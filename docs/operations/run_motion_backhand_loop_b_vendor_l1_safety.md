@@ -9,7 +9,7 @@
 ```bash
 cd /path/to/clean/nohope
 PLAN=configs/motion_backhand_loop_b_vendor_l1_safety_prereg_20260715.json
-PLAN_SHA=f8530d834392545105cc4dd89d6a177d4f34ce970cc1ba5d7bb3fdb4d04af699
+PLAN_SHA=66504cdccb22ce5367679d6f96467bb21e66d591982fc8edcf1e80a125489c30
 
 python3 scripts/audit_motion_schema2_vendor_l1_safety.py \
   --prereg "$PLAN" \
@@ -40,11 +40,12 @@ export PYTHONNOUSERSITE=1
 /workspace/hope_mjeval_venv/bin/python \
   scripts/audit_motion_schema2_vendor_l1_safety.py \
   --prereg configs/motion_backhand_loop_b_vendor_l1_safety_prereg_20260715.json \
-  --expected-prereg-sha256 f8530d834392545105cc4dd89d6a177d4f34ce970cc1ba5d7bb3fdb4d04af699 \
+  --expected-prereg-sha256 66504cdccb22ce5367679d6f96467bb21e66d591982fc8edcf1e80a125489c30 \
   dry-run
 ```
 
-当前任务**没有运行这条命令**。只有 dry-run 通过、逐帧 safety evidence 保存且另有显式发布授权后，
+dry-run 会在启动 MuJoCo runtime 前检查输出 parent 已存在且不是 symlink，并用 `lexists` 拒绝普通文件、
+目录和 dangling symlink target。当前任务**没有运行这条命令**。只有 dry-run 通过、逐帧 safety evidence 保存且另有显式发布授权后，
 才把最后一个参数改为 `audit` 执行唯一一次 `O_EXCL` 发布。通过只令 `vendor_l1_complete=true` 并解锁
 下一张桌网整轨门；dynamics/training/formal motion/hardware 仍 false。
 

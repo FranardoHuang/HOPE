@@ -550,8 +550,11 @@ blocked。下一步是 vendor L1 整轨自碰/球拍自打，不得越级训练�
 vendor MJCF/75-file closure、compiled collision contract 和 exact CPU runtime；沿用已验证的
 root linear / quaternion shortest-arc slerp / joint linear 插值，把 `151 @ 50 Hz` 全轨有限密扫为
 `1201 @ 400 Hz`。所有 enabled robot geom 的穿透超过 `1e-6 m`，或球拍/拍柄距 head/trunk/对侧臂/
-下肢小于 `5 mm`，都会否决整条 B，不能由 warning/reward/其他分数补偿；`5–20 mm` 只登记 warning。
-右腕/手/球拍安装链只从 `5 mm` proximity pairs 排除，enabled-robot 实际穿透仍 hard fail。该有限扫掠
+右肩三轴与右肘/下肢小于 `5 mm`，都会否决整条 B，不能由 warning/reward/其他分数补偿；`5–20 mm`
+只登记 warning。hard 判定直接调用 exact/saturating `distance >= 5 mm` predicate，不用 `1e-4 m`
+bisection midpoint；4.99/5.00/5.01 mm 边界反例已闭环。右腕/手/球拍安装链只从 `5 mm` proximity
+pairs 排除，enabled-robot 实际穿透仍 hard fail。dry-run 也必须在 runtime 前证明输出 parent 是已存在
+真实目录且 target absent/非 symlink。该有限扫掠
 **不是**数学连续时间证书，且不含桌网或动力学。当前专项 source gate 已过但没有连接 Pod、没有
 runtime audit/certificate，所以 G08 仍为 Partial，B 仍不得进入桌网、动力学或训练。见
 [L1 卷宗](../experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-VENDOR-L1.md)和

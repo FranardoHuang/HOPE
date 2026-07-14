@@ -233,6 +233,10 @@ def validate_plan(plan_path: Path, expected_sha256: str) -> tuple[dict[str, Any]
             "left_wrist_roll_collision_0", "left_wrist_roll_collision_1",
             "left_wrist_pitch_collision", "left_wrist_yaw_collision", "left_hand_collision",
         ],
+        "striking_proximal_arm": [
+            "right_shoulder_pitch_collision", "right_shoulder_roll_collision",
+            "right_shoulder_yaw_collision", "right_elbow_collision",
+        ],
         "lower_body": [
             "left_hip_pitch_collision", "left_hip_roll_collision", "left_hip_yaw_collision",
             "left_knee_collision", "left_ankle_pitch_collision", "left_ankle_roll_collision",
@@ -253,6 +257,10 @@ def validate_plan(plan_path: Path, expected_sha256: str) -> tuple[dict[str, Any]
         "self_collision_penetration_tolerance_m": 0.000001,
         "hard_racket_body_clearance_m": 0.005,
         "warning_racket_body_clearance_m": 0.02,
+        "hard_threshold_predicate": (
+            "fail iff audit_self_collision._far(model,data,racket,body,0.005) is false"
+        ),
+        "reporting_clearance_bisection_tolerance_m": 0.000001,
         "racket_collision_geoms": list(RACKET_GEOMS),
         "racket_body_clearance_groups": groups,
         "striking_mount_chain_clearance_exclusion": (
@@ -407,6 +415,75 @@ def summarize_hard_failures(
     return result
 
 
+def evaluate_racket_clearance_pairs(
+    helper: Any,
+    model: Any,
+    data: Any,
+    racket_ids: Sequence[int],
+    group_ids: Mapping[str, Sequence[int]],
+    *,
+    hard_threshold_m: float,
+    warning_threshold_m: float,
+    reporting_tolerance_m: float,
+    geom_name: Any,
+) -> dict[str, Any]:
+    """Evaluate one pose using exact saturation predicates for hard decisions.
+
+    ``geom_clearance`` remains useful for a human-readable minimum, but its
+    bisection midpoint must never decide the 5 mm gate.  ``_far(dm)`` is the
+    helper's exact/saturating predicate for true distance >= dm, so the strict
+    ``distance < threshold`` contract is exactly ``not _far(threshold)``.
+    """
+
+    if not (
+        math.isfinite(hard_threshold_m)
+        and math.isfinite(warning_threshold_m)
+        and math.isfinite(reporting_tolerance_m)
+        and 0.0 < reporting_tolerance_m < hard_threshold_m < warning_threshold_m
+    ):
+        raise VendorL1Error("racket clearance thresholds/tolerance are invalid")
+    minimum = float("inf")
+    minimum_pair: list[str] | None = None
+    hard_failure = False
+    warning = False
+    for group_name, bodies in group_ids.items():
+        for racket in racket_ids:
+            for body in bodies:
+                if not bool(helper._far(model, data, racket, body, hard_threshold_m)):
+                    hard_failure = True
+                if not bool(helper._far(model, data, racket, body, warning_threshold_m)):
+                    warning = True
+                distance, _ = helper.geom_clearance(
+                    model, data, racket, body, tol=reporting_tolerance_m
+                )
+                distance = float(distance)
+                if distance < minimum:
+                    minimum = distance
+                    minimum_pair = [geom_name(racket), geom_name(body), str(group_name)]
+    if minimum_pair is None or not math.isfinite(minimum):
+        raise VendorL1Error("racket clearance group evaluation produced no finite pair")
+    return {
+        "hard_failure": hard_failure,
+        "warning": warning,
+        "minimum_clearance_m": minimum,
+        "minimum_pair_and_group": minimum_pair,
+    }
+
+
+def validate_output_preconditions(plan: Mapping[str, Any]) -> Path:
+    """Require the preregistered absent target and real pre-existing parent."""
+
+    output = Path(plan["output_contract"]["certificate_path"])
+    if os.path.lexists(output):
+        raise VendorL1Error(f"certificate path already exists or is a symlink; no-clobber: {output}")
+    parent = output.parent
+    if parent.is_symlink() or not parent.is_dir():
+        raise VendorL1Error(
+            f"certificate parent must pre-exist and be a real directory: {parent}"
+        )
+    return output
+
+
 def audit_runtime(plan: Mapping[str, Any], l0_v1_plan: Mapping[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
     l0_v2 = _load_l0_v2()
     try:
@@ -502,19 +579,21 @@ def audit_runtime(plan: Mapping[str, Any], l0_v1_plan: Mapping[str, Any]) -> tup
                         _body_name(mujoco, model, int(model.geom_bodyid[contact.geom2])),
                     ],
                 })
-        for group_name, bodies in group_ids.items():
-            for racket in racket_ids:
-                for body in bodies:
-                    distance, _ = self_collision.geom_clearance(model, data, racket, body)
-                    if distance < minimum[dense_frame]:
-                        minimum[dense_frame] = float(distance)
-                        minimum_pair[dense_frame] = [
-                            _geom_name(mujoco, model, racket),
-                            _geom_name(mujoco, model, body),
-                            group_name,
-                        ]
-        clearance_bad[dense_frame] = minimum[dense_frame] < hard
-        clearance_warn[dense_frame] = minimum[dense_frame] < warning
+        clearance = evaluate_racket_clearance_pairs(
+            self_collision,
+            model,
+            data,
+            racket_ids,
+            group_ids,
+            hard_threshold_m=hard,
+            warning_threshold_m=warning,
+            reporting_tolerance_m=float(safety["reporting_clearance_bisection_tolerance_m"]),
+            geom_name=lambda geom_id: _geom_name(mujoco, model, geom_id),
+        )
+        minimum[dense_frame] = clearance["minimum_clearance_m"]
+        minimum_pair[dense_frame] = clearance["minimum_pair_and_group"]
+        clearance_bad[dense_frame] = clearance["hard_failure"]
+        clearance_warn[dense_frame] = clearance["warning"]
 
     hard_summary = summarize_hard_failures(
         collision_bad, clearance_bad, source_time, 151, phase.unsafe_source_mask
@@ -539,6 +618,10 @@ def audit_runtime(plan: Mapping[str, Any], l0_v1_plan: Mapping[str, Any]) -> tup
         "racket_body_clearance": {
             "hard_threshold_m": hard,
             "warning_threshold_m": warning,
+            "hard_threshold_predicate": safety["hard_threshold_predicate"],
+            "reporting_bisection_tolerance_m": safety[
+                "reporting_clearance_bisection_tolerance_m"
+            ],
             "dangerous_dense_samples": int(np.count_nonzero(clearance_bad)),
             "warning_dense_samples": int(np.count_nonzero(clearance_warn)),
             "minimum_clearance_m": float(minimum[closest]),
@@ -629,9 +712,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 "runtime_audit=false no_write=true continuous_time_claim=false"
             )
             return 0
-        output = Path(plan["output_contract"]["certificate_path"])
-        if output.is_symlink() or output.exists():
-            raise VendorL1Error(f"certificate path already exists; no-clobber: {output}")
+        output = validate_output_preconditions(plan)
         certificate = build_certificate(plan, args.prereg.resolve(), plan_sha, l0_v1_plan)
         if args.command == "dry-run":
             print(

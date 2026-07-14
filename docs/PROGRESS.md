@@ -16,8 +16,10 @@
 - Franco 反手拉 B 的 [`vendor L1 safety audit`](DEFINITIONS.md#motion-vendor-l1-safety) 已完成
   source-only 预注册/validator：绑定 exact L0 certificate、B schema-2 NPZ、vendor MJCF closure 与
   MuJoCo 3.10 runtime，复用既有 shortest-arc/linear 插值将 `151 @ 50 Hz` 有限密扫为
-  `1201 @ 400 Hz`；自碰穿透或球拍/拍柄 `<5 mm` 自打均为不可补偿 hard fail，明确不声称连续时间。
-  专项连同 L0 回归 `17 passed`；本任务没有连接 Pod、没有运行 runtime 或写证书，G08 仍 Partial，
+  `1201 @ 400 Hz`；自碰穿透或球拍/拍柄 `<5 mm` 自打均为不可补偿 hard fail。红队后续把 5 mm
+  决策改为 exact saturation predicate（4.99/5.00/5.01 mm 反例闭环）、补齐右肩三轴/右肘，并令
+  dry-run 在 runtime 前强制 parent 存在、target absent 且非 symlink；明确不声称连续时间。
+  专项连同 L0 回归 `23 passed`；本任务没有连接 Pod、没有运行 runtime 或写证书，G08 仍 Partial，
   桌网/动力学/训练继续 blocked。见
   [L1 卷宗](experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-VENDOR-L1.md)与
   [操作](operations/run_motion_backhand_loop_b_vendor_l1_safety.md)。

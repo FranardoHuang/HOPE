@@ -144,6 +144,83 @@ def test_any_collision_or_clearance_failure_is_noncompensable_and_marks_both_end
     assert marked.tolist() == [True, True]
 
 
+class _DistanceHelper:
+    def __init__(self, distances: dict[tuple[int, int], float]):
+        self.distances = distances
+
+    def _distance(self, g1: int, g2: int) -> float:
+        if (g1, g2) in self.distances:
+            return self.distances[(g1, g2)]
+        return self.distances[(g2, g1)]
+
+    def _far(self, model, data, g1: int, g2: int, threshold: float) -> bool:
+        return self._distance(g1, g2) >= threshold
+
+    def geom_clearance(self, model, data, g1: int, g2: int, *, tol: float):
+        assert tol == 1.0e-6
+        return self._distance(g1, g2), False
+
+
+@pytest.mark.parametrize(
+    ("distance_m", "expected_hard"),
+    [(0.00499, True), (0.00500, False), (0.00501, False)],
+)
+def test_five_mm_gate_uses_exact_saturation_predicate_not_bisection_midpoint(
+    distance_m, expected_hard
+):
+    helper = _DistanceHelper({(1, 2): distance_m})
+    result = L1.evaluate_racket_clearance_pairs(
+        helper,
+        object(),
+        object(),
+        (1,),
+        {"trunk": (2,)},
+        hard_threshold_m=0.005,
+        warning_threshold_m=0.02,
+        reporting_tolerance_m=1.0e-6,
+        geom_name=lambda geom_id: f"geom{geom_id}",
+    )
+    assert result["hard_failure"] is expected_hard
+
+
+def test_striking_proximal_arm_prevents_right_elbow_self_hit_false_negative():
+    plan = _plan()
+    proximal = plan["safety_contract"]["racket_body_clearance_groups"][
+        "striking_proximal_arm"
+    ]
+    assert proximal == [
+        "right_shoulder_pitch_collision",
+        "right_shoulder_roll_collision",
+        "right_shoulder_yaw_collision",
+        "right_elbow_collision",
+    ]
+    helper = _DistanceHelper({(1, 2): 0.00499, (1, 3): 0.10})
+    old_groups = {"trunk": (3,)}
+    assert L1.evaluate_racket_clearance_pairs(
+        helper,
+        object(),
+        object(),
+        (1,),
+        old_groups,
+        hard_threshold_m=0.005,
+        warning_threshold_m=0.02,
+        reporting_tolerance_m=1.0e-6,
+        geom_name=lambda geom_id: f"geom{geom_id}",
+    )["hard_failure"] is False
+    fixed_groups = {**old_groups, "striking_proximal_arm": (2,)}
+    assert L1.evaluate_racket_clearance_pairs(
+        helper,
+        object(),
+        object(),
+        (1,),
+        fixed_groups,
+        hard_threshold_m=0.005,
+        warning_threshold_m=0.02,
+        reporting_tolerance_m=1.0e-6,
+        geom_name=lambda geom_id: f"geom{geom_id}",
+    )["hard_failure"] is True
+
+
 def test_contract_cannot_claim_continuous_time_or_weaken_five_mm_gate(tmp_path):
     plan = _plan()
     plan["safety_contract"]["dense_sampling_is_continuous_time_certificate"] = True
@@ -203,6 +280,42 @@ def test_dry_run_executes_runtime_path_but_never_writes(monkeypatch, tmp_path, c
     assert len(calls) == 1
     assert not output.exists()
     assert "certificate_written=false" in capsys.readouterr().out
+
+
+def test_dry_run_fails_before_runtime_when_output_parent_is_absent(monkeypatch, tmp_path):
+    plan = _plan()
+    plan["output_contract"]["certificate_path"] = str(
+        tmp_path / "missing-parent" / "certificate.json"
+    )
+    monkeypatch.setattr(
+        L1, "validate_plan", lambda *args: (plan, "a" * 64, {"synthetic": "l0-v1"})
+    )
+    monkeypatch.setattr(
+        L1,
+        "build_certificate",
+        lambda *args: pytest.fail("runtime started before output-parent preflight"),
+    )
+    assert L1.main(
+        ["--prereg", str(PLAN), "--expected-prereg-sha256", "a" * 64, "dry-run"]
+    ) == 2
+
+
+def test_dry_run_rejects_dangling_symlink_target_before_runtime(monkeypatch, tmp_path):
+    output = tmp_path / "certificate.json"
+    output.symlink_to(tmp_path / "absent-target")
+    plan = _plan()
+    plan["output_contract"]["certificate_path"] = str(output)
+    monkeypatch.setattr(
+        L1, "validate_plan", lambda *args: (plan, "a" * 64, {"synthetic": "l0-v1"})
+    )
+    monkeypatch.setattr(
+        L1,
+        "build_certificate",
+        lambda *args: pytest.fail("runtime started with symlink certificate target"),
+    )
+    assert L1.main(
+        ["--prereg", str(PLAN), "--expected-prereg-sha256", "a" * 64, "dry-run"]
+    ) == 2
 
 
 def test_certificate_write_is_no_clobber(tmp_path):

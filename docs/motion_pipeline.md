@@ -116,7 +116,8 @@ free-joint qpos，而不是继续放宽 schema-2。该 V2 已用 Pod2 exact runt
 
 B 的下一张 [`vendor L1 safety audit`](DEFINITIONS.md#motion-vendor-l1-safety) 已冻结为 source-only
 计划：沿用既有 shortest-arc/linear 插值，把 151 帧整轨有限密扫为 1201 个 400 Hz 样本；任何机器人
-自碰或球拍/拍柄对冻结关键 body group 小于 `5 mm` 都 hard fail，不能补偿。当前只通过本地 source
+自碰或球拍/拍柄对冻结关键 body group 小于 `5 mm` 都 hard fail，不能补偿；5 mm 决策直接用
+MuJoCo saturation predicate，关键组包含右肩三轴/右肘，仅排除右腕/手/安装链。当前只通过本地 source
 gate，未在 exact runtime 运行、未写 certificate；它不检查桌网，也不冒充连续时间或动力学证明。见
 [`EXP-MOTION-BACKHAND-LOOP-B-VENDOR-L1`](experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-VENDOR-L1.md)。
 
