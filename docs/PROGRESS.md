@@ -13,6 +13,13 @@
 
 ## 2026-07-15
 
+- clean base-decel 单变量 pair 已按同一次顺序事务在 Pod2 GPU1/GPU2 越过首迭代：control/treatment
+  exact PID=PGID `385320/385948`，claim SHA-256 `a039226a...1746e` / `673bf6c6...9392`；GPU0 的 Yikang
+  进程未触碰。04:27 CST 只读复核时 TensorBoard 到 step `106/89`，日志 fatal=0，两臂五个
+  post-swing 计数在全部已写 update 严格为零；raw base-decel 两边均激活，weighted Reward 只在
+  treatment 非零。尚未到 `model_200`，不比较行为、不买第二 seed。详见
+  [clean main-effect 卷宗](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-CLEAN-MAIN-EFFECT.md)。
+
 - 新的 clean base-decel main-effect 已在结果前预注册：两臂固定 V1+V2、seed3、4096×1001 与同
   action/bank/plant，post-swing 明确关闭且五个 replay 计数必须逐 update 全零；唯一差异为 base-decel
   `0/1`。它不复用失败 pair 的行为，只复用 exact `2c2d70d...` 已通过的 source/scene boot 门；新 job/run

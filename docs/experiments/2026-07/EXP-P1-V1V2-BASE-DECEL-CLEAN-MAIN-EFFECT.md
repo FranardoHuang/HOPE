@@ -1,12 +1,12 @@
 # EXP-P1-V1V2-BASE-DECEL-CLEAN-MAIN-EFFECT — 关闭随挥重放后只测底座减速
 
-- 状态：`preregistered / launch-ready`
+- 状态：`running / first-iteration and activation gate passed`
 - 阶段/轴：Phase 1 fresh C；V1+V2 下的 base-decel 单变量主效应
 - 集成小目标：判断底座减速本身能否降低击球前底座速度和摔倒，同时不伤四项击球精度
 - 人类负责人：Franco
 - 执行者：Codex
 - 复核/决策负责人：Franco
-- 最高证据等级：`E1`（机器队列和静态合同；尚无本 run checkpoint）
+- 最高证据等级：`E1`（机器队列、运行绑定与在线 activation；尚未到首个 checkpoint）
 - 创建日期/最后复核日期：2026-07-15 / 2026-07-15
 
 共享术语见[术语与人话对照](../../DEFINITIONS.md)。V1 是释放持拍手腕线速度模仿，V2 是在击球窗把
@@ -83,3 +83,24 @@ git diff --check
 
 实际 launch 只能由 queue 的一次 `fill --count 2` 顺序事务完成；先让 GPU1 control 越过首迭代，再发 GPU2
 treatment。timeout 标 unknown，不得因 SSH 抖动重复 claim 或重发。
+
+## 运行证据（首个 checkpoint 前）
+
+2026-07-15 04:27 CST，队列按上述顺序在 Pod2 成功发射两条 fresh run；Pod1 与 Pod2 GPU0 均未进入
+Codex 发射路径：
+
+| arm | GPU | exact PID=PGID | queue-claim SHA-256 | 只读复核时最新 update |
+| --- | ---: | ---: | --- | ---: |
+| control，底座减速关闭 | 1 | `385320` | `a039226a...1746e` | 106（日志已越过 91；TensorBoard 已写到 106） |
+| treatment，底座减速权重 1 | 2 | `385948` | `673bf6c6...9392` | 89（日志已越过 73；TensorBoard 已写到 89） |
+
+两进程的 `/proc` 身份与 launch sidecar 的 start-time 一致；归档训练 checkout 仍为 clean exact
+`6d93bcb...80b`，实际训练源码为 clean exact `2c2d70d...607e`。GPU0 只有 Yikang 的 PID `379550`；
+GPU1/GPU2 分别只有本表一条 Codex trainer。两份完整日志的 fatal 扫描均为零，host 可用内存约
+`965 GiB`、无 swap。
+
+TensorBoard 的第一轮在线合同核验通过：两臂
+`buffer_not_ready/eligible/not_selected/selected/started` 五个 post-swing 计数在**每个已写 update**均为零；
+两臂 base-decel raw eligible/nonzero/sum 均为正，control weighted Reward 为零，treatment weighted Reward
+非零。此处只证明禁用合同和 Reward 路径按预注册执行，不比较行为；首个可比较点仍是 exact
+`model_200` receipt。

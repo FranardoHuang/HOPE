@@ -62,9 +62,13 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   两臂共享、自然-wrap provenance 绑定的 immutable teacher-state receipt 做外生 cold-start，并在首 update
   前 fail closed。
 
-  为避免 GPU 等待这条较复杂的 continuous-recovery 修复，当前先采用一个更小的 clean main-effect：两臂
-  都关闭 post-swing replay、固定 V1+V2，只比较 base-decel `0/1`；新单 seed namespace 硬绑 Pod2
-  GPU1/GPU2，五个 replay activation counter 必须逐 update 全零。这只回答底座减速本身，不冒充连续恢复。
+  为避免 GPU 等待这条较复杂的 continuous-recovery 修复，当前已启动一个更小的 clean main-effect：
+  两臂都关闭 post-swing replay、固定 V1+V2，只比较 base-decel `0/1`。Pod2 GPU1 control
+  PID=PGID `385320`、GPU2 treatment PID=PGID `385948`，claim SHA-256 分别为
+  `a039226a...1746e` / `673bf6c6...9392`；GPU0 仍只有 Yikang。2026-07-15 04:27 CST 只读复核时
+  TensorBoard 已到 step `106/89`，完整日志 fatal=0，五个 post-swing activation counter 在所有已写
+  update 逐项全零；两臂 raw base-decel kernel 都已激活，只有 treatment 的 weighted Reward 非零。
+  首个行为比较仍等 exact `model_200` receipt。这只回答底座减速本身，不冒充连续恢复。
 
   Fresh C 的五条单 seed 机制格均已越过 `+500` 且 checkpoint
   finite/contract/lineage 正确。V1+V2 出现当前最强击球精度信号（composite `0.0893`、normal pass

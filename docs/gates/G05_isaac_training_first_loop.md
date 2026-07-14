@@ -46,6 +46,19 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-15, clean base-deceleration pair running; Gate remains `Partial`):
+
+- The ordered queue transaction launched control/treatment on Pod2 GPU1/GPU2 with exact PID=PGID
+  `385320/385948` and claim SHA-256 `a039226a...1746e` / `673bf6c6...9392`. GPU0 remains owned only
+  by Yikang. Both arms crossed their first iteration; a 04:27 CST read-only audit found no fatal log
+  signature and TensorBoard through steps `106/89`.
+- On every emitted update, all five post-swing replay counters are exactly zero. Raw base-deceleration
+  eligible/nonzero/sum counters are positive on both arms, while weighted base-deceleration reward is
+  zero only on control and nonzero on treatment. This closes the initial execution/activation gate but
+  is not a behavior result. No comparison, second seed, judge or promotion is allowed before exact
+  model-200 receipts. See
+  [the clean main-effect record](../experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-CLEAN-MAIN-EFFECT.md).
+
 Follow-up note (2026-07-15, clean base-deceleration main effect preregistered; Gate remains `Partial`):
 
 - The invalid pair mixed base deceleration with a post-swing buffer whose readiness depends on policy
