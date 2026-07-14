@@ -1463,3 +1463,16 @@ launcher/finalizer 源码中不存在 activation、judge、L2、第二 seed 或 
 之前还需独立、no-clobber 的 L1 result consumer，并把已物化 paper 的 exact receipt/SHA 纳入一个新的
 L2-only activation；当前 C2/D2 pair result 自己不能翻转该 paper activation 的 false 位。启动 judge
 又需另一个 reviewed execution contract。G06 保持 `Partial`。
+
+### 2026-07-14 C3/D3 K100 v1 asset-packaging failure 与 v2 source gate
+
+C3/D3 paired K100 v1 在 C3 ONNX 导出前自然失败：独立 eval checkout 缺少 Git-ignored
+`agibot_a3/urdf/model.urdf` 及同闭包 meshes/config。tracked-clean gate 因上游
+`assets/.gitignore:*` 没有覆盖这些 runtime bytes。v1 output/attestation 已消费并永久冻结；没有 ONNX、
+MuJoCo attempt 或 K100 成绩，因此不能判 C3/D3 行为。
+
+v2 在全新 attestor/pair namespace 中把训练 checkout 的 ignored A3 递归 canonical inventory、required
+URDF、C3 一次 hydrate/D3 exact verify 角色与 `libGLU.so.1` 可加载性放到 claim/judge 前。focused
+`56 passed`，static/source-plan rc0；尚未 Pod runtime。可复现合同和命令见
+[v2 操作](../operations/run_phase1_signed_face_c3d3_k100_v2.md)。G06 仍为 `Partial`：只有 v2 paired
+`K100` 完整结果通过后才有行为证据，且结果本身仍不授权 L2、第二 seed、stop/promote、部署或真机。

@@ -99,6 +99,25 @@ attest 或 judge。执行步骤见[同卷 K100 操作](../../operations/run_phas
 产出的 paired count 只供后续人类 L2 decision contract 使用，本身仍把 L2、第二 seed、stop/promote、采用
 setting、Gate3、部署和真机全部固定为 false。
 
+### v1 运行失败与 ignored Isaac asset v2 修复
+
+Pod1 v1 paired execution 已消费并冻结；C3 的 `judge.sh` 在 ONNX 导出阶段自然退出 `rc=1`。
+exact traceback 是独立 eval checkout 缺少
+`hope_training/.../assets/agibot_a3/urdf/model.urdf`。训练 checkout 中该文件为 43,240 bytes、
+SHA-256 `79655f05d204c24f028778425aa971410773d1f8bbbd214de6fdb8f8ae75d1cc`，且同目录还有导出所需
+meshes/config；整个目录被上游 `assets/.gitignore:*` 忽略，所以原 tracked-clean/source-SHA gate 没有
+覆盖它。失败发生在 ONNX、MuJoCo 和 K100 attempt 之前，不是 C3 模型行为结论。
+
+v1 output、attestation 与失败日志永久保留且不重放。v2 source gate 使用全新 attestor/pair namespace：
+C3 attestation 先验证训练时实际 ignored `agibot_a3` 递归 canonical inventory、required URDF 和
+`libGLU.so.1` 可加载性，再把闭包一次性 hydrate 到全新 eval checkout；D3 只能验证同一已存在闭包。
+paired consumer 在 claim/judge 前重放两侧完整 asset evidence。focused `56 passed`，
+`py_compile`、attestor static、pair static/source-plan 均 rc0；本 source gate 未连接 Pod、未 attest、
+未 judge。运行真源见 [v2 操作](../../operations/run_phase1_signed_face_c3d3_k100_v2.md)。
+
+决定仍为 `inconclusive`：v2 只修复运行打包合同，不提供行为成绩，也不授权 L2、第二 seed、
+stop/promote 或采用 setting。
+
 ## 复现与证据
 
 操作真源：[运行 C3/D3 显式零摩擦 L1](../../operations/run_phase1_signed_face_c3d3_l1.md)。Pod1 runtime

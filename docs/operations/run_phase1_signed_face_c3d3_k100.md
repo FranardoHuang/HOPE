@@ -1,5 +1,10 @@
 # 运行 C3/D3 同卷 signed-face K100
 
+状态：**v1 已失败并永久冻结，不得再执行本页命令。** Pod1 的 C3 在 ONNX 导出前因独立 eval checkout
+缺少 ignored `agibot_a3/urdf/model.urdf` 自然退出 `rc=1`；没有 MuJoCo/K100 行为结果。保留 v1
+attestation、pair output 与日志原样，修复后的新 namespace 只按
+[v2 操作](run_phase1_signed_face_c3d3_k100_v2.md)执行。
+
 本操作把已经终档的显式零摩擦对照 `C3` 和有符号拍面引导 `D3` 各自在同一张
 [`K100`](../DEFINITIONS.md#q50-and-k100)（正手/反手各 50 次）上判一次。两条 checkpoint 必须先分别通过
 generic [`checkpoint attestor`](../DEFINITIONS.md)，随后
