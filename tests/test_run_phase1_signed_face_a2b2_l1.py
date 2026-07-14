@@ -84,6 +84,85 @@ def parent_and_current(m, cell_id="A2"):
     return parent, current
 
 
+def write_read_only(path, payload, *, binary=False):
+    if path.exists():
+        path.chmod(0o644)
+    if binary:
+        path.write_bytes(payload)
+    else:
+        path.write_text(json.dumps(payload) + "\n", encoding="utf-8")
+    path.chmod(0o444)
+
+
+def copied_pair_receipt(tmp_path, m, cell_id="A2"):
+    m["runtime"]["pair_input_root"] = str(tmp_path / "inputs")
+    paths = mod.pair_input_paths(m)[cell_id]
+    paths["terminal"].parent.mkdir(parents=True, exist_ok=True)
+    write_read_only(paths["hard"], {})
+    write_read_only(paths["checkpoint"], f"checkpoint-{cell_id}".encode(), binary=True)
+    manifest_sha = mod.sha256_file(MANIFEST)
+    launcher_sha = mod.sha256_file(SCRIPT)
+    claim = mod.build_claim(
+        m, manifest_sha=manifest_sha, launcher_sha=launcher_sha,
+        cell_id=cell_id, arm_dir=mod.expected_arm_paths(m, cell_id)["arm"],
+        arm_identity={"device": 1, "inode": 2},
+    )
+    claim_sha = mod.canonical_sha256(claim)
+    hard_sha = mod.sha256_file(paths["hard"])
+    audit = {
+        "iter": 13824,
+        "training_contract_schema_version": 3,
+        "training_contract_sha256": hard_sha,
+        "training_contract_lineage_exact": 0,
+        "training_launch_claim_sha256": claim_sha,
+        "floating_tensor_count": 10,
+        "floating_elements": 100,
+        "nonfinite_floating_elements": 0,
+    }
+    logs = (
+        Path(m["source"]["training_checkout"])
+        / m["source"]["wbt_relative_path"]
+        / "logs/rsl_rl/agibot_a3_hope_virtualball"
+    )
+    run_dir = logs / f"2026-07-14_00-00-00_{mod.cells(m)[cell_id]['run_name']}"
+    terminal = {
+        "artifact_kind": "phase1_signed_face_a2_b2_l1_terminal_result",
+        "schema_version": 1,
+        "manifest_id": mod.MANIFEST_ID,
+        "manifest_sha256": manifest_sha,
+        "launcher_sha256": launcher_sha,
+        "cell_id": cell_id,
+        "run_name": mod.cells(m)[cell_id]["run_name"],
+        "optimization_recipe": mod.optimization_recipe(m, cell_id),
+        "execution_lane": claim["execution_lane"],
+        "training_source": mod.expected_source_identity(m),
+        "training_launch_claim": claim,
+        "training_launch_claim_sha256": claim_sha,
+        "training_run_dir": str(run_dir),
+        "hard_contract_path": str(run_dir / "params/training_contract.json"),
+        "hard_contract_sha256": hard_sha,
+        "terminal_checkpoint_path": str(run_dir / "model_13824.pt"),
+        "terminal_checkpoint_sha256": mod.sha256_file(paths["checkpoint"]),
+        "terminal_checkpoint_file_identity": {"device": 3, "inode": 4},
+        "terminal_checkpoint_size_bytes": paths["checkpoint"].stat().st_size,
+        "checkpoint_audit": audit,
+        "training_log_sha256": "d" * 64,
+        "training_log_file_identity": {"device": 5, "inode": 6},
+        "exact_trainer_natural_exit_observed": True,
+        "gpu_empty_terminal_barrier_observed": True,
+        "kit_thread_cap_marker_occurrences": 1,
+        "instantiated_zero_friction_marker_occurrences": 1,
+        "activation": False,
+        "judge": False,
+        "l2": False,
+        "second_seed": False,
+        "stop_or_promote": False,
+        "real_robot_commands_executed": False,
+    }
+    write_read_only(paths["terminal"], terminal)
+    return paths, terminal, audit
+
+
 def test_checked_in_manifest_static_source_and_plan_are_exact():
     m = mod.load_manifest(MANIFEST)
     assert mod.verify_static_source(m) == {
@@ -219,6 +298,66 @@ def test_host_identity_uses_actual_gpu_uuid_not_host_cli():
         mod.verify_gpu_host_identity(m, "pod2", pod1)
 
 
+@pytest.mark.parametrize("scope,mutation", [
+    ("terminal", "extra"),
+    ("terminal", "missing"),
+    ("audit", "extra"),
+    ("audit", "missing"),
+])
+def test_pair_receipts_reject_extra_and_missing_keys(
+    monkeypatch, tmp_path, scope, mutation
+):
+    m = manifest()
+    paths, terminal, audit = copied_pair_receipt(tmp_path, m)
+    target = terminal if scope == "terminal" else audit
+    if mutation == "extra":
+        target["forged_extra"] = 1
+    else:
+        target.pop("floating_elements" if scope == "audit" else "training_log_sha256")
+    write_read_only(paths["terminal"], terminal)
+    monkeypatch.setattr(mod, "checkpoint_audit", lambda *_a, **_k: audit)
+    monkeypatch.setattr(
+        mod, "verify_hard_contract",
+        lambda path, *_a, **_k: (mod.sha256_file(path), hard_contract(m, "A2")),
+    )
+    monkeypatch.setattr(mod, "verify_parent_to_current_contract", lambda *_a: {})
+    with pytest.raises(mod.ContractError, match="keys changed"):
+        mod.verify_copied_terminal_result(
+            m, MANIFEST, SCRIPT, "A2", paths["terminal"], paths["hard"],
+            paths["checkpoint"],
+        )
+
+
+def test_pair_checkpoint_bytes_sha_is_recomputed(monkeypatch, tmp_path):
+    m = manifest()
+    paths, terminal, audit = copied_pair_receipt(tmp_path, m)
+    write_read_only(paths["checkpoint"], b"tampered--A2?", binary=True)
+    monkeypatch.setattr(mod, "checkpoint_audit", lambda *_a, **_k: audit)
+    monkeypatch.setattr(
+        mod, "verify_hard_contract",
+        lambda path, *_a, **_k: (mod.sha256_file(path), hard_contract(m, "A2")),
+    )
+    monkeypatch.setattr(mod, "verify_parent_to_current_contract", lambda *_a: {})
+    with pytest.raises(mod.ContractError, match="bytes/SHA"):
+        mod.verify_copied_terminal_result(
+            m, MANIFEST, SCRIPT, "A2", paths["terminal"], paths["hard"],
+            paths["checkpoint"],
+        )
+
+
+def test_pair_checkpoint_architecture_rejects_forged_count_asymmetry():
+    terminals = {
+        "A2": {"checkpoint_audit": {
+            "floating_tensor_count": 1, "floating_elements": 100,
+        }},
+        "B2": {"checkpoint_audit": {
+            "floating_tensor_count": 999999999, "floating_elements": 100,
+        }},
+    }
+    with pytest.raises(mod.ContractError, match="floating_tensor_count differs"):
+        mod.verify_pair_checkpoint_architecture(terminals)
+
+
 def test_cross_pod_finalize_pair_is_runtime_reachable_and_fail_closed(
     monkeypatch, tmp_path
 ):
@@ -230,9 +369,15 @@ def test_cross_pod_finalize_pair_is_runtime_reachable_and_fail_closed(
         paths[cell_id]["terminal"].parent.mkdir(parents=True)
         paths[cell_id]["terminal"].write_text("{}\n", encoding="utf-8")
         paths[cell_id]["hard"].write_text("{}\n", encoding="utf-8")
+        paths[cell_id]["checkpoint"].write_bytes(b"checkpoint")
     pair = {cell: hard_contract(m, cell) for cell in mod.CELL_IDS}
     terminals = {
-        cell: {"terminal_checkpoint_sha256": ("a" if cell == "A2" else "b") * 64}
+        cell: {
+            "terminal_checkpoint_sha256": ("a" if cell == "A2" else "b") * 64,
+            "checkpoint_audit": {
+                "floating_tensor_count": 10, "floating_elements": 100,
+            },
+        }
         for cell in mod.CELL_IDS
     }
     monkeypatch.setattr(mod.os, "geteuid", lambda: 0)
@@ -247,7 +392,7 @@ def test_cross_pod_finalize_pair_is_runtime_reachable_and_fail_closed(
     )
     monkeypatch.setattr(
         mod, "verify_copied_terminal_result",
-        lambda _m, _mp, _lp, cell, _tp, _hp: (terminals[cell], pair[cell]),
+        lambda _m, _mp, _lp, cell, _tp, _hp, _cp: (terminals[cell], pair[cell]),
     )
     result = mod.finalize_pair(m, MANIFEST, SCRIPT, "pod1")
     assert result["status"] == "paired_l1_provenance_complete_no_decision"

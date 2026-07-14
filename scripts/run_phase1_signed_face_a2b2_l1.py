@@ -1280,6 +1280,27 @@ def verify_pair_contracts(contracts: dict[str, dict[str, Any]]) -> None:
         raise ContractError("A2/B2 hard contracts differ outside signed-face guidance weight")
 
 
+CHECKPOINT_AUDIT_KEYS = {
+    "iter", "training_contract_schema_version", "training_contract_sha256",
+    "training_contract_lineage_exact", "training_launch_claim_sha256",
+    "floating_tensor_count", "floating_elements", "nonfinite_floating_elements",
+}
+
+TERMINAL_RESULT_KEYS = {
+    "artifact_kind", "schema_version", "manifest_id", "manifest_sha256",
+    "launcher_sha256", "cell_id", "run_name", "optimization_recipe",
+    "execution_lane", "training_source", "training_launch_claim",
+    "training_launch_claim_sha256", "training_run_dir", "hard_contract_path",
+    "hard_contract_sha256", "terminal_checkpoint_path",
+    "terminal_checkpoint_sha256", "terminal_checkpoint_file_identity",
+    "terminal_checkpoint_size_bytes", "checkpoint_audit", "training_log_sha256",
+    "training_log_file_identity", "exact_trainer_natural_exit_observed",
+    "gpu_empty_terminal_barrier_observed", "kit_thread_cap_marker_occurrences",
+    "instantiated_zero_friction_marker_occurrences", "activation", "judge", "l2",
+    "second_seed", "stop_or_promote", "real_robot_commands_executed",
+}
+
+
 CHECKPOINT_CODE = r"""
 import json,sys,torch
 obj=torch.load(sys.argv[1],map_location='cpu',weights_only=False)
@@ -1308,12 +1329,7 @@ def checkpoint_audit(
         result = json.loads(raw)
     except (subprocess.CalledProcessError, json.JSONDecodeError) as exc:
         raise ContractError(f"checkpoint audit failed: {exc}") from exc
-    expected_keys = {
-        "iter", "training_contract_schema_version", "training_contract_sha256",
-        "training_contract_lineage_exact", "training_launch_claim_sha256",
-        "floating_tensor_count", "floating_elements", "nonfinite_floating_elements",
-    }
-    require_exact_keys(result, expected_keys, "checkpoint audit")
+    require_exact_keys(result, CHECKPOINT_AUDIT_KEYS, "checkpoint audit")
     for key in ("iter", "training_contract_schema_version", "training_contract_lineage_exact", "floating_tensor_count", "floating_elements", "nonfinite_floating_elements"):
         if type(result[key]) is not int:
             raise ContractError(f"checkpoint audit {key} has wrong exact type")
@@ -1754,6 +1770,7 @@ def pair_input_paths(manifest: dict[str, Any]) -> dict[str, dict[str, Path]]:
         cell_id: {
             "terminal": root / cell_id / "terminal_result.json",
             "hard": root / cell_id / "training_contract.json",
+            "checkpoint": root / cell_id / "model_13824.pt",
         }
         for cell_id in CELL_IDS
     }
@@ -1761,13 +1778,15 @@ def pair_input_paths(manifest: dict[str, Any]) -> dict[str, dict[str, Path]]:
 
 def verify_copied_terminal_result(
     manifest: dict[str, Any], manifest_path: Path, launcher_path: Path,
-    cell_id: str, terminal_path: Path, hard_path: Path,
+    cell_id: str, terminal_path: Path, hard_path: Path, checkpoint_path: Path,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
     terminal_stat = require_regular(terminal_path, f"{cell_id} copied terminal result")
     hard_stat = require_regular(hard_path, f"{cell_id} copied hard contract")
-    if terminal_stat.st_mode & 0o222 or hard_stat.st_mode & 0o222:
+    checkpoint_stat = require_regular(checkpoint_path, f"{cell_id} copied model_13824.pt")
+    if any(result.st_mode & 0o222 for result in (terminal_stat, hard_stat, checkpoint_stat)):
         raise ContractError(f"{cell_id} pair inputs must be read-only")
     terminal = read_json_object(terminal_path, f"{cell_id} copied terminal result")
+    require_exact_keys(terminal, TERMINAL_RESULT_KEYS, f"{cell_id} copied terminal result")
     manifest_sha = sha256_file(manifest_path)
     launcher_sha = sha256_file(launcher_path)
     expected_scalars = {
@@ -1782,6 +1801,8 @@ def verify_copied_terminal_result(
         "optimization_recipe": optimization_recipe(manifest, cell_id),
         "exact_trainer_natural_exit_observed": True,
         "gpu_empty_terminal_barrier_observed": True,
+        "kit_thread_cap_marker_occurrences": 1,
+        "instantiated_zero_friction_marker_occurrences": 1,
         "activation": False,
         "judge": False,
         "l2": False,
@@ -1817,14 +1838,35 @@ def verify_copied_terminal_result(
         terminal.get("execution_lane"), expected_claim["execution_lane"],
         f"{cell_id} copied terminal execution lane",
     )
+    training_run_dir = Path(str(terminal.get("training_run_dir", "")))
+    expected_logs = (
+        Path(manifest["source"]["training_checkout"])
+        / manifest["source"]["wbt_relative_path"]
+        / "logs/rsl_rl/agibot_a3_hope_virtualball"
+    )
+    if (
+        not training_run_dir.is_absolute()
+        or training_run_dir.parent != expected_logs
+        or not training_run_dir.name.endswith(f"_{cells(manifest)[cell_id]['run_name']}")
+    ):
+        raise ContractError(f"{cell_id} copied terminal binds a foreign training run")
+    require_exact(
+        terminal.get("hard_contract_path"),
+        str(training_run_dir / "params/training_contract.json"),
+        f"{cell_id} copied terminal hard-contract path",
+    )
+    require_exact(
+        terminal.get("terminal_checkpoint_path"),
+        str(training_run_dir / "model_13824.pt"),
+        f"{cell_id} copied terminal checkpoint path",
+    )
     hard_sha = sha256_file(hard_path)
     require_exact(
         terminal.get("hard_contract_sha256"), hard_sha,
         f"{cell_id} copied terminal hard-contract SHA",
     )
     audit = terminal.get("checkpoint_audit")
-    if not isinstance(audit, dict):
-        raise ContractError(f"{cell_id} copied terminal lacks checkpoint audit")
+    require_exact_keys(audit, CHECKPOINT_AUDIT_KEYS, f"{cell_id} copied checkpoint audit")
     for key, expected in {
         "iter": 13824,
         "training_contract_schema_version": 3,
@@ -1838,14 +1880,53 @@ def verify_copied_terminal_result(
         raise ContractError(f"{cell_id} copied checkpoint has no floating tensors")
     if type(audit.get("floating_elements")) is not int or audit["floating_elements"] <= 0:
         raise ContractError(f"{cell_id} copied checkpoint has no floating elements")
-    require_sha(
+    recorded_checkpoint_sha = require_sha(
         terminal.get("terminal_checkpoint_sha256"),
         f"{cell_id} copied terminal checkpoint SHA",
     )
+    require_exact(
+        terminal.get("terminal_checkpoint_size_bytes"), checkpoint_stat.st_size,
+        f"{cell_id} copied terminal checkpoint byte count",
+    )
+    checkpoint_sha = sha256_file(checkpoint_path)
+    require_exact(
+        recorded_checkpoint_sha, checkpoint_sha,
+        f"{cell_id} copied terminal checkpoint bytes/SHA",
+    )
+    recomputed_audit = checkpoint_audit(
+        Path(manifest["runtime"]["isaac_python"]), checkpoint_path
+    )
+    require_exact(
+        audit, recomputed_audit,
+        f"{cell_id} copied terminal checkpoint recursive audit",
+    )
+    checkpoint_after = require_regular(
+        checkpoint_path, f"{cell_id} stable copied model_13824.pt"
+    )
+    stable_fields = ("st_dev", "st_ino", "st_size", "st_mtime_ns", "st_ctime_ns", "st_nlink")
+    if any(
+        getattr(checkpoint_stat, key) != getattr(checkpoint_after, key)
+        for key in stable_fields
+    ):
+        raise ContractError(f"{cell_id} copied checkpoint changed during recursive audit")
     hard_digest, hard = verify_hard_contract(hard_path, manifest, cell_id)
     require_exact(hard_digest, hard_sha, f"{cell_id} copied hard digest")
     verify_parent_to_current_contract(hard, manifest, cell_id)
     return terminal, hard
+
+
+def verify_pair_checkpoint_architecture(
+    terminals: dict[str, dict[str, Any]],
+) -> None:
+    if set(terminals) != set(CELL_IDS):
+        raise ContractError("paired checkpoint audit requires A2 and B2")
+    for key in ("floating_tensor_count", "floating_elements"):
+        values = {
+            cell_id: terminals[cell_id]["checkpoint_audit"][key]
+            for cell_id in CELL_IDS
+        }
+        if values["A2"] != values["B2"]:
+            raise ContractError(f"A2/B2 checkpoint shared architecture {key} differs")
 
 
 def finalize_pair(
@@ -1865,8 +1946,10 @@ def finalize_pair(
         terminals[cell_id], contracts[cell_id] = verify_copied_terminal_result(
             manifest, manifest_path, launcher_path, cell_id,
             inputs[cell_id]["terminal"], inputs[cell_id]["hard"],
+            inputs[cell_id]["checkpoint"],
         )
     verify_pair_contracts(contracts)
+    verify_pair_checkpoint_architecture(terminals)
     output = Path(manifest["runtime"]["pair_result_path"])
     if output.exists():
         raise ContractError("paired L1 result already exists; no-clobber finalization")
