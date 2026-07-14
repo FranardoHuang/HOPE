@@ -1,0 +1,252 @@
+{
+  "schema_version": 1,
+  "plan_id": "motion-franco-backhand-loop-b-l0-static-20260714-v1",
+  "status": "preregistered_source_gate_pass_runtime_audit_not_run",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "scope": "CPU-only exact runtime-order schema-2 L0 static audit; kinematic mj_forward only, no simulator step, dynamics, training, deployment or hardware",
+  "asset_id": "franco_backhand_loop_b",
+  "validator": {
+    "path": "scripts/audit_motion_schema2_l0_static.py",
+    "bytes": 46886,
+    "sha256": "4f2c9c238e9686a4a461760ffaf221cf1177828cc00fcf91aeededcbd2e04405"
+  },
+  "exact_runtime_inputs": {
+    "motion_npz": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/schema2_fk_primary_v1/franco_backhand_loop_b_98e7b883b29d/franco_backhand_loop_b.98e7b883b29d.schema2_fk.npz",
+      "sha256": "e2eb99e69f624250e37d012ebc2c7db53c4213a6c73e8cd232b92640051d28cc"
+    },
+    "materialization_report": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/schema2_fk_primary_v1/franco_backhand_loop_b_98e7b883b29d/schema2_fk_report.json",
+      "sha256": "4f5245937956290b3f623acbb588d99b346e5a1d874e55ee9caf010f2d75bc38"
+    },
+    "consume_claim": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/schema2_fk_primary_v1/.bc_schema2_fk_consume_control_v2/franco_backhand_loop_b.claim.json",
+      "sha256": "76e7ff88fea39c13b45096edaad504b2570b3ce079acc96366b820a9c1295fb0"
+    },
+    "consume_success": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/schema2_fk_primary_v1/.bc_schema2_fk_consume_control_v2/franco_backhand_loop_b.success.json",
+      "sha256": "c0a25f2cba0e61bf0df7f63e6493948e16c5a3d3074f65091430f29e417f4f8b"
+    }
+  },
+  "upstream_contracts": {
+    "consume_activation": {
+      "path": "configs/motion_backhand_loop_bc_schema2_fk_consume_activation_20260714.json",
+      "bytes": 10508,
+      "sha256": "72b22ccd0d691f170d96eba4e0067195a09160c04b12fe9180601115ab546ffb"
+    },
+    "consume_runner": {
+      "path": "scripts/run_motion_schema2_fk_consume_once.py",
+      "bytes": 48312,
+      "sha256": "8e66e0508fec5fc3a973f15fd88c469a6da2ea911e0f3125a1229bdee898a447"
+    },
+    "schema2_materializer": {
+      "path": "scripts/materialize_motion_schema2_fk.py",
+      "bytes": 49151,
+      "sha256": "33cf23eecff514a0e89bfe245db5b63470c4cd1dc9a433d0b920dfd84b9caebd"
+    },
+    "schema2_preregistration": {
+      "path": "configs/motion_backhand_loop_b_schema2_fk_prereg_20260714.json",
+      "bytes": 2864,
+      "sha256": "3d71cc02c6ae68d0ecedf280e8341d763ad39ec0aac1757367c9719e761d33ae"
+    },
+    "shared_schema2_runtime": {
+      "path": "configs/motion_backhand_loop_bc_schema2_fk_runtime_v1.json",
+      "bytes": 5503,
+      "sha256": "3d32b146e72029960ebf9cb2777f484804dafc87097e9cd3d0513dc277eed6e8"
+    },
+    "donor_metadata": {
+      "path": "configs/a3_schema2_fk_donor_metadata_v1.json",
+      "bytes": 2301,
+      "sha256": "0e55b78806e3a5ae26f3ace6df067ec5cd145ed985a778f7962e4bfe24116f1c"
+    },
+    "joint_order_contract": {
+      "path": "configs/a3_joint_order_bijection_v1.json",
+      "bytes": 2579,
+      "sha256": "b09987ff7a1bfa624b566cc8884d16672ba73c1acc3f92efb8a4faa99d314815"
+    },
+    "joint_order_validator": {
+      "path": "hope_training/whole_body_tracking/scripts/a3_joint_order_contract.py",
+      "bytes": 17677,
+      "sha256": "8f01d20d4ce47e543b90a8e38dba52c70784d9f8b3be6a9ddb0965863a5c1ae9"
+    },
+    "runtime_joint_order": {
+      "path": "configs/a3_runtime_articulation_joint_order.txt",
+      "bytes": 724,
+      "sha256": "5181da217c9fdd6928c965613e4f053ce437d232d590f1ffc61487fb429dd87c"
+    },
+    "runtime_body_order": {
+      "path": "configs/a3_runtime_body_order.txt",
+      "bytes": 629,
+      "sha256": "1cdae4ba7c8d604428ee69ed4a3059e67fb195b22e1d0e294d509c4325809a3a"
+    },
+    "kinematics_contract": {
+      "path": "hope_training/whole_body_tracking/scripts/motion_kinematics_contract.py",
+      "bytes": 10145,
+      "sha256": "7b68f19fb4468c0776b3941e20381314bde2edb0d1d5cc0af5b03b18f25da5ab"
+    },
+    "converter_helper": {
+      "path": "hope_training/whole_body_tracking/scripts/csv_to_npz_mujoco.py",
+      "bytes": 18832,
+      "sha256": "a151a691983eac72cd6f9f58f08979aea7fa657092d09ee5c3742a3e02b07f04"
+    },
+    "grounding_helper": {
+      "path": "scripts/ground_gmr_pkl.py",
+      "bytes": 35333,
+      "sha256": "db5bd1670cd113ce6ada8b53a7d4b0e5e25f0cc51665983c4958146e99ce4591"
+    },
+    "grounding_preregistration": {
+      "path": "configs/motion_video_canonical_gmr_ground_prereg_v2_20260711.json",
+      "bytes": 10726,
+      "sha256": "3f1980d11f4bbfef54b142e58082360d385f28905c7e700472e532eb5abdf8a5"
+    }
+  },
+  "a3_model": {
+    "model_root": "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong",
+    "canonical_mjcf": {
+      "path": "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml",
+      "bytes": 49107,
+      "sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97"
+    },
+    "derived_closure": {
+      "algorithm": "sha256(canonical-json(sorted[{path,bytes,sha256}]))-v1",
+      "file_count": 75,
+      "total_bytes": 14127373,
+      "manifest_sha256": "e0381752eab46013c08559b331abb261beaa88a207a3c2f1155ab00857b962de",
+      "xml_file_count": 1,
+      "include_reference_count": 0,
+      "external_file_reference_count": 74,
+      "unique_external_file_count": 74,
+      "mesh_reference_count": 74
+    },
+    "compiled_collision_contract": {
+      "sha256": "18e7f6ffbefba9dbd988f7c3cb9fb92b250777862fc25fa3d4a0b2ca0f8386e5",
+      "ground_geom": "floor",
+      "ground_z_m": 0.0,
+      "enabled_robot_geom_count": 37,
+      "enabled_robot_geom_ids": [
+        3,
+        9,
+        11,
+        13,
+        15,
+        17,
+        19,
+        21,
+        23,
+        24,
+        26,
+        29,
+        30,
+        32,
+        34,
+        36,
+        38,
+        40,
+        42,
+        47,
+        48,
+        49,
+        50,
+        51,
+        52,
+        54,
+        56,
+        58,
+        61,
+        63,
+        65,
+        67,
+        69,
+        71,
+        74,
+        76,
+        78
+      ],
+      "surface_method": "analytic_primitive_support_or_compiled_mesh_vertices"
+    }
+  },
+  "runtime": {
+    "launcher": "/workspace/hope_mjeval_venv/bin/python",
+    "resolved_executable": "/usr/bin/python3.12",
+    "resolved_executable_bytes": 8021824,
+    "resolved_executable_sha256": "1d3cf64f97cadc79fdc6fe2496a21b7b456cb94211978cfef5a65f616af74fd5",
+    "python_version": "3.12.3",
+    "packages": {
+      "numpy": "2.5.0",
+      "mujoco": "3.10.0"
+    },
+    "module_origins": {
+      "numpy": "/workspace/hope_mjeval_venv/lib/python3.12/site-packages/numpy/__init__.py",
+      "mujoco": "/workspace/hope_mjeval_venv/lib/python3.12/site-packages/mujoco/__init__.py"
+    },
+    "environment": {
+      "CUDA_VISIBLE_DEVICES": "",
+      "PYTHONDONTWRITEBYTECODE": "1",
+      "PYTHONNOUSERSITE": "1"
+    }
+  },
+  "l0_contract": {
+    "frames": 151,
+    "fps": 50,
+    "joint_count": 31,
+    "body_count": 32,
+    "npz_fields": [
+      "body_ang_vel_w",
+      "body_lin_vel_point",
+      "body_lin_vel_w",
+      "body_names",
+      "body_pos_point",
+      "body_pos_w",
+      "body_quat_w",
+      "fps",
+      "joint_pos",
+      "joint_vel",
+      "kinematics_schema_version"
+    ],
+    "time_series_dtype": "float32",
+    "quaternion_norm_tolerance": 0.00001,
+    "joint_range_tolerance_rad": 0.00001,
+    "kinematic_replay": "stored_pelvis_pose_plus_runtime_joint_pos_to_exact_MJCF_mj_forward; recomputed_float32_link_pose_and_velocity_arrays_must_be_byte_equal",
+    "grounding": {
+      "target_clearance_m": 0.00001,
+      "max_grounded_clearance_m": 0.001,
+      "numerical_tolerance_m": 0.0000005,
+      "sampling": "all_151_discrete_50Hz_frames_no_continuous_time_claim",
+      "lowest_collision_body_must_descend_from_support_body": true
+    },
+    "support_bodies": [
+      "left_ankle_roll_Link",
+      "right_ankle_roll_Link"
+    ]
+  },
+  "output_contract": {
+    "certificate_path": "/workspace/codexschema/motion_video_intake_20260711/l0_static_primary_v1/franco_backhand_loop_b_98e7b883b29d.l0_static_certificate.json",
+    "must_be_absent": true,
+    "parent_must_exist": true,
+    "no_clobber": true
+  },
+  "authorization": {
+    "source_gate_pass": true,
+    "cpu_l0_audit_authorized_after_review": true,
+    "l0_static_complete": false,
+    "vendor_l1_authorized": false,
+    "table_net_authorized": false,
+    "dynamics_authorized": false,
+    "simulator_authorized": false,
+    "training_authorized": false,
+    "formal_motion_authorized": false,
+    "hardware_authorized": false
+  },
+  "explicit_non_claims": [
+    "vendor_self_collision_or_racket_self_hit",
+    "table_or_net_swept_clearance",
+    "continuous_time_ground_clearance",
+    "dynamics_balance_or_contact_stability",
+    "TOPP_or_time_warp",
+    "strike_or_returnability",
+    "RL_training_or_checkpoint_quality",
+    "Gate3_or_hardware_safety"
+  ],
+  "next_gate": "only_after_exact_L0_certificate_vendor_L1_self_collision_and_racket_self_hit"
+}
