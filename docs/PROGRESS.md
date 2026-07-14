@@ -13,6 +13,14 @@
 
 ## 2026-07-14
 
+- Fresh C queue 的五条 `retry-v2` 已全部越过真实 first iteration，现场到 `103–160/1001` 且无
+  NaN/Inf/Traceback/OOM/Killed；五份 `model_100.pt` 均 filename=embedded iter、76 tensor finite、
+  schema-3 hard-contract SHA 与 fresh lineage 绑定通过。第六个 actual qdot-limit tail 格冻结为 fresh
+  seed3、4096×1001、weight `-5.0`/margin `0.85`，只作 +200 direction screen；同 source weight0 control
+  尚未跑，故不得作因果采用或买第二 seed。见
+  [实验](experiments/2026-07/EXP-P1-FRESH-C-MECHANISM-ABLATION.md)与
+  [操作](operations/run_lean_training_queue.md)。
+
 - 第二圈第六机制的 31 关节 qdot-limit hinge 已完成 E1 source gate：VirtualBall 默认关闭，normalized
   tail 公式直接消费 actual articulation qdot/velocity limits，Hydra 只接受非正 weight 和 `(0,1)` margin，
   applied marker 与 hard-contract/outer-claim 边界已写清；错序、零/非有限 limit fail closed。qdot-focused

@@ -1738,6 +1738,12 @@ origin 通过，实际 child Python 为 `/workspace/hope_isaac_venv/bin/python`�
 该命令没有创建 retry-v2 claim 或 trainer，Hydra compose 仍明确未运行，所以只把 harness 从 E1 提升为
 module-runtime preflight 通过，不改变 G05 `Partial`。
 
+随后单一 `fill` scheduler 把五条 retry-v2 依次铺到 Pod1 GPU0/1/2 与 Pod2 GPU0/1，并全部越过第一个
+`Learning iteration`。2026-07-14T10:09:52Z 五条仍存活于 update `103–160/1001`，无 fatal；五份
+`model_100.pt` 的 filename=embedded iteration、finite、相邻 schema-3 hard-contract SHA 与 fresh lineage
+均通过。第六格 qdot-limit tail 已冻结为同 fresh-C 配方、weight `-5.0`/margin `0.85`，只授权单 seed
+`+200` direction screen；同 source weight0 matched control 前不得作因果采用。G05 仍为 `Partial`。
+
 ### 2026-07-14 31 关节 qdot-limit hinge 源码门
 
 VirtualBall reward stack 新增默认关闭的

@@ -379,9 +379,9 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
     ready = [job for job in queue["jobs"] if job["status"] == "ready"]
     blocked = [job for job in queue["jobs"] if job["status"] == "blocked"]
     rejected = [job for job in queue["jobs"] if job["status"] == "rejected"]
-    assert len(ready) == 5
+    assert len(ready) == 6
     assert len(rejected) == 5
-    assert [job["id"] for job in blocked] == ["fresh_c_qdot_limit_reward"]
+    assert blocked == []
     axis_prefixes = (
         "++task.rewards.free_wrist_vel_mimic=",
         "++task.rewards.motion_scale_in_window=",
@@ -394,6 +394,7 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
         "fresh_c_v1_v2_combined_retry_v2": ("true", "0.25", "0.0", "0.25"),
         "fresh_c_base_deceleration_retry_v2": ("false", "1.0", "1.0", "0.25"),
         "fresh_c_post_swing_replay_half_retry_v2": ("false", "1.0", "0.0", "0.5"),
+        "fresh_c_qdot_limit_hinge_w5": ("false", "1.0", "0.0", "0.25"),
     }
     for job in ready:
         assert job["seed"] == 3
@@ -401,7 +402,12 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
             "num_envs": 4096, "max_iterations": 1001, "save_interval": 100
         }
         assert job["milestones"] == [200, 500, 1000]
-        assert job["source"]["commit"] == "4467d79f1ed425a4263f0caaad2f661e1ec737ad"
+        expected_source = (
+            "a6ccdc7a1c696ff37878039f1e1d83dea28a2bfa"
+            if job["id"] == "fresh_c_qdot_limit_hinge_w5"
+            else "4467d79f1ed425a4263f0caaad2f661e1ec737ad"
+        )
+        assert job["source"]["commit"] == expected_source
         base = job["recipe"]["base"]
         delta = job["recipe"]["delta"]
         assert not any(item.startswith(axis_prefixes) for item in base)
@@ -411,13 +417,28 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
             assert len(matches) == 1
             actual.append(matches[0])
         assert tuple(actual) == expected[job["id"]]
+        qdot_weight = [
+            item for item in delta
+            if item.startswith("task.rewards.joint_velocity_limit_hinge_weight=")
+        ]
+        qdot_margin = [
+            item for item in delta
+            if item.startswith("task.rewards.joint_velocity_limit_hinge_margin=")
+        ]
+        if job["id"] == "fresh_c_qdot_limit_hinge_w5":
+            assert qdot_weight == ["task.rewards.joint_velocity_limit_hinge_weight=-5.0"]
+            assert qdot_margin == ["task.rewards.joint_velocity_limit_hinge_margin=0.85"]
+        else:
+            assert qdot_weight == []
+            assert qdot_margin == []
     plan = Q.cmd_plan(queue, live=False)
-    assert len(plan["assignments"]) == 5
+    assert len(plan["assignments"]) == 6
     assert [item["resource"] for item in plan["assignments"]] == [
-        "pod1/gpu0", "pod1/gpu1", "pod1/gpu2", "pod2/gpu0", "pod2/gpu1"
+        "pod1/gpu0", "pod1/gpu1", "pod1/gpu2", "pod2/gpu0", "pod2/gpu1", "pod2/gpu2"
     ]
-    by_id = {job["id"]: job for job in queue["jobs"]}
-    for attempt1, retry in zip(rejected, ready, strict=True):
+    retry_ready = [job for job in ready if job["id"].endswith("_retry_v2")]
+    assert len(retry_ready) == 5
+    for attempt1, retry in zip(rejected, retry_ready, strict=True):
         assert retry["recipe"] == attempt1["recipe"]
         assert retry["motion"] == attempt1["motion"]
         assert retry["bank"] == attempt1["bank"]

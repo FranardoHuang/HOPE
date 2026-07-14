@@ -1,8 +1,7 @@
 # 轻量 YAML 训练队列
 
-状态：队列 harness 修复通过 source gate；五个 `retry-v2` 尚未启动，无 Pod 训练结果。G05 仍为
-`Partial`。2026-07-14T09:53:56Z 五格只读 `doctor --live` 均通过 exact module gate；没有创建 retry-v2
-claim/trainer。
+状态：队列 harness 修复后，五个 `retry-v2` 已越过真实 first iteration 并写出 finite `model_100.pt`；
+第六个 qdot-limit 格已进入 ready 队列。G05 仍为 `Partial`，这不是行为晋级。
 
 这个入口解决的是“动作和题库已经决定后，为什么还要手拼一长串命令”。一条 YAML job 必须同时绑定：
 
@@ -60,7 +59,7 @@ python3 scripts/run_lean_training_queue.py \
   --queue configs/phase1_fresh_c_mechanism_queue_20260714.yaml doctor
 
 python3 scripts/run_lean_training_queue.py \
-  --queue configs/phase1_fresh_c_mechanism_queue_20260714.yaml fill --count 5
+  --queue configs/phase1_fresh_c_mechanism_queue_20260714.yaml fill --count 1
 
 python3 scripts/run_lean_training_queue.py \
   --queue configs/lean_training_queue.example.yaml launch-next
@@ -76,7 +75,7 @@ python3 scripts/run_lean_training_queue.py \
   --queue configs/phase1_fresh_c_mechanism_queue_20260714.yaml doctor --live
 
 python3 scripts/run_lean_training_queue.py \
-  --queue configs/phase1_fresh_c_mechanism_queue_20260714.yaml fill --count 5 \
+  --queue configs/phase1_fresh_c_mechanism_queue_20260714.yaml fill --count 1 \
   --execute --confirm SIM_ONLY_LAUNCH_ONE_LEAN_QUEUE_JOB
 ```
 

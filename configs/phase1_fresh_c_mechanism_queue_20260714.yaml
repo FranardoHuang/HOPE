@@ -16,7 +16,7 @@ pods:
     gpus: [0, 1, 2]
     max_trainers_per_gpu: 3
 
-# This is the matched comparison contract, not an extra queue row.  All five
+# This is the matched comparison contract, not an extra queue row.  All six
 # ready cells keep fresh initialization, guidance=0, seed=3 and this complete
 # base recipe.  Their only delta is the named mechanism (two deltas for V1+V2).
 shared_control:
@@ -47,6 +47,9 @@ x-exam: &exam
 x-source: &source
   checkout: /workspace/codexschema/nohope_signed_face_a2b2_hot_l1_v2_4467d79
   commit: 4467d79f1ed425a4263f0caaad2f661e1ec737ad
+x-qdot-source: &qdot_source
+  checkout: /workspace/codexschema/nohope_qdot_limit_hinge_a6ccdc7
+  commit: a6ccdc7a1c696ff37878039f1e1d83dea28a2bfa
 x-base: &base
   - task=HOPEPingPongVirtualBall
   - algo=ppo
@@ -297,21 +300,27 @@ jobs:
     run_name: phase1_fresh_c_post_swing_half_seed3_retry_v2_20260714
     run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_post_swing_half_seed3_retry_v2
 
-  - id: fresh_c_qdot_limit_reward
-    human_name: fresh C plus joint-velocity-limit reward
+  - id: fresh_c_qdot_limit_hinge_w5
+    human_name: fresh C plus actual 31-joint qdot-limit tail penalty, weight minus five
     action: *action
-    status: blocked
-    blocker: qdot-limit reward flag and training implementation do not exist yet; never launch this row
+    status: ready
+    blocker: null
     motion: *motion
     bank: *bank
     exam: *exam
-    source: *source
+    source: *qdot_source
     recipe:
       base: *base
-      delta: []
+      delta:
+        - ++task.rewards.free_wrist_vel_mimic=false
+        - ++task.rewards.motion_scale_in_window=1.0
+        - task.rewards.base_decel_weight=0.0
+        - task.motion.post_swing_start_prob=0.25
+        - task.rewards.joint_velocity_limit_hinge_weight=-5.0
+        - task.rewards.joint_velocity_limit_hinge_margin=0.85
     seed: 3
     budget: *budget
     milestones: *milestones
     resource: *resource
-    run_name: phase1_fresh_c_qdot_limit_reward_seed3_20260714
-    run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_qdot_limit_reward_seed3
+    run_name: phase1_fresh_c_qdot_hinge_w5_seed3_20260714
+    run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_qdot_hinge_w5_seed3
