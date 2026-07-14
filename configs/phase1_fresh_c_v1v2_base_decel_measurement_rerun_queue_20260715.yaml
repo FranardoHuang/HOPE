@@ -1,7 +1,7 @@
 schema_version: 1
 simulation_only: true
 launch_authorized: false
-preregistration_status: activation_successor_source_pinned_strict_full_scene_probe_pending
+preregistration_status: inference_fix_rebound_hard_slot_strict_full_scene_probe_pending
 
 ssh:
   key: ~/.ssh/id_ed25519_runpod
@@ -33,16 +33,19 @@ shared_control:
   signed_face_guidance_weight: 0.0
   comparison_status: exact_same_source_matched_pair_required
 
-# Historical 312669c closed only post-swing counters.  The exact successor below
-# now contains post-swing, V1, V2 and weight-independent base-decel ledgers on top
-# of current main.  This closes the source API gap only: its own strict full-scene
-# terminal probe is still missing, so neither row is launchable.
+# Historical 312669c closed only post-swing counters.  Source 0f3900a added the
+# missing V1/V2/base-decel ledgers but its real full-scene probe exposed an
+# inference-mode reset fatal.  The exact replacement below contains that fix;
+# its own strict terminal probe is still missing, so neither row is launchable.
 instrumentation_closure:
   telemetry_reference_source_commit: 312669c7bd61f8fc8f5ea99c8e94cfc3ffae9b94
   required_main_hardening_commit: f00c49779174fdf43f861a29ceda0f985be04f31
   telemetry_reference_contains_required_main_hardening: false
-  successor_source_commit: 0f3900a612863faf326dca6ad3e8d38bfe8df3c9
+  failed_runtime_source_commit: 0f3900a612863faf326dca6ad3e8d38bfe8df3c9
+  successor_source_commit: 2c2d70d6d0ccf7b0757aac4dd8e575c2e077607e
   successor_contains_required_main_hardening: true
+  inference_mode_counter_reset_fix_in_successor: true
+  hard_slot_scheduler_commit: 8b0a08414aef390d3b45664c2cd3746e87453fff
   source_rebind_required_before_launch: false
   strict_full_scene_terminal_probe_required_after_rebind: true
   available_post_swing_replay_metrics:
@@ -173,11 +176,11 @@ x-exam: &exam
   path: /workspace/codexschema/phase1_signed_face_rescue_20260713/papers/signed_face_exam_k100_v1/signed_face_exam_k100.schedule.json
   family: signed_face_rebound_k100_v1
 
-# Exact activation successor.  It is source-complete but still intentionally
+# Exact inference-reset successor.  It is source-complete but intentionally
 # blocked until this exact checkout passes its own strict full-scene probe.
 x-source: &source
-  checkout: /workspace/codexschema/nohope_p1_activation_successor_0f3900a
-  commit: 0f3900a612863faf326dca6ad3e8d38bfe8df3c9
+  checkout: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d
+  commit: 2c2d70d6d0ccf7b0757aac4dd8e575c2e077607e
   ignored_runtime_asset:
     target_relative_path: hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
     donor:
@@ -277,11 +280,11 @@ x-milestones: &milestones [200, 500, 1000]
 
 jobs:
   - &control
-    id: fresh_c_v1v2_base_decel_measurement_control_v3
-    human_name: fresh C V1 plus V2 measurement replacement control with base deceleration off
+    id: fresh_c_v1v2_base_decel_measurement_control_v4
+    human_name: fresh C V1 plus V2 inference-fixed measurement control with base deceleration off
     action: *action
     status: blocked
-    blocker: exact same-phase activation successor 0f3900a is pinned but has not passed its own strict full-scene terminal probe; keep both cells blocked and launch_authorized false
+    blocker: exact inference-fixed successor 2c2d70d is pinned but has not passed its own strict full-scene terminal probe; keep both cells blocked and launch_authorized false
     motion: *motion
     bank: *bank
     exam: *exam
@@ -302,13 +305,13 @@ jobs:
     milestones: *milestones
     resource:
       policy: dispatch_gpu_round_robin
-      preferred_slot: pod2/gpu1
-    run_name: phase1_fresh_c_v1v2_base_decel_measurement_control_seed3_v3_20260715
-    run_dir: /workspace/codexschema/phase1_fresh_c_v1v2_base_decel_measurement_rerun_20260715/runs/phase1_fresh_c_v1v2_base_decel_measurement_control_seed3_v3
+      required_slot: pod2/gpu1
+    run_name: phase1_fresh_c_v1v2_base_decel_measurement_control_seed3_v4_20260715
+    run_dir: /workspace/codexschema/phase1_fresh_c_v1v2_base_decel_measurement_rerun_20260715/runs/phase1_fresh_c_v1v2_base_decel_measurement_control_seed3_v4
 
   - <<: *control
-    id: fresh_c_v1v2_base_decel_measurement_w1_v3
-    human_name: fresh C V1 plus V2 measurement replacement treatment with base deceleration weight one
+    id: fresh_c_v1v2_base_decel_measurement_w1_v4
+    human_name: fresh C V1 plus V2 inference-fixed measurement treatment with base deceleration weight one
     recipe:
       base: *base
       delta:
@@ -321,6 +324,6 @@ jobs:
         - ++task.rewards.racket_face_conditional_guidance_weight=0.0
     resource:
       policy: dispatch_gpu_round_robin
-      preferred_slot: pod2/gpu2
-    run_name: phase1_fresh_c_v1v2_base_decel_measurement_w1_seed3_v3_20260715
-    run_dir: /workspace/codexschema/phase1_fresh_c_v1v2_base_decel_measurement_rerun_20260715/runs/phase1_fresh_c_v1v2_base_decel_measurement_w1_seed3_v3
+      required_slot: pod2/gpu2
+    run_name: phase1_fresh_c_v1v2_base_decel_measurement_w1_seed3_v4_20260715
+    run_dir: /workspace/codexschema/phase1_fresh_c_v1v2_base_decel_measurement_rerun_20260715/runs/phase1_fresh_c_v1v2_base_decel_measurement_w1_seed3_v4

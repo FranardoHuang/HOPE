@@ -13,10 +13,15 @@
 
 ## 2026-07-15
 
+- inference-counter 修复后的 replacement pair 已改绑 clean exact `2c2d70d...`，并换用从未发射的 `v4`
+  namespace；control/treatment 由 main `8b0a084...` 分别 hard-bound 到 Pod2 GPU1/GPU2，Pod1 与一康 GPU0
+  均不在发射路径。两臂仍 `blocked`、`launch_authorized=false`；须先水合独立 source 并让 fresh 4096-env
+  strict probe 自然终档，当前没有科学 trainer。
+
 - 轻量训练 harness 新增 `required_slot` 硬绑定：目标 GPU 满载时本 job 不 fallback，同时不饿死其他槽的
   独立任务；与 `preferred_slot` 互斥，science claim、warmup、probe/finalizer 都在 SSH 前执行检查，防止
-  Codex 作业落到一康保留的 GPU0。该字段不冒充 matched pair 原子性；当前只是源码门，replacement queue
-  仍 blocked，尚未重绑或启动。
+  Codex 作业落到一康保留的 GPU0。该字段不冒充 matched pair 原子性；replacement queue 已重绑但仍
+  blocked，尚未 probe 或启动。
 
 - Same-phase activation successor `0f3900a...` 的 4096-env Pod2 strict probe 抓到离线测试遗漏：
   RewardManager 在 `torch.inference_mode()` 内创建 ledger，normal-mode runner 第一次 `zero_()` 即 fatal；因此

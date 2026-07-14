@@ -1,7 +1,7 @@
 # EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN — 补齐 activation 后重跑底座减速配对
 
 - 状态：`blocked`（`0f3900a...` 的 strict full-scene probe 已抓到 inference-counter logger 真 bug；
-  修复源码尚未重绑队列、复跑并终档通过）
+  修复源码已重绑 exact `2c2d70d...`，但 fresh probe 尚未终档通过）
 - 阶段/轴：Phase 1 fresh C；组合击球精度下，底座减速是否有净收益
 - 集成小目标：保住击球精度信号，同时降低击球前底座速度与击球前摔倒率
 - 人类负责人：Franco
@@ -50,12 +50,17 @@ eligible denominator。只看配置回显、`Live/Reward/base_decel` 的全环�
 
 `312669c...` 的父提交是 `2171302...`，不是 main hardening `f00c497...` 的后代，因此仍只作历史 telemetry
 reference。当前 YAML 已原子改绑 clean exact
-`0f3900a612863faf326dca6ad3e8d38bfe8df3c9`（checkout
-`/workspace/codexschema/nohope_p1_activation_successor_0f3900a`）。该 successor 同时包含 main hardening、五个
-post-swing counters、V1/V2 execution counters、base-decel raw observer 和 runner logger；measurement 源码
-表面完整，但仍含跨 InferenceMode consumer bug。它自己的 strict full-scene attempt 已在首个 update 后失败，
-所以永久不是 launch-ready source，禁止
-原地修改 checkout或复用旧 attempt。失败与源码修复见下文。
+`0f3900a612863faf326dca6ad3e8d38bfe8df3c9`。该 successor 同时包含 main hardening、五个 post-swing
+counters、V1/V2 execution counters、base-decel raw observer 和 runner logger；measurement 源码表面完整，
+但仍含跨 InferenceMode consumer bug。它自己的 strict full-scene attempt 已在首个 update 后失败，所以永久
+不是 launch-ready source，禁止原地修改 checkout 或复用旧 attempt。
+
+当前 replacement 已改绑 clean exact `2c2d70d6d0ccf7b0757aac4dd8e575c2e077607e`（checkout
+`/workspace/codexschema/nohope_p1_activation_successor_2c2d70d`）。它只在消费后 reset 三个私有 scalar 时回到
+inference mode，未改 Reward、scene、题库或 optimizer。资源隔离由 main
+`8b0a08414aef390d3b45664c2cd3746e87453fff` 的
+[`required_slot`](../../DEFINITIONS.md#required-slot) 合同提供；source/queue 已精确绑定，但 fresh strict probe
+仍 pending，故科学 pair 继续 blocked。
 
 ## `0f3900a` strict probe 的两次不可覆盖负结果
 
@@ -115,21 +120,21 @@ sum 都要 finite、非负。
 | 字段 | 冻结值 |
 | --- | --- |
 | 失败 source | clean exact `0f3900a612863faf326dca6ad3e8d38bfe8df3c9`；fatal evidence 冻结，永久 NO-LAUNCH |
-| replacement source | 本 source-fix 提交；exact SHA 须由下一次 queue rebind 冻结，strict terminal probe pending |
+| replacement source | clean exact `2c2d70d6d0ccf7b0757aac4dd8e575c2e077607e`；strict terminal probe pending |
 | 初始化/seed | fresh / `3`；只买一个 seed |
 | 预算 | `4096 environments × 1001 updates`；每 `100` 保存；milestone `200/500/1000` |
 | 动作/题库/plant | 与原配对逐字相同的 v4rg runtime-order 正反手、schema-3 rebound bank、zero-joint-friction 训练协议 |
 | 共同机制 | V1=`true`；V2=`0.25`；post-swing replay=`0.25`；qdot hinge=`0`；conditional face=`0` |
 | 唯一差异 | control `base_decel_weight=0.0`；treatment `base_decel_weight=1.0` |
-| 调度 | 只允许 Pod2；control 优先 GPU1，treatment 优先 GPU2；Pod1 不 snapshot/claim/probe/launch |
+| 调度 | 只允许 Pod2；control 硬绑定 GPU1，treatment 硬绑定 GPU2；GPU0 与 Pod1 均不得接收 Codex 作业 |
 | 权限 | `launch_authorized=false`；两格 `status=blocked`；第二 seed/judge/promotion 均未授权 |
 
 fresh namespaces：
 
-- control：`phase1_fresh_c_v1v2_base_decel_measurement_control_seed3_v3_20260715`
-- treatment：`phase1_fresh_c_v1v2_base_decel_measurement_w1_seed3_v3_20260715`
+- control：`phase1_fresh_c_v1v2_base_decel_measurement_control_seed3_v4_20260715`
+- treatment：`phase1_fresh_c_v1v2_base_decel_measurement_w1_seed3_v4_20260715`
 
-`v3` 表示新的 measurement-complete namespace，不是第三个 seed，也不继承旧 checkpoint。
+`v4` 表示 inference-reset 修复后的 fresh namespace，不是第四个 seed，也不继承旧 checkpoint。
 
 ## Activation 先于行为早判
 
@@ -153,11 +158,11 @@ fresh namespaces：
 
 | 运行 | 状态 | 证据 | 有效性 |
 | --- | --- | --- | --- |
-| measurement control，base-decel 关 | blocked | `0f3900a` probe 在首 update 后 logger fatal | 必须新 source、新 attempt、strict terminal pass |
-| measurement treatment，base-decel 权重 1 | blocked | 唯一 Reward 权重 delta | control source 门未过，不得发射 |
+| measurement control，base-decel 关 | blocked | exact `2c2d70d`、Pod2 GPU1；fresh strict probe pending | probe 必须自然终档并被显式消费 |
+| measurement treatment，base-decel 权重 1 | blocked | exact `2c2d70d`、Pod2 GPU2；唯一 Reward 权重 delta | control source 门未过，不得发射 |
 
 - 决定：`inconclusive`；尚无 replacement runtime。
-- 当前阻塞不是 Reward 负结果；`0f3900a` 的 runtime logger 已证伪，新 source 的 strict terminal probe 仍未闭合。
+- 当前阻塞不是 Reward 负结果；`0f3900a` 的 runtime logger 已证伪，`2c2d70d` 的 strict terminal probe 仍未闭合。
 - 本记录不建立算力优先级；是否排队仍只由 main 的 `docs/NOW.md` 统一队列决定。
 - 不授权 Isaac/MuJoCo judge、第二 seed、正式 setting、部署或真机。
 
@@ -174,6 +179,6 @@ pytest -q tests/test_run_lean_training_queue.py
 git diff --check
 ```
 
-专项测试证明：Pod2-only 且当前无 assignment、source/五 tag 精确绑定、三组缺失 telemetry fail-closed、
-replacement 与原配方逐字一致且只改 base-decel 权重、fresh namespace 不复用旧证据、activation 明确先于
-behavior screen。
+专项测试证明：Pod2-only 且当前无 assignment、source/五 tag 精确绑定、两臂分别 hard-bound GPU1/GPU2、
+三组缺失 telemetry fail-closed、replacement 与原配方逐字一致且只改 base-decel 权重、fresh namespace 不复用
+旧证据、activation 明确先于 behavior screen。

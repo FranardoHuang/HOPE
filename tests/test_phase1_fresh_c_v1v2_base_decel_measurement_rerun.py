@@ -47,12 +47,12 @@ def test_replacement_pair_is_pod2_only_and_cannot_plan_a_launch():
 
     assert queue["launch_authorized"] is False
     assert queue["preregistration_status"] == (
-        "activation_successor_source_pinned_strict_full_scene_probe_pending"
+        "inference_fix_rebound_hard_slot_strict_full_scene_probe_pending"
     )
     assert queue["dispatch_pods"] == ["pod2"]
     assert {slot.pod for slot in Q.slots(queue)} == {"pod2"}
     assert [job["status"] for job in queue["jobs"]] == ["blocked", "blocked"]
-    assert all("0f3900a" in job["blocker"] for job in queue["jobs"])
+    assert all("2c2d70d" in job["blocker"] for job in queue["jobs"])
     assert all("strict full-scene terminal probe" in job["blocker"] for job in queue["jobs"])
     assert Q.cmd_plan(queue, live=False)["assignments"] == []
 
@@ -69,7 +69,14 @@ def test_successor_source_contains_required_lineages_but_probe_is_still_pending(
     )
     assert closure["telemetry_reference_contains_required_main_hardening"] is False
     assert closure["successor_source_commit"] == (
+        "2c2d70d6d0ccf7b0757aac4dd8e575c2e077607e"
+    )
+    assert closure["failed_runtime_source_commit"] == (
         "0f3900a612863faf326dca6ad3e8d38bfe8df3c9"
+    )
+    assert closure["inference_mode_counter_reset_fix_in_successor"] is True
+    assert closure["hard_slot_scheduler_commit"] == (
+        "8b0a08414aef390d3b45664c2cd3746e87453fff"
     )
     assert closure["successor_contains_required_main_hardening"] is True
     assert closure["source_rebind_required_before_launch"] is False
@@ -77,12 +84,27 @@ def test_successor_source_contains_required_lineages_but_probe_is_still_pending(
 
     for job in queue["jobs"]:
         assert job["source"]["checkout"] == (
-            "/workspace/codexschema/nohope_p1_activation_successor_0f3900a"
+            "/workspace/codexschema/nohope_p1_activation_successor_2c2d70d"
         )
         assert job["source"]["commit"] == (
-            "0f3900a612863faf326dca6ad3e8d38bfe8df3c9"
+            "2c2d70d6d0ccf7b0757aac4dd8e575c2e077607e"
         )
         assert job["runtime_binding"] is True
+
+
+def test_pair_is_hard_bound_away_from_yikang_gpu0():
+    queue = Q.load_queue(QUEUE_PATH)
+    control, treatment = queue["jobs"]
+
+    assert control["resource"] == {
+        "policy": "dispatch_gpu_round_robin",
+        "required_slot": "pod2/gpu1",
+    }
+    assert treatment["resource"] == {
+        "policy": "dispatch_gpu_round_robin",
+        "required_slot": "pod2/gpu2",
+    }
+    assert all(job["resource"].get("preferred_slot") is None for job in queue["jobs"])
 
 
 def test_five_post_swing_counts_are_frozen_with_arithmetic_closure():
@@ -240,6 +262,8 @@ def test_fresh_namespaces_have_no_old_attempt_or_placeholder():
     assert "/path/to/" not in raw.lower()
     assert "phase1_fresh_c_v1v2_decel_interaction_20260714/runs/" not in raw
     assert "control_seed3_retry_v2_20260714" not in raw
+    assert "control_seed3_v3_20260715" not in raw
+    assert "w1_seed3_v3_20260715" not in raw
     assert len({job["run_name"] for job in queue["jobs"]}) == 2
     assert len({job["run_dir"] for job in queue["jobs"]}) == 2
     for job in queue["jobs"]:
