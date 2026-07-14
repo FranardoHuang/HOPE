@@ -13,6 +13,13 @@
 
 ## 2026-07-14
 
+- C2 的 31/31 非零摩擦根因已转成全新 C3/D3 显式零摩擦 L1 source gate：两格 fresh seed3 只差
+  signed-face guidance `0/-0.4`，同一 zero-friction leaf 被唯一绑定到 argv、optimization recipe、outer
+  claim、runtime marker、hard contract 和 checkpoint replay。专项 `38 passed`、完整回归
+  `972 passed, 10 skipped`；此条只表示 main source 可执行，Pod runtime/行为仍未通过。见
+  [实验](experiments/2026-07/EXP-P1-SIGNED-FACE-C3D3-ZERO-FRICTION-L1.md)与
+  [操作](operations/run_phase1_signed_face_c3d3_l1.md)。
+
 - 非击球臂 A0/A1 的 checkpoint 层已闭环：A1 自然退出；A0 在稳定写完 `model_1000.pt` 后发生近三小时
   Kit/Python teardown hang。终档 iteration/finite/fresh-lineage/hard binding 与正式 failure regex 先通过，
   精确单成员 PGID `1811464` 对 `TERM` 无响应后才被同 PGID `KILL`，未重启或重发。冻结 v1r1 finalizer

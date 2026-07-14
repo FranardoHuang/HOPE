@@ -1618,6 +1618,20 @@ C2 只保留为 nonconforming 根因证据，不能与正式零摩擦谱系混�
 `NO-LAUNCH`。下一次训练必须使用全新 C3/D3 namespace，并把同一零摩擦值同时绑定到 argv、optimization
 recipe、claim 和 emitted hard contract。该新 source/runtime 门通过前，G05 保持 `Partial`。
 
+### 2026-07-14 C3/D3 显式零摩擦 L1 source gate
+
+全新 C3/D3 prereg 不复用 C2/D2 的 run、claim、environment receipt 或 artifact root。两条都是 fresh
+seed3、`512 env × 25 update`；C3 guidance 为 `0`，D3 只把 signed-face guidance 改为 `-0.4`。manifest
+和 launcher 要求 `task.plant.zero_joint_friction=true` 在每条 argv 恰好出现一次，并逐层绑定到 outer
+optimization recipe、atomic claim、唯一 `ZERO_FRICTION_RUNTIME_OK` marker、31/31 finite-zero hard
+contract 以及 terminal checkpoint replay。任一层不一致永久停止该 namespace，不自动 retry。
+
+manifest/launcher SHA 为 `eefc8023...5dc2` / `19214890...a628`；`static-validate`、plan 与专项
+`38 passed`，完整 `tests/` 为 `972 passed, 10 skipped`。本节仍只有 E1 source 证据：Pod runtime、
+checkpoint、activation/judge/L2/第二 seed/晋级/真机全为 false。复现见
+[实验卷宗](../experiments/2026-07/EXP-P1-SIGNED-FACE-C3D3-ZERO-FRICTION-L1.md)与
+[操作文档](../operations/run_phase1_signed_face_c3d3_l1.md)，G05 继续 `Partial`。
+
 ### 2026-07-14 A0/A1 paired checkpoints complete，行为仍未判
 
 非击球臂 A1 自然退出；A0 在 `model_1000.pt` 稳定写完后发生 terminal teardown hang。终档 embedded

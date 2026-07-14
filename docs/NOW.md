@@ -56,9 +56,10 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   C2 虽自然终档，但 2026-07-14 的 v1r2 runtime gate 发现它**不是所声明的零摩擦配方**：manifest 写
   `zero_joint_friction=true`，实际 launch argv 没有 `task.plant.zero_joint_friction=true`，相邻 hard
   contract 的 31 个系数全为非零 PhysX 默认值。v1r2 在任何 attestation/claim/D2 run 前 fail closed；
-  D2 永久不续跑，C2 只保留为 nonconforming 根因证据。下一步是全新 namespace 的 C3/D3 L1 配对，
-  显式把零摩擦同时绑定到 argv、claim、optimization recipe 与 hard contract。它的 source gate 未合入
-  main 前，当前没有别的合法新 trainer；不能用旧 seed 或越级动作填槽。Franco
+  D2 永久不续跑，C2 只保留为 nonconforming 根因证据。全新 namespace 的 C3/D3 L1 source gate 已
+  进入 main，并显式把零摩擦同时绑定到 argv、claim、optimization recipe、runtime marker、hard
+  contract 与 checkpoint replay；下一步是 fresh Pod runtime preflight 后各发一次，不能用旧 seed 或
+  越级动作填槽。Franco
   定为 Pod1 每卡 `4` 个我们的 trainer、Pod2 每卡 `3` 个，为 Yikang 的最多一张卡留动态余量。新增任务
   先跨六张可用 GPU 各放一条，再开始第二/第三轮，Pod1 才有第四轮。空槽只给已过前置门且有预注册
   早判的不同机制，不复制失败
@@ -383,9 +384,9 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
 
 ### 尺子与阶段 1
 
-- **[2｜P0] 拍面正反与解析判分。** 责任人 franco；执行者 Codex；signed source gate 与 C2 终档已进
-  main 证据链；下一证据是先修复 v1r1 对真实五字段 train-bank contract 的假拒绝，再完成 D2 L1 与
-  fresh C/D 成对账，然后用一个 seed 跑“热启动/从零 × 线性引导
+- **[2｜P0] 拍面正反与解析判分。** 责任人 franco；执行者 Codex；C2 的真实非零 plant 已证伪旧配对，
+  D2 永久不发；下一证据是运行 main 上全新 C3/D3 显式零摩擦 L1 并形成 fresh paired receipt，然后用
+  一个 seed 跑“热启动/从零 × 线性引导
   关/开”四个机制单元到相对 checkpoint
   `+200/+500/+1000`。只有胜者连同匹配对照才解锁第二 seed，不再给已失败配方复制四 seed。
   [量尺实验](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)；
