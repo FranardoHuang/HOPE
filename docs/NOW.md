@@ -56,17 +56,17 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   C2 虽自然终档，但 2026-07-14 的 v1r2 runtime gate 发现它**不是所声明的零摩擦配方**：manifest 写
   `zero_joint_friction=true`，实际 launch argv 没有 `task.plant.zero_joint_friction=true`，相邻 hard
   contract 的 31 个系数全为非零 PhysX 默认值。v1r2 在任何 attestation/claim/D2 run 前 fail closed；
-  D2 永久不续跑，C2 只保留为 nonconforming 根因证据。全新 namespace 的 C3/D3 L1 source gate 已
-  进入 main，并显式把零摩擦同时绑定到 argv、claim、optimization recipe、runtime marker、hard
-  contract 与 checkpoint replay；下一步是 fresh Pod runtime preflight 后各发一次，不能用旧 seed 或
-  越级动作填槽。Franco
+  D2 永久不续跑，C2 只保留为 nonconforming 根因证据。全新 C3/D3 已在 Pod1 GPU1/GPU2 各只发一次并
+  自然到 `model_24.pt`；31/31 零摩擦、finite/iter24/lineage/claim/hard binding 与 paired receipt
+  `bb3cd749...bbde` 均通过。它只证明 L1 provenance，下一步是同一 immutable K100，不得重跑或直接
+  晋级 L2。Franco
   定为 Pod1 每卡 `4` 个我们的 trainer、Pod2 每卡 `3` 个，为 Yikang 的最多一张卡留动态余量。新增任务
   先跨六张可用 GPU 各放一条，再开始第二/第三轮，Pod1 才有第四轮。空槽只给已过前置门且有预注册
   早判的不同机制，不复制失败
   seed，也不拿未过动作安全门的任务凑数。
   signed-face exam bank 已过 E2：371 题 old/new replay 逐字节一致并发布新 bank/report；K100 paper
-  也已从 exact bank 物化为 100 个唯一题、正反手各 50 的 schedule 和 paper-only activation。它尚未绑定
-  checkpoint/evaluator execution contract，故 L2/judge/第二 seed/晋级仍阻断。
+  已物化为 100 个唯一题、正反手各 50。generic checkpoint attestor 已进入 main，但 C3/D3 actual
+  execution consumer 尚在收口，故 L2/judge/第二 seed/晋级仍阻断。
 - **Franco focus：** 五种动作的用途、动作专属来球题族、空挥视觉锚点和横移终态站距语义；反手拉
   B/C 先补证，高点拍压作为第五动作，v12 只作后续 Jiayi 对照。
 - **Jiayi focus：** v12/dang 路线与 planner-policy 契合；其候选必须在相同挡球专卷和厂商 MuJoCo 中

@@ -13,6 +13,11 @@
 
 ## 2026-07-14
 
+- C3/D3 在 Pod1 GPU1/GPU2 各只 claim 一次并自然到 `model_24.pt`；两条 hard-contract marker 与
+  31/31 实例化零摩擦 marker 均唯一，finite/iter24/fresh-lineage/outer-claim binding 通过。paired L1
+  receipt SHA `bb3cd749...bbde` 只闭合 provenance，不判 guidance 效果；不得重跑，K100/L2/第二 seed
+  继续阻断。见[实验](experiments/2026-07/EXP-P1-SIGNED-FACE-C3D3-ZERO-FRICTION-L1.md)。
+
 - C2 的 31/31 非零摩擦根因已转成全新 C3/D3 显式零摩擦 L1 source gate：两格 fresh seed3 只差
   signed-face guidance `0/-0.4`，同一 zero-friction leaf 被唯一绑定到 argv、optimization recipe、outer
   claim、runtime marker、hard contract 和 checkpoint replay。专项 `38 passed`、完整回归

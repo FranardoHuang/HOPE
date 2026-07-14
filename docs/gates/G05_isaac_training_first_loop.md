@@ -1632,6 +1632,13 @@ checkpoint、activation/judge/L2/第二 seed/晋级/真机全为 false。复现�
 [实验卷宗](../experiments/2026-07/EXP-P1-SIGNED-FACE-C3D3-ZERO-FRICTION-L1.md)与
 [操作文档](../operations/run_phase1_signed_face_c3d3_l1.md)，G05 继续 `Partial`。
 
+Runtime 随后在 Pod1 GPU1/GPU2 分别一次性启动 C3/D3。两条各自 hard marker 与 31/31
+`ZERO_FRICTION_RUNTIME_OK` marker 唯一，均自然到 finite/iter24/lineage1 `model_24.pt`；terminal SHA 为
+`8c579386...e8ef` / `ccb9933c...7f0e`。finalizer 证明两份 hard contract 除
+`racket_guidance_reward.signed_face.weight` 外逐值相同，并发布 paired receipt SHA
+`bb3cd749...bbde`。这把 L1 provenance 从 E1 提升到 E2，但仍无 K100 行为、L2、第二 seed 或晋级，
+所以 G05 保持 `Partial` 且 C3/D3 禁止重跑。
+
 ### 2026-07-14 A0/A1 paired checkpoints complete，行为仍未判
 
 非击球臂 A1 自然退出；A0 在 `model_1000.pt` 稳定写完后发生 terminal teardown hang。终档 embedded

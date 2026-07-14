@@ -1,8 +1,13 @@
 # 运行 signed-face C3/D3 显式零摩擦 L1
 
-状态：**source/static gate 已就绪；Pod runtime 尚未运行。** 本页只处理一对 fresh
+状态：**C3/D3 已自然终档并发布 paired L1 provenance receipt；禁止重跑。** 本页只处理一对 fresh
 [`L1`](../DEFINITIONS.md) 小臂：`C3` 是关闭有符号拍面引导的显式零摩擦对照，`D3` 只把引导权重改为
 `-0.4`。两格都是 seed3、`512 env × 25 update`；`L1` 仅是发射与合同冒烟，不是行为判卷。
+
+2026-07-14 实际运行的 exact PID=PGID 为 C3 `1856778`、D3 `1857599`；两条各自只出现一次 hard
+contract marker 和 31/31 zero-friction marker，均自然到 `model_24.pt` 后退出。C3/D3 terminal SHA 分别
+为 `8c579386...e8ef` / `ccb9933c...7f0e`，paired receipt SHA 为 `bb3cd749...bbde`。下列 launch 命令只
+保留复现审计，当前 namespace 不得再次执行；下一操作是独立 K100 attestation/execution。
 
 旧 C2 虽在 manifest 写了零摩擦，却没有在 argv 传
 `task.plant.zero_joint_friction=true`，实际 hard contract 的 31 个 PhysX 关节摩擦系数全部非零。

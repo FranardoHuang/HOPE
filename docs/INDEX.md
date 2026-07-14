@@ -53,8 +53,8 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | [`EXP-P1-FACE-PLANT-SCALEOUT`](experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md) | 16 条 fresh 广度臂已分两波全部精确停止并保留证据；旧 face×plant 矩阵不能选 baseline |
 | [`EXP-P1-FRESH-SZ-STABILITY`](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md) | 实验 completed/rejected；2k 与 4k 四 seed 稳定性都失败，seed4 持续弱；不晋级 baseline |
 | [`EXP-P1-FACE-SIGN-FORENSIC`](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md) | `n/-n` 源码负控与 pre-orient physical-B 门已实现；fresh canary/修正后同卷未跑，旧分不晋级 |
-| [`EXP-P1-SIGNED-FACE-RESCUE-FUNNEL`](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md) | E3 partial：C2 真实 plant 与零摩擦声明矛盾，D2 永久不发；下一证据改由全新 C3/D3 获取 |
-| [`EXP-P1-SIGNED-FACE-C3D3-ZERO-FRICTION-L1`](experiments/2026-07/EXP-P1-SIGNED-FACE-C3D3-ZERO-FRICTION-L1.md) | E1 source gate：零摩擦已贯穿 argv/recipe/claim/runtime marker/hard contract/checkpoint replay；Pod runtime 尚未执行 |
+| [`EXP-P1-SIGNED-FACE-RESCUE-FUNNEL`](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md) | C3/D3 显式零摩擦 L1 已配对终档；同卷 K100/L2 仍阻断 |
+| [`EXP-P1-SIGNED-FACE-C3D3-ZERO-FRICTION-L1`](experiments/2026-07/EXP-P1-SIGNED-FACE-C3D3-ZERO-FRICTION-L1.md) | E2 provenance：paired receipt `bb3cd749...bbde`；下一门是同一 immutable K100，不得重跑 |
 | [`EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND`](experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND.md) | E2 数据门通过：真实 371 题逐字节 replay 并发布 exact bank/report；新 schedule/paper activation/judge 继续阻断 |
 | [`EXP-P1-SIGNED-FACE-EXAM-PAPER`](experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-PAPER.md) | 新 bank 绑定的 K100 materializer/activation source gate 与攻击负测已通过；真实 private bank consume 未跑，所以 schedule/activation 尚不存在 |
 | [`EXP-P1-HISTORICAL-SCHEMA3`](experiments/2026-07/EXP-P1-HISTORICAL-SCHEMA3.md) | 同题同卷尺已可用于诊断排名；所有历史模型仍为 inexact |

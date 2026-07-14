@@ -1,6 +1,6 @@
 # EXP-P1-SIGNED-FACE-C3D3-ZERO-FRICTION-L1 — 显式零摩擦 L1 配对
 
-- 状态：`preregistered`
+- 状态：`L1 provenance complete / behavior pending`
 - 阶段/轴：阶段 1 / 有符号拍面引导
 - 集成小目标：得到一对配方、命令、实际 PhysX plant 与 checkpoint 谱系一致的 fresh L1 证据
 - 人类负责人：Franco
@@ -73,23 +73,24 @@
 
 | 运行（人话名 + `run_name`） | 状态 | Checkpoint/seed | 证据 | 结果产物 | 有效性说明 |
 | --- | --- | --- | --- | --- | --- |
-| 显式零摩擦 fresh 对照 `phase1_signed_face_l1_c3d3_v1_C3_fresh_control_seed3` | 未启动 | seed3 / 预期 `model_24.pt` | E1 source gate | 无 runtime 产物 | 只在 main source 与 fresh runtime preflight 通过后允许一次 claim |
-| 显式零摩擦 fresh 引导 `phase1_signed_face_l1_c3d3_v1_D3_fresh_guidance_seed3` | 未启动 | seed3 / 预期 `model_24.pt` | E1 source gate | 无 runtime 产物 | C3 runtime verified 后才可 claim；不要求 C3 先终档 |
+| 显式零摩擦 fresh 对照 `phase1_signed_face_l1_c3d3_v1_C3_fresh_control_seed3` | 自然终档 | seed3 / `model_24.pt` SHA `6b3e2cb1...70e7` | E2 runtime provenance | hard `d76dc944...ef2c`；terminal `8c579386...e8ef` | 31/31 零摩擦、finite/iter24/lineage1/claim binding 通过；尚未判 K100 |
+| 显式零摩擦 fresh 引导 `phase1_signed_face_l1_c3d3_v1_D3_fresh_guidance_seed3` | 自然终档 | seed3 / `model_24.pt` SHA `44c6117c...85b8` | E2 runtime provenance | hard `98f6468f...34f4`；terminal `ccb9933c...7f0e` | 同门通过；只与 C3 相差 signed-face weight，尚未判 K100 |
 
 ## 决定
 
 - 决定：`inconclusive`
-- 理由：source/static/攻击门已构建；尚未在 Pod 消费，故没有新 trainer、checkpoint 或行为结论。
+- 理由：Pod1 GPU1/GPU2 上两条都只 claim 一次、各自 hard/zero-friction marker 唯一并自然到 iter24；paired
+  receipt SHA `bb3cd749477861b1cd55f059ed3b23307784030dcad758db3a819c3c8a37bbde` 证明 provenance 完整，
+  但还没有同一 immutable K100 行为结果。
 - 是否已纳入当前 setting：`no`
-- 局限/下一个 gate：合入 main 后只读安装 exact control，先运行 `static-validate`、`plan` 和
-  `validate-runtime`；fresh absence/GPU 门通过后依次一次性 claim C3、D3。两格终档后仍须同一 immutable
-  signed-face paper execution 才能决定机制，不得从 L1 reward 曲线晋级。
+- 局限/下一个 gate：不得重跑 C3/D3；下一步只允许先由 generic checkpoint attestor 绑定两份终档，再用
+  同一 immutable signed-face K100 execution consumer 做 paired 行为判读。K100 前不得从 L1 reward 曲线
+  晋级 L2、第二 seed 或 stop/promote。
 
 ## 复现与证据
 
-操作真源：
-[运行 C3/D3 显式零摩擦 L1](../../operations/run_phase1_signed_face_c3d3_l1.md)。本分支没有 SSH、Pod
-安装、claim、trainer、judge 或真机命令。
+操作真源：[运行 C3/D3 显式零摩擦 L1](../../operations/run_phase1_signed_face_c3d3_l1.md)。Pod1 runtime
+使用文档中的 exact control/source 和一次性 root token；没有 judge、部署或真机命令。
 
 ```bash
 python3 scripts/run_phase1_signed_face_c3d3_l1.py --mode static-validate
