@@ -53,8 +53,10 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   canonical-beta `inspect/consume`，non-beta 内容逐 bit 不变。exact GMR runtime source gate 也已进入
   `main` 并通过全回归；Pod 上的 `inspect/consume` 尚未执行，所以还不是“动作会打球”。
 - **当前运行态：** 2026-07-15，V1+V2×base-decel 的 inference-counter 修复 source `2c2d70d...` 已通过
-  Pod2 GPU1 的 4096-env strict full-scene 自然终档门；control/treatment 以 fresh v4 namespace 分别 hard-bound
-  GPU1/GPU2 并变为 ready，GPU0 仍只留给 Yikang。此时尚未创建 science claim，且不授权第二 seed/judge/晋级。
+  Pod2 GPU1 的 4096-env strict full-scene 自然终档门；fresh v4 control/treatment 随后由同一次顺序 `fill`
+  分别在 GPU1/GPU2 越过首迭代，exact PGID=`380610/381237`，claim SHA-256=`576724de...a49d` /
+  `1a529430...4c5`。最近快照两臂到 iteration `25/11`、fatal0；GPU0 仍只有 Yikang。当前只授权这一个
+  seed 继续到 `+200/+500/+1000` 早判，不授权 judge、第二 seed或晋级。
 
   Fresh C 的五条单 seed 机制格均已越过 `+500` 且 checkpoint
   finite/contract/lineage 正确。V1+V2 出现当前最强击球精度信号（composite `0.0893`、normal pass

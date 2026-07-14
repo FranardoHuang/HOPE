@@ -2094,4 +2094,6 @@ GPU0/GPU2、GPU0/GPU2 独立任务仍可调度”、非 dispatch required slot�
 exact `2c2d70d...`，control/treatment 分别 required Pod2 GPU1/GPU2。唯一 fresh 4096-env probe 已完成两个
 update 并自然退出；finalizer 绑定 actual env、物理球/桌三实体、face179、31/31 零摩擦、schema-3、finite
 model、source/asset closure 与空 PGID，result file SHA-256 `4b12854c...0b27`。queue 已显式消费 receipt，
-`launch_authorized=true`、两臂 ready；尚无 science checkpoint 或 activation/行为结果，G05 继续 `Partial`。
+`launch_authorized=true`。同一次 `fill --count 2` 随后顺序发射 control/treatment：Pod2 GPU1/GPU2 exact
+PGID=`380610/381237`、claim=`576724de...a49d` / `1a529430...4c5`，均已越过首迭代，最近到 `25/11` 且
+fatal0；GPU0 仍只有 Yikang。尚无 milestone checkpoint 或 activation/行为结果，G05 继续 `Partial`。

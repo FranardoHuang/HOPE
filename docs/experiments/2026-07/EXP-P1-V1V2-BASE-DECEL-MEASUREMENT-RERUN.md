@@ -1,7 +1,7 @@
 # EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN — 补齐 activation 后重跑底座减速配对
 
-- 状态：`ready`（`0f3900a...` 的 probe 抓到 inference-counter logger 真 bug；修复源码 exact
-  `2c2d70d...` 的 fresh strict probe 已自然终档通过并被 queue 显式消费）
+- 状态：`running`（`0f3900a...` 的 probe 抓到 inference-counter logger 真 bug；修复源码 exact
+  `2c2d70d...` 的 fresh strict probe 已通过，单 seed v4 pair 已越过首迭代）
 - 阶段/轴：Phase 1 fresh C；组合击球精度下，底座减速是否有净收益
 - 集成小目标：保住击球精度信号，同时降低击球前底座速度与击球前摔倒率
 - 人类负责人：Franco
@@ -77,6 +77,21 @@ source/ignored asset closure、checkpoint filename=embedded iteration=`1`，以�
 
 queue 以这些 exact 字段把 `launch_authorized` 改为 true、两臂改为 ready；receipt 只授权这对 fresh v4
 science namespace，不是行为成绩。
+
+## Science pair 已顺序点火
+
+同一次 `fill --count 2` 先让 control 的 embedded preflight 与首迭代通过，再发 treatment；两臂都没有
+fallback 到 GPU0：
+
+| Arm | Pod/GPU | PID=PGID | claim content SHA-256 | 最近只读迭代 |
+| --- | --- | --- | --- | --- |
+| control，base-decel 关 | Pod2 GPU1 | `380610` | `576724deeeaf2386005e804fc5f2dc5600a7c63d104cb8f7c8f1f2f5131ba49d` | `25/1001` |
+| treatment，base-decel 权重 1 | Pod2 GPU2 | `381237` | `1a529430eda6f5d69636b8992fec7499867a7933760c231e6cd599b33dccd4c5` | `11/1001` |
+
+两份 trainer-owned binding 都指向 clean exact `2c2d70d...`、4096 environments、fresh checkpoint、相同
+schema-3 hard contract；最近日志 fatal scan 为零。treatment 的普通 weighted `base_decel` 已非零、control 为
+零，但这还不能替代 count-level denominator/numerator；必须等 `model_200` 后先 attest checkpoint，再从
+TensorBoard event 做 activation 算术闭合，最后才看行为差异。
 
 ## `0f3900a` strict probe 的两次不可覆盖负结果
 
@@ -174,10 +189,10 @@ fresh namespaces：
 
 | 运行 | 状态 | 证据 | 有效性 |
 | --- | --- | --- | --- |
-| measurement control，base-decel 关 | ready | exact `2c2d70d`、Pod2 GPU1；fresh strict probe passed | 可与 treatment 同一 fill 顺序发射 |
-| measurement treatment，base-decel 权重 1 | ready | exact `2c2d70d`、Pod2 GPU2；唯一 Reward 权重 delta | 可在 control 越过 first iteration 后发射 |
+| measurement control，base-decel 关 | running | PGID `380610`；claim `576724de...a49d` | 等 `model_200` attestation + activation |
+| measurement treatment，base-decel 权重 1 | running | PGID `381237`；claim `1a529430...4c5` | 等 `model_200` attestation + activation |
 
-- 决定：`inconclusive`；source/scene 门已过，尚无 replacement science runtime。
+- 决定：`inconclusive`；source/scene 门已过且 pair 正在运行，尚无有效 milestone 结论。
 - `0f3900a` 的 runtime logger 已证伪；`2c2d70d` 只解锁同配方单 seed pair，不追认任何 Reward 效果。
 - 本记录不建立算力优先级；是否排队仍只由 main 的 `docs/NOW.md` 统一队列决定。
 - 不授权 Isaac/MuJoCo judge、第二 seed、正式 setting、部署或真机。

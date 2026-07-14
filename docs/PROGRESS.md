@@ -13,6 +13,11 @@
 
 ## 2026-07-15
 
+- fresh v4 measurement control/treatment 已由同一次 `fill --count 2` 顺序发射：Pod2 GPU1/GPU2 exact
+  PGID=`380610/381237`，claim content SHA-256=`576724de...a49d` / `1a529430...4c5`，两臂均绑定 clean
+  `2c2d70d...`、4096 env、schema-3 hard contract并越过首迭代。最近只读快照为 iteration `25/11`、fatal0；
+  GPU0 的 Yikang trainer 保持原样。下一门是 `model_200` attestation 与 count-level activation 先判。
+
 - exact `2c2d70d...` 的唯一 4096-env full-scene probe 已在 Pod2 GPU1 完成两个 update 并自然退出；finalizer
   复核 actual env、物理球/桌三实体、face179、31/31 零摩擦、schema-3、76 tensors 全 finite、fatal0、
   source/asset closure 与空 PGID，result file SHA-256 `4b12854c...0b27`。queue 已显式消费 receipt，fresh v4
