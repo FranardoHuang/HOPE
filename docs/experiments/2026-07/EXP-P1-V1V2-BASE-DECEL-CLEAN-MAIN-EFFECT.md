@@ -1,6 +1,6 @@
 # EXP-P1-V1V2-BASE-DECEL-CLEAN-MAIN-EFFECT — 关闭随挥重放后只测底座减速
 
-- 状态：`running / model-200 exact；+200 direction gate failed`
+- 状态：`running to terminal / model-500 exact；treatment rejected by +500 screen`
 - 阶段/轴：Phase 1 fresh C；V1+V2 下的 base-decel 单变量主效应
 - 集成小目标：判断底座减速本身能否降低击球前底座速度和摔倒，同时不伤四项击球精度
 - 人类负责人：Franco
@@ -136,3 +136,29 @@ weighted Reward 每点为零、treatment 每点非零。
 因此 `+200` 方向门失败：treatment 没有降低底座速度，反而高 `5.14%`；两边精度零对零，pre-fall 又
 接近 100%，不能把非劣阈值的数值通过解释成行为收益。按冻结规则，`+200` 不 stop/promote；trainer
 继续到 `+500` 只为判断是否晚熟翻转，不买第二 seed、不 judge、不晋级。
+
+## `model_500` 与单 seed 因果 screen
+
+control/treatment checkpoint SHA-256 分别为 `3b67962f...9020` / `7cf137fe...0065`，receipt content
+SHA-256 为 `ba4b92c6...7dd6` / `a717e246...55c0`。两边 filename=embedded `500`、1,762,715 floating
+elements 全 finite、fresh lineage/claim/common hard contract `ca57a94f...cc2e` exact，trainer identity 仍
+匹配且 fatal=0。
+
+step 0–500 的 501 点 activation 全过：五个 post-swing counter 两臂每点全零；V1/V2 的 numerator 与
+denominator 逐点相等；base raw 三项每点为正；control weighted Reward 每点为零、treatment 每点非零。
+480–500 尾窗两臂 V2 也都有充分样本，不再有 +200 treatment 尾窗空洞。
+
+| 480–500 指标 | control | treatment | 差异 | +500 门 |
+| --- | ---: | ---: | ---: | --- |
+| 击球前底座速度 | `0.479838` | `0.545428` | `1.13669×` | **FAIL**，要求 `≤0.90×` |
+| pre-strike fall rate | `0.616979` | `0.584106` | `−0.032873` | PASS |
+| position pass | `0.621397` | `0.580054` | `−0.041343` | PASS，要求 `≥−0.05` |
+| velocity pass | `0.296915` | `0.403085` | `+0.106170` | PASS |
+| signed-face pass | `0.267027` | `0.100937` | `−0.166089` | **FAIL** |
+| composite pass | `0.088143` | `0.018723` | `−0.069420` | **FAIL** |
+| 解析合法回球 | `0.247710` | `0.122821` | `0.49583×` | 诊断明显退化 |
+
+这次不是零分母假象：尾窗 decayed exact-strike count 为 `1915.25/1466.06`。当前 weight=`1.0` 的
+base-decel 虽降低 fall、提高速度 pass，却让底座更快、signed face 与 composite 过门失败，并把解析回球
+压到约一半，故 +500 single-seed screen **reject treatment**。队列冻结 `stop_or_promote_allowed=false`，
+所以两臂继续到 +1000 只收 terminal diagnostic；拒绝结论不买第二 seed、不 judge、不做交互或晋级。

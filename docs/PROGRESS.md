@@ -13,6 +13,13 @@
 
 ## 2026-07-15
 
+- clean base-decel 的 `model_500` 两份 receipt/finite/fresh/claim/common hard exact，step 0–500 activation
+  全过且 480–500 尾窗两臂都有真实 V2/exact-strike 分母。treatment/control 底座速度=`1.13669×`
+  （FAIL `≤0.90×`）、signed-face pass 差=`−0.16609`、composite 差=`−0.06942`，解析回球降到
+  `0.49583×`；虽 pre-fall `−0.03287`、velocity pass `+0.10617`，当前 weight=`1.0` treatment 仍按
+  单 seed screen reject。按冻结合同 trainer 继续 +1000，只收终档，不买 seed/judge/晋级。见
+  [clean main-effect 卷宗](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-CLEAN-MAIN-EFFECT.md)。
+
 - Franco 反手拉 B 的 vendor L1 已在 Pod2 exact `main@7dec698` 闭环：runtime→GMR/MJCF 31-joint
   name permutation 修掉第二个 harness 假拒绝后，full `dry-run` 与唯一 `O_EXCL` audit 通过。1201 个
   400 Hz 有限样本自碰/`<5 mm` 自打/warning=`0/0/0`，最小余隙 `0.1382918358 m`；certificate

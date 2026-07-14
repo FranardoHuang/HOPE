@@ -46,6 +46,20 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-15, clean base-deceleration `+500` treatment rejected; Gate remains `Partial`):
+
+- Both model-500 checkpoints are finite and exact for filename/embedded iteration, fresh lineage,
+  claims and common schema-3 hard contract. Across steps 0--500 all disabled post-swing counters stay
+  zero; V1/V2 count equalities and raw/weighted base-deceleration activation pass, including active
+  V2 denominators in the frozen 480--500 window.
+- Treatment/control pre-strike base speed is `0.545428/0.479838 = 1.13669x` (fails `<=0.90x`), signed
+  face pass delta is `-0.16609`, composite pass delta `-0.06942`, and analytic return falls from
+  `0.24771` to `0.12282`. Lower pre-fall and better velocity pass do not compensate these three
+  preregistered failures. The current weight-1 treatment is rejected by the single-seed screen; the
+  frozen queue nevertheless continues both trainers to +1000 only for terminal diagnostics. No
+  second seed, judge, interaction or promotion is authorized. See
+  [the clean main-effect record](../experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-CLEAN-MAIN-EFFECT.md).
+
 Follow-up note (2026-07-15, clean base-deceleration `+200` direction gate failed; Gate remains `Partial`):
 
 - Control/treatment model-200 SHA-256 are `6cb55718...94f1` / `d61998ac...6892`; both receipts bind

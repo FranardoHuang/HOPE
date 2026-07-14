@@ -74,8 +74,11 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   `6cb55718...94f1` / `d61998ac...6892`。step 0–200 的五个 post-swing counter 在两臂每一点全零，
   raw base-decel 两边逐点激活且 weighted Reward 只在 treatment 非零；执行合同闭合。但 180–200
   冻结窗 treatment/control 的击球前底座速度=`0.75008/0.71340`（`1.05142×`），方向门要求
-  `≤1.00×`，因此 +200 失败；精度与解析回球全是零对零，pre-fall 又约 100%，不能解读为行为非劣。
-  按预注册继续到 +500 只看晚熟翻转，不停训、不买 seed、不 judge。这只回答底座减速本身，不冒充连续恢复。
+  `≤1.00×`，因此 +200 失败；+500 的有效尾窗随后给出可读负结果：treatment/control 底座速度
+  `0.54543/0.47984`（`1.13669×`）、signed-face pass `0.10094/0.26703`、composite
+  `0.01872/0.08814`、解析回球 `0.12282/0.24771`。虽 pre-fall 和 velocity pass 改善，三个预注册门
+  仍失败，当前 base-decel weight=`1.0` treatment 已 reject。队列规定不中停，所以只继续到 +1000
+  收 terminal diagnostic；不买 seed、不 judge。这只回答底座减速本身，不冒充连续恢复。
 
   Fresh C 的五条单 seed 机制格均已越过 `+500` 且 checkpoint
   finite/contract/lineage 正确。V1+V2 出现当前最强击球精度信号（composite `0.0893`、normal pass
