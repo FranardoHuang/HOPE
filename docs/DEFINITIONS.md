@@ -19,6 +19,9 @@
 | `setting` | 一整套可复现配方：动作、观测、reward、题库、plant、训练方法和裁决尺必须一起指定。只换一项就是新 setting。 |
 | `arm` / 实验臂 | 一条具体训练或对照配置，不是机器人的手臂。每条臂必须说清与对照相比只改了什么。 |
 | `run` | 某条实验臂的一次实际执行。同一实验可以有多个 run。 |
+| <a id="dispatch-pods"></a>`dispatch_pods` / 可发射 Pod 集合 | YAML 队列里唯一允许接收**新** trainer 的 Pod 名单。未列入的 Pod 可以只读旧 claim 来防重复，但调度器不得给它生成 assignment 或 launch。它表达当前资源归属，不改变每卡容量上限。 |
+| <a id="trainer-run-binding"></a>`run_binding.json` / trainer 运行绑定 | trainer 在自己确定真实 RSL log directory 后原子写出的不可覆盖 sidecar；把 queue claim、PID/PGID、进程 starttime、物理 GPU、source/argv 与真实日志/checkpoint 根绑定起来。外部脚本不得用时间戳或 stdout 猜目录。 |
+| <a id="milestone-attestor"></a>`milestone attestor` / 里程碑取证器 | 只沿已验证 `run_binding.json` 查找预注册 checkpoint，核对迭代号、finite、hard contract 和 launch lineage，再以 no-clobber 方式写证据；它不启动训练、不判卷，也不自动 stop/promote。 |
 | `PPO` | Proximal Policy Optimization，本项目使用的批量强化学习策略优化算法。测试/合同通过不等于 PPO 已实际训练。 |
 | `VecEnv` | vectorized environment，并行推进多个仿真环境的训练接口。只有配置或 preflight 时，不能写成 `VecEnv` backend 已实现。 |
 | `seed` | 随机种子。配方不变、只换 seed，用来看训练是否稳定，不许只挑最好的 seed。机制尚未成立时先用一个阻断 seed；第二 seed 只给胜者和匹配对照，`3–4` seed 只给正式候选。所有已运行 seed 仍须全量报告。 |

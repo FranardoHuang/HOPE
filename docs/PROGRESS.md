@@ -13,6 +13,11 @@
 
 ## 2026-07-14
 
+- qdot retry-v2 已在 Pod2 GPU2 通过 no-Kit doctor 与真实 `Learning iteration` boot marker；只读复核到
+  iter `79`，schema-2 claim digest、96 项实际 argv、`model_0.pt` finite、hard contract 与 fresh/claim
+  lineage 全匹配，fatal `0`。第一次 0-update 超时因此维持“基础设施失败”，不是 reward 失败；下一步补
+  同 source/seed 的 weight `0` 匹配对照。
+
 - Lean queue P0 已把重复/owned Hydra override、control flag/interpolation、run-dir 覆盖与未解析配方挡在
   claim 前；doctor 用真实最终 argv 做 no-Kit compose，schema-2 canonical claim 自动绑定 source、argv、
   预算和 motion/bank/exam identity。五机制 `+500` 中 V1+V2 出现 composite `0.0893` / normal pass

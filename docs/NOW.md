@@ -48,18 +48,22 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   `0.268`），但平衡债仍高；V2 单独格明显落后，已列为可替换且不复制 seed。base-decel、V1 和
   post-swing 保到 `+1000` 看权衡是否收敛。qdot-limit 第一次发射在第 0 update 的 A3 URDF import 阶段
   超时，launcher 只收口其 exact PGID；无 hard contract/model，因此是基础设施失败而非 reward 失败，
-  相同配方只允许在全新 retry-v2 namespace 重试。
+  全新 retry-v2 已通过 no-Kit compose 与真实 boot marker，并在 Pod2 GPU2 训练到 iter `79`：schema-2
+  claim 的 96 项 argv 与 `/proc` 逐项一致，`model_0.pt` finite、hard-contract/claim lineage 正确、fatal `0`。
+  它仍只是 treatment 已运行；同 source/seed 的 qdot weight `0` 匹配对照未完成前不得作因果采用。
 
   2026-07-14 19:00 CST 起 Pod1 全部留给 Yikang 冲刺：Codex 的 V1/V2/V1+V2 只对精确 PGID 发出
   `TERM`，分别停在 iter `792/782/743`，三条 `model_700.pt` 与日志完整保留，未进入 `KILL`；复核 Pod1
   三卡无 Codex compute process。Codex 后续只使用 Pod2；当前 GPU0/1 的 base-decel/post-swing 继续，
-  GPU2 是 qdot retry-v2 的唯一合法下一槽。机器可读 `dispatch_pods: [pod2]` 已使新 assignment 不可能
+  GPU2 正运行 qdot retry-v2。机器可读
+  [`dispatch_pods: [pod2]`](DEFINITIONS.md#dispatch-pods) 已使新 assignment 不可能
   落到 Pod1，同时只读旧 claim 防止重复发射。
 
   发射 harness 已在 `main` 收紧：YAML recipe 先拒绝重复/owned key 和 Hydra 控制语法，真实最终 argv 在
   claim 前做 no-Kit compose，run directory 原子创建，canonical claim digest 自动绑定 source/argv/
-  预算/motion/bank/exam 并进入 checkpoint provenance。下一闭环是 trainer-owned `run_binding.json`、
-  milestone attestor 和每个机制的 activation numerator/denominator。
+  预算/motion/bank/exam 并进入 checkpoint provenance。下一闭环是 trainer-owned
+  [`run_binding.json`](DEFINITIONS.md#trainer-run-binding)、
+  [milestone attestor](DEFINITIONS.md#milestone-attestor) 和每个机制的 activation numerator/denominator。
 
   非击球臂 A0/A1 已完成 checkpoint 层闭环。A1 自然退出；
   A0 的 `model_1000.pt` 写完后在 Kit/Python teardown 挂起近三小时，正式 failure regex 无命中，终档

@@ -1,8 +1,8 @@
 # Fresh C 单机制首轮消融（2026-07-14）
 
-状态：`Partial`。五个全新 `retry-v2` 已越过 `+500` 并持续训练；第六个 qdot-limit tail 的首次发射
-在第 0 update 的 A3 URDF import 阶段超时，属于基础设施失败，完整 namespace 已保留。相同配方的
-`retry-v2` 已预注册；尚无任何机制的行为晋级结论。
+状态：`Partial`。五个全新 `retry-v2` 已越过 `+500`；第六个 qdot-limit tail 的首次发射在第 0 update
+超时，完整 namespace 已保留。相同配方的 `retry-v2` 已在 Pod2 GPU2 正常进入训练并到 iter `79`；尚无
+任何机制的行为晋级结论。
 
 ## 问题与固定对照
 
@@ -108,6 +108,14 @@ launcher 按合同只终止该 PGID并返回 rc124；其余五臂未受影响。
 46 files / 15,378,264 bytes，逐相对路径与大小一致；因此这不能算 qdot reward 的科学失败，也不能复用
 旧 namespace。完全相同 recipe/source/seed/budget 的 `fresh_c_qdot_limit_hinge_w5_retry_v2` 是唯一允许的
 基础设施重试，并将首次使用 schema-2 canonical claim 与 no-Kit Hydra compose P0 harness。
+
+retry-v2 的运行复核：PID=PGID `326576`，queue claim digest
+`3910e3e20f44bad3871cd9c9fb4d0e024cbe5d9f48a8d1fc336d8082c4be8fb6`；外层 claim 的 96 项 argv 与
+`/proc` 逐项一致，真实 RSL directory 为
+`2026-07-14_11-05-03_phase1_fresh_c_qdot_hinge_w5_seed3_retry_v2_20260714`。到 iter `79` 时 fatal `0`；
+`model_0.pt` 的 76 个 tensor / 1,762,715 个浮点元素全部 finite，内嵌 iter `0`，hard contract、fresh
+lineage 与 claim SHA 全匹配。这里只证明 harness 与训练启动闭合；weight `0` 的同-source 匹配对照和
+`+200/+500/+1000` 早判仍缺。
 
 ## 发射 harness P0 收紧（尚未产生新 run）
 

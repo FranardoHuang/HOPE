@@ -1766,6 +1766,11 @@ asset/cache warmup 的 phase marker，因此 G05 保持 `Partial`。复现见
 停住，900 秒后由 launcher 精确终止 PGID `323083`；没有 hard contract/model，故只作基础设施失败，
 同 recipe 的全新 retry-v2 namespace 才允许重试。G05 仍为 `Partial`。
 
+qdot retry-v2 随后在 Pod2 GPU2 通过 no-Kit compose 和真实 boot marker，并到 iter `79`；schema-2 claim
+digest、96 项 `/proc` argv、`model_0.pt` finite、hard contract 与 fresh/claim lineage 全匹配，fatal `0`。
+它只关闭“机制能否真正进入训练”的运行门；未到 `+200`，且同 source/seed 的 weight `0` 对照未运行，
+不构成 reward 结论或晋级。
+
 资源边界随后切换为 Pod2-only：Pod1 的三条 Codex trainer 在 iter `792/782/743` 由 exact PGID `TERM`
 收口，`model_700.pt` 与日志保留，未发 `KILL`；Pod1 复核无 Codex compute process并全部交给 Yikang。
 active queue 的 `dispatch_pods: [pod2]` 是可执行合同，不依赖聊天记忆；旧 Pod1 claim 仍只读防重复。

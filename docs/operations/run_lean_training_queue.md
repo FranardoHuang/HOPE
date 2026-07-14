@@ -1,8 +1,8 @@
 # 轻量 YAML 训练队列
 
-状态：五个机制 `retry-v2` 已越过 `+500`；qdot attempt-1 在第 0 update 的 A3 URDF import 阶段超时并
-保全，只有全新 retry-v2 namespace 可再次调度。P0 harness 已强制 no-Kit Hydra compose、原子 run-dir
-与 canonical claim。G05 仍为 `Partial`，这不是行为晋级。
+状态：五个机制 `retry-v2` 已越过 `+500`；qdot attempt-1 在第 0 update 超时并保全，全新 retry-v2 已
+通过真实 boot marker 并到 iter `79`。P0 harness 已强制 no-Kit Hydra compose、原子 run-dir 与 canonical
+claim。G05 仍为 `Partial`，这不是行为晋级。
 
 这个入口解决的是“动作和题库已经决定后，为什么还要手拼一长串命令”。一条 YAML job 必须同时绑定：
 
@@ -11,7 +11,8 @@
 - 一个 clean Git source commit；
 - 公共 base recipe 与本臂唯一 delta；
 - seed、环境数/迭代预算、`+200/+500/+1000` checkpoint milestone；
-- 一个显式 `dispatch_pods` 调度集合与其 GPU round-robin 资源策略。
+- 一个显式 [`dispatch_pods` 可发射 Pod 集合](../DEFINITIONS.md#dispatch-pods)与其 GPU round-robin
+  资源策略。
 
 它是执行清单，不是第二份优先级账本。job 顺序必须抄自
 [`NOW` 统一队列](../NOW.md#统一工作队列唯一优先级账本)中已经解锁的项目；新科学问题仍先写对应实验记录。
