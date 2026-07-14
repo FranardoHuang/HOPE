@@ -30,6 +30,10 @@
   boot 上限的非科学冷启动探针，reserved Pod 与科学确认 token 均 fail closed；queue suite `23 passed`。
   尚未在 Pod 执行，不能写成 runtime 通过。
 
+- conditional source 的 Pod2 GPU1 `boot-warmup` 已自然退出并通过：2/2 updates，`model_0/1` 各 76 tensors/
+  1,762,715 floats 全 finite，embedded iter、schema3 contract、claim、fresh lineage 匹配，fatal0；明确
+  `not_science`，不进入成绩或晋级。
+
 - 通用 Kit launcher 新增默认 180 秒 content-bearing stale-log watchdog：增长重置、marker 优先，只精确
   收口自己的已验证 PGID并以 rc125/sidecar 留证；空日志仍走 hard timeout，stat 异常 fail closed。
   专项 `9 passed`、相关 retry/queue `50 passed`；它缩短卡死，不冒充 importer 根因修复。

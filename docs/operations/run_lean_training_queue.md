@@ -39,6 +39,9 @@ python3 scripts/run_lean_training_queue.py \
 出现 `Learning iteration` 只证明 importer/scene/simulation 能走通，仍须等 warmup exact PID 退出并核对无
 fatal，才可启动正式 control/treatment。warmup 的模型、Reward 与 checkpoint 一律不得进入成绩表。
 
+首次真实执行 `conditional_61007e9_gpu1_a1` 已按上述路径自然退出，2/2 updates、`model_0/1` finite、
+contract/claim/fresh lineage 匹配且 fatal0；该 receipt 只证明此 source/Pod2/GPU1 的 boot 路径。
+
 这个入口解决的是“动作和题库已经决定后，为什么还要手拼一长串命令”。一条 YAML job 必须同时绑定：
 
 - 一个动作名与它的一个或多个 motion 文件；

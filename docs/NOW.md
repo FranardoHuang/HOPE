@@ -58,6 +58,8 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   新 source 的正式 run 前现先走独立 `boot-warmup`（1 env×2 update、180 秒、非科学 namespace），避免再拿
   control/treatment 的证据目录承担冷缓存失败。
   通用 launcher 也已加入 180 秒日志无进展 watchdog；marker 优先，失败只收口自身 exact PGID并写 sidecar。
+  conditional source 的首个 Pod2 GPU1 warmup 已自然退出：2/2 updates、`model_0/1` finite、contract/claim/
+  fresh lineage 全匹配、fatal0；它只关闭冷启动门，不计实验成绩。
 
   2026-07-14 19:00 CST 起 Pod1 全部留给 Yikang 冲刺：Codex 的 V1/V2/V1+V2 只对精确 PGID 发出
   `TERM`，分别停在 iter `792/782/743`，三条 `model_700.pt` 与日志完整保留，未进入 `KILL`；复核 Pod1

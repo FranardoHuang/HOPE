@@ -67,6 +67,13 @@ machine prereg 已冻结为 source `61007e93879f35677e4c7d38cf7f681f324f9571`、
 
 两格同时显式把 qdot hinge weight 固定为 `0.0` / margin `0.85`，避免继承差异；其余 delta 完全相同。
 
+该 source 的独立 Pod2 GPU1 cold-boot warmup 已自然退出：claim
+`f10ed619e0b71a28a0b0b781d95f1e5508c9bcead5a6f82ca909affbfd527012` 明确
+`purpose=boot_warmup_not_science`、1 env×2 updates/save1；`model_0/1` 均为 76 tensors / 1,762,715 floats
+全 finite，embedded iter、schema3 contract `c39cf1ae...`、claim SHA 与 fresh lineage 全匹配，fatal0。
+它只证明该 source/host/GPU 的 importer→scene→simulation→first iteration 能闭合，不是 control 或 treatment
+已启动，更不是 Reward 结果。
+
 ## 不可补偿安全边界
 
 该项只返回非负 magnitude，再乘非正权重；它不会提供正安全信用，也不改 termination、自碰/自打、

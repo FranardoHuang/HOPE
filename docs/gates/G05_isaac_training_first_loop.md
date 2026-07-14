@@ -1784,6 +1784,10 @@ lean harness 因此新增默认不执行的 `boot-warmup` source gate：只从�
 claim/namespace、180 秒 boot 上限的非科学探针，reserved Pod 与科学确认 token 均不能授权它。聚焦 queue
 suite `23 passed`；尚未在 Pod 执行，所以这里只是 E1，不证明 importer 已稳定。
 
+随后 conditional source 在 Pod2 GPU1 的首个 warmup 自然退出并通过 2/2 updates；`model_0/1` finite，
+embedded iter、schema3 contract、claim 与 fresh lineage 匹配，fatal0，且 claim 明确 `not_science`。这把该
+source/host/GPU 的 cold-boot 门提升到 E2，但不构成 conditional control/treatment runtime 或行为证据。
+
 通用 Kit launcher 同时加入默认 180 秒 stale-log watchdog：只在日志非空后跟踪 size/mtime，增长即重置；
 marker 同 poll 优先，stale 时只收口已验证 pid=pgid 的自身进程组并写 sidecar，rc125；空日志保持 hard
 timeout rc124，stat 异常 rc126。专项 `9 passed`、相关 retry/queue `50 passed`。这缩短卡死占槽时间，不是
