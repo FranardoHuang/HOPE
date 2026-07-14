@@ -37,6 +37,12 @@
   ledger SHA `c0a25f2c...f4f8b`。只解锁 B 的 L0 静态证书；C 保持未消费后备，L1/桌网/动力学/RL/真机
   仍未授权。见[动作实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)。
 
+- B 反手拉的 [L0 静态审计](DEFINITIONS.md#motion-l0-static)已完成 source/static 门：exact prereg SHA
+  `6b0b9ccd...838b7`、validator SHA `4f2c9c23...e04405`，专项连同上游 schema-2 回归 `55 passed`，
+  全仓 `1018 passed, 10 skipped`。真实 B NPZ 的 runtime audit 尚未运行、没有 certificate，所以该子门
+  仍为 Partial，L1/桌网/动力学/RL/真机继续 blocked。见[实验](experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-L0.md)与
+  [操作](operations/run_motion_backhand_loop_b_l0_static.md)。
+
 - signed-face K100 的 generic checkpoint attestor 已完成 E1 source/static gate：每个 request 必须显式绑定
   checkpoint SHA/filename+embedded iteration/finite/fresh lineage、相邻 hard contract、producer claim、
   evaluator source+runtime、MJCF/plant 和 actual schedule/activation；同 checkpoint 只能写一个

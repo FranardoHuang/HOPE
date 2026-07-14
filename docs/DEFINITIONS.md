@@ -35,6 +35,7 @@
 | `v4rg_runtime_order_v3` | 当前 formal fresh setting 实际绑定的 v4rg 版本：schema-2、50 Hz，已迁移到 runtime body order。只写“v4rg”时只表示资产族，不足以复现 formal setting。 |
 | `legacy v4rg` | 迁移到 `v4rg_runtime_order_v3` 之前的旧资产/顺序；可用于 causal 历史诊断，不得冒充当前 fresh exact 动作。 |
 | `schema-2 motion` | 动作资产的第 2 版数据合同，包含 runtime 所需的关节/刚体顺序与元数据。 |
+| <a id="motion-l0-static"></a>motion `L0 static audit` / 动作 L0 静态审计 | 对 exact schema-2 动作做的纯 CPU 离散静态门：核对字段/顺序/finite/形状/时间、四元数、vendor MJCF 关节范围、逐帧 FK 与 root-foot 接地，但不调用 `mj_step` 或推进动力学。source/static gate 通过只说明计划、validator 和合成反例闭环；必须另有 exact 资产的 runtime certificate 才能声称 L0 runtime 通过。它不包含 vendor L1 自碰/自打、桌网扫掠、动力学、RL、Gate3 或真机，也不是 signed-face 的 L1/L2/L3 或证据等级 E1/E2/E3。 |
 | `schema-3 bank` | 题库和判卷的第 3 版合同：训练题与考试题分开，题序、分母、动作和 SHA 可绑定。它不是 schema-2 motion 的升级同一件事。 |
 | `q10` | 每个动作/侧各 10 题的快速方向卷；只看有没有苗头，不许据此停训或晋级。 |
 | <a id="q50-and-k100"></a>`q50` | 每个动作/侧至少 50 题的同卷决策考试。当本项目只考正手和反手时，合计通常是 100 次。 |

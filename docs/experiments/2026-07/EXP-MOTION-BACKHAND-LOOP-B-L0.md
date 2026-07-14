@@ -6,8 +6,8 @@
 - 执行者：Codex
 - 最高证据等级：E1（源码、合同与合成反例；尚无本门 runtime 结果）
 
-本文的 `L0` 指“完全不推进物理仿真的静态动作可行性审计”，不是训练层级；共享术语入口见
-[术语与人话对照](../../DEFINITIONS.md)，main 整合时仍需补一条正式定义。
+本文的 [`L0`](../../DEFINITIONS.md#motion-l0-static) 指“完全不推进物理仿真的静态动作可行性审计”，
+不是训练层级；source/static pass 也不等于真实资产已有 runtime certificate。
 
 ## 要回答的问题
 

@@ -1,7 +1,7 @@
 # 运行反手拉 B 的 CPU-only L0 静态审计
 
-这里的 `L0` 是“纯 CPU、零 dynamics step 的静态动作可行性审计”；共享术语入口见
-[术语与人话对照](../DEFINITIONS.md)，正式定义待 main 整合。权威实验边界见
+这里的 [`L0`](../DEFINITIONS.md#motion-l0-static) 是“纯 CPU、零 dynamics step 的静态动作可行性审计”；
+source/static pass 不等于真实资产已有 runtime certificate。权威实验边界见
 [EXP-MOTION-BACKHAND-LOOP-B-L0](../experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-L0.md)。
 
 ## 当前授权

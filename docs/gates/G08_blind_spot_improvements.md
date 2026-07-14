@@ -517,6 +517,17 @@ runtime/module-origin drift、缺失/伪造 NPZ，专项 `28 passed`、连同 pr
 Pod 执行，两个 output root absent、证书为 0；L0/L1、桌网、动力学、simulator/RL、正式动作和硬件仍
 全部 false，G08 仍是 Research track。
 
+其后 B 花掉唯一 v2 consume 并产出 exact runtime-order schema-2/FK 结果：151-frame NPZ、report、claim、
+completion-last success 的 SHA 分别为 `e2eb99e6...d28cc`、`4f524593...bc38`、
+`76e7ff88...fb0`、`c0a25f2c...f4f8b`，独立复核为 `runner_lineage=true`、`npz_bound=true`；C 仍保持
+未消费后备。B 的下一张 [动作 L0 静态审计](../DEFINITIONS.md#motion-l0-static)已完成 source/static
+门：exact prereg SHA `6b0b9ccd...838b7`、validator SHA `4f2c9c23...e04405`，专项连同上游 schema-2
+回归 `55 passed`，全仓 `1018 passed, 10 skipped`。**该 L0 子门状态仍为 Partial**：真实 B NPZ 的
+runtime audit 尚未运行、没有本门 certificate；source/static pass 不能写成 runtime pass。vendor L1
+自碰/自打、桌网扫掠、动力学、RL、Gate3 和真机继续全部 blocked。边界、冻结输入与未来一次性命令见
+[L0 实验卷宗](../experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-L0.md)和
+[L0 操作文档](../operations/run_motion_backhand_loop_b_l0_static.md)。
+
 S0/M0 的下一层 exact GMR 现已冻结成两批独立 machine plan。共享 consumer 不把 retarget body order 猜成
 canonical vendor body order，而是分开绑定两套 XML order，再用显式 31-joint bijection 接入 A3 FK。M0
 四条候选的人工 ready windows 已展开为 exact 30 Hz sample indices；结果将同时报告初末前后脚错位和横向
