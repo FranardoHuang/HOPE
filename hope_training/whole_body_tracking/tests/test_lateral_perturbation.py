@@ -301,6 +301,16 @@ def test_preregistered_train_and_eval_boundaries_are_machine_readable_and_blocke
     assert runtime_adapter[
         "scheduler_application_cache_is_private_and_every_public_ledger_return_is_a_deep_clone"
     ] is True
+    assert runtime_adapter["public_step_validated_before_adapter_access"] is True
+    assert runtime_adapter[
+        "wrench_derived_from_scheduler_private_canonical_clone"
+    ] is True
+    assert runtime_adapter[
+        "source_seam_prewrite_validation_has_one_host_visible_completion"
+    ] is True
+    assert runtime_adapter[
+        "runtime_unlock_requires_removing_that_sync_or_replacing_public_step_handoff"
+    ] is True
     assert {
         "hard_safety_identity_sha256",
         "actual_total_articulation_mass_after_randomization_kg",
@@ -1002,6 +1012,52 @@ def test_public_ledger_mutation_never_reaches_private_cache_or_duplicate_return(
         duplicate_tensor = getattr(duplicate, name)
         assert first_tensor.data_ptr() != duplicate_tensor.data_ptr(), name
         assert torch.equal(_tensor_bits(duplicate_tensor), bits), name
+
+
+def test_tampered_public_step_is_rejected_before_write_and_same_tick_can_retry():
+    scheduler = L.LateralPulseScheduler(
+        16,
+        _cfg(
+            policy_dt_s=0.04,
+            opportunity_interval_steps=1,
+            pulse_duration_steps=1,
+            normalized_impulse_min_mps=0.04,
+            normalized_impulse_max_mps=0.04,
+        ),
+        require_application_ack=True,
+    )
+    inputs = _inputs(16, 0)
+    public_result = scheduler.step(step_token=0, **inputs)
+    canonical_accel = public_result.normalized_accel_y_mps2.clone()
+    negative = torch.nonzero(canonical_accel < 0.0, as_tuple=False)
+    assert negative.shape[0] > 0
+    attacked_env = int(negative[0, 0])
+    public_result.normalized_accel_y_mps2[attacked_env] = 2.0
+    mass = torch.full((16,), 40.0, dtype=torch.float32)
+    adapter = _RecordingAdapter()
+
+    with pytest.raises(
+        RuntimeError,
+        match="application result does not match scheduler ledger field normalized_accel_y_mps2",
+    ):
+        _dispatch(scheduler, public_result, adapter, mass=mass)
+    assert adapter.calls == []
+    assert scheduler.cached_application_ledger(0) is None
+
+    retry_result = scheduler.step(step_token=0, **inputs)
+    assert torch.equal(retry_result.normalized_accel_y_mps2, canonical_accel)
+    ledger = _dispatch(scheduler, retry_result, adapter, mass=mass)
+    assert len(adapter.calls) == 1
+    assert torch.equal(
+        adapter.calls[0][1][:, 0, 1],
+        mass * canonical_accel.to(dtype=mass.dtype),
+    )
+    assert torch.equal(
+        ledger.commanded_normalized_accel_y_mps2,
+        canonical_accel.to(dtype=mass.dtype),
+    )
+    counters = scheduler.consume_counters()
+    assert counters["lateral_perturbation_wrench_write_step_count"].item() == 1
 
 
 def test_adapter_seam_writes_zero_after_pulse_and_accounts_once():

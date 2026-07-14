@@ -184,7 +184,11 @@
     "typed_receipt_must_echo_exact_mass_world_wrench_and_transform_identity": true,
     "adapter_receives_only_isolated_mass_force_and_torque_clones": true,
     "adapter_exception_or_rejection_must_leave_caller_tensors_bit_exact": true,
-    "scheduler_application_cache_is_private_and_every_public_ledger_return_is_a_deep_clone": true
+    "scheduler_application_cache_is_private_and_every_public_ledger_return_is_a_deep_clone": true,
+    "public_step_validated_before_adapter_access": true,
+    "wrench_derived_from_scheduler_private_canonical_clone": true,
+    "source_seam_prewrite_validation_has_one_host_visible_completion": true,
+    "runtime_unlock_requires_removing_that_sync_or_replacing_public_step_handoff": true
   },
   "runtime_unlock_gates": {
     "gpu_throughput": {

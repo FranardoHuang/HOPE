@@ -126,6 +126,14 @@ WORLD→BODY 变换、`write_data_to_sim` 时序、随机化后总质量读取�
   mass 与 scheduler step tensors 也必须逐 bit 不变，且同一步可安全换 reviewed adapter 重试。
 - scheduler 的 application ledger cache 永不直接公开：首次返回、显式 cache 查询和同一步 duplicate
   dispatch 每次都生成新的 tensor 深拷贝。调用者改坏任一返回 ledger 后，后续副本和计数仍须保持原值。
+- public step 中的 tensor 虽属于 frozen dataclass，内容仍可被外部改写；因此 dispatch 必须在读取任何
+  adapter 字段或计算 wrench **之前**，先把 public step 与 scheduler 私有 canonical step 全字段比较，
+  再只从私有 validated clone 派生 force。若比较失败，adapter call 必须严格为 0、application cache 仍空，
+  reviewed caller 可用同一 step token 取得未污染的 canonical clone 并安全重试。
+- CUDA 上的 async assert 不能保证 Python 在 device failure 可见前不调用 writer，因此当前 source seam 在
+  pre-write 比较使用一次 host-visible completion。这是正确性优先的 E1 实现，同时意味着它**尚未满足**
+  预注册的 hot-path no-host-sync 门；runtime 接线必须改成只传 scheduler-private command/capability 或移除
+  该同步，并通过同 GPU throughput 门，才能把 `launch_authorized` 改成 true。
 
 `L0` 必须有 eligible/selected，但 `applied_pulse_count=0`；`L1` 必须有非零 applied pulse。采样、命令和
 application 三本冲量账对不上时，结果无效而不是“近似通过”。
@@ -185,16 +193,17 @@ application 三本冲量账对不上时，结果无效而不是“近似通过�
   hope_training/whole_body_tracking/tests/test_lateral_perturbation.py
 ```
 
-当前 `26 passed`。测试覆盖：Random123 Philox 零 counter/key 已知向量、四个 domain 与相邻 seed 的分桶
+当前 `27 passed`。测试覆盖：Random123 Philox 零 counter/key 已知向量、四个 domain 与相邻 seed 的分桶
 均匀性和交叉相关性、`L0/L1` potential draw/SHA 完全相同、左右对称与幅度界、recovery/hold eligibility、
 strike skip、完整 pulse 冲量、reset 中断五项账、同一步幂等、漏步/漏 application receipt fail closed、
 按总质量缩放、质量/力/transform typed ledger，对极大 finite impulse、duration overflow、cast overflow、
 mass×acceleration overflow 和 force 上限的负测、X/Z force 与 torque 恒零，以及 pulse 后 full-batch 零写。
 另含 adapter 原地篡改/异常后的 caller bit-exact 不变量，以及公开 ledger 篡改无法污染私有 cache 的攻击
-回归。它不证明 simulator 真正执行了这些命令，也没有 GPU throughput 证据。
+回归；public normalized acceleration 被改写后会在 adapter 前拒绝，写入次数为 0，并允许同 tick 用私有
+canonical step 安全重试。它不证明 simulator 真正执行了这些命令，也没有 GPU throughput 证据。
 
-在最新 `origin/main@fbdad0d` 重放后，whole-body tracking 的 57 文件整合套件为
-`837 passed, 22 skipped, 3 failed`。三项失败是未改动路径中的既有主线基线：MotionLoader 对两个
+在最新 `origin/main@1d1eade` 重放后，whole-body tracking 的 57 文件整合套件为
+`838 passed, 22 skipped, 3 failed`。三项失败是未改动路径中的既有主线基线：MotionLoader 对两个
 `PosixPath` case 抛 `TypeError`，virtual scorer 的 `0.9999999999979997` 超出 `1e-12` 容差；同环境在
 `origin/main` 原样重跑三项均失败，且四个相关源码/测试文件相对 `origin/main` 无 diff。因此本 source
 gate 没有新增整合回归，但也没有顺手修改这三个不在本实验范围内的问题。

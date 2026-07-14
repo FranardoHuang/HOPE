@@ -1030,11 +1030,43 @@ class LateralPulseScheduler:
             "reset_abandoned_unapplied_impulse_y_mps",
             "remaining_steps_after_step",
         )
+        equality_predicates = []
         for name in comparable:
-            _assert_all_async(
-                getattr(last, name) == getattr(result, name),
-                f"application result does not match scheduler ledger field {name}",
-            )
+            canonical_tensor = getattr(last, name)
+            public_tensor = getattr(result, name)
+            if (
+                canonical_tensor.shape != public_tensor.shape
+                or canonical_tensor.dtype != public_tensor.dtype
+                or canonical_tensor.device != public_tensor.device
+            ):
+                raise RuntimeError(
+                    f"application result has the wrong tensor contract for field {name}"
+                )
+            equality_predicates.append(torch.all(canonical_tensor == public_tensor))
+        predicate_vector = torch.stack(equality_predicates)
+        # A physical writer cannot be protected by an asynchronous assertion: Python could call
+        # the adapter before a CUDA-side failure becomes host-visible.  This deliberate one-sync
+        # barrier is correctness-first and must be included in the pending GPU-throughput gate.
+        if not torch.equal(
+            predicate_vector,
+            torch.ones_like(predicate_vector, dtype=torch.bool),
+        ):
+            for name in comparable:
+                if not torch.equal(getattr(last, name), getattr(result, name)):
+                    raise RuntimeError(
+                        "application result does not match scheduler ledger field "
+                        f"{name}"
+                    )
+            raise RuntimeError("application result does not match scheduler ledger")
+
+    def _validated_private_result_clone(
+        self, result: LateralPerturbationStep
+    ) -> LateralPerturbationStep:
+        """Validate a public step, then return only scheduler-owned canonical data."""
+
+        self._validate_application_result(result)
+        assert self._last_result is not None
+        return self._last_result.clone()
 
     def acknowledge_application(
         self,
@@ -1246,6 +1278,12 @@ def dispatch_lateral_wrench_fail_closed(
     that prevents a completed pulse from becoming a persistent external force.
     """
 
+    # This must happen before even inspecting the adapter.  The public dataclass is frozen, but its
+    # tensors are mutable; deriving a wrench from it before comparison would let an attacker cause
+    # a physical write and only then trip the acknowledgement check.  All command derivation below
+    # uses the scheduler-owned canonical clone returned here.
+    canonical_result = scheduler._validated_private_result_clone(result)
+
     required_adapter_fields = {
         "body_name": scheduler.cfg.body_name,
         "input_force_frame": scheduler.cfg.force_frame,
@@ -1271,7 +1309,7 @@ def dispatch_lateral_wrench_fail_closed(
             "lateral wrench adapter must expose a lowercase SHA-256 transform identity"
         )
     force_w, torque_w = lateral_world_wrench_from_total_mass(
-        result.normalized_accel_y_mps2, total_mass_kg
+        canonical_result.normalized_accel_y_mps2, total_mass_kg
     )
     _assert_all_async(
         (force_w[:, :, 0] == 0.0)
@@ -1279,15 +1317,16 @@ def dispatch_lateral_wrench_fail_closed(
         & torch.all(torque_w == 0.0, dim=-1),
         "lateral wrench kernel emitted forbidden X/Z force or torque",
     )
-    cached = scheduler.cached_application_ledger(result.step_token)
+    cached = scheduler.cached_application_ledger(canonical_result.step_token)
     if cached is not None:
-        scheduler._validate_application_result(result)
         if cached.world_to_backend_transform_identity_sha256 != transform_identity:
             raise RuntimeError("same-step dispatch reused a different transform identity")
         cached_tensors = {
             "actual_total_mass_kg": total_mass_kg,
-            "commanded_normalized_accel_y_mps2": result.normalized_accel_y_mps2.to(
-                dtype=total_mass_kg.dtype
+            "commanded_normalized_accel_y_mps2": (
+                canonical_result.normalized_accel_y_mps2.to(
+                    dtype=total_mass_kg.dtype
+                )
             ),
             "commanded_world_force_y_N": force_w[:, 0, 1],
             "commanded_world_impulse_y_Ns": (
@@ -1317,7 +1356,7 @@ def dispatch_lateral_wrench_fail_closed(
     adapter_force_w = expected_force_w.clone()
     adapter_torque_w = expected_torque_w.clone()
     receipt = writer(
-        step_token=result.step_token,
+        step_token=canonical_result.step_token,
         total_mass_kg=adapter_total_mass_kg,
         force_w=adapter_force_w,
         torque_w=adapter_torque_w,
@@ -1325,7 +1364,7 @@ def dispatch_lateral_wrench_fail_closed(
     if not isinstance(receipt, LateralWrenchWriteReceipt):
         raise RuntimeError("lateral wrench adapter returned no typed write receipt")
     return scheduler.acknowledge_application(
-        result,
+        canonical_result,
         receipt,
         expected_total_mass_kg=expected_total_mass_kg,
         expected_force_w=expected_force_w,
