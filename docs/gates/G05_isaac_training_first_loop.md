@@ -46,6 +46,18 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-15, clean base-deceleration main effect preregistered; Gate remains `Partial`):
+
+- The invalid pair mixed base deceleration with a post-swing buffer whose readiness depends on policy
+  survival. A fresh single-seed pair now disables post-swing replay in both arms and changes only
+  `base_decel_weight=0/1`; all five replay counters must remain zero on every update before behavior
+  may be compared. New job, run and claim namespaces are hard-bound to Pod2 GPU1/GPU2.
+- The queue reuses the exact `2c2d70d...` 4096-env terminal probe only as source/scene/checkpoint-wiring
+  evidence, not as scientific recipe or behavior evidence. Launch still requires fresh final-argv
+  compose, clean source, absent run directories and each arm's own first iteration. No second seed,
+  judge or promotion is authorized. See
+  [the clean main-effect record](../experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-CLEAN-MAIN-EFFECT.md).
+
 Follow-up note (2026-07-15, fresh v4 `+500` matched-activation failure; Gate remains `Partial`):
 
 - Both model-500 checkpoints pass filename/embedded iteration, finite, fresh-lineage, claim and common

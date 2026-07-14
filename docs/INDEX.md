@@ -57,6 +57,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | [`EXP-P1-FACE-SIGN-FORENSIC`](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md) | `n/-n` 源码负控与 pre-orient physical-B 门已实现；fresh canary/修正后同卷未跑，旧分不晋级 |
 | [`EXP-P1-REWARD-PHYSICAL-TRUTH-AUDIT-20260715`](experiments/2026-07/EXP-P1-REWARD-PHYSICAL-TRUTH-AUDIT-20260715.md) | source/config 审计完成：现役同时使用目标匹配与 achieved-state 解析过网/落台 Reward；Phase-A engine-integrated ball 仍 metrics-only 且无拍球冲量 |
 | [`EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN`](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md) | model500 身份通过，但 control/treatment 的 post-swing cold-start 在冻结窗分叉；+500 activation-invalid，已停止并转共享 natural-wrap teacher receipt 修复 |
+| [`EXP-P1-V1V2-BASE-DECEL-CLEAN-MAIN-EFFECT`](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-CLEAN-MAIN-EFFECT.md) | 关闭已证实内生污染的 post-swing replay，只用单 seed 比较 V1+V2 下 base-decel `0/1`；Pod2 GPU1/2 新 namespace 已预注册 |
 | [`EXP-P1-SIGNED-FACE-RESCUE-FUNNEL`](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md) | C3/D3 显式零摩擦 L1 已配对终档；同卷 K100/L2 仍阻断 |
 | [`EXP-P1-SIGNED-FACE-C3D3-ZERO-FRICTION-L1`](experiments/2026-07/EXP-P1-SIGNED-FACE-C3D3-ZERO-FRICTION-L1.md) | E2 provenance：paired receipt `bb3cd749...bbde`；下一门是同一 immutable K100，不得重跑 |
 | [`EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND`](experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND.md) | E2 数据门通过：真实 371 题逐字节 replay 并发布 exact bank/report；新 schedule/paper activation/judge 继续阻断 |

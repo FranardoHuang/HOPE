@@ -1,0 +1,346 @@
+schema_version: 1
+simulation_only: true
+launch_authorized: true
+preregistration_status: exact_source_scene_gate_reused_post_swing_disabled_clean_main_effect
+
+ssh:
+  key: ~/.ssh/id_ed25519_runpod
+
+pods:
+  pod1:
+    host: 162.43.172.171
+    port: 18333
+    gpus: [0, 1, 2]
+    max_trainers_per_gpu: 4
+  pod2:
+    host: 162.43.172.181
+    port: 13146
+    gpus: [0, 1, 2]
+    max_trainers_per_gpu: 3
+
+# Pod1 is reserved for Yikang.  Keeping it in the fixed harness schema does not
+# authorize a snapshot, claim, probe, or launch there.
+dispatch_pods: [pod2]
+
+shared_control:
+  human_name: fresh C V1 plus V2 clean base-deceleration main effect with post-swing replay disabled
+  initialization: fresh
+  seed: 3
+  num_envs: 4096
+  max_iterations: 1001
+  save_interval: 100
+  milestones: [200, 500, 1000]
+  signed_face_guidance_weight: 0.0
+  comparison_status: exact_same_source_matched_pair_required
+
+# Source 2c2d70d already passed a 4096-env full-scene terminal probe and then
+# produced finite model-200/model-500 checkpoints on this exact Pod.  This queue
+# reuses only that source/scene boot evidence.  It disables post-swing replay in
+# both arms to remove the endogenous cold-start path; no old behavior result is reused.
+instrumentation_closure:
+  telemetry_reference_source_commit: 312669c7bd61f8fc8f5ea99c8e94cfc3ffae9b94
+  required_main_hardening_commit: f00c49779174fdf43f861a29ceda0f985be04f31
+  telemetry_reference_contains_required_main_hardening: false
+  failed_runtime_source_commit: 0f3900a612863faf326dca6ad3e8d38bfe8df3c9
+  successor_source_commit: 2c2d70d6d0ccf7b0757aac4dd8e575c2e077607e
+  successor_contains_required_main_hardening: true
+  inference_mode_counter_reset_fix_in_successor: true
+  hard_slot_scheduler_commit: 8b0a08414aef390d3b45664c2cd3746e87453fff
+  source_rebind_required_before_launch: false
+  strict_full_scene_terminal_probe_required_after_rebind: true
+  strict_full_scene_terminal_probe_satisfied: true
+  available_post_swing_replay_metrics:
+    buffer_not_ready: Live/motion/post_swing_replay_buffer_not_ready_reset_count
+    eligible_denominator: Live/motion/post_swing_replay_eligible_reset_count
+    random_not_selected: Live/motion/post_swing_replay_random_not_selected_reset_count
+    selected_numerator: Live/motion/post_swing_replay_selected_reset_count
+    started_numerator: Live/motion/post_swing_replay_started_reset_count
+  successor_runtime_metrics:
+    v1_free_wrist_linear_velocity:
+      eligible_denominator: Live/motion/v1_velocity_mimic_eligible_sample_count
+      exclusion_numerator: Live/motion/v1_held_wrist_excluded_sample_count
+    v2_strike_window_imitation_scale:
+      eligible_denominator: Live/motion/v2_strike_window_eligible_imitation_sample_count
+      scaled_window_numerator: Live/motion/v2_quarter_scaled_strike_window_imitation_sample_count
+    base_deceleration:
+      sampling_phase: reward_manager_before_reset_and_command
+      probe_weight: 1.0
+      probe_return: exact_zero_per_environment
+      eligible_denominator: Live/racket_target/base_decel_eligible_sample_count
+      raw_kernel_sum: Live/racket_target/base_decel_raw_kernel_sum
+      raw_kernel_nonzero_numerator: Live/racket_target/base_decel_raw_kernel_nonzero_sample_count
+  existing_base_deceleration_metrics:
+    weighted_reward_mean: Live/Reward/base_decel
+    zero_masked_speed_mean: Live/racket_target/base_speed_xy_prestrike
+    sufficient_for_activation: false
+    reason: neither existing mean exposes the pre-strike and not-in-hold eligible sample denominator
+
+strict_full_scene_probe_evidence:
+  attempt_id: inferencefix_2c2d70d_pod2_gpu1_a1
+  pod: pod2
+  gpu: 1
+  result_path: /workspace/codexschema/phase1_fresh_c_v1v2_base_decel_measurement_rerun_20260715/runs/_full_scene_probes/fresh_c_v1v2_base_decel_measurement_control_v4/2c2d70d6d0ccf7b0757aac4dd8e575c2e077607e/pod2/gpu1/inferencefix_2c2d70d_pod2_gpu1_a1/probe_result.json
+  result_file_sha256: 4b12854c5deca075ddf886fea3c5806aa0838b1d2bc9d3739e2fa13cd1840b27
+  result_content_sha256: 4cbc9fc0bf7a5e5bdc5dfaa06386463e325dab141945344d0b0064b1b55fb083
+  claim_content_sha256: 52298bf11cb16e11cd67a198ca713c542423d576d1052e4178e42868b9bcfb9f
+  checkpoint_sha256: 68d9809bdc29c041a21fe775006adeafeacf6ff0a1d7b86cbbfe7bd042598713
+  hard_contract_sha256: 451cda47227f8e78e4f3dcae3cbf22d7ddf88b4c5fbaf348e698963d8bc12291
+  source_asset_receipt_sha256: bf6aa5d922a628f398a6b27d4e37e4440f08e15dda4b8234781f0b0a396c5b6d
+  actual_num_envs: 4096
+  physical_ball_enabled: true
+  physical_scene_entities: [pb_ball, pb_table, pb_table_visual]
+  embedded_iteration: 1
+  nonfinite_floating_elements: 0
+  isolated_process_group_empty: true
+  terminal_status: passed
+  unlock_authorized: true
+  reuse_scope: source_scene_boot_and_checkpoint_wiring_only
+  scientific_recipe_identity_reused: false
+  post_swing_setting_covered_by_probe: false
+
+decision_contract:
+  evidence_scope: paired_training_diagnostics_only
+  aggregation: trailing_21_updates_at_each_milestone
+  activation_must_precede_behavior_comparison: true
+  missing_activation_makes_run: invalid_instrumentation_blocked
+  activation:
+    post_swing_replay_disabled:
+      setting: 0.0
+      reason: isolate_base_deceleration_main_effect_from_endogenous_natural_wrap_buffer_readiness
+      tensorboard_metrics:
+        buffer_not_ready: Live/motion/post_swing_replay_buffer_not_ready_reset_count
+        eligible_denominator: Live/motion/post_swing_replay_eligible_reset_count
+        random_not_selected: Live/motion/post_swing_replay_random_not_selected_reset_count
+        selected_numerator: Live/motion/post_swing_replay_selected_reset_count
+        started_numerator: Live/motion/post_swing_replay_started_reset_count
+      all_five_counters_must_equal_zero_every_update: true
+      any_nonzero_counter_invalidates_milestone: true
+    v1_free_wrist_linear_velocity:
+      setting: true
+      telemetry_status_in_successor_source: instrumented_probe_pending
+      eligible_denominator_metric: Live/motion/v1_velocity_mimic_eligible_sample_count
+      exclusion_numerator_metric: Live/motion/v1_held_wrist_excluded_sample_count
+      eligible_denominator_must_be_positive: true
+      exclusion_numerator_must_be_positive: true
+      exclusion_must_equal_eligible: true
+    v2_strike_window_imitation_scale:
+      setting: 0.25
+      telemetry_status_in_successor_source: instrumented_probe_pending
+      counting_unit: imitation_reward_term_x_environment_sample
+      eligible_denominator_metric: Live/motion/v2_strike_window_eligible_imitation_sample_count
+      scaled_window_numerator_metric: Live/motion/v2_quarter_scaled_strike_window_imitation_sample_count
+      eligible_denominator_must_be_positive: true
+      scaled_window_numerator_must_be_positive: true
+      scaled_window_must_equal_eligible: true
+    base_deceleration:
+      telemetry_status_in_successor_source: instrumented_probe_pending
+      denominator_definition: pre_strike_and_not_in_hold_environment_samples_observed_every_reward_manager_step_before_reset_and_command
+      eligible_denominator_metric: Live/racket_target/base_decel_eligible_sample_count
+      raw_kernel_sum_metric: Live/racket_target/base_decel_raw_kernel_sum
+      raw_kernel_nonzero_numerator_metric: Live/racket_target/base_decel_raw_kernel_nonzero_sample_count
+      existing_weighted_reward_metric: Live/Reward/base_decel
+      raw_kernel_nonzero_must_not_exceed_eligible: true
+      control:
+        weight: 0.0
+        eligible_denominator_must_be_positive: true
+        raw_kernel_sum_must_be_positive: true
+        raw_kernel_nonzero_numerator_must_be_positive: true
+      treatment:
+        weight: 1.0
+        eligible_denominator_must_be_positive: true
+        raw_kernel_sum_must_be_positive: true
+        raw_kernel_nonzero_numerator_must_be_positive: true
+  milestone_rules:
+    200:
+      purpose: direction_only_after_all_activation_and_finite_checks
+      base_speed_xy_prestrike_treatment_over_control_max: 1.0
+      pre_fall_rate_treatment_minus_control_max: 0.05
+      precision_pass_rate_treatment_minus_control_min: -0.10
+      stop_or_promote_allowed: false
+    500:
+      purpose: causal_screen_after_all_activation_and_finite_checks
+      base_speed_xy_prestrike_treatment_over_control_max: 0.90
+      pre_fall_rate_treatment_minus_control_max: 0.02
+      precision_pass_rate_treatment_minus_control_min: -0.05
+      stop_or_promote_allowed: false
+    1000:
+      purpose: terminal_training_diagnostic_after_all_activation_and_finite_checks
+      base_speed_xy_prestrike_treatment_over_control_max: 0.90
+      pre_fall_rate_treatment_minus_control_max: 0.02
+      precision_pass_rate_treatment_minus_control_min: -0.05
+      stop_or_promote_allowed: false
+  precision_pass_rates:
+    - racket_position_pass
+    - racket_velocity_pass
+    - signed_racket_normal_pass
+    - strike_composite_pass
+  second_seed_authorized: false
+  judge_authorized: false
+  promotion_authorized: false
+
+x-action: &action signed_face_v4rg_shared_face
+x-motion: &motion
+  action: signed_face_v4rg_shared_face
+  bindings:
+    motion_file: /workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_forehand_v4rg_cal.npz
+    motion_file_2: /workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_backhand_v4rg_cal.npz
+x-bank: &bank
+  action: signed_face_v4rg_shared_face
+  train_path: /workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_bank_rebind_v2/s1_v4rg_runtime_order_schema3_train_882fea4_rebound.npz
+  train_arg: ++task.racket.question_bank
+x-exam: &exam
+  action: signed_face_v4rg_shared_face
+  path: /workspace/codexschema/phase1_signed_face_rescue_20260713/papers/signed_face_exam_k100_v1/signed_face_exam_k100.schedule.json
+  family: signed_face_rebound_k100_v1
+
+# Exact inference-reset successor.  Its own immutable strict full-scene probe
+# above passed before the two science rows were changed to ready.
+x-source: &source
+  checkout: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d
+  commit: 2c2d70d6d0ccf7b0757aac4dd8e575c2e077607e
+  ignored_runtime_asset:
+    target_relative_path: hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
+    donor:
+      checkout: /workspace/codexschema/nohope
+      commit: 6d93bcb16c422a2f42748c2dc99432559653480b
+      relative_path: hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
+    file_count: 46
+    total_file_bytes: 15378264
+    tree_content_sha256: 0137f59b1fe45e7d5f8fa731bedca905f5466bc98e8d1354081fe071d60426c6
+    symlinks_forbidden: true
+    target_must_be_gitignored: true
+
+x-base: &base
+  - task=HOPEPingPongVirtualBall
+  - algo=ppo
+  - headless=true
+  - logger=tensorboard
+  - video=false
+  - task.actor_obs_contract=deploy_parity_face179
+  - task.env.episode_length_s=10.0
+  - task.sim.dt=0.005
+  - task.sim.decimation=4
+  - task.actions.qdes_clamp=true
+  - task.plant.zero_joint_friction=true
+  - task.motion.wrap_teleport=false
+  - task.motion.stand_start_prob=0.25
+  - task.motion.hold_steps_range=[0,100]
+  - task.motion.stand_start_min_hold=25
+  - task.motion.post_swing_buffer_size=4096
+  - task.motion.post_swing_min_fill=256
+  - task.motion.post_swing_min_hold=25
+  - task.motion.clip_switch_prob=0.0
+  - task.motion.speed_scale_range=[1.0,1.0]
+  - ++task.motion.rsi_skip_settle_frames=0
+  - ++task.motion.rsi_hold_root_stand_z=false
+  - ++task.motion.stagger_initial_clock=false
+  - ++task.motion.stagger_hold_max_steps=150
+  - ++task.racket.question_bank_allow_legacy=false
+  - ++task.racket.face_command=true
+  - ++task.racket.face_command_obs=true
+  - ++task.racket.station_obs=false
+  - ++task.racket.mount_normal_sign_per_clip=[1.0,-1.0]
+  - task.racket.target_mode=uniform
+  - task.racket.normal_mode=velocity
+  - task.racket.adaptive_sigma=true
+  - task.racket.target_delay_steps=2
+  - task.racket.target_jitter_pos_per_s=0.0
+  - task.racket.target_jitter_vel_per_s=0.0
+  - task.racket.target_noise_white=0.0019
+  - task.racket.target_noise_ar1_sigma=0.0052
+  - task.racket.target_noise_ar1_rho=0.717
+  - task.racket.target_dropout_prob=0.0
+  - task.racket.target_post_strike_dropout_s=0.0
+  - task.racket.target_bias_per_swing=0.0
+  - task.racket.midswing_resample_prob=0.0
+  - task.racket.midswing_resample_tts_floor=0.3
+  - task.racket.vb_spin_mode=minimize
+  - task.racket.vb_metrics_only=true
+  - ++task.racket.rally_legacy_metrics=true
+  - task.racket.achieved_target_mix_prob=0.30
+  - task.racket.achieved_buffer_size=4096
+  - task.racket.achieved_min_fill=256
+  - task.racket.achieved_jitter_pos=0.03
+  - task.racket.achieved_jitter_vel=0.15
+  - task.racket.achieved_clamp_inflate=0.20
+  - task.racket.clean_reference_strike_velocity=true
+  - task.racket.clean_strike_vel_window=2
+  - task.racket.strike_window_s=0.12
+  - task.racket.strike_success_pos_thresh=0.075
+  - ++task.physical_ball=true
+  - task.rewards.racket_position_weight=14.0
+  - task.rewards.racket_position_std=0.2
+  - task.rewards.racket_velocity_weight=10.0
+  - task.rewards.racket_velocity_std=1.0
+  - task.rewards.racket_normal_weight=5.0
+  - task.rewards.racket_normal_std=0.3
+  - task.rewards.foot_orientation_weight=-0.3
+  - task.rewards.free_wrist_ori_mimic=true
+  - ++task.motion.allow_legacy_link_origin_velocity=false
+  - ++task.motion.event_timing_mode=disabled
+  - task.racket.strike_phase_per_clip=[0.471,0.338]
+  - ++task.racket.face_command_pairing=shared_plus_y
+  - ++task.rewards.racket_guidance_weight=0.0
+  - ++task.rewards.racket_face_guidance_weight=0.0
+  - ++task.rewards.racket_face_guidance_theta_max=3.141592653589793
+  - checkpoint_path=null
+  - checkpoint_tolerant=false
+  - checkpoint_allow_missing_contract=false
+  - checkpoint_allow_contract_mismatch=false
+  - ++kit_carb_tasking_thread_count=16
+  - ++kit_tbb_thread_count=16
+x-budget: &budget
+  num_envs: 4096
+  max_iterations: 1001
+  save_interval: 100
+x-milestones: &milestones [200, 500, 1000]
+
+jobs:
+  - &control
+    id: fresh_c_v1v2_base_decel_clean_control_v1
+    human_name: fresh C V1 plus V2 clean main-effect control with base deceleration off and post-swing disabled
+    action: *action
+    status: ready
+    blocker: null
+    motion: *motion
+    bank: *bank
+    exam: *exam
+    source: *source
+    runtime_binding: true
+    recipe:
+      base: *base
+      delta:
+        - ++task.rewards.free_wrist_vel_mimic=true
+        - ++task.rewards.motion_scale_in_window=0.25
+        - task.rewards.base_decel_weight=0.0
+        - task.motion.post_swing_start_prob=0.0
+        - task.rewards.joint_velocity_limit_hinge_weight=0.0
+        - task.rewards.joint_velocity_limit_hinge_margin=0.85
+        - ++task.rewards.racket_face_conditional_guidance_weight=0.0
+    seed: 3
+    budget: *budget
+    milestones: *milestones
+    resource:
+      policy: dispatch_gpu_round_robin
+      required_slot: pod2/gpu1
+    run_name: phase1_fresh_c_v1v2_base_decel_clean_control_seed3_v1_20260715
+    run_dir: /workspace/codexschema/phase1_fresh_c_v1v2_base_decel_clean_main_effect_20260715/runs/phase1_fresh_c_v1v2_base_decel_clean_control_seed3_v1
+
+  - <<: *control
+    id: fresh_c_v1v2_base_decel_clean_w1_v1
+    human_name: fresh C V1 plus V2 clean main-effect treatment with base deceleration weight one and post-swing disabled
+    recipe:
+      base: *base
+      delta:
+        - ++task.rewards.free_wrist_vel_mimic=true
+        - ++task.rewards.motion_scale_in_window=0.25
+        - task.rewards.base_decel_weight=1.0
+        - task.motion.post_swing_start_prob=0.0
+        - task.rewards.joint_velocity_limit_hinge_weight=0.0
+        - task.rewards.joint_velocity_limit_hinge_margin=0.85
+        - ++task.rewards.racket_face_conditional_guidance_weight=0.0
+    resource:
+      policy: dispatch_gpu_round_robin
+      required_slot: pod2/gpu2
+    run_name: phase1_fresh_c_v1v2_base_decel_clean_w1_seed3_v1_20260715
+    run_dir: /workspace/codexschema/phase1_fresh_c_v1v2_base_decel_clean_main_effect_20260715/runs/phase1_fresh_c_v1v2_base_decel_clean_w1_seed3_v1

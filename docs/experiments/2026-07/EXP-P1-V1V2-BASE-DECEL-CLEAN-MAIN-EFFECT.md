@@ -1,0 +1,85 @@
+# EXP-P1-V1V2-BASE-DECEL-CLEAN-MAIN-EFFECT — 关闭随挥重放后只测底座减速
+
+- 状态：`preregistered / launch-ready`
+- 阶段/轴：Phase 1 fresh C；V1+V2 下的 base-decel 单变量主效应
+- 集成小目标：判断底座减速本身能否降低击球前底座速度和摔倒，同时不伤四项击球精度
+- 人类负责人：Franco
+- 执行者：Codex
+- 复核/决策负责人：Franco
+- 最高证据等级：`E1`（机器队列和静态合同；尚无本 run checkpoint）
+- 创建日期/最后复核日期：2026-07-15 / 2026-07-15
+
+共享术语见[术语与人话对照](../../DEFINITIONS.md)。V1 是释放持拍手腕线速度模仿，V2 是在击球窗把
+动作模仿缩放到四分之一，base-decel 是“击球前按距离递减底座目标速度”的 Reward。机器真源是
+[`phase1_fresh_c_v1v2_base_decel_clean_main_effect_queue_20260715.yaml`](../../../configs/phase1_fresh_c_v1v2_base_decel_clean_main_effect_queue_20260715.yaml)。
+
+## 为什么这不是失败 pair 的原地重跑
+
+[上一对](EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md)在 model-500 证明 post-swing buffer 的 ready 时刻
+并非共同外生条件：它只收 policy 自己活到自然 clip wrap 的状态，而 base-decel treatment 会改变活到 wrap
+的概率。control 在冻结窗分母为零，treatment 已激活，所以把后续差异归给 base-decel 会同时混入“谁更早
+拿到随挥重放课程”。
+
+本实验不修补或复用那个 buffer，而是把两臂 `post_swing_start_prob` 都冻结为 `0.0`，先回答更小也更干净的
+问题：在同一个 V1+V2、seed、动作、题库、plant、PPO 和预算下，只把 base-decel 从 `0` 改为 `1`，有没有
+净收益。连续恢复与 post-swing interaction 仍是后续独立轴；它必须消费两臂相同的 immutable natural-wrap
+teacher receipt 后另跑，不能用本卷冒充。
+
+## 冻结配方
+
+| 项目 | 两臂共同值 |
+| --- | --- |
+| source | clean exact `2c2d70d6d0ccf7b0757aac4dd8e575c2e077607e` |
+| 初始化 | from scratch，seed `3` |
+| 训练 | 4096 environments、1001 updates、每 100 保存，milestone `200/500/1000` |
+| 动作/题库 | signed-face v4rg 正反手动作与 schema-3 train bank |
+| V1/V2 | `free_wrist_vel_mimic=true`；`motion_scale_in_window=0.25` |
+| post-swing | `post_swing_start_prob=0.0`；五个 activation counter 每 update 必须全零 |
+| 资源 | 只用 Pod2；control 硬绑 GPU1，treatment 硬绑 GPU2；GPU0 只归 Yikang |
+
+唯一科学差异：control 的 `base_decel_weight=0.0`，treatment 为 `1.0`。两个新 job id、run name、run
+directory 和 claim namespace 与所有旧 run 不相交；旧 checkpoint、曲线和行为结论都不继承。
+
+## source/scene 门为何可复用
+
+exact `2c2d70d...` 已在同一 Pod2 GPU1 通过 4096-env full-scene 自然终档，并在上一对实际产出 finite
+model-200/model-500。队列只复用该 receipt 对 source、A3 ignored asset、physical-ball/table scene、face179、
+零摩擦 plant、checkpoint wiring 和 Kit boot 的证明；明确写
+`scientific_recipe_identity_reused=false` 与 `post_swing_setting_covered_by_probe=false`。本卷不会把 probe 或
+旧 pair 当作 Reward 证据。每个新 job 仍须在 claim 前重新跑最终 argv 的 no-Kit compose、检查 source clean
+exact 和新 run-dir absence，并越过自己的首迭代。
+
+## activation 与早判
+
+每个 milestone 先做 checkpoint filename=embedded iteration、finite、fresh lineage、claim、相邻 schema-3
+hard contract 和 fatal scan。随后必须满足：
+
+- post-swing 的 buffer-not-ready/eligible/not-selected/selected/started 五个计数**每个 update 全零**；任一非零
+  说明 disabled 合同失效，整个 milestone invalid；
+- V1 `eligible == excluded > 0`；
+- V2 `eligible == quarter_scaled > 0`；
+- 两臂 base-decel raw eligible、nonzero 与 sum 都为正；weighted Reward 只允许 treatment 非零，不能用
+  weighted mean 代替 raw activation。
+
+只有 activation 全过，才比较相同 milestone 最后 21 updates：
+
+| milestone | base speed treatment/control | pre-fall 差 | 四项精度逐项非劣 | 动作 |
+| --- | ---: | ---: | ---: | --- |
+| +200 | `≤1.00` | `≤+0.05` | `≥−0.10` | 方向检查，不 stop/promote |
+| +500 | `≤0.90` | `≤+0.02` | `≥−0.05` | 单 seed screen |
+| +1000 | `≤0.90` | `≤+0.02` | `≥−0.05` | 只记 candidate/reject/inconclusive |
+
+四项精度是位置、速度、**带符号**拍面和 composite pass rate；不能互相补偿。训练内解析 return 只作诊断，
+不替代物理球或 vendor MuJoCo。首个 seed 过门前不买第二 seed，不启动 judge、交互、晋级、部署或真机。
+
+## 预运行验收
+
+```bash
+python3 -m pytest -q tests/test_phase1_fresh_c_v1v2_base_decel_clean_main_effect.py
+python3 scripts/run_lean_training_queue.py \
+  --queue configs/phase1_fresh_c_v1v2_base_decel_clean_main_effect_queue_20260715.yaml plan
+git diff --check
+```
+
+实际 launch 只能由 queue 的一次 `fill --count 2` 顺序事务完成；先让 GPU1 control 越过首迭代，再发 GPU2
+treatment。timeout 标 unknown，不得因 SSH 抖动重复 claim 或重发。

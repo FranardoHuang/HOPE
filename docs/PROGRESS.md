@@ -13,6 +13,12 @@
 
 ## 2026-07-15
 
+- 新的 clean base-decel main-effect 已在结果前预注册：两臂固定 V1+V2、seed3、4096×1001 与同
+  action/bank/plant，post-swing 明确关闭且五个 replay 计数必须逐 update 全零；唯一差异为 base-decel
+  `0/1`。它不复用失败 pair 的行为，只复用 exact `2c2d70d...` 已通过的 source/scene boot 门；新 job/run
+  namespace 硬绑 Pod2 GPU1/GPU2。详见
+  [实验卷宗](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-CLEAN-MAIN-EFFECT.md)。
+
 - fresh v4 两份 `model_500` receipt 已闭合（checkpoint SHA-256 `22f78f88...a6a` / `a1735fbb...c14`，
   finite/lineage/claim/hard exact）。但 control 的冻结 `480–500` 窗 post-swing 分母仍为零，treatment 已按
   24.86% 激活；control 到 step519 才 ready，不能倒灌。根因是 buffer 只收自然 clip-wrap 存活状态，
