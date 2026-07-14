@@ -482,7 +482,190 @@ def test_boot_warmup_is_tiny_claim_bound_and_never_reuses_science_namespace():
     assert f"exec {Q.GPU_LAUNCH_LOCK_FD}>/tmp/hope_lean_queue_gpu{slot.gpu}.lock" in warmup_body
     assert f"flock -n {Q.GPU_LAUNCH_LOCK_FD}" in warmup_body
     assert f" {Q.GPU_LAUNCH_LOCK_FD}>&-" in warmup_body
+    assert "training_queue_claim_path" not in rendered
+    assert "training_run_binding_path" not in rendered
     assert "pkill" not in rendered and "killall" not in rendered
+
+
+def test_full_scene_probe_preserves_complete_scene_and_scale_in_isolated_namespace():
+    queue = _queue()
+    job = queue["jobs"][0]
+    job["budget"]["num_envs"] = 4096
+    slot = Q.slots(queue)[4]
+    frozen_job = yaml.safe_dump(job, sort_keys=True)
+    science_argv = Q._training_argv(
+        queue, job, slot.gpu, include_run_binding=False
+    )
+    claim, argv, run_dir = Q._full_scene_probe_contract(
+        queue, job, slot, "formal_scale_a1"
+    )
+
+    content = claim["content"]
+    assert content["purpose"] == "full_scene_probe_not_science"
+    assert content["not_science"] is True
+    assert content["attestable"] is False
+    assert content["promotable"] is False
+    assert content["source_job_budget"] == {
+        "num_envs": 4096, "max_iterations": 1001, "save_interval": 100
+    }
+    assert content["budget"] == {
+        "num_envs": 4096, "max_iterations": 2, "save_interval": 1
+    }
+    assert content["source"] == job["source"]
+    assert content["pod"] == slot.pod and content["gpu"] == slot.gpu
+    assert content["inputs"] == {
+        "motion": job["motion"], "bank": job["bank"], "exam": job["exam"]
+    }
+    assert claim["content_sha256"] == Q._canonical_sha256(content)
+    assert argv[-1] == f"++training_launch_claim_sha256={claim['content_sha256']}"
+
+    probe_argv = argv[:-1]
+    assert len(probe_argv) == len(science_argv)
+    changed_keys = {
+        "max_iterations", "algo.runner.save_interval", "run_name"
+    }
+    for science_arg, probe_arg in zip(science_argv[2:], probe_argv[2:]):
+        key = Q._override_key(science_arg, "science argv")
+        if key not in changed_keys:
+            assert probe_arg == science_arg
+    assert "num_envs=4096" in probe_argv
+    assert "max_iterations=2" in probe_argv
+    assert "algo.runner.save_interval=1" in probe_argv
+    assert any(
+        item.startswith("run_name=full_scene_probe_not_science_job0_")
+        for item in probe_argv
+    )
+    assert not any("training_queue_claim_path" in item for item in probe_argv)
+    assert not any("training_run_binding_path" in item for item in probe_argv)
+    assert "/_full_scene_probes/job0/" in run_dir
+    assert job["run_dir"] not in run_dir
+    assert not run_dir.startswith(job["source"]["checkout"])
+    assert yaml.safe_dump(job, sort_keys=True) == frozen_job
+
+
+def test_full_scene_probe_fails_closed_on_num_envs_drift(monkeypatch):
+    queue = _queue()
+    job = queue["jobs"][0]
+    job["budget"]["num_envs"] = 4096
+    slot = Q.slots(queue)[0]
+    original = Q._training_argv
+
+    def drifted(*args, **kwargs):
+        argv = original(*args, **kwargs)
+        return ["num_envs=1" if item == "num_envs=4096" else item for item in argv]
+
+    monkeypatch.setattr(Q, "_training_argv", drifted)
+    try:
+        Q._full_scene_probe_contract(queue, job, slot, "drift_a1")
+    except Q.QueueError as exc:
+        assert "preserve the source job num_envs" in str(exc)
+    else:
+        raise AssertionError("a 4096-to-1 full-scene probe drift was accepted")
+
+
+def test_full_scene_probe_script_is_no_clobber_first_iteration_only():
+    queue = _queue()
+    job = queue["jobs"][0]
+    job["budget"]["num_envs"] = 4096
+    slot = Q.slots(queue)[1]
+    _claim, _argv, run_dir = Q._full_scene_probe_contract(
+        queue, job, slot, "reuse_guard_a1"
+    )
+    rendered = Q._full_scene_probe_script(
+        queue, job, slot, "reuse_guard_a1"
+    )
+    body = shlex.split(rendered)[-1]
+    assert f"mkdir {run_dir}" in body
+    assert f"mkdir -p {run_dir}" not in body
+    assert "set -o noclobber" in body
+    assert "full_scene_probe_claim.json" in body
+    assert "queue_claim.json" not in body
+    assert "run_binding.json" not in body
+    assert "/milestones" not in body
+    assert "KIT_BOOT_MARKER='Learning iteration'" in body or "KIT_BOOT_MARKER=Learning" in body
+    assert "KIT_BOOT_TIMEOUT_S=900" in body
+    assert "KIT_BOOT_STALE_TIMEOUT_S=180" in body
+    assert "phase=first_iter not_science=true" in body
+    assert f" {Q.GPU_LAUNCH_LOCK_FD}>&-" in body
+    assert "pkill" not in rendered and "killall" not in rendered
+
+
+def test_full_scene_probe_requires_exact_job_confirmation_and_dispatch(monkeypatch):
+    queue = _queue()
+    calls = []
+    monkeypatch.setattr(Q, "live_snapshot", lambda *_args: calls.append("live"))
+    for wrong_confirm in (Q.CONFIRM, Q.WARMUP_CONFIRM, Q.ATTEST_CONFIRM):
+        try:
+            Q.cmd_full_scene_probe(
+                queue, job_id="job0", pod="pod1", gpu=0, attempt_id="a1",
+                execute=True, confirm=wrong_confirm,
+            )
+        except Q.QueueError as exc:
+            assert Q.FULL_SCENE_PROBE_CONFIRM in str(exc)
+        else:
+            raise AssertionError(
+                f"foreign confirmation {wrong_confirm} authorized a full-scene probe"
+            )
+    assert calls == []
+
+    queue["dispatch_pods"] = ["pod2"]
+    try:
+        Q.cmd_full_scene_probe(
+            queue, job_id="job0", pod="pod1", gpu=0, attempt_id="a1",
+            execute=False, confirm=None,
+        )
+    except Q.QueueError as exc:
+        assert "not dispatch-enabled" in str(exc)
+    else:
+        raise AssertionError("reserved Pod received a full-scene probe")
+
+    queue["jobs"][0]["resource"]["preferred_slot"] = "pod2/gpu1"
+    try:
+        Q.cmd_full_scene_probe(
+            queue, job_id="job0", pod="pod2", gpu=2, attempt_id="a1",
+            execute=False, confirm=None,
+        )
+    except Q.QueueError as exc:
+        assert "must use preferred_slot pod2/gpu1" in str(exc)
+    else:
+        raise AssertionError("probe drifted from the job's bound GPU")
+
+
+def test_full_scene_probe_rejects_terminal_or_placeholder_and_avoids_cross_job_collision():
+    queue = _queue(2)
+    slot = Q.slots(queue)[0]
+    _a, _argv_a, run_a = Q._full_scene_probe_contract(
+        queue, queue["jobs"][0], slot, "same_attempt"
+    )
+    _b, _argv_b, run_b = Q._full_scene_probe_contract(
+        queue, queue["jobs"][1], slot, "same_attempt"
+    )
+    assert run_a != run_b
+    assert "/job0/" in run_a and "/job1/" in run_b
+
+    queue["jobs"][0]["status"] = "rejected"
+    queue["jobs"][0]["blocker"] = "retired"
+    try:
+        Q.cmd_full_scene_probe(
+            queue, job_id="job0", pod="pod1", gpu=0, attempt_id="a1",
+            execute=False, confirm=None,
+        )
+    except Q.QueueError as exc:
+        assert "ready or blocked" in str(exc)
+    else:
+        raise AssertionError("terminal job was used for a full-scene probe")
+
+    queue["jobs"][0]["status"] = "blocked"
+    queue["jobs"][0]["source"]["commit"] = Q.ZERO_COMMIT
+    try:
+        Q.cmd_full_scene_probe(
+            queue, job_id="job0", pod="pod1", gpu=0, attempt_id="a2",
+            execute=False, confirm=None,
+        )
+    except Q.QueueError as exc:
+        assert "all-zero placeholder" in str(exc)
+    else:
+        raise AssertionError("placeholder blocked row was used as an exact probe")
 
 
 def test_legacy_source_capability_does_not_require_or_inject_p1_runtime():

@@ -51,6 +51,7 @@ BLOCKED = "blocked"
 TERMINAL = {"complete", "rejected"}
 CONFIRM = "SIM_ONLY_LAUNCH_ONE_LEAN_QUEUE_JOB"
 WARMUP_CONFIRM = "SIM_ONLY_LAUNCH_ONE_BOOT_WARMUP"
+FULL_SCENE_PROBE_CONFIRM = "SIM_ONLY_LAUNCH_ONE_FULL_SCENE_PROBE"
 ATTEST_CONFIRM = "SIM_ONLY_ATTEST_ONE_LEAN_QUEUE_MILESTONE"
 ZERO_COMMIT = "0" * 40
 GLOBAL_SCHEDULER_LOCK = Path("/tmp/hope_lean_training_queue.global.lock")
@@ -66,6 +67,9 @@ WARMUP_BOOT_TIMEOUT_SECONDS = 180
 WARMUP_NUM_ENVS = 1
 WARMUP_MAX_ITERATIONS = 2
 WARMUP_SAVE_INTERVAL = 1
+FULL_SCENE_PROBE_MAX_ITERATIONS = 2
+FULL_SCENE_PROBE_SAVE_INTERVAL = 1
+FULL_SCENE_PROBE_STALE_TIMEOUT_SECONDS = 180
 GPU_LAUNCH_LOCK_FD = 8
 HARNESS_OWNED_OVERRIDE_KEYS = {
     "seed",
@@ -796,7 +800,13 @@ def _child_env_command(argv: list[str], gpu: int) -> str:
     )
 
 
-def _doctor_body(queue: dict[str, Any], job: dict[str, Any], slot: Slot) -> str:
+def _doctor_body(
+    queue: dict[str, Any],
+    job: dict[str, Any],
+    slot: Slot,
+    *,
+    training_argv: list[str] | None = None,
+) -> str:
     source = job["source"]["checkout"].rstrip("/")
     workdir = f"{source}/{WBT_RELATIVE}"
     required = [
@@ -814,7 +824,8 @@ def _doctor_body(queue: dict[str, Any], job: dict[str, Any], slot: Slot) -> str:
         "print(pathlib.Path(s.origin).resolve().parent)"
     )
     child_probe = _child_env_command([ISAAC_PYTHON, "-c", module_probe], slot.gpu)
-    _claim, training_argv = _launch_contract(queue, job, slot)
+    if training_argv is None:
+        _claim, training_argv = _launch_contract(queue, job, slot)
     compose_probe = _child_env_command(_hydra_compose_argv(training_argv), slot.gpu)
     return f"""set -euo pipefail
 test \"$(git -C {shlex.quote(source)} rev-parse HEAD)\" = {shlex.quote(job['source']['commit'])}
@@ -846,6 +857,30 @@ def _replace_generated_overrides(argv: list[str], replacements: dict[str, str]) 
     if missing:
         raise QueueError(f"generated argv is missing harness keys: {sorted(missing)}")
     return result
+
+
+def _require_exact_probe_job(job: dict[str, Any]) -> None:
+    """Raise unless a ready/blocked row has ready-grade exact identities."""
+
+    job_id = job["id"]
+    if job["source"]["commit"] == ZERO_COMMIT:
+        raise QueueError(f"{job_id}.source.commit is an all-zero placeholder")
+    paths = {
+        "source.checkout": job["source"]["checkout"],
+        **{
+            f"motion.{argument}": asset_path
+            for argument, asset_path in job["motion"]["bindings"].items()
+        },
+        "bank.train_path": job["bank"]["train_path"],
+        "exam.path": job["exam"]["path"],
+        "run_dir": job["run_dir"],
+    }
+    normalized = [
+        _ready_workspace_path(value, f"{job_id}.{label}")
+        for label, value in paths.items()
+    ]
+    if len(set(normalized[1:-1])) != len(normalized[1:-1]):
+        raise QueueError(f"{job_id} has duplicate motion/bank/exam identities")
 
 
 def _boot_warmup_contract(
@@ -912,6 +947,87 @@ def _boot_warmup_contract(
     return claim, execution_argv, run_dir
 
 
+def _full_scene_probe_contract(
+    queue: dict[str, Any], job: dict[str, Any], slot: Slot, attempt_id: str
+) -> tuple[dict[str, Any], list[str], str]:
+    """Derive a two-update non-science run without changing scene scale."""
+
+    _require_exact_probe_job(job)
+    attempt_id = _text(attempt_id, "attempt_id", safe_id=True)
+    num_envs = job["budget"]["num_envs"]
+    probe_name = (
+        f"full_scene_probe_not_science_{job['id']}_"
+        f"{job['source']['commit'][:8]}_"
+        f"{slot.pod}_gpu{slot.gpu}_{attempt_id}"
+    )
+    base_argv = _training_argv(
+        queue, job, slot.gpu, include_run_binding=False
+    )
+    argv_without_claim = _replace_generated_overrides(
+        base_argv,
+        {
+            "max_iterations": str(FULL_SCENE_PROBE_MAX_ITERATIONS),
+            "algo.runner.save_interval": str(FULL_SCENE_PROBE_SAVE_INTERVAL),
+            "run_name": probe_name,
+        },
+    )
+    expected_num_envs = f"num_envs={num_envs}"
+    if argv_without_claim.count(expected_num_envs) != 1:
+        raise QueueError(
+            "full-scene probe must preserve the source job num_envs exactly"
+        )
+    run_dir = str(
+        PurePosixPath(job["run_dir"]).parent
+        / "_full_scene_probes"
+        / job["id"]
+        / job["source"]["commit"]
+        / slot.pod
+        / f"gpu{slot.gpu}"
+        / attempt_id
+    )
+    source_path = PurePosixPath(job["source"]["checkout"])
+    probe_path = PurePosixPath(run_dir)
+    if probe_path == source_path or source_path in probe_path.parents:
+        raise QueueError("full-scene probe namespace must stay outside source checkout")
+    content = {
+        "schema_version": 1,
+        "purpose": "full_scene_probe_not_science",
+        "not_science": True,
+        "attestable": False,
+        "promotable": False,
+        "job_id": job["id"],
+        "pod": slot.pod,
+        "gpu": slot.gpu,
+        "attempt_id": attempt_id,
+        "source": dict(job["source"]),
+        "run_dir": run_dir,
+        "source_job_budget": dict(job["budget"]),
+        "budget": {
+            "num_envs": num_envs,
+            "max_iterations": FULL_SCENE_PROBE_MAX_ITERATIONS,
+            "save_interval": FULL_SCENE_PROBE_SAVE_INTERVAL,
+        },
+        "inputs": {
+            "motion": dict(job["motion"]),
+            "bank": dict(job["bank"]),
+            "exam": dict(job["exam"]),
+        },
+        "training_argv_without_claim": argv_without_claim,
+    }
+    digest = _canonical_sha256(content)
+    execution_argv = [
+        *argv_without_claim,
+        f"++training_launch_claim_sha256={digest}",
+    ]
+    claim = {
+        "schema_version": 2,
+        "content": content,
+        "content_sha256": digest,
+        "training_argv": execution_argv,
+    }
+    return claim, execution_argv, run_dir
+
+
 def _boot_warmup_script(
     queue: dict[str, Any], job: dict[str, Any], slot: Slot, attempt_id: str
 ) -> str:
@@ -932,10 +1048,8 @@ def _boot_warmup_script(
     launch = shlex.join([launcher, f"{run_dir}/run.log"]) + " " + (
         _child_env_command(train_argv, slot.gpu)
     ) + f" {GPU_LAUNCH_LOCK_FD}>&-"
-    doctor = _doctor_body(queue, job, slot)
-    warmup_compose = _child_env_command(_hydra_compose_argv(train_argv), slot.gpu)
+    doctor = _doctor_body(queue, job, slot, training_argv=train_argv)
     body = doctor + f"""
-{warmup_compose} >/dev/null
 count=$(nvidia-smi -i {slot.gpu} --query-compute-apps=pid --format=csv,noheader,nounits | awk {shlex.quote(UNIQUE_NUMERIC_PID_AWK)})
 test "$count" -lt {slot.capacity}
 mkdir -p {shlex.quote(run_parent)}
@@ -944,6 +1058,42 @@ mkdir {shlex.quote(run_dir)}
 export KIT_BOOT_MARKER={shlex.quote(KIT_BOOT_MARKER)}
 export KIT_BOOT_TIMEOUT_S={WARMUP_BOOT_TIMEOUT_SECONDS}
 {launch}
+"""
+    return _gpu_launch_lock_script(slot, body)
+
+
+def _full_scene_probe_script(
+    queue: dict[str, Any], job: dict[str, Any], slot: Slot, attempt_id: str
+) -> str:
+    source = job["source"]["checkout"].rstrip("/")
+    workdir = f"{source}/{WBT_RELATIVE}"
+    claim_document, train_argv, run_dir = _full_scene_probe_contract(
+        queue, job, slot, attempt_id
+    )
+    run_parent = str(PurePosixPath(run_dir).parent)
+    claim = json.dumps(
+        claim_document,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ) + "\n"
+    launcher = f"{workdir}/{KIT_LAUNCHER_RELATIVE}"
+    launch = shlex.join([launcher, f"{run_dir}/run.log"]) + " " + (
+        _child_env_command(train_argv, slot.gpu)
+    ) + f" {GPU_LAUNCH_LOCK_FD}>&-"
+    doctor = _doctor_body(queue, job, slot, training_argv=train_argv)
+    body = doctor + f"""
+count=$(nvidia-smi -i {slot.gpu} --query-compute-apps=pid --format=csv,noheader,nounits | awk {shlex.quote(UNIQUE_NUMERIC_PID_AWK)})
+test "$count" -lt {slot.capacity}
+mkdir -p {shlex.quote(run_parent)}
+mkdir {shlex.quote(run_dir)}
+( set -o noclobber; printf %s {shlex.quote(claim)} > {shlex.quote(run_dir + '/full_scene_probe_claim.json')} )
+export KIT_BOOT_MARKER={shlex.quote(KIT_BOOT_MARKER)}
+export KIT_BOOT_TIMEOUT_S={KIT_BOOT_TIMEOUT_SECONDS}
+export KIT_BOOT_STALE_TIMEOUT_S={FULL_SCENE_PROBE_STALE_TIMEOUT_SECONDS}
+{launch}
+printf '%s\n' 'phase=first_iter not_science=true' >> {shlex.quote(run_dir + '/run.log.launch')}
 """
     return _gpu_launch_lock_script(slot, body)
 
@@ -1367,6 +1517,62 @@ def cmd_boot_warmup(
     return result
 
 
+def cmd_full_scene_probe(
+    queue: dict[str, Any], *, job_id: str, pod: str, gpu: int,
+    attempt_id: str, execute: bool, confirm: str | None,
+) -> dict[str, Any]:
+    """Run one representative-scale scene boot in a non-science namespace."""
+
+    if execute and confirm != FULL_SCENE_PROBE_CONFIRM:
+        raise QueueError(f"--execute requires --confirm {FULL_SCENE_PROBE_CONFIRM}")
+    job = _job_by_id(queue, _text(job_id, "job_id", safe_id=True))
+    if job["status"] not in {READY, BLOCKED}:
+        raise QueueError("full-scene probe requires a ready or blocked exact source job")
+    slot = _slot_by_identity(queue, _text(pod, "pod", safe_id=True), gpu)
+    preferred_slot = job["resource"].get("preferred_slot")
+    if preferred_slot is not None and preferred_slot != slot.name:
+        raise QueueError(
+            f"full-scene probe must use preferred_slot {preferred_slot}, got {slot.name}"
+        )
+    claim, _argv, run_dir = _full_scene_probe_contract(
+        queue, job, slot, attempt_id
+    )
+    remote = _full_scene_probe_script(queue, job, slot, attempt_id)
+    result: dict[str, Any] = {
+        "mode": "full-scene-probe",
+        "dry_run": not execute,
+        "purpose": "full_scene_probe_not_science",
+        "not_science": True,
+        "attestable": False,
+        "promotable": False,
+        "job_id": job["id"],
+        "resource": slot.name,
+        "run_dir": run_dir,
+        "claim_path": f"{run_dir}/full_scene_probe_claim.json",
+        "claim_sha256": claim["content_sha256"],
+        "budget": claim["content"]["budget"],
+        "first_iteration_observed": False,
+    }
+    if not execute:
+        result["ssh_argv"] = [
+            *_ssh_prefix(queue, slot.pod), f"bash -lc {shlex.quote(remote)}"
+        ]
+        return result
+
+    occupancy, _claims = live_snapshot(queue)
+    if occupancy[slot.name] >= slot.capacity:
+        raise QueueError(f"full-scene probe slot is at capacity: {slot.name}")
+    result["remote_output"] = _run_ssh(
+        queue,
+        slot.pod,
+        remote,
+        timeout=KIT_BOOT_TIMEOUT_SECONDS + 60,
+        phase=f"full-scene-probe:{job['id']}:{attempt_id}",
+    )
+    result["first_iteration_observed"] = True
+    return result
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--queue", type=Path, required=True)
@@ -1388,6 +1594,13 @@ def _parser() -> argparse.ArgumentParser:
     warmup.add_argument("--attempt-id", required=True)
     warmup.add_argument("--execute", action="store_true")
     warmup.add_argument("--confirm")
+    full_scene = sub.add_parser("full-scene-probe")
+    full_scene.add_argument("--job-id", required=True)
+    full_scene.add_argument("--pod", required=True)
+    full_scene.add_argument("--gpu", required=True, type=int)
+    full_scene.add_argument("--attempt-id", required=True)
+    full_scene.add_argument("--execute", action="store_true")
+    full_scene.add_argument("--confirm")
     attest = sub.add_parser("attest-milestone")
     attest.add_argument("--job-id", required=True)
     attest.add_argument("--milestone", type=int, required=True)
@@ -1415,6 +1628,16 @@ def main(argv: list[str] | None = None) -> int:
             )
         elif args.mode == "boot-warmup":
             result = cmd_boot_warmup(
+                queue,
+                job_id=args.job_id,
+                pod=args.pod,
+                gpu=args.gpu,
+                attempt_id=args.attempt_id,
+                execute=args.execute,
+                confirm=args.confirm,
+            )
+        elif args.mode == "full-scene-probe":
+            result = cmd_full_scene_probe(
                 queue,
                 job_id=args.job_id,
                 pod=args.pod,

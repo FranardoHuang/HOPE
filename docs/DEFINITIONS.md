@@ -24,7 +24,8 @@
 | <a id="trainer-run-binding"></a>`run_binding.json` / trainer 运行绑定 | trainer 在自己确定真实 RSL log directory 后原子写出的不可覆盖 sidecar；把 queue claim、PID/PGID、进程 starttime、物理 GPU、source/argv 与真实日志/checkpoint 根绑定起来。外部脚本不得用时间戳或 stdout 猜目录。 |
 | <a id="milestone-attestor"></a>`milestone attestor` / 里程碑取证器 | 只沿已验证 `run_binding.json` 查找预注册 checkpoint，核对迭代号、finite、hard contract 和 launch lineage，再以 no-clobber 方式写证据；它不启动训练、不判卷，也不自动 stop/promote。 |
 | <a id="runtime-binding-flag"></a>`runtime_binding: true` / exact 运行绑定开关 | 轻量训练 YAML 的显式 capability：只有 pinned source 已包含 trainer callback 与 `lean_queue_runtime.py` 才能设为 `true`，此时科学 run 才注入 claim/binding path 并允许里程碑取证。默认 `false` 保持旧 source 与非科学 boot warmup 兼容，绝不追认历史 run。当前 P1 只支持 fresh run，`checkpoint_path` 必须为空。 |
-| <a id="boot-warmup"></a>`boot-warmup` / 冷启动探针 | 为一个 exact source/Pod/GPU 单独创建的非科学小运行：沿用动作、题库和配方，但强制 1 environment、2 updates、独立 namespace/claim 与 180 秒 boot 上限，只回答动态场景导入能否越过 first iteration。其 checkpoint/指标永远不能当实验结果；失败只管理 claim 中的 exact PGID。 |
+| <a id="boot-warmup"></a>`boot-warmup` / 1-env 缓存探针 | 为一个 exact source/Pod/GPU 单独创建的非科学小运行：沿用动作、题库和配方，但强制 1 environment、2 updates、独立 namespace/claim 与 180 秒 boot 上限；它只回答最小 importer/cache 路径能否越过 first iteration，不能代表正式环境数的 scene。其 checkpoint/指标永远不能当实验结果；失败只管理 claim 中的 exact PGID。 |
+| <a id="full-scene-probe"></a>`full-scene-probe` / 完整场景启动探针 | 从一条 ready/blocked exact job 派生的非科学两次 update 运行：保留 source、Pod/GPU、完整 scene recipe 与原 `num_envs`，只改独立 `full_scene_probe_not_science_*` run name、`max_iterations=2`、save interval `1`，并写入 `_full_scene_probes/` namespace。只有看到首个 `Learning iteration` 才算 boot ready；它不可取证、判卷、晋级或当训练成绩。 |
 | `PPO` | Proximal Policy Optimization，本项目使用的批量强化学习策略优化算法。测试/合同通过不等于 PPO 已实际训练。 |
 | `VecEnv` | vectorized environment，并行推进多个仿真环境的训练接口。只有配置或 preflight 时，不能写成 `VecEnv` backend 已实现。 |
 | `seed` | 随机种子。配方不变、只换 seed，用来看训练是否稳定，不许只挑最好的 seed。机制尚未成立时先用一个阻断 seed；第二 seed 只给胜者和匹配对照，`3–4` seed 只给正式候选。所有已运行 seed 仍须全量报告。 |

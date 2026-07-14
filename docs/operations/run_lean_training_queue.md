@@ -12,7 +12,7 @@ poll 上优先；超时先写 sidecar，再只对 launcher 已验证的 exact PG
 仍由 900 秒 hard timeout 管，stat 失败 rc126 fail closed。仍缺 scene-created 等细分阶段 receipt；长期应
 消费内容绑定的预转换 USD，避免每条训练重新动态导入 URDF。
 
-### 新 source 先做冷启动探针
+### 新 source 先做 1-env 缓存探针
 
 动态 URDF importer 会在 reward/contract/PPO 之前偶发卡死，所以新 source 不再用正式科学 namespace
 试冷缓存。[`boot-warmup`](../DEFINITIONS.md#boot-warmup) 从一条已预注册 job 派生完全独立的
@@ -41,6 +41,39 @@ fatal，才可启动正式 control/treatment。warmup 的模型、Reward 与 che
 
 首次真实执行 `conditional_61007e9_gpu1_a1` 已按上述路径自然退出，2/2 updates、`model_0/1` finite、
 contract/claim/fresh lineage 匹配且 fatal0；该 receipt 只证明此 source/Pod2/GPU1 的 boot 路径。
+
+### 正式环境数先做 full-scene probe
+
+1-env 成功不能代表 4096-env scene 可创建。[`full-scene-probe`](../DEFINITIONS.md#full-scene-probe)
+必须从同一份 ready/blocked exact job 派生：source、目标 Pod/GPU、base+delta、动作、bank、exam、seed 和原
+`num_envs` 全部不变，命令没有 `--num-envs` 逃生口；只把 `max_iterations`/save interval 改为 `2/1`，并换成
+`full_scene_probe_not_science_*` run name 与
+`_full_scene_probes/<job>/<commit>/<pod>/gpu<N>/<attempt>` namespace。先 dry-run：
+
+```bash
+python3 scripts/run_lean_training_queue.py \
+  --queue configs/phase1_fresh_c_mechanism_queue_20260714.yaml \
+  full-scene-probe \
+  --job-id REPLACE_WITH_READY_OR_BLOCKED_EXACT_JOB \
+  --pod pod2 --gpu 1 --attempt-id full_scene_a1
+
+python3 scripts/run_lean_training_queue.py \
+  --queue configs/phase1_fresh_c_mechanism_queue_20260714.yaml \
+  full-scene-probe \
+  --job-id REPLACE_WITH_READY_OR_BLOCKED_EXACT_JOB \
+  --pod pod2 --gpu 1 --attempt-id full_scene_a1 \
+  --execute --confirm SIM_ONLY_LAUNCH_ONE_FULL_SCENE_PROBE
+```
+
+专用确认词不能与 science/warmup token 混用；blocked 行也先按 ready 级规则拒绝 zero commit、placeholder、
+非 `/workspace` 或重复资产。声明了 `preferred_slot` 的 job 只能在该槽探测，reserved Pod 在 SSH 前拒绝。
+远端在 fd8 短锁内重查容量，用 plain `mkdir` 和 no-clobber
+`full_scene_probe_claim.json` 拒绝复用 attempt；显式使用 source-pinned launcher 的 900 秒 hard timeout、
+180 秒 content-stale watchdog 与 `Learning iteration` marker。
+
+launcher 返回只表示 `first_iteration_observed=true`，不表示两次 update 已终档，更不表示 reward 有效。
+probe 永远 `not_science=true / attestable=false / promotable=false`，不写 `queue_claim.json`、`run_binding.json`、
+`milestones/`，也不能进入 checkpoint attestor、成绩表或自动解锁正式 job。
 
 这个入口解决的是“动作和题库已经决定后，为什么还要手拼一长串命令”。一条 YAML job 必须同时绑定：
 
@@ -193,9 +226,9 @@ queue harness 才在 `.launch` 写 `phase=first_iter`。这能把“卡在 A3 im
 main 已有独立 per-source+Pod+GPU 的 `1 env × 2 updates` boot-warmup 和 content-bearing 日志默认 180 秒
 stale watchdog；P1 不改变其 source-pinned/exact-PGID 语义，也不会让 warmup 继承科学 binding path。
 新反例证明 1-env 成功只可当 cache/import probe：同 source/GPU 的正式 4096-env control 仍可能在
-`scene_import_start` 后卡死。未来代表性 full-scene boot 必须另用独立非科学 namespace，并绑定同 source、
-physical GPU、task/assets/plant 和正式 `num_envs`/scene recipe；到 `scene_import_done`/`first_iter` 才能授权
-随后全新科学 claim。当前 P1 只提供 phase 证据，不冒充该 full-scene 门已经实现。
+`scene_import_start` 后卡死。P1.1 source gate 因此新增上述 full-scene probe，绑定同 source、physical GPU、
+task/assets/plant、完整 recipe 与正式 `num_envs`，但尚未在 Pod 产出真实 probe claim；源码通过不能冒充
+full-scene runtime 已通过。
 
 ## 验证
 
@@ -212,5 +245,6 @@ bash -n hope_training/whole_body_tracking/scripts/launch_kit_training_locked.sh
 ```
 
 本源码门只证明 YAML 绑定、调度与 fail-closed 选择逻辑；没有证明远端 SSH、Isaac runtime、动作效果或
-exam 成绩。focused source result 为 `68 passed`；现有 source-pinned launcher 同时保留 180 秒 stale-log
-watchdog 与总 boot timeout，P1 只增加更细的 queue phase 归因。代表性 full-scene probe 仍是后续能力。
+exam 成绩。focused source result 为 `73 passed`；现有 source-pinned launcher 同时保留 180 秒 stale-log
+watchdog 与总 boot timeout。P1.1 已提供代表性 full-scene probe 的 source mode，但尚无远端 claim/首迭代
+运行证据，仍不能写成 full-scene runtime 通过。

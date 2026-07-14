@@ -73,6 +73,12 @@ per-source+Pod+physical-GPU [`boot-warmup`](../DEFINITIONS.md#boot-warmup) names
 日志默认 180 秒 stale watchdog；warmup 明确不继承科学 run 的 P1 binding path，也不冒充 checkpoint
 证据。P1 保持 generic launcher/watchdog 语义，不增加 retry 或 broad signal。
 
+`boot-warmup` 的 1 environment 只探最小 importer/cache 路径，不能授权正式规模。P1.1 的
+[`full-scene-probe`](../DEFINITIONS.md#full-scene-probe)另沿同一 source/Pod/GPU、完整 scene recipe 与原
+`num_envs` 派生两次 update 的隔离运行；它只在 launcher 看到首个 `Learning iteration` 后报告
+`first_iteration_observed=true`。probe claim 明写 `not_science=true / attestable=false / promotable=false`，
+不生成本接口的 `run_binding.json` 或 milestone receipt，因此不能通过本接口被追认为科学 checkpoint。
+
 ## 源码复现
 
 ```bash
@@ -90,6 +96,7 @@ python3 -m py_compile \
 bash -n hope_training/whole_body_tracking/scripts/launch_kit_training_locked.sh
 ```
 
-当前 focused 结果为 `68 passed`。负测覆盖 fake log dir、binding/receipt overwrite、静态及读中 PID reuse、
+当前 focused 结果为 `73 passed`。负测覆盖 fake log dir、binding/receipt overwrite、静态及读中 PID reuse、
 source dirty/YAML verifier 漂移、不可达 terminal milestone、warmup/legacy capability 串线、filename/embed
-iteration 错位、nested float/complex NaN、hard-contract SHA 错绑与 launch-claim lineage 错绑。
+iteration 错位、nested float/complex NaN、hard-contract SHA 错绑、launch-claim lineage 错绑，以及 full-scene
+probe 的环境数漂移、科学 namespace 串线、错确认词、reserved Pod、placeholder/reuse。
