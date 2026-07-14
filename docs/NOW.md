@@ -64,7 +64,10 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   在 dynamic URDF import 后停住，iter0、无 scene/contract/checkpoint；精确 PGID 收口并保全，treatment
   从未创建。这个反例推翻了“1-env warmup 可授权正式 run”。新的 P1 source `077e70c` 已在 Pod2 clean
   detached 准备完成；conditional `0/-0.4` 与 `V1+V2 × base-decel` 两组单 seed pair 均已 exact 绑定但保持
-  blocked，下一动作是 GPU1 上同 `4096 env` scene recipe 的 2-update 非科学 full-scene probe。
+  blocked。首次正式规模非科学 probe 已创建唯一 PID=PGID `353107`，随后自然 `rc=1` 且无 signal、首 iter、
+  hard contract 或 model；明确根因是 fresh checkout 缺少 Git-ignored A3 runtime tree，URDF 路径在 scene
+  creation 后 fail closed。这不是 4096-env 容量或 Reward 负结果，原 attempt 永不重放；下一动作是把完整
+  46-file A3 tree 做成 YAML source closure/no-clobber hydrate，再用新 attempt 重跑同一 scene gate。
   “每卡只能发一条”的 launch-lock 根因已修：旧 `flock FILE command` fd 被 trainer 继承；新 controller
   用 fd8 持短锁并对子 launcher `8>&-`。conditional control/treatment 优先同落已 warm 的 Pod2 GPU1，
   正好验证容量不再退化为1；现役 qdot 的旧锁不做任何强制处理。
@@ -81,7 +84,10 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   预算/motion/bank/exam 并进入 checkpoint provenance。trainer-owned
   [`run_binding.json`](DEFINITIONS.md#trainer-run-binding) 与
   [milestone attestor](DEFINITIONS.md#milestone-attestor) 已进入 main；代表性 full-scene probe 也已实现。
-  下一闭环是 Pod2 首次 probe/新 source binding receipt，以及每个机制的 activation numerator/denominator。
+  Pod2-only probe 的外层快照现在只读 selected dispatch slot，不再因普通 fill 的全 Pod 快照访问 reserved
+  Pod1；`fill --execute` 每臂也已从“独立 doctor SSH + 内嵌 doctor launch SSH”收为一次原子远端调用。
+  下一闭环是 ignored asset prepare receipt、probe 自然终档 receipt，以及每个机制的 activation
+  numerator/denominator。
 
   非击球臂 A0/A1 已完成 checkpoint 层闭环。A1 自然退出；
   A0 的 `model_1000.pt` 写完后在 Kit/Python teardown 挂起近三小时，正式 failure regex 无命中，终档

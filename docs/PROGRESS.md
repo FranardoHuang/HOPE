@@ -13,6 +13,12 @@
 
 ## 2026-07-14
 
+- Pod2-only full-scene probe 已实际创建唯一 PID=PGID `353107`，随后自然 `rc=1`：fresh `077e70c`
+  checkout 缺 Git-ignored A3 URDF/mesh tree，故无首 iter/model/hard contract；不是 4096-env 或 Reward
+  失败，原 attempt 不重放。控制器同时修掉 reserved Pod1 的越界快照和每臂重复 doctor SSH；下一门是
+  完整 46-file source-asset hydrate/receipt。见 [conditional 卷宗](experiments/2026-07/EXP-P1-CONDITIONAL-FACE-GUIDANCE.md)
+  与 [G05](gates/G05_isaac_training_first_loop.md)。
+
 - lean queue P1/P1.1 已进入 main：trainer-owned `run_binding` 与 exact milestone attestor 不再靠 glob 猜
   checkpoint；新 `full-scene-probe` 保留正式 `4096 env` scene recipe、只用独立 2-update 非科学 namespace。
   Pod2 clean detached `077e70c` source 与外部动作/bank/exam已核对；conditional 和 V1+V2×base-decel 新 pair
