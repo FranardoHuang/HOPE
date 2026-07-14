@@ -44,9 +44,12 @@ torque_world = 0
 | `L0` | 零推力对照 | `[0, 0] m/s` | 保留与 treatment 相同的机会、选择、方向和虚拟 pulse 占用时间 |
 | `L1` | 随机横向躯干脉冲 | `Uniform(0.04, 0.08) m/s`，方向左右各 `0.5` | 0.10 s 脉冲；每 0.50 s 一个随机相位机会，eligible 后以 `0.5` 概率选择 |
 
-两个格使用同一个无状态 schedule seed。这里的“共同随机数”是指：按
-`seed + environment + episode + opportunity + stream` 确定机会、是否选择、左右方向和单位幅度；即使两个
-策略之后走到不同状态，也不会因为调用 RNG 的次数不同而悄悄换题。
+两个格使用同一个无状态 schedule seed。这里的“共同随机数”是指：用
+`Philox4x32-10` counter generator 按 `seed/environment/episode/opportunity` 生成题目，再用四个固定的
+32-bit domain tag 分开机会相位、是否选择、左右方向和单位幅度；即使两个策略之后走到不同状态，也不会
+因为调用 RNG 的次数不同而悄悄换题。共同随机题身份 SHA-256 是
+`d157bd6e7c063df80d41ca03b9eb4acae2a4b45c9ee0967b5dcbce5b76d14593`，并且每步显式暴露 potential
+selection/direction/unit-magnitude draw，允许直接对账 `L0/L1`，不再用线性 stream 偏移冒充独立随机流。
 
 ### Eligibility 与硬安全边界
 
@@ -59,6 +62,10 @@ AND safe_window_remaining_steps >= pulse_duration_steps
 ```
 
 - pulse 启动后若击球窗意外开始，下一步必须写零并记 `interrupted_for_strike`，不能把残余外力带进挥拍。
+- episode reset 若截断 pulse，reset 当步禁止立刻重启；账本同时保存原采样冲量、reset 前已 command/已
+  applied 冲量、尚未 command 和已 command 未 applied 的放弃量，并逐环境满足
+  `sampled = commanded + abandoned_uncommanded` 与
+  `commanded = applied + abandoned_unapplied`。
 - 每个 simulator step 都必须覆盖完整 torso wrench buffer；无脉冲的环境也显式写零。漏一步就 fail closed，
   因为旧外力可能继续存活。
 - 允许任何时刻扰动的 `anytime` 版本是**后续独立因果轴**。它不能混进首格；只有 recovery/hold 格在留出
@@ -70,7 +77,8 @@ AND safe_window_remaining_steps >= pulse_duration_steps
 [`lateral_perturbation.py`](../../../hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/lateral_perturbation.py)
 现在只提供两个部分：
 
-1. 纯 torch 的确定性 scheduler/kernel：有界随机幅度、左右对称、完整安全窗、同一步幂等、漏步 fail closed。
+1. 纯 torch 的确定性 scheduler/kernel：Random123 已知向量一致的 `Philox4x32-10`、有界随机幅度、
+   左右对称、完整安全窗、同一步幂等、漏步 fail closed、reset 中断冲量对账。
 2. fail-closed adapter seam：把归一化脉冲按**整机总质量**变成 WORLD-Y 躯干质心力，并要求未来 adapter
    对完整 batch 写入且返回 typed receipt。
 
@@ -85,6 +93,7 @@ WORLD→BODY 变换、`write_data_to_sim` 时序、随机化后总质量读取�
 - 非零 pulse command、strike-window skip、窗口不足、意外中断；
 - 每步 full-buffer write receipt、真正 applied pulse 数与 applied impulse 总量；
 - 每次 pulse 的 environment/episode/step、采样 `Δv_y`、命令 `F_y`、剩余 pulse step 和 adapter receipt。
+- potential 随机 draw、共同随机题 SHA，以及 reset 截断时 sampled/commanded/applied/abandoned 五项冲量账。
 
 `L0` 必须有 eligible/selected，但 `applied_pulse_count=0`；`L1` 必须有非零 applied pulse。采样、命令和
 application 三本冲量账对不上时，结果无效而不是“近似通过”。
@@ -136,9 +145,11 @@ application 三本冲量账对不上时，结果无效而不是“近似通过�
   hope_training/whole_body_tracking/tests/test_lateral_perturbation.py
 ```
 
-测试覆盖：control/treatment 共同随机时序、左右对称与幅度界、recovery/hold eligibility、strike skip、
-完整 pulse 冲量、同一步幂等、漏步/漏 application receipt fail closed、按总质量缩放、X/Z force 与 torque
-恒零，以及 pulse 后 full-batch 零写。它不证明 simulator 真正执行了这些命令。
+当前 `20 passed`。测试覆盖：Random123 Philox 零 counter/key 已知向量、四个 domain 与相邻 seed 的分桶
+均匀性和交叉相关性、`L0/L1` potential draw/SHA 完全相同、左右对称与幅度界、recovery/hold eligibility、
+strike skip、完整 pulse 冲量、reset 中断五项账、同一步幂等、漏步/漏 application receipt fail closed、
+按总质量缩放、X/Z force 与 torque 恒零，以及 pulse 后 full-batch 零写。它不证明 simulator 真正执行了
+这些命令。
 
 相关 Gate：[`G05 Isaac training first loop`](../../gates/G05_isaac_training_first_loop.md)；连续恢复的结构顺序见
 [`EXP-RECOVERY-TUPLE-ABC`](EXP-RECOVERY-TUPLE-ABC.md)。

@@ -96,8 +96,8 @@ class _RecordingAdapter:
             full_batch_overwrite=self.full_batch_overwrite,
             inactive_zero_overwrite=self.inactive_zero_overwrite,
             zero_torque=bool(torch.all(torque_w == 0.0)),
-            nonzero_force_env_count=int(
-                torch.any(force_w.reshape(force_w.shape[0], -1) != 0.0, dim=1).sum()
+            applied_force_mask=torch.any(
+                force_w.reshape(force_w.shape[0], -1) != 0.0, dim=1
             ),
         )
         if self.receipt_override is not None:
@@ -168,9 +168,41 @@ def test_preregistered_train_and_eval_boundaries_are_machine_readable_and_blocke
     assert control["normalized_impulse_mps"] == [0.0, 0.0]
     assert treatment["normalized_impulse_mps"] == [0.04, 0.08]
     assert control["schedule_seed"] == treatment["schedule_seed"]
+    assert payload["pulse_schedule"]["sampling"] == (
+        "philox4x32-10-domain-separated-v1"
+    )
+    expected_schedule_sha = (
+        "d157bd6e7c063df80d41ca03b9eb4acae2a4b45c9ee0967b5dcbce5b76d14593"
+    )
+    assert payload["pulse_schedule"]["random_schedule_identity_sha256"] == (
+        expected_schedule_sha
+    )
+    assert payload["common_random_numbers"][
+        "random_schedule_identity_shared_by_L0_L1"
+    ] == expected_schedule_sha
+    prereg_cfg = L.LateralPerturbationConfig(
+        policy_dt_s=payload["pulse_schedule"]["policy_dt_s"],
+        opportunity_interval_steps=payload["pulse_schedule"][
+            "opportunity_interval_steps"
+        ],
+        pulse_duration_steps=payload["pulse_schedule"]["pulse_duration_steps"],
+        selection_probability=payload["pulse_schedule"][
+            "selection_probability_per_eligible_opportunity"
+        ],
+        normalized_impulse_min_mps=0.0,
+        normalized_impulse_max_mps=0.0,
+        seed=control["schedule_seed"],
+    )
+    assert prereg_cfg.random_schedule_identity_sha256 == expected_schedule_sha
     assert payload["held_out_eval"]["clean"]["normalized_impulse_mps"] == [0.0, 0.0]
     assert payload["held_out_eval"]["strong"]["normalized_impulse_mps"] == [0.1, 0.14]
     assert payload["held_out_eval"]["strong"]["schedule_seed"] != treatment["schedule_seed"]
+    assert {
+        "lateral_perturbation_interrupted_for_reset_count",
+        "lateral_perturbation_reset_interrupted_sampled_impulse_abs_sum_mps",
+        "lateral_perturbation_reset_abandoned_uncommanded_impulse_abs_sum_mps",
+        "lateral_perturbation_reset_abandoned_unapplied_impulse_abs_sum_mps",
+    } <= set(payload["activation_and_application_counters"])
     metrics = set(payload["held_out_eval"]["metrics"])
     assert {
         "recovery_time_to_ready_s_all_attempts",
@@ -182,6 +214,203 @@ def test_preregistered_train_and_eval_boundaries_are_machine_readable_and_blocke
         "ready_set_by_deadline_rate_all_attempts",
         "next_strike_composite_rate_all_attempts",
     } <= metrics
+
+
+def test_philox_matches_random123_zero_counter_zero_key_vector():
+    zero = torch.zeros(1, dtype=torch.long)
+    lanes = L._philox4x32_10((zero, zero, zero, zero), (0, 0))
+    assert [int(lane[0]) for lane in lanes] == [
+        0x6627E8D5,
+        0xE169C58D,
+        0xBC57AC4C,
+        0x9B00DBD8,
+    ]
+
+
+def _pearson(a, b):
+    a = a - a.mean()
+    b = b - b.mean()
+    return float((a * b).mean() / (a.std(unbiased=False) * b.std(unbiased=False)))
+
+
+def _uniform_diagnostics(values, bins=32):
+    counts = torch.histc(values, bins=bins, min=0.0, max=1.0)
+    expected = values.numel() / bins
+    chi_square = float(torch.sum((counts - expected) ** 2 / expected))
+    return float(values.mean()), float(values.var(unbiased=False)), chi_square
+
+
+def test_philox_domains_and_neighbor_seeds_are_not_linearly_correlated():
+    n = 131_072
+    env_ids = torch.arange(n, dtype=torch.long)
+    episode_indices = torch.remainder(env_ids * 17 + 3, 65_521)
+    opportunity_indices = torch.remainder(env_ids * 29 + 11, 1_000_003)
+    domains = {
+        name: L._counter_uniform(
+            seed=20260715,
+            env_ids=env_ids,
+            episode_indices=episode_indices,
+            opportunity_indices=opportunity_indices,
+            domain=name,
+        )
+        for name in ("phase_offset", "selection", "direction", "unit_magnitude")
+    }
+    for values in domains.values():
+        mean, variance, chi_square = _uniform_diagnostics(values)
+        assert mean == pytest.approx(0.5, abs=0.003)
+        assert variance == pytest.approx(1.0 / 12.0, abs=0.002)
+        assert chi_square < 70.0
+
+    names = sorted(domains)
+    for i, left in enumerate(names):
+        for right in names[i + 1 :]:
+            assert abs(_pearson(domains[left], domains[right])) < 0.015
+
+    neighboring_seed = L._counter_uniform(
+        seed=20260716,
+        env_ids=env_ids,
+        episode_indices=episode_indices,
+        opportunity_indices=opportunity_indices,
+        domain="selection",
+    )
+    assert not torch.equal(domains["selection"], neighboring_seed)
+    assert abs(_pearson(domains["selection"], neighboring_seed)) < 0.015
+
+
+def test_crn_schedule_identity_and_potential_draws_are_exposed_for_l0_audit():
+    control_cfg = _cfg(
+        normalized_impulse_min_mps=0.0,
+        normalized_impulse_max_mps=0.0,
+    )
+    treatment_cfg = _cfg()
+    assert (
+        control_cfg.random_schedule_identity_sha256
+        == treatment_cfg.random_schedule_identity_sha256
+    )
+    assert (
+        control_cfg.random_schedule_identity_sha256
+        != _cfg(seed=20260716).random_schedule_identity_sha256
+    )
+    control = L.LateralPulseScheduler(512, control_cfg)
+    treatment = L.LateralPulseScheduler(512, treatment_cfg)
+    for step in range(8):
+        inputs = _inputs(512, step)
+        left = control.step(step_token=step, **inputs)
+        right = treatment.step(step_token=step, **inputs)
+        assert left.random_schedule_identity_sha256 == (
+            right.random_schedule_identity_sha256
+        )
+        for name in (
+            "potential_phase_offset_steps",
+            "opportunity_indices",
+            "potential_selection_u01",
+            "potential_direction_u01",
+            "potential_unit_magnitude_u01",
+        ):
+            assert torch.equal(getattr(left, name), getattr(right, name))
+        assert torch.all((left.potential_selection_u01 > 0.0) & (left.potential_selection_u01 < 1.0))
+        assert torch.all((left.potential_direction_u01 > 0.0) & (left.potential_direction_u01 < 1.0))
+        assert torch.all(
+            (left.potential_unit_magnitude_u01 > 0.0)
+            & (left.potential_unit_magnitude_u01 < 1.0)
+        )
+
+
+def test_episode_reset_mid_pulse_has_reconciled_abandonment_ledger_and_no_restart():
+    scheduler = L.LateralPulseScheduler(
+        1,
+        _cfg(opportunity_interval_steps=5, pulse_duration_steps=5),
+        require_application_ack=True,
+    )
+    adapter = _RecordingAdapter()
+    started = None
+    start_token = None
+    for token in range(5):
+        result = scheduler.step(
+            step_token=token,
+            **_inputs(1, token, episode_index=0, safe=20 - token),
+        )
+        _dispatch(scheduler, result, adapter)
+        if result.nonzero_start_mask.item():
+            started = result
+            start_token = token
+            break
+    assert started is not None and start_token is not None
+
+    reset = scheduler.step(
+        step_token=start_token + 1,
+        **_inputs(1, 0, episode_index=1, eligible=True, strike=False, safe=20),
+    )
+    assert reset.interrupted_for_reset_mask.item()
+    assert not reset.opportunity_mask.item()
+    assert not reset.selected_start_mask.item()
+    assert reset.normalized_accel_y_mps2.item() == 0.0
+    sampled = reset.reset_interrupted_sampled_impulse_y_mps
+    commanded = reset.reset_interrupted_commanded_impulse_y_mps
+    applied = reset.reset_interrupted_applied_impulse_y_mps
+    assert torch.allclose(
+        sampled,
+        commanded + reset.reset_abandoned_uncommanded_impulse_y_mps,
+        atol=1e-15,
+        rtol=0.0,
+    )
+    assert torch.allclose(
+        commanded,
+        applied + reset.reset_abandoned_unapplied_impulse_y_mps,
+        atol=1e-15,
+        rtol=0.0,
+    )
+    assert torch.allclose(commanded, applied, atol=1e-15, rtol=0.0)
+    assert 0.0 < commanded.abs().item() < sampled.abs().item()
+    _dispatch(scheduler, reset, adapter)
+    counters = scheduler.consume_counters()
+    assert counters["lateral_perturbation_interrupted_for_reset_count"].item() == 1
+    assert counters[
+        "lateral_perturbation_reset_interrupted_sampled_impulse_abs_sum_mps"
+    ].item() == pytest.approx(sampled.abs().item())
+    assert counters[
+        "lateral_perturbation_reset_abandoned_uncommanded_impulse_abs_sum_mps"
+    ].item() == pytest.approx(
+        reset.reset_abandoned_uncommanded_impulse_y_mps.abs().item()
+    )
+    assert counters[
+        "lateral_perturbation_reset_abandoned_unapplied_impulse_abs_sum_mps"
+    ].item() == pytest.approx(0.0, abs=1e-15)
+
+
+def test_plan_only_reset_ledger_exposes_commanded_but_unacknowledged_impulse():
+    scheduler = L.LateralPulseScheduler(
+        1,
+        _cfg(opportunity_interval_steps=5, pulse_duration_steps=5),
+    )
+    started = None
+    start_token = None
+    for token in range(5):
+        result = scheduler.step(
+            step_token=token,
+            **_inputs(1, token, episode_index=0, safe=20 - token),
+        )
+        if result.nonzero_start_mask.item():
+            started = result
+            start_token = token
+            break
+    assert started is not None and start_token is not None
+    reset = scheduler.step(
+        step_token=start_token + 1,
+        **_inputs(1, 0, episode_index=1, eligible=True, safe=20),
+    )
+    assert reset.interrupted_for_reset_mask.item()
+    assert reset.reset_interrupted_applied_impulse_y_mps.item() == 0.0
+    assert torch.equal(
+        reset.reset_abandoned_unapplied_impulse_y_mps,
+        reset.reset_interrupted_commanded_impulse_y_mps,
+    )
+
+
+def test_source_hot_path_has_no_explicit_tensor_item_or_bool_any_sync():
+    source = MODULE_PATH.read_text()
+    assert ".item(" not in source
+    assert "bool(torch.any" not in source
 
 
 def test_stateless_schedule_reproducible_and_seed_sensitive():
@@ -441,7 +670,7 @@ def test_world_wrench_uses_total_mass_only_in_y_and_has_zero_torque():
     assert force32.dtype == torch.float32
     assert torque32.dtype == torch.float32
 
-    with pytest.raises(ValueError, match="strictly positive"):
+    with pytest.raises(RuntimeError, match="strictly positive"):
         L.lateral_world_wrench_from_total_mass(accel, torch.tensor([20.0, 0.0, 60.0]))
 
 
@@ -455,7 +684,7 @@ def test_adapter_seam_writes_zero_after_pulse_and_accounts_once():
     first = scheduler.step(step_token=0, **_inputs(4, 0))
     ledger = _dispatch(scheduler, first, adapter)
     duplicate = _dispatch(scheduler, first, adapter)
-    assert duplicate == ledger
+    assert duplicate is ledger
     assert len(adapter.calls) == 1
     second = scheduler.step(
         step_token=1,
@@ -483,7 +712,7 @@ def test_adapter_seam_rejects_stale_force_contract_or_false_receipt():
     with pytest.raises(RuntimeError, match="not runtime-safe"):
         _dispatch(scheduler, result, bad_adapter)
 
-    def wrong_count(receipt):
+    def wrong_mask(receipt):
         return L.LateralWrenchWriteReceipt(
             step_token=receipt.step_token,
             body_name=receipt.body_name,
@@ -492,11 +721,11 @@ def test_adapter_seam_rejects_stale_force_contract_or_false_receipt():
             full_batch_overwrite=True,
             inactive_zero_overwrite=True,
             zero_torque=True,
-            nonzero_force_env_count=receipt.nonzero_force_env_count + 1,
+            applied_force_mask=~receipt.applied_force_mask,
         )
 
-    false_receipt = _RecordingAdapter(receipt_override=wrong_count)
-    with pytest.raises(RuntimeError, match="nonzero_force_env_count"):
+    false_receipt = _RecordingAdapter(receipt_override=wrong_mask)
+    with pytest.raises(RuntimeError, match="applied_force_mask"):
         _dispatch(scheduler, result, false_receipt)
     counters = scheduler.consume_counters()
     assert counters["lateral_perturbation_applied_pulse_count"].item() == 0

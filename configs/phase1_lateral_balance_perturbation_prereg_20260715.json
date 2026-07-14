@@ -48,7 +48,14 @@
       "world_plus_y": 0.5
     },
     "magnitude_distribution": "uniform_closed_interval",
-    "sampling": "stateless_by_seed_env_episode_opportunity_stream",
+    "sampling": "philox4x32-10-domain-separated-v1",
+    "random_domains_u32_hex": {
+      "direction": "0x44495245",
+      "phase_offset": "0x50484153",
+      "selection": "0x53454c45",
+      "unit_magnitude": "0x4d41474e"
+    },
+    "random_schedule_identity_sha256": "d157bd6e7c063df80d41ca03b9eb4acae2a4b45c9ee0967b5dcbce5b76d14593",
     "overlap_allowed": false,
     "force_law": "Fy_N = total_articulation_mass_kg * sampled_normalized_impulse_y_mps / pulse_duration_s"
   },
@@ -78,6 +85,8 @@
   ],
   "common_random_numbers": {
     "timing_selection_direction_and_unit_magnitude_shared": true,
+    "potential_draws_exposed_in_step_ledger": true,
+    "random_schedule_identity_shared_by_L0_L1": "d157bd6e7c063df80d41ca03b9eb4acae2a4b45c9ee0967b5dcbce5b76d14593",
     "zero_control_occupies_virtual_pulse_duration": true,
     "reason": "The zero control must not gain extra selection opportunities relative to treatment."
   },
@@ -93,24 +102,42 @@
     "lateral_perturbation_skipped_short_window_count",
     "lateral_perturbation_interrupted_for_strike_count",
     "lateral_perturbation_interrupted_for_window_count",
+    "lateral_perturbation_interrupted_for_reset_count",
     "lateral_perturbation_wrench_write_step_count",
     "lateral_perturbation_applied_pulse_count",
     "lateral_perturbation_applied_force_env_step_count",
     "lateral_perturbation_sampled_normalized_impulse_abs_sum_mps",
     "lateral_perturbation_commanded_normalized_impulse_abs_sum_mps",
-    "lateral_perturbation_applied_normalized_impulse_abs_sum_mps"
+    "lateral_perturbation_applied_normalized_impulse_abs_sum_mps",
+    "lateral_perturbation_reset_interrupted_sampled_impulse_abs_sum_mps",
+    "lateral_perturbation_reset_interrupted_commanded_impulse_abs_sum_mps",
+    "lateral_perturbation_reset_interrupted_applied_impulse_abs_sum_mps",
+    "lateral_perturbation_reset_abandoned_uncommanded_impulse_abs_sum_mps",
+    "lateral_perturbation_reset_abandoned_unapplied_impulse_abs_sum_mps"
   ],
   "per_step_ledger_required": [
     "step_token",
+    "random_schedule_identity_sha256",
     "episode_index",
     "episode_step",
     "environment_id",
     "eligible",
     "selected",
+    "potential_phase_offset_steps",
+    "opportunity_index",
+    "potential_selection_u01",
+    "potential_direction_u01",
+    "potential_unit_magnitude_u01",
     "sampled_normalized_impulse_y_mps",
     "commanded_force_y_N",
     "adapter_write_receipt",
-    "remaining_pulse_steps"
+    "remaining_pulse_steps",
+    "interrupted_for_reset",
+    "reset_interrupted_sampled_impulse_y_mps",
+    "reset_interrupted_commanded_impulse_y_mps",
+    "reset_interrupted_applied_impulse_y_mps",
+    "reset_abandoned_uncommanded_impulse_y_mps",
+    "reset_abandoned_unapplied_impulse_y_mps"
   ],
   "runtime_adapter": {
     "implemented": false,

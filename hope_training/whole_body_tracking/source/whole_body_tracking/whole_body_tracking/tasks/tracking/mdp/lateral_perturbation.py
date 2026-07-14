@@ -26,14 +26,30 @@ after the nominal pulse.
 from __future__ import annotations
 
 from dataclasses import dataclass
+import hashlib
+import json
 import math
 from typing import Protocol, runtime_checkable
 
 import torch
 
 
-_LCG_MODULUS = 2_147_483_647
 _COUNT_PREFIX = "lateral_perturbation_"
+_U16_MASK = 0xFFFF
+_U32_MASK = 0xFFFFFFFF
+_U32_SCALE = float(1 << 32)
+_PHILOX_M0 = 0xD2511F53
+_PHILOX_M1 = 0xCD9E8D57
+_PHILOX_W0 = 0x9E3779B9
+_PHILOX_W1 = 0xBB67AE85
+_PHILOX_KEY1_NAMESPACE = 0xA3C59AC3
+_RANDOM_GENERATOR_ID = "philox4x32-10-domain-separated-v1"
+_RANDOM_DOMAINS = {
+    "phase_offset": 0x50484153,
+    "selection": 0x53454C45,
+    "direction": 0x44495245,
+    "unit_magnitude": 0x4D41474E,
+}
 
 
 def _is_plain_int(value: object) -> bool:
@@ -42,6 +58,134 @@ def _is_plain_int(value: object) -> bool:
 
 def _is_plain_number(value: object) -> bool:
     return type(value) in (int, float)
+
+
+def _assert_all_async(condition: torch.Tensor, message: str) -> None:
+    """Fail without a deliberate CUDA-to-host synchronization in the hot path."""
+
+    predicate = torch.all(condition)
+    if predicate.device.type == "cpu":
+        if not bool(predicate):
+            raise RuntimeError(message)
+        return
+    assert_fn = getattr(torch, "_assert_async", None)
+    if callable(assert_fn):
+        # torch 2.0 exposes the one-argument form; newer versions may accept a message, but using
+        # the common signature keeps the runtime source portable without a CUDA synchronization.
+        assert_fn(predicate)
+    else:  # pragma: no cover - only for older torch than the supported runtime
+        raise RuntimeError(
+            "torch._assert_async is required for CUDA lateral-perturbation validation"
+        )
+
+
+def _mulhilo_u32_const(value: torch.Tensor, multiplier: int) -> tuple[torch.Tensor, torch.Tensor]:
+    """Exact unsigned-32 multiply split into high/low lanes using safe int64 arithmetic."""
+
+    value_lo = torch.bitwise_and(value, _U16_MASK)
+    value_hi = torch.bitwise_right_shift(value, 16)
+    multiplier_lo = multiplier & _U16_MASK
+    multiplier_hi = multiplier >> 16
+    product_00 = value_lo * multiplier_lo
+    product_01 = value_lo * multiplier_hi
+    product_10 = value_hi * multiplier_lo
+    product_11 = value_hi * multiplier_hi
+    middle = (
+        torch.bitwise_right_shift(product_00, 16)
+        + torch.bitwise_and(product_01, _U16_MASK)
+        + torch.bitwise_and(product_10, _U16_MASK)
+    )
+    low = torch.bitwise_or(
+        torch.bitwise_and(product_00, _U16_MASK),
+        torch.bitwise_left_shift(torch.bitwise_and(middle, _U16_MASK), 16),
+    )
+    high = (
+        product_11
+        + torch.bitwise_right_shift(product_01, 16)
+        + torch.bitwise_right_shift(product_10, 16)
+        + torch.bitwise_right_shift(middle, 16)
+    )
+    return torch.bitwise_and(high, _U32_MASK), torch.bitwise_and(low, _U32_MASK)
+
+
+def _philox4x32_10(
+    counter: tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor],
+    key: tuple[int, int],
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Random123 Philox4x32-10, represented as non-negative int64 uint32 lanes."""
+
+    c0, c1, c2, c3 = (torch.bitwise_and(lane, _U32_MASK) for lane in counter)
+    k0 = key[0] & _U32_MASK
+    k1 = key[1] & _U32_MASK
+    for round_index in range(10):
+        hi0, lo0 = _mulhilo_u32_const(c0, _PHILOX_M0)
+        hi1, lo1 = _mulhilo_u32_const(c2, _PHILOX_M1)
+        c0, c1, c2, c3 = (
+            torch.bitwise_and(torch.bitwise_xor(torch.bitwise_xor(hi1, c1), k0), _U32_MASK),
+            lo1,
+            torch.bitwise_and(torch.bitwise_xor(torch.bitwise_xor(hi0, c3), k1), _U32_MASK),
+            lo0,
+        )
+        if round_index != 9:
+            k0 = (k0 + _PHILOX_W0) & _U32_MASK
+            k1 = (k1 + _PHILOX_W1) & _U32_MASK
+    return c0, c1, c2, c3
+
+
+def _counter_uniform(
+    *,
+    seed: int,
+    env_ids: torch.Tensor,
+    episode_indices: torch.Tensor,
+    opportunity_indices: torch.Tensor,
+    domain: str,
+) -> torch.Tensor:
+    """Domain-separated counter-based U(0,1) values independent of call order."""
+
+    if domain not in _RANDOM_DOMAINS:
+        raise ValueError(f"unknown lateral perturbation random domain: {domain!r}")
+    domain_lane = torch.full_like(env_ids, _RANDOM_DOMAINS[domain])
+    output = _philox4x32_10(
+        (
+            env_ids,
+            episode_indices,
+            opportunity_indices,
+            domain_lane,
+        ),
+        (seed, seed ^ _PHILOX_KEY1_NAMESPACE),
+    )[0]
+    return (output.to(dtype=torch.float64) + 0.5) / _U32_SCALE
+
+
+def random_schedule_contract(cfg: "LateralPerturbationConfig") -> dict[str, object]:
+    """Canonical CRN contract shared by zero-control and non-zero treatment."""
+
+    return {
+        "schema_version": 1,
+        "generator": _RANDOM_GENERATOR_ID,
+        "domains_u32_hex": {
+            name: f"0x{value:08x}" for name, value in sorted(_RANDOM_DOMAINS.items())
+        },
+        "seed": cfg.seed,
+        "policy_dt_s": float(cfg.policy_dt_s),
+        "opportunity_interval_steps": cfg.opportunity_interval_steps,
+        "pulse_duration_steps": cfg.pulse_duration_steps,
+        "selection_probability": float(cfg.selection_probability),
+        "eligibility_mode": cfg.eligibility_mode,
+        "body_name": cfg.body_name,
+        "force_frame": cfg.force_frame,
+        "application_point": cfg.application_point,
+    }
+
+
+def random_schedule_identity_sha256(cfg: "LateralPerturbationConfig") -> str:
+    payload = json.dumps(
+        random_schedule_contract(cfg),
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
 
 
 @dataclass(frozen=True)
@@ -99,8 +243,8 @@ class LateralPerturbationConfig:
             raise ValueError(
                 "normalized_impulse_min_mps cannot exceed normalized_impulse_max_mps"
             )
-        if not _is_plain_int(self.seed) or not 0 <= self.seed < _LCG_MODULUS:
-            raise ValueError(f"seed must be a plain int in [0, {_LCG_MODULUS})")
+        if not _is_plain_int(self.seed) or not 0 <= self.seed <= _U32_MASK:
+            raise ValueError(f"seed must be a plain int in [0, {_U32_MASK}]")
         if self.eligibility_mode != "recovery_hold":
             raise ValueError(
                 "the source-core v1 only permits eligibility_mode='recovery_hold'; "
@@ -124,12 +268,22 @@ class LateralPerturbationConfig:
             and float(self.normalized_impulse_max_mps) == 0.0
         )
 
+    @property
+    def random_schedule_identity_sha256(self) -> str:
+        return random_schedule_identity_sha256(self)
+
 
 @dataclass(frozen=True)
 class LateralPerturbationStep:
     """Per-environment command and sample ledger for one unique simulator step."""
 
     step_token: int
+    random_schedule_identity_sha256: str
+    potential_phase_offset_steps: torch.Tensor
+    opportunity_indices: torch.Tensor
+    potential_selection_u01: torch.Tensor
+    potential_direction_u01: torch.Tensor
+    potential_unit_magnitude_u01: torch.Tensor
     normalized_accel_y_mps2: torch.Tensor
     opportunity_mask: torch.Tensor
     eligible_opportunity_mask: torch.Tensor
@@ -139,11 +293,23 @@ class LateralPerturbationStep:
     active_force_mask: torch.Tensor
     interrupted_for_strike_mask: torch.Tensor
     interrupted_for_window_mask: torch.Tensor
+    interrupted_for_reset_mask: torch.Tensor
+    reset_interrupted_sampled_impulse_y_mps: torch.Tensor
+    reset_interrupted_commanded_impulse_y_mps: torch.Tensor
+    reset_interrupted_applied_impulse_y_mps: torch.Tensor
+    reset_abandoned_uncommanded_impulse_y_mps: torch.Tensor
+    reset_abandoned_unapplied_impulse_y_mps: torch.Tensor
     remaining_steps_after_step: torch.Tensor
 
     def clone(self) -> "LateralPerturbationStep":
         return LateralPerturbationStep(
             step_token=self.step_token,
+            random_schedule_identity_sha256=self.random_schedule_identity_sha256,
+            potential_phase_offset_steps=self.potential_phase_offset_steps.clone(),
+            opportunity_indices=self.opportunity_indices.clone(),
+            potential_selection_u01=self.potential_selection_u01.clone(),
+            potential_direction_u01=self.potential_direction_u01.clone(),
+            potential_unit_magnitude_u01=self.potential_unit_magnitude_u01.clone(),
             normalized_accel_y_mps2=self.normalized_accel_y_mps2.clone(),
             opportunity_mask=self.opportunity_mask.clone(),
             eligible_opportunity_mask=self.eligible_opportunity_mask.clone(),
@@ -153,6 +319,22 @@ class LateralPerturbationStep:
             active_force_mask=self.active_force_mask.clone(),
             interrupted_for_strike_mask=self.interrupted_for_strike_mask.clone(),
             interrupted_for_window_mask=self.interrupted_for_window_mask.clone(),
+            interrupted_for_reset_mask=self.interrupted_for_reset_mask.clone(),
+            reset_interrupted_sampled_impulse_y_mps=(
+                self.reset_interrupted_sampled_impulse_y_mps.clone()
+            ),
+            reset_interrupted_commanded_impulse_y_mps=(
+                self.reset_interrupted_commanded_impulse_y_mps.clone()
+            ),
+            reset_interrupted_applied_impulse_y_mps=(
+                self.reset_interrupted_applied_impulse_y_mps.clone()
+            ),
+            reset_abandoned_uncommanded_impulse_y_mps=(
+                self.reset_abandoned_uncommanded_impulse_y_mps.clone()
+            ),
+            reset_abandoned_unapplied_impulse_y_mps=(
+                self.reset_abandoned_unapplied_impulse_y_mps.clone()
+            ),
             remaining_steps_after_step=self.remaining_steps_after_step.clone(),
         )
 
@@ -172,7 +354,7 @@ class LateralWrenchWriteReceipt:
     full_batch_overwrite: bool
     inactive_zero_overwrite: bool
     zero_torque: bool
-    nonzero_force_env_count: int
+    applied_force_mask: torch.Tensor
 
     def __post_init__(self) -> None:
         if not _is_plain_int(self.step_token) or self.step_token < 0:
@@ -184,13 +366,10 @@ class LateralWrenchWriteReceipt:
         ):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"receipt {name} must be a bool")
-        if (
-            not _is_plain_int(self.nonzero_force_env_count)
-            or self.nonzero_force_env_count < 0
-        ):
-            raise ValueError(
-                "receipt nonzero_force_env_count must be a non-negative plain int"
-            )
+        if not isinstance(self.applied_force_mask, torch.Tensor):
+            raise ValueError("receipt applied_force_mask must be a torch.Tensor")
+        if self.applied_force_mask.ndim != 1 or self.applied_force_mask.dtype != torch.bool:
+            raise ValueError("receipt applied_force_mask must be a 1-D bool tensor")
 
 
 @dataclass(frozen=True)
@@ -199,10 +378,10 @@ class LateralApplicationLedgerRow:
 
     step_token: int
     body_name: str
-    selected_start_count: int
-    applied_nonzero_start_count: int
-    nonzero_force_env_count: int
-    commanded_normalized_impulse_abs_mps: float
+    selected_start_count: torch.Tensor
+    applied_nonzero_start_count: torch.Tensor
+    nonzero_force_env_count: torch.Tensor
+    commanded_normalized_impulse_abs_mps: torch.Tensor
 
 
 @runtime_checkable
@@ -239,6 +418,7 @@ def _counter_zeros(device: torch.device) -> dict[str, torch.Tensor]:
         "skipped_active_pulse_count",
         "interrupted_for_strike_count",
         "interrupted_for_window_count",
+        "interrupted_for_reset_count",
         "active_force_env_step_count",
         "wrench_write_step_count",
         "applied_pulse_count",
@@ -252,38 +432,16 @@ def _counter_zeros(device: torch.device) -> dict[str, torch.Tensor]:
         "sampled_normalized_impulse_abs_sum_mps",
         "commanded_normalized_impulse_abs_sum_mps",
         "applied_normalized_impulse_abs_sum_mps",
+        "reset_interrupted_sampled_impulse_abs_sum_mps",
+        "reset_interrupted_commanded_impulse_abs_sum_mps",
+        "reset_interrupted_applied_impulse_abs_sum_mps",
+        "reset_abandoned_uncommanded_impulse_abs_sum_mps",
+        "reset_abandoned_unapplied_impulse_abs_sum_mps",
     ):
         state[_COUNT_PREFIX + name] = torch.zeros(
             (), dtype=torch.float64, device=device
         )
     return state
-
-
-def _stateless_uniform(
-    *,
-    seed: int,
-    env_ids: torch.Tensor,
-    episode_indices: torch.Tensor,
-    opportunity_indices: torch.Tensor,
-    stream: int,
-) -> torch.Tensor:
-    """Counter-based U(0,1) variates with stable CPU/CUDA integer arithmetic.
-
-    This is intentionally stateless: control and treatment receive the same timing, selection,
-    sign and unit-magnitude variates even after their trajectories diverge.  It is not a security
-    RNG.  All products stay far below signed-int64 overflow after each modulus.
-    """
-
-    if not _is_plain_int(stream) or stream < 0:
-        raise ValueError("stream must be a non-negative plain int")
-    modulus = _LCG_MODULUS
-    x = torch.remainder(seed + 1 + (env_ids + 1) * 48_271, modulus)
-    x = torch.remainder(x + (episode_indices + 1) * 69_621, modulus)
-    x = torch.remainder(x + (opportunity_indices + 1) * 40_699, modulus)
-    x = torch.remainder(x + (stream + 1) * 104_729, modulus)
-    x = torch.remainder(x * 48_271 + 12_820_163, modulus)
-    x = torch.remainder(x * 40_699 + 1_234_567, modulus)
-    return (x.to(dtype=torch.float64) + 0.5) / float(modulus)
 
 
 class LateralPulseScheduler:
@@ -309,12 +467,15 @@ class LateralPulseScheduler:
     ) -> None:
         if not _is_plain_int(num_envs) or num_envs <= 0:
             raise ValueError("num_envs must be a positive plain int")
+        if num_envs - 1 > _U32_MASK:
+            raise ValueError("num_envs exceed the Philox uint32 environment counter lane")
         if type(require_application_ack) is not bool:
             raise ValueError("require_application_ack must be a bool")
         self.num_envs = num_envs
         self.cfg = cfg
         self.device = torch.device(device)
         self.require_application_ack = require_application_ack
+        self.random_schedule_identity_sha256 = cfg.random_schedule_identity_sha256
         self._env_ids = torch.arange(num_envs, dtype=torch.long, device=self.device)
         self._remaining_steps = torch.zeros(
             num_envs, dtype=torch.long, device=self.device
@@ -322,6 +483,8 @@ class LateralPulseScheduler:
         self._active_impulse_y = torch.zeros(
             num_envs, dtype=torch.float64, device=self.device
         )
+        self._active_commanded_impulse_y = torch.zeros_like(self._active_impulse_y)
+        self._active_applied_impulse_y = torch.zeros_like(self._active_impulse_y)
         self._last_episode_indices = torch.full(
             (num_envs,), -1, dtype=torch.long, device=self.device
         )
@@ -387,12 +550,16 @@ class LateralPulseScheduler:
             safe_window_remaining_steps,
             dtype=torch.long,
         )
-        if bool(torch.any(episode_indices < 0)):
-            raise ValueError("episode_indices cannot be negative")
-        if bool(torch.any(episode_steps < 0)):
-            raise ValueError("episode_steps cannot be negative")
-        if bool(torch.any(safe_window_remaining_steps < 0)):
-            raise ValueError("safe_window_remaining_steps cannot be negative")
+        _assert_all_async(episode_indices >= 0, "episode_indices cannot be negative")
+        _assert_all_async(episode_steps >= 0, "episode_steps cannot be negative")
+        _assert_all_async(
+            safe_window_remaining_steps >= 0,
+            "safe_window_remaining_steps cannot be negative",
+        )
+        _assert_all_async(
+            episode_indices <= _U32_MASK,
+            "episode_indices exceed the Philox uint32 counter lane",
+        )
 
         current_inputs = (
             episode_indices,
@@ -425,6 +592,7 @@ class LateralPulseScheduler:
 
         seen_episode = self._last_episode_indices.ge(0)
         changed_episode = episode_indices.ne(self._last_episode_indices)
+        actual_reset = seen_episode & changed_episode
         invalid_same_episode_step = (
             seen_episode
             & ~changed_episode
@@ -436,16 +604,42 @@ class LateralPulseScheduler:
             & changed_episode
             & episode_indices.le(self._last_episode_indices)
         )
-        if bool(torch.any(invalid_same_episode_step)):
-            raise RuntimeError(
-                "episode_steps must advance by exactly one inside an episode"
-            )
-        if bool(torch.any(invalid_reset_step)):
-            raise RuntimeError("a changed episode index must restart episode_steps at zero")
-        if bool(torch.any(invalid_episode_order)):
-            raise RuntimeError("episode_indices must increase monotonically on reset")
-        self._remaining_steps.masked_fill_(changed_episode, 0)
-        self._active_impulse_y.masked_fill_(changed_episode, 0.0)
+        _assert_all_async(
+            ~invalid_same_episode_step,
+            "episode_steps must advance by exactly one inside an episode",
+        )
+        _assert_all_async(
+            ~invalid_reset_step,
+            "a changed episode index must restart episode_steps at zero",
+        )
+        _assert_all_async(
+            ~invalid_episode_order,
+            "episode_indices must increase monotonically on reset",
+        )
+
+        interrupted_reset = actual_reset & self._remaining_steps.gt(0)
+        reset_sampled_impulse = torch.where(
+            interrupted_reset,
+            self._active_impulse_y,
+            torch.zeros_like(self._active_impulse_y),
+        )
+        reset_commanded_impulse = torch.where(
+            interrupted_reset,
+            self._active_commanded_impulse_y,
+            torch.zeros_like(self._active_commanded_impulse_y),
+        )
+        reset_applied_impulse = torch.where(
+            interrupted_reset,
+            self._active_applied_impulse_y,
+            torch.zeros_like(self._active_applied_impulse_y),
+        )
+        reset_abandoned_uncommanded = reset_sampled_impulse - reset_commanded_impulse
+        reset_abandoned_unapplied = reset_commanded_impulse - reset_applied_impulse
+
+        self._remaining_steps.masked_fill_(actual_reset, 0)
+        self._active_impulse_y.masked_fill_(actual_reset, 0.0)
+        self._active_commanded_impulse_y.masked_fill_(actual_reset, 0.0)
+        self._active_applied_impulse_y.masked_fill_(actual_reset, 0.0)
         self._last_episode_indices.copy_(episode_indices)
         self._last_episode_steps.copy_(episode_steps)
 
@@ -458,25 +652,31 @@ class LateralPulseScheduler:
         interrupted = interrupted_strike | interrupted_window
         self._remaining_steps.masked_fill_(interrupted, 0)
         self._active_impulse_y.masked_fill_(interrupted, 0.0)
+        self._active_commanded_impulse_y.masked_fill_(interrupted, 0.0)
+        self._active_applied_impulse_y.masked_fill_(interrupted, 0.0)
 
         zero_opp = torch.zeros_like(episode_steps)
-        offsets_u = _stateless_uniform(
+        offsets_u = _counter_uniform(
             seed=self.cfg.seed,
             env_ids=self._env_ids,
             episode_indices=episode_indices,
             opportunity_indices=zero_opp,
-            stream=0,
+            domain="phase_offset",
         )
         offsets = torch.floor(
             offsets_u * self.cfg.opportunity_interval_steps
         ).to(dtype=torch.long)
         opportunity = episode_steps.remainder(
             self.cfg.opportunity_interval_steps
-        ).eq(offsets)
+        ).eq(offsets) & ~actual_reset
         opportunity_indices = torch.div(
             (episode_steps - offsets).clamp_min(0),
             self.cfg.opportunity_interval_steps,
             rounding_mode="floor",
+        )
+        _assert_all_async(
+            opportunity_indices <= _U32_MASK,
+            "opportunity_indices exceed the Philox uint32 counter lane",
         )
 
         active_now = self._remaining_steps.gt(0)
@@ -506,32 +706,32 @@ class LateralPulseScheduler:
             & active_now
         )
 
-        select_u = _stateless_uniform(
+        select_u = _counter_uniform(
             seed=self.cfg.seed,
             env_ids=self._env_ids,
             episode_indices=episode_indices,
             opportunity_indices=opportunity_indices,
-            stream=1,
+            domain="selection",
         )
         selected = eligible & select_u.lt(float(self.cfg.selection_probability))
-        direction_u = _stateless_uniform(
+        direction_u = _counter_uniform(
             seed=self.cfg.seed,
             env_ids=self._env_ids,
             episode_indices=episode_indices,
             opportunity_indices=opportunity_indices,
-            stream=2,
+            domain="direction",
         )
         sign = torch.where(
             direction_u.lt(0.5),
             torch.full_like(direction_u, -1.0),
             torch.ones_like(direction_u),
         )
-        magnitude_u = _stateless_uniform(
+        magnitude_u = _counter_uniform(
             seed=self.cfg.seed,
             env_ids=self._env_ids,
             episode_indices=episode_indices,
             opportunity_indices=opportunity_indices,
-            stream=3,
+            domain="unit_magnitude",
         )
         magnitude = float(self.cfg.normalized_impulse_min_mps) + magnitude_u * (
             float(self.cfg.normalized_impulse_max_mps)
@@ -546,12 +746,17 @@ class LateralPulseScheduler:
         # the stateless opportunity schedule instead of giving control extra selection chances.
         self._remaining_steps[selected] = self.cfg.pulse_duration_steps
         self._active_impulse_y[selected] = sampled_impulse[selected]
+        self._active_commanded_impulse_y[selected] = 0.0
+        self._active_applied_impulse_y[selected] = 0.0
 
         active_force = self._remaining_steps.gt(0) & self._active_impulse_y.ne(0.0)
         normalized_accel = torch.where(
             self._remaining_steps.gt(0),
             self._active_impulse_y / self.cfg.pulse_duration_s,
             torch.zeros_like(self._active_impulse_y),
+        )
+        self._active_commanded_impulse_y.add_(
+            normalized_accel * float(self.cfg.policy_dt_s)
         )
         self._remaining_steps.sub_(self._remaining_steps.gt(0).to(torch.long))
 
@@ -572,6 +777,7 @@ class LateralPulseScheduler:
         add_count("skipped_active_pulse_count", skipped_active)
         add_count("interrupted_for_strike_count", interrupted_strike)
         add_count("interrupted_for_window_count", interrupted_window)
+        add_count("interrupted_for_reset_count", interrupted_reset)
         add_count("active_force_env_step_count", active_force)
         self._counters[
             _COUNT_PREFIX + "sampled_normalized_impulse_abs_sum_mps"
@@ -582,9 +788,30 @@ class LateralPulseScheduler:
             normalized_accel.detach().abs().sum(dtype=torch.float64)
             * float(self.cfg.policy_dt_s)
         )
+        reset_ledger = {
+            "reset_interrupted_sampled_impulse_abs_sum_mps": reset_sampled_impulse,
+            "reset_interrupted_commanded_impulse_abs_sum_mps": reset_commanded_impulse,
+            "reset_interrupted_applied_impulse_abs_sum_mps": reset_applied_impulse,
+            "reset_abandoned_uncommanded_impulse_abs_sum_mps": (
+                reset_abandoned_uncommanded
+            ),
+            "reset_abandoned_unapplied_impulse_abs_sum_mps": (
+                reset_abandoned_unapplied
+            ),
+        }
+        for counter_name, values in reset_ledger.items():
+            self._counters[_COUNT_PREFIX + counter_name].add_(
+                values.detach().abs().sum(dtype=torch.float64)
+            )
 
         result = LateralPerturbationStep(
             step_token=step_token,
+            random_schedule_identity_sha256=self.random_schedule_identity_sha256,
+            potential_phase_offset_steps=offsets,
+            opportunity_indices=opportunity_indices,
+            potential_selection_u01=select_u,
+            potential_direction_u01=direction_u,
+            potential_unit_magnitude_u01=magnitude_u,
             normalized_accel_y_mps2=normalized_accel,
             opportunity_mask=opportunity,
             eligible_opportunity_mask=eligible,
@@ -594,6 +821,16 @@ class LateralPulseScheduler:
             active_force_mask=active_force,
             interrupted_for_strike_mask=interrupted_strike,
             interrupted_for_window_mask=interrupted_window,
+            interrupted_for_reset_mask=interrupted_reset,
+            reset_interrupted_sampled_impulse_y_mps=reset_sampled_impulse,
+            reset_interrupted_commanded_impulse_y_mps=reset_commanded_impulse,
+            reset_interrupted_applied_impulse_y_mps=reset_applied_impulse,
+            reset_abandoned_uncommanded_impulse_y_mps=(
+                reset_abandoned_uncommanded
+            ),
+            reset_abandoned_unapplied_impulse_y_mps=(
+                reset_abandoned_unapplied
+            ),
             remaining_steps_after_step=self._remaining_steps.clone(),
         )
         self._last_step_token = step_token
@@ -622,7 +859,14 @@ class LateralPulseScheduler:
         if self._last_result is None or result.step_token != self._last_step_token:
             raise RuntimeError("application receipt does not belong to the current scheduler step")
         last = self._last_result
+        if result.random_schedule_identity_sha256 != last.random_schedule_identity_sha256:
+            raise RuntimeError("application result has the wrong random schedule identity")
         comparable = (
+            "potential_phase_offset_steps",
+            "opportunity_indices",
+            "potential_selection_u01",
+            "potential_direction_u01",
+            "potential_unit_magnitude_u01",
             "normalized_accel_y_mps2",
             "opportunity_mask",
             "eligible_opportunity_mask",
@@ -632,19 +876,24 @@ class LateralPulseScheduler:
             "active_force_mask",
             "interrupted_for_strike_mask",
             "interrupted_for_window_mask",
+            "interrupted_for_reset_mask",
+            "reset_interrupted_sampled_impulse_y_mps",
+            "reset_interrupted_commanded_impulse_y_mps",
+            "reset_interrupted_applied_impulse_y_mps",
+            "reset_abandoned_uncommanded_impulse_y_mps",
+            "reset_abandoned_unapplied_impulse_y_mps",
             "remaining_steps_after_step",
         )
-        if any(
-            not torch.equal(getattr(last, name), getattr(result, name))
-            for name in comparable
-        ):
-            raise RuntimeError("application result does not match the current scheduler ledger")
+        for name in comparable:
+            _assert_all_async(
+                getattr(last, name) == getattr(result, name),
+                f"application result does not match scheduler ledger field {name}",
+            )
         if receipt.step_token != result.step_token:
             raise RuntimeError("adapter receipt step_token does not match the command")
         cached = self.cached_application_ledger(result.step_token)
         if cached is not None:
             return cached
-        expected_nonzero = int(result.active_force_mask.sum().item())
         expected = {
             "body_name": self.cfg.body_name,
             "input_force_frame": self.cfg.force_frame,
@@ -652,7 +901,6 @@ class LateralPulseScheduler:
             "full_batch_overwrite": True,
             "inactive_zero_overwrite": True,
             "zero_torque": True,
-            "nonzero_force_env_count": expected_nonzero,
         }
         for name, value in expected.items():
             if getattr(receipt, name) != value:
@@ -661,15 +909,28 @@ class LateralPulseScheduler:
                     f"expected {value!r}, got {getattr(receipt, name)!r}"
                 )
 
-        applied_starts = int(result.nonzero_start_mask.sum().item())
-        applied_step_impulse = float(
-            result.normalized_accel_y_mps2.abs().sum().item()
-            * float(self.cfg.policy_dt_s)
+        if receipt.applied_force_mask.shape != (self.num_envs,):
+            raise RuntimeError("adapter applied_force_mask has the wrong shape")
+        if receipt.applied_force_mask.device != self.device:
+            raise RuntimeError("adapter applied_force_mask has the wrong device")
+        _assert_all_async(
+            receipt.applied_force_mask == result.active_force_mask,
+            "adapter applied_force_mask does not match the commanded nonzero force mask",
         )
+        applied_starts_mask = result.nonzero_start_mask & receipt.applied_force_mask
+        applied_starts = applied_starts_mask.sum(dtype=torch.long)
+        applied_force_env_count = receipt.applied_force_mask.sum(dtype=torch.long)
+        applied_impulse_per_env = torch.where(
+            receipt.applied_force_mask,
+            result.normalized_accel_y_mps2 * float(self.cfg.policy_dt_s),
+            torch.zeros_like(result.normalized_accel_y_mps2),
+        )
+        applied_step_impulse = applied_impulse_per_env.abs().sum(dtype=torch.float64)
+        self._active_applied_impulse_y.add_(applied_impulse_per_env)
         self._counters[_COUNT_PREFIX + "wrench_write_step_count"].add_(1)
         self._counters[_COUNT_PREFIX + "applied_pulse_count"].add_(applied_starts)
         self._counters[_COUNT_PREFIX + "applied_force_env_step_count"].add_(
-            expected_nonzero
+            applied_force_env_count
         )
         self._counters[
             _COUNT_PREFIX + "applied_normalized_impulse_abs_sum_mps"
@@ -677,10 +938,14 @@ class LateralPulseScheduler:
         ledger = LateralApplicationLedgerRow(
             step_token=result.step_token,
             body_name=self.cfg.body_name,
-            selected_start_count=int(result.selected_start_mask.sum().item()),
-            applied_nonzero_start_count=applied_starts,
-            nonzero_force_env_count=expected_nonzero,
-            commanded_normalized_impulse_abs_mps=applied_step_impulse,
+            selected_start_count=result.selected_start_mask.sum(
+                dtype=torch.long
+            ).detach().clone(),
+            applied_nonzero_start_count=applied_starts.detach().clone(),
+            nonzero_force_env_count=applied_force_env_count.detach().clone(),
+            commanded_normalized_impulse_abs_mps=(
+                applied_step_impulse.detach().clone()
+            ),
         )
         self._last_application_ledger = ledger
         return ledger
@@ -722,12 +987,14 @@ def lateral_world_wrench_from_total_mass(
         raise TypeError("normalized acceleration must use a floating dtype")
     if not torch.is_floating_point(total_mass_kg):
         raise TypeError("total_mass_kg must use a floating dtype")
-    if bool(torch.any(~torch.isfinite(normalized_accel_y_mps2))):
-        raise ValueError("normalized acceleration must be finite")
-    if bool(torch.any(~torch.isfinite(total_mass_kg))) or bool(
-        torch.any(total_mass_kg <= 0.0)
-    ):
-        raise ValueError("total_mass_kg must be finite and strictly positive")
+    _assert_all_async(
+        torch.isfinite(normalized_accel_y_mps2),
+        "normalized acceleration must be finite",
+    )
+    _assert_all_async(
+        torch.isfinite(total_mass_kg) & total_mass_kg.gt(0.0),
+        "total_mass_kg must be finite and strictly positive",
+    )
 
     # The simulator mass tensor owns the runtime wrench dtype (normally float32).  Sampling and
     # ledger arithmetic stay float64, but the actual command is rounded exactly once here instead
@@ -779,10 +1046,12 @@ def dispatch_lateral_wrench_fail_closed(
     force_w, torque_w = lateral_world_wrench_from_total_mass(
         result.normalized_accel_y_mps2, total_mass_kg
     )
-    if bool(torch.any(force_w[:, :, 0] != 0.0)) or bool(
-        torch.any(force_w[:, :, 2] != 0.0)
-    ) or bool(torch.any(torque_w != 0.0)):
-        raise RuntimeError("lateral wrench kernel emitted forbidden X/Z force or torque")
+    _assert_all_async(
+        (force_w[:, :, 0] == 0.0)
+        & (force_w[:, :, 2] == 0.0)
+        & torch.all(torque_w == 0.0, dim=-1),
+        "lateral wrench kernel emitted forbidden X/Z force or torque",
+    )
     receipt = writer(
         step_token=result.step_token,
         force_w=force_w,
@@ -802,4 +1071,6 @@ __all__ = [
     "LateralWrenchWriteReceipt",
     "dispatch_lateral_wrench_fail_closed",
     "lateral_world_wrench_from_total_mass",
+    "random_schedule_contract",
+    "random_schedule_identity_sha256",
 ]
