@@ -13,6 +13,14 @@
 
 ## 2026-07-15
 
+- V1+V2×底座减速旧仪表 pair 已自然到 `model_1000` 并退出，不是中途失败。control/
+  treatment 的 model SHA-256 为 `ad69bc70...9f75` / `dcfb9599...00e8`，两边 filename/embedded
+  iter=`1000`、76 tensors / 1,762,715 浮点元素全 finite、fresh lineage=`1`、fatal0；
+  no-clobber receipt 为 `8c0b3750...415d` / `050f2657...5f00`。终点 21 点的底座击球前
+  速度 treatment/control=`0.15364/0.16714`，但旧 source 缺 activation denominator/numerator，
+  仍判 instrumentation-blocked，不买第二 seed/不 judge/不晋级。见
+  [interaction 卷宗](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-INTERACTION.md)。
+
 - Franco 反手拉 B 的 [`vendor L1 safety audit`](DEFINITIONS.md#motion-vendor-l1-safety) 已完成
   source-only 预注册/validator：绑定 exact L0 certificate、B schema-2 NPZ、vendor MJCF closure 与
   MuJoCo 3.10 runtime，复用既有 shortest-arc/linear 插值将 `151 @ 50 Hz` 有限密扫为

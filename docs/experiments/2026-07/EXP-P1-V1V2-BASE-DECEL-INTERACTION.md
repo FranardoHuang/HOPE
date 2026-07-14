@@ -105,8 +105,8 @@ control/treatment 分别为 `95d19d16...49bb` / `a4036b15...5788`。结果：
 | 运行（人话名 + `run_name`） | 状态 | Checkpoint/seed | 证据 | 结果产物 | 有效性说明 |
 | --- | --- | --- | --- | --- | --- |
 | V1+V2，底座减速关的首次 namespace；`phase1_fresh_c_v1v2_base_decel_control_seed3_20260714` | rejected，禁止重发 | first iteration 前，seed 3 | PID=PGID `358331` + claim/namespace | dynamic URDF import `malloc(): invalid size (unsorted)`，自然 `rc=134` | 基础设施失败，不是 Reward/行为失败 |
-| 同配方 control 唯一重试；`phase1_fresh_c_v1v2_base_decel_control_seed3_retry_v2_20260714` | `model_200` 身份过；记录时 live | `200/500/1000`，seed 3 | PID=PGID `359240`；model `44a709ac...035a` | receipt `ad47c826...4d1f` | V1/V2/base-decel denominator 不完整 |
-| V1+V2，底座减速权重 1；`phase1_fresh_c_v1v2_base_decel_w1_seed3_20260714` | `model_200` 身份过；记录时 live | `200/500/1000`，seed 3 | PID=PGID `359872`；model `b04e2338...e56b` | receipt `49234348...7748` | Reward 非零，但不能替代 denominator/numerator 合同 |
+| 同配方 control 唯一重试；`phase1_fresh_c_v1v2_base_decel_control_seed3_retry_v2_20260714` | terminal，自然退出 | `200/500/1000`，seed 3 | PID=PGID `359240`；model1000 `ad69bc70...9f75` | receipt `8c0b3750...415d` | finite/fresh 身份通过；V1/V2/base-decel denominator 不完整 |
+| V1+V2，底座减速权重 1；`phase1_fresh_c_v1v2_base_decel_w1_seed3_20260714` | terminal，自然退出 | `200/500/1000`，seed 3 | PID=PGID `359872`；model1000 `dcfb9599...00e8` | receipt `050f2657...5f00` | finite/fresh 身份通过；Reward 非零但不能替代 denominator/numerator 合同 |
 
 ## 决定
 
@@ -148,5 +148,16 @@ clean caeb source。显式 unlock 后的首次 control PID=PGID `358331` 在 fir
 报 `malloc(): invalid size (unsorted)`、自然 `rc=134`；treatment 未发射。旧 control 行已 rejected，唯一
 unchanged-recipe retry-v2 与 treatment 保持 ready，并由同一 fill 的 first-iteration 顺序约束保护。probe
 非科学、不可晋级。该 fill 随后让 retry-v2 PID=PGID `359240`（Pod2 GPU1）和 treatment PID=PGID
-`359872`（GPU2）依次越过 first iteration；matched pair 现 live，尚无 checkpoint/早判，交互轴结论仍为
-`inconclusive`。
+`359872`（GPU2）依次越过 first iteration，后来均自然跑到 `model_1000` 并退出。2026-07-15 的
+no-clobber 终档验身确认：两个 checkpoint 的 filename/embedded iteration 均为 `1000`，76 个
+tensor 中 1,762,715 个浮点元素全 finite，fresh lineage=`1`，schema-3 hard-contract SHA 均为
+`451cda47...2291`，精确 fatal 扫描为 0。control/treatment 的 model SHA 分别为
+`ad69bc70...9f75` / `dcfb9599...00e8`，receipt content SHA 分别为
+`8c0b3750...415d` / `050f2657...5f00`。
+
+终点 updates `980–1000` 的 21 点描述性均值为：treatment/control 底座击球前速度
+`0.15364/0.16714`（比值 `0.9193`），pre-fall=`0.06359/0.06569`，post-fall=`0.02390/0.02239`，
+legacy virtual return=`0.35220/0.34512`，strike-window hit=`0.08298/0.07625`。这表明底座减速有值得
+复测的弱方向，但速度比未过预注册 `<=0.90`，且最根本的 activation denominator/numerator 仍缺失。
+所以这一对仍为 `activation-invalid / instrumentation-blocked`：不买第二 seed、不 judge、不晋级；只能用
+新的同 phase 仪表 source 另开 fresh namespace 复测。

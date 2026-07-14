@@ -2020,3 +2020,19 @@ Reward 或行为失败，也不能把单边 attempt 记成 matched pair。旧 co
 first iteration 再发 treatment。该事务已按序完成：retry-v2 PID=PGID `359240`（Pod2 GPU1）和 treatment
 PID=PGID `359872`（GPU2）均越过 first iteration，pair 现 live；尚无 checkpoint/早判。G05 仍为
 `Partial`。
+
+#### V1+V2×底座减速旧仪表 pair 自然终档
+
+Pod2 的 retry-v2 PID=PGID `359240` 与 treatment PID=PGID `359872` 后续均自然跑到
+`model_1000` 并退出。no-clobber 终档验身确认两边 filename/embedded iter=`1000`，76 tensors /
+1,762,715 个浮点元素全 finite，fresh lineage=`1`，schema-3 hard-contract SHA 均为
+`451cda47...2291`，精确 fatal 扫描为 0。control/treatment checkpoint SHA 为
+`ad69bc70...9f75` / `dcfb9599...00e8`，receipt content SHA 为
+`8c0b3750...415d` / `050f2657...5f00`。
+
+updates `980–1000` 的描述性 treatment/control 均值：底座击球前速度
+`0.15364/0.16714`，pre-fall=`0.06359/0.06569`，post-fall=`0.02390/0.02239`，legacy virtual
+return=`0.35220/0.34512`。但旧 source 仍缺 V1/V2/base-decel 的 activation denominator/numerator，
+且速度比 `0.9193` 未过预注册 `<=0.90`。因此这只是 finite 终档+弱方向证据，不是
+Reward 采用结论；不买第二 seed、不 judge、不晋级。新 fresh 复测必须先让同 phase 仪表
+source 过独立 review 和 exact full-scene probe。G05 仍为 `Partial`。
