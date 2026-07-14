@@ -53,7 +53,11 @@ Follow-up note (2026-07-15, post-swing schema-v2 launch controller hardened; Gat
   `nvidia-smi`, fixed hostname/machine-id/boot-id, physical Pod2 GPU2 UUID plus shared lease, safe exact
   environment allowlist, resolved Hydra compose with timeout, and same-PID exec handoff. A separate offline
   builder produces a controller-validated schema-v2 plan outside the immutable source tree.
-- Focused host verification is `40 passed, 4 skipped`; no Pod launch, Isaac capture, attestation, first-reset
+- The read-only `plan` path now executes the exact same absolute cwd/environment/argv/timeout Hydra
+  `--cfg job --resolve` as `launch`, binds output digest/bytes/elapsed, and re-verifies runtime after compose
+  before any launch/capture namespace, claim or capture process can exist. `launch` repeats the same helper
+  and post-compose drift check before consuming the capture namespace.
+- Focused host verification is `43 passed, 4 skipped`; no Pod launch, Isaac capture, attestation, first-reset
   probe, science trainer, judge or hardware command occurred. The threat model is trusted root plus accidental
   drift/concurrent legitimate jobs; the five inventoried source/Isaac import roots are not claimed as a full
   venv/stdlib/native/rootfs dependency graph. Runtime remains `Partial` until a new GPU2 plan passes on Pod2.

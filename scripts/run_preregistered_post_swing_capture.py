@@ -32,6 +32,23 @@ class CaptureContractError(RuntimeError):
     """The frozen plan or current runtime does not authorize a launch."""
 
 
+class HydraComposeError(CaptureContractError):
+    """A read-only Hydra compose failed while retaining its bounded output."""
+
+    def __init__(
+        self,
+        message: str,
+        *,
+        output: bytes,
+        elapsed_ms: int,
+        returncode: int | None,
+    ) -> None:
+        super().__init__(message)
+        self.output = output
+        self.elapsed_ms = elapsed_ms
+        self.returncode = returncode
+
+
 ARTIFACT_ROOT = Path("/workspace/codexschema/phase1_post_swing_teacher_20260715")
 CAPTURE_PARENT = ARTIFACT_ROOT / "capture"
 LAUNCH_PARENT = ARTIFACT_ROOT / "launch"
@@ -1189,6 +1206,72 @@ def _environment(plan: Mapping[str, Any]) -> dict[str, str]:
     return exact
 
 
+def _compose_recipe(
+    plan: Mapping[str, Any], argv: Sequence[str]
+) -> tuple[bytes, dict[str, Any]]:
+    """Resolve the exact capture recipe without creating a capture/launch namespace."""
+
+    if not argv or not all(type(value) is str for value in argv):
+        raise CaptureContractError("Hydra compose argv must be a non-empty string sequence")
+    source = _canonical_absolute_path(
+        plan["capture_source"]["checkout"], "capture_source.checkout"
+    )
+    cwd = source / "hope_training/whole_body_tracking"
+    with _open_real_directory(cwd):
+        pass
+    environment = _environment(plan)
+    command = [*argv, "--cfg", "job", "--resolve"]
+    started = time.monotonic_ns()
+    try:
+        compose = subprocess.run(
+            command,
+            cwd=cwd,
+            env=environment,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.STDOUT,
+            check=False,
+            timeout=plan["runtime_environment"]["compose_timeout_s"],
+        )
+    except subprocess.TimeoutExpired as exc:
+        elapsed_ms = (time.monotonic_ns() - started) // 1_000_000
+        output = exc.stdout or b""
+        if isinstance(output, str):
+            output = output.encode()
+        if not isinstance(output, bytes):
+            output = bytes(output)
+        raise HydraComposeError(
+            "Hydra compose exceeded the frozen timeout",
+            output=output,
+            elapsed_ms=elapsed_ms,
+            returncode=None,
+        ) from exc
+    elapsed_ms = (time.monotonic_ns() - started) // 1_000_000
+    output = compose.stdout if compose.stdout is not None else b""
+    if isinstance(output, str):
+        output = output.encode()
+    if not isinstance(output, bytes):
+        raise CaptureContractError("Hydra compose returned a non-byte stdout payload")
+    if type(compose.returncode) is not int:
+        raise CaptureContractError("Hydra compose returned a non-integer status")
+    if compose.returncode != 0:
+        raise HydraComposeError(
+            f"Hydra compose failed with rc={compose.returncode}",
+            output=output,
+            elapsed_ms=elapsed_ms,
+            returncode=compose.returncode,
+        )
+    return output, {
+        "cwd": str(cwd),
+        "command_sha256": _sha256_bytes(_canonical_bytes(command)),
+        "environment_sha256": _sha256_bytes(_canonical_bytes(environment)),
+        "output_bytes": len(output),
+        "output_sha256": _sha256_bytes(output),
+        "elapsed_ms": elapsed_ms,
+        "returncode": compose.returncode,
+    }
+
+
 def _load_plan(path: Path, expected_sha256: str) -> tuple[Mapping[str, Any], bytes]:
     raw = _read_regular_bytes(path, "capture plan")
     actual = _sha256_bytes(raw)
@@ -1211,6 +1294,13 @@ def _namespace_exists(parent: Path, leaf: str) -> bool:
 def _plan_summary(plan: Mapping[str, Any], plan_raw: bytes, script: Path) -> dict[str, Any]:
     binding, proof = _verify_runtime(plan, script)
     argv = _derive_argv(plan, binding)
+    _compose_output, compose_proof = _compose_recipe(plan, argv)
+    binding_after, proof_after = _verify_runtime(plan, script)
+    if (
+        _derive_argv(plan, binding_after) != argv
+        or _stable_runtime_proof(proof_after) != _stable_runtime_proof(proof)
+    ):
+        raise CaptureContractError("source/input/runtime drifted during Hydra compose")
     plan_id = str(plan["plan_id"])
     return {
         "plan_sha256": _sha256_bytes(plan_raw),
@@ -1222,6 +1312,7 @@ def _plan_summary(plan: Mapping[str, Any], plan_raw: bytes, script: Path) -> dic
         "gpu_lease_held": _lease_is_held(),
         "asset_inventory": proof["asset_inventory"],
         "runtime_verification_elapsed_ms": proof["verification_elapsed_ms"],
+        "hydra_compose": compose_proof,
     }
 
 
@@ -1309,28 +1400,17 @@ def _launch(plan: Mapping[str, Any], plan_raw: bytes, script: Path) -> dict[str,
             cwd = source / "hope_training/whole_body_tracking"
             environment = _environment(plan)
             stage = "hydra_compose"
-            compose_command = [*argv, "--cfg", "job", "--resolve"]
             try:
-                compose = subprocess.run(
-                    compose_command,
-                    cwd=cwd,
-                    env=environment,
-                    stdin=subprocess.DEVNULL,
-                    stdout=subprocess.PIPE,
-                    stderr=subprocess.STDOUT,
-                    check=False,
-                    timeout=plan["runtime_environment"]["compose_timeout_s"],
-                )
-                compose_output = compose.stdout if isinstance(compose.stdout, bytes) else str(compose.stdout).encode()
-            except subprocess.TimeoutExpired as exc:
-                output = exc.stdout or b""
-                if isinstance(output, str):
-                    output = output.encode()
-                _exclusive_write_at(launch_fd, "hydra_compose.log", output)
-                raise CaptureContractError("Hydra compose exceeded the frozen timeout") from exc
+                compose_output, compose_proof = _compose_recipe(plan, argv)
+            except HydraComposeError as exc:
+                _exclusive_write_at(launch_fd, "hydra_compose.log", exc.output)
+                raise
             _exclusive_write_at(launch_fd, "hydra_compose.log", compose_output)
-            if compose.returncode != 0:
-                raise CaptureContractError(f"Hydra compose failed with rc={compose.returncode}")
+            _exclusive_write_at(
+                launch_fd,
+                "hydra_compose_receipt.json",
+                _canonical_bytes({"schema_version": 1, **compose_proof}) + b"\n",
+            )
             stage = "runtime_verification_after_compose"
             binding_after, runtime_after = _verify_runtime(plan, script)
             if (

@@ -50,8 +50,10 @@ python3 scripts/run_preregistered_post_swing_capture.py \
 
 `plan` 只读复算 source、ignored A3 tree、checkpoint/claim/binding/milestone receipt、动作、题库、Pod2
 hostname/machine-id/boot-id、physical GPU2 UUID、冻结 Python symlink chain、五个实际 source/Isaac import root
-和最终 argv；`launch` 持有共享 `/tmp/hope_lean_queue_gpu2.lock`，先用 exact `/usr/bin/git`、
-`/usr/bin/nvidia-smi` bytes/SHA 和安全环境做同一 argv 的 `--cfg job --resolve` compose，再次复算所有输入。
+和最终 argv；它随后用 launch 完全相同的 absolute cwd、安全环境、argv 与 timeout 跑只读
+`--cfg job --resolve`，记录 compose output SHA/bytes/elapsed，再次复算所有输入。失败或前后漂移均不会创建
+launch/capture namespace、claim 或 capture process。`launch` 持有共享 `/tmp/hope_lean_queue_gpu2.lock`，仍会用
+exact `/usr/bin/git`、`/usr/bin/nvidia-smi` bytes/SHA 和同一 helper 重复 compose、再次复算所有输入。
 只有仍 exact 才创建 capture directory；controller 随后以同一 PID `execve` 交棒，不产生可能成为 orphan 的 child。
 `status` 只按 immutable exec intent 的 PID/PGID/SID/starttime/cmdline 和四个固定制品读取，symlink、zombie、
 PID reuse 或 teacher receipt 重绑都不能报绿。

@@ -74,6 +74,7 @@ def _plan(tmp_path: Path, monkeypatch=None) -> dict:
         _patch_artifact_paths(monkeypatch, tmp_path)
     source = tmp_path / "source"
     source.mkdir(parents=True, exist_ok=True)
+    (source / "hope_training/whole_body_tracking").mkdir(parents=True, exist_ok=True)
     plan_id = "case-v2"
     requested_python = RUNNER.ISAAC_PYTHON
     train = source / "hope_training/whole_body_tracking/scripts/train.py"
@@ -490,6 +491,77 @@ def _fake_runtime(plan):
     }
 
 
+def test_plan_composes_with_exact_launch_context_and_writes_no_namespace(tmp_path, monkeypatch):
+    plan = _plan(tmp_path, monkeypatch)
+    calls = []
+    runtime_calls = []
+
+    def verify(candidate, _script):
+        runtime_calls.append(candidate)
+        return _fake_runtime(candidate)
+
+    def compose(command, **kwargs):
+        calls.append((command, kwargs))
+        return types.SimpleNamespace(returncode=0, stdout=b"resolved-config")
+
+    monkeypatch.setattr(RUNNER, "_verify_runtime", verify)
+    monkeypatch.setattr(RUNNER.subprocess, "run", compose)
+    monkeypatch.setattr(
+        RUNNER.os,
+        "execve",
+        lambda *_args: pytest.fail("plan mode must not start the capture process"),
+    )
+    raw = _canonical(plan)
+    result = RUNNER._plan_summary(plan, raw, Path("controller"))
+
+    assert len(runtime_calls) == 2
+    assert len(calls) == 1
+    command, kwargs = calls[0]
+    assert command[-3:] == ["--cfg", "job", "--resolve"]
+    assert kwargs["cwd"] == Path(plan["capture_source"]["checkout"]) / "hope_training/whole_body_tracking"
+    assert kwargs["env"] == RUNNER._environment(plan)
+    assert kwargs["timeout"] == plan["runtime_environment"]["compose_timeout_s"]
+    assert kwargs["stdin"] is subprocess.DEVNULL
+    assert kwargs["stdout"] is subprocess.PIPE
+    assert kwargs["stderr"] is subprocess.STDOUT
+    assert result["hydra_compose"]["output_sha256"] == _sha(b"resolved-config")
+    assert result["hydra_compose"]["output_bytes"] == len(b"resolved-config")
+    assert type(result["hydra_compose"]["elapsed_ms"]) is int
+    assert not RUNNER.ARTIFACT_ROOT.exists()
+    assert not (RUNNER.CAPTURE_PARENT / plan["plan_id"]).exists()
+    assert not (RUNNER.LAUNCH_PARENT / plan["plan_id"]).exists()
+
+
+def test_plan_compose_failure_spends_no_namespace_or_claim(tmp_path, monkeypatch):
+    plan = _plan(tmp_path, monkeypatch)
+    monkeypatch.setattr(RUNNER, "_verify_runtime", lambda p, _s: _fake_runtime(p))
+    monkeypatch.setattr(
+        RUNNER.subprocess,
+        "run",
+        lambda *_args, **_kwargs: types.SimpleNamespace(returncode=9, stdout=b"bad recipe"),
+    )
+    with pytest.raises(RUNNER.CaptureContractError, match="rc=9"):
+        RUNNER._plan_summary(plan, _canonical(plan), Path("controller"))
+    assert not RUNNER.ARTIFACT_ROOT.exists()
+    assert not (RUNNER.CAPTURE_PARENT / plan["plan_id"]).exists()
+    assert not (RUNNER.LAUNCH_PARENT / plan["plan_id"]).exists()
+
+
+def test_plan_post_compose_drift_fails_without_spending_namespace(tmp_path, monkeypatch):
+    plan = _plan(tmp_path, monkeypatch)
+    proofs = [_fake_runtime(plan), _fake_runtime(plan)]
+    proofs[1][1]["source_commit"] = "e" * 40
+    monkeypatch.setattr(RUNNER, "_verify_runtime", lambda *_args: proofs.pop(0))
+    monkeypatch.setattr(
+        RUNNER.subprocess,
+        "run",
+        lambda *_args, **_kwargs: types.SimpleNamespace(returncode=0, stdout=b"resolved"),
+    )
+    with pytest.raises(RUNNER.CaptureContractError, match="drifted"):
+        RUNNER._plan_summary(plan, _canonical(plan), Path("controller"))
+    assert not RUNNER.ARTIFACT_ROOT.exists()
+
+
 def test_compose_failure_records_all_evidence_without_capture_namespace(tmp_path, monkeypatch):
     plan = _plan(tmp_path, monkeypatch)
     monkeypatch.setattr(RUNNER, "_verify_runtime", lambda p, _s: _fake_runtime(p))
@@ -525,12 +597,16 @@ def test_post_compose_drift_spends_launch_but_not_capture(tmp_path, monkeypatch)
         RUNNER._launch(plan, _canonical(plan), Path("controller"))
     launch = RUNNER.LAUNCH_PARENT / plan["plan_id"]
     assert json.loads((launch / "failure.json").read_text())["stage"] == "runtime_verification_after_compose"
+    receipt = json.loads((launch / "hydra_compose_receipt.json").read_text())
+    assert receipt["output_sha256"] == _sha(b"resolved")
     assert not (RUNNER.CAPTURE_PARENT / plan["plan_id"]).exists()
 
 
 def test_same_pid_exec_intent_exists_before_exec_and_no_child_is_spawned(tmp_path, monkeypatch):
     plan = _plan(tmp_path, monkeypatch)
-    (Path(plan["capture_source"]["checkout"]) / "hope_training/whole_body_tracking").mkdir(parents=True)
+    (Path(plan["capture_source"]["checkout"]) / "hope_training/whole_body_tracking").mkdir(
+        parents=True, exist_ok=True
+    )
     monkeypatch.setattr(RUNNER, "_verify_runtime", lambda p, _s: _fake_runtime(p))
     monkeypatch.setattr(
         RUNNER.subprocess,

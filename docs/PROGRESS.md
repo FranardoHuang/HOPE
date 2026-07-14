@@ -15,7 +15,9 @@
 
 - post-swing capture schema-v2 controller/builder 已闭合九类 pre-launch blocker：历史 teacher lineage、
   Pod2 physical GPU2 UUID/共享 lease、absolute byte-bound tools、safe env、timeout compose、same-PID handoff
-  和 status 防重绑均有负测；focused `40 passed, 4 skipped`。只完成 host source gate，未连接 Pod、未 capture；
+  和 status 防重绑均有负测；`plan` 现与 `launch` 共用 exact cwd/env/argv/timeout 的只读 Hydra compose，
+  compose 前后复核且失败不消费 namespace，成功绑定 output digest/bytes/elapsed；focused
+  `43 passed, 4 skipped`。只完成 host source gate，未连接 Pod、未 capture；
   详见[实验卷宗](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md)和
   [操作文档](operations/run_post_swing_teacher_capture.md)。
 
