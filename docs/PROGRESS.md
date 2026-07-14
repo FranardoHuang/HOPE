@@ -13,6 +13,13 @@
 
 ## 2026-07-15
 
+- 横向躯干扰动的 source-only Isaac adapter 已通过独立红队：每个 physics substep 以当前
+  `torso_link` 显式 WORLD COM 提交力，same-tick/reset 竞争 writer、异常后的 terminal zero、motion inode
+  替换和 output no-clobber 均有反例；focused `65 passed`。它尚无真实 full-scene、solver response、
+  direct-setter 独占或 throughput 证据，`launch_authorized=false` / `training_authorized=false` 不变。见
+  [实验卷宗](experiments/2026-07/EXP-P1-LATERAL-BALANCE-PERTURBATION.md)和
+  [运行操作](operations/run_lateral_perturbation_runtime_probe.md)。
+
 - post-swing capture schema-v2 controller/builder 已闭合九类 pre-launch blocker：历史 teacher lineage、
   Pod2 physical GPU2 UUID/共享 lease、absolute byte-bound tools、safe env、timeout compose、same-PID handoff
   和 status 防重绑均有负测；`plan` 现与 `launch` 共用 exact cwd/env/argv/timeout 的只读 Hydra compose，
