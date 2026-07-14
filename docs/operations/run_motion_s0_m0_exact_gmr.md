@@ -7,33 +7,42 @@
 
 ## 0. 当前状态与边界
 
-两份 batch plan 与共享 runtime 均为 `preregistered_not_executed`。16 项只读 closure 已绑定 exact GMR
-commit/tree、十二个 runtime 文件、direct retarget XML 的 31-joint/32-body preorder、显式 qpos bijection、
-Python/pip 与 `xrobot_utils=absent`；两份 host `static` 已通过。
+attempt v1 已永久 **NO-CONSUME**：它只保存了一个无法从保留证据复现的 pip-freeze hash。2026-07-13
+22:53Z 的真实 S0 `inspect` 在 output root 创建前精确拒绝 `97c66009...18ff` vs 实际规范化
+`56b0f8af...c694`；M0 未重复同一 shared blocker，两份 `exact_gmr_v1` root 均 absent。不得修改 v1
+consumer/plan、重跑 v1 或复用 v1 root。
+
+当前可审阅入口是 attempt v2：两份 batch plan 与共享 runtime 均为 `preregistered_not_executed`。它保留
+原 16 项 exact GMR closure，并把 234 行、4,702 bytes 的规范化 pip snapshot 本身加入 Git；同时绑定
+`numpy/torch/mujoco/smplx/scipy` 五个直接 import 的 version、origin 与 dist-info `METADATA/RECORD`。
+实际复用的冻结 v1 base consumer 也有独立 bytes/SHA binding，plan/runtime JSON duplicate key 会 fail closed。
+两份 host `static-v2` 已通过；runtime `inspect-v2/consume-v2` 尚未运行。
 
 direct retarget `a3_mocap.xml` 的完整 site inventory 是空列表，且 `left_foot/right_foot` 明确 absent；不得抄
 canonical vendor MJCF 的足点去伪造 retarget site。M0 脚距只在 canonical vendor MJCF 的 `left_foot` 与
-`right_foot` 上做 FK。当前仍未运行 ignored runtime `inspect`、私有 PT、converter 或 `consume`，所以没有
-GMR 输出，也未解锁 schema-2/训练/真机。
+`right_foot` 上做 FK。当前仍未用 v2 运行 ignored runtime `inspect`、私有 PT、converter 或 `consume`，
+所以没有 GMR 输出，也未解锁 schema-2/训练/真机。
 
 ## 1. Host static
 
 ```bash
-S0=configs/motion_exact_gmr_s0_prereg_20260713.json
-M0=configs/motion_exact_gmr_m0_prereg_20260713.json
+S0=configs/motion_exact_gmr_s0_prereg_20260714_v2.json
+M0=configs/motion_exact_gmr_m0_prereg_20260714_v2.json
 S0_SHA=$(shasum -a 256 "$S0" | awk '{print $1}')
 M0_SHA=$(shasum -a 256 "$M0" | awk '{print $1}')
 
-python3 scripts/run_motion_s0_m0_exact_gmr.py \
+python3 scripts/run_motion_s0_m0_exact_gmr_v2.py \
   --plan "$S0" --expected-plan-sha256 "$S0_SHA" static
-python3 scripts/run_motion_s0_m0_exact_gmr.py \
+python3 scripts/run_motion_s0_m0_exact_gmr_v2.py \
   --plan "$M0" --expected-plan-sha256 "$M0_SHA" static
-python3 -m pytest -q tests/test_run_motion_s0_m0_exact_gmr.py
+python3 -m pytest -q \
+  tests/test_run_motion_s0_m0_exact_gmr.py \
+  tests/test_run_motion_s0_m0_exact_gmr_v2.py
 ```
 
 `static` 只读 Git 中的 prereg/tool/A3 tracked model tree，不访问私有 PT 或 ignored GMR。当前预期是两次
-分别输出 `PASS static s0_static_high_press` 与 `PASS static m0_lateral_teachers`；任何 binding、site absence、
-31-index bijection 或 tool SHA 漂移都必须 fail closed。
+分别输出 `PASS static-v2 s0_static_high_press` 与 `PASS static-v2 m0_lateral_teachers`；任何 snapshot bytes、
+direct-import binding、site absence、31-index bijection 或 tool SHA 漂移都必须 fail closed。
 
 ## 2. Runtime inspect（不写）
 
@@ -43,16 +52,19 @@ python3 -m pytest -q tests/test_run_motion_s0_m0_exact_gmr.py
 export CUDA_VISIBLE_DEVICES=
 PY=/workspace/yikang/miniforge3/envs/hope-motion-py310/bin/python3.10
 
-"$PY" scripts/run_motion_s0_m0_exact_gmr.py \
+"$PY" scripts/run_motion_s0_m0_exact_gmr_v2.py \
   --plan "$S0" --expected-plan-sha256 "$S0_SHA" inspect
-"$PY" scripts/run_motion_s0_m0_exact_gmr.py \
+"$PY" scripts/run_motion_s0_m0_exact_gmr_v2.py \
   --plan "$M0" --expected-plan-sha256 "$M0_SHA" inspect
 ```
 
-`inspect` 验 commit/tree/clean status、bundle、converter/import/model closure、direct retarget 的空 site
-inventory、Python/pip、canonical-beta completion 与五条 exact PT，并确认各自 output root 不存在。它设置
+`inspect-v2` 验 commit/tree/clean status、bundle、converter/import/model closure、direct retarget 的空 site
+inventory、完整 pip snapshot bytes、五个 direct import 的 origin/version/METADATA/RECORD、canonical-beta
+completion 与五条 exact PT，并确认各自 `exact_gmr_v2` root 不存在。它设置
 `PYTHONDONTWRITEBYTECODE=1`，不创建 output/state/report。S0/M0 分开 inspect，一批失败不改变另一批。
-本次 source 闭环没有执行这两条命令；必须在 code review 后另行运行并记录结果。
+若 shared consume lock 已存在，inspect 只读验证它是 single-link regular file 且 marker 精确；lock absent 也
+合法，inspect 绝不创建 lock。
+本次 source 闭环没有执行这两条命令；必须在 code review/合入并得到独立 runtime 授权后另行运行。
 
 ## 3. 一次性 consume
 
@@ -60,20 +72,26 @@ inventory、Python/pip、canonical-beta completion 与五条 exact PT，并确�
 **没有执行** `consume`。
 
 ```bash
-"$PY" scripts/run_motion_s0_m0_exact_gmr.py \
+"$PY" scripts/run_motion_s0_m0_exact_gmr_v2.py \
   --plan "$S0" --expected-plan-sha256 "$S0_SHA" consume
-"$PY" scripts/run_motion_s0_m0_exact_gmr.py \
+"$PY" scripts/run_motion_s0_m0_exact_gmr_v2.py \
   --plan "$M0" --expected-plan-sha256 "$M0_SHA" consume
 ```
 
 输出 root 分别为：
 
-- `/workspace/codexschema/motion_video_intake_20260713_s0/exact_gmr_v1`；
-- `/workspace/codexschema/motion_video_intake_20260713_m0/exact_gmr_v1`。
+- `/workspace/codexschema/motion_video_intake_20260713_s0/exact_gmr_v2`；
+- `/workspace/codexschema/motion_video_intake_20260713_m0/exact_gmr_v2`。
 
 root 必须原先不存在。每个 root 内先出现 `outputs/logs/audits/bindings`，所有内容完整并 fsync 后才最后出现
 `completion_manifest.json`。失败/超时或中断留下的是不可覆盖证据；不得删除后用同一 plan 重跑，需另建
-版本化 prereg/root。
+版本化 prereg/root。v2 在所有 converter child 退出后、completion 发布前再次验证 GMR/input/model 与
+Python snapshot/direct-import closure；post-check 失败必须保留 partial 且没有 completion。
+
+S0/M0 两条 `consume` 必须按上面的命令串行运行；consumer 还用
+`/workspace/codexschema/motion_s0_m0_exact_gmr_v2.consume.lock` 的 exclusive flock 做代码级互斥。首次
+consume 在持锁时写固定 marker；后续只接受 exact marker。这个互斥不要求 S0 成功后 M0 才能运行，也不把
+一批的失败写进另一批 root。
 
 ## 4. 结果边界
 

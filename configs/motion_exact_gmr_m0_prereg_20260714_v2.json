@@ -1,0 +1,394 @@
+{
+  "schema_version": 1,
+  "plan_id": "motion-exact-gmr-lateral-teachers-m0-20260714-v2",
+  "status": "preregistered_not_executed",
+  "batch_kind": "m0_lateral_teachers",
+  "scope": "attempt-v2 independent CPU-only exact GMR retarget of four M0 lateral-teacher canonical-beta PTs plus preregistered robot-coordinate stance measurement",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
+  "formal_eligible": false,
+  "schema2_authorized": false,
+  "training_authorized": false,
+  "hardware_authorized": false,
+  "runtime_contract": {
+    "path": "configs/motion_s0_m0_exact_gmr_runtime_20260714_v2.json",
+    "bytes": 23382,
+    "sha256": "a55c52cc1ad3524142b7bbb926e0b37a8e2a1ca42d779b3bec22873c757db7b2"
+  },
+  "source_materialization": {
+    "body_shape_contract": "diagnostic_same_performer_coordinatewise_median_betas_v1",
+    "preregistration": {
+      "path": "configs/motion_canonical_betas_m0_prereg_20260713.json",
+      "bytes": 6122,
+      "sha256": "c70d1fdbe75b3f22d5ca55193cb15c199882ac7df5976dc31fe19dc1fc9fcb69"
+    },
+    "completion_manifest": {
+      "path": "/workspace/codexschema/motion_video_intake_20260713_m0/canonical_betas_v1/materialization_manifest.json",
+      "bytes": 10273,
+      "sha256": "5cef05f7f4a0b901529d294998df34c6cfc4d8baa09ffb2befe9651c69071a65"
+    },
+    "canonical_betas_artifact": {
+      "path": "/workspace/codexschema/motion_video_intake_20260713_m0/canonical_betas_v1/canonical_betas.json",
+      "bytes": 915,
+      "sha256": "f405ba45d7f2233d3735c2e6b59409203cc98b1e97deef00224e16f2c7c4cbf2"
+    },
+    "canonical_vector_sha256": "a03f1642151453316f0c99f81a743a604e29c656c9fffd4bac89353f7c4d9cc6"
+  },
+  "processing_order": [
+    "lateral_step_left_1",
+    "lateral_step_left_2",
+    "lateral_step_right_1",
+    "lateral_step_right_2"
+  ],
+  "inputs": [
+    {
+      "asset_id": "lateral_step_left_1",
+      "frames": 105,
+      "ready_before_window_s": [
+        0.0,
+        0.75
+      ],
+      "ready_after_window_s": [
+        2.75,
+        3.25
+      ],
+      "canonical_vector_sha256": "a03f1642151453316f0c99f81a743a604e29c656c9fffd4bac89353f7c4d9cc6",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260713_m0/canonical_betas_v1/lateral_step_left_1.diagnostic_franco_donor_betas.pt",
+        "bytes": 463122,
+        "sha256": "d2ee8c998a209efd0b730801c20f54d0b6a8d2ea6a2215c263fada5d6a1986c8"
+      }
+    },
+    {
+      "asset_id": "lateral_step_left_2",
+      "frames": 97,
+      "ready_before_window_s": [
+        0.0,
+        0.75
+      ],
+      "ready_after_window_s": [
+        2.5,
+        3.0
+      ],
+      "canonical_vector_sha256": "a03f1642151453316f0c99f81a743a604e29c656c9fffd4bac89353f7c4d9cc6",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260713_m0/canonical_betas_v1/lateral_step_left_2.diagnostic_franco_donor_betas.pt",
+        "bytes": 428626,
+        "sha256": "3b3bac48ab4c945a38fca43d4435f14bf7c1df84408d73c19a85fe42721cda78"
+      }
+    },
+    {
+      "asset_id": "lateral_step_right_1",
+      "frames": 82,
+      "ready_before_window_s": [
+        0.0,
+        0.5
+      ],
+      "ready_after_window_s": [
+        2.0,
+        2.5
+      ],
+      "canonical_vector_sha256": "a03f1642151453316f0c99f81a743a604e29c656c9fffd4bac89353f7c4d9cc6",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260713_m0/canonical_betas_v1/lateral_step_right_1.diagnostic_franco_donor_betas.pt",
+        "bytes": 363474,
+        "sha256": "29d7c09794e49e9f918e078a3ad60624c28762e9f8bb522b7ca2b5e1aa8909d4"
+      }
+    },
+    {
+      "asset_id": "lateral_step_right_2",
+      "frames": 96,
+      "ready_before_window_s": [
+        0.0,
+        0.75
+      ],
+      "ready_after_window_s": [
+        2.5,
+        3.0
+      ],
+      "canonical_vector_sha256": "a03f1642151453316f0c99f81a743a604e29c656c9fffd4bac89353f7c4d9cc6",
+      "input": {
+        "path": "/workspace/codexschema/motion_video_intake_20260713_m0/canonical_betas_v1/lateral_step_right_2.diagnostic_franco_donor_betas.pt",
+        "bytes": 424466,
+        "sha256": "ceffcf988224c3c80ba07678f270e04690c3be3e049603337b198769a654ef08"
+      }
+    }
+  ],
+  "s0_semantic_guard": null,
+  "m0_stance_contract": {
+    "measurement_stage": "exact_robot_coordinate_gmr_before_schema2_promotion",
+    "normalization": "subtract_frame0_common_root_xy_then_rotate_frame0_pelvis_heading_to_plus_x",
+    "vector_definition": "d_xy=right_foot_xy-left_foot_xy",
+    "coordinate_axes": {
+      "x": "forward",
+      "y": "left"
+    },
+    "window_estimator": "coordinatewise_median_over_preregistered_closed_sample_indices",
+    "must_preserve_components": [
+      "lateral_separation",
+      "fore_aft_stagger"
+    ],
+    "feet_together_or_narrower_substitute_allowed": false,
+    "preregistered_tolerances_m": {
+      "fore_aft_component_abs_error_max": 0.03,
+      "lateral_component_abs_error_max": 0.03,
+      "lateral_narrowing_max": 0.005,
+      "minimum_initial_abs_lateral_separation": 0.05
+    },
+    "ready_window_sample_mappings": [
+      {
+        "asset_id": "lateral_step_left_1",
+        "ready_before": {
+          "time_rule": "sample_i_time_seconds=i/30; closed interval start<=t_i<=end",
+          "indices": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22
+          ],
+          "count": 23,
+          "first_index": 0,
+          "last_index": 22
+        },
+        "ready_after": {
+          "time_rule": "sample_i_time_seconds=i/30; closed interval start<=t_i<=end",
+          "indices": [
+            83,
+            84,
+            85,
+            86,
+            87,
+            88,
+            89,
+            90,
+            91,
+            92,
+            93,
+            94,
+            95,
+            96,
+            97
+          ],
+          "count": 15,
+          "first_index": 83,
+          "last_index": 97
+        }
+      },
+      {
+        "asset_id": "lateral_step_left_2",
+        "ready_before": {
+          "time_rule": "sample_i_time_seconds=i/30; closed interval start<=t_i<=end",
+          "indices": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22
+          ],
+          "count": 23,
+          "first_index": 0,
+          "last_index": 22
+        },
+        "ready_after": {
+          "time_rule": "sample_i_time_seconds=i/30; closed interval start<=t_i<=end",
+          "indices": [
+            75,
+            76,
+            77,
+            78,
+            79,
+            80,
+            81,
+            82,
+            83,
+            84,
+            85,
+            86,
+            87,
+            88,
+            89,
+            90
+          ],
+          "count": 16,
+          "first_index": 75,
+          "last_index": 90
+        }
+      },
+      {
+        "asset_id": "lateral_step_right_1",
+        "ready_before": {
+          "time_rule": "sample_i_time_seconds=i/30; closed interval start<=t_i<=end",
+          "indices": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15
+          ],
+          "count": 16,
+          "first_index": 0,
+          "last_index": 15
+        },
+        "ready_after": {
+          "time_rule": "sample_i_time_seconds=i/30; closed interval start<=t_i<=end",
+          "indices": [
+            60,
+            61,
+            62,
+            63,
+            64,
+            65,
+            66,
+            67,
+            68,
+            69,
+            70,
+            71,
+            72,
+            73,
+            74,
+            75
+          ],
+          "count": 16,
+          "first_index": 60,
+          "last_index": 75
+        }
+      },
+      {
+        "asset_id": "lateral_step_right_2",
+        "ready_before": {
+          "time_rule": "sample_i_time_seconds=i/30; closed interval start<=t_i<=end",
+          "indices": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22
+          ],
+          "count": 23,
+          "first_index": 0,
+          "last_index": 22
+        },
+        "ready_after": {
+          "time_rule": "sample_i_time_seconds=i/30; closed interval start<=t_i<=end",
+          "indices": [
+            75,
+            76,
+            77,
+            78,
+            79,
+            80,
+            81,
+            82,
+            83,
+            84,
+            85,
+            86,
+            87,
+            88,
+            89,
+            90
+          ],
+          "count": 16,
+          "first_index": 75,
+          "last_index": 90
+        }
+      }
+    ],
+    "result_placeholders_before_execution": {
+      "initial_d_xy_m": null,
+      "terminal_d_xy_m": null,
+      "fore_aft_stagger_initial_m": null,
+      "fore_aft_stagger_terminal_m": null,
+      "lateral_separation_initial_signed_m": null,
+      "lateral_separation_terminal_signed_m": null,
+      "lateral_separation_initial_abs_m": null,
+      "lateral_separation_terminal_abs_m": null,
+      "stance_passed": null
+    }
+  },
+  "output_contract": {
+    "output_root": "/workspace/codexschema/motion_video_intake_20260713_m0/exact_gmr_v2",
+    "result_suffix": ".exact_franco_donor_betas.gmr.pkl",
+    "output_root_must_not_exist": true,
+    "no_clobber": true,
+    "stop_on_first_failure": true,
+    "completion_manifest_filename": "completion_manifest.json",
+    "completion_manifest_published_last": true
+  },
+  "formal_blockers": [
+    "GMR structural and stance measurements do not prove foot contact, collision safety, balance or dynamics",
+    "schema-2, L0/L1 and table/net swept clearance are untested",
+    "teacher selection, displacement conditioning, mirroring and full-body composition are untested",
+    "TOPP, RL, vendor Gate3 and hardware remain unauthorized",
+    "attempt v1 is permanently blocked by an unreproducible hash-only pip snapshot; attempt v2 runtime inspect and consume remain unexecuted"
+  ],
+  "attempt_version": 2
+}

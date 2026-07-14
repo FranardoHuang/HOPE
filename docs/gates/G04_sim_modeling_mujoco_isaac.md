@@ -403,3 +403,23 @@ continues to use the separately bound canonical model. The two batch plans and s
 FK result, schema-2, simulator, training or hardware ran; G04 remains `Partial`. See
 [the experiment](../experiments/motion_exact_gmr_s0_m0_20260713.md) and
 [operation](../operations/run_motion_s0_m0_exact_gmr.md).
+
+The first real v1 runtime inspection later exposed a contract defect before any output root was
+created: the retained evidence bound only pip-freeze digest `97c66009...18ff`, while the exact
+interpreter produced the auditable bytewise-normalized digest `56b0f8af...c694`. The old receipt did
+not retain the package lines/bytes, and filesystem/conda history supplies no positive environment
+drift evidence, so v1 is permanently **NO-CONSUME** rather than silently rebound. M0 did not repeat
+the same shared blocker; both v1 roots remain absent.
+
+Attempt v2 is a new source contract and new output namespace. It tracks all 234 normalized lines
+(4,702 bytes, SHA `56b0f8af...c694`) and binds exact version/origin plus dist-info
+`METADATA/RECORD` for NumPy, Torch, MuJoCo, SMPL-X and SciPy. It also binds the frozen v1 base
+consumer that supplies the reviewed geometry machinery, rejects duplicate plan/runtime JSON keys,
+and serializes S0/M0 consume through one exact-marker exclusive flock without making one batch's
+success depend on the other. The consumer verifies that each direct origin matches its RECORD entry
+and repeats the runtime closure after converter children exit, before report-last completion. It
+deliberately does not claim a whole-distribution/ELF proof. Both v2 host static plans pass;
+v2-specific tests are `15 passed`, old+new focused tests are `28 passed`, and the repository suite is
+`949 passed, 10 skipped`. No v2 runtime inspect/consume,
+GMR output, FK result or simulator ran; G04 remains
+`Partial`.

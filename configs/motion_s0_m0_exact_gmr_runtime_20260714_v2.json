@@ -1,0 +1,645 @@
+{
+  "schema_version": 1,
+  "status": "preregistered_not_executed",
+  "scope": "attempt-v2 shared CPU-only source, runtime, converter, auditable pip snapshot, five direct-import bindings, A3 model, joint/body-order and foot-site contract for independent but consume-serialized S0 and M0 batches",
+  "tool_contract": {
+    "consumer": {
+      "path": "scripts/run_motion_s0_m0_exact_gmr_v2.py",
+      "bytes": 29531,
+      "sha256": "6f83de8ee0d4aecd933f945b73ecff1f6dc78c34de5050dc1450820a8c031394"
+    },
+    "base_consumer_v1": {
+      "path": "scripts/run_motion_s0_m0_exact_gmr.py",
+      "bytes": 64240,
+      "sha256": "4c32deeef1faee9744c13914cfe9ebc49738007f5faf0860c1c1a656544c5a5e"
+    },
+    "result_auditor": {
+      "path": "scripts/audit_gmr_result.py",
+      "bytes": 11501,
+      "sha256": "7adca8eab4e168f0c8c505d77dabb000c9d29891594b8882e6aba95250469884"
+    }
+  },
+  "batch_serialization_contract": {
+    "mode": "advisory_flock_exclusive_across_s0_m0_consume",
+    "lock_path": "/workspace/codexschema/motion_s0_m0_exact_gmr_v2.consume.lock",
+    "lock_payload_utf8": "motion-s0-m0-exact-gmr-v2-serialized-consume-lock",
+    "inspect_writes_lock": false,
+    "consume_batches": [
+      "s0_static_high_press",
+      "m0_lateral_teachers"
+    ],
+    "batch_order_dependency": false
+  },
+  "ignored_gmr_source": {
+    "root": "/workspace/franco/motion_work/GMR",
+    "commit": "aabea2eee4be4bc16d4be17dac5ffa85e5a31539",
+    "tree_oid": "dc32626643e1a35820ec3ccf00e4d20b590d77cf",
+    "worktree_must_be_clean": true,
+    "recovery_bundle": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/gmr_provenance/GMR_aabea2e.bundle",
+      "bytes": 282953810,
+      "sha256": "5b94af15f4a367dff8d7dc6c1cf14d26be6a649a25df6e1c1046b0e6ab72e2de"
+    },
+    "runtime_files": {
+      "converter": {
+        "path": "/workspace/franco/motion_work/GMR/scripts/gvhmr_to_robot.py",
+        "bytes": 7075,
+        "sha256": "a989edd8e0c9392d18bd0a439ed4f290f187a8f8daaaa049c992f79cb1d185da"
+      },
+      "package_init": {
+        "path": "/workspace/franco/motion_work/GMR/general_motion_retargeting/__init__.py",
+        "bytes": 641,
+        "sha256": "eb7a658704164e03cf182bc57f863c7dc01f87b49c463cecc5c2f3f5d58b5502"
+      },
+      "smpl_loader": {
+        "path": "/workspace/franco/motion_work/GMR/general_motion_retargeting/utils/smpl.py",
+        "bytes": 13815,
+        "sha256": "2737f47207eb7298e747907ea2d11355d1280b680bc4e0fbce3080657e505de2"
+      },
+      "motion_retarget": {
+        "path": "/workspace/franco/motion_work/GMR/general_motion_retargeting/motion_retarget.py",
+        "bytes": 20549,
+        "sha256": "67de733e0114794d901c298a49bcb1cfda7bf03a833394766284a01eacc52c5f"
+      },
+      "params": {
+        "path": "/workspace/franco/motion_work/GMR/general_motion_retargeting/params.py",
+        "bytes": 4963,
+        "sha256": "7c5a7a9bff70dd9826a41dbc80ec6d5342a1ded77b735558345203633f32e901"
+      },
+      "kinematics_model": {
+        "path": "/workspace/franco/motion_work/GMR/general_motion_retargeting/kinematics_model.py",
+        "bytes": 10910,
+        "sha256": "f4b69a6876cfc967383555cc82220077f768a8246eac5ae6d29e680ae9bdb1b1"
+      },
+      "robot_motion_viewer": {
+        "path": "/workspace/franco/motion_work/GMR/general_motion_retargeting/robot_motion_viewer.py",
+        "bytes": 5846,
+        "sha256": "6d5ee44d80de6e411bc0a7fc9c2ca162cabc597d21a8c747e1045c3c6accc991"
+      },
+      "data_loader": {
+        "path": "/workspace/franco/motion_work/GMR/general_motion_retargeting/data_loader.py",
+        "bytes": 673,
+        "sha256": "48d2857fe856124509295a57678655c6301e1e36d0109bf15962b648ff61c635"
+      },
+      "neck_retarget": {
+        "path": "/workspace/franco/motion_work/GMR/general_motion_retargeting/neck_retarget.py",
+        "bytes": 2023,
+        "sha256": "dfc439e5244ee2bb1cc5358fd1f3f35a20740696eb4844fe6b51733212382886"
+      },
+      "neutral_smplx_model": {
+        "path": "/workspace/franco/motion_work/GMR/assets/body_models/smplx/SMPLX_NEUTRAL.npz",
+        "bytes": 108752058,
+        "sha256": "376021446ddc86e99acacd795182bbef903e61d33b76b9d8b359c2b0865bd992"
+      },
+      "a3_retarget_mjcf": {
+        "path": "/workspace/franco/motion_work/GMR/assets/agibot_a3/a3_mocap.xml",
+        "bytes": 19741,
+        "sha256": "242235f5a0ef0b2b134cdf4c2514b39c04f8d70dc8cac6ca8781c6b7d40b68ca"
+      },
+      "smplx_to_a3_mapping": {
+        "path": "/workspace/franco/motion_work/GMR/general_motion_retargeting/ik_configs/smplx_to_a3.json",
+        "bytes": 3581,
+        "sha256": "262b398629183f9f861d4780fa5ac5308bed5d851e62f365ff369cc39854a011"
+      }
+    },
+    "checkpoint_contract": {
+      "runtime_checkpoint_files": [],
+      "semantic": "checkpoint_free_optimization_converter; GVHMR inference is already frozen in each input PT",
+      "evidence": "bound converter/import closure has no checkpoint CLI argument or runtime checkpoint read"
+    },
+    "retarget_joint_order": [
+      "waist_yaw_joint",
+      "waist_roll_joint",
+      "waist_pitch_joint",
+      "head_yaw_joint",
+      "head_pitch_joint",
+      "left_shoulder_pitch_joint",
+      "left_shoulder_roll_joint",
+      "left_shoulder_yaw_joint",
+      "left_elbow_joint",
+      "left_wrist_roll_joint",
+      "left_wrist_pitch_joint",
+      "left_wrist_yaw_joint",
+      "right_shoulder_pitch_joint",
+      "right_shoulder_roll_joint",
+      "right_shoulder_yaw_joint",
+      "right_elbow_joint",
+      "right_wrist_roll_joint",
+      "right_wrist_pitch_joint",
+      "right_wrist_yaw_joint",
+      "left_hip_pitch_joint",
+      "left_hip_roll_joint",
+      "left_hip_yaw_joint",
+      "left_knee_joint",
+      "left_ankle_pitch_joint",
+      "left_ankle_roll_joint",
+      "right_hip_pitch_joint",
+      "right_hip_roll_joint",
+      "right_hip_yaw_joint",
+      "right_knee_joint",
+      "right_ankle_pitch_joint",
+      "right_ankle_roll_joint"
+    ],
+    "retarget_body_order": [
+      "pelvis_link",
+      "waist_yaw_Link",
+      "waist_roll_Link",
+      "torso_Link",
+      "head_yaw_Link",
+      "head_pitch_Link",
+      "left_shoulder_pitch_Link",
+      "left_shoulder_roll_Link",
+      "left_shoulder_yaw_Link",
+      "left_elbow_Link",
+      "left_wrist_roll_Link",
+      "left_wrist_pitch_Link",
+      "left_wrist_yaw_Link",
+      "right_shoulder_pitch_Link",
+      "right_shoulder_roll_Link",
+      "right_shoulder_yaw_Link",
+      "right_elbow_Link",
+      "right_wrist_roll_Link",
+      "right_wrist_pitch_Link",
+      "right_wrist_yaw_Link",
+      "left_hip_pitch_Link",
+      "left_hip_roll_Link",
+      "left_hip_yaw_Link",
+      "left_knee_Link",
+      "left_ankle_pitch_Link",
+      "left_ankle_roll_Link",
+      "right_hip_pitch_Link",
+      "right_hip_roll_Link",
+      "right_hip_yaw_Link",
+      "right_knee_Link",
+      "right_ankle_pitch_Link",
+      "right_ankle_roll_Link"
+    ],
+    "retarget_site_inventory": [],
+    "retarget_foot_site_absence": {
+      "left": {
+        "site": "left_foot",
+        "absent": true
+      },
+      "right": {
+        "site": "right_foot",
+        "absent": true
+      }
+    },
+    "joint_bijection_to_canonical": [
+      {
+        "gmr_dof_index": 0,
+        "gmr_joint": "waist_yaw_joint",
+        "canonical_qpos_index": 7,
+        "canonical_joint": "waist_yaw_joint"
+      },
+      {
+        "gmr_dof_index": 1,
+        "gmr_joint": "waist_roll_joint",
+        "canonical_qpos_index": 8,
+        "canonical_joint": "waist_roll_joint"
+      },
+      {
+        "gmr_dof_index": 2,
+        "gmr_joint": "waist_pitch_joint",
+        "canonical_qpos_index": 9,
+        "canonical_joint": "waist_pitch_joint"
+      },
+      {
+        "gmr_dof_index": 3,
+        "gmr_joint": "head_yaw_joint",
+        "canonical_qpos_index": 10,
+        "canonical_joint": "head_yaw_joint"
+      },
+      {
+        "gmr_dof_index": 4,
+        "gmr_joint": "head_pitch_joint",
+        "canonical_qpos_index": 11,
+        "canonical_joint": "head_pitch_joint"
+      },
+      {
+        "gmr_dof_index": 5,
+        "gmr_joint": "left_shoulder_pitch_joint",
+        "canonical_qpos_index": 12,
+        "canonical_joint": "left_shoulder_pitch_joint"
+      },
+      {
+        "gmr_dof_index": 6,
+        "gmr_joint": "left_shoulder_roll_joint",
+        "canonical_qpos_index": 13,
+        "canonical_joint": "left_shoulder_roll_joint"
+      },
+      {
+        "gmr_dof_index": 7,
+        "gmr_joint": "left_shoulder_yaw_joint",
+        "canonical_qpos_index": 14,
+        "canonical_joint": "left_shoulder_yaw_joint"
+      },
+      {
+        "gmr_dof_index": 8,
+        "gmr_joint": "left_elbow_joint",
+        "canonical_qpos_index": 15,
+        "canonical_joint": "left_elbow_joint"
+      },
+      {
+        "gmr_dof_index": 9,
+        "gmr_joint": "left_wrist_roll_joint",
+        "canonical_qpos_index": 16,
+        "canonical_joint": "left_wrist_roll_joint"
+      },
+      {
+        "gmr_dof_index": 10,
+        "gmr_joint": "left_wrist_pitch_joint",
+        "canonical_qpos_index": 17,
+        "canonical_joint": "left_wrist_pitch_joint"
+      },
+      {
+        "gmr_dof_index": 11,
+        "gmr_joint": "left_wrist_yaw_joint",
+        "canonical_qpos_index": 18,
+        "canonical_joint": "left_wrist_yaw_joint"
+      },
+      {
+        "gmr_dof_index": 12,
+        "gmr_joint": "right_shoulder_pitch_joint",
+        "canonical_qpos_index": 19,
+        "canonical_joint": "right_shoulder_pitch_joint"
+      },
+      {
+        "gmr_dof_index": 13,
+        "gmr_joint": "right_shoulder_roll_joint",
+        "canonical_qpos_index": 20,
+        "canonical_joint": "right_shoulder_roll_joint"
+      },
+      {
+        "gmr_dof_index": 14,
+        "gmr_joint": "right_shoulder_yaw_joint",
+        "canonical_qpos_index": 21,
+        "canonical_joint": "right_shoulder_yaw_joint"
+      },
+      {
+        "gmr_dof_index": 15,
+        "gmr_joint": "right_elbow_joint",
+        "canonical_qpos_index": 22,
+        "canonical_joint": "right_elbow_joint"
+      },
+      {
+        "gmr_dof_index": 16,
+        "gmr_joint": "right_wrist_roll_joint",
+        "canonical_qpos_index": 23,
+        "canonical_joint": "right_wrist_roll_joint"
+      },
+      {
+        "gmr_dof_index": 17,
+        "gmr_joint": "right_wrist_pitch_joint",
+        "canonical_qpos_index": 24,
+        "canonical_joint": "right_wrist_pitch_joint"
+      },
+      {
+        "gmr_dof_index": 18,
+        "gmr_joint": "right_wrist_yaw_joint",
+        "canonical_qpos_index": 25,
+        "canonical_joint": "right_wrist_yaw_joint"
+      },
+      {
+        "gmr_dof_index": 19,
+        "gmr_joint": "left_hip_pitch_joint",
+        "canonical_qpos_index": 26,
+        "canonical_joint": "left_hip_pitch_joint"
+      },
+      {
+        "gmr_dof_index": 20,
+        "gmr_joint": "left_hip_roll_joint",
+        "canonical_qpos_index": 27,
+        "canonical_joint": "left_hip_roll_joint"
+      },
+      {
+        "gmr_dof_index": 21,
+        "gmr_joint": "left_hip_yaw_joint",
+        "canonical_qpos_index": 28,
+        "canonical_joint": "left_hip_yaw_joint"
+      },
+      {
+        "gmr_dof_index": 22,
+        "gmr_joint": "left_knee_joint",
+        "canonical_qpos_index": 29,
+        "canonical_joint": "left_knee_joint"
+      },
+      {
+        "gmr_dof_index": 23,
+        "gmr_joint": "left_ankle_pitch_joint",
+        "canonical_qpos_index": 30,
+        "canonical_joint": "left_ankle_pitch_joint"
+      },
+      {
+        "gmr_dof_index": 24,
+        "gmr_joint": "left_ankle_roll_joint",
+        "canonical_qpos_index": 31,
+        "canonical_joint": "left_ankle_roll_joint"
+      },
+      {
+        "gmr_dof_index": 25,
+        "gmr_joint": "right_hip_pitch_joint",
+        "canonical_qpos_index": 32,
+        "canonical_joint": "right_hip_pitch_joint"
+      },
+      {
+        "gmr_dof_index": 26,
+        "gmr_joint": "right_hip_roll_joint",
+        "canonical_qpos_index": 33,
+        "canonical_joint": "right_hip_roll_joint"
+      },
+      {
+        "gmr_dof_index": 27,
+        "gmr_joint": "right_hip_yaw_joint",
+        "canonical_qpos_index": 34,
+        "canonical_joint": "right_hip_yaw_joint"
+      },
+      {
+        "gmr_dof_index": 28,
+        "gmr_joint": "right_knee_joint",
+        "canonical_qpos_index": 35,
+        "canonical_joint": "right_knee_joint"
+      },
+      {
+        "gmr_dof_index": 29,
+        "gmr_joint": "right_ankle_pitch_joint",
+        "canonical_qpos_index": 36,
+        "canonical_joint": "right_ankle_pitch_joint"
+      },
+      {
+        "gmr_dof_index": 30,
+        "gmr_joint": "right_ankle_roll_joint",
+        "canonical_qpos_index": 37,
+        "canonical_joint": "right_ankle_roll_joint"
+      }
+    ]
+  },
+  "a3_robot_contract": {
+    "canonical_mjcf": {
+      "path": "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml",
+      "bytes": 49107,
+      "sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97"
+    },
+    "canonical_model_tree": {
+      "root": "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong",
+      "algorithm": "sha256(canonical-json(sorted[{path,bytes,sha256}]))-v1",
+      "file_count": 76,
+      "total_bytes": 14142194,
+      "manifest_sha256": "c9725c580e8c176a3886592db898088e53673aa2dd8f2947e2added4b2933b83"
+    },
+    "joint_order_source": {
+      "path": "hope_training/config/joint_order_agibot_a3.yaml",
+      "bytes": 1099,
+      "sha256": "7748a134f362ce2ad6a3afe30234a7590133244dcabbaa5d990cda9776acb205"
+    },
+    "joint_order": [
+      "waist_yaw_joint",
+      "waist_roll_joint",
+      "waist_pitch_joint",
+      "head_yaw_joint",
+      "head_pitch_joint",
+      "left_shoulder_pitch_joint",
+      "left_shoulder_roll_joint",
+      "left_shoulder_yaw_joint",
+      "left_elbow_joint",
+      "left_wrist_roll_joint",
+      "left_wrist_pitch_joint",
+      "left_wrist_yaw_joint",
+      "right_shoulder_pitch_joint",
+      "right_shoulder_roll_joint",
+      "right_shoulder_yaw_joint",
+      "right_elbow_joint",
+      "right_wrist_roll_joint",
+      "right_wrist_pitch_joint",
+      "right_wrist_yaw_joint",
+      "left_hip_pitch_joint",
+      "left_hip_roll_joint",
+      "left_hip_yaw_joint",
+      "left_knee_joint",
+      "left_ankle_pitch_joint",
+      "left_ankle_roll_joint",
+      "right_hip_pitch_joint",
+      "right_hip_roll_joint",
+      "right_hip_yaw_joint",
+      "right_knee_joint",
+      "right_ankle_pitch_joint",
+      "right_ankle_roll_joint"
+    ],
+    "body_order": [
+      "pelvis_link",
+      "waist_yaw_Link",
+      "waist_roll_Link",
+      "torso_Link",
+      "head_yaw_Link",
+      "head_pitch_Link",
+      "left_shoulder_pitch_Link",
+      "left_shoulder_roll_Link",
+      "left_shoulder_yaw_Link",
+      "left_elbow_Link",
+      "left_wrist_roll_Link",
+      "left_wrist_pitch_Link",
+      "left_wrist_yaw_Link",
+      "right_shoulder_pitch_Link",
+      "right_shoulder_roll_Link",
+      "right_shoulder_yaw_Link",
+      "right_elbow_Link",
+      "right_wrist_roll_Link",
+      "right_wrist_pitch_Link",
+      "right_wrist_yaw_Link",
+      "left_hip_pitch_Link",
+      "left_hip_roll_Link",
+      "left_hip_yaw_Link",
+      "left_knee_Link",
+      "left_ankle_pitch_Link",
+      "left_ankle_roll_Link",
+      "right_hip_pitch_Link",
+      "right_hip_roll_Link",
+      "right_hip_yaw_Link",
+      "right_knee_Link",
+      "right_ankle_pitch_Link",
+      "right_ankle_roll_Link"
+    ],
+    "gmr_output_to_mjcf_qpos": {
+      "root_pos": "qpos[0:3]",
+      "root_rot_input": "xyzw",
+      "root_rot_mjcf": "qpos[3:7]=[w,x,y,z]",
+      "dof_pos": "qpos[7:38] via explicit 31-name/index bijection"
+    },
+    "foot_site_mapping": {
+      "left": {
+        "site": "left_foot",
+        "parent_body": "left_ankle_roll_Link",
+        "local_pos_m": [
+          0.04,
+          0.0,
+          -0.067
+        ]
+      },
+      "right": {
+        "site": "right_foot",
+        "parent_body": "right_ankle_roll_Link",
+        "local_pos_m": [
+          0.04,
+          0.0,
+          -0.067
+        ]
+      }
+    }
+  },
+  "execution_contract": {
+    "cpu_only": true,
+    "CUDA_VISIBLE_DEVICES": "",
+    "OMP_NUM_THREADS": 8,
+    "MKL_NUM_THREADS": 8,
+    "TORCH_FORCE_NO_WEIGHTS_ONLY_LOAD": "1",
+    "PYTHONDONTWRITEBYTECODE": "1",
+    "robot": "agibot_a3",
+    "target_fps": 30,
+    "warmup_threshold_strict_lt": 0.0001,
+    "warmup_max_rounds": 200,
+    "timeout_seconds_per_asset": 900,
+    "python_environment": {
+      "executable": "/workspace/yikang/miniforge3/envs/hope-motion-py310/bin/python3.10",
+      "executable_bytes": 17331920,
+      "executable_sha256": "dd9eb3366f895f5ed70ae0240dda1956269448cfbd270092aee9a65de55caa55",
+      "version": "Python 3.10.20",
+      "pip_version": "pip 26.1.2 from /workspace/yikang/miniforge3/envs/hope-motion-py310/lib/python3.10/site-packages/pip (python 3.10)",
+      "pip_freeze_command": "python -m pip freeze --all",
+      "pip_freeze_normalization": "strip nonempty lines; bytewise sort; join LF; append one LF; sha256",
+      "pip_freeze_sha256": "56b0f8af9677b279bbb4925b6f49113f484dcb9ded1ed8d9bc56af71f304c694",
+      "xrobot_utils_resolution": {
+        "status": "absent",
+        "origin": null,
+        "bytes": null,
+        "sha256": null
+      },
+      "pip_freeze_snapshot": {
+        "path": "configs/motion_s0_m0_exact_gmr_pip_freeze_56b0f8af_v2.txt",
+        "bytes": 4702,
+        "sha256": "56b0f8af9677b279bbb4925b6f49113f484dcb9ded1ed8d9bc56af71f304c694",
+        "line_count": 234,
+        "normalization": "strip nonempty lines; bytewise sort; join LF; append one LF"
+      },
+      "direct_imports": {
+        "mujoco": {
+          "dist_info_root": "/workspace/yikang/miniforge3/envs/hope-motion-py310/lib/python3.10/site-packages/mujoco-3.10.0.dist-info",
+          "distribution_name": "mujoco",
+          "metadata": {
+            "bytes": 232742,
+            "path": "/workspace/yikang/miniforge3/envs/hope-motion-py310/lib/python3.10/site-packages/mujoco-3.10.0.dist-info/METADATA",
+            "sha256": "e37572aef23253626ac77d51bba1eaee630f69037c315e8f715fc56758f7fe3f"
+          },
+          "module_origin": {
+            "bytes": 7997,
+            "path": "/workspace/yikang/miniforge3/envs/hope-motion-py310/lib/python3.10/site-packages/mujoco/__init__.py",
+            "sha256": "c734d493d95933f4414633325491e8e6658670455a3c94981a6c1d26600d43e1"
+          },
+          "record": {
+            "bytes": 28853,
+            "path": "/workspace/yikang/miniforge3/envs/hope-motion-py310/lib/python3.10/site-packages/mujoco-3.10.0.dist-info/RECORD",
+            "sha256": "0e2db85cf0eeac3515859b5def1625ef15a22743dbb237f46fb7bf2014f186c2"
+          },
+          "version": "3.10.0"
+        },
+        "numpy": {
+          "dist_info_root": "/workspace/yikang/miniforge3/envs/hope-motion-py310/lib/python3.10/site-packages/numpy-1.23.5.dist-info",
+          "distribution_name": "numpy",
+          "metadata": {
+            "bytes": 2296,
+            "path": "/workspace/yikang/miniforge3/envs/hope-motion-py310/lib/python3.10/site-packages/numpy-1.23.5.dist-info/METADATA",
+            "sha256": "1dd9add64280d256885e58fc129daa201ea0cd362f7bd595ad1dc85af3be3788"
+          },
+          "module_origin": {
+            "bytes": 15398,
+            "path": "/workspace/yikang/miniforge3/envs/hope-motion-py310/lib/python3.10/site-packages/numpy/__init__.py",
+            "sha256": "8cbd5deacb12112e0313dba29bcdad4751616850bef439aabad3c08d1e58a57d"
+          },
+          "record": {
+            "bytes": 109797,
+            "path": "/workspace/yikang/miniforge3/envs/hope-motion-py310/lib/python3.10/site-packages/numpy-1.23.5.dist-info/RECORD",
+            "sha256": "c26fb47dab540c38ff7b48d2ce7e61ff4dd8b480de52782215d73c76474fc5da"
+          },
+          "version": "1.23.5"
+        },
+        "scipy": {
+          "dist_info_root": "/workspace/yikang/miniforge3/envs/hope-motion-py310/lib/python3.10/site-packages/scipy-1.15.3.dist-info",
+          "distribution_name": "scipy",
+          "metadata": {
+            "bytes": 61956,
+            "path": "/workspace/yikang/miniforge3/envs/hope-motion-py310/lib/python3.10/site-packages/scipy-1.15.3.dist-info/METADATA",
+            "sha256": "c75caf32b67a13a9fc16aacf993a8bb883b7a69744ffe77cbbd4f3bfbad28f3d"
+          },
+          "module_origin": {
+            "bytes": 4153,
+            "path": "/workspace/yikang/miniforge3/envs/hope-motion-py310/lib/python3.10/site-packages/scipy/__init__.py",
+            "sha256": "185913aa107512fafd5cf89dfd452a8719b45a6eba833e2dcee2cbfd18b4bbe5"
+          },
+          "record": {
+            "bytes": 193586,
+            "path": "/workspace/yikang/miniforge3/envs/hope-motion-py310/lib/python3.10/site-packages/scipy-1.15.3.dist-info/RECORD",
+            "sha256": "e5372c6fe03595e9d3dd6960d3fa23f0db13dfd6c26713f99e1c03ccb7fa1e68"
+          },
+          "version": "1.15.3"
+        },
+        "smplx": {
+          "dist_info_root": "/workspace/yikang/miniforge3/envs/hope-motion-py310/lib/python3.10/site-packages/smplx-0.1.28.dist-info",
+          "distribution_name": "smplx",
+          "metadata": {
+            "bytes": 10756,
+            "path": "/workspace/yikang/miniforge3/envs/hope-motion-py310/lib/python3.10/site-packages/smplx-0.1.28.dist-info/METADATA",
+            "sha256": "91fdb2ebf5dfada8a4641245cb5200073fdbbed4126e4174b6b53084a597eadf"
+          },
+          "module_origin": {
+            "bytes": 875,
+            "path": "/workspace/yikang/miniforge3/envs/hope-motion-py310/lib/python3.10/site-packages/smplx/__init__.py",
+            "sha256": "c45c111b7736fe9f00b6b6ec7d1ced44ccd0ad2838cc57012d80d8b7080a9786"
+          },
+          "record": {
+            "bytes": 1434,
+            "path": "/workspace/yikang/miniforge3/envs/hope-motion-py310/lib/python3.10/site-packages/smplx-0.1.28.dist-info/RECORD",
+            "sha256": "0880980fe3c585d3ce2f5838556eb60a220c9da0c1d20aa75d1406d93b007b9d"
+          },
+          "version": "0.1.28"
+        },
+        "torch": {
+          "dist_info_root": "/workspace/yikang/miniforge3/envs/hope-motion-py310/lib/python3.10/site-packages/torch-2.7.0+cu128.dist-info",
+          "distribution_name": "torch",
+          "metadata": {
+            "bytes": 29230,
+            "path": "/workspace/yikang/miniforge3/envs/hope-motion-py310/lib/python3.10/site-packages/torch-2.7.0+cu128.dist-info/METADATA",
+            "sha256": "86107f52ff49e63a75c9d345374cac30140e053a12ffa728d676fee836e69022"
+          },
+          "module_origin": {
+            "bytes": 100862,
+            "path": "/workspace/yikang/miniforge3/envs/hope-motion-py310/lib/python3.10/site-packages/torch/__init__.py",
+            "sha256": "9801e75447c7f585545f989f8a21940b60e0c4cc888effb2f08e739664b4b904"
+          },
+          "record": {
+            "bytes": 1311037,
+            "path": "/workspace/yikang/miniforge3/envs/hope-motion-py310/lib/python3.10/site-packages/torch-2.7.0+cu128.dist-info/RECORD",
+            "sha256": "74de8f87c3845fbcfea72b55161a0257134d9f02686cb18e6e4c8f0fdf6be09e"
+          },
+          "version": "2.7.0+cu128"
+        }
+      }
+    },
+    "required_imports": [
+      "numpy",
+      "torch",
+      "mujoco",
+      "smplx",
+      "scipy"
+    ],
+    "converter_argv_template": [
+      "{python}",
+      "{converter}",
+      "--gvhmr_pred_file",
+      "{input}",
+      "--robot",
+      "agibot_a3",
+      "--save_path",
+      "{output}"
+    ]
+  },
+  "attempt_version": 2
+}

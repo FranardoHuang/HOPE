@@ -530,8 +530,19 @@ retarget sites，M0 stance 仍只在绑定的 canonical vendor MJCF 上做 FK。
 均为 `preregistered_not_executed`，两次 host `static` 均 `PASS`，专项 `13 passed`、仓内 `tests/` 回归
 `867 passed, 10 skipped`。
 
-这只解除 source/static blocker；本分支没有连接 Pod、读取私有 PT、运行 runtime `inspect/consume`、GMR、
-schema-2、安全、动力学、RL 或真机。见
+真实 v1 S0 runtime inspect 随后在创建 root 前抓到一个证据合同错误：只登记的 pip-freeze SHA
+`97c66009...18ff` 无对应 line list/bytes，无法由 exact Python 的实际 234 行规范化快照
+`56b0f8af...c694` 复现。M0 没有重复 shared blocker；两份 v1 root 均 absent，v1 永久
+**NO-CONSUME**，不能把这个负结果写成动作或横移失败。
+
+新的 attempt v2 使用新 consumer/plan/runtime 和 `exact_gmr_v2` root。它把 4,702 bytes snapshot 本身纳入
+source，并绑定冻结 v1 base consumer 和五个直接 import 的 version、origin、`METADATA/RECORD`；RECORD
+origin、duplicate JSON、S0/M0 shared exclusive flock 与 post-converter 重验都 fail closed。两份 host
+`static-v2` 已通过，v2 专项 `15 passed`、新旧 focused `28 passed`、仓内回归
+`949 passed, 10 skipped`；没有 runtime consume、脚距结果或动作晋级，因此 G08 状态不变。
+
+这只解除 v2 source/static blocker；除上面的 v1 no-write inspect 与只读 v2 closure 取证外，没有运行
+v2 runtime `inspect/consume`、GMR、schema-2、安全、动力学、RL 或真机。见
 [exact GMR 卷宗](../experiments/motion_exact_gmr_s0_m0_20260713.md)。G08 状态不变。
 
 ## 文档路由更新（2026-07-12）

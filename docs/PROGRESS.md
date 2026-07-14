@@ -37,6 +37,18 @@
   [face-sign 实验](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)与
   [操作](operations/run_phase1_signed_face_cd_l1.md)。
 
+- S0/M0 exact-GMR v1 在真实 runtime `inspect` 中于写 root 前 fail closed：hash-only pip 证据
+  `97c66009...18ff` 没有保留 234 行输入，且不能由 exact Python 的实际规范化快照
+  `56b0f8af...c694` 复现；M0 未重复同一 blocker，两份 v1 root 均 absent，v1 永久 **NO-CONSUME**。
+  新 attempt v2 使用新 consumer/plan/runtime/root，跟踪完整 4,702-byte snapshot，并绑定 v1 base consumer、
+  五个直接 import 的 version/origin/METADATA/RECORD 与 post-converter 重验；S0/M0 `consume` 还共用
+  exact marker 的 exclusive flock，只串行而不互相设成功依赖。runtime SHA `a55c52cc...b7b2`，S0/M0 plan
+  SHA `0746291e...f2f2` / `a810ee01...41f3`；两份 host `static-v2` 通过，v2 专项 `15 passed`、
+  新旧 focused `28 passed`、仓内回归 `949 passed, 10 skipped`。v2 runtime 未执行，
+  GMR/schema-2/训练/真机仍 blocked。见
+  [exact GMR 卷宗](experiments/motion_exact_gmr_s0_m0_20260713.md)与
+  [操作](operations/run_motion_s0_m0_exact_gmr.md)。
+
 - S0 高点拍压与 M0 横移老师的 shared exact-GMR source/static blocker 已闭环：16 项低频只读证据绑定
   clean GMR tree、七个 import module、mapping、Python/pip、direct 31-joint/32-body order 与显式 qpos
   bijection。direct retarget XML 的 site inventory 精确为空、左右 foot site absent；consumer 不再错误要求
