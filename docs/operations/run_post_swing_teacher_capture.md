@@ -1,17 +1,28 @@
 # 生成随挥结束教师状态制品
 
-状态：**v1 preclaim blocked；schema-v2 controller/builder 源码门通过；Pod runtime 尚未过。** 本操作只用于仿真推理和后续训练 cold-start，
+状态：**v1/v2 均已阻断且 namespace 不重发；observation/teardown successor source gate 已修，Pod runtime 尚未重验。** 本操作只用于仿真推理和后续训练 cold-start，
 绝不下发真机命令。源码专项与攻击负测通过；首个 exact 实例见
 [`phase1_post_swing_teacher_capture_prereg_20260715.json`](../../configs/phase1_post_swing_teacher_capture_prereg_20260715.json)，
 但它在 Hydra compose 阶段因保留 train-only checkpoint 兼容键而 fail closed；capture directory、claim、
-process 和 GPU work 均未创建，v1 永久不重发。successor 还必须把冻结 seed 真正赋给 play 的 env/runner，
-用新 source 与新 namespace 重新预注册。4096-environment capture、attestation 和首 reset readback probe
-尚未完成，因此 scientific trainer、第二 seed、judge 与 promotion 仍未授权。
+process 和 GPU work 均未创建，v1 永久不重发。schema-v2 的只读 compose 与所有合同复核随后通过，但正式
+launch 在零 inference step 读取初始 observation 时命中 IsaacLab 版本差异：wrapper 返回合法
+`(actor_observation, extras)`，旧 `play.py` 却直接调用 tuple 的 `.to()`。v2 只留下 claim，没有 states/result/
+receipt；exact PGID teardown 后永久花掉。机器证据见
+[`phase1_post_swing_teacher_capture_attempt_v2_result_20260715.json`](../../configs/phase1_post_swing_teacher_capture_attempt_v2_result_20260715.json)。
+4096-environment capture、attestation 和首 reset readback probe 尚未完成，因此 scientific trainer、第二 seed、
+judge 与 promotion 仍未授权。
 
 2026-07-15 的 seed-parity 修复已让 `play.py` 只接受 plain uint32 seed，并在 `gym.make` 前把同一个值
 写入 environment config 与 PPO runner config；三个 train-only checkpoint 键也都有真实 Hydra compose
 负测。一次性 controller/builder 随后通过独立 source-only 红队；当前仍未完成的是 Pod2 上的新 schema-v2
 plan、同环境只读 compose、正式 capture、attestation 与首 reset，而不是 seed 或 controller 源码。
+
+successor 的 `play.py` 必须通过共享 `policy_observation_tensor` 只接受三种明确结构：actor tensor、exact
+`(actor tensor, extras mapping)`，或含 `policy` 的 observation mapping；mapping 同时含 `critic` 时也只把
+`policy` 交给 actor，critic-only/坏 tuple/非 tensor 一律 fail closed。初始 observation 与每个 step 输出都走
+同一 adapter。环境一旦由 `gym.make` 创建，正常退出、初始 observation 异常和 step 异常都必须 exactly once
+关闭最终 wrapper；wrapper 构造前失败才关闭 base env，并保留原异常不被 teardown 异常覆盖。该修复只有
+host focused/Hydra compose 证据，仍需新 commit、新 plan 和新 namespace 的 Pod runtime 才能晋级。
 
 合同真源见 [随挥结束教师状态接口](../interfaces/post_swing_teacher_artifact.md)，当前科学动机见
 [base-deceleration measurement rerun](../experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md)。
@@ -163,7 +174,8 @@ pytest -q \
   tests/test_run_preregistered_post_swing_capture.py \
   tests/test_attest_post_swing_teacher.py \
   tests/test_post_swing_play_runtime_compose.py \
-  hope_training/whole_body_tracking/tests/test_post_swing_teacher.py
+  hope_training/whole_body_tracking/tests/test_post_swing_teacher.py \
+  hope_training/whole_body_tracking/tests/test_isaac_bank_exam_adapter.py
 
 python3 -m py_compile \
   scripts/build_post_swing_capture_plan_v2.py \

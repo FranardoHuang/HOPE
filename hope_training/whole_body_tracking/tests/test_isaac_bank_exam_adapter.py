@@ -221,12 +221,35 @@ def _records(schedule):
     return rows
 
 
-def test_observation_adapter_handles_tuple_and_policy_mapping_and_rejects_unknown():
-    for raw in (FakeTensor(), (FakeTensor(), {"ignored": True}), {"policy": FakeTensor()}):
+def test_observation_adapter_selects_only_actor_from_legal_wrapper_returns():
+    actor = FakeTensor("actor")
+    critic = FakeTensor("critic")
+    for raw in (
+        actor,
+        (actor, {"observations": {"critic": critic}}),
+        {"policy": actor, "critic": critic},
+        ({"policy": actor, "critic": critic}, {"log": {}}),
+    ):
         got = A.policy_observation_tensor(raw, device="cuda:0")
-        assert isinstance(got, FakeTensor) and got.device == "cuda:0"
-    with pytest.raises(A.IsaacBankExamError, match="no 'policy'"):
-        A.policy_observation_tensor({"critic": FakeTensor()})
+        assert got is actor
+        assert got.value == "actor" and got.device == "cuda:0"
+
+
+@pytest.mark.parametrize(
+    ("raw", "match"),
+    (
+        ((), "exactly"),
+        ((FakeTensor(),), "exactly"),
+        ((FakeTensor(), {}, "extra"), "exactly"),
+        ((FakeTensor(), []), "exactly"),
+        ({"critic": FakeTensor()}, "no 'policy'"),
+        (({"critic": FakeTensor()}, {}), "no 'policy'"),
+        (object(), "not a tensor-like"),
+    ),
+)
+def test_observation_adapter_rejects_ambiguous_or_non_actor_structures(raw, match):
+    with pytest.raises(A.IsaacBankExamError, match=match):
+        A.policy_observation_tensor(raw)
 
 
 def test_repository_root_discovery_binds_checkout_level_provenance_paths():

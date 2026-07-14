@@ -1,0 +1,82 @@
+{
+  "schema_version": 1,
+  "result_id": "phase1-post-swing-teacher-control-model500-capture-attempt-v2-result-20260715",
+  "status": "blocked_runtime_observation_api",
+  "simulation_only": true,
+  "preregistration": {
+    "plan_id": "control_model500_v2_schema2_gpu2_20260715a",
+    "path": "/workspace/codexschema/phase1_post_swing_teacher_20260715/prereg/control_model500_v2_schema2_gpu2_20260715a.json",
+    "file_sha256": "fd72fa9ef1305960bd715c087623a21ef4709c7f05f751bb9ab2d6d4fc94b60c"
+  },
+  "source": {
+    "checkout": "/workspace/codexschema/nohope_post_swing_capture_2539889",
+    "commit": "253988917566c989828d4ac77de6fb0036dcfc12"
+  },
+  "plan_compose": {
+    "returncode": 0,
+    "stdout_stderr_bytes": 6596,
+    "stdout_stderr_sha256": "0c9595c50bd510ba1c4f1482541f71dbbc3006c69c1067518088325e0d4ddaae"
+  },
+  "launch": {
+    "directory": "/workspace/codexschema/phase1_post_swing_teacher_20260715/launch/control_model500_v2_schema2_gpu2_20260715a",
+    "capture_directory": "/workspace/codexschema/phase1_post_swing_teacher_20260715/capture/control_model500_v2_schema2_gpu2_20260715a",
+    "exec_started_utc": "2026-07-14T23:24:36.287928+00:00",
+    "pid": 398269,
+    "pgid": 398269,
+    "sid": 398269,
+    "run_log_bytes": 38552,
+    "run_log_sha256": "c0e9397cfd399f21c7fafaa298c438db5e9ec24dfd8ceebccec932a75c96be91"
+  },
+  "runtime_checks_before_failure": {
+    "environment_setup_completed": true,
+    "actor_observation_contract": "MATCH_179D",
+    "checkpoint_hard_contract_sha256": "451cda47227f8e78e4f3dcae3cbf22d7ddf88b4c5fbaf348e698963d8bc12291",
+    "runtime_hard_contract_match": true,
+    "ppo_updates": 0,
+    "inference_steps": 0
+  },
+  "capture_claim": {
+    "path": "/workspace/codexschema/phase1_post_swing_teacher_20260715/capture/control_model500_v2_schema2_gpu2_20260715a/natural_wrap_capture.claim.json",
+    "bytes": 1243,
+    "sha256": "81126b27c70d855ceef28d11a7fb4f96e200d097132ab6693dc93d045c7e244e"
+  },
+  "failure": {
+    "exception_type": "AttributeError",
+    "message": "'tuple' object has no attribute 'to'",
+    "traceback": [
+      "hope_training/whole_body_tracking/scripts/play.py:303 main",
+      "hope_training/whole_body_tracking/scripts/play.py:241 _run_play",
+      "obs = env.get_observations().to(agent_cfg.device)"
+    ],
+    "root_cause": "play.py assumed a direct tensor although this exact IsaacLab RSL-RL wrapper returned (actor_observation, extras); play.py had not reused the existing actor-only observation adapter"
+  },
+  "artifacts": {
+    "natural_wrap_capture_claim_json": "present",
+    "natural_wrap_states_npz": "absent",
+    "natural_wrap_capture_json": "absent",
+    "teacher_receipt_json": "absent"
+  },
+  "teardown": {
+    "natural_exit_observed_before_intervention": false,
+    "hang_observation_seconds_lower_bound": 99,
+    "signal": "SIGTERM",
+    "signal_target": "exact numeric PGID -398269 after PID/PGID/SID identity revalidation",
+    "signal_sent_utc": null,
+    "signal_sent_utc_status": "not_recorded",
+    "exit_observed_utc": null,
+    "exit_observed_utc_status": "not_recorded",
+    "exit_observed_after_signal_seconds": 4.27
+  },
+  "decision": {
+    "v2_retry_forbidden": true,
+    "v2_namespace_spent": true,
+    "v2_capture_complete": false,
+    "v2_attestation_authorized": false,
+    "v2_first_reset_probe_authorized": false,
+    "v2_scientific_training_authorized": false,
+    "successor_requires_new_source_commit": true,
+    "successor_requires_new_plan_and_output_namespace": true,
+    "successor_must_normalize_actor_observation_api": true,
+    "successor_must_close_environment_on_all_exit_paths": true
+  }
+}

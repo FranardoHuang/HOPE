@@ -333,6 +333,23 @@ Hydra 的本地环境复现为 `41 passed`。
 另冻 GPU2 新 namespace，旧 GPU1 v1 仍不重发。完整 source/Isaac import roots 本机时序为 119 MB/2432 files
 约 `0.709 s`，9.8 MB/852 files 约 `0.284 s`；这不是 Pod 冷缓存数字，也不声称覆盖 venv/stdlib/native/rootfs。
 
+schema-v2 正式 attempt 随后把前置链推进到真实 runtime：plan
+`control_model500_v2_schema2_gpu2_20260715a`（SHA-256 `fd72fa9e...b60c`）的只读 Hydra compose rc0，
+source `2539889`、179-D actor 合同与 checkpoint hard contract `451cda47...2291` 均 MATCH。进程在零
+inference step 读取初始 observation 时失败：Pod2 的 RSL-RL wrapper 返回合法
+`(actor_observation, extras)`，而 `play.py` 仍直接做 `.to()`。namespace 只留下 claim
+`81126b27...244e`；states/result/receipt 全 absent。Kit teardown 超过 99 s 后只对重新核验的 exact
+PID/PGID/SID `398269` 发 TERM，4.27 s 后退出；UTC 信号/退出时刻未记录，机器结果明确写 null 而不猜。
+完整证据见
+[`phase1_post_swing_teacher_capture_attempt_v2_result_20260715.json`](../../../configs/phase1_post_swing_teacher_capture_attempt_v2_result_20260715.json)。
+v2 永久不重发，不构成 teacher 或训练证据。
+
+successor source 复用并收紧现有 actor observation adapter：只接受 tensor、exact
+`(observation, extras mapping)` 或含 `policy` 的 mapping，绝不把 `critic` privileged observation 喂给 actor；
+initial 与 step observation 共用同一路径。环境 ownership 也改为 normal/initial-observation/step failure
+均 exactly once 关闭最终 wrapper，保留 primary exception。focused source/Hydra compose 测试通过；这是
+source gate，不追认 v2，也不授权新 capture/attestation/首 reset，必须另冻 source/plan/namespace 后才可运行。
+
 ## 离线复现
 
 本提交不连接 Pod、不写 claim、不运行 probe/trainer/judge：

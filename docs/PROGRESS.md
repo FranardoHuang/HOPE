@@ -13,6 +13,14 @@
 
 ## 2026-07-15
 
+- post-swing teacher capture schema-v2 已从 prelaunch 推进到真实 runtime，但在零 inference step 因
+  `get_observations()` 返回 `(actor observation, extras)`、旧 play 直接 `.to()` 而失败；v2 只有 bound claim，
+  states/result/receipt absent，exact teardown 后永久不重发。successor source 已统一到 actor-only adapter，
+  拒绝 critic-only/坏结构，并保证 wrapper 在正常/初始 observation/step 异常均 exactly once close；focused
+  source/Hydra tests 通过，Pod 重验仍未做。见[机器结果](../configs/phase1_post_swing_teacher_capture_attempt_v2_result_20260715.json)、
+  [实验卷宗](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md)和
+  [操作文档](operations/run_post_swing_teacher_capture.md)。
+
 - 横向躯干扰动的 source-only Isaac adapter 已通过独立红队：每个 physics substep 以当前
   `torso_link` 显式 WORLD COM 提交力，same-tick/reset 竞争 writer、异常后的 terminal zero、motion inode
   替换和 output no-clobber 均有反例；focused `65 passed`。它尚无真实 full-scene、solver response、

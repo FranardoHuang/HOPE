@@ -46,6 +46,20 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-15, schema-v2 capture reached runtime then failed before the first inference step; Gate remains `Partial`):
+
+- Plan `control_model500_v2_schema2_gpu2_20260715a` passed exact read-only compose and launch-side
+  environment/179-D actor/checkpoint hard-contract checks, then failed at the initial observation because this
+  IsaacLab wrapper returned `(actor_observation, extras)` while `play.py` called `.to()` on the tuple. The spent
+  namespace contains only the 1243-byte bound claim; states, capture result and teacher receipt are absent.
+  The exact PID/PGID/SID was terminated after the failed process remained in Kit teardown for more than 99 s.
+  See the [machine result](../../configs/phase1_post_swing_teacher_capture_attempt_v2_result_20260715.json).
+- The successor source now routes both initial and stepped observations through the existing actor-only adapter,
+  accepts only a tensor, exact `(observation, extras mapping)`, or a mapping with `policy`, and rejects critic-only
+  or ambiguous structures. It also closes the final RSL-RL wrapper exactly once on normal, initial-observation and
+  step failures without replacing the primary exception. Focused source/Hydra tests pass, but no new Pod capture
+  has run; v2 is not retried and attestation, first reset, training, judge and hardware remain unauthorized.
+
 Follow-up note (2026-07-15, post-swing schema-v2 launch controller hardened; Gate remains `Partial`):
 
 - The successor controller now closes the known pre-launch false-green paths: direct no-follow namespaces,

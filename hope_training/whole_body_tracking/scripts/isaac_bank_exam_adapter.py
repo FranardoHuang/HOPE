@@ -468,8 +468,10 @@ def policy_observation_tensor(raw: Any, *, device: str | None = None):
 
     value = raw
     if isinstance(value, tuple):
-        if not value:
-            raise IsaacBankExamError("empty observation tuple")
+        if len(value) != 2 or not isinstance(value[1], Mapping):
+            raise IsaacBankExamError(
+                "observation tuple must be exactly (actor_observation, extras_mapping)"
+            )
         value = value[0]
     if isinstance(value, Mapping):
         if "policy" not in value:

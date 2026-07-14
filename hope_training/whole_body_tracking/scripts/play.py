@@ -17,6 +17,7 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import hydra
 from omegaconf import OmegaConf
 
+from isaac_bank_exam_adapter import policy_observation_tensor
 from train import (
     _apply_task_overrides,
     _build_training_hard_contract,
@@ -36,22 +37,210 @@ def _validate_play_seed(value):
     return value
 
 
-def _run_play(cfg, simulation_app):
+def _run_with_owned_play_environment(env, body):
+    """Run ``body`` and close the final environment wrapper exactly once.
+
+    ``body`` receives a one-element owner slot and must replace its element immediately after
+    wrapping the base Gym environment.  Closing the wrapper then closes the underlying environment;
+    if wrapping itself fails, the unchanged slot closes the base environment instead.  A teardown
+    failure is allowed to surface only when there is no primary rollout failure to preserve.
+    """
+
+    close_target = [env]
+    primary_error = None
+    try:
+        return body(close_target)
+    except BaseException as error:
+        primary_error = error
+        raise
+    finally:
+        try:
+            close_target[0].close()
+        except BaseException as close_error:
+            if primary_error is None:
+                raise
+            note = (
+                "play environment close also failed while preserving the primary error: "
+                f"{type(close_error).__name__}: {close_error}"
+            )
+            if hasattr(primary_error, "add_note"):
+                primary_error.add_note(note)
+            else:
+                print(f"[play.py] {note}", file=sys.stderr, flush=True)
+
+
+def _run_created_environment(
+    cfg,
+    simulation_app,
+    env,
+    close_target,
+    *,
+    resume_path,
+    agent_cfg,
+    wandb_path,
+):
+    """Validate, wrap and roll out one already-created Gym environment."""
+
     import pathlib
 
-    import gymnasium as gym
     import torch
 
     from rsl_rl.runners import OnPolicyRunner
 
-    from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg, RslRlVecEnvWrapper
-    from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
+    from isaaclab_rl.rsl_rl import RslRlVecEnvWrapper
 
-    import whole_body_tracking.tasks  # noqa: F401  -- registers the gym tasks
     from whole_body_tracking.tasks.tracking.actor_observation_contract import (
         validate_actor_observation_contract,
     )
     from whole_body_tracking.utils.exporter import attach_onnx_metadata, export_motion_policy_as_onnx
+
+    motion_cmd = env.unwrapped.command_manager.get_term("motion")
+    capture_requested = bool(
+        str(getattr(motion_cmd.cfg, "post_swing_capture_output_dir", "") or "").strip()
+    )
+    capture_max_steps = int(cfg.get("post_swing_capture_max_steps", 0) or 0)
+    if capture_requested and capture_max_steps <= 0:
+        raise ValueError(
+            "post-swing teacher capture requires post_swing_capture_max_steps > 0"
+        )
+    if not capture_requested and capture_max_steps != 0:
+        raise ValueError(
+            "post_swing_capture_max_steps is invalid without a capture output directory"
+        )
+    expected_contract = cfg.task.get("actor_obs_contract", None)
+    actor_contract = None
+    if expected_contract is not None:
+        actor_contract = validate_actor_observation_contract(env.unwrapped, str(expected_contract))
+        print(
+            "[play.py] actor observation contract validated: "
+            f"{actor_contract.name} ({actor_contract.total_dim}D, obs_mode={actor_contract.obs_mode})",
+            flush=True,
+        )
+    if capture_requested:
+        if actor_contract is None:
+            raise RuntimeError("post-swing capture requires an exact actor observation contract")
+        import json
+
+        adjacent = pathlib.Path(resume_path).resolve().parent / "params/training_contract.json"
+        if not adjacent.is_file():
+            raise RuntimeError(f"post-swing capture checkpoint lacks adjacent hard contract: {adjacent}")
+        with adjacent.open(encoding="utf-8") as stream:
+            checkpoint_contract = json.load(stream)
+        runtime_contract = _build_training_hard_contract(env.unwrapped, actor_contract)
+        diffs = _contract_diff(checkpoint_contract, runtime_contract)
+        if diffs:
+            raise RuntimeError(
+                "post-swing capture runtime differs from the checkpoint hard contract:\n  - "
+                + "\n  - ".join(diffs)
+            )
+        runtime_contract_sha256 = _sha256_file(adjacent)
+        motion_cmd._bind_post_swing_capture_runtime_contract(runtime_contract_sha256)
+        print(
+            "[play.py] post-swing capture runtime contract MATCH: "
+            f"{adjacent} sha256={runtime_contract_sha256}",
+            flush=True,
+        )
+    log_dir = os.path.dirname(resume_path)
+    env = RslRlVecEnvWrapper(env)
+    close_target[0] = env
+
+    ppo_runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
+    # Shape-tolerant load: pre-2026-07-03 checkpoints have the old (2-dim-wider) critic; export only
+    # needs the actor, so fall back to an actor-preserving partial load instead of dying.
+    from whole_body_tracking.utils.ckpt_compat import load_actor_tolerant
+
+    trained_with_obs_norm = load_actor_tolerant(ppo_runner, resume_path)
+    policy = ppo_runner.get_inference_policy(device=env.unwrapped.device)
+
+    # Capture mode is inference-only and writes only its dedicated no-clobber callback directory;
+    # do not mutate the checkpoint run by exporting an unrelated ONNX side artifact.
+    if not capture_requested:
+        export_model_dir = (
+            os.path.abspath(str(cfg.export_dir))
+            if cfg.get("export_dir", None)
+            else os.path.join(os.path.dirname(resume_path), "exported")
+        )
+        obs_norm_baked = export_motion_policy_as_onnx(
+            env.unwrapped, ppo_runner.alg.policy,
+            normalizer=ppo_runner.obs_normalizer if trained_with_obs_norm else None,
+            path=export_model_dir, filename="policy.onnx",
+        )
+        attach_onnx_metadata(
+            env.unwrapped, str(wandb_path) if wandb_path else "none", export_model_dir,
+            obs_norm_baked=obs_norm_baked,
+            trained_with_obs_norm=trained_with_obs_norm,
+            source_checkpoint_path=resume_path,
+        )
+        print(f"[INFO] Exported ONNX policy to: {export_model_dir}")
+    else:
+        print("[play.py] capture mode: ONNX export skipped", flush=True)
+
+    if bool(cfg.get("export_only", False)):
+        return
+
+    # Manual video capture: grab env.render() each step and encode to mp4 with imageio
+    # (imageio-ffmpeg). Avoids gym RecordVideo's vec-env / flush quirks and reports exactly
+    # how many frames were captured so a black/empty render is obvious instead of silent.
+    frames = []
+    # IsaacLab/RSL-RL versions differ here: the wrapper may return the actor tensor directly,
+    # ``(actor_tensor, extras)``, or an observation mapping containing ``policy`` and privileged
+    # ``critic`` groups.  Always select the actor view and reject every other structure.
+    obs = policy_observation_tensor(env.get_observations(), device=agent_cfg.device)
+    timestep = 0
+    while simulation_app.is_running():
+        with torch.inference_mode():
+            actions = policy(obs)
+            obs, _, _, _ = env.step(actions.to(env.unwrapped.device))
+            obs = policy_observation_tensor(obs, device=agent_cfg.device)
+        timestep += 1
+        if capture_requested:
+            if motion_cmd.post_swing_capture_complete():
+                print(
+                    f"[play.py] natural-wrap capture complete after {timestep} inference steps",
+                    flush=True,
+                )
+                break
+            if timestep >= capture_max_steps:
+                raise RuntimeError(
+                    "natural-wrap capture did not reach its frozen target before max steps"
+                )
+        if cfg.video:
+            frame = env.unwrapped.render()
+            if frame is not None:
+                frames.append(frame)
+            if timestep >= int(cfg.video_length):
+                break
+        # non-video: keep stepping until the Isaac Sim window is closed (live viewing)
+
+    if cfg.video:
+        import numpy as np
+
+        video_dir = os.path.join(log_dir, "videos", "play")
+        os.makedirs(video_dir, exist_ok=True)
+        video_path = os.path.join(video_dir, "play.mp4")
+        valid = [np.asarray(f) for f in frames if f is not None and getattr(f, "size", 0) > 0]
+        print(f"[INFO] captured {len(frames)} frames ({len(valid)} non-empty)", flush=True)
+        if valid:
+            import imageio
+
+            imageio.mimsave(video_path, valid, fps=30)
+            print(f"[INFO] wrote video -> {video_path}", flush=True)
+        else:
+            print(
+                "[ERROR] env.render() returned no usable frames. Check that AppLauncher got "
+                "enable_cameras=True (it ties to video) and render_mode='rgb_array'.",
+                flush=True,
+            )
+
+
+def _run_play(cfg, simulation_app):
+    import pathlib
+
+    import gymnasium as gym
+    from isaaclab_rl.rsl_rl import RslRlOnPolicyRunnerCfg
+    from isaaclab_tasks.utils import get_checkpoint_path, parse_env_cfg
+
+    import whole_body_tracking.tasks  # noqa: F401  -- registers the gym tasks
     from whole_body_tracking.utils.ppo_cfg import runner_kwargs
 
     task_id = str(cfg.task.gym_task)
@@ -148,143 +337,14 @@ def _run_play(cfg, simulation_app):
 
     render_mode = "rgb_array" if cfg.video else None
     env = gym.make(task_id, cfg=env_cfg, render_mode=render_mode)
-    motion_cmd = env.unwrapped.command_manager.get_term("motion")
-    capture_requested = bool(
-        str(getattr(motion_cmd.cfg, "post_swing_capture_output_dir", "") or "").strip()
-    )
-    capture_max_steps = int(cfg.get("post_swing_capture_max_steps", 0) or 0)
-    if capture_requested and capture_max_steps <= 0:
-        raise ValueError(
-            "post-swing teacher capture requires post_swing_capture_max_steps > 0"
+
+    def _body(close_target):
+        return _run_created_environment(
+            cfg, simulation_app, env, close_target,
+            resume_path=resume_path, agent_cfg=agent_cfg, wandb_path=wandb_path,
         )
-    if not capture_requested and capture_max_steps != 0:
-        raise ValueError(
-            "post_swing_capture_max_steps is invalid without a capture output directory"
-        )
-    expected_contract = cfg.task.get("actor_obs_contract", None)
-    actor_contract = None
-    if expected_contract is not None:
-        actor_contract = validate_actor_observation_contract(env.unwrapped, str(expected_contract))
-        print(
-            "[play.py] actor observation contract validated: "
-            f"{actor_contract.name} ({actor_contract.total_dim}D, obs_mode={actor_contract.obs_mode})",
-            flush=True,
-        )
-    if capture_requested:
-        if actor_contract is None:
-            raise RuntimeError("post-swing capture requires an exact actor observation contract")
-        import json
 
-        adjacent = pathlib.Path(resume_path).resolve().parent / "params/training_contract.json"
-        if not adjacent.is_file():
-            raise RuntimeError(f"post-swing capture checkpoint lacks adjacent hard contract: {adjacent}")
-        with adjacent.open(encoding="utf-8") as stream:
-            checkpoint_contract = json.load(stream)
-        runtime_contract = _build_training_hard_contract(env.unwrapped, actor_contract)
-        diffs = _contract_diff(checkpoint_contract, runtime_contract)
-        if diffs:
-            raise RuntimeError(
-                "post-swing capture runtime differs from the checkpoint hard contract:\n  - "
-                + "\n  - ".join(diffs)
-            )
-        runtime_contract_sha256 = _sha256_file(adjacent)
-        motion_cmd._bind_post_swing_capture_runtime_contract(runtime_contract_sha256)
-        print(
-            "[play.py] post-swing capture runtime contract MATCH: "
-            f"{adjacent} sha256={runtime_contract_sha256}",
-            flush=True,
-        )
-    log_dir = os.path.dirname(resume_path)
-    env = RslRlVecEnvWrapper(env)
-
-    ppo_runner = OnPolicyRunner(env, agent_cfg.to_dict(), log_dir=None, device=agent_cfg.device)
-    # Shape-tolerant load: pre-2026-07-03 checkpoints have the old (2-dim-wider) critic; export only
-    # needs the actor, so fall back to an actor-preserving partial load instead of dying.
-    from whole_body_tracking.utils.ckpt_compat import load_actor_tolerant
-
-    trained_with_obs_norm = load_actor_tolerant(ppo_runner, resume_path)
-    policy = ppo_runner.get_inference_policy(device=env.unwrapped.device)
-
-    # Capture mode is inference-only and writes only its dedicated no-clobber callback directory;
-    # do not mutate the checkpoint run by exporting an unrelated ONNX side artifact.
-    if not capture_requested:
-        export_model_dir = (
-            os.path.abspath(str(cfg.export_dir))
-            if cfg.get("export_dir", None)
-            else os.path.join(os.path.dirname(resume_path), "exported")
-        )
-        obs_norm_baked = export_motion_policy_as_onnx(
-            env.unwrapped, ppo_runner.alg.policy,
-            normalizer=ppo_runner.obs_normalizer if trained_with_obs_norm else None,
-            path=export_model_dir, filename="policy.onnx",
-        )
-        attach_onnx_metadata(
-            env.unwrapped, str(wandb_path) if wandb_path else "none", export_model_dir,
-            obs_norm_baked=obs_norm_baked,
-            trained_with_obs_norm=trained_with_obs_norm,
-            source_checkpoint_path=resume_path,
-        )
-        print(f"[INFO] Exported ONNX policy to: {export_model_dir}")
-    else:
-        print("[play.py] capture mode: ONNX export skipped", flush=True)
-
-    if bool(cfg.get("export_only", False)):
-        env.close()
-        return
-
-    # Manual video capture: grab env.render() each step and encode to mp4 with imageio
-    # (imageio-ffmpeg). Avoids gym RecordVideo's vec-env / flush quirks and reports exactly
-    # how many frames were captured so a black/empty render is obvious instead of silent.
-    frames = []
-    # This rsl_rl/IsaacLab version returns a TensorDict from get_observations() (NOT an (obs, extras)
-    # tuple) and the inference policy consumes the whole TensorDict — mirror the runner's rollout loop.
-    obs = env.get_observations().to(agent_cfg.device)
-    timestep = 0
-    while simulation_app.is_running():
-        with torch.inference_mode():
-            actions = policy(obs)
-            obs, _, _, _ = env.step(actions.to(env.unwrapped.device))
-        timestep += 1
-        if capture_requested:
-            if motion_cmd.post_swing_capture_complete():
-                print(
-                    f"[play.py] natural-wrap capture complete after {timestep} inference steps",
-                    flush=True,
-                )
-                break
-            if timestep >= capture_max_steps:
-                raise RuntimeError(
-                    "natural-wrap capture did not reach its frozen target before max steps"
-                )
-        if cfg.video:
-            frame = env.unwrapped.render()
-            if frame is not None:
-                frames.append(frame)
-            if timestep >= int(cfg.video_length):
-                break
-        # non-video: keep stepping until the Isaac Sim window is closed (live viewing)
-
-    if cfg.video:
-        import numpy as np
-
-        video_dir = os.path.join(log_dir, "videos", "play")
-        os.makedirs(video_dir, exist_ok=True)
-        video_path = os.path.join(video_dir, "play.mp4")
-        valid = [np.asarray(f) for f in frames if f is not None and getattr(f, "size", 0) > 0]
-        print(f"[INFO] captured {len(frames)} frames ({len(valid)} non-empty)", flush=True)
-        if valid:
-            import imageio
-
-            imageio.mimsave(video_path, valid, fps=30)
-            print(f"[INFO] wrote video -> {video_path}", flush=True)
-        else:
-            print(
-                "[ERROR] env.render() returned no usable frames. Check that AppLauncher got "
-                "enable_cameras=True (it ties to video) and render_mode='rgb_array'.",
-                flush=True,
-            )
-
-    env.close()
+    return _run_with_owned_play_environment(env, _body)
 
 
 @hydra.main(version_base=None, config_path="../cfg", config_name="play")
