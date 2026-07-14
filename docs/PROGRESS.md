@@ -13,6 +13,10 @@
 
 ## 2026-07-14
 
+- Kit watchdog 的 marker-priority 测试移除亚秒 sleep 调度竞态：现在于第二次 marker probe 同步注入
+  marker，仍直接验证 timeout/stale 已到边界时 marker 优先，且不改生产 launcher 语义；相关专项
+  `15 passed`。见 [G05](gates/G05_isaac_training_first_loop.md)。
+
 - qdot `-5/0` terminal 曲线推翻 `+500` 的 mixed-only 读法：updates `980–1000` 中 treatment/control 的
   position pass=`0.878/0.593`、error=`4.74/9.62 cm`、signed composite=`0.310/0.146`、virtual
   return=`0.454/0.265`，fall/completion 基本持平；两份 `model_1000` 均 finite/lineage/contract/claim exact。

@@ -1800,6 +1800,10 @@ leader 会把仍存活的 child 漏掉。watchdog 现把 leader PID=PGID、双�
 leader 在 TERM 后退出、已绑定 child 残留则仍可按其原 PID/starttime/PGID 安全收口。该项只是 E1 source
 安全门，未连接 Pod、未 signal 任何远端进程，也不改变训练配方，G05 仍为 `Partial`。
 
+对应的 marker-priority 回归不再用 `sleep 0.5` 与一秒 watchdog 竞争调度；测试 shim 在第二次 marker probe
+同步写入 marker，从而稳定覆盖“同一轮 watchdog 已到期时 marker 仍优先”的语义。生产 launcher、timeout
+和 signal 路径均未改变，专项 launcher/process-group 回归为 `15 passed`。
+
 并发发射的另一根因也已定位：`flock FILE command` 的 lock fd 被 detached trainer 继承，导致每 GPU
 名义容量 3/4 实际只能再发第一条。lean harness 现由短命 controller 持 fd8，launcher child 显式
 `8>&-`；新增 preferred-slot 容量/回退测试后 queue suite `24 passed`。现役 qdot 两条仍持旧锁，不做信号，

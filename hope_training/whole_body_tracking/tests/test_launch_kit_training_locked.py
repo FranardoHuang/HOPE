@@ -3,6 +3,7 @@ from __future__ import annotations
 import os
 from pathlib import Path
 import signal
+import shutil
 import subprocess
 import sys
 import time
@@ -204,18 +205,47 @@ def test_log_growth_resets_stale_clock_until_marker_wins(
 def test_marker_check_has_priority_over_watchdogs(
     tmp_path: Path, portable_launch_tools: Path
 ) -> None:
+    # Inject the marker on the second marker probe.  That is deterministically
+    # either the same-poll watchdog recheck or the next poll's leading check,
+    # so the test exercises marker priority without racing a sub-second child
+    # sleep against Python/process startup on a loaded developer host.
+    real_grep = shutil.which("grep")
+    assert real_grep is not None
+    grep_count = tmp_path / "marker-grep.count"
+    marker_log = tmp_path / "run.log"
+    grep = portable_launch_tools / "grep"
+    grep.write_text(
+        f"#!{sys.executable}\n"
+        "import os, pathlib, sys\n"
+        "counter = pathlib.Path(os.environ['MARKER_PRIORITY_GREP_COUNT'])\n"
+        "count = int(counter.read_text()) + 1 if counter.exists() else 1\n"
+        "counter.write_text(str(count))\n"
+        "if count == 2:\n"
+        "    with pathlib.Path(os.environ['MARKER_PRIORITY_LOG']).open('a') as stream:\n"
+        "        stream.write('KIT_READY\\n')\n"
+        f"os.execv({real_grep!r}, [{real_grep!r}, *sys.argv[1:]])\n",
+        encoding="utf-8",
+    )
+    grep.chmod(0o755)
     child = _write_child(
         tmp_path,
         "printf 'content before marker\\n'\n"
-        "sleep 0.5\n"
-        "printf 'KIT_READY\\n'\n"
         "while :; do sleep 1; done\n",
     )
     proc, _log, state, _ = _run_launcher(
-        tmp_path, portable_launch_tools, child, timeout_s=1, stale_timeout_s="1"
+        tmp_path,
+        portable_launch_tools,
+        child,
+        timeout_s=1,
+        stale_timeout_s="1",
+        extra_env={
+            "MARKER_PRIORITY_GREP_COUNT": str(grep_count),
+            "MARKER_PRIORITY_LOG": str(marker_log),
+        },
     )
     try:
         assert proc.returncode == 0, proc.stderr
+        assert grep_count.read_text(encoding="utf-8") == "2"
         fields = _state_fields(state)
         assert "ready_utc" in fields
         assert "boot_timeout_s" not in fields
