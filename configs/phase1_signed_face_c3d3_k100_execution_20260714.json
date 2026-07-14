@@ -1,0 +1,141 @@
+{
+  "schema_version": 1,
+  "manifest_id": "phase1-signed-face-c3-d3-k100-paired-execution-20260714-v1",
+  "status": "source_reviewed_runtime_request_and_attestations_required",
+  "recorded_local_date": "2026-07-14",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "simulation_only": true,
+  "real_robot_commands_forbidden": true,
+  "source_bindings": {
+    "runner": {
+      "path": "scripts/run_phase1_signed_face_c3d3_k100.py",
+      "sha256": "671d10e78f80c0a64fd17f4ce2af19b7239905b394c8c796723d6929e47da5ce"
+    },
+    "checkpoint_attestor": {
+      "path": "scripts/attest_phase1_signed_face_k100_checkpoint.py",
+      "sha256": "b42ecd08ea1516ab50cda0d47ee957b82e7c1e5b0c19fc3f7f588862ed7c5ec3"
+    },
+    "checkpoint_attestor_manifest": {
+      "path": "configs/phase1_signed_face_k100_checkpoint_attestor_20260714.json",
+      "sha256": "0c9fa56ef44b7a2e4d3e7b3c661df195ed3f6cbfd5aa0e03b79e344f604bd4f5"
+    },
+    "c3d3_l1_manifest": {
+      "path": "configs/phase1_signed_face_c3d3_l1_prereg_20260714.json",
+      "sha256": "eefc8023786a3bc90f86bc0803dda69003c76cc3076bc089a15dec618f435dc2"
+    },
+    "c3d3_l1_finalizer": {
+      "path": "scripts/run_phase1_signed_face_c3d3_l1.py",
+      "sha256": "192148906a893e8b55e9a9cf666c3557e14ce8d0b53f2337b2e311e2430aa628"
+    }
+  },
+  "paired_l1_receipt": {
+    "path": "/workspace/codexschema/phase1_signed_face_c3d3_l1_20260714/runs/l1/paired_l1_result.json",
+    "sha256": "bb3cd749477861b1cd55f059ed3b23307784030dcad758db3a819c3c8a37bbde",
+    "ordered_cells": [
+      "C3",
+      "D3"
+    ],
+    "only_hard_contract_difference": "racket_guidance_reward.signed_face.weight"
+  },
+  "cells": {
+    "C3": {
+      "human_name": "fresh explicit-zero-friction signed-face control",
+      "run_name": "phase1_signed_face_l1_c3d3_v1_C3_fresh_control_seed3",
+      "face_guidance_weight": 0.0,
+      "checkpoint": {
+        "path": "/workspace/codexschema/nohope_signed_face_c3d3_l1_4467d79/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-14_04-47-45_phase1_signed_face_l1_c3d3_v1_C3_fresh_control_seed3/model_24.pt",
+        "sha256": "6b3e2cb17a0cfcc299b3f32a13814f4c7d34292bdd4d3d7ef73f5cb2d3bd70e7",
+        "iteration": 24
+      },
+      "adjacent_hard_contract": {
+        "path": "/workspace/codexschema/nohope_signed_face_c3d3_l1_4467d79/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-14_04-47-45_phase1_signed_face_l1_c3d3_v1_C3_fresh_control_seed3/params/training_contract.json",
+        "sha256": "d76dc9440b0a9f58da71a40425e2eb6a6f003097ebfcd50bf3fec8d4d4e5ef2c"
+      },
+      "producer_claim_canonical_sha256": "aa240e2fe2ef9cef5cc5d8676d5c42a77d0d7764bd8d21710dba4b0e04b8a6d8",
+      "terminal_receipt": {
+        "path": "/workspace/codexschema/phase1_signed_face_c3d3_l1_20260714/runs/l1/phase1_signed_face_l1_c3d3_v1_C3_fresh_control_seed3/terminal_result.json",
+        "sha256": "8c579386df56f9b49863c9b879f2e45109ba392f3e0a66d55a56d6a08b00e8ef"
+      }
+    },
+    "D3": {
+      "human_name": "fresh explicit-zero-friction signed-face guidance",
+      "run_name": "phase1_signed_face_l1_c3d3_v1_D3_fresh_guidance_seed3",
+      "face_guidance_weight": -0.4,
+      "checkpoint": {
+        "path": "/workspace/codexschema/nohope_signed_face_c3d3_l1_4467d79/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-14_04-48-53_phase1_signed_face_l1_c3d3_v1_D3_fresh_guidance_seed3/model_24.pt",
+        "sha256": "44c6117c8a2449140da056a9a03bfcce4a9e87a971f2549b9528b424a80f85b8",
+        "iteration": 24
+      },
+      "adjacent_hard_contract": {
+        "path": "/workspace/codexschema/nohope_signed_face_c3d3_l1_4467d79/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-14_04-48-53_phase1_signed_face_l1_c3d3_v1_D3_fresh_guidance_seed3/params/training_contract.json",
+        "sha256": "98f6468f19ba7b57e538db1fdccfff41726eed73aa30cc810f2edd35efc734f4"
+      },
+      "producer_claim_canonical_sha256": "7a1970d217bb7fd5b36daeb2cbbd789237ee4a2606300c954e01acc714e556d2",
+      "terminal_receipt": {
+        "path": "/workspace/codexschema/phase1_signed_face_c3d3_l1_20260714/runs/l1/phase1_signed_face_l1_c3d3_v1_D3_fresh_guidance_seed3/terminal_result.json",
+        "sha256": "ccb9933c057d15079015d13a2b0a97589902650842369aaaad025e35fa367f0e"
+      }
+    }
+  },
+  "paper": {
+    "schedule": {
+      "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/papers/signed_face_exam_k100_v1/signed_face_exam_k100.schedule.json",
+      "bytes": 20237,
+      "file_sha256": "f2777dcd02080ba68b839c76ea9d3f14c938457c9bc01b5692fe86ae59157ec7",
+      "semantic_sha256": "3ca4bdba7f4acbe6f211d90e95305fc4a9459c118e4220c9683060c0a6723365",
+      "question_id_order_sha256": "09f778f2afd7888069ac75aabee3bf19deda015acbbad843ccdb70ca39548bd0"
+    },
+    "activation": {
+      "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/papers/signed_face_exam_k100_v1/signed_face_exam_k100.activation.json",
+      "bytes": 11620,
+      "file_sha256": "e0125b0e937655672e68ac79578c075e4cf8e99fc1cad5655bcb7e3e4a977bb4",
+      "content_sha256": "533beb03a13236eb93404b5c141f6459b08520060b0c2ed0b6dc4ee2e46db3d8"
+    },
+    "denominator": {
+      "aggregate": 100,
+      "forehand": 50,
+      "backhand": 50
+    },
+    "mount_normal_sign_per_clip": [
+      1.0,
+      -1.0
+    ]
+  },
+  "execution": {
+    "ordered_cells": [
+      "C3",
+      "D3"
+    ],
+    "schedule_seed": 0,
+    "noise_scales": [
+      0.0
+    ],
+    "hold_range": [
+      0,
+      100
+    ],
+    "qdes_clamp": true,
+    "allow_inexact_contract": false,
+    "one_question_reset": true,
+    "same_schedule_activation_required": true,
+    "output_root": "/workspace/codexschema/phase1_signed_face_c3d3_l1_20260714/evaluations/signed_face_k100_c3d3_v1",
+    "root_confirmation": "ROOT_APPROVES_SIM_ONLY_C3_D3_SIGNED_K100_PAIRED_EXECUTION_V1",
+    "result_policy": "publish_exact_paired_counts_and_delta_without_authorizing_l2_or_any_training_action"
+  },
+  "authorization": {
+    "auto_start": false,
+    "trainer_started": false,
+    "training_mutation_allowed": false,
+    "c3d3_rerun_allowed": false,
+    "paired_k100_judge_allowed_only_after_exact_attestations": true,
+    "l2_training_authorized": false,
+    "second_seed_authorized": false,
+    "checkpoint_stop_or_promote_authorized": false,
+    "formal_setting_adoption_authorized": false,
+    "gate3_authorized": false,
+    "deployment_authorized": false,
+    "real_robot_authorized": false,
+    "signals_to_existing_processes_allowed": false
+  }
+}

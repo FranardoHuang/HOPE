@@ -1682,3 +1682,13 @@ evidence-only partial 都 fail closed。focused 攻击回归为 `21 passed`，re
 checkpoint evidence/claim、judge 或训练结果。因此只是 E1 source gate，G05 继续 `Partial`。见
 [实验](../experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-PAPER.md)与
 [操作](../operations/run_phase1_signed_face_k100_checkpoint_attestor.md)。
+
+### 2026-07-14 C3/D3 signed-face K100 paired execution source gate
+
+最小 one-shot consumer 已 exact 绑定 paired L1 receipt `bb3cd749...bbde`、C3/D3 两份终档四键
+（checkpoint/hard/producer claim/terminal）、generic checkpoint attestor 和同一 K100
+schedule/activation。任一侧 attestation、actual float `[1.0,-1.0]`、独立 eval worktree/runtime、MJCF/plant、
+env.yaml 或 no-clobber namespace 缺失都拒绝；现有 judge 只允许在 distinct empty GPU 上顺序运行，不写训练
+run、不发 signal。focused `22 passed`，static/source-plan rc0；尚未 runtime attest/judge，因此仍无行为结果，
+G05 保持 `Partial`。见[实验](../experiments/2026-07/EXP-P1-SIGNED-FACE-C3D3-ZERO-FRICTION-L1.md)与
+[操作](../operations/run_phase1_signed_face_c3d3_k100.md)。

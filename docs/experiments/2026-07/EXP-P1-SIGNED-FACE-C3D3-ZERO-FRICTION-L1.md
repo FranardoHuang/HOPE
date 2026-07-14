@@ -87,6 +87,18 @@
   同一 immutable signed-face K100 execution consumer 做 paired 行为判读。K100 前不得从 L1 reward 曲线
   晋级 L2、第二 seed 或 stop/promote。
 
+### 同卷 K100 execution consumer source gate
+
+新的 [`C3/D3 K100 paired execution consumer`](../../DEFINITIONS.md) 已把 paired receipt、两份
+checkpoint/hard/producer-claim/terminal SHA、generic attestor、现有 K100 schedule/activation 和 exact float
+`[1.0,-1.0]` 合同冻结到一个 one-shot manifest。它要求两份独立 attestation claim 都存在且可完整 replay，
+再把 checkpoint-adjacent `env.yaml` 复制到独立 eval root，顺序运行同一卷；不写训练 run、不发 signal。
+
+当前仍是 source gate：focused `22 passed`，`py_compile`、`static-validate`、`source-plan` rc0；没有 SSH、
+attest 或 judge。执行步骤见[同卷 K100 操作](../../operations/run_phase1_signed_face_c3d3_k100.md)。consumer
+产出的 paired count 只供后续人类 L2 decision contract 使用，本身仍把 L2、第二 seed、stop/promote、采用
+setting、Gate3、部署和真机全部固定为 false。
+
 ## 复现与证据
 
 操作真源：[运行 C3/D3 显式零摩擦 L1](../../operations/run_phase1_signed_face_c3d3_l1.md)。Pod1 runtime
