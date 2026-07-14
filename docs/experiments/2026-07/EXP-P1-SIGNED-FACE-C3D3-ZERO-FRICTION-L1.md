@@ -132,6 +132,11 @@ PID `1873348/1873349` 均已退出。两份日志均为 `scheduled=50/side`、`a
 parity 未闭合前不得执行正式 paired judge，也不授权 L2、第二 seed、stop/promote 或采用 setting。任何
 明确 `allow-inexact` 的同卷方向筛都只能作为诊断，不能替代 formal K100。
 
+后续 source 快审又关闭两项假绿：新 evaluator SHA 已逐级绑定到 attestor manifest 与 paired execution
+manifest；hydrate 发布不再用可覆盖并发同名 child 的 `rename(2)`，而是 exclusive root/directory 加
+`link(2)` 原子 no-replace。并发 sentinel 攻击保持 sentinel 与 stage 不变并 fail closed。focused
+`57 passed`、两份 static 与 source-plan rc0；新的 velocity-proxy diagnostic 仍未运行，不能补写方向分。
+
 ## 复现与证据
 
 操作真源：[运行 C3/D3 显式零摩擦 L1](../../operations/run_phase1_signed_face_c3d3_l1.md)。Pod1 runtime

@@ -103,7 +103,7 @@ RUNTIME_FACE_CONTRACT = {
 SCRIPT_DIR = Path(__file__).resolve().parent
 REPO_ROOT_DEFAULT = SCRIPT_DIR.parent
 ATTESTOR_PATH = SCRIPT_DIR / "attest_phase1_signed_face_k100_checkpoint_v2.py"
-ATTESTOR_SHA256 = "45d35083d8a02b53e30b875839d0b004306511f6cafcbc6c36753c488f4d024a"
+ATTESTOR_SHA256 = "4792d7e279042abfdc0f130ab9bca3006cb300f32f8c76e4cc069c5ec4c0cb5a"
 
 
 def _bootstrap_sha256(path: Path) -> str:

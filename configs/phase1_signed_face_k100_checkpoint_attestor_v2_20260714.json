@@ -10,7 +10,7 @@
   "source_bindings": {
     "runner": {
       "path": "scripts/attest_phase1_signed_face_k100_checkpoint_v2.py",
-      "sha256": "45d35083d8a02b53e30b875839d0b004306511f6cafcbc6c36753c488f4d024a"
+      "sha256": "4792d7e279042abfdc0f130ab9bca3006cb300f32f8c76e4cc069c5ec4c0cb5a"
     },
     "judge": {
       "path": "hope_training/whole_body_tracking/scripts/judge.sh",
@@ -38,7 +38,7 @@
     },
     "mujoco_evaluator": {
       "path": "hope_training/whole_body_tracking/scripts/mujoco_eval_onnx.py",
-      "sha256": "08c601488b79188eab4e3c0dbe3f90c939a11e7f021eb96ca55fec4f4b61ab12"
+      "sha256": "343fce91c1358d34764c754832261798e1e94490cb479003cfe2fff1523cd714"
     },
     "signed_face_scorer": {
       "path": "hope_training/whole_body_tracking/scripts/virtual_return_scorer.py",

@@ -580,6 +580,52 @@ def test_asset_inventory_hydrates_once_and_rejects_symlinks(tmp_path, monkeypatc
         A.asset_inventory_summary(linked)
 
 
+def test_asset_hydration_publish_never_overwrites_concurrent_sentinel(tmp_path, monkeypatch):
+    manifest = copy.deepcopy(_manifest())
+    source = tmp_path / "training" / "assets" / "agibot_a3"
+    urdf = source / "urdf" / "model.urdf"
+    mesh = source / "meshes" / "body.STL"
+    urdf.parent.mkdir(parents=True)
+    mesh.parent.mkdir(parents=True)
+    urdf.write_bytes(b"<robot name='fixture'/>")
+    mesh.write_bytes(b"trusted-mesh")
+    monkeypatch.setattr(A, "REQUIRED_URDF_BYTES", urdf.stat().st_size)
+    monkeypatch.setattr(A, "REQUIRED_URDF_SHA256", A.sha256_file(urdf))
+    manifest["execution_semantics"]["isaac_asset_hydration"]["source_root"] = str(source)
+    eval_root = tmp_path / "eval"
+    (eval_root / A.ASSET_RELATIVE_PATH.parent).mkdir(parents=True)
+    request = _request(manifest, tmp_path)
+    destination = eval_root / A.ASSET_RELATIVE_PATH
+    request["source_checkout"]["path"] = str(eval_root)
+    request["isaac_asset_bundle"] = {
+        "source_root": str(source),
+        "destination_root": str(destination),
+        "inventory": A.asset_inventory_summary(source),
+        "required_urdf": A._required_urdf_spec(),
+        "hydration_mode": "hydrate_absent",
+    }
+
+    real_link = A.os.link
+    sentinel = {"path": None}
+
+    def inject_sentinel_then_link(staged_file, target_file, *, follow_symlinks):
+        target = Path(target_file)
+        if sentinel["path"] is None:
+            target.write_bytes(b"concurrent-sentinel")
+            sentinel["path"] = target
+        return real_link(staged_file, target_file, follow_symlinks=follow_symlinks)
+
+    monkeypatch.setattr(A.os, "link", inject_sentinel_then_link)
+    with pytest.raises(A.ContractError, match="no-replace: concurrent asset file appeared"):
+        A.hydrate_asset_bundle(request, manifest)
+
+    assert sentinel["path"] is not None
+    assert sentinel["path"].read_bytes() == b"concurrent-sentinel"
+    stage = destination.parent / f".{destination.name}.hydrate-{request['request_id']}"
+    assert stage.is_dir()
+    assert (stage / sentinel["path"].relative_to(destination)).is_file()
+
+
 def test_libglu_preflight_is_existence_only_and_fails_closed(monkeypatch):
     loaded = []
     monkeypatch.setattr(A.ctypes, "CDLL", lambda soname: loaded.append(soname))

@@ -23,6 +23,10 @@
   见[实验](experiments/2026-07/EXP-P1-SIGNED-FACE-C3D3-ZERO-FRICTION-L1.md)与
   [v2 操作](operations/run_phase1_signed_face_c3d3_k100_v2.md)。
 
+- C3/D3 v2 快审已把新 evaluator bytes 逐级绑定到 attestor 与 paired manifest，并把 ignored asset
+  hydrate 从可覆盖 child 的 `rename(2)` 改成 exclusive root/directory + `link(2)` 原子 no-replace；并发
+  sentinel 攻击 fail closed 且保留证据。focused `57 passed`、static/source-plan rc0；未新增 Pod runtime。
+
 - C3/D3 同卷 K100 one-shot consumer source gate 已绑定 paired L1 receipt、两份终档 exact attestation、
   immutable schedule/activation 与 float `[1.0,-1.0]`；focused `28 passed`，static/source-plan rc0。尚未 SSH/
   attest/judge，L2、第二 seed、stop/promote 仍为 false。见[操作](operations/run_phase1_signed_face_c3d3_k100.md)。

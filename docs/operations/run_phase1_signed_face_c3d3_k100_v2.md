@@ -49,7 +49,9 @@ v2 使用新的 [`checkpoint attestor`](../DEFINITIONS.md) namespace
    `79655f05d204c24f028778425aa971410773d1f8bbbd214de6fdb8f8ae75d1cc`。
 2. `libGLU.so.1` 只做 `ctypes.CDLL` 可加载性预检；本合同不扩展成系统依赖审计。
 3. C3 request 的 `hydration_mode=hydrate_absent`：先在 eval checkout 的 ignored assets 父目录完成并复核
-   staged copy，再用 exclusive destination directory 发布；任何 partial destination 都保留并阻断重试。
+   staged copy，再原子独占 destination root；每个子目录用 `mkdir(exist_ok=false)`，每个已 `fsync` 的
+   regular file 用同文件系统 `link(2)` 原子 no-replace 发布。禁止用 `rename(2)` 覆盖/合并并发同名目标；
+   任何 sentinel、partial destination 或 stage 都原样保留并阻断重试。
 4. D3 request 的 `hydration_mode=verify_existing`：只能复核 C3 已发布的同一 destination/inventory。
 5. paired consumer 完整重放两份 v2 evidence/claim，并要求两侧共享同一 asset inventory、destination、
    MJCF、plant 和可加载的 `libGLU.so.1`。
@@ -62,14 +64,18 @@ v2 使用新的 [`checkpoint attestor`](../DEFINITIONS.md) namespace
 
 这就是两条 checkpoint 的训练 checkout；不得换成相似仓库、symlink 或后来重建的未绑定目录。
 
-合入前 source gate 的四份精确字节为：
+当前 source gate 的五份精确字节为：
 
 | 文件 | SHA-256 |
 | --- | --- |
-| `scripts/attest_phase1_signed_face_k100_checkpoint_v2.py` | `45d35083d8a02b53e30b875839d0b004306511f6cafcbc6c36753c488f4d024a` |
-| `configs/phase1_signed_face_k100_checkpoint_attestor_v2_20260714.json` | `7bfa3b843de15b2c107c8254b04a585d78ac2c029c478d7294dc16a13e3c3a93` |
-| `scripts/run_phase1_signed_face_c3d3_k100_v2.py` | `61338a382418e941413af58128a38c0d6530853b4bac5a406836136dd9a9befa` |
-| `configs/phase1_signed_face_c3d3_k100_execution_v2_20260714.json` | `c6c8db751b60015b946889e41966e637daaa935c7e8753f498365d4fd67263e8` |
+| `hope_training/whole_body_tracking/scripts/mujoco_eval_onnx.py` | `343fce91c1358d34764c754832261798e1e94490cb479003cfe2fff1523cd714` |
+| `scripts/attest_phase1_signed_face_k100_checkpoint_v2.py` | `4792d7e279042abfdc0f130ab9bca3006cb300f32f8c76e4cc069c5ec4c0cb5a` |
+| `configs/phase1_signed_face_k100_checkpoint_attestor_v2_20260714.json` | `9bc2be01224ffd75c1fdaf46a5c9945a8291bf94398104be1c6480eb16e40097` |
+| `scripts/run_phase1_signed_face_c3d3_k100_v2.py` | `6cb8c6936f7aa19b6e6553e5709bfb61564a7a4ed7d5385b48960db3347c1744` |
+| `configs/phase1_signed_face_c3d3_k100_execution_v2_20260714.json` | `28c6b8cfa207c24e210013d6473a570f8b8038157b02b14f285b09af882c1654` |
+
+级联 source binding 与并发 sentinel 攻击回归已通过：focused `57 passed`，attestor/pair
+`static-validate` 及 pair `source-plan` 均 rc0。这里只证明 source/发布合同，不代表新 diagnostic 已运行。
 
 ## 2. Source gate 与新 eval checkout
 

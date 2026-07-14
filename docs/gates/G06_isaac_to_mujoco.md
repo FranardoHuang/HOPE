@@ -1482,3 +1482,5 @@ articulation `[8]` 的
 velocity-limit braking parity。可复现合同见
 [v2 操作](../operations/run_phase1_signed_face_c3d3_k100_v2.md)。G06 仍为 `Partial`：parity 修复前不得
 执行 formal paired K100；明确 allow-inexact 的方向筛不能授权 L2、第二 seed、stop/promote、部署或真机。
+evaluator→attestor→paired manifest 的 SHA 级联与 hydrate 并发 sentinel no-replace 攻击已在 source
+层通过（focused `57 passed`、static/source-plan rc0）；没有新的 Pod runtime 或行为结论。

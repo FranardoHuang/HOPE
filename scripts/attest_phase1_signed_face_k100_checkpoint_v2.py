@@ -1315,12 +1315,43 @@ def hydrate_asset_bundle(request: Mapping[str, Any], manifest: Mapping[str, Any]
     require_exact(
         asset_inventory_summary(source_root), source_inventory, "post-copy source asset inventory"
     )
+    # Reserve the destination namespace atomically.  Publishing children with rename(2) would
+    # still be unsafe: a concurrent writer can create a same-named child after this mkdir and a
+    # later rename may replace or merge it.  Build every directory exclusively and publish every
+    # already-fsynced regular file with link(2), whose destination creation is atomic no-replace.
+    # Stage and the conflicting destination are deliberately preserved on any collision.
     try:
         destination_root.mkdir(mode=0o755, exist_ok=False)
     except FileExistsError as exc:
         raise ContractError("asset destination appeared before exclusive publish") from exc
-    for child in sorted(stage.iterdir(), key=lambda path: path.name):
-        os.rename(child, destination_root / child.name)
+    staged_directories = sorted(
+        (path for path in stage.rglob("*") if path.is_dir()),
+        key=lambda path: (len(path.relative_to(stage).parts), path.relative_to(stage).as_posix()),
+    )
+    for directory in staged_directories:
+        target_directory = destination_root / directory.relative_to(stage)
+        try:
+            target_directory.mkdir(mode=0o755, exist_ok=False)
+        except FileExistsError as exc:
+            raise ContractError(
+                f"no-replace: concurrent asset directory appeared: {target_directory}"
+            ) from exc
+    staged_files = sorted(
+        (path for path in stage.rglob("*") if path.is_file()),
+        key=lambda path: path.relative_to(stage).as_posix(),
+    )
+    for staged_file in staged_files:
+        target_file = destination_root / staged_file.relative_to(stage)
+        try:
+            os.link(staged_file, target_file, follow_symlinks=False)
+        except FileExistsError as exc:
+            raise ContractError(
+                f"no-replace: concurrent asset file appeared: {target_file}"
+            ) from exc
+    for staged_file in reversed(staged_files):
+        staged_file.unlink()
+    for directory in reversed(staged_directories):
+        directory.rmdir()
     stage.rmdir()
     require_exact(
         asset_inventory_summary(destination_root), source_inventory, "published asset inventory"
