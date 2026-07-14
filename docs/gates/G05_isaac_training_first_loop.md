@@ -1651,3 +1651,27 @@ file/content SHA 为 `e0125b0e...bb4` / `533beb03...3d8`。完整 receipt 见
 [`phase1_signed_face_exam_k100_runtime_receipt_20260714.json`](../../configs/phase1_signed_face_exam_k100_runtime_receipt_20260714.json)。
 它没有消费 checkpoint，也明确不授权 trainer、judge、L2、第二 seed、停止/晋级或部署；所以这不是
 Isaac 行为结果，G05 保持 `Partial`。
+
+### 2026-07-14 signed-face K100 checkpoint attestor source gate
+
+paper 后的 generic [`checkpoint attestor`](../DEFINITIONS.md) 已完成 source/static gate。它不自动挑“最新”
+模型；每个候选 request 必须显式绑定 checkpoint path/bytes/SHA、filename/embed iteration、相邻
+`params/training_contract.json` SHA、fresh lineage integer `1` 和 producer claim canonical SHA。hard contract
+必须逐类型保留 `deploy_parity_face179`、`shared_plus_y` 与 exact float
+`mount_normal_sign_per_clip=[1.0,-1.0]`，并把 31-joint plant 字段算入 semantic SHA。
+
+同一 request 还冻结 clean source commit/tree、judge/evaluator/scorer/schedule source closure、checkpoint 与
+evaluator Python runtime fingerprints、MJCF bytes/SHA，以及 actual immutable schedule 和 activation 的
+file/content SHA。consumer 必须直接读取 actual activation；旧 runtime receipt 摘要中的 integer `[1,-1]`
+已由 versioned correction pointer 保留并降级，不能作为 signed numeric type 权威，也不能用 Python 数值
+等价放行。
+
+全部 no-write 检查通过后，consumer 才在由 checkpoint SHA 唯一导出的 no-clobber namespace 先写 evidence、
+最后写 claim；partial 或已有 root 均不可复用。claim 仍标记
+`attested_not_executed_no_decision`，judge/trainer/L2/第二 seed/stop-promote/formal score/部署/真机全 false。
+路径通配/穿越、symlink ancestry、checkpoint/contract/request 中途替换、dangling namespace 与
+evidence-only partial 都 fail closed。focused 攻击回归为 `21 passed`，rebase 后仓内 `tests/` 为
+`956 passed, 9 skipped`，`py_compile` 与 `static-validate` rc0；没有 Pod 连接、runtime request、
+checkpoint evidence/claim、judge 或训练结果。因此只是 E1 source gate，G05 继续 `Partial`。见
+[实验](../experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-PAPER.md)与
+[操作](../operations/run_phase1_signed_face_k100_checkpoint_attestor.md)。

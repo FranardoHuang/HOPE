@@ -1,0 +1,200 @@
+{
+  "schema_version": 1,
+  "manifest_id": "phase1-signed-face-k100-checkpoint-attestor-20260714-v1",
+  "status": "source_reviewed_runtime_attestation_not_run",
+  "recorded_local_date": "2026-07-14",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "simulation_only": true,
+  "real_robot_commands_forbidden": true,
+  "source_bindings": {
+    "runner": {
+      "path": "scripts/attest_phase1_signed_face_k100_checkpoint.py",
+      "sha256": "b42ecd08ea1516ab50cda0d47ee957b82e7c1e5b0c19fc3f7f588862ed7c5ec3"
+    },
+    "judge": {
+      "path": "hope_training/whole_body_tracking/scripts/judge.sh",
+      "sha256": "5cec764d80fed779e3b13a17d12dbac4465b6df5e10c5810fee9866b2e4eab60"
+    },
+    "play_exporter": {
+      "path": "hope_training/whole_body_tracking/scripts/play.py",
+      "sha256": "84725f097d78e80d995c5d44008aea8e6a9d8b410e1900846c8aa9d5d440691b"
+    },
+    "std_sidecar": {
+      "path": "hope_training/whole_body_tracking/scripts/make_std_sidecar.py",
+      "sha256": "e17d144c14af4cba9d7b73d8ac842001dbecd944a73a539bdfe2bd9ddc17a9f4"
+    },
+    "training_contract": {
+      "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/utils/training_contract.py",
+      "sha256": "544bafbc4de4062aba78e8b129c1b020ee33ef147c449e1b70e5e4809ed79569"
+    },
+    "policy_runner": {
+      "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/utils/my_on_policy_runner.py",
+      "sha256": "0eca52b732a5934cbd6cb0d09e5bea1907ecad0ae469416d75892e8c9245a3a1"
+    },
+    "question_bank_loader": {
+      "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/stage1_question_bank.py",
+      "sha256": "47db31320c8a37ad95d082a179dcdfad45ca1b740696d54e22069fcdaab8b8b0"
+    },
+    "mujoco_evaluator": {
+      "path": "hope_training/whole_body_tracking/scripts/mujoco_eval_onnx.py",
+      "sha256": "08c601488b79188eab4e3c0dbe3f90c939a11e7f021eb96ca55fec4f4b61ab12"
+    },
+    "signed_face_scorer": {
+      "path": "hope_training/whole_body_tracking/scripts/virtual_return_scorer.py",
+      "sha256": "9d01da15a6f24166d4d185ede26a2bd29c9c61d02d15942beadb35b335e0f5ec"
+    },
+    "schedule_module": {
+      "path": "hope_training/whole_body_tracking/scripts/bank_exam_schedule.py",
+      "sha256": "32721f018f6a35a42aa12ff0a7e48c0d9bc513d238988d953241ee625744b23b"
+    }
+  },
+  "paper": {
+    "bank": {
+      "sha256": "60e1a7ade72eaf64e17a1b83795125551f08c6699c8a3cc3c269500d8e6cd1ca",
+      "schema_version": 3,
+      "split": "exam",
+      "physics_contract_sha256": "09dfe8999c54e36b258fe54b5ec3da5d9816ff3be3675963b919371d7f4afb95",
+      "source_family_sha256": "9603a1788eb17ce03598cdde4efff946039613cf61fcc686f90a385706dba9db"
+    },
+    "schedule": {
+      "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/papers/signed_face_exam_k100_v1/signed_face_exam_k100.schedule.json",
+      "bytes": 20237,
+      "file_sha256": "f2777dcd02080ba68b839c76ea9d3f14c938457c9bc01b5692fe86ae59157ec7",
+      "semantic_sha256": "3ca4bdba7f4acbe6f211d90e95305fc4a9459c118e4220c9683060c0a6723365",
+      "question_id_order_sha256": "09f778f2afd7888069ac75aabee3bf19deda015acbbad843ccdb70ca39548bd0",
+      "scheduled_attempts": 100,
+      "unique_question_ids": 100,
+      "selected_per_side": {
+        "forehand": 50,
+        "backhand": 50
+      }
+    },
+    "activation": {
+      "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/papers/signed_face_exam_k100_v1/signed_face_exam_k100.activation.json",
+      "bytes": 11620,
+      "file_sha256": "e0125b0e937655672e68ac79578c075e4cf8e99fc1cad5655bcb7e3e4a977bb4",
+      "content_sha256": "533beb03a13236eb93404b5c141f6459b08520060b0c2ed0b6dc4ee2e46db3d8",
+      "artifact_kind": "phase1_signed_face_exam_k100_paper_activation"
+    },
+    "signed_face_contract": {
+      "schema_version": 1,
+      "achieved_and_target_frame": "mount_plusY_A",
+      "external_frame": "physical_striking_face_B",
+      "physical_B_to_raw_A": "raw_A=mount_normal_sign_per_clip[clip]*physical_B",
+      "clip_order": [
+        "forehand",
+        "backhand"
+      ],
+      "mount_normal_sign_per_clip": [
+        1.0,
+        -1.0
+      ],
+      "signed_face_required": true,
+      "unsigned_or_oriented_plane_fallback_allowed": false,
+      "identity_checked_before_orient_normal": true,
+      "physical_B_min_x_strict": 1e-06,
+      "unit_normal_atol": 0.0002,
+      "identity_gate": "dot(achieved_raw_A,target_raw_A)>0_and_achieved_physical_B.x>1e-6_and_target_physical_B.x>1e-6_before_orient_normal"
+    },
+    "denominator": {
+      "aggregate": 100,
+      "forehand": 50,
+      "backhand": 50
+    }
+  },
+  "receipt_correction": {
+    "path": "configs/phase1_signed_face_exam_k100_runtime_receipt_correction_20260714.json",
+    "sha256": "4ef8b8d868e1e17733710e525e1bffb3ed4ed8c6013b7b834bfd63571e0c30ca"
+  },
+  "execution_semantics": {
+    "evaluation_contract_exact": true,
+    "signed_face_exact": true,
+    "checkpoint_contract": {
+      "schema_version": 3,
+      "fresh_lineage_exact": 1,
+      "actor_obs_contract": "deploy_parity_face179",
+      "actor_obs_total_dim": 179,
+      "face_command_pairing": "shared_plus_y",
+      "mount_normal_sign_per_clip": [
+        1.0,
+        -1.0
+      ],
+      "motion_kinematics_exact": true,
+      "motion_allow_legacy_link_origin_velocity": false
+    },
+    "runtime_packages": {
+      "checkpoint_python": [
+        "torch"
+      ],
+      "evaluator_python": [
+        "mujoco",
+        "numpy",
+        "onnx",
+        "onnxruntime"
+      ]
+    },
+    "plant_contract_keys": [
+      "articulation_joint_names",
+      "action_joint_ids",
+      "joint_names",
+      "default_joint_pos",
+      "action_scale",
+      "joint_stiffness",
+      "joint_damping",
+      "joint_effort_limits",
+      "joint_actuator_types",
+      "joint_armature",
+      "joint_friction_coefficients",
+      "joint_velocity_limits",
+      "joint_friction_backend",
+      "joint_friction_semantics",
+      "joint_friction_units",
+      "qdes_joint_pos_limits",
+      "action_use_default_offset",
+      "qdes_clamp",
+      "physics_step_dt_s",
+      "policy_step_dt_s",
+      "control_decimation"
+    ],
+    "plant_execution": {
+      "passive_damping": "auto",
+      "frictionloss": "auto",
+      "qdes_clamp": true,
+      "require_bound_plant_match": true,
+      "allow_inexact_contract": false
+    },
+    "paper_execution": {
+      "all_scheduled_attempts_in_denominator": true,
+      "missing_invalid_or_reset_attempts_count_as_failures": true,
+      "attempts": 100,
+      "attempts_per_side": 50,
+      "schedule_seed": 0,
+      "hold_range": [
+        0,
+        100
+      ],
+      "no_wrap": true
+    }
+  },
+  "output": {
+    "root": "/workspace/codexschema/phase1_signed_face_rescue_20260713/executions/signed_face_k100_v1",
+    "evidence_basename": "execution_evidence.json",
+    "claim_basename": "execution_claim.json",
+    "claim_written_last": true
+  },
+  "authorization": {
+    "attestation_only": true,
+    "auto_start": false,
+    "trainer_started": false,
+    "judge_started": false,
+    "checkpoint_execution_started": false,
+    "l2_training_authorized": false,
+    "second_seed_authorized": false,
+    "checkpoint_stop_or_promote_authorized": false,
+    "formal_score_authorized": false,
+    "gate3_authorized": false,
+    "deployment_authorized": false,
+    "real_robot_authorized": false
+  }
+}

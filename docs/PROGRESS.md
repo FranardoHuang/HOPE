@@ -32,6 +32,20 @@
   ledger SHA `c0a25f2c...f4f8b`。只解锁 B 的 L0 静态证书；C 保持未消费后备，L1/桌网/动力学/RL/真机
   仍未授权。见[动作实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)。
 
+- signed-face K100 的 generic checkpoint attestor 已完成 E1 source/static gate：每个 request 必须显式绑定
+  checkpoint SHA/filename+embedded iteration/finite/fresh lineage、相邻 hard contract、producer claim、
+  evaluator source+runtime、MJCF/plant 和 actual schedule/activation；同 checkpoint 只能写一个
+  SHA-derived no-clobber evidence/claim namespace，且 claim 不授权 judge、停止或晋级。旧 runtime receipt
+  摘要的 integer `[1,-1]` 被 versioned correction pointer 保留并降级；consumer 直接严格验证 actual
+  activation 的 float `[1.0,-1.0]`；路径通配符/穿越、symlink ancestry、checkpoint 替换、request TOCTOU、
+  dangling namespace 与 evidence-only partial 都 fail closed。focused `21 passed`、rebase 后仓内 `tests/`
+  `956 passed, 9 skipped`，且
+  `py_compile`/`static-validate` rc0；未连接 Pod、
+  未创建 runtime claim 或运行判卷。见
+  [实验](experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-PAPER.md)、
+  [G05](gates/G05_isaac_training_first_loop.md)与
+  [操作](operations/run_phase1_signed_face_k100_checkpoint_attestor.md)。
+
 - signed-face fresh C2 已在 Pod1 自然产生 finite/iter24/lineage1 terminal bytes，但 v1 用整数
   `[1,-1]` 假拒绝训练端合法 float `[1.0,-1.0]`；冻结 v1r1 又把 trainer 实际五键 compact bank
   record 错当成应直含第六个 physics SHA。最后一次成功只读快照证明 v1r1 从未安装/运行且 D2 从未

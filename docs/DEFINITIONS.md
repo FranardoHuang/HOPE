@@ -39,6 +39,7 @@
 | `q10` | 每个动作/侧各 10 题的快速方向卷；只看有没有苗头，不许据此停训或晋级。 |
 | <a id="q50-and-k100"></a>`q50` | 每个动作/侧至少 50 题的同卷决策考试。当本项目只考正手和反手时，合计通常是 100 次。 |
 | `K100` | 当前一张具体的、100 行 immutable paper：正手 50 + 反手 50，共用固定 schedule/order，且不删失败尝试。`q50` 是考试协议类型，`K100` 是这次的具体卷，两者不是普遍同义词。`K100` 也不自动表示 exact，还必须核对题库 bytes、语义和分母。 |
+| `signed-face K100 checkpoint attestor` | 给一份**显式指定**的 checkpoint 做判卷前一次性取证：核对 filename/embed iteration、finite、fresh lineage、相邻 hard contract、producer claim、评测源码/runtime、MJCF/plant 和 actual K100 activation，再在 checkpoint-SHA 唯一路径写 evidence/claim。它不运行 judge、不产生成绩，也不授权停止或晋级。 |
 | Python `BankExam` | 仓库内的独立 policy 考试：Python 在 MuJoCo 中物理推进机器人，每题单独重置，再从击球时的球拍状态用解析模型推算接触和落台。它没有真实球拍—球碰撞，也不包含 planner、生产 C++ runner 或完整厂商运行链，因此不是 `Gate3/Gate3B`。 |
 | `readiness audit` | 开卷前的只读资格检查：核对 checkpoint、contract、题库/schedule 和本机路径，不启动 judge，不产生成绩。 |
 | `all-four activation` | 四 seed 同卷的启动授权文件：只有 Pod1/Pod2 readiness audit 和四份 checkpoint 全对上才能生成。它只允许下一步 `prepare`，不是 judge 已启动，更不是新分数。`judges_started=0` 就是还没有子判卷进程启动。 |

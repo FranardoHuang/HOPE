@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "correction_id": "phase1-signed-face-exam-k100-runtime-receipt-correction-20260714-v1",
+  "status": "versioned_summary_correction_original_receipt_preserved",
+  "recorded_local_date": "2026-07-14",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "original_receipt": {
+    "path": "configs/phase1_signed_face_exam_k100_runtime_receipt_20260714.json",
+    "sha256": "c0eca638c5adff856d659cff70ec37908bf65c1fd703cdf4a56d91b002922048",
+    "receipt_id": "phase1-signed-face-exam-k100-runtime-receipt-20260714-v1",
+    "preserved_unchanged": true
+  },
+  "affected_summary_field": "signed_face_contract.mount_normal_sign_per_clip",
+  "recorded_summary_value": [
+    1,
+    -1
+  ],
+  "correction": {
+    "kind": "json_numeric_type_correction",
+    "correct_exact_value": [
+      1.0,
+      -1.0
+    ],
+    "integers_are_not_accepted_as_float_equivalents": true,
+    "source_manifest": {
+      "path": "configs/phase1_signed_face_exam_k100_activation_prereg_20260714.json",
+      "sha256": "e401305d4564def80677e6d881ef4afabde01d96ea7ea6aa08224d86835de556"
+    },
+    "materializer": {
+      "path": "scripts/materialize_phase1_signed_face_exam_k100.py",
+      "sha256": "4e094bbebe525fb9cd756c3fa6eebe7436c72f94aba2a12ecd136f612761ac6e"
+    },
+    "actual_activation": {
+      "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/papers/signed_face_exam_k100_v1/signed_face_exam_k100.activation.json",
+      "bytes": 11620,
+      "file_sha256": "e0125b0e937655672e68ac79578c075e4cf8e99fc1cad5655bcb7e3e4a977bb4",
+      "content_sha256": "533beb03a13236eb93404b5c141f6459b08520060b0c2ed0b6dc4ee2e46db3d8",
+      "authoritative_field": "content.signed_face_contract.mount_normal_sign_per_clip",
+      "required_exact_value": [
+        1.0,
+        -1.0
+      ]
+    }
+  },
+  "trust_rule": {
+    "old_receipt_summary_may_describe_file_hashes": true,
+    "old_receipt_summary_must_not_supply_signed_face_numeric_types": true,
+    "consumer_must_verify_actual_activation_bytes_and_content": true,
+    "silent_edit_or_replacement_of_original_receipt_forbidden": true
+  },
+  "authorization": {
+    "paper_materialization_only": true,
+    "trainer_started": false,
+    "judge_started": false,
+    "checkpoint_execution_started": false,
+    "stop_or_promote_authorized": false,
+    "deployment_authorized": false,
+    "real_robot_authorized": false
+  }
+}
