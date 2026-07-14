@@ -148,7 +148,11 @@ python3 scripts/run_lean_training_queue.py \
 ```
 
 终档器不扫描另一台 Pod、不发 signal、不改 YAML status、不自动 retry。它先要求当前 YAML 重算的 expected
-claim SHA 等于 immutable claim，并再次运行 source-asset doctor、消费 exact receipt。trainer/supervisor 任一
+claim SHA 等于 immutable claim。queue shell 仍先跑一次 source-asset doctor 作为快速诊断，但终档授权不信任该输出：
+probe runtime 会再从 claim 导出唯一 receipt、target 和 donor，自己重算两棵当前文件树库存与 URDF mesh
+引用闭包，复核 donor clean commit，并将 target/donor 的实测 tree SHA/字节数/文件数/闭包写入
+immutable result 的 `source_asset_receipt.current_closure`。因此直接调用 runtime finalizer、或 doctor 通过后资产发生
+漂移，都不能解锁。trainer/supervisor 任一
 仍存活或原 PGID 还有 orphan 时只报 not-ready，不写结果；整组自然消失后才核对 exact PID/starttime、normal
 rc0、scene→contract→first-iteration phase、fatal0、`model_1.pt` filename/embed/finite/fresh-lineage1、相邻
 schema-3 hard-contract SHA、launch claim、source/ignored A3 closure 与 motion/train-bank bytes。通过或失败都
@@ -178,6 +182,12 @@ SHA-256 分别为 `0d03bd0305a56e56440b14e1f41278a26c0cad3a84cc1245325faed1ef29b
 实际 4096 environments、`physical_ball=true`、三实体全存在、76 个 tensor / 1,762,715 个浮点元素全
 finite、fatal0 与自然空 PGID，因此 `unlock_authorized=true` 可被显式队列变更消费。probe 本身仍
 `not_science=true / attestable=false / promotable=false`，不能当 Reward 结果或晋级证据。
+
+该 caeb attempt 在当时的 queue shell 中确实完成了 source-asset doctor 重哈希；但它使用的旧 runtime
+并没有 in-process `current_closure`，所以不把新能力倒算到旧 result。新 source 的验收结果必须实际携带上述
+当前闭包证据。终档 checkpoint 的内嵌 iteration 与 fresh lineage 只接受 plain integer，`true` 不等于合法的
+`1`。当前 full-scene terminal 专项 `39 passed`，包含直接绕过 wrapper 后分别篡改 target/donor、以及 boolean
+iteration/lineage 的负测；整合 harness/source-asset 回归 `146 passed`。
 
 这个入口解决的是“动作和题库已经决定后，为什么还要手拼一长串命令”。一条 YAML job 必须同时绑定：
 

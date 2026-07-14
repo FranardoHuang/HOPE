@@ -100,6 +100,20 @@ def _write_json(path: Path, value):
     )
 
 
+def _make_runtime_asset(root: Path) -> None:
+    (root / "urdf").mkdir(parents=True)
+    (root / "meshes").mkdir()
+    (root / "config").mkdir()
+    (root / "meshes/body.STL").write_bytes(b"exact-a3-mesh\n")
+    (root / "config/joints.yaml").write_text("joints: 31\n", encoding="utf-8")
+    (root / "urdf/model.urdf").write_text(
+        '<robot name="a3"><link name="body"><visual><geometry>'
+        '<mesh filename="../meshes/body.STL"/>'
+        "</geometry></visual></link></robot>\n",
+        encoding="utf-8",
+    )
+
+
 def _fixture(tmp_path: Path, *, live=False, wrong_supervisor_argv=False):
     root = tmp_path / "case"
     source = root / "source"
@@ -126,16 +140,22 @@ def _fixture(tmp_path: Path, *, live=False, wrong_supervisor_argv=False):
     motion0.write_bytes(b"motion-forehand")
     motion1.write_bytes(b"motion-backhand")
     bank.write_bytes(b"bank")
+    donor_checkout = root / "donor"
+    donor_asset = donor_checkout / "assets/agibot_a3"
+    _make_runtime_asset(donor_asset)
+    target_asset = source / "runtime_assets/agibot_a3"
+    target_asset.parent.mkdir(parents=True)
+    shutil.copytree(donor_asset, target_asset)
+    asset_inventory = P._stable_asset_inventory(donor_asset, "fixture donor asset")
+    asset_urdf = P._asset_urdf_reference_closure(donor_asset, "fixture donor asset")
     asset_contract = {
         "target_relative_path": "runtime_assets/agibot_a3",
         "donor": {
-            "checkout": str(root / "donor"),
+            "checkout": str(donor_checkout),
             "commit": "b" * 40,
             "relative_path": "assets/agibot_a3",
         },
-        "file_count": 46,
-        "total_file_bytes": 15378264,
-        "tree_content_sha256": "c" * 64,
+        **asset_inventory,
         "symlinks_forbidden": True,
         "target_must_be_gitignored": True,
     }
@@ -223,11 +243,7 @@ def _fixture(tmp_path: Path, *, live=False, wrong_supervisor_argv=False):
             "total_file_bytes": asset_contract["total_file_bytes"],
             "tree_content_sha256": asset_contract["tree_content_sha256"],
         },
-        "urdf_reference_closure": {
-            "mesh_reference_occurrences": 43,
-            "unique_mesh_references": 43,
-            "resolved_regular_meshes": 43,
-        },
+        "urdf_reference_closure": asset_urdf,
         "target_gitignored": True,
         "symlinks_present": False,
     }
@@ -342,6 +358,10 @@ def _fixture(tmp_path: Path, *, live=False, wrong_supervisor_argv=False):
         "exit_path": run_dir / P.EXIT_NAME,
         "claim_digest": claim_digest,
         "source_asset_receipt": source_asset_receipt,
+        "target_asset": target_asset,
+        "donor_asset": donor_asset,
+        "asset_inventory": asset_inventory,
+        "asset_urdf": asset_urdf,
     }
 
 
@@ -406,9 +426,15 @@ def _write_launcher_terminal(
 def test_happy_terminal_pass_and_identical_repeat(tmp_path):
     fixture = _fixture(tmp_path)
     first = _finalize(fixture)
-    assert first["result"]["content"]["status"] == "passed"
-    assert first["result"]["content"]["unlock_authorized"] is True
-    assert first["result"]["content"]["not_science"] is True
+    content = first["result"]["content"]
+    assert content["status"] == "passed"
+    assert content["unlock_authorized"] is True
+    assert content["not_science"] is True
+    current = content["source_asset_receipt"]["current_closure"]
+    assert current["target"]["inventory"] == fixture["asset_inventory"]
+    assert current["donor"]["inventory"] == fixture["asset_inventory"]
+    assert current["target"]["urdf_reference_closure"] == fixture["asset_urdf"]
+    assert current["donor"]["urdf_reference_closure"] == fixture["asset_urdf"]
     assert first["repeated_identical"] is False
     frozen = (fixture["run_dir"] / P.RESULT_NAME).read_bytes()
     second = _finalize(fixture)
@@ -542,6 +568,14 @@ def test_embedded_iteration_mismatch_cannot_pass(tmp_path):
     assert "filename iteration differs" in result["result"]["content"]["failure_reason"]
 
 
+def test_boolean_embedded_iteration_cannot_pass(tmp_path):
+    fixture = _fixture(tmp_path)
+    fixture["checkpoint"]["iter"] = True
+    result = _finalize(fixture)
+    assert result["result"]["content"]["status"] == "failed"
+    assert "embedded iteration must be an integer" in result["result"]["content"]["failure_reason"]
+
+
 def test_contract_sha_mismatch_cannot_pass(tmp_path):
     fixture = _fixture(tmp_path)
     fixture["checkpoint"]["infos"]["training_contract_sha256"] = "0" * 64
@@ -649,6 +683,21 @@ def test_terminal_source_drift_cannot_pass(tmp_path):
     assert "exact clean source" in result["result"]["content"]["failure_reason"]
 
 
+def test_terminal_donor_source_drift_cannot_pass(tmp_path):
+    fixture = _fixture(tmp_path)
+    result = _finalize(
+        fixture,
+        source_verifier=lambda _path, commit: {
+            "head": commit,
+            "clean": commit != "b" * 40,
+        },
+    )
+    content = result["result"]["content"]
+    assert content["status"] == "failed"
+    assert content["unlock_authorized"] is False
+    assert "donor verifier did not prove exact clean source" in content["failure_reason"]
+
+
 def test_ignored_source_asset_receipt_drift_cannot_pass(tmp_path):
     fixture = _fixture(tmp_path)
     receipt = json.loads(fixture["source_asset_receipt"].read_text(encoding="utf-8"))
@@ -659,10 +708,43 @@ def test_ignored_source_asset_receipt_drift_cannot_pass(tmp_path):
     assert "inventory mismatch" in result["result"]["content"]["failure_reason"]
 
 
+@pytest.mark.parametrize("which", ["target_asset", "donor_asset"])
+def test_direct_finalizer_rehashes_current_ignored_asset_tree(tmp_path, which):
+    """Calling runtime finalize directly must not bypass terminal A3 verification."""
+
+    fixture = _fixture(tmp_path)
+    (fixture[which] / "meshes/body.STL").write_bytes(b"drift-after-hydration\n")
+    result = P.finalize(
+        fixture["run_dir"],
+        expected_claim_digest=fixture["claim_digest"],
+        # Deliberately call the terminal authority directly: no queue shell
+        # wrapper or pre-finalize source-asset doctor participates.
+        checkpoint_loader=lambda _path: fixture["checkpoint"],
+        torch_module=FakeTorch,
+        proc_root=fixture["proc_root"],
+        getpgid=lambda pid: fixture["pgids"].get(pid, pid),
+        source_verifier=lambda _path, commit: {"head": commit, "clean": True},
+        hard_contract_validator=lambda _contract, _source: None,
+    )
+    content = result["result"]["content"]
+    assert content["status"] == "failed"
+    assert content["unlock_authorized"] is False
+    expected = "target" if which == "target_asset" else "donor"
+    assert f"current {expected} asset tree inventory drift" in content["failure_reason"]
+
+
 def test_causal_lineage_cannot_unlock_fresh_probe(tmp_path):
     fixture = _fixture(tmp_path)
     fixture["checkpoint"]["infos"]["training_contract_lineage_exact"] = 0
     result = _finalize(fixture)
+    assert "lineage must equal 1" in result["result"]["content"]["failure_reason"]
+
+
+def test_boolean_lineage_cannot_unlock_fresh_probe(tmp_path):
+    fixture = _fixture(tmp_path)
+    fixture["checkpoint"]["infos"]["training_contract_lineage_exact"] = True
+    result = _finalize(fixture)
+    assert result["result"]["content"]["status"] == "failed"
     assert "lineage must equal 1" in result["result"]["content"]["failure_reason"]
 
 

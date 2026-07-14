@@ -26,6 +26,14 @@
   继续 Partial。见 [L0 卷宗](experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-L0.md)与
   [操作](operations/run_motion_backhand_loop_b_l0_static.md)。
 
+- Full-scene terminal authority 现在自行重算 ignored A3 target/donor 当前库存、URDF mesh 闭包与
+  donor clean commit，将实测 SHA 写入 immutable `current_closure`；直接绕过 queue wrapper 后的两侧
+  资产漂移与 boolean iteration/lineage 负测均 fail closed。full-scene 专项 `39 passed`，整合
+  harness/source-asset 回归 `146 passed`。caeb 旧 probe 的 wrapper doctor 当时通过，但旧 result 没有
+  `current_closure`，故不追认新能力；新 Pod result 尚未运行，G05 保持 `Partial`。见
+  [G05](gates/G05_isaac_training_first_loop.md)、[queue 操作](operations/run_lean_training_queue.md)与
+  [运行绑定接口](interfaces/lean_training_run_binding.md)。
+
 - strict receipt 解锁后的 conditional control/treatment 已分别在 Pod2 GPU1/GPU2 越过 first iteration，
   PID=PGID 为 `357023/357679`；尚无 checkpoint 早判或 Reward 结论。紧接着的 interaction control
   PID=PGID `358331` 在 first iteration 前 dynamic URDF import 报

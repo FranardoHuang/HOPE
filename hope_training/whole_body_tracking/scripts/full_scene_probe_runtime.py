@@ -16,12 +16,14 @@ import hashlib
 import importlib.util
 import json
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import re
+import stat
 import subprocess
 import sys
 import time
 from typing import Any
+import xml.etree.ElementTree as ET
 
 import lean_queue_runtime as queue_runtime
 
@@ -47,6 +49,7 @@ REQUIRED_TRAINER_PHASES = (
     "scene_import_done",
     "hard_contract_written",
 )
+SOURCE_ASSET_URDF_RELATIVE_PATH = "urdf/model.urdf"
 FATAL_PATTERNS = {
     "bad_alloc": r"bad_alloc",
     "cuda_out_of_memory": r"cuda out of memory",
@@ -144,7 +147,12 @@ def _probe_claim(
     budget = queue_runtime._require_mapping(content.get("budget"), "probe budget")
     if budget.get("milestones") != [1]:
         raise FullSceneProbeError("probe claim must bind milestones=[1]")
-    if content.get("expected_training_contract_lineage_exact") != 1:
+    expected_lineage = queue_runtime._require_plain_int(
+        content.get("expected_training_contract_lineage_exact"),
+        "expected probe training-contract lineage",
+        minimum=0,
+    )
+    if expected_lineage != 1:
         raise FullSceneProbeError("probe claim must require fresh exact lineage=1")
     prefix = content.get("supervisor_argv_prefix")
     if not isinstance(prefix, list) or not prefix or any(
@@ -625,6 +633,149 @@ def _asset_hashes_and_contract_binding(
     return evidence
 
 
+def _safe_asset_relative_path(value: Any, label: str) -> PurePosixPath:
+    if type(value) is not str or not value or "\x00" in value:
+        raise FullSceneProbeError(f"{label} must be a non-empty relative path")
+    path = PurePosixPath(value)
+    if path.is_absolute() or value in {".", ".."} or ".." in path.parts:
+        raise FullSceneProbeError(f"{label} must be a safe relative path")
+    return path
+
+
+def _checked_asset_path(
+    checkout: Path,
+    relative: Any,
+    label: str,
+    *,
+    require_directory: bool,
+) -> Path:
+    """Resolve a claimed asset path without accepting a symlink component."""
+
+    if checkout.is_symlink() or not checkout.is_dir():
+        raise FullSceneProbeError(f"{label} checkout is missing or a symlink")
+    current = checkout
+    parts = _safe_asset_relative_path(relative, label).parts
+    for index, part in enumerate(parts):
+        current = current / part
+        try:
+            observed = current.lstat()
+        except FileNotFoundError as exc:
+            raise FullSceneProbeError(f"{label} component is missing: {current}") from exc
+        if stat.S_ISLNK(observed.st_mode):
+            raise FullSceneProbeError(f"{label} contains a symlink component: {current}")
+        final = index == len(parts) - 1
+        if not final and not stat.S_ISDIR(observed.st_mode):
+            raise FullSceneProbeError(f"{label} parent is not a directory: {current}")
+        if final:
+            expected = stat.S_ISDIR if require_directory else stat.S_ISREG
+            if not expected(observed.st_mode):
+                kind = "directory" if require_directory else "regular file"
+                raise FullSceneProbeError(f"{label} is not a {kind}: {current}")
+    try:
+        current.resolve().relative_to(checkout.resolve())
+    except ValueError as exc:
+        raise FullSceneProbeError(f"{label} escapes its checkout") from exc
+    return current
+
+
+def _asset_inventory_once(root: Path, label: str) -> dict[str, Any]:
+    try:
+        root_info = root.lstat()
+    except FileNotFoundError as exc:
+        raise FullSceneProbeError(f"{label} root is missing: {root}") from exc
+    if stat.S_ISLNK(root_info.st_mode) or not stat.S_ISDIR(root_info.st_mode):
+        raise FullSceneProbeError(f"{label} root is not a real directory: {root}")
+
+    rows: list[dict[str, Any]] = []
+
+    def walk_error(error: OSError) -> None:
+        raise FullSceneProbeError(f"cannot enumerate {label}: {error}") from error
+
+    for current, dirnames, filenames in os.walk(
+        root, topdown=True, followlinks=False, onerror=walk_error
+    ):
+        current_path = Path(current)
+        dirnames.sort()
+        filenames.sort()
+        for name in dirnames:
+            path = current_path / name
+            try:
+                observed = path.lstat()
+            except FileNotFoundError as exc:
+                raise FullSceneProbeError(f"{label} changed while enumerating: {path}") from exc
+            if stat.S_ISLNK(observed.st_mode):
+                raise FullSceneProbeError(f"{label} contains a symlink: {path}")
+            if not stat.S_ISDIR(observed.st_mode):
+                raise FullSceneProbeError(f"{label} contains a special directory entry: {path}")
+        for name in filenames:
+            path = current_path / name
+            try:
+                raw = queue_runtime._read_regular_bytes(path, f"{label} file")
+            except queue_runtime.LeanQueueRuntimeError as exc:
+                raise FullSceneProbeError(str(exc)) from exc
+            rows.append(
+                {
+                    "relative_path": path.relative_to(root).as_posix(),
+                    "bytes": len(raw),
+                    "sha256": hashlib.sha256(raw).hexdigest(),
+                }
+            )
+    rows.sort(key=lambda row: row["relative_path"])
+    return {
+        "file_count": len(rows),
+        "total_file_bytes": sum(row["bytes"] for row in rows),
+        "tree_content_sha256": queue_runtime.canonical_sha256({"files": rows}),
+    }
+
+
+def _stable_asset_inventory(root: Path, label: str) -> dict[str, Any]:
+    first = _asset_inventory_once(root, label)
+    second = _asset_inventory_once(root, label)
+    if first != second:
+        raise FullSceneProbeError(f"{label} changed during terminal inventory")
+    return first
+
+
+def _asset_urdf_reference_closure(root: Path, label: str) -> dict[str, int]:
+    urdf = _checked_asset_path(
+        root,
+        SOURCE_ASSET_URDF_RELATIVE_PATH,
+        f"{label} URDF",
+        require_directory=False,
+    )
+    try:
+        raw = queue_runtime._read_regular_bytes(urdf, f"{label} URDF")
+        xml_root = ET.fromstring(raw)
+    except (queue_runtime.LeanQueueRuntimeError, ET.ParseError) as exc:
+        raise FullSceneProbeError(f"cannot parse {label} URDF: {exc}") from exc
+    references: list[str] = []
+    for element in xml_root.iter():
+        if element.tag.rsplit("}", 1)[-1] != "mesh":
+            continue
+        filename = element.attrib.get("filename")
+        if filename:
+            references.append(filename)
+    unique = sorted(set(references))
+    if not unique:
+        raise FullSceneProbeError(f"{label} URDF has no mesh references")
+    for reference in unique:
+        if reference.startswith("package://") or "\x00" in reference:
+            raise FullSceneProbeError(
+                f"{label} URDF has an unsupported mesh reference: {reference!r}"
+            )
+        lexical = os.path.normpath(
+            str(PurePosixPath(SOURCE_ASSET_URDF_RELATIVE_PATH).parent / reference)
+        )
+        _checked_asset_path(
+            root, lexical, f"{label} mesh reference", require_directory=False
+        )
+    return {
+        "mesh_reference_occurrences": len(references),
+        "unique_mesh_references": len(unique),
+        "resolved_regular_meshes": len(unique),
+    }
+
+
 def _validate_source_asset_receipt(
     claim_content: Mapping[str, Any], receipt_path: Path
 ) -> dict[str, Any]:
@@ -683,6 +834,8 @@ def _validate_source_asset_receipt(
     if type(unique) is not int or unique <= 0 or urdf.get("resolved_regular_meshes") != unique:
         raise FullSceneProbeError("source asset receipt has incomplete URDF mesh closure")
     raw = queue_runtime._read_regular_bytes(receipt_path, "source asset receipt")
+    if raw != _canonical_payload(receipt):
+        raise FullSceneProbeError("source asset receipt changed while validating")
     return {
         "path": str(receipt_path),
         "sha256": hashlib.sha256(raw).hexdigest(),
@@ -690,6 +843,89 @@ def _validate_source_asset_receipt(
         "ignored_runtime_asset_sha256": content["ignored_runtime_asset_sha256"],
         "inventory": inventory,
         "urdf_reference_closure": urdf,
+    }
+
+
+def _validate_current_source_asset_closure(
+    claim_content: Mapping[str, Any],
+    receipt_path: Path,
+    *,
+    source_verifier: Callable[[Path, str], Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Recompute ignored target and donor bytes inside the terminal authority."""
+
+    receipt = _validate_source_asset_receipt(claim_content, receipt_path)
+    source = queue_runtime._require_mapping(claim_content.get("source"), "probe source")
+    source_checkout = _canonical_absolute(source.get("checkout"), "probe source checkout")
+    contract = queue_runtime._require_mapping(
+        source.get("ignored_runtime_asset"), "ignored runtime asset contract"
+    )
+    donor = queue_runtime._require_mapping(contract.get("donor"), "asset donor")
+    donor_checkout = _canonical_absolute(donor.get("checkout"), "asset donor checkout")
+    donor_commit = queue_runtime._require_text(donor.get("commit"), "asset donor commit")
+    donor_state = dict(source_verifier(donor_checkout, donor_commit))
+    if donor_state != {"head": donor_commit, "clean": True}:
+        raise FullSceneProbeError("terminal donor verifier did not prove exact clean source")
+
+    target_root = _checked_asset_path(
+        source_checkout,
+        contract.get("target_relative_path"),
+        "current target asset",
+        require_directory=True,
+    )
+    donor_root = _checked_asset_path(
+        donor_checkout,
+        donor.get("relative_path"),
+        "current donor asset",
+        require_directory=True,
+    )
+    expected_inventory = {
+        "file_count": contract.get("file_count"),
+        "total_file_bytes": contract.get("total_file_bytes"),
+        "tree_content_sha256": contract.get("tree_content_sha256"),
+    }
+    target_inventory = _stable_asset_inventory(target_root, "current target asset")
+    target_urdf = _asset_urdf_reference_closure(target_root, "current target asset")
+    if _stable_asset_inventory(target_root, "current target asset") != target_inventory:
+        raise FullSceneProbeError("current target asset changed after URDF validation")
+    donor_inventory = _stable_asset_inventory(donor_root, "current donor asset")
+    donor_urdf = _asset_urdf_reference_closure(donor_root, "current donor asset")
+    if _stable_asset_inventory(donor_root, "current donor asset") != donor_inventory:
+        raise FullSceneProbeError("current donor asset changed after URDF validation")
+
+    if target_inventory != expected_inventory:
+        raise FullSceneProbeError("current target asset tree inventory drift")
+    if donor_inventory != expected_inventory:
+        raise FullSceneProbeError("current donor asset tree inventory drift")
+    if target_inventory != donor_inventory:
+        raise FullSceneProbeError("current target and donor asset inventories differ")
+    receipt_inventory = receipt["inventory"]
+    if target_inventory != receipt_inventory:
+        raise FullSceneProbeError("current asset inventory differs from hydration receipt")
+    if target_urdf != donor_urdf:
+        raise FullSceneProbeError("current target and donor URDF closures differ")
+    if target_urdf != receipt["urdf_reference_closure"]:
+        raise FullSceneProbeError("current URDF closure differs from hydration receipt")
+    if hashlib.sha256(
+        queue_runtime._read_regular_bytes(receipt_path, "source asset receipt")
+    ).hexdigest() != receipt["sha256"]:
+        raise FullSceneProbeError("source asset receipt changed during terminal validation")
+
+    return {
+        **receipt,
+        "current_closure": {
+            "target": {
+                "path": str(target_root),
+                "inventory": target_inventory,
+                "urdf_reference_closure": target_urdf,
+            },
+            "donor": {
+                "path": str(donor_root),
+                "source_state": donor_state,
+                "inventory": donor_inventory,
+                "urdf_reference_closure": donor_urdf,
+            },
+        },
     }
 
 
@@ -767,9 +1003,6 @@ def _validate_terminal(
     source_state = dict(source_verifier(source_path, source_commit))
     if source_state != {"head": source_commit, "clean": True}:
         raise FullSceneProbeError("terminal source verifier did not prove exact clean source")
-    source_asset_evidence = _validate_source_asset_receipt(
-        claim_content, source_asset_receipt
-    )
 
     log_dir = _canonical_absolute(binding_content.get("rsl_log_dir"), "bound RSL log dir")
     hard_path = log_dir / "params/training_contract.json"
@@ -804,7 +1037,10 @@ def _validate_terminal(
     if queue_runtime._checkpoint_stat(checkpoint_path) != before:
         raise FullSceneProbeError("probe checkpoint changed while loading")
     checkpoint = queue_runtime._require_mapping(checkpoint, "probe checkpoint")
-    if checkpoint.get("iter") != 1:
+    embedded_iteration = queue_runtime._require_plain_int(
+        checkpoint.get("iter"), "probe checkpoint embedded iteration", minimum=0
+    )
+    if embedded_iteration != 1:
         raise FullSceneProbeError("model_1 filename iteration differs from embedded iteration")
     infos = queue_runtime._require_mapping(checkpoint.get("infos"), "probe checkpoint infos")
     if infos.get("training_contract_schema_version") != 3:
@@ -813,7 +1049,8 @@ def _validate_terminal(
         raise FullSceneProbeError("probe checkpoint hard-contract SHA binding mismatch")
     if infos.get("training_launch_claim_sha256") != claim_digest:
         raise FullSceneProbeError("probe checkpoint launch-claim binding mismatch")
-    if infos.get("training_contract_lineage_exact") != 1:
+    lineage = infos.get("training_contract_lineage_exact")
+    if type(lineage) is not int or lineage != 1:
         raise FullSceneProbeError("fresh full-scene probe checkpoint lineage must equal 1")
     tensor_audit = queue_runtime._tensor_finiteness(checkpoint, torch_module)
     if tensor_audit["floating_tensor_count"] <= 0:
@@ -825,6 +1062,14 @@ def _validate_terminal(
         raise FullSceneProbeError("probe checkpoint changed while hashing")
     if queue_runtime._read_regular_bytes(hard_path, "hard training contract") != hard_raw:
         raise FullSceneProbeError("probe hard contract changed during finalization")
+    # Recompute the ignored target/donor at the end of semantic validation,
+    # immediately before constructing the immutable result.  The queue shell's
+    # earlier doctor is only a diagnostic and cannot close this authority gap.
+    source_asset_evidence = _validate_current_source_asset_closure(
+        claim_content,
+        source_asset_receipt,
+        source_verifier=source_verifier,
+    )
 
     return {
         "schema_version": 1,
@@ -849,7 +1094,7 @@ def _validate_terminal(
             "path": str(checkpoint_path),
             "sha256": hashlib.sha256(checkpoint_raw).hexdigest(),
             "filename_iteration": 1,
-            "embedded_iteration": 1,
+            "embedded_iteration": embedded_iteration,
             **tensor_audit,
         },
         "hard_contract": {

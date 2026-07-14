@@ -112,9 +112,14 @@ trainer argv。普通 attestor 看到 `attestable=false` 必须拒绝。
 supervisor 是 `setsid` 建立的 leader，trainer 是同组 child；supervisor 只 `wait`，不发 `TERM/KILL`，自然
 结束后 no-clobber 写 `full_scene_probe_exit.json`，明确区分 `normal_exit+exit_code` 与 `signal+signal`。独立
 `finalize-full-scene-probe` 只访问调用者选择的 Pod，并要求 trainer/supervisor 及整个原 PGID 均自然消失；
-仍 live/orphan 只返回 not-ready。它还比较 current-YAML expected claim SHA，重验 ignored A3 tree 并消费
-claim-bound source-asset receipt；PID reuse、signal/nonzero rc、fatal（含 NaN/Inf/Killed）、phase 缺失、
-`model_1` 缺失/iteration 错/nonfinite/causal-lineage、contract/claim/source/asset 漂移均形成不可解锁的终档失败。
+仍 live/orphan 只返回 not-ready。它还比较 current-YAML expected claim SHA，并由 **finalizer runtime 本身**
+从 immutable claim 导出 receipt、target 与 donor，重算两棵当前文件树库存和 URDF mesh 引用闭包，再与
+claim-bound source-asset receipt 逐项比较。shell 中的 source-asset doctor 只是更早的诊断门，它的成功输出不是
+终档授权依据；直接调用 runtime `finalize()` 也不能绕过当前资产重验。PID reuse、signal/nonzero rc、
+fatal（含 NaN/Inf/Killed）、phase 缺失、`model_1` 缺失/iteration 错/nonfinite/causal-lineage、
+contract/claim/source/asset 漂移均形成不可解锁的终档失败。通过结果的当前闭包证据
+(`source_asset_receipt.current_closure`) 分别记录 target/donor 的观测路径、tree-content SHA、文件数/字节数、
+URDF 闭包和 donor clean commit 状态，使 immutable result 能直接回答终档当下读到了什么。
 通过或失败都写 immutable
 `probe_result.json`；重复调用只接受 byte-identical receipt，且从不自动重试、改 queue status 或晋级。
 probe execute 的容量快照只读取 selected dispatch Pod/GPU；普通 science fill 仍保留 all-Pod claim 防重复。
@@ -133,6 +138,12 @@ not-ready。PID 数字被新 starttime 复用不再当 run failure；它只证�
 PGID 扫描。调用者不再选择 source-asset receipt 路径，而从 immutable claim 唯一导出，避免错误 CLI 把结果
 namespace 烧死；并发相同 finalization 只接受原子胜者的 byte-identical bytes。
 
+`main@caeb9ad` 的历史 strict probe 在 shell wrapper 中确实重算并通过了当时的 target/donor
+doctor，但当时的 runtime/result 还没有上述 in-process `current_closure`。因此该 receipt 仍按其原语义作为
+4096-environment 启动/终档证据，不追认为已经运行了新授权逻辑；只有绑定新 exact source 且结果实际
+带 `current_closure` 的新 attempt 才能声明这项能力。checkpoint 文件名与内嵌 iteration、fresh lineage 也都只
+接受 plain integer；JSON boolean 不得借 Python 中 `True == 1` 混过终档。
+
 ## 源码复现
 
 ```bash
@@ -143,7 +154,8 @@ python3 -m pytest -q \
   hope_training/whole_body_tracking/tests/test_full_scene_probe_runtime.py \
   tests/test_run_lean_training_queue.py \
   hope_training/whole_body_tracking/tests/test_training_launch_claim.py \
-  hope_training/whole_body_tracking/tests/test_training_thread_caps.py
+  hope_training/whole_body_tracking/tests/test_training_thread_caps.py \
+  tests/test_lean_training_source_asset.py
 
 python3 -m py_compile \
   scripts/run_lean_training_queue.py \
@@ -155,7 +167,8 @@ python3 -m py_compile \
 bash -n hope_training/whole_body_tracking/scripts/launch_kit_training_locked.sh
 ```
 
-当前整合 focused 结果为 `126 passed`。watchdog identity 专项覆盖 PID reuse、双读漂移、leader 先退但已绑定
+当前整合 harness/source-asset 回归结果为 `146 passed`，其中 full-scene terminal 专项 `39 passed`。
+watchdog identity 专项覆盖 PID reuse、双读漂移、leader 先退但已绑定
 child 残留、新成员加入、空组与正常 stale/hard timeout；其余负测覆盖每臂单一原子 SSH、内置 doctor 门在
 容量/claim 前执行、多臂每臂
 各一次 transaction，以及 fake log dir、binding/receipt overwrite、静态及读中 PID reuse、

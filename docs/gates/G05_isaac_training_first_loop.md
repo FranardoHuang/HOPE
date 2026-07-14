@@ -1978,6 +1978,25 @@ fatal0、自然空 PGID 与 clean caeb source，故 `unlock_authorized=true`。�
 两对当时均变为 ready。probe 仍 `not_science=true / attestable=false / promotable=false`，不产生 Reward
 结论、不授权第二 seed、judge、晋级或部署；G05 保持 `Partial`。
 
+#### Full-scene 终档的 ignored A3 当前闭包
+
+红队复核发现：上述 caeb 时代的 queue shell 会在调用 finalizer 前重算 source-asset closure，但
+runtime `finalize()` 自身只校验 immutable hydration receipt。因此直接调用 runtime 可以绕过这层当前资产
+证明，而 wrapper doctor 与终档结果之间的 target/donor 漂移也没有观测摘要。
+
+新 source gate 让 terminal authority 自身从 claim 导出 target、donor 和 receipt，用 no-follow 稳定读重算两棵
+完整文件树库存，解析 `urdf/model.urdf` 并复核所有 mesh 引用闭包，同时核 donor exact clean
+commit。任一当前闭包与 claim/receipt 不同即冻结 `unlock_authorized=false`；pass 结果在
+`source_asset_receipt.current_closure` 分别保存 target/donor 的实测 tree SHA、文件数/字节数、URDF
+闭包和 donor source 状态。checkpoint 内嵌 iteration 与 fresh lineage 也都只接受 plain integer，不再让
+JSON boolean 借 `True == 1` 通过。直接 finalizer 绕过 wrapper 后分别篡改 target/donor、boolean
+iteration/lineage 的负测均 fail closed；full-scene 专项 `39 passed`，整合 harness/source-asset 回归
+`146 passed`。
+
+caeb attempt 当时的 wrapper doctor 有通过记录，因此继续作为原语义的 E2 启动/终档证据；但它的
+result 不含 `current_closure`，不追认新能力。本项目前只是 E1 source gate，新 exact source 尚未产生带该
+字段的 Pod result，所以 G05 仍为 `Partial`。
+
 显式 unlock 后，conditional control/treatment 已分别在 Pod2 GPU1/GPU2 越过 first iteration，PID=PGID
 `357023/357679`；尚无 checkpoint 早判，不能形成 Reward 结论。随后 interaction control PID=PGID
 `358331` 在 first iteration 前的 dynamic URDF import 报 `malloc(): invalid size (unsorted)`、`rc=134` 并

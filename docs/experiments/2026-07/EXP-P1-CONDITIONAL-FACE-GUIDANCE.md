@@ -102,6 +102,18 @@ schema-3 contract、exact supervisor argv、source-asset receipt 与 motion/bank
 no-clobber 写 pass/fail `probe_result.json`。失败不自动 retry，仍 live 不提前冻结结果；普通 milestone attestor
 拒绝 `attestable=false` probe。整合 focused `126 passed` 只是 source gate；后续 Pod receipt 另见下文。
 
+后续红队又分出一个与 conditional Reward 无关的终档 harness 漏口：queue shell 会先重哈希 ignored
+A3 target/donor，但旧 runtime finalizer 自身只读 hydration receipt。直接绕过 wrapper 或 doctor 与 runtime 之间
+的资产漂移，可能不进入 immutable result。新 source gate 把 target/donor 当前库存、URDF mesh 闭包、donor
+clean commit 与 receipt 比对全部收进 runtime `finalize()`，并在 result 的 `current_closure` 写入实测 tree
+SHA；checkpoint iteration/lineage 也改为 plain integer 才接受。直接 finalizer 的 target/donor 漂移及 boolean
+欺骗负测均通过；full-scene 专项 `39 passed`、整合 harness/source-asset 回归 `146 passed`。这是
+E1 source gate，没有改动实验配方、运行 namespace 或 Reward 判决。
+
+strict `main@caeb9ad` attempt 的 shell doctor 当时确实通过，故保留其原 E2 启动/终档证据；但旧
+`probe_result.json` 不含 `current_closure`，不追认为已经运行新的 in-process 授权逻辑。新能力只能由之后绑定
+新 exact source 并实际产生该字段的 attempt 验收。
+
 旧 pair 保持不可修改的失败证据。新的 `p1r1` pair 已在结果前绑定同一 clean detached
 `main@caeb9ad`（Pod2 checkout `/workspace/codexschema/nohope_p1_caeb9ad`），两格均
 `runtime_binding=true`，仍只差 conditional weight `0/-0.4`。strict terminal receipt 已通过并由显式
