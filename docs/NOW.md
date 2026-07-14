@@ -480,6 +480,9 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
   Reward 跑 `T0/T1` 配对连续卷。[实验](experiments/2026-07/EXP-RECOVERY-TUPLE-ABC.md)
 - **[6｜P1] Hitter V3 规划器—policy 输入对齐。** 责任人 jiayi；执行者 direct；下一证据：旧观测
   排列、训练第 24100 次迭代 checkpoint 归属和第 7 版击球平面三项来源对齐。
+- **[8｜P1] 110 维 RallyV10 左腕/恢复修复。** 责任人 dongc1；执行者 Codex；分支 `hitter`；
+  下一证据：从 RallyV9 冻结合同派生 V10，加入左腕参考 debt、修正反手 `tts=0.96` 边界、
+  对齐 yaw-rate settle 与 whole-joint q_des 门，并完成 host 结构回归；不启动训练、不改 serve 表。
 
 队列排序与算力规则见[跑批作战手册](runbook.md#统一队列排序与算力纪律)。完整实验索引只在
 [实验登记册](experiments/README.md)维护；本页不再复制实验索引或最近测试流水。
