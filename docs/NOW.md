@@ -34,22 +34,31 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
 - **最新可分享结果：** 反手拉 B/C 的 rank-0 主选已在 Pod1 CPU-only runtime 完成 exact 整轨
   SE(2) 实体化；后续 schema-2/FK 源码门也已进入 `main` 并通过 `17` 项专项回归。逐资产 no-write
   runtime inspection 又在 exact donor/私有 PKL 下通过：B/C 分别 `91/98` 帧，未写输出。一次性 consume
-  runner/activation 已进入 `main` 并通过 latest-main 全回归；Pod 网络恢复后仍须先重验 absent 账本再
-  各执行一次，因此 schema-2 物化、L0/vendor L1/桌网/动力学仍未跑，证书仍为 `0`。
+  runner/activation 已进入 `main` 并通过 latest-main 全回归。2026-07-14 08:22 CST，B 在 fresh
+  absence preflight 后花掉唯一一次 consume：`91` 帧 schema-2/FK NPZ 的 SHA-256 为
+  `e2eb99e6...d28cc`，独立 `validate-result` 确认 `runner_lineage=true`、`npz_bound=true`，completion-last
+  ledger SHA-256 为 `c0a25f2c...f4f8b`。这只解锁 B 的下一张 L0 静态证书；vendor L1、整轨桌网余隙、
+  动力学与 RL 仍未跑。C 保持未消费，只在 B 后续外部安全门失败或证明有独有覆盖时作为后备，不复制
+  一个 RL 槽。
   高点拍压 S0 与四条横移 M0 不仅通过 exact GVHMR 帧数/finite 审计，还已完成真实五条 PT 的
   canonical-beta `inspect/consume`，non-beta 内容逐 bit 不变。exact GMR runtime source gate 也已进入
   `main` 并通过全回归；Pod 上的 `inspect/consume` 尚未执行，所以还不是“动作会打球”。
-- **当前运行态：** 最近一次成功的 Pod1 只读审计为 2026-07-14 05:49 CST。GPU0 的非击球臂
-  single-seed 机制配对仍有两条 exact trainer：A0（保留左臂模仿对照）PID=PGID `1811464` 已接近
-  `1001` 终档，A1（只解除左非击球臂模仿）PID=PGID `1816234` 当时还约有 `33` 分钟；两者日志均未见
-  fatal。此后 Pod1/Pod2 的握手超时只记为 `UNKNOWN`，不能把 A0 写成已终档、把 A1 写成失败，二者都
-  禁止重启或重发。C2 已自然终档并通过 checkpoint finite/iteration/lineage/contract 取证。四文件
-  external mini-tree 已修复旧 verifier 把 `[1.0,-1.0]` 错按整数比较的问题，但随后 latest-main 红队又
-  发现第二个 source 假拒绝：冻结 trainer 实际写出的 question-bank hard contract 只有五个字段，v1r1
-  却要求一个不存在的 `physics_contract_sha256`；旧单测 fixture 人工多放了该字段。D2 因此在
-  attestation/claim 前重新阻断，C2 绝不重跑；下一步必须用新版本分别校验五字段 runtime contract 与
-  bank metadata/source-family 的 physics 绑定。当前没有别的合法新 trainer，不能用旧 seed 或越级动作
-  填槽。Franco
+- **当前运行态：** 2026-07-14 08:33 CST，非击球臂 A0/A1 已完成 checkpoint 层闭环。A1 自然退出；
+  A0 的 `model_1000.pt` 写完后在 Kit/Python teardown 挂起近三小时，正式 failure regex 无命中，终档
+  内嵌 iteration `1000`、`1,762,715` 个浮点元素全部 finite、fresh lineage `1`，hard-contract SHA
+  与相邻文件一致。它对精确 PGID `1811464` 的 `TERM` 20 秒无响应后，只对同一个单成员 PGID 发出
+  `KILL`；没有重启、重发或影响别的进程。既有 v1r1 finalizer 随后通过两臂
+  `200/500/1000` 的 filename↔embedded iteration、finite、lineage、hard-contract 与唯一 body-mask
+  差异，发布 paired result SHA-256 `30ba716b...d7d9`。结果仍写明 signed K100 尚未判卷、不得晋级或买
+  第二 seed。Pod1、Pod2 六张 GPU 现均无 compute process；两边归档 checkout 仍 clean exact
+  `6d93bcb...480b`。
+
+  C2 虽自然终档，但 2026-07-14 的 v1r2 runtime gate 发现它**不是所声明的零摩擦配方**：manifest 写
+  `zero_joint_friction=true`，实际 launch argv 没有 `task.plant.zero_joint_friction=true`，相邻 hard
+  contract 的 31 个系数全为非零 PhysX 默认值。v1r2 在任何 attestation/claim/D2 run 前 fail closed；
+  D2 永久不续跑，C2 只保留为 nonconforming 根因证据。下一步是全新 namespace 的 C3/D3 L1 配对，
+  显式把零摩擦同时绑定到 argv、claim、optimization recipe 与 hard contract。它的 source gate 未合入
+  main 前，当前没有别的合法新 trainer；不能用旧 seed 或越级动作填槽。Franco
   定为 Pod1 每卡 `4` 个我们的 trainer、Pod2 每卡 `3` 个，为 Yikang 的最多一张卡留动态余量。新增任务
   先跨六张可用 GPU 各放一条，再开始第二/第三轮，Pod1 才有第四轮。空槽只给已过前置门且有预注册
   早判的不同机制，不复制失败
@@ -63,8 +72,8 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   与 Franco 主线对照，不能用录制版本号直接晋级。
 - **Yikang focus：** 历史 Gate3 谱系复核与独立 physics/reference oracle；现有证据不替代当前 179-D
   planner-policy tuple 的 vendor runtime 行为。
-- **Codex 执行：** exact 动作 lineage、B/C 每类只选一个候选的证书、S0/M0 exact GMR 前置、D2
-  v1r2 provenance 修复与 A2/B2 热启动 source gate、A0/A1 早判、signed-face checkpoint/judge execution
+- **Codex 执行：** exact 动作 lineage、B 主选/C 后备的逐层证书、S0/M0 exact GMR 前置、C3/D3
+  零摩擦 L1 修正版与 A2/B2 热启动 source gate、A0/A1 终档/早判、signed-face checkpoint execution
   contract 和 main 账本；
   每通过一层就合 main，不把多个未验层绑成一个大任务。
 
