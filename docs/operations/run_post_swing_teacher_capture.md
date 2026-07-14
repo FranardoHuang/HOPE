@@ -10,8 +10,8 @@ process 和 GPU work 均未创建，v1 永久不重发。successor 还必须把�
 
 2026-07-15 的 seed-parity 修复已让 `play.py` 只接受 plain uint32 seed，并在 `gym.make` 前把同一个值
 写入 environment config 与 PPO runner config；三个 train-only checkpoint 键也都有真实 Hydra compose
-负测。该修复只关闭 seed 这一项 source blocker：一次性 controller 的独立红队与 schema-2 successor
-预注册仍未完成，因此本页状态仍是 `NO-LAUNCH`。
+负测。一次性 controller/builder 随后通过独立 source-only 红队；当前仍未完成的是 Pod2 上的新 schema-v2
+plan、同环境只读 compose、正式 capture、attestation 与首 reset，而不是 seed 或 controller 源码。
 
 合同真源见 [随挥结束教师状态接口](../interfaces/post_swing_teacher_artifact.md)，当前科学动机见
 [base-deceleration measurement rerun](../experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md)。
@@ -176,3 +176,6 @@ python3 -m py_compile \
 
 git diff --check
 ```
+
+2026-07-15 在可导入 Hydra 的本地环境按上述四文件命令复现为 `41 passed`；这只是 host source gate，
+不能替代 Pod2 同环境 compose 或 Isaac capture。

@@ -16,15 +16,15 @@
 - post-swing capture schema-v2 controller/builder 已闭合九类 pre-launch blocker：历史 teacher lineage、
   Pod2 physical GPU2 UUID/共享 lease、absolute byte-bound tools、safe env、timeout compose、same-PID handoff
   和 status 防重绑均有负测；`plan` 现与 `launch` 共用 exact cwd/env/argv/timeout 的只读 Hydra compose，
-  compose 前后复核且失败不消费 namespace，成功绑定 output digest/bytes/elapsed；focused
-  `43 passed, 4 skipped`。只完成 host source gate，未连接 Pod、未 capture；
+  compose 前后复核且失败不消费 namespace，成功绑定 output digest/bytes/elapsed；按 operation 所列四文件
+  在可导入 Hydra 的本地环境复现为 `41 passed`。只完成 host source gate，未连接 Pod、未 capture；
   详见[实验卷宗](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md)和
   [操作文档](operations/run_post_swing_teacher_capture.md)。
 
 - post-swing capture 的 seed-parity source blocker 已闭环：`play.py` 现在拒绝 bool/float/string、负数与
   uint32 越界 seed，并在创建环境前把同一个冻结值写入 env 与 PPO runner；真实 Hydra compose 负测也
-  逐项拒绝三个 train-only checkpoint 键。该提交不运行 Pod、不追认失败 v1，也不授权 successor；
-  controller 红队、schema-2 prereg、4096-environment capture 与首 reset 仍保持 fail closed。见
+  逐项拒绝三个 train-only checkpoint 键。该提交不运行 Pod、不追认失败 v1，也不单独授权 successor；
+  schema-2 prereg、4096-environment capture 与首 reset 仍保持 fail closed。见
   [producer operation](operations/run_post_swing_teacher_capture.md)和
   [measurement rerun 卷宗](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md)。
 
@@ -41,13 +41,8 @@
   Pod2 GPU1、4096 条 natural-wrap 状态、20000 inference-step 上限和 root 速度上限全部在数据前绑定。
   只授权一次 capture；attestation、首 reset、科学训练、第二 seed 与 judge 仍逐级 fail closed。
   随后的 v1 Hydra compose 在任何 capture directory/claim/process/GPU work 前 rc1 fail closed：派生器遗漏
-  三个 train-only checkpoint 键；源码复核还发现 play 未实际应用冻结 seed。v1 证据保全且不重发，v2
-  必须合 seed parity、删除 train-only 键并换全新 namespace。
-
-- post-swing successor 的本机一次性 controller source gate 已补：从 exact run binding 自动派生 argv，
-  强制删除 train-only/ownership 键并保留 seed，Hydra compose 后二次复算全部输入，随后才创建 output 和
-  numeric PGID；没有 SSH/stop/retry/trainer 子命令。专项 `4 passed`，但 seed parity 和独立红队尚未合，
-  所以仍不能发 v2。见[操作文档](operations/run_post_swing_teacher_capture.md)。
+  三个 train-only checkpoint 键；源码复核还发现 play 未实际应用冻结 seed。v1 证据保全且不重发；上述
+  seed parity 与 controller/builder 已关闭源码缺口，但 v2 仍必须使用全新 namespace 并逐级过 runtime 门。
 
 - clean base-decel 的 `model_500` 两份 receipt/finite/fresh/claim/common hard exact，step 0–500 activation
   全过且 480–500 尾窗两臂都有真实 V2/exact-strike 分母。treatment/control 底座速度=`1.13669×`

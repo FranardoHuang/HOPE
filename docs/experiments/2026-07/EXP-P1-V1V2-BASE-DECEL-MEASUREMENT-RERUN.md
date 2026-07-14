@@ -327,7 +327,8 @@ exec handoff；status 的 symlink/zombie/PID reuse/receipt-rebinding 拒绝。�
 接受的 plan。红队最后发现旧 `plan` 只派生 argv、不实际 compose，会把 structured-config/entry/env 错误拖到
 `launch` namespace 已花掉后；现已改为 plan/launch 共用 absolute cwd、exact env/argv/timeout 的
 `--cfg job --resolve` helper。`plan` 在零 namespace/claim/capture process 前后各复算一次 runtime，成功结果
-绑定 compose output SHA/bytes/elapsed；`launch` 仍重复 compose 与后复核。focused 为 `43 passed, 4 skipped`。
+绑定 compose output SHA/bytes/elapsed；`launch` 仍重复 compose 与后复核。按 operation 所列四文件在可导入
+Hydra 的本地环境复现为 `41 passed`。
 本分支未连接 Pod；V10 已占 GPU1，因此任何 successor 只可
 另冻 GPU2 新 namespace，旧 GPU1 v1 仍不重发。完整 source/Isaac import roots 本机时序为 119 MB/2432 files
 约 `0.709 s`，9.8 MB/852 files 约 `0.284 s`；这不是 Pod 冷缓存数字，也不声称覆盖 venv/stdlib/native/rootfs。

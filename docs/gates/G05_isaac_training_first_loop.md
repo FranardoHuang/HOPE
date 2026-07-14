@@ -57,7 +57,8 @@ Follow-up note (2026-07-15, post-swing schema-v2 launch controller hardened; Gat
   `--cfg job --resolve` as `launch`, binds output digest/bytes/elapsed, and re-verifies runtime after compose
   before any launch/capture namespace, claim or capture process can exist. `launch` repeats the same helper
   and post-compose drift check before consuming the capture namespace.
-- Focused host verification is `43 passed, 4 skipped`; no Pod launch, Isaac capture, attestation, first-reset
+- Focused host verification with Hydra available is `41 passed` using the four files listed in the operation;
+  no Pod launch, Isaac capture, attestation, first-reset
   probe, science trainer, judge or hardware command occurred. The threat model is trusted root plus accidental
   drift/concurrent legitimate jobs; the five inventoried source/Isaac import roots are not claimed as a full
   venv/stdlib/native/rootfs dependency graph. Runtime remains `Partial` until a new GPU2 plan passes on Pod2.
@@ -85,8 +86,8 @@ Follow-up note (2026-07-15, clean base-deceleration terminal and teacher capture
 - A successor-side one-shot controller now has a dependency-light source gate: it derives play argv
   from the exact run binding, removes every frozen train-only/ownership key, retains and checks seed,
   runs Hydra compose, re-hashes all inputs, and only then creates output and a numeric process group.
-  It has no SSH, stop, retry or trainer command. This is not runtime evidence; seed parity and an
-  independent red-team review remain required before a schema-2 v2 plan may launch.
+  It has no SSH, stop, retry or trainer command. This interim step was not runtime evidence; the newer
+  schema-v2 note above records the completed seed parity and independent source red-team.
 
 Follow-up note (2026-07-15, clean base-deceleration `+500` treatment rejected; Gate remains `Partial`):
 
