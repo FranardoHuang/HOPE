@@ -1,20 +1,23 @@
 # 运行 signed-face C2/D2 provenance-complete L1
 
-状态：**C2 已自然到达 terminal，但 v1 outer verifier 因 float/int 类型误判没有发布
-`runtime_verified`；冻结 v1r1 又因虚构第六个 compact-bank 字段而在源码层假拒绝，且最后一次成功
-只读快照证明它从未安装或运行；D2 尚未 claim。只有本页 v1r2 通过 fresh absence/runtime 复核后才
-可能续接 D2。** 本操作只运行
-[`signed-face C2/D2`](../DEFINITIONS.md) 两条 fresh L1 小臂：C2 关闭 signed-face guidance，D2 只把
-同一 Reward 权重改为 `-0.4`。`L1` 是 `512 env × 25 update` 的发射/合同冒烟，不是判卷或晋级。
-`run_name` 是不可复用的训练运行名；`claim` 是外层原子运行占位；其余术语见
+状态：**永久 `NO-LAUNCH`，本页所有 C2/D2 与 v1r2 命令只作历史取证，禁止执行。** C2 虽在
+manifest 声明 zero friction，实际 trainer argv 和 outer optimization recipe 均没有
+`task.plant.zero_joint_friction=true`；其 emitted hard contract 的 31 个 PhysX 关节摩擦系数全部非零。
+因此 C2 与声明的 setting 不一致，checkpoint 不采用；D2 从未 claim，v1r2 不得再续接。后继只能使用
+全新的 [C3/D3 显式零摩擦操作](run_phase1_signed_face_c3d3_l1.md)，不能修改、覆盖、改名或重放本页
+namespace。
+
+本页保留 [`signed-face C2/D2`](../DEFINITIONS.md) 的取证流程：C2 原计划关闭 signed-face guidance，
+D2 原计划只把同一 Reward 权重改为 `-0.4`。`L1` 是 `512 env × 25 update` 的发射/合同冒烟，不是
+判卷或晋级。`run_name` 是不可复用的训练运行名；`claim` 是外层原子运行占位；其余术语见
 [人话定义](../DEFINITIONS.md)。
 
 本工具没有 activation、judge、L2、第二 seed、自动 retry、部署或真机入口。它也不复用 v9 的 C/D
 claim/checkpoint；旧 `5f691b3` source 与 `466f8ea` control 只作为只读根因证据。
 
-[`v1r2`](../DEFINITIONS.md) 是 one-shot continuation：只验证已经完成的 C2，并只允许原子 claim
-仍不存在的 D2。它不是 C2 retry，也不改变 seed、配方、训练 source 或 L1 边界。旧 v1r1 bytes 是
-必须被精确复现的负例，不是备用 launcher。
+[`v1r2`](../DEFINITIONS.md) 原本是 one-shot continuation source gate；新的 plant 取证已证明它即使修复
+compact-bank validator，也会把非零摩擦 C2 与宣称零摩擦的 D2 配成无效 pair。因此 v1/v1r1/v1r2
+bytes 全部只作冻结负例，不是备用 launcher。
 
 ## 冻结输入
 
@@ -165,7 +168,10 @@ exact D2 training run 和 v1r1 pair result 全部 absent，v1r1 mode 执行次�
 或 launch。随后 SSH 超时，所以当前状态是 unknown；**历史 absence 不授权运行**。禁止安装或执行冻结
 v1r1 mode，也不得补造 v1r1 sidecar。
 
-## 5. v1r2 五键合同与 D2-only one-shot continuation
+## 5. 已禁止的 v1r2 五键合同与 D2-only one-shot continuation
+
+**以下命令全部只保留为历史复现说明，不得在 Pod 安装、attest、claim 或 launch。** v1r2 对 compact
+bank 的五键修复本身通过源码测试，但它无法修复 C2 训练时已经发生的 plant 合同失配。
 
 v1r2 不修改 v1/v1r1 bytes。它先精确复现上面的 v1r1 错误，再用两层证据验证同一个 C2 hard
 contract：compact 记录必须恰为五键；exact bank NPZ 的 `meta_json` 必须独立绑定 file SHA、schema、
