@@ -100,3 +100,9 @@ pytest -q tests/test_phase1_fresh_c_v1v2_base_decel_prereg.py
 
 本实验没有执行命令、Pod 结果或忽略资产的新要求。后续若解除 blocker，运行必须走项目统一 lean queue
 harness；本文不会另建竞争性的算力优先级队列。
+
+2026-07-14 同 source family 的首个 full-scene probe 在 iter0 暴露 clean detached `077e70c` 缺少 Git
+忽略 A3 URDF/mesh tree；它在 Reward、hard contract 和 checkpoint 之前，不能评价本交互轴。两行现显式绑定
+donor `6d93bcb`、46 files / 15,378,264 bytes / tree SHA `0137f59b...26c6`，并要求先由
+`prepare-source-assets` 产生 source 外 receipt、science doctor 再重算并消费。本分支只闭合 source gate，
+不远程水合、不解锁状态，故两格仍 blocked。

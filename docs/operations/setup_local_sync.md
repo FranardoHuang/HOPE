@@ -164,6 +164,14 @@ The accepted tree contains exactly `46` regular files and `15,378,264` file byte
 that digest for both source and destination, requires the destination to remain Git-ignored, and
 rejects symlinks, special files, missing files and extra files before creating a run claim.
 
+For the lean P1 source `/workspace/codexschema/nohope_p1_077e70c`, do not use the manual `cp` recipe
+above. The conditional and V1+V2/base-decel queue rows bind the same accepted tree and donor
+`/workspace/codexschema/nohope@6d93bcb16c422a2f42748c2dc99432559653480b`. Use the reviewed
+`prepare-source-assets` command in [the lean queue operation](run_lean_training_queue.md#新-source-的-ignored-a3-资产先显式水合).
+It verifies all 46 accepted files plus the 43 unique URDF-referenced meshes, publishes with
+no-replace semantics, and writes a source-external receipt consumed before any science claim. A
+timeout or preserved staging directory is not permission to replay the copy.
+
 ### Signed-face epoch-1 v6 and superseded v6r1 private evidence
 
 The epoch-1 source commit and production v6 control were created after the tracked `882fea4` source

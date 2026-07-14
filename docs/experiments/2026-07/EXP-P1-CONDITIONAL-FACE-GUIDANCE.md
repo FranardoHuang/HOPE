@@ -144,3 +144,9 @@ joint/torque/qdot limit、观测、动作或 plant。以下任一项都独立判
 源码入口是 `hope_rewards.racket_face_conditional_guidance`；训练只暴露一个开关，固定门参数由 hard
 contract 记录。运行方法与 first-iteration/claim 纪律见[训练操作](../../operations/run_training.md)和
 [lean queue 操作](../../operations/run_lean_training_queue.md)。本实验不授权 Pods、judge 或真机。
+
+2026-07-14 的首个 P1 full-scene probe 又产生基础设施结论：它在 iter0 以 `rc=1` 自然退出，直接缺失
+clean detached source 中 Git 忽略的 A3 `model.urdf`；这不是 conditional Reward 失败。新的 `p1r1` 两行现
+显式绑定 donor `6d93bcb` 与接受的 46-file tree，且 science claim 会绑定完整 ignored-asset contract。
+必须先走 selected-Pod-only `prepare-source-assets` 产生 source 外 exact receipt，再由 doctor 重算并消费；
+本次源码工作不执行该水合、不重发 probe，pair 继续 blocked。

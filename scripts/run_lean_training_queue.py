@@ -10,6 +10,7 @@ and resource policy.  ``plan`` and ``launch-next`` are dry-run by default.
 from __future__ import annotations
 
 import argparse
+import base64
 from concurrent.futures import ThreadPoolExecutor
 from dataclasses import dataclass
 import fcntl
@@ -53,6 +54,7 @@ CONFIRM = "SIM_ONLY_LAUNCH_ONE_LEAN_QUEUE_JOB"
 WARMUP_CONFIRM = "SIM_ONLY_LAUNCH_ONE_BOOT_WARMUP"
 FULL_SCENE_PROBE_CONFIRM = "SIM_ONLY_LAUNCH_ONE_FULL_SCENE_PROBE"
 ATTEST_CONFIRM = "SIM_ONLY_ATTEST_ONE_LEAN_QUEUE_MILESTONE"
+PREPARE_SOURCE_ASSET_CONFIRM = "SIM_ONLY_PREPARE_ONE_LEAN_QUEUE_SOURCE_ASSET"
 ZERO_COMMIT = "0" * 40
 GLOBAL_SCHEDULER_LOCK = Path("/tmp/hope_lean_training_queue.global.lock")
 ISAAC_PYTHON = "/workspace/hope_isaac_venv/bin/python"
@@ -70,6 +72,14 @@ WARMUP_SAVE_INTERVAL = 1
 FULL_SCENE_PROBE_MAX_ITERATIONS = 2
 FULL_SCENE_PROBE_SAVE_INTERVAL = 1
 FULL_SCENE_PROBE_STALE_TIMEOUT_SECONDS = 180
+SOURCE_ASSET_RECEIPT_ROOT = PurePosixPath(
+    "/workspace/codexschema/lean_training_source_asset_receipts"
+)
+SOURCE_ASSET_STAGING_ROOT = PurePosixPath(
+    "/workspace/codexschema/lean_training_source_asset_staging"
+)
+SOURCE_ASSET_URDF_RELATIVE_PATH = "urdf/model.urdf"
+SOURCE_ASSET_UNIQUE_MESH_REFERENCES = 43
 GPU_LAUNCH_LOCK_FD = 8
 HARNESS_OWNED_OVERRIDE_KEYS = {
     "seed",
@@ -86,6 +96,427 @@ UNIQUE_NUMERIC_PID_AWK = (
     r'{gsub(/^[ \t]+|[ \t]+$/, "", $0); '
     r'if ($0 ~ /^[0-9]+$/) seen[$0]=1} END {print length(seen)}'
 )
+
+
+# This program is sent as one quoted ``python3 -c`` argument to exactly one
+# selected Pod.  Keeping the mutation in one process makes the source-specific
+# flock, no-clobber staging, atomic publish, and receipt publication one
+# auditable state machine.  It deliberately has no retry loop.
+SOURCE_ASSET_PROGRAM = r'''import base64
+import ctypes
+import fcntl
+import hashlib
+import json
+import os
+from pathlib import Path, PurePosixPath
+import shutil
+import stat
+import subprocess
+import sys
+import xml.etree.ElementTree as ET
+
+
+class AssetError(RuntimeError):
+    pass
+
+
+def canonical_sha256(value):
+    data = json.dumps(
+        value, allow_nan=False, ensure_ascii=False,
+        separators=(",", ":"), sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(data).hexdigest()
+
+
+def sha256_file(path):
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def git(checkout, *args):
+    try:
+        return subprocess.run(
+            ["git", "-C", str(checkout), *args], check=True, text=True,
+            stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        ).stdout.strip()
+    except (OSError, subprocess.CalledProcessError) as exc:
+        raise AssetError(f"Git validation failed for {checkout}: {exc}") from exc
+
+
+def safe_relative(value, label):
+    if not isinstance(value, str) or not value or "\x00" in value:
+        raise AssetError(f"{label} must be a non-empty relative path")
+    path = PurePosixPath(value)
+    if path.is_absolute() or value in (".", "..") or ".." in path.parts:
+        raise AssetError(f"unsafe {label}: {value!r}")
+    return path
+
+
+def require_checkout(path, commit, label):
+    if path.is_symlink() or not path.is_dir():
+        raise AssetError(f"{label} checkout is missing or a symlink: {path}")
+    if git(path, "rev-parse", "HEAD") != commit:
+        raise AssetError(f"{label} checkout is at the wrong commit")
+    if git(path, "status", "--porcelain"):
+        raise AssetError(f"{label} checkout is dirty")
+
+
+def checked_join(root, relative, label, *, leaf_may_be_missing):
+    root = root.resolve()
+    current = root
+    parts = safe_relative(relative, label).parts
+    for index, part in enumerate(parts):
+        current = current / part
+        exists = os.path.lexists(current)
+        if not exists:
+            if leaf_may_be_missing and index == len(parts) - 1:
+                return current
+            raise AssetError(f"{label} component is missing: {current}")
+        result = current.lstat()
+        if stat.S_ISLNK(result.st_mode):
+            raise AssetError(f"{label} contains a symlink component: {current}")
+        if index < len(parts) - 1 and not stat.S_ISDIR(result.st_mode):
+            raise AssetError(f"{label} parent is not a directory: {current}")
+    try:
+        current.resolve().relative_to(root)
+    except ValueError as exc:
+        raise AssetError(f"{label} escapes checkout") from exc
+    return current
+
+
+def inventory(root):
+    if not os.path.lexists(root):
+        raise AssetError(f"asset root is missing: {root}")
+    root_stat = root.lstat()
+    if stat.S_ISLNK(root_stat.st_mode) or not stat.S_ISDIR(root_stat.st_mode):
+        raise AssetError(f"asset root is not a real directory: {root}")
+    rows = []
+    for current, dirnames, filenames in os.walk(root, topdown=True, followlinks=False):
+        current_path = Path(current)
+        for name in sorted(dirnames):
+            path = current_path / name
+            result = path.lstat()
+            if stat.S_ISLNK(result.st_mode):
+                raise AssetError(f"asset tree contains symlink: {path}")
+            if not stat.S_ISDIR(result.st_mode):
+                raise AssetError(f"asset tree contains special directory entry: {path}")
+        for name in sorted(filenames):
+            path = current_path / name
+            result = path.lstat()
+            if stat.S_ISLNK(result.st_mode):
+                raise AssetError(f"asset tree contains symlink: {path}")
+            if not stat.S_ISREG(result.st_mode):
+                raise AssetError(f"asset tree contains special file: {path}")
+            rows.append({
+                "relative_path": path.relative_to(root).as_posix(),
+                "bytes": result.st_size,
+                "sha256": sha256_file(path),
+            })
+    rows.sort(key=lambda row: row["relative_path"])
+    return {
+        "file_count": len(rows),
+        "total_file_bytes": sum(row["bytes"] for row in rows),
+        "tree_content_sha256": canonical_sha256({"files": rows}),
+    }
+
+
+def verify_urdf(root, relative, expected_unique):
+    urdf = checked_join(
+        root, relative, "asset URDF", leaf_may_be_missing=False
+    )
+    result = urdf.lstat()
+    if not stat.S_ISREG(result.st_mode):
+        raise AssetError("asset URDF is not a regular file")
+    try:
+        xml_root = ET.parse(urdf).getroot()
+    except (OSError, ET.ParseError) as exc:
+        raise AssetError(f"cannot parse asset URDF: {exc}") from exc
+    refs = []
+    for element in xml_root.iter():
+        if element.tag.rsplit("}", 1)[-1] != "mesh":
+            continue
+        filename = element.attrib.get("filename")
+        if filename:
+            refs.append(filename)
+    unique = sorted(set(refs))
+    if len(unique) != expected_unique:
+        raise AssetError(
+            f"asset URDF unique mesh references changed: {len(unique)} != {expected_unique}"
+        )
+    resolved = 0
+    root_resolved = root.resolve()
+    for reference in unique:
+        if reference.startswith("package://") or "\x00" in reference:
+            raise AssetError(f"unsupported asset mesh reference: {reference!r}")
+        candidate = (urdf.parent / reference).resolve()
+        try:
+            candidate.relative_to(root_resolved)
+        except ValueError as exc:
+            raise AssetError(f"mesh reference escapes asset root: {reference!r}") from exc
+        if not os.path.lexists(candidate):
+            raise AssetError(f"mesh reference is missing: {reference!r}")
+        item = candidate.lstat()
+        if stat.S_ISLNK(item.st_mode) or not stat.S_ISREG(item.st_mode):
+            raise AssetError(f"mesh reference is not a regular non-symlink file: {reference!r}")
+        resolved += 1
+    return {
+        "mesh_reference_occurrences": len(refs),
+        "unique_mesh_references": len(unique),
+        "resolved_regular_meshes": resolved,
+    }
+
+
+def verify_tree(root, expected, urdf_relative, expected_unique):
+    actual = inventory(root)
+    if actual != expected:
+        raise AssetError(f"asset tree inventory drift: actual={actual} expected={expected}")
+    urdf = verify_urdf(root, urdf_relative, expected_unique)
+    if urdf["resolved_regular_meshes"] != expected_unique:
+        raise AssetError("asset URDF reference closure is incomplete")
+    return actual, urdf
+
+
+def require_gitignored(checkout, relative):
+    completed = subprocess.run(
+        ["git", "-C", str(checkout), "check-ignore", "-q", "--", relative],
+        check=False, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE, text=True,
+    )
+    if completed.returncode != 0:
+        raise AssetError("target runtime asset is not Git-ignored")
+
+
+def exact_source_trainers(source, entrypoint_relative, proc_root):
+    expected_entrypoint = os.path.normpath(str(source / entrypoint_relative))
+    expected_cwd = os.path.normpath(str((source / entrypoint_relative).parent.parent))
+    found = []
+    proc_root = Path(proc_root)
+    if not proc_root.is_dir() or proc_root.is_symlink():
+        raise AssetError("Linux procfs root is missing or a symlink")
+    for proc in proc_root.iterdir():
+        if not proc.name.isdigit():
+            continue
+        try:
+            argv = [
+                item.decode("utf-8", "surrogateescape")
+                for item in (proc / "cmdline").read_bytes().split(b"\0") if item
+            ]
+        except (FileNotFoundError, PermissionError, ProcessLookupError):
+            continue
+        matched = any(
+            os.path.normpath(item) == expected_entrypoint for item in argv
+        )
+        if not matched and "scripts/train.py" in argv:
+            try:
+                matched = os.path.normpath(os.readlink(proc / "cwd")) == expected_cwd
+            except (FileNotFoundError, PermissionError, ProcessLookupError, OSError):
+                matched = False
+        if matched:
+            found.append(int(proc.name))
+    return sorted(set(found))
+
+
+def rename_noreplace(source, target):
+    libc = ctypes.CDLL(None, use_errno=True)
+    function = getattr(libc, "renameat2", None)
+    if function is None:
+        raise AssetError("renameat2(RENAME_NOREPLACE) is unavailable")
+    function.argtypes = [
+        ctypes.c_int, ctypes.c_char_p, ctypes.c_int, ctypes.c_char_p,
+        ctypes.c_uint,
+    ]
+    function.restype = ctypes.c_int
+    rc = function(
+        -100, os.fsencode(source), -100, os.fsencode(target), 1
+    )
+    if rc != 0:
+        error = ctypes.get_errno()
+        raise AssetError(
+            f"atomic no-replace asset publish failed: {os.strerror(error)}"
+        )
+
+
+def publish_receipt(path, document, *, allow_create):
+    encoded = (
+        json.dumps(
+            document, allow_nan=False, ensure_ascii=False,
+            separators=(",", ":"), sort_keys=True,
+        ) + "\n"
+    ).encode("utf-8")
+    if os.path.lexists(path):
+        result = path.lstat()
+        if stat.S_ISLNK(result.st_mode) or not stat.S_ISREG(result.st_mode):
+            raise AssetError("source asset receipt is not a regular non-symlink file")
+        if path.read_bytes() != encoded:
+            raise AssetError("source asset receipt exists with different bytes")
+        return "existing_exact"
+    if not allow_create:
+        raise AssetError(
+            "exact source asset receipt is missing; run explicit prepare first"
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    temporary = path.parent / (path.name + ".tmp")
+    descriptor = os.open(temporary, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o444)
+    try:
+        with os.fdopen(descriptor, "wb", closefd=True) as stream:
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
+        os.link(temporary, path, follow_symlinks=False)
+        directory = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+        try:
+            os.fsync(directory)
+        finally:
+            os.close(directory)
+    except Exception:
+        raise
+    finally:
+        try:
+            temporary.unlink()
+        except FileNotFoundError:
+            pass
+    return "created"
+
+
+def main():
+    if len(sys.argv) != 2:
+        raise AssetError("one base64 JSON runtime specification is required")
+    try:
+        spec = json.loads(base64.b64decode(sys.argv[1], validate=True))
+    except Exception as exc:
+        raise AssetError(f"invalid runtime specification: {exc}") from exc
+    mode = spec.get("mode")
+    if mode not in ("prepare", "doctor"):
+        raise AssetError("source asset mode must be prepare or doctor")
+    source_spec = spec["source"]
+    contract = spec["contract"]
+    donor_spec = contract["donor"]
+    source = Path(source_spec["checkout"])
+    donor_checkout = Path(donor_spec["checkout"])
+    receipt = Path(spec["receipt_path"])
+    staging = Path(spec["staging_path"])
+    lock_path = Path(spec["lock_path"])
+    require_checkout(source, source_spec["commit"], "target source")
+    require_checkout(donor_checkout, donor_spec["commit"], "donor")
+    target = checked_join(
+        source, contract["target_relative_path"], "target runtime asset",
+        leaf_may_be_missing=True,
+    )
+    donor = checked_join(
+        donor_checkout, donor_spec["relative_path"], "donor runtime asset",
+        leaf_may_be_missing=False,
+    )
+    source_resolved = source.resolve()
+    try:
+        receipt.resolve(strict=False).relative_to(source_resolved)
+    except ValueError:
+        pass
+    else:
+        raise AssetError("source asset receipt must remain outside source checkout")
+    expected = {
+        "file_count": contract["file_count"],
+        "total_file_bytes": contract["total_file_bytes"],
+        "tree_content_sha256": contract["tree_content_sha256"],
+    }
+    donor_inventory, donor_urdf = verify_tree(
+        donor, expected, spec["urdf_relative_path"],
+        spec["expected_unique_mesh_references"],
+    )
+    require_gitignored(source, contract["target_relative_path"])
+    contract_sha256 = canonical_sha256(contract)
+    receipt_content = {
+        "schema_version": 1,
+        "pod": spec["pod"],
+        "source": source_spec,
+        "ignored_runtime_asset": contract,
+        "ignored_runtime_asset_sha256": contract_sha256,
+        "target_path": str(target),
+        "inventory": donor_inventory,
+        "urdf_reference_closure": donor_urdf,
+        "target_gitignored": True,
+        "symlinks_present": False,
+    }
+    receipt_document = {
+        "schema_version": 1,
+        "content": receipt_content,
+        "content_sha256": canonical_sha256(receipt_content),
+    }
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    with lock_path.open("a+") as lock:
+        try:
+            fcntl.flock(lock.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+        except BlockingIOError as exc:
+            raise AssetError("source-specific asset lock is already held") from exc
+        materialized = False
+        if mode == "prepare":
+            trainers = exact_source_trainers(
+                source, spec["entrypoint_relative_path"], spec["proc_root"]
+            )
+            if trainers:
+                raise AssetError(
+                    f"exact source has live trainers; refusing asset mutation: {trainers}"
+                )
+        if os.path.lexists(target):
+            target_inventory, target_urdf = verify_tree(
+                target, expected, spec["urdf_relative_path"],
+                spec["expected_unique_mesh_references"],
+            )
+        else:
+            if mode != "prepare":
+                raise AssetError("target runtime asset is missing; run explicit prepare first")
+            if os.path.lexists(staging):
+                raise AssetError(
+                    f"no-clobber staging path already exists; preserve and diagnose: {staging}"
+                )
+            staging.parent.mkdir(parents=True, exist_ok=True)
+            shutil.copytree(donor, staging, symlinks=False)
+            staged_inventory, staged_urdf = verify_tree(
+                staging, expected, spec["urdf_relative_path"],
+                spec["expected_unique_mesh_references"],
+            )
+            # Re-read the ignored donor after the copy.  A concurrent mutation
+            # cannot be hidden by a byte-exact staging tree.
+            verify_tree(
+                donor, expected, spec["urdf_relative_path"],
+                spec["expected_unique_mesh_references"],
+            )
+            target.parent.mkdir(parents=True, exist_ok=True)
+            if staging.stat().st_dev != target.parent.stat().st_dev:
+                raise AssetError("staging and target are on different filesystems")
+            rename_noreplace(staging, target)
+            materialized = True
+            target_inventory, target_urdf = verify_tree(
+                target, expected, spec["urdf_relative_path"],
+                spec["expected_unique_mesh_references"],
+            )
+            if target_inventory != staged_inventory or target_urdf != staged_urdf:
+                raise AssetError("published target differs from verified staging tree")
+        if target_inventory != donor_inventory or target_urdf != donor_urdf:
+            raise AssetError("target and donor asset closures differ")
+        require_gitignored(source, contract["target_relative_path"])
+        receipt_state = publish_receipt(
+            receipt, receipt_document, allow_create=(mode == "prepare")
+        )
+    print(json.dumps({
+        "status": "SOURCE_ASSET_OK",
+        "mode": mode,
+        "materialized": materialized,
+        "receipt_state": receipt_state,
+        "receipt_path": str(receipt),
+        "contract_sha256": contract_sha256,
+        "inventory": target_inventory,
+        "urdf_reference_closure": target_urdf,
+    }, sort_keys=True))
+
+
+try:
+    main()
+except AssetError as exc:
+    print(f"SOURCE_ASSET_ERROR: {exc}", file=sys.stderr)
+    raise SystemExit(2)
+'''
 
 
 def _mapping(value: Any, label: str) -> dict[str, Any]:
@@ -114,6 +545,82 @@ def _positive_int(value: Any, label: str) -> int:
     if type(value) is not int or value <= 0:
         raise QueueError(f"{label} must be a positive integer")
     return value
+
+
+def _safe_relative_contract_path(value: Any, label: str) -> str:
+    path = _text(value, label)
+    parsed = PurePosixPath(path)
+    if parsed.is_absolute() or path in {".", ".."} or ".." in parsed.parts:
+        raise QueueError(f"{label} must be a safe relative path")
+    return path
+
+
+def _validate_ignored_runtime_asset(
+    source: dict[str, Any], label: str
+) -> dict[str, Any] | None:
+    """Validate the optional ignored asset closure bound by a source row."""
+
+    raw = source.get("ignored_runtime_asset")
+    if raw is None:
+        return None
+    asset = _mapping(raw, f"{label}.ignored_runtime_asset")
+    expected_keys = {
+        "target_relative_path",
+        "donor",
+        "file_count",
+        "total_file_bytes",
+        "tree_content_sha256",
+        "symlinks_forbidden",
+        "target_must_be_gitignored",
+    }
+    if set(asset) != expected_keys:
+        raise QueueError(
+            f"{label}.ignored_runtime_asset keys changed: "
+            f"expected={sorted(expected_keys)} got={sorted(asset)}"
+        )
+    _safe_relative_contract_path(
+        asset.get("target_relative_path"),
+        f"{label}.ignored_runtime_asset.target_relative_path",
+    )
+    donor = _mapping(asset.get("donor"), f"{label}.ignored_runtime_asset.donor")
+    if set(donor) != {"checkout", "commit", "relative_path"}:
+        raise QueueError(
+            f"{label}.ignored_runtime_asset.donor must bind checkout/commit/relative_path"
+        )
+    _ready_workspace_path(
+        donor.get("checkout"), f"{label}.ignored_runtime_asset.donor.checkout"
+    )
+    donor_commit = _text(
+        donor.get("commit"), f"{label}.ignored_runtime_asset.donor.commit"
+    )
+    if not COMMIT.fullmatch(donor_commit):
+        raise QueueError(
+            f"{label}.ignored_runtime_asset.donor.commit must be a full Git commit"
+        )
+    _safe_relative_contract_path(
+        donor.get("relative_path"),
+        f"{label}.ignored_runtime_asset.donor.relative_path",
+    )
+    _positive_int(
+        asset.get("file_count"), f"{label}.ignored_runtime_asset.file_count"
+    )
+    _positive_int(
+        asset.get("total_file_bytes"),
+        f"{label}.ignored_runtime_asset.total_file_bytes",
+    )
+    digest = _text(
+        asset.get("tree_content_sha256"),
+        f"{label}.ignored_runtime_asset.tree_content_sha256",
+    )
+    if not SHA256.fullmatch(digest):
+        raise QueueError(
+            f"{label}.ignored_runtime_asset.tree_content_sha256 must be SHA-256"
+        )
+    if asset.get("symlinks_forbidden") is not True:
+        raise QueueError(f"{label}.ignored_runtime_asset must forbid symlinks")
+    if asset.get("target_must_be_gitignored") is not True:
+        raise QueueError(f"{label}.ignored_runtime_asset target must remain Git-ignored")
+    return asset
 
 
 def _ready_workspace_path(value: Any, label: str) -> str:
@@ -298,10 +805,18 @@ def load_queue(path: Path) -> dict[str, Any]:
         _text(exam.get("family"), f"{job_id}.exam.family", safe_id=True)
 
         source = _mapping(job.get("source"), f"{job_id}.source")
+        unknown_source_keys = set(source) - {
+            "checkout", "commit", "ignored_runtime_asset"
+        }
+        if unknown_source_keys:
+            raise QueueError(
+                f"{job_id}.source has unsupported keys: {sorted(unknown_source_keys)}"
+            )
         _text(source.get("checkout"), f"{job_id}.source.checkout")
         commit = _text(source.get("commit"), f"{job_id}.source.commit")
         if not COMMIT.fullmatch(commit):
             raise QueueError(f"{job_id}.source.commit must be a full Git commit")
+        _validate_ignored_runtime_asset(source, f"{job_id}.source")
         runtime_binding = job.get("runtime_binding", False)
         if type(runtime_binding) is not bool:
             raise QueueError(f"{job_id}.runtime_binding must be true or false")
@@ -751,10 +1266,10 @@ def _launch_contract(
         "action": job["action"],
         "pod": slot.pod,
         "gpu": slot.gpu,
-        "source": {
-            "checkout": job["source"]["checkout"],
-            "commit": job["source"]["commit"],
-        },
+        # The complete source mapping intentionally includes an optional
+        # ignored_runtime_asset closure.  The schema-2 claim therefore binds
+        # the exact hydrated tree contract without a parallel side channel.
+        "source": dict(job["source"]),
         "run_name": job["run_name"],
         "run_dir": job["run_dir"],
         "runtime_binding": bool(job.get("runtime_binding", False)),
@@ -797,6 +1312,70 @@ def _launch_contract(
     return claim, execution_argv
 
 
+def _source_asset_runtime_paths(
+    job: dict[str, Any], pod: str
+) -> tuple[str, str, str]:
+    asset = job["source"].get("ignored_runtime_asset")
+    if not isinstance(asset, dict):
+        raise QueueError(f"{job['id']} does not declare ignored_runtime_asset")
+    contract_digest = _canonical_sha256(asset)
+    identity = PurePosixPath(
+        job["source"]["commit"], contract_digest, pod
+    )
+    receipt = SOURCE_ASSET_RECEIPT_ROOT / identity / "receipt.json"
+    staging = SOURCE_ASSET_STAGING_ROOT / identity / "asset.stage"
+    lock_identity = hashlib.sha256(
+        (
+            job["source"]["checkout"]
+            + "\0"
+            + job["source"]["commit"]
+            + "\0"
+            + contract_digest
+        ).encode("utf-8")
+    ).hexdigest()
+    lock = f"/tmp/hope_lean_source_asset_{lock_identity}.lock"
+    return str(receipt), str(staging), lock
+
+
+def _source_asset_runtime_spec(
+    job: dict[str, Any], pod: str, *, mode: str
+) -> dict[str, Any]:
+    if mode not in {"prepare", "doctor"}:
+        raise QueueError("source asset runtime mode must be prepare or doctor")
+    receipt, staging, lock = _source_asset_runtime_paths(job, pod)
+    return {
+        "mode": mode,
+        "pod": pod,
+        "source": {
+            "checkout": job["source"]["checkout"],
+            "commit": job["source"]["commit"],
+        },
+        "contract": job["source"]["ignored_runtime_asset"],
+        "receipt_path": receipt,
+        "staging_path": staging,
+        "lock_path": lock,
+        "entrypoint_relative_path": (
+            f"{WBT_RELATIVE}/{ENTRYPOINT_RELATIVE}"
+        ),
+        "proc_root": "/proc",
+        "urdf_relative_path": SOURCE_ASSET_URDF_RELATIVE_PATH,
+        "expected_unique_mesh_references": SOURCE_ASSET_UNIQUE_MESH_REFERENCES,
+    }
+
+
+def _source_asset_remote_command(
+    job: dict[str, Any], pod: str, *, mode: str
+) -> str:
+    spec = _source_asset_runtime_spec(job, pod, mode=mode)
+    encoded = base64.b64encode(
+        json.dumps(
+            spec, allow_nan=False, ensure_ascii=False,
+            separators=(",", ":"), sort_keys=True,
+        ).encode("utf-8")
+    ).decode("ascii")
+    return shlex.join(["python3", "-c", SOURCE_ASSET_PROGRAM, encoded])
+
+
 def _hydra_compose_argv(training_argv: list[str]) -> list[str]:
     if len(training_argv) < 2:
         raise QueueError("training argv is missing the Python executable or train.py")
@@ -835,6 +1414,13 @@ def _doctor_body(
     if job.get("runtime_binding", False):
         required.append(f"{workdir}/{QUEUE_RUNTIME_RELATIVE}")
     checks = "\n".join(f"test -f {shlex.quote(path)}" for path in required)
+    source_asset_check = ""
+    if job["source"].get("ignored_runtime_asset") is not None:
+        source_asset_check = (
+            "# source-asset-doctor: exact target/donor/receipt before Hydra or Kit\n"
+            + _source_asset_remote_command(job, slot.pod, mode="doctor")
+            + "\n"
+        )
     expected_module_root = f"{workdir}/source/whole_body_tracking/whole_body_tracking"
     module_probe = (
         "import importlib.util,pathlib;"
@@ -849,7 +1435,7 @@ def _doctor_body(
     return f"""set -euo pipefail
 test \"$(git -C {shlex.quote(source)} rev-parse HEAD)\" = {shlex.quote(job['source']['commit'])}
 test -z \"$(git -C {shlex.quote(source)} status --porcelain)\"
-{checks}
+{source_asset_check}{checks}
 cd {shlex.quote(workdir)}
 source {shlex.quote(workdir + '/' + SETUP_RELATIVE)}
 resolved_module_root=$({child_probe})
@@ -1593,6 +2179,52 @@ def cmd_full_scene_probe(
     return result
 
 
+def cmd_prepare_source_assets(
+    queue: dict[str, Any], *, job_id: str, pod: str,
+    execute: bool, confirm: str | None,
+) -> dict[str, Any]:
+    """Hydrate one declared ignored source asset on one selected Pod only."""
+
+    if execute and confirm != PREPARE_SOURCE_ASSET_CONFIRM:
+        raise QueueError(
+            f"--execute requires --confirm {PREPARE_SOURCE_ASSET_CONFIRM}"
+        )
+    job = _job_by_id(queue, _text(job_id, "job_id", safe_id=True))
+    if job["status"] not in {READY, BLOCKED}:
+        raise QueueError("source asset preparation requires a ready or blocked job")
+    pod = _text(pod, "pod", safe_id=True)
+    if pod not in queue.get("dispatch_pods", list(queue["pods"])):
+        raise QueueError(f"source asset preparation Pod is not dispatch-enabled: {pod}")
+    if job["source"].get("ignored_runtime_asset") is None:
+        raise QueueError(f"{job['id']} does not declare ignored_runtime_asset")
+    receipt, staging, lock = _source_asset_runtime_paths(job, pod)
+    remote = _source_asset_remote_command(job, pod, mode="prepare")
+    result: dict[str, Any] = {
+        "mode": "prepare-source-assets",
+        "dry_run": not execute,
+        "simulation_only": True,
+        "job_id": job["id"],
+        "pod": pod,
+        "source": dict(job["source"]),
+        "receipt_path": receipt,
+        "staging_path": staging,
+        "source_lock": lock,
+        "automatic_retry": False,
+    }
+    if not execute:
+        result["ssh_argv"] = [
+            *_ssh_prefix(queue, pod), f"bash -lc {shlex.quote(remote)}"
+        ]
+        return result
+    # Exactly one selected-Pod SSH call.  A timeout is UNKNOWN and is returned
+    # to the operator; this command never replays itself.
+    result["remote_output"] = _run_ssh(
+        queue, pod, remote, timeout=600,
+        phase=f"prepare-source-assets:{job['id']}",
+    )
+    return result
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--queue", type=Path, required=True)
@@ -1621,6 +2253,11 @@ def _parser() -> argparse.ArgumentParser:
     full_scene.add_argument("--attempt-id", required=True)
     full_scene.add_argument("--execute", action="store_true")
     full_scene.add_argument("--confirm")
+    prepare_asset = sub.add_parser("prepare-source-assets")
+    prepare_asset.add_argument("--job-id", required=True)
+    prepare_asset.add_argument("--pod", required=True)
+    prepare_asset.add_argument("--execute", action="store_true")
+    prepare_asset.add_argument("--confirm")
     attest = sub.add_parser("attest-milestone")
     attest.add_argument("--job-id", required=True)
     attest.add_argument("--milestone", type=int, required=True)
@@ -1663,6 +2300,14 @@ def main(argv: list[str] | None = None) -> int:
                 pod=args.pod,
                 gpu=args.gpu,
                 attempt_id=args.attempt_id,
+                execute=args.execute,
+                confirm=args.confirm,
+            )
+        elif args.mode == "prepare-source-assets":
+            result = cmd_prepare_source_assets(
+                queue,
+                job_id=args.job_id,
+                pod=args.pod,
                 execute=args.execute,
                 confirm=args.confirm,
             )

@@ -61,6 +61,28 @@ def _queue(job_count: int = 1) -> dict:
     }
 
 
+def _ignored_asset_contract() -> dict:
+    return {
+        "target_relative_path": (
+            "hope_training/whole_body_tracking/source/whole_body_tracking/"
+            "whole_body_tracking/assets/agibot_a3"
+        ),
+        "donor": {
+            "checkout": "/workspace/codexschema/nohope",
+            "commit": "6" * 40,
+            "relative_path": (
+                "hope_training/whole_body_tracking/source/whole_body_tracking/"
+                "whole_body_tracking/assets/agibot_a3"
+            ),
+        },
+        "file_count": 46,
+        "total_file_bytes": 15378264,
+        "tree_content_sha256": "a" * 64,
+        "symlinks_forbidden": True,
+        "target_must_be_gitignored": True,
+    }
+
+
 def _write(tmp_path: Path, queue: dict) -> Path:
     path = tmp_path / "queue.yaml"
     path.write_text(yaml.safe_dump(queue, sort_keys=False), encoding="utf-8")
@@ -988,6 +1010,112 @@ def test_milestone_attestor_rejects_legacy_capability_before_live_snapshot(monke
     assert calls == []
 
 
+def test_ignored_runtime_asset_contract_is_strict_and_claim_bound(tmp_path):
+    queue = _queue()
+    queue["jobs"][0]["source"]["ignored_runtime_asset"] = _ignored_asset_contract()
+    loaded = Q.load_queue(_write(tmp_path, queue))
+    job = loaded["jobs"][0]
+    claim, _argv = Q._launch_contract(loaded, job, Q.slots(loaded)[0])
+    assert claim["content"]["source"] == job["source"]
+    assert (
+        claim["content"]["source"]["ignored_runtime_asset"]
+        == _ignored_asset_contract()
+    )
+
+    for mutation in ("target_traversal", "donor_traversal", "unknown_key"):
+        broken = _queue()
+        asset = _ignored_asset_contract()
+        if mutation == "target_traversal":
+            asset["target_relative_path"] = "../agibot_a3"
+        elif mutation == "donor_traversal":
+            asset["donor"]["relative_path"] = "assets/../agibot_a3"
+        else:
+            asset["unbound"] = True
+        broken["jobs"][0]["source"]["ignored_runtime_asset"] = asset
+        try:
+            Q.load_queue(_write(tmp_path, broken))
+        except Q.QueueError:
+            pass
+        else:
+            raise AssertionError(f"unsafe ignored asset contract accepted: {mutation}")
+
+
+def test_asset_doctor_precedes_hydra_claim_and_kit():
+    queue = _queue()
+    job = queue["jobs"][0]
+    job["source"]["ignored_runtime_asset"] = _ignored_asset_contract()
+    slot = Q.slots(queue)[0]
+    rendered = Q._launch_script(queue, job, slot)
+    body = shlex.split(rendered)[-1]
+    asset_index = body.index("source-asset-doctor")
+    assert asset_index < body.index("--cfg job --resolve")
+    assert asset_index < body.index(f"mkdir {job['run_dir']}")
+    assert asset_index < body.index("queue_claim.json")
+    assert asset_index < body.index("launch_kit_training_locked.sh")
+    assert "mode" in body and "doctor" in body
+
+
+def test_prepare_source_assets_is_selected_pod_only_and_never_replays(monkeypatch):
+    queue = _queue()
+    queue["dispatch_pods"] = ["pod2"]
+    job = queue["jobs"][0]
+    job["resource"] = {"policy": "dispatch_gpu_round_robin"}
+    job["source"]["ignored_runtime_asset"] = _ignored_asset_contract()
+    calls = []
+
+    def fake_ssh(_queue, pod, _remote, **kwargs):
+        calls.append((pod, kwargs["phase"], kwargs["timeout"]))
+        return "SOURCE_ASSET_OK\n"
+
+    monkeypatch.setattr(Q, "_run_ssh", fake_ssh)
+    for wrong_confirm in (None, Q.CONFIRM, Q.FULL_SCENE_PROBE_CONFIRM):
+        try:
+            Q.cmd_prepare_source_assets(
+                queue, job_id="job0", pod="pod2", execute=True,
+                confirm=wrong_confirm,
+            )
+        except Q.QueueError as exc:
+            assert Q.PREPARE_SOURCE_ASSET_CONFIRM in str(exc)
+        else:
+            raise AssertionError("foreign confirmation prepared a source asset")
+    try:
+        Q.cmd_prepare_source_assets(
+            queue, job_id="job0", pod="pod1", execute=False, confirm=None,
+        )
+    except Q.QueueError as exc:
+        assert "not dispatch-enabled" in str(exc)
+    else:
+        raise AssertionError("reserved Pod1 received source asset work")
+    assert calls == []
+
+    result = Q.cmd_prepare_source_assets(
+        queue, job_id="job0", pod="pod2", execute=True,
+        confirm=Q.PREPARE_SOURCE_ASSET_CONFIRM,
+    )
+    assert result["automatic_retry"] is False
+    assert calls == [("pod2", "prepare-source-assets:job0", 600)]
+    assert "pod2" in result["receipt_path"]
+    assert "/workspace/source/" not in result["receipt_path"]
+
+
+def test_prepare_source_assets_rejects_legacy_row_before_ssh(monkeypatch):
+    queue = _queue()
+    queue["dispatch_pods"] = ["pod2"]
+    queue["jobs"][0]["resource"] = {"policy": "dispatch_gpu_round_robin"}
+    calls = []
+    monkeypatch.setattr(Q, "_run_ssh", lambda *args, **kwargs: calls.append(args))
+    try:
+        Q.cmd_prepare_source_assets(
+            queue, job_id="job0", pod="pod2", execute=True,
+            confirm=Q.PREPARE_SOURCE_ASSET_CONFIRM,
+        )
+    except Q.QueueError as exc:
+        assert "does not declare" in str(exc)
+    else:
+        raise AssertionError("legacy source row entered asset preparation")
+    assert calls == []
+
+
 def test_example_is_valid_and_safely_blocked():
     queue = Q.load_queue(ROOT / "configs" / "lean_training_queue.example.yaml")
     assert queue["jobs"][0]["status"] == "blocked"
@@ -1030,10 +1158,17 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
         conditional["fresh_c_conditional_face_w04_p1r1"],
     ]
     assert all(job["runtime_binding"] is True for job in p1_pair)
-    assert all(job["source"] == {
-        "checkout": "/workspace/codexschema/nohope_p1_077e70c",
-        "commit": "077e70cfd89cfe21cdc24dc928e62b3fc2a8820f",
-    } for job in p1_pair)
+    assert all(
+        job["source"]["checkout"] == "/workspace/codexschema/nohope_p1_077e70c"
+        and job["source"]["commit"]
+        == "077e70cfd89cfe21cdc24dc928e62b3fc2a8820f"
+        and job["source"]["ignored_runtime_asset"]["file_count"] == 46
+        and job["source"]["ignored_runtime_asset"]["total_file_bytes"]
+        == 15378264
+        and job["source"]["ignored_runtime_asset"]["tree_content_sha256"]
+        == "0137f59b1fe45e7d5f8fa731bedca905f5466bc98e8d1354081fe071d60426c6"
+        for job in p1_pair
+    )
     def delta_map(job):
         return {
             item.split("=", 1)[0].lstrip("+"): item.split("=", 1)[1]

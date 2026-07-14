@@ -108,10 +108,16 @@ def test_base_deceleration_weight_is_the_only_matched_pair_delta():
 def test_exact_p1_source_is_bound_but_normal_launch_remains_blocked():
     queue = Q.load_queue(QUEUE_PATH)
     for job in queue["jobs"]:
-        assert job["source"] == {
-            "checkout": "/workspace/codexschema/nohope_p1_077e70c",
-            "commit": "077e70cfd89cfe21cdc24dc928e62b3fc2a8820f",
-        }
+        assert job["source"]["checkout"] == "/workspace/codexschema/nohope_p1_077e70c"
+        assert job["source"]["commit"] == "077e70cfd89cfe21cdc24dc928e62b3fc2a8820f"
+        ignored = job["source"]["ignored_runtime_asset"]
+        assert ignored["file_count"] == 46
+        assert ignored["total_file_bytes"] == 15378264
+        assert ignored["tree_content_sha256"] == (
+            "0137f59b1fe45e7d5f8fa731bedca905f5466bc98e8d1354081fe071d60426c6"
+        )
+        assert ignored["symlinks_forbidden"] is True
+        assert ignored["target_must_be_gitignored"] is True
     assert Q.cmd_plan(queue, live=False)["assignments"] == []
     probe = Q.cmd_full_scene_probe(
         queue,

@@ -24,6 +24,20 @@
 
 任何一步失败都不删除、覆盖或自动重试科学 namespace，也不产生 receipt。
 
+## Source ignored-runtime-asset 绑定
+
+P1 queue row 的 `source` 可包含 `ignored_runtime_asset`：`target_relative_path`、donor 的
+`checkout/commit/relative_path`、`file_count/total_file_bytes/tree_content_sha256`，以及固定为 true 的
+`symlinks_forbidden/target_must_be_gitignored`。schema-2 queue claim 的 `content.source` 必须逐字段保留整个
+mapping；只保留 checkout/commit 会丢失训练实际加载的 URDF/mesh 身份，属于无效 claim。
+
+水合 receipt 位于 source checkout 之外：
+`/workspace/codexschema/lean_training_source_asset_receipts/<source-commit>/<canonical-asset-contract-sha>/<pod>/receipt.json`。
+其 content 绑定 Pod、source、完整资产合同、target path、46-file inventory、Git-ignore 结论和 URDF
+43/43 唯一 mesh 引用 closure，并有 canonical content SHA。science doctor 必须重算 target 与 donor 后消费
+已有 exact receipt；不得在 doctor/binding/terminal 路径补造。这样 source clean 不会掩盖 ignored tree
+缺失或漂移。该 receipt 只证明 source runtime asset 身份，不证明 scene boot、Reward、checkpoint 或行为。
+
 `fill --execute` 的控制面也只有一条权威远端路径：每臂一次 `_launch_script` SSH，在同一个 per-GPU 短锁
 中按 doctor checks → 容量 → namespace/claim → Kit 顺序执行。standalone `doctor` 仍是无状态诊断入口，
 但不会在 `fill` 中先跑一遍再被 launch 重复；第一遍既未占槽也未写 claim，不能关闭 TOCTOU，只会增加一次

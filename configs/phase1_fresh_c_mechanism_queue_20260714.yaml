@@ -61,6 +61,17 @@ x-conditional-source: &conditional_source
 x-p1-source: &p1_source
   checkout: /workspace/codexschema/nohope_p1_077e70c
   commit: 077e70cfd89cfe21cdc24dc928e62b3fc2a8820f
+  ignored_runtime_asset:
+    target_relative_path: hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
+    donor:
+      checkout: /workspace/codexschema/nohope
+      commit: 6d93bcb16c422a2f42748c2dc99432559653480b
+      relative_path: hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
+    file_count: 46
+    total_file_bytes: 15378264
+    tree_content_sha256: 0137f59b1fe45e7d5f8fa731bedca905f5466bc98e8d1354081fe071d60426c6
+    symlinks_forbidden: true
+    target_must_be_gitignored: true
 x-base: &base
   - task=HOPEPingPongVirtualBall
   - algo=ppo

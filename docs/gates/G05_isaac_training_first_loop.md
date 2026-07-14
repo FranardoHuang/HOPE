@@ -1899,3 +1899,18 @@ updates `980–1000` 的 21 点均值已出现晚熟翻转：treatment/control �
 error=`0.0474/0.0962 m`、signed composite=`0.310/0.146`、virtual return=`0.454/0.265`，而 fall 与
 completion 基本持平。因此停止低剂量/interaction 扩展，把 `-5` 保留为晚熟候选；同题 immutable
 MuJoCo/vendor judge 尚未执行，G05 仍不晋级。
+
+#### P1 full-scene probe 暴露 ignored A3 source closure 缺口
+
+Pod2 首个 4096-environment P1 probe 在 `Learning iteration` 前自然 `rc=1`：exact detached
+`077e70c` source 缺少 Git 忽略的 `assets/agibot_a3/urdf/model.urdf`，因此没有 hard contract、checkpoint 或
+Reward 结论。archive donor 的既有接受树为 46 regular files、15,378,264 bytes、canonical SHA
+`0137f59b...26c6`；其中 URDF 实际闭包有 43 个唯一 mesh 引用。source `git status` clean 不能证明 ignored
+runtime asset 存在。
+
+P1.4 source gate 因此让 YAML source 显式绑定 target/donor/commit/完整 tree 合同；新增 selected-Pod-only
+`prepare-source-assets`，在 source 无 trainer 时用 source-specific lock、source 外 no-clobber staging、
+`renameat2(RENAME_NOREPLACE)` 与 no-clobber receipt 水合。声明者的 doctor 在 Hydra/run-dir/claim/Kit 前
+重算 donor/target、43/43 URDF closure、Git-ignore 并消费 exact receipt；science claim 自动绑定完整 source
+mapping。旧行不声明时兼容。源码/测试通过仍只是 E1；本分支不远程水合、不重发 probe、不改变 blocked
+状态，G05 保持 `Partial`。

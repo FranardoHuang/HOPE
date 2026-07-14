@@ -42,6 +42,39 @@ fatal，才可启动正式 control/treatment。warmup 的模型、Reward 与 che
 首次真实执行 `conditional_61007e9_gpu1_a1` 已按上述路径自然退出，2/2 updates、`model_0/1` finite、
 contract/claim/fresh lineage 匹配且 fatal0；该 receipt 只证明此 source/Pod2/GPU1 的 boot 路径。
 
+### 新 source 的 ignored A3 资产先显式水合
+
+clean detached source 不包含 Git 忽略的 A3 URDF/mesh tree。P1 source 行因此可选声明
+`source.ignored_runtime_asset`：target checkout 相对路径、donor checkout/commit/相对路径、完整 `46` 文件/
+`15,378,264` bytes/canonical tree SHA，以及“禁 symlink、target 必须 Git-ignored”两条硬规则。旧历史行不声明
+时保持兼容；声明者的 schema-2 science claim 会自动绑定完整 source mapping，不能只绑定 commit 后另手抄资产。
+
+先 dry-run，再只对 `dispatch_pods` 中用户明确选择的一台 Pod 执行：
+
+```bash
+python3 scripts/run_lean_training_queue.py \
+  --queue configs/phase1_fresh_c_mechanism_queue_20260714.yaml \
+  prepare-source-assets \
+  --job-id fresh_c_conditional_face_matched_control_p1r1 --pod pod2
+
+python3 scripts/run_lean_training_queue.py \
+  --queue configs/phase1_fresh_c_mechanism_queue_20260714.yaml \
+  prepare-source-assets \
+  --job-id fresh_c_conditional_face_matched_control_p1r1 --pod pod2 \
+  --execute --confirm SIM_ONLY_PREPARE_ONE_LEAN_QUEUE_SOURCE_ASSET
+```
+
+该入口不读 GPU、不启动 Kit，也不访问 reserved Pod1。它在 source-specific lock 内要求 source 没有 exact
+`scripts/train.py` 进程；先复核 source/donor clean exact、donor 46-file tree 和 URDF 的 43/43 个唯一 mesh
+引用。target 缺失时只复制到 source 外的 deterministic no-clobber staging，复核后用 Linux
+`renameat2(RENAME_NOREPLACE)` 原子发布；target 已存在时只允许 exact idempotent verify，不会重拷或覆盖。
+完成后在 source 外写 deterministic no-clobber receipt。SSH timeout 是 `UNKNOWN`，命令没有自动 replay；残留
+staging 必须保全诊断。
+
+声明该合同的 `doctor`/science launch 会在 Hydra compose、run directory、claim 与 Kit 之前重算 donor/target、
+确认 target 仍 Git-ignored，并**消费已有 exact receipt**；doctor 不会替 prepare 补写 receipt。target/receipt
+缺失、额外文件、内容漂移、symlink、特殊文件、donor commit 漂移或 43/43 mesh closure 不完整均 fail closed。
+
 ### 正式环境数先做 full-scene probe
 
 1-env 成功不能代表 4096-env scene 可创建。[`full-scene-probe`](../DEFINITIONS.md#full-scene-probe)
@@ -100,7 +133,8 @@ probe 永远 `not_science=true / attestable=false / promotable=false`，不写 `
 claim，且拒绝 Hydra flag、删除语法和 `${...}` interpolation。所有 `run_dir` 在整份 YAML 内必须唯一，
 不能等于或位于自身 source 内；`ready` job 还不能放进其他 ready source checkout。这些错误都在 SSH 前失败。
 
-远端快速检查为：source checkout 处于 YAML 记录的 commit 且 clean；motion/train bank/exam 三类资产存在；
+远端快速检查为：source checkout 处于 YAML 记录的 commit 且 clean；若声明 ignored runtime asset，则先消费
+exact hydration receipt 并复核 donor/target closure；motion/train bank/exam 三类资产存在；
 同一个 child environment 下 `whole_body_tracking` exact 解析到该 source；用最终训练 override 向量实际执行
 `train.py --cfg job --resolve`，只做 Hydra 配置合成而不启动 Kit；目标 GPU 未达容量；以一次原子 `mkdir`
 创建全新的 run directory；Kit 经现有 boot lock 串行启动。
