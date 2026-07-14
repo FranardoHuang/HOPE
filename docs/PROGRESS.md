@@ -13,6 +13,15 @@
 
 ## 2026-07-15
 
+- Franco 反手拉 B 的 [`vendor L1 safety audit`](DEFINITIONS.md#motion-vendor-l1-safety) 已完成
+  source-only 预注册/validator：绑定 exact L0 certificate、B schema-2 NPZ、vendor MJCF closure 与
+  MuJoCo 3.10 runtime，复用既有 shortest-arc/linear 插值将 `151 @ 50 Hz` 有限密扫为
+  `1201 @ 400 Hz`；自碰穿透或球拍/拍柄 `<5 mm` 自打均为不可补偿 hard fail，明确不声称连续时间。
+  专项连同 L0 回归 `17 passed`；本任务没有连接 Pod、没有运行 runtime 或写证书，G08 仍 Partial，
+  桌网/动力学/训练继续 blocked。见
+  [L1 卷宗](experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-VENDOR-L1.md)与
+  [操作](operations/run_motion_backhand_loop_b_vendor_l1_safety.md)。
+
 - Franco 反手拉 B 的 L0 V1 portable dry-run 已登记为数值合同负结果，而非动作失败：schema-2 只存
   post-FK normalized float32 root body pose，V1 再把它当原 free-joint qpos 注入并要求 byte equality；
   position/quaternion/COM velocity/angular velocity 最大差分别为 `1.1920929e-7 / 5.9604645e-8 /

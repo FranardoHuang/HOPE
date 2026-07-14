@@ -114,6 +114,12 @@ free-joint qpos，而不是继续放宽 schema-2。该 V2 已用 Pod2 exact runt
 `60c08185...afc6`，仅解锁 vendor L1 自碰/球拍自打；桌网、动力学、训练和真机仍 blocked。详见
 [`EXP-MOTION-BACKHAND-LOOP-B-L0`](experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-L0.md)。
 
+B 的下一张 [`vendor L1 safety audit`](DEFINITIONS.md#motion-vendor-l1-safety) 已冻结为 source-only
+计划：沿用既有 shortest-arc/linear 插值，把 151 帧整轨有限密扫为 1201 个 400 Hz 样本；任何机器人
+自碰或球拍/拍柄对冻结关键 body group 小于 `5 mm` 都 hard fail，不能补偿。当前只通过本地 source
+gate，未在 exact runtime 运行、未写 certificate；它不检查桌网，也不冒充连续时间或动力学证明。见
+[`EXP-MOTION-BACKHAND-LOOP-B-VENDOR-L1`](experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-VENDOR-L1.md)。
+
 当前资产:`hope_{forehand,backhand}_{v5,oblique,v4}_cal.npz`(v4=hopex 视频重跑;**hopex 资产
 与 v4_cal 同底片**——真源都是 raw_video_hopex/*_v4.mp4,动作组消融里两者不构成独立对照)。
 **swing 对试产件**(2026-07-08,修复版管线全链,判炸器双 PASS):

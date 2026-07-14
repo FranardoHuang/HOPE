@@ -47,6 +47,7 @@
 | `legacy v4rg` | 迁移到 `v4rg_runtime_order_v3` 之前的旧资产/顺序；可用于 causal 历史诊断，不得冒充当前 fresh exact 动作。 |
 | `schema-2 motion` | 动作资产的第 2 版数据合同，包含 runtime 所需的关节/刚体顺序与元数据。 |
 | <a id="motion-l0-static"></a>motion `L0 static audit` / 动作 L0 静态审计 | 对 exact schema-2 动作做的纯 CPU 离散静态门：核对字段/顺序/finite/形状/时间、四元数、vendor MJCF 关节范围、逐帧 FK 与 root-foot 接地，但不调用 `mj_step` 或推进动力学。source/static gate 通过只说明计划、validator 和合成反例闭环；必须另有 exact 资产的 runtime certificate 才能声称 L0 runtime 通过。它不包含 vendor L1 自碰/自打、桌网扫掠、动力学、RL、Gate3 或真机，也不是 signed-face 的 L1/L2/L3 或证据等级 E1/E2/E3。 |
+| <a id="motion-vendor-l1-safety"></a>motion `vendor L1 safety audit` / 动作厂商 L1 安全审计 | 在 exact vendor MuJoCo 碰撞模型中，把一条已通过动作 L0 的 schema-2 整轨做有限密集插值并逐样本检查机器人自碰、球拍/拍柄碰机器人及关键部位余隙。任一硬失败都会否决整条动作，不能由 reward 或其他好成绩补偿。当前 B 合同把 151 个 50 Hz 原帧按每段 8 个子步扫成 1201 个 400 Hz 样本；这仍是有限采样，不是数学连续时间扫掠证明，也不含桌网、动力学、训练、Gate3 或真机。它与训练阶段的 L1/L2/L3 不是同一层级。 |
 | <a id="float32-ulp"></a>float32 `ULP` / 相邻格宽 | `unit in the last place`：某个 float32 数附近相邻两个可表示数之间的距离。它随数值量级变化，不是固定物理容差；动作 L0 V2 用预注册的格数、近零 floor 和独立物理上限共同约束纯舍入差，不能用它掩盖关节、接地、支撑或安全失败。 |
 | `schema-3 bank` | 题库和判卷的第 3 版合同：训练题与考试题分开，题序、分母、动作和 SHA 可绑定。它不是 schema-2 motion 的升级同一件事。 |
 | `q10` | 每个动作/侧各 10 题的快速方向卷；只看有没有苗头，不许据此停训或晋级。 |

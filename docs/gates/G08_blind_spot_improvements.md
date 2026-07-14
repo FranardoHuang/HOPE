@@ -545,6 +545,18 @@ blocked。下一步是 vendor L1 整轨自碰/球拍自打，不得越级训练�
 [L0 实验卷宗](../experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-L0.md)和
 [L0 操作文档](../operations/run_motion_backhand_loop_b_l0_static.md)。
 
+该下一门现已形成 [`vendor L1 safety audit`](../DEFINITIONS.md#motion-vendor-l1-safety) 的 source-only
+预注册与 validator。它逐字绑定 L0 certificate `60c08185...afc6`、B NPZ `e2eb99e6...d28cc`、
+vendor MJCF/75-file closure、compiled collision contract 和 exact CPU runtime；沿用已验证的
+root linear / quaternion shortest-arc slerp / joint linear 插值，把 `151 @ 50 Hz` 全轨有限密扫为
+`1201 @ 400 Hz`。所有 enabled robot geom 的穿透超过 `1e-6 m`，或球拍/拍柄距 head/trunk/对侧臂/
+下肢小于 `5 mm`，都会否决整条 B，不能由 warning/reward/其他分数补偿；`5–20 mm` 只登记 warning。
+右腕/手/球拍安装链只从 `5 mm` proximity pairs 排除，enabled-robot 实际穿透仍 hard fail。该有限扫掠
+**不是**数学连续时间证书，且不含桌网或动力学。当前专项 source gate 已过但没有连接 Pod、没有
+runtime audit/certificate，所以 G08 仍为 Partial，B 仍不得进入桌网、动力学或训练。见
+[L1 卷宗](../experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-VENDOR-L1.md)和
+[L1 操作](../operations/run_motion_backhand_loop_b_vendor_l1_safety.md)。
+
 S0/M0 的下一层 exact GMR 现已冻结成两批独立 machine plan。共享 consumer 不把 retarget body order 猜成
 canonical vendor body order，而是分开绑定两套 XML order，再用显式 31-joint bijection 接入 A3 FK。M0
 四条候选的人工 ready windows 已展开为 exact 30 Hz sample indices；结果将同时报告初末前后脚错位和横向
