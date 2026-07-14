@@ -5,7 +5,7 @@ from __future__ import annotations
 import importlib.util
 import sys
 from pathlib import Path
-from types import ModuleType
+from types import ModuleType, SimpleNamespace
 
 import pytest
 
@@ -135,3 +135,65 @@ def test_absent_claim_writes_no_launch_key_and_train_reads_only_top_level(monkey
     assert '_get(cfg, "training_launch_claim_sha256")' in train_source
     assert "training_launch_claim_sha256=training_launch_claim_sha256" in train_source
     assert 'hard_contract["training_launch_claim_sha256"]' not in train_source
+
+
+def test_live_logger_exports_and_consumes_post_swing_activation_totals_once(monkeypatch):
+    contract = _load_contract_module()
+    runner_module = _load_runner_module(monkeypatch, contract)
+
+    class MotionTerm:
+        metrics = {}
+
+        def __init__(self):
+            self.consume_calls = 0
+
+        def consume_post_swing_activation_counters(self):
+            self.consume_calls += 1
+            return {
+                "post_swing_replay_buffer_not_ready_reset_count": 11,
+                "post_swing_replay_eligible_reset_count": 101,
+                "post_swing_replay_random_not_selected_reset_count": 49,
+                "post_swing_replay_selected_reset_count": 52,
+                "post_swing_replay_started_reset_count": 52,
+            }
+
+    term = MotionTerm()
+    env = SimpleNamespace(
+        command_manager=SimpleNamespace(
+            active_terms=["motion"], get_term=lambda name: term
+        ),
+        episode_length_buf=7,
+        common_step_counter=123,
+    )
+    runner = runner_module.MotionOnPolicyRunner.__new__(
+        runner_module.MotionOnPolicyRunner
+    )
+    runner.env = SimpleNamespace(unwrapped=env)
+    logged = {}
+    runner._log_scalar = lambda tag, value, step: logged.setdefault(
+        tag, (value, step)
+    )
+
+    runner._log_live_metrics(step=17)
+
+    assert term.consume_calls == 1
+    assert logged["Live/motion/post_swing_replay_buffer_not_ready_reset_count"] == (
+        11.0,
+        17,
+    )
+    assert logged["Live/motion/post_swing_replay_eligible_reset_count"] == (
+        101.0,
+        17,
+    )
+    assert logged["Live/motion/post_swing_replay_random_not_selected_reset_count"] == (
+        49.0,
+        17,
+    )
+    assert logged["Live/motion/post_swing_replay_selected_reset_count"] == (
+        52.0,
+        17,
+    )
+    assert logged["Live/motion/post_swing_replay_started_reset_count"] == (
+        52.0,
+        17,
+    )

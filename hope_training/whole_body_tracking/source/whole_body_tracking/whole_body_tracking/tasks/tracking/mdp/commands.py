@@ -519,6 +519,20 @@ class MotionCommand(CommandTerm):
         self._post_swing_joint_vel: torch.Tensor | None = None
         self._post_swing_count = 0
         self._post_swing_ptr = 0
+        # Activation accounting is kept outside ``metrics`` because command metrics are
+        # instantaneous per-environment values, while these are event counts accumulated over
+        # one PPO update.  MotionOnPolicyRunner consumes and resets them exactly once from its
+        # existing per-update logger.  Integer device scalars avoid a host sync on every reset.
+        self._post_swing_activation_counters = {
+            name: torch.zeros((), dtype=torch.long, device=self.device)
+            for name in (
+                "post_swing_replay_buffer_not_ready_reset_count",
+                "post_swing_replay_eligible_reset_count",
+                "post_swing_replay_random_not_selected_reset_count",
+                "post_swing_replay_selected_reset_count",
+                "post_swing_replay_started_reset_count",
+            )
+        }
         self.body_pos_relative_w = torch.zeros(self.num_envs, len(cfg.body_names), 3, device=self.device)
         self.body_quat_relative_w = torch.zeros(self.num_envs, len(cfg.body_names), 4, device=self.device)
         self.body_quat_relative_w[:, :, 0] = 1.0
@@ -995,6 +1009,23 @@ class MotionCommand(CommandTerm):
             env_ids=env_ids,
         )
 
+    def consume_post_swing_activation_counters(self) -> dict[str, torch.Tensor]:
+        """Return one PPO update's replay-start counts and atomically reset the window.
+
+        The training runner calls this once after each rollout/update.  Returning cloned device
+        scalars keeps the completed window stable while the live counters are zeroed for the next
+        update.  With ``post_swing_start_prob == 0`` every counter remains exactly zero and this
+        instrumentation performs no sampling or simulator write.
+        """
+
+        snapshot = {
+            name: value.detach().clone()
+            for name, value in self._post_swing_activation_counters.items()
+        }
+        for value in self._post_swing_activation_counters.values():
+            value.zero_()
+        return snapshot
+
     def _resample_command(self, env_ids: Sequence[int]):
         if len(env_ids) == 0:
             return
@@ -1046,13 +1077,30 @@ class MotionCommand(CommandTerm):
         u = torch.rand(len(env_ids_t), device=self.device)
         stand_mask = torch.zeros(len(env_ids_t), dtype=torch.bool, device=self.device)
         post_mask = torch.zeros(len(env_ids_t), dtype=torch.bool, device=self.device)
+        post_selected_count: torch.Tensor | None = None
         if not self._resampling_from_wrap:
             stand_p = float(self.cfg.stand_start_prob)
             post_p = float(self.cfg.post_swing_start_prob)
             if stand_p > 0.0:
                 stand_mask = u < stand_p
-            if post_p > 0.0 and self._post_swing_count >= int(self.cfg.post_swing_min_fill):
-                post_mask = (u >= stand_p) & (u < stand_p + post_p)
+            if post_p > 0.0:
+                buffer_ready = self._post_swing_count >= int(self.cfg.post_swing_min_fill)
+                if buffer_ready:
+                    eligible_count = len(env_ids_t)
+                    post_mask = (u >= stand_p) & (u < stand_p + post_p)
+                    post_selected_count = post_mask.sum(dtype=torch.long)
+                    counters = self._post_swing_activation_counters
+                    counters["post_swing_replay_eligible_reset_count"].add_(eligible_count)
+                    counters["post_swing_replay_selected_reset_count"].add_(
+                        post_selected_count
+                    )
+                    counters["post_swing_replay_random_not_selected_reset_count"].add_(
+                        eligible_count - post_selected_count
+                    )
+                else:
+                    self._post_swing_activation_counters[
+                        "post_swing_replay_buffer_not_ready_reset_count"
+                    ].add_(len(env_ids_t))
         stand_ids = env_ids_t[stand_mask]
         post_ids = env_ids_t[post_mask]
         rsi_ids = env_ids_t[~(stand_mask | post_mask)]
@@ -1082,7 +1130,17 @@ class MotionCommand(CommandTerm):
             )
 
         if len(post_ids) > 0:
+            if post_selected_count is None:
+                raise RuntimeError(
+                    "post-swing replay ids exist without an activation selected count"
+                )
             self._write_post_swing_states(post_ids)
+            # Count a replay as started only after both root and joint state writes return.  A
+            # selected count without a started count therefore exposes a failed adoption path
+            # instead of silently treating the random draw as a real replay start.
+            self._post_swing_activation_counters[
+                "post_swing_replay_started_reset_count"
+            ].add_(post_selected_count)
             # Settle follow-through -> windup before the clip runs.
             self.hold_counter[post_ids] = torch.clamp(
                 self.hold_counter[post_ids], min=int(self.cfg.post_swing_min_hold)

@@ -161,6 +161,20 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 term = env.command_manager.get_term(term_name)
                 for metric_name, metric_value in term.metrics.items():
                     self._log_scalar(f"Live/{term_name}/{metric_name}", self._mean_tensor(metric_value), step)
+                activation_consumer = getattr(
+                    term, "consume_post_swing_activation_counters", None
+                )
+                if callable(activation_consumer):
+                    # These are event counts accumulated across every environment step in the
+                    # just-finished PPO update.  They must be logged as totals, not averaged over
+                    # num_envs like instantaneous CommandTerm metrics.  The consumer snapshots
+                    # and resets the counters exactly once for the next update.
+                    for counter_name, counter_value in activation_consumer().items():
+                        self._log_scalar(
+                            f"Live/{term_name}/{counter_name}",
+                            self._scalar_tensor(counter_value),
+                            step,
+                        )
                 if hasattr(term, "command_counter"):
                     self._log_scalar(
                         f"Live/{term_name}/command_counter", self._mean_tensor(term.command_counter), step
@@ -208,6 +222,19 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             if value.numel() == 0:
                 return None
             return value.float().mean().item()
+        try:
+            return float(value)
+        except (TypeError, ValueError):
+            return None
+
+    @staticmethod
+    def _scalar_tensor(value):
+        """Convert one scalar event counter without accidentally averaging a vector."""
+
+        if isinstance(value, torch.Tensor):
+            if value.numel() != 1:
+                raise ValueError("per-update activation counter must be a scalar tensor")
+            return value.item()
         try:
             return float(value)
         except (TypeError, ValueError):

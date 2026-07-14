@@ -29,6 +29,9 @@ hope_observations.py). What is tested is therefore the actual shipped math, not 
 * R-c commands.MotionCommand on a synthetic 2-clip npz pair: rsi_skip_settle_frames offsets the
       swing-entry frame (multiseg + single-clip clamp, incl. the short-clip clamp) and
       rsi_hold_root_stand_z rewrites ONLY the held-RSI birth root z to the default stand height.
+* A8 post-swing replay activation: true-reset counts distinguish buffer-not-ready, eligible,
+      random-not-selected, selected and state-write-started paths; per-update consumption resets
+      exactly, and the disabled mechanism stays all-zero.
 
 Run:  python -m pytest hope_training/whole_body_tracking/tests/test_reward_flags_mdp.py -q
 """
@@ -1233,6 +1236,109 @@ def test_rc_hold_root_stand_z_leaves_unheld_births_alone(clips):
     cmd._resample_command(torch.arange(cmd.num_envs))
     root = [c for c in robot.calls if c[0] == "root"][0][1]
     assert torch.allclose(root[:, 2], torch.full((root.shape[0],), _CROUCH_Z))  # untouched
+
+
+def _prime_post_swing_buffer(cmd):
+    count = int(cmd.cfg.post_swing_min_fill)
+    cmd._post_swing_count = count
+    cmd._post_swing_ptr = 0
+    cmd._post_swing_root = torch.zeros(count, 13)
+    cmd._post_swing_root[:, 3] = 1.0
+    cmd._post_swing_joint_pos = torch.zeros(count, _N_JOINTS)
+    cmd._post_swing_joint_vel = torch.zeros(count, _N_JOINTS)
+
+
+def _counter_values(snapshot):
+    return {name: int(value.item()) for name, value in snapshot.items()}
+
+
+def test_post_swing_activation_disabled_stays_zero_without_replay_adoption(clips):
+    cmd, robot = _make_motion_command(
+        [clips[0], clips[1]], num_envs=4, post_swing_start_prob=0.0
+    )
+    _prime_post_swing_buffer(cmd)
+    cmd._resample_command(torch.arange(4))
+
+    assert _counter_values(cmd.consume_post_swing_activation_counters()) == {
+        "post_swing_replay_buffer_not_ready_reset_count": 0,
+        "post_swing_replay_eligible_reset_count": 0,
+        "post_swing_replay_random_not_selected_reset_count": 0,
+        "post_swing_replay_selected_reset_count": 0,
+        "post_swing_replay_started_reset_count": 0,
+    }
+    # The legacy RSI path still writes exactly one joint/root batch; enabling instrumentation
+    # alone must not turn a disabled post-swing mechanism into a replay state write.
+    assert [call[0] for call in robot.calls] == ["joint", "root"]
+
+
+def test_post_swing_activation_counts_buffer_not_ready_as_ineligible(clips):
+    cmd, _ = _make_motion_command(
+        [clips[0], clips[1]], num_envs=5, post_swing_start_prob=0.5
+    )
+    assert cmd._post_swing_count < int(cmd.cfg.post_swing_min_fill)
+    cmd._resample_command(torch.arange(5))
+
+    assert _counter_values(cmd.consume_post_swing_activation_counters()) == {
+        "post_swing_replay_buffer_not_ready_reset_count": 5,
+        "post_swing_replay_eligible_reset_count": 0,
+        "post_swing_replay_random_not_selected_reset_count": 0,
+        "post_swing_replay_selected_reset_count": 0,
+        "post_swing_replay_started_reset_count": 0,
+    }
+
+
+def test_post_swing_activation_multi_env_selection_and_per_update_reset(clips, monkeypatch):
+    cmd, _ = _make_motion_command(
+        [clips[0], clips[1]],
+        num_envs=4,
+        stand_start_prob=0.25,
+        post_swing_start_prob=0.5,
+    )
+    _prime_post_swing_buffer(cmd)
+    real_rand = torch.rand
+
+    def controlled_rand(*shape, **kwargs):
+        if shape == (4,):
+            # stand, replay, replay, RSI: the replay interval is [0.25, 0.75).
+            return torch.tensor([0.10, 0.30, 0.70, 0.90], device=kwargs.get("device"))
+        return real_rand(*shape, **kwargs)
+
+    monkeypatch.setattr(torch, "rand", controlled_rand)
+    cmd._resample_command(torch.arange(4))
+    cmd._resample_command(torch.arange(4))
+    assert _counter_values(cmd.consume_post_swing_activation_counters()) == {
+        "post_swing_replay_buffer_not_ready_reset_count": 0,
+        "post_swing_replay_eligible_reset_count": 8,
+        "post_swing_replay_random_not_selected_reset_count": 4,
+        "post_swing_replay_selected_reset_count": 4,
+        "post_swing_replay_started_reset_count": 4,
+    }
+    # A second logger consumption is the next PPO update's empty window, not a cumulative total.
+    assert all(
+        value == 0
+        for value in _counter_values(
+            cmd.consume_post_swing_activation_counters()
+        ).values()
+    )
+
+
+def test_post_swing_selected_is_not_started_until_state_write_returns(clips, monkeypatch):
+    cmd, _ = _make_motion_command(
+        [clips[0], clips[1]], num_envs=3, post_swing_start_prob=1.0
+    )
+    _prime_post_swing_buffer(cmd)
+
+    def fail_before_adoption(_env_ids):
+        raise RuntimeError("synthetic replay state write failure")
+
+    monkeypatch.setattr(cmd, "_write_post_swing_states", fail_before_adoption)
+    with pytest.raises(RuntimeError, match="synthetic replay state write failure"):
+        cmd._resample_command(torch.arange(3))
+    snapshot = _counter_values(cmd.consume_post_swing_activation_counters())
+    assert snapshot["post_swing_replay_eligible_reset_count"] == 3
+    assert snapshot["post_swing_replay_selected_reset_count"] == 3
+    assert snapshot["post_swing_replay_started_reset_count"] == 0
+    assert snapshot["post_swing_replay_random_not_selected_reset_count"] == 0
 
 
 def test_rally_hold_heading_is_hold_only_and_monotone():
