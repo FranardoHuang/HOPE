@@ -48,26 +48,28 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   `0.268`），但平衡债仍高；V2 单独格明显落后，已列为可替换且不复制 seed。base-decel、V1 和
   post-swing 保到 `+1000` 看权衡是否收敛。qdot-limit 第一次发射在第 0 update 的 A3 URDF import 阶段
   超时，launcher 只收口其 exact PGID；无 hard contract/model，因此是基础设施失败而非 reward 失败，
-  全新 retry-v2 已通过 no-Kit compose 与真实 boot marker，并在 Pod2 GPU2 训练到 iter `79`：schema-2
-  claim 的 96 项 argv 与 `/proc` 逐项一致，`model_0.pt` finite、hard-contract/claim lineage 正确、fatal `0`。
-  它仍只是 treatment 已运行；同 source/seed 的 qdot weight `0` 匹配对照未完成前不得作因果采用。
-  qdot control 与 conditional-face `0/-0.4` 配对已在结果前写入 Pod2-only YAML，等待各自 no-Kit doctor
-  后按 GPU0→1→2 一圈发射；它们是三个不同因果单元，不是复制失败 seed。
+  全新 retry-v2 已通过 no-Kit compose 与真实 boot marker。2026-07-14T12:11Z，Pod2 上同 source/seed 的
+  qdot control/treatment 分别到 iter `504/818`，最新为 `model_500/model_800`；两者 fatal regex 均为 `0`，
+  checkpoint/claim/hard-contract lineage 仍按原配对合同审计。因此 qdot pair 有效运行，并非“跑几步就失败”；
+  尚未完成同 milestone 行为早判，不能作因果采用。
   qdot control 的首次冷启动随后在 scene creation 前卡住，iter0/无 contract；exact PGID 已收口并保全。
   仅允许相同配方的 retry-v2 再试一次；若同 phase 重复，停止 retry并转 importer 根因线。
   新 source 的正式 run 前现先走独立 `boot-warmup`（1 env×2 update、180 秒、非科学 namespace），避免再拿
   control/treatment 的证据目录承担冷缓存失败。
   通用 launcher 也已加入 180 秒日志无进展 watchdog；marker 优先，失败只收口自身 exact PGID并写 sidecar。
-  conditional source 的首个 Pod2 GPU1 warmup 已自然退出：2/2 updates、`model_0/1` finite、contract/claim/
-  fresh lineage 全匹配、fatal0；它只关闭冷启动门，不计实验成绩。
+  conditional source 的 Pod2 GPU1 1-env warmup 虽自然退出并通过 2/2 updates，但随后 4096-env control
+  在 dynamic URDF import 后停住，iter0、无 scene/contract/checkpoint；精确 PGID 收口并保全，treatment
+  从未创建。这个反例推翻了“1-env warmup 可授权正式 run”：旧 source610 pair 已撤销，下一版必须把
+  watchdog/runtime binding 固定进 source，并以同 `4096 env` scene recipe 的非科学 full-scene probe 过门。
   “每卡只能发一条”的 launch-lock 根因已修：旧 `flock FILE command` fd 被 trainer 继承；新 controller
   用 fd8 持短锁并对子 launcher `8>&-`。conditional control/treatment 优先同落已 warm 的 Pod2 GPU1，
   正好验证容量不再退化为1；现役 qdot 的旧锁不做任何强制处理。
 
   2026-07-14 19:00 CST 起 Pod1 全部留给 Yikang 冲刺：Codex 的 V1/V2/V1+V2 只对精确 PGID 发出
   `TERM`，分别停在 iter `792/782/743`，三条 `model_700.pt` 与日志完整保留，未进入 `KILL`；复核 Pod1
-  三卡无 Codex compute process。Codex 后续只使用 Pod2；当前 GPU0/1 的 base-decel/post-swing 继续，
-  GPU2 正运行 qdot retry-v2。机器可读
+  三卡无 Codex compute process。Codex 后续只使用 Pod2。2026-07-14T12:11Z，GPU2 的 qdot treatment 与
+  GPU0 的 qdot control 正常运行；GPU0 另有 Yikang 的外部 trainer，Codex 不管理；GPU1 因 conditional
+  基础设施失败暂时释放。机器可读
   [`dispatch_pods: [pod2]`](DEFINITIONS.md#dispatch-pods) 已使新 assignment 不可能
   落到 Pod1，同时只读旧 claim 防止重复发射。
 

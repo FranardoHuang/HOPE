@@ -1,12 +1,13 @@
 # EXP-P1-CONDITIONAL-FACE-GUIDANCE — 不逃离就绪区的固定预算 Reward
 
-- 状态：`Partial`（E1 source gate 已合入 `main`；Pod2 machine prereg 已冻结，尚未 launch）
+- 状态：`Partial`（E1 source gate 已合入 `main`；旧 source 的 1-env cache probe 通过，但 4096-env
+  formal control 在第 0 次迭代前卡死，旧配对已撤销）
 - 阶段/轴：阶段 1 固定点；Reward 争抢机制
 - 集成小目标：在不牺牲触点、拍速、完成率或安全的前提下，降低有符号拍面误差
 - 人类负责人：franco
 - 执行者：Codex
 - 复核/决策负责人：franco
-- 最高证据等级：`E1`（`main@61007e9` source/tests；尚未运行 Isaac）
+- 最高证据等级：`E2`（`main@61007e9` source/tests + Pod2 启动反例；尚无 Reward 训练结果）
 - 创建日期/最后复核日期：2026-07-14
 
 共享缩写见[术语与人话对照](../../DEFINITIONS.md)。本文的
@@ -73,8 +74,8 @@ machine prereg 已冻结为 source `61007e93879f35677e4c7d38cf7f681f324f9571`、
 `f10ed619e0b71a28a0b0b781d95f1e5508c9bcead5a6f82ca909affbfd527012` 明确
 `purpose=boot_warmup_not_science`、1 env×2 updates/save1；`model_0/1` 均为 76 tensors / 1,762,715 floats
 全 finite，embedded iter、schema3 contract `c39cf1ae...`、claim SHA 与 fresh lineage 全匹配，fatal0。
-它只证明该 source/host/GPU 的 importer→scene→simulation→first iteration 能闭合，不是 control 或 treatment
-已启动，更不是 Reward 结果。
+它只证明该 source/host/GPU 在 **1 environment** 的 cache/importer 最小路径能闭合，不代表
+4096 environments 的正式 scene recipe。后续运行已经直接推翻“1-env 通过即可授权正式发射”这个假设。
 
 ## 不可补偿安全边界
 
@@ -106,16 +107,19 @@ joint/torque/qdot limit、观测、动作或 plant。以下任一项都独立判
 
 | 运行（人话名 + `run_name`） | 状态 | Checkpoint/seed | 证据 | 结果产物 | 有效性说明 |
 | --- | --- | --- | --- | --- | --- |
-| 同 source fresh 对照（`phase1_fresh_c_conditional_face_control_seed3_20260714`） | 预注册、未启动 | seed3；200/500/1000 | E1 | queue YAML | 必须与 treatment 同 source |
-| 不逃离就绪区的固定预算纠面（`phase1_fresh_c_conditional_face_w04_seed3_20260714`） | 预注册、未启动 | seed3；200/500/1000 | E1 | queue YAML | 唯一逻辑差异为 conditional weight `-0.4` |
+| 同 source fresh 对照（`phase1_fresh_c_conditional_face_control_seed3_20260714`） | 基础设施失败，永久拒绝该 namespace | seed3；第 0 次迭代前 | E2 | claim `caffd19e...da52`、run log/launch sidecar | 4096-env 日志停在 URDF import；无 scene、contract 或 checkpoint，不是 Reward 失败 |
+| 不逃离就绪区的固定预算纠面（`phase1_fresh_c_conditional_face_w04_seed3_20260714`） | 未发射、旧配对阻断 | seed3；无进程/claim | E1 | run directory 不存在 | control 失败后 serial fill fail closed；必须换 fresh source/namespace，不能单独补 treatment |
 
 ## 决定
 
 - 决定：`inconclusive`
-- 理由：公式、反向激励反例与 source gate 已进入 `main@61007e9`，但未做 runtime smoke 或训练。
+- 理由：公式、反向激励反例与 source gate 已进入 `main@61007e9`；1-env probe 虽通过，4096-env
+  control 仍在 dynamic URDF import 后日志停止增长。它在 scene、hard contract、iteration 之前，不能评价机制。
 - 是否已纳入当前 setting：`no`
-- 局限/下一个 gate：先由 lean queue 对 exact source 做 no-Kit doctor 与独立 `boot-warmup`，探针退出且
-  无 fatal 后再按 Pod2 一圈一条发射；禁止手写 CLI 点火，warmup 不得进入成绩。
+- 局限/下一个 gate：旧 source610 配对不再运行。新配对必须使用 fresh latest-main source/namespace，且
+  source 自带 stale-log watchdog、trainer-owned runtime binding；正式发射前用同 source、GPU、
+  `num_envs=4096` 和同 scene recipe 的非科学 full-scene probe 越过 first iteration。1-env 只作 cache probe，
+  不再授权正式训练；禁止手写 CLI 点火。
 
 ## 复现与证据
 

@@ -13,6 +13,13 @@
 
 ## 2026-07-14
 
+- conditional-face source610 的 1-env warmup 不能代表正式启动：Pod2 GPU1 的 4096-env control 在 dynamic
+  URDF import 后停住，iter0、无 scene/hard contract/checkpoint；精确 PGID `332786` 的 TERM 30 秒无响应后
+  对同一 PGID KILL，证据保留。serial fill 未创建 treatment，因此不是“两条 Reward 都失败”。旧 pair 撤销，
+  新 pair 必须绑定 source-pinned watchdog/runtime binding，并过同规模 full-scene 非科学 probe。见
+  [实验卷宗](experiments/2026-07/EXP-P1-CONDITIONAL-FACE-GUIDANCE.md)与
+  [G05](gates/G05_isaac_training_first_loop.md)。
+
 - qdot retry-v2 已在 Pod2 GPU2 通过 no-Kit doctor 与真实 `Learning iteration` boot marker；只读复核到
   iter `79`，schema-2 claim digest、96 项实际 argv、`model_0.pt` finite、hard contract 与 fresh/claim
   lineage 全匹配，fatal `0`。第一次 0-update 超时因此维持“基础设施失败”，不是 reward 失败；下一步补

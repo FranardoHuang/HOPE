@@ -377,8 +377,8 @@ jobs:
     id: fresh_c_conditional_face_matched_control
     human_name: fresh C fixed-budget conditional face matched control
     action: *action
-    status: ready
-    blocker: null
+    status: rejected
+    blocker: 4096-env formal control stalled in dynamic URDF import before scene creation/contract/iteration even though the 1-env cache probe passed; exact attempt evidence is preserved and this namespace is never reused
     motion: *motion
     bank: *bank
     exam: *exam
@@ -405,6 +405,8 @@ jobs:
   - <<: *conditional_control
     id: fresh_c_conditional_face_w04
     human_name: fresh C fixed-budget conditional face treatment, weight minus zero point four
+    status: blocked
+    blocker: matched source610 pair revoked after its formal control boot failed; treatment was never claimed and requires a fresh source with source-pinned watchdog/runtime binding plus a representative full-scene boot gate
     recipe:
       base: *base
       delta:

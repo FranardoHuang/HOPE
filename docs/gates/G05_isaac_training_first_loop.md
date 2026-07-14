@@ -1838,3 +1838,17 @@ seed/动作/bank/plant，只改 conditional weight `0/-0.4`，并按 `+200/+500/
 fall/guard 退化不可由拍面收益补偿。G05 保持 `Partial`；见
 [实验卷宗](../experiments/2026-07/EXP-P1-CONDITIONAL-FACE-GUIDANCE.md)与
 [训练操作](../operations/run_training.md)。
+
+#### Conditional 正式启动推翻 1-env warmup 授权语义
+
+同 source 的 Pod2 GPU1 `1 env × 2 updates` warmup 通过后，4096-env matched control 仍在 dynamic
+URDF import 阶段停止日志增长：PID=PGID `332786`，没有 scene-created marker、hard contract、checkpoint
+或 `Learning iteration`；claim digest 为 `caffd19e...da52`，实际 argv 与 claim 匹配。2026-07-14T12:10:05Z
+只向该精确 PGID 发出 `TERM`，30 秒未退出后只向同一 PGID 发出 `KILL`；最终 pre-marker rc137，日志、
+claim 和 launch sidecar 全部保留。serial fill 没有创建 treatment directory/claim，故没有第二个失败 arm。
+
+这不是 conditional Reward 负结果，而是启动 harness 反例：1-env 只可回答最小 cache/import 路径，不能
+代表 4096-env scene recipe。旧 source610 配对永久撤销；下一次 formal pair 必须换 fresh source/namespace，
+让 stale-log watchdog 随 source 固定，并先以相同 source/GPU/4096 environments/scene recipe 的非科学
+full-scene probe 越过 first iteration，同时写 trainer-owned runtime binding。上述能力和新运行证据闭合前，
+G05 继续 `Partial`。

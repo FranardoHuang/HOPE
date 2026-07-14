@@ -575,14 +575,20 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
     ready = [job for job in queue["jobs"] if job["status"] == "ready"]
     blocked = [job for job in queue["jobs"] if job["status"] == "blocked"]
     rejected = [job for job in queue["jobs"] if job["status"] == "rejected"]
-    assert len(ready) == 9
-    assert len(rejected) == 7
-    assert blocked == []
+    assert len(ready) == 7
+    assert len(rejected) == 8
+    assert [job["id"] for job in blocked] == ["fresh_c_conditional_face_w04"]
     assert queue["dispatch_pods"] == ["pod2"]
     conditional = {
-        job["id"]: job for job in ready if job["id"].startswith("fresh_c_conditional_face_")
+        job["id"]: job for job in queue["jobs"]
+        if job["id"].startswith("fresh_c_conditional_face_")
     }
-    assert conditional
+    assert {
+        job_id: job["status"] for job_id, job in conditional.items()
+    } == {
+        "fresh_c_conditional_face_matched_control": "rejected",
+        "fresh_c_conditional_face_w04": "blocked",
+    }
     assert all(
         job["resource"]["preferred_slot"] == "pod2/gpu1"
         for job in conditional.values()
@@ -662,16 +668,20 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
         else:
             assert conditional_weight == []
     plan = Q.cmd_plan(queue, live=False)
-    assert len(plan["assignments"]) == 9
+    assert len(plan["assignments"]) == 7
     assert [item["resource"] for item in plan["assignments"]] == [
         "pod2/gpu0", "pod2/gpu1", "pod2/gpu2",
         "pod2/gpu0", "pod2/gpu1", "pod2/gpu2",
-        "pod2/gpu0", "pod2/gpu1", "pod2/gpu2",
+        "pod2/gpu0",
     ]
     retry_ready = [job for job in ready if job["id"].endswith("_retry_v2")]
     assert len(retry_ready) == 7
     retry_by_id = {job["id"]: job for job in retry_ready}
-    for attempt1 in rejected:
+    retryable_rejected = [
+        job for job in rejected if f"{job['id']}_retry_v2" in retry_by_id
+    ]
+    assert len(retryable_rejected) == 7
+    for attempt1 in retryable_rejected:
         retry = retry_by_id[f"{attempt1['id']}_retry_v2"]
         assert retry["recipe"] == attempt1["recipe"]
         assert retry["motion"] == attempt1["motion"]
