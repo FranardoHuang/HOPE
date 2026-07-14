@@ -120,6 +120,14 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   [`dispatch_pods: [pod2]`](DEFINITIONS.md#dispatch-pods) 已使新 assignment 不可能
   落到 Pod1，普通 live snapshot 也不会读取 Pod1。
 
+  2026-07-15 03:17 CST 的 Yikang 训练快照：纯 A 继续在 Pod1 GPU0（W&B `5nso93g0`）；旧的
+  root-velocity B/AB/AB_FRESH 已在保全 finite checkpoint 后按 exact PGID 停止。物理
+  `pelvis_link` force 替代组使用 branch `yikang-standhit-0714` 的 exact source
+  `0db9a9a8bf27b3389080edef456551257c08a170`：B_FORCE 在 Pod1 GPU1（`e0jg8n35`）、AB_FORCE
+  在 Pod1 GPU2（`qfn5xlnr`），两者从原始 `ayzxv1ma/model_10600` 严格恢复；AB_FORCE_FRESH
+  在保留给 Yikang 的 Pod2 GPU0（`147kd92u`）从 iteration zero 启动。三条均为 8000 envs/seed 0，
+  10 秒 timeout 与 fall termination 未改；更长 recovery horizon 仍是独立 C 实验，不混入本矩阵。
+
   发射 harness 已在 `main` 收紧：YAML recipe 先拒绝重复/owned key 和 Hydra 控制语法，真实最终 argv 在
   claim 前做 no-Kit compose，run directory 原子创建，canonical claim digest 自动绑定 source/argv/
   预算/motion/bank/exam 并进入 checkpoint provenance。trainer-owned
