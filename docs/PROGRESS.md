@@ -14,7 +14,7 @@
 ## 2026-07-14
 
 - C3/D3 同卷 K100 one-shot consumer source gate 已绑定 paired L1 receipt、两份终档 exact attestation、
-  immutable schedule/activation 与 float `[1.0,-1.0]`；focused `22 passed`，static/source-plan rc0。尚未 SSH/
+  immutable schedule/activation 与 float `[1.0,-1.0]`；focused `28 passed`，static/source-plan rc0。尚未 SSH/
   attest/judge，L2、第二 seed、stop/promote 仍为 false。见[操作](operations/run_phase1_signed_face_c3d3_k100.md)。
 
 - C3/D3 在 Pod1 GPU1/GPU2 各只 claim 一次并自然到 `model_24.pt`；两条 hard-contract marker 与

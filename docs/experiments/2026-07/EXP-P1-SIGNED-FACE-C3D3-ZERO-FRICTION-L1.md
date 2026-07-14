@@ -94,7 +94,7 @@ checkpoint/hard/producer-claim/terminal SHA、generic attestor、现有 K100 sch
 `[1.0,-1.0]` 合同冻结到一个 one-shot manifest。它要求两份独立 attestation claim 都存在且可完整 replay，
 再把 checkpoint-adjacent `env.yaml` 复制到独立 eval root，顺序运行同一卷；不写训练 run、不发 signal。
 
-当前仍是 source gate：focused `22 passed`，`py_compile`、`static-validate`、`source-plan` rc0；没有 SSH、
+当前仍是 source gate：focused `28 passed`，`py_compile`、`static-validate`、`source-plan` rc0；没有 SSH、
 attest 或 judge。执行步骤见[同卷 K100 操作](../../operations/run_phase1_signed_face_c3d3_k100.md)。consumer
 产出的 paired count 只供后续人类 L2 decision contract 使用，本身仍把 L2、第二 seed、stop/promote、采用
 setting、Gate3、部署和真机全部固定为 false。

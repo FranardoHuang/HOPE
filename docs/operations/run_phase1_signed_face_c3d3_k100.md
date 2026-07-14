@@ -17,7 +17,7 @@ generic [`checkpoint attestor`](../DEFINITIONS.md)，随后
 | paired L1 receipt | `bb3cd749477861b1cd55f059ed3b23307784030dcad758db3a819c3c8a37bbde` |
 | schedule file / semantic / order | `f2777dcd...1ca` / `3ca4bdba...3365` / `09f778f2...bd0` |
 | activation file / content | `e0125b0e...bb4` / `533beb03...3d8`；face signs 必须是 JSON floats `[1.0,-1.0]` |
-| consumer manifest / runner | `1489a250...e5507d` / `671d10e7...a5ce` |
+| consumer manifest / runner | `cd1dfedc...f66088` / `f8515cf6...0a674` |
 
 完整路径在
 [`phase1_signed_face_c3d3_k100_execution_20260714.json`](../../configs/phase1_signed_face_c3d3_k100_execution_20260714.json)。

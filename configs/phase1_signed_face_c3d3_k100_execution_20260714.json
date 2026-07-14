@@ -10,7 +10,7 @@
   "source_bindings": {
     "runner": {
       "path": "scripts/run_phase1_signed_face_c3d3_k100.py",
-      "sha256": "671d10e78f80c0a64fd17f4ce2af19b7239905b394c8c796723d6929e47da5ce"
+      "sha256": "f8515cf612e3a48cd7315083cfc36b6e04e9701cdf7d8a7ee66c889aca00a674"
     },
     "checkpoint_attestor": {
       "path": "scripts/attest_phase1_signed_face_k100_checkpoint.py",

@@ -526,26 +526,38 @@ def _validate_attestation(
     cell = manifest["cells"][cell_id]
     request_spec = request["attestor_requests"][cell_id]
     evidence_content = evidence["content"]
-    evidence_checks = {
+    attestor_manifest_path = manifest["_resolved_sources"]["checkpoint_attestor_manifest"]
+    attestor_runner_path = manifest["_resolved_sources"]["checkpoint_attestor"]
+    evidence_expected = {
         "manifest_id": A.MANIFEST_ID,
+        "manifest_sha256": sha256_file(attestor_manifest_path),
+        "runner_sha256": sha256_file(attestor_runner_path),
         "request_id": attestor_request["request_id"],
         "request_file_sha256": request_spec["file_sha256"],
         "request_canonical_sha256": request_spec["content_sha256"],
         "status": "exact_checkpoint_inputs_attested_judge_not_started",
         "checkpoint": attestor_request["checkpoint"],
         "adjacent_hard_contract": attestor_request["adjacent_hard_contract"],
-        "producer_claim": attestor_request["checkpoint"]["producer_claim"],
-        "plant_contract_sha256": attestor_request["adjacent_hard_contract"]["plant_contract_sha256"],
-        "mjcf": attestor_request["mjcf"],
+        "source_checkout": runtime["source_checkout"],
+        "checkpoint_audit": runtime["checkpoint_audit"],
+        "producer_claim": runtime["producer_claim"],
+        "runtime": {
+            "checkpoint_python": runtime["checkpoint_python"],
+            "evaluator_python": runtime["evaluator_python"],
+        },
+        "mjcf": runtime["mjcf"],
+        "plant_contract_sha256": runtime["plant_contract_sha256"],
+        "plant_execution": manifest["_attestor_manifest"]["execution_semantics"]["plant_execution"],
+        "paper": runtime["paper"],
+        "receipt_correction": manifest["_attestor_manifest"]["receipt_correction"],
         "signed_face_contract": A.EXPECTED_FACE_CONTRACT,
         "evaluation_contract_exact": True,
         "signed_face_exact": True,
         "authorization": A.ATTESTATION_AUTHORIZATION,
     }
-    for key, expected in evidence_checks.items():
-        require_exact(evidence_content.get(key), expected, f"{cell_id} evidence {key}")
+    require_exact(evidence_content, evidence_expected, f"{cell_id} complete generic evidence")
     claim_content = claim["content"]
-    claim_checks = {
+    claim_expected = {
         "manifest_id": A.MANIFEST_ID,
         "request_id": attestor_request["request_id"],
         "checkpoint_sha256": cell["checkpoint"]["sha256"],
@@ -567,8 +579,7 @@ def _validate_attestation(
         "stop_or_promote_authorized": False,
         "real_robot_authorized": False,
     }
-    for key, expected in claim_checks.items():
-        require_exact(claim_content.get(key), expected, f"{cell_id} claim {key}")
+    require_exact(claim_content, claim_expected, f"{cell_id} complete generic claim")
     return {"runtime": runtime, "claim": claim, "evidence": evidence}
 
 

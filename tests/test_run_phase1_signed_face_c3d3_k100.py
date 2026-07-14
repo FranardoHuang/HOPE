@@ -319,6 +319,137 @@ def test_no_clobber_writer_preserves_first_artifact(tmp_path: Path):
     assert path.read_bytes() == before
 
 
+def _attestation_fixture(tmp_path: Path, monkeypatch, *, cell_id: str = "C3"):
+    pair_path, _ = _execution_request(tmp_path)
+    request = _load_execution_request(pair_path)
+    manifest = _manifest()
+    attestor_request = request["_attestor_requests"][cell_id]
+    runtime = {
+        "source_checkout": {
+            "path": str(ROOT), "commit": "a" * 40, "tree": "b" * 40, "clean": True,
+        },
+        "checkpoint_audit": {
+            "iter": 24,
+            "training_contract_schema_version": 3,
+            "training_contract_sha256": attestor_request["checkpoint"]["training_contract_sha256"],
+            "training_contract_lineage_exact": 1,
+            "training_launch_claim_sha256": attestor_request["checkpoint"]["producer_claim"]["canonical_sha256"],
+            "floating_tensor_count": 10,
+            "floating_elements": 100,
+            "nonfinite_floating_elements": 0,
+        },
+        "producer_claim": copy.deepcopy(attestor_request["checkpoint"]["producer_claim"]),
+        "checkpoint_python": copy.deepcopy(attestor_request["runtime"]["checkpoint_python"]["fingerprint"]),
+        "evaluator_python": copy.deepcopy(attestor_request["runtime"]["evaluator_python"]["fingerprint"]),
+        "mjcf": copy.deepcopy(attestor_request["mjcf"]),
+        "plant_contract_sha256": attestor_request["adjacent_hard_contract"]["plant_contract_sha256"],
+        "paper": {
+            "schedule": copy.deepcopy(manifest["_attestor_manifest"]["paper"]["schedule"]),
+            "activation": copy.deepcopy(manifest["_attestor_manifest"]["paper"]["activation"]),
+            "actual_signed_face_contract": copy.deepcopy(R.A.EXPECTED_FACE_CONTRACT),
+            "question_id_order_sha256": manifest["paper"]["schedule"]["question_id_order_sha256"],
+            "all_scheduled_attempts_in_denominator": True,
+        },
+    }
+    request_spec = request["attestor_requests"][cell_id]
+    evidence_content = {
+        "manifest_id": R.A.MANIFEST_ID,
+        "manifest_sha256": R.sha256_file(manifest["_resolved_sources"]["checkpoint_attestor_manifest"]),
+        "runner_sha256": R.sha256_file(manifest["_resolved_sources"]["checkpoint_attestor"]),
+        "request_id": attestor_request["request_id"],
+        "request_file_sha256": request_spec["file_sha256"],
+        "request_canonical_sha256": request_spec["content_sha256"],
+        "status": "exact_checkpoint_inputs_attested_judge_not_started",
+        "checkpoint": copy.deepcopy(attestor_request["checkpoint"]),
+        "adjacent_hard_contract": copy.deepcopy(attestor_request["adjacent_hard_contract"]),
+        "source_checkout": copy.deepcopy(runtime["source_checkout"]),
+        "checkpoint_audit": copy.deepcopy(runtime["checkpoint_audit"]),
+        "producer_claim": copy.deepcopy(runtime["producer_claim"]),
+        "runtime": {
+            "checkpoint_python": copy.deepcopy(runtime["checkpoint_python"]),
+            "evaluator_python": copy.deepcopy(runtime["evaluator_python"]),
+        },
+        "mjcf": copy.deepcopy(runtime["mjcf"]),
+        "plant_contract_sha256": runtime["plant_contract_sha256"],
+        "plant_execution": copy.deepcopy(manifest["_attestor_manifest"]["execution_semantics"]["plant_execution"]),
+        "paper": copy.deepcopy(runtime["paper"]),
+        "receipt_correction": copy.deepcopy(manifest["_attestor_manifest"]["receipt_correction"]),
+        "signed_face_contract": copy.deepcopy(R.A.EXPECTED_FACE_CONTRACT),
+        "evaluation_contract_exact": True,
+        "signed_face_exact": True,
+        "authorization": copy.deepcopy(R.A.ATTESTATION_AUTHORIZATION),
+    }
+    evidence = R.A.content_document(R.A.EVIDENCE_KIND, evidence_content)
+    evidence_spec = request["attestations"][cell_id]["evidence"]
+    evidence_spec["content_sha256"] = evidence["content_sha256"]
+    cell = manifest["cells"][cell_id]
+    claim_content = {
+        "manifest_id": R.A.MANIFEST_ID,
+        "request_id": attestor_request["request_id"],
+        "checkpoint_sha256": cell["checkpoint"]["sha256"],
+        "checkpoint_iteration": 24,
+        "training_contract_sha256": cell["adjacent_hard_contract"]["sha256"],
+        "producer_claim_canonical_sha256": cell["producer_claim_canonical_sha256"],
+        "plant_contract_sha256": runtime["plant_contract_sha256"],
+        "mjcf_sha256": attestor_request["mjcf"]["sha256"],
+        "schedule_file_sha256": manifest["paper"]["schedule"]["file_sha256"],
+        "schedule_semantic_sha256": manifest["paper"]["schedule"]["semantic_sha256"],
+        "schedule_question_id_order_sha256": manifest["paper"]["schedule"]["question_id_order_sha256"],
+        "activation_file_sha256": manifest["paper"]["activation"]["file_sha256"],
+        "activation_content_sha256": manifest["paper"]["activation"]["content_sha256"],
+        "evidence_path": evidence_spec["path"],
+        "evidence_file_sha256": evidence_spec["file_sha256"],
+        "evidence_content_sha256": evidence_spec["content_sha256"],
+        "status": "attested_not_executed_no_decision",
+        "judge_started": False,
+        "stop_or_promote_authorized": False,
+        "real_robot_authorized": False,
+    }
+    claim = R.A.content_document(R.A.CLAIM_KIND, claim_content)
+    request["attestations"][cell_id]["claim"]["content_sha256"] = claim["content_sha256"]
+    monkeypatch.setattr(R.A, "validate_runtime_request", lambda *_args, **_kwargs: runtime)
+    monkeypatch.setattr(
+        R,
+        "_validate_bound_json",
+        lambda _spec, label: (claim if " claim" in label else evidence, None),
+    )
+    return request, manifest, runtime, evidence, claim
+
+
+def test_generic_attestation_exact_full_documents_pass(tmp_path: Path, monkeypatch):
+    request, manifest, _, _, _ = _attestation_fixture(tmp_path, monkeypatch)
+    result = R._validate_attestation("C3", request, manifest)
+    assert result["evidence"]["content"]["manifest_sha256"] == R.sha256_file(
+        manifest["_resolved_sources"]["checkpoint_attestor_manifest"]
+    )
+
+
+@pytest.mark.parametrize("mutation", (
+    lambda content: content.pop("manifest_sha256"),
+    lambda content: content.__setitem__("unexpected", "forged"),
+    lambda content: content.__setitem__("request_file_sha256", "0" * 64),
+    lambda content: content.pop("runtime"),
+))
+def test_generic_evidence_rejects_missing_extra_or_forged_fields(
+    tmp_path: Path, monkeypatch, mutation
+):
+    request, manifest, _, evidence, _ = _attestation_fixture(tmp_path, monkeypatch)
+    mutation(evidence["content"])
+    evidence["content_sha256"] = R.canonical_sha256(evidence["content"])
+    request["attestations"]["C3"]["evidence"]["content_sha256"] = evidence["content_sha256"]
+    with pytest.raises(R.ContractError, match="complete generic evidence"):
+        R._validate_attestation("C3", request, manifest)
+
+
+def test_generic_claim_rejects_extra_field_even_when_rehashed(tmp_path: Path, monkeypatch):
+    request, manifest, _, _, claim = _attestation_fixture(tmp_path, monkeypatch)
+    claim["content"]["unexpected"] = "forged"
+    claim["content_sha256"] = R.canonical_sha256(claim["content"])
+    request["attestations"]["C3"]["claim"]["content_sha256"] = claim["content_sha256"]
+    with pytest.raises(R.ContractError, match="complete generic claim"):
+        R._validate_attestation("C3", request, manifest)
+
+
 def test_plan_and_execute_require_runtime_request(capsys):
     with pytest.raises(R.ContractError, match="requires --request"):
         R.main(["plan"])
