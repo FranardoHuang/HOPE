@@ -168,7 +168,11 @@ Follow-up note (2026-07-15, lateral-balance perturbation source gate; Gate remai
   transform identity into the receipt/application ledger.  Applying at torso COM only removes an
   explicit/link-local lever-arm torque; it does not imply zero whole-articulation `r x F` angular
   impulse or contact response.
-- Focused source verification is `24 passed`; this is E1 only.  The Isaac adapter, WORLD-to-BODY
+- The fourth source successor closes tensor-ownership holes: an adapter receives isolated clones
+  of mass/force/torque, so mutation followed by rejection or exception leaves caller tensors bit
+  exact; the scheduler keeps a private deep-cloned application ledger and every first/cached/
+  duplicate public return is another deep clone.  Adversarial mutation tests cover both paths.
+- Focused source verification is `26 passed`; this is E1 only.  The Isaac adapter, WORLD-to-BODY
   wrench transform, post-randomization total-mass reader, every-step full-batch zero overwrite,
   runtime ledger/logger, hard-contract/runner integration and content-addressed held-out papers are
   absent.  A same-GPU throughput comparison must retain at least `0.95x` environment-steps/s with
@@ -177,6 +181,10 @@ Follow-up note (2026-07-15, lateral-balance perturbation source gate; Gate remai
   MuJoCo reuse.  Both are pending.  The machine prereg remains `launch_authorized=false`; no Pod,
   trainer or simulator was touched.  See
   [EXP-P1-LATERAL-BALANCE-PERTURBATION](../experiments/2026-07/EXP-P1-LATERAL-BALANCE-PERTURBATION.md).
+- Replayed on current `origin/main@fbdad0d`, the focused suite is `26 passed`; the full 57-file
+  tracking suite is `837 passed, 22 skipped, 3 failed`.  All three failures reproduce unchanged on
+  `origin/main` (two existing MotionLoader `PosixPath` cases and one virtual-scorer tolerance case),
+  so no integration regression is attributed to this source gate.
 
 Follow-up note (2026-07-14, Pod2 `+200` activation audit; Gate remains `Partial`):
 

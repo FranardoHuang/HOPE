@@ -502,6 +502,31 @@ class LateralApplicationLedgerRow:
     nonzero_force_env_count: torch.Tensor
     commanded_normalized_impulse_abs_mps: torch.Tensor
 
+    def clone(self) -> "LateralApplicationLedgerRow":
+        """Deep-clone all tensor fields so callers cannot mutate scheduler-owned state."""
+
+        return LateralApplicationLedgerRow(
+            step_token=self.step_token,
+            body_name=self.body_name,
+            hard_safety_identity_sha256=self.hard_safety_identity_sha256,
+            world_to_backend_transform_identity_sha256=(
+                self.world_to_backend_transform_identity_sha256
+            ),
+            actual_total_mass_kg=self.actual_total_mass_kg.clone(),
+            commanded_normalized_accel_y_mps2=(
+                self.commanded_normalized_accel_y_mps2.clone()
+            ),
+            commanded_world_force_y_N=self.commanded_world_force_y_N.clone(),
+            commanded_world_impulse_y_Ns=self.commanded_world_impulse_y_Ns.clone(),
+            applied_force_mask=self.applied_force_mask.clone(),
+            selected_start_count=self.selected_start_count.clone(),
+            applied_nonzero_start_count=self.applied_nonzero_start_count.clone(),
+            nonzero_force_env_count=self.nonzero_force_env_count.clone(),
+            commanded_normalized_impulse_abs_mps=(
+                self.commanded_normalized_impulse_abs_mps.clone()
+            ),
+        )
+
 
 @runtime_checkable
 class LateralWrenchAdapter(Protocol):
@@ -969,7 +994,7 @@ class LateralPulseScheduler:
             self._last_application_ledger is not None
             and self._last_application_ledger.step_token == step_token
         ):
-            return self._last_application_ledger
+            return self._last_application_ledger.clone()
         return None
 
     def _validate_application_result(self, result: LateralPerturbationStep) -> None:
@@ -1125,8 +1150,8 @@ class LateralPulseScheduler:
                 applied_step_impulse.detach().clone()
             ),
         )
-        self._last_application_ledger = ledger
-        return ledger
+        self._last_application_ledger = ledger.clone()
+        return ledger.clone()
 
     def consume_counters(self) -> dict[str, torch.Tensor]:
         """Snapshot/reset counters while retaining step/application idempotence tokens."""
@@ -1288,11 +1313,14 @@ def dispatch_lateral_wrench_fail_closed(
     expected_total_mass_kg = total_mass_kg.detach().clone()
     expected_force_w = force_w.detach().clone()
     expected_torque_w = torque_w.detach().clone()
+    adapter_total_mass_kg = expected_total_mass_kg.clone()
+    adapter_force_w = expected_force_w.clone()
+    adapter_torque_w = expected_torque_w.clone()
     receipt = writer(
         step_token=result.step_token,
-        total_mass_kg=total_mass_kg,
-        force_w=force_w,
-        torque_w=torque_w,
+        total_mass_kg=adapter_total_mass_kg,
+        force_w=adapter_force_w,
+        torque_w=adapter_torque_w,
     )
     if not isinstance(receipt, LateralWrenchWriteReceipt):
         raise RuntimeError("lateral wrench adapter returned no typed write receipt")

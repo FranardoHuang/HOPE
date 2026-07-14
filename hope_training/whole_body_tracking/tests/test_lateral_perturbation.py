@@ -130,6 +130,23 @@ def _dispatch(scheduler, result, adapter, mass=None):
     )
 
 
+def _tensor_bits(value):
+    return value.detach().contiguous().reshape(-1).view(torch.uint8).clone()
+
+
+def _tensor_field_bits(dataclass_value):
+    return {
+        name: _tensor_bits(value)
+        for name, value in vars(dataclass_value).items()
+        if isinstance(value, torch.Tensor)
+    }
+
+
+def _assert_tensor_field_bits_unchanged(dataclass_value, expected):
+    for name, bits in expected.items():
+        assert torch.equal(_tensor_bits(getattr(dataclass_value, name)), bits), name
+
+
 def test_config_freezes_recovery_hold_torso_world_com_and_rejects_anytime():
     cfg = _cfg()
     assert cfg.eligibility_mode == "recovery_hold"
@@ -274,6 +291,16 @@ def test_preregistered_train_and_eval_boundaries_are_machine_readable_and_blocke
     assert throughput["required_before_launch"] is True
     assert throughput["minimum_environment_steps_per_second_ratio_vs_no_hook"] == 0.95
     assert throughput["host_device_sync_in_hot_path_allowed"] is False
+    runtime_adapter = payload["runtime_adapter"]
+    assert runtime_adapter[
+        "adapter_receives_only_isolated_mass_force_and_torque_clones"
+    ] is True
+    assert runtime_adapter[
+        "adapter_exception_or_rejection_must_leave_caller_tensors_bit_exact"
+    ] is True
+    assert runtime_adapter[
+        "scheduler_application_cache_is_private_and_every_public_ledger_return_is_a_deep_clone"
+    ] is True
     assert {
         "hard_safety_identity_sha256",
         "actual_total_articulation_mass_after_randomization_kg",
@@ -871,15 +898,110 @@ def test_receipt_cannot_relabel_actual_mass_world_force_or_transform_identity():
         ):
             total_mass_kg.add_(1.0)
             force_w[:, 0, 1].add_(1.0)
-            return super().overwrite_world_wrench_at_body_com(
+            receipt = super().overwrite_world_wrench_at_body_com(
                 step_token=step_token,
                 total_mass_kg=total_mass_kg,
                 force_w=force_w,
                 torque_w=torque_w,
             )
+            return replace(receipt, zero_torque=True)
 
     with pytest.raises(RuntimeError, match="actual_total_mass_kg does not match"):
         _dispatch(scheduler, result, _MutatingAdapter())
+
+
+def test_mutating_or_raising_adapter_cannot_change_any_caller_owned_tensor_bits():
+    class _MutateThenRejectAdapter(_RecordingAdapter):
+        def overwrite_world_wrench_at_body_com(
+            self, *, step_token, total_mass_kg, force_w, torque_w
+        ):
+            total_mass_kg.fill_(99.0)
+            force_w.fill_(17.0)
+            torque_w.fill_(-23.0)
+            receipt = super().overwrite_world_wrench_at_body_com(
+                step_token=step_token,
+                total_mass_kg=total_mass_kg,
+                force_w=force_w,
+                torque_w=torque_w,
+            )
+            return replace(receipt, zero_torque=True)
+
+    scheduler = L.LateralPulseScheduler(
+        2,
+        _cfg(policy_dt_s=0.04, opportunity_interval_steps=1, pulse_duration_steps=1),
+    )
+    result = scheduler.step(step_token=0, **_inputs(2, 0))
+    mass = torch.tensor([40.0, 55.0], dtype=torch.float32)
+    mass_bits = _tensor_bits(mass)
+    result_bits = _tensor_field_bits(result)
+    with pytest.raises(RuntimeError, match="actual_total_mass_kg does not match"):
+        _dispatch(scheduler, result, _MutateThenRejectAdapter(), mass=mass)
+    assert torch.equal(_tensor_bits(mass), mass_bits)
+    _assert_tensor_field_bits_unchanged(result, result_bits)
+
+    class _MutateThenRaiseAdapter(_RecordingAdapter):
+        def overwrite_world_wrench_at_body_com(
+            self, *, step_token, total_mass_kg, force_w, torque_w
+        ):
+            total_mass_kg.zero_()
+            force_w.fill_(float("inf"))
+            torque_w.fill_(float("nan"))
+            raise RuntimeError("adversarial adapter exception")
+
+    scheduler = L.LateralPulseScheduler(
+        2,
+        _cfg(policy_dt_s=0.04, opportunity_interval_steps=1, pulse_duration_steps=1),
+    )
+    result = scheduler.step(step_token=0, **_inputs(2, 0))
+    mass = torch.tensor([40.0, 55.0], dtype=torch.float32)
+    mass_bits = _tensor_bits(mass)
+    result_bits = _tensor_field_bits(result)
+    with pytest.raises(RuntimeError, match="adversarial adapter exception"):
+        _dispatch(scheduler, result, _MutateThenRaiseAdapter(), mass=mass)
+    assert torch.equal(_tensor_bits(mass), mass_bits)
+    _assert_tensor_field_bits_unchanged(result, result_bits)
+    # A rejected call cannot poison the same-step retry.
+    ledger = _dispatch(scheduler, result, _RecordingAdapter(), mass=mass)
+    assert torch.equal(ledger.actual_total_mass_kg, mass)
+
+
+def test_public_ledger_mutation_never_reaches_private_cache_or_duplicate_return():
+    scheduler = L.LateralPulseScheduler(
+        2,
+        _cfg(policy_dt_s=0.04, opportunity_interval_steps=1, pulse_duration_steps=1),
+        require_application_ack=True,
+    )
+    result = scheduler.step(step_token=0, **_inputs(2, 0))
+    mass = torch.tensor([40.0, 55.0], dtype=torch.float32)
+    adapter = _RecordingAdapter()
+    first = _dispatch(scheduler, result, adapter, mass=mass)
+    pristine = _tensor_field_bits(first)
+
+    for value in vars(first).values():
+        if isinstance(value, torch.Tensor):
+            if value.dtype == torch.bool:
+                value.logical_not_()
+            else:
+                value.fill_(123.0)
+
+    cached_public = scheduler.cached_application_ledger(0)
+    assert cached_public is not None
+    _assert_tensor_field_bits_unchanged(cached_public, pristine)
+    for value in vars(cached_public).values():
+        if isinstance(value, torch.Tensor):
+            if value.dtype == torch.bool:
+                value.logical_not_()
+            else:
+                value.zero_()
+
+    duplicate = _dispatch(scheduler, result, adapter, mass=mass)
+    _assert_tensor_field_bits_unchanged(duplicate, pristine)
+    assert len(adapter.calls) == 1
+    for name, bits in pristine.items():
+        first_tensor = getattr(first, name)
+        duplicate_tensor = getattr(duplicate, name)
+        assert first_tensor.data_ptr() != duplicate_tensor.data_ptr(), name
+        assert torch.equal(_tensor_bits(duplicate_tensor), bits), name
 
 
 def test_adapter_seam_writes_zero_after_pulse_and_accounts_once():
@@ -892,7 +1014,8 @@ def test_adapter_seam_writes_zero_after_pulse_and_accounts_once():
     first = scheduler.step(step_token=0, **_inputs(4, 0))
     ledger = _dispatch(scheduler, first, adapter)
     duplicate = _dispatch(scheduler, first, adapter)
-    assert duplicate is ledger
+    assert duplicate is not ledger
+    assert torch.equal(duplicate.actual_total_mass_kg, ledger.actual_total_mass_kg)
     assert len(adapter.calls) == 1
     second = scheduler.step(
         step_token=1,

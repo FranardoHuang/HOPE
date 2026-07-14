@@ -116,12 +116,15 @@
   第二轮红队 blocker 另新增不可由配置放大的 `0.15 m/s` 冲量、
   `2.0 m/s²` 加速度、`0.02--0.20 s` 时长和 `200 N` WORLD-Y force 硬包络，并在 derived duration、
   runtime dtype cast、mass multiplication 和最终 wrench 后逐层 fail closed；typed receipt/ledger 现在绑定
-  随机化后实际总质量、命令 WORLD force/impulse 和 transform identity，可复算质量归一化。源码专项增至
-  `24 passed`。torso COM 仅意味着 zero explicit/link-local lever-arm torque，不代表整机无 `r×F` 角冲量。
+  随机化后实际总质量、命令 WORLD force/impulse 和 transform identity，可复算质量归一化。adapter
+  只拿隔离 tensor 副本，scheduler 私有 ledger cache 与每个公开返回也深拷贝，两类篡改/异常攻击回归使
+  源码专项增至 `26 passed`。torso COM 仅意味着 zero explicit/link-local lever-arm torque，不代表整机无
+  `r×F` 角冲量。
   GPU throughput 门和不可变 ball×action-family held-out paper 仍 pending，故继续
   `launch_authorized=false`，未连接 Pod。见
   [实验卷宗](experiments/2026-07/EXP-P1-LATERAL-BALANCE-PERTURBATION.md)与
-  [G05](gates/G05_isaac_training_first_loop.md)。
+  [G05](gates/G05_isaac_training_first_loop.md)。最新 `origin/main@fbdad0d` 整合重放为
+  `837 passed, 22 skipped, 3 failed`；三项失败均在未改动路径且已在 main 原样复现，不是本分支新增回归。
 
 - Franco 反手拉 B 的 L0 V1 portable dry-run 已登记为数值合同负结果，而非动作失败：schema-2 只存
   post-FK normalized float32 root body pose，V1 再把它当原 free-joint qpos 注入并要求 byte equality；
