@@ -1699,5 +1699,6 @@ G05 保持 `Partial`。见[实验](../experiments/2026-07/EXP-P1-SIGNED-FACE-C3D
 GPU0=B2 signed-face guidance。两条都绑定同一父 checkpoint、clean source commit/tree、`512×25`、唯一
 `task.plant.zero_joint_friction=true` argv、outer claim、runtime zero-friction marker、31/31 zero hard
 contract、fresh namespace/empty GPU 和 no-retry；terminal 必须是 finite `model_13824.pt`、lineage0。
-focused `18 passed`，static/plan rc0；尚无 Pod runtime/checkpoint/行为结果，不授权 judge/L2/第二 seed/
+focused `21 passed`，static/plan rc0；actual-host 由两 Pod GPU0 UUID 而非 CLI 自报绑定；跨 Pod pair
+finalizer 完整比较两 hard contracts，并把 current-only 值锁到预注册值。尚无 Pod runtime/checkpoint/行为结果，不授权 judge/L2/第二 seed/
 晋级/真机，G05 保持 `Partial`。复现见[操作](../operations/run_phase1_signed_face_a2b2_l1.md)。

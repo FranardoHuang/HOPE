@@ -89,6 +89,52 @@ EXPECTED_HISTORICAL = {
     ),
 }
 
+EXPECTED_CURRENT_ONLY_SHARED = {
+    "motion_adaptive_alpha": 0.001,
+    "motion_adaptive_kernel_size": 1,
+    "motion_adaptive_lambda": 0.8,
+    "motion_adaptive_uniform_ratio": 0.1,
+    "motion_clip_switch_prob": 0.0,
+    "motion_event_timing": {"mode": "disabled"},
+    "motion_post_swing_buffer_size": 4096,
+    "motion_post_swing_min_fill": 256,
+    "motion_post_swing_min_hold": 25,
+    "motion_post_swing_start_prob": 0.25,
+    "motion_rsi_skip_settle_frames": 0,
+    "motion_stagger_hold_max_steps": 150,
+    "motion_stagger_initial_clock": False,
+    "racket_midswing_resample_prob": 0.0,
+    "racket_midswing_resample_tts_floor": 0.3,
+    "racket_strike_phase": 0.47,
+    "racket_strike_window_pos_s": None,
+    "racket_strike_window_s": 0.12,
+    "racket_strike_window_wide_s": None,
+    "racket_target_bias_per_swing": 0.0,
+    "racket_target_delay_steps": 2,
+    "racket_target_dropout_prob": 0.0,
+    "racket_target_jitter_pos_per_s": 0.0,
+    "racket_target_jitter_vel_per_s": 0.0,
+    "racket_target_noise_ar1_rho": 0.717,
+    "racket_target_noise_ar1_sigma": 0.0052,
+    "racket_target_noise_white": 0.0019,
+    "racket_target_post_strike_dropout_s": 0.0,
+}
+
+EXPECTED_GUIDANCE_BY_CELL = {
+    "A2": {
+        "position": {"weight": 0.0, "command_name": "racket_target", "d_max": 0.5},
+        "signed_face": {
+            "weight": 0.0, "command_name": "racket_target", "theta_max": math.pi,
+        },
+    },
+    "B2": {
+        "position": {"weight": 0.0, "command_name": "racket_target", "d_max": 0.5},
+        "signed_face": {
+            "weight": -0.4, "command_name": "racket_target", "theta_max": math.pi,
+        },
+    },
+}
+
 
 class ContractError(RuntimeError):
     """One preregistered source, runtime, or scientific invariant changed."""
@@ -286,6 +332,13 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
         "isaac_python": "/workspace/hope_isaac_venv/bin/python",
         "isaaclab_root": "/workspace/IsaacLab",
         "training_environment_sha256_by_cell": TRAINING_ENV_SHA256_BY_CELL,
+        "gpu0_uuid_by_host": {
+            "pod1": "GPU-889b1712-8d89-0536-5c9e-e79aae30523d",
+            "pod2": "GPU-449c8b80-f4a6-2d03-6e8a-b8ac68dea23d",
+        },
+        "pair_finalize_host": "pod1",
+        "pair_input_root": f"{ARTIFACT_ROOT}/pair_inputs/v1",
+        "pair_result_path": f"{RUN_ROOT}/paired_l1_result.json",
         "locked_launcher_relative_path": "scripts/launch_kit_training_locked.sh",
         "kit_boot_marker": HARD_CONTRACT_MARKER,
         "zero_friction_runtime_marker": ZERO_FRICTION_RUNTIME_MARKER,
@@ -427,6 +480,8 @@ def validate_manifest(manifest: dict[str, Any]) -> None:
             "racket_target_jitter_vel_per_s", "racket_target_noise_ar1_rho", "racket_target_noise_ar1_sigma",
             "racket_target_noise_white", "racket_target_post_strike_dropout_s",
         ],
+        "expected_current_only_shared_values": EXPECTED_CURRENT_ONLY_SHARED,
+        "expected_racket_guidance_reward_by_cell": EXPECTED_GUIDANCE_BY_CELL,
         "prohibited_claim": "A2/B2 descendants are never fresh/exact evidence and cannot be relabeled by adjacency to the current contract",
     }, "hot-start contract transition")
 
@@ -844,6 +899,12 @@ def build_environment(
 
 
 def gpu_snapshot(gpu: int) -> dict[str, Any]:
+    uuid_rows = subprocess.check_output(
+        ["nvidia-smi", "-i", str(gpu), "--query-gpu=uuid", "--format=csv,noheader,nounits"],
+        text=True,
+    ).strip().splitlines()
+    if len(uuid_rows) != 1 or not uuid_rows[0].startswith("GPU-"):
+        raise ContractError("cannot read exact GPU UUID")
     free = subprocess.check_output(
         ["nvidia-smi", "-i", str(gpu), "--query-gpu=memory.free", "--format=csv,noheader,nounits"],
         text=True,
@@ -860,7 +921,24 @@ def gpu_snapshot(gpu: int) -> dict[str, Any]:
         cmdline = Path(f"/proc/{pid}/cmdline")
         if cmdline.is_file() and b"scripts/train.py" in cmdline.read_bytes():
             trainers.append(pid)
-    return {"gpu": gpu, "free_memory_mib": int(free[0]), "compute_pids": pids, "trainer_pids": trainers}
+    return {
+        "gpu": gpu,
+        "uuid": uuid_rows[0].strip(),
+        "free_memory_mib": int(free[0]),
+        "compute_pids": pids,
+        "trainer_pids": trainers,
+    }
+
+
+def verify_gpu_host_identity(
+    manifest: dict[str, Any], host: str, snapshot: dict[str, Any]
+) -> None:
+    require_exact(snapshot.get("gpu"), 0, "host identity GPU index")
+    require_exact(
+        snapshot.get("uuid"),
+        manifest["runtime"]["gpu0_uuid_by_host"][host],
+        f"{host} hardware GPU0 UUID",
+    )
 
 
 def available_memory_mib() -> int:
@@ -949,6 +1027,7 @@ def verify_runtime(
         raise ContractError("host available memory is below the frozen floor")
     assigned_gpu = cells(manifest)[cell_id]["gpu"]
     gpu = gpu_snapshot(assigned_gpu)
+    verify_gpu_host_identity(manifest, observed_host, gpu)
     if require_empty_gpu and gpu["compute_pids"]:
         raise ContractError(
             f"{cell_id} assigned GPU{assigned_gpu} must be empty, found {gpu['compute_pids']}"
@@ -1142,7 +1221,8 @@ def verify_hard_contract(
 
 
 def verify_hot_transition(
-    parent: dict[str, Any], current: dict[str, Any], manifest: dict[str, Any]
+    parent: dict[str, Any], current: dict[str, Any],
+    manifest: dict[str, Any], cell_id: str,
 ) -> None:
     transition = manifest["hot_start_contract_transition"]
     bank_transition = transition["allowed_changed_common_fields"]["question_bank"]
@@ -1155,12 +1235,21 @@ def verify_hot_transition(
     allowed = set(transition["allowed_current_only_top_level_keys"])
     if current_keys - parent_keys != allowed:
         raise ContractError("current-only hard-contract field set changed")
+    expected_values = dict(transition["expected_current_only_shared_values"])
+    expected_values["racket_guidance_reward"] = transition[
+        "expected_racket_guidance_reward_by_cell"
+    ][cell_id]
+    require_exact(
+        {key: current[key] for key in allowed},
+        expected_values,
+        f"{cell_id} preregistered current-only hard-contract values",
+    )
     for key in parent_keys - {"question_bank"}:
         require_exact(current[key], parent[key], f"hot transition common field {key}")
 
 
 def verify_parent_to_current_contract(
-    current: dict[str, Any], manifest: dict[str, Any]
+    current: dict[str, Any], manifest: dict[str, Any], cell_id: str,
 ) -> dict[str, Any]:
     parent_spec = manifest["inputs"]["hot_parent_checkpoint"]
     parent_path = Path(parent_spec["adjacent_training_contract_path"])
@@ -1168,7 +1257,7 @@ def verify_parent_to_current_contract(
     if sha256_file(parent_path) != parent_spec["adjacent_training_contract_sha256"]:
         raise ContractError("hot parent adjacent hard-contract SHA changed")
     parent = read_json_object(parent_path, "hot parent adjacent hard contract")
-    verify_hot_transition(parent, current, manifest)
+    verify_hot_transition(parent, current, manifest, cell_id)
     return parent
 
 
@@ -1337,7 +1426,7 @@ def verify_launch_and_runtime(
     contract_stat = require_regular(contract_path, f"{cell_id} adjacent hard contract")
     require_exact(identity(contract_stat), runtime.get("hard_contract_file_identity"), f"{cell_id} hard contract identity")
     hard_sha, hard_contract = verify_hard_contract(contract_path, manifest, cell_id)
-    verify_parent_to_current_contract(hard_contract, manifest)
+    verify_parent_to_current_contract(hard_contract, manifest, cell_id)
     require_exact(runtime.get("hard_contract_sha256"), hard_sha, f"{cell_id} hard contract SHA")
     require_exact(runtime.get("checkpoint_absent_at_runtime_verification"), True, f"{cell_id} runtime checkpoint boundary")
     require_exact(
@@ -1576,7 +1665,7 @@ def launch_one(
     contract_path = run_dir / "params/training_contract.json"
     contract_stat = require_regular(contract_path, f"{cell_id} adjacent hard contract")
     hard_sha, hard_contract = verify_hard_contract(contract_path, manifest, cell_id)
-    verify_parent_to_current_contract(hard_contract, manifest)
+    verify_parent_to_current_contract(hard_contract, manifest, cell_id)
     checkpoint = run_dir / "model_13824.pt"
     if checkpoint.exists():
         raise ContractError(f"{cell_id} terminal checkpoint appeared before runtime verification")
@@ -1659,16 +1748,191 @@ def finalize_cell(
     }
 
 
+def pair_input_paths(manifest: dict[str, Any]) -> dict[str, dict[str, Path]]:
+    root = Path(manifest["runtime"]["pair_input_root"])
+    return {
+        cell_id: {
+            "terminal": root / cell_id / "terminal_result.json",
+            "hard": root / cell_id / "training_contract.json",
+        }
+        for cell_id in CELL_IDS
+    }
+
+
+def verify_copied_terminal_result(
+    manifest: dict[str, Any], manifest_path: Path, launcher_path: Path,
+    cell_id: str, terminal_path: Path, hard_path: Path,
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    terminal_stat = require_regular(terminal_path, f"{cell_id} copied terminal result")
+    hard_stat = require_regular(hard_path, f"{cell_id} copied hard contract")
+    if terminal_stat.st_mode & 0o222 or hard_stat.st_mode & 0o222:
+        raise ContractError(f"{cell_id} pair inputs must be read-only")
+    terminal = read_json_object(terminal_path, f"{cell_id} copied terminal result")
+    manifest_sha = sha256_file(manifest_path)
+    launcher_sha = sha256_file(launcher_path)
+    expected_scalars = {
+        "artifact_kind": "phase1_signed_face_a2_b2_l1_terminal_result",
+        "schema_version": 1,
+        "manifest_id": MANIFEST_ID,
+        "manifest_sha256": manifest_sha,
+        "launcher_sha256": launcher_sha,
+        "cell_id": cell_id,
+        "run_name": cells(manifest)[cell_id]["run_name"],
+        "training_source": expected_source_identity(manifest),
+        "optimization_recipe": optimization_recipe(manifest, cell_id),
+        "exact_trainer_natural_exit_observed": True,
+        "gpu_empty_terminal_barrier_observed": True,
+        "activation": False,
+        "judge": False,
+        "l2": False,
+        "second_seed": False,
+        "stop_or_promote": False,
+        "real_robot_commands_executed": False,
+    }
+    for key, expected in expected_scalars.items():
+        require_exact(terminal.get(key), expected, f"{cell_id} copied terminal {key}")
+    claim = terminal.get("training_launch_claim")
+    claim_sha = require_sha(
+        terminal.get("training_launch_claim_sha256"),
+        f"{cell_id} copied terminal claim SHA",
+    )
+    if not isinstance(claim, dict) or canonical_sha256(claim) != claim_sha:
+        raise ContractError(f"{cell_id} copied terminal claim digest changed")
+    directory = claim.get("claim_directory")
+    if not isinstance(directory, dict):
+        raise ContractError(f"{cell_id} copied terminal claim lacks directory identity")
+    expected_claim = build_claim(
+        manifest,
+        manifest_sha=manifest_sha,
+        launcher_sha=launcher_sha,
+        cell_id=cell_id,
+        arm_dir=expected_arm_paths(manifest, cell_id)["arm"],
+        arm_identity={
+            "device": directory.get("st_dev"),
+            "inode": directory.get("st_ino"),
+        },
+    )
+    require_exact(claim, expected_claim, f"{cell_id} copied terminal claim")
+    require_exact(
+        terminal.get("execution_lane"), expected_claim["execution_lane"],
+        f"{cell_id} copied terminal execution lane",
+    )
+    hard_sha = sha256_file(hard_path)
+    require_exact(
+        terminal.get("hard_contract_sha256"), hard_sha,
+        f"{cell_id} copied terminal hard-contract SHA",
+    )
+    audit = terminal.get("checkpoint_audit")
+    if not isinstance(audit, dict):
+        raise ContractError(f"{cell_id} copied terminal lacks checkpoint audit")
+    for key, expected in {
+        "iter": 13824,
+        "training_contract_schema_version": 3,
+        "training_contract_sha256": hard_sha,
+        "training_contract_lineage_exact": 0,
+        "training_launch_claim_sha256": claim_sha,
+        "nonfinite_floating_elements": 0,
+    }.items():
+        require_exact(audit.get(key), expected, f"{cell_id} copied checkpoint {key}")
+    if type(audit.get("floating_tensor_count")) is not int or audit["floating_tensor_count"] <= 0:
+        raise ContractError(f"{cell_id} copied checkpoint has no floating tensors")
+    if type(audit.get("floating_elements")) is not int or audit["floating_elements"] <= 0:
+        raise ContractError(f"{cell_id} copied checkpoint has no floating elements")
+    require_sha(
+        terminal.get("terminal_checkpoint_sha256"),
+        f"{cell_id} copied terminal checkpoint SHA",
+    )
+    hard_digest, hard = verify_hard_contract(hard_path, manifest, cell_id)
+    require_exact(hard_digest, hard_sha, f"{cell_id} copied hard digest")
+    verify_parent_to_current_contract(hard, manifest, cell_id)
+    return terminal, hard
+
+
+def finalize_pair(
+    manifest: dict[str, Any], manifest_path: Path, launcher_path: Path,
+    host: str,
+) -> dict[str, Any]:
+    require_exact(host, manifest["runtime"]["pair_finalize_host"], "pair finalize host")
+    if os.geteuid() != 0:
+        raise ContractError("finalize-pair requires root on the simulator Pod")
+    control = verify_external_control_location(manifest, manifest_path, launcher_path)
+    host_snapshot = gpu_snapshot(0)
+    verify_gpu_host_identity(manifest, host, host_snapshot)
+    inputs = pair_input_paths(manifest)
+    terminals: dict[str, dict[str, Any]] = {}
+    contracts: dict[str, dict[str, Any]] = {}
+    for cell_id in CELL_IDS:
+        terminals[cell_id], contracts[cell_id] = verify_copied_terminal_result(
+            manifest, manifest_path, launcher_path, cell_id,
+            inputs[cell_id]["terminal"], inputs[cell_id]["hard"],
+        )
+    verify_pair_contracts(contracts)
+    output = Path(manifest["runtime"]["pair_result_path"])
+    if output.exists():
+        raise ContractError("paired L1 result already exists; no-clobber finalization")
+    result = {
+        "artifact_kind": "phase1_signed_face_a2_b2_cross_pod_l1_pair_result",
+        "schema_version": 1,
+        "manifest_id": MANIFEST_ID,
+        "manifest_sha256": sha256_file(manifest_path),
+        "launcher_sha256": sha256_file(launcher_path),
+        "external_control": control,
+        "pair_finalize_host": host,
+        "pair_finalize_gpu0_uuid": host_snapshot["uuid"],
+        "ordered_cells": list(CELL_IDS),
+        "terminal_result_sha256_by_cell": {
+            cell_id: sha256_file(inputs[cell_id]["terminal"])
+            for cell_id in CELL_IDS
+        },
+        "hard_contract_sha256_by_cell": {
+            cell_id: sha256_file(inputs[cell_id]["hard"])
+            for cell_id in CELL_IDS
+        },
+        "terminal_checkpoint_sha256_by_cell": {
+            cell_id: terminals[cell_id]["terminal_checkpoint_sha256"]
+            for cell_id in CELL_IDS
+        },
+        "only_hard_contract_difference": "racket_guidance_reward.signed_face.weight",
+        "all_current_only_values_preregistered_and_pair_equal": True,
+        "both_model_13824_finite_iter13824_lineage0": True,
+        "activation": False,
+        "judge": False,
+        "l2": False,
+        "second_seed": False,
+        "stop_or_promote": False,
+        "real_robot_commands_executed": False,
+    }
+    write_json_exclusive(output, result)
+    return {
+        "status": "paired_l1_provenance_complete_no_decision",
+        "paired_result_path": str(output),
+        "paired_result_sha256": sha256_file(output),
+        "judge": False,
+        "l2": False,
+        "second_seed": False,
+    }
+
+
+def default_manifest_path(launcher: Path | None = None) -> Path:
+    launcher = Path(__file__).resolve() if launcher is None else launcher.resolve()
+    external = launcher.parent / "phase1_signed_face_a2b2_l1_prereg_20260714.json"
+    if external.is_file():
+        return external
+    return launcher.parents[1] / "configs/phase1_signed_face_a2b2_l1_prereg_20260714.json"
+
+
 def parser() -> argparse.ArgumentParser:
-    root = Path(__file__).resolve().parents[1]
     value = argparse.ArgumentParser(description=__doc__)
     value.add_argument(
         "--manifest", type=Path,
-        default=root / "configs/phase1_signed_face_a2b2_l1_prereg_20260714.json",
+        default=default_manifest_path(),
     )
     value.add_argument(
         "--mode",
-        choices=("plan", "static-validate", "validate-runtime", "launch-one", "finalize-cell"),
+        choices=(
+            "plan", "static-validate", "validate-runtime", "launch-one",
+            "finalize-cell", "finalize-pair",
+        ),
         default="plan",
     )
     value.add_argument("--cell", choices=CELL_IDS)
@@ -1717,6 +1981,12 @@ def main(argv: list[str] | None = None) -> int:
                 raise ContractError("finalize-cell requires exact --cell and --host")
             result = finalize_cell(
                 manifest, manifest_path, launcher_path, args.cell, args.host
+            )
+        elif args.mode == "finalize-pair":
+            if args.host is None:
+                raise ContractError("finalize-pair requires exact --host pod1")
+            result = finalize_pair(
+                manifest, manifest_path, launcher_path, args.host
             )
         print(json.dumps(result, sort_keys=True, indent=2, allow_nan=False))
     except (ContractError, OSError, subprocess.CalledProcessError) as exc:

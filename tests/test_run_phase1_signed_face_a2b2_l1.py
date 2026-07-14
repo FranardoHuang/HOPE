@@ -67,8 +67,13 @@ def bank_metadata(m):
 
 def parent_and_current(m, cell_id="A2"):
     current = hard_contract(m, cell_id)
-    for key in m["hot_start_contract_transition"]["allowed_current_only_top_level_keys"]:
-        current.setdefault(key, {"frozen": key})
+    current.update(copy.deepcopy(
+        m["hot_start_contract_transition"]["expected_current_only_shared_values"]
+    ))
+    current["racket_guidance_reward"] = copy.deepcopy(
+        m["hot_start_contract_transition"]["expected_racket_guidance_reward_by_cell"]
+        [cell_id]
+    )
     parent = copy.deepcopy(current)
     for key in m["hot_start_contract_transition"]["allowed_current_only_top_level_keys"]:
         parent.pop(key)
@@ -175,11 +180,15 @@ def test_hard_contract_requires_31_exact_zero_friction(tmp_path, bad):
 def test_core_hot_contract_diff_and_pair_axis_are_exact():
     m = manifest()
     parent, current = parent_and_current(m)
-    mod.verify_hot_transition(parent, current, m)
+    mod.verify_hot_transition(parent, current, m, "A2")
     broken = copy.deepcopy(current)
     broken["actor_obs_total_dim"] = 180
     with pytest.raises(mod.ContractError, match="actor_obs_total_dim"):
-        mod.verify_hot_transition(parent, broken, m)
+        mod.verify_hot_transition(parent, broken, m, "A2")
+    broken = copy.deepcopy(current)
+    broken["racket_target_delay_steps"] = 3
+    with pytest.raises(mod.ContractError, match="current-only"):
+        mod.verify_hot_transition(parent, broken, m, "A2")
     pair = {cell: hard_contract(m, cell) for cell in mod.CELL_IDS}
     mod.verify_pair_contracts(pair)
     pair["B2"]["actor_obs_total_dim"] = 180
@@ -202,6 +211,53 @@ def test_fresh_absence_wrong_host_and_preserved_failure_fail_closed(tmp_path):
         mod.select_one_shot_cell(m, "A2", "pod1")
 
 
+def test_host_identity_uses_actual_gpu_uuid_not_host_cli():
+    m = manifest()
+    pod1 = {"gpu": 0, "uuid": m["runtime"]["gpu0_uuid_by_host"]["pod1"]}
+    mod.verify_gpu_host_identity(m, "pod1", pod1)
+    with pytest.raises(mod.ContractError, match="hardware GPU0 UUID"):
+        mod.verify_gpu_host_identity(m, "pod2", pod1)
+
+
+def test_cross_pod_finalize_pair_is_runtime_reachable_and_fail_closed(
+    monkeypatch, tmp_path
+):
+    m = manifest()
+    m["runtime"]["pair_input_root"] = str(tmp_path / "inputs")
+    m["runtime"]["pair_result_path"] = str(tmp_path / "pair.json")
+    paths = mod.pair_input_paths(m)
+    for cell_id in mod.CELL_IDS:
+        paths[cell_id]["terminal"].parent.mkdir(parents=True)
+        paths[cell_id]["terminal"].write_text("{}\n", encoding="utf-8")
+        paths[cell_id]["hard"].write_text("{}\n", encoding="utf-8")
+    pair = {cell: hard_contract(m, cell) for cell in mod.CELL_IDS}
+    terminals = {
+        cell: {"terminal_checkpoint_sha256": ("a" if cell == "A2" else "b") * 64}
+        for cell in mod.CELL_IDS
+    }
+    monkeypatch.setattr(mod.os, "geteuid", lambda: 0)
+    monkeypatch.setattr(mod, "verify_external_control_location", lambda *a: {"exact": True})
+    monkeypatch.setattr(
+        mod, "gpu_snapshot",
+        lambda _gpu: {
+            "gpu": 0,
+            "uuid": m["runtime"]["gpu0_uuid_by_host"]["pod1"],
+            "compute_pids": [], "trainer_pids": [], "free_memory_mib": 32000,
+        },
+    )
+    monkeypatch.setattr(
+        mod, "verify_copied_terminal_result",
+        lambda _m, _mp, _lp, cell, _tp, _hp: (terminals[cell], pair[cell]),
+    )
+    result = mod.finalize_pair(m, MANIFEST, SCRIPT, "pod1")
+    assert result["status"] == "paired_l1_provenance_complete_no_decision"
+    written = json.loads((tmp_path / "pair.json").read_text())
+    assert written["only_hard_contract_difference"].endswith("signed_face.weight")
+    assert written["judge"] is False and written["l2"] is False
+    with pytest.raises(mod.ContractError, match="pair finalize host"):
+        mod.finalize_pair(m, MANIFEST, SCRIPT, "pod2")
+
+
 def test_runtime_control_is_external_read_only_and_cli_has_no_judge_retry(tmp_path):
     m = manifest()
     m["runtime"]["external_control_root"] = str(tmp_path)
@@ -216,10 +272,21 @@ def test_runtime_control_is_external_read_only_and_cli_has_no_judge_retry(tmp_pa
     with pytest.raises(mod.ContractError, match="read-only"):
         mod.verify_external_control_location(m, config, launcher)
     modes = set(mod.parser()._option_string_actions["--mode"].choices)
-    assert modes == {"plan", "static-validate", "validate-runtime", "launch-one", "finalize-cell"}
-    assert not ({"judge", "retry", "l2", "activate", "finalize-pair"} & modes)
+    assert modes == {
+        "plan", "static-validate", "validate-runtime", "launch-one",
+        "finalize-cell", "finalize-pair",
+    }
+    assert not ({"judge", "retry", "l2", "activate"} & modes)
     source = SCRIPT.read_text(encoding="utf-8")
     assert "os.kill(" not in source
     assert "subprocess.Popen" not in source
     assert "pkill" not in source
     assert "killall" not in source
+
+
+def test_external_control_default_manifest_is_sibling(tmp_path):
+    launcher = tmp_path / "run_phase1_signed_face_a2b2_l1.py"
+    launcher.write_text("# launcher\n", encoding="utf-8")
+    sibling = tmp_path / "phase1_signed_face_a2b2_l1_prereg_20260714.json"
+    sibling.write_text("{}\n", encoding="utf-8")
+    assert mod.default_manifest_path(launcher) == sibling

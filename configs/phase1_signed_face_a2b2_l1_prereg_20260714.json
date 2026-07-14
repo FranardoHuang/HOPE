@@ -31,6 +31,13 @@
       "A2": "0c89d8b3d34c49e14a1883bf81316367b1089520a65444cb9f03a82d9c007c9e",
       "B2": "82d3249107a2e5a826d1a3d8b3b59dc6c9e60555e415116256865178b7691992"
     },
+    "gpu0_uuid_by_host": {
+      "pod1": "GPU-889b1712-8d89-0536-5c9e-e79aae30523d",
+      "pod2": "GPU-449c8b80-f4a6-2d03-6e8a-b8ac68dea23d"
+    },
+    "pair_finalize_host": "pod1",
+    "pair_input_root": "/workspace/codexschema/phase1_signed_face_a2b2_hot_l1_v2_20260714/pair_inputs/v1",
+    "pair_result_path": "/workspace/codexschema/phase1_signed_face_a2b2_hot_l1_v2_20260714/runs/l1/paired_l1_result.json",
     "locked_launcher_relative_path": "scripts/launch_kit_training_locked.sh",
     "kit_boot_marker": "[train.py] hard training contract:",
     "zero_friction_runtime_marker": "[train.py] ZERO_FRICTION_RUNTIME_OK: 31/31 instantiated PhysX joint friction coefficients are exactly 0.0",
@@ -229,6 +236,46 @@
       "racket_target_jitter_vel_per_s", "racket_target_noise_ar1_rho", "racket_target_noise_ar1_sigma",
       "racket_target_noise_white", "racket_target_post_strike_dropout_s"
     ],
+    "expected_current_only_shared_values": {
+      "motion_adaptive_alpha": 0.001,
+      "motion_adaptive_kernel_size": 1,
+      "motion_adaptive_lambda": 0.8,
+      "motion_adaptive_uniform_ratio": 0.1,
+      "motion_clip_switch_prob": 0.0,
+      "motion_event_timing": {"mode": "disabled"},
+      "motion_post_swing_buffer_size": 4096,
+      "motion_post_swing_min_fill": 256,
+      "motion_post_swing_min_hold": 25,
+      "motion_post_swing_start_prob": 0.25,
+      "motion_rsi_skip_settle_frames": 0,
+      "motion_stagger_hold_max_steps": 150,
+      "motion_stagger_initial_clock": false,
+      "racket_midswing_resample_prob": 0.0,
+      "racket_midswing_resample_tts_floor": 0.3,
+      "racket_strike_phase": 0.47,
+      "racket_strike_window_pos_s": null,
+      "racket_strike_window_s": 0.12,
+      "racket_strike_window_wide_s": null,
+      "racket_target_bias_per_swing": 0.0,
+      "racket_target_delay_steps": 2,
+      "racket_target_dropout_prob": 0.0,
+      "racket_target_jitter_pos_per_s": 0.0,
+      "racket_target_jitter_vel_per_s": 0.0,
+      "racket_target_noise_ar1_rho": 0.717,
+      "racket_target_noise_ar1_sigma": 0.0052,
+      "racket_target_noise_white": 0.0019,
+      "racket_target_post_strike_dropout_s": 0.0
+    },
+    "expected_racket_guidance_reward_by_cell": {
+      "A2": {
+        "position": {"weight": 0.0, "command_name": "racket_target", "d_max": 0.5},
+        "signed_face": {"weight": 0.0, "command_name": "racket_target", "theta_max": 3.141592653589793}
+      },
+      "B2": {
+        "position": {"weight": 0.0, "command_name": "racket_target", "d_max": 0.5},
+        "signed_face": {"weight": -0.4, "command_name": "racket_target", "theta_max": 3.141592653589793}
+      }
+    },
     "prohibited_claim": "A2/B2 descendants are never fresh/exact evidence and cannot be relabeled by adjacency to the current contract"
   },
   "cells": [
