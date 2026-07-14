@@ -19,7 +19,7 @@ python3 scripts/audit_motion_schema2_vendor_l1_safety.py \
 
 成功行必须含 `source_exact=true runtime_audit=false no_write=true continuous_time_claim=false`。
 
-## Runtime 前置（两次 harness 假拒绝已修，等待 clean 重跑）
+## Runtime 前置与已完成结果
 
 首次 Pod2 CPU `dry-run` 在轨迹审计前因 private-name grounding helper 无法由 `sys.path` 导入而
 fail closed；没有 certificate，这不是动作安全结论。当前 plan 已绑定修复后的 exact-path loader：
@@ -28,8 +28,8 @@ helper 必须同时满足冻结 bytes/SHA、exact `__file__`，import body 失�
 `left_elbow_joint=1.1804603338 rad` 当成 GMR column 23 的 `left_ankle_pitch_joint`，产生精确
 `0.656861334 rad` 假超限；真正 ankle 是 runtime column 14 的 `-0.5744639635 rad`，L0 按名字验证为
 合法。当前 source 要求在 densify/range/qpos 前以两份冻结名字表建立 31-joint 双射并报告 permutation；
-不得直接按列重标、放宽 range 或改 B/C。合入后必须从 clean checkout 重跑本节命令，两个旧失败都不能
-当作行为结果复用。
+不得直接按列重标、放宽 range 或改 B/C。该修复已进入 `main@7dec698`，两个旧失败只保留为 harness
+证据，不能当作行为结果复用。
 
 只在 code review 后使用 exact CPU venv。必须先只读确认 L0 certificate 与 B NPZ 的 SHA 分别为
 `60c08185...afc6`、`e2eb99e6...d28cc`，checkout 中 validator/dependencies/MJCF closure 与 plan 全部
@@ -55,10 +55,11 @@ export PYTHONNOUSERSITE=1
 ```
 
 dry-run 会在启动 MuJoCo runtime 前检查输出 parent 已存在且不是 symlink，并用 `lexists` 拒绝普通文件、
-目录和 dangling symlink target。此前两次命令只形成上述 harness 负证据，均没有 certificate；修复后的
-命令尚未运行。只有新 dry-run 通过、逐帧 safety evidence 保存且另有显式发布授权后，
-才把最后一个参数改为 `audit` 执行唯一一次 `O_EXCL` 发布。通过只令 `vendor_l1_complete=true` 并解锁
-下一张桌网整轨门；dynamics/training/formal motion/hardware 仍 false。
+目录和 dangling symlink target。2026-07-15，修复后的 exact Pod2 命令已通过，并随后唯一执行一次
+`audit`；certificate SHA-256 为 `6840df34...db60`。其记录 1201 个 finite dense samples、self-hit hard
+events=`0`、racket/handle hard/warning events=`0/0`、minimum clearance=`0.1382918358 m`。已有 certificate
+现在必须按 no-clobber 规则拒绝再次运行；复现只能只读核 certificate/输入 SHA，不能删除重发。该证书只令
+`vendor_l1_complete=true` 并解锁下一张桌网整轨门；dynamics/training/formal motion/hardware 仍 false。
 
 ## 失败处理
 

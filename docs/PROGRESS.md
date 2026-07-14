@@ -13,6 +13,12 @@
 
 ## 2026-07-15
 
+- Franco 反手拉 B 的 vendor L1 已在 Pod2 exact `main@7dec698` 闭环：runtime→GMR/MJCF 31-joint
+  name permutation 修掉第二个 harness 假拒绝后，full `dry-run` 与唯一 `O_EXCL` audit 通过。1201 个
+  400 Hz 有限样本自碰/`<5 mm` 自打/warning=`0/0/0`，最小余隙 `0.1382918358 m`；certificate
+  SHA-256 `6840df34...db60`。这不是连续时间或动力学证明，只解锁独立桌网整轨门，训练仍 blocked。
+  详见 [B vendor L1 卷宗](experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-VENDOR-L1.md)。
+
 - S0/M0 exact-GMR attempt-v2 在 Pod2 clean detached `b75204d` 上再次证明 source/static 合同正常：两份
   `static-v2` PASS、plan SHA exact，两个 `exact_gmr_v2` root 与 shared consume lock 执行前后均 absent。
   runtime `inspect` 在进入 consumer 前以 rc127 fail closed，因为合同绑定的

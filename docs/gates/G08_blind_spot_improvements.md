@@ -555,9 +555,10 @@ root linear / quaternion shortest-arc slerp / joint linear 插值，把 `151 @ 5
 bisection midpoint；4.99/5.00/5.01 mm 边界反例已闭环。右腕/手/球拍安装链只从 `5 mm` proximity
 pairs 排除，enabled-robot 实际穿透仍 hard fail。dry-run 也必须在 runtime 前证明输出 parent 是已存在
 真实目录且 target absent/非 symlink。该有限扫掠
-**不是**数学连续时间证书，且不含桌网或动力学。当前专项 source gate 已过；两次 Pod2 runtime
-尝试都只形成下述 harness 负证据，尚未得到自碰/自打行为结果或 certificate，所以 G08 仍为 Partial，
-B 仍不得进入桌网、动力学或训练。见
+**不是**数学连续时间证书，且不含桌网或动力学。两次 Pod2 runtime 假拒绝修复后，exact
+`main@7dec698` 的 full `dry-run` 与唯一 no-clobber audit 已通过：1201 样本自碰/`<5 mm` 自打/warning
+=`0/0/0`，最小余隙 `0.1382918358 m`，certificate SHA-256 `6840df34...db60`。B 现只解锁独立桌网
+整轨门，动力学或训练仍不得越级；G08 继续 Partial。见
 [L1 卷宗](../experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-VENDOR-L1.md)和
 [L1 操作](../operations/run_motion_backhand_loop_b_vendor_l1_safety.md)。
 
@@ -575,7 +576,7 @@ helper。dense 704 正是 source frame 88；runtime column 23 的 elbow `1.18046
 `-0.5744639635 rad` 合法。L0 按 name→MJCF id 映射，故 certificate 的 `max_excess_rad=0.0` 与原动作
 并不矛盾。L1 已改为在 densify/range/qpos 前执行冻结名字表的 byte-preserving 31-joint 双射并报告
 permutation，duplicate/missing/extra/order-contract drift 均 fail closed；没有放宽 range、修改 B 或启用
-C。修复后 runtime 尚未重跑、certificate 仍不存在，因此 G08 继续 Partial。
+C。修复后 runtime/certificate 结果见本节上方；原 dense704 只作为假拒绝根因证据。
 
 S0/M0 的下一层 exact GMR 现已冻结成两批独立 machine plan。共享 consumer 不把 retarget body order 猜成
 canonical vendor body order，而是分开绑定两套 XML order，再用显式 31-joint bijection 接入 A3 FK。M0

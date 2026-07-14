@@ -47,8 +47,10 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   float32/50 Hz 差分可复现性合同不自洽。旧 v1 失败保留；v2 从 ULP 与差分误差解析推导，
   不放宽关节、地面、支撑脚或安全门。该 v2 已在 exact `main@cc1a2b1` 上通过 Pod2 full
   `dry-run` 与唯一 no-clobber formal audit，certificate SHA-256 为
-  `60c08185e15c80621063bcedc65b42b6b738a12caeb8fb4e40a4c197e7daafc6`。L0 现已闭合，下一门是
-  vendor L1 整轨自碰/球拍自打；桌网、动力学、RL 和真机仍未授权。
+  `60c08185e15c80621063bcedc65b42b6b738a12caeb8fb4e40a4c197e7daafc6`。vendor L1 随后在修复
+  runtime→GMR 关节顺序 adapter 后完成 Pod2 full dry-run 与唯一 no-clobber audit：1201 个 400 Hz
+  有限样本中自碰=`0`、拍/柄 `<5 mm` 自打=`0`、warning=`0`，最小余隙 `0.13829 m`；certificate
+  SHA-256 `6840df34...db60`。B 只解锁下一张整轨桌网余隙门；动力学、RL 和真机仍未授权，C 保持后备。
   高点拍压 S0 与四条横移 M0 不仅通过 exact GVHMR 帧数/finite 审计，还已完成真实五条 PT 的
   canonical-beta `inspect/consume`，non-beta 内容逐 bit 不变。exact GMR runtime source gate 也已进入
   `main` 并通过全回归；Pod2 的 v2 runtime `inspect` 已尝试，但在 consumer 前因合同写死的

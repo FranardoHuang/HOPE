@@ -1,10 +1,10 @@
 # EXP-MOTION-BACKHAND-LOOP-B-VENDOR-L1 — 反手拉 B 整轨自碰/自打门
 
-- 状态：source/static gate 通过；两次 exact runtime `dry-run` 先后抓到 import 与 joint-order adapter 假拒绝，两个 source 修复均已回归，等待 clean runtime 重跑；certificate 不存在
+- 状态：`complete_cpu_vendor_l1_safety_pass_downstream_blocked`
 - 阶段/轴：新动作库 / [`vendor L1 safety audit`](../../DEFINITIONS.md#motion-vendor-l1-safety)
 - 人类负责人：Franco
 - 执行者：Codex
-- 最高证据等级：E1（源码、预注册和合成反例；无真实 B L1 行为结果）
+- 最高证据等级：E2（exact Pod2 CPU dry-run + 唯一 no-clobber vendor L1 certificate）
 
 ## 问题与冻结输入
 
@@ -77,8 +77,16 @@ runtime names 逐关节查 MJCF id，所以 exact certificate 正确报告 `max_
 任一 self-collision、continuous-time flag/阈值放宽、C 混入、缺 output parent、dangling symlink target
 和 certificate overwrite 均 fail closed。
 
-两次失败都在真正自碰/自打结果前且没有 certificate。因此不能声称 B 已过或未过 vendor L1；G08 继续
-Partial。代码合入并由人复核后，下一步按
-[操作文档](../../operations/run_motion_backhand_loop_b_vendor_l1_safety.md)在 exact CPU runtime 先做一次
-`dry-run`，保全逐帧结果；只有通过且另有显式发布授权，才允许唯一 no-clobber `audit`。通过证书只解锁
-独立桌网整轨门，不直接解锁动力学或训练。
+两个 harness 根因进入 `main@7dec698` 后，Pod2 clean detached exact source 先通过 full `dry-run`，再执行
+唯一一次 `O_EXCL` audit。certificate SHA-256 为
+`6840df34a6aa6e5636192c705a8ecaa563f751658fe538df428bc317c858db60`，完成时间
+`2026-07-15 05:00 CST`。1201 个有限密扫样本中：
+
+- enabled robot self-collision hard events=`0`；
+- 球拍/拍柄—机器人 `<5 mm` hard events=`0`，`5–20 mm` warning=`0`；
+- 最小余隙 `0.1382918358 m`，发生在 source frame `75.0` 的拍柄—右肘 pair；
+- joint-order permutation 与两份完整名字表已写入 certificate，`mj_step_calls=0`；
+- `continuous_time_certificate=false`，不能把有限 400 Hz 扫描改写为数学连续时间证明。
+
+这令 `vendor_l1_complete=true`、`table_net_authorized=true`，但 dynamics/simulator/training/formal-motion/
+hardware 仍全 false。B 下一门是独立整轨桌网余隙，不直接进入 RL；C 继续保持未消费后备。
