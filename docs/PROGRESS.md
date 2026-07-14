@@ -27,6 +27,11 @@
   hydrate 从可覆盖 child 的 `rename(2)` 改成 exclusive root/directory + `link(2)` 原子 no-replace；并发
   sentinel 攻击 fail closed 且保留证据。focused `57 passed`、static/source-plan rc0；未新增 Pod runtime。
 
+- 动作专属轻量 YAML 训练队列完成 E1 source gate：一行绑定 motion、专属 train bank/exam、source、
+  base+delta、seed、预算、`+200/+500/+1000` milestone 与六卡资源；默认 dry-run，blocked 永不启动，
+  Pod1/Pod2 每卡容量 `4/3` 且先铺满六卡一圈。探索入口不做逐文件/pip/receipt hash；当前示例仍 blocked，
+  没有 Pod trainer 或行为结果。见[操作](operations/run_lean_training_queue.md)。
+
 - C3/D3 同卷 K100 one-shot consumer source gate 已绑定 paired L1 receipt、两份终档 exact attestation、
   immutable schedule/activation 与 float `[1.0,-1.0]`；focused `28 passed`，static/source-plan rc0。尚未 SSH/
   attest/judge，L2、第二 seed、stop/promote 仍为 false。见[操作](operations/run_phase1_signed_face_c3d3_k100.md)。

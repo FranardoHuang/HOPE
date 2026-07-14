@@ -1702,3 +1702,15 @@ contract、fresh namespace/empty GPU 和 no-retry；terminal 必须是 finite `m
 focused `27 passed`，static/plan rc0；actual-host 由两 Pod GPU0 UUID 而非 CLI 自报绑定；跨 Pod pair
 finalizer 完整比较两 hard contracts，并把 current-only 值锁到预注册值。尚无 Pod runtime/checkpoint/行为结果，不授权 judge/L2/第二 seed/
 晋级/真机，G05 保持 `Partial`。复现见[操作](../operations/run_phase1_signed_face_a2b2_l1.md)。
+
+### 2026-07-14 动作专属轻量 YAML 队列 source gate
+
+新增探索训练用的单一 YAML 入口：每条 job 把 action/motion、专属 train bank/immutable exam、source
+commit、base recipe/唯一 delta、seed、训练预算、checkpoint milestone 和资源策略放在一起。默认
+`plan/status/launch-next` 都是 dry-run；只有显式 simulation-only token 才能启动一条 `ready` job，
+`blocked` 永不调度。六卡先各放一条再进入下一圈，Pod1/Pod2 容量分别固定为每卡 `4/3`。
+
+探索入口只查 clean commit、必需资产存在、GPU 容量、重复 claim 与 Kit boot lock，不引入逐文件 SHA、
+pip/import closure 或 receipt；正式晋级/Gate3 仍用严格合同。focused 测试与静态检查见
+[操作文档](../operations/run_lean_training_queue.md)。当前示例全部 blocked，尚无 Pod/训练/行为结果，
+G05 保持 `Partial`。

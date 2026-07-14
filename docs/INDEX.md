@@ -95,6 +95,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | A0/A1 非击球臂模仿配对 | [`run_phase1_non_striking_arm_imitation_a01.md`](operations/run_phase1_non_striking_arm_imitation_a01.md) |
 | 统一队列、排序与算力 | [`runbook.md`](runbook.md) |
 | 共享 RunPod 作业 | [`run_on_runpod.md`](operations/run_on_runpod.md) |
+| 动作专属 YAML 训练队列 | [`run_lean_training_queue.md`](operations/run_lean_training_queue.md) |
 | Fresh model-4000 q50 考卷 | [`run_phase1_fresh_sz_model4000_seed_stability_q50.md`](operations/run_phase1_fresh_sz_model4000_seed_stability_q50.md) |
 | C3/D3 同卷 signed-face K100 | [`run_phase1_signed_face_c3d3_k100.md`](operations/run_phase1_signed_face_c3d3_k100.md) |
 | Signed-face K100 checkpoint 取证（不启动判卷） | [`run_phase1_signed_face_k100_checkpoint_attestor.md`](operations/run_phase1_signed_face_k100_checkpoint_attestor.md) |

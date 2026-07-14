@@ -1,0 +1,72 @@
+schema_version: 1
+simulation_only: true
+
+ssh:
+  key: ~/.ssh/id_ed25519_runpod
+
+# Fixed capacity policy from the team resource agreement.  The scheduler fills
+# one trainer on each of the six GPUs before starting the second round.
+pods:
+  pod1:
+    host: 162.43.172.171
+    port: 18333
+    gpus: [0, 1, 2]
+    max_trainers_per_gpu: 4
+  pod2:
+    host: 162.43.172.181
+    port: 13146
+    gpus: [0, 1, 2]
+    max_trainers_per_gpu: 3
+
+runner:
+  python: /workspace/hope_isaac_venv/bin/python
+  workdir_relative: hope_training/whole_body_tracking
+  setup_relative: setup_train_env.sh
+  entrypoint_relative: scripts/train.py
+  kit_launcher_relative: scripts/launch_kit_training_locked.sh
+  kit_boot_marker: "[train.py] hard training contract:"
+  kit_boot_timeout_seconds: 900
+
+jobs:
+  # Copy this row for one causal question.  Do not make one row cover multiple
+  # actions: motion, train bank, and immutable exam are one action-specific unit.
+  - id: franco_backhand_loop_b_reward_pilot
+    human_name: Franco 反手拉 B 的单 seed 奖励 pilot
+    action: franco_backhand_loop_b
+    status: blocked
+    blocker: L0/static safety certificate is not complete; this example must not launch
+    motion:
+      action: franco_backhand_loop_b
+      bindings:
+        motion_file: /workspace/codexschema/motions/franco_backhand_loop_b.schema2.npz
+    bank:
+      action: franco_backhand_loop_b
+      train_path: /workspace/codexschema/banks/franco_backhand_loop_b.train.npz
+      train_arg: ++task.racket.question_bank
+    exam:
+      action: franco_backhand_loop_b
+      path: /workspace/codexschema/exams/franco_backhand_loop_b.k100.schedule.json
+      family: franco_backhand_loop_b_k100
+    source:
+      checkout: /workspace/codexschema/nohope_training_explore
+      commit: "0000000000000000000000000000000000000000"
+    recipe:
+      base:
+        - task=HOPEPingPongVirtualBall
+        - algo=ppo
+        - headless=true
+        - logger=tensorboard
+        - video=false
+        - task.plant.zero_joint_friction=true
+      delta:
+        - task.rewards.racket_normal_weight=5.0
+    seed: 0
+    budget:
+      num_envs: 512
+      max_iterations: 1000
+      save_interval: 100
+    milestones: [200, 500, 1000]
+    resource:
+      policy: six_gpu_round_robin
+    run_name: franco_backhand_loop_b_reward_pilot_seed0
+    run_dir: /workspace/codexschema/lean_training_runs/franco_backhand_loop_b_reward_pilot_seed0
