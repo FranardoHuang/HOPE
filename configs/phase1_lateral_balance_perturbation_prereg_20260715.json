@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "experiment_id": "EXP-P1-LATERAL-BALANCE-PERTURBATION",
-  "status": "draft_source_gate_only",
+  "status": "draft_source_and_adapter_candidate_gate_only",
   "created_local_date": "2026-07-15",
   "human_owner": "franco",
   "executor": "Codex",
@@ -10,6 +10,8 @@
   "source": {
     "commit": null,
     "module": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/lateral_perturbation.py",
+    "isaac_runtime_candidate_module": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/isaac_lateral_perturbation.py",
+    "isaac_runtime_probe": "hope_training/whole_body_tracking/scripts/probe_lateral_perturbation_runtime.py",
     "runtime_hook_bound": false,
     "hard_contract_bound": false
   },
@@ -175,7 +177,7 @@
     "world_to_backend_transform_identity_sha256",
     "application_backend_identity_sha256",
     "adapter_side_effect_free_preflight_receipt",
-    "adapter_atomic_commit_completed",
+    "adapter_commit_returned_none_after_exact_readback",
     "remaining_pulse_steps",
     "interrupted_for_reset",
     "reset_interrupted_sampled_impulse_y_mps",
@@ -198,10 +200,19 @@
   ],
   "runtime_adapter": {
     "implemented": false,
-    "required_backend_api": "isaaclab.Articulation.set_external_force_and_torque",
+    "candidate_source_implemented": true,
+    "candidate_full_scene_probe_run": false,
+    "candidate_default_off_direct_delegation_tested": true,
+    "candidate_existing_external_wrench_owner_rejected_even_when_buffer_zero": true,
+    "candidate_between_step_live_buffer_identity_and_bytes_guarded": true,
+    "candidate_isaaclab_tag": "v2.1.0",
+    "candidate_isaaclab_commit": "21f7136325136ca3f6ca4e0a8125edffe5c24f7e",
+    "required_backend_api": "IsaacLab-2.1 Articulation external wrench buffers plus InteractiveScene.write_data_to_sim",
     "required_world_to_body_transform": true,
+    "required_world_to_body_refresh_before_every_physics_substep": true,
     "required_full_batch_torso_overwrite_every_step": true,
     "required_zero_write_for_inactive_environments": true,
+    "required_full_batch_zero_before_subset_reset_scene_write": true,
     "persistent_force_clearance_verified": false,
     "actual_total_mass_after_randomization_bound": false,
     "actual_application_ledger_bound": false,
@@ -217,12 +228,19 @@
     "source_owned_one_use_preflight_token_bound_by_object_identity": true,
     "same_step_cache_bound_to_live_backend_object_identity_and_backend_sha256": true,
     "preflight_is_side_effect_free_and_rejection_discards_staged_command": true,
-    "commit_is_atomic_no_throw_and_none_returning": true,
+    "commit_failure_is_terminal_and_blocks_retry_or_advance": true,
     "commit_contract_violation_marks_backend_dirty_unknown_and_blocks_retry": true,
     "bad_preflight_receipt_cannot_write_cache_or_unlock": true,
     "strike_and_window_interrupt_impulses_reconcile_per_environment": true,
     "source_seam_prewrite_and_precommit_validation_use_multiple_host_visible_completions": true,
-    "runtime_unlock_requires_eliminating_all_hot_path_syncs_or_redesigning_handoff": true
+    "runtime_unlock_requires_eliminating_all_hot_path_syncs_or_redesigning_handoff": true,
+    "command_buffer_readback_candidate_implemented": true,
+    "candidate_probe_requires_imported_modules_from_exact_clean_checkouts": true,
+    "candidate_probe_rejects_all_interval_event_terms": true,
+    "candidate_probe_reset_and_strike_coverage_must_be_nonvacuous": true,
+    "physx_solver_consumed_wrench_readback_available": false,
+    "solver_execution_must_not_be_inferred_from_command_buffer_readback": true,
+    "candidate_atomic_noexcept_claim": false
   },
   "runtime_unlock_gates": {
     "gpu_throughput": {
@@ -294,7 +312,7 @@
     ]
   },
   "decision_rule_draft": {
-    "activation_valid": "Both cells have eligible and selected opportunities; L0 applied_pulse_count equals 0; L1 applied_pulse_count is positive; every step has a side-effect-free preflight receipt followed by an atomic commit; sampled, commanded and applied impulse ledgers reconcile.",
+    "activation_valid": "Both cells have eligible and selected opportunities; L0 applied_pulse_count equals 0; L1 applied_pulse_count is positive; every step has a side-effect-free preflight receipt followed by a successful full-buffer commit and exact readback; any commit failure is terminal with no ledger, retry, advance, or next simulator step; sampled, commanded and applied impulse ledgers reconcile.",
     "clean_non_regression": "L1 clean physical-fall rate is no more than L0 plus 0.01 and next-strike composite is no less than L0 minus 0.03.",
     "strong_benefit": "L1 reduces strong balance_debt_auc and median recovery_time_to_ready by at least 10 percent and improves ready_set_by_deadline by at least 0.05 absolute, without increasing strong physical-fall rate.",
     "stance_and_margin_safety": "Against L0 on the same strong paper, L1 may not reduce the minimum capture-point or COM support margin by more than 0.01 m, increase p95 stance narrowing from each episode's initial width by more than 0.02 m, or increase p95 absolute foot-yaw error by more than 0.0872665 rad (5 deg).",
@@ -302,7 +320,8 @@
     "invalidation": "Any hard-envelope violation; non-finite derived or final wrench; missing actual mass, commanded WORLD force or transform identity receipt; non-torso force; X/Z force; explicit torque; direct root-velocity write; strike-window application; missing step token; missing zero overwrite; persistent force; or train/eval schedule leakage invalidates the run."
   },
   "explicit_non_claims": [
-    "No Isaac runtime hook has been implemented or run.",
+    "A default-off Isaac runtime candidate and strict probe harness exist in source, but neither has run in a full Isaac scene.",
+    "Isaac Lab 2.1 exposes no solver-consumed wrench getter; command-buffer readback is not solver-execution proof.",
     "No GPU throughput benchmark or immutable held-out ball-by-action-family paper exists.",
     "No simulator behaviour, training improvement, checkpoint, or deployment result exists.",
     "This is not the anytime perturbation axis and not a reward-composition result."

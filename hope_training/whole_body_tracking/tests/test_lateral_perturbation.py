@@ -83,7 +83,7 @@ class _RecordingAdapter:
     full_batch_overwrite = True
     inactive_zero_overwrite = True
     preflight_side_effect_free = True
-    commit_is_atomic_and_noexcept = True
+    commit_failure_is_terminal = True
     discard_is_noexcept = True
     world_to_backend_transform_identity_sha256 = "a" * 64
 
@@ -156,6 +156,7 @@ class _RecordingAdapter:
 
     def discard_preflighted_world_wrench_at_body_com(self, *, preflight_token):
         self._pending.pop(preflight_token, None)
+
 
 def _dispatch(scheduler, result, adapter, mass=None):
     if mass is None:
@@ -353,7 +354,7 @@ def test_preregistered_train_and_eval_boundaries_are_machine_readable_and_blocke
         "source_owned_one_use_preflight_token_bound_by_object_identity",
         "same_step_cache_bound_to_live_backend_object_identity_and_backend_sha256",
         "preflight_is_side_effect_free_and_rejection_discards_staged_command",
-        "commit_is_atomic_no_throw_and_none_returning",
+        "commit_failure_is_terminal_and_blocks_retry_or_advance",
         "commit_contract_violation_marks_backend_dirty_unknown_and_blocks_retry",
         "bad_preflight_receipt_cannot_write_cache_or_unlock",
         "strike_and_window_interrupt_impulses_reconcile_per_environment",
@@ -382,7 +383,7 @@ def test_preregistered_train_and_eval_boundaries_are_machine_readable_and_blocke
     } <= set(payload["activation_and_application_counters"])
     assert {
         "adapter_side_effect_free_preflight_receipt",
-        "adapter_atomic_commit_completed",
+        "adapter_commit_returned_none_after_exact_readback",
         "strike_interrupted_sampled_impulse_y_mps",
         "strike_abandoned_unapplied_impulse_y_mps",
         "window_interrupted_sampled_impulse_y_mps",
@@ -975,7 +976,7 @@ def test_stale_preflight_token_substitution_cannot_commit_old_staged_wrench():
     assert adapter._pending == {}
 
 
-def test_atomic_commit_contract_violation_marks_backend_dirty_and_blocks_retry():
+def test_commit_exception_marks_backend_dirty_and_blocks_retry():
     class _WriteThenRaiseAdapter(_RecordingAdapter):
         def commit_preflighted_world_wrench_at_body_com(self, *, preflight_token):
             super().commit_preflighted_world_wrench_at_body_com(
@@ -1002,7 +1003,7 @@ def test_atomic_commit_contract_violation_marks_backend_dirty_and_blocks_retry()
         scheduler.step(step_token=0, **_inputs(2, 0))
 
 
-def test_non_none_atomic_commit_result_is_dirty_unknown_not_success():
+def test_non_none_commit_result_is_dirty_unknown_not_success():
     class _WriteThenReturnAdapter(_RecordingAdapter):
         def commit_preflighted_world_wrench_at_body_com(self, *, preflight_token):
             super().commit_preflighted_world_wrench_at_body_com(

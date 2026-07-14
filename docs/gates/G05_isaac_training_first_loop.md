@@ -238,6 +238,45 @@ Follow-up note (2026-07-15, Yikang RallyV9 reach/balance matrix; Gate remains `P
   iteration 322. Launch health is not a generalization, balance, or Gate3 result; matched-iteration
   evaluation and formal fork export remain pending.
 
+Follow-up note (2026-07-15, lateral-balance Isaac adapter candidate; Gate remains `Partial`):
+
+- A default-off, explicit-probe-only candidate now binds the merged scheduler transaction to the
+  exact Isaac Lab `v2.1.0@21f7136325136ca3f6ca4e0a8125edffe5c24f7e` articulation buffers.
+  It is not registered in an existing task or trainer.  Disabled mode directly delegates
+  `env.step(action)` and does not inspect the environment.
+- Source audit established that Isaac Lab stores the command in a BODY-frame buffer and calls
+  `scene.write_data_to_sim()` before every physics substep.  A WORLD-Y perturbation is therefore
+  transformed from the current torso quaternion before every substep, not once per policy tick.
+  The candidate exclusively owns the complete robot external-wrench buffer, reads current
+  post-randomization masses from PhysX, writes only `torso_link`, synchronizes each CUDA submission
+  and performs exact command-buffer readback after the scene-write boundary.
+- Strike/window interruption writes zero in the same policy step.  When a subset reset causes the
+  extra full-scene write in `ManagerBasedRLEnv`, the candidate clears the **whole batch** before
+  that write so non-reset environments cannot receive an extra off-decimation wrench; any valid
+  continuing pulse is reconstructed on the next policy step.  Receipts reconcile episode
+  index/step, eligibility, strike window, application ledger, every physics substep and reset.
+- Isaac Lab exposes no getter for the wrench actually consumed by the PhysX solver.  The candidate
+  therefore advertises `solver_execution_readback_available=false`; synchronized command-buffer
+  evidence is not called solver-execution evidence.  The strict full-scene probe exists but was
+  not run in this source change, and the correctness-first implementation still contains hot-path
+  host synchronizations.  Full-scene lifecycle, independent dynamics response, same-GPU
+  throughput/no-host-sync redesign, runner/hard-contract binding and held-out behavior all remain
+  open.  `launch_authorized=false` and `runtime_adapter.implemented=false` are unchanged.
+- Adapter red-team removed two potential false greens before handoff.  An all-zero buffer with
+  `has_external_wrench=true` is now treated as an existing owner, every later policy step compares
+  both live buffer identities and full bytes to the adapter's prior readback, and the probe binds
+  all EventManager terms while rejecting interval terms.  Also, Python tensor copies/CUDA sync are
+  no longer self-declared atomic/noexcept: any commit exception or malformed return writes no
+  scheduler ledger, permanently dirties the backend and forbids retry/advance/another simulator
+  step.  Probe aggregate reset/strike claims are non-vacuous; missing natural reset or active-pulse
+  strike interruption yields an explicit lifecycle-uncovered status and null reset evidence.
+- Focused scheduler plus adapter verification is `48 passed` (`36` scheduler/transaction and `12`
+  adapter/hook lifecycle mocks); `py_compile`, JSON parsing and whitespace checks are part of the
+  source handoff.  No Pod, simulator, trainer or hardware was touched.  Reproduction and the exact
+  probe boundary are in
+  [EXP-P1-LATERAL-BALANCE-PERTURBATION](../experiments/2026-07/EXP-P1-LATERAL-BALANCE-PERTURBATION.md)
+  and [run_lateral_perturbation_runtime_probe](../operations/run_lateral_perturbation_runtime_probe.md).
+
 Follow-up note (2026-07-15, lateral-balance perturbation source gate; Gate remains `Partial`):
 
 - The proposed sparse-balance-data ablation now has a source-only, recovery/hold-exclusive pulse
@@ -267,10 +306,11 @@ Follow-up note (2026-07-15, lateral-balance perturbation source gate; Gate remai
   been removed; only a non-public dispatch identity capability can prepare/commit bookkeeping, and
   every expected tensor/mask/count is derived from the scheduler-private canonical step.  The
   adapter seam is now two-phase: a source-token-bound, side-effect-free typed preflight is fully
-  validated before a single atomic/no-throw/`None`-returning full-buffer commit.  Rejected preflight
+  validated before a full-buffer commit/readback whose successful result is `None`.  Rejected preflight
   is discarded with backend/cache/counters unchanged and permits a canonical retry on the same
-  step token with a fresh preflight nonce.  Commit exceptions or non-`None` results permanently
-  mark the backend `DIRTY/UNKNOWN` and block ordinary retry/advance.  Same-step cache also binds
+  step token with a fresh preflight nonce.  Python/CUDA copies are not self-certified as atomic or
+  noexcept: commit exceptions or non-`None` results permanently mark the backend `DIRTY/UNKNOWN`
+  before any ledger and block retry/advance/next simulator step.  Same-step cache also binds
   transform SHA, backend SHA and the live backend object token, so another same-SHA adapter cannot
   borrow an old application ledger.
 - Mass/cast/final-wrench, cached duplicate and preflight receipt/mask safety predicates are all

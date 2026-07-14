@@ -7,7 +7,8 @@
 - 人类负责人：franco
 - 执行者：Codex
 - 复核/决策负责人：franco
-- 最高证据等级：[E1（源码与单测）](../../DEFINITIONS.md#证据和文档术语)；没有 runtime、训练或行为证据
+- 最高证据等级：[E1（源码与单测）](../../DEFINITIONS.md#证据和文档术语)；已有 Isaac adapter/hook
+  候选源码和 mock 生命周期证据，但没有 full-scene runtime、训练或行为证据
 - 创建日期/最后复核日期：2026-07-15 / 2026-07-15
 
 ## 问题与第一性原理假设
@@ -97,27 +98,51 @@ WORLD-Y force 每层都必须 finite 且在界内；极大但 finite 的输入�
 ## 源码边界与激活账本
 
 [`lateral_perturbation.py`](../../../hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/lateral_perturbation.py)
-现在只提供两个部分：
+提供 simulator-independent scheduler 与事务 seam：
 
 1. 纯 torch 的确定性 scheduler/kernel：Random123 已知向量一致的 `Philox4x32-10`、有界随机幅度、
    左右对称、完整安全窗、同一步幂等、漏步 fail closed、reset 中断冲量对账。
-2. fail-closed adapter seam：把归一化脉冲按**整机总质量**变成 WORLD-Y 躯干质心力，并要求未来 adapter
-   先做不改 live buffer 的 typed preflight，再执行一次不抛异常、只返回 `None` 的原子 full-buffer commit。
+2. fail-closed adapter seam：把归一化脉冲按**整机总质量**变成 WORLD-Y 躯干质心力，并要求 adapter
+   先做不改 live buffer 的 typed preflight，再做完整 buffer overwrite + 同步 exact readback；成功只返回
+   `None`。Python/CUDA copy 不能自证 atomic/noexcept；异常/非 `None` 必须在 application ledger 前把 backend
+   标成 terminal `DIRTY/UNKNOWN`，禁止 retry、advance 或下一 simulator step。
    preflight receipt 与 application ledger 必须逐环境绑定随机化后实际总质量、runtime dtype 的 normalized
    acceleration、命令 WORLD-Y force/impulse、applied mask、WORLD→backend transform SHA、adapter/backend
    SHA 与 live backend object token；同一步换质量、力、transform 或 live backend 都会拒绝。详细接口见
    [横向扰动 adapter 事务合同](../../interfaces/lateral_perturbation_adapter_contract.md)。
 
-本提交**没有**把 seam 接进 Isaac。Isaac Lab 2.1 的实际接口接线仍需确认 body-frame wrench 语义、
-WORLD→BODY 变换、`write_data_to_sim` 时序、随机化后总质量读取和 zero overwrite 生命周期；在这些通过
-真实 runtime smoke 前不得写成 launch-ready。
+[`isaac_lateral_perturbation.py`](../../../hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/isaac_lateral_perturbation.py)
+新增了一个**默认关闭、只供显式 probe 使用**的 Isaac Lab `v2.1.0` 候选 adapter/hook；它固定到
+Isaac Lab commit `21f7136325136ca3f6ca4e0a8125edffe5c24f7e`，目前没有接进任何现役 task
+registration 或 trainer。源码审计得到一个关键时序结论：`set_external_force_and_torque` 只更新 BODY-frame
+buffer，而 `scene.write_data_to_sim()` 会在每个 physics substep 前提交它；所以 WORLD-Y 力不能只在 policy
+tick 开头变换一次，必须在每个 substep 用当时的 `body_quat_w` 重新做 WORLD→BODY 变换。候选 hook 因此：
+
+- 从 `root_physx_view.get_masses()` 读取当前随机化后全身质量；只占用完整 robot external-wrench buffer，发现
+  既有非零 owner 或全零但 `has_external_wrench=true` 的 owner 都拒绝；后续每步还对账两个 buffer identity
+  和 prior-readback bytes，EventManager interval term 在 probe 中一律拒绝；
+- 每个 policy step 完整覆盖 force/torque buffer，每个 physics substep 前重新变换，scene write 后做 CUDA
+  completion sync 和 exact command-buffer readback；单纯 async enqueue 不能算完成；
+- strike/window closure 当步提交全零；发生 subset reset 时，Isaac 的额外全-scene write 前先把**全部环境**
+  清零，避免非 reset 环境在 decimation 之外多吃一次力，并在下一 policy step 按账重新施加仍有效的 pulse；
+- 逐步回执绑定 episode index/step、strike/eligible/safe-window、application ledger、每个 substep 的 WORLD/BODY
+  命令、同步态和 reset 清零态；`enabled=false` 直接原样委托 `env.step(action)`，不读取环境字段。
+
+诚实边界不变：Isaac Lab 2.1 没有可读取“PhysX solver 实际消费的 wrench”的 getter。当前回执只证明 exact
+command buffer 穿过同步的 scene-write boundary，**不证明 solver execution**；而且正确性优先路径仍有 host
+sync，尚未过同 GPU throughput/no-host-sync 门。严格 full-scene probe 已提供在
+[`probe_lateral_perturbation_runtime.py`](../../../hope_training/whole_body_tracking/scripts/probe_lateral_perturbation_runtime.py)，
+但本记录没有运行它，`launch_authorized` 与 `runtime_adapter.implemented` 继续为 `false`。操作边界和命令见
+[`run_lateral_perturbation_runtime_probe.md`](../../operations/run_lateral_perturbation_runtime_probe.md)。
+probe 的 reset/strike 结论必须非空覆盖：若零动作场景没有自然 reset 或 active-pulse strike interruption，
+结果只能写 command-buffer-only/lifecycle-uncovered，reset evidence 为 `null`，不能用 vacuous all-pass 升级。
 
 首轮机器账至少同时记录：
 
 - opportunity 总数、eligible denominator、selected numerator；
 - 左/右选择数与采样强度总量；
 - 非零 pulse command、strike-window skip、窗口不足、意外中断；
-- 每步 side-effect-free preflight receipt、原子 commit 完成态、真正 applied pulse 数与 applied impulse 总量；
+- 每步 side-effect-free preflight receipt、成功 full-buffer commit/readback、真正 applied pulse 数与 applied impulse 总量；
 - 每次 pulse 的 environment/episode/step、采样 `Δv_y`、命令 `F_y`、剩余 pulse step 和 adapter ledger。
 - potential 随机 draw、共同随机题 SHA，以及 reset/strike/window 截断时各自的
   sampled/commanded/applied/abandoned 五项冲量账。
@@ -182,17 +207,19 @@ application 三本冲量账对不上时，结果无效而不是“近似通过�
 
 | 运行（人话名 + `run_name`） | 状态 | Checkpoint/seed | 证据 | 结果产物 | 有效性说明 |
 | --- | --- | --- | --- | --- | --- |
-| 零推力对照 `pending` | 未启动 | seed 1 | 无 | 无 | runtime adapter 与 hard contract 未绑定 |
-| 横向脉冲 treatment `pending` | 未启动 | seed 1 | 无 | 无 | runtime adapter 与 hard contract 未绑定 |
+| 零推力对照 `pending` | 未启动 | seed 1 | source/mock only | 无 | 候选 adapter 未过 full-scene/solver-response/throughput，hard contract 未绑定 |
+| 横向脉冲 treatment `pending` | 未启动 | seed 1 | source/mock only | 无 | 候选 adapter 未过 full-scene/solver-response/throughput，hard contract 未绑定 |
 
 ## 决定
 
 - 决定：`inconclusive`
-- 理由：第一性原理设计和纯源码门成立，但没有 Isaac adapter、full-step application ledger、训练或留出考试。
+- 理由：第一性原理设计、scheduler 和 Isaac adapter/hook 候选的源码/mock 生命周期成立，但没有 full-scene
+  runtime、solver-response、throughput、训练或留出考试。
 - 是否已纳入当前 setting：`no`
-- 局限/下一个 gate：实现独立 Isaac adapter 与 runner/hard-contract 接线；验证随机化后整机质量、真实
-  WORLD-Y 脉冲积分和 pulse 后连续零写；完成 GPU throughput 门并冻结内容寻址的 ball×action-family
-  held-out paper；再做小环境 runtime smoke，最后才生成可点火配对 queue。
+- 局限/下一个 gate：在 exact clean Isaac Lab `v2.1.0` 环境先运行一次独立、无 trainer 的 strict full-scene
+  probe，核验实际 mass/body/frame/write/reset 生命周期；再以独立 dynamics-response probe 证明非零力确实进入
+  solver，并完成 GPU throughput/no-host-sync 重设计。之后才允许绑定 runner/hard contract、冻结内容寻址的
+  ball×action-family held-out paper 并生成配对 queue。
 
 ## 复现源码证据
 
@@ -200,10 +227,11 @@ application 三本冲量账对不上时，结果无效而不是“近似通过�
 
 ```bash
 /Users/Franco/opt/anaconda3/envs/fast/bin/python -m pytest -q \
-  hope_training/whole_body_tracking/tests/test_lateral_perturbation.py
+  hope_training/whole_body_tracking/tests/test_lateral_perturbation.py \
+  hope_training/whole_body_tracking/tests/test_isaac_lateral_perturbation.py
 ```
 
-当前聚焦测试为 `36 passed`。测试覆盖：Random123 Philox 零 counter/key 已知向量、四个 domain 与相邻 seed 的分桶
+当前聚焦测试为 `48 passed`。原有 `36` 项覆盖：Random123 Philox 零 counter/key 已知向量、四个 domain 与相邻 seed 的分桶
 均匀性和交叉相关性、`L0/L1` potential draw/SHA 完全相同、左右对称与幅度界、recovery/hold eligibility、
 strike skip、完整 pulse 冲量、reset 中断五项账、同一步幂等、漏步/漏 application receipt fail closed、
 按总质量缩放、质量/力/transform typed ledger，对极大 finite impulse、duration overflow、cast overflow、
@@ -212,7 +240,12 @@ mass×acceleration overflow 和 force 上限的负测、X/Z force 与 torque 恒
 neutered、坏 receipt/stale token、不同 live backend cache replay、commit 抛异常/非 `None` 返回等攻击回归；
 所有 precommit 失败都满足 backend write=0/cache 空，side-effect-free staging 会 discard，同 tick 可安全重试。
 strike/window/reset 的逐环境 sampled/commanded/applied/abandoned 恒等式及中断 tick backend 全零也已覆盖。
-它不证明真实 simulator adapter 满足 side-effect-free/atomic 合同，也没有 GPU throughput 证据。
+新增 `12` 项 dependency-light adapter/hook 测试覆盖：随机化后真实总质量读取、WORLD→BODY 变换、只写
+`torso_link`、既有 wrench owner 与 between-step writer 拒绝、live force/torque buffer identity 漂移拒绝、默认关闭的直接委托、
+全 articulation scene-write 后读回、四个 substep 按变化中的 torso yaw 重新变换、
+scene-write 后同步 readback、strike 当步全零、subset reset 的额外 scene write 全 batch 清零及下一步 episode/
+impulse 对账、T1 event-driven 时序拒绝，以及所有回执显式 `solver_execution_readback_available=false`。
+它不证明真实 simulator 满足相同 lifecycle，也没有 solver-response 或 GPU throughput 证据。
 
 在最新 `origin/main@107102f` 重放后，whole-body tracking 的 57 文件整合套件为
 `847 passed, 22 skipped, 3 failed`。三项失败是未改动路径中的既有主线基线：MotionLoader 对两个

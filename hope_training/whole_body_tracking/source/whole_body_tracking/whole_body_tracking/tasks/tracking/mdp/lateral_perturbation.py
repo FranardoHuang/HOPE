@@ -11,12 +11,16 @@ whole-robot momentum disturbance::
 This module is intentionally split in two:
 
 * :class:`LateralPulseScheduler` is a pure, deterministic torch scheduler/kernel.
-* :func:`dispatch_lateral_wrench_fail_closed` is an adapter seam.  No Isaac adapter is supplied
-  here.  A future runtime adapter must transform the WORLD wrench to the frame expected by
-  ``Articulation.set_external_force_and_torque``, stage without changing the live buffer, return
-  an exact preflight receipt, then atomically overwrite the complete torso wrench buffer on every
-  simulator step (including zeros after a pulse) at the COM.  Until that adapter and its ledger
-  consumer are implemented and tested, this feature is not runtime-ready.
+* :func:`dispatch_lateral_wrench_fail_closed` is an adapter seam.  The separate
+  ``isaac_lateral_perturbation`` module contains a default-off Isaac Lab 2.1 runtime candidate;
+  it remains probe-only because the exact full-scene and throughput gates have not run and Isaac
+  exposes no solver-consumed wrench getter.  A reviewed runtime adapter must transform the WORLD
+  wrench to the frame expected by ``Articulation.set_external_force_and_torque``, stage without
+  changing the live buffer, return an exact preflight receipt, then overwrite/read back the
+  complete articulation wrench buffer on every simulator step (including zeros after a pulse),
+  with only the torso COM row nonzero.  A failed commit is terminal and must never be followed by
+  another simulator step.  Until that adapter and its ledger consumer are implemented and tested,
+  this feature is not runtime-ready.
 
 Keeping the seam explicit prevents two common but scientifically invalid shortcuts: using
 ``push_by_setting_velocity`` instead of a force, or leaving a non-zero external-force buffer alive
@@ -472,7 +476,9 @@ class LateralWrenchPreflightReceipt:
     """Side-effect-free preflight receipt returned by a reviewed simulator adapter.
 
     Receipt validation happens before the backend write.  ``preflight_token`` is opaque adapter
-    state consumed by one reviewed, atomic, no-throw commit.  This receipt is not itself proof of
+    state consumed by one reviewed full-buffer commit.  A successful commit must return ``None``
+    only after its exact readback; a commit exception makes the backend terminal/unknown and may
+    never be retried or followed by a simulator step.  This receipt is not itself proof of
     simulator behaviour; a runtime consumer must persist the resulting application ledger.
     """
 
@@ -619,7 +625,7 @@ class _PreparedApplication:
 
 @runtime_checkable
 class LateralWrenchAdapter(Protocol):
-    """Seam a future Isaac adapter must implement; no implementation is provided here."""
+    """Transaction seam implemented by a separately reviewed simulator adapter."""
 
     body_name: str
     input_force_frame: str
@@ -627,7 +633,7 @@ class LateralWrenchAdapter(Protocol):
     full_batch_overwrite: bool
     inactive_zero_overwrite: bool
     preflight_side_effect_free: bool
-    commit_is_atomic_and_noexcept: bool
+    commit_failure_is_terminal: bool
     discard_is_noexcept: bool
     world_to_backend_transform_identity_sha256: str
     application_backend_identity_sha256: str
@@ -647,7 +653,7 @@ class LateralWrenchAdapter(Protocol):
     def commit_preflighted_world_wrench_at_body_com(
         self, *, preflight_token: object
     ) -> None:
-        """Atomically commit one staged full-buffer overwrite and never raise."""
+        """Commit/read back the full buffer, or raise and make the run terminal."""
 
     def discard_preflighted_world_wrench_at_body_com(
         self, *, preflight_token: object
@@ -835,8 +841,8 @@ class LateralPulseScheduler:
         )
         if self._application_dirty_unknown:
             raise RuntimeError(
-                "lateral adapter backend is DIRTY/UNKNOWN after an atomic-commit contract "
-                "violation; terminate the run or use an independently reviewed zero-clear/readback"
+                "lateral adapter backend is DIRTY/UNKNOWN after a commit failure; terminate the "
+                "run without another simulator step or use an independently reviewed zero-clear/readback"
             )
         if self._last_step_token == step_token:
             if not self._same_inputs(current_inputs):
@@ -1467,10 +1473,10 @@ class LateralPulseScheduler:
     def _commit_application_from_dispatch(
         self, *, capability: object, prepared: _PreparedApplication
     ) -> LateralApplicationLedgerRow:
-        """Commit preallocated bookkeeping after the adapter's atomic no-throw write.
+        """Commit preallocated bookkeeping after the adapter's successful exact-readback write.
 
-        All checks and allocations occur in ``_prepare_application_from_dispatch``.  Once the
-        backend commit returns, this method performs only scheduler-owned deterministic updates.
+        Once the backend commit returns ``None``, this method performs only scheduler-owned
+        deterministic updates.  An exception never reaches this method.
         """
 
         self._require_dispatch_capability(capability)
@@ -1497,7 +1503,7 @@ class LateralPulseScheduler:
     def _mark_application_dirty_from_dispatch(
         self, *, capability: object, prepared: _PreparedApplication
     ) -> None:
-        """Permanently block ordinary retry after an impossible no-throw commit violation."""
+        """Permanently block retry/advance after any failed or malformed commit."""
 
         self._require_dispatch_capability(capability)
         if self._pending_application is not prepared:
@@ -1592,19 +1598,21 @@ def dispatch_lateral_wrench_fail_closed(
     total_mass_kg: torch.Tensor,
     adapter: LateralWrenchAdapter,
 ) -> LateralApplicationLedgerRow:
-    """Preflight, atomically write/clear, then ledger one full-batch torso wrench.
+    """Preflight, synchronously write/read back, then ledger one full-batch torso wrench.
 
     The adapter uses a two-phase contract: preflight may stage data but must not touch the live
-    backend buffer; after every receipt predicate is synchronously visible, commit performs one
-    atomic full-buffer overwrite and is required never to throw.  The commit is called even when
-    every force is zero, which clears a completed or interrupted pulse.
+    backend buffer; after every receipt predicate is synchronously visible, commit performs a
+    full-buffer overwrite and exact readback.  A successful commit returns ``None``.  Any exception
+    is terminal: no application ledger is written, ordinary retry/advance is blocked, and the
+    simulator must not step again.  The commit is called even when every force is zero, which
+    clears a completed or interrupted pulse.
     """
 
     # This must happen before even inspecting the adapter.  The public dataclass is frozen, but its
     # tensors are mutable; deriving a wrench from it before comparison would let an attacker cause
-    # a physical write and only then trip the acknowledgement check.  All command derivation below
-    # uses the scheduler-owned canonical clone returned here.
-    canonical_result = scheduler._validated_private_result_clone(result)
+    # a physical write and only then trip the acknowledgement check.  The scheduler-owned
+    # preparation path repeats this validation before it derives the command.
+    scheduler._validated_private_result_clone(result)
 
     required_adapter_fields = {
         "body_name": scheduler.cfg.body_name,
@@ -1613,7 +1621,7 @@ def dispatch_lateral_wrench_fail_closed(
         "full_batch_overwrite": True,
         "inactive_zero_overwrite": True,
         "preflight_side_effect_free": True,
-        "commit_is_atomic_and_noexcept": True,
+        "commit_failure_is_terminal": True,
         "discard_is_noexcept": True,
     }
     for name, expected in required_adapter_fields.items():
@@ -1740,18 +1748,18 @@ def dispatch_lateral_wrench_fail_closed(
             )
         raise
 
-    # No validation, allocation, receipt processing or caller-controlled branch may occur between
-    # this atomic no-throw commit and the preallocated scheduler bookkeeping below.
+    # The adapter performs its own synchronous readback.  Only a successful None return can reach
+    # the preallocated scheduler bookkeeping below; any exception permanently dirties the step.
     try:
         commit_result = commit(preflight_token=prepared.nonce)
-    except BaseException as exc:  # pragma: no cover - a reviewed adapter contract violation
+    except BaseException as exc:
         scheduler._mark_application_dirty_from_dispatch(
             capability=_DISPATCH_APPLICATION_CAPABILITY,
             prepared=prepared,
         )
         raise RuntimeError(
-            "adapter violated atomic no-throw commit; backend state is DIRTY/UNKNOWN and the run "
-            "must terminate or use an independently reviewed zero-clear/readback path"
+            "adapter commit failed; backend state is DIRTY/UNKNOWN and the run must terminate "
+            "without another simulator step or use an independently reviewed zero-clear/readback path"
         ) from exc
     if commit_result is not None:
         scheduler._mark_application_dirty_from_dispatch(
@@ -1759,8 +1767,8 @@ def dispatch_lateral_wrench_fail_closed(
             prepared=prepared,
         )
         raise RuntimeError(
-            "adapter violated the None-returning atomic commit contract; backend state is "
-            "DIRTY/UNKNOWN"
+            "adapter commit returned a non-None result; backend state is DIRTY/UNKNOWN and the "
+            "run must terminate without another simulator step"
         )
     return scheduler._commit_application_from_dispatch(
         capability=_DISPATCH_APPLICATION_CAPABILITY,
