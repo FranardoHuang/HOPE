@@ -41,7 +41,7 @@ instrumentation_closure:
   telemetry_reference_source_commit: 312669c7bd61f8fc8f5ea99c8e94cfc3ffae9b94
   required_main_hardening_commit: f00c49779174fdf43f861a29ceda0f985be04f31
   telemetry_reference_contains_required_main_hardening: false
-  successor_source_commit: 1f0ca12ffd556dc25f6313df559fe0fd6eaee9e6
+  successor_source_commit: 0f3900a612863faf326dca6ad3e8d38bfe8df3c9
   successor_contains_required_main_hardening: true
   source_rebind_required_before_launch: false
   strict_full_scene_terminal_probe_required_after_rebind: true
@@ -59,6 +59,9 @@ instrumentation_closure:
       eligible_denominator: Live/motion/v2_strike_window_eligible_imitation_sample_count
       scaled_window_numerator: Live/motion/v2_quarter_scaled_strike_window_imitation_sample_count
     base_deceleration:
+      sampling_phase: reward_manager_before_reset_and_command
+      probe_weight: 1.0
+      probe_return: exact_zero_per_environment
       eligible_denominator: Live/racket_target/base_decel_eligible_sample_count
       raw_kernel_sum: Live/racket_target/base_decel_raw_kernel_sum
       raw_kernel_nonzero_numerator: Live/racket_target/base_decel_raw_kernel_nonzero_sample_count
@@ -111,7 +114,7 @@ decision_contract:
       scaled_window_must_equal_eligible: true
     base_deceleration:
       telemetry_status_in_successor_source: instrumented_probe_pending
-      denominator_definition: pre_strike_and_not_in_hold_environment_samples_observed_every_command_step
+      denominator_definition: pre_strike_and_not_in_hold_environment_samples_observed_every_reward_manager_step_before_reset_and_command
       eligible_denominator_metric: Live/racket_target/base_decel_eligible_sample_count
       raw_kernel_sum_metric: Live/racket_target/base_decel_raw_kernel_sum
       raw_kernel_nonzero_numerator_metric: Live/racket_target/base_decel_raw_kernel_nonzero_sample_count
@@ -173,8 +176,8 @@ x-exam: &exam
 # Exact activation successor.  It is source-complete but still intentionally
 # blocked until this exact checkout passes its own strict full-scene probe.
 x-source: &source
-  checkout: /workspace/codexschema/nohope_p1_activation_successor_1f0ca12
-  commit: 1f0ca12ffd556dc25f6313df559fe0fd6eaee9e6
+  checkout: /workspace/codexschema/nohope_p1_activation_successor_0f3900a
+  commit: 0f3900a612863faf326dca6ad3e8d38bfe8df3c9
   ignored_runtime_asset:
     target_relative_path: hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
     donor:
@@ -278,7 +281,7 @@ jobs:
     human_name: fresh C V1 plus V2 measurement replacement control with base deceleration off
     action: *action
     status: blocked
-    blocker: exact activation successor 1f0ca12 is pinned but has not passed its own strict full-scene terminal probe; keep both cells blocked and launch_authorized false
+    blocker: exact same-phase activation successor 0f3900a is pinned but has not passed its own strict full-scene terminal probe; keep both cells blocked and launch_authorized false
     motion: *motion
     bank: *bank
     exam: *exam

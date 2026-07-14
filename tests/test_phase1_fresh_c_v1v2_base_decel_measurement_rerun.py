@@ -52,7 +52,7 @@ def test_replacement_pair_is_pod2_only_and_cannot_plan_a_launch():
     assert queue["dispatch_pods"] == ["pod2"]
     assert {slot.pod for slot in Q.slots(queue)} == {"pod2"}
     assert [job["status"] for job in queue["jobs"]] == ["blocked", "blocked"]
-    assert all("1f0ca12" in job["blocker"] for job in queue["jobs"])
+    assert all("0f3900a" in job["blocker"] for job in queue["jobs"])
     assert all("strict full-scene terminal probe" in job["blocker"] for job in queue["jobs"])
     assert Q.cmd_plan(queue, live=False)["assignments"] == []
 
@@ -69,7 +69,7 @@ def test_successor_source_contains_required_lineages_but_probe_is_still_pending(
     )
     assert closure["telemetry_reference_contains_required_main_hardening"] is False
     assert closure["successor_source_commit"] == (
-        "1f0ca12ffd556dc25f6313df559fe0fd6eaee9e6"
+        "0f3900a612863faf326dca6ad3e8d38bfe8df3c9"
     )
     assert closure["successor_contains_required_main_hardening"] is True
     assert closure["source_rebind_required_before_launch"] is False
@@ -77,10 +77,10 @@ def test_successor_source_contains_required_lineages_but_probe_is_still_pending(
 
     for job in queue["jobs"]:
         assert job["source"]["checkout"] == (
-            "/workspace/codexschema/nohope_p1_activation_successor_1f0ca12"
+            "/workspace/codexschema/nohope_p1_activation_successor_0f3900a"
         )
         assert job["source"]["commit"] == (
-            "1f0ca12ffd556dc25f6313df559fe0fd6eaee9e6"
+            "0f3900a612863faf326dca6ad3e8d38bfe8df3c9"
         )
         assert job["runtime_binding"] is True
 
@@ -125,6 +125,9 @@ def test_successor_exposes_exact_v1_v2_and_raw_base_deceleration_metrics():
             "scaled_window_numerator": "Live/motion/v2_quarter_scaled_strike_window_imitation_sample_count",
         },
         "base_deceleration": {
+            "sampling_phase": "reward_manager_before_reset_and_command",
+            "probe_weight": 1.0,
+            "probe_return": "exact_zero_per_environment",
             "eligible_denominator": "Live/racket_target/base_decel_eligible_sample_count",
             "raw_kernel_sum": "Live/racket_target/base_decel_raw_kernel_sum",
             "raw_kernel_nonzero_numerator": "Live/racket_target/base_decel_raw_kernel_nonzero_sample_count",
@@ -161,7 +164,14 @@ def test_successor_exposes_exact_v1_v2_and_raw_base_deceleration_metrics():
     ] is True
     base = activation["base_deceleration"]
     assert base["denominator_definition"] == (
-        "pre_strike_and_not_in_hold_environment_samples_observed_every_command_step"
+        "pre_strike_and_not_in_hold_environment_samples_observed_every_reward_manager_step_before_reset_and_command"
+    )
+    assert metrics["base_deceleration"]["sampling_phase"] == (
+        "reward_manager_before_reset_and_command"
+    )
+    assert metrics["base_deceleration"]["probe_weight"] == 1.0
+    assert metrics["base_deceleration"]["probe_return"] == (
+        "exact_zero_per_environment"
     )
     assert base["raw_kernel_nonzero_must_not_exceed_eligible"] is True
     for arm in ("control", "treatment"):

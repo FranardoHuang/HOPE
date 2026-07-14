@@ -1,6 +1,6 @@
 # EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN — 补齐 activation 后重跑底座减速配对
 
-- 状态：`blocked`（activation successor `1f0ca12...` 已 exact 绑定；等待该 source 自己的 strict
+- 状态：`blocked`（same-phase activation successor `0f3900a...` 已 exact 绑定；等待该 source 自己的 strict
   full-scene terminal probe）
 - 阶段/轴：Phase 1 fresh C；组合击球精度下，底座减速是否有净收益
 - 集成小目标：保住击球精度信号，同时降低击球前底座速度与击球前摔倒率
@@ -50,8 +50,8 @@ eligible denominator。只看配置回显、`Live/Reward/base_decel` 的全环�
 
 `312669c...` 的父提交是 `2171302...`，不是 main hardening `f00c497...` 的后代，因此仍只作历史 telemetry
 reference。当前 YAML 已原子改绑 clean exact
-`1f0ca12ffd556dc25f6313df559fe0fd6eaee9e6`（checkout
-`/workspace/codexschema/nohope_p1_activation_successor_1f0ca12`）。该 successor 同时包含 main hardening、五个
+`0f3900a612863faf326dca6ad3e8d38bfe8df3c9`（checkout
+`/workspace/codexschema/nohope_p1_activation_successor_0f3900a`）。该 successor 同时包含 main hardening、五个
 post-swing counters、V1/V2 execution counters、base-decel raw observer 和 runner logger；源码缺口已闭合，
 但它尚未跑自己的 strict full-scene terminal probe，所以仍不是 launch-ready source，禁止原地修改 checkout。
 
@@ -68,10 +68,12 @@ environment-step 只计一次；只有 runtime body list 确实排除右手腕�
 denominator。V2 的单位是“一个 imitation RewardTerm × 一个 environment sample”：每条 non-None motion
 imitation term 在 wide strike window 真正走到缩放 `torch.where` 就计 denominator，且 command setting 与函数
 实际 scale 都严格为 `0.25` 才计 numerator，因此两者必须相等。base-decel 的 eligible 是
-`pre_strike & ~in_hold`；command 的每步 observer 在所有 target 更新之后运行，control `weight=0` 与 treatment
-`weight=1` 都走同一个 raw kernel，treatment 后续 RewardTerm 由 `common_step_counter` 去重。故两臂的 raw
-nonzero 与 raw sum 都必须大于零；**不能**再要求 control 的 numerator 为零，因为这里量的是未乘 Reward
-weight 的真实 kernel opportunity。所有计数与 raw sum 都要 finite、非负。
+`pre_strike & ~in_hold`。Isaac 2.1 的 step 顺序是 reward → reset → command，因此 control 与 treatment 都由
+RewardManager 内同一个 instrumentation term 先观察旧状态：该 probe 的 manager weight 是 `1.0`，但每环境
+返回严格 `0`，不改变总 reward；treatment 随后的真实 `base_decel` RewardTerm 用同一
+`common_step_counter` 去重。command stage 不再记账。故两臂的 raw nonzero 与 raw sum 都必须大于零；**不能**
+要求 control 的 numerator 为零，因为这里量的是未乘 Reward weight 的真实 kernel opportunity。所有计数与 raw
+sum 都要 finite、非负。
 
 现有 `Live/Reward/base_decel` 是加权后的 step Reward 均值，control 权重为零时甚至可能不是 active term；
 `Live/racket_target/base_speed_xy_prestrike` 在窗外写零后再取均值。二者都可以继续作为行为/Reward 量，但不能
@@ -81,7 +83,7 @@ weight 的真实 kernel opportunity。所有计数与 raw sum 都要 finite、�
 
 | 字段 | 冻结值 |
 | --- | --- |
-| Source | clean exact `1f0ca12ffd556dc25f6313df559fe0fd6eaee9e6`；strict full-scene probe pending |
+| Source | clean exact `0f3900a612863faf326dca6ad3e8d38bfe8df3c9`；strict full-scene probe pending |
 | 初始化/seed | fresh / `3`；只买一个 seed |
 | 预算 | `4096 environments × 1001 updates`；每 `100` 保存；milestone `200/500/1000` |
 | 动作/题库/plant | 与原配对逐字相同的 v4rg runtime-order 正反手、schema-3 rebound bank、zero-joint-friction 训练协议 |

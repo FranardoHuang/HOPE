@@ -1,6 +1,6 @@
 # EXP-P1-V1V2-POST-SWING-INTERACTION — 精度组合下提高随挥后重放覆盖能否改善恢复
 
-- 状态：`blocked`（activation successor `1f0ca12...` 已 exact 绑定；等待该 source 自己的 strict full-scene probe）
+- 状态：`blocked`（same-phase activation successor `0f3900a...` 已 exact 绑定；等待该 source 自己的 strict full-scene probe）
 - 阶段/轴：Phase 1 fresh C；V1+V2 与随挥后状态重放起点概率的组合效应
 - 集成小目标：保住 V1+V2 的击球精度，同时提高从上一拍余势中恢复并完成下一拍的能力
 - 人类负责人：Franco
@@ -35,7 +35,7 @@ unsafe contact 任何一项失败都不可由 reward、恢复或精度收益补�
 
 | 字段 | 冻结值 |
 | --- | --- |
-| Source | clean exact `1f0ca12ffd556dc25f6313df559fe0fd6eaee9e6` / `/workspace/codexschema/nohope_p1_activation_successor_1f0ca12`；含 V1、V2、post-swing 和 base-decel activation counters/logger，但 strict probe 尚未运行 |
+| Source | clean exact `0f3900a612863faf326dca6ad3e8d38bfe8df3c9` / `/workspace/codexschema/nohope_p1_activation_successor_0f3900a`；含 V1、V2、post-swing 和 reward-stage base-decel activation counters/logger，但 strict probe 尚未运行 |
 | 忽略 A3 资产 | donor `6d93bcb...`；46 files、15,378,264 bytes、tree SHA `0137f59b...26c6`；禁止 symlink |
 | 初始化/seed | fresh / `3`；只买一个 seed |
 | 预算 | `4096 environments × 1001 updates`，每 `100` 保存，配对 milestone `200/500/1000` |
@@ -49,7 +49,7 @@ unsafe contact 任何一项失败都不可由 reward、恢复或精度收益补�
 顶层 `launch_authorized=false`，两行均为 `blocked`。上一个 `caeb9ad` strict probe 不能替新源码背书。旧
 `3ced5a2...` 只量到了 post-swing replay，V1/V2 没有整数 execution denominator/numerator；它保留在 Git
 历史里作为已识别的 instrumentation 缺口，但永久不能据此 probe 或 launch 本 pair。YAML 现在绑定 clean exact
-`1f0ca12...`，必须在这个新 detached checkout 重跑 strict full-scene terminal probe，审核通过后才能用另一个
+`0f3900a...`，必须在这个新 detached checkout 重跑 strict full-scene terminal probe，审核通过后才能用另一个
 提交同时解除顶层闩和两行 blocker。当前 live caeb source 不修改。
 
 ## Activation：先证明真的从随挥后状态启动
@@ -107,7 +107,7 @@ setting 是否更稳”，不是同一初态分布下的 replay-conditioned poli
 
 | 运行（人话名 + `run_name`） | 状态 | Checkpoint/seed | 证据 | 结果产物 | 有效性说明 |
 | --- | --- | --- | --- | --- | --- |
-| V1+V2、随挥后重放概率 0.25 对照；`phase1_fresh_c_v1v2_post_swing_p025_control_seed3_20260714` | blocked | `200/500/1000`，seed 3 | exact `1f0ca12...` source 单测；新 strict probe 尚缺 | 无 | 不得发射 |
+| V1+V2、随挥后重放概率 0.25 对照；`phase1_fresh_c_v1v2_post_swing_p025_control_seed3_20260714` | blocked | `200/500/1000`，seed 3 | exact `0f3900a...` source 单测；新 strict probe 尚缺 | 无 | 不得发射 |
 | V1+V2、随挥后重放概率 0.50 treatment；`phase1_fresh_c_v1v2_post_swing_p050_seed3_20260714` | blocked | `200/500/1000`，seed 3 | 与 control 完全配对、唯一概率 delta；新 strict probe 尚缺 | 无 | 不得发射 |
 
 ## 决定与边界

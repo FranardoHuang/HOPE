@@ -78,10 +78,10 @@ def test_pair_freezes_same_inputs_budget_seed_and_exact_instrumented_source():
     }
     assert control["milestones"] == [200, 500, 1000]
     assert control["source"]["checkout"] == (
-        "/workspace/codexschema/nohope_p1_activation_successor_1f0ca12"
+        "/workspace/codexschema/nohope_p1_activation_successor_0f3900a"
     )
     assert control["source"]["commit"] == (
-        "1f0ca12ffd556dc25f6313df559fe0fd6eaee9e6"
+        "0f3900a612863faf326dca6ad3e8d38bfe8df3c9"
     )
     ignored = control["source"]["ignored_runtime_asset"]
     assert ignored == {

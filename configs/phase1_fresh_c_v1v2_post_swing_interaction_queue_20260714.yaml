@@ -142,8 +142,8 @@ x-exam: &exam
 # It must pass its own strict full-scene probe before either science row is
 # unlocked; the already-live caeb checkout is never changed in place.
 x-source: &source
-  checkout: /workspace/codexschema/nohope_p1_activation_successor_1f0ca12
-  commit: 1f0ca12ffd556dc25f6313df559fe0fd6eaee9e6
+  checkout: /workspace/codexschema/nohope_p1_activation_successor_0f3900a
+  commit: 0f3900a612863faf326dca6ad3e8d38bfe8df3c9
   ignored_runtime_asset:
     target_relative_path: hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
     donor:
@@ -247,7 +247,7 @@ jobs:
     human_name: fresh C V1 plus V2 post-swing replay probability 0.25 matched control
     action: *action
     status: blocked
-    blocker: exact activation successor 1f0ca12 is pinned but has not passed its own strict full-scene probe; keep both cells blocked and launch_authorized false
+    blocker: exact same-phase activation successor 0f3900a is pinned but has not passed its own strict full-scene probe; keep both cells blocked and launch_authorized false
     motion: *motion
     bank: *bank
     exam: *exam
