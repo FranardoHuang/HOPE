@@ -347,6 +347,10 @@ def test_locked_launcher_timeout_is_exact_pgid_cleanup_not_zero_signal(
     tmp_path, monkeypatch
 ):
     locked = ROOT / "hope_training/whole_body_tracking/scripts/launch_kit_training_locked.sh"
+    # v6r1 deliberately keeps its historical launcher SHA frozen.  This unit
+    # test isolates its rc=124 state parser from later versioned launcher
+    # hardening, so bind the current fixture bytes without changing v6r1 data.
+    monkeypatch.setattr(M, "LOCKED_LAUNCHER_SHA256", M.sha256_file(locked))
     state = tmp_path / "run.log.launch"
     state.write_text(
         "pid=2468\npgid=2468\nboot_timeout_s=900\n", encoding="utf-8"
