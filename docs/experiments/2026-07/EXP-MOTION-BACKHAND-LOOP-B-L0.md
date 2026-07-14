@@ -1,10 +1,11 @@
 # EXP-MOTION-BACKHAND-LOOP-B-L0 — 反手拉 B 的静态动作证书
 
-- 状态：V1 portable dry-run 已运行并因非自洽的 float32 byte-equality 门 fail closed；V2 数值合同 source/static pass，runtime 未运行；未生成证书
+- 状态：V1 portable dry-run 因非自洽的 float32 byte-equality 门 fail closed；V2 的 Pod2
+  dry-run 与一次 no-clobber formal audit 均通过，L0 证书已生成，只解锁 vendor L1
 - 阶段/轴：新动作库 / runtime-order schema-2 后的纯 CPU 静态审计
 - 人类负责人：Franco
 - 执行者：Codex
-- 最高证据等级：E1 + V1 runtime 负结果（源码、合同、合成反例与保存的失败摘要；V2 尚无 runtime 结果）
+- 最高证据等级：E2（exact Pod2 V2 runtime certificate；仍无 vendor L1/动力学/击球结果）
 
 本文的 [`L0`](../../DEFINITIONS.md#motion-l0-static) 指“完全不推进物理仿真的静态动作可行性审计”，
 不是训练层级；source/static pass 也不等于真实资产已有 runtime certificate。
@@ -90,6 +91,25 @@ input/runtime/MJCF/lineage/safety 合同；V2 validator SHA-256 为
 bit replay；不能从现有 schema-2 body pose 唯一恢复那些 pre-normalization bytes。V2 只解决冻结 B
 资产的 L0 数值可复现性，不改变 schema，也不宣称跨硬件 bit determinism。
 
+## V2 Pod2 runtime 结果
+
+`main@cc1a2b101431f42ad2e1ddd94816605781404f51` 以 clean detached checkout 在 Pod2 的 exact
+Python `3.12.3` / NumPy `2.5.0` / MuJoCo `3.10.0` CPU venv 上先运行一次 full `dry-run`，
+输出 `runtime_audit=true certificate_written=false l0_static_complete=false`。独立只读复核随后
+确认 source detached/clean、plan/validator、四份输入 SHA 和 V1/V2 certificate absence 均 exact。
+
+操作人再显式授权只创建 exact V2 父目录并执行同计划唯一一次 `audit`；它以 `O_EXCL`
+写入：
+
+`/workspace/codexschema/motion_video_intake_20260711/l0_static_primary_v2/franco_backhand_loop_b_98e7b883b29d.l0_static_certificate.json`
+
+certificate SHA-256 为
+`60c08185e15c80621063bcedc65b42b6b738a12caeb8fb4e40a4c197e7daafc6`。证书 `schema_version=2`、
+`asset_id=franco_backhand_loop_b`，`l0_static_complete=true`、`vendor_l1_authorized=true`；同时
+`table_net/dynamics/simulator/training/formal_motion/hardware_authorized` 仍全为 `false`。这证明 151 帧
+离散静态运动学、关节范围、grounding 与 support ancestry 过门；不证明自碰、球拍打自身、
+桌网扫掠、动力学平衡或能打球。
+
 模型侧绑定 exact vendor MJCF `2ab1cd31...feb97`、`1 XML + 74 mesh` closure
 `e0381752...962de`、compiled collision contract `18e7f6ff...386e5`、31-joint runtime order、32-body
 runtime order和 donor metadata。运行环境沿用已记录的 CPU venv：Python `3.12.3`、NumPy `2.5.0`、
@@ -116,12 +136,13 @@ MuJoCo `3.10.0`，并强制 `CUDA_VISIBLE_DEVICES=''`。
 `dry-run` 会执行同一完整上游谱系、NPZ 与运动学审计但不发布证书，并明确输出
 `certificate_written=false`、`l0_static_complete=false`；正式 `audit` 才会在所有检查通过后以 `O_EXCL`
 写入预注册绝对路径。目标已存在、父目录是 symlink、JSON duplicate key、任一输入漂移都会 fail
-closed。V1 已在 Pod2 运行并 fail closed；V2 尚未运行私有 NPZ，因此没有 L0 pass certificate。
+closed。V1 已在 Pod2 运行并 fail closed；V2 已按上述 exact runtime 合同通过并发布 L0
+certificate。
 
 ## 明确不在本门内
 
 本门没有执行或声称：vendor 自碰、球拍打到机器人、桌/网整轨 `>=5 mm`、连续时间地面余隙、
-动力学/平衡、TOPP、击球/上台率、RL、Gate3 或真机安全。即便未来 L0 通过，也只解锁独立 vendor L1
+动力学/平衡、TOPP、击球/上台率、RL、Gate3 或真机安全。已通过的 L0 也只解锁独立 vendor L1
 审计，不解锁训练。
 
 ## 源码验证
@@ -145,5 +166,5 @@ collection 阶段因本机缺 `zmq`、`torch`、`hydra` 出现 `15 errors`，没
 没有一项来自两份 B L0 测试，故不在本分支改写这些无关合同，也不记成整合绿灯。
 `origin/main@b609c0d` 的 `1018 passed, 10 skipped` 只保留为 V1
 portability 修复前历史结果。这些结果
-只证明源码和合成反例，不将缺少 V2 私有 runtime 执行的 source gate 冒充真实 L0 结果。本任务没有
-连接 Pod、没有执行正式 audit，也没有创建 certificate。
+只证明源码和合成反例；真实 L0 结果只由上节 Pod2 certificate 与其 SHA 提供，不用本地
+测试冒充 runtime 证据。

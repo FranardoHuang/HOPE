@@ -25,6 +25,14 @@
 
 ## 2026-07-14
 
+- 反手拉 B 的 V2 L0 已在 Pod2 exact detached `main@cc1a2b1` 闭环：full `dry-run` 通过后，
+  独立只读复核 source/plan/validator/四输入与证书 absence；随后唯一 `O_EXCL` formal audit
+  发布 certificate SHA-256 `60c08185e15c80621063bcedc65b42b6b738a12caeb8fb4e40a4c197e7daafc6`。
+  certificate 仅令 `l0_static_complete/vendor_l1_authorized=true`，桌网、动力学、训练、formal motion 和
+  hardware 仍 false；下一门是 vendor L1 自碰/球拍自打。见
+  [L0 卷宗](experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-L0.md)与
+  [G08](gates/G08_blind_spot_improvements.md)。
+
 - Pod2 四条科学臂的 paired `model_200` 身份和 step `180..200` 曲线已冻结。conditional
   treatment 的 gate/cost/reward 全零，可严格推出 eligibility=0，故当前 `-0.4` setting
   在 `+200` 判 activation-invalid，不买 seed/不晋级。V1+V2×base-decel 的 checkpoint SHA-256 为

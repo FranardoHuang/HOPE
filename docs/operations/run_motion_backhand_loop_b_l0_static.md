@@ -8,9 +8,11 @@ source/static pass 不等于真实资产已有 runtime certificate。权威实�
 
 V1 full `dry-run` 已在 Pod2 fail closed，原因是 schema-2 未保存 producer 原始 free-joint qpos，却要求
 把 post-FK float32 root body pose 再注入后逐字节相等；V1 原字节和失败账冻结，禁止改阈值或重跑。
-V2 目前只完成本地 source/static gate 与 dependency-light 测试，本任务没有连接 Pod。只有分支 review
-并合入 main 后，才允许操作人用 exact detached-clean source 在 Pod2 执行**一次** V2 full `dry-run`。
-它不写 certificate，也不运行 dynamics step、trainer、judge、部署或真机。C 的一次性 consume 继续禁止。
+V2 已在 Pod2 exact detached `main@cc1a2b1` 上先通过唯一 full `dry-run`，随后在显式发布授权下
+以 `O_EXCL` 完成一次 formal `audit`。certificate SHA-256 为
+`60c08185e15c80621063bcedc65b42b6b738a12caeb8fb4e40a4c197e7daafc6`，禁止删除、覆盖或重跑。
+它只授权 vendor L1 自碰/球拍自打门，不授权桌网、dynamics、trainer、judge、部署或真机。C 的
+一次性 consume 继续禁止。
 
 ## Source/static gate
 
@@ -31,7 +33,7 @@ python3 scripts/audit_motion_schema2_l0_static_v2.py \
 [motion-l0-v2] PASS static asset=franco_backhand_loop_b source_exact=true runtime_audit=false no_write=true v1_unchanged=true
 ```
 
-## Runtime 前置只读核对
+## Runtime 前置只读核对（已执行的发布前步骤）
 
 在 exact CPU venv 中先逐份复算 SHA；任一不符就停止，不创建输出父目录：
 
@@ -53,7 +55,7 @@ test ! -e "$V2_CERT" && test ! -L "$V2_CERT"
 
 不要删除、覆盖或“清理后重跑”已有证书。若路径存在，先保全并审计；no-clobber 是结果合同的一部分。
 
-## Pod2 V2 full dry-run（仅在合 main 后的远端下一步）
+## Pod2 V2 full dry-run（已完成，不得重跑）
 
 `dry-run` 不创建 certificate 或其父目录；若 Pod2 上父目录不存在也保持不存在：
 
@@ -69,10 +71,20 @@ export PYTHONNOUSERSITE=1
   dry-run
 ```
 
-预期成功行必须同时包含 `runtime_audit=true certificate_written=false l0_static_complete=false`。成功只表示
-exact B NPZ 的完整 L0 只读路径通过；仍没有 certificate，也不授权 vendor L1、桌网、动力学或 RL。
-复核 dry-run 后才可另行授权同计划的 `audit` 发布动作证书。V2 runtime 未跑前，不得根据 V1 已知差值
-声称 V2 必然通过。
+已观察成功行：`runtime_audit=true certificate_written=false l0_static_complete=false`。独立只读复核证明
+source/plan/validator/四输入与证书 absence exact，之后才发布上述 formal certificate。本节命令只保留为
+已执行记录，现在 certificate 已存在，no-clobber 合同要求任何重跑必须 fail closed。
+
+## 当前 certificate 只读核对
+
+```bash
+V2_CERT=/workspace/codexschema/motion_video_intake_20260711/l0_static_primary_v2/franco_backhand_loop_b_98e7b883b29d.l0_static_certificate.json
+test -f "$V2_CERT" && test ! -L "$V2_CERT"
+test "$(sha256sum "$V2_CERT" | awk '{print $1}')" = 60c08185e15c80621063bcedc65b42b6b738a12caeb8fb4e40a4c197e7daafc6
+```
+
+下一步必须新建并预注册 vendor L1 整轨自碰/球拍自打审计；不要把本 certificate 直接当作
+桌网、动力学或 RL 入场券。
 
 ## 失败处理
 

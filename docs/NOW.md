@@ -44,8 +44,11 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   float32 逐 bit 相等处 fail closed。实测最大差为 position `1.1920929e-7 m`、quaternion
   `5.9604645e-8`、COM velocity `2.9802322e-6 m/s`、angular velocity `5.9679151e-6 rad/s`；
   无证书、不占 GPU。这不是碰撞/自打/动作安全失败，而是 Pod1 producer → Pod2 重算的
-  float32/50 Hz 差分可复现性合同不自洽；旧 v1 失败保留，正在独立推导 v2 ULP/差分上界，
-  不放宽关节、地面、支撑脚或安全门。
+  float32/50 Hz 差分可复现性合同不自洽。旧 v1 失败保留；v2 从 ULP 与差分误差解析推导，
+  不放宽关节、地面、支撑脚或安全门。该 v2 已在 exact `main@cc1a2b1` 上通过 Pod2 full
+  `dry-run` 与唯一 no-clobber formal audit，certificate SHA-256 为
+  `60c08185e15c80621063bcedc65b42b6b738a12caeb8fb4e40a4c197e7daafc6`。L0 现已闭合，下一门是
+  vendor L1 整轨自碰/球拍自打；桌网、动力学、RL 和真机仍未授权。
   高点拍压 S0 与四条横移 M0 不仅通过 exact GVHMR 帧数/finite 审计，还已完成真实五条 PT 的
   canonical-beta `inspect/consume`，non-beta 内容逐 bit 不变。exact GMR runtime source gate 也已进入
   `main` 并通过全回归；Pod 上的 `inspect/consume` 尚未执行，所以还不是“动作会打球”。

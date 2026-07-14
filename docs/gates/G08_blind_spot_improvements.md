@@ -537,10 +537,11 @@ free-joint qpos 再注入并要求 bit-idempotence；这不是动作、关节、
 V2 保留 V1 全部 exact lineage/MJCF/runtime、joint range、ground、support-foot、no-clobber 与 downstream
 false gate，只把不可重构的 pose 比较改为 two-[`ULP`](../DEFINITIONS.md#float32-ulp) + physical cap，
 COM velocity 改为 stored link pose + exact MJCF `body_ipos` 的 50 Hz 解析误差传播，angular/joint velocity
-仍 byte exact。V2 prereg/validator source/static gate 与 dependency-light 测试已通过，但本任务没有连接
-Pod，V2 runtime 尚未运行。**该 L0 子门状态仍为 Partial**：没有本门 certificate；source/static pass
-不能写成 runtime pass。vendor L1
-自碰/自打、桌网扫掠、动力学、RL、Gate3 和真机继续全部 blocked。边界、冻结输入与未来一次性命令见
+仍 byte exact。Pod2 exact detached `main@cc1a2b1` 的 full `dry-run` 已通过，随后唯一 no-clobber
+formal audit 发布 certificate SHA-256
+`60c08185e15c80621063bcedc65b42b6b738a12caeb8fb4e40a4c197e7daafc6`。**该 L0 子门已完成**；
+证书只令 `vendor_l1_authorized=true`，桌网扫掠、动力学、simulator/RL、formal motion、Gate3 和真机仍
+blocked。下一步是 vendor L1 整轨自碰/球拍自打，不得越级训练。边界、冻结输入与命令见
 [L0 实验卷宗](../experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-L0.md)和
 [L0 操作文档](../operations/run_motion_backhand_loop_b_l0_static.md)。
 

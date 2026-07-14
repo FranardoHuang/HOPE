@@ -110,7 +110,8 @@ equal 是非幂等合同。反手拉 B 的 V1 dry-run 已以 1 个 float32 格�
 [`ULP`](DEFINITIONS.md#float32-ulp) 格并带物理 cap，COM velocity 从已存 link pose + exact `body_ipos`
 按 50 Hz 差分误差传播，angular/joint velocity 仍 byte exact；joint range、ground、support-foot 和
 safety 门完全不变。长期若要恢复 bit replay，应升级 motion schema 显式保存 pre-normalization
-free-joint qpos，而不是继续放宽 schema-2。详见
+free-joint qpos，而不是继续放宽 schema-2。该 V2 已用 Pod2 exact runtime 发布 L0 certificate
+`60c08185...afc6`，仅解锁 vendor L1 自碰/球拍自打；桌网、动力学、训练和真机仍 blocked。详见
 [`EXP-MOTION-BACKHAND-LOOP-B-L0`](experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-L0.md)。
 
 当前资产:`hope_{forehand,backhand}_{v5,oblique,v4}_cal.npz`(v4=hopex 视频重跑;**hopex 资产
