@@ -631,6 +631,105 @@ def test_full_scene_probe_requires_exact_job_confirmation_and_dispatch(monkeypat
         raise AssertionError("probe drifted from the job's bound GPU")
 
 
+def test_full_scene_probe_execute_reads_only_selected_dispatch_pod(monkeypatch):
+    queue = _queue()
+    queue["dispatch_pods"] = ["pod2"]
+    queue["jobs"][0]["resource"] = {
+        "policy": "dispatch_gpu_round_robin",
+        "preferred_slot": "pod2/gpu1",
+    }
+    calls = []
+
+    def fake_ssh(_queue, pod, _remote, *, timeout=30, phase="remote-command"):
+        calls.append((pod, phase, timeout))
+        if phase.startswith("slot-occupancy:"):
+            return "0\n"
+        return "KIT_BOOT_READY\n"
+
+    monkeypatch.setattr(Q, "_run_ssh", fake_ssh)
+    monkeypatch.setattr(
+        Q,
+        "live_snapshot",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            AssertionError("full-scene probe must not call all-Pod live_snapshot")
+        ),
+    )
+    result = Q.cmd_full_scene_probe(
+        queue,
+        job_id="job0",
+        pod="pod2",
+        gpu=1,
+        attempt_id="selected_only_a1",
+        execute=True,
+        confirm=Q.FULL_SCENE_PROBE_CONFIRM,
+    )
+    assert result["first_iteration_observed"] is True
+    assert [pod for pod, _phase, _timeout in calls] == ["pod2", "pod2"]
+    assert calls[0][1] == "slot-occupancy:pod2/gpu1"
+    assert calls[1][1].startswith("full-scene-probe:job0:")
+
+
+def test_live_slot_occupancy_binds_requested_pod_gpu_and_fails_closed(monkeypatch):
+    queue = _queue()
+    calls = []
+
+    def fake_ssh(_queue, pod, remote, **_kwargs):
+        calls.append((pod, remote))
+        return "2\n" if pod == "pod1" else "1\n"
+
+    monkeypatch.setattr(Q, "_run_ssh", fake_ssh)
+    pod1_slot = next(slot for slot in Q.slots(queue) if slot.name == "pod1/gpu2")
+    pod2_slot = next(slot for slot in Q.slots(queue) if slot.name == "pod2/gpu0")
+    assert Q.live_slot_occupancy(queue, pod1_slot) == 2
+    assert Q.live_slot_occupancy(queue, pod2_slot) == 1
+    assert calls[0][0] == "pod1" and "nvidia-smi -i 2" in calls[0][1]
+    assert calls[1][0] == "pod2" and "nvidia-smi -i 0" in calls[1][1]
+
+    monkeypatch.setattr(Q, "_run_ssh", lambda *_args, **_kwargs: "UNKNOWN\n")
+    try:
+        Q.live_slot_occupancy(queue, pod2_slot)
+    except Q.QueueError as exc:
+        assert "invalid compute occupancy" in str(exc)
+    else:
+        raise AssertionError("unknown selected-slot occupancy did not fail closed")
+
+
+def test_full_scene_probe_capacity_and_empty_dispatch_fail_before_launch(monkeypatch):
+    queue = _queue()
+    queue["dispatch_pods"] = ["pod2"]
+    queue["jobs"][0]["resource"] = {"policy": "dispatch_gpu_round_robin"}
+    phases = []
+
+    def at_capacity(_queue, pod, _remote, *, phase="remote-command", **_kwargs):
+        phases.append((pod, phase))
+        return "3\n"
+
+    monkeypatch.setattr(Q, "_run_ssh", at_capacity)
+    try:
+        Q.cmd_full_scene_probe(
+            queue, job_id="job0", pod="pod2", gpu=1, attempt_id="full_a1",
+            execute=True, confirm=Q.FULL_SCENE_PROBE_CONFIRM,
+        )
+    except Q.QueueError as exc:
+        assert "slot is at capacity" in str(exc)
+    else:
+        raise AssertionError("full selected slot launched at capacity")
+    assert phases == [("pod2", "slot-occupancy:pod2/gpu1")]
+
+    queue["dispatch_pods"] = []
+    phases.clear()
+    try:
+        Q.cmd_full_scene_probe(
+            queue, job_id="job0", pod="pod2", gpu=1, attempt_id="none_a1",
+            execute=False, confirm=None,
+        )
+    except Q.QueueError as exc:
+        assert "not dispatch-enabled" in str(exc)
+    else:
+        raise AssertionError("empty dispatch set selected a probe slot")
+    assert phases == []
+
+
 def test_full_scene_probe_rejects_terminal_or_placeholder_and_avoids_cross_job_collision():
     queue = _queue(2)
     slot = Q.slots(queue)[0]

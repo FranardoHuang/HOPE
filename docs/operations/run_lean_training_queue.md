@@ -67,6 +67,9 @@ python3 scripts/run_lean_training_queue.py \
 
 专用确认词不能与 science/warmup token 混用；blocked 行也先按 ready 级规则拒绝 zero commit、placeholder、
 非 `/workspace` 或重复资产。声明了 `preferred_slot` 的 job 只能在该槽探测，reserved Pod 在 SSH 前拒绝。
+execute 的外层容量预检只 SSH 读取用户明确选择的 dispatch Pod/GPU，不调用普通 fill 用的 all-Pod
+`live_snapshot`；随后远端仍在同一 selected GPU 的 fd8 短锁内复核容量。这样 Pod2-only probe 不会因防重复
+逻辑触碰 reserved Pod1，普通 fill/claim 的跨 Pod 防重复语义不变。
 远端在 fd8 短锁内重查容量，用 plain `mkdir` 和 no-clobber
 `full_scene_probe_claim.json` 拒绝复用 attempt；显式使用 source-pinned launcher 的 900 秒 hard timeout、
 180 秒 content-stale watchdog 与 `Learning iteration` marker。
@@ -245,6 +248,6 @@ bash -n hope_training/whole_body_tracking/scripts/launch_kit_training_locked.sh
 ```
 
 本源码门只证明 YAML 绑定、调度与 fail-closed 选择逻辑；没有证明远端 SSH、Isaac runtime、动作效果或
-exam 成绩。focused source result 为 `73 passed`；现有 source-pinned launcher 同时保留 180 秒 stale-log
+exam 成绩。focused source result 为 `76 passed`；现有 source-pinned launcher 同时保留 180 秒 stale-log
 watchdog 与总 boot timeout。P1.1 已提供代表性 full-scene probe 的 source mode，但尚无远端 claim/首迭代
 运行证据，仍不能写成 full-scene runtime 通过。

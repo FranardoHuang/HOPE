@@ -78,6 +78,7 @@ per-source+Pod+physical-GPU [`boot-warmup`](../DEFINITIONS.md#boot-warmup) names
 `num_envs` 派生两次 update 的隔离运行；它只在 launcher 看到首个 `Learning iteration` 后报告
 `first_iteration_observed=true`。probe claim 明写 `not_science=true / attestable=false / promotable=false`，
 不生成本接口的 `run_binding.json` 或 milestone receipt，因此不能通过本接口被追认为科学 checkpoint。
+probe execute 的容量快照只读取 selected dispatch Pod/GPU；普通 science fill 仍保留 all-Pod claim 防重复。
 
 ## 源码复现
 
@@ -96,7 +97,7 @@ python3 -m py_compile \
 bash -n hope_training/whole_body_tracking/scripts/launch_kit_training_locked.sh
 ```
 
-当前 focused 结果为 `73 passed`。负测覆盖 fake log dir、binding/receipt overwrite、静态及读中 PID reuse、
+当前 focused 结果为 `76 passed`。负测覆盖 fake log dir、binding/receipt overwrite、静态及读中 PID reuse、
 source dirty/YAML verifier 漂移、不可达 terminal milestone、warmup/legacy capability 串线、filename/embed
 iteration 错位、nested float/complex NaN、hard-contract SHA 错绑、launch-claim lineage 错绑，以及 full-scene
 probe 的环境数漂移、科学 namespace 串线、错确认词、reserved Pod、placeholder/reuse。

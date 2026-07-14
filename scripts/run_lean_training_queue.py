@@ -602,6 +602,25 @@ def live_occupancy(queue: dict[str, Any]) -> dict[str, int]:
     return live_snapshot(queue)[0]
 
 
+def live_slot_occupancy(queue: dict[str, Any], slot: Slot) -> int:
+    """Read only the explicitly selected dispatch slot for a non-science probe."""
+
+    remote = (
+        f"nvidia-smi -i {slot.gpu} --query-compute-apps=pid "
+        "--format=csv,noheader,nounits | awk "
+        + shlex.quote(UNIQUE_NUMERIC_PID_AWK)
+    )
+    output = _run_ssh(
+        queue,
+        slot.pod,
+        remote,
+        phase=f"slot-occupancy:{slot.name}",
+    ).strip()
+    if not output.isdigit():
+        raise QueueError(f"{slot.name} returned invalid compute occupancy {output!r}")
+    return int(output)
+
+
 def _effective_occupancy(
     queue: dict[str, Any],
     occupancy: dict[str, int],
@@ -1559,8 +1578,7 @@ def cmd_full_scene_probe(
         ]
         return result
 
-    occupancy, _claims = live_snapshot(queue)
-    if occupancy[slot.name] >= slot.capacity:
+    if live_slot_occupancy(queue, slot) >= slot.capacity:
         raise QueueError(f"full-scene probe slot is at capacity: {slot.name}")
     result["remote_output"] = _run_ssh(
         queue,

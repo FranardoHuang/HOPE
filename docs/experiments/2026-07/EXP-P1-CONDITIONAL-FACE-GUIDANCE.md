@@ -77,6 +77,12 @@ machine prereg 已冻结为 source `61007e93879f35677e4c7d38cf7f681f324f9571`、
 它只证明该 source/host/GPU 在 **1 environment** 的 cache/importer 最小路径能闭合，不代表
 4096 environments 的正式 scene recipe。后续运行已经直接推翻“1-env 通过即可授权正式发射”这个假设。
 
+发射 P1 full-scene probe 前又抓到一个控制面越界：原 execute 路径复用了普通 fill 的 all-Pod
+`live_snapshot`，即使 `dispatch_pods=[pod2]` 仍会只读访问 reserved Pod1。该行为没有创建 probe，但违反本轮
+Pod2-only 资源合同。P1.2 改为只读 selected dispatch Pod/GPU 的唯一 PID 数，未知输出或达到容量即
+fail closed；远端 fd8 锁内容量复核保持不变，普通 fill 的跨 Pod claim 防重复语义也不改。源码回归通过前
+probe 保持未发射，不能绕过专用 confirm 直接执行 dry-rendered SSH。
+
 旧 pair 保持不可修改的失败证据。新的 `p1r1` pair 已在结果前绑定同一 clean detached
 `main@077e70c`（Pod2 checkout `/workspace/codexschema/nohope_p1_077e70c`），两格均
 `runtime_binding=true`，仍只差 conditional weight `0/-0.4`。当前二者均为 `blocked`：先由 control 配方

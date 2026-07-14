@@ -1870,6 +1870,11 @@ Pod2 已准备 clean detached exact `077e70c` source，motion、train bank 与 K
 pair 与 V1+V2×base-decel pair 已绑定但保持 blocked，尚未运行 full-scene probe 或 scientific trainer。
 因此这里仍是 E1/source+runtime-readiness，G05 维持 `Partial`。
 
+full-scene probe 首次 dry/capacity preflight 又发现 execute 原先会复用 all-Pod `live_snapshot`：Pod2-only
+probe 也会访问 reserved Pod1。P1.2 将该路径收窄为 selected dispatch Pod/GPU 唯一 PID 计数，未知输出、
+空 dispatch 或达到容量均 fail closed，远端 fd8 二次容量检查不变；普通 fill 仍使用 all-Pod claim 快照。
+这是 source gate 修复，不是 probe runtime 通过，修复合入前没有创建 run directory/claim/process。
+
 #### qdot matched pair `+500` mixed signal
 
 同 source/seed 的 qdot weight `-5/0` 两份 `model_500.pt` 已通过 filename/embed iter、finite、fresh lineage、
