@@ -1780,6 +1780,10 @@ qdot control attempt-1 随后也在 iter `0` 的动态 URDF importer 返回前�
 均非差异根因。exact PGID `327651` 已保全日志后收口；只允许完全相同配方的 retry-v2 fresh namespace
 再试一次，若同 phase 重复则停止 retry。G05 仍为 `Partial`。
 
+lean harness 因此新增默认不执行的 `boot-warmup` source gate：只从预注册 job 派生 1 env×2 update、独立
+claim/namespace、180 秒 boot 上限的非科学探针，reserved Pod 与科学确认 token 均不能授权它。聚焦 queue
+suite `23 passed`；尚未在 Pod 执行，所以这里只是 E1，不证明 importer 已稳定。
+
 资源边界随后切换为 Pod2-only：Pod1 的三条 Codex trainer 在 iter `792/782/743` 由 exact PGID `TERM`
 收口，`model_700.pt` 与日志保留，未发 `KILL`；Pod1 复核无 Codex compute process并全部交给 Yikang。
 active queue 的 `dispatch_pods: [pod2]` 是可执行合同，不依赖聊天记忆；旧 Pod1 claim 仍只读防重复。

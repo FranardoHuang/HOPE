@@ -49,6 +49,7 @@ READY = "ready"
 BLOCKED = "blocked"
 TERMINAL = {"complete", "rejected"}
 CONFIRM = "SIM_ONLY_LAUNCH_ONE_LEAN_QUEUE_JOB"
+WARMUP_CONFIRM = "SIM_ONLY_LAUNCH_ONE_BOOT_WARMUP"
 ZERO_COMMIT = "0" * 40
 GLOBAL_SCHEDULER_LOCK = Path("/tmp/hope_lean_training_queue.global.lock")
 ISAAC_PYTHON = "/workspace/hope_isaac_venv/bin/python"
@@ -58,6 +59,10 @@ ENTRYPOINT_RELATIVE = "scripts/train.py"
 KIT_LAUNCHER_RELATIVE = "scripts/launch_kit_training_locked.sh"
 KIT_BOOT_MARKER = "Learning iteration"
 KIT_BOOT_TIMEOUT_SECONDS = 900
+WARMUP_BOOT_TIMEOUT_SECONDS = 180
+WARMUP_NUM_ENVS = 1
+WARMUP_MAX_ITERATIONS = 2
+WARMUP_SAVE_INTERVAL = 1
 HARNESS_OWNED_OVERRIDE_KEYS = {
     "seed",
     "num_envs",
@@ -750,6 +755,138 @@ test \"$resolved_module_root\" = {shlex.quote(expected_module_root)}
 """
 
 
+def _replace_generated_overrides(argv: list[str], replacements: dict[str, str]) -> list[str]:
+    """Replace harness-generated scalar overrides exactly once each."""
+
+    result = list(argv)
+    seen: set[str] = set()
+    for index in range(2, len(result)):
+        argument = result[index]
+        key = _override_key(argument, f"generated argv[{index}]")
+        if key not in replacements:
+            continue
+        if key in seen:
+            raise QueueError(f"generated argv sets {key!r} more than once")
+        result[index] = f"{key}={replacements[key]}"
+        seen.add(key)
+    missing = set(replacements) - seen
+    if missing:
+        raise QueueError(f"generated argv is missing harness keys: {sorted(missing)}")
+    return result
+
+
+def _boot_warmup_contract(
+    queue: dict[str, Any], job: dict[str, Any], slot: Slot, attempt_id: str
+) -> tuple[dict[str, Any], list[str], str]:
+    """Build a tiny non-scientific scene-import warmup in its own namespace."""
+
+    attempt_id = _text(attempt_id, "attempt_id", safe_id=True)
+    warmup_name = (
+        f"boot_warmup_{job['source']['commit'][:8]}_{slot.pod}_gpu{slot.gpu}_{attempt_id}"
+    )
+    base_argv = _training_argv(queue, job, slot.gpu)
+    argv_without_claim = _replace_generated_overrides(
+        base_argv,
+        {
+            "num_envs": str(WARMUP_NUM_ENVS),
+            "max_iterations": str(WARMUP_MAX_ITERATIONS),
+            "algo.runner.save_interval": str(WARMUP_SAVE_INTERVAL),
+            "run_name": warmup_name,
+        },
+    )
+    run_dir = str(
+        PurePosixPath(job["run_dir"]).parent
+        / "_boot_warmups"
+        / job["source"]["commit"]
+        / slot.pod
+        / f"gpu{slot.gpu}"
+        / attempt_id
+    )
+    content = {
+        "schema_version": 1,
+        "purpose": "boot_warmup_not_science",
+        "job_id": job["id"],
+        "pod": slot.pod,
+        "gpu": slot.gpu,
+        "attempt_id": attempt_id,
+        "source": dict(job["source"]),
+        "run_dir": run_dir,
+        "budget": {
+            "num_envs": WARMUP_NUM_ENVS,
+            "max_iterations": WARMUP_MAX_ITERATIONS,
+            "save_interval": WARMUP_SAVE_INTERVAL,
+        },
+        "inputs": {
+            "motion": dict(job["motion"]),
+            "bank": dict(job["bank"]),
+            "exam": dict(job["exam"]),
+        },
+        "training_argv_without_claim": argv_without_claim,
+    }
+    digest = _canonical_sha256(content)
+    execution_argv = [
+        *argv_without_claim,
+        f"++training_launch_claim_sha256={digest}",
+    ]
+    claim = {
+        "schema_version": 2,
+        "content": content,
+        "content_sha256": digest,
+        "training_argv": execution_argv,
+    }
+    return claim, execution_argv, run_dir
+
+
+def _boot_warmup_script(
+    queue: dict[str, Any], job: dict[str, Any], slot: Slot, attempt_id: str
+) -> str:
+    source = job["source"]["checkout"].rstrip("/")
+    workdir = f"{source}/{WBT_RELATIVE}"
+    claim_document, train_argv, run_dir = _boot_warmup_contract(
+        queue, job, slot, attempt_id
+    )
+    run_parent = str(PurePosixPath(run_dir).parent)
+    claim = json.dumps(
+        claim_document,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ) + "\n"
+    launcher = f"{workdir}/{KIT_LAUNCHER_RELATIVE}"
+    launch = shlex.join([launcher, f"{run_dir}/run.log"]) + " " + (
+        _child_env_command(train_argv, slot.gpu)
+    )
+    doctor = _doctor_body(queue, job, slot)
+    warmup_compose = _child_env_command(_hydra_compose_argv(train_argv), slot.gpu)
+    body = doctor + f"""
+{warmup_compose} >/dev/null
+count=$(nvidia-smi -i {slot.gpu} --query-compute-apps=pid --format=csv,noheader,nounits | awk {shlex.quote(UNIQUE_NUMERIC_PID_AWK)})
+test "$count" -lt {slot.capacity}
+mkdir -p {shlex.quote(run_parent)}
+mkdir {shlex.quote(run_dir)}
+( set -o noclobber; printf %s {shlex.quote(claim)} > {shlex.quote(run_dir + '/warmup_claim.json')} )
+export KIT_BOOT_MARKER={shlex.quote(KIT_BOOT_MARKER)}
+export KIT_BOOT_TIMEOUT_S={WARMUP_BOOT_TIMEOUT_SECONDS}
+{launch}
+"""
+    return f"flock -n /tmp/hope_lean_queue_gpu{slot.gpu}.lock bash -lc {shlex.quote(body)}"
+
+
+def _job_by_id(queue: dict[str, Any], job_id: str) -> dict[str, Any]:
+    matches = [job for job in queue["jobs"] if job["id"] == job_id]
+    if len(matches) != 1:
+        raise QueueError(f"unknown or duplicate job id: {job_id}")
+    return matches[0]
+
+
+def _slot_by_identity(queue: dict[str, Any], pod: str, gpu: int) -> Slot:
+    matches = [slot for slot in slots(queue) if slot.pod == pod and slot.gpu == gpu]
+    if len(matches) != 1:
+        raise QueueError(f"slot is not dispatch-enabled: {pod}/gpu{gpu}")
+    return matches[0]
+
+
 def _doctor_script(queue: dict[str, Any], job: dict[str, Any], slot: Slot) -> str:
     return _doctor_body(queue, job, slot) + (
         "printf '%s\\n' "
@@ -986,6 +1123,49 @@ def cmd_fill(
     }
 
 
+def cmd_boot_warmup(
+    queue: dict[str, Any], *, job_id: str, pod: str, gpu: int,
+    attempt_id: str, execute: bool, confirm: str | None,
+) -> dict[str, Any]:
+    """Run one tiny scene-import warmup without consuming a science namespace."""
+
+    if execute and confirm != WARMUP_CONFIRM:
+        raise QueueError(f"--execute requires --confirm {WARMUP_CONFIRM}")
+    job = _job_by_id(queue, _text(job_id, "job_id", safe_id=True))
+    if job["status"] not in {READY, BLOCKED}:
+        raise QueueError("boot warmup requires a ready or blocked source job")
+    slot = _slot_by_identity(queue, _text(pod, "pod", safe_id=True), gpu)
+    claim, _argv, run_dir = _boot_warmup_contract(queue, job, slot, attempt_id)
+    remote = _boot_warmup_script(queue, job, slot, attempt_id)
+    result: dict[str, Any] = {
+        "mode": "boot-warmup",
+        "dry_run": not execute,
+        "not_science": True,
+        "job_id": job["id"],
+        "resource": slot.name,
+        "run_dir": run_dir,
+        "claim_sha256": claim["content_sha256"],
+        "budget": claim["content"]["budget"],
+    }
+    if not execute:
+        result["ssh_argv"] = [
+            *_ssh_prefix(queue, slot.pod), f"bash -lc {shlex.quote(remote)}"
+        ]
+        return result
+
+    occupancy, _claims = live_snapshot(queue)
+    if occupancy[slot.name] >= slot.capacity:
+        raise QueueError(f"warmup slot is at capacity: {slot.name}")
+    result["remote_output"] = _run_ssh(
+        queue,
+        slot.pod,
+        remote,
+        timeout=WARMUP_BOOT_TIMEOUT_SECONDS + 60,
+        phase=f"boot-warmup:{job['id']}:{attempt_id}",
+    )
+    return result
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--queue", type=Path, required=True)
@@ -1000,6 +1180,13 @@ def _parser() -> argparse.ArgumentParser:
     fill.add_argument("--count", type=int, default=1)
     fill.add_argument("--execute", action="store_true")
     fill.add_argument("--confirm")
+    warmup = sub.add_parser("boot-warmup")
+    warmup.add_argument("--job-id", required=True)
+    warmup.add_argument("--pod", required=True)
+    warmup.add_argument("--gpu", required=True, type=int)
+    warmup.add_argument("--attempt-id", required=True)
+    warmup.add_argument("--execute", action="store_true")
+    warmup.add_argument("--confirm")
     return parser
 
 
@@ -1019,6 +1206,16 @@ def main(argv: list[str] | None = None) -> int:
                 execute=args.execute,
                 confirm=args.confirm,
                 count=args.count,
+            )
+        elif args.mode == "boot-warmup":
+            result = cmd_boot_warmup(
+                queue,
+                job_id=args.job_id,
+                pod=args.pod,
+                gpu=args.gpu,
+                attempt_id=args.attempt_id,
+                execute=args.execute,
+                confirm=args.confirm,
             )
         else:
             result = cmd_launch_next(queue, execute=args.execute, confirm=args.confirm)

@@ -105,7 +105,8 @@ joint/torque/qdot limit、观测、动作或 plant。以下任一项都独立判
 - 决定：`inconclusive`
 - 理由：公式、反向激励反例与 source gate 已进入 `main@61007e9`，但未做 runtime smoke 或训练。
 - 是否已纳入当前 setting：`no`
-- 局限/下一个 gate：先由 lean queue 对 exact source 做 no-Kit doctor，再按 Pod2 一圈一条发射；禁止手写 CLI 点火。
+- 局限/下一个 gate：先由 lean queue 对 exact source 做 no-Kit doctor 与独立 `boot-warmup`，探针退出且
+  无 fatal 后再按 Pod2 一圈一条发射；禁止手写 CLI 点火，warmup 不得进入成绩。
 
 ## 复现与证据
 

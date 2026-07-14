@@ -407,6 +407,69 @@ def test_doctor_and_launch_share_exact_claim_bound_argv_before_fresh_claim():
     assert launch_body.index("queue_claim.json") < launch_body.rindex(trainer)
 
 
+def test_boot_warmup_is_tiny_claim_bound_and_never_reuses_science_namespace():
+    queue = _queue()
+    job = queue["jobs"][0]
+    slot = Q.slots(queue)[2]
+    original_budget = dict(job["budget"])
+    claim, argv, run_dir = Q._boot_warmup_contract(
+        queue, job, slot, "conditional_gpu2_a1"
+    )
+    assert claim["content"]["purpose"] == "boot_warmup_not_science"
+    assert claim["content"]["budget"] == {
+        "num_envs": 1, "max_iterations": 2, "save_interval": 1
+    }
+    assert claim["content_sha256"] == Q._canonical_sha256(claim["content"])
+    assert argv[-1] == f"++training_launch_claim_sha256={claim['content_sha256']}"
+    assert "num_envs=1" in argv
+    assert "max_iterations=2" in argv
+    assert "algo.runner.save_interval=1" in argv
+    assert any(item.startswith("run_name=boot_warmup_") for item in argv)
+    assert f"/{job['source']['commit']}/{slot.pod}/gpu{slot.gpu}/" in run_dir
+    assert run_dir != job["run_dir"] and not run_dir.startswith(job["source"]["checkout"])
+    assert job["budget"] == original_budget
+
+    rendered = Q._boot_warmup_script(queue, job, slot, "conditional_gpu2_a1")
+    assert "warmup_claim.json" in rendered
+    assert "KIT_BOOT_TIMEOUT_S=180" in rendered
+    assert "num_envs=1" in rendered and "max_iterations=2" in rendered
+    assert "pkill" not in rendered and "killall" not in rendered
+
+
+def test_boot_warmup_requires_dedicated_confirmation_and_dispatch_slot():
+    queue = _queue()
+    try:
+        Q.cmd_boot_warmup(
+            queue,
+            job_id="job0",
+            pod="pod1",
+            gpu=0,
+            attempt_id="a1",
+            execute=True,
+            confirm=Q.CONFIRM,
+        )
+    except Q.QueueError as exc:
+        assert Q.WARMUP_CONFIRM in str(exc)
+    else:
+        raise AssertionError("science confirmation token authorized a boot warmup")
+
+    queue["dispatch_pods"] = ["pod2"]
+    try:
+        Q.cmd_boot_warmup(
+            queue,
+            job_id="job0",
+            pod="pod1",
+            gpu=0,
+            attempt_id="a1",
+            execute=False,
+            confirm=None,
+        )
+    except Q.QueueError as exc:
+        assert "not dispatch-enabled" in str(exc)
+    else:
+        raise AssertionError("reserved Pod received a boot warmup")
+
+
 def test_fill_is_one_scheduler_sequence_and_stops_before_claim_on_doctor_failure(
     tmp_path, monkeypatch
 ):

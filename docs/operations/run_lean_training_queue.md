@@ -10,6 +10,33 @@ qdot matched-control 的首次冷启动也在 dynamic URDF import/scene creation
 launcher 下一版须增加日志无进展 watchdog 与 scene-created 等阶段 receipt；长期应消费内容绑定的预转换
 USD，避免每条训练重新动态导入 URDF。
 
+### 新 source 先做冷启动探针
+
+动态 URDF importer 会在 reward/contract/PPO 之前偶发卡死，所以新 source 不再用正式科学 namespace
+试冷缓存。[`boot-warmup`](../DEFINITIONS.md#boot-warmup) 从一条已预注册 job 派生完全独立的
+`_boot_warmups/<source>/<pod>/gpu<N>/<attempt>`：动作/bank/exam/plant/seed 仍绑定，但 harness 强制
+`1 env × 2 updates`、save interval `1`、独立 schema-2 claim 和 180 秒总 boot 上限。它使用专用确认 token，
+不能被科学 launch token 误授权；输出明确写 `not_science=true`。
+
+```bash
+python3 scripts/run_lean_training_queue.py \
+  --queue configs/phase1_fresh_c_mechanism_queue_20260714.yaml \
+  boot-warmup \
+  --job-id fresh_c_conditional_face_matched_control \
+  --pod pod2 --gpu 1 --attempt-id conditional_61007e9_gpu1_a1
+
+python3 scripts/run_lean_training_queue.py \
+  --queue configs/phase1_fresh_c_mechanism_queue_20260714.yaml \
+  boot-warmup \
+  --job-id fresh_c_conditional_face_matched_control \
+  --pod pod2 --gpu 1 --attempt-id conditional_61007e9_gpu1_a1 \
+  --execute --confirm SIM_ONLY_LAUNCH_ONE_BOOT_WARMUP
+```
+
+先看 dry-run。已有 attempt directory 一律拒绝覆盖；reserved Pod 不在 `dispatch_pods` 时也会在 SSH 前拒绝。
+出现 `Learning iteration` 只证明 importer/scene/simulation 能走通，仍须等 warmup exact PID 退出并核对无
+fatal，才可启动正式 control/treatment。warmup 的模型、Reward 与 checkpoint 一律不得进入成绩表。
+
 这个入口解决的是“动作和题库已经决定后，为什么还要手拼一长串命令”。一条 YAML job 必须同时绑定：
 
 - 一个动作名与它的一个或多个 motion 文件；

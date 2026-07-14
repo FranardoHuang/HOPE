@@ -26,6 +26,10 @@
   有同样 warning 而能完成 scene creation，故排除 reward 与 warning 字面为差异根因。exact PGID 收口并
   保全后，只登记一次 unchanged retry-v2；重复则停止 retry，转 boot watchdog/预转换 USD。
 
+- lean harness 新增独立 `boot-warmup`：从 exact job 派生 1 env×2 update、独立 claim/namespace、180 秒
+  boot 上限的非科学冷启动探针，reserved Pod 与科学确认 token 均 fail closed；queue suite `23 passed`。
+  尚未在 Pod 执行，不能写成 runtime 通过。
+
 - Lean queue P0 已把重复/owned Hydra override、control flag/interpolation、run-dir 覆盖与未解析配方挡在
   claim 前；doctor 用真实最终 argv 做 no-Kit compose，schema-2 canonical claim 自动绑定 source、argv、
   预算和 motion/bank/exam identity。五机制 `+500` 中 V1+V2 出现 composite `0.0893` / normal pass
