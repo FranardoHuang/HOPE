@@ -44,7 +44,7 @@ def test_preregistered_pair_is_pod2_only_blocked_and_unassigned():
     queue = Q.load_queue(QUEUE_PATH)
 
     assert queue["launch_authorized"] is False
-    assert queue["preregistration_status"] == "blocked_pending_representative_full_scene_probe"
+    assert queue["preregistration_status"] == "blocked_pending_terminal_full_scene_probe"
     assert queue["dispatch_pods"] == ["pod2"]
     assert [job["id"] for job in queue["jobs"]] == [
         "fresh_c_v1v2_base_decel_matched_control",
@@ -65,7 +65,7 @@ def test_pair_copies_the_complete_active_recipe_and_freezes_one_seed_budget():
         if job["id"] == "fresh_c_v1_v2_combined_retry_v2"
     )
 
-    for job in queue["jobs"]:
+    for index, job in enumerate(queue["jobs"], start=1):
         assert job["recipe"]["base"] == active_v1v2["recipe"]["base"]
         assert job["seed"] == 3
         assert job["budget"] == {
@@ -74,15 +74,26 @@ def test_pair_copies_the_complete_active_recipe_and_freezes_one_seed_budget():
             "save_interval": 100,
         }
         assert job["milestones"] == [200, 500, 1000]
-        assert job["resource"] == {"policy": "dispatch_gpu_round_robin"}
+        assert job["resource"] == {
+            "policy": "dispatch_gpu_round_robin",
+            "preferred_slot": f"pod2/gpu{index}",
+        }
 
 
 def test_base_deceleration_weight_is_the_only_matched_pair_delta():
     queue = Q.load_queue(QUEUE_PATH)
     control, treatment = queue["jobs"]
 
-    for identity in ("motion", "bank", "exam", "source", "seed", "budget", "milestones", "resource"):
+    for identity in ("motion", "bank", "exam", "source", "seed", "budget", "milestones"):
         assert control[identity] == treatment[identity]
+    assert control["resource"] == {
+        "policy": "dispatch_gpu_round_robin",
+        "preferred_slot": "pod2/gpu1",
+    }
+    assert treatment["resource"] == {
+        "policy": "dispatch_gpu_round_robin",
+        "preferred_slot": "pod2/gpu2",
+    }
     assert control["recipe"]["base"] == treatment["recipe"]["base"]
 
     control_delta = _override_map(control["recipe"]["delta"])
@@ -108,8 +119,8 @@ def test_base_deceleration_weight_is_the_only_matched_pair_delta():
 def test_exact_p1_source_is_bound_but_normal_launch_remains_blocked():
     queue = Q.load_queue(QUEUE_PATH)
     for job in queue["jobs"]:
-        assert job["source"]["checkout"] == "/workspace/codexschema/nohope_p1_077e70c"
-        assert job["source"]["commit"] == "077e70cfd89cfe21cdc24dc928e62b3fc2a8820f"
+        assert job["source"]["checkout"] == "/workspace/codexschema/nohope_p1_c7e1a90"
+        assert job["source"]["commit"] == "c7e1a907353b8034ae3f76646e1dcd40a2ce895d"
         ignored = job["source"]["ignored_runtime_asset"]
         assert ignored["file_count"] == 46
         assert ignored["total_file_bytes"] == 15378264
@@ -135,6 +146,7 @@ def test_exact_p1_source_is_bound_but_normal_launch_remains_blocked():
         "num_envs": 4096,
         "max_iterations": 2,
         "save_interval": 1,
+        "milestones": [1],
     }
 
 

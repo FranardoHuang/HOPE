@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import os
 from pathlib import Path
 import shlex
@@ -53,6 +54,7 @@ def _queue(job_count: int = 1) -> dict:
     return {
         "schema_version": 1,
         "simulation_only": True,
+        "launch_authorized": True,
         "ssh": {"key": "/key"},
         "pods": {
             "pod1": {"host": "pod1", "port": 1, "gpus": [0, 1, 2], "max_trainers_per_gpu": 4},
@@ -168,6 +170,71 @@ def test_dispatch_pods_excludes_reserved_pod_but_keeps_round_robin():
         "pod2/gpu0", "pod2/gpu1",
     ]
     assert all(slot.pod == "pod2" for _, slot in assignments)
+
+
+def test_live_snapshot_contacts_only_dispatch_pods(monkeypatch):
+    queue = _queue()
+    queue["dispatch_pods"] = ["pod2"]
+    queue["jobs"][0]["resource"] = {"policy": "dispatch_gpu_round_robin"}
+    calls = []
+
+    def fake_ssh(_queue, pod, _remote, **_kwargs):
+        calls.append(pod)
+        assert pod == "pod2"
+        return json.dumps(
+            {
+                "compute_rows": [],
+                "gpu_rows": ["0, GPU-20", "1, GPU-21", "2, GPU-22"],
+                "jobs": {},
+            }
+        )
+
+    monkeypatch.setattr(Q, "_run_ssh", fake_ssh)
+    occupancy, claims = Q.live_snapshot(queue)
+    assert calls == ["pod2"]
+    assert occupancy == {
+        "pod2/gpu0": 0,
+        "pod2/gpu1": 0,
+        "pod2/gpu2": 0,
+    }
+    assert claims == {}
+
+
+def test_launch_authorized_is_explicit_and_blocks_launch_before_ssh(
+    tmp_path, monkeypatch
+):
+    missing = _queue()
+    del missing["launch_authorized"]
+    with pytest.raises(Q.QueueError, match="launch_authorized must be an explicit"):
+        Q.load_queue(_write(tmp_path, missing))
+
+    malformed = _queue()
+    malformed["launch_authorized"] = "false"
+    with pytest.raises(Q.QueueError, match="launch_authorized must be an explicit"):
+        Q.load_queue(_write(tmp_path, malformed))
+
+    queue = _queue()
+    queue["launch_authorized"] = False
+    calls = []
+    monkeypatch.setattr(Q, "live_snapshot", lambda *_args: calls.append("snapshot"))
+    monkeypatch.setattr(Q, "_run_ssh", lambda *_args, **_kwargs: calls.append("ssh"))
+    for execute in (False, True):
+        with pytest.raises(Q.QueueError, match="launch_authorized is false"):
+            Q.cmd_launch_next(
+                queue,
+                execute=execute,
+                confirm=Q.CONFIRM if execute else None,
+            )
+        with pytest.raises(Q.QueueError, match="launch_authorized is false"):
+            Q.cmd_fill(
+                queue,
+                execute=execute,
+                confirm=Q.CONFIRM if execute else None,
+                count=1,
+            )
+    assert calls == []
+    assert Q.cmd_status(queue, live=False)["mode"] == "status"
+    assert Q.cmd_doctor(queue, live=False)["mode"] == "doctor"
 
 
 def test_six_gpu_policy_rejects_restricted_dispatch_set(tmp_path):
@@ -1227,14 +1294,37 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
     ready = [job for job in queue["jobs"] if job["status"] == "ready"]
     blocked = [job for job in queue["jobs"] if job["status"] == "blocked"]
     rejected = [job for job in queue["jobs"] if job["status"] == "rejected"]
-    assert len(ready) == 7
-    assert len(rejected) == 8
+    complete = [job for job in queue["jobs"] if job["status"] == "complete"]
+    assert ready == []
+    assert len(rejected) == 13
+    assert {job["id"] for job in complete} == {
+        "fresh_c_qdot_limit_hinge_w5_retry_v2",
+        "fresh_c_qdot_limit_hinge_matched_control_retry_v2",
+    }
+    terminal_by_id = {job["id"]: job for job in [*rejected, *complete]}
+    for job_id in (
+        "fresh_c_v1_free_wrist_velocity_retry_v2",
+        "fresh_c_v2_motion_window_scale_retry_v2",
+        "fresh_c_v1_v2_combined_retry_v2",
+    ):
+        assert "resource handoff terminal" in terminal_by_id[job_id]["blocker"]
+        assert "not a behavior failure" in terminal_by_id[job_id]["blocker"]
+    for job_id in (
+        "fresh_c_base_deceleration_retry_v2",
+        "fresh_c_post_swing_replay_half_retry_v2",
+    ):
+        assert "activation closed" in terminal_by_id[job_id]["blocker"]
+        assert "not a behavior failure" in terminal_by_id[job_id]["blocker"]
     assert [job["id"] for job in blocked] == [
         "fresh_c_conditional_face_w04",
         "fresh_c_conditional_face_matched_control_p1r1",
         "fresh_c_conditional_face_w04_p1r1",
     ]
     assert queue["dispatch_pods"] == ["pod2"]
+    assert queue["launch_authorized"] is False
+    assert queue["preregistration_status"] == (
+        "blocked_pending_terminal_full_scene_probe"
+    )
     conditional = {
         job["id"]: job for job in queue["jobs"]
         if job["id"].startswith("fresh_c_conditional_face_")
@@ -1247,19 +1337,24 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
         "fresh_c_conditional_face_matched_control_p1r1": "blocked",
         "fresh_c_conditional_face_w04_p1r1": "blocked",
     }
-    assert all(
-        job["resource"]["preferred_slot"] == "pod2/gpu1"
-        for job in conditional.values()
-    )
+    assert {
+        job_id: job["resource"]["preferred_slot"]
+        for job_id, job in conditional.items()
+    } == {
+        "fresh_c_conditional_face_matched_control": "pod2/gpu1",
+        "fresh_c_conditional_face_w04": "pod2/gpu1",
+        "fresh_c_conditional_face_matched_control_p1r1": "pod2/gpu1",
+        "fresh_c_conditional_face_w04_p1r1": "pod2/gpu2",
+    }
     p1_pair = [
         conditional["fresh_c_conditional_face_matched_control_p1r1"],
         conditional["fresh_c_conditional_face_w04_p1r1"],
     ]
     assert all(job["runtime_binding"] is True for job in p1_pair)
     assert all(
-        job["source"]["checkout"] == "/workspace/codexschema/nohope_p1_077e70c"
+        job["source"]["checkout"] == "/workspace/codexschema/nohope_p1_c7e1a90"
         and job["source"]["commit"]
-        == "077e70cfd89cfe21cdc24dc928e62b3fc2a8820f"
+        == "c7e1a907353b8034ae3f76646e1dcd40a2ce895d"
         and job["source"]["ignored_runtime_asset"]["file_count"] == 46
         and job["source"]["ignored_runtime_asset"]["total_file_bytes"]
         == 15378264
@@ -1356,19 +1451,14 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
         else:
             assert conditional_weight == []
     plan = Q.cmd_plan(queue, live=False)
-    assert len(plan["assignments"]) == 7
-    assert [item["resource"] for item in plan["assignments"]] == [
-        "pod2/gpu0", "pod2/gpu1", "pod2/gpu2",
-        "pod2/gpu0", "pod2/gpu1", "pod2/gpu2",
-        "pod2/gpu0",
-    ]
+    assert plan["assignments"] == []
     retry_ready = [job for job in ready if job["id"].endswith("_retry_v2")]
-    assert len(retry_ready) == 7
+    assert retry_ready == []
     retry_by_id = {job["id"]: job for job in retry_ready}
     retryable_rejected = [
         job for job in rejected if f"{job['id']}_retry_v2" in retry_by_id
     ]
-    assert len(retryable_rejected) == 7
+    assert retryable_rejected == []
     for attempt1 in retryable_rejected:
         retry = retry_by_id[f"{attempt1['id']}_retry_v2"]
         assert retry["recipe"] == attempt1["recipe"]
@@ -1376,3 +1466,62 @@ def test_active_fresh_c_queue_is_one_seed_one_mechanism_per_ready_cell():
         assert retry["bank"] == attempt1["bank"]
         assert retry["exam"] == attempt1["exam"]
         assert retry["run_dir"] != attempt1["run_dir"]
+
+    for job in p1_pair:
+        job["status"] = "ready"
+        job["blocker"] = None
+    activated = Q._assign(
+        queue, {slot.name: 0 for slot in Q.slots(queue)}
+    )
+    assert [(job["id"], slot.name) for job, slot in activated] == [
+        ("fresh_c_conditional_face_matched_control_p1r1", "pod2/gpu1"),
+        ("fresh_c_conditional_face_w04_p1r1", "pod2/gpu2"),
+    ]
+
+
+def test_v1v2_base_decel_interaction_queue_stays_blocked_and_splits_after_unlock():
+    queue = Q.load_queue(
+        ROOT / "configs" / "phase1_fresh_c_v1v2_decel_interaction_queue_20260714.yaml"
+    )
+    assert queue["launch_authorized"] is False
+    assert queue["preregistration_status"] == (
+        "blocked_pending_terminal_full_scene_probe"
+    )
+    assert queue["dispatch_pods"] == ["pod2"]
+    assert Q.cmd_plan(queue, live=False)["assignments"] == []
+    assert [job["status"] for job in queue["jobs"]] == ["blocked", "blocked"]
+    assert [job["resource"]["preferred_slot"] for job in queue["jobs"]] == [
+        "pod2/gpu1",
+        "pod2/gpu2",
+    ]
+    assert all(
+        job["runtime_binding"] is True
+        and job["source"]["checkout"]
+        == "/workspace/codexschema/nohope_p1_c7e1a90"
+        and job["source"]["commit"]
+        == "c7e1a907353b8034ae3f76646e1dcd40a2ce895d"
+        for job in queue["jobs"]
+    )
+
+    def delta_map(job):
+        return {
+            item.split("=", 1)[0].lstrip("+"): item.split("=", 1)[1]
+            for item in job["recipe"]["delta"]
+        }
+
+    control, treatment = [delta_map(job) for job in queue["jobs"]]
+    assert {
+        key: (control[key], treatment[key])
+        for key in control if control[key] != treatment[key]
+    } == {"task.rewards.base_decel_weight": ("0.0", "1.0")}
+
+    for job in queue["jobs"]:
+        job["status"] = "ready"
+        job["blocker"] = None
+    activated = Q._assign(
+        queue, {slot.name: 0 for slot in Q.slots(queue)}
+    )
+    assert [(job["id"], slot.name) for job, slot in activated] == [
+        ("fresh_c_v1v2_base_decel_matched_control", "pod2/gpu1"),
+        ("fresh_c_v1v2_base_decel_w1", "pod2/gpu2"),
+    ]

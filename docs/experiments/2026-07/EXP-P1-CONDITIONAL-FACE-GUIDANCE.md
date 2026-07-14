@@ -166,3 +166,9 @@ clean detached source 中 Git 忽略的 A3 `model.urdf`；这不是 conditional 
 显式绑定 donor `6d93bcb` 与接受的 46-file tree，且 science claim 会绑定完整 ignored-asset contract。
 必须先走 selected-Pod-only `prepare-source-assets` 产生 source 外 exact receipt，再由 doctor 重算并消费；
 本次源码工作不执行该水合、不重发 probe，pair 继续 blocked。
+
+pre-probe 机器清单现改绑 exact `main@c7e1a90` 与
+`/workspace/codexschema/nohope_p1_c7e1a90`；control/treatment 明确分到 Pod2 GPU1/GPU2，但两行仍
+`blocked`，顶层 `launch_authorized=false`。普通 live snapshot 只访问 `dispatch_pods=[pod2]`，不会读取
+reserved Pod1；terminal probe result 未通过前，`fill/launch-next` 会在任何 SSH 前拒绝。本次只闭合控制面，
+没有水合、probe、checkpoint 或行为结论。

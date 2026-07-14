@@ -13,6 +13,11 @@
 
 ## 2026-07-14
 
+- Lean queue 加入显式 `launch_authorized` 发射闩：当前两份 P1 清单在 terminal probe 前保持 false，
+  `fill/launch-next` 零 SSH 拒绝；live snapshot 只访问 Pod2。历史七条 ready 行已按既有证据终态化，新
+  conditional 与 V1+V2×base-decel 配对改绑 `main@c7e1a90`、分列 Pod2 GPU1/GPU2，仍未解锁或点火。
+  见 [G05](gates/G05_isaac_training_first_loop.md)与[操作](operations/run_lean_training_queue.md)。
+
 - Kit watchdog 的 marker-priority 测试移除亚秒 sleep 调度竞态：现在于第二次 marker probe 同步注入
   marker，仍直接验证 timeout/stale 已到边界时 marker 优先，且不改生产 launcher 语义；相关专项
   `15 passed`。见 [G05](gates/G05_isaac_training_first_loop.md)。

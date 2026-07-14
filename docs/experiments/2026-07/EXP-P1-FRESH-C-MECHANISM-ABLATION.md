@@ -180,3 +180,12 @@ MuJoCo/vendor judge。训练内曲线本身仍不构成采用或部署证据。
 
 focused 回归为 `19 passed`，并继续覆盖 active queue。此处只关闭发射前 source-contract 缺口：没有新增
 claim、checkpoint、机制成绩或 qdot runtime 证据，G05 继续 `Partial`。
+
+## Pod2-only pre-probe 机器处置
+
+2026-07-14 的 pre-probe 清单把历史可运行行全部终态化：qdot `-5/0` 两行按已验证的自然
+`model_1000` 终档标为 `complete`；V1/V2/V1+V2 按 Pod1 资源移交的 `792/782/743` 收口标为
+`rejected`，明确不是行为失败；base-decel/post-swing 只保留已验证的 `model_500` screen，也以
+“activation closed、非行为失败、不得重发该 namespace”终结。新的 conditional P1 pair 仍 blocked，source
+改绑 `main@c7e1a90`，control/treatment 分别优先 Pod2 GPU1/GPU2。队列顶层发射闩为 false；本次没有连接
+Pod、没有 probe 或科学训练结果。

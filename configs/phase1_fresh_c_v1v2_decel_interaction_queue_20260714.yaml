@@ -1,7 +1,7 @@
 schema_version: 1
 simulation_only: true
 launch_authorized: false
-preregistration_status: blocked_pending_representative_full_scene_probe
+preregistration_status: blocked_pending_terminal_full_scene_probe
 
 ssh:
   key: ~/.ssh/id_ed25519_runpod
@@ -19,8 +19,7 @@ pods:
     max_trainers_per_gpu: 3
 
 # Pod1 is reserved for Yikang. Both blocked cells may eventually dispatch only
-# to Pod2, after an exact reviewed P1 source replaces the fail-closed source
-# placeholder below.
+# to Pod2 after the exact reviewed P1 source below passes its terminal probe.
 dispatch_pods: [pod2]
 
 shared_control:
@@ -105,8 +104,8 @@ x-exam: &exam
 # source-pinned stale-log handling, and the representative full-scene probe.
 # Both jobs remain blocked until the separate probe receipt is audited.
 x-source: &source
-  checkout: /workspace/codexschema/nohope_p1_077e70c
-  commit: 077e70cfd89cfe21cdc24dc928e62b3fc2a8820f
+  checkout: /workspace/codexschema/nohope_p1_c7e1a90
+  commit: c7e1a907353b8034ae3f76646e1dcd40a2ce895d
   ignored_runtime_asset:
     target_relative_path: hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
     donor:
@@ -231,7 +230,9 @@ jobs:
     seed: 3
     budget: *budget
     milestones: *milestones
-    resource: *resource
+    resource:
+      policy: dispatch_gpu_round_robin
+      preferred_slot: pod2/gpu1
     run_name: phase1_fresh_c_v1v2_base_decel_control_seed3_20260714
     run_dir: /workspace/codexschema/phase1_fresh_c_v1v2_decel_interaction_20260714/runs/phase1_fresh_c_v1v2_base_decel_control_seed3
 
@@ -248,5 +249,8 @@ jobs:
         - task.rewards.joint_velocity_limit_hinge_weight=0.0
         - task.rewards.joint_velocity_limit_hinge_margin=0.85
         - ++task.rewards.racket_face_conditional_guidance_weight=0.0
+    resource:
+      policy: dispatch_gpu_round_robin
+      preferred_slot: pod2/gpu2
     run_name: phase1_fresh_c_v1v2_base_decel_w1_seed3_20260714
     run_dir: /workspace/codexschema/phase1_fresh_c_v1v2_decel_interaction_20260714/runs/phase1_fresh_c_v1v2_base_decel_w1_seed3

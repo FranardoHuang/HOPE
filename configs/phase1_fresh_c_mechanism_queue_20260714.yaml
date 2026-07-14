@@ -1,5 +1,7 @@
 schema_version: 1
 simulation_only: true
+launch_authorized: false
+preregistration_status: blocked_pending_terminal_full_scene_probe
 
 ssh:
   key: ~/.ssh/id_ed25519_runpod
@@ -16,14 +18,14 @@ pods:
     gpus: [0, 1, 2]
     max_trainers_per_gpu: 3
 
-# Pod1 is reserved for Yikang's sprint from 2026-07-14 onward.  The harness
-# still reads its old claims to prevent duplicate experiments, but may launch
-# new work only on Pod2.
+# Pod1 is reserved for Yikang's sprint from 2026-07-14 onward.  Both live
+# inventory and new work are restricted to Pod2; historical rows below are
+# terminal or blocked so the scheduler does not depend on Pod1 claims.
 dispatch_pods: [pod2]
 
-# This is the matched comparison contract, not an extra queue row.  All six
-# ready cells keep fresh initialization, guidance=0, seed=3 and this complete
-# base recipe.  Their only delta is the named mechanism (two deltas for V1+V2).
+# This is the historical matched comparison contract, not an extra queue row.
+# Its completed/rejected cells stay immutable; only the blocked P1 pair may be
+# unlocked after a terminal full-scene probe passes.
 shared_control:
   human_name: fresh C control, shared-face guidance off
   initialization: fresh
@@ -59,8 +61,8 @@ x-conditional-source: &conditional_source
   checkout: /workspace/codexschema/nohope_conditional_face_guidance_61007e9
   commit: 61007e93879f35677e4c7d38cf7f681f324f9571
 x-p1-source: &p1_source
-  checkout: /workspace/codexschema/nohope_p1_077e70c
-  commit: 077e70cfd89cfe21cdc24dc928e62b3fc2a8820f
+  checkout: /workspace/codexschema/nohope_p1_c7e1a90
+  commit: c7e1a907353b8034ae3f76646e1dcd40a2ce895d
   ignored_runtime_asset:
     target_relative_path: hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
     donor:
@@ -285,40 +287,40 @@ jobs:
   - <<: *v1_free_wrist_attempt1
     id: fresh_c_v1_free_wrist_velocity_retry_v2
     human_name: fresh C plus V1 free wrist linear-velocity imitation, infra retry v2
-    status: ready
-    blocker: null
+    status: rejected
+    blocker: resource handoff terminal at iteration 792 with model_700 preserved; this is not a behavior failure and this namespace must not relaunch
     run_name: phase1_fresh_c_v1_free_wrist_vel_seed3_retry_v2_20260714
     run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_v1_free_wrist_vel_seed3_retry_v2
 
   - <<: *v2_motion_window_attempt1
     id: fresh_c_v2_motion_window_scale_retry_v2
     human_name: fresh C plus V2 quarter motion imitation inside strike window, infra retry v2
-    status: ready
-    blocker: null
+    status: rejected
+    blocker: resource handoff terminal at iteration 782 with model_700 preserved; this is not a behavior failure and this namespace must not relaunch
     run_name: phase1_fresh_c_v2_motion_window_scale_seed3_retry_v2_20260714
     run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_v2_motion_window_scale_seed3_retry_v2
 
   - <<: *v1_v2_attempt1
     id: fresh_c_v1_v2_combined_retry_v2
     human_name: fresh C plus V1 and V2 interaction cell, infra retry v2
-    status: ready
-    blocker: null
+    status: rejected
+    blocker: resource handoff terminal at iteration 743 with model_700 preserved; this is not a behavior failure and this namespace must not relaunch
     run_name: phase1_fresh_c_v1_v2_seed3_retry_v2_20260714
     run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_v1_v2_seed3_retry_v2
 
   - <<: *base_decel_attempt1
     id: fresh_c_base_deceleration_retry_v2
     human_name: fresh C plus pre-strike base deceleration reward, infra retry v2
-    status: ready
-    blocker: null
+    status: rejected
+    blocker: current activation closed after the validated model_500 screen; this is not a behavior failure and this namespace must not relaunch
     run_name: phase1_fresh_c_base_decel_seed3_retry_v2_20260714
     run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_base_decel_seed3_retry_v2
 
   - <<: *post_swing_attempt1
     id: fresh_c_post_swing_replay_half_retry_v2
     human_name: fresh C plus fifty-percent post-swing replay starts, infra retry v2
-    status: ready
-    blocker: null
+    status: rejected
+    blocker: current activation closed after the validated model_500 screen; this is not a behavior failure and this namespace must not relaunch
     run_name: phase1_fresh_c_post_swing_half_seed3_retry_v2_20260714
     run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_post_swing_half_seed3_retry_v2
 
@@ -351,7 +353,7 @@ jobs:
   - <<: *qdot_attempt1
     id: fresh_c_qdot_limit_hinge_w5_retry_v2
     human_name: fresh C plus actual 31-joint qdot-limit tail penalty, infra retry v2
-    status: ready
+    status: complete
     blocker: null
     run_name: phase1_fresh_c_qdot_hinge_w5_seed3_retry_v2_20260714
     run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_qdot_hinge_w5_seed3_retry_v2
@@ -380,7 +382,7 @@ jobs:
   - <<: *qdot_control_attempt1
     id: fresh_c_qdot_limit_hinge_matched_control_retry_v2
     human_name: fresh C qdot-limit matched control, unchanged infra retry v2
-    status: ready
+    status: complete
     blocker: null
     run_name: phase1_fresh_c_qdot_hinge_control_seed3_retry_v2_20260714
     run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_qdot_hinge_control_seed3_retry_v2
@@ -444,6 +446,9 @@ jobs:
     blocker: blocked_on_exact_4096_environment_full_scene_probe_passing_on_pod2_gpu1
     source: *p1_source
     runtime_binding: true
+    resource:
+      policy: dispatch_gpu_round_robin
+      preferred_slot: pod2/gpu1
     run_name: phase1_fresh_c_conditional_face_control_p1r1_seed3_20260714
     run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_conditional_face_control_p1r1_seed3
 
@@ -460,5 +465,8 @@ jobs:
         - task.rewards.joint_velocity_limit_hinge_weight=0.0
         - task.rewards.joint_velocity_limit_hinge_margin=0.85
         - ++task.rewards.racket_face_conditional_guidance_weight=-0.4
+    resource:
+      policy: dispatch_gpu_round_robin
+      preferred_slot: pod2/gpu2
     run_name: phase1_fresh_c_conditional_face_w04_p1r1_seed3_20260714
     run_dir: /workspace/codexschema/phase1_fresh_c_mechanism_20260714/runs/phase1_fresh_c_conditional_face_w04_p1r1_seed3

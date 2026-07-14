@@ -1,5 +1,6 @@
 schema_version: 1
 simulation_only: true
+launch_authorized: false
 
 ssh:
   key: ~/.ssh/id_ed25519_runpod

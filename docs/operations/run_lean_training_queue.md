@@ -1,9 +1,9 @@
 # 轻量 YAML 训练队列
 
-状态：五个机制 `retry-v2` 已越过 `+500`；qdot 的两次不同 physical-GPU 冷启动都曾卡在 A3 URDF
-import，不能解释成 reward 失败。P0 harness 已强制 no-Kit Hydra compose、原子 run-dir 与 canonical
-claim；P1 source gate 新增显式 opt-in 的 trainer-owned exact log binding、不可覆盖里程碑取证与 phase telemetry。
-P1 尚未用 exact source 在 Pod 运行，G05 仍为 `Partial`，这不是行为晋级。
+状态：旧机制行已完成机器终态处置，qdot `-5/0` 自然终档，其余历史 namespace 不再发射。两个 P1 配对
+现绑定 `main@c7e1a90` 的 clean checkout `/workspace/codexschema/nohope_p1_c7e1a90`，但 terminal
+full-scene probe 尚未通过；两份队列的 [`launch_authorized`](../DEFINITIONS.md#launch-authorized) 都是
+`false`，科学 `fill/launch-next` 会在 SSH 前拒绝。G05 仍为 `Partial`，这不是行为晋级。
 
 qdot matched-control 的首次冷启动也在 dynamic URDF import/scene creation 前停住；相同 warning 在成功臂
 同样存在，不能拿 warning 字面当根因。旧 namespace 已保全并拒绝，只有 unchanged retry-v2 可再试一次。
@@ -106,7 +106,8 @@ python3 scripts/run_lean_training_queue.py \
 非 `/workspace` 或重复资产。声明了 `preferred_slot` 的 job 只能在该槽探测，reserved Pod 在 SSH 前拒绝。
 execute 的外层容量预检只 SSH 读取用户明确选择的 dispatch Pod/GPU，不调用普通 fill 用的 all-Pod
 `live_snapshot`；随后远端仍在同一 selected GPU 的 fd8 短锁内复核容量。这样 Pod2-only probe 不会因防重复
-逻辑触碰 reserved Pod1，普通 fill/claim 的跨 Pod 防重复语义不变。
+逻辑触碰 reserved Pod1；普通 fill/claim 现在也只读取 `dispatch_pods`，交接前靠历史行终态化而不是访问
+reserved Pod 防重复。
 远端在 fd8 短锁内重查容量，用 plain `mkdir` 和 no-clobber
 `full_scene_probe_claim.json` 拒绝复用 attempt；显式使用 source-pinned launcher 的 900 秒 hard timeout、
 180 秒 content-stale watchdog 与 `Learning iteration` marker。
@@ -182,13 +183,14 @@ robot runner。`ready` job 还会在任何 SSH 前拒绝全零 commit、非 `/wo
 重复 input identity；blocked 示例可以保留尚未填实的占位值，但永远不会被调度。run directory 不是
 “存在就复用”：任何已有目录、文件或 symlink 都会让原子创建失败，因此旧日志和 state 不会被覆盖。
 
-Pod 容量上限固定为 Pod1 每卡最多 4 个本项目 trainer、Pod2 每卡最多 3 个；但真正可发射的机器由
-`dispatch_pods` 显式收窄。2026-07-14 起 active queue 设为 `[pod2]`，Pod1 全留给 Yikang：调度器仍只读
-Pod1 的旧 claim 以防同一 job 在 Pod2 重复发射，却绝不会把新 assignment 放到 Pod1。Pod2 按
-`gpu0 → gpu1 → gpu2` 完成一整圈，才给任一卡放第二条；真实 launch 前用 `nvidia-smi`
-把其他人的 compute process 也保守计入占用。并发 `launch-next --execute` 先竞争单控制端全局 scheduler
-`flock`；只有持锁者才重新读取两 Pod 六卡、跳过已有 claim、做 round-robin 选槽并启动，因此同一控制端
-的多个 agent 不会基于同一份旧快照抢同一槽。`nvidia-smi` 偶尔会为同一 trainer PID 返回重复行；live
+Pod 容量上限固定为 Pod1 每卡最多 4 个本项目 trainer、Pod2 每卡最多 3 个；但真正可发射和读取的机器都由
+`dispatch_pods` 显式收窄。2026-07-14 起 active queue 设为 `[pod2]`，Pod1 全留给 Yikang：普通
+`status/doctor/fill/launch-next/attest` 的 live snapshot 只 SSH Pod2，不再以跨 Pod 防重为由读取 Pod1。
+因此同一变更也把所有历史 `ready` 行改为 `complete/rejected`，新 P1 使用从未发射的 run namespace；不能
+单独恢复旧 `ready` 状态。Pod2 按 `gpu0 → gpu1 → gpu2` 完成一整圈，才给任一卡放第二条；真实 launch 前用
+`nvidia-smi` 把其他人的 compute process 也保守计入占用。并发 `launch-next --execute` 先竞争单控制端全局
+scheduler `flock`；只有持锁者才重新读取 Pod2 三卡、跳过已有 claim、做 round-robin 选槽并启动，因此同一
+控制端的多个 agent 不会基于同一份旧快照抢同一槽。`nvidia-smi` 偶尔会为同一 trainer PID 返回重复行；live
 snapshot 与远端最后容量检查都按每 GPU 的唯一纯数字 PID 计数，重复行不能把一条 trainer 算成两条。
 远端每 GPU 的 boot lock 仍作最后一道容量/claim 检查。
 
@@ -220,7 +222,8 @@ launch 自身先在远端短锁内完成与 standalone `doctor` 相同的 source
 
 ## 命令
 
-所有模式默认 dry-run，不连 Pod：
+`plan/status/doctor` 默认不连 Pod。`launch-next/fill` 还要求机器清单显式
+`launch_authorized: true`；当前 pre-probe 队列调用它们会在任何 SSH 前拒绝：
 
 ```bash
 python3 scripts/run_lean_training_queue.py \
@@ -233,21 +236,19 @@ python3 scripts/run_lean_training_queue.py \
   --queue configs/phase1_fresh_c_mechanism_queue_20260714.yaml doctor
 
 python3 scripts/run_lean_training_queue.py \
-  --queue configs/phase1_fresh_c_mechanism_queue_20260714.yaml fill --count 1
-
-python3 scripts/run_lean_training_queue.py \
-  --queue configs/lean_training_queue.example.yaml launch-next
+  --queue configs/phase1_fresh_c_mechanism_queue_20260714.yaml plan
 
 python3 scripts/run_lean_training_queue.py \
   --queue configs/lean_training_queue.example.yaml \
   attest-milestone --job-id REPLACE_WITH_JOB_ID --milestone 200
 ```
 
-`plan --live` / `status --live` 各配置 Pod 只建立一个低频只读 SSH：只把 `dispatch_pods` 的 GPU 计入
-可调度占用，但读取全部旧 claim 防重复。`doctor --live`
+`plan --live` / `status --live` 只对 `dispatch_pods` 中的每台机器建立一个低频只读 SSH；当前两队列因此
+只读 Pod2 的 GPU 与 claim。`doctor --live`
 不创建 run directory、claim 或 Kit 进程；它验证 source/assets/exact module origin，并以真实最终 override
-向量执行 `train.py --cfg job --resolve`。只有返回 `hydra=exact-no-kit-compose` 才通过。真正启动前先看
-`fill` dry-run，再用单个 scheduler 进程发射指定上限：
+向量执行 `train.py --cfg job --resolve`。只有返回 `hydra=exact-no-kit-compose` 才通过。terminal probe
+通过、显式 unlock 把目标行改为 `ready` 且把 `launch_authorized` 改为 `true` 后，才先看 `fill` dry-run，
+再用单个 scheduler 进程发射指定上限：
 
 ```bash
 python3 scripts/run_lean_training_queue.py \

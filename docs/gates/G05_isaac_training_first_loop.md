@@ -1935,3 +1935,11 @@ P1.4 source gate 因此让 YAML source 显式绑定 target/donor/commit/完整 t
 重算 donor/target、43/43 URDF closure、Git-ignore 并消费 exact receipt；science claim 自动绑定完整 source
 mapping。旧行不声明时兼容。源码/测试通过仍只是 E1；本分支不远程水合、不重发 probe、不改变 blocked
 状态，G05 保持 `Partial`。
+
+#### Pod2-only pre-probe 发射闩
+
+P1 source 现改绑 exact `main@c7e1a90` checkout，两个队列仍保持 terminal probe 前的
+`launch_authorized=false`。`fill/launch-next` 会在任何 SSH 前拒绝；status/doctor 与 probe 前置门只读取
+`dispatch_pods=[pod2]`，不再访问 reserved Pod1。历史七条 ready 行同步改为 complete/rejected，新 conditional
+与 V1+V2×base-decel 两对仍 blocked，并预分 Pod2 GPU1/GPU2。focused queue suite `47 passed`；没有远端
+水合、probe 或新 trainer，G05 继续 `Partial`。

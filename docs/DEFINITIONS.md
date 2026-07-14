@@ -19,7 +19,8 @@
 | `setting` | 一整套可复现配方：动作、观测、reward、题库、plant、训练方法和裁决尺必须一起指定。只换一项就是新 setting。 |
 | `arm` / 实验臂 | 一条具体训练或对照配置，不是机器人的手臂。每条臂必须说清与对照相比只改了什么。 |
 | `run` | 某条实验臂的一次实际执行。同一实验可以有多个 run。 |
-| <a id="dispatch-pods"></a>`dispatch_pods` / 可发射 Pod 集合 | YAML 队列里唯一允许接收**新** trainer 的 Pod 名单。未列入的 Pod 可以只读旧 claim 来防重复，但调度器不得给它生成 assignment 或 launch。它表达当前资源归属，不改变每卡容量上限。 |
+| <a id="launch-authorized"></a>`launch_authorized` / 科学训练发射闩 | 轻量训练 YAML 顶层的显式布尔门。`false` 时 `launch-next` 与 `fill` 在 SSH、claim 或 Kit 启动前拒绝；`plan/status/doctor` 和独立的 source-asset/probe/finalizer 前置门仍可运行。只有 terminal probe 证据审完并把目标行改为 `ready` 后才可设为 `true`；它不授权 judge、第二 seed、晋级或真机。 |
+| <a id="dispatch-pods"></a>`dispatch_pods` / 活跃 Pod 集合 | YAML 队列里唯一允许 live snapshot、claim 检查和接收**新** trainer 的 Pod 名单。未列入的 Pod 不被普通 status/doctor/fill/launch/attest 访问；交接前必须先把其历史行改成终态，并给新任务使用从未发射的 namespace。它表达当前资源归属，不改变每卡容量上限。 |
 | <a id="preferred-slot"></a>`preferred_slot` / 优先槽 | 某条 YAML job 希望优先落到的 `pod/gpu`，用于同卡配对或复用该 source 的 cold-boot receipt；只在该槽仍低于容量时生效，满载后仍回到全局 round-robin，不会越过 `dispatch_pods` 或容量上限。 |
 | <a id="trainer-run-binding"></a>`run_binding.json` / trainer 运行绑定 | trainer 在自己确定真实 RSL log directory 后原子写出的不可覆盖 sidecar；把 queue claim、PID/PGID、进程 starttime、物理 GPU、source/argv 与真实日志/checkpoint 根绑定起来。外部脚本不得用时间戳或 stdout 猜目录。 |
 | <a id="milestone-attestor"></a>`milestone attestor` / 里程碑取证器 | 只沿已验证 `run_binding.json` 查找预注册 checkpoint，核对迭代号、finite、hard contract 和 launch lineage，再以 no-clobber 方式写证据；它不启动训练、不判卷，也不自动 stop/promote。 |

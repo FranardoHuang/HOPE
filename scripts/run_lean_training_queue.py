@@ -726,6 +726,9 @@ def load_queue(path: Path) -> dict[str, Any]:
         raise QueueError("schema_version must be 1")
     if queue.get("simulation_only") is not True:
         raise QueueError("simulation_only must be true")
+    launch_authorized = queue.get("launch_authorized")
+    if type(launch_authorized) is not bool:
+        raise QueueError("launch_authorized must be an explicit true or false")
 
     ssh = _mapping(queue.get("ssh"), "ssh")
     _text(ssh.get("key"), "ssh.key")
@@ -980,12 +983,7 @@ def _run_ssh(
 
 
 def live_snapshot(queue: dict[str, Any]) -> tuple[dict[str, int], dict[str, dict[str, Any]]]:
-    """Read active occupancy and all configured-Pod claims in one SSH per Pod.
-
-    Claims on a dispatch-disabled Pod are still observed so a stopped or
-    reserved experiment cannot be duplicated onto an active Pod.  Its GPU
-    occupancy is deliberately excluded from scheduling.
-    """
+    """Read occupancy and claims only from explicitly dispatch-enabled Pods."""
 
     occupancy: dict[str, int] = {}
     claims: dict[str, dict[str, Any]] = {}
@@ -1055,7 +1053,7 @@ for job_id, directory in jobs.items():
 print(json.dumps({{"compute_rows": compute_rows, "gpu_rows": gpu_rows, "jobs": states}}, sort_keys=True))
 """
     command = f"python3 -c {shlex.quote(program)}"
-    pod_names = tuple(queue["pods"])
+    pod_names = tuple(queue["dispatch_pods"])
     with ThreadPoolExecutor(max_workers=len(pod_names)) as pool:
         outputs = dict(
             zip(
@@ -1063,14 +1061,12 @@ print(json.dumps({{"compute_rows": compute_rows, "gpu_rows": gpu_rows, "jobs": s
                 pool.map(lambda pod: _run_ssh(queue, pod, command), pod_names),
             )
         )
-    dispatch_pods = set(queue.get("dispatch_pods", pod_names))
     for pod_name in pod_names:
         try:
             snapshot = json.loads(outputs[pod_name])
         except json.JSONDecodeError as exc:
             raise QueueError(f"{pod_name} returned malformed live snapshot") from exc
-        if pod_name in dispatch_pods:
-            occupancy.update(_parse_gpu_occupancy(pod_name, snapshot))
+        occupancy.update(_parse_gpu_occupancy(pod_name, snapshot))
         for job_id, state_value in _mapping(
             snapshot.get("jobs"), f"{pod_name}.jobs"
         ).items():
@@ -2033,6 +2029,8 @@ def cmd_status(queue: dict[str, Any], *, live: bool) -> dict[str, Any]:
 def cmd_launch_next(
     queue: dict[str, Any], *, execute: bool, confirm: str | None
 ) -> dict[str, Any]:
+    if queue["launch_authorized"] is not True:
+        raise QueueError("launch_authorized is false; launch-next is blocked")
     if execute and confirm != CONFIRM:
         raise QueueError(f"--execute requires --confirm {CONFIRM}")
     if not execute:
@@ -2080,6 +2078,8 @@ def cmd_launch_next(
 def cmd_fill(
     queue: dict[str, Any], *, execute: bool, confirm: str | None, count: int
 ) -> dict[str, Any]:
+    if queue["launch_authorized"] is not True:
+        raise QueueError("launch_authorized is false; fill is blocked")
     if count <= 0:
         raise QueueError("fill --count must be a positive integer")
     if execute and confirm != CONFIRM:
