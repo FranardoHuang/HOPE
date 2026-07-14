@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import importlib.util
+import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 
@@ -132,6 +134,29 @@ def test_remote_final_capacity_awk_deduplicates_and_ignores_non_numeric_rows():
     assert completed.stdout.strip() == "2"
 
 
+def test_child_env_builder_makes_setup_exported_pythonpath_effective(tmp_path):
+    source = tmp_path / "source"
+    package = source / "lean_queue_fake_module"
+    package.mkdir(parents=True)
+    (package / "__init__.py").write_text("VALUE = 7\n", encoding="utf-8")
+    setup = tmp_path / "setup.sh"
+    setup.write_text(
+        f"export HOPE_WBT_PYTHONPATH={shlex.quote(str(source))}\n",
+        encoding="utf-8",
+    )
+    probe = [sys.executable, "-c", "import lean_queue_fake_module"]
+    raw_env = dict(os.environ)
+    raw_env.pop("PYTHONPATH", None)
+    raw = subprocess.run(probe, env=raw_env, check=False)
+    assert raw.returncode != 0
+    child = Q._child_env_command(probe, 2)
+    completed = subprocess.run(
+        ["bash", "-lc", f"source {shlex.quote(str(setup))}; {child}"],
+        check=False,
+    )
+    assert completed.returncode == 0
+
+
 def test_runner_entrypoints_are_source_pinned_and_yaml_override_is_rejected(tmp_path):
     queue = _queue()
     queue["runner"] = {
@@ -237,6 +262,108 @@ def test_execute_locks_before_resampling_and_selecting_slot(tmp_path, monkeypatc
     result = Q.cmd_launch_next(queue, execute=True, confirm=Q.CONFIRM)
     assert order == ["lock", "snapshot", "launch"]
     assert result["resource"] == "pod1/gpu1"
+
+
+def test_pending_claim_reservations_spread_five_independent_resamples():
+    queue = _queue(5)
+    occupancy = {slot.name: 0 for slot in Q.slots(queue)}
+    claims = {}
+    resources = []
+    for _ in range(5):
+        effective = Q._effective_occupancy(queue, occupancy, claims)
+        job, slot = Q._assign(queue, effective, set(claims))[0]
+        resources.append(slot.name)
+        claims[job["id"]] = {
+            "pod": slot.pod,
+            "gpu": slot.gpu,
+            "state": "claimed",
+            "claim_path": f"{job['run_dir']}/queue_claim.json",
+        }
+    assert resources == [
+        "pod1/gpu0", "pod1/gpu1", "pod1/gpu2", "pod2/gpu0", "pod2/gpu1"
+    ]
+
+
+def test_doctor_has_no_claim_or_run_directory_write():
+    queue = _queue()
+    job = queue["jobs"][0]
+    rendered = Q._doctor_script(job, Q.slots(queue)[0])
+    assert "find_spec" in rendered
+    assert "HOPE_WBT_PYTHONPATH" in rendered
+    assert "queue_claim.json" not in rendered
+    assert job["run_dir"] not in rendered
+    assert "mkdir" not in rendered
+
+
+def test_fill_is_one_scheduler_sequence_and_stops_before_claim_on_doctor_failure(
+    tmp_path, monkeypatch
+):
+    queue = _queue(2)
+    monkeypatch.setattr(Q, "GLOBAL_SCHEDULER_LOCK", tmp_path / "scheduler.lock")
+    occupancy = {slot.name: 0 for slot in Q.slots(queue)}
+    claims = {}
+    calls = []
+
+    def fake_snapshot(_queue):
+        return dict(occupancy), dict(claims)
+
+    def fake_ssh(_queue, pod, _remote, **kwargs):
+        calls.append((pod, kwargs["phase"]))
+        raise Q.QueueError("doctor failed")
+
+    monkeypatch.setattr(Q, "live_snapshot", fake_snapshot)
+    monkeypatch.setattr(Q, "_run_ssh", fake_ssh)
+    try:
+        Q.cmd_fill(queue, execute=True, confirm=Q.CONFIRM, count=2)
+    except Q.QueueError as exc:
+        assert "doctor failed" in str(exc)
+    else:
+        raise AssertionError("doctor failure was ignored")
+    assert calls == [("pod1", "doctor:job0")]
+    assert claims == {}
+
+
+def test_fill_rescans_after_first_iteration_before_next_job(tmp_path, monkeypatch):
+    queue = _queue(3)
+    monkeypatch.setattr(Q, "GLOBAL_SCHEDULER_LOCK", tmp_path / "scheduler.lock")
+    occupancy = {slot.name: 0 for slot in Q.slots(queue)}
+    claims = {}
+    calls = []
+
+    def fake_snapshot(_queue):
+        calls.append("snapshot")
+        return dict(occupancy), dict(claims)
+
+    def fake_ssh(_queue, pod, _remote, **kwargs):
+        phase = kwargs["phase"]
+        calls.append(phase)
+        if phase.startswith("launch-first-iteration:"):
+            job_id = phase.split(":", 1)[1]
+            index = int(job_id.removeprefix("job"))
+            slot = Q.slots(queue)[index]
+            occupancy[slot.name] += 1
+            claims[job_id] = {
+                "pod": slot.pod,
+                "gpu": slot.gpu,
+                "state": "launched",
+                "claim_path": f"{queue['jobs'][index]['run_dir']}/queue_claim.json",
+            }
+        return "ok"
+
+    monkeypatch.setattr(Q, "live_snapshot", fake_snapshot)
+    monkeypatch.setattr(Q, "_run_ssh", fake_ssh)
+    result = Q.cmd_fill(queue, execute=True, confirm=Q.CONFIRM, count=2)
+    assert [item["resource"] for item in result["launched"]] == [
+        "pod1/gpu0", "pod1/gpu1"
+    ]
+    assert calls == [
+        "snapshot",
+        "doctor:job0",
+        "launch-first-iteration:job0",
+        "snapshot",
+        "doctor:job1",
+        "launch-first-iteration:job1",
+    ]
 
 
 def test_example_is_valid_and_safely_blocked():

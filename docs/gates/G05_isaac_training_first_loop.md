@@ -1716,3 +1716,19 @@ pip/import closure 或 receipt；三个 runner 入口固定为 canonical repo-re
 numeric PID 计数，拒绝 `nvidia-smi` 重复行导致的假满。正式晋级/Gate3 仍用严格合同。focused 测试与静态检查见
 [操作文档](../operations/run_lean_training_queue.md)。当前示例全部 blocked，尚无 Pod/训练/行为结果，
 G05 保持 `Partial`。
+
+#### Fresh C 五机制 attempt-1 基础设施失败与 harness 修复
+
+active queue 的五个 attempt-1 都在 Pod1 GPU0 创建 claim 并启动过子进程，但均为 0 update、
+pre-marker rc1、无 model，PID/PGID 已退出。根因是 setup 只导出 `HOPE_WBT_PYTHONPATH`，旧 launcher 的
+raw Python 没有收到 `PYTHONPATH`，触发 `ModuleNotFoundError: whole_body_tracking`；因此不能据此拒绝任何
+机制。旧 namespace/log/claim 已保全并标为 `rejected`，五个完全同 recipe 的 `retry-v2` 是唯一允许的
+基础设施重试。
+
+harness 现让 doctor/trainer 共用 CUDA+source-first PYTHONPATH builder，在 `mkdir/claim` 前验证 clean exact
+source、assets 和 exact `find_spec` origin；SSH 错误保留 phase/stdout/stderr，launcher 等第一个
+`Learning iteration`。`doctor --live` 不写 run 状态，并明确不声称无 Kit Hydra compose；`fill` 由单个
+scheduler 进程逐条 doctor→claim→first iteration→重采。focused `17 passed`；retry-v2 尚未启动，
+无 checkpoint/行为结果，G05 继续 `Partial`。见
+[实验](../experiments/2026-07/EXP-P1-FRESH-C-MECHANISM-ABLATION.md)与
+[操作](../operations/run_lean_training_queue.md)。

@@ -562,12 +562,14 @@ def cmd_plan(queue: dict[str, Any], *, live: bool) -> dict[str, Any]:
         occupancy, claims = live_snapshot(queue)
     else:
         occupancy, claims = {slot.name: 0 for slot in slots(queue)}, {}
-    assignments = _assign(queue, occupancy, set(claims))
+    effective_occupancy = _effective_occupancy(queue, occupancy, claims)
+    assignments = _assign(queue, effective_occupancy, set(claims))
     return {
         "mode": "plan",
         "dry_run": True,
         "occupancy_source": "live" if live else "assumed_empty",
         "occupancy": occupancy,
+        "effective_occupancy": effective_occupancy,
         "claims": claims,
         "assignments": [
             {
@@ -581,6 +583,41 @@ def cmd_plan(queue: dict[str, Any], *, live: bool) -> dict[str, Any]:
             {"job_id": job["id"], "reason": job["blocker"]}
             for job in queue["jobs"] if job["status"] == BLOCKED
         ],
+    }
+
+
+def cmd_doctor(queue: dict[str, Any], *, live: bool) -> dict[str, Any]:
+    if live:
+        occupancy, claims = live_snapshot(queue)
+    else:
+        occupancy, claims = {slot.name: 0 for slot in slots(queue)}, {}
+    effective_occupancy = _effective_occupancy(queue, occupancy, claims)
+    assignments = _assign(queue, effective_occupancy, set(claims))
+    results: list[dict[str, Any]] = []
+    for job, slot in assignments:
+        remote = _doctor_script(job, slot)
+        record: dict[str, Any] = {
+            "job_id": job["id"],
+            "resource": slot.name,
+            "scope": "source-clean,assets,module-exact",
+            "hydra": "not-run; train.py has no no-Kit compose contract",
+        }
+        if live:
+            record["remote_output"] = _run_ssh(
+                queue, slot.pod, remote, phase=f"doctor:{job['id']}"
+            )
+        else:
+            record["ssh_argv"] = [
+                *_ssh_prefix(queue, slot.pod), f"bash -lc {shlex.quote(remote)}"
+            ]
+        results.append(record)
+    return {
+        "mode": "doctor",
+        "dry_run": not live,
+        "occupancy": occupancy,
+        "effective_occupancy": effective_occupancy,
+        "claims": claims,
+        "results": results,
     }
 
 
@@ -601,7 +638,8 @@ def cmd_launch_next(
         raise QueueError(f"--execute requires --confirm {CONFIRM}")
     if not execute:
         occupancy, claims = {slot.name: 0 for slot in slots(queue)}, {}
-        assignments = _assign(queue, occupancy, set(claims))
+        effective_occupancy = _effective_occupancy(queue, occupancy, claims)
+        assignments = _assign(queue, effective_occupancy, set(claims))
         if not assignments:
             raise QueueError("no ready job fits an available GPU slot")
         job, slot = assignments[0]
@@ -619,7 +657,8 @@ def cmd_launch_next(
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
         # Re-sample all six GPUs only after the global scheduler lock is held.
         occupancy, claims = live_snapshot(queue)
-        assignments = _assign(queue, occupancy, set(claims))
+        effective_occupancy = _effective_occupancy(queue, occupancy, claims)
+        assignments = _assign(queue, effective_occupancy, set(claims))
         if not assignments:
             raise QueueError("no ready job fits an available GPU slot")
         job, slot = assignments[0]
@@ -629,6 +668,7 @@ def cmd_launch_next(
             slot.pod,
             remote,
             timeout=KIT_BOOT_TIMEOUT_SECONDS + 60,
+            phase=f"launch:{job['id']}",
         )
         return {
             "mode": "launch-next", "dry_run": False,
@@ -638,16 +678,94 @@ def cmd_launch_next(
         }
 
 
+def cmd_fill(
+    queue: dict[str, Any], *, execute: bool, confirm: str | None, count: int
+) -> dict[str, Any]:
+    if count <= 0:
+        raise QueueError("fill --count must be a positive integer")
+    if execute and confirm != CONFIRM:
+        raise QueueError(f"--execute requires --confirm {CONFIRM}")
+    if not execute:
+        occupancy = {slot.name: 0 for slot in slots(queue)}
+        assignments = _assign(queue, occupancy)[:count]
+        return {
+            "mode": "fill",
+            "dry_run": True,
+            "count_limit": count,
+            "jobs": [
+                {
+                    "job_id": job["id"],
+                    "resource": slot.name,
+                    "doctor_ssh_argv": [
+                        *_ssh_prefix(queue, slot.pod),
+                        f"bash -lc {shlex.quote(_doctor_script(job, slot))}",
+                    ],
+                    "launch_ssh_argv": [
+                        *_ssh_prefix(queue, slot.pod),
+                        f"bash -lc {shlex.quote(_launch_script(queue, job, slot))}",
+                    ],
+                }
+                for job, slot in assignments
+            ],
+        }
+
+    launched: list[dict[str, Any]] = []
+    GLOBAL_SCHEDULER_LOCK.parent.mkdir(parents=True, exist_ok=True)
+    with GLOBAL_SCHEDULER_LOCK.open("a+", encoding="utf-8") as lock:
+        fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        for _ in range(count):
+            occupancy, claims = live_snapshot(queue)
+            effective_occupancy = _effective_occupancy(queue, occupancy, claims)
+            assignments = _assign(queue, effective_occupancy, set(claims))
+            if not assignments:
+                break
+            job, slot = assignments[0]
+            doctor_output = _run_ssh(
+                queue,
+                slot.pod,
+                _doctor_script(job, slot),
+                phase=f"doctor:{job['id']}",
+            )
+            launch_output = _run_ssh(
+                queue,
+                slot.pod,
+                _launch_script(queue, job, slot),
+                timeout=KIT_BOOT_TIMEOUT_SECONDS + 60,
+                phase=f"launch-first-iteration:{job['id']}",
+            )
+            launched.append(
+                {
+                    "job_id": job["id"],
+                    "resource": slot.name,
+                    "doctor_output": doctor_output,
+                    "launch_output": launch_output,
+                }
+            )
+    if not launched:
+        raise QueueError("no ready job fits an available GPU slot")
+    return {
+        "mode": "fill",
+        "dry_run": False,
+        "count_limit": count,
+        "scheduler_lock": str(GLOBAL_SCHEDULER_LOCK),
+        "launched": launched,
+    }
+
+
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--queue", type=Path, required=True)
     sub = parser.add_subparsers(dest="mode", required=True)
-    for mode in ("plan", "status"):
+    for mode in ("plan", "status", "doctor"):
         command = sub.add_parser(mode)
         command.add_argument("--live", action="store_true", help="read GPU occupancy over SSH")
     launch = sub.add_parser("launch-next")
     launch.add_argument("--execute", action="store_true")
     launch.add_argument("--confirm")
+    fill = sub.add_parser("fill")
+    fill.add_argument("--count", type=int, default=1)
+    fill.add_argument("--execute", action="store_true")
+    fill.add_argument("--confirm")
     return parser
 
 
@@ -659,6 +777,15 @@ def main(argv: list[str] | None = None) -> int:
             result = cmd_plan(queue, live=args.live)
         elif args.mode == "status":
             result = cmd_status(queue, live=args.live)
+        elif args.mode == "doctor":
+            result = cmd_doctor(queue, live=args.live)
+        elif args.mode == "fill":
+            result = cmd_fill(
+                queue,
+                execute=args.execute,
+                confirm=args.confirm,
+                count=args.count,
+            )
         else:
             result = cmd_launch_next(queue, execute=args.execute, confirm=args.confirm)
     except QueueError as exc:

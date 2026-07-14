@@ -1,6 +1,7 @@
 # 轻量 YAML 训练队列
 
-状态：源码门通过；尚无 Pod 训练结果。G05 仍为 `Partial`。
+状态：队列 harness 修复通过 source gate；五个 `retry-v2` 尚未启动，无 Pod 训练结果。G05 仍为
+`Partial`。
 
 这个入口解决的是“动作和题库已经决定后，为什么还要手拼一长串命令”。一条 YAML job 必须同时绑定：
 
@@ -18,8 +19,9 @@
 
 ## 启动前只查什么
 
-探索训练只做五项快速检查：source checkout 处于 YAML 记录的 commit 且 clean；motion/train bank/exam
-三个资产存在；目标 GPU 未达容量；同一个 `run_dir/queue_claim.json` 不存在；Kit 经现有 boot lock 串行启动。
+探索训练只做六项快速检查：source checkout 处于 YAML 记录的 commit 且 clean；motion/train bank/exam
+三个资产存在；同一个 child environment 下 `whole_body_tracking` exact 解析到该 source；目标 GPU 未达容量；
+同一个 `run_dir/queue_claim.json` 不存在；Kit 经现有 boot lock 串行启动。
 不做逐文件 SHA、`pip freeze`、import closure 或 evidence receipt。那些严格绑定只在正式晋级、跨引擎判卷
 和 Gate3 使用。
 
@@ -36,6 +38,12 @@ Pod 容量固定为 Pod1 每卡最多 4 个本项目 trainer、Pod2 每卡最多
 snapshot 与远端最后容量检查都按每 GPU 的唯一纯数字 PID 计数，重复行不能把一条 trainer 算成两条。
 远端每 GPU 的 boot lock 仍作最后一道容量/claim 检查。
 
+`doctor` 与 trainer 共用一个 child-environment builder，同时设置所选 CUDA 和
+`PYTHONPATH=${HOPE_WBT_PYTHONPATH}`。exact module probe 位于 `mkdir/claim` 之前；失败不会污染新
+namespace。pending claim 在 NVML 尚不可见时作为 GPU reservation，terminal/rejected 旧 claim 不占新槽。
+真正批量发射只用一个 `fill` 进程；它持 scheduler lock，逐条 doctor、发射并等到第一个
+`Learning iteration`，然后重新读取 claims/GPU 再决定下一条。不要并发调用多个 `launch-next --execute`。
+
 ## 命令
 
 所有模式默认 dry-run，不连 Pod：
@@ -48,19 +56,31 @@ python3 scripts/run_lean_training_queue.py \
   --queue configs/lean_training_queue.example.yaml status
 
 python3 scripts/run_lean_training_queue.py \
+  --queue configs/phase1_fresh_c_mechanism_queue_20260714.yaml doctor
+
+python3 scripts/run_lean_training_queue.py \
+  --queue configs/phase1_fresh_c_mechanism_queue_20260714.yaml fill --count 5
+
+python3 scripts/run_lean_training_queue.py \
   --queue configs/lean_training_queue.example.yaml launch-next
 ```
 
-`plan --live` / `status --live` 各 Pod 只建立一个低频只读 SSH，读取实际 GPU 占用。真正启动时，把已过
-离线门的 job 改为 `ready`，先看 dry-run 输出，再只启动一条：
+`plan --live` / `status --live` 各 Pod 只建立一个低频只读 SSH，读取实际 GPU 占用。`doctor --live`
+不创建 run directory、claim 或 Kit 进程；它验证 source/assets/exact module origin。当前 trainer 没有
+可信 no-Kit Hydra compose 合同，所以 doctor 会明确把该项报告为未运行。真正启动前先看 `fill` dry-run，
+再用单个 scheduler 进程发射指定上限：
 
 ```bash
 python3 scripts/run_lean_training_queue.py \
-  --queue /path/to/active_queue.yaml launch-next \
+  --queue configs/phase1_fresh_c_mechanism_queue_20260714.yaml doctor --live
+
+python3 scripts/run_lean_training_queue.py \
+  --queue configs/phase1_fresh_c_mechanism_queue_20260714.yaml fill --count 5 \
   --execute --confirm SIM_ONLY_LAUNCH_ONE_LEAN_QUEUE_JOB
 ```
 
-`launch-next` 每次最多消费一条 `ready` job。`blocked`、`complete`、`rejected` 永远不会进入候选；
+`fill` 最多消费 `--count` 条，并在每条 first iteration 后重采现场；`launch-next` 仅保留单条诊断用途。
+`blocked`、`complete`、`rejected` 永远不会进入候选；
 预检或 Kit 启动失败后 claim 会保留，禁止自动重试，先诊断再新建明确的后续 job。工具不包含信号、
 `pkill`、`killall` 或任何真机入口。
 
