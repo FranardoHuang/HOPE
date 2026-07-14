@@ -62,6 +62,11 @@ rewards:
   # vector, not action-rate or a hand-copied proxy.
   joint_velocity_limit_hinge_weight: 0.0
   joint_velocity_limit_hinge_margin: 0.85
+  # Conditional fixed-budget signed-face guidance: explicit OFF baseline.  Within the strike window,
+  # unready states keep a constant maximum cost; readiness converts that budget into signed-face
+  # error, so leaving the readiness gate cannot evade the penalty.  The term returns [0,1], making
+  # |weight| the maximum per-window-step tax.  Readiness bounds are source-frozen and hard-bound.
+  racket_face_conditional_guidance_weight: 0.0
   # Keep the Tier-1 design default. DeployParity's -0.3 was a separate, unablated hold/fall arm;
   # inheriting it here silently confounded every VirtualBall result after task composition.
   foot_orientation_weight: 0.0

@@ -1791,3 +1791,22 @@ argv/manifest。reward-layer focused qdot tests 为 `21 passed`，整个 depende
 actual reward math 的 Torch/Isaac-stub focused tests 为 `3 passed`，schema-3/launch-claim suite 为
 `62 passed`。合计 qdot-focused selection 为 `30 passed`。这仍是 E1 source gate：没有 Pod
 训练、runtime marker、checkpoint 或行为成绩，也没有授权第二 seed/judge/晋级，G05 保持 `Partial`。
+
+### 2026-07-14 不逃离就绪区的固定预算 Reward 源码门
+
+为区分“静态 signed-face 权重不对”与“拍面 Reward 在触点/拍速尚未就绪时争自由度”，新增默认关闭的
+[`racket_face_conditional_guidance_weight`](../DEFINITIONS.md#conditional-face-guidance)。它只在 wide
+strike window 内花固定成本；位置误差用 `9.5→7.5 cm`、完整拍速向量误差用 `1.0→0.5 m/s`
+形成就绪度。未就绪时成本为 1，进入门后连续换成 `15°→180°` 的拍面误差分数。故就绪度提高不会
+增加成本，策略也不能靠退出门来免罚；门外拍面梯度为零。输出仍在 `[0,1]`，非正 weight 的绝对值是
+每个时间窗 step 的最大罚金预算。拍面对仍强制走 raw-A/target-A 的共享 `_face_pair`。
+
+Hydra 只暴露一个非正 weight 轴；门宽和公式随 source 固定并进入 training hard contract。默认 off、
+数值/compact support、无效 bounds、raw-A 接线和 override/hard-contract 负例已写入 focused tests。
+机制 math/梯度/单调性专项 `6 passed`，override 全文件 `78 passed`，raw-A face suite `34 passed`，schema-3/
+launch-claim `62 passed`，`py_compile` 与 `git diff --check` 通过。
+当前没有 main merge、Pod runtime、checkpoint 或行为结果；后续 control/treatment 必须同新 source、同
+seed/动作/bank/plant，只改 conditional weight `0/-0.4`，并按 `+200/+500/+1000` 早判。安全/self-hit/
+fall/guard 退化不可由拍面收益补偿。G05 保持 `Partial`；见
+[实验卷宗](../experiments/2026-07/EXP-P1-CONDITIONAL-FACE-GUIDANCE.md)与
+[训练操作](../operations/run_training.md)。

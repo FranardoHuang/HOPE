@@ -631,6 +631,7 @@ def test_source_guards_face_frame_wiring():
     hope_rewards._face_pair 的 docstring 再动手。"""
     assert "_face_pair" in inspect.getsource(hope_rewards_mod._normal_kernel_raw)
     assert "_face_pair" in inspect.getsource(hope_rewards_mod.racket_face_guidance)
+    assert "_face_pair" in inspect.getsource(hope_rewards_mod.racket_face_conditional_guidance)
     src_p = inspect.getsource(hope_commands_mod.face_tracking_pair)
     assert "racket_normal_raw_w" in src_p and "target_normal_cmd" in src_p
     assert "face_tracking_pair(cmd)" in inspect.getsource(hope_rewards_mod._face_pair)

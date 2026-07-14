@@ -98,6 +98,18 @@ def _make_env_cfg(anchor_pos_none=True):
         ),
         racket_guidance=_Term(weight=0.0, params={"command_name": "racket_target", "d_max": 0.5}),
         racket_face_guidance=_Term(weight=0.0, params={"command_name": "racket_target", "theta_max": 1.5707963}),
+        racket_face_conditional_guidance=_Term(
+            weight=0.0,
+            params={
+                "command_name": "racket_target",
+                "theta_free": 0.262,
+                "theta_max": 3.141592653589793,
+                "pos_full": 0.075,
+                "pos_zero": 0.095,
+                "vel_full": 0.5,
+                "vel_zero": 1.0,
+            },
+        ),
         tracking_envelope=_Term(weight=0.0, params={"command_name": "motion", "threshold": 0.25}),
         motion_global_anchor_pos=None if anchor_pos_none else _Term(weight=0.5, params={"std": 0.3}),
         motion_global_anchor_ori=_Term(weight=0.5, params={"std": 0.4}),
@@ -182,6 +194,7 @@ def test_empty_task_applies_nothing():
     env_cfg, applied = _apply({})
     assert applied == []
     assert env_cfg.rewards.racket_guidance.weight == 0.0
+    assert env_cfg.rewards.racket_face_conditional_guidance.weight == 0.0
     assert env_cfg.commands.racket_target.strike_window_pos_s is None
 
 
@@ -732,6 +745,30 @@ def test_face_guidance_weight_and_theta_max_wired():
         _apply({"rewards": {"racket_face_guidance_theta_max": 0.0}})  # zero: gradient dead everywhere
 
 
+def test_conditional_face_guidance_is_one_flag_with_fixed_budget_contract():
+    env_cfg, applied = _apply(
+        {"rewards": {"racket_face_conditional_guidance_weight": -0.4}}
+    )
+    term = env_cfg.rewards.racket_face_conditional_guidance
+    assert term.weight == -0.4
+    assert term.params == {
+        "command_name": "racket_target",
+        "theta_free": 0.262,
+        "theta_max": 3.141592653589793,
+        "pos_full": 0.075,
+        "pos_zero": 0.095,
+        "vel_full": 0.5,
+        "vel_zero": 1.0,
+    }
+    assert any("racket_face_conditional_guidance.weight=-0.4" in item for item in applied)
+    for invalid in (0.1, float("nan"), True, "wrong"):
+        with pytest.raises(train_mod._OverrideError, match="finite number <= 0"):
+            _apply({"rewards": {"racket_face_conditional_guidance_weight": invalid}})
+
+    fact = train_mod._racket_guidance_reward_contract(env_cfg, racket_task=True)
+    assert fact["conditional_signed_face"] == {"weight": -0.4, **term.params}
+
+
 def test_c2_d2_guidance_recipe_is_a_checkpoint_hard_contract_fact():
     c2, _ = _apply({
         "rewards": {
@@ -773,6 +810,7 @@ def test_c2_d2_guidance_recipe_is_a_checkpoint_hard_contract_fact():
         ("racket_guidance", "weight", float("nan"), "finite and <= 0"),
         ("racket_guidance", "weight", 0.1, "finite and <= 0"),
         ("racket_face_guidance", "weight", True, "finite number"),
+        ("racket_face_conditional_guidance", "weight", True, "finite number"),
     ],
 )
 def test_guidance_hard_contract_rejects_ambiguous_weights(
@@ -794,6 +832,16 @@ def test_guidance_hard_contract_rejects_wrong_command_or_bounds():
     env_cfg.rewards.racket_face_guidance.params["theta_max"] = 3.5
     with pytest.raises(RuntimeError, match=r"finite and \(0, pi\]"):
         train_mod._racket_guidance_reward_contract(env_cfg, racket_task=True)
+
+    for field, value, message in (
+        ("theta_free", 3.2, "theta_free < theta_max"),
+        ("pos_full", 0.1, "pos_full < pos_zero"),
+        ("vel_zero", 0.4, "vel_full < vel_zero"),
+    ):
+        env_cfg = _make_env_cfg()
+        env_cfg.rewards.racket_face_conditional_guidance.params[field] = value
+        with pytest.raises(RuntimeError, match=message):
+            train_mod._racket_guidance_reward_contract(env_cfg, racket_task=True)
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -1016,6 +1064,7 @@ def test_deployparity_like_task_without_new_flags_is_untouched():
     assert "pos_gate_radius" not in R.racket_velocity.params
     assert "window_scale" not in R.motion_body_lin_vel.params
     assert R.racket_guidance.weight == 0.0 and R.tracking_envelope.weight == 0.0
+    assert R.racket_face_conditional_guidance.weight == 0.0
     assert env_cfg.commands.motion.rsi_skip_settle_frames == 0
     assert env_cfg.commands.motion.rsi_hold_root_stand_z is False
     assert env_cfg.observations.policy.command.func == "generated_commands"

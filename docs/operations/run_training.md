@@ -1030,6 +1030,21 @@ band while preventing non-hit rewards from dominating:
   `robot.data.joint_vel` 和同一 31-joint articulation order 的实际 `joint_vel_limits`，不是
   `action_rate_weight` 的别名。启动会打印两个 applied marker；关节重排/缺失、零/非有限 limit 或
   每个 environment 的 limit 不一致都 fail closed。
+- `racket_face_conditional_guidance_weight: 0.0`
+  ([不逃离就绪区的固定预算 Reward](../DEFINITIONS.md#conditional-face-guidance)，默认关闭)：
+  只在 wide strike window 内收费；位置误差用 `9.5→7.5 cm`、完整拍速向量误差用
+  `1.0→0.5 m/s` 形成连续就绪门。未就绪时成本固定为 1；进入门后按就绪度把这份成本换成拍面误差
+  （15° 内为 0，180° 为 1）。因此位置或拍速越就绪，成本只会不变或下降，不能靠故意退到门外免罚；
+  门外拍面梯度为零。函数输出 `[0,1]`，weight 必须 `<=0`，所以 `|weight|` 是每个时间窗 step 的
+  硬预算。开启时会记录 `face_conditional_guidance_gate`、
+  `face_conditional_guidance_error_fraction` 与 `face_conditional_guidance_cost_fraction`；`+200` 若
+  gate 全程为零，说明没有真正获得拍面纠偏信号。公式、配对与 `+200/+500/+1000` 门见
+  [实验卷宗](../experiments/2026-07/EXP-P1-CONDITIONAL-FACE-GUIDANCE.md)。
+
+  首轮只能通过 paired lean YAML 点火：control/treatment 均显式固定历史 static guidance 为 `0`，
+  treatment 只设置 `++task.rewards.racket_face_conditional_guidance_weight=-0.4`，control 设 `0.0`；
+  两格必须使用包含该 hard-contract 字段的同一 source。不要拿旧 source checkpoint 当 control，
+  也不要同时扫 gate 或 weight。
 
 qdot-limit treatment 尚未选择采用的负 weight，也没有 machine prereg，因此不要直接把下面写成临时
 CLI 点火。未来 paired manifest 必须让 control/treatment 从同一父 checkpoint 各自启动，并同时冻结：

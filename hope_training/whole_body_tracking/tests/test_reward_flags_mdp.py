@@ -37,6 +37,7 @@ from __future__ import annotations
 
 import copy
 import importlib.util
+import math
 import os
 import re
 import sys
@@ -678,6 +679,116 @@ def test_racket_face_guidance_clamp_mask_and_target_selection():
     cmd.cfg.face_command = False
     r2 = hope_rewards_mod.racket_face_guidance(env, "racket_target", theta_max=math.pi / 2)
     assert abs(float(r2[0]) - math.pi / 2) < 1e-5, r2
+
+
+def test_conditional_face_guidance_has_readiness_preserving_fixed_budget():
+    """The term is [0,1], window-only, with no face gradient outside either readiness margin."""
+    import math
+
+    n = 7
+    win = torch.tensor([True, True, True, True, False, True, True])
+    cmd = _fake_racket_cmd(n, window=win, window_wide=win)
+    cmd.cfg.face_command = True
+    cmd.target_normal_cmd = torch.tensor([[1.0, 0.0, 0.0]]).expand(n, 3).clone()
+    angles = torch.tensor([
+        math.pi,
+        0.1,
+        math.pi,
+        math.pi,
+        math.pi,
+        (0.262 + math.pi) / 2.0,
+        math.pi,
+    ])
+    cmd.racket_normal_raw_w = torch.stack(
+        [torch.cos(angles), torch.sin(angles), torch.zeros_like(angles)], dim=-1
+    ).detach().requires_grad_()
+    cmd.racket_normal_w = cmd.racket_normal_raw_w.clone()
+
+    # env2 is exactly at the 9.5cm outer position margin; env5 halfway through both compact
+    # readiness ramps; env6 proves position is measured against the swing-through target-now.
+    cmd.racket_pos_w[2, 0] = 0.095
+    cmd.racket_pos_w[5, 0] = 0.085
+    cmd.racket_lin_vel_w[3, 0] = 1.0
+    cmd.racket_lin_vel_w[5, 0] = 0.75
+    cmd.time_to_strike[6] = 0.1
+    cmd.racket_target_vel_w[6, 0] = 1.0
+    cmd.racket_lin_vel_w[6, 0] = 1.0
+    cmd.racket_pos_w[6, 0] = -0.1
+
+    r = hope_rewards_mod.racket_face_conditional_guidance(_fake_env(racket_target=cmd), "racket_target")
+    # Within the time window an unready state keeps the fixed cost 1 instead of escaping the face
+    # penalty.  A fully ready state pays only face_fraction; the halfway-ready/half-face case is .875.
+    assert torch.allclose(r, torch.tensor([1.0, 0.0, 1.0, 1.0, 0.0, 0.875, 1.0]), atol=1e-5), r
+    assert torch.all((r >= 0.0) & (r <= 1.0))
+    assert torch.allclose(
+        cmd.metrics["face_conditional_guidance_gate"],
+        torch.tensor([1.0, 1.0, 0.0, 0.0, 0.0, 0.25, 1.0]),
+        atol=1e-6,
+    )
+    assert torch.allclose(
+        cmd.metrics["face_conditional_guidance_error_fraction"],
+        torch.tensor([1.0, 0.0, 1.0, 1.0, 1.0, 0.5, 1.0]),
+        atol=1e-5,
+    )
+    assert torch.allclose(cmd.metrics["face_conditional_guidance_cost_fraction"], r)
+    r.sum().backward()
+    assert torch.isfinite(cmd.racket_normal_raw_w.grad).all()
+    # Below-angle-floor and every compact-gate-zero row have no face gradient to compete with
+    # position/velocity acquisition.  Exact 180 degrees is finite (its turn axis is ambiguous).
+    assert torch.equal(
+        cmd.racket_normal_raw_w.grad[[1, 2, 3, 4]],
+        torch.zeros_like(cmd.racket_normal_raw_w.grad[[1, 2, 3, 4]]),
+    )
+
+
+def test_conditional_face_guidance_never_rewards_abandoning_readiness():
+    """The scalar reward, not merely autograd, must prefer .094m/.94mps over escaping the outer gate."""
+    errors = torch.tensor([0.070, 0.075, 0.085, 0.094, 0.095, 0.096])
+
+    for dimension in ("position", "velocity"):
+        cmd = _fake_racket_cmd(len(errors), window=torch.ones(len(errors), dtype=torch.bool))
+        cmd.cfg.face_command = True
+        cmd.target_normal_cmd = torch.tensor([[1.0, 0.0, 0.0]]).expand(len(errors), 3).clone()
+        angle = torch.full((len(errors),), math.pi / 2.0)
+        cmd.racket_normal_raw_w = torch.stack(
+            [torch.cos(angle), torch.sin(angle), torch.zeros_like(angle)], dim=-1
+        )
+        cmd.racket_normal_w = cmd.racket_normal_raw_w.clone()
+        if dimension == "position":
+            cmd.racket_pos_w[:, 0] = errors
+        else:
+            # Map the same ordered fractions across the 0.5 -> 1.0 m/s velocity readiness band.
+            cmd.racket_lin_vel_w[:, 0] = (errors - 0.075) / 0.02 * 0.5 + 0.5
+
+        cost = hope_rewards_mod.racket_face_conditional_guidance(
+            _fake_env(racket_target=cmd), "racket_target"
+        )
+        weighted_reward = -0.4 * cost
+        # As either error worsens, cost may rise but must never fall; a negative weight therefore
+        # never makes a deliberately less-ready state preferable.
+        assert torch.all(cost[1:] >= cost[:-1] - 1e-7), (dimension, cost)
+        assert torch.all(weighted_reward[:-1] >= weighted_reward[1:] - 1e-7), (
+            dimension,
+            weighted_reward,
+        )
+        assert weighted_reward[3] > weighted_reward[5], (dimension, weighted_reward)
+
+
+@pytest.mark.parametrize(
+    "kwargs, message",
+    [
+        ({"theta_free": math.pi}, "theta_free < theta_max"),
+        ({"pos_full": 0.1, "pos_zero": 0.095}, "pos_full < pos_zero"),
+        ({"vel_full": 1.0, "vel_zero": 1.0}, "vel_full < vel_zero"),
+        ({"pos_zero": float("nan")}, "finite bounds"),
+    ],
+)
+def test_conditional_face_guidance_rejects_invalid_source_bounds(kwargs, message):
+    cmd = _fake_racket_cmd(1, window=torch.ones(1, dtype=torch.bool))
+    with pytest.raises(ValueError, match=message):
+        hope_rewards_mod.racket_face_conditional_guidance(
+            _fake_env(racket_target=cmd), "racket_target", **kwargs
+        )
 
 
 # --------------------------------------------------------------------------------------------- #

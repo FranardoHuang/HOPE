@@ -271,12 +271,12 @@ def _motion_imitation_body_names_contract(env_cfg) -> dict[str, list[str] | None
 
 
 def _racket_guidance_reward_contract(env_cfg, *, racket_task: bool) -> dict | None:
-    """Bind the two post-override guidance terms that define a guidance ablation.
+    """Bind the post-override guidance terms that define a guidance ablation.
 
-    Most reward weights remain curriculum-mutable.  These two terms are different: a signed-face
+    Most reward weights remain curriculum-mutable.  These terms are different: a signed-face
     mechanism comparison uses their exact post-Hydra values as its causal identity.  Binding both
-    the positional and angular terms prevents a copied checkpoint from being relabelled as the
-    other arm after it leaves the launch directory.
+    historical guidance terms and the conditional fixed-budget term prevents a copied checkpoint
+    from being relabelled as another arm after it leaves the launch directory.
     """
 
     if not racket_task:
@@ -316,9 +316,48 @@ def _racket_guidance_reward_contract(env_cfg, *, racket_task: bool) -> dict | No
             bound_name: bound,
         }
 
+    def conditional_face_contract() -> dict:
+        name = "racket_face_conditional_guidance"
+        term = getattr(rewards, name, None)
+        if term is None:
+            raise RuntimeError(f"racket guidance hard contract requires rewards.{name}")
+        weight = getattr(term, "weight", None)
+        if isinstance(weight, bool) or not isinstance(weight, (int, float)):
+            raise RuntimeError(f"rewards.{name}.weight must be a finite number")
+        weight = float(weight)
+        if not math.isfinite(weight) or weight > 0.0:
+            raise RuntimeError(f"rewards.{name}.weight must be finite and <= 0")
+        params = getattr(term, "params", None)
+        if not isinstance(params, dict):
+            raise RuntimeError(f"rewards.{name}.params must be a mapping")
+        if params.get("command_name") != "racket_target":
+            raise RuntimeError(
+                f"rewards.{name}.command_name must be exactly 'racket_target'"
+            )
+        names = ("theta_free", "theta_max", "pos_full", "pos_zero", "vel_full", "vel_zero")
+        values: dict[str, float] = {}
+        for field in names:
+            value = params.get(field)
+            if isinstance(value, bool) or not isinstance(value, (int, float)):
+                raise RuntimeError(f"rewards.{name}.{field} must be a finite number")
+            value = float(value)
+            if not math.isfinite(value):
+                raise RuntimeError(f"rewards.{name}.{field} must be a finite number")
+            values[field] = value
+        if not 0.0 <= values["theta_free"] < values["theta_max"] <= math.pi:
+            raise RuntimeError(
+                f"rewards.{name} requires 0 <= theta_free < theta_max <= pi"
+            )
+        if not 0.0 < values["pos_full"] < values["pos_zero"]:
+            raise RuntimeError(f"rewards.{name} requires 0 < pos_full < pos_zero")
+        if not 0.0 < values["vel_full"] < values["vel_zero"]:
+            raise RuntimeError(f"rewards.{name} requires 0 < vel_full < vel_zero")
+        return {"weight": weight, "command_name": "racket_target", **values}
+
     return {
         "position": term_contract("racket_guidance", "d_max"),
         "signed_face": term_contract("racket_face_guidance", "theta_max"),
+        "conditional_signed_face": conditional_face_contract(),
     }
 
 
@@ -904,6 +943,7 @@ _REWARD_KEYS = (
     "face_gate_by_pos", "face_gate_radius",
     # constant guidance penalty toward the racket target (reward_staged_design §② B2)
     "racket_guidance_weight", "racket_face_guidance_weight", "racket_face_guidance_theta_max",
+    "racket_face_conditional_guidance_weight",
 )
 
 # YAML keys under `terminations:` (R-b envelope-termination softening, reward_staged_design §⑥;
@@ -1522,6 +1562,36 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _require(hasattr(R, "racket_face_guidance"), "rewards.racket_face_guidance")
             R.racket_face_guidance.params["theta_max"] = _fgt
             applied.append(f"rewards.racket_face_guidance.params.theta_max={_fgt}")
+        # Conditional fixed-budget face guidance (2026-07-14): the function returns [0,1] and is
+        # identically zero outside the strike window.  Inside it, unready states keep the fixed maximum
+        # cost and readiness converts that cost into signed-face error, so deliberately leaving the
+        # gate cannot evade a negative penalty.  Therefore |weight| is the maximum per-window-step
+        # budget.  All thresholds are source-frozen and hard-bound; this flag selects the mechanism.
+        _cfgw_raw = _get(rw, "racket_face_conditional_guidance_weight")
+        if _cfgw_raw is not None:
+            if isinstance(_cfgw_raw, bool):
+                raise _OverrideError(
+                    "[train.py] rewards.racket_face_conditional_guidance_weight must be a finite "
+                    "number <= 0, not a boolean"
+                )
+            try:
+                _cfgw = float(_cfgw_raw)
+            except (TypeError, ValueError) as exc:
+                raise _OverrideError(
+                    "[train.py] rewards.racket_face_conditional_guidance_weight must be a finite "
+                    f"number <= 0, got {_cfgw_raw!r}"
+                ) from exc
+            if not math.isfinite(_cfgw) or _cfgw > 0.0:
+                raise _OverrideError(
+                    "[train.py] rewards.racket_face_conditional_guidance_weight must be a finite "
+                    f"number <= 0, got {_cfgw_raw!r}"
+                )
+            _require(
+                hasattr(R, "racket_face_conditional_guidance"),
+                "rewards.racket_face_conditional_guidance",
+            )
+            R.racket_face_conditional_guidance.weight = _cfgw
+            applied.append(f"rewards.racket_face_conditional_guidance.weight={_cfgw}")
 
         # --- penalties / regularization (negative weights: energy + smoothness + safety) --------
         for _name, _key in (

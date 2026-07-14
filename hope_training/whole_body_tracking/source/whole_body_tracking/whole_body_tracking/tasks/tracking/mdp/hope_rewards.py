@@ -527,6 +527,103 @@ def racket_face_guidance(
     return angle.clamp(max=float(theta_max)) * active.float()
 
 
+def racket_face_conditional_guidance(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    theta_free: float = 0.262,
+    theta_max: float = math.pi,
+    pos_full: float = 0.075,
+    pos_zero: float = 0.095,
+    vel_full: float = 0.5,
+    vel_zero: float = 1.0,
+) -> torch.Tensor:
+    """Fixed-budget signed-face correction that cannot reward abandoning readiness.
+
+    The always-on linear face penalty helped angle while degrading position, velocity and completion.
+    This term isolates the proposed remedy: within the wide strike window it spends one fixed cost
+    budget, then converts that cost from a readiness deficit into signed-face error as the current
+    swing-through position and velocity enter compact margins.  The face gradient is exactly zero
+    outside either outer readiness margin; inside the corresponding acceptance margin the readiness
+    gate is one, with a linear transition between the two:
+
+    ``g(e; full, zero) = clamp((zero - e) / (zero - full), 0, 1)``
+
+    ``face = clamp((face_angle - theta_free) / (theta_max - theta_free), 0, 1)``
+
+    ``ready = g(pos_err) * g(vel_err)``
+
+    ``penalty = window * (1 - ready * (1 - face))``
+
+    Thus an unready strike-window state pays the fixed maximum cost, while a ready state pays only
+    its face-error fraction.  Since ``d penalty / d ready = -(1 - face) <= 0``, improving position or
+    velocity readiness can never increase the cost.  This avoids the inverse incentive in the naive
+    ``ready * face`` formulation, where a negatively weighted policy could escape the face penalty by
+    deliberately becoming less ready.  The term can still add readiness-aligned shaping; that is part
+    of the integrated mechanism being ablated, not a claim of a face-only scalar reward.
+
+    The defaults bind existing task contracts rather than adding tunable thresholds: 7.5 cm is the
+    exact position-pass threshold, 9.5 cm is the virtual-ball capture radius, 0.5 m/s is the exact
+    velocity-pass threshold, and 1.0 m/s is twice that tolerance.  The angular free band is 15 degrees.
+    Therefore the return is dimensionless in ``[0, 1]`` and the non-positive RewTerm weight is the exact
+    maximum per-strike-window-step penalty budget.  It reads the same ``_face_pair`` as every other
+    face reward.
+
+    This is task shaping, never a safety credit: it is non-positive after weighting and changes no
+    termination, collision, joint/torque/qdot limit, observation, action, or plant contract.  Safety
+    regressions remain non-compensable experiment failures.
+    """
+    values = {
+        "theta_free": theta_free,
+        "theta_max": theta_max,
+        "pos_full": pos_full,
+        "pos_zero": pos_zero,
+        "vel_full": vel_full,
+        "vel_zero": vel_zero,
+    }
+    if any(not math.isfinite(float(value)) for value in values.values()):
+        raise ValueError(f"racket_face_conditional_guidance requires finite bounds, got {values}")
+    if not 0.0 <= float(theta_free) < float(theta_max) <= math.pi:
+        raise ValueError(
+            "racket_face_conditional_guidance requires 0 <= theta_free < theta_max <= pi"
+        )
+    if not 0.0 < float(pos_full) < float(pos_zero):
+        raise ValueError("racket_face_conditional_guidance requires 0 < pos_full < pos_zero")
+    if not 0.0 < float(vel_full) < float(vel_zero):
+        raise ValueError("racket_face_conditional_guidance requires 0 < vel_full < vel_zero")
+
+    cmd = _cmd(env, command_name)
+    measured, target_normal = _face_pair(cmd)
+    cos_ang = torch.sum(measured * target_normal, dim=-1).clamp(-1.0, 1.0)
+    # atan2(sin, cos) keeps the near-180-degree gradient finite; acos has an infinite derivative
+    # at +/-1 and can turn an otherwise-zero compact gate into 0*NaN during backpropagation.
+    sin_ang = torch.linalg.vector_norm(torch.cross(measured, target_normal, dim=-1), dim=-1)
+    angle = torch.atan2(sin_ang, cos_ang)
+    face_fraction = ((angle - float(theta_free)) / (float(theta_max) - float(theta_free))).clamp(
+        0.0, 1.0
+    )
+
+    target_pos_now = cmd.racket_target_pos_w - cmd.racket_target_vel_w * cmd.time_to_strike.unsqueeze(-1)
+    pos_err = torch.norm(cmd.racket_pos_w - target_pos_now, dim=-1)
+    vel_err = torch.norm(cmd.racket_lin_vel_w - cmd.racket_target_vel_w, dim=-1)
+    pos_gate = ((float(pos_zero) - pos_err) / (float(pos_zero) - float(pos_full))).clamp(0.0, 1.0)
+    vel_gate = ((float(vel_zero) - vel_err) / (float(vel_zero) - float(vel_full))).clamp(0.0, 1.0)
+    readiness = pos_gate * vel_gate
+    event_window = _window_wide(cmd).float()
+    active_face_gate = readiness * event_window
+
+    # Spend a fixed budget in the exogenous strike-time window, then grant relief only when readiness
+    # and face correctness coexist.  For every face_fraction in [0,1], greater readiness weakly lowers
+    # this cost; leaving the readiness gate can never be a way to evade the penalty.
+    penalty_fraction = event_window * (1.0 - readiness * (1.0 - face_fraction))
+
+    # Directional observability for +200 screening.  These metrics exist only when the default-off
+    # term is evaluated, so a purported treatment whose gate/reward never executes is visible.
+    cmd.metrics["face_conditional_guidance_gate"] = active_face_gate
+    cmd.metrics["face_conditional_guidance_error_fraction"] = face_fraction
+    cmd.metrics["face_conditional_guidance_cost_fraction"] = penalty_fraction
+    return penalty_fraction
+
+
 def tracking_envelope_violation(
     env: ManagerBasedRLEnv, command_name: str, threshold: float, body_names: list[str],
     ignore_hold: bool = False,

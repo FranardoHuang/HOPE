@@ -401,6 +401,27 @@ class HOPERewardsCfg(RewardsCfg):
     racket_face_guidance = RewTerm(
         func=mdp.racket_face_guidance, weight=0.0,
         params={"command_name": "racket_target", "theta_max": 1.5707963})
+    # Conditional, fixed-budget face guidance (2026-07-14; default OFF).  Unlike the historical
+    # pre-strike-wide linear angle tax, this term spends a fixed cost only in the wide strike window:
+    # outside readiness it is constant (so there is no face gradient or escape reward), then readiness
+    # converts that cost into the signed-face error fraction.  Its function returns [0,1], so |weight|
+    # is an auditable maximum per-window-step penalty.  Thresholds are
+    # frozen to existing task contracts: position 7.5cm full / 9.5cm zero; velocity 0.5m/s full /
+    # 1.0m/s zero; no penalty inside the 15-degree face tolerance.  Enable only through the
+    # single causal-axis flag rewards.racket_face_conditional_guidance_weight (must be <= 0).
+    racket_face_conditional_guidance = RewTerm(
+        func=mdp.racket_face_conditional_guidance,
+        weight=0.0,
+        params={
+            "command_name": "racket_target",
+            "theta_free": 0.262,
+            "theta_max": 3.141592653589793,
+            "pos_full": 0.075,
+            "pos_zero": 0.095,
+            "vel_full": 0.5,
+            "vel_zero": 1.0,
+        },
+    )
     # R-b envelope-as-penalty (§⑥): per-step indicator of the tracking-envelope violation that
     # normally TERMINATES (anchor_pos | ee_body_pos, both z>0.25 m vs the reference — identical
     # expressions/threshold/body list as TerminationsCfg after the A3 __post_init__ re-pin).
