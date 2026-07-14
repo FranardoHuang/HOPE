@@ -1,5 +1,8 @@
 # 术语与人话对照
 
+- **signed-face A2/B2**：同一个已审计父 checkpoint 的跨 Pod 热启动探索 L1；A2 是 guidance `0.0`
+  对照，B2 只把 signed-face guidance 改为 `-0.4`，两条 child 都是 lineage-inexact，不能当 fresh 证据。
+
 本文件是现行术语真源。新人和 agent 不需要去历史归档猜缩写。
 
 ## 先遵守这条：不用黑话

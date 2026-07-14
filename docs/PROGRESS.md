@@ -22,6 +22,12 @@
   receipt SHA `bb3cd749...bbde` 只闭合 provenance，不判 guidance 效果；不得重跑，K100/L2/第二 seed
   继续阻断。见[实验](experiments/2026-07/EXP-P1-SIGNED-FACE-C3D3-ZERO-FRICTION-L1.md)。
 
+- A2/B2 plan-only gate 已收口为全新 v2 跨 Pod one-shot L1 runtime：Pod1 GPU0 跑 A2 对照，Pod2 GPU0
+  跑 B2 guidance；两条均为同父模型热启动、`512 env × 25 update`，并显式绑定零摩擦 argv/runtime/hard
+  contract、空 GPU、fresh namespace 与 no-retry。focused `18 passed`，static/plan rc0；尚未连接 Pod 或
+  启动 trainer，不授权 judge/L2/第二 seed。见[实验](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)
+  与[操作](operations/run_phase1_signed_face_a2b2_l1.md)。
+
 - C2 的 31/31 非零摩擦根因已转成全新 C3/D3 显式零摩擦 L1 source gate：两格 fresh seed3 只差
   signed-face guidance `0/-0.4`，同一 zero-friction leaf 被唯一绑定到 argv、optimization recipe、outer
   claim、runtime marker、hard contract 和 checkpoint replay。专项 `38 passed`、完整回归

@@ -1692,3 +1692,12 @@ env.yaml 或 no-clobber namespace 缺失都拒绝；现有 judge 只允许在 di
 run、不发 signal。focused `28 passed`，static/source-plan rc0；尚未 runtime attest/judge，因此仍无行为结果，
 G05 保持 `Partial`。见[实验](../experiments/2026-07/EXP-P1-SIGNED-FACE-C3D3-ZERO-FRICTION-L1.md)与
 [操作](../operations/run_phase1_signed_face_c3d3_k100.md)。
+
+### 2026-07-14 A2/B2 跨 Pod 热启动 L1 runtime source gate
+
+全新 v2 consumer 把旧 plan-only A2/B2 收口为两条独立 one-shot 探索 L1：Pod1 GPU0=A2 对照、Pod2
+GPU0=B2 signed-face guidance。两条都绑定同一父 checkpoint、clean source commit/tree、`512×25`、唯一
+`task.plant.zero_joint_friction=true` argv、outer claim、runtime zero-friction marker、31/31 zero hard
+contract、fresh namespace/empty GPU 和 no-retry；terminal 必须是 finite `model_13824.pt`、lineage0。
+focused `18 passed`，static/plan rc0；尚无 Pod runtime/checkpoint/行为结果，不授权 judge/L2/第二 seed/
+晋级/真机，G05 保持 `Partial`。复现见[操作](../operations/run_phase1_signed_face_a2b2_l1.md)。
