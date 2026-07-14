@@ -53,10 +53,13 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   全新 retry-v2 已通过 no-Kit compose 与真实 boot marker。qdot treatment/control 均已自然到
   `model_1000` 并退出；control 终档 SHA-256 `b6672869...12cb9`，filename/embedded iter=`1000`、76 tensors/
   1,762,717 elements finite、fresh lineage=`1`、schema-3 hard contract 与 claim 均 exact。两份 `model_500`
-  的 checkpoint/claim/hard-contract/finite 也全过。末 21 updates
-  里 treatment 的 qdot max `-16.4%`、near-limit `-20.1%`、torque saturation `-35.5%` 且 fall 改善，但
-  position pass 从 `0.418` 降到 `0.107`。这是“平衡更好、击球位置明显更差”的 mixed signal：不采用、
-  不买第二 seed，等 terminal immutable judge；也不启动 `V1+V2 × qdot` 交互。
+  的 checkpoint/claim/hard-contract/finite 也全过。`480–500` 的末 21 点里 treatment 的 qdot max
+  `-16.4%`、near-limit `-20.1%`、torque saturation `-35.5%` 且 fall 改善，但 position pass
+  `0.418→0.107`，当时是 mixed signal。`980–1000` 的同口径曲线随后翻转：treatment/control 的 position
+  pass=`0.878/0.593`、position error=`4.74/9.62 cm`、signed composite=`0.310/0.146`、virtual
+  return=`0.454/0.265`，而 pre/post fall 与 completion 基本持平。这把 `-5` 从“准备调低权重”改判为
+  **晚熟候选**；仍不直接采用、不买第二 seed，也不启动交互，先对两份 finite `model_1000` 跑 immutable
+  MuJoCo/vendor judge。
   qdot control 的首次冷启动随后在 scene creation 前卡住，iter0/无 contract；exact PGID 已收口并保全。
   仅允许相同配方的 retry-v2 再试一次；若同 phase 重复，停止 retry并转 importer 根因线。
   新 source 的正式 run 前现先走独立 `boot-warmup`（1 env×2 update、180 秒、非科学 namespace），避免再拿

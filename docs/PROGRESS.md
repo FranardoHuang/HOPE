@@ -13,6 +13,11 @@
 
 ## 2026-07-14
 
+- qdot `-5/0` terminal 曲线推翻 `+500` 的 mixed-only 读法：updates `980–1000` 中 treatment/control 的
+  position pass=`0.878/0.593`、error=`4.74/9.62 cm`、signed composite=`0.310/0.146`、virtual
+  return=`0.454/0.265`，fall/completion 基本持平；两份 `model_1000` 均 finite/lineage/contract/claim exact。
+  `-5` 改判为晚熟候选，但仍不采用、不买 seed，先过 immutable MuJoCo/vendor judge。
+
 - qdot matched control 已自然终档并释放 Pod2 GPU0：`model_1000.pt` SHA-256 `b6672869...12cb9`，
   filename/embedded iter=`1000`、76 tensors/1,762,717 elements finite、fresh lineage `1`、schema-3
   contract SHA `25faa6f5...da12` 与 claim `c73ac441...8a959` 均匹配，fatal `0`。这只闭合配对终档身份；

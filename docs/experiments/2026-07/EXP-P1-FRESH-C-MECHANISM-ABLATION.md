@@ -151,8 +151,19 @@ control 随后自然完成到 `model_1000.pt` 并退出；模型 SHA-256 为
 均为 `1000`，76 tensors / 1,762,717 elements 全 finite，fresh lineage `1`。内嵌/相邻 schema-3
 contract SHA 均为 `25faa6f59d8d9a5eb2e4b57f2fc827422529d0264ff93b43639abd889fb9da12`，claim 为
 `c73ac441ad6ea8ff64d4caa86376af3976b97d844c11a8278349ba788198a959`，正式 failure regex 为 `0`。
-这闭合了 matched control 的 terminal checkpoint 身份，但没有改变 `+500` mixed-signal 判决；terminal
-immutable judge 仍未执行。
+对应 treatment `model_1000.pt` 也已复核：SHA-256
+`8814debb38b31cc1f311567945eaef7d993170332c89241831811e1fcd0e556e`，iter `1000`、76 tensors /
+1,762,717 elements finite、fresh lineage `1`、schema-3 contract
+`3f6a532adeb1e3cefce5fa16745ab879fa204d8df5d47909d4c62839abe79091` 与 claim
+`3910e3e20f44bad3871cd9c9fb4d0e024cbe5d9f48a8d1fc336d8082c4be8fb6` 均 exact，fatal `0`。
+
+更重要的是，updates `980–1000` 的 21 点均值推翻了 `+500` 时“精度代价持续存在”的外推。terminal
+treatment/control 分别为：position pass `0.878/0.593`，position error `0.0474/0.0962 m`，signed
+composite `0.310/0.146`，virtual return `0.454/0.265`；pre-fall `0.0721/0.0668`、post-fall
+`0.0235/0.0243`、completion `0.798/0.804`，平衡/完成率基本持平。arm torque saturation 的惩罚幅度也从
+`0.001257` 降到 `0.001054`。因此 `-5` 从“考虑低剂量补救”改判为 **晚熟候选**：不启动低剂量扫描、
+不买第二 seed、不做 `V1+V2 × qdot` 交互，先用两份 terminal checkpoint 跑同题 immutable
+MuJoCo/vendor judge。训练内曲线本身仍不构成采用或部署证据。
 
 ## 发射 harness P0 收紧（尚未产生新 run）
 

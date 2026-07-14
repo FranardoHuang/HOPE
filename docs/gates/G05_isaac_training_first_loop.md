@@ -1893,4 +1893,9 @@ activation denominator 与 normalized/per-joint tail，所以只能判 mixed sig
 matched control 后续自然完成到 `model_1000.pt` 并退出。该文件 SHA-256 为 `b6672869...12cb9`，
 filename/embedded iter=`1000`、76 tensors/1,762,717 elements finite、fresh lineage `1`；内嵌与相邻
 schema-3 contract SHA 同为 `25faa6f5...da12`，queue claim 为 `c73ac441...8a959`，fatal regex 为 `0`。
-这里只闭合 terminal checkpoint 身份；immutable judge 尚未执行，mixed-signal 判决不变。
+对应 treatment `model_1000.pt` 也为 iter `1000`、76 tensors/1,762,717 elements finite、fresh lineage `1`；
+model/contract/claim SHA 分别为 `8814debb...556e` / `3f6a532a...9091` / `3910e3e2...8fb6`，fatal `0`。
+updates `980–1000` 的 21 点均值已出现晚熟翻转：treatment/control 的 position pass=`0.878/0.593`、
+error=`0.0474/0.0962 m`、signed composite=`0.310/0.146`、virtual return=`0.454/0.265`，而 fall 与
+completion 基本持平。因此停止低剂量/interaction 扩展，把 `-5` 保留为晚熟候选；同题 immutable
+MuJoCo/vendor judge 尚未执行，G05 仍不晋级。
