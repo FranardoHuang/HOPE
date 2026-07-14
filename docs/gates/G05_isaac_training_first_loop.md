@@ -1712,6 +1712,7 @@ commit、base recipe/唯一 delta、seed、训练预算、checkpoint milestone �
 
 探索入口只查 clean commit、必需资产存在、GPU 容量、重复 claim 与 Kit boot lock，不引入逐文件 SHA、
 pip/import closure 或 receipt；三个 runner 入口固定为 canonical repo-relative 路径，ready placeholder
-在 SSH 前拒绝，并用全局 scheduler flock 包住六卡重采样/round-robin 选槽/launch。正式晋级/Gate3 仍用严格合同。focused 测试与静态检查见
+在 SSH 前拒绝，并用全局 scheduler flock 包住六卡重采样/round-robin 选槽/launch；GPU 占用按唯一
+numeric PID 计数，拒绝 `nvidia-smi` 重复行导致的假满。正式晋级/Gate3 仍用严格合同。focused 测试与静态检查见
 [操作文档](../operations/run_lean_training_queue.md)。当前示例全部 blocked，尚无 Pod/训练/行为结果，
 G05 保持 `Partial`。

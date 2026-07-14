@@ -32,7 +32,9 @@ Pod 容量固定为 Pod1 每卡最多 4 个本项目 trainer、Pod2 每卡最多
 `pod1/gpu0..2 → pod2/gpu0..2` 完成一整圈，才给任一卡放第二条；真实 launch 前用 `nvidia-smi`
 把其他人的 compute process 也保守计入占用。并发 `launch-next --execute` 先竞争单控制端全局 scheduler
 `flock`；只有持锁者才重新读取两 Pod 六卡、跳过已有 claim、做 round-robin 选槽并启动，因此同一控制端
-的多个 agent 不会基于同一份旧快照抢同一槽。远端每 GPU 的 boot lock 仍作最后一道容量/claim 检查。
+的多个 agent 不会基于同一份旧快照抢同一槽。`nvidia-smi` 偶尔会为同一 trainer PID 返回重复行；live
+snapshot 与远端最后容量检查都按每 GPU 的唯一纯数字 PID 计数，重复行不能把一条 trainer 算成两条。
+远端每 GPU 的 boot lock 仍作最后一道容量/claim 检查。
 
 ## 命令
 

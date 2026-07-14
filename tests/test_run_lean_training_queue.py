@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import subprocess
 import sys
 
 import yaml
@@ -100,6 +101,35 @@ def test_round_robin_fills_six_gpus_one_round_at_a_time_and_honors_caps():
     assert len(assignments) == 21
     assert names.count("pod1/gpu0") == 4
     assert names.count("pod2/gpu0") == 3
+
+
+def test_duplicate_nvidia_rows_count_one_unique_numeric_pid_per_gpu():
+    snapshot = {
+        "compute_rows": [
+            "GPU-A, 1881321",
+            "GPU-A, 1881321",
+            "GPU-A, 1881444",
+            "GPU-B, 2999000",
+            "GPU-B, 2999000",
+        ],
+        "gpu_rows": ["0, GPU-A", "1, GPU-B", "2, GPU-C"],
+    }
+    assert Q._parse_gpu_occupancy("pod1", snapshot) == {
+        "pod1/gpu0": 2,
+        "pod1/gpu1": 1,
+        "pod1/gpu2": 0,
+    }
+
+
+def test_remote_final_capacity_awk_deduplicates_and_ignores_non_numeric_rows():
+    completed = subprocess.run(
+        ["awk", Q.UNIQUE_NUMERIC_PID_AWK],
+        input="1881321\n1881321\nnot-a-pid\n 1881444 \n",
+        text=True,
+        check=True,
+        stdout=subprocess.PIPE,
+    )
+    assert completed.stdout.strip() == "2"
 
 
 def test_runner_entrypoints_are_source_pinned_and_yaml_override_is_rejected(tmp_path):

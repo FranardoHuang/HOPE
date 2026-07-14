@@ -56,6 +56,10 @@ ENTRYPOINT_RELATIVE = "scripts/train.py"
 KIT_LAUNCHER_RELATIVE = "scripts/launch_kit_training_locked.sh"
 KIT_BOOT_MARKER = "[train.py] hard training contract:"
 KIT_BOOT_TIMEOUT_SECONDS = 900
+UNIQUE_NUMERIC_PID_AWK = (
+    r'{gsub(/^[ \t]+|[ \t]+$/, "", $0); '
+    r'if ($0 ~ /^[0-9]+$/) seen[$0]=1} END {print length(seen)}'
+)
 
 
 def _mapping(value: Any, label: str) -> dict[str, Any]:
@@ -293,16 +297,8 @@ jobs = json.loads({json.dumps(json.dumps(job_dirs))})
 def lines(args):
     return subprocess.run(args, check=True, text=True, stdout=subprocess.PIPE).stdout.splitlines()
 
-counts = {{}}
-for row in lines(["nvidia-smi", "--query-compute-apps=gpu_uuid,pid", "--format=csv,noheader,nounits"]):
-    fields = [part.strip() for part in row.split(",")]
-    if fields and fields[0]:
-        counts[fields[0]] = counts.get(fields[0], 0) + 1
-gpus = {{}}
-for row in lines(["nvidia-smi", "--query-gpu=index,uuid", "--format=csv,noheader,nounits"]):
-    fields = [part.strip() for part in row.split(",")]
-    if len(fields) == 2 and fields[0].isdigit():
-        gpus[fields[0]] = counts.get(fields[1], 0)
+compute_rows = lines(["nvidia-smi", "--query-compute-apps=gpu_uuid,pid", "--format=csv,noheader,nounits"])
+gpu_rows = lines(["nvidia-smi", "--query-gpu=index,uuid", "--format=csv,noheader,nounits"])
 states = {{}}
 for job_id, directory in jobs.items():
     root = Path(directory)
@@ -314,7 +310,7 @@ for job_id, directory in jobs.items():
         if (root / "terminal_result.json").is_file():
             state = "terminal"
         states[job_id] = {{"state": state, "claim_path": str(claim)}}
-print(json.dumps({{"gpus": gpus, "jobs": states}}, sort_keys=True))
+print(json.dumps({{"compute_rows": compute_rows, "gpu_rows": gpu_rows, "jobs": states}}, sort_keys=True))
 """
     command = f"python3 -c {shlex.quote(program)}"
     with ThreadPoolExecutor(max_workers=2) as pool:
@@ -329,10 +325,7 @@ print(json.dumps({{"gpus": gpus, "jobs": states}}, sort_keys=True))
             snapshot = json.loads(outputs[pod_name])
         except json.JSONDecodeError as exc:
             raise QueueError(f"{pod_name} returned malformed live snapshot") from exc
-        for gpu, count in _mapping(snapshot.get("gpus"), f"{pod_name}.gpus").items():
-            if type(count) is not int or count < 0:
-                raise QueueError(f"{pod_name}/gpu{gpu} returned invalid occupancy")
-            occupancy[f"{pod_name}/gpu{gpu}"] = count
+        occupancy.update(_parse_gpu_occupancy(pod_name, snapshot))
         for job_id, state in _mapping(snapshot.get("jobs"), f"{pod_name}.jobs").items():
             if job_id in claims:
                 raise QueueError(f"job {job_id} is claimed on both Pods")
@@ -345,6 +338,26 @@ print(json.dumps({{"gpus": gpus, "jobs": states}}, sort_keys=True))
 
 def live_occupancy(queue: dict[str, Any]) -> dict[str, int]:
     return live_snapshot(queue)[0]
+
+
+def _parse_gpu_occupancy(pod_name: str, snapshot: dict[str, Any]) -> dict[str, int]:
+    compute_rows = _list(snapshot.get("compute_rows"), f"{pod_name}.compute_rows")
+    gpu_rows = _list(snapshot.get("gpu_rows"), f"{pod_name}.gpu_rows")
+    pids_by_uuid: dict[str, set[int]] = {}
+    for index, row in enumerate(compute_rows):
+        row = _text(row, f"{pod_name}.compute_rows[{index}]")
+        fields = [field.strip() for field in row.split(",")]
+        if len(fields) != 2 or not fields[0] or not fields[1].isdigit():
+            raise QueueError(f"{pod_name} returned malformed compute-app row: {row!r}")
+        pids_by_uuid.setdefault(fields[0], set()).add(int(fields[1]))
+    result: dict[str, int] = {}
+    for index, row in enumerate(gpu_rows):
+        row = _text(row, f"{pod_name}.gpu_rows[{index}]")
+        fields = [field.strip() for field in row.split(",")]
+        if len(fields) != 2 or not fields[0].isdigit() or not fields[1]:
+            raise QueueError(f"{pod_name} returned malformed GPU row: {row!r}")
+        result[f"{pod_name}/gpu{fields[0]}"] = len(pids_by_uuid.get(fields[1], set()))
+    return result
 
 
 def _assign(
@@ -422,7 +435,7 @@ def _launch_script(queue: dict[str, Any], job: dict[str, Any], slot: Slot) -> st
 test \"$(git -C {shlex.quote(source)} rev-parse HEAD)\" = {shlex.quote(job['source']['commit'])}
 test -z \"$(git -C {shlex.quote(source)} status --porcelain)\"
 {checks}
-count=$(nvidia-smi -i {slot.gpu} --query-compute-apps=pid --format=csv,noheader,nounits | sed '/^[[:space:]]*$/d' | wc -l)
+count=$(nvidia-smi -i {slot.gpu} --query-compute-apps=pid --format=csv,noheader,nounits | awk {shlex.quote(UNIQUE_NUMERIC_PID_AWK)})
 test \"$count\" -lt {slot.capacity}
 mkdir -p {shlex.quote(run_dir)}
 ( set -o noclobber; printf %s {shlex.quote(claim)} > {shlex.quote(run_dir + '/queue_claim.json')} )
