@@ -1889,3 +1889,8 @@ fraction、torque saturation 分别下降 `16.4%/20.1%/35.5%`，pre/post fall �
 `0.418` 降到 `0.107`，position error 从 `0.219 m` 升到 `0.311 m`，exact composite 两边均为零。日志还缺
 activation denominator 与 normalized/per-joint tail，所以只能判 mixed signal：不采用、不买第二 seed，
 等待 terminal checkpoint 的 immutable judge；G05 不因此晋级。
+
+matched control 后续自然完成到 `model_1000.pt` 并退出。该文件 SHA-256 为 `b6672869...12cb9`，
+filename/embedded iter=`1000`、76 tensors/1,762,717 elements finite、fresh lineage `1`；内嵌与相邻
+schema-3 contract SHA 同为 `25faa6f5...da12`，queue claim 为 `c73ac441...8a959`，fatal regex 为 `0`。
+这里只闭合 terminal checkpoint 身份；immutable judge 尚未执行，mixed-signal 判决不变。

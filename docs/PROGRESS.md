@@ -13,6 +13,11 @@
 
 ## 2026-07-14
 
+- qdot matched control 已自然终档并释放 Pod2 GPU0：`model_1000.pt` SHA-256 `b6672869...12cb9`，
+  filename/embedded iter=`1000`、76 tensors/1,762,717 elements finite、fresh lineage `1`、schema-3
+  contract SHA `25faa6f5...da12` 与 claim `c73ac441...8a959` 均匹配，fatal `0`。这只闭合配对终档身份；
+  `-5` mixed-signal 仍不采用、不买第二 seed。
+
 - Pod2-only full-scene probe 已实际创建唯一 PID=PGID `353107`，随后自然 `rc=1`：fresh `077e70c`
   checkout 缺 Git-ignored A3 URDF/mesh tree，故无首 iter/model/hard contract；不是 4096-env 或 Reward
   失败，原 attempt 不重放。控制器同时修掉 reserved Pod1 的越界快照和每臂重复 doctor SSH；下一门是

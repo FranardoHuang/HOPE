@@ -146,6 +146,14 @@ control `21/21` 为零。
 tail，因此结论只能是“qdot/平衡方向改善但击球位置明显退化”的 mixed signal；不采用、不买第二 seed，
 保留 terminal checkpoint 后再用 immutable judge 判断，且未过主效应前不启动 `V1+V2 × qdot` 交互。
 
+control 随后自然完成到 `model_1000.pt` 并退出；模型 SHA-256 为
+`b667286972bed9400f26f9b6ce1fe5c6dc093ee4b2305bdbd7ec08dc75612cb9`，filename/embedded iteration
+均为 `1000`，76 tensors / 1,762,717 elements 全 finite，fresh lineage `1`。内嵌/相邻 schema-3
+contract SHA 均为 `25faa6f59d8d9a5eb2e4b57f2fc827422529d0264ff93b43639abd889fb9da12`，claim 为
+`c73ac441ad6ea8ff64d4caa86376af3976b97d844c11a8278349ba788198a959`，正式 failure regex 为 `0`。
+这闭合了 matched control 的 terminal checkpoint 身份，但没有改变 `+500` mixed-signal 判决；terminal
+immutable judge 仍未执行。
+
 ## 发射 harness P0 收紧（尚未产生新 run）
 
 在 qdot 格发射前，队列入口补上四个反复出错的执行合同，但没有连接 Pod 或改动现有五条 trainer：

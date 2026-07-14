@@ -50,8 +50,10 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   `0.268`），但平衡债仍高；V2 单独格明显落后，已列为可替换且不复制 seed。base-decel、V1 和
   post-swing 保到 `+1000` 看权衡是否收敛。qdot-limit 第一次发射在第 0 update 的 A3 URDF import 阶段
   超时，launcher 只收口其 exact PGID；无 hard contract/model，因此是基础设施失败而非 reward 失败，
-  全新 retry-v2 已通过 no-Kit compose 与真实 boot marker。qdot treatment 已自然到 `model_1000`，control
-  只读审计时到 iter `799`；两份 `model_500` 的 checkpoint/claim/hard-contract/finite 全过。末 21 updates
+  全新 retry-v2 已通过 no-Kit compose 与真实 boot marker。qdot treatment/control 均已自然到
+  `model_1000` 并退出；control 终档 SHA-256 `b6672869...12cb9`，filename/embedded iter=`1000`、76 tensors/
+  1,762,717 elements finite、fresh lineage=`1`、schema-3 hard contract 与 claim 均 exact。两份 `model_500`
+  的 checkpoint/claim/hard-contract/finite 也全过。末 21 updates
   里 treatment 的 qdot max `-16.4%`、near-limit `-20.1%`、torque saturation `-35.5%` 且 fall 改善，但
   position pass 从 `0.418` 降到 `0.107`。这是“平衡更好、击球位置明显更差”的 mixed signal：不采用、
   不买第二 seed，等 terminal immutable judge；也不启动 `V1+V2 × qdot` 交互。
