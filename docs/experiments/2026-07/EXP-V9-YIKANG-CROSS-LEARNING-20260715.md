@@ -31,7 +31,7 @@
 | `8c8cd530a482d588f28aec96b02d61805a1e3c3e` | 从 `model_10600` 续训的 reach-box、root 速度推扰及二者组合矩阵；含 episode 级调度/计数 | 调度与计数思路可借；直接改 root velocity 的扰动语义拒绝 |
 | `fbf245ea9c0d245e6d47c5438c4515581a2b6e30` | V9 的定向 x 恢复、二维 station 目标速度、航向/角速度 debt，以及 reach 支撑 | 三个 Reward 核心可作独立配对候选，不整体移植权重 |
 | `05ff64b9b16109a931f2085316e60d097ddbf09e` | hold 时模仿当前 clip 第 0 帧的上肢准备姿态；腿明确排除；站距项权重保持 0 | “准备态来自动作入口”可复用；具体关节集合与权重需按动作族消融 |
-| `bfa2f2186548f94509aa2251585b57f4e37c7923` | v12fix-era Gate3 handoff、重复 checkpoint 比较、per-side/tempo 诊断和旧本地 harness | 重复判 checkpoint 的纪律可复用；含 broad `pkill -f` 的 harness 明确拒绝 |
+| `bfa2f2186548f94509aa2251585b57f4e37c7923` | v12fix-era Gate3 handoff、重复 checkpoint 比较、per-side/tempo 诊断和旧本地 harness | 部署挥拍周期稳定性比较可借；`7/7` 不是物理回球，且含 broad `pkill -f` 的 harness 明确拒绝 |
 | `609ddc8443c2f29b24b0ca4affaf8d3aa032ad98` | 为 v12fix 模型加入正反手不同击球 x 平面与 side split | model/planner 几何绑定候选；不能越过 main 的同 tick tuple/epoch 合同整包合入 |
 | `8615eb57802cbf63dc57837c2f7bc7b4c2b74ff8` | runner 增加 `q_des` 软限幅；`q_des` 是 policy 发布的期望关节位置 | checkpoint 绑定开关；已有相反 A/B 结果，禁止设成全局默认 |
 | `12f78ac1cb7659ebcd12d1c12ae8f42c8a00be5c` | 部署数值安全和 planner 输入校验加固 | 值得对 current main 做逐块 diff/red-team；不能从旧分支整包 cherry-pick |
@@ -62,10 +62,14 @@
    “动作入口定义准备态”，不是“全身照抄某条 clip”：原实现刻意排除腿；对 Franco 五动作还必须分别核对
    第 0 帧、末帧、非击球臂自由度和横移老师的起始脚距。
 
-5. **checkpoint 必须由部署裁判反复选，而不是只看训练曲线。** `bfa2f21` 记录同 lineage 的较晚
-   checkpoint 在 Isaac 曲线近似不变时，branch-local Gate3 诊断反而更抖。可复用结论是同一 immutable
-   题表至少重复三次、保存峰值 checkpoint，并同时报告摔倒、骨盆高度、漂移、恢复和回球分母。
-   但这些旧 harness 含 broad process matching，本项目当前仍以
+5. **部署链周期稳定性必须独立于训练曲线测量，但旧 `7/7` 不能用于选择物理回球 checkpoint。**
+   `bfa2f21` 记录同 lineage 的较晚 checkpoint 在 Isaac 曲线近似不变时，branch-local Gate3 周期诊断
+   反而更抖；重复同卷可比较 exact planner-policy tuple 的运行时随机性、摔倒、骨盆高度、漂移和恢复。
+   但旧计数的成功条件只是 `engaged && ready_ok && complete>=1 && recovered`，结果还显式写明
+   `physical_contact_measured=false`、`landing_measured=false`。因此其 `7/7` 只能叫
+   **planner-policy 挥拍周期完成/恢复代理**，不能叫“回球”，也不能据此保存“回球峰值” checkpoint。
+   真正的回球 checkpoint 选择必须由物理球 receiver 按全部发球分母统计触拍、过网和落台；最终留出卷
+   还必须与开发选档卷隔离。旧 harness 同时含 broad process matching，本项目当前仍以
    [current exact-179 Gate3-D0](EXP-GATE3-CURRENT179-D0.md)为权威；分支自述不能替代它。
 
 ### B. 需要单变量或交互消融的候选
@@ -100,15 +104,26 @@
   `push_by_setting_velocity`，把 root x/y 速度直接改写。它不经过 `F=ma`、不表示力作用点/持续时间，
   也会绕开足接触与躯干惯量的真实响应，难以与 vendor MuJoCo 做物理同义比较。
 
-## 局限性与证据阶梯：V9 的 `7/7` 不等于球路泛化
+## 局限性与证据阶梯：V9 的 `7/7` 甚至不是物理回球，更不等于球路泛化
 
-`bfa2f21` 中的 `7/7` 是特定 `model_10600`、v12fix 配置和 branch-local harness 下的 checkpoint
-交接证据；记录还包含三次正手重复卷。它能说明“该 checkpoint 在那套 planner、题目和旧运行链上出现过
-可重复的成功”，但不能说明 unseen ball、跨动作或 vendor 部署泛化，更不能覆盖 current main 的正式
+`bfa2f21` 中的 `7/7` 是特定 `model_10600`、v12fix 配置和 branch-local harness 下的
+**planner-policy 挥拍周期完成/恢复代理**。源码逐题令
+`ok = engaged && ready_ok && complete>=1 && (recovered>=1 || recovered_behavioral)`，随后把 `ok` 累加到
+名为 `returned` 的字段；同一结果又明确写入 `physical_contact_measured=false` 和
+`landing_measured=false`。旧 `fake_ball_publisher` 也只是向 planner 发布积分得到的合成球位置，不存在
+MuJoCo 球拍接触、朝对方的过网事件或对方台面落点。因此字段名不能改变其测量语义：`7/7` 只证明那套
+planner、policy 和旧运行链在七题中完成了 engage→挥拍→恢复周期，**没有证明七次物理回球**。
+
+分支 handoff 记录的三次 `7/7` 还只在正手稳定区；反手没有完整覆盖。重复结果可作为 checkpoint-specific
+运行时稳定性诊断，但不能说明 unseen ball、跨动作或 vendor 部署泛化，更不能覆盖 current main 的正式
 [`Gate3`](../../DEFINITIONS.md#部署与全链路术语)。旧 harness 还包含本项目明确禁止的 broad process kill，
-所以 `7/7` 只保留为 checkpoint-specific diagnostic，而不是 accepted behavior result。
+所以该结果不是 accepted physical behavior result。
 
-当前证据至少受以下六类限制；其中任何一项没有被独立留出，就必须保持 `untested`，不能用训练分数或同分布
+历史 `standhit_verdict.md` 虽然设计过 `paddle_hit -> net_crossing -> opponent_table_bounce` 的物理 T3
+合同，但相应 `pp_gate3_ball.sh` 和 `pp_ball_events_score.py` 在所审提交树中并不存在，也没有运行结果。
+它只能作为下面物理卷的事件语义起点，不能反向补记旧 `7/7`。
+
+当前证据至少受以下七类限制；其中任何一项没有被独立留出，就必须保持 `untested`，不能用训练分数或同分布
 重复代替：
 
 | 限制 | 可能夸大的原因 | 本文允许的表述 |
@@ -119,32 +134,42 @@
 | 单一/少量保守动作 | V9/v12fix 的正反手动作简化了动作选择，不覆盖 Franco 拉、挡、高点拍压及横移老师 | 该动作族内结果，不是多动作泛化 |
 | 训练或 Isaac 指标 | 已知 Isaac 高分可能对 vendor MuJoCo 回球缺乏预测力 | 训练诊断；正式结论等待 immutable vendor MuJoCo |
 | 同卷选 checkpoint | 若反复用最终卷试多个 checkpoint，再挑最好者，最终卷已经成为开发集 | 只能称开发集选择，不能称 sealed exam |
+| 自家分布评分 | `A14000` 在自家箱 explicit/df 为 `0.82/0.64`，同 checkpoint 到固定 parity 箱仅 `0.36/0.27`，且两边均 0 摔 | 自家题分数可能虚高；至少报告独立分布和最差条件 |
 
 证据应按下面的阶梯逐层升级，低层结果不得越级替代高层结果：
 
 1. **E1 source/config：** exact commit、planner、policy、动作、题库和运行时可重放。
-2. **分支特定 harness 诊断：** 当前 `7/7` 所在层；允许筛 checkpoint，不允许宣称泛化。
+2. **分支特定周期代理：** 当前 `7/7` 所在层；只允许比较 engage/complete/recovery 与运行稳定性，
+   不允许称为物理回球、用作回球选档或宣称泛化。
 3. **vendor MuJoCo 同分布不可变卷：** exact tuple 在最终物理后端复现同类来球。
 4. **sealed held-out 泛化卷：** 落点、速度、旋转和到达时刻均与调参集隔离。
 5. **no-reset 随机到达 + 动作族选择：** 连续多拍中由 planner 在合法动作族之间选择，恢复与下一拍同时过门。
 6. **真机：** 只有安全 Gate 完整后才可进入；本文不授权也不包含该层。
 
-### 留出卷的最小设计
+### 最小物理球卷：`K32` 主卷 + `K8-spin` 哨兵卷
 
-- **落点：** 用横向 × 深度网格划分开发格和密封测试格；密封格在最终一次判卷前不可用于调 planner、
-  checkpoint 或 Reward。
-- **速度与到达时间：** 分开留出低/中/高速和短/中/长 time-to-arrival；长 hold 与快 cadence 都必须有题，
-  不能只改变一个全局发球间隔。
-- **旋转：** 至少区分无旋、上旋、下旋和侧旋方向/强度桶；若当前 simulator、球或考卷没有可信物理旋转，
-  对应格直接记 `untested`，不得用假球几何命中补记。
-- **到达状态：** 正反手分别留出横向、深度和高度组合，报告全出手分母，避免 planner 只发 easy/reachable 子集。
-- **动作族：** 动作和题库按适配关系绑定，但最终卷要留出未参与选择的 action-family 组合。若只训练/选择
-  V9 两个保守动作，再让 planner 永远选择已见动作，只能证明路由内插，不能证明 Franco 五动作泛化。
-- **禁止同卷调参：** 开发卷可重复用于 checkpoint early selection；final sealed paper 只在 tuple 冻结后消费一次。
-  看过 final 分题结果后不得再改 planner、checkpoint、Reward 或动作并沿用同一张 final paper。
+- **`K32` 主卷：** 正/反手两侧（或两种被测动作族）× 两个击球深度 × 两个横向位置 × 两个来球高度
+  × 两档速度/到达节奏，共 `2×2×2×2×2=32` 个物理球格。每题必须在 vendor MuJoCo 内真的发球；成功事件链
+  固定为 `paddle_hit -> 朝对方的 net_crossing -> opponent_table_bounce`。分母永远是 32 个已发球，planner
+  无解、拒绝、未 engage、`MISS`、`NET`、`OUT`、摔倒都计失败，不能只在可达/已挥拍子集上算比例。
+- **`K8-spin` 独立哨兵卷：** 两侧 × 上/下旋方向 × 两档旋转强度，共 8 题，用来暴露当前无旋/弱旋管线
+  的能力空洞。它不混入 `K32` 掩盖主结果；若 simulator、球或观测尚不能可信表达这些旋转，八格全部保持
+  `untested`，不能用合成目标或零旋球代替。
+- **真正的留出而非换 seed：** 预先生成互不重合的 `DEV-K32` 与密封 `EXAM-K32`；连续变量所在 cell
+  也必须不重合，不能只为同一组点换随机种子。`DEV-K32` 可用于 +200/+500/+1000 early selection；
+  `EXAM-K32` 只能在 exact planner + policy + runtime + MJCF + ball-physics + schedule tuple 全部冻结后激活一次。
+- **查看即烧卷：** 一旦看过 `EXAM-K32` 的逐题结果，随后改 planner、policy/checkpoint、margin、Reward、
+  动作或路由，就烧掉这一 fold，不得再用相同 32 题声称 final。可预注册多份 immutable fold，但每轮开发
+  只能消费下一份未见 fold。
+- **重复的边界：** 同一 `EXAM-K32` 重复三次只测随机性/运行时稳定性，不能用于 checkpoint 选择，也不会
+  扩大球路覆盖。正式报告同时给总分、每侧/动作和速度/位置/高度/旋转最差 cell，不能只报均值。
+- **动作与题库绑定：** 每个动作使用自己的触球窗、站位和适配来球族；最终 action-family 路由卷必须包含
+  未参与选择的组合。若只训练/选择 V9 两个保守动作，再让 planner 永远选择已见动作，只能证明路由内插，
+  不能证明 Franco 五动作泛化。
 
-因此，Jiayi/Yikang 支线当前最值得学习的是简化问题、重复筛 checkpoint、per-side planner 适配和恢复 Reward
-结构；其行为分数仍需按上述阶梯重判。本文没有因为 `7/7` 改变采用配置、Gate 状态或 main 行为结论。
+因此，Jiayi/Yikang 支线当前最值得学习的是简化问题、用周期代理筛部署稳定性、per-side planner 适配和
+恢复 Reward 结构；其物理回球与泛化能力仍需按上述阶梯重判。本文没有因为 `7/7` 改变采用配置、Gate 状态
+或 main 行为结论。
 
 ## 随机躯干横向力：替代接口与首轮消融
 
@@ -192,7 +217,7 @@ plant imitation 会阻止必要移动。
 | 第 0 帧 upper-body ready | `ablation candidate` | 按动作族绑定 frame0；与非击球臂自由度、横移起始脚距做交互测试 |
 | 外生随机长 hold | `reusable environment axis` | 不改 Reward 的单变量 pair；同一 no-reset exam |
 | 躯干横向力 | `proposed replacement` | force/impulse 双引擎合同、clear 负测、control/treatment activation 后才可训练 |
-| repeated Gate3 checkpoint selection | `adopt evaluation principle only` | 使用 reviewed exact-owned supervisor 与 immutable paper；禁止旧 broad-kill harness |
+| repeated deployment-cycle proxy | `adopt stability diagnostic only` | reviewed exact-owned supervisor；不得称物理回球或用 final 卷选档；回球选档须用 `DEV-K32` 物理 receiver |
 | per-side hit plane | `model-bound integration candidate` | metadata/clip/题库/planner-policy tuple 同时绑定；current-main fresh red-team |
 | `q_des` soft clamp | `checkpoint-bound A/B only` | 每模型 clean + Gate3 重复卷；默认保持原语义 |
 | `12f78ac` numeric/input safety | `selective source-audit candidate` | 与 current main 逐函数去重、攻击测试、portable Release；不整体 cherry-pick |
@@ -207,8 +232,8 @@ plant imitation 会阻止必要移动。
 - 是否有代码 merge：`no`
 - 是否有新的训练、Gate3 或真机行为结果：`no`
 - 下一个 gate：若 NOW 统一队列认领该工作，先实现默认关闭的 torso-force source/activation 负测；Reward
-  候选各自单变量通过后，再按固定总预算测试同阶段组合。部署侧只把 repeated-checkpoint 纪律移到当前
-  exact-owned Gate3 harness，不复用旧脚本。
+  候选各自单变量通过后，再按固定总预算测试同阶段组合。部署侧只把周期完成/恢复代理用于当前 exact-owned
+  Gate3 的运行稳定性诊断，不复用旧脚本；物理回球需另闭合 `K32`/`K8-spin` receiver 与密封激活合同。
 
 ## 复现与证据
 
@@ -226,6 +251,13 @@ git grep -n -E \
 git grep -n -E 'x_hit_fh|x_hit_bh|side_split_y|qdes-soft-clamp|qdes_soft_clamp' \
   609ddc8 8615eb5 -- hope_ws agi
 git grep -n -E 'pkill|killall' bfa2f21 -- agi/a3_deploy_example/scripts/gate3_v12fix
+git show bfa2f21:agi/a3_deploy_example/scripts/gate3_v12fix/g3r_pp_rally_conductor.py \
+  | sed -n '448,471p;547,549p'
+git show 5b2a467:hope_ws/src/hope_bringup/scripts/fake_ball_publisher | sed -n '33,68p;99,140p'
+git show 183a0fe:docs/gates/standhit_verdict.md | sed -n '18,25p;68,77p'
+for c in 183a0fe bfa2f21 8c8cd53; do
+  git ls-tree -r --name-only "$c" | grep -E 'pp_gate3_ball\.sh|pp_ball_events_score\.py' || true
+done
 git diff --check
 ```
 
