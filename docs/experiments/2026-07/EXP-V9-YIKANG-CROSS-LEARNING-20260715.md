@@ -100,6 +100,52 @@
   `push_by_setting_velocity`，把 root x/y 速度直接改写。它不经过 `F=ma`、不表示力作用点/持续时间，
   也会绕开足接触与躯干惯量的真实响应，难以与 vendor MuJoCo 做物理同义比较。
 
+## 局限性与证据阶梯：V9 的 `7/7` 不等于球路泛化
+
+`bfa2f21` 中的 `7/7` 是特定 `model_10600`、v12fix 配置和 branch-local harness 下的 checkpoint
+交接证据；记录还包含三次正手重复卷。它能说明“该 checkpoint 在那套 planner、题目和旧运行链上出现过
+可重复的成功”，但不能说明 unseen ball、跨动作或 vendor 部署泛化，更不能覆盖 current main 的正式
+[`Gate3`](../../DEFINITIONS.md#部署与全链路术语)。旧 harness 还包含本项目明确禁止的 broad process kill，
+所以 `7/7` 只保留为 checkpoint-specific diagnostic，而不是 accepted behavior result。
+
+当前证据至少受以下六类限制；其中任何一项没有被独立留出，就必须保持 `untested`，不能用训练分数或同分布
+重复代替：
+
+| 限制 | 可能夸大的原因 | 本文允许的表述 |
+| --- | --- | --- |
+| 固定或同分布来球 | serve 脚本、目标区和命中时刻可能与调参题重合 | 对已见题目的特定 checkpoint 成功 |
+| 固定 timing / 落点 / 旋转 | 慢球、快节奏和 long hold 已表现出不同失败型；旧链也未证明完整物理旋转覆盖 | 对已记录 cadence/目标的诊断，不是任意来球 |
+| planner prior | per-side 击球平面、margin 和可达目标先验把难题过滤或变简单，结果混合了 planner 与 policy | exact planner-policy tuple 的联合结果 |
+| 单一/少量保守动作 | V9/v12fix 的正反手动作简化了动作选择，不覆盖 Franco 拉、挡、高点拍压及横移老师 | 该动作族内结果，不是多动作泛化 |
+| 训练或 Isaac 指标 | 已知 Isaac 高分可能对 vendor MuJoCo 回球缺乏预测力 | 训练诊断；正式结论等待 immutable vendor MuJoCo |
+| 同卷选 checkpoint | 若反复用最终卷试多个 checkpoint，再挑最好者，最终卷已经成为开发集 | 只能称开发集选择，不能称 sealed exam |
+
+证据应按下面的阶梯逐层升级，低层结果不得越级替代高层结果：
+
+1. **E1 source/config：** exact commit、planner、policy、动作、题库和运行时可重放。
+2. **分支特定 harness 诊断：** 当前 `7/7` 所在层；允许筛 checkpoint，不允许宣称泛化。
+3. **vendor MuJoCo 同分布不可变卷：** exact tuple 在最终物理后端复现同类来球。
+4. **sealed held-out 泛化卷：** 落点、速度、旋转和到达时刻均与调参集隔离。
+5. **no-reset 随机到达 + 动作族选择：** 连续多拍中由 planner 在合法动作族之间选择，恢复与下一拍同时过门。
+6. **真机：** 只有安全 Gate 完整后才可进入；本文不授权也不包含该层。
+
+### 留出卷的最小设计
+
+- **落点：** 用横向 × 深度网格划分开发格和密封测试格；密封格在最终一次判卷前不可用于调 planner、
+  checkpoint 或 Reward。
+- **速度与到达时间：** 分开留出低/中/高速和短/中/长 time-to-arrival；长 hold 与快 cadence 都必须有题，
+  不能只改变一个全局发球间隔。
+- **旋转：** 至少区分无旋、上旋、下旋和侧旋方向/强度桶；若当前 simulator、球或考卷没有可信物理旋转，
+  对应格直接记 `untested`，不得用假球几何命中补记。
+- **到达状态：** 正反手分别留出横向、深度和高度组合，报告全出手分母，避免 planner 只发 easy/reachable 子集。
+- **动作族：** 动作和题库按适配关系绑定，但最终卷要留出未参与选择的 action-family 组合。若只训练/选择
+  V9 两个保守动作，再让 planner 永远选择已见动作，只能证明路由内插，不能证明 Franco 五动作泛化。
+- **禁止同卷调参：** 开发卷可重复用于 checkpoint early selection；final sealed paper 只在 tuple 冻结后消费一次。
+  看过 final 分题结果后不得再改 planner、checkpoint、Reward 或动作并沿用同一张 final paper。
+
+因此，Jiayi/Yikang 支线当前最值得学习的是简化问题、重复筛 checkpoint、per-side planner 适配和恢复 Reward
+结构；其行为分数仍需按上述阶梯重判。本文没有因为 `7/7` 改变采用配置、Gate 状态或 main 行为结论。
+
 ## 随机躯干横向力：替代接口与首轮消融
 
 用户提出的平衡学习稀疏性判断成立为一个可证伪假设：如果多拍后才偶尔出现窄脚、歪站或漂移，当前训练
