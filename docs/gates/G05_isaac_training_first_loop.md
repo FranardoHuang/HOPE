@@ -46,6 +46,21 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-15, clean base-deceleration `+200` direction gate failed; Gate remains `Partial`):
+
+- Control/treatment model-200 SHA-256 are `6cb55718...94f1` / `d61998ac...6892`; both receipts bind
+  filename=embedded iteration 200, 1,762,715 finite floating elements, fresh lineage, claims and the
+  common schema-3 hard contract `ca57a94f...cc2e`.
+- Across every step 0--200, all five disabled post-swing counters are exactly zero. Raw
+  base-deceleration activation is positive on both arms and weighted reward is nonzero only on
+  treatment, so the execution contract passes. In the frozen 180--200 window, however, treatment /
+  control pre-strike base speed is `0.75008/0.71340 = 1.05142x`, failing the preregistered `<=1.00x`
+  direction gate. All four exact-strike pass metrics and analytic return are zero on both arms, while
+  pre-fall is approximately 100%, so numeric non-degradation is vacuous rather than behavior success.
+  Per preregistration the trainers continue to +500 only to test late reversal; no stop, second seed,
+  judge or promotion is unlocked. See
+  [the clean main-effect record](../experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-CLEAN-MAIN-EFFECT.md).
+
 Follow-up note (2026-07-15, clean base-deceleration pair running; Gate remains `Partial`):
 
 - The ordered queue transaction launched control/treatment on Pod2 GPU1/GPU2 with exact PID=PGID

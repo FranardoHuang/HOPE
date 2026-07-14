@@ -13,6 +13,14 @@
 
 ## 2026-07-15
 
+- clean base-decel 两份 `model_200` receipt 已闭合：checkpoint SHA-256 `6cb55718...94f1` /
+  `d61998ac...6892`，76 tensors / 1,762,715 floats 全 finite、fresh lineage/claim/common schema-3 hard
+  exact。step 0–200 两臂五个 post-swing counter 每点全零，raw base-decel 两边逐点为正且 weighted
+  Reward 只在 treatment 非零。但 180–200 冻结窗底座速度 treatment/control=`0.75008/0.71340`
+  （`1.05142×`），+200 `≤1.00×` 方向门失败；四项精度和解析回球均为零对零、pre-fall 约 100%，
+  不能写成行为非劣。按预注册继续到 +500 只判晚熟，不买 seed/judge/晋级。详见
+  [clean main-effect 卷宗](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-CLEAN-MAIN-EFFECT.md)。
+
 - clean base-decel 单变量 pair 已按同一次顺序事务在 Pod2 GPU1/GPU2 越过首迭代：control/treatment
   exact PID=PGID `385320/385948`，claim SHA-256 `a039226a...1746e` / `673bf6c6...9392`；GPU0 的 Yikang
   进程未触碰。04:27 CST 只读复核时 TensorBoard 到 step `106/89`，日志 fatal=0，两臂五个

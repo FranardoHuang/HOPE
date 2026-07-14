@@ -1,12 +1,12 @@
 # EXP-P1-V1V2-BASE-DECEL-CLEAN-MAIN-EFFECT — 关闭随挥重放后只测底座减速
 
-- 状态：`running / first-iteration and activation gate passed`
+- 状态：`running / model-200 exact；+200 direction gate failed`
 - 阶段/轴：Phase 1 fresh C；V1+V2 下的 base-decel 单变量主效应
 - 集成小目标：判断底座减速本身能否降低击球前底座速度和摔倒，同时不伤四项击球精度
 - 人类负责人：Franco
 - 执行者：Codex
 - 复核/决策负责人：Franco
-- 最高证据等级：`E1`（机器队列、运行绑定与在线 activation；尚未到首个 checkpoint）
+- 最高证据等级：`E2`（两份 exact model-200 receipt 与独立冻结窗审计；没有物理回球）
 - 创建日期/最后复核日期：2026-07-15 / 2026-07-15
 
 共享术语见[术语与人话对照](../../DEFINITIONS.md)。V1 是释放持拍手腕线速度模仿，V2 是在击球窗把
@@ -104,3 +104,35 @@ TensorBoard 的第一轮在线合同核验通过：两臂
 两臂 base-decel raw eligible/nonzero/sum 均为正，control weighted Reward 为零，treatment weighted Reward
 非零。此处只证明禁用合同和 Reward 路径按预注册执行，不比较行为；首个可比较点仍是 exact
 `model_200` receipt。
+
+## `model_200` 与 `+200` 早判
+
+两份 no-clobber receipt 已分别发布并由独立只读审计复算：
+
+| arm | checkpoint SHA-256 | receipt content SHA-256 | common hard contract |
+| --- | --- | --- | --- |
+| control | `6cb55718...94f1` | `5847f050...ce52` | `ca57a94f...cc2e` |
+| treatment | `d61998ac...6892` | `9a42dc25...f49b` | `ca57a94f...cc2e` |
+
+两边 filename iteration 与 embedded iteration 都是 `200`，76 tensors / 1,762,715 floating elements
+全 finite，fresh lineage=`1`，claim、binding 与 schema-3 hard contract 都 exact；trainer 仍保持原
+PID=PGID 存活，日志 fatal=0。
+
+step 0–200 的每个 activation tag 都恰有 201 点。两臂五个 post-swing counter 每点严格为零；V1
+eligible/excluded 每点严格相等且为 `98,304`。V2 eligible/quarter-scaled 在各臂内每点相等、累计为
+control `4,555`、treatment `4,335`；但 treatment 的 180–200 尾窗为零，因此这里只满足预注册的
+milestone 累计语义，不能声称尾窗持续激活。base-decel raw eligible/nonzero/sum 两边每点为正；control
+weighted Reward 每点为零、treatment 每点非零。
+
+冻结的 step 180–200（每项 21 点）结果：
+
+| 指标 | control | treatment | 差异 | +200 判定 |
+| --- | ---: | ---: | ---: | --- |
+| 击球前底座速度 | `0.71340` | `0.75008` | `1.05142×` | **FAIL**，要求 `≤1.00×` |
+| pre-strike fall rate | `0.999981` | `1.000000` | `+0.000019` | 仅数值过 `≤+0.05` |
+| 位置/速度/signed-face/composite pass | 全 `0` | 全 `0` | `0` | 空洞非劣，不是成功 |
+| 解析合法回球 | `0` | `0` | `0` | 无可读行为信号 |
+
+因此 `+200` 方向门失败：treatment 没有降低底座速度，反而高 `5.14%`；两边精度零对零，pre-fall 又
+接近 100%，不能把非劣阈值的数值通过解释成行为收益。按冻结规则，`+200` 不 stop/promote；trainer
+继续到 `+500` 只为判断是否晚熟翻转，不买第二 seed、不 judge、不晋级。
