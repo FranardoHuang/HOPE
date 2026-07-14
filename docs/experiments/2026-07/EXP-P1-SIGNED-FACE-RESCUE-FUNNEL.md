@@ -406,7 +406,7 @@ artifact。A2 固定 Pod1 GPU0、guidance `0.0`；B2 固定 Pod2 GPU0、guidance
 `model_13800.pt` 父模型、seed3、`512 env × 25 update`、显式零摩擦与同一 train bank；child 预期
 `model_13824.pt`、lineage `0`。claim 前必须重验 clean commit/tree、父 checkpoint+hard contract、核心
 父→子 diff、输入 SHA、空 GPU 和 exact run absence；失败 namespace 永不重放。source/static/attack
-`18 passed`，static/plan rc0；尚未 SSH、安装 control 或启动 trainer，judge/L2/第二 seed/晋级/真机全
+`27 passed`，static/plan rc0；尚未 SSH、安装 control 或启动 trainer，judge/L2/第二 seed/晋级/真机全
 false。跨 Pod pair finalizer 还会用实际 GPU0 UUID 验明 Pod，并要求两份 hard contract 的所有
 current-only 值都匹配预注册值，完整比较后只允许 signed-face weight 不同。运行真源见
 [操作](../../operations/run_phase1_signed_face_a2b2_l1.md)。

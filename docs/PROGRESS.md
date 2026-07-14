@@ -24,7 +24,7 @@
 
 - A2/B2 plan-only gate 已收口为全新 v2 跨 Pod one-shot L1 runtime：Pod1 GPU0 跑 A2 对照，Pod2 GPU0
   跑 B2 guidance；两条均为同父模型热启动、`512 env × 25 update`，并显式绑定零摩擦 argv/runtime/hard
-  contract、空 GPU、fresh namespace 与 no-retry。focused `21 passed`，static/plan rc0；尚未连接 Pod 或
+  contract、空 GPU、fresh namespace 与 no-retry。focused `27 passed`，static/plan rc0；尚未连接 Pod 或
   启动 trainer，不授权 judge/L2/第二 seed。见[实验](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)
   与[操作](operations/run_phase1_signed_face_a2b2_l1.md)。
 

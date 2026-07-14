@@ -7,7 +7,7 @@ L1（`512 env × 25 update`）：A2 为 guidance `0.0` 对照，B2 只把 signed
 冻结文件：
 
 - manifest：[`phase1_signed_face_a2b2_l1_prereg_20260714.json`](../../configs/phase1_signed_face_a2b2_l1_prereg_20260714.json)，SHA `890cb8f7c1176c0e8a5e3102eb40c80d02ffcb4f6ed355465a006d875806c659`；
-- launcher：[`run_phase1_signed_face_a2b2_l1.py`](../../scripts/run_phase1_signed_face_a2b2_l1.py)，SHA `35d730facd6d5b2387a923232e62b47589b33b420e5d51d9489700c93f49b63e`；
+- launcher：[`run_phase1_signed_face_a2b2_l1.py`](../../scripts/run_phase1_signed_face_a2b2_l1.py)，SHA `709d3b9f7ae459fa2807719ff99f50f10b458c58933fd13d829214c83d2f6712`；
 - training source：commit `4467d79f1ed425a4263f0caaad2f661e1ec737ad`，tree
   `497db1d8f2d7fb1b554337928f098a2951d4cf0d`；
 - external control root：`/workspace/codexschema/phase1_signed_face_a2b2_hot_l1_v2_20260714/control/v2`；
@@ -21,7 +21,7 @@ python3 scripts/run_phase1_signed_face_a2b2_l1.py --mode plan
 pytest -q tests/test_run_phase1_signed_face_a2b2_l1.py
 ```
 
-当前结果：`21 passed`，`py_compile`、`static-validate`、plan 均 rc0。运行消费者只重复检查会改变本轮
+当前结果：`27 passed`，`py_compile`、`static-validate`、plan 均 rc0。运行消费者只重复检查会改变本轮
 科学/安全结论的事实：clean commit/tree、父 checkpoint bytes/finite/embedded contract、父→子核心
 hard-contract diff、输入 SHA、零摩擦 argv/runtime marker/31 项 hard contract、全新 run namespace 和空 GPU。
 
@@ -61,13 +61,14 @@ python3 /workspace/codexschema/phase1_signed_face_a2b2_hot_l1_v2_20260714/contro
 终档必须是 finite `model_13824.pt`、embedded iter `13824`、lineage `0`，并绑定相邻 hard-contract SHA
 和 outer claim。两条结果仍只证明探索 L1 provenance；后续判卷/第二 seed 必须另过门。
 
-跨 Pod pair 只在 Pod1 汇总：把两格各自只读的 `terminal_result.json` 和它绑定的
-`params/training_contract.json` 复制到 exact `pair_inputs/v1/{A2,B2}/`，hard contract 统一命名为
-`training_contract.json`，四文件均设为只读。随后运行：
+跨 Pod pair 只在 Pod1 汇总：把两格各自只读的 `terminal_result.json`、它绑定的
+`params/training_contract.json` 和 `model_13824.pt` 复制到 exact `pair_inputs/v1/{A2,B2}/`，hard contract
+统一命名为 `training_contract.json`，六文件均设为只读。随后运行：
 
 ```bash
 python3 /workspace/codexschema/phase1_signed_face_a2b2_hot_l1_v2_20260714/control/v2/run_phase1_signed_face_a2b2_l1.py --mode finalize-pair --host pod1
 ```
 
-finalizer 会用 Pod1 GPU0 UUID 验明实际机器，重放两份 terminal claim/checkpoint audit，并完整比较两份 hard
-contract；包括所有 current-only 值在内只能有 `racket_guidance_reward.signed_face.weight` 一处差异。
+finalizer 会用 Pod1 GPU0 UUID 验明实际机器，重算两份 checkpoint 的 bytes SHA 与递归 tensor audit，
+重放两份 terminal claim/checkpoint audit，并完整比较两份 hard contract；包括所有 current-only 值在内
+只能有 `racket_guidance_reward.signed_face.weight` 一处差异，且两格 tensor 数量/元素数必须相等。
