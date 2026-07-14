@@ -1,13 +1,13 @@
 # EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN — 补齐 activation 后重跑底座减速配对
 
-- 状态：`running`（`0f3900a...` 的 probe 抓到 inference-counter logger 真 bug；修复源码 exact
-  `2c2d70d...` 的 fresh strict probe 已通过，单 seed v4 pair 已越过首迭代）
+- 状态：`running / +200 activation-invalid`（exact `model_200` 均通过身份门；post-swing buffer
+  仍未 ready，故 +200 不解释行为，训练继续观察 +500）
 - 阶段/轴：Phase 1 fresh C；组合击球精度下，底座减速是否有净收益
 - 集成小目标：保住击球精度信号，同时降低击球前底座速度与击球前摔倒率
 - 人类负责人：Franco
 - 执行者：Codex
 - 复核/决策负责人：Franco
-- 最高证据等级：`E2`（4096-env probe 越过首个 update 后按真实异常失败；没有本 replacement pair runtime）
+- 最高证据等级：`E2`（replacement pair 4096-env runtime 与 exact `model_200` receipt；无有效行为比较）
 - 创建日期/最后复核日期：2026-07-15 / 2026-07-15
 
 共享术语见[术语与人话对照](../../DEFINITIONS.md)。本文的 V1 是“从线速度动作模仿中释放持拍手腕”，
@@ -92,6 +92,34 @@ fallback 到 GPU0：
 schema-3 hard contract；最近日志 fatal scan 为零。treatment 的普通 weighted `base_decel` 已非零、control 为
 零，但这还不能替代 count-level denominator/numerator；必须等 `model_200` 后先 attest checkpoint，再从
 TensorBoard event 做 activation 算术闭合，最后才看行为差异。
+
+## `+200`：checkpoint 有效，但 post-swing activation 无效
+
+两臂均在 trainer 继续运行时发布 no-clobber `model_200` receipt：
+
+| Arm | checkpoint SHA-256 | receipt content SHA-256 | attestation 时状态 |
+| --- | --- | --- | --- |
+| control | `d065441bb96eb6bc9b5466eea5647dd03a7e881600034a0537e7c50559f4c77b` | `8561016ffb436dca463b6486ff5e2431d32b145b3e606211b91058362c20851d` | live |
+| treatment W1 | `e1d2b43f0b608fa2015912641cdbceb909c8408da8032403a5799f5e480f4fb7` | `bf10ccf03d545dd1c07905b57bd89ea6bb8e6ed831c328b7e1f4748dbc53f4fb` | live |
+
+两份文件均为 filename/embedded iteration=`200`、76 tensors、1,762,715 个浮点元素、nonfinite=`0`，
+fresh lineage=`1`，并绑定同一 schema-3 hard contract `451cda47...2291` 与各自 launch claim。完整日志 fatal
+扫描为零；只读快照时 control/treatment 已继续到 iteration `231/238`。
+
+activation 算术如下：
+
+- V1 两臂都满足 `eligible == excluded`，prefix 各 `19,759,104`，末 21 updates 各 `2,064,384`。
+- base-decel 两臂的 eligible、raw nonzero 和 raw sum 都为正；末 21 updates control 为
+  `463,231 / 463,231 / 189,693.86`，treatment 为 `505,785 / 505,785 / 314,143.20`。
+- V2 在有样本处满足 `eligible == quarter_scaled`；control prefix=`4,555`、末 21=`245`，treatment
+  prefix=`4,335`、末 21=`0`。末窗无样本不违反逐项等式，但不提供末窗行为归因。
+- post-swing 两臂的 `buffer_not_ready` prefix 分别为 `1,810,024 / 1,814,343`；从 step 0 到 200，
+  `eligible=random_not_selected=selected=started=0`。这违反预注册的 eligible/selected/started 必须为正，
+  所以共同机制没有在 +200 得到可解释的启动样本。
+
+因此 `+200` 的正式判定是 `invalid/instrumentation-blocked`，不是 base-decel control/treatment 的行为输赢。
+trainer 不停、不重跑，也不解锁第二 seed；继续到 `+500` 只为判断 buffer 是晚激活还是 execution 路径仍有
+缺口。若 +500 仍为零，先修 post-swing activation/缓冲根因，不能用 V1/base-decel 的正计数绕过共同机制门。
 
 ## `0f3900a` strict probe 的两次不可覆盖负结果
 
@@ -189,10 +217,11 @@ fresh namespaces：
 
 | 运行 | 状态 | 证据 | 有效性 |
 | --- | --- | --- | --- |
-| measurement control，base-decel 关 | running | PGID `380610`；claim `576724de...a49d` | 等 `model_200` attestation + activation |
-| measurement treatment，base-decel 权重 1 | running | PGID `381237`；claim `1a529430...4c5` | 等 `model_200` attestation + activation |
+| measurement control，base-decel 关 | running past +200 | PGID `380610`；model200 `d065441b...c77b` | +200 post-swing activation-invalid；等 +500 |
+| measurement treatment，base-decel 权重 1 | running past +200 | PGID `381237`；model200 `e1d2b43f...4fb7` | +200 post-swing activation-invalid；等 +500 |
 
-- 决定：`inconclusive`；source/scene 门已过且 pair 正在运行，尚无有效 milestone 结论。
+- 决定：`+200 invalid/instrumentation-blocked`；source/checkpoint 有效，但共同 post-swing 机制分母为零，
+  不看行为差异；pair 继续到 +500。
 - `0f3900a` 的 runtime logger 已证伪；`2c2d70d` 只解锁同配方单 seed pair，不追认任何 Reward 效果。
 - 本记录不建立算力优先级；是否排队仍只由 main 的 `docs/NOW.md` 统一队列决定。
 - 不授权 Isaac/MuJoCo judge、第二 seed、正式 setting、部署或真机。

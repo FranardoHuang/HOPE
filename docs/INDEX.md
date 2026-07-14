@@ -39,6 +39,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | 原生 MuJoCo `Trainer-v0`/fine-tune | [MuJoCo 实验](experiments/2026-07/EXP-MUJOCO-NATIVE-TRAINING.md) → [v0 preflight](research/mujoco_training_v0_preflight_2026-07-12.md) → [G06](gates/G06_isaac_to_mujoco.md) |
 | 评估/checkpoint 排名 | [Fresh 稳定性](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md)或[历史尺](experiments/2026-07/EXP-P1-HISTORICAL-SCHEMA3.md) → [G06](gates/G06_isaac_to_mujoco.md) |
 | 拍面符号/解析判分复核 | [Face-sign forensic](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md) → [术语：raw-A/physical-B](DEFINITIONS.md) → G05/G06 |
+| 当前 Reward 是否真的按上台给分 | [Reward / physical-truth 审计](experiments/2026-07/EXP-P1-REWARD-PHYSICAL-TRUTH-AUDIT-20260715.md) → [G05](gates/G05_isaac_training_first_loop.md) → [G06](gates/G06_isaac_to_mujoco.md) |
 | 当前 179-D `Gate3-D0` 演示 | [`Gate3-D0` 实验](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md) → [exact planner-policy build](experiments/2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md) → [G06](gates/G06_isaac_to_mujoco.md) → [`run_gate3_first_tick_harness.md`](operations/run_gate3_first_tick_harness.md) |
 | 恢复/等待/连续对打 | [NOW 连续能力](NOW.md#22-连续能力每个课程阶段都要另考) → [Recovery A/B/C](experiments/2026-07/EXP-RECOVERY-TUPLE-ABC.md) → [T1 接口](interfaces/t1_event_training_contract.md) → G05/G06 |
 | 借鉴 Jiayi V9 / Yikang 支线并核对泛化局限 | [选择性跨线审计](experiments/2026-07/EXP-V9-YIKANG-CROSS-LEARNING-20260715.md) → [G05](gates/G05_isaac_training_first_loop.md) / [G06](gates/G06_isaac_to_mujoco.md)；旧 `7/7` 只测挥拍/恢复周期，未测物理触球或落台 |
@@ -54,6 +55,8 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | [`EXP-P1-FACE-PLANT-SCALEOUT`](experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md) | 16 条 fresh 广度臂已分两波全部精确停止并保留证据；旧 face×plant 矩阵不能选 baseline |
 | [`EXP-P1-FRESH-SZ-STABILITY`](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md) | 实验 completed/rejected；2k 与 4k 四 seed 稳定性都失败，seed4 持续弱；不晋级 baseline |
 | [`EXP-P1-FACE-SIGN-FORENSIC`](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md) | `n/-n` 源码负控与 pre-orient physical-B 门已实现；fresh canary/修正后同卷未跑，旧分不晋级 |
+| [`EXP-P1-REWARD-PHYSICAL-TRUTH-AUDIT-20260715`](experiments/2026-07/EXP-P1-REWARD-PHYSICAL-TRUTH-AUDIT-20260715.md) | source/config 审计完成：现役同时使用目标匹配与 achieved-state 解析过网/落台 Reward；Phase-A engine-integrated ball 仍 metrics-only 且无拍球冲量 |
+| [`EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN`](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md) | fresh v4 两臂 model200 finite/lineage/contract 通过；共同 post-swing 分母仍为零，+200 activation-invalid，继续到 +500 查晚激活 |
 | [`EXP-P1-SIGNED-FACE-RESCUE-FUNNEL`](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md) | C3/D3 显式零摩擦 L1 已配对终档；同卷 K100/L2 仍阻断 |
 | [`EXP-P1-SIGNED-FACE-C3D3-ZERO-FRICTION-L1`](experiments/2026-07/EXP-P1-SIGNED-FACE-C3D3-ZERO-FRICTION-L1.md) | E2 provenance：paired receipt `bb3cd749...bbde`；下一门是同一 immutable K100，不得重跑 |
 | [`EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND`](experiments/2026-07/EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND.md) | E2 数据门通过：真实 371 题逐字节 replay 并发布 exact bank/report；新 schedule/paper activation/judge 继续阻断 |

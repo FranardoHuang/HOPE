@@ -46,6 +46,35 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-15, fresh v4 `+200` activation audit; Gate remains `Partial`):
+
+- Both live arms published exact model-200 receipts. Control/treatment checkpoint SHA-256 are
+  `d065441b...c77b` / `e1d2b43f...4fb7`; filename and embedded iteration are 200, all 1,762,715
+  floating elements are finite, and fresh lineage, claim and the common schema-3 hard contract match.
+- V1 and raw base-deceleration count closures pass, and V2 equality holds wherever samples occur.
+  However, both post-swing buffers report only `buffer_not_ready` through step 200; eligible,
+  selected and started counts are all zero. This violates the preregistered positive-denominator gate,
+  so +200 is instrumentation-invalid and no behavior comparison is allowed. Trainers continue to +500
+  only to distinguish late buffer activation from an execution-path defect; no second seed, judge or
+  promotion is unlocked. See
+  [the replacement record](../experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md).
+
+Follow-up note (2026-07-15, Reward/physical-truth semantic audit; Gate remains `Partial`):
+
+- The live fresh v4 recipe selects `HOPEPingPongVirtualBall`: direct achieved-FK position/velocity/
+  signed-face shaping is overridden to `14/10/5`, while the task's analytic pass-net/landing/spin
+  terms remain active at `20/30/5`. `vb_metrics_only=true` does not disable those task-owned terms.
+  The analytic contact gate reads achieved racket state, but pass-net and landing include dense partial
+  credit before a fully legal return, so training reward is not an independent physical verdict.
+- `physical_ball=true` is a separate Phase-A engine-integrated diagnostic: PhysX integrates position,
+  while code applies the venue aero and table-bounce models. The current recipe does not enable racket
+  impulse, and the ball passes through the robot; no physical hit/net/landing metric is
+  consumed by reward or observation. The running pair remains frozen. A future outcome-source ablation
+  requires Phase-B receiver closure first. Phase-B still reuses the analytic paddle-contact law, so it
+  tests contact detection and engine-integrated post-contact flight rather than an independent contact
+  model. See
+  [the Reward truth audit](../experiments/2026-07/EXP-P1-REWARD-PHYSICAL-TRUTH-AUDIT-20260715.md).
+
 Follow-up note (2026-07-15, Jiayi/Yikang selective cross-learning audit; Gate remains `Partial`):
 
 - Exact-commit source/config review keeps directional recovery debt, vector station-settle, clip-frame-0

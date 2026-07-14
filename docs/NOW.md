@@ -55,8 +55,11 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
 - **当前运行态：** 2026-07-15，V1+V2×base-decel 的 inference-counter 修复 source `2c2d70d...` 已通过
   Pod2 GPU1 的 4096-env strict full-scene 自然终档门；fresh v4 control/treatment 随后由同一次顺序 `fill`
   分别在 GPU1/GPU2 越过首迭代，exact PGID=`380610/381237`，claim SHA-256=`576724de...a49d` /
-  `1a529430...4c5`。最近快照两臂到 iteration `25/11`、fatal0；GPU0 仍只有 Yikang。当前只授权这一个
-  seed 继续到 `+200/+500/+1000` 早判，不授权 judge、第二 seed或晋级。
+  `1a529430...4c5`。两份 `model_200` 已通过 filename=embedded、finite、fresh lineage 与同 hard-contract
+  attestation，checkpoint SHA-256=`d065441b...c77b` / `e1d2b43f...4fb7`；训练继续到 iteration `231/238`。
+  V1 与 base-decel 的 count closure 通过，V2 在有样本处相等，但两臂 post-swing buffer 到 +200 仍只有
+  `buffer_not_ready`，eligible/selected/started 全零。因此 +200 按预注册判 activation-invalid，不比较
+  行为；继续到 +500 只查晚激活，不授权 judge、第二 seed或晋级。GPU0 仍只归 Yikang。
 
   Fresh C 的五条单 seed 机制格均已越过 `+500` 且 checkpoint
   finite/contract/lineage 正确。V1+V2 出现当前最强击球精度信号（composite `0.0893`、normal pass
@@ -296,8 +299,8 @@ policy 输出 31 个关节目标，PPO 根据 Reward 改进它，独立考卷再
 **当前解法：** 现役 Reward 分为四组：
 
 - **回答这道球题：** 球拍位置匹配 `14`（宽度 `0.20 m`）、速度匹配 `10`
-  （`1.0 m/s`）、拍面匹配 `5`（`0.3 rad`）；三项同时达标另有击球成功奖金 `5`；接近目标的
-  进度奖励为 `10`。
+  （`1.0 m/s`）、拍面匹配 `5`（`0.3 rad`）；三个连续核的乘积另有击球奖金 `5`，不是三项
+  过阈值后的二值分；接近目标的进度奖励为 `10`。
 - **保持可用动作形态：** 只模仿上半身的参考位置、朝向和速度，各项权重 `1`；下半身模仿已解除，
   让腿可以按题调整，球拍手腕的朝向模仿也按现行开关释放。
 - **等待和收拍：** 等待时接近准备状态的正奖励为 `2`，只在目标仍可原地够到时生效。
@@ -305,9 +308,14 @@ policy 输出 31 个关节目标，PPO 根据 Reward 改进它，独立考卷再
   晃动、力矩饱和，以及直立、关节速度、动作变化、关节限位和异常接触等正则项；脚朝向惩罚由
   当前发射配方设为 `-0.3`。
 
-解析击球/上台被设为**只记指标，不进入 Reward**（`vb_metrics_only=true`）。减速入位、额外拍面
-引导和额外球拍引导当前都关闭。目标关节范围裁剪和摔倒/跟踪终止另属硬保护，不靠其他 Reward
-抵消。
+此外，现役 `HOPEPingPongVirtualBall` 仍启用由**实际执行球拍状态**推演的解析 outcome Reward：
+解析过网 `20`、解析落点 `30`、解析旋转 `5`。`vb_metrics_only=true` 不会关闭这三个 task 自带项；
+它与本 task 已开启的 `virtual_ball=true` 是冗余 OR 条件。解析过网和落点都有完整合法回球前的稠密部分分，所以它们是训练
+shaping，不是独立物理裁判。`physical_ball=true` 的 Phase-A engine-integrated 来球诊断目前才是
+**只记指标、不进 Reward**：位置由 PhysX 积分，场馆 aero/table bounce 由代码驱动；它没有开启拍球冲量，
+球会穿过机器人。减速入位、额外拍面引导和额外球拍引导当前都关闭。
+目标关节范围裁剪和摔倒/跟踪终止另属硬保护，不靠其他 Reward 抵消。详见
+[Reward 真值审计](experiments/2026-07/EXP-P1-REWARD-PHYSICAL-TRUTH-AUDIT-20260715.md)。
 
 **效果与差距：** 有的独立初始化达到 100/100，另一个只有 20/100。结果属于整套配方，不能归因
 到某一个 Reward 项。拍面尺和稳定性解决前冻结 Reward；理想状态还需用单变量配对证明各项贡献，
@@ -332,8 +340,8 @@ policy 输出 31 个关节目标，PPO 根据 Reward 改进它，独立考卷再
 ### 4.6 训练方法和机器人动力学
 
 当前使用 `rsl_rl` 的 PPO、4096 个 Isaac 环境和 50 Hz 控制，从随机初始化训练。零关节摩擦只为
-当前执行合同对账；训练配置虽打开来球轨迹真值仪，现有正式 Reward 和成绩卡都没有采用真实
-球拍—球物理接触结果。
+当前执行合同对账；训练配置虽打开来球轨迹真值仪，现有 Reward 和成绩卡都没有采用真实
+球拍—球物理接触结果。Reward 中的过网/落台是 achieved 球拍状态驱动的解析推演，不能改名为物理结果。
 
 原生 MuJoCo 微调是减少 Isaac→MuJoCo 迁移损失的候选训练引擎，不是 Gate3。现有候选仍有动作
 保护、源码闭包、严格 JSON 和 MJCF 路径四个正确性缺口，没有可信训练环境、并行接口、PPO 冒烟

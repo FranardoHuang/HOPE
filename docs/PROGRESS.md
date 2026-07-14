@@ -13,6 +13,22 @@
 
 ## 2026-07-15
 
+- fresh v4 control/treatment 的 `model_200` 已分别发布 exact receipt：checkpoint SHA-256
+  `d065441b...c77b` / `e1d2b43f...4fb7`，两边 filename=embedded `200`、76 tensors、1,762,715 floats
+  finite、fresh lineage 与 hard contract 一致。V1 和 base-decel activation 闭合，V2 在有样本处相等；
+  但 post-swing 两臂到 +200 的 eligible/selected/started 全为零，明确违反预注册正分母门。因此 +200
+  记 `invalid/instrumentation-blocked`，不比较行为、不买 seed；trainer 继续到 +500 判断 buffer 是否晚激活。
+  详见 [replacement 卷宗](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md)。
+
+- exact source/config 审计纠正了现役 Reward 的错误表述：`task=HOPEPingPongVirtualBall` 同时保留
+  目标位置/速度/拍面 `14/10/5` 与 achieved-state 解析过网/落点/旋转 `20/30/5`；
+  `vb_metrics_only=true` 不会关闭 task 自带的 outcome Reward。真正 metrics-only 的是
+  `physical_ball=true` Phase-A engine-integrated 诊断，当前又没有拍球冲量，所以没有真实物理回球
+  Reward。解析过网与落点还会在完整合法回球前给稠密部分分；现役 pair 不改配方，未来先闭合
+  Phase-B 物理 receiver，再做
+  outcome-source 固定总预算单 seed 配对。详见
+  [Reward 真值审计](experiments/2026-07/EXP-P1-REWARD-PHYSICAL-TRUTH-AUDIT-20260715.md)。
+
 - 完成 Jiayi V9 与 Yikang 部署支线的 exact-commit 只读审计：定向 recovery debt、二维 station settle、
   动作首帧上肢准备态、外生随机长等待及 per-side planner metadata 可作为 current-main 单变量候选；
   直接写 root velocity、旧 broad-kill harness 与 checkpoint 专用 soft clamp 不整体移植。旧三次 `7/7`
@@ -22,8 +38,8 @@
 
 - fresh v4 measurement control/treatment 已由同一次 `fill --count 2` 顺序发射：Pod2 GPU1/GPU2 exact
   PGID=`380610/381237`，claim content SHA-256=`576724de...a49d` / `1a529430...4c5`，两臂均绑定 clean
-  `2c2d70d...`、4096 env、schema-3 hard contract并越过首迭代。最近只读快照为 iteration `25/11`、fatal0；
-  GPU0 的 Yikang trainer 保持原样。下一门是 `model_200` attestation 与 count-level activation 先判。
+  `2c2d70d...`、4096 env、schema-3 hard contract并越过首迭代。GPU0 的 Yikang trainer 保持原样；
+  本节上方 `model_200` 条目已经取代这条启动快照。
 
 - exact `2c2d70d...` 的唯一 4096-env full-scene probe 已在 Pod2 GPU1 完成两个 update 并自然退出；finalizer
   复核 actual env、物理球/桌三实体、face179、31/31 零摩擦、schema-3、76 tensors 全 finite、fatal0、

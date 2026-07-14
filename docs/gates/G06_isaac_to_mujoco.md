@@ -56,6 +56,18 @@ This gate is the sim-to-sim bridge before real deployment.
 
 ## Current State
 
+### 2026-07-15 analytic Reward is not the physical referee
+
+The current VirtualBall task does use achieved racket FK state to analytically predict contact, net
+crossing and landing, but those outcome terms remain a training model with dense partial credit. The
+separate Isaac Phase-A engine-integrated ball diagnostic is metrics-only, and the live recipe leaves
+racket impulse off; there is therefore no current physical-return reward or policy result. Before comparing analytic versus
+physical outcome reward, Phase-B hit/net/landing events and all-serves denominators must close; Phase-B's
+paddle impulse still reuses the analytic contact law. The same
+actor/racket trajectory must be replayed against the Agibot vendor MuJoCo referee. Detailed exact-source
+semantics are in [the Reward truth audit](../experiments/2026-07/EXP-P1-REWARD-PHYSICAL-TRUTH-AUDIT-20260715.md).
+No Gate3/Gate3B score changes, and G06 remains `Partial`.
+
 Done (2026-06-27 → 2026-07-02, recorded 2026-07-03):
 
 - The parity procedure exists and is battle-tested: `scripts/mujoco_eval_onnx.py` loads the exact
