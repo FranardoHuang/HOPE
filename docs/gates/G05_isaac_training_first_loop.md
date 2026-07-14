@@ -46,6 +46,18 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-15, post-swing schema-v2 launch controller hardened; Gate remains `Partial`):
+
+- The successor controller now closes the known pre-launch false-green paths: direct no-follow namespaces,
+  exact historical claim/binding/model-500 milestone lineage, plain-uint32 seed, absolute byte-bound Git and
+  `nvidia-smi`, fixed hostname/machine-id/boot-id, physical Pod2 GPU2 UUID plus shared lease, safe exact
+  environment allowlist, resolved Hydra compose with timeout, and same-PID exec handoff. A separate offline
+  builder produces a controller-validated schema-v2 plan outside the immutable source tree.
+- Focused host verification is `40 passed, 4 skipped`; no Pod launch, Isaac capture, attestation, first-reset
+  probe, science trainer, judge or hardware command occurred. The threat model is trusted root plus accidental
+  drift/concurrent legitimate jobs; the five inventoried source/Isaac import roots are not claimed as a full
+  venv/stdlib/native/rootfs dependency graph. Runtime remains `Partial` until a new GPU2 plan passes on Pod2.
+
 Follow-up note (2026-07-15, clean base-deceleration terminal and teacher capture preregistration; Gate remains `Partial`):
 
 - Both clean-pair model-1000 checkpoints naturally terminated and independently pass filename/embedded

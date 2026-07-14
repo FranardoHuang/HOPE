@@ -319,6 +319,15 @@ run binding 机器派生 play argv，强制删除十二个 train-only/ownership 
 stop、SSH 或 trainer 功能。当前仍只是 dependency-light source gate；独立红队、全新 schema-2 prereg、
 4096-environment capture、attestation 与首 reset 未闭前不能用它解锁科学训练。
 
+controller 的独立红队随后把九类 blocker 收口到 schema-v2：固定 direct namespace/dirfd no-follow；历史
+teacher train entry 与当前 play entry 分离；claim→binding→model-500 milestone receipt→checkpoint/hard-contract
+逐层交叉绑定；Pod2 hostname/machine-id/boot-id 与 physical GPU2 UUID；共享 GPU2 lease；absolute byte-bound
+Git/`nvidia-smi`；safe environment allowlist；`--resolve` compose timeout 与全阶段 failure evidence；same-PID
+exec handoff；status 的 symlink/zombie/PID reuse/receipt-rebinding 拒绝。离线 builder 已可生成并回读同一 validator
+接受的 plan，focused 为 `40 passed, 4 skipped`。本分支未连接 Pod；V10 已占 GPU1，因此任何 successor 只可
+另冻 GPU2 新 namespace，旧 GPU1 v1 仍不重发。完整 source/Isaac import roots 本机时序为 119 MB/2432 files
+约 `0.709 s`，9.8 MB/852 files 约 `0.284 s`；这不是 Pod 冷缓存数字，也不声称覆盖 venv/stdlib/native/rootfs。
+
 ## 离线复现
 
 本提交不连接 Pod、不写 claim、不运行 probe/trainer/judge：

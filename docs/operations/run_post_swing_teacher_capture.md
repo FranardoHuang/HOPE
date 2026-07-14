@@ -1,6 +1,6 @@
 # 生成随挥结束教师状态制品
 
-状态：**v1 preclaim blocked / training NO-LAUNCH。** 本操作只用于仿真推理和后续训练 cold-start，
+状态：**v1 preclaim blocked；schema-v2 controller/builder 源码门通过；Pod runtime 尚未过。** 本操作只用于仿真推理和后续训练 cold-start，
 绝不下发真机命令。源码专项与攻击负测通过；首个 exact 实例见
 [`phase1_post_swing_teacher_capture_prereg_20260715.json`](../../configs/phase1_post_swing_teacher_capture_prereg_20260715.json)，
 但它在 Hydra compose 阶段因保留 train-only checkpoint 兼容键而 fail closed；capture directory、claim、
@@ -48,12 +48,48 @@ python3 scripts/run_preregistered_post_swing_capture.py \
   --expected-plan-sha256 PLAN_SHA256 status
 ```
 
-`plan` 只读复算 source、ignored A3 tree、checkpoint/claim/binding/receipt、动作、题库、GPU 与最终 argv；
-`launch` 先做同一 argv 的 Hydra compose，再次复算所有输入，只有仍 exact 才创建 capture directory 并用
-new session 启动一个 inference process；`status` 只按 receipt 的数字 PID/PGID/starttime 和四个固定制品读取。
+`plan` 只读复算 source、ignored A3 tree、checkpoint/claim/binding/milestone receipt、动作、题库、Pod2
+hostname/machine-id/boot-id、physical GPU2 UUID、冻结 Python symlink chain、五个实际 source/Isaac import root
+和最终 argv；`launch` 持有共享 `/tmp/hope_lean_queue_gpu2.lock`，先用 exact `/usr/bin/git`、
+`/usr/bin/nvidia-smi` bytes/SHA 和安全环境做同一 argv 的 `--cfg job --resolve` compose，再次复算所有输入。
+只有仍 exact 才创建 capture directory；controller 随后以同一 PID `execve` 交棒，不产生可能成为 orphan 的 child。
+`status` 只按 immutable exec intent 的 PID/PGID/SID/starttime/cmdline 和四个固定制品读取，symlink、zombie、
+PID reuse 或 teacher receipt 重绑都不能报绿。
 工具没有 stop/retry/SSH/trainer 子命令。compose 或二次复算失败会留下 no-clobber failure evidence，但不会
-创建 capture claim/process；该 plan 仍视为花掉，必须新预注册。当前工具只是 source gate，必须与 seed
-parity 修复、schema-2 plan 和独立红队一起合入后才能运行。
+创建 capture claim/process；该 plan 仍视为花掉，必须新预注册。play 的 plain-uint32 seed parity 已合入并
+通过真实 Hydra compose 正负例。当前工具仍只是 source gate；必须用下面 builder 在 Pod2 本机生成并 review
+一个全新 schema-v2 plan，再过 `plan` 模式，才可单次运行。
+
+### schema-v2 计划生成
+
+[`build_post_swing_capture_plan_v2.py`](../../scripts/build_post_swing_capture_plan_v2.py) 只做本机 byte snapshot，
+不创建 launch/capture namespace，也不启动 Hydra/Isaac。输出必须在 immutable capture checkout 之外；五项
+`--runtime-tree` 已收缩为 controller 实际使用的五个 source/Isaac Python import root，不声称覆盖 venv
+site-packages、stdlib、native ELF 或整个 rootfs。
+
+```bash
+python3 scripts/build_post_swing_capture_plan_v2.py \
+  --template-plan /ABS/V1_EVIDENCE_TEMPLATE.json \
+  --capture-source-checkout /ABS/CLEAN/DETACHED/SOURCE \
+  --plan-id NEW_DIRECT_NAMESPACE \
+  --gpu-uuid GPU-feee9e1f-7663-06f6-fa29-62fca6a9b1a4 \
+  --git /usr/bin/git --nvidia-smi /usr/bin/nvidia-smi \
+  --runtime-tree capture_pythonpath=/ABS/CAPTURE_SOURCE_ROOT:on \
+  --runtime-tree isaaclab=/ABS/ISAACLAB_ROOT:on \
+  --runtime-tree isaaclab_tasks=/ABS/ISAACLAB_TASKS_ROOT:on \
+  --runtime-tree isaaclab_assets=/ABS/ISAACLAB_ASSETS_ROOT:on \
+  --runtime-tree isaaclab_rl=/ABS/ISAACLAB_RL_ROOT:on \
+  --env PATH=/usr/bin:/bin --env HOME=/root \
+  --output /ABS/OUTSIDE_SOURCE/PLAN.json
+```
+
+路径占位符必须替换成 Pod2 实际 exact root；用 `--help` 查看完整参数。Pod 当前没有
+`RUNPOD_POD_ID`，所以 schema 不伪造该字段，而是固定 hostname + `/etc/machine-id` + boot-id；Pod 重启后
+boot-id 改变会让旧 plan fail closed。
+
+威胁模型是 trusted root operator 下的误配置、字节漂移和并发合法 job；不声称抵御同机恶意 root 在微秒级
+替换 path/inode，也不把五个 import root 冒充完整 Python/native dependency closure。该剩余限制必须保留在
+review 记录中。
 
 ## 1. inference-only 自然 wrap 采集
 
@@ -122,11 +158,14 @@ probe 需要在首个 PPO rollout/update 前通过，并证明两臂 hard contra
 
 ```bash
 pytest -q \
+  tests/test_run_preregistered_post_swing_capture.py \
   tests/test_attest_post_swing_teacher.py \
   tests/test_post_swing_play_runtime_compose.py \
   hope_training/whole_body_tracking/tests/test_post_swing_teacher.py
 
 python3 -m py_compile \
+  scripts/build_post_swing_capture_plan_v2.py \
+  scripts/run_preregistered_post_swing_capture.py \
   scripts/attest_post_swing_teacher.py \
   hope_training/whole_body_tracking/scripts/play.py \
   hope_training/whole_body_tracking/scripts/train.py \
