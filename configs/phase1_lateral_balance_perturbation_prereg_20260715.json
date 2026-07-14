@@ -1,0 +1,175 @@
+{
+  "schema_version": 1,
+  "experiment_id": "EXP-P1-LATERAL-BALANCE-PERTURBATION",
+  "status": "draft_source_gate_only",
+  "created_local_date": "2026-07-15",
+  "human_owner": "franco",
+  "executor": "Codex",
+  "launch_authorized": false,
+  "scientific_question": "Does bounded lateral torso impulse training create enough recoverable balance errors to improve later-swing readiness without reducing clean strike quality?",
+  "source": {
+    "commit": null,
+    "module": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/lateral_perturbation.py",
+    "runtime_hook_bound": false,
+    "hard_contract_bound": false
+  },
+  "eligibility": {
+    "first_cell": "recovery_hold",
+    "definition": "recovery_or_hold_true AND strike_window_false AND safe_window_remaining_steps_gte_pulse_duration_steps",
+    "anytime_axis_in_this_prereg": false,
+    "anytime_followup_rule": "A separate preregistration is required after the recovery/hold cell survives held-out clean and strong evaluation."
+  },
+  "wrench_contract": {
+    "body_name": "torso_link",
+    "application_point": "center_of_mass",
+    "force_frame": "world",
+    "force_components": [
+      0.0,
+      "sampled_Fy",
+      0.0
+    ],
+    "torque_components": [
+      0.0,
+      0.0,
+      0.0
+    ],
+    "normalization_mass": "total_articulation_mass_after_randomization",
+    "direct_root_velocity_write": false
+  },
+  "pulse_schedule": {
+    "policy_dt_s": 0.02,
+    "opportunity_interval_steps": 25,
+    "opportunity_interval_s": 0.5,
+    "pulse_duration_steps": 5,
+    "pulse_duration_s": 0.1,
+    "selection_probability_per_eligible_opportunity": 0.5,
+    "direction_distribution": {
+      "world_minus_y": 0.5,
+      "world_plus_y": 0.5
+    },
+    "magnitude_distribution": "uniform_closed_interval",
+    "sampling": "stateless_by_seed_env_episode_opportunity_stream",
+    "overlap_allowed": false,
+    "force_law": "Fy_N = total_articulation_mass_kg * sampled_normalized_impulse_y_mps / pulse_duration_s"
+  },
+  "train_cells": [
+    {
+      "cell_id": "L0",
+      "human_name": "matched zero-impulse control",
+      "normalized_impulse_mps": [
+        0.0,
+        0.0
+      ],
+      "schedule_seed": 20260715,
+      "training_seed": 1,
+      "second_seed_authorized": false
+    },
+    {
+      "cell_id": "L1",
+      "human_name": "bounded random lateral torso impulse",
+      "normalized_impulse_mps": [
+        0.04,
+        0.08
+      ],
+      "schedule_seed": 20260715,
+      "training_seed": 1,
+      "second_seed_authorized": false
+    }
+  ],
+  "common_random_numbers": {
+    "timing_selection_direction_and_unit_magnitude_shared": true,
+    "zero_control_occupies_virtual_pulse_duration": true,
+    "reason": "The zero control must not gain extra selection opportunities relative to treatment."
+  },
+  "activation_and_application_counters": [
+    "lateral_perturbation_opportunity_count",
+    "lateral_perturbation_eligible_opportunity_count",
+    "lateral_perturbation_selected_start_count",
+    "lateral_perturbation_selected_left_count",
+    "lateral_perturbation_selected_right_count",
+    "lateral_perturbation_nonzero_pulse_command_count",
+    "lateral_perturbation_skipped_strike_window_count",
+    "lateral_perturbation_skipped_ineligible_phase_count",
+    "lateral_perturbation_skipped_short_window_count",
+    "lateral_perturbation_interrupted_for_strike_count",
+    "lateral_perturbation_interrupted_for_window_count",
+    "lateral_perturbation_wrench_write_step_count",
+    "lateral_perturbation_applied_pulse_count",
+    "lateral_perturbation_applied_force_env_step_count",
+    "lateral_perturbation_sampled_normalized_impulse_abs_sum_mps",
+    "lateral_perturbation_commanded_normalized_impulse_abs_sum_mps",
+    "lateral_perturbation_applied_normalized_impulse_abs_sum_mps"
+  ],
+  "per_step_ledger_required": [
+    "step_token",
+    "episode_index",
+    "episode_step",
+    "environment_id",
+    "eligible",
+    "selected",
+    "sampled_normalized_impulse_y_mps",
+    "commanded_force_y_N",
+    "adapter_write_receipt",
+    "remaining_pulse_steps"
+  ],
+  "runtime_adapter": {
+    "implemented": false,
+    "required_backend_api": "isaaclab.Articulation.set_external_force_and_torque",
+    "required_world_to_body_transform": true,
+    "required_full_batch_torso_overwrite_every_step": true,
+    "required_zero_write_for_inactive_environments": true,
+    "persistent_force_clearance_verified": false,
+    "actual_total_mass_after_randomization_bound": false,
+    "actual_application_ledger_bound": false
+  },
+  "checkpoint_cadence": [
+    200,
+    500,
+    1000
+  ],
+  "held_out_eval": {
+    "shared_question_and_episode_schedule": "pending_content_addressed_schedule",
+    "clean": {
+      "normalized_impulse_mps": [
+        0.0,
+        0.0
+      ],
+      "schedule_seed": 910247,
+      "purpose": "Measure no-perturbation strike and stability regression."
+    },
+    "strong": {
+      "normalized_impulse_mps": [
+        0.1,
+        0.14
+      ],
+      "schedule_seed": 910247,
+      "purpose": "Out-of-train-range recovery stress test; never used for PPO or checkpoint selection."
+    },
+    "metrics": [
+      "physical_fall_rate_all_attempts",
+      "guard_reset_rate_all_attempts",
+      "recovery_time_to_ready_s_all_attempts",
+      "balance_debt_auc",
+      "capture_point_to_support_margin_min_m_all_attempts",
+      "com_projection_to_support_margin_min_m_all_attempts",
+      "stance_width_min_m_all_attempts",
+      "stance_width_narrowing_from_episode_start_max_m_all_attempts",
+      "left_right_foot_yaw_error_abs_max_rad_all_attempts",
+      "ready_set_by_deadline_rate_all_attempts",
+      "next_strike_composite_rate_all_attempts"
+    ]
+  },
+  "decision_rule_draft": {
+    "activation_valid": "Both cells have eligible and selected opportunities; L0 applied_pulse_count equals 0; L1 applied_pulse_count is positive; every step has a full-buffer write receipt; sampled, commanded and applied impulse ledgers reconcile.",
+    "clean_non_regression": "L1 clean physical-fall rate is no more than L0 plus 0.01 and next-strike composite is no less than L0 minus 0.03.",
+    "strong_benefit": "L1 reduces strong balance_debt_auc and median recovery_time_to_ready by at least 10 percent and improves ready_set_by_deadline by at least 0.05 absolute, without increasing strong physical-fall rate.",
+    "stance_and_margin_safety": "Against L0 on the same strong paper, L1 may not reduce the minimum capture-point or COM support margin by more than 0.01 m, increase p95 stance narrowing from each episode's initial width by more than 0.02 m, or increase p95 absolute foot-yaw error by more than 0.0872665 rad (5 deg).",
+    "promotion": "Only a cell passing activation validity, clean non-regression, strong benefit and stance/margin safety may buy a second seed.",
+    "invalidation": "Any non-torso force, X/Z force, torque, direct root-velocity write, strike-window application, missing step token, missing zero overwrite, persistent force, or train/eval schedule leakage invalidates the run."
+  },
+  "explicit_non_claims": [
+    "No Isaac runtime hook has been implemented or run.",
+    "No simulator behaviour, training improvement, checkpoint, or deployment result exists.",
+    "This is not the anytime perturbation axis and not a reward-composition result."
+  ]
+}

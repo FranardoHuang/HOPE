@@ -1,0 +1,144 @@
+# EXP-P1-LATERAL-BALANCE-PERTURBATION — 用可恢复的横向推力增加平衡学习机会
+
+- 状态：`proposed`
+- 预注册状态：机器可读草案；`launch_authorized=false`
+- 阶段/轴：连续能力线 / 击球后恢复与等待姿态的状态覆盖
+- 集成小目标：上一拍后吸收余势、保持可接战平衡、按时启动下一拍
+- 人类负责人：franco
+- 执行者：Codex
+- 复核/决策负责人：franco
+- 最高证据等级：[E1（源码与单测）](../../DEFINITIONS.md#证据和文档术语)；没有 runtime、训练或行为证据
+- 创建日期/最后复核日期：2026-07-15 / 2026-07-15
+
+## 问题与第一性原理假设
+
+现役短片段里，机器人前几拍通常不会立刻摔；脚距逐渐变窄、站姿逐渐歪等平衡债，往往要很多拍后才显现。
+因此真正能教策略“如何从将要失衡的状态恢复”的样本很稀疏。单纯延长训练不一定高效，因为绝大多数
+rollout 仍停留在容易状态。
+
+首个可证伪假设是：**只在击球后的恢复或等待窗口，给躯干质心施加左右对称、强度有界的短时横向力，
+能增加可恢复的平衡误差样本；相对零推力对照，它应在留出的强扰动考试中更快回到可接战状态，同时不降低
+无扰动考试的下一拍质量。**
+
+这不是额外 Reward，也不直接修改 root velocity。直接改速度会跳过接触、驱动和惯性响应，无法回答策略
+是否学会通过脚、腿和躯干吸收真实外力。这里冻结的是力-时间脉冲：用随机脉冲对应的整机速度增量预算
+`Δv` 表示强度，再按实际随机化后的整机总质量换成躯干力：
+
+```text
+F_world_y = total_articulation_mass * sampled_Δv_y / pulse_duration
+F_world_x = F_world_z = 0
+torque_world = 0
+```
+
+力作用于 `torso_link` 的质心；因此不会因错误的施力点额外注入人为力矩。`Δv` 只是冲量除以整机质量的
+归一化单位，代码不会把它写进机器人速度。
+
+## 首轮冻结的因果轴
+
+权威草案是
+[`phase1_lateral_balance_perturbation_prereg_20260715.json`](../../../configs/phase1_lateral_balance_perturbation_prereg_20260715.json)。
+首轮只有一对单 seed 配对：
+
+| 格 | 人话 | 归一化脉冲强度 | 其他 |
+| --- | --- | --- | --- |
+| `L0` | 零推力对照 | `[0, 0] m/s` | 保留与 treatment 相同的机会、选择、方向和虚拟 pulse 占用时间 |
+| `L1` | 随机横向躯干脉冲 | `Uniform(0.04, 0.08) m/s`，方向左右各 `0.5` | 0.10 s 脉冲；每 0.50 s 一个随机相位机会，eligible 后以 `0.5` 概率选择 |
+
+两个格使用同一个无状态 schedule seed。这里的“共同随机数”是指：按
+`seed + environment + episode + opportunity + stream` 确定机会、是否选择、左右方向和单位幅度；即使两个
+策略之后走到不同状态，也不会因为调用 RNG 的次数不同而悄悄换题。
+
+### Eligibility 与硬安全边界
+
+第一次只允许以下交集：
+
+```text
+(post-strike recovery OR pre-swing hold)
+AND NOT strike_window
+AND safe_window_remaining_steps >= pulse_duration_steps
+```
+
+- pulse 启动后若击球窗意外开始，下一步必须写零并记 `interrupted_for_strike`，不能把残余外力带进挥拍。
+- 每个 simulator step 都必须覆盖完整 torso wrench buffer；无脉冲的环境也显式写零。漏一步就 fail closed，
+  因为旧外力可能继续存活。
+- 允许任何时刻扰动的 `anytime` 版本是**后续独立因果轴**。它不能混进首格；只有 recovery/hold 格在留出
+  考试存活后，才允许新建预注册。
+- self-hit、桌网碰撞、关节/力矩上限和物理摔倒仍是不可补偿硬门，推力训练不能用别的 Reward 抵消它们。
+
+## 源码边界与激活账本
+
+[`lateral_perturbation.py`](../../../hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/lateral_perturbation.py)
+现在只提供两个部分：
+
+1. 纯 torch 的确定性 scheduler/kernel：有界随机幅度、左右对称、完整安全窗、同一步幂等、漏步 fail closed。
+2. fail-closed adapter seam：把归一化脉冲按**整机总质量**变成 WORLD-Y 躯干质心力，并要求未来 adapter
+   对完整 batch 写入且返回 typed receipt。
+
+本提交**没有**把 seam 接进 Isaac。Isaac Lab 2.1 的实际接口接线仍需确认 body-frame wrench 语义、
+WORLD→BODY 变换、`write_data_to_sim` 时序、随机化后总质量读取和 zero overwrite 生命周期；在这些通过
+真实 runtime smoke 前不得写成 launch-ready。
+
+首轮机器账至少同时记录：
+
+- opportunity 总数、eligible denominator、selected numerator；
+- 左/右选择数与采样强度总量；
+- 非零 pulse command、strike-window skip、窗口不足、意外中断；
+- 每步 full-buffer write receipt、真正 applied pulse 数与 applied impulse 总量；
+- 每次 pulse 的 environment/episode/step、采样 `Δv_y`、命令 `F_y`、剩余 pulse step 和 adapter receipt。
+
+`L0` 必须有 eligible/selected，但 `applied_pulse_count=0`；`L1` 必须有非零 applied pulse。采样、命令和
+application 三本冲量账对不上时，结果无效而不是“近似通过”。
+
+## 留出考试与决策规则
+
+训练 seed/时序不得用于考试：
+
+| 考试 | 脉冲 | 用途 |
+| --- | --- | --- |
+| clean | `[0,0] m/s` | 判断无扰动下的摔倒率、guard reset 和下一拍击球是否退化 |
+| strong | `Uniform(0.10,0.14) m/s`，held-out seed | 超出训练强度的恢复压力测试；不参与 PPO 或 checkpoint 选择 |
+
+两张卷共用冻结的来球、episode 和 deadline schedule，以 all-attempt 为分母。草案的首轮晋级线是：
+
+1. 激活与 application 账完全闭合；
+2. clean 物理摔倒率不比 `L0` 高超过 1 个百分点，下一拍 composite 不低超过 3 个百分点；
+3. strong 的 balance-debt AUC 与回到 ready set 的中位时间都至少降低 10%，ready-by-deadline 至少提高
+   5 个百分点，且物理摔倒率不升；
+4. strong 同时记录 capture point（按当前质心位置/速度估计的落脚稳定点）与 COM（质心）到支撑域的最小
+   margin、相对**每个 episode 起始脚距**的最大变窄量、左右脚 yaw 误差。相对 `L0`，`L1` 不得让
+   capture-point/COM 最小 margin 低超过 1 cm、p95 脚距变窄多超过 2 cm，或 p95 脚 yaw 误差多超过 5°；
+5. 四项同时通过才买第二 seed。`+200/+500/+1000` checkpoint 只作早判，不给失败格复制 seed。
+
+这些阈值仍是预注册草案的一部分；在内容寻址题表和 runtime adapter 未闭合前不允许点火或事后改成
+“已经采用”。最终部署裁判仍是厂商 MuJoCo；Isaac 训练曲线只能筛方向。
+
+## 运行表
+
+| 运行（人话名 + `run_name`） | 状态 | Checkpoint/seed | 证据 | 结果产物 | 有效性说明 |
+| --- | --- | --- | --- | --- | --- |
+| 零推力对照 `pending` | 未启动 | seed 1 | 无 | 无 | runtime adapter 与 hard contract 未绑定 |
+| 横向脉冲 treatment `pending` | 未启动 | seed 1 | 无 | 无 | runtime adapter 与 hard contract 未绑定 |
+
+## 决定
+
+- 决定：`inconclusive`
+- 理由：第一性原理设计和纯源码门成立，但没有 Isaac adapter、full-step application ledger、训练或留出考试。
+- 是否已纳入当前 setting：`no`
+- 局限/下一个 gate：实现独立 Isaac adapter 与 runner/hard-contract 接线；验证随机化后整机质量、真实
+  WORLD-Y 脉冲积分和 pulse 后连续零写；再做小环境 runtime smoke，最后才生成可点火配对 queue。
+
+## 复现源码证据
+
+不需要 Isaac、Pod 或真机：
+
+```bash
+/Users/Franco/opt/anaconda3/envs/fast/bin/python -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_lateral_perturbation.py
+```
+
+测试覆盖：control/treatment 共同随机时序、左右对称与幅度界、recovery/hold eligibility、strike skip、
+完整 pulse 冲量、同一步幂等、漏步/漏 application receipt fail closed、按总质量缩放、X/Z force 与 torque
+恒零，以及 pulse 后 full-batch 零写。它不证明 simulator 真正执行了这些命令。
+
+相关 Gate：[`G05 Isaac training first loop`](../../gates/G05_isaac_training_first_loop.md)；连续恢复的结构顺序见
+[`EXP-RECOVERY-TUPLE-ABC`](EXP-RECOVERY-TUPLE-ABC.md)。
