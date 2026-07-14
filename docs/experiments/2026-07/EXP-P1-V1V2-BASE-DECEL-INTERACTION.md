@@ -1,12 +1,13 @@
 # EXP-P1-V1V2-BASE-DECEL-INTERACTION — 组合击球精度下的底座减速是否仍有净收益
 
-- 状态：`blocked`（已绑定 P1 exact source；等待同 scene family 的 4096-env 非科学启动探针）
+- 状态：`Partial`（strict probe 已通过；首次 control 基础设施失败并永久 rejected；unchanged retry-v2
+  与 treatment 已按同一 fill 顺序越过 first iteration，尚无 checkpoint/早判）
 - 阶段/轴：Phase 1 fresh C；V1+V2 与击球前底座减速的组合效应
 - 集成小目标：保住 V1+V2 的击球精度信号，同时降低击球前底座速度和摔倒率
 - 人类负责人：Franco
 - 执行者：Codex
 - 复核/决策负责人：Franco
-- 最高证据等级：`E0`（只有机器可读预注册，没有训练结果）
+- 最高证据等级：`E2`（strict Pod2 启动/终档 receipt；没有本交互轴训练结果）
 - 创建日期/最后复核日期：2026-07-14 / 2026-07-14
 
 共享缩写见[术语与人话对照](../../DEFINITIONS.md)。本文的 V1 指“在线速度模仿中释放持拍手腕”，
@@ -32,7 +33,7 @@ composite 四项击球精度通过率各自不下降超过 5 个百分点。任�
 
 | 字段 | 冻结值 |
 | --- | --- |
-| Source | `main@077e70c` / `/workspace/codexschema/nohope_p1_077e70c`；含 runtime binding、milestone attestor 与 full-scene probe |
+| Source | `main@caeb9ad` / `/workspace/codexschema/nohope_p1_caeb9ad`；含 runtime binding、milestone attestor 与 strict full-scene probe |
 | 初始化/seed | fresh / `3`；只买一个 seed |
 | 预算 | `4096 environments × 1001 updates`，每 `100` 保存，配对检查 `200/500/1000` |
 | 动作 | v4rg 正反手 runtime-order 动作；shared-face signed action |
@@ -42,10 +43,11 @@ composite 四项击球精度通过率各自不下降超过 5 个百分点。任�
 | 唯一差异 | control `base_decel_weight=0.0`；treatment `base_decel_weight=1.0` |
 | 调度 | 只允许 Pod2；Pod1 仅保留在 harness 固定 schema 中，`dispatch_pods: [pod2]` 不会给它发新任务 |
 
-两格仍为 `status: blocked`，所以 normal plan 没有 assignment。source 绑定已关闭，但这不等于 scene boot
-已经通过：必须先用独立 `_full_scene_probes/` namespace、同 source/Pod2/GPU、同动作/bank/plant 与
-`4096 environments` 越过首个 `Learning iteration`，再核对 probe 自然退出和 fatal0，才可另提交解除
-blocker。probe 的 model/reward 永不进入实验成绩。
+strict receipt 已被显式队列变更消费，顶层
+[`launch_authorized=true`](../../DEFINITIONS.md#launch-authorized)。首次 control 旧行现为 `rejected`，不再
+发射；配方逐字不变的 `control_retry_v2` 与从未 claim 的 treatment 当时均为 `ready`。probe 的 model/reward
+永不进入实验成绩。随后同一 `fill --count 2` 已先后观察 retry-v2 与 treatment 的 first iteration；当前
+matched pair live，但仍无 checkpoint。
 
 ## Activation 与配对早判
 
@@ -79,16 +81,19 @@ reward 效果前必须先闭合以下 activation：
 
 | 运行（人话名 + `run_name`） | 状态 | Checkpoint/seed | 证据 | 结果产物 | 有效性说明 |
 | --- | --- | --- | --- | --- | --- |
-| V1+V2，底座减速关；`phase1_fresh_c_v1v2_base_decel_control_seed3_20260714` | blocked | `200/500/1000`，seed 3 | exact P1 source + machine prereg | 无 | 等代表性 full-scene probe |
-| V1+V2，底座减速权重 1；`phase1_fresh_c_v1v2_base_decel_w1_seed3_20260714` | blocked | `200/500/1000`，seed 3 | exact P1 source + machine prereg | 无 | 等代表性 full-scene probe |
+| V1+V2，底座减速关的首次 namespace；`phase1_fresh_c_v1v2_base_decel_control_seed3_20260714` | rejected，禁止重发 | first iteration 前，seed 3 | PID=PGID `358331` + claim/namespace | dynamic URDF import `malloc(): invalid size (unsorted)`，自然 `rc=134` | 基础设施失败，不是 Reward/行为失败 |
+| 同配方 control 唯一重试；`phase1_fresh_c_v1v2_base_decel_control_seed3_retry_v2_20260714` | live，已过 first iteration | `200/500/1000`，seed 3 | PID=PGID `359240`（Pod2 GPU1）+ exact unchanged recipe | 尚无 checkpoint | 同一 fill 中先于 treatment 通过启动门 |
+| V1+V2，底座减速权重 1；`phase1_fresh_c_v1v2_base_decel_w1_seed3_20260714` | live，已过 first iteration | `200/500/1000`，seed 3 | PID=PGID `359872`（Pod2 GPU2）+ strict caeb receipt | 尚无 checkpoint | 同一 fill 在 retry-v2 first iteration 后发射 |
 
 ## 决定
 
 - 决定：`inconclusive`
-- 理由：两格 recipe、差异、早判与 P1 source 已冻结，但代表性 4096-env probe 尚未执行，未产生科学 claim/run。
+- 理由：两格 recipe、差异、早判与 P1 source 已冻结，strict 4096-env probe 也已通过；unchanged retry-v2
+  与 treatment 已形成 live pair，但还没有 paired checkpoint，不能评价交互轴。
 - 是否已纳入当前 setting：`no`
-- 局限/下一个 gate：先让同 source/scene family 的 full-scene probe 在 Pod2 空闲卡越过 first iteration并
-  自然退出；另一个结果后提交才可把两格改为 ready。不得顺手改 recipe、seed、阈值或授权 judge。
+- 局限/下一个 gate：`fill --count 2` 的顺序门已经通过；下一步守到 paired `+200`，再在
+  `+200/+500/+1000` 核 activation。旧 `358331` 永久 rejected，不得重放；不得顺手改 recipe、seed、阈值
+  或授权 judge。
 
 ## 复现与证据
 
@@ -98,11 +103,27 @@ reward 效果前必须先闭合以下 activation：
 pytest -q tests/test_phase1_fresh_c_v1v2_base_decel_prereg.py
 ```
 
-本实验没有执行命令、Pod 结果或忽略资产的新要求。后续若解除 blocker，运行必须走项目统一 lean queue
-harness；本文不会另建竞争性的算力优先级队列。
+本实验没有科学 trainer 或 Reward 结果。后续运行必须走项目统一 lean queue harness；本文不会另建竞争性
+的算力优先级队列。
 
 2026-07-14 同 source family 的首个 full-scene probe 在 iter0 暴露 clean detached `077e70c` 缺少 Git
 忽略 A3 URDF/mesh tree；它在 Reward、hard contract 和 checkpoint 之前，不能评价本交互轴。两行现显式绑定
 donor `6d93bcb`、46 files / 15,378,264 bytes / tree SHA `0137f59b...26c6`，并要求先由
 `prepare-source-assets` 产生 source 外 receipt、science doctor 再重算并消费。本分支只闭合 source gate，
-不远程水合、不解锁状态，故两格仍 blocked。
+当时不远程水合、不解锁状态，故两格当时仍 blocked。
+
+后续 c7 非科学 canary 的 result/model/hard-contract SHA-256 为 `02780b52...c4186` /
+`a813ea9b...38e68` / `c39cf1ae...df838`，76 个 tensor / 1,762,715 个浮点元素全 finite、fatal0、原 PGID
+自然为空；但其 `unlock_authorized=true` 只符合旧终档语义，不能解锁本实验。strict `main@caeb9ad`
+attempt `caeb_strict_terminal_pod2_gpu1_a1` 随后通过，result/claim/model/hard-contract SHA-256 分别为
+`0d03bd0305a56e56440b14e1f41278a26c0cad3a84cc1245325faed1ef29b1d1`、
+`7437db488d8aa062aba8de91fb517362cc609a81900f0e953f80e15174c36ad5`、
+`e1b79d142c13bc2df513b2a7311fbeb7b610fc64047e095c1a54c76571fe3106`、
+`c39cf1ae4bd99aa5ddce2a4c6c51cfd3858eba4884baeb369d5fdb1cf88df838`；result 绑定 actual 4096
+environments、physical ball/三实体、76 tensors / 1,762,715 浮点元素全 finite、fatal0、自然空 PGID 与
+clean caeb source。显式 unlock 后的首次 control PID=PGID `358331` 在 first iteration 前 dynamic URDF import
+报 `malloc(): invalid size (unsorted)`、自然 `rc=134`；treatment 未发射。旧 control 行已 rejected，唯一
+unchanged-recipe retry-v2 与 treatment 保持 ready，并由同一 fill 的 first-iteration 顺序约束保护。probe
+非科学、不可晋级。该 fill 随后让 retry-v2 PID=PGID `359240`（Pod2 GPU1）和 treatment PID=PGID
+`359872`（GPU2）依次越过 first iteration；matched pair 现 live，尚无 checkpoint/早判，交互轴结论仍为
+`inconclusive`。

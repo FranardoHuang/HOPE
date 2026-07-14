@@ -1,13 +1,13 @@
 # EXP-P1-CONDITIONAL-FACE-GUIDANCE — 不逃离就绪区的固定预算 Reward
 
-- 状态：`Partial`（E1 source gate 已合入 `main`；旧 source 的 1-env cache probe 通过，但 4096-env
-  formal control 在第 0 次迭代前卡死；P1 新配对已绑定 exact source，等待全规模非科学探针）
+- 状态：`Partial`（strict 4096-env 非科学探针已通过；科学 control/treatment 均越过 first iteration，
+  尚无 checkpoint 早判或 Reward 结论）
 - 阶段/轴：阶段 1 固定点；Reward 争抢机制
 - 集成小目标：在不牺牲触点、拍速、完成率或安全的前提下，降低有符号拍面误差
 - 人类负责人：franco
 - 执行者：Codex
 - 复核/决策负责人：franco
-- 最高证据等级：`E2`（`main@61007e9` source/tests + Pod2 启动反例；尚无 Reward 训练结果）
+- 最高证据等级：`E2`（`main@caeb9ad` strict Pod2 启动/终档 receipt；尚无 Reward 训练结果）
 - 创建日期/最后复核日期：2026-07-14
 
 共享缩写见[术语与人话对照](../../DEFINITIONS.md)。本文的
@@ -100,15 +100,14 @@ normal rc 或 signal，不发 signal。launcher 仍只报告 first iteration。�
 整个原 PGID 自然消失、current expected claim、phase 顺序、fatal0、finite/fresh-lineage1 `model_1.pt`、
 schema-3 contract、exact supervisor argv、source-asset receipt 与 motion/bank binding，并
 no-clobber 写 pass/fail `probe_result.json`。失败不自动 retry，仍 live 不提前冻结结果；普通 milestone attestor
-拒绝 `attestable=false` probe。整合 focused `126 passed` 只是 source gate，尚未在 Pod 运行，所以 p1r1 pair 继续
-blocked，也没有改变本实验的 `inconclusive` 结论。
+拒绝 `attestable=false` probe。整合 focused `126 passed` 只是 source gate；后续 Pod receipt 另见下文。
 
 旧 pair 保持不可修改的失败证据。新的 `p1r1` pair 已在结果前绑定同一 clean detached
-`main@077e70c`（Pod2 checkout `/workspace/codexschema/nohope_p1_077e70c`），两格均
-`runtime_binding=true`，仍只差 conditional weight `0/-0.4`。当前二者均为 `blocked`：先由 control 配方
-在 Pod2 GPU1 的独立 `_full_scene_probes/` namespace 保留全部 scene argv 与 `4096 environments`，仅缩短为
-2 updates/save1；只有看到首个 `Learning iteration`、随后自然退出并由 immutable terminal result 证明
-fatal0/model1/contract/claim/source/asset 全闭合，才有资格交给未来显式 unlock consumer；当前不会自动解锁。
+`main@caeb9ad`（Pod2 checkout `/workspace/codexschema/nohope_p1_caeb9ad`），两格均
+`runtime_binding=true`，仍只差 conditional weight `0/-0.4`。strict terminal receipt 已通过并由显式
+队列变更消费；当前二者均为 `ready`、顶层
+[`launch_authorized=true`](../../DEFINITIONS.md#launch-authorized)。随后 control/treatment 已分别在 Pod2
+GPU1/GPU2 越过 first iteration，PID=PGID 为 `357023/357679`；尚无 `model_200.pt` 或配对早判。
 
 ## 不可补偿安全边界
 
@@ -142,18 +141,18 @@ joint/torque/qdot limit、观测、动作或 plant。以下任一项都独立判
 | --- | --- | --- | --- | --- | --- |
 | 同 source fresh 对照（`phase1_fresh_c_conditional_face_control_seed3_20260714`） | 基础设施失败，永久拒绝该 namespace | seed3；第 0 次迭代前 | E2 | claim `caffd19e...da52`、run log/launch sidecar | 4096-env 日志停在 URDF import；无 scene、contract 或 checkpoint，不是 Reward 失败 |
 | 不逃离就绪区的固定预算纠面（`phase1_fresh_c_conditional_face_w04_seed3_20260714`） | 未发射、旧配对阻断 | seed3；无进程/claim | E1 | run directory 不存在 | control 失败后 serial fill fail closed；必须换 fresh source/namespace，不能单独补 treatment |
-| P1 runtime-bound fresh 对照（`phase1_fresh_c_conditional_face_control_p1r1_seed3_20260714`） | blocked，等待 4096-env probe | seed3；200/500/1000 | E1 | exact source + machine prereg | 不得用 normal fill 绕过 probe |
-| P1 runtime-bound 固定预算纠面（`phase1_fresh_c_conditional_face_w04_p1r1_seed3_20260714`） | blocked，等待 4096-env probe | seed3；200/500/1000 | E1 | exact source + machine prereg | 与新 control 唯一差异为 `-0.4` |
+| P1 runtime-bound fresh 对照（`phase1_fresh_c_conditional_face_control_p1r1_seed3_20260714`） | live，已过 first iteration | seed3；200/500/1000 | E2 启动门 | PID=PGID `357023` + strict caeb receipt | 尚无 `model_200.pt`，不得把 probe model 当科学 checkpoint |
+| P1 runtime-bound 固定预算纠面（`phase1_fresh_c_conditional_face_w04_p1r1_seed3_20260714`） | live，已过 first iteration | seed3；200/500/1000 | E2 启动门 | PID=PGID `357679` + strict caeb receipt | 尚无配对早判；与 control 唯一差异为 `-0.4` |
 
 ## 决定
 
 - 决定：`inconclusive`
-- 理由：公式、反向激励反例与 source gate 已进入 `main@61007e9`；1-env probe 虽通过，4096-env
-  control 仍在 dynamic URDF import 后日志停止增长。它在 scene、hard contract、iteration 之前，不能评价机制。
+- 理由：公式、反向激励反例与 source gate 已进入 main；strict 4096-env probe 与两臂 first iteration
+  已通过，但还没有 paired checkpoint，因此仍不能评价 conditional 机制。
 - 是否已纳入当前 setting：`no`
-- 局限/下一个 gate：旧 source610 配对不再运行。新 pair 已绑定 fresh P1 source/namespace；下一步只运行
-  同 source、GPU、`num_envs=4096` 和同 scene recipe 的非科学 full-scene probe。1-env 只作 cache probe，
-  不再授权正式训练；probe receipt 审完前禁止手写 CLI 或 normal fill 点火。
+- 局限/下一个 gate：旧 source610 配对不再运行。新 pair 已绑定 strict caeb source/namespace 并正在运行；
+  下一步守到 `+200`，再于 `+200/+500/+1000` 核 activation 与行为。不得手写
+  CLI、把 probe model 计入成绩或越过配对早判。
 
 ## 复现与证据
 
@@ -165,15 +164,23 @@ contract 记录。运行方法与 first-iteration/claim 纪律见[训练操作](
 clean detached source 中 Git 忽略的 A3 `model.urdf`；这不是 conditional Reward 失败。新的 `p1r1` 两行现
 显式绑定 donor `6d93bcb` 与接受的 46-file tree，且 science claim 会绑定完整 ignored-asset contract。
 必须先走 selected-Pod-only `prepare-source-assets` 产生 source 外 exact receipt，再由 doctor 重算并消费；
-本次源码工作不执行该水合、不重发 probe，pair 继续 blocked。
+该 source-gate 提交当时未执行水合或重发，故当时 pair 继续 blocked。后续 c7/caeb 结果如下。
 
-pre-probe 机器清单现改绑 exact `main@c7e1a90` 与
-`/workspace/codexschema/nohope_p1_c7e1a90`；control/treatment 明确分到 Pod2 GPU1/GPU2，但两行仍
-`blocked`，顶层 `launch_authorized=false`。普通 live snapshot 只访问 `dispatch_pods=[pod2]`，不会读取
-reserved Pod1；terminal probe result 未通过前，`fill/launch-next` 会在任何 SSH 前拒绝。本次只闭合控制面，
-没有水合、probe、checkpoint 或行为结论。
+pre-probe 机器清单曾改绑 exact `main@c7e1a90` 与
+`/workspace/codexschema/nohope_p1_c7e1a90`；control/treatment 分到 Pod2 GPU1/GPU2 并保持 blocked。普通
+live snapshot 只访问 `dispatch_pods=[pod2]`，不会读取 reserved Pod1。随后 c7 非科学 canary 的
+result/model/hard-contract SHA-256 为 `02780b52...c4186` / `a813ea9b...38e68` /
+`c39cf1ae...df838`，76 个 tensor / 1,762,715 个浮点元素全 finite、fatal0、原 PGID 自然为空；但其
+`unlock_authorized=true` 只符合旧终档语义，不能解锁科学 pair。
 
 随后 P1.5 又把旧 probe 的 launcher-only 短终态变成可审计的 failure-only receipt，并补齐实际 4096-env、
 物理球/桌实体、face179、31/31 零摩擦与正式 schema-3 validator 门。validator 直接从 exact checkout 载入，
-不触发 Kit/Omni package import；旧 c7 hard contract 尚未由该门重新验证，不能追认通过。增量 focused
-`100 passed` 仍只是 source gate，本卷 `inconclusive` 与两条 p1r1 `blocked` 状态不变。
+不触发 Kit/Omni package import。strict `main@caeb9ad` attempt `caeb_strict_terminal_pod2_gpu1_a1` 已通过：
+result/claim/model/hard-contract SHA-256 分别为
+`0d03bd0305a56e56440b14e1f41278a26c0cad3a84cc1245325faed1ef29b1d1`、
+`7437db488d8aa062aba8de91fb517362cc609a81900f0e953f80e15174c36ad5`、
+`e1b79d142c13bc2df513b2a7311fbeb7b610fc64047e095c1a54c76571fe3106`、
+`c39cf1ae4bd99aa5ddce2a4c6c51cfd3858eba4884baeb369d5fdb1cf88df838`；actual
+`num_envs=4096`、physical ball/三实体、76 tensors / 1,762,715 浮点元素全 finite、fatal0、自然空 PGID 与
+clean caeb source 均由 result 绑定。显式 unlock 后两条 p1r1 已在 PID=PGID `357023/357679` 越过 first
+iteration；probe 非科学、不可晋级，本卷仍为 `inconclusive`，科学 checkpoint 早判尚未出现。

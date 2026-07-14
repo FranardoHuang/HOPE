@@ -1877,9 +1877,10 @@ source/动作/bank/plant/GPU 和正式 `num_envs`，只改为 2 updates/save1；
 隔离的非科学 namespace，明确 `attestable=false/promotable=false`，专用确认词、reserved Pod、重复路径、
 zero/placeholder source 与环境数漂移均 fail closed。source focused/扩展套件分别 `73/109 passed`。
 
-Pod2 已准备 clean detached exact `077e70c` source，motion、train bank 与 K100 exam 均存在；conditional P1
-pair 与 V1+V2×base-decel pair 已绑定但保持 blocked，尚未运行 full-scene probe 或 scientific trainer。
-因此这里仍是 E1/source+runtime-readiness，G05 维持 `Partial`。
+最初的 Pod2 clean detached exact `077e70c` source 已准备 motion、train bank 与 K100 exam；它后续因缺
+Git-ignored A3 tree 在 iter0 自然 fail closed。当前 conditional P1 pair 与 V1+V2×base-decel pair 已改绑
+strict `main@caeb9ad` source；该 source 的 full-scene probe 已通过并显式解锁两对，但 scientific trainer
+尚未点火。因此这里已有 E2 启动/终档运行证据、没有 Reward 行为结果，G05 维持 `Partial`。
 
 full-scene probe 首次 dry/capacity preflight 又发现 execute 原先会复用 all-Pod `live_snapshot`：Pod2-only
 probe 也会访问 reserved Pod1。P1.2 将该路径收窄为 selected dispatch Pod/GPU 唯一 PID 计数，未知输出、
@@ -1933,16 +1934,17 @@ P1.4 source gate 因此让 YAML source 显式绑定 target/donor/commit/完整 t
 `prepare-source-assets`，在 source 无 trainer 时用 source-specific lock、source 外 no-clobber staging、
 `renameat2(RENAME_NOREPLACE)` 与 no-clobber receipt 水合。声明者的 doctor 在 Hydra/run-dir/claim/Kit 前
 重算 donor/target、43/43 URDF closure、Git-ignore 并消费 exact receipt；science claim 自动绑定完整 source
-mapping。旧行不声明时兼容。源码/测试通过仍只是 E1；本分支不远程水合、不重发 probe、不改变 blocked
-状态，G05 保持 `Partial`。
+mapping。旧行不声明时兼容。该 source-gate 提交当时不远程水合、不重发 probe、不改变 blocked 状态；
+后续 strict caeb 结果见下文。G05 保持 `Partial`。
 
 #### Pod2-only pre-probe 发射闩
 
-P1 source 现改绑 exact `main@c7e1a90` checkout，两个队列仍保持 terminal probe 前的
-`launch_authorized=false`。`fill/launch-next` 会在任何 SSH 前拒绝；status/doctor 与 probe 前置门只读取
-`dispatch_pods=[pod2]`，不再访问 reserved Pod1。历史七条 ready 行同步改为 complete/rejected，新 conditional
-与 V1+V2×base-decel 两对仍 blocked，并预分 Pod2 GPU1/GPU2。focused queue suite `47 passed`；没有远端
-水合、probe 或新 trainer，G05 继续 `Partial`。
+P1 source 现改绑 exact `main@caeb9ad` checkout。
+[`launch_authorized=false`](../DEFINITIONS.md#launch-authorized) 时 `fill/launch-next` 会在任何
+SSH 前拒绝；status/doctor 与 probe 前置门只读取 `dispatch_pods=[pod2]`，不再访问 reserved Pod1。历史七条
+ready 行同步改为 complete/rejected，新 conditional 与 V1+V2×base-decel 两对预分 Pod2 GPU1/GPU2。strict
+receipt 通过后，两份队列已显式切为 `launch_authorized=true`、四条科学行 ready；尚未点火或产生科学
+checkpoint，G05 继续 `Partial`。
 
 #### Full-scene probe P1.5 终档诚实门
 
@@ -1953,5 +1955,35 @@ P1.5 收口首个 probe 的“短跑结束但没有 supervisor exit receipt”�
 hard contract 还必须分别证明 `deploy_parity_face179` 与 31/31 PhysX 零摩擦。schema-3 正式 validator 从
 claim-bound clean checkout 的 dependency-light `training_contract.py` 直接载入，禁止经过会启动 Kit/Omni 的
 package `__init__`。PID 已复用只证明原 identity 已退出，仍由双扫描 PGID closure 阻止 orphan；并发 finalizer
-仍以 atomic no-replace 胜者为准，只接受 byte-identical 重放。增量 focused `100 passed`；尚未拿该 source 在
-Pod 产出通过结果，也未重新验证旧 c7 hard contract，因此 G05 继续 `Partial`。
+仍以 atomic no-replace 胜者为准，只接受 byte-identical 重放。增量 focused `100 passed`；源码门本身不等于
+Pod runtime，G05 继续 `Partial`。
+
+旧 `main@c7e1a90` 随后完成一次非科学基础设施 canary。其 `probe_result.json` 内容 SHA-256 为
+`02780b52df27255eea096f34dda9a26e806ae3a196c233a46a2af1cde16c4186`，finite `model_1.pt` SHA-256 为
+`a813ea9ba8c058cf5ed2f9a9a8f8fe3b95ec0903cd3702831b99736736738e68`，相邻 hard-contract SHA-256 为
+`c39cf1ae4bd99aa5ddce2a4c6c51cfd3858eba4884baeb369d5fdb1cf88df838`；76 个 tensor 的
+1,762,715 个浮点元素全 finite，fatal 命中为 0，trainer/supervisor 的原 PGID 自然为空。hard contract 也
+独立通过正式 schema-3 validator，但 c7 `probe_result.json` 的 `unlock_authorized=true` 只属于旧终档语义；
+它没有受 P1.5 结果绑定证明实际 4096 environments、物理球与 `pb_ball/pb_table/pb_table_visual`，不能追认
+或解锁科学训练。
+
+clean exact `main@caeb9ad` 随后用全新 attempt `caeb_strict_terminal_pod2_gpu1_a1` 通过严格门。result/claim/
+model/hard-contract SHA-256 分别为
+`0d03bd0305a56e56440b14e1f41278a26c0cad3a84cc1245325faed1ef29b1d1`、
+`7437db488d8aa062aba8de91fb517362cc609a81900f0e953f80e15174c36ad5`、
+`e1b79d142c13bc2df513b2a7311fbeb7b610fc64047e095c1a54c76571fe3106`、
+`c39cf1ae4bd99aa5ddce2a4c6c51cfd3858eba4884baeb369d5fdb1cf88df838`。result 绑定 actual
+`num_envs=4096`、`physical_ball=true`、三实体全存在、76 个 tensor / 1,762,715 个浮点元素全 finite、
+fatal0、自然空 PGID 与 clean caeb source，故 `unlock_authorized=true`。该 receipt 已被显式队列变更消费，
+两对当时均变为 ready。probe 仍 `not_science=true / attestable=false / promotable=false`，不产生 Reward
+结论、不授权第二 seed、judge、晋级或部署；G05 保持 `Partial`。
+
+显式 unlock 后，conditional control/treatment 已分别在 Pod2 GPU1/GPU2 越过 first iteration，PID=PGID
+`357023/357679`；尚无 checkpoint 早判，不能形成 Reward 结论。随后 interaction control PID=PGID
+`358331` 在 first iteration 前的 dynamic URDF import 报 `malloc(): invalid size (unsorted)`、`rc=134` 并
+自然退出，treatment 未发射；claim/namespace 保全。这是新的启动基础设施失败，不是 V1+V2×base-decel
+Reward 或行为失败，也不能把单边 attempt 记成 matched pair。旧 control 行已 rejected/no-relaunch；逐字
+同配方 `control_retry_v2` 与从未 claim 的 treatment 均 ready，只允许同一 `fill --count 2` 事务先等 retry
+first iteration 再发 treatment。该事务已按序完成：retry-v2 PID=PGID `359240`（Pod2 GPU1）和 treatment
+PID=PGID `359872`（GPU2）均越过 first iteration，pair 现 live；尚无 checkpoint/早判。G05 仍为
+`Partial`。

@@ -67,22 +67,38 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   通用 launcher 也已加入 180 秒日志无进展 watchdog；marker 优先，失败只收口自身 exact PGID并写 sidecar。
   conditional source 的 Pod2 GPU1 1-env warmup 虽自然退出并通过 2/2 updates，但随后 4096-env control
   在 dynamic URDF import 后停住，iter0、无 scene/contract/checkpoint；精确 PGID 收口并保全，treatment
-  从未创建。这个反例推翻了“1-env warmup 可授权正式 run”。新的 P1 source `077e70c` 已在 Pod2 clean
-  detached 准备完成；conditional `0/-0.4` 与 `V1+V2 × base-decel` 两组单 seed pair 均已 exact 绑定但保持
-  blocked。首次正式规模非科学 probe 已创建唯一 PID=PGID `353107`，随后自然 `rc=1` 且无 signal、首 iter、
-  hard contract 或 model；明确根因是 fresh checkout 缺少 Git-ignored A3 runtime tree，URDF 路径在 scene
-  creation 后 fail closed。这不是 4096-env 容量或 Reward 负结果，原 attempt 永不重放；下一动作是把完整
-  46-file A3 tree 做成 YAML source closure/no-clobber hydrate，再用新 attempt 重跑同一 scene gate。
+  从未创建。这个反例推翻了“1-env warmup 可授权正式 run”。后续 `077e70c` 非科学 probe 又因 clean
+  checkout 缺 Git-ignored A3 runtime tree 在 iter0 自然失败；它不是 4096-env 容量或 Reward 负结果，原
+  attempt 永不重放。46-file A3 tree 的 YAML source closure/no-clobber hydrate 随后闭合，`main@c7e1a90`
+  canary 已自然越过首迭代并终档：result/model/hard-contract SHA-256 分别为
+  `02780b52...c4186` / `a813ea9b...38e68` / `c39cf1ae...df838`，76 个 tensor 的 1,762,715 个浮点元素
+  全 finite，fatal=0，原 PGID 已自然为空。但它的 `unlock_authorized=true` 只符合 c7 旧终档语义，不能
+  解锁科学训练。当前 conditional `0/-0.4` 与 `V1+V2 × base-decel` 两组单 seed pair 已改绑 strict
+  `main@caeb9ad` checkout `/workspace/codexschema/nohope_p1_caeb9ad`。新 attempt
+  `caeb_strict_terminal_pod2_gpu1_a1` 已真正通过：result/claim/model/hard-contract SHA-256 分别为
+  `0d03bd03...9b1d1` / `7437db48...ad5` / `e1b79d14...3106` / `c39cf1ae...df838`，并绑定实际
+  4096 environments、物理球/三实体、76 个 tensor 的 1,762,715 个浮点元素全 finite、fatal0 与自然空
+  PGID。该非科学 receipt 已被显式队列变更消费：两对均为 ready、
+  [`launch_authorized=true`](DEFINITIONS.md#launch-authorized)。conditional control/treatment 随后已分别在
+  Pod2 GPU1/GPU2 越过 first iteration（PID=PGID `357023/357679`），尚无 checkpoint 早判或行为结论。
+  interaction control PID=PGID `358331` 则在 first iteration 前的 dynamic URDF import 以
+  `malloc(): invalid size (unsorted)`、`rc=134` 自然退出；treatment 未发射，claim/namespace 已保全。
+  这不是 interaction Reward/行为失败，也不能写成 pair 已运行。旧 control 行已 rejected、禁止重发；
+  逐字相同配方的 `control_retry_v2` 与从未 claim 的 treatment 均 ready，只允许同一 `fill --count 2` 事务
+  先观察 retry first iteration 再发 treatment。该事务随后按序成功：retry-v2 PID=PGID `359240` 在 Pod2
+  GPU1、treatment PID=PGID `359872` 在 GPU2，二者均已越过 first iteration。interaction pair 现 live，
+  尚无 checkpoint 或早判；旧 `358331` 永久 rejected。
   “每卡只能发一条”的 launch-lock 根因已修：旧 `flock FILE command` fd 被 trainer 继承；新 controller
   用 fd8 持短锁并对子 launcher `8>&-`。conditional control/treatment 优先同落已 warm 的 Pod2 GPU1，
   正好验证容量不再退化为1；现役 qdot 的旧锁不做任何强制处理。
 
   2026-07-14 19:00 CST 起 Pod1 全部留给 Yikang 冲刺：Codex 的 V1/V2/V1+V2 只对精确 PGID 发出
   `TERM`，分别停在 iter `792/782/743`，三条 `model_700.pt` 与日志完整保留，未进入 `KILL`；复核 Pod1
-  三卡无 Codex compute process。Codex 后续只使用 Pod2。qdot treatment 已自然退出并释放 GPU2，control
-  仍在 GPU0；GPU0 另有 Yikang 的外部 trainer，Codex 不管理；GPU1 预留给下一条 4096-env probe。机器可读
+  三卡无 Codex compute process。Codex 后续只使用 Pod2。qdot treatment/control 均已自然终档；c7/caeb
+  canary 也已自然退出。最近可信 Pod2 快照中 GPU0 只有 Yikang 的外部 trainer，Codex 不管理；GPU1/GPU2
+  分别运行 conditional control/treatment 与 interaction retry-v2/treatment，每卡两条 Codex trainer。机器可读
   [`dispatch_pods: [pod2]`](DEFINITIONS.md#dispatch-pods) 已使新 assignment 不可能
-  落到 Pod1，同时只读旧 claim 防止重复发射。
+  落到 Pod1，普通 live snapshot 也不会读取 Pod1。
 
   发射 harness 已在 `main` 收紧：YAML recipe 先拒绝重复/owned key 和 Hydra 控制语法，真实最终 argv 在
   claim 前做 no-Kit compose，run directory 原子创建，canonical claim digest 自动绑定 source/argv/
@@ -91,8 +107,8 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   [milestone attestor](DEFINITIONS.md#milestone-attestor) 已进入 main；代表性 full-scene probe 也已实现。
   Pod2-only probe 的外层快照现在只读 selected dispatch slot，不再因普通 fill 的全 Pod 快照访问 reserved
   Pod1；`fill --execute` 每臂也已从“独立 doctor SSH + 内嵌 doctor launch SSH”收为一次原子远端调用。
-  下一闭环是 ignored asset prepare receipt、probe 自然终档 receipt，以及每个机制的 activation
-  numerator/denominator。
+  ignored asset prepare 与 strict caeb 自然终档已经闭合；两组 pair 也都已过 first iteration。下一闭环是守到
+  `+200` 并核对各自 activation numerator/denominator；旧 interaction `358331` 不得重放。
 
   非击球臂 A0/A1 已完成 checkpoint 层闭环。A1 自然退出；
   A0 的 `model_1000.pt` 写完后在 Kit/Python teardown 挂起近三小时，正式 failure regex 无命中，终档

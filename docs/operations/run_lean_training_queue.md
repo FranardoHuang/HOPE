@@ -1,9 +1,17 @@
 # 轻量 YAML 训练队列
 
 状态：旧机制行已完成机器终态处置，qdot `-5/0` 自然终档，其余历史 namespace 不再发射。两个 P1 配对
-现绑定 `main@c7e1a90` 的 clean checkout `/workspace/codexschema/nohope_p1_c7e1a90`，但 terminal
-full-scene probe 尚未通过；两份队列的 [`launch_authorized`](../DEFINITIONS.md#launch-authorized) 都是
-`false`，科学 `fill/launch-next` 会在 SSH 前拒绝。G05 仍为 `Partial`，这不是行为晋级。
+现绑定 `main@caeb9ad` 的 clean checkout `/workspace/codexschema/nohope_p1_caeb9ad`；严格 terminal
+full-scene probe 已通过，两份队列已显式把 [`launch_authorized`](../DEFINITIONS.md#launch-authorized) 改为
+`true`，conditional 与 V1+V2×base-decel 两组科学配对当时均为 `ready`。probe 是非科学启动/终档门，
+不是行为晋级，G05 仍为 `Partial`。显式解锁后，conditional control/treatment 已分别在 Pod2
+GPU1/GPU2 越过 first iteration（PID=PGID `357023/357679`），尚无 checkpoint 早判。interaction control
+PID=PGID `358331` 则在 first iteration 前的 dynamic URDF import 以 `malloc(): invalid size (unsorted)`、
+`rc=134` 自然退出，treatment 未发射；claim/namespace 保全，这不是 interaction Reward 或行为失败。旧
+control 行已 `rejected` 且禁止重发；逐字相同配方的新 `control_retry_v2` 与原 treatment 为 `ready`，只能用
+同一个 `fill --count 2` 事务在 retry 越过 first iteration 后再发 treatment。该事务已按序完成：retry-v2
+PID=PGID `359240` 在 Pod2 GPU1、treatment PID=PGID `359872` 在 GPU2，二者均已越过 first iteration；
+interaction pair 现 live，但尚无 checkpoint/早判。
 
 qdot matched-control 的首次冷启动也在 dynamic URDF import/scene creation 前停住；相同 warning 在成功臂
 同样存在，不能拿 warning 字面当根因。旧 namespace 已保全并拒绝，只有 unchanged retry-v2 可再试一次。
@@ -155,6 +163,22 @@ queue 不会自动解锁任何科学 job。
 launcher 已在精确 PGID 收口后发布 pre-marker/watchdog/stale/boot-timeout 终态，终档器只会保存 immutable
 failure，不能 pass。CLI 不需要也不应手传 source-asset receipt；路径由 immutable claim 导出。
 
+旧 `main@c7e1a90` 已跑过一次非科学基础设施 canary：`probe_result.json` 内容 SHA-256 为
+`02780b52df27255eea096f34dda9a26e806ae3a196c233a46a2af1cde16c4186`，`model_1.pt` SHA-256 为
+`a813ea9ba8c058cf5ed2f9a9a8f8fe3b95ec0903cd3702831b99736736738e68`，相邻 hard-contract SHA-256 为
+`c39cf1ae4bd99aa5ddce2a4c6c51cfd3858eba4884baeb369d5fdb1cf88df838`；76 个 tensor 中
+1,762,715 个浮点元素全 finite，fatal 命中为 0，trainer/supervisor 的原 PGID 自然为空。旧结果内的
+`unlock_authorized=true` 只符合 c7 旧终档语义，**不能**解锁当前队列。
+
+严格 `main@caeb9ad` probe `caeb_strict_terminal_pod2_gpu1_a1` 随后通过：result/claim/model/hard-contract
+SHA-256 分别为 `0d03bd0305a56e56440b14e1f41278a26c0cad3a84cc1245325faed1ef29b1d1`、
+`7437db488d8aa062aba8de91fb517362cc609a81900f0e953f80e15174c36ad5`、
+`e1b79d142c13bc2df513b2a7311fbeb7b610fc64047e095c1a54c76571fe3106`、
+`c39cf1ae4bd99aa5ddce2a4c6c51cfd3858eba4884baeb369d5fdb1cf88df838`。result 绑定 clean caeb source、
+实际 4096 environments、`physical_ball=true`、三实体全存在、76 个 tensor / 1,762,715 个浮点元素全
+finite、fatal0 与自然空 PGID，因此 `unlock_authorized=true` 可被显式队列变更消费。probe 本身仍
+`not_science=true / attestable=false / promotable=false`，不能当 Reward 结果或晋级证据。
+
 这个入口解决的是“动作和题库已经决定后，为什么还要手拼一长串命令”。一条 YAML job 必须同时绑定：
 
 - 一个动作名与它的一个或多个 motion 文件；
@@ -232,7 +256,8 @@ launch 自身先在远端短锁内完成与 standalone `doctor` 相同的 source
 ## 命令
 
 `plan/status/doctor` 默认不连 Pod。`launch-next/fill` 还要求机器清单显式
-`launch_authorized: true`；当前 pre-probe 队列调用它们会在任何 SSH 前拒绝：
+`launch_authorized: true`；通用 example 仍保持 false 并会在任何 SSH 前拒绝，当前两份 P1 active queue
+已经 strict probe 后显式解锁：
 
 ```bash
 python3 scripts/run_lean_training_queue.py \
@@ -255,9 +280,8 @@ python3 scripts/run_lean_training_queue.py \
 `plan --live` / `status --live` 只对 `dispatch_pods` 中的每台机器建立一个低频只读 SSH；当前两队列因此
 只读 Pod2 的 GPU 与 claim。`doctor --live`
 不创建 run directory、claim 或 Kit 进程；它验证 source/assets/exact module origin，并以真实最终 override
-向量执行 `train.py --cfg job --resolve`。只有返回 `hydra=exact-no-kit-compose` 才通过。terminal probe
-通过、显式 unlock 把目标行改为 `ready` 且把 `launch_authorized` 改为 `true` 后，才先看 `fill` dry-run，
-再用单个 scheduler 进程发射指定上限：
+向量执行 `train.py --cfg job --resolve`。只有返回 `hydra=exact-no-kit-compose` 才通过。当前 terminal probe
+与显式 unlock 已完成，仍须先看 `fill` dry-run，再用单个 scheduler 进程发射指定上限：
 
 ```bash
 python3 scripts/run_lean_training_queue.py \
@@ -315,8 +339,8 @@ main 已有独立 per-source+Pod+GPU 的 `1 env × 2 updates` boot-warmup 和 co
 stale watchdog；P1 不改变其 source-pinned/exact-PGID 语义，也不会让 warmup 继承科学 binding path。
 新反例证明 1-env 成功只可当 cache/import probe：同 source/GPU 的正式 4096-env control 仍可能在
 `scene_import_start` 后卡死。P1.1 source gate 因此新增上述 full-scene probe，绑定同 source、physical GPU、
-task/assets/plant、完整 recipe 与正式 `num_envs`，但尚未在 Pod 产出真实 probe claim；源码通过不能冒充
-full-scene runtime 已通过。
+task/assets/plant、完整 recipe 与正式 `num_envs`。c7 canary 只闭合旧终档语义；strict caeb probe 已按本页
+证据闭合当前 4096-env full-scene 启动/终档门，但尚无科学 trainer 或 Reward 结果。
 
 ## 验证
 
@@ -337,7 +361,6 @@ python3 -m py_compile scripts/run_lean_training_queue.py \
 bash -n hope_training/whole_body_tracking/scripts/launch_kit_training_locked.sh
 ```
 
-本源码门只证明 YAML 绑定、调度与 fail-closed 选择逻辑；没有证明远端 SSH、Isaac runtime、动作效果或
-exam 成绩。整合 focused source result 为 `126 passed`；现有 source-pinned launcher 同时保留 180 秒 stale-log
-watchdog 与总 boot timeout。P1.1 已提供代表性 full-scene probe 的 source mode，但尚无远端 claim/首迭代
-运行证据，仍不能写成 full-scene runtime 通过。
+本源码门只证明 YAML 绑定、调度与 fail-closed 选择逻辑；没有证明动作效果或 exam 成绩。整合 focused
+source result 为 `126 passed`；现有 source-pinned launcher 同时保留 180 秒 stale-log watchdog 与总 boot
+timeout。strict caeb runtime probe 已通过，但它只授权科学队列点火，不能写成科学训练或行为通过。

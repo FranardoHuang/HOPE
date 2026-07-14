@@ -13,15 +13,47 @@
 
 ## 2026-07-14
 
-- Lean queue 加入显式 `launch_authorized` 发射闩：当前两份 P1 清单在 terminal probe 前保持 false，
-  `fill/launch-next` 零 SSH 拒绝；live snapshot 只访问 Pod2。历史七条 ready 行已按既有证据终态化，新
-  conditional 与 V1+V2×base-decel 配对改绑 `main@c7e1a90`、分列 Pod2 GPU1/GPU2，仍未解锁或点火。
+- strict receipt 解锁后的 conditional control/treatment 已分别在 Pod2 GPU1/GPU2 越过 first iteration，
+  PID=PGID 为 `357023/357679`；尚无 checkpoint 早判或 Reward 结论。紧接着的 interaction control
+  PID=PGID `358331` 在 first iteration 前 dynamic URDF import 报
+  `malloc(): invalid size (unsorted)`、`rc=134` 并自然退出，treatment 未发射；claim/namespace 保全，
+  不能写成 interaction pair 已运行或 Reward 失败。旧 control 行已 rejected/no-relaunch；逐字同配方
+  `control_retry_v2` 与从未 claim 的 treatment 均 ready，只允许同一 `fill --count 2` 事务先等 retry first
+  iteration 再发 treatment。该事务随后按序成功：retry-v2 PID=PGID `359240`（Pod2 GPU1）、treatment
+  PID=PGID `359872`（GPU2）均越过 first iteration，interaction pair 现 live；尚无 checkpoint/早判。见
+  [conditional 卷宗](experiments/2026-07/EXP-P1-CONDITIONAL-FACE-GUIDANCE.md)与
+  [interaction 卷宗](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-INTERACTION.md)。
+
+- c7 非科学 full-scene canary 已闭合旧语义的基础设施路径：result/model/hard-contract SHA-256 分别为
+  `02780b52df27255eea096f34dda9a26e806ae3a196c233a46a2af1cde16c4186`、
+  `a813ea9ba8c058cf5ed2f9a9a8f8fe3b95ec0903cd3702831b99736736738e68`、
+  `c39cf1ae4bd99aa5ddce2a4c6c51cfd3858eba4884baeb369d5fdb1cf88df838`；76 个 tensor 的
+  1,762,715 个浮点元素全 finite、fatal0、trainer/supervisor 原 PGID 自然为空。旧结果中的
+  `unlock_authorized=true` 不满足 `main@caeb9ad` 新增的实际 4096-env、物理球/三实体与完整 schema-3
+  终档门，不能解锁。
+
+- strict caeb probe `caeb_strict_terminal_pod2_gpu1_a1` 随后通过：result/claim/model/hard-contract SHA-256
+  分别为 `0d03bd0305a56e56440b14e1f41278a26c0cad3a84cc1245325faed1ef29b1d1`、
+  `7437db488d8aa062aba8de91fb517362cc609a81900f0e953f80e15174c36ad5`、
+  `e1b79d142c13bc2df513b2a7311fbeb7b610fc64047e095c1a54c76571fe3106`、
+  `c39cf1ae4bd99aa5ddce2a4c6c51cfd3858eba4884baeb369d5fdb1cf88df838`。它绑定 clean caeb source、实际
+  4096 environments、physical ball/三实体、76 tensors / 1,762,715 浮点元素全 finite、fatal0 与自然空
+  PGID。两份 P1 队列已显式
+  [`launch_authorized=true`](DEFINITIONS.md#launch-authorized)，四条科学行 ready，但尚未点火；probe 仍非科学且
+  不可晋级。见
+  [G05](gates/G05_isaac_training_first_loop.md)与[操作](operations/run_lean_training_queue.md)。
+
+- Lean queue 加入显式 `launch_authorized` 发射闩：false 时
+  `fill/launch-next` 会零 SSH 拒绝；live snapshot
+  只访问 Pod2。历史七条 ready 行已按既有证据终态化，新 conditional 与 V1+V2×base-decel 配对现改绑
+  `main@caeb9ad`、分列 Pod2 GPU1/GPU2，并在上述 strict receipt 后显式解锁；尚未点火。
   见 [G05](gates/G05_isaac_training_first_loop.md)与[操作](operations/run_lean_training_queue.md)。
 
 - full-scene probe P1.5 关闭短跑终态与假绿缺口：launcher-only pre-marker/watchdog/timeout 只能冻结失败；
   pass 新增实际环境数、物理球/桌实体、face179、31/31 零摩擦和 direct-file schema-3 validator 门，并修正
-  PID reuse/并发 finalizer race。增量 focused `100 passed`，未重跑 Pod、未追认旧 c7 contract，G05 仍
-  `Partial`。见 [G05](gates/G05_isaac_training_first_loop.md)与
+  PID reuse/并发 finalizer race。该源码合入时的增量 focused 为 `100 passed`，当时未重跑 Pod、未追认旧
+  c7 contract；后续 strict caeb receipt 见上，G05 仍 `Partial`。见
+  [G05](gates/G05_isaac_training_first_loop.md)与
   [运行绑定接口](interfaces/lean_training_run_binding.md)。
 
 - Kit watchdog 的 marker-priority 测试移除亚秒 sleep 调度竞态：现在于第二次 marker probe 同步注入
@@ -47,7 +79,8 @@
 - lean queue P1/P1.1 已进入 main：trainer-owned `run_binding` 与 exact milestone attestor 不再靠 glob 猜
   checkpoint；新 `full-scene-probe` 保留正式 `4096 env` scene recipe、只用独立 2-update 非科学 namespace。
   Pod2 clean detached `077e70c` source 与外部动作/bank/exam已核对；conditional 和 V1+V2×base-decel 新 pair
-  已绑定但仍 blocked，probe 尚未执行。见 [运行接口](interfaces/lean_training_run_binding.md)与
+  在该 source-gate 合入时已绑定但仍 blocked、probe 尚未执行；后续 strict caeb 结果见本节顶部。见
+  [运行接口](interfaces/lean_training_run_binding.md)与
   [G05](gates/G05_isaac_training_first_loop.md)。
 
 - qdot 同源 `-5/0` pair 的 `model_500` 身份/finite/contract/claim 全过；末 21 updates 显示 qdot max
