@@ -21,12 +21,15 @@ def test_twelve_accepted_single_seed_cells_fill_pod1_with_one_preserved_failure(
     accepted = [job for job in jobs if job["status"] == "ready"]
     assert data["dispatch_pods"] == ["pod1"]
     assert data["pods"]["pod1"]["max_trainers_per_gpu"] == 4
-    assert len(jobs) == 13
+    assert len(jobs) == 14
     assert len(accepted) == 12
-    assert len({job["id"] for job in jobs}) == 13
+    assert len({job["id"] for job in jobs}) == 14
     assert jobs[5]["status"] == "rejected"
     assert jobs[5]["id"] == "p1_pod1_arm_free_ep24_seed3"
-    assert jobs[-1]["id"] == "p1_pod1_arm_free_ep24_seed3_retry_v2"
+    assert jobs[11]["status"] == "rejected"
+    assert jobs[11]["id"] == "p1_pod1_reward_double_dense_seed3"
+    assert jobs[-2]["id"] == "p1_pod1_arm_free_ep24_seed3_retry_v2"
+    assert jobs[-1]["id"] == "p1_pod1_reward_double_dense_seed3_retry_v2"
     assert {job["seed"] for job in accepted} == {3}
     assert {job["budget"]["num_envs"] for job in accepted} == {4096}
     assert {job["budget"]["max_iterations"] for job in accepted} == {10001}
@@ -62,7 +65,7 @@ def test_balance_grid_is_non_striking_arm_by_episode_length():
     assert cells == {
         (seconds, free) for seconds in (10.0, 16.0, 24.0) for free in ("false", "true")
     }
-    assert _delta(jobs[-1]) == _delta(jobs[5])
+    assert _delta(jobs[-2]) == _delta(jobs[5])
 
 
 def test_reward_rows_change_only_the_three_dense_strike_weights():
@@ -90,6 +93,7 @@ def test_reward_rows_change_only_the_three_dense_strike_weights():
         (4.0, 0.5, 0.5),
         (28.0, 20.0, 10.0),
     ]
+    assert _delta(jobs[-1]) == _delta(jobs[11])
     contract = data["decision_contract"]
     assert contract["sparse_hit_behavior_may_stop_before_minimum_eligible_events"] is False
     assert contract["second_seed_authorized"] is False

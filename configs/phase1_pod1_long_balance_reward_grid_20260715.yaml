@@ -353,6 +353,10 @@ jobs:
   - <<: *control
     id: p1_pod1_reward_double_dense_seed3
     human_name: 保持14比10比5比例但把跟踪总预算加倍
+    status: rejected
+    blocker: >-
+      attempt-1 PGID 2157392 stalled in dynamic URDF import before first iteration;
+      exact launcher terminated only that PGID after the frozen 180-second stale-log limit.
     recipe:
       base: *base
       delta:
@@ -379,3 +383,18 @@ jobs:
     resource: *gpu2
     run_name: phase1_pod1_arm_free_ep24_seed3_retry_v2_20260715
     run_dir: /workspace/codexschema/phase1_long_pod1_20260715/runs/phase1_pod1_arm_free_ep24_seed3_retry_v2
+
+  - <<: *control
+    id: p1_pod1_reward_double_dense_seed3_retry_v2
+    human_name: 双倍击球跟踪总强度，基础设施失败后的唯一同配方重试
+    recipe:
+      base: *base
+      delta:
+        - task.env.episode_length_s=10.0
+        - ++task.rewards.free_non_striking_arm_mimic=false
+        - task.rewards.racket_position_weight=28.0
+        - task.rewards.racket_velocity_weight=20.0
+        - task.rewards.racket_normal_weight=10.0
+    resource: *gpu2
+    run_name: phase1_pod1_reward_double_dense_seed3_retry_v2_20260715
+    run_dir: /workspace/codexschema/phase1_long_pod1_20260715/runs/phase1_pod1_reward_double_dense_seed3_retry_v2

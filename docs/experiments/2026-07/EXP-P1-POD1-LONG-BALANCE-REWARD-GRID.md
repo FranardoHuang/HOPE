@@ -44,6 +44,10 @@ Pod1 4096-env 非科学 full-scene probe 已到首迭代并 rc0；finalizer 因�
 “24 秒、非击球臂自由” attempt-1（PGID `2152129`）在动态 URDF import 后日志停滞，launcher 只按该 PGID 在
 180 秒门收口。原 namespace 永久保留，队尾只有一个逐字同配方 `retry_v2`；其余六个不同问题继续发射。
 
+随后六个不同格中五个已到首迭代；“双倍击球跟踪总强度” attempt-1（PGID `2157392`）也在动态 URDF
+import 后停滞并由同一 180 秒 exact-PGID 门收口。它是另一配方的首次基础设施失败，队尾同样只有一个逐字同配方
+`retry_v2`。两条 retry 共用 GPU2 剩余两槽；任一再次在同 phase 失败都不再重试。
+
 ## 判读边界
 
 现役 `physical_ball=true` 只提供 Phase-A 物理球指标；训练回球结果仍来自达到击球窗后才触发的 VirtualBall 反事实。
