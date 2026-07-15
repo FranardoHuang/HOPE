@@ -1484,7 +1484,7 @@ def _write_post_swing_teacher_receipt(tmp_path, motion_files, *, count=4):
             },
         },
         "attestation": {
-            "schema_version": 1,
+            "schema_version": 2,
             "artifact_kind": "hope_post_swing_teacher_capture_attestation",
             "capture_result_sha256": "4" * 64,
             "capture_result_relative_path": "natural_wrap_capture.json",
@@ -1506,7 +1506,16 @@ def _write_post_swing_teacher_receipt(tmp_path, motion_files, *, count=4):
                 "commit": "6" * 40,
                 "clean": True,
                 "producer_source_sha256": "8" * 64,
+            },
+            "attestor_source": {
+                "commit": "7" * 40,
+                "clean": True,
                 "attestor_source_sha256": "9" * 64,
+            },
+            "retry_authorization": {
+                "authorization_id": "test-v3-attestor-attempt2",
+                "file_sha256": "b" * 64,
+                "v3_plan_file_sha256": "c" * 64,
             },
         },
     }
@@ -1549,11 +1558,54 @@ def _write_post_swing_teacher_receipt(tmp_path, motion_files, *, count=4):
     )
     receipt["attestation"]["capture_result_sha256"] = _sha256(capture_path)
     receipt_path = tmp_path / "post_swing_teacher_receipt.json"
+    authorization = {
+        "schema_version": 1,
+        "artifact_kind": "hope_post_swing_teacher_attestor_retry_authorization",
+        "authorization_id": "test-v3-attestor-attempt2",
+        "v3_plan": {"plan_id": tmp_path.name, "file_sha256": "c" * 64},
+        "capture": {
+            "output_directory": str(tmp_path.absolute()),
+            "output_receipt": str(receipt_path.absolute()),
+            "capture_claim_sha256": _sha256(claim_path),
+            "states_sha256": _sha256(payload),
+            "result_sha256": _sha256(capture_path),
+            "state_count": count,
+        },
+        "teacher": {
+            "checkpoint_sha256": "2" * 64,
+            "hard_contract_sha256": "3" * 64,
+            "launch_claim_content_sha256": "5" * 64,
+        },
+        "capture_source": {
+            "commit": "6" * 40,
+            "producer_source_sha256": "8" * 64,
+        },
+        "attestor_source": {
+            "commit": "7" * 40,
+            "attestor_source_sha256": "9" * 64,
+        },
+        "decision": {
+            "capture_retry_authorized": False,
+            "attestor_attempt2_authorized": True,
+            "first_reset_probe_authorized": False,
+            "scientific_training_authorized": False,
+        },
+    }
+    authorization_path = tmp_path / "retry_authorization.json"
+    authorization_path.write_text(
+        json.dumps(authorization, separators=(",", ":"), sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    receipt["attestation"]["retry_authorization"]["file_sha256"] = _sha256(
+        authorization_path
+    )
     receipt_path.write_text(
         json.dumps(receipt, separators=(",", ":"), sort_keys=True) + "\n",
         encoding="utf-8",
     )
-    return receipt_path, _sha256(receipt_path)
+    return receipt_path, _sha256(receipt_path), authorization_path, _sha256(
+        authorization_path
+    )
 
 
 def test_post_swing_activation_disabled_stays_zero_without_replay_adoption(clips):
@@ -1648,7 +1700,7 @@ def test_post_swing_selected_is_not_started_until_state_write_returns(clips, mon
 def test_post_swing_teacher_cold_start_is_ready_and_activates_before_learning(
     clips, tmp_path, monkeypatch
 ):
-    receipt, receipt_sha = _write_post_swing_teacher_receipt(
+    receipt, receipt_sha, authorization, authorization_sha = _write_post_swing_teacher_receipt(
         tmp_path, [clips[0], clips[1]], count=4
     )
     cmd, robot = _make_motion_command(
@@ -1659,6 +1711,8 @@ def test_post_swing_teacher_cold_start_is_ready_and_activates_before_learning(
         post_swing_buffer_size=8,
         post_swing_teacher_receipt=str(receipt),
         post_swing_teacher_receipt_sha256=receipt_sha,
+        post_swing_teacher_retry_authorization=str(authorization),
+        post_swing_teacher_retry_authorization_sha256=authorization_sha,
         post_swing_teacher_root_linear_velocity_limit_mps=2.0,
         post_swing_teacher_root_angular_velocity_limit_radps=4.0,
         post_swing_require_ready_at_init=True,
@@ -1688,7 +1742,7 @@ def test_post_swing_teacher_cold_start_is_ready_and_activates_before_learning(
 def test_post_swing_teacher_fail_fast_refuses_zero_activation_before_first_update(
     clips, tmp_path, monkeypatch
 ):
-    receipt, receipt_sha = _write_post_swing_teacher_receipt(
+    receipt, receipt_sha, authorization, authorization_sha = _write_post_swing_teacher_receipt(
         tmp_path, [clips[0], clips[1]], count=4
     )
     cmd, _ = _make_motion_command(
@@ -1699,6 +1753,8 @@ def test_post_swing_teacher_fail_fast_refuses_zero_activation_before_first_updat
         post_swing_buffer_size=8,
         post_swing_teacher_receipt=str(receipt),
         post_swing_teacher_receipt_sha256=receipt_sha,
+        post_swing_teacher_retry_authorization=str(authorization),
+        post_swing_teacher_retry_authorization_sha256=authorization_sha,
         post_swing_teacher_root_linear_velocity_limit_mps=2.0,
         post_swing_teacher_root_angular_velocity_limit_radps=4.0,
         post_swing_require_ready_at_init=True,
@@ -1710,7 +1766,7 @@ def test_post_swing_teacher_fail_fast_refuses_zero_activation_before_first_updat
 
 
 def test_post_swing_first_reset_checks_count_fraction_and_state_readback(clips, tmp_path):
-    receipt, receipt_sha = _write_post_swing_teacher_receipt(
+    receipt, receipt_sha, authorization, authorization_sha = _write_post_swing_teacher_receipt(
         tmp_path, [clips[0], clips[1]], count=4
     )
     cmd, robot = _make_motion_command(
@@ -1721,6 +1777,8 @@ def test_post_swing_first_reset_checks_count_fraction_and_state_readback(clips, 
         post_swing_buffer_size=8,
         post_swing_teacher_receipt=str(receipt),
         post_swing_teacher_receipt_sha256=receipt_sha,
+        post_swing_teacher_retry_authorization=str(authorization),
+        post_swing_teacher_retry_authorization_sha256=authorization_sha,
         post_swing_teacher_root_linear_velocity_limit_mps=2.0,
         post_swing_teacher_root_angular_velocity_limit_radps=4.0,
         post_swing_require_ready_at_init=True,
@@ -1738,7 +1796,7 @@ def test_post_swing_first_reset_checks_count_fraction_and_state_readback(clips, 
 def test_post_swing_first_reset_readback_cannot_be_forged_by_selected_count(
     clips, tmp_path, monkeypatch
 ):
-    receipt, receipt_sha = _write_post_swing_teacher_receipt(
+    receipt, receipt_sha, authorization, authorization_sha = _write_post_swing_teacher_receipt(
         tmp_path, [clips[0], clips[1]], count=4
     )
     cmd, robot = _make_motion_command(
@@ -1749,6 +1807,8 @@ def test_post_swing_first_reset_readback_cannot_be_forged_by_selected_count(
         post_swing_buffer_size=8,
         post_swing_teacher_receipt=str(receipt),
         post_swing_teacher_receipt_sha256=receipt_sha,
+        post_swing_teacher_retry_authorization=str(authorization),
+        post_swing_teacher_retry_authorization_sha256=authorization_sha,
         post_swing_teacher_root_linear_velocity_limit_mps=2.0,
         post_swing_teacher_root_angular_velocity_limit_radps=4.0,
         post_swing_require_ready_at_init=True,
@@ -1773,6 +1833,22 @@ def test_post_swing_ready_at_init_requires_exact_teacher_receipt(clips):
             [clips[0], clips[1]],
             post_swing_start_prob=0.25,
             post_swing_require_ready_at_init=True,
+        )
+
+
+def test_post_swing_teacher_receipt_requires_frozen_retry_authorization(
+    clips, tmp_path
+):
+    receipt, receipt_sha, _, _ = _write_post_swing_teacher_receipt(
+        tmp_path, [clips[0], clips[1]], count=4
+    )
+    with pytest.raises(ValueError, match="receipt and retry authorization"):
+        _make_motion_command(
+            [clips[0], clips[1]],
+            post_swing_start_prob=1.0,
+            post_swing_min_fill=4,
+            post_swing_teacher_receipt=str(receipt),
+            post_swing_teacher_receipt_sha256=receipt_sha,
         )
 
 

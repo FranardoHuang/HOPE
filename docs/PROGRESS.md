@@ -42,6 +42,28 @@
   Partial。见
   [实验卷宗](experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-TABLE-NET.md)和
   [运行操作](operations/run_motion_backhand_loop_b_table_net_clearance.md)。
+- post-swing teacher capture v3 已在 Pod2 GPU2 自然收满 `4096/4096` 条 finite `natural_clip_wrap` 状态并
+  自然退出；claim/states/result SHA-256 为 `81126b27...244e` / `8d07668e...95d8` /
+  `0aa2f37f...d641`。但 one-shot attestor attempt-1 在 receipt 写入前因 canonical content 与 JSON
+  document 末尾换行混用而 rc2 假拒绝，`teacher_receipt.json` absent。源码修复已拆分无换行 content
+  digest 与单换行 document bytes；attempt-1 在 `_claim` 停止，后续 checkpoint/lineage/source/motion/速度门
+  都尚未执行。修订后的 attestation schema 2 又把原始 producer `capture_source` 与修复后 consumer
+  `attestor_source` 分开，status 分别对回 immutable v3 plan 和 tracked retry authorization；交换、重绑、dirty
+  均负测；另加 main-tracked one-shot retry authorization，把唯一 attestor commit/SHA 绑定 v3
+  plan/capture/checkpoint/output，拒绝任意 clean HEAD 自签自验。授权固定 attestor `a38b7e9e...293cf` /
+  `03611b56...310f` 与 authorization `87fd1c71...dfda`；attempt-2 尚未执行。补齐 consumer 后六文件 host suite
+  `181 passed`（一个既有
+  duplicate-ZIP warning）。修复合入 main 前禁止重跑
+  capture/attestor，首 reset 与科学训练仍 blocked。见[机器结果](../configs/phase1_post_swing_teacher_capture_attempt_v3_result_20260715.json)、
+  [实验卷宗](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md)和
+  [操作文档](operations/run_post_swing_teacher_capture.md)。
+
+- post-swing trainer consumer 红队补出一处 NO-MERGE：旧 loader 只检查 source tuple 的 hex 形状与 clean，
+  合法 40/64-hex 重绑仍可通过。successor 现在要求训练配置同时提供 tracked retry authorization 路径/SHA，
+  从该 exact byte snapshot 派生 capture/attestor tuples 并完整比较，且把规范化 authorization 内容纳入
+  schema-3 hard contract；四类合法 hex 重绑与缺失配对项均有负测。仅闭合 source consumer，attempt-2、
+  首 reset 和科学训练仍未执行；见[接口](interfaces/post_swing_teacher_artifact.md)与
+  [操作](operations/run_post_swing_teacher_capture.md)。
 
 - Franco 反手拉 B 的桌网整轨门已通过独立 source/static 红队：冻结 validator/plan、runtime-order 名字双射、
   四个碰撞障碍和 `1201×37×4` 有限密扫均内容绑定，`<5 mm` 为不可补偿 hard fail；focused `29 passed`、

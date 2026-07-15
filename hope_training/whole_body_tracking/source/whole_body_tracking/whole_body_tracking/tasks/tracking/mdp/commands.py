@@ -1140,10 +1140,31 @@ class MotionCommand(CommandTerm):
         receipt_sha = str(
             getattr(self.cfg, "post_swing_teacher_receipt_sha256", "") or ""
         ).strip().lower()
+        authorization_path = str(
+            getattr(self.cfg, "post_swing_teacher_retry_authorization", "") or ""
+        ).strip()
+        authorization_sha = str(
+            getattr(
+                self.cfg,
+                "post_swing_teacher_retry_authorization_sha256",
+                "",
+            )
+            or ""
+        ).strip().lower()
         probability = float(self.cfg.post_swing_start_prob)
-        if bool(receipt_path) != bool(receipt_sha):
+        configured_identity = tuple(
+            bool(value)
+            for value in (
+                receipt_path,
+                receipt_sha,
+                authorization_path,
+                authorization_sha,
+            )
+        )
+        if any(configured_identity) and not all(configured_identity):
             raise ValueError(
-                "post_swing_teacher_receipt and its SHA-256 must be provided together"
+                "post-swing teacher receipt and retry authorization paths/SHA-256 values "
+                "must be provided together"
             )
         if (
             receipt_path
@@ -1178,6 +1199,8 @@ class MotionCommand(CommandTerm):
             teacher = load_post_swing_teacher_states(
                 receipt_path,
                 receipt_sha,
+                retry_authorization_path=authorization_path,
+                expected_retry_authorization_sha256=authorization_sha,
                 expected_motion_sha256=[sha256_file(path) for path in motion_files],
                 expected_joint_names=self.robot.data.joint_names,
                 expected_joint_velocity_limits=[
@@ -2034,6 +2057,8 @@ class MotionCommandCfg(CommandTermCfg):
     # order.  Empty/default preserves the historical policy-owned live buffer exactly.
     post_swing_teacher_receipt: str = ""
     post_swing_teacher_receipt_sha256: str = ""
+    post_swing_teacher_retry_authorization: str = ""
+    post_swing_teacher_retry_authorization_sha256: str = ""
     # Explicit runtime limits accepted by the attestor and rechecked before simulator adoption.
     # A floating base has no actuator limit in PhysX, so the capture contract must pin both norms.
     post_swing_teacher_root_linear_velocity_limit_mps: float = 0.0

@@ -1,7 +1,7 @@
 # 随挥结束教师状态制品合同
 
-状态：**源码候选已闭合；4096-environment 运行门未过，保持 `Partial` 与
-`launch_authorized=false`。** 这里的“教师状态”是从一个既有策略自然完成整段动作时采到的机器人状态，
+状态：**4096-environment v3 capture runtime 已自然完成；attestation 与首 reset 尚未完成，保持
+`Partial`。** 这里的“教师状态”是从一个既有策略自然完成整段动作时采到的机器人状态，
 用来让两个消融臂从同一外生恢复分布起步；它不是动作模仿 teacher，也不是任意 episode timeout 快照。
 
 相关术语见 [定义表](../DEFINITIONS.md)。正式运行步骤见
@@ -15,7 +15,8 @@
 2. producer 只能 no-clobber 发布 claim、`natural_wrap_states.npz` 和 `natural_wrap_capture.json`。artifact
    只证明 exact reviewed producer source、exclusive claim 与 runtime hard-contract bytes 相互绑定；普通 Python
    runtime 无法提供 callback 的密码学证明，所以 callback 名称/自报标签不作为安全证据。
-3. `scripts/attest_post_swing_teacher.py` 是独立的一次性 consumer。它重新核对实际 checkpoint bytes、
+3. `scripts/attest_post_swing_teacher.py` 是独立的一次性 consumer。它从自己的 clean source checkout 运行，
+   不要求 post-fix attestor 冒充旧 capture producer。它重新核对实际 checkpoint bytes、
    checkpoint 内嵌 schema-3/fresh-lineage/launch-claim、相邻 `params/training_contract.json`、checkpoint source、
    capture source、按序 motion bytes、runtime articulation joint order 和 plant joint-velocity limits，才可
    no-clobber 发布 `teacher_receipt.json`。
@@ -25,6 +26,40 @@
 这四份输入均用一次 `O_NOFOLLOW` open、同一 descriptor 的前后 `fstat` 与单个 immutable byte buffer；SHA、
 JSON 解析和 `np.load(BytesIO)` 不得重新开路径。NPZ ZIP member 必须逐名唯一，JSON boolean 不得冒充 integer，
 integer/float 也不得靠隐式 coercion 过门。
+
+## capture producer 与 attestor 双谱系
+
+receipt 的 attestation sub-schema=`2` 必须把两条源码谱系分开，不能再塞进同一个 `capture_source`：
+
+- `capture_source={commit, clean, producer_source_sha256}` 只描述原始自然 wrap producer。对当前 v3，
+  `--capture-source-checkout` 必须指向原始 clean `906a3c3...` checkout；controller status 还会把 commit 与
+  producer SHA 逐项对回 immutable v3 plan。
+- `attestor_source={commit, clean, attestor_source_sha256}` 只描述实际签发 receipt 的修复后 attestor。
+  它由 running script 自己的 clean repository root 派生，但不能接受任意 clean HEAD。当前唯一授权值是
+  commit `a38b7e9e693db407795d9a5f3af144b8f8e293cf` 与脚本 SHA-256
+  `03611b565a539fa81811ac76c4631484a60679adfd11c1f1e07599081f46310f`。合入 main 的固定
+  `phase1_post_swing_teacher_capture_v3_attestor_retry_authorization_20260715.json` 会把唯一允许的 attestor
+  commit/SHA 同时绑定到 v3 plan SHA、capture claim/states/result、teacher checkpoint/hard/launch claim、
+  output namespace 和 attempt-2-only 决定；其 file SHA-256 是
+  `87fd1c7136d9a6d54546f26367cc83d5dad20e4d8b0f57fba94e6cc207e2dfda`，receipt 还必须记录该 SHA/ID。
+
+交换两个对象、把 post-fix HEAD 写成 capture source、重绑任一 commit/SHA、或任一 tracked checkout dirty，
+都必须 fail closed。controller `status` 只能读取其自身 clean checkout 中被 Git tracked 的固定 authorization，
+并让 receipt 的 attestor source 与 authorization 一致；因此另一个 clean commit/SHA 不能靠“自己签、自己验”
+变绿。trainer 返回的 hard-contract summary 同时保留两条谱系与 retry authorization，不能只保留 capture
+producer。
+
+trainer consumer 不能只检查上述 commit/SHA “长得像合法 hex”。启用外生 teacher 时，训练配置必须成对
+提供 `post_swing_teacher_retry_authorization`（[随挥教师重签授权](../DEFINITIONS.md)文件路径）与
+`post_swing_teacher_retry_authorization_sha256`（该文件的 exact byte SHA-256）。loader 从同一份只读 byte
+snapshot 解析 authorization，派生允许的 capture/attestor tuples，再与 receipt 做完整相等比较；合法的
+40/64-hex 替换值也必须拒绝。authorization 的完整规范化内容、文件 SHA 与 basename 进入
+`motion_post_swing_replay.teacher_receipt.retry_authorization` hard contract，不能只保留 receipt 自述的 ID/SHA。
+
+v3 attempt-1 在 `_claim()` 的 embedded digest 检查处已经停止；只证明第一个观测到的 blocker 是 producer
+按 compact content bytes（无末尾换行）计算 digest、旧 attestor 却误用 newline-terminated document bytes。
+capture arrays finite 是独立证据，checkpoint/lineage/source/motion/velocity-limit 等后续 attestation gates 在
+attempt-1 中均未执行，必须等修复进入 `main` 后由 attempt-2 完整重跑证明。
 
 ## 状态数值合同
 

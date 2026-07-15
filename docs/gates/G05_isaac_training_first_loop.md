@@ -46,6 +46,39 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-15, schema-v3 capture complete but attestor newline false rejection; Gate remains `Partial`):
+
+- Pod2 GPU2 attempt `control_model500_v3_obsfix_gpu2_20260715a` naturally produced 4096 finite
+  `natural_clip_wrap` states with `wrap_teleport=false` and no clip-switch abort. PID=PGID `399423`
+  naturally disappeared after the bound result was published; claim/states/result SHA-256 are
+  `81126b27...244e` / `8d07668e...95d8` / `0aa2f37f...d641`. This closes the capture runtime gate only.
+- One-shot attestor attempt-1 then failed before receipt publication with rc2 `training launch claim
+  canonical digest mismatch`; `teacher_receipt.json` is absent. The queue producer hashes compact canonical
+  content without a trailing newline, while the attestor incorrectly reused document serialization with a
+  newline for that embedded digest. This is only the first observed blocker: attempt-1 stopped in `_claim`, so
+  checkpoint/lineage/hard-contract/source/motion/velocity gates remain unexecuted and unproven; capture-array
+  finiteness is separate evidence. The source fix separates content bytes from newline-terminated document
+  bytes and splits original capture-producer lineage from the later fixed-attestor lineage. Receipt attestation
+  schema 2 and controller status reject swapped/rebound/dirty sources while permitting producer commit `906a3c3`
+  to differ from the post-fix attestor commit. A tracked one-shot retry authorization binds the only accepted
+  attestor commit `a38b7e9e693db407795d9a5f3af144b8f8e293cf` / script SHA
+  `03611b56...310f` to the immutable v3 plan/capture/checkpoint/output; the authorization SHA is
+  `87fd1c71...dfda`. This prevents an arbitrary clean HEAD
+  from signing and validating itself. After the authorization-backed trainer consumer was added, the
+  six-file host suite is `181 passed` with one existing
+  duplicate-ZIP warning; this is source evidence, not full attestation.
+  Capture must not be rerun, and attestor must not be rerun until this fix is merged to `main`.
+  First-reset, replacement training, second seed, judge and promotion remain unauthorized. See the
+  [machine result](../../configs/phase1_post_swing_teacher_capture_attempt_v3_result_20260715.json),
+  [experiment](../experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md), and
+  [operation](../operations/run_post_swing_teacher_capture.md).
+- A follow-up consumer red-team found that the trainer initially checked only source tuple shape and
+  `clean=true`; another valid 40/64-hex tuple could therefore survive loader validation. The successor
+  requires a paired retry-authorization path/SHA in training config, derives both accepted tuples from
+  that exact immutable file, compares them byte-for-byte with the receipt, and records the normalized
+  authorization in the schema-3 hard contract. Valid-hex capture/attestor commit/SHA rebound negatives
+  now fail closed. This is source closure only; attempt-2 and the first-reset probe remain unexecuted.
+
 Follow-up note (2026-07-15, schema-v2 capture reached runtime then failed before the first inference step; Gate remains `Partial`):
 
 - Plan `control_model500_v2_schema2_gpu2_20260715a` passed exact read-only compose and launch-side

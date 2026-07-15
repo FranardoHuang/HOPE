@@ -984,6 +984,8 @@ _MOTION_KEYS = (
     "stand_start_yaw_range",
     "post_swing_start_prob", "post_swing_buffer_size", "post_swing_min_fill", "post_swing_min_hold",
     "post_swing_teacher_receipt", "post_swing_teacher_receipt_sha256",
+    "post_swing_teacher_retry_authorization",
+    "post_swing_teacher_retry_authorization_sha256",
     "post_swing_teacher_root_linear_velocity_limit_mps",
     "post_swing_teacher_root_angular_velocity_limit_radps",
     "post_swing_require_ready_at_init",
@@ -1300,6 +1302,8 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_attr(M, "post_swing_min_hold", _get(mt, "post_swing_min_hold"), int, applied, "commands.motion")
             _set_attr(M, "post_swing_teacher_receipt", _get(mt, "post_swing_teacher_receipt"), str, applied, "commands.motion")
             _set_attr(M, "post_swing_teacher_receipt_sha256", _get(mt, "post_swing_teacher_receipt_sha256"), str, applied, "commands.motion")
+            _set_attr(M, "post_swing_teacher_retry_authorization", _get(mt, "post_swing_teacher_retry_authorization"), str, applied, "commands.motion")
+            _set_attr(M, "post_swing_teacher_retry_authorization_sha256", _get(mt, "post_swing_teacher_retry_authorization_sha256"), str, applied, "commands.motion")
             _set_attr(M, "post_swing_teacher_root_linear_velocity_limit_mps", _get(mt, "post_swing_teacher_root_linear_velocity_limit_mps"), lambda value: _as_exact_float(value, "task.motion.post_swing_teacher_root_linear_velocity_limit_mps"), applied, "commands.motion")
             _set_attr(M, "post_swing_teacher_root_angular_velocity_limit_radps", _get(mt, "post_swing_teacher_root_angular_velocity_limit_radps"), lambda value: _as_exact_float(value, "task.motion.post_swing_teacher_root_angular_velocity_limit_radps"), applied, "commands.motion")
             _set_attr(M, "post_swing_require_ready_at_init", _get(mt, "post_swing_require_ready_at_init"), lambda value: _as_explicit_bool(value, "task.motion.post_swing_require_ready_at_init"), applied, "commands.motion")

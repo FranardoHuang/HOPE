@@ -1,0 +1,100 @@
+{
+  "schema_version": 1,
+  "result_id": "phase1-post-swing-teacher-control-model500-capture-attempt-v3-result-20260715",
+  "status": "blocked_pending_full_attestation",
+  "simulation_only": true,
+  "preregistration": {
+    "plan_id": "control_model500_v3_obsfix_gpu2_20260715a",
+    "path": "/workspace/codexschema/phase1_post_swing_teacher_20260715/prereg/control_model500_v3_obsfix_gpu2_20260715a.json",
+    "file_sha256": "de96a45d2a5ae3d47536509e40cd451307a4e9ccba6a357a2445b17e3ed093d9"
+  },
+  "source": {
+    "checkout": null,
+    "checkout_record_status": "not_available_in_durable_attempt_evidence",
+    "commit": "906a3c3e0cd43962247af0ff3857bf640d04d7ba",
+    "capture_producer_sha256": "496a7fa2bc97e9d7a8234702a7f6c9edb1f6b3fd17f215da042a62c0649be90a",
+    "attestor_sha256": "800645381cf32d811881f47e91cb8a24b70216a4adeac80bd4b9e482757c7020"
+  },
+  "execution_slot": {
+    "pod": "pod2",
+    "logical_gpu": 2,
+    "physical_gpu_uuid": "GPU-feee9e1f-7663-06f6-fa29-62fca6a9b1a4"
+  },
+  "teacher": {
+    "checkpoint_sha256": "22f78f882397c48d1c8763186748935517d669cf4f36205baf69d07dc9e08a6a",
+    "checkpoint_hard_contract_sha256": "451cda47227f8e78e4f3dcae3cbf22d7ddf88b4c5fbaf348e698963d8bc12291",
+    "training_launch_claim_file_sha256": "17700ee233e3ebeaece2ef54420d6e6cefa81974738ea5e88475b9399290118f",
+    "training_launch_claim_content_sha256": "576724deeeaf2386005e804fc5f2dc5600a7c63d104cb8f7c8f1f2f5131ba49d"
+  },
+  "capture": {
+    "directory": "/workspace/codexschema/phase1_post_swing_teacher_20260715/capture/control_model500_v3_obsfix_gpu2_20260715a",
+    "exec_started_utc": "2026-07-14T23:50:46.319308+00:00",
+    "pid": 399423,
+    "pgid": 399423,
+    "natural_completion_result_mtime_epoch": 1784073421.140937,
+    "natural_completion_result_mtime_utc": "2026-07-14T23:57:01.140937+00:00",
+    "process_naturally_absent_after_completion": true,
+    "capture_claim_sha256": "81126b27c70d855ceef28d11a7fb4f96e200d097132ab6693dc93d045c7e244e",
+    "states_sha256": "8d07668e3bcc1e91f95634e1af375713ec0c1c239a8b9fedab7c9e3004b295d8",
+    "result_sha256": "0aa2f37f114643b9c31d091495483433953d0b204fcefbf980b14df48a04d641",
+    "state_count": 4096,
+    "state_arrays_finite": true,
+    "capture_event": "natural_clip_wrap",
+    "wrap_teleport": false,
+    "clip_switch_aborted": false
+  },
+  "attestor_attempt_1": {
+    "runtime": "/workspace/hope_isaac_venv/bin/python",
+    "capture_source_commit": "906a3c3e0cd43962247af0ff3857bf640d04d7ba",
+    "inputs": "exact v3 capture result, teacher checkpoint, adjacent hard contract, schema-2 training launch claim, ordered motions and preregistered 2.0/4.0 root velocity limits",
+    "command_artifact_path": null,
+    "command_artifact_sha256": null,
+    "log_artifact_path": null,
+    "log_artifact_sha256": null,
+    "returncode": 2,
+    "stderr_exact": "FAIL: training launch claim canonical digest mismatch",
+    "teacher_receipt_json": "absent",
+    "durable_attempt_log_available": false
+  },
+  "first_observed_attestation_blocker": {
+    "producer_semantics": "lean_queue_runtime hashes compact canonical JSON content bytes without a trailing newline",
+    "rejected_consumer_semantics": "attest_post_swing_teacher used one helper that always appended a trailing newline for both embedded content digests and complete JSON documents",
+    "classification": "the attestor stopped in _claim before receipt publication; this proves the digest check was a false rejection but does not execute or prove any downstream attestation gate"
+  },
+  "downstream_attestation_gates": {
+    "checkpoint_restricted_load": "not_executed",
+    "checkpoint_schema3_fresh_lineage": "not_executed",
+    "checkpoint_adjacent_hard_contract": "not_executed",
+    "checkpoint_source": "not_executed",
+    "capture_producer_source": "not_executed",
+    "ordered_motion_bytes": "not_executed",
+    "runtime_joint_order": "not_executed",
+    "root_and_joint_velocity_limits": "not_executed",
+    "note": "capture state arrays were separately shown finite; that does not substitute for full attestation"
+  },
+  "attestor_attempt_2_authorization": {
+    "status": "source_authorization_prepared_not_executed",
+    "path": "configs/phase1_post_swing_teacher_capture_v3_attestor_retry_authorization_20260715.json",
+    "file_sha256": "87fd1c7136d9a6d54546f26367cc83d5dad20e4d8b0f57fba94e6cc207e2dfda",
+    "authorization_id": "control_model500_v3_obsfix_gpu2_20260715a_attestor_attempt2",
+    "capture_source_commit": "906a3c3e0cd43962247af0ff3857bf640d04d7ba",
+    "capture_producer_sha256": "496a7fa2bc97e9d7a8234702a7f6c9edb1f6b3fd17f215da042a62c0649be90a",
+    "attestor_source_commit": "a38b7e9e693db407795d9a5f3af144b8f8e293cf",
+    "attestor_source_sha256": "03611b565a539fa81811ac76c4631484a60679adfd11c1f1e07599081f46310f",
+    "capture_retry_authorized": false,
+    "first_reset_probe_authorized": false,
+    "scientific_training_authorized": false
+  },
+  "decision": {
+    "v3_capture_complete": true,
+    "v3_capture_retry_forbidden": true,
+    "attestor_attempt_1_failed_without_receipt": true,
+    "attestor_attempt_2_source_authorized_after_main_merge": true,
+    "attestor_attempt_2_executed": false,
+    "attestor_retry_requires_clean_exact_source_and_same_immutable_v3_inputs": true,
+    "first_reset_probe_authorized": false,
+    "scientific_training_authorized": false,
+    "second_seed_authorized": false,
+    "judge_or_promotion_authorized": false
+  }
+}
