@@ -45,9 +45,23 @@
       "dynamics_authorized": false
     }
   },
-  "successor_v4": {
+  "v4_premerge_redteam_rejection": {
+    "source_commit": "7241157e036a8892c80319457ba5c7cdf31d69b2",
     "preregistration_sha256": "dee68548256e3b5966135a61f1c40e1cb4a64f6c63c0235dc4ea9112e7cc2ef8",
     "validator_sha256": "46f919eab7bdc842c29361dbd9174a6ef2be70767c896fd9e687393ee6c83e3b",
+    "status": "no_merge_no_runtime",
+    "reason": "hard and warning reused reporting threshold-minus-epsilon predicate and could accept sub-threshold distances",
+    "counterexamples_m": {
+      "hard_5mm": 0.0049999999995,
+      "warning_20mm": 0.0199999999995
+    },
+    "runtime_executed": false,
+    "certificate_present": false,
+    "dynamics_authorized": false
+  },
+  "successor_v4": {
+    "preregistration_sha256": "e6e82f75ad10c6d90c6f38631c0ec039baaeca4fc5a738be981169bb1bd47534",
+    "validator_sha256": "c0300cc0b7cbeb3aaadab145dd2793b539bff4b61cc85ff61de55be7ab8c98ea",
     "certificate_path": "/workspace/codexschema/motion_video_intake_20260711/table_net_primary_v4/franco_backhand_loop_b_98e7b883b29d.table_net_clearance_v4_certificate.json",
     "runtime_executed": false,
     "certificate_present": false,

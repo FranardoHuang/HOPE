@@ -21,11 +21,12 @@
 预注册
 [`motion_backhand_loop_b_table_net_clearance_prereg_20260715.json`](../../../configs/motion_backhand_loop_b_table_net_clearance_prereg_20260715.json)
 当前 schema-v4 SHA-256 为
-`dee68548256e3b5966135a61f1c40e1cb4a64f6c63c0235dc4ea9112e7cc2ef8`。已产出但被拒绝的 schema-v3
+`e6e82f75ad10c6d90c6f38631c0ec039baaeca4fc5a738be981169bb1bd47534`。已产出但被拒绝的 schema-v3
 计划 SHA-256 `9c03e7b0...d273a` 冻结在 `main@b9b011b`；失败的 schema-v2/v1 计划分别冻结在
 `main@f214a80` / `main@9abf7fe`，三者都不得再运行或给 dynamics 授权。v4 不改动作、桌位、hard/warning
-阈值、采样或输入 lineage；它保留 v2 geom 编号与 v3 comment parser 修复，只修正 reporting-cap saturation
-的 certified lower bound，并切换到全新 no-clobber v4 输出。当前计划逐字绑定：
+阈值、采样或输入 lineage；它保留 v2 geom 编号与 v3 comment parser 修复，修正 reporting-cap saturation
+的 certified lower bound，并把 hard/warning 与 reporting epsilon 解耦，再切换到全新 no-clobber v4 输出。
+当前计划逐字绑定：
 
 - B schema-2 NPZ SHA-256 `e2eb99e6...d28cc`；
 - vendor L1 certificate SHA-256 `6840df34...db60`，且运行消费前必须读到
@@ -52,7 +53,7 @@ p_schema2_mjcf = p_HOPE + [0.5, 1.525/2, 0.76]
 
 validator
 [`audit_motion_schema2_table_net_clearance.py`](../../../scripts/audit_motion_schema2_table_net_clearance.py)
-SHA-256 为 `46f919ea...3e3b`。它继承 vendor L1 已验证的 root 线性、四元数 shortest-arc slerp 和关节线性
+SHA-256 为 `c0300cc0...c98ea`。它继承 vendor L1 已验证的 root 线性、四元数 shortest-arc slerp 和关节线性
 插值，将 `151 @ 50 Hz` 扫成 `1201 @ 400 Hz` 有限样本。运行时把四个静态 box 追加到 canonical
 `worldbody`，通过 in-memory XML + exact 74-file mesh map 编译。MuJoCo 会先编号一个 body 直属的全部 geom，
 再递归其 child body；因此四个新增 world geom 必然占 `1..4`，floor 保持 `0`，robot geom 的全局编号整体
@@ -62,8 +63,9 @@ robot geom 的相对顺序/名字不变、37 个 enabled collision geom 精确 `
 compiled collision SHA `18e7f6ff...386e5`。任何其他重排或数值漂移仍 fail closed。
 
 每个样本对 37 个 enabled robot collision geom 与 4 个障碍做 `37×4=148` 对检查。球拍与拍柄另做汇总，
-但不从全机器人门中排除。hard 判定直接使用 exact MuJoCo saturation predicate：距离 `<5 mm` 就否决整条
-动作；`5–20 mm` 只登记 warning。任一 robot-obstacle hard event 都不可由 reward、其他安全分或其他帧
+但不从全机器人门中排除。hard/warning 判定直接比较 finite `mj_geomDistance` 与各自的 5 mm/20 mm 门槛，
+不继承 reporting 的 `1e-12 m` epsilon：距离 `<5 mm` 就否决整条动作，`5–20 mm` 只登记 warning，
+non-finite 也 fail closed。任一 robot-obstacle hard event 都不可由 reward、其他安全分或其他帧
 补偿，并保守标记相邻 source frame。二分报告分别写 midpoint estimate 与真正的 certified lower
 bracket（已扣除 saturation predicate 的 `1e-12 m` 数值裕量），不能把 midpoint 冒充下界。运行只调用
 `mj_forward`，`mj_step_calls=0`。
@@ -78,7 +80,7 @@ bracket（已扣除 saturation predicate 的 `1e-12 m` 数值裕量），不能�
 
 ```bash
 python3 -m pytest -q tests/test_motion_backhand_loop_b_table_net_clearance.py
-# 42 passed
+# 47 passed
 
 python3 -m pytest -q \
   tests/test_motion_backhand_loop_bc_schema2_fk_prereg.py \
@@ -87,11 +89,11 @@ python3 -m pytest -q \
   tests/test_motion_backhand_loop_b_l0_static_v2.py \
   tests/test_motion_backhand_loop_b_vendor_l1_safety.py \
   tests/test_motion_backhand_loop_b_table_net_clearance.py
-# 143 passed
+# 148 passed
 
 python3 scripts/audit_motion_schema2_table_net_clearance.py \
   --prereg configs/motion_backhand_loop_b_table_net_clearance_prereg_20260715.json \
-  --expected-prereg-sha256 dee68548256e3b5966135a61f1c40e1cb4a64f6c63c0235dc4ea9112e7cc2ef8 \
+  --expected-prereg-sha256 e6e82f75ad10c6d90c6f38631c0ec039baaeca4fc5a738be981169bb1bd47534 \
   static
 # PASS ... source_exact=true runtime_audit=false no_write=true continuous_time_claim=false
 ```
@@ -107,8 +109,9 @@ NaN/Inf；canonical XML 与 74 mesh 从同一个 pinned model-root dirfd 读取�
 第二次红队发现执行完整 phase/self-collision 模块会触发未绑定的普通 project import；预置伪造
 `virtual_return_scorer` 可进入模块命名空间，因此该版本仍 NO-MERGE。当前实现不再 exec 这两个大模块：
 densify/slerp/unsafe-source/qpos 仅保留四个 dependency-free 纯函数，source gate 强制它们与 exact upstream
-四个函数 AST 逐字义等价；距离门是本地最小 MuJoCo saturation+bisection kernel，并对 exact upstream
-`_far/geom_clearance` 做数值 parity。`ground_gmr_pkl`、`virtual_return_scorer`、`audit_motion_npz` 的伪造
+四个函数 AST 逐字义等价；距离实现把无 epsilon 的 safety threshold 与 reporting saturation/bisection
+分开，后者对 exact upstream `_far/geom_clearance` 做数值 parity。`ground_gmr_pkl`、
+`virtual_return_scorer`、`audit_motion_npz` 的伪造
 `sys.modules` 注入负测证明本门不会消费它们。同期把误标为 lower bound 的 midpoint 拆成 midpoint estimate
 与 certified lower bracket，并把网柱几何的真实 `table_tennis_env_cfg.py` source 纳入 plan。冻结 L1
 validator 的验证调用结束后还会逐项恢复 `sys.path`/`sys.modules`，exact-bytes module loader 也不留下
@@ -168,8 +171,9 @@ dry-run log 为 155 bytes / SHA-256 `ad33e82c...3213c`，audit log 为 177 bytes
 下界语义。`geom_is_far(cap)` 接受 `mj_geomDistance >= cap - 1e-12`，因此所有 pair 在 0.1 m reporting cap
 饱和时只证明真实距离 `>=0.099999999999 m`。旧 aggregator 却把默认 lower bound 初始化成 `0.1`，又因
 所有 pair 都 saturated 而不进入 bracket，最终把未证明的 `0.1` 写成
-`minimum_clearance_certified_lower_bound_m`；midpoint/pair/source-time 都是 null。这个 `1e-12 m` 不影响
-hard/warning，但“certified”字段不允许多报一个 epsilon，故旧 certificate 的 `table_net_complete` 与
+`minimum_clearance_certified_lower_bound_m`；midpoint/pair/source-time 都是 null。这份运行的所有 pair
+至少为 `0.099999999999 m`，所以该 safety-predicate 缺陷未改变其 hard/warning=`0/0`；但“certified”字段
+不允许多报一个 epsilon，故旧 certificate 的 `table_net_complete` 与
 `dynamics_authorized` 一律不接受。
 
 schema-v4 把 pair-level 和全轨 aggregator 的 saturated 初值统一为 `cap-epsilon=0.099999999999`；全体
@@ -179,6 +183,15 @@ pair/midpoint 为 null；未饱和反例仍给出实际 pair。旧 certificate �
 被 plan 逐字列为 rejected 且 `dynamics_authorized=false`。新输出改为独立
 `table_net_primary_v4/...table_net_clearance_v4_certificate.json`；parent 只能在源码合入/review 后创建，
 v4 重发通过前 B 仍不得进入 dynamics。
+
+初版 v4 source commit `7241157` 在合入/运行前又被独立红队判为 **NO-MERGE**：它虽修正 reporting lower，
+hard/warning 仍复用了 `distance >= threshold-1e-12` 的 reporting saturation predicate，因此会把
+`0.0049999999995 m` 当作 5 mm 门通过，也会漏记 `0.0199999999995 m` warning。当前 v4 将安全门拆成
+独立、无 epsilon 的 `finite distance >= threshold` predicate；epsilon 只留在 reporting cap/bisection，并
+继续从 certified lower 扣除。5 mm 与 20 mm 两处都用 `nextafter(threshold,-inf)` 和
+`threshold-0.5e-12` 反例验证必须 fail/warn，精确 threshold 则通过。该问题没有改变旧 cert 的实际零
+hard/warning 结论，因为其全体 reporting-cap saturated 已证明所有 pair 都至少为 `0.099999999999 m`；但旧
+cert 仍因 certified lower overclaim 保持拒绝。
 
 ## 当前决定与下一步
 

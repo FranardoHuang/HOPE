@@ -825,8 +825,12 @@ def _expected_audit_contract() -> dict[str, Any]:
             "and saturation flag is true"
         ),
         "hard_threshold_predicate": (
-            "fail iff local_dependency_free_geom_is_far_exact_MuJoCo_saturation_predicate_"
-            "at_0.005m_is_false"
+            "fail iff finite_mj_geomDistance_at_distmax_0.005m_is_strictly_below_0.005m_"
+            "or_nonfinite; no_epsilon_relaxation"
+        ),
+        "warning_threshold_predicate": (
+            "warn iff finite_mj_geomDistance_at_distmax_0.02m_is_strictly_below_0.02m_"
+            "or_nonfinite; no_epsilon_relaxation"
         ),
         "danger_propagation": (
             "any robot-obstacle dense sample below 5mm fails the whole asset and marks both "
@@ -1859,14 +1863,24 @@ def _compile_augmented_model(
     return augmented_binding, obstacle_ids, evidence
 
 
-def geom_is_far(
+def geom_meets_clearance_threshold(
     mujoco_api: Any, model: Any, data: Any, g1: int, g2: int, threshold_m: float
 ) -> bool:
-    """Exact MuJoCo saturation predicate: true geometric distance is at least threshold."""
+    """Fail-closed hard/warning predicate with no epsilon relaxation."""
 
+    observed = float(mujoco_api.mj_geomDistance(model, data, g1, g2, threshold_m, None))
+    return math.isfinite(observed) and observed >= threshold_m
+
+
+def geom_reporting_bound_is_saturated(
+    mujoco_api: Any, model: Any, data: Any, g1: int, g2: int, threshold_m: float
+) -> bool:
+    """Reporting-only saturation predicate whose lower bound deducts the epsilon."""
+
+    observed = float(mujoco_api.mj_geomDistance(model, data, g1, g2, threshold_m, None))
     return (
-        float(mujoco_api.mj_geomDistance(model, data, g1, g2, threshold_m, None))
-        >= threshold_m - DISTANCE_SATURATION_EPSILON_M
+        math.isfinite(observed)
+        and observed >= threshold_m - DISTANCE_SATURATION_EPSILON_M
     )
 
 
@@ -1896,7 +1910,7 @@ def geom_clearance_bracket(
         raise TableNetError("MuJoCo geom distance is non-finite")
     if d0 < 0.0:
         return d0, d0, d0, False
-    if geom_is_far(mujoco_api, model, data, g1, g2, distmax):
+    if geom_reporting_bound_is_saturated(mujoco_api, model, data, g1, g2, distmax):
         return (
             distmax,
             reporting_cap_saturated_lower_bound(distmax),
@@ -1906,7 +1920,7 @@ def geom_clearance_bracket(
     lo, hi = 0.0, distmax
     while hi - lo > tol:
         mid = 0.5 * (lo + hi)
-        if geom_is_far(mujoco_api, model, data, g1, g2, mid):
+        if geom_reporting_bound_is_saturated(mujoco_api, model, data, g1, g2, mid):
             lo = mid
         else:
             hi = mid
@@ -1965,13 +1979,19 @@ def evaluate_robot_obstacle_pairs(
     for robot in robots:
         for obstacle_name, obstacle in obstacles.items():
             pair = [geom_name(robot), obstacle_name]
-            if not geom_is_far(mujoco_api, model, data, robot, obstacle, hard_threshold_m):
+            if not geom_meets_clearance_threshold(
+                mujoco_api, model, data, robot, obstacle, hard_threshold_m
+            ):
                 hard_pairs.append(pair)
                 if robot in rackets:
                     racket_hard_pairs.append(pair)
-            if not geom_is_far(mujoco_api, model, data, robot, obstacle, warning_threshold_m):
+            if not geom_meets_clearance_threshold(
+                mujoco_api, model, data, robot, obstacle, warning_threshold_m
+            ):
                 warning_pairs.append(pair)
-            if not geom_is_far(mujoco_api, model, data, robot, obstacle, reporting_cap_m):
+            if not geom_reporting_bound_is_saturated(
+                mujoco_api, model, data, robot, obstacle, reporting_cap_m
+            ):
                 midpoint, lower, _upper, _saturated = geom_clearance_bracket(
                     mujoco_api,
                     model,
@@ -2382,6 +2402,9 @@ def audit_runtime(plan: Mapping[str, Any]) -> dict[str, Any]:
                 "hard_threshold_m": audit_contract["hard_clearance_m"],
                 "warning_threshold_m": audit_contract["warning_clearance_m"],
                 "hard_threshold_predicate": audit_contract["hard_threshold_predicate"],
+                "warning_threshold_predicate": audit_contract[
+                    "warning_threshold_predicate"
+                ],
                 "distance_saturation_predicate_epsilon_m": audit_contract[
                     "distance_saturation_predicate_epsilon_m"
                 ],

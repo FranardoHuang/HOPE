@@ -9,7 +9,7 @@
 ```bash
 cd /path/to/clean/nohope
 PLAN=configs/motion_backhand_loop_b_table_net_clearance_prereg_20260715.json
-PLAN_SHA=dee68548256e3b5966135a61f1c40e1cb4a64f6c63c0235dc4ea9112e7cc2ef8
+PLAN_SHA=e6e82f75ad10c6d90c6f38631c0ec039baaeca4fc5a738be981169bb1bd47534
 
 python3 scripts/audit_motion_schema2_table_net_clearance.py \
   --prereg "$PLAN" \
@@ -21,10 +21,13 @@ python3 scripts/audit_motion_schema2_table_net_clearance.py \
 
 ```bash
 python3 -m pytest -q tests/test_motion_backhand_loop_b_table_net_clearance.py
-# 42 passed
+# 47 passed
 ```
 
 source gate 只证明预注册、坐标系、输入 lineage、5 mm 边界和 no-clobber 反例闭环，不是 B 的桌网通过。
+其中 hard/warning 必须使用无 epsilon 的 finite `distance>=threshold`；reporting 的 `1e-12 m` 裕量绝不能
+复用到 5 mm 或 20 mm 安全门。5 mm/20 mm 的 nextafter-below 与 half-epsilon-below 都必须分别 hard fail /
+warning，non-finite 也 fail closed。
 旧 schema-v1 plan SHA `9d7126bc...eb1e6` 已在首次 Pod2 dry-run 证明会把 MuJoCo 的确定性 `+4`
 world-geom 编号插入误判为 robot 重排；它永久只作根因证据，不得运行或用于发布 certificate。
 旧 schema-v2 plan SHA `1c73faf9...ec6b4` 又会把 exact runtime joint-order 文件的 `#` 人话头误算为
@@ -63,7 +66,7 @@ export PYTHONNOUSERSITE=1
 /workspace/hope_mjeval_venv/bin/python \
   scripts/audit_motion_schema2_table_net_clearance.py \
   --prereg configs/motion_backhand_loop_b_table_net_clearance_prereg_20260715.json \
-  --expected-prereg-sha256 dee68548256e3b5966135a61f1c40e1cb4a64f6c63c0235dc4ea9112e7cc2ef8 \
+  --expected-prereg-sha256 e6e82f75ad10c6d90c6f38631c0ec039baaeca4fc5a738be981169bb1bd47534 \
   dry-run
 ```
 
@@ -82,7 +85,7 @@ root/joint topology、qpos0、collision row/mesh 和归一化后的 frozen compi
 /workspace/hope_mjeval_venv/bin/python \
   scripts/audit_motion_schema2_table_net_clearance.py \
   --prereg configs/motion_backhand_loop_b_table_net_clearance_prereg_20260715.json \
-  --expected-prereg-sha256 dee68548256e3b5966135a61f1c40e1cb4a64f6c63c0235dc4ea9112e7cc2ef8 \
+  --expected-prereg-sha256 e6e82f75ad10c6d90c6f38631c0ec039baaeca4fc5a738be981169bb1bd47534 \
   audit
 ```
 
@@ -101,6 +104,8 @@ predicate 的 `1e-12 m` 数值裕量。
 当所有 pair 在 `0.1 m` reporting cap 饱和时，v4 certified lower bound 必须精确为
 `0.099999999999 m`；midpoint、minimum pair 与 source time 必须为 null，saturation flag 必须为 true。
 任何写成 `0.1 m` 的旧结果都不得消费。
+这里的 epsilon 只属于 capped reporting/bisection；hard `<5 mm` 和 warning `<20 mm` 直接与门槛比较，
+不得减 epsilon。
 
 ## 失败处理
 

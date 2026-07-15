@@ -6,6 +6,7 @@ import importlib.util
 import ast
 import builtins
 import json
+import math
 import os
 import subprocess
 import sys
@@ -128,6 +129,12 @@ def test_rejected_v3_result_and_v4_successor_are_cross_bound():
     }
     assert rejected["rejection"]["accepted_as_table_net_complete"] is False
     assert rejected["rejection"]["dynamics_authorized"] is False
+    redteam = result["v4_premerge_redteam_rejection"]
+    assert redteam["source_commit"] == "7241157e036a8892c80319457ba5c7cdf31d69b2"
+    assert redteam["status"] == "no_merge_no_runtime"
+    assert redteam["runtime_executed"] is False
+    assert redteam["certificate_present"] is False
+    assert redteam["dynamics_authorized"] is False
     successor = result["successor_v4"]
     assert successor["preregistration_sha256"] == _sha(PLAN)
     assert successor["validator_sha256"] == _sha(SCRIPT)
@@ -498,7 +505,7 @@ class _DistanceHelper:
     ("distance_m", "expected_hard"),
     [(0.00499, True), (0.00500, False), (0.00501, False)],
 )
-def test_five_mm_boundary_is_exact_saturation_predicate(distance_m, expected_hard):
+def test_five_mm_boundary_is_exact_fail_closed_threshold(distance_m, expected_hard):
     helper = _DistanceHelper({(1, 10): distance_m, (2, 10): 0.1})
     result = TABLE_NET.evaluate_robot_obstacle_pairs(
         helper,
@@ -514,6 +521,56 @@ def test_five_mm_boundary_is_exact_saturation_predicate(distance_m, expected_har
     )
     assert result["hard_failure"] is expected_hard
     assert result["racket_or_handle_hard_failure"] is expected_hard
+
+
+@pytest.mark.parametrize("threshold_m", [0.005, 0.02])
+@pytest.mark.parametrize("probe", ["nextafter_below", "half_epsilon_below"])
+def test_hard_and_warning_thresholds_do_not_inherit_reporting_epsilon(threshold_m, probe):
+    if probe == "nextafter_below":
+        distance_m = math.nextafter(threshold_m, -math.inf)
+    else:
+        distance_m = threshold_m - 0.5 * TABLE_NET.DISTANCE_SATURATION_EPSILON_M
+    assert distance_m < threshold_m
+    helper = _DistanceHelper({(1, 10): distance_m})
+    assert TABLE_NET.geom_meets_clearance_threshold(
+        helper, object(), object(), 1, 10, threshold_m
+    ) is False
+    assert TABLE_NET.geom_reporting_bound_is_saturated(
+        helper, object(), object(), 1, 10, threshold_m
+    ) is True
+    result = TABLE_NET.evaluate_robot_obstacle_pairs(
+        helper,
+        object(),
+        object(),
+        robot_ids=(1,),
+        racket_ids=(1,),
+        obstacle_ids={"motion_net": 10},
+        hard_threshold_m=0.005,
+        warning_threshold_m=0.02,
+        reporting_tolerance_m=1.0e-6,
+        geom_name=lambda geom_id: f"geom{geom_id}",
+    )
+    assert result["hard_failure"] is (threshold_m == 0.005)
+    assert result["racket_or_handle_hard_failure"] is (threshold_m == 0.005)
+    assert result["warning"] is True
+
+
+def test_twenty_mm_boundary_does_not_warn():
+    helper = _DistanceHelper({(1, 10): 0.02})
+    result = TABLE_NET.evaluate_robot_obstacle_pairs(
+        helper,
+        object(),
+        object(),
+        robot_ids=(1,),
+        racket_ids=(1,),
+        obstacle_ids={"motion_net": 10},
+        hard_threshold_m=0.005,
+        warning_threshold_m=0.02,
+        reporting_tolerance_m=1.0e-6,
+        geom_name=lambda geom_id: f"geom{geom_id}",
+    )
+    assert result["hard_failure"] is False
+    assert result["warning"] is False
 
 
 def test_non_racket_robot_geom_is_in_scope_and_noncompensable():

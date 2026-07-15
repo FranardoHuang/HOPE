@@ -17,8 +17,11 @@
   exact-semantics review 仍正式 REJECT：reporting cap predicate 只证明 `>=0.1-1e-12`，旧 aggregator 却把
   saturated 默认值 `0.1` 写成 certified lower bound。旧文件保持 immutable 但不算 `table_net_complete`，
   dynamics 继续 unauthorized。schema-v4 把 pair/全轨 saturated lower 统一为 `0.099999999999`，null
-  pair/midpoint/time 与 saturation flag 语义闭环，并换到独立 v4 namespace/name；focused `42 passed`、
-  完整 B chain `143 passed`、static PASS。见
+  pair/midpoint/time 与 saturation flag 语义闭环，并换到独立 v4 namespace/name。初版 v4 commit
+  `7241157` 又在合入/运行前被红队判 NO-MERGE：hard/warning 复用 reporting epsilon，会接受
+  nextafter/half-epsilon 的门槛下方值。修正版把 5 mm/20 mm 安全门改为无 epsilon 的 finite
+  `distance>=threshold`（non-finite fail closed），epsilon 只保留给 reporting cap/bisection；两处边界反例
+  均闭环。focused `47 passed`、完整 B chain `148 passed`、static PASS。见
   [机器拒绝记录](../configs/motion_backhand_loop_b_table_net_v3_rejected_result_20260715.json)、
   [实验卷宗](experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-TABLE-NET.md)和
   [运行操作](operations/run_motion_backhand_loop_b_table_net_clearance.md)。

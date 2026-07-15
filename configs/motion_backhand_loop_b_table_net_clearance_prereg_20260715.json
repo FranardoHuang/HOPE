@@ -8,8 +8,8 @@
   "asset_id": "franco_backhand_loop_b",
   "validator": {
     "path": "scripts/audit_motion_schema2_table_net_clearance.py",
-    "bytes": 106098,
-    "sha256": "46f919eab7bdc842c29361dbd9174a6ef2be70767c896fd9e687393ee6c83e3b"
+    "bytes": 107052,
+    "sha256": "c0300cc0b7cbeb3aaadab145dd2793b539bff4b61cc85ff61de55be7ab8c98ea"
   },
   "frozen_vendor_l1": {
     "certificate": {
@@ -147,7 +147,8 @@
     "distance_saturation_predicate_epsilon_m": 1e-12,
     "reporting_cap_saturated_certified_lower_bound": "max(0,reporting_clearance_cap_m-distance_saturation_predicate_epsilon_m)",
     "reporting_cap_saturated_null_semantics": "when every pair is reporting-cap saturated midpoint/pair/source-time are null and saturation flag is true",
-    "hard_threshold_predicate": "fail iff local_dependency_free_geom_is_far_exact_MuJoCo_saturation_predicate_at_0.005m_is_false",
+    "hard_threshold_predicate": "fail iff finite_mj_geomDistance_at_distmax_0.005m_is_strictly_below_0.005m_or_nonfinite; no_epsilon_relaxation",
+    "warning_threshold_predicate": "warn iff finite_mj_geomDistance_at_distmax_0.02m_is_strictly_below_0.02m_or_nonfinite; no_epsilon_relaxation",
     "reporting_clearance_bisection_tolerance_m": 0.000001,
     "danger_propagation": "any robot-obstacle dense sample below 5mm fails the whole asset and marks both adjacent source frames",
     "hard_fail_is_noncompensable": true,
