@@ -2446,3 +2446,9 @@ GPU0/GPU1。200/500/1000 只可停损/看方向，2000/3000 看中段，6000/100
 仍需 immutable MuJoCo/vendor 同卷，不能直接采用、买第二 seed 或晋级。训练尚未产生 checkpoint，
 G05 保持 `Partial`；详见
 [实验卷宗](../experiments/2026-07/EXP-P1-LONG-NO-REPLAY-FUNNEL.md)。
+
+普通对照 attempt-1 随后在首迭代前的 dynamic URDF import 日志静止 180 秒；launcher 写完 exact
+PGID `410589` 的 pre-TERM/pre-KILL identity evidence 后只收口该组，`rc=125`、无 checkpoint，另两格
+没有 claim。该 namespace 已 rejected，不能解释为 Reward 负结果。队列现先发 qdot/V1+V2 两个未消费
+treatment，再允许普通对照逐字相同配方的唯一 retry-v2；任一新 attempt 仍须先越过真实
+`Learning iteration`。G05 继续 `Partial`。

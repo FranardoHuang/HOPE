@@ -16,7 +16,15 @@ def test_long_funnel_is_three_single_seed_gpu2_rows():
     data, jobs = _jobs()
     assert data["dispatch_pods"] == ["pod2"]
     assert data["strict_full_scene_probe_evidence"]["terminal_status"] == "passed"
-    assert len(jobs) == 3
+    assert len(jobs) == 4
+    assert jobs["p1_long_no_replay_control_seed3"]["status"] == "rejected"
+    assert {
+        job_id for job_id, job in jobs.items() if job["status"] == "ready"
+    } == {
+        "p1_long_no_replay_qdot_w5_seed3",
+        "p1_long_no_replay_v1v2_seed3",
+        "p1_long_no_replay_control_seed3_retry_v2",
+    }
     assert {job["seed"] for job in jobs.values()} == {3}
     assert {job["budget"]["max_iterations"] for job in jobs.values()} == {10001}
     assert {tuple(job["milestones"]) for job in jobs.values()} == {
@@ -48,3 +56,4 @@ def test_long_funnel_has_one_variable_per_treatment_and_no_replay():
         "++task.rewards.free_wrist_vel_mimic",
         "++task.rewards.motion_scale_in_window",
     }
+    assert deltas["p1_long_no_replay_control_seed3_retry_v2"] == control

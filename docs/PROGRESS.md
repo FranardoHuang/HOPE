@@ -20,6 +20,11 @@
   seed/judge/晋级。见
   [实验卷宗](experiments/2026-07/EXP-P1-LONG-NO-REPLAY-FUNNEL.md)。
 
+- 上述漏斗的普通对照 attempt-1 在首迭代前停在动态 URDF import：日志 180 秒无进展，watchdog 只按
+  exact PGID `410589` 保全 pre-TERM/pre-KILL identity 后收口，`rc=125`、无 checkpoint；另两格未 claim。
+  这不是 Reward 失败。旧 namespace 已 rejected；队列先发两个未消费 treatment，再允许普通对照逐字相同
+  配方的唯一 retry-v2，以减少基础设施故障造成的 GPU 空等。见同一[实验卷宗](experiments/2026-07/EXP-P1-LONG-NO-REPLAY-FUNNEL.md)。
+
 - post-swing teacher v3 的唯一 attestor attempt-2 已在 Pod2 从 clean detached `a38b7e9` 自然 rc0：固定
   authorization 来自 clean `main@ff9a253`，4096-state receipt 为 4103 bytes / SHA-256
   `e20a6989...d2aba4`。PGID `403786` 已 absent；merged-main controller status 对 immutable v3 plan、原
