@@ -2475,3 +2475,9 @@ eligible hit 样本前必须继续。队列/host 回归通过后才允许点火�
 动态 URDF import 阶段以 `malloc(): invalid size` / rc134 自然退出，未到首迭代且没有 checkpoint。
 claim/log/leader identity 保留，namespace 永不复用；这是已知 importer 基础设施故障，不是该模仿方式
 失败。只授权逐字相同配方、全新 namespace 的一次 retry-v2；若同 phase 再失败，不再重试。
+
+retry-v2 随后以 exact PGID `423502` 越过真实首迭代。2026-07-15 15:49 UTC，GPU0 的
+V1-only/foot-orientation-0/V2-retry 为 `419643/422126/423502`，GPU1 的
+qdot-1/qdot-2.5/foot-orientation--0.6 为 `420298/421479/422783`；两卡各三条。连同 GPU2 现役
+`411519/412204/412899`，Pod2 三卡利用率 `97%/97%/91%`，九条日志除已归档 V2 attempt-1 外均
+fatal0。新格尚未到 model-200，不作行为结论，G05 继续 `Partial`。

@@ -24,6 +24,11 @@
   import 以 `malloc(): invalid size` / rc134 自然退出，无 checkpoint。证据与 namespace 保留，它不是
   Reward 负结果；只给逐字相同配方一个全新 namespace 的唯一重试，同 phase 再失败则转 importer 根因线。
 
+- V2-only 唯一 retry-v2 PGID `423502` 已越过首迭代。15:49 UTC，Pod2 GPU0/GPU1/GPU2 均恰有三条
+  trainer，利用率 `97%/97%/91%`；六条新格 exact PGID 为
+  `419643/420298/421479/422126/422783/423502`，除已归档 attempt-1 外 fatal0。当前只是满池启动证据，
+  新格尚无 model-200，不作行为胜负。
+
 - Pod2 GPU2 的无随挥回放长曲线已真正点火：qdot/V1+V2/control-retry exact PGID
   `411519/412204/412899` 均返回 `KIT_BOOT_READY`，04:15 UTC 分别到 iter `24/9/2`，fatal0 且
   claim/binding present；GPU2 `97%`、17154 MiB。GPU0/1 的 Yikang PID `379550/396374` 未触碰。

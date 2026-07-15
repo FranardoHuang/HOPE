@@ -380,6 +380,26 @@ python3 scripts/run_lean_training_queue.py \
 三条 job 都有 `required_slot: pod2/gpu2`；不得删除硬槽位来追求表面利用率。任一条没有越过首个
 `Learning iteration` 时，顺序 `fill` 会停止，不会自动发后续臂或重放失败 namespace。
 
+## Pod2 两张空卡的六格长曲线（2026-07-15）
+
+当 live snapshot 证明 GPU0/GPU1 没有 Yikang 或其他 compute PID 后，使用
+`phase1_long_scaleout_funnel_20260715.yaml`。行顺序是 GPU0→GPU1 逐圈各一条，不先塞满单卡：
+
+```bash
+python3 scripts/run_lean_training_queue.py \
+  --queue configs/phase1_long_scaleout_funnel_20260715.yaml plan
+python3 scripts/run_lean_training_queue.py \
+  --queue configs/phase1_long_scaleout_funnel_20260715.yaml doctor --live
+python3 scripts/run_lean_training_queue.py \
+  --queue configs/phase1_long_scaleout_funnel_20260715.yaml \
+  fill --count 6 --execute --confirm SIM_ONLY_LAUNCH_ONE_LEAN_QUEUE_JOB
+```
+
+六格补齐单独/组合模仿、关节速度剂量和脚部朝向剂量，不是六个 seed。它们全部到 10000 updates；
+200/500/1000 只判 fatal、finite、合同与可观测 activation。真实击球后才有收入的稀疏结果在最少
+eligible hit denominator 未满足时一律继续。首次 V2-only 在 importer rc134 后保全，队列只含一个
+逐字同配方的 retry-v2；同 phase 再失败时不得继续造 namespace。
+
 main 已有独立 per-source+Pod+GPU 的 `1 env × 2 updates` boot-warmup 和 content-bearing 日志默认 180 秒
 stale watchdog；P1 不改变其 source-pinned/exact-PGID 语义，也不会让 warmup 继承科学 binding path。
 新反例证明 1-env 成功只可当 cache/import probe：同 source/GPU 的正式 4096-env control 仍可能在

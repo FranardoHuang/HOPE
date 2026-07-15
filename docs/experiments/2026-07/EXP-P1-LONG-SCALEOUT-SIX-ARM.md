@@ -1,10 +1,10 @@
 # EXP-P1-LONG-SCALEOUT-SIX-ARM — 两张空卡的六条单 seed 长曲线
 
-- 状态：`ready`
+- 状态：`running`
 - 阶段/轴：阶段 1，击球窗模仿、关节速度约束、脚部朝向约束
 - 人类负责人：Franco
 - 执行者：Codex
-- 最高证据等级：`E1`（运行前）
+- 最高证据等级：`E2`（真实首迭代/运行时）
 - 创建日期/最后复核日期：2026-07-15
 
 共享缩写见[术语与人话对照](../../DEFINITIONS.md)。本卷不以内部代号作结论：
@@ -69,13 +69,13 @@ Pod2 在 2026-07-15 15:27 UTC 的只读快照中，GPU0/GPU1 都没有 compute P
 
 | 运行 | 状态 | 证据 |
 | --- | --- | --- |
-| 只放开手腕 `phase1_long_no_replay_v1_only_seed3_20260715` | ready | 待 exact PID/PGID、首迭代与 checkpoint receipt |
-| `qdot=-1` `phase1_long_no_replay_qdot_w1_seed3_20260715` | ready | 同上 |
+| 只放开手腕 `phase1_long_no_replay_v1_only_seed3_20260715` | running | PGID `419643`；15:49 UTC 到 iter127，fatal0 |
+| `qdot=-1` `phase1_long_no_replay_qdot_w1_seed3_20260715` | running | PGID `420298`；同窗到 iter82，fatal0 |
 | 只降低击球窗模仿 attempt-1 `phase1_long_no_replay_v2_only_seed3_20260715` | invalidated | PGID `420947` 在动态 URDF import 阶段 `malloc(): invalid size`、rc134；首迭代前退出、无 checkpoint；namespace 永不复用，不是 Reward 结果 |
-| 只降低击球窗模仿唯一重试 `phase1_long_no_replay_v2_only_seed3_retry_v2_20260715` | ready | 配方逐字相同、全新 no-clobber namespace；只允许一次 |
-| `qdot=-2.5` `phase1_long_no_replay_qdot_w2p5_seed3_20260715` | ready | 同上 |
-| 关闭脚部朝向惩罚 `phase1_long_no_replay_foot_orientation_w0_seed3_20260715` | ready | 同上 |
-| 加强脚部朝向惩罚 `phase1_long_no_replay_foot_orientation_w0p6_seed3_20260715` | ready | 同上 |
+| 只降低击球窗模仿唯一重试 `phase1_long_no_replay_v2_only_seed3_retry_v2_20260715` | running | PGID `423502`；同窗到 iter2、fatal0、`KIT_BOOT_READY` |
+| `qdot=-2.5` `phase1_long_no_replay_qdot_w2p5_seed3_20260715` | running | PGID `421479`；同窗到 iter59，fatal0 |
+| 关闭脚部朝向惩罚 `phase1_long_no_replay_foot_orientation_w0_seed3_20260715` | running | PGID `422126`；同窗到 iter62，fatal0 |
+| 加强脚部朝向惩罚 `phase1_long_no_replay_foot_orientation_w0p6_seed3_20260715` | running | PGID `422783`；同窗到 iter35，fatal0 |
 
 发射命令：
 
@@ -88,3 +88,7 @@ python3 scripts/run_lean_training_queue.py \
 controller 必须先验证 GPU0/GPU1 没有任何外部 compute PID；若 Yikang 在发射前重新占卡，相关行 fail
 closed，不迁移、不抢占。attempt-1 的 importer rc134 已完整保全；唯一 retry 仍失败时停止重试并转 importer
 根因线。
+
+2026-07-15 15:49 UTC，Pod2 三卡分别恰有三条 trainer，利用率 `97%/97%/91%`，显存
+`17294/17160/17270 MiB`。GPU0/GPU1 六条新格与 GPU2 三条长训合计九条均在继续；本快照只证明生产池
+已铺满，不产生行为胜负。新格到 model-200 后再做 finite/lineage/contract/eligibility receipt。
