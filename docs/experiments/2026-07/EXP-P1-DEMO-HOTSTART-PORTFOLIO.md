@@ -88,7 +88,10 @@ PID/PGID `429116`、starttime `557505718` 已确认不存在。原普通母本�
 仅为这两个基础设施失败新增一次 `retry_v2`。新行使用新 id、run name 和 run directory，loader 逐字段比较
 parent、完整 recipe、seed、budget 与 milestones 必须和 predecessor 相等；claim 绑定 `retry_of`、完整终态证据、
 `manual_retry_limit=1`、`automatic_retry=false`、`recipe_equal=true`。先在 GPU1 发自由臂 retry，消费新 claim 后
-才允许在 GPU0 发保守模仿 retry；本文提交不执行远端点火。
+才允许在 GPU0 发保守模仿 retry。点火前还会在同一 GPU 锁内、创建新 run directory 之前重算旧
+claim/binding/log/launch/identity 的 5 或 7 个 SHA，双次扫描旧 PGID 全部 `/proc` 成员，解析已绑定的
+leader/pre-TERM/pre-KILL 身份并逐个要求 PID absent，同时拒绝这些成员仍持有 NVML context；本文提交不执行
+远端点火。
 
 历史母本的完整 recipe 仍以其 canonical self-bound queue claim + run binding 账本为信任边界；本轮会反向验证
 账本、argv 与 checkpoint lineage，但没有另造一份独立的旧 recipe 真源。这是已知边界，不影响本轮 v3 的
@@ -128,7 +131,7 @@ python3 scripts/run_phase1_demo_hotstart_queue.py \
 
 两条 parent 命令默认都只是 dry-run；正式执行 inspect 使用独立确认词。正式 attest 会先再跑一遍只读 inspect，
 它通过后才消费 v2 snapshot namespace。receipt 与七类 SHA 已由唯一运行回填；当前 activated 配置及其
-pending 反事实 fixture、终态/recipe 攻击与 assignment 测试共 `28` 个专项测试通过。`fill` 仍会按现场容量和已有 claim fail closed；本页尚无
+pending 反事实 fixture、终态/recipe/残留进程攻击与 assignment 测试共 `32` 个专项测试通过。`fill` 仍会按现场容量和已有 claim fail closed；本页尚无
 后代 Pod 行为结果。
 
 ## 决定

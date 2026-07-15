@@ -401,6 +401,7 @@ import json
 import os
 from pathlib import Path
 import stat
+import subprocess
 import sys
 import torch
 
@@ -975,6 +976,217 @@ try:
     }, sort_keys=True))
 except (RecheckError, OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
     print(f"PARENT_SNAPSHOT_RECHECK_ERROR: {exc}", file=sys.stderr)
+    raise SystemExit(2)
+'''
+
+
+RETRY_RECHECK_PROGRAM = r'''import base64
+import hashlib
+import json
+import os
+from pathlib import Path
+import stat
+import subprocess
+import sys
+
+
+class RetryRecheckError(RuntimeError):
+    pass
+
+
+def parse_stat(text, expected_pid):
+    close = text.rfind(") ")
+    if close < 0 or not text[:close].startswith(f"{expected_pid} ("):
+        raise RetryRecheckError("proc stat has an invalid PID/command prefix")
+    fields = text[close + 2:].split()
+    if len(fields) <= 19:
+        raise RetryRecheckError("proc stat is missing pgrp/starttime fields")
+    try:
+        return {
+            "pid": expected_pid,
+            "pgid": int(fields[2]),
+            "starttime_ticks": int(fields[19]),
+        }
+    except ValueError as exc:
+        raise RetryRecheckError("proc stat pgrp/starttime is not numeric") from exc
+
+
+def group_members(proc_root, pgid):
+    result = []
+    try:
+        entries = list(proc_root.iterdir())
+    except OSError as exc:
+        raise RetryRecheckError(f"cannot enumerate {proc_root}") from exc
+    for entry in entries:
+        if not entry.name.isdigit():
+            continue
+        pid = int(entry.name)
+        try:
+            first = parse_stat((entry / "stat").read_text(encoding="utf-8"), pid)
+            second = parse_stat((entry / "stat").read_text(encoding="utf-8"), pid)
+        except FileNotFoundError:
+            continue
+        if first != second:
+            raise RetryRecheckError(f"process {pid} identity changed while reading")
+        if first["pgid"] == pgid:
+            result.append(first)
+    return sorted(result, key=lambda item: item["pid"])
+
+
+def identity_rows(document, label):
+    try:
+        parsed = json.loads(document.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RetryRecheckError(f"{label} is not valid identity JSON") from exc
+    if not isinstance(parsed, dict):
+        raise RetryRecheckError(f"{label} identity JSON is not an object")
+    rows = []
+    if isinstance(parsed.get("leader"), dict):
+        rows.append(parsed["leader"])
+    if isinstance(parsed.get("members"), list):
+        rows.extend(parsed["members"])
+    identities = []
+    for row in rows:
+        if not isinstance(row, dict):
+            raise RetryRecheckError(f"{label} identity row is not an object")
+        identity = {
+            "pid": row.get("pid"), "pgid": row.get("pgid"),
+            "starttime_ticks": row.get("starttime_ticks"),
+        }
+        if (
+            type(identity["pid"]) is not int or identity["pid"] <= 0
+            or type(identity["pgid"]) is not int or identity["pgid"] <= 0
+            or type(identity["starttime_ticks"]) is not int
+            or identity["starttime_ticks"] <= 0
+        ):
+            raise RetryRecheckError(f"{label} identity row is invalid")
+        identities.append(identity)
+    return identities
+
+
+def recheck(item, allowed_root):
+    path = Path(item["path"])
+    if not path.is_absolute() or path == allowed_root or allowed_root not in path.parents:
+        raise RetryRecheckError(f"{item['label']} path is outside the allowed root")
+    current = Path(path.anchor)
+    for index, part in enumerate(path.parts[1:]):
+        current = current / part
+        try:
+            info = current.lstat()
+        except FileNotFoundError as exc:
+            raise RetryRecheckError(f"{item['label']} is missing") from exc
+        if stat.S_ISLNK(info.st_mode):
+            raise RetryRecheckError(f"{item['label']} contains a symlink component")
+        if index < len(path.parts[1:]) - 1 and not stat.S_ISDIR(info.st_mode):
+            raise RetryRecheckError(f"{item['label']} parent is not a directory")
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        before = os.fstat(fd)
+        if not stat.S_ISREG(before.st_mode) or before.st_size <= 0:
+            raise RetryRecheckError(f"{item['label']} is not a non-empty regular file")
+        digest = hashlib.sha256()
+        size = 0
+        raw = bytearray()
+        while True:
+            chunk = os.read(fd, 1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+            size += len(chunk)
+            raw.extend(chunk)
+        after = os.fstat(fd)
+        signature = lambda value: (
+            value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns
+        )
+        if signature(before) != signature(after) or size != before.st_size:
+            raise RetryRecheckError(f"{item['label']} changed while hashing")
+    finally:
+        os.close(fd)
+    observed = digest.hexdigest()
+    if observed != item["sha256"]:
+        raise RetryRecheckError(f"{item['label']} SHA differs from retry contract")
+    return (
+        {"label": item["label"], "path": str(path), "sha256": observed},
+        bytes(raw),
+    )
+
+
+try:
+    if len(sys.argv) != 2:
+        raise RetryRecheckError("one base64 JSON specification is required")
+    spec = json.loads(base64.b64decode(sys.argv[1], validate=True))
+    files = spec.get("files")
+    if not isinstance(files, list) or len(files) not in {5, 7}:
+        raise RetryRecheckError("retry predecessor must bind five or seven files")
+    if len({item.get("path") for item in files if isinstance(item, dict)}) != len(files):
+        raise RetryRecheckError("retry predecessor file paths are not unique")
+    process = spec.get("process_identity")
+    if not isinstance(process, dict):
+        raise RetryRecheckError("retry predecessor process identity is missing")
+    pid, pgid = process.get("pid"), process.get("pgid")
+    if type(pid) is not int or pid <= 0 or type(pgid) is not int or pgid != pid:
+        raise RetryRecheckError("retry predecessor PID/PGID is invalid")
+    if type(process.get("starttime_ticks")) is not int or process["starttime_ticks"] <= 0:
+        raise RetryRecheckError("retry predecessor starttime is invalid")
+    if process.get("absent_verified") is not True:
+        raise RetryRecheckError("retry predecessor absence was not verified")
+    expected_identity = {
+        "pid": pid, "pgid": pgid,
+        "starttime_ticks": process["starttime_ticks"],
+    }
+    allowed_root = Path(spec.get("allowed_root", "/workspace"))
+    proc_root = Path(spec.get("proc_root", "/proc"))
+    if not allowed_root.is_absolute() or not proc_root.is_absolute():
+        raise RetryRecheckError("allowed/proc roots must be absolute")
+    proc = proc_root / str(pid)
+    before_group = group_members(proc_root, pgid)
+    if proc.exists() or before_group:
+        raise RetryRecheckError("retry predecessor process group is no longer absent")
+    checked = [recheck(item, allowed_root) for item in files]
+    result = [item[0] for item in checked]
+    bound = {}
+    for item, raw in checked:
+        if "identity" not in item["label"]:
+            continue
+        for identity in identity_rows(raw, item["label"]):
+            if identity["pgid"] != pgid:
+                raise RetryRecheckError("identity evidence contains a foreign PGID")
+            previous = bound.get(identity["pid"])
+            if previous is not None and previous != identity:
+                raise RetryRecheckError("identity evidence disagrees about one PID")
+            bound[identity["pid"]] = identity
+    if bound.get(pid) != expected_identity:
+        raise RetryRecheckError("identity evidence omits the predecessor leader")
+    live_bound = sorted(
+        bound_pid for bound_pid in bound
+        if (proc_root / str(bound_pid)).exists()
+    )
+    after_group = group_members(proc_root, pgid)
+    if proc.exists() or live_bound or after_group:
+        raise RetryRecheckError("retry predecessor member is still live")
+    completed = subprocess.run(
+        ["nvidia-smi", "--query-compute-apps=pid", "--format=csv,noheader,nounits"],
+        check=True, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    nvml_pids = {
+        int(line.strip()) for line in completed.stdout.splitlines()
+        if line.strip().isdigit()
+    }
+    if nvml_pids.intersection(bound):
+        raise RetryRecheckError("retry predecessor member still owns an NVML context")
+    print(json.dumps({
+        "status": "RETRY_PREDECESSOR_RECHECK_OK",
+        "job_id": spec["job_id"], "retry_of": spec["retry_of"],
+        "terminal_kind": spec["terminal_kind"], "files": result,
+        "bound_member_count": len(bound), "old_pgid_member_count": 0,
+        "bound_nvml_context_count": 0,
+    }, sort_keys=True))
+except (
+    RetryRecheckError, OSError, KeyError, TypeError, ValueError,
+    subprocess.CalledProcessError,
+    json.JSONDecodeError,
+) as exc:
+    print(f"RETRY_PREDECESSOR_RECHECK_ERROR: {exc}", file=sys.stderr)
     raise SystemExit(2)
 '''
 
@@ -1634,6 +1846,39 @@ def _demo_claim(
     }, argv
 
 
+def _retry_recheck_command(job: dict[str, Any]) -> str:
+    if job["id"] not in RETRY_IDS:
+        return "true"
+    retry = job["retry_contract"]
+    terminal = retry["predecessor_terminal"]
+    evidence = terminal["evidence"]
+    file_fields = (
+        ("queue claim", "queue_claim_path", "queue_claim_file_sha256"),
+        ("run binding", "run_binding_path", "run_binding_file_sha256"),
+        ("run log", "run_log_path", "run_log_sha256"),
+        ("launch state", "launch_state_path", "launch_state_sha256"),
+        ("leader identity", "leader_identity_path", "leader_identity_sha256"),
+        ("pre-TERM identity", "pre_term_identity_path", "pre_term_identity_sha256"),
+        ("pre-KILL identity", "pre_kill_identity_path", "pre_kill_identity_sha256"),
+    )
+    spec = {
+        "job_id": job["id"],
+        "retry_of": retry["retry_of"],
+        "terminal_kind": terminal["terminal_kind"],
+        "terminal_exit_code": terminal["terminal_exit_code"],
+        "process_identity": terminal["process_identity"],
+        "files": [
+            {"label": label, "path": evidence[path_key], "sha256": evidence[sha_key]}
+            for label, path_key, sha_key in file_fields
+            if path_key in evidence
+        ],
+    }
+    encoded = base64.b64encode(
+        json.dumps(spec, sort_keys=True).encode("utf-8")
+    ).decode("ascii")
+    return shlex.join(["python3", "-c", RETRY_RECHECK_PROGRAM, encoded])
+
+
 def _launch_script(queue: dict[str, Any], job: dict[str, Any], slot: Any) -> str:
     source = job["source"]["checkout"].rstrip("/")
     workdir = f"{source}/{Q.WBT_RELATIVE}"
@@ -1702,13 +1947,17 @@ def _launch_script(queue: dict[str, Any], job: dict[str, Any], slot: Any) -> str
         + shlex.quote(digest)
         for relative, digest in EXPECTED_SOURCE_CONTRACT_FILES.items()
     )
+    retry_recheck_command = _retry_recheck_command(job)
     launcher = f"{workdir}/{Q.KIT_LAUNCHER_RELATIVE}"
     launch = shlex.join([launcher, f"{run_dir}/run.log"]) + " " + (
         Q._child_env_command(argv, slot.gpu)
     ) + f" {Q.GPU_LAUNCH_LOCK_FD}>&-"
-    body = snapshot_recheck_command + "\n" + source_hash_checks + "\n" + Q._doctor_body(
-        queue, job, slot, training_argv=argv
-    ) + f"""
+    body = (
+        snapshot_recheck_command + "\n"
+        + retry_recheck_command + "\n"
+        + source_hash_checks + "\n"
+        + Q._doctor_body(queue, job, slot, training_argv=argv)
+        + f"""
 count=$(nvidia-smi -i {slot.gpu} --query-compute-apps=pid --format=csv,noheader,nounits | awk {shlex.quote(Q.UNIQUE_NUMERIC_PID_AWK)})
 test "$count" -lt {slot.capacity}
 mkdir -p {shlex.quote(run_parent)}
@@ -1721,6 +1970,7 @@ export KIT_BOOT_TIMEOUT_S={Q.KIT_BOOT_TIMEOUT_SECONDS}
 {proof_command}
 printf '%s\n' phase=first_iter demo_only=true exact_eligible=false strict_full_state_resume_proven=true expected_lineage_exact=0 >> {shlex.quote(run_dir + '/run.log.launch')}
 """
+    )
     return Q._gpu_launch_lock_script(slot, body)
 
 

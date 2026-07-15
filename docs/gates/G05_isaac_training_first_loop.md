@@ -2568,7 +2568,9 @@ log、launch/identity evidence SHA 已冻结，旧行改为 `rejected`，因此�
 slot。只新增各一次 recipe-identical `retry_v2`：新 id/name/dir，分别硬绑 GPU1/GPU0，loader 机器比较
 parent/recipe/seed/budget/milestones 与 predecessor 相同；claim 绑定终态证据、`retry_of`、
 `manual_retry_limit=1`、`automatic_retry=false` 和 `recipe_equal=true`。两条按 GPU1→GPU0 顺序错峰，第二条
-只有第一条已消费新 claim 后才可选择。本变更只排队、未点火；`28` 个专项测试通过，G05 仍为 `Partial`。
+只有第一条已消费新 claim 后才可选择。点火锁内还会在创建新目录前重算 predecessor 的 5/7 个证据 SHA，
+双次扫描旧 PGID、解析绑定成员并逐 PID 检查 absent、拒绝残留 NVML context；leader 已退但同 PGID child
+仍活的反例必须 fail closed。本变更只排队、未点火；`32` 个专项测试通过，G05 仍为 `Partial`。
 
 每条 launch 的 `phase=first_iter` 现在还要求日志同时证明 explicit hard-contract mismatch、从 snapshot
 model-3500 恢复到 iteration 3500 和 `optimizer=resumed`，并从新 hard contract 核对本行 qdot/conditional-face

@@ -7,6 +7,7 @@ import importlib.util
 import json
 import os
 from pathlib import Path
+import shlex
 import subprocess
 import sys
 
@@ -295,6 +296,141 @@ def test_retry_contracts_bind_terminal_evidence_and_recipe_identity():
         assert claim["content"]["retry_contract"]["predecessor_terminal"] == (
             predecessor["terminal_contract"]
         )
+
+
+def test_retry_launch_rechecks_predecessor_bytes_and_absent_pid_inside_lock():
+    queue = D.load_queue(QUEUE)
+    jobs = {job["id"]: job for job in queue["jobs"]}
+    assert D._retry_recheck_command(queue["jobs"][0]) == "true"
+    for retry_id, predecessor_id in D.RETRY_PREDECESSORS.items():
+        job = jobs[retry_id]
+        slot = next(
+            candidate for candidate in D.Q.slots(queue)
+            if candidate.name == job["resource"]["required_slot"]
+        )
+        command = D._retry_recheck_command(job)
+        argv = shlex.split(command)
+        assert argv[:3] == ["python3", "-c", D.RETRY_RECHECK_PROGRAM]
+        spec = json.loads(base64.b64decode(argv[-1], validate=True))
+        terminal = jobs[predecessor_id]["terminal_contract"]
+        assert spec["retry_of"] == predecessor_id
+        assert spec["terminal_kind"] == terminal["terminal_kind"]
+        assert spec["process_identity"] == terminal["process_identity"]
+        assert len(spec["files"]) in {5, 7}
+        assert {item["sha256"] for item in spec["files"]}.issubset(
+            set(terminal["evidence"].values())
+        )
+        launch = D._launch_script(queue, job, slot)
+        locked_body = shlex.split(launch)[-1]
+        assert command in locked_body
+        assert locked_body.index(command) < locked_body.index(
+            f"mkdir {job['run_dir']}"
+        )
+
+
+def test_retry_recheck_rejects_live_child_after_leader_exit(tmp_path):
+    proc_root = tmp_path / "proc"
+    child = proc_root / "222"
+    child.mkdir(parents=True)
+    old_pgid = 429116
+    fields = ["S", "1", str(old_pgid), *(["0"] * 16), "999"]
+    (child / "stat").write_text(
+        "222 (orphaned-kit-child) " + " ".join(fields), encoding="utf-8"
+    )
+    files = [
+        {
+            "label": f"evidence-{index}",
+            "path": str(tmp_path / f"missing-{index}.json"),
+            "sha256": "0" * 64,
+        }
+        for index in range(5)
+    ]
+    encoded = base64.b64encode(json.dumps({
+        "job_id": "retry-attack",
+        "retry_of": "failed-job",
+        "terminal_kind": "pre_marker_exit",
+        "terminal_exit_code": 134,
+        "process_identity": {
+            "pid": old_pgid, "pgid": old_pgid, "starttime_ticks": 123,
+            "absent_verified": True,
+        },
+        "files": files,
+        "allowed_root": str(tmp_path),
+        "proc_root": str(proc_root),
+    }).encode()).decode()
+    completed = subprocess.run(
+        [sys.executable, "-c", D.RETRY_RECHECK_PROGRAM, encoded],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    assert completed.returncode == 2
+    assert "process group is no longer absent" in completed.stderr
+
+
+@pytest.mark.parametrize(("file_count", "bound_member_count"), [(5, 1), (7, 3)])
+def test_retry_recheck_accepts_absent_bound_group_and_exact_evidence(
+    tmp_path, file_count, bound_member_count
+):
+    proc_root = tmp_path / "proc"
+    proc_root.mkdir()
+    evidence_root = tmp_path / "evidence"
+    evidence_root.mkdir()
+    leader = {"pid": 429116, "pgid": 429116, "starttime_ticks": 123}
+    child_a = {"pid": 429117, "pgid": 429116, "starttime_ticks": 124}
+    child_b = {"pid": 429118, "pgid": 429116, "starttime_ticks": 125}
+    payloads = [
+        ("queue claim", b"claim\n"),
+        ("run binding", b"binding\n"),
+        ("run log", b"log\n"),
+        ("launch state", b"launch\n"),
+        ("leader identity", json.dumps({
+            "schema_version": 1, "kind": "leader_identity", "leader": leader,
+        }, sort_keys=True).encode()),
+    ]
+    if file_count == 7:
+        payloads.extend([
+            ("pre-TERM identity", json.dumps({
+                "schema_version": 1, "kind": "pre_term_group_identity",
+                "leader": leader, "members": [leader, child_a, child_b],
+            }, sort_keys=True).encode()),
+            ("pre-KILL identity", json.dumps({
+                "schema_version": 1, "kind": "pre_kill_group_identity",
+                "leader": leader, "members": [child_a, child_b],
+            }, sort_keys=True).encode()),
+        ])
+    files = []
+    for index, (label, payload) in enumerate(payloads):
+        path = evidence_root / f"evidence-{index}.bin"
+        path.write_bytes(payload)
+        files.append({
+            "label": label, "path": str(path),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+        })
+    fake_bin = tmp_path / "bin"
+    fake_bin.mkdir()
+    nvidia_smi = fake_bin / "nvidia-smi"
+    nvidia_smi.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+    nvidia_smi.chmod(0o755)
+    encoded = base64.b64encode(json.dumps({
+        "job_id": "retry-success",
+        "retry_of": "failed-job",
+        "terminal_kind": "pre_marker_exit",
+        "terminal_exit_code": 134,
+        "process_identity": {**leader, "absent_verified": True},
+        "files": files,
+        "allowed_root": str(tmp_path),
+        "proc_root": str(proc_root),
+    }).encode()).decode()
+    completed = subprocess.run(
+        [sys.executable, "-c", D.RETRY_RECHECK_PROGRAM, encoded],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+        env={**os.environ, "PATH": str(fake_bin) + os.pathsep + os.environ["PATH"]},
+    )
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout)
+    assert result["status"] == "RETRY_PREDECESSOR_RECHECK_OK"
+    assert result["bound_member_count"] == bound_member_count
+    assert result["old_pgid_member_count"] == 0
+    assert result["bound_nvml_context_count"] == 0
 
 
 def test_rejected_claims_release_slots_and_retries_launch_in_declared_order():

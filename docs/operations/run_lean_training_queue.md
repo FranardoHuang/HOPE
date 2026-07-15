@@ -483,7 +483,9 @@ claim/binding/log/launch/identity SHA；不得把旧目录改回 ready。当前�
 绑定 `retry_of`、predecessor 终态证据、`manual_retry_limit=1`、`automatic_retry=false`、
 `recipe_equal=true`；loader 会逐字段比较 parent、完整 recipe、seed、budget 和 milestones，并拒绝复用
 run name/directory。调度只先选择 GPU1 retry；它的新 claim 可见后才选择 GPU0 retry，所以即使一次请求
-`fill --count 9` 也按顺序错峰。没有第二次 retry。
+`fill --count 9` 也按顺序错峰。每条 retry 在 GPU 锁内、创建新目录前还会重算旧 5/7 个证据文件 SHA，
+双次扫描旧 PGID 的 `/proc` 成员，解析 leader/pre-TERM/pre-KILL 成员并逐个要求 absent，再拒绝残留 NVML
+context。没有第二次 retry。
 
 旧母本完整 recipe 的边界是原 canonical self-bound queue claim/run binding；v3 会重验其 argv/source/run/lineage，
 但不声称用另一份独立真源重新证明历史 recipe。

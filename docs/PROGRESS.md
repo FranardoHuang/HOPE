@@ -17,7 +17,8 @@
   stale timeout `rc125` 结束；exact PID/PGID/starttime 均已确认 absent，完整 claim/binding/log/launch/
   identity SHA 已绑定，旧行标 `rejected` 且不再占调度槽。新增两个 recipe-identical 的一次性人工
   `retry_v2`，使用新 namespace、硬绑 GPU1→GPU0 并按 claim 顺序错峰；`automatic_retry=false`，本提交
-  未点火。前七条 claim digest 不变，`28` 个专项测试通过。见
+  未点火。点火前同一 GPU 锁会重核旧 5/7 个证据 SHA、旧 PGID/成员 PID 与 NVML context；leader 退出但
+  child 仍活的攻击测试 fail closed。前七条 claim digest 不变，`32` 个专项测试通过。见
   [实验卷宗](experiments/2026-07/EXP-P1-DEMO-HOTSTART-PORTFOLIO.md)。
 
 - 在不改变前六条续训 recipe/claim digest 的前提下，队列增加 GPU2 第四槽的第七条 16 秒长回合候选：
