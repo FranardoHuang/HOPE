@@ -13,6 +13,11 @@
 
 ## 2026-07-15
 
+- Pod2 GPU2 的无随挥回放长曲线已真正点火：qdot/V1+V2/control-retry exact PGID
+  `411519/412204/412899` 均返回 `KIT_BOOT_READY`，04:15 UTC 分别到 iter `24/9/2`，fatal0 且
+  claim/binding present；GPU2 `97%`、17154 MiB。GPU0/1 的 Yikang PID `379550/396374` 未触碰。
+  当前无 model-200，不作 Reward 结论。见[实验卷宗](experiments/2026-07/EXP-P1-LONG-NO-REPLAY-FUNNEL.md)。
+
 - 新的 10000-update 无随挥回放漏斗已在结果前冻结：普通对照、关节速度边界惩罚 `-5`、击球窗模仿放松
   三格同 source/题库/seed，只落 Pod2 GPU2。exact source `2c2d70d...607e` 的 4096-environment
   full-scene terminal probe 与三格 no-Kit Hydra compose 均通过；host 队列/调度回归 `54 passed`。

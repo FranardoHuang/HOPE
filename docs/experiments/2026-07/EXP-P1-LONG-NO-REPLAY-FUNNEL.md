@@ -1,6 +1,6 @@
 # EXP-P1-LONG-NO-REPLAY-FUNNEL — 先把早筛候选跑成可解释的 10000-update 长曲线
 
-- 状态：`ready`
+- 状态：`running`
 - 阶段/轴：阶段 1，平衡约束与动作模仿强度
 - 集成小目标：在不引入随挥状态回放的条件下，比较普通配方、关节速度边界惩罚与击球窗模仿放松
 - 人类负责人：Franco
@@ -67,15 +67,20 @@
 | 运行（人话名 + `run_name`） | 状态 | Checkpoint/seed | 证据 | 结果产物 | 有效性说明 |
 | --- | --- | --- | --- | --- | --- |
 | 普通对照 attempt-1 `phase1_long_no_replay_control_seed3_20260715` | invalidated | 未到首迭代，seed3 | dynamic URDF import 后日志 180 秒无进展；exact PGID `410589` 已由 watchdog 收口 | claim/binding/log/TERM/KILL identity evidence | 纯基础设施失败，无 checkpoint，不是 Reward 结果；namespace 永不复用 |
-| 关节速度边界惩罚 `phase1_long_no_replay_qdot_w5_seed3_20260715` | ready | 同上 | 待运行 | Pod2 run directory | 只改变 qdot 惩罚权重 |
-| 击球窗模仿放松 `phase1_long_no_replay_v1v2_seed3_20260715` | ready | 同上 | 待运行 | Pod2 run directory | 只改变两项动作模仿开关 |
-| 普通对照唯一重试 `phase1_long_no_replay_control_seed3_retry_v2_20260715` | ready | 同上 | 待运行 | 全新 no-clobber namespace | 配方逐字不变；只更换身份，排在两个 treatment 之后以先恢复有效 GPU 工作 |
+| 关节速度边界惩罚 `phase1_long_no_replay_qdot_w5_seed3_20260715` | running | 同上 | PGID `411519`，04:15 UTC 到 iter24，fatal0，claim/binding present | Pod2 run directory | 只改变 qdot 惩罚权重 |
+| 击球窗模仿放松 `phase1_long_no_replay_v1v2_seed3_20260715` | running | 同上 | PGID `412204`，04:15 UTC 到 iter9，fatal0，claim/binding present | Pod2 run directory | 只改变两项动作模仿开关 |
+| 普通对照唯一重试 `phase1_long_no_replay_control_seed3_retry_v2_20260715` | running | 同上 | PGID `412899`，04:15 UTC 到 iter2，fatal0，claim/binding present | 全新 no-clobber namespace | 配方逐字不变；共享匹配对照 |
 
 2026-07-15 04:06–04:09 UTC，attempt-1 在 source/assets/Hydra compose 通过后启动，停在动态 URDF import；
 进程曾使用约 13 个 CPU core，但 `run.log` 固定在 32075 bytes，GPU2 仅约 2.3 GiB/1%。180 秒 stale-log
 watchdog 先写同一 PGID 的 pre-TERM/pre-KILL identity evidence，再只收口 PGID `410589`，终态
 `terminal_kind=stale_timeout`、`rc=125`、GPU2 回到 2 MiB。后两格当时尚未 claim；本卷只授权普通对照一次
 逐字相同配方 retry，且先发两个仍未消费的 treatment，避免启动故障继续让 GPU 空等。
+
+第二次 `fill --count 3` 严格按 qdot → V1+V2 → control-retry 顺序逐条等待真实
+`Learning iteration`，三条都返回 `KIT_BOOT_READY`。04:15 UTC，GPU2 上恰有这三个 Codex PID，利用率
+`97%`、显存 `17154/32607 MiB`；GPU0/1 的 Yikang PID 保持不变。当前只证明生产训练已启动，尚无
+model-200、激活计数或行为结论。
 
 ## 复现与证据
 

@@ -67,9 +67,12 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   eligible/selected/started=`0/0/0`，treatment 已为 `15087/3750/3750`；control 到 step519 才激活，不能
   倒灌 model-500。源码确认 buffer 只收 policy 自己活到自然 clip wrap 的状态，因此 base-decel 会反过来改变
   curriculum 何时 ready，这一对按预注册判 `activation-invalid`，不比较行为、不买第二 seed、不判卷。
-  exact PGID=`380610/381237` 已停止。最近只读快照中 Pod2 GPU0/1 分别有 Yikang V9/V10（PID
-  `379550/396374`），Codex 不触碰；GPU2 空闲。任何 Yikang 进程仍在的 GPU 都保持保留，实际空出的卡才进入
-  Codex 队列。下一次同轴训练必须先用
+  exact PGID=`380610/381237` 已停止。2026-07-15 04:15 UTC 的只读快照中，Pod2 GPU0/1 分别仍是
+  Yikang V9/V10（PID `379550/396374`），Codex 没有触碰；GPU2 已运行三条同源 10000-update 长曲线：
+  关节速度边界惩罚 PGID `411519`、击球窗模仿放松 PGID `412204`、普通对照唯一重试 PGID `412899`。
+  三条分别到 iteration `24/9/2`，fatal=`0/0/0`，claim/binding 都存在；GPU2 为 `97%`、17154 MiB。
+  200/500/1000 只早筛，2000/3000 看中段，6000/10000 才看完整曲线，不买第二 seed。任何 Yikang
+  进程仍在的 GPU 都保持保留。下一次同轴训练必须先用
   两臂共享、自然-wrap provenance 绑定的 immutable teacher-state receipt 做外生 cold-start，并在首 update
   前 fail closed。
 
@@ -84,7 +87,7 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   `natural_clip_wrap` state；唯一授权 attestor attempt-2 从固定 `a38b7e9` rc0，发布 4103-byte receipt
   `e20a6989...d2aba4`。merged-main controller status 已确认 `teacher_receipt_binding_exact=true`。当前只差
   4096-env、首个 PPO rollout 前的 first-reset 采用率与 simulator root/joint readback probe；它未通过前，
-  科学 pair、第二 seed 与 judge 继续 fail closed。可用执行槽目前只有 Pod2 GPU2。
+  科学 pair、第二 seed 与 judge 继续 fail closed。Codex 唯一可用卡仍是 Pod2 GPU2，当前三槽已满。
 
   Fresh C 的五条单 seed 机制格均已越过 `+500` 且 checkpoint
   finite/contract/lineage 正确。V1+V2 出现当前最强击球精度信号（composite `0.0893`、normal pass

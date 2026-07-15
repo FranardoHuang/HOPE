@@ -2452,3 +2452,8 @@ PGID `410589` 的 pre-TERM/pre-KILL identity evidence 后只收口该组，`rc=1
 没有 claim。该 namespace 已 rejected，不能解释为 Reward 负结果。队列现先发 qdot/V1+V2 两个未消费
 treatment，再允许普通对照逐字相同配方的唯一 retry-v2；任一新 attempt 仍须先越过真实
 `Learning iteration`。G05 继续 `Partial`。
+
+重排后的同一次 `fill --count 3` 已逐条拿到 `KIT_BOOT_READY`：qdot/V1+V2/control-retry exact PGID
+`411519/412204/412899`。2026-07-15 04:15 UTC 只读复核分别为 iter `24/9/2`，fatal0、claim/binding
+present；Pod2 GPU2 为 `97%` / 17154 MiB，GPU0/1 的 Yikang PID 未变化。尚无 model-200 或 activation
+receipt，故只把训练状态从 ready 改为 running，G05 仍为 `Partial`。
