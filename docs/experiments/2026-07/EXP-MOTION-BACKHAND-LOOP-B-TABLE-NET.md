@@ -1,6 +1,6 @@
 # EXP-MOTION-BACKHAND-LOOP-B-TABLE-NET — 反手拉 B 整轨桌网余隙门
 
-- 状态：`v2_runtime_joint_order_comment_false_reject_v3_source_static_pass_runtime_pending`
+- 状态：`v3_certificate_rejected_lower_bound_overclaim_v4_source_static_pass_runtime_pending`
 - 阶段/轴：新动作库 / 整轨桌板、网与网柱几何余隙
 - 人类负责人：Franco
 - 执行者：Codex
@@ -20,12 +20,12 @@
 
 预注册
 [`motion_backhand_loop_b_table_net_clearance_prereg_20260715.json`](../../../configs/motion_backhand_loop_b_table_net_clearance_prereg_20260715.json)
-当前 schema-v3 SHA-256 为
-`9c03e7b0e5adc2febb6dd8ccdb36273a7fc05020052ccefda57579c596dd273a`。失败的 schema-v2
-计划 SHA-256 `1c73faf9...ec6b4` 冻结在 `main@f214a80`，失败的 schema-v1 计划 SHA-256
-`9d7126bc...eb1e6` 冻结在 `main@9abf7fe`，两者都不得再运行。v3 不改动作、桌位、阈值、采样、输入
-lineage 或输出授权；它保留 v2 的 MuJoCo geom 编号修复，并让 snapshot name-list parser 与冻结 upstream
-L0 的 comment 语义一致。当前计划逐字绑定：
+当前 schema-v4 SHA-256 为
+`dee68548256e3b5966135a61f1c40e1cb4a64f6c63c0235dc4ea9112e7cc2ef8`。已产出但被拒绝的 schema-v3
+计划 SHA-256 `9c03e7b0...d273a` 冻结在 `main@b9b011b`；失败的 schema-v2/v1 计划分别冻结在
+`main@f214a80` / `main@9abf7fe`，三者都不得再运行或给 dynamics 授权。v4 不改动作、桌位、hard/warning
+阈值、采样或输入 lineage；它保留 v2 geom 编号与 v3 comment parser 修复，只修正 reporting-cap saturation
+的 certified lower bound，并切换到全新 no-clobber v4 输出。当前计划逐字绑定：
 
 - B schema-2 NPZ SHA-256 `e2eb99e6...d28cc`；
 - vendor L1 certificate SHA-256 `6840df34...db60`，且运行消费前必须读到
@@ -52,7 +52,7 @@ p_schema2_mjcf = p_HOPE + [0.5, 1.525/2, 0.76]
 
 validator
 [`audit_motion_schema2_table_net_clearance.py`](../../../scripts/audit_motion_schema2_table_net_clearance.py)
-SHA-256 为 `66aa16b4...7449d`。它继承 vendor L1 已验证的 root 线性、四元数 shortest-arc slerp 和关节线性
+SHA-256 为 `46f919ea...3e3b`。它继承 vendor L1 已验证的 root 线性、四元数 shortest-arc slerp 和关节线性
 插值，将 `151 @ 50 Hz` 扫成 `1201 @ 400 Hz` 有限样本。运行时把四个静态 box 追加到 canonical
 `worldbody`，通过 in-memory XML + exact 74-file mesh map 编译。MuJoCo 会先编号一个 body 直属的全部 geom，
 再递归其 child body；因此四个新增 world geom 必然占 `1..4`，floor 保持 `0`，robot geom 的全局编号整体
@@ -78,7 +78,7 @@ bracket（已扣除 saturation predicate 的 `1e-12 m` 数值裕量），不能�
 
 ```bash
 python3 -m pytest -q tests/test_motion_backhand_loop_b_table_net_clearance.py
-# 39 passed
+# 42 passed
 
 python3 -m pytest -q \
   tests/test_motion_backhand_loop_bc_schema2_fk_prereg.py \
@@ -87,11 +87,11 @@ python3 -m pytest -q \
   tests/test_motion_backhand_loop_b_l0_static_v2.py \
   tests/test_motion_backhand_loop_b_vendor_l1_safety.py \
   tests/test_motion_backhand_loop_b_table_net_clearance.py
-# 140 passed
+# 143 passed
 
 python3 scripts/audit_motion_schema2_table_net_clearance.py \
   --prereg configs/motion_backhand_loop_b_table_net_clearance_prereg_20260715.json \
-  --expected-prereg-sha256 9c03e7b0e5adc2febb6dd8ccdb36273a7fc05020052ccefda57579c596dd273a \
+  --expected-prereg-sha256 dee68548256e3b5966135a61f1c40e1cb4a64f6c63c0235dc4ea9112e7cc2ef8 \
   static
 # PASS ... source_exact=true runtime_audit=false no_write=true continuous_time_claim=false
 ```
@@ -155,9 +155,34 @@ schema-v3 对 single-fd snapshot bytes 使用与 upstream 完全相同的过滤�
 metadata、过滤后 duplicate name 仍 fail closed，leading-whitespace comment 只作为 metadata 跳过。当前
 只有 source/static 结果；合入 main 并独立 review 前禁止 runtime 重跑。
 
+## schema-v3 certificate 拒绝与 schema-v4 下界修复
+
+schema-v3 在 clean `main@b9b011bc101e98b597bb08ef729090c358302226` 上完成 Pod2 CPU dry-run/audit。
+dry-run log 为 155 bytes / SHA-256 `ad33e82c...3213c`，audit log 为 177 bytes / SHA-256
+`9f30eab9...be997`。它发布的旧 certificate 位于 `table_net_primary_v1`，14848 bytes / SHA-256
+`39d6cc38941acfed2aa57e09add90660f946d16849ba3a8f02581fe646a79a19`；该文件必须原地 immutable，但经
+独立 exact-semantics review 后被正式 **REJECT**，机器记录见
+[`motion_backhand_loop_b_table_net_v3_rejected_result_20260715.json`](../../../configs/motion_backhand_loop_b_table_net_v3_rejected_result_20260715.json)。
+
+旧证书仍报告 1201 帧 hard/warning=`0/0`，所以 5 mm/20 mm 门结论有巨大裕量；拒绝原因只在证书的精确
+下界语义。`geom_is_far(cap)` 接受 `mj_geomDistance >= cap - 1e-12`，因此所有 pair 在 0.1 m reporting cap
+饱和时只证明真实距离 `>=0.099999999999 m`。旧 aggregator 却把默认 lower bound 初始化成 `0.1`，又因
+所有 pair 都 saturated 而不进入 bracket，最终把未证明的 `0.1` 写成
+`minimum_clearance_certified_lower_bound_m`；midpoint/pair/source-time 都是 null。这个 `1e-12 m` 不影响
+hard/warning，但“certified”字段不允许多报一个 epsilon，故旧 certificate 的 `table_net_complete` 与
+`dynamics_authorized` 一律不接受。
+
+schema-v4 把 pair-level 和全轨 aggregator 的 saturated 初值统一为 `cap-epsilon=0.099999999999`；全体
+saturated 时 midpoint、minimum pair 与 source time 继续为 null，并新增显式 saturation flag。只有出现
+未饱和 bracket 时才登记实际 pair/time。边界 fake 精确返回 `cap-epsilon`，验证 lower bound 正好为该值、
+pair/midpoint 为 null；未饱和反例仍给出实际 pair。旧 certificate 的 path/bytes/SHA、source/plan/validator
+被 plan 逐字列为 rejected 且 `dynamics_authorized=false`。新输出改为独立
+`table_net_primary_v4/...table_net_clearance_v4_certificate.json`；parent 只能在源码合入/review 后创建，
+v4 重发通过前 B 仍不得进入 dynamics。
+
 ## 当前决定与下一步
 
-schema-v3 源码门通过，只授权在合入 main 且 code review 后使用 exact `/workspace/hope_mjeval_venv`
+schema-v4 源码门通过，只授权在合入 main 且 code review 后使用 exact `/workspace/hope_mjeval_venv`
 再做一次无写 `dry-run`。
 目前没有 runtime 结果、没有 table/net certificate，也没有动作晋级；G08 保持 Partial。`dry-run` 必须先
 验证现存 L1 certificate 的 exact SHA/authorization、输出父目录真实存在且 target absent。通过后才能执行

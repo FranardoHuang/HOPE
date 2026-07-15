@@ -32,6 +32,9 @@ COMMAND = ROOT / (
 )
 RUNTIME_JOINT_ORDER = ROOT / "configs/a3_runtime_articulation_joint_order.txt"
 L0_V1_PLAN = ROOT / "configs/motion_backhand_loop_b_l0_static_prereg_20260714.json"
+REJECTED_V3_RESULT = ROOT / (
+    "configs/motion_backhand_loop_b_table_net_v3_rejected_result_20260715.json"
+)
 
 
 def _sha(path: Path) -> str:
@@ -90,6 +93,47 @@ def test_static_gate_binds_l1_npz_mjcf_closure_and_frame_sources():
     )
     assert plan["frame_sources"]["table_geometry"]["sha256"] == _sha(GEOMETRY)
     assert plan["frame_sources"]["tracking_command"]["sha256"] == _sha(COMMAND)
+    rejected = plan["rejected_prior_certificate"]
+    assert rejected["sha256"] == (
+        "39d6cc38941acfed2aa57e09add90660f946d16849ba3a8f02581fe646a79a19"
+    )
+    assert rejected["accepted_as_table_net_complete"] is False
+    assert rejected["dynamics_authorized"] is False
+    output = plan["output_contract"]["certificate_path"]
+    assert "/table_net_primary_v4/" in output
+    assert output.endswith(".table_net_clearance_v4_certificate.json")
+    assert output != rejected["path"]
+
+
+def test_rejected_v3_certificate_cannot_be_reauthorized_in_v4_plan(tmp_path):
+    plan = _plan()
+    plan["rejected_prior_certificate"]["accepted_as_table_net_complete"] = True
+    path = tmp_path / "forged-v4-plan.json"
+    path.write_text(json.dumps(plan), encoding="utf-8")
+    with pytest.raises(TABLE_NET.TableNetError, match="rejected prior.*binding changed"):
+        TABLE_NET.validate_plan(path, _sha(path))
+
+
+def test_rejected_v3_result_and_v4_successor_are_cross_bound():
+    plan = _plan()
+    result = json.loads(REJECTED_V3_RESULT.read_text(encoding="utf-8"))
+    rejected = result["rejected_certificate"]
+    assert {
+        "path": rejected["path"],
+        "bytes": rejected["bytes"],
+        "sha256": rejected["sha256"],
+    } == {
+        key: plan["rejected_prior_certificate"][key]
+        for key in ("path", "bytes", "sha256")
+    }
+    assert rejected["rejection"]["accepted_as_table_net_complete"] is False
+    assert rejected["rejection"]["dynamics_authorized"] is False
+    successor = result["successor_v4"]
+    assert successor["preregistration_sha256"] == _sha(PLAN)
+    assert successor["validator_sha256"] == _sha(SCRIPT)
+    assert successor["certificate_path"] == plan["output_contract"]["certificate_path"]
+    assert successor["runtime_executed"] is False
+    assert successor["certificate_present"] is False
 
 
 def test_local_phase_kernels_are_ast_identical_to_exact_upstream():
@@ -519,6 +563,34 @@ def test_clearance_reports_midpoint_and_actual_certified_lower_bracket():
     assert lower <= true_distance < lower + 1.0e-6
     assert abs(midpoint - true_distance) <= 0.5e-6
     assert midpoint != lower
+    assert result["minimum_lower_bound_pair"] == ["geom1", "motion_net"]
+    assert result["minimum_lower_bound_is_reporting_cap_saturation"] is False
+
+
+def test_reporting_cap_minus_epsilon_boundary_is_the_saturated_certified_bound():
+    cap = 0.1
+    boundary = cap - TABLE_NET.DISTANCE_SATURATION_EPSILON_M
+    helper = _DistanceHelper({(1, 10): boundary})
+    result = TABLE_NET.evaluate_robot_obstacle_pairs(
+        helper,
+        object(),
+        object(),
+        robot_ids=(1,),
+        racket_ids=(1,),
+        obstacle_ids={"motion_net": 10},
+        hard_threshold_m=0.005,
+        warning_threshold_m=0.02,
+        reporting_tolerance_m=1.0e-6,
+        reporting_cap_m=cap,
+        geom_name=lambda geom_id: f"geom{geom_id}",
+    )
+    assert result["hard_failure"] is False
+    assert result["warning"] is False
+    assert result["minimum_clearance_midpoint_estimate_m"] is None
+    assert result["minimum_midpoint_pair"] is None
+    assert result["minimum_clearance_lower_bound_m"] == boundary
+    assert result["minimum_lower_bound_pair"] is None
+    assert result["minimum_lower_bound_is_reporting_cap_saturation"] is True
 
 
 @pytest.mark.parametrize("true_distance", [-0.002, 0.0371234, 0.2])

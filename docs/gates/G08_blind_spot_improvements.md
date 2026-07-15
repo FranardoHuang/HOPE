@@ -608,7 +608,14 @@ obstacle=`1..4` 和 robot 精确 `+4`；同时逐项守住 robot 相对顺序/�
 reader 却只忽略 blank，误把注释算成第 32 个关节。90-byte log SHA-256 `5c9a5940...f92d`，certificate
 absent；这不是 NPZ/order/bijection 漂移。schema-v3 逐字复制 upstream comment 过滤语义，仍拒绝额外未标注
 metadata 与 duplicate name；production-shaped focused `39 passed`、完整 B lineage chain `140 passed`、
-source/static PASS。合入后的 runtime 重跑、certificate 与动作晋级均未发生，所以 G08 保持 Partial。
+source/static PASS。v3 随后在 clean `main@b9b011b` 发布了 hard/warning=`0/0` 的旧 certificate
+`39d6cc38...79a19`，但独立 exact-semantics review 将其拒绝：reporting-cap predicate 只证明
+`distance>=0.1-1e-12`，旧 aggregator 却在所有 pair saturated 时把默认 `0.1` 冒充 certified lower
+bound。hard/warning 结论不变，但旧 `table_net_complete/dynamics_authorized` 不接受。schema-v4 将 pair/
+全轨 saturated 初值改为 `0.099999999999`，保持 midpoint/pair/time=null 并显式标 saturation；旧 cert
+path/bytes/SHA machine-bound 为 rejected，新输出使用独立 `table_net_primary_v4` namespace/name。focused
+`42 passed`、完整 B chain `143 passed`、source/static PASS；v4 runtime/certificate 尚未发生，dynamics
+继续 unauthorized，所以 G08 保持 Partial。
 见[桌网实验卷宗](../experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-TABLE-NET.md)和
 [操作文档](../operations/run_motion_backhand_loop_b_table_net_clearance.md)。
 

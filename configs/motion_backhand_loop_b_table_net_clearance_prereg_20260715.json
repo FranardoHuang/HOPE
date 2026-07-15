@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "plan_id": "motion-franco-backhand-loop-b-table-net-clearance-20260715-v3",
+  "plan_id": "motion-franco-backhand-loop-b-table-net-clearance-20260715-v4",
   "status": "preregistered_source_gate_pass_runtime_audit_not_run",
   "human_owner": "Franco",
   "executor": "Codex",
@@ -8,8 +8,8 @@
   "asset_id": "franco_backhand_loop_b",
   "validator": {
     "path": "scripts/audit_motion_schema2_table_net_clearance.py",
-    "bytes": 103182,
-    "sha256": "66aa16b4999092fd7c17b7192edde107f7c6d7bcec67cbbdaa15979b91b7449d"
+    "bytes": 106098,
+    "sha256": "46f919eab7bdc842c29361dbd9174a6ef2be70767c896fd9e687393ee6c83e3b"
   },
   "frozen_vendor_l1": {
     "certificate": {
@@ -145,6 +145,8 @@
     "warning_clearance_m": 0.02,
     "reporting_clearance_cap_m": 0.1,
     "distance_saturation_predicate_epsilon_m": 1e-12,
+    "reporting_cap_saturated_certified_lower_bound": "max(0,reporting_clearance_cap_m-distance_saturation_predicate_epsilon_m)",
+    "reporting_cap_saturated_null_semantics": "when every pair is reporting-cap saturated midpoint/pair/source-time are null and saturation flag is true",
     "hard_threshold_predicate": "fail iff local_dependency_free_geom_is_far_exact_MuJoCo_saturation_predicate_at_0.005m_is_false",
     "reporting_clearance_bisection_tolerance_m": 0.000001,
     "danger_propagation": "any robot-obstacle dense sample below 5mm fails the whole asset and marks both adjacent source frames",
@@ -152,8 +154,19 @@
     "model_augmentation": "append four exact world-fixed box geoms to the canonical worldbody and compile from in-memory XML plus exact 74-file asset map; MuJoCo indexes all worldbody geoms before child-body robot geoms, so require floor ID 0, obstacle IDs 1..4, exact +4 robot-geom index shift, exact robot relative order/name/topology/qpos/collision arrays, and recompute the frozen collision SHA after normalizing only that proven global ID shift",
     "mj_step_calls": 0
   },
+  "rejected_prior_certificate": {
+    "path": "/workspace/codexschema/motion_video_intake_20260711/table_net_primary_v1/franco_backhand_loop_b_98e7b883b29d.table_net_clearance_certificate.json",
+    "bytes": 14848,
+    "sha256": "39d6cc38941acfed2aa57e09add90660f946d16849ba3a8f02581fe646a79a19",
+    "source_commit": "b9b011bc101e98b597bb08ef729090c358302226",
+    "preregistration_sha256": "9c03e7b0e5adc2febb6dd8ccdb36273a7fc05020052ccefda57579c596dd273a",
+    "validator_sha256": "66aa16b4999092fd7c17b7192edde107f7c6d7bcec67cbbdaa15979b91b7449d",
+    "rejection_reason": "reporting-cap saturation proved only distance>=cap-epsilon but certificate overclaimed the lower bound as cap",
+    "accepted_as_table_net_complete": false,
+    "dynamics_authorized": false
+  },
   "output_contract": {
-    "certificate_path": "/workspace/codexschema/motion_video_intake_20260711/table_net_primary_v1/franco_backhand_loop_b_98e7b883b29d.table_net_clearance_certificate.json",
+    "certificate_path": "/workspace/codexschema/motion_video_intake_20260711/table_net_primary_v4/franco_backhand_loop_b_98e7b883b29d.table_net_clearance_v4_certificate.json",
     "must_be_absent": true,
     "parent_must_exist": true,
     "no_clobber": true

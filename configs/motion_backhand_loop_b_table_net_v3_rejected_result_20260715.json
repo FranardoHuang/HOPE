@@ -1,0 +1,63 @@
+{
+  "schema_version": 1,
+  "artifact_kind": "motion_backhand_loop_b_table_net_v3_rejected_result",
+  "status": "rejected_reporting_cap_lower_bound_overclaim_v4_reissue_required",
+  "recorded_date": "2026-07-15",
+  "asset_id": "franco_backhand_loop_b",
+  "source": {
+    "commit": "b9b011bc101e98b597bb08ef729090c358302226",
+    "checkout_clean": true,
+    "preregistration_sha256": "9c03e7b0e5adc2febb6dd8ccdb36273a7fc05020052ccefda57579c596dd273a",
+    "validator_sha256": "66aa16b4999092fd7c17b7192edde107f7c6d7bcec67cbbdaa15979b91b7449d"
+  },
+  "runtime_logs": {
+    "dry_run": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/table_net_primary_v1/franco_backhand_loop_b_b9b011b_v3_dryrun.log",
+      "bytes": 155,
+      "sha256": "ad33e82cb2be9ae57d71dc8ffe2138657d5e0c89a2681435fc4576ac8d53213c"
+    },
+    "audit": {
+      "path": "/workspace/codexschema/motion_video_intake_20260711/table_net_primary_v1/franco_backhand_loop_b_b9b011b_v3_audit.log",
+      "bytes": 177,
+      "sha256": "9f30eab9a65bc285c03a250fb51c49a95f55a0cc5b9ab43991bd354dfc4be997"
+    }
+  },
+  "rejected_certificate": {
+    "path": "/workspace/codexschema/motion_video_intake_20260711/table_net_primary_v1/franco_backhand_loop_b_98e7b883b29d.table_net_clearance_certificate.json",
+    "bytes": 14848,
+    "sha256": "39d6cc38941acfed2aa57e09add90660f946d16849ba3a8f02581fe646a79a19",
+    "must_remain_immutable": true,
+    "reported": {
+      "dangerous_dense_samples": 0,
+      "warning_dense_samples": 0,
+      "minimum_clearance_midpoint_estimate_m": null,
+      "minimum_clearance_certified_lower_bound_m": 0.1,
+      "minimum_lower_bound_pair": null,
+      "minimum_lower_bound_source_time_frames": null
+    },
+    "rejection": {
+      "predicate": "mj_geomDistance_at_cap >= cap - 1e-12",
+      "what_was_proven_m": 0.099999999999,
+      "overclaimed_field": "minimum_clearance_certified_lower_bound_m",
+      "overclaimed_value_m": 0.1,
+      "hard_or_warning_counts_changed": false,
+      "accepted_as_table_net_complete": false,
+      "dynamics_authorized": false
+    }
+  },
+  "successor_v4": {
+    "preregistration_sha256": "dee68548256e3b5966135a61f1c40e1cb4a64f6c63c0235dc4ea9112e7cc2ef8",
+    "validator_sha256": "46f919eab7bdc842c29361dbd9174a6ef2be70767c896fd9e687393ee6c83e3b",
+    "certificate_path": "/workspace/codexschema/motion_video_intake_20260711/table_net_primary_v4/franco_backhand_loop_b_98e7b883b29d.table_net_clearance_v4_certificate.json",
+    "runtime_executed": false,
+    "certificate_present": false,
+    "table_net_complete": false,
+    "dynamics_authorized": false
+  },
+  "explicit_non_claims": [
+    "accepted_table_net_certificate",
+    "vendor_dynamics_or_balance_authorization",
+    "continuous_time_clearance",
+    "training_or_hardware_authorization"
+  ]
+}
