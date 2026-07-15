@@ -13,6 +13,12 @@
 
 ## 2026-07-15
 
+- Pod1 获重新授权后已按三卡四圈铺满 12 条不同问题的单 seed 长曲线：非击球臂模仿开关 ×
+  10/16/24 秒连续 episode，以及六种击球位置/速度/拍面 Reward 配比。两个 attempt-1 在动态 URDF
+  import stale 门按 exact PGID 收口；各自唯一同配方 retry 均过首迭代。16:40 UTC 三卡各四条、
+  GPU `97/93/97%`，12/12 accepted PID=PGID/fatal0；尚不作行为结论。见
+  [实验卷宗](experiments/2026-07/EXP-P1-POD1-LONG-BALANCE-REWARD-GRID.md)。
+
 - 15:33 UTC 只读复核确认 Pod2 GPU0/GPU1 已完全空闲；GPU2 的 qdot/V1+V2/control 三条 10000-update
   长训约到 `3193/3201/3205`，latest `model_3100.pt` 的 finite/schema-3/fresh lineage/contract/claim
   均 exact，fatal0。真实 exact-hit 仍稀疏，当前不能定论。已预注册六条共同 seed3 的长曲线来补齐
