@@ -13,6 +13,22 @@
 
 ## 2026-07-15
 
+- 15:33 UTC 只读复核确认 Pod2 GPU0/GPU1 已完全空闲；GPU2 的 qdot/V1+V2/control 三条 10000-update
+  长训约到 `3193/3201/3205`，latest `model_3100.pt` 的 finite/schema-3/fresh lineage/contract/claim
+  均 exact，fatal0。真实 exact-hit 仍稀疏，当前不能定论。已预注册六条共同 seed3 的长曲线来补齐
+  模仿 `2×2`、关节速度 `0/-1/-2.5/-5` 与脚部朝向 `0/-0.3/-0.6`；按 GPU0/GPU1 逐圈发射，
+  稀疏击球样本不足时不早停。见
+  [实验卷宗](experiments/2026-07/EXP-P1-LONG-SCALEOUT-SIX-ARM.md)。
+
+- 六格首次铺池已有五条越过真实首迭代；只降低击球窗模仿的 attempt-1（PGID `420947`）在动态 URDF
+  import 以 `malloc(): invalid size` / rc134 自然退出，无 checkpoint。证据与 namespace 保留，它不是
+  Reward 负结果；只给逐字相同配方一个全新 namespace 的唯一重试，同 phase 再失败则转 importer 根因线。
+
+- V2-only 唯一 retry-v2 PGID `423502` 已越过首迭代。15:49 UTC，Pod2 GPU0/GPU1/GPU2 均恰有三条
+  trainer，利用率 `97%/97%/91%`；六条新格 exact PGID 为
+  `419643/420298/421479/422126/422783/423502`，除已归档 attempt-1 外 fatal0。当前只是满池启动证据，
+  新格尚无 model-200，不作行为胜负。
+
 - Pod2 GPU2 的无随挥回放长曲线已真正点火：qdot/V1+V2/control-retry exact PGID
   `411519/412204/412899` 均返回 `KIT_BOOT_READY`，04:15 UTC 分别到 iter `24/9/2`，fatal0 且
   claim/binding present；GPU2 `97%`、17154 MiB。GPU0/1 的 Yikang PID `379550/396374` 未触碰。

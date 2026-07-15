@@ -76,6 +76,16 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   两臂共享、自然-wrap provenance 绑定的 immutable teacher-state receipt 做外生 cold-start，并在首 update
   前 fail closed。
 
+  2026-07-15 15:49 UTC 的更新取代上面的 04:15 资源快照：Yikang 在 Pod2 GPU0/GPU1 的 compute PID
+  已自然为空，因此 Codex 按 GPU0→GPU1 逐圈各一条补齐六格 10000-update 单 seed 长曲线。V1-only、
+  `qdot=-1`、V2-only 唯一 retry、`qdot=-2.5`、脚部朝向惩罚 `0/-0.6` 的 exact PGID 分别为
+  `419643/420298/423502/421479/422126/422783`；连同 GPU2 原三条，Pod2 三卡各恰三条 trainer，
+  利用率 `97%/97%/91%`，九条 live 日志 fatal0。V2-only attempt-1 PGID `420947` 在首迭代前的动态
+  URDF import 以 malloc rc134 退出，无 checkpoint；证据保全且 namespace 永不复用，不是 Reward 失败。
+  这六格补齐“单独/组合放松动作模仿”、关节速度和脚部朝向三个因果问题，不复制 seed。200/500/1000
+  只判结构；只有真实击球后才有意义的 Reward 若 eligible hit 样本不足必须继续，6000/10000 才看完整
+  单 seed 曲线。[六格实验](experiments/2026-07/EXP-P1-LONG-SCALEOUT-SIX-ARM.md)
+
   clean main-effect 也已自然终档：两臂关闭 post-swing replay、固定 V1+V2，只比较 base-decel `0/1`。
   `model_1000` 两份 filename=embedded、finite、fresh lineage、claim 与共同 hard contract exact，原
   PGID `385320/385948` 均已退出。980–1000 的 treatment/control raw base speed=`1.00882×`，按冻结
