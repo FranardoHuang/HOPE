@@ -1,11 +1,11 @@
 # EXP-P1-DEMO-HOTSTART-PORTFOLIO — 今夜六个组合方案的严格续训
 
-- 状态：`blocked`
+- 状态：`activated，首批点火待执行`
 - 阶段/轴：阶段 1，面向次日演示的组合方案
 - 集成小目标：从三个已经学到约 3500 次更新的母本出发，尽快得到多个能兼顾挥拍、拍面和平衡的候选
 - 人类负责人：Franco
 - 执行者：Codex
-- 最高证据等级：`E1`
+- 最高证据等级：`E2`（母本 provenance；尚无后代行为）
 - 创建日期/最后复核日期：2026-07-16
 
 `v4rg`、[`qdot-limit hinge`](../../DEFINITIONS.md#qdot-limit-hinge) 等共享术语按
@@ -56,8 +56,10 @@ vendor MuJoCo 通过证据。
 2. inspect 通过后，唯一一次 `parent-attest` 用 `O_EXCL` 把 checkpoint、hard contract、原始 claim 和
    binding 复制到固定 `parent_snapshots_v2/<parent>/`，设为只读，再只从 snapshot bytes 重做同一审计并
    no-clobber 写 v2 receipt。旧 v1 receipt 路径不能解锁本队列；运行期也不再读取可变 live 母本。
-3. receipt SHA 和三个 checkpoint/hard/claim/binding SHA 未回填前，机器队列保持
-   `launch_authorized=false`、六行 `blocked`；不会自动解锁或重试。
+3. 2026-07-16 02:10 CST 只读 inspect 与唯一 attest 均通过；v2 receipt file SHA 为
+   `fd200bd65ee00d33fb50a73f5de8d011cd810498ef626a3ca9d3a63b5bff2f34`。三个母本的
+   checkpoint/hard/claim/binding SHA 已回填，机器队列显式切到 `launch_authorized=true`、六行
+   `ready`；该切换不自动点火或重试。
 4. 六条 scaleout 的 `model_500` 全部保全后，若 Pod2 GPU0/GPU1 当前各不超过三条，可先用第 4 槽发
    job1/job2，不必为此停现役。其余四组合只在按独立证据精确停止四条弱臂后逐圈补入；保留 GPU0 的
    V1-only 和 GPU1 的 foot-`-0.6`，最终仍为每卡四条。GPU2 的后续候选不塞进本 v2。
@@ -80,12 +82,12 @@ snapshot/load 时序修复。
 
 | 运行（人话名 + `run_name`） | 状态 | 证据 | 有效性说明 |
 | --- | --- | --- | --- |
-| qdot 母本强拍面 `phase1_demo_qdot_v1v2_face_w0p4_seed3_20260716` | blocked | 等 parent receipt/GPU release | demo-only |
-| qdot 母本中拍面 `phase1_demo_qdot_v1v2_face_w0p2_seed3_20260716` | blocked | 同上 | demo-only |
-| V1+V2 母本强拍面 `phase1_demo_v1v2_qdot_w5_face_w0p4_seed3_20260716` | blocked | 同上 | demo-only |
-| V1+V2 母本自由臂 `phase1_demo_v1v2_qdot_w2p5_face_w0p4_free_arm_seed3_20260716` | blocked | 同上 | demo-only |
-| 普通母本保守模仿 `phase1_demo_control_qdot_w5_face_w0p4_seed3_20260716` | blocked | 同上 | demo-only |
-| 普通母本全栈 `phase1_demo_control_full_stack_free_arm_foot_w0p6_seed3_20260716` | blocked | 同上 | demo-only |
+| qdot 母本强拍面 `phase1_demo_qdot_v1v2_face_w0p4_seed3_20260716` | ready | v2 receipt 已绑定；等待 GPU0 第 4 槽点火 | demo-only |
+| qdot 母本中拍面 `phase1_demo_qdot_v1v2_face_w0p2_seed3_20260716` | ready | v2 receipt 已绑定；等待 GPU1 第 4 槽点火 | demo-only |
+| V1+V2 母本强拍面 `phase1_demo_v1v2_qdot_w5_face_w0p4_seed3_20260716` | ready | 等弱臂精确退出后的 GPU0 槽 | demo-only |
+| V1+V2 母本自由臂 `phase1_demo_v1v2_qdot_w2p5_face_w0p4_free_arm_seed3_20260716` | ready | 等弱臂精确退出后的 GPU1 槽 | demo-only |
+| 普通母本保守模仿 `phase1_demo_control_qdot_w5_face_w0p4_seed3_20260716` | ready | 等第二个 GPU0 换槽 | demo-only |
+| 普通母本全栈 `phase1_demo_control_full_stack_free_arm_foot_w0p6_seed3_20260716` | ready | 等第二个 GPU1 换槽 | demo-only |
 
 ## 复现
 
@@ -106,11 +108,12 @@ python3 scripts/run_phase1_demo_hotstart_queue.py \
 ```
 
 两条 parent 命令默认都只是 dry-run；正式执行 inspect 使用独立确认词。正式 attest 会先再跑一遍只读 inspect，
-它通过后才消费 v2 snapshot namespace。parent receipt、七类 SHA 的显式回填激活和 GPU release 完成前，
-`fill` 会 fail closed。专用与相邻 generic queue host 回归为 `68 passed`；本页仍没有 Pod 行为结果。
+它通过后才消费 v2 snapshot namespace。receipt 与七类 SHA 已由唯一运行回填；当前 activated 配置及其
+pending 反事实 fixture 共 `17` 个专项测试通过。`fill` 仍会按现场容量和已有 claim fail closed；本页尚无
+后代 Pod 行为结果。
 
 ## 决定
 
 - 决定：`inconclusive`
 - 是否已纳入当前 setting：`no`
-- 下一个 gate：parent receipt → 显式激活 → Pod2 首迭代 → 绝对 checkpoint receipt → 次日同一演示卷排序。
+- 下一个 gate：Pod2 jobs1/2 首迭代 → 绝对 checkpoint receipt → 次日同一演示卷排序。

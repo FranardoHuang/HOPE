@@ -1,7 +1,7 @@
 schema_version: 1
 simulation_only: true
-launch_authorized: false
-preregistration_status: blocked_until_parent_snapshot_receipt_and_fourth_slot_evidence
+launch_authorized: true
+preregistration_status: activated_demo_only_inexact
 
 ssh:
   key: ~/.ssh/id_ed25519_runpod
@@ -25,9 +25,9 @@ source_contract_files:
   hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/utils/training_contract.py: 25cf79b9341201b96e618c9b449b1aea649b164815cc3051321d451ce1cbd4c4
 
 activation_contract:
-  state: pending_parent_receipt_and_gpu_release
+  state: activated
   receipt_path: /workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_snapshot_receipt_v2.json
-  receipt_file_sha256: null
+  receipt_file_sha256: fd200bd65ee00d33fb50a73f5de8d011cd810498ef626a3ca9d3a63b5bff2f34
   gpu_release_rule: pod2_gpu0_gpu1_occupancy_lte3_and_six_model500_preserved_allow_fourth_slot_jobs1_2
   automatic_activation: false
   automatic_retry: false
@@ -66,13 +66,13 @@ parents:
     snapshot_run_binding_path: /workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_snapshots_v2/qdot/run_binding.json
     embedded_iteration: 3500
     optimizer_state_dict_required: true
-    checkpoint_sha256: null
-    hard_contract_sha256: null
-    queue_claim_file_sha256: null
-    queue_claim_content_sha256: null
-    run_binding_file_sha256: null
-    run_binding_content_sha256: null
-    training_launch_claim_sha256: null
+    checkpoint_sha256: b7ae6daad1961738c46fc366a17da3104c2ca6b269553b1e276620d5380b726c
+    hard_contract_sha256: 28f3c11e6bdee8b686eb47bf2a78a71dd9125a491ebb0d089da00b12d855a689
+    queue_claim_file_sha256: 2298630ff13dddd3ea5d3d4818abd6f81fce356618c6eeb8101ca72fa2dcc52c
+    queue_claim_content_sha256: 5de74fe716033ca5a6b71f507d2230d72b0b5fbb34b149f6b53406bdcf0a9be4
+    run_binding_file_sha256: b6b8b65b65771362f78ec0bbf6398dd9f260678b6132ba6adade2bc43122728f
+    run_binding_content_sha256: 0fb4fede3e658b5cf23d01d2204031103955235d57fb71eb475029e8ec637e61
+    training_launch_claim_sha256: 5de74fe716033ca5a6b71f507d2230d72b0b5fbb34b149f6b53406bdcf0a9be4
   v1v2:
     original_job_id: p1_long_no_replay_v1v2_seed3
     original_run_name: phase1_long_no_replay_v1v2_seed3_20260715
@@ -90,13 +90,13 @@ parents:
     snapshot_run_binding_path: /workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_snapshots_v2/v1v2/run_binding.json
     embedded_iteration: 3500
     optimizer_state_dict_required: true
-    checkpoint_sha256: null
-    hard_contract_sha256: null
-    queue_claim_file_sha256: null
-    queue_claim_content_sha256: null
-    run_binding_file_sha256: null
-    run_binding_content_sha256: null
-    training_launch_claim_sha256: null
+    checkpoint_sha256: 7026e24d7cdb2fee1bd166777967f664831287e8f71d3a4d39962fde16f8f894
+    hard_contract_sha256: ca57a94f5765dbcd9bab0e35e37d447391305691969eb38c725d58b97570cc2e
+    queue_claim_file_sha256: a39161f9d5674a6981733dac791a2c6938818236138c4b2a6355a37f0c89522e
+    queue_claim_content_sha256: c73b8ac673cbbc4a513e7f2d663faff9c09ea5dba605a7eb37b063b87e6adb00
+    run_binding_file_sha256: 3ac8723235a6cd861dad5c6cbc7536e2c0077994691bab4d0362471037703ea7
+    run_binding_content_sha256: f3aac5fed966dfa06989f38779c8a91a30bd7ecf59da8d5e01c9bf907ac01a84
+    training_launch_claim_sha256: c73b8ac673cbbc4a513e7f2d663faff9c09ea5dba605a7eb37b063b87e6adb00
   control:
     original_job_id: p1_long_no_replay_control_seed3_retry_v2
     original_run_name: phase1_long_no_replay_control_seed3_retry_v2_20260715
@@ -114,13 +114,13 @@ parents:
     snapshot_run_binding_path: /workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_snapshots_v2/control/run_binding.json
     embedded_iteration: 3500
     optimizer_state_dict_required: true
-    checkpoint_sha256: null
-    hard_contract_sha256: null
-    queue_claim_file_sha256: null
-    queue_claim_content_sha256: null
-    run_binding_file_sha256: null
-    run_binding_content_sha256: null
-    training_launch_claim_sha256: null
+    checkpoint_sha256: c30e46d36fdcafec6287917296cfa92d6d2c3e3cf95eec445397269b1d7e786f
+    hard_contract_sha256: 85343ac6c466cb6f29579cf7838f65a1b163459da1ea25a8fc5232a5d27c1b9b
+    queue_claim_file_sha256: 52b9c9c60d5c01238d4e94c5539cb0a54bfff2302a2b56a64a91988efd2f4730
+    queue_claim_content_sha256: b7d9c92f7a6b0953e4d28261e517f0ac07bf49d2b978c263362f90e6a7155071
+    run_binding_file_sha256: 536b18889cbde00cc5fe6e895413e17283bd35c0b17705a997b0acc2801ac843
+    run_binding_content_sha256: ea167391200dc536082710d6a67aa5ae90ce1ed55a2d5e94a7c021d406791390
+    training_launch_claim_sha256: b7d9c92f7a6b0953e4d28261e517f0ac07bf49d2b978c263362f90e6a7155071
 
 x-action: &action signed_face_v4rg_shared_face
 x-motion: &motion
@@ -241,14 +241,14 @@ x-gpu0: &gpu0
 x-gpu1: &gpu1
   policy: dispatch_gpu_round_robin
   required_slot: pod2/gpu1
-x-blocker: &blocker v2 parent snapshot receipt and six-model500/fourth-slot activation evidence are pending
+x-blocker: &blocker null
 
 jobs:
   - &job
     id: demo_qdot_v1v2_face_w0p4
     human_name: 从关节速度约束母本继续，组合两项模仿放松与强拍面引导
     action: *action
-    status: blocked
+    status: ready
     blocker: *blocker
     motion: *motion
     bank: *bank

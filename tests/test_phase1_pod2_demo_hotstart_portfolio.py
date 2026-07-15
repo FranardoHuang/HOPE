@@ -42,6 +42,35 @@ def _write(tmp_path: Path, value: dict) -> Path:
     return path
 
 
+def _pending_raw() -> dict:
+    raw = copy.deepcopy(_raw())
+    raw["launch_authorized"] = False
+    raw["preregistration_status"] = (
+        "blocked_until_parent_snapshot_receipt_and_fourth_slot_evidence"
+    )
+    raw["activation_contract"]["state"] = (
+        "pending_parent_receipt_and_gpu_release"
+    )
+    raw["activation_contract"]["receipt_file_sha256"] = None
+    for parent in raw["parents"].values():
+        for key in (
+            "checkpoint_sha256", "hard_contract_sha256",
+            "queue_claim_file_sha256", "queue_claim_content_sha256",
+            "run_binding_file_sha256", "run_binding_content_sha256",
+            "training_launch_claim_sha256",
+        ):
+            parent[key] = None
+    for job in raw["jobs"]:
+        job["status"] = "blocked"
+        job["blocker"] = "unit-test pending activation fixture"
+    return raw
+
+
+def _pending(tmp_path: Path) -> tuple[dict, Path]:
+    path = _write(tmp_path, _pending_raw())
+    return D.load_queue(path), path
+
+
 def _values(job: dict) -> dict[str, str]:
     return {
         D.Q._override_key(raw, job["id"]): raw.partition("=")[2]
@@ -70,8 +99,8 @@ def _activated(tmp_path: Path) -> tuple[dict, Path]:
     return D.load_queue(path), path
 
 
-def test_pending_queue_is_six_blocked_pod2_rows_and_plan_is_nonlaunching():
-    queue = D.load_queue(QUEUE)
+def test_pending_queue_is_six_blocked_pod2_rows_and_plan_is_nonlaunching(tmp_path):
+    queue, _path = _pending(tmp_path)
     plan = D.cmd_plan(queue)
     assert queue["dispatch_pods"] == ["pod2"]
     assert queue["launch_authorized"] is False
@@ -83,6 +112,19 @@ def test_pending_queue_is_six_blocked_pod2_rows_and_plan_is_nonlaunching():
     assert all(job["status"] == "blocked" for job in queue["jobs"])
     assert all(job["runtime_binding"] is True for job in queue["jobs"])
     assert all(job["source"]["commit"] == D.EXPECTED_SOURCE for job in queue["jobs"])
+
+
+def test_current_queue_is_explicitly_activated_by_the_v2_snapshot_receipt():
+    queue = D.load_queue(QUEUE)
+    plan = D.cmd_plan(queue)
+    assert queue["launch_authorized"] is True
+    assert queue["activation_contract"]["state"] == "activated"
+    assert queue["activation_contract"]["receipt_file_sha256"] == (
+        "fd200bd65ee00d33fb50a73f5de8d011cd810498ef626a3ca9d3a63b5bff2f34"
+    )
+    assert all(job["status"] == "ready" and job["blocker"] is None
+               for job in queue["jobs"])
+    assert [row["resource"] for row in plan["assignments"]] == D.EXPECTED_SLOTS
 
 
 def test_six_recipes_match_the_frozen_demo_portfolio():
@@ -169,14 +211,14 @@ def test_activation_and_exactness_flags_fail_closed(tmp_path):
     with pytest.raises(D.DemoQueueError, match="exact-ineligible"):
         D.load_queue(_write(tmp_path, raw))
 
-    raw = _raw()
+    raw = _pending_raw()
     raw["launch_authorized"] = True
     with pytest.raises(D.DemoQueueError, match="exactly follow activation"):
         D.load_queue(_write(tmp_path, raw))
 
 
-def test_parent_attestation_is_separate_one_pod_no_retry_dry_run():
-    queue = D.load_queue(QUEUE)
+def test_parent_attestation_is_separate_one_pod_no_retry_dry_run(tmp_path):
+    queue, _path = _pending(tmp_path)
     result = D.cmd_parent_attest(queue, execute=False, confirm=None)
     assert result["automatic_activation"] is False
     assert result["automatic_retry"] is False
@@ -189,8 +231,8 @@ def test_parent_attestation_is_separate_one_pod_no_retry_dry_run():
     assert "killall" not in command
 
 
-def test_parent_inspect_is_explicitly_read_only_and_pod2_only():
-    queue = D.load_queue(QUEUE)
+def test_parent_inspect_is_explicitly_read_only_and_pod2_only(tmp_path):
+    queue, _path = _pending(tmp_path)
     result = D.cmd_parent_inspect(queue, execute=False, confirm=None)
     assert result["read_only"] is True
     assert result["creates_snapshots"] is False

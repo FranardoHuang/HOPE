@@ -20,7 +20,9 @@
   并要求 binding 的 `/proc` PID/PGID/starttime/cmdline 存活到真实 `Learning iteration >3500`；失败只记 exact
   identity、不 signal。generic fresh-only queue 未
   放宽。Pod2 今晚采用实测四路/卡：六个 model500 保全且 GPU0/GPU1 各 `<=3` 时先上前两组合，其余四条
-  等四个弱臂精确退出后补齐并保留 V1-only/foot-`-0.6`。当前仍 blocked、没有 Pod 行为结果。见
+  等四个弱臂精确退出后补齐并保留 V1-only/foot-`-0.6`。02:10 CST 唯一 parent inspect/attest 已通过，
+  v2 receipt file SHA `fd200bd6...f2f34` 与三套 checkpoint/hard/claim/binding 已回填，六行现为 ready；
+  尚无后代 Pod 行为结果。见
   [实验卷宗](experiments/2026-07/EXP-P1-DEMO-HOTSTART-PORTFOLIO.md)。
 
 ## 2026-07-15
