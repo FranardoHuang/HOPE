@@ -13,6 +13,16 @@
 
 ## 2026-07-15
 
+- post-swing teacher capture v3 已在 Pod2 GPU2 自然收满 `4096/4096` 条 finite `natural_clip_wrap` 状态并
+  自然退出；claim/states/result SHA-256 为 `81126b27...244e` / `8d07668e...95d8` /
+  `0aa2f37f...d641`。但 one-shot attestor attempt-1 在 receipt 写入前因 canonical content 与 JSON
+  document 末尾换行混用而 rc2 假拒绝，`teacher_receipt.json` absent。源码修复已拆分无换行 content
+  digest 与单换行 document bytes，并加入 schema-2/newline/no-clobber 回归；五文件 host suite `76 passed`
+  （一个既有 duplicate-ZIP warning）。修复合入 main 前禁止重跑
+  capture/attestor，首 reset 与科学训练仍 blocked。见[机器结果](../configs/phase1_post_swing_teacher_capture_attempt_v3_result_20260715.json)、
+  [实验卷宗](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md)和
+  [操作文档](operations/run_post_swing_teacher_capture.md)。
+
 - Franco 反手拉 B 的桌网整轨门已通过独立 source/static 红队：冻结 validator/plan、runtime-order 名字双射、
   四个碰撞障碍和 `1201×37×4` 有限密扫均内容绑定，`<5 mm` 为不可补偿 hard fail；focused `29 passed`、
   完整 lineage chain `130 passed`。这只允许进入 Pod2 CPU 的只读 dry-run，尚无 runtime certificate，

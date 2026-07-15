@@ -70,17 +70,27 @@ def _sha(raw: bytes) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
-def _canonical(value: Mapping[str, Any]) -> bytes:
-    return (
-        json.dumps(
-            value,
-            allow_nan=False,
-            ensure_ascii=False,
-            separators=(",", ":"),
-            sort_keys=True,
-        )
-        + "\n"
+def _canonical_content(value: Mapping[str, Any]) -> bytes:
+    """Return the canonical JSON payload bytes used by embedded digests.
+
+    Queue claim ``content_sha256`` values are computed over the compact JSON
+    value itself.  The newline used when a complete JSON document is written
+    to disk is framing, not part of that embedded content digest.
+    """
+
+    return json.dumps(
+        value,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
     ).encode("utf-8")
+
+
+def _json_document(value: Mapping[str, Any]) -> bytes:
+    """Return one canonical JSON document with exactly one trailing newline."""
+
+    return _canonical_content(value) + b"\n"
 
 
 def _git_state(checkout: Path, expected_commit: str, label: str) -> dict[str, Any]:
@@ -185,7 +195,7 @@ def _claim(raw: bytes) -> tuple[dict[str, Any], str, Path, str]:
     if not isinstance(content, dict):
         raise AttestationError("training launch claim content missing")
     claim_sha = envelope.get("content_sha256")
-    if type(claim_sha) is not str or claim_sha != _sha(_canonical(content)):
+    if type(claim_sha) is not str or claim_sha != _sha(_canonical_content(content)):
         raise AttestationError("training launch claim canonical digest mismatch")
     source = content.get("source")
     if not isinstance(source, dict):
@@ -448,7 +458,7 @@ def attest(args: argparse.Namespace) -> dict[str, Any]:
             },
         },
     }
-    receipt_raw = _canonical(receipt)
+    receipt_raw = _json_document(receipt)
 
     # Validate exact trainer consumption before publishing any new final path.
     with tempfile.TemporaryDirectory(prefix="post-swing-attest-") as temp_dir:

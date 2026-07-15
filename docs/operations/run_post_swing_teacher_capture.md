@@ -1,6 +1,6 @@
 # 生成随挥结束教师状态制品
 
-状态：**v1/v2 均已阻断且 namespace 不重发；observation/teardown successor source gate 已修，Pod runtime 尚未重验。** 本操作只用于仿真推理和后续训练 cold-start，
+状态：**v1/v2 均已阻断且 namespace 不重发；v3 已自然收满 4096 条 finite 状态，但 attestor attempt-1 因 canonical newline 语义假拒绝且 receipt 不存在。** 本操作只用于仿真推理和后续训练 cold-start，
 绝不下发真机命令。源码专项与攻击负测通过；首个 exact 实例见
 [`phase1_post_swing_teacher_capture_prereg_20260715.json`](../../configs/phase1_post_swing_teacher_capture_prereg_20260715.json)，
 但它在 Hydra compose 阶段因保留 train-only checkpoint 兼容键而 fail closed；capture directory、claim、
@@ -9,13 +9,19 @@ launch 在零 inference step 读取初始 observation 时命中 IsaacLab 版本�
 `(actor_observation, extras)`，旧 `play.py` 却直接调用 tuple 的 `.to()`。v2 只留下 claim，没有 states/result/
 receipt；exact PGID teardown 后永久花掉。机器证据见
 [`phase1_post_swing_teacher_capture_attempt_v2_result_20260715.json`](../../configs/phase1_post_swing_teacher_capture_attempt_v2_result_20260715.json)。
-4096-environment capture、attestation 和首 reset readback probe 尚未完成，因此 scientific trainer、第二 seed、
-judge 与 promotion 仍未授权。
+successor v3 在同一 Pod2 GPU2 上自然退出，`natural_clip_wrap` 状态 `4096/4096` 且 arrays finite；但旧
+attestor 把“完整 JSON 文档的末尾换行”错误计入 queue claim 的嵌入式 `content_sha256`，以 rc2
+`training launch claim canonical digest mismatch` 假拒绝。`teacher_receipt.json` 从未创建；完整机器证据见
+[`phase1_post_swing_teacher_capture_attempt_v3_result_20260715.json`](../../configs/phase1_post_swing_teacher_capture_attempt_v3_result_20260715.json)。
+不得重跑 capture；attestor 也必须等本语义修复进入 `main`，再用 clean exact source 和同一 immutable v3
+inputs 单次执行。attestation 和首 reset readback probe 尚未完成，因此 scientific trainer、第二 seed、judge
+与 promotion 仍未授权。
 
 2026-07-15 的 seed-parity 修复已让 `play.py` 只接受 plain uint32 seed，并在 `gym.make` 前把同一个值
 写入 environment config 与 PPO runner config；三个 train-only checkpoint 键也都有真实 Hydra compose
-负测。一次性 controller/builder 随后通过独立 source-only 红队；当前仍未完成的是 Pod2 上的新 schema-v2
-plan、同环境只读 compose、正式 capture、attestation 与首 reset，而不是 seed 或 controller 源码。
+负测。一次性 controller/builder 随后通过独立 source-only 红队，v3 又实际闭合 plan/compose/launch/capture；
+当前缺口已缩小为修复 attestor 的 content/document canonical 语义、在修复合入 main 后对同一 immutable v3
+capture 做一次 attestation，以及独立的首 reset probe。不是 seed、controller 或 capture runtime 缺口。
 
 successor 的 `play.py` 必须通过共享 `policy_observation_tensor` 只接受三种明确结构：actor tensor、exact
 `(actor tensor, extras mapping)`，或含 `policy` 的 observation mapping；mapping 同时含 `critic` 时也只把
@@ -154,6 +160,11 @@ attestor 使用 `torch.load(..., weights_only=True)`；不兼容 restricted unpi
 不得切回任意 pickle 执行。成功只输出 receipt 路径、SHA 和 count；重复运行因 no-clobber 失败。SSH timeout 时只读检查四个固定文件，
 不要自动重发 capture 或 attestor。
 
+queue claim 的 `content_sha256` 只覆盖 `json.dumps(..., separators=(",", ":"), sort_keys=True)` 产生的
+compact UTF-8 **content bytes**，不含末尾换行；claim/receipt 落盘时才在完整 JSON **document bytes** 后追加
+恰好一个 `\n`。两类 bytes 必须用不同 helper，不能再共享一个“总是加换行”的 canonicalizer。v3
+attempt-1 已证明混用会在任何 receipt 写入前假拒绝；修复合入前不得再次运行 attestor。
+
 ## 3. 4096-environment 首 reset probe（尚未执行）
 
 后续 probe 的两臂必须引用同一 receipt SHA，并显式设置：
@@ -190,5 +201,6 @@ git diff --check
 ```
 
 2026-07-15 在可导入 Hydra 的本地环境，controller/attestor/teacher 原四文件门曾复现为 `41 passed`；
-加入 observation adapter 与 v2 result 负测后的上述五文件命令复现为 `74 passed`（另有一个既有 duplicate-ZIP
-warning）。这仍只是 host source gate，不能替代 Pod2 同环境 compose 或 Isaac capture。
+加入 observation adapter、v2 result 负测与 content/document canonical 回归后的上述五文件命令复现为
+`76 passed`（另有一个既有 duplicate-ZIP warning），其中 attestor 专项为 `6 passed`。这仍只是 host
+source gate，不能替代 v3 receipt attestation 或首 reset probe。

@@ -20,6 +20,13 @@ SPEC = importlib.util.spec_from_file_location("attest_post_swing_teacher_test", 
 A = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = A
 SPEC.loader.exec_module(A)
+QUEUE_RUNTIME_SCRIPT = ROOT / "hope_training/whole_body_tracking/scripts/lean_queue_runtime.py"
+QUEUE_RUNTIME_SPEC = importlib.util.spec_from_file_location(
+    "attest_post_swing_teacher_queue_runtime_test", QUEUE_RUNTIME_SCRIPT
+)
+QUEUE_RUNTIME = importlib.util.module_from_spec(QUEUE_RUNTIME_SPEC)
+sys.modules[QUEUE_RUNTIME_SPEC.name] = QUEUE_RUNTIME
+QUEUE_RUNTIME_SPEC.loader.exec_module(QUEUE_RUNTIME)
 
 
 class _Tensor:
@@ -49,8 +56,8 @@ class _EvilPickle:
         return os.system, (self.command,)
 
 
-def _canonical(value):
-    return A._canonical(value)
+def _document(value):
+    return A._json_document(value)
 
 
 def _fixture(tmp_path: Path, monkeypatch, *, lineage=1, legacy_forgery=False):
@@ -64,7 +71,7 @@ def _fixture(tmp_path: Path, monkeypatch, *, lineage=1, legacy_forgery=False):
             {"index": 0, "sha256": A.teacher.sha256_file(motion)}
         ],
     }
-    hard_raw = _canonical(hard)
+    hard_raw = _document(hard)
     capture = tmp_path / "capture"
     capture.mkdir()
     producer_path = (
@@ -94,7 +101,7 @@ def _fixture(tmp_path: Path, monkeypatch, *, lineage=1, legacy_forgery=False):
         "exclusive_create": True,
     }
     claim_path = capture / A.teacher.CAPTURE_CLAIM_NAME
-    claim_path.write_bytes(_canonical(claim))
+    claim_path.write_bytes(_document(claim))
     result = {
         "schema_version": 2,
         "artifact_kind": A.teacher.CAPTURE_RESULT_KIND,
@@ -129,7 +136,7 @@ def _fixture(tmp_path: Path, monkeypatch, *, lineage=1, legacy_forgery=False):
         result["callback_batches"] = 1
         del result["evidence"]
     result_path = capture / A.teacher.CAPTURE_RESULT_NAME
-    result_path.write_bytes(_canonical(result))
+    result_path.write_bytes(_document(result))
 
     run = tmp_path / "run"
     (run / "params").mkdir(parents=True)
@@ -141,12 +148,40 @@ def _fixture(tmp_path: Path, monkeypatch, *, lineage=1, legacy_forgery=False):
     checkpoint_source_commit = "a" * 40
     claim_content = {
         "schema_version": 1,
+        "job_id": "fresh-c-v1v2-clean-control-seed3",
+        "action": "control",
+        "pod": "pod2",
+        "gpu": 1,
         "source": {"checkout": "/fake/checkpoint-source", "commit": checkpoint_source_commit},
+        "run_name": "fresh_c_v1v2_clean_control_seed3",
+        "run_dir": "/fake/checkpoint-source/logs/fresh_c_v1v2_clean_control_seed3",
+        "runtime_binding": True,
+        "seed": 3,
+        "budget": {
+            "num_envs": 4096,
+            "max_iterations": 1001,
+            "save_interval": 100,
+            "milestones": [200, 500, 1000],
+        },
+        "inputs": {
+            "motion": {"action": "shared", "bindings": {}},
+            "bank": {"action": "shared", "train_path": "/fake/train.npz", "train_arg": "task.bank"},
+            "exam": {"action": "shared", "path": "/fake/exam.npz", "family": "schema3"},
+        },
+        "training_argv_without_claim": ["/fake/python", "scripts/train.py", "seed=3"],
     }
-    claim_sha = A._sha(_canonical(claim_content))
-    claim = {"schema_version": 2, "content": claim_content, "content_sha256": claim_sha}
+    claim_sha = A._sha(A._canonical_content(claim_content))
+    claim = {
+        "schema_version": 2,
+        "content": claim_content,
+        "content_sha256": claim_sha,
+        "training_argv": [
+            *claim_content["training_argv_without_claim"],
+            f"++training_launch_claim_sha256={claim_sha}",
+        ],
+    }
     claim_path = tmp_path / "launch_claim.json"
-    claim_path.write_bytes(_canonical(claim))
+    claim_path.write_bytes(_document(claim))
 
     checkpoint = {
         "infos": {
@@ -195,13 +230,42 @@ def test_attestor_binds_real_checkpoint_contract_sources_and_exclusive_claim(tmp
     args = _fixture(tmp_path, monkeypatch)
     result = A.attest(args)
     assert result["count"] == 4
-    receipt = json.loads(Path(result["receipt"]).read_text(encoding="utf-8"))
+    receipt_path = Path(result["receipt"])
+    receipt_raw = receipt_path.read_bytes()
+    receipt = json.loads(receipt_raw)
+    assert receipt_raw == A._json_document(receipt)
+    assert receipt_raw.endswith(b"\n") and not receipt_raw.endswith(b"\n\n")
+    assert result["sha256"] == A._sha(receipt_raw)
     assert receipt["schema_version"] == 2
     assert receipt["teacher"]["fresh_lineage"] is True
     assert receipt["attestation"]["checkpoint_source"]["commit"] == "a" * 40
     assert receipt["attestation"]["capture_source"]["commit"] == "b" * 40
     with pytest.raises(A.AttestationError, match="already exists"):
         A.attest(args)
+    assert receipt_path.read_bytes() == receipt_raw
+
+
+def test_real_schema2_claim_hashes_content_without_document_newline(tmp_path, monkeypatch):
+    args = _fixture(tmp_path, monkeypatch)
+    raw = args.launch_claim.read_bytes()
+    envelope = json.loads(raw)
+    content = envelope["content"]
+    accepted_content, digest, _, _ = A._claim(raw)
+    assert accepted_content == content
+    assert raw.endswith(b"\n")
+    assert digest == A._sha(A._canonical_content(content))
+    assert digest == QUEUE_RUNTIME.canonical_sha256(content)
+    assert digest != A._sha(A._json_document(content))
+
+
+def test_schema2_claim_rejects_digest_that_includes_document_newline(tmp_path, monkeypatch):
+    args = _fixture(tmp_path, monkeypatch)
+    envelope = json.loads(args.launch_claim.read_bytes())
+    envelope["content_sha256"] = A._sha(A._json_document(envelope["content"]))
+    args.launch_claim.write_bytes(A._json_document(envelope))
+    with pytest.raises(A.AttestationError, match="canonical digest mismatch"):
+        A.attest(args)
+    assert not args.output_receipt.exists()
 
 
 def test_attestor_rejects_legacy_public_writer_callback_label_forgery(tmp_path, monkeypatch):

@@ -46,6 +46,24 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-15, schema-v3 capture complete but attestor newline false rejection; Gate remains `Partial`):
+
+- Pod2 GPU2 attempt `control_model500_v3_obsfix_gpu2_20260715a` naturally produced 4096 finite
+  `natural_clip_wrap` states with `wrap_teleport=false` and no clip-switch abort. PID=PGID `399423`
+  naturally disappeared after the bound result was published; claim/states/result SHA-256 are
+  `81126b27...244e` / `8d07668e...95d8` / `0aa2f37f...d641`. This closes the capture runtime gate only.
+- One-shot attestor attempt-1 then failed before receipt publication with rc2 `training launch claim
+  canonical digest mismatch`; `teacher_receipt.json` is absent. The queue producer hashes compact canonical
+  content without a trailing newline, while the attestor incorrectly reused document serialization with a
+  newline for that embedded digest. The source fix separates content bytes from newline-terminated document
+  bytes and adds a production-shaped schema-2 claim, newline counterexample, exact receipt-byte and no-clobber
+  regressions; the operation's five-file host suite is `76 passed` with one existing duplicate-ZIP warning.
+  Capture must not be rerun, and attestor must not be rerun until this fix is merged to `main`.
+  First-reset, replacement training, second seed, judge and promotion remain unauthorized. See the
+  [machine result](../../configs/phase1_post_swing_teacher_capture_attempt_v3_result_20260715.json),
+  [experiment](../experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md), and
+  [operation](../operations/run_post_swing_teacher_capture.md).
+
 Follow-up note (2026-07-15, schema-v2 capture reached runtime then failed before the first inference step; Gate remains `Partial`):
 
 - Plan `control_model500_v2_schema2_gpu2_20260715a` passed exact read-only compose and launch-side
