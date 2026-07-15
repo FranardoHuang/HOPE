@@ -400,6 +400,28 @@ python3 scripts/run_lean_training_queue.py \
 eligible hit denominator 未满足时一律继续。首次 V2-only 在 importer rc134 后保全，队列只含一个
 逐字同配方的 retry-v2；同 phase 再失败时不得继续造 namespace。
 
+## Pod1 十二格连续平衡与击球 Reward 长曲线（2026-07-15）
+
+Pod1 获重新授权且 live snapshot 证明三卡都没有 compute PID 后，使用
+`phase1_pod1_long_balance_reward_grid_20260715.yaml`。队列顺序严格按 GPU0→GPU1→GPU2 四圈，
+每卡最多四条；前六条是非击球臂模仿开关 × 10/16/24 秒 episode，后六条是位置/速度/拍面 Reward
+的不同配比或总强度，不是重复 seed。
+
+```bash
+python3 scripts/run_lean_training_queue.py \
+  --queue configs/phase1_pod1_long_balance_reward_grid_20260715.yaml plan
+python3 scripts/run_lean_training_queue.py \
+  --queue configs/phase1_pod1_long_balance_reward_grid_20260715.yaml doctor --live
+python3 scripts/run_lean_training_queue.py \
+  --queue configs/phase1_pod1_long_balance_reward_grid_20260715.yaml \
+  fill --count 12 --execute --confirm SIM_ONLY_LAUNCH_ONE_LEAN_QUEUE_JOB
+```
+
+发射前只需一次 selected-Pod asset receipt、12 行 live doctor 和一个同 source/scene/4096-env 的非科学 probe；
+不为每条重复做 importer probe。若 probe 或 trainer 在首迭代前出现 importer malloc，保全 namespace/claim/log，
+同一 recipe 最多一个 fresh retry；第二次同 phase 失败转根因线。稀疏回球结果在 eligible opportunity 不足时继续到下一正式
+milestone，不得用零收入早停。
+
 main 已有独立 per-source+Pod+GPU 的 `1 env × 2 updates` boot-warmup 和 content-bearing 日志默认 180 秒
 stale watchdog；P1 不改变其 source-pinned/exact-PGID 语义，也不会让 warmup 继承科学 binding path。
 新反例证明 1-env 成功只可当 cache/import probe：同 source/GPU 的正式 4096-env control 仍可能在
