@@ -13,6 +13,14 @@
 
 ## 2026-07-16
 
+- 两台 Pod 已各自三卡四路铺满，共 `24/24` 条 trainer。Pod2 的七个 model-3500 演示续训候选均从
+  policy/value/optimizer 完整恢复并真实越过首迭代，PID 为
+  `426506/427190/428347/431061/431910/432838/433601`；三卡 `4/4/4`、fatal0。前两条已写
+  `model_3700`，均通过 embedded iteration、finite、schema-3 hard contract、claim/binding 与
+  inexact lineage 检查。原自由臂/保守模仿两次首迭代前基础设施失败继续保留为 rejected，唯一
+  recipe-identical retry 均已成功；尚无行为胜者，继续按 `+200/+500/+1000` 且不以稀疏零值误杀。
+  见[实验卷宗](experiments/2026-07/EXP-P1-DEMO-HOTSTART-PORTFOLIO.md)。
+
 - Demo hot-start 的自由非击球臂行与普通母本保守模仿行分别在首迭代前以 malloc `rc134`、content-bearing
   stale timeout `rc125` 结束；exact PID/PGID/starttime 均已确认 absent，完整 claim/binding/log/launch/
   identity SHA 已绑定，旧行标 `rejected` 且不再占调度槽。新增两个 recipe-identical 的一次性人工

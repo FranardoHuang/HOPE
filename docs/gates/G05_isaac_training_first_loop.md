@@ -2553,12 +2553,12 @@ binding `O_EXCL` 复制到只读 fixed snapshots，并只对 snapshot 重验、�
 SHA 已回填，前六行显式切到 ready。六个旧 scaleout 的 model500
 证据都保全且 GPU0/GPU1 occupancy 各 `<=3` 时，v2 可先用第 4 槽发前两条，不要求先停；其余四条只在
 精确停止四个弱臂后补入，并保留 GPU0 V1-only/GPU1 foot-`-0.6`，最终每卡四条。focused host 回归
-`17` 个专用测试及相邻队列回归通过；已有 parent snapshot provenance，但尚无后代 Pod 启动或行为结果，
+`17` 个专用测试及相邻队列回归通过；parent snapshot provenance 与七条后代首迭代现均已运行通过，
 第七条不修改前六条 recipe 或 claim：它只用 qdot snapshot，在独立的 16 秒 base recipe 中把
 `task.env.episode_length_s` 从 10 秒替换一次（Hydra key 不重复），并组合 V1/V2、qdot `-5`、拍面
 `-0.4`、脚朝向 `-0.3` 和自由非击球臂。它硬绑 GPU2 第四槽，专门测同 episode 连续 3–4 拍累积的平衡债；
 claim 绑定 `+200` 只判结构/激活、`+500` 判安全/平衡、`+1000` 排演示候选，稀疏命中为零不可早停。
-前六条 canonical claim digest 的回归逐项不变；专项测试扩为 `19` 个。未有运行证据，故 G05 保持
+前六条 canonical claim digest 的回归逐项不变；专项测试扩为 `19` 个。当前运行证据仍不足以判断行为，故 G05 保持
 `Partial`。详见
 [实验卷宗](../experiments/2026-07/EXP-P1-DEMO-HOTSTART-PORTFOLIO.md)。
 
@@ -2570,12 +2570,17 @@ parent/recipe/seed/budget/milestones 与 predecessor 相同；claim 绑定终态
 `manual_retry_limit=1`、`automatic_retry=false` 和 `recipe_equal=true`。两条按 GPU1→GPU0 顺序错峰，第二条
 只有第一条已消费新 claim 后才可选择。点火锁内还会在创建新目录前重算 predecessor 的 5/7 个证据 SHA，
 双次扫描旧 PGID、解析绑定成员并逐 PID 检查 absent、拒绝残留 NVML context；leader 已退但同 PGID child
-仍活的反例必须 fail closed。本变更只排队、未点火；`32` 个专项测试通过，G05 仍为 `Partial`。
+仍活的反例必须 fail closed。两条 retry-v2 已分别在 GPU1/GPU0 消费唯一新 namespace 并越过首迭代；旧
+PID `429116/429974` 仍为 `/proc` 与 NVML 双重 absent。`32` 个专项测试通过，G05 仍为 `Partial`。
 
 每条 launch 的 `phase=first_iter` 现在还要求日志同时证明 explicit hard-contract mismatch、从 snapshot
 model-3500 恢复到 iteration 3500 和 `optimizer=resumed`，并从新 hard contract 核对本行 qdot/conditional-face
 权重。v3 还在同一 GPU lock、trainer 调用前重算 checkpoint/hard/claim/binding 四个 snapshot file SHA；
 FIRST_ITER 从 binding 复核 `/proc` PID=PGID/starttime/cmdline，等到真实 `Learning iteration >3500` 才成功。
 自然退出、只打印 resume/3500 或 PID reuse 都只写 exact identity 处置证据；wrapper 不发 signal、不自动 replay。
-首个 checkpoint 的
-lineage=0 仍由专用 milestone receipt fail-closed，未运行前不能把该源码门写成训练通过。
+首个 checkpoint 的 lineage=0 仍由专用 milestone receipt fail-closed。最终只读审计中，七条后代均从
+`model_3500` 完整恢复并在 `3501` 首次观察到真实训练迭代；exact PID 为
+`426506/427190/428347/431061/431910/432838/433601`，全部 fatal0。前两条已产生
+`model_3700`，均通过 filename=embedded、74 个浮点 tensor / 1,762,715 元素全 finite、schema-3 hard
+contract、checkpoint↔claim↔binding 与 `lineage_exact=0`。这关闭首迭代和首个 `+200` checkpoint 的
+provenance 门，但没有给出行为排序、正式因果结论或 vendor MuJoCo 结果。
