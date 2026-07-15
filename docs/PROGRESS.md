@@ -13,16 +13,20 @@
 
 ## 2026-07-16
 
-- 两台 Pod 已各自三卡四路铺满，共 `24/24` 条 trainer。04:32 CST 的 Pod1 只读审计确认 `12/12`
+- 04:32 CST 的最后一份完整可信快照为两台 Pod 各三卡四路、共 `24/24` 条 trainer。该快照的 Pod1 为 `12/12`
   live、每卡 `4/4/4`、fatal=`0`；12 条 latest checkpoint 均 finite、hard-contract/claim 与 fresh
-  lineage=`1` 匹配，且全部至少到 `model_800`，其中 16 秒普通对照已到 `model_1000`。Pod2 的七个
+  lineage=`1` 匹配，且全部至少到 `model_800`，其中 16 秒普通对照已到 `model_1000`。本轮 Pod1
+  单连接刷新在远端检查开始前因本地审计程序 `SyntaxError` 退出，故当前状态记 `UNKNOWN`；没有远端
+  写入或 signal，不记训练失败。Pod2 的七个
   model-3500 演示续训候选均从
   policy/value/optimizer 完整恢复并真实越过首迭代，PID 为
   `426506/427190/428347/431061/431910/432838/433601`；三卡 `4/4/4`、fatal0。七条均已写
   `model_3700`，冻结的 `+200` checkpoint 完整性门全部 `PASS`；机制激活与行为仍待后续仪表判读。原自由臂/保守模仿两次首迭代前基础设施失败
-  继续保留为 rejected，唯一 recipe-identical retry 均已成功。当前仍无行为胜者；前两条虽已有
-  `model_4000` 文件但尚待独立审计，
-  不提前记通过或领先。后续按 `+500/+1000` 且不以稀疏零值误杀。
+  继续保留为 rejected，唯一 recipe-identical retry 均已成功。前四条 PID
+  `426506/427190/428347/431061` 的 `+500/model_4000` 已通过 embedded iteration、finite、
+  hard-contract/claim 与 lineage 完整性门；后三条尚未到该点，不是失败。当前没有 activation/eligible
+  计数，不能排名或停臂，fall-rate 只作诊断；仍无行为胜者，后三条继续到 `+500`、七条再到 `+1000`，
+  且不以稀疏零值误杀。
   见[实验卷宗](experiments/2026-07/EXP-P1-DEMO-HOTSTART-PORTFOLIO.md)。
 
 - Demo hot-start 的自由非击球臂行与普通母本保守模仿行分别在首迭代前以 malloc `rc134`、content-bearing

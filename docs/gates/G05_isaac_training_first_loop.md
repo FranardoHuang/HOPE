@@ -2585,3 +2585,11 @@ stable load、filename=embedded `3700`、74 个浮点 tensor / 1,762,715 元素�
 schema-3 hard contract、checkpoint↔hard/claim/binding 与 `lineage_exact=0`。PID `426506/427190` 已出现
 `model_4000`，但本轮未审其内容。七条继续到 `+500`；当前证据只关闭首迭代和首个 `+200` checkpoint 的
 provenance 门，没有给出行为赢家、正式因果结论或 vendor MuJoCo 结果，G05 保持 `Partial`。
+
+2026-07-16 05:02 CST（UTC 21:02）只读复核时七条仍 live、fatal0；PID
+`426506/427190/428347/431061` 的 `model_4000` 全部通过 stable load、filename=embedded `4000`、
+74 个浮点 tensor / 1,762,715 元素全 finite（nonfinite `0`）、schema-3 hard contract、
+checkpoint↔hard/claim/binding 与 `lineage_exact=0`。PID `431910/432838/433601` 尚未到该里程碑，记
+`UNKNOWN` 而非失败；七条均未出现 `model_4500`。日志末窗没有明确 activation count 或 eligible
+sparse-hit count，instrumentation 因此保持 `UNKNOWN`，不得据零值排名或停臂；fall-rate 只作诊断，不是
+正式安全结论。仍无行为赢家；后三条继续到 `+500`，七条再继续到 `+1000`，G05 保持 `Partial`。

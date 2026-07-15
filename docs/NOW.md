@@ -31,10 +31,12 @@
 做成安全可训练候选；把四个不同因果格先跨卡铺开以修正现役 policy 的拍面反号；把胜出 policy 连同我们的
 planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行为以厂商 MuJoCo 为准。
 
-- **当前训练池（2026-07-16 约 04:32 CST）：** 两台 Pod 都已按三卡各四条铺满，共 `24/24`
-  条 trainer。Pod1 最新只读审计为 `12/12` live、每卡 `4/4/4`、fatal=`0`；12 条接受臂的 latest
+- **当前训练池：** 2026-07-16 约 04:32 CST 的最后一份完整可信快照中，两台 Pod 都按三卡各四条
+  铺满，共 `24/24` 条 trainer。该快照的 Pod1 为 `12/12` live、每卡 `4/4/4`、fatal=`0`；12 条接受臂的 latest
   checkpoint 均已到 `model_800` 或以后，并通过 finite、hard-contract/claim 与 fresh lineage=`1`
-  检查，其中 16 秒普通对照已到 `model_1000`。Pod2 今夜新增七个
+  检查，其中 16 秒普通对照已到 `model_1000`。本轮 Pod1 单连接刷新在任何远端检查前因本地生成的
+  审计程序 `SyntaxError` 退出，因此 **Pod1 当前状态为 `UNKNOWN`**；没有远端写入或 signal，不能记作
+  训练失败。Pod2 今夜新增七个
   “明早能打”组合候选：两档拍面引导、不同已学母本、释放非击球臂、保守模仿、全栈组合，以及一个
   16 秒多次挥拍长回合。七条均从只读 `model_3500` 完整恢复 policy/value/optimizer 并真实越过首迭代，
   PID 为 `426506/427190/428347/431061/431910/432838/433601`；现均已到绝对 `model_3700`
@@ -43,10 +45,12 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   **还没有行为胜者**。自由非击球臂与
   保守模仿的原始两次启动分别在首迭代前遇到 malloc `rc134` 和 stale `rc125`，旧 PID
   `429116/429974` 仍为 `/proc` 与 NVML 双重 absent；证据保留后，各自唯一一次同配方新 namespace
-  重试已成功越过首迭代，不再授权重试。前两条还存在 `model_4000` 文件，尚待独立审计，当前不记为
-  通过或候选领先。下一步按
-  `+500/+1000` 查看安全/平衡和
-  候选排序；需要真实击球才产生的稀疏回台 Reward 在资格不足时不得因零值早停，最终仍由厂商 MuJoCo
+  重试已成功越过首迭代，不再授权重试。前四条 `426506/427190/428347/431061` 的绝对
+  `model_4000`（母本后 `+500`）已通过 embedded iteration、finite、hard-contract/claim 与 lineage
+  完整性检查；后三条尚未到该 checkpoint，**不是失败**。当前没有 activation/eligible 计数，不能据此
+  排名或停臂；fall-rate 也只作诊断。下一步让后三条先到 `+500`，再让七条继续到 `+1000` 查看
+  安全/平衡和候选排序；需要真实击球才产生的
+  稀疏回台 Reward 在资格不足时不得因零值早停，最终仍由厂商 MuJoCo
   判卷。详见[今夜演示组合卷宗](experiments/2026-07/EXP-P1-DEMO-HOTSTART-PORTFOLIO.md)。
 
 - **最新可分享结果：** 反手拉 B/C 的 rank-0 主选已在 Pod1 CPU-only runtime 完成 exact 整轨

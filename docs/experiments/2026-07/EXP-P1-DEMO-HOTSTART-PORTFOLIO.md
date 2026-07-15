@@ -101,15 +101,15 @@ snapshot/load 时序修复。
 
 | 运行（人话名 + `run_name`） | 状态 | 证据 | 有效性说明 |
 | --- | --- | --- | --- |
-| qdot 母本强拍面 `phase1_demo_qdot_v1v2_face_w0p4_seed3_20260716` | live | PID=PGID `426506`；iter `4003` / `model_4000`；first proof `fedbe84a...05af` | demo-only |
-| qdot 母本中拍面 `phase1_demo_qdot_v1v2_face_w0p2_seed3_20260716` | live | PID=PGID `427190`；iter `4008` / `model_4000`；first proof `e397c918...899e` | demo-only |
-| V1+V2 母本强拍面 `phase1_demo_v1v2_qdot_w5_face_w0p4_seed3_20260716` | live | PID=PGID `428347`；iter `3959` / `model_3900`；first proof `0890be8b...b0b9` | demo-only |
+| qdot 母本强拍面 `phase1_demo_qdot_v1v2_face_w0p4_seed3_20260716` | live | PID=PGID `426506`；iter `4104` / `model_4100`；first proof `fedbe84a...05af` | demo-only |
+| qdot 母本中拍面 `phase1_demo_qdot_v1v2_face_w0p2_seed3_20260716` | live | PID=PGID `427190`；iter `4107` / `model_4100`；first proof `e397c918...899e` | demo-only |
+| V1+V2 母本强拍面 `phase1_demo_v1v2_qdot_w5_face_w0p4_seed3_20260716` | live | PID=PGID `428347`；iter `4060` / `model_4000`；first proof `0890be8b...b0b9` | demo-only |
 | V1+V2 母本自由臂 `phase1_demo_v1v2_qdot_w2p5_face_w0p4_free_arm_seed3_20260716` | rejected | 首迭代前 malloc invalid size；rc134；旧 namespace 永不复用 | infrastructure-only |
 | 普通母本保守模仿 `phase1_demo_control_qdot_w5_face_w0p4_seed3_20260716` | rejected | 首迭代前 content-bearing stale timeout；rc125；旧 namespace 永不复用 | infrastructure-only |
-| 普通母本全栈 `phase1_demo_control_full_stack_free_arm_foot_w0p6_seed3_20260716` | live | PID=PGID `431061`；iter `3904` / `model_3900`；first proof `3e623c0a...8d47` | demo-only |
-| qdot 母本 16 秒长回合 `phase1_demo_qdot_long_carry_free_arm_16s_seed3_20260716` | live | PID=PGID `431910`；iter `3879` / `model_3800`；first proof `1e7abe7e...21e` | demo-only |
-| 自由臂基础设施重试 `phase1_demo_v1v2_qdot_w2p5_face_w0p4_free_arm_seed3_20260716_retry_v2` | live | PID=PGID `432838`；iter `3794` / `model_3700`；first proof `bb00993c...5455` | demo-only |
-| 保守模仿基础设施重试 `phase1_demo_control_qdot_w5_face_w0p4_seed3_20260716_retry_v2` | live | PID=PGID `433601`；iter `3789` / `model_3700`；first proof `46afdddc...bcaa` | demo-only |
+| 普通母本全栈 `phase1_demo_control_full_stack_free_arm_foot_w0p6_seed3_20260716` | live | PID=PGID `431061`；iter `4005` / `model_4000`；first proof `3e623c0a...8d47` | demo-only |
+| qdot 母本 16 秒长回合 `phase1_demo_qdot_long_carry_free_arm_16s_seed3_20260716` | live | PID=PGID `431910`；iter `3979` / `model_3900`；first proof `1e7abe7e...21e` | demo-only |
+| 自由臂基础设施重试 `phase1_demo_v1v2_qdot_w2p5_face_w0p4_free_arm_seed3_20260716_retry_v2` | live | PID=PGID `432838`；iter `3893` / `model_3800`；first proof `bb00993c...5455` | demo-only |
+| 保守模仿基础设施重试 `phase1_demo_control_qdot_w5_face_w0p4_seed3_20260716_retry_v2` | live | PID=PGID `433601`；iter `3889` / `model_3800`；first proof `46afdddc...bcaa` | demo-only |
 
 ## 复现
 
@@ -137,6 +137,14 @@ pending 反事实 fixture、终态/recipe/残留进程攻击与 assignment 测�
 74 个浮点 tensor / 1,762,715 个元素全 finite（nonfinite `0`）、schema-3 hard contract、
 checkpoint↔hard/claim/binding 与 `lineage_exact=0`。PID `426506/427190` 已出现 `model_4000`，但本轮未审其
 内容。这些仍只是启动/checkpoint 证据，不是击球或回台行为结果，也没有产生行为赢家。
+
+2026-07-16 05:02 CST（UTC 21:02）只读复核时七条仍 live、fatal0。PID
+`426506/427190/428347/431061` 的 `model_4000` 均通过 stable load、filename=embedded `4000`、
+74 个浮点 tensor / 1,762,715 个元素全 finite（nonfinite `0`）、schema-3 hard contract、
+checkpoint↔hard/claim/binding 与 `lineage_exact=0`；PID `431910/432838/433601` 尚未产生该文件，记为
+`UNKNOWN` 而不是失败，七条均未出现 `model_4500`。日志末窗没有明确 activation count 或 eligible
+sparse-hit count，故 instrumentation 保持 `UNKNOWN`，不据零值排名或停臂；可见 fall-rate 仅作诊断，
+不是正式安全结论。
 
 ## 决定
 
