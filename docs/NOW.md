@@ -31,27 +31,22 @@
 做成安全可训练候选；把四个不同因果格先跨卡铺开以修正现役 policy 的拍面反号；把胜出 policy 连同我们的
 planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行为以厂商 MuJoCo 为准。
 
-- **当前训练池：** 2026-07-16 约 04:32 CST 的最后一份完整可信快照中，两台 Pod 都按三卡各四条
-  铺满，共 `24/24` 条 trainer。该快照的 Pod1 为 `12/12` live、每卡 `4/4/4`、fatal=`0`；12 条接受臂的 latest
-  checkpoint 均已到 `model_800` 或以后，并通过 finite、hard-contract/claim 与 fresh lineage=`1`
-  检查，其中 16 秒普通对照已到 `model_1000`。本轮 Pod1 单连接刷新在任何远端检查前因本地生成的
-  审计程序 `SyntaxError` 退出，因此 **Pod1 当前状态为 `UNKNOWN`**；没有远端写入或 signal，不能记作
-  训练失败。Pod2 今夜新增七个
-  “明早能打”组合候选：两档拍面引导、不同已学母本、释放非击球臂、保守模仿、全栈组合，以及一个
-  16 秒多次挥拍长回合。七条均从只读 `model_3500` 完整恢复 policy/value/optimizer 并真实越过首迭代，
-  PID 为 `426506/427190/428347/431061/431910/432838/433601`；现均已到绝对 `model_3700`
-  （母本后 `+200`），冻结的 checkpoint 完整性门全部 `PASS`。这只证明续训、finite 与 provenance 闭合；
-  机制是否实际激活仍要从训练仪表单独判断，
-  **还没有行为胜者**。自由非击球臂与
-  保守模仿的原始两次启动分别在首迭代前遇到 malloc `rc134` 和 stale `rc125`，旧 PID
-  `429116/429974` 仍为 `/proc` 与 NVML 双重 absent；证据保留后，各自唯一一次同配方新 namespace
-  重试已成功越过首迭代，不再授权重试。前四条 `426506/427190/428347/431061` 的绝对
-  `model_4000`（母本后 `+500`）已通过 embedded iteration、finite、hard-contract/claim 与 lineage
-  完整性检查；后三条尚未到该 checkpoint，**不是失败**。当前没有 activation/eligible 计数，不能据此
-  排名或停臂；fall-rate 也只作诊断。下一步让后三条先到 `+500`，再让七条继续到 `+1000` 查看
-  安全/平衡和候选排序；需要真实击球才产生的
-  稀疏回台 Reward 在资格不足时不得因零值早停，最终仍由厂商 MuJoCo
-  判卷。详见[今夜演示组合卷宗](experiments/2026-07/EXP-P1-DEMO-HOTSTART-PORTFOLIO.md)。
+- **当前训练池：** 2026-07-16 约 05:29 CST 的最后一份完整可信审计覆盖了全部 `24/24` 条，而不是只看
+  新到 milestone 的四条：两台 Pod 都是三卡各 `4/4/4`、全部 live、fatal=`0`，latest checkpoint 的
+  embedded iteration、finite、hard-contract/claim/binding 与 lineage 均通过。07:47 CST 的下一轮两个
+  单连接都在限时内没有返回审计输出，因此当前连接态诚实记为 `UNKNOWN`；没有远端写入或 signal，不能
+  写成训练失败。Pod1 的 12 条是非击球臂模仿开关 × `10/16/24` 秒，以及六种 Reward 配比，当前约在
+  iteration `1030–1243` / `model_1000–1200`。16 秒自由臂相对匹配对照给出最强方向信号，但 10 秒近似
+  打平、24 秒没有优势，说明收益不随 episode 单调增加；Reward 近似均分当前最均衡，位置/速度/拍面单项
+  重押会牺牲其他项，双倍总强度增加 fall。Pod2 的 12 条包含七个演示组合和五条保留长曲线：七组合中
+  `426506/427190/428347/431061/431910` 已通过绝对 `model_4000`（母本后 `+500`）完整性门，
+  `432838/433601` 尚在 `model_3900`，不是失败；五条保留线已到 `model_1400/1500/4500/4500/4600`。
+  当前方向上，强 qdot 的 fall 较低、普通对照 hit 略高、全栈组合的 10 cm 指标较高但 fall 也更高；所有
+  训练的 eligible sparse-hit/activation 整数分母仍缺，Pod1 exact-hit 也只有约 `0.47%–0.54%`，所以这些
+  都只是单 seed、单末窗诊断，**没有行为胜者，也不据此停臂**。剩余两组合先到 `+500`，七组合再到
+  `+1000`，最终仍由厂商 MuJoCo 同卷判分。详见
+  [Pod1 十二格卷宗](experiments/2026-07/EXP-P1-POD1-LONG-BALANCE-REWARD-GRID.md)与
+  [演示组合卷宗](experiments/2026-07/EXP-P1-DEMO-HOTSTART-PORTFOLIO.md)。
 
 - **最新可分享结果：** 反手拉 B/C 的 rank-0 主选已在 Pod1 CPU-only runtime 完成 exact 整轨
   SE(2) 实体化；后续 schema-2/FK 源码门也已进入 `main` 并通过 `17` 项专项回归。逐资产 no-write

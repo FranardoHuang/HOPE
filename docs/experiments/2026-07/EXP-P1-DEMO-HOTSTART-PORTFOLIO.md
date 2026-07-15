@@ -101,15 +101,15 @@ snapshot/load 时序修复。
 
 | 运行（人话名 + `run_name`） | 状态 | 证据 | 有效性说明 |
 | --- | --- | --- | --- |
-| qdot 母本强拍面 `phase1_demo_qdot_v1v2_face_w0p4_seed3_20260716` | live | PID=PGID `426506`；iter `4104` / `model_4100`；first proof `fedbe84a...05af` | demo-only |
-| qdot 母本中拍面 `phase1_demo_qdot_v1v2_face_w0p2_seed3_20260716` | live | PID=PGID `427190`；iter `4107` / `model_4100`；first proof `e397c918...899e` | demo-only |
-| V1+V2 母本强拍面 `phase1_demo_v1v2_qdot_w5_face_w0p4_seed3_20260716` | live | PID=PGID `428347`；iter `4060` / `model_4000`；first proof `0890be8b...b0b9` | demo-only |
+| qdot 母本强拍面 `phase1_demo_qdot_v1v2_face_w0p4_seed3_20260716` | live | PID=PGID `426506`；iter `4192` / `model_4100`；first proof `fedbe84a...05af` | demo-only |
+| qdot 母本中拍面 `phase1_demo_qdot_v1v2_face_w0p2_seed3_20260716` | live | PID=PGID `427190`；iter `4193` / `model_4100`；first proof `e397c918...899e` | demo-only |
+| V1+V2 母本强拍面 `phase1_demo_v1v2_qdot_w5_face_w0p4_seed3_20260716` | live | PID=PGID `428347`；iter `4146` / `model_4100`；first proof `0890be8b...b0b9` | demo-only |
 | V1+V2 母本自由臂 `phase1_demo_v1v2_qdot_w2p5_face_w0p4_free_arm_seed3_20260716` | rejected | 首迭代前 malloc invalid size；rc134；旧 namespace 永不复用 | infrastructure-only |
 | 普通母本保守模仿 `phase1_demo_control_qdot_w5_face_w0p4_seed3_20260716` | rejected | 首迭代前 content-bearing stale timeout；rc125；旧 namespace 永不复用 | infrastructure-only |
-| 普通母本全栈 `phase1_demo_control_full_stack_free_arm_foot_w0p6_seed3_20260716` | live | PID=PGID `431061`；iter `4005` / `model_4000`；first proof `3e623c0a...8d47` | demo-only |
-| qdot 母本 16 秒长回合 `phase1_demo_qdot_long_carry_free_arm_16s_seed3_20260716` | live | PID=PGID `431910`；iter `3979` / `model_3900`；first proof `1e7abe7e...21e` | demo-only |
-| 自由臂基础设施重试 `phase1_demo_v1v2_qdot_w2p5_face_w0p4_free_arm_seed3_20260716_retry_v2` | live | PID=PGID `432838`；iter `3893` / `model_3800`；first proof `bb00993c...5455` | demo-only |
-| 保守模仿基础设施重试 `phase1_demo_control_qdot_w5_face_w0p4_seed3_20260716_retry_v2` | live | PID=PGID `433601`；iter `3889` / `model_3800`；first proof `46afdddc...bcaa` | demo-only |
+| 普通母本全栈 `phase1_demo_control_full_stack_free_arm_foot_w0p6_seed3_20260716` | live | PID=PGID `431061`；iter `4091` / `model_4000`；first proof `3e623c0a...8d47` | demo-only |
+| qdot 母本 16 秒长回合 `phase1_demo_qdot_long_carry_free_arm_16s_seed3_20260716` | live | PID=PGID `431910`；iter `4067` / `model_4000`；first proof `1e7abe7e...21e` | demo-only |
+| 自由臂基础设施重试 `phase1_demo_v1v2_qdot_w2p5_face_w0p4_free_arm_seed3_20260716_retry_v2` | live | PID=PGID `432838`；iter `3979` / `model_3900`；first proof `bb00993c...5455` | demo-only |
+| 保守模仿基础设施重试 `phase1_demo_control_qdot_w5_face_w0p4_seed3_20260716_retry_v2` | live | PID=PGID `433601`；iter `3975` / `model_3900`；first proof `46afdddc...bcaa` | demo-only |
 
 ## 复现
 
@@ -146,8 +146,15 @@ checkpoint↔hard/claim/binding 与 `lineage_exact=0`；PID `431910/432838/43360
 sparse-hit count，故 instrumentation 保持 `UNKNOWN`，不据零值排名或停臂；可见 fall-rate 仅作诊断，
 不是正式安全结论。
 
+2026-07-16 05:29 CST 的全 Pod2 审计又覆盖了全部 12 条而不只七个 demo：12/12 live、fatal0，latest
+checkpoint 的 embedded iteration、finite、schema-3 hard、claim/binding 与 lineage 全部通过。七个 demo
+中，16 秒长回合也已产生并通过 `model_4000`，所以当前是五条通过 `+500`、两条尚在 `model_3900`。
+同一末窗只给出方向性信号：中拍面版的 strike/10 cm 比强拍面版高；普通母本全栈的 10 cm 指标最高但
+fall 也更高；16 秒长回合因 episode 不匹配不能直接横比。所有 demo 仍缺 activation 与 eligible-hit 整数
+分母，因此不得据这些窗口排名、停臂或宣布行为赢家。
+
 ## 决定
 
 - 决定：`inconclusive`
 - 是否已纳入当前 setting：`no`
-- 下一个 gate：七条继续到 `+500/+1000`，再按安全、平衡与资格充分后的同一演示卷排序。
+- 下一个 gate：剩余两条继续到 `+500`，七条再到 `+1000`，按安全、平衡与资格充分后的同一演示卷排序。

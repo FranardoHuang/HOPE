@@ -2593,3 +2593,10 @@ checkpoint↔hard/claim/binding 与 `lineage_exact=0`。PID `431910/432838/43360
 `UNKNOWN` 而非失败；七条均未出现 `model_4500`。日志末窗没有明确 activation count 或 eligible
 sparse-hit count，instrumentation 因此保持 `UNKNOWN`，不得据零值排名或停臂；fall-rate 只作诊断，不是
 正式安全结论。仍无行为赢家；后三条继续到 `+500`，七条再继续到 `+1000`，G05 保持 `Partial`。
+
+2026-07-16 05:29 CST 的下一次全量审计覆盖双 Pod 全部 `24/24` 条：两边均三卡 `4/4/4`、全部
+live/fatal0，24 份 latest checkpoint 的 embedded iteration、finite、hard/claim/binding 与 lineage 均通过。
+Pod1 十二格约在 `model_1000–1200`，Pod2 七组合中五条已通过 `model_4000`、两条在 `model_3900`，另五条
+保留长曲线在 `model_1400/1500/4500/4500/4600`。训练仪表仍没有 activation/eligible sparse-hit 整数
+分母，Pod1 exact-hit 也只有约 `0.47%–0.54%`；因此当前只能保留自由臂时长、Reward 配比和 qdot/全栈的
+方向诊断，不能形成行为赢家、停臂或正式因果结论，G05 保持 `Partial`。

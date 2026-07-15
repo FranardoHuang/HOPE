@@ -13,6 +13,16 @@
 
 ## 2026-07-16
 
+- 05:29 CST 的全池只读审计逐条覆盖双 Pod `24/24`，而非只看新到里程碑的候选：两边均三卡
+  `4/4/4`、全部 live/fatal0，24 份 latest checkpoint 的 embedded iteration、finite、hard/claim/binding
+  与 lineage 均通过。Pod1 12 条约到 `model_1000–1200`；16 秒自由臂有最强 matched 方向，但 10 秒近似
+  打平、24 秒无优势，Reward 近似均分最均衡，单项重押和双倍总强度都有跨项或 fall 代价。Pod2 七组合中
+  五条已过 `+500/model_4000` 完整性门、两条在 `model_3900`；五条保留线已到
+  `model_1400/1500/4500/4500/4600`。eligible/activation 分母缺失且 Pod1 exact-hit 仅约
+  `0.47%–0.54%`，故只记方向、不排名、不停臂。07:47 的下一轮双 Pod 单连接均未在限时内返回输出，
+  记 `UNKNOWN` 而非训练失败。见[Pod1 十二格](experiments/2026-07/EXP-P1-POD1-LONG-BALANCE-REWARD-GRID.md)
+  与[演示组合](experiments/2026-07/EXP-P1-DEMO-HOTSTART-PORTFOLIO.md)。
+
 - 04:32 CST 的最后一份完整可信快照为两台 Pod 各三卡四路、共 `24/24` 条 trainer。该快照的 Pod1 为 `12/12`
   live、每卡 `4/4/4`、fatal=`0`；12 条 latest checkpoint 均 finite、hard-contract/claim 与 fresh
   lineage=`1` 匹配，且全部至少到 `model_800`，其中 16 秒普通对照已到 `model_1000`。本轮 Pod1
