@@ -99,16 +99,16 @@ def _activated(tmp_path: Path) -> tuple[dict, Path]:
     return D.load_queue(path), path
 
 
-def test_pending_queue_is_six_blocked_pod2_rows_and_plan_is_nonlaunching(tmp_path):
+def test_pending_queue_is_seven_blocked_pod2_rows_and_plan_is_nonlaunching(tmp_path):
     queue, _path = _pending(tmp_path)
     plan = D.cmd_plan(queue)
     assert queue["dispatch_pods"] == ["pod2"]
     assert queue["launch_authorized"] is False
-    assert len(queue["jobs"]) == 6
+    assert len(queue["jobs"]) == 7
     assert queue["pods"]["pod2"]["max_trainers_per_gpu"] == 4
     assert "parent_snapshot_receipt_v2.json" in queue["activation_contract"]["receipt_path"]
     assert plan["assignments"] == []
-    assert len(plan["blocked"]) == 6
+    assert len(plan["blocked"]) == 7
     assert all(job["status"] == "blocked" for job in queue["jobs"])
     assert all(job["runtime_binding"] is True for job in queue["jobs"])
     assert all(job["source"]["commit"] == D.EXPECTED_SOURCE for job in queue["jobs"])
@@ -127,7 +127,7 @@ def test_current_queue_is_explicitly_activated_by_the_v2_snapshot_receipt():
     assert [row["resource"] for row in plan["assignments"]] == D.EXPECTED_SLOTS
 
 
-def test_six_recipes_match_the_frozen_demo_portfolio():
+def test_seven_recipes_match_the_frozen_demo_portfolio():
     queue = D.load_queue(QUEUE)
     jobs = {job["id"]: job for job in queue["jobs"]}
     actual = {}
@@ -142,7 +142,9 @@ def test_six_recipes_match_the_frozen_demo_portfolio():
             value["task.rewards.foot_orientation_weight"],
             value["task.rewards.free_non_striking_arm_mimic"],
         )
-        assert value["task.env.episode_length_s"] == "10.0"
+        assert value["task.env.episode_length_s"] == (
+            "16.0" if job_id == D.LONG_CARRY_JOB_ID else "10.0"
+        )
         assert (
             value["task.rewards.racket_position_weight"],
             value["task.rewards.racket_velocity_weight"],
@@ -159,6 +161,7 @@ def test_six_recipes_match_the_frozen_demo_portfolio():
         "demo_v1v2_qdot_w2p5_face_w0p4_free_arm": ("v1v2", "true", "0.25", "-2.5", "-0.4", "-0.3", "true"),
         "demo_control_qdot_w5_face_w0p4": ("control", "false", "1.0", "-5.0", "-0.4", "-0.3", "false"),
         "demo_control_full_stack_free_arm_foot_w0p6": ("control", "true", "0.25", "-5.0", "-0.4", "-0.6", "true"),
+        "demo_qdot_long_carry_free_arm_16s": ("qdot", "true", "0.25", "-5.0", "-0.4", "-0.3", "true"),
     }
 
 
@@ -190,12 +193,59 @@ def test_activated_queue_round_robins_and_claim_binds_inexact_parent_receipt(tmp
 
 def test_fourth_slot_activation_only_selects_jobs_one_and_two(tmp_path):
     queue, _path = _activated(tmp_path)
-    occupancy = {"pod2/gpu0": 3, "pod2/gpu1": 3, "pod2/gpu2": 0}
+    occupancy = {"pod2/gpu0": 3, "pod2/gpu1": 3, "pod2/gpu2": 4}
     assignments = D.Q._assign(queue, occupancy)
     assert [(job["id"], slot.name) for job, slot in assignments] == [
         ("demo_qdot_v1v2_face_w0p4", "pod2/gpu0"),
         ("demo_qdot_v1v2_face_w0p2", "pod2/gpu1"),
     ]
+
+
+def test_long_carry_row_is_gpu2_fourth_slot_and_binds_early_screening_rules(tmp_path):
+    queue, _path = _activated(tmp_path)
+    occupancy = {"pod2/gpu0": 4, "pod2/gpu1": 4, "pod2/gpu2": 3}
+    assignments = D._assign_demo(queue, occupancy)
+    assert [(job["id"], slot.name) for job, slot in assignments] == [
+        (D.LONG_CARRY_JOB_ID, "pod2/gpu2"),
+    ]
+    assert D._assign_demo(
+        queue, {"pod2/gpu0": 4, "pod2/gpu1": 4, "pod2/gpu2": 2}
+    ) == []
+    job, slot = assignments[0]
+    values = _values(job)
+    assert values["task.env.episode_length_s"] == "16.0"
+    assert len([
+        raw for raw in [*job["recipe"]["base"], *job["recipe"]["delta"]]
+        if D.Q._override_key(raw, job["id"]) == "task.env.episode_length_s"
+    ]) == 1
+    claim, _argv = D._demo_claim(queue, job, slot)
+    assert claim["content"]["screening_contract"] == (
+        D.EXPECTED_LONG_CARRY_SCREENING_CONTRACT
+    )
+    rules = claim["content"]["screening_contract"]["milestone_rules"]
+    assert rules[3700]["decision_scope"] == "structure_and_activation_only"
+    assert rules[4000]["decision_scope"] == "safety_and_balance_debt"
+    assert rules[4500]["decision_scope"] == "overnight_demo_portfolio_ranking"
+    assert all(not rule["sparse_hit_zero_may_stop"] for rule in rules.values())
+
+
+def test_first_six_claim_digests_remain_unchanged_after_long_carry_extension():
+    queue = D.load_queue(QUEUE)
+    expected = {
+        "demo_qdot_v1v2_face_w0p4": "7b72023e81d78f0e431834721fc85876c29315529f0f211bc8d6de3c421ea8fb",
+        "demo_qdot_v1v2_face_w0p2": "86d17ce478fe7cf91e9a49b38af246e195fb359576ab9395bdbf6ea27bfc7e56",
+        "demo_v1v2_qdot_w5_face_w0p4": "c282ec0b1b2cb5fbdc803eaf5eb42e5d7fcac4db2cd985fda9142532244aa8c6",
+        "demo_v1v2_qdot_w2p5_face_w0p4_free_arm": "d942f1b20df209a68f8f45e567faed6f1df22c607abecdf1f0b71145a1be003e",
+        "demo_control_qdot_w5_face_w0p4": "2e6eb7e0f479d48e34130252cf4c83a22bdfdadfcbfe1813b5b1aa398d29b811",
+        "demo_control_full_stack_free_arm_foot_w0p6": "ab5ceba2933849a330cf889bab30e40e26d1789f32827b0105a03575467176b6",
+    }
+    for job in queue["jobs"][:6]:
+        slot = next(
+            candidate for candidate in D.Q.slots(queue)
+            if candidate.name == job["resource"]["required_slot"]
+        )
+        claim, _argv = D._demo_claim(queue, job, slot)
+        assert claim["content_sha256"] == expected[job["id"]]
 
 
 def test_generic_fresh_queue_guard_remains_fresh_only(tmp_path):
@@ -256,7 +306,9 @@ def test_parent_spec_binds_exact_original_claim_binding_and_descendant_hard_chan
         assert parent["live_queue_claim_path"].endswith("queue_claim.json")
         assert parent["live_run_binding_path"].endswith("run_binding.json")
         assert "parent_snapshots_v2" in parent["snapshot_checkpoint_path"]
-        assert len(parent["descendant_contract_values"]) == 2
+        assert len(parent["descendant_contract_values"]) == (
+            3 if name == "qdot" else 2
+        )
 
 
 def test_parent_program_is_fd_snapshot_based_and_strict_about_full_state():

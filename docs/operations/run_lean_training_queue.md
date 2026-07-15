@@ -424,7 +424,7 @@ milestone，不得用零收入早停。
 
 ## Demo-only model-3500 严格续训（2026-07-16）
 
-generic lean queue 继续只接受 fresh run。为了次日演示而允许显式合同变化的续训只走专用入口；六条后代
+generic lean queue 继续只接受 fresh run。为了次日演示而允许显式合同变化的续训只走专用入口；七条后代
 永久 formal-ineligible，不得用 generic token 发射：
 
 ```bash
@@ -445,7 +445,7 @@ argv/source/run/process、actor+critic、非空 optimizer `state/param_groups`�
 `SIM_ONLY_ATTEST_DEMO_WARMSTART_PARENTS`；它会自动再做一遍 inspect，只有通过才以 `O_EXCL` 写固定只读
 `parent_snapshots_v2` 四件套并从 snapshot bytes 复核、写 v2 receipt。旧 receipt 路径永远不接受，不自动激活
 或重试。operator 必须把 receipt file SHA、三个 checkpoint/hard/claim-file/claim-content/binding-file/
-binding-content/launch-claim SHA 回填 YAML，再把 activation state/六行 status 作为一次受审变更切到
+binding-content/launch-claim SHA 回填 YAML，再把 activation state/status 作为一次受审变更切到
 activated/ready。未回填时 `fill` 恒 fail closed。
 
 激活后先 dry-run；真实发射使用本专用 token：
@@ -453,18 +453,20 @@ activated/ready。未回填时 `fill` 恒 fail closed。
 ```bash
 python3 scripts/run_phase1_demo_hotstart_queue.py \
   --queue configs/phase1_pod2_demo_hotstart_portfolio_20260716.yaml \
-  fill --count 6
+  fill --count 7
 
 python3 scripts/run_phase1_demo_hotstart_queue.py \
   --queue configs/phase1_pod2_demo_hotstart_portfolio_20260716.yaml \
-  fill --count 6 --execute --confirm SIM_ONLY_LAUNCH_ONE_DEMO_WARMSTART_JOB
+  fill --count 7 --execute --confirm SIM_ONLY_LAUNCH_ONE_DEMO_WARMSTART_JOB
 ```
 
 execute 会只从 fixed parent snapshots 重算三个 parent 并要求与 immutable receipt 逐字节一致，再读取 Pod2
-现场容量；live 母本后续变化不会产生 TOCTOU。job 只硬绑
+现场容量；live 母本后续变化不会产生 TOCTOU。前六个 job 只硬绑
 GPU0/GPU1、按 0→1 逐圈。六个旧 model500 都保全且两卡 occupancy 各 `<=3` 时，先把 job1/job2 放入
 各卡第 4 槽；其余四条等待四个弱臂按其证据和 exact PGID 退出后再补，保留 GPU0 V1-only 与 GPU1
-foot-`-0.6`，最终各四条。不抢占、不 signal；GPU2 后续候选不进入本 v2。claim 同时绑定 parent checkpoint/
+foot-`-0.6`，最终各四条。第七条硬绑 GPU2 第四槽，使用 16 秒 episode 观察同回合 3–4 拍的平衡债；
+其 claim 额外绑定 `+200` 只判结构/激活、`+500` 判安全/平衡、`+1000` 排候选，且稀疏命中为零不可早停。
+不抢占、不 signal。claim 同时绑定 parent checkpoint/
 hard/原始 claim/binding SHA、activation receipt、完整 argv 与 `formal_exact_eligible=false`。source 中两个
 负责 strict resume/hard-contract 的文件还会按固定 SHA 验证。launcher 只有在 run log 包含 explicit mismatch、
 snapshot 路径、iteration 3500、`optimizer=resumed`，且新 hard contract 的 qdot/conditional-face 值与该行相同

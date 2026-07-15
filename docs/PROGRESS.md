@@ -13,6 +13,13 @@
 
 ## 2026-07-16
 
+- 在不改变前六条续训 recipe/claim digest 的前提下，队列增加 GPU2 第四槽的第七条 16 秒长回合候选：
+  从 qdot model-3500 snapshot 继续，组合 V1/V2、强速度/拍面引导、脚朝向与自由非击球臂，专门观察
+  单 episode 连续 3–4 拍累积的平衡债。episode 长度在独立 base 中唯一设为 16 秒；claim 绑定
+  `+200` 结构/激活、`+500` 安全/平衡、`+1000` 候选排序，稀疏命中为零不得早停。`19` 个专项测试通过；
+  尚未远端启动，G05 仍为 `Partial`。见
+  [实验卷宗](experiments/2026-07/EXP-P1-DEMO-HOTSTART-PORTFOLIO.md)。
+
 - 为次日演示冻结六条 Pod2 model-3500 严格续训组合：三类母本、两档拍面引导、两档 qdot、自由非击球臂
   与脚朝向以组合方案而非伪因果格运行。v2 先只读审原始 claim/binding 与非空全 optimizer，再唯一消费
   `O_EXCL` 只读 parent snapshots；launch 必须从日志证明 iteration-3500/optimizer strict resume、显式合同

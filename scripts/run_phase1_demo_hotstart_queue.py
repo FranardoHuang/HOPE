@@ -92,7 +92,7 @@ EXPECTED_PARENT_ITERATION = 3500
 EXPECTED_MILESTONES = [3700, 4000, 4500, 5500, 7500]
 EXPECTED_SLOTS = [
     "pod2/gpu0", "pod2/gpu1", "pod2/gpu0",
-    "pod2/gpu1", "pod2/gpu0", "pod2/gpu1",
+    "pod2/gpu1", "pod2/gpu0", "pod2/gpu1", "pod2/gpu2",
 ]
 EXPECTED_RECEIPT_PATH = (
     "/workspace/codexschema/phase1_demo_hotstart_20260716/activation/"
@@ -197,6 +197,11 @@ EXPECTED_BASE_RECIPE = (
     "checkpoint_allow_contract_mismatch=true", "++kit_carb_tasking_thread_count=16",
     "++kit_tbb_thread_count=16",
 )
+EXPECTED_LONG_BASE_RECIPE = tuple(
+    "task.env.episode_length_s=16.0"
+    if item == "task.env.episode_length_s=10.0" else item
+    for item in EXPECTED_BASE_RECIPE
+)
 
 EXPECTED_JOB_SPECS = {
     "demo_qdot_v1v2_face_w0p4": (
@@ -231,6 +236,40 @@ EXPECTED_JOB_SPECS = {
         "/workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_control_full_stack_free_arm_foot_w0p6",
         ("true", "0.25", "-5.0", "-0.4", "-0.6", "true"),
     ),
+    "demo_qdot_long_carry_free_arm_16s": (
+        "qdot", "pod2/gpu2",
+        "phase1_demo_qdot_long_carry_free_arm_16s_seed3_20260716",
+        "/workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_qdot_long_carry_free_arm_16s",
+        ("true", "0.25", "-5.0", "-0.4", "-0.3", "true"),
+    ),
+}
+LONG_CARRY_JOB_ID = "demo_qdot_long_carry_free_arm_16s"
+EXPECTED_LONG_CARRY_SCREENING_CONTRACT = {
+    "scientific_question": "three_to_four_swing_balance_debt_in_one_episode",
+    "expected_swings_per_episode": [3, 4],
+    "episode_length_s": 16.0,
+    "milestone_rules": {
+        3700: {
+            "offset_from_parent": 200,
+            "decision_scope": "structure_and_activation_only",
+            "sparse_hit_zero_may_stop": False,
+        },
+        4000: {
+            "offset_from_parent": 500,
+            "decision_scope": "safety_and_balance_debt",
+            "sparse_hit_zero_may_stop": False,
+        },
+        4500: {
+            "offset_from_parent": 1000,
+            "decision_scope": "overnight_demo_portfolio_ranking",
+            "sparse_hit_zero_may_stop": False,
+        },
+    },
+    "launch_gate": {
+        "required_slot": "pod2/gpu2",
+        "required_prelaunch_occupancy": 3,
+        "fourth_slot_only": True,
+    },
 }
 EXPECTED_DELTA_KEYS = (
     "checkpoint_path", "++task.rewards.free_wrist_vel_mimic",
@@ -1250,12 +1289,12 @@ def load_queue(path: Path) -> dict[str, Any]:
             )
 
     jobs = queue.get("jobs")
-    if not isinstance(jobs, list) or len(jobs) != 6:
-        raise DemoQueueError("exactly six demo rows are required")
+    if not isinstance(jobs, list) or len(jobs) != 7:
+        raise DemoQueueError("exactly seven demo rows are required")
     if [job.get("id") for job in jobs] != list(EXPECTED_JOB_SPECS):
-        raise DemoQueueError("six job ids/order changed")
+        raise DemoQueueError("seven job ids/order changed")
     if [job.get("resource", {}).get("required_slot") for job in jobs] != EXPECTED_SLOTS:
-        raise DemoQueueError("jobs must round-robin Pod2 GPU0/GPU1")
+        raise DemoQueueError("jobs 1-6 must alternate GPU0/GPU1; job 7 must use GPU2")
     ids: set[str] = set()
     runs: set[str] = set()
     for job in jobs:
@@ -1268,13 +1307,19 @@ def load_queue(path: Path) -> dict[str, Any]:
         parent_name, expected_slot, expected_run_name, expected_run_dir, knobs = (
             EXPECTED_JOB_SPECS[job_id]
         )
-        if set(job) != {
+        expected_job_fields = {
             "id", "human_name", "action", "status", "blocker", "motion",
             "bank", "exam", "source", "runtime_binding", "warm_start",
             "recipe", "seed", "budget", "milestones", "resource",
             "run_name", "run_dir",
-        }:
+        }
+        if job_id == LONG_CARRY_JOB_ID:
+            expected_job_fields.add("screening_contract")
+        if set(job) != expected_job_fields:
             raise DemoQueueError(f"{job_id} has extra or missing job fields")
+        if job_id == LONG_CARRY_JOB_ID:
+            if job.get("screening_contract") != EXPECTED_LONG_CARRY_SCREENING_CONTRACT:
+                raise DemoQueueError(f"{job_id} screening contract changed")
         if job.get("status") != ("blocked" if pending else "ready"):
             raise DemoQueueError(f"{job_id} status does not match activation state")
         if pending and not isinstance(job.get("blocker"), str):
@@ -1329,14 +1374,18 @@ def load_queue(path: Path) -> dict[str, Any]:
         recipe = job.get("recipe")
         if not isinstance(recipe, dict) or set(recipe) != {"base", "delta"}:
             raise DemoQueueError(f"{job_id} recipe has extra or missing sections")
-        if tuple(recipe.get("base", ())) != EXPECTED_BASE_RECIPE:
+        expected_base = (
+            EXPECTED_LONG_BASE_RECIPE
+            if job_id == LONG_CARRY_JOB_ID else EXPECTED_BASE_RECIPE
+        )
+        if tuple(recipe.get("base", ())) != expected_base:
             raise DemoQueueError(f"{job_id} full base recipe changed")
         if tuple(recipe.get("delta", ())) != expected_delta:
             raise DemoQueueError(f"{job_id} full delta recipe changed")
         values = _values(job)
         expected_values = {
             Q._override_key(raw, job_id): raw.partition("=")[2]
-            for raw in (*EXPECTED_BASE_RECIPE, *expected_delta)
+            for raw in (*expected_base, *expected_delta)
         }
         if values != expected_values:
             raise DemoQueueError(f"{job_id} final Hydra key/value mapping changed")
@@ -1346,7 +1395,9 @@ def load_queue(path: Path) -> dict[str, Any]:
             "checkpoint_tolerant": "false",
             "checkpoint_allow_missing_contract": "false",
             "checkpoint_allow_contract_mismatch": "true",
-            "task.env.episode_length_s": "10.0",
+            "task.env.episode_length_s": (
+                "16.0" if job_id == LONG_CARRY_JOB_ID else "10.0"
+            ),
             "task.rewards.racket_position_weight": "14.0",
             "task.rewards.racket_velocity_weight": "10.0",
             "task.rewards.racket_normal_weight": "5.0",
@@ -1435,6 +1486,8 @@ def _demo_claim(
     }
     content["formal_exact_eligible"] = False
     content["source_contract_files"] = dict(EXPECTED_SOURCE_CONTRACT_FILES)
+    if job["id"] == LONG_CARRY_JOB_ID:
+        content["screening_contract"] = dict(job["screening_contract"])
     digest = _canonical_sha256(content)
     argv = [
         *content["training_argv_without_claim"],
@@ -1536,6 +1589,26 @@ export KIT_BOOT_TIMEOUT_S={Q.KIT_BOOT_TIMEOUT_SECONDS}
 printf '%s\n' phase=first_iter demo_only=true exact_eligible=false strict_full_state_resume_proven=true expected_lineage_exact=0 >> {shlex.quote(run_dir + '/run.log.launch')}
 """
     return Q._gpu_launch_lock_script(slot, body)
+
+
+def _assign_demo(
+    queue: dict[str, Any], occupancy: dict[str, int],
+    existing_ids: set[str] | None = None,
+) -> list[tuple[dict[str, Any], Any]]:
+    """Apply the seventh row's fourth-slot-only launch gate.
+
+    The generic scheduler correctly enforces capacity, but it intentionally has
+    no experiment-specific notion of "only add the fourth colocated trainer".
+    Keep that policy local to this demo queue and re-check it from the same live
+    occupancy snapshot used for assignment.
+    """
+
+    assignments = Q._assign(queue, occupancy, existing_ids or set())
+    return [
+        (job, slot)
+        for job, slot in assignments
+        if job["id"] != LONG_CARRY_JOB_ID or occupancy.get(slot.name) == 3
+    ]
 
 
 def cmd_plan(queue: dict[str, Any]) -> dict[str, Any]:
@@ -1704,7 +1777,7 @@ def cmd_fill(
         for _ in range(count):
             occupancy, claims = Q.live_snapshot(queue)
             effective = Q._effective_occupancy(queue, occupancy, claims)
-            assignments = Q._assign(queue, effective, set(claims))
+            assignments = _assign_demo(queue, effective, set(claims))
             if not assignments:
                 break
             job, slot = assignments[0]

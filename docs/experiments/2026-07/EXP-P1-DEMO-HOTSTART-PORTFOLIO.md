@@ -1,4 +1,4 @@
-# EXP-P1-DEMO-HOTSTART-PORTFOLIO — 今夜六个组合方案的严格续训
+# EXP-P1-DEMO-HOTSTART-PORTFOLIO — 今夜七个组合方案的严格续训
 
 - 状态：`activated，首批点火待执行`
 - 阶段/轴：阶段 1，面向次日演示的组合方案
@@ -14,7 +14,7 @@
 ## 问题与诚实边界
 
 问题不是“单独哪个 Reward 有因果作用”，而是：在剩余一晚内，能否把已经出现方向信号的机制组合成多个
-可测试候选。六条都使用严格全状态续训：policy、value function 和 optimizer 一起从母本继续；不是从零再等
+可测试候选。七条都使用严格全状态续训：policy、value function 和 optimizer 一起从母本继续；不是从零再等
 学习起步。
 
 这批故意允许母本训练合同与新组合不同，因此 `checkpoint_allow_contract_mismatch=true`。训练器会把所有
@@ -32,9 +32,9 @@ vendor MuJoCo 通过证据。
 | 共同训练项 | seed 3；4096 environments；episode 10 秒；击球位置/速度/拍面 Reward=`14/10/5` |
 | 追加预算 | 5001 updates；每 100 保存 |
 | 绝对 checkpoint | `3700/4000/4500/5500/7500`，即母本后 `+200/+500/+1000/+2000/+4000` |
-| 资源 | 只允许 Pod2 GPU0/GPU1，按 0→1 逐圈；今晚实测上限每卡四条 |
+| 资源 | 前六条只允许 Pod2 GPU0/GPU1，按 0→1 逐圈；第七条只允许 GPU2 第四槽；今晚实测上限每卡四条 |
 
-## 六个候选
+## 七个候选
 
 | 候选 | 母本 | 组合 |
 | --- | --- | --- |
@@ -44,6 +44,7 @@ vendor MuJoCo 通过证据。
 | 自由非击球臂版 | V1+V2 | qdot `-2.5` + 拍面 `-0.4` + 非击球臂不模仿 |
 | 保守模仿版 | 普通对照 | qdot `-5` + 拍面 `-0.4`，不放松两项模仿 |
 | 全栈版 | 普通对照 | 两项模仿放松 + qdot `-5` + 拍面 `-0.4` + 脚朝向 `-0.6` + 自由非击球臂 |
+| 16 秒长回合版 | qdot | 两项模仿放松 + qdot `-5` + 拍面 `-0.4` + 脚朝向 `-0.3` + 自由非击球臂；同 episode 连续 3–4 拍观察平衡债 |
 
 这里比较的是“明天哪个组合更可能可用”，不是把不同母本之间的差异解释成单一机制效果。
 
@@ -62,7 +63,7 @@ vendor MuJoCo 通过证据。
    `ready`；该切换不自动点火或重试。
 4. 六条 scaleout 的 `model_500` 全部保全后，若 Pod2 GPU0/GPU1 当前各不超过三条，可先用第 4 槽发
    job1/job2，不必为此停现役。其余四组合只在按独立证据精确停止四条弱臂后逐圈补入；保留 GPU0 的
-   V1-only 和 GPU1 的 foot-`-0.6`，最终仍为每卡四条。GPU2 的后续候选不塞进本 v2。
+   V1-only 和 GPU1 的 foot-`-0.6`，最终仍为每卡四条。第七条仅在 GPU2 已有三条且第 4 槽可用时发射。
 5. launch 成功前必须在日志同时看到显式 hard-contract mismatch、从 snapshot model-3500 恢复到
    iteration 3500 和 `optimizer=resumed`；在同一 GPU launch lock 内、调用 trainer 前，还要把该 job 的
    snapshot checkpoint/hard/claim/binding 四个 file SHA 与 activated queue 再对拍，关闭 verify SSH 到 load
@@ -72,6 +73,8 @@ vendor MuJoCo 通过证据。
    都失败。失败只写 exact identity 人工处置记录，不自动发信号或重试。
 7. `+200/+500/+1000` 看是否启动、finite、机制是否真的激活和是否明显崩坏；只在真实击球后才有意义的
    稀疏回台指标，样本不足时继续。`+2000/+4000` 才用于次日候选排序。
+   对第七条，`+200` 只判结构/激活，`+500` 才判安全和平衡债，`+1000` 才进入候选排序；稀疏命中为零
+   不能在这些早期节点杀臂。
 8. 任一 namespace 失败都保留，不自动 replay；本批不授权第二 seed、正式晋级、真机或 broad process signal。
 
 历史母本的完整 recipe 仍以其 canonical self-bound queue claim + run binding 账本为信任边界；本轮会反向验证
@@ -88,6 +91,7 @@ snapshot/load 时序修复。
 | V1+V2 母本自由臂 `phase1_demo_v1v2_qdot_w2p5_face_w0p4_free_arm_seed3_20260716` | ready | 等弱臂精确退出后的 GPU1 槽 | demo-only |
 | 普通母本保守模仿 `phase1_demo_control_qdot_w5_face_w0p4_seed3_20260716` | ready | 等第二个 GPU0 换槽 | demo-only |
 | 普通母本全栈 `phase1_demo_control_full_stack_free_arm_foot_w0p6_seed3_20260716` | ready | 等第二个 GPU1 换槽 | demo-only |
+| qdot 母本 16 秒长回合 `phase1_demo_qdot_long_carry_free_arm_16s_seed3_20260716` | ready | 只等 GPU2 第四槽；早判规则已绑定进 claim | demo-only |
 
 ## 复现
 
@@ -109,7 +113,7 @@ python3 scripts/run_phase1_demo_hotstart_queue.py \
 
 两条 parent 命令默认都只是 dry-run；正式执行 inspect 使用独立确认词。正式 attest 会先再跑一遍只读 inspect，
 它通过后才消费 v2 snapshot namespace。receipt 与七类 SHA 已由唯一运行回填；当前 activated 配置及其
-pending 反事实 fixture 共 `17` 个专项测试通过。`fill` 仍会按现场容量和已有 claim fail closed；本页尚无
+pending 反事实 fixture 共 `19` 个专项测试通过。`fill` 仍会按现场容量和已有 claim fail closed；本页尚无
 后代 Pod 行为结果。
 
 ## 决定

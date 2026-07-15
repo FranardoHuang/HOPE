@@ -2537,10 +2537,10 @@ logger/sidecar receipt。virtual 结果仍是解析 Phase A，PhysicalBall Phase
 [接口](../interfaces/sparse_reward_eligibility_ledger.md)与
 [操作](../operations/run_sparse_reward_milestone_classifier.md)。
 
-#### 次日演示六组合的 inexact 严格续训门
+#### 次日演示七组合的 inexact 严格续训门
 
 为避免最后一晚再从零等待，新增 Pod2-only 专用续训 runner；generic lean queue 的 fresh-only 拒绝规则没有
-放宽。六条都从 qdot、V1+V2 或普通对照的 `model_3500.pt` 严格加载 policy/value/optimizer，追加 5001
+放宽。七条都从 qdot、V1+V2 或普通对照的 `model_3500.pt` 严格加载 policy/value/optimizer，追加 5001
 updates，并显式设置 `checkpoint_tolerant=false`、不允许缺 hard contract、允许合同变化。合同变化意味着所有
 后代永久 formal-ineligible；它们只能用于演示候选排序，不能当正式因果/fresh 证据。
 
@@ -2550,11 +2550,16 @@ finite、embedded iter=3500 与 schema-3 hard/claim 双绑定；通过后唯一�
 binding `O_EXCL` 复制到只读 fixed snapshots，并只对 snapshot 重验、写新路径 receipt。旧 v1 receipt 不可复用；
 2026-07-16 02:10 CST 的唯一 inspect/attest 已通过并发布 receipt file SHA
 `fd200bd65ee00d33fb50a73f5de8d011cd810498ef626a3ca9d3a63b5bff2f34`；checkpoint/hard/claim/binding
-SHA 已回填，六行显式切到 ready。六个旧 scaleout 的 model500
+SHA 已回填，前六行显式切到 ready。六个旧 scaleout 的 model500
 证据都保全且 GPU0/GPU1 occupancy 各 `<=3` 时，v2 可先用第 4 槽发前两条，不要求先停；其余四条只在
 精确停止四个弱臂后补入，并保留 GPU0 V1-only/GPU1 foot-`-0.6`，最终每卡四条。focused host 回归
 `17` 个专用测试及相邻队列回归通过；已有 parent snapshot provenance，但尚无后代 Pod 启动或行为结果，
-故 G05 保持 `Partial`。详见
+第七条不修改前六条 recipe 或 claim：它只用 qdot snapshot，在独立的 16 秒 base recipe 中把
+`task.env.episode_length_s` 从 10 秒替换一次（Hydra key 不重复），并组合 V1/V2、qdot `-5`、拍面
+`-0.4`、脚朝向 `-0.3` 和自由非击球臂。它硬绑 GPU2 第四槽，专门测同 episode 连续 3–4 拍累积的平衡债；
+claim 绑定 `+200` 只判结构/激活、`+500` 判安全/平衡、`+1000` 排演示候选，稀疏命中为零不可早停。
+前六条 canonical claim digest 的回归逐项不变；专项测试扩为 `19` 个。未有运行证据，故 G05 保持
+`Partial`。详见
 [实验卷宗](../experiments/2026-07/EXP-P1-DEMO-HOTSTART-PORTFOLIO.md)。
 
 每条 launch 的 `phase=first_iter` 现在还要求日志同时证明 explicit hard-contract mismatch、从 snapshot
