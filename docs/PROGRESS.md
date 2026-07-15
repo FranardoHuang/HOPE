@@ -29,6 +29,13 @@
   `419643/420298/421479/422126/422783/423502`，除已归档 attempt-1 外 fatal0。当前只是满池启动证据，
   新格尚无 model-200，不作行为胜负。
 
+- 稀疏 Reward milestone 早筛已补 E1 资格账本：同一步整数链覆盖 exact strike→virtual
+  capture→解析 net/landing/legal return（分动作）与 qdot observed→active→excess；只写 receipt 的五态
+  classifier 固定总 `100`、每动作 `50`、连续两个 milestone，任何状态都不自动停 trainer。focused
+  `14+4+18 passed`；旧 live source 不可回填，PhysicalBall Phase B 仍未测。见
+  [实验](experiments/2026-07/EXP-P1-SPARSE-REWARD-ELIGIBILITY.md)与
+  [接口](interfaces/sparse_reward_eligibility_ledger.md)。
+
 - Pod2 GPU2 的无随挥回放长曲线已真正点火：qdot/V1+V2/control-retry exact PGID
   `411519/412204/412899` 均返回 `KIT_BOOT_READY`，04:15 UTC 分别到 iter `24/9/2`，fatal0 且
   claim/binding present；GPU2 `97%`、17154 MiB。GPU0/1 的 Yikang PID `379550/396374` 未触碰。

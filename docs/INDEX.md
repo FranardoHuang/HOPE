@@ -99,6 +99,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | --- | --- |
 | 构建与测试 | [`build_and_test.md`](operations/build_and_test.md) |
 | Isaac 训练 | [`run_training.md`](operations/run_training.md) |
+| 稀疏 Reward milestone 资格判读 | [`run_sparse_reward_milestone_classifier.md`](operations/run_sparse_reward_milestone_classifier.md) |
 | A0/A1 非击球臂模仿配对 | [`run_phase1_non_striking_arm_imitation_a01.md`](operations/run_phase1_non_striking_arm_imitation_a01.md) |
 | 随挥结束 natural-wrap 教师状态 capture/attestation | [`run_post_swing_teacher_capture.md`](operations/run_post_swing_teacher_capture.md) |
 | 统一队列、排序与算力 | [`runbook.md`](runbook.md) |
@@ -135,6 +136,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | 球拍接触几何 | [`racket_contact_geometry.md`](interfaces/racket_contact_geometry.md) |
 | Plant 语义 | [`plant_semantics_contract.md`](interfaces/plant_semantics_contract.md) |
 | T1 事件/恢复时序 | [`t1_event_training_contract.md`](interfaces/t1_event_training_contract.md) |
+| 稀疏 Reward 资格账本 | [`sparse_reward_eligibility_ledger.md`](interfaces/sparse_reward_eligibility_ledger.md) |
 | 横向扰动 scheduler→adapter 事务 | [`lateral_perturbation_adapter_contract.md`](interfaces/lateral_perturbation_adapter_contract.md) |
 | q50 持久启动与只读复核 | [`q50_persistent_supervisor_contract.md`](interfaces/q50_persistent_supervisor_contract.md) |
 | 轻量训练 queue claim→真实日志→checkpoint 绑定 | [`lean_training_run_binding.md`](interfaces/lean_training_run_binding.md) |
