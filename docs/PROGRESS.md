@@ -13,6 +13,13 @@
 
 ## 2026-07-15
 
+- 新的 10000-update 无随挥回放漏斗已在结果前冻结：普通对照、关节速度边界惩罚 `-5`、击球窗模仿放松
+  三格同 source/题库/seed，只落 Pod2 GPU2。exact source `2c2d70d...607e` 的 4096-environment
+  full-scene terminal probe 与三格 no-Kit Hydra compose 均通过；host 队列/调度回归 `54 passed`。
+  200/500/1000 只用于机制与趋势早筛，2000/3000 看中段，6000/10000 看完整曲线；暂不授权第二
+  seed/judge/晋级。见
+  [实验卷宗](experiments/2026-07/EXP-P1-LONG-NO-REPLAY-FUNNEL.md)。
+
 - post-swing teacher v3 的唯一 attestor attempt-2 已在 Pod2 从 clean detached `a38b7e9` 自然 rc0：固定
   authorization 来自 clean `main@ff9a253`，4096-state receipt 为 4103 bytes / SHA-256
   `e20a6989...d2aba4`。PGID `403786` 已 absent；merged-main controller status 对 immutable v3 plan、原

@@ -2433,3 +2433,16 @@ model、source/asset closure 与空 PGID，result file SHA-256 `4b12854c...0b27`
 `launch_authorized=true`。同一次 `fill --count 2` 随后顺序发射 control/treatment：Pod2 GPU1/GPU2 exact
 PGID=`380610/381237`、claim=`576724de...a49d` / `1a529430...4c5`，均已越过首迭代，最近到 `25/11` 且
 fatal0；GPU0 仍只有 Yikang。尚无 milestone checkpoint 或 activation/行为结果，G05 继续 `Partial`。
+
+#### 10000-update 无随挥回放三格漏斗
+
+为避免把 1000-update 早筛误写成最终消融，新增三条同源、同题库、同 seed 的长曲线：普通对照、
+[`qdot-limit hinge`](../DEFINITIONS.md#qdot-limit-hinge) 权重 `-5`、以及 V1+V2 击球窗模仿放松。
+三格共同关闭随挥状态回放，两个 treatment 分别只相对共享对照改变一个机制 bundle；不比较两个
+treatment，也不声称交互。exact source `2c2d70d...607e` 已有 4096-environment full-scene terminal
+result `4b12854c...0b27`，三条最终 argv 的远端 no-Kit compose 均返回
+`hydra=exact-no-kit-compose`。机器队列强制三条 `required_slot=pod2/gpu2`，不会发到 Pod1 或 Pod2
+GPU0/GPU1。200/500/1000 只可停损/看方向，2000/3000 看中段，6000/10000 才形成完整训练曲线；
+仍需 immutable MuJoCo/vendor 同卷，不能直接采用、买第二 seed 或晋级。训练尚未产生 checkpoint，
+G05 保持 `Partial`；详见
+[实验卷宗](../experiments/2026-07/EXP-P1-LONG-NO-REPLAY-FUNNEL.md)。
