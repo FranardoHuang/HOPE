@@ -49,6 +49,13 @@ receipt 的 attestation sub-schema=`2` 必须把两条源码谱系分开，不�
 变绿。trainer 返回的 hard-contract summary 同时保留两条谱系与 retry authorization，不能只保留 capture
 producer。
 
+trainer consumer 不能只检查上述 commit/SHA “长得像合法 hex”。启用外生 teacher 时，训练配置必须成对
+提供 `post_swing_teacher_retry_authorization`（[随挥教师重签授权](../DEFINITIONS.md)文件路径）与
+`post_swing_teacher_retry_authorization_sha256`（该文件的 exact byte SHA-256）。loader 从同一份只读 byte
+snapshot 解析 authorization，派生允许的 capture/attestor tuples，再与 receipt 做完整相等比较；合法的
+40/64-hex 替换值也必须拒绝。authorization 的完整规范化内容、文件 SHA 与 basename 进入
+`motion_post_swing_replay.teacher_receipt.retry_authorization` hard contract，不能只保留 receipt 自述的 ID/SHA。
+
 v3 attempt-1 在 `_claim()` 的 embedded digest 检查处已经停止；只证明第一个观测到的 blocker 是 producer
 按 compact content bytes（无末尾换行）计算 digest、旧 attestor 却误用 newline-terminated document bytes。
 capture arrays finite 是独立证据，checkpoint/lineage/source/motion/velocity-limit 等后续 attestation gates 在

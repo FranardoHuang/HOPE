@@ -33,6 +33,7 @@ import numpy as np
 SCHEMA_VERSION = 2
 ARTIFACT_KIND = "hope_post_swing_teacher_state_receipt"
 ATTESTATION_KIND = "hope_post_swing_teacher_capture_attestation"
+RETRY_AUTHORIZATION_KIND = "hope_post_swing_teacher_attestor_retry_authorization"
 CAPTURE_RESULT_KIND = "hope_post_swing_natural_wrap_capture_result"
 CAPTURE_CLAIM_KIND = "hope_post_swing_natural_wrap_exclusive_claim"
 CAPTURE_RESULT_NAME = "natural_wrap_capture.json"
@@ -117,6 +118,45 @@ _RETRY_AUTHORIZATION_KEYS = {
     "authorization_id",
     "file_sha256",
     "v3_plan_file_sha256",
+}
+_RETRY_AUTHORIZATION_DOCUMENT_KEYS = {
+    "schema_version",
+    "artifact_kind",
+    "authorization_id",
+    "v3_plan",
+    "capture",
+    "teacher",
+    "capture_source",
+    "attestor_source",
+    "decision",
+}
+_RETRY_AUTHORIZATION_PLAN_KEYS = {"plan_id", "file_sha256"}
+_RETRY_AUTHORIZATION_CAPTURE_KEYS = {
+    "output_directory",
+    "output_receipt",
+    "capture_claim_sha256",
+    "states_sha256",
+    "result_sha256",
+    "state_count",
+}
+_RETRY_AUTHORIZATION_TEACHER_KEYS = {
+    "checkpoint_sha256",
+    "hard_contract_sha256",
+    "launch_claim_content_sha256",
+}
+_RETRY_AUTHORIZATION_CAPTURE_SOURCE_KEYS = {
+    "commit",
+    "producer_source_sha256",
+}
+_RETRY_AUTHORIZATION_ATTESTOR_SOURCE_KEYS = {
+    "commit",
+    "attestor_source_sha256",
+}
+_RETRY_AUTHORIZATION_DECISION = {
+    "capture_retry_authorized": False,
+    "attestor_attempt2_authorized": True,
+    "first_reset_probe_authorized": False,
+    "scientific_training_authorized": False,
 }
 _CAPTURE_EVIDENCE_KEYS = {
     "producer_source_sha256",
@@ -338,6 +378,100 @@ def _exact_bool(value: Any, label: str) -> bool:
     return value
 
 
+def _load_retry_authorization(
+    path: str | Path, expected_sha256: str
+) -> dict[str, Any]:
+    """Load the frozen retry authorization that independently names both source tuples."""
+
+    path = Path(path)
+    expected_sha256 = _require_sha(
+        expected_sha256, "expected retry authorization SHA-256"
+    )
+    raw = _read_regular_file_once(path, "post-swing retry authorization")
+    actual_sha256 = hashlib.sha256(raw).hexdigest()
+    if actual_sha256 != expected_sha256:
+        raise PostSwingTeacherError(
+            "retry authorization byte SHA-256 does not match the configured digest"
+        )
+    document = _require_exact_keys(
+        _strict_json_bytes(raw, "post-swing retry authorization"),
+        _RETRY_AUTHORIZATION_DOCUMENT_KEYS,
+        "post-swing retry authorization",
+    )
+    if (
+        type(document["schema_version"]) is not int
+        or document["schema_version"] != 1
+        or document["artifact_kind"] != RETRY_AUTHORIZATION_KIND
+        or type(document["authorization_id"]) is not str
+        or not document["authorization_id"]
+    ):
+        raise PostSwingTeacherError("post-swing retry authorization header is malformed")
+    plan = _require_exact_keys(
+        document["v3_plan"], _RETRY_AUTHORIZATION_PLAN_KEYS, "authorization v3_plan"
+    )
+    capture = _require_exact_keys(
+        document["capture"], _RETRY_AUTHORIZATION_CAPTURE_KEYS, "authorization capture"
+    )
+    teacher = _require_exact_keys(
+        document["teacher"], _RETRY_AUTHORIZATION_TEACHER_KEYS, "authorization teacher"
+    )
+    capture_source = _require_exact_keys(
+        document["capture_source"],
+        _RETRY_AUTHORIZATION_CAPTURE_SOURCE_KEYS,
+        "authorization capture_source",
+    )
+    attestor_source = _require_exact_keys(
+        document["attestor_source"],
+        _RETRY_AUTHORIZATION_ATTESTOR_SOURCE_KEYS,
+        "authorization attestor_source",
+    )
+    decision = _require_exact_keys(
+        document["decision"],
+        set(_RETRY_AUTHORIZATION_DECISION),
+        "authorization decision",
+    )
+    for label, value, pattern in (
+        ("authorization plan", plan["file_sha256"], _SHA256),
+        ("authorization capture claim", capture["capture_claim_sha256"], _SHA256),
+        ("authorization states", capture["states_sha256"], _SHA256),
+        ("authorization result", capture["result_sha256"], _SHA256),
+        ("authorization checkpoint", teacher["checkpoint_sha256"], _SHA256),
+        ("authorization hard contract", teacher["hard_contract_sha256"], _SHA256),
+        ("authorization launch claim", teacher["launch_claim_content_sha256"], _SHA256),
+        ("authorization capture source commit", capture_source["commit"], _COMMIT),
+        (
+            "authorization capture producer source",
+            capture_source["producer_source_sha256"],
+            _SHA256,
+        ),
+        ("authorization attestor source commit", attestor_source["commit"], _COMMIT),
+        (
+            "authorization attestor source bytes",
+            attestor_source["attestor_source_sha256"],
+            _SHA256,
+        ),
+    ):
+        _require_sha(value, label, pattern=pattern)
+    _positive_int(capture["state_count"], "authorization capture state_count")
+    if (
+        type(plan["plan_id"]) is not str
+        or not plan["plan_id"]
+        or type(capture["output_directory"]) is not str
+        or not Path(capture["output_directory"]).is_absolute()
+        or type(capture["output_receipt"]) is not str
+        or not Path(capture["output_receipt"]).is_absolute()
+        or decision != _RETRY_AUTHORIZATION_DECISION
+    ):
+        raise PostSwingTeacherError("post-swing retry authorization content is malformed")
+    if Path(capture["output_receipt"]) != Path(capture["output_directory"]) / "teacher_receipt.json":
+        raise PostSwingTeacherError("authorization output receipt leaves its capture directory")
+    return {
+        "file_basename": path.name,
+        "file_sha256": actual_sha256,
+        "content": document,
+    }
+
+
 def _shape(value: Any, label: str) -> list[int]:
     if not isinstance(value, list) or not value:
         raise PostSwingTeacherError(f"{label} must be a non-empty integer list")
@@ -370,6 +504,8 @@ def load_post_swing_teacher_states(
     receipt_path: str | Path,
     expected_receipt_sha256: str,
     *,
+    retry_authorization_path: str | Path,
+    expected_retry_authorization_sha256: str,
     expected_motion_sha256: Sequence[str],
     expected_joint_names: Sequence[str],
     expected_joint_velocity_limits: Sequence[float],
@@ -381,6 +517,10 @@ def load_post_swing_teacher_states(
     """Load and validate one immutable natural-wrap teacher-state artifact."""
 
     receipt_path = Path(receipt_path)
+    authorization = _load_retry_authorization(
+        retry_authorization_path, expected_retry_authorization_sha256
+    )
+    authorization_content = authorization["content"]
     expected_receipt_sha256 = _require_sha(
         expected_receipt_sha256, "expected teacher receipt SHA-256"
     )
@@ -521,6 +661,35 @@ def load_post_swing_teacher_states(
         != checkpoint_att["training_launch_claim_sha256"]
     ):
         raise PostSwingTeacherError("teacher self-summary differs from the one-shot attestation")
+    authorized_capture_source = {
+        **authorization_content["capture_source"],
+        "clean": True,
+    }
+    authorized_attestor_source = {
+        **authorization_content["attestor_source"],
+        "clean": True,
+    }
+    authorized_retry_summary = {
+        "authorization_id": authorization_content["authorization_id"],
+        "file_sha256": authorization["file_sha256"],
+        "v3_plan_file_sha256": authorization_content["v3_plan"]["file_sha256"],
+    }
+    if (
+        capture_source != authorized_capture_source
+        or attestor_source != authorized_attestor_source
+        or retry_authorization != authorized_retry_summary
+    ):
+        raise PostSwingTeacherError(
+            "teacher source tuples differ from the frozen retry authorization"
+        )
+    if authorization_content["teacher"] != {
+        "checkpoint_sha256": checkpoint_sha,
+        "hard_contract_sha256": training_contract_sha,
+        "launch_claim_content_sha256": checkpoint_att["training_launch_claim_sha256"],
+    }:
+        raise PostSwingTeacherError(
+            "teacher identity differs from the frozen retry authorization"
+        )
 
     motion_clips = _motion_contract(document["motion_clips"], expected_motion_sha256)
     states = _require_exact_keys(document["states"], _STATE_KEYS, "states")
@@ -534,6 +703,21 @@ def load_post_swing_teacher_states(
     if count > buffer_size:
         raise PostSwingTeacherError(
             f"teacher state count {count} exceeds post_swing_buffer_size {buffer_size}"
+        )
+    authorized_capture = authorization_content["capture"]
+    if {
+        "capture_claim_sha256": authorized_capture["capture_claim_sha256"],
+        "states_sha256": authorized_capture["states_sha256"],
+        "result_sha256": authorized_capture["result_sha256"],
+        "state_count": authorized_capture["state_count"],
+    } != {
+        "capture_claim_sha256": capture_claim_sha,
+        "states_sha256": states["sha256"],
+        "result_sha256": capture_result_sha,
+        "state_count": count,
+    }:
+        raise PostSwingTeacherError(
+            "capture identity differs from the frozen retry authorization"
         )
 
     joint_names = states["joint_names"]
@@ -728,6 +912,7 @@ def load_post_swing_teacher_states(
             "attestor_source": dict(attestor_source),
             "retry_authorization": dict(retry_authorization),
         },
+        "retry_authorization": authorization,
         "motion_clips": motion_clips,
         "joint_names": list(joint_names),
         "velocity_limits": {

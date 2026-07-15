@@ -381,6 +381,13 @@ clean detached `a38b7e9e...293cf` 运行脚本（SHA `03611b56...310f`），auth
 提供（SHA `87fd1c71...dfda`），并把 `--capture-source-checkout` 明确指回原始 clean `906a3c3` checkout；任一 source
 dirty、commit/SHA 重绑或二者交换均 fail closed。该 source fix 仍不等于 attempt-2 runtime 通过。
 
+consumer 红队随后发现 trainer loader 仍只验证 tuple 是合法 40/64-hex、`clean=true`，却没有把合法 hex
+值逐项对回 authorization，故该版本仍是 NO-MERGE。successor 增加成对的 authorization path/SHA 训练配置；
+loader 从 exact frozen authorization byte snapshot 派生 capture/attestor tuples，并把完整 authorization 内容
+写入 schema-3 hard contract。capture/attestor commit 或 source SHA 换成另一组合法 hex 的四类反例均
+fail closed；receipt/authorization 缺任一配对项同样在环境创建时拒绝。attempt-2、首 reset 与训练仍未执行。
+补齐 override/loader 回归后的 operation 六文件 host suite 为 `181 passed`（一个既有 duplicate-ZIP warning）。
+
 ## 离线复现
 
 本提交不连接 Pod、不写 claim、不运行 probe/trainer/judge：

@@ -644,6 +644,10 @@ def attest(args: argparse.Namespace) -> dict[str, Any]:
         teacher.load_post_swing_teacher_states(
             temp_receipt,
             _sha(receipt_raw),
+            retry_authorization_path=args.retry_authorization,
+            expected_retry_authorization_sha256=(
+                args.expected_retry_authorization_sha256
+            ),
             expected_motion_sha256=[row["sha256"] for row in motions],
             expected_joint_names=joint_names,
             expected_joint_velocity_limits=joint_limits,

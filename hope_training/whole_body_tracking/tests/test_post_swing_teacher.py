@@ -156,11 +156,69 @@ def _write_fixture(tmp_path: Path, *, count: int = 4, joints: int = 3):
     )
     receipt["attestation"]["capture_result_sha256"] = sha256_file(capture_path)
     receipt_path = tmp_path / "teacher_receipt.json"
+    authorization = {
+        "schema_version": 1,
+        "artifact_kind": MODULE.RETRY_AUTHORIZATION_KIND,
+        "authorization_id": "test-v3-attestor-attempt2",
+        "v3_plan": {"plan_id": tmp_path.name, "file_sha256": "c" * 64},
+        "capture": {
+            "output_directory": str(tmp_path.absolute()),
+            "output_receipt": str(receipt_path.absolute()),
+            "capture_claim_sha256": sha256_file(claim_path),
+            "states_sha256": sha256_file(payload),
+            "result_sha256": sha256_file(capture_path),
+            "state_count": count,
+        },
+        "teacher": {
+            "checkpoint_sha256": "2" * 64,
+            "hard_contract_sha256": "3" * 64,
+            "launch_claim_content_sha256": "5" * 64,
+        },
+        "capture_source": {
+            "commit": "6" * 40,
+            "producer_source_sha256": "8" * 64,
+        },
+        "attestor_source": {
+            "commit": "7" * 40,
+            "attestor_source_sha256": "9" * 64,
+        },
+        "decision": dict(MODULE._RETRY_AUTHORIZATION_DECISION),
+    }
+    authorization_path = tmp_path / "retry_authorization.json"
+    authorization_path.write_text(
+        json.dumps(authorization, allow_nan=False, separators=(",", ":"), sort_keys=True)
+        + "\n",
+        encoding="utf-8",
+    )
+    receipt["attestation"]["retry_authorization"]["file_sha256"] = sha256_file(
+        authorization_path
+    )
     receipt_path.write_text(
         json.dumps(receipt, allow_nan=False, separators=(",", ":"), sort_keys=True) + "\n",
         encoding="utf-8",
     )
     return receipt_path, motion_paths, joint_names, receipt
+
+
+def _rewrite_authorization_binding(receipt_path: Path, receipt: dict) -> None:
+    authorization_path = receipt_path.parent / "retry_authorization.json"
+    authorization = json.loads(authorization_path.read_text(encoding="utf-8"))
+    authorization["capture"] = {
+        "output_directory": str(receipt_path.parent.absolute()),
+        "output_receipt": str(receipt_path.absolute()),
+        "capture_claim_sha256": receipt["attestation"]["capture_claim_sha256"],
+        "states_sha256": receipt["states"]["sha256"],
+        "result_sha256": receipt["attestation"]["capture_result_sha256"],
+        "state_count": receipt["states"]["count"],
+    }
+    authorization_path.write_text(
+        json.dumps(authorization, allow_nan=False, separators=(",", ":"), sort_keys=True)
+        + "\n",
+        encoding="utf-8",
+    )
+    receipt["attestation"]["retry_authorization"]["file_sha256"] = sha256_file(
+        authorization_path
+    )
 
 
 def _rewrite_receipt_and_capture(receipt_path: Path, receipt: dict) -> None:
@@ -186,13 +244,23 @@ def _rewrite_receipt_and_capture(receipt_path: Path, receipt: dict) -> None:
         encoding="utf-8",
     )
     receipt["attestation"]["capture_result_sha256"] = sha256_file(capture_path)
+    _rewrite_authorization_binding(receipt_path, receipt)
     receipt_path.write_text(json.dumps(receipt, sort_keys=True) + "\n", encoding="utf-8")
+
+
+def _authorization_kwargs(receipt_path: Path) -> dict:
+    path = receipt_path.parent / "retry_authorization.json"
+    return {
+        "retry_authorization_path": path,
+        "expected_retry_authorization_sha256": sha256_file(path),
+    }
 
 
 def _load(receipt_path, motion_paths, joint_names, *, min_fill=4, buffer_size=8):
     return load_post_swing_teacher_states(
         receipt_path,
         sha256_file(receipt_path),
+        **_authorization_kwargs(receipt_path),
         expected_motion_sha256=[sha256_file(path) for path in motion_paths],
         expected_joint_names=joint_names,
         expected_joint_velocity_limits=[5.0] * len(joint_names),
@@ -215,16 +283,22 @@ def test_exact_receipt_loads_and_returns_hard_contract(tmp_path):
     assert loaded.hard_contract["attestation"]["attestor_source"]["commit"] == "7" * 40
     assert (
         loaded.hard_contract["attestation"]["retry_authorization"]["file_sha256"]
-        == "b" * 64
+        == sha256_file(tmp_path / "retry_authorization.json")
     )
+    assert loaded.hard_contract["retry_authorization"]["content"]["capture_source"] == {
+        "commit": "6" * 40,
+        "producer_source_sha256": "8" * 64,
+    }
 
 
 @pytest.mark.parametrize(
     ("mutation", "message"),
     [
         ("swap_sources", "keys differ"),
-        ("rebind_attestor_commit", "attestor source commit"),
-        ("rebind_attestor_sha", "attestor source bytes"),
+        ("rebind_capture_commit", "source tuples differ"),
+        ("rebind_capture_sha", "source tuples differ"),
+        ("rebind_attestor_commit", "source tuples differ"),
+        ("rebind_attestor_sha", "source tuples differ"),
         ("dirty_capture", "exact schema-3 clean lineage"),
         ("dirty_attestor", "exact schema-3 clean lineage"),
     ],
@@ -236,10 +310,14 @@ def test_receipt_rejects_rebound_or_dirty_source_lineage(tmp_path, mutation, mes
             receipt["attestation"]["attestor_source"],
             receipt["attestation"]["capture_source"],
         )
+    elif mutation == "rebind_capture_commit":
+        receipt["attestation"]["capture_source"]["commit"] = "d" * 40
+    elif mutation == "rebind_capture_sha":
+        receipt["attestation"]["capture_source"]["producer_source_sha256"] = "d" * 64
     elif mutation == "rebind_attestor_commit":
-        receipt["attestation"]["attestor_source"]["commit"] = "not-a-commit"
+        receipt["attestation"]["attestor_source"]["commit"] = "e" * 40
     elif mutation == "rebind_attestor_sha":
-        receipt["attestation"]["attestor_source"]["attestor_source_sha256"] = "not-a-sha"
+        receipt["attestation"]["attestor_source"]["attestor_source_sha256"] = "f" * 64
     elif mutation == "dirty_capture":
         receipt["attestation"]["capture_source"]["clean"] = False
     else:
@@ -249,12 +327,27 @@ def test_receipt_rejects_rebound_or_dirty_source_lineage(tmp_path, mutation, mes
         _load(receipt_path, motions, joints)
 
 
+def test_valid_hex_rebound_authorization_cannot_rebind_receipt_sources(tmp_path):
+    receipt_path, motions, joints, _ = _write_fixture(tmp_path)
+    authorization_path = tmp_path / "retry_authorization.json"
+    authorization = json.loads(authorization_path.read_text(encoding="utf-8"))
+    authorization["capture_source"]["commit"] = "d" * 40
+    authorization["attestor_source"]["attestor_source_sha256"] = "e" * 64
+    authorization_path.write_text(
+        json.dumps(authorization, separators=(",", ":"), sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    with pytest.raises(PostSwingTeacherError, match="source tuples differ"):
+        _load(receipt_path, motions, joints)
+
+
 def test_receipt_rejects_byte_drift_and_wrong_runtime_bindings(tmp_path):
     receipt_path, motions, joints, _ = _write_fixture(tmp_path)
     with pytest.raises(PostSwingTeacherError, match="receipt byte SHA"):
         load_post_swing_teacher_states(
             receipt_path,
             "f" * 64,
+            **_authorization_kwargs(receipt_path),
             expected_motion_sha256=[sha256_file(path) for path in motions],
             expected_joint_names=joints,
             expected_joint_velocity_limits=[5.0] * len(joints),
@@ -267,6 +360,7 @@ def test_receipt_rejects_byte_drift_and_wrong_runtime_bindings(tmp_path):
         load_post_swing_teacher_states(
             receipt_path,
             sha256_file(receipt_path),
+            **_authorization_kwargs(receipt_path),
             expected_motion_sha256=["f" * 64, sha256_file(motions[1])],
             expected_joint_names=joints,
             expected_joint_velocity_limits=[5.0] * len(joints),
@@ -387,6 +481,7 @@ def test_velocity_limits_bind_runtime_and_reject_unsafe_states(tmp_path):
         load_post_swing_teacher_states(
             receipt_path,
             sha256_file(receipt_path),
+            **_authorization_kwargs(receipt_path),
             expected_motion_sha256=[sha256_file(path) for path in motions],
             expected_joint_names=joints,
             expected_joint_velocity_limits=[5.0] * len(joints),
@@ -438,6 +533,7 @@ def test_red_team_array_forgery_seam_is_removed_and_legacy_label_is_rejected(tmp
     del result["evidence"]
     result_path.write_text(json.dumps(result, sort_keys=True) + "\n", encoding="utf-8")
     receipt["attestation"]["capture_result_sha256"] = sha256_file(result_path)
+    _rewrite_authorization_binding(receipt_path, receipt)
     receipt_path.write_text(json.dumps(receipt, sort_keys=True) + "\n", encoding="utf-8")
     with pytest.raises(PostSwingTeacherError, match="keys differ"):
         _load(receipt_path, motions, joints)

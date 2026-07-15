@@ -187,6 +187,11 @@ post-fix clean HEAD 自签自验、不得用 post-fix HEAD 冒充 capture source
 
 后续 probe 的两臂必须引用同一 receipt SHA，并显式设置：
 
+- `post_swing_teacher_retry_authorization`：指向 main tracked 的
+  [随挥教师重签授权](../DEFINITIONS.md)，当前只能是
+  `configs/phase1_post_swing_teacher_capture_v3_attestor_retry_authorization_20260715.json`；
+- `post_swing_teacher_retry_authorization_sha256`：上述文件的 exact byte SHA-256，当前只能是
+  `87fd1c7136d9a6d54546f26367cc83d5dad20e4d8b0f57fba94e6cc207e2dfda`；
 - `post_swing_teacher_root_linear_velocity_limit_mps` / `...angular...`：与 attestor 完全相同的 root 上限；
 - `post_swing_first_reset_min_adopted_count`：预注册 count 下限；
 - `post_swing_first_reset_min_adopted_fraction`：预注册比例下限；
@@ -196,6 +201,12 @@ post-fix clean HEAD 自签自验、不得用 post-fix HEAD 冒充 capture source
 probe 需要在首个 PPO rollout/update 前通过，并证明两臂 hard contract 只在科学自变量上不同；否则保持
 `Partial`，不得发正式 pair、第二 seed、judge 或 promotion。
 
+receipt 路径/SHA 与 authorization 路径/SHA 四项必须同时存在；缺任一项都在建环境时 fail closed。trainer
+loader 会从 authorization 内容派生原始 producer `906a3c3...` / `496a7fa2...` 与 attestor
+`a38b7e9e...` / `03611b56...` 两个 tuple，并逐字段对 receipt；不能用另一组格式合法的 hex 值重绑。
+解析后的完整 authorization 进入 schema-3 training hard contract，保证后续 checkpoint lineage 也带着这条
+外部信任根。
+
 ## 源码验证
 
 ```bash
@@ -204,7 +215,8 @@ pytest -q \
   tests/test_attest_post_swing_teacher.py \
   tests/test_post_swing_play_runtime_compose.py \
   hope_training/whole_body_tracking/tests/test_post_swing_teacher.py \
-  hope_training/whole_body_tracking/tests/test_isaac_bank_exam_adapter.py
+  hope_training/whole_body_tracking/tests/test_isaac_bank_exam_adapter.py \
+  hope_training/whole_body_tracking/tests/test_reward_flags_overrides.py
 
 python3 -m py_compile \
   scripts/build_post_swing_capture_plan_v2.py \
@@ -219,6 +231,7 @@ git diff --check
 ```
 
 2026-07-15 在可导入 Hydra 的本地环境，controller/attestor/teacher 原四文件门曾复现为 `41 passed`；
-加入 observation adapter、v2 result 负测与 content/document canonical 回归后的上述五文件命令复现为
-`96 passed`（另有一个既有 duplicate-ZIP warning），其中 attestor 专项为 `11 passed`。这仍只是 host
+加入 observation adapter、v2 result 负测与 content/document canonical 回归后的旧五文件命令曾复现为
+`96 passed`。补齐 authorization-backed consumer 与 YAML override 后，上述六文件命令复现为
+`181 passed`（另有一个既有 duplicate-ZIP warning），其中 attestor 专项为 `11 passed`。这仍只是 host
 source gate，不能替代 v3 receipt attestation 或首 reset probe。

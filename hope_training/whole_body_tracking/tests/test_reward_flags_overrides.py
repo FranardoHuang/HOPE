@@ -151,6 +151,8 @@ def _make_env_cfg(anchor_pos_none=True):
         post_swing_min_hold=25,
         post_swing_teacher_receipt="",
         post_swing_teacher_receipt_sha256="",
+        post_swing_teacher_retry_authorization="",
+        post_swing_teacher_retry_authorization_sha256="",
         post_swing_teacher_root_linear_velocity_limit_mps=0.0,
         post_swing_teacher_root_angular_velocity_limit_radps=0.0,
         post_swing_require_ready_at_init=False,
@@ -964,6 +966,8 @@ def test_post_swing_teacher_cold_start_overrides_are_explicit_and_typed():
             "motion": {
                 "post_swing_teacher_receipt": "/ignored/teacher/receipt.json",
                 "post_swing_teacher_receipt_sha256": "a" * 64,
+                "post_swing_teacher_retry_authorization": "/ignored/teacher/retry.json",
+                "post_swing_teacher_retry_authorization_sha256": "b" * 64,
                 "post_swing_teacher_root_linear_velocity_limit_mps": 2.0,
                 "post_swing_teacher_root_angular_velocity_limit_radps": 4.0,
                 "post_swing_require_ready_at_init": True,
@@ -978,6 +982,8 @@ def test_post_swing_teacher_cold_start_overrides_are_explicit_and_typed():
     motion = env_cfg.commands.motion
     assert motion.post_swing_teacher_receipt.endswith("receipt.json")
     assert motion.post_swing_teacher_receipt_sha256 == "a" * 64
+    assert motion.post_swing_teacher_retry_authorization.endswith("retry.json")
+    assert motion.post_swing_teacher_retry_authorization_sha256 == "b" * 64
     assert motion.post_swing_require_ready_at_init is True
     assert motion.post_swing_fail_fast_first_reset is True
     assert motion.post_swing_teacher_root_linear_velocity_limit_mps == 2.0
