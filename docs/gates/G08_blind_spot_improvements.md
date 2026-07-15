@@ -602,8 +602,13 @@ global geom ID 当成 robot identity：MuJoCo 先编号 worldbody 自身的 floo
 child-body robot geom 确定性整体 `+4`，并非 robot 几何漂移。schema-v2 只接受 floor=`0`、
 obstacle=`1..4` 和 robot 精确 `+4`；同时逐项守住 robot 相对顺序/名字、root/joint topology、`qpos0`、
 37 个 collision row/mesh 与 canonical collision SHA，任意其他 permutation 或 `1e-9` collision drift
-仍拒绝。v2 focused `36 passed`、完整 B lineage chain `137 passed`、source/static PASS；合入后的 runtime
-重跑、certificate 与动作晋级均未发生，所以 G08 保持 Partial。
+仍拒绝。v2 focused `36 passed`、完整 B lineage chain `137 passed`、source/static PASS。v2 合入
+`main@f214a80` 后的 Pod2 `dry-run` 又在几何循环前 rc2 fail closed：exact 724-byte runtime joint-order
+文件含一行 `#` 人话头和 31 个唯一关节名；upstream L0 parser 明确忽略 blank/comment，table/net snapshot
+reader 却只忽略 blank，误把注释算成第 32 个关节。90-byte log SHA-256 `5c9a5940...f92d`，certificate
+absent；这不是 NPZ/order/bijection 漂移。schema-v3 逐字复制 upstream comment 过滤语义，仍拒绝额外未标注
+metadata 与 duplicate name；production-shaped focused `39 passed`、完整 B lineage chain `140 passed`、
+source/static PASS。合入后的 runtime 重跑、certificate 与动作晋级均未发生，所以 G08 保持 Partial。
 见[桌网实验卷宗](../experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-TABLE-NET.md)和
 [操作文档](../operations/run_motion_backhand_loop_b_table_net_clearance.md)。
 

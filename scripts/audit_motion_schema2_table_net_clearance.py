@@ -35,7 +35,7 @@ import numpy as np
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-PLAN_ID = "motion-franco-backhand-loop-b-table-net-clearance-20260715-v2"
+PLAN_ID = "motion-franco-backhand-loop-b-table-net-clearance-20260715-v3"
 PLAN_STATUS = "preregistered_source_gate_pass_runtime_audit_not_run"
 ASSET_ID = "franco_backhand_loop_b"
 CERTIFICATE_STATUS = "complete_cpu_dense_table_net_clearance_pass_dynamics_blocked"
@@ -1122,7 +1122,14 @@ def _read_names_snapshot(snapshot: FileSnapshot, count: int, label: str) -> tupl
         text = snapshot.data.decode("utf-8")
     except UnicodeDecodeError as exc:
         raise TableNetError(f"{label} is not UTF-8") from exc
-    names = tuple(line.strip() for line in text.splitlines() if line.strip())
+    # Match the frozen upstream L0 reader exactly: the bound runtime joint-order
+    # file intentionally starts with a human-readable comment header.  Comments
+    # are metadata, never joint/body names.
+    names = tuple(
+        line.strip()
+        for line in text.splitlines()
+        if line.strip() and not line.lstrip().startswith("#")
+    )
     if len(names) != count or len(set(names)) != count:
         raise TableNetError(f"{label} must contain exactly {count} unique names")
     return names

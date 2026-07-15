@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "plan_id": "motion-franco-backhand-loop-b-table-net-clearance-20260715-v2",
+  "plan_id": "motion-franco-backhand-loop-b-table-net-clearance-20260715-v3",
   "status": "preregistered_source_gate_pass_runtime_audit_not_run",
   "human_owner": "Franco",
   "executor": "Codex",
@@ -8,8 +8,8 @@
   "asset_id": "franco_backhand_loop_b",
   "validator": {
     "path": "scripts/audit_motion_schema2_table_net_clearance.py",
-    "bytes": 102909,
-    "sha256": "f294a1fd0b499e3f048c6dd60323418dbe49fbeb70c76c0efa0f5cb7cc2b06cd"
+    "bytes": 103182,
+    "sha256": "66aa16b4999092fd7c17b7192edde107f7c6d7bcec67cbbdaa15979b91b7449d"
   },
   "frozen_vendor_l1": {
     "certificate": {

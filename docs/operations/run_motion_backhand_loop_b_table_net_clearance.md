@@ -9,7 +9,7 @@
 ```bash
 cd /path/to/clean/nohope
 PLAN=configs/motion_backhand_loop_b_table_net_clearance_prereg_20260715.json
-PLAN_SHA=1c73faf9034c1ed5136641ff4594917d5d5f66a5c93e92b35d300107ae9ec6b4
+PLAN_SHA=9c03e7b0e5adc2febb6dd8ccdb36273a7fc05020052ccefda57579c596dd273a
 
 python3 scripts/audit_motion_schema2_table_net_clearance.py \
   --prereg "$PLAN" \
@@ -21,12 +21,16 @@ python3 scripts/audit_motion_schema2_table_net_clearance.py \
 
 ```bash
 python3 -m pytest -q tests/test_motion_backhand_loop_b_table_net_clearance.py
-# 36 passed
+# 39 passed
 ```
 
 source gate 只证明预注册、坐标系、输入 lineage、5 mm 边界和 no-clobber 反例闭环，不是 B 的桌网通过。
 旧 schema-v1 plan SHA `9d7126bc...eb1e6` 已在首次 Pod2 dry-run 证明会把 MuJoCo 的确定性 `+4`
 world-geom 编号插入误判为 robot 重排；它永久只作根因证据，不得运行或用于发布 certificate。
+旧 schema-v2 plan SHA `1c73faf9...ec6b4` 又会把 exact runtime joint-order 文件的 `#` 人话头误算为
+第 32 个关节；它同样永久只作根因证据，不得运行或用于发布 certificate。schema-v3 必须从绑定的
+724-byte 文件按 upstream L0 语义跳过 blank/comment 后得到恰好 31 个唯一名字；未标注 metadata 或
+duplicate name 仍 fail closed。
 
 ## Runtime 前置
 
@@ -55,7 +59,7 @@ export PYTHONNOUSERSITE=1
 /workspace/hope_mjeval_venv/bin/python \
   scripts/audit_motion_schema2_table_net_clearance.py \
   --prereg configs/motion_backhand_loop_b_table_net_clearance_prereg_20260715.json \
-  --expected-prereg-sha256 1c73faf9034c1ed5136641ff4594917d5d5f66a5c93e92b35d300107ae9ec6b4 \
+  --expected-prereg-sha256 9c03e7b0e5adc2febb6dd8ccdb36273a7fc05020052ccefda57579c596dd273a \
   dry-run
 ```
 
@@ -74,7 +78,7 @@ root/joint topology、qpos0、collision row/mesh 和归一化后的 frozen compi
 /workspace/hope_mjeval_venv/bin/python \
   scripts/audit_motion_schema2_table_net_clearance.py \
   --prereg configs/motion_backhand_loop_b_table_net_clearance_prereg_20260715.json \
-  --expected-prereg-sha256 1c73faf9034c1ed5136641ff4594917d5d5f66a5c93e92b35d300107ae9ec6b4 \
+  --expected-prereg-sha256 9c03e7b0e5adc2febb6dd8ccdb36273a7fc05020052ccefda57579c596dd273a \
   audit
 ```
 

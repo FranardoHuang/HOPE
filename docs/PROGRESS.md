@@ -13,6 +13,14 @@
 
 ## 2026-07-15
 
+- B 桌网 schema-v2 在 clean `main@f214a80` 的 Pod2 CPU `dry-run` 又于几何循环前 rc2 fail closed、
+  certificate absent：bound 724-byte runtime joint-order 是一行 `#` 说明加 31 个唯一关节，upstream L0
+  明确过滤 blank/comment，table/net snapshot reader 却只过滤 blank，误计成 32。schema-v3 复用 exact
+  upstream comment 语义且不改文件/顺序；未标注 metadata 与 duplicate 仍拒绝。log SHA-256
+  `5c9a5940...f92d`；focused `39 passed`、完整 B chain `140 passed`、static PASS。合入 review 前不重跑，
+  G08 仍 Partial。见[实验卷宗](experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-TABLE-NET.md)和
+  [运行操作](operations/run_motion_backhand_loop_b_table_net_clearance.md)。
+
 - B 桌网门的首次 Pod2 CPU `dry-run` 在 1201 帧循环前因 geom ID 假设 rc2 fail closed、没有输出：MuJoCo
   会把新增的四个 worldbody geom 编为 `1..4`，故 child-body robot geom 只发生确定性整体 `+4`，不是
   37 个碰撞体漂移。schema-v2 仅归一化这个精确 shift，并继续逐项绑定 robot 顺序/名字、topology、qpos0、

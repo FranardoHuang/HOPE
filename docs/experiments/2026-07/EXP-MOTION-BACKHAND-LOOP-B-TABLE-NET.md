@@ -1,6 +1,6 @@
 # EXP-MOTION-BACKHAND-LOOP-B-TABLE-NET — 反手拉 B 整轨桌网余隙门
 
-- 状态：`v1_runtime_harness_false_reject_v2_source_static_pass_runtime_pending`
+- 状态：`v2_runtime_joint_order_comment_false_reject_v3_source_static_pass_runtime_pending`
 - 阶段/轴：新动作库 / 整轨桌板、网与网柱几何余隙
 - 人类负责人：Franco
 - 执行者：Codex
@@ -20,10 +20,12 @@
 
 预注册
 [`motion_backhand_loop_b_table_net_clearance_prereg_20260715.json`](../../../configs/motion_backhand_loop_b_table_net_clearance_prereg_20260715.json)
-当前 schema-v2 SHA-256 为
-`1c73faf9034c1ed5136641ff4594917d5d5f66a5c93e92b35d300107ae9ec6b4`。失败的 schema-v1
-计划 SHA-256 `9d7126bc...eb1e6` 冻结在 `main@9abf7fe`，不得再运行。v2 不改动作、桌位、阈值、采样、
-输入 lineage 或输出授权，只修正 MuJoCo 编译后的全局 geom 编号语义。当前计划逐字绑定：
+当前 schema-v3 SHA-256 为
+`9c03e7b0e5adc2febb6dd8ccdb36273a7fc05020052ccefda57579c596dd273a`。失败的 schema-v2
+计划 SHA-256 `1c73faf9...ec6b4` 冻结在 `main@f214a80`，失败的 schema-v1 计划 SHA-256
+`9d7126bc...eb1e6` 冻结在 `main@9abf7fe`，两者都不得再运行。v3 不改动作、桌位、阈值、采样、输入
+lineage 或输出授权；它保留 v2 的 MuJoCo geom 编号修复，并让 snapshot name-list parser 与冻结 upstream
+L0 的 comment 语义一致。当前计划逐字绑定：
 
 - B schema-2 NPZ SHA-256 `e2eb99e6...d28cc`；
 - vendor L1 certificate SHA-256 `6840df34...db60`，且运行消费前必须读到
@@ -50,11 +52,11 @@ p_schema2_mjcf = p_HOPE + [0.5, 1.525/2, 0.76]
 
 validator
 [`audit_motion_schema2_table_net_clearance.py`](../../../scripts/audit_motion_schema2_table_net_clearance.py)
-SHA-256 为 `f294a1fd...b06cd`。它继承 vendor L1 已验证的 root 线性、四元数 shortest-arc slerp 和关节线性
+SHA-256 为 `66aa16b4...7449d`。它继承 vendor L1 已验证的 root 线性、四元数 shortest-arc slerp 和关节线性
 插值，将 `151 @ 50 Hz` 扫成 `1201 @ 400 Hz` 有限样本。运行时把四个静态 box 追加到 canonical
 `worldbody`，通过 in-memory XML + exact 74-file mesh map 编译。MuJoCo 会先编号一个 body 直属的全部 geom，
 再递归其 child body；因此四个新增 world geom 必然占 `1..4`，floor 保持 `0`，robot geom 的全局编号整体
-精确 `+4`。v2 只归一化这个已证明的 bookkeeping shift：它同时要求 obstacle ID=`1..4`、所有 canonical
+精确 `+4`。v2/v3 只归一化这个已证明的 bookkeeping shift：它同时要求 obstacle ID=`1..4`、所有 canonical
 robot geom 的相对顺序/名字不变、37 个 enabled collision geom 精确 `+4`、root/joint topology、`qpos0`
 以及全部 collision array row/mesh 顶点逐字等价，并用实际 augmented row 在 canonical ID 下重算冻结的
 compiled collision SHA `18e7f6ff...386e5`。任何其他重排或数值漂移仍 fail closed。
@@ -76,7 +78,7 @@ bracket（已扣除 saturation predicate 的 `1e-12 m` 数值裕量），不能�
 
 ```bash
 python3 -m pytest -q tests/test_motion_backhand_loop_b_table_net_clearance.py
-# 36 passed
+# 39 passed
 
 python3 -m pytest -q \
   tests/test_motion_backhand_loop_bc_schema2_fk_prereg.py \
@@ -85,11 +87,11 @@ python3 -m pytest -q \
   tests/test_motion_backhand_loop_b_l0_static_v2.py \
   tests/test_motion_backhand_loop_b_vendor_l1_safety.py \
   tests/test_motion_backhand_loop_b_table_net_clearance.py
-# 137 passed
+# 140 passed
 
 python3 scripts/audit_motion_schema2_table_net_clearance.py \
   --prereg configs/motion_backhand_loop_b_table_net_clearance_prereg_20260715.json \
-  --expected-prereg-sha256 1c73faf9034c1ed5136641ff4594917d5d5f66a5c93e92b35d300107ae9ec6b4 \
+  --expected-prereg-sha256 9c03e7b0e5adc2febb6dd8ccdb36273a7fc05020052ccefda57579c596dd273a \
   static
 # PASS ... source_exact=true runtime_audit=false no_write=true continuous_time_claim=false
 ```
@@ -134,9 +136,28 @@ collision row 改 `1e-9`、obstacle ID 不是 `1..4`、37 个 robot collision id
 IDs `+4`、topology count、root/joint binding、`qpos0` 或 robot name order 任一变化都仍拒绝。当前仅
 source/static 通过；合入 main 并独立 review 前禁止重试 runtime。
 
+## schema-v2 runtime joint-order 注释假拒绝与 schema-v3 修复
+
+geom-index 修复合入 `main@f214a80` 后，Pod2 exact CPU `dry-run` 再次在真正桌网几何循环前以 rc2
+fail closed：`[motion-table-net] FAIL schema-2 runtime joint order must contain exactly 31 unique names`。
+checkout clean exact `f214a80`；90-byte log SHA-256
+`5c9a594019acb3215641ef1a8785dc5acd33eec7a35d8183dba2b7e6dfddf92d`；certificate/output absent。
+
+逐字回溯 plan 与 upstream L0/L1 合同后确认输入有效：绑定文件
+`configs/a3_runtime_articulation_joint_order.txt` 是 exact 724 bytes / SHA-256 `5181da21...d87c`，内容是
+一行 `# Isaac/runtime articulation ...` 人话头加 31 个唯一关节名。冻结 L0 `_read_names` 明确过滤 blank
+以及 `line.lstrip().startswith('#')` 的注释，L0 certificate 和 L1 runtime 都按这 31 名消费；table/net 新写的
+snapshot reader 却只过滤 blank，把注释当成第 32 个关节。这是复制 parser 时漏掉 upstream comment
+语义的 harness 假拒绝，不是 joint-order 文件、schema-2 NPZ 或 31-joint bijection 失效。
+
+schema-v3 对 single-fd snapshot bytes 使用与 upstream 完全相同的过滤条件，不改文件或名字顺序。生产形状
+测试逐字绑定 724-byte 文件并得到首尾 `left_hip_pitch_joint` / `right_wrist_yaw_joint` 的 31 项；额外未标注
+metadata、过滤后 duplicate name 仍 fail closed，leading-whitespace comment 只作为 metadata 跳过。当前
+只有 source/static 结果；合入 main 并独立 review 前禁止 runtime 重跑。
+
 ## 当前决定与下一步
 
-schema-v2 源码门通过，只授权在合入 main 且 code review 后使用 exact `/workspace/hope_mjeval_venv`
+schema-v3 源码门通过，只授权在合入 main 且 code review 后使用 exact `/workspace/hope_mjeval_venv`
 再做一次无写 `dry-run`。
 目前没有 runtime 结果、没有 table/net certificate，也没有动作晋级；G08 保持 Partial。`dry-run` 必须先
 验证现存 L1 certificate 的 exact SHA/authorization、输出父目录真实存在且 target absent。通过后才能执行

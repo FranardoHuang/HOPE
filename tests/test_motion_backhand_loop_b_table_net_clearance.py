@@ -30,6 +30,8 @@ COMMAND = ROOT / (
     "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/"
     "tasks/tracking/mdp/hope_commands.py"
 )
+RUNTIME_JOINT_ORDER = ROOT / "configs/a3_runtime_articulation_joint_order.txt"
+L0_V1_PLAN = ROOT / "configs/motion_backhand_loop_b_l0_static_prereg_20260714.json"
 
 
 def _sha(path: Path) -> str:
@@ -106,6 +108,43 @@ def test_local_phase_kernels_are_ast_identical_to_exact_upstream():
     assert set(hashes) == set(TABLE_NET.PURE_PHASE_FUNCTIONS)
     assert all(len(value) == 64 for value in hashes.values())
     assert plan["validator"]["path"] == "scripts/audit_motion_schema2_table_net_clearance.py"
+
+
+def test_bound_production_joint_order_skips_upstream_comment_header_exactly():
+    l0_plan = json.loads(L0_V1_PLAN.read_text(encoding="utf-8"))
+    binding = l0_plan["upstream_contracts"]["runtime_joint_order"]
+    snapshot = TABLE_NET.read_file_snapshot(
+        RUNTIME_JOINT_ORDER,
+        "production runtime joint order",
+        expected_bytes=binding["bytes"],
+        expected_sha256=binding["sha256"],
+    )
+    assert snapshot.data.startswith(b"# Isaac/runtime articulation")
+    names = TABLE_NET._read_names_snapshot(snapshot, 31, "runtime joint order")
+    assert len(names) == len(set(names)) == 31
+    assert names[0] == "left_hip_pitch_joint"
+    assert names[-1] == "right_wrist_yaw_joint"
+    assert all(not name.startswith("#") for name in names)
+
+
+def test_name_snapshot_rejects_noncomment_metadata_as_a_32nd_joint(tmp_path):
+    data = RUNTIME_JOINT_ORDER.read_text(encoding="utf-8") + "schema_version=1\n"
+    path = tmp_path / "joint_order_with_unmarked_metadata.txt"
+    path.write_text(data, encoding="utf-8")
+    snapshot = TABLE_NET.read_file_snapshot(path, "mutated runtime joint order")
+    with pytest.raises(TABLE_NET.TableNetError, match="exactly 31 unique names"):
+        TABLE_NET._read_names_snapshot(snapshot, 31, "runtime joint order")
+
+
+def test_name_snapshot_rejects_duplicate_joint_after_comment_filtering(tmp_path):
+    lines = RUNTIME_JOINT_ORDER.read_text(encoding="utf-8").splitlines()
+    lines[-1] = lines[1]
+    lines.insert(1, "   # second human-readable comment")
+    path = tmp_path / "joint_order_with_duplicate.txt"
+    path.write_text("\n".join(lines) + "\n", encoding="utf-8")
+    snapshot = TABLE_NET.read_file_snapshot(path, "mutated runtime joint order")
+    with pytest.raises(TABLE_NET.TableNetError, match="exactly 31 unique names"):
+        TABLE_NET._read_names_snapshot(snapshot, 31, "runtime joint order")
 
 
 def test_project_module_sys_modules_injection_is_never_consumed(monkeypatch):
