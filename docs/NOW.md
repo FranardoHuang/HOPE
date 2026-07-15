@@ -561,6 +561,11 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
   未加载 checkpoint。首个 progressed `model_100.pt` 已通过 embedded iteration、optimizer 与全部
   tensor finite 审计；下一证据是 deterministic core/planner/mix 选择、recipe-7 ONNX、MuJoCo 与
   V10 Gate3，不以启动曲线直接晋级。
+- **[OPS｜P1] RallyV10 真机单命令部署与板载 VRPN。** 责任人 dongc1；执行者 Codex；分支
+  `hitter`。把 CMTracker/VRPN、relay 与 planner 收敛到 HDU，Laptop 只保留完整 SSH/TTY
+  入口，并为 MDU HAL、SHADOW、真机 runner 提供互不自动串联的单命令脚本。下一证据：脚本
+  静态/打包检查、HDU preflight，以及 `run_pingpong_end_to_end.md` 9.9 的可复现终端矩阵；不由
+  Codex 执行真机 MOTION。
 
 ### 训练引擎与机器人物理
 
