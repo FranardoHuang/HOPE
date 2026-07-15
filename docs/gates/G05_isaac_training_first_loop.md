@@ -2514,3 +2514,25 @@ null。CPU design validator + `25` 个红队测试通过，`launch-check` 按设
 [恢复操作](../operations/run_phase1_recovery_tuple_prereg.md)，详细语义见
 [T1 接口](../interfaces/t1_event_training_contract.md#selected-action-frame-0-waiting-contract-v2)。
 没有 Isaac、Pod、训练或真机行为证据，G05 保持 `Partial`。
+
+#### 稀疏 Reward eligibility ledger 源码门
+
+为防止 `+200/+500/+1000` 把“尚未击中球，所以 outcome Reward 没资格出现”误写成 setting 失败，
+训练源码新增[`稀疏 Reward 资格账本`](../DEFINITIONS.md#sparse-reward-eligibility-ledger)。解析球路径在
+`_vb_book_strike_step` 同一步记录 exact-strike opportunity、virtual capture、net clear、landing valid 与
+legal return 的非衰减整数，并按 forehand/backhand 分账；不从 warm-up 抑制和 decay 混合的 EMA rate
+反推。qdot 的 RewardManager-stage 零返回探针与真实 hinge 复用 runtime 31-joint math，分别记录
+observed/hinge-active/excess；control active 必须为零，treatment active 必须等于 observed。
+
+只写 receipt 的 classifier 固定总机会至少 `100`、每动作至少 `50`、每动作至少一次 capture，并要求
+连续两个预注册 milestone 才给 `DECISION_ELIGIBLE`。零机会为 `NO_OPPORTUNITY_CONTINUE`，有机会但
+hit-conditioned 分母不足为 `CENSORED_CONTINUE`，身份或计数闭包错误为 `MEASUREMENT_INVALID`，单个
+完整 milestone 仅 `DIRECTION_ONLY`。所有状态都写
+`automatic_trainer_action=CONTINUE_UNCHANGED`，绝不 stop/restart/promote/买 seed。
+
+host focused 回归为 classifier `14 passed`、qdot/virtual ledger `4 passed`、Hydra translation `18 passed`。
+这只是 E1：当前在跑 source `2c2d70d` 没有这些 exact counter，禁止用旧 EMA 回填；也没有真实 Isaac
+logger/sidecar receipt。virtual 结果仍是解析 Phase A，PhysicalBall Phase B 的真实触球/过网/落台未测。
+因此不改变现役训练格，G05 保持 `Partial`。见[实验](../experiments/2026-07/EXP-P1-SPARSE-REWARD-ELIGIBILITY.md)、
+[接口](../interfaces/sparse_reward_eligibility_ledger.md)与
+[操作](../operations/run_sparse_reward_milestone_classifier.md)。

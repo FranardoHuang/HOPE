@@ -1904,7 +1904,7 @@ def _qdot_limit_env(limits=None):
             joint_vel_limits=limits,
         ),
     )
-    env = types.SimpleNamespace(scene={"robot": asset})
+    env = types.SimpleNamespace(scene={"robot": asset}, common_step_counter=1)
     asset_cfg = types.SimpleNamespace(name="robot", joint_ids=list(range(31)))
     return env, asset_cfg
 
@@ -1916,6 +1916,76 @@ def test_qdot_limit_hinge_uses_actual_runtime_limits_and_normalized_mean():
     )
     assert result[0] == pytest.approx(0.0)
     assert result[1] == pytest.approx((1.5 - 0.85) ** 2 / 31.0)
+
+
+def test_qdot_probe_and_hinge_share_one_observation_but_book_activation_separately():
+    env, asset_cfg = _qdot_limit_env()
+    probe = hope_rewards_mod.joint_velocity_limit_hinge_probe(env, asset_cfg)
+    assert torch.equal(probe, torch.zeros(2))
+    reward = hope_rewards_mod.joint_velocity_limit_hinge(env, asset_cfg)
+    assert reward[1] > 0.0
+
+    snapshot = hope_rewards_mod.consume_joint_velocity_limit_hinge_activation_counters(env)
+    assert snapshot["observed_sample_count"].item() == 2
+    assert snapshot["hinge_active_sample_count"].item() == 2
+    assert snapshot["excess_sample_count"].item() == 1
+    assert snapshot["normalized_excess_square_sum"].item() == pytest.approx(
+        reward.sum().item()
+    )
+    assert all(
+        value.item() == 0
+        for value in hope_rewards_mod.consume_joint_velocity_limit_hinge_activation_counters(env).values()
+    )
+
+
+def test_sparse_virtual_reward_ledger_is_exact_per_action_and_resets_once():
+    command = hope_commands_mod.RacketTargetCommand.__new__(
+        hope_commands_mod.RacketTargetCommand
+    )
+    command._clip_names = {0: "forehand", 1: "backhand"}
+    names = (
+        "strike_opportunity_count",
+        "virtual_capture_count",
+        "virtual_net_clear_count",
+        "virtual_landing_valid_count",
+        "virtual_legal_return_count",
+    )
+    command._sparse_reward_eligibility_counters = {
+        name: torch.zeros((), dtype=torch.long) for name in names
+    }
+    for family in command._clip_names.values():
+        for name in names:
+            command._sparse_reward_eligibility_counters[f"{name}_{family}"] = torch.zeros(
+                (), dtype=torch.long
+            )
+    command._motion_term = types.SimpleNamespace(
+        _multiseg=True, clip_id=torch.tensor([0, 0, 1, 1])
+    )
+    command._event_timing_bound = True
+
+    command._book_sparse_reward_eligibility(
+        exact_strike=torch.tensor([True, True, True, True]),
+        capture=torch.tensor([True, False, True, False]),
+        net_clear=torch.tensor([True, False, False, False]),
+        landing_valid=torch.tensor([True, False, True, False]),
+        legal_return=torch.tensor([True, False, False, False]),
+    )
+    snapshot = command.consume_sparse_reward_eligibility_counters()
+    assert snapshot["strike_opportunity_count"].item() == 4
+    assert snapshot["virtual_capture_count"].item() == 2
+    assert snapshot["virtual_net_clear_count"].item() == 1
+    assert snapshot["virtual_landing_valid_count"].item() == 2
+    assert snapshot["virtual_legal_return_count"].item() == 1
+    assert snapshot["strike_opportunity_count_forehand"].item() == 2
+    assert snapshot["strike_opportunity_count_backhand"].item() == 2
+    assert snapshot["virtual_capture_count_forehand"].item() == 1
+    assert snapshot["virtual_capture_count_backhand"].item() == 1
+    assert snapshot["virtual_legal_return_count_forehand"].item() == 1
+    assert snapshot["virtual_legal_return_count_backhand"].item() == 0
+    assert all(
+        value.item() == 0
+        for value in command.consume_sparse_reward_eligibility_counters().values()
+    )
 
 
 def test_qdot_limit_hinge_reloads_runtime_limits_after_first_call():

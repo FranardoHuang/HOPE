@@ -100,6 +100,14 @@ def _make_env_cfg(anchor_pos_none=True):
                 "expected_joint_count": 31,
             },
         ),
+        joint_velocity_limit_hinge_probe=_Term(
+            weight=0.0,
+            params={
+                "asset_cfg": _NS(name="robot", joint_ids=slice(None)),
+                "margin": 0.85,
+                "expected_joint_count": 31,
+            },
+        ),
         racket_guidance=_Term(weight=0.0, params={"command_name": "racket_target", "d_max": 0.5}),
         racket_face_guidance=_Term(weight=0.0, params={"command_name": "racket_target", "theta_max": 1.5707963}),
         racket_face_conditional_guidance=_Term(
@@ -234,6 +242,7 @@ def test_qdot_limit_hinge_default_off_and_override_markers():
     env_cfg, applied = _apply({})
     assert env_cfg.rewards.joint_velocity_limit_hinge.weight == 0.0
     assert env_cfg.rewards.joint_velocity_limit_hinge.params["margin"] == pytest.approx(0.85)
+    assert env_cfg.rewards.joint_velocity_limit_hinge_probe.weight == 0.0
     assert not any("joint_velocity_limit_hinge" in item for item in applied)
 
     env_cfg, applied = _apply({
@@ -246,6 +255,9 @@ def test_qdot_limit_hinge_default_off_and_override_markers():
     assert env_cfg.rewards.joint_velocity_limit_hinge.params["margin"] == pytest.approx(0.8)
     assert "rewards.joint_velocity_limit_hinge.weight=-0.25" in applied
     assert "rewards.joint_velocity_limit_hinge.params.margin=0.8" in applied
+    assert env_cfg.rewards.joint_velocity_limit_hinge_probe.weight == 1.0
+    assert env_cfg.rewards.joint_velocity_limit_hinge_probe.params["margin"] == pytest.approx(0.8)
+    assert any("rewards.joint_velocity_limit_hinge_probe=" in item for item in applied)
 
 
 @pytest.mark.parametrize("weight", [0.1, float("nan"), float("inf"), True, "bad"])

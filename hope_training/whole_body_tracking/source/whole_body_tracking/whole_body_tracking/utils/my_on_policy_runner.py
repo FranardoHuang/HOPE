@@ -182,6 +182,19 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                             self._scalar_tensor(counter_value),
                             step,
                         )
+                sparse_reward_consumer = getattr(
+                    term, "consume_sparse_reward_eligibility_counters", None
+                )
+                if callable(sparse_reward_consumer):
+                    # Exact non-decayed counts, including per-action denominators.  These are
+                    # intentionally a second transaction: MotionCommand owns imitation/replay
+                    # activation, while RacketTargetCommand owns virtual strike outcomes.
+                    for counter_name, counter_value in sparse_reward_consumer().items():
+                        self._log_scalar(
+                            f"Live/{term_name}/{counter_name}",
+                            self._scalar_tensor(counter_value),
+                            step,
+                        )
                 if hasattr(term, "command_counter"):
                     self._log_scalar(
                         f"Live/{term_name}/command_counter", self._mean_tensor(term.command_counter), step
@@ -207,6 +220,19 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 ):
                     self._log_scalar(
                         f"Live/{command_name}/{counter_name}",
+                        self._scalar_tensor(counter_value),
+                        step,
+                    )
+            if "joint_velocity_limit_hinge_probe" in active_reward_terms:
+                from whole_body_tracking.tasks.tracking.mdp.hope_rewards import (
+                    consume_joint_velocity_limit_hinge_activation_counters,
+                )
+
+                for counter_name, counter_value in (
+                    consume_joint_velocity_limit_hinge_activation_counters(env).items()
+                ):
+                    self._log_scalar(
+                        f"Live/qdot/{counter_name}",
                         self._scalar_tensor(counter_value),
                         step,
                     )
