@@ -21,7 +21,8 @@
   都尚未执行。修订后的 attestation schema 2 又把原始 producer `capture_source` 与修复后 consumer
   `attestor_source` 分开，status 分别对回 immutable v3 plan 和 tracked retry authorization；交换、重绑、dirty
   均负测；另加 main-tracked one-shot retry authorization，把唯一 attestor commit/SHA 绑定 v3
-  plan/capture/checkpoint/output，拒绝任意 clean HEAD 自签自验。五文件 host suite `95 passed`（一个既有
+  plan/capture/checkpoint/output，拒绝任意 clean HEAD 自签自验。授权固定 attestor `a38b7e9e...293cf` /
+  `03611b56...310f` 与 authorization `87fd1c71...dfda`；attempt-2 尚未执行。五文件 host suite `96 passed`（一个既有
   duplicate-ZIP warning）。修复合入 main 前禁止重跑
   capture/attestor，首 reset 与科学训练仍 blocked。见[机器结果](../configs/phase1_post_swing_teacher_capture_attempt_v3_result_20260715.json)、
   [实验卷宗](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md)和

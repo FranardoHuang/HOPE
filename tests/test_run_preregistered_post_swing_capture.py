@@ -920,6 +920,11 @@ def test_status_retry_authorization_is_tracked_clean_and_binds_v3_and_attestor(
     }
     authorization_path.write_bytes(_canonical(authorization) + b"\n")
     monkeypatch.setattr(RUNNER, "_verify_executable_row", lambda *args: {})
+    monkeypatch.setattr(
+        RUNNER,
+        "RETRY_AUTHORIZATION_SHA256",
+        _sha(authorization_path.read_bytes()),
+    )
 
     dirty = False
     def git_output(_git, checkout, *args):
@@ -939,9 +944,31 @@ def test_status_retry_authorization_is_tracked_clean_and_binds_v3_and_attestor(
         "attestor_source_sha256": authorization["attestor_source"]["attestor_source_sha256"],
     }
     assert proof["receipt_binding"]["file_sha256"] == _sha(authorization_path.read_bytes())
+    frozen_authorization_raw = authorization_path.read_bytes()
+    authorization["authorization_id"] = "rebound-clean-source"
+    authorization_path.write_bytes(_canonical(authorization) + b"\n")
+    with pytest.raises(RUNNER.CaptureContractError, match="bytes differ from source gate"):
+        RUNNER._status_retry_authorization(plan, output, controller, plan_sha)
+    authorization_path.write_bytes(frozen_authorization_raw)
     dirty = True
     with pytest.raises(RUNNER.CaptureContractError, match="tracked changes"):
         RUNNER._status_retry_authorization(plan, output, controller, plan_sha)
+
+
+def test_committed_retry_authorization_matches_source_gate_and_fixed_attestor():
+    raw = (ROOT / RUNNER.RETRY_AUTHORIZATION_RELATIVE).read_bytes()
+    assert _sha(raw) == RUNNER.RETRY_AUTHORIZATION_SHA256
+    authorization = RUNNER._strict_json_loads(raw, "committed retry authorization")
+    assert authorization["attestor_source"] == {
+        "commit": "a38b7e9e693db407795d9a5f3af144b8f8e293cf",
+        "attestor_source_sha256": "03611b565a539fa81811ac76c4631484a60679adfd11c1f1e07599081f46310f",
+    }
+    assert authorization["decision"] == {
+        "capture_retry_authorized": False,
+        "attestor_attempt2_authorized": True,
+        "first_reset_probe_authorized": False,
+        "scientific_training_authorized": False,
+    }
 
 
 def test_inventory_small_tree_is_subsecond(tmp_path):

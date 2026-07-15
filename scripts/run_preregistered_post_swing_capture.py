@@ -60,6 +60,9 @@ RETRY_AUTHORIZATION_RELATIVE = Path(
     "configs/phase1_post_swing_teacher_capture_v3_attestor_retry_authorization_20260715.json"
 )
 RETRY_AUTHORIZATION_KIND = "hope_post_swing_teacher_attestor_retry_authorization"
+RETRY_AUTHORIZATION_SHA256 = (
+    "87fd1c7136d9a6d54546f26367cc83d5dad20e4d8b0f57fba94e6cc207e2dfda"
+)
 UINT32_MAX = 0xFFFFFFFF
 NAMESPACE_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -1563,6 +1566,8 @@ def _status_retry_authorization(
         raise CaptureContractError("retry authorization is not one tracked source file")
     authorization_path = source / RETRY_AUTHORIZATION_RELATIVE
     raw = _read_regular_bytes(authorization_path, "attestor retry authorization")
+    if _sha256_bytes(raw) != RETRY_AUTHORIZATION_SHA256:
+        raise CaptureContractError("attestor retry authorization bytes differ from source gate")
     value = _strict_json_loads(raw, "attestor retry authorization")
     _require_exact_keys(
         value,

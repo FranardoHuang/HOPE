@@ -61,8 +61,10 @@ Follow-up note (2026-07-15, schema-v3 capture complete but attestor newline fals
   bytes and splits original capture-producer lineage from the later fixed-attestor lineage. Receipt attestation
   schema 2 and controller status reject swapped/rebound/dirty sources while permitting producer commit `906a3c3`
   to differ from the post-fix attestor commit. A tracked one-shot retry authorization binds the only accepted
-  attestor commit/SHA to the immutable v3 plan/capture/checkpoint/output, preventing an arbitrary clean HEAD
-  from signing and validating itself. The five-file host suite is `95 passed` with one existing
+  attestor commit `a38b7e9e693db407795d9a5f3af144b8f8e293cf` / script SHA
+  `03611b56...310f` to the immutable v3 plan/capture/checkpoint/output; the authorization SHA is
+  `87fd1c71...dfda`. This prevents an arbitrary clean HEAD
+  from signing and validating itself. The five-file host suite is `96 passed` with one existing
   duplicate-ZIP warning; this is source evidence, not full attestation.
   Capture must not be rerun, and attestor must not be rerun until this fix is merged to `main`.
   First-reset, replacement training, second seed, judge and promotion remain unauthorized. See the

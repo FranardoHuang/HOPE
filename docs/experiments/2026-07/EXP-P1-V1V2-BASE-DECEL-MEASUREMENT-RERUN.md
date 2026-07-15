@@ -364,7 +364,7 @@ restricted load、fresh lineage、相邻 hard contract、两条 source、motion/
 未证明；capture arrays finite 只是一条独立 capture 证据。机器结果只记录已知事实；由于
 现场没有 durable command/log artifact，其 path/SHA 明确为 null，不能补猜。修复必须拆开 content bytes 与
 document bytes，并用 production-shaped schema-2 claim、newline 反例、receipt byte/no-clobber 回归证明；在该
-修复下 operation 的五文件 host suite 为 `95 passed`（一个既有 duplicate-ZIP warning）；在修复合入
+修复下 operation 的五文件 host suite 为 `96 passed`（一个既有 duplicate-ZIP warning）；在修复合入
 `main` 前禁止重跑 capture 或 attestor。完整证据见
 [`phase1_post_swing_teacher_capture_attempt_v3_result_20260715.json`](../../../configs/phase1_post_swing_teacher_capture_attempt_v3_result_20260715.json)。
 首 reset、replacement pair、第二 seed、judge 与 promotion 继续全部 blocked。
@@ -377,7 +377,8 @@ successor receipt 将 attestation sub-schema 升为 `2`：`capture_source` 只�
 immutable v3 plan；后者不能只靠“任意 clean HEAD 与自身一致”，而必须匹配 main 中 tracked 的一次性 retry
 authorization。该 authorization 同时绑定 v3 plan/capture/checkpoint/output 和唯一 attestor commit/SHA，receipt
 记录 authorization ID/file SHA，status 只从自身 clean checkout 读取它。attempt-2 必须从授权的修复后
-clean main 运行脚本，却把 `--capture-source-checkout` 明确指回原始 clean `906a3c3` checkout；任一 source
+clean detached `a38b7e9e...293cf` 运行脚本（SHA `03611b56...310f`），authorization 则由后续 clean main
+提供（SHA `87fd1c71...dfda`），并把 `--capture-source-checkout` 明确指回原始 clean `906a3c3` checkout；任一 source
 dirty、commit/SHA 重绑或二者交换均 fail closed。该 source fix 仍不等于 attempt-2 runtime 通过。
 
 ## 离线复现

@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "artifact_kind": "hope_post_swing_teacher_attestor_retry_authorization",
+  "authorization_id": "control_model500_v3_obsfix_gpu2_20260715a_attestor_attempt2",
+  "v3_plan": {
+    "plan_id": "control_model500_v3_obsfix_gpu2_20260715a",
+    "file_sha256": "de96a45d2a5ae3d47536509e40cd451307a4e9ccba6a357a2445b17e3ed093d9"
+  },
+  "capture": {
+    "output_directory": "/workspace/codexschema/phase1_post_swing_teacher_20260715/capture/control_model500_v3_obsfix_gpu2_20260715a",
+    "output_receipt": "/workspace/codexschema/phase1_post_swing_teacher_20260715/capture/control_model500_v3_obsfix_gpu2_20260715a/teacher_receipt.json",
+    "capture_claim_sha256": "81126b27c70d855ceef28d11a7fb4f96e200d097132ab6693dc93d045c7e244e",
+    "states_sha256": "8d07668e3bcc1e91f95634e1af375713ec0c1c239a8b9fedab7c9e3004b295d8",
+    "result_sha256": "0aa2f37f114643b9c31d091495483433953d0b204fcefbf980b14df48a04d641",
+    "state_count": 4096
+  },
+  "teacher": {
+    "checkpoint_sha256": "22f78f882397c48d1c8763186748935517d669cf4f36205baf69d07dc9e08a6a",
+    "hard_contract_sha256": "451cda47227f8e78e4f3dcae3cbf22d7ddf88b4c5fbaf348e698963d8bc12291",
+    "launch_claim_content_sha256": "576724deeeaf2386005e804fc5f2dc5600a7c63d104cb8f7c8f1f2f5131ba49d"
+  },
+  "capture_source": {
+    "commit": "906a3c3e0cd43962247af0ff3857bf640d04d7ba",
+    "producer_source_sha256": "496a7fa2bc97e9d7a8234702a7f6c9edb1f6b3fd17f215da042a62c0649be90a"
+  },
+  "attestor_source": {
+    "commit": "a38b7e9e693db407795d9a5f3af144b8f8e293cf",
+    "attestor_source_sha256": "03611b565a539fa81811ac76c4631484a60679adfd11c1f1e07599081f46310f"
+  },
+  "decision": {
+    "capture_retry_authorized": false,
+    "attestor_attempt2_authorized": true,
+    "first_reset_probe_authorized": false,
+    "scientific_training_authorized": false
+  }
+}

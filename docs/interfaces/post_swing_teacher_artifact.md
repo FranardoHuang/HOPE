@@ -35,10 +35,13 @@ receipt 的 attestation sub-schema=`2` 必须把两条源码谱系分开，不�
   `--capture-source-checkout` 必须指向原始 clean `906a3c3...` checkout；controller status 还会把 commit 与
   producer SHA 逐项对回 immutable v3 plan。
 - `attestor_source={commit, clean, attestor_source_sha256}` 只描述实际签发 receipt 的修复后 attestor。
-  它由 running script 自己的 clean repository root 派生，但不能接受任意 clean HEAD。合入 main 的固定
+  它由 running script 自己的 clean repository root 派生，但不能接受任意 clean HEAD。当前唯一授权值是
+  commit `a38b7e9e693db407795d9a5f3af144b8f8e293cf` 与脚本 SHA-256
+  `03611b565a539fa81811ac76c4631484a60679adfd11c1f1e07599081f46310f`。合入 main 的固定
   `phase1_post_swing_teacher_capture_v3_attestor_retry_authorization_20260715.json` 会把唯一允许的 attestor
   commit/SHA 同时绑定到 v3 plan SHA、capture claim/states/result、teacher checkpoint/hard/launch claim、
-  output namespace 和 attempt-2-only 决定；receipt 还必须记录该 authorization 的 file SHA/ID。
+  output namespace 和 attempt-2-only 决定；其 file SHA-256 是
+  `87fd1c7136d9a6d54546f26367cc83d5dad20e4d8b0f57fba94e6cc207e2dfda`，receipt 还必须记录该 SHA/ID。
 
 交换两个对象、把 post-fix HEAD 写成 capture source、重绑任一 commit/SHA、或任一 tracked checkout dirty，
 都必须 fail closed。controller `status` 只能读取其自身 clean checkout 中被 Git tracked 的固定 authorization，

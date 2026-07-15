@@ -146,8 +146,8 @@ capture mode 不做 PPO update，也跳过 ONNX export。环境建立后先用�
 每个 `--motion` 按 hard contract 顺序重复一次。
 
 ```bash
-cd /ABS/CLEAN/POST_FIX_MAIN
-python3 /ABS/CLEAN/POST_FIX_MAIN/scripts/attest_post_swing_teacher.py \
+cd /ABS/CLEAN/ATTESTOR_A38B7E9
+python3 /ABS/CLEAN/ATTESTOR_A38B7E9/scripts/attest_post_swing_teacher.py \
   --capture-result /ABS/NEW/CAPTURE_DIR/natural_wrap_capture.json \
   --checkpoint /ABS/RUN/model_ITER.pt \
   --hard-contract /ABS/RUN/params/training_contract.json \
@@ -156,8 +156,8 @@ python3 /ABS/CLEAN/POST_FIX_MAIN/scripts/attest_post_swing_teacher.py \
   --motion /ABS/MOTION_0.npz --motion /ABS/MOTION_1.npz \
   --root-linear-limit-mps ROOT_LINEAR_LIMIT \
   --root-angular-limit-radps ROOT_ANGULAR_LIMIT \
-  --retry-authorization /ABS/CLEAN/AUTH_MAIN/configs/phase1_post_swing_teacher_capture_v3_attestor_retry_authorization_20260715.json \
-  --expected-retry-authorization-sha256 RETRY_AUTHORIZATION_FILE_SHA256 \
+  --retry-authorization /ABS/CLEAN/MAIN_WITH_AUTH/configs/phase1_post_swing_teacher_capture_v3_attestor_retry_authorization_20260715.json \
+  --expected-retry-authorization-sha256 87fd1c7136d9a6d54546f26367cc83d5dad20e4d8b0f57fba94e6cc207e2dfda \
   --output-receipt /ABS/NEW/CAPTURE_DIR/teacher_receipt.json
 ```
 
@@ -170,13 +170,16 @@ compact UTF-8 **content bytes**，不含末尾换行；claim/receipt 落盘时�
 恰好一个 `\n`。两类 bytes 必须用不同 helper，不能再共享一个“总是加换行”的 canonicalizer。v3
 attempt-1 已证明混用会在任何 receipt 写入前假拒绝；修复合入前不得再次运行 attestor。
 
-attempt-2 的 running attestor 与 `--capture-source-checkout` 故意不是同一个 checkout。后者必须是原始
+attempt-2 的 running attestor 与 `--capture-source-checkout` 故意不是同一个 checkout。running attestor
+必须是 clean detached `a38b7e9e693db407795d9a5f3af144b8f8e293cf`，其脚本 SHA-256 必须为
+`03611b565a539fa81811ac76c4631484a60679adfd11c1f1e07599081f46310f`；authorization 文件来自已经包含它的
+后续 clean main，不得改成 main HEAD 直接运行 attestor。后者（`--capture-source-checkout`）必须是原始
 v3 producer 的 clean `906a3c3...` source，只写入 receipt 的
 `capture_source={commit,clean,producer_source_sha256}`；running script 则从修复后 clean main 自己的 repo
 root 派生 `attestor_source={commit,clean,attestor_source_sha256}`。receipt attestation sub-schema=`2`，trainer
 hard-contract summary 保留两者和 retry authorization。`--retry-authorization` 必须是 main 中固定、tracked
 的 attempt-2 授权，逐字节绑定 v3 plan/capture/teacher/output 与唯一 attestor commit/SHA；命令行还必须给
-它的 exact file SHA。controller `status` 会把 capture source 对回 immutable v3 plan，并只从自身 clean
+它的 exact file SHA `87fd1c71...dfda`。controller `status` 会把 capture source 对回 immutable v3 plan，并只从自身 clean
 checkout 读取这份 tracked authorization，再核对 receipt 的 attestor source 与 authorization；不得用任意
 post-fix clean HEAD 自签自验、不得用 post-fix HEAD 冒充 capture source，也不得交换两个对象。
 
@@ -217,5 +220,5 @@ git diff --check
 
 2026-07-15 在可导入 Hydra 的本地环境，controller/attestor/teacher 原四文件门曾复现为 `41 passed`；
 加入 observation adapter、v2 result 负测与 content/document canonical 回归后的上述五文件命令复现为
-`95 passed`（另有一个既有 duplicate-ZIP warning），其中 attestor 专项为 `11 passed`。这仍只是 host
+`96 passed`（另有一个既有 duplicate-ZIP warning），其中 attestor 专项为 `11 passed`。这仍只是 host
 source gate，不能替代 v3 receipt attestation 或首 reset probe。

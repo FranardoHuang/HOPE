@@ -72,12 +72,25 @@
     "root_and_joint_velocity_limits": "not_executed",
     "note": "capture state arrays were separately shown finite; that does not substitute for full attestation"
   },
+  "attestor_attempt_2_authorization": {
+    "status": "source_authorization_prepared_not_executed",
+    "path": "configs/phase1_post_swing_teacher_capture_v3_attestor_retry_authorization_20260715.json",
+    "file_sha256": "87fd1c7136d9a6d54546f26367cc83d5dad20e4d8b0f57fba94e6cc207e2dfda",
+    "authorization_id": "control_model500_v3_obsfix_gpu2_20260715a_attestor_attempt2",
+    "capture_source_commit": "906a3c3e0cd43962247af0ff3857bf640d04d7ba",
+    "capture_producer_sha256": "496a7fa2bc97e9d7a8234702a7f6c9edb1f6b3fd17f215da042a62c0649be90a",
+    "attestor_source_commit": "a38b7e9e693db407795d9a5f3af144b8f8e293cf",
+    "attestor_source_sha256": "03611b565a539fa81811ac76c4631484a60679adfd11c1f1e07599081f46310f",
+    "capture_retry_authorized": false,
+    "first_reset_probe_authorized": false,
+    "scientific_training_authorized": false
+  },
   "decision": {
     "v3_capture_complete": true,
     "v3_capture_retry_forbidden": true,
     "attestor_attempt_1_failed_without_receipt": true,
-    "attestor_retry_authorized_now": false,
-    "attestor_retry_requires_fix_merged_to_main": true,
+    "attestor_attempt_2_source_authorized_after_main_merge": true,
+    "attestor_attempt_2_executed": false,
     "attestor_retry_requires_clean_exact_source_and_same_immutable_v3_inputs": true,
     "first_reset_probe_authorized": false,
     "scientific_training_authorized": false,
