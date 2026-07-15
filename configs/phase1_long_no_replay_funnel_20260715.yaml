@@ -161,8 +161,8 @@ jobs:
     id: p1_long_no_replay_control_seed3
     human_name: 无随挥回放的普通对照，单 seed 长曲线
     action: *action
-    status: ready
-    blocker: null
+    status: rejected
+    blocker: infrastructure-only attempt stalled before first iteration in dynamic URDF import; exact PGID 410589 was closed by the 180-second stale-log watchdog, with no checkpoint; never reuse this namespace
     motion: *motion
     bank: *bank
     exam: *exam
@@ -188,6 +188,8 @@ jobs:
   - <<: *control
     id: p1_long_no_replay_qdot_w5_seed3
     human_name: 无随挥回放，加关节速度边界惩罚负五，单 seed 长曲线
+    status: ready
+    blocker: null
     recipe:
       base: *base
       delta:
@@ -204,6 +206,8 @@ jobs:
   - <<: *control
     id: p1_long_no_replay_v1v2_seed3
     human_name: 无随挥回放，放开手腕速度模仿并把击球窗模仿降到四分之一，单 seed 长曲线
+    status: ready
+    blocker: null
     recipe:
       base: *base
       delta:
@@ -216,3 +220,11 @@ jobs:
         - ++task.rewards.racket_face_conditional_guidance_weight=0.0
     run_name: phase1_long_no_replay_v1v2_seed3_20260715
     run_dir: /workspace/codexschema/phase1_long_funnel_20260715/runs/phase1_long_no_replay_v1v2_seed3
+
+  - <<: *control
+    id: p1_long_no_replay_control_seed3_retry_v2
+    human_name: 无随挥回放的普通对照，基础设施唯一重试 v2
+    status: ready
+    blocker: null
+    run_name: phase1_long_no_replay_control_seed3_retry_v2_20260715
+    run_dir: /workspace/codexschema/phase1_long_funnel_20260715/runs/phase1_long_no_replay_control_seed3_retry_v2

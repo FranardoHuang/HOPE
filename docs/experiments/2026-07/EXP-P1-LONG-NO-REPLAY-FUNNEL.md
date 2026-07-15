@@ -66,9 +66,16 @@
 
 | 运行（人话名 + `run_name`） | 状态 | Checkpoint/seed | 证据 | 结果产物 | 有效性说明 |
 | --- | --- | --- | --- | --- | --- |
-| 普通对照 `phase1_long_no_replay_control_seed3_20260715` | ready | 200/500/1000/2000/3000/6000/10000，seed3 | 待运行 | Pod2 run directory | 两个问题的共享匹配对照 |
+| 普通对照 attempt-1 `phase1_long_no_replay_control_seed3_20260715` | invalidated | 未到首迭代，seed3 | dynamic URDF import 后日志 180 秒无进展；exact PGID `410589` 已由 watchdog 收口 | claim/binding/log/TERM/KILL identity evidence | 纯基础设施失败，无 checkpoint，不是 Reward 结果；namespace 永不复用 |
 | 关节速度边界惩罚 `phase1_long_no_replay_qdot_w5_seed3_20260715` | ready | 同上 | 待运行 | Pod2 run directory | 只改变 qdot 惩罚权重 |
 | 击球窗模仿放松 `phase1_long_no_replay_v1v2_seed3_20260715` | ready | 同上 | 待运行 | Pod2 run directory | 只改变两项动作模仿开关 |
+| 普通对照唯一重试 `phase1_long_no_replay_control_seed3_retry_v2_20260715` | ready | 同上 | 待运行 | 全新 no-clobber namespace | 配方逐字不变；只更换身份，排在两个 treatment 之后以先恢复有效 GPU 工作 |
+
+2026-07-15 04:06–04:09 UTC，attempt-1 在 source/assets/Hydra compose 通过后启动，停在动态 URDF import；
+进程曾使用约 13 个 CPU core，但 `run.log` 固定在 32075 bytes，GPU2 仅约 2.3 GiB/1%。180 秒 stale-log
+watchdog 先写同一 PGID 的 pre-TERM/pre-KILL identity evidence，再只收口 PGID `410589`，终态
+`terminal_kind=stale_timeout`、`rc=125`、GPU2 回到 2 MiB。后两格当时尚未 claim；本卷只授权普通对照一次
+逐字相同配方 retry，且先发两个仍未消费的 treatment，避免启动故障继续让 GPU 空等。
 
 ## 复现与证据
 
