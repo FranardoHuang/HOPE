@@ -31,6 +31,7 @@ def _raw() -> dict:
 
 
 def _write(tmp_path: Path, value: dict) -> Path:
+    tmp_path.mkdir(parents=True, exist_ok=True)
     path = tmp_path / "queue.yaml"
     path.write_text(yaml.safe_dump(value, sort_keys=False), encoding="utf-8")
     return path
@@ -46,12 +47,17 @@ def _values(job: dict) -> dict[str, str]:
 def _activated(tmp_path: Path) -> tuple[dict, Path]:
     raw = copy.deepcopy(_raw())
     raw["launch_authorized"] = True
+    raw["preregistration_status"] = "activated_demo_only_inexact"
     raw["activation_contract"]["state"] = "activated"
     raw["activation_contract"]["receipt_file_sha256"] = "a" * 64
     for parent in raw["parents"].values():
         parent["checkpoint_sha256"] = "b" * 64
         parent["hard_contract_sha256"] = "c" * 64
         parent["training_launch_claim_sha256"] = "d" * 64
+        parent["queue_claim_content_sha256"] = "d" * 64
+        parent["queue_claim_file_sha256"] = "e" * 64
+        parent["run_binding_file_sha256"] = "f" * 64
+        parent["run_binding_content_sha256"] = "1" * 64
     for job in raw["jobs"]:
         job["status"] = "ready"
         job["blocker"] = None
@@ -65,6 +71,8 @@ def test_pending_queue_is_six_blocked_pod2_rows_and_plan_is_nonlaunching():
     assert queue["dispatch_pods"] == ["pod2"]
     assert queue["launch_authorized"] is False
     assert len(queue["jobs"]) == 6
+    assert queue["pods"]["pod2"]["max_trainers_per_gpu"] == 4
+    assert "parent_snapshot_receipt_v2.json" in queue["activation_contract"]["receipt_path"]
     assert plan["assignments"] == []
     assert len(plan["blocked"]) == 6
     assert all(job["status"] == "blocked" for job in queue["jobs"])
@@ -119,17 +127,35 @@ def test_activated_queue_round_robins_and_claim_binds_inexact_parent_receipt(tmp
     assert content["demo_warm_start"]["checkpoint_sha256"] == "b" * 64
     assert content["demo_warm_start"]["hard_contract_sha256"] == "c" * 64
     assert content["demo_warm_start"]["training_launch_claim_sha256"] == "d" * 64
+    assert content["demo_warm_start"]["queue_claim_content_sha256"] == "d" * 64
+    assert content["demo_warm_start"]["run_binding_content_sha256"] == "1" * 64
     assert content["activation_receipt"]["file_sha256"] == "a" * 64
     assert "checkpoint_tolerant=false" in argv
     assert "checkpoint_allow_missing_contract=false" in argv
     assert "checkpoint_allow_contract_mismatch=true" in argv
-    assert any(item.endswith("model_3500.pt") and item.startswith("checkpoint_path=") for item in argv)
+    assert any(
+        item.startswith("checkpoint_path=") and "parent_snapshots_v2" in item
+        for item in argv
+    )
+    assert content["source_contract_files"] == D.EXPECTED_SOURCE_CONTRACT_FILES
     assert argv[-1] == f"++training_launch_claim_sha256={claim['content_sha256']}"
 
 
-def test_generic_fresh_queue_guard_remains_unchanged():
+def test_fourth_slot_activation_only_selects_jobs_one_and_two(tmp_path):
+    queue, _path = _activated(tmp_path)
+    occupancy = {"pod2/gpu0": 3, "pod2/gpu1": 3, "pod2/gpu2": 0}
+    assignments = D.Q._assign(queue, occupancy)
+    assert [(job["id"], slot.name) for job, slot in assignments] == [
+        ("demo_qdot_v1v2_face_w0p4", "pod2/gpu0"),
+        ("demo_qdot_v1v2_face_w0p2", "pod2/gpu1"),
+    ]
+
+
+def test_generic_fresh_queue_guard_remains_fresh_only(tmp_path):
+    raw = _raw()
+    raw["pods"]["pod2"]["max_trainers_per_gpu"] = 3
     with pytest.raises(D.Q.QueueError, match="supports fresh runs only"):
-        D.Q.load_queue(QUEUE)
+        D.Q.load_queue(_write(tmp_path, raw))
 
 
 def test_activation_and_exactness_flags_fail_closed(tmp_path):
@@ -150,7 +176,125 @@ def test_parent_attestation_is_separate_one_pod_no_retry_dry_run():
     assert result["automatic_activation"] is False
     assert result["automatic_retry"] is False
     command = " ".join(result["ssh_argv"])
+    preflight = " ".join(result["preflight_ssh_argv"])
     assert "162.43.172.181" in command
+    assert "162.43.172.181" in preflight
     assert "162.43.172.171" not in command
     assert "pkill" not in command
     assert "killall" not in command
+
+
+def test_parent_inspect_is_explicitly_read_only_and_pod2_only():
+    queue = D.load_queue(QUEUE)
+    result = D.cmd_parent_inspect(queue, execute=False, confirm=None)
+    assert result["read_only"] is True
+    assert result["creates_snapshots"] is False
+    assert result["creates_receipt"] is False
+    command = " ".join(result["ssh_argv"])
+    assert "162.43.172.181" in command
+    assert "162.43.172.171" not in command
+    spec = D._parent_spec(queue, mode="inspect")
+    assert spec["mode"] == "inspect"
+    assert spec["receipt_path"].endswith("parent_snapshot_receipt_v2.json")
+
+
+def test_parent_spec_binds_exact_original_claim_binding_and_descendant_hard_changes():
+    queue = D.load_queue(QUEUE)
+    spec = D._parent_spec(queue, mode="attest")
+    assert list(spec["parents"]) == ["qdot", "v1v2", "control"]
+    assert spec["parents"]["qdot"]["original_job_id"] == "p1_long_no_replay_qdot_w5_seed3"
+    for name, parent in spec["parents"].items():
+        assert parent["original_pod"] == "pod2"
+        assert parent["original_gpu"] == 2
+        assert parent["live_queue_claim_path"].endswith("queue_claim.json")
+        assert parent["live_run_binding_path"].endswith("run_binding.json")
+        assert "parent_snapshots_v2" in parent["snapshot_checkpoint_path"]
+        assert len(parent["descendant_contract_values"]) == 2
+
+
+def test_parent_program_is_fd_snapshot_based_and_strict_about_full_state():
+    program = D.PARENT_PROGRAM
+    for required in (
+        "io.BytesIO(raw)", "O_NOFOLLOW", "O_EXCL", "snapshot_queue_claim_path",
+        "snapshot_run_binding_path", "optimizer.get(\"state\")",
+        "optimizer.get(\"param_groups\")", "key.startswith(\"actor.\")",
+        "key.startswith(\"critic.\")", "queue claim canonical SHA mismatch",
+        "run binding canonical SHA mismatch", "mode not in {\"inspect\", \"attest\", \"verify\"}",
+    ):
+        assert required in program
+    assert "torch.load(checkpoint_path" not in program
+    assert "parent_model3500_finite_receipt.json" not in D.EXPECTED_RECEIPT_PATH
+
+
+def test_launch_requires_source_hashes_strict_resume_and_exact_failure_identity(tmp_path):
+    queue, _path = _activated(tmp_path)
+    job = queue["jobs"][0]
+    slot = next(slot for slot in D.Q.slots(queue) if slot.name == "pod2/gpu0")
+    script = D._launch_script(queue, job, slot)
+    assert D.EXPECTED_SOURCE_CONTRACT_FILES[
+        "hope_training/whole_body_tracking/scripts/train.py"
+    ] in script
+    assert "strict_full_state_resume_proven=true" in script
+    assert "failure_path" in D.FIRST_ITER_PROGRAM
+    assert "manual_exact_pgid_disposition_required" in D.FIRST_ITER_PROGRAM
+    assert "pkill" not in script
+    assert "killall" not in script
+    assert "checkpoint_path=/workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_snapshots_v2/qdot/model_3500.pt" in script
+    proof = D.FIRST_ITER_PROGRAM
+    assert "explicit hard-contract mismatch override" in proof
+    assert "continuing at iteration 3500, optimizer=resumed" in proof
+    assert "joint_velocity_limit_hinge_reward" in proof
+    assert "conditional_signed_face" in proof
+
+
+def test_all_recipe_identity_and_contract_mutations_fail_closed(tmp_path):
+    mutations = []
+    for section in ("base", "delta"):
+        mutations.extend([
+            (f"{section}-change", lambda raw, s=section: raw["jobs"][0]["recipe"][s].__setitem__(0, raw["jobs"][0]["recipe"][s][0] + "_drift")),
+            (f"{section}-missing", lambda raw, s=section: raw["jobs"][0]["recipe"][s].pop()),
+            (f"{section}-extra", lambda raw, s=section: raw["jobs"][0]["recipe"][s].append("task.fake=1")),
+        ])
+    mutations.extend([
+        ("id", lambda raw: raw["jobs"][0].__setitem__("id", "demo_changed")),
+        ("parent", lambda raw: raw["jobs"][0]["warm_start"].__setitem__("parent", "control")),
+        ("run-name", lambda raw: raw["jobs"][0].__setitem__("run_name", "changed")),
+        ("run-dir", lambda raw: raw["jobs"][0].__setitem__("run_dir", "/workspace/changed")),
+        ("slot", lambda raw: raw["jobs"][0]["resource"].__setitem__("required_slot", "pod2/gpu2")),
+        ("host", lambda raw: raw["pods"]["pod2"].__setitem__("host", "127.0.0.1")),
+        ("port", lambda raw: raw["pods"]["pod2"].__setitem__("port", 22)),
+        ("capacity", lambda raw: raw["pods"]["pod2"].__setitem__("max_trainers_per_gpu", 3)),
+        ("source", lambda raw: raw["jobs"][0]["source"].__setitem__("commit", "0" * 40)),
+        ("source-hash", lambda raw: raw["source_contract_files"].__setitem__("hope_training/whole_body_tracking/scripts/train.py", "0" * 64)),
+        ("parent-id", lambda raw: raw["parents"]["qdot"].__setitem__("original_job_id", "wrong")),
+        ("parent-claim", lambda raw: raw["parents"]["qdot"].__setitem__("live_queue_claim_path", "/workspace/wrong/queue_claim.json")),
+        ("snapshot", lambda raw: raw["parents"]["qdot"].__setitem__("snapshot_checkpoint_path", "/workspace/wrong/model_3500.pt")),
+        ("receipt-v1", lambda raw: raw["activation_contract"].__setitem__("receipt_path", "/workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_model3500_finite_receipt.json")),
+        ("release-rule", lambda raw: raw["activation_contract"].__setitem__("gpu_release_rule", "drift")),
+    ])
+    for index, (label, mutate) in enumerate(mutations):
+        raw = _raw()
+        mutate(raw)
+        with pytest.raises(D.DemoQueueError):
+            D.load_queue(_write(tmp_path / f"case_{index}_{label}", raw))
+
+
+def test_activated_parent_sha_closure_rejects_missing_or_split_claim(tmp_path):
+    raw = _raw()
+    raw["launch_authorized"] = True
+    raw["preregistration_status"] = "activated_demo_only_inexact"
+    raw["activation_contract"]["state"] = "activated"
+    raw["activation_contract"]["receipt_file_sha256"] = "a" * 64
+    for job in raw["jobs"]:
+        job["status"] = "ready"
+        job["blocker"] = None
+    for parent in raw["parents"].values():
+        for key in (
+            "checkpoint_sha256", "hard_contract_sha256", "queue_claim_file_sha256",
+            "queue_claim_content_sha256", "run_binding_file_sha256",
+            "run_binding_content_sha256", "training_launch_claim_sha256",
+        ):
+            parent[key] = "b" * 64
+    raw["parents"]["qdot"]["training_launch_claim_sha256"] = "c" * 64
+    with pytest.raises(D.DemoQueueError, match="launch claim differs"):
+        D.load_queue(_write(tmp_path, raw))

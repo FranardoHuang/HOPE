@@ -14,9 +14,11 @@
 ## 2026-07-16
 
 - 为次日演示冻结六条 Pod2 model-3500 严格续训组合：三类母本、两档拍面引导、两档 qdot、自由非击球臂
-  与脚朝向以组合方案而非伪因果格运行。专用 runner 绑定完整 optimizer transfer、parent/hard SHA receipt、
-  absolute `3700/4000/4500/5500/7500` checkpoint 和永久 exact-ineligible 语义；generic fresh-only queue 未
-  放宽。当前六行仍 blocked，等 parent finite receipt 与 GPU0/GPU1 release；focused `58 passed`。见
+  与脚朝向以组合方案而非伪因果格运行。v2 先只读审原始 claim/binding 与非空全 optimizer，再唯一消费
+  `O_EXCL` 只读 parent snapshots；launch 必须从日志证明 iteration-3500/optimizer strict resume、显式合同
+  mismatch 和新 qdot/conditional-face hard binding，失败只记 exact PID/PGID。generic fresh-only queue 未
+  放宽。Pod2 今晚采用实测四路/卡：六个 model500 保全且 GPU0/GPU1 各 `<=3` 时先上前两组合，其余四条
+  等四个弱臂精确退出后补齐并保留 V1-only/foot-`-0.6`。当前仍 blocked、没有 Pod 行为结果。见
   [实验卷宗](experiments/2026-07/EXP-P1-DEMO-HOTSTART-PORTFOLIO.md)。
 
 ## 2026-07-15

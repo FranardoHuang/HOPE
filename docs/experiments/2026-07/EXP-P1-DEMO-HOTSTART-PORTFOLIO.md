@@ -27,12 +27,12 @@ vendor MuJoCo 通过证据。
 | --- | --- |
 | source | `2c2d70d6d0ccf7b0757aac4dd8e575c2e077607e` |
 | 动作/题库 | `v4rg` 正反手与同一 schema-3 signed-face train bank |
-| 母本 | Pod2 上 qdot、V1+V2、普通对照三个 `model_3500.pt` |
+| 母本 | Pod2 上 qdot、V1+V2、普通对照三个 `model_3500.pt` 的只读 v2 snapshot |
 | 续训语义 | `checkpoint_tolerant=false`、不允许缺 hard contract、允许显式合同变化、完整 optimizer 保留 |
 | 共同训练项 | seed 3；4096 environments；episode 10 秒；击球位置/速度/拍面 Reward=`14/10/5` |
 | 追加预算 | 5001 updates；每 100 保存 |
 | 绝对 checkpoint | `3700/4000/4500/5500/7500`，即母本后 `+200/+500/+1000/+2000/+4000` |
-| 资源 | 只允许 Pod2 GPU0/GPU1，按 0→1 逐圈各一条，每卡最多三条 |
+| 资源 | 只允许 Pod2 GPU0/GPU1，按 0→1 逐圈；今晚实测上限每卡四条 |
 
 ## 六个候选
 
@@ -49,15 +49,24 @@ vendor MuJoCo 通过证据。
 
 ## 启动门与停止规则
 
-1. 先独立读取三个母本，证明 checkpoint 是 regular file、embedded iter=`3500`、所有浮点 tensor finite、
-   optimizer 存在、相邻 schema-3 hard-contract SHA 与 checkpoint infos 一致，并绑定原始 launch-claim SHA；
-   no-clobber 写一份父模型 receipt。hard contract 相同不能替代 launch claim 相同。
-2. receipt SHA 和三个 checkpoint/hard-contract SHA 未回填前，机器队列保持
+1. 先用只读 `parent-inspect` 验证三个原始 `queue_claim.json`、`run_binding.json`、checkpoint 与 hard
+   contract 的完整关系：claim canonical SHA/完整 argv、binding 的 source/run/process 关系、embedded
+   iter=`3500`、非空 actor/critic、非空 optimizer `state/param_groups`、finite、schema-3、checkpoint↔hard
+   SHA、checkpoint↔原始 claim SHA。inspect 不创建任何文件。
+2. inspect 通过后，唯一一次 `parent-attest` 用 `O_EXCL` 把 checkpoint、hard contract、原始 claim 和
+   binding 复制到固定 `parent_snapshots_v2/<parent>/`，设为只读，再只从 snapshot bytes 重做同一审计并
+   no-clobber 写 v2 receipt。旧 v1 receipt 路径不能解锁本队列；运行期也不再读取可变 live 母本。
+3. receipt SHA 和三个 checkpoint/hard/claim/binding SHA 未回填前，机器队列保持
    `launch_authorized=false`、六行 `blocked`；不会自动解锁或重试。
-3. 现有 scaleout 行到 `model_500` 并按其自身规则停止后，现场必须再次证明 Pod2 GPU0/GPU1 有槽；不得抢占。
-4. `+200/+500/+1000` 看是否启动、finite、机制是否真的激活和是否明显崩坏；只在真实击球后才有意义的
+4. 六条 scaleout 的 `model_500` 全部保全后，若 Pod2 GPU0/GPU1 当前各不超过三条，可先用第 4 槽发
+   job1/job2，不必为此停现役。其余四组合只在按独立证据精确停止四条弱臂后逐圈补入；保留 GPU0 的
+   V1-only 和 GPU1 的 foot-`-0.6`，最终仍为每卡四条。GPU2 的后续候选不塞进本 v2。
+5. launch 成功前必须在日志同时看到显式 hard-contract mismatch、从 snapshot model-3500 恢复到
+   iteration 3500 和 `optimizer=resumed`；新 hard contract 还必须逐值包含该行 qdot/conditional-face
+   权重。任一证明失败都不写 `phase=first_iter`，而写 exact PID/PGID 的人工处置记录，不自动发信号或重试。
+6. `+200/+500/+1000` 看是否启动、finite、机制是否真的激活和是否明显崩坏；只在真实击球后才有意义的
    稀疏回台指标，样本不足时继续。`+2000/+4000` 才用于次日候选排序。
-5. 任一 namespace 失败都保留，不自动 replay；本批不授权第二 seed、正式晋级、真机或 broad process signal。
+7. 任一 namespace 失败都保留，不自动 replay；本批不授权第二 seed、正式晋级、真机或 broad process signal。
 
 ## 运行表
 
@@ -82,10 +91,15 @@ python3 scripts/run_phase1_demo_hotstart_queue.py \
   --queue configs/phase1_pod2_demo_hotstart_portfolio_20260716.yaml plan
 
 python3 scripts/run_phase1_demo_hotstart_queue.py \
+  --queue configs/phase1_pod2_demo_hotstart_portfolio_20260716.yaml parent-inspect
+
+python3 scripts/run_phase1_demo_hotstart_queue.py \
   --queue configs/phase1_pod2_demo_hotstart_portfolio_20260716.yaml parent-attest
 ```
 
-第二条默认只是 dry-run。正式 parent receipt、显式回填激活和 GPU release 完成前，`fill` 会 fail closed。
+两条 parent 命令默认都只是 dry-run；正式执行 inspect 使用独立确认词。正式 attest 会先再跑一遍只读 inspect，
+它通过后才消费 v2 snapshot namespace。parent receipt、七类 SHA 的显式回填激活和 GPU release 完成前，
+`fill` 会 fail closed。专用与相邻 generic queue host 回归为 `65 passed`；本页仍没有 Pod 行为结果。
 
 ## 决定
 

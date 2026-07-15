@@ -1,7 +1,7 @@
 schema_version: 1
 simulation_only: true
 launch_authorized: false
-preregistration_status: blocked_until_parent_finite_receipt_and_gpu_release
+preregistration_status: blocked_until_parent_snapshot_receipt_and_fourth_slot_evidence
 
 ssh:
   key: ~/.ssh/id_ed25519_runpod
@@ -16,15 +16,19 @@ pods:
     host: 162.43.172.181
     port: 13146
     gpus: [0, 1, 2]
-    max_trainers_per_gpu: 3
+    max_trainers_per_gpu: 4
 
 dispatch_pods: [pod2]
 
+source_contract_files:
+  hope_training/whole_body_tracking/scripts/train.py: e263c70ec037b9e3d9ff5a90b38a5c1e90ee2ac142b6e5e03e9180c496579775
+  hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/utils/training_contract.py: 25cf79b9341201b96e618c9b449b1aea649b164815cc3051321d451ce1cbd4c4
+
 activation_contract:
   state: pending_parent_receipt_and_gpu_release
-  receipt_path: /workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_model3500_finite_receipt.json
+  receipt_path: /workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_snapshot_receipt_v2.json
   receipt_file_sha256: null
-  gpu_release_rule: pod2_gpu0_and_gpu1_slots_free_after_existing_scaleout_model500_stop
+  gpu_release_rule: pod2_gpu0_gpu1_occupancy_lte3_and_six_model500_preserved_allow_fourth_slot_jobs1_2
   automatic_activation: false
   automatic_retry: false
 
@@ -46,28 +50,76 @@ decision_contract:
 
 parents:
   qdot:
-    checkpoint_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-12-03_phase1_long_no_replay_qdot_w5_seed3_20260715/model_3500.pt
-    hard_contract_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-12-03_phase1_long_no_replay_qdot_w5_seed3_20260715/params/training_contract.json
+    original_job_id: p1_long_no_replay_qdot_w5_seed3
+    original_run_name: phase1_long_no_replay_qdot_w5_seed3_20260715
+    original_run_dir: /workspace/codexschema/phase1_long_funnel_20260715/runs/phase1_long_no_replay_qdot_w5_seed3
+    original_rsl_log_dir: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-12-03_phase1_long_no_replay_qdot_w5_seed3_20260715
+    original_pod: pod2
+    original_gpu: 2
+    live_checkpoint_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-12-03_phase1_long_no_replay_qdot_w5_seed3_20260715/model_3500.pt
+    live_hard_contract_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-12-03_phase1_long_no_replay_qdot_w5_seed3_20260715/params/training_contract.json
+    live_queue_claim_path: /workspace/codexschema/phase1_long_funnel_20260715/runs/phase1_long_no_replay_qdot_w5_seed3/queue_claim.json
+    live_run_binding_path: /workspace/codexschema/phase1_long_funnel_20260715/runs/phase1_long_no_replay_qdot_w5_seed3/run_binding.json
+    snapshot_checkpoint_path: /workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_snapshots_v2/qdot/model_3500.pt
+    snapshot_hard_contract_path: /workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_snapshots_v2/qdot/params/training_contract.json
+    snapshot_queue_claim_path: /workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_snapshots_v2/qdot/queue_claim.json
+    snapshot_run_binding_path: /workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_snapshots_v2/qdot/run_binding.json
     embedded_iteration: 3500
     optimizer_state_dict_required: true
     checkpoint_sha256: null
     hard_contract_sha256: null
+    queue_claim_file_sha256: null
+    queue_claim_content_sha256: null
+    run_binding_file_sha256: null
+    run_binding_content_sha256: null
     training_launch_claim_sha256: null
   v1v2:
-    checkpoint_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-13-17_phase1_long_no_replay_v1v2_seed3_20260715/model_3500.pt
-    hard_contract_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-13-17_phase1_long_no_replay_v1v2_seed3_20260715/params/training_contract.json
+    original_job_id: p1_long_no_replay_v1v2_seed3
+    original_run_name: phase1_long_no_replay_v1v2_seed3_20260715
+    original_run_dir: /workspace/codexschema/phase1_long_funnel_20260715/runs/phase1_long_no_replay_v1v2_seed3
+    original_rsl_log_dir: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-13-17_phase1_long_no_replay_v1v2_seed3_20260715
+    original_pod: pod2
+    original_gpu: 2
+    live_checkpoint_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-13-17_phase1_long_no_replay_v1v2_seed3_20260715/model_3500.pt
+    live_hard_contract_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-13-17_phase1_long_no_replay_v1v2_seed3_20260715/params/training_contract.json
+    live_queue_claim_path: /workspace/codexschema/phase1_long_funnel_20260715/runs/phase1_long_no_replay_v1v2_seed3/queue_claim.json
+    live_run_binding_path: /workspace/codexschema/phase1_long_funnel_20260715/runs/phase1_long_no_replay_v1v2_seed3/run_binding.json
+    snapshot_checkpoint_path: /workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_snapshots_v2/v1v2/model_3500.pt
+    snapshot_hard_contract_path: /workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_snapshots_v2/v1v2/params/training_contract.json
+    snapshot_queue_claim_path: /workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_snapshots_v2/v1v2/queue_claim.json
+    snapshot_run_binding_path: /workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_snapshots_v2/v1v2/run_binding.json
     embedded_iteration: 3500
     optimizer_state_dict_required: true
     checkpoint_sha256: null
     hard_contract_sha256: null
+    queue_claim_file_sha256: null
+    queue_claim_content_sha256: null
+    run_binding_file_sha256: null
+    run_binding_content_sha256: null
     training_launch_claim_sha256: null
   control:
-    checkpoint_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-14-14_phase1_long_no_replay_control_seed3_retry_v2_20260715/model_3500.pt
-    hard_contract_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-14-14_phase1_long_no_replay_control_seed3_retry_v2_20260715/params/training_contract.json
+    original_job_id: p1_long_no_replay_control_seed3_retry_v2
+    original_run_name: phase1_long_no_replay_control_seed3_retry_v2_20260715
+    original_run_dir: /workspace/codexschema/phase1_long_funnel_20260715/runs/phase1_long_no_replay_control_seed3_retry_v2
+    original_rsl_log_dir: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-14-14_phase1_long_no_replay_control_seed3_retry_v2_20260715
+    original_pod: pod2
+    original_gpu: 2
+    live_checkpoint_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-14-14_phase1_long_no_replay_control_seed3_retry_v2_20260715/model_3500.pt
+    live_hard_contract_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-14-14_phase1_long_no_replay_control_seed3_retry_v2_20260715/params/training_contract.json
+    live_queue_claim_path: /workspace/codexschema/phase1_long_funnel_20260715/runs/phase1_long_no_replay_control_seed3_retry_v2/queue_claim.json
+    live_run_binding_path: /workspace/codexschema/phase1_long_funnel_20260715/runs/phase1_long_no_replay_control_seed3_retry_v2/run_binding.json
+    snapshot_checkpoint_path: /workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_snapshots_v2/control/model_3500.pt
+    snapshot_hard_contract_path: /workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_snapshots_v2/control/params/training_contract.json
+    snapshot_queue_claim_path: /workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_snapshots_v2/control/queue_claim.json
+    snapshot_run_binding_path: /workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_snapshots_v2/control/run_binding.json
     embedded_iteration: 3500
     optimizer_state_dict_required: true
     checkpoint_sha256: null
     hard_contract_sha256: null
+    queue_claim_file_sha256: null
+    queue_claim_content_sha256: null
+    run_binding_file_sha256: null
+    run_binding_content_sha256: null
     training_launch_claim_sha256: null
 
 x-action: &action signed_face_v4rg_shared_face
@@ -189,7 +241,7 @@ x-gpu0: &gpu0
 x-gpu1: &gpu1
   policy: dispatch_gpu_round_robin
   required_slot: pod2/gpu1
-x-blocker: &blocker parent model3500 finite/optimizer receipt is pending and Pod2 GPU0/GPU1 scaleout slots are not yet released
+x-blocker: &blocker v2 parent snapshot receipt and six-model500/fourth-slot activation evidence are pending
 
 jobs:
   - &job
@@ -213,7 +265,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - checkpoint_path=/workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-12-03_phase1_long_no_replay_qdot_w5_seed3_20260715/model_3500.pt
+        - checkpoint_path=/workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_snapshots_v2/qdot/model_3500.pt
         - ++task.rewards.free_wrist_vel_mimic=true
         - ++task.rewards.motion_scale_in_window=0.25
         - task.rewards.joint_velocity_limit_hinge_weight=-5.0
@@ -233,7 +285,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - checkpoint_path=/workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-12-03_phase1_long_no_replay_qdot_w5_seed3_20260715/model_3500.pt
+        - checkpoint_path=/workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_snapshots_v2/qdot/model_3500.pt
         - ++task.rewards.free_wrist_vel_mimic=true
         - ++task.rewards.motion_scale_in_window=0.25
         - task.rewards.joint_velocity_limit_hinge_weight=-5.0
@@ -257,7 +309,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - checkpoint_path=/workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-13-17_phase1_long_no_replay_v1v2_seed3_20260715/model_3500.pt
+        - checkpoint_path=/workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_snapshots_v2/v1v2/model_3500.pt
         - ++task.rewards.free_wrist_vel_mimic=true
         - ++task.rewards.motion_scale_in_window=0.25
         - task.rewards.joint_velocity_limit_hinge_weight=-5.0
@@ -281,7 +333,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - checkpoint_path=/workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-13-17_phase1_long_no_replay_v1v2_seed3_20260715/model_3500.pt
+        - checkpoint_path=/workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_snapshots_v2/v1v2/model_3500.pt
         - ++task.rewards.free_wrist_vel_mimic=true
         - ++task.rewards.motion_scale_in_window=0.25
         - task.rewards.joint_velocity_limit_hinge_weight=-2.5
@@ -305,7 +357,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - checkpoint_path=/workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-14-14_phase1_long_no_replay_control_seed3_retry_v2_20260715/model_3500.pt
+        - checkpoint_path=/workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_snapshots_v2/control/model_3500.pt
         - ++task.rewards.free_wrist_vel_mimic=false
         - ++task.rewards.motion_scale_in_window=1.0
         - task.rewards.joint_velocity_limit_hinge_weight=-5.0
@@ -329,7 +381,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - checkpoint_path=/workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-14-14_phase1_long_no_replay_control_seed3_retry_v2_20260715/model_3500.pt
+        - checkpoint_path=/workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_snapshots_v2/control/model_3500.pt
         - ++task.rewards.free_wrist_vel_mimic=true
         - ++task.rewards.motion_scale_in_window=0.25
         - task.rewards.joint_velocity_limit_hinge_weight=-5.0

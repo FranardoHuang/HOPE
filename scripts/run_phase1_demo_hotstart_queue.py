@@ -40,10 +40,48 @@ class DemoQueueError(RuntimeError):
 
 
 PARENT_ATTEST_CONFIRM = "SIM_ONLY_ATTEST_DEMO_WARMSTART_PARENTS"
+PARENT_INSPECT_CONFIRM = "SIM_ONLY_INSPECT_DEMO_WARMSTART_PARENTS"
 LAUNCH_CONFIRM = "SIM_ONLY_LAUNCH_ONE_DEMO_WARMSTART_JOB"
 ATTEST_CONFIRM = "SIM_ONLY_ATTEST_ONE_DEMO_WARMSTART_MILESTONE"
 EXPECTED_SOURCE = "2c2d70d6d0ccf7b0757aac4dd8e575c2e077607e"
 EXPECTED_SOURCE_CHECKOUT = "/workspace/codexschema/nohope_p1_activation_successor_2c2d70d"
+EXPECTED_SSH_KEY = "~/.ssh/id_ed25519_runpod"
+EXPECTED_PODS = {
+    "pod1": {
+        "host": "162.43.172.171", "port": 18333,
+        "gpus": [0, 1, 2], "max_trainers_per_gpu": 4,
+    },
+    "pod2": {
+        "host": "162.43.172.181", "port": 13146,
+        "gpus": [0, 1, 2], "max_trainers_per_gpu": 4,
+    },
+}
+EXPECTED_SOURCE_CONTRACT_FILES = {
+    "hope_training/whole_body_tracking/scripts/train.py":
+        "e263c70ec037b9e3d9ff5a90b38a5c1e90ee2ac142b6e5e03e9180c496579775",
+    "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/"
+    "utils/training_contract.py":
+        "25cf79b9341201b96e618c9b449b1aea649b164815cc3051321d451ce1cbd4c4",
+}
+EXPECTED_IGNORED_RUNTIME_ASSET = {
+    "target_relative_path": (
+        "hope_training/whole_body_tracking/source/whole_body_tracking/"
+        "whole_body_tracking/assets/agibot_a3"
+    ),
+    "donor": {
+        "checkout": "/workspace/codexschema/nohope",
+        "commit": "6d93bcb16c422a2f42748c2dc99432559653480b",
+        "relative_path": (
+            "hope_training/whole_body_tracking/source/whole_body_tracking/"
+            "whole_body_tracking/assets/agibot_a3"
+        ),
+    },
+    "file_count": 46, "total_file_bytes": 15378264,
+    "tree_content_sha256": (
+        "0137f59b1fe45e7d5f8fa731bedca905f5466bc98e8d1354081fe071d60426c6"
+    ),
+    "symlinks_forbidden": True, "target_must_be_gitignored": True,
+}
 EXPECTED_MOTION_BINDINGS = {
     "motion_file": "/workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_forehand_v4rg_cal.npz",
     "motion_file_2": "/workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_backhand_v4rg_cal.npz",
@@ -56,10 +94,174 @@ EXPECTED_SLOTS = [
     "pod2/gpu0", "pod2/gpu1", "pod2/gpu0",
     "pod2/gpu1", "pod2/gpu0", "pod2/gpu1",
 ]
+EXPECTED_RECEIPT_PATH = (
+    "/workspace/codexschema/phase1_demo_hotstart_20260716/activation/"
+    "parent_snapshot_receipt_v2.json"
+)
+EXPECTED_PARENT_SPECS = {
+    "qdot": {
+        "original_job_id": "p1_long_no_replay_qdot_w5_seed3",
+        "original_run_name": "phase1_long_no_replay_qdot_w5_seed3_20260715",
+        "original_run_dir": "/workspace/codexschema/phase1_long_funnel_20260715/runs/phase1_long_no_replay_qdot_w5_seed3",
+        "original_rsl_log_dir": f"{EXPECTED_SOURCE_CHECKOUT}/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-12-03_phase1_long_no_replay_qdot_w5_seed3_20260715",
+    },
+    "v1v2": {
+        "original_job_id": "p1_long_no_replay_v1v2_seed3",
+        "original_run_name": "phase1_long_no_replay_v1v2_seed3_20260715",
+        "original_run_dir": "/workspace/codexschema/phase1_long_funnel_20260715/runs/phase1_long_no_replay_v1v2_seed3",
+        "original_rsl_log_dir": f"{EXPECTED_SOURCE_CHECKOUT}/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-13-17_phase1_long_no_replay_v1v2_seed3_20260715",
+    },
+    "control": {
+        "original_job_id": "p1_long_no_replay_control_seed3_retry_v2",
+        "original_run_name": "phase1_long_no_replay_control_seed3_retry_v2_20260715",
+        "original_run_dir": "/workspace/codexschema/phase1_long_funnel_20260715/runs/phase1_long_no_replay_control_seed3_retry_v2",
+        "original_rsl_log_dir": f"{EXPECTED_SOURCE_CHECKOUT}/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-14-14_phase1_long_no_replay_control_seed3_retry_v2_20260715",
+    },
+}
+for _parent_name, _parent_spec in EXPECTED_PARENT_SPECS.items():
+    _run = _parent_spec["original_run_dir"]
+    _rsl = _parent_spec["original_rsl_log_dir"]
+    _snapshot = (
+        "/workspace/codexschema/phase1_demo_hotstart_20260716/activation/"
+        f"parent_snapshots_v2/{_parent_name}"
+    )
+    _parent_spec.update({
+        "original_pod": "pod2", "original_gpu": 2,
+        "live_checkpoint_path": f"{_rsl}/model_3500.pt",
+        "live_hard_contract_path": f"{_rsl}/params/training_contract.json",
+        "live_queue_claim_path": f"{_run}/queue_claim.json",
+        "live_run_binding_path": f"{_run}/run_binding.json",
+        "snapshot_checkpoint_path": f"{_snapshot}/model_3500.pt",
+        "snapshot_hard_contract_path": f"{_snapshot}/params/training_contract.json",
+        "snapshot_queue_claim_path": f"{_snapshot}/queue_claim.json",
+        "snapshot_run_binding_path": f"{_snapshot}/run_binding.json",
+    })
+
+EXPECTED_BASE_RECIPE = (
+    "task=HOPEPingPongVirtualBall", "algo=ppo", "headless=true",
+    "logger=tensorboard", "video=false",
+    "task.actor_obs_contract=deploy_parity_face179",
+    "task.env.episode_length_s=10.0", "task.sim.dt=0.005",
+    "task.sim.decimation=4", "task.actions.qdes_clamp=true",
+    "task.plant.zero_joint_friction=true", "task.motion.wrap_teleport=false",
+    "task.motion.stand_start_prob=0.25", "task.motion.hold_steps_range=[0,100]",
+    "task.motion.stand_start_min_hold=25",
+    "task.motion.post_swing_buffer_size=4096",
+    "task.motion.post_swing_min_fill=256", "task.motion.post_swing_min_hold=25",
+    "task.motion.clip_switch_prob=0.0", "task.motion.speed_scale_range=[1.0,1.0]",
+    "++task.motion.rsi_skip_settle_frames=0",
+    "++task.motion.rsi_hold_root_stand_z=false",
+    "++task.motion.stagger_initial_clock=false",
+    "++task.motion.stagger_hold_max_steps=150",
+    "++task.racket.question_bank_allow_legacy=false",
+    "++task.racket.face_command=true", "++task.racket.face_command_obs=true",
+    "++task.racket.station_obs=false",
+    "++task.racket.mount_normal_sign_per_clip=[1.0,-1.0]",
+    "task.racket.target_mode=uniform", "task.racket.normal_mode=velocity",
+    "task.racket.adaptive_sigma=true", "task.racket.target_delay_steps=2",
+    "task.racket.target_jitter_pos_per_s=0.0",
+    "task.racket.target_jitter_vel_per_s=0.0",
+    "task.racket.target_noise_white=0.0019",
+    "task.racket.target_noise_ar1_sigma=0.0052",
+    "task.racket.target_noise_ar1_rho=0.717",
+    "task.racket.target_dropout_prob=0.0",
+    "task.racket.target_post_strike_dropout_s=0.0",
+    "task.racket.target_bias_per_swing=0.0",
+    "task.racket.midswing_resample_prob=0.0",
+    "task.racket.midswing_resample_tts_floor=0.3",
+    "task.racket.vb_spin_mode=minimize", "task.racket.vb_metrics_only=true",
+    "++task.racket.rally_legacy_metrics=true",
+    "task.racket.achieved_target_mix_prob=0.30",
+    "task.racket.achieved_buffer_size=4096", "task.racket.achieved_min_fill=256",
+    "task.racket.achieved_jitter_pos=0.03", "task.racket.achieved_jitter_vel=0.15",
+    "task.racket.achieved_clamp_inflate=0.20",
+    "task.racket.clean_reference_strike_velocity=true",
+    "task.racket.clean_strike_vel_window=2", "task.racket.strike_window_s=0.12",
+    "task.racket.strike_success_pos_thresh=0.075", "++task.physical_ball=true",
+    "task.rewards.racket_position_weight=14.0",
+    "task.rewards.racket_position_std=0.2",
+    "task.rewards.racket_velocity_weight=10.0",
+    "task.rewards.racket_velocity_std=1.0",
+    "task.rewards.racket_normal_weight=5.0", "task.rewards.racket_normal_std=0.3",
+    "task.rewards.free_wrist_ori_mimic=true",
+    "++task.motion.allow_legacy_link_origin_velocity=false",
+    "++task.motion.event_timing_mode=disabled",
+    "task.racket.strike_phase_per_clip=[0.471,0.338]",
+    "++task.racket.face_command_pairing=shared_plus_y",
+    "++task.rewards.racket_guidance_weight=0.0",
+    "++task.rewards.racket_face_guidance_weight=0.0",
+    "++task.rewards.racket_face_guidance_theta_max=3.141592653589793",
+    "task.rewards.base_decel_weight=0.0", "task.motion.post_swing_start_prob=0.0",
+    "task.rewards.joint_velocity_limit_hinge_margin=0.85",
+    "checkpoint_tolerant=false", "checkpoint_allow_missing_contract=false",
+    "checkpoint_allow_contract_mismatch=true", "++kit_carb_tasking_thread_count=16",
+    "++kit_tbb_thread_count=16",
+)
+
+EXPECTED_JOB_SPECS = {
+    "demo_qdot_v1v2_face_w0p4": (
+        "qdot", "pod2/gpu0", "phase1_demo_qdot_v1v2_face_w0p4_seed3_20260716",
+        "/workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_qdot_v1v2_face_w0p4",
+        ("true", "0.25", "-5.0", "-0.4", "-0.3", "false"),
+    ),
+    "demo_qdot_v1v2_face_w0p2": (
+        "qdot", "pod2/gpu1", "phase1_demo_qdot_v1v2_face_w0p2_seed3_20260716",
+        "/workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_qdot_v1v2_face_w0p2",
+        ("true", "0.25", "-5.0", "-0.2", "-0.3", "false"),
+    ),
+    "demo_v1v2_qdot_w5_face_w0p4": (
+        "v1v2", "pod2/gpu0", "phase1_demo_v1v2_qdot_w5_face_w0p4_seed3_20260716",
+        "/workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_v1v2_qdot_w5_face_w0p4",
+        ("true", "0.25", "-5.0", "-0.4", "-0.3", "false"),
+    ),
+    "demo_v1v2_qdot_w2p5_face_w0p4_free_arm": (
+        "v1v2", "pod2/gpu1",
+        "phase1_demo_v1v2_qdot_w2p5_face_w0p4_free_arm_seed3_20260716",
+        "/workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_v1v2_qdot_w2p5_face_w0p4_free_arm",
+        ("true", "0.25", "-2.5", "-0.4", "-0.3", "true"),
+    ),
+    "demo_control_qdot_w5_face_w0p4": (
+        "control", "pod2/gpu0", "phase1_demo_control_qdot_w5_face_w0p4_seed3_20260716",
+        "/workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_control_qdot_w5_face_w0p4",
+        ("false", "1.0", "-5.0", "-0.4", "-0.3", "false"),
+    ),
+    "demo_control_full_stack_free_arm_foot_w0p6": (
+        "control", "pod2/gpu1",
+        "phase1_demo_control_full_stack_free_arm_foot_w0p6_seed3_20260716",
+        "/workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_control_full_stack_free_arm_foot_w0p6",
+        ("true", "0.25", "-5.0", "-0.4", "-0.6", "true"),
+    ),
+}
+EXPECTED_DELTA_KEYS = (
+    "checkpoint_path", "++task.rewards.free_wrist_vel_mimic",
+    "++task.rewards.motion_scale_in_window",
+    "task.rewards.joint_velocity_limit_hinge_weight",
+    "++task.rewards.racket_face_conditional_guidance_weight",
+    "task.rewards.foot_orientation_weight",
+    "++task.rewards.free_non_striking_arm_mimic",
+)
+EXPECTED_PROBE_EVIDENCE = {
+    "attempt_id": "inferencefix_2c2d70d_pod2_gpu1_a1",
+    "result_file_sha256": (
+        "4b12854c5deca075ddf886fea3c5806aa0838b1d2bc9d3739e2fa13cd1840b27"
+    ),
+    "terminal_status": "passed",
+    "reuse_scope": "exact_source_scene_boot_and_runtime_binding_only",
+}
+EXPECTED_DECISION_CONTRACT = {
+    "purpose": "overnight_demo_portfolio_not_causal_or_exact_evidence",
+    "descendants_formal_exact_eligible": False,
+    "checkpoints_absolute": EXPECTED_MILESTONES,
+    "checkpoint_offsets_from_parent": [200, 500, 1000, 2000, 4000],
+    "sparse_outcome_zero_before_eligibility_may_stop": False,
+    "second_seed_authorized": False, "formal_promotion_authorized": False,
+    "real_robot_authorized": False,
+}
 
 
 PARENT_PROGRAM = r'''import base64
 import hashlib
+import io
 import json
 import os
 from pathlib import Path
@@ -80,56 +282,140 @@ def canonical_sha256(value):
     return hashlib.sha256(encoded).hexdigest()
 
 
-def require_no_symlink_components(path, label, *, leaf_may_be_missing=False):
+def require_workspace_path(value, label):
+    path = Path(value)
     if not path.is_absolute() or not str(path).startswith("/workspace/"):
         raise ParentError(f"{label} must be an absolute /workspace path")
+    return path
+
+
+def require_no_symlink_components(path, label, *, leaf_may_be_missing=False):
+    path = require_workspace_path(path, label)
     current = Path(path.anchor)
-    parts = path.parts[1:]
-    for index, part in enumerate(parts):
+    for index, part in enumerate(path.parts[1:]):
         current = current / part
         try:
             item = current.lstat()
         except FileNotFoundError:
-            if leaf_may_be_missing and index == len(parts) - 1:
+            if leaf_may_be_missing and index == len(path.parts[1:]) - 1:
                 return
             raise ParentError(f"{label} component missing: {current}")
         if stat.S_ISLNK(item.st_mode):
             raise ParentError(f"{label} contains a symlink component: {current}")
-        if index < len(parts) - 1 and not stat.S_ISDIR(item.st_mode):
+        if index < len(path.parts[1:]) - 1 and not stat.S_ISDIR(item.st_mode):
             raise ParentError(f"{label} parent is not a directory: {current}")
 
 
 def safe_mkdirs(path, label):
-    if not path.is_absolute() or not str(path).startswith("/workspace/"):
-        raise ParentError(f"{label} must be an absolute /workspace path")
+    path = require_workspace_path(path, label)
     current = Path(path.anchor)
     for part in path.parts[1:]:
         current = current / part
         try:
             item = current.lstat()
         except FileNotFoundError:
-            current.mkdir()
+            try:
+                current.mkdir()
+            except FileExistsError:
+                pass
             item = current.lstat()
         if stat.S_ISLNK(item.st_mode) or not stat.S_ISDIR(item.st_mode):
             raise ParentError(f"{label} is not a real directory: {current}")
 
 
+def require_publish_target_absent(path, label):
+    path = require_workspace_path(path, label)
+    current = Path(path.anchor)
+    for index, part in enumerate(path.parts[1:]):
+        current = current / part
+        try:
+            item = current.lstat()
+        except FileNotFoundError:
+            return
+        if stat.S_ISLNK(item.st_mode):
+            raise ParentError(f"{label} contains a symlink component: {current}")
+        if index < len(path.parts[1:]) - 1 and not stat.S_ISDIR(item.st_mode):
+            raise ParentError(f"{label} parent is not a directory: {current}")
+    raise ParentError(f"{label} already exists; one-shot namespace is consumed")
+
+
 def file_bytes(path, label):
+    path = require_workspace_path(path, label)
     require_no_symlink_components(path, label)
+    flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
     try:
-        before = path.lstat()
-    except FileNotFoundError as exc:
-        raise ParentError(f"{label} missing: {path}") from exc
-    if not stat.S_ISREG(before.st_mode) or before.st_size <= 0:
-        raise ParentError(f"{label} must be a non-empty regular non-symlink file")
-    payload = path.read_bytes()
-    after = path.lstat()
-    signature = lambda value: (
-        value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns
+        descriptor = os.open(path, flags)
+    except OSError as exc:
+        raise ParentError(f"cannot open {label}: {exc}") from exc
+    try:
+        before = os.fstat(descriptor)
+        if not stat.S_ISREG(before.st_mode) or before.st_size <= 0:
+            raise ParentError(f"{label} must be a non-empty regular file")
+        chunks = []
+        while True:
+            chunk = os.read(descriptor, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        after = os.fstat(descriptor)
+        signature = lambda item: (
+            item.st_dev, item.st_ino, item.st_size, item.st_mtime_ns
+        )
+        if signature(before) != signature(after):
+            raise ParentError(f"{label} changed while reading")
+        payload = b"".join(chunks)
+        if len(payload) != before.st_size:
+            raise ParentError(f"{label} short read")
+        return payload
+    finally:
+        os.close(descriptor)
+
+
+def write_exclusive(path, payload, label):
+    path = require_workspace_path(path, label)
+    safe_mkdirs(path.parent, f"{label} parent")
+    require_no_symlink_components(path, label, leaf_may_be_missing=True)
+    flags = (
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0)
     )
-    if signature(before) != signature(after):
-        raise ParentError(f"{label} changed while reading")
-    return payload, signature(after)
+    try:
+        descriptor = os.open(path, flags, 0o444)
+    except FileExistsError as exc:
+        raise ParentError(f"{label} already exists; overwrite is forbidden") from exc
+    try:
+        view = memoryview(payload)
+        while view:
+            written = os.write(descriptor, view)
+            if written <= 0:
+                raise ParentError(f"{label} write failed")
+            view = view[written:]
+        os.fchmod(descriptor, 0o444)
+        os.fsync(descriptor)
+    finally:
+        os.close(descriptor)
+    directory = os.open(path.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+    try:
+        os.fsync(directory)
+    finally:
+        os.close(directory)
+
+
+def require_read_only_file(path, label):
+    path = require_workspace_path(path, label)
+    require_no_symlink_components(path, label)
+    item = path.lstat()
+    if not stat.S_ISREG(item.st_mode) or stat.S_IMODE(item.st_mode) & 0o222:
+        raise ParentError(f"{label} must be a read-only regular file")
+
+
+def json_mapping(raw, label):
+    try:
+        value = json.loads(raw.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ParentError(f"{label} is not valid JSON") from exc
+    if not isinstance(value, dict):
+        raise ParentError(f"{label} is not a mapping")
+    return value
 
 
 def finite_audit(value):
@@ -166,21 +452,150 @@ def finite_audit(value):
     }
 
 
-def audit_parent(name, item):
-    checkpoint_path = Path(item["checkpoint_path"])
-    hard_path = Path(item["hard_contract_path"])
-    raw, checkpoint_signature = file_bytes(checkpoint_path, f"{name} checkpoint")
-    hard_raw, hard_signature = file_bytes(hard_path, f"{name} hard contract")
+def validate_claim(raw, name, item):
+    claim = json_mapping(raw, f"{name} queue claim")
+    if claim.get("schema_version") != 2:
+        raise ParentError(f"{name} queue claim schema is not 2")
+    content = claim.get("content")
+    if not isinstance(content, dict) or content.get("schema_version") != 1:
+        raise ParentError(f"{name} queue claim content schema is not 1")
+    digest = claim.get("content_sha256")
+    if canonical_sha256(content) != digest:
+        raise ParentError(f"{name} queue claim canonical SHA mismatch")
+    caller_argv = content.get("training_argv_without_claim")
+    full_argv = claim.get("training_argv")
+    if (
+        not isinstance(caller_argv, list)
+        or not all(type(value) is str for value in caller_argv)
+        or full_argv != [*caller_argv, f"++training_launch_claim_sha256={digest}"]
+    ):
+        raise ParentError(f"{name} queue claim training argv is not self-bound")
+    expected = {
+        "job_id": item["original_job_id"], "pod": item["original_pod"],
+        "gpu": item["original_gpu"], "run_name": item["original_run_name"],
+        "run_dir": item["original_run_dir"], "runtime_binding": True,
+    }
+    for key, value in expected.items():
+        if content.get(key) != value:
+            raise ParentError(f"{name} queue claim {key} mismatch")
+    source = content.get("source")
+    if not isinstance(source, dict) or (
+        source.get("checkout") != item["source_checkout"]
+        or source.get("commit") != item["source_commit"]
+    ):
+        raise ParentError(f"{name} queue claim source mismatch")
+    required = (
+        f"++training_queue_claim_path={item['live_queue_claim_path']}",
+        f"++training_run_binding_path={item['live_run_binding_path']}",
+        f"run_name={item['original_run_name']}",
+    )
+    for override in required:
+        if full_argv.count(override) != 1:
+            raise ParentError(f"{name} queue claim must contain one {override}")
+    expected_train = f"{item['source_checkout']}/hope_training/whole_body_tracking/scripts/train.py"
+    if len(full_argv) < 2 or full_argv[1] != expected_train:
+        raise ParentError(f"{name} queue claim train.py source mismatch")
+    return claim, content, digest
+
+
+def validate_binding(raw, name, item, claim, claim_content, claim_digest):
+    binding = json_mapping(raw, f"{name} run binding")
+    if binding.get("schema_version") != 1:
+        raise ParentError(f"{name} run binding schema is not 1")
+    content = binding.get("content")
+    digest = binding.get("content_sha256")
+    if not isinstance(content, dict) or canonical_sha256(content) != digest:
+        raise ParentError(f"{name} run binding canonical SHA mismatch")
+    expected = {
+        "schema_version": 1, "job_id": item["original_job_id"],
+        "claim_path": item["live_queue_claim_path"],
+        "claim_content_sha256": claim_digest,
+        "binding_path": item["live_run_binding_path"],
+        "rsl_log_dir": item["original_rsl_log_dir"],
+        "pod": item["original_pod"], "gpu": item["original_gpu"],
+        "source": claim_content["source"],
+        "source_state_at_binding": {
+            "head": item["source_commit"], "clean": True,
+        },
+        "run_name": item["original_run_name"],
+        "run_dir": item["original_run_dir"],
+        "training_argv": claim["training_argv"],
+        "purpose": None, "not_science": False,
+        "attestable": True, "promotable": True,
+    }
+    for key, value in expected.items():
+        if content.get(key) != value:
+            raise ParentError(f"{name} run binding {key} mismatch")
+    if content.get("milestones") != claim_content.get("budget", {}).get("milestones"):
+        raise ParentError(f"{name} run binding milestones mismatch")
+    process = content.get("process")
+    if not isinstance(process, dict):
+        raise ParentError(f"{name} run binding process missing")
+    pid, pgid = process.get("pid"), process.get("pgid")
+    if type(pid) is not int or pid <= 0 or pgid != pid:
+        raise ParentError(f"{name} run binding process identity invalid")
+    if process.get("argv") != claim["training_argv"]:
+        raise ParentError(f"{name} run binding process argv mismatch")
+    return binding, content, digest
+
+
+def audit_bundle(name, item, paths):
+    raw = file_bytes(Path(paths["checkpoint"]), f"{name} checkpoint")
+    hard_raw = file_bytes(Path(paths["hard"]), f"{name} hard contract")
+    claim_raw = file_bytes(Path(paths["claim"]), f"{name} queue claim")
+    binding_raw = file_bytes(Path(paths["binding"]), f"{name} run binding")
+    claim, claim_content, claim_digest = validate_claim(claim_raw, name, item)
+    _binding, _binding_content, binding_digest = validate_binding(
+        binding_raw, name, item, claim, claim_content, claim_digest
+    )
+    hard = json_mapping(hard_raw, f"{name} hard contract")
+    if hard.get("schema_version") != 3:
+        raise ParentError(f"{name} hard contract schema is not 3")
+    parent_qdot = hard.get("joint_velocity_limit_hinge_reward")
+    parent_face = hard.get("racket_guidance_reward", {}).get("conditional_signed_face")
+    if not isinstance(parent_qdot, dict) or not isinstance(parent_face, dict):
+        raise ParentError(f"{name} parent lacks qdot/conditional-face hard bindings")
+    parent_qdot_weight = parent_qdot.get("weight")
+    parent_face_weight = parent_face.get("weight")
+    if (
+        isinstance(parent_qdot_weight, bool)
+        or not isinstance(parent_qdot_weight, (int, float))
+        or isinstance(parent_face_weight, bool)
+        or not isinstance(parent_face_weight, (int, float))
+    ):
+        raise ParentError(f"{name} parent hard-bound reward weights are malformed")
+    for descendant in item["descendant_contract_values"]:
+        if (
+            descendant["qdot_weight"] == parent_qdot_weight
+            and descendant["face_weight"] == parent_face_weight
+        ):
+            raise ParentError(
+                f"{name} descendant {descendant['job_id']} changes no hard-bound reward"
+            )
     try:
-        checkpoint = torch.load(checkpoint_path, map_location="cpu", weights_only=False)
+        checkpoint = torch.load(io.BytesIO(raw), map_location="cpu", weights_only=False)
     except Exception as exc:
-        raise ParentError(f"cannot load {name} checkpoint: {exc}") from exc
+        raise ParentError(f"cannot load {name} checkpoint bytes: {exc}") from exc
     if not isinstance(checkpoint, dict):
         raise ParentError(f"{name} checkpoint is not a mapping")
     if type(checkpoint.get("iter")) is not int or checkpoint["iter"] != item["iteration"]:
         raise ParentError(f"{name} embedded iteration mismatch")
-    if "optimizer_state_dict" not in checkpoint:
-        raise ParentError(f"{name} checkpoint lacks optimizer_state_dict")
+    model = checkpoint.get("model_state_dict")
+    if not isinstance(model, dict) or not model:
+        raise ParentError(f"{name} checkpoint lacks non-empty model_state_dict")
+    keys = tuple(model)
+    if not any(key.startswith("actor.") for key in keys) or not any(
+        key.startswith("critic.") for key in keys
+    ):
+        raise ParentError(f"{name} checkpoint lacks actor/critic model keys")
+    optimizer = checkpoint.get("optimizer_state_dict")
+    if (
+        not isinstance(optimizer, dict) or not optimizer
+        or not isinstance(optimizer.get("state"), dict) or not optimizer["state"]
+        or not isinstance(optimizer.get("param_groups"), list)
+        or not optimizer["param_groups"]
+    ):
+        raise ParentError(f"{name} checkpoint optimizer state is empty or malformed")
     audit = finite_audit(checkpoint)
     if audit["floating_tensor_count"] <= 0 or audit["nonfinite_floating_elements"] != 0:
         raise ParentError(f"{name} checkpoint floating tensors are not finite")
@@ -188,40 +603,60 @@ def audit_parent(name, item):
     if not isinstance(infos, dict):
         raise ParentError(f"{name} checkpoint infos missing")
     hard_sha = hashlib.sha256(hard_raw).hexdigest()
-    if infos.get("training_contract_sha256") != hard_sha:
-        raise ParentError(f"{name} checkpoint/hard-contract SHA binding mismatch")
-    if infos.get("training_contract_schema_version") != 3:
-        raise ParentError(f"{name} parent hard-contract schema binding is not 3")
+    if (
+        infos.get("training_contract_sha256") != hard_sha
+        or infos.get("training_contract_schema_version") != 3
+    ):
+        raise ParentError(f"{name} checkpoint/hard-contract binding mismatch")
     lineage = infos.get("training_contract_lineage_exact")
     if type(lineage) is not int or lineage != 1:
         raise ParentError(f"{name} parent lineage is not exact")
-    launch_claim_sha = infos.get("training_launch_claim_sha256")
-    if (
-        not isinstance(launch_claim_sha, str)
-        or len(launch_claim_sha) != 64
-        or any(character not in "0123456789abcdef" for character in launch_claim_sha)
-    ):
-        raise ParentError(f"{name} parent launch-claim SHA is missing or malformed")
-    if checkpoint_signature != (
-        checkpoint_path.lstat().st_dev, checkpoint_path.lstat().st_ino,
-        checkpoint_path.lstat().st_size, checkpoint_path.lstat().st_mtime_ns,
-    ):
-        raise ParentError(f"{name} checkpoint changed while auditing")
-    if hard_signature != (
-        hard_path.lstat().st_dev, hard_path.lstat().st_ino,
-        hard_path.lstat().st_size, hard_path.lstat().st_mtime_ns,
-    ):
-        raise ParentError(f"{name} hard contract changed while auditing")
+    if infos.get("training_launch_claim_sha256") != claim_digest:
+        raise ParentError(f"{name} checkpoint/launch-claim binding mismatch")
     return {
-        "checkpoint_path": str(checkpoint_path),
         "checkpoint_sha256": hashlib.sha256(raw).hexdigest(),
-        "hard_contract_path": str(hard_path),
         "hard_contract_sha256": hard_sha,
+        "queue_claim_file_sha256": hashlib.sha256(claim_raw).hexdigest(),
+        "queue_claim_content_sha256": claim_digest,
+        "run_binding_file_sha256": hashlib.sha256(binding_raw).hexdigest(),
+        "run_binding_content_sha256": binding_digest,
         "embedded_iteration": checkpoint["iter"],
         "optimizer_state_dict_present": True,
+        "optimizer_state_dict_nonempty": True,
         "parent_training_contract_lineage_exact": True,
-        "training_launch_claim_sha256": launch_claim_sha,
+        "parent_qdot_weight": parent_qdot_weight,
+        "parent_conditional_face_weight": parent_face_weight,
+        "training_launch_claim_sha256": claim_digest,
         "finite_audit": audit,
+        "raw": {
+            "checkpoint": raw, "hard": hard_raw,
+            "claim": claim_raw, "binding": binding_raw,
+        },
+    }
+
+
+def public_parent(item, audited):
+    return {
+        "original_job_id": item["original_job_id"],
+        "original_run_name": item["original_run_name"],
+        "original_run_dir": item["original_run_dir"],
+        "original_rsl_log_dir": item["original_rsl_log_dir"],
+        "original_pod": item["original_pod"], "original_gpu": item["original_gpu"],
+        "live_paths": {
+            key.removeprefix("live_"): item[key]
+            for key in (
+                "live_checkpoint_path", "live_hard_contract_path",
+                "live_queue_claim_path", "live_run_binding_path",
+            )
+        },
+        "snapshot_paths": {
+            key.removeprefix("snapshot_"): item[key]
+            for key in (
+                "snapshot_checkpoint_path", "snapshot_hard_contract_path",
+                "snapshot_queue_claim_path", "snapshot_run_binding_path",
+            )
+        },
+        **{key: value for key, value in audited.items() if key != "raw"},
     }
 
 
@@ -229,61 +664,98 @@ def main():
     if len(sys.argv) != 2:
         raise ParentError("one base64 JSON specification is required")
     spec = json.loads(base64.b64decode(sys.argv[1], validate=True))
+    mode = spec.get("mode")
+    if mode not in {"inspect", "attest", "verify"}:
+        raise ParentError("mode must be inspect, attest, or verify")
+    if mode in {"inspect", "attest"}:
+        require_publish_target_absent(
+            Path(spec["receipt_path"]), "activation receipt"
+        )
+        for name, item in sorted(spec["parents"].items()):
+            for key, label in (
+                ("snapshot_checkpoint_path", "checkpoint"),
+                ("snapshot_hard_contract_path", "hard contract"),
+                ("snapshot_queue_claim_path", "queue claim"),
+                ("snapshot_run_binding_path", "run binding"),
+            ):
+                require_publish_target_absent(
+                    Path(item[key]), f"{name} snapshot {label}"
+                )
+        live_audits = {}
+        for name, item in sorted(spec["parents"].items()):
+            live_audits[name] = audit_bundle(name, item, {
+                "checkpoint": item["live_checkpoint_path"],
+                "hard": item["live_hard_contract_path"],
+                "claim": item["live_queue_claim_path"],
+                "binding": item["live_run_binding_path"],
+            })
+        if mode == "attest":
+            for name, item in sorted(spec["parents"].items()):
+                raw = live_audits[name]["raw"]
+                write_exclusive(Path(item["snapshot_checkpoint_path"]), raw["checkpoint"], f"{name} snapshot checkpoint")
+                write_exclusive(Path(item["snapshot_hard_contract_path"]), raw["hard"], f"{name} snapshot hard contract")
+                write_exclusive(Path(item["snapshot_queue_claim_path"]), raw["claim"], f"{name} snapshot queue claim")
+                write_exclusive(Path(item["snapshot_run_binding_path"]), raw["binding"], f"{name} snapshot run binding")
+    if mode == "inspect":
+        audits = live_audits
+    else:
+        audits = {}
+        for name, item in sorted(spec["parents"].items()):
+            for key, label in (
+                ("snapshot_checkpoint_path", "checkpoint"),
+                ("snapshot_hard_contract_path", "hard contract"),
+                ("snapshot_queue_claim_path", "queue claim"),
+                ("snapshot_run_binding_path", "run binding"),
+            ):
+                require_read_only_file(Path(item[key]), f"{name} snapshot {label}")
+            audits[name] = audit_bundle(name, item, {
+                "checkpoint": item["snapshot_checkpoint_path"],
+                "hard": item["snapshot_hard_contract_path"],
+                "claim": item["snapshot_queue_claim_path"],
+                "binding": item["snapshot_run_binding_path"],
+            })
+    if mode == "attest":
+        for name in sorted(spec["parents"]):
+            for key in (
+                "checkpoint_sha256", "hard_contract_sha256",
+                "queue_claim_file_sha256", "queue_claim_content_sha256",
+                "run_binding_file_sha256", "run_binding_content_sha256",
+                "training_launch_claim_sha256",
+            ):
+                if audits[name][key] != live_audits[name][key]:
+                    raise ParentError(f"{name} snapshot {key} differs from live source")
     content = {
-        "schema_version": 1,
-        "purpose": "demo_only_strict_full_state_warm_start_parent_receipt",
+        "schema_version": 2,
+        "purpose": "demo_only_strict_full_state_snapshot_parent_receipt_v2",
         "source_commit": spec["source_commit"],
         "transfer_mode": "strict_full_state_preserve_optimizer",
         "descendant_exact_eligible": False,
         "parents": {
-            name: audit_parent(name, item)
-            for name, item in sorted(spec["parents"].items())
+            name: public_parent(spec["parents"][name], audit)
+            for name, audit in sorted(audits.items())
         },
     }
     receipt = {
-        "schema_version": 1,
-        "content": content,
+        "schema_version": 2, "content": content,
         "content_sha256": canonical_sha256(content),
     }
     encoded = (
-        json.dumps(
-            receipt, allow_nan=False, ensure_ascii=False,
-            separators=(",", ":"), sort_keys=True,
-        ) + "\n"
+        json.dumps(receipt, allow_nan=False, ensure_ascii=False,
+                   separators=(",", ":"), sort_keys=True) + "\n"
     ).encode("utf-8")
-    output = Path(spec["receipt_path"])
-    if spec["mode"] == "attest":
-        safe_mkdirs(output.parent, "activation receipt parent")
-        require_no_symlink_components(output, "activation receipt", leaf_may_be_missing=True)
-        descriptor = os.open(
-            output,
-            os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
-            0o444,
-        )
-        with os.fdopen(descriptor, "wb") as stream:
-            stream.write(encoded)
-            stream.flush()
-            os.fsync(stream.fileno())
-        directory = os.open(output.parent, os.O_RDONLY | os.O_DIRECTORY)
-        try:
-            os.fsync(directory)
-        finally:
-            os.close(directory)
-    elif spec["mode"] == "verify":
-        existing, _signature = file_bytes(output, "activation receipt")
-        if existing != encoded:
-            raise ParentError("activation receipt content differs from current parents")
-    else:
-        raise ParentError("mode must be attest or verify")
+    output = require_workspace_path(spec["receipt_path"], "activation receipt")
+    if mode == "attest":
+        write_exclusive(output, encoded, "activation receipt")
+    elif mode == "verify":
+        if file_bytes(output, "activation receipt") != encoded:
+            raise ParentError("activation receipt differs from immutable snapshots")
     receipt_sha = hashlib.sha256(encoded).hexdigest()
     expected = spec.get("expected_receipt_sha256")
     if expected is not None and receipt_sha != expected:
         raise ParentError("activation receipt file SHA mismatch")
     print(json.dumps({
-        "status": "DEMO_WARMSTART_PARENTS_OK",
-        "mode": spec["mode"],
-        "receipt_path": str(output),
-        "receipt_file_sha256": receipt_sha,
+        "status": "DEMO_WARMSTART_PARENT_SNAPSHOTS_V2_OK", "mode": mode,
+        "receipt_path": str(output), "receipt_file_sha256": receipt_sha,
         "receipt": receipt,
     }, sort_keys=True))
 
@@ -292,6 +764,208 @@ try:
     main()
 except ParentError as exc:
     print(f"DEMO_WARMSTART_PARENT_ERROR: {exc}", file=sys.stderr)
+    raise SystemExit(2)
+'''
+
+
+FIRST_ITER_PROGRAM = r'''import base64
+import hashlib
+import json
+import os
+from pathlib import Path
+import stat
+import sys
+import time
+
+
+class ProofError(RuntimeError):
+    pass
+
+
+def canonical_sha256(value):
+    return hashlib.sha256(json.dumps(
+        value, allow_nan=False, ensure_ascii=False,
+        separators=(",", ":"), sort_keys=True,
+    ).encode("utf-8")).hexdigest()
+
+
+def workspace_path(value, label):
+    path = Path(value)
+    if not path.is_absolute() or not str(path).startswith("/workspace/"):
+        raise ProofError(f"{label} must be an absolute /workspace path")
+    current = Path(path.anchor)
+    for index, part in enumerate(path.parts[1:]):
+        current = current / part
+        try:
+            item = current.lstat()
+        except FileNotFoundError as exc:
+            raise ProofError(f"{label} is missing: {current}") from exc
+        if stat.S_ISLNK(item.st_mode):
+            raise ProofError(f"{label} contains a symlink component")
+        if index < len(path.parts[1:]) - 1 and not stat.S_ISDIR(item.st_mode):
+            raise ProofError(f"{label} parent is not a directory")
+    return path
+
+
+def read_bytes(value, label):
+    path = workspace_path(value, label)
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        info = os.fstat(fd)
+        if not stat.S_ISREG(info.st_mode) or info.st_size <= 0:
+            raise ProofError(f"{label} must be a non-empty regular file")
+        chunks = []
+        while True:
+            chunk = os.read(fd, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        return b"".join(chunks)
+    finally:
+        os.close(fd)
+
+
+def read_json(value, label):
+    try:
+        document = json.loads(read_bytes(value, label).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise ProofError(f"{label} is not valid JSON") from exc
+    if not isinstance(document, dict):
+        raise ProofError(f"{label} is not a mapping")
+    return document
+
+
+def envelope(value, label, schema):
+    document = read_json(value, label)
+    if document.get("schema_version") != schema:
+        raise ProofError(f"{label} schema mismatch")
+    content = document.get("content")
+    if not isinstance(content, dict) or canonical_sha256(content) != document.get("content_sha256"):
+        raise ProofError(f"{label} canonical SHA mismatch")
+    return document, content
+
+
+def write_failure(spec, error):
+    process = None
+    try:
+        _binding, content = envelope(spec["binding_path"], "run binding", 1)
+        raw = content.get("process")
+        if isinstance(raw, dict):
+            pid, pgid = raw.get("pid"), raw.get("pgid")
+            if type(pid) is int and pid > 0 and type(pgid) is int and pgid > 0:
+                process = {"pid": pid, "pgid": pgid,
+                           "starttime_ticks": raw.get("starttime_ticks")}
+    except Exception:
+        pass
+    content = {
+        "schema_version": 1, "status": "first_iteration_proof_failed",
+        "error": str(error), "job_id": spec["job_id"],
+        "claim_content_sha256": spec["claim_content_sha256"],
+        "run_binding_path": spec["binding_path"], "process": process,
+        "manual_exact_pgid_disposition_required": process is not None,
+        "automatic_retry": False, "signal_sent": False,
+    }
+    document = {
+        "schema_version": 1, "content": content,
+        "content_sha256": canonical_sha256(content),
+    }
+    payload = (json.dumps(document, allow_nan=False, ensure_ascii=False,
+                          separators=(",", ":"), sort_keys=True) + "\n").encode("utf-8")
+    path = Path(spec["failure_path"])
+    fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o444)
+    try:
+        os.write(fd, payload)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+
+
+def main():
+    if len(sys.argv) != 2:
+        raise ProofError("one base64 JSON specification is required")
+    spec = json.loads(base64.b64decode(sys.argv[1], validate=True))
+    claim, claim_content = envelope(spec["claim_path"], "queue claim", 2)
+    digest = claim.get("content_sha256")
+    if digest != spec["claim_content_sha256"]:
+        raise ProofError("queue claim differs from launch contract")
+    argv = claim.get("training_argv")
+    caller = claim_content.get("training_argv_without_claim")
+    if argv != [*caller, f"++training_launch_claim_sha256={digest}"]:
+        raise ProofError("queue claim argv is not self-bound")
+    binding, bound = envelope(spec["binding_path"], "run binding", 1)
+    expected_bound = {
+        "job_id": spec["job_id"], "claim_path": spec["claim_path"],
+        "claim_content_sha256": digest, "binding_path": spec["binding_path"],
+        "run_name": spec["run_name"], "run_dir": spec["run_dir"],
+        "pod": spec["pod"], "gpu": spec["gpu"], "training_argv": argv,
+    }
+    for key, value in expected_bound.items():
+        if bound.get(key) != value:
+            raise ProofError(f"run binding {key} mismatch")
+    process = bound.get("process")
+    if not isinstance(process, dict) or type(process.get("pid")) is not int or process.get("pgid") != process.get("pid"):
+        raise ProofError("run binding lacks exact isolated PID/PGID")
+    hard_path = str(Path(bound["rsl_log_dir"]) / "params/training_contract.json")
+    hard = read_json(hard_path, "child hard contract")
+    if hard.get("schema_version") != 3:
+        raise ProofError("child hard contract schema is not 3")
+    qdot = hard.get("joint_velocity_limit_hinge_reward")
+    face = hard.get("racket_guidance_reward", {}).get("conditional_signed_face")
+    if not isinstance(qdot, dict) or qdot.get("weight") != spec["qdot_weight"]:
+        raise ProofError("child qdot hard-contract weight mismatch")
+    if not isinstance(face, dict) or face.get("weight") != spec["face_weight"]:
+        raise ProofError("child conditional-face hard-contract weight mismatch")
+    deadline = time.monotonic() + spec["timeout_s"]
+    expected_resume = (
+        f"[train.py] RESUMED from checkpoint: {spec['checkpoint_path']} "
+        "(continuing at iteration 3500, optimizer=resumed)"
+    )
+    mismatch = "[train.py] WARNING: explicit hard-contract mismatch override:"
+    while True:
+        try:
+            log = read_bytes(spec["run_log_path"], "run log").decode("utf-8", "replace")
+        except ProofError:
+            log = ""
+        if expected_resume in log and mismatch in log:
+            break
+        if time.monotonic() >= deadline:
+            raise ProofError("run log lacks strict resume and explicit mismatch proof")
+        time.sleep(1)
+    content = {
+        "schema_version": 1, "status": "strict_full_state_resume_proven",
+        "job_id": spec["job_id"], "claim_content_sha256": digest,
+        "run_binding_content_sha256": binding["content_sha256"],
+        "process": {key: process.get(key) for key in ("pid", "pgid", "starttime_ticks")},
+        "checkpoint_path": spec["checkpoint_path"], "parent_iteration": 3500,
+        "optimizer": "resumed", "explicit_hard_contract_mismatch": True,
+        "expected_child_lineage_exact": 0,
+        "child_hard_contract_path": hard_path,
+        "qdot_weight": spec["qdot_weight"], "face_weight": spec["face_weight"],
+    }
+    document = {
+        "schema_version": 1, "content": content,
+        "content_sha256": canonical_sha256(content),
+    }
+    payload = (json.dumps(document, allow_nan=False, ensure_ascii=False,
+                          separators=(",", ":"), sort_keys=True) + "\n").encode("utf-8")
+    fd = os.open(spec["success_path"], os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0), 0o444)
+    try:
+        os.write(fd, payload)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    print(json.dumps(document, sort_keys=True))
+
+
+try:
+    main()
+except (ProofError, OSError, KeyError, TypeError, ValueError) as exc:
+    try:
+        if len(sys.argv) == 2:
+            write_failure(json.loads(base64.b64decode(sys.argv[1], validate=True)), exc)
+    except Exception as record_error:
+        print(f"FIRST_ITER_FAILURE_RECORD_ERROR: {record_error}", file=sys.stderr)
+    print(f"FIRST_ITER_PROOF_ERROR: {exc}", file=sys.stderr)
     raise SystemExit(2)
 '''
 
@@ -332,12 +1006,12 @@ def load_queue(path: Path) -> dict[str, Any]:
         raise DemoQueueError("simulation_only must be true")
     if queue.get("dispatch_pods") != ["pod2"]:
         raise DemoQueueError("demo queue must dispatch only to Pod2")
-    if list(queue.get("pods", {})) != ["pod1", "pod2"]:
-        raise DemoQueueError("pods must remain ordered pod1, pod2")
-    if queue["pods"]["pod1"].get("max_trainers_per_gpu") != 4:
-        raise DemoQueueError("Pod1 capacity declaration must remain 4")
-    if queue["pods"]["pod2"].get("max_trainers_per_gpu") != 3:
-        raise DemoQueueError("Pod2 capacity declaration must remain 3")
+    if queue.get("ssh") != {"key": EXPECTED_SSH_KEY}:
+        raise DemoQueueError("SSH key changed")
+    if queue.get("pods") != EXPECTED_PODS:
+        raise DemoQueueError("exact Pod host/port/GPU/capacity contract changed")
+    if queue.get("source_contract_files") != EXPECTED_SOURCE_CONTRACT_FILES:
+        raise DemoQueueError("critical source-file hashes changed")
 
     activation = queue.get("activation_contract")
     if not isinstance(activation, dict):
@@ -346,19 +1020,39 @@ def load_queue(path: Path) -> dict[str, Any]:
     if state not in {"pending_parent_receipt_and_gpu_release", "activated"}:
         raise DemoQueueError("invalid activation state")
     pending = state != "activated"
+    expected_preregistration = (
+        "blocked_until_parent_snapshot_receipt_and_fourth_slot_evidence"
+        if pending else "activated_demo_only_inexact"
+    )
+    if queue.get("preregistration_status") != expected_preregistration:
+        raise DemoQueueError("preregistration_status does not match activation state")
     if queue.get("launch_authorized") is not (not pending):
         raise DemoQueueError("launch_authorized must exactly follow activation state")
     receipt_path = Q._ready_workspace_path(
         activation.get("receipt_path"), "activation receipt path"
     )
+    if receipt_path != EXPECTED_RECEIPT_PATH:
+        raise DemoQueueError("activation must use the immutable v2 snapshot receipt path")
     _require_sha(
         activation.get("receipt_file_sha256"),
         "activation receipt_file_sha256", pending=pending,
     )
     if activation.get("gpu_release_rule") != (
-        "pod2_gpu0_and_gpu1_slots_free_after_existing_scaleout_model500_stop"
+        "pod2_gpu0_gpu1_occupancy_lte3_and_six_model500_preserved_"
+        "allow_fourth_slot_jobs1_2"
     ):
         raise DemoQueueError("activation GPU release rule changed")
+    if set(activation) != {
+        "state", "receipt_path", "receipt_file_sha256", "gpu_release_rule",
+        "automatic_activation", "automatic_retry",
+    } or activation.get("automatic_activation") is not False or (
+        activation.get("automatic_retry") is not False
+    ):
+        raise DemoQueueError("activation one-shot/no-retry fields changed")
+    if queue.get("strict_full_scene_probe_evidence") != EXPECTED_PROBE_EVIDENCE:
+        raise DemoQueueError("strict full-scene probe evidence changed")
+    if queue.get("decision_contract") != EXPECTED_DECISION_CONTRACT:
+        raise DemoQueueError("demo decision/exactness contract changed")
 
     parents = queue.get("parents")
     if not isinstance(parents, dict) or list(parents) != ["qdot", "v1v2", "control"]:
@@ -366,30 +1060,67 @@ def load_queue(path: Path) -> dict[str, Any]:
     for name, parent in parents.items():
         if not isinstance(parent, dict):
             raise DemoQueueError(f"parent {name} must be a mapping")
-        checkpoint = Q._ready_workspace_path(
-            parent.get("checkpoint_path"), f"parent {name} checkpoint"
-        )
-        hard = Q._ready_workspace_path(
-            parent.get("hard_contract_path"), f"parent {name} hard contract"
-        )
-        if PurePosixPath(checkpoint).name != "model_3500.pt":
-            raise DemoQueueError(f"parent {name} must be model_3500.pt")
-        if PurePosixPath(hard) != PurePosixPath(checkpoint).parent / "params/training_contract.json":
-            raise DemoQueueError(f"parent {name} hard contract is not adjacent")
+        expected_parent = EXPECTED_PARENT_SPECS[name]
+        identity_keys = set(expected_parent)
+        if any(parent.get(key) != value for key, value in expected_parent.items()):
+            raise DemoQueueError(f"parent {name} identity/path contract changed")
+        expected_keys = identity_keys | {
+            "embedded_iteration", "optimizer_state_dict_required",
+            "checkpoint_sha256", "hard_contract_sha256",
+            "queue_claim_file_sha256", "queue_claim_content_sha256",
+            "run_binding_file_sha256", "run_binding_content_sha256",
+            "training_launch_claim_sha256",
+        }
+        if set(parent) != expected_keys:
+            raise DemoQueueError(f"parent {name} has extra or missing fields")
+        for prefix in ("live", "snapshot"):
+            checkpoint = Q._ready_workspace_path(
+                parent[f"{prefix}_checkpoint_path"],
+                f"parent {name} {prefix} checkpoint",
+            )
+            hard = Q._ready_workspace_path(
+                parent[f"{prefix}_hard_contract_path"],
+                f"parent {name} {prefix} hard contract",
+            )
+            Q._ready_workspace_path(
+                parent[f"{prefix}_queue_claim_path"],
+                f"parent {name} {prefix} queue claim",
+            )
+            Q._ready_workspace_path(
+                parent[f"{prefix}_run_binding_path"],
+                f"parent {name} {prefix} run binding",
+            )
+            if PurePosixPath(checkpoint).name != "model_3500.pt":
+                raise DemoQueueError(f"parent {name} {prefix} checkpoint is not model_3500.pt")
+            if PurePosixPath(hard) != (
+                PurePosixPath(checkpoint).parent / "params/training_contract.json"
+            ):
+                raise DemoQueueError(f"parent {name} {prefix} hard contract is not adjacent")
         if parent.get("embedded_iteration") != EXPECTED_PARENT_ITERATION:
             raise DemoQueueError(f"parent {name} iteration must be 3500")
         if parent.get("optimizer_state_dict_required") is not True:
             raise DemoQueueError(f"parent {name} must preserve optimizer state")
-        _require_sha(parent.get("checkpoint_sha256"), f"parent {name} checkpoint SHA", pending=pending)
-        _require_sha(parent.get("hard_contract_sha256"), f"parent {name} hard SHA", pending=pending)
-        _require_sha(
-            parent.get("training_launch_claim_sha256"),
-            f"parent {name} launch claim SHA", pending=pending,
-        )
+        for key in (
+            "checkpoint_sha256", "hard_contract_sha256",
+            "queue_claim_file_sha256", "queue_claim_content_sha256",
+            "run_binding_file_sha256", "run_binding_content_sha256",
+            "training_launch_claim_sha256",
+        ):
+            _require_sha(parent.get(key), f"parent {name} {key}", pending=pending)
+        if (
+            not pending
+            and parent["training_launch_claim_sha256"]
+            != parent["queue_claim_content_sha256"]
+        ):
+            raise DemoQueueError(
+                f"parent {name} checkpoint launch claim differs from claim content SHA"
+            )
 
     jobs = queue.get("jobs")
     if not isinstance(jobs, list) or len(jobs) != 6:
         raise DemoQueueError("exactly six demo rows are required")
+    if [job.get("id") for job in jobs] != list(EXPECTED_JOB_SPECS):
+        raise DemoQueueError("six job ids/order changed")
     if [job.get("resource", {}).get("required_slot") for job in jobs] != EXPECTED_SLOTS:
         raise DemoQueueError("jobs must round-robin Pod2 GPU0/GPU1")
     ids: set[str] = set()
@@ -401,6 +1132,16 @@ def load_queue(path: Path) -> dict[str, Any]:
         if not isinstance(job_id, str) or not Q.SAFE_ID.fullmatch(job_id) or job_id in ids:
             raise DemoQueueError("job ids must be unique safe identifiers")
         ids.add(job_id)
+        parent_name, expected_slot, expected_run_name, expected_run_dir, knobs = (
+            EXPECTED_JOB_SPECS[job_id]
+        )
+        if set(job) != {
+            "id", "human_name", "action", "status", "blocker", "motion",
+            "bank", "exam", "source", "runtime_binding", "warm_start",
+            "recipe", "seed", "budget", "milestones", "resource",
+            "run_name", "run_dir",
+        }:
+            raise DemoQueueError(f"{job_id} has extra or missing job fields")
         if job.get("status") != ("blocked" if pending else "ready"):
             raise DemoQueueError(f"{job_id} status does not match activation state")
         if pending and not isinstance(job.get("blocker"), str):
@@ -409,33 +1150,64 @@ def load_queue(path: Path) -> dict[str, Any]:
             raise DemoQueueError(f"{job_id} ready row still has a blocker")
         if job.get("runtime_binding") is not True:
             raise DemoQueueError(f"{job_id} requires runtime binding")
-        if job.get("source", {}).get("commit") != EXPECTED_SOURCE:
-            raise DemoQueueError(f"{job_id} source changed")
-        if job["source"].get("checkout") != EXPECTED_SOURCE_CHECKOUT:
-            raise DemoQueueError(f"{job_id} source checkout changed")
+        expected_source = {
+            "checkout": EXPECTED_SOURCE_CHECKOUT, "commit": EXPECTED_SOURCE,
+            "ignored_runtime_asset": EXPECTED_IGNORED_RUNTIME_ASSET,
+        }
+        if job.get("source") != expected_source:
+            raise DemoQueueError(f"{job_id} exact source/asset closure changed")
         if job.get("action") != "signed_face_v4rg_shared_face":
             raise DemoQueueError(f"{job_id} action changed")
-        if job.get("motion", {}).get("bindings") != EXPECTED_MOTION_BINDINGS:
+        if job.get("motion") != {
+            "action": "signed_face_v4rg_shared_face",
+            "bindings": EXPECTED_MOTION_BINDINGS,
+        }:
             raise DemoQueueError(f"{job_id} v4rg motion binding changed")
-        if job.get("bank", {}).get("train_path") != EXPECTED_BANK:
+        if job.get("bank") != {
+            "action": "signed_face_v4rg_shared_face", "train_path": EXPECTED_BANK,
+            "train_arg": "++task.racket.question_bank",
+        }:
             raise DemoQueueError(f"{job_id} schema-3 bank changed")
-        if job.get("exam", {}).get("path") != EXPECTED_EXAM:
+        if job.get("exam") != {
+            "action": "signed_face_v4rg_shared_face", "path": EXPECTED_EXAM,
+            "family": "signed_face_rebound_k100_v1",
+        }:
             raise DemoQueueError(f"{job_id} immutable exam changed")
         warm = job.get("warm_start")
-        if not isinstance(warm, dict) or warm.get("parent") not in parents:
-            raise DemoQueueError(f"{job_id} warm-start parent is invalid")
-        if warm.get("transfer_mode") != "strict_full_state_preserve_optimizer":
-            raise DemoQueueError(f"{job_id} transfer mode changed")
-        if warm.get("checkpoint_tolerant") is not False:
-            raise DemoQueueError(f"{job_id} checkpoint_tolerant must be false")
-        if warm.get("allow_missing_contract") is not False:
-            raise DemoQueueError(f"{job_id} allow_missing_contract must be false")
-        if warm.get("allow_contract_mismatch") is not True:
-            raise DemoQueueError(f"{job_id} must opt into the contract mismatch")
-        if warm.get("descendant_exact_eligible") is not False:
-            raise DemoQueueError(f"{job_id} descendants must be exact-ineligible")
+        if isinstance(warm, dict) and warm.get("descendant_exact_eligible") is not False:
+            raise DemoQueueError(f"{job_id} descendants must remain exact-ineligible")
+        expected_warm = {
+            "parent": parent_name,
+            "transfer_mode": "strict_full_state_preserve_optimizer",
+            "checkpoint_tolerant": False, "allow_missing_contract": False,
+            "allow_contract_mismatch": True, "descendant_exact_eligible": False,
+        }
+        if warm != expected_warm:
+            raise DemoQueueError(f"{job_id} exact warm-start contract changed")
+        expected_delta = (
+            f"checkpoint_path={parents[parent_name]['snapshot_checkpoint_path']}",
+            f"++task.rewards.free_wrist_vel_mimic={knobs[0]}",
+            f"++task.rewards.motion_scale_in_window={knobs[1]}",
+            f"task.rewards.joint_velocity_limit_hinge_weight={knobs[2]}",
+            f"++task.rewards.racket_face_conditional_guidance_weight={knobs[3]}",
+            f"task.rewards.foot_orientation_weight={knobs[4]}",
+            f"++task.rewards.free_non_striking_arm_mimic={knobs[5]}",
+        )
+        recipe = job.get("recipe")
+        if not isinstance(recipe, dict) or set(recipe) != {"base", "delta"}:
+            raise DemoQueueError(f"{job_id} recipe has extra or missing sections")
+        if tuple(recipe.get("base", ())) != EXPECTED_BASE_RECIPE:
+            raise DemoQueueError(f"{job_id} full base recipe changed")
+        if tuple(recipe.get("delta", ())) != expected_delta:
+            raise DemoQueueError(f"{job_id} full delta recipe changed")
         values = _values(job)
-        parent_path = parents[warm["parent"]]["checkpoint_path"]
+        expected_values = {
+            Q._override_key(raw, job_id): raw.partition("=")[2]
+            for raw in (*EXPECTED_BASE_RECIPE, *expected_delta)
+        }
+        if values != expected_values:
+            raise DemoQueueError(f"{job_id} final Hydra key/value mapping changed")
+        parent_path = parents[parent_name]["snapshot_checkpoint_path"]
         required = {
             "checkpoint_path": parent_path,
             "checkpoint_tolerant": "false",
@@ -454,11 +1226,19 @@ def load_queue(path: Path) -> dict[str, Any]:
             raise DemoQueueError(f"{job_id} budget changed")
         if job.get("milestones") != EXPECTED_MILESTONES:
             raise DemoQueueError(f"{job_id} absolute milestones changed")
+        if job.get("seed") != 3:
+            raise DemoQueueError(f"{job_id} seed changed")
+        if job.get("resource") != {
+            "policy": "dispatch_gpu_round_robin", "required_slot": expected_slot,
+        }:
+            raise DemoQueueError(f"{job_id} required slot changed")
         run_name = job.get("run_name")
         if not isinstance(run_name, str) or not Q.SAFE_ID.fullmatch(run_name) or run_name in runs:
             raise DemoQueueError("run names must be unique safe identifiers")
         runs.add(run_name)
-        Q._ready_workspace_path(job.get("run_dir"), f"{job_id} run_dir")
+        if run_name != expected_run_name or job.get("run_dir") != expected_run_dir:
+            raise DemoQueueError(f"{job_id} run_name/run_dir changed")
+        Q._ready_workspace_path(expected_run_dir, f"{job_id} run_dir")
     return queue
 
 
@@ -473,9 +1253,26 @@ def _parent_spec(queue: dict[str, Any], *, mode: str) -> dict[str, Any]:
         ),
         "parents": {
             name: {
-                "checkpoint_path": parent["checkpoint_path"],
-                "hard_contract_path": parent["hard_contract_path"],
+                **{
+                    key: parent[key]
+                    for key in EXPECTED_PARENT_SPECS[name]
+                },
+                "source_checkout": EXPECTED_SOURCE_CHECKOUT,
+                "source_commit": EXPECTED_SOURCE,
                 "iteration": parent["embedded_iteration"],
+                "descendant_contract_values": [
+                    {
+                        "job_id": job["id"],
+                        "qdot_weight": float(
+                            _values(job)["task.rewards.joint_velocity_limit_hinge_weight"]
+                        ),
+                        "face_weight": float(
+                            _values(job)["task.rewards.racket_face_conditional_guidance_weight"]
+                        ),
+                    }
+                    for job in queue["jobs"]
+                    if job["warm_start"]["parent"] == name
+                ],
             }
             for name, parent in queue["parents"].items()
         },
@@ -504,6 +1301,7 @@ def _demo_claim(
         "file_sha256": queue["activation_contract"]["receipt_file_sha256"],
     }
     content["formal_exact_eligible"] = False
+    content["source_contract_files"] = dict(EXPECTED_SOURCE_CONTRACT_FILES)
     digest = _canonical_sha256(content)
     argv = [
         *content["training_argv_without_claim"],
@@ -527,11 +1325,39 @@ def _launch_script(queue: dict[str, Any], job: dict[str, Any], slot: Any) -> str
         claim_document, allow_nan=False, ensure_ascii=False,
         separators=(",", ":"), sort_keys=True,
     ) + "\n"
+    values = _values(job)
+    proof_spec = {
+        "job_id": job["id"], "pod": slot.pod, "gpu": slot.gpu,
+        "run_name": job["run_name"], "run_dir": run_dir,
+        "claim_path": f"{run_dir}/queue_claim.json",
+        "binding_path": f"{run_dir}/run_binding.json",
+        "run_log_path": f"{run_dir}/run.log",
+        "success_path": f"{run_dir}/first_iter_resume_proof.json",
+        "failure_path": f"{run_dir}/first_iter_resume_failure.json",
+        "claim_content_sha256": claim_document["content_sha256"],
+        "checkpoint_path": values["checkpoint_path"],
+        "qdot_weight": float(values["task.rewards.joint_velocity_limit_hinge_weight"]),
+        "face_weight": float(values["task.rewards.racket_face_conditional_guidance_weight"]),
+        "timeout_s": 120,
+    }
+    proof_encoded = base64.b64encode(
+        json.dumps(proof_spec, sort_keys=True).encode("utf-8")
+    ).decode("ascii")
+    proof_command = shlex.join(["python3", "-c", FIRST_ITER_PROGRAM, proof_encoded])
+    source_hash_checks = "\n".join(
+        "test \"$(sha256sum "
+        + shlex.quote(f"{source}/{relative}")
+        + " | awk '{print $1}')\" = "
+        + shlex.quote(digest)
+        for relative, digest in EXPECTED_SOURCE_CONTRACT_FILES.items()
+    )
     launcher = f"{workdir}/{Q.KIT_LAUNCHER_RELATIVE}"
     launch = shlex.join([launcher, f"{run_dir}/run.log"]) + " " + (
         Q._child_env_command(argv, slot.gpu)
     ) + f" {Q.GPU_LAUNCH_LOCK_FD}>&-"
-    body = Q._doctor_body(queue, job, slot, training_argv=argv) + f"""
+    body = source_hash_checks + "\n" + Q._doctor_body(
+        queue, job, slot, training_argv=argv
+    ) + f"""
 count=$(nvidia-smi -i {slot.gpu} --query-compute-apps=pid --format=csv,noheader,nounits | awk {shlex.quote(Q.UNIQUE_NUMERIC_PID_AWK)})
 test "$count" -lt {slot.capacity}
 mkdir -p {shlex.quote(run_parent)}
@@ -541,7 +1367,8 @@ mkdir {shlex.quote(run_dir + '/milestones')}
 export KIT_BOOT_MARKER={shlex.quote(Q.KIT_BOOT_MARKER)}
 export KIT_BOOT_TIMEOUT_S={Q.KIT_BOOT_TIMEOUT_SECONDS}
 {launch}
-printf '%s\n' phase=first_iter demo_only=true exact_eligible=false >> {shlex.quote(run_dir + '/run.log.launch')}
+{proof_command}
+printf '%s\n' phase=first_iter demo_only=true exact_eligible=false strict_full_state_resume_proven=true expected_lineage_exact=0 >> {shlex.quote(run_dir + '/run.log.launch')}
 """
     return Q._gpu_launch_lock_script(slot, body)
 
@@ -562,6 +1389,7 @@ def cmd_plan(queue: dict[str, Any]) -> dict[str, Any]:
             {"job_id": job["id"], "reason": job["blocker"]}
             for job in queue["jobs"] if job["status"] == "blocked"
         ],
+        "parent_inspect_command": f"--execute --confirm {PARENT_INSPECT_CONFIRM}",
         "parent_attest_command": f"--execute --confirm {PARENT_ATTEST_CONFIRM}",
     }
 
@@ -569,13 +1397,50 @@ def cmd_plan(queue: dict[str, Any]) -> dict[str, Any]:
 def cmd_parent_attest(
     queue: dict[str, Any], *, execute: bool, confirm: str | None
 ) -> dict[str, Any]:
+    if queue["activation_contract"]["state"] != "pending_parent_receipt_and_gpu_release":
+        raise DemoQueueError("parent-attest is only valid before activation")
     if execute and confirm != PARENT_ATTEST_CONFIRM:
         raise DemoQueueError(f"--execute requires --confirm {PARENT_ATTEST_CONFIRM}")
     remote = _parent_remote(queue, mode="attest")
+    inspect_remote = _parent_remote(queue, mode="inspect")
     result: dict[str, Any] = {
         "mode": "parent-attest", "dry_run": not execute,
         "receipt_path": queue["activation_contract"]["receipt_path"],
         "automatic_activation": False, "automatic_retry": False,
+    }
+    if not execute:
+        result["preflight_ssh_argv"] = [
+            *Q._ssh_prefix(queue, "pod2"), f"bash -lc {shlex.quote(inspect_remote)}"
+        ]
+        result["attest_ssh_argv"] = [
+            *Q._ssh_prefix(queue, "pod2"), f"bash -lc {shlex.quote(remote)}"
+        ]
+        result["ssh_argv"] = result["attest_ssh_argv"]
+        return result
+    result["read_only_preflight"] = json.loads(
+        Q._run_ssh(
+            queue, "pod2", inspect_remote, timeout=600,
+            phase="demo-parent-inspect-before-attest",
+        )
+    )
+    result["remote_result"] = json.loads(
+        Q._run_ssh(queue, "pod2", remote, timeout=600, phase="demo-parent-attest")
+    )
+    return result
+
+
+def cmd_parent_inspect(
+    queue: dict[str, Any], *, execute: bool, confirm: str | None
+) -> dict[str, Any]:
+    if queue["activation_contract"]["state"] != "pending_parent_receipt_and_gpu_release":
+        raise DemoQueueError("parent-inspect is only valid before activation")
+    if execute and confirm != PARENT_INSPECT_CONFIRM:
+        raise DemoQueueError(f"--execute requires --confirm {PARENT_INSPECT_CONFIRM}")
+    remote = _parent_remote(queue, mode="inspect")
+    result: dict[str, Any] = {
+        "mode": "parent-inspect", "dry_run": not execute,
+        "read_only": True, "creates_snapshots": False, "creates_receipt": False,
+        "receipt_preview_path": queue["activation_contract"]["receipt_path"],
     }
     if not execute:
         result["ssh_argv"] = [
@@ -583,7 +1448,7 @@ def cmd_parent_attest(
         ]
         return result
     result["remote_result"] = json.loads(
-        Q._run_ssh(queue, "pod2", remote, timeout=600, phase="demo-parent-attest")
+        Q._run_ssh(queue, "pod2", remote, timeout=600, phase="demo-parent-inspect")
     )
     return result
 
@@ -607,12 +1472,15 @@ def _require_remote_activation(queue: dict[str, Any]) -> dict[str, Any]:
         if not isinstance(current, dict):
             raise DemoQueueError(f"verified receipt lacks parent {name}")
         bound = {
-            "checkpoint_path": expected["checkpoint_path"],
             "checkpoint_sha256": expected["checkpoint_sha256"],
-            "hard_contract_path": expected["hard_contract_path"],
             "hard_contract_sha256": expected["hard_contract_sha256"],
+            "queue_claim_file_sha256": expected["queue_claim_file_sha256"],
+            "queue_claim_content_sha256": expected["queue_claim_content_sha256"],
+            "run_binding_file_sha256": expected["run_binding_file_sha256"],
+            "run_binding_content_sha256": expected["run_binding_content_sha256"],
             "embedded_iteration": expected["embedded_iteration"],
             "optimizer_state_dict_present": True,
+            "optimizer_state_dict_nonempty": True,
             "parent_training_contract_lineage_exact": True,
             "training_launch_claim_sha256": expected["training_launch_claim_sha256"],
         }
@@ -621,6 +1489,24 @@ def _require_remote_activation(queue: dict[str, Any]) -> dict[str, Any]:
                 raise DemoQueueError(
                     f"verified parent {name}.{key} differs from activated queue"
                 )
+        expected_live = {
+            key.removeprefix("live_"): expected[key]
+            for key in (
+                "live_checkpoint_path", "live_hard_contract_path",
+                "live_queue_claim_path", "live_run_binding_path",
+            )
+        }
+        expected_snapshot = {
+            key.removeprefix("snapshot_"): expected[key]
+            for key in (
+                "snapshot_checkpoint_path", "snapshot_hard_contract_path",
+                "snapshot_queue_claim_path", "snapshot_run_binding_path",
+            )
+        }
+        if current.get("live_paths") != expected_live:
+            raise DemoQueueError(f"verified parent {name} live paths changed")
+        if current.get("snapshot_paths") != expected_snapshot:
+            raise DemoQueueError(f"verified parent {name} snapshot paths changed")
     return result
 
 
@@ -720,6 +1606,9 @@ def _parser() -> argparse.ArgumentParser:
     parser.add_argument("--queue", type=Path, required=True)
     sub = parser.add_subparsers(dest="command", required=True)
     sub.add_parser("plan")
+    inspect = sub.add_parser("parent-inspect")
+    inspect.add_argument("--execute", action="store_true")
+    inspect.add_argument("--confirm")
     parent = sub.add_parser("parent-attest")
     parent.add_argument("--execute", action="store_true")
     parent.add_argument("--confirm")
@@ -741,6 +1630,10 @@ def main(argv: list[str] | None = None) -> int:
         queue = load_queue(args.queue.resolve())
         if args.command == "plan":
             result = cmd_plan(queue)
+        elif args.command == "parent-inspect":
+            result = cmd_parent_inspect(
+                queue, execute=args.execute, confirm=args.confirm
+            )
         elif args.command == "parent-attest":
             result = cmd_parent_attest(
                 queue, execute=args.execute, confirm=args.confirm

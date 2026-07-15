@@ -2489,10 +2489,18 @@ fatal0。新格尚未到 model-200，不作行为结论，G05 继续 `Partial`�
 updates，并显式设置 `checkpoint_tolerant=false`、不允许缺 hard contract、允许合同变化。合同变化意味着所有
 后代永久 formal-ineligible；它们只能用于演示候选排序，不能当正式因果/fresh 证据。
 
-当前机器清单仍 `launch_authorized=false`、六行 blocked。独立 parent-attest 必须先证明三个 checkpoint
-embedded iter=3500、全 finite、optimizer present、checkpoint↔相邻 schema-3 hard-contract SHA 与原始
-launch-claim SHA 绑定，并
-no-clobber 写 receipt；随后人工把 receipt/parent SHA 回填并显式激活。Pod2 GPU0/GPU1 还必须在旧 scaleout
-到 model500 后真实释放，调度才可按 0→1 逐圈填满。focused host 回归 `58 passed`，但没有 parent receipt、
+当前机器清单仍 `launch_authorized=false`、六行 blocked。v2 先用不落盘的 `parent-inspect` 逐字验证三个原始
+claim/binding、完整 argv/source/run/process、checkpoint 的 actor/critic、非空 optimizer state/param_groups、
+finite、embedded iter=3500 与 schema-3 hard/claim 双绑定；通过后唯一一次 attest 才把 checkpoint/hard/claim/
+binding `O_EXCL` 复制到只读 fixed snapshots，并只对 snapshot 重验、写新路径 receipt。旧 v1 receipt 不可复用；
+随后人工把 receipt 及 checkpoint/hard/claim/binding SHA 回填并显式激活。六个旧 scaleout 的 model500
+证据都保全且 GPU0/GPU1 occupancy 各 `<=3` 时，v2 可先用第 4 槽发前两条，不要求先停；其余四条只在
+精确停止四个弱臂后补入，并保留 GPU0 V1-only/GPU1 foot-`-0.6`，最终每卡四条。focused host 回归
+`65 passed`，但没有 parent receipt、
 Pod 启动或行为结果，故 G05 保持 `Partial`。详见
 [实验卷宗](../experiments/2026-07/EXP-P1-DEMO-HOTSTART-PORTFOLIO.md)。
+
+每条 launch 的 `phase=first_iter` 现在还要求日志同时证明 explicit hard-contract mismatch、从 snapshot
+model-3500 恢复到 iteration 3500 和 `optimizer=resumed`，并从新 hard contract 核对本行 qdot/conditional-face
+权重。失败只写含 exact PID/PGID 的人工处置证据；wrapper 不发 signal、不自动 replay。首个 checkpoint 的
+lineage=0 仍由专用 milestone receipt fail-closed，未运行前不能把该源码门写成训练通过。
