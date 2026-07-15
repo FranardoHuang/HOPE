@@ -400,6 +400,43 @@ python3 scripts/run_lean_training_queue.py \
 eligible hit denominator 未满足时一律继续。首次 V2-only 在 importer rc134 后保全，队列只含一个
 逐字同配方的 retry-v2；同 phase 再失败时不得继续造 namespace。
 
+## Demo-only model-3500 严格续训（2026-07-16）
+
+generic lean queue 继续只接受 fresh run。为了次日演示而允许显式合同变化的续训只走专用入口；六条后代
+永久 formal-ineligible，不得用 generic token 发射：
+
+```bash
+python3 scripts/run_phase1_demo_hotstart_queue.py \
+  --queue configs/phase1_pod2_demo_hotstart_portfolio_20260716.yaml plan
+
+python3 scripts/run_phase1_demo_hotstart_queue.py \
+  --queue configs/phase1_pod2_demo_hotstart_portfolio_20260716.yaml parent-attest
+```
+
+`parent-attest` 默认 dry-run。显式执行使用独立确认词
+`SIM_ONLY_ATTEST_DEMO_WARMSTART_PARENTS`，只访问 Pod2，读取三个 `model_3500.pt` 及相邻 hard contract，
+检查 embedded iteration、finite、optimizer、hard-contract SHA 与原始 launch-claim SHA 绑定，并 no-clobber
+写 receipt；不会自动激活或重试。
+operator 必须把 receipt file SHA、三个 checkpoint/hard SHA 回填 YAML，再把 activation state/六行 status 作为
+一次受审变更切到 activated/ready。未回填时 `fill` 恒 fail closed。
+
+激活后先 dry-run；真实发射使用本专用 token：
+
+```bash
+python3 scripts/run_phase1_demo_hotstart_queue.py \
+  --queue configs/phase1_pod2_demo_hotstart_portfolio_20260716.yaml \
+  fill --count 6
+
+python3 scripts/run_phase1_demo_hotstart_queue.py \
+  --queue configs/phase1_pod2_demo_hotstart_portfolio_20260716.yaml \
+  fill --count 6 --execute --confirm SIM_ONLY_LAUNCH_ONE_DEMO_WARMSTART_JOB
+```
+
+execute 会先重算当前三个 parent 并要求与 immutable receipt 逐字节一致，再读取 Pod2 现场容量。job 只硬绑
+GPU0/GPU1、按 0→1 逐圈；旧 scaleout 仍占槽时等待，不抢占、不 signal。claim 同时绑定 parent checkpoint/
+hard SHA、activation receipt、完整 argv 与 `formal_exact_eligible=false`。绝对 checkpoint 用专用
+`attest-milestone`，合法值仅 `3700/4000/4500/5500/7500`；source runtime receipt 必须报告 lineage exact=0。
+
 main 已有独立 per-source+Pod+GPU 的 `1 env × 2 updates` boot-warmup 和 content-bearing 日志默认 180 秒
 stale watchdog；P1 不改变其 source-pinned/exact-PGID 语义，也不会让 warmup 继承科学 binding path。
 新反例证明 1-env 成功只可当 cache/import probe：同 source/GPU 的正式 4096-env control 仍可能在

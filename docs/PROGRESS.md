@@ -11,6 +11,14 @@
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
 
+## 2026-07-16
+
+- 为次日演示冻结六条 Pod2 model-3500 严格续训组合：三类母本、两档拍面引导、两档 qdot、自由非击球臂
+  与脚朝向以组合方案而非伪因果格运行。专用 runner 绑定完整 optimizer transfer、parent/hard SHA receipt、
+  absolute `3700/4000/4500/5500/7500` checkpoint 和永久 exact-ineligible 语义；generic fresh-only queue 未
+  放宽。当前六行仍 blocked，等 parent finite receipt 与 GPU0/GPU1 release；focused `58 passed`。见
+  [实验卷宗](experiments/2026-07/EXP-P1-DEMO-HOTSTART-PORTFOLIO.md)。
+
 ## 2026-07-15
 
 - 15:33 UTC 只读复核确认 Pod2 GPU0/GPU1 已完全空闲；GPU2 的 qdot/V1+V2/control 三条 10000-update

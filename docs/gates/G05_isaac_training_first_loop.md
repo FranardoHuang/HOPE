@@ -2481,3 +2481,18 @@ V1-only/foot-orientation-0/V2-retry 为 `419643/422126/423502`，GPU1 的
 qdot-1/qdot-2.5/foot-orientation--0.6 为 `420298/421479/422783`；两卡各三条。连同 GPU2 现役
 `411519/412204/412899`，Pod2 三卡利用率 `97%/97%/91%`，九条日志除已归档 V2 attempt-1 外均
 fatal0。新格尚未到 model-200，不作行为结论，G05 继续 `Partial`。
+
+#### 次日演示六组合的 inexact 严格续训门
+
+为避免最后一晚再从零等待，新增 Pod2-only 专用续训 runner；generic lean queue 的 fresh-only 拒绝规则没有
+放宽。六条都从 qdot、V1+V2 或普通对照的 `model_3500.pt` 严格加载 policy/value/optimizer，追加 5001
+updates，并显式设置 `checkpoint_tolerant=false`、不允许缺 hard contract、允许合同变化。合同变化意味着所有
+后代永久 formal-ineligible；它们只能用于演示候选排序，不能当正式因果/fresh 证据。
+
+当前机器清单仍 `launch_authorized=false`、六行 blocked。独立 parent-attest 必须先证明三个 checkpoint
+embedded iter=3500、全 finite、optimizer present、checkpoint↔相邻 schema-3 hard-contract SHA 与原始
+launch-claim SHA 绑定，并
+no-clobber 写 receipt；随后人工把 receipt/parent SHA 回填并显式激活。Pod2 GPU0/GPU1 还必须在旧 scaleout
+到 model500 后真实释放，调度才可按 0→1 逐圈填满。focused host 回归 `58 passed`，但没有 parent receipt、
+Pod 启动或行为结果，故 G05 保持 `Partial`。详见
+[实验卷宗](../experiments/2026-07/EXP-P1-DEMO-HOTSTART-PORTFOLIO.md)。

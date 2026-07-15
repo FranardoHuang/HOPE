@@ -1,0 +1,341 @@
+schema_version: 1
+simulation_only: true
+launch_authorized: false
+preregistration_status: blocked_until_parent_finite_receipt_and_gpu_release
+
+ssh:
+  key: ~/.ssh/id_ed25519_runpod
+
+pods:
+  pod1:
+    host: 162.43.172.171
+    port: 18333
+    gpus: [0, 1, 2]
+    max_trainers_per_gpu: 4
+  pod2:
+    host: 162.43.172.181
+    port: 13146
+    gpus: [0, 1, 2]
+    max_trainers_per_gpu: 3
+
+dispatch_pods: [pod2]
+
+activation_contract:
+  state: pending_parent_receipt_and_gpu_release
+  receipt_path: /workspace/codexschema/phase1_demo_hotstart_20260716/activation/parent_model3500_finite_receipt.json
+  receipt_file_sha256: null
+  gpu_release_rule: pod2_gpu0_and_gpu1_slots_free_after_existing_scaleout_model500_stop
+  automatic_activation: false
+  automatic_retry: false
+
+strict_full_scene_probe_evidence:
+  attempt_id: inferencefix_2c2d70d_pod2_gpu1_a1
+  result_file_sha256: 4b12854c5deca075ddf886fea3c5806aa0838b1d2bc9d3739e2fa13cd1840b27
+  terminal_status: passed
+  reuse_scope: exact_source_scene_boot_and_runtime_binding_only
+
+decision_contract:
+  purpose: overnight_demo_portfolio_not_causal_or_exact_evidence
+  descendants_formal_exact_eligible: false
+  checkpoints_absolute: [3700, 4000, 4500, 5500, 7500]
+  checkpoint_offsets_from_parent: [200, 500, 1000, 2000, 4000]
+  sparse_outcome_zero_before_eligibility_may_stop: false
+  second_seed_authorized: false
+  formal_promotion_authorized: false
+  real_robot_authorized: false
+
+parents:
+  qdot:
+    checkpoint_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-12-03_phase1_long_no_replay_qdot_w5_seed3_20260715/model_3500.pt
+    hard_contract_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-12-03_phase1_long_no_replay_qdot_w5_seed3_20260715/params/training_contract.json
+    embedded_iteration: 3500
+    optimizer_state_dict_required: true
+    checkpoint_sha256: null
+    hard_contract_sha256: null
+    training_launch_claim_sha256: null
+  v1v2:
+    checkpoint_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-13-17_phase1_long_no_replay_v1v2_seed3_20260715/model_3500.pt
+    hard_contract_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-13-17_phase1_long_no_replay_v1v2_seed3_20260715/params/training_contract.json
+    embedded_iteration: 3500
+    optimizer_state_dict_required: true
+    checkpoint_sha256: null
+    hard_contract_sha256: null
+    training_launch_claim_sha256: null
+  control:
+    checkpoint_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-14-14_phase1_long_no_replay_control_seed3_retry_v2_20260715/model_3500.pt
+    hard_contract_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-14-14_phase1_long_no_replay_control_seed3_retry_v2_20260715/params/training_contract.json
+    embedded_iteration: 3500
+    optimizer_state_dict_required: true
+    checkpoint_sha256: null
+    hard_contract_sha256: null
+    training_launch_claim_sha256: null
+
+x-action: &action signed_face_v4rg_shared_face
+x-motion: &motion
+  action: signed_face_v4rg_shared_face
+  bindings:
+    motion_file: /workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_forehand_v4rg_cal.npz
+    motion_file_2: /workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_backhand_v4rg_cal.npz
+x-bank: &bank
+  action: signed_face_v4rg_shared_face
+  train_path: /workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_bank_rebind_v2/s1_v4rg_runtime_order_schema3_train_882fea4_rebound.npz
+  train_arg: ++task.racket.question_bank
+x-exam: &exam
+  action: signed_face_v4rg_shared_face
+  path: /workspace/codexschema/phase1_signed_face_rescue_20260713/papers/signed_face_exam_k100_v1/signed_face_exam_k100.schedule.json
+  family: signed_face_rebound_k100_v1
+x-source: &source
+  checkout: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d
+  commit: 2c2d70d6d0ccf7b0757aac4dd8e575c2e077607e
+  ignored_runtime_asset:
+    target_relative_path: hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
+    donor:
+      checkout: /workspace/codexschema/nohope
+      commit: 6d93bcb16c422a2f42748c2dc99432559653480b
+      relative_path: hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
+    file_count: 46
+    total_file_bytes: 15378264
+    tree_content_sha256: 0137f59b1fe45e7d5f8fa731bedca905f5466bc98e8d1354081fe071d60426c6
+    symlinks_forbidden: true
+    target_must_be_gitignored: true
+x-base: &base
+  - task=HOPEPingPongVirtualBall
+  - algo=ppo
+  - headless=true
+  - logger=tensorboard
+  - video=false
+  - task.actor_obs_contract=deploy_parity_face179
+  - task.env.episode_length_s=10.0
+  - task.sim.dt=0.005
+  - task.sim.decimation=4
+  - task.actions.qdes_clamp=true
+  - task.plant.zero_joint_friction=true
+  - task.motion.wrap_teleport=false
+  - task.motion.stand_start_prob=0.25
+  - task.motion.hold_steps_range=[0,100]
+  - task.motion.stand_start_min_hold=25
+  - task.motion.post_swing_buffer_size=4096
+  - task.motion.post_swing_min_fill=256
+  - task.motion.post_swing_min_hold=25
+  - task.motion.clip_switch_prob=0.0
+  - task.motion.speed_scale_range=[1.0,1.0]
+  - ++task.motion.rsi_skip_settle_frames=0
+  - ++task.motion.rsi_hold_root_stand_z=false
+  - ++task.motion.stagger_initial_clock=false
+  - ++task.motion.stagger_hold_max_steps=150
+  - ++task.racket.question_bank_allow_legacy=false
+  - ++task.racket.face_command=true
+  - ++task.racket.face_command_obs=true
+  - ++task.racket.station_obs=false
+  - ++task.racket.mount_normal_sign_per_clip=[1.0,-1.0]
+  - task.racket.target_mode=uniform
+  - task.racket.normal_mode=velocity
+  - task.racket.adaptive_sigma=true
+  - task.racket.target_delay_steps=2
+  - task.racket.target_jitter_pos_per_s=0.0
+  - task.racket.target_jitter_vel_per_s=0.0
+  - task.racket.target_noise_white=0.0019
+  - task.racket.target_noise_ar1_sigma=0.0052
+  - task.racket.target_noise_ar1_rho=0.717
+  - task.racket.target_dropout_prob=0.0
+  - task.racket.target_post_strike_dropout_s=0.0
+  - task.racket.target_bias_per_swing=0.0
+  - task.racket.midswing_resample_prob=0.0
+  - task.racket.midswing_resample_tts_floor=0.3
+  - task.racket.vb_spin_mode=minimize
+  - task.racket.vb_metrics_only=true
+  - ++task.racket.rally_legacy_metrics=true
+  - task.racket.achieved_target_mix_prob=0.30
+  - task.racket.achieved_buffer_size=4096
+  - task.racket.achieved_min_fill=256
+  - task.racket.achieved_jitter_pos=0.03
+  - task.racket.achieved_jitter_vel=0.15
+  - task.racket.achieved_clamp_inflate=0.20
+  - task.racket.clean_reference_strike_velocity=true
+  - task.racket.clean_strike_vel_window=2
+  - task.racket.strike_window_s=0.12
+  - task.racket.strike_success_pos_thresh=0.075
+  - ++task.physical_ball=true
+  - task.rewards.racket_position_weight=14.0
+  - task.rewards.racket_position_std=0.2
+  - task.rewards.racket_velocity_weight=10.0
+  - task.rewards.racket_velocity_std=1.0
+  - task.rewards.racket_normal_weight=5.0
+  - task.rewards.racket_normal_std=0.3
+  - task.rewards.free_wrist_ori_mimic=true
+  - ++task.motion.allow_legacy_link_origin_velocity=false
+  - ++task.motion.event_timing_mode=disabled
+  - task.racket.strike_phase_per_clip=[0.471,0.338]
+  - ++task.racket.face_command_pairing=shared_plus_y
+  - ++task.rewards.racket_guidance_weight=0.0
+  - ++task.rewards.racket_face_guidance_weight=0.0
+  - ++task.rewards.racket_face_guidance_theta_max=3.141592653589793
+  - task.rewards.base_decel_weight=0.0
+  - task.motion.post_swing_start_prob=0.0
+  - task.rewards.joint_velocity_limit_hinge_margin=0.85
+  - checkpoint_tolerant=false
+  - checkpoint_allow_missing_contract=false
+  - checkpoint_allow_contract_mismatch=true
+  - ++kit_carb_tasking_thread_count=16
+  - ++kit_tbb_thread_count=16
+x-budget: &budget
+  num_envs: 4096
+  max_iterations: 5001
+  save_interval: 100
+x-milestones: &milestones [3700, 4000, 4500, 5500, 7500]
+x-gpu0: &gpu0
+  policy: dispatch_gpu_round_robin
+  required_slot: pod2/gpu0
+x-gpu1: &gpu1
+  policy: dispatch_gpu_round_robin
+  required_slot: pod2/gpu1
+x-blocker: &blocker parent model3500 finite/optimizer receipt is pending and Pod2 GPU0/GPU1 scaleout slots are not yet released
+
+jobs:
+  - &job
+    id: demo_qdot_v1v2_face_w0p4
+    human_name: 从关节速度约束母本继续，组合两项模仿放松与强拍面引导
+    action: *action
+    status: blocked
+    blocker: *blocker
+    motion: *motion
+    bank: *bank
+    exam: *exam
+    source: *source
+    runtime_binding: true
+    warm_start:
+      parent: qdot
+      transfer_mode: strict_full_state_preserve_optimizer
+      checkpoint_tolerant: false
+      allow_missing_contract: false
+      allow_contract_mismatch: true
+      descendant_exact_eligible: false
+    recipe:
+      base: *base
+      delta:
+        - checkpoint_path=/workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-12-03_phase1_long_no_replay_qdot_w5_seed3_20260715/model_3500.pt
+        - ++task.rewards.free_wrist_vel_mimic=true
+        - ++task.rewards.motion_scale_in_window=0.25
+        - task.rewards.joint_velocity_limit_hinge_weight=-5.0
+        - ++task.rewards.racket_face_conditional_guidance_weight=-0.4
+        - task.rewards.foot_orientation_weight=-0.3
+        - ++task.rewards.free_non_striking_arm_mimic=false
+    seed: 3
+    budget: *budget
+    milestones: *milestones
+    resource: *gpu0
+    run_name: phase1_demo_qdot_v1v2_face_w0p4_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_qdot_v1v2_face_w0p4
+
+  - <<: *job
+    id: demo_qdot_v1v2_face_w0p2
+    human_name: 从关节速度约束母本继续，组合两项模仿放松与中等拍面引导
+    recipe:
+      base: *base
+      delta:
+        - checkpoint_path=/workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-12-03_phase1_long_no_replay_qdot_w5_seed3_20260715/model_3500.pt
+        - ++task.rewards.free_wrist_vel_mimic=true
+        - ++task.rewards.motion_scale_in_window=0.25
+        - task.rewards.joint_velocity_limit_hinge_weight=-5.0
+        - ++task.rewards.racket_face_conditional_guidance_weight=-0.2
+        - task.rewards.foot_orientation_weight=-0.3
+        - ++task.rewards.free_non_striking_arm_mimic=false
+    resource: *gpu1
+    run_name: phase1_demo_qdot_v1v2_face_w0p2_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_qdot_v1v2_face_w0p2
+
+  - <<: *job
+    id: demo_v1v2_qdot_w5_face_w0p4
+    human_name: 从模仿放松母本继续，加入强关节速度约束与强拍面引导
+    warm_start:
+      parent: v1v2
+      transfer_mode: strict_full_state_preserve_optimizer
+      checkpoint_tolerant: false
+      allow_missing_contract: false
+      allow_contract_mismatch: true
+      descendant_exact_eligible: false
+    recipe:
+      base: *base
+      delta:
+        - checkpoint_path=/workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-13-17_phase1_long_no_replay_v1v2_seed3_20260715/model_3500.pt
+        - ++task.rewards.free_wrist_vel_mimic=true
+        - ++task.rewards.motion_scale_in_window=0.25
+        - task.rewards.joint_velocity_limit_hinge_weight=-5.0
+        - ++task.rewards.racket_face_conditional_guidance_weight=-0.4
+        - task.rewards.foot_orientation_weight=-0.3
+        - ++task.rewards.free_non_striking_arm_mimic=false
+    resource: *gpu0
+    run_name: phase1_demo_v1v2_qdot_w5_face_w0p4_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_v1v2_qdot_w5_face_w0p4
+
+  - <<: *job
+    id: demo_v1v2_qdot_w2p5_face_w0p4_free_arm
+    human_name: 从模仿放松母本继续，采用中等关节速度约束、拍面引导并放开非击球臂
+    warm_start:
+      parent: v1v2
+      transfer_mode: strict_full_state_preserve_optimizer
+      checkpoint_tolerant: false
+      allow_missing_contract: false
+      allow_contract_mismatch: true
+      descendant_exact_eligible: false
+    recipe:
+      base: *base
+      delta:
+        - checkpoint_path=/workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-13-17_phase1_long_no_replay_v1v2_seed3_20260715/model_3500.pt
+        - ++task.rewards.free_wrist_vel_mimic=true
+        - ++task.rewards.motion_scale_in_window=0.25
+        - task.rewards.joint_velocity_limit_hinge_weight=-2.5
+        - ++task.rewards.racket_face_conditional_guidance_weight=-0.4
+        - task.rewards.foot_orientation_weight=-0.3
+        - ++task.rewards.free_non_striking_arm_mimic=true
+    resource: *gpu1
+    run_name: phase1_demo_v1v2_qdot_w2p5_face_w0p4_free_arm_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_v1v2_qdot_w2p5_face_w0p4_free_arm
+
+  - <<: *job
+    id: demo_control_qdot_w5_face_w0p4
+    human_name: 从普通母本继续，只组合强关节速度约束与强拍面引导
+    warm_start:
+      parent: control
+      transfer_mode: strict_full_state_preserve_optimizer
+      checkpoint_tolerant: false
+      allow_missing_contract: false
+      allow_contract_mismatch: true
+      descendant_exact_eligible: false
+    recipe:
+      base: *base
+      delta:
+        - checkpoint_path=/workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-14-14_phase1_long_no_replay_control_seed3_retry_v2_20260715/model_3500.pt
+        - ++task.rewards.free_wrist_vel_mimic=false
+        - ++task.rewards.motion_scale_in_window=1.0
+        - task.rewards.joint_velocity_limit_hinge_weight=-5.0
+        - ++task.rewards.racket_face_conditional_guidance_weight=-0.4
+        - task.rewards.foot_orientation_weight=-0.3
+        - ++task.rewards.free_non_striking_arm_mimic=false
+    resource: *gpu0
+    run_name: phase1_demo_control_qdot_w5_face_w0p4_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_control_qdot_w5_face_w0p4
+
+  - <<: *job
+    id: demo_control_full_stack_free_arm_foot_w0p6
+    human_name: 从普通母本继续，组合两项模仿放松、强速度约束、强拍面引导、脚朝向与自由非击球臂
+    warm_start:
+      parent: control
+      transfer_mode: strict_full_state_preserve_optimizer
+      checkpoint_tolerant: false
+      allow_missing_contract: false
+      allow_contract_mismatch: true
+      descendant_exact_eligible: false
+    recipe:
+      base: *base
+      delta:
+        - checkpoint_path=/workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_04-14-14_phase1_long_no_replay_control_seed3_retry_v2_20260715/model_3500.pt
+        - ++task.rewards.free_wrist_vel_mimic=true
+        - ++task.rewards.motion_scale_in_window=0.25
+        - task.rewards.joint_velocity_limit_hinge_weight=-5.0
+        - ++task.rewards.racket_face_conditional_guidance_weight=-0.4
+        - task.rewards.foot_orientation_weight=-0.6
+        - ++task.rewards.free_non_striking_arm_mimic=true
+    resource: *gpu1
+    run_name: phase1_demo_control_full_stack_free_arm_foot_w0p6_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_control_full_stack_free_arm_foot_w0p6
