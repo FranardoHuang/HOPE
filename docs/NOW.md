@@ -566,9 +566,11 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
 - **[6｜P1] Hitter V3 规划器—policy 输入对齐。** 责任人 jiayi；执行者 direct；下一证据：旧观测
   排列、训练第 24100 次迭代 checkpoint 归属和第 7 版击球平面三项来源对齐。
 - **[8｜P1] 110 维 RallyV10 左腕/恢复修复。** 责任人 dongc1；执行者 Codex；分支 `hitter`；
-  实现已完成：从 RallyV9 冻结合同派生 V10，加入左腕参考 debt、修正反手 `tts=0.96` 边界，
-  对齐 yaw-rate settle 与 whole-joint q_des 门；训练 host `87/87`、Gate3 report `12/12`。下一证据：
-  dongc1 手动 fresh 训练后提交 deterministic eval、recipe-6 ONNX 和同 serve 表 Gate3；Codex 未启动训练。
+  V10 fresh run 的训练曲线已显示击球精度成熟，但 yaw-rate 约 `0.46-0.52 rad/s`、左腕超差率约
+  `0.42-0.54`，尚未证明修复通过。当前工作：在不改 V10 基线的前提下增加独立
+  constrained-resume 任务，从当前 V10 checkpoint 严格续训，固定最终 planner/yaw 分布，对左腕
+  position+velocity 做全阶段独立模仿并收紧 yaw-rate。下一证据：host 合同门、Isaac mechanics
+  preflight 与用户手动发射的 resume run；Codex 不停止、不启动 PPO。
 
 队列排序与算力规则见[跑批作战手册](runbook.md#统一队列排序与算力纪律)。完整实验索引只在
 [实验登记册](experiments/README.md)维护；本页不再复制实验索引或最近测试流水。
