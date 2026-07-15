@@ -2498,3 +2498,19 @@ PID/PGID/argv 判作 identity mismatch，该 harness 假拒绝另行修。科学
 GPU0/GPU1/GPU2 各四条，利用率 `97%/93%/97%`，显存约 `23.2/23.1/23.1 GiB`，无外部 compute PID。
 这只关闭满池发射门；尚无配对行为结论，稀疏回球机会不足时继续，G05 仍为 `Partial`。详见
 [实验卷宗](../experiments/2026-07/EXP-P1-POD1-LONG-BALANCE-REWARD-GRID.md)。
+
+### 2026-07-15 selected-action frame-0 等待 v2（design-only）
+
+等待/恢复参考现已另建 machine-readable v2，而没有改写旧 A/B/C prereg bytes。连续 episode 在揭题前
+只公开上一拍动作，并以该动作自己的第 0 帧姿态、全零 root/joint/body 线角速度作为恢复参考；原子揭题
+后才切到新动作自己的第 0 帧零速度参考。XY 在参考阶段入口从 live station 捕获一次并冻结；参考切换
+不得 teleport、reset 或清 observation history、executed last action、action/target delay、noise/dropout
+与 per-swing bias。Ready 另按全部安全/可达容差合取，不能把 frame-0 等式或 Reward 加权分冒充 ready。
+
+源码审计确认现役 hold 仍用 `default_joint_pos`，root/anchor 速度未 hold-zero，body XY 又逐 tick 跟随
+live robot。只切 joint reference 会制造 mixed reference，因此本次未声称 source adapter；合同的 adapter、
+immutable XY snapshot、atomic non-leakage、carry-state receipt、ready 数值阈值和 full-scene probe 都是
+null。CPU design validator + `25` 个红队测试通过，`launch-check` 按设计 rc1。可复现命令见
+[恢复操作](../operations/run_phase1_recovery_tuple_prereg.md)，详细语义见
+[T1 接口](../interfaces/t1_event_training_contract.md#selected-action-frame-0-waiting-contract-v2)。
+没有 Isaac、Pod、训练或真机行为证据，G05 保持 `Partial`。

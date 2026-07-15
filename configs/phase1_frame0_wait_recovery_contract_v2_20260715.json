@@ -1,0 +1,175 @@
+{
+  "schema_version": 2,
+  "contract_id": "phase1-selected-action-frame0-wait-recovery-v2",
+  "created_utc": "2026-07-15T05:20:00Z",
+  "status": "design_validated_no_launch",
+  "scope": "freeze the no-teleport continuous-episode waiting reference: the currently public action owns its exact frame-0 pose, every reference velocity is zero, XY is captured from the live station at phase entry, and the next action remains hidden until one atomic reveal",
+  "launch_authorized": false,
+  "real_robot_authorized": false,
+  "validator": {
+    "repo_path": "scripts/validate_phase1_frame0_wait_recovery_contract_v2.py"
+  },
+  "immutable_parent": {
+    "repo_path": "configs/phase1_recovery_tuple_abc_prereg_20260712.json",
+    "bytes": 17008,
+    "sha256": "ca7806df83b650546cf4406963bb231622a248c8e04e944991a371e44d810616",
+    "bytes_may_be_rewritten": false,
+    "relationship": "v2 narrows waiting and recovery reference semantics without editing or reinterpreting the v1 preregistration bytes"
+  },
+  "audited_source": {
+    "commit": "6c3e47d1f6305688450353de3dfa847fb9a65d2e",
+    "git_blobs": {
+      "motion_command": {
+        "repo_path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/commands.py",
+        "bytes": 117787,
+        "sha256": "3428dc1d77b12cc9965a862acd2cd2febbcbb6a6cbf3c3b2d556ec59c57aceaa"
+      },
+      "racket_target_command": {
+        "repo_path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/hope_commands.py",
+        "bytes": 257190,
+        "sha256": "b43e85da20cf0030618dddb1493955764ce8bd636b42c450950df910be03576b"
+      }
+    }
+  },
+  "phase_contract": {
+    "phase_order": [
+      "post_swing_pre_reveal_recovery",
+      "atomic_reveal",
+      "revealed_wait",
+      "swing"
+    ],
+    "post_swing_pre_reveal_recovery": {
+      "public_action_identity": "just_completed_action",
+      "reference_pose": "just_completed_action_exact_frame0",
+      "reference_velocity": "all_zero",
+      "future_action_fields_visible": false
+    },
+    "atomic_reveal": {
+      "public_action_identity": "newly_revealed_action",
+      "reference_install": "one_atomic_generation",
+      "physical_state_write": false,
+      "deadline_shift_allowed": false
+    },
+    "revealed_wait": {
+      "public_action_identity": "newly_revealed_action",
+      "reference_pose": "newly_revealed_action_exact_frame0",
+      "reference_velocity": "all_zero",
+      "hold_until_native_clip_release": true
+    },
+    "swing": {
+      "reference_pose": "selected_action_native_clip",
+      "reference_velocity": "selected_action_native_clip",
+      "starts_from_carried_physical_and_policy_state": true
+    }
+  },
+  "reference_contract": {
+    "pose_source": "selected_public_action_exact_frame0",
+    "default_joint_pos_substitution_allowed": false,
+    "root_pose": "selected_action_frame0_z_and_orientation_plus_phase_entry_station_xy",
+    "joint_pose": "selected_action_frame0_joint_position",
+    "body_pose": "selected_action_frame0_body_position_and_orientation_with_same_xy_translation",
+    "xy_anchor": {
+      "source": "live_robot_station_xy_at_reference_phase_entry",
+      "capture_count": "exactly_once_per_reference_phase_entry",
+      "immutable_until": "next_atomic_reveal_or_true_episode_boundary",
+      "live_per_tick_reanchor_allowed": false
+    },
+    "velocity_fields_exact_zero": [
+      "root_linear_velocity",
+      "root_angular_velocity",
+      "joint_velocity",
+      "body_linear_velocity",
+      "body_angular_velocity"
+    ]
+  },
+  "continuous_episode_carry_contract": {
+    "reference_switch_only": true,
+    "simulator_root_write_allowed": false,
+    "simulator_joint_write_allowed": false,
+    "teleport_allowed": false,
+    "episode_reset_allowed": false,
+    "observation_history_clear_allowed": false,
+    "last_action_clear_or_replace_allowed": false,
+    "action_delay_ring_clear_allowed": false,
+    "target_delay_ring_clear_allowed": false,
+    "noise_or_dropout_state_clear_allowed": false,
+    "per_swing_bias_clear_allowed": false,
+    "carried_state_fields": [
+      "root_pose_and_velocity",
+      "joint_pose_and_velocity",
+      "observation_history",
+      "executed_last_action",
+      "action_delay_ring",
+      "target_delay_ring",
+      "noise_dropout_and_hold_last_state",
+      "per_swing_bias_state"
+    ]
+  },
+  "nonleakage_contract": {
+    "before_reveal_future_action_identity_visible": false,
+    "before_reveal_future_clip_id_visible": false,
+    "before_reveal_future_frame0_visible": false,
+    "before_reveal_future_target_visible": false,
+    "before_reveal_future_deadline_visible": false,
+    "before_reveal_allowed_reference": "just_completed_public_action_frame0_zero_velocity",
+    "reveal_updates": "action_identity_clip_frame0_target_and_deadline_one_atomic_generation",
+    "partial_or_mixed_generation_visible": false
+  },
+  "ready_contract": {
+    "semantics": "all_tolerance_conjuncts_not_weighted_score",
+    "all_conjuncts_required": true,
+    "positive_reward_can_offset_failure": false,
+    "numeric_thresholds_bound": false,
+    "conjuncts": [
+      {
+        "id": "station_xy_and_yaw",
+        "threshold_binding": null
+      },
+      {
+        "id": "upright_height_and_gravity_projection",
+        "threshold_binding": null
+      },
+      {
+        "id": "root_joint_body_and_racket_low_velocity",
+        "threshold_binding": null
+      },
+      {
+        "id": "bilateral_support_contact_and_slip",
+        "threshold_binding": null
+      },
+      {
+        "id": "joint_torque_qdes_and_thermal_margin",
+        "threshold_binding": null
+      },
+      {
+        "id": "self_robot_table_net_and_ground_clearance",
+        "threshold_binding": null
+      },
+      {
+        "id": "enabled_next_action_and_deadline_reachability",
+        "threshold_binding": null
+      }
+    ],
+    "missing_or_nonfinite_measurement": "not_ready_fail_closed"
+  },
+  "source_audit": {
+    "observed_conflicts": [
+      "commands.py substitutes robot.data.default_joint_pos while held instead of the selected clip frame0 joint pose",
+      "commands.py zeroes joint and body velocities while held but leaves anchor root linear and angular reference velocities ungated",
+      "commands.py reanchors body XY to the live robot anchor every update instead of capturing one immutable phase-entry station XY"
+    ],
+    "adapter_implemented": false,
+    "adapter_default_enabled": false,
+    "safe_adapter_verdict": "no_launch_until_phase_entry_anchor_atomicity_and_carry_state_receipts_are_implemented_and_runtime_verified",
+    "reason_not_patched_in_this_contract": "changing only joint_pos would create a mixed frame0/default/root reference; a safe adapter must update pose, root and body velocity, immutable XY anchoring, reveal atomicity and carry-state observation together"
+  },
+  "implementation_bindings": {
+    "selected_action_frame0_source_adapter": null,
+    "phase_entry_xy_anchor_snapshot": null,
+    "atomic_reveal_nonleakage_assertion": null,
+    "continuous_carry_state_runtime_receipt": null,
+    "ready_numeric_tolerances": null,
+    "isaac_full_scene_probe": null,
+    "vendor_mujoco_continuous_gate": null
+  }
+}

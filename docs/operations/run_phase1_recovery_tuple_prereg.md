@@ -1,12 +1,64 @@
 # Validate The Phase-1 Recovery-Tuple A/B/C Preregistration
 
-状态：旧 A/B/C 结构设计可校验；launch 明确 blocked
+状态：旧 A/B/C 结构设计与 frame-0 等待 v2 均可校验；launch 明确 blocked
 
 > 2026-07-13 阻塞说明：本文件绑定的 prereg/validator 仍把 random-arrival readiness 当第三项
 > reward，并强制 full `2^3`。最新文档设计已改为“随机到球先作为环境轴；平衡债/ready potential
 > 先做 `2^2`；第三 critic 独立校准并过隔离 q50 后才可选 `2^3`”。因此下面的 `design-check`
 > 只验证旧结构记录没有漂移，不证明新 reward 次序已经物化，也不授权实验。不得改写旧文件；
 > 必须另建并绑定新的 config、validator、测试和 SHA 后，才能更新本操作并考虑 launch。
+
+> 2026-07-15 边界：新的 frame-0 等待 v2 已作为**独立设计合同**落库，且没有改写旧 prereg；
+> 它仍缺 source adapter、数值 ready 容差和双引擎 runtime receipt，所以不是 launch manifest，
+> 也不解除上面的 reward 次序阻塞。
+
+## Frame-0 Waiting V2 Design Check
+
+人话语义见 [T1 接口](../interfaces/t1_event_training_contract.md#selected-action-frame-0-waiting-contract-v2)：
+揭题前只使用上一公开动作自己的第 0 帧零速度参考；原子揭题后才使用新动作自己的第 0 帧零速度参考。
+XY 在阶段入口从当前站位捕获一次；连续 episode 只切参考，不传送、不 reset、不清历史/动作/delay。
+Ready 是全部安全/可达容差的合取，不是 Reward 分数。
+
+绑定文件：
+
+- v2 design contract：
+  `configs/phase1_frame0_wait_recovery_contract_v2_20260715.json`
+  (`sha256 cc05d63fa4e4ffd9515f369f176ba032ca2a46d8996431a7b1e7d34e2b1bf28e`)；
+- v2 validator：`scripts/validate_phase1_frame0_wait_recovery_contract_v2.py`；
+- v2 tests：`tests/test_validate_phase1_frame0_wait_recovery_contract_v2.py`；
+- immutable v1 parent 仍为 `17008` bytes / SHA-256
+  `ca7806df83b650546cf4406963bb231622a248c8e04e944991a371e44d810616`。
+
+从仓库根目录运行 CPU-only design check：
+
+```bash
+python3 scripts/validate_phase1_frame0_wait_recovery_contract_v2.py \
+  --contract configs/phase1_frame0_wait_recovery_contract_v2_20260715.json \
+  --expected-contract-sha256 cc05d63fa4e4ffd9515f369f176ba032ca2a46d8996431a7b1e7d34e2b1bf28e \
+  --mode design-check
+
+python3 -m pytest -q \
+  tests/test_validate_phase1_frame0_wait_recovery_contract_v2.py
+```
+
+已签入结果为 `25 passed`。它覆盖 duplicate key、non-finite、bool-as-int、v1 parent/source SHA、
+frame0/default-stand 偷换、缺 root/body/joint 零速度、live per-tick XY 重锚、future-action 泄漏、
+teleport/reset/history/action/delay clear，以及把 ready 改成可补偿分数等负测。
+
+`launch-check` 必须退出 `1`：
+
+```bash
+python3 scripts/validate_phase1_frame0_wait_recovery_contract_v2.py \
+  --contract configs/phase1_frame0_wait_recovery_contract_v2_20260715.json \
+  --expected-contract-sha256 cc05d63fa4e4ffd9515f369f176ba032ca2a46d8996431a7b1e7d34e2b1bf28e \
+  --mode launch-check
+```
+
+现役 `commands.py` 的 hold 使用 `default_joint_pos`，root/anchor 速度未 hold-zero，body XY 又是 live
+per-tick reanchor。只补一个 joint switch 会产生混合参考，所以 v2 明确没有 source adapter。
+未来 adapter 必须默认关闭，并在一个变更中同时覆盖 selected-action frame0 pose、root/joint/body
+全零速度、phase-entry immutable XY、atomic reveal non-leakage 与 carry-state receipt；再跑 strict
+full-scene Isaac 和 vendor MuJoCo 连续门，才可另建 launch manifest。
 
 ## Purpose
 
@@ -154,6 +206,8 @@ This runbook does not authorize:
 - changing the Gate3 worktree or C++ runtime;
 - running a real-robot command;
 - adding recovery rewards before the A/B/C structural result.
+- treating the frame-0 v2 design check as source/runtime/behavior evidence or filling its null
+  bindings in place.
 
 若 T1 结构仍失败，现行文档设计要求先在冻结 rollout 上归一化平衡债与 ready-set potential，
 跑配对 seed 的 `2^2`。随机到球继续作为环境/题目轴；只有 readiness critic 独立训练/校准、
