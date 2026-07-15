@@ -91,6 +91,8 @@ _ATTESTATION_KEYS = {
     "hard_contract",
     "checkpoint_source",
     "capture_source",
+    "attestor_source",
+    "retry_authorization",
 }
 _ATTESTED_CHECKPOINT_KEYS = {
     "sha256",
@@ -105,7 +107,16 @@ _ATTESTED_CAPTURE_SOURCE_KEYS = {
     "commit",
     "clean",
     "producer_source_sha256",
+}
+_ATTESTED_ATTESTOR_SOURCE_KEYS = {
+    "commit",
+    "clean",
     "attestor_source_sha256",
+}
+_RETRY_AUTHORIZATION_KEYS = {
+    "authorization_id",
+    "file_sha256",
+    "v3_plan_file_sha256",
 }
 _CAPTURE_EVIDENCE_KEYS = {
     "producer_source_sha256",
@@ -407,7 +418,7 @@ def load_post_swing_teacher_states(
         raise PostSwingTeacherError("teacher must have explicit fresh lineage")
 
     attestation = _require_exact_keys(document["attestation"], _ATTESTATION_KEYS, "attestation")
-    if type(attestation["schema_version"]) is not int or attestation["schema_version"] != 1:
+    if type(attestation["schema_version"]) is not int or attestation["schema_version"] != 2:
         raise PostSwingTeacherError("unsupported teacher attestation schema")
     if attestation["artifact_kind"] != ATTESTATION_KIND:
         raise PostSwingTeacherError("wrong teacher attestation kind")
@@ -457,6 +468,16 @@ def load_post_swing_teacher_states(
         _ATTESTED_CAPTURE_SOURCE_KEYS,
         "attestation.capture_source",
     )
+    attestor_source = _require_exact_keys(
+        attestation["attestor_source"],
+        _ATTESTED_ATTESTOR_SOURCE_KEYS,
+        "attestation.attestor_source",
+    )
+    retry_authorization = _require_exact_keys(
+        attestation["retry_authorization"],
+        _RETRY_AUTHORIZATION_KEYS,
+        "attestation.retry_authorization",
+    )
     for label, value, pattern in (
         ("attested checkpoint", checkpoint_att["sha256"], _SHA256),
         ("attested checkpoint contract", checkpoint_att["training_contract_sha256"], _SHA256),
@@ -466,9 +487,17 @@ def load_post_swing_teacher_states(
         ("checkpoint source claim", checkpoint_source["launch_claim_content_sha256"], _SHA256),
         ("capture source commit", capture_source["commit"], _COMMIT),
         ("capture producer source", capture_source["producer_source_sha256"], _SHA256),
-        ("capture attestor source", capture_source["attestor_source_sha256"], _SHA256),
+        ("attestor source commit", attestor_source["commit"], _COMMIT),
+        ("attestor source bytes", attestor_source["attestor_source_sha256"], _SHA256),
+        ("retry authorization file", retry_authorization["file_sha256"], _SHA256),
+        ("retry authorization v3 plan", retry_authorization["v3_plan_file_sha256"], _SHA256),
     ):
         _require_sha(value, label, pattern=pattern)
+    if (
+        type(retry_authorization["authorization_id"]) is not str
+        or not retry_authorization["authorization_id"]
+    ):
+        raise PostSwingTeacherError("retry authorization id must be non-empty text")
     if (
         type(checkpoint_att["training_contract_schema_version"]) is not int
         or checkpoint_att["training_contract_schema_version"] != 3
@@ -480,6 +509,7 @@ def load_post_swing_teacher_states(
         or type(hard_att["schema_version"]) is not int
         or hard_att["schema_version"] != 3
         or _exact_bool(capture_source["clean"], "attestation.capture_source.clean") is not True
+        or _exact_bool(attestor_source["clean"], "attestation.attestor_source.clean") is not True
     ):
         raise PostSwingTeacherError("teacher attestation is not exact schema-3 clean lineage")
     if (
@@ -695,6 +725,8 @@ def load_post_swing_teacher_states(
             "hard_contract": dict(hard_att),
             "checkpoint_source": dict(checkpoint_source),
             "capture_source": dict(capture_source),
+            "attestor_source": dict(attestor_source),
+            "retry_authorization": dict(retry_authorization),
         },
         "motion_clips": motion_clips,
         "joint_names": list(joint_names),

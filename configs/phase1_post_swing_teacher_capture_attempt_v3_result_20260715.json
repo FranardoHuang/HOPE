@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "result_id": "phase1-post-swing-teacher-control-model500-capture-attempt-v3-result-20260715",
-  "status": "capture_complete_attestation_blocked_false_reject",
+  "status": "blocked_pending_full_attestation",
   "simulation_only": true,
   "preregistration": {
     "plan_id": "control_model500_v3_obsfix_gpu2_20260715a",
@@ -56,10 +56,21 @@
     "teacher_receipt_json": "absent",
     "durable_attempt_log_available": false
   },
-  "root_cause": {
+  "first_observed_attestation_blocker": {
     "producer_semantics": "lean_queue_runtime hashes compact canonical JSON content bytes without a trailing newline",
     "rejected_consumer_semantics": "attest_post_swing_teacher used one helper that always appended a trailing newline for both embedded content digests and complete JSON documents",
-    "classification": "attestor false rejection after a valid complete capture; not a capture, checkpoint, lineage, finiteness or velocity-limit failure"
+    "classification": "the attestor stopped in _claim before receipt publication; this proves the digest check was a false rejection but does not execute or prove any downstream attestation gate"
+  },
+  "downstream_attestation_gates": {
+    "checkpoint_restricted_load": "not_executed",
+    "checkpoint_schema3_fresh_lineage": "not_executed",
+    "checkpoint_adjacent_hard_contract": "not_executed",
+    "checkpoint_source": "not_executed",
+    "capture_producer_source": "not_executed",
+    "ordered_motion_bytes": "not_executed",
+    "runtime_joint_order": "not_executed",
+    "root_and_joint_velocity_limits": "not_executed",
+    "note": "capture state arrays were separately shown finite; that does not substitute for full attestation"
   },
   "decision": {
     "v3_capture_complete": true,

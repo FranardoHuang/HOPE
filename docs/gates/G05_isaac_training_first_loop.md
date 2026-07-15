@@ -55,9 +55,15 @@ Follow-up note (2026-07-15, schema-v3 capture complete but attestor newline fals
 - One-shot attestor attempt-1 then failed before receipt publication with rc2 `training launch claim
   canonical digest mismatch`; `teacher_receipt.json` is absent. The queue producer hashes compact canonical
   content without a trailing newline, while the attestor incorrectly reused document serialization with a
-  newline for that embedded digest. The source fix separates content bytes from newline-terminated document
-  bytes and adds a production-shaped schema-2 claim, newline counterexample, exact receipt-byte and no-clobber
-  regressions; the operation's five-file host suite is `76 passed` with one existing duplicate-ZIP warning.
+  newline for that embedded digest. This is only the first observed blocker: attempt-1 stopped in `_claim`, so
+  checkpoint/lineage/hard-contract/source/motion/velocity gates remain unexecuted and unproven; capture-array
+  finiteness is separate evidence. The source fix separates content bytes from newline-terminated document
+  bytes and splits original capture-producer lineage from the later fixed-attestor lineage. Receipt attestation
+  schema 2 and controller status reject swapped/rebound/dirty sources while permitting producer commit `906a3c3`
+  to differ from the post-fix attestor commit. A tracked one-shot retry authorization binds the only accepted
+  attestor commit/SHA to the immutable v3 plan/capture/checkpoint/output, preventing an arbitrary clean HEAD
+  from signing and validating itself. The five-file host suite is `95 passed` with one existing
+  duplicate-ZIP warning; this is source evidence, not full attestation.
   Capture must not be rerun, and attestor must not be rerun until this fix is merged to `main`.
   First-reset, replacement training, second seed, judge and promotion remain unauthorized. See the
   [machine result](../../configs/phase1_post_swing_teacher_capture_attempt_v3_result_20260715.json),

@@ -56,6 +56,10 @@ GPU_LEASE_PATH = Path("/tmp/hope_lean_queue_gpu2.lock")
 ISAAC_PYTHON = Path("/workspace/hope_isaac_venv/bin/python")
 MACHINE_ID_PATH = Path("/etc/machine-id")
 BOOT_ID_PATH = Path("/proc/sys/kernel/random/boot_id")
+RETRY_AUTHORIZATION_RELATIVE = Path(
+    "configs/phase1_post_swing_teacher_capture_v3_attestor_retry_authorization_20260715.json"
+)
+RETRY_AUTHORIZATION_KIND = "hope_post_swing_teacher_attestor_retry_authorization"
 UINT32_MAX = 0xFFFFFFFF
 NAMESPACE_RE = re.compile(r"^[a-z0-9][a-z0-9._-]{0,127}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -438,9 +442,14 @@ def _validate_plan(plan: Mapping[str, Any]) -> None:
         _canonical_relative_path(row.get("path"), f"capture_source.files.{label}.path")
         _require_plain_int(row.get("bytes"), f"capture_source.files.{label}.bytes", minimum=1)
         _require_sha256(row.get("sha256"), f"capture_source.files.{label}.sha256")
-    for label in ("controller", "inference_runner", "lean_queue_runtime"):
+    for label in ("controller", "inference_runner", "lean_queue_runtime", "producer"):
         if label not in files:
             raise CaptureContractError(f"capture_source.files lacks required {label}")
+    if files["producer"]["path"] != (
+        "hope_training/whole_body_tracking/source/whole_body_tracking/"
+        "whole_body_tracking/tasks/tracking/mdp/commands.py"
+    ):
+        raise CaptureContractError("capture_source.files.producer is not the MotionCommand source")
     asset = _require_mapping(source.get("ignored_runtime_asset"), "ignored_runtime_asset")
     _require_exact_keys(
         asset,
@@ -1511,7 +1520,175 @@ def _artifact_status(path: Path) -> dict[str, Any]:
     return {"lexists": True, "kind": "regular", "bytes": len(raw), "sha256": _sha256_bytes(raw)}
 
 
-def _validate_teacher_receipt_binding(plan: Mapping[str, Any], output: Path, raw: bytes) -> None:
+def _status_retry_authorization(
+    plan: Mapping[str, Any],
+    output: Path,
+    current_script: Path,
+    plan_sha256: str,
+) -> dict[str, Any]:
+    """Load the committed authorization for one post-fix attestor retry."""
+
+    if not current_script.is_absolute() or current_script.is_symlink():
+        raise CaptureContractError("running status controller must be one absolute regular path")
+    try:
+        current_script = current_script.resolve(strict=True)
+    except OSError as exc:
+        raise CaptureContractError("running status controller path is unavailable") from exc
+    source = current_script.parents[1]
+    expected_controller = source / "scripts/run_preregistered_post_swing_capture.py"
+    if current_script != expected_controller:
+        raise CaptureContractError("running status controller is outside its own source checkout")
+    with _open_real_directory(source):
+        pass
+    runtime = _require_mapping(plan["runtime_environment"], "runtime environment")
+    tools = _require_mapping(runtime["tools"], "runtime tools")
+    git_row = _require_mapping(tools["git"], "runtime git tool")
+    git_executable = Path(str(git_row["path"]))
+    _verify_executable_row(git_executable, git_row, "runtime git tool")
+    commit = _git_output(git_executable, source, "rev-parse", "HEAD")
+    if not COMMIT_RE.fullmatch(commit):
+        raise CaptureContractError("attestor source HEAD is not one exact commit")
+    if _git_output(
+        git_executable, source, "status", "--porcelain=v1", "--untracked-files=no"
+    ):
+        raise CaptureContractError("status authorization source has tracked changes")
+    tracked = _git_output(
+        git_executable,
+        source,
+        "ls-files",
+        "--error-unmatch",
+        RETRY_AUTHORIZATION_RELATIVE.as_posix(),
+    )
+    if tracked != RETRY_AUTHORIZATION_RELATIVE.as_posix():
+        raise CaptureContractError("retry authorization is not one tracked source file")
+    authorization_path = source / RETRY_AUTHORIZATION_RELATIVE
+    raw = _read_regular_bytes(authorization_path, "attestor retry authorization")
+    value = _strict_json_loads(raw, "attestor retry authorization")
+    _require_exact_keys(
+        value,
+        {
+            "schema_version", "artifact_kind", "authorization_id", "v3_plan",
+            "capture", "teacher", "capture_source", "attestor_source", "decision",
+        },
+        "attestor retry authorization",
+    )
+    if (
+        value.get("schema_version") != 1
+        or value.get("artifact_kind") != RETRY_AUTHORIZATION_KIND
+        or type(value.get("authorization_id")) is not str
+        or not value["authorization_id"]
+    ):
+        raise CaptureContractError("attestor retry authorization header is malformed")
+    plan_row = _require_mapping(value["v3_plan"], "retry v3 plan")
+    _require_exact_keys(plan_row, {"plan_id", "file_sha256"}, "retry v3 plan")
+    capture = _require_mapping(value["capture"], "retry capture")
+    _require_exact_keys(
+        capture,
+        {
+            "output_directory", "output_receipt", "capture_claim_sha256",
+            "states_sha256", "result_sha256", "state_count",
+        },
+        "retry capture",
+    )
+    teacher_row = _require_mapping(value["teacher"], "retry teacher")
+    _require_exact_keys(
+        teacher_row,
+        {"checkpoint_sha256", "hard_contract_sha256", "launch_claim_content_sha256"},
+        "retry teacher",
+    )
+    capture_source = _require_mapping(value["capture_source"], "retry capture source")
+    _require_exact_keys(
+        capture_source, {"commit", "producer_source_sha256"}, "retry capture source"
+    )
+    attestor_source = _require_mapping(value["attestor_source"], "retry attestor source")
+    _require_exact_keys(
+        attestor_source, {"commit", "attestor_source_sha256"}, "retry attestor source"
+    )
+    decision = _require_mapping(value["decision"], "retry decision")
+    _require_exact_keys(
+        decision,
+        {
+            "capture_retry_authorized", "attestor_attempt2_authorized",
+            "first_reset_probe_authorized", "scientific_training_authorized",
+        },
+        "retry decision",
+    )
+    for label, digest in (
+        ("retry plan", plan_row.get("file_sha256")),
+        ("retry capture claim", capture.get("capture_claim_sha256")),
+        ("retry states", capture.get("states_sha256")),
+        ("retry result", capture.get("result_sha256")),
+        ("retry checkpoint", teacher_row.get("checkpoint_sha256")),
+        ("retry hard contract", teacher_row.get("hard_contract_sha256")),
+        ("retry launch claim", teacher_row.get("launch_claim_content_sha256")),
+        ("retry producer", capture_source.get("producer_source_sha256")),
+        ("retry attestor", attestor_source.get("attestor_source_sha256")),
+    ):
+        _require_sha256(digest, label)
+    for label, commit_value in (
+        ("retry capture source", capture_source.get("commit")),
+        ("retry attestor source", attestor_source.get("commit")),
+    ):
+        if type(commit_value) is not str or not COMMIT_RE.fullmatch(commit_value):
+            raise CaptureContractError(f"{label} commit must be 40 lowercase hex characters")
+    frozen = _require_mapping(plan["teacher_checkpoint"], "frozen teacher")
+    producer = _require_mapping(
+        plan["capture_source"]["files"]["producer"], "frozen capture producer"
+    )
+    if (
+        plan_row != {"plan_id": plan["plan_id"], "file_sha256": plan_sha256}
+        or capture
+        != {
+            "output_directory": str(output),
+            "output_receipt": str(output / "teacher_receipt.json"),
+            "capture_claim_sha256": _sha256_file(output / "natural_wrap_capture.claim.json"),
+            "states_sha256": _sha256_file(output / "natural_wrap_states.npz"),
+            "result_sha256": _sha256_file(output / "natural_wrap_capture.json"),
+            "state_count": plan["capture_contract"]["target_count"],
+        }
+        or teacher_row
+        != {
+            "checkpoint_sha256": frozen["sha256"],
+            "hard_contract_sha256": frozen["hard_contract"]["sha256"],
+            "launch_claim_content_sha256": frozen["launch_claim"]["content_sha256"],
+        }
+        or capture_source
+        != {
+            "commit": plan["capture_source"]["commit"],
+            "producer_source_sha256": producer["sha256"],
+        }
+        or decision
+        != {
+            "capture_retry_authorized": False,
+            "attestor_attempt2_authorized": True,
+            "first_reset_probe_authorized": False,
+            "scientific_training_authorized": False,
+        }
+    ):
+        raise CaptureContractError("retry authorization is rebound from immutable v3 evidence")
+    return {
+        "receipt_binding": {
+            "authorization_id": value["authorization_id"],
+            "file_sha256": _sha256_bytes(raw),
+            "v3_plan_file_sha256": plan_sha256,
+        },
+        "attestor_source": {
+            "commit": attestor_source["commit"],
+            "clean": True,
+            "attestor_source_sha256": attestor_source["attestor_source_sha256"],
+        },
+        "status_source_commit": commit,
+    }
+
+
+def _validate_teacher_receipt_binding(
+    plan: Mapping[str, Any],
+    output: Path,
+    raw: bytes,
+    *,
+    current_script: Path,
+    plan_sha256: str,
+) -> None:
     receipt = _strict_json_loads(raw, "teacher receipt")
     teacher = _require_mapping(receipt.get("teacher"), "teacher receipt teacher")
     frozen = _require_mapping(plan["teacher_checkpoint"], "frozen teacher")
@@ -1532,6 +1709,23 @@ def _validate_teacher_receipt_binding(plan: Mapping[str, Any], output: Path, raw
         if set(actual) != {"index", "sha256"} or actual.get("index") != index or actual.get("sha256") != expected["sha256"]:
             raise CaptureContractError("teacher receipt is rebound from the ordered motions")
     attestation = _require_mapping(receipt.get("attestation"), "teacher attestation")
+    _require_exact_keys(
+        attestation,
+        {
+            "schema_version", "artifact_kind", "capture_result_sha256",
+            "capture_result_relative_path", "capture_claim_sha256",
+            "capture_claim_relative_path", "checkpoint", "hard_contract",
+            "checkpoint_source", "capture_source", "attestor_source",
+            "retry_authorization",
+        },
+        "teacher attestation",
+    )
+    if (
+        attestation.get("schema_version") != 2
+        or attestation.get("artifact_kind")
+        != "hope_post_swing_teacher_capture_attestation"
+    ):
+        raise CaptureContractError("teacher attestation schema is not lineage-split v2")
     result_path = output / str(attestation.get("capture_result_relative_path", ""))
     claim_path = output / str(attestation.get("capture_claim_relative_path", ""))
     if result_path.parent != output or claim_path.parent != output:
@@ -1546,12 +1740,80 @@ def _validate_teacher_receipt_binding(plan: Mapping[str, Any], output: Path, raw
         or checkpoint_source.get("launch_claim_content_sha256") != frozen["launch_claim"]["content_sha256"]
     ):
         raise CaptureContractError("teacher receipt checkpoint lineage is rebound")
+    checkpoint = _require_mapping(attestation.get("checkpoint"), "attested checkpoint")
+    _require_exact_keys(
+        checkpoint,
+        {
+            "sha256", "training_contract_schema_version",
+            "training_contract_sha256", "training_contract_lineage_exact",
+            "training_launch_claim_sha256",
+        },
+        "attested checkpoint",
+    )
+    hard_contract = _require_mapping(
+        attestation.get("hard_contract"), "attested hard contract"
+    )
+    _require_exact_keys(
+        hard_contract, {"sha256", "schema_version"}, "attested hard contract"
+    )
+    if (
+        checkpoint.get("sha256") != frozen["sha256"]
+        or checkpoint.get("training_contract_schema_version") != 3
+        or checkpoint.get("training_contract_sha256")
+        != frozen["hard_contract"]["sha256"]
+        or checkpoint.get("training_contract_lineage_exact") is not True
+        or checkpoint.get("training_launch_claim_sha256")
+        != frozen["launch_claim"]["content_sha256"]
+        or hard_contract
+        != {"sha256": frozen["hard_contract"]["sha256"], "schema_version": 3}
+    ):
+        raise CaptureContractError("teacher receipt checkpoint/hard-contract attestation is rebound")
     capture_source = _require_mapping(attestation.get("capture_source"), "capture source")
-    if capture_source.get("commit") != plan["capture_source"]["commit"]:
+    _require_exact_keys(
+        capture_source,
+        {"commit", "clean", "producer_source_sha256"},
+        "capture source",
+    )
+    producer_row = _require_mapping(
+        plan["capture_source"]["files"]["producer"], "frozen capture producer"
+    )
+    if (
+        capture_source.get("commit") != plan["capture_source"]["commit"]
+        or capture_source.get("clean") is not True
+        or capture_source.get("producer_source_sha256") != producer_row["sha256"]
+    ):
         raise CaptureContractError("teacher receipt capture source is rebound")
+    attestor_source = _require_mapping(attestation.get("attestor_source"), "attestor source")
+    _require_exact_keys(
+        attestor_source,
+        {"commit", "clean", "attestor_source_sha256"},
+        "attestor source",
+    )
+    retry_receipt = _require_mapping(
+        attestation.get("retry_authorization"), "retry authorization receipt binding"
+    )
+    _require_exact_keys(
+        retry_receipt,
+        {"authorization_id", "file_sha256", "v3_plan_file_sha256"},
+        "retry authorization receipt binding",
+    )
+    authorization = _status_retry_authorization(
+        plan, output, current_script, plan_sha256
+    )
+    if (
+        attestor_source != authorization["attestor_source"]
+        or retry_receipt != authorization["receipt_binding"]
+    ):
+        raise CaptureContractError("teacher receipt attestor source is rebound")
 
 
-def _status(plan: Mapping[str, Any], plan_raw: bytes, proc_root: Path = Path("/proc")) -> dict[str, Any]:
+def _status(
+    plan: Mapping[str, Any],
+    plan_raw: bytes,
+    proc_root: Path = Path("/proc"),
+    *,
+    current_script: Path = Path(__file__).resolve(),
+) -> dict[str, Any]:
     plan_id = str(plan["plan_id"])
     launch_root = LAUNCH_PARENT / plan_id
     output = CAPTURE_PARENT / plan_id
@@ -1616,7 +1878,13 @@ def _status(plan: Mapping[str, Any], plan_raw: bytes, proc_root: Path = Path("/p
     if receipt_status["kind"] == "regular":
         try:
             raw = _read_regular_bytes(output / "teacher_receipt.json", "teacher receipt")
-            _validate_teacher_receipt_binding(plan, output, raw)
+            _validate_teacher_receipt_binding(
+                plan,
+                output,
+                raw,
+                current_script=current_script,
+                plan_sha256=plan_sha,
+            )
             receipt_binding_exact = True
         except CaptureContractError:
             receipt_binding_exact = False

@@ -99,6 +99,11 @@ def _plan(tmp_path: Path, monkeypatch=None) -> dict:
                     "bytes": 1,
                     "sha256": "3" * 64,
                 },
+                "producer": {
+                    "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/commands.py",
+                    "bytes": 1,
+                    "sha256": "e" * 64,
+                },
             },
             "ignored_runtime_asset": {
                 "relative_path": "asset",
@@ -703,6 +708,240 @@ def test_status_rejects_rebound_teacher_receipt(tmp_path, monkeypatch):
     monkeypatch.setattr(RUNNER, "_lease_is_held", lambda: False)
     result = RUNNER._status(plan, raw, tmp_path / "proc")
     assert result["teacher_receipt_binding_exact"] is False
+
+
+def _write_status_receipt(
+    plan: dict, output: Path, attestor_source: dict, retry_binding: dict
+) -> dict:
+    result_raw = b"immutable-capture-result"
+    claim_raw = b"immutable-capture-claim"
+    (output / "natural_wrap_capture.json").write_bytes(result_raw)
+    (output / "natural_wrap_capture.claim.json").write_bytes(claim_raw)
+    receipt = {
+        "teacher": {
+            "source_commit": plan["teacher_checkpoint"]["training_source_commit"],
+            "checkpoint_sha256": plan["teacher_checkpoint"]["sha256"],
+            "training_contract_sha256": plan["teacher_checkpoint"]["hard_contract"]["sha256"],
+            "training_contract_schema_version": 3,
+            "fresh_lineage": True,
+        },
+        "motion_clips": [
+            {"index": index, "sha256": row["sha256"]}
+            for index, row in enumerate(plan["ordered_motion_inputs"])
+        ],
+        "attestation": {
+            "schema_version": 2,
+            "artifact_kind": "hope_post_swing_teacher_capture_attestation",
+            "capture_result_sha256": _sha(result_raw),
+            "capture_result_relative_path": "natural_wrap_capture.json",
+            "capture_claim_sha256": _sha(claim_raw),
+            "capture_claim_relative_path": "natural_wrap_capture.claim.json",
+            "checkpoint": {
+                "sha256": plan["teacher_checkpoint"]["sha256"],
+                "training_contract_schema_version": 3,
+                "training_contract_sha256": plan["teacher_checkpoint"]["hard_contract"]["sha256"],
+                "training_contract_lineage_exact": True,
+                "training_launch_claim_sha256": plan["teacher_checkpoint"]["launch_claim"]["content_sha256"],
+            },
+            "hard_contract": {
+                "sha256": plan["teacher_checkpoint"]["hard_contract"]["sha256"],
+                "schema_version": 3,
+            },
+            "checkpoint_source": {
+                "commit": plan["teacher_checkpoint"]["training_source_commit"],
+                "launch_claim_content_sha256": plan["teacher_checkpoint"]["launch_claim"]["content_sha256"],
+            },
+            "capture_source": {
+                "commit": plan["capture_source"]["commit"],
+                "clean": True,
+                "producer_source_sha256": plan["capture_source"]["files"]["producer"]["sha256"],
+            },
+            "attestor_source": dict(attestor_source),
+            "retry_authorization": dict(retry_binding),
+        },
+    }
+    (output / "teacher_receipt.json").write_bytes(_canonical(receipt) + b"\n")
+    return receipt
+
+
+def test_status_accepts_split_capture_and_attestor_lineage(tmp_path, monkeypatch):
+    plan = _plan(tmp_path, monkeypatch)
+    raw = _canonical(plan)
+    output = RUNNER.CAPTURE_PARENT / plan["plan_id"]
+    output.mkdir(parents=True)
+    attestor_source = {
+        "commit": "f" * 40,
+        "clean": True,
+        "attestor_source_sha256": "a" * 64,
+    }
+    retry_binding = {
+        "authorization_id": "test-v3-attestor-attempt2",
+        "file_sha256": "b" * 64,
+        "v3_plan_file_sha256": _sha(raw),
+    }
+    _write_status_receipt(plan, output, attestor_source, retry_binding)
+    monkeypatch.setattr(
+        RUNNER,
+        "_status_retry_authorization",
+        lambda *_args: {
+            "attestor_source": attestor_source,
+            "receipt_binding": retry_binding,
+            "status_source_commit": "1" * 40,
+        },
+    )
+    monkeypatch.setattr(RUNNER, "_gpu_state", lambda _plan: {"gpus": [], "compute_apps": []})
+    monkeypatch.setattr(RUNNER, "_lease_is_held", lambda: False)
+    status = RUNNER._status(plan, raw, tmp_path / "proc")
+    assert plan["capture_source"]["commit"] != attestor_source["commit"]
+    assert status["teacher_receipt_binding_exact"] is True
+
+
+@pytest.mark.parametrize(
+    "mutation",
+    (
+        "capture_commit",
+        "producer_sha",
+        "attestor_commit",
+        "attestor_sha",
+        "swap_sources",
+        "dirty_capture_checkout",
+        "dirty_attestor_checkout",
+    ),
+)
+def test_status_rejects_rebound_swapped_or_dirty_source_lineage(
+    tmp_path, monkeypatch, mutation
+):
+    plan = _plan(tmp_path, monkeypatch)
+    raw = _canonical(plan)
+    output = RUNNER.CAPTURE_PARENT / plan["plan_id"]
+    output.mkdir(parents=True)
+    live_attestor = {
+        "commit": "f" * 40,
+        "clean": True,
+        "attestor_source_sha256": "a" * 64,
+    }
+    retry_binding = {
+        "authorization_id": "test-v3-attestor-attempt2",
+        "file_sha256": "b" * 64,
+        "v3_plan_file_sha256": _sha(raw),
+    }
+    receipt = _write_status_receipt(plan, output, live_attestor, retry_binding)
+    if mutation == "capture_commit":
+        receipt["attestation"]["capture_source"]["commit"] = "0" * 40
+    elif mutation == "producer_sha":
+        receipt["attestation"]["capture_source"]["producer_source_sha256"] = "0" * 64
+    elif mutation == "attestor_commit":
+        receipt["attestation"]["attestor_source"]["commit"] = "0" * 40
+    elif mutation == "attestor_sha":
+        receipt["attestation"]["attestor_source"]["attestor_source_sha256"] = "0" * 64
+    elif mutation == "swap_sources":
+        receipt["attestation"]["capture_source"], receipt["attestation"]["attestor_source"] = (
+            receipt["attestation"]["attestor_source"],
+            receipt["attestation"]["capture_source"],
+        )
+    elif mutation == "dirty_capture_checkout":
+        receipt["attestation"]["capture_source"]["clean"] = False
+    (output / "teacher_receipt.json").write_bytes(_canonical(receipt) + b"\n")
+
+    if mutation == "dirty_attestor_checkout":
+        def dirty(*_args):
+            raise RUNNER.CaptureContractError("status authorization source has tracked changes")
+
+        monkeypatch.setattr(RUNNER, "_status_retry_authorization", dirty)
+    else:
+        monkeypatch.setattr(
+            RUNNER,
+            "_status_retry_authorization",
+            lambda *_args: {
+                "attestor_source": live_attestor,
+                "receipt_binding": retry_binding,
+                "status_source_commit": "1" * 40,
+            },
+        )
+    monkeypatch.setattr(RUNNER, "_gpu_state", lambda _plan: {"gpus": [], "compute_apps": []})
+    monkeypatch.setattr(RUNNER, "_lease_is_held", lambda: False)
+    status = RUNNER._status(plan, raw, tmp_path / "proc")
+    assert status["teacher_receipt_binding_exact"] is False
+
+
+def test_status_retry_authorization_is_tracked_clean_and_binds_v3_and_attestor(
+    tmp_path, monkeypatch
+):
+    plan = _plan(tmp_path, monkeypatch)
+    plan_sha = _sha(_canonical(plan))
+    output = RUNNER.CAPTURE_PARENT / plan["plan_id"]
+    output.mkdir(parents=True)
+    capture_claim = b"capture claim"
+    states = b"states"
+    result = b"capture result"
+    (output / "natural_wrap_capture.claim.json").write_bytes(capture_claim)
+    (output / "natural_wrap_states.npz").write_bytes(states)
+    (output / "natural_wrap_capture.json").write_bytes(result)
+    source = tmp_path / "fixed-attestor-source"
+    controller = source / "scripts/run_preregistered_post_swing_capture.py"
+    attestor = source / "scripts/attest_post_swing_teacher.py"
+    controller.parent.mkdir(parents=True)
+    controller.write_bytes(b"fixed controller\n")
+    attestor.write_bytes(b"fixed attestor\n")
+    authorization_path = source / RUNNER.RETRY_AUTHORIZATION_RELATIVE
+    authorization_path.parent.mkdir(parents=True)
+    authorization = {
+        "schema_version": 1,
+        "artifact_kind": RUNNER.RETRY_AUTHORIZATION_KIND,
+        "authorization_id": "test-v3-attestor-attempt2",
+        "v3_plan": {"plan_id": plan["plan_id"], "file_sha256": plan_sha},
+        "capture": {
+            "output_directory": str(output),
+            "output_receipt": str(output / "teacher_receipt.json"),
+            "capture_claim_sha256": _sha(capture_claim),
+            "states_sha256": _sha(states),
+            "result_sha256": _sha(result),
+            "state_count": plan["capture_contract"]["target_count"],
+        },
+        "teacher": {
+            "checkpoint_sha256": plan["teacher_checkpoint"]["sha256"],
+            "hard_contract_sha256": plan["teacher_checkpoint"]["hard_contract"]["sha256"],
+            "launch_claim_content_sha256": plan["teacher_checkpoint"]["launch_claim"]["content_sha256"],
+        },
+        "capture_source": {
+            "commit": plan["capture_source"]["commit"],
+            "producer_source_sha256": plan["capture_source"]["files"]["producer"]["sha256"],
+        },
+        "attestor_source": {
+            "commit": "f" * 40,
+            "attestor_source_sha256": _sha(attestor.read_bytes()),
+        },
+        "decision": {
+            "capture_retry_authorized": False,
+            "attestor_attempt2_authorized": True,
+            "first_reset_probe_authorized": False,
+            "scientific_training_authorized": False,
+        },
+    }
+    authorization_path.write_bytes(_canonical(authorization) + b"\n")
+    monkeypatch.setattr(RUNNER, "_verify_executable_row", lambda *args: {})
+
+    dirty = False
+    def git_output(_git, checkout, *args):
+        assert checkout == source
+        if args[:2] == ("rev-parse", "HEAD"):
+            return "f" * 40
+        if args[:2] == ("status", "--porcelain=v1"):
+            return " M configs/retry.json" if dirty else ""
+        assert args[:2] == ("ls-files", "--error-unmatch")
+        return RUNNER.RETRY_AUTHORIZATION_RELATIVE.as_posix()
+
+    monkeypatch.setattr(RUNNER, "_git_output", git_output)
+    proof = RUNNER._status_retry_authorization(plan, output, controller, plan_sha)
+    assert proof["attestor_source"] == {
+        "commit": authorization["attestor_source"]["commit"],
+        "clean": True,
+        "attestor_source_sha256": authorization["attestor_source"]["attestor_source_sha256"],
+    }
+    assert proof["receipt_binding"]["file_sha256"] == _sha(authorization_path.read_bytes())
+    dirty = True
+    with pytest.raises(RUNNER.CaptureContractError, match="tracked changes"):
+        RUNNER._status_retry_authorization(plan, output, controller, plan_sha)
 
 
 def test_inventory_small_tree_is_subsecond(tmp_path):

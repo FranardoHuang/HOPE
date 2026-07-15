@@ -17,8 +17,12 @@
   自然退出；claim/states/result SHA-256 为 `81126b27...244e` / `8d07668e...95d8` /
   `0aa2f37f...d641`。但 one-shot attestor attempt-1 在 receipt 写入前因 canonical content 与 JSON
   document 末尾换行混用而 rc2 假拒绝，`teacher_receipt.json` absent。源码修复已拆分无换行 content
-  digest 与单换行 document bytes，并加入 schema-2/newline/no-clobber 回归；五文件 host suite `76 passed`
-  （一个既有 duplicate-ZIP warning）。修复合入 main 前禁止重跑
+  digest 与单换行 document bytes；attempt-1 在 `_claim` 停止，后续 checkpoint/lineage/source/motion/速度门
+  都尚未执行。修订后的 attestation schema 2 又把原始 producer `capture_source` 与修复后 consumer
+  `attestor_source` 分开，status 分别对回 immutable v3 plan 和 tracked retry authorization；交换、重绑、dirty
+  均负测；另加 main-tracked one-shot retry authorization，把唯一 attestor commit/SHA 绑定 v3
+  plan/capture/checkpoint/output，拒绝任意 clean HEAD 自签自验。五文件 host suite `95 passed`（一个既有
+  duplicate-ZIP warning）。修复合入 main 前禁止重跑
   capture/attestor，首 reset 与科学训练仍 blocked。见[机器结果](../configs/phase1_post_swing_teacher_capture_attempt_v3_result_20260715.json)、
   [实验卷宗](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md)和
   [操作文档](operations/run_post_swing_teacher_capture.md)。

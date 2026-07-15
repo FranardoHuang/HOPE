@@ -357,15 +357,28 @@ arrays finite。claim/states/result SHA-256 分别为 `81126b27...244e`、`8d076
 `0aa2f37f...d641`。这闭合了 capture runtime 本身，但没有闭合 attestation。
 
 紧接的 one-shot attestor attempt-1 在写 receipt 前 rc2：`FAIL: training launch claim canonical digest
-mismatch`，`teacher_receipt.json` 保持 absent。根因不是 capture/checkpoint/lineage/finiteness，而是 producer
-按 compact canonical content bytes（无末尾换行）计算 schema-2 claim 的 `content_sha256`，旧 attestor 却用
-同一个“总是追加 `\n`”的 helper 同时算 content digest 和完整 JSON document。机器结果只记录已知事实；由于
+mismatch`，`teacher_receipt.json` 保持 absent。第一个观测到的 blocker 是 producer 按 compact canonical
+content bytes（无末尾换行）计算 schema-2 claim 的 `content_sha256`，旧 attestor 却用同一个“总是追加
+`\n`”的 helper 同时算 content digest 和完整 JSON document。attempt-1 在 `_claim()` 已停止，所以 checkpoint
+restricted load、fresh lineage、相邻 hard contract、两条 source、motion/order 与 velocity limits 全部未执行、
+未证明；capture arrays finite 只是一条独立 capture 证据。机器结果只记录已知事实；由于
 现场没有 durable command/log artifact，其 path/SHA 明确为 null，不能补猜。修复必须拆开 content bytes 与
 document bytes，并用 production-shaped schema-2 claim、newline 反例、receipt byte/no-clobber 回归证明；在该
-修复下 operation 的五文件 host suite 为 `76 passed`（一个既有 duplicate-ZIP warning）；在修复合入
+修复下 operation 的五文件 host suite 为 `95 passed`（一个既有 duplicate-ZIP warning）；在修复合入
 `main` 前禁止重跑 capture 或 attestor。完整证据见
 [`phase1_post_swing_teacher_capture_attempt_v3_result_20260715.json`](../../../configs/phase1_post_swing_teacher_capture_attempt_v3_result_20260715.json)。
 首 reset、replacement pair、第二 seed、judge 与 promotion 继续全部 blocked。
+
+source red-team 随后发现旧 attestor 还把 producer 与 consumer 谱系合并：它要求 running post-fix attestor
+bytes 等于原始 `906a3c3` capture checkout 中的旧 attestor bytes，导致修复本身永远无法消费合法 v3 capture。
+successor receipt 将 attestation sub-schema 升为 `2`：`capture_source` 只放原始 producer
+`{commit,clean,producer_source_sha256}`，新增 `attestor_source` 单独放 running fixed attestor
+`{commit,clean,attestor_source_sha256}`。trainer hard-contract summary 保留两者；controller status 把前者对回
+immutable v3 plan；后者不能只靠“任意 clean HEAD 与自身一致”，而必须匹配 main 中 tracked 的一次性 retry
+authorization。该 authorization 同时绑定 v3 plan/capture/checkpoint/output 和唯一 attestor commit/SHA，receipt
+记录 authorization ID/file SHA，status 只从自身 clean checkout 读取它。attempt-2 必须从授权的修复后
+clean main 运行脚本，却把 `--capture-source-checkout` 明确指回原始 clean `906a3c3` checkout；任一 source
+dirty、commit/SHA 重绑或二者交换均 fail closed。该 source fix 仍不等于 attempt-2 runtime 通过。
 
 ## 离线复现
 

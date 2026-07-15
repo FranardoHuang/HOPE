@@ -43,6 +43,9 @@ class AttestationError(RuntimeError):
     """The capture cannot produce an exact teacher receipt."""
 
 
+RETRY_AUTHORIZATION_KIND = "hope_post_swing_teacher_attestor_retry_authorization"
+
+
 def _read(path: Path, label: str) -> bytes:
     try:
         return teacher._read_regular_file_once(path, label)
@@ -113,6 +116,22 @@ def _git_state(checkout: Path, expected_commit: str, label: str) -> dict[str, An
             f"{label} is not clean exact {expected_commit}: head={head} dirty={bool(dirty)}"
         )
     return {"commit": head, "clean": True}
+
+
+def _current_git_state(checkout: Path, label: str) -> dict[str, Any]:
+    """Bind one clean checkout to the commit it contains at attestation time."""
+
+    if not checkout.is_absolute() or checkout.is_symlink() or not checkout.is_dir():
+        raise AttestationError(f"{label} must be an absolute non-symlink directory")
+    head = subprocess.run(
+        ["git", "-C", str(checkout), "rev-parse", "HEAD"],
+        check=True,
+        capture_output=True,
+        text=True,
+    ).stdout.strip()
+    if teacher._COMMIT.fullmatch(head) is None:
+        raise AttestationError(f"{label} HEAD is not one exact commit")
+    return _git_state(checkout, head, label)
 
 
 def _plain_int(value: Any, label: str) -> int:
@@ -210,6 +229,139 @@ def _claim(raw: bytes) -> tuple[dict[str, Any], str, Path, str]:
     ):
         raise AttestationError("training launch claim source binding is malformed")
     return content, claim_sha, Path(checkout), commit
+
+
+def _retry_authorization(
+    raw: bytes,
+    expected_file_sha256: str,
+    *,
+    capture_directory: Path,
+    output_receipt: Path,
+    capture_claim_sha256: str,
+    states_sha256: str,
+    capture_result_sha256: str,
+    state_count: int,
+    checkpoint_sha256: str,
+    hard_contract_sha256: str,
+    launch_claim_content_sha256: str,
+    capture_source: Mapping[str, Any],
+    producer_source_sha256: str,
+    attestor_source: Mapping[str, Any],
+    attestor_source_sha256: str,
+) -> dict[str, Any]:
+    if (
+        type(expected_file_sha256) is not str
+        or teacher._SHA256.fullmatch(expected_file_sha256) is None
+        or _sha(raw) != expected_file_sha256
+    ):
+        raise AttestationError("retry authorization file SHA-256 mismatch")
+    value = _keys(
+        _json(raw, "attestor retry authorization"),
+        {
+            "schema_version", "artifact_kind", "authorization_id", "v3_plan",
+            "capture", "teacher", "capture_source", "attestor_source", "decision",
+        },
+        "attestor retry authorization",
+    )
+    if (
+        _plain_int(value["schema_version"], "retry authorization schema") != 1
+        or value["artifact_kind"] != RETRY_AUTHORIZATION_KIND
+        or type(value["authorization_id"]) is not str
+        or not value["authorization_id"]
+    ):
+        raise AttestationError("attestor retry authorization header is malformed")
+    plan = _keys(value["v3_plan"], {"plan_id", "file_sha256"}, "retry v3 plan")
+    capture = _keys(
+        value["capture"],
+        {
+            "output_directory", "output_receipt", "capture_claim_sha256",
+            "states_sha256", "result_sha256", "state_count",
+        },
+        "retry capture",
+    )
+    teacher_row = _keys(
+        value["teacher"],
+        {"checkpoint_sha256", "hard_contract_sha256", "launch_claim_content_sha256"},
+        "retry teacher",
+    )
+    capture_source_row = _keys(
+        value["capture_source"],
+        {"commit", "producer_source_sha256"},
+        "retry capture source",
+    )
+    attestor_source_row = _keys(
+        value["attestor_source"],
+        {"commit", "attestor_source_sha256"},
+        "retry attestor source",
+    )
+    decision = _keys(
+        value["decision"],
+        {
+            "capture_retry_authorized", "attestor_attempt2_authorized",
+            "first_reset_probe_authorized", "scientific_training_authorized",
+        },
+        "retry decision",
+    )
+    for label, digest in (
+        ("retry plan file", plan["file_sha256"]),
+        ("retry capture claim", capture["capture_claim_sha256"]),
+        ("retry states", capture["states_sha256"]),
+        ("retry result", capture["result_sha256"]),
+        ("retry checkpoint", teacher_row["checkpoint_sha256"]),
+        ("retry hard contract", teacher_row["hard_contract_sha256"]),
+        ("retry launch claim", teacher_row["launch_claim_content_sha256"]),
+        ("retry producer", capture_source_row["producer_source_sha256"]),
+        ("retry attestor", attestor_source_row["attestor_source_sha256"]),
+    ):
+        if type(digest) is not str or teacher._SHA256.fullmatch(digest) is None:
+            raise AttestationError(f"{label} SHA-256 is malformed")
+    for label, commit in (
+        ("retry capture source", capture_source_row["commit"]),
+        ("retry attestor source", attestor_source_row["commit"]),
+    ):
+        if type(commit) is not str or teacher._COMMIT.fullmatch(commit) is None:
+            raise AttestationError(f"{label} commit is malformed")
+    expected_capture_source = {
+        "commit": capture_source["commit"],
+        "producer_source_sha256": producer_source_sha256,
+    }
+    expected_attestor_source = {
+        "commit": attestor_source["commit"],
+        "attestor_source_sha256": attestor_source_sha256,
+    }
+    if (
+        plan["plan_id"] != capture_directory.name
+        or capture
+        != {
+            "output_directory": str(capture_directory),
+            "output_receipt": str(output_receipt),
+            "capture_claim_sha256": capture_claim_sha256,
+            "states_sha256": states_sha256,
+            "result_sha256": capture_result_sha256,
+            "state_count": state_count,
+        }
+        or teacher_row
+        != {
+            "checkpoint_sha256": checkpoint_sha256,
+            "hard_contract_sha256": hard_contract_sha256,
+            "launch_claim_content_sha256": launch_claim_content_sha256,
+        }
+        or capture_source_row != expected_capture_source
+        or attestor_source_row != expected_attestor_source
+        or decision
+        != {
+            "capture_retry_authorized": False,
+            "attestor_attempt2_authorized": True,
+            "first_reset_probe_authorized": False,
+            "scientific_training_authorized": False,
+        }
+    ):
+        raise AttestationError("retry authorization is rebound from the immutable v3 attempt")
+    return {
+        "authorization_id": value["authorization_id"],
+        "file_sha256": expected_file_sha256,
+        "v3_plan_file_sha256": plan["file_sha256"],
+    }
 
 
 def _capture_result(
@@ -345,24 +497,20 @@ def attest(args: argparse.Namespace) -> dict[str, Any]:
     checkpoint_raw = _read(checkpoint_path, "teacher checkpoint")
     checkpoint_attestation = _checkpoint(checkpoint_raw, hard_sha, claim_sha)
 
-    capture_commit = subprocess.run(
-        ["git", "-C", str(args.capture_source_checkout), "rev-parse", "HEAD"],
-        check=True,
-        capture_output=True,
-        text=True,
-    ).stdout.strip()
-    capture_source = _git_state(
-        args.capture_source_checkout, capture_commit, "capture source checkout"
+    capture_source = _current_git_state(
+        args.capture_source_checkout, "capture producer source checkout"
     )
+    attestor_source = _current_git_state(REPO_ROOT, "attestor source checkout")
     producer_path = (
         args.capture_source_checkout
         / "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/commands.py"
     )
-    attestor_path = args.capture_source_checkout / "scripts/attest_post_swing_teacher.py"
     producer_sha = _sha(_read(producer_path, "capture producer source"))
-    attestor_sha = _sha(_read(attestor_path, "teacher attestor source"))
-    if attestor_sha != _sha(_read(Path(__file__).resolve(), "running teacher attestor source")):
-        raise AttestationError("running attestor bytes differ from the clean capture source checkout")
+    attestor_path = REPO_ROOT / "scripts/attest_post_swing_teacher.py"
+    running_attestor_path = Path(__file__).resolve()
+    if running_attestor_path != attestor_path:
+        raise AttestationError("running attestor is outside its own clean source checkout")
+    attestor_sha = _sha(_read(attestor_path, "running teacher attestor source"))
     if (
         producer_sha != evidence["producer_source_sha256"]
         or producer_sha != capture_claim["producer_source_sha256"]
@@ -419,6 +567,27 @@ def attest(args: argparse.Namespace) -> dict[str, Any]:
     if np.any(np.abs(joint_vel.astype(np.float64)) > np.asarray(joint_limits)[None, :]):
         raise AttestationError("capture joint velocity exceeds the runtime plant limit")
 
+    retry_authorization_raw = _read(
+        args.retry_authorization, "attestor retry authorization"
+    )
+    retry_authorization = _retry_authorization(
+        retry_authorization_raw,
+        args.expected_retry_authorization_sha256,
+        capture_directory=result_path.parent,
+        output_receipt=output,
+        capture_claim_sha256=_sha(capture_claim_raw),
+        states_sha256=_sha(state_raw),
+        capture_result_sha256=_sha(result_raw),
+        state_count=_plain_int(result["states"]["count"], "teacher state count"),
+        checkpoint_sha256=checkpoint_attestation["sha256"],
+        hard_contract_sha256=hard_sha,
+        launch_claim_content_sha256=claim_sha,
+        capture_source=capture_source,
+        producer_source_sha256=producer_sha,
+        attestor_source=attestor_source,
+        attestor_source_sha256=attestor_sha,
+    )
+
     states = dict(result["states"])
     states["velocity_limits"] = {
         "root_linear_norm_max_mps": root_lin,
@@ -439,7 +608,7 @@ def attest(args: argparse.Namespace) -> dict[str, Any]:
         "motion_clips": motions,
         "states": states,
         "attestation": {
-            "schema_version": 1,
+            "schema_version": 2,
             "artifact_kind": teacher.ATTESTATION_KIND,
             "capture_result_sha256": _sha(result_raw),
             "capture_result_relative_path": result_path.name,
@@ -454,8 +623,12 @@ def attest(args: argparse.Namespace) -> dict[str, Any]:
             "capture_source": {
                 **capture_source,
                 "producer_source_sha256": producer_sha,
+            },
+            "attestor_source": {
+                **attestor_source,
                 "attestor_source_sha256": attestor_sha,
             },
+            "retry_authorization": retry_authorization,
         },
     }
     receipt_raw = _json_document(receipt)
@@ -493,6 +666,8 @@ def parser() -> argparse.ArgumentParser:
     value.add_argument("--motion", type=Path, action="append", required=True)
     value.add_argument("--root-linear-limit-mps", type=float, required=True)
     value.add_argument("--root-angular-limit-radps", type=float, required=True)
+    value.add_argument("--retry-authorization", type=Path, required=True)
+    value.add_argument("--expected-retry-authorization-sha256", required=True)
     value.add_argument("--output-receipt", type=Path, required=True)
     return value
 

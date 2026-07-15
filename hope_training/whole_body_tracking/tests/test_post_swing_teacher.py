@@ -82,7 +82,7 @@ def _write_fixture(tmp_path: Path, *, count: int = 4, joints: int = 3):
             },
         },
         "attestation": {
-            "schema_version": 1,
+            "schema_version": 2,
             "artifact_kind": MODULE.ATTESTATION_KIND,
             "capture_result_sha256": "4" * 64,
             "capture_result_relative_path": MODULE.CAPTURE_RESULT_NAME,
@@ -104,7 +104,16 @@ def _write_fixture(tmp_path: Path, *, count: int = 4, joints: int = 3):
                 "commit": "6" * 40,
                 "clean": True,
                 "producer_source_sha256": "8" * 64,
+            },
+            "attestor_source": {
+                "commit": "7" * 40,
+                "clean": True,
                 "attestor_source_sha256": "9" * 64,
+            },
+            "retry_authorization": {
+                "authorization_id": "test-v3-attestor-attempt2",
+                "file_sha256": "b" * 64,
+                "v3_plan_file_sha256": "c" * 64,
             },
         },
     }
@@ -202,6 +211,42 @@ def test_exact_receipt_loads_and_returns_hard_contract(tmp_path):
     assert loaded.hard_contract["receipt_sha256"] == sha256_file(receipt_path)
     assert loaded.hard_contract["capture_contract"]["event"] == "natural_clip_wrap"
     assert loaded.hard_contract["teacher"]["fresh_lineage"] is True
+    assert loaded.hard_contract["attestation"]["capture_source"]["commit"] == "6" * 40
+    assert loaded.hard_contract["attestation"]["attestor_source"]["commit"] == "7" * 40
+    assert (
+        loaded.hard_contract["attestation"]["retry_authorization"]["file_sha256"]
+        == "b" * 64
+    )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("swap_sources", "keys differ"),
+        ("rebind_attestor_commit", "attestor source commit"),
+        ("rebind_attestor_sha", "attestor source bytes"),
+        ("dirty_capture", "exact schema-3 clean lineage"),
+        ("dirty_attestor", "exact schema-3 clean lineage"),
+    ],
+)
+def test_receipt_rejects_rebound_or_dirty_source_lineage(tmp_path, mutation, message):
+    receipt_path, motions, joints, receipt = _write_fixture(tmp_path)
+    if mutation == "swap_sources":
+        receipt["attestation"]["capture_source"], receipt["attestation"]["attestor_source"] = (
+            receipt["attestation"]["attestor_source"],
+            receipt["attestation"]["capture_source"],
+        )
+    elif mutation == "rebind_attestor_commit":
+        receipt["attestation"]["attestor_source"]["commit"] = "not-a-commit"
+    elif mutation == "rebind_attestor_sha":
+        receipt["attestation"]["attestor_source"]["attestor_source_sha256"] = "not-a-sha"
+    elif mutation == "dirty_capture":
+        receipt["attestation"]["capture_source"]["clean"] = False
+    else:
+        receipt["attestation"]["attestor_source"]["clean"] = False
+    receipt_path.write_text(json.dumps(receipt, sort_keys=True) + "\n", encoding="utf-8")
+    with pytest.raises(PostSwingTeacherError, match=message):
+        _load(receipt_path, motions, joints)
 
 
 def test_receipt_rejects_byte_drift_and_wrong_runtime_bindings(tmp_path):

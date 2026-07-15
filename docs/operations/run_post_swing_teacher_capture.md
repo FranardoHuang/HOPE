@@ -13,6 +13,9 @@ successor v3 在同一 Pod2 GPU2 上自然退出，`natural_clip_wrap` 状态 `4
 attestor 把“完整 JSON 文档的末尾换行”错误计入 queue claim 的嵌入式 `content_sha256`，以 rc2
 `training launch claim canonical digest mismatch` 假拒绝。`teacher_receipt.json` 从未创建；完整机器证据见
 [`phase1_post_swing_teacher_capture_attempt_v3_result_20260715.json`](../../configs/phase1_post_swing_teacher_capture_attempt_v3_result_20260715.json)。
+attempt-1 在 `_claim()` 即停止：这只证明 digest 是第一个观测到的 blocker；checkpoint restricted load、
+fresh lineage、相邻 hard contract、producer/attestor source、motion/order 与 velocity limits 均未执行、未证明。
+capture arrays finite 是单独的 capture 证据，不能代替完整 attestation。
 不得重跑 capture；attestor 也必须等本语义修复进入 `main`，再用 clean exact source 和同一 immutable v3
 inputs 单次执行。attestation 和首 reset readback probe 尚未完成，因此 scientific trainer、第二 seed、judge
 与 promotion 仍未授权。
@@ -143,16 +146,18 @@ capture mode 不做 PPO update，也跳过 ONNX export。环境建立后先用�
 每个 `--motion` 按 hard contract 顺序重复一次。
 
 ```bash
-cd /ABS/CLEAN/NOHOPE
-python3 scripts/attest_post_swing_teacher.py \
+cd /ABS/CLEAN/POST_FIX_MAIN
+python3 /ABS/CLEAN/POST_FIX_MAIN/scripts/attest_post_swing_teacher.py \
   --capture-result /ABS/NEW/CAPTURE_DIR/natural_wrap_capture.json \
   --checkpoint /ABS/RUN/model_ITER.pt \
   --hard-contract /ABS/RUN/params/training_contract.json \
   --launch-claim /ABS/RUN/queue_claim.json \
-  --capture-source-checkout /ABS/CLEAN/NOHOPE \
+  --capture-source-checkout /ABS/CLEAN/ORIGINAL_CAPTURE_SOURCE_906A3C3 \
   --motion /ABS/MOTION_0.npz --motion /ABS/MOTION_1.npz \
   --root-linear-limit-mps ROOT_LINEAR_LIMIT \
   --root-angular-limit-radps ROOT_ANGULAR_LIMIT \
+  --retry-authorization /ABS/CLEAN/AUTH_MAIN/configs/phase1_post_swing_teacher_capture_v3_attestor_retry_authorization_20260715.json \
+  --expected-retry-authorization-sha256 RETRY_AUTHORIZATION_FILE_SHA256 \
   --output-receipt /ABS/NEW/CAPTURE_DIR/teacher_receipt.json
 ```
 
@@ -164,6 +169,16 @@ queue claim 的 `content_sha256` 只覆盖 `json.dumps(..., separators=(",", ":"
 compact UTF-8 **content bytes**，不含末尾换行；claim/receipt 落盘时才在完整 JSON **document bytes** 后追加
 恰好一个 `\n`。两类 bytes 必须用不同 helper，不能再共享一个“总是加换行”的 canonicalizer。v3
 attempt-1 已证明混用会在任何 receipt 写入前假拒绝；修复合入前不得再次运行 attestor。
+
+attempt-2 的 running attestor 与 `--capture-source-checkout` 故意不是同一个 checkout。后者必须是原始
+v3 producer 的 clean `906a3c3...` source，只写入 receipt 的
+`capture_source={commit,clean,producer_source_sha256}`；running script 则从修复后 clean main 自己的 repo
+root 派生 `attestor_source={commit,clean,attestor_source_sha256}`。receipt attestation sub-schema=`2`，trainer
+hard-contract summary 保留两者和 retry authorization。`--retry-authorization` 必须是 main 中固定、tracked
+的 attempt-2 授权，逐字节绑定 v3 plan/capture/teacher/output 与唯一 attestor commit/SHA；命令行还必须给
+它的 exact file SHA。controller `status` 会把 capture source 对回 immutable v3 plan，并只从自身 clean
+checkout 读取这份 tracked authorization，再核对 receipt 的 attestor source 与 authorization；不得用任意
+post-fix clean HEAD 自签自验、不得用 post-fix HEAD 冒充 capture source，也不得交换两个对象。
 
 ## 3. 4096-environment 首 reset probe（尚未执行）
 
@@ -202,5 +217,5 @@ git diff --check
 
 2026-07-15 在可导入 Hydra 的本地环境，controller/attestor/teacher 原四文件门曾复现为 `41 passed`；
 加入 observation adapter、v2 result 负测与 content/document canonical 回归后的上述五文件命令复现为
-`76 passed`（另有一个既有 duplicate-ZIP warning），其中 attestor 专项为 `6 passed`。这仍只是 host
+`95 passed`（另有一个既有 duplicate-ZIP warning），其中 attestor 专项为 `11 passed`。这仍只是 host
 source gate，不能替代 v3 receipt attestation 或首 reset probe。
