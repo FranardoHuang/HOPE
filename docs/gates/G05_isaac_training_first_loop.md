@@ -2580,7 +2580,8 @@ FIRST_ITER 从 binding 复核 `/proc` PID=PGID/starttime/cmdline，等到真实 
 自然退出、只打印 resume/3500 或 PID reuse 都只写 exact identity 处置证据；wrapper 不发 signal、不自动 replay。
 首个 checkpoint 的 lineage=0 仍由专用 milestone receipt fail-closed。最终只读审计中，七条后代均从
 `model_3500` 完整恢复并在 `3501` 首次观察到真实训练迭代；exact PID 为
-`426506/427190/428347/431061/431910/432838/433601`，全部 fatal0。前两条已产生
-`model_3700`，均通过 filename=embedded、74 个浮点 tensor / 1,762,715 元素全 finite、schema-3 hard
-contract、checkpoint↔claim↔binding 与 `lineage_exact=0`。这关闭首迭代和首个 `+200` checkpoint 的
-provenance 门，但没有给出行为排序、正式因果结论或 vendor MuJoCo 结果。
+`426506/427190/428347/431061/431910/432838/433601`，全部 live、fatal0。七个 `model_3700` 均通过
+stable load、filename=embedded `3700`、74 个浮点 tensor / 1,762,715 元素全 finite（nonfinite `0`）、
+schema-3 hard contract、checkpoint↔hard/claim/binding 与 `lineage_exact=0`。PID `426506/427190` 已出现
+`model_4000`，但本轮未审其内容。七条继续到 `+500`；当前证据只关闭首迭代和首个 `+200` checkpoint 的
+provenance 门，没有给出行为赢家、正式因果结论或 vendor MuJoCo 结果，G05 保持 `Partial`。
