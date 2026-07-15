@@ -35,10 +35,10 @@ import numpy as np
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-PLAN_ID = "motion-franco-backhand-loop-b-table-net-clearance-20260715-v3"
+PLAN_ID = "motion-franco-backhand-loop-b-table-net-clearance-20260715-v4"
 PLAN_STATUS = "preregistered_source_gate_pass_runtime_audit_not_run"
 ASSET_ID = "franco_backhand_loop_b"
-CERTIFICATE_STATUS = "complete_cpu_dense_table_net_clearance_pass_dynamics_blocked"
+CERTIFICATE_STATUS = "complete_cpu_dense_table_net_clearance_v4_pass_dynamics_blocked"
 L1_CERTIFICATE_STATUS = "complete_cpu_vendor_l1_safety_pass_downstream_blocked"
 L1_PLAN_PATH = REPO_ROOT / "configs/motion_backhand_loop_b_vendor_l1_safety_prereg_20260715.json"
 L1_VALIDATOR_PATH = REPO_ROOT / "scripts/audit_motion_schema2_vendor_l1_safety.py"
@@ -817,9 +817,20 @@ def _expected_audit_contract() -> dict[str, Any]:
         "reporting_clearance_bisection_tolerance_m": 0.000001,
         "reporting_clearance_cap_m": 0.1,
         "distance_saturation_predicate_epsilon_m": DISTANCE_SATURATION_EPSILON_M,
+        "reporting_cap_saturated_certified_lower_bound": (
+            "max(0,reporting_clearance_cap_m-distance_saturation_predicate_epsilon_m)"
+        ),
+        "reporting_cap_saturated_null_semantics": (
+            "when every pair is reporting-cap saturated midpoint/pair/source-time are null "
+            "and saturation flag is true"
+        ),
         "hard_threshold_predicate": (
-            "fail iff local_dependency_free_geom_is_far_exact_MuJoCo_saturation_predicate_"
-            "at_0.005m_is_false"
+            "fail iff finite_mj_geomDistance_at_distmax_0.005m_is_strictly_below_0.005m_"
+            "or_nonfinite; no_epsilon_relaxation"
+        ),
+        "warning_threshold_predicate": (
+            "warn iff finite_mj_geomDistance_at_distmax_0.02m_is_strictly_below_0.02m_"
+            "or_nonfinite; no_epsilon_relaxation"
         ),
         "danger_propagation": (
             "any robot-obstacle dense sample below 5mm fails the whole asset and marks both "
@@ -851,7 +862,8 @@ def validate_plan(plan_path: Path, expected_sha256: str) -> tuple[dict[str, Any]
             "schema_version", "plan_id", "status", "human_owner", "executor", "scope",
             "asset_id", "validator", "frozen_vendor_l1", "exact_runtime_input", "a3_model",
             "frame_sources", "frame_contract", "obstacle_geometry", "audit_contract",
-            "output_contract", "authorization", "explicit_non_claims", "next_gate",
+            "rejected_prior_certificate", "output_contract", "authorization",
+            "explicit_non_claims", "next_gate",
         },
         "table/net preregistration",
     )
@@ -985,10 +997,33 @@ def validate_plan(plan_path: Path, expected_sha256: str) -> tuple[dict[str, Any]
     _snapshot_exact_mjcf_closure(plan)
     if plan["audit_contract"] != _expected_audit_contract():
         raise TableNetError("audit contract changed or weakened")
-    expected_output = {
-        "certificate_path": (
+    expected_rejected = {
+        "path": (
             "/workspace/codexschema/motion_video_intake_20260711/table_net_primary_v1/"
             "franco_backhand_loop_b_98e7b883b29d.table_net_clearance_certificate.json"
+        ),
+        "bytes": 14848,
+        "sha256": "39d6cc38941acfed2aa57e09add90660f946d16849ba3a8f02581fe646a79a19",
+        "source_commit": "b9b011bc101e98b597bb08ef729090c358302226",
+        "preregistration_sha256": (
+            "9c03e7b0e5adc2febb6dd8ccdb36273a7fc05020052ccefda57579c596dd273a"
+        ),
+        "validator_sha256": (
+            "66aa16b4999092fd7c17b7192edde107f7c6d7bcec67cbbdaa15979b91b7449d"
+        ),
+        "rejection_reason": (
+            "reporting-cap saturation proved only distance>=cap-epsilon but certificate "
+            "overclaimed the lower bound as cap"
+        ),
+        "accepted_as_table_net_complete": False,
+        "dynamics_authorized": False,
+    }
+    if plan["rejected_prior_certificate"] != expected_rejected:
+        raise TableNetError("rejected prior table/net certificate binding changed")
+    expected_output = {
+        "certificate_path": (
+            "/workspace/codexschema/motion_video_intake_20260711/table_net_primary_v4/"
+            "franco_backhand_loop_b_98e7b883b29d.table_net_clearance_v4_certificate.json"
         ),
         "must_be_absent": True,
         "parent_must_exist": True,
@@ -1828,15 +1863,34 @@ def _compile_augmented_model(
     return augmented_binding, obstacle_ids, evidence
 
 
-def geom_is_far(
+def geom_meets_clearance_threshold(
     mujoco_api: Any, model: Any, data: Any, g1: int, g2: int, threshold_m: float
 ) -> bool:
-    """Exact MuJoCo saturation predicate: true geometric distance is at least threshold."""
+    """Fail-closed hard/warning predicate with no epsilon relaxation."""
 
+    observed = float(mujoco_api.mj_geomDistance(model, data, g1, g2, threshold_m, None))
+    return math.isfinite(observed) and observed >= threshold_m
+
+
+def geom_reporting_bound_is_saturated(
+    mujoco_api: Any, model: Any, data: Any, g1: int, g2: int, threshold_m: float
+) -> bool:
+    """Reporting-only saturation predicate whose lower bound deducts the epsilon."""
+
+    observed = float(mujoco_api.mj_geomDistance(model, data, g1, g2, threshold_m, None))
     return (
-        float(mujoco_api.mj_geomDistance(model, data, g1, g2, threshold_m, None))
-        >= threshold_m - DISTANCE_SATURATION_EPSILON_M
+        math.isfinite(observed)
+        and observed >= threshold_m - DISTANCE_SATURATION_EPSILON_M
     )
+
+
+def reporting_cap_saturated_lower_bound(reporting_cap_m: float) -> float:
+    """Return the strongest lower bound proved by the saturated cap predicate."""
+
+    value = float(reporting_cap_m)
+    if not math.isfinite(value) or value <= 0.0:
+        raise TableNetError("reporting cap must be finite and positive")
+    return max(0.0, value - DISTANCE_SATURATION_EPSILON_M)
 
 
 def geom_clearance_bracket(
@@ -1856,17 +1910,17 @@ def geom_clearance_bracket(
         raise TableNetError("MuJoCo geom distance is non-finite")
     if d0 < 0.0:
         return d0, d0, d0, False
-    if geom_is_far(mujoco_api, model, data, g1, g2, distmax):
+    if geom_reporting_bound_is_saturated(mujoco_api, model, data, g1, g2, distmax):
         return (
             distmax,
-            max(0.0, distmax - DISTANCE_SATURATION_EPSILON_M),
+            reporting_cap_saturated_lower_bound(distmax),
             None,
             True,
         )
     lo, hi = 0.0, distmax
     while hi - lo > tol:
         mid = 0.5 * (lo + hi)
-        if geom_is_far(mujoco_api, model, data, g1, g2, mid):
+        if geom_reporting_bound_is_saturated(mujoco_api, model, data, g1, g2, mid):
             lo = mid
         else:
             hi = mid
@@ -1919,18 +1973,25 @@ def evaluate_robot_obstacle_pairs(
     racket_hard_pairs: list[list[str]] = []
     minimum_midpoint: float | None = None
     minimum_midpoint_pair: list[str] | None = None
-    minimum_lower_bound = reporting_cap_m
+    saturated_lower_bound = reporting_cap_saturated_lower_bound(reporting_cap_m)
+    minimum_lower_bound = saturated_lower_bound
     minimum_lower_bound_pair: list[str] | None = None
     for robot in robots:
         for obstacle_name, obstacle in obstacles.items():
             pair = [geom_name(robot), obstacle_name]
-            if not geom_is_far(mujoco_api, model, data, robot, obstacle, hard_threshold_m):
+            if not geom_meets_clearance_threshold(
+                mujoco_api, model, data, robot, obstacle, hard_threshold_m
+            ):
                 hard_pairs.append(pair)
                 if robot in rackets:
                     racket_hard_pairs.append(pair)
-            if not geom_is_far(mujoco_api, model, data, robot, obstacle, warning_threshold_m):
+            if not geom_meets_clearance_threshold(
+                mujoco_api, model, data, robot, obstacle, warning_threshold_m
+            ):
                 warning_pairs.append(pair)
-            if not geom_is_far(mujoco_api, model, data, robot, obstacle, reporting_cap_m):
+            if not geom_reporting_bound_is_saturated(
+                mujoco_api, model, data, robot, obstacle, reporting_cap_m
+            ):
                 midpoint, lower, _upper, _saturated = geom_clearance_bracket(
                     mujoco_api,
                     model,
@@ -1948,6 +2009,8 @@ def evaluate_robot_obstacle_pairs(
                 if lower < minimum_lower_bound:
                     minimum_lower_bound = lower
                     minimum_lower_bound_pair = pair
+                elif lower == minimum_lower_bound and minimum_lower_bound_pair is None:
+                    minimum_lower_bound_pair = pair
     return {
         "pair_count": len(robots) * len(obstacles),
         "hard_failure": bool(hard_pairs),
@@ -1960,6 +2023,10 @@ def evaluate_robot_obstacle_pairs(
         "minimum_clearance_lower_bound_m": minimum_lower_bound,
         "minimum_midpoint_pair": minimum_midpoint_pair,
         "minimum_lower_bound_pair": minimum_lower_bound_pair,
+        "minimum_lower_bound_is_reporting_cap_saturation": (
+            minimum_lower_bound_pair is None
+            and minimum_lower_bound == saturated_lower_bound
+        ),
         "reporting_cap_m": reporting_cap_m,
     }
 
@@ -2222,7 +2289,10 @@ def audit_runtime(plan: Mapping[str, Any]) -> dict[str, Any]:
     minimum_midpoint: float | None = None
     minimum_midpoint_pair: list[str] | None = None
     minimum_midpoint_source_time: float | None = None
-    minimum_lower_bound = audit_contract["reporting_clearance_cap_m"]
+    saturated_lower_bound = reporting_cap_saturated_lower_bound(
+        audit_contract["reporting_clearance_cap_m"]
+    )
+    minimum_lower_bound = saturated_lower_bound
     minimum_lower_bound_pair: list[str] | None = None
     minimum_lower_bound_source_time: float | None = None
     warning_events: list[dict[str, Any]] = []
@@ -2256,6 +2326,13 @@ def audit_runtime(plan: Mapping[str, Any]) -> dict[str, Any]:
         lower = float(result["minimum_clearance_lower_bound_m"])
         if lower < minimum_lower_bound:
             minimum_lower_bound = lower
+            minimum_lower_bound_pair = result["minimum_lower_bound_pair"]
+            minimum_lower_bound_source_time = float(source_time[dense_frame])
+        elif (
+            lower == minimum_lower_bound
+            and minimum_lower_bound_pair is None
+            and result["minimum_lower_bound_pair"] is not None
+        ):
             minimum_lower_bound_pair = result["minimum_lower_bound_pair"]
             minimum_lower_bound_source_time = float(source_time[dense_frame])
         if result["hard_failure"] and len(hard_events) < 512:
@@ -2325,6 +2402,9 @@ def audit_runtime(plan: Mapping[str, Any]) -> dict[str, Any]:
                 "hard_threshold_m": audit_contract["hard_clearance_m"],
                 "warning_threshold_m": audit_contract["warning_clearance_m"],
                 "hard_threshold_predicate": audit_contract["hard_threshold_predicate"],
+                "warning_threshold_predicate": audit_contract[
+                    "warning_threshold_predicate"
+                ],
                 "distance_saturation_predicate_epsilon_m": audit_contract[
                     "distance_saturation_predicate_epsilon_m"
                 ],
@@ -2332,6 +2412,10 @@ def audit_runtime(plan: Mapping[str, Any]) -> dict[str, Any]:
                 "warning_dense_samples": int(np.count_nonzero(warnings)),
                 "minimum_clearance_midpoint_estimate_m": minimum_midpoint,
                 "minimum_clearance_certified_lower_bound_m": minimum_lower_bound,
+                "minimum_clearance_certified_lower_bound_is_reporting_cap_saturation": (
+                    minimum_lower_bound_pair is None
+                    and minimum_lower_bound == saturated_lower_bound
+                ),
                 "minimum_midpoint_pair": minimum_midpoint_pair,
                 "minimum_midpoint_source_time_frames": minimum_midpoint_source_time,
                 "minimum_lower_bound_pair": minimum_lower_bound_pair,

@@ -585,7 +585,7 @@ B 的下一道整轨桌网余隙门现已完成 source/static 预注册，并做
 schema-2/MJCF 世界的无旋转纯平移 `(+0.5,+0.7625,+0.76)`；因此桌板、网和两根网柱在同一冻结 tracking
 桌位中检查，而不是从空挥视频背景猜 capture extrinsic。validator 把四个 world-fixed box 追加到 canonical
 worldbody，在内存中用 exact 74-file asset map 编译；每个 `1201 @ 400 Hz` 有限样本检查 `37×4=148` 个 pair，球拍/拍柄另做
-汇总但不从全机器人门排除。`<5 mm` 是 exact saturation-predicate hard fail，不能由其他帧/reward 补偿；
+汇总但不从全机器人门排除。`<5 mm` 是无 epsilon 的 finite threshold hard fail，不能由其他帧/reward 补偿；
 有限密扫仍不是数学连续时间证明，且没有动力学、训练或真机含义。首次 source 版本被红队证明存在
 certificate/NPZ/MJCF 的 check→reopen 和输出 parent path-swap 窗口，因此明确 NO-MERGE；修复版把每个
 runtime 输入绑定为 `O_NOFOLLOW` fd 的单次 bytes snapshot，canonical XML + 74 mesh 从 pinned model-root
@@ -608,7 +608,17 @@ obstacle=`1..4` 和 robot 精确 `+4`；同时逐项守住 robot 相对顺序/�
 reader 却只忽略 blank，误把注释算成第 32 个关节。90-byte log SHA-256 `5c9a5940...f92d`，certificate
 absent；这不是 NPZ/order/bijection 漂移。schema-v3 逐字复制 upstream comment 过滤语义，仍拒绝额外未标注
 metadata 与 duplicate name；production-shaped focused `39 passed`、完整 B lineage chain `140 passed`、
-source/static PASS。合入后的 runtime 重跑、certificate 与动作晋级均未发生，所以 G08 保持 Partial。
+source/static PASS。v3 随后在 clean `main@b9b011b` 发布了 hard/warning=`0/0` 的旧 certificate
+`39d6cc38...79a19`，但独立 exact-semantics review 将其拒绝：reporting-cap predicate 只证明
+`distance>=0.1-1e-12`，旧 aggregator 却在所有 pair saturated 时把默认 `0.1` 冒充 certified lower
+bound。hard/warning 结论不变，但旧 `table_net_complete/dynamics_authorized` 不接受。schema-v4 将 pair/
+全轨 saturated 初值改为 `0.099999999999`，保持 midpoint/pair/time=null 并显式标 saturation；旧 cert
+path/bytes/SHA machine-bound 为 rejected，新输出使用独立 `table_net_primary_v4` namespace/name。
+初版 v4 commit `7241157` 又在合入/运行前被红队判 NO-MERGE：hard/warning 仍错误复用 reporting
+`threshold-1e-12` predicate，可接受 5 mm/20 mm 各自门槛下方半个 epsilon。当前 v4 把安全门改为
+finite `distance>=threshold`、non-finite fail closed，只让 epsilon 留在 reporting cap/bisection；5 mm 与
+20 mm 的 nextafter-below/half-epsilon-below 反例均闭环。focused `47 passed`、完整 B chain `148 passed`、
+source/static PASS；v4 runtime/certificate 尚未发生，dynamics 继续 unauthorized，所以 G08 保持 Partial。
 见[桌网实验卷宗](../experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-TABLE-NET.md)和
 [操作文档](../operations/run_motion_backhand_loop_b_table_net_clearance.md)。
 
