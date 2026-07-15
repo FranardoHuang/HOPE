@@ -62,11 +62,19 @@ vendor MuJoCo 通过证据。
    job1/job2，不必为此停现役。其余四组合只在按独立证据精确停止四条弱臂后逐圈补入；保留 GPU0 的
    V1-only 和 GPU1 的 foot-`-0.6`，最终仍为每卡四条。GPU2 的后续候选不塞进本 v2。
 5. launch 成功前必须在日志同时看到显式 hard-contract mismatch、从 snapshot model-3500 恢复到
-   iteration 3500 和 `optimizer=resumed`；新 hard contract 还必须逐值包含该行 qdot/conditional-face
-   权重。任一证明失败都不写 `phase=first_iter`，而写 exact PID/PGID 的人工处置记录，不自动发信号或重试。
-6. `+200/+500/+1000` 看是否启动、finite、机制是否真的激活和是否明显崩坏；只在真实击球后才有意义的
+   iteration 3500 和 `optimizer=resumed`；在同一 GPU launch lock 内、调用 trainer 前，还要把该 job 的
+   snapshot checkpoint/hard/claim/binding 四个 file SHA 与 activated queue 再对拍，关闭 verify SSH 到 load
+   之间的漂移窗口。新 hard contract 必须逐值包含该行 qdot/conditional-face 权重。
+6. `phase=first_iter` 还要求 run binding 的 PID=PGID/starttime/cmdline 在 `/proc` 仍是同一活进程，并且日志
+   已出现第一条真实 `Learning iteration > 3500`；只有 RESUMED 行、3500 起始打印、自然退出或 PID reuse
+   都失败。失败只写 exact identity 人工处置记录，不自动发信号或重试。
+7. `+200/+500/+1000` 看是否启动、finite、机制是否真的激活和是否明显崩坏；只在真实击球后才有意义的
    稀疏回台指标，样本不足时继续。`+2000/+4000` 才用于次日候选排序。
-7. 任一 namespace 失败都保留，不自动 replay；本批不授权第二 seed、正式晋级、真机或 broad process signal。
+8. 任一 namespace 失败都保留，不自动 replay；本批不授权第二 seed、正式晋级、真机或 broad process signal。
+
+历史母本的完整 recipe 仍以其 canonical self-bound queue claim + run binding 账本为信任边界；本轮会反向验证
+账本、argv 与 checkpoint lineage，但没有另造一份独立的旧 recipe 真源。这是已知边界，不影响本轮 v3 的
+snapshot/load 时序修复。
 
 ## 运行表
 
@@ -99,7 +107,7 @@ python3 scripts/run_phase1_demo_hotstart_queue.py \
 
 两条 parent 命令默认都只是 dry-run；正式执行 inspect 使用独立确认词。正式 attest 会先再跑一遍只读 inspect，
 它通过后才消费 v2 snapshot namespace。parent receipt、七类 SHA 的显式回填激活和 GPU release 完成前，
-`fill` 会 fail closed。专用与相邻 generic queue host 回归为 `65 passed`；本页仍没有 Pod 行为结果。
+`fill` 会 fail closed。专用与相邻 generic queue host 回归为 `68 passed`；本页仍没有 Pod 行为结果。
 
 ## 决定
 

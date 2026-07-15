@@ -2496,11 +2496,14 @@ binding `O_EXCL` 复制到只读 fixed snapshots，并只对 snapshot 重验、�
 随后人工把 receipt 及 checkpoint/hard/claim/binding SHA 回填并显式激活。六个旧 scaleout 的 model500
 证据都保全且 GPU0/GPU1 occupancy 各 `<=3` 时，v2 可先用第 4 槽发前两条，不要求先停；其余四条只在
 精确停止四个弱臂后补入，并保留 GPU0 V1-only/GPU1 foot-`-0.6`，最终每卡四条。focused host 回归
-`65 passed`，但没有 parent receipt、
+`68 passed`，但没有 parent receipt、
 Pod 启动或行为结果，故 G05 保持 `Partial`。详见
 [实验卷宗](../experiments/2026-07/EXP-P1-DEMO-HOTSTART-PORTFOLIO.md)。
 
 每条 launch 的 `phase=first_iter` 现在还要求日志同时证明 explicit hard-contract mismatch、从 snapshot
 model-3500 恢复到 iteration 3500 和 `optimizer=resumed`，并从新 hard contract 核对本行 qdot/conditional-face
-权重。失败只写含 exact PID/PGID 的人工处置证据；wrapper 不发 signal、不自动 replay。首个 checkpoint 的
+权重。v3 还在同一 GPU lock、trainer 调用前重算 checkpoint/hard/claim/binding 四个 snapshot file SHA；
+FIRST_ITER 从 binding 复核 `/proc` PID=PGID/starttime/cmdline，等到真实 `Learning iteration >3500` 才成功。
+自然退出、只打印 resume/3500 或 PID reuse 都只写 exact identity 处置证据；wrapper 不发 signal、不自动 replay。
+首个 checkpoint 的
 lineage=0 仍由专用 milestone receipt fail-closed，未运行前不能把该源码门写成训练通过。

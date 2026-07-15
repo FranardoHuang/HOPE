@@ -446,8 +446,15 @@ foot-`-0.6`，最终各四条。不抢占、不 signal；GPU2 后续候选不进
 hard/原始 claim/binding SHA、activation receipt、完整 argv 与 `formal_exact_eligible=false`。source 中两个
 负责 strict resume/hard-contract 的文件还会按固定 SHA 验证。launcher 只有在 run log 包含 explicit mismatch、
 snapshot 路径、iteration 3500、`optimizer=resumed`，且新 hard contract 的 qdot/conditional-face 值与该行相同
-后才写 `phase=first_iter`；否则保留 exact PID/PGID 人工处置 JSON，不做任何 signal。绝对 checkpoint 用专用
+后才继续。就在同一个 GPU fd lock 内且 trainer 前，四个 parent snapshot file SHA 还会再与 activated queue
+对拍；任何漂移都在创建 run_dir/调用 trainer 前退出。随后 FIRST_ITER 持续核对 binding 所记
+PID=PGID/starttime/cmdline 与 `/proc`，必须看到 `Learning iteration >3500` 且进程仍是同一活进程才写
+`phase=first_iter`；自然退出、stale/reused PID 或只有 resume 行都保留 exact identity 人工处置 JSON，不做任何
+signal。绝对 checkpoint 用专用
 `attest-milestone`，合法值仅 `3700/4000/4500/5500/7500`；source runtime receipt 必须报告 lineage exact=0。
+
+旧母本完整 recipe 的边界是原 canonical self-bound queue claim/run binding；v3 会重验其 argv/source/run/lineage，
+但不声称用另一份独立真源重新证明历史 recipe。
 
 main 已有独立 per-source+Pod+GPU 的 `1 env × 2 updates` boot-warmup 和 content-bearing 日志默认 180 秒
 stale watchdog；P1 不改变其 source-pinned/exact-PGID 语义，也不会让 warmup 继承科学 binding path。
