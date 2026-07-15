@@ -422,6 +422,55 @@ python3 scripts/run_lean_training_queue.py \
 同一 recipe 最多一个 fresh retry；第二次同 phase 失败转根因线。稀疏回球结果在 eligible opportunity 不足时继续到下一正式
 milestone，不得用零收入早停。
 
+## Demo-only model-3500 严格续训（2026-07-16）
+
+generic lean queue 继续只接受 fresh run。为了次日演示而允许显式合同变化的续训只走专用入口；六条后代
+永久 formal-ineligible，不得用 generic token 发射：
+
+```bash
+python3 scripts/run_phase1_demo_hotstart_queue.py \
+  --queue configs/phase1_pod2_demo_hotstart_portfolio_20260716.yaml plan
+
+python3 scripts/run_phase1_demo_hotstart_queue.py \
+  --queue configs/phase1_pod2_demo_hotstart_portfolio_20260716.yaml parent-inspect
+
+python3 scripts/run_phase1_demo_hotstart_queue.py \
+  --queue configs/phase1_pod2_demo_hotstart_portfolio_20260716.yaml parent-attest
+```
+
+两条命令默认都是 dry-run。先用确认词 `SIM_ONLY_INSPECT_DEMO_WARMSTART_PARENTS` 执行只读 inspect；它读取
+三个 live model-3500、相邻 hard contract、原始 queue claim 和 run binding，验证 canonical content SHA、完整
+argv/source/run/process、actor+critic、非空 optimizer `state/param_groups`、finite、schema-3 及双 SHA lineage，
+但不创建 snapshot/receipt。随后 `parent-attest` 用确认词
+`SIM_ONLY_ATTEST_DEMO_WARMSTART_PARENTS`；它会自动再做一遍 inspect，只有通过才以 `O_EXCL` 写固定只读
+`parent_snapshots_v2` 四件套并从 snapshot bytes 复核、写 v2 receipt。旧 receipt 路径永远不接受，不自动激活
+或重试。operator 必须把 receipt file SHA、三个 checkpoint/hard/claim-file/claim-content/binding-file/
+binding-content/launch-claim SHA 回填 YAML，再把 activation state/六行 status 作为一次受审变更切到
+activated/ready。未回填时 `fill` 恒 fail closed。
+
+激活后先 dry-run；真实发射使用本专用 token：
+
+```bash
+python3 scripts/run_phase1_demo_hotstart_queue.py \
+  --queue configs/phase1_pod2_demo_hotstart_portfolio_20260716.yaml \
+  fill --count 6
+
+python3 scripts/run_phase1_demo_hotstart_queue.py \
+  --queue configs/phase1_pod2_demo_hotstart_portfolio_20260716.yaml \
+  fill --count 6 --execute --confirm SIM_ONLY_LAUNCH_ONE_DEMO_WARMSTART_JOB
+```
+
+execute 会只从 fixed parent snapshots 重算三个 parent 并要求与 immutable receipt 逐字节一致，再读取 Pod2
+现场容量；live 母本后续变化不会产生 TOCTOU。job 只硬绑
+GPU0/GPU1、按 0→1 逐圈。六个旧 model500 都保全且两卡 occupancy 各 `<=3` 时，先把 job1/job2 放入
+各卡第 4 槽；其余四条等待四个弱臂按其证据和 exact PGID 退出后再补，保留 GPU0 V1-only 与 GPU1
+foot-`-0.6`，最终各四条。不抢占、不 signal；GPU2 后续候选不进入本 v2。claim 同时绑定 parent checkpoint/
+hard/原始 claim/binding SHA、activation receipt、完整 argv 与 `formal_exact_eligible=false`。source 中两个
+负责 strict resume/hard-contract 的文件还会按固定 SHA 验证。launcher 只有在 run log 包含 explicit mismatch、
+snapshot 路径、iteration 3500、`optimizer=resumed`，且新 hard contract 的 qdot/conditional-face 值与该行相同
+后才写 `phase=first_iter`；否则保留 exact PID/PGID 人工处置 JSON，不做任何 signal。绝对 checkpoint 用专用
+`attest-milestone`，合法值仅 `3700/4000/4500/5500/7500`；source runtime receipt 必须报告 lineage exact=0。
+
 main 已有独立 per-source+Pod+GPU 的 `1 env × 2 updates` boot-warmup 和 content-bearing 日志默认 180 秒
 stale watchdog；P1 不改变其 source-pinned/exact-PGID 语义，也不会让 warmup 继承科学 binding path。
 新反例证明 1-env 成功只可当 cache/import probe：同 source/GPU 的正式 4096-env control 仍可能在
