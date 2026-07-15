@@ -1456,6 +1456,11 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 hasattr(R, "joint_velocity_limit_hinge"),
                 "rewards.joint_velocity_limit_hinge",
             )
+            _require(
+                hasattr(R, "joint_velocity_limit_hinge_probe")
+                and R.joint_velocity_limit_hinge_probe is not None,
+                "rewards.joint_velocity_limit_hinge_probe",
+            )
             _qdot_term = R.joint_velocity_limit_hinge
             if _qdot_weight is not None:
                 if isinstance(_qdot_weight, bool):
@@ -1500,6 +1505,21 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                     "rewards.joint_velocity_limit_hinge.params.margin="
                     f"{_qdot_margin_value}"
                 )
+            _qdot_probe = R.joint_velocity_limit_hinge_probe
+            _qdot_probe.weight = 1.0
+            _qdot_probe.params.update(
+                {
+                    "asset_cfg": _qdot_term.params["asset_cfg"],
+                    "margin": float(_qdot_term.params["margin"]),
+                    "expected_joint_count": int(
+                        _qdot_term.params["expected_joint_count"]
+                    ),
+                }
+            )
+            applied.append(
+                "rewards.joint_velocity_limit_hinge_probe="
+                f"(margin={float(_qdot_term.params['margin'])},weight=1.0)"
+            )
         _foot_hold_gate = _get(rw, "foot_orientation_hold_gate")
         if _foot_hold_gate is not None:
             _require(hasattr(R, "foot_orientation"), "rewards.foot_orientation")

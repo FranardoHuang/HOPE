@@ -825,6 +825,18 @@ class HOPEVirtualBallRewardsCfg(HOPEDeployParityRewardsCfg):
             "expected_joint_count": 31,
         },
     )
+    # Measurement-only twin of the hinge.  Hydra raises this term to weight 1.0 whenever a qdot
+    # arm (including weight-zero control) explicitly binds the hinge setting.  Its function returns
+    # exact zeros, so it observes qdot/excess eligibility without changing the task reward.
+    joint_velocity_limit_hinge_probe = RewTerm(
+        func=mdp.joint_velocity_limit_hinge_probe,
+        weight=0.0,
+        params={
+            "asset_cfg": SceneEntityCfg("robot"),
+            "margin": 0.85,
+            "expected_joint_count": 31,
+        },
+    )
 
     racket_velocity = RewTerm(
         func=mdp.racket_velocity_tracking_exp,

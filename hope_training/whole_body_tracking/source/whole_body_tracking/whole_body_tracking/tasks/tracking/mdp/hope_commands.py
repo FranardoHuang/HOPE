@@ -374,6 +374,29 @@ class RacketTargetCommand(CommandTerm):
         # sample-weighted EMA as the global accumulators above, but each clip's exact-strike samples are
         # accumulated separately (selected by the motion command's clip_id). Populated in multiseg only.
         self._clip_names = {0: "forehand", 1: "backhand"}
+        # Non-decayed, per-PPO-update eligibility ledger for sparse virtual-ball outcomes.  The
+        # existing virtual_* rates are EMAs and deliberately suppress values before their
+        # denominators warm up; they therefore cannot tell a milestone classifier whether a zero
+        # means "failed" or "the reward was never eligible".  These integer counters book the
+        # exact same masks as _vb_book_strike_step, globally and per action family, and are consumed
+        # exactly once by MotionOnPolicyRunner.  They do not enter observations, rewards, resets or
+        # sampling.
+        _sparse_names = (
+            "strike_opportunity_count",
+            "virtual_capture_count",
+            "virtual_net_clear_count",
+            "virtual_landing_valid_count",
+            "virtual_legal_return_count",
+        )
+        self._sparse_reward_eligibility_counters = {
+            name: torch.zeros((), dtype=torch.long, device=self.device)
+            for name in _sparse_names
+        }
+        for _family in self._clip_names.values():
+            for _name in _sparse_names:
+                self._sparse_reward_eligibility_counters[f"{_name}_{_family}"] = torch.zeros(
+                    (), dtype=torch.long, device=self.device
+                )
         self._exact_n_acc_c = {c: 0.0 for c in self._clip_names}
         self._exact_pass_pos_acc_c = {c: 0.0 for c in self._clip_names}
         self._exact_pass_vel_acc_c = {c: 0.0 for c in self._clip_names}
@@ -2777,6 +2800,13 @@ class RacketTargetCommand(CommandTerm):
         self._vb_net_acc = decay * self._vb_net_acc + float((gate & net_clear).sum())
         self._vb_land_valid_acc = decay * self._vb_land_valid_acc + float((gate & land_valid).sum())
         self._vb_inb_acc = decay * self._vb_inb_acc + float(legal.sum())
+        self._book_sparse_reward_eligibility(
+            exact_strike=exact_strike,
+            capture=gate,
+            net_clear=gate & net_clear,
+            landing_valid=gate & land_valid,
+            legal_return=legal,
+        )
         # Rally latch with a wrap-boundary guard: on the step a clip WRAPS, the motion term has
         # already advanced to the NEW clip before this metrics pass, so a strike frame sitting at
         # the swing's entry (strike phase ~0, or rsi_skip_settle_frames landing on the strike
@@ -2792,6 +2822,52 @@ class RacketTargetCommand(CommandTerm):
         else:
             self._rally_returned = self._rally_returned | (legal & ~wrapped)
             self._rally_pending_return = self._rally_pending_return | (legal & wrapped)
+
+    def _book_sparse_reward_eligibility(
+        self,
+        *,
+        exact_strike: torch.Tensor,
+        capture: torch.Tensor,
+        net_clear: torch.Tensor,
+        landing_valid: torch.Tensor,
+        legal_return: torch.Tensor,
+    ) -> None:
+        """Book exact, non-decayed sparse-reward counters for one simulator step."""
+
+        masks = {
+            "strike_opportunity_count": exact_strike,
+            "virtual_capture_count": capture,
+            "virtual_net_clear_count": net_clear,
+            "virtual_landing_valid_count": landing_valid,
+            "virtual_legal_return_count": legal_return,
+        }
+        ledger = self._sparse_reward_eligibility_counters
+        for name, mask in masks.items():
+            ledger[name].add_(mask.detach().sum(dtype=torch.long))
+
+        motion = self._motion()
+        if getattr(motion, "_multiseg", False):
+            clip_id = motion.clip_id
+            for clip, family in self._clip_names.items():
+                selected = clip_id == clip
+                for name, mask in masks.items():
+                    ledger[f"{name}_{family}"].add_(
+                        (mask.detach() & selected).sum(dtype=torch.long)
+                    )
+
+    def consume_sparse_reward_eligibility_counters(self) -> dict[str, torch.Tensor]:
+        """Snapshot and reset one PPO update's sparse outcome ledger exactly once."""
+
+        snapshot = {
+            name: value.detach().clone()
+            for name, value in self._sparse_reward_eligibility_counters.items()
+        }
+        # Reward/command updates can allocate these under inference mode.  Reset under the same
+        # mode so the logger never mutates an inference tensor from normal mode.
+        with torch.inference_mode():
+            for value in self._sparse_reward_eligibility_counters.values():
+                value.zero_()
+        return snapshot
 
     def _rally_legacy_values(self) -> tuple[float, dict]:
         """OLD mixed-ledger rally readout (transition-period *_legacy curves + unit tests).

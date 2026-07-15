@@ -543,16 +543,25 @@ def base_decel_tracking(
     return reward
 
 
-def joint_velocity_limit_hinge(
+_QDOT_ACTIVATION_ATTR = "_hope_qdot_hinge_activation_counters"
+_QDOT_OBSERVED_STEP_ATTR = "_hope_qdot_hinge_observed_step"
+_QDOT_ACTIVE_STEP_ATTR = "_hope_qdot_hinge_active_step"
+_QDOT_OBSERVED_COUNT = "observed_sample_count"
+_QDOT_ACTIVE_COUNT = "hinge_active_sample_count"
+_QDOT_EXCESS_COUNT = "excess_sample_count"
+_QDOT_EXCESS_SQUARE_SUM = "normalized_excess_square_sum"
+
+
+def _joint_velocity_limit_hinge_values(
     env: ManagerBasedRLEnv,
     asset_cfg,
     margin: float = 0.85,
     expected_joint_count: int = 31,
-) -> torch.Tensor:
-    """Penalize only the normalized joint-speed tail near the articulation limits.
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return per-env hinge value and the per-env above-margin mask.
 
-    The returned value is non-negative; the :class:`RewardTermCfg` weight must therefore be
-    non-positive.  Unlike ``action_rate_l2``, this term measures the robot's *realized* joint
+    The first returned tensor is non-negative; the :class:`RewardTermCfg` weight must therefore
+    be non-positive.  Unlike ``action_rate_l2``, this term measures the robot's *realized* joint
     velocity against the actual articulation limits, in the exact runtime articulation order::
 
         mean_j(relu(abs(qd_j) / qd_limit_j - margin) ** 2)
@@ -648,7 +657,112 @@ def joint_velocity_limit_hinge(
         torch._assert_async(limits_valid)
 
     normalized_excess = torch.relu(torch.abs(joint_vel) / limits - margin)
-    return torch.mean(torch.square(normalized_excess), dim=-1)
+    squared_mean = torch.mean(torch.square(normalized_excess), dim=-1)
+    return squared_mean, torch.any(normalized_excess > 0.0, dim=-1)
+
+
+def _qdot_activation_counter_state(
+    env: ManagerBasedRLEnv, template: torch.Tensor
+) -> dict[str, torch.Tensor]:
+    state = getattr(env, _QDOT_ACTIVATION_ATTR, None)
+    if state is None:
+        state = {
+            _QDOT_OBSERVED_COUNT: torch.zeros(
+                (), dtype=torch.long, device=template.device
+            ),
+            _QDOT_ACTIVE_COUNT: torch.zeros(
+                (), dtype=torch.long, device=template.device
+            ),
+            _QDOT_EXCESS_COUNT: torch.zeros(
+                (), dtype=torch.long, device=template.device
+            ),
+            _QDOT_EXCESS_SQUARE_SUM: torch.zeros(
+                (), dtype=template.dtype, device=template.device
+            ),
+        }
+        setattr(env, _QDOT_ACTIVATION_ATTR, state)
+    return state
+
+
+def _record_joint_velocity_limit_hinge_activation(
+    env: ManagerBasedRLEnv,
+    values: torch.Tensor,
+    excess_mask: torch.Tensor,
+    *,
+    hinge_active: bool,
+) -> None:
+    """Book one simulator step, deduplicating probe and real RewardTerm calls."""
+
+    token = getattr(env, "common_step_counter", None)
+    token = token if type(token) is int else None
+    state = _qdot_activation_counter_state(env, values)
+    if token is None or getattr(env, _QDOT_OBSERVED_STEP_ATTR, None) != token:
+        state[_QDOT_OBSERVED_COUNT].add_(values.numel())
+        state[_QDOT_EXCESS_COUNT].add_(
+            excess_mask.detach().sum(dtype=torch.long)
+        )
+        state[_QDOT_EXCESS_SQUARE_SUM].add_(values.detach().sum())
+        if token is not None:
+            setattr(env, _QDOT_OBSERVED_STEP_ATTR, token)
+    if hinge_active and (
+        token is None or getattr(env, _QDOT_ACTIVE_STEP_ATTR, None) != token
+    ):
+        state[_QDOT_ACTIVE_COUNT].add_(values.numel())
+        if token is not None:
+            setattr(env, _QDOT_ACTIVE_STEP_ATTR, token)
+
+
+def joint_velocity_limit_hinge_probe(
+    env: ManagerBasedRLEnv,
+    asset_cfg,
+    margin: float = 0.85,
+    expected_joint_count: int = 31,
+) -> torch.Tensor:
+    """Observe realized qdot without changing the scalar reward.
+
+    A nonzero manager weight is safe because this function returns exact zeros.  The probe and the
+    actual hinge share the validation/math helper and a simulator-step token, so treatment samples
+    are observed once while hinge-active samples are booked separately.
+    """
+
+    values, excess_mask = _joint_velocity_limit_hinge_values(
+        env, asset_cfg, margin, expected_joint_count
+    )
+    _record_joint_velocity_limit_hinge_activation(
+        env, values, excess_mask, hinge_active=False
+    )
+    return torch.zeros_like(values)
+
+
+def joint_velocity_limit_hinge(
+    env: ManagerBasedRLEnv,
+    asset_cfg,
+    margin: float = 0.85,
+    expected_joint_count: int = 31,
+) -> torch.Tensor:
+    """Penalize and attest the normalized joint-speed tail near articulation limits."""
+
+    values, excess_mask = _joint_velocity_limit_hinge_values(
+        env, asset_cfg, margin, expected_joint_count
+    )
+    _record_joint_velocity_limit_hinge_activation(
+        env, values, excess_mask, hinge_active=True
+    )
+    return values
+
+
+def consume_joint_velocity_limit_hinge_activation_counters(
+    env: ManagerBasedRLEnv,
+) -> dict[str, torch.Tensor]:
+    """Snapshot and reset one PPO update's qdot observer/activation ledger."""
+
+    template = env.scene["robot"].data.joint_vel
+    state = _qdot_activation_counter_state(env, template)
+    snapshot = {name: value.detach().clone() for name, value in state.items()}
+    with torch.inference_mode():
+        for value in state.values():
+            value.zero_()
+    return snapshot
 
 
 def racket_strike_success(

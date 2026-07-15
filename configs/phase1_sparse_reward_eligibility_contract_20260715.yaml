@@ -1,0 +1,21 @@
+schema_version: 1
+contract_id: phase1_sparse_reward_eligibility_v1_20260715
+milestones: [200, 500, 1000, 2000, 3000, 6000, 10000]
+thresholds:
+  minimum_strike_opportunities_total: 100
+  minimum_strike_opportunities_per_action: 50
+  # One capture only proves that hit-conditioned channels were reached.  It does
+  # not make their rates statistically decisive; the external immutable q50
+  # comparison still owns the eventual winner decision.
+  minimum_virtual_captures_per_action: 1
+  consecutive_eligible_milestones: 2
+runs:
+  p1_long_no_replay_control_seed3_eligibility_successor:
+    required_action_families: [forehand, backhand]
+    qdot_hinge_expected_active: false
+  p1_long_no_replay_qdot_w5_seed3_eligibility_successor:
+    required_action_families: [forehand, backhand]
+    qdot_hinge_expected_active: true
+  p1_long_no_replay_v1v2_seed3_eligibility_successor:
+    required_action_families: [forehand, backhand]
+    qdot_hinge_expected_active: false
