@@ -71,7 +71,8 @@ Pod2 在 2026-07-15 15:27 UTC 的只读快照中，GPU0/GPU1 都没有 compute P
 | --- | --- | --- |
 | 只放开手腕 `phase1_long_no_replay_v1_only_seed3_20260715` | ready | 待 exact PID/PGID、首迭代与 checkpoint receipt |
 | `qdot=-1` `phase1_long_no_replay_qdot_w1_seed3_20260715` | ready | 同上 |
-| 只降低击球窗模仿 `phase1_long_no_replay_v2_only_seed3_20260715` | ready | 同上 |
+| 只降低击球窗模仿 attempt-1 `phase1_long_no_replay_v2_only_seed3_20260715` | invalidated | PGID `420947` 在动态 URDF import 阶段 `malloc(): invalid size`、rc134；首迭代前退出、无 checkpoint；namespace 永不复用，不是 Reward 结果 |
+| 只降低击球窗模仿唯一重试 `phase1_long_no_replay_v2_only_seed3_retry_v2_20260715` | ready | 配方逐字相同、全新 no-clobber namespace；只允许一次 |
 | `qdot=-2.5` `phase1_long_no_replay_qdot_w2p5_seed3_20260715` | ready | 同上 |
 | 关闭脚部朝向惩罚 `phase1_long_no_replay_foot_orientation_w0_seed3_20260715` | ready | 同上 |
 | 加强脚部朝向惩罚 `phase1_long_no_replay_foot_orientation_w0p6_seed3_20260715` | ready | 同上 |
@@ -85,4 +86,5 @@ python3 scripts/run_lean_training_queue.py \
 ```
 
 controller 必须先验证 GPU0/GPU1 没有任何外部 compute PID；若 Yikang 在发射前重新占卡，相关行 fail
-closed，不迁移、不抢占。
+closed，不迁移、不抢占。attempt-1 的 importer rc134 已完整保全；唯一 retry 仍失败时停止重试并转 importer
+根因线。

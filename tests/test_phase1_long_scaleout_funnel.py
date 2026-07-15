@@ -21,8 +21,12 @@ def test_six_long_rows_are_pod2_only_single_seed_and_round_robin():
     assert data["dispatch_pods"] == ["pod2"]
     assert data["launch_authorized"] is True
     assert data["strict_full_scene_probe_evidence"]["terminal_status"] == "passed"
-    assert len(jobs) == 6
-    assert all(job["status"] == "ready" for job in jobs)
+    assert len(jobs) == 7
+    assert jobs[2]["id"] == "p1_long_v2_only_seed3"
+    assert jobs[2]["status"] == "rejected"
+    assert jobs[-1]["id"] == "p1_long_v2_only_seed3_retry_v2"
+    assert jobs[-1]["status"] == "ready"
+    assert all(job["status"] == "ready" for index, job in enumerate(jobs) if index != 2)
     assert {job["seed"] for job in jobs} == {3}
     assert {job["budget"]["num_envs"] for job in jobs} == {4096}
     assert {job["budget"]["max_iterations"] for job in jobs} == {10001}
@@ -36,6 +40,7 @@ def test_six_long_rows_are_pod2_only_single_seed_and_round_robin():
         "pod2/gpu1",
         "pod2/gpu0",
         "pod2/gpu1",
+        "pod2/gpu0",
     ]
     assert {job["source"]["commit"] for job in jobs} == {
         "2c2d70d6d0ccf7b0757aac4dd8e575c2e077607e"
@@ -65,6 +70,9 @@ def test_rows_complete_two_factor_and_two_dose_curves_without_second_seed():
         deltas["p1_long_v2_only_seed3"]["++task.rewards.free_wrist_vel_mimic"],
         deltas["p1_long_v2_only_seed3"]["++task.rewards.motion_scale_in_window"],
     ) == ("false", "0.25")
+    assert deltas["p1_long_v2_only_seed3_retry_v2"] == deltas[
+        "p1_long_v2_only_seed3"
+    ]
     assert deltas["p1_long_qdot_w1_seed3"][
         "task.rewards.joint_velocity_limit_hinge_weight"
     ] == "-1.0"

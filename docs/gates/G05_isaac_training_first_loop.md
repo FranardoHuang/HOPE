@@ -2470,3 +2470,8 @@ exact。当前 exact-hit 仍只有约 `0–1%`，所以不能用 3.2k 的瞬时�
 对照，也不复制 seed。200/500/1000 只能判结构与激活；只有真实击球后才有意义的指标在达到最少
 eligible hit 样本前必须继续。队列/host 回归通过后才允许点火，G05 保持 `Partial`。详见
 [实验卷宗](../experiments/2026-07/EXP-P1-LONG-SCALEOUT-SIX-ARM.md)。
+
+首次铺池中五条已越过首迭代；“只把击球窗模仿降为四分之一”attempt-1 的 exact PGID `420947` 在
+动态 URDF import 阶段以 `malloc(): invalid size` / rc134 自然退出，未到首迭代且没有 checkpoint。
+claim/log/leader identity 保留，namespace 永不复用；这是已知 importer 基础设施故障，不是该模仿方式
+失败。只授权逐字相同配方、全新 namespace 的一次 retry-v2；若同 phase 再失败，不再重试。

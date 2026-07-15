@@ -20,6 +20,10 @@
   稀疏击球样本不足时不早停。见
   [实验卷宗](experiments/2026-07/EXP-P1-LONG-SCALEOUT-SIX-ARM.md)。
 
+- 六格首次铺池已有五条越过真实首迭代；只降低击球窗模仿的 attempt-1（PGID `420947`）在动态 URDF
+  import 以 `malloc(): invalid size` / rc134 自然退出，无 checkpoint。证据与 namespace 保留，它不是
+  Reward 负结果；只给逐字相同配方一个全新 namespace 的唯一重试，同 phase 再失败则转 importer 根因线。
+
 - Pod2 GPU2 的无随挥回放长曲线已真正点火：qdot/V1+V2/control-retry exact PGID
   `411519/412204/412899` 均返回 `KIT_BOOT_READY`，04:15 UTC 分别到 iter `24/9/2`，fatal0 且
   claim/binding present；GPU2 `97%`、17154 MiB。GPU0/1 的 Yikang PID `379550/396374` 未触碰。

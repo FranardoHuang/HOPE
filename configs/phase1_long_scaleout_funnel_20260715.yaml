@@ -217,9 +217,12 @@ jobs:
     run_name: phase1_long_no_replay_qdot_w1_seed3_20260715
     run_dir: /workspace/codexschema/phase1_long_scaleout_20260715/runs/phase1_long_no_replay_qdot_w1_seed3
 
-  - <<: *v1_only
+  - &v2_only
+    <<: *v1_only
     id: p1_long_v2_only_seed3
     human_name: 只把击球窗动作模仿降到四分之一，单 seed 长曲线
+    status: rejected
+    blocker: dynamic URDF import exited rc134 with malloc invalid size before first iteration; exact PGID 420947 and namespace are preserved; one recipe-identical retry is authorized below
     recipe:
       base: *base
       delta:
@@ -288,3 +291,12 @@ jobs:
     resource: *gpu1
     run_name: phase1_long_no_replay_foot_orientation_w0p6_seed3_20260715
     run_dir: /workspace/codexschema/phase1_long_scaleout_20260715/runs/phase1_long_no_replay_foot_orientation_w0p6_seed3
+
+  - <<: *v2_only
+    id: p1_long_v2_only_seed3_retry_v2
+    human_name: 只降低击球窗模仿的基础设施唯一重试 v2
+    status: ready
+    blocker: null
+    resource: *gpu0
+    run_name: phase1_long_no_replay_v2_only_seed3_retry_v2_20260715
+    run_dir: /workspace/codexschema/phase1_long_scaleout_20260715/runs/phase1_long_no_replay_v2_only_seed3_retry_v2
