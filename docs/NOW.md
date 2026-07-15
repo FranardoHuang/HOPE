@@ -571,6 +571,12 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
 
 - **[4｜P0] 原生 MuJoCo 训练候选。** 责任人 franco；执行者 Codex；下一证据：修正四个源码缺口
   后复核，再测单环境核心、并行吞吐和一次限预算 PPO 更新。[实验](experiments/2026-07/EXP-MUJOCO-NATIVE-TRAINING.md)
+- **[9｜P1] Hitter 下半身站稳与 MuJoCo—实机接口对齐。** 责任人 yikang；执行者 Codex；分支
+  `codex/hitter-lowerbody-mujoco-alignment`，基于 `hitter`。本线冻结为两个问题：一是盘点并单变量验证
+  下半身稳定、基座姿态和微屈膝站姿相关 Reward；二是逐项对齐训练、ONNX/C++ runner、厂商 MuJoCo
+  与真实接口的 joint/default pose/gain/action/observation/timing tuple。下一证据是源码级 Reward 台账、
+  接口差分和 fail-closed 回归；这些证据完成前不启动长跑 PPO、不执行真机 MOTION，也不扩展球路、
+  planner 或连续回合范围。
 
 ### 连续能力与后续接口
 - **[5｜P1] 等待/恢复结构卷。** 责任人 franco；执行者 Codex；下一证据：同步机器合同后，用冻结
