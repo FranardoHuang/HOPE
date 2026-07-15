@@ -13,6 +13,13 @@
 
 ## 2026-07-16
 
+- Demo hot-start 的自由非击球臂行与普通母本保守模仿行分别在首迭代前以 malloc `rc134`、content-bearing
+  stale timeout `rc125` 结束；exact PID/PGID/starttime 均已确认 absent，完整 claim/binding/log/launch/
+  identity SHA 已绑定，旧行标 `rejected` 且不再占调度槽。新增两个 recipe-identical 的一次性人工
+  `retry_v2`，使用新 namespace、硬绑 GPU1→GPU0 并按 claim 顺序错峰；`automatic_retry=false`，本提交
+  未点火。前七条 claim digest 不变，`28` 个专项测试通过。见
+  [实验卷宗](experiments/2026-07/EXP-P1-DEMO-HOTSTART-PORTFOLIO.md)。
+
 - 在不改变前六条续训 recipe/claim digest 的前提下，队列增加 GPU2 第四槽的第七条 16 秒长回合候选：
   从 qdot model-3500 snapshot 继续，组合 V1/V2、强速度/拍面引导、脚朝向与自由非击球臂，专门观察
   单 episode 连续 3–4 拍累积的平衡债。episode 长度在独立 base 中唯一设为 16 秒；claim 绑定

@@ -93,6 +93,7 @@ EXPECTED_MILESTONES = [3700, 4000, 4500, 5500, 7500]
 EXPECTED_SLOTS = [
     "pod2/gpu0", "pod2/gpu1", "pod2/gpu0",
     "pod2/gpu1", "pod2/gpu0", "pod2/gpu1", "pod2/gpu2",
+    "pod2/gpu1", "pod2/gpu0",
 ]
 EXPECTED_RECEIPT_PATH = (
     "/workspace/codexschema/phase1_demo_hotstart_20260716/activation/"
@@ -242,8 +243,103 @@ EXPECTED_JOB_SPECS = {
         "/workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_qdot_long_carry_free_arm_16s",
         ("true", "0.25", "-5.0", "-0.4", "-0.3", "true"),
     ),
+    "demo_v1v2_qdot_w2p5_face_w0p4_free_arm_retry_v2": (
+        "v1v2", "pod2/gpu1",
+        "phase1_demo_v1v2_qdot_w2p5_face_w0p4_free_arm_seed3_20260716_retry_v2",
+        "/workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_v1v2_qdot_w2p5_face_w0p4_free_arm_retry_v2",
+        ("true", "0.25", "-2.5", "-0.4", "-0.3", "true"),
+    ),
+    "demo_control_qdot_w5_face_w0p4_retry_v2": (
+        "control", "pod2/gpu0",
+        "phase1_demo_control_qdot_w5_face_w0p4_seed3_20260716_retry_v2",
+        "/workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_control_qdot_w5_face_w0p4_retry_v2",
+        ("false", "1.0", "-5.0", "-0.4", "-0.3", "false"),
+    ),
 }
 LONG_CARRY_JOB_ID = "demo_qdot_long_carry_free_arm_16s"
+RETRY_PREDECESSORS = {
+    "demo_v1v2_qdot_w2p5_face_w0p4_free_arm_retry_v2": (
+        "demo_v1v2_qdot_w2p5_face_w0p4_free_arm"
+    ),
+    "demo_control_qdot_w5_face_w0p4_retry_v2": (
+        "demo_control_qdot_w5_face_w0p4"
+    ),
+}
+RETRY_IDS = frozenset(RETRY_PREDECESSORS)
+REJECTED_PREDECESSOR_IDS = frozenset(RETRY_PREDECESSORS.values())
+EXPECTED_TERMINAL_CONTRACTS = {
+    "demo_v1v2_qdot_w2p5_face_w0p4_free_arm": {
+        "classification": "infrastructure_only_pre_first_iteration",
+        "terminal_kind": "pre_marker_exit",
+        "terminal_exit_code": 134,
+        "process_identity": {
+            "pid": 429116, "pgid": 429116,
+            "starttime_ticks": 557505718, "absent_verified": True,
+        },
+        "evidence": {
+            "queue_claim_path": "/workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_v1v2_qdot_w2p5_face_w0p4_free_arm/queue_claim.json",
+            "queue_claim_file_sha256": "09d1b842a7c2fbf2468daeb0430451926c6c2821fa7f121c42439da1c704dbff",
+            "queue_claim_content_sha256": "d942f1b20df209a68f8f45e567faed6f1df22c607abecdf1f0b71145a1be003e",
+            "run_binding_path": "/workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_v1v2_qdot_w2p5_face_w0p4_free_arm/run_binding.json",
+            "run_binding_file_sha256": "3ec302f7bc186d174cd242e9f35e08ec4b12a2d00737325e8851903dc875a0ed",
+            "run_binding_content_sha256": "8b9bfcd5b9f0c5af152ae53a20c5f23e9c513d274b5b234d2f46f2c209cac294",
+            "run_log_path": "/workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_v1v2_qdot_w2p5_face_w0p4_free_arm/run.log",
+            "run_log_sha256": "ac2e1bdf6da8953f3961b2aa5dfb368da39624204c0be4a4e4141f3f5a69b10e",
+            "launch_state_path": "/workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_v1v2_qdot_w2p5_face_w0p4_free_arm/run.log.launch",
+            "launch_state_sha256": "1819713e1475f8b1714e62b7eacb70493cde34bf0113f1460eb3ea4b4987b0b5",
+            "leader_identity_path": "/workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_v1v2_qdot_w2p5_face_w0p4_free_arm/run.log.launch.leader.json",
+            "leader_identity_sha256": "e80ab343810d6087d67cbd9b8fc3c848810bfe3cecb72c1155b55ba83635da48",
+        },
+        "behavior_evidence_eligible": False,
+        "old_namespace_relaunch_forbidden": True,
+    },
+    "demo_control_qdot_w5_face_w0p4": {
+        "classification": "infrastructure_only_pre_first_iteration",
+        "terminal_kind": "stale_timeout",
+        "terminal_exit_code": 125,
+        "process_identity": {
+            "pid": 429974, "pgid": 429974,
+            "starttime_ticks": 557535387, "absent_verified": True,
+        },
+        "evidence": {
+            "queue_claim_path": "/workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_control_qdot_w5_face_w0p4/queue_claim.json",
+            "queue_claim_file_sha256": "eaea2766ccdff35bd26cbb271118b01df9c7a4a20d855054e6c9913c246eb70d",
+            "queue_claim_content_sha256": "2e6eb7e0f479d48e34130252cf4c83a22bdfdadfcbfe1813b5b1aa398d29b811",
+            "run_binding_path": "/workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_control_qdot_w5_face_w0p4/run_binding.json",
+            "run_binding_file_sha256": "6015ccbbb0d8e9f6eb95cd735e475d002ee1340f70ff4256f39ff54d002b0c32",
+            "run_binding_content_sha256": "0942c89b5acac88c9a6432e50cff9836c85f5c0564b3a3dfb8a9f8ece5c25008",
+            "run_log_path": "/workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_control_qdot_w5_face_w0p4/run.log",
+            "run_log_sha256": "d62d1055a00de134b1b3476735ef298a838b9e6330e0800fc37b65f4fbf58382",
+            "launch_state_path": "/workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_control_qdot_w5_face_w0p4/run.log.launch",
+            "launch_state_sha256": "dfb5a21d9e8fa53f0e8d87b08f3434727575ddf3bcd3994b00c0f2b2f4a4e694",
+            "leader_identity_path": "/workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_control_qdot_w5_face_w0p4/run.log.launch.leader.json",
+            "leader_identity_sha256": "eaf24e7646a7a256a21afb5ca0348baf34759c54a8fac49be67433b3d8f8e79f",
+            "pre_term_identity_path": "/workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_control_qdot_w5_face_w0p4/run.log.launch.pre_term.json",
+            "pre_term_identity_sha256": "cc3f0c6d7a2f056d5a7cbf81fa2d7af98c8d1339e9eecab7c07eca3879d037ff",
+            "pre_kill_identity_path": "/workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_control_qdot_w5_face_w0p4/run.log.launch.pre_kill.json",
+            "pre_kill_identity_sha256": "8905b4505488c53ebec60e644b42670a7222d2b2a91c71023e69e9cfcb4818ba",
+        },
+        "behavior_evidence_eligible": False,
+        "old_namespace_relaunch_forbidden": True,
+    },
+}
+EXPECTED_RETRY_CONTRACTS = {
+    retry_id: {
+        "retry_of": predecessor_id,
+        "retry_ordinal": 1,
+        "manual_retry_limit": 1,
+        "manual_dispatch_only": True,
+        "automatic_retry": False,
+        "further_retry_authorized": False,
+        "recipe_equal": True,
+        "predecessor_status": "rejected",
+        "predecessor_terminal": EXPECTED_TERMINAL_CONTRACTS[predecessor_id],
+        "launch_sequence": sequence,
+    }
+    for sequence, (retry_id, predecessor_id) in enumerate(
+        RETRY_PREDECESSORS.items(), start=1
+    )
+}
 EXPECTED_LONG_CARRY_SCREENING_CONTRACT = {
     "scientific_question": "three_to_four_swing_balance_debt_in_one_episode",
     "expected_swings_per_episode": [3, 4],
@@ -1289,12 +1385,12 @@ def load_queue(path: Path) -> dict[str, Any]:
             )
 
     jobs = queue.get("jobs")
-    if not isinstance(jobs, list) or len(jobs) != 7:
-        raise DemoQueueError("exactly seven demo rows are required")
+    if not isinstance(jobs, list) or len(jobs) != 9:
+        raise DemoQueueError("exactly seven original rows and two retry-v2 rows are required")
     if [job.get("id") for job in jobs] != list(EXPECTED_JOB_SPECS):
-        raise DemoQueueError("seven job ids/order changed")
+        raise DemoQueueError("original/retry job ids or order changed")
     if [job.get("resource", {}).get("required_slot") for job in jobs] != EXPECTED_SLOTS:
-        raise DemoQueueError("jobs 1-6 must alternate GPU0/GPU1; job 7 must use GPU2")
+        raise DemoQueueError("original/retry GPU bindings changed")
     ids: set[str] = set()
     runs: set[str] = set()
     for job in jobs:
@@ -1315,17 +1411,33 @@ def load_queue(path: Path) -> dict[str, Any]:
         }
         if job_id == LONG_CARRY_JOB_ID:
             expected_job_fields.add("screening_contract")
+        if job_id in REJECTED_PREDECESSOR_IDS:
+            expected_job_fields.add("terminal_contract")
+        if job_id in RETRY_IDS:
+            expected_job_fields.add("retry_contract")
         if set(job) != expected_job_fields:
             raise DemoQueueError(f"{job_id} has extra or missing job fields")
         if job_id == LONG_CARRY_JOB_ID:
             if job.get("screening_contract") != EXPECTED_LONG_CARRY_SCREENING_CONTRACT:
                 raise DemoQueueError(f"{job_id} screening contract changed")
-        if job.get("status") != ("blocked" if pending else "ready"):
+        if job_id in REJECTED_PREDECESSOR_IDS:
+            expected_status = "rejected"
+        else:
+            expected_status = "blocked" if pending else "ready"
+        if job.get("status") != expected_status:
             raise DemoQueueError(f"{job_id} status does not match activation state")
-        if pending and not isinstance(job.get("blocker"), str):
+        if job_id in REJECTED_PREDECESSOR_IDS:
+            if not isinstance(job.get("blocker"), str) or not job["blocker"]:
+                raise DemoQueueError(f"{job_id} rejected row must explain terminal evidence")
+            if job.get("terminal_contract") != EXPECTED_TERMINAL_CONTRACTS[job_id]:
+                raise DemoQueueError(f"{job_id} terminal evidence contract changed")
+        elif pending and not isinstance(job.get("blocker"), str):
             raise DemoQueueError(f"{job_id} must explain its blocker")
-        if not pending and job.get("blocker") not in (None, ""):
+        elif not pending and job.get("blocker") not in (None, ""):
             raise DemoQueueError(f"{job_id} ready row still has a blocker")
+        if job_id in RETRY_IDS:
+            if job.get("retry_contract") != EXPECTED_RETRY_CONTRACTS[job_id]:
+                raise DemoQueueError(f"{job_id} retry contract changed")
         if job.get("runtime_binding") is not True:
             raise DemoQueueError(f"{job_id} requires runtime binding")
         expected_source = {
@@ -1423,6 +1535,22 @@ def load_queue(path: Path) -> dict[str, Any]:
         if run_name != expected_run_name or job.get("run_dir") != expected_run_dir:
             raise DemoQueueError(f"{job_id} run_name/run_dir changed")
         Q._ready_workspace_path(expected_run_dir, f"{job_id} run_dir")
+    by_id = {job["id"]: job for job in jobs}
+    for retry_id, predecessor_id in RETRY_PREDECESSORS.items():
+        retry = by_id[retry_id]
+        predecessor = by_id[predecessor_id]
+        for field in (
+            "action", "motion", "bank", "exam", "source", "runtime_binding",
+            "warm_start", "recipe", "seed", "budget", "milestones",
+        ):
+            if retry[field] != predecessor[field]:
+                raise DemoQueueError(
+                    f"{retry_id} must remain recipe-identical to {predecessor_id}: {field}"
+                )
+        if retry["run_dir"] == predecessor["run_dir"] or (
+            retry["run_name"] == predecessor["run_name"]
+        ):
+            raise DemoQueueError(f"{retry_id} must use a fresh run namespace")
     return queue
 
 
@@ -1455,7 +1583,10 @@ def _parent_spec(queue: dict[str, Any], *, mode: str) -> dict[str, Any]:
                         ),
                     }
                     for job in queue["jobs"]
-                    if job["warm_start"]["parent"] == name
+                    if (
+                        job["warm_start"]["parent"] == name
+                        and job["id"] not in RETRY_IDS
+                    )
                 ],
             }
             for name, parent in queue["parents"].items()
@@ -1488,6 +1619,8 @@ def _demo_claim(
     content["source_contract_files"] = dict(EXPECTED_SOURCE_CONTRACT_FILES)
     if job["id"] == LONG_CARRY_JOB_ID:
         content["screening_contract"] = dict(job["screening_contract"])
+    if job["id"] in RETRY_IDS:
+        content["retry_contract"] = dict(job["retry_contract"])
     digest = _canonical_sha256(content)
     argv = [
         *content["training_argv_without_claim"],
@@ -1595,19 +1728,26 @@ def _assign_demo(
     queue: dict[str, Any], occupancy: dict[str, int],
     existing_ids: set[str] | None = None,
 ) -> list[tuple[dict[str, Any], Any]]:
-    """Apply the seventh row's fourth-slot-only launch gate.
+    """Apply the long-carry slot gate and ordered manual retry gate.
 
     The generic scheduler correctly enforces capacity, but it intentionally has
     no experiment-specific notion of "only add the fourth colocated trainer".
     Keep that policy local to this demo queue and re-check it from the same live
-    occupancy snapshot used for assignment.
+    occupancy snapshot used for assignment.  Retry sequence 2 cannot be
+    selected until sequence 1 has consumed its fresh one-shot namespace.
     """
 
-    assignments = Q._assign(queue, occupancy, existing_ids or set())
+    claimed = set(existing_ids or set())
+    assignments = Q._assign(queue, occupancy, claimed)
+    first_retry = next(iter(RETRY_PREDECESSORS))
+    second_retry = list(RETRY_PREDECESSORS)[1]
     return [
         (job, slot)
         for job, slot in assignments
-        if job["id"] != LONG_CARRY_JOB_ID or occupancy.get(slot.name) == 3
+        if (
+            (job["id"] != LONG_CARRY_JOB_ID or occupancy.get(slot.name) == 3)
+            and (job["id"] != second_retry or first_retry in claimed)
+        )
     ]
 
 

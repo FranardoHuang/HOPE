@@ -453,11 +453,11 @@ activated/ready。未回填时 `fill` 恒 fail closed。
 ```bash
 python3 scripts/run_phase1_demo_hotstart_queue.py \
   --queue configs/phase1_pod2_demo_hotstart_portfolio_20260716.yaml \
-  fill --count 7
+  fill --count 9
 
 python3 scripts/run_phase1_demo_hotstart_queue.py \
   --queue configs/phase1_pod2_demo_hotstart_portfolio_20260716.yaml \
-  fill --count 7 --execute --confirm SIM_ONLY_LAUNCH_ONE_DEMO_WARMSTART_JOB
+  fill --count 9 --execute --confirm SIM_ONLY_LAUNCH_ONE_DEMO_WARMSTART_JOB
 ```
 
 execute 会只从 fixed parent snapshots 重算三个 parent 并要求与 immutable receipt 逐字节一致，再读取 Pod2
@@ -476,6 +476,14 @@ PID=PGID/starttime/cmdline 与 `/proc`，必须看到 `Learning iteration >3500`
 `phase=first_iter`；自然退出、stale/reused PID 或只有 resume 行都保留 exact identity 人工处置 JSON，不做任何
 signal。绝对 checkpoint 用专用
 `attest-milestone`，合法值仅 `3700/4000/4500/5500/7500`；source runtime receipt 必须报告 lineage exact=0。
+
+若某行在首迭代前以已审计的 infrastructure-only 原因终止，原行必须先标 `rejected`，保留原目录并绑定
+claim/binding/log/launch/identity SHA；不得把旧目录改回 ready。当前仅有两条一次性 `retry_v2`：V1+V2
+自由臂的 malloc rc134 行硬绑 GPU1，普通母本保守模仿的 stale-timeout rc125 行硬绑 GPU0。新 claim 必须
+绑定 `retry_of`、predecessor 终态证据、`manual_retry_limit=1`、`automatic_retry=false`、
+`recipe_equal=true`；loader 会逐字段比较 parent、完整 recipe、seed、budget 和 milestones，并拒绝复用
+run name/directory。调度只先选择 GPU1 retry；它的新 claim 可见后才选择 GPU0 retry，所以即使一次请求
+`fill --count 9` 也按顺序错峰。没有第二次 retry。
 
 旧母本完整 recipe 的边界是原 canonical self-bound queue claim/run binding；v3 会重验其 argv/source/run/lineage，
 但不声称用另一份独立真源重新证明历史 recipe。

@@ -2562,6 +2562,14 @@ claim 绑定 `+200` 只判结构/激活、`+500` 判安全/平衡、`+1000` 排�
 `Partial`。详见
 [实验卷宗](../experiments/2026-07/EXP-P1-DEMO-HOTSTART-PORTFOLIO.md)。
 
+后续首迭代门抓到两条基础设施失败：V1+V2 自由臂行 `pre_marker_exit/rc134`（malloc invalid size），
+普通母本保守模仿行 `stale_timeout/rc125`。两组 exact PID/PGID/starttime 均已确认 absent，原 claim、binding、
+log、launch/identity evidence SHA 已冻结，旧行改为 `rejected`，因此旧 claimed namespace 不再占 effective
+slot。只新增各一次 recipe-identical `retry_v2`：新 id/name/dir，分别硬绑 GPU1/GPU0，loader 机器比较
+parent/recipe/seed/budget/milestones 与 predecessor 相同；claim 绑定终态证据、`retry_of`、
+`manual_retry_limit=1`、`automatic_retry=false` 和 `recipe_equal=true`。两条按 GPU1→GPU0 顺序错峰，第二条
+只有第一条已消费新 claim 后才可选择。本变更只排队、未点火；`28` 个专项测试通过，G05 仍为 `Partial`。
+
 每条 launch 的 `phase=first_iter` 现在还要求日志同时证明 explicit hard-contract mismatch、从 snapshot
 model-3500 恢复到 iteration 3500 和 `optimizer=resumed`，并从新 hard contract 核对本行 qdot/conditional-face
 权重。v3 还在同一 GPU lock、trainer 调用前重算 checkpoint/hard/claim/binding 四个 snapshot file SHA；

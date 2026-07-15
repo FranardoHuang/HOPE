@@ -61,6 +61,8 @@ def _pending_raw() -> dict:
         ):
             parent[key] = None
     for job in raw["jobs"]:
+        if job["id"] in D.REJECTED_PREDECESSOR_IDS:
+            continue
         job["status"] = "blocked"
         job["blocker"] = "unit-test pending activation fixture"
     return raw
@@ -93,23 +95,28 @@ def _activated(tmp_path: Path) -> tuple[dict, Path]:
         parent["run_binding_file_sha256"] = "f" * 64
         parent["run_binding_content_sha256"] = "1" * 64
     for job in raw["jobs"]:
+        if job["id"] in D.REJECTED_PREDECESSOR_IDS:
+            continue
         job["status"] = "ready"
         job["blocker"] = None
     path = _write(tmp_path, raw)
     return D.load_queue(path), path
 
 
-def test_pending_queue_is_seven_blocked_pod2_rows_and_plan_is_nonlaunching(tmp_path):
+def test_pending_queue_has_seven_blocked_and_two_rejected_rows(tmp_path):
     queue, _path = _pending(tmp_path)
     plan = D.cmd_plan(queue)
     assert queue["dispatch_pods"] == ["pod2"]
     assert queue["launch_authorized"] is False
-    assert len(queue["jobs"]) == 7
+    assert len(queue["jobs"]) == 9
     assert queue["pods"]["pod2"]["max_trainers_per_gpu"] == 4
     assert "parent_snapshot_receipt_v2.json" in queue["activation_contract"]["receipt_path"]
     assert plan["assignments"] == []
     assert len(plan["blocked"]) == 7
-    assert all(job["status"] == "blocked" for job in queue["jobs"])
+    assert sum(job["status"] == "blocked" for job in queue["jobs"]) == 7
+    assert {
+        job["id"] for job in queue["jobs"] if job["status"] == "rejected"
+    } == D.REJECTED_PREDECESSOR_IDS
     assert all(job["runtime_binding"] is True for job in queue["jobs"])
     assert all(job["source"]["commit"] == D.EXPECTED_SOURCE for job in queue["jobs"])
 
@@ -122,12 +129,19 @@ def test_current_queue_is_explicitly_activated_by_the_v2_snapshot_receipt():
     assert queue["activation_contract"]["receipt_file_sha256"] == (
         "fd200bd65ee00d33fb50a73f5de8d011cd810498ef626a3ca9d3a63b5bff2f34"
     )
-    assert all(job["status"] == "ready" and job["blocker"] is None
-               for job in queue["jobs"])
-    assert [row["resource"] for row in plan["assignments"]] == D.EXPECTED_SLOTS
+    assert all(
+        job["status"] == "rejected"
+        if job["id"] in D.REJECTED_PREDECESSOR_IDS
+        else job["status"] == "ready" and job["blocker"] is None
+        for job in queue["jobs"]
+    )
+    assert [row["resource"] for row in plan["assignments"]] == [
+        slot for job_id, slot in zip(D.EXPECTED_JOB_SPECS, D.EXPECTED_SLOTS)
+        if job_id not in D.REJECTED_PREDECESSOR_IDS
+    ]
 
 
-def test_seven_recipes_match_the_frozen_demo_portfolio():
+def test_original_and_retry_recipes_match_the_frozen_demo_portfolio():
     queue = D.load_queue(QUEUE)
     jobs = {job["id"]: job for job in queue["jobs"]}
     actual = {}
@@ -162,13 +176,18 @@ def test_seven_recipes_match_the_frozen_demo_portfolio():
         "demo_control_qdot_w5_face_w0p4": ("control", "false", "1.0", "-5.0", "-0.4", "-0.3", "false"),
         "demo_control_full_stack_free_arm_foot_w0p6": ("control", "true", "0.25", "-5.0", "-0.4", "-0.6", "true"),
         "demo_qdot_long_carry_free_arm_16s": ("qdot", "true", "0.25", "-5.0", "-0.4", "-0.3", "true"),
+        "demo_v1v2_qdot_w2p5_face_w0p4_free_arm_retry_v2": ("v1v2", "true", "0.25", "-2.5", "-0.4", "-0.3", "true"),
+        "demo_control_qdot_w5_face_w0p4_retry_v2": ("control", "false", "1.0", "-5.0", "-0.4", "-0.3", "false"),
     }
 
 
 def test_activated_queue_round_robins_and_claim_binds_inexact_parent_receipt(tmp_path):
     queue, _path = _activated(tmp_path)
     plan = D.cmd_plan(queue)
-    assert [row["resource"] for row in plan["assignments"]] == D.EXPECTED_SLOTS
+    assert [row["resource"] for row in plan["assignments"]] == [
+        slot for job_id, slot in zip(D.EXPECTED_JOB_SPECS, D.EXPECTED_SLOTS)
+        if job_id not in D.REJECTED_PREDECESSOR_IDS
+    ]
     first = queue["jobs"][0]
     slot = next(slot for slot in D.Q.slots(queue) if slot.name == "pod2/gpu0")
     claim, argv = D._demo_claim(queue, first, slot)
@@ -229,7 +248,7 @@ def test_long_carry_row_is_gpu2_fourth_slot_and_binds_early_screening_rules(tmp_
     assert all(not rule["sparse_hit_zero_may_stop"] for rule in rules.values())
 
 
-def test_first_six_claim_digests_remain_unchanged_after_long_carry_extension():
+def test_first_seven_claim_digests_remain_unchanged_after_retry_extension():
     queue = D.load_queue(QUEUE)
     expected = {
         "demo_qdot_v1v2_face_w0p4": "7b72023e81d78f0e431834721fc85876c29315529f0f211bc8d6de3c421ea8fb",
@@ -238,14 +257,98 @@ def test_first_six_claim_digests_remain_unchanged_after_long_carry_extension():
         "demo_v1v2_qdot_w2p5_face_w0p4_free_arm": "d942f1b20df209a68f8f45e567faed6f1df22c607abecdf1f0b71145a1be003e",
         "demo_control_qdot_w5_face_w0p4": "2e6eb7e0f479d48e34130252cf4c83a22bdfdadfcbfe1813b5b1aa398d29b811",
         "demo_control_full_stack_free_arm_foot_w0p6": "ab5ceba2933849a330cf889bab30e40e26d1789f32827b0105a03575467176b6",
+        "demo_qdot_long_carry_free_arm_16s": "e36bde2bbbee2bb2d5805a642a90454ae89c8e76c63ff085768e1f5d16529c1a",
     }
-    for job in queue["jobs"][:6]:
+    for job in queue["jobs"][:7]:
         slot = next(
             candidate for candidate in D.Q.slots(queue)
             if candidate.name == job["resource"]["required_slot"]
         )
         claim, _argv = D._demo_claim(queue, job, slot)
         assert claim["content_sha256"] == expected[job["id"]]
+
+
+def test_retry_contracts_bind_terminal_evidence_and_recipe_identity():
+    queue = D.load_queue(QUEUE)
+    jobs = {job["id"]: job for job in queue["jobs"]}
+    for retry_id, predecessor_id in D.RETRY_PREDECESSORS.items():
+        retry = jobs[retry_id]
+        predecessor = jobs[predecessor_id]
+        assert predecessor["status"] == "rejected"
+        assert predecessor["terminal_contract"] == (
+            D.EXPECTED_TERMINAL_CONTRACTS[predecessor_id]
+        )
+        assert retry["retry_contract"] == D.EXPECTED_RETRY_CONTRACTS[retry_id]
+        assert retry["retry_contract"]["automatic_retry"] is False
+        assert retry["retry_contract"]["manual_retry_limit"] == 1
+        assert retry["retry_contract"]["recipe_equal"] is True
+        assert retry["recipe"] == predecessor["recipe"]
+        assert retry["warm_start"] == predecessor["warm_start"]
+        assert retry["milestones"] == predecessor["milestones"]
+        assert retry["run_dir"] != predecessor["run_dir"]
+        slot = next(
+            candidate for candidate in D.Q.slots(queue)
+            if candidate.name == retry["resource"]["required_slot"]
+        )
+        claim, _argv = D._demo_claim(queue, retry, slot)
+        assert claim["content"]["retry_contract"] == retry["retry_contract"]
+        assert claim["content"]["retry_contract"]["predecessor_terminal"] == (
+            predecessor["terminal_contract"]
+        )
+
+
+def test_rejected_claims_release_slots_and_retries_launch_in_declared_order():
+    queue = D.load_queue(QUEUE)
+    first_seven = {job["id"] for job in queue["jobs"][:7]}
+    stale_claims = {
+        predecessor_id: {
+            "pod": "pod2",
+            "gpu": 1 if "v1v2" in predecessor_id else 0,
+            "state": "claimed",
+        }
+        for predecessor_id in D.REJECTED_PREDECESSOR_IDS
+    }
+    occupancy = {"pod2/gpu0": 3, "pod2/gpu1": 3, "pod2/gpu2": 4}
+    assert D.Q._effective_occupancy(queue, occupancy, stale_claims) == occupancy
+
+    first = D._assign_demo(queue, occupancy, first_seven)
+    assert [(job["id"], slot.name) for job, slot in first] == [
+        (next(iter(D.RETRY_PREDECESSORS)), "pod2/gpu1"),
+    ]
+    first_retry = first[0][0]["id"]
+    second = D._assign_demo(queue, occupancy, first_seven | {first_retry})
+    assert [(job["id"], slot.name) for job, slot in second] == [
+        (list(D.RETRY_PREDECESSORS)[1], "pod2/gpu0"),
+    ]
+
+
+@pytest.mark.parametrize(
+    "mutate",
+    [
+        lambda raw: raw["jobs"][3]["terminal_contract"]["evidence"].__setitem__(
+            "run_log_sha256", "0" * 64
+        ),
+        lambda raw: raw["jobs"][4]["terminal_contract"]["process_identity"].__setitem__(
+            "absent_verified", False
+        ),
+        lambda raw: raw["jobs"][7]["retry_contract"].__setitem__(
+            "automatic_retry", True
+        ),
+        lambda raw: raw["jobs"][8]["retry_contract"].__setitem__(
+            "recipe_equal", False
+        ),
+        lambda raw: raw["jobs"][7]["recipe"]["delta"].__setitem__(
+            3, "task.rewards.joint_velocity_limit_hinge_weight=-5.0"
+        ),
+        lambda raw: raw["jobs"][3].__setitem__("status", "ready"),
+        lambda raw: raw["jobs"][8].__setitem__("run_dir", raw["jobs"][4]["run_dir"]),
+    ],
+)
+def test_retry_terminal_and_recipe_attacks_fail_closed(tmp_path, mutate):
+    raw = _raw()
+    mutate(raw)
+    with pytest.raises(D.DemoQueueError):
+        D.load_queue(_write(tmp_path, raw))
 
 
 def test_generic_fresh_queue_guard_remains_fresh_only(tmp_path):
@@ -385,6 +488,8 @@ def test_activated_parent_sha_closure_rejects_missing_or_split_claim(tmp_path):
     raw["activation_contract"]["state"] = "activated"
     raw["activation_contract"]["receipt_file_sha256"] = "a" * 64
     for job in raw["jobs"]:
+        if job["id"] in D.REJECTED_PREDECESSOR_IDS:
+            continue
         job["status"] = "ready"
         job["blocker"] = None
     for parent in raw["parents"].values():

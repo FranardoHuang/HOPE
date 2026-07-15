@@ -1,6 +1,6 @@
 # EXP-P1-DEMO-HOTSTART-PORTFOLIO — 今夜七个组合方案的严格续训
 
-- 状态：`activated，首批点火待执行`
+- 状态：`activated；两条首迭代前基础设施失败已拒绝，retry-v2 已排队但未点火`
 - 阶段/轴：阶段 1，面向次日演示的组合方案
 - 集成小目标：从三个已经学到约 3500 次更新的母本出发，尽快得到多个能兼顾挥拍、拍面和平衡的候选
 - 人类负责人：Franco
@@ -77,6 +77,19 @@ vendor MuJoCo 通过证据。
    不能在这些早期节点杀臂。
 8. 任一 namespace 失败都保留，不自动 replay；本批不授权第二 seed、正式晋级、真机或 broad process signal。
 
+## 两条基础设施失败与唯一人工重试
+
+原自由非击球臂行在首迭代前以 `pre_marker_exit/rc134` 退出，日志包含 `malloc invalid size`；绑定进程
+PID/PGID `429116`、starttime `557505718` 已确认不存在。原普通母本保守模仿行在首迭代前触发
+`stale_timeout/rc125`；PID/PGID `429974`、starttime `557535387` 已确认不存在。两条都没有产生行为证据，
+原 run directory 与 claim 永久保留并标为 `rejected`；claim、binding、run log、launch state、leader identity，
+以及 stale 行的 pre-TERM/pre-KILL evidence SHA 全部绑定在机器队列的 `terminal_contract`。
+
+仅为这两个基础设施失败新增一次 `retry_v2`。新行使用新 id、run name 和 run directory，loader 逐字段比较
+parent、完整 recipe、seed、budget 与 milestones 必须和 predecessor 相等；claim 绑定 `retry_of`、完整终态证据、
+`manual_retry_limit=1`、`automatic_retry=false`、`recipe_equal=true`。先在 GPU1 发自由臂 retry，消费新 claim 后
+才允许在 GPU0 发保守模仿 retry；本文提交不执行远端点火。
+
 历史母本的完整 recipe 仍以其 canonical self-bound queue claim + run binding 账本为信任边界；本轮会反向验证
 账本、argv 与 checkpoint lineage，但没有另造一份独立的旧 recipe 真源。这是已知边界，不影响本轮 v3 的
 snapshot/load 时序修复。
@@ -88,10 +101,12 @@ snapshot/load 时序修复。
 | qdot 母本强拍面 `phase1_demo_qdot_v1v2_face_w0p4_seed3_20260716` | ready | v2 receipt 已绑定；等待 GPU0 第 4 槽点火 | demo-only |
 | qdot 母本中拍面 `phase1_demo_qdot_v1v2_face_w0p2_seed3_20260716` | ready | v2 receipt 已绑定；等待 GPU1 第 4 槽点火 | demo-only |
 | V1+V2 母本强拍面 `phase1_demo_v1v2_qdot_w5_face_w0p4_seed3_20260716` | ready | 等弱臂精确退出后的 GPU0 槽 | demo-only |
-| V1+V2 母本自由臂 `phase1_demo_v1v2_qdot_w2p5_face_w0p4_free_arm_seed3_20260716` | ready | 等弱臂精确退出后的 GPU1 槽 | demo-only |
-| 普通母本保守模仿 `phase1_demo_control_qdot_w5_face_w0p4_seed3_20260716` | ready | 等第二个 GPU0 换槽 | demo-only |
+| V1+V2 母本自由臂 `phase1_demo_v1v2_qdot_w2p5_face_w0p4_free_arm_seed3_20260716` | rejected | 首迭代前 malloc invalid size；rc134；旧 namespace 永不复用 | infrastructure-only |
+| 普通母本保守模仿 `phase1_demo_control_qdot_w5_face_w0p4_seed3_20260716` | rejected | 首迭代前 content-bearing stale timeout；rc125；旧 namespace 永不复用 | infrastructure-only |
 | 普通母本全栈 `phase1_demo_control_full_stack_free_arm_foot_w0p6_seed3_20260716` | ready | 等第二个 GPU1 换槽 | demo-only |
 | qdot 母本 16 秒长回合 `phase1_demo_qdot_long_carry_free_arm_16s_seed3_20260716` | ready | 只等 GPU2 第四槽；早判规则已绑定进 claim | demo-only |
+| 自由臂基础设施重试 `phase1_demo_v1v2_qdot_w2p5_face_w0p4_free_arm_seed3_20260716_retry_v2` | ready，未启动 | 新 GPU1 namespace；唯一人工 retry，必须先发 | demo-only |
+| 保守模仿基础设施重试 `phase1_demo_control_qdot_w5_face_w0p4_seed3_20260716_retry_v2` | ready，未启动 | 新 GPU0 namespace；只在前一 retry 已 claim 后发 | demo-only |
 
 ## 复现
 
@@ -113,7 +128,7 @@ python3 scripts/run_phase1_demo_hotstart_queue.py \
 
 两条 parent 命令默认都只是 dry-run；正式执行 inspect 使用独立确认词。正式 attest 会先再跑一遍只读 inspect，
 它通过后才消费 v2 snapshot namespace。receipt 与七类 SHA 已由唯一运行回填；当前 activated 配置及其
-pending 反事实 fixture 共 `19` 个专项测试通过。`fill` 仍会按现场容量和已有 claim fail closed；本页尚无
+pending 反事实 fixture、终态/recipe 攻击与 assignment 测试共 `28` 个专项测试通过。`fill` 仍会按现场容量和已有 claim fail closed；本页尚无
 后代 Pod 行为结果。
 
 ## 决定
