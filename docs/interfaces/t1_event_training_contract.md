@@ -1,6 +1,7 @@
 # T1 Post-Strike Event Training Contract
 
-Status: **core training implementation only; not launch-ready** (2026-07-11).
+Status: **core training implementation plus frame-0 waiting design; not launch-ready**
+(2026-07-15).
 
 This note defines the runtime seam added after the frozen T0/T1 preregistration at commit
 `1913861`. It does not mutate that preregistration or fill any of its null launch bindings.
@@ -95,3 +96,50 @@ The tests prove post-strike-only arming, miss consumption, fixed deadlines, expl
 and infeasible rows, exact-byte SHA binding, and the absence of reset/teleport/history-reset calls
 from the two event-install methods. They do **not** prove continuous Isaac/MuJoCo parity, self-hit
 safety, or launch readiness.
+
+## Selected-action frame-0 waiting contract v2
+
+The machine-readable design is
+[`phase1_frame0_wait_recovery_contract_v2_20260715.json`](../../configs/phase1_frame0_wait_recovery_contract_v2_20260715.json).
+Its human meaning is deliberately narrower than “ready equals frame 0”:
+
+- the **waiting reference** is the currently public action's exact frame-0 pose, with root, joint
+  and body linear/angular reference velocities all exactly zero;
+- the frame-0 body is translated once in XY to the live station at reference-phase entry. That XY
+  anchor stays fixed until the next atomic reveal or a true episode boundary; it does not follow
+  the drifting robot every tick;
+- after a swing and before the next reveal, the only public action is the just-completed action, so
+  recovery points to that action's zero-velocity frame 0. The future action ID, clip, frame 0,
+  target and deadline remain hidden;
+- one atomic reveal makes the next action public and switches the reference to **that** action's
+  zero-velocity frame 0. This only switches a reference: it does not write simulator root/joints,
+  teleport, reset an episode, or clear observation/action/delay/noise history;
+- “ready” remains a fail-closed conjunction of safety and reachability tolerances. It is not exact
+  pose equality and not a weighted score whose positive terms may offset a failed safety conjunct.
+
+This phase split resolves the apparent conflict between “use each selected action's own frame 0”
+and “do not leak the future action”: before reveal, the selected/public identity is the completed
+action; only at reveal does the new action become the selected/public identity.
+
+### Current source conflict and launch boundary
+
+At audited `main@6c3e47d`, `MotionCommand.joint_pos` substitutes
+`robot.data.default_joint_pos` during hold, while the v2 contract requires the selected clip's
+frame-0 joint pose. Joint/body velocity references are zeroed, but root/anchor velocity references
+are not; body XY is also re-anchored to the live robot every command update rather than captured
+once. Changing only `joint_pos` would therefore create a mixed reference. No runtime adapter is
+claimed in v2.
+
+The design validator passes while `launch-check` must fail:
+
+```bash
+python3 scripts/validate_phase1_frame0_wait_recovery_contract_v2.py \
+  --contract configs/phase1_frame0_wait_recovery_contract_v2_20260715.json \
+  --expected-contract-sha256 cc05d63fa4e4ffd9515f369f176ba032ca2a46d8996431a7b1e7d34e2b1bf28e \
+  --mode design-check
+```
+
+A later, default-off source adapter must change pose, root/body velocity, immutable XY anchoring,
+atomic reveal and carry-state observation together, then pass a strict full-scene Isaac receipt
+and the vendor MuJoCo continuous gate. Until those bindings and numeric ready tolerances exist,
+the v2 contract is `NO-LAUNCH`.

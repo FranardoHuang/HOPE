@@ -1508,3 +1508,16 @@ velocity-limit braking parity。可复现合同见
 执行 formal paired K100；明确 allow-inexact 的方向筛不能授权 L2、第二 seed、stop/promote、部署或真机。
 evaluator→attestor→paired manifest 的 SHA 级联与 hydrate 并发 sentinel no-replace 攻击已在 source
 层通过（focused `57 passed`、static/source-plan rc0）；没有新的 Pod runtime 或行为结论。
+
+### 2026-07-15 frame-0 等待 v2 的跨引擎边界
+
+新的等待设计合同冻结了同一条连续序列在两个引擎都必须满足的状态边界：揭题前未来 action/clip/frame0/
+target/deadline 全部不可见；揭题时一次原子切换；切换仅改 reference，不能写 root/joints、teleport、
+reset 或清 history/action/delay/noise；selected public action 的 frame-0 pose 使用 phase-entry station XY，
+所有 root/joint/body reference velocity 为零。Ready 是全部数值安全/可达 tolerance 的 fail-closed 合取。
+
+当前 v2 只过 exact-byte CPU design check。现役 `commands.py` 的 default-stand hold、未清零 anchor velocity
+与 live per-tick XY reanchor 和该设计冲突；source adapter、numeric tolerance、carry-state runtime receipt、
+Isaac full-scene probe 与 vendor MuJoCo continuous gate 均未绑定。因而不能把 v2 写成 Isaac/MuJoCo parity、
+Gate3/Gate3B 或部署证据；`launch-check` 必须失败，G06 保持 `Partial`。复现入口见
+[恢复操作](../operations/run_phase1_recovery_tuple_prereg.md)。

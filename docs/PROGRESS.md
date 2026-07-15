@@ -29,6 +29,15 @@
   `419643/420298/421479/422126/422783/423502`，除已归档 attempt-1 外 fatal0。当前只是满池启动证据，
   新格尚无 model-200，不作行为胜负。
 
+- 连续等待/恢复新增独立 frame-0 v2 design contract：揭题前用上一公开动作自己的第 0 帧零速度参考，
+  原子揭题后才切新动作自己的第 0 帧零速度参考；XY 只在阶段入口捕获一次，连续 episode 不
+  teleport/reset/清 history/action/delay。Ready 仍是全部安全与可达容差合取。旧 A/B/C prereg 保持
+  `17008` bytes / SHA-256 `ca7806df...0616` 不变；CPU validator 红队 `25 passed`，`launch-check`
+  按设计 rc1。现役 hold 的 default-stand、未 hold-zero 的 anchor velocity 与 live per-tick XY reanchor
+  尚未修，所以没有 Isaac/Pod/行为结论。见 [T1 接口](interfaces/t1_event_training_contract.md)、
+  [恢复实验](experiments/2026-07/EXP-RECOVERY-TUPLE-ABC.md)和
+  [操作](operations/run_phase1_recovery_tuple_prereg.md)。
+
 - Pod2 GPU2 的无随挥回放长曲线已真正点火：qdot/V1+V2/control-retry exact PGID
   `411519/412204/412899` 均返回 `KIT_BOOT_READY`，04:15 UTC 分别到 iter `24/9/2`，fatal0 且
   claim/binding present；GPU2 `97%`、17154 MiB。GPU0/1 的 Yikang PID `379550/396374` 未触碰。
