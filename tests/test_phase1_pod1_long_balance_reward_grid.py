@@ -16,26 +16,33 @@ def _delta(job):
     return dict(item.split("=", 1) for item in job["recipe"]["delta"])
 
 
-def test_twelve_distinct_single_seed_jobs_fill_pod1_by_rounds():
+def test_twelve_accepted_single_seed_cells_fill_pod1_with_one_preserved_failure():
     data, jobs = _load()
+    accepted = [job for job in jobs if job["status"] == "ready"]
     assert data["dispatch_pods"] == ["pod1"]
     assert data["pods"]["pod1"]["max_trainers_per_gpu"] == 4
-    assert len(jobs) == 12
-    assert len({job["id"] for job in jobs}) == 12
-    assert all(job["status"] == "ready" for job in jobs)
-    assert {job["seed"] for job in jobs} == {3}
-    assert {job["budget"]["num_envs"] for job in jobs} == {4096}
-    assert {job["budget"]["max_iterations"] for job in jobs} == {10001}
-    assert {tuple(job["milestones"]) for job in jobs} == {
+    assert len(jobs) == 13
+    assert len(accepted) == 12
+    assert len({job["id"] for job in jobs}) == 13
+    assert jobs[5]["status"] == "rejected"
+    assert jobs[5]["id"] == "p1_pod1_arm_free_ep24_seed3"
+    assert jobs[-1]["id"] == "p1_pod1_arm_free_ep24_seed3_retry_v2"
+    assert {job["seed"] for job in accepted} == {3}
+    assert {job["budget"]["num_envs"] for job in accepted} == {4096}
+    assert {job["budget"]["max_iterations"] for job in accepted} == {10001}
+    assert {tuple(job["milestones"]) for job in accepted} == {
         (200, 500, 1000, 2000, 3000, 6000, 10000)
     }
-    assert [job["resource"]["required_slot"] for job in jobs] == [
-        f"pod1/gpu{gpu}" for _round in range(4) for gpu in range(3)
+    assert [job["resource"]["required_slot"] for job in accepted] == [
+        "pod1/gpu0", "pod1/gpu1", "pod1/gpu2",
+        "pod1/gpu0", "pod1/gpu1",
+        "pod1/gpu0", "pod1/gpu1", "pod1/gpu2",
+        "pod1/gpu0", "pod1/gpu1", "pod1/gpu2", "pod1/gpu2",
     ]
-    assert {job["source"]["commit"] for job in jobs} == {
+    assert {job["source"]["commit"] for job in accepted} == {
         "2c2d70d6d0ccf7b0757aac4dd8e575c2e077607e"
     }
-    assert all(job["runtime_binding"] is True for job in jobs)
+    assert all(job["runtime_binding"] is True for job in accepted)
 
 
 def test_balance_grid_is_non_striking_arm_by_episode_length():
@@ -55,12 +62,13 @@ def test_balance_grid_is_non_striking_arm_by_episode_length():
     assert cells == {
         (seconds, free) for seconds in (10.0, 16.0, 24.0) for free in ("false", "true")
     }
+    assert _delta(jobs[-1]) == _delta(jobs[5])
 
 
 def test_reward_rows_change_only_the_three_dense_strike_weights():
     data, jobs = _load()
     triples = []
-    for job in jobs[6:]:
+    for job in jobs[6:12]:
         delta = _delta(job)
         assert delta["task.env.episode_length_s"] == "10.0"
         assert delta["++task.rewards.free_non_striking_arm_mimic"] == "false"

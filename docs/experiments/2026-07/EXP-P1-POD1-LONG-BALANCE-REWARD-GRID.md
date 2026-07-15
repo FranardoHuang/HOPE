@@ -39,7 +39,10 @@
 Pod1 2026-07-15 15:54 UTC 快照为三卡均 0 compute PID、0 MiB，archive clean exact `6d93bcb...80b`；
 独立 source worktree clean exact `2c2d70d...607e`。忽略资产 materialize receipt 为
 `d45eb08a...c6f2`，12/12 live doctor 均返回 `SOURCE_ASSET_OK` 与 `DOCTOR_OK`。科学 trainer 尚未发射；
-下一步只做一次 Pod1 4096-env 非科学 full-scene probe，随后立即填满 12 槽。
+Pod1 4096-env 非科学 full-scene probe 已到首迭代并 rc0；finalizer 因进程退出后 `/proc` starttime 不可读而把
+相同 PID/PGID/argv 错判成 identity mismatch，此账本 bug 不改变 scene 启动事实。科学发射前五条已过首迭代；第六条
+“24 秒、非击球臂自由” attempt-1（PGID `2152129`）在动态 URDF import 后日志停滞，launcher 只按该 PGID 在
+180 秒门收口。原 namespace 永久保留，队尾只有一个逐字同配方 `retry_v2`；其余六个不同问题继续发射。
 
 ## 判读边界
 
