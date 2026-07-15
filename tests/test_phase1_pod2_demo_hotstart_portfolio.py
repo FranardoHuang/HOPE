@@ -1,8 +1,13 @@
 from __future__ import annotations
 
+import base64
 import copy
+import hashlib
 import importlib.util
+import json
+import os
 from pathlib import Path
+import subprocess
 import sys
 
 import pytest
@@ -298,3 +303,78 @@ def test_activated_parent_sha_closure_rejects_missing_or_split_claim(tmp_path):
     raw["parents"]["qdot"]["training_launch_claim_sha256"] = "c" * 64
     with pytest.raises(D.DemoQueueError, match="launch claim differs"):
         D.load_queue(_write(tmp_path, raw))
+
+
+def _embedded_definitions(program: str) -> dict:
+    prefix = program.split("\n\ntry:\n    main()", 1)[0]
+    namespace: dict = {}
+    exec(compile(prefix, "<embedded-test>", "exec"), namespace)
+    return namespace
+
+
+def test_snapshot_changed_after_verify_is_rejected_by_in_lock_recheck(tmp_path):
+    root = tmp_path / "snapshots"
+    root.mkdir()
+    files = []
+    for index, label in enumerate(("checkpoint", "hard", "claim", "binding")):
+        path = root / f"{label}.bin"
+        payload = f"original-{index}".encode()
+        path.write_bytes(payload)
+        os.chmod(path, 0o444)
+        files.append({
+            "label": label, "path": str(path),
+            "sha256": hashlib.sha256(payload).hexdigest(),
+        })
+    os.chmod(root / "checkpoint.bin", 0o644)
+    (root / "checkpoint.bin").write_bytes(b"tampered-after-verify")
+    os.chmod(root / "checkpoint.bin", 0o444)
+    allowed_prefix = str(tmp_path) + "/"
+    program = D.SNAPSHOT_RECHECK_PROGRAM.replace('"/workspace/"', repr(allowed_prefix))
+    encoded = base64.b64encode(json.dumps({
+        "job_id": "attack", "files": files,
+    }).encode()).decode()
+    completed = subprocess.run(
+        [sys.executable, "-c", program, encoded], text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
+    )
+    assert completed.returncode == 2
+    assert "SHA differs from activated queue" in completed.stderr
+
+
+def test_resume_without_first_post_resume_learning_step_is_rejected():
+    namespace = _embedded_definitions(D.FIRST_ITER_PROGRAM)
+    first = namespace["first_post_resume_iteration"]
+    resume = (
+        "[train.py] WARNING: explicit hard-contract mismatch override:\n"
+        "[train.py] RESUMED from checkpoint: snapshot/model_3500.pt "
+        "(continuing at iteration 3500, optimizer=resumed)\n"
+    )
+    assert first(resume) is None
+    assert first(resume + "Learning iteration 3500/8501\n") is None
+    assert first(resume + "Learning iteration 3501/8501\n") == 3501
+
+
+def test_stale_reused_or_exited_bound_pid_is_rejected(tmp_path):
+    namespace = _embedded_definitions(D.FIRST_ITER_PROGRAM)
+    identity = namespace["proc_identity"]
+    error = namespace["ProofError"]
+    proc = tmp_path / "proc" / "123"
+    proc.mkdir(parents=True)
+    fields = ["S", *(["0"] * 18), "456"]
+    (proc / "stat").write_text("123 (trainer) " + " ".join(fields), encoding="utf-8")
+    (proc / "cmdline").write_bytes(b"python\0train.py\0")
+    expected = {
+        "pid": 123, "pgid": 123, "starttime_ticks": 456,
+        "argv": ["python", "train.py"],
+    }
+    assert identity(expected, proc_root=tmp_path / "proc", getpgid=lambda _pid: 123) == {
+        "pid": 123, "pgid": 123, "starttime_ticks": 456,
+    }
+    stale = {**expected, "starttime_ticks": 455}
+    with pytest.raises(error, match="drifted or was reused"):
+        identity(stale, proc_root=tmp_path / "proc", getpgid=lambda _pid: 123)
+    with pytest.raises(error, match="drifted or was reused"):
+        identity(expected, proc_root=tmp_path / "proc", getpgid=lambda _pid: 999)
+    (proc / "stat").unlink()
+    with pytest.raises(error, match="exited before"):
+        identity(expected, proc_root=tmp_path / "proc", getpgid=lambda _pid: 123)

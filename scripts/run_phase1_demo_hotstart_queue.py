@@ -768,11 +768,88 @@ except ParentError as exc:
 '''
 
 
+SNAPSHOT_RECHECK_PROGRAM = r'''import base64
+import hashlib
+import json
+import os
+from pathlib import Path
+import stat
+import sys
+
+
+class RecheckError(RuntimeError):
+    pass
+
+
+def recheck(item):
+    path = Path(item["path"])
+    if not path.is_absolute() or not str(path).startswith("/workspace/"):
+        raise RecheckError(f"{item['label']} path is outside /workspace")
+    current = Path(path.anchor)
+    for index, part in enumerate(path.parts[1:]):
+        current = current / part
+        try:
+            info = current.lstat()
+        except FileNotFoundError as exc:
+            raise RecheckError(f"{item['label']} is missing") from exc
+        if stat.S_ISLNK(info.st_mode):
+            raise RecheckError(f"{item['label']} contains a symlink component")
+        if index < len(path.parts[1:]) - 1 and not stat.S_ISDIR(info.st_mode):
+            raise RecheckError(f"{item['label']} parent is not a directory")
+    fd = os.open(path, os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0))
+    try:
+        before = os.fstat(fd)
+        if (
+            not stat.S_ISREG(before.st_mode) or before.st_size <= 0
+            or stat.S_IMODE(before.st_mode) & 0o222
+        ):
+            raise RecheckError(f"{item['label']} is not a read-only regular file")
+        digest = hashlib.sha256()
+        size = 0
+        while True:
+            chunk = os.read(fd, 1024 * 1024)
+            if not chunk:
+                break
+            digest.update(chunk)
+            size += len(chunk)
+        after = os.fstat(fd)
+        signature = lambda value: (
+            value.st_dev, value.st_ino, value.st_size, value.st_mtime_ns
+        )
+        if signature(before) != signature(after) or size != before.st_size:
+            raise RecheckError(f"{item['label']} changed while hashing")
+    finally:
+        os.close(fd)
+    observed = digest.hexdigest()
+    if observed != item["sha256"]:
+        raise RecheckError(f"{item['label']} SHA differs from activated queue")
+    return {"label": item["label"], "path": str(path), "sha256": observed}
+
+
+try:
+    if len(sys.argv) != 2:
+        raise RecheckError("one base64 JSON specification is required")
+    spec = json.loads(base64.b64decode(sys.argv[1], validate=True))
+    files = spec.get("files")
+    if not isinstance(files, list) or len(files) != 4:
+        raise RecheckError("exactly four parent snapshot files are required")
+    result = [recheck(item) for item in files]
+    print(json.dumps({
+        "status": "PARENT_SNAPSHOT_RECHECK_OK", "job_id": spec["job_id"],
+        "files": result,
+    }, sort_keys=True))
+except (RecheckError, OSError, KeyError, TypeError, ValueError, json.JSONDecodeError) as exc:
+    print(f"PARENT_SNAPSHOT_RECHECK_ERROR: {exc}", file=sys.stderr)
+    raise SystemExit(2)
+'''
+
+
 FIRST_ITER_PROGRAM = r'''import base64
 import hashlib
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import sys
 import time
@@ -833,6 +910,52 @@ def read_json(value, label):
     if not isinstance(document, dict):
         raise ProofError(f"{label} is not a mapping")
     return document
+
+
+def proc_identity(expected, proc_root="/proc", getpgid=os.getpgid):
+    pid = expected.get("pid")
+    pgid = expected.get("pgid")
+    starttime = expected.get("starttime_ticks")
+    argv = expected.get("argv")
+    if (
+        type(pid) is not int or pid <= 0 or type(pgid) is not int or pgid != pid
+        or type(starttime) is not int or starttime <= 0
+        or not isinstance(argv, list) or not argv
+        or not all(type(value) is str for value in argv)
+    ):
+        raise ProofError("run binding process identity is incomplete")
+    root = Path(proc_root) / str(pid)
+    try:
+        stat_text = (root / "stat").read_text(encoding="utf-8")
+        cmdline_raw = (root / "cmdline").read_bytes()
+        observed_pgid = getpgid(pid)
+    except (FileNotFoundError, ProcessLookupError) as exc:
+        raise ProofError("bound trainer exited before a post-resume learning iteration") from exc
+    close = stat_text.rfind(")")
+    fields = [] if close < 0 else stat_text[close + 2:].split()
+    if len(fields) <= 19 or not fields[19].isdigit():
+        raise ProofError("bound trainer /proc stat is malformed")
+    if fields[0] in {"Z", "X", "x"}:
+        raise ProofError("bound trainer exited before a post-resume learning iteration")
+    observed_starttime = int(fields[19])
+    observed_argv = [
+        value.decode("utf-8", "surrogateescape")
+        for value in cmdline_raw.split(b"\0") if value
+    ]
+    if observed_pgid != pgid or observed_starttime != starttime:
+        raise ProofError("bound trainer PID/PGID/starttime identity drifted or was reused")
+    if observed_argv != argv:
+        raise ProofError("bound trainer /proc argv differs from run binding")
+    return {"pid": pid, "pgid": pgid, "starttime_ticks": starttime}
+
+
+def first_post_resume_iteration(log):
+    iterations = [
+        int(match.group(1))
+        for match in re.finditer(r"Learning iteration\s+(\d+)(?:/\d+)?", log)
+    ]
+    later = [value for value in iterations if value > 3500]
+    return None if not later else min(later)
 
 
 def envelope(value, label, schema):
@@ -903,8 +1026,9 @@ def main():
         if bound.get(key) != value:
             raise ProofError(f"run binding {key} mismatch")
     process = bound.get("process")
-    if not isinstance(process, dict) or type(process.get("pid")) is not int or process.get("pgid") != process.get("pid"):
+    if not isinstance(process, dict) or process.get("argv") != argv:
         raise ProofError("run binding lacks exact isolated PID/PGID")
+    exact_process = proc_identity(process)
     hard_path = str(Path(bound["rsl_log_dir"]) / "params/training_contract.json")
     hard = read_json(hard_path, "child hard contract")
     if hard.get("schema_version") != 3:
@@ -922,22 +1046,31 @@ def main():
     )
     mismatch = "[train.py] WARNING: explicit hard-contract mismatch override:"
     while True:
+        exact_process = proc_identity(process)
         try:
             log = read_bytes(spec["run_log_path"], "run log").decode("utf-8", "replace")
         except ProofError:
             log = ""
-        if expected_resume in log and mismatch in log:
+        first_later_iteration = first_post_resume_iteration(log)
+        if (
+            expected_resume in log and mismatch in log
+            and first_later_iteration is not None
+        ):
+            exact_process = proc_identity(process)
             break
         if time.monotonic() >= deadline:
-            raise ProofError("run log lacks strict resume and explicit mismatch proof")
+            raise ProofError(
+                "run log lacks strict resume, mismatch, or Learning iteration > 3500"
+            )
         time.sleep(1)
     content = {
         "schema_version": 1, "status": "strict_full_state_resume_proven",
         "job_id": spec["job_id"], "claim_content_sha256": digest,
         "run_binding_content_sha256": binding["content_sha256"],
-        "process": {key: process.get(key) for key in ("pid", "pgid", "starttime_ticks")},
+        "process": exact_process,
         "checkpoint_path": spec["checkpoint_path"], "parent_iteration": 3500,
         "optimizer": "resumed", "explicit_hard_contract_mismatch": True,
+        "first_observed_learning_iteration": first_later_iteration,
         "expected_child_lineage_exact": 0,
         "child_hard_contract_path": hard_path,
         "qdot_weight": spec["qdot_weight"], "face_weight": spec["face_weight"],
@@ -1344,6 +1477,38 @@ def _launch_script(queue: dict[str, Any], job: dict[str, Any], slot: Any) -> str
         json.dumps(proof_spec, sort_keys=True).encode("utf-8")
     ).decode("ascii")
     proof_command = shlex.join(["python3", "-c", FIRST_ITER_PROGRAM, proof_encoded])
+    parent = queue["parents"][job["warm_start"]["parent"]]
+    snapshot_recheck_spec = {
+        "job_id": job["id"],
+        "files": [
+            {
+                "label": "parent checkpoint",
+                "path": parent["snapshot_checkpoint_path"],
+                "sha256": parent["checkpoint_sha256"],
+            },
+            {
+                "label": "parent hard contract",
+                "path": parent["snapshot_hard_contract_path"],
+                "sha256": parent["hard_contract_sha256"],
+            },
+            {
+                "label": "parent queue claim",
+                "path": parent["snapshot_queue_claim_path"],
+                "sha256": parent["queue_claim_file_sha256"],
+            },
+            {
+                "label": "parent run binding",
+                "path": parent["snapshot_run_binding_path"],
+                "sha256": parent["run_binding_file_sha256"],
+            },
+        ],
+    }
+    snapshot_recheck_encoded = base64.b64encode(
+        json.dumps(snapshot_recheck_spec, sort_keys=True).encode("utf-8")
+    ).decode("ascii")
+    snapshot_recheck_command = shlex.join(
+        ["python3", "-c", SNAPSHOT_RECHECK_PROGRAM, snapshot_recheck_encoded]
+    )
     source_hash_checks = "\n".join(
         "test \"$(sha256sum "
         + shlex.quote(f"{source}/{relative}")
@@ -1355,7 +1520,7 @@ def _launch_script(queue: dict[str, Any], job: dict[str, Any], slot: Any) -> str
     launch = shlex.join([launcher, f"{run_dir}/run.log"]) + " " + (
         Q._child_env_command(argv, slot.gpu)
     ) + f" {Q.GPU_LAUNCH_LOCK_FD}>&-"
-    body = source_hash_checks + "\n" + Q._doctor_body(
+    body = snapshot_recheck_command + "\n" + source_hash_checks + "\n" + Q._doctor_body(
         queue, job, slot, training_argv=argv
     ) + f"""
 count=$(nvidia-smi -i {slot.gpu} --query-compute-apps=pid --format=csv,noheader,nounits | awk {shlex.quote(Q.UNIQUE_NUMERIC_PID_AWK)})
