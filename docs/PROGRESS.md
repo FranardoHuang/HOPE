@@ -13,6 +13,13 @@
 
 ## 2026-07-15
 
+- 15:33 UTC 只读复核确认 Pod2 GPU0/GPU1 已完全空闲；GPU2 的 qdot/V1+V2/control 三条 10000-update
+  长训约到 `3193/3201/3205`，latest `model_3100.pt` 的 finite/schema-3/fresh lineage/contract/claim
+  均 exact，fatal0。真实 exact-hit 仍稀疏，当前不能定论。已预注册六条共同 seed3 的长曲线来补齐
+  模仿 `2×2`、关节速度 `0/-1/-2.5/-5` 与脚部朝向 `0/-0.3/-0.6`；按 GPU0/GPU1 逐圈发射，
+  稀疏击球样本不足时不早停。见
+  [实验卷宗](experiments/2026-07/EXP-P1-LONG-SCALEOUT-SIX-ARM.md)。
+
 - Pod2 GPU2 的无随挥回放长曲线已真正点火：qdot/V1+V2/control-retry exact PGID
   `411519/412204/412899` 均返回 `KIT_BOOT_READY`，04:15 UTC 分别到 iter `24/9/2`，fatal0 且
   claim/binding present；GPU2 `97%`、17154 MiB。GPU0/1 的 Yikang PID `379550/396374` 未触碰。

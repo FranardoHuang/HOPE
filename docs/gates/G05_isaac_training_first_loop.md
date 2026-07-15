@@ -2457,3 +2457,16 @@ treatment，再允许普通对照逐字相同配方的唯一 retry-v2；任一�
 `411519/412204/412899`。2026-07-15 04:15 UTC 只读复核分别为 iter `24/9/2`，fatal0、claim/binding
 present；Pod2 GPU2 为 `97%` / 17154 MiB，GPU0/1 的 Yikang PID 未变化。尚无 model-200 或 activation
 receipt，故只把训练状态从 ready 改为 running，G05 仍为 `Partial`。
+
+#### 两张新空卡的六格长曲线补全
+
+2026-07-15 15:33 UTC 的独立只读复核确认 Pod2 GPU0/GPU1 已无任何 compute PID，GPU2 三条现役长训
+仍正常到约 `3.2k`、fatal0，latest `model_3100.pt` 均为 finite/schema-3/fresh lineage 且 contract/claim
+exact。当前 exact-hit 仍只有约 `0–1%`，所以不能用 3.2k 的瞬时指标定胜负。
+
+新增六条同 source/动作/题库/seed 的 10000-update 单 seed 格，按 GPU0→GPU1 逐圈发射：单独放开手腕
+线速度模仿、`qdot=-1`、单独把击球窗模仿降为四分之一、`qdot=-2.5`、脚部朝向惩罚 `0`、脚部朝向
+惩罚 `-0.6`。它们与 GPU2 普通对照/`qdot=-5`/两项模仿同时放松组成三个不同问题，不互相冒充
+对照，也不复制 seed。200/500/1000 只能判结构与激活；只有真实击球后才有意义的指标在达到最少
+eligible hit 样本前必须继续。队列/host 回归通过后才允许点火，G05 保持 `Partial`。详见
+[实验卷宗](../experiments/2026-07/EXP-P1-LONG-SCALEOUT-SIX-ARM.md)。
