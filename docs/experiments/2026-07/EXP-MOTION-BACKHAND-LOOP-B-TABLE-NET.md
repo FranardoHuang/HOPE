@@ -1,6 +1,6 @@
 # EXP-MOTION-BACKHAND-LOOP-B-TABLE-NET — 反手拉 B 整轨桌网余隙门
 
-- 状态：`source_static_pass_runtime_not_run`
+- 状态：`v1_runtime_harness_false_reject_v2_source_static_pass_runtime_pending`
 - 阶段/轴：新动作库 / 整轨桌板、网与网柱几何余隙
 - 人类负责人：Franco
 - 执行者：Codex
@@ -20,7 +20,10 @@
 
 预注册
 [`motion_backhand_loop_b_table_net_clearance_prereg_20260715.json`](../../../configs/motion_backhand_loop_b_table_net_clearance_prereg_20260715.json)
-SHA-256 为 `9d7126bc09166bc428d2c79327417e250384ff45190c09d7ee86d90469eeb1e6`。它逐字绑定：
+当前 schema-v2 SHA-256 为
+`1c73faf9034c1ed5136641ff4594917d5d5f66a5c93e92b35d300107ae9ec6b4`。失败的 schema-v1
+计划 SHA-256 `9d7126bc...eb1e6` 冻结在 `main@9abf7fe`，不得再运行。v2 不改动作、桌位、阈值、采样、
+输入 lineage 或输出授权，只修正 MuJoCo 编译后的全局 geom 编号语义。当前计划逐字绑定：
 
 - B schema-2 NPZ SHA-256 `e2eb99e6...d28cc`；
 - vendor L1 certificate SHA-256 `6840df34...db60`，且运行消费前必须读到
@@ -47,10 +50,14 @@ p_schema2_mjcf = p_HOPE + [0.5, 1.525/2, 0.76]
 
 validator
 [`audit_motion_schema2_table_net_clearance.py`](../../../scripts/audit_motion_schema2_table_net_clearance.py)
-SHA-256 为 `1ef347ba...39a7a`。它继承 vendor L1 已验证的 root 线性、四元数 shortest-arc slerp 和关节线性
+SHA-256 为 `f294a1fd...b06cd`。它继承 vendor L1 已验证的 root 线性、四元数 shortest-arc slerp 和关节线性
 插值，将 `151 @ 50 Hz` 扫成 `1201 @ 400 Hz` 有限样本。运行时把四个静态 box 追加到 canonical
-`worldbody` 的末尾，通过 in-memory XML + exact 74-file mesh map 编译；canonical robot geom ID、qpos0、
-拓扑和 compiled collision SHA 必须保持不变。
+`worldbody`，通过 in-memory XML + exact 74-file mesh map 编译。MuJoCo 会先编号一个 body 直属的全部 geom，
+再递归其 child body；因此四个新增 world geom 必然占 `1..4`，floor 保持 `0`，robot geom 的全局编号整体
+精确 `+4`。v2 只归一化这个已证明的 bookkeeping shift：它同时要求 obstacle ID=`1..4`、所有 canonical
+robot geom 的相对顺序/名字不变、37 个 enabled collision geom 精确 `+4`、root/joint topology、`qpos0`
+以及全部 collision array row/mesh 顶点逐字等价，并用实际 augmented row 在 canonical ID 下重算冻结的
+compiled collision SHA `18e7f6ff...386e5`。任何其他重排或数值漂移仍 fail closed。
 
 每个样本对 37 个 enabled robot collision geom 与 4 个障碍做 `37×4=148` 对检查。球拍与拍柄另做汇总，
 但不从全机器人门中排除。hard 判定直接使用 exact MuJoCo saturation predicate：距离 `<5 mm` 就否决整条
@@ -69,11 +76,20 @@ bracket（已扣除 saturation predicate 的 `1e-12 m` 数值裕量），不能�
 
 ```bash
 python3 -m pytest -q tests/test_motion_backhand_loop_b_table_net_clearance.py
-# 29 passed
+# 36 passed
+
+python3 -m pytest -q \
+  tests/test_motion_backhand_loop_bc_schema2_fk_prereg.py \
+  tests/test_motion_backhand_loop_bc_schema2_fk_consume_activation.py \
+  tests/test_motion_backhand_loop_b_l0_static.py \
+  tests/test_motion_backhand_loop_b_l0_static_v2.py \
+  tests/test_motion_backhand_loop_b_vendor_l1_safety.py \
+  tests/test_motion_backhand_loop_b_table_net_clearance.py
+# 137 passed
 
 python3 scripts/audit_motion_schema2_table_net_clearance.py \
   --prereg configs/motion_backhand_loop_b_table_net_clearance_prereg_20260715.json \
-  --expected-prereg-sha256 9d7126bc09166bc428d2c79327417e250384ff45190c09d7ee86d90469eeb1e6 \
+  --expected-prereg-sha256 1c73faf9034c1ed5136641ff4594917d5d5f66a5c93e92b35d300107ae9ec6b4 \
   static
 # PASS ... source_exact=true runtime_audit=false no_write=true continuous_time_claim=false
 ```
@@ -102,9 +118,26 @@ private module entry；运行环境检查已改为本地 snapshot 版本，不�
 旋转/平移漂移、漏网柱、桌板厚度漂移、duplicate obstacle name、vendor L1 未授权、continuous-time 假声明、
 阈值放宽、dry-run 写文件和 certificate overwrite。
 
+## 首次 runtime 假拒绝与 schema-v2 修复
+
+2026-07-15 Pod2 的第一次 CPU `dry-run` 在真正 1201 帧轨迹循环前以 rc2 停在
+`in-memory augmentation reordered canonical robot geoms`；此前仅发现输出父目录缺失，操作者建立空的
+真实目录后再运行才暴露此点。两次都没有 certificate/output。canonical XML 只有 floor 是 world geom，
+robot 全在 `pelvis_link` child body；augmenter 确实只向同一个 worldbody 加四个 inert box。MuJoCo 编译
+顺序是先列 body 自身 geom 再下钻 child body，所以新增 box 在 XML 中写在 robot body 后面，也仍会在
+compiled model 中插入 floor 与 robot 之间。旧门拿 canonical robot ID 去 augmented model 的同一数字位置
+比名字，实际读到的正是四个新增障碍；这是 harness 对全局编号的错误假设，不是 B、MJCF 或 37 个 robot
+collision geom 漂移。
+
+schema-v2 不接受任意 name lookup 或任意 permutation，只接受上述精确 `+4` 编号变换。反例证明 robot
+collision row 改 `1e-9`、obstacle ID 不是 `1..4`、37 个 robot collision identity/order 不是 canonical
+IDs `+4`、topology count、root/joint binding、`qpos0` 或 robot name order 任一变化都仍拒绝。当前仅
+source/static 通过；合入 main 并独立 review 前禁止重试 runtime。
+
 ## 当前决定与下一步
 
-源码门通过，只授权在 code review 后使用 exact `/workspace/hope_mjeval_venv` 做一次无写 `dry-run`。
+schema-v2 源码门通过，只授权在合入 main 且 code review 后使用 exact `/workspace/hope_mjeval_venv`
+再做一次无写 `dry-run`。
 目前没有 runtime 结果、没有 table/net certificate，也没有动作晋级；G08 保持 Partial。`dry-run` 必须先
 验证现存 L1 certificate 的 exact SHA/authorization、输出父目录真实存在且 target absent。通过后才能执行
 唯一一次 `O_EXCL` audit；完整命令和失败处理见

@@ -13,6 +13,15 @@
 
 ## 2026-07-15
 
+- B 桌网门的首次 Pod2 CPU `dry-run` 在 1201 帧循环前因 geom ID 假设 rc2 fail closed、没有输出：MuJoCo
+  会把新增的四个 worldbody geom 编为 `1..4`，故 child-body robot geom 只发生确定性整体 `+4`，不是
+  37 个碰撞体漂移。schema-v2 仅归一化这个精确 shift，并继续逐项绑定 robot 顺序/名字、topology、qpos0、
+  collision row/mesh 与 frozen collision SHA；`1e-9` 漂移和非 `1..4/+4` 反例均拒绝。focused
+  `36 passed`、完整 B lineage chain `137 passed`、source/static PASS；合入并 review 前不重跑，G08 仍
+  Partial。见
+  [实验卷宗](experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-TABLE-NET.md)和
+  [运行操作](operations/run_motion_backhand_loop_b_table_net_clearance.md)。
+
 - Franco 反手拉 B 的桌网整轨门已通过独立 source/static 红队：冻结 validator/plan、runtime-order 名字双射、
   四个碰撞障碍和 `1201×37×4` 有限密扫均内容绑定，`<5 mm` 为不可补偿 hard fail；focused `29 passed`、
   完整 lineage chain `130 passed`。这只允许进入 Pod2 CPU 的只读 dry-run，尚无 runtime certificate，

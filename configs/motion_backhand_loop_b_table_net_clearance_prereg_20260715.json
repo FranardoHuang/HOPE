@@ -1,6 +1,6 @@
 {
   "schema_version": 1,
-  "plan_id": "motion-franco-backhand-loop-b-table-net-clearance-20260715-v1",
+  "plan_id": "motion-franco-backhand-loop-b-table-net-clearance-20260715-v2",
   "status": "preregistered_source_gate_pass_runtime_audit_not_run",
   "human_owner": "Franco",
   "executor": "Codex",
@@ -8,8 +8,8 @@
   "asset_id": "franco_backhand_loop_b",
   "validator": {
     "path": "scripts/audit_motion_schema2_table_net_clearance.py",
-    "bytes": 96390,
-    "sha256": "1ef347ba50966bf61a4edc7fd0f0cdadd9270a510e9b2fefbeb73205f6c39a7a"
+    "bytes": 102909,
+    "sha256": "f294a1fd0b499e3f048c6dd60323418dbe49fbeb70c76c0efa0f5cb7cc2b06cd"
   },
   "frozen_vendor_l1": {
     "certificate": {
@@ -149,7 +149,7 @@
     "reporting_clearance_bisection_tolerance_m": 0.000001,
     "danger_propagation": "any robot-obstacle dense sample below 5mm fails the whole asset and marks both adjacent source frames",
     "hard_fail_is_noncompensable": true,
-    "model_augmentation": "append four exact world-fixed box geoms after the canonical worldbody children and compile from in-memory XML plus exact 74-file asset map",
+    "model_augmentation": "append four exact world-fixed box geoms to the canonical worldbody and compile from in-memory XML plus exact 74-file asset map; MuJoCo indexes all worldbody geoms before child-body robot geoms, so require floor ID 0, obstacle IDs 1..4, exact +4 robot-geom index shift, exact robot relative order/name/topology/qpos/collision arrays, and recompute the frozen collision SHA after normalizing only that proven global ID shift",
     "mj_step_calls": 0
   },
   "output_contract": {

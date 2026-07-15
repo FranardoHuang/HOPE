@@ -578,13 +578,13 @@ helper。dense 704 正是 source frame 88；runtime column 23 的 elbow `1.18046
 permutation，duplicate/missing/extra/order-contract drift 均 fail closed；没有放宽 range、修改 B 或启用
 C。修复后 runtime/certificate 结果见本节上方；原 dense704 只作为假拒绝根因证据。
 
-B 的下一道整轨桌网余隙门现已完成 source/static 预注册，但**尚未运行 exact MuJoCo runtime**。它逐字绑定
+B 的下一道整轨桌网余隙门现已完成 source/static 预注册，并做过一次未进入轨迹循环的 exact MuJoCo
+`dry-run`；该次只暴露 harness 假拒绝，尚无动作 runtime 结论。它逐字绑定
 现存 vendor L1 certificate `6840df34...db60`、B NPZ、L1 plan/validator、vendor MJCF/75-file closure，
 并在消费前要求 certificate 的 `table_net_authorized=true`。坐标只允许 canonical HOPE 桌坐标到
 schema-2/MJCF 世界的无旋转纯平移 `(+0.5,+0.7625,+0.76)`；因此桌板、网和两根网柱在同一冻结 tracking
 桌位中检查，而不是从空挥视频背景猜 capture extrinsic。validator 把四个 world-fixed box 追加到 canonical
-worldbody 末尾，在内存中用 exact 74-file asset map 编译，要求原 37 个 enabled robot geom ID、qpos0、拓扑
-和 compiled collision SHA 不变；每个 `1201 @ 400 Hz` 有限样本检查 `37×4=148` 个 pair，球拍/拍柄另做
+worldbody，在内存中用 exact 74-file asset map 编译；每个 `1201 @ 400 Hz` 有限样本检查 `37×4=148` 个 pair，球拍/拍柄另做
 汇总但不从全机器人门排除。`<5 mm` 是 exact saturation-predicate hard fail，不能由其他帧/reward 补偿；
 有限密扫仍不是数学连续时间证明，且没有动力学、训练或真机含义。首次 source 版本被红队证明存在
 certificate/NPZ/MJCF 的 check→reopen 和输出 parent path-swap 窗口，因此明确 NO-MERGE；修复版把每个
@@ -596,9 +596,14 @@ fail-closed 负测。第二次红队又证明完整 phase/self-collision module 
 的本地 MuJoCo saturation/bisection kernel，不再执行 `virtual_return_scorer`/`audit_motion_npz` 等 transitive
 module；冻结 source validator 调用后还原完整 `sys.path`/`sys.modules`，legacy L0 runtime module 也不再
 执行。伪造 `sys.modules` 注入已 fail closed；二分 midpoint 与 certified lower bracket 分字段，网柱尺寸和
-左右 placement 也新增 exact `table_tennis_env_cfg.py::build_net_post_cfg` source binding。dependency-light
-专项 `29 passed`、source/static 命令 PASS；runtime
-`dry-run/audit`、certificate 与动作晋级均未发生，所以 G08 保持 Partial。
+左右 placement 也新增 exact `table_tennis_env_cfg.py::build_net_post_cfg` source binding。旧版
+dependency-light 专项 `29 passed`、source/static 命令 PASS；首次 Pod2 `dry-run` 随后证明旧 harness 把
+global geom ID 当成 robot identity：MuJoCo 先编号 worldbody 自身的 floor+四个新增障碍，所以所有
+child-body robot geom 确定性整体 `+4`，并非 robot 几何漂移。schema-v2 只接受 floor=`0`、
+obstacle=`1..4` 和 robot 精确 `+4`；同时逐项守住 robot 相对顺序/名字、root/joint topology、`qpos0`、
+37 个 collision row/mesh 与 canonical collision SHA，任意其他 permutation 或 `1e-9` collision drift
+仍拒绝。v2 focused `36 passed`、完整 B lineage chain `137 passed`、source/static PASS；合入后的 runtime
+重跑、certificate 与动作晋级均未发生，所以 G08 保持 Partial。
 见[桌网实验卷宗](../experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-TABLE-NET.md)和
 [操作文档](../operations/run_motion_backhand_loop_b_table_net_clearance.md)。
 

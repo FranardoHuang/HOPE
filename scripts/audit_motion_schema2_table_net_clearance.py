@@ -35,7 +35,7 @@ import numpy as np
 
 
 REPO_ROOT = Path(__file__).resolve().parents[1]
-PLAN_ID = "motion-franco-backhand-loop-b-table-net-clearance-20260715-v1"
+PLAN_ID = "motion-franco-backhand-loop-b-table-net-clearance-20260715-v2"
 PLAN_STATUS = "preregistered_source_gate_pass_runtime_audit_not_run"
 ASSET_ID = "franco_backhand_loop_b"
 CERTIFICATE_STATUS = "complete_cpu_dense_table_net_clearance_pass_dynamics_blocked"
@@ -69,6 +69,17 @@ PURE_PHASE_FUNCTIONS = (
     "_qpos_from_payload",
 )
 DISTANCE_SATURATION_EPSILON_M = 1.0e-12
+ROBOT_GEOM_INDEX_SHIFT = len(OBSTACLE_NAMES)
+COLLISION_GEOM_ARRAYS = (
+    "geom_type",
+    "geom_bodyid",
+    "geom_contype",
+    "geom_conaffinity",
+    "geom_dataid",
+    "geom_size",
+    "geom_pos",
+    "geom_quat",
+)
 
 
 class TableNetError(ValueError):
@@ -816,8 +827,11 @@ def _expected_audit_contract() -> dict[str, Any]:
         ),
         "hard_fail_is_noncompensable": True,
         "model_augmentation": (
-            "append four exact world-fixed box geoms after the canonical worldbody children and "
-            "compile from in-memory XML plus exact 74-file asset map"
+            "append four exact world-fixed box geoms to the canonical worldbody and compile from "
+            "in-memory XML plus exact 74-file asset map; MuJoCo indexes all worldbody geoms before "
+            "child-body robot geoms, so require floor ID 0, obstacle IDs 1..4, exact +4 robot-geom "
+            "index shift, exact robot relative order/name/topology/qpos/collision arrays, and "
+            "recompute the frozen collision SHA after normalizing only that proven global ID shift"
         ),
         "mj_step_calls": 0,
     }
@@ -1481,6 +1495,165 @@ def _compile_canonical_model(
         raise TableNetError(f"cannot compile immutable canonical vendor MJCF bytes: {exc}") from exc
 
 
+def _collision_contract_with_canonical_geom_ids(
+    ground: Any,
+    model: Any,
+    *,
+    canonical_geom_ids: Sequence[int],
+    actual_geom_ids: Sequence[int],
+) -> str:
+    """Hash actual robot rows under their proven canonical global geom IDs.
+
+    MuJoCo assigns all geoms attached directly to ``worldbody`` before geoms in
+    child bodies, independent of their XML sibling position.  Adding four inert
+    world geoms therefore shifts every robot geom ID by four without changing a
+    robot byte.  The frozen upstream hash includes the selected global IDs, so
+    this view normalizes only that already-verified bookkeeping shift.  Every
+    collision array row still comes from the augmented compiled model.
+    """
+
+    canonical = tuple(int(value) for value in canonical_geom_ids)
+    actual = tuple(int(value) for value in actual_geom_ids)
+    if (
+        len(canonical) != len(actual)
+        or not canonical
+        or len(set(canonical)) != len(canonical)
+        or len(set(actual)) != len(actual)
+        or min(canonical) < 0
+        or min(actual) < 0
+        or max(canonical) >= int(model.ngeom)
+        or max(actual) >= int(model.ngeom)
+    ):
+        raise TableNetError("canonical/actual robot geom ID projection is invalid")
+
+    projected: dict[str, np.ndarray] = {}
+    canonical_index = np.asarray(canonical, dtype=np.int64)
+    actual_index = np.asarray(actual, dtype=np.int64)
+    for label in COLLISION_GEOM_ARRAYS:
+        source = np.asarray(getattr(model, label))
+        value = source.copy()
+        value[canonical_index] = source[actual_index].copy()
+        projected[label] = value
+
+    class _CanonicalGeomIdView:
+        def __getattr__(self, name: str) -> Any:
+            if name in projected:
+                return projected[name]
+            return getattr(model, name)
+
+    return str(
+        ground._compiled_collision_contract_sha256(
+            _CanonicalGeomIdView(), canonical
+        )
+    )
+
+
+def validate_augmented_robot_identity(
+    mujoco: Any,
+    ground: Any,
+    canonical_binding: Any,
+    augmented_binding: Any,
+    obstacle_ids: Mapping[str, int],
+    *,
+    expected_collision_sha256: str,
+) -> dict[str, Any]:
+    """Accept only the deterministic four-ID world-geom insertion shift."""
+
+    canonical_model = canonical_binding.model
+    model = augmented_binding.model
+    if int(canonical_binding.ground_geom_id) != 0 or int(augmented_binding.ground_geom_id) != 0:
+        raise TableNetError("canonical and augmented floor geom must retain global ID 0")
+    canonical_world_geoms = tuple(
+        gid
+        for gid in range(int(canonical_model.ngeom))
+        if int(canonical_model.geom_bodyid[gid]) == 0
+    )
+    if canonical_world_geoms != (0,):
+        raise TableNetError("canonical MJCF world geom set changed; expected only floor ID 0")
+    expected_obstacle_ids = tuple(range(1, ROBOT_GEOM_INDEX_SHIFT + 1))
+    actual_obstacle_ids = tuple(int(obstacle_ids[name]) for name in OBSTACLE_NAMES)
+    if actual_obstacle_ids != expected_obstacle_ids:
+        raise TableNetError(
+            "MuJoCo worldbody geom indexing changed; expected obstacle IDs 1..4"
+        )
+
+    count_fields = ("nbody", "njnt", "nq", "nv", "nu", "na")
+    if any(int(getattr(model, name)) != int(getattr(canonical_model, name)) for name in count_fields):
+        raise TableNetError("in-memory augmentation changed robot model topology counts")
+    if not np.array_equal(model.qpos0, canonical_model.qpos0):
+        raise TableNetError("in-memory augmentation changed canonical qpos0")
+    binding_fields = (
+        "root_joint_id",
+        "root_body_id",
+        "root_qpos_address",
+        "joint_ids",
+        "joint_qpos_addresses",
+    )
+    if any(getattr(augmented_binding, name) != getattr(canonical_binding, name) for name in binding_fields):
+        raise TableNetError("in-memory augmentation changed robot root/joint topology binding")
+
+    shift = ROBOT_GEOM_INDEX_SHIFT
+    for canonical_id in range(1, int(canonical_model.ngeom)):
+        actual_id = canonical_id + shift
+        old = mujoco.mj_id2name(canonical_model, mujoco.mjtObj.mjOBJ_GEOM, canonical_id)
+        new = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, actual_id)
+        if old != new:
+            raise TableNetError(
+                "in-memory augmentation changed canonical robot geom relative order/name"
+            )
+    for label in COLLISION_GEOM_ARRAYS:
+        canonical_rows = np.asarray(getattr(canonical_model, label))[1:]
+        actual_rows = np.asarray(getattr(model, label))[1 + shift :]
+        if not np.array_equal(actual_rows, canonical_rows):
+            raise TableNetError(
+                f"in-memory augmentation changed canonical robot {label} rows"
+            )
+
+    canonical_robot_ids = tuple(int(value) for value in canonical_binding.collision_geom_ids)
+    actual_robot_ids = tuple(int(value) for value in augmented_binding.collision_geom_ids)
+    expected_actual_ids = tuple(value + shift for value in canonical_robot_ids)
+    if actual_robot_ids != expected_actual_ids or len(actual_robot_ids) != 37:
+        raise TableNetError(
+            "in-memory augmentation changed enabled robot collision identity/order"
+        )
+    canonical_names = tuple(
+        mujoco.mj_id2name(canonical_model, mujoco.mjtObj.mjOBJ_GEOM, geom_id)
+        for geom_id in canonical_robot_ids
+    )
+    actual_names = tuple(
+        mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, geom_id)
+        for geom_id in actual_robot_ids
+    )
+    if (
+        any(name is None for name in canonical_names)
+        or len(set(canonical_names)) != len(canonical_names)
+        or actual_names != canonical_names
+    ):
+        raise TableNetError("in-memory augmentation changed 37 named robot collision geoms")
+
+    normalized_sha = _collision_contract_with_canonical_geom_ids(
+        ground,
+        model,
+        canonical_geom_ids=canonical_robot_ids,
+        actual_geom_ids=actual_robot_ids,
+    )
+    if normalized_sha != expected_collision_sha256:
+        raise TableNetError(
+            "augmented model changed compiled robot collision contract after exact ID normalization"
+        )
+    return {
+        "canonical_world_geom_ids": list(canonical_world_geoms),
+        "obstacle_geom_ids": list(actual_obstacle_ids),
+        "robot_geom_index_shift": shift,
+        "canonical_robot_collision_geom_ids": list(canonical_robot_ids),
+        "augmented_robot_collision_geom_ids": list(actual_robot_ids),
+        "robot_relative_order_and_names_preserved": True,
+        "robot_topology_and_qpos_preserved": True,
+        "robot_collision_rows_preserved": True,
+        "normalized_robot_collision_contract_sha256": normalized_sha,
+    }
+
+
 def _bind_compiled_model(
     mujoco: Any, ground: Any, model: Any, data: Any, *, ground_geom_name: str
 ) -> Any:
@@ -1578,7 +1751,7 @@ def _compile_augmented_model(
     canonical_source: FileSnapshot,
     mesh_sources: Mapping[str, FileSnapshot],
     plan: Mapping[str, Any],
-) -> tuple[Any, Any, dict[str, int], dict[str, Any]]:
+) -> tuple[Any, dict[str, int], dict[str, Any]]:
     canonical_xml = canonical_source.data
     augmented_xml = augment_mjcf_xml(canonical_xml, plan["obstacle_geometry"])
     assets = {name: snapshot.data for name, snapshot in mesh_sources.items()}
@@ -1592,21 +1765,12 @@ def _compile_augmented_model(
     canonical_model = canonical_binding.model
     if (
         int(model.ngeom) != int(canonical_model.ngeom) + 4
-        or int(model.nbody) != int(canonical_model.nbody)
-        or int(model.nq) != int(canonical_model.nq)
-        or int(model.nv) != int(canonical_model.nv)
-        or not np.array_equal(model.qpos0, canonical_model.qpos0)
     ):
-        raise TableNetError("in-memory augmentation changed robot model topology or qpos0")
-    robot_ids = tuple(int(value) for value in canonical_binding.collision_geom_ids)
-    for geom_id in robot_ids:
-        old = mujoco.mj_id2name(canonical_model, mujoco.mjtObj.mjOBJ_GEOM, geom_id)
-        new = mujoco.mj_id2name(model, mujoco.mjtObj.mjOBJ_GEOM, geom_id)
-        if old != new:
-            raise TableNetError("in-memory augmentation reordered canonical robot geoms")
-    collision_sha = ground._compiled_collision_contract_sha256(model, robot_ids)
-    if collision_sha != plan["a3_model"]["compiled_collision_contract_sha256"]:
-        raise TableNetError("augmented model changed compiled robot collision contract")
+        raise TableNetError("in-memory augmentation did not add exactly four geoms")
+    augmented_binding = _bind_compiled_model(
+        mujoco, ground, model, data, ground_geom_name="floor"
+    )
+    robot_ids = tuple(int(value) for value in augmented_binding.collision_geom_ids)
     obstacle_ids: dict[str, int] = {}
     mujoco.mj_forward(model, data)
     expected_rows = {row["name"]: row for row in _obstacle_rows(plan["obstacle_geometry"])}
@@ -1632,17 +1796,29 @@ def _compile_augmented_model(
         ):
             raise TableNetError(f"augmented obstacle {name} extents changed")
         obstacle_ids[name] = geom_id
+    robot_identity = validate_augmented_robot_identity(
+        mujoco,
+        ground,
+        canonical_binding,
+        augmented_binding,
+        obstacle_ids,
+        expected_collision_sha256=plan["a3_model"]["compiled_collision_contract_sha256"],
+    )
     evidence = {
         "assembly": plan["audit_contract"]["model_augmentation"],
         "canonical_ngeom": int(canonical_model.ngeom),
         "augmented_ngeom": int(model.ngeom),
-        "robot_geom_ids_preserved": True,
-        "robot_collision_contract_sha256": collision_sha,
+        "robot_geom_numeric_ids_preserved": False,
+        "robot_geom_identity_preserved_under_exact_shift": True,
+        "robot_identity": robot_identity,
+        "robot_collision_contract_sha256": robot_identity[
+            "normalized_robot_collision_contract_sha256"
+        ],
         "asset_map_file_count": len(assets),
         "obstacle_geom_ids": obstacle_ids,
         "mj_step_calls": 0,
     }
-    return model, data, obstacle_ids, evidence
+    return augmented_binding, obstacle_ids, evidence
 
 
 def geom_is_far(
@@ -1985,22 +2161,11 @@ def audit_runtime(plan: Mapping[str, Any]) -> dict[str, Any]:
         or len(canonical_binding.collision_geom_ids) != 37
     ):
         raise TableNetError("canonical compiled robot collision contract changed at runtime")
-    model, data, obstacle_ids, assembly = _compile_augmented_model(
+    augmented_binding, obstacle_ids, assembly = _compile_augmented_model(
         mujoco, ground, canonical_binding, canonical_source, mesh_sources, plan
     )
-    augmented_binding = ground.ModelBinding(
-        model=model,
-        data=data,
-        root_joint_id=canonical_binding.root_joint_id,
-        root_body_id=canonical_binding.root_body_id,
-        root_qpos_address=canonical_binding.root_qpos_address,
-        joint_ids=canonical_binding.joint_ids,
-        joint_qpos_addresses=canonical_binding.joint_qpos_addresses,
-        collision_geom_ids=canonical_binding.collision_geom_ids,
-        ground_geom_id=canonical_binding.ground_geom_id,
-        ground_z_m=canonical_binding.ground_z_m,
-        collision_contract_sha256=canonical_binding.collision_contract_sha256,
-    )
+    model = augmented_binding.model
+    data = augmented_binding.data
 
     joint_order_binding = l0_v1_plan["upstream_contracts"]["runtime_joint_order"]
     joint_order_snapshot = _snapshot_repo_binding(
@@ -2121,7 +2286,9 @@ def audit_runtime(plan: Mapping[str, Any]) -> dict[str, Any]:
             "motion_npz": _binding(npz_snapshot),
             "canonical_mjcf": _binding(canonical_source),
             "derived_mjcf_closure": plan["a3_model"]["derived_closure"],
-            "compiled_robot_collision_sha256": augmented_binding.collision_contract_sha256,
+            "compiled_robot_collision_sha256": assembly[
+                "robot_collision_contract_sha256"
+            ],
             "dense_phase_reference": _binding(phase_source),
             "dense_phase_pure_function_ast_sha256": phase_function_asts,
             "distance_reference": _binding(helper_source),

@@ -46,6 +46,7 @@ def _load(path: Path, name: str):
 
 
 TABLE_NET = _load(SCRIPT, "motion_table_net_test")
+GROUND = _load(ROOT / "scripts/ground_gmr_pkl.py", "motion_table_net_ground_test")
 
 
 def _plan() -> dict:
@@ -191,7 +192,7 @@ def test_frame_or_obstacle_drift_fails_closed(tmp_path, mutation, match):
         TABLE_NET.validate_plan(path, _sha(path))
 
 
-def test_model_augmentation_appends_four_boxes_without_reordering_robot_worldbody():
+def test_model_augmentation_appends_four_boxes_after_robot_xml_children():
     xml = "<mujoco><worldbody><geom name='floor'/><body name='robot'/></worldbody></mujoco>"
     result = TABLE_NET.augment_mjcf_xml(xml.encode(), _plan()["obstacle_geometry"])
     text = result.decode()
@@ -204,6 +205,180 @@ def test_model_augmentation_appends_four_boxes_without_reordering_robot_worldbod
     ):
         assert text.count(f'name="{name}"') == 1
     assert "<include" not in text
+
+
+class _FakeCompiledModel:
+    pass
+
+
+def _fake_compiled_models():
+    canonical = _FakeCompiledModel()
+    augmented = _FakeCompiledModel()
+    canonical.ngeom = 38
+    augmented.ngeom = 42
+    for model in (canonical, augmented):
+        model.nbody = 2
+        model.njnt = 1
+        model.nq = 1
+        model.nv = 1
+        model.nu = 0
+        model.na = 0
+        model.qpos0 = np.array([0.25], dtype=np.float64)
+        model.body_parentid = np.array([0, 0], dtype=np.int32)
+        model.body_pos = np.zeros((2, 3), dtype=np.float64)
+        model.body_quat = np.array([[1.0, 0.0, 0.0, 0.0]] * 2)
+        model.jnt_type = np.array([0], dtype=np.int32)
+        model.jnt_bodyid = np.array([1], dtype=np.int32)
+        model.jnt_qposadr = np.array([0], dtype=np.int32)
+        model.jnt_pos = np.zeros((1, 3), dtype=np.float64)
+        model.jnt_axis = np.array([[0.0, 0.0, 1.0]], dtype=np.float64)
+        model.mesh_vertadr = np.zeros(0, dtype=np.int32)
+        model.mesh_vertnum = np.zeros(0, dtype=np.int32)
+        model.mesh_vert = np.zeros((0, 3), dtype=np.float64)
+
+    canonical.names = ["floor", *[f"robot_collision_{index}" for index in range(37)]]
+    augmented.names = [
+        "floor",
+        *TABLE_NET.OBSTACLE_NAMES,
+        *canonical.names[1:],
+    ]
+    canonical.geom_type = np.array([0, *([6] * 37)], dtype=np.int32)
+    canonical.geom_bodyid = np.array([0, *([1] * 37)], dtype=np.int32)
+    canonical.geom_contype = np.array([1, *([1] * 37)], dtype=np.int32)
+    canonical.geom_conaffinity = np.array([1, *([7] * 37)], dtype=np.int32)
+    canonical.geom_dataid = np.full(38, -1, dtype=np.int32)
+    canonical.geom_size = np.arange(38 * 3, dtype=np.float64).reshape(38, 3) / 1000.0
+    canonical.geom_pos = np.arange(38 * 3, dtype=np.float64).reshape(38, 3) / 100.0
+    canonical.geom_quat = np.tile([1.0, 0.0, 0.0, 0.0], (38, 1))
+    for label in TABLE_NET.COLLISION_GEOM_ARRAYS:
+        source = np.asarray(getattr(canonical, label))
+        shape = (42, *source.shape[1:])
+        value = np.zeros(shape, dtype=source.dtype)
+        value[0] = source[0]
+        value[5:] = source[1:]
+        setattr(augmented, label, value)
+    augmented.geom_type[1:5] = 6
+    augmented.geom_bodyid[1:5] = 0
+    augmented.geom_contype[1:5] = 0
+    augmented.geom_conaffinity[1:5] = 0
+    augmented.geom_dataid[1:5] = -1
+
+    fields = {
+        "root_joint_id": 0,
+        "root_body_id": 1,
+        "root_qpos_address": 0,
+        "joint_ids": (0,),
+        "joint_qpos_addresses": (0,),
+        "ground_geom_id": 0,
+    }
+    canonical_binding = types.SimpleNamespace(
+        model=canonical,
+        collision_geom_ids=tuple(range(1, 38)),
+        **fields,
+    )
+    augmented_binding = types.SimpleNamespace(
+        model=augmented,
+        collision_geom_ids=tuple(range(5, 42)),
+        **fields,
+    )
+
+    class _FakeMujoco:
+        class mjtObj:
+            mjOBJ_GEOM = object()
+
+        @staticmethod
+        def mj_id2name(model, _kind, index):
+            return model.names[index]
+
+    collision_sha = GROUND._compiled_collision_contract_sha256(
+        canonical, canonical_binding.collision_geom_ids
+    )
+    return (
+        _FakeMujoco(),
+        canonical_binding,
+        augmented_binding,
+        {name: index for index, name in enumerate(TABLE_NET.OBSTACLE_NAMES, start=1)},
+        collision_sha,
+    )
+
+
+def test_worldbody_first_geom_index_shift_preserves_exact_robot_contract():
+    mujoco, canonical, augmented, obstacles, expected_sha = _fake_compiled_models()
+    evidence = TABLE_NET.validate_augmented_robot_identity(
+        mujoco,
+        GROUND,
+        canonical,
+        augmented,
+        obstacles,
+        expected_collision_sha256=expected_sha,
+    )
+    assert evidence["robot_geom_index_shift"] == 4
+    assert evidence["augmented_robot_collision_geom_ids"] == list(range(5, 42))
+    assert evidence["normalized_robot_collision_contract_sha256"] == expected_sha
+
+
+def test_worldbody_index_normalization_rejects_robot_collision_row_drift():
+    mujoco, canonical, augmented, obstacles, expected_sha = _fake_compiled_models()
+    augmented.model.geom_size[9, 0] += 1.0e-9
+    with pytest.raises(TABLE_NET.TableNetError, match="geom_size rows"):
+        TABLE_NET.validate_augmented_robot_identity(
+            mujoco,
+            GROUND,
+            canonical,
+            augmented,
+            obstacles,
+            expected_collision_sha256=expected_sha,
+        )
+
+
+def test_worldbody_index_normalization_rejects_unexpected_obstacle_ids():
+    mujoco, canonical, augmented, obstacles, expected_sha = _fake_compiled_models()
+    obstacles = dict(obstacles)
+    obstacles["motion_net"] = 4
+    with pytest.raises(TABLE_NET.TableNetError, match="obstacle IDs 1..4"):
+        TABLE_NET.validate_augmented_robot_identity(
+            mujoco,
+            GROUND,
+            canonical,
+            augmented,
+            obstacles,
+            expected_collision_sha256=expected_sha,
+        )
+
+
+@pytest.mark.parametrize(
+    ("mutation", "match"),
+    [
+        ("topology_count", "topology counts"),
+        ("qpos0", "qpos0"),
+        ("joint_binding", "root/joint topology"),
+        ("robot_name_order", "relative order/name"),
+    ],
+)
+def test_worldbody_index_normalization_never_weakens_robot_identity_gates(
+    mutation, match
+):
+    mujoco, canonical, augmented, obstacles, expected_sha = _fake_compiled_models()
+    if mutation == "topology_count":
+        augmented.model.nq += 1
+    elif mutation == "qpos0":
+        augmented.model.qpos0[0] += 1.0e-12
+    elif mutation == "joint_binding":
+        augmented.joint_ids = (1,)
+    else:
+        augmented.model.names[8], augmented.model.names[9] = (
+            augmented.model.names[9],
+            augmented.model.names[8],
+        )
+    with pytest.raises(TABLE_NET.TableNetError, match=match):
+        TABLE_NET.validate_augmented_robot_identity(
+            mujoco,
+            GROUND,
+            canonical,
+            augmented,
+            obstacles,
+            expected_collision_sha256=expected_sha,
+        )
 
 
 def test_model_augmentation_rejects_duplicate_bound_obstacle_name():

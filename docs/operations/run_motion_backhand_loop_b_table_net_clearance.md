@@ -9,7 +9,7 @@
 ```bash
 cd /path/to/clean/nohope
 PLAN=configs/motion_backhand_loop_b_table_net_clearance_prereg_20260715.json
-PLAN_SHA=9d7126bc09166bc428d2c79327417e250384ff45190c09d7ee86d90469eeb1e6
+PLAN_SHA=1c73faf9034c1ed5136641ff4594917d5d5f66a5c93e92b35d300107ae9ec6b4
 
 python3 scripts/audit_motion_schema2_table_net_clearance.py \
   --prereg "$PLAN" \
@@ -21,10 +21,12 @@ python3 scripts/audit_motion_schema2_table_net_clearance.py \
 
 ```bash
 python3 -m pytest -q tests/test_motion_backhand_loop_b_table_net_clearance.py
-# 29 passed
+# 36 passed
 ```
 
 source gate 只证明预注册、坐标系、输入 lineage、5 mm 边界和 no-clobber 反例闭环，不是 B 的桌网通过。
+旧 schema-v1 plan SHA `9d7126bc...eb1e6` 已在首次 Pod2 dry-run 证明会把 MuJoCo 的确定性 `+4`
+world-geom 编号插入误判为 robot 重排；它永久只作根因证据，不得运行或用于发布 certificate。
 
 ## Runtime 前置
 
@@ -53,14 +55,16 @@ export PYTHONNOUSERSITE=1
 /workspace/hope_mjeval_venv/bin/python \
   scripts/audit_motion_schema2_table_net_clearance.py \
   --prereg configs/motion_backhand_loop_b_table_net_clearance_prereg_20260715.json \
-  --expected-prereg-sha256 9d7126bc09166bc428d2c79327417e250384ff45190c09d7ee86d90469eeb1e6 \
+  --expected-prereg-sha256 1c73faf9034c1ed5136641ff4594917d5d5f66a5c93e92b35d300107ae9ec6b4 \
   dry-run
 ```
 
-它在内存中把四个 world-fixed box 追加到 canonical MJCF 末尾并重编译，要求原 37 个 robot geom ID、
-qpos0、拓扑和 compiled collision SHA 不变；随后以 1201 个有限 400 Hz 样本检查每样本 148 个
-robot-obstacle pair。成功行必须含 `runtime_audit=true certificate_written=false`。任何失败都不得自动重跑或
-改阈值。
+它在内存中把四个 world-fixed box 追加到 canonical MJCF worldbody 并重编译。MuJoCo 会先编号
+worldbody 直属 geom，因此唯一允许的全局编号变化是 floor=`0`、四个 obstacle=`1..4`、全部 child-body
+robot geom 精确 `+4`；validator 仍逐项核对 robot 相对顺序/名字、37 个 enabled collision geom、
+root/joint topology、qpos0、collision row/mesh 和归一化后的 frozen compiled collision SHA。随后才以
+1201 个有限 400 Hz 样本检查每样本 148 个 robot-obstacle pair。成功行必须含
+`runtime_audit=true certificate_written=false`。任何失败都不得自动重跑或改阈值。
 
 ## 唯一 no-clobber audit
 
@@ -70,7 +74,7 @@ robot-obstacle pair。成功行必须含 `runtime_audit=true certificate_written
 /workspace/hope_mjeval_venv/bin/python \
   scripts/audit_motion_schema2_table_net_clearance.py \
   --prereg configs/motion_backhand_loop_b_table_net_clearance_prereg_20260715.json \
-  --expected-prereg-sha256 9d7126bc09166bc428d2c79327417e250384ff45190c09d7ee86d90469eeb1e6 \
+  --expected-prereg-sha256 1c73faf9034c1ed5136641ff4594917d5d5f66a5c93e92b35d300107ae9ec6b4 \
   audit
 ```
 
@@ -93,6 +97,7 @@ predicate 的 `1e-12 m` 数值裕量。
 - frame/桌位漂移：停止；不可把 capture 视频背景或另一套 table pose 猜成现役 tracking 桌位；
 - 任一 37×4 pair `<5 mm`：B 在本门 hard fail，保全 dense frame/source time/geom pair，不用 reward 补偿；
 - `5–20 mm` warning：保全并人工查看，但不改 hard threshold；
-- in-memory augmentation 改了 robot geom ID、qpos0、拓扑或 collision SHA：视为 harness failure，不判 B；
+- worldbody augmentation 不是 floor=`0`、obstacle=`1..4`、robot 精确 `+4`，或 robot 相对顺序/名字、
+  qpos0、拓扑、collision row/mesh、归一化 SHA 任一变化：视为 harness failure，不判 B；
 - 输出存在或 symlink：禁止覆盖、删除或重发；
 - 有限 400 Hz 通过也不得写成连续时间、动力学、击球、训练、Gate3 或真机通过。
