@@ -86,6 +86,14 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   只判结构；只有真实击球后才有意义的 Reward 若 eligible hit 样本不足必须继续，6000/10000 才看完整
   单 seed 曲线。[六格实验](experiments/2026-07/EXP-P1-LONG-SCALEOUT-SIX-ARM.md)
 
+  2026-07-15 16:40 UTC，Pod1 也已重新授权并按 GPU0→GPU1→GPU2 四圈铺满 12 条不同问题的
+  10000-update 单 seed 长曲线：非击球臂是否继续模仿 × 10/16/24 秒连续 episode，以及六种击球
+  位置/速度/拍面 Reward 配比。两个首发 namespace 在动态 URDF import 的 180 秒 stale 门失败，均为
+  0 iteration/0 checkpoint；各自唯一同配方 retry 已过首迭代。现为三卡各四条、利用率
+  `97%/93%/97%`，12 条接受臂 PID=PGID、fatal0。Pod2 同时保持九条三卡满池；两 Pod 合计 21 条。
+  当前只证明生产池已铺满，不把早期稀疏回球零值判成失败。
+  [Pod1 十二格实验](experiments/2026-07/EXP-P1-POD1-LONG-BALANCE-REWARD-GRID.md)
+
   clean main-effect 也已自然终档：两臂关闭 post-swing replay、固定 V1+V2，只比较 base-decel `0/1`。
   `model_1000` 两份 filename=embedded、finite、fresh lineage、claim 与共同 hard contract exact，原
   PGID `385320/385948` 均已退出。980–1000 的 treatment/control raw base speed=`1.00882×`，按冻结

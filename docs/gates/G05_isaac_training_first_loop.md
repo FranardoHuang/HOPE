@@ -2481,3 +2481,20 @@ V1-only/foot-orientation-0/V2-retry 为 `419643/422126/423502`，GPU1 的
 qdot-1/qdot-2.5/foot-orientation--0.6 为 `420298/421479/422783`；两卡各三条。连同 GPU2 现役
 `411519/412204/412899`，Pod2 三卡利用率 `97%/97%/91%`，九条日志除已归档 V2 attempt-1 外均
 fatal0。新格尚未到 model-200，不作行为结论，G05 继续 `Partial`。
+
+#### Pod1 连续挥拍平衡与 Reward 配比十二格
+
+负责人重新授权 Pod1 后，三卡 live snapshot 均为 0 compute PID。新的单 seed 长曲线把 12 个槽分成
+两个问题：非击球臂模仿开关 × 10/16/24 秒 episode 的 `2×3`，以及位置/速度/拍面跟踪的六种配比或
+总强度。现役 `wrap_teleport=false` 在动作片段结束后保留机器人物理状态并进入下一拍，所以更长
+episode 确实增加同一连续状态内的挥拍次数。队列按 GPU0→GPU1→GPU2 四圈发射，不复制 seed。
+
+4096-env probe 已越过首迭代并 rc0；finalizer 仅因退出后 `/proc` starttime 变成 null 而把同一
+PID/PGID/argv 判作 identity mismatch，该 harness 假拒绝另行修。科学池两个 attempt-1 分别以 exact PGID
+`2152129/2157392` 卡在 dynamic URDF import 的 180 秒 stale 门；两者无 iteration/checkpoint、原 namespace
+保留。各自唯一逐字同配方 retry `2158534/2159350` 均已越过首迭代。
+
+2026-07-15 16:40 UTC，12 条接受臂全部 live、PID=PGID、exact source `2c2d70d...607e`、fatal0，Pod1
+GPU0/GPU1/GPU2 各四条，利用率 `97%/93%/97%`，显存约 `23.2/23.1/23.1 GiB`，无外部 compute PID。
+这只关闭满池发射门；尚无配对行为结论，稀疏回球机会不足时继续，G05 仍为 `Partial`。详见
+[实验卷宗](../experiments/2026-07/EXP-P1-POD1-LONG-BALANCE-REWARD-GRID.md)。
