@@ -360,6 +360,26 @@ queue trainer 默认关闭的 phase telemetry 在 P1 run 中依次留下 `hydra_
 `Learning iteration` 并成功返回后，
 queue harness 才在 `.launch` 写 `phase=first_iter`。这能把“卡在 A3 import”与学习失败分开。
 
+## 10000-update 无随挥回放三格漏斗（2026-07-15）
+
+这批只允许 Pod2 GPU2：普通对照与两个 treatment 共用 source/题库/seed；一个 treatment 增加关节速度
+边界惩罚，另一个放松击球窗动作模仿。先做 dry-run/doctor，再发三条：
+
+```bash
+python3 scripts/run_lean_training_queue.py \
+  --queue configs/phase1_long_no_replay_funnel_20260715.yaml plan
+python3 scripts/run_lean_training_queue.py \
+  --queue configs/phase1_long_no_replay_funnel_20260715.yaml doctor --live
+python3 scripts/run_lean_training_queue.py \
+  --queue configs/phase1_long_no_replay_funnel_20260715.yaml fill --count 3
+python3 scripts/run_lean_training_queue.py \
+  --queue configs/phase1_long_no_replay_funnel_20260715.yaml \
+  fill --count 3 --execute --confirm SIM_ONLY_LAUNCH_ONE_LEAN_QUEUE_JOB
+```
+
+三条 job 都有 `required_slot: pod2/gpu2`；不得删除硬槽位来追求表面利用率。任一条没有越过首个
+`Learning iteration` 时，顺序 `fill` 会停止，不会自动发后续臂或重放失败 namespace。
+
 main 已有独立 per-source+Pod+GPU 的 `1 env × 2 updates` boot-warmup 和 content-bearing 日志默认 180 秒
 stale watchdog；P1 不改变其 source-pinned/exact-PGID 语义，也不会让 warmup 继承科学 binding path。
 新反例证明 1-env 成功只可当 cache/import probe：同 source/GPU 的正式 4096-env control 仍可能在
