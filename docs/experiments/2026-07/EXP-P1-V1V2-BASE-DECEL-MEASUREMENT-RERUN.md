@@ -388,6 +388,16 @@ loader 从 exact frozen authorization byte snapshot 派生 capture/attestor tupl
 fail closed；receipt/authorization 缺任一配对项同样在环境创建时拒绝。attempt-2、首 reset 与训练仍未执行。
 补齐 override/loader 回归后的 operation 六文件 host suite 为 `181 passed`（一个既有 duplicate-ZIP warning）。
 
+上述唯一 attempt-2 已在 source 与授权合入 `main` 后执行并通过。running attestor 保持 clean detached
+`a38b7e9e...293cf` / script `03611b56...310f`，tracked authorization 来自 clean
+`main@ff9a253602cadc99842349c8a2e4c53e8e7b0d54` / file `87fd1c71...dfda`，原 capture producer 仍是 clean
+`906a3c3`。独立 PGID `403786` 自然 rc0 后 absent，发布 4103-byte receipt
+`e20a6989a43f3a0725b5973e8675f2a25e72d2fe705d3fc0c914cd7da2d2aba4`，count=`4096`。随后 merged-main
+controller `status` 逐项复核 immutable v3 plan、capture claim/states/result、producer/attestor tuple 和
+authorization，得到 `teacher_receipt_binding_exact=true`。这闭合的是外生 teacher 制品，不是恢复行为；
+下一步必须先过 4096-env、首 PPO rollout 前的 first-reset 采用率与 simulator readback probe。该 probe 未过前，
+scientific pair、第二 seed、judge 与 promotion 继续 blocked。
+
 ## 离线复现
 
 本提交不连接 Pod、不写 claim、不运行 probe/trainer/judge：

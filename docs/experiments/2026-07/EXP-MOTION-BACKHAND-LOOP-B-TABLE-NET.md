@@ -1,10 +1,10 @@
 # EXP-MOTION-BACKHAND-LOOP-B-TABLE-NET — 反手拉 B 整轨桌网余隙门
 
-- 状态：`v3_certificate_rejected_lower_bound_overclaim_v4_source_static_pass_runtime_pending`
+- 状态：`v4_runtime_certificate_accepted_dynamics_gate_unlocked`
 - 阶段/轴：新动作库 / 整轨桌板、网与网柱几何余隙
 - 人类负责人：Franco
 - 执行者：Codex
-- 最高证据等级：E1（dependency-light source/static gate；尚无 exact MuJoCo runtime 结果）
+- 最高证据等级：E2（Pod2 exact MuJoCo 有限密扫 certificate；尚无动力学/平衡行为）
 
 ## 问题
 
@@ -195,9 +195,19 @@ cert 仍因 certified lower overclaim 保持拒绝。
 
 ## 当前决定与下一步
 
-schema-v4 源码门通过，只授权在合入 main 且 code review 后使用 exact `/workspace/hope_mjeval_venv`
-再做一次无写 `dry-run`。
-目前没有 runtime 结果、没有 table/net certificate，也没有动作晋级；G08 保持 Partial。`dry-run` 必须先
-验证现存 L1 certificate 的 exact SHA/authorization、输出父目录真实存在且 target absent。通过后才能执行
-唯一一次 `O_EXCL` audit；完整命令和失败处理见
+schema-v4 已在 clean detached `main@c047ea7f75c3ca2d9ff545a3ddd0de87dffd8440` 的 Pod2 CPU runtime
+完成 full `dry-run` 和唯一一次 `O_EXCL` audit。dry-run log 为 155 bytes / SHA-256
+`ad33e82cb2be9ae57d71dc8ffe2138657d5e0c89a2681435fc4576ac8d53213c`；它明确
+`certificate_written=false`。新 certificate 位于
+`table_net_primary_v4/franco_backhand_loop_b_98e7b883b29d.table_net_clearance_v4_certificate.json`，
+15064 bytes / SHA-256
+`93fd543597650d071e2e8eb3b2908e14d29c6c9af6a5080874056e246f69b0e7`；audit log SHA-256 为
+`e39a2aef85ffa4e5c442a6084f0669601bf14c70752928b7ca472a3cbfed0729`。独立只读复核确认 source、plan、
+validator、B NPZ、L1 certificate、MJCF/mesh closure 和 compiled collision 全部仍 exact。
+
+结果覆盖 `151 @ 50 Hz → 1201 @ 400 Hz`、每样本 `37×4=148` 对，hard/warning、球拍危险样本和 unsafe
+frame 均为 0，`mj_step_calls=0`。所有 pair 在 0.1 m reporting cap 饱和；v4 诚实写入 certified lower
+`0.099999999999 m`、`saturation=true`，并把 midpoint/pair/source-time 全部置 null。因此 B 的本门
+`table_net_complete=true` 已接受，只解锁下一道 vendor 动力学/平衡门。它仍不是连续时间证书，也不证明
+TOPP、击球/回台、RL、Gate3 或真机；G08 保持 Partial，C 继续后备。完整命令和失败边界见
 [操作文档](../../operations/run_motion_backhand_loop_b_table_net_clearance.md)。

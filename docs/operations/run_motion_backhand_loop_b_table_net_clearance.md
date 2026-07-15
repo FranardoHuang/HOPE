@@ -107,6 +107,15 @@ predicate 的 `1e-12 m` 数值裕量。
 这里的 epsilon 只属于 capped reporting/bisection；hard `<5 mm` 和 warning `<20 mm` 直接与门槛比较，
 不得减 epsilon。
 
+## 2026-07-15 已接受的 v4 运行
+
+clean detached `main@c047ea7f75c3ca2d9ff545a3ddd0de87dffd8440` 已在 Pod2 用上述 exact 命令完成
+full `dry-run` 与唯一 audit。dry-run log SHA-256 为 `ad33e82c...3213c`，且没有写 certificate；audit log
+SHA-256 为 `e39a2aef...0729`。no-clobber certificate 为 15064 bytes / SHA-256
+`93fd543597650d071e2e8eb3b2908e14d29c6c9af6a5080874056e246f69b0e7`。结果为 1201 个 400 Hz 有限样本、
+每帧 148 对、hard/warning/unsafe=`0/0/0`，saturated certified lower 精确为 `0.099999999999 m`；
+midpoint/pair/source-time 均为 null。该实例不得重发或覆盖；后续只读消费必须逐字核对上述 SHA。
+
 ## 失败处理
 
 - L1 certificate 未授权、NPZ/MJCF/closure/source 漂移：停止并保全，不放宽绑定；

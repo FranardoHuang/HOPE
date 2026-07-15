@@ -618,7 +618,10 @@ path/bytes/SHA machine-bound 为 rejected，新输出使用独立 `table_net_pri
 `threshold-1e-12` predicate，可接受 5 mm/20 mm 各自门槛下方半个 epsilon。当前 v4 把安全门改为
 finite `distance>=threshold`、non-finite fail closed，只让 epsilon 留在 reporting cap/bisection；5 mm 与
 20 mm 的 nextafter-below/half-epsilon-below 反例均闭环。focused `47 passed`、完整 B chain `148 passed`、
-source/static PASS；v4 runtime/certificate 尚未发生，dynamics 继续 unauthorized，所以 G08 保持 Partial。
+source/static PASS。随后 clean Pod2 `main@c047ea7` 的 full dry-run 与唯一 v4 audit 均通过：`1201 @ 400 Hz`
+逐帧 `37×4` 对，hard/warning/unsafe=`0/0/0`；certificate `93fd5435...9b0e7` 对 saturated reporting 只声明
+`0.099999999999 m` 下界且 pair/midpoint/time=null，已由独立复核接受。B 因此完成桌网有限密扫并只解锁
+下一道 vendor 动力学/平衡门；连续时间、动力学行为、RL、Gate3 与真机仍未证明，所以 G08 保持 Partial。
 见[桌网实验卷宗](../experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-TABLE-NET.md)和
 [操作文档](../operations/run_motion_backhand_loop_b_table_net_clearance.md)。
 

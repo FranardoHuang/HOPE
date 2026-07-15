@@ -13,6 +13,21 @@
 
 ## 2026-07-15
 
+- post-swing teacher v3 的唯一 attestor attempt-2 已在 Pod2 从 clean detached `a38b7e9` 自然 rc0：固定
+  authorization 来自 clean `main@ff9a253`，4096-state receipt 为 4103 bytes / SHA-256
+  `e20a6989...d2aba4`。PGID `403786` 已 absent；merged-main controller status 对 immutable v3 plan、原
+  capture producer、attestor source 与授权复核后给出 `teacher_receipt_binding_exact=true`。这只解锁独立
+  first-reset full-scene probe；科学 pair、第二 seed、judge/promotion 仍 blocked。见
+  [机器结果](../configs/phase1_post_swing_teacher_capture_attempt_v3_result_20260715.json)、
+  [实验卷宗](experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md)和
+  [操作](operations/run_post_swing_teacher_capture.md)。
+
+- Franco 反手拉 B 的 v4 桌网门已在 clean Pod2 `main@c047ea7` 完成 full dry-run 与唯一 audit：1201 个
+  400 Hz 样本逐帧 `37×4` 对，hard/warning/unsafe=`0/0/0`；15064-byte certificate
+  `93fd5435...9b0e7` 只声明诚实 saturated lower `0.099999999999 m`，pair/midpoint/time=null，并通过独立
+  只读复核。B 现只解锁 vendor 动力学/平衡门；连续时间、RL、回台、Gate3 与真机仍未证明。见
+  [桌网卷宗](experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-TABLE-NET.md)和[G08](gates/G08_blind_spot_improvements.md)。
+
 - B 桌网 v3 虽在 clean `main@b9b011b` 产出 hard/warning=`0/0` 的 certificate `39d6cc38...79a19`，
   exact-semantics review 仍正式 REJECT：reporting cap predicate 只证明 `>=0.1-1e-12`，旧 aggregator 却把
   saturated 默认值 `0.1` 写成 certified lower bound。旧文件保持 immutable 但不算 `table_net_complete`，

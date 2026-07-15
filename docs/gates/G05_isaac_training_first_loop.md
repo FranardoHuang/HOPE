@@ -67,8 +67,8 @@ Follow-up note (2026-07-15, schema-v3 capture complete but attestor newline fals
   from signing and validating itself. After the authorization-backed trainer consumer was added, the
   six-file host suite is `181 passed` with one existing
   duplicate-ZIP warning; this is source evidence, not full attestation.
-  Capture must not be rerun, and attestor must not be rerun until this fix is merged to `main`.
-  First-reset, replacement training, second seed, judge and promotion remain unauthorized. See the
+  Capture remains permanently no-rerun; the one authorized attestor attempt is recorded below.
+  First-reset, replacement training, second seed, judge and promotion remained unauthorized at this source stage. See the
   [machine result](../../configs/phase1_post_swing_teacher_capture_attempt_v3_result_20260715.json),
   [experiment](../experiments/2026-07/EXP-P1-V1V2-BASE-DECEL-MEASUREMENT-RERUN.md), and
   [operation](../operations/run_post_swing_teacher_capture.md).
@@ -77,7 +77,13 @@ Follow-up note (2026-07-15, schema-v3 capture complete but attestor newline fals
   requires a paired retry-authorization path/SHA in training config, derives both accepted tuples from
   that exact immutable file, compares them byte-for-byte with the receipt, and records the normalized
   authorization in the schema-3 hard contract. Valid-hex capture/attestor commit/SHA rebound negatives
-  now fail closed. This is source closure only; attempt-2 and the first-reset probe remain unexecuted.
+  now fail closed.
+- The only authorized attempt-2 then ran from clean detached `a38b7e9` against authorization from clean
+  `main@ff9a253`, exited rc0 and published a 4103-byte, 4096-state receipt SHA-256
+  `e20a6989...d2aba4`. Exact PGID `403786` is naturally absent. Merged-main controller status re-bound the
+  receipt to the immutable v3 plan, original producer, fixed attestor and tracked authorization and returned
+  `teacher_receipt_binding_exact=true`. This completes artifact attestation only; the 4096-environment first-reset
+  pre-rollout adoption/readback probe, scientific pair, second seed, judge and promotion remain unauthorized.
 
 Follow-up note (2026-07-15, schema-v2 capture reached runtime then failed before the first inference step; Gate remains `Partial`):
 
@@ -191,7 +197,8 @@ Follow-up note (2026-07-15, post-swing teacher source gate repaired; Gate remain
   joint order and root/joint velocity bounds. Trainer consumption re-binds the raw capture result;
   a standalone receipt JSON cannot unlock replay. First-reset acceptance now supports a frozen
   adopted count/fraction, probability tolerance and simulator state readback.
-- Dependency-light attack tests pass, but no Torch/Isaac or 4096-environment Pod probe has run.
+- Dependency-light negative tests and the immutable receipt attestation pass, but no 4096-environment first-reset
+  trainer-consumer Pod probe has run.
   `launch_authorized=false`; no replacement science pair, second seed, judge or promotion is
   unlocked. See the [artifact contract](../interfaces/post_swing_teacher_artifact.md),
   [producer operation](../operations/run_post_swing_teacher_capture.md), and

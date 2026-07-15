@@ -50,7 +50,10 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   `60c08185e15c80621063bcedc65b42b6b738a12caeb8fb4e40a4c197e7daafc6`。vendor L1 随后在修复
   runtime→GMR 关节顺序 adapter 后完成 Pod2 full dry-run 与唯一 no-clobber audit：1201 个 400 Hz
   有限样本中自碰=`0`、拍/柄 `<5 mm` 自打=`0`、warning=`0`，最小余隙 `0.13829 m`；certificate
-  SHA-256 `6840df34...db60`。B 只解锁下一张整轨桌网余隙门；动力学、RL 和真机仍未授权，C 保持后备。
+  SHA-256 `6840df34...db60`。下一张整轨桌网门也已在 clean Pod2 `main@c047ea7` 完成唯一 v4 audit：
+  `1201 @ 400 Hz` 逐帧 `37×4` 对，hard/warning/unsafe=`0/0/0`；certificate `93fd5435...9b0e7`
+  只声明诚实 saturated lower `0.099999999999 m`，pair/midpoint/time=null，并经独立复核接受。B 现只解锁
+  vendor 动力学/平衡门；RL、回台、Gate3 和真机仍未授权，C 保持后备。
   高点拍压 S0 与四条横移 M0 不仅通过 exact GVHMR 帧数/finite 审计，还已完成真实五条 PT 的
   canonical-beta `inspect/consume`，non-beta 内容逐 bit 不变。exact GMR runtime source gate 也已进入
   `main` 并通过全回归；Pod2 的 v2 runtime `inspect` 已尝试，但在 consumer 前因合同写死的
@@ -64,7 +67,9 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   eligible/selected/started=`0/0/0`，treatment 已为 `15087/3750/3750`；control 到 step519 才激活，不能
   倒灌 model-500。源码确认 buffer 只收 policy 自己活到自然 clip wrap 的状态，因此 base-decel 会反过来改变
   curriculum 何时 ready，这一对按预注册判 `activation-invalid`，不比较行为、不买第二 seed、不判卷。
-  exact PGID=`380610/381237` 已停止；Pod2 GPU1/GPU2 当前空，GPU0 仍只归 Yikang。下一次同轴训练必须先用
+  exact PGID=`380610/381237` 已停止。最近只读快照中 Pod2 GPU0/1 分别有 Yikang V9/V10（PID
+  `379550/396374`），Codex 不触碰；GPU2 空闲。任何 Yikang 进程仍在的 GPU 都保持保留，实际空出的卡才进入
+  Codex 队列。下一次同轴训练必须先用
   两臂共享、自然-wrap provenance 绑定的 immutable teacher-state receipt 做外生 cold-start，并在首 update
   前 fail closed。
 
@@ -75,12 +80,11 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   `v_des`，并非始终让 raw speed 更低；尾窗 raw-kernel-per-eligible 反而提升 `1.6003×`。因此不改写
   verdict，但后续必须先用 `|v_base-v_des|` 的近/中/远分桶重做量尺，不能复制当前 weight=`1`。
 
-  连续恢复当前最短关键路径转为共享外生 teacher。v1 已在结果前绑定 fresh control `model_500`、动作、题库、
-  A3 tree、Pod2 GPU1、4096 条 natural-wrap state 与 20000 inference-step 上限，但运行时派生器在 Hydra
-  compose 阶段因遗留 train-only checkpoint 键 fail closed；capture directory/claim/process/GPU work 都未
-  创建。源码复核还发现 play 没有实际应用冻结 seed。v1 不重发；当前先合 seed parity、删全 train-only 键，
-  再用新 source/output namespace 预注册 v2。attestation、首 reset、科学 pair、第二 seed 与 judge 仍逐门
-  fail closed。Pod2 GPU1/GPU2 当前空；GPU0 继续只归 Yikang。
+  连续恢复当前最短关键路径已完成共享外生 teacher 制品：v3 在 Pod2 GPU2 自然收满 4096 条
+  `natural_clip_wrap` state；唯一授权 attestor attempt-2 从固定 `a38b7e9` rc0，发布 4103-byte receipt
+  `e20a6989...d2aba4`。merged-main controller status 已确认 `teacher_receipt_binding_exact=true`。当前只差
+  4096-env、首个 PPO rollout 前的 first-reset 采用率与 simulator root/joint readback probe；它未通过前，
+  科学 pair、第二 seed 与 judge 继续 fail closed。可用执行槽目前只有 Pod2 GPU2。
 
   Fresh C 的五条单 seed 机制格均已越过 `+500` 且 checkpoint
   finite/contract/lineage 正确。V1+V2 出现当前最强击球精度信号（composite `0.0893`、normal pass

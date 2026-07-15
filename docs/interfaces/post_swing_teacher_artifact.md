@@ -1,7 +1,7 @@
 # 随挥结束教师状态制品合同
 
-状态：**4096-environment v3 capture runtime 已自然完成；attestation 与首 reset 尚未完成，保持
-`Partial`。** 这里的“教师状态”是从一个既有策略自然完成整段动作时采到的机器人状态，
+状态：**4096-environment v3 capture 与唯一 attestation 已自然完成；首 reset trainer-consumer probe 尚未完成，
+保持 `Partial`。** 这里的“教师状态”是从一个既有策略自然完成整段动作时采到的机器人状态，
 用来让两个消融臂从同一外生恢复分布起步；它不是动作模仿 teacher，也不是任意 episode timeout 快照。
 
 相关术语见 [定义表](../DEFINITIONS.md)。正式运行步骤见
@@ -26,6 +26,11 @@
 这四份输入均用一次 `O_NOFOLLOW` open、同一 descriptor 的前后 `fstat` 与单个 immutable byte buffer；SHA、
 JSON 解析和 `np.load(BytesIO)` 不得重新开路径。NPZ ZIP member 必须逐名唯一，JSON boolean 不得冒充 integer，
 integer/float 也不得靠隐式 coercion 过门。
+
+当前已接受实例的 receipt 是 4103 bytes / SHA-256
+`e20a6989a43f3a0725b5973e8675f2a25e72d2fe705d3fc0c914cd7da2d2aba4`，count=`4096`。它由 clean
+`a38b7e9` attestor 在固定 authorization 下唯一签发；merged-main controller status 已给出
+`teacher_receipt_binding_exact=true`。该事实只授权后续独立 first-reset probe，不自动授权科学训练。
 
 ## capture producer 与 attestor 双谱系
 

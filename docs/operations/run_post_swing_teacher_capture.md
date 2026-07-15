@@ -1,6 +1,7 @@
 # 生成随挥结束教师状态制品
 
-状态：**v1/v2 均已阻断且 namespace 不重发；v3 已自然收满 4096 条 finite 状态，但 attestor attempt-1 因 canonical newline 语义假拒绝且 receipt 不存在。** 本操作只用于仿真推理和后续训练 cold-start，
+状态：**v1/v2 均已阻断且 namespace 不重发；v3 已自然收满 4096 条 finite 状态，唯一授权的 attestor
+attempt-2 已 rc0 并发布 exact receipt；first-reset trainer-consumer probe 尚未运行。** 本操作只用于仿真推理和后续训练 cold-start，
 绝不下发真机命令。源码专项与攻击负测通过；首个 exact 实例见
 [`phase1_post_swing_teacher_capture_prereg_20260715.json`](../../configs/phase1_post_swing_teacher_capture_prereg_20260715.json)，
 但它在 Hydra compose 阶段因保留 train-only checkpoint 兼容键而 fail closed；capture directory、claim、
@@ -13,18 +14,17 @@ successor v3 在同一 Pod2 GPU2 上自然退出，`natural_clip_wrap` 状态 `4
 attestor 把“完整 JSON 文档的末尾换行”错误计入 queue claim 的嵌入式 `content_sha256`，以 rc2
 `training launch claim canonical digest mismatch` 假拒绝。`teacher_receipt.json` 从未创建；完整机器证据见
 [`phase1_post_swing_teacher_capture_attempt_v3_result_20260715.json`](../../configs/phase1_post_swing_teacher_capture_attempt_v3_result_20260715.json)。
-attempt-1 在 `_claim()` 即停止：这只证明 digest 是第一个观测到的 blocker；checkpoint restricted load、
+attempt-1 在 `_claim()` 即停止：它当时只证明 digest 是第一个观测到的 blocker；checkpoint restricted load、
 fresh lineage、相邻 hard contract、producer/attestor source、motion/order 与 velocity limits 均未执行、未证明。
-capture arrays finite 是单独的 capture 证据，不能代替完整 attestation。
-不得重跑 capture；attestor 也必须等本语义修复进入 `main`，再用 clean exact source 和同一 immutable v3
-inputs 单次执行。attestation 和首 reset readback probe 尚未完成，因此 scientific trainer、第二 seed、judge
+capture arrays finite 是单独的 capture 证据，不能代替完整 attestation；后续 attempt-2 已补齐这些门。
+不得重跑 capture 或 attestor。首 reset readback probe 尚未完成，因此 scientific trainer、第二 seed、judge
 与 promotion 仍未授权。
 
 2026-07-15 的 seed-parity 修复已让 `play.py` 只接受 plain uint32 seed，并在 `gym.make` 前把同一个值
 写入 environment config 与 PPO runner config；三个 train-only checkpoint 键也都有真实 Hydra compose
 负测。一次性 controller/builder 随后通过独立 source-only 红队，v3 又实际闭合 plan/compose/launch/capture；
-当前缺口已缩小为修复 attestor 的 content/document canonical 语义、在修复合入 main 后对同一 immutable v3
-capture 做一次 attestation，以及独立的首 reset probe。不是 seed、controller 或 capture runtime 缺口。
+attestor 的 content/document canonical 语义和同一 immutable v3 capture 的唯一 attestation 现已闭合；
+当前缺口只剩独立的首 reset probe。不是 seed、controller、capture 或 receipt lineage 缺口。
 
 successor 的 `play.py` 必须通过共享 `policy_observation_tensor` 只接受三种明确结构：actor tensor、exact
 `(actor tensor, extras mapping)`，或含 `policy` 的 observation mapping；mapping 同时含 `critic` 时也只把
@@ -168,7 +168,7 @@ attestor 使用 `torch.load(..., weights_only=True)`；不兼容 restricted unpi
 queue claim 的 `content_sha256` 只覆盖 `json.dumps(..., separators=(",", ":"), sort_keys=True)` 产生的
 compact UTF-8 **content bytes**，不含末尾换行；claim/receipt 落盘时才在完整 JSON **document bytes** 后追加
 恰好一个 `\n`。两类 bytes 必须用不同 helper，不能再共享一个“总是加换行”的 canonicalizer。v3
-attempt-1 已证明混用会在任何 receipt 写入前假拒绝；修复合入前不得再次运行 attestor。
+attempt-1 已证明混用会在任何 receipt 写入前假拒绝；该失败实例永久不重放。
 
 attempt-2 的 running attestor 与 `--capture-source-checkout` 故意不是同一个 checkout。running attestor
 必须是 clean detached `a38b7e9e693db407795d9a5f3af144b8f8e293cf`，其脚本 SHA-256 必须为
@@ -182,6 +182,12 @@ hard-contract summary 保留两者和 retry authorization。`--retry-authorizati
 它的 exact file SHA `87fd1c71...dfda`。controller `status` 会把 capture source 对回 immutable v3 plan，并只从自身 clean
 checkout 读取这份 tracked authorization，再核对 receipt 的 attestor source 与 authorization；不得用任意
 post-fix clean HEAD 自签自验、不得用 post-fix HEAD 冒充 capture source，也不得交换两个对象。
+
+2026-07-15 唯一 attempt-2 已按上述合同执行：running source=`a38b7e9...293cf`，authorization source=
+`main@ff9a253...0d54`，PGID `403786` 自然 rc0 后 absent。receipt 为 4103 bytes / SHA-256
+`e20a6989a43f3a0725b5973e8675f2a25e72d2fe705d3fc0c914cd7da2d2aba4`、count=`4096`；merged-main
+controller `status` 返回 `teacher_receipt_binding_exact=true`。state/log/rc SHA-256 分别为
+`7a7e74ab...d0a24` / `1becc72e...e77c3` / `9a271f2a...86aa`。该 receipt 和 attestor 都不得重发或覆盖。
 
 ## 3. 4096-environment 首 reset probe（尚未执行）
 
