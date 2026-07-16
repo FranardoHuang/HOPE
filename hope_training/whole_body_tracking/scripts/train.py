@@ -780,6 +780,12 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
                 "exact": True,
             }
     post_swing_replay = motion_cmd.post_swing_replay_hard_contract()
+    planner_runtime_contract = motion_cmd.planner_revision_hard_contract()
+    planner_training_contract = motion_cmd.planner_revision_training_hard_contract()
+    if (planner_runtime_contract is None) != (planner_training_contract is None):
+        raise RuntimeError(
+            "planner runtime and training hard contracts must be enabled atomically"
+        )
     from whole_body_tracking.tasks.tracking.mdp.post_swing_teacher import (
         training_contract_extension,
     )
@@ -851,16 +857,16 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
         "motion_event_timing": motion_cmd.event_timing_hard_contract(),
         **(
             {}
-            if motion_cmd.planner_revision_hard_contract() is None
+            if planner_runtime_contract is None
             else {
-                "planner_task_revision": motion_cmd.planner_revision_hard_contract(),
+                "planner_task_revision": planner_runtime_contract,
                 "planner_task_revision_training": {
                     "initial_tts_sampling_semantics": (
                         "explicit_weighted_mixture_over_initial_tts_range_s"
                     ),
-                    "initial_tts_mixture": attr(
-                        motion, "planner_revision_initial_tts_mixture"
-                    ),
+                    "initial_tts_mixture": planner_training_contract[
+                        "initial_tts_mixture"
+                    ],
                     "initial_feasibility_gate": (
                         "normalized_phase_rate_and_acceleration_envelope_only"
                     ),
@@ -2622,6 +2628,7 @@ def _run(cfg):
     from whole_body_tracking.utils.training_contract import (
         require_checkpoint_contract_binding,
         validate_schema3_contract,
+        validate_schema3_contract_structure,
     )
 
     torch.backends.cuda.matmul.allow_tf32 = True
@@ -2795,6 +2802,12 @@ def _run(cfg):
         actor_contract = infer_actor_observation_contract(env.unwrapped)
 
     hard_contract = _build_training_hard_contract(env.unwrapped, actor_contract)
+    try:
+        validate_schema3_contract_structure(hard_contract)
+    except ValueError as exc:
+        raise RuntimeError(
+            "new training hard contract failed schema-3 structural validation"
+        ) from exc
     lateral_training_runtime = None
     lateral_training = _resolve_lateral_training_runtime(env.unwrapped)
     if lateral_training is not None:

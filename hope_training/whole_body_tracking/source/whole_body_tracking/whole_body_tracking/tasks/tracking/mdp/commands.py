@@ -918,6 +918,26 @@ class MotionCommand(CommandTerm):
             "initial_tts_range_s": list(initial_tts),
         }
 
+    def planner_revision_training_hard_contract(self) -> dict | None:
+        """Return canonical training-only planner facts from the validated runtime objects.
+
+        Hydra may retain mapping-shaped values as ``DictConfig`` instances.  The generic legacy
+        hard-contract converter intentionally preserves its historical behavior, so feeding the
+        raw config through it would serialize a mapping as a list of keys.  The parsed
+        ``InitialTtsMixture`` is already the runtime authority; publishing its canonical document
+        here keeps the producer and validator on one representation without changing any legacy
+        OFF-path contract bytes.
+        """
+
+        if not self.planner_revision_enabled:
+            return None
+        mixture = self._planner_initial_tts_mixture
+        if mixture is None:
+            raise RuntimeError(
+                "planner revision enabled without a validated initial-TTS mixture"
+            )
+        return {"initial_tts_mixture": mixture.document()}
+
     def begin_planner_task(
         self,
         env_ids: torch.Tensor,

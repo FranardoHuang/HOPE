@@ -1,8 +1,9 @@
 # EXP-P1-TASK-REVISION-CUTOVER
 
-Status: `blocked` — replacement source is implemented; the first real full-scene attempt found a
-per-environment metric-shape bug before iteration 1. The root cause is fixed in source and awaits a
-fresh full-scene pass; there is still no accepted behavior result.
+Status: `blocked` — replacement source is implemented. `A5` proved the metric-shape fix crosses a
+real rollout and exits naturally, but its producer wrote the initial-TTS mixture as a key list
+instead of an object; the finalizer correctly rejected it. The producer and pre-write structural
+gate are fixed in source and await a fresh `A6`; there is still no accepted behavior result.
 
 - Human owner: Franco
 - Executor: Codex
@@ -112,7 +113,18 @@ buffers at `[num_envs]`, clears them every policy step and scatters compact deci
 original environment ids; a 4096-environment regression includes high global reset ids. `A4` was
 classified `stale_timeout/125` after the CUDA cascade, both recorded process ids and the GPU context
 are absent, and it produced no checkpoint. This is a failed probe, not a training result or retry
-authorization. A fresh source commit plus a new no-clobber full-scene attempt are still required.
+authorization.
+
+`A5` used the fixed metric buffers and reached the first PPO iteration, completed the two-update
+probe and wrote a normal-exit marker. The generic finalizer then rejected its schema-3 sidecar
+before task-revision activation: `_contract_value()` treated the raw Hydra mapping as an iterable
+and serialized `initial_tts_mixture` as `["contract_version", "components"]`. The validator was
+correct; `A5` is permanently rejected and cannot be repaired by a receipt. The successor takes the
+canonical document from the already validated `InitialTtsMixture` runtime object and, before any
+sidecar write or runner creation, validates every newly produced schema-3 structure. It deliberately
+does not change the legacy generic converter, preserving planner-OFF contract bytes. The exact A5
+malformed shape is now a fail-closed regression. A fresh source commit plus a unique no-clobber
+`A6` attempt are still required.
 
 ## Acceptance sequence
 

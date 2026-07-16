@@ -13,6 +13,12 @@
 
 ## 2026-07-17
 
+- task-revision full-scene `A5` 已越过 A4 的 CUDA metric-shape 根因、进入真实 PPO iteration 并自然
+  完成两次 update，但 finalizer 正确拒绝其 malformed hard contract：Hydra mixture dict 被旧通用
+  converter 写成 key list。修复版改从已验证 runtime object 生成 canonical object，并在 sidecar/runner
+  前自验新 schema-3；A5 永久 rejected，须新 `A6` 运行门。聚焦回归 `203 passed`。见
+  [task-revision cutover](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md)。
+
 - 03:30 CST，task-revision full-scene `A4` 首次越过 4096-env scene import 与 schema-3
   hard-contract 写入，却在 iteration 1 前触发 CUDA env-id 越界。根因是 planner revision 将两个
   `[num_envs]` command metric 错误重绑成 eligible 子集短张量；0.36 秒支路第 18 步缩集而首 rollout

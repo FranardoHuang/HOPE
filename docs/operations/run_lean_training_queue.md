@@ -585,6 +585,12 @@ python3 scripts/run_phase1_task_revision_supercombo_queue.py \
 `blocking_contract.task_revision_full_scene_probe_evidence`；runner 自己把该证据加入 `validate`、`plan`、
 `fill`、行为 attestor 和 exact-stop 的统一 blocker，不能只改旧 generic evidence 绕过。
 
+`A5` 运行到真实 PPO iteration 并自然完成两次 update，但 generic finalizer 拒绝了训练 producer
+写出的 malformed mixture（key list 而非 object），所以该 namespace 永久 rejected、不得补 receipt 或
+重放。successor 必须从 validated `InitialTtsMixture.document()` 生成训练字段，并在写
+`training_contract.json`、构造 runner 之前调用 schema-3 structure validator；任一失败都必须在新
+attempt namespace 中重跑 full-scene，不能放宽 finalizer。
+
 科学 run 的行为比较不读 TensorBoard EMA，而只消费 runner 每个 PPO update 发出的唯一
 `HOPE_EXACT_BEHAVIOR_UPDATE_JSON`。absolute milestone 可从 `plan` 读取。先只读 inspect；需要创建 checkpoint
 和行为 receipt 时使用 attest：

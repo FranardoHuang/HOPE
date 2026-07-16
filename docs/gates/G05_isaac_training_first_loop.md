@@ -46,6 +46,18 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-17, task-revision `A5` reached rollout but hard-contract producer failed;
+Gate remains `Partial`):
+
+- `A5` crossed the previous CUDA metric-shape failure, observed a real PPO iteration and naturally
+  completed its two-update full-scene process. Its generic finalizer correctly refused activation:
+  the producer serialized the weighted initial preparation-time mixture as a two-key list rather
+  than the required object. No behavior result, queue activation or promotion follows from `A5`.
+- The successor sources the mixture from the parsed runtime authority and validates a newly built
+  schema-3 contract before writing its sidecar or constructing the runner. The old generic converter
+  is unchanged, so planner-OFF historical contracts do not drift. Focused dependency-light
+  regression is `203 passed`; a fresh `A6` full-scene runtime pass remains mandatory.
+
 Follow-up note (2026-07-15, schema-v3 capture complete but attestor newline false rejection; Gate remains `Partial`):
 
 - Pod2 GPU2 attempt `control_model500_v3_obsfix_gpu2_20260715a` naturally produced 4096 finite

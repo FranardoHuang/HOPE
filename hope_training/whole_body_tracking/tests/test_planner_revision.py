@@ -362,7 +362,7 @@ def test_runtime_metadata_and_training_noise_are_separate_contracts():
         / "source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/commands.py"
     ).read_text()
     hard = commands.split("def planner_revision_hard_contract", 1)[1].split(
-        "def begin_planner_task", 1
+        "def planner_revision_training_hard_contract", 1
     )[0]
     for key in (
         '"enabled"',
@@ -372,8 +372,18 @@ def test_runtime_metadata_and_training_noise_are_separate_contracts():
     ):
         assert key in hard
     assert "initial_tts_mixture" not in hard
+    training_hard = commands.split(
+        "def planner_revision_training_hard_contract", 1
+    )[1].split("def begin_planner_task", 1)[0]
+    assert 'return {"initial_tts_mixture": mixture.document()}' in training_hard
     assert '"planner_task_revision_training"' in train
     assert '"initial_tts_mixture"' in train
+    assert 'planner_training_contract[\n                        "initial_tts_mixture"' in train
+    assert 'attr(\n                        motion, "planner_revision_initial_tts_mixture"' not in train
+    run = train.split("def _run(cfg):", 1)[1]
+    assert run.index("validate_schema3_contract_structure(hard_contract)") < run.index(
+        'contract_path = os.path.join(log_dir, "params", "training_contract.json")'
+    )
     assert "explicit_weighted_mixture_over_initial_tts_range_s" in train
     assert '"truth_fields_immutable"' in train
 

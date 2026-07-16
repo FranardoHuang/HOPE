@@ -582,6 +582,12 @@ def test_planner_revision_range_and_policy_clock_mismatch_fail_closed():
             "missing fields",
         ),
         (
+            lambda contract: contract["planner_task_revision_training"].__setitem__(
+                "initial_tts_mixture", ["contract_version", "components"]
+            ),
+            "must be an object",
+        ),
+        (
             lambda contract: contract["planner_task_revision_training"][
                 "initial_tts_mixture"
             ]["components"][0].__setitem__("weight", 0.14),
