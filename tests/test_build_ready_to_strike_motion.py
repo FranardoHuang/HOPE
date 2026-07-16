@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/build_ready_to_strike_motion.py"
 LADDER = ROOT / "configs/ready_to_strike_join_ladder_20260717.yaml"
 STAGE2_ACTIVATION_V1 = ROOT / "configs/ready_to_strike_join_ladder_stage2_activation_20260717.json"
-STAGE2_ACTIVATION = ROOT / "configs/ready_to_strike_join_ladder_stage2_activation_v2_20260717.json"
+STAGE2_ACTIVATION = ROOT / "configs/ready_to_strike_join_ladder_stage2_activation_v3_20260717.json"
 
 
 def _load_module():
@@ -124,10 +124,13 @@ def test_stage2_activation_is_exactly_the_registered_crossover_branch() -> None:
         ).hexdigest(),
     }
     assert activation["stage2_namespace"].endswith(
-        "/join_ladder_stage2_d12_v2_float32_producer"
+        "/join_ladder_stage2_d12_v3_mjcf_closure"
     )
     assert activation["prior_failed_attempt"]["summary_sha256"] == (
-        "f92e6b8b30844ba366c0bc901aacdb0f040e61f961678bd2290d833b8ac63c0e"
+        "6910db2826654123c576afa67b9c2e873c4785c2bd095b2f61abb26d5f1f1476"
+    )
+    assert activation["prior_failed_attempt"]["failure_class"] == (
+        "mjcf_snapshot_omitted_referenced_mesh_assets"
     )
     assert activation["prior_failed_attempt"]["automatic_retry"] is False
     cells = activation["authorized_stage2_cells"]

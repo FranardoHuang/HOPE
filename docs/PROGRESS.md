@@ -13,6 +13,12 @@
 
 ## 2026-07-17
 
+- ready×join Stage-2 v2 唯一 execute 已保全 summary `6910db28…f1476`：四份 candidate/contract 与 v1
+  逐字节一致，随后因隔离 MJCF 漏复制 XML 引用的 STL，四个 TOPP 均在算法前 rc1，无 timing、无重试。
+  v3 零 generator 调用并精确复用这四份 candidate，只从 frozen Git objects 补齐 `1 XML + 74 mesh`
+  closure（75 文件、14,127,373 字节、manifest `e0381752…b962de`）；wrong prior/log/blob/tree/mode 与 XML
+  include/path 反例均 fail closed，相关回归 `66 passed`。远端一次性 execute 仍待完成，G08 保持 Partial。
+
 - ready×join Stage-2 v1 dry-run 通过后唯一 execute 自然终止并保全失败 summary
   `f92e6b8b…63c0e`：四个 generator 均 rc0，但 runner 重复了历史已知量尺错误，把 generator 的 float32
   producer-gradient 当成 TOPP float64 workspace-gradient，四格全在 TOPP 前拒绝；无 timing、无重试、

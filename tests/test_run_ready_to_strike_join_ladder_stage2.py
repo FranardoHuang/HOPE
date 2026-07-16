@@ -18,6 +18,8 @@ assert SPEC is not None and SPEC.loader is not None
 runner = importlib.util.module_from_spec(SPEC)
 sys.modules[SPEC.name] = runner
 SPEC.loader.exec_module(runner)
+REAL_COLLECT_PRIOR_V2_INPUTS = runner._collect_prior_v2_inputs
+REAL_RUN_GIT_READONLY = runner._run_git_readonly
 
 
 def _canonical(document: object) -> bytes:
@@ -146,17 +148,26 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]
     prior_root.mkdir()
     prior_runner_sha = "5" * 64
     prior_activation_sha = "6" * 64
+    prior_v1_summary_sha = "a" * 64
+    fixture_prior_candidates = {
+        cell_id: (format(index + 1, "x") * 64, format(index + 9, "x") * 64)
+        for index, cell_id in enumerate(runner.EXPECTED_STAGE2_CELLS)
+    }
+    monkeypatch.setattr(runner, "EXPECTED_PRIOR_V1_SUMMARY_SHA256", prior_v1_summary_sha)
+    monkeypatch.setattr(runner, "EXPECTED_PRIOR_CANDIDATES", fixture_prior_candidates)
     prior_rows = []
     for cell_id, (action, ready, delta) in runner.EXPECTED_STAGE2_CELLS.items():
+        candidate_sha, contract_sha = fixture_prior_candidates[cell_id]
         prior_rows.append({
             "cell_id": cell_id, "action": action, "ready_source": ready,
             "delta": delta,
             "join_frame": queue["assets"][action]["contact_frame"] - 12,
             "blend_intervals": 10, "generator_rc": 0,
-            "terminal_error": (
-                f"candidate_validation_failed:{cell_id} candidate.joint_vel "
-                "is not the canonical position gradient"
-            ),
+            "candidate_sha256": candidate_sha,
+            "generator_contract_sha256": contract_sha,
+            "frames": 40, "phase": 25.0 / 39.0,
+            "joint_path_l2": 0.0, "joint_curvature_l2": 0.0,
+            "max_joint_step_rad": 0.0, "topp_rc": 1,
         })
     prior_summary = {
         "schema_version": 1,
@@ -166,6 +177,7 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]
         "queue_sha256": queue_sha,
         "stage1_receipt_sha256": _sha(receipt_payload),
         "runner_sha256": prior_runner_sha,
+        "prior_failed_attempt_summary_sha256": prior_v1_summary_sha,
         "runtime_snapshot_shas": {"runtime.py": "7" * 64},
         "asset_snapshot_shas": {"forehand": "8" * 64, "backhand": "9" * 64},
         "rows": prior_rows,
@@ -200,7 +212,7 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]
         "runner_sha256": prior_runner_sha,
         "activation_sha256": prior_activation_sha,
         "failure_class": (
-            "candidate_validator_used_float64_instead_of_generator_float32_gradient"
+            "mjcf_snapshot_omitted_referenced_mesh_assets"
         ),
         "automatic_retry": False,
     }
@@ -254,6 +266,68 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]
     }
     activation_path = tmp_path / "activation.json"
     _write(activation_path, _canonical(activation))
+
+    def fake_mjcf_closure(**_kwargs):
+        return ({
+            "checkout_commit": queue["runtime"]["checkout_commit"],
+            "model_root_git_tree_oid": "b" * 40,
+            "mjcf_relative_path": str(runner.RUNTIME_RELATIVE_PATHS["mjcf_sha256"]),
+            "compiler_meshdir": "meshes", "file_count": 2, "mesh_count": 1,
+            "total_bytes": 2, "mesh_manifest_sha256": "c" * 64,
+            "files": [], "git_blob_manifest_sha256": "d" * 64, "git_blobs": [],
+        }, {})
+
+    monkeypatch.setattr(runner, "_collect_mjcf_mesh_closure", fake_mjcf_closure)
+
+    def fake_prior_inputs(**_kwargs):
+        body_names_path = runtime / runner.RUNTIME_RELATIVE_PATHS["body_order_sha256"]
+        body_names = tuple(line.strip() for line in body_names_path.read_text().splitlines()
+                           if line.strip())
+        fixture_root = tmp_path / "prior-v2-inputs"
+        fixture_root.mkdir(exist_ok=True)
+        records = {}
+        snapshots = {}
+        for cell_id in runner.EXPECTED_STAGE2_CELLS:
+            q = np.zeros((40, 31), dtype=np.float32)
+            quat = np.zeros((40, len(body_names), 4), dtype=np.float32)
+            quat[..., 0] = 1.0
+            candidate_path = fixture_root / f"{cell_id}.npz"
+            np.savez(
+                candidate_path,
+                fps=np.array([50], dtype=np.int64), joint_pos=q,
+                joint_vel=np.gradient(q, 1.0 / 50.0, axis=0).astype(np.float32),
+                body_pos_w=np.zeros((40, len(body_names), 3), dtype=np.float32),
+                body_quat_w=quat,
+                body_lin_vel_w=np.zeros((40, len(body_names), 3), dtype=np.float32),
+                body_ang_vel_w=np.zeros((40, len(body_names), 3), dtype=np.float32),
+                kinematics_schema_version=np.array([2], dtype=np.int64),
+                body_pos_point=np.array("link_origin"),
+                body_lin_vel_point=np.array("center_of_mass"),
+                body_names=np.asarray(body_names),
+            )
+            contract_path = fixture_root / f"{cell_id}.contract.json"
+            contract_path.write_bytes(b"fixture-contract\n")
+            log_path = fixture_root / f"{cell_id}.log"
+            log_path.write_bytes(b"missing mesh.STL: No such file or directory\n")
+            candidate = runner._read_snapshot(candidate_path, "fixture prior candidate")
+            contract = runner._read_snapshot(contract_path, "fixture prior contract")
+            log = runner._read_snapshot(log_path, "fixture prior log")
+            info = {
+                "candidate_sha256": candidate.sha256,
+                "generator_contract_sha256": contract.sha256,
+                "frames": 40, "phase": 25.0 / 39.0,
+                "joint_path_l2": 0.0, "joint_curvature_l2": 0.0,
+                "max_joint_step_rad": 0.0,
+            }
+            records[cell_id] = {
+                "candidate": candidate, "contract": contract, "log": log, "info": info,
+            }
+            snapshots[f"prior:candidate:{cell_id}"] = candidate
+            snapshots[f"prior:contract:{cell_id}"] = contract
+            snapshots[f"prior:topp_log:{cell_id}"] = log
+        return records, snapshots
+
+    monkeypatch.setattr(runner, "_collect_prior_v2_inputs", fake_prior_inputs)
     return {
         "queue": queue_path,
         "activation": activation_path,
@@ -270,6 +344,82 @@ def _plan(paths: dict[str, Path]) -> dict[str, object]:
         root=paths["root"],
         runner_source=paths["source"],
     )
+
+
+def _prepare_real_prior_v2_preflight_prefix(
+    paths: dict[str, Path], monkeypatch: pytest.MonkeyPatch,
+) -> tuple[dict[str, object], dict[str, object], str, str, str]:
+    activation = json.loads(paths["activation"].read_text())
+    queue = json.loads(paths["queue"].read_text())
+    prior_root = Path(activation["prior_failed_attempt"]["namespace"])
+    controls = {
+        "runner": b"prior-v2-runner\n", "activation": b"prior-v2-activation\n",
+        "queue": paths["queue"].read_bytes(), "receipt": b"prior-v2-receipt\n",
+        "generator": (Path(activation["stage1_namespace"])
+                      / "build_ready_to_strike_motion.py").read_bytes(),
+        "v1_summary": b"prior-v1-summary\n",
+    }
+    control_paths = {
+        "runner": prior_root / "snapshots/run_ready_to_strike_join_ladder_stage2.py",
+        "activation": prior_root / "snapshots/activation.json",
+        "queue": prior_root / "snapshots/queue.json",
+        "receipt": prior_root / "snapshots/stage1_historical_attestation.json",
+        "generator": prior_root / "snapshots/build_ready_to_strike_motion.py",
+        "v1_summary": prior_root / "snapshots/prior_stage2_failure_summary.json",
+    }
+    for name, payload in controls.items():
+        _write(control_paths[name], payload)
+    for name in ("forehand", "backhand"):
+        _write(prior_root / f"snapshots/assets/{name}.npz",
+               Path(queue["assets"][name]["path"]).read_bytes())
+    binding = dict(activation["prior_failed_attempt"])
+    binding["runner_sha256"] = _sha(controls["runner"])
+    binding["activation_sha256"] = _sha(controls["activation"])
+    monkeypatch.setattr(runner, "EXPECTED_PRIOR_ATTEMPT", binding)
+    monkeypatch.setattr(runner, "EXPECTED_PRIOR_V1_SUMMARY_SHA256",
+                        _sha(controls["v1_summary"]))
+    cell_id = next(iter(runner.EXPECTED_STAGE2_CELLS))
+    cell_root = prior_root / cell_id
+    candidate_payload = b"prior-v2-candidate\n"
+    contract_payload = b"prior-v2-contract\n"
+    log_payload = b"missing mesh.STL: No such file or directory\n"
+    _write(cell_root / "candidate.npz", candidate_payload)
+    _write(cell_root / "candidate.contract.json", contract_payload)
+    _write(cell_root / "topp/run.log", log_payload)
+    return activation, queue, _sha(candidate_payload), _sha(contract_payload), _sha(log_payload)
+
+
+@pytest.mark.parametrize("tamper", ["candidate", "log"])
+def test_real_prior_v2_preflight_rejects_tampered_candidate_or_log_before_runtime(
+    tamper: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _fixture(tmp_path, monkeypatch)
+    activation, queue, candidate_sha, contract_sha, log_sha = (
+        _prepare_real_prior_v2_preflight_prefix(paths, monkeypatch)
+    )
+    cell_id = next(iter(runner.EXPECTED_STAGE2_CELLS))
+    candidates = dict(runner.EXPECTED_PRIOR_CANDIDATES)
+    candidates[cell_id] = (
+        "0" * 64 if tamper == "candidate" else candidate_sha,
+        contract_sha,
+    )
+    logs = dict(runner.EXPECTED_PRIOR_TOPP_LOGS)
+    logs[cell_id] = "0" * 64 if tamper == "log" else log_sha
+    monkeypatch.setattr(runner, "EXPECTED_PRIOR_CANDIDATES", candidates)
+    monkeypatch.setattr(runner, "EXPECTED_PRIOR_TOPP_LOGS", logs)
+    receipt_sha = _sha(b"prior-v2-receipt\n")
+    message = "candidate or contract SHA" if tamper == "candidate" else "TOPP log SHA"
+
+    with pytest.raises(runner.Stage2Error, match=message):
+        REAL_COLLECT_PRIOR_V2_INPUTS(
+            activation=activation, queue=queue, body_order=("body",),
+            expected_receipt_sha=receipt_sha,
+        )
+
+
+def test_v2_activation_bytes_remain_immutable() -> None:
+    payload = (REPO / "configs/ready_to_strike_join_ladder_stage2_activation_v2_20260717.json").read_bytes()
+    assert _sha(payload) == "8742aadff796218f170fede3f6e386e54314e086740f4ad82b9242f52667ab10"
 
 
 def _flag(command: list[str], name: str) -> str:
@@ -314,8 +464,113 @@ def test_schema2_gradient_contract_separates_generator_from_topp_workspace() -> 
     ) == 40
 
 
+def test_real_mjcf_mesh_closure_is_git_bound_and_complete() -> None:
+    mjcf_relative = runner.RUNTIME_RELATIVE_PATHS["mjcf_sha256"]
+    snapshot = runner._read_snapshot(REPO / mjcf_relative, "real MJCF fixture")
+    head = subprocess.run(
+        ["git", "-C", str(REPO), "rev-parse", "HEAD"],
+        check=True, text=True, stdout=subprocess.PIPE,
+    ).stdout.strip()
+
+    closure, snapshots = runner._collect_mjcf_mesh_closure(
+        runtime_root=REPO, checkout_commit=head,
+        mjcf_relative=mjcf_relative, mjcf_snapshot=snapshot,
+    )
+
+    assert closure["file_count"] == 75
+    assert closure["mesh_count"] == 74
+    assert closure["total_bytes"] == 14127373
+    assert closure["mesh_manifest_sha256"] == runner.EXPECTED_MJCF_CLOSURE_MANIFEST_SHA256
+    assert closure["model_root_git_tree_oid"] == runner.EXPECTED_MJCF_MODEL_TREE_OID
+    assert len(snapshots) == 74
+
+
+@pytest.mark.parametrize(
+    ("mutator", "message"),
+    [
+        (lambda payload: payload.replace(
+            b'file="pelvis_link.STL"', b'file="../pelvis_link.STL"', 1), "traversal"),
+        (lambda payload: payload.replace(
+            b'file="waist_yaw_Link.STL"', b'file="pelvis_link.STL"', 1), "duplicate"),
+        (lambda payload: payload.replace(
+            b"<asset>", b'<include file="external.xml" />\n  <asset>', 1),
+         "unsupported external"),
+        (lambda payload: b"<!DOCTYPE mujoco [<!ENTITY x 'y'>]>\n" + payload,
+         "entity declarations"),
+    ],
+)
+def test_mjcf_closure_rejects_unreviewed_external_or_ambiguous_references(
+    mutator, message: str
+) -> None:
+    mjcf_relative = runner.RUNTIME_RELATIVE_PATHS["mjcf_sha256"]
+    original = runner._read_snapshot(REPO / mjcf_relative, "real MJCF fixture")
+    head = subprocess.run(
+        ["git", "-C", str(REPO), "rev-parse", "HEAD"],
+        check=True, text=True, stdout=subprocess.PIPE,
+    ).stdout.strip()
+    changed = runner.Snapshot(original.path, mutator(original.payload), original.mode)
+
+    with pytest.raises(runner.Stage2Error, match=message):
+        runner._collect_mjcf_mesh_closure(
+            runtime_root=REPO, checkout_commit=head,
+            mjcf_relative=mjcf_relative, mjcf_snapshot=changed,
+        )
+
+
+def test_mjcf_closure_rejects_wrong_frozen_tree_before_snapshot(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mjcf_relative = runner.RUNTIME_RELATIVE_PATHS["mjcf_sha256"]
+    snapshot = runner._read_snapshot(REPO / mjcf_relative, "real MJCF fixture")
+    head = subprocess.run(
+        ["git", "-C", str(REPO), "rev-parse", "HEAD"], check=True,
+        text=True, stdout=subprocess.PIPE,
+    ).stdout.strip()
+
+    def wrong_tree(runtime_root, arguments, label):
+        if label == "MJCF model-root tree binding":
+            return ("0" * 40 + "\n").encode()
+        return REAL_RUN_GIT_READONLY(runtime_root, arguments, label)
+
+    monkeypatch.setattr(runner, "_run_git_readonly", wrong_tree)
+    with pytest.raises(runner.Stage2Error, match="model-root Git tree"):
+        runner._collect_mjcf_mesh_closure(
+            runtime_root=REPO, checkout_commit=head,
+            mjcf_relative=mjcf_relative, mjcf_snapshot=snapshot,
+        )
+
+
+@pytest.mark.parametrize("mutation", ["blob", "mode"])
+def test_mjcf_closure_rejects_wrong_git_blob_or_mode(
+    mutation: str, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    mjcf_relative = runner.RUNTIME_RELATIVE_PATHS["mjcf_sha256"]
+    snapshot = runner._read_snapshot(REPO / mjcf_relative, "real MJCF fixture")
+    head = subprocess.run(
+        ["git", "-C", str(REPO), "rev-parse", "HEAD"], check=True,
+        text=True, stdout=subprocess.PIPE,
+    ).stdout.strip()
+
+    def corrupt_git(runtime_root, arguments, label):
+        payload = REAL_RUN_GIT_READONLY(runtime_root, arguments, label)
+        if mutation == "blob" and arguments[:2] == ["cat-file", "blob"]:
+            return b"corrupt-object-bytes"
+        if mutation == "mode" and label == "MJCF mesh tree binding":
+            return payload.replace(b"100644 blob", b"100755 blob", 1)
+        return payload
+
+    monkeypatch.setattr(runner, "_run_git_readonly", corrupt_git)
+    message = "corrupt MJCF blob" if mutation == "blob" else "unsupported Git entry"
+    with pytest.raises(runner.Stage2Error, match=message):
+        runner._collect_mjcf_mesh_closure(
+            runtime_root=REPO, checkout_commit=head,
+            mjcf_relative=mjcf_relative, mjcf_snapshot=snapshot,
+        )
+
+
 def _fake_executor(paths: dict[str, Path], calls: list[list[str]], *,
                    fail_generator_cell: str | None = None,
+                   fail_topp_cell: str | None = None,
                    budget_scale: float = 1.5,
                    reported_runup_s: float = 0.6,
                    output_contact_frame: int | None = None):
@@ -408,6 +663,8 @@ def _fake_executor(paths: dict[str, Path], calls: list[list[str]], *,
             return subprocess.CompletedProcess(command, 0, "generated")
 
         input_path = Path(_flag(command, "--input"))
+        if input_path.parent.name == fail_topp_cell:
+            return subprocess.CompletedProcess(command, 7, "registered TOPP failure")
         output = Path(_flag(command, "--output"))
         report = Path(_flag(command, "--report"))
         markdown = Path(_flag(command, "--md"))
@@ -702,19 +959,13 @@ def test_execute_runs_each_registered_cell_once_and_separates_timing_gate(
     )
 
     assert result["status"] == "stage2_execution_complete_no_retry"
-    assert len(calls) == 8
-    assert sum("--output-contract" in command for command in calls) == 4
+    assert len(calls) == 4
+    assert sum("--output-contract" in command for command in calls) == 0
     assert sum("--report" in command for command in calls) == 4
-    assert len({Path(_flag(command, "--output-npz")).parent.name
-                for command in calls if "--output-contract" in command}) == 4
-    generator_calls = [command for command in calls if "--output-contract" in command]
-    assert all(Path(_flag(command, "--source")).parent
-               == paths["root"] / "snapshots" / "assets"
-               for command in generator_calls)
-    assert all(Path(_flag(command, "--ready-source")).parent
-               == paths["root"] / "snapshots" / "assets"
-               for command in generator_calls)
+    assert result["generator_commands_executed"] == 0
     topp_calls = [command for command in calls if "--report" in command]
+    assert all(Path(_flag(command, "--input")).parent.parent == paths["root"]
+               for command in topp_calls)
     assert all(
         Path(command[command.index("--budget-clips") + 1]).parent
         == paths["root"] / "snapshots" / "assets"
@@ -742,14 +993,16 @@ def test_execute_failure_is_terminal_summary_and_never_retried(
             activation_path=paths["activation"], queue_path=paths["queue"],
             root=paths["root"], execute=True, confirm=runner.CONFIRM_TOKEN,
             runner_source=paths["source"],
-            command_runner=_fake_executor(paths, calls, fail_generator_cell="fh_rf_d12"),
+            command_runner=_fake_executor(paths, calls, fail_topp_cell="fh_rf_d12"),
         )
 
     summary = json.loads((paths["root"] / "stage2_summary.json").read_text())
     assert summary["status"] == "stage2_terminal_failure_no_retry"
-    assert len(calls) == 7  # four generators once, TOPP only for the three valid candidates
+    assert len(calls) == 4  # four prior candidates, each TOPP attempted exactly once
     failed = next(row for row in summary["rows"] if row["cell_id"] == "fh_rf_d12")
-    assert failed["generator_rc"] == 7
+    assert failed["generator_rc"] == 0
+    assert failed["topp_rc"] == 7
+    assert summary["generator_commands_executed"] == 0
 
 
 def test_execute_rejects_nonregistered_topp_budget_scale(
@@ -802,7 +1055,7 @@ def test_unexpected_post_namespace_failure_gets_terminal_summary(
     def explode(*args, **kwargs):
         raise RuntimeError("validator exploded")
 
-    monkeypatch.setattr(runner, "_validate_candidate", explode)
+    monkeypatch.setattr(runner, "_validate_topp", explode)
     with pytest.raises(runner.Stage2Error, match="unexpected Stage2 failure"):
         runner.run_stage2(
             activation_path=paths["activation"], queue_path=paths["queue"],
@@ -820,7 +1073,7 @@ def test_unexpected_post_namespace_failure_gets_terminal_summary(
 
 def test_current_repo_activation_exactly_binds_the_tracked_runner() -> None:
     activation = json.loads(
-        (REPO / "configs/ready_to_strike_join_ladder_stage2_activation_v2_20260717.json").read_text()
+        (REPO / "configs/ready_to_strike_join_ladder_stage2_activation_v3_20260717.json").read_text()
     )
     queue = runner._validate_queue(json.loads(
         (REPO / "configs/ready_to_strike_join_ladder_20260717.yaml").read_text()

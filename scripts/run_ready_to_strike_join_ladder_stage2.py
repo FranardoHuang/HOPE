@@ -22,12 +22,13 @@ import io
 import json
 import math
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 import stat
 import subprocess
 import sys
 from typing import Any, Callable, Mapping, Sequence
 import zipfile
+import xml.etree.ElementTree as ET
 
 import numpy as np
 
@@ -35,29 +36,55 @@ import numpy as np
 SCHEMA_VERSION = 1
 CONFIRM_TOKEN = "RUN_READY_TO_STRIKE_STAGE2_ONCE"
 CHILD_TIMEOUT_S = 3600
-EXPECTED_ACTIVATION_ID = "ready_to_strike_join_ladder_stage2_v2_20260717"
+EXPECTED_ACTIVATION_ID = "ready_to_strike_join_ladder_stage2_v3_20260717"
 EXPECTED_EXPERIMENT_ID = "ready_to_strike_join_ladder_20260717"
 EXPECTED_QUEUE_SHA256 = "cfa112f799dab9af33914fdfb5bfff90d21b4692e38b16a4627393936a527b8b"
 EXPECTED_PREREG_COMMIT = "8d74025e88fee832fae0ac2f672ec0eb9b2d3d5a"
 EXPECTED_EVIDENCE_STATUS = "historical_stage1_attested_screening_only"
 EXPECTED_STAGE2_NAMESPACE = (
     "/workspace/codexschema/ready_to_strike_0p5_20260717/"
-    "join_ladder_stage2_d12_v2_float32_producer"
+    "join_ladder_stage2_d12_v3_mjcf_closure"
 )
 EXPECTED_PRIOR_ATTEMPT = {
     "namespace": (
         "/workspace/codexschema/ready_to_strike_0p5_20260717/"
-        "join_ladder_stage2_d12_8d74025e"
+        "join_ladder_stage2_d12_v2_float32_producer"
     ),
     "summary_path": (
         "/workspace/codexschema/ready_to_strike_0p5_20260717/"
-        "join_ladder_stage2_d12_8d74025e/stage2_summary.json"
+        "join_ladder_stage2_d12_v2_float32_producer/stage2_summary.json"
     ),
-    "summary_sha256": "f92e6b8b30844ba366c0bc901aacdb0f040e61f961678bd2290d833b8ac63c0e",
-    "runner_sha256": "835cb56f9aac7c5b85791368e1de26745140a5de1af00144b0167fc2c26cf9f4",
-    "activation_sha256": "b225ed3715532cf498cbe7f95f31ef2972ce5ff6ed5a7dda2ad759c1a51dd500",
-    "failure_class": "candidate_validator_used_float64_instead_of_generator_float32_gradient",
+    "summary_sha256": "6910db2826654123c576afa67b9c2e873c4785c2bd095b2f61abb26d5f1f1476",
+    "runner_sha256": "049295e63e6f786cdb6aeb9ae8fe1d30d8418f8aad8253587fce52d76f44b9c5",
+    "activation_sha256": "8742aadff796218f170fede3f6e386e54314e086740f4ad82b9242f52667ab10",
+    "failure_class": "mjcf_snapshot_omitted_referenced_mesh_assets",
     "automatic_retry": False,
+}
+
+EXPECTED_PRIOR_V1_SUMMARY_SHA256 = (
+    "f92e6b8b30844ba366c0bc901aacdb0f040e61f961678bd2290d833b8ac63c0e"
+)
+EXPECTED_MJCF_MODEL_TREE_OID = "0870b9bf9eff29473b02cc9e363cbf084dda9048"
+EXPECTED_MJCF_CLOSURE_FILE_COUNT = 75
+EXPECTED_MJCF_CLOSURE_TOTAL_BYTES = 14127373
+EXPECTED_MJCF_CLOSURE_MANIFEST_SHA256 = (
+    "e0381752eab46013c08559b331abb261beaa88a207a3c2f1155ab00857b962de"
+)
+EXPECTED_PRIOR_CANDIDATES = {
+    "fh_rf_d12": ("a6c181f1b29b7e683a2efa70414f908c0896d110b21721c39565e3641a4eeb17",
+                  "a8c7b966b7c21dfd8c992dc286ae3a7c6788396124a2d54104b65adc09593630"),
+    "fh_rb_d12": ("ac3089ed72492eb92a4bdb63c218070af9303fa7fb4ec6df909f7e406ea13c6a",
+                  "ae19f06a65dc369b042109a93117069481fcde9167eae3a39189dd0a1f694e4d"),
+    "bh_rf_d12": ("c892336ee0363e0867535be9fc892a071c49ae3af338412bcc090f06d66c6c64",
+                  "bf8918968a60817f76ed83b76b26b932a6b068c960e3a2113e181d9cc0c93b4a"),
+    "bh_rb_d12": ("d9ce654c861d343be8fd6ed81ac40a15fda9b95d6bf2969bacdb936697e68643",
+                  "224cab63deb9bb76c514f8e19ca29e224be54f3b819a34f35137208c1da741df"),
+}
+EXPECTED_PRIOR_TOPP_LOGS = {
+    "fh_rf_d12": "36aac9645dd1b2441467a3ad1d57b889912f2b346cd7cdf3493b4f4a65760583",
+    "fh_rb_d12": "81db850b93837a91154807b852a37f09541cf777a15384d1a0cd650a51ea3d2b",
+    "bh_rf_d12": "7d66169ff4691d4cb96bfcc0584d4e2886e210472f88c01ca7db5ba76bb54a0a",
+    "bh_rb_d12": "9ee20f066ddd387bbbc06c323c6c06046f4f0f51745ba858811220698a66a24f",
 }
 
 EXPECTED_STAGE1_CELLS = {
@@ -240,6 +267,171 @@ def _read_snapshot(path: Path | str, label: str) -> Snapshot:
         return Snapshot(absolute, payload, stat.S_IMODE(before.st_mode))
     finally:
         os.close(fd)
+
+
+def _git_blob_oid(payload: bytes) -> str:
+    header = f"blob {len(payload)}\0".encode("ascii")
+    return hashlib.sha1(header + payload).hexdigest()
+
+
+def _safe_repo_relative(value: str, label: str) -> PurePosixPath:
+    _require(isinstance(value, str) and value != "", f"{label} must be non-empty")
+    _require("\\" not in value and "\0" not in value,
+             f"{label} contains a forbidden separator or NUL")
+    path = PurePosixPath(value)
+    _require(not path.is_absolute(), f"{label} must be relative")
+    _require(all(part not in ("", ".", "..") for part in path.parts),
+             f"{label} contains traversal or empty components")
+    return path
+
+
+def _run_git_readonly(runtime_root: Path, arguments: Sequence[str], label: str) -> bytes:
+    env = dict(os.environ)
+    env.update({
+        "GIT_CONFIG_NOSYSTEM": "1",
+        "GIT_CONFIG_GLOBAL": os.devnull,
+        "GIT_OPTIONAL_LOCKS": "0",
+        "LC_ALL": "C",
+    })
+    try:
+        completed = subprocess.run(
+            ["git", "--no-replace-objects", "--no-optional-locks", "-C",
+             str(runtime_root), *arguments],
+            stdin=subprocess.DEVNULL, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+            check=False, env=env, timeout=30,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Stage2Error(f"cannot run read-only git {label}: {exc}") from exc
+    _require(completed.returncode == 0,
+             f"read-only git {label} failed rc={completed.returncode}: "
+             f"{completed.stderr.decode('utf-8', errors='replace').strip()}")
+    return completed.stdout
+
+
+def _collect_mjcf_mesh_closure(*, runtime_root: Path, checkout_commit: str,
+                               mjcf_relative: Path,
+                               mjcf_snapshot: Snapshot) -> tuple[dict[str, Any], dict[str, Snapshot]]:
+    """Bind every MJCF-referenced mesh to the exact runtime Git commit."""
+    _require(isinstance(checkout_commit, str) and len(checkout_commit) == 40
+             and all(char in "0123456789abcdef" for char in checkout_commit),
+             "runtime checkout commit is malformed")
+    head = _run_git_readonly(runtime_root, ["rev-parse", "--verify", "HEAD^{commit}"],
+                             "HEAD verification").decode("ascii", errors="strict").strip()
+    _require(head == checkout_commit, "runtime checkout HEAD differs from frozen commit")
+    _require(b"<!DOCTYPE" not in mjcf_snapshot.payload
+             and b"<!ENTITY" not in mjcf_snapshot.payload,
+             "MJCF external or internal entity declarations are forbidden")
+    try:
+        xml_root = ET.fromstring(mjcf_snapshot.payload)
+    except ET.ParseError as exc:
+        raise Stage2Error(f"cannot parse frozen MJCF XML: {exc}") from exc
+    elements = list(xml_root.iter())
+    _require(all(isinstance(element.tag, str) and "}" not in element.tag
+                 for element in elements), "MJCF namespaces are not supported")
+    compilers = [element for element in elements if element.tag == "compiler"]
+    _require(len(compilers) == 1, "MJCF must contain exactly one compiler element")
+    meshdir_raw = compilers[0].get("meshdir")
+    _require(meshdir_raw == "meshes", "MJCF compiler meshdir changed from meshes")
+    meshdir = _safe_repo_relative(meshdir_raw, "MJCF compiler meshdir")
+    for element in elements:
+        if "file" in element.attrib:
+            _require(element.tag == "mesh",
+                     f"unsupported external MJCF file reference on <{element.tag}>")
+    files: list[PurePosixPath] = []
+    for element in elements:
+        if element.tag != "mesh":
+            continue
+        file_value = element.get("file")
+        _require(file_value is not None, "MJCF mesh without file is unsupported")
+        files.append(_safe_repo_relative(file_value, "MJCF mesh file"))
+    _require(files, "MJCF contains no file-backed meshes")
+    _require(len(files) == len(set(files)), "MJCF contains duplicate mesh file references")
+    model_dir = PurePosixPath(mjcf_relative.as_posix()).parent
+    tree_oid = _run_git_readonly(
+        runtime_root,
+        ["rev-parse", f"{checkout_commit}:{model_dir.as_posix()}"],
+        "MJCF model-root tree binding",
+    ).decode("ascii", errors="strict").strip()
+    _require(tree_oid == EXPECTED_MJCF_MODEL_TREE_OID,
+             "MJCF model-root Git tree differs from the frozen tree")
+    mesh_repo_paths = [model_dir / meshdir / value for value in sorted(files, key=str)]
+    repo_paths = [PurePosixPath(mjcf_relative.as_posix()), *mesh_repo_paths]
+    tree = _run_git_readonly(
+        runtime_root,
+        ["ls-tree", "-rz", "--full-tree", checkout_commit, "--",
+         *(path.as_posix() for path in repo_paths)],
+        "MJCF mesh tree binding",
+    )
+    entries: dict[str, tuple[str, str, str]] = {}
+    for record in tree.split(b"\0"):
+        if not record:
+            continue
+        try:
+            metadata, raw_path = record.split(b"\t", 1)
+            mode, object_type, oid = metadata.decode("ascii").split(" ")
+            path_text = raw_path.decode("utf-8")
+        except (ValueError, UnicodeDecodeError) as exc:
+            raise Stage2Error("cannot parse git ls-tree MJCF closure output") from exc
+        _require(path_text not in entries, "duplicate path in git MJCF closure output")
+        entries[path_text] = (mode, object_type, oid)
+    _require(set(entries) == {path.as_posix() for path in repo_paths},
+             "Git tree does not contain the complete MJCF mesh closure")
+    snapshots: dict[str, Snapshot] = {}
+    closure_rows: list[dict[str, Any]] = []
+    git_rows: list[dict[str, str]] = []
+    for relative in repo_paths:
+        relative_text = relative.as_posix()
+        mode, object_type, oid = entries[relative_text]
+        _require(mode == "100644" and object_type == "blob" and len(oid) == 40,
+                 f"MJCF mesh has unsupported Git entry: {relative_text}")
+        object_payload = _run_git_readonly(runtime_root, ["cat-file", "blob", oid],
+                                           f"MJCF object {relative_text}")
+        _require(_git_blob_oid(object_payload) == oid,
+                 f"Git returned corrupt MJCF blob bytes: {relative_text}")
+        working = _read_snapshot(runtime_root / relative_text,
+                                 f"working MJCF closure {relative_text}")
+        _require(working.payload == object_payload,
+                 f"working MJCF file differs from frozen Git object: {relative_text}")
+        object_snapshot = Snapshot(working.path, object_payload, working.mode)
+        if relative != PurePosixPath(mjcf_relative.as_posix()):
+            snapshots[f"runtime:{relative_text}"] = object_snapshot
+        else:
+            _require(object_payload == mjcf_snapshot.payload,
+                     "queue-bound MJCF bytes differ from frozen Git object")
+        model_relative = relative.relative_to(model_dir).as_posix()
+        closure_rows.append({
+            "path": model_relative,
+            "bytes": len(object_payload),
+            "sha256": _sha256(object_payload),
+        })
+        git_rows.append({"path": model_relative, "git_blob_sha1": oid})
+    closure_rows.sort(key=lambda row: row["path"])
+    git_rows.sort(key=lambda row: row["path"])
+    manifest_payload = json.dumps(
+        closure_rows, allow_nan=False, ensure_ascii=False,
+        separators=(",", ":"), sort_keys=True,
+    ).encode("utf-8")
+    manifest_sha = _sha256(manifest_payload)
+    total_bytes = sum(row["bytes"] for row in closure_rows)
+    _require(len(closure_rows) == EXPECTED_MJCF_CLOSURE_FILE_COUNT,
+             "MJCF closure file count changed")
+    _require(total_bytes == EXPECTED_MJCF_CLOSURE_TOTAL_BYTES,
+             "MJCF closure total bytes changed")
+    _require(manifest_sha == EXPECTED_MJCF_CLOSURE_MANIFEST_SHA256,
+             "MJCF closure manifest changed")
+    return ({
+        "checkout_commit": checkout_commit,
+        "model_root_git_tree_oid": tree_oid,
+        "mjcf_relative_path": mjcf_relative.as_posix(),
+        "compiler_meshdir": meshdir.as_posix(),
+        "file_count": len(closure_rows),
+        "mesh_count": len(mesh_repo_paths),
+        "total_bytes": total_bytes,
+        "mesh_manifest_sha256": manifest_sha,
+        "files": closure_rows,
+        "git_blob_manifest_sha256": _sha256(_canonical_json(git_rows)),
+        "git_blobs": git_rows,
+    }, snapshots)
 
 
 def _write_exclusive(path: Path, payload: bytes, mode: int = 0o444) -> None:
@@ -481,6 +673,7 @@ def _validate_prior_failure(document: Any, *, payload: bytes,
     summary = _exact_keys(document, {
         "schema_version", "artifact_kind", "status", "activation_sha256",
         "queue_sha256", "stage1_receipt_sha256", "runner_sha256",
+        "prior_failed_attempt_summary_sha256",
         "runtime_snapshot_shas", "asset_snapshot_shas", "rows",
         "screening_acceptance", "input_stability_errors", "formal_claims",
         "runtime_authority", "automatic_retry", "reviewed_child_timeout_s",
@@ -499,6 +692,9 @@ def _validate_prior_failure(document: Any, *, payload: bytes,
              "prior Stage2 queue is misbound")
     _require(summary["stage1_receipt_sha256"] == expected_receipt_sha,
              "prior Stage2 receipt is misbound")
+    _require(summary["prior_failed_attempt_summary_sha256"]
+             == EXPECTED_PRIOR_V1_SUMMARY_SHA256,
+             "prior Stage2 does not bind the frozen V1 failure summary")
     for label in ("runtime_snapshot_shas", "asset_snapshot_shas"):
         values = summary[label]
         _require(isinstance(values, Mapping) and values,
@@ -513,7 +709,9 @@ def _validate_prior_failure(document: Any, *, payload: bytes,
     for row in rows:
         row = _exact_keys(row, {
             "cell_id", "action", "ready_source", "delta", "join_frame",
-            "blend_intervals", "generator_rc", "terminal_error",
+            "blend_intervals", "generator_rc", "candidate_sha256",
+            "generator_contract_sha256", "frames", "phase", "joint_path_l2",
+            "joint_curvature_l2", "max_joint_step_rad", "topp_rc",
         }, "prior Stage2 row")
         cell_id = row["cell_id"]
         _require(cell_id in EXPECTED_STAGE2_CELLS and cell_id not in actual,
@@ -527,10 +725,17 @@ def _validate_prior_failure(document: Any, *, payload: bytes,
         expected_join = (66 if row["action"] == "forehand" else 45) - 12
         _require(row["join_frame"] == expected_join,
                  f"prior Stage2 cell {cell_id} join changed")
-        _require(row["terminal_error"] == (
-            f"candidate_validation_failed:{cell_id} candidate.joint_vel "
-            "is not the canonical position gradient"
-        ), f"prior Stage2 cell {cell_id} failure class changed")
+        expected_candidate, expected_contract = EXPECTED_PRIOR_CANDIDATES[cell_id]
+        _require(row["candidate_sha256"] == expected_candidate
+                 and row["generator_contract_sha256"] == expected_contract,
+                 f"prior Stage2 cell {cell_id} candidate lineage changed")
+        _require(type(row["frames"]) is int and row["frames"] > 25,
+                 f"prior Stage2 cell {cell_id} frame count is invalid")
+        for key in ("phase", "joint_path_l2", "joint_curvature_l2",
+                    "max_joint_step_rad"):
+            _finite(row[key], f"prior Stage2 {cell_id} {key}", minimum=0.0)
+        _require(row["topp_rc"] == 1,
+                 f"prior Stage2 cell {cell_id} did not fail in TOPP as recorded")
     _require(actual == EXPECTED_STAGE2_CELLS, "prior Stage2 cell set changed")
     _require(summary["screening_acceptance"] == {
         "at_or_below_0p5_cells": [], "timing_by_cell_s": {},
@@ -853,6 +1058,76 @@ def _validate_topp(certificate: Snapshot, output: Snapshot, markdown: Snapshot, 
     }
 
 
+def _collect_prior_v2_inputs(*, activation: Mapping[str, Any],
+                             queue: Mapping[str, Any],
+                             body_order: Sequence[str],
+                             expected_receipt_sha: str) -> tuple[
+                                 dict[str, dict[str, Any]], dict[str, Snapshot]
+                             ]:
+    prior_root = _absolute(activation["prior_failed_attempt"]["namespace"])
+    expected_control = {
+        "runner": (prior_root / "snapshots/run_ready_to_strike_join_ladder_stage2.py",
+                   EXPECTED_PRIOR_ATTEMPT["runner_sha256"]),
+        "activation": (prior_root / "snapshots/activation.json",
+                       EXPECTED_PRIOR_ATTEMPT["activation_sha256"]),
+        "queue": (prior_root / "snapshots/queue.json", EXPECTED_QUEUE_SHA256),
+        "receipt": (prior_root / "snapshots/stage1_historical_attestation.json",
+                     expected_receipt_sha),
+        "generator": (prior_root / "snapshots/build_ready_to_strike_motion.py",
+                      queue["runtime"]["generator_sha256"]),
+        "v1_summary": (prior_root / "snapshots/prior_stage2_failure_summary.json",
+                       EXPECTED_PRIOR_V1_SUMMARY_SHA256),
+    }
+    snapshots: dict[str, Snapshot] = {}
+    for name, (path, expected_sha) in expected_control.items():
+        snapshot = _read_snapshot(path, f"prior V2 {name}")
+        _require(snapshot.sha256 == expected_sha, f"prior V2 {name} SHA changed")
+        snapshots[f"prior:control:{name}"] = snapshot
+    prior_assets: dict[str, Path] = {}
+    for name in ("forehand", "backhand"):
+        path = prior_root / f"snapshots/assets/{name}.npz"
+        snapshot = _read_snapshot(path, f"prior V2 {name} asset")
+        _require(snapshot.sha256 == queue["assets"][name]["sha256"],
+                 f"prior V2 {name} asset SHA changed")
+        snapshots[f"prior:asset:{name}"] = snapshot
+        prior_assets[name] = path
+    records: dict[str, dict[str, Any]] = {}
+    generator_path = expected_control["generator"][0]
+    for cell_id, (action, ready_source, delta) in EXPECTED_STAGE2_CELLS.items():
+        candidate_path = prior_root / cell_id / "candidate.npz"
+        contract_path = prior_root / cell_id / "candidate.contract.json"
+        log_path = prior_root / cell_id / "topp/run.log"
+        candidate = _read_snapshot(candidate_path, f"prior V2 {cell_id} candidate")
+        contract = _read_snapshot(contract_path, f"prior V2 {cell_id} contract")
+        log = _read_snapshot(log_path, f"prior V2 {cell_id} TOPP log")
+        expected_candidate, expected_contract = EXPECTED_PRIOR_CANDIDATES[cell_id]
+        _require(candidate.sha256 == expected_candidate
+                 and contract.sha256 == expected_contract,
+                 f"prior V2 {cell_id} candidate or contract SHA changed")
+        _require(log.sha256 == EXPECTED_PRIOR_TOPP_LOGS[cell_id],
+                 f"prior V2 {cell_id} TOPP log SHA changed")
+        log_lower = log.payload.lower()
+        _require(b".stl" in log_lower and b"no such file or directory" in log_lower,
+                 f"prior V2 {cell_id} log no longer proves missing MJCF mesh")
+        cell = {"cell_id": cell_id, "action": action,
+                "ready_source": ready_source, "delta": delta}
+        info = _validate_candidate(
+            candidate, contract, cell=cell, queue=queue,
+            generator_path=generator_path, asset_paths=prior_assets,
+            body_order=body_order,
+        )
+        _require(info["candidate_sha256"] == expected_candidate
+                 and info["generator_contract_sha256"] == expected_contract,
+                 f"prior V2 {cell_id} candidate validation lineage changed")
+        records[cell_id] = {
+            "candidate": candidate, "contract": contract, "log": log, "info": info,
+        }
+        snapshots[f"prior:candidate:{cell_id}"] = candidate
+        snapshots[f"prior:contract:{cell_id}"] = contract
+        snapshots[f"prior:topp_log:{cell_id}"] = log
+    return records, snapshots
+
+
 def _validate_inputs(*, activation_path: Path | str, queue_path: Path | str,
                      root: Path | str, runner_source: Path | str | None = None) -> dict[str, Any]:
     root = _absolute(root)
@@ -906,6 +1181,14 @@ def _validate_inputs(*, activation_path: Path | str, queue_path: Path | str,
         key = f"runtime:{relative}"
         if key not in snapshots:
             snapshots[key] = _read_snapshot(runtime_root / relative, f"TOPP closure {relative}")
+    mjcf_relative = RUNTIME_RELATIVE_PATHS["mjcf_sha256"]
+    mjcf_closure, mesh_snapshots = _collect_mjcf_mesh_closure(
+        runtime_root=runtime_root,
+        checkout_commit=queue["runtime"]["checkout_commit"],
+        mjcf_relative=mjcf_relative,
+        mjcf_snapshot=snapshots[f"runtime:{mjcf_relative}"],
+    )
+    snapshots.update(mesh_snapshots)
     for name, asset in queue["assets"].items():
         snapshot = _read_snapshot(asset["path"], f"asset {name}")
         _require(snapshot.sha256 == asset["sha256"], f"asset {name} SHA changed")
@@ -921,11 +1204,17 @@ def _validate_inputs(*, activation_path: Path | str, queue_path: Path | str,
         raise Stage2Error("runtime body order is not UTF-8") from exc
     _require(body_order and len(body_order) == len(set(body_order)),
              "runtime body order must contain unique non-empty names")
+    prior_candidate_records, prior_input_snapshots = _collect_prior_v2_inputs(
+        activation=activation, queue=queue, body_order=body_order,
+        expected_receipt_sha=receipt_sha,
+    )
+    snapshots.update(prior_input_snapshots)
     return {
         "root": root, "queue": queue, "activation": activation, "receipt": receipt,
         "prior_summary": prior_summary,
         "cells": cells, "snapshots": snapshots, "runtime_root": runtime_root,
-        "body_order": body_order,
+        "body_order": body_order, "mjcf_asset_closure": mjcf_closure,
+        "prior_candidate_records": prior_candidate_records,
     }
 
 
@@ -947,6 +1236,10 @@ def plan_stage2(*, activation_path: Path | str, queue_path: Path | str,
         "cells": plans,
         "receipt_sha256": context["snapshots"]["receipt"].sha256,
         "runner_sha256": context["snapshots"]["runner"].sha256,
+        "mjcf_mesh_count": context["mjcf_asset_closure"]["mesh_count"],
+        "mjcf_mesh_manifest_sha256": (
+            context["mjcf_asset_closure"]["mesh_manifest_sha256"]
+        ),
         "runtime_authority": context["activation"]["runtime_authority"],
     }
 
@@ -1002,6 +1295,13 @@ def _run_stage2_impl(*, activation_path: Path | str, queue_path: Path | str,
         destination = runtime_snapshot_root / relative
         destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
         _write_exclusive(destination, snapshot.payload)
+    prior_snapshot_root = snapshot_root / "prior_v2"
+    prior_snapshot_root.mkdir(mode=0o700)
+    for key, snapshot in snapshots.items():
+        if not key.startswith("prior:"):
+            continue
+        destination = prior_snapshot_root / key.removeprefix("prior:").replace(":", "__")
+        _write_exclusive(destination, snapshot.payload)
     asset_snapshot_root = snapshot_root / "assets"
     asset_snapshot_root.mkdir(mode=0o700)
     asset_snapshot_paths: dict[str, Path] = {}
@@ -1012,7 +1312,6 @@ def _run_stage2_impl(*, activation_path: Path | str, queue_path: Path | str,
 
     queue: Mapping[str, Any] = context["queue"]
     runtime_root: Path = context["runtime_root"]
-    generator = snapshot_destinations["stage1_generator"]
     topp = runtime_snapshot_root / RUNTIME_RELATIVE_PATHS["topp_sha256"]
     mjcf = runtime_snapshot_root / RUNTIME_RELATIVE_PATHS["mjcf_sha256"]
     urdf = runtime_snapshot_root / RUNTIME_RELATIVE_PATHS["urdf_sha256"]
@@ -1032,41 +1331,22 @@ def _run_stage2_impl(*, activation_path: Path | str, queue_path: Path | str,
         join = action["contact_frame"] - 12
         candidate_path = cell_root / "candidate.npz"
         contract_path = cell_root / "candidate.contract.json"
-        command = [
-            sys.executable, "-B", str(generator), "--source",
-            str(asset_snapshot_paths[cell["action"]]),
-            "--ready-source", str(asset_snapshot_paths[cell["ready_source"]]),
-            "--ready-frame", "0",
-            "--contact-frame", str(action["contact_frame"]), "--join-frame", str(join),
-            "--hold-frames", "4", "--blend-intervals", "10",
-            "--output-npz", str(candidate_path), "--output-contract", str(contract_path),
-        ]
-        row: dict[str, Any] = {**cell, "join_frame": join, "blend_intervals": 10,
-                               "generator_rc": None}
+        prior_record = context["prior_candidate_records"][cell["cell_id"]]
+        candidate_snapshot: Snapshot = prior_record["candidate"]
+        contract_snapshot: Snapshot = prior_record["contract"]
+        info: dict[str, Any] = dict(prior_record["info"])
+        _write_exclusive(candidate_path, candidate_snapshot.payload)
+        _write_exclusive(contract_path, contract_snapshot.payload)
+        row: dict[str, Any] = {
+            **cell, "join_frame": join, "blend_intervals": 10,
+            "generator_rc": 0, "generator_reused_from_prior_v2": True, **info,
+        }
         rows.append(row)
-        try:
-            completed = command_runner(command, cwd=runtime_root, env=env)
-        except Exception as exc:
-            row["terminal_error"] = f"generator_spawn_or_wait_failed:{type(exc).__name__}:{exc}"
-            continue
-        _write_exclusive(cell_root / "generator.log", completed.stdout.encode("utf-8"))
-        row["generator_rc"] = completed.returncode
-        if completed.returncode != 0:
-            continue
-        try:
-            candidate_snapshot = _read_snapshot(candidate_path, f"{cell['cell_id']} candidate")
-            contract_snapshot = _read_snapshot(contract_path, f"{cell['cell_id']} contract")
-            info = _validate_candidate(
-                candidate_snapshot, contract_snapshot, cell=cell, queue=queue,
-                generator_path=generator, asset_paths=asset_snapshot_paths,
-                body_order=context["body_order"])
-        except Stage2Error as exc:
-            row["terminal_error"] = f"candidate_validation_failed:{exc}"
-            continue
-        row.update(info)
         candidate_records[cell["cell_id"]] = (candidate_path, candidate_snapshot, info)
 
-    def run_topp(cell: Mapping[str, Any], row: dict[str, Any]) -> tuple[str, subprocess.CompletedProcess[str] | None, str | None]:
+    def run_topp(cell: Mapping[str, Any], row: dict[str, Any]) -> tuple[
+        str, subprocess.CompletedProcess[str] | None, str | None, list[str]
+    ]:
         candidate_path, _candidate_snapshot, info = candidate_records[cell["cell_id"]]
         topp_root = root_path / cell["cell_id"] / "topp"
         topp_root.mkdir(mode=0o700)
@@ -1084,8 +1364,9 @@ def _run_stage2_impl(*, activation_path: Path | str, queue_path: Path | str,
             completed = command_runner(
                 command, cwd=runtime_root / "hope_training/whole_body_tracking", env=env)
         except Exception as exc:
-            return cell["cell_id"], None, f"topp_spawn_or_wait_failed:{type(exc).__name__}:{exc}"
-        return cell["cell_id"], completed, None
+            return (cell["cell_id"], None,
+                    f"topp_spawn_or_wait_failed:{type(exc).__name__}:{exc}", command)
+        return cell["cell_id"], completed, None, command
 
     row_by_id = {row["cell_id"]: row for row in rows}
     futures = []
@@ -1094,13 +1375,16 @@ def _run_stage2_impl(*, activation_path: Path | str, queue_path: Path | str,
             if cell["cell_id"] in candidate_records:
                 futures.append(pool.submit(run_topp, cell, row_by_id[cell["cell_id"]]))
         for future in as_completed(futures):
-            cell_id, completed, terminal_error = future.result()
+            cell_id, completed, terminal_error, command = future.result()
             topp_root = root_path / cell_id / "topp"
             row = row_by_id[cell_id]
+            row["topp_argv"] = command
             if terminal_error is not None or completed is None:
                 row["terminal_error"] = terminal_error or "TOPP child failed without result"
                 continue
-            _write_exclusive(topp_root / "run.log", completed.stdout.encode("utf-8"))
+            log_payload = completed.stdout.encode("utf-8")
+            _write_exclusive(topp_root / "run.log", log_payload)
+            row["topp_log_sha256"] = _sha256(log_payload)
             row["topp_rc"] = completed.returncode
             if completed.returncode != 0:
                 continue
@@ -1165,6 +1449,11 @@ def _run_stage2_impl(*, activation_path: Path | str, queue_path: Path | str,
             key.split(":", 1)[1]: value.sha256
             for key, value in sorted(snapshots.items()) if key.startswith("asset:")
         },
+        "prior_v2_snapshot_shas": {
+            key.removeprefix("prior:"): value.sha256
+            for key, value in sorted(snapshots.items()) if key.startswith("prior:")
+        },
+        "mjcf_asset_closure": context["mjcf_asset_closure"],
         "rows": rows,
         "screening_acceptance": {
             "at_or_below_0p5_cells": accepted_cells,
@@ -1175,10 +1464,11 @@ def _run_stage2_impl(*, activation_path: Path | str, queue_path: Path | str,
         "input_stability_errors": input_stability_errors,
         "formal_claims": {
             "physics_replay_exact": False, "source_closure_exact": False,
-            "mjcf_closure_exact": False, "screening_evidence_only": True,
+            "mjcf_closure_exact": True, "screening_evidence_only": True,
             "strict_global_minimum_proven": False,
         },
         "runtime_authority": context["activation"]["runtime_authority"],
+        "generator_commands_executed": 0,
         "automatic_retry": False,
         "reviewed_child_timeout_s": CHILD_TIMEOUT_S,
         "trainer_or_robot_signals": [],

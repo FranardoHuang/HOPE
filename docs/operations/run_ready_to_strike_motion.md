@@ -102,7 +102,7 @@ schema-2 source/candidate 的 `joint_vel` 必须按 generator 的 float32 输入
 它只把旧结果升级为 screening evidence；因为历史证书没有完整 argv、transitive source 和 MJCF closure，
 `physics_replay_exact/source_closure_exact/mjcf_closure_exact` 仍必须是 `false`，不能冒充动力学重放或部署通过。
 
-## Stage-2 四个中点的一次性执行
+## Stage-2 四个中点的一次性执行（当前 v3）
 
 Stage-1 receipt `7cf1c7c9…c377f` 已成功发布后，四个 `delta=12` 中点只能由 tracked runner 消费一次。
 activation 精确绑定 runner SHA、Stage-1 receipt SHA 和唯一结果目录；换目录重复执行会在创建任何 namespace
@@ -110,9 +110,9 @@ activation 精确绑定 runner SHA、Stage-1 receipt SHA 和唯一结果目录�
 
 ```bash
 python3 scripts/run_ready_to_strike_join_ladder_stage2.py \
-  --activation configs/ready_to_strike_join_ladder_stage2_activation_v2_20260717.json \
+  --activation configs/ready_to_strike_join_ladder_stage2_activation_v3_20260717.json \
   --queue configs/ready_to_strike_join_ladder_20260717.yaml \
-  --root /workspace/codexschema/ready_to_strike_0p5_20260717/join_ladder_stage2_d12_v2_float32_producer
+  --root /workspace/codexschema/ready_to_strike_0p5_20260717/join_ladder_stage2_d12_v3_mjcf_closure
 ```
 
 dry-run 必须报告四格且不创建结果目录。确认 receipt、runner、queue、旧 runtime 与两份动作资产 SHA 全部
@@ -120,17 +120,20 @@ dry-run 必须报告四格且不创建结果目录。确认 receipt、runner、q
 
 ```bash
 python3 scripts/run_ready_to_strike_join_ladder_stage2.py \
-  --activation configs/ready_to_strike_join_ladder_stage2_activation_v2_20260717.json \
+  --activation configs/ready_to_strike_join_ladder_stage2_activation_v3_20260717.json \
   --queue configs/ready_to_strike_join_ladder_20260717.yaml \
-  --root /workspace/codexschema/ready_to_strike_0p5_20260717/join_ladder_stage2_d12_v2_float32_producer \
+  --root /workspace/codexschema/ready_to_strike_0p5_20260717/join_ladder_stage2_d12_v3_mjcf_closure \
   --execute \
   --confirm RUN_READY_TO_STRIKE_STAGE2_ONCE
 ```
 
-runner 先以 O_EXCL 冻结 generator、TOPP 闭包、MJCF、URDF、body order、两份动作资产和所有控制文件，
-generator 必须来自 Stage-1 namespace 中已被 receipt 认证的 immutable copy；旧 `b1f5a38` 训练 checkout
-按设计不含后置 `66f93559` generator，不能从那里假取。TOPP/MJCF/URDF/body-order 仍来自绑定的旧 runtime
-checkout。generator/TOPP 只读冻结副本。四个 TOPP 可并行，但每个 CPU child 的 reviewed timeout 为 3600 秒；任一格
+v3 不再重跑 generator：它先完整消费 v2 的 terminal summary、runner、activation、V1 prior、四份
+candidate/contract 和四份 missing-mesh log，逐字节复验 lineage 后把同一 candidate 复制进新 namespace。
+因此本轮唯一改变是补齐 MJCF 外部资产闭包。runner 解析原 XML，拒绝 DTD/entity/include、路径逃逸、
+重复引用和非 regular/symlink 文件；然后从冻结 commit 的 Git object 读取 `1 XML + 74 mesh`，核
+model-tree OID、每个 blob OID、SHA 和大小，以原相对目录 O_EXCL 快照。闭包固定为 `75 files / 14,127,373
+bytes / e0381752…b962de`，worktree fallback 不构成授权。TOPP/URDF/body-order 与两份预算动作也只读冻结。
+四个 TOPP 可并行，但每个 CPU child 的 reviewed timeout 为 3600 秒；任一格
 失败都发布 terminal summary、全批不重试。`runup_s` 必须同时等于 output contact-frame/fps 与 timing bound，
 budget scale 必须为冻结默认 `1.5`。成功只说明 Stage-2 screening 执行完整；只有 `<=0.5 s` 且 hard gate
 全过的格才能进入 L0/L1，仍无训练、部署或真机权限。
@@ -140,6 +143,9 @@ budget scale 必须为冻结默认 `1.5`。成功只说明 Stage-2 screening 执
 全部在 TOPP 前 fail closed。summary SHA=`f92e6b8b…63c0e`。v2 不改变动作、join、预算或 acceptance；只把
 candidate/TOPP 两条已冻结的 producer 合同分开验证，并在新 activation 中精确绑定旧 failure summary、
 旧 runner/activation SHA 和 `automatic_retry=false`。旧 summary 缺失或改变时，v2 在创建新 namespace 前拒绝。
+v2 namespace `join_ladder_stage2_d12_v2_float32_producer` 也已永久消费：四份 candidate 与 v1 逐字节一致，
+但四个 TOPP 都因隔离 MJCF 旁缺少其引用的 STL 而 rc1；summary SHA=`6910db28…f1476`，四份 log 已逐一
+绑定。v3 只修这个 source-closure 错误，不改 candidate、join、hold、预算、acceptance 或 TOPP 算法。
 
 ## 下一步不是直接训练
 

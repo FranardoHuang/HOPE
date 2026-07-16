@@ -52,8 +52,12 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   `+500` 开始判。最新 Pod2 `+500` cycle 显示十一条 live 臂仍未到共同 `model_5000/5200`，故尚无合法
   `+500` 行为取证已在 Pod2 到档格上闭合：quality 父本六条 completion 为 `0.919–0.971`、virtual-return
   为 `0.278–0.395`，没有一条满足“连续两个窗口 completion<0.40”的崩坏门；ready 四项在本批日志中均为
-  null，不能拿缺失量尺做淘汰。因此这轮合法 stop 仍为 0。continuous 父本只有一条到 `model_5000`，其余
-  等待；`+1000` 所需 `model_5500/5700` 全部尚不存在，所以还不能做同父本 Pareto 排序。一条既有
+  null，不能拿缺失量尺做淘汰。因此这轮合法 stop 仍为 0。最新 Pod2 只读动态复核为 11 条 live、
+  1 条既有 importer malloc terminal，三卡 `3/4/4` 且利用率 `96–97%`；本轮 inspector 没有穿过实际
+  checkpoint 制品路径，所以不把 `latest=null` 冒充“没有 +1000”。下一轮只用 reviewed
+  `inspect-pruning-cycle --milestone-offset 1000` 闭合 checkpoint+behavior+portfolio 三联 receipt，之后
+  才能合法 Pareto stop。自动 rolling 任务在本次 task-revision/TOPP 关键修复期间保持暂停；trainer 本身
+  未因此停止。一条既有
   importer 失败继续排除且全程没有 signal。首个合格
   checkpoint 正在跑 K100，之后按 receipt 淘汰并把胜者送 vendor MuJoCo。详见
   [task-revision 卷宗](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md)。
@@ -73,7 +77,12 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   `1.94/0.78/1.42 s`，仍全部高于 `0.5 s`。四个 `d=12` 中点的 v1 execute 中 generator 全部成功，
   但量尺把 candidate float32 producer-gradient 混成 TOPP float64 workspace-gradient，故四格在 TOPP 前
   fail closed；旧 summary `f92e6b8b…63c0e` 已冻结且不重放。v2 只修该量尺，绑定旧失败并使用唯一新
-  CPU-only namespace，动作/join/预算/acceptance 不变；目前仍没有
+  CPU-only namespace，动作/join/预算/acceptance 不变。v2 唯一 execute 已证明四份 candidate 与 v1
+  逐字节一致，随后因隔离 MJCF XML 漏复制其引用的 STL，四个 TOPP 都在算法前 missing-mesh rc1；
+  summary `6910db28…f1476` 冻结且不得重放。v3 直接复验并复用这四份 candidate，零 generator 调用，
+  唯一改变是从 frozen runtime Git objects 补齐 `1 XML + 74 mesh` 的 exact closure（75 文件、
+  14,127,373 字节、manifest `e0381752…b962de`）。本地相关回归 `66 passed`，独立红队与一次性 Pod2
+  execute 正在收口；在真实结果出现前仍没有
   production FK、TOPP≤0.5、L0/L1、桌网、动力学或行为通过，不能写成0.5秒动作已完成。见
   [短路径实验](experiments/2026-07/EXP-MOTION-READY-TO-STRIKE-0P5.md)。
 

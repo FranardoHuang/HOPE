@@ -112,6 +112,17 @@ run-up 上界是正手 `0.98 s`、反手 `0.78 s`。因此单纯把完整旧 cli
   无自动重试。v2 只修量尺：candidate 用 float32、TOPP output 用 float64；动作、join、hold、预算和 hard
   acceptance 不变。v2 activation 固定新 namespace，并精确绑定 v1 summary/runner/activation/failure class；
   prior 缺失或篡改均在 namespace 前拒绝。
+- Stage-2 v2 的唯一 execute 已结束且不得重放：四格 generator 均 rc0，四份 candidate/contract 与 v1
+  逐字节一致，说明 float32 producer 量尺修复有效；随后四个 TOPP 均 rc1。完整 log 定位为 source
+  closure 错误：隔离快照复制了 `a3_pingpong.xml`，却没有复制 XML 引用的 `meshes/*.STL`，所以 MuJoCo
+  在算法开始前因 missing mesh 退出。summary SHA=`6910db28…f1476`；这不是动作、预算或动力学失败，
+  也没有任何 timing 值。
+- v3 保持四份 v2 candidate 字节不变且 **零 generator 调用**，只补 MJCF 外部资产闭包。runner 从
+  frozen runtime commit 的 Git objects 读取并绑定 model tree `0870b9bf…9048`、`1 XML + 74 mesh`、
+  `75 files / 14,127,373 bytes / manifest e0381752…b962de`；拒绝 DTD/entity/include、路径逃逸、重复、
+  symlink、worktree 漂移和第三种 prior。v3 activation 使用新 one-shot namespace，精确消费 v2 summary、
+  runner、activation、V1 prior、四份 candidate/contract 和四份 missing-mesh log。相关生成器、attestor、
+  runner 回归为 `66 passed`；远端 execute 完成前仍只能写 source gate，不能写成 0.5 秒已通过。
 - 下一门：在 ignored runtime 资产上按预注册 join ladder 生成正/反手候选，production FK 重建后逐个跑
   TOPP；只把 `<=0.5 s` 的候选送 L0/L1/桌网/动力学，再用绑定该 motion SHA 的 0.5 秒 K100 和
 vendor MuJoCo 判行为。
