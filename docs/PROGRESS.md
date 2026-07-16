@@ -13,6 +13,13 @@
 
 ## 2026-07-17
 
+- ready×join Stage-2 v1 dry-run 通过后唯一 execute 自然终止并保全失败 summary
+  `f92e6b8b…63c0e`：四个 generator 均 rc0，但 runner 重复了历史已知量尺错误，把 generator 的 float32
+  producer-gradient 当成 TOPP float64 workspace-gradient，四格全在 TOPP 前拒绝；无 timing、无重试、
+  无 signal。v2 保持动作/join/预算/acceptance 不变，固定新 namespace 并精确绑定 v1 失败 summary；
+  candidate 与 TOPP 分别按两条 producer 合同验证，missing/tampered prior 均 pre-root fail，组合回归
+  `55 passed`。
+
 - Stage-2 远端执行前的真实 source-root 对账发现 tracked runner 仍错误地从 `b1f5a38` 训练 checkout
   寻找后置 `66f93559` generator；该 checkout 按合同本来就不含它。未创建 Stage-2 namespace、未启动 child。
   runner 已改为读取并冻结 Stage-1 receipt 认证的 immutable generator copy，旧 checkout 只提供

@@ -35,11 +35,30 @@ import numpy as np
 SCHEMA_VERSION = 1
 CONFIRM_TOKEN = "RUN_READY_TO_STRIKE_STAGE2_ONCE"
 CHILD_TIMEOUT_S = 3600
-EXPECTED_ACTIVATION_ID = "ready_to_strike_join_ladder_stage2_20260717"
+EXPECTED_ACTIVATION_ID = "ready_to_strike_join_ladder_stage2_v2_20260717"
 EXPECTED_EXPERIMENT_ID = "ready_to_strike_join_ladder_20260717"
 EXPECTED_QUEUE_SHA256 = "cfa112f799dab9af33914fdfb5bfff90d21b4692e38b16a4627393936a527b8b"
 EXPECTED_PREREG_COMMIT = "8d74025e88fee832fae0ac2f672ec0eb9b2d3d5a"
 EXPECTED_EVIDENCE_STATUS = "historical_stage1_attested_screening_only"
+EXPECTED_STAGE2_NAMESPACE = (
+    "/workspace/codexschema/ready_to_strike_0p5_20260717/"
+    "join_ladder_stage2_d12_v2_float32_producer"
+)
+EXPECTED_PRIOR_ATTEMPT = {
+    "namespace": (
+        "/workspace/codexschema/ready_to_strike_0p5_20260717/"
+        "join_ladder_stage2_d12_8d74025e"
+    ),
+    "summary_path": (
+        "/workspace/codexschema/ready_to_strike_0p5_20260717/"
+        "join_ladder_stage2_d12_8d74025e/stage2_summary.json"
+    ),
+    "summary_sha256": "f92e6b8b30844ba366c0bc901aacdb0f040e61f961678bd2290d833b8ac63c0e",
+    "runner_sha256": "835cb56f9aac7c5b85791368e1de26745140a5de1af00144b0167fc2c26cf9f4",
+    "activation_sha256": "b225ed3715532cf498cbe7f95f31ef2972ce5ff6ed5a7dda2ad759c1a51dd500",
+    "failure_class": "candidate_validator_used_float64_instead_of_generator_float32_gradient",
+    "automatic_retry": False,
+}
 
 EXPECTED_STAGE1_CELLS = {
     "fh_rf_d17": ("forehand", "forehand", 17),
@@ -301,7 +320,7 @@ def _validate_activation(activation: Any, queue: Mapping[str, Any], *,
         "stage1_namespace", "observations", "decision", "evidence_status",
         "required_attestation_receipt", "required_attestation_receipt_sha256",
         "stage2_runner", "stage2_namespace", "launch_authorized",
-        "authorized_stage2_cells",
+        "authorized_stage2_cells", "prior_failed_attempt",
         "runtime_authority",
     }, "activation")
     _require(activation["schema_version"] == 1, "activation schema changed")
@@ -319,8 +338,10 @@ def _validate_activation(activation: Any, queue: Mapping[str, Any], *,
         "sha256": runner_sha256,
     }, "activation does not bind the executing Stage2 runner bytes")
     stage2_namespace = _absolute(activation["stage2_namespace"])
-    _require(stage2_namespace.parent == _absolute(activation["stage1_namespace"]).parent,
-             "Stage2 namespace is not a sibling of the attested Stage1 namespace")
+    _require(str(stage2_namespace) == EXPECTED_STAGE2_NAMESPACE,
+             "Stage2 namespace differs from the source-pinned one-shot namespace")
+    _require(activation["prior_failed_attempt"] == EXPECTED_PRIOR_ATTEMPT,
+             "prior failed attempt binding changed")
     runtime_authority = {
         "cpu_only": True, "automatic_retry": False, "trainer_signal": False,
         "robot_command": False, "training_authorized": False,
@@ -452,6 +473,91 @@ def _validate_stage1_receipt(document: Any, *, receipt_sha: str,
     return receipt
 
 
+def _validate_prior_failure(document: Any, *, payload: bytes,
+                            expected_receipt_sha: str) -> Mapping[str, Any]:
+    prior = EXPECTED_PRIOR_ATTEMPT
+    _require(_sha256(payload) == prior["summary_sha256"],
+             "prior Stage2 failure summary bytes changed")
+    summary = _exact_keys(document, {
+        "schema_version", "artifact_kind", "status", "activation_sha256",
+        "queue_sha256", "stage1_receipt_sha256", "runner_sha256",
+        "runtime_snapshot_shas", "asset_snapshot_shas", "rows",
+        "screening_acceptance", "input_stability_errors", "formal_claims",
+        "runtime_authority", "automatic_retry", "reviewed_child_timeout_s",
+        "trainer_or_robot_signals",
+    }, "prior Stage2 failure summary")
+    _require(summary["schema_version"] == 1, "prior Stage2 schema changed")
+    _require(summary["artifact_kind"] == "ready_to_strike_join_ladder_stage2_screening_result",
+             "prior Stage2 artifact kind changed")
+    _require(summary["status"] == "stage2_terminal_failure_no_retry",
+             "prior Stage2 status changed")
+    _require(summary["activation_sha256"] == prior["activation_sha256"],
+             "prior Stage2 activation is misbound")
+    _require(summary["runner_sha256"] == prior["runner_sha256"],
+             "prior Stage2 runner is misbound")
+    _require(summary["queue_sha256"] == EXPECTED_QUEUE_SHA256,
+             "prior Stage2 queue is misbound")
+    _require(summary["stage1_receipt_sha256"] == expected_receipt_sha,
+             "prior Stage2 receipt is misbound")
+    for label in ("runtime_snapshot_shas", "asset_snapshot_shas"):
+        values = summary[label]
+        _require(isinstance(values, Mapping) and values,
+                 f"prior Stage2 {label} is empty")
+        _require(all(isinstance(key, str) and _is_sha256(value)
+                     for key, value in values.items()),
+                 f"prior Stage2 {label} is malformed")
+    rows = summary["rows"]
+    _require(isinstance(rows, list) and len(rows) == 4,
+             "prior Stage2 row count changed")
+    actual: dict[str, tuple[str, str, int]] = {}
+    for row in rows:
+        row = _exact_keys(row, {
+            "cell_id", "action", "ready_source", "delta", "join_frame",
+            "blend_intervals", "generator_rc", "terminal_error",
+        }, "prior Stage2 row")
+        cell_id = row["cell_id"]
+        _require(cell_id in EXPECTED_STAGE2_CELLS and cell_id not in actual,
+                 f"unexpected or duplicate prior Stage2 cell {cell_id!r}")
+        identity = (row["action"], row["ready_source"], row["delta"])
+        _require(identity == EXPECTED_STAGE2_CELLS[cell_id],
+                 f"prior Stage2 cell {cell_id} changed")
+        actual[cell_id] = identity
+        _require(row["generator_rc"] == 0 and row["blend_intervals"] == 10,
+                 f"prior Stage2 cell {cell_id} did not finish generation")
+        expected_join = (66 if row["action"] == "forehand" else 45) - 12
+        _require(row["join_frame"] == expected_join,
+                 f"prior Stage2 cell {cell_id} join changed")
+        _require(row["terminal_error"] == (
+            f"candidate_validation_failed:{cell_id} candidate.joint_vel "
+            "is not the canonical position gradient"
+        ), f"prior Stage2 cell {cell_id} failure class changed")
+    _require(actual == EXPECTED_STAGE2_CELLS, "prior Stage2 cell set changed")
+    _require(summary["screening_acceptance"] == {
+        "at_or_below_0p5_cells": [], "timing_by_cell_s": {},
+        "shared_ready_two_side_at_or_below_0p5": {
+            "backhand": False, "forehand": False,
+        },
+        "any_shared_ready_pass": False,
+    }, "prior Stage2 screening outcome changed")
+    _require(summary["input_stability_errors"] == [],
+             "prior Stage2 inputs were unstable")
+    _require(summary["formal_claims"] == {
+        "physics_replay_exact": False, "source_closure_exact": False,
+        "mjcf_closure_exact": False, "screening_evidence_only": True,
+        "strict_global_minimum_proven": False,
+    }, "prior Stage2 formal claims changed")
+    _require(summary["runtime_authority"] == {
+        "cpu_only": True, "automatic_retry": False, "trainer_signal": False,
+        "robot_command": False, "training_authorized": False,
+        "deployment_authorized": False,
+    }, "prior Stage2 runtime authority changed")
+    _require(summary["automatic_retry"] is False
+             and summary["reviewed_child_timeout_s"] == 3600
+             and summary["trainer_or_robot_signals"] == [],
+             "prior Stage2 retry/signal record changed")
+    return summary
+
+
 def _load_npz(payload: bytes, label: str) -> dict[str, np.ndarray]:
     try:
         with zipfile.ZipFile(io.BytesIO(payload), "r") as archive:
@@ -475,7 +581,8 @@ def _scalar_unicode(array: np.ndarray, label: str) -> str:
 
 
 def _validate_schema2(arrays: Mapping[str, np.ndarray], *, label: str,
-                      body_order: Sequence[str], allow_migration: bool) -> int:
+                      body_order: Sequence[str], allow_migration: bool,
+                      gradient_contract: str) -> int:
     time_keys = {"joint_pos", "joint_vel", "body_pos_w", "body_quat_w",
                  "body_lin_vel_w", "body_ang_vel_w"}
     metadata_keys = {"fps", "kinematics_schema_version", "body_pos_point",
@@ -516,7 +623,10 @@ def _validate_schema2(arrays: Mapping[str, np.ndarray], *, label: str,
         value = np.asarray(arrays[key])
         _require(value.dtype == np.float32 and value.shape == shape,
                  f"{label}.{key} shape/dtype changed")
-    expected_velocity = np.gradient(q.astype(np.float64), 1.0 / 50.0, axis=0).astype(np.float32)
+    _require(gradient_contract in {"float32_producer", "float64_workspace"},
+             f"unknown gradient contract {gradient_contract!r}")
+    gradient_input = q if gradient_contract == "float32_producer" else q.astype(np.float64)
+    expected_velocity = np.gradient(gradient_input, 1.0 / 50.0, axis=0).astype(np.float32)
     _require(np.array_equal(np.asarray(arrays["joint_vel"]), expected_velocity),
              f"{label}.joint_vel is not the canonical position gradient")
     quaternion_norm = np.linalg.norm(np.asarray(arrays["body_quat_w"], dtype=np.float64), axis=-1)
@@ -541,7 +651,8 @@ def _validate_candidate(candidate: Snapshot, contract: Snapshot, *, cell: Mappin
                         body_order: Sequence[str]) -> dict[str, Any]:
     arrays = _load_npz(candidate.payload, f"{cell['cell_id']} candidate")
     frames = _validate_schema2(arrays, label=f"{cell['cell_id']} candidate",
-                               body_order=body_order, allow_migration=True)
+                               body_order=body_order, allow_migration=True,
+                               gradient_contract="float32_producer")
     q = np.asarray(arrays["joint_pos"])
     qd = np.asarray(arrays["joint_vel"])
     for key in ("joint_vel", "body_lin_vel_w", "body_ang_vel_w"):
@@ -631,7 +742,8 @@ def _validate_topp(certificate: Snapshot, output: Snapshot, markdown: Snapshot, 
     _require(files["markdown_path"] == str(markdown.path), "TOPP markdown path is misbound")
     arrays = _load_npz(output.payload, "TOPP output")
     output_frames = _validate_schema2(arrays, label="TOPP output", body_order=body_order,
-                                      allow_migration=False)
+                                      allow_migration=False,
+                                      gradient_contract="float64_workspace")
     candidate_arrays = _load_npz(candidate.payload, "TOPP candidate input")
     acceptance = _exact_keys(document["acceptance"], {
         "cop_dose_final", "fric_dose_final", "tau_dose_final", "within_budget",
@@ -763,6 +875,15 @@ def _validate_inputs(*, activation_path: Path | str, queue_path: Path | str,
         _load_json(receipt_snapshot.payload, "Stage1 receipt"),
         receipt_sha=receipt_sha, receipt_payload=receipt_snapshot.payload,
         queue=queue, activation=activation)
+    prior_summary_snapshot = _read_snapshot(
+        activation["prior_failed_attempt"]["summary_path"],
+        "prior Stage2 failure summary",
+    )
+    prior_summary = _validate_prior_failure(
+        _load_json(prior_summary_snapshot.payload, "prior Stage2 failure summary"),
+        payload=prior_summary_snapshot.payload,
+        expected_receipt_sha=receipt_sha,
+    )
     stage1_generator = _read_snapshot(
         _absolute(activation["stage1_namespace"]) / "build_ready_to_strike_motion.py",
         "attested Stage1 generator copy",
@@ -775,6 +896,7 @@ def _validate_inputs(*, activation_path: Path | str, queue_path: Path | str,
         "runner": source_snapshot, "activation": activation_snapshot,
         "queue": queue_snapshot, "receipt": receipt_snapshot,
         "stage1_generator": stage1_generator,
+        "prior_summary": prior_summary_snapshot,
     }
     for key, relative in RUNTIME_RELATIVE_PATHS.items():
         snapshot = _read_snapshot(runtime_root / relative, f"runtime {key}")
@@ -801,6 +923,7 @@ def _validate_inputs(*, activation_path: Path | str, queue_path: Path | str,
              "runtime body order must contain unique non-empty names")
     return {
         "root": root, "queue": queue, "activation": activation, "receipt": receipt,
+        "prior_summary": prior_summary,
         "cells": cells, "snapshots": snapshots, "runtime_root": runtime_root,
         "body_order": body_order,
     }
@@ -865,8 +988,10 @@ def _run_stage2_impl(*, activation_path: Path | str, queue_path: Path | str,
         "queue": snapshot_root / "queue.json",
         "receipt": snapshot_root / "stage1_historical_attestation.json",
         "stage1_generator": snapshot_root / "build_ready_to_strike_motion.py",
+        "prior_summary": snapshot_root / "prior_stage2_failure_summary.json",
     }
-    for key in ("runner", "activation", "queue", "receipt", "stage1_generator"):
+    for key in ("runner", "activation", "queue", "receipt", "stage1_generator",
+                "prior_summary"):
         _write_exclusive(snapshot_destinations[key], snapshots[key].payload)
     runtime_snapshot_root = snapshot_root / "runtime"
     runtime_snapshot_root.mkdir(mode=0o700)
@@ -1030,6 +1155,7 @@ def _run_stage2_impl(*, activation_path: Path | str, queue_path: Path | str,
         "activation_sha256": snapshots["activation"].sha256,
         "queue_sha256": snapshots["queue"].sha256,
         "stage1_receipt_sha256": snapshots["receipt"].sha256,
+        "prior_failed_attempt_summary_sha256": snapshots["prior_summary"].sha256,
         "runner_sha256": snapshots["runner"].sha256,
         "runtime_snapshot_shas": {
             key.split(":", 1)[1]: value.sha256

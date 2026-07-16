@@ -14,7 +14,8 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/build_ready_to_strike_motion.py"
 LADDER = ROOT / "configs/ready_to_strike_join_ladder_20260717.yaml"
-STAGE2_ACTIVATION = ROOT / "configs/ready_to_strike_join_ladder_stage2_activation_20260717.json"
+STAGE2_ACTIVATION_V1 = ROOT / "configs/ready_to_strike_join_ladder_stage2_activation_20260717.json"
+STAGE2_ACTIVATION = ROOT / "configs/ready_to_strike_join_ladder_stage2_activation_v2_20260717.json"
 
 
 def _load_module():
@@ -123,8 +124,12 @@ def test_stage2_activation_is_exactly_the_registered_crossover_branch() -> None:
         ).hexdigest(),
     }
     assert activation["stage2_namespace"].endswith(
-        "/join_ladder_stage2_d12_8d74025e"
+        "/join_ladder_stage2_d12_v2_float32_producer"
     )
+    assert activation["prior_failed_attempt"]["summary_sha256"] == (
+        "f92e6b8b30844ba366c0bc901aacdb0f040e61f961678bd2290d833b8ac63c0e"
+    )
+    assert activation["prior_failed_attempt"]["automatic_retry"] is False
     cells = activation["authorized_stage2_cells"]
     assert {(cell["action"], cell["ready_source"], cell["delta"]) for cell in cells} == {
         ("forehand", "forehand", 12),
@@ -141,6 +146,15 @@ def test_stage2_activation_is_exactly_the_registered_crossover_branch() -> None:
         "training_authorized": False,
         "deployment_authorized": False,
     }
+
+
+def test_stage2_v1_activation_remains_an_immutable_failed_attempt_record() -> None:
+    activation = json.loads(STAGE2_ACTIVATION_V1.read_text(encoding="utf-8"))
+    assert activation["activation_id"] == "ready_to_strike_join_ladder_stage2_20260717"
+    assert activation["stage2_runner"]["sha256"] == (
+        "835cb56f9aac7c5b85791368e1de26745140a5de1af00144b0167fc2c26cf9f4"
+    )
+    assert activation["stage2_namespace"].endswith("/join_ladder_stage2_d12_8d74025e")
 
 
 def _sha(path: Path) -> str:

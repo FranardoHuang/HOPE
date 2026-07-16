@@ -110,9 +110,9 @@ activation 精确绑定 runner SHA、Stage-1 receipt SHA 和唯一结果目录�
 
 ```bash
 python3 scripts/run_ready_to_strike_join_ladder_stage2.py \
-  --activation configs/ready_to_strike_join_ladder_stage2_activation_20260717.json \
+  --activation configs/ready_to_strike_join_ladder_stage2_activation_v2_20260717.json \
   --queue configs/ready_to_strike_join_ladder_20260717.yaml \
-  --root /workspace/codexschema/ready_to_strike_0p5_20260717/join_ladder_stage2_d12_8d74025e
+  --root /workspace/codexschema/ready_to_strike_0p5_20260717/join_ladder_stage2_d12_v2_float32_producer
 ```
 
 dry-run 必须报告四格且不创建结果目录。确认 receipt、runner、queue、旧 runtime 与两份动作资产 SHA 全部
@@ -120,9 +120,9 @@ dry-run 必须报告四格且不创建结果目录。确认 receipt、runner、q
 
 ```bash
 python3 scripts/run_ready_to_strike_join_ladder_stage2.py \
-  --activation configs/ready_to_strike_join_ladder_stage2_activation_20260717.json \
+  --activation configs/ready_to_strike_join_ladder_stage2_activation_v2_20260717.json \
   --queue configs/ready_to_strike_join_ladder_20260717.yaml \
-  --root /workspace/codexschema/ready_to_strike_0p5_20260717/join_ladder_stage2_d12_8d74025e \
+  --root /workspace/codexschema/ready_to_strike_0p5_20260717/join_ladder_stage2_d12_v2_float32_producer \
   --execute \
   --confirm RUN_READY_TO_STRIKE_STAGE2_ONCE
 ```
@@ -134,6 +134,12 @@ checkout。generator/TOPP 只读冻结副本。四个 TOPP 可并行，但每个
 失败都发布 terminal summary、全批不重试。`runup_s` 必须同时等于 output contact-frame/fps 与 timing bound，
 budget scale 必须为冻结默认 `1.5`。成功只说明 Stage-2 screening 执行完整；只有 `<=0.5 s` 且 hard gate
 全过的格才能进入 L0/L1，仍无训练、部署或真机权限。
+
+旧 v1 namespace `join_ladder_stage2_d12_8d74025e` 已永久消费且不得再运行：四格 generator 均 rc0，
+但 validator 把 generator 的 float32 producer-gradient 错按 TOPP 的 float64 workspace-gradient 重算，故
+全部在 TOPP 前 fail closed。summary SHA=`f92e6b8b…63c0e`。v2 不改变动作、join、预算或 acceptance；只把
+candidate/TOPP 两条已冻结的 producer 合同分开验证，并在新 activation 中精确绑定旧 failure summary、
+旧 runner/activation SHA 和 `automatic_retry=false`。旧 summary 缺失或改变时，v2 在创建新 namespace 前拒绝。
 
 ## 下一步不是直接训练
 

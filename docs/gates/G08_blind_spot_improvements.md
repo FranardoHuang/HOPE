@@ -439,7 +439,9 @@ candidate/schema-2/production-FK TOPP/provenance，六个端点时间 `1.28/0.70
 均为可信 screening evidence、也均未过 0.5 秒。四个 `d=12` 中点的剩余前置仅为 exact tracked
 CPU-only runner activation。tracked runner 已通过独立红队并绑定 receipt、冻结输入、唯一 namespace、
 contact/fps timing 一致性与 child timeout；generator 从 Stage-1 receipt 认证副本读取，旧 runtime checkout
-不再被错误要求含后置 source。四格尚未执行，不能提前记通过。
+不再被错误要求含后置 source。v1 四格 generator 已成功但因 candidate float32/TOPP float64 梯度量尺
+混用而在 TOPP 前 fail closed；旧 summary `f92e6b8b…63c0e` 冻结。v2 只修量尺并绑定旧失败，尚未执行，
+不能提前记通过。
 TOPP `<=0.5 s`、L0、vendor L1、桌网、
 动力学和行为卷仍全部开放，
 所以 G08 不晋级。

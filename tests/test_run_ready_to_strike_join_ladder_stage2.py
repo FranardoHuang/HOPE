@@ -142,6 +142,71 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]
     receipt_payload = _canonical(receipt)
     _write(receipt_path, receipt_payload)
 
+    prior_root = tmp_path / "prior-stage2"
+    prior_root.mkdir()
+    prior_runner_sha = "5" * 64
+    prior_activation_sha = "6" * 64
+    prior_rows = []
+    for cell_id, (action, ready, delta) in runner.EXPECTED_STAGE2_CELLS.items():
+        prior_rows.append({
+            "cell_id": cell_id, "action": action, "ready_source": ready,
+            "delta": delta,
+            "join_frame": queue["assets"][action]["contact_frame"] - 12,
+            "blend_intervals": 10, "generator_rc": 0,
+            "terminal_error": (
+                f"candidate_validation_failed:{cell_id} candidate.joint_vel "
+                "is not the canonical position gradient"
+            ),
+        })
+    prior_summary = {
+        "schema_version": 1,
+        "artifact_kind": "ready_to_strike_join_ladder_stage2_screening_result",
+        "status": "stage2_terminal_failure_no_retry",
+        "activation_sha256": prior_activation_sha,
+        "queue_sha256": queue_sha,
+        "stage1_receipt_sha256": _sha(receipt_payload),
+        "runner_sha256": prior_runner_sha,
+        "runtime_snapshot_shas": {"runtime.py": "7" * 64},
+        "asset_snapshot_shas": {"forehand": "8" * 64, "backhand": "9" * 64},
+        "rows": prior_rows,
+        "screening_acceptance": {
+            "at_or_below_0p5_cells": [], "timing_by_cell_s": {},
+            "shared_ready_two_side_at_or_below_0p5": {
+                "backhand": False, "forehand": False,
+            },
+            "any_shared_ready_pass": False,
+        },
+        "input_stability_errors": [],
+        "formal_claims": {
+            "physics_replay_exact": False, "source_closure_exact": False,
+            "mjcf_closure_exact": False, "screening_evidence_only": True,
+            "strict_global_minimum_proven": False,
+        },
+        "runtime_authority": {
+            "cpu_only": True, "automatic_retry": False, "trainer_signal": False,
+            "robot_command": False, "training_authorized": False,
+            "deployment_authorized": False,
+        },
+        "automatic_retry": False, "reviewed_child_timeout_s": 3600,
+        "trainer_or_robot_signals": [],
+    }
+    prior_summary_path = prior_root / "stage2_summary.json"
+    prior_summary_payload = _canonical(prior_summary)
+    _write(prior_summary_path, prior_summary_payload)
+    prior_binding = {
+        "namespace": str(prior_root),
+        "summary_path": str(prior_summary_path),
+        "summary_sha256": _sha(prior_summary_payload),
+        "runner_sha256": prior_runner_sha,
+        "activation_sha256": prior_activation_sha,
+        "failure_class": (
+            "candidate_validator_used_float64_instead_of_generator_float32_gradient"
+        ),
+        "automatic_retry": False,
+    }
+    monkeypatch.setattr(runner, "EXPECTED_PRIOR_ATTEMPT", prior_binding)
+    monkeypatch.setattr(runner, "EXPECTED_STAGE2_NAMESPACE", str(stage2))
+
     source = tmp_path / "runner.py"
     _write(source, b"runner-source\n")
     activation = {
@@ -177,6 +242,7 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]
              "delta": values[2]}
             for cell_id, values in runner.EXPECTED_STAGE2_CELLS.items()
         ],
+        "prior_failed_attempt": prior_binding,
         "runtime_authority": {
             "cpu_only": True,
             "automatic_retry": False,
@@ -208,6 +274,44 @@ def _plan(paths: dict[str, Path]) -> dict[str, object]:
 
 def _flag(command: list[str], name: str) -> str:
     return command[command.index(name) + 1]
+
+
+def test_schema2_gradient_contract_separates_generator_from_topp_workspace() -> None:
+    rng = np.random.default_rng(20260717)
+    q = (rng.normal(size=(40, 31)).astype(np.float32) * np.float32(1.0e-3))
+    qd32 = np.gradient(q, 1.0 / 50.0, axis=0).astype(np.float32)
+    qd64 = np.gradient(q.astype(np.float64), 1.0 / 50.0, axis=0).astype(np.float32)
+    assert not np.array_equal(qd32, qd64)
+    quat = np.zeros((40, 1, 4), dtype=np.float32)
+    quat[..., 0] = 1.0
+    arrays = {
+        "fps": np.array([50], dtype=np.int64),
+        "joint_pos": q,
+        "joint_vel": qd32,
+        "body_pos_w": np.zeros((40, 1, 3), dtype=np.float32),
+        "body_quat_w": quat,
+        "body_lin_vel_w": np.zeros((40, 1, 3), dtype=np.float32),
+        "body_ang_vel_w": np.zeros((40, 1, 3), dtype=np.float32),
+        "kinematics_schema_version": np.array([2], dtype=np.int64),
+        "body_pos_point": np.array("link_origin"),
+        "body_lin_vel_point": np.array("center_of_mass"),
+        "body_names": np.array(["body"]),
+    }
+
+    assert runner._validate_schema2(
+        arrays, label="generator candidate", body_order=("body",),
+        allow_migration=False, gradient_contract="float32_producer",
+    ) == 40
+    with pytest.raises(runner.Stage2Error, match="canonical position gradient"):
+        runner._validate_schema2(
+            arrays, label="TOPP output", body_order=("body",),
+            allow_migration=False, gradient_contract="float64_workspace",
+        )
+    arrays["joint_vel"] = qd64
+    assert runner._validate_schema2(
+        arrays, label="TOPP output", body_order=("body",),
+        allow_migration=False, gradient_contract="float64_workspace",
+    ) == 40
 
 
 def _fake_executor(paths: dict[str, Path], calls: list[list[str]], *,
@@ -439,6 +543,31 @@ def test_tampered_receipt_fails_sha_binding(
     paths["receipt"].write_bytes(paths["receipt"].read_bytes() + b" \n")
 
     with pytest.raises(runner.Stage2Error, match="receipt bytes"):
+        _plan(paths)
+    assert not paths["root"].exists()
+
+
+def test_missing_prior_failure_summary_blocks_v2_before_namespace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _fixture(tmp_path, monkeypatch)
+    activation = json.loads(paths["activation"].read_text())
+    Path(activation["prior_failed_attempt"]["summary_path"]).unlink()
+
+    with pytest.raises(runner.Stage2Error, match="prior Stage2 failure summary"):
+        _plan(paths)
+    assert not paths["root"].exists()
+
+
+def test_tampered_prior_failure_summary_blocks_v2_before_namespace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _fixture(tmp_path, monkeypatch)
+    activation = json.loads(paths["activation"].read_text())
+    prior = Path(activation["prior_failed_attempt"]["summary_path"])
+    prior.write_bytes(prior.read_bytes() + b" ")
+
+    with pytest.raises(runner.Stage2Error, match="summary bytes changed"):
         _plan(paths)
     assert not paths["root"].exists()
 
@@ -691,7 +820,7 @@ def test_unexpected_post_namespace_failure_gets_terminal_summary(
 
 def test_current_repo_activation_exactly_binds_the_tracked_runner() -> None:
     activation = json.loads(
-        (REPO / "configs/ready_to_strike_join_ladder_stage2_activation_20260717.json").read_text()
+        (REPO / "configs/ready_to_strike_join_ladder_stage2_activation_v2_20260717.json").read_text()
     )
     queue = runner._validate_queue(json.loads(
         (REPO / "configs/ready_to_strike_join_ladder_20260717.yaml").read_text()

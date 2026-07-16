@@ -106,6 +106,12 @@ run-up 上界是正手 `0.98 s`、反手 `0.78 s`。因此单纯把完整旧 cli
 - 正式远端执行前又复现了 Stage-1 已知的双 source-root 边界：旧 `b1f5a38` runtime checkout 不含独立
   `66f93559` generator。Stage-2 没有因此尝试执行；runner 改为精确读取 Stage-1 receipt 已认证的 generator
   copy，再与 TOPP/runtime closure 一起冻结。generator 缺失或 SHA 改变均在 namespace 创建前拒绝。
+- Stage-2 v1 dry-run 正常，唯一 execute 的四格 generator 也全部 rc0；但 candidate validator 又把
+  generator 的 float32 producer-gradient 错按 TOPP float64 workspace-gradient 重算，四格统一在 TOPP 前
+  fail closed。旧 namespace、四份 candidate/contract 与 summary `f92e6b8b…63c0e` 永久保留，无 timing、
+  无自动重试。v2 只修量尺：candidate 用 float32、TOPP output 用 float64；动作、join、hold、预算和 hard
+  acceptance 不变。v2 activation 固定新 namespace，并精确绑定 v1 summary/runner/activation/failure class；
+  prior 缺失或篡改均在 namespace 前拒绝。
 - 下一门：在 ignored runtime 资产上按预注册 join ladder 生成正/反手候选，production FK 重建后逐个跑
   TOPP；只把 `<=0.5 s` 的候选送 L0/L1/桌网/动力学，再用绑定该 motion SHA 的 0.5 秒 K100 和
 vendor MuJoCo 判行为。

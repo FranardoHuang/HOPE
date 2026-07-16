@@ -70,8 +70,10 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   选择两个 ready 的四个 `d=12` 中点。红队发现一次性 runner 未持久绑定 consumer 且 certificate parser
   不够严格后，独立 historical attestor 已全量重验并发布唯一 receipt
   `7cf1c7c9…c377f`：六个端点升级为可信的 screening evidence，分别为正手 `1.28/0.70/1.54 s`、反手
-  `1.94/0.78/1.42 s`，仍全部高于 `0.5 s`。四个 `d=12` 中点的 exact tracked runner activation
-  已闭合，下一步是在唯一 CPU-only namespace 一次执行，不再被旧端点取证阻塞；目前仍没有
+  `1.94/0.78/1.42 s`，仍全部高于 `0.5 s`。四个 `d=12` 中点的 v1 execute 中 generator 全部成功，
+  但量尺把 candidate float32 producer-gradient 混成 TOPP float64 workspace-gradient，故四格在 TOPP 前
+  fail closed；旧 summary `f92e6b8b…63c0e` 已冻结且不重放。v2 只修该量尺，绑定旧失败并使用唯一新
+  CPU-only namespace，动作/join/预算/acceptance 不变；目前仍没有
   production FK、TOPP≤0.5、L0/L1、桌网、动力学或行为通过，不能写成0.5秒动作已完成。见
   [短路径实验](experiments/2026-07/EXP-MOTION-READY-TO-STRIKE-0P5.md)。
 
