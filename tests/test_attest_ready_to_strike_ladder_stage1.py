@@ -340,6 +340,9 @@ def complete_stage1(tmp_path: Path) -> dict:
     _write(root / "queue.yaml", queue_bytes)
     _write(root / "build_ready_to_strike_motion.py", runtime_paths["generator_sha256"].read_bytes())
     generator_copy = root / "build_ready_to_strike_motion.py"
+    # Production used a source-pinned copy from generator_source_commit; the older
+    # runtime checkout is not required to contain that later generator file.
+    runtime_paths["generator_sha256"].unlink()
     rows = []
     for cell in queue["staged_cells"]["stage1_endpoint_factorial"]:
         cell_root = root / cell["cell_id"]

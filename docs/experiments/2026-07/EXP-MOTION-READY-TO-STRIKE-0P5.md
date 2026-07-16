@@ -83,6 +83,10 @@ run-up 上界是正手 `0.98 s`、反手 `0.78 s`。因此单纯把完整旧 cli
   Stage 1 summary 未绑定一次性 consumer 源码，且旧 parser 未全量重验 certificate provenance；因此这些
   数值先降级为 raw，`launch_authorized=false`。独立 historical attestor 全量重建 candidate/certificate/
   runtime binding 并发布 no-clobber receipt 后，才允许点火中点，不重跑六格。
+- Historical attestor production dry-run attempt 1 在 receipt 前正确停止：queue 的训练 checkout 是
+  `b1f5a38`，而 generator 由单独的 `generator_source_commit=66f93559` 提供并以不可变副本执行；首版
+  attestor 错误要求旧 checkout 自己含该文件。失败没有 receipt、候选重跑或 signal。修复只核实际执行
+  副本与 queue 中 generator SHA，仍保留训练 checkout 内 TOPP/MJCF/URDF/body-order 的逐文件绑定。
 - 下一门：在 ignored runtime 资产上按预注册 join ladder 生成正/反手候选，production FK 重建后逐个跑
   TOPP；只把 `<=0.5 s` 的候选送 L0/L1/桌网/动力学，再用绑定该 motion SHA 的 0.5 秒 K100 和
 vendor MuJoCo 判行为。

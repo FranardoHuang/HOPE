@@ -92,6 +92,9 @@ python3 scripts/attest_ready_to_strike_ladder_stage1.py \
 O_EXCL 写入 Stage-1 根目录并核 source SHA，再从该副本运行。receipt 固定为根目录下
 `stage1_historical_attestation.json`，存在即拒绝再次执行。认证会重验候选 schema-2、generator contract、
 TOPP input/output、生产 FK body order、直接工具依赖、预算、触球行、拍速、拍面、首帧零速及可行时间上界。
+queue 中 `checkout_commit` 与 `generator_source_commit` 是两个独立 source root：前者必须提供绑定的
+TOPP/MJCF/URDF/body-order，后者由 Stage-1 根目录中实际执行的 immutable generator copy 对 SHA；不要
+错误要求旧训练 checkout 包含后置生成器，也不要拿当前 main 文件替换历史副本。
 它只把旧结果升级为 screening evidence；因为历史证书没有完整 argv、transitive source 和 MJCF closure，
 `physics_replay_exact/source_closure_exact/mjcf_closure_exact` 仍必须是 `false`，不能冒充动力学重放或部署通过。
 

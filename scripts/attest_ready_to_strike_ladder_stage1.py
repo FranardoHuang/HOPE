@@ -1055,7 +1055,9 @@ def attest_stage1(
     _ensure_no_symlink_components(runtime_root, "runtime checkout")
     _require(runtime_root.is_dir(), "runtime checkout is not a directory")
     runtime_paths = {
-        key: runtime_root / relative for key, relative in RUNTIME_RELATIVE_PATHS.items()
+        key: runtime_root / relative
+        for key, relative in RUNTIME_RELATIVE_PATHS.items()
+        if key != "generator_sha256"
     }
     runtime_snapshots: dict[str, _Snapshot] = {}
     for key, path in runtime_paths.items():
@@ -1065,8 +1067,8 @@ def attest_stage1(
         runtime_snapshots[key] = snapshot
     generator_copy = context.read(root / "build_ready_to_strike_motion.py", "stage1 generator copy")
     _require(
-        generator_copy.payload == runtime_snapshots["generator_sha256"].payload,
-        "stage1 generator copy is not exact",
+        _sha256(generator_copy.payload) == queue["runtime"]["generator_sha256"],
+        "stage1 executed generator copy does not match its registered SHA",
     )
     try:
         body_order = tuple(
