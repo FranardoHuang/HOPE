@@ -63,6 +63,7 @@ class ContinuationLaunchBatchError(ContinuationQueueError):
 
 CONFIRM = "SIM_ONLY_LAUNCH_ONE_ROLLING_CONTINUATION_JOB"
 ATTEST_CONFIRM = "SIM_ONLY_ATTEST_ONE_ROLLING_CONTINUATION_MILESTONE"
+INSPECT_CONFIRM = "SIM_ONLY_INSPECT_ONE_ROLLING_ATTESTATION_INPUT"
 QUEUE_PATH = Path("configs/phase1_rolling_timing_supercombo_20260716.yaml")
 EXPECTED_JOBS = 24
 EXPECTED_ROUNDS = 4
@@ -126,6 +127,238 @@ for expected in (
     if argv.count(expected) != 1:
         raise RuntimeError("queue claim path override differs from registered job")
 print(json.dumps({"status": "claim_preflight_passed", "content_sha256": digest}))
+""".strip()
+
+_INSPECT_ATTESTATION_INPUT = r"""
+import base64, hashlib, json, os, stat, sys
+
+spec = json.loads(base64.b64decode(sys.argv[1], validate=True))
+runtime_raw = base64.b64decode(sys.argv[2], validate=True)
+runtime_sha256 = hashlib.sha256(runtime_raw).hexdigest()
+if runtime_sha256 != spec["inspector_runtime_sha256"]:
+    raise RuntimeError("read-only inspector runtime SHA mismatch")
+runtime_namespace = {
+    "__name__": "rolling_read_only_inspector_runtime",
+    "__file__": "<content-addressed-read-only-inspector-runtime>",
+}
+exec(
+    compile(runtime_raw.decode("utf-8"), runtime_namespace["__file__"], "exec"),
+    runtime_namespace,
+)
+runtime_path = runtime_namespace["Path"]
+validated_binding, validated_binding_content, validated_claim, validated_claim_content = (
+    runtime_namespace["_load_binding"](runtime_path(spec["binding_path"]))
+)
+runtime_process_state = runtime_namespace["_verify_bound_process"](
+    validated_binding_content,
+    proc_root=runtime_path("/proc"),
+    getpgid=os.getpgid,
+)
+signature = lambda value: (
+    value.st_dev, value.st_ino, value.st_mode, value.st_size, value.st_mtime_ns
+)
+
+def stable_json(path, label):
+    before = os.lstat(path)
+    if not stat.S_ISREG(before.st_mode) or before.st_size <= 0:
+        raise RuntimeError(f"{label} must be a non-empty regular non-symlink file")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(path, flags)
+    try:
+        opened = os.fstat(fd)
+        if signature(opened) != signature(before):
+            raise RuntimeError(f"{label} changed while opening")
+        chunks = []
+        while True:
+            chunk = os.read(fd, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        after = os.fstat(fd)
+    finally:
+        os.close(fd)
+    outside = os.lstat(path)
+    if signature(before) != signature(after) or signature(before) != signature(outside):
+        raise RuntimeError(f"{label} changed during stable read")
+    try:
+        value = json.loads(b"".join(chunks).decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+        raise RuntimeError(f"{label} is not valid UTF-8 JSON") from exc
+    if not isinstance(value, dict):
+        raise RuntimeError(f"{label} must be a mapping")
+    return value, before
+
+def canonical_sha(value):
+    payload = json.dumps(
+        value, allow_nan=False, ensure_ascii=False,
+        separators=(",", ":"), sort_keys=True,
+    ).encode("utf-8")
+    return hashlib.sha256(payload).hexdigest()
+
+claim, claim_stat = stable_json(spec["claim_path"], "queue claim")
+if claim != validated_claim:
+    raise RuntimeError("queue claim changed after complete runtime validation")
+if set(claim) != {"schema_version", "content", "content_sha256", "training_argv"}:
+    raise RuntimeError("queue claim top-level keys changed")
+if claim.get("schema_version") != 2 or not isinstance(claim.get("content"), dict):
+    raise RuntimeError("queue claim schema changed")
+claim_content = claim["content"]
+actual_digest = canonical_sha(claim_content)
+if claim.get("content_sha256") != actual_digest:
+    raise RuntimeError(
+        "queue claim self digest mismatch: "
+        f"declared={claim.get('content_sha256')} canonical={actual_digest}"
+    )
+argv = claim.get("training_argv")
+if not isinstance(argv, list) or any(type(item) is not str for item in argv):
+    raise RuntimeError("queue claim argv must be a string list")
+
+binding, binding_stat = stable_json(spec["binding_path"], "run binding")
+if binding != validated_binding:
+    raise RuntimeError("run binding changed after complete runtime validation")
+if set(binding) != {"schema_version", "content", "content_sha256"}:
+    raise RuntimeError("run binding top-level keys changed")
+if binding.get("schema_version") != 1 or not isinstance(binding.get("content"), dict):
+    raise RuntimeError("run binding schema changed")
+binding_content = binding["content"]
+binding_digest = canonical_sha(binding_content)
+if binding.get("content_sha256") != binding_digest:
+    raise RuntimeError("run binding self digest mismatch")
+
+required_binding = {
+    "binding_path": spec["binding_path"],
+    "claim_path": spec["claim_path"],
+    "claim_content_sha256": actual_digest,
+    "job_id": claim_content.get("job_id"),
+    "run_dir": claim_content.get("run_dir"),
+    "pod": claim_content.get("pod"),
+    "gpu": claim_content.get("gpu"),
+    "source": claim_content.get("source"),
+    "milestones": claim_content.get("budget", {}).get("milestones"),
+    "training_argv": argv,
+}
+binding_differences = sorted(
+    key for key, expected in required_binding.items()
+    if binding_content.get(key) != expected
+)
+if binding_differences:
+    raise RuntimeError(
+        "run binding differs from its actual immutable claim: "
+        + ",".join(binding_differences)
+    )
+
+process = binding_content.get("process")
+if not isinstance(process, dict):
+    raise RuntimeError("run binding process must be a mapping")
+pid = process.get("pid")
+if type(pid) is not int or pid < 1 or process.get("pgid") != pid:
+    raise RuntimeError("bound trainer must have a positive isolated PID=PGID")
+process_state = "exited"
+proc_dir = f"/proc/{pid}"
+if os.path.isdir(proc_dir):
+    def read_starttime():
+        with open(proc_dir + "/stat", "r", encoding="utf-8") as stream:
+            stat_line = stream.read().strip()
+        suffix = stat_line.rsplit(")", 1)
+        if len(suffix) != 2:
+            raise RuntimeError("live process stat format changed")
+        fields = suffix[1].split()
+        if len(fields) <= 19:
+            raise RuntimeError("live process stat is truncated")
+        return int(fields[19])
+    starttime_before = read_starttime()
+    with open(proc_dir + "/cmdline", "rb") as stream:
+        raw_cmdline = stream.read()
+    observed_argv = [item.decode("utf-8") for item in raw_cmdline.split(b"\x00") if item]
+    observed_pgid = os.getpgid(pid)
+    starttime_after = read_starttime()
+    if (
+        observed_pgid != pid
+        or starttime_before != process.get("starttime_ticks")
+        or starttime_after != starttime_before
+        or observed_argv != process.get("argv")
+        or observed_argv != argv
+    ):
+        raise RuntimeError("live process no longer matches immutable binding")
+    process_state = "live"
+if process_state != runtime_process_state:
+    raise RuntimeError("process state changed after complete runtime validation")
+
+expected_content = spec["expected_content"]
+if not isinstance(expected_content, dict):
+    raise RuntimeError("expected claim content must be a mapping")
+if canonical_sha(expected_content) != spec["expected_digest"]:
+    raise RuntimeError("expected claim content does not self-bind its digest")
+content_diff_keys = sorted(
+    key for key in set(claim_content) | set(expected_content)
+    if claim_content.get(key) != expected_content.get(key)
+)
+continuation = claim_content.get("continuation")
+budget = claim_content.get("budget")
+if not isinstance(continuation, dict) or not isinstance(budget, dict):
+    raise RuntimeError("actual continuation and budget must be mappings")
+
+checkpoint_path = (
+    str(binding_content.get("rsl_log_dir", "")).rstrip("/")
+    + f"/model_{spec['milestone']}.pt"
+)
+checkpoint_state = "missing"
+try:
+    checkpoint_info = os.lstat(checkpoint_path)
+except FileNotFoundError:
+    pass
+else:
+    if not stat.S_ISREG(checkpoint_info.st_mode) or checkpoint_info.st_size <= 0:
+        raise RuntimeError("registered checkpoint must be a non-empty regular non-symlink file")
+    checkpoint_state = "present_regular"
+
+receipt_state = "absent"
+try:
+    receipt_info = os.lstat(spec["receipt_path"])
+except FileNotFoundError:
+    pass
+else:
+    receipt_state = "present_regular" if stat.S_ISREG(receipt_info.st_mode) else "present_non_regular"
+
+result = {
+    "status": "exact_match" if actual_digest == spec["expected_digest"] else "actual_claim_differs_expected",
+    "actual_claim_content_sha256": actual_digest,
+    "declared_claim_content_sha256": claim.get("content_sha256"),
+    "expected_claim_content_sha256": spec["expected_digest"],
+    "claim_self_valid": True,
+    "binding_self_valid": True,
+    "binding_exact_to_actual_claim": True,
+    "inspector_runtime_sha256": runtime_sha256,
+    "claim_stat": {
+        "device": claim_stat.st_dev, "inode": claim_stat.st_ino,
+        "size": claim_stat.st_size, "mtime_ns": claim_stat.st_mtime_ns,
+    },
+    "binding_stat": {
+        "device": binding_stat.st_dev, "inode": binding_stat.st_ino,
+        "size": binding_stat.st_size, "mtime_ns": binding_stat.st_mtime_ns,
+    },
+    "content_diff_keys": content_diff_keys,
+    "actual_job_id": claim_content.get("job_id"),
+    "actual_run_dir": claim_content.get("run_dir"),
+    "actual_source": claim_content.get("source"),
+    "actual_pod": claim_content.get("pod"),
+    "actual_gpu": claim_content.get("gpu"),
+    "actual_continuation_runner_script_sha256": continuation.get("continuation_runner_script_sha256"),
+    "actual_budget": budget,
+    "expected_continuation_runner_script_sha256": spec["expected_content"].get("continuation", {}).get("continuation_runner_script_sha256"),
+    "expected_budget": spec["expected_content"].get("budget"),
+    "process": {
+        "pid": pid,
+        "pgid": process.get("pgid"),
+        "starttime_ticks": process.get("starttime_ticks"),
+        "state": "live_exact" if process_state == "live" else "exited",
+    },
+    "checkpoint_path": checkpoint_path,
+    "checkpoint_state": checkpoint_state,
+    "receipt_path": spec["receipt_path"],
+    "receipt_state": receipt_state,
+}
+print(json.dumps(result, allow_nan=False, ensure_ascii=False, sort_keys=True))
 """.strip()
 
 # Every item below is generated once by this harness.  In particular, a YAML
@@ -1536,6 +1769,54 @@ PYTHONPATH="${{HOPE_WBT_PYTHONPATH}}" {command}
 """
 
 
+def _milestone_binding_inspector_script(
+    job: Mapping[str, Any],
+    milestone: int,
+    claim_spec: Mapping[str, Any],
+    expected_content: Mapping[str, Any],
+    runtime_raw: bytes,
+    runtime_sha256: str,
+) -> str:
+    source = job["source"]["checkout"].rstrip("/")
+    run_dir = job["run_dir"].rstrip("/")
+    spec = {
+        "claim_path": claim_spec["claim_path"],
+        "binding_path": claim_spec["binding_path"],
+        "receipt_path": f"{run_dir}/milestones/model_{milestone}.json",
+        "milestone": milestone,
+        "expected_digest": claim_spec["content_sha256"],
+        "expected_content": dict(expected_content),
+        "inspector_runtime_sha256": runtime_sha256,
+    }
+    encoded_spec = base64.b64encode(
+        json.dumps(
+            spec,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).decode("ascii")
+    encoded_runtime = base64.b64encode(runtime_raw).decode("ascii")
+    inspect = shlex.join(
+        [
+            lean.ISAAC_PYTHON,
+            "-B",
+            "-c",
+            _INSPECT_ATTESTATION_INPUT,
+            encoded_spec,
+            encoded_runtime,
+        ]
+    )
+    return f"""set -euo pipefail
+export GIT_OPTIONAL_LOCKS=0
+export PYTHONDONTWRITEBYTECODE=1
+test "$(git --no-optional-locks -C {shlex.quote(source)} rev-parse HEAD)" = {shlex.quote(job['source']['commit'])}
+test -z "$(git --no-optional-locks -C {shlex.quote(source)} status --porcelain)"
+{inspect}
+"""
+
+
 def cmd_attest_milestone(
     queue: dict[str, Any],
     *,
@@ -1594,6 +1875,95 @@ def cmd_attest_milestone(
         phase=f"rolling-attest-milestone:{job_id}:{milestone}",
     )
     return {**result, "remote_output": output}
+
+
+def cmd_inspect_milestone_binding(
+    queue: dict[str, Any],
+    *,
+    job_id: str,
+    milestone: int,
+    execute: bool,
+    confirm: str | None,
+) -> dict[str, Any]:
+    """Read one immutable claim/binding tuple without publishing a receipt."""
+
+    jobs = {job["id"]: job for job in queue["jobs"]}
+    job = jobs.get(job_id)
+    if job is None:
+        raise ContinuationQueueError(f"unknown queue job: {job_id}")
+    absolute = _absolute_schedule(job, _parent_records_from_job_context(job))
+    registered = absolute["milestones"]
+    if type(milestone) is not int or milestone not in registered:
+        raise ContinuationQueueError(
+            f"{job_id} milestone must be one of the registered absolute milestones {registered}"
+        )
+    if execute and confirm != INSPECT_CONFIRM:
+        raise ContinuationQueueError(
+            f"--execute requires --confirm {INSPECT_CONFIRM}"
+        )
+
+    required_slot = job["resource"]["required_slot"]
+    slot = _slots(queue).get(required_slot)
+    if slot is None:
+        raise ContinuationQueueError(
+            f"{job_id} required slot is not registered: {required_slot}"
+        )
+    blocking = _mapping(queue.get("blocking_contract"), "blocking_contract")
+    harness = _mapping(blocking.get("hotstart_harness"), "hotstart_harness")
+    launch_runner_sha256 = _sha256(
+        harness.get("runner_script_sha256"),
+        "hotstart_harness.runner_script_sha256",
+    )
+    expected_claim, _argv, _absolute = _launch_contract(
+        queue,
+        job,
+        slot,
+        runner_script_sha256=launch_runner_sha256,
+    )
+    runtime_raw, runtime_sha256 = _lean_runtime_payload()
+    claim_spec = _attestor_claim_spec(queue, job, slot)
+    remote = _milestone_binding_inspector_script(
+        job,
+        milestone,
+        claim_spec,
+        expected_claim["content"],
+        runtime_raw,
+        runtime_sha256,
+    )
+    result = {
+        "mode": "inspect-milestone-binding",
+        "dry_run": not execute,
+        "read_only": True,
+        "job_id": job_id,
+        "pod": slot.pod,
+        "required_slot": required_slot,
+        "milestone": milestone,
+        "registered_absolute_milestones": registered,
+        "binding_path": claim_spec["binding_path"],
+        "claim_path": claim_spec["claim_path"],
+        "expected_launch_claim_content_sha256": claim_spec["content_sha256"],
+        "inspector_runtime_sha256": runtime_sha256,
+    }
+    if not execute:
+        return {**result, "remote_script": remote}
+    output = lean._run_ssh(
+        queue,
+        slot.pod,
+        remote,
+        timeout=60,
+        phase=f"rolling-inspect-milestone-binding:{job_id}:{milestone}",
+    )
+    try:
+        inspection = json.loads(output)
+    except json.JSONDecodeError as exc:
+        raise ContinuationQueueError(
+            "rolling milestone binding inspector returned non-JSON output"
+        ) from exc
+    if not isinstance(inspection, dict):
+        raise ContinuationQueueError(
+            "rolling milestone binding inspector output must be a mapping"
+        )
+    return {**result, "inspection": inspection}
 
 
 def cmd_fill(
@@ -1746,6 +2116,11 @@ def _parser() -> argparse.ArgumentParser:
     attest.add_argument("--milestone", type=int, required=True)
     attest.add_argument("--execute", action="store_true")
     attest.add_argument("--confirm")
+    inspect_binding = sub.add_parser("inspect-milestone-binding")
+    inspect_binding.add_argument("--job-id", required=True)
+    inspect_binding.add_argument("--milestone", type=int, required=True)
+    inspect_binding.add_argument("--execute", action="store_true")
+    inspect_binding.add_argument("--confirm")
     fill = sub.add_parser("fill")
     fill.add_argument("--count", type=int, required=True)
     fill.add_argument("--execute", action="store_true")
@@ -1766,6 +2141,14 @@ def main(argv: list[str] | None = None) -> int:
             result = cmd_inspect_parents(queue)
         elif args.mode == "attest-milestone":
             result = cmd_attest_milestone(
+                queue,
+                job_id=args.job_id,
+                milestone=args.milestone,
+                execute=args.execute,
+                confirm=args.confirm,
+            )
+        elif args.mode == "inspect-milestone-binding":
+            result = cmd_inspect_milestone_binding(
                 queue,
                 job_id=args.job_id,
                 milestone=args.milestone,

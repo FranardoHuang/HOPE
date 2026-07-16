@@ -451,6 +451,369 @@ def test_milestone_attestor_cli_defaults_to_dry_run_surface():
     assert args.confirm is None
 
 
+def test_milestone_binding_inspector_dry_run_is_read_only_and_uses_no_ssh(
+    tmp_path, monkeypatch
+):
+    queue = _loaded(tmp_path)
+    calls = []
+    monkeypatch.setattr(Q.lean, "_run_ssh", lambda *_a, **_k: calls.append("ssh"))
+    result = Q.cmd_inspect_milestone_binding(
+        queue,
+        job_id="rolling_job_3",
+        milestone=5200,
+        execute=False,
+        confirm=None,
+    )
+    assert result["dry_run"] is True
+    assert result["read_only"] is True
+    assert result["pod"] == "pod2"
+    assert result["required_slot"] == "pod2/gpu0"
+    assert result["registered_absolute_milestones"] == [4900, 5200, 5700, 6700]
+    remote = result["remote_script"]
+    assert "actual_claim_differs_expected" in remote
+    assert "export GIT_OPTIONAL_LOCKS=0" in remote
+    assert "export PYTHONDONTWRITEBYTECODE=1" in remote
+    assert remote.count("git --no-optional-locks") == 2
+    assert " -B -c " in remote
+    assert Q.lean.ATTESTOR_RUNTIME_ROOT not in remote
+    assert "lean_queue_runtime.py attest" not in remote
+    assert all(token not in remote for token in ("kill ", "pkill", "killall", "signal"))
+    assert calls == []
+
+
+def test_milestone_binding_inspector_execute_requires_confirmation_before_ssh(
+    tmp_path, monkeypatch
+):
+    queue = _loaded(tmp_path)
+    calls = []
+    monkeypatch.setattr(Q.lean, "_run_ssh", lambda *_a, **_k: calls.append("ssh"))
+    with pytest.raises(Q.ContinuationQueueError, match=Q.INSPECT_CONFIRM):
+        Q.cmd_inspect_milestone_binding(
+            queue,
+            job_id="rolling_job_3",
+            milestone=5200,
+            execute=True,
+            confirm=Q.ATTEST_CONFIRM,
+        )
+    assert calls == []
+
+
+def test_milestone_binding_inspector_execute_uses_exactly_one_yaml_pod_ssh(
+    tmp_path, monkeypatch
+):
+    queue = _loaded(tmp_path)
+    calls = []
+    payload = {
+        "status": "actual_claim_differs_expected",
+        "actual_claim_content_sha256": "a" * 64,
+    }
+
+    def fake_ssh(queue_arg, pod, remote, **kwargs):
+        calls.append((queue_arg, pod, remote, kwargs))
+        return json.dumps(payload)
+
+    monkeypatch.setattr(Q.lean, "_run_ssh", fake_ssh)
+    result = Q.cmd_inspect_milestone_binding(
+        queue,
+        job_id="rolling_job_3",
+        milestone=5200,
+        execute=True,
+        confirm=Q.INSPECT_CONFIRM,
+    )
+    assert result["inspection"] == payload
+    assert len(calls) == 1
+    _queue_arg, pod, remote, kwargs = calls[0]
+    assert pod == "pod2"
+    assert kwargs == {
+        "timeout": 60,
+        "phase": "rolling-inspect-milestone-binding:rolling_job_3:5200",
+    }
+    assert "O_RDONLY" in remote
+    assert Q.lean.ATTESTOR_RUNTIME_ROOT not in remote
+    assert all(token not in remote for token in ("kill ", "pkill", "killall", "signal"))
+
+
+def test_milestone_binding_inspector_reports_old_self_valid_claim_without_writing(
+    tmp_path
+):
+    queue = _loaded(tmp_path)
+    job = queue["jobs"][3]
+    job["run_dir"] = str(tmp_path / "run")
+    Path(job["run_dir"]).mkdir()
+    slot = Q._slots(queue)[job["resource"]["required_slot"]]
+    launch_runner_sha = queue["blocking_contract"]["hotstart_harness"][
+        "runner_script_sha256"
+    ]
+    claim, _argv, _absolute = Q._launch_contract(
+        queue,
+        job,
+        slot,
+        runner_script_sha256=launch_runner_sha,
+    )
+    claim_path = Path(job["run_dir"]) / "queue_claim.json"
+    claim_path.write_text(json.dumps(claim), encoding="utf-8")
+    binding_path = Path(job["run_dir"]) / "run_binding.json"
+    binding_content = {
+        "schema_version": 1,
+        "binding_path": str(binding_path),
+        "claim_path": str(claim_path),
+        "claim_content_sha256": claim["content_sha256"],
+        "job_id": claim["content"]["job_id"],
+        "run_dir": claim["content"]["run_dir"],
+        "pod": claim["content"]["pod"],
+        "gpu": claim["content"]["gpu"],
+        "source": claim["content"]["source"],
+        "milestones": claim["content"]["budget"]["milestones"],
+        "training_argv": claim["training_argv"],
+        "rsl_log_dir": (
+            "/workspace/source/hope_training/whole_body_tracking/logs/rsl_rl/"
+            f"agibot_a3_hope_virtualball/2026-07-16_12-00-00_{claim['content']['run_name']}"
+        ),
+        "source_state_at_binding": {
+            "head": claim["content"]["source"]["commit"],
+            "clean": True,
+        },
+        "run_name": claim["content"]["run_name"],
+        "purpose": None,
+        "not_science": False,
+        "attestable": True,
+        "promotable": True,
+        "process": {
+            "pid": 999999999,
+            "pgid": 999999999,
+            "starttime_ticks": 1,
+            "argv": claim["training_argv"],
+        },
+    }
+    binding = {
+        "schema_version": 1,
+        "content": binding_content,
+        "content_sha256": Q._canonical_sha256(binding_content),
+    }
+    binding_path.write_text(json.dumps(binding), encoding="utf-8")
+    expected = copy.deepcopy(claim["content"])
+    expected["continuation"]["continuation_runner_script_sha256"] = "f" * 64
+    runtime_raw, runtime_sha256 = Q._lean_runtime_payload()
+    spec = {
+        "claim_path": str(claim_path),
+        "binding_path": str(binding_path),
+        "receipt_path": str(Path(job["run_dir"]) / "milestones/model_5200.json"),
+        "milestone": 5200,
+        "expected_digest": Q._canonical_sha256(expected),
+        "expected_content": expected,
+        "inspector_runtime_sha256": runtime_sha256,
+    }
+    encoded = base64.b64encode(
+        json.dumps(spec, separators=(",", ":"), sort_keys=True).encode()
+    ).decode()
+    encoded_runtime = base64.b64encode(runtime_raw).decode()
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            Q._INSPECT_ATTESTATION_INPUT,
+            encoded,
+            encoded_runtime,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout)
+    assert result["status"] == "actual_claim_differs_expected"
+    assert result["claim_self_valid"] is True
+    assert result["binding_self_valid"] is True
+    assert result["binding_exact_to_actual_claim"] is True
+    assert result["actual_claim_content_sha256"] == claim["content_sha256"]
+    assert result["content_diff_keys"] == ["continuation"]
+    assert result["process"]["state"] == "exited"
+    assert result["checkpoint_state"] == "missing"
+    assert result["receipt_state"] == "absent"
+    assert not Path(spec["receipt_path"]).exists()
+
+    bad_binding = copy.deepcopy(binding)
+    bad_binding["content"]["rsl_log_dir"] = "/tmp/evil-unbound"
+    bad_binding["content_sha256"] = Q._canonical_sha256(bad_binding["content"])
+    binding_path.write_text(json.dumps(bad_binding), encoding="utf-8")
+    bad_layout = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            Q._INSPECT_ATTESTATION_INPUT,
+            encoded,
+            encoded_runtime,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert bad_layout.returncode != 0
+    assert "RSL log dir is outside" in bad_layout.stderr
+
+    tampered_claim = copy.deepcopy(claim)
+    tampered_claim["training_argv"] = [*claim["training_argv"], "task.fake=true"]
+    claim_path.write_text(json.dumps(tampered_claim), encoding="utf-8")
+    tampered_binding = copy.deepcopy(binding)
+    tampered_binding["content"]["training_argv"] = tampered_claim["training_argv"]
+    tampered_binding["content_sha256"] = Q._canonical_sha256(
+        tampered_binding["content"]
+    )
+    binding_path.write_text(json.dumps(tampered_binding), encoding="utf-8")
+    bad_argv = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            Q._INSPECT_ATTESTATION_INPUT,
+            encoded,
+            encoded_runtime,
+        ],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert bad_argv.returncode != 0
+    assert "full argv does not self-bind" in bad_argv.stderr
+    assert not Path(spec["receipt_path"]).exists()
+
+
+def test_milestone_binding_inspector_cli_defaults_to_dry_run_surface():
+    args = Q._parser().parse_args(
+        [
+            "inspect-milestone-binding",
+            "--job-id",
+            "rolling_job_3",
+            "--milestone",
+            "5200",
+        ]
+    )
+    assert args.mode == "inspect-milestone-binding"
+    assert args.execute is False
+    assert args.confirm is None
+
+
+def test_milestone_binding_inspector_keeps_runtime_live_enum_until_display():
+    script = Q._INSPECT_ATTESTATION_INPUT
+    assert 'process_state = "live"' in script
+    assert "if process_state != runtime_process_state" in script
+    assert '"state": "live_exact" if process_state == "live" else "exited"' in script
+
+
+@pytest.mark.skipif(not Path("/proc/self").exists(), reason="Linux /proc required")
+def test_milestone_binding_inspector_accepts_exact_live_isolated_process(tmp_path):
+    queue = _loaded(tmp_path)
+    job = queue["jobs"][3]
+    source = tmp_path / "source"
+    train = source / Q.lean.WBT_RELATIVE / "scripts/train.py"
+    train.parent.mkdir(parents=True)
+    train.write_text("import time\ntime.sleep(30)\n", encoding="utf-8")
+    job["source"]["checkout"] = str(source)
+    job["run_dir"] = str(tmp_path / "live-run")
+    Path(job["run_dir"]).mkdir()
+    slot = Q._slots(queue)[job["resource"]["required_slot"]]
+    runner_sha = queue["blocking_contract"]["hotstart_harness"][
+        "runner_script_sha256"
+    ]
+    claim, _argv, _absolute = Q._launch_contract(
+        queue,
+        job,
+        slot,
+        runner_script_sha256=runner_sha,
+    )
+    process = subprocess.Popen(
+        claim["training_argv"],
+        executable=sys.executable,
+        start_new_session=True,
+    )
+    try:
+        stat_fields = (
+            Path(f"/proc/{process.pid}/stat")
+            .read_text(encoding="utf-8")
+            .rsplit(")", 1)[1]
+            .split()
+        )
+        starttime = int(stat_fields[19])
+        claim_path = Path(job["run_dir"]) / "queue_claim.json"
+        claim_path.write_text(json.dumps(claim), encoding="utf-8")
+        binding_path = Path(job["run_dir"]) / "run_binding.json"
+        run_name = claim["content"]["run_name"]
+        rsl_log_dir = (
+            source
+            / Q.lean.WBT_RELATIVE
+            / "logs/rsl_rl/agibot_a3_hope_virtualball"
+            / f"2026-07-16_12-00-00_{run_name}"
+        )
+        binding_content = {
+            "schema_version": 1,
+            "job_id": claim["content"]["job_id"],
+            "claim_path": str(claim_path),
+            "claim_content_sha256": claim["content_sha256"],
+            "binding_path": str(binding_path),
+            "rsl_log_dir": str(rsl_log_dir),
+            "process": {
+                "pid": process.pid,
+                "pgid": process.pid,
+                "starttime_ticks": starttime,
+                "argv": claim["training_argv"],
+            },
+            "pod": claim["content"]["pod"],
+            "gpu": claim["content"]["gpu"],
+            "source": claim["content"]["source"],
+            "source_state_at_binding": {
+                "head": claim["content"]["source"]["commit"],
+                "clean": True,
+            },
+            "run_name": run_name,
+            "run_dir": claim["content"]["run_dir"],
+            "milestones": claim["content"]["budget"]["milestones"],
+            "training_argv": claim["training_argv"],
+            "purpose": None,
+            "not_science": False,
+            "attestable": True,
+            "promotable": True,
+        }
+        binding = {
+            "schema_version": 1,
+            "content": binding_content,
+            "content_sha256": Q._canonical_sha256(binding_content),
+        }
+        binding_path.write_text(json.dumps(binding), encoding="utf-8")
+        runtime_raw, runtime_sha256 = Q._lean_runtime_payload()
+        spec = {
+            "claim_path": str(claim_path),
+            "binding_path": str(binding_path),
+            "receipt_path": str(
+                Path(job["run_dir"]) / "milestones/model_5200.json"
+            ),
+            "milestone": 5200,
+            "expected_digest": claim["content_sha256"],
+            "expected_content": claim["content"],
+            "inspector_runtime_sha256": runtime_sha256,
+        }
+        encoded_spec = base64.b64encode(
+            json.dumps(spec, separators=(",", ":"), sort_keys=True).encode()
+        ).decode()
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-c",
+                Q._INSPECT_ATTESTATION_INPUT,
+                encoded_spec,
+                base64.b64encode(runtime_raw).decode(),
+            ],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+        assert completed.returncode == 0, completed.stderr
+        result = json.loads(completed.stdout)
+        assert result["status"] == "exact_match"
+        assert result["process"]["state"] == "live_exact"
+    finally:
+        process.terminate()
+        process.wait(timeout=10)
+
+
 def test_pending_queue_reports_blockers_without_ssh(tmp_path, monkeypatch):
     queue = _queue()
     queue["launch_authorized"] = False

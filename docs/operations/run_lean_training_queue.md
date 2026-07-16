@@ -559,6 +559,30 @@ lock；该 JSON 是部分成功审计，不得误读成整批成功。
 同一 fill 进程还维护只用于 job-ID 排除的 attempted overlay；即使下一次远端 snapshot 暂时漏掉刚写的 claim，
 也不会再次提交该 job。overlay 不增加 occupancy，真实容量仍只来自 NVML 与远端 claim。
 
+若 attestor 在发布 receipt 前因 expected claim digest 不一致而 fail closed，禁止直接重跑或改写远端 claim。
+先用同一 runner 的只读 inspector 诊断；它仍只接受 YAML job 与注册的绝对 milestone，默认 dry-run：
+
+```bash
+python3 scripts/run_phase1_rolling_timing_supercombo_queue.py \
+  --queue configs/phase1_rolling_timing_supercombo_20260716.yaml \
+  inspect-milestone-binding --job-id REPLACE_WITH_JOB_ID --milestone REPLACE_WITH_ABSOLUTE_ITERATION
+```
+
+人工复核 job/Pod/路径后，下一独立审计轮只允许一次目标 Pod SSH：
+
+```bash
+python3 scripts/run_phase1_rolling_timing_supercombo_queue.py \
+  --queue configs/phase1_rolling_timing_supercombo_20260716.yaml \
+  inspect-milestone-binding --job-id REPLACE_WITH_JOB_ID --milestone REPLACE_WITH_ABSOLUTE_ITERATION \
+  --execute --confirm SIM_ONLY_INSPECT_ONE_ROLLING_ATTESTATION_INPUT
+```
+
+inspector 对 actual claim 与 binding 做稳定 `O_NOFOLLOW` 自校验，复核 binding→actual-claim、绑定
+PID/PGID/starttime/argv，并只报告 actual/expected digest、差异顶层字段、launcher runner SHA、budget、
+checkpoint/receipt presence。它不物化 attestor runtime、不加载 checkpoint tensor、不创建目录或 receipt，
+也没有 stop/signal/retry。`actual_claim_differs_expected` 是诊断结果，不是训练失败或兼容授权；必须先把
+actual 谱系绑定回不可变 source/runner，再另行评审 attestor，不能靠放宽摘要“修绿”。
+
 已有 checkpoint 只能通过 rolling runner 的专用 no-clobber 入口取证。`job-id` 必须来自 YAML，`milestone`
 必须是 parent iteration 加冻结 offset 后的**绝对**编号；Pod、run directory、binding、claim 与 receipt 路径均
 由该 job 派生，不接受 CLI PID 或手写远端路径。先 dry-run：

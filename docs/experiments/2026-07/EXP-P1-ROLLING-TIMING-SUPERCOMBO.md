@@ -201,6 +201,22 @@ trainer/hard-contract/full-scene source gate 后，才可作为空槽的 matched
 `model_2400`，`model_3600` 不存在；Pod2 已有两份 `model_5200`，但没有对应 no-clobber milestone receipt。
 这两份文件的出现不是行为门通过，也不授权 stop。
 
+2026-07-16 12:45 CST，Pod1 的本轮唯一连接确认 `11 live + 1 rejected`、fatal=`0`，11 份 latest
+`model_2100–2600` 的 embedded iteration、74 个浮点 tensor/1,762,715 elements finite、schema-3 hard、
+claim/binding 与 lineage=`0` 全部一致；budget-v1 的 `model_3600` 仍不存在。Pod2 的唯一连接用于
+`rolling_p2_t05_comp2_j0_equal_f03@5200` 的已注册 no-clobber attestation。它在 claim 稳定读取阶段即
+fail closed：actual immutable claim 的 canonical digest 不等于按当前 YAML 与冻结 `c49dc314` runner SHA
+重建的 `aee7132...`；没有 materialize attestor runtime、没有 load checkpoint、没有发布 receipt，也没有
+retry/signal。训练和 checkpoint 不能因此判失败。
+
+本地逐提交复算得到三种可能的合法历史 claim：旧 runner `27202d...` 为 `b639160...`，修正 budget runner
+`428cbf...` 为 `7878d92...`，cross-Pod runner `90d7f26...` 为 `aee7132...`。runner SHA 本身写入
+`continuation.continuation_runner_script_sha256`，更早版本还叠加 budget 语义差异；但失败信息没有返回
+actual digest，所以“远端是旧 launcher claim”目前只是假设。禁止通过改写 claim、放宽摘要或重复
+attestation 来验证。下一轮先使用 YAML 派生、严格只读、单 SSH 的 `inspect-milestone-binding`，稳定
+O_NOFOLLOW 自校验 actual claim/binding、绑定进程与 checkpoint/receipt presence，并报告 actual/expected
+digest、runner SHA、budget 与字段差异；只有 actual 谱系无歧义后，才能预注册新的兼容 attestor。
+
 同轮 source/event-schema 审计进一步推翻了“现役 `704bf3a` 可以直接执行上面的 `+500/+1000` 行为淘汰”这一
 假设：completion 和 pre/post-fall 是跨全历史、逐 simulator step 衰减的 EMA，比值无法重建两个不重叠的
 100-update 窗；pre/post numerator 又包含所有 `terminated`，不是 `base_fell_tilt ∪ base_too_low` 的绝对

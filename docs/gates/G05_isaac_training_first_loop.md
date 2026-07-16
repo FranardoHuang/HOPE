@@ -2682,6 +2682,17 @@ quality-parent 后代已写 `model_5200`，但尚无 no-clobber milestone receip
 身份，不把描述性 EMA 升格成行为分数；未来必须用 consume-once per-update 整数账或 checkpoint-bound
 immutable exam 才能恢复自动行为淘汰。G05 保持 `Partial`。
 
+2026-07-16 12:45 CST，Pod1 的单连接刷新仍为 `11 live + 1 importer rejected`、accepted fatal0；11 份
+latest `model_2100–2600` 均通过 embedded/finite/schema-3 hard/claim/binding/lineage，budget-v1 尚无
+`model_3600`。Pod2 的唯一连接按注册入口尝试第一份 `model_5200` checkpoint attestation，却在任何
+runtime materialization、checkpoint load 或 receipt 发布前发现 actual immutable claim canonical digest 与
+当前 YAML 重建值不一致并 fail closed；没有 retry、stop 或 trainer 变更。三代 launcher 的 claim digest
+可在本地分别复算，但该错误未返回 actual，当前不能把差异归因写成事实。main 新增独立
+`inspect-milestone-binding` source gate：它从 YAML 派生 job/Pod/path/registered milestone，在唯一 SSH 内
+只读稳定自校验 actual claim/binding、进程身份和 checkpoint/receipt presence，并报告 runner SHA、budget 与
+字段差异；不物化 attestor runtime、不写 receipt、不 signal。该 inspector 尚未在 Pod2 执行，原 attestation
+也不得重试；G05 保持 `Partial`。
+
 首次真实 continuation 又抓到 budget 字段语义错误：parent `1600` 配 CLI `max_iterations=3601` 时，RSL
 实际报告 `1601/5201`，说明该值是追加 update 数而非绝对终点。首 trainer 健康且 binding 正确；本地等待
 在 remote watchdog 前退出，未重发或 signal trainer。runner 已改为 CLI 传 `2001`，同时在 claim 中分别绑定

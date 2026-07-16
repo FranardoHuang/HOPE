@@ -42,9 +42,14 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   11:29 CST 的量尺审计推翻了“现役 source 可自动执行 `+500/+1000` 行为淘汰”的假设：completion 与
   pre/post-fall 是跨历史 EMA，termination 混有非物理 guard，dense ready/balance 又缺 phase 分母与母本
   receipt，无法重建两个互不重叠的 100-update 窗。因此现役 22 条只能结构淘汰，行为状态统一为
-  “量尺不完整，继续训练”；稀疏击球零值仍绝不算失败。Pod1 旧 budget-v1 诊断臂现到
-  `model_2400`，`model_3600` 尚不存在；Pod2 已有两份 `model_5200`，但还没有专用 no-clobber milestone
-  receipt，更没有可信行为窗，所以都继续、不排名、不停止。后续 source 必须增加 per-update 整数机会/
+  “量尺不完整，继续训练”；稀疏击球零值仍绝不算失败。12:45 CST 的 Pod1 单连接刷新仍是
+  `11 live + 1 importer rejected`、fatal=`0`，11 份 latest `model_2100–2600` 的 embedded iteration、finite、
+  hard/claim/binding 与 lineage 全过；旧 budget-v1 诊断臂现到 `model_2600`，`model_3600` 尚不存在。
+  Pod2 本轮唯一连接用于第一份 `model_5200` 取证：attestor 在任何 receipt/checkpoint load 前发现远端
+  immutable claim 的 canonical digest 与按现行 YAML 重建值不一致并 fail closed，无 receipt、无 retry，
+  这不是 trainer 或 checkpoint 失败。历史可复算的三代 launcher claim digest 不同，actual 值尚未读出；
+  下一轮只允许专用只读 inspector 稳定读取 actual claim/binding 后再决定如何迁移取证合同。两份
+  `model_5200` 继续、不排名、不停止。后续 source 必须增加 per-update 整数机会/
   完成/物理跌倒 union 与 ready-phase `sum+count`，现役模型若要提前排序只能另走绑定 checkpoint 的不可变
   同卷评估。`qdot` 是确定性的关节速度超限惩罚，不是随机外力；随机横向躯干推力正在
   补 trainer/物理响应门，过门后才占释放槽做同母本 no-force/force 配对。

@@ -13,6 +13,17 @@
 
 ## 2026-07-16
 
+- 12:45 CST，Pod1 单连接仍为 `11 live + 1 importer rejected`、fatal0，11 份 latest `model_2100–2600`
+  均 embedded/finite/schema-3 hard/claim/binding/lineage 一致；budget-v1 只到 `model_2600`，未触发
+  `model_3600` stop。Pod2 的唯一连接按注册命令消费第一份 `model_5200` attestation，但在任何 receipt
+  发布或 checkpoint load 前因 actual immutable claim digest 不等于当前 YAML 重建值而 fail closed；未重试，
+  训练继续。历史静态复算表明三代 launcher 会因 runner SHA/budget 语义生成 `b639160.../7878d92.../
+  aee7132...` 三种摘要，现有错误未返回 actual，不能猜是哪一代。runner 因此新增严格只读、单 SSH 的
+  `inspect-milestone-binding`：只稳定自校验 actual claim/binding、进程身份、checkpoint/receipt presence
+  并报告字段差异，不物化 runtime、不写 receipt、不 signal；下一轮先诊断，不重复 attestation。详见
+  [组合卷宗](experiments/2026-07/EXP-P1-ROLLING-TIMING-SUPERCOMBO.md)与
+  [运行操作](operations/run_lean_training_queue.md#rolling-timing-双-pod-严格续训2026-07-16)。
+
 - 11:29 CST 的 rolling 审计仍为双 Pod `22 live/2 importer rejected`、fatal0；Pod2 两条已出现
   `model_5200`，但尚无 milestone receipt。source/event-schema 复核证明现役 completion/fall 是重叠历史
   EMA，physical-fall union、ready-phase `sum+count` 与母本机器基线均缺失，不能物化冻结的两个

@@ -91,6 +91,14 @@ reviewed `lean_queue_runtime.py` 以 SHA 命名、O_EXCL/no-replace 地物化为
 recipe 或 slot 漂移都会在 checkpoint 打开前拒绝。这个 wrapper 没有 PID、checkpoint path、stop、signal
 或 retry 输入面。
 
+expected claim 不一致时不得把 remote claim 改成当前 YAML，也不得重复 attestation。专用
+`inspect-milestone-binding` 与 attestor 共用 YAML `job-id + absolute milestone` 输入面，但只做一条目标 Pod
+SSH：稳定 `O_NOFOLLOW` 读取 actual claim/binding，先各自 canonical self-check，再要求 binding 精确指向
+actual claim，并复核绑定 PID/PGID/starttime/argv（已自然退出则诚实写 exited）。结果只报告 actual/expected
+digest、顶层差异、continuation runner SHA、budget 与 checkpoint/receipt presence；它不物化 runtime、不加载
+checkpoint tensor、不写任何远端文件。diagnostic mismatch 只用于确定不可变 producer lineage，绝不自动
+兼容、晋级或 stop。
+
 ## 启动 phase telemetry 与冷启动边界
 
 仅当 queue claim/binding 两个 override 同时存在时，trainer 才输出机器可读
