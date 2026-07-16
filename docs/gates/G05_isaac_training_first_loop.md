@@ -68,6 +68,12 @@ Follow-up note (2026-07-17, task-revision pool uniquely launched; Gate remains `
   coverage. The first read-only `+200` scan produced zero stops because some still-live siblings
   had not yet reached the shared milestone; infrastructure-terminal rows were excluded. Actual
   portfolio receipts, the 0.5-second K100 result and vendor MuJoCo remain open.
+- The first Pod2 write-side `+200` cycle then found a missing-directory harness bug before the first
+  behavior receipt: the no-clobber runtime correctly refused to publish into an absent
+  `behavior_milestones/` parent. No behavior/portfolio receipt or signal was produced. The source
+  successor creates only that fixed direct child below the already bound real run directory and
+  rejects missing parents, files and symlinks; this repair has host tests but still needs its one
+  Pod runtime consume, so the pruning run gate remains `Partial`.
 
 Follow-up note (2026-07-17, task-revision `A6` full-scene gate passed; Gate remains `Partial`):
 

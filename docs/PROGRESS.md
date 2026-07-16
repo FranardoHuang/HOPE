@@ -13,6 +13,13 @@
 
 ## 2026-07-17
 
+- Pod2 首次 `+200` write-side pruning cycle 在第一条 behavior receipt 前 fail closed：reviewed atomic writer
+  正确要求父目录已存在，而新 consumer 漏建绑定 run_dir 下的 `behavior_milestones/`。没有 behavior/
+  portfolio receipt、signal 或 retry；可能新建的 checkpoint receipt仍是独立合法制品。修复版只允许在
+  已验证真实 run_dir 下用单级 `mkdir` 建固定目录名，缺 parent、文件或 symlink 均拒绝；专项增至
+  `65 passed`。旧失败输出保留，只在本修复进入 main 后做新的显式远端消费。见
+  [task-revision cutover](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md)。
+
 - task-revision 行为淘汰闭环已补齐：`+200` 只在两个完整整数窗都证明 revision/ledger 机制未激活时淘汰，
   `+500` 的 dense-collapse 还要过同父本组合保护，`+1000` 按 YAML 容差 Pareto，并至少保留两条、一个
   实际记录过 exact-0.5 样本的候选和一个 broad 候选；exact stop 必须同时消费单臂与 portfolio 两份 no-clobber receipt，

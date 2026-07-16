@@ -1131,6 +1131,28 @@ def _stable_append_prefix(path: Path) -> tuple[bytes, dict[str, Any]]:
     }
 
 
+def _ensure_direct_receipt_directory(parent: Path, name: str) -> Path:
+    """Create one fixed direct-child receipt directory without following links."""
+
+    if not continuation.lean.SAFE_ID.fullmatch(name):
+        raise SuccessorQueueError("receipt directory name is unsafe")
+    try:
+        parent_info = parent.lstat()
+    except FileNotFoundError as exc:
+        raise SuccessorQueueError(f"bound receipt parent is missing: {parent}") from exc
+    if not stat.S_ISDIR(parent_info.st_mode) or stat.S_ISLNK(parent_info.st_mode):
+        raise SuccessorQueueError(f"bound receipt parent is not a real directory: {parent}")
+    child = parent / name
+    try:
+        os.mkdir(child, mode=0o700)
+    except FileExistsError:
+        pass
+    child_info = child.lstat()
+    if not stat.S_ISDIR(child_info.st_mode) or stat.S_ISLNK(child_info.st_mode):
+        raise SuccessorQueueError(f"receipt directory is not a real directory: {child}")
+    return child
+
+
 def _load_runtime(source_checkout: str):
     path = (
         Path(source_checkout)
@@ -1312,6 +1334,7 @@ def inspect_or_attest_behavior_local(
     }
     receipt_path = run_dir / "behavior_milestones" / f"model_{milestone}.json"
     if write_receipt:
+        _ensure_direct_receipt_directory(run_dir, "behavior_milestones")
         runtime._atomic_publish_json(receipt_path, receipt, "behavior milestone receipt")
     return {
         "mode": "attest-behavior" if write_receipt else "inspect-behavior",

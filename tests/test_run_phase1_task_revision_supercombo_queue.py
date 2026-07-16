@@ -683,6 +683,29 @@ def test_exact_behavior_two_complete_windows_can_make_only_registered_dense_coll
     assert result["stop_execution"] == "manual_reviewed_exact_consumer_only"
 
 
+def test_behavior_receipt_directory_is_direct_no_symlink_and_idempotent(tmp_path):
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    expected = run_dir / "behavior_milestones"
+    assert Q._ensure_direct_receipt_directory(run_dir, "behavior_milestones") == expected
+    assert expected.is_dir()
+    assert Q._ensure_direct_receipt_directory(run_dir, "behavior_milestones") == expected
+
+
+def test_behavior_receipt_directory_rejects_missing_parent_file_and_symlink(tmp_path):
+    with pytest.raises(Q.SuccessorQueueError, match="parent is missing"):
+        Q._ensure_direct_receipt_directory(tmp_path / "missing", "behavior_milestones")
+    run_dir = tmp_path / "run"
+    run_dir.mkdir()
+    target = tmp_path / "target"
+    target.mkdir()
+    (run_dir / "behavior_milestones").symlink_to(target, target_is_directory=True)
+    with pytest.raises(Q.SuccessorQueueError, match="not a real directory"):
+        Q._ensure_direct_receipt_directory(run_dir, "behavior_milestones")
+    with pytest.raises(Q.SuccessorQueueError, match="name is unsafe"):
+        Q._ensure_direct_receipt_directory(run_dir, "../escape")
+
+
 def test_zero_eligible_denominators_are_null_and_never_stop():
     queue = Q.load_queue(QUEUE)
     counters = _exact_counters(outcome=0, completion=0)

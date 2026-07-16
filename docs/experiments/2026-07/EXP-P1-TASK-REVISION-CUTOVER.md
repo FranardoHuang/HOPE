@@ -184,6 +184,14 @@ quality rows and all continuous-parent rows were still waiting for their registe
 The three infrastructure-terminal rows were explicitly excluded. No row was stopped or ranked;
 the portfolio correctly waits for every still-live sibling rather than rewarding early starters.
 
+The next Pod2 write-side cycle exposed one harness defect before its first behavior receipt: the
+atomic writer requires an existing parent, but the consumer had not created the bound run's
+`behavior_milestones/` directory. It produced no behavior/portfolio receipt and sent no signal.
+The successor creates only that fixed direct child with a single-level `mkdir`, after validating
+the bound run directory; missing parents, ordinary files and symlinks fail closed. This is a
+consumer infrastructure failure, not a training or Reward result, and the failed invocation is
+retained rather than silently replayed.
+
 ## Acceptance sequence
 
 1. Launch the 22 activated delay-zero cells in cross-GPU rounds; keep the two transport cells

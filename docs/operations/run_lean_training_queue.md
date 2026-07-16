@@ -656,6 +656,11 @@ python3 scripts/run_phase1_task_revision_supercombo_queue.py \
 `4 ready + 2 waiting`，continuous parent 为 `5 waiting + 1 infrastructure excluded`。因此组合 receipt
 与 stop 都正确保持为零；这不是“默认不淘汰”，而是拒绝跨进度误比。
 
+write-side cycle 发布单臂 receipt 前，只能在已经由 binding 验证的真实 `run_dir` 下以单级 `mkdir`
+创建固定 `behavior_milestones` 目录；不得 `parents=True` 猜路径，也不得跟随 symlink。首个 Pod2 write
+尝试曾因该目录缺失在第一份 behavior receipt 前 fail closed，未 signal；修复版必须先过缺 parent、文件、
+symlink 三类负测，再做一次新的显式 consume。
+
 只有单臂 behavior receipt **与**同父本 portfolio receipt 都明确淘汰该 job 时，operator 才可手动调用
 exact stop；rolling 自动任务不得跳过组合保护或隐式 signal：
 
