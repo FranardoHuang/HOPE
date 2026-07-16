@@ -246,7 +246,7 @@ x-base: &base
   - task.racket.normal_mode=velocity
   - task.racket.adaptive_sigma=true
   - task.racket.target_delay_steps=2
-  - task.racket.target_delay_tts_mode=source_timestamp_compensated
+  - ++task.racket.target_delay_tts_mode=source_timestamp_compensated
   - task.racket.target_jitter_pos_per_s=0.0
   - task.racket.target_jitter_vel_per_s=0.0
   - task.racket.target_noise_white=0.0019
@@ -487,7 +487,7 @@ jobs:
       base: *base
       delta:
         - task.motion.speed_scale_per_clip=[1.886,1.286]
-        - task.racket.target_delay_tts_mode=uncompensated
+        - ++task.racket.target_delay_tts_mode=uncompensated
     matched_treatment_job: rolling_p1_t07_comp2_j0_std_f03
     negative_control_scope: only_tts_elapsed_time_subtraction_is_removed
     resource: *pod1_gpu1
