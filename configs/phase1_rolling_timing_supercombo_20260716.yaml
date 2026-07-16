@@ -232,7 +232,7 @@ x-base: &base
   - task.motion.post_swing_min_hold=25
   - task.motion.clip_switch_prob=0.0
   - task.motion.speed_scale_range=[1.0,1.0]
-  - task.motion.speed_scale_per_clip=[1.886,1.286]
+  - ++task.motion.speed_scale_per_clip=[1.886,1.286]
   - ++task.motion.rsi_skip_settle_frames=0
   - ++task.motion.rsi_hold_root_stand_z=false
   - ++task.motion.stagger_initial_clock=false
@@ -370,7 +370,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - task.motion.speed_scale_per_clip=[1.32,1.0]
+        - ++task.motion.speed_scale_per_clip=[1.32,1.0]
     seed: 3
     budget: *budget
     milestones: *milestones
@@ -387,7 +387,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - task.motion.speed_scale_per_clip=[1.886,1.286]
+        - ++task.motion.speed_scale_per_clip=[1.886,1.286]
     resource: *pod1_gpu1
     run_name: phase1_rolling_p1_t07_comp2_j0_std_f03_seed3_20260716
     run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/p1_t07_comp2_j0_std_f03
@@ -399,7 +399,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - task.motion.speed_scale_per_clip=[2.64,1.8]
+        - ++task.motion.speed_scale_per_clip=[2.64,1.8]
     resource: *pod1_gpu2
     run_name: phase1_rolling_p1_t05_comp2_j0_std_f03_seed3_20260716
     run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/p1_t05_comp2_j0_std_f03
@@ -421,7 +421,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - task.motion.speed_scale_per_clip=[2.64,1.8]
+        - ++task.motion.speed_scale_per_clip=[2.64,1.8]
         - task.rewards.racket_position_weight=9.67
         - task.rewards.racket_velocity_weight=9.67
         - task.rewards.racket_normal_weight=9.66
@@ -441,7 +441,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - task.motion.speed_scale_per_clip=null
+        - ++task.motion.speed_scale_per_clip=null
         - task.motion.speed_scale_range=[1.286,1.886]
         - task.rewards.racket_position_weight=9.67
         - task.rewards.racket_velocity_weight=9.67
@@ -457,7 +457,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - task.motion.speed_scale_per_clip=[1.32,1.0]
+        - ++task.motion.speed_scale_per_clip=[1.32,1.0]
         - task.rewards.foot_orientation_weight=-0.6
     resource: *pod2_gpu2
     run_name: phase1_rolling_p2_t10_comp2_j0_std_f06_seed3_20260716
@@ -472,7 +472,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - task.motion.speed_scale_per_clip=null
+        - ++task.motion.speed_scale_per_clip=null
         - task.motion.speed_scale_range=[1.286,1.886]
     resource: *pod1_gpu0
     run_name: phase1_rolling_p1_trange_comp2_j0_std_f03_seed3_20260716
@@ -486,7 +486,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - task.motion.speed_scale_per_clip=[1.886,1.286]
+        - ++task.motion.speed_scale_per_clip=[1.886,1.286]
         - ++task.racket.target_delay_tts_mode=uncompensated
     matched_treatment_job: rolling_p1_t07_comp2_j0_std_f03
     negative_control_scope: only_tts_elapsed_time_subtraction_is_removed
@@ -502,7 +502,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - task.motion.speed_scale_per_clip=[1.886,1.286]
+        - ++task.motion.speed_scale_per_clip=[1.886,1.286]
         - task.racket.target_delay_steps=4
     resource: *pod1_gpu2
     run_name: phase1_rolling_p1_t07_comp4_j0_std_f03_seed3_20260716
@@ -516,7 +516,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - task.motion.speed_scale_per_clip=[1.886,1.286]
+        - ++task.motion.speed_scale_per_clip=[1.886,1.286]
         - task.rewards.foot_orientation_weight=-0.6
     resource: *pod2_gpu0
     run_name: phase1_rolling_p2_t07_comp2_j0_std_f06_seed3_20260716
@@ -530,7 +530,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - task.motion.speed_scale_per_clip=[2.64,1.8]
+        - ++task.motion.speed_scale_per_clip=[2.64,1.8]
         - task.rewards.foot_orientation_weight=-0.6
     resource: *pod2_gpu1
     run_name: phase1_rolling_p2_t05_comp2_j0_std_f06_seed3_20260716
@@ -544,7 +544,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - task.motion.speed_scale_per_clip=null
+        - ++task.motion.speed_scale_per_clip=null
         - task.motion.speed_scale_range=[1.286,1.886]
         - task.rewards.foot_orientation_weight=-0.6
     resource: *pod2_gpu2
@@ -560,7 +560,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - task.motion.speed_scale_per_clip=[1.32,1.0]
+        - ++task.motion.speed_scale_per_clip=[1.32,1.0]
         - task.racket.target_jitter_pos_per_s=0.03
         - task.racket.target_jitter_vel_per_s=0.15
     resource: *pod1_gpu0
@@ -575,7 +575,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - task.motion.speed_scale_per_clip=[1.886,1.286]
+        - ++task.motion.speed_scale_per_clip=[1.886,1.286]
         - task.racket.target_jitter_pos_per_s=0.03
         - task.racket.target_jitter_vel_per_s=0.15
     resource: *pod1_gpu1
@@ -590,7 +590,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - task.motion.speed_scale_per_clip=[2.64,1.8]
+        - ++task.motion.speed_scale_per_clip=[2.64,1.8]
         - task.racket.target_jitter_pos_per_s=0.03
         - task.racket.target_jitter_vel_per_s=0.15
     resource: *pod1_gpu2
@@ -607,7 +607,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - task.motion.speed_scale_per_clip=[1.886,1.286]
+        - ++task.motion.speed_scale_per_clip=[1.886,1.286]
         - task.rewards.racket_position_weight=9.67
         - task.rewards.racket_velocity_weight=9.67
         - task.rewards.racket_normal_weight=9.66
@@ -624,7 +624,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - task.motion.speed_scale_per_clip=[1.886,1.286]
+        - ++task.motion.speed_scale_per_clip=[1.886,1.286]
         - task.racket.target_jitter_pos_per_s=0.03
         - task.racket.target_jitter_vel_per_s=0.15
         - task.rewards.racket_position_weight=9.67
@@ -642,7 +642,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - task.motion.speed_scale_per_clip=[1.886,1.286]
+        - ++task.motion.speed_scale_per_clip=[1.886,1.286]
         - task.racket.target_jitter_pos_per_s=0.03
         - task.racket.target_jitter_vel_per_s=0.15
         - task.rewards.foot_orientation_weight=-0.6
@@ -659,7 +659,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - task.motion.speed_scale_per_clip=[1.886,1.286]
+        - ++task.motion.speed_scale_per_clip=[1.886,1.286]
         - task.racket.target_jitter_pos_per_s=0.05
         - task.racket.target_jitter_vel_per_s=0.25
     resource: *pod1_gpu0
@@ -674,7 +674,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - task.motion.speed_scale_per_clip=[1.32,1.0]
+        - ++task.motion.speed_scale_per_clip=[1.32,1.0]
         - task.rewards.racket_position_weight=9.67
         - task.rewards.racket_velocity_weight=9.67
         - task.rewards.racket_normal_weight=9.66
@@ -690,7 +690,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - task.motion.speed_scale_per_clip=[1.886,1.286]
+        - ++task.motion.speed_scale_per_clip=[1.886,1.286]
         - task.rewards.racket_position_weight=9.67
         - task.rewards.racket_velocity_weight=9.67
         - task.rewards.racket_normal_weight=9.66
@@ -706,7 +706,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - task.motion.speed_scale_per_clip=[1.886,1.286]
+        - ++task.motion.speed_scale_per_clip=[1.886,1.286]
         - task.racket.target_delay_steps=4
         - task.racket.target_jitter_pos_per_s=0.03
         - task.racket.target_jitter_vel_per_s=0.15
@@ -722,7 +722,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - task.motion.speed_scale_per_clip=[2.64,1.8]
+        - ++task.motion.speed_scale_per_clip=[2.64,1.8]
         - task.racket.target_jitter_pos_per_s=0.03
         - task.racket.target_jitter_vel_per_s=0.15
         - task.rewards.racket_position_weight=9.67
@@ -741,7 +741,7 @@ jobs:
     recipe:
       base: *base
       delta:
-        - task.motion.speed_scale_per_clip=null
+        - ++task.motion.speed_scale_per_clip=null
         - task.motion.speed_scale_range=[1.286,1.886]
         - task.racket.target_delay_steps=4
     resource: *pod2_gpu2
