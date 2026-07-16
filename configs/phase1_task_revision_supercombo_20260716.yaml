@@ -34,8 +34,8 @@ blocking_contract:
     - probe_checkpoint_is_finite_and_binds_revision_profile_mixture_and_exact_ledger
     - predecessor_stop_receipts_and_same_pod_parents_are_reverified
     - dry_run_plan_is_exactly_four_rounds_over_six_gpus
-  source_checkout: /workspace/codexschema/nohope_task_revision_d9eda00
-  source_commit: d9eda00e4714eb8cf166b81ca2210ff5677eb8ac
+  source_checkout: /workspace/codexschema/nohope_task_revision_b1f5a38
+  source_commit: b1f5a3803efa14f91e594912959cec2de473a5a6
   source_full_scene_probe_evidence: PENDING_FULL_SCENE_PROBE
   task_revision_full_scene_probe_evidence: PENDING_TASK_REVISION_PROBE
   hotstart_harness: PENDING_REVIEWED_SUCCESSOR_HARNESS_BINDING
@@ -271,8 +271,8 @@ x-exam: &exam
   path: /workspace/codexschema/phase1_task_revision_supercombo_20260716/papers/timing_exam_0p5_k100.schedule.json
   family: task_revision_timing_exam_0p5_k100_v1
 x-source: &source
-  checkout: /workspace/codexschema/nohope_task_revision_d9eda00
-  commit: d9eda00e4714eb8cf166b81ca2210ff5677eb8ac
+  checkout: /workspace/codexschema/nohope_task_revision_b1f5a38
+  commit: b1f5a3803efa14f91e594912959cec2de473a5a6
   ignored_runtime_asset:
     target_relative_path: hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
     donor:
