@@ -2631,5 +2631,8 @@ starttime，故 immutable result 按身份不一致失败。该失败属于 supe
 argv 和自身 bytes，并强制同 Pod parent、六卡四轮、每卡四条。激活门只接受 exact
 `activated_demo_only_inexact`，还会逐字段复核上述 full-scene 训练证据及 reviewed runner SHA；父模型只读门要求
 `actor.*`、`critic.*`、全部浮点 tensor finite 和非空 optimizer state/groups。`88` 个 runner/generic queue
-专项测试通过；尚未完成三份 parent 的远端只读核验，也未启动本轮 trainer，因此这里只闭合发射源码门，G05
-保持 `Partial`。操作见[rolling timing 双 Pod 严格续训](../operations/run_lean_training_queue.md#rolling-timing-双-pod-严格续训2026-07-16)。
+专项测试通过。随后每 Pod 一条只读 SSH 完成三份 parent 核验：embedded iteration 为 `1600/4700/4500`，
+三者均 actor/critic 各 `8` keys、74 个浮点 tensor / 1,762,715 elements、nonfinite `0`、optimizer state
+`17` entries / `1` group。队列静态 dry-run 为四轮各六条、每槽四条，现只授权本轮 demo-only inexact
+仿真续训；尚未启动 child 或观察首迭代，因此 G05 保持 `Partial`。操作见
+[rolling timing 双 Pod 严格续训](../operations/run_lean_training_queue.md#rolling-timing-双-pod-严格续训2026-07-16)。

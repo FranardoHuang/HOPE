@@ -16,8 +16,9 @@
 - 24 格 rolling timing 组合有了独立 continuation runner：相对 parent 的
   `+200/+500/+1000/+2000` 会转为绝对 checkpoint，三份 parent 必须在原 Pod 通过 checkpoint/hard/claim/
   binding、actor+critic、finite 与完整 optimizer 只读核验；激活状态、full-scene evidence 和 runner bytes
-  都有 fail-closed allowlist/SHA 门。runner 与 generic queue 共 `88 passed`，当前仍 blocked，尚未远端读取
-  parent 或启动 trainer。详见[组合卷宗](experiments/2026-07/EXP-P1-ROLLING-TIMING-SUPERCOMBO.md)。
+  都有 fail-closed allowlist/SHA 门。runner 与 generic queue 共 `88 passed`；三份 parent 已用每 Pod 一条
+  只读 SSH 通过，24 条 dry-run 精确为四轮×六卡且每卡四条，队列现为 ready，但尚未启动 trainer。
+  详见[组合卷宗](experiments/2026-07/EXP-P1-ROLLING-TIMING-SUPERCOMBO.md)。
 
 - 真实测试触发的 training-critical 修复已进入 `main@704bf3a2`：actor 可显式消费同源延迟的
   position/velocity/face/side/TTS 元组，并按已知 step delay 更新剩余击球时间；schema-3 题库现在可与

@@ -1,6 +1,6 @@
 # EXP-P1-ROLLING-TIMING-SUPERCOMBO — 快速准备、时间戳补偿与组合训练漏斗
 
-- 状态：`blocked`（source/full-scene training path 与 continuation runner 已过；等待 parent runtime attestation）
+- 状态：`activated / ready`（source/full-scene、continuation runner 与三份 parent runtime attestation 已过；尚未点火）
 - 阶段/轴：阶段 1，动作重定时、actor 可见目标/TTS 延迟、预测收敛抖动、击球 Reward 配比与脚朝向
 - 人类负责人：Franco
 - 执行者：Codex
@@ -9,8 +9,8 @@
 
 共享术语按[术语与人话对照](../../DEFINITIONS.md)解释。本实验的机器草案是
 [`phase1_rolling_timing_supercombo_20260716.yaml`](../../../configs/phase1_rolling_timing_supercombo_20260716.yaml)。
-顶层 [`launch_authorized=false`](../../DEFINITIONS.md#launch-authorized)，24 条 job 也全部为 `blocked`；本文没有
-授权启动、自动重试、第二 seed、判卷、晋级或真机。
+顶层 [`launch_authorized=true`](../../DEFINITIONS.md#launch-authorized)，24 条 job 已在一次性 parent inspect
+通过后切为 `ready`；只授权本轮仿真续训，不授权自动重试、第二 seed、判卷、晋级或真机。
 
 ## 先回答：qdot 是不是随机施加力
 
@@ -206,19 +206,22 @@ trainer/hard-contract/full-scene source gate 后，才可作为空槽的 matched
    absolute；错误 clip count、非正 scale、同时误启 event timing 必须 fail closed。
 4. **已完成 exact stop：** 旧 24 条均按绑定 identity 停止且 GPU compute 为空；不额外制造不参与
    后代 provenance 的 stop receipt。
-5. 对三份选中 parent（Pod1 一份、Pod2 两份）做只读 runtime attest；验证完整 optimizer、finite、contract/claim/binding 和
-   source lineage。parent 选择变化时先更新本实验，不在聊天里暗换。
+5. **已完成：** 对三份选中 parent（Pod1 一份、Pod2 两份）做一次只读 runtime attest；每 Pod 仅一条 SSH。
+   三者分别为 embedded `1600/4700/4500`，均有 actor/critic 各 `8` keys、`74` 个浮点 tensor /
+   `1,762,715` elements、nonfinite `0`、optimizer state `17` entries / `1` param group，且 checkpoint/hard/
+   claim/binding/source lineage 均通过。parent 选择变化时先更新本实验，不在聊天里暗换。
 6. **训练路径已完成：** 直接做 4096-env×2 update full-scene probe；不再串一个不能代表正式 scene 的
    512-env smoke。Pod2 0.7 秒补偿格自然 rc0，`model_1` 的 1,762,715 个浮点元素全 finite、schema-3/
    fresh lineage 通过且 fatal0。严格 finalizer 因 Popen 后第一次 `/proc` identity 读取竞态得到 null
    starttime 而 fail closed；训练本体、checkpoint 与自然退出证据均已独立复核。该基础设施 bug 另修，
    不把一次成功 physics run 重跑成“更好结果”。
-7. 对队列做静态审计：24 unique ids/run names/run dirs；12/12 Pod；六槽各 4；四轮各 6；仅一条
-   `uncompensated`，且它与 #2 除 TTS mode 外逐项相等；全部 blocked、`launch_authorized=false`、formal-ineligible。
+7. **已完成：** 对队列做静态审计：24 unique ids/run names/run dirs；12/12 Pod；六槽各 4；四轮各 6；仅一条
+   `uncompensated`，且它与 #2 除 TTS mode 外逐项相等。激活前全部 blocked、`launch_authorized=false`；上述门
+   通过后只把全局状态与两个继承 anchor 切为 ready，formal-ineligible 始终不变。
 8. 只有以上 receipt/测试审完并由人明确授权，才另做 activation patch；激活本身不得自动执行 `fill` 或 retry。
 
 ## 决定
 
-- 决定：`blocked / preregistration draft only`
-- 是否纳入当前 setting：`no`
-- 下一个 gate：per-Pod parent runtime attestation + activated queue dry-run
+- 决定：`activated / demo-only inexact engineering portfolio`
+- 是否纳入当前 setting：`yes, for the 24-run overnight engineering funnel only`
+- 下一个 gate：activated queue dry-run → 24 个 child 首迭代/identity/optimizer lineage

@@ -1,7 +1,7 @@
 schema_version: 1
 simulation_only: true
-launch_authorized: false
-preregistration_status: blocked_pending_parent_runtime_attestation
+launch_authorized: true
+preregistration_status: activated_demo_only_inexact
 formal_evidence_eligible: false
 
 ssh:
@@ -54,6 +54,33 @@ blocking_contract:
     runner_script_sha256: 27202d79f362d5ee5cccae639e72b3252d8b8ee75e75b32d60a3425c048542b2
     reviewed_tests_passed: true
     reviewed_test_count: 88
+  parent_runtime_attestation:
+    inspected_utc: 2026-07-16T01:04:47Z
+    mode: one_read_only_ssh_connection_per_pod
+    runner_script_sha256: 27202d79f362d5ee5cccae639e72b3252d8b8ee75e75b32d60a3425c048542b2
+    ssh_connections:
+      pod1: 1
+      pod2: 1
+    unique_parent_count: 3
+    common_checkpoint_audit:
+      actor_key_count: 8
+      critic_key_count: 8
+      floating_tensor_count: 74
+      floating_elements: 1762715
+      nonfinite_floating_elements: 0
+      optimizer_state_entries: 17
+      optimizer_param_groups: 1
+      optimizer_resume_eligible: true
+    parents:
+      pod1_local_best:
+        pod: pod1
+        embedded_iteration: 1600
+      pod2_quality_basin:
+        pod: pod2
+        embedded_iteration: 4700
+      pod2_continuous_basin:
+        pod: pod2
+        embedded_iteration: 4500
   activation_is_manual: true
   automatic_launch: false
   automatic_retry: false
@@ -371,9 +398,7 @@ x-budget: &budget
   save_interval: 100
   iteration_semantics: additional_updates_after_full_state_resume
 x-milestones: &milestones [200, 500, 1000, 2000]
-x-blocker: &blocker >-
-  Global launch gate is closed: exact parent runtime attestations and the
-  parent-relative hot-start harness are still PENDING.
+x-blocker: &blocker null
 
 x-pod1-warm-start: &pod1_warm_start
   parent: pod1_local_best
@@ -427,7 +452,7 @@ jobs:
     scientific_question: does_about_1s_preparation_preserve_speed_and_balance_under_the_shared_core
     launch_round: 1
     action: *action
-    status: blocked
+    status: ready
     blocker: *blocker
     motion: *motion
     bank: *bank
@@ -478,7 +503,7 @@ jobs:
     scientific_question: does_equal_reward_allocation_help_the_about_0p5s_deadline
     launch_round: 1
     action: *action
-    status: blocked
+    status: ready
     blocker: *blocker
     motion: *motion
     bank: *bank
