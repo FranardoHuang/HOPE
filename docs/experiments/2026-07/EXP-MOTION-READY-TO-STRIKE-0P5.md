@@ -63,6 +63,17 @@ run-up 上界是正手 `0.98 s`、反手 `0.78 s`。因此单纯把完整旧 cli
   fail closed，原因是 v1 生成器把正式 v4rg 的完整 canonical migration 三元组误判为 unexpected；
   没有候选 NPZ/contract、没有启动 TOPP、没有占 GPU，也不是动作/动力学失败。该 namespace 永久保留，
   不重放。合同修复后的专项为 `21 passed`；下一次只能使用新源码和新 namespace。
+- 真实 attempt 2：新源码 `66f93559`、namespace `attempt_2_66f93559`。两侧 host 候选均生成成功并把
+  触球放在第25 tick；正/反手 candidate SHA 分别为 `b0350f4d…53ac4d` / `0f017dc5…dfc89`。
+  production-FK TOPP 两侧 hard acceptance 都通过，但可行 run-up 上界分别为 `0.64 s` / `0.94 s`，
+  因而 **没有** 0.5秒动作证书，也不送后续安全门。反手使用共同的正手 frame0 ready，结果还不能区分
+  “join 位置不佳”和“共同 ready 距离过远”。
+- 后续搜索已在
+  [`ready_to_strike_join_ladder_20260717.yaml`](../../../configs/ready_to_strike_join_ladder_20260717.yaml)
+  预注册：保持 frame0 zero、hold=4、触球第25 tick和保护窗不变。先做 `delta=contact-join` 的合法
+  两端 `6/17` × 正反手 × forehand/backhand frame0 ready 的小因子阵（两个既有格不重跑），再按冻结
+  规则跑中点 `12`，只在主点附近细化 `9/14`。shared-ready 按两侧 minimax 选，单侧胜者只作诊断。
+  若全失败，停止这个 two-ready/hold/join family，再单独改变一个结构轴，绝不放宽 TOPP 动力学限值。
 - 下一门：在 ignored runtime 资产上按预注册 join ladder 生成正/反手候选，production FK 重建后逐个跑
   TOPP；只把 `<=0.5 s` 的候选送 L0/L1/桌网/动力学，再用绑定该 motion SHA 的 0.5 秒 K100 和
 vendor MuJoCo 判行为。

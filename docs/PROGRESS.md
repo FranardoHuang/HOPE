@@ -13,6 +13,12 @@
 
 ## 2026-07-17
 
+- 新源码 `66f93559` 的 Pod2 CPU-only attempt2 已对真实 v4rg 成功生成正/反手 0.5秒 host 候选，随后
+  production-FK TOPP 两侧 hard acceptance 全过，但当前 join 的可行 run-up 上界为 `0.64/0.94 s`，故
+  没有 0.5秒动力学证书、未送 L0/L1/桌网/训练。下一轮预注册保持安全合同不变，先跑 join 端点
+  `delta=6/17` 的 side×ready 小因子阵，再按冻结规则跑中点 `12` 和细化点 `9/14`；已跑格不重放。见
+  [短路径实验](experiments/2026-07/EXP-MOTION-READY-TO-STRIKE-0P5.md)。
+
 - ready-to-strike 首次 Pod2 CPU-only 真实生成在发布前 fail closed：正式 v4rg 的三项 canonical migration
   provenance 被 v1 严格字段表误当成 unexpected，正反手均无候选 NPZ/contract、无 TOPP、无 GPU 行为，
   因此不是动作或动力学失败。失败 namespace 永久保留。修复版只新增完整 canonical-v2 三元组这一精确

@@ -13,6 +13,7 @@ import pytest
 
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/build_ready_to_strike_motion.py"
+LADDER = ROOT / "configs/ready_to_strike_join_ladder_20260717.yaml"
 
 
 def _load_module():
@@ -25,6 +26,68 @@ def _load_module():
 
 
 M = _load_module()
+
+
+def test_join_ladder_stage1_is_complete_nonduplicative_and_keeps_contact_tick_25() -> None:
+    queue = json.loads(LADDER.read_text(encoding="utf-8"))
+    assert queue["fixed_contract"]["output_contact_frame"] == 25
+    assert queue["fixed_contract"]["delta_plus_blend_intervals"] == 22
+    observed = {row["cell_id"] for row in queue["observed_baseline_not_to_rerun"]}
+    assert observed == {"fh_shared_d06", "bh_shared_d06"}
+    cells: set[tuple[str, str, int]] = set()
+    cell_ids: set[str] = set()
+    for cell in queue["staged_cells"]["stage1_endpoint_factorial"]:
+        assert cell["cell_id"] not in cell_ids
+        cell_ids.add(cell["cell_id"])
+        action = cell["action"]
+        contact = queue["assets"][action]["contact_frame"]
+        delta = cell["delta"]
+        identity = (action, cell["ready_source"], delta)
+        assert identity not in cells
+        cells.add(identity)
+        join = contact - delta
+        blend = 22 - delta
+        assert join + delta == contact
+        assert blend >= 5
+        assert 4 + (blend - 1) + delta == 25
+    assert len(cells) == 6
+    assert ("forehand", "forehand", 6) not in cells
+    assert ("backhand", "forehand", 6) not in cells
+    assert ("backhand", "backhand", 6) in cells
+    assert cells == {
+        ("forehand", "forehand", 17),
+        ("forehand", "backhand", 6),
+        ("forehand", "backhand", 17),
+        ("backhand", "forehand", 17),
+        ("backhand", "backhand", 6),
+        ("backhand", "backhand", 17),
+    }
+    assert queue["staged_cells"]["stage2_midpoint_rule"]["delta"] == 12
+    assert queue["staged_cells"]["stage3_refinement_rule"]["left_refinement_delta"] == 9
+    assert queue["staged_cells"]["stage3_refinement_rule"]["right_refinement_delta"] == 14
+
+
+def test_join_ladder_binds_exact_sources_and_keeps_all_runtime_authority_false() -> None:
+    queue = json.loads(LADDER.read_text(encoding="utf-8"))
+    for key in (
+        "generator_sha256",
+        "topp_sha256",
+        "mjcf_sha256",
+        "urdf_sha256",
+        "body_order_sha256",
+    ):
+        value = queue["runtime"][key]
+        assert len(value) == 64 and set(value) <= set("0123456789abcdef")
+    for asset in queue["assets"].values():
+        value = asset["sha256"]
+        assert len(value) == 64 and set(value) <= set("0123456789abcdef")
+    fixed = queue["fixed_contract"]
+    assert fixed["automatic_retry"] is False
+    assert fixed["gpu_or_trainer_signals"] is False
+    assert fixed["training_authorized"] is False
+    assert fixed["deployment_authorized"] is False
+    assert fixed["hardware_authorized"] is False
+    assert queue["acceptance"]["candidate_start_to_contact_s_max"] == 0.5
 
 
 def _sha(path: Path) -> str:

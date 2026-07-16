@@ -1,0 +1,115 @@
+{
+  "schema_version": 1,
+  "experiment_id": "ready_to_strike_join_ladder_20260717",
+  "created_utc": "2026-07-16T22:02:50Z",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "purpose": "Search the spatial join tradeoff for a frame-0 zero-speed path that production-FK TOPP can execute by 0.5 seconds without changing the protected strike window.",
+  "runtime": {
+    "checkout_path": "/workspace/codexschema/nohope_task_revision_b1f5a38",
+    "checkout_commit": "b1f5a3803efa14f91e594912959cec2de473a5a6",
+    "generator_source_commit": "66f93559d920b554f6b99a3c74939ff82db26ca9",
+    "generator_sha256": "54025ed2d93050eb2c22364b4bd65953dbe66c4f92b2c1428507324a289d4352",
+    "topp_sha256": "30f54cbd06803e444e8e8710051476389ad6c53372b20226a27556061893061a",
+    "mjcf_sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97",
+    "urdf_sha256": "0d83529cf808e2e68036f8168bd8b7a1c9a97d9c536eb9a14981ea4105d6b9ae",
+    "body_order_sha256": "1cdae4ba7c8d604428ee69ed4a3059e67fb195b22e1d0e294d509c4325809a3a"
+  },
+  "assets": {
+    "forehand": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_forehand_v4rg_cal.npz",
+      "sha256": "f2cb2d9f5d27cefbcee0b790000fcd979abaf02894d4fcad061ebca27f141687",
+      "contact_frame": 66
+    },
+    "backhand": {
+      "path": "/workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_backhand_v4rg_cal.npz",
+      "sha256": "1722553375cd28f9b2d567c01b1a5fc6bcd149fa12cadb20e5202a9153367534",
+      "contact_frame": 45
+    }
+  },
+  "fixed_contract": {
+    "fps": 50,
+    "ready_frame": 0,
+    "ready_velocity": "bitwise_zero",
+    "hold_frames": 4,
+    "output_contact_frame": 25,
+    "protected_precontact_seconds": 0.1,
+    "delta_plus_blend_intervals": 22,
+    "topp_objective": "runup",
+    "body_mode": "fk",
+    "automatic_retry": false,
+    "gpu_or_trainer_signals": false,
+    "training_authorized": false,
+    "deployment_authorized": false,
+    "hardware_authorized": false
+  },
+  "observed_baseline_not_to_rerun": [
+    {
+      "cell_id": "fh_shared_d06",
+      "action": "forehand",
+      "ready_source": "forehand",
+      "delta": 6,
+      "join_frame": 60,
+      "blend_intervals": 16,
+      "candidate_sha256": "b0350f4d8db600344651135673afc99c95d43a2c27432d131a8ed8a08253ac4d",
+      "topp_start_to_contact_s": 0.64
+    },
+    {
+      "cell_id": "bh_shared_d06",
+      "action": "backhand",
+      "ready_source": "forehand",
+      "delta": 6,
+      "join_frame": 39,
+      "blend_intervals": 16,
+      "candidate_sha256": "0f017dc58918aa1e80846d4dfec81668efbb3fecabf546727750a8c2717dfc89",
+      "topp_start_to_contact_s": 0.94
+    }
+  ],
+  "staged_cells": {
+    "stage1_endpoint_factorial": [
+      {"cell_id": "fh_rf_d17", "action": "forehand", "ready_source": "forehand", "delta": 17},
+      {"cell_id": "fh_rb_d06", "action": "forehand", "ready_source": "backhand", "delta": 6},
+      {"cell_id": "fh_rb_d17", "action": "forehand", "ready_source": "backhand", "delta": 17},
+      {"cell_id": "bh_rf_d17", "action": "backhand", "ready_source": "forehand", "delta": 17},
+      {"cell_id": "bh_rb_d06", "action": "backhand", "ready_source": "backhand", "delta": 6},
+      {"cell_id": "bh_rb_d17", "action": "backhand", "ready_source": "backhand", "delta": 17}
+    ],
+    "stage2_midpoint_rule": {
+      "delta": 12,
+      "dominance_tolerance_s": 0.02,
+      "if_one_ready_noninferior_for_both_sides_and_endpoints": "run that ready for forehand and backhand",
+      "if_ready_by_side_or_endpoint_crossover": "run both ready sources for forehand and backhand"
+    },
+    "stage3_refinement_rule": {
+      "left_refinement_delta": 9,
+      "right_refinement_delta": 14,
+      "if_best_main_delta_is_6": [9],
+      "if_best_main_delta_is_12": [9, 14],
+      "if_best_main_delta_is_17": [14],
+      "ties_within_s": 0.02,
+      "tie_action": "cover refinement adjacent to every tied main point"
+    }
+  },
+  "derived_cell_rule": {
+    "join_frame": "contact_frame - delta",
+    "blend_intervals": "22 - delta",
+    "output_contact_frame": 25
+  },
+  "acceptance": {
+    "candidate_contract_required": true,
+    "protected_window_bitwise_equal": true,
+    "production_fk_required": true,
+    "topp_within_budget": true,
+    "kinematic_hard_limits_clean": true,
+    "candidate_start_to_contact_s_max": 0.5,
+    "strict_global_minimum_not_claimed": true
+  },
+  "selection": [
+    "Reject any cell whose generator or TOPP exits nonzero or whose hard acceptance fields fail.",
+    "Among cells at or below 0.5 seconds, prefer lower start-to-contact time, then lower maximum of CoP, torque and friction dose.",
+    "Do not send cells above 0.5 seconds to L0/L1/dynamics as a claimed 0.5-second action.",
+    "Choose a shared ready by the two-side minimax result; a side-specific winner is diagnostic only.",
+    "Stop remaining search once one shared ready has at least one fully gated at-or-below-0.5-second path on each side.",
+    "If all registered main and refinement cells fail, stop this two-ready hold=4 quintic family and change one structural axis in a new preregistration; do not relax dynamics limits."
+  ]
+}
