@@ -128,7 +128,12 @@ run-up 上界是正手 `0.98 s`、反手 `0.78 s`。因此单纯把完整旧 cli
 - v4 只把四个 expected contract 改为 v2 summary 的真实值
   `7c8e1f3a…/9970770e…/f7686ef8…/e504637a…`，并使用新的 runner-bound activation 与结果 namespace；
   candidate、join、hold、预算、TOPP、MJCF closure 和所有 acceptance 不变。相关回归 `68 passed`、
-  独立红队 GO；远端 execute 完成前仍只能写 source gate，不能写成 0.5 秒已通过。
+  独立红队 GO；但唯一 dry-run 又在结果 root 前被重复文本量尺假拒绝：四份 log 已经 exact SHA 绑定，
+  consumer 仍猜测必须同时含 `.stl` 和 `no such file or directory`，真实不可变 log 格式不同。execute/TOPP
+  未启动，v4 activation 永久冻结。
+- v5 删除上述重复文本解释，只保留四份 exact log SHA；使用新 runner-bound activation 与结果 namespace，
+  其余所有字节级输入和科学配方不变。相关回归 `70 passed`、独立红队 GO；远端 execute 完成前仍只能
+  写 source gate，不能写成 0.5 秒已通过。
 - 下一门：在 ignored runtime 资产上按预注册 join ladder 生成正/反手候选，production FK 重建后逐个跑
   TOPP；只把 `<=0.5 s` 的候选送 L0/L1/桌网/动力学，再用绑定该 motion SHA 的 0.5 秒 K100 和
 vendor MuJoCo 判行为。

@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/build_ready_to_strike_motion.py"
 LADDER = ROOT / "configs/ready_to_strike_join_ladder_20260717.yaml"
 STAGE2_ACTIVATION_V1 = ROOT / "configs/ready_to_strike_join_ladder_stage2_activation_20260717.json"
-STAGE2_ACTIVATION = ROOT / "configs/ready_to_strike_join_ladder_stage2_activation_v4_20260717.json"
+STAGE2_ACTIVATION = ROOT / "configs/ready_to_strike_join_ladder_stage2_activation_v5_20260717.json"
 
 
 def _load_module():
@@ -124,7 +124,7 @@ def test_stage2_activation_is_exactly_the_registered_crossover_branch() -> None:
         ).hexdigest(),
     }
     assert activation["stage2_namespace"].endswith(
-        "/join_ladder_stage2_d12_v4_contract_lineage"
+        "/join_ladder_stage2_d12_v5_exact_log_bytes"
     )
     assert activation["prior_failed_attempt"]["summary_sha256"] == (
         "6910db2826654123c576afa67b9c2e873c4785c2bd095b2f61abb26d5f1f1476"

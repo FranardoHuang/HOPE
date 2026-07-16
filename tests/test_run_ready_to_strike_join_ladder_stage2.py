@@ -427,6 +427,17 @@ def test_v3_preflight_activation_bytes_remain_immutable() -> None:
     assert _sha(payload) == "5b42fa8dd43cd29e5fc858a2ef895a5e92bc547c52fedd2d9e3dfaf7e68ab488"
 
 
+def test_v4_preflight_activation_bytes_remain_immutable() -> None:
+    payload = (REPO / "configs/ready_to_strike_join_ladder_stage2_activation_v4_20260717.json").read_bytes()
+    assert _sha(payload) == "818f23d97b07cc52b2d8677d9d1e9d7670ab13cbcb85589b23e369450d3ef969"
+
+
+def test_v5_does_not_reinterpret_sha_bound_prior_log_text() -> None:
+    source = SCRIPT.read_bytes().lower()
+    assert b"no such file or directory" not in source
+    assert b'log_lower' not in source
+
+
 def test_v4_binds_the_observed_v2_contract_lineage_not_v1_contracts() -> None:
     assert runner.EXPECTED_PRIOR_CANDIDATES == {
         "fh_rf_d12": (
@@ -1099,7 +1110,7 @@ def test_unexpected_post_namespace_failure_gets_terminal_summary(
 
 def test_current_repo_activation_exactly_binds_the_tracked_runner() -> None:
     activation = json.loads(
-        (REPO / "configs/ready_to_strike_join_ladder_stage2_activation_v4_20260717.json").read_text()
+        (REPO / "configs/ready_to_strike_join_ladder_stage2_activation_v5_20260717.json").read_text()
     )
     queue = runner._validate_queue(json.loads(
         (REPO / "configs/ready_to_strike_join_ladder_20260717.yaml").read_text()

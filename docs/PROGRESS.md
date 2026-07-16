@@ -19,7 +19,9 @@
   closure（75 文件、14,127,373 字节、manifest `e0381752…b962de`）；wrong prior/log/blob/tree/mode 与 XML
   include/path 反例均 fail closed。v3 唯一远端 dry-run 又在结果 root 前发现 expected contract 误绑 v1
   而非 v2，execute/TOPP 未启动；v4 使用新 activation/namespace 绑定四份真实 v2 contract，其余配方不变。
-  v4 相关回归 `68 passed`、独立红队 GO；远端一次性 execute 仍待完成，G08 保持 Partial。
+  v4 相关回归 `68 passed`、独立红队 GO，但唯一 dry-run 又在结果 root 前暴露 exact log SHA 后的脆弱
+  英文文本猜测；真实日志格式不同，execute/TOPP 未启动。v5 删除重复文本解释、使用新 activation/root，
+  本地相关回归 `70 passed`、独立红队 GO；远端一次性 execute 仍待完成，G08 保持 Partial。
 
 - ready×join Stage-2 v1 dry-run 通过后唯一 execute 自然终止并保全失败 summary
   `f92e6b8b…63c0e`：四个 generator 均 rc0，但 runner 重复了历史已知量尺错误，把 generator 的 float32

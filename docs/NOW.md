@@ -83,7 +83,8 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   唯一改变是从 frozen runtime Git objects 补齐 `1 XML + 74 mesh` 的 exact closure（75 文件、
   14,127,373 字节、manifest `e0381752…b962de`）。但 v3 唯一 Pod2 dry-run 在结果 root 前抓到 v1/v2
   contract SHA 账本混用，未启动 execute/TOPP。v4 用新 activation/namespace 绑定 v2 四份实际 contract，
-  其余科学配方完全不变；本地相关回归 `68 passed`、独立红队 GO，一次性 Pod2 execute 待 main 落地后进行。
+  随后 dry-run 又发现 exact log SHA 后的英文文本猜测会假拒绝真实日志，同样未启动 execute/TOPP。v5
+  删除重复文本解释、只保留 exact bytes，其他科学配方完全不变；本地相关回归 `70 passed`、独立红队 GO。
   在真实结果出现前仍没有
   production FK、TOPP≤0.5、L0/L1、桌网、动力学或行为通过，不能写成0.5秒动作已完成。见
   [短路径实验](experiments/2026-07/EXP-MOTION-READY-TO-STRIKE-0P5.md)。

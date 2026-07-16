@@ -447,7 +447,10 @@ execute 已证明四份 candidate 与 v1 逐字节一致，但隔离 MJCF 快照
 `75 files / 14,127,373 bytes / manifest e0381752…b962de`，拒绝 include、路径逃逸、symlink 和 worktree
 fallback。v3 唯一远端 dry-run 在结果 root 前又发现 expected contract 仍误绑 v1，而实际 v2 contract
 因 snapshot path 证据不同已有新 SHA；execute/TOPP 未启动。v4 仅修四个 actual contract 绑定并使用新
-activation/namespace，相关回归 `68 passed` 且独立红队 GO；远端 execute 仍待完成，不能提前记通过。
+activation/namespace，相关回归 `68 passed` 且独立红队 GO；随后 dry-run 又在结果 root 前证明 exact log
+SHA 后的 `.stl`/英文 errno 文本猜测会假拒绝真实日志，execute/TOPP 未启动。v5 删除重复文本解释，只保留
+完整 log SHA，并使用新 activation/root；相关回归 `70 passed`、独立红队 GO，远端 execute 仍待完成，
+不能提前记通过。
 TOPP `<=0.5 s`、L0、vendor L1、桌网、
 动力学和行为卷仍全部开放，
 所以 G08 不晋级。

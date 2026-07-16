@@ -36,14 +36,14 @@ import numpy as np
 SCHEMA_VERSION = 1
 CONFIRM_TOKEN = "RUN_READY_TO_STRIKE_STAGE2_ONCE"
 CHILD_TIMEOUT_S = 3600
-EXPECTED_ACTIVATION_ID = "ready_to_strike_join_ladder_stage2_v4_20260717"
+EXPECTED_ACTIVATION_ID = "ready_to_strike_join_ladder_stage2_v5_20260717"
 EXPECTED_EXPERIMENT_ID = "ready_to_strike_join_ladder_20260717"
 EXPECTED_QUEUE_SHA256 = "cfa112f799dab9af33914fdfb5bfff90d21b4692e38b16a4627393936a527b8b"
 EXPECTED_PREREG_COMMIT = "8d74025e88fee832fae0ac2f672ec0eb9b2d3d5a"
 EXPECTED_EVIDENCE_STATUS = "historical_stage1_attested_screening_only"
 EXPECTED_STAGE2_NAMESPACE = (
     "/workspace/codexschema/ready_to_strike_0p5_20260717/"
-    "join_ladder_stage2_d12_v4_contract_lineage"
+    "join_ladder_stage2_d12_v5_exact_log_bytes"
 )
 EXPECTED_PRIOR_ATTEMPT = {
     "namespace": (
@@ -1106,9 +1106,6 @@ def _collect_prior_v2_inputs(*, activation: Mapping[str, Any],
                  f"prior V2 {cell_id} candidate or contract SHA changed")
         _require(log.sha256 == EXPECTED_PRIOR_TOPP_LOGS[cell_id],
                  f"prior V2 {cell_id} TOPP log SHA changed")
-        log_lower = log.payload.lower()
-        _require(b".stl" in log_lower and b"no such file or directory" in log_lower,
-                 f"prior V2 {cell_id} log no longer proves missing MJCF mesh")
         cell = {"cell_id": cell_id, "action": action,
                 "ready_source": ready_source, "delta": delta}
         info = _validate_candidate(
