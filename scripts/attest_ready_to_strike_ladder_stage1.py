@@ -378,6 +378,7 @@ def _validate_schema2_arrays(
     body_order: Sequence[str],
     label: str,
     allow_migration_provenance: bool,
+    gradient_input_float64: bool,
 ) -> int:
     """Validate the exact production motion schema used by generator and TOPP."""
 
@@ -435,9 +436,8 @@ def _validate_schema2_arrays(
         value = np.asarray(arrays[key])
         _require(value.dtype == np.float32 and value.shape == shape,
                  f"{label}.{key} shape/dtype changed")
-    recomputed_velocity = np.gradient(
-        joint_pos.astype(np.float64), 1.0 / 50.0, axis=0
-    ).astype(np.float32)
+    gradient_input = joint_pos.astype(np.float64) if gradient_input_float64 else joint_pos
+    recomputed_velocity = np.gradient(gradient_input, 1.0 / 50.0, axis=0).astype(np.float32)
     _require(np.array_equal(joint_vel, recomputed_velocity),
              f"{label}.joint_vel is not the canonical position gradient")
     quaternion_norm = np.linalg.norm(np.asarray(arrays["body_quat_w"], dtype=np.float64), axis=-1)
@@ -762,6 +762,7 @@ def _validate_topp_certificate(
         body_order=body_order,
         label="TOPP output NPZ",
         allow_migration_provenance=False,
+        gradient_input_float64=True,
     )
 
     clips = certificate.get("budget_provenance")
@@ -1090,6 +1091,7 @@ def attest_stage1(
             body_order=body_order,
             label=f"{name} source asset",
             allow_migration_provenance=True,
+            gradient_input_float64=False,
         )
         asset_arrays[name] = arrays
 
@@ -1159,6 +1161,7 @@ def attest_stage1(
             body_order=body_order,
             label=f"{cell_id} candidate",
             allow_migration_provenance=True,
+            gradient_input_float64=False,
         )
         ready_arrays = asset_arrays[row["ready_source"]]
         action_arrays = asset_arrays[row["action"]]

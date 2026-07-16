@@ -95,6 +95,8 @@ TOPP input/output、生产 FK body order、直接工具依赖、预算、触球�
 queue 中 `checkout_commit` 与 `generator_source_commit` 是两个独立 source root：前者必须提供绑定的
 TOPP/MJCF/URDF/body-order，后者由 Stage-1 根目录中实际执行的 immutable generator copy 对 SHA；不要
 错误要求旧训练 checkout 包含后置生成器，也不要拿当前 main 文件替换历史副本。
+schema-2 source/candidate 的 `joint_vel` 必须按 generator 的 float32 输入梯度逐位重算；TOPP FK output
+必须按其 float64 工作区梯度再转 float32。两条 producer 合同不同，审计时不可混用或放宽为任选其一。
 它只把旧结果升级为 screening evidence；因为历史证书没有完整 argv、transitive source 和 MJCF closure，
 `physics_replay_exact/source_closure_exact/mjcf_closure_exact` 仍必须是 `false`，不能冒充动力学重放或部署通过。
 

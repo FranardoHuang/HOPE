@@ -87,6 +87,9 @@ run-up 上界是正手 `0.98 s`、反手 `0.78 s`。因此单纯把完整旧 cli
   `b1f5a38`，而 generator 由单独的 `generator_source_commit=66f93559` 提供并以不可变副本执行；首版
   attestor 错误要求旧 checkout 自己含该文件。失败没有 receipt、候选重跑或 signal。修复只核实际执行
   副本与 queue 中 generator SHA，仍保留训练 checkout 内 TOPP/MJCF/URDF/body-order 的逐文件绑定。
+  第二次 dry-run 又在 receipt 前发现审计器误用 TOPP 的 float64 工作区重算 source/candidate；正式 generator
+  对两者使用 float32 producer-gradient。修复后 source/candidate 与 TOPP output 各按自己的冻结 producer
+  重算，不接受二选一宽容匹配。
 - 下一门：在 ignored runtime 资产上按预注册 join ladder 生成正/反手候选，production FK 重建后逐个跑
   TOPP；只把 `<=0.5 s` 的候选送 L0/L1/桌网/动力学，再用绑定该 motion SHA 的 0.5 秒 K100 和
 vendor MuJoCo 判行为。

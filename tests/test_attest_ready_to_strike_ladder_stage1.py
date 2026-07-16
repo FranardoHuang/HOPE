@@ -55,7 +55,7 @@ def _write_npz(path: Path, *, frames: int = 40, candidate: bool = False) -> None
     basis = np.concatenate((0.01 * t, -0.02 * t, 0.003 * t * t), axis=1)
     q = np.tile(basis, (1, 11))[:, :31].astype(np.float32)
     q[:4] = q[0]
-    qv = np.gradient(q.astype(np.float64), 1.0 / 50.0, axis=0).astype(np.float32)
+    qv = np.gradient(q, 1.0 / 50.0, axis=0).astype(np.float32)
     lin = np.zeros((frames, 2, 3), dtype=np.float32)
     ang = np.zeros((frames, 2, 3), dtype=np.float32)
     pos = np.zeros((frames, 2, 3), dtype=np.float32)
@@ -92,7 +92,7 @@ def _write_candidate_npz(
         candidate[key][0] = ready[key][0]
     candidate["joint_pos"][19:27] = action["joint_pos"][contact_frame - 6:contact_frame + 2]
     candidate["joint_vel"] = np.gradient(
-        candidate["joint_pos"].astype(np.float64), 1.0 / 50.0, axis=0
+        candidate["joint_pos"], 1.0 / 50.0, axis=0
     ).astype(np.float32)
     for key in ("body_pos_w", "body_quat_w", "body_lin_vel_w", "body_ang_vel_w"):
         candidate[key][20:26] = action[key][contact_frame - 5:contact_frame + 1]
@@ -499,7 +499,7 @@ def test_consistently_rebound_candidate_cannot_change_protected_window(
         arrays = {key: np.asarray(archive[key]).copy() for key in archive.files}
     arrays["joint_pos"][20, 0] += np.float32(0.05)
     arrays["joint_vel"] = np.gradient(
-        arrays["joint_pos"].astype(np.float64), 1.0 / 50.0, axis=0
+        arrays["joint_pos"], 1.0 / 50.0, axis=0
     ).astype(np.float32)
     with candidate.open("wb") as stream:
         np.savez(stream, **arrays)
@@ -520,7 +520,7 @@ def test_consistently_rebound_candidate_cannot_change_protected_window(
     row["contract_sha256"] = _sha(contract)
     row["topp_certificate_sha256"] = _sha(report)
     complete_stage1["summary"].write_text(json.dumps(summary, sort_keys=True) + "\n")
-    with pytest.raises(M.AttestationError, match="protected joint_pos window"):
+    with pytest.raises(M.AttestationError, match="protected .* window"):
         _attest(complete_stage1)
 
 
