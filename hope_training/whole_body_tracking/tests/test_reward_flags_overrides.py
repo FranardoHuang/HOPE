@@ -231,6 +231,59 @@ def test_empty_task_applies_nothing():
     assert env_cfg.rewards.racket_guidance.weight == 0.0
     assert env_cfg.rewards.racket_face_conditional_guidance.weight == 0.0
     assert env_cfg.commands.racket_target.strike_window_pos_s is None
+    assert not hasattr(env_cfg, train_mod._LATERAL_TRAINING_SPEC_ATTR)
+
+
+def test_lateral_trainer_default_off_is_historical_no_hook_path():
+    env_cfg, applied = _apply({"lateral_perturbation": {"enabled": False}})
+    assert not hasattr(env_cfg, train_mod._LATERAL_TRAINING_SPEC_ATTR)
+    assert applied == ["lateral_perturbation.enabled=False (historical no-hook path)"]
+    assert train_mod._resolve_lateral_training_runtime(
+        _NS(cfg=env_cfg, step_dt=0.02)
+    ) is None
+
+
+@pytest.mark.parametrize("cell", ["L0", "L1"])
+def test_lateral_trainer_translation_accepts_only_frozen_cells(cell):
+    env_cfg, applied = _apply(
+        {
+            "lateral_perturbation": {
+                "enabled": True,
+                "cell": cell,
+                "seed": 20260715,
+            }
+        }
+    )
+    assert getattr(env_cfg, train_mod._LATERAL_TRAINING_SPEC_ATTR) == {
+        "schema_version": 1,
+        "cell": cell,
+        "seed": 20260715,
+    }
+    assert len(applied) == 1
+    assert f"cell={cell}" in applied[0]
+    assert "recovery_hold_only" in applied[0]
+
+
+@pytest.mark.parametrize(
+    "node, match",
+    [
+        ({"enabled": False, "cell": "L0"}, "require enabled=true"),
+        ({"enabled": True, "cell": "anytime", "seed": 1}, "exactly 'L0' or 'L1'"),
+        ({"enabled": True, "cell": "L1"}, "exact uint32"),
+        ({"enabled": True, "cell": "L1", "seed": True}, "exact uint32"),
+        ({"enabled": True, "cell": "L1", "seed": -1}, "exact uint32"),
+        ({"enabled": True, "cell": "L1", "seed": 1, "body": "pelvis"}, "body"),
+    ],
+)
+def test_lateral_trainer_translation_fails_closed(node, match):
+    with pytest.raises(train_mod._OverrideError, match=match):
+        _apply({"lateral_perturbation": node})
+
+
+def test_lateral_trainer_is_conditionally_checkpoint_hard_contract_bound():
+    source = inspect.getsource(train_mod._build_training_hard_contract)
+    assert "_resolve_lateral_training_runtime(env)" in source
+    assert '{"lateral_perturbation": lateral_training[1]}' in source
 
 
 def test_unknown_rewards_key_fails_loud():

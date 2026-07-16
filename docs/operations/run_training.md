@@ -1066,6 +1066,39 @@ exact `task.rewards.joint_velocity_limit_hinge_weight`、margin、完整 argv、
 `joint_velocity_limit_hinge_reward` 和 31 项 `joint_names/joint_velocity_limits`。不得从 treatment 的
 中间 checkpoint 再派生 control，也不得用 action-rate 代替这一轴。
 
+### 恢复/等待窗随机横向躯干推力（source 已接线，当前 `NO-LAUNCH`）
+
+这和 qdot-limit 完全不同：qdot-limit 是关节速度惩罚；
+[恢复窗随机横向躯干推力](../DEFINITIONS.md#lateral-balance-perturbation)只在 post-strike recovery 或
+pre-swing hold 且非 strike window 时，给 `torso_link` COM 施加 WORLD-Y 外力。Hydra 入口只有：
+
+```text
++task.lateral_perturbation.enabled=true
++task.lateral_perturbation.cell=L0|L1
++task.lateral_perturbation.seed=<exact uint32>
+```
+
+`L0` 是同随机机会的零推力对照；`L1` 是冻结的 `0.04–0.08 m/s` 归一化冲量、`0.10 s` pulse、每
+`0.50 s` 一个机会、eligible 后选择概率 `0.5`。命令行不能改 body/frame/XZ force/torque/强度/时长；
+disabled 时不能同时提供 cell/seed。启用后的 checkpoint hard contract 会绑定 cell/seed、resolved tick、
+共同随机题、hard-safety、Isaac backend/显式 COM transform、全部 active EventManager term manifest 与 metric
+schema；任一 interval term 在首次 force submit 前拒绝。日志输出 opportunity/selected/
+commanded/applied/zero-overwrite 整数、abandoned 与三本 impulse 账、实际整机质量 min/mean/max。
+
+目前不要把上述三行加入任何 queue：exact Isaac full-scene、solver dynamics response、同 GPU throughput 与
+no-host-sync 门尚未通过，机器预注册仍为 `launch_authorized=false`。现在只允许运行 dependency-light source
+回归：
+
+```bash
+/Users/Franco/opt/anaconda3/envs/fast/bin/python -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_lateral_perturbation.py \
+  hope_training/whole_body_tracking/tests/test_isaac_lateral_perturbation.py \
+  hope_training/whole_body_tracking/tests/test_reward_flags_overrides.py
+```
+
+full-scene 首次 canary 必须改走
+[专用 probe 操作页](run_lateral_perturbation_runtime_probe.md)，不能用 trainer 偷跑。
+
 These stds are DECOUPLED from acceptance thresholds: the position metric still reports true success only
 below `strike_success_pos_thresh = 0.075 m`, velocity below `0.5 m/s`, and racket-normal error below
 `15 deg`.

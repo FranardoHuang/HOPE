@@ -113,5 +113,6 @@ interruption probes，而不是事后修改现有门。
   setter-owner/readback，不能只靠内建 buffer 全零哨兵宣称这类 direct competitor 不存在；
 - 把 correctness-first host synchronizations 改成 reviewed handoff，并在相同 GPU/scene/seed 下通过
   `>=0.95×` environment-steps/s、`<=1.05×` p95 step time 且 hot path 无 host sync；
-- 把 runtime receipt、runner tag、hard contract、内容寻址 ball-arrival-bin × action-family 留出题表全部绑定；
+- trainer wrapper、标量 activation ledger 与 checkpoint hard contract 已有 E1 source 接线；仍需让本 probe
+  的 exact runtime receipt 与训练 source/claim 绑定，并冻结内容寻址 ball-arrival-bin × action-family 留出题表；
 - vendor MuJoCo 复核。以上未闭合前，机器预注册必须继续保持 `launch_authorized=false`。

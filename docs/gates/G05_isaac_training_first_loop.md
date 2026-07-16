@@ -292,6 +292,29 @@ Follow-up note (2026-07-15, Yikang RallyV9 reach/balance matrix; Gate remains `P
   iteration 322. Launch health is not a generalization, balance, or Gate3 result; matched-iteration
   evaluation and formal fork export remain pending.
 
+Follow-up note (2026-07-16, lateral-balance trainer E1 binding; Gate remains `Partial`):
+
+- The previously probe-only recovery/hold lateral-force candidate now has a narrow, default-off
+  `train.py` binding.  Hydra exposes only `enabled`, frozen cell `L0/L1`, and an exact uint32
+  counter seed.  It does not expose body/frame/XYZ/torque/duration/magnitude knobs; L0 and L1 share
+  the same Philox schedule while L0 commands zero impulse and L1 remains the preregistered
+  `0.04--0.08 m/s` treatment.
+- An enabled run's schema-3 hard contract binds the resolved integer-step schedule, cell/seed,
+  common-random schedule and hard-safety identities, direct-COM Isaac backend/transform identities,
+  the complete active EventManager term manifest and metric schema.  Any interval EventManager term
+  is rejected before a force submit.  The historical absent/disabled path attaches no env-cfg field,
+  constructs no hook and emits no lateral hard-contract key.  Disabled cell/seed, unknown fields, T1
+  event timing, non-torso semantics and competing writers fail closed.
+- Trainer mode prevents unbounded 4096-environment receipt retention and instead returns a copied
+  `extras['log']` row with integer opportunity/selected/commanded/applied/zero-overwrite counts,
+  abandoned and sampled/commanded/applied impulse totals, and actual randomized total-mass
+  min/mean/max.  Metric collisions or malformed Gym output terminally clear the private wrench.
+  Focused scheduler/adapter/translation regression is `170 passed` (`40 + 34 + 96`).
+- This is E1 source/mock evidence only.  No full-scene trainer, solver-response, throughput,
+  checkpoint or behavior was run; correctness-first host synchronizations remain.  Therefore
+  `launch_authorized=false`, the current rolling portfolio must not depend on it, and G05 remains
+  `Partial`.
+
 Follow-up note (2026-07-15, lateral-balance Isaac adapter candidate; Gate remains `Partial`):
 
 - A default-off, explicit-probe-only candidate now binds the merged scheduler transaction to the

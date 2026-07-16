@@ -67,6 +67,19 @@ _HARD_MAX_PULSE_DURATION_S = 0.20
 _HARD_MAX_ABS_FORCE_N = 200.0
 _DISPATCH_APPLICATION_CAPABILITY = object()
 
+# The first trainer-facing experiment is intentionally a two-cell, common-random-number pair.
+# Keep every physical/scheduling value in source rather than accepting a broad Hydra parameter
+# surface: callers may select L0/L1 and the counter-based schedule seed, but cannot silently turn
+# this recovery/hold experiment into an anytime, non-torso, torque or arbitrary-force treatment.
+_FROZEN_TRAINING_CELL_SCHEMA_VERSION = 1
+_FROZEN_TRAINING_OPPORTUNITY_INTERVAL_S = 0.50
+_FROZEN_TRAINING_PULSE_DURATION_S = 0.10
+_FROZEN_TRAINING_SELECTION_PROBABILITY = 0.50
+_FROZEN_TRAINING_IMPULSE_BOUNDS_MPS = {
+    "L0": (0.0, 0.0),
+    "L1": (0.04, 0.08),
+}
+
 
 def _is_plain_int(value: object) -> bool:
     return type(value) is int
@@ -362,6 +375,87 @@ class LateralPerturbationConfig:
     @property
     def hard_safety_identity_sha256(self) -> str:
         return lateral_hard_safety_identity_sha256()
+
+
+def frozen_lateral_training_config(
+    *, cell: str, seed: int, policy_dt_s: float
+) -> LateralPerturbationConfig:
+    """Resolve the reviewed L0/L1 trainer cell at an exact policy rate.
+
+    The preregistered schedule is expressed in seconds.  A runtime whose policy step cannot
+    represent 0.50 s opportunities and 0.10 s pulses as exact integer step counts is rejected;
+    rounding would change both exposure and common-random-number identity.
+    """
+
+    if type(cell) is not str or cell not in _FROZEN_TRAINING_IMPULSE_BOUNDS_MPS:
+        raise ValueError("lateral trainer cell must be exactly 'L0' or 'L1'")
+    if not _is_plain_number(policy_dt_s) or not math.isfinite(float(policy_dt_s)) or float(
+        policy_dt_s
+    ) <= 0.0:
+        raise ValueError("policy_dt_s must be a finite number > 0")
+
+    def exact_steps(duration_s: float, label: str) -> int:
+        ratio = duration_s / float(policy_dt_s)
+        steps = int(round(ratio))
+        if steps <= 0 or not math.isclose(
+            ratio, float(steps), rel_tol=0.0, abs_tol=1.0e-10
+        ):
+            raise ValueError(
+                f"policy_dt_s={policy_dt_s!r} cannot represent frozen {label}="
+                f"{duration_s!r}s as an exact positive integer step count"
+            )
+        return steps
+
+    impulse_min, impulse_max = _FROZEN_TRAINING_IMPULSE_BOUNDS_MPS[cell]
+    return LateralPerturbationConfig(
+        policy_dt_s=float(policy_dt_s),
+        opportunity_interval_steps=exact_steps(
+            _FROZEN_TRAINING_OPPORTUNITY_INTERVAL_S, "opportunity_interval"
+        ),
+        pulse_duration_steps=exact_steps(
+            _FROZEN_TRAINING_PULSE_DURATION_S, "pulse_duration"
+        ),
+        selection_probability=_FROZEN_TRAINING_SELECTION_PROBABILITY,
+        normalized_impulse_min_mps=impulse_min,
+        normalized_impulse_max_mps=impulse_max,
+        seed=seed,
+    )
+
+
+def frozen_lateral_training_contract(
+    *, cell: str, cfg: LateralPerturbationConfig
+) -> dict[str, object]:
+    """Return the scheduler half of the checkpoint identity for one enabled trainer cell."""
+
+    expected = frozen_lateral_training_config(
+        cell=cell, seed=cfg.seed, policy_dt_s=cfg.policy_dt_s
+    )
+    if cfg != expected:
+        raise ValueError("lateral trainer config does not match the frozen L0/L1 source cell")
+    return {
+        "schema_version": _FROZEN_TRAINING_CELL_SCHEMA_VERSION,
+        "enabled": True,
+        "cell": cell,
+        "eligibility_mode": cfg.eligibility_mode,
+        "body_name": cfg.body_name,
+        "force_frame": cfg.force_frame,
+        "application_point": cfg.application_point,
+        "policy_dt_s": float(cfg.policy_dt_s),
+        "opportunity_interval_steps": cfg.opportunity_interval_steps,
+        "opportunity_interval_s": (
+            float(cfg.policy_dt_s) * cfg.opportunity_interval_steps
+        ),
+        "pulse_duration_steps": cfg.pulse_duration_steps,
+        "pulse_duration_s": cfg.pulse_duration_s,
+        "selection_probability": float(cfg.selection_probability),
+        "normalized_impulse_min_mps": float(cfg.normalized_impulse_min_mps),
+        "normalized_impulse_max_mps": float(cfg.normalized_impulse_max_mps),
+        "seed": cfg.seed,
+        "random_schedule": random_schedule_contract(cfg),
+        "random_schedule_identity_sha256": cfg.random_schedule_identity_sha256,
+        "hard_safety": lateral_hard_safety_contract(),
+        "hard_safety_identity_sha256": cfg.hard_safety_identity_sha256,
+    }
 
 
 @dataclass(frozen=True)
@@ -1781,6 +1875,8 @@ def dispatch_lateral_wrench_fail_closed(
 __all__ = [
     "LateralApplicationLedgerRow",
     "LateralPerturbationConfig",
+    "frozen_lateral_training_config",
+    "frozen_lateral_training_contract",
     "LateralPerturbationStep",
     "LateralPulseScheduler",
     "LateralWrenchAdapter",

@@ -51,6 +51,37 @@ def _cfg(**overrides):
     return L.LateralPerturbationConfig(**values)
 
 
+def test_frozen_trainer_cells_share_schedule_and_bind_only_impulse_treatment():
+    control = L.frozen_lateral_training_config(cell="L0", seed=20260715, policy_dt_s=0.02)
+    treatment = L.frozen_lateral_training_config(cell="L1", seed=20260715, policy_dt_s=0.02)
+    assert control.opportunity_interval_steps == treatment.opportunity_interval_steps == 25
+    assert control.pulse_duration_steps == treatment.pulse_duration_steps == 5
+    assert control.selection_probability == treatment.selection_probability == 0.5
+    assert control.random_schedule_identity_sha256 == treatment.random_schedule_identity_sha256
+    assert control.normalized_impulse_min_mps == control.normalized_impulse_max_mps == 0.0
+    assert treatment.normalized_impulse_min_mps == pytest.approx(0.04)
+    assert treatment.normalized_impulse_max_mps == pytest.approx(0.08)
+    contract = L.frozen_lateral_training_contract(cell="L1", cfg=treatment)
+    assert contract["enabled"] is True
+    assert contract["eligibility_mode"] == "recovery_hold"
+    assert contract["body_name"] == "torso_link"
+    assert contract["force_frame"] == "world"
+    assert contract["application_point"] == "center_of_mass"
+
+
+@pytest.mark.parametrize(
+    "kwargs, match",
+    [
+        ({"cell": "anytime", "seed": 1, "policy_dt_s": 0.02}, "exactly 'L0' or 'L1'"),
+        ({"cell": "L1", "seed": 1, "policy_dt_s": 0.03}, "cannot represent"),
+        ({"cell": "L1", "seed": True, "policy_dt_s": 0.02}, "plain int"),
+    ],
+)
+def test_frozen_trainer_cell_rejects_semantic_drift(kwargs, match):
+    with pytest.raises(ValueError, match=match):
+        L.frozen_lateral_training_config(**kwargs)
+
+
 def _inputs(
     n,
     episode_step,

@@ -36,6 +36,7 @@ from .lateral_perturbation import (
     LateralPulseScheduler,
     LateralWrenchPreflightReceipt,
     dispatch_lateral_wrench_fail_closed,
+    frozen_lateral_training_contract,
 )
 
 _ISAACLAB_TAG = "v2.1.0"
@@ -63,6 +64,36 @@ _TRANSFORM_CONTRACT = {
     "algorithm": "com_w_equals_link_origin_w_plus_quat_rotate_wxyz_com_b_v1",
 }
 
+_TRAINING_METRIC_SCHEMA_VERSION = 1
+_TRAINING_COUNTER_METRICS = {
+    "opportunity_count": "lateral_perturbation_opportunity_count",
+    "eligible_opportunity_count": "lateral_perturbation_eligible_opportunity_count",
+    "selected_start_count": "lateral_perturbation_selected_start_count",
+    "nonzero_pulse_command_count": "lateral_perturbation_nonzero_pulse_command_count",
+    "applied_pulse_count": "lateral_perturbation_applied_pulse_count",
+    "sampled_normalized_impulse_abs_sum_mps": (
+        "lateral_perturbation_sampled_normalized_impulse_abs_sum_mps"
+    ),
+    "commanded_normalized_impulse_abs_sum_mps": (
+        "lateral_perturbation_commanded_normalized_impulse_abs_sum_mps"
+    ),
+    "applied_normalized_impulse_abs_sum_mps": (
+        "lateral_perturbation_applied_normalized_impulse_abs_sum_mps"
+    ),
+}
+_TRAINING_ABANDONED_COUNTERS = {
+    "abandoned_uncommanded_impulse_abs_sum_mps": (
+        "lateral_perturbation_reset_abandoned_uncommanded_impulse_abs_sum_mps",
+        "lateral_perturbation_strike_abandoned_uncommanded_impulse_abs_sum_mps",
+        "lateral_perturbation_window_abandoned_uncommanded_impulse_abs_sum_mps",
+    ),
+    "abandoned_unapplied_impulse_abs_sum_mps": (
+        "lateral_perturbation_reset_abandoned_unapplied_impulse_abs_sum_mps",
+        "lateral_perturbation_strike_abandoned_unapplied_impulse_abs_sum_mps",
+        "lateral_perturbation_window_abandoned_unapplied_impulse_abs_sum_mps",
+    ),
+}
+
 
 def _canonical_sha256(payload: dict[str, object]) -> str:
     return hashlib.sha256(
@@ -88,6 +119,90 @@ def isaac_lateral_transform_contract() -> dict[str, object]:
 
 def isaac_lateral_transform_identity_sha256() -> str:
     return _canonical_sha256(_TRANSFORM_CONTRACT)
+
+
+def isaac_lateral_event_term_manifest(event_manager: object) -> list[dict[str, object]]:
+    """Bind all active EventManager terms and reject any mid-episode writer class."""
+
+    active = getattr(event_manager, "active_terms", None)
+    get_term_cfg = getattr(event_manager, "get_term_cfg", None)
+    if not isinstance(active, dict) or not callable(get_term_cfg):
+        raise RuntimeError("EventManager exposes no auditable active-term contract")
+    manifest: list[dict[str, object]] = []
+    for mode in sorted(active):
+        names = active[mode]
+        if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
+            raise RuntimeError("EventManager active-term names have an unexpected shape")
+        for name in names:
+            term_cfg = get_term_cfg(name)
+            func = getattr(term_cfg, "func", None)
+            if func is None:
+                raise RuntimeError(f"EventManager term {name!r} exposes no callable")
+            identity_source = func if hasattr(func, "__qualname__") else type(func)
+            params = getattr(term_cfg, "params", None)
+            if not isinstance(params, dict):
+                raise RuntimeError(f"EventManager term {name!r} exposes no parameter mapping")
+            manifest.append(
+                {
+                    "mode": mode,
+                    "name": name,
+                    "function_identity": (
+                        f"{getattr(identity_source, '__module__', '')}."
+                        f"{getattr(identity_source, '__qualname__', type(func).__qualname__)}"
+                    ),
+                    "parameter_keys": sorted(str(key) for key in params),
+                }
+            )
+    interval_names = [row["name"] for row in manifest if row["mode"] == "interval"]
+    if interval_names:
+        raise RuntimeError(
+            "lateral runtime refuses all interval EventManager terms; disable and bind them "
+            "explicitly: " + ", ".join(str(name) for name in interval_names)
+        )
+    return manifest
+
+
+def isaac_lateral_training_hard_contract(
+    *,
+    cell: str,
+    cfg: LateralPerturbationConfig,
+    event_term_manifest: list[dict[str, object]],
+) -> dict[str, object]:
+    """Bind an enabled trainer cell to its scheduler, adapter and metric identities."""
+
+    return {
+        **frozen_lateral_training_contract(cell=cell, cfg=cfg),
+        "isaac_backend": isaac_lateral_backend_contract(),
+        "isaac_backend_identity_sha256": isaac_lateral_backend_identity_sha256(),
+        "world_to_backend_transform": isaac_lateral_transform_contract(),
+        "world_to_backend_transform_identity_sha256": (
+            isaac_lateral_transform_identity_sha256()
+        ),
+        "active_event_terms": [dict(row) for row in event_term_manifest],
+        "interval_event_terms_present": False,
+        "metrics_schema_version": _TRAINING_METRIC_SCHEMA_VERSION,
+        "integer_metrics": [
+            "opportunity_count",
+            "eligible_opportunity_count",
+            "selected_start_count",
+            "nonzero_pulse_command_count",
+            "applied_pulse_count",
+            "zero_overwrite_step_count",
+        ],
+        "mass_metrics_kg": [
+            "actual_total_mass_min_kg",
+            "actual_total_mass_mean_kg",
+            "actual_total_mass_max_kg",
+        ],
+        "impulse_metrics_mps": [
+            "sampled_normalized_impulse_abs_sum_mps",
+            "commanded_normalized_impulse_abs_sum_mps",
+            "applied_normalized_impulse_abs_sum_mps",
+            "abandoned_uncommanded_impulse_abs_sum_mps",
+            "abandoned_unapplied_impulse_abs_sum_mps",
+        ],
+        "solver_execution_readback_available": False,
+    }
 
 
 def _require_tensor(
@@ -753,7 +868,12 @@ class IsaacLab21LateralWrenchAdapter:
 
 
 class IsaacLateralPerturbationRuntimeHook:
-    """Explicit probe wrapper around one ``ManagerBasedRLEnv`` step path."""
+    """Fail-closed wrapper around one ``ManagerBasedRLEnv`` step path.
+
+    Probe callers retain complete per-substep receipts by default.  The trainer path explicitly
+    selects ``retain_receipts=False`` and emits bounded scalar counters instead; retaining a full
+    4096-environment receipt for every PPO step would otherwise grow memory without bound.
+    """
 
     def __init__(
         self,
@@ -761,16 +881,22 @@ class IsaacLateralPerturbationRuntimeHook:
         cfg: LateralPerturbationConfig,
         *,
         enabled: bool = False,
+        retain_receipts: bool = True,
         synchronize: Callable[[torch.device], None] | None = None,
     ) -> None:
         if type(enabled) is not bool:
             raise ValueError("enabled must be a bool")
+        if type(retain_receipts) is not bool:
+            raise ValueError("retain_receipts must be a bool")
         self.enabled = enabled
+        self._retain_receipts = retain_receipts
         self._env = env
         self._cfg = cfg
         self._dirty_unknown = False
         self._terminal = False
         self._receipts: list[IsaacLateralPolicyStepReceipt] = []
+        self._pending_training_metrics: dict[str, torch.Tensor] | None = None
+        self._event_term_manifest: list[dict[str, object]] = []
         if not enabled:
             self._adapter = None
             self._scheduler = None
@@ -780,6 +906,9 @@ class IsaacLateralPerturbationRuntimeHook:
         device = torch.device(getattr(env, "device", "cpu"))
         if num_envs <= 0:
             raise RuntimeError("runtime hook requires a vectorized environment")
+        self._event_term_manifest = isaac_lateral_event_term_manifest(
+            getattr(env, "event_manager", None)
+        )
         step_dt = float(getattr(env, "step_dt", float("nan")))
         if not math.isfinite(step_dt) or not math.isclose(
             step_dt, cfg.policy_dt_s, rel_tol=0.0, abs_tol=1.0e-12
@@ -817,6 +946,10 @@ class IsaacLateralPerturbationRuntimeHook:
         return self._dirty_unknown or bool(
             self._adapter is not None and self._adapter.dirty_unknown
         )
+
+    @property
+    def event_term_manifest(self) -> list[dict[str, object]]:
+        return [dict(row) for row in self._event_term_manifest]
 
     @property
     def terminal_zero_submit_succeeded(self) -> bool:
@@ -1074,25 +1207,51 @@ class IsaacLateralPerturbationRuntimeHook:
                 getattr(self._env, "episode_length_buf") == expected_next_steps,
                 "post-step environment episode clock does not reconcile",
             )
-            receipt = IsaacLateralPolicyStepReceipt(
-                step_token=self._step_token,
-                episode_indices=self._episode_indices.clone(),
-                episode_steps=self._episode_steps.clone(),
-                recovery_hold_eligible=eligible.clone(),
-                strike_window=strike.clone(),
-                safe_window_remaining_steps=safe.clone(),
-                scheduler_step=result.clone(),
-                application_ledger=application.clone(),
-                physics_substeps=tuple(row.clone() for row in substeps),
-                reset_after_step=reset.clone(),
-                reset_scene_write_observed=reset_scene_write_observed,
-                reset_live_wrench_zero_exact=(not reset_any or reset_zero_exact),
-                async_backend_completion_synchronized=(
-                    self._adapter.async_completion_synchronization_trusted
-                ),
-                solver_execution_readback_available=False,
-            )
-            self._receipts.append(receipt)
+            if self._retain_receipts:
+                self._receipts.append(
+                    IsaacLateralPolicyStepReceipt(
+                        step_token=self._step_token,
+                        episode_indices=self._episode_indices.clone(),
+                        episode_steps=self._episode_steps.clone(),
+                        recovery_hold_eligible=eligible.clone(),
+                        strike_window=strike.clone(),
+                        safe_window_remaining_steps=safe.clone(),
+                        scheduler_step=result.clone(),
+                        application_ledger=application.clone(),
+                        physics_substeps=tuple(row.clone() for row in substeps),
+                        reset_after_step=reset.clone(),
+                        reset_scene_write_observed=reset_scene_write_observed,
+                        reset_live_wrench_zero_exact=(not reset_any or reset_zero_exact),
+                        async_backend_completion_synchronized=(
+                            self._adapter.async_completion_synchronization_trusted
+                        ),
+                        solver_execution_readback_available=False,
+                    )
+                )
+            else:
+                counters = self._scheduler.consume_counters()
+                metrics: dict[str, torch.Tensor] = {}
+                for public_name, counter_name in _TRAINING_COUNTER_METRICS.items():
+                    value = counters[counter_name]
+                    if value.ndim != 0:
+                        raise RuntimeError(
+                            f"lateral training counter {counter_name!r} is not scalar"
+                        )
+                    metrics[public_name] = value.detach().clone()
+                for public_name, counter_names in _TRAINING_ABANDONED_COUNTERS.items():
+                    metrics[public_name] = sum(
+                        (counters[name] for name in counter_names),
+                        torch.zeros((), dtype=torch.float64, device=self._device),
+                    ).detach().clone()
+                nonzero_force_count = application.nonzero_force_env_count
+                metrics["zero_overwrite_step_count"] = nonzero_force_count.eq(0).to(
+                    dtype=torch.long
+                )
+                mass = application.actual_total_mass_kg
+                metrics["actual_total_mass_min_kg"] = mass.amin().detach().clone()
+                metrics["actual_total_mass_mean_kg"] = mass.mean().detach().clone()
+                metrics["actual_total_mass_max_kg"] = mass.amax().detach().clone()
+                self._pending_training_metrics = metrics
             self._episode_steps.copy_(expected_next_steps)
             self._episode_indices.add_(reset.to(dtype=torch.long))
             self._step_token += 1
@@ -1125,14 +1284,131 @@ class IsaacLateralPerturbationRuntimeHook:
             return {}
         return self._scheduler.consume_counters()
 
+    def consume_training_metrics(self) -> dict[str, torch.Tensor]:
+        """Return one bounded scalar metric row for a non-retaining trainer step."""
+
+        if self._retain_receipts:
+            raise RuntimeError(
+                "consume_training_metrics requires retain_receipts=False"
+            )
+        if self._pending_training_metrics is None:
+            return {}
+        metrics = {
+            name: value.detach().clone()
+            for name, value in self._pending_training_metrics.items()
+        }
+        self._pending_training_metrics = None
+        return metrics
+
+
+class IsaacLateralPerturbationTrainingRuntime:
+    """Trainer-facing adapter that injects one scalar activation row into ``extras['log']``.
+
+    The enclosing training entrypoint owns the actual Gym wrapper.  This dependency-light object
+    owns the fail-closed hook, validates the five-element Gym step tuple, refuses metric-key
+    collisions and terminally zeroes the private wrench before closing the underlying environment.
+    """
+
+    _METRIC_PREFIX = "Metrics/lateral_perturbation_"
+
+    def __init__(
+        self,
+        env: object,
+        cfg: LateralPerturbationConfig,
+        *,
+        cell: str,
+        synchronize: Callable[[torch.device], None] | None = None,
+    ) -> None:
+        runtime_env = getattr(env, "unwrapped", env)
+        self._env = env
+        self._hook = IsaacLateralPerturbationRuntimeHook(
+            runtime_env,
+            cfg,
+            enabled=True,
+            retain_receipts=False,
+            synchronize=synchronize,
+        )
+        self.hard_contract = isaac_lateral_training_hard_contract(
+            cell=cell,
+            cfg=cfg,
+            event_term_manifest=self._hook.event_term_manifest,
+        )
+        self._closed = False
+
+    @property
+    def hook(self) -> IsaacLateralPerturbationRuntimeHook:
+        return self._hook
+
+    def step(self, action: Any) -> Any:
+        try:
+            output = self._hook.step(action)
+            if not isinstance(output, tuple) or len(output) < 5:
+                raise RuntimeError(
+                    "lateral trainer requires a five-element Gym step tuple with extras"
+                )
+            extras_source = output[4]
+            if not isinstance(extras_source, dict):
+                raise RuntimeError("lateral trainer Gym extras must be a dict")
+            log_source = extras_source.get("log", {})
+            if not isinstance(log_source, dict):
+                raise RuntimeError("lateral trainer extras['log'] must be a dict")
+            # Never write our metric row into the ManagerBasedRLEnv-owned extras object.  Some
+            # runtime versions reuse it; a shallow copy keeps prior-step keys from becoming a
+            # false same-step collision and prevents the trainer adapter from owning env state.
+            extras = dict(extras_source)
+            log = dict(log_source)
+            extras["log"] = log
+            metrics = self._hook.consume_training_metrics()
+            if not metrics:
+                raise RuntimeError("lateral trainer produced no activation/application metrics")
+            for name, value in metrics.items():
+                key = self._METRIC_PREFIX + name
+                if key in log:
+                    raise RuntimeError(f"lateral trainer metric collision for {key!r}")
+                if not isinstance(value, torch.Tensor) or value.ndim != 0:
+                    raise RuntimeError(f"lateral trainer metric {name!r} is not a scalar tensor")
+                log[key] = value
+            output_parts = list(output)
+            output_parts[4] = extras
+            return tuple(output_parts)
+        except BaseException:
+            self._hook.terminate_lateral_wrench_noexcept()
+            raise
+
+    def reset(self, *args: object, **kwargs: object) -> Any:
+        """Reject a reset that would bypass the hook's episode/zero-write ledger."""
+
+        del args, kwargs
+        self._hook.terminate_lateral_wrench_noexcept()
+        raise RuntimeError(
+            "lateral trainer forbids out-of-band reset; ManagerBasedRLEnv must auto-reset "
+            "inside the intercepted step path"
+        )
+
+    def close(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        zero_ok = self._hook.terminate_lateral_wrench_noexcept()
+        close = getattr(self._env, "close", None)
+        if callable(close):
+            close()
+        if not zero_ok or self._hook.dirty_unknown:
+            raise RuntimeError(
+                "lateral trainer could not prove terminal zero overwrite; run is invalid"
+            )
+
 
 __all__ = [
     "IsaacLab21LateralWrenchAdapter",
     "IsaacLateralPerturbationRuntimeHook",
+    "IsaacLateralPerturbationTrainingRuntime",
     "IsaacLateralPolicyStepReceipt",
     "IsaacLateralSubstepReceipt",
     "isaac_lateral_backend_contract",
     "isaac_lateral_backend_identity_sha256",
+    "isaac_lateral_event_term_manifest",
     "isaac_lateral_transform_contract",
     "isaac_lateral_transform_identity_sha256",
+    "isaac_lateral_training_hard_contract",
 ]

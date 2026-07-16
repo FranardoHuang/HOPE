@@ -67,7 +67,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | [`EXP-MUJOCO-EVAL-FRAME-INTEGRATION`](experiments/2026-07/EXP-MUJOCO-EVAL-FRAME-INTEGRATION.md) | evaluator parity guard、pelvis COM/link-origin、XBODY gyro 与 leg-mask provenance 已在 feature 集成回归；行为卷未跑 |
 | [`EXP-RECOVERY-TUPLE-ABC`](experiments/2026-07/EXP-RECOVERY-TUPLE-ABC.md) | A/B/C 旧结构合同已验证；T0/T1/T2 与新 reward 次序仅完成文档设计，machine prereg 待同步 |
 | [`EXP-V9-YIKANG-CROSS-LEARNING-20260715`](experiments/2026-07/EXP-V9-YIKANG-CROSS-LEARNING-20260715.md) | 只读审计完成：保留定向恢复、vector settle、动作首帧准备态和随机长等待为候选；旧 `7/7` 无物理触球/落台，且固定正手区不能证明球路泛化 |
-| [`EXP-P1-LATERAL-BALANCE-PERTURBATION`](experiments/2026-07/EXP-P1-LATERAL-BALANCE-PERTURBATION.md) | E1 source gate：两阶段无副作用 preflight/原子 commit、私有 canonical/冲量中断对账与攻击回归通过；真实 adapter/throughput/held-out paper pending，禁止 launch |
+| [`EXP-P1-LATERAL-BALANCE-PERTURBATION`](experiments/2026-07/EXP-P1-LATERAL-BALANCE-PERTURBATION.md) | E1 source gate：scheduler/显式 COM adapter/default-off trainer 与 hard contract 已接，`170 passed`；full-scene/solver-response/throughput/held-out paper pending，禁止 launch |
 | [`EXP-MOTION-SPATIAL-RETARGET`](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md) | B 主选的 schema-2/FK 一次性 consume 已通过并解锁 L0；C 保持未消费后备，安全/动力学/RL 仍阻断 |
 | [`EXP-GATE3-CURRENT179-D0`](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md) | 实验 blocked；`Gate3-D0` 严格模型 preflight 通过，当前行为尚未运行 |
 | [`EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD`](experiments/2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md) | 实验 completed；exact 源码通过 portable Release 与 latest-main 回归，runtime gates 保持 open |

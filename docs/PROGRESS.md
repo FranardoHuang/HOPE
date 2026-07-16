@@ -27,6 +27,15 @@
   [组合卷宗](experiments/2026-07/EXP-P1-ROLLING-TIMING-SUPERCOMBO.md)与
   [横向扰动卷宗](experiments/2026-07/EXP-P1-LATERAL-BALANCE-PERTURBATION.md)。
 
+- 随机横向躯干推力已补齐 default-off trainer E1 接线：Hydra 只允许冻结的 L0 零推力同调度对照或
+  L1 `0.04–0.08 m/s` recovery/hold treatment 与 uint32 题种子；启用时 checkpoint hard contract 绑定
+  schedule/safety/Isaac explicit-COM backend 与全量 active EventManager manifest，并拒绝 interval writer；
+  训练日志有 opportunity/command/backend-accepted/abandoned/zero-write、质量与冲量标量，且不无界保留
+  4096-env receipt。聚焦与相邻回归 `173 + 107 passed`；没有 Pod/full-scene/
+  solver-response/throughput/checkpoint，`launch_authorized=false` 不变。见
+  [实验卷宗](experiments/2026-07/EXP-P1-LATERAL-BALANCE-PERTURBATION.md)与
+  [接口合同](interfaces/lateral_perturbation_adapter_contract.md)。
+
 - rolling fill 的本地等待由全局逐条串行改为每批 Pod1/Pod2 各至多一条并发，同 Pod 仍由 host Kit lock
   串行。两 future settle 后才继续；部分失败保留 sibling 成功 claim 并停止后续批次，绝不自动 retry。
   同一进程 attempted overlay 还拒绝 snapshot 短暂漏 claim 时重提交 job；rolling+generic runner

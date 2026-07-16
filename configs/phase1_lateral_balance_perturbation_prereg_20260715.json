@@ -1,7 +1,7 @@
 {
   "schema_version": 1,
   "experiment_id": "EXP-P1-LATERAL-BALANCE-PERTURBATION",
-  "status": "draft_source_and_adapter_candidate_gate_only",
+  "status": "draft_trainer_source_candidate_gate_only",
   "created_local_date": "2026-07-15",
   "human_owner": "franco",
   "executor": "Codex",
@@ -12,8 +12,11 @@
     "module": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/lateral_perturbation.py",
     "isaac_runtime_candidate_module": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/isaac_lateral_perturbation.py",
     "isaac_runtime_probe": "hope_training/whole_body_tracking/scripts/probe_lateral_perturbation_runtime.py",
-    "runtime_hook_bound": false,
-    "hard_contract_bound": false
+    "runtime_hook_bound": true,
+    "trainer_entrypoint_bound": true,
+    "hard_contract_bound": true,
+    "binding_evidence_level": "source_and_dependency_light_mock_only",
+    "full_scene_training_runtime_validated": false
   },
   "eligibility": {
     "first_cell": "recovery_hold",
@@ -134,6 +137,7 @@
     "lateral_perturbation_interrupted_for_window_count",
     "lateral_perturbation_interrupted_for_reset_count",
     "lateral_perturbation_wrench_write_step_count",
+    "lateral_perturbation_zero_overwrite_step_count",
     "lateral_perturbation_applied_pulse_count",
     "lateral_perturbation_applied_force_env_step_count",
     "lateral_perturbation_sampled_normalized_impulse_abs_sum_mps",
@@ -154,6 +158,11 @@
     "lateral_perturbation_window_interrupted_applied_impulse_abs_sum_mps",
     "lateral_perturbation_window_abandoned_uncommanded_impulse_abs_sum_mps",
     "lateral_perturbation_window_abandoned_unapplied_impulse_abs_sum_mps"
+  ],
+  "trainer_scalar_mass_metrics": [
+    "lateral_perturbation_actual_total_mass_min_kg",
+    "lateral_perturbation_actual_total_mass_mean_kg",
+    "lateral_perturbation_actual_total_mass_max_kg"
   ],
   "per_step_ledger_required": [
     "step_token",
@@ -203,6 +212,9 @@
     "candidate_source_implemented": true,
     "candidate_full_scene_probe_run": false,
     "candidate_default_off_direct_delegation_tested": true,
+    "candidate_trainer_scalar_metrics_bound": true,
+    "candidate_trainer_unbounded_receipt_retention_disabled": true,
+    "candidate_trainer_terminal_zero_on_close": true,
     "candidate_existing_external_wrench_owner_rejected_even_when_buffer_zero": true,
     "candidate_builtin_full_buffer_identity_zero_bytes_and_owner_flag_guarded_every_substep": true,
     "candidate_isaaclab_tag": "v2.1.0",

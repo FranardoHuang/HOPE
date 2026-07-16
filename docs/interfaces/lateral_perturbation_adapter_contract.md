@@ -1,13 +1,15 @@
 # 横向平衡扰动 adapter 事务接口
 
-Status: `Partial`（已有默认关闭的 Isaac Lab 2.1 adapter/hook 候选与 mock 回归；没有 full-scene runtime 证据）
+Status: `Partial`（已有默认关闭的 Isaac Lab 2.1 adapter/hook、trainer/hard-contract 候选与 mock 回归；
+没有 full-scene runtime、solver-response 或 throughput 证据，仍禁止点火）
 
 ## 目的与诚实边界
 
 本接口约束恢复/等待窗横向扰动从 scheduler 到 simulator 外力命令的一次应用事务。它防止伪造回执
 解锁下一 tick、CUDA 异步失败晚于物理写入、坏回执留下非零 backend，以及同一步 cache 被重放到另一个
-live backend。当前仓库有一个不改变现役 task registration 的 probe-only Isaac adapter 候选；机器预注册
-仍为 `launch_authorized=false`。Isaac Lab 2.1 没有 PhysX solver-consumed wrench getter，因此不得把 direct
+live backend。当前仓库有一个默认关闭的 Isaac adapter 候选，并有显式 opt-in trainer wrapper；现役 task
+默认路径不包装 `env.step`，机器预注册仍为 `launch_authorized=false`。Isaac Lab 2.1 没有 PhysX
+solver-consumed wrench getter，因此不得把 direct
 setter 成功或 adapter 私有 command readback 写成物理执行 ACK。
 
 源码、测试和机器合同分别在：
@@ -61,6 +63,27 @@ preflight 拒绝时必须无副作用 discard staging，回到 `PLANNED`，允�
 - application cache 同时绑定 transform SHA、adapter/backend SHA 与 live backend object token。同 SHA 的
   新 adapter 实例不能拿旧 cache 冒充已写。
 
+## Trainer 入口与 metric 合同
+
+`train.py` 只暴露 `task.lateral_perturbation.enabled/cell/seed`。启用时 `cell` 只能是 `L0`（零推力但占用
+相同随机机会/虚拟 pulse）或 `L1`（冻结的 `0.04–0.08 m/s` 横向冲量）；body 固定 `torso_link`、frame
+固定 WORLD、作用点固定 link COM、X/Z force 与 torque 固定为零。`enabled=false`/缺失不附加 env cfg 字段、
+不产生 lateral hard-contract key、不构造 hook；disabled 同时给 cell/seed、未知 key、非 uint32 seed 或非
+L0/L1 cell 都 fail closed。
+
+启用的 checkpoint hard contract 绑定 resolved tick schedule、共同随机题与 hard-safety SHA、Isaac backend/
+transform identity、全部 active EventManager term manifest 和 metric schema；任一 interval term 在首次
+force submit 前 fail closed。trainer 模式不累积完整 per-step receipt；每个成功 step 只复制输出
+`extras['log']` 并加入下列标量，不改 environment-owned extras：
+
+- 整数：opportunity、eligible opportunity、selected、nonzero commanded pulse、applied pulse、full-zero
+  overwrite step；
+- 浮点：sampled/commanded/applied 与 abandoned-uncommanded/unapplied 归一化冲量和；
+- 浮点：该 step 实际随机化后 articulation 总质量 min/mean/max。
+
+metric key 已存在、输出不是五元 Gym tuple、extras/log 类型错误、T1 event timing、竞争 writer 或 terminal
+zero 失败均中止 run。这个 source 接口不等于 launch 授权；full-scene 和 throughput 门仍在下节。
+
 ## Adapter 必须提供的合同
 
 adapter 必须声明并实现：
@@ -79,8 +102,8 @@ CUDA sync 与私有 readback 自称 atomic/noexcept。当前 candidate 已实现
 - attach 时要求 Isaac 内建 force/torque buffer 的所有 environment/body row 全零且
   `has_external_wrench=false`；candidate 从不借用该 origin-based buffer，而把它作为竞争 writer 哨兵。每次
   private command copy、每个 substep direct submit 前后、scene write 后和 reset clear 前后都检查完整 buffer
-  identity/zero bytes 与 owner flag；同 tick 或 non-torso writer 都 terminal fail closed。strict probe 另外绑定
-  全部 EventManager terms 并拒绝 interval term；
+  identity/zero bytes 与 owner flag；同 tick 或 non-torso writer 都 terminal fail closed。strict probe 与
+  trainer 都绑定全部 EventManager terms 并拒绝 interval term；
 - 从 `root_physx_view.get_masses()` 读取随机化后的全部 body masses，并在 preflight 再次逐值绑定 caller 的
   total mass；
 - pinned Isaac Lab `write_data_to_sim()` 使用 `position_data=None`，官方 PhysX tensor 语义是作用在 link
@@ -144,9 +167,10 @@ policy scheduler + side-effect-free preflight
   -> only then receipt validation / source re-attestation / no-clobber publication
 ```
 
-现有 task ID 没有被替换。只有显式构造 `IsaacLateralPerturbationRuntimeHook(..., enabled=true)` 并通过
-该 hook 的 `step` 才进入候选路径；这是为了让 default-off 保持原行为，也避免在 full-scene gate 前偷偷把
-probe 变成训练功能。
+现有 task ID 没有被替换。probe 只有显式构造
+`IsaacLateralPerturbationRuntimeHook(..., enabled=true)` 才进入候选路径；trainer 只有显式 Hydra
+`enabled=true + cell + seed` 才构造同一个 hook 的 non-retaining wrapper。default-off 保持原行为；在
+full-scene gate 前，源码可 compose 不表示允许点火。
 
 ## 中断冲量恒等式
 

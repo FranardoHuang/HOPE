@@ -7,9 +7,10 @@
 - 人类负责人：franco
 - 执行者：Codex
 - 复核/决策负责人：franco
-- 最高证据等级：[E1（源码与单测）](../../DEFINITIONS.md#证据和文档术语)；已有 Isaac adapter/hook
-  候选源码和 mock 生命周期证据，但没有 full-scene runtime、训练或行为证据
-- 创建日期/最后复核日期：2026-07-15 / 2026-07-15
+- 最高证据等级：[E1（源码与单测）](../../DEFINITIONS.md#证据和文档术语)；已有 Isaac adapter/hook、
+  trainer 入口与 checkpoint hard-contract 候选源码和 mock 生命周期证据，但没有 full-scene runtime、
+  训练或行为证据
+- 创建日期/最后复核日期：2026-07-15 / 2026-07-16
 
 ## 问题与第一性原理假设
 
@@ -112,9 +113,10 @@ WORLD-Y force 每层都必须 finite 且在界内；极大但 finite 的输入�
    [横向扰动 adapter 事务合同](../../interfaces/lateral_perturbation_adapter_contract.md)。
 
 [`isaac_lateral_perturbation.py`](../../../hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/isaac_lateral_perturbation.py)
-新增了一个**默认关闭、只供显式 probe 使用**的 Isaac Lab `v2.1.0` 候选 adapter/hook；它固定到
-Isaac Lab commit `21f7136325136ca3f6ca4e0a8125edffe5c24f7e`，目前没有接进任何现役 task
-registration 或 trainer。二次源码审计纠正了更关键的语义：pinned
+新增了一个**默认关闭**的 Isaac Lab `v2.1.0` 候选 adapter/hook；它固定到
+Isaac Lab commit `21f7136325136ca3f6ca4e0a8125edffe5c24f7e`。2026-07-16 的 E1 后续已把它接进
+`train.py` 的显式 opt-in wrapper，但 full-scene/solver-response/throughput 未过，仍禁止点火。二次源码审计
+纠正了更关键的语义：pinned
 `Articulation.write_data_to_sim()` 最终以 `position_data=None` 调用 PhysX，这表示 link origin，**不是 COM**。
 原 BODY-buffer 候选因此被红队否决；新候选每个 substep 都显式计算/传入当前 WORLD torso COM：
 
@@ -140,6 +142,26 @@ sync，尚未过同 GPU throughput/no-host-sync 门。严格 full-scene probe �
 [`run_lateral_perturbation_runtime_probe.md`](../../operations/run_lateral_perturbation_runtime_probe.md)。
 probe 的 reset/strike 结论必须非空覆盖：若零动作场景没有自然 reset 或 active-pulse strike interruption，
 结果只能写 explicit-COM/lifecycle-uncovered，reset evidence 为 `null`，不能用 vacuous all-pass 升级。
+
+### 2026-07-16 trainer-facing E1 接线（仍然 `NO-LAUNCH`）
+
+训练入口现在只接受三个 Hydra 字段：`enabled`（是否启用）、`cell`（`L0` 零推力同调度对照或 `L1`
+随机推力 treatment）和 `seed`（counter-based 随机题种子）。不存在可由命令行修改的 body/frame/torque/
+XYZ force/持续时间/强度字段：`L1` 继续冻结为每 `0.50 s` 一个机会、eligible 后 `p=0.5`、持续 `0.10 s`、
+归一化冲量 `Uniform(0.04, 0.08) m/s`；`L0` 使用相同题但冲量为零。`enabled=false` 或配置完全缺失时，
+不向 env cfg 附加字段、不包装 `env.step`、也不在历史 hard contract 中增加 key；`cell/seed` 与 disabled
+混用会 fail closed。
+
+启用时，checkpoint hard contract 逐项绑定 resolved policy dt/整数 tick、cell/seed、共同随机题 SHA、hard
+safety envelope、Isaac backend/显式 COM transform identity 和 metric schema。trainer 不保留逐 step 的完整
+4096-env probe transcript，避免 receipt 随 PPO step 无界增长；它只向 `extras['log']` 的副本发布标量：
+opportunity/eligible/selected/commanded/applied/zero-overwrite 整数、reset/strike/window 的 abandoned impulse、
+sampled/commanded/applied impulse，以及随机化后整机质量 min/mean/max。原 env-owned `extras` 不被改写；
+metric key 竞争、非五元 Gym output、非 dict log 或关闭时 terminal zero 失败都让 run 无效。
+
+这个接线没有改变 `launch_authorized=false`：当前 adapter 每个 substep 仍有 correctness-first host sync，
+也没有 full-scene、solver dynamics response 或同 GPU throughput 证据。下面的 probe/throughput/held-out
+门全部照旧；今晚的 rolling 组合训练不能依赖本分支。
 
 首轮机器账至少同时记录：
 
@@ -211,19 +233,19 @@ application 三本冲量账对不上时，结果无效而不是“近似通过�
 
 | 运行（人话名 + `run_name`） | 状态 | Checkpoint/seed | 证据 | 结果产物 | 有效性说明 |
 | --- | --- | --- | --- | --- | --- |
-| 零推力对照 `pending` | 未启动 | seed 1 | source/mock only | 无 | 候选 adapter 未过 full-scene/solver-response/throughput，hard contract 未绑定 |
-| 横向脉冲 treatment `pending` | 未启动 | seed 1 | source/mock only | 无 | 候选 adapter 未过 full-scene/solver-response/throughput，hard contract 未绑定 |
+| 零推力对照 `pending` | 未启动 | seed 1 | source/mock only | 无 | trainer/hard-contract 源码已接；adapter 未过 full-scene/solver-response/throughput，禁止点火 |
+| 横向脉冲 treatment `pending` | 未启动 | seed 1 | source/mock only | 无 | trainer/hard-contract 源码已接；adapter 未过 full-scene/solver-response/throughput，禁止点火 |
 
 ## 决定
 
 - 决定：`inconclusive`
-- 理由：第一性原理设计、scheduler 和 Isaac adapter/hook 候选的源码/mock 生命周期成立，但没有 full-scene
-  runtime、solver-response、throughput、训练或留出考试。
+- 理由：第一性原理设计、scheduler、Isaac adapter/hook 与 trainer/hard-contract 候选的源码/mock 生命周期
+  成立，但没有 full-scene runtime、solver-response、throughput、训练或留出考试。
 - 是否已纳入当前 setting：`no`
 - 局限/下一个 gate：在 exact clean Isaac Lab `v2.1.0` 环境先运行一次独立、无 trainer 的 strict full-scene
   probe，核验实际 mass/body/frame/write/reset 生命周期；再以独立 dynamics-response probe 证明非零力确实进入
-  solver，并完成 GPU throughput/no-host-sync 重设计。之后才允许绑定 runner/hard contract、冻结内容寻址的
-  ball×action-family held-out paper 并生成配对 queue。
+  solver，并完成 GPU throughput/no-host-sync 重设计。trainer 与 hard contract 已有 E1 接线，但只有上述门
+  通过后才允许激活 launch、冻结内容寻址的 ball×action-family held-out paper 并生成配对 queue。
 
 ## 复现源码证据
 
@@ -232,10 +254,13 @@ application 三本冲量账对不上时，结果无效而不是“近似通过�
 ```bash
 /Users/Franco/opt/anaconda3/envs/fast/bin/python -m pytest -q \
   hope_training/whole_body_tracking/tests/test_lateral_perturbation.py \
-  hope_training/whole_body_tracking/tests/test_isaac_lateral_perturbation.py
+  hope_training/whole_body_tracking/tests/test_isaac_lateral_perturbation.py \
+  hope_training/whole_body_tracking/tests/test_reward_flags_overrides.py
 ```
 
-当前聚焦测试为 `65 passed`。原有 `36` 项覆盖：Random123 Philox 零 counter/key 已知向量、四个 domain 与相邻 seed 的分桶
+当前 trainer/scheduler/adapter/translation 聚焦测试为 `170 passed`：scheduler/transaction 文件 `40`
+项、dependency-light adapter/hook 文件 `34` 项、训练 override/hard-contract 文件 `96` 项。覆盖包括：
+Random123 Philox 零 counter/key 已知向量、四个 domain 与相邻 seed 的分桶
 均匀性和交叉相关性、`L0/L1` potential draw/SHA 完全相同、左右对称与幅度界、recovery/hold eligibility、
 strike skip、完整 pulse 冲量、reset 中断五项账、同一步幂等、漏步/漏 application receipt fail closed、
 按总质量缩放、质量/力/transform typed ledger，对极大 finite impulse、duration overflow、cast overflow、
@@ -244,15 +269,19 @@ mass×acceleration overflow 和 force 上限的负测、X/Z force 与 torque 恒
 neutered、坏 receipt/stale token、不同 live backend cache replay、commit 抛异常/非 `None` 返回等攻击回归；
 所有 precommit 失败都满足 backend write=0/cache 空，side-effect-free staging 会 discard，同 tick 可安全重试。
 strike/window/reset 的逐环境 sampled/commanded/applied/abandoned 恒等式及中断 tick backend 全零也已覆盖。
-新增 `29` 项 dependency-light adapter/hook/artifact 测试覆盖：随机化后真实总质量读取、显式非零 local-COM
+adapter/hook/artifact 测试覆盖：随机化后真实总质量读取、全量 active EventManager term manifest 绑定、
+任一 interval term 在首次 force submit 前 fail closed、显式非零 local-COM
 offset 旋转到 WORLD、派生 WORLD COM overflow 在 setter 前 terminal 拒绝、每 substep 传非 `None position_data`、
 只写 `torso_link` WORLD force、既有 wrench owner、
 same-tick/non-torso 与 reset writer 拒绝、direct setter 内同 tick 竞争 writer、scene/direct-setter exception、
 scene/env wrong return 与 scene-hook restore 失败后的 terminal zero、clean rollout 在任何验收/落盘前 terminal
 zero、terminal-zero 失败禁止发布、默认关闭直接委托、strike/reset 当步全零及 episode/impulse 对账、T1
 event-driven 时序拒绝、motion inode swap、output parent symlink swap、stable-dirfd no-clobber，以及所有回执显式
-`solver_execution_readback_available=false`。
-它不证明真实 simulator 满足相同 lifecycle，也没有 solver-response 或 GPU throughput 证据。
+`solver_execution_readback_available=false`。trainer 接线测试另覆盖：默认关闭不附加 runtime spec、
+L0/L1-only Hydra translation、unknown/body/anytime/非 uint32 seed 拒绝、50 Hz frozen schedule、L0/L1
+共同随机 SHA、conditional checkpoint hard contract、无界 receipt 禁止、连续两 step 的非侵入 extras 标量账、
+metric 竞争后的 terminal zero。它不证明真实 simulator 满足相同 lifecycle，也没有 solver-response 或 GPU
+throughput 证据。
 
 在最新 `origin/main@107102f` 重放后，whole-body tracking 的 57 文件整合套件为
 `847 passed, 22 skipped, 3 failed`。三项失败是未改动路径中的既有主线基线：MotionLoader 对两个

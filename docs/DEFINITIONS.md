@@ -70,7 +70,8 @@
 | `formal target` | 实验前预先指定、有资格进入正式决策卷的 setting。 |
 | `accepted baseline` | 已通过预定稳定性、留出卷和必要部署门，团队可以正式往上比的基线。`formal target` 不会自动变成 accepted baseline。 |
 | `plant` | 机器人与环境在仿真里的物理对象：质量、惯量、摩擦、驱动器和数值积分都在内。 |
-| <a id="qdot-limit-hinge"></a>`qdot-limit hinge` / 关节速度限位铰链惩罚 | 只在实际关节速度超过各自运行时速度上限的一定比例后开始收费：`mean(relu(abs(qd)/limit-margin)^2)`。它读取 31 个 articulation 关节的真实速度和同顺序真实上限，不是 action-rate 平滑的别名；权重为非正惩罚，默认 `0` 表示关闭。 |
+| <a id="qdot-limit-hinge"></a>`qdot-limit hinge` / 关节速度限位铰链惩罚 | 只在实际关节速度超过各自运行时速度上限的一定比例后开始收费：`mean(relu(abs(qd)/limit-margin)^2)`。它读取 31 个 articulation 关节的真实速度和同顺序真实上限，不是 action-rate 平滑的别名，也**不施加任何随机力**；权重为非正惩罚，默认 `0` 表示关闭。 |
+| <a id="lateral-balance-perturbation"></a>`lateral balance perturbation` / 恢复窗随机横向躯干推力 | 与 qdot 无关的仿真环境轴：只在击球后恢复或挥拍前等待、且非击球窗时，把有界 WORLD-Y 力施加在 `torso_link` 质心。L0 是同随机机会的零推力对照；L1 是冻结的 `0.04–0.08 m/s` 归一化冲量 treatment。当前只有 default-off trainer E1 接线，没有 full-scene/solver/throughput 证据，禁止点火。 |
 | <a id="atomic-planner-tuple-timing"></a>`atomic planner tuple timing` / 同源时刻的规划目标元组 | policy 看到的击球位置、拍速、拍面、动作侧和剩余击球时间来自同一个 source sample。`source_timestamp_compensated` 会在延迟完整元组的同时扣除已知 transport delay；`uncompensated` 是故意不扣延迟的负控；`live` 保留旧行为。它只闭合训练观测一致性，不代表 VRPN 已提供相机采集时间，也不代表部署 runner 已支持 rolling revision。 |
 | <a id="available-time-bucket"></a>`available-time bucket` / 可用准备时间档 | 用固定的每动作时间缩放把“动作开始到预定触球”压到约 1.0、0.7 或 0.5 秒，从而直接测 policy 在不同来球提前量下是否还能完成击球。它不是把球或题库答案放慢；稀疏击球机会不足时，0 回球不能作为早停理由。 |
 | <a id="sparse-reward-eligibility-ledger"></a>`sparse Reward eligibility ledger` / 稀疏 Reward 资格账本 | 不看 Reward 均值猜机制是否有效，而是逐级数 exact-strike 机会、virtual capture、解析过网/落点/合法回球，以及 qdot observed/hinge-active/excess。缺机会或 hit-conditioned 通道未触发时必须继续训练；两个连续 milestone 分母完整也只表示可交给外部预注册规则判读，不会自动 stop、晋级或买 seed。当前 virtual 结果仍是解析 Phase A，不是物理触球。 |

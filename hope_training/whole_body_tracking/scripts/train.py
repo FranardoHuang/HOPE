@@ -209,6 +209,112 @@ def _as_explicit_bool(x, name: str) -> bool:
     raise _OverrideError(f"{name} must be an explicit boolean, got {x!r}")
 
 
+_LATERAL_TRAINING_SPEC_ATTR = "_hope_lateral_perturbation_training_spec_v1"
+
+
+def _apply_lateral_perturbation_task_override(env_cfg, task, applied) -> None:
+    """Translate the narrow, default-off Hydra surface for the frozen L0/L1 pair.
+
+    An absent section and an explicit ``enabled=false`` do not attach any attribute to the
+    environment config, preserving the historical runtime and hard-contract bytes.  L0 is the
+    matched zero-impulse scheduler cell, so selecting a cell while disabled is a configuration
+    error rather than a silent no-op.
+    """
+
+    node = _get(task, "lateral_perturbation")
+    if node is None:
+        return
+    try:
+        node.keys()
+    except Exception as exc:
+        raise _OverrideError(
+            f"task.lateral_perturbation must be a mapping, got {node!r}"
+        ) from exc
+    _check_unknown_keys(
+        node,
+        ("enabled", "cell", "seed"),
+        "task.lateral_perturbation",
+    )
+    enabled_raw = _get(node, "enabled")
+    enabled = (
+        False
+        if enabled_raw is None
+        else _as_explicit_bool(enabled_raw, "task.lateral_perturbation.enabled")
+    )
+    cell = _get(node, "cell")
+    seed = _get(node, "seed")
+    if not enabled:
+        if cell is not None or seed is not None:
+            raise _OverrideError(
+                "task.lateral_perturbation.cell/seed require enabled=true; use enabled=true, "
+                "cell=L0 for the matched zero-impulse control"
+            )
+        applied.append("lateral_perturbation.enabled=False (historical no-hook path)")
+        return
+    if type(cell) is not str or cell not in ("L0", "L1"):
+        raise _OverrideError(
+            "task.lateral_perturbation.cell must be exactly 'L0' or 'L1'"
+        )
+    if type(seed) is not int or not 0 <= seed <= 0xFFFFFFFF:
+        raise _OverrideError(
+            "task.lateral_perturbation.seed must be an exact uint32 integer "
+            "(bool/coercion forbidden)"
+        )
+    commands = getattr(env_cfg, "commands", None)
+    _require(
+        commands is not None
+        and getattr(commands, "motion", None) is not None
+        and getattr(commands, "racket_target", None) is not None,
+        "commands.motion + commands.racket_target "
+        "(task.lateral_perturbation.enabled=true)",
+    )
+    if hasattr(env_cfg, _LATERAL_TRAINING_SPEC_ATTR):
+        raise _OverrideError(
+            "composed env cfg already owns the lateral trainer spec attribute; refusing a "
+            "competing activation writer"
+        )
+    setattr(
+        env_cfg,
+        _LATERAL_TRAINING_SPEC_ATTR,
+        {"schema_version": 1, "cell": cell, "seed": seed},
+    )
+    applied.append(
+        "lateral_perturbation="
+        f"(enabled=True,cell={cell},seed={seed},recovery_hold_only,frozen_L1_envelope)"
+    )
+
+
+def _resolve_lateral_training_runtime(env):
+    """Return ``(cfg, hard_contract)`` for an enabled cell, else ``None``."""
+
+    spec = getattr(env.cfg, _LATERAL_TRAINING_SPEC_ATTR, None)
+    if spec is None:
+        return None
+    if not isinstance(spec, dict) or set(spec) != {"schema_version", "cell", "seed"}:
+        raise RuntimeError("lateral trainer runtime spec has an invalid key set")
+    if spec["schema_version"] != 1:
+        raise RuntimeError("lateral trainer runtime spec schema is not v1")
+    from whole_body_tracking.tasks.tracking.mdp.lateral_perturbation import (
+        frozen_lateral_training_config,
+    )
+    from whole_body_tracking.tasks.tracking.mdp.isaac_lateral_perturbation import (
+        isaac_lateral_event_term_manifest,
+        isaac_lateral_training_hard_contract,
+    )
+
+    cfg = frozen_lateral_training_config(
+        cell=spec["cell"], seed=spec["seed"], policy_dt_s=float(env.step_dt)
+    )
+    event_term_manifest = isaac_lateral_event_term_manifest(
+        getattr(env, "event_manager", None)
+    )
+    return cfg, isaac_lateral_training_hard_contract(
+        cell=spec["cell"],
+        cfg=cfg,
+        event_term_manifest=event_term_manifest,
+    )
+
+
 def _as_exact_int(x, name: str) -> int:
     if type(x) is not int:
         raise _OverrideError(f"{name} must be an exact integer (bool/coercion forbidden), got {x!r}")
@@ -596,6 +702,7 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
         racket_cmd = None
     racket = None if racket_cmd is None else racket_cmd.cfg
     runtime_facts = runtime_execution_facts(env, actor_contract)
+    lateral_training = _resolve_lateral_training_runtime(env)
     motion_files = motion.motion_file
     if not isinstance(motion_files, (list, tuple, ListConfig)):
         motion_files = [motion_files]
@@ -755,6 +862,11 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
         ),
         "joint_velocity_limit_hinge_reward": (
             _joint_velocity_limit_hinge_reward_contract(env_cfg, runtime_facts)
+        ),
+        **(
+            {}
+            if lateral_training is None
+            else {"lateral_perturbation": lateral_training[1]}
         ),
         "motion_clips": clips,
         "question_bank": question_bank,
@@ -1267,6 +1379,11 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             "scene.robot.actuators[*].friction=0.0 "
             "(explicit schema-v3 zero-friction plant control)"
         )
+
+    # Recovery/hold-only random WORLD-Y torso-force training.  This deliberately is not an
+    # EventManager term: the reviewed adapter must own every substep write, prove a complete zero
+    # overwrite when inactive, and fail closed on any competing writer.
+    _apply_lateral_perturbation_task_override(env_cfg, task, applied)
 
     # env base (num_envs is applied earlier via parse_env_cfg). Read every value through _get so the
     # logic works on both OmegaConf nodes (runtime) and plain dicts (unit tests).
@@ -2485,6 +2602,40 @@ def _run(cfg):
         actor_contract = infer_actor_observation_contract(env.unwrapped)
 
     hard_contract = _build_training_hard_contract(env.unwrapped, actor_contract)
+    lateral_training_runtime = None
+    lateral_training = _resolve_lateral_training_runtime(env.unwrapped)
+    if lateral_training is not None:
+        lateral_cfg, lateral_hard_contract = lateral_training
+        from whole_body_tracking.tasks.tracking.mdp.isaac_lateral_perturbation import (
+            IsaacLateralPerturbationTrainingRuntime,
+        )
+
+        lateral_training_runtime = IsaacLateralPerturbationTrainingRuntime(
+            env,
+            lateral_cfg,
+            cell=str(
+                getattr(
+                    env.unwrapped.cfg, _LATERAL_TRAINING_SPEC_ATTR
+                )["cell"]
+            ),
+        )
+        if lateral_training_runtime.hard_contract != lateral_hard_contract:
+            raise RuntimeError(
+                "lateral trainer runtime and checkpoint hard contract disagree"
+            )
+        if hard_contract.get("lateral_perturbation") != lateral_hard_contract:
+            raise RuntimeError(
+                "training_contract.json omitted or changed the enabled lateral trainer identity"
+            )
+        print(
+            "[train.py] LATERAL_TRAINER_READY: "
+            f"cell={lateral_hard_contract['cell']} seed={lateral_hard_contract['seed']} "
+            f"body={lateral_hard_contract['body_name']} "
+            f"frame={lateral_hard_contract['force_frame']} "
+            f"impulse=[{lateral_hard_contract['normalized_impulse_min_mps']},"
+            f"{lateral_hard_contract['normalized_impulse_max_mps']}]m/s",
+            flush=True,
+        )
     if zero_joint_friction_requested:
         _require_zero_joint_friction_contract(hard_contract)
         print(
@@ -2506,6 +2657,22 @@ def _run(cfg):
         schema_version=int(hard_contract["schema_version"]),
         sha256=hard_contract_sha256,
     )
+    if lateral_training_runtime is not None:
+        class _LateralTrainingGymWrapper(gym.Wrapper):
+            def __init__(self, wrapped_env, runtime):
+                super().__init__(wrapped_env)
+                self._lateral_runtime = runtime
+
+            def step(self, action):
+                return self._lateral_runtime.step(action)
+
+            def reset(self, *args, **kwargs):
+                return self._lateral_runtime.reset(*args, **kwargs)
+
+            def close(self):
+                return self._lateral_runtime.close()
+
+        env = _LateralTrainingGymWrapper(env, lateral_training_runtime)
     if cfg.video:
         env = gym.wrappers.RecordVideo(
             env,
@@ -2634,8 +2801,25 @@ def _run(cfg):
     dump_pickle(os.path.join(log_dir, "params", "env.pkl"), env_cfg)
     dump_pickle(os.path.join(log_dir, "params", "agent.pkl"), agent_cfg)
 
-    runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
-    env.close()
+    if lateral_training_runtime is None:
+        # Preserve the historical default-off control flow exactly.
+        runner.learn(num_learning_iterations=agent_cfg.max_iterations, init_at_random_ep_len=True)
+        env.close()
+    else:
+        try:
+            runner.learn(
+                num_learning_iterations=agent_cfg.max_iterations,
+                init_at_random_ep_len=True,
+            )
+        finally:
+            # A clean terminal full-batch zero overwrite is part of the enabled run contract.
+            # Close the outer RSL/Gym wrappers for their own bookkeeping, then call the runtime
+            # owner directly as an idempotent backstop in case an upstream wrapper failed to
+            # forward ``close``.
+            try:
+                env.close()
+            finally:
+                lateral_training_runtime.close()
 
 
 @hydra.main(version_base=None, config_path="../cfg", config_name="train")

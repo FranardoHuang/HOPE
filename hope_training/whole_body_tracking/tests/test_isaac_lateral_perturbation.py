@@ -178,6 +178,19 @@ class _Cfg:
     decimation = 4
 
 
+class _EventManager:
+    def __init__(self, *, active_terms=None, term_cfgs=None):
+        self.active_terms = (
+            {"reset": [], "startup": []}
+            if active_terms is None
+            else active_terms
+        )
+        self._term_cfgs = {} if term_cfgs is None else term_cfgs
+
+    def get_term_cfg(self, name: str):
+        return self._term_cfgs[name]
+
+
 class _FakeEnv:
     def __init__(self, num_envs: int = 2):
         self.num_envs = num_envs
@@ -189,11 +202,13 @@ class _FakeEnv:
         self.motion = _MotionTerm(num_envs)
         self.target = _TargetTerm(num_envs)
         self.command_manager = _CommandManager(self.motion, self.target)
+        self.event_manager = _EventManager()
         self.episode_length_buf = torch.zeros(num_envs, dtype=torch.long)
         self.reset_buf = torch.zeros(num_envs, dtype=torch.bool)
         self.reset_next = torch.zeros(num_envs, dtype=torch.bool)
         self.yaws_per_substep = [0.0, math.pi / 2, math.pi, -math.pi / 2]
         self.wrong_output = False
+        self.output_extras = {"sentinel": object()}
 
     def step(self, action):
         for index, yaw in enumerate(self.yaws_per_substep):
@@ -211,7 +226,7 @@ class _FakeEnv:
         self.reset_next.zero_()
         if self.wrong_output:
             return object()
-        return (action, object(), terminated, truncated, {"sentinel": object()})
+        return (action, object(), terminated, truncated, self.output_extras)
 
 
 def _cfg(*, duration_steps: int = 2):
@@ -496,6 +511,107 @@ def test_runtime_submits_explicit_current_com_on_every_physics_substep():
         assert not substep.solver_execution_readback_available
     assert torch.equal(env.robot._external_force_b, torch.zeros_like(env.robot._external_force_b))
     assert env.robot.has_external_wrench is False
+
+
+def test_training_runtime_emits_bounded_scalar_metrics_without_receipt_growth():
+    env = _FakeEnv()
+    cfg = L.frozen_lateral_training_config(cell="L0", seed=20260715, policy_dt_s=0.02)
+    runtime = IL.IsaacLateralPerturbationTrainingRuntime(env, cfg, cell="L0")
+    output = runtime.step(torch.zeros(env.num_envs, 1))
+    log = output[4]["log"]
+    prefix = "Metrics/lateral_perturbation_"
+    integer_names = (
+        "opportunity_count",
+        "eligible_opportunity_count",
+        "selected_start_count",
+        "nonzero_pulse_command_count",
+        "applied_pulse_count",
+        "zero_overwrite_step_count",
+    )
+    for name in integer_names:
+        value = log[prefix + name]
+        assert value.ndim == 0
+        assert value.dtype == torch.long
+    assert log[prefix + "applied_pulse_count"].item() == 0
+    assert log[prefix + "zero_overwrite_step_count"].item() == 1
+    assert log[prefix + "actual_total_mass_min_kg"].item() == pytest.approx(33.0)
+    assert log[prefix + "actual_total_mass_mean_kg"].item() == pytest.approx(33.0)
+    assert log[prefix + "actual_total_mass_max_kg"].item() == pytest.approx(33.0)
+    assert runtime.hook.receipts() == ()
+    assert runtime.hard_contract["cell"] == "L0"
+    assert runtime.hard_contract["isaac_backend"]["position_data"] == (
+        "explicit_current_torso_com_world"
+    )
+    assert runtime.hard_contract["active_event_terms"] == []
+    assert runtime.hard_contract["interval_event_terms_present"] is False
+    for name in (
+        *runtime.hard_contract["integer_metrics"],
+        *runtime.hard_contract["mass_metrics_kg"],
+        *runtime.hard_contract["impulse_metrics_mps"],
+    ):
+        assert prefix + name in log
+    # The environment-owned extras object is not mutated or forced to carry last-step metrics.
+    assert "log" not in env.output_extras
+    second = runtime.step(torch.zeros(env.num_envs, 1))
+    assert second[4]["log"][prefix + "zero_overwrite_step_count"].item() == 1
+    assert "log" not in env.output_extras
+    runtime.close()
+    assert runtime.hook.terminal_zero_submit_succeeded is True
+
+
+def test_training_runtime_metric_collision_is_terminal_and_zeroes():
+    env = _FakeEnv()
+    key = "Metrics/lateral_perturbation_opportunity_count"
+    env.output_extras = {"log": {key: torch.tensor(-1)}}
+    cfg = L.frozen_lateral_training_config(cell="L1", seed=1, policy_dt_s=0.02)
+    runtime = IL.IsaacLateralPerturbationTrainingRuntime(env, cfg, cell="L1")
+    with pytest.raises(RuntimeError, match="metric collision"):
+        runtime.step(torch.zeros(env.num_envs, 1))
+    assert runtime.hook.terminal is True
+    assert runtime.hook.terminal_zero_submit_succeeded is True
+    last = env.robot.root_physx_view.apply_calls[-1]
+    assert torch.equal(last["force_data"], torch.zeros_like(last["force_data"]))
+
+
+def test_training_runtime_rejects_out_of_band_reset_before_any_sim_step():
+    env = _FakeEnv()
+    cfg = L.frozen_lateral_training_config(cell="L0", seed=1, policy_dt_s=0.02)
+    runtime = IL.IsaacLateralPerturbationTrainingRuntime(env, cfg, cell="L0")
+    with pytest.raises(RuntimeError, match="out-of-band reset"):
+        runtime.reset(seed=7)
+    assert runtime.hook.terminal is True
+    assert runtime.hook.terminal_zero_submit_succeeded is True
+    assert env.scene.write_count == 0
+
+
+def test_training_hard_contract_rejects_cell_config_mismatch():
+    treatment = L.frozen_lateral_training_config(cell="L1", seed=1, policy_dt_s=0.02)
+    with pytest.raises(ValueError, match="does not match"):
+        IL.isaac_lateral_training_hard_contract(
+            cell="L0", cfg=treatment, event_term_manifest=[]
+        )
+
+
+def test_training_runtime_rejects_interval_event_terms_before_any_force_submit():
+    env = _FakeEnv()
+
+    def random_push_term():
+        return None
+
+    env.event_manager = _EventManager(
+        active_terms={"interval": ["competing_random_push"]},
+        term_cfgs={
+            "competing_random_push": types.SimpleNamespace(
+                func=random_push_term,
+                params={"asset_cfg": object()},
+            )
+        },
+    )
+    cfg = L.frozen_lateral_training_config(cell="L1", seed=1, policy_dt_s=0.02)
+    with pytest.raises(RuntimeError, match="refuses all interval EventManager terms"):
+        IL.IsaacLateralPerturbationTrainingRuntime(env, cfg, cell="L1")
+    assert env.robot.root_physx_view.apply_calls == []
+    assert env.scene.write_count == 0
 
 
 def test_strike_interruption_submits_full_zero_on_next_policy_step():
