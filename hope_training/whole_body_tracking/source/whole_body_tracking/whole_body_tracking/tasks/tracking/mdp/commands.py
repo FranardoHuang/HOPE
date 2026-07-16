@@ -1119,8 +1119,13 @@ class MotionCommand(CommandTerm):
                 deadline_delta_from_visible[valid]
                 > profile.early_deadline_tolerance_s
             )
-        self.metrics["planner_revision_accepted"] = valid.float()
-        self.metrics["planner_revision_rejected"] = (~valid).float()
+        # CommandTerm.reset() indexes every metric with GLOBAL environment ids. ``valid`` is
+        # intentionally compact (one row per currently eligible environment), so rebinding either
+        # metric to ``valid.float()`` corrupts the mandatory [num_envs] shape as soon as the first
+        # short-preparation task leaves the pre-contact set. Keep the registered per-env buffers
+        # stable and scatter the compact decision back through its original ids.
+        self.metrics["planner_revision_accepted"][ids] = valid.float()
+        self.metrics["planner_revision_rejected"][ids] = (~valid).float()
         return valid
 
     def _advance_planner_phase(self, held: torch.Tensor) -> torch.Tensor:
@@ -1129,6 +1134,11 @@ class MotionCommand(CommandTerm):
         profile = self._planner_revision_profile
         if profile is None:
             raise RuntimeError("planner revision profile is unavailable")
+        # These are per-step indicators, not held episode metrics. Clearing the full registered
+        # tensors here also covers a step with no eligible revision submission; submit() then
+        # scatters only the environments that actually attempted a revision.
+        self.metrics["planner_revision_accepted"].zero_()
+        self.metrics["planner_revision_rejected"].zero_()
         active = self._planner_active
         dt = profile.policy_dt_s
         self._planner_truth_tts[active] = (

@@ -2756,3 +2756,10 @@ eligible 分母为零的稀疏 Reward 永远不能据零值早停。
 contract、mixture count partition、same-task revision activation 和 exact behavior ledger 后才可点火；
 否则 G05 保持 `Partial` 且旧池不恢复。完整边界见
 [task-revision cutover 卷宗](../experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md)。
+
+首次真实 4096-environment successor probe `A4` 已越过 scene import 与 hard-contract 写入，但在
+iteration 1 前因 planner revision 的 accept/reject command metric 被 eligible 子集短张量重绑而触发
+CUDA 全局 env-id 越界。0.36 秒支路第 18 步缩集、首 PPO 窗 24 步，与现场时序吻合；同构 CPU
+反例还能复现相同的最后三个失败位置。源码修为固定 `[num_envs]`、逐 tick 清零和按原 env id scatter，
+并新增 4096-env/high-id partial-reset 回归。`A4` 无 checkpoint，进程与 GPU context 已 absent；修复版
+尚未 fresh full-scene 通过，因此 successor queue 仍不得点火，G05 保持 `Partial`。

@@ -2447,7 +2447,10 @@ def test_training_governor_keeps_final_actor_interval_for_point_zero_two_revisio
     )
     motion.time_steps_f = torch.zeros(1)
     motion.speed_scale = torch.ones(1)
-    motion.metrics = {}
+    motion.metrics = {
+        "planner_revision_accepted": torch.zeros(1),
+        "planner_revision_rejected": torch.zeros(1),
+    }
     motion._planner_active = torch.zeros(1, dtype=torch.bool)
     motion._planner_control_epoch = torch.zeros(1, dtype=torch.long)
     motion._planner_task_id = torch.zeros(1, dtype=torch.long)
@@ -2521,6 +2524,80 @@ def test_training_governor_keeps_final_actor_interval_for_point_zero_two_revisio
         target_normal=normal,
     )
     assert post_contact.tolist() == [False]
+
+
+def test_planner_revision_metrics_remain_full_env_after_eligible_set_shrinks():
+    """Compact revision decisions must remain safe for CommandTerm.reset global indexing."""
+
+    num_envs = 4096
+    motion = commands_mod.MotionCommand.__new__(commands_mod.MotionCommand)
+    motion.num_envs = num_envs
+    motion.device = "cpu"
+    motion.planner_revision_enabled = True
+    motion._planner_revision_profile = planner_revision_mod.PhaseGovernorProfile(
+        policy_dt_s=0.02,
+        min_tts_s=0.02,
+        max_tts_s=2.0,
+        max_phase_rate_per_s=4.0,
+        max_phase_acceleration_per_s2=20.0,
+        max_deadline_revision_delta_s=0.25,
+        max_position_revision_delta_m=0.10,
+        max_velocity_revision_delta_mps=0.50,
+        max_normal_revision_delta_rad=0.20,
+        early_deadline_tolerance_s=1.0e-6,
+    )
+    motion.time_steps_f = torch.zeros(num_envs)
+    motion.speed_scale = torch.ones(num_envs)
+    motion.metrics = {
+        "planner_revision_accepted": torch.ones(num_envs),
+        "planner_revision_rejected": torch.ones(num_envs),
+        "planner_phase_rate_per_s": torch.zeros(num_envs),
+        "planner_truth_tts_s": torch.zeros(num_envs),
+    }
+    motion._planner_active = torch.ones(num_envs, dtype=torch.bool)
+    motion._planner_control_epoch = torch.full((num_envs,), 7, dtype=torch.long)
+    motion._planner_task_id = torch.full((num_envs,), 10, dtype=torch.long)
+    motion._planner_task_revision = torch.ones(num_envs, dtype=torch.long)
+    motion._planner_start_step = torch.zeros(num_envs)
+    motion._planner_strike_step = torch.full((num_envs,), 100.0)
+    motion._planner_phase_rate = torch.zeros(num_envs)
+    motion._planner_slow_only_next = torch.zeros(num_envs, dtype=torch.bool)
+    motion._planner_desired_tts = torch.full((num_envs,), 0.50)
+    motion._planner_begin_tts = torch.full((num_envs,), 0.50)
+    motion._planner_truth_tts = torch.full((num_envs,), 0.50)
+    motion._planner_begin_target_pos = torch.zeros(num_envs, 3)
+    motion._planner_begin_target_vel = torch.zeros(num_envs, 3)
+    motion._planner_begin_target_normal = torch.zeros(num_envs, 3)
+    motion._planner_begin_target_normal[:, 0] = 1.0
+
+    # The phase step clears stale decisions for every environment before the currently eligible
+    # subset submits its compact revision rows.
+    motion._advance_planner_phase(torch.zeros(num_envs, dtype=torch.bool))
+    ids = torch.tensor([1, 4001], dtype=torch.long)
+    accepted = motion.submit_planner_revision(
+        ids,
+        control_epoch=torch.tensor([7, 7]),
+        task_id=torch.tensor([10, 999]),  # one accept, one deliberate reject
+        task_revision=torch.tensor([2, 2]),
+        desired_tts=torch.tensor([0.48, 0.48]),
+        target_position=torch.zeros(2, 3),
+        target_velocity=torch.zeros(2, 3),
+        target_normal=torch.tensor([[1.0, 0.0, 0.0], [1.0, 0.0, 0.0]]),
+    )
+    assert torch.equal(accepted, torch.tensor([True, False]))
+    assert motion.metrics["planner_revision_accepted"].shape == (num_envs,)
+    assert motion.metrics["planner_revision_rejected"].shape == (num_envs,)
+    assert motion.metrics["planner_revision_accepted"].sum().item() == 1
+    assert motion.metrics["planner_revision_rejected"].sum().item() == 1
+    assert motion.metrics["planner_revision_accepted"][1].item() == 1
+    assert motion.metrics["planner_revision_rejected"][4001].item() == 1
+
+    # Reproduce the reset pattern from the A4 failure: the last three reset positions carry high
+    # global env ids. Every registered metric must remain safely gatherable by those ids.
+    reset_env_ids = torch.tensor(list(range(68)) + [4001, 4050, 4095], dtype=torch.long)
+    for metric in motion.metrics.values():
+        assert metric.shape[0] == num_envs
+        assert metric[reset_env_ids].shape[0] == len(reset_env_ids)
 
 
 if __name__ == "__main__":

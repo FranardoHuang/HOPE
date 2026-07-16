@@ -11,6 +11,15 @@
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
 
+## 2026-07-17
+
+- 03:30 CST，task-revision full-scene `A4` 首次越过 4096-env scene import 与 schema-3
+  hard-contract 写入，却在 iteration 1 前触发 CUDA env-id 越界。根因是 planner revision 将两个
+  `[num_envs]` command metric 错误重绑成 eligible 子集短张量；0.36 秒支路第 18 步缩集而首 rollout
+  为 24 步，和现场完全吻合。源码已改为固定全长、逐步清零、按原 id scatter，并补 4096-env/high-id
+  partial-reset 回归；`A4` 无 checkpoint 且进程/NVML context 已 absent，修复版仍须 fresh full-scene
+  通过后才能点火新池。见 [task-revision cutover](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md)。
+
 ## 2026-07-16
 
 - 17:00 CST，按“先停自动任务、再改训练协议”的要求完成 rolling task-revision cutover：双 Pod 22 条

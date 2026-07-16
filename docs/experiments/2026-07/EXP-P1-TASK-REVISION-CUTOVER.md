@@ -1,7 +1,8 @@
 # EXP-P1-TASK-REVISION-CUTOVER
 
-Status: `blocked` — replacement source is implemented and under red-team; no full-scene or behavior
-result yet.
+Status: `blocked` — replacement source is implemented; the first real full-scene attempt found a
+per-environment metric-shape bug before iteration 1. The root cause is fixed in source and awaits a
+fresh full-scene pass; there is still no accepted behavior result.
 
 - Human owner: Franco
 - Executor: Codex
@@ -97,8 +98,21 @@ rejected the absent private 0.5-second paper. After the paper was materialized, 
 second harness bug: the queue stored `task.planner_revision` as JSON with quoted mapping keys,
 which the Hydra override grammar rejects. The queue now stores one canonical Hydra-native typed
 mapping directly, and the validator rejects the old JSON spelling; dependency-light queue and
-launch regression is `108 passed`. A new full-scene attempt is still required, so this experiment
-remains `blocked` and neither failure is a training result.
+launch regression is `108 passed`.
+
+`A4` then reached a 4096-environment scene, wrote the schema-3 hard contract, instantiated all
+three physical-scene entities and entered the first PPO rollout. Before iteration 1 it hit
+`IndexKernel.cu:93` on reset. The failure is fully explained by one source invariant violation:
+`MotionCommand.submit_planner_revision()` replaced two registered `[num_envs]` command metrics with
+the compact `[eligible_envs]` accept/reject tensor. The 0.36-second curriculum rows begin leaving
+the eligible set at policy step 18, while the first rollout contains 24 steps; the next partial
+reset therefore indexed a shortened tensor with global environment ids. A CPU reconstruction
+reproduces the same three failing reset positions (`68/69/70`). The fix preserves both metric
+buffers at `[num_envs]`, clears them every policy step and scatters compact decisions through their
+original environment ids; a 4096-environment regression includes high global reset ids. `A4` was
+classified `stale_timeout/125` after the CUDA cascade, both recorded process ids and the GPU context
+are absent, and it produced no checkpoint. This is a failed probe, not a training result or retry
+authorization. A fresh source commit plus a new no-clobber full-scene attempt are still required.
 
 ## Acceptance sequence
 
