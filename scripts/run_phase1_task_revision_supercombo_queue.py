@@ -155,6 +155,56 @@ def _launchable_continuation_queue(
     return value
 
 
+def _hydra_literal(value: Any) -> str:
+    """Render strict JSON data as one Hydra override value without quoted map keys.
+
+    Hydra's override grammar accepts JSON-compatible values but not JSON's quoted mapping
+    keys.  The tracked queue stores this canonical native form directly: validation, launch,
+    immutable claim reconstruction and later attestation therefore all consume identical argv
+    bytes, with no hidden transport rewrite.
+    """
+
+    if value is None:
+        return "null"
+    if type(value) is bool:
+        return "true" if value else "false"
+    if type(value) is int:
+        return str(value)
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise SuccessorQueueError("Hydra transport forbids non-finite numbers")
+        rendered = repr(value)
+        if "e" in rendered.lower():
+            mantissa, exponent = rendered.lower().split("e", 1)
+            if "." not in mantissa:
+                mantissa += ".0"
+            rendered = f"{mantissa}e{int(exponent):+d}"
+        return rendered
+    if isinstance(value, str):
+        return json.dumps(value, allow_nan=False, ensure_ascii=False)
+    if isinstance(value, list):
+        return "[" + ", ".join(_hydra_literal(item) for item in value) + "]"
+    if isinstance(value, dict):
+        rows: list[str] = []
+        for key in sorted(value):
+            if (
+                not isinstance(key, str)
+                or not key
+                or key[0] not in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_"
+                or not all(
+                    character
+                    in "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz_0123456789"
+                    for character in key
+                )
+            ):
+                raise SuccessorQueueError(
+                    f"Hydra transport cannot encode mapping key {key!r}"
+                )
+            rows.append(f"{key}: {_hydra_literal(value[key])}")
+        return "{" + ", ".join(rows) + "}"
+    raise SuccessorQueueError(
+        f"Hydra transport cannot encode value of type {type(value).__name__}"
+    )
 def _mapping(value: Any, label: str) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise SuccessorQueueError(f"{label} must be a mapping")
@@ -172,15 +222,24 @@ def _compiled_overrides(job: Mapping[str, Any]) -> dict[str, str]:
     return result
 
 
-def _override_json(argument: str, *, key: str, job_id: str) -> dict[str, Any]:
+def _override_hydra_mapping(argument: str, *, key: str, job_id: str) -> dict[str, Any]:
     prefix, separator, raw = argument.partition("=")
     if not separator or prefix.lstrip("+") != key:
         raise SuccessorQueueError(f"{job_id} does not provide one complete {key} override")
     try:
-        value = json.loads(raw)
-    except json.JSONDecodeError as exc:
-        raise SuccessorQueueError(f"{job_id} {key} must be strict JSON: {exc}") from exc
-    return _mapping(value, f"{job_id}.{key}")
+        value = yaml.safe_load(raw)
+    except yaml.YAMLError as exc:
+        raise SuccessorQueueError(
+            f"{job_id} {key} must be one canonical Hydra mapping: {exc}"
+        ) from exc
+    document = _mapping(value, f"{job_id}.{key}")
+    canonical = _hydra_literal(document)
+    if raw != canonical:
+        raise SuccessorQueueError(
+            f"{job_id} {key} is not the canonical Hydra mapping; quoted JSON keys and "
+            "implicit transport rewrites are forbidden"
+        )
+    return document
 
 
 def _finite(value: Any, label: str) -> float:
@@ -196,7 +255,7 @@ def _validate_revision(job: Mapping[str, Any], overrides: Mapping[str, str]) -> 
     job_id = str(job["id"])
     if "task.planner_revision" not in overrides:
         raise SuccessorQueueError(f"{job_id} is missing task.planner_revision")
-    revision = _override_json(
+    revision = _override_hydra_mapping(
         overrides["task.planner_revision"], key="task.planner_revision", job_id=job_id
     )
     if set(revision) != EXPECTED_REVISION_KEYS or revision.get("enabled") is not True:

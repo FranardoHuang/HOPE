@@ -536,6 +536,12 @@ python3 scripts/run_phase1_task_revision_supercombo_queue.py \
 source 进入最终 clean commit 后，只允许预注册代表格 `taskrev_p1_core_high_noise` 做一次 4096-env、两 update、
 非科学 full-scene probe。先 dry-run；真实执行只加下面的唯一确认词：
 
+`task.planner_revision` 必须在 tracked queue 中直接写成 Hydra 原生的单一 typed mapping（例如
+`{enabled: true, ...}`）；JSON 的 `{"enabled": true}` quoted-key 写法会在 Hydra compose 阶段拒绝。
+successor validator 会用 canonical Hydra/YAML 公共子集逐类型重读并要求逐字节 canonical，禁止 launcher
+临时改写 JSON。这样 dry-run、claim、真实 training argv、finalizer 和后续行为 attestor 使用完全相同的
+参数字节。no-Kit compose 位于 run directory/claim/Kit 之前，compose 失败不会留下 trainer 或科学结果。
+
 新 detached checkout 首次使用前，必须从同一个 successor 入口显式水合 Git-ignored A3 runtime；不能直接
 调用旧 generic queue（它的 Pod2 容量合同不同），也不能让 full-scene probe 隐式复制资产：
 

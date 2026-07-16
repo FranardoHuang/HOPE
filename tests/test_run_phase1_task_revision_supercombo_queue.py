@@ -45,7 +45,40 @@ def _write(tmp_path: Path, queue: dict) -> Path:
 def _revision(job: dict) -> dict:
     overrides = Q._compiled_overrides(job)
     argument = overrides["task.planner_revision"]
-    return json.loads(argument.split("=", 1)[1])
+    return Q._override_hydra_mapping(
+        argument, key="task.planner_revision", job_id=job["id"]
+    )
+
+
+def test_planner_revision_hydra_mapping_is_canonical_typed_and_rejects_json_keys():
+    queue = Q.load_queue(QUEUE)
+    documents = []
+    for job in queue["jobs"]:
+        overrides = Q._compiled_overrides(job)
+        argument = overrides["task.planner_revision"]
+        raw = argument.split("=", 1)[1]
+        document = _revision(job)
+        assert raw == Q._hydra_literal(document)
+        assert type(document["enabled"]) is bool
+        assert type(document["profile"]["schema_version"]) is int
+        assert type(document["profile"]["early_deadline_tolerance_s"]) is float
+        assert type(document["initial_tts_mixture"]["components"]) is list
+        documents.append(json.dumps(document, allow_nan=False, sort_keys=True))
+    assert len(set(documents)) == 6
+
+    legacy = '++task.planner_revision={"enabled":true}'
+    with pytest.raises(Q.SuccessorQueueError, match="canonical Hydra mapping"):
+        Q._override_hydra_mapping(
+            legacy, key="task.planner_revision", job_id="legacy_json"
+        )
+
+
+@pytest.mark.parametrize("value", [1.0e-6, 1.0e6, -1.0e-6, -0.0])
+def test_hydra_float_literal_round_trips_as_float(value):
+    rendered = Q._hydra_literal({"value": value})
+    parsed = yaml.safe_load(rendered)
+    assert type(parsed["value"]) is float
+    assert Q._hydra_literal(parsed) == rendered
 
 
 def _first_launchable(queue: dict) -> dict:
@@ -390,7 +423,8 @@ def test_pruning_uses_closeout_completion_and_exact_denominators_not_window_star
             lambda q: q["jobs"][0]["recipe"]["delta"].__setitem__(
                 0,
                 q["jobs"][0]["recipe"]["delta"][0].replace(
-                    '"range_s":[0.5,0.5]', '"range_s":[0.5,0.6]'
+                    'name: "baseline_0p5", range_s: [0.5, 0.5]',
+                    'name: "baseline_0p5", range_s: [0.5, 0.6]',
                 ),
             ),
             "baseline_0p5",
@@ -444,8 +478,8 @@ def test_pruning_uses_closeout_completion_and_exact_denominators_not_window_star
             lambda q: q["jobs"][0]["recipe"]["delta"].__setitem__(
                 0,
                 q["jobs"][0]["recipe"]["delta"][0].replace(
-                    '"early_deadline_tolerance_s":1e-6',
-                    '"early_deadline_tolerance_s":1e-9',
+                    "early_deadline_tolerance_s: 1.0e-6",
+                    "early_deadline_tolerance_s: 1.0e-9",
                 ),
             ),
             "early_deadline_tolerance_s must be exact 1e-6",
@@ -737,8 +771,8 @@ def test_full_scene_probe_delegates_to_reviewed_generic_harness(monkeypatch):
     )
     calls = []
 
-    def fake(_queue, **kwargs):
-        calls.append(kwargs)
+    def fake(delegated_queue, **kwargs):
+        calls.append((delegated_queue, kwargs))
         return {"run_dir": "/tmp/probe", "mode": "full-scene-probe"}
 
     monkeypatch.setattr(Q.continuation.lean, "cmd_full_scene_probe", fake)
@@ -751,7 +785,17 @@ def test_full_scene_probe_delegates_to_reviewed_generic_harness(monkeypatch):
         execute=True,
         confirm=Q.FULL_SCENE_PROBE_CONFIRM,
     )
-    assert calls[0]["confirm"] == Q.continuation.lean.FULL_SCENE_PROBE_CONFIRM
+    delegated_queue, delegated_kwargs = calls[0]
+    assert delegated_kwargs["confirm"] == Q.continuation.lean.FULL_SCENE_PROBE_CONFIRM
+    delegated_job = next(
+        job for job in delegated_queue["jobs"] if job["id"] == representative["id"]
+    )
+    planner_argument = Q._compiled_overrides(delegated_job)["task.planner_revision"]
+    assert planner_argument == Q._compiled_overrides(representative)["task.planner_revision"]
+    assert '{"enabled"' not in planner_argument
+    Q._override_hydra_mapping(
+        planner_argument, key="task.planner_revision", job_id=representative["id"]
+    )
     assert result["generic_result_alone_may_unlock_successor"] is False
     assert result["task_revision_specialized_result_path"] == (
         "/tmp/probe/task_revision_probe_result.json"

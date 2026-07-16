@@ -182,11 +182,15 @@ python3 scripts/materialize_phase1_timing_exam_0p5.py convert-isaac-scorecard \
   --expected-scorecard-file-sha256 <SCORECARD_FILE_SHA256> \
   --checkpoint /abs/path/to/model_N.pt \
   --expected-checkpoint-file-sha256 <CHECKPOINT_FILE_SHA256> \
-  --checkpoint-hard-contract /abs/path/to/model_N.pt.hard-contract.json \
+  --checkpoint-hard-contract /abs/path/to/run/params/training_contract.json \
   --expected-checkpoint-hard-contract-file-sha256 <HARD_CONTRACT_FILE_SHA256> \
   --output /abs/path/isaac_timing_0p5/timing_0p5.result.json \
   --confirm SIM_ONLY_CONVERT_ONE_ISAAC_TIMING_SCORECARD
 ```
+
+这里的 `--checkpoint-hard-contract` 必须指 evaluator 在 scorecard 中回显 SHA 的训练合同
+`$RUN/params/training_contract.json`；不能按文件名猜成 checkpoint sidecar。converter 会逐字节重算并
+fail closed。
 
 结论边界：代码层已经可以对 **[`v4rg`](../../DEFINITIONS.md) motion-contract 匹配的 checkpoint**
 做真正 25-tick Isaac 诊断；

@@ -64,10 +64,13 @@ evidence; they cannot be relabelled as task-revision, 0.5-second or exact-prunin
 
 ## Timing and TOPP evidence boundaries
 
-The paper K100 [`0.5-second timing exam`](../../DEFINITIONS.md#timing-exam-0p5) is materialized at
+The tracked contract for the paper K100
+[`0.5-second timing exam`](../../DEFINITIONS.md#timing-exam-0p5) is
 `configs/phase1_timing_exam_0p5_k100_20260716.json`: 50 questions per side, zero-velocity frame 0,
-25 policy ticks at 50 Hz and all attempts in the denominator. It has not been run; 0.5-second
-ability is therefore **unknown**.
+25 policy ticks at 50 Hz and all attempts in the denominator. On 2026-07-16 it was consumed once
+on each Pod from the same immutable source schedule; both copies are 48,963 bytes with file SHA
+`6f5f1526…672d` and semantic SHA `fa7e3c21…3b66`. No checkpoint has taken the exam yet, so
+0.5-second ability remains **unknown**.
 
 `topp_mintime.py` now distinguishes total-motion and run-up objectives, prepends a static
 zero-velocity frame when required and never lets an oracle bypass CoP/friction/torque gates. Its
@@ -86,6 +89,16 @@ dynamics certificate exists. This is source progress, not completion of action a
 
 These tests prove internal source semantics only. Local macOS lacks Torch/Isaac, ROS 2 Jazzy,
 VRPN and the vendor runtime, so the counts are not an accepted runtime gate.
+
+## Runtime harness findings before acceptance
+
+The first two successor probe attempts stopped before any trainer or iteration. `A2` correctly
+rejected the absent private 0.5-second paper. After the paper was materialized, `A3` exposed a
+second harness bug: the queue stored `task.planner_revision` as JSON with quoted mapping keys,
+which the Hydra override grammar rejects. The queue now stores one canonical Hydra-native typed
+mapping directly, and the validator rejects the old JSON spelling; dependency-light queue and
+launch regression is `108 passed`. A new full-scene attempt is still required, so this experiment
+remains `blocked` and neither failure is a training result.
 
 ## Acceptance sequence
 
