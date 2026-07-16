@@ -2730,3 +2730,29 @@ inexact 方向诊断，到 `model_3600` 精确收口；剩余格使用修正合�
 成功证据并立即停止后续批次，不 retry/replay；本进程 attempted overlay 又防止下一 snapshot 短暂漏 claim
 时重提交相同 job。`92` 个 rolling/generic runner 测试通过；这是调度能力，
 不改变任何训练配方或 G05 行为结论。
+
+2026-07-16 17:00 CST，rolling 池因训练/部署共同的 task-revision 缺口被整体停止，不再等待无法由现役
+EMA 日志产生的行为淘汰。专用 cutover 工具先逐条复核 claim/binding/source/PID=PGID/starttime/argv/cwd/
+checkpoint/hard，再只 signal 记录的精确进程组；最终双 Pod 的 24 个注册 leader、22 个接受进程组与 NVML
+compute context 均 absent。Pod1/Pod2 no-clobber recovery receipt SHA-256 分别为 `e6b2480a...8263e` 与
+`4c370431...949`；finalizer 本身没有发 signal。最后稳定 checkpoint 约为 Pod1 `2900–3500`、Pod2
+`5800–6500`，只保留为 inexact 结构证据。正式 179-D active swing 冻结目标/TTS、训练不消费同一物理球
+递增 revision、0.5 秒卷尚未真正绑定 time-law，故旧 queue 标为 superseded，不能 resume。G05 继续
+`Partial`；新池必须先过 task identity/revision、受限 phase governor、0.5 秒卷和整数行为窗口四道 source/
+full-scene 门。
+
+2026-07-16 task-revision replacement source 把这四道门实现为一个不可拆开的训练协议。每颗新球先
+从显式加权 [`initial TTS mixture`](../DEFINITIONS.md#initial-tts-mixture) 抽样；分布同时包含低于 0.5 秒
+压力层、精确 0.5 秒点质量、0.5–0.9 秒部署层和更长来球层，且每层/总数写入 hard training contract。
+同一物理球只修改 actor-visible position/velocity/signed-normal/TTS；question-bank row、物理球、Reward
+和 critic truth 均不可变。motion 与 racket command 共用 SHA-bound
+[`phase governor`](../DEFINITIONS.md#phase-governor)，旧 hold clock 被强制清零，避免两个 preparation clock
+重复扣时。runner 每个 PPO update 输出整数事件账，淘汰必须对两个互不重叠窗口先求和再重算比例；
+eligible 分母为零的稀疏 Reward 永远不能据零值早停。
+
+当前仍只有 E1：本地没有 Torch/Isaac full scene，K100
+[`0.5-second timing exam`](../DEFINITIONS.md#timing-exam-0p5) 尚未实际运行，TOPP 也没有 0.5 秒动力学
+证书。任何 successor queue 必须等 clean detached Pod probe 同时证明 finite checkpoint、schema-3
+contract、mixture count partition、same-task revision activation 和 exact behavior ledger 后才可点火；
+否则 G05 保持 `Partial` 且旧池不恢复。完整边界见
+[task-revision cutover 卷宗](../experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md)。

@@ -134,7 +134,8 @@ bool ValidateCommandLine(int argc, char** argv, std::string& error) {
       "--leg-stand-gains", "--legs-passive", "--no-fall-guard", "--no-imu-yaw",
       "--model-preflight-only", "--no-publish", "--no-yaw-align", "--official-stand",
       "--oracle-pelvis",
-      "--perfect-tracking", "--planner", "--reference-playback", "--shadow-frozen-clock",
+      "--perfect-tracking", "--planner", "--planner-task-revision",
+      "--reference-playback", "--shadow-frozen-clock",
       "--single-swing", "--stream-target", "--use-imu-yaw", "--vel-box-center",
       "--waist-passive"};
   std::unordered_set<std::string> seen;
@@ -389,7 +390,8 @@ int main(int argc, char** argv) {
                  "       [--planner] (LIVE planner: racket <- /racket/command_flat, base <- /a3/base_pose_flat over ros2;"
                  " [--engage-min-tts S] [--cmd-timeout S] [--invalid-grace S]"
                  " [--planner-side-split-y Y] [--planner-side-hysteresis-y H]"
-                 " [--hold-recover S] [--vel-gate-margin M])\n"
+                 " [--hold-recover S] [--vel-gate-margin M]"
+                 " [--planner-task-revision])\n"
                  "       [--loc-mode fabricated|perfect_tracking|oracle|external_base]"
                  " [--perfect-tracking] [--oracle-pelvis] [--no-imu-yaw]\n"
                  "       [--oracle-shm PATH] [--oracle-max-age S]"
@@ -467,6 +469,12 @@ int main(int argc, char** argv) {
   // LIVE PLANNER mode (Path B): racket target from /racket/command_flat + mocap base pose
   // from /a3/base_pose_flat, both over the AimRT ros2 backend; body-drive stays iceoryx.
   const bool planner_mode = Has(argc, argv, "--planner");
+  const bool planner_task_revision =
+      Has(argc, argv, "--planner-task-revision");
+  if (planner_task_revision && !planner_mode) {
+    std::cerr << "--planner-task-revision requires --planner\n";
+    return 2;
+  }
   if (first_tick_enabled && !planner_mode) {
     std::cerr << "--first-tick-json is an obs179 planner-source diagnostic and requires "
                  "--planner\n";
@@ -649,6 +657,7 @@ int main(int argc, char** argv) {
   // swing_rest semantics). single_swing gives the linear clock + clip-end completion the
   // engage machine relies on; swing_rest_s>=0 arms the inter-swing rest timer.
   pcfg.planner_mode = planner_mode;
+  pcfg.planner_task_revision_enable = planner_task_revision;
   if (planner_mode) {
     pcfg.single_swing = true;
     if (!Has(argc, argv, "--swing-rest")) pcfg.swing_rest_s = 0.5;
@@ -667,6 +676,11 @@ int main(int argc, char** argv) {
     // Demo-robustness vel mode: command the trained box-center velocity; planner keeps
     // WHERE + WHEN (see PpPolicyConfig::vel_cmd_box_center).
     pcfg.vel_cmd_box_center = Has(argc, argv, "--vel-box-center");
+    if (planner_task_revision && (pcfg.stream_target || pcfg.vel_cmd_box_center)) {
+      std::cerr << "--planner-task-revision owns the atomic target/TTS tuple and forbids "
+                   "legacy --stream-target/--vel-box-center overrides\n";
+      return 2;
+    }
   }
   // YAW-ALIGN default ON (hardware fix: boot-drifted IMU yaw polluted motion_anchor_ori_b
   // by a constant -12..-38 deg in MDU captures -> the policy fought a fictional torso yaw
@@ -1702,6 +1716,25 @@ int main(int argc, char** argv) {
       PrintDiagBlock(diag, ppp->legs_passive());  // per-joint cmd-vs-meas block (SHADOW/MOTION)
       PrintObsDebugBlock(obsd, ppp->last_action(),
                          ppp->planner_mode() ? ppp->planner_status() : std::string{});  // obs slices + stats
+      const auto planner_trace = ppp->planner_task_trace();
+      if (planner_trace.enabled) {
+        std::printf(
+            " [planner-task] epoch=%llu observed=%llu/r%llu accepted=%llu/r%llu "
+            "last=%llu active=%d post_contact=%d revoke_gen=%llu "
+            "tts=%.3f phase=%.4f rate=%.4f gate=%s\n",
+            (unsigned long long)planner_trace.control_epoch,
+            (unsigned long long)planner_trace.observed_task_id,
+            (unsigned long long)planner_trace.observed_task_revision,
+            (unsigned long long)planner_trace.accepted_task_id,
+            (unsigned long long)planner_trace.accepted_task_revision,
+            (unsigned long long)planner_trace.last_consumed_task_id,
+            planner_trace.active ? 1 : 0,
+            planner_trace.post_contact ? 1 : 0,
+            (unsigned long long)planner_trace.revocation_generation,
+            planner_trace.effective_tts_s, planner_trace.phase,
+            planner_trace.phase_rate_per_s,
+            planner_trace.gate_state.empty() ? "-" : planner_trace.gate_state.c_str());
+      }
       // one-shot warning if any joint is hitting its clamp on a large fraction of
       // ticks (the documented waist_roll mismatch): the policy keeps commanding
       // beyond the A3 limit. NOT a fault (clamp keeps it safe) — a tuning flag.

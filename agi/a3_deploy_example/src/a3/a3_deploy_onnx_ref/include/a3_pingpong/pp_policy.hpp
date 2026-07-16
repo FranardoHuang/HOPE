@@ -13,18 +13,19 @@
 //   LEARNED (ONNX, per tick):  31 joint actions -> q_des; kp/kd from metadata.
 //   REFERENCE (ONNX side-out): command[0:62] ref joint_pos/vel + tracked body
 //                              poses, indexed by time_step (the strike clock).
-//   SCRIPTED (this file, C++):  the racket TARGET (pos/vel/normal-sign), the
-//                              strike clock (time_to_strike -> time_step), and
-//                              the forehand/backhand SELECT (swing_dir_). There
-//                              is NO live ball tracker / planner -- ScriptedTarget
-//                              is a fixed front-right TEST target. Pressing f/b
-//                              only flips the target y-sign + swing_type and picks
-//                              the matching baked clip; it does not load new poses.
+//   RUNTIME INPUT (this file):  scripted mode uses a fixed test target and keyboard
+//                              side select. Planner mode consumes the live planner
+//                              target/clock; formal schema 4 may atomically revise
+//                              pos/vel/signed normal/TTS for the same physical ball
+//                              on every pre-contact actor tick while side/clip stay
+//                              fixed. The task gate prevents one ball from starting
+//                              the action more than once.
 //   OVERWRITTEN AFTER ONNX:    neck slots [3,4] forced passive; legs forced to
 //                              nominal iff --legs-passive; q_des clamped to A3
 //                              joint limits (safety). Nothing else is overridden.
-// To hit REAL balls, replace ScriptedTarget with planner output (pos/vel/normal/
-// hit-time from a ball-trajectory estimator); the policy/obs/decode stay as-is.
+// Formal real-ball input is the planner-owned schema-4 flat command. It is still
+// fail-closed until the model metadata, runtime flag, base/racket tuple and phase
+// governor profile all agree; scripted mode is diagnostic only.
 // ======================================================================
 //
 // Depends only on Eigen + onnxruntime + robot_io_backend.hpp (plain structs),
@@ -52,8 +53,10 @@
 #include "a3_pingpong/pp_obs_builder.hpp"
 #include "a3_pingpong/pp_onnx_policy.hpp"
 #include "a3_pingpong/pp_oracle_pose.hpp"
+#include "a3_pingpong/pp_phase_governor.hpp"
 #include "a3_pingpong/pp_planner_input.hpp"
 #include "a3_pingpong/pp_reference_clock.hpp"
+#include "a3_pingpong/pp_task_revision_gate.hpp"
 #include "a3_policy_parameters.hpp"      // ::a3_pd_stand_kps / kds (official robust-stand gains)
 #include "robot_io/a3_layout_extra.hpp"  // robot_io::kA3PolicyToSdkIdx (29->31 scatter)
 #include "robot_io/robot_io_backend.hpp"
@@ -185,12 +188,17 @@ struct PpPolicyConfig {
   // When planner_mode: the racket target is NO LONGER the scripted per-clip box center.
   // A real planner feeds PpRacketTargetInput (over AimRT /racket/command_flat) and a mocap
   // localizer feeds PpBasePoseInput (LocMode::kExternalBase). Each ComputeCommand tick,
-  // PlannerEngageStep_ reproduces the proven Python wbc_runner._tick engage machine:
-  // gate a fresh VALID command (timeout / invalid-flutter grace / min-tts / base-low /
-  // reachability), then set_swing_dir + set_level(1) + FREEZE the target. The existing
-  // swing clock, tts clamps, single-swing completion and mid-swing latch execute the swing
-  // UNCHANGED. planner_mode implies single_swing (one clip per engage, then a held stand).
+  // PlannerEngageStep_ gates a fresh VALID command (timeout / invalid-flutter grace /
+  // timing / base-low / reachability), then commits target+side and starts one clip.
+  // Legacy models retain the proven frozen-target wbc_runner path; an explicitly trained
+  // formal-179 revision actor may atomically replace target/TTS before contact under the
+  // phase governor. planner_mode implies single_swing (one clip per engage, then hold).
   bool planner_mode = false;
+  // Double-keyed rollout for formal 179-D same-ball revisions.  Enabling this
+  // runtime switch is insufficient by design: the ONNX must also carry a
+  // complete, content-bound planner_task_revision training contract.  Old
+  // models and schema-3 producers retain the frozen-target path.
+  bool planner_task_revision_enable = false;
   double engage_min_tts_s = 1.0;      // never START a swing later than this (deep-clip snap -> fall)
   double planner_invalid_grace_s = 0.25;  // a valid cmd still engages if an invalid arrived within this
   double command_timeout_s = 0.5;     // no fresh VALID command within this -> stand
@@ -364,6 +372,19 @@ class PpPolicy {
       throw std::runtime_error(
           "pingpong: a 179-D face-command policy requires --planner and flat wire schema 3; "
           "scripted targets do not carry the demanded world-frame normal/rho atomically");
+    const auto& revision_contract = onnx_.planner_task_revision_contract();
+    RequirePpPlannerTaskRevisionDoubleKey(
+        revision_contract.trained, cfg_.planner_task_revision_enable);
+    if (cfg_.planner_task_revision_enable) {
+      if (!cfg_.planner_mode || onnx_.obs_dim() != kObsDim179)
+        throw std::runtime_error(
+            "pingpong: planner task revisions require planner-mode formal 179-D actor");
+      if (std::fabs(revision_contract.governor.policy_dt_s - cfg_.dt) > 1e-12)
+        throw std::runtime_error(
+            "pingpong: phase governor policy_dt_s does not match runtime policy dt");
+      planner_phase_governor_ = std::make_unique<PpPhaseGovernor>(
+          revision_contract.governor);
+    }
     if (cfg_.capture_first_tick && onnx_.obs_dim() != kObsDim179)
       throw std::runtime_error(
           "pingpong: first-tick source diagnostic supports deploy_parity_face179 only");
@@ -597,6 +618,28 @@ class PpPolicy {
     return planner_status_;
   }
 
+  struct PlannerTaskTrace {
+    bool enabled = false;
+    bool active = false;
+    bool post_contact = false;
+    std::uint64_t control_epoch = 0;
+    std::uint64_t observed_task_id = 0;
+    std::uint64_t observed_task_revision = 0;
+    std::uint64_t accepted_task_id = 0;
+    std::uint64_t accepted_task_revision = 0;
+    std::uint64_t last_consumed_task_id = 0;
+    std::uint64_t revocation_generation = 0;
+    double effective_tts_s = 0.0;
+    double phase = 0.0;
+    double phase_rate_per_s = 0.0;
+    std::string gate_state;
+  };
+
+  PlannerTaskTrace planner_task_trace() const {
+    std::lock_guard<std::mutex> lk(planner_mu_);
+    return planner_task_trace_;
+  }
+
   LocMode loc_mode() const { return cfg_.loc_mode; }
   const char* loc_mode_name() const {
     switch (cfg_.loc_mode) {
@@ -754,12 +797,23 @@ class PpPolicy {
       swing_level_prev_ = 0;
       planner_engaged_ = false;
       planner_base_lease_latched_ = false;
+      planner_racket_lease_latched_ = false;
       planner_have_hold_ = false;
       planner_tts0_ = 0.0;
       planner_static_active_ = false;
       planner_static_start_tick_ = 0;
       planner_hold_start_tick_ = 0;
       planner_static_q0_.resize(0);
+      if (cfg_.planner_task_revision_enable) {
+        if (planner_task_gate_.epoch_initialized())
+          planner_task_gate_.Disarm(planner_task_gate_.control_epoch());
+        planner_task_rearm_pending_ = true;
+        if (planner_phase_governor_) planner_phase_governor_->Complete();
+        planner_revision_post_strike_ = false;
+        planner_revision_clip_end_seen_ = false;
+        planner_revision_frame_delta_ = 0.0;
+        planner_revision_phase_rate_per_s_ = 0.0;
+      }
       planner_entry_pending_.store(true);  // restart the engage settle clock (engage_settle_s)
       set_planner_status_("yaw_align_pending");
     }
@@ -851,7 +905,17 @@ class PpPolicy {
       // LIVE PLANNER: linear clock seeded from the ENGAGE-time tts (clamped to the clip's
       // windup length at engage) so the reference strike aligns with the ball's arrival.
       // Same no-wrap semantics as single_swing; completion still trips on tts < min_tts.
-      tg.time_to_strike = planner_tts0_ - t;
+      if (cfg_.planner_task_revision_enable && planner_phase_governor_ &&
+          planner_phase_governor_->active()) {
+        // Schema-4 TTS is a task deadline, not a signed clip-frame offset.
+        // It reaches zero at contact and remains zero throughout follow-through;
+        // legacy schema-3 clocks retain their historical signed semantics below.
+        tg.time_to_strike = planner_revision_post_strike_
+                                ? 0.0
+                                : planner_phase_governor_->remaining_tts_s();
+      } else {
+        tg.time_to_strike = planner_tts0_ - t;
+      }
     } else if (cfg_.single_swing || cfg_.swing_rest_s >= 0.0) {
       // SINGLE-SWING: linear clock, NO fmod wrap. The periodic schedule bounds tts to
       // [-(1-lead)*period, lead*period] = [-0.9, 2.1], which (a) never reaches the clip's
@@ -890,6 +954,7 @@ class PpPolicy {
       bool force_zero_gain = false;
       PlannerEngageStep_(tick_idx, planner_tick, force_zero_gain);
       if (force_zero_gain) {
+        UpdatePlannerTaskTrace_(planner_tick);
         // A formal active-base lease changed or latest localization became
         // implausible. Do not execute the actor for even one extra sampled
         // tick; publish zero gain and re-enter via yaw/settle gating.
@@ -949,8 +1014,13 @@ class PpPolicy {
     // (it already clamps ts to seg_start for any tts >= this bound).
     const double max_tts =
         (clip_.strike_frame(clip_id) - clip_.seg_start(clip_id)) * clip_.step_dt;
-    if (tg.time_to_strike > max_tts) tg.time_to_strike = max_tts;
-    last_tts_at_windup_ = (tg.time_to_strike >= max_tts - 1e-9);
+    if (!(cfg_.planner_task_revision_enable && planner_engaged_) &&
+        tg.time_to_strike > max_tts)
+      tg.time_to_strike = max_tts;
+    last_tts_at_windup_ = cfg_.planner_task_revision_enable && planner_engaged_
+                              ? planner_revision_frame_float_ <=
+                                    static_cast<double>(clip_.seg_start(clip_id)) + 1e-9
+                              : (tg.time_to_strike >= max_tts - 1e-9);
     // SINGLE-SWING / REST (see PpPolicyConfig): once the clip has fully played, drop to
     // level 0 (held stand) instead of letting the periodic clock WRAP the reference from
     // the end pose back to windup (an untracked-in-training snap that topples the backhand).
@@ -959,8 +1029,21 @@ class PpPolicy {
       const double min_tts = (clip_.strike_frame(clip_id) -
                               (clip_.seg_start(clip_id) + clip_.seg_len[clip_id] - 1)) *
                              clip_.step_dt;
-      if (tg.time_to_strike < min_tts) {
+      const bool revision_clip_at_end =
+          cfg_.planner_task_revision_enable && planner_engaged_ &&
+          planner_revision_frame_float_ >=
+              static_cast<double>(clip_.seg_start(clip_id) +
+                                  clip_.seg_len[clip_id] - 1) -
+                  1e-9;
+      // Preserve the legacy one-tick observation of the exact final clip
+      // frame: native clock completes only after TTS crosses below min_tts,
+      // not on the first tick equal to it.
+      const bool revision_clip_finished =
+          revision_clip_at_end && planner_revision_clip_end_seen_;
+      if (revision_clip_at_end) planner_revision_clip_end_seen_ = true;
+      if (tg.time_to_strike < min_tts || revision_clip_finished) {
         level_.store(0);
+        CompleteFormalRevisionTask_();
         if (cfg_.planner_mode) planner_hold_start_tick_ = tick_idx;  // recovery-window clock
         if (cfg_.swing_rest_s >= 0.0) {
           rest_rearm_tick_ = tick_idx + static_cast<std::uint64_t>(
@@ -971,6 +1054,7 @@ class PpPolicy {
                      cfg_.swing_rest_s >= 0.0 ? " (auto re-arm after rest)" : "; press 1 to swing again");
       }
     }
+    if (cfg_.planner_mode) UpdatePlannerTaskTrace_(planner_tick);
     // Auto re-arm after the rest (only if WE dropped the level; a manual '0' clears it).
     // NOT in planner mode: there a swing re-engages only on a fresh VALID command
     // (PlannerEngageStep_); rest_rearm_tick_ is reused there purely as the rest timer.
@@ -990,9 +1074,18 @@ class PpPolicy {
                                   clip_.step_dt;
       if (tg.time_to_strike < min_tts_clip) tg.time_to_strike = min_tts_clip;
     }
-    const int time_step = clip_.time_step_for(clip_id, tg.time_to_strike);
+    const int time_step = cfg_.planner_task_revision_enable && planner_engaged_
+                              ? std::clamp(
+                                    static_cast<int>(std::lround(
+                                        planner_revision_frame_float_)),
+                                    clip_.seg_start(clip_id),
+                                    clip_.seg_start(clip_id) +
+                                        clip_.seg_len[clip_id] - 1)
+                              : clip_.time_step_for(clip_id, tg.time_to_strike);
 
     PpRefs refs = onnx_.refs(time_step);
+    if (cfg_.planner_task_revision_enable && planner_engaged_)
+      refs.joint_vel *= planner_revision_frame_delta_;
     // HOLD = a STATIONARY reference (2026-07-05, train==deploy lockstep): clip frame 0
     // is a mid-crouch TRANSIENT (knee +7.8 rad/s, torso -1.11 m/s down) — feeding its
     // raw velocities through the whole hold taught the policy to fight a phantom squat
@@ -1246,11 +1339,12 @@ class PpPolicy {
 
     // LIVE PLANNER target override (Path B): the swing clock already set tg.time_to_strike,
     // swing_sign, clip_id and time_step above; here we only swap the REACH POINT. During a
-    // swing use the FROZEN world target; while holding, use a base-anchored ready target at
+    // swing use the latest atomically COMMITTED world target; while holding, use a
+    // base-anchored ready target at
     // racket-reach x (so the footwork policy is not commanded to walk to a fixed world point
     // during the hold — the wbc_runner rest-hold semantics). Untouched when not planner_mode.
     if (cfg_.planner_mode) {
-      if (planner_engaged_) {   // active swing -> frozen world target
+      if (planner_engaged_) {   // active swing -> latest committed world target
         tg.pos_w = planner_frozen_pos_w_;
         tg.vel_w = planner_frozen_vel_w_;
       } else if (onnx_.obs_dim() == kObsDim110) {
@@ -1614,6 +1708,37 @@ class PpPolicy {
     bool input_pair_atomic = false;
   };
 
+  void UpdatePlannerTaskTrace_(const PlannerControlSnapshot& tick) {
+    if (!cfg_.planner_task_revision_enable) return;
+    PlannerTaskTrace trace;
+    trace.enabled = true;
+    trace.active = planner_task_gate_.active();
+    trace.post_contact = planner_revision_post_strike_;
+    trace.control_epoch = planner_task_gate_.epoch_initialized()
+                              ? planner_task_gate_.control_epoch()
+                              : 0;
+    trace.accepted_task_id = planner_task_gate_.active_task_id();
+    trace.accepted_task_revision = planner_task_gate_.active_revision();
+    trace.last_consumed_task_id = planner_task_gate_.last_consumed_task_id();
+    trace.revocation_generation = tick.racket.revocation_generation;
+    if (tick.racket.has_valid && tick.racket.cmd.has_task_contract) {
+      trace.observed_task_id = tick.racket.cmd.task_id;
+      trace.observed_task_revision = tick.racket.cmd.task_revision;
+      trace.effective_tts_s =
+          tick.racket.cmd.time_to_strike - tick.racket.valid_age_s;
+    }
+    if (planner_phase_governor_ && planner_phase_governor_->active()) {
+      trace.effective_tts_s = planner_revision_post_strike_
+                                  ? 0.0
+                                  : planner_phase_governor_->remaining_tts_s();
+      trace.phase = planner_phase_governor_->phase();
+      trace.phase_rate_per_s = planner_phase_governor_->phase_rate_per_s();
+    }
+    std::lock_guard<std::mutex> lk(planner_mu_);
+    trace.gate_state = planner_status_;
+    planner_task_trace_ = std::move(trace);
+  }
+
   PlannerControlSnapshot CapturePlannerControlSnapshot_(
       const robot_io::RobotState& state) const {
     PlannerControlSnapshot out;
@@ -1631,7 +1756,7 @@ class PpPolicy {
       out.base_fresh = base_in_->Latest(
           out.base, cfg_.external_base_max_age_s) &&
           base_in_->PosePlausible(out.base);
-      if (onnx_.obs_dim() == kObsDim179 && level_.load() != 1 &&
+      if (onnx_.obs_dim() == kObsDim179 &&
           out.racket.has_valid && out.racket.cmd.has_formal_epoch) {
         out.referenced_base_fresh = base_in_->ExactFormal(
             out.racket.cmd.control_epoch,
@@ -1647,7 +1772,7 @@ class PpPolicy {
         out.base_fresh = base_in_->Latest(
             out.base, cfg_.external_base_max_age_s) &&
             base_in_->PosePlausible(out.base);
-        if (onnx_.obs_dim() == kObsDim179 && level_.load() != 1 &&
+        if (onnx_.obs_dim() == kObsDim179 &&
             out.racket.has_valid && out.racket.cmd.has_formal_epoch) {
           out.referenced_base_fresh = base_in_->ExactFormal(
               out.racket.cmd.control_epoch,
@@ -1661,17 +1786,287 @@ class PpPolicy {
     return out;
   }
 
-  // Live-planner engage machine (Path B). Reproduces the PROVEN Python wbc_runner._tick:
-  // while a swing runs, the target is FROZEN and the existing clock/completion owns it (no
-  // mid-swing abort on planner flutter); at idle, gate a fresh VALID command (timeout /
-  // invalid-grace / min-tts / base-low / reachability) and, if it passes, FREEZE the target
-  // and drive the EXISTING controls (set_swing_dir + set_level(1)). Racket, formal base,
+  PpPhaseRevision MakePhaseRevision_(const PpRacketMsg& command,
+                                     const Vec3& position_w,
+                                     const Vec3& velocity_w,
+                                     const Vec3& normal_raw_a_w,
+                                     double time_to_strike) const {
+    PpPhaseRevision out;
+    out.control_epoch = command.control_epoch;
+    out.task_id = command.task_id;
+    out.task_revision = command.task_revision;
+    out.command_sequence = command.command_sequence;
+    out.source_monotonic_s = command.source_monotonic_s;
+    out.target_position_m = position_w;
+    out.target_velocity_mps = velocity_w;
+    out.target_normal = normal_raw_a_w;
+    out.desired_tts_s = time_to_strike;
+    return out;
+  }
+
+  void AbortFormalRevisionTask_(const char* status, bool& force_zero_gain) {
+    set_level(0);
+    planner_engaged_ = false;
+    planner_base_lease_latched_ = false;
+    planner_racket_lease_latched_ = false;
+    if (planner_phase_governor_) planner_phase_governor_->Complete();
+    planner_revision_post_strike_ = false;
+    planner_revision_clip_end_seen_ = false;
+    planner_revision_frame_delta_ = 0.0;
+    planner_revision_phase_rate_per_s_ = 0.0;
+    rearm_yaw_align();
+    set_planner_status_(status);
+    force_zero_gain = true;
+  }
+
+  void CompleteFormalRevisionTask_() {
+    if (!cfg_.planner_task_revision_enable) return;
+    if (planner_task_gate_.active())
+      planner_task_gate_.Complete(
+          planner_task_gate_.control_epoch(),
+          planner_task_gate_.active_task_id());
+    if (planner_phase_governor_) planner_phase_governor_->Complete();
+    planner_revision_post_strike_ = false;
+    planner_revision_clip_end_seen_ = false;
+    planner_revision_frame_delta_ = 0.0;
+    planner_revision_phase_rate_per_s_ = 0.0;
+    planner_engaged_ = false;
+  }
+
+  // Consume one schema-4 refinement for the already-linearized physical ball.
+  // A positive invalid revision is task-scoped and holds the last good tuple;
+  // zero/zero, epoch change, or a malformed/downgraded stream revokes the
+  // active actor.  Side/clip never change after engage.
+  void Formal179RevisionStep_(const PlannerControlSnapshot& tick,
+                              bool& force_zero_gain) {
+    const auto& snap = tick.racket;
+    if (snap.invalid_after) {
+      PpTaskRevisionDecision decision;
+      if (snap.has_latest_event && !snap.latest_event.valid &&
+          snap.latest_event.has_task_contract) {
+        decision = planner_task_gate_.ObserveInvalid(
+            snap.latest_event.control_epoch, snap.latest_event.task_id,
+            snap.latest_event.task_revision);
+      } else {
+        decision = planner_task_gate_.ObserveInvalid(
+            planner_task_gate_.control_epoch(), 0, 0);
+      }
+      if (decision == PpTaskRevisionDecision::kGlobalRevoke ||
+          decision == PpTaskRevisionDecision::kDisarmed ||
+          decision == PpTaskRevisionDecision::kEpochRegressed) {
+        AbortFormalRevisionTask_("active_task_revoked", force_zero_gain);
+        return;
+      }
+      set_planner_status_(
+          decision == PpTaskRevisionDecision::kTaskInvalidObserved
+              ? "active_task_scoped_invalid_hold"
+              : "active_revision_ignored");
+      return;
+    }
+    if (planner_revision_post_strike_) {
+      set_planner_status_("post_strike_revision_closed");
+      return;
+    }
+    if (!snap.has_valid || snap.valid_age_s > cfg_.command_timeout_s) {
+      set_planner_status_("active_revision_stale_hold");
+      return;
+    }
+    const auto& command = snap.cmd;
+    if (!command.has_task_contract || !command.has_task_identity) {
+      planner_task_gate_.ObserveInvalid(planner_task_gate_.control_epoch(), 0, 0);
+      AbortFormalRevisionTask_("active_schema_downgrade", force_zero_gain);
+      return;
+    }
+    const int clip_id = clip_id_from_swing_sign(planner_frozen_sign_);
+    const PpTaskRevisionEnvelope envelope{
+        command.control_epoch, command.task_id, command.task_revision,
+        command.swing_sign, clip_id};
+    if (command.control_epoch != planner_task_gate_.control_epoch()) {
+      const auto decision = planner_task_gate_.TryRevision(envelope);
+      if (decision == PpTaskRevisionDecision::kDisarmed ||
+          decision == PpTaskRevisionDecision::kEpochRegressed) {
+        AbortFormalRevisionTask_("active_epoch_changed", force_zero_gain);
+        return;
+      }
+    }
+    if (command.task_id != planner_task_gate_.active_task_id()) {
+      set_planner_status_("different_task_held_until_completion");
+      return;
+    }
+    if (command.task_revision <= planner_task_gate_.active_revision()) {
+      set_planner_status_("active_revision_duplicate");
+      return;
+    }
+    if (!tick.input_pair_atomic || !tick.transaction_mu || !racket_in_ || !base_in_ ||
+        !tick.base_fresh || !tick.referenced_base_fresh ||
+        command.control_epoch != tick.base.control_epoch ||
+        command.control_epoch != tick.referenced_base.control_epoch ||
+        command.base_sequence_ref != tick.referenced_base.base_sequence ||
+        tick.base.revocation_generation != tick.referenced_base.revocation_generation) {
+      set_planner_status_("active_revision_base_tuple_hold");
+      return;
+    }
+
+    const Vec3 base_pos = tick.base.pos;
+    const Vec4 base_yaw = yaw_quat(tick.aligned_imu_quat_w);
+    Vec3 position_w = command.pos_w;
+    Vec3 velocity_w = command.vel_w;
+    Vec3 normal_wire_b_w = command.normal_cmd;
+    if (command.frame_code == 1) {
+      position_w = base_pos + quat_rotate(base_yaw, command.pos_w);
+      velocity_w = quat_rotate(base_yaw, command.vel_w);
+      normal_wire_b_w = quat_rotate(base_yaw, command.normal_cmd);
+    }
+    const Vec3 target_b = quat_rotate_inverse(base_yaw, position_w - base_pos);
+    double resolved_sign = 0.0;
+    const Vec4 referenced_base_yaw = yaw_quat(tick.referenced_base.quat);
+    const Vec3 referenced_target_b = quat_rotate_inverse(
+        referenced_base_yaw, position_w - tick.referenced_base.pos);
+    double referenced_sign = 0.0;
+    if (!resolve_planner_swing_sign(
+            true, command.has_explicit_side, command.swing_sign,
+            target_b[1], cfg_.planner_side_split_y,
+            cfg_.planner_side_hysteresis_y, resolved_sign) ||
+        !resolve_planner_swing_sign(
+            true, command.has_explicit_side, command.swing_sign,
+            referenced_target_b[1], cfg_.planner_side_split_y,
+            cfg_.planner_side_hysteresis_y, referenced_sign) ||
+        resolved_sign != planner_frozen_sign_) {
+      set_planner_status_("active_revision_side_hold");
+      return;
+    }
+    if (cfg_.target_gate_enable &&
+        (target_b[0] < cfg_.gate_x_lo || target_b[0] > cfg_.gate_x_hi ||
+         std::fabs(target_b[1]) > cfg_.gate_y_abs ||
+         position_w[2] < cfg_.gate_z_lo || position_w[2] > cfg_.gate_z_hi ||
+         velocity_w.norm() > cfg_.gate_speed_max)) {
+      set_planner_status_("active_revision_target_gate_hold");
+      return;
+    }
+    const Vec3 normal_raw_a_w =
+        onnx_.face_normal_raw_a_from_wire_b(clip_id, normal_wire_b_w);
+    if (!onnx_.face_normal_within_training_envelope(clip_id, normal_raw_a_w)) {
+      set_planner_status_("active_revision_face_envelope_hold");
+      return;
+    }
+    bool committed_semantics = false;
+    const bool unchanged = PpWithPlannerInputsIfUnchanged(
+        *racket_in_, snap.generation, *base_in_, command.control_epoch,
+        command.base_sequence_ref, cfg_.external_base_max_age_s,
+        [&](const PpBaseSample& exact_base,
+            const PpBaseSample& current_latest_base) {
+          const auto current = racket_in_->Latest();
+          if (!current.has_valid || current.invalid_after ||
+              current.generation != snap.generation ||
+              current.cmd.control_epoch != command.control_epoch ||
+              current.cmd.task_id != command.task_id ||
+              current.cmd.task_revision != command.task_revision ||
+              exact_base.control_epoch != command.control_epoch ||
+              exact_base.base_sequence != command.base_sequence_ref ||
+              current_latest_base.control_epoch != command.control_epoch ||
+              exact_base.revocation_generation !=
+                  current_latest_base.revocation_generation ||
+              !base_in_->PosePlausible(current_latest_base) ||
+              current_latest_base.pos[2] < cfg_.base_low_z)
+            return false;
+          const double current_tts =
+              current.cmd.time_to_strike - current.valid_age_s;
+          PpPhaseGovernor phase_candidate = *planner_phase_governor_;
+          if (phase_candidate.Revise(
+                  MakePhaseRevision_(current.cmd, position_w, velocity_w,
+                                     normal_raw_a_w, current_tts)) !=
+              PpPhaseDecision::kAccepted) {
+            set_planner_status_("active_revision_phase_envelope_hold");
+            return false;
+          }
+          if (planner_task_gate_.TryRevision(envelope) !=
+              PpTaskRevisionDecision::kRevisionAccepted)
+            return false;
+          *planner_phase_governor_ = std::move(phase_candidate);
+          planner_frozen_pos_w_ = position_w;
+          planner_frozen_vel_w_ = velocity_w;
+          planner_frozen_normal_w_ = normal_raw_a_w;
+          planner_frozen_rho_ = command.rho;
+          committed_semantics = true;
+          return true;
+        });
+    set_planner_status_(unchanged && committed_semantics
+                            ? "active_revision_applied"
+                            : "active_revision_snapshot_changed_hold");
+  }
+
+  void AdvanceFormalRevisionPhase_(std::uint64_t tick_idx) {
+    if (!cfg_.planner_task_revision_enable || !planner_engaged_ ||
+        !planner_phase_governor_ || !planner_phase_governor_->active())
+      return;
+    const int clip_id = clip_id_from_swing_sign(planner_frozen_sign_);
+    const int start = clip_.seg_start(clip_id);
+    const int strike = clip_.strike_frame(clip_id);
+    const int end = start + clip_.seg_len[clip_id] - 1;
+    const double windup_frames = static_cast<double>(strike - start);
+    while (planner_revision_last_tick_ < tick_idx) {
+      const double previous_frame = planner_revision_frame_float_;
+      if (!planner_revision_post_strike_) {
+        planner_phase_governor_->Advance();
+        planner_revision_frame_float_ =
+            static_cast<double>(start) +
+            planner_phase_governor_->phase() * windup_frames;
+        planner_revision_frame_delta_ =
+            std::max(0.0, planner_revision_frame_float_ - previous_frame);
+        planner_revision_phase_rate_per_s_ =
+            planner_phase_governor_->phase_rate_per_s();
+        if (planner_phase_governor_->phase() >= 1.0)
+          planner_revision_post_strike_ = true;
+      } else {
+        // Keep the hidden phase-rate state continuous across contact.  The
+        // final pre-strike frame delta may be truncated by the remaining
+        // distance, so deriving post-strike speed from that delta would
+        // falsely collapse the rate exactly at contact.  Training instead
+        // accelerates/decelerates the true rate toward native 1 frame/tick and
+        // integrates it trapezoidally; mirror that here.
+        const auto& profile = planner_phase_governor_->profile();
+        const double native_phase_rate = std::min(
+            profile.max_phase_rate_per_s,
+            1.0 / (windup_frames * profile.policy_dt_s));
+        const double max_rate_change =
+            profile.max_phase_acceleration_per_s2 * profile.policy_dt_s;
+        const double next_phase_rate = std::max(
+            0.0, planner_revision_phase_rate_per_s_ + std::clamp(
+                native_phase_rate - planner_revision_phase_rate_per_s_,
+                -max_rate_change, max_rate_change));
+        planner_revision_frame_delta_ =
+            0.5 * (planner_revision_phase_rate_per_s_ + next_phase_rate) *
+            profile.policy_dt_s * windup_frames;
+        planner_revision_phase_rate_per_s_ = next_phase_rate;
+        planner_revision_frame_float_ = std::min(
+            static_cast<double>(end), planner_revision_frame_float_ +
+                                          planner_revision_frame_delta_);
+      }
+      ++planner_revision_last_tick_;
+    }
+  }
+
+  // Live-planner engage machine (Path B). Legacy models reproduce the proven frozen-target
+  // wbc_runner path. A double-keyed schema-4/model-contract path advances its governed phase
+  // and atomically accepts same-ball target/TTS revisions before contact. At idle, gate a
+  // fresh VALID command and, if it passes, commit its first visible tuple and drive the
+  // existing controls (set_swing_dir + set_level(1)). Racket, formal base,
   // oracle and current aligned IMU are captured once at the policy-tick boundary; engage,
   // side/face/wait and the observation path consume that same snapshot.
   void PlannerEngageStep_(std::uint64_t tick_idx,
                           const PlannerControlSnapshot& tick,
                           bool& force_zero_gain) {
     if (level_.load() == 1) {  // in flight
+      if (onnx_.obs_dim() == kObsDim179 &&
+          cfg_.planner_task_revision_enable &&
+          (!planner_racket_lease_latched_ ||
+           tick.racket.revocation_generation !=
+               planner_latched_racket_revocation_generation_)) {
+        planner_task_gate_.ObserveInvalid(
+            planner_task_gate_.control_epoch(), 0, 0);
+        AbortFormalRevisionTask_("active_task_revoked", force_zero_gain);
+        return;
+      }
       if (onnx_.obs_dim() == kObsDim179 &&
           (!planner_base_lease_latched_ ||
            !PpFormalBaseLeaseUsable(
@@ -1690,15 +2085,27 @@ class PpPolicy {
         force_zero_gain = true;
         return;
       }
-      // 110-D STREAMING (paper Fig. 3): keep consuming same-side refinements while the swing
-      // flies. Every other contract keeps the proven frozen-target behavior.
-      // Deliberate asymmetry for formal 179: racket commands (including a
-      // malformed/revoked command) remain frozen for the current swing and only
-      // gate the next engage.  The base lease check above is an emergency halt
-      // because localization feeds closed-loop state; it is not a claim that
-      // mailbox malformed/revoke semantics abort a frozen racket trajectory.
+      if (onnx_.obs_dim() == kObsDim179 &&
+          cfg_.planner_task_revision_enable) {
+        // Training order is advance the old visible task, then atomically
+        // accept a same-tick refinement, then compute the actor.  Engage tick
+        // k deliberately remains at the entry frame; the first advance is
+        // tick k+1.  Keeping that order also makes the revision deadline use
+        // the k+1 phase/rate/local-time state rather than stale tick-k state.
+        AdvanceFormalRevisionPhase_(tick_idx);
+        Formal179RevisionStep_(tick, force_zero_gain);
+        if (force_zero_gain) return;
+      }
+      // 110-D STREAMING (paper Fig. 3) consumes same-side refinements while the swing flies.
+      // Legacy formal-179 keeps its proven frozen-target behavior.  Double-keyed
+      // task-revision-179 instead consumes one atomic same-task target/TTS refinement per
+      // policy tick before contact while side/clip remain frozen; task-scoped invalids hold
+      // last-good, whereas anonymous/global revoke fails closed.  The base lease check above
+      // remains an emergency halt in both 179 paths because localization is closed-loop state.
       if (onnx_.obs_dim() == kObsDim110 && cfg_.stream_target) StreamTargetStep_(tick_idx);
-      set_planner_status_("swinging");
+      if (!(onnx_.obs_dim() == kObsDim179 &&
+            cfg_.planner_task_revision_enable))
+        set_planner_status_("swinging");
       return;
     }
     planner_engaged_ = false;  // level 0: idle/hold (ready-hold override uses planner_have_hold_)
@@ -1717,6 +2124,18 @@ class PpPolicy {
 
     if (!tick.has_racket_input) { set_planner_status_("no_input"); return; }
     const auto& snap = tick.racket;
+    if (onnx_.obs_dim() == kObsDim179 &&
+        cfg_.planner_task_revision_enable && planner_racket_lease_latched_ &&
+        snap.revocation_generation !=
+            planner_latched_racket_revocation_generation_) {
+      planner_task_gate_.ObserveInvalid(
+          planner_task_gate_.epoch_initialized()
+              ? planner_task_gate_.control_epoch()
+              : snap.cmd.control_epoch,
+          0, 0);
+      AbortFormalRevisionTask_("planner_authority_revoked", force_zero_gain);
+      return;
+    }
     if (!snap.has_valid) { set_planner_status_("no_command"); return; }
 
     const double tts = snap.cmd.time_to_strike - snap.valid_age_s;  // decays since send
@@ -1727,11 +2146,72 @@ class PpPolicy {
       set_planner_status_("stale"); return;
     }
     if (freshness == PpPlannerFreshnessDecision::kRevoked) {
+      if (cfg_.planner_task_revision_enable) {
+        PpTaskRevisionDecision decision;
+        if (snap.has_latest_event && !snap.latest_event.valid &&
+            snap.latest_event.has_task_contract) {
+          decision = planner_task_gate_.ObserveInvalid(
+              snap.latest_event.control_epoch, snap.latest_event.task_id,
+              snap.latest_event.task_revision);
+        } else {
+          decision = planner_task_gate_.ObserveInvalid(
+              planner_task_gate_.epoch_initialized()
+                  ? planner_task_gate_.control_epoch()
+                  : snap.cmd.control_epoch,
+              0, 0);
+        }
+        if (decision == PpTaskRevisionDecision::kGlobalRevoke ||
+            decision == PpTaskRevisionDecision::kDisarmed ||
+            decision == PpTaskRevisionDecision::kEpochRegressed) {
+          AbortFormalRevisionTask_("planner_invalid", force_zero_gain);
+          return;
+        }
+      }
       set_planner_status_("planner_invalid"); return;
     }
     if (onnx_.obs_dim() == kObsDim179 && !snap.cmd.has_face_command) {
       set_planner_status_("face_command_missing");
       return;
+    }
+    if (onnx_.obs_dim() == kObsDim179) {
+      if (cfg_.planner_task_revision_enable && !snap.cmd.has_task_contract) {
+        set_planner_status_("schema4_task_contract_required");
+        return;
+      }
+      if (!cfg_.planner_task_revision_enable && snap.cmd.has_task_contract) {
+        // A schema-4 producer promises live same-ball refinements.  A model
+        // not trained for those transitions must never silently downgrade the
+        // stream to the historical frozen-target behavior.
+        set_planner_status_("schema4_model_not_revision_trained");
+        return;
+      }
+      if (cfg_.planner_task_revision_enable && planner_task_rearm_pending_) {
+        if (!planner_task_gate_.Rearm(snap.cmd.control_epoch)) {
+          set_planner_status_("task_rearm_failed");
+          return;
+        }
+        planner_task_rearm_pending_ = false;
+      }
+      if (cfg_.planner_task_revision_enable &&
+          planner_task_gate_.epoch_initialized() &&
+          snap.cmd.control_epoch != planner_task_gate_.control_epoch()) {
+        if (snap.cmd.control_epoch < planner_task_gate_.control_epoch()) {
+          set_planner_status_("task_epoch_regressed");
+          return;
+        }
+        // A newer planner authority may reset task_id to 1.  Because this is
+        // the idle/level-0 path, explicitly rearm the new epoch before any
+        // target or actor state can become visible.  Active epoch changes use
+        // AbortFormalRevisionTask_ instead and must traverse yaw/settle again.
+        if (!planner_task_gate_.Rearm(snap.cmd.control_epoch)) {
+          set_planner_status_("task_epoch_rearm_failed");
+          return;
+        }
+      }
+      if (cfg_.planner_task_revision_enable && !planner_task_gate_.armed()) {
+        set_planner_status_("task_gate_disarmed");
+        return;
+      }
     }
     // Late gate. 110: PER-CLIP (the backhand windup 0.87 s < the legacy 1.0 s constant —
     // a scalar gate would make backhand unreachable under the wait-for-tts semantics below);
@@ -1743,14 +2223,24 @@ class PpPolicy {
     // mode). The pre-side cutoff must be the MIN of the per-clip cutoffs. Legacy contracts
     // keep the scalar behavior unchanged.
     double candidate_tts0;
-    if (onnx_.obs_dim() == kObsDim110 || onnx_.obs_dim() == kObsDim179) {
+    if (onnx_.obs_dim() == kObsDim110 ||
+        (onnx_.obs_dim() == kObsDim179 && !cfg_.planner_task_revision_enable)) {
       const double windup_min = std::min(
           (clip_.strike_frame(0) - clip_.seg_start(0)) * clip_.step_dt,
           (clip_.strike_frame(1) - clip_.seg_start(1)) * clip_.step_dt);
       if (tts < std::min(cfg_.engage_min_tts_s, 0.9 * windup_min)) {
         set_planner_status_("too_late"); return;
       }
-    } else if (tts < cfg_.engage_min_tts_s) { set_planner_status_("too_late"); return; }
+    } else if (onnx_.obs_dim() == kObsDim179 &&
+               cfg_.planner_task_revision_enable) {
+      const auto& contract = onnx_.planner_task_revision_contract();
+      if (tts < contract.initial_tts_lo_s || tts > contract.initial_tts_hi_s) {
+        set_planner_status_("revision_initial_tts_outside_trained_range");
+        return;
+      }
+    } else if (tts < cfg_.engage_min_tts_s) {
+      set_planner_status_("too_late"); return;
+    }
 
     // A stale localization frame makes the base obs (and this gate) incoherent -> block
     // engage. Covers BOTH live-base modes: external_base (mocap) and oracle (sim GT) —
@@ -1956,7 +2446,13 @@ class PpPolicy {
     // = multi-decimeter miss). Wait at ready until the decaying tts enters the windup
     // window, then engage with the strike frame exactly on the predicted arrival. Per-clip
     // late gate re-check (side is now known).
-    if (onnx_.obs_dim() == kObsDim110 || onnx_.obs_dim() == kObsDim179) {
+    if (onnx_.obs_dim() == kObsDim179 && cfg_.planner_task_revision_enable) {
+      // Feasibility is decided by phase_governor_v1 at the transaction
+      // boundary.  Unlike the historical native-clock path this supports a
+      // trained 0.5 s wind-up and longer early predictions without waiting for
+      // the native clip duration.
+      candidate_tts0 = tts;
+    } else if (onnx_.obs_dim() == kObsDim110 || onnx_.obs_dim() == kObsDim179) {
       const auto timing = EvaluateExactWindupTts(
           tts, cfg_.engage_min_tts_s, max_tts0);
       if (timing == PpPlannerTtsDecision::kTooLate) {
@@ -2064,14 +2560,31 @@ class PpPolicy {
               set_planner_status_("snapshot_stale_or_epoch_changed");
               return false;
             }
+            if (cfg_.planner_task_revision_enable &&
+                (!current_racket.cmd.has_task_contract ||
+                 current_racket.cmd.task_id != snap.cmd.task_id ||
+                 current_racket.cmd.task_revision != snap.cmd.task_revision)) {
+              set_planner_status_("snapshot_task_changed");
+              return false;
+            }
             const auto current_freshness = EvaluatePpPlannerFreshness(
                 current_racket.valid_age_s, cfg_.command_timeout_s,
                 current_racket.invalid_after, cfg_.planner_invalid_grace_s, true);
             committed_tts = current_racket.cmd.time_to_strike - current_racket.valid_age_s;
-            if (current_freshness != PpPlannerFreshnessDecision::kFresh ||
+            const bool revision_timing_in_training_support =
+                cfg_.planner_task_revision_enable &&
+                committed_tts >=
+                    onnx_.planner_task_revision_contract().initial_tts_lo_s &&
+                committed_tts <=
+                    onnx_.planner_task_revision_contract().initial_tts_hi_s;
+            const bool legacy_native_timing_engageable =
+                !cfg_.planner_task_revision_enable &&
                 EvaluateExactWindupTts(
-                    committed_tts, cfg_.engage_min_tts_s, max_tts0) !=
-                    PpPlannerTtsDecision::kEngage) {
+                    committed_tts, cfg_.engage_min_tts_s, max_tts0) ==
+                    PpPlannerTtsDecision::kEngage;
+            if (current_freshness != PpPlannerFreshnessDecision::kFresh ||
+                (!revision_timing_in_training_support &&
+                 !legacy_native_timing_engageable)) {
               set_planner_status_("snapshot_timing_changed");
               return false;
             }
@@ -2083,6 +2596,43 @@ class PpPolicy {
             planner_latched_base_revocation_generation_ =
                 current_latest_base.revocation_generation;
             planner_base_lease_latched_ = true;
+            planner_latched_racket_revocation_generation_ =
+                current_racket.revocation_generation;
+            planner_racket_lease_latched_ = true;
+            if (cfg_.planner_task_revision_enable) {
+              PpPhaseGovernor candidate = *planner_phase_governor_;
+              const auto phase_decision = candidate.BeginConsumerSnapshot(
+                  MakePhaseRevision_(current_racket.cmd, pos_w, candidate_vel_w,
+                                     normal_raw_a_w, committed_tts),
+                  static_cast<double>(tick_idx) * cfg_.dt);
+              if (phase_decision != PpPhaseDecision::kAccepted) {
+                set_planner_status_("phase_begin_rejected");
+                planner_base_lease_latched_ = false;
+                planner_racket_lease_latched_ = false;
+                return false;
+              }
+              const PpTaskRevisionEnvelope envelope{
+                  current_racket.cmd.control_epoch,
+                  current_racket.cmd.task_id,
+                  current_racket.cmd.task_revision,
+                  sign,
+                  eng_clip};
+              if (planner_task_gate_.TryEngage(envelope) !=
+                  PpTaskRevisionDecision::kEngaged) {
+                set_planner_status_("task_not_engageable");
+                planner_base_lease_latched_ = false;
+                planner_racket_lease_latched_ = false;
+                return false;
+              }
+              *planner_phase_governor_ = std::move(candidate);
+              planner_revision_frame_float_ =
+                  static_cast<double>(clip_.seg_start(eng_clip));
+              planner_revision_frame_delta_ = 0.0;
+              planner_revision_phase_rate_per_s_ = 0.0;
+              planner_revision_post_strike_ = false;
+              planner_revision_clip_end_seen_ = false;
+              planner_revision_last_tick_ = tick_idx;
+            }
             commit_frozen(committed_tts);
             return true;
           });
@@ -2100,7 +2650,11 @@ class PpPolicy {
     std::fprintf(stderr,
         "[pp engage] %s %s: tgt base-rel (%+.2f,%+.2f,%+.2f) tts=%.2fs (clock tts0=%.2fs)\n",
         sign > 0 ? "forehand" : "backhand",
-        (onnx_.obs_dim() == kObsDim110 && cfg_.stream_target) ? "engaged (streaming)" : "locked",
+        cfg_.planner_task_revision_enable
+            ? "engaged (same-task revisions)"
+            : ((onnx_.obs_dim() == kObsDim110 && cfg_.stream_target)
+                   ? "engaged (streaming)"
+                   : "locked"),
         tgt_b[0], tgt_b[1], tgt_b[2], committed_tts, planner_tts0_);
     set_planner_status_("engage");
   }
@@ -2327,10 +2881,21 @@ class PpPolicy {
   std::uint64_t base_warn_tick_ = 0;    // repeat the stale-mocap warning every ~2 s
   std::uint64_t required_base_warn_tick_ = 0;  // 177-D fail-closed warning throttle
   std::uint64_t gate_warn_tick_ = 0;    // throttle the target-gate rejection detail print
-  bool planner_engaged_ = false;        // a planner swing is active (frozen target in flight)
+  bool planner_engaged_ = false;        // a planner swing is active (committed target in flight)
+  PpTaskRevisionGate planner_task_gate_;
+  std::unique_ptr<PpPhaseGovernor> planner_phase_governor_;
+  bool planner_task_rearm_pending_ = true;
+  bool planner_revision_post_strike_ = false;
+  bool planner_revision_clip_end_seen_ = false;
+  double planner_revision_frame_float_ = 0.0;
+  double planner_revision_frame_delta_ = 0.0;
+  double planner_revision_phase_rate_per_s_ = 0.0;
+  std::uint64_t planner_revision_last_tick_ = 0;
   bool planner_base_lease_latched_ = false;  // formal179 base lease captured atomically at engage
   std::uint64_t planner_latched_base_epoch_ = 0;
   std::uint64_t planner_latched_base_revocation_generation_ = 0;
+  bool planner_racket_lease_latched_ = false;
+  std::uint64_t planner_latched_racket_revocation_generation_ = 0;
   bool planner_have_hold_ = false;      // at least one swing engaged (diagnostic)
   double planner_tts0_ = 0.0;           // engage-time tts, clamped to the clip windup length;
                                         // seeds the swing clock so the strike meets the ball
@@ -2356,6 +2921,7 @@ class PpPolicy {
   Eigen::VectorXd planner_static_q0_;
   mutable std::mutex planner_mu_;
   std::string planner_status_ = "init";
+  PlannerTaskTrace planner_task_trace_;
   mutable std::mutex obs_mu_;
   Eigen::VectorXd last_obs_;
 

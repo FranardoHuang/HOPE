@@ -31,6 +31,10 @@ def generate_launch_description():
     server = LaunchConfiguration("server")
     port = LaunchConfiguration("port")
     update_freq = LaunchConfiguration("update_freq")
+    source_timestamp_mode = LaunchConfiguration("source_timestamp_mode")
+    vrpn_source_max_abs_skew_s = LaunchConfiguration(
+        "vrpn_source_max_abs_skew_s"
+    )
     start_vrpn_client = LaunchConfiguration("start_vrpn_client")
     start_world = LaunchConfiguration("start_world")
     ball_tracking_mode = LaunchConfiguration("ball_tracking_mode")
@@ -47,6 +51,19 @@ def generate_launch_description():
             description="VRPN client poll rate (Hz); match the mocap camera rate (arena "
                         "cameras run 300 Hz; the planner's velocity polyfit window is sized "
                         "for a >=240 Hz ball stream — 180 Hz doubles its time window).",
+        ),
+        DeclareLaunchArgument(
+            "source_timestamp_mode",
+            default_value="receipt",
+            description="VRPN source stamp mode: receipt (legacy/default) or vrpn_packet. "
+                        "vrpn_packet requires synchronized producer/ROS-host clocks and "
+                        "fails closed when packet skew exceeds vrpn_source_max_abs_skew_s.",
+        ),
+        DeclareLaunchArgument(
+            "vrpn_source_max_abs_skew_s",
+            default_value="0.1",
+            description="Maximum absolute packet-to-local ROS clock skew in seconds when "
+                        "source_timestamp_mode=vrpn_packet.",
         ),
         DeclareLaunchArgument("start_vrpn_client", default_value="true"),
         DeclareLaunchArgument("start_world", default_value="true"),
@@ -81,6 +98,10 @@ def generate_launch_description():
                 "port": ParameterValue(port, value_type=int),
                 "frame_id": "world",
                 "update_freq": ParameterValue(update_freq, value_type=float),
+                "source_timestamp_mode": source_timestamp_mode,
+                "vrpn_source_max_abs_skew_s": ParameterValue(
+                    vrpn_source_max_abs_skew_s, value_type=float
+                ),
                 # multi_sensor:=true exposes EVERY VRPN sensor channel as its own
                 # topic (/vrpn_mocap/<sender>/<sensor>/pose). The ball is a single
                 # marker, not a nameable rigid body, so it usually only appears as

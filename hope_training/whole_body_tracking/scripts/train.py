@@ -849,6 +849,51 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
         "motion_adaptive_uniform_ratio": attr(motion, "adaptive_uniform_ratio"),
         "motion_adaptive_alpha": attr(motion, "adaptive_alpha"),
         "motion_event_timing": motion_cmd.event_timing_hard_contract(),
+        **(
+            {}
+            if motion_cmd.planner_revision_hard_contract() is None
+            else {
+                "planner_task_revision": motion_cmd.planner_revision_hard_contract(),
+                "planner_task_revision_training": {
+                    "initial_tts_sampling_semantics": (
+                        "explicit_weighted_mixture_over_initial_tts_range_s"
+                    ),
+                    "initial_tts_mixture": attr(
+                        motion, "planner_revision_initial_tts_mixture"
+                    ),
+                    "initial_feasibility_gate": (
+                        "normalized_phase_rate_and_acceleration_envelope_only"
+                    ),
+                    "dynamics_certified_action_tau_min_bound": False,
+                    "timing_exam_semantics": {
+                        "0.5_s": "required_baseline_gate",
+                        "below_0.5_s": "stress_diagnostic_not_support_floor",
+                    },
+                    "position_std_m": attr(
+                        racket, "planner_revision_position_std_m"
+                    ),
+                    "velocity_std_mps": attr(
+                        racket, "planner_revision_velocity_std_mps"
+                    ),
+                    "normal_std_rad": attr(
+                        racket, "planner_revision_normal_std_rad"
+                    ),
+                    "tts_std_s": attr(racket, "planner_revision_tts_std_s"),
+                    "truth_fields_immutable": [
+                        "question_bank_row",
+                        "physical_ball",
+                        "reward_target",
+                        "critic_target",
+                    ],
+                    "actor_revision_fields": [
+                        "target_position",
+                        "target_velocity",
+                        "signed_target_normal",
+                        "time_to_strike",
+                    ],
+                },
+            }
+        ),
         "motion_allow_legacy_link_origin_velocity": bool(
             getattr(motion, "allow_legacy_link_origin_velocity", False)
         ),
@@ -1046,6 +1091,18 @@ def _check_unknown_keys(node, known, where):
             f"consume — they would be silently ignored. Add each to the whitelist AND a "
             f"_set_attr/_set_range call in _apply_task_overrides, or remove it from the YAML/CLI."
         )
+
+
+_PLANNER_REVISION_KEYS = (
+    "enabled",
+    "profile",
+    "initial_tts_range_s",
+    "initial_tts_mixture",
+    "position_std_m",
+    "velocity_std_mps",
+    "normal_std_rad",
+    "tts_std_s",
+)
 
 
 # YAML keys under `racket:` that target the RacketTargetCommandCfg (used to decide whether the task
@@ -1410,6 +1467,142 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             env_cfg.decimation = int(dec)
             env_cfg.sim.render_interval = env_cfg.decimation  # keep render in step with decimation
             applied.append(f"decimation={int(dec)}")
+
+    # One top-level block configures both command terms.  There is intentionally no supported
+    # per-term YAML seam: a clock-only or target-only activation would train a protocol that cannot
+    # exist in the runner.  Enabled blocks require every field, including an exact complete profile;
+    # disabled/absent keeps the historical source and hard-contract bytes unchanged.
+    planner_revision = _get(task, "planner_revision")
+    _check_unknown_keys(
+        planner_revision, _PLANNER_REVISION_KEYS, "task.planner_revision"
+    )
+    if planner_revision is not None:
+        enabled_raw = _get(planner_revision, "enabled")
+        if enabled_raw is None:
+            raise _OverrideError(
+                "task.planner_revision must explicitly set enabled=true|false"
+            )
+        enabled = _as_explicit_bool(
+            enabled_raw, "task.planner_revision.enabled"
+        )
+        present = {
+            key for key in _PLANNER_REVISION_KEYS if _get(planner_revision, key) is not None
+        }
+        if not enabled:
+            extras = sorted(present - {"enabled"})
+            if extras:
+                raise _OverrideError(
+                    "disabled task.planner_revision may not carry dormant fields: "
+                    f"{extras}"
+                )
+        else:
+            missing = sorted(set(_PLANNER_REVISION_KEYS) - present)
+            if missing:
+                raise _OverrideError(
+                    "enabled task.planner_revision is incomplete; missing "
+                    f"{missing}"
+                )
+            _require(
+                hasattr(env_cfg.commands, "motion")
+                and hasattr(env_cfg.commands, "racket_target"),
+                "commands.motion + commands.racket_target (task.planner_revision)",
+            )
+            from whole_body_tracking.tasks.tracking.mdp.planner_revision import (
+                InitialTtsMixture,
+                PhaseGovernorProfile,
+            )
+
+            raw_profile = _get(planner_revision, "profile")
+            try:
+                profile = PhaseGovernorProfile.from_mapping(dict(raw_profile))
+            except (TypeError, ValueError) as exc:
+                raise _OverrideError(
+                    f"task.planner_revision.profile is invalid: {exc}"
+                ) from exc
+            initial_tts = tuple(
+                float(value)
+                for value in _get(planner_revision, "initial_tts_range_s")
+            )
+            if (
+                len(initial_tts) != 2
+                or not profile.min_tts_s <= initial_tts[0] < initial_tts[1] <= profile.max_tts_s
+            ):
+                raise _OverrideError(
+                    "task.planner_revision.initial_tts_range_s must be a non-degenerate ordered "
+                    "pair inside "
+                    "the profile TTS envelope"
+                )
+            raw_initial_tts_mixture = _get(
+                planner_revision, "initial_tts_mixture"
+            )
+            try:
+                initial_tts_mixture = InitialTtsMixture.from_mapping(
+                    dict(raw_initial_tts_mixture)
+                )
+                initial_tts_mixture.validate_support(
+                    lo_s=initial_tts[0], hi_s=initial_tts[1]
+                )
+            except (TypeError, ValueError) as exc:
+                raise _OverrideError(
+                    f"task.planner_revision.initial_tts_mixture is invalid: {exc}"
+                ) from exc
+            initial_tts_mixture_doc = initial_tts_mixture.document()
+            profile_doc = profile.document()
+            motion_cfg = env_cfg.commands.motion
+            racket_cfg = env_cfg.commands.racket_target
+            for command_cfg, label in (
+                (motion_cfg, "commands.motion"),
+                (racket_cfg, "commands.racket_target"),
+            ):
+                _require(
+                    hasattr(command_cfg, "planner_revision_enabled")
+                    and hasattr(command_cfg, "planner_revision_profile")
+                    and hasattr(command_cfg, "planner_revision_initial_tts_range_s"),
+                    f"{label}.planner_revision_*",
+                )
+                command_cfg.planner_revision_enabled = True
+                command_cfg.planner_revision_profile = profile_doc
+                command_cfg.planner_revision_initial_tts_range_s = initial_tts
+                _require(
+                    hasattr(command_cfg, "planner_revision_initial_tts_mixture"),
+                    f"{label}.planner_revision_initial_tts_mixture",
+                )
+                command_cfg.planner_revision_initial_tts_mixture = (
+                    initial_tts_mixture_doc
+                )
+            # initial_tts is the sole preparation/deadline clock.  Leaving the legacy hold clocks
+            # active would consume the same deadline twice and create impossible late releases.
+            motion_cfg.hold_steps_range = (0, 0)
+            motion_cfg.stand_start_min_hold = 0
+            motion_cfg.post_swing_min_hold = 0
+            for source_key, target_attr in (
+                ("position_std_m", "planner_revision_position_std_m"),
+                ("velocity_std_mps", "planner_revision_velocity_std_mps"),
+                ("normal_std_rad", "planner_revision_normal_std_rad"),
+                ("tts_std_s", "planner_revision_tts_std_s"),
+            ):
+                _require(hasattr(racket_cfg, target_attr), f"commands.racket_target.{target_attr}")
+                value = _as_exact_float(
+                    _get(planner_revision, source_key),
+                    f"task.planner_revision.{source_key}",
+                )
+                if value < 0.0:
+                    raise _OverrideError(
+                        f"task.planner_revision.{source_key} must be non-negative"
+                    )
+                setattr(racket_cfg, target_attr, value)
+            from whole_body_tracking.tasks.tracking import mdp as _mdp
+
+            _require(
+                getattr(env_cfg.observations.policy, "time_to_strike", None) is not None,
+                "observations.policy.time_to_strike (task.planner_revision)",
+            )
+            env_cfg.observations.policy.time_to_strike.func = _mdp.actor_time_to_strike
+            applied.append(
+                "planner_task_revision=enabled(same physical ball; atomic target/TTS; "
+                f"phase_governor_sha={profile.profile_sha256},initial_tts={initial_tts},"
+                f"tts_mixture={initial_tts_mixture_doc})"
+            )
 
     # motion command (swing-entry structure): no-teleport wrap / stand-entry resets / pre-swing hold
     mt = _get(task, "motion")

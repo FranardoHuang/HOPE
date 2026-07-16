@@ -1,0 +1,129 @@
+{
+  "schema_version": 1,
+  "contract_id": "phase1-timing-exam-0p5-k100-v1",
+  "status": "preregistered_materialization_not_run",
+  "recorded_local_date": "2026-07-16",
+  "human_owner": "Franco",
+  "executor": "Codex",
+  "purpose": "Materialize one immutable 0.5 second, 50-question-per-side timing paper from the accepted signed-face K100 without inventing or censoring question ids.",
+  "simulation_only": true,
+  "real_robot_commands_forbidden": true,
+  "source_schedule": {
+    "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/papers/signed_face_exam_k100_v1/signed_face_exam_k100.schedule.json",
+    "bytes": 20237,
+    "file_sha256": "f2777dcd02080ba68b839c76ea9d3f14c938457c9bc01b5692fe86ae59157ec7",
+    "semantic_sha256": "3ca4bdba7f4acbe6f211d90e95305fc4a9459c118e4220c9683060c0a6723365",
+    "question_id_order_sha256": "09f778f2afd7888069ac75aabee3bf19deda015acbbad843ccdb70ca39548bd0",
+    "bank_sha256": "60e1a7ade72eaf64e17a1b83795125551f08c6699c8a3cc3c269500d8e6cd1ca",
+    "bank_source_family_sha256": "9603a1788eb17ce03598cdde4efff946039613cf61fcc686f90a385706dba9db",
+    "scheduled_attempts": 100,
+    "per_side": {
+      "forehand": 50,
+      "backhand": 50
+    }
+  },
+  "source_bindings": {
+    "validator": {
+      "repo_path": "scripts/materialize_phase1_timing_exam_0p5.py",
+      "bytes": 70127,
+      "sha256": "224122ba1cf4080ca18de40e2278a2825ad878f60bf7e477662df5ad1f043e90"
+    }
+  },
+  "paper": {
+    "policy_rate_hz": 50,
+    "baseline": {
+      "human_name": "0.5 second zero-velocity ready-state timing baseline",
+      "tts_seconds": 0.5,
+      "tts_ticks": 25,
+      "initial_state_id": "nominal-frame0-zero-velocity-v1",
+      "expected_feasible": null,
+      "feasibility_status": "hypothesis_not_certified",
+      "scheduled_attempts": 100,
+      "per_side": {
+        "forehand": 50,
+        "backhand": 50
+      },
+      "source_hold_steps_are_replaced": true,
+      "source_attempt_seed_and_question_order_are_preserved": true
+    },
+    "time_laws": [
+      {
+        "time_law_id": "v4rg-uniform-phase-forehand-0p5-v1",
+        "side": "forehand",
+        "native_contact_ticks": 66,
+        "speed_scale": 2.64,
+        "contact_tts_ticks": 25,
+        "contact_tts_seconds": 0.5,
+        "topp_or_dynamics_certified": false
+      },
+      {
+        "time_law_id": "v4rg-uniform-phase-backhand-0p5-v1",
+        "side": "backhand",
+        "native_contact_ticks": 45,
+        "speed_scale": 1.8,
+        "contact_tts_ticks": 25,
+        "contact_tts_seconds": 0.5,
+        "topp_or_dynamics_certified": false
+      }
+    ],
+    "tts_sweep_plan": {
+      "tts_seconds": [
+        0.9,
+        0.7,
+        0.5,
+        0.4,
+        0.33,
+        0.25
+      ],
+      "screen_questions_per_side": 10,
+      "screen_role": "diagnostic_only_no_stop_or_promote",
+      "decision_questions_per_side": 50,
+      "decision_rule": "run 0.5 s and the two screen bins bracketing the first failure transition",
+      "sub_0p5_role": "late_ball_or_infeasible_boundary_diagnostic",
+      "formal_shortest_time_claim_authorized": false
+    }
+  },
+  "scoring": {
+    "denominator": {
+      "policy": "all_scheduled_attempts",
+      "aggregate": 100,
+      "forehand": 50,
+      "backhand": 50,
+      "missing_invalid_reset_or_infeasible_attempt_counts_as_failure": true,
+      "censoring_allowed": false
+    },
+    "per_side_pass_count": 31,
+    "per_side_total": 50,
+    "one_sided_wilson_confidence": 0.95,
+    "one_sided_wilson_lower_bound_at_31_of_50": 0.5036944597,
+    "composite": {
+      "returned_required": true,
+      "position_error_m_strict_lt": 0.075,
+      "velocity_error_mps_strict_lt": 0.5,
+      "signed_normal_error_deg_strict_lt": 15.0,
+      "unsigned_or_oriented_plane_fallback_allowed": false
+    },
+    "safety_zero_tolerance_fields": [
+      "physical_fall",
+      "self_hit",
+      "illegal_table_or_net_contact",
+      "reset_or_teleport",
+      "deadline_shifted"
+    ],
+    "formal_gate_requires_evaluation_contract_exact": true
+  },
+  "execution": {
+    "materializer_launches_no_evaluator": true,
+    "output_must_not_exist": true,
+    "atomic_no_replace": true,
+    "isaac_diagnostic_evaluator_authorized": true,
+    "isaac_diagnostic_requires_allow_inexact_contract": true,
+    "trainer_authorized": false,
+    "judge_authorized": false,
+    "planner_or_runner_authorized": false,
+    "stop_or_promote_authorized": false,
+    "deployment_authorized": false,
+    "real_robot_authorized": false
+  },
+  "contract_content_sha256": "8156d59b186fc0353259a4619e60e2996c02de06210d1afd7ee0798c28b9bc9d"
+}

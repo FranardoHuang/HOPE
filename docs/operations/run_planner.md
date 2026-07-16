@@ -26,6 +26,9 @@ ros2 launch hope_planner hope_planner.launch.py
 Current config:
 
 - `hope_ws/src/hope_planner/config/hope_planner.yaml`
+- `hope_ws/src/hope_planner/config/hope_planner.task_revision.yaml` is the schema-4 same-ball
+  revision overlay. It must be paired with a checkpoint whose ONNX metadata binds the identical
+  [`phase governor`](../DEFINITIONS.md#phase-governor); never enable only one side.
 
 Runtime parameters that must travel with a formal 179 planner/policy pairing:
 
@@ -52,17 +55,28 @@ The planner publishes `/racket/command` (`hope_msgs/RacketCommand`) with reliabl
 
 For the native C++ runner it also publishes reliable `/racket/command_flat` and
 `/a3/base_pose_flat`. Formal racket schema 3 is exact20 and carries shared epoch, racket sequence,
-exact base-sequence reference and source time; formal base schema 2 is exact12. Side `0` is a
-revocation, never permission for the runner to guess.
+exact base-sequence reference and source time. Task-revision schema 4 is exact22 and adds
+`task_id/task_revision`; formal base schema 2 is exact12. Side `0` is a revocation, never permission
+for the runner to guess.
 
 Confirm live topic wiring before relying on outputs.
 
-Current runtime semantics (audited 2026-07-16): the Python node recomputes the estimate, trajectory,
-target and `time_to_strike` from each admitted sample. Formal 179-D C++ execution consumes the
-latest tuple before engage but freezes target and clock for the active swing; it is not a fully
-rolling in-swing planner. Also note that the current VRPN bridge supplies host receipt time rather
-than camera capture time. Source-age checks are useful safety checks, but are not yet end-to-end
-capture-latency compensation.
+Current source semantics (implemented 2026-07-16; runtime gate still open): the Python node
+recomputes trajectory, target and `time_to_strike` from each admitted sample. In schema 4, one
+physical ball keeps one task id and every valid/invalid refresh increments the revision. A matching
+179-D C++ policy consumes the latest complete target/TTS tuple on every policy tick before contact,
+while side/clip stay immutable; it never treats a refresh as a second swing. The task closes only on
+an explicit ball boundary/contact/deadline transition and consumed task ids cannot replay.
+
+The runner must be started with its task-revision option and must load ONNX metadata whose
+`planner_task_revision` document exactly matches the producer/training profile. A schema-4 producer
+with an old frozen-target model, or a revision-trained model with schema 3, fails closed. These are
+source gates only until the clean Linux Release/full-scene/vendor tests pass.
+
+VRPN still defaults to host receipt time. Capture-stamp experiments must explicitly set
+`source_timestamp_mode=vrpn_packet`, prove the VRPN and ROS clocks are synchronized within
+`vrpn_source_max_abs_skew_s`, and retain a latency trace. Invalid/skewed packet stamps suppress the
+sample instead of silently falling back.
 
 Relevant source:
 
@@ -81,12 +95,11 @@ ros2 topic echo /racket/command
 
 4. Record latency and prediction sanity checks in G03.
 
-For a useful low-rate field trace, record at least: source/capture age, ball distance to the strike
-plane, predicted intercept position/velocity, time-to-strike, command epoch/sequence, runner state,
-and the accept/wait/reject reason. The existing 10 Hz diagnostics expose only part of this list; a
-single correlated planner/runner trace remains to be implemented. Until it exists, save the planner
-diagnostics topic together with runner stdout and do not infer a task-lifecycle bug from either log
-alone.
+The planner now emits a throttled 10 Hz correlated diagnostic including source age, ball distance to
+the strike plane, predicted intercept position/velocity, planner TTS, runner-effective TTS, task
+state/id/revision and command epoch/sequence. Save it together with runner status/accept reason; the
+two streams still need a shared runtime capture before they count as a field trace. Do not infer a
+task-lifecycle bug from only one log.
 
 Host-only source checks, without ROS, a simulator or a runner:
 
@@ -96,5 +109,5 @@ PYTHONPATH=hope_ws/src/hope_planner python3 -m pytest -q \
   tests/test_planner_side_contract_source.py
 ```
 
-Accepted latest-main integration result: `180 passed, 2 optional skipped`. Runtime verification
-still requires the separately owned first-tick path.
+Current feature integration result: `215 passed, 2 optional skipped`. This is not yet an accepted
+latest-main/runtime result; ROS/Jazzy Release, first tick and vendor behavior remain separate gates.

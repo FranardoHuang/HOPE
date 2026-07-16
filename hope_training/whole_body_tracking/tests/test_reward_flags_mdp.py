@@ -191,6 +191,7 @@ for _p in ("whole_body_tracking", "whole_body_tracking.tasks", "whole_body_track
     sys.modules.setdefault(_p, types.ModuleType(_p))
 _load(f"{_PKG}.event_timing", "event_timing.py")
 _load(f"{_PKG}.post_swing_teacher", "post_swing_teacher.py")
+planner_revision_mod = _load(f"{_PKG}.planner_revision", "planner_revision.py")
 commands_mod = _load(f"{_PKG}.commands", "commands.py")
 rewards_mod = _load(f"{_PKG}.rewards", "rewards.py")
 terminations_mod = _load(f"{_PKG}.terminations", "terminations.py")
@@ -1058,16 +1059,22 @@ def _make_a1_cmd(
     dropout_prob=0.0,
     ar1_sigma=0.0,
     tts_mode="live",
+    planner_revision=False,
 ):
     cmd = hope_commands_mod.RacketTargetCommand.__new__(hope_commands_mod.RacketTargetCommand)
     cmd.num_envs = 1
     cmd.device = "cpu"
-    cmd._env = types.SimpleNamespace(step_dt=0.02)
+    cmd._env = types.SimpleNamespace(
+        step_dt=0.02,
+        termination_manager=types.SimpleNamespace(active_terms=()),
+    )
     cmd.metrics = {"actor_time_to_strike_s": torch.zeros(1)}
     cmd._actor_view_active = True
     cmd._delay_steps = delay_steps
     cmd._delay_tts_mode = tts_mode
     cmd._delay_tts_active = tts_mode != "live"
+    cmd.planner_revision_enabled = planner_revision
+    cmd._atomic_tts_active = cmd._delay_tts_active or planner_revision
     cmd._delay_ptr = 0
     cmd._jitter_pos = 0.0
     cmd._jitter_vel = 0.0
@@ -1089,16 +1096,36 @@ def _make_a1_cmd(
     cmd.delayed_racket_target_vel_w = cmd.racket_target_vel_w.clone()
     cmd.delayed_target_normal_cmd = cmd.target_normal_cmd.clone()
     cmd.delayed_swing_sign = cmd.swing_sign.clone()
-    if cmd._delay_tts_active:
+    if cmd._atomic_tts_active:
         cmd.delayed_time_to_strike = cmd.time_to_strike.clone()
+    if planner_revision:
+        cmd._planner_initial_tts_mixture = None
+        cmd._planner_control_epoch = torch.tensor([7], dtype=torch.long)
+        cmd._planner_task_id = torch.tensor([10], dtype=torch.long)
+        cmd._planner_task_revision = torch.tensor([1], dtype=torch.long)
+        cmd._planner_visible_pos = cmd.racket_target_pos_w.clone()
+        cmd._planner_visible_vel = cmd.racket_target_vel_w.clone()
+        cmd._planner_visible_normal = cmd.target_normal_cmd.clone()
+        cmd._planner_visible_tts = cmd.time_to_strike.clone()
+        cmd._planner_visible_last_precontact = torch.zeros(1, dtype=torch.bool)
+        cmd._planner_actor_control_epoch = cmd._planner_control_epoch.clone()
+        cmd._planner_actor_task_id = cmd._planner_task_id.clone()
+        cmd._planner_actor_task_revision = cmd._planner_task_revision.clone()
     if delay_steps > 0:
         length = delay_steps + 1
         cmd._delay_buf_pos = cmd.racket_target_pos_w.unsqueeze(0).repeat(length, 1, 1)
         cmd._delay_buf_vel = cmd.racket_target_vel_w.unsqueeze(0).repeat(length, 1, 1)
         cmd._delay_buf_normal = cmd.target_normal_cmd.unsqueeze(0).repeat(length, 1, 1)
         cmd._delay_buf_sign = cmd.swing_sign.unsqueeze(0).repeat(length, 1)
-        if cmd._delay_tts_active:
+        if cmd._atomic_tts_active:
             cmd._delay_buf_tts = cmd.time_to_strike.unsqueeze(0).repeat(length, 1)
+        if planner_revision:
+            cmd._delay_buf_planner_epoch = cmd._planner_control_epoch.unsqueeze(0).repeat(length, 1)
+            cmd._delay_buf_planner_task = cmd._planner_task_id.unsqueeze(0).repeat(length, 1)
+            cmd._delay_buf_planner_revision = cmd._planner_task_revision.unsqueeze(0).repeat(length, 1)
+            cmd._delay_buf_planner_last_precontact = torch.zeros(
+                length, 1, dtype=torch.bool
+            )
     if cmd._a1v2_active:
         cmd._swing_bias = torch.zeros(1, 3)
         cmd._drop_cd = torch.zeros(1, dtype=torch.long)
@@ -1107,8 +1134,13 @@ def _make_a1_cmd(
         cmd._held_vel = cmd.racket_target_vel_w.clone()
         cmd._held_normal = cmd.target_normal_cmd.clone()
         cmd._held_sign = cmd.swing_sign.clone()
-        if cmd._delay_tts_active:
+        if cmd._atomic_tts_active:
             cmd._held_tts = cmd.time_to_strike.clone()
+        if planner_revision:
+            cmd._held_planner_epoch = cmd._planner_control_epoch.clone()
+            cmd._held_planner_task = cmd._planner_task_id.clone()
+            cmd._held_planner_revision = cmd._planner_task_revision.clone()
+            cmd._held_planner_last_precontact = torch.zeros(1, dtype=torch.bool)
     return cmd
 
 
@@ -1198,6 +1230,71 @@ def test_a1_atomic_tts_zero_delay_is_numerically_live(mode):
     cmd.time_to_strike[:] = 0.31
     cmd._push_actor_target()
     assert cmd.actor_time_to_strike().item() == pytest.approx(0.31)
+
+
+def test_planner_revision_actor_delivery_counts_only_after_atomic_ring_materializes():
+    cmd = _make_a1_cmd(
+        delay_steps=2,
+        tts_mode="source_timestamp_compensated",
+        planner_revision=True,
+    )
+    cmd._planner_task_revision[:] = 2
+    cmd._planner_visible_pos[:] = torch.tensor([[10.0, 20.0, 30.0]])
+    cmd._planner_visible_vel[:] = torch.tensor([[40.0, 50.0, 60.0]])
+    cmd._planner_visible_normal[:] = torch.tensor([[1.0, 0.0, 0.0]])
+    cmd._planner_visible_tts[:] = 0.02
+    cmd._planner_visible_last_precontact[:] = True
+
+    cmd._push_actor_target()
+    cmd._push_actor_target()
+    before_delivery = cmd.consume_exact_behavior_decision_counters()
+    assert before_delivery["planner_revision_actor_visible_count"].item() == 0
+    assert before_delivery["planner_revision_last_precontact_actor_visible_count"].item() == 0
+
+    cmd._push_actor_target()
+    delivered = cmd.consume_exact_behavior_decision_counters()
+    assert delivered["planner_revision_actor_visible_count"].item() == 1
+    assert delivered["planner_revision_last_precontact_actor_visible_count"].item() == 1
+    assert cmd.actor_time_to_strike().item() == 0.0
+
+    cmd._push_actor_target()
+    duplicate = cmd.consume_exact_behavior_decision_counters()
+    assert duplicate["planner_revision_actor_visible_count"].item() == 0
+    assert duplicate["planner_revision_last_precontact_actor_visible_count"].item() == 0
+
+
+def test_planner_revision_delay_zero_counts_same_step_and_clamps_postcontact_tts():
+    cmd = _make_a1_cmd(
+        delay_steps=0,
+        tts_mode="source_timestamp_compensated",
+        planner_revision=True,
+    )
+    cmd._planner_task_revision[:] = 2
+    cmd._planner_visible_tts[:] = -0.04
+    cmd._planner_visible_last_precontact[:] = True
+    cmd._push_actor_target()
+    delivered = cmd.consume_exact_behavior_decision_counters()
+    assert delivered["planner_revision_actor_visible_count"].item() == 1
+    assert delivered["planner_revision_last_precontact_actor_visible_count"].item() == 1
+    assert cmd.actor_time_to_strike().item() == 0.0
+
+
+def test_delayed_final_revision_arriving_after_contact_is_not_precontact_visible():
+    cmd = _make_a1_cmd(
+        delay_steps=2,
+        tts_mode="source_timestamp_compensated",
+        planner_revision=True,
+    )
+    cmd._planner_task_revision[:] = 2
+    cmd._planner_visible_tts[:] = 0.02
+    cmd._planner_visible_last_precontact[:] = True
+    cmd._push_actor_target()
+    cmd._push_actor_target()
+    cmd.pre_strike[:] = False
+    cmd._push_actor_target()
+    delivered = cmd.consume_exact_behavior_decision_counters()
+    assert delivered["planner_revision_actor_visible_count"].item() == 1
+    assert delivered["planner_revision_last_precontact_actor_visible_count"].item() == 0
 
 
 def test_a1_dropout_holds_the_entire_target_message():
@@ -2115,6 +2212,315 @@ def test_qdot_limit_hinge_rejects_order_zero_nonfinite_and_per_env_drift():
     env, asset_cfg = _qdot_limit_env(limits)
     with pytest.raises(RuntimeError, match="identical articulation velocity limits"):
         hope_rewards_mod.joint_velocity_limit_hinge(env, asset_cfg)
+
+
+def _exact_behavior_command(termination_manager, num_envs=4):
+    command = hope_commands_mod.RacketTargetCommand.__new__(
+        hope_commands_mod.RacketTargetCommand
+    )
+    command.device = "cpu"
+    command.num_envs = num_envs
+    command._env = types.SimpleNamespace(termination_manager=termination_manager)
+    command._exact_behavior_decision_counters = {}
+    command._exact_attempt_active = torch.zeros(num_envs, dtype=torch.bool)
+    command._exact_attempt_completed = torch.zeros(num_envs, dtype=torch.bool)
+    command._exact_pending_completion = torch.zeros(num_envs, dtype=torch.bool)
+    command._clip_names = {0: "forehand", 1: "backhand"}
+    sparse_names = (
+        "strike_opportunity_count",
+        "virtual_capture_count",
+        "virtual_net_clear_count",
+        "virtual_landing_valid_count",
+        "virtual_legal_return_count",
+    )
+    command._sparse_reward_eligibility_counters = {
+        name: torch.zeros((), dtype=torch.long) for name in sparse_names
+    }
+    for family in command._clip_names.values():
+        for name in sparse_names:
+            command._sparse_reward_eligibility_counters[f"{name}_{family}"] = torch.zeros(
+                (), dtype=torch.long
+            )
+    command._ensure_exact_behavior_decision_counters()
+    return command
+
+
+def test_exact_behavior_terminal_reset_separates_physical_pre_post_and_guards():
+    reasons = {
+        "base_fell_tilt": torch.tensor([True, False, False, False]),
+        "base_too_low": torch.tensor([False, False, True, True]),
+        "anchor_pos": torch.tensor([False, True, False, False]),
+        "time_out": torch.zeros(4, dtype=torch.bool),
+    }
+    tm = types.SimpleNamespace(
+        active_terms=list(reasons),
+        get_term=lambda name: reasons[name],
+        terminated=torch.ones(4, dtype=torch.bool),
+        time_outs=torch.zeros(4, dtype=torch.bool),
+    )
+    command = _exact_behavior_command(tm)
+    command._exact_attempt_active[:] = True
+    command._close_exact_swing_attempts(torch.arange(4))
+    command._book_exact_behavior_terminal_reset(
+        torch.arange(4),
+        pre_strike=torch.tensor([True, True, False, True]),
+        recovering=torch.tensor([False, False, False, True]),
+    )
+
+    first = command.consume_exact_behavior_decision_counters()
+    assert first["terminal_reset_count"].item() == 4
+    assert first["swing_outcome_count"].item() == 4
+    assert first["swing_completion_count"].item() == 0
+    assert first["physical_fall_count"].item() == 3
+    assert first["pre_strike_physical_fall_count"].item() == 1
+    assert first["post_strike_physical_fall_count"].item() == 2
+    assert first["non_physical_terminal_reset_count"].item() == 1
+    assert first["termination_reason_base_fell_tilt_count"].item() == 1
+    assert first["termination_reason_base_too_low_count"].item() == 2
+    assert first["termination_reason_anchor_pos_count"].item() == 1
+    # Consume is a hard PPO-update boundary: the next transaction cannot inherit any event.
+    second = command.consume_exact_behavior_decision_counters()
+    assert all(value.item() == 0 for value in second.values())
+
+
+def test_exact_swing_closeout_pairs_window_denominator_and_transfers_wrap_strike():
+    command = _exact_behavior_command(types.SimpleNamespace(active_terms=()), num_envs=2)
+    # Two attempts started before this decision window.  Only the first reached its strike;
+    # a defensive exact strike on the current wrap step is parked for the second env's NEW task.
+    command._exact_attempt_active[:] = True
+    command._exact_attempt_completed[:] = torch.tensor([True, False])
+    command._exact_pending_completion[:] = torch.tensor([False, True])
+
+    command._close_exact_swing_attempts(torch.arange(2))
+    first = command.consume_exact_behavior_decision_counters()
+    assert first["swing_start_count"].item() == 0
+    assert first["strike_opportunity_count"].item() == 0
+    assert first["swing_outcome_count"].item() == 2
+    assert first["swing_completion_count"].item() == 1
+    assert torch.equal(command._exact_attempt_completed, torch.tensor([False, True]))
+    assert not bool(command._exact_pending_completion.any())
+
+    # The parked wrap strike is paired only when its new attempt later closes; no prior-window
+    # start/strike counter is needed to reconstruct this window's bounded completion ratio.
+    command._close_exact_swing_attempts(torch.tensor([1]))
+    second = command.consume_exact_behavior_decision_counters()
+    assert second["swing_outcome_count"].item() == 1
+    assert second["swing_completion_count"].item() == 1
+
+
+def test_exact_terminal_reason_masks_reject_numeric_truthiness():
+    reasons = {"base_fell_tilt": torch.tensor([0.0, 0.2])}
+    tm = types.SimpleNamespace(
+        active_terms=list(reasons),
+        get_term=lambda name: reasons[name],
+        terminated=torch.tensor([False, True]),
+        time_outs=torch.zeros(2, dtype=torch.bool),
+    )
+    command = _exact_behavior_command(tm, num_envs=2)
+    with pytest.raises(TypeError, match="boolean dtype"):
+        command._book_exact_behavior_terminal_reset(
+            torch.arange(2),
+            pre_strike=torch.ones(2, dtype=torch.bool),
+            recovering=torch.zeros(2, dtype=torch.bool),
+        )
+    snapshot = command.consume_exact_behavior_decision_counters()
+    assert snapshot["terminal_reset_count"].item() == 0
+    assert snapshot["physical_fall_count"].item() == 0
+
+
+def test_exact_terminal_reason_masks_reject_broadcastable_matrix_shape():
+    reasons = {"base_fell_tilt": torch.zeros(2, 1, dtype=torch.bool)}
+    tm = types.SimpleNamespace(
+        active_terms=list(reasons),
+        get_term=lambda name: reasons[name],
+        terminated=torch.tensor([False, True]),
+        time_outs=torch.zeros(2, dtype=torch.bool),
+    )
+    command = _exact_behavior_command(tm, num_envs=2)
+    with pytest.raises(ValueError, match="one-dimensional"):
+        command._book_exact_behavior_terminal_reset(
+            torch.arange(2),
+            pre_strike=torch.ones(2, dtype=torch.bool),
+            recovering=torch.zeros(2, dtype=torch.bool),
+        )
+
+
+def test_exact_ready_balance_aggregates_have_explicit_phase_and_sensor_denominators():
+    tm = types.SimpleNamespace(active_terms=())
+    command = _exact_behavior_command(tm)
+    command._motion_term = types.SimpleNamespace(
+        event_timing_enabled=False,
+        in_hold=torch.tensor([True, False, True, True]),
+    )
+    command._event_timing_bound = True
+    command.metrics = {
+        "base_upright": torch.cos(torch.tensor([0.0, 0.5, 0.2, 0.4])),
+        "foot_contact_frac": torch.tensor([1.0, 0.0, 0.5, 1.0]),
+        "foot_slip_speed": torch.tensor([0.1, 9.0, 0.2, 0.3]),
+    }
+    command.robot = types.SimpleNamespace(
+        data=types.SimpleNamespace(
+            root_pos_w=torch.tensor(
+                [[0.0, 0.0, 1.0], [9.0, 9.0, 1.0], [0.3, 0.4, 1.0], [0.0, 1.0, 1.0]]
+            ),
+            root_lin_vel_w=torch.tensor(
+                [[0.3, 0.4, 0.0], [9.0, 9.0, 0.0], [0.0, 0.0, 0.0], [0.0, 1.0, 0.0]]
+            ),
+        )
+    )
+    command.base_target_pos_w = torch.zeros(4, 2)
+    command._foot_idx_robot = [0, 1]
+    command._foot_idx_contact = [0, 1]
+    command._contact_sensor = object()
+
+    command._book_exact_ready_behavior_samples()
+    first = command.consume_exact_behavior_decision_counters()
+    for key in (
+        "ready_tilt_eligible_sample_count",
+        "ready_base_speed_eligible_sample_count",
+        "ready_station_offset_eligible_sample_count",
+        "ready_foot_contact_eligible_sample_count",
+        "ready_foot_slip_eligible_sample_count",
+    ):
+        assert first[key].item() == 3
+    assert first["ready_tilt_rad_sum"].item() == pytest.approx(0.6, abs=1e-5)
+    assert first["ready_base_speed_xy_mps_sum"].item() == pytest.approx(1.5)
+    assert first["ready_station_offset_m_sum"].item() == pytest.approx(1.5)
+    assert first["ready_foot_contact_fraction_sum"].item() == pytest.approx(2.5)
+    assert first["ready_foot_slip_speed_mps_sum"].item() == pytest.approx(0.6)
+
+    # No hold eligibility means no fabricated zero-valued observation in the next update.
+    command._motion_term.in_hold.zero_()
+    command._book_exact_ready_behavior_samples()
+    second = command.consume_exact_behavior_decision_counters()
+    assert second["ready_tilt_eligible_sample_count"].item() == 0
+    assert second["ready_foot_contact_eligible_sample_count"].item() == 0
+
+
+def test_exact_planner_revision_activation_counters_book_and_reset_per_update():
+    command = _exact_behavior_command(types.SimpleNamespace(active_terms=()))
+    command.planner_revision_enabled = True
+    command._planner_revision_profile = types.SimpleNamespace(
+        min_tts_s=0.02, early_deadline_tolerance_s=1.0e-6
+    )
+    command._planner_initial_tts_mixture = None
+
+    command._book_planner_revision_decisions(
+        attempted_tts=torch.tensor([0.10, 0.02000001, 0.02, 0.08]),
+        accepted=torch.tensor([True, True, False, False]),
+    )
+    first = command.consume_exact_behavior_decision_counters()
+    assert first["planner_revision_attempt_count"].item() == 4
+    assert first["planner_revision_accepted_count"].item() == 2
+    assert first["planner_revision_rejected_count"].item() == 2
+    assert first["planner_revision_last_precontact_attempt_count"].item() == 2
+    assert first["planner_revision_last_precontact_accepted_count"].item() == 1
+
+    second = command.consume_exact_behavior_decision_counters()
+    for name in (
+        "planner_revision_attempt_count",
+        "planner_revision_accepted_count",
+        "planner_revision_rejected_count",
+        "planner_revision_last_precontact_attempt_count",
+        "planner_revision_last_precontact_accepted_count",
+        "planner_revision_actor_visible_count",
+        "planner_revision_last_precontact_actor_visible_count",
+    ):
+        assert second[name].item() == 0
+
+
+def test_training_governor_keeps_final_actor_interval_for_point_zero_two_revision():
+    motion = commands_mod.MotionCommand.__new__(commands_mod.MotionCommand)
+    motion.device = "cpu"
+    motion.planner_revision_enabled = True
+    motion._planner_revision_profile = planner_revision_mod.PhaseGovernorProfile(
+        policy_dt_s=0.02,
+        min_tts_s=0.02,
+        max_tts_s=2.0,
+        max_phase_rate_per_s=4.0,
+        max_phase_acceleration_per_s2=20.0,
+        max_deadline_revision_delta_s=0.25,
+        max_position_revision_delta_m=0.10,
+        max_velocity_revision_delta_mps=0.50,
+        max_normal_revision_delta_rad=0.20,
+        early_deadline_tolerance_s=1.0e-6,
+    )
+    motion.time_steps_f = torch.zeros(1)
+    motion.speed_scale = torch.ones(1)
+    motion.metrics = {}
+    motion._planner_active = torch.zeros(1, dtype=torch.bool)
+    motion._planner_control_epoch = torch.zeros(1, dtype=torch.long)
+    motion._planner_task_id = torch.zeros(1, dtype=torch.long)
+    motion._planner_task_revision = torch.full((1,), -1, dtype=torch.long)
+    motion._planner_start_step = torch.zeros(1)
+    motion._planner_strike_step = torch.zeros(1)
+    motion._planner_phase_rate = torch.zeros(1)
+    motion._planner_slow_only_next = torch.zeros(1, dtype=torch.bool)
+    motion._planner_desired_tts = torch.zeros(1)
+    motion._planner_begin_tts = torch.zeros(1)
+    motion._planner_truth_tts = torch.zeros(1)
+    motion._planner_begin_target_pos = torch.zeros(1, 3)
+    motion._planner_begin_target_vel = torch.zeros(1, 3)
+    motion._planner_begin_target_normal = torch.zeros(1, 3)
+
+    ids = torch.tensor([0], dtype=torch.long)
+    position = torch.tensor([[0.2, -0.1, 0.9]])
+    velocity = torch.tensor([[-2.0, 0.0, -0.2]])
+    normal = torch.tensor([[1.0, 0.0, 0.0]])
+    motion.begin_planner_task(
+        ids,
+        control_epoch=torch.tensor([7]),
+        task_id=torch.tensor([10]),
+        strike_step=torch.tensor([1.0]),
+        initial_tts=torch.tensor([0.5]),
+        target_position=position,
+        target_velocity=velocity,
+        target_normal=normal,
+    )
+
+    accepted_tts = []
+    revision = 1
+    for tick in range(1, 25):
+        delta = motion._advance_planner_phase(torch.tensor([False]))
+        motion.time_steps_f += delta
+        if tick >= 20:
+            revision += 1
+            # Exercise the actual float32 countdown path; 0.50 - 24*0.02 is
+            # 0.0199999101 on the training grid, not the rounded decimal 0.02.
+            tts = motion._planner_truth_tts[ids].clone()
+            accepted = motion.submit_planner_revision(
+                ids,
+                control_epoch=torch.tensor([7]),
+                task_id=torch.tensor([10]),
+                task_revision=torch.tensor([revision]),
+                desired_tts=tts,
+                target_position=position,
+                target_velocity=velocity,
+                target_normal=normal,
+            )
+            assert accepted.tolist() == [True]
+            accepted_tts.append(tts.item())
+
+    assert accepted_tts == pytest.approx([0.10, 0.08, 0.06, 0.04, 0.02], abs=1.0e-6)
+    assert torch.equal(
+        motion._planner_desired_tts[ids], torch.full((1,), 0.02)
+    )
+    assert motion.time_steps_f.item() < 1.0
+
+    delta = motion._advance_planner_phase(torch.tensor([False]))
+    motion.time_steps_f += delta
+    assert motion.time_steps_f.item() == pytest.approx(1.0)
+    post_contact = motion.submit_planner_revision(
+        ids,
+        control_epoch=torch.tensor([7]),
+        task_id=torch.tensor([10]),
+        task_revision=torch.tensor([revision + 1]),
+        desired_tts=torch.tensor([0.02]),
+        target_position=position,
+        target_velocity=velocity,
+        target_normal=normal,
+    )
+    assert post_contact.tolist() == [False]
 
 
 if __name__ == "__main__":

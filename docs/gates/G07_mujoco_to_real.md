@@ -192,7 +192,7 @@ questions are not all closed end to end:
    distribution; real strike-position coverage has not been compared quantitatively.
 5. **Fast preparation / retiming — Partial.** Training now has approximately 1.0/0.7/0.5-second and
    clip-dependent random retiming, while the question-bank demanded absolute racket target remains
-   unchanged. This is uniform clip retiming, not [TOPP](../DEFINITIONS.md#topp); new-motion TOPP and
+   unchanged. This is uniform clip retiming, not [TOPP](../DEFINITIONS.md); new-motion TOPP and
    an equivalent deployed reference/target-speed interface remain open.
 6. **Readable debugging — Partial.** Existing 10 Hz planner diagnostics expose counts, validity and
    time-to-strike, while the runner throttles some gate warnings. There is still no single low-rate
@@ -215,3 +215,37 @@ vendor Gate3. G07 remains `Partial`.
 
 Reproduction evidence: planner/runner causal source `6d6b778a`; focused host source tests passed
 `66/66` during this audit. These tests do not replace the open runtime and behavior gates above.
+
+## Source update 2026-07-16: same-ball live revision closes the design freeze
+
+The eight-point audit above remains the historical description of the old runner. The replacement
+source now addresses its linked items 1, 2, 6 and 8 as one protocol, without claiming runtime or
+robot success:
+
+- formal racket schema 4 extends the exact schema-3 row with `task_id` and monotonically increasing
+  `task_revision`; one physical ball retains one task identity while position, velocity,
+  physical-B normal and TTS update atomically before reference contact;
+- a checkpoint/ONNX-bound [`phase governor`](../DEFINITIONS.md#phase-governor) consumes those
+  revisions without reversing the reference, ratcheting the revision envelope or exceeding the
+  frozen phase-rate/acceleration/target/deadline bounds;
+- contact/plane/deadline lifecycle closure plus a trustworthy no-ball gap makes one task
+  consume-once, so a repeated producer sample cannot start another swing and a genuinely new
+  inbound ball is not swallowed as an old revision;
+- the Python planner's throttled diagnostic line now correlates source age, ball distance to the
+  strike plane, predicted TTS, runner-effective TTS, task state/id/revision and formal
+  epoch/sequence;
+- the local VRPN client has a strict opt-in packet-timestamp mode. It rejects invalid/non-finite,
+  unrepresentable or over-skew packets instead of silently falling back to host receipt time;
+  receipt time remains the compatibility default until venue clock synchronization is measured.
+
+The same protocol is wired into training: latent question/ball/Reward/critic truth stays immutable,
+only the actor-visible estimate revises, and the training hard contract records a broad explicit
+initial-TTS mixture with a point mass at 0.5 s. A separate K100
+[`0.5-second timing exam`](../DEFINITIONS.md#timing-exam-0p5) and exact integer behavior ledger
+have source implementations. The old rolling pool was stopped because its EMA logs cannot
+retroactively supply this ruler.
+
+This is still `Partial`. No ROS 2 Jazzy/VRPN Release build, full-scene Isaac probe, real 0.5-second
+behavior score, dynamics-certified 0.5-second TOPP trajectory, vendor MuJoCo Gate3/Gate3B run or
+real-robot command has passed. The new runner/profile must fail closed until all metadata and
+schema-4 inputs agree; no legacy model is upgraded by re-export alone.

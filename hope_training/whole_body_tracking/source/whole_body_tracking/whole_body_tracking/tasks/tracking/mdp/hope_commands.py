@@ -47,6 +47,10 @@ from isaaclab.utils.math import (
 )
 
 from whole_body_tracking.tasks.tracking.mdp.commands import MotionCommand
+from whole_body_tracking.tasks.tracking.mdp.planner_revision import (
+    InitialTtsMixture,
+    PhaseGovernorProfile,
+)
 from whole_body_tracking.tasks.tracking.mdp.stage1_question_bank import (
     load_question_bank,
     question_id,
@@ -60,6 +64,10 @@ if TYPE_CHECKING:
 # Holds starting beyond this yaw (rad) contribute to the conditioned recovery metric.
 # It sits just inside the deploy engage limit, so the metric measures states that matter.
 _RECOVERY_START_YAW_THRESHOLD = 0.30
+
+# Absolute, reference-independent balance guards from HOPEDeployParityTerminationsCfg.  A reset
+# caused only by anchor/body tracking envelopes is a guard reset, not evidence that the robot fell.
+_PHYSICAL_FALL_TERMINATION_TERMS = ("base_fell_tilt", "base_too_low")
 
 _FACE_COMMAND_PAIRINGS = ("shared_plus_y", "legacy_signed_vs_A")
 
@@ -421,6 +429,12 @@ class RacketTargetCommand(CommandTerm):
                 self._sparse_reward_eligibility_counters[f"{_name}_{_family}"] = torch.zeros(
                     (), dtype=torch.long, device=self.device
                 )
+        # Exact per-PPO-update behavior ledger.  Event counters and ready-phase denominators are
+        # integer, sums are float64, and nothing decays.  The runner consumes this transaction
+        # together with the sparse strike ledger once per update, so two disjoint 100-update
+        # windows can be reconstructed by summing their records (unlike the historical EMAs).
+        self._exact_behavior_decision_counters = {}
+        self._ensure_exact_behavior_decision_counters()
         self._exact_n_acc_c = {c: 0.0 for c in self._clip_names}
         self._exact_pass_pos_acc_c = {c: 0.0 for c in self._clip_names}
         self._exact_pass_vel_acc_c = {c: 0.0 for c in self._clip_names}
@@ -467,6 +481,23 @@ class RacketTargetCommand(CommandTerm):
         self._rally_returns_acc = 0.0
         self._rally_starts_acc_c = {c: 0.0 for c in self._clip_names}
         self._rally_returns_acc_c = {c: 0.0 for c in self._clip_names}
+        # Exact decision-window swing ledger.  Starts and exact-strike opportunities occur at
+        # different phases of an attempt, so their counts may legitimately straddle a PPO-window
+        # boundary.  Latch completion during the attempt and book numerator+denominator together
+        # only when that attempt closes (wrap or true reset).  This makes every independently
+        # aggregated window satisfy completion <= outcome without clipping or boundary slack.
+        self._exact_attempt_active = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        self._exact_attempt_completed = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        # A defensive wrap-step exact strike belongs to the newly starting attempt because Motion
+        # has already advanced before this command's metrics pass.  Park it until close-out books
+        # the old attempt, mirroring the legal-return rally latch above.
+        self._exact_pending_completion = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
         self._prestrike_fall_acc = 0.0
         # POST-strike falls (fall AFTER reaching the strike frame — the follow-through/recovery fall that
         # swing_completion_rate + pre_strike_fall_rate are both blind to; it was the actual backhand
@@ -546,6 +577,115 @@ class RacketTargetCommand(CommandTerm):
         # TTS exists only in the two explicit atomic-planner-tuple modes below.
         self.time_to_strike = torch.zeros(self.num_envs, device=self.device)
 
+        # Same-ball planner revisions.  Unlike the retired midswing redraw knob, this never
+        # replaces the question row or physical ball.  It maintains one explicit
+        # (control_epoch, task_id), emits strictly increasing revisions of one atomic actor tuple,
+        # and asks MotionCommand's phase governor to meet the revised deadline.
+        self.planner_revision_enabled = bool(
+            getattr(cfg, "planner_revision_enabled", False)
+        )
+        self._planner_revision_profile: PhaseGovernorProfile | None = None
+        self._planner_initial_tts_mixture: InitialTtsMixture | None = None
+        if self.planner_revision_enabled:
+            raw_profile = getattr(cfg, "planner_revision_profile", None)
+            if not isinstance(raw_profile, dict):
+                raise ValueError(
+                    "planner_revision_enabled requires a complete planner_revision_profile mapping"
+                )
+            self._planner_revision_profile = PhaseGovernorProfile.from_mapping(raw_profile)
+            if not cfg.face_command or self._question_bank is None:
+                raise ValueError(
+                    "planner revisions require the formal signed-face question-bank task; "
+                    "otherwise the atomic target normal has no defined contract"
+                )
+            if float(cfg.midswing_resample_prob) != 0.0:
+                raise ValueError(
+                    "planner revisions replace midswing_resample_prob; truth/question redraws "
+                    "during one physical ball are forbidden"
+                )
+            initial_tts = tuple(
+                float(value)
+                for value in getattr(cfg, "planner_revision_initial_tts_range_s", ())
+            )
+            if (
+                len(initial_tts) != 2
+                or not (
+                    self._planner_revision_profile.min_tts_s
+                    <= initial_tts[0]
+                    < initial_tts[1]
+                    <= self._planner_revision_profile.max_tts_s
+                )
+            ):
+                raise ValueError(
+                    "planner_revision_initial_tts_range_s must be a non-degenerate ordered pair "
+                    "inside the "
+                    "profile TTS envelope"
+                )
+            raw_mixture = getattr(
+                cfg, "planner_revision_initial_tts_mixture", None
+            )
+            if not isinstance(raw_mixture, dict):
+                raise ValueError(
+                    "planner_revision_enabled requires a complete "
+                    "planner_revision_initial_tts_mixture mapping"
+                )
+            self._planner_initial_tts_mixture = InitialTtsMixture.from_mapping(
+                raw_mixture
+            )
+            self._planner_initial_tts_mixture.validate_support(
+                lo_s=initial_tts[0], hi_s=initial_tts[1]
+            )
+            self._planner_initial_tts_component_lo = torch.tensor(
+                [component.lo_s for component in self._planner_initial_tts_mixture.components],
+                dtype=torch.float32,
+                device=self.device,
+            )
+            self._planner_initial_tts_component_hi = torch.tensor(
+                [component.hi_s for component in self._planner_initial_tts_mixture.components],
+                dtype=torch.float32,
+                device=self.device,
+            )
+            self._planner_initial_tts_component_weight = torch.tensor(
+                [component.weight for component in self._planner_initial_tts_mixture.components],
+                dtype=torch.float64,
+                device=self.device,
+            )
+            for name in (
+                "planner_revision_position_std_m",
+                "planner_revision_velocity_std_mps",
+                "planner_revision_normal_std_rad",
+                "planner_revision_tts_std_s",
+            ):
+                value = float(getattr(cfg, name, 0.0))
+                if not math.isfinite(value) or value < 0.0:
+                    raise ValueError(f"{name} must be finite and non-negative")
+            n = self.num_envs
+            self._planner_control_epoch = torch.zeros(n, dtype=torch.long, device=self.device)
+            self._planner_task_id = torch.zeros(n, dtype=torch.long, device=self.device)
+            self._planner_task_revision = torch.full(
+                (n,), -1, dtype=torch.long, device=self.device
+            )
+            self._planner_visible_pos = self.racket_target_pos_w.clone()
+            self._planner_visible_vel = self.racket_target_vel_w.clone()
+            self._planner_visible_normal = self.target_normal_cmd.clone()
+            self._planner_visible_tts = self.time_to_strike.clone()
+            self._planner_visible_last_precontact = torch.zeros(
+                n, dtype=torch.bool, device=self.device
+            )
+            # Actor delivery is a different event from producer acceptance.  Keep the complete
+            # task identity so a delayed ring cannot confuse revision 2 of two adjacent balls.
+            self._planner_actor_control_epoch = torch.zeros(
+                n, dtype=torch.long, device=self.device
+            )
+            self._planner_actor_task_id = torch.zeros(
+                n, dtype=torch.long, device=self.device
+            )
+            self._planner_actor_task_revision = torch.full(
+                (n,), -1, dtype=torch.long, device=self.device
+            )
+            self.metrics["planner_task_revision"] = torch.zeros(n, device=self.device)
+            self.metrics["planner_same_task_revision_active"] = torch.zeros(n, device=self.device)
+
         # --- A1 target latency & time-variance (mocap->planner->runner realism) --------------------
         # MOTIVATION: training previously handed the actor a PERFECT, instantly-updated target; the
         # real loop (mocap -> planner -> runner) delivers it LATE (transport + planning latency),
@@ -558,8 +698,15 @@ class RacketTargetCommand(CommandTerm):
         # RNG draw. Only the ACTOR-visible view is degraded — rewards, metrics, the privileged critic,
         # and the achieved-target-replay WRITE always use the TRUE live target.
         self._delay_steps = max(int(cfg.target_delay_steps), 0)
+        if self.planner_revision_enabled and self._delay_steps > 0:
+            raise ValueError(
+                "planner revisions with target_delay_steps > 0 are not launchable: "
+                "the phase governor and actor must consume one coupled transport tuple; "
+                "the current legacy delay ring delays only actor observations"
+            )
         self._delay_tts_mode = _target_delay_tts_mode(cfg)
         self._delay_tts_active = self._delay_tts_mode != "live"
+        self._atomic_tts_active = self._delay_tts_active or self.planner_revision_enabled
         self._jitter_pos = max(float(cfg.target_jitter_pos_per_s), 0.0)
         self._jitter_vel = max(float(cfg.target_jitter_vel_per_s), 0.0)
         # Calibrated MEASUREMENT noise (ball_physics_venue.yaml `capture:` block, 2026-07-03 fit):
@@ -586,18 +733,33 @@ class RacketTargetCommand(CommandTerm):
             # first two used to expose question N+1's normal/sign next to question N's target.
             self._held_normal = torch.zeros(self.num_envs, 3, device=self.device)
             self._held_sign = torch.ones(self.num_envs, device=self.device)
-            if self._delay_tts_active:
+            if self._atomic_tts_active:
                 self._held_tts = torch.zeros(self.num_envs, device=self.device)
+            if self.planner_revision_enabled:
+                self._held_planner_epoch = torch.zeros(
+                    self.num_envs, dtype=torch.long, device=self.device
+                )
+                self._held_planner_task = torch.zeros(
+                    self.num_envs, dtype=torch.long, device=self.device
+                )
+                self._held_planner_revision = torch.full(
+                    (self.num_envs,), -1, dtype=torch.long, device=self.device
+                )
+                self._held_planner_last_precontact = torch.zeros(
+                    self.num_envs, dtype=torch.bool, device=self.device
+                )
         # The actor view is materialized (separate tensors) whenever latency OR jitter is on;
         # otherwise the delayed_* attributes ARE the live tensors (which are only ever index-assigned
         # after __init__, so the alias stays valid for the whole run).
         self._actor_view_active = (
+            self.planner_revision_enabled
+            or
             self._delay_steps > 0 or self._jitter_pos > 0.0 or self._jitter_vel > 0.0
             or self._mnoise_white > 0.0 or self._mnoise_ar1_sigma > 0.0
             or float(cfg.target_dropout_prob) > 0.0
             or float(cfg.target_post_strike_dropout_s) > 0.0
             or float(cfg.target_bias_per_swing) > 0.0
-            or self._delay_tts_active
+            or self._atomic_tts_active
         )
         if self._delay_steps > 0:
             # Ring buffers (length delay+1) over the ACTOR-VISIBLE target quantities: the slot
@@ -607,15 +769,28 @@ class RacketTargetCommand(CommandTerm):
             self._delay_buf_vel = torch.zeros(_L, self.num_envs, 3, device=self.device)
             self._delay_buf_normal = torch.zeros(_L, self.num_envs, 3, device=self.device)
             self._delay_buf_sign = torch.ones(_L, self.num_envs, device=self.device)
-            if self._delay_tts_active:
+            if self._atomic_tts_active:
                 self._delay_buf_tts = torch.zeros(_L, self.num_envs, device=self.device)
+            if self.planner_revision_enabled:
+                self._delay_buf_planner_epoch = torch.zeros(
+                    _L, self.num_envs, dtype=torch.long, device=self.device
+                )
+                self._delay_buf_planner_task = torch.zeros(
+                    _L, self.num_envs, dtype=torch.long, device=self.device
+                )
+                self._delay_buf_planner_revision = torch.full(
+                    (_L, self.num_envs), -1, dtype=torch.long, device=self.device
+                )
+                self._delay_buf_planner_last_precontact = torch.zeros(
+                    _L, self.num_envs, dtype=torch.bool, device=self.device
+                )
             self._delay_ptr = 0
         if self._actor_view_active:
             self.delayed_racket_target_pos_w = self.racket_target_pos_w.clone()
             self.delayed_racket_target_vel_w = self.racket_target_vel_w.clone()
             self.delayed_target_normal_cmd = self.target_normal_cmd.clone()
             self.delayed_swing_sign = self.swing_sign.clone()
-            if self._delay_tts_active:
+            if self._atomic_tts_active:
                 self.delayed_time_to_strike = self.time_to_strike.clone()
         else:
             # Flags off: zero-overhead aliases of the live tensors (byte-identical baseline).
@@ -2013,6 +2188,11 @@ class RacketTargetCommand(CommandTerm):
         self.racket_progress[env_ids] = 0.0
         self._progress_reset_mask[env_ids] = True
 
+        # Install the task only after every truth field (bank row, contact, demanded velocity/
+        # signed normal and incoming ball) has been sampled.  Revisions below update a separate
+        # actor tuple and can never mutate these buffers.
+        self._begin_same_ball_planner_task(env_ids)
+
         # A1 target latency: a TRUE reset (not an intra-episode wrap) starts a fresh "deploy
         # session".  Backfill the complete atomic planner message and clear every stateful sensor
         # defect; otherwise a new episode can inherit the previous episode's held frame, dropout
@@ -2119,6 +2299,293 @@ class RacketTargetCommand(CommandTerm):
             self.racket_normal_w,
         ) = self._racket_fk()
 
+    def _strike_steps_for_envs(self, env_ids: torch.Tensor) -> torch.Tensor:
+        """Return absolute float clip indices for the configured contact phase."""
+
+        motion = self._motion()
+        ml = motion.motion
+        ids = env_ids.to(device=self.device, dtype=torch.long)
+        if motion._multiseg:
+            if self._strike_phase_per_clip_t is None:
+                phases = self._strike_phases_cfg(int(ml.num_segments))
+                self._strike_phase_per_clip_t = (
+                    torch.tensor([float(value) for value in phases], device=self.device)
+                    if phases
+                    else torch.full(
+                        (int(ml.num_segments),),
+                        float(self.cfg.strike_phase),
+                        device=self.device,
+                    )
+                )
+            clips = motion.clip_id[ids]
+            starts = ml.seg_start[clips].float()
+            lengths = ml.seg_len[clips].float()
+            return starts + torch.round(
+                self._strike_phase_per_clip_t[clips] * (lengths - 1.0)
+            )
+        total = max(int(ml.time_step_total), 1)
+        return torch.full(
+            (len(ids),),
+            float(round(self.cfg.strike_phase * (total - 1))),
+            device=self.device,
+        )
+
+    def _sample_planner_initial_tts(self, count: int) -> torch.Tensor:
+        """Draw the checkpoint-bound preparation-time mixture exactly once per new task."""
+
+        if count <= 0:
+            return torch.empty(0, device=self.device)
+        mixture = self._planner_initial_tts_mixture
+        if mixture is None:
+            raise RuntimeError("planner initial-TTS mixture is unavailable")
+        component_ids = torch.multinomial(
+            self._planner_initial_tts_component_weight,
+            count,
+            replacement=True,
+        )
+        lo = self._planner_initial_tts_component_lo[component_ids]
+        hi = self._planner_initial_tts_component_hi[component_ids]
+        # Point-mass rows (notably the explicit 0.5 s deployment baseline) remain exact because
+        # (hi - lo) is bitwise zero; sub-0.5 s rows are a stress stratum, not a support floor.
+        samples = lo + (hi - lo) * torch.rand(count, device=self.device)
+        ledger = self._ensure_exact_behavior_decision_counters()
+        counts = torch.bincount(
+            component_ids,
+            minlength=len(mixture.components),
+        )
+        ledger["planner_initial_tts_sample_count"].add_(count)
+        for index, component_count in enumerate(counts):
+            ledger[f"planner_initial_tts_component_{index}_count"].add_(
+                component_count
+            )
+        ledger["planner_initial_tts_sub_0p5_count"].add_(
+            (samples < 0.5).sum(dtype=torch.long)
+        )
+        ledger["planner_initial_tts_exact_0p5_count"].add_(
+            (samples == 0.5).sum(dtype=torch.long)
+        )
+        ledger["planner_initial_tts_above_0p5_count"].add_(
+            (samples > 0.5).sum(dtype=torch.long)
+        )
+        return samples
+
+    def _begin_same_ball_planner_task(self, env_ids: Sequence[int]) -> None:
+        """Create one new task identity without changing the already-sampled physical truth."""
+
+        if not self.planner_revision_enabled or len(env_ids) == 0:
+            return
+        motion = self._motion()
+        if not motion.planner_revision_enabled:
+            raise RuntimeError(
+                "half-configured planner revisions: racket command enabled but motion governor off"
+            )
+        profile = self._planner_revision_profile
+        motion_profile = motion._planner_revision_profile
+        if profile is None or motion_profile is None or (
+            profile.profile_sha256 != motion_profile.profile_sha256
+        ):
+            raise RuntimeError(
+                "half-configured planner revisions: racket/motion profile SHA mismatch"
+            )
+        motion_mixture = motion._planner_initial_tts_mixture
+        if (
+            motion_mixture is None
+            or self._planner_initial_tts_mixture is None
+            or motion_mixture.document()
+            != self._planner_initial_tts_mixture.document()
+        ):
+            raise RuntimeError(
+                "half-configured planner revisions: racket/motion initial-TTS mixture mismatch"
+            )
+        ids = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+        if self._resample_is_wrap:
+            self._planner_task_id[ids] += 1
+        else:
+            self._planner_control_epoch[ids] += 1
+            self._planner_task_id[ids] = 1
+        self._planner_task_revision[ids] = 1
+        initial_tts = self._sample_planner_initial_tts(len(ids))
+        strike_step = self._strike_steps_for_envs(ids)
+        normal = self.target_normal_cmd[ids]
+        normal = normal / torch.linalg.vector_norm(normal, dim=-1, keepdim=True).clamp(min=1.0e-12)
+        motion.begin_planner_task(
+            ids,
+            control_epoch=self._planner_control_epoch[ids],
+            task_id=self._planner_task_id[ids],
+            strike_step=strike_step,
+            initial_tts=initial_tts,
+            target_position=self.racket_target_pos_w[ids],
+            target_velocity=self.racket_target_vel_w[ids],
+            target_normal=normal,
+        )
+        self.time_to_strike[ids] = initial_tts
+        self._planner_visible_pos[ids] = self.racket_target_pos_w[ids]
+        self._planner_visible_vel[ids] = self.racket_target_vel_w[ids]
+        self._planner_visible_normal[ids] = normal
+        self._planner_visible_tts[ids] = initial_tts
+        self._planner_visible_last_precontact[ids] = False
+        self.metrics["planner_task_revision"][ids] = 1.0
+
+    def _revise_same_ball_actor_tuple(self) -> None:
+        """Generate and atomically submit one bounded estimate revision for each pre-strike task."""
+
+        if not self.planner_revision_enabled:
+            return
+        motion = self._motion()
+        profile = self._planner_revision_profile
+        if profile is None:
+            raise RuntimeError("planner revision profile is unavailable")
+        # The runner can advance an accepted source timestamp locally between messages.  Mirror
+        # that here so the actor clock never freezes inside the profile's no-new-revision cutoff.
+        active = motion._planner_active
+        self._planner_visible_tts[active] = (
+            self._planner_visible_tts[active] - profile.policy_dt_s
+        ).clamp(min=0.0)
+        self._planner_visible_tts[active] = motion._planner_canonicalize_tts(
+            self._planner_visible_tts[active], profile
+        )
+        eligible = motion._planner_active & (
+            motion._planner_truth_tts + profile.early_deadline_tolerance_s
+            >= profile.min_tts_s
+        )
+        ids = torch.where(eligible)[0]
+        if len(ids) == 0:
+            return
+        # Estimate noise converges toward contact.  Every proposal is clamped against the
+        # immutable task-begin tuple.  This is essential for latest-value transport: the runner may
+        # observe revision N+2 without ever seeing N+1, yet both remain valid members of one task.
+        convergence = motion._planner_truth_tts[ids].clamp(0.0, 1.0).unsqueeze(-1)
+        begin_pos = self.racket_target_pos_w[ids]
+        pos = begin_pos
+        pos_std = float(self.cfg.planner_revision_position_std_m)
+        if pos_std > 0.0:
+            proposal = pos + torch.randn_like(pos) * (pos_std * convergence)
+        else:
+            proposal = pos
+        delta = proposal - begin_pos
+        delta_norm = torch.linalg.vector_norm(delta, dim=-1, keepdim=True).clamp(min=1.0e-12)
+        pos = begin_pos + delta * torch.minimum(
+            torch.ones_like(delta_norm), profile.max_position_revision_delta_m / delta_norm
+        )
+
+        begin_vel = self.racket_target_vel_w[ids]
+        vel = begin_vel
+        vel_std = float(self.cfg.planner_revision_velocity_std_mps)
+        if vel_std > 0.0:
+            proposal = vel + torch.randn_like(vel) * (vel_std * convergence)
+        else:
+            proposal = vel
+        delta = proposal - begin_vel
+        delta_norm = torch.linalg.vector_norm(delta, dim=-1, keepdim=True).clamp(min=1.0e-12)
+        vel = begin_vel + delta * torch.minimum(
+            torch.ones_like(delta_norm), profile.max_velocity_revision_delta_mps / delta_norm
+        )
+
+        truth_normal = self.target_normal_cmd[ids]
+        normal_std = float(self.cfg.planner_revision_normal_std_rad)
+        normal = truth_normal
+        if normal_std > 0.0:
+            tangent = torch.randn_like(normal)
+            tangent -= (tangent * truth_normal).sum(dim=-1, keepdim=True) * truth_normal
+            tangent /= torch.linalg.vector_norm(tangent, dim=-1, keepdim=True).clamp(min=1.0e-12)
+            angle = torch.randn(len(ids), 1, device=self.device) * (
+                normal_std * convergence
+            )
+            normal = truth_normal * torch.cos(angle) + tangent * torch.sin(angle)
+        dot = (truth_normal * normal).sum(dim=-1, keepdim=True).clamp(-1.0, 1.0)
+        angle = torch.acos(dot)
+        ratio = torch.minimum(
+            torch.ones_like(angle),
+            profile.max_normal_revision_delta_rad / angle.clamp(min=1.0e-12),
+        )
+        normal = truth_normal + ratio * (normal - truth_normal)
+        normal /= torch.linalg.vector_norm(normal, dim=-1, keepdim=True).clamp(min=1.0e-12)
+
+        raw_truth_tts = motion._planner_truth_tts[ids]
+        truth_tts = motion._planner_canonicalize_tts(raw_truth_tts, profile)
+        tts = truth_tts
+        tts_std = float(self.cfg.planner_revision_tts_std_s)
+        if tts_std > 0.0:
+            deadline_jitter = torch.randn_like(tts) * (
+                tts_std * convergence.squeeze(-1)
+            )
+            deadline_jitter = deadline_jitter.clamp(
+                min=-profile.max_deadline_revision_delta_s,
+                max=profile.max_deadline_revision_delta_s,
+            )
+            tts = tts + deadline_jitter
+        tts = tts.clamp(profile.min_tts_s, profile.max_tts_s)
+        revision = self._planner_task_revision[ids] + 1
+        accepted = motion.submit_planner_revision(
+            ids,
+            control_epoch=self._planner_control_epoch[ids],
+            task_id=self._planner_task_id[ids],
+            task_revision=revision,
+            desired_tts=tts,
+            target_position=pos,
+            target_velocity=vel,
+            target_normal=normal,
+        )
+        self._book_planner_revision_decisions(
+            attempted_tts=truth_tts,
+            accepted=accepted,
+        )
+        last_precontact = torch.isclose(
+            truth_tts,
+            torch.full_like(truth_tts, profile.min_tts_s),
+            rtol=0.0,
+            atol=profile.early_deadline_tolerance_s,
+        )
+        accepted_ids = ids[accepted]
+        if len(accepted_ids) > 0:
+            self._planner_task_revision[accepted_ids] = revision[accepted]
+            self._planner_visible_pos[accepted_ids] = pos[accepted]
+            self._planner_visible_vel[accepted_ids] = vel[accepted]
+            self._planner_visible_normal[accepted_ids] = normal[accepted]
+            self._planner_visible_tts[accepted_ids] = tts[accepted]
+            self._planner_visible_last_precontact[accepted_ids] = last_precontact[accepted]
+        self.metrics["planner_task_revision"] = self._planner_task_revision.clamp(min=0).float()
+        self.metrics["planner_same_task_revision_active"] = eligible.float()
+
+    def _book_planner_revision_decisions(
+        self,
+        *,
+        attempted_tts: torch.Tensor,
+        accepted: torch.Tensor,
+    ) -> None:
+        """Book exact actor-revision activation, including the final pre-contact tick."""
+
+        if not self.planner_revision_enabled or self._planner_revision_profile is None:
+            raise RuntimeError("planner revision decisions require an enabled validated profile")
+        tts = attempted_tts.detach().reshape(-1)
+        decisions = accepted.detach().reshape(-1)
+        if decisions.dtype != torch.bool:
+            raise TypeError("planner revision accepted mask must have boolean dtype")
+        if tts.shape != decisions.shape:
+            raise ValueError("planner revision TTS and decision masks must have identical shape")
+        if not bool(torch.isfinite(tts).all()):
+            raise ValueError("planner revision attempted TTS must be finite")
+        ledger = self._ensure_exact_behavior_decision_counters()
+        last_tick = torch.isclose(
+            tts,
+            torch.full_like(tts, self._planner_revision_profile.min_tts_s),
+            rtol=0.0,
+            atol=self._planner_revision_profile.early_deadline_tolerance_s,
+        )
+        ledger["planner_revision_attempt_count"].add_(tts.numel())
+        ledger["planner_revision_accepted_count"].add_(
+            decisions.sum(dtype=torch.long)
+        )
+        ledger["planner_revision_rejected_count"].add_(
+            (~decisions).sum(dtype=torch.long)
+        )
+        ledger["planner_revision_last_precontact_attempt_count"].add_(
+            last_tick.sum(dtype=torch.long)
+        )
+        ledger["planner_revision_last_precontact_accepted_count"].add_(
+            (last_tick & decisions).sum(dtype=torch.long)
+        )
+
     def _compute_strike_timing(self):
         """Refresh time_to_strike / pre_strike / strike_window from the CURRENT motion phase.
 
@@ -2168,6 +2635,18 @@ class RacketTargetCommand(CommandTerm):
                 )
             else:
                 self.time_to_strike = (strike_step - motion.time_steps).float() * self._env.step_dt
+        if self.planner_revision_enabled:
+            if not motion.planner_revision_enabled:
+                raise RuntimeError(
+                    "half-configured planner revisions: motion governor disabled at runtime"
+                )
+            # Physical-ball/reward/critic truth is the immutable task deadline, independent of
+            # the actor's noisy revised estimate and independent of the reference phase chosen to
+            # meet it.  This breaks the old circular definition (TTS derived from clip phase).
+            # Schema-4 owns a task deadline: it reaches zero at contact and
+            # remains zero through follow-through.  Legacy clip-derived clocks
+            # keep their historical signed post-strike values above.
+            self.time_to_strike = motion._planner_truth_tts.clamp(min=0.0)
         if getattr(motion, "event_timing_enabled", False):
             # For a successfully revealed T1 row, WHEN is owned by the immutable schedule rather
             # than by the clip phase.  The native clip/hold pair is only the feasible trajectory
@@ -2276,6 +2755,9 @@ class RacketTargetCommand(CommandTerm):
             # eligible fraction). Written every step while the feature is on so zero-redraw steps count.
             self.metrics["midswing_resample_count"] = redraw.float()
 
+        # Same-ball planner: refine the complete estimate (including WHEN) without changing truth.
+        self._revise_same_ball_actor_tuple()
+
         # A1 target latency/jitter: refresh the ACTOR-visible target view once per step (no-op alias
         # when the knobs are off). Runs LAST so it sees this step's wrap/refinement target updates.
         self._push_actor_target()
@@ -2305,11 +2787,33 @@ class RacketTargetCommand(CommandTerm):
         if not self._actor_view_active:
             self.metrics["actor_time_to_strike_s"][:] = self.time_to_strike
             return  # default path: delayed_* alias the live tensors — nothing to compute, no RNG
-        pos = self.racket_target_pos_w
-        vel = self.racket_target_vel_w
-        normal = self.target_normal_cmd
+        pos = (
+            self._planner_visible_pos
+            if self.planner_revision_enabled
+            else self.racket_target_pos_w
+        )
+        vel = (
+            self._planner_visible_vel
+            if self.planner_revision_enabled
+            else self.racket_target_vel_w
+        )
+        normal = (
+            self._planner_visible_normal
+            if self.planner_revision_enabled
+            else self.target_normal_cmd
+        )
         sign = self.swing_sign
-        tts = self.time_to_strike
+        tts = (
+            self._planner_visible_tts
+            if self.planner_revision_enabled
+            else self.time_to_strike
+        )
+        if self.planner_revision_enabled:
+            tts = tts.clamp(min=0.0)
+            planner_epoch = self._planner_control_epoch
+            planner_task = self._planner_task_id
+            planner_revision = self._planner_task_revision
+            planner_last_precontact = self._planner_visible_last_precontact
         if self._jitter_pos > 0.0 or self._jitter_vel > 0.0:
             scale = self.time_to_strike.clamp(0.0, 1.0).unsqueeze(-1)
             if self._jitter_pos > 0.0:
@@ -2345,14 +2849,30 @@ class RacketTargetCommand(CommandTerm):
             vel = torch.where(d3, self._held_vel, vel)
             normal = torch.where(d3, self._held_normal, normal)
             sign = torch.where(drop, self._held_sign, sign)
-            if self._delay_tts_active:
+            if self._atomic_tts_active:
                 tts = torch.where(drop, self._held_tts, tts)
+            if self.planner_revision_enabled:
+                planner_epoch = torch.where(drop, self._held_planner_epoch, planner_epoch)
+                planner_task = torch.where(drop, self._held_planner_task, planner_task)
+                planner_revision = torch.where(
+                    drop, self._held_planner_revision, planner_revision
+                )
+                planner_last_precontact = torch.where(
+                    drop,
+                    self._held_planner_last_precontact,
+                    planner_last_precontact,
+                )
             self._held_pos.copy_(pos)
             self._held_vel.copy_(vel)
             self._held_normal.copy_(normal)
             self._held_sign.copy_(sign)
-            if self._delay_tts_active:
+            if self._atomic_tts_active:
                 self._held_tts.copy_(tts)
+            if self.planner_revision_enabled:
+                self._held_planner_epoch.copy_(planner_epoch)
+                self._held_planner_task.copy_(planner_task)
+                self._held_planner_revision.copy_(planner_revision)
+                self._held_planner_last_precontact.copy_(planner_last_precontact)
         if self._delay_steps > 0:
             # Write this step's (jittered) target into slot `w`; the next slot in the length-
             # (delay+1) ring was written exactly `delay` pushes ago — that is the actor's view.
@@ -2361,29 +2881,103 @@ class RacketTargetCommand(CommandTerm):
             self._delay_buf_vel[w].copy_(vel)
             self._delay_buf_normal[w].copy_(normal)
             self._delay_buf_sign[w].copy_(sign)
-            if self._delay_tts_active:
+            if self._atomic_tts_active:
                 self._delay_buf_tts[w].copy_(tts)
+            if self.planner_revision_enabled:
+                self._delay_buf_planner_epoch[w].copy_(planner_epoch)
+                self._delay_buf_planner_task[w].copy_(planner_task)
+                self._delay_buf_planner_revision[w].copy_(planner_revision)
+                self._delay_buf_planner_last_precontact[w].copy_(
+                    planner_last_precontact
+                )
             r = (w + 1) % (self._delay_steps + 1)
             self._delay_ptr = r
             self.delayed_racket_target_pos_w.copy_(self._delay_buf_pos[r])
             self.delayed_racket_target_vel_w.copy_(self._delay_buf_vel[r])
             self.delayed_target_normal_cmd.copy_(self._delay_buf_normal[r])
             self.delayed_swing_sign.copy_(self._delay_buf_sign[r])
-            if self._delay_tts_active:
+            if self._atomic_tts_active:
                 delayed_tts = self._delay_buf_tts[r]
                 if self._delay_tts_mode == "source_timestamp_compensated":
                     delayed_tts = delayed_tts - self._delay_steps * float(self._env.step_dt)
+                if self.planner_revision_enabled:
+                    delayed_tts = delayed_tts.clamp(min=0.0)
                 self.delayed_time_to_strike.copy_(delayed_tts)
+            if self.planner_revision_enabled:
+                self._book_planner_revision_actor_delivery(
+                    self._delay_buf_planner_epoch[r],
+                    self._delay_buf_planner_task[r],
+                    self._delay_buf_planner_revision[r],
+                    self._delay_buf_planner_last_precontact[r],
+                )
         else:
             # Jitter-only (delay==0): the actor view is live + this step's noise, no latency.
             self.delayed_racket_target_pos_w.copy_(pos)
             self.delayed_racket_target_vel_w.copy_(vel)
             self.delayed_target_normal_cmd.copy_(normal)
             self.delayed_swing_sign.copy_(sign)
-            if self._delay_tts_active:
+            if self._atomic_tts_active:
                 # Zero transport delay is explicitly equivalent to live TTS in both atomic modes.
                 self.delayed_time_to_strike.copy_(tts)
+            if self.planner_revision_enabled:
+                self._book_planner_revision_actor_delivery(
+                    planner_epoch,
+                    planner_task,
+                    planner_revision,
+                    planner_last_precontact,
+                )
         self.metrics["actor_time_to_strike_s"][:] = self.actor_time_to_strike()
+
+    def _book_planner_revision_actor_delivery(
+        self,
+        control_epoch: torch.Tensor,
+        task_id: torch.Tensor,
+        task_revision: torch.Tensor,
+        last_precontact: torch.Tensor,
+    ) -> None:
+        """Count a revision only when its complete atomic tuple reaches actor observations."""
+
+        epoch = control_epoch.detach().reshape(-1)
+        task = task_id.detach().reshape(-1)
+        revision = task_revision.detach().reshape(-1)
+        last = last_precontact.detach().reshape(-1)
+        expected = self._planner_actor_task_revision.shape
+        if (
+            epoch.shape != expected
+            or task.shape != expected
+            or revision.shape != expected
+            or last.shape != expected
+            or last.dtype != torch.bool
+        ):
+            raise ValueError("actor-visible planner identity must be one complete per-env tuple")
+        changed = (
+            (epoch > 0)
+            & (task > 0)
+            & (
+                (epoch != self._planner_actor_control_epoch)
+                | (task != self._planner_actor_task_id)
+                | (revision != self._planner_actor_task_revision)
+            )
+        )
+        delivered_revision = changed & (revision > 1)
+        ledger = self._ensure_exact_behavior_decision_counters()
+        ledger["planner_revision_actor_visible_count"].add_(
+            delivered_revision.sum(dtype=torch.long)
+        )
+        ledger["planner_revision_last_precontact_actor_visible_count"].add_(
+            (delivered_revision & last & self.pre_strike.detach().bool()).sum(
+                dtype=torch.long
+            )
+        )
+        self._planner_actor_control_epoch.copy_(
+            torch.where(changed, epoch, self._planner_actor_control_epoch)
+        )
+        self._planner_actor_task_id.copy_(
+            torch.where(changed, task, self._planner_actor_task_id)
+        )
+        self._planner_actor_task_revision.copy_(
+            torch.where(changed, revision, self._planner_actor_task_revision)
+        )
 
     def _reset_actor_target_state(self, env_ids: Sequence[int]) -> None:
         """Start a true episode with a fresh, internally consistent A1 sensor state.
@@ -2396,31 +2990,63 @@ class RacketTargetCommand(CommandTerm):
         if not self._actor_view_active or len(env_ids) == 0:
             return
         ids = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
-        self.delayed_racket_target_pos_w[ids] = self.racket_target_pos_w[ids]
-        self.delayed_racket_target_vel_w[ids] = self.racket_target_vel_w[ids]
-        self.delayed_target_normal_cmd[ids] = self.target_normal_cmd[ids]
+        source_pos = self._planner_visible_pos if self.planner_revision_enabled else self.racket_target_pos_w
+        source_vel = self._planner_visible_vel if self.planner_revision_enabled else self.racket_target_vel_w
+        source_normal = self._planner_visible_normal if self.planner_revision_enabled else self.target_normal_cmd
+        source_tts = self._planner_visible_tts if self.planner_revision_enabled else self.time_to_strike
+        if self.planner_revision_enabled:
+            source_tts = source_tts.clamp(min=0.0)
+        self.delayed_racket_target_pos_w[ids] = source_pos[ids]
+        self.delayed_racket_target_vel_w[ids] = source_vel[ids]
+        self.delayed_target_normal_cmd[ids] = source_normal[ids]
         self.delayed_swing_sign[ids] = self.swing_sign[ids]
-        if self._delay_tts_active:
-            self.delayed_time_to_strike[ids] = self.time_to_strike[ids]
+        if self._atomic_tts_active:
+            self.delayed_time_to_strike[ids] = source_tts[ids]
         if self._mnoise_ar1_sigma > 0.0:
             self._mnoise_ar1_state[ids] = 0.0
         if self._a1v2_active:
             self._swing_bias[ids] = 0.0
             self._drop_cd[ids] = 0
             self._prev_pre_strike[ids] = True
-            self._held_pos[ids] = self.racket_target_pos_w[ids]
-            self._held_vel[ids] = self.racket_target_vel_w[ids]
-            self._held_normal[ids] = self.target_normal_cmd[ids]
+            self._held_pos[ids] = source_pos[ids]
+            self._held_vel[ids] = source_vel[ids]
+            self._held_normal[ids] = source_normal[ids]
             self._held_sign[ids] = self.swing_sign[ids]
-            if self._delay_tts_active:
-                self._held_tts[ids] = self.time_to_strike[ids]
+            if self._atomic_tts_active:
+                self._held_tts[ids] = source_tts[ids]
+            if self.planner_revision_enabled:
+                self._held_planner_epoch[ids] = self._planner_control_epoch[ids]
+                self._held_planner_task[ids] = self._planner_task_id[ids]
+                self._held_planner_revision[ids] = self._planner_task_revision[ids]
+                self._held_planner_last_precontact[ids] = (
+                    self._planner_visible_last_precontact[ids]
+                )
         if self._delay_steps > 0:
-            self._delay_buf_pos[:, ids] = self.racket_target_pos_w[ids].unsqueeze(0)
-            self._delay_buf_vel[:, ids] = self.racket_target_vel_w[ids].unsqueeze(0)
-            self._delay_buf_normal[:, ids] = self.target_normal_cmd[ids].unsqueeze(0)
+            self._delay_buf_pos[:, ids] = source_pos[ids].unsqueeze(0)
+            self._delay_buf_vel[:, ids] = source_vel[ids].unsqueeze(0)
+            self._delay_buf_normal[:, ids] = source_normal[ids].unsqueeze(0)
             self._delay_buf_sign[:, ids] = self.swing_sign[ids].unsqueeze(0)
-            if self._delay_tts_active:
-                self._delay_buf_tts[:, ids] = self.time_to_strike[ids].unsqueeze(0)
+            if self._atomic_tts_active:
+                self._delay_buf_tts[:, ids] = source_tts[ids].unsqueeze(0)
+            if self.planner_revision_enabled:
+                self._delay_buf_planner_epoch[:, ids] = (
+                    self._planner_control_epoch[ids].unsqueeze(0)
+                )
+                self._delay_buf_planner_task[:, ids] = (
+                    self._planner_task_id[ids].unsqueeze(0)
+                )
+                self._delay_buf_planner_revision[:, ids] = (
+                    self._planner_task_revision[ids].unsqueeze(0)
+                )
+                self._delay_buf_planner_last_precontact[:, ids] = (
+                    self._planner_visible_last_precontact[ids].unsqueeze(0)
+                )
+        if self.planner_revision_enabled:
+            # A true reset hands the initial revision to the actor immediately;
+            # seed the high-water mark without booking it as a same-task revision.
+            self._planner_actor_control_epoch[ids] = self._planner_control_epoch[ids]
+            self._planner_actor_task_id[ids] = self._planner_task_id[ids]
+            self._planner_actor_task_revision[ids] = self._planner_task_revision[ids]
 
     def _count_swing_starts(self, env_ids, count_prestrike_falls: bool) -> None:
         """UNCONDITIONAL swing accounting (Phase A wandb fix). Increment-only here; the decay is
@@ -2432,6 +3058,8 @@ class RacketTargetCommand(CommandTerm):
         if n == 0:
             return
         env_ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+        exact_ledger = self._ensure_exact_behavior_decision_counters()
+        exact_ledger["swing_start_count"].add_(n)
         self._swing_starts_acc += float(n)
         motion = self._motion()
         if motion._multiseg:
@@ -2460,6 +3088,7 @@ class RacketTargetCommand(CommandTerm):
         # _vb_book_strike_step). One-shot — consumed on transfer.
         self._rally_returned[env_ids_t] = self._rally_pending_return[env_ids_t]
         self._rally_pending_return[env_ids_t] = False
+        self._close_exact_swing_attempts(env_ids_t)
 
         # Rally drift close-out: a WRAP means the previous swing ran to completion — book its base
         # displacement (norm + forward component) from the swing-start stamp to the current base.
@@ -2486,6 +3115,9 @@ class RacketTargetCommand(CommandTerm):
             recovering = rec >= 0
             true_pre = term & pre & ~recovering
             post = term & (~pre | recovering)
+            self._book_exact_behavior_terminal_reset(
+                env_ids_t, pre_strike=pre, recovering=recovering
+            )
             self._prestrike_fall_acc += float(true_pre.sum())
             self._poststrike_fall_acc += float(post.sum())
             if motion._multiseg:
@@ -2500,6 +3132,39 @@ class RacketTargetCommand(CommandTerm):
             # True reset: the new episode starts fresh (its stand-start/reset hold is genuine
             # pre-strike preparation, not recovery), so clear the latch for these envs.
             self._recover_from_clip[env_ids_t] = -1
+
+    def _close_exact_swing_attempts(self, env_ids: torch.Tensor) -> None:
+        """Close old attempts and start new ones with paired decision-window accounting.
+
+        ``swing_start_count`` remains a useful mechanism/throughput counter, while pruning uses
+        ``swing_completion_count / swing_outcome_count``.  The paired counters are written in the
+        same call, so a PPO-window boundary cannot create the old false ``strike > start``
+        invariant failure.
+        """
+
+        ids = torch.as_tensor(env_ids, dtype=torch.long, device=self.device).reshape(-1)
+        if len(ids) == 0:
+            return
+        ledger = self._ensure_exact_behavior_decision_counters()
+        ended = self._exact_attempt_active[ids]
+        completed = ended & self._exact_attempt_completed[ids]
+        ledger["swing_outcome_count"].add_(ended.sum(dtype=torch.long))
+        ledger["swing_completion_count"].add_(completed.sum(dtype=torch.long))
+        self._exact_attempt_active[ids] = True
+        self._exact_attempt_completed[ids] = self._exact_pending_completion[ids]
+        self._exact_pending_completion[ids] = False
+
+    def _latch_exact_swing_completion(self, exact_strike: torch.Tensor) -> None:
+        """Latch an exact strike onto the attempt that owns the current motion frame."""
+
+        exact = exact_strike.detach().bool()
+        wrapped = getattr(self._motion(), "just_resampled", None)
+        if wrapped is None:
+            self._exact_attempt_completed |= exact
+            return
+        wrapped = wrapped.detach().bool()
+        self._exact_attempt_completed |= exact & ~wrapped
+        self._exact_pending_completion |= exact & wrapped
 
     def _update_footwork_signals(self, racket_dist: torch.Tensor) -> None:
         """Base-FREE footwork-to-strike signals (reward/metric only; NEVER observed). The legs are driven
@@ -2865,6 +3530,7 @@ class RacketTargetCommand(CommandTerm):
             net_clear=gate & net_clear,
             landing_valid=gate & land_valid,
             legal_return=legal,
+            book_strike_opportunity=False,
         )
         # Rally latch with a wrap-boundary guard: on the step a clip WRAPS, the motion term has
         # already advanced to the NEW clip before this metrics pass, so a strike frame sitting at
@@ -2890,17 +3556,34 @@ class RacketTargetCommand(CommandTerm):
         net_clear: torch.Tensor,
         landing_valid: torch.Tensor,
         legal_return: torch.Tensor,
+        book_strike_opportunity: bool = True,
     ) -> None:
         """Book exact, non-decayed sparse-reward counters for one simulator step."""
 
         masks = {
-            "strike_opportunity_count": exact_strike,
             "virtual_capture_count": capture,
             "virtual_net_clear_count": net_clear,
             "virtual_landing_valid_count": landing_valid,
             "virtual_legal_return_count": legal_return,
         }
-        ledger = self._sparse_reward_eligibility_counters
+        if book_strike_opportunity:
+            masks = {"strike_opportunity_count": exact_strike, **masks}
+        ledger = getattr(self, "_sparse_reward_eligibility_counters", None)
+        if ledger is None:
+            names = (
+                "strike_opportunity_count",
+                "virtual_capture_count",
+                "virtual_net_clear_count",
+                "virtual_landing_valid_count",
+                "virtual_legal_return_count",
+            )
+            ledger = {name: torch.zeros((), dtype=torch.long, device=self.device) for name in names}
+            for family in self._clip_names.values():
+                for name in names:
+                    ledger[f"{name}_{family}"] = torch.zeros(
+                        (), dtype=torch.long, device=self.device
+                    )
+            self._sparse_reward_eligibility_counters = ledger
         for name, mask in masks.items():
             ledger[name].add_(mask.detach().sum(dtype=torch.long))
 
@@ -2917,6 +3600,16 @@ class RacketTargetCommand(CommandTerm):
     def consume_sparse_reward_eligibility_counters(self) -> dict[str, torch.Tensor]:
         """Snapshot and reset one PPO update's sparse outcome ledger exactly once."""
 
+        if not hasattr(self, "_sparse_reward_eligibility_counters"):
+            empty = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+            self._book_sparse_reward_eligibility(
+                exact_strike=empty,
+                capture=empty,
+                net_clear=empty,
+                landing_valid=empty,
+                legal_return=empty,
+            )
+
         snapshot = {
             name: value.detach().clone()
             for name, value in self._sparse_reward_eligibility_counters.items()
@@ -2926,6 +3619,229 @@ class RacketTargetCommand(CommandTerm):
         with torch.inference_mode():
             for value in self._sparse_reward_eligibility_counters.values():
                 value.zero_()
+        return snapshot
+
+    def _ensure_exact_behavior_decision_counters(self) -> dict[str, torch.Tensor]:
+        """Create the fixed behavior counters and any configured termination-reason counters."""
+
+        ledger = getattr(self, "_exact_behavior_decision_counters", None)
+        if ledger is None:
+            ledger = {}
+            self._exact_behavior_decision_counters = ledger
+        for name in (
+            "swing_start_count",
+            "swing_outcome_count",
+            "swing_completion_count",
+            "terminal_reset_count",
+            "timeout_reset_count",
+            "physical_fall_count",
+            "pre_strike_physical_fall_count",
+            "post_strike_physical_fall_count",
+            "non_physical_terminal_reset_count",
+            "ready_tilt_eligible_sample_count",
+            "ready_base_speed_eligible_sample_count",
+            "ready_station_offset_eligible_sample_count",
+            "ready_foot_contact_eligible_sample_count",
+            "ready_foot_slip_eligible_sample_count",
+            "ready_nonfinite_value_count",
+        ):
+            if name not in ledger:
+                ledger[name] = torch.zeros((), dtype=torch.long, device=self.device)
+        if getattr(self, "planner_revision_enabled", False):
+            for name in (
+                "planner_initial_tts_sample_count",
+                "planner_initial_tts_sub_0p5_count",
+                "planner_initial_tts_exact_0p5_count",
+                "planner_initial_tts_above_0p5_count",
+                "planner_revision_attempt_count",
+                "planner_revision_accepted_count",
+                "planner_revision_rejected_count",
+                "planner_revision_last_precontact_attempt_count",
+                "planner_revision_last_precontact_accepted_count",
+                "planner_revision_actor_visible_count",
+                "planner_revision_last_precontact_actor_visible_count",
+            ):
+                if name not in ledger:
+                    ledger[name] = torch.zeros((), dtype=torch.long, device=self.device)
+            mixture = getattr(self, "_planner_initial_tts_mixture", None)
+            if mixture is not None:
+                for index, _component in enumerate(mixture.components):
+                    name = f"planner_initial_tts_component_{index}_count"
+                    if name not in ledger:
+                        ledger[name] = torch.zeros(
+                            (), dtype=torch.long, device=self.device
+                        )
+        for name in (
+            "ready_tilt_rad_sum",
+            "ready_base_speed_xy_mps_sum",
+            "ready_station_offset_m_sum",
+            "ready_foot_contact_fraction_sum",
+            "ready_foot_slip_speed_mps_sum",
+        ):
+            if name not in ledger:
+                ledger[name] = torch.zeros((), dtype=torch.float64, device=self.device)
+
+        termination_manager = getattr(self._env, "termination_manager", None)
+        for term_name in tuple(getattr(termination_manager, "active_terms", ())):
+            key = f"termination_reason_{term_name}_count"
+            if key not in ledger:
+                ledger[key] = torch.zeros((), dtype=torch.long, device=self.device)
+        return ledger
+
+    @staticmethod
+    def _selected_bool(value, env_ids: torch.Tensor) -> torch.Tensor:
+        """Select one manager mask without accepting numeric/non-boolean reason tensors."""
+
+        if not isinstance(value, torch.Tensor):
+            value = torch.as_tensor(value, device=env_ids.device)
+        value = value.to(device=env_ids.device)
+        if value.dtype != torch.bool:
+            raise TypeError("termination reason masks must have boolean dtype")
+        if value.ndim == 0:
+            return value.expand(len(env_ids))
+        if value.ndim != 1:
+            raise ValueError("termination reason masks must be scalar or one-dimensional")
+        return value[env_ids]
+
+    def _book_exact_behavior_terminal_reset(
+        self,
+        env_ids: torch.Tensor,
+        *,
+        pre_strike: torch.Tensor,
+        recovering: torch.Tensor,
+    ) -> None:
+        """Attribute true-reset reasons; only absolute balance guards are physical falls.
+
+        ``pre_strike`` is the ending attempt's timing latch.  ``recovering`` wins over that latch:
+        a fall during a post-wrap hold belongs to the completed swing's post-strike recovery even
+        though the next swing already reports pre-strike timing.
+        """
+
+        ledger = self._ensure_exact_behavior_decision_counters()
+        tm = getattr(self._env, "termination_manager", None)
+        if tm is None or len(env_ids) == 0:
+            return
+        terminated = self._selected_bool(
+            getattr(tm, "terminated", torch.zeros((), dtype=torch.bool, device=self.device)),
+            env_ids,
+        )
+        timed_out = self._selected_bool(
+            getattr(tm, "time_outs", torch.zeros((), dtype=torch.bool, device=self.device)),
+            env_ids,
+        )
+        selected_phase_masks = {}
+        for name, value in (("pre_strike", pre_strike), ("recovering", recovering)):
+            if not isinstance(value, torch.Tensor):
+                value = torch.as_tensor(value, device=self.device)
+            value = value.to(device=self.device)
+            if value.dtype != torch.bool:
+                raise TypeError(f"{name} attribution mask must have boolean dtype")
+            if value.shape != terminated.shape:
+                raise ValueError(
+                    f"{name} attribution mask shape {tuple(value.shape)} does not match "
+                    f"selected terminations {tuple(terminated.shape)}"
+                )
+            selected_phase_masks[name] = value
+        pre_strike = selected_phase_masks["pre_strike"]
+        recovering = selected_phase_masks["recovering"]
+        reason_masks: dict[str, torch.Tensor] = {}
+        get_term = getattr(tm, "get_term", None)
+        if callable(get_term):
+            for term_name in tuple(getattr(tm, "active_terms", ())):
+                mask = self._selected_bool(get_term(term_name), env_ids)
+                reason_masks[str(term_name)] = mask
+
+        # Commit only after every dynamic reason mask has passed strict dtype/shape selection.
+        # A malformed late-listed term must not leave a partially updated decision transaction.
+        ledger["terminal_reset_count"].add_(terminated.sum(dtype=torch.long))
+        ledger["timeout_reset_count"].add_(timed_out.sum(dtype=torch.long))
+        for term_name, mask in reason_masks.items():
+            ledger[f"termination_reason_{term_name}_count"].add_(
+                mask.sum(dtype=torch.long)
+            )
+
+        physical = torch.zeros_like(terminated)
+        for term_name in _PHYSICAL_FALL_TERMINATION_TERMS:
+            physical |= reason_masks.get(term_name, torch.zeros_like(terminated))
+        physical &= terminated
+        true_pre = physical & pre_strike & ~recovering
+        post = physical & (~pre_strike | recovering)
+        ledger["physical_fall_count"].add_(physical.sum(dtype=torch.long))
+        ledger["pre_strike_physical_fall_count"].add_(true_pre.sum(dtype=torch.long))
+        ledger["post_strike_physical_fall_count"].add_(post.sum(dtype=torch.long))
+        ledger["non_physical_terminal_reset_count"].add_(
+            (terminated & ~physical).sum(dtype=torch.long)
+        )
+
+    def _book_exact_ready_behavior_samples(self) -> None:
+        """Accumulate hold/recovery balance sums with an explicit denominator per quantity."""
+
+        in_hold = getattr(self._motion(), "in_hold", None)
+        if in_hold is None:
+            return
+        eligible = in_hold.detach().bool()
+        ledger = self._ensure_exact_behavior_decision_counters()
+        data = self.robot.data
+        tilt = torch.acos(self.metrics["base_upright"].detach().clamp(-1.0, 1.0))
+        base_speed = torch.linalg.vector_norm(data.root_lin_vel_w[:, :2].detach(), dim=-1)
+        station_offset = torch.linalg.vector_norm(
+            (self.base_pos_w[:, :2] - self.base_target_pos_w).detach(), dim=-1
+        )
+
+        def book(count_key: str, sum_key: str, values: torch.Tensor) -> None:
+            finite = eligible & torch.isfinite(values)
+            ledger[count_key].add_(finite.sum(dtype=torch.long))
+            ledger[sum_key].add_(
+                torch.where(finite, values, torch.zeros_like(values)).sum(dtype=torch.float64)
+            )
+            ledger["ready_nonfinite_value_count"].add_(
+                (eligible & ~torch.isfinite(values)).sum(dtype=torch.long)
+            )
+
+        book("ready_tilt_eligible_sample_count", "ready_tilt_rad_sum", tilt)
+        book(
+            "ready_base_speed_eligible_sample_count",
+            "ready_base_speed_xy_mps_sum",
+            base_speed,
+        )
+        book(
+            "ready_station_offset_eligible_sample_count",
+            "ready_station_offset_m_sum",
+            station_offset,
+        )
+
+        sensor_ready = bool(
+            getattr(self, "_foot_idx_robot", ())
+            and getattr(self, "_foot_idx_contact", ())
+            and getattr(self, "_contact_sensor", None) is not None
+        )
+        if sensor_ready:
+            contact = self.metrics["foot_contact_frac"].detach()
+            slip = self.metrics["foot_slip_speed"].detach()
+            book(
+                "ready_foot_contact_eligible_sample_count",
+                "ready_foot_contact_fraction_sum",
+                contact,
+            )
+            book(
+                "ready_foot_slip_eligible_sample_count",
+                "ready_foot_slip_speed_mps_sum",
+                slip,
+            )
+
+    def consume_exact_behavior_decision_counters(self) -> dict[str, torch.Tensor]:
+        """Consume one update's behavior and existing sparse-outcome ledgers as one transaction."""
+
+        ledger = self._ensure_exact_behavior_decision_counters()
+        snapshot = {name: value.detach().clone() for name, value in ledger.items()}
+        with torch.inference_mode():
+            for value in ledger.values():
+                value.zero_()
+        sparse = self.consume_sparse_reward_eligibility_counters()
+        overlap = snapshot.keys() & sparse.keys()
+        if overlap:
+            raise RuntimeError(f"exact behavior ledger has duplicate sparse keys: {sorted(overlap)}")
+        snapshot.update(sparse)
         return snapshot
 
     def _rally_legacy_values(self) -> tuple[float, dict]:
@@ -3060,6 +3976,7 @@ class RacketTargetCommand(CommandTerm):
             # first origin, the normal exact clip strike is accepted and is the sole arming event.
             exact_strike = exact_strike & motion.event_exact_strike_allowed
             motion.record_event_exact_strike(torch.where(exact_strike)[0])
+        self._latch_exact_swing_completion(exact_strike)
         self.metrics["exact_strike_hit_rate"] = exact_strike.float()
 
         # --- DEBUG: swing-through sign verification (cfg.debug_reward_logging) -----------------------
@@ -3114,6 +4031,17 @@ class RacketTargetCommand(CommandTerm):
         self._exact_pass_5cm_acc = decay * self._exact_pass_5cm_acc + float(_pass_5cm.sum())
         self._exact_pass_10cm_acc = decay * self._exact_pass_10cm_acc + float(_pass_10cm.sum())
         self._exact_pass_normal_acc = decay * self._exact_pass_normal_acc + float(pass_normal.sum())
+        # Reuse the existing exact sparse strike denominator for unconditional swing completion.
+        # Virtual-ball evaluation below adds only its downstream outcomes, so a strike is booked
+        # exactly once whether virtual rewards are enabled or not.
+        _no_sparse_outcome = torch.zeros_like(exact_strike)
+        self._book_sparse_reward_eligibility(
+            exact_strike=exact_strike,
+            capture=_no_sparse_outcome,
+            net_clear=_no_sparse_outcome,
+            landing_valid=_no_sparse_outcome,
+            legal_return=_no_sparse_outcome,
+        )
         # Tier-1 virtual-ball at-strike evaluation (one-shot buffers consumed by the virtual_*
         # reward terms after this compute()); no-op (and vb_fired stays False) when disabled.
         # vb_metrics_only runs the same evaluation purely for the virtual_*_rate curves (the
@@ -3472,6 +4400,10 @@ class RacketTargetCommand(CommandTerm):
                 self.metrics["action_delta_abs_mean"].zero_()
                 self.metrics["action_delta_abs_max"].zero_()
 
+        # Instrumentation only: hold/recovery phase sums and denominators for this simulator step.
+        # These tensors are never read by observations, rewards, resets, curricula or sampling.
+        self._book_exact_ready_behavior_samples()
+
     # ------------------------------------------------------------------ #
     # Observation helpers (base-relative quantities)
     # ------------------------------------------------------------------ #
@@ -3532,7 +4464,7 @@ class RacketTargetCommand(CommandTerm):
         historical observation path.  Atomic delayed modes return the materialized ring output;
         rewards, exact-strike gates, physics and the privileged critic never call this accessor.
         """
-        if self._delay_tts_mode == "live":
+        if self._delay_tts_mode == "live" and not self.planner_revision_enabled:
             return self.time_to_strike
         return self.delayed_time_to_strike
 
@@ -3801,6 +4733,19 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # no fake progress.
     midswing_resample_prob: float = 0.0
     midswing_resample_tts_floor: float = 0.3  # s; no refinement inside the last `floor` seconds before the strike
+
+    # Replacement for truth-redrawing midswing_resample: one physical ball keeps one immutable
+    # task identity while the actor receives bounded, atomically revised planner estimates every
+    # policy step.  All fields are installed from one task.planner_revision block by train.py;
+    # manually enabling only one command term fails closed at runtime.
+    planner_revision_enabled: bool = False
+    planner_revision_profile: dict | None = None
+    planner_revision_initial_tts_range_s: tuple[float, float] = (0.5, 1.5)
+    planner_revision_initial_tts_mixture: dict | None = None
+    planner_revision_position_std_m: float = 0.0
+    planner_revision_velocity_std_mps: float = 0.0
+    planner_revision_normal_std_rad: float = 0.0
+    planner_revision_tts_std_s: float = 0.0
 
     # --- Tier-1 VIRTUAL INCOMING BALL + at-strike landing evaluation (rewardDesign.md) -----------
     # Per swing, a virtual incoming ball (v_in, omega_in) is sampled that BY CONSTRUCTION arrives at

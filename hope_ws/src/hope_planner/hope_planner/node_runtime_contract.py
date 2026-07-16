@@ -457,6 +457,35 @@ def ros_source_to_monotonic(
     return now_monotonic_s - max(0.0, now_ros_s - source_stamp_s)
 
 
+def latency_compensated_time_to_strike(
+    sample_time_to_strike_s: float,
+    source_stamp_s: float,
+    now_ros_s: float,
+) -> float:
+    """Remove measured source-to-planner age from a sample-relative TTS.
+
+    The trajectory solver timestamps its predicted strike in the producer's
+    ROS/source clock domain.  Its legacy ``time_to_strike`` property is
+    relative to the measurement timestamp, so forwarding that value grants
+    transport and compute latency to the runner a second time.  Formal task
+    revisions instead expose the remaining time *at publication*.
+
+    A source stamp up to the separately bounded future-tolerance never earns
+    extra preparation time: negative measured age is clamped to zero.  A
+    negative result is intentionally retained so the downstream phase
+    governor can reject an already-missed deadline rather than hiding it.
+    """
+
+    sample_tts = float(sample_time_to_strike_s)
+    source_stamp = float(source_stamp_s)
+    now_ros = float(now_ros_s)
+    if not all(math.isfinite(value) for value in (sample_tts, source_stamp, now_ros)):
+        raise ValueError("TTS/source/current ROS times must be finite")
+    if source_stamp < 0.0 or now_ros < 0.0:
+        raise ValueError("source/current ROS times must be non-negative")
+    return sample_tts - max(0.0, now_ros - source_stamp)
+
+
 def ros_stamp_fields_to_seconds(sec: int, nanosec: int) -> float:
     """Validate builtin_interfaces/Time fields before float conversion."""
 

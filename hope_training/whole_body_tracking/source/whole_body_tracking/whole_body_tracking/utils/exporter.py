@@ -24,8 +24,10 @@ from whole_body_tracking.utils.training_contract import (
     TRAINING_CONTRACT_SCHEMA_VERSION,
     RUNTIME_EXECUTION_KEYS,
     bind_actor_leg_ref_mask_metadata,
+    bind_planner_task_revision_metadata,
     checkpoint_claims_contract,
     checkpoint_contract_lineage_exact,
+    planner_task_revision_metadata,
     require_checkpoint_contract_binding,
     resolve_motion_body_lin_vel_points,
     runtime_execution_facts,
@@ -251,6 +253,7 @@ def attach_onnx_metadata(
     training_contract_schema = 0
     training_contract_sha256 = None
     training_contract_lineage_exact = False
+    planner_revision_metadata_json = None
     if source_checkpoint_path is not None:
         checkpoint_path = os.path.abspath(str(source_checkpoint_path))
         if not os.path.isfile(checkpoint_path):
@@ -314,6 +317,9 @@ def attach_onnx_metadata(
                     f"{training_contract_schema}; supported diagnostic schemas are 1/2 and "
                     f"formal schema is {TRAINING_CONTRACT_SCHEMA_VERSION}"
                 )
+            # Only consume the profile for export after the adjacent checkpoint contract binding
+            # above has succeeded. The structural validator may inspect it, but cannot mint output.
+            planner_revision_metadata_json = planner_task_revision_metadata(training_contract)
             metadata["training_contract_sha256"] = training_contract_sha256
             metadata["training_contract_schema_version"] = str(training_contract_schema)
         elif checkpoint_claims_contract(checkpoint):
@@ -375,6 +381,32 @@ def attach_onnx_metadata(
     # clip boundary). seg_len comes from the baked MotionLoader segments; strike phases from the
     # racket_target command (per-clip when configured).
     motion_cmd = env.command_manager.get_term("motion")
+    runtime_planner_revision = (
+        motion_cmd.planner_revision_hard_contract()
+        if callable(getattr(motion_cmd, "planner_revision_hard_contract", None))
+        else None
+    )
+    checkpoint_planner_revision = (
+        training_contract.get("planner_task_revision")
+        if training_contract_schema == TRAINING_CONTRACT_SCHEMA_VERSION
+        and training_contract is not None
+        else None
+    )
+    if runtime_planner_revision != checkpoint_planner_revision:
+        raise ValueError(
+            "attach_onnx_metadata: current export environment planner-task-revision contract "
+            "disagrees with the checkpoint-bound schema-3 contract; legacy/OFF checkpoints "
+            "cannot inherit revision support from the current environment"
+        )
+    if planner_revision_metadata_json is not None:
+        if actor_contract is None or actor_contract.name != "deploy_parity_face179":
+            raise ValueError(
+                "attach_onnx_metadata: planner-task-revision metadata is valid only for the "
+                "formal deploy_parity_face179 actor"
+            )
+    bound_planner_revision = bind_planner_task_revision_metadata(metadata, training_contract)
+    if bound_planner_revision != planner_revision_metadata_json:
+        raise RuntimeError("attach_onnx_metadata: planner revision canonicalization drift")
     metadata["clip_seg_lengths"] = ",".join(
         str(int(n)) for n in runtime_facts["motion_segment_lengths"]
     )

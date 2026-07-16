@@ -13,6 +13,13 @@ Formal Gate3 uses schema 3, which extends that face-B row with a shared
 base-control epoch, a strictly increasing command sequence, an exact
 base-sequence reference and a same-host monotonic source stamp. Those payload
 fields, rather than cross-topic receive order, define causality.
+
+Schema 4 appends exact ``task_id`` and ``task_revision`` counters.  A positive
+pair identifies one observed ball/task and orders every valid or invalid
+refinement of it.  The zero/zero pair is reserved for an invalid global revoke
+when no task identity can safely be asserted; it is never a valid command.
+``command_sequence`` remains transport ordering and must not be reused as a
+ball identity. Schema 3 is intentionally left byte-for-byte unchanged.
 """
 
 from __future__ import annotations
@@ -24,9 +31,11 @@ import math
 RACKET_FLAT_SCHEMA_V1 = 1
 RACKET_FLAT_SCHEMA_V2_FACE179 = 2
 RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH = 3
+RACKET_FLAT_SCHEMA_V4_FACE179_TASK = 4
 RACKET_FLAT_V1_SIZE = 12
 RACKET_FLAT_V2_SIZE = 16
 RACKET_FLAT_V3_SIZE = 20
+RACKET_FLAT_V4_SIZE = 22
 BASE_FLAT_SCHEMA_V1 = 1
 BASE_FLAT_SCHEMA_V2_EPOCH = 2
 BASE_FLAT_V1_SIZE = 9
@@ -57,6 +66,25 @@ def _exact_counter(value: int | float | None, *, name: str) -> int:
     return int(number)
 
 
+def _schema4_task_identity(
+    task_id: int | float | None,
+    task_revision: int | float | None,
+    *,
+    valid: bool,
+) -> tuple[int, int]:
+    """Validate an active positive pair or an invalid zero/zero revoke."""
+
+    if not valid and task_id is None and task_revision is None:
+        task_id = task_revision = 0
+    task = _exact_counter(task_id, name="task_id")
+    revision = _exact_counter(task_revision, name="task_revision")
+    if (task == 0) != (revision == 0):
+        raise ValueError("task_id and task_revision must both be zero or both be positive")
+    if valid and task == 0:
+        raise ValueError("valid schema-4 command requires positive task_id/task_revision")
+    return task, revision
+
+
 def pack_racket_command_flat(
     *,
     schema: int,
@@ -73,17 +101,21 @@ def pack_racket_command_flat(
     command_sequence: int | float | None = None,
     base_sequence_ref: int | float | None = None,
     source_monotonic_s: float | None = None,
+    task_id: int | float | None = None,
+    task_revision: int | float | None = None,
 ) -> list[float]:
     """Build one canonical row; ``normal_cmd_w`` is physical face B, not raw mount A."""
 
     face_schema = schema in (
         RACKET_FLAT_SCHEMA_V2_FACE179,
         RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+        RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
     )
     if schema not in (
         RACKET_FLAT_SCHEMA_V1,
         RACKET_FLAT_SCHEMA_V2_FACE179,
         RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+        RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
     ):
         raise ValueError(f"unsupported racket flat schema {schema}")
     if frame_code not in (0, 1):
@@ -140,7 +172,13 @@ def pack_racket_command_flat(
     stamp = float(source_monotonic_s) if source_monotonic_s is not None else math.nan
     if not math.isfinite(stamp) or stamp < 0.0:
         raise ValueError("source_monotonic_s must be finite and non-negative")
-    return [*face_row, float(epoch), float(sequence), float(base_ref), stamp]
+    formal_row = [*face_row, float(epoch), float(sequence), float(base_ref), stamp]
+    if schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+        return formal_row
+    task, revision = _schema4_task_identity(
+        task_id, task_revision, valid=bool(valid)
+    )
+    return [*formal_row, float(task), float(revision)]
 
 
 def pack_base_pose_flat(
@@ -205,6 +243,8 @@ def pack_invalid_racket_command_flat(
     command_sequence: int | float | None = None,
     base_sequence_ref: int | float | None = None,
     source_monotonic_s: float | None = None,
+    task_id: int | float | None = None,
+    task_revision: int | float | None = None,
 ) -> list[float]:
     """Return an exact finite invalid row that safely revokes a live command."""
 
@@ -220,21 +260,30 @@ def pack_invalid_racket_command_flat(
             0.0, 0.0, 0.0,
             1.0, 0.0, 0.0, 0.0,
         ]
-    if schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+    if schema in (
+        RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+        RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
+    ):
         epoch = _exact_counter(control_epoch, name="control_epoch")
         sequence = _exact_counter(command_sequence, name="command_sequence")
         base_ref = _exact_counter(base_sequence_ref, name="base_sequence_ref")
         stamp = float(source_monotonic_s) if source_monotonic_s is not None else math.nan
         if not math.isfinite(stamp) or stamp < 0.0:
             raise ValueError("source_monotonic_s must be finite and non-negative")
-        return [
-            3.0, 0.0, 0.0,
+        formal_row = [
+            float(schema), 0.0, 0.0,
             0.0, 0.0, 0.0,
             0.0, 0.0, 0.0,
             0.0, 0.0, 0.0,
             1.0, 0.0, 0.0, 0.0,
             float(epoch), float(sequence), float(base_ref), stamp,
         ]
+        if schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+            return formal_row
+        task, revision = _schema4_task_identity(
+            task_id, task_revision, valid=False
+        )
+        return [*formal_row, float(task), float(revision)]
     raise ValueError(f"unsupported racket flat schema {schema}")
 
 
@@ -253,12 +302,29 @@ def pack_racket_command_flat_fail_closed(**kwargs) -> tuple[list[float], str | N
         if schema not in (
             RACKET_FLAT_SCHEMA_V2_FACE179,
             RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+            RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
         ):
             raise
-        return pack_invalid_racket_command_flat(
+        invalid_kwargs = dict(
             schema=schema,
             control_epoch=kwargs.get("control_epoch"),
             command_sequence=kwargs.get("command_sequence"),
             base_sequence_ref=kwargs.get("base_sequence_ref"),
             source_monotonic_s=kwargs.get("source_monotonic_s"),
-        ), str(exc)
+            task_id=kwargs.get("task_id"),
+            task_revision=kwargs.get("task_revision"),
+        )
+        try:
+            invalid = pack_invalid_racket_command_flat(**invalid_kwargs)
+        except ValueError as identity_exc:
+            if schema != RACKET_FLAT_SCHEMA_V4_FACE179_TASK:
+                raise
+            # A malformed task identity must not leave the prior command
+            # eligible.  Publish an anonymous global revoke instead of
+            # inventing an active task.  Causality metadata is still required;
+            # if it is malformed this second pack raises.
+            invalid_kwargs["task_id"] = 0
+            invalid_kwargs["task_revision"] = 0
+            invalid = pack_invalid_racket_command_flat(**invalid_kwargs)
+            return invalid, f"{exc}; task identity revoked globally: {identity_exc}"
+        return invalid, str(exc)

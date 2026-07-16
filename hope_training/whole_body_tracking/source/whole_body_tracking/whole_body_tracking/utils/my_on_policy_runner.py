@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import math
 import os
 
@@ -22,6 +23,70 @@ from whole_body_tracking.utils.training_contract import (
     TRAINING_CONTRACT_SCHEMA_VERSION,
     validate_training_launch_claim_sha256,
 )
+
+
+_EXACT_BEHAVIOR_EVENT = "hope_exact_behavior_update"
+
+
+def _ratio_or_none(counters: dict, numerator: str, denominator: str):
+    """Return an honest derived value; an absent/zero denominator is unavailable, never zero."""
+
+    denom = counters.get(denominator, 0)
+    if denom is None or float(denom) <= 0.0:
+        return None
+    value = float(counters.get(numerator, 0)) / float(denom)
+    return value if math.isfinite(value) else None
+
+
+def exact_behavior_decision_values(counters: dict) -> dict[str, float | None]:
+    """Derive dashboard values from one record; windows must sum counters before calling this."""
+
+    return {
+        "swing_completion_rate": _ratio_or_none(
+            counters, "swing_completion_count", "swing_outcome_count"
+        ),
+        "pre_strike_physical_fall_rate": _ratio_or_none(
+            counters, "pre_strike_physical_fall_count", "swing_outcome_count"
+        ),
+        "post_strike_physical_fall_rate": _ratio_or_none(
+            counters, "post_strike_physical_fall_count", "swing_outcome_count"
+        ),
+        "virtual_capture_per_strike": _ratio_or_none(
+            counters, "virtual_capture_count", "strike_opportunity_count"
+        ),
+        "virtual_net_clear_per_capture": _ratio_or_none(
+            counters, "virtual_net_clear_count", "virtual_capture_count"
+        ),
+        "virtual_landing_valid_per_capture": _ratio_or_none(
+            counters, "virtual_landing_valid_count", "virtual_capture_count"
+        ),
+        "virtual_legal_return_per_strike": _ratio_or_none(
+            counters, "virtual_legal_return_count", "strike_opportunity_count"
+        ),
+        "ready_tilt_rad_mean": _ratio_or_none(
+            counters, "ready_tilt_rad_sum", "ready_tilt_eligible_sample_count"
+        ),
+        "ready_base_speed_xy_mps_mean": _ratio_or_none(
+            counters,
+            "ready_base_speed_xy_mps_sum",
+            "ready_base_speed_eligible_sample_count",
+        ),
+        "ready_station_offset_m_mean": _ratio_or_none(
+            counters,
+            "ready_station_offset_m_sum",
+            "ready_station_offset_eligible_sample_count",
+        ),
+        "ready_foot_contact_fraction_mean": _ratio_or_none(
+            counters,
+            "ready_foot_contact_fraction_sum",
+            "ready_foot_contact_eligible_sample_count",
+        ),
+        "ready_foot_slip_speed_mps_mean": _ratio_or_none(
+            counters,
+            "ready_foot_slip_speed_mps_sum",
+            "ready_foot_slip_eligible_sample_count",
+        ),
+    }
 
 
 class MyOnPolicyRunner(OnPolicyRunner):
@@ -148,13 +213,65 @@ class MotionOnPolicyRunner(OnPolicyRunner):
 
     def log(self, locs: dict, width: int = 80, pad: int = 35) -> None:
         super().log(locs, width=width, pad=pad)
+        step = int(locs["it"])
+        # Consume/print even when TensorBoard/W&B is disabled: this stdout JSON line is the exact
+        # per-update receipt, while dashboard logging is optional presentation only.
+        exact_behavior = self._consume_exact_behavior_updates(step)
         if self.disable_logs or self.writer is None:
             return
-        self._log_live_metrics(locs["it"])
+        self._log_live_metrics(step, exact_behavior=exact_behavior)
 
-    def _log_live_metrics(self, step: int) -> None:
+    def _consume_exact_behavior_updates(self, step: int) -> dict[str, dict]:
+        """Consume the sole behavior ledger once and emit one canonical JSON line per PPO update."""
+
+        if getattr(self, "_exact_behavior_consumed_step", None) == int(step):
+            return getattr(self, "_exact_behavior_consumed_records", {})
+        records: dict[str, dict] = {}
+        env = self.env.unwrapped
+        if hasattr(env, "command_manager"):
+            providers = []
+            for term_name in env.command_manager.active_terms:
+                term = env.command_manager.get_term(term_name)
+                consumer = getattr(term, "consume_exact_behavior_decision_counters", None)
+                if callable(consumer):
+                    providers.append((str(term_name), consumer))
+            if len(providers) > 1:
+                names = [name for name, _consumer in providers]
+                raise RuntimeError(
+                    "exact behavior receipt requires exactly one provider; found "
+                    f"{names}"
+                )
+            for term_name, consumer in providers:
+                counters = {
+                    name: self._exact_counter_value(value)
+                    for name, value in consumer().items()
+                }
+                record = {
+                    "event": _EXACT_BEHAVIOR_EVENT,
+                    "schema_version": 1,
+                    "ppo_update": int(step),
+                    "term": term_name,
+                    "counters": dict(sorted(counters.items())),
+                    "derived": exact_behavior_decision_values(counters),
+                    "window_aggregation": "sum_counters_then_recompute_derived",
+                }
+                records[term_name] = record
+                print(
+                    "HOPE_EXACT_BEHAVIOR_UPDATE_JSON="
+                    + json.dumps(record, sort_keys=True, separators=(",", ":")),
+                    flush=True,
+                )
+        self._exact_behavior_consumed_step = int(step)
+        self._exact_behavior_consumed_records = records
+        return records
+
+    def _log_live_metrics(
+        self, step: int, *, exact_behavior: dict[str, dict] | None = None
+    ) -> None:
         """Log current manager state means every PPO iteration for richer dashboards."""
         env = self.env.unwrapped
+        if exact_behavior is None:
+            exact_behavior = self._consume_exact_behavior_updates(step)
 
         if hasattr(env, "command_manager"):
             for term_name in env.command_manager.active_terms:
@@ -182,10 +299,19 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                             self._scalar_tensor(counter_value),
                             step,
                         )
-                sparse_reward_consumer = getattr(
-                    term, "consume_sparse_reward_eligibility_counters", None
-                )
-                if callable(sparse_reward_consumer):
+                exact_record = exact_behavior.get(str(term_name))
+                if exact_record is not None:
+                    for counter_name, counter_value in exact_record["counters"].items():
+                        self._log_scalar(
+                            f"Live/{term_name}/{counter_name}",
+                            counter_value,
+                            step,
+                        )
+                else:
+                    sparse_reward_consumer = getattr(
+                        term, "consume_sparse_reward_eligibility_counters", None
+                    )
+                if exact_record is None and callable(sparse_reward_consumer):
                     # Exact non-decayed counts, including per-action denominators.  These are
                     # intentionally a second transaction: MotionCommand owns imitation/replay
                     # activation, while RacketTargetCommand owns virtual strike outcomes.
@@ -289,6 +415,23 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             return float(value)
         except (TypeError, ValueError):
             return None
+
+    @staticmethod
+    def _exact_counter_value(value):
+        """Preserve integer counters in JSON and reject vectors/non-finite sums."""
+
+        if isinstance(value, torch.Tensor):
+            if value.numel() != 1:
+                raise ValueError("per-update exact behavior counter must be a scalar tensor")
+            value = value.item()
+        if isinstance(value, bool):
+            raise TypeError("per-update exact behavior counter must not be boolean")
+        if isinstance(value, int):
+            return value
+        numeric = float(value)
+        if not math.isfinite(numeric):
+            raise ValueError("per-update exact behavior sum must be finite")
+        return numeric
 
     def _log_scalar(self, tag: str, value, step: int) -> None:
         if value is None or not math.isfinite(float(value)):

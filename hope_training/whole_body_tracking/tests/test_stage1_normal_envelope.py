@@ -301,11 +301,33 @@ def test_both_export_paths_derive_from_exact_bank_and_runtime_gate_is_precommit(
         / "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/include/"
         "a3_pingpong/pp_policy.hpp"
     ).read_text(encoding="utf-8")
-    convert = "face_normal_raw_a_from_wire_b(eng_clip, normal_w)"
-    gate = "face_normal_within_training_envelope(eng_clip, normal_raw_a_w)"
-    commit = "planner_frozen_normal_w_ = normal_raw_a_w"
-    assert convert in policy and gate in policy and commit in policy
-    assert policy.index(convert) < policy.index(gate) < policy.index(commit)
+    # Check each transaction independently.  Schema-4 same-task revisions have a second
+    # gate/commit path before the initial-engage path in this header, so comparing the first
+    # occurrence of a shared assignment across the whole file is not a meaningful ordering
+    # assertion.
+    active_path = policy.split("void Formal179RevisionStep_", 1)[1].split(
+        "void AdvanceFormalRevisionPhase_", 1
+    )[0]
+    active_convert = "face_normal_raw_a_from_wire_b(clip_id, normal_wire_b_w)"
+    active_gate = "face_normal_within_training_envelope(clip_id, normal_raw_a_w)"
+    active_commit = "planner_frozen_normal_w_ = normal_raw_a_w"
+    assert active_convert in active_path and active_gate in active_path and active_commit in active_path
+    assert (
+        active_path.index(active_convert)
+        < active_path.index(active_gate)
+        < active_path.index(active_commit)
+    )
+
+    engage_path = policy.split("void PlannerEngageStep_", 1)[1]
+    engage_convert = "face_normal_raw_a_from_wire_b(eng_clip, normal_w)"
+    engage_gate = "face_normal_within_training_envelope(eng_clip, normal_raw_a_w)"
+    engage_commit = "planner_frozen_normal_w_ = normal_raw_a_w"
+    assert engage_convert in engage_path and engage_gate in engage_path and engage_commit in engage_path
+    assert (
+        engage_path.index(engage_convert)
+        < engage_path.index(engage_gate)
+        < engage_path.index(engage_commit)
+    )
     assert "planner_frozen_pos_w_ = pos_w" in policy
     assert "planner_frozen_vel_w_ = candidate_vel_w" in policy
     assert "face_command_out_of_train_envelope" in policy

@@ -7,6 +7,7 @@
 #pragma once
 
 #include <onnxruntime_cxx_api.h>
+#include <nlohmann/json.hpp>
 
 #include <algorithm>
 #include <array>
@@ -22,9 +23,153 @@
 
 #include "a3_pingpong/pp_obs_builder.hpp"
 #include "a3_pingpong/pp_face179_contract.hpp"
+#include "a3_pingpong/pp_phase_governor.hpp"
 #include "a3_pingpong/pp_sha256.hpp"
 
 namespace a3_pingpong {
+
+struct PpPlannerTaskRevisionModelContract {
+  bool trained = false;
+  int revision_schema_version = 0;
+  PpPhaseGovernorProfile governor;
+  double initial_tts_lo_s = 0.0;
+  double initial_tts_hi_s = 0.0;
+};
+
+inline PpPlannerTaskRevisionModelContract ParsePpPlannerTaskRevisionModelContract(
+    const std::string& raw) {
+  PpPlannerTaskRevisionModelContract out;
+  if (raw.empty()) return out;  // old models are unambiguously untrained
+  using Json = nlohmann::json;
+  Json root;
+  try {
+    root = Json::parse(raw);
+  } catch (const std::exception& exc) {
+    throw std::runtime_error(
+        std::string("ONNX planner_task_revision is not valid JSON: ") + exc.what());
+  }
+  const auto require_keys = [](const Json& object,
+                               std::initializer_list<const char*> expected,
+                               const char* name) {
+    if (!object.is_object())
+      throw std::runtime_error(std::string("ONNX ") + name + " must be an object");
+    std::vector<std::string> actual;
+    for (auto it = object.begin(); it != object.end(); ++it)
+      actual.push_back(it.key());
+    std::vector<std::string> wanted;
+    for (const char* key : expected) wanted.emplace_back(key);
+    std::sort(actual.begin(), actual.end());
+    std::sort(wanted.begin(), wanted.end());
+    if (actual != wanted)
+      throw std::runtime_error(std::string("ONNX ") + name +
+                               " has missing or unknown fields");
+  };
+  const auto finite_number = [](const Json& value, const char* name) {
+    if (!value.is_number() || value.is_boolean())
+      throw std::runtime_error(std::string("ONNX ") + name + " must be numeric");
+    const double parsed = value.get<double>();
+    if (!std::isfinite(parsed))
+      throw std::runtime_error(std::string("ONNX ") + name + " must be finite");
+    return parsed;
+  };
+  require_keys(root,
+               {"enabled", "revision_schema_version", "governor",
+                "initial_tts_range_s"},
+               "planner_task_revision");
+  if (!root.at("enabled").is_boolean() || !root.at("enabled").get<bool>())
+    throw std::runtime_error(
+        "ONNX planner_task_revision, when present, must declare enabled=true");
+  if (!root.at("revision_schema_version").is_number_integer() ||
+      root.at("revision_schema_version").get<int>() != 1)
+    throw std::runtime_error(
+        "ONNX planner_task_revision revision_schema_version must equal 1");
+
+  const Json& governor = root.at("governor");
+  require_keys(governor,
+               {"contract_version", "schema_version", "profile_sha256", "profile"},
+               "planner_task_revision.governor");
+  const Json& profile = governor.at("profile");
+  require_keys(
+      profile,
+      {"policy_dt_s", "min_tts_s", "max_tts_s", "max_phase_rate_per_s",
+       "max_phase_acceleration_per_s2", "max_deadline_revision_delta_s",
+       "max_position_revision_delta_m", "max_velocity_revision_delta_mps",
+       "max_normal_revision_delta_rad", "normal_unit_tolerance",
+       "early_deadline_tolerance_s", "contract_version", "schema_version"},
+      "planner_task_revision.governor.profile");
+  if (!governor.at("contract_version").is_string() ||
+      governor.at("contract_version").get<std::string>() != "phase_governor_v1" ||
+      !profile.at("contract_version").is_string() ||
+      profile.at("contract_version").get<std::string>() != "phase_governor_v1")
+    throw std::runtime_error(
+        "ONNX planner_task_revision requires phase_governor_v1");
+  if (!governor.at("schema_version").is_number_integer() ||
+      governor.at("schema_version").get<int>() != 1 ||
+      !profile.at("schema_version").is_number_integer() ||
+      profile.at("schema_version").get<int>() != 1)
+    throw std::runtime_error(
+        "ONNX planner_task_revision governor schema_version must equal 1");
+  if (!governor.at("profile_sha256").is_string())
+    throw std::runtime_error(
+        "ONNX planner_task_revision profile_sha256 must be a string");
+  const std::string profile_sha =
+      governor.at("profile_sha256").get<std::string>();
+  const std::string canonical_profile = profile.dump(-1, ' ', false,
+      Json::error_handler_t::strict) + "\n";
+  if (profile_sha != PpSha256Hex(canonical_profile))
+    throw std::runtime_error(
+        "ONNX planner_task_revision profile_sha256 does not bind the profile");
+
+  PpPhaseGovernorProfile parsed;
+  parsed.contract_version = "phase_governor_v1";
+  parsed.schema_version = 1;
+  parsed.profile_sha256 = profile_sha;
+  parsed.policy_dt_s = finite_number(profile.at("policy_dt_s"), "policy_dt_s");
+  parsed.min_tts_s = finite_number(profile.at("min_tts_s"), "min_tts_s");
+  parsed.max_tts_s = finite_number(profile.at("max_tts_s"), "max_tts_s");
+  parsed.max_phase_rate_per_s = finite_number(
+      profile.at("max_phase_rate_per_s"), "max_phase_rate_per_s");
+  parsed.max_phase_acceleration_per_s2 = finite_number(
+      profile.at("max_phase_acceleration_per_s2"),
+      "max_phase_acceleration_per_s2");
+  parsed.max_deadline_revision_delta_s = finite_number(
+      profile.at("max_deadline_revision_delta_s"),
+      "max_deadline_revision_delta_s");
+  parsed.max_position_revision_delta_m = finite_number(
+      profile.at("max_position_revision_delta_m"),
+      "max_position_revision_delta_m");
+  parsed.max_velocity_revision_delta_mps = finite_number(
+      profile.at("max_velocity_revision_delta_mps"),
+      "max_velocity_revision_delta_mps");
+  parsed.max_normal_revision_delta_rad = finite_number(
+      profile.at("max_normal_revision_delta_rad"),
+      "max_normal_revision_delta_rad");
+  parsed.normal_unit_tolerance = finite_number(
+      profile.at("normal_unit_tolerance"), "normal_unit_tolerance");
+  parsed.early_deadline_tolerance_s = finite_number(
+      profile.at("early_deadline_tolerance_s"),
+      "early_deadline_tolerance_s");
+  if (!parsed.Valid())
+    throw std::runtime_error(
+        "ONNX planner_task_revision contains an invalid governor profile");
+
+  const Json& tts_range = root.at("initial_tts_range_s");
+  if (!tts_range.is_array() || tts_range.size() != 2)
+    throw std::runtime_error(
+        "ONNX planner_task_revision initial_tts_range_s must contain two values");
+  const double initial_lo = finite_number(tts_range.at(0), "initial_tts_range_s[0]");
+  const double initial_hi = finite_number(tts_range.at(1), "initial_tts_range_s[1]");
+  if (initial_lo < parsed.min_tts_s || initial_hi > parsed.max_tts_s ||
+      initial_hi <= initial_lo)
+    throw std::runtime_error(
+        "ONNX planner_task_revision initial_tts_range_s is outside the governor profile");
+  out.trained = true;
+  out.revision_schema_version = 1;
+  out.governor = std::move(parsed);
+  out.initial_tts_lo_s = initial_lo;
+  out.initial_tts_hi_s = initial_hi;
+  return out;
+}
 
 class PpOnnxPolicy {
  public:
@@ -103,6 +248,11 @@ class PpOnnxPolicy {
         LookupMetaOptional(md, alloc, "actor_leg_ref_mask_provenance_epoch");
     const std::string actor_leg_ref_mask_binding =
         LookupMetaOptional(md, alloc, "actor_leg_ref_mask_provenance_sha256");
+    planner_task_revision_contract_ = ParsePpPlannerTaskRevisionModelContract(
+        LookupMetaOptional(md, alloc, "planner_task_revision"));
+    if (planner_task_revision_contract_.trained && obs_dim_ != kObsDim179)
+      throw std::runtime_error(
+          "ONNX planner_task_revision metadata is valid only for the formal 179-D actor");
     training_contract_exact_ = training_contract_exact == "1";
     const std::string schema = LookupMetaOptional(md, alloc, "hope_metadata_schema_version");
     auto valid_bit = [](const std::string& s) { return s.empty() || s == "0" || s == "1"; };
@@ -603,6 +753,9 @@ class PpOnnxPolicy {
   const PpFaceNormalEnvelope& face_normal_envelope() const {
     return face_normal_envelope_;
   }
+  const PpPlannerTaskRevisionModelContract& planner_task_revision_contract() const {
+    return planner_task_revision_contract_;
+  }
   bool face_normal_within_training_envelope(int clip, const Vec3& normal_w) const {
     return obs_dim_ == kObsDim179 &&
            face_normal_envelope_.AllowsRawA(
@@ -798,6 +951,7 @@ class PpOnnxPolicy {
   bool actor_leg_ref_mask_provenance_exact_ = false;
   bool publishable_model_contract_ = false;
   PpFaceNormalEnvelope face_normal_envelope_{};  // mandatory and content-bound for 179-D only
+  PpPlannerTaskRevisionModelContract planner_task_revision_contract_{};
   std::vector<float> obs_f_;
   int obs_dim_ = kObsDim;  // detected from the model input at load (180 full / 175 deploy_parity)
 };

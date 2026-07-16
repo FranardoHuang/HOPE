@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 import importlib.util
+import hashlib
+import json
 from dataclasses import dataclass
 from pathlib import Path
 from types import SimpleNamespace
@@ -389,6 +391,259 @@ def _schema3_contract():
         "racket_control_point": "pingpang_red_Link_origin_v1",
         "racket_control_point_offset_wrist_m": [0.21021, 0.032078, 0.032036],
     }
+
+
+def _planner_revision_schema3_contract():
+    contract = _schema3_contract()
+    contract["strike_phase_per_clip"] = [0.4, 0.6]
+    profile = {
+        "policy_dt_s": 0.02,
+        "min_tts_s": 0.1,
+        "max_tts_s": 2.0,
+        "max_phase_rate_per_s": 4.0,
+        "max_phase_acceleration_per_s2": 20.0,
+        "max_deadline_revision_delta_s": 0.25,
+        "max_position_revision_delta_m": 0.1,
+        "max_velocity_revision_delta_mps": 0.5,
+        "max_normal_revision_delta_rad": 0.2,
+        "normal_unit_tolerance": 0.0001,
+        "early_deadline_tolerance_s": 1e-9,
+        "contract_version": "phase_governor_v1",
+        "schema_version": 1,
+    }
+    profile_bytes = (
+        json.dumps(profile, allow_nan=False, separators=(",", ":"), sort_keys=True) + "\n"
+    ).encode("utf-8")
+    contract["planner_task_revision"] = {
+        "enabled": True,
+        "revision_schema_version": 1,
+        "governor": {
+            "contract_version": "phase_governor_v1",
+            "schema_version": 1,
+            "profile_sha256": hashlib.sha256(profile_bytes).hexdigest(),
+            "profile": profile,
+        },
+        "initial_tts_range_s": [0.25, 1.7],
+    }
+    contract["planner_task_revision_training"] = {
+        "initial_tts_sampling_semantics": (
+            "explicit_weighted_mixture_over_initial_tts_range_s"
+        ),
+        "initial_tts_mixture": {
+            "contract_version": "initial_tts_mixture_v1",
+            "components": [
+                {"name": "late_stress", "range_s": [0.25, 0.49], "weight": 0.15},
+                {"name": "baseline_0p5", "range_s": [0.5, 0.5], "weight": 0.20},
+                {"name": "fast_deploy", "range_s": [0.5, 0.9], "weight": 0.30},
+                {"name": "broad_arrival", "range_s": [0.9, 1.7], "weight": 0.35},
+            ],
+        },
+        "initial_feasibility_gate": (
+            "normalized_phase_rate_and_acceleration_envelope_only"
+        ),
+        "dynamics_certified_action_tau_min_bound": False,
+        "timing_exam_semantics": {
+            "0.5_s": "required_baseline_gate",
+            "below_0.5_s": "stress_diagnostic_not_support_floor",
+        },
+        "position_std_m": 0.02,
+        "velocity_std_mps": 0.1,
+        "normal_std_rad": 0.05,
+        "tts_std_s": 0.1,
+        "truth_fields_immutable": [
+            "question_bank_row",
+            "physical_ball",
+            "reward_target",
+            "critic_target",
+        ],
+        "actor_revision_fields": [
+            "target_position",
+            "target_velocity",
+            "signed_target_normal",
+            "time_to_strike",
+        ],
+    }
+    return contract
+
+
+def test_planner_revision_metadata_is_complete_canonical_and_profile_bound():
+    contract = _planner_revision_schema3_contract()
+    metadata = TC.planner_task_revision_metadata(contract)
+    assert metadata == json.dumps(
+        contract["planner_task_revision"],
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    )
+    decoded = json.loads(metadata)
+    assert set(decoded) == {
+        "enabled",
+        "revision_schema_version",
+        "governor",
+        "initial_tts_range_s",
+    }
+    assert set(decoded["governor"]["profile"]) == {
+        "policy_dt_s",
+        "min_tts_s",
+        "max_tts_s",
+        "max_phase_rate_per_s",
+        "max_phase_acceleration_per_s2",
+        "max_deadline_revision_delta_s",
+        "max_position_revision_delta_m",
+        "max_velocity_revision_delta_mps",
+        "max_normal_revision_delta_rad",
+        "normal_unit_tolerance",
+        "early_deadline_tolerance_s",
+        "contract_version",
+        "schema_version",
+    }
+    profile_bytes = (
+        json.dumps(
+            decoded["governor"]["profile"],
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode("utf-8")
+    assert hashlib.sha256(profile_bytes).hexdigest() == decoded["governor"][
+        "profile_sha256"
+    ]
+    # Same fixed vector is hard-coded in C++ test_pp_onnx_policy.cpp; this catches cross-language
+    # key-order/number-format drift instead of letting each side self-sign its own serialization.
+    assert decoded["governor"]["profile_sha256"] == (
+        "3ebaca6b7f6ce1e841d5cf62aab3df38c796093ce563b6bfb4ef3048a0dd886a"
+    )
+    # Validation also proves the checkpoint-bound strike-frame inputs are complete.
+    TC.validate_schema3_contract_structure(contract)
+
+
+@pytest.mark.parametrize("keep", ["planner_task_revision", "planner_task_revision_training"])
+def test_planner_revision_half_configuration_fails_closed(keep):
+    contract = _planner_revision_schema3_contract()
+    drop = (
+        "planner_task_revision_training"
+        if keep == "planner_task_revision"
+        else "planner_task_revision"
+    )
+    contract.pop(drop)
+    with pytest.raises(ValueError, match="half-configured"):
+        TC.planner_task_revision_metadata(contract)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (
+            lambda contract: contract["planner_task_revision"].pop("initial_tts_range_s"),
+            "missing fields",
+        ),
+        (
+            lambda contract: contract["planner_task_revision"]["governor"]["profile"].pop(
+                "max_phase_rate_per_s"
+            ),
+            "missing fields",
+        ),
+        (
+            lambda contract: contract["planner_task_revision"]["governor"]["profile"].__setitem__(
+                "max_phase_acceleration_per_s2", 21.0
+            ),
+            "does not bind",
+        ),
+        (
+            lambda contract: contract.__setitem__("strike_phase_per_clip", [0.4]),
+            "one checkpoint-bound strike phase",
+        ),
+    ],
+)
+def test_planner_revision_missing_partial_and_tamper_fail_closed(mutation, message):
+    contract = _planner_revision_schema3_contract()
+    mutation(contract)
+    with pytest.raises(ValueError, match=message):
+        TC.planner_task_revision_metadata(contract)
+
+
+def test_planner_revision_range_and_policy_clock_mismatch_fail_closed():
+    contract = _planner_revision_schema3_contract()
+    contract["planner_task_revision"]["initial_tts_range_s"] = [0.05, 1.5]
+    with pytest.raises(ValueError, match="strictly ordered inside"):
+        TC.planner_task_revision_metadata(contract)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        (
+            lambda contract: contract["planner_task_revision_training"].pop(
+                "initial_tts_mixture"
+            ),
+            "missing fields",
+        ),
+        (
+            lambda contract: contract["planner_task_revision_training"][
+                "initial_tts_mixture"
+            ]["components"][0].__setitem__("weight", 0.14),
+            "weights must sum to 1",
+        ),
+        (
+            lambda contract: contract["planner_task_revision_training"][
+                "initial_tts_mixture"
+            ]["components"][0].__setitem__("range_s", [0.3, 0.49]),
+            "support must equal",
+        ),
+        (
+            lambda contract: contract["planner_task_revision_training"][
+                "initial_tts_mixture"
+            ]["components"][1].__setitem__("range_s", [0.5, 0.51]),
+            "exact 0.5 s point mass",
+        ),
+    ],
+)
+def test_planner_revision_initial_tts_mixture_fails_closed(mutation, message):
+    contract = _planner_revision_schema3_contract()
+    mutation(contract)
+    with pytest.raises(ValueError, match=message):
+        TC.planner_task_revision_metadata(contract)
+
+    contract = _planner_revision_schema3_contract()
+    profile = contract["planner_task_revision"]["governor"]["profile"]
+    profile["policy_dt_s"] = 0.01
+    canonical = (
+        json.dumps(profile, allow_nan=False, separators=(",", ":"), sort_keys=True) + "\n"
+    ).encode("utf-8")
+    contract["planner_task_revision"]["governor"]["profile_sha256"] = hashlib.sha256(
+        canonical
+    ).hexdigest()
+    with pytest.raises(ValueError, match="disagrees with schema-3 policy_step_dt_s"):
+        TC.planner_task_revision_metadata(contract)
+
+
+def test_legacy_contract_does_not_acquire_planner_revision_metadata():
+    contract = _schema3_contract()
+    assert TC.planner_task_revision_metadata(contract) is None
+    donor_metadata = {"planner_task_revision": '{"enabled":true}', "other": "kept"}
+    assert TC.bind_planner_task_revision_metadata(donor_metadata, contract) is None
+    assert donor_metadata == {"other": "kept"}
+
+    enabled_contract = _planner_revision_schema3_contract()
+    encoded = TC.bind_planner_task_revision_metadata(donor_metadata, enabled_contract)
+    assert encoded == TC.planner_task_revision_metadata(enabled_contract)
+    assert donor_metadata["planner_task_revision"] == encoded
+
+    diagnostic_v2 = {"schema_version": 2}
+    assert TC.planner_task_revision_metadata(diagnostic_v2) is None
+
+    # Presence on an old sidecar is not an opt-in; only checkpoint-bound schema 3 may carry it.
+    diagnostic_v2["planner_task_revision"] = _planner_revision_schema3_contract()[
+        "planner_task_revision"
+    ]
+    diagnostic_v2["planner_task_revision_training"] = _planner_revision_schema3_contract()[
+        "planner_task_revision_training"
+    ]
+    with pytest.raises(ValueError, match="requires schema-3"):
+        TC.planner_task_revision_metadata(diagnostic_v2)
 
 
 def _qdot_hinge_schema3_contract():

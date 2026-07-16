@@ -15,8 +15,10 @@ import hashlib
 import json
 import math
 import os
+import shutil
 from collections import Counter
 from pathlib import Path
+import tempfile
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -1131,18 +1133,74 @@ def write_scorecard(
     strict = finite_or_none(document)
     out_json = Path(output_json).expanduser().resolve()
     out_csv = Path(output_csv).expanduser().resolve()
+    if out_json == out_csv or out_json.parent != out_csv.parent:
+        raise IsaacBankExamError("scorecard JSON/CSV must be distinct files in one output directory")
     out_json.parent.mkdir(parents=True, exist_ok=True)
-    out_csv.parent.mkdir(parents=True, exist_ok=True)
-    tmp_json = out_json.with_name(out_json.name + ".tmp")
-    tmp_csv = out_csv.with_name(out_csv.name + ".tmp")
-    with open(tmp_json, "w", encoding="utf-8") as stream:
-        json.dump(strict, stream, indent=2, sort_keys=True, allow_nan=False)
-        stream.write("\n")
-    with open(tmp_csv, "w", encoding="utf-8", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=list(ATTEMPT_COLUMNS), extrasaction="ignore")
-        writer.writeheader()
-        for row in strict["attempts"]:
-            writer.writerow({key: row.get(key) for key in ATTEMPT_COLUMNS})
-    os.replace(tmp_json, out_json)
-    os.replace(tmp_csv, out_csv)
+    if any(path.exists() or path.is_symlink() for path in (out_json, out_csv)):
+        raise IsaacBankExamError("refusing to replace an existing scorecard JSON/CSV")
+
+    stage = Path(tempfile.mkdtemp(prefix=".isaac-scorecard.stage.", dir=out_json.parent))
+    staged_json = stage / "scorecard.json"
+    staged_csv = stage / "scorecard.csv"
+    published: list[Path] = []
+    try:
+        with open(staged_json, "x", encoding="utf-8") as stream:
+            json.dump(strict, stream, indent=2, sort_keys=True, allow_nan=False)
+            stream.write("\n")
+            stream.flush()
+            os.fsync(stream.fileno())
+        with open(staged_csv, "x", encoding="utf-8", newline="") as stream:
+            writer = csv.DictWriter(
+                stream, fieldnames=list(ATTEMPT_COLUMNS), extrasaction="ignore"
+            )
+            writer.writeheader()
+            for row in strict["attempts"]:
+                writer.writerow({key: row.get(key) for key in ATTEMPT_COLUMNS})
+            stream.flush()
+            os.fsync(stream.fileno())
+
+        try:
+            persisted = json.loads(
+                staged_json.read_text(encoding="utf-8"),
+                parse_constant=lambda value: (_ for _ in ()).throw(
+                    IsaacBankExamError(f"staged scorecard contains {value}")
+                ),
+            )
+        except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+            raise IsaacBankExamError(f"cannot reload staged scorecard JSON: {exc}") from exc
+        if persisted != strict:
+            raise IsaacBankExamError("staged scorecard JSON differs after reload")
+        with staged_csv.open("r", encoding="utf-8", newline="") as stream:
+            reader = csv.DictReader(stream)
+            csv_rows = list(reader)
+        if reader.fieldnames != list(ATTEMPT_COLUMNS) or len(csv_rows) != len(
+            strict["attempts"]
+        ):
+            raise IsaacBankExamError("staged scorecard CSV does not match the all-attempt ledger")
+
+        os.chmod(staged_json, 0o444)
+        os.chmod(staged_csv, 0o444)
+        try:
+            for source, destination in (
+                (staged_json, out_json),
+                (staged_csv, out_csv),
+            ):
+                os.link(source, destination)
+                published.append(destination)
+            directory_fd = os.open(
+                out_json.parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0)
+            )
+            try:
+                os.fsync(directory_fd)
+            finally:
+                os.close(directory_fd)
+        except BaseException:
+            for path in reversed(published):
+                try:
+                    path.unlink()
+                except FileNotFoundError:
+                    pass
+            raise
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
     return strict

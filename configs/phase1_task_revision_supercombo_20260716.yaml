@@ -1,0 +1,754 @@
+schema_version: 1
+simulation_only: true
+launch_authorized: false
+preregistration_status: pending_source_commit_and_full_scene_probe
+formal_evidence_eligible: false
+
+ssh:
+  key: ~/.ssh/id_ed25519_runpod
+
+pods:
+  pod1:
+    host: 162.43.172.171
+    port: 18333
+    gpus: [0, 1, 2]
+    max_trainers_per_gpu: 4
+  pod2:
+    host: 162.43.172.181
+    port: 13146
+    gpus: [0, 1, 2]
+    max_trainers_per_gpu: 4
+
+dispatch_pods: [pod1, pod2]
+
+namespace_contract:
+  root: /workspace/codexschema/phase1_task_revision_supercombo_20260716
+  status: pending_source_commit_and_full_scene_probe
+  no_clobber: true
+  predecessor_namespace_reuse_forbidden: true
+
+blocking_contract:
+  launch_remains_forbidden_until_all_true:
+    - final_task_revision_source_is_merged_and_clean
+    - one_strict_4096_env_full_scene_probe_exits_naturally
+    - probe_checkpoint_is_finite_and_binds_revision_profile_mixture_and_exact_ledger
+    - predecessor_stop_receipts_and_same_pod_parents_are_reverified
+    - dry_run_plan_is_exactly_four_rounds_over_six_gpus
+  source_checkout: PENDING_SOURCE_CHECKOUT_AFTER_FINAL_MAIN_COMMIT
+  source_commit: PENDING_SOURCE_COMMIT_AFTER_FINAL_MAIN_COMMIT
+  source_full_scene_probe_evidence: PENDING_FULL_SCENE_PROBE
+  task_revision_full_scene_probe_evidence: PENDING_TASK_REVISION_PROBE
+  hotstart_harness: PENDING_REVIEWED_SUCCESSOR_HARNESS_BINDING
+  activation_is_manual: true
+  automatic_launch: false
+  automatic_retry: false
+
+predecessor_stop_contract:
+  evidence_state: immutable_receipts_bound
+  stop_before_source_mutation_or_new_launch: true
+  pod1:
+    stop_receipt_path: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/control/task_revision_cutover_stop_v1/pod1.receipt.json
+    stop_receipt_sha256: e6b2480abfbc8a8b6437c7c8a1baacaac14c6b50537f1c8654eed0a74348263e
+  pod2:
+    stop_receipt_path: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/control/task_revision_cutover_stop_v1/pod2.receipt.json
+    stop_receipt_sha256: 4c370431b0501ee6ed01e374c059290607499790a757eb12ffd9e5d9948cc949
+
+parent_selection:
+  policy: same_pod_only_from_frozen_predecessor_records
+  selection_state: frozen_from_predecessor_records
+  pod1_local_best:
+    preferred_candidate_reason: frozen Pod1 continuity parent; no cross-Pod copy
+    original_job_id: p1_pod1_arm_free_ep16_seed3
+    original_run_name: phase1_pod1_arm_free_ep16_seed3_20260715
+    original_run_dir: /workspace/codexschema/phase1_long_pod1_20260715/runs/phase1_pod1_arm_free_ep16_seed3
+    original_queue_claim_path: /workspace/codexschema/phase1_long_pod1_20260715/runs/phase1_pod1_arm_free_ep16_seed3/queue_claim.json
+    original_queue_claim_sha256: f40507860eb8b2133d47d3d0232a279831c116ef36320ea34e8a4e3bdcce547a
+    original_run_binding_path: /workspace/codexschema/phase1_long_pod1_20260715/runs/phase1_pod1_arm_free_ep16_seed3/run_binding.json
+    original_run_binding_sha256: e1d534d8c719ac1b7dde49ae69b4c064d4a5ae3f81462c32216815dc0fecaa44
+    selected_rsl_log_dir: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_16-18-03_phase1_pod1_arm_free_ep16_seed3_20260715
+    ranking_snapshot_checkpoint_filename: model_1600.pt
+    selected_checkpoint_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_16-18-03_phase1_pod1_arm_free_ep16_seed3_20260715/model_1600.pt
+    selected_embedded_iteration: 1600
+    selected_checkpoint_sha256: fd69dd6c9eac8ba4910de2a75de2709b5927a8d5302a8763ce1205c91c209b57
+    selected_hard_contract_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_16-18-03_phase1_pod1_arm_free_ep16_seed3_20260715/params/training_contract.json
+    selected_hard_contract_sha256: a9e922e18ac0ac2262b46d276247f68cbe9268a1d7283867aa7ef30bce0b2e70
+    immutable_stop_receipt_still_required: false
+    selection_is_final: true
+  pod2_quality_basin:
+    preferred_candidate_reason: frozen Pod2 accuracy parent; no cross-Pod copy
+    original_job_id: demo_qdot_v1v2_face_w0p2
+    original_run_name: phase1_demo_qdot_v1v2_face_w0p2_seed3_20260716
+    original_run_dir: /workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_qdot_v1v2_face_w0p2
+    original_queue_claim_path: /workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_qdot_v1v2_face_w0p2/queue_claim.json
+    original_queue_claim_sha256: 9dcd2d4d6e9fa5f0f0fb338452f63b436d4d34e499486ab62180d26d554db1bc
+    original_run_binding_path: /workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_qdot_v1v2_face_w0p2/run_binding.json
+    original_run_binding_sha256: b5caa418e716b35dc4261e9fcde70c5e2261bd4a1dacf5e82792d89fdc01c813
+    selected_rsl_log_dir: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_18-12-12_phase1_demo_qdot_v1v2_face_w0p2_seed3_20260716
+    ranking_snapshot_checkpoint_filename: model_4700.pt
+    selected_checkpoint_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_18-12-12_phase1_demo_qdot_v1v2_face_w0p2_seed3_20260716/model_4700.pt
+    selected_embedded_iteration: 4700
+    selected_checkpoint_sha256: 32adc2a816e8742df93695a866f1621af22c6454cdcdea6e0ee5fc0e6e866b17
+    selected_hard_contract_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_18-12-12_phase1_demo_qdot_v1v2_face_w0p2_seed3_20260716/params/training_contract.json
+    selected_hard_contract_sha256: 4fd5e6b6ade92f10c20abf02f33e7986dd31c2b87827114f922f4a752af4cd0f
+    immutable_stop_receipt_still_required: false
+    selection_is_final: true
+  pod2_continuous_basin:
+    preferred_candidate_reason: frozen Pod2 long-episode parent; no cross-Pod copy
+    original_job_id: demo_qdot_long_carry_free_arm_16s
+    original_run_name: phase1_demo_qdot_long_carry_free_arm_16s_seed3_20260716
+    original_run_dir: /workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_qdot_long_carry_free_arm_16s
+    original_queue_claim_path: /workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_qdot_long_carry_free_arm_16s/queue_claim.json
+    original_queue_claim_sha256: 2d0d072de238d48a3dc42c3a0ae20a07994efda8661d76c6164376c9469980b4
+    original_run_binding_path: /workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_qdot_long_carry_free_arm_16s/run_binding.json
+    original_run_binding_sha256: bab17599cba4c6d4a63026e348d082926f54cee98f6cc8bb0dab84ac9b5931af
+    selected_rsl_log_dir: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_18-37-52_phase1_demo_qdot_long_carry_free_arm_16s_seed3_20260716
+    ranking_snapshot_checkpoint_filename: model_4500.pt
+    selected_checkpoint_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_18-37-52_phase1_demo_qdot_long_carry_free_arm_16s_seed3_20260716/model_4500.pt
+    selected_embedded_iteration: 4500
+    selected_checkpoint_sha256: ea818f2ac5433e2736d5224c0f1a1cc686bc18608bee495a06c57f75ca2af198
+    selected_hard_contract_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_18-37-52_phase1_demo_qdot_long_carry_free_arm_16s_seed3_20260716/params/training_contract.json
+    selected_hard_contract_sha256: e3bddb560c5a487e3dea9a65a7b16129c37f210c5c30df9d634a8b708066a46e
+    immutable_stop_receipt_still_required: false
+    selection_is_final: true
+
+timing_exam_contract:
+  paper: configs/phase1_timing_exam_0p5_k100_20260716.json
+  status: pending_checkpoint_bound_full_scene_execution
+  exact_0p5_seconds_is_required_baseline: true
+  below_0p5_seconds_is_stress_only: true
+  all_attempts_denominator: true
+  zero_sparse_score_with_zero_eligible_attempts_may_stop: false
+  vendor_mujoco_required_before_demo_winner_claim: true
+
+task_revision_execution_contract:
+  actor_visible_revision_fields: [target_position, target_velocity, signed_target_normal, time_to_strike]
+  update_window: every_policy_tick_through_last_pre_contact_tick
+  policy_tick_s: 0.02
+  same_ball_revision_is_not_a_new_task: true
+  side_and_clip_are_task_invariant: true
+
+transport_atomicity_contract:
+  status: delay_zero_only_until_coupled_governor_actor_transport_exists
+  launchable_target_delay_steps: [0]
+  blocked_job_ids:
+    - taskrev_p1_core_low_noise
+    - taskrev_p1_uncompensated_negative
+  blocker: governor_actor_transport_not_atomic
+  blocked_pair_is_not_counted_as_a_runtime_or_reward_failure: true
+
+exact_behavior_ledger_contract:
+  schema: exact_behavior_update_v1
+  event_prefix: HOPE_EXACT_BEHAVIOR_UPDATE_JSON=
+  consume_once_per_update: true
+  window_updates: 100
+  missing_or_duplicate_update_action: continue_training_no_decision
+  derive_after_summing_window_counters: true
+  required_counters:
+    - swing_start_count
+    - swing_outcome_count
+    - swing_completion_count
+    - strike_opportunity_count
+    - virtual_capture_count
+    - virtual_net_clear_count
+    - virtual_landing_valid_count
+    - virtual_legal_return_count
+    - physical_fall_count
+    - pre_strike_physical_fall_count
+    - post_strike_physical_fall_count
+    - non_physical_terminal_reset_count
+    - termination_reason_base_fell_tilt_count
+    - termination_reason_base_too_low_count
+    - ready_tilt_eligible_sample_count
+    - ready_tilt_rad_sum
+    - ready_base_speed_eligible_sample_count
+    - ready_base_speed_xy_mps_sum
+    - ready_station_offset_eligible_sample_count
+    - ready_station_offset_m_sum
+    - ready_foot_contact_eligible_sample_count
+    - ready_foot_contact_fraction_sum
+    - ready_foot_slip_eligible_sample_count
+    - ready_foot_slip_speed_mps_sum
+    - planner_initial_tts_sample_count
+    - planner_initial_tts_sub_0p5_count
+    - planner_initial_tts_exact_0p5_count
+    - planner_initial_tts_above_0p5_count
+    - planner_initial_tts_component_0_count
+    - planner_initial_tts_component_1_count
+    - planner_initial_tts_component_2_count
+    - planner_initial_tts_component_3_count
+    - planner_revision_attempt_count
+    - planner_revision_accepted_count
+    - planner_revision_rejected_count
+    - planner_revision_last_precontact_attempt_count
+    - planner_revision_last_precontact_accepted_count
+    - planner_revision_actor_visible_count
+    - planner_revision_last_precontact_actor_visible_count
+  invariants:
+    - swing_completion_count_is_between_zero_and_swing_outcome_count
+    - pre_plus_post_physical_fall_equals_physical_fall_is_at_most_swing_outcome_count
+    - both_bound_physical_fall_reason_counters_must_exist_or_window_is_no_decision
+    - swing_start_and_strike_opportunity_are_diagnostic_and_may_cross_window_boundaries
+    - each_ready_sum_has_its_own_nonnegative_eligible_count
+    - initial_tts_sample_count_equals_component_sum_and_three_way_stratum_sum
+    - planner_revision_attempt_count_equals_accepted_plus_rejected
+    - last_precontact_accepted_is_at_most_last_precontact_attempt_is_at_most_all_attempts
+    - actor_visible_is_at_most_accepted_and_last_precontact_actor_visible_is_positive_in_probe
+    - zero_denominator_derives_null_never_zero
+
+full_scene_probe_contract:
+  representative_job_id: taskrev_p1_core_high_noise
+  generic_reviewed_result_required: true
+  specialized_no_clobber_result: task_revision_probe_result.json
+  minimum_consecutive_exact_updates: 2
+  initial_tts_all_four_components_must_be_observed: true
+  initial_tts_sub_exact_and_above_0p5_must_all_be_observed: true
+  planner_revision_attempt_accept_reject_identity_must_hold: true
+  accepted_revision_must_be_observed: true
+  accepted_last_precontact_revision_must_be_observed: true
+  actor_visible_revision_must_be_observed: true
+  actor_visible_last_precontact_revision_must_be_observed: true
+  exact_behavior_ledger_must_be_complete: true
+  generic_pass_without_specialized_pass_may_unlock_launch: false
+
+behavior_decision_receipt_contract:
+  directory: behavior_milestones
+  publish: atomic_no_clobber
+  exact_log_prefix_bound_by_inode_size_and_sha256: true
+  checkpoint_receipt_required: true
+  claim_binding_process_identity_required: true
+  automatic_signal_authorized: false
+  exact_stop_consumer: reviewed_numeric_identity_v1
+  manual_command: exact-stop-behavior
+  required_revalidation: [job, claim, binding, pid, pgid, starttime, argv, checkpoint_receipt, behavior_receipt]
+  no_clobber_intent_before_signal: true
+  exact_group_membership_required_before_term_or_kill: true
+
+pruning_contract:
+  checkpoint_offsets_from_parent: [200, 500, 1000, 2000]
+  behavior_decision_requires_two_disjoint_complete_windows: true
+  sparse_zero_without_positive_eligible_denominator_may_stop: false
+  automatic_retry: false
+  plus_200:
+    behavior_ranking_authorized: false
+    stop_only_for: [fatal, nonfinite, resume_or_contract_mismatch, revision_or_ledger_activation_absent]
+  plus_500:
+    required_complete_windows: 2
+    window_updates: 100
+    stop_only_if_all_true:
+      - both_windows_closeout_completion_rate_below_0p40
+      - both_windows_combined_physical_fall_above_0p10
+      - second_window_improves_no_ready_metric_over_first
+    sparse_outcome_alone_may_stop: false
+  plus_1000:
+    comparison_scope: same_parent_only
+    pareto_metrics:
+      maximize: [swing_closeout_completion_rate, virtual_legal_return_per_strike, ready_foot_contact_fraction_mean]
+      minimize: [pre_strike_physical_fall_rate, post_strike_physical_fall_rate, ready_tilt_rad_mean, ready_base_speed_xy_mps_mean, ready_foot_slip_speed_mps_mean]
+    minimum_survivors_per_parent: 2
+    preserve_at_least_one_exact_0p5_exposed_candidate: true
+    preserve_at_least_one_broad_arrival_candidate: true
+  plus_2000:
+    terminal_portfolio_ranking: true
+    checkpoint_bound_0p5_k100_required: true
+    vendor_mujoco_required_before_winner_claim: true
+  freed_slot_policy:
+    first_effect: surviving_cells_receive_more_throughput
+    unregistered_replacement_forbidden: true
+    stochastic_torso_push_status: omitted_until_E1_full_scene_launch_gate_passes
+
+x-action: &action signed_face_v4rg_shared_face
+x-motion: &motion
+  action: signed_face_v4rg_shared_face
+  bindings:
+    motion_file: /workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_forehand_v4rg_cal.npz
+    motion_file_2: /workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_backhand_v4rg_cal.npz
+x-bank: &bank
+  action: signed_face_v4rg_shared_face
+  train_path: /workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_bank_rebind_v2/s1_v4rg_runtime_order_schema3_train_882fea4_rebound.npz
+  train_arg: ++task.racket.question_bank
+x-exam: &exam
+  action: signed_face_v4rg_shared_face
+  path: /workspace/codexschema/phase1_task_revision_supercombo_20260716/papers/timing_exam_0p5_k100.schedule.json
+  family: task_revision_timing_exam_0p5_k100_v1
+x-source: &source
+  checkout: PENDING_SOURCE_CHECKOUT_AFTER_FINAL_MAIN_COMMIT
+  commit: PENDING_SOURCE_COMMIT_AFTER_FINAL_MAIN_COMMIT
+  ignored_runtime_asset:
+    target_relative_path: hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
+    donor:
+      checkout: /workspace/codexschema/nohope
+      commit: 6d93bcb16c422a2f42748c2dc99432559653480b
+      relative_path: hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
+    file_count: 46
+    total_file_bytes: 15378264
+    tree_content_sha256: 0137f59b1fe45e7d5f8fa731bedca905f5466bc98e8d1354081fe071d60426c6
+    symlinks_forbidden: true
+    target_must_be_gitignored: true
+
+x-planner-balanced-low: &planner_balanced_low >-
+  ++task.planner_revision={"enabled":true,"profile":{"policy_dt_s":0.02,"min_tts_s":0.02,"max_tts_s":2.0,"max_phase_rate_per_s":4.0,"max_phase_acceleration_per_s2":20.0,"max_deadline_revision_delta_s":0.25,"max_position_revision_delta_m":0.1,"max_velocity_revision_delta_mps":0.5,"max_normal_revision_delta_rad":0.2,"normal_unit_tolerance":0.0001,"early_deadline_tolerance_s":1e-6,"contract_version":"phase_governor_v1","schema_version":1},"initial_tts_range_s":[0.36,1.7],"initial_tts_mixture":{"contract_version":"initial_tts_mixture_v1","components":[{"name":"late_stress","range_s":[0.36,0.49],"weight":0.15},{"name":"baseline_0p5","range_s":[0.5,0.5],"weight":0.2},{"name":"fast_deploy","range_s":[0.5,0.9],"weight":0.3},{"name":"broad_arrival","range_s":[0.9,1.7],"weight":0.35}]},"position_std_m":0.02,"velocity_std_mps":0.1,"normal_std_rad":0.05,"tts_std_s":0.08}
+x-planner-balanced-high: &planner_balanced_high >-
+  ++task.planner_revision={"enabled":true,"profile":{"policy_dt_s":0.02,"min_tts_s":0.02,"max_tts_s":2.0,"max_phase_rate_per_s":4.0,"max_phase_acceleration_per_s2":20.0,"max_deadline_revision_delta_s":0.25,"max_position_revision_delta_m":0.1,"max_velocity_revision_delta_mps":0.5,"max_normal_revision_delta_rad":0.2,"normal_unit_tolerance":0.0001,"early_deadline_tolerance_s":1e-6,"contract_version":"phase_governor_v1","schema_version":1},"initial_tts_range_s":[0.36,1.7],"initial_tts_mixture":{"contract_version":"initial_tts_mixture_v1","components":[{"name":"late_stress","range_s":[0.36,0.49],"weight":0.15},{"name":"baseline_0p5","range_s":[0.5,0.5],"weight":0.2},{"name":"fast_deploy","range_s":[0.5,0.9],"weight":0.3},{"name":"broad_arrival","range_s":[0.9,1.7],"weight":0.35}]},"position_std_m":0.04,"velocity_std_mps":0.2,"normal_std_rad":0.1,"tts_std_s":0.16}
+x-planner-fast-low: &planner_fast_low >-
+  ++task.planner_revision={"enabled":true,"profile":{"policy_dt_s":0.02,"min_tts_s":0.02,"max_tts_s":2.0,"max_phase_rate_per_s":4.0,"max_phase_acceleration_per_s2":20.0,"max_deadline_revision_delta_s":0.25,"max_position_revision_delta_m":0.1,"max_velocity_revision_delta_mps":0.5,"max_normal_revision_delta_rad":0.2,"normal_unit_tolerance":0.0001,"early_deadline_tolerance_s":1e-6,"contract_version":"phase_governor_v1","schema_version":1},"initial_tts_range_s":[0.36,1.7],"initial_tts_mixture":{"contract_version":"initial_tts_mixture_v1","components":[{"name":"late_stress","range_s":[0.36,0.49],"weight":0.2},{"name":"baseline_0p5","range_s":[0.5,0.5],"weight":0.3},{"name":"fast_deploy","range_s":[0.5,0.9],"weight":0.35},{"name":"broad_arrival","range_s":[0.9,1.7],"weight":0.15}]},"position_std_m":0.02,"velocity_std_mps":0.1,"normal_std_rad":0.05,"tts_std_s":0.08}
+x-planner-fast-high: &planner_fast_high >-
+  ++task.planner_revision={"enabled":true,"profile":{"policy_dt_s":0.02,"min_tts_s":0.02,"max_tts_s":2.0,"max_phase_rate_per_s":4.0,"max_phase_acceleration_per_s2":20.0,"max_deadline_revision_delta_s":0.25,"max_position_revision_delta_m":0.1,"max_velocity_revision_delta_mps":0.5,"max_normal_revision_delta_rad":0.2,"normal_unit_tolerance":0.0001,"early_deadline_tolerance_s":1e-6,"contract_version":"phase_governor_v1","schema_version":1},"initial_tts_range_s":[0.36,1.7],"initial_tts_mixture":{"contract_version":"initial_tts_mixture_v1","components":[{"name":"late_stress","range_s":[0.36,0.49],"weight":0.2},{"name":"baseline_0p5","range_s":[0.5,0.5],"weight":0.3},{"name":"fast_deploy","range_s":[0.5,0.9],"weight":0.35},{"name":"broad_arrival","range_s":[0.9,1.7],"weight":0.15}]},"position_std_m":0.04,"velocity_std_mps":0.2,"normal_std_rad":0.1,"tts_std_s":0.16}
+x-planner-broad-low: &planner_broad_low >-
+  ++task.planner_revision={"enabled":true,"profile":{"policy_dt_s":0.02,"min_tts_s":0.02,"max_tts_s":2.0,"max_phase_rate_per_s":4.0,"max_phase_acceleration_per_s2":20.0,"max_deadline_revision_delta_s":0.25,"max_position_revision_delta_m":0.1,"max_velocity_revision_delta_mps":0.5,"max_normal_revision_delta_rad":0.2,"normal_unit_tolerance":0.0001,"early_deadline_tolerance_s":1e-6,"contract_version":"phase_governor_v1","schema_version":1},"initial_tts_range_s":[0.36,1.7],"initial_tts_mixture":{"contract_version":"initial_tts_mixture_v1","components":[{"name":"late_stress","range_s":[0.36,0.49],"weight":0.1},{"name":"baseline_0p5","range_s":[0.5,0.5],"weight":0.15},{"name":"fast_deploy","range_s":[0.5,0.9],"weight":0.25},{"name":"broad_arrival","range_s":[0.9,1.7],"weight":0.5}]},"position_std_m":0.02,"velocity_std_mps":0.1,"normal_std_rad":0.05,"tts_std_s":0.08}
+x-planner-broad-high: &planner_broad_high >-
+  ++task.planner_revision={"enabled":true,"profile":{"policy_dt_s":0.02,"min_tts_s":0.02,"max_tts_s":2.0,"max_phase_rate_per_s":4.0,"max_phase_acceleration_per_s2":20.0,"max_deadline_revision_delta_s":0.25,"max_position_revision_delta_m":0.1,"max_velocity_revision_delta_mps":0.5,"max_normal_revision_delta_rad":0.2,"normal_unit_tolerance":0.0001,"early_deadline_tolerance_s":1e-6,"contract_version":"phase_governor_v1","schema_version":1},"initial_tts_range_s":[0.36,1.7],"initial_tts_mixture":{"contract_version":"initial_tts_mixture_v1","components":[{"name":"late_stress","range_s":[0.36,0.49],"weight":0.1},{"name":"baseline_0p5","range_s":[0.5,0.5],"weight":0.15},{"name":"fast_deploy","range_s":[0.5,0.9],"weight":0.25},{"name":"broad_arrival","range_s":[0.9,1.7],"weight":0.5}]},"position_std_m":0.04,"velocity_std_mps":0.2,"normal_std_rad":0.1,"tts_std_s":0.16}
+
+x-base: &base
+  - task=HOPEPingPongVirtualBall
+  - algo=ppo
+  - headless=true
+  - logger=tensorboard
+  - video=false
+  - task.actor_obs_contract=deploy_parity_face179
+  - task.env.episode_length_s=16.0
+  - task.sim.dt=0.005
+  - task.sim.decimation=4
+  - task.actions.qdes_clamp=true
+  - task.plant.zero_joint_friction=true
+  - task.motion.wrap_teleport=false
+  - task.motion.stand_start_prob=0.25
+  - task.motion.hold_steps_range=[0,0]
+  - task.motion.stand_start_min_hold=0
+  - task.motion.post_swing_buffer_size=4096
+  - task.motion.post_swing_min_fill=256
+  - task.motion.post_swing_min_hold=0
+  - task.motion.clip_switch_prob=0.0
+  - task.motion.speed_scale_range=[1.0,1.0]
+  - ++task.motion.rsi_skip_settle_frames=0
+  - ++task.motion.rsi_hold_root_stand_z=false
+  - ++task.motion.stagger_initial_clock=false
+  - ++task.motion.stagger_hold_max_steps=150
+  - ++task.racket.question_bank_allow_legacy=false
+  - ++task.racket.face_command=true
+  - ++task.racket.face_command_obs=true
+  - ++task.racket.station_obs=false
+  - ++task.racket.mount_normal_sign_per_clip=[1.0,-1.0]
+  - task.racket.target_mode=uniform
+  - task.racket.normal_mode=velocity
+  - task.racket.adaptive_sigma=true
+  - task.racket.target_delay_steps=0
+  - ++task.racket.target_delay_tts_mode=source_timestamp_compensated
+  - task.racket.target_jitter_pos_per_s=0.0
+  - task.racket.target_jitter_vel_per_s=0.0
+  - task.racket.target_noise_white=0.0019
+  - task.racket.target_noise_ar1_sigma=0.0052
+  - task.racket.target_noise_ar1_rho=0.717
+  - task.racket.target_dropout_prob=0.0
+  - task.racket.target_post_strike_dropout_s=0.0
+  - task.racket.target_bias_per_swing=0.0
+  - task.racket.midswing_resample_prob=0.0
+  - task.racket.midswing_resample_tts_floor=0.3
+  - task.racket.vb_spin_mode=minimize
+  - task.racket.vb_metrics_only=true
+  - ++task.racket.rally_legacy_metrics=true
+  - task.racket.achieved_target_mix_prob=0.30
+  - task.racket.achieved_buffer_size=4096
+  - task.racket.achieved_min_fill=256
+  - task.racket.achieved_jitter_pos=0.03
+  - task.racket.achieved_jitter_vel=0.15
+  - task.racket.achieved_clamp_inflate=0.20
+  - task.racket.clean_reference_strike_velocity=true
+  - task.racket.clean_strike_vel_window=2
+  - task.racket.strike_window_s=0.12
+  - task.racket.strike_success_pos_thresh=0.075
+  - ++task.physical_ball=true
+  - task.rewards.racket_position_weight=14.0
+  - task.rewards.racket_position_std=0.2
+  - task.rewards.racket_velocity_weight=10.0
+  - task.rewards.racket_velocity_std=1.0
+  - task.rewards.racket_normal_weight=5.0
+  - task.rewards.racket_normal_std=0.3
+  - task.rewards.foot_orientation_weight=-0.3
+  - task.rewards.prestrike_upright_weight=-1.0
+  - task.rewards.free_wrist_ori_mimic=true
+  - ++task.rewards.free_wrist_vel_mimic=true
+  - ++task.rewards.motion_scale_in_window=0.25
+  - ++task.rewards.free_non_striking_arm_mimic=false
+  - task.rewards.base_decel_weight=0.0
+  - task.motion.post_swing_start_prob=0.0
+  - task.rewards.joint_velocity_limit_hinge_weight=-5.0
+  - task.rewards.joint_velocity_limit_hinge_margin=0.85
+  - ++task.rewards.racket_face_conditional_guidance_weight=-0.4
+  - ++task.motion.allow_legacy_link_origin_velocity=false
+  - ++task.motion.event_timing_mode=disabled
+  - task.racket.strike_phase_per_clip=[0.471,0.338]
+  - ++task.racket.face_command_pairing=shared_plus_y
+  - ++task.rewards.racket_guidance_weight=0.0
+  - ++task.rewards.racket_face_guidance_weight=0.0
+  - ++task.rewards.racket_face_guidance_theta_max=3.141592653589793
+  - ++kit_carb_tasking_thread_count=16
+  - ++kit_tbb_thread_count=16
+
+x-budget: &budget
+  num_envs: 4096
+  max_iterations: 2001
+  save_interval: 100
+  iteration_semantics: additional_updates_after_full_state_resume
+x-milestones: &milestones [200, 500, 1000, 2000]
+x-blocker: &blocker >-
+  PENDING final merged source commit, strict full-scene probe, and no-clobber activation evidence.
+
+x-pod1-warm-start: &pod1_warm_start
+  parent: pod1_local_best
+  checkpoint_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_16-18-03_phase1_pod1_arm_free_ep16_seed3_20260715/model_1600.pt
+  transfer_mode: strict_full_state_preserve_optimizer
+  checkpoint_tolerant: false
+  allow_missing_contract: false
+  allow_contract_mismatch: true
+  descendant_exact_eligible: false
+x-pod2-quality-warm-start: &pod2_quality_warm_start
+  parent: pod2_quality_basin
+  checkpoint_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_18-12-12_phase1_demo_qdot_v1v2_face_w0p2_seed3_20260716/model_4700.pt
+  transfer_mode: strict_full_state_preserve_optimizer
+  checkpoint_tolerant: false
+  allow_missing_contract: false
+  allow_contract_mismatch: true
+  descendant_exact_eligible: false
+x-pod2-continuous-warm-start: &pod2_continuous_warm_start
+  parent: pod2_continuous_basin
+  checkpoint_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_18-37-52_phase1_demo_qdot_long_carry_free_arm_16s_seed3_20260716/model_4500.pt
+  transfer_mode: strict_full_state_preserve_optimizer
+  checkpoint_tolerant: false
+  allow_missing_contract: false
+  allow_contract_mismatch: true
+  descendant_exact_eligible: false
+
+x-pod1-gpu0: &pod1_gpu0 {policy: dispatch_gpu_round_robin, required_slot: pod1/gpu0}
+x-pod1-gpu1: &pod1_gpu1 {policy: dispatch_gpu_round_robin, required_slot: pod1/gpu1}
+x-pod1-gpu2: &pod1_gpu2 {policy: dispatch_gpu_round_robin, required_slot: pod1/gpu2}
+x-pod2-gpu0: &pod2_gpu0 {policy: dispatch_gpu_round_robin, required_slot: pod2/gpu0}
+x-pod2-gpu1: &pod2_gpu1 {policy: dispatch_gpu_round_robin, required_slot: pod2/gpu1}
+x-pod2-gpu2: &pod2_gpu2 {policy: dispatch_gpu_round_robin, required_slot: pod2/gpu2}
+
+x-pod1-job: &pod1_job
+  action: *action
+  status: blocked
+  blocker: *blocker
+  motion: *motion
+  bank: *bank
+  exam: *exam
+  source: *source
+  runtime_binding: true
+  warm_start: *pod1_warm_start
+  seed: 3
+  budget: *budget
+  milestones: *milestones
+  milestone_semantics: offsets_from_attested_parent
+  behavior_ledger_contract_ref: exact_behavior_update_v1
+  scientific_launch_authorized: true
+  scientific_blocker: null
+  formal_evidence_eligible: false
+x-pod2-quality-job: &pod2_quality_job
+  action: *action
+  status: blocked
+  blocker: *blocker
+  motion: *motion
+  bank: *bank
+  exam: *exam
+  source: *source
+  runtime_binding: true
+  warm_start: *pod2_quality_warm_start
+  seed: 3
+  budget: *budget
+  milestones: *milestones
+  milestone_semantics: offsets_from_attested_parent
+  behavior_ledger_contract_ref: exact_behavior_update_v1
+  scientific_launch_authorized: true
+  scientific_blocker: null
+  formal_evidence_eligible: false
+x-pod2-continuous-job: &pod2_continuous_job
+  action: *action
+  status: blocked
+  blocker: *blocker
+  motion: *motion
+  bank: *bank
+  exam: *exam
+  source: *source
+  runtime_binding: true
+  warm_start: *pod2_continuous_warm_start
+  seed: 3
+  budget: *budget
+  milestones: *milestones
+  milestone_semantics: offsets_from_attested_parent
+  behavior_ledger_contract_ref: exact_behavior_update_v1
+  scientific_launch_authorized: true
+  scientific_blocker: null
+  formal_evidence_eligible: false
+
+jobs:
+  # Round 1: complete core, two planner-noise levels, timestamp negative, and reward allocation.
+  - <<: *pod1_job
+    id: taskrev_p1_core_low_noise
+    human_name: 同一来球实时更新的低噪声完整基线
+    scientific_question: does_the_complete_same_ball_revision_core_learn_with_low_planner_noise
+    launch_round: 1
+    timestamp_role: compensated_treatment
+    matched_timestamp_job: taskrev_p1_uncompensated_negative
+    scientific_launch_authorized: false
+    scientific_blocker: governor_actor_transport_not_atomic
+    recipe:
+      base: *base
+      delta: [*planner_balanced_low, task.racket.target_delay_steps=2]
+    resource: *pod1_gpu0
+    run_name: phase1_taskrev_p1_core_low_noise_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p1_core_low_noise
+  - <<: *pod1_job
+    id: taskrev_p1_core_high_noise
+    human_name: 同一来球实时更新的高噪声完整基线
+    scientific_question: does_the_complete_same_ball_revision_core_remain_learnable_with_high_planner_noise
+    launch_round: 1
+    recipe: {base: *base, delta: [*planner_balanced_high]}
+    resource: *pod1_gpu1
+    run_name: phase1_taskrev_p1_core_high_noise_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p1_core_high_noise
+  - <<: *pod1_job
+    id: taskrev_p1_uncompensated_negative
+    human_name: 与低噪声基线逐项匹配但故意不扣感知延迟
+    scientific_question: does_removing_source_timestamp_compensation_hurt_an_otherwise_matched_revision_policy
+    launch_round: 1
+    timestamp_role: uncompensated_negative_control
+    matched_timestamp_job: taskrev_p1_core_low_noise
+    scientific_launch_authorized: false
+    scientific_blocker: governor_actor_transport_not_atomic
+    recipe:
+      base: *base
+      delta: [*planner_balanced_low, task.racket.target_delay_steps=2, ++task.racket.target_delay_tts_mode=uncompensated]
+    resource: *pod1_gpu2
+    run_name: phase1_taskrev_p1_uncompensated_negative_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p1_uncompensated_negative
+  - <<: *pod2_quality_job
+    id: taskrev_p2_equal_reward
+    human_name: 位置速度拍面固定总预算近似均分
+    scientific_question: does_equal_hit_reward_allocation_help_the_complete_revision_core
+    launch_round: 1
+    recipe:
+      base: *base
+      delta: [*planner_balanced_low, task.rewards.racket_position_weight=9.67, task.rewards.racket_velocity_weight=9.67, task.rewards.racket_normal_weight=9.66]
+    resource: *pod2_gpu0
+    run_name: phase1_taskrev_p2_equal_reward_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward
+  - <<: *pod2_quality_job
+    id: taskrev_p2_velocity_reward
+    human_name: 固定总预算下更重视击球速度
+    scientific_question: does_velocity_heavy_reward_reduce_late_or_too_slow_contacts_under_live_revision
+    launch_round: 1
+    recipe:
+      base: *base
+      delta: [*planner_balanced_low, task.rewards.racket_position_weight=8.0, task.rewards.racket_velocity_weight=16.0, task.rewards.racket_normal_weight=5.0]
+    resource: *pod2_gpu1
+    run_name: phase1_taskrev_p2_velocity_reward_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_velocity_reward
+  - <<: *pod2_quality_job
+    id: taskrev_p2_normal_reward
+    human_name: 固定总预算下更重视有符号拍面方向
+    scientific_question: does_normal_heavy_reward_preserve_signed_face_control_while_the_target_moves
+    launch_round: 1
+    recipe:
+      base: *base
+      delta: [*planner_balanced_low, task.rewards.racket_position_weight=10.0, task.rewards.racket_velocity_weight=8.0, task.rewards.racket_normal_weight=11.0]
+    resource: *pod2_gpu2
+    run_name: phase1_taskrev_p2_normal_reward_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_normal_reward
+
+  # Round 2: balance, non-striking arm freedom, and three meaningful joint-speed limits.
+  - <<: *pod1_job
+    id: taskrev_p1_strong_foot_ready
+    human_name: 加强脚朝向与挥拍前直立约束
+    scientific_question: do_stronger_foot_and_prestrike_upright_terms_reduce_balance_debt_without_blocking_contact
+    launch_round: 2
+    recipe:
+      base: *base
+      delta: [*planner_balanced_low, task.rewards.foot_orientation_weight=-0.6, task.rewards.prestrike_upright_weight=-2.0]
+    resource: *pod1_gpu0
+    run_name: phase1_taskrev_p1_strong_foot_ready_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p1_strong_foot_ready
+  - <<: *pod1_job
+    id: taskrev_p1_free_non_striking_arm
+    human_name: 非击球臂不再模仿老师动作而专注平衡
+    scientific_question: does_freeing_the_non_striking_arm_improve_balance_under_live_target_revision
+    launch_round: 2
+    recipe:
+      base: *base
+      delta: [*planner_balanced_low, ++task.rewards.free_non_striking_arm_mimic=true]
+    resource: *pod1_gpu1
+    run_name: phase1_taskrev_p1_free_non_striking_arm_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p1_free_non_striking_arm
+  - <<: *pod1_job
+    id: taskrev_p1_medium_joint_speed_limit
+    human_name: 把关节速度惩罚从强档降到中档
+    scientific_question: does_a_medium_joint_speed_penalty_preserve_fast_reach_better_than_the_strong_default
+    launch_round: 2
+    recipe:
+      base: *base
+      delta: [*planner_balanced_low, task.rewards.joint_velocity_limit_hinge_weight=-2.5]
+    resource: *pod1_gpu2
+    run_name: phase1_taskrev_p1_medium_joint_speed_limit_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p1_medium_joint_speed_limit
+  - <<: *pod2_quality_job
+    id: taskrev_p2_no_joint_speed_penalty
+    human_name: 关闭关节速度惩罚观察最快可达上限
+    scientific_question: does_removing_joint_speed_penalty_unlock_short_deadlines_without_unacceptable_falls
+    launch_round: 2
+    recipe:
+      base: *base
+      delta: [*planner_balanced_low, task.rewards.joint_velocity_limit_hinge_weight=0.0]
+    resource: *pod2_gpu0
+    run_name: phase1_taskrev_p2_no_joint_speed_penalty_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_no_joint_speed_penalty
+  - <<: *pod2_quality_job
+    id: taskrev_p2_free_arm_strong_ready
+    human_name: 放开非击球臂并加强脚与直立准备
+    scientific_question: can_a_free_non_striking_arm_and_stronger_ready_terms_cooperate_instead_of_compete
+    launch_round: 2
+    recipe:
+      base: *base
+      delta: [*planner_balanced_low, ++task.rewards.free_non_striking_arm_mimic=true, task.rewards.foot_orientation_weight=-0.6, task.rewards.prestrike_upright_weight=-2.0]
+    resource: *pod2_gpu1
+    run_name: phase1_taskrev_p2_free_arm_strong_ready_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_free_arm_strong_ready
+  - <<: *pod2_quality_job
+    id: taskrev_p2_free_arm_medium_speed
+    human_name: 放开非击球臂并采用中等关节速度约束
+    scientific_question: does_free_arm_balance_compensate_for_a_looser_joint_speed_penalty
+    launch_round: 2
+    recipe:
+      base: *base
+      delta: [*planner_balanced_low, ++task.rewards.free_non_striking_arm_mimic=true, task.rewards.joint_velocity_limit_hinge_weight=-2.5]
+    resource: *pod2_gpu2
+    run_name: phase1_taskrev_p2_free_arm_medium_speed_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_free_arm_medium_speed
+
+  # Round 3: preparation-time curriculum weighting, still with all four strata present.
+  - <<: *pod1_job
+    id: taskrev_p1_fast_curriculum_low_noise
+    human_name: 增加半秒与更短压力但保留长准备样本
+    scientific_question: does_a_fast_weighted_curriculum_improve_half_second_readiness_under_low_noise
+    launch_round: 3
+    recipe: {base: *base, delta: [*planner_fast_low]}
+    resource: *pod1_gpu0
+    run_name: phase1_taskrev_p1_fast_curriculum_low_noise_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p1_fast_curriculum_low_noise
+  - <<: *pod1_job
+    id: taskrev_p1_broad_curriculum_low_noise
+    human_name: 增加长准备来球比例并保留半秒基线
+    scientific_question: does_a_broad_arrival_curriculum_improve_stability_without_forgetting_half_second_tasks
+    launch_round: 3
+    recipe: {base: *base, delta: [*planner_broad_low]}
+    resource: *pod1_gpu1
+    run_name: phase1_taskrev_p1_broad_curriculum_low_noise_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p1_broad_curriculum_low_noise
+  - <<: *pod1_job
+    id: taskrev_p1_fast_curriculum_high_noise
+    human_name: 快准备课程叠加较大目标修订噪声
+    scientific_question: can_fast_preparation_training_survive_the_registered_high_planner_noise
+    launch_round: 3
+    recipe: {base: *base, delta: [*planner_fast_high]}
+    resource: *pod1_gpu2
+    run_name: phase1_taskrev_p1_fast_curriculum_high_noise_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p1_fast_curriculum_high_noise
+  - <<: *pod2_continuous_job
+    id: taskrev_p2_fast_equal_reward
+    human_name: 快准备课程配固定总预算均分击球奖励
+    scientific_question: does_equal_hit_reward_help_a_fast_weighted_curriculum_reach_legal_returns
+    launch_round: 3
+    recipe:
+      base: *base
+      delta: [*planner_fast_low, task.rewards.racket_position_weight=9.67, task.rewards.racket_velocity_weight=9.67, task.rewards.racket_normal_weight=9.66]
+    resource: *pod2_gpu0
+    run_name: phase1_taskrev_p2_fast_equal_reward_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_fast_equal_reward
+  - <<: *pod2_continuous_job
+    id: taskrev_p2_fast_free_arm
+    human_name: 快准备课程中放开非击球臂
+    scientific_question: does_a_free_non_striking_arm_help_absorb_fast_curriculum_balance_debt
+    launch_round: 3
+    recipe:
+      base: *base
+      delta: [*planner_fast_low, ++task.rewards.free_non_striking_arm_mimic=true]
+    resource: *pod2_gpu1
+    run_name: phase1_taskrev_p2_fast_free_arm_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_fast_free_arm
+  - <<: *pod2_continuous_job
+    id: taskrev_p2_broad_strong_ready
+    human_name: 长短混合课程配更强脚与直立准备
+    scientific_question: do_stronger_ready_terms_help_the_broad_curriculum_recover_between_variable_deadlines
+    launch_round: 3
+    recipe:
+      base: *base
+      delta: [*planner_broad_low, task.rewards.foot_orientation_weight=-0.6, task.rewards.prestrike_upright_weight=-2.0]
+    resource: *pod2_gpu2
+    run_name: phase1_taskrev_p2_broad_strong_ready_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_broad_strong_ready
+
+  # Round 4: combined candidates that could plausibly win, not duplicate seeds or filler.
+  - <<: *pod1_job
+    id: taskrev_p1_combo_equal_ready_free_medium
+    human_name: 均分击球奖励加稳脚准备、自由非击球臂与中等速度约束
+    scientific_question: does_the_balanced_full_stack_combine_hit_quality_and_recovery_without_one_reward_dominating
+    launch_round: 4
+    recipe:
+      base: *base
+      delta: [*planner_balanced_low, task.rewards.racket_position_weight=9.67, task.rewards.racket_velocity_weight=9.67, task.rewards.racket_normal_weight=9.66, task.rewards.foot_orientation_weight=-0.6, task.rewards.prestrike_upright_weight=-2.0, ++task.rewards.free_non_striking_arm_mimic=true, task.rewards.joint_velocity_limit_hinge_weight=-2.5]
+    resource: *pod1_gpu0
+    run_name: phase1_taskrev_p1_combo_equal_ready_free_medium_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p1_combo_equal_ready_free_medium
+  - <<: *pod1_job
+    id: taskrev_p1_combo_high_noise_equal_ready
+    human_name: 高噪声下测试均分奖励与稳脚准备组合
+    scientific_question: does_equal_reward_plus_strong_ready_remain_stable_under_high_revision_noise
+    launch_round: 4
+    recipe:
+      base: *base
+      delta: [*planner_balanced_high, task.rewards.racket_position_weight=9.67, task.rewards.racket_velocity_weight=9.67, task.rewards.racket_normal_weight=9.66, task.rewards.foot_orientation_weight=-0.6, task.rewards.prestrike_upright_weight=-2.0]
+    resource: *pod1_gpu1
+    run_name: phase1_taskrev_p1_combo_high_noise_equal_ready_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p1_combo_high_noise_equal_ready
+  - <<: *pod1_job
+    id: taskrev_p1_combo_velocity_free_medium
+    human_name: 速度主导奖励配自由非击球臂和中等速度约束
+    scientific_question: can_velocity_heavy_reward_and_free_arm_control_reach_short_deadlines_without_balance_collapse
+    launch_round: 4
+    recipe:
+      base: *base
+      delta: [*planner_balanced_low, task.rewards.racket_position_weight=8.0, task.rewards.racket_velocity_weight=16.0, task.rewards.racket_normal_weight=5.0, ++task.rewards.free_non_striking_arm_mimic=true, task.rewards.joint_velocity_limit_hinge_weight=-2.5]
+    resource: *pod1_gpu2
+    run_name: phase1_taskrev_p1_combo_velocity_free_medium_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p1_combo_velocity_free_medium
+  - <<: *pod2_continuous_job
+    id: taskrev_p2_combo_high_noise_free_medium
+    human_name: 高噪声配自由非击球臂和中等速度约束
+    scientific_question: does_free_arm_balance_make_high_revision_noise_more_tolerable_with_medium_speed_regularization
+    launch_round: 4
+    recipe:
+      base: *base
+      delta: [*planner_balanced_high, ++task.rewards.free_non_striking_arm_mimic=true, task.rewards.joint_velocity_limit_hinge_weight=-2.5]
+    resource: *pod2_gpu0
+    run_name: phase1_taskrev_p2_combo_high_noise_free_medium_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_combo_high_noise_free_medium
+  - <<: *pod2_continuous_job
+    id: taskrev_p2_combo_fast_equal_free_medium
+    human_name: 快准备课程配均分奖励、自由非击球臂与中等速度约束
+    scientific_question: is_the_fast_balanced_free_arm_stack_the_best_half_second_demo_candidate
+    launch_round: 4
+    recipe:
+      base: *base
+      delta: [*planner_fast_low, task.rewards.racket_position_weight=9.67, task.rewards.racket_velocity_weight=9.67, task.rewards.racket_normal_weight=9.66, ++task.rewards.free_non_striking_arm_mimic=true, task.rewards.joint_velocity_limit_hinge_weight=-2.5]
+    resource: *pod2_gpu1
+    run_name: phase1_taskrev_p2_combo_fast_equal_free_medium_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_combo_fast_equal_free_medium
+  - <<: *pod2_continuous_job
+    id: taskrev_p2_combo_broad_high_ready
+    human_name: 长短混合课程叠加高噪声和更强稳脚准备
+    scientific_question: can_the_broad_high_noise_ready_stack_cover_deployment_variability_without_forgetting_0p5
+    launch_round: 4
+    recipe:
+      base: *base
+      delta: [*planner_broad_high, task.rewards.foot_orientation_weight=-0.6, task.rewards.prestrike_upright_weight=-2.0]
+    resource: *pod2_gpu2
+    run_name: phase1_taskrev_p2_combo_broad_high_ready_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_combo_broad_high_ready

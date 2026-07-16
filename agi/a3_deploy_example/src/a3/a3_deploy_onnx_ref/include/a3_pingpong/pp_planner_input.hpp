@@ -33,6 +33,10 @@
 //    RACKET schema 3 formal face179          (exactly 20 doubles)
 //      schema-2 prefix, [16]=shared control_epoch, [17]=command_sequence,
 //      [18]=base_sequence_ref, [19]=same-host monotonic source stamp (seconds)
+//    RACKET schema 4 formal face179 task     (exactly 22 doubles)
+//      schema-3 prefix, [20]=task_id, [21]=task_revision. A valid row requires
+//      both positive; an invalid row permits zero/zero as an anonymous global
+//      revoke. Mixed zero/positive identity is malformed.
 //    BASE schema 1 /a3/base_pose_flat        (>=9 doubles)
 //      [0]=schema(1)  [1]=valid(0/1)  [2..4]=pos(x,y,z)
 //      [5..8]=quat(w,x,y,z)
@@ -111,6 +115,10 @@ struct PpRacketMsg {
   std::uint64_t command_sequence = 0;
   std::uint64_t base_sequence_ref = 0;
   double source_monotonic_s = -1.0;
+  bool has_task_contract = false;
+  bool has_task_identity = false;
+  std::uint64_t task_id = 0;
+  std::uint64_t task_revision = 0;
 };
 
 // A latest-value mailbox with per-validity timestamps. The engage logic needs
@@ -129,12 +137,13 @@ class PpRacketTargetInput {
       RecordInvalidIfFaceActive();
       return;
     }
-    if (a[0] != 1.0 && a[0] != 2.0 && a[0] != 3.0) {
+    if (a[0] != 1.0 && a[0] != 2.0 && a[0] != 3.0 && a[0] != 4.0) {
       RecordInvalidIfFaceActive();
       return;
     }
-    const bool face179 = a[0] == 2.0 || a[0] == 3.0;
-    const bool formal = a[0] == 3.0;
+    const bool task_schema = a[0] == 4.0;
+    const bool face179 = a[0] == 2.0 || a[0] == 3.0 || task_schema;
+    const bool formal = a[0] == 3.0 || task_schema;
     if (!formal) {
       bool formal_order_initialized = false;
       {
@@ -145,6 +154,20 @@ class PpRacketTargetInput {
         // Once the formal stream has established ordering, a recognized older
         // schema is a downgrade event, not a second live protocol.  Poison the
         // old tuple and require a later, causally fresh schema-3 command.
+        RecordInvalidNow();
+        return;
+      }
+    }
+    if (a[0] == 3.0) {
+      bool task_schema_initialized = false;
+      {
+        std::lock_guard<std::mutex> lk(mu_);
+        task_schema_initialized = task_schema_initialized_;
+      }
+      if (task_schema_initialized) {
+        // Once task identity has been established, schema 3 is a downgrade,
+        // not a second formal protocol. Revoke and require a causally fresh
+        // schema-4 row before the mailbox can recover.
         RecordInvalidNow();
         return;
       }
@@ -166,7 +189,8 @@ class PpRacketTargetInput {
       return;
     }
     if ((!face179 && a.size() < 11) || (a[0] == 2.0 && a.size() != 16) ||
-        (formal && a.size() != 20)) {
+        (a[0] == 3.0 && a.size() != 20) ||
+        (task_schema && a.size() != 22)) {
       reject_malformed();
       return;
     }
@@ -188,6 +212,17 @@ class PpRacketTargetInput {
       }
       m.has_formal_epoch = true;
       m.source_monotonic_s = a[19];
+      if (task_schema) {
+        if (!PpParseExactCounter(a[20], m.task_id) ||
+            !PpParseExactCounter(a[21], m.task_revision) ||
+            ((m.task_id == 0) != (m.task_revision == 0)) ||
+            (m.valid && m.task_id == 0)) {
+          reject_malformed();
+          return;
+        }
+        m.has_task_contract = true;
+        m.has_task_identity = m.task_id > 0;
+      }
     }
     const size_t body_required = face179 ? 16 : 11;
     for (size_t i = 2; i < body_required; ++i) {
@@ -266,10 +301,16 @@ class PpRacketTargetInput {
   struct Snapshot {
     bool has_valid = false;      // a valid command was ever received
     PpRacketMsg cmd;             // the newest VALID command (invalids never overwrite)
+    bool has_latest_event = false;  // newest accepted formal envelope, valid or invalid
+    PpRacketMsg latest_event;       // preserves schema-4 task identity on scoped invalids
     double valid_age_s = 1e9;    // wall age of that valid command
     double valid_received_wall_s = -1.0;  // local monotonic receive epoch
     bool invalid_after = false;  // an invalid arrived AFTER the newest valid
     std::uint64_t generation = 0;
+    // Monotonic authority-loss edge. Unlike `invalid_after`, this survives a
+    // causally newer valid row arriving before the next sampled policy tick.
+    // Positive task-scoped invalid revisions deliberately do not advance it.
+    std::uint64_t revocation_generation = 0;
   };
 
   Snapshot Latest() const {
@@ -282,6 +323,8 @@ class PpRacketTargetInput {
     const double now = PpNowMonotonicSec();
     s.has_valid = true;
     s.cmd = last_valid_;
+    s.has_latest_event = has_latest_event_;
+    s.latest_event = latest_event_;
     s.valid_age_s = last_valid_.has_formal_epoch
                         ? now - last_valid_.source_monotonic_s
                         : now - last_valid_wall_;
@@ -291,6 +334,7 @@ class PpRacketTargetInput {
     // updated under mu_ and therefore makes an invalid deterministically win.
     s.invalid_after = !latest_event_valid_;
     s.generation = generation_.load(std::memory_order_acquire);
+    s.revocation_generation = revocation_generation_;
     return s;
   }
 
@@ -315,8 +359,10 @@ class PpRacketTargetInput {
     if (!ordered) {
       last_invalid_wall_ = now;
       latest_event_valid_ = false;
+      has_latest_event_ = false;
       anonymous_revoke_source_barrier_ =
           std::max(anonymous_revoke_source_barrier_, now);
+      ++revocation_generation_;
       ++generation_;
       any_ = true;
       return;
@@ -325,6 +371,9 @@ class PpRacketTargetInput {
     last_formal_epoch_ = m.control_epoch;
     last_formal_sequence_ = m.command_sequence;
     last_formal_source_monotonic_s_ = m.source_monotonic_s;
+    if (m.has_task_contract) task_schema_initialized_ = true;
+    latest_event_ = m;
+    has_latest_event_ = true;
     if (m.valid && m.source_monotonic_s > anonymous_revoke_source_barrier_) {
       last_valid_ = m;
       last_valid_wall_ = now;
@@ -332,12 +381,16 @@ class PpRacketTargetInput {
     } else {
       last_invalid_wall_ = now;
       latest_event_valid_ = false;
+      if (m.valid) has_latest_event_ = false;  // blocked by anonymous global barrier
       // An explicitly invalid row is new evidence and advances to its source
       // stamp. A valid row blocked only by the existing barrier is not new bad
       // evidence: keep T0 fixed so a constant-latency stream can cross it.
       if (!m.valid)
         anonymous_revoke_source_barrier_ = std::max(
             anonymous_revoke_source_barrier_, m.source_monotonic_s);
+      if (!m.valid &&
+          (!m.has_task_contract || (m.task_id == 0 && m.task_revision == 0)))
+        ++revocation_generation_;
     }
     ++generation_;
     any_ = true;
@@ -348,8 +401,10 @@ class PpRacketTargetInput {
     std::lock_guard<std::mutex> lk(mu_);
     last_invalid_wall_ = now;
     latest_event_valid_ = false;
+    has_latest_event_ = false;  // malformed/downgrade has no task-scoped identity
     anonymous_revoke_source_barrier_ =
         std::max(anonymous_revoke_source_barrier_, now);
+    ++revocation_generation_;
     ++generation_;
     any_ = true;
   }
@@ -360,8 +415,10 @@ class PpRacketTargetInput {
     if (last_valid_wall_ >= 0.0 && last_valid_.has_face_command) {
       last_invalid_wall_ = now;
       latest_event_valid_ = false;
+      has_latest_event_ = false;
       anonymous_revoke_source_barrier_ =
           std::max(anonymous_revoke_source_barrier_, now);
+      ++revocation_generation_;
       ++generation_;
       any_ = true;
     }
@@ -370,14 +427,18 @@ class PpRacketTargetInput {
   mutable std::mutex mu_;
   std::shared_ptr<std::mutex> transaction_mu_;
   PpRacketMsg last_valid_{};
+  PpRacketMsg latest_event_{};
+  bool has_latest_event_ = false;
   double last_valid_wall_ = -1.0;
   double last_invalid_wall_ = -1.0;
   bool latest_event_valid_ = false;
   bool formal_order_initialized_ = false;
+  bool task_schema_initialized_ = false;
   std::uint64_t last_formal_epoch_ = 0;
   std::uint64_t last_formal_sequence_ = 0;
   double last_formal_source_monotonic_s_ = -1.0;
   double anonymous_revoke_source_barrier_ = -1.0;
+  std::uint64_t revocation_generation_ = 0;  // protected by mu_
   std::atomic<std::uint64_t> generation_{0};
   std::atomic<bool> any_{false};
 };

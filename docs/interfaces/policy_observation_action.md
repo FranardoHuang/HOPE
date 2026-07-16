@@ -1,7 +1,9 @@
 # Policy Observation And Action
 
-Status: Implemented for 110/175/177/180. The 179 training/evaluation contract and versioned
-flat-wire/C++ source path are implemented, but vendor Gate 3 runtime evidence is still pending.
+Status: Implemented for 110/175/177/180. The 179 training/evaluation contract, versioned
+flat-wire/C++ source path and opt-in same-ball task-revision source are implemented, but the new
+schema-4 path has not yet passed an Isaac full-scene run, ROS/Jazzy Release, vendor Gate 3 or
+hardware behavior. It therefore remains `Partial`, not the currently accepted deployment path.
 The 181 deploy wire remains intentionally blocked pending the station/order contract day.
 
 ## HITTER-Compatible Contract
@@ -69,8 +71,8 @@ Notes:
 ### Actor-visible planner tuple timing
 
 `racket_target_pos_b`, `racket_target_vel_w`, the optional 179-D face tail, swing identity and
-`time_to_strike` describe one planner decision and must not mix different source times. Training
-now exposes three explicit modes through `task.racket.target_delay_tts_mode`:
+`time_to_strike` describe one atomic estimate and must not mix different source times. The legacy
+delay ablation exposes three explicit modes through `task.racket.target_delay_tts_mode`:
 
 - `live` preserves the historical contract and keeps the live countdown beside a delayed target;
 - `source_timestamp_compensated` delays the complete tuple and converts the source countdown to
@@ -80,24 +82,41 @@ now exposes three explicit modes through `task.racket.target_delay_tts_mode`:
 
 Only the actor sees the delayed/compensated countdown. The critic, Reward eligibility and truth
 metrics keep the current simulator countdown. Reset and dropout operate on the whole tuple, not
-individual fields. This source contract prevents a training-only mixed-age observation; it does
-not prove that the deployment transport carries a camera capture timestamp, that the C++ runner
-accepts rolling revisions, or that vendor MuJoCo behavior passes. Those remain G06/G07 work.
+individual fields.
+
+The opt-in [`planner task revision`](../DEFINITIONS.md#planner-task-revision) path supersedes the
+old mid-swing freeze without turning every update into a new stroke. One physical ball owns one
+`(control_epoch, task_id)`; each newer estimate increments `task_revision` and atomically revises
+position, velocity, physical face-B normal and TTS. The runner may consume the newest revision at
+any actor tick before reference contact. A bounded [`phase governor`](../DEFINITIONS.md#phase-governor)
+changes playback rate without reversing phase or exceeding the checkpoint-bound rate,
+acceleration, target-displacement or deadline envelope. Side and clip identity remain immutable
+within one task, and contact/plane/deadline closure makes that task consume-once. Training keeps
+the physical question, Reward truth and critic truth immutable while exposing the same revision
+protocol to the actor. This is the required answer to the old target/TTS freeze; it is source-level
+only until the full-scene and vendor gates below run.
+
+In the current `phase_governor_v1` cutover, `target_delay_steps` must be `0`:
+the legacy delay ring delays actor observations but would let the motion governor consume a source
+revision earlier. Any positive delay therefore fails closed until a coupled provider/transport
+ring can submit the complete `(epoch, task, revision, target, TTS)` to governor and actor in the
+same policy tick. Timestamp-compensation pairs with positive delay are `NO-LAUNCH`, not evidence.
 
 ### Other registered actor layouts
 
 | Dim | Contract | Delta / source | C++ publish status |
 | --- | --- | --- | --- |
 | 177 | `hitter_footwork` | 175 layout with `base_target_pos_b(2)` inserted after projected gravity; requires fresh external/oracle base localization. | Supported, but publication fails closed without fresh localization. |
-| 179 | `deploy_parity_face179` | Exact 175 prefix + tail `racket_target_normal_cmd(3), rho(1)`; actor tail is raw mount +Y/A after the runner converts the physical-B wire normal with the selected clip sign. | Flat wire schema 2 plus exact metadata/content-bound train-normal envelope/planner mode are mandatory. One envelope-bearing formal model has passed strict Release model preflight (`configs/gate3_face179_strict_preflight_evidence_20260712.json`), but no backend first tick or vendor Gate 3 behavior, so it is not yet a behavioral candidate. |
+| 179 | `deploy_parity_face179` | Exact 175 prefix + tail `racket_target_normal_cmd(3), rho(1)`; actor tail is raw mount +Y/A after the runner converts the physical-B wire normal with the selected clip sign. | Legacy face-only input uses schema 2; the existing formal atomic transport uses schema 3. The opt-in live-revision path requires exact schema 4 plus matching `planner_task_revision` ONNX metadata and `--planner-task-revision`. One older envelope-bearing model passed strict Release preflight, but no task-revision model has passed a backend first tick or vendor Gate 3 behavior. |
 | 181 | `deploy_parity_station181` | Exact 179 prefix + tail `station_anchor_err_b(2)`. | Blocked: wire and the unique station/normal term order are not frozen. |
 | 110 | `hitter_pure` | HITTER Table-I style: 99-D proprio prefix + base forward(2), station delta(2), racket target rel base(3), target velocity(3), tts(1); no reference command or swing flag. | Supported; requires fresh localization and metadata-bound per-side station geometry. |
 
 Do not infer a contract from width alone. Formal consumers require the registered name, mode,
 ordered term names/dims and total dimension to agree. The 179 C++ path accepts only
-`deploy_parity_face179` metadata and flat wire schema 2; it also binds face enabled,
-`shared_plus_y`, `mount_plusY_A`, exact schema-3 train split, train-bank SHA and source-family SHA.
-Schema 1 never fabricates the tail.
+`deploy_parity_face179` metadata and the wire schema named by that runtime profile; it also binds
+face enabled, `shared_plus_y`, `mount_plusY_A`, exact schema-3 train split, train-bank SHA and
+source-family SHA. A schema-4 launch additionally double-keys the runner flag, exact task-revision
+metadata and wire width. Schema 1 never fabricates the tail.
 Merely accepting 181 in an input-shape whitelist would still create a right-width/wrong-columns
 command, so 181 remains rejected until its unique station/normal order is frozen.
 
@@ -119,6 +138,14 @@ schema-1 keeps its historical ignore-and-age behavior when no formal face comman
 actor refuses to engage on schema 1. The planner publishes schema 1 by default for compatibility;
 schema 2 remains the face-only prefix, while a reviewed formal 179 Gate3 launch must set
 `racket_flat_schema:=3` to add epoch/sequence/base-reference causality.
+Schema 4 is an exact 22-double extension of schema 3. It adds `task_id` and `task_revision`; both
+are non-negative integers exactly representable as doubles. For one active ball, task identity is
+stable and revision strictly increases. A missing, fractional, stale, cross-task, post-contact or
+out-of-envelope revision fails closed. Solver valid/invalid jitter does not create a new task.
+Only a lifecycle-proven closure followed by a new inbound ball may allocate the next task. This
+separates “refresh the same strike” from “start another action” and closes the repeated-task bug at
+the same interface boundary.
+
 The formal flat row is published before the optional `hope_msgs/RacketCommand` mirror; mirror
 conversion/DDS failures are counted but cannot suppress a new formal row or revocation.
 
@@ -166,11 +193,22 @@ sign/range and cap statistics. It is a source-contract expectation for the next 
 formal ONNX, Isaac result, vendor-MuJoCo result, collision proof or recovery result.
 
 Model publication state and model-contract strictness are separate. Plain `--no-publish`,
-`--dry-run`, and `--model-preflight-only` still require the same schema-2 packaging, exact complete
-schema-3 execution metadata and (for 179) envelope as live publication. Only explicit
+`--dry-run`, and `--model-preflight-only` still require the same selected wire-schema packaging,
+exact complete schema-3 execution metadata and (for 179) envelope as live publication. Only explicit
 `--allow-legacy-model-diagnostic` relaxes legacy model loading; it requires no-publish and cannot
 be combined with model preflight. Therefore an accepted preflight certificate always reports
 parsed `publishable_model_contract=true` and `training_contract_exact=1`.
+
+For a task-revision-trained export, the checkpoint hard contract owns two deliberately separate
+records. `planner_task_revision` is the runtime contract and has exactly four fields: enabled,
+revision schema version, complete governor document and enclosing initial-TTS range. The ONNX
+embeds the canonical form of this runtime record and its SHA. `planner_task_revision_training`
+records the explicit weighted [`initial TTS mixture`](../DEFINITIONS.md#initial-tts-mixture) and
+training-only revision noise/counters; it is not copied into the runtime metadata. Native and
+standalone export both reconstruct the four-field runtime payload from the source checkpoint,
+reject missing/extra/tampered fields and never borrow it from a donor ONNX. The C++ runner requires
+this exact metadata only when `--planner-task-revision` and schema 4 are both selected; any partial
+combination fails closed.
 
 ## Critic (privileged) Observation (implemented)
 

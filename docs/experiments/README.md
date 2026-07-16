@@ -40,6 +40,8 @@ runtime/feature 细节，写进实验正文或“决定”列。全局 P0/P1 只
 
 | ID | 问题 | 人类负责人 | 执行者 | 状态 | 证据 | 决定 |
 | --- | --- | --- | --- | --- | --- | --- |
+| [EXP-P1-TASK-REVISION-CUTOVER](2026-07/EXP-P1-TASK-REVISION-CUTOVER.md) | 同一颗球能否在挥拍中实时修订 target/TTS，同时保持 exactly-once、宽准备时间、可达加速和可淘汰量尺？ | Franco | Codex | blocked | E1 | replacement source under red-team；必须先过 full-scene、0.5 K100 和 TOPP 运行门，旧池不得恢复 |
+| [EXP-P1-TIMING-EXAM-0P5](2026-07/EXP-P1-TIMING-EXAM-0P5.md) | 同一不可变双侧题表能否验证策略在仅 0.5 秒准备时间内真实完成击球？ | Franco | Codex | blocked | E1 | K100 试卷和 Isaac 诊断接线已实现；私有题表、checkpoint 行为、TOPP 可行性和 vendor MuJoCo 均未运行 |
 | [EXP-P1-FACE-PLANT-SCALEOUT](2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md) | 拍面×plant 广度矩阵哪些方向值得继续购买迭代？ | franco | Codex | completed/rejected | E4（诊断） | 16 臂已全部保留证据并停止；24/24 最近格的正手 signed composite=0，旧矩阵不能选 baseline |
 | [EXP-P1-FRESH-SZ-STABILITY](2026-07/EXP-P1-FRESH-SZ-STABILITY.md) | 最接近正式 setting 的方案在不同 seed/checkpoint 间是否稳定？ | franco | Codex | completed/rejected | model-2000/4000：E4 diagnostic | 2k 与 4k 稳定性都失败；seed4 持续弱，旧 parsed 正手分被 signed-face 反例推翻 |
 | [EXP-P1-FACE-SIGN-FORENSIC](2026-07/EXP-P1-FACE-SIGN-FORENSIC.md) | 高解析上台率是否隐去了拍面反号？ | franco | Codex | running | E4（旧卷诊断）+ E1（新源码） | `n/-n`/physical-B 源码门已实现；fresh canary 和修正后同卷未跑，旧分不晋级 |
@@ -54,7 +56,7 @@ runtime/feature 细节，写进实验正文或“决定”列。全局 P0/P1 只
 | [EXP-P1-LONG-SCALEOUT-SIX-ARM](2026-07/EXP-P1-LONG-SCALEOUT-SIX-ARM.md) | 两张空卡能否用同一长曲线补齐模仿 `2×2`、关节速度与脚部朝向剂量曲线？ | Franco | Codex | running | E2 | 五格首发 + V2 唯一 importer retry 均 live；GPU0/GPU1 每卡三条，稀疏击球样本不足时继续，不买第二 seed |
 | [EXP-P1-POD1-LONG-BALANCE-REWARD-GRID](2026-07/EXP-P1-POD1-LONG-BALANCE-REWARD-GRID.md) | 非击球臂自由是否要到多拍后才显出平衡收益；击球位置/速度/拍面 Reward 怎样配比？ | Franco | Codex | running | E2 | probe 到首迭代；五格 live，第六格 importer stale 已保全，余格与唯一同配方 retry 继续逐圈填满 |
 | [EXP-P1-DEMO-HOTSTART-PORTFOLIO](2026-07/EXP-P1-DEMO-HOTSTART-PORTFOLIO.md) | 能否从三个 model-3500 母本严格续训六个组合，给次日演示准备多个候选？ | Franco | Codex | blocked | E1 | 专用 fail-closed queue 已冻结；等 parent finite/optimizer receipt 与 Pod2 GPU0/GPU1 release，后代永久 formal-ineligible |
-| [EXP-P1-ROLLING-TIMING-SUPERCOMBO](2026-07/EXP-P1-ROLLING-TIMING-SUPERCOMBO.md) | 同源 TTS 补偿与约 1.0/0.7/0.5 秒老师动作加速能否形成可部署准备时间的演示候选？ | Franco | Codex | blocked | E1 | timing/retiming source gate 已进 main；等待 4096-env probe、parent runtime attestation 与通用 continuation runner，24 格永久 formal-ineligible |
+| [EXP-P1-ROLLING-TIMING-SUPERCOMBO](2026-07/EXP-P1-ROLLING-TIMING-SUPERCOMBO.md) | 同源 TTS 补偿与约 1.0/0.7/0.5 秒老师动作加速能否形成可部署准备时间的演示候选？ | Franco | Codex | superseded | E2 structural | 双 Pod 旧池已精确停止；active-swing target/TTS freeze 与 EMA-only 量尺使其不能回答部署时序或诚实淘汰，转 task-revision cutover |
 | [EXP-P1-SIGNED-FACE-C3D3-ZERO-FRICTION-L1](2026-07/EXP-P1-SIGNED-FACE-C3D3-ZERO-FRICTION-L1.md) | 显式零摩擦能否从 argv 到 checkpoint 完整闭合，并形成 guidance off/on 的 fresh L1 配对？ | Franco | Codex | L1 complete/behavior pending | E2 provenance | paired receipt `bb3cd749...bbde` 通过；不得重跑，等待同一 immutable K100 |
 | [EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND](2026-07/EXP-P1-SIGNED-FACE-EXAM-BANK-REBIND.md) | 旧 exam bank 能否只改四个 metadata leaf 严格迁移到当前 signed-face family？ | Franco | Codex | completed/data-only | E2 | 真实 371 题 runtime replay 逐字节相同并发布 exact bank/report；新 schedule/paper activation/judge 仍阻断 |
 | [EXP-P1-SIGNED-FACE-EXAM-PAPER](2026-07/EXP-P1-SIGNED-FACE-EXAM-PAPER.md) | 新 exact exam bank 能否冻结成不混旧 question ID、每侧 50 且全出手计分的 K100？ | Franco | Codex | preregistered | E1 | materializer/activation source 与攻击负测通过；真实 private bank consume 未跑，schedule/activation 均未物化 |

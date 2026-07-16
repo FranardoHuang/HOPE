@@ -23,6 +23,7 @@
 #include "vrpn_mocap/client.hpp"
 
 #include <chrono>
+#include <stdexcept>
 #include <string>
 #include <unordered_set>
 
@@ -39,6 +40,16 @@ namespace vrpn_mocap
         connection_(vrpn_get_connection_by_name(ParseHost().c_str()))
   {
     this->declare_parameter("multi_sensor", false);
+    const SourceTimestampMode source_timestamp_mode = ParseSourceTimestampMode(
+        this->declare_parameter<std::string>("source_timestamp_mode", "receipt"));
+    const double vrpn_source_max_abs_skew_s =
+        this->declare_parameter("vrpn_source_max_abs_skew_s", 0.1);
+    if (source_timestamp_mode == SourceTimestampMode::kVrpnPacket &&
+        !IsValidMaxAbsoluteSkewSeconds(vrpn_source_max_abs_skew_s))
+    {
+      throw std::invalid_argument(
+          "vrpn_source_max_abs_skew_s must be finite, nonnegative, and representable");
+    }
     const double refresh_freq = this->declare_parameter("refresh_freq", 1.);
     refresh_timer_ =
         this->create_wall_timer(1s / refresh_freq, std::bind(&Client::RefreshConnection, this));

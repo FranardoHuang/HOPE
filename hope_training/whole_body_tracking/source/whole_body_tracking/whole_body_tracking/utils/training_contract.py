@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import functools
 import hashlib
+import json
 import math
 from collections.abc import Mapping, MutableMapping
 
@@ -26,6 +27,53 @@ CHECKPOINT_LAUNCH_CLAIM_SHA_KEY = "training_launch_claim_sha256"
 SCHEMA3_TASK_KEYS = (
     "racket_control_point",
     "racket_control_point_offset_wrist_m",
+)
+
+PLANNER_TASK_REVISION_KEY = "planner_task_revision"
+PLANNER_TASK_REVISION_TRAINING_KEY = "planner_task_revision_training"
+_PLANNER_TASK_REVISION_KEYS = frozenset(
+    {"enabled", "revision_schema_version", "governor", "initial_tts_range_s"}
+)
+_PLANNER_GOVERNOR_KEYS = frozenset(
+    {"contract_version", "schema_version", "profile_sha256", "profile"}
+)
+_PLANNER_GOVERNOR_PROFILE_KEYS = frozenset(
+    {
+        "policy_dt_s",
+        "min_tts_s",
+        "max_tts_s",
+        "max_phase_rate_per_s",
+        "max_phase_acceleration_per_s2",
+        "max_deadline_revision_delta_s",
+        "max_position_revision_delta_m",
+        "max_velocity_revision_delta_mps",
+        "max_normal_revision_delta_rad",
+        "normal_unit_tolerance",
+        "early_deadline_tolerance_s",
+        "contract_version",
+        "schema_version",
+    }
+)
+_PLANNER_TASK_REVISION_TRAINING_KEYS = frozenset(
+    {
+        "initial_tts_sampling_semantics",
+        "initial_tts_mixture",
+        "initial_feasibility_gate",
+        "dynamics_certified_action_tau_min_bound",
+        "timing_exam_semantics",
+        "position_std_m",
+        "velocity_std_mps",
+        "normal_std_rad",
+        "tts_std_s",
+        "truth_fields_immutable",
+        "actor_revision_fields",
+    }
+)
+_PLANNER_INITIAL_TTS_MIXTURE_KEYS = frozenset(
+    {"contract_version", "components"}
+)
+_PLANNER_INITIAL_TTS_COMPONENT_KEYS = frozenset(
+    {"name", "range_s", "weight"}
 )
 
 # Isaac Lab 2.1 passes ``ImplicitActuatorCfg.friction`` to PhysX as a dimensionless,
@@ -75,6 +123,350 @@ RUNTIME_EXECUTION_KEYS = (
     "motion_kinematics_contracts",
     "motion_kinematics_exact",
 )
+
+
+def _require_exact_mapping_keys(value: object, expected: frozenset[str], *, name: str) -> Mapping:
+    if not isinstance(value, Mapping):
+        raise ValueError(f"{name} must be an object")
+    missing = sorted(expected - set(value))
+    unknown = sorted(set(value) - expected)
+    if missing:
+        raise ValueError(f"{name} is missing fields: {missing}")
+    if unknown:
+        raise ValueError(f"{name} contains unknown fields: {unknown}")
+    return value
+
+
+def _planner_finite_number(
+    value: object,
+    *,
+    name: str,
+    minimum: float | None = None,
+    strictly_positive: bool = False,
+) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"{name} must be a finite number")
+    parsed = float(value)
+    if not math.isfinite(parsed):
+        raise ValueError(f"{name} must be finite")
+    if strictly_positive and parsed <= 0.0:
+        raise ValueError(f"{name} must be positive")
+    if minimum is not None and parsed < minimum:
+        raise ValueError(f"{name} must be >= {minimum}")
+    return parsed
+
+
+def _canonical_planner_json(value: Mapping, *, trailing_newline: bool) -> str:
+    try:
+        encoded = json.dumps(
+            value,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    except (TypeError, ValueError) as exc:
+        raise ValueError("planner task revision contract is not canonical JSON data") from exc
+    return encoded + ("\n" if trailing_newline else "")
+
+
+def _validate_planner_initial_tts_mixture(
+    value: object, *, support_lo: float, support_hi: float
+) -> None:
+    """Validate the complete training-only mixture without leaking it into ONNX metadata."""
+
+    mixture = _require_exact_mapping_keys(
+        value,
+        _PLANNER_INITIAL_TTS_MIXTURE_KEYS,
+        name="planner_task_revision_training.initial_tts_mixture",
+    )
+    if mixture["contract_version"] != "initial_tts_mixture_v1":
+        raise ValueError("planner initial-TTS mixture contract version is unsupported")
+    components = mixture["components"]
+    if not isinstance(components, (list, tuple)) or not components:
+        raise ValueError("planner initial-TTS mixture components must be a non-empty list")
+    names: set[str] = set()
+    total_weight = 0.0
+    component_lows: list[float] = []
+    component_highs: list[float] = []
+    has_exact_0p5 = False
+    has_sub_0p5_stress = False
+    for index, raw_component in enumerate(components):
+        component = _require_exact_mapping_keys(
+            raw_component,
+            _PLANNER_INITIAL_TTS_COMPONENT_KEYS,
+            name=f"planner initial-TTS mixture component {index}",
+        )
+        name = component["name"]
+        if not isinstance(name, str) or not name or name.strip() != name:
+            raise ValueError(
+                f"planner initial-TTS mixture component {index} name is invalid"
+            )
+        if name in names:
+            raise ValueError("planner initial-TTS mixture component names must be unique")
+        names.add(name)
+        interval = component["range_s"]
+        if not isinstance(interval, (list, tuple)) or len(interval) != 2:
+            raise ValueError(
+                f"planner initial-TTS mixture component {index} range_s must contain two values"
+            )
+        lo = _planner_finite_number(
+            interval[0], name=f"planner initial-TTS component {index} lo_s", minimum=0.0
+        )
+        hi = _planner_finite_number(
+            interval[1], name=f"planner initial-TTS component {index} hi_s", minimum=lo
+        )
+        weight = _planner_finite_number(
+            component["weight"],
+            name=f"planner initial-TTS component {index} weight",
+            strictly_positive=True,
+        )
+        total_weight += weight
+        component_lows.append(lo)
+        component_highs.append(hi)
+        has_exact_0p5 |= lo == 0.5 and hi == 0.5
+        has_sub_0p5_stress |= lo < 0.5
+    if not math.isclose(total_weight, 1.0, rel_tol=0.0, abs_tol=1.0e-9):
+        raise ValueError("planner initial-TTS mixture weights must sum to 1")
+    if min(component_lows) != support_lo or max(component_highs) != support_hi:
+        raise ValueError(
+            "planner initial-TTS mixture support must equal initial_tts_range_s"
+        )
+    if not has_exact_0p5:
+        raise ValueError("planner initial-TTS mixture requires an exact 0.5 s point mass")
+    if not has_sub_0p5_stress:
+        raise ValueError("planner initial-TTS mixture requires a sub-0.5 s stress stratum")
+
+
+def planner_task_revision_metadata(contract: Mapping) -> str | None:
+    """Return the sole C++ metadata JSON for a checkpoint-bound revision profile.
+
+    Absence of both revision keys is the byte-compatible legacy/OFF spelling and returns ``None``.
+    Any partial spelling fails closed.  The returned JSON is reconstructed only from the immutable
+    schema-3 sidecar; callers must never fill it from the current export environment or an ONNX
+    donor.  ``clip_seg_lengths`` and ``clip_strike_phases`` remain separate established metadata
+    keys, but are validated here because the C++ phase governor maps normalized phase to the strike
+    frame derived from that exact pair.
+    """
+
+    if not isinstance(contract, Mapping):
+        raise ValueError("training contract root must be an object")
+    revision_present = PLANNER_TASK_REVISION_KEY in contract
+    training_present = PLANNER_TASK_REVISION_TRAINING_KEY in contract
+    if not revision_present and not training_present:
+        return None
+    if revision_present != training_present:
+        raise ValueError(
+            "schema-3 planner task revision is half-configured: planner_task_revision and "
+            "planner_task_revision_training must either both be present or both be absent"
+        )
+    if type(contract.get("schema_version")) is not int or contract["schema_version"] != 3:
+        raise ValueError("planner task revision metadata requires schema-3 training contract")
+
+    revision = _require_exact_mapping_keys(
+        contract[PLANNER_TASK_REVISION_KEY],
+        _PLANNER_TASK_REVISION_KEYS,
+        name="planner_task_revision",
+    )
+    if revision["enabled"] is not True:
+        raise ValueError("planner_task_revision.enabled must be true when the block is present")
+    if (
+        type(revision["revision_schema_version"]) is not int
+        or revision["revision_schema_version"] != 1
+    ):
+        raise ValueError("planner_task_revision.revision_schema_version must be integer 1")
+
+    governor = _require_exact_mapping_keys(
+        revision["governor"],
+        _PLANNER_GOVERNOR_KEYS,
+        name="planner_task_revision.governor",
+    )
+    profile = _require_exact_mapping_keys(
+        governor["profile"],
+        _PLANNER_GOVERNOR_PROFILE_KEYS,
+        name="planner_task_revision.governor.profile",
+    )
+    if governor["contract_version"] != "phase_governor_v1" or profile[
+        "contract_version"
+    ] != "phase_governor_v1":
+        raise ValueError("planner task revision requires phase_governor_v1")
+    if (
+        type(governor["schema_version"]) is not int
+        or governor["schema_version"] != 1
+        or type(profile["schema_version"]) is not int
+        or profile["schema_version"] != 1
+    ):
+        raise ValueError("planner task revision governor schema_version must be integer 1")
+
+    profile_sha = governor["profile_sha256"]
+    if (
+        type(profile_sha) is not str
+        or len(profile_sha) != 64
+        or any(character not in "0123456789abcdef" for character in profile_sha)
+    ):
+        raise ValueError("planner task revision profile_sha256 must be 64 lowercase hex characters")
+    canonical_profile = _canonical_planner_json(profile, trailing_newline=True)
+    calculated_profile_sha = hashlib.sha256(canonical_profile.encode("utf-8")).hexdigest()
+    if profile_sha != calculated_profile_sha:
+        raise ValueError("planner task revision profile_sha256 does not bind the canonical profile")
+
+    policy_dt = _planner_finite_number(
+        profile["policy_dt_s"], name="planner profile policy_dt_s", strictly_positive=True
+    )
+    min_tts = _planner_finite_number(
+        profile["min_tts_s"], name="planner profile min_tts_s", strictly_positive=True
+    )
+    max_tts = _planner_finite_number(
+        profile["max_tts_s"], name="planner profile max_tts_s", strictly_positive=True
+    )
+    if max_tts <= min_tts:
+        raise ValueError("planner profile max_tts_s must be greater than min_tts_s")
+    _planner_finite_number(
+        profile["max_phase_rate_per_s"],
+        name="planner profile max_phase_rate_per_s",
+        strictly_positive=True,
+    )
+    _planner_finite_number(
+        profile["max_phase_acceleration_per_s2"],
+        name="planner profile max_phase_acceleration_per_s2",
+        strictly_positive=True,
+    )
+    for key in (
+        "max_deadline_revision_delta_s",
+        "max_position_revision_delta_m",
+        "max_velocity_revision_delta_mps",
+        "early_deadline_tolerance_s",
+    ):
+        _planner_finite_number(
+            profile[key], name=f"planner profile {key}", minimum=0.0
+        )
+    max_normal_delta = _planner_finite_number(
+        profile["max_normal_revision_delta_rad"],
+        name="planner profile max_normal_revision_delta_rad",
+        minimum=0.0,
+    )
+    if max_normal_delta > math.pi:
+        raise ValueError("planner profile max_normal_revision_delta_rad must be <= pi")
+    normal_tolerance = _planner_finite_number(
+        profile["normal_unit_tolerance"],
+        name="planner profile normal_unit_tolerance",
+        minimum=0.0,
+    )
+    if normal_tolerance >= 1.0:
+        raise ValueError("planner profile normal_unit_tolerance must be < 1")
+
+    raw_initial_tts = revision["initial_tts_range_s"]
+    if not isinstance(raw_initial_tts, (list, tuple)) or len(raw_initial_tts) != 2:
+        raise ValueError("planner_task_revision.initial_tts_range_s must contain two values")
+    initial_lo = _planner_finite_number(
+        raw_initial_tts[0], name="planner initial_tts_range_s[0]"
+    )
+    initial_hi = _planner_finite_number(
+        raw_initial_tts[1], name="planner initial_tts_range_s[1]"
+    )
+    if initial_lo < min_tts or initial_hi > max_tts or initial_hi <= initial_lo:
+        raise ValueError(
+            "planner_task_revision.initial_tts_range_s must be strictly ordered inside the "
+            "governor TTS envelope"
+        )
+    contract_policy_dt = _planner_finite_number(
+        contract.get("policy_step_dt_s"),
+        name="schema-3 policy_step_dt_s",
+        strictly_positive=True,
+    )
+    if policy_dt != contract_policy_dt:
+        raise ValueError(
+            "planner profile policy_dt_s disagrees with schema-3 policy_step_dt_s"
+        )
+
+    segment_lengths = contract.get("motion_segment_lengths")
+    strike_phases = contract.get("strike_phase_per_clip")
+    if (
+        not isinstance(segment_lengths, (list, tuple))
+        or not segment_lengths
+        or not isinstance(strike_phases, (list, tuple))
+        or len(strike_phases) != len(segment_lengths)
+    ):
+        raise ValueError(
+            "planner task revision requires one checkpoint-bound strike phase per motion segment"
+        )
+    for index, (raw_length, raw_phase) in enumerate(
+        zip(segment_lengths, strike_phases, strict=True)
+    ):
+        if isinstance(raw_length, bool) or type(raw_length) is not int or raw_length <= 0:
+            raise ValueError(f"planner clip {index} segment length must be a positive integer")
+        phase = _planner_finite_number(
+            raw_phase, name=f"planner clip {index} strike phase"
+        )
+        if phase < 0.0 or phase > 1.0:
+            raise ValueError(f"planner clip {index} strike phase must be in [0, 1]")
+
+    training = _require_exact_mapping_keys(
+        contract[PLANNER_TASK_REVISION_TRAINING_KEY],
+        _PLANNER_TASK_REVISION_TRAINING_KEYS,
+        name="planner_task_revision_training",
+    )
+    if training["initial_tts_sampling_semantics"] != (
+        "explicit_weighted_mixture_over_initial_tts_range_s"
+    ):
+        raise ValueError("planner revision initial TTS sampling semantics are unsupported")
+    _validate_planner_initial_tts_mixture(
+        training["initial_tts_mixture"],
+        support_lo=initial_lo,
+        support_hi=initial_hi,
+    )
+    if training["initial_feasibility_gate"] != (
+        "normalized_phase_rate_and_acceleration_envelope_only"
+    ):
+        raise ValueError("planner revision feasibility-gate semantics are unsupported")
+    if type(training["dynamics_certified_action_tau_min_bound"]) is not bool:
+        raise ValueError("planner revision dynamics certification flag must be boolean")
+    if training["timing_exam_semantics"] != {
+        "0.5_s": "required_baseline_gate",
+        "below_0.5_s": "stress_diagnostic_not_support_floor",
+    }:
+        raise ValueError("planner revision timing-exam semantics are unsupported")
+    for key in ("position_std_m", "velocity_std_mps", "normal_std_rad", "tts_std_s"):
+        _planner_finite_number(
+            training[key], name=f"planner_task_revision_training.{key}", minimum=0.0
+        )
+    if training["truth_fields_immutable"] != [
+        "question_bank_row",
+        "physical_ball",
+        "reward_target",
+        "critic_target",
+    ]:
+        raise ValueError("planner revision immutable truth field list is invalid")
+    if training["actor_revision_fields"] != [
+        "target_position",
+        "target_velocity",
+        "signed_target_normal",
+        "time_to_strike",
+    ]:
+        raise ValueError("planner revision actor field list is invalid")
+
+    # nlohmann::json uses a sorted object map and compact dump for the C++ parser.  This exact
+    # spelling keeps exporter outputs deterministic and makes the embedded profile SHA replayable.
+    return _canonical_planner_json(revision, trailing_newline=False)
+
+
+def bind_planner_task_revision_metadata(
+    metadata: MutableMapping[str, str], contract: Mapping | None
+) -> str | None:
+    """Replace any donor/runtime claim with the checkpoint-side revision contract.
+
+    This is intentionally destructive before validation: callers write artifacts only after all
+    checks pass, so a failed contract cannot leave a stale donor claim available for later code to
+    copy.  ``None`` or an OFF/legacy contract always removes the metadata key.
+    """
+
+    metadata.pop(PLANNER_TASK_REVISION_KEY, None)
+    if contract is None:
+        return None
+    encoded = planner_task_revision_metadata(contract)
+    if encoded is not None:
+        metadata[PLANNER_TASK_REVISION_KEY] = encoded
+    return encoded
 
 
 def validate_training_launch_claim_sha256(value: str) -> str:
@@ -602,6 +994,9 @@ def validate_schema3_contract_structure(contract: Mapping) -> None:
     missing = [key for key in (*RUNTIME_EXECUTION_KEYS, *SCHEMA3_TASK_KEYS) if key not in contract]
     if missing:
         raise ValueError("schema-3 training contract missing execution facts: " + ", ".join(missing))
+    # Optional only as a complete pair.  The OFF/legacy spelling is total absence; an enabled
+    # block must bind the exact C++ governor JSON plus the clip layout that defines strike frames.
+    planner_task_revision_metadata(contract)
     actor_names_raw = contract["actor_obs_term_names"]
     actor_dims_raw = contract["actor_obs_term_dims"]
     actor_history_raw = contract["observation_history_lengths"]

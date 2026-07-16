@@ -1,0 +1,21 @@
+# Opt-in schema-4 overlay for a planner/task-revision-trained formal 179-D
+# policy. Load this *after* hope_planner.yaml and the venue/sim overlay.  It is
+# intentionally not part of the default launch: schema 4 may only be paired
+# with a C++ runner explicitly started with --planner-task-revision and an ONNX
+# model carrying the matching checkpoint-bound planner_task_revision profile.
+hope_planner:
+  ros__parameters:
+    racket_flat_schema: 4
+
+    # A transport sequence is not a ball identity. A new task is armed only
+    # after a trustworthy no-ball gap followed by an inbound track, or an
+    # estimator-proven contact discontinuity followed by an inbound track.
+    formal_task_no_ball_rearm_s: 0.10
+    formal_task_inbound_vx_threshold_mps: -0.30
+    formal_task_outbound_vx_threshold_mps: 0.30
+
+    # Close the old ball after it passes the strike plane or its newest
+    # predicted strike deadline. Solver valid/invalid jitter never allocates a
+    # new task; it advances the same task's revision counter.
+    formal_task_plane_close_margin_m: 0.02
+    formal_task_deadline_close_grace_s: 0.08

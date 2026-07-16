@@ -8,6 +8,7 @@
 
 #include "a3_pingpong/pp_planner_input.hpp"
 #include "a3_pingpong/pp_reference_clock.hpp"
+#include "a3_pingpong/pp_task_revision_gate.hpp"
 
 namespace {
 
@@ -21,10 +22,34 @@ std::vector<double> FormalRacket(bool valid, std::uint64_t epoch,
           static_cast<double>(base_sequence_ref), source};
 }
 
+std::vector<double> TaskRacket(bool valid, std::uint64_t epoch,
+                               std::uint64_t sequence, double source,
+                               std::uint64_t task_id,
+                               std::uint64_t task_revision,
+                               std::uint64_t base_sequence_ref = 1) {
+  auto row = FormalRacket(valid, epoch, sequence, source, base_sequence_ref);
+  row[0] = 4.0;
+  row.push_back(static_cast<double>(task_id));
+  row.push_back(static_cast<double>(task_revision));
+  return row;
+}
+
 std::vector<double> FormalBase(bool valid, std::uint64_t epoch,
                               std::uint64_t sequence, double source) {
   return {2, valid ? 1.0 : 0.0, 1.0, 2.0, 0.95, 1.0, 0.0, 0.0, 0.0,
           static_cast<double>(epoch), static_cast<double>(sequence), source};
+}
+
+a3_pingpong::PpTaskRevisionEnvelope TaskEnvelope(
+    std::uint64_t epoch, std::uint64_t task_id, std::uint64_t revision,
+    double side = 1.0, int clip = 0) {
+  a3_pingpong::PpTaskRevisionEnvelope out;
+  out.control_epoch = epoch;
+  out.task_id = task_id;
+  out.task_revision = revision;
+  out.swing_sign = side;
+  out.clip_id = clip;
+  return out;
 }
 
 bool FormalPairEligible(a3_pingpong::PpRacketTargetInput& racket,
@@ -183,6 +208,7 @@ TEST(PpPlannerInput, FormalRacketRequiresExactTwentyAndExactBaseSequenceRef) {
   input.SetFromFlat(fractional_ref);
   EXPECT_FALSE(input.Latest().has_valid);
 
+  std::this_thread::sleep_for(std::chrono::milliseconds(1));
   input.SetFromFlat(FormalRacket(
       true, 1, 3, a3_pingpong::PpNowMonotonicSec(),
       a3_pingpong::kPpMaxExactFloat64Integer));
@@ -190,6 +216,278 @@ TEST(PpPlannerInput, FormalRacketRequiresExactTwentyAndExactBaseSequenceRef) {
   ASSERT_TRUE(snap.has_valid);
   EXPECT_EQ(snap.cmd.base_sequence_ref,
             a3_pingpong::kPpMaxExactFloat64Integer);
+}
+
+TEST(PpPlannerInput, TaskSchemaCarriesExactIdentityAfterSchemaThreePrefix) {
+  a3_pingpong::PpRacketTargetInput input;
+  const double source = a3_pingpong::PpNowMonotonicSec() - 0.01;
+  input.SetFromFlat(TaskRacket(true, 7, 11, source, 3, 9, 5));
+  const auto snap = input.Latest();
+  ASSERT_TRUE(snap.has_valid);
+  EXPECT_FALSE(snap.invalid_after);
+  EXPECT_TRUE(snap.cmd.has_formal_epoch);
+  EXPECT_TRUE(snap.cmd.has_task_contract);
+  EXPECT_TRUE(snap.cmd.has_task_identity);
+  EXPECT_EQ(snap.cmd.control_epoch, 7u);
+  EXPECT_EQ(snap.cmd.command_sequence, 11u);
+  EXPECT_EQ(snap.cmd.base_sequence_ref, 5u);
+  EXPECT_EQ(snap.cmd.task_id, 3u);
+  EXPECT_EQ(snap.cmd.task_revision, 9u);
+}
+
+TEST(PpPlannerInput, TaskSchemaRequiresExactTwentyTwoAndValidPositivePair) {
+  const double source = a3_pingpong::PpNowMonotonicSec() - 0.02;
+  const auto expect_no_valid = [source](std::vector<double> row) {
+    a3_pingpong::PpRacketTargetInput input;
+    input.SetFromFlat(row);
+    EXPECT_FALSE(input.Latest().has_valid);
+  };
+
+  auto short_row = TaskRacket(true, 1, 1, source, 1, 1);
+  short_row.pop_back();
+  expect_no_valid(short_row);
+
+  auto long_row = TaskRacket(true, 1, 1, source, 1, 1);
+  long_row.push_back(0.0);
+  expect_no_valid(long_row);
+
+  auto fractional_task = TaskRacket(true, 1, 1, source, 1, 1);
+  fractional_task[20] = 1.5;
+  expect_no_valid(fractional_task);
+
+  auto overflow_revision = TaskRacket(true, 1, 1, source, 1, 1);
+  overflow_revision[21] =
+      static_cast<double>(a3_pingpong::kPpMaxExactFloat64Integer) + 1.0;
+  expect_no_valid(overflow_revision);
+
+  expect_no_valid(TaskRacket(true, 1, 1, source, 0, 0));
+  expect_no_valid(TaskRacket(false, 1, 1, source, 0, 1));
+  expect_no_valid(TaskRacket(false, 1, 1, source, 1, 0));
+}
+
+TEST(PpPlannerInput, TaskSchemaInvalidKeepsPositiveIdentityOrUsesZeroPair) {
+  a3_pingpong::PpRacketTargetInput input;
+  double source = a3_pingpong::PpNowMonotonicSec() - 0.03;
+  input.SetFromFlat(TaskRacket(true, 2, 1, source, 4, 1));
+  ASSERT_TRUE(input.Latest().has_valid);
+  const auto engaged_revoke_generation =
+      input.Latest().revocation_generation;
+
+  source += 0.005;
+  input.SetFromFlat(TaskRacket(false, 2, 2, source, 4, 2));
+  auto snap = input.Latest();
+  ASSERT_TRUE(snap.has_valid);
+  EXPECT_TRUE(snap.invalid_after);
+  ASSERT_TRUE(snap.has_latest_event);
+  EXPECT_FALSE(snap.latest_event.valid);
+  EXPECT_TRUE(snap.latest_event.has_task_contract);
+  EXPECT_EQ(snap.latest_event.task_id, 4u);
+  EXPECT_EQ(snap.latest_event.task_revision, 2u);
+  EXPECT_EQ(snap.cmd.task_id, 4u);
+  EXPECT_EQ(snap.cmd.task_revision, 1u);
+  EXPECT_EQ(snap.revocation_generation, engaged_revoke_generation);
+
+  // A later valid revision of the same task may recover transport validity.
+  source += 0.005;
+  input.SetFromFlat(TaskRacket(true, 2, 3, source, 4, 3));
+  snap = input.Latest();
+  ASSERT_TRUE(snap.has_valid);
+  EXPECT_FALSE(snap.invalid_after);
+  EXPECT_EQ(snap.cmd.task_revision, 3u);
+  EXPECT_EQ(snap.revocation_generation, engaged_revoke_generation);
+
+  // Zero/zero is the only anonymous invalid identity and globally revokes.
+  source += 0.005;
+  input.SetFromFlat(TaskRacket(false, 2, 4, source, 0, 0));
+  snap = input.Latest();
+  ASSERT_TRUE(snap.has_valid);
+  EXPECT_TRUE(snap.invalid_after);
+  ASSERT_TRUE(snap.has_latest_event);
+  EXPECT_EQ(snap.latest_event.task_id, 0u);
+  EXPECT_EQ(snap.latest_event.task_revision, 0u);
+  EXPECT_EQ(snap.revocation_generation, engaged_revoke_generation + 1);
+}
+
+TEST(PpPlannerInput, GlobalRevokeGenerationSurvivesValidRecoveryBetweenTicks) {
+  a3_pingpong::PpRacketTargetInput input;
+  double source = a3_pingpong::PpNowMonotonicSec() - 0.01;
+  input.SetFromFlat(TaskRacket(true, 7, 1, source, 1, 1));
+  const auto engaged = input.Latest();
+  ASSERT_TRUE(engaged.has_valid);
+  ASSERT_FALSE(engaged.invalid_after);
+
+  source += 0.002;
+  input.SetFromFlat(TaskRacket(false, 7, 2, source, 0, 0));
+  const auto revoked = input.Latest();
+  ASSERT_TRUE(revoked.invalid_after);
+  ASSERT_EQ(revoked.revocation_generation,
+            engaged.revocation_generation + 1);
+
+  // Simulate latest-value transport coalescing both callbacks before the next
+  // policy tick. The latest row is valid again, but the authority-loss edge
+  // remains independently observable by the active consumer.
+  source += 0.002;
+  input.SetFromFlat(TaskRacket(true, 7, 3, source, 2, 1));
+  const auto recovered = input.Latest();
+  ASSERT_TRUE(recovered.has_valid);
+  ASSERT_FALSE(recovered.invalid_after);
+  EXPECT_EQ(recovered.cmd.task_id, 2u);
+  EXPECT_EQ(recovered.revocation_generation,
+            engaged.revocation_generation + 1);
+}
+
+TEST(PpPlannerInput, SchemaThreeDowngradeAfterTaskSchemaRevokes) {
+  a3_pingpong::PpRacketTargetInput input;
+  double source = a3_pingpong::PpNowMonotonicSec() - 0.02;
+  input.SetFromFlat(TaskRacket(true, 3, 1, source, 1, 1));
+  auto snap = input.Latest();
+  ASSERT_TRUE(snap.has_valid);
+  ASSERT_FALSE(snap.invalid_after);
+
+  source += 0.005;
+  input.SetFromFlat(FormalRacket(true, 3, 2, source));
+  snap = input.Latest();
+  ASSERT_TRUE(snap.has_valid);
+  EXPECT_TRUE(snap.invalid_after);
+  EXPECT_TRUE(snap.cmd.has_task_contract);
+
+  // Schema 3 remains a downgrade even with a newer epoch and sequence.
+  input.SetFromFlat(FormalRacket(
+      true, 4, 100, a3_pingpong::PpNowMonotonicSec()));
+  EXPECT_TRUE(input.Latest().invalid_after);
+
+  // Only a causally fresh schema-4 row can recover the established protocol.
+  std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  input.SetFromFlat(TaskRacket(
+      true, 4, 101, a3_pingpong::PpNowMonotonicSec(), 1, 1));
+  snap = input.Latest();
+  ASSERT_TRUE(snap.has_valid);
+  EXPECT_FALSE(snap.invalid_after);
+  EXPECT_EQ(snap.cmd.control_epoch, 4u);
+  EXPECT_EQ(snap.cmd.task_id, 1u);
+}
+
+TEST(PpTaskRevisionGate, EngageConsumesOnceAndRevisionsAreStrict) {
+  using D = a3_pingpong::PpTaskRevisionDecision;
+  a3_pingpong::PpTaskRevisionGate gate;
+  const auto first = TaskEnvelope(7, 1, 1, -1.0, 1);
+  EXPECT_EQ(gate.TryEngage(first), D::kDisarmed);
+  ASSERT_TRUE(gate.Rearm(7));
+  EXPECT_EQ(gate.TryEngage(first), D::kEngaged);
+  EXPECT_TRUE(gate.active());
+  EXPECT_EQ(gate.last_consumed_task_id(), 1u);
+  EXPECT_DOUBLE_EQ(gate.frozen_swing_sign(), -1.0);
+  EXPECT_EQ(gate.frozen_clip_id(), 1);
+
+  EXPECT_EQ(gate.TryEngage(TaskEnvelope(7, 1, 2, -1.0, 1)),
+            D::kAlreadyActive);
+  EXPECT_EQ(gate.TryRevision(TaskEnvelope(7, 1, 1, -1.0, 1)),
+            D::kOldOrDuplicate);
+  EXPECT_EQ(gate.TryRevision(TaskEnvelope(7, 1, 2, -1.0, 1)),
+            D::kRevisionAccepted);
+  EXPECT_EQ(gate.active_revision(), 2u);
+  EXPECT_EQ(gate.TryRevision(TaskEnvelope(7, 1, 2, -1.0, 1)),
+            D::kOldOrDuplicate);
+}
+
+TEST(PpTaskRevisionGate, SideClipAndTaskStayFrozenWhileActive) {
+  using D = a3_pingpong::PpTaskRevisionDecision;
+  a3_pingpong::PpTaskRevisionGate gate;
+  ASSERT_TRUE(gate.Rearm(7));
+  ASSERT_EQ(gate.TryEngage(TaskEnvelope(7, 2, 1, 1.0, 0)), D::kEngaged);
+  EXPECT_EQ(gate.TryRevision(TaskEnvelope(7, 2, 2, -1.0, 0)),
+            D::kSideOrClipChanged);
+  EXPECT_EQ(gate.TryRevision(TaskEnvelope(7, 2, 2, 1.0, 1)),
+            D::kSideOrClipChanged);
+  EXPECT_EQ(gate.TryRevision(TaskEnvelope(7, 3, 2, 1.0, 0)),
+            D::kDifferentTask);
+  EXPECT_EQ(gate.active_revision(), 1u);
+  EXPECT_DOUBLE_EQ(gate.frozen_swing_sign(), 1.0);
+  EXPECT_EQ(gate.frozen_clip_id(), 0);
+}
+
+TEST(PpTaskRevisionGate, CompleteNeverMakesOldTaskEngageableAgain) {
+  using D = a3_pingpong::PpTaskRevisionDecision;
+  a3_pingpong::PpTaskRevisionGate gate;
+  ASSERT_TRUE(gate.Rearm(7));
+  ASSERT_EQ(gate.TryEngage(TaskEnvelope(7, 4, 1)), D::kEngaged);
+  EXPECT_TRUE(gate.Complete(7, 4));
+  EXPECT_FALSE(gate.active());
+  EXPECT_FALSE(gate.Complete(7, 4));
+  EXPECT_EQ(gate.TryEngage(TaskEnvelope(7, 4, 99)), D::kConsumed);
+  EXPECT_EQ(gate.TryEngage(TaskEnvelope(7, 3, 1)), D::kConsumed);
+  EXPECT_EQ(gate.TryEngage(TaskEnvelope(7, 5, 1)), D::kEngaged);
+}
+
+TEST(PpTaskRevisionGate, InvalidRevisionHoldsActiveButGlobalRevokeDisarms) {
+  using D = a3_pingpong::PpTaskRevisionDecision;
+  a3_pingpong::PpTaskRevisionGate gate;
+  ASSERT_TRUE(gate.Rearm(7));
+  ASSERT_EQ(gate.TryEngage(TaskEnvelope(7, 1, 1)), D::kEngaged);
+  EXPECT_EQ(gate.ObserveInvalid(7, 1, 2), D::kTaskInvalidObserved);
+  EXPECT_TRUE(gate.active());
+  EXPECT_EQ(gate.active_revision(), 2u);
+  EXPECT_EQ(gate.TryRevision(TaskEnvelope(7, 1, 2)), D::kOldOrDuplicate);
+  EXPECT_EQ(gate.TryRevision(TaskEnvelope(7, 1, 3)), D::kRevisionAccepted);
+  EXPECT_EQ(gate.ObserveInvalid(7, 0, 1), D::kMalformed);
+  EXPECT_TRUE(gate.active());
+  EXPECT_EQ(gate.ObserveInvalid(7, 0, 0), D::kGlobalRevoke);
+  EXPECT_FALSE(gate.active());
+  EXPECT_FALSE(gate.armed());
+  EXPECT_EQ(gate.TryEngage(TaskEnvelope(7, 2, 1)), D::kDisarmed);
+  ASSERT_TRUE(gate.Rearm(7));
+  EXPECT_EQ(gate.TryEngage(TaskEnvelope(7, 1, 4)), D::kConsumed);
+}
+
+TEST(PpTaskRevisionGate, EpochAdvanceDisarmsAndRegressionCannotMutateState) {
+  using D = a3_pingpong::PpTaskRevisionDecision;
+  a3_pingpong::PpTaskRevisionGate gate;
+  ASSERT_TRUE(gate.Rearm(7));
+  ASSERT_EQ(gate.TryEngage(TaskEnvelope(7, 3, 1)), D::kEngaged);
+  EXPECT_EQ(gate.TryRevision(TaskEnvelope(8, 3, 2)), D::kDisarmed);
+  EXPECT_EQ(gate.control_epoch(), 8u);
+  EXPECT_FALSE(gate.armed());
+  EXPECT_FALSE(gate.active());
+  EXPECT_EQ(gate.TryEngage(TaskEnvelope(8, 1, 1)), D::kDisarmed);
+  ASSERT_TRUE(gate.Rearm(8));
+  ASSERT_EQ(gate.TryEngage(TaskEnvelope(8, 1, 1)), D::kEngaged);
+  EXPECT_EQ(gate.TryRevision(TaskEnvelope(7, 1, 2)), D::kEpochRegressed);
+  EXPECT_EQ(gate.control_epoch(), 8u);
+  EXPECT_TRUE(gate.active());
+  EXPECT_EQ(gate.active_revision(), 1u);
+}
+
+TEST(PpTaskRevisionGate, MalformedIdentityAndSideNeverConsume) {
+  using D = a3_pingpong::PpTaskRevisionDecision;
+  a3_pingpong::PpTaskRevisionGate gate;
+  ASSERT_TRUE(gate.Rearm(9));
+  EXPECT_EQ(gate.TryEngage(TaskEnvelope(9, 0, 0)), D::kMalformed);
+  EXPECT_EQ(gate.TryEngage(TaskEnvelope(9, 1, 1, 0.0, 0)), D::kMalformed);
+  EXPECT_EQ(gate.TryEngage(TaskEnvelope(9, 1, 1, 1.0, -1)), D::kMalformed);
+  EXPECT_EQ(gate.last_consumed_task_id(), 0u);
+  EXPECT_FALSE(gate.active());
+  EXPECT_EQ(gate.TryEngage(TaskEnvelope(9, 1, 1)), D::kEngaged);
+}
+
+TEST(PpTaskRevisionGate, LatestFutureTaskRevisionCanEngageAfterCurrentCompletes) {
+  using D = a3_pingpong::PpTaskRevisionDecision;
+  a3_pingpong::PpTaskRevisionGate gate;
+  ASSERT_TRUE(gate.Rearm(12));
+  ASSERT_EQ(gate.TryEngage(TaskEnvelope(12, 1, 1)), D::kEngaged);
+
+  // A future ball may keep refining while task 1 is still in follow-through;
+  // it must not preempt the active physical ball or consume task 2.
+  EXPECT_EQ(gate.TryRevision(TaskEnvelope(12, 2, 1)), D::kDifferentTask);
+  EXPECT_EQ(gate.TryRevision(TaskEnvelope(12, 2, 2)), D::kDifferentTask);
+  ASSERT_TRUE(gate.Complete(12, 1));
+
+  // The latest-value mailbox may now contain only revision 3.  Consumer-side
+  // engage accepts that complete fresh snapshot exactly once; producer-side
+  // lifecycle tests separately require every new task to originate at rev 1.
+  EXPECT_EQ(gate.TryEngage(TaskEnvelope(12, 2, 3)), D::kEngaged);
+  ASSERT_TRUE(gate.Complete(12, 2));
+  EXPECT_EQ(gate.TryEngage(TaskEnvelope(12, 2, 4)), D::kConsumed);
+  EXPECT_EQ(gate.TryEngage(TaskEnvelope(12, 1, 99)), D::kConsumed);
 }
 
 TEST(PpPlannerInput, AnonymousMalformedPoisonsPreBarrierDelayedValid) {
@@ -208,6 +506,7 @@ TEST(PpPlannerInput, AnonymousMalformedPoisonsPreBarrierDelayedValid) {
   input.SetFromFlat(FormalRacket(true, 1, 3, old_source + 0.002));
   EXPECT_TRUE(input.Latest().invalid_after);
 
+  std::this_thread::sleep_for(std::chrono::milliseconds(1));
   const double fresh_source = a3_pingpong::PpNowMonotonicSec();
   input.SetFromFlat(FormalRacket(true, 1, 4, fresh_source));
   EXPECT_FALSE(input.Latest().invalid_after);
@@ -507,6 +806,10 @@ TEST(PpPlannerInput, FormalBaseCarriesEpochAndRejectsOldRecovery) {
   input.SetFromFlat(FormalBase(true, 4, 10, source + 0.001));
   EXPECT_FALSE(input.Latest(sample, 1.0));
 
+  // The rejected partial-order event above deliberately installs a
+  // receive-time poison barrier. Cross that wall-clock barrier before sending
+  // a causally fresh recovery; equality must remain rejected by production.
+  std::this_thread::sleep_for(std::chrono::milliseconds(1));
   source = a3_pingpong::PpNowMonotonicSec();
   input.SetFromFlat(FormalBase(true, 5, 11, source));
   ASSERT_TRUE(input.Latest(sample, 1.0));
@@ -789,7 +1092,10 @@ TEST(PpPlannerInput, TryCommitIfUnchangedLinearizesBothMailboxes) {
   auto transaction = std::make_shared<std::mutex>();
   a3_pingpong::PpRacketTargetInput racket(transaction);
   a3_pingpong::PpBasePoseInput base(transaction);
-  double source = a3_pingpong::PpNowMonotonicSec() - 0.02;
+  // Use one safely historical source-time origin for the whole test. Every
+  // formal event below has a deterministic positive offset from this origin,
+  // independent of host monotonic-clock resolution and test execution speed.
+  double source = a3_pingpong::PpNowMonotonicSec() - 0.20;
   racket.SetFromFlat(FormalRacket(true, 1, 1, source));
   base.SetFromFlat(FormalBase(true, 1, 1, source));
   auto rs = racket.Latest();
@@ -805,15 +1111,26 @@ TEST(PpPlannerInput, TryCommitIfUnchangedLinearizesBothMailboxes) {
           const a3_pingpong::PpBaseSample&) { called = true; return true; }));
   EXPECT_FALSE(called);
 
-  source = a3_pingpong::PpNowMonotonicSec();
+  // This case tests generation linearization, not clock resolution. Keep the
+  // recovery and refresh strictly newer than every event above while still
+  // safely in the past.
+  source += 0.05;
   racket.SetFromFlat(FormalRacket(true, 2, 3, source, 2));
   base.SetFromFlat(FormalBase(true, 2, 2, source));
   rs = racket.Latest();
   ASSERT_TRUE(base.Latest(bs, 1.0));
   // A normal high-rate refresh after capture advances latest generation but
   // retains the exact referenced base, so commit must not starve.
-  base.SetFromFlat(FormalBase(
-      true, 2, 3, a3_pingpong::PpNowMonotonicSec()));
+  base.SetFromFlat(FormalBase(true, 2, 3, source + 0.01));
+  ASSERT_TRUE(racket.GenerationCurrent(rs.generation));
+  a3_pingpong::PpBaseSample exact_before_commit;
+  ASSERT_TRUE(base.ExactFormal(
+      rs.cmd.control_epoch, rs.cmd.base_sequence_ref,
+      exact_before_commit, 1.0));
+  EXPECT_EQ(exact_before_commit.base_sequence, 2u);
+  a3_pingpong::PpBaseSample latest_before_commit;
+  ASSERT_TRUE(base.Latest(latest_before_commit, 1.0));
+  EXPECT_EQ(latest_before_commit.base_sequence, 3u);
   EXPECT_TRUE(a3_pingpong::PpWithPlannerInputsIfUnchanged(
       racket, rs.generation, base, rs.cmd.control_epoch,
       rs.cmd.base_sequence_ref, 1.0,

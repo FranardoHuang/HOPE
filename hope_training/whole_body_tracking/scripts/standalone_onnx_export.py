@@ -52,8 +52,10 @@ checkpoint_claims_contract = _TC.checkpoint_claims_contract
 checkpoint_contract_lineage_exact = _TC.checkpoint_contract_lineage_exact
 require_checkpoint_contract_binding = _TC.require_checkpoint_contract_binding
 bind_actor_leg_ref_mask_metadata = _TC.bind_actor_leg_ref_mask_metadata
+bind_planner_task_revision_metadata = _TC.bind_planner_task_revision_metadata
 require_actor_leg_ref_mask_provenance = _TC.require_actor_leg_ref_mask_provenance
 resolve_motion_body_lin_vel_points = _TC.resolve_motion_body_lin_vel_points
+planner_task_revision_metadata = _TC.planner_task_revision_metadata
 validate_schema3_contract = _TC.validate_schema3_contract
 validate_schema3_contract_structure = _TC.validate_schema3_contract_structure
 
@@ -355,6 +357,7 @@ def main() -> int:
     training_contract = None
     training_contract_sha256 = None
     training_contract_lineage_exact = False
+    planner_revision_metadata_json = None
     if os.path.isfile(training_contract_path):
         try:
             with open(training_contract_path, encoding="utf-8") as stream:
@@ -403,6 +406,12 @@ def main() -> int:
                 f"[FATAL] unsupported training-contract schema {contract_schema}; "
                 f"formal schema is {TRAINING_CONTRACT_SCHEMA_VERSION}"
             )
+        # Do not consume a sidecar profile into ONNX metadata until its checkpoint SHA/schema
+        # binding above has succeeded. Legacy unbound sidecars may remain diagnostic, never opt in.
+        try:
+            planner_revision_metadata_json = planner_task_revision_metadata(training_contract)
+        except ValueError as exc:
+            raise SystemExit(f"[FATAL] {exc}") from exc
     elif checkpoint_claims_contract(ckpt):
         raise SystemExit(
             "[FATAL] checkpoint claims a training-contract binding but the adjacent sidecar "
@@ -455,6 +464,7 @@ def main() -> int:
     motion = {k: torch.as_tensor(h[k], dtype=torch.float32) for k in MOTION_KEYS}
 
     donor_meta = {e.key: e.value for e in donor.metadata_props}
+    donor_planner_revision_claim = donor_meta.get("planner_task_revision")
     for req in (
         "hope_metadata_schema_version", "joint_names", "joint_stiffness", "clip_seg_lengths",
         "clip_strike_phases", "motion_clip_sha256", "actor_obs_contract",
@@ -485,9 +495,28 @@ def main() -> int:
     # which bank/protocol trained this checkpoint; strip those labels before rebuilding them from
     # the checkpoint-neighbour training contract.
     for key in list(donor_meta):
-        if key.startswith("stage1_") or key.startswith("training_contract_"):
+        if (
+            key == "planner_task_revision"
+            or key.startswith("stage1_")
+            or key.startswith("training_contract_")
+        ):
             donor_meta.pop(key, None)
     donor_meta["training_contract_exact"] = "0"
+    try:
+        bound_planner_revision = bind_planner_task_revision_metadata(
+            donor_meta, training_contract
+        )
+    except ValueError as exc:
+        raise SystemExit(f"[FATAL] {exc}") from exc
+    _require(
+        bound_planner_revision == planner_revision_metadata_json,
+        "planner revision canonicalization drift",
+    )
+    if donor_planner_revision_claim is not None:
+        _require(
+            donor_planner_revision_claim == bound_planner_revision,
+            "donor planner_task_revision metadata != checkpoint training contract",
+        )
 
     contract_schema = 0
     if training_contract is not None:
@@ -538,6 +567,17 @@ def main() -> int:
             donor_meta.get("actor_obs_mode") == expected_mode,
             "donor actor obs mode != checkpoint training contract",
         )
+        if planner_revision_metadata_json is not None:
+            _require(
+                actor_contract == "deploy_parity_face179",
+                "planner-task-revision metadata is valid only for deploy_parity_face179",
+            )
+            # The donor is never authority for revision capability. Its value was stripped above;
+            # rebuild the exact canonical JSON solely from the checkpoint-bound schema-3 sidecar.
+            _require(
+                donor_meta.get("planner_task_revision") == planner_revision_metadata_json,
+                "checkpoint-bound planner revision metadata was not installed",
+            )
         phases = [float(v) for v in training_contract.get("strike_phase_per_clip", [])]
         _require(len(phases) == len(seg_lengths), "training contract lacks one strike phase per clip")
         donor_meta.update({

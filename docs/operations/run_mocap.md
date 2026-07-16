@@ -42,6 +42,15 @@ After building and sourcing `hope_ws`, launch the VRPN client directly only when
 ros2 launch vrpn_mocap client.launch.yaml server:=PLACEHOLDER_MOCAP_SERVER_IP port:=3883
 ```
 
+The client defaults to `source_timestamp_mode:=receipt`, which keeps the historical ROS-host
+receipt stamp. Do not opt into packet time merely because the field exists. First prove the VRPN
+producer and ROS host clocks are synchronized, then use the tracked client parameter
+`source_timestamp_mode:=vrpn_packet` with an explicit
+`vrpn_source_max_abs_skew_s` (default `0.1`). Pose, twist and acceleration samples with malformed,
+overflowing or over-skewed packet time are dropped; there is no receipt-time fallback. Record both
+clock-sync evidence and observed capture-to-receipt age in G01/G03 before describing this mode as
+latency compensation.
+
 Confirm live topics:
 
 ```bash

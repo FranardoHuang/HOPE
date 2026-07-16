@@ -1211,6 +1211,44 @@ def test_dry_fill_is_six_gpu_round_robin_and_claim_is_no_clobber(tmp_path):
     assert "Learning iteration 1601/3601" in remote
 
 
+def test_superseded_tracked_queue_digest_rejects_fill_without_snapshot(
+    tmp_path, monkeypatch
+):
+    historical = ROOT / Q.QUEUE_PATH
+    assert hashlib.sha256(historical.read_bytes()).hexdigest() == Q.SUPERSEDED_QUEUE_SHA256
+    copied = tmp_path / "renamed-historical-copy.yaml"
+    copied.write_bytes(historical.read_bytes())
+    queue = Q.load_queue(copied)
+    calls = []
+    monkeypatch.setattr(Q.lean, "live_snapshot", lambda *_a: calls.append("snapshot"))
+
+    with pytest.raises(Q.ContinuationQueueError, match="permanently disabled"):
+        Q.cmd_fill(queue, count=1, execute=False, confirm=None)
+    with pytest.raises(Q.ContinuationQueueError, match="permanently disabled"):
+        Q.cmd_fill(queue, count=1, execute=True, confirm=Q.CONFIRM)
+
+    assert calls == []
+    assert Q.validate_queue(queue)["schema_valid"] is True
+    assert Q.cmd_plan(queue)["mode"] == "plan"
+
+
+def test_superseded_tracked_queue_path_rejects_fill_even_if_comments_drift(
+    tmp_path, monkeypatch
+):
+    historical = ROOT / Q.QUEUE_PATH
+    copied = tmp_path / Q.QUEUE_PATH
+    copied.parent.mkdir(parents=True)
+    copied.write_bytes(historical.read_bytes() + b"\n# deliberate nonsemantic drift\n")
+    queue = Q.load_queue(copied)
+    assert queue.source_sha256 != Q.SUPERSEDED_QUEUE_SHA256
+    monkeypatch.setattr(
+        Q.lean, "live_snapshot", lambda *_a: pytest.fail("live snapshot called")
+    )
+
+    with pytest.raises(Q.ContinuationQueueError, match="tracked superseded path"):
+        Q.cmd_fill(queue, count=1, execute=True, confirm=Q.CONFIRM)
+
+
 def test_execute_needs_exact_confirmation_before_live_snapshot(tmp_path, monkeypatch):
     queue = _loaded(tmp_path)
     calls = []

@@ -43,6 +43,13 @@ install(TARGETS client_node
   DESTINATION lib/${PROJECT_NAME})
 
 if(BUILD_TESTING)
+  add_executable(vrpn_mocap_source_timestamp_test test/test_source_timestamp.cpp)
+  target_include_directories(vrpn_mocap_source_timestamp_test PRIVATE
+    ${CMAKE_CURRENT_SOURCE_DIR}/include)
+  add_test(
+    NAME vrpn_mocap_source_timestamp_test
+    COMMAND vrpn_mocap_source_timestamp_test)
+
   find_package(ament_lint_auto REQUIRED)
   # add rclcpp include dir to ament_cppcheck
   get_target_property(ament_cmake_cppcheck_ADDITIONAL_INCLUDE_DIRS

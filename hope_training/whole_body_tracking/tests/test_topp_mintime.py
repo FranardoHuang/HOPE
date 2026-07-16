@@ -159,6 +159,33 @@ def test_kinematic_cap_blocks_overcompression():
     assert res_t.best.breakdown["kin_bad_out_window"] == 0
 
 
+def test_lock_window_hard_limit_violation_is_infeasible(monkeypatch):
+    """A contact-locked violation cannot be repaired, but it can never be accepted."""
+
+    data, phase = make_clip()
+    contact_row = np.asarray(data["joint_pos"])[int(round(phase * 80))]
+
+    def contact_only_violation(out, vel_cap, acc_budget, fps_out):
+        del vel_cap, acc_budget, fps_out
+        frames = len(out["joint_pos"])
+        vel = np.zeros(frames)
+        acc = np.zeros(frames)
+        matches = np.where(np.all(np.asarray(out["joint_pos"]) == contact_row, axis=1))[0]
+        assert len(matches) == 1
+        vel[int(matches[0])] = 1.01
+        return vel, acc
+
+    monkeypatch.setattr(v3, "kin_utils", contact_only_violation)
+    with pytest.raises(SystemExit, match="仍不可行"):
+        _run(
+            data,
+            phase,
+            stub_oracle(1e9),
+            scale_min=1.0,
+            scale_max=1.0,
+        )
+
+
 # --------------------------------- ⑤ 预算收紧 -> 时长单调不减 -------------------------- #
 def test_tighter_budget_duration_monotone():
     data, phase = make_clip()
@@ -172,6 +199,30 @@ def test_tighter_budget_duration_monotone():
     assert durs[2] >= durs[1] - 1e-6
 
 
+def test_oracle_pass_cannot_bypass_tighter_cli_dose_gate():
+    """The oracle's broad PASS band must not override this run's declared budget."""
+
+    data, phase = make_clip()
+
+    def broad_pass(out, stem, phase_out):
+        del stem, phase_out
+        frames = len(out["joint_pos"])
+        return v2.OracleReading(
+            cop_excess=np.full(frames, -0.01),
+            fric_ratio=np.full(frames, np.nan),
+            util_max=np.zeros(frames),
+            fz=np.full(frames, 500.0),
+            doses={"cop": 0.15, "friction": 0.0, "torque": 0.0},
+            verdict="PASS",
+            contact_frame=None,
+        )
+
+    # No per-frame bump can repair this intentionally adversarial aggregate reading.  The only
+    # correct result is fail-closed; the old `PASS or dose<=gate` bug returned a green asset.
+    with pytest.raises(SystemExit):
+        _run(data, phase, broad_pass, cop_gate=0.10, scale_max=1.0)
+
+
 # ---------------- ⑥ 外层全程扫描:到下界收尾点 + best=可行探点全局最短 ------------------ #
 def test_outer_ladder_full_scan_global_min():
     data, phase = make_clip()
@@ -183,6 +234,26 @@ def test_outer_ladder_full_scan_global_min():
         feas_durs = [t["duration_s"] for t in res.outer_trace if t["feasible"]]
         assert abs(res.best.duration_s - min(feas_durs)) < 1e-9, \
             "best 必须是全部可行探点的全局最短(平台期早停禁用)"
+
+
+def test_runup_objective_selects_shortest_feasible_start_to_contact_candidate():
+    data, phase = make_clip()
+    out, res, law, meta = _run(
+        data,
+        phase,
+        stub_oracle(1e9),
+        objective="runup",
+        scale_min=0.1,
+    )
+    feasible_runups = [row["runup_s"] for row in res.outer_trace if row["feasible"]]
+    assert round(res.best.runup_s, 4) == min(feasible_runups)
+    report = v3.build_report(data, res, law, meta, "interp")
+    assert report["search_objective"] == "runup"
+    assert report["timing_bound"]["strict_global_minimum_proven"] is False
+    assert "upper bound" in report["timing_bound"]["bound_semantics"]
+    assert np.array_equal(out["joint_pos"][0], out["joint_pos"][1])
+    assert np.array_equal(out["joint_vel"][0], np.zeros_like(out["joint_vel"][0]))
+    assert report["fidelity"]["first_frame_max_joint_vel"] == 0.0
 
 
 # ---------------- ⑦ 上探梯子补探 scale_max 本身(fail-loud 名副其实) ------------------- #
@@ -208,3 +279,54 @@ def test_bad_search_params_refused():
         _run(data, phase, stub_oracle(1e9), compress_step=1.2)   # 步长必须 <1
     with pytest.raises(SystemExit):
         _run(data, phase, stub_oracle(1e9), scale_min=1.5)       # 下界必须 ≤1
+    with pytest.raises(SystemExit):
+        _run(data, phase, stub_oracle(1e9), objective="not-an-objective")
+
+
+def test_production_cli_refuses_interp_before_reading_inputs(tmp_path: Path):
+    with pytest.raises(SystemExit, match="必须 --body-mode fk"):
+        v3.main(
+            [
+                "--input",
+                str(tmp_path / "missing.npz"),
+                "--output",
+                str(tmp_path / "out.npz"),
+                "--phase",
+                "0.5",
+                "--budget-clips",
+                str(tmp_path / "missing-budget.npz"),
+                "--body-mode",
+                "interp",
+                "--report",
+                str(tmp_path / "report.json"),
+                "--md",
+                str(tmp_path / "report.md"),
+            ]
+        )
+
+
+def test_certificate_bundle_publish_is_no_replace_and_rolls_back_partial(tmp_path: Path):
+    stage = tmp_path / "stage"
+    stage.mkdir()
+    sources = []
+    for name, payload in (("a", b"one"), ("b", b"two"), ("c", b"three")):
+        path = stage / name
+        path.write_bytes(payload)
+        sources.append(path)
+        evidence = v3._file_evidence(path, name)
+        assert evidence["bytes"] == len(payload)
+        assert len(evidence["sha256"]) == 64
+
+    destinations = [tmp_path / f"out-{index}" for index in range(3)]
+    v3._publish_staged_bundle(list(zip(sources, destinations)), parent=tmp_path)
+    assert [path.read_bytes() for path in destinations] == [b"one", b"two", b"three"]
+
+    rollback_first = tmp_path / "rollback-first"
+    occupied = tmp_path / "occupied"
+    occupied.write_bytes(b"immutable")
+    with pytest.raises(FileExistsError):
+        v3._publish_staged_bundle(
+            [(sources[0], rollback_first), (sources[1], occupied)], parent=tmp_path
+        )
+    assert not rollback_first.exists()
+    assert occupied.read_bytes() == b"immutable"

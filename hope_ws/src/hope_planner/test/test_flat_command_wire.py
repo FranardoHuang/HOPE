@@ -12,9 +12,11 @@ from hope_planner.flat_command_wire import (
     RACKET_FLAT_SCHEMA_V1,
     RACKET_FLAT_SCHEMA_V2_FACE179,
     RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+    RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
     RACKET_FLAT_V1_SIZE,
     RACKET_FLAT_V2_SIZE,
     RACKET_FLAT_V3_SIZE,
+    RACKET_FLAT_V4_SIZE,
     pack_base_pose_flat,
     pack_invalid_base_pose_flat,
     pack_invalid_racket_command_flat,
@@ -74,7 +76,7 @@ def test_schema2_rejects_malformed_or_non_opponent_facing_command(kwargs):
 
 def test_unknown_schema_and_frame_fail_closed():
     with pytest.raises(ValueError):
-        pack_racket_command_flat(schema=4, **BASE)
+        pack_racket_command_flat(schema=5, **BASE)
     with pytest.raises(ValueError):
         pack_racket_command_flat(schema=1, **{**BASE, "frame_code": 2})
     with pytest.raises(ValueError):
@@ -181,6 +183,132 @@ def test_schema3_fail_closed_revocation_keeps_exact_base_reference_and_size():
         float(MAX_EXACT_FLOAT64_INTEGER),
         123.5,
     ]
+
+
+def test_schema4_appends_exact_task_identity_without_changing_schema3_prefix():
+    schema3 = pack_racket_command_flat(
+        schema=RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+        normal_cmd_w=(1.0, 0.0, 0.0),
+        control_epoch=7,
+        command_sequence=11,
+        base_sequence_ref=5,
+        source_monotonic_s=123.5,
+        **BASE,
+    )
+    schema4 = pack_racket_command_flat(
+        schema=RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
+        normal_cmd_w=(1.0, 0.0, 0.0),
+        control_epoch=7,
+        command_sequence=11,
+        base_sequence_ref=5,
+        source_monotonic_s=123.5,
+        task_id=3,
+        task_revision=9,
+        **BASE,
+    )
+    assert len(schema4) == RACKET_FLAT_V4_SIZE == 22
+    assert schema4[:20] == [4.0, *schema3[1:]]
+    assert schema4[20:] == [3.0, 9.0]
+
+
+@pytest.mark.parametrize(
+    "field,value",
+    [
+        ("task_id", None),
+        ("task_id", False),
+        ("task_id", 0),
+        ("task_id", -1),
+        ("task_id", 1.5),
+        ("task_id", MAX_EXACT_FLOAT64_INTEGER + 1),
+        ("task_revision", None),
+        ("task_revision", 0),
+        ("task_revision", math.nan),
+        ("task_revision", MAX_EXACT_FLOAT64_INTEGER + 1),
+    ],
+)
+def test_schema4_rejects_missing_or_nonexact_task_identity(field, value):
+    kwargs = dict(
+        schema=RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
+        normal_cmd_w=(1.0, 0.0, 0.0),
+        control_epoch=7,
+        command_sequence=11,
+        base_sequence_ref=5,
+        source_monotonic_s=123.5,
+        task_id=3,
+        task_revision=9,
+        **BASE,
+    )
+    kwargs[field] = value
+    with pytest.raises(ValueError):
+        pack_racket_command_flat(**kwargs)
+
+
+def test_schema4_invalid_and_fail_closed_rows_preserve_task_identity():
+    invalid = pack_invalid_racket_command_flat(
+        schema=RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
+        control_epoch=7,
+        command_sequence=12,
+        base_sequence_ref=6,
+        source_monotonic_s=124.0,
+        task_id=3,
+        task_revision=10,
+    )
+    assert len(invalid) == RACKET_FLAT_V4_SIZE
+    assert invalid[1] == 0.0
+    assert invalid[16:] == [7.0, 12.0, 6.0, 124.0, 3.0, 10.0]
+
+    revoked, error = pack_racket_command_flat_fail_closed(
+        schema=RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
+        normal_cmd_w=(-1.0, 0.0, 0.0),
+        control_epoch=7,
+        command_sequence=12,
+        base_sequence_ref=6,
+        source_monotonic_s=124.0,
+        task_id=3,
+        task_revision=10,
+        **BASE,
+    )
+    assert error is not None
+    assert revoked == invalid
+
+
+def test_schema4_bad_identity_fails_closed_as_anonymous_global_revoke():
+    revoked, error = pack_racket_command_flat_fail_closed(
+        schema=RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
+        normal_cmd_w=(-1.0, 0.0, 0.0),
+        control_epoch=7,
+        command_sequence=12,
+        base_sequence_ref=6,
+        source_monotonic_s=124.0,
+        task_id=0,
+        task_revision=10,
+        **BASE,
+    )
+    assert error is not None and "revoked globally" in error
+    assert revoked[1] == 0.0
+    assert revoked[20:] == [0.0, 0.0]
+
+
+def test_schema4_anonymous_pair_is_invalid_only_and_mixed_pair_is_rejected():
+    anonymous = pack_invalid_racket_command_flat(
+        schema=RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
+        control_epoch=7,
+        command_sequence=12,
+        base_sequence_ref=6,
+        source_monotonic_s=124.0,
+    )
+    assert len(anonymous) == RACKET_FLAT_V4_SIZE
+    assert anonymous[20:] == [0.0, 0.0]
+    with pytest.raises(ValueError, match="both be zero"):
+        pack_invalid_racket_command_flat(
+            schema=RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
+            control_epoch=7,
+            command_sequence=12,
+            base_sequence_ref=6,
+            source_monotonic_s=124.0,
+            task_id=3,
+            task_revision=0,
+        )
 
 
 def test_base_schema2_carries_same_epoch_and_has_canonical_invalid_row():

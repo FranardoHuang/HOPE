@@ -62,6 +62,19 @@ from isaac_bank_exam_adapter import (  # noqa: E402
     validate_phase_b_pre_gym_target,
     write_scorecard,
 )
+from isaac_timing_exam_adapter import (  # noqa: E402
+    DIAGNOSTIC_REASONS as TIMING_DIAGNOSTIC_REASONS,
+    activate_runtime_retiming,
+    finalize_timing_records,
+    initialize_timing_record,
+    install_zero_velocity_frame0_reference,
+    load_timing_paper,
+    observe_timing_deadlines,
+    sha256_file as timing_sha256_file,
+    validate_paper_schedule_binding,
+    validate_zero_velocity_ready_state,
+    verify_runtime_retiming_preserved,
+)
 
 
 CLIP_NAMES = ("forehand", "backhand")
@@ -285,10 +298,21 @@ def _run(cfg, simulation_app):
 
     allow_inexact = bool(_cfg(cfg, "allow_inexact_contract", False))
     phase_b_requested = bool(_cfg(cfg, "instrument_physical_truth_phase_b", False))
+    timing_paper_raw = str(_cfg(cfg, "timing_paper", "")).strip()
+    timing_requested = bool(timing_paper_raw)
     if phase_b_requested and allow_inexact:
         raise IsaacBankExamError(
             "Phase-B physical truth is bound to the exact fresh paper; allow_inexact_contract "
             "cannot be enabled in the same cell"
+        )
+    if timing_requested and phase_b_requested:
+        raise IsaacBankExamError(
+            "the 0.5 s timing rider is analytic/diagnostic only and cannot be combined with Phase-B"
+        )
+    if timing_requested and not allow_inexact:
+        raise IsaacBankExamError(
+            "the 0.5 s uniform-phase timing paper is not TOPP/dynamics-certified and lacks full "
+            "safety instrumentation; pass +allow_inexact_contract=true for diagnostic use"
         )
     repo = find_repository_root(__file__)
     phase_b_contract = None
@@ -326,6 +350,27 @@ def _run(cfg, simulation_app):
         checkpoint_obj=checkpoint_obj,
         allow_inexact=allow_inexact,
     )
+    timing_paper = None
+    timing_paper_path = None
+    timing_paper_file_sha = None
+    if timing_requested:
+        timing_paper_path = Path(timing_paper_raw).expanduser().resolve()
+        timing_paper_file_sha = str(
+            _cfg(cfg, "expected_timing_paper_sha256", "")
+        ).strip()
+        timing_paper_semantic_sha = str(
+            _cfg(cfg, "expected_timing_paper_semantic_sha256", "")
+        ).strip()
+        if not timing_paper_file_sha or not timing_paper_semantic_sha:
+            raise IsaacBankExamError(
+                "timing paper requires +expected_timing_paper_sha256=... and "
+                "+expected_timing_paper_semantic_sha256=..."
+            )
+        timing_paper = load_timing_paper(
+            timing_paper_path,
+            expected_file_sha256=timing_paper_file_sha,
+            expected_semantic_sha256=timing_paper_semantic_sha,
+        )
     contract_path = run_dir / "params" / "training_contract.json"
     if training_contract_sha is not None and sha256_file(contract_path) != training_contract_sha:
         raise IsaacBankExamError("training contract changed immediately after preflight")
@@ -592,10 +637,19 @@ def _run(cfg, simulation_app):
     bank_sha = bank_sha_after
     question_ids = derive_question_bank_question_ids(exam_bank, bank_sha256=bank_sha)
     output_json, output_csv, schedule_path = _artifact_paths(cfg, run_dir)
+    if any(path.exists() or path.is_symlink() for path in (output_json, output_csv)):
+        raise IsaacBankExamError(
+            "refusing to start an Isaac BankExam that would replace an existing scorecard"
+        )
     supplied_schedule = _cfg(cfg, "schedule_json", None)
+    if timing_paper is not None and not supplied_schedule:
+        raise IsaacBankExamError(
+            "timing paper requires the exact source +schedule_json; evaluator may not rebuild it"
+        )
     if supplied_schedule:
+        runtime_schedule_path = Path(str(supplied_schedule)).expanduser().resolve()
         schedule_artifact = load_schedule_artifact(
-            supplied_schedule,
+            runtime_schedule_path,
             expected_bank_sha256=bank_sha,
             expected_clip_names=CLIP_NAMES,
             expected_question_ids=question_ids,
@@ -605,6 +659,7 @@ def _run(cfg, simulation_app):
                 f"schedule quota={schedule_artifact.per_clip_quota}, requested {quota}"
             )
     else:
+        runtime_schedule_path = schedule_path
         schedule_artifact = materialize_balanced_bank_exam_schedule(
             bank_sha256=bank_sha,
             clip_names=CLIP_NAMES,
@@ -615,6 +670,14 @@ def _run(cfg, simulation_app):
         )
         write_schedule_artifact(schedule_artifact, schedule_path)
     schedule = schedule_artifact.items
+    if timing_paper is not None:
+        if quota != 50 or len(schedule) != 100:
+            raise IsaacBankExamError("0.5 s timing paper requires per_clip_quota=50 and K100")
+        validate_paper_schedule_binding(
+            timing_paper,
+            schedule_artifact=schedule_artifact,
+            schedule_path=runtime_schedule_path,
+        )
     if phase_b_contract is not None:
         if sha256_file(phase_b_schedule_path) != phase_b_schedule_file_sha:
             raise IsaacBankExamError(
@@ -655,6 +718,11 @@ def _run(cfg, simulation_app):
     if sha256_file(checkpoint) != checkpoint_sha:
         raise IsaacBankExamError("checkpoint changed while the policy runner was loading it")
     policy = runner.get_inference_policy(device=base.device)
+    if timing_paper is not None:
+        # These describe the timing instrument, not checkpoint compatibility.  Add them only
+        # after the strict/tolerant runner-load decision so an exact checkpoint is never loaded
+        # through the legacy compatibility path merely because this paper is diagnostic-only.
+        inexact_reasons.extend(TIMING_DIAGNOSTIC_REASONS)
     std_vec = None
     for name in ("std", "action_std"):
         value = getattr(runner.alg.policy, name, None)
@@ -699,6 +767,16 @@ def _run(cfg, simulation_app):
     )
     if ready_state_numeric["legacy_ready_state_sha256"] != ready_sha:
         raise IsaacBankExamError("numeric ready-state export disagrees with the accepted digest")
+    timing_ready_profile = None
+    if timing_paper is not None:
+        timing_ready_profile = {
+            "physical_robot": validate_zero_velocity_ready_state(
+                timing_paper,
+                root_states=root,
+                joint_velocities=joint_vel,
+            ),
+            "motion_reference": None,
+        }
 
     from whole_body_tracking.tasks.tracking.mdp import virtual_ball as virtual_ball_scorer
 
@@ -786,11 +864,30 @@ def _run(cfg, simulation_app):
     env_ids = torch.arange(num_envs, dtype=torch.long, device=device)
     clip_ids = torch.as_tensor([int(item.clip) for item in schedule], device=device)
     bank_rows = torch.as_tensor([int(item.bank_row) for item in schedule], device=device)
-    holds = torch.as_tensor([int(item.hold_steps) for item in schedule], device=device)
+    source_holds = torch.as_tensor([int(item.hold_steps) for item in schedule], device=device)
+    holds = torch.zeros_like(source_holds) if timing_paper is not None else source_holds
     attempt_tokens = torch.as_tensor(
         [int(item.schedule_index) for item in schedule], dtype=torch.long, device=device
     )
     motion_cmd.install_external_exam_timing(env_ids, clip_ids, holds)
+    timing_runtime_profile = None
+    if timing_paper is not None:
+        timing_runtime_profile = activate_runtime_retiming(
+            motion_cmd,
+            env_ids=env_ids,
+            clip_ids=clip_ids,
+            paper=timing_paper,
+            segment_lengths=segment_lengths,
+            strike_phases=strike_phases,
+            torch_module=torch,
+        )
+        timing_ready_profile["motion_reference"] = install_zero_velocity_frame0_reference(
+            motion_cmd,
+            env_ids=env_ids,
+            clip_ids=clip_ids,
+            paper=timing_paper,
+            torch_module=torch,
+        )
     racket_cmd.install_external_exam_questions(env_ids, exam_bank, clip_ids, bank_rows)
     if phase_b_contract is not None:
         physical_manager.begin_external_exam_attempt(env_ids, attempt_tokens)
@@ -799,7 +896,7 @@ def _run(cfg, simulation_app):
 
     records = []
     for env_id, item in enumerate(schedule):
-        records.append({
+        record = {
             "schedule_index": int(item.schedule_index),
             "env_id": env_id,
             "clip": int(item.clip),
@@ -827,7 +924,10 @@ def _run(cfg, simulation_app):
             "landing_y": None,
             "net_clear": False,
             "instrumentation": None,
-        })
+        }
+        if timing_paper is not None:
+            initialize_timing_record(record, timing_paper["rows"][env_id])
+        records.append(record)
     active = torch.ones(num_envs, dtype=torch.bool, device=device)
     tm = base.termination_manager
     active_names = set(tm.active_terms)
@@ -930,6 +1030,8 @@ def _run(cfg, simulation_app):
             if row["reached_exact"]:
                 raise IsaacBankExamError(f"attempt {env_id} produced more than one exact-strike frame")
             row["reached_exact"] = True
+            if timing_paper is not None:
+                row["exact_strike_step"] = step
             row["hit"] = bool(hit[env_id])
             row["returned"] = bool(returned[env_id])
             row["pos_error_m"] = float(racket_cmd.metrics["racket_pos_error_exact_strike"][env_id])
@@ -944,6 +1046,10 @@ def _run(cfg, simulation_app):
             row["instrumentation"] = state_snapshot(
                 env_id, "exact_strike", analytic_available=True
             )
+
+        if timing_paper is not None:
+            # Process exact-strike first: an exact hit on tick 25 meets the immutable deadline.
+            observe_timing_deadlines(records, step=step)
 
         masks = _term_masks(tm, observed_terms, num_envs)
         done_list = dones.detach().to("cpu").bool().tolist()
@@ -1032,6 +1138,24 @@ def _run(cfg, simulation_app):
         if end_contract["contract_id"] != phase_b_contract["contract_id"]:
             raise IsaacBankExamError("Phase-B contract identity changed during evaluation")
 
+    timing_summary = None
+    if timing_paper is not None:
+        if timing_sha256_file(timing_paper_path) != timing_paper_file_sha:
+            raise IsaacBankExamError("timing paper changed during evaluation")
+        if sha256_file(runtime_schedule_path) != timing_paper["source_schedule"]["file_sha256"]:
+            raise IsaacBankExamError("timing source schedule changed during evaluation")
+        timing_runtime_profile["final_verification"] = verify_runtime_retiming_preserved(
+            motion_cmd,
+            paper=timing_paper,
+            expected_profile=timing_runtime_profile,
+            torch_module=torch,
+        )
+        timing_summary = finalize_timing_records(
+            records,
+            paper=timing_paper,
+            evaluation_contract_exact=not inexact_reasons,
+        )
+
     schedule_payload = artifact_document(schedule_artifact)
     metadata = {
         "evaluation_contract_exact": not inexact_reasons,
@@ -1070,6 +1194,22 @@ def _run(cfg, simulation_app):
             "ball_physics_yaml_sha256": sha256_file(repo / "configs/ball_physics_venue.yaml"),
         },
     }
+    if timing_paper is not None:
+        metadata["sources"]["timing_adapter_sha256"] = sha256_file(
+            Path(__file__).with_name("isaac_timing_exam_adapter.py")
+        )
+        metadata["timing_exam"] = {
+            "enabled": True,
+            "mode": "0.5_second_zero_velocity_frame0_diagnostic",
+            "paper_binding": dict(timing_paper["_validated_binding"]),
+            "source_schedule_file_sha256": timing_paper["source_schedule"]["file_sha256"],
+            "ready_state": timing_ready_profile,
+            "runtime": timing_runtime_profile,
+            "summary": timing_summary,
+            "all_scheduled_attempts_in_denominator": True,
+            "formal_gate_authorized": False,
+            "mujoco_retiming_status": "blocked_not_implemented_or_verified_in_this_evaluator",
+        }
     if phase_b_contract is not None:
         metadata["physical_truth_phase_b_contract"] = {
             **dict(phase_b_contract["_validated_binding"]),
@@ -1086,6 +1226,12 @@ def _run(cfg, simulation_app):
         schedule=schedule,
         clip_names=CLIP_NAMES,
     )
+    if timing_summary is not None:
+        print(
+            "[isaac-bank-exam timing-0p5] "
+            + json.dumps(finite_or_none(timing_summary), sort_keys=True),
+            flush=True,
+        )
     print(json.dumps(finite_or_none(document["summary"]), indent=2, sort_keys=True), flush=True)
     print(f"[isaac-bank-exam] JSON {output_json}", flush=True)
     print(f"[isaac-bank-exam] CSV  {output_csv}", flush=True)

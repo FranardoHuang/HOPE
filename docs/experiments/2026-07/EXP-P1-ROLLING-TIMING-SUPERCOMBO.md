@@ -1,6 +1,6 @@
 # EXP-P1-ROLLING-TIMING-SUPERCOMBO — 快速准备、时间戳补偿与组合训练漏斗
 
-- 状态：`running / demo-only inexact`（24 个唯一 claim 已消费；最近可信状态为 22 live、2 个 importer 基础设施拒绝）
+- 状态：`superseded / stopped`（24 个唯一 claim 已消费；22 个接受进程已精确停止，2 个 importer 拒绝保持 absent）
 - 阶段/轴：阶段 1，动作重定时、actor 可见目标/TTS 延迟、预测收敛抖动、击球 Reward 配比与脚朝向
 - 人类负责人：Franco
 - 执行者：Codex
@@ -9,8 +9,9 @@
 
 共享术语按[术语与人话对照](../../DEFINITIONS.md)解释。本实验的机器草案是
 [`phase1_rolling_timing_supercombo_20260716.yaml`](../../../configs/phase1_rolling_timing_supercombo_20260716.yaml)。
-顶层 [`launch_authorized=true`](../../DEFINITIONS.md#launch-authorized)，24 条 job 已在一次性 parent inspect
-通过后消费各自唯一 claim；只授权本轮仿真续训，不授权自动重试、第二 seed、判卷、晋级或真机。
+机器 YAML 历史上曾设置 [`launch_authorized=true`](../../DEFINITIONS.md#launch-authorized)，24 条 job 已在一次性 parent inspect
+通过后消费各自唯一 claim；该授权已经被 task-revision cutover 的双 Pod stop receipt 撤销，旧 queue 不得
+resume。它从未授权自动重试、第二 seed、判卷、晋级或真机。
 
 ## 先回答：qdot 是不是随机施加力
 
@@ -290,6 +291,30 @@ physical-fall union、各 termination 原因，并为 ready/hold 的倾角、接
 整数不能倒灌进已经运行的 source；现役 checkpoint 若要提前排序，必须另立同题、不可变、checkpoint-bound
 行为卷，不能把描述性 TensorBoard 曲线升级成淘汰依据。
 
+## 17:00 CST task-revision cutover：旧池已完整停止
+
+现场复核确认 formal 179-D runner 在 active swing 内冻结目标与剩余击球时间，现役训练也没有消费同一物理球的
+递增 planner revision。继续训练只会把错误协议学得更牢；同时本 source 缺独立整数行为窗口，继续跑也不能产生
+合法的 `+500/+1000` 淘汰结论。因此先暂停自动任务，再停止整个 rolling 池，而不是挑看起来弱的曲线拍脑袋淘汰。
+
+[`scripts/stop_phase1_rolling_task_revision_cutover.py`](../../../scripts/stop_phase1_rolling_task_revision_cutover.py)
+从冻结 YAML 派生全部目标，逐条复核 immutable claim/binding、source、PID=PGID、starttime、完整 argv、cwd、
+latest checkpoint 与 hard contract；只有 dry-run 全过后才向记录的数值 PGID 发 TERM，短暂未退出的同一精确
+进程组再发 KILL。它不使用 `pgrep -f`、`pkill` 或 `killall`。Pod1 的 11 条 live 与 Pod2 的 11 条 live 均已
+退出；两条 importer rc134 仍保持 rejected。最后可稳定读取的 checkpoint 范围分别为 Pod1
+`model_2900–3500`、Pod2 `model_5800–6500`，没有把这些 checkpoint 升格为行为胜者。
+
+首次 worker 已在 signal 前 O_EXCL 写入 intent，但等待内核回收 `/proc` 项时未能发布 receipt；随后只读复核
+证明 24 个注册 leader、22 个精确进程组和 NVML compute context 全部 absent。recovery finalizer 不再发任何
+signal，只对原 intent 和空进程事实发布 no-clobber receipt：
+
+- Pod1 receipt SHA-256 `e6b2480abfbc8a8b6437c7c8a1baacaac14c6b50537f1c8654eed0a74348263e`；
+- Pod2 receipt SHA-256 `4c370431b0501ee6ed01e374c059290607499790a757eb12ffd9e5d9948cc949`。
+
+本实验现在是 `stopped / superseded-by-task-revision-and-0p5-exam`。新训练只有在以下四项同时通过后才可另立
+新 queue：同一物理球的 `task_id + task_revision` 训练/部署闭环、受限 phase governor、真正消费 0.5 秒
+time-law 的 checkpoint-bound 卷，以及可物化两个不重叠窗口的整数事件账。旧 YAML 不得直接 resume/fill。
+
 ## 为什么 formal-ineligible
 
 每个 child 都从不同历史合同的 optimizer 热启动，并同时改动共享组合与 timing；`checkpoint_allow_contract_mismatch=true`
@@ -322,9 +347,9 @@ physical-fall union、各 termination 原因，并为 ready/hold 的倾角、接
 
 ## 决定
 
-- 决定：`activated / demo-only inexact engineering portfolio`
-- 是否纳入当前 setting：`yes, for the 24-run overnight engineering funnel only`
-- 下一个 gate：activated queue dry-run → 24 个 child 首迭代/identity/optimizer lineage
+- 决定：`stopped / superseded-by-task-revision-and-0p5-exam`
+- 是否纳入当前 setting：`no`；只保留 checkpoint 与结构证据，不恢复旧 queue
+- 下一个 gate：同球 revision/phase governor source gate → 0.5 秒 immutable exam → 新 queue full-scene probe
 
 ## 点火首条抓到的 resume budget 语义反例
 

@@ -24,9 +24,11 @@
 
 #include <Eigen/Geometry>
 #include <chrono>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <regex>
+#include <stdexcept>
 #include <string>
 
 namespace vrpn_mocap
@@ -53,6 +55,10 @@ namespace vrpn_mocap
         multi_sensor_(declare_parameter("multi_sensor", false)),
         frame_id_(declare_parameter("frame_id", "world")),
         sensor_data_qos_(declare_parameter("sensor_data_qos", true)),
+        source_timestamp_mode_(ParseSourceTimestampMode(
+            declare_parameter<std::string>("source_timestamp_mode", "receipt"))),
+        vrpn_source_max_abs_skew_s_(
+            declare_parameter("vrpn_source_max_abs_skew_s", 0.1)),
         vrpn_tracker_(name_.c_str())
   {
     Init();
@@ -70,6 +76,10 @@ namespace vrpn_mocap
         multi_sensor_(base_node.get_parameter("multi_sensor").as_bool()),
         frame_id_(base_node.get_parameter("frame_id").as_string()),
         sensor_data_qos_(base_node.get_parameter("sensor_data_qos").as_bool()),
+        source_timestamp_mode_(ParseSourceTimestampMode(
+            base_node.get_parameter("source_timestamp_mode").as_string())),
+        vrpn_source_max_abs_skew_s_(
+            base_node.get_parameter("vrpn_source_max_abs_skew_s").as_double()),
         vrpn_tracker_(name_.c_str(), connection.get())
   {
     Init();
@@ -86,6 +96,13 @@ namespace vrpn_mocap
 
   void Tracker::Init()
   {
+    if (source_timestamp_mode_ == SourceTimestampMode::kVrpnPacket &&
+        !IsValidMaxAbsoluteSkewSeconds(vrpn_source_max_abs_skew_s_))
+    {
+      throw std::invalid_argument(
+          "vrpn_source_max_abs_skew_s must be finite, nonnegative, and representable");
+    }
+
     vrpn_tracker_.register_change_handler(this, &Tracker::HandlePose);
     vrpn_tracker_.register_change_handler(this, &Tracker::HandleTwist);
     vrpn_tracker_.register_change_handler(this, &Tracker::HandleAccel);
@@ -95,6 +112,27 @@ namespace vrpn_mocap
   }
 
   void Tracker::MainLoop() { vrpn_tracker_.mainloop(); }
+
+  bool Tracker::ResolveMessageTimestamp(
+      int64_t packet_seconds, int64_t packet_microseconds, rclcpp::Time *stamp) const
+  {
+    const rclcpp::Time receipt_now = this->get_clock()->now();
+    const SourceTimestampDecision decision = ResolveSourceTimestamp(
+        source_timestamp_mode_, packet_seconds, packet_microseconds,
+        receipt_now.nanoseconds(), vrpn_source_max_abs_skew_s_);
+    if (!decision.publish)
+    {
+      RCLCPP_WARN_THROTTLE(
+          this->get_logger(), *this->get_clock(), 5000,
+          "Suppressing VRPN sample from '%s': timestamp_reason=%s abs_skew_ns=%lld "
+          "(no receipt-time fallback)",
+          name_.c_str(), SourceTimestampRejectReasonName(decision.reject_reason),
+          static_cast<long long>(decision.absolute_skew_nanoseconds));
+      return false;
+    }
+    *stamp = rclcpp::Time(decision.stamp_nanoseconds, receipt_now.get_clock_type());
+    return true;
+  }
 
   void VRPN_CALLBACK Tracker::HandlePose(void *data, const vrpn_TRACKERCB tracker_pose)
   {
@@ -107,7 +145,14 @@ namespace vrpn_mocap
     // populate message
     PoseStamped msg;
     msg.header.frame_id = tracker->frame_id_;
-    msg.header.stamp = tracker->get_clock()->now();
+    rclcpp::Time message_stamp(0, 0, tracker->get_clock()->get_clock_type());
+    if (!tracker->ResolveMessageTimestamp(
+            static_cast<int64_t>(tracker_pose.msg_time.tv_sec),
+            static_cast<int64_t>(tracker_pose.msg_time.tv_usec), &message_stamp))
+    {
+      return;
+    }
+    msg.header.stamp = message_stamp;
 
     msg.pose.position.x = tracker_pose.pos[0];
     msg.pose.position.y = tracker_pose.pos[1];
@@ -132,7 +177,14 @@ namespace vrpn_mocap
     // populate message
     TwistStamped msg;
     msg.header.frame_id = tracker->frame_id_;
-    msg.header.stamp = tracker->get_clock()->now();
+    rclcpp::Time message_stamp(0, 0, tracker->get_clock()->get_clock_type());
+    if (!tracker->ResolveMessageTimestamp(
+            static_cast<int64_t>(tracker_twist.msg_time.tv_sec),
+            static_cast<int64_t>(tracker_twist.msg_time.tv_usec), &message_stamp))
+    {
+      return;
+    }
+    msg.header.stamp = message_stamp;
 
     msg.twist.linear.x = tracker_twist.vel[0];
     msg.twist.linear.y = tracker_twist.vel[1];
@@ -161,7 +213,14 @@ namespace vrpn_mocap
     // populate message
     AccelStamped msg;
     msg.header.frame_id = tracker->frame_id_;
-    msg.header.stamp = tracker->get_clock()->now();
+    rclcpp::Time message_stamp(0, 0, tracker->get_clock()->get_clock_type());
+    if (!tracker->ResolveMessageTimestamp(
+            static_cast<int64_t>(tracker_accel.msg_time.tv_sec),
+            static_cast<int64_t>(tracker_accel.msg_time.tv_usec), &message_stamp))
+    {
+      return;
+    }
+    msg.header.stamp = message_stamp;
 
     msg.accel.linear.x = tracker_accel.acc[0];
     msg.accel.linear.y = tracker_accel.acc[1];

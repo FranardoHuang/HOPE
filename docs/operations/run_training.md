@@ -86,6 +86,40 @@ The training scaffold exists under:
   Reward gates and truth metrics retain live `time_to_strike`. Reset backfills the complete tuple,
   while dropout holds the complete tuple. The selected mode and delay are checkpoint hard-contract
   fields. See [atomic planner tuple](../DEFINITIONS.md#atomic-planner-tuple-timing).
+- `task.planner_revision` is the opt-in replacement for the old “freeze target after engage” and
+  `midswing_resample_prob` ablation. When enabled it configures both motion and racket command
+  terms together; a half-configured clock-only or target-only path is rejected. One physical ball
+  keeps immutable question/Reward/critic truth while the actor receives atomic position, velocity,
+  signed-normal and TTS revisions. A checkpoint-bound
+  [`phase governor`](../DEFINITIONS.md#phase-governor) may change reference rate without reversing
+  phase or exceeding its frozen rate, acceleration, target-delta or deadline-delta limits. The
+  legacy hold clocks are forced to zero because the revision task's initial TTS is the sole
+  preparation clock. For `phase_governor_v1`, `racket.target_delay_steps` must remain `0`.
+  Positive delay fails before launch because the legacy ring delays only the actor, not the motion
+  governor; it becomes legal only after both consume one coupled transport tuple in the same tick.
+- An enabled revision block must include a complete `initial_tts_mixture`, not merely a broad min/
+  max range. The intended launch family has four explicit strata: a sub-0.5-second stress band,
+  an exact 0.5-second point mass, a 0.5–0.9-second fast-deployment band and a longer-arrival band.
+  The four weights sum exactly to one and their support exactly equals
+  `initial_tts_range_s`. Thus 0.5 seconds is a separately counted required baseline, not the
+  minimum preparation time. Per-component, below/exact/above-0.5 and total sample counts must
+  partition exactly in every accepted full-scene probe and checkpoint contract. See
+  [`initial TTS mixture`](../DEFINITIONS.md#initial-tts-mixture).
+- This path does not claim a 0.5-second return from source tests. Behavior must be measured with
+  the immutable K100 [`0.5-second timing exam`](../DEFINITIONS.md#timing-exam-0p5): frame 0 has
+  zero reference velocity, every attempt remains in the denominator and a fixed clock multiplier
+  is explicitly inexact. A separate TOPP run must also certify the chosen reference/action path;
+  the current safe heuristic upper bound is not a proof of a global minimum or a 0.5-second
+  feasible trajectory.
+- A task-revision run is pruneable only when exactly one command term provides the behavior
+  ledger and the runner emits one canonical `HOPE_EXACT_BEHAVIOR_UPDATE_JSON=...` record per PPO
+  update. Completion is `swing_completion_count / swing_outcome_count`: both counters close on the
+  same attempt-end event, so a start in one 100-update window and an outcome in the next cannot
+  invalidate either window. `swing_start_count` and `strike_opportunity_count` remain raw
+  diagnostics. Physical fall accepts only exact boolean termination reasons and is split into
+  mutually exclusive pre/post counts; guard or timeout reset is separate. A numeric truthy tensor,
+  duplicate provider, missing update, duplicate update or zero denominator makes the behavior
+  decision unavailable and the trainer continues—it never manufactures zero or stops the arm.
 - `rewards.free_wrist_ori_mimic` (R16, default `false`): drop `right_wrist_yaw_Link` (the racket
   mount) from the `motion_body_ori` / `motion_body_ang_vel` body lists — the wrist's ORIENTATION
   stops being imitated while position/linear-velocity mimic keep the swing path. Rationale

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
@@ -332,3 +333,184 @@ def test_live_logger_consumes_base_decel_raw_ledger_once_with_stable_tags(monkey
     assert logged[
         "Live/racket_target/base_decel_raw_kernel_nonzero_sample_count"
     ] == (99.0, 23)
+
+
+def test_exact_behavior_record_is_consumed_once_and_zero_denominators_are_null(
+    monkeypatch, capsys
+):
+    contract = _load_contract_module()
+    runner_module = _load_runner_module(monkeypatch, contract)
+
+    class RacketTerm:
+        metrics = {}
+
+        def __init__(self):
+            self.calls = 0
+
+        def consume_exact_behavior_decision_counters(self):
+            self.calls += 1
+            return {
+                "swing_start_count": 0,
+                "swing_outcome_count": 0,
+                "swing_completion_count": 0,
+                "strike_opportunity_count": 0,
+                "pre_strike_physical_fall_count": 0,
+                "post_strike_physical_fall_count": 0,
+                "virtual_capture_count": 0,
+                "virtual_net_clear_count": 0,
+                "virtual_landing_valid_count": 0,
+                "virtual_legal_return_count": 0,
+                "ready_tilt_eligible_sample_count": 0,
+                "ready_tilt_rad_sum": 0.0,
+                "ready_base_speed_eligible_sample_count": 0,
+                "ready_base_speed_xy_mps_sum": 0.0,
+                "ready_station_offset_eligible_sample_count": 0,
+                "ready_station_offset_m_sum": 0.0,
+                "ready_foot_contact_eligible_sample_count": 0,
+                "ready_foot_contact_fraction_sum": 0.0,
+                "ready_foot_slip_eligible_sample_count": 0,
+                "ready_foot_slip_speed_mps_sum": 0.0,
+            }
+
+    term = RacketTerm()
+    env = SimpleNamespace(
+        command_manager=SimpleNamespace(
+            active_terms=["racket_target"], get_term=lambda _name: term
+        ),
+        episode_length_buf=7,
+        common_step_counter=123,
+    )
+    runner = runner_module.MotionOnPolicyRunner.__new__(
+        runner_module.MotionOnPolicyRunner
+    )
+    runner.env = SimpleNamespace(unwrapped=env)
+    runner._log_scalar = lambda *args, **kwargs: None
+
+    runner._log_live_metrics(step=31)
+    runner._log_live_metrics(step=31)
+
+    assert term.calls == 1
+    lines = [
+        line for line in capsys.readouterr().out.splitlines()
+        if line.startswith("HOPE_EXACT_BEHAVIOR_UPDATE_JSON=")
+    ]
+    assert len(lines) == 1
+    record = json.loads(lines[0].split("=", 1)[1])
+    assert record["ppo_update"] == 31
+    assert record["window_aggregation"] == "sum_counters_then_recompute_derived"
+    assert all(value is None for value in record["derived"].values())
+
+
+def test_exact_behavior_counters_form_two_independent_hundred_update_windows(monkeypatch):
+    contract = _load_contract_module()
+    runner_module = _load_runner_module(monkeypatch, contract)
+    updates = []
+    for index in range(200):
+        first_window = index < 100
+        updates.append(
+            {
+                "swing_start_count": 4,
+                "swing_outcome_count": 4,
+                "swing_completion_count": 3 if first_window else 2,
+                "strike_opportunity_count": 3 if first_window else 2,
+                "pre_strike_physical_fall_count": 1 if first_window else 2,
+                "post_strike_physical_fall_count": 0,
+                "ready_tilt_eligible_sample_count": 10,
+                "ready_tilt_rad_sum": 1.0 if first_window else 3.0,
+            }
+        )
+
+    def aggregate(rows):
+        keys = set().union(*(row.keys() for row in rows))
+        return {key: sum(row.get(key, 0) for row in rows) for key in keys}
+
+    first = runner_module.exact_behavior_decision_values(aggregate(updates[:100]))
+    second = runner_module.exact_behavior_decision_values(aggregate(updates[100:]))
+    assert first["swing_completion_rate"] == pytest.approx(0.75)
+    assert second["swing_completion_rate"] == pytest.approx(0.50)
+    assert first["pre_strike_physical_fall_rate"] == pytest.approx(0.25)
+    assert second["pre_strike_physical_fall_rate"] == pytest.approx(0.50)
+    assert first["ready_tilt_rad_mean"] == pytest.approx(0.10)
+    assert second["ready_tilt_rad_mean"] == pytest.approx(0.30)
+
+
+def test_exact_behavior_completion_uses_paired_closeouts_not_phase_shifted_events(monkeypatch):
+    contract = _load_contract_module()
+    runner_module = _load_runner_module(monkeypatch, contract)
+
+    # A strike may occur in a different PPO window from its start.  The old strike/start ratio is
+    # therefore unbounded at a window boundary; paired close-out counters remain an exact 1/1.
+    boundary_window = {
+        "swing_start_count": 0,
+        "strike_opportunity_count": 7,
+        "swing_outcome_count": 5,
+        "swing_completion_count": 5,
+        "pre_strike_physical_fall_count": 0,
+        "post_strike_physical_fall_count": 0,
+    }
+    derived = runner_module.exact_behavior_decision_values(boundary_window)
+    assert derived["swing_completion_rate"] == pytest.approx(1.0)
+    assert derived["pre_strike_physical_fall_rate"] == pytest.approx(0.0)
+
+
+def test_exact_behavior_receipt_is_not_disabled_with_dashboard_logging(monkeypatch, capsys):
+    contract = _load_contract_module()
+    runner_module = _load_runner_module(monkeypatch, contract)
+
+    class Term:
+        metrics = {}
+        calls = 0
+
+        def consume_exact_behavior_decision_counters(self):
+            self.calls += 1
+            return {"swing_start_count": 1, "strike_opportunity_count": 1}
+
+    term = Term()
+    env = SimpleNamespace(
+        command_manager=SimpleNamespace(
+            active_terms=["racket_target"], get_term=lambda _name: term
+        )
+    )
+    runner = runner_module.MotionOnPolicyRunner.__new__(
+        runner_module.MotionOnPolicyRunner
+    )
+    runner.env = SimpleNamespace(unwrapped=env)
+    runner.disable_logs = True
+    runner.writer = None
+
+    runner.log({"it": 44})
+
+    assert term.calls == 1
+    record_line = capsys.readouterr().out.strip()
+    assert record_line.startswith("HOPE_EXACT_BEHAVIOR_UPDATE_JSON=")
+    assert json.loads(record_line.split("=", 1)[1])["ppo_update"] == 44
+
+
+def test_exact_behavior_refuses_multiple_receipt_providers_before_consuming(monkeypatch):
+    contract = _load_contract_module()
+    runner_module = _load_runner_module(monkeypatch, contract)
+
+    class Term:
+        metrics = {}
+
+        def __init__(self):
+            self.calls = 0
+
+        def consume_exact_behavior_decision_counters(self):
+            self.calls += 1
+            return {"swing_outcome_count": 1, "swing_completion_count": 1}
+
+    terms = {"first": Term(), "second": Term()}
+    env = SimpleNamespace(
+        command_manager=SimpleNamespace(
+            active_terms=list(terms), get_term=lambda name: terms[name]
+        )
+    )
+    runner = runner_module.MotionOnPolicyRunner.__new__(
+        runner_module.MotionOnPolicyRunner
+    )
+    runner.env = SimpleNamespace(unwrapped=env)
+
+    with pytest.raises(RuntimeError, match="exactly one provider"):
+        runner._consume_exact_behavior_updates(12)
+    assert [term.calls for term in terms.values()] == [0, 0]

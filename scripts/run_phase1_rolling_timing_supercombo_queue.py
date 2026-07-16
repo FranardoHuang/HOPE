@@ -65,6 +65,10 @@ CONFIRM = "SIM_ONLY_LAUNCH_ONE_ROLLING_CONTINUATION_JOB"
 ATTEST_CONFIRM = "SIM_ONLY_ATTEST_ONE_ROLLING_CONTINUATION_MILESTONE"
 INSPECT_CONFIRM = "SIM_ONLY_INSPECT_ONE_ROLLING_ATTESTATION_INPUT"
 QUEUE_PATH = Path("configs/phase1_rolling_timing_supercombo_20260716.yaml")
+SUPERSEDED_QUEUE_SHA256 = (
+    "dc438aec883957034b28ad882fc9cbbeb56a5af2630a5f7ab0a50bd3046d4d6c"
+)
+SUPERSEDED_QUEUE_SUFFIX = QUEUE_PATH.as_posix()
 ATTESTATION_CONTRACT_PATH = Path(
     "configs/phase1_rolling_timing_attestation_contract_20260716.yaml"
 )
@@ -108,6 +112,27 @@ REVIEWED_ATTESTATION_RUNNERS = {
 DENIED_ATTESTATION_JOBS = {
     "rolling_p1_t10_comp2_j0_std_f03": "legacy_budget_v1_claim_is_not_corrected_budget",
 }
+
+
+class _LoadedContinuationQueue(dict[str, Any]):
+    """A validated queue plus non-serialized source-file provenance.
+
+    Provenance must not be inserted into the mapping: queue/job canonical
+    digests are scientific contracts, while the source path and byte digest
+    are only an entry-point safety boundary.
+    """
+
+    def __init__(
+        self,
+        value: Mapping[str, Any],
+        *,
+        source_path: Path,
+        source_sha256: str,
+    ):
+        super().__init__(value)
+        self.source_path = source_path
+        self.source_sha256 = source_sha256
+
 
 _ATTEST_CLAIM_PREFLIGHT = r"""
 import base64, hashlib, json, os, stat, sys
@@ -737,8 +762,10 @@ def _validate_job(
 
 def load_queue(path: Path) -> dict[str, Any]:
     try:
-        raw = yaml.safe_load(path.read_text(encoding="utf-8"))
-    except (OSError, yaml.YAMLError) as exc:
+        source_path = path.resolve()
+        source_bytes = _stable_regular_bytes(source_path, "rolling queue YAML")
+        raw = yaml.safe_load(source_bytes.decode("utf-8"))
+    except (OSError, UnicodeDecodeError, yaml.YAMLError) as exc:
         raise ContinuationQueueError(f"cannot read queue YAML {path}: {exc}") from exc
     queue = _mapping(raw, "queue")
     if queue.get("schema_version") != 1 or queue.get("simulation_only") is not True:
@@ -858,7 +885,45 @@ def load_queue(path: Path) -> dict[str, Any]:
                 f"predecessor_stop_contract.{pod}.stop_receipt_sha256",
                 allow_pending=True,
             )
-    return queue
+    return _LoadedContinuationQueue(
+        queue,
+        source_path=source_path,
+        source_sha256=hashlib.sha256(source_bytes).hexdigest(),
+    )
+
+
+def _reject_superseded_fill(queue: Mapping[str, Any]) -> None:
+    """Permanently deny fill for the stopped rolling queue.
+
+    The old YAML remains byte-identical because historical milestone receipts
+    and the attestation contract bind it.  Consequently the mutation boundary
+    belongs in this runner, not in that evidence file.  Both the tracked path
+    (including a drifted copy in another checkout) and an exact byte-for-byte
+    copy are denied.  Successor queues loaded through this module retain their
+    own distinct provenance and continue to delegate to ``cmd_fill``.
+    """
+
+    source_path = getattr(queue, "source_path", None)
+    source_sha256 = getattr(queue, "source_sha256", None)
+    if not isinstance(source_path, Path) or not isinstance(source_sha256, str):
+        return
+    normalized = source_path.as_posix()
+    path_match = normalized == SUPERSEDED_QUEUE_SUFFIX or normalized.endswith(
+        "/" + SUPERSEDED_QUEUE_SUFFIX
+    )
+    digest_match = source_sha256 == SUPERSEDED_QUEUE_SHA256
+    if path_match or digest_match:
+        identity = (
+            "tracked superseded path"
+            if path_match
+            else "byte-identical superseded queue digest"
+        )
+        raise ContinuationQueueError(
+            "fill is permanently disabled for the stopped rolling-timing queue "
+            f"({identity}; sha256={source_sha256}); validate, plan, read-only "
+            "inspection, and historical milestone attestation remain separate "
+            "non-launch surfaces"
+        )
 
 
 def activation_blockers(queue: Mapping[str, Any]) -> list[str]:
@@ -2153,6 +2218,7 @@ def cmd_inspect_milestone_binding(
 def cmd_fill(
     queue: dict[str, Any], *, count: int, execute: bool, confirm: str | None
 ) -> dict[str, Any]:
+    _reject_superseded_fill(queue)
     if type(count) is not int or count <= 0:
         raise ContinuationQueueError("fill --count must be a positive integer")
     blockers = activation_blockers(queue)

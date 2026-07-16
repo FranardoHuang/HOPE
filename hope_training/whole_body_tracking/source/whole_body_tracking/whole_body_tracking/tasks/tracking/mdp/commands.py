@@ -46,6 +46,11 @@ from whole_body_tracking.tasks.tracking.mdp.post_swing_teacher import (
     load_post_swing_teacher_states,
     sha256_file,
 )
+from whole_body_tracking.tasks.tracking.mdp.planner_revision import (
+    InitialTtsMixture,
+    PLANNER_TASK_REVISION_SCHEMA_VERSION,
+    PhaseGovernorProfile,
+)
 
 
 def _stand_start_yaw_samples(yaw_range, count: int, device):
@@ -427,6 +432,120 @@ class MotionCommand(CommandTerm):
                   f"(fixed per-clip reference playback; overrides speed_scale_range)", flush=True)
         self.time_steps_f = torch.zeros(self.num_envs, dtype=torch.float, device=self.device)
         self.speed_scale = torch.ones(self.num_envs, device=self.device)
+        # Same-ball planner revisions (default OFF).  This is deliberately a separate clock from
+        # the historical R14 random/fixed retimer: a revised deadline changes the phase rate of the
+        # *same* physical ball task, never the clip, bank row, reward truth, or simulator state.
+        # The RacketTargetCommand installs an immutable task identity and then submits one atomic
+        # target/TTS revision per policy step.  This command consumes the accepted TTS on the next
+        # step and advances a monotonic, acceleration-bounded reference phase.
+        self.planner_revision_enabled = bool(
+            getattr(self.cfg, "planner_revision_enabled", False)
+        )
+        self._planner_revision_profile: PhaseGovernorProfile | None = None
+        self._planner_initial_tts_mixture: InitialTtsMixture | None = None
+        if self.planner_revision_enabled:
+            raw_profile = getattr(self.cfg, "planner_revision_profile", None)
+            if not isinstance(raw_profile, dict):
+                raise ValueError(
+                    "planner_revision_enabled requires a complete planner_revision_profile mapping"
+                )
+            self._planner_revision_profile = PhaseGovernorProfile.from_mapping(raw_profile)
+            initial_tts = tuple(
+                float(value)
+                for value in getattr(
+                    self.cfg, "planner_revision_initial_tts_range_s", ()
+                )
+            )
+            if (
+                len(initial_tts) != 2
+                or not math.isfinite(initial_tts[0])
+                or not math.isfinite(initial_tts[1])
+                or not (
+                    self._planner_revision_profile.min_tts_s
+                    <= initial_tts[0]
+                    < initial_tts[1]
+                    <= self._planner_revision_profile.max_tts_s
+                )
+            ):
+                raise ValueError(
+                    "planner_revision_initial_tts_range_s must be a non-degenerate ordered "
+                    "finite pair inside "
+                    "the complete profile TTS envelope"
+                )
+            raw_mixture = getattr(
+                self.cfg, "planner_revision_initial_tts_mixture", None
+            )
+            if not isinstance(raw_mixture, dict):
+                raise ValueError(
+                    "planner_revision_enabled requires a complete "
+                    "planner_revision_initial_tts_mixture mapping"
+                )
+            self._planner_initial_tts_mixture = InitialTtsMixture.from_mapping(
+                raw_mixture
+            )
+            self._planner_initial_tts_mixture.validate_support(
+                lo_s=initial_tts[0], hi_s=initial_tts[1]
+            )
+            if not math.isclose(
+                self._planner_revision_profile.policy_dt_s,
+                float(env.step_dt),
+                rel_tol=0.0,
+                abs_tol=1.0e-12,
+            ):
+                raise ValueError(
+                    "planner revision profile policy_dt_s must equal the runtime policy step: "
+                    f"profile={self._planner_revision_profile.policy_dt_s} runtime={env.step_dt}"
+                )
+            if self._speed_per_clip is not None or _s_rng != (1.0, 1.0):
+                raise ValueError(
+                    "planner revision phase governor is incompatible with R14 speed_scale_range/"
+                    "speed_scale_per_clip; it owns the sole reference clock"
+                )
+            if str(getattr(self.cfg, "event_timing_mode", EVENT_TIMING_MODE_DISABLED)) \
+                    != EVENT_TIMING_MODE_DISABLED:
+                raise ValueError(
+                    "planner revision phase governor is incompatible with event_timing_mode; "
+                    "one task may have only one deadline owner"
+                )
+            if (
+                tuple(int(value) for value in self.cfg.hold_steps_range) != (0, 0)
+                or int(self.cfg.stand_start_min_hold) != 0
+                or int(self.cfg.post_swing_min_hold) != 0
+            ):
+                raise ValueError(
+                    "planner revision initial_tts_range_s owns preparation time; legacy random/min "
+                    "hold clocks must all be zero"
+                )
+            # Force velocity scaling through the existing, audited retiming lane.  Unlike R14,
+            # speed_scale is recomputed from the *actual* phase delta each step below.
+            self.retiming_active = True
+            n = self.num_envs
+            self._planner_active = torch.zeros(n, dtype=torch.bool, device=self.device)
+            self._planner_control_epoch = torch.zeros(n, dtype=torch.long, device=self.device)
+            self._planner_task_id = torch.zeros(n, dtype=torch.long, device=self.device)
+            self._planner_task_revision = torch.full(
+                (n,), -1, dtype=torch.long, device=self.device
+            )
+            self._planner_start_step = torch.zeros(n, device=self.device)
+            self._planner_strike_step = torch.zeros(n, device=self.device)
+            self._planner_phase_rate = torch.zeros(n, device=self.device)
+            self._planner_slow_only_next = torch.zeros(
+                n, dtype=torch.bool, device=self.device
+            )
+            self._planner_desired_tts = torch.zeros(n, device=self.device)
+            self._planner_begin_tts = torch.zeros(n, device=self.device)
+            self._planner_truth_tts = torch.zeros(n, device=self.device)
+            # Immutable task-begin envelope baseline.  A latest-value transport may legitimately
+            # skip active revisions, so envelope checks may not depend on whichever revision the
+            # consumer happened to observe previously.
+            self._planner_begin_target_pos = torch.zeros(n, 3, device=self.device)
+            self._planner_begin_target_vel = torch.zeros(n, 3, device=self.device)
+            self._planner_begin_target_normal = torch.zeros(n, 3, device=self.device)
+            self._planner_begin_target_normal[:, 0] = 1.0
+            self.metrics["planner_revision_accepted"] = torch.zeros(n, device=self.device)
+            self.metrics["planner_revision_rejected"] = torch.zeros(n, device=self.device)
+            self.metrics["planner_phase_rate_per_s"] = torch.zeros(n, device=self.device)
+            self.metrics["planner_truth_tts_s"] = torch.zeros(n, device=self.device)
         # Unified multi-clip (HITTER forehand+backhand) support. With one clip these are inert and the
         # behaviour below is byte-identical to the single-clip path. clip_id[env] selects which segment
         # (swing type) the env is currently imitating.
@@ -780,6 +899,322 @@ class MotionCommand(CommandTerm):
         if self._event_scheduler is None:
             return torch.empty(0, dtype=torch.long, device=self.device)
         return self._event_scheduler.finalize_deadlines()
+
+    def planner_revision_hard_contract(self) -> dict | None:
+        """Return the complete runtime contract, or ``None`` for the byte-identical OFF path."""
+
+        if not self.planner_revision_enabled:
+            return None
+        profile = self._planner_revision_profile
+        if profile is None:
+            raise RuntimeError("planner revision enabled without a validated profile")
+        initial_tts = tuple(
+            float(value) for value in self.cfg.planner_revision_initial_tts_range_s
+        )
+        return {
+            "enabled": True,
+            "revision_schema_version": PLANNER_TASK_REVISION_SCHEMA_VERSION,
+            "governor": profile.hard_contract(),
+            "initial_tts_range_s": list(initial_tts),
+        }
+
+    def begin_planner_task(
+        self,
+        env_ids: torch.Tensor,
+        *,
+        control_epoch: torch.Tensor,
+        task_id: torch.Tensor,
+        strike_step: torch.Tensor,
+        initial_tts: torch.Tensor,
+        target_position: torch.Tensor,
+        target_velocity: torch.Tensor,
+        target_normal: torch.Tensor,
+    ) -> None:
+        """Install one new immutable physical-ball identity for each selected environment."""
+
+        if not self.planner_revision_enabled:
+            raise RuntimeError("begin_planner_task called while planner revisions are disabled")
+        profile = self._planner_revision_profile
+        if profile is None:
+            raise RuntimeError("planner revision profile is unavailable")
+        ids = env_ids.to(device=self.device, dtype=torch.long).reshape(-1)
+        if len(ids) == 0:
+            return
+        epoch = control_epoch.to(device=self.device, dtype=torch.long).reshape(-1)
+        tasks = task_id.to(device=self.device, dtype=torch.long).reshape(-1)
+        strike = strike_step.to(device=self.device, dtype=torch.float32).reshape(-1)
+        raw_tts = initial_tts.to(device=self.device, dtype=torch.float32).reshape(-1)
+        tts = self._planner_canonicalize_tts(raw_tts, profile)
+        pos = target_position.to(device=self.device, dtype=torch.float32)
+        vel = target_velocity.to(device=self.device, dtype=torch.float32)
+        normal = target_normal.to(device=self.device, dtype=torch.float32)
+        start = self.time_steps_f[ids]
+        normal_norm = torch.linalg.vector_norm(normal, dim=-1)
+        minimum_tts = self._planner_minimum_finish_time(
+            torch.ones_like(tts),
+            torch.zeros_like(tts),
+            profile.max_phase_rate_per_s,
+            profile.max_phase_acceleration_per_s2,
+        )
+        valid = (
+            (epoch > 0)
+            & (tasks > 0)
+            & torch.isfinite(strike)
+            & (strike > start)
+            & torch.isfinite(raw_tts)
+            & (raw_tts + profile.early_deadline_tolerance_s >= profile.min_tts_s)
+            & (raw_tts - profile.early_deadline_tolerance_s <= profile.max_tts_s)
+            & (tts + profile.early_deadline_tolerance_s >= minimum_tts)
+            & torch.isfinite(pos).all(dim=-1)
+            & torch.isfinite(vel).all(dim=-1)
+            & torch.isfinite(normal).all(dim=-1)
+            & ((normal_norm - 1.0).abs() <= profile.normal_unit_tolerance)
+        )
+        if not bool(valid.all()):
+            raise ValueError("begin_planner_task received an invalid or partial atomic task tuple")
+        self._planner_active[ids] = True
+        self._planner_control_epoch[ids] = epoch
+        self._planner_task_id[ids] = tasks
+        self._planner_task_revision[ids] = 1
+        self._planner_start_step[ids] = start
+        self._planner_strike_step[ids] = strike
+        self._planner_phase_rate[ids] = 0.0
+        self._planner_slow_only_next[ids] = False
+        self._planner_desired_tts[ids] = tts
+        self._planner_begin_tts[ids] = tts
+        self._planner_truth_tts[ids] = tts
+        self._planner_begin_target_pos[ids] = pos
+        self._planner_begin_target_vel[ids] = vel
+        self._planner_begin_target_normal[ids] = normal
+        self.speed_scale[ids] = 0.0
+
+    @staticmethod
+    def _planner_canonicalize_tts(
+        tts: torch.Tensor, profile: PhaseGovernorProfile
+    ) -> torch.Tensor:
+        """Snap only the profile-bound float32 edge bands to their canonical values."""
+
+        tolerance = profile.early_deadline_tolerance_s
+        minimum = torch.full_like(tts, profile.min_tts_s)
+        maximum = torch.full_like(tts, profile.max_tts_s)
+        snapped = torch.where((tts - minimum).abs() <= tolerance, minimum, tts)
+        return torch.where((snapped - maximum).abs() <= tolerance, maximum, snapped)
+
+    @staticmethod
+    def _planner_minimum_finish_time(
+        distance: torch.Tensor,
+        initial_rate: torch.Tensor,
+        maximum_rate: float,
+        maximum_acceleration: float,
+    ) -> torch.Tensor:
+        """Vector form of planner_revision._minimum_finish_time."""
+
+        rate = initial_rate.clamp(min=0.0, max=maximum_rate)
+        accelerate_time = (maximum_rate - rate).clamp(min=0.0) / maximum_acceleration
+        accelerate_distance = (
+            rate * accelerate_time + 0.5 * maximum_acceleration * accelerate_time.square()
+        )
+        triangular = (-rate + torch.sqrt(
+            (rate.square() + 2.0 * maximum_acceleration * distance.clamp(min=0.0))
+        )) / maximum_acceleration
+        trapezoidal = accelerate_time + (
+            distance - accelerate_distance
+        ).clamp(min=0.0) / maximum_rate
+        return torch.where(distance <= accelerate_distance, triangular, trapezoidal)
+
+    def submit_planner_revision(
+        self,
+        env_ids: torch.Tensor,
+        *,
+        control_epoch: torch.Tensor,
+        task_id: torch.Tensor,
+        task_revision: torch.Tensor,
+        desired_tts: torch.Tensor,
+        target_position: torch.Tensor,
+        target_velocity: torch.Tensor,
+        target_normal: torch.Tensor,
+    ) -> torch.Tensor:
+        """Atomically accept/reject same-task revisions; rejected rows preserve the old ledger."""
+
+        if not self.planner_revision_enabled:
+            raise RuntimeError("submit_planner_revision called while planner revisions are disabled")
+        profile = self._planner_revision_profile
+        if profile is None:
+            raise RuntimeError("planner revision profile is unavailable")
+        ids = env_ids.to(device=self.device, dtype=torch.long).reshape(-1)
+        if len(ids) == 0:
+            return torch.empty(0, dtype=torch.bool, device=self.device)
+        epoch = control_epoch.to(device=self.device, dtype=torch.long).reshape(-1)
+        tasks = task_id.to(device=self.device, dtype=torch.long).reshape(-1)
+        revisions = task_revision.to(device=self.device, dtype=torch.long).reshape(-1)
+        raw_tts = desired_tts.to(device=self.device, dtype=torch.float32).reshape(-1)
+        tts = self._planner_canonicalize_tts(raw_tts, profile)
+        pos = target_position.to(device=self.device, dtype=torch.float32)
+        vel = target_velocity.to(device=self.device, dtype=torch.float32)
+        normal = target_normal.to(device=self.device, dtype=torch.float32)
+        normal_norm = torch.linalg.vector_norm(normal, dim=-1)
+        # Envelope the proposed *absolute* deadline relative to the immutable task-begin deadline.
+        # The visible-to-proposed delta is still needed only for the one-step slow-only rule.  These
+        # are deliberately separate: a latest-value mailbox may skip revisions, but every accepted
+        # snapshot must remain inside the same begin-bound envelope.
+        elapsed_since_begin = (
+            self._planner_begin_tts[ids] - self._planner_truth_tts[ids]
+        ).clamp(min=0.0)
+        deadline_delta_from_begin = (
+            elapsed_since_begin + tts - self._planner_begin_tts[ids]
+        )
+        deadline_delta_from_visible = tts - self._planner_desired_tts[ids]
+        span = (self._planner_strike_step[ids] - self._planner_start_step[ids]).clamp(min=1.0e-6)
+        phase = ((self.time_steps_f[ids] - self._planner_start_step[ids]) / span).clamp(0.0, 1.0)
+        minimum_tts = self._planner_minimum_finish_time(
+            1.0 - phase,
+            self._planner_phase_rate[ids],
+            profile.max_phase_rate_per_s,
+            profile.max_phase_acceleration_per_s2,
+        )
+        valid = (
+            self._planner_active[ids]
+            & (self.time_steps_f[ids] < self._planner_strike_step[ids])
+            & (epoch == self._planner_control_epoch[ids])
+            & (tasks == self._planner_task_id[ids])
+            & (revisions > self._planner_task_revision[ids])
+            & torch.isfinite(raw_tts)
+            & (raw_tts + profile.early_deadline_tolerance_s >= profile.min_tts_s)
+            & (raw_tts - profile.early_deadline_tolerance_s <= profile.max_tts_s)
+            & (
+                deadline_delta_from_begin.abs()
+                <= profile.max_deadline_revision_delta_s
+            )
+            & (tts + profile.early_deadline_tolerance_s >= minimum_tts)
+            & torch.isfinite(pos).all(dim=-1)
+            & torch.isfinite(vel).all(dim=-1)
+            & torch.isfinite(normal).all(dim=-1)
+            & ((normal_norm - 1.0).abs() <= profile.normal_unit_tolerance)
+            & (
+                torch.linalg.vector_norm(
+                    pos - self._planner_begin_target_pos[ids], dim=-1
+                )
+                <= profile.max_position_revision_delta_m
+            )
+            & (
+                torch.linalg.vector_norm(
+                    vel - self._planner_begin_target_vel[ids], dim=-1
+                )
+                <= profile.max_velocity_revision_delta_mps
+            )
+            & (
+                torch.acos(
+                    (normal * self._planner_begin_target_normal[ids])
+                    .sum(dim=-1)
+                    .clamp(-1.0, 1.0)
+                )
+                <= profile.max_normal_revision_delta_rad
+            )
+        )
+        accepted_ids = ids[valid]
+        if len(accepted_ids) > 0:
+            self._planner_task_revision[accepted_ids] = revisions[valid]
+            self._planner_desired_tts[accepted_ids] = tts[valid]
+            self._planner_slow_only_next[accepted_ids] = (
+                deadline_delta_from_visible[valid]
+                > profile.early_deadline_tolerance_s
+            )
+        self.metrics["planner_revision_accepted"] = valid.float()
+        self.metrics["planner_revision_rejected"] = (~valid).float()
+        return valid
+
+    def _advance_planner_phase(self, held: torch.Tensor) -> torch.Tensor:
+        """Advance active planner-owned clocks and return their exact clip-frame delta."""
+
+        profile = self._planner_revision_profile
+        if profile is None:
+            raise RuntimeError("planner revision profile is unavailable")
+        active = self._planner_active
+        dt = profile.policy_dt_s
+        self._planner_truth_tts[active] = (
+            self._planner_truth_tts[active] - dt
+        ).clamp(min=0.0)
+        remaining_deadline = (self._planner_desired_tts - dt).clamp(min=0.0)
+        span = (self._planner_strike_step - self._planner_start_step).clamp(min=1.0e-6)
+        phase = ((self.time_steps_f - self._planner_start_step) / span).clamp(0.0, 1.0)
+        prestrike = active & (phase < 1.0)
+        requested = torch.where(
+            remaining_deadline > profile.early_deadline_tolerance_s,
+            (1.0 - phase) / remaining_deadline.clamp(min=dt),
+            torch.full_like(phase, profile.max_phase_rate_per_s),
+        ).clamp(min=0.0, max=profile.max_phase_rate_per_s)
+        # Mirror planner_revision.advance_phase / PpPhaseGovernor::Advance exactly.  Near the
+        # reachability boundary, dividing remaining phase by the nominal deadline under-requests
+        # the rate because it ignores the acceleration ramp; force the cap before applying a
+        # one-step slow-only deadline extension.  Without this branch training and deployment
+        # diverge specifically on the short-preparation cases this curriculum is meant to expose.
+        earliest = self._planner_minimum_finish_time(
+            (1.0 - phase).clamp(min=0.0),
+            self._planner_phase_rate,
+            profile.max_phase_rate_per_s,
+            profile.max_phase_acceleration_per_s2,
+        )
+        requested = torch.where(
+            remaining_deadline <= earliest + dt,
+            torch.full_like(requested, profile.max_phase_rate_per_s),
+            requested,
+        )
+        requested = torch.where(
+            self._planner_slow_only_next,
+            torch.minimum(requested, self._planner_phase_rate),
+            requested,
+        )
+        max_delta = profile.max_phase_acceleration_per_s2 * dt
+        rate_delta = (requested - self._planner_phase_rate).clamp(
+            min=-max_delta, max=max_delta
+        )
+        new_rate = (self._planner_phase_rate + rate_delta).clamp(
+            min=0.0, max=profile.max_phase_rate_per_s
+        )
+        # Once contact is reached, smoothly return to the native one-frame clock for follow-through.
+        native_rate = (1.0 / (span * dt)).clamp(
+            max=profile.max_phase_rate_per_s
+        )
+        post_delta = (native_rate - self._planner_phase_rate).clamp(
+            min=-max_delta, max=max_delta
+        )
+        new_rate = torch.where(
+            prestrike,
+            new_rate,
+            (self._planner_phase_rate + post_delta).clamp(min=0.0),
+        )
+        new_rate = torch.where(held & active, torch.zeros_like(new_rate), new_rate)
+        frame_delta = 0.5 * (self._planner_phase_rate + new_rate) * dt * span
+        remaining_frames = (self._planner_strike_step - self.time_steps_f).clamp(min=0.0)
+        frame_delta = torch.where(prestrike, torch.minimum(frame_delta, remaining_frames), frame_delta)
+        # Keep one full actor interval in reserve whenever the task still has
+        # positive time after this update.  The racket command runs later in
+        # the same command-manager step, so this is what leaves the final
+        # policy_dt target/TTS revision pre-contact and actor-visible.  The
+        # following step has remaining_deadline==0 and may reach contact.
+        next_rate = torch.minimum(
+            torch.full_like(new_rate, profile.max_phase_rate_per_s),
+            new_rate + max_delta,
+        )
+        reserved_phase_distance = 0.5 * (new_rate + next_rate) * dt
+        precontact_delta_cap = (
+            remaining_frames - reserved_phase_distance * span
+        ).clamp(min=0.0)
+        reserve_last_actor_interval = prestrike & (
+            remaining_deadline > profile.early_deadline_tolerance_s
+        )
+        frame_delta = torch.where(
+            reserve_last_actor_interval,
+            torch.minimum(frame_delta, precontact_delta_cap),
+            frame_delta,
+        )
+        frame_delta = torch.where(active, frame_delta.clamp(min=0.0), torch.zeros_like(frame_delta))
+        self._planner_phase_rate = torch.where(active, new_rate, self._planner_phase_rate)
+        self._planner_slow_only_next[active] = False
+        self._planner_desired_tts[active] = remaining_deadline[active]
+        self.metrics["planner_phase_rate_per_s"] = self._planner_phase_rate.clone()
+        self.metrics["planner_truth_tts_s"] = self._planner_truth_tts.clone()
+        return frame_delta
 
     def _install_event_motion(self, step) -> None:
         """Install clip/start/hold only; carry all physical and policy state across the event."""
@@ -1562,6 +1997,21 @@ class MotionCommand(CommandTerm):
         env_ids_t = env_ids if torch.is_tensor(env_ids) else torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
         env_ids_t = env_ids_t.to(device=self.device, dtype=torch.long)
 
+        if self.planner_revision_enabled:
+            # A new ball starts from the action's explicit zero-rate entry frame.  Failure-adaptive
+            # RSI may still choose the clip, but it may not start halfway through the swing: that
+            # would erase preparation time and can place the phase past contact.  Clearing active
+            # before any optional RSI simulator write also makes joint/body reference velocities
+            # exactly zero until RacketTargetCommand installs the complete new task.
+            if self._multiseg:
+                starts = self.motion.seg_start[self.clip_id[env_ids_t]]
+            else:
+                starts = torch.zeros_like(env_ids_t)
+            self.time_steps[env_ids_t] = starts
+            self.time_steps_f[env_ids_t] = starts.float()
+            self.speed_scale[env_ids_t] = 0.0
+            self._planner_active[env_ids_t] = False
+
         # Pre-swing HOLD (Phase A): freeze the reference at the swing's first frame for a random
         # number of control steps ("the ball is not reaching yet"). Applies to resets AND wraps.
         lo, hi = self.cfg.hold_steps_range
@@ -1835,7 +2285,18 @@ class MotionCommand(CommandTerm):
         self.metrics["in_hold"] = held.float()
         if "clip_switch_count" not in self.metrics:
             self.metrics["clip_switch_count"] = torch.zeros(self.num_envs, device=self.device)
-        if self.retiming_active:
+        if self.planner_revision_enabled:
+            # The same-ball governor owns the sole reference clock.  Non-active rows can only
+            # occur during construction/reset ordering and remain frozen until RacketTargetCommand
+            # installs their first complete task tuple.
+            frame_delta = self._advance_planner_phase(held)
+            self.speed_scale = torch.where(
+                self._planner_active, frame_delta, torch.zeros_like(frame_delta)
+            )
+            self.time_steps_f += self.speed_scale
+            self.time_steps = self.time_steps_f.round().long()
+            self.metrics["playback_speed"] = self.speed_scale.clone()
+        elif self.retiming_active:
             # R14: fractional clock — advance s frames per unheld control step; the integer index is
             # derived by round(), mirroring the deploy clock's nearest-frame mapping (torch rounds
             # half-to-even vs C++ half-away-from-zero — differs only on exact .5 ties, measure-zero
@@ -2102,6 +2563,17 @@ class MotionCommandCfg(CommandTermCfg):
     # Question-bank targets are NOT rescaled (bank overrides target sampling downstream) — the
     # reference swing slows, the physical answer stays the answer.
     speed_scale_per_clip: tuple[float, ...] | None = None
+
+    # Same-ball task revision + phase-governor contract.  The disabled path allocates no buffers,
+    # draws no RNG and preserves the historical reference clock.  When enabled the complete
+    # profile is mandatory (no defaults/partial profiles); train.py installs the same mapping in
+    # MotionCommand and RacketTargetCommand from one top-level task.planner_revision block.
+    planner_revision_enabled: bool = False
+    planner_revision_profile: dict | None = None
+    planner_revision_initial_tts_range_s: tuple[float, float] = (0.5, 1.5)
+    # Training-only weighted preparation-time distribution.  The complete document is bound in
+    # planner_task_revision_training; deployment consumes only the enclosing runtime range above.
+    planner_revision_initial_tts_mixture: dict | None = None
 
     # --- R-c RSI birth fixes (reward_staged_design 2026-07-08 §⑥; defaults OFF = byte-identical) --
     # (i) Skip the first N frames of every swing entry (RSI reset AND wrap — both go through

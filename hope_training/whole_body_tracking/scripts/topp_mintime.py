@@ -28,9 +28,11 @@ ALGORITHM(外层缩放扫描 + 内层 oracle 在环修复)
         2.44→2.38s);修不动(不可行)才在最后一对(好 γ, 坏 γ)之间几何二分收尾。
         γ=1 都修不进预算 → 往上乘(×expand-step)找第一个可行的 γ 再二分收尾,梯子
         越过 γ 上界时补探上界本身;还没有 = fail loud(SystemExit)。
-    收敛 = 预算内的最短总时长;全程记录候选,取全局最优(不信任单调性,见取舍)。
-    语义务必读对:输出的 min-time 是**本搜索族(乘法梯子 × 内层贪心修复)内的最短**,
-        是真 min-time 的上界——梯子点之间可能存在更短的可行解(非单调性所致),
+    收敛 = 预算内最短的选定目标(--objective=total 或 runup);全程记录候选,
+        取全局最优(不信任单调性,见取舍)。
+    语义务必读对:输出只是**本搜索族(乘法梯子 × 内层贪心修复)内的最好已知可行解**,
+        所报时间是未知真正最小值的可行上界——梯子点之间可能存在更短的可行解
+        (非单调性所致),
         要更紧的界加密 --compress-step / --refine-steps 换 oracle 调用量。
 
 取舍(为什么这么做,不是严格 TOPP / 凸优化):
@@ -63,9 +65,13 @@ DEPENDENCIES: numpy always; mujoco 只在 --body-mode fk + 真 oracle 时(延迟
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
+import shutil
+import stat
 import sys
+import tempfile
 from dataclasses import dataclass, field as dc_field
 from datetime import datetime, timezone
 from pathlib import Path
@@ -152,7 +158,8 @@ def kin_utils(out: dict, vel_cap: np.ndarray, acc_budget: np.ndarray, fps_out: f
 def _kin_bumps(vel_util: np.ndarray, acc_util: np.ndarray, s_out: np.ndarray, field):
     """运动学越界帧 → (路径中心, ρ 抬升倍率)。
     速度 ∝ 1/ρ → 线性律 fac = util/0.95;加速度主项 ∝ 1/ρ² → 开方律 fac = √(util/0.95)。
-    锁窗内的越界由触球拍速 |v*| 几何钉死,时间律治不了 → 只计数(irreducible),不出 bump。"""
+    锁窗内的越界由触球拍速 |v*| 几何钉死,时间律治不了 → 只计数(irreducible),不出 bump；
+    但它仍是硬限位越界，必须让候选不可行，不得因为“时间律修不了”而假绿。"""
     lw = field.lock_weight(s_out)
     inside = lw < 0.5
     vel_bad = vel_util > 1.0
@@ -194,8 +201,34 @@ class InnerResult:
     acc_util: Optional[np.ndarray] = None
     iters: int = 0
     duration_s: float = float("inf")
+    runup_s: float = float("inf")
     breakdown: dict = dc_field(default_factory=dict)
     trace: List[dict] = dc_field(default_factory=list)
+
+
+def _ensure_static_entry(warp: "v2.WarpResult", fps_out: float) -> "v2.WarpResult":
+    """Guarantee one complete zero-motion interval before retimed motion starts.
+
+    Grid-snap wait can be shorter than one output step.  In that case ``s_out[0] == 0`` but
+    ``s_out[1] > 0``, so the finite-difference asset gives frame 0 a non-zero velocity.  Prepending
+    one path-zero sample fixes the retiming product itself; training/deployment waiting logic still
+    consumes this exact frame-0 state and does not manufacture a separate hold convention.
+    """
+
+    s_out = np.asarray(warp.s_out)
+    if len(s_out) >= 2 and s_out[0] == 0.0 and s_out[1] == 0.0:
+        return warp
+    if len(s_out) == 0 or s_out[0] != 0.0:
+        raise SystemExit("retiming produced no frame-0 ready pose")
+    padded = np.concatenate([np.zeros(1, dtype=s_out.dtype), s_out])
+    return v2.WarpResult(
+        s_out=padded,
+        T_out=warp.T_out + 1,
+        k_star=warp.k_star + 1,
+        wait_s=warp.wait_s + 1.0 / fps_out,
+        t_end_warp=warp.t_end_warp,
+        duration_s=warp.duration_s + 1.0 / fps_out,
+    )
 
 
 def repair_at_scale(gamma: float, data: dict, law: "v1.TimeLaw", judge: "v2.Judge",
@@ -216,7 +249,7 @@ def repair_at_scale(gamma: float, data: dict, law: "v1.TimeLaw", judge: "v2.Judg
     feasible, reason = False, "max_inner_iters"
 
     for it in range(max_inner + 1):
-        warp = v2.warp_timeline(law, field, fps_out)
+        warp = _ensure_static_entry(v2.warp_timeline(law, field, fps_out), fps_out)
         out = v2.resample_at_s(data, warp.s_out, fps_out, body_mode, fk_ctx)
         phase_out = warp.k_star / (warp.T_out - 1)
         reading = judge(out, stem, phase_out)
@@ -236,12 +269,23 @@ def repair_at_scale(gamma: float, data: dict, law: "v1.TimeLaw", judge: "v2.Judg
                           T_out=warp.T_out, duration_s=round(warp.duration_s, 4),
                           **breakdown))
 
-        # 验收:oracle 三剂量全过闸(或 verdict PASS,v2 同口径)且窗外运动学零越界
-        dose_ok = (reading.verdict == "PASS"
-                   or (reading.doses.get("cop", 1.0) <= cop_gate
-                       and reading.doses.get("friction", 0.0) <= fric_gate
-                       and reading.doses.get("torque", 0.0) <= tau_gate))
-        kin_ok = kbr["kin_bad_out_window"] == 0
+        # 验收:oracle 不得 hard-fail、三项 CLI 剂量闸门必须全部通过、且窗外运动学零越界。
+        # feasibility_oracle 的 PASS 只代表其较宽的全局校准门（例如 CoP < 0.20），不能
+        # 绕过本次搜索声明的更严预算（默认 CoP <= 0.10）。否则报告会出现“gate 0.10”
+        # 却把 0.11--0.19 的候选标成 within_budget 的假绿。
+        dose_ok = (
+            reading.verdict != "FAIL"
+            and reading.doses.get("cop", 1.0) <= cop_gate
+            and reading.doses.get("friction", 1.0) <= fric_gate
+            and reading.doses.get("torque", 1.0) <= tau_gate
+        )
+        # 锁窗内外都是 URDF/acc-envelope 硬边界。锁窗内不出 bump 只表示
+        # “这条路径靠时间律修不了”，绝不表示可以验收；此时应 fail closed
+        # 并换几何路径/老师动作。
+        kin_ok = (
+            kbr["kin_bad_out_window"] == 0
+            and kbr["kin_bad_in_window"] == 0
+        )
         if dose_ok and kin_ok:
             feasible = True
             reason = "pass" if reading.verdict == "PASS" else "dose_gate"
@@ -261,15 +305,16 @@ def repair_at_scale(gamma: float, data: dict, law: "v1.TimeLaw", judge: "v2.Judg
                        warp=warp, reading=reading, reading0=reading0,
                        field=field.snapshot(), vel_util=vel_util, acc_util=acc_util,
                        iters=len(trace) - 1, duration_s=float(warp.duration_s),
+                       runup_s=float(warp.k_star / fps_out),
                        breakdown=breakdown, trace=trace)
 
 
 # ====================================================================================== #
-# 外层:γ 扫描,收敛 = 预算内的最短总时长                                                 #
+# 外层:γ 扫描,收敛 = 预算内最短的选定目标(total 或 start→contact)                     #
 # ====================================================================================== #
 @dataclass
 class MinTimeResult:
-    best: InnerResult                 # 全局最优(预算内最短时长)
+    best: InnerResult                 # 所有已探测可行点中的选定 objective 最优
     gamma1: InnerResult               # γ=1 的修复结果(v2 语义等价,对照用)
     reading0: "v2.OracleReading"      # γ=1 迭代 0 = v1 基线原样的判卷(before)
     outer_trace: List[dict] = dc_field(default_factory=list)
@@ -279,6 +324,7 @@ def _outer_row(r: InnerResult) -> dict:
     return dict(gamma=round(r.gamma, 4), feasible=bool(r.feasible), reason=r.reason,
                 iters=r.iters, T_out=(int(r.warp.T_out) if r.warp else None),
                 duration_s=(round(r.duration_s, 4) if np.isfinite(r.duration_s) else None),
+                runup_s=(round(r.runup_s, 4) if np.isfinite(r.runup_s) else None),
                 cop=(round(r.reading.doses.get("cop", 0.0), 4) if r.reading else None),
                 fric=(round(r.reading.doses.get("friction", 0.0), 4) if r.reading else None),
                 tau=(round(r.reading.doses.get("torque", 0.0), 4) if r.reading else None))
@@ -289,11 +335,18 @@ def mintime_search(data: dict, law: "v1.TimeLaw", judge: "v2.Judge", stem: str,
                    body_mode: str, fk_ctx, cop_gate: float, fric_gate: float,
                    tau_gate: float, max_inner: int, src_duration: float, half: float,
                    c: int, compress_step: float, expand_step: float, scale_min: float,
-                   scale_max: float, refine_steps: int) -> MinTimeResult:
-    """外层 γ 搜索。可行 = 内层修进预算;目标 = 预算内最短总时长(全局记最优)。
+                   scale_max: float, refine_steps: int,
+                   objective: str = "total") -> MinTimeResult:
+    """外层 γ 搜索。可行 = 内层修进预算;目标 = 总时长或 start→contact 时间。
     压缩侧把乘法梯子扫到 γ 下界(含下界收尾点)不早停:修复后时长对 γ 非单调,
     平台期早停会错过更短可行解(0709 对抗复核实锤);上探侧梯子越界时补探上界本身。"""
     outer_trace: List[dict] = []
+
+    if objective not in {"total", "runup"}:
+        raise ValueError(f"unknown min-time objective {objective!r}")
+
+    def score(result: InnerResult) -> float:
+        return result.duration_s if objective == "total" else result.runup_s
 
     def inner(g: float) -> InnerResult:
         r = repair_at_scale(g, data, law, judge, stem, vel_cap, acc_budget, fps_out,
@@ -307,7 +360,7 @@ def mintime_search(data: dict, law: "v1.TimeLaw", judge: "v2.Judge", stem: str,
         for _ in range(refine_steps):
             mid = float(np.sqrt(lo * hi))
             rm = inner(mid)
-            if rm.feasible and rm.duration_s < best.duration_s - 1e-9:
+            if rm.feasible and score(rm) < score(best) - 1e-9:
                 best, hi = rm, mid
             else:
                 lo = mid
@@ -330,7 +383,7 @@ def mintime_search(data: dict, law: "v1.TimeLaw", judge: "v2.Judge", stem: str,
                 g, at_floor = scale_min, True        # 梯子越过下界:补探 γ=下界 收尾
             r = inner(g)
             if r.feasible:
-                if r.duration_s < best.duration_s - 1e-9:
+                if score(r) < score(best) - 1e-9:
                     best = r                          # 全局最优(时长帧格量化,严格短=至少短 1 帧)
                 good_g = g
                 if at_floor:
@@ -389,7 +442,8 @@ def mintime(data: dict, phase: float, vlim: np.ndarray, acc_budget: np.ndarray,
             compress_step: float = DEFAULT_COMPRESS_STEP,
             expand_step: float = DEFAULT_EXPAND_STEP,
             scale_min: float = DEFAULT_SCALE_MIN, scale_max: float = DEFAULT_SCALE_MAX,
-            refine_steps: int = DEFAULT_REFINE_STEPS):
+            refine_steps: int = DEFAULT_REFINE_STEPS,
+            objective: str = "total"):
     """统一预算 min-time 重定时。返回 (out, MinTimeResult, law, meta)。"""
     # ---- 参数护栏(fail loud,不静默修正) --------------------------------------- #
     if not (0.0 < compress_step < 1.0):
@@ -400,6 +454,8 @@ def mintime(data: dict, phase: float, vlim: np.ndarray, acc_budget: np.ndarray,
         raise SystemExit(f"要求 0 < scale_min ≤ 1 ≤ scale_max,拿到 {scale_min}/{scale_max}")
     if min(cop_gate, fric_gate, tau_gate) < 0:
         raise SystemExit("剂量闸门不能为负")
+    if objective not in {"total", "runup"}:
+        raise SystemExit(f"--objective 必须是 total 或 runup,拿到 {objective!r}")
 
     # ---- 与 v1/v2 完全同口径的预处理(路径/触球帧/拍速边界条件/预算) -------------- #
     q = np.asarray(data["joint_pos"], dtype=np.float64)
@@ -444,7 +500,7 @@ def mintime(data: dict, phase: float, vlim: np.ndarray, acc_budget: np.ndarray,
     res = mintime_search(data, law, judge, stem, vel_cap, acc_budget, fps_out,
                          body_mode, fk_ctx, cop_gate, fric_gate, tau_gate, max_inner,
                          src_duration, half, c, compress_step, expand_step,
-                         scale_min, scale_max, refine_steps)
+                         scale_min, scale_max, refine_steps, objective)
 
     meta = dict(T_src=T_src, J=J, fps_src=fps_src, fps_out=fps_out, c=c, s_end=s_end,
                 phase=phase, v_star=float(v_star), v_src_clean=v_src_clean, dpds=dpds,
@@ -454,7 +510,7 @@ def mintime(data: dict, phase: float, vlim: np.ndarray, acc_budget: np.ndarray,
                 cop_gate=cop_gate, fric_gate=fric_gate, tau_gate=tau_gate,
                 compress_step=compress_step, expand_step=expand_step,
                 scale_min=scale_min, scale_max=scale_max, refine_steps=refine_steps,
-                max_inner=max_inner)
+                max_inner=max_inner, objective=objective)
     return res.best.out, res, law, meta
 
 
@@ -490,7 +546,7 @@ def build_report(data: dict, res: MinTimeResult, law: "v1.TimeLaw", meta: dict,
     direction = ("accelerated" if dur_x_src < 0.999
                  else ("slowed" if dur_x_src > 1.001 else "unchanged"))
 
-    # 运动学利用率落点(窗外 = 硬边界必须干净;窗内 = |v*| 钉死,只报不判)
+    # 运动学利用率落点(锁窗内外都是硬边界；窗内越界不可由时间律修复)
     lw = field.lock_weight(warp.s_out)
     inside = lw < 0.5
     kin = dict(
@@ -501,7 +557,8 @@ def build_report(data: dict, res: MinTimeResult, law: "v1.TimeLaw", meta: dict,
         vel_util_max_in_window=(round(float(best.vel_util[inside].max()), 4)
                                 if inside.any() else None),
         kin_bad_in_window=best.breakdown.get("kin_bad_in_window", 0),
-        note="窗内利用率由触球拍速 |v*| 几何钉死,时间律不可约;窗外必须 ≤1(硬边界)")
+        note=("锁窗内外必须全部 ≤1；窗内若越界则该几何路径不可行，"
+              "不得用时间律豁免"))
 
     # ρ 场分段(压缩段 rho_min < 1 直接可见)
     sg, rho = field.s_grid, field.rho
@@ -520,6 +577,11 @@ def build_report(data: dict, res: MinTimeResult, law: "v1.TimeLaw", meta: dict,
     r0, rf = res.reading0, best.reading
     report = dict(
         tool="topp_mintime.py v3 (unified-budget min-time bidirectional retiming)",
+        algorithm_scope=(
+            "heuristic upper bound within the sampled gamma ladder plus greedy local repair; "
+            "not strict TOPP and not a global minimum proof"
+        ),
+        search_objective=meta["objective"],
         generated_utc=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ"),
         verdict=rf.verdict,
         direction=direction,
@@ -534,7 +596,12 @@ def build_report(data: dict, res: MinTimeResult, law: "v1.TimeLaw", meta: dict,
             fric_dose_final=round(rf.doses.get("friction", 0.0), 4),
             tau_dose_final=round(rf.doses.get("torque", 0.0), 4),
             within_budget=bool(best.feasible),
-            kin_out_window_clean=bool(best.breakdown.get("kin_bad_out_window", 0) == 0)),
+            kin_out_window_clean=bool(best.breakdown.get("kin_bad_out_window", 0) == 0),
+            kin_lock_window_clean=bool(best.breakdown.get("kin_bad_in_window", 0) == 0),
+            kinematic_hard_limits_clean=bool(
+                best.breakdown.get("kin_bad_out_window", 0) == 0
+                and best.breakdown.get("kin_bad_in_window", 0) == 0
+            )),
         durations=dict(
             source_s=round(src_duration, 4),
             baseline_gamma1_s=round(r1.duration_s, 4),
@@ -576,6 +643,11 @@ def build_report(data: dict, res: MinTimeResult, law: "v1.TimeLaw", meta: dict,
                     duration_change_x=round(((T_out - 1) / fps_out) / src_duration, 3),
                     wait_s=round(warp.wait_s, 4), body_mode=body_mode,
                     mean_abs_acc=round(mean_acc_out, 3)),
+        timing_bound=dict(
+            candidate_start_to_contact_s=round(float(best.runup_s), 4),
+            bound_semantics="feasible upper bound within this searched family",
+            strict_global_minimum_proven=False,
+        ),
         fidelity=dict(contact_row_bitwise=contact_bitwise,
                       blade_speed_clean_out_mps=round(v_out_clean, 4),
                       blade_speed_dev_frac=round(speed_dev, 5),
@@ -595,14 +667,19 @@ def report_md(rep: dict) -> str:
     zh = {"accelerated": "加速(预算内有富余,健康动作)",
           "slowed": "放慢(预算顶住,v2 语义兜底)",
           "unchanged": "不变(已在预算边界)"}[rep["direction"]]
+    objective_answer = (
+        f"整段候选时长 **{d['mintime_s']:.2f} s**"
+        if rep["search_objective"] == "total"
+        else f"起始到触球可行上界 **{o['runup_s']:.2f} s**"
+    )
     lines = [
         f"# min-time 双向重定时 (TOPP v3) — **{rep['verdict']}** / 方向 **{rep['direction']}** "
         f"(γ={rep['chosen_scale']}, {rep['feasible_reason']})",
         "",
         f"- generated: {rep['generated_utc']}",
         f"- 人话:统一预算(CoP≤{b['cop_gate']} / fric≤{b['fric_gate']} / τ≤{b['tau_gate']} / "
-        f"速度≤URDF×{b['vel_limit_frac']:g} / |acc|≤实证包络)下,这个动作的最快时间 = "
-        f"**{d['mintime_s']:.2f} s**;{zh}",
+        f"速度≤URDF×{b['vel_limit_frac']:g} / |acc|≤实证包络)下,{objective_answer};{zh}",
+        f"- 搜索语义:{rep['algorithm_scope']}",
         f"- 时长对账:源 {d['source_s']:.2f} s (x{d['vs_source_x']:.2f}) | γ=1 基线修复后 "
         f"{d['baseline_gamma1_s']:.2f} s (x{d['vs_gamma1_x']:.2f} vs 基线, 基线可行="
         f"{d['baseline_gamma1_feasible']}) —— 两侧难度拉平假说请对比正/反手这一行",
@@ -611,7 +688,8 @@ def report_md(rep: dict) -> str:
         f"fric {oa['fric_dose']:.3f}/τ {oa['tau_dose']:.3f}); within_budget={a['within_budget']}",
         f"- 运动学硬边界:窗外峰值利用率 vel {k['vel_util_max_out_window']} / "
         f"acc {k['acc_util_max_out_window']} (必须≤1, clean={a['kin_out_window_clean']}); "
-        f"窗内 vel {k['vel_util_max_in_window']}(|v*| 钉死,不可约 {k['kin_bad_in_window']} 帧)",
+        f"窗内 vel {k['vel_util_max_in_window']} (必须≤1, clean={a['kin_lock_window_clean']}, "
+        f"越界 {k['kin_bad_in_window']} 帧则路径不可行)",
         f"- 源: {s['frames']} 帧 @ {s['fps']:.0f} fps = {s['duration_s']:.2f} s; 触球 "
         f"f{s['contact_frame']} (phase {s['phase']}); 干净拍速 {s['clean_blade_speed_mps']:.3f} m/s",
         f"- 出: {o['frames']} 帧 @ {o['fps']:.0f} fps = {o['duration_s']:.2f} s; 触球 "
@@ -626,18 +704,148 @@ def report_md(rep: dict) -> str:
         f"(dev {f['blade_speed_dev_frac'] * 100:.2f}%); 拍面差 {f['face_normal_diff_deg']:.4f} deg; "
         f"首帧 max|q̇| {f['first_frame_max_joint_vel']:.3f} rad/s",
         "",
-        "| γ | 可行 | 原因 | 内层轮数 | T_out | 时长 s | CoP | fric | τ |",
-        "|---|---|---|---|---|---|---|---|---|",
+        "| γ | 可行 | 原因 | 内层轮数 | T_out | 时长 s | 到触球 s | CoP | fric | τ |",
+        "|---|---|---|---|---|---|---|---|---|---|",
     ]
     for r in rep["outer_trace"]:
         lines.append(
             f"| {r['gamma']:.3f} | {r['feasible']} | {r['reason']} | {r['iters']} | "
-            f"{r['T_out']} | {r['duration_s']} | {r['cop']} | {r['fric']} | {r['tau']} |")
+            f"{r['T_out']} | {r['duration_s']} | {r['runup_s']} | {r['cop']} | "
+            f"{r['fric']} | {r['tau']} |")
     lines += ["",
               f"REGISTRY REMINDER: SYNTHESIZED timeline — register phase_out = "
               f"{o['phase_out']:.4f} (contact frame {o['contact_frame']} of {o['frames']}) "
               f"in cfg/strike_annotations.yaml. 视频约定帧对本资产弃用。"]
     return "\n".join(lines)
+
+
+# ====================================================================================== #
+# 可审计、不覆盖的证书发布                                                               #
+# ====================================================================================== #
+def _sha256_file(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _file_evidence(path_like, label: str) -> dict:
+    try:
+        path = Path(path_like).expanduser().resolve(strict=True)
+        info = path.stat()
+    except OSError as exc:
+        raise SystemExit(f"{label} 不可读: {path_like}: {exc}") from exc
+    if not stat.S_ISREG(info.st_mode) or info.st_size <= 0:
+        raise SystemExit(f"{label} 必须是非空普通文件: {path}")
+    return {
+        "path": str(path),
+        "bytes": int(info.st_size),
+        "sha256": _sha256_file(path),
+    }
+
+
+def _verify_file_evidence(evidence: dict, label: str) -> None:
+    current = _file_evidence(evidence["path"], label)
+    if current != evidence:
+        raise SystemExit(f"{label} 在证书发布前发生变化: {evidence} -> {current}")
+
+
+def _write_exclusive(path: Path, writer) -> None:
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_CLOEXEC", 0)
+    fd = os.open(path, flags, 0o444)
+    try:
+        with os.fdopen(fd, "wb") as stream:
+            writer(stream)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except BaseException:
+        try:
+            path.unlink()
+        except FileNotFoundError:
+            pass
+        raise
+
+
+def _validate_npz_roundtrip(path: Path, expected: dict) -> None:
+    try:
+        with np.load(path, allow_pickle=False) as persisted:
+            if set(persisted.files) != set(expected):
+                raise SystemExit(
+                    f"暂存 NPZ 字段发生变化: {sorted(persisted.files)} != {sorted(expected)}"
+                )
+            for key, raw in expected.items():
+                want = np.asarray(raw)
+                got = np.asarray(persisted[key])
+                if got.dtype != want.dtype or got.shape != want.shape:
+                    raise SystemExit(f"暂存 NPZ {key} dtype/shape 发生变化")
+                if np.issubdtype(want.dtype, np.inexact):
+                    equal = np.array_equal(got, want, equal_nan=True)
+                else:
+                    equal = np.array_equal(got, want)
+                if not equal:
+                    raise SystemExit(f"暂存 NPZ {key} 数值发生变化")
+    except (OSError, ValueError) as exc:
+        raise SystemExit(f"无法稳定回读暂存 NPZ: {exc}") from exc
+
+
+def _prepare_output_paths(output, report, md) -> tuple[Path, Path, Path, Path]:
+    if not report or not md:
+        raise SystemExit("产线证书必须同时给出 --output/--report/--md")
+    paths = tuple(Path(value).expanduser().absolute() for value in (output, report, md))
+    if len(set(paths)) != 3:
+        raise SystemExit("--output/--report/--md 必须是三个不同的路径")
+    parents = {path.parent.resolve(strict=True) for path in paths}
+    if len(parents) != 1:
+        raise SystemExit("三个证书制品必须位于同一个已存在的目录")
+    parent = next(iter(parents))
+    for path in paths:
+        if path.exists() or path.is_symlink():
+            raise SystemExit(f"拒绝覆盖已有证书制品: {path}")
+    return paths[0], paths[1], paths[2], parent
+
+
+def _publish_staged_bundle(
+    staged: list[tuple[Path, Path]], *, parent: Path
+) -> None:
+    """Hard-link each validated staged file with no-replace semantics.
+
+    All files live on one filesystem.  A normal failure rolls back every name created by this
+    invocation; a crash can leave only the hidden staging directory, never an overwritten result.
+    """
+
+    published: list[Path] = []
+    try:
+        for source, destination in staged:
+            os.link(source, destination)
+            published.append(destination)
+        directory_fd = os.open(parent, os.O_RDONLY | getattr(os, "O_DIRECTORY", 0))
+        try:
+            os.fsync(directory_fd)
+        finally:
+            os.close(directory_fd)
+    except BaseException:
+        for path in reversed(published):
+            try:
+                path.unlink()
+            except FileNotFoundError:
+                pass
+        raise
+
+
+def _tool_provenance() -> dict:
+    dependencies = {
+        "synthesize_timing": Path(v1.__file__),
+        "synthesize_timing_v2": Path(v2.__file__),
+        "audit_motion_npz": Path(_HERE) / "audit_motion_npz.py",
+    }
+    return {
+        "topp_mintime": _file_evidence(Path(__file__), "TOPP tool"),
+        "dependencies": {
+            name: _file_evidence(path, f"TOPP dependency {name}")
+            for name, path in dependencies.items()
+        },
+    }
 
 
 # ====================================================================================== #
@@ -689,24 +897,45 @@ def main(argv=None) -> int:
                     help="γ 上界(放慢到此仍不可行=几何问题,fail loud)")
     ap.add_argument("--refine-steps", type=int, default=DEFAULT_REFINE_STEPS,
                     help="好/坏 γ 之间几何二分收尾步数")
+    ap.add_argument("--objective", choices=("total", "runup"), default="total",
+                    help="优化整段总时长(total,历史默认)或起始到触球时间(runup)")
     ap.add_argument("--oracle-workdir", default=None,
                     help="每轮判卷临时 npz 的目录(默认新 tmpdir)")
     ap.add_argument("--report", default=None, help="JSON 报告输出路径")
     ap.add_argument("--md", default=None, help="markdown 报告输出路径")
     args = ap.parse_args(argv)
 
+    # CLI 发布的是 production certificate；interp 只能在纯 CPU 函数单测中使用。
+    if args.body_mode != "fk":
+        raise SystemExit("产线 TOPP 证书必须 --body-mode fk；interp 只允许单测")
+    output_path, report_path, md_path, output_parent = _prepare_output_paths(
+        args.output, args.report, args.md
+    )
+
     if args.urdf is None:
         args.urdf = os.path.normpath(os.path.join(
             _HERE, "../../..", "agi/URDF/A3T2.5-URDF-std-pingpang/urdf/URDF-JOINT-LINK.urdf"))
+    if not args.mjcf or not args.body_order:
+        raise SystemExit("--mjcf and --body-order are required (oracle + FK)")
+
+    source_evidence = {
+        "input": _file_evidence(args.input, "input clip"),
+        "budget_clips": [
+            _file_evidence(path, f"budget clip {index}")
+            for index, path in enumerate(args.budget_clips)
+        ],
+        "mjcf": _file_evidence(args.mjcf, "MuJoCo MJCF"),
+        "urdf": _file_evidence(args.urdf, "A3 URDF"),
+        "body_order": _file_evidence(args.body_order, "body-order"),
+        "tool": _tool_provenance(),
+    }
+
     from audit_motion_npz import parse_urdf_limits  # via sys.path insert
     limits = parse_urdf_limits(args.urdf)
     vlim = np.array([limits[n].velocity if limits[n].velocity is not None else np.inf
                      for n in ISAAC_JOINT_NAMES])
     env = v1.acc_envelope(args.budget_clips)
     acc_budget = env * args.budget_scale
-
-    if not args.mjcf or not args.body_order:
-        raise SystemExit("--mjcf and --body-order are required (oracle + FK)")
 
     fk_ctx = None
     if args.body_mode == "fk":
@@ -730,29 +959,75 @@ def main(argv=None) -> int:
         fric_gate=args.fric_gate, tau_gate=args.tau_gate,
         compress_step=args.compress_step, expand_step=args.expand_step,
         scale_min=args.scale_min, scale_max=args.scale_max,
-        refine_steps=args.refine_steps)
+        refine_steps=args.refine_steps, objective=args.objective)
 
     rep = build_report(data, res, law, meta, args.body_mode)
-    rep["files"] = dict(input=os.path.abspath(args.input), output=os.path.abspath(args.output))
-    rep["budget_provenance"] = dict(clips=[os.path.abspath(p) for p in args.budget_clips],
-                                    scale=args.budget_scale,
-                                    envelope=[round(float(v), 3) for v in env])
-
-    np.savez(args.output, **out)
-    md = report_md(rep)
-    print(md)
-    if args.report:
-        with open(args.report, "w") as fh:
-            json.dump(rep, fh, indent=2)
-    if args.md:
-        with open(args.md, "w") as fh:
-            fh.write(md)
-
     dev = rep["fidelity"]["blade_speed_dev_frac"]
     if dev > 0.02:
-        print(f"** WARNING: contact blade-speed deviation {dev * 100:.2f}% > 2% **",
-              file=sys.stderr)
-        return 1
+        raise SystemExit(
+            f"触球拍速偏差 {dev * 100:.2f}% > 2%，拒绝发布任何制品"
+        )
+    if not rep["acceptance"]["kinematic_hard_limits_clean"]:
+        raise SystemExit("运动学硬限位未全部通过，拒绝发布任何制品")
+
+    stage = Path(tempfile.mkdtemp(prefix=".topp_mintime.stage.", dir=output_parent))
+    try:
+        staged_output = stage / "motion.npz"
+        staged_report = stage / "certificate.json"
+        staged_md = stage / "certificate.md"
+        _write_exclusive(staged_output, lambda stream: np.savez(stream, **out))
+        _validate_npz_roundtrip(staged_output, out)
+        output_evidence = {
+            "path": str(output_path),
+            "bytes": staged_output.stat().st_size,
+            "sha256": _sha256_file(staged_output),
+        }
+        rep["files"] = {
+            "input": source_evidence["input"],
+            "output": output_evidence,
+            "report_path": str(report_path),
+            "markdown_path": str(md_path),
+        }
+        rep["budget_provenance"] = {
+            "clips": source_evidence["budget_clips"],
+            "scale": args.budget_scale,
+            "envelope": [round(float(value), 3) for value in env],
+        }
+        rep["runtime_provenance"] = {
+            key: source_evidence[key] for key in ("mjcf", "urdf", "body_order", "tool")
+        }
+        report_bytes = (
+            json.dumps(rep, indent=2, sort_keys=True, allow_nan=False) + "\n"
+        ).encode("utf-8")
+        _write_exclusive(staged_report, lambda stream: stream.write(report_bytes))
+        persisted_report = json.loads(staged_report.read_text(encoding="utf-8"))
+        if persisted_report != rep:
+            raise SystemExit("暂存 TOPP JSON 报告回读不一致")
+        md = report_md(rep) + "\n"
+        _write_exclusive(staged_md, lambda stream: stream.write(md.encode("utf-8")))
+        if staged_md.read_text(encoding="utf-8") != md:
+            raise SystemExit("暂存 TOPP Markdown 报告回读不一致")
+
+        for key in ("input", "mjcf", "urdf", "body_order"):
+            _verify_file_evidence(source_evidence[key], key)
+        for index, evidence in enumerate(source_evidence["budget_clips"]):
+            _verify_file_evidence(evidence, f"budget clip {index}")
+        _verify_file_evidence(source_evidence["tool"]["topp_mintime"], "TOPP tool")
+        for name, evidence in source_evidence["tool"]["dependencies"].items():
+            _verify_file_evidence(evidence, f"TOPP dependency {name}")
+
+        _publish_staged_bundle(
+            [
+                (staged_output, output_path),
+                (staged_report, report_path),
+                (staged_md, md_path),
+            ],
+            parent=output_parent,
+        )
+    finally:
+        shutil.rmtree(stage, ignore_errors=True)
+
+    print(md, end="")
     return 0
 
 

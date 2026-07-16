@@ -52,6 +52,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 
 | ID | 简短状态 |
 | --- | --- |
+| [`EXP-P1-TASK-REVISION-CUTOVER`](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md) | 旧 rolling 池已精确停止；同一物理球的原子 target/TTS revision、宽准备时间、相位 governor、0.5 秒卷与整数淘汰量尺处于 source 红队，full-scene/行为尚未通过 |
 | [`EXP-P1-FACE-PLANT-SCALEOUT`](experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md) | 16 条 fresh 广度臂已分两波全部精确停止并保留证据；旧 face×plant 矩阵不能选 baseline |
 | [`EXP-P1-FRESH-SZ-STABILITY`](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md) | 实验 completed/rejected；2k 与 4k 四 seed 稳定性都失败，seed4 持续弱；不晋级 baseline |
 | [`EXP-P1-FACE-SIGN-FORENSIC`](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md) | `n/-n` 源码负控与 pre-orient physical-B 门已实现；fresh canary/修正后同卷未跑，旧分不晋级 |

@@ -37,9 +37,17 @@ from .flat_command_wire import (
     BASE_FLAT_SCHEMA_V2_EPOCH,
     RACKET_FLAT_SCHEMA_V2_FACE179,
     RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+    RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
     pack_base_pose_flat,
     pack_invalid_racket_command_flat,
     pack_racket_command_flat_fail_closed,
+)
+from .task_lifecycle import (
+    FormalBallTrackBoundary,
+    FormalBallTrackDecision,
+    FormalTaskLifecycle,
+    FormalTaskRevision,
+    FormalTaskState,
 )
 from .node_runtime_contract import (
     FormalBaseBarrierRejection,
@@ -53,6 +61,7 @@ from .node_runtime_contract import (
     SwingSideSelector,
     base_pose_is_fresh,
     corrected_base_pose,
+    latency_compensated_time_to_strike,
     ros_source_to_monotonic,
     ros_stamp_fields_to_seconds,
     validate_formal_source_clock_mode,
@@ -215,7 +224,13 @@ class HOPEPlannerNode(Node):
         # Schema 1 is legacy. Schema 2 added the face tail but had no cross-topic
         # causality. Formal Gate3/179 must opt into schema 3, whose payload binds
         # a shared base-control epoch, strict sequence and source monotonic stamp.
+        # Schema 4 adds one physical-ball task id and strictly increasing revisions.
         self.declare_parameter("racket_flat_schema", 1)
+        self.declare_parameter("formal_task_no_ball_rearm_s", 0.10)
+        self.declare_parameter("formal_task_plane_close_margin_m", 0.02)
+        self.declare_parameter("formal_task_deadline_close_grace_s", 0.08)
+        self.declare_parameter("formal_task_inbound_vx_threshold_mps", -0.30)
+        self.declare_parameter("formal_task_outbound_vx_threshold_mps", 0.30)
         # marker-cluster -> base_link offset (table frame). /P1/pose is the marker cluster; the
         # policy base is the pelvis. In sim (robot_pose_topic=/sim/a3/pelvis_pose) it is already
         # the pelvis, so [0,0,0]. Set per venue (mirrors hope_world_frame.yaml mocap_to_base_link / G8).
@@ -260,16 +275,52 @@ class HOPEPlannerNode(Node):
         )
         self._publish_flat = bool(self.get_parameter("publish_flat_cmd").value)
         self._racket_flat_schema = int(self.get_parameter("racket_flat_schema").value)
-        if self._racket_flat_schema not in (1, 2, 3):
-            raise ValueError("racket_flat_schema must be 1 (legacy), 2 (face), or 3 (formal epoch)")
-        if self._racket_flat_schema in (2, 3) and not self._publish_flat:
+        if self._racket_flat_schema not in (1, 2, 3, 4):
+            raise ValueError(
+                "racket_flat_schema must be 1 (legacy), 2 (face), "
+                "3 (formal epoch), or 4 (formal task revision)"
+            )
+        if self._racket_flat_schema in (2, 3, 4) and not self._publish_flat:
             raise ValueError("face racket schemas require publish_flat_cmd=true")
         self._base_flat_schema = (
             BASE_FLAT_SCHEMA_V2_EPOCH
-            if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH
+            if self._racket_flat_schema in (
+                RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+                RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
+            )
             else BASE_FLAT_SCHEMA_V1
         )
         self._wire_counters = FormalWireCounters()
+        self._task_lifecycle = None
+        self._task_boundary = None
+        self._pending_ball_discontinuity = False
+        if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V4_FACE179_TASK:
+            self._task_lifecycle = FormalTaskLifecycle(
+                control_epoch=self._wire_counters.control_epoch
+            )
+            self._task_boundary = FormalBallTrackBoundary(
+                no_ball_rearm_s=float(
+                    self.get_parameter("formal_task_no_ball_rearm_s").value
+                ),
+                plane_close_margin_m=float(
+                    self.get_parameter("formal_task_plane_close_margin_m").value
+                ),
+                deadline_close_grace_s=float(
+                    self.get_parameter(
+                        "formal_task_deadline_close_grace_s"
+                    ).value
+                ),
+                inbound_vx_threshold_mps=float(
+                    self.get_parameter(
+                        "formal_task_inbound_vx_threshold_mps"
+                    ).value
+                ),
+                outbound_vx_threshold_mps=float(
+                    self.get_parameter(
+                        "formal_task_outbound_vx_threshold_mps"
+                    ).value
+                ),
+            )
         self._base_pose_max_age_s = float(
             self.get_parameter("base_pose_max_age_s").value
         )
@@ -287,7 +338,10 @@ class HOPEPlannerNode(Node):
             future_tolerance_s=source_future_tolerance_s,
         )
         self._formal_source_frames = None
-        if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+        if self._racket_flat_schema in (
+            RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+            RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
+        ):
             if not self.has_parameter("use_sim_time"):
                 raise ValueError(
                     "formal schema 3 requires ROS to declare use_sim_time"
@@ -464,7 +518,10 @@ class HOPEPlannerNode(Node):
                 expired_this_callback = self._expire_formal_base_if_needed(received_now)
                 base_source_monotonic_s = received_now
                 base_source_stamp_s = None
-                if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+                if self._racket_flat_schema in (
+                    RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+                    RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
+                ):
                     try:
                         self._formal_source_frames.validate_base(msg.header.frame_id)
                     except ValueError as exc:
@@ -522,7 +579,10 @@ class HOPEPlannerNode(Node):
                         self._marker_to_base,
                         policy_z_offset=self._policy_z_offset,
                     )
-                    if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+                    if self._racket_flat_schema in (
+                        RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+                        RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
+                    ):
                         self._formal_base_pose_guard.validate(
                             base_w, quat_wxyz, base_source_monotonic_s
                         )
@@ -554,7 +614,10 @@ class HOPEPlannerNode(Node):
                     expired_this_callback or expired_during_admission
                 )
                 try:
-                    if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+                    if self._racket_flat_schema in (
+                        RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+                        RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
+                    ):
                         self._formal_base_state.accept_source(
                             base_source_monotonic_s,
                             now_monotonic_s=admission_now,
@@ -584,7 +647,10 @@ class HOPEPlannerNode(Node):
                         throttle_duration_sec=2.0,
                     )
                     return
-                if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+                if self._racket_flat_schema in (
+                    RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+                    RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
+                ):
                     self._formal_base_pose_guard.commit(
                         base_w, quat_wxyz, base_source_monotonic_s
                     )
@@ -627,6 +693,9 @@ class HOPEPlannerNode(Node):
         self._n_custom_mirror_rejected = 0
         self._last_valid = False
         self._last_tts = float("nan")
+        self._last_effective_tts = float("nan")
+        self._last_ball_source_age_s = float("nan")
+        self._last_ball_plane_distance_m = float("nan")
         self.create_timer(0.1, self._publish_diagnostics)
 
         self.get_logger().info(
@@ -654,6 +723,13 @@ class HOPEPlannerNode(Node):
     def _advance_control_epoch(self) -> None:
         try:
             self._wire_counters.advance_epoch()
+            if self._task_lifecycle is not None:
+                self._task_lifecycle.observe_epoch(
+                    self._wire_counters.control_epoch
+                )
+                assert self._task_boundary is not None
+                self._task_boundary.reset_epoch()
+                self._pending_ball_discontinuity = False
         except FormalWireExhaustion as exc:
             self._publish_terminal_wire_exhaustion(str(exc))
 
@@ -668,13 +744,16 @@ class HOPEPlannerNode(Node):
         if self.flat_cmd_pub is not None:
             try:
                 msg = Float64MultiArray()
-                msg.data = pack_invalid_racket_command_flat(
-                    schema=RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+                racket_kwargs = dict(
+                    schema=self._racket_flat_schema,
                     control_epoch=epoch,
                     command_sequence=racket_sequence,
                     base_sequence_ref=base_sequence,
                     source_monotonic_s=stamp,
                 )
+                if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V4_FACE179_TASK:
+                    racket_kwargs.update(task_id=0, task_revision=0)
+                msg.data = pack_invalid_racket_command_flat(**racket_kwargs)
                 self.flat_cmd_pub.publish(msg)
             except Exception as exc:
                 errors.append(f"racket={type(exc).__name__}: {exc}")
@@ -713,11 +792,19 @@ class HOPEPlannerNode(Node):
             source_stamp_s, now_ros_s, now_monotonic_s
         )
 
-    def _publish_flat_racket_invalid(self, source_monotonic_s: float | None = None) -> None:
+    def _publish_flat_racket_invalid(
+        self,
+        source_monotonic_s: float | None = None,
+        *,
+        task_revision: FormalTaskRevision | None = None,
+    ) -> None:
         if self.flat_cmd_pub is None:
             return
         kwargs = {"schema": self._racket_flat_schema}
-        if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+        if self._racket_flat_schema in (
+            RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+            RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
+        ):
             kwargs.update(
                 control_epoch=self._wire_counters.control_epoch,
                 command_sequence=self._next_sequence("_racket_sequence"),
@@ -732,9 +819,155 @@ class HOPEPlannerNode(Node):
                     else float(source_monotonic_s)
                 ),
             )
+        if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V4_FACE179_TASK:
+            if task_revision is None:
+                kwargs.update(task_id=0, task_revision=0)
+            else:
+                if task_revision.control_epoch != self._wire_counters.control_epoch:
+                    raise RuntimeError(
+                        "task revision epoch does not match the live control epoch"
+                    )
+                kwargs.update(
+                    task_id=task_revision.task_id,
+                    task_revision=task_revision.task_revision,
+                )
         racket = Float64MultiArray()
         racket.data = pack_invalid_racket_command_flat(**kwargs)
         self.flat_cmd_pub.publish(racket)
+
+    def _disarm_formal_task(self) -> None:
+        """Forget task identity when the ball source itself is untrustworthy."""
+
+        if self._task_lifecycle is None:
+            return
+        self._task_lifecycle.disarm(self._wire_counters.control_epoch)
+        assert self._task_boundary is not None
+        self._task_boundary.reset_epoch()
+        self._pending_ball_discontinuity = False
+
+    def _formal_task_active(self) -> bool:
+        return (
+            self._task_lifecycle is not None
+            and self._task_lifecycle.state is FormalTaskState.ACTIVE
+        )
+
+    def _publish_task_close(
+        self, source_monotonic_s: float | None
+    ) -> FormalTaskRevision | None:
+        """Close one live task and publish its final task-scoped invalid row."""
+
+        assert self._task_lifecycle is not None
+        terminal = self._task_lifecycle.close(
+            self._wire_counters.control_epoch
+        )
+        if terminal is not None:
+            self._publish_flat_racket_invalid(
+                source_monotonic_s, task_revision=terminal
+            )
+            if self.cmd_pub is not None:
+                try:
+                    mirror = RacketCommand()
+                    mirror.normal.x = 1.0
+                    mirror.valid = False
+                    self.cmd_pub.publish(mirror)
+                except Exception as exc:
+                    self._n_custom_mirror_rejected += 1
+                    self.get_logger().error(
+                        "optional RacketCommand task-close mirror failed after "
+                        f"formal flat publication: {type(exc).__name__}: {exc}",
+                        throttle_duration_sec=2.0,
+                    )
+        return terminal
+
+    def _observe_formal_task_present(
+        self,
+        *,
+        source_time_s: float,
+        source_monotonic_s: float | None,
+        raw_ball_position: np.ndarray,
+        predicted_strike_time_s: float | None,
+    ) -> tuple[bool, bool]:
+        """Update the schema-4 ball boundary.
+
+        Returns ``(continue_current_sample, inbound_track_ready)``. A task is
+        closed before any newer command for that sample is considered. A
+        physically proven new inbound ball may close/rearm in one callback,
+        but transport sequence numbers and solver validity never create tasks.
+        """
+
+        if self._task_lifecycle is None:
+            return True, False
+        assert self._task_boundary is not None
+        ball_x = float(raw_ball_position[0])
+        ball_vx = None
+        if self.planner.estimator.ready:
+            p_est, v_est, _ = self.planner.estimator.estimate()
+            ball_x = float(p_est[0])
+            ball_vx = float(v_est[0])
+        self._last_ball_plane_distance_m = (
+            ball_x - float(self.planner.config.x_hit)
+        )
+        discontinuity = bool(
+            self._pending_ball_discontinuity
+            or self.planner.estimator.discontinuity_detected
+        )
+        # The estimator deliberately clears its fit window on the jump, so a
+        # velocity estimate can be unavailable on the detection tick. Retain
+        # that physical-boundary proof until a later fit classifies direction.
+        self._pending_ball_discontinuity = (
+            discontinuity if ball_vx is None else False
+        )
+        decision = self._task_boundary.observe_present(
+            source_time_s,
+            ball_x_m=ball_x,
+            ball_vx_mps=ball_vx,
+            discontinuity_detected=discontinuity,
+            task_active=self._formal_task_active(),
+            strike_plane_x_m=float(self.planner.config.x_hit),
+            predicted_strike_time_s=predicted_strike_time_s,
+        )
+        if decision in (
+            FormalBallTrackDecision.CLOSE_ACTIVE,
+            FormalBallTrackDecision.CLOSE_AND_REARM,
+        ):
+            self._publish_task_close(source_monotonic_s)
+            if decision is FormalBallTrackDecision.CLOSE_ACTIVE:
+                return False, False
+        if decision in (
+            FormalBallTrackDecision.SAFE_REARM,
+            FormalBallTrackDecision.CLOSE_AND_REARM,
+        ):
+            self._task_lifecycle.explicit_rearm(
+                self._wire_counters.control_epoch,
+                no_ball_or_new_serve_confirmed=True,
+            )
+        inbound = ball_vx is not None and (
+            ball_vx <= self._task_boundary.inbound_vx_threshold_mps
+        )
+        return True, inbound
+
+    def _observe_formal_task_absent(
+        self, *, source_time_s: float, source_monotonic_s: float | None
+    ) -> None:
+        """Handle a trustworthy no-ball tick without inventing a new task."""
+
+        if self._task_lifecycle is None:
+            return
+        assert self._task_boundary is not None
+        decision = self._task_boundary.observe_absent(
+            source_time_s, task_active=self._formal_task_active()
+        )
+        if decision is FormalBallTrackDecision.CLOSE_ACTIVE:
+            self._publish_task_close(source_monotonic_s)
+            return
+        revision = self._task_lifecycle.publish(
+            self._wire_counters.control_epoch,
+            inbound_track_ready=False,
+            solver_valid=False,
+        )
+        self._publish_flat_racket_invalid(
+            source_monotonic_s, task_revision=revision
+        )
 
     def _publish_flat_base(
         self, *, valid: bool, position_w=None, quaternion_wxyz=None,
@@ -788,6 +1021,7 @@ class HOPEPlannerNode(Node):
         if self._racket_flat_schema not in (
             RACKET_FLAT_SCHEMA_V2_FACE179,
             RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+            RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
         ):
             return
         flat_errors = []
@@ -827,7 +1061,10 @@ class HOPEPlannerNode(Node):
         )
         self._clear_formal_base_geometry()
         if transitioned:
-            if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+            if self._racket_flat_schema in (
+                RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+                RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
+            ):
                 self._advance_control_epoch()
             self._publish_formal_revocation(reason)
         return transitioned
@@ -836,12 +1073,16 @@ class HOPEPlannerNode(Node):
         if self._racket_flat_schema not in (
             RACKET_FLAT_SCHEMA_V2_FACE179,
             RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+            RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
         ) or not self._formal_base_state.expire_before_admission(
             now_monotonic_s, self._base_pose_max_age_s
         ):
             return False
         self._clear_formal_base_geometry()
-        if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+        if self._racket_flat_schema in (
+            RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+            RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
+        ):
             self._advance_control_epoch()
         self._publish_formal_revocation("corrected base pose stale")
         return True
@@ -854,6 +1095,7 @@ class HOPEPlannerNode(Node):
         if (self._racket_flat_schema not in (
                 RACKET_FLAT_SCHEMA_V2_FACE179,
                 RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+                RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
             ) or self.flat_cmd_pub is None
                 or not self._formal_base_state.ready_for_source(
                     base_source_monotonic_s,
@@ -868,7 +1110,11 @@ class HOPEPlannerNode(Node):
     def _poses_cb(self, msg: PoseArray) -> None:
         self._n_received += 1
         ball_source_monotonic_s = None
-        if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+        formal_epoch_schema = self._racket_flat_schema in (
+            RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+            RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
+        )
+        if formal_epoch_schema:
             try:
                 self._formal_source_frames.validate_ball(msg.header.frame_id)
             except ValueError as exc:
@@ -877,6 +1123,9 @@ class HOPEPlannerNode(Node):
                 # estimator may ingest a sample in the wrong frame.
                 self._last_valid = False
                 self._last_tts = float("nan")
+                self._last_effective_tts = float("nan")
+                self._last_ball_source_age_s = float("nan")
+                self._disarm_formal_task()
                 self._publish_flat_racket_invalid()
                 self.get_logger().warning(
                     f"ball source frame_id rejected ({exc}); formal racket command revoked",
@@ -886,18 +1135,25 @@ class HOPEPlannerNode(Node):
         try:
             t = self._source_stamp_s(msg)
         except ValueError as exc:
-            if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+            if formal_epoch_schema:
+                self._disarm_formal_task()
                 self._publish_flat_racket_invalid()
             self.get_logger().warning(
                 f"ball source stamp fields rejected ({exc})",
                 throttle_duration_sec=2.0,
             )
             return
-        if len(msg.poses) <= self._ball_index:
-            if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+        # Preserve the older schema-3 no-pose behavior. Schema 4 first proves
+        # the source clock so an empty PoseArray can safely contribute to the
+        # explicit no-ball/new-serve boundary.
+        if (
+            len(msg.poses) <= self._ball_index
+            and self._racket_flat_schema != RACKET_FLAT_SCHEMA_V4_FACE179_TASK
+        ):
+            if formal_epoch_schema:
                 self._publish_flat_racket_invalid()
             return
-        if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+        if formal_epoch_schema:
             try:
                 now_ros_s = self._now_ros_s()
                 self._ball_source_guard.validate(float(t), now_ros_s)
@@ -910,6 +1166,9 @@ class HOPEPlannerNode(Node):
             except ValueError as exc:
                 self._last_valid = False
                 self._last_tts = float("nan")
+                self._last_effective_tts = float("nan")
+                self._last_ball_source_age_s = float("nan")
+                self._disarm_formal_task()
                 self._publish_flat_racket_invalid(ball_source_monotonic_s)
                 self.get_logger().warning(
                     f"ball source stamp rejected ({exc}); formal racket command revoked",
@@ -917,14 +1176,30 @@ class HOPEPlannerNode(Node):
                 )
                 return
 
+        if len(msg.poses) <= self._ball_index:
+            # Reaching this branch is schema 4 with a validated source stamp.
+            self._ball_source_guard.commit(float(t))
+            self._last_valid = False
+            self._last_tts = float("nan")
+            self._last_effective_tts = float("nan")
+            self._last_ball_source_age_s = max(0.0, self._now_ros_s() - float(t))
+            self._observe_formal_task_absent(
+                source_time_s=float(t),
+                source_monotonic_s=ball_source_monotonic_s,
+            )
+            return
+
         # NOTE: PoseArray carries no names. Configure ball_pose_index to match
         # the ball's slot in the /poses ordering (the avatar_pro relay puts the
         # ball first), or swap this for a /tf lookup keyed on ball_rigid_body_name.
         pose = msg.poses[self._ball_index]
         p_ball = np.array([pose.position.x, pose.position.y, pose.position.z])
-        if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+        if formal_epoch_schema:
             if not np.isfinite(p_ball).all():
                 self._last_valid = False
+                self._last_effective_tts = float("nan")
+                self._last_ball_source_age_s = float("nan")
+                self._disarm_formal_task()
                 self._publish_flat_racket_invalid(ball_source_monotonic_s)
                 return
             self._ball_source_guard.commit(float(t))
@@ -943,6 +1218,11 @@ class HOPEPlannerNode(Node):
             return
         if not solve_now:
             self.planner.push_measurement(t, p_ball)
+            if self._task_lifecycle is not None:
+                self._pending_ball_discontinuity = bool(
+                    self._pending_ball_discontinuity
+                    or self.planner.estimator.discontinuity_detected
+                )
             if self._kf is not None:
                 self._kf.push(t, p_ball)
             return
@@ -982,15 +1262,43 @@ class HOPEPlannerNode(Node):
                 self._kf_pos_delta = float("nan")
                 self._kf_vel_delta = float("nan")
 
+        predicted_strike_time_s = None
+        strike_target = self.planner.strike_target
+        if strike_target is not None:
+            candidate_strike_time = float(strike_target.t_strike)
+            if np.isfinite(candidate_strike_time) and candidate_strike_time >= 0.0:
+                predicted_strike_time_s = candidate_strike_time
+        continue_sample, inbound_track_ready = self._observe_formal_task_present(
+            source_time_s=float(t),
+            source_monotonic_s=ball_source_monotonic_s,
+            raw_ball_position=p_ball,
+            predicted_strike_time_s=predicted_strike_time_s,
+        )
+        if not continue_sample:
+            self._last_valid = False
+            self._last_tts = float("nan")
+            self._last_effective_tts = float("nan")
+            return
+
         if cmd is None:
             self._last_valid = False
             self._last_tts = float("nan")
-            if self._racket_flat_schema in (
+            self._last_effective_tts = float("nan")
+            if self._task_lifecycle is not None:
+                revision = self._task_lifecycle.publish(
+                    self._wire_counters.control_epoch,
+                    inbound_track_ready=inbound_track_ready,
+                    solver_valid=False,
+                )
+                self._publish_flat_racket_invalid(
+                    ball_source_monotonic_s, task_revision=revision
+                )
+            elif self._racket_flat_schema in (
                 RACKET_FLAT_SCHEMA_V2_FACE179,
                 RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
             ):
                 self._publish_flat_racket_invalid(ball_source_monotonic_s)
-            if self.cmd_pub is not None and self._racket_flat_schema in (2, 3):
+            if self.cmd_pub is not None and self._racket_flat_schema in (2, 3, 4):
                 out = RacketCommand()
                 out.header = msg.header
                 out.header.frame_id = "world"
@@ -1037,13 +1345,51 @@ class HOPEPlannerNode(Node):
                     cmd = self.planner.replan_latest()
                     if cmd is None:
                         self._last_valid = False
-                        if self._racket_flat_schema in (2, 3):
+                        if self._task_lifecycle is not None:
+                            revision = self._task_lifecycle.publish(
+                                self._wire_counters.control_epoch,
+                                inbound_track_ready=inbound_track_ready,
+                                solver_valid=False,
+                            )
+                            self._publish_flat_racket_invalid(
+                                ball_source_monotonic_s,
+                                task_revision=revision,
+                            )
+                        elif self._racket_flat_schema in (2, 3):
                             self._publish_flat_racket_invalid(ball_source_monotonic_s)
                         return
 
-        self._last_valid = cmd.valid
+        task_revision = None
+        if self._task_lifecycle is not None:
+            task_revision = self._task_lifecycle.publish(
+                self._wire_counters.control_epoch,
+                inbound_track_ready=inbound_track_ready,
+                solver_valid=bool(cmd.valid),
+            )
+        wire_command_valid = bool(cmd.valid) and (
+            self._task_lifecycle is None or task_revision is not None
+        )
+        self._last_valid = wire_command_valid
         tts = self.planner.time_to_strike
-        self._last_tts = tts if tts is not None else float("nan")
+        if (
+            tts is not None
+            and self._racket_flat_schema == RACKET_FLAT_SCHEMA_V4_FACE179_TASK
+        ):
+            publish_now_ros_s = self._now_ros_s()
+            self._last_ball_source_age_s = max(
+                0.0, publish_now_ros_s - float(t)
+            )
+            # Keep the wire value sample-relative. Its source_monotonic_s maps
+            # the original header stamp, and the C++ mailbox subtracts the
+            # resulting end-to-end age exactly once. The compensated value is
+            # diagnostic only; publishing it would double-count latency.
+            self._last_tts = float(tts)
+            self._last_effective_tts = latency_compensated_time_to_strike(
+                float(tts), float(t), publish_now_ros_s
+            )
+        else:
+            self._last_tts = tts if tts is not None else float("nan")
+            self._last_effective_tts = self._last_tts
         if cmd.valid:
             self._n_planner_valid += 1
 
@@ -1055,38 +1401,63 @@ class HOPEPlannerNode(Node):
         flat_contract_error = None
         if self.flat_cmd_pub is not None:
             formal_wire = {}
-            if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH:
+            if self._racket_flat_schema in (
+                RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+                RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
+            ):
                 formal_wire = {
                     "control_epoch": self._wire_counters.control_epoch,
                     "command_sequence": self._next_sequence("_racket_sequence"),
                     "base_sequence_ref": self._wire_counters.base_sequence,
                     "source_monotonic_s": ball_source_monotonic_s,
                 }
-            try:
-                flat_data, flat_contract_error = pack_racket_command_flat_fail_closed(
-                    schema=self._racket_flat_schema,
-                    valid=bool(cmd.valid),
-                    swing_sign=swing_sign,
-                    position_w=(
-                        float(cmd.p_intercept[0]),
-                        float(cmd.p_intercept[1]),
-                        float(cmd.p_intercept[2]) + self._policy_z_offset,
+            if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V4_FACE179_TASK:
+                formal_wire.update(
+                    task_id=(0 if task_revision is None else task_revision.task_id),
+                    task_revision=(
+                        0
+                        if task_revision is None
+                        else task_revision.task_revision
                     ),
-                    velocity_w=cmd.v_racket,
-                    time_to_strike=(
-                        float(self._last_tts) if self._last_tts == self._last_tts else 0.0
-                    ),
-                    strike_time=float(cmd.t_strike),
-                    frame_code=0,
-                    # StrikeSpec exposes the physical opponent-facing contact face B. The C++
-                    # 179 runner converts B->raw mount +Y/A with the selected clip sign; do not
-                    # pre-flip here and never flip position/velocity.
-                    normal_cmd_w=cmd.n_racket,
-                    rho=0.0,
-                    **formal_wire,
                 )
+            try:
+                if (
+                    self._racket_flat_schema == RACKET_FLAT_SCHEMA_V4_FACE179_TASK
+                    and task_revision is None
+                ):
+                    # The producer has not yet observed the explicit new-ball
+                    # rearm barrier. Do not leak a plausible target under an
+                    # anonymous identity while waiting for that proof.
+                    flat_data = pack_invalid_racket_command_flat(
+                        schema=self._racket_flat_schema, **formal_wire
+                    )
+                else:
+                    flat_data, flat_contract_error = pack_racket_command_flat_fail_closed(
+                        schema=self._racket_flat_schema,
+                        valid=wire_command_valid,
+                        swing_sign=swing_sign,
+                        position_w=(
+                            float(cmd.p_intercept[0]),
+                            float(cmd.p_intercept[1]),
+                            float(cmd.p_intercept[2]) + self._policy_z_offset,
+                        ),
+                        velocity_w=cmd.v_racket,
+                        time_to_strike=(
+                            float(self._last_tts)
+                            if self._last_tts == self._last_tts
+                            else 0.0
+                        ),
+                        strike_time=float(cmd.t_strike),
+                        frame_code=0,
+                        # StrikeSpec exposes the physical opponent-facing contact face B. The C++
+                        # 179 runner converts B->raw mount +Y/A with the selected clip sign; do not
+                        # pre-flip here and never flip position/velocity.
+                        normal_cmd_w=cmd.n_racket,
+                        rho=0.0,
+                        **formal_wire,
+                    )
             except (IndexError, TypeError, ValueError, OverflowError) as exc:
-                if self._racket_flat_schema not in (2, 3):
+                if self._racket_flat_schema not in (2, 3, 4):
                     raise
                 flat_data = pack_invalid_racket_command_flat(
                     schema=self._racket_flat_schema,
@@ -1116,7 +1487,10 @@ class HOPEPlannerNode(Node):
                 out = RacketCommand()
                 out.header = msg.header
                 out.header.frame_id = "world"
-                if flat_contract_error is not None:
+                if flat_contract_error is not None or (
+                    self._racket_flat_schema == RACKET_FLAT_SCHEMA_V4_FACE179_TASK
+                    and task_revision is None
+                ):
                     # Canonical invalid mirror: finite zeros plus opponent-facing
                     # +X normal. Consumers see the same formal-flat revocation.
                     out.normal.x = 1.0
@@ -1139,7 +1513,7 @@ class HOPEPlannerNode(Node):
                     out.ball_velocity_outgoing.x = float(cmd.v_ball_outgoing[0])
                     out.ball_velocity_outgoing.y = float(cmd.v_ball_outgoing[1])
                     out.ball_velocity_outgoing.z = float(cmd.v_ball_outgoing[2])
-                    out.valid = bool(cmd.valid)
+                    out.valid = wire_command_valid
                     out.clears_net = bool(cmd.clears_net)
                     out.bypasses_net_posts = bool(cmd.bypasses_net_posts)
                     out.predicted_bounces = int(cmd.num_bounces)
@@ -1302,7 +1676,34 @@ class HOPEPlannerNode(Node):
             ),
             KeyValue(key="last_valid", value=str(self._last_valid)),
             KeyValue(key="time_to_strike_s", value=f"{self._last_tts:.4f}"),
+            KeyValue(
+                key="runner_effective_time_to_strike_s",
+                value=f"{self._last_effective_tts:.4f}",
+            ),
+            KeyValue(
+                key="ball_source_age_s",
+                value=f"{self._last_ball_source_age_s:.4f}",
+            ),
+            KeyValue(
+                key="ball_to_strike_plane_x_m",
+                value=f"{self._last_ball_plane_distance_m:.4f}",
+            ),
         ]
+        if self._task_lifecycle is not None:
+            status.values += [
+                KeyValue(
+                    key="formal_task_state",
+                    value=self._task_lifecycle.state.value,
+                ),
+                KeyValue(
+                    key="formal_task_id",
+                    value=str(self._task_lifecycle.active_task_id or 0),
+                ),
+                KeyValue(
+                    key="formal_task_revision",
+                    value=str(self._task_lifecycle.active_revision),
+                ),
+            ]
         if self._kf is not None:
             status.values += [
                 KeyValue(key="kf_pos_delta_m", value=f"{self._kf_pos_delta:.4f}"),

@@ -504,7 +504,116 @@ stale watchdog；P1 不改变其 source-pinned/exact-PGID 语义，也不会让 
 task/assets/plant、完整 recipe 与正式 `num_envs`。c7 canary 只闭合旧终档语义；strict caeb probe 已按本页
 证据闭合当前 4096-env full-scene 启动/终档门，但尚无科学 trainer 或 Reward 结果。
 
+## Task-revision successor 24 格队列（待激活）
+
+`phase1_task_revision_supercombo_20260716.yaml` 是旧 rolling-timing 池的唯一 successor（后继队列）：
+24 格按六张 GPU 四圈预注册，每格只跑一个 seed，且每格回答不同问题。独立 tick 红队发现原来两条
+`target_delay_steps=2` 时间戳对照只把 actor 目标延迟两 tick，却让 phase governor 当场看到新 deadline；
+这与部署端“governor 与 actor 同时消费到达的完整 revision tuple”不等价。因此这两格固定为
+`governor_actor_transport_not_atomic` / **NO-LAUNCH**，既不算训练失败也不能被全局激活改成 READY；当前
+可点火集合严格为其余 `22` 条 delay-zero 格。后续只有完整 `(epoch, task, revision, target, TTS)` transport
+ring 在出队时同 tick 提交 governor+actor 后，才能另行解锁时间戳配对，不能用 filler 替换。
+
+队列当前必须保持
+`launch_authorized=false`；source commit、generic full-scene probe、task-revision 专项 probe、同 Pod parent
+和 reviewed continuation harness 全部回填后，才允许单独受审激活。generic probe 的“首迭代、自然退出、finite”
+结果不能单独解锁；专项 receipt 还必须证明四个准备时间 mixture 分量、`<0.5 s`/`=0.5 s`/`>0.5 s`
+三类样本、revision attempt=`accepted+rejected`、至少一次 accepted revision，以及最后触球前 policy interval
+仍有 accepted revision，并且 actor 确实在普通 tick 与最后触球前 tick 都读到该 revision。末 tick 两项不得放宽；
+六个 profile 的 `early_deadline_tolerance_s` 固定为 `1e-6`，
+与 float32 的 `0.02 s` policy grid 对齐，不能退回会在末 tick 假拒绝的 `1e-9`。
+
+先在本机只读验证和看四圈计划；输出必须明确 `launchable_job_count=22`、
+`transport_blocked_job_count=2`，但仍展示全部 24 个预注册问题：
+
+```bash
+python3 scripts/run_phase1_task_revision_supercombo_queue.py \
+  --queue configs/phase1_task_revision_supercombo_20260716.yaml validate
+python3 scripts/run_phase1_task_revision_supercombo_queue.py \
+  --queue configs/phase1_task_revision_supercombo_20260716.yaml plan
+```
+
+source 进入最终 clean commit 后，只允许预注册代表格 `taskrev_p1_core_high_noise` 做一次 4096-env、两 update、
+非科学 full-scene probe。先 dry-run；真实执行只加下面的唯一确认词：
+
+```bash
+python3 scripts/run_phase1_task_revision_supercombo_queue.py \
+  --queue configs/phase1_task_revision_supercombo_20260716.yaml \
+  full-scene-probe --job-id taskrev_p1_core_high_noise --pod pod1 --gpu 1 \
+  --attempt-id REPLACE_WITH_UNIQUE_ATTEMPT
+
+# 真实执行才追加：
+# --execute --confirm SIM_ONLY_RUN_ONE_TASK_REVISION_FULL_SCENE_PROBE
+```
+
+probe 自然终止后，finalizer 在**同一个 Pod1 SSH** 中先运行既有 generic terminal finalizer，再运行
+task-revision 专项 finalizer；第二步失败时即使 generic 通过也不得激活：
+
+```bash
+python3 scripts/run_phase1_task_revision_supercombo_queue.py \
+  --queue configs/phase1_task_revision_supercombo_20260716.yaml \
+  finalize-full-scene-probe --job-id taskrev_p1_core_high_noise --pod pod1 --gpu 1 \
+  --attempt-id REPLACE_WITH_THE_SAME_ATTEMPT
+
+# 真实执行才追加：
+# --execute --confirm SIM_ONLY_FINALIZE_ONE_TASK_REVISION_FULL_SCENE_PROBE
+```
+
+专项结果以 `O_EXCL`（文件已存在即拒绝）发布 `task_revision_probe_result.json`。激活变更必须把该文件
+的 absolute path、file SHA、content SHA 和上述 activation booleans 回填
+`blocking_contract.task_revision_full_scene_probe_evidence`；runner 自己把该证据加入 `validate`、`plan`、
+`fill`、行为 attestor 和 exact-stop 的统一 blocker，不能只改旧 generic evidence 绕过。
+
+科学 run 的行为比较不读 TensorBoard EMA，而只消费 runner 每个 PPO update 发出的唯一
+`HOPE_EXACT_BEHAVIOR_UPDATE_JSON`。absolute milestone 可从 `plan` 读取。先只读 inspect；需要创建 checkpoint
+和行为 receipt 时使用 attest：
+
+```bash
+python3 scripts/run_phase1_task_revision_supercombo_queue.py \
+  --queue configs/phase1_task_revision_supercombo_20260716.yaml \
+  inspect-behavior --job-id REPLACE_WITH_JOB_ID --milestone REPLACE_WITH_ABSOLUTE_ITERATION
+# 真实 inspect 才追加：
+# --execute --confirm SIM_ONLY_INSPECT_ONE_TASK_REVISION_BEHAVIOR_WINDOW
+
+python3 scripts/run_phase1_task_revision_supercombo_queue.py \
+  --queue configs/phase1_task_revision_supercombo_20260716.yaml \
+  attest-behavior --job-id REPLACE_WITH_JOB_ID --milestone REPLACE_WITH_ABSOLUTE_ITERATION
+# 真实 attest 才追加：
+# --execute --confirm SIM_ONLY_ATTEST_ONE_TASK_REVISION_BEHAVIOR_WINDOW
+```
+
+consumer 先逐字节重建 claim，重验 binding、numeric PID=PGID、starttime、完整 argv、checkpoint receipt，
+再用 inode/size/SHA 绑定 append-only log prefix。它拒绝重复 update、缺号、provider 漂移和分母账不守恒；
+只对 checkpoint 结束的两个互不重叠 100-update 完整窗口先加整数、再算比例。eligible denominator 为零时
+结果是 null 且继续训练，绝不能把稀疏回台零值当失败。receipt 写入
+`behavior_milestones/model_N.json`，重复消费 fail closed。
+
+只有 receipt 明确给出 `stop_clear_dense_collapse` 时，operator 才可手动调用 exact stop；rolling 自动任务
+不得隐式 signal：
+
+```bash
+python3 scripts/run_phase1_task_revision_supercombo_queue.py \
+  --queue configs/phase1_task_revision_supercombo_20260716.yaml \
+  exact-stop-behavior --job-id REPLACE_WITH_JOB_ID --milestone REPLACE_WITH_ABSOLUTE_ITERATION
+# 真实 stop 才追加：
+# --execute --confirm SIM_ONLY_EXACT_STOP_ONE_TASK_REVISION_BEHAVIOR_FAILURE
+```
+
+stop consumer 会重新读取 behavior/checkpoint receipt、claim/binding 和 PID/PGID/starttime/argv，先写 no-clobber
+intent，再用 reviewed `exact_process_group.py` 对该数值 PGID 做成员双读；先 TERM，20 秒后仍存在时只对 intent
+已绑定且未被新成员/PID reuse 污染的 residual 做 KILL。它不用 `pgrep -f`、`pkill` 或 `killall`，不自动 retry，
+也不接收命令行 PID/路径。
+
 ## Rolling timing 双 Pod 严格续训（2026-07-16）
+
+> **历史记录，禁止运行。** 本节以下所有
+> `phase1_rolling_timing_supercombo_20260716.yaml` 只保留 validate、plan、只读 inspect 和历史 receipt
+> 复核；2026-07-16 task-revision cutover 已撤销其发射授权。旧池的 active-swing target/TTS freeze
+> 和 EMA-only 量尺不能回答部署问题，也不能诚实淘汰。不得再次 resume/fill/finalize；新的唯一候选入口是
+> `phase1_task_revision_supercombo_20260716.yaml`，且在本页新增 successor 段落完成 full-scene/行为
+> consumer 前仍为 `launch_authorized=false`。旧 runner 会按追踪路径或冻结文件 SHA 对任何 `fill`（包括
+> dry-run）永久 fail closed；历史 attestor 代码只为核验既有 no-clobber receipt 保留，本节不再授权新的
+> attestation 消费。
 
 快速动作、滚动剩余击球时间和预测扰动的 24 格组合不允许走 fresh-only generic runner，也不复用旧的
 demo-hotstart snapshot。专用入口先在本机校验冻结 YAML，再对每台 Pod 只建立一次只读 SSH，核验三份唯一 parent：
@@ -535,16 +644,8 @@ RSL-RL 的 `max_iterations` 在 resume 时表示**从 parent 之后再跑多少 
 跑到 `5201`；这一真实反例已经进入负测试，
 不能再靠字段名猜语义。
 
-激活前先 dry-run；真实发射使用独立确认词：
-
-```bash
-python3 scripts/run_phase1_rolling_timing_supercombo_queue.py \
-  --queue configs/phase1_rolling_timing_supercombo_20260716.yaml fill --count 24
-python3 scripts/run_phase1_rolling_timing_supercombo_queue.py \
-  --queue configs/phase1_rolling_timing_supercombo_20260716.yaml \
-  fill --count 24 --execute \
-  --confirm SIM_ONLY_LAUNCH_ONE_ROLLING_CONTINUATION_JOB
-```
+旧池的 dry-run 与真实 `fill` 入口均已永久关闭；不要从历史聊天、shell history 或旧提交复制发射命令。
+下面的调度说明只解释既有 claim/receipt 如何产生，不构成启动授权。
 
 runner 按六张卡一圈一条的冻结顺序发射，每张卡上限四条；每条都在创建 run 前原子核验 source/ignored-asset
 receipt/Hydra/parent/GPU 容量。父 checkpoint 必须具备 full-state optimizer 恢复资格，child 首个 learning
@@ -592,9 +693,10 @@ attestor 对目标 job 分别完整重建两个 schema-2 claim，remote actual �
 “允许 continuation 字段不同”的通配规则，第三 runner 或 parent/source/recipe/run/slot/budget/argv 任一
 漂移仍在 checkpoint load 前 fail closed。
 
-已有 checkpoint 只能通过 rolling runner 的专用 no-clobber 入口取证。`job-id` 必须来自 YAML，`milestone`
+历史 checkpoint receipt 由 rolling runner 的专用 no-clobber attestor 产生。`job-id` 必须来自 YAML，`milestone`
 必须是 parent iteration 加冻结 offset 后的**绝对**编号；Pod、run directory、binding、claim 与 receipt 路径均
-由该 job 派生，不接受 CLI PID 或手写远端路径。先 dry-run：
+由该 job 派生，不接受 CLI PID 或手写远端路径。当前只允许用下面的本地 dry-run 复算既有输入；不得再追加
+receipt：
 
 ```bash
 python3 scripts/run_phase1_rolling_timing_supercombo_queue.py \
@@ -602,17 +704,9 @@ python3 scripts/run_phase1_rolling_timing_supercombo_queue.py \
   attest-milestone --job-id REPLACE_WITH_JOB_ID --milestone REPLACE_WITH_ABSOLUTE_ITERATION
 ```
 
-人工复核 dry-run 的 job/Pod/absolute schedule/runtime SHA 后，才允许一次真实消费：
-
-```bash
-python3 scripts/run_phase1_rolling_timing_supercombo_queue.py \
-  --queue configs/phase1_rolling_timing_supercombo_20260716.yaml \
-  attest-milestone --job-id REPLACE_WITH_JOB_ID --milestone REPLACE_WITH_ABSOLUTE_ITERATION \
-  --execute --confirm SIM_ONLY_ATTEST_ONE_ROLLING_CONTINUATION_MILESTONE
-```
-
 dry-run 必须列出该 job 的两个完整候选 digest/runner；若只出现一个、出现第三个、contract 与 queue SHA
-不符或 job 在 deny 表中，禁止 execute。远端先核训练 checkout 仍 clean exact，但绝不修改活训练工作树。
+不符或 job 在 deny 表中，历史 receipt 也不能被视为可复算。旧生产消费已经结束，禁止 execute。原实现会先
+核训练 checkout clean exact，且不会修改活训练工作树。
 因为旧 trainer source 不含新 expected-identity 参数，同一 SSH 会把本地 reviewed
 `lean_queue_runtime.py` bytes 以 SHA 为目录名、O_EXCL/no-replace 地发布到
 `/workspace/codexschema/lean_queue_attestor_runtime/<sha>/`；已存在时只接受逐字节相同的只读 regular file，
@@ -646,6 +740,22 @@ content-bound parent baseline 均缺失。首份 `model_5200` checkpoint receipt
 发布 consume-once 整数事件账和 phase `sum+count`，或另立 checkpoint-bound immutable exam；当前 runner
 不会从旧日志伪造行为窗。
 
+### Task-revision cutover 精确停池
+
+本入口已经完成一次 cutover，现只保留下面的只读 dry-run 供历史身份复核：
+
+```bash
+python3 scripts/stop_phase1_rolling_task_revision_cutover.py --pod pod1
+python3 scripts/stop_phase1_rolling_task_revision_cutover.py --pod pod2
+```
+
+dry-run 必须逐条验证 queue 派生的 claim/binding、source、PID=PGID/starttime、完整 argv/cwd、latest checkpoint
+与 hard contract。真实 stop 与 finalizer 已经消费完毕，本历史段不再给出 mutation 命令；禁止从旧版本复制
+`--execute` 或 `--finalize-existing`。
+
+2026-07-16 的真实 cutover 已完成，旧 rolling queue 标为 superseded；不要再次 execute/finalize，也不要从旧
+YAML resume/fill。Pod1/Pod2 receipt SHA-256 分别为 `e6b2480a...8263e`、`4c370431...949`。
+
 ## 验证
 
 ```bash
@@ -656,10 +766,12 @@ python3 -m pytest -q \
   hope_training/whole_body_tracking/tests/test_full_scene_probe_runtime.py \
   tests/test_run_lean_training_queue.py \
   tests/test_run_phase1_rolling_timing_supercombo_queue.py \
+  tests/test_run_phase1_task_revision_supercombo_queue.py \
   hope_training/whole_body_tracking/tests/test_training_launch_claim.py \
   hope_training/whole_body_tracking/tests/test_training_thread_caps.py
 python3 -m py_compile scripts/run_lean_training_queue.py \
   scripts/run_phase1_rolling_timing_supercombo_queue.py \
+  scripts/run_phase1_task_revision_supercombo_queue.py \
   hope_training/whole_body_tracking/scripts/exact_process_group.py \
   hope_training/whole_body_tracking/scripts/train.py \
   hope_training/whole_body_tracking/scripts/lean_queue_runtime.py \

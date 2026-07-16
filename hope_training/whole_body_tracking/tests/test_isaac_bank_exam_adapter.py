@@ -608,6 +608,20 @@ def test_scorecard_json_is_strict_and_csv_has_same_attempt_count(tmp_path: Path)
     assert loaded["attempts"][0]["normal_error_deg"] is None
     assert len((tmp_path / "score.csv").read_text().splitlines()) == len(schedule) + 1
 
+    original_json = (tmp_path / "score.json").read_bytes()
+    original_csv = (tmp_path / "score.csv").read_bytes()
+    with pytest.raises(A.IsaacBankExamError, match="refusing to replace"):
+        A.write_scorecard(
+            output_json=tmp_path / "score.json",
+            output_csv=tmp_path / "score.csv",
+            metadata={"evaluation_contract_exact": False},
+            records=rows,
+            schedule=schedule,
+            clip_names=("forehand", "backhand"),
+        )
+    assert (tmp_path / "score.json").read_bytes() == original_json
+    assert (tmp_path / "score.csv").read_bytes() == original_csv
+
 
 def test_tolerant_checkpoint_loader_rejects_actor_key_missing_from_checkpoint(monkeypatch):
     class Value:

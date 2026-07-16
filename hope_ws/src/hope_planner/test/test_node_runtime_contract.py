@@ -20,6 +20,7 @@ from hope_planner.node_runtime_contract import (
     base_pose_is_fresh,
     base_yaw_relative_y,
     corrected_base_pose,
+    latency_compensated_time_to_strike,
     ros_source_to_monotonic,
     ros_stamp_fields_to_seconds,
     validate_formal_source_clock_mode,
@@ -305,6 +306,36 @@ def test_ros_source_mapping_preserves_upstream_age_and_runner_adds_dds_age():
     assert 1.0 - (500.02 - mapped) == pytest.approx(0.79)  # TTS decays end-to-end
 
 
+def test_formal_tts_removes_transport_and_solve_age_without_granting_future_skew():
+    assert latency_compensated_time_to_strike(0.50, 100.00, 100.08) == pytest.approx(
+        0.42
+    )
+    # A source stamp inside the separate future-tolerance never creates extra
+    # preparation time.
+    assert latency_compensated_time_to_strike(0.50, 100.01, 100.00) == 0.50
+    # Missed deadlines remain negative so the runner can reject them.
+    assert latency_compensated_time_to_strike(0.05, 100.00, 100.08) == pytest.approx(
+        -0.03
+    )
+
+
+@pytest.mark.parametrize(
+    "sample_tts,source_stamp,now_ros",
+    [
+        (math.nan, 1.0, 1.0),
+        (0.5, math.inf, 1.0),
+        (0.5, 1.0, math.nan),
+        (0.5, -0.1, 1.0),
+        (0.5, 1.0, -0.1),
+    ],
+)
+def test_formal_tts_rejects_nonfinite_or_negative_clock_inputs(
+    sample_tts, source_stamp, now_ros
+):
+    with pytest.raises(ValueError):
+        latency_compensated_time_to_strike(sample_tts, source_stamp, now_ros)
+
+
 def test_ros_stamp_fields_reject_invalid_nanoseconds_and_negative_seconds():
     assert ros_stamp_fields_to_seconds(7, 123_000_000) == pytest.approx(7.123)
     with pytest.raises(ValueError, match="out of range"):
@@ -446,6 +477,25 @@ def test_gate3_sim_profile_binds_long_horizon_and_nonstarving_cadence():
         if publisher["topic"] == "/sim/a3/pelvis_pose"
     )
     assert pelvis["options"]["frame_id"] == params["formal_base_source_frame_id"]
+
+
+def test_task_revision_overlay_is_explicit_schema4_and_freezes_ball_boundaries():
+    path = (
+        Path(__file__).resolve().parents[1]
+        / "config"
+        / "hope_planner.task_revision.yaml"
+    )
+    params = yaml.safe_load(path.read_text(encoding="utf-8"))["hope_planner"][
+        "ros__parameters"
+    ]
+    assert params == {
+        "racket_flat_schema": 4,
+        "formal_task_no_ball_rearm_s": 0.10,
+        "formal_task_inbound_vx_threshold_mps": -0.30,
+        "formal_task_outbound_vx_threshold_mps": 0.30,
+        "formal_task_plane_close_margin_m": 0.02,
+        "formal_task_deadline_close_grace_s": 0.08,
+    }
 
 
 def test_ros_node_wires_one_corrected_base_to_flat_adaptive_x_and_side():

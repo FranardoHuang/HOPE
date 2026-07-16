@@ -18,12 +18,19 @@ Rates: the rig streams at 300 Hz during play (team contract, 2026-07); the bridg
 `update_freq` is aligned to 300 Hz. The vendored client's own `client.yaml` default is 100 Hz —
 always launch through `avatar_pro_hope_bridge.launch.py`.
 
-Timestamp boundary (audited 2026-07-16): the current vendored VRPN tracker callback does **not**
-preserve the packet capture timestamp. It publishes `header.stamp` from the ROS host clock at
-receipt, and the relay preserves that value. Formal planner/C++ source-age logic is therefore based
-on host receipt time, not camera capture time. Do not describe it as end-to-end capture-latency
-compensation until the callback forwards the VRPN message timestamp, clock synchronization is
-recorded, and a capture→planner→runner latency report passes.
+Timestamp boundary (source implemented 2026-07-16, runtime still `Partial`): the vendored VRPN
+tracker now has an explicit `source_timestamp_mode`:
+
+- `receipt` is the default and preserves the historical host-receipt stamp;
+- `vrpn_packet` preserves each pose/twist/accel callback's VRPN `msg_time` only when its absolute
+  difference from the local ROS clock is at most `vrpn_source_max_abs_skew_s` (default `0.1 s`).
+
+Packet mode rejects negative/overflowing seconds, invalid microseconds, non-finite time, bad clock
+configuration and excessive skew by suppressing that sample; it never falls back to receipt time.
+It therefore requires recorded PTP/NTP-equivalent synchronization between the VRPN producer and ROS
+host. The source helper has a dependency-light C++ pass, but ROS/Jazzy package build and an actual
+capture→planner→runner latency report remain open. Until those pass, production must keep `receipt`
+and must not claim camera-capture latency compensation.
 
 Current relay config defaults the input object names to `PPT` for the table and `ppp2`/`ppp3` for the
 two robot rigid bodies, while publishing the normalized output topics `/P1/pose` and `/P2/pose`. These
@@ -80,8 +87,14 @@ not by rigid-body name; its `ball_rigid_body_name` parameter is currently unused
 
 | Topic | Type | Contract |
 | --- | --- | --- |
-| `/racket/command_flat` | `std_msgs/Float64MultiArray` | Schema 1 is legacy 12-value position/velocity. Face schema 2 is exact16 with physical face-B normal and zero rho. Formal schema 3 is exact20 and adds shared control epoch, racket sequence, exact base-sequence reference and source-monotonic time; valid rows require explicit `swing_sign=+1/-1`. |
+| `/racket/command_flat` | `std_msgs/Float64MultiArray` | Schema 1 is legacy 12-value position/velocity. Face schema 2 is exact16 with physical face-B normal and zero rho. Formal schema 3 is exact20 and adds shared control epoch, racket sequence, exact base-sequence reference and source-monotonic time. Task-revision schema 4 is exact22. Valid and task-scoped invalid rows both require positive `task_id` and positive monotonic `task_revision`; only a global invalid revoke may use `(0,0)`, and mixed-zero pairs are malformed. Valid rows require explicit `swing_sign=+1/-1`. |
 | `/a3/base_pose_flat` | `std_msgs/Float64MultiArray` | Legacy schema 1 is exact9. Formal schema 2 is exact12 and adds shared control epoch, base sequence and source-monotonic time. Marker-local `marker_to_base_xyz` is quaternion-rotated before addition. |
+
+Schema 4 has exactly three identity cases: positive/positive is one task-scoped valid or invalid
+revision; zero/zero is an anonymous global revoke; either mixed-zero pair is malformed and globally
+revokes. The ordinary `/racket/command` message has no task identity fields and remains a
+legacy/diagnostic output. Formal task-revision execution is authorized only by
+`/racket/command_flat` schema 4.
 
 Formal schema 3 selects side from `(R_yaw(base)^-1 * (intercept_w-base_w)).y`, not raw world Y.
 Missing, stale, malformed or implausible base state publishes finite invalid rows on both topics;
@@ -89,17 +102,23 @@ only a newer causal racket row may re-arm. Planner mocap yaw proposes side, whil
 rejects a proposal inconsistent with its boot-aligned-IMU target geometry outside the explicit
 ±`0.04 m` overlap. Human-readable READY logs are diagnostic only and cannot authorize a serve.
 
-The formal command sequence is a transport ordering field, not a ball/rally task identity. The C++
-mailbox rejects stale rows and keeps the latest valid row, but current messages do not prove that one
-planned strike is consumed exactly once. A still-fresh stream can become eligible again after the
-runner returns to idle; task-level deduplication remains a deployment blocker.
+The formal command sequence remains a transport ordering field, not a ball identity. Schema 4 closes
+that gap with `(control_epoch, task_id, task_revision)`: one physical inbound ball owns one task id;
+each solver refresh, including task-scoped invalid rows with a positive pair, advances its revision.
+A sustained no-ball gap plus a clearly inbound next track, plane/deadline close, or contact-sized outbound transition
+closes the old task. The C++ consumer linearizes the task id exactly once, accepts a latest-value
+mailbox that first exposes revision `N>1`, and never replays a consumed task after idle/rearm.
+Position, velocity, physical face-B normal and remaining strike time may update atomically before
+contact while side/clip stay frozen. Source tests pass, but vendor runtime behavior remains open.
 
 ## Deploy Runtime Topics
 
-- `/racket/command` — consumed by `hope_wbc_runner` (the legacy 180-D Python runner).
+- `/racket/command` — consumed by `hope_wbc_runner` (the legacy 180-D Python runner). This mirror has
+  no task id/revision and is diagnostic/legacy only; it cannot satisfy task-revision exactly-once.
 - `/racket/command_flat` and `/a3/base_pose_flat` — consumed by the C++
   `a3_deploy_onnx_ref_pingpong --planner` path through AimRT ROS 2 subscribers. Source wiring is
-  implemented; vendor first-tick/behavior evidence and hardware use remain separate open gates.
+  implemented. Formal schema-4 task revision is carried only by `/racket/command_flat`; vendor
+  first-tick/behavior evidence and hardware use remain separate open gates.
 - `/hope/estop` — hope_wbc_runner safety gate.
 - `/body_drive/*` — AGI backend command/state interface; on the MDU these run over iceoryx and are
   invisible to the ros2 CLI. A ros2/iceoryx transport mismatch presents as `rate=0` + safe-halt

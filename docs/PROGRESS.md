@@ -13,6 +13,13 @@
 
 ## 2026-07-16
 
+- 17:00 CST，按“先停自动任务、再改训练协议”的要求完成 rolling task-revision cutover：双 Pod 22 条
+  接受臂与两条既有 importer rejected job 均已逐项确认进程/NVML absent，Pod1/Pod2 no-clobber receipt
+  SHA 分别为 `e6b2480a...8263e`、`4c370431...949`。旧池没有可重建的独立行为窗口，且 formal 179-D
+  active swing 冻结目标/TTS，所以不再继续训练或从 EMA 假造淘汰。下一池先闭合同球递增 revision、受限
+  phase governor、真正的 0.5 秒卷和 consume-once 整数事件账。见
+  [rolling 组合卷宗](experiments/2026-07/EXP-P1-ROLLING-TIMING-SUPERCOMBO.md)。
+
 - 完成 V10 现场八项问题的源码/合同复核：训练侧 rolling TTS 同源补偿、统一 motion retiming 与 Python
   planner 逐样本重规划已经存在；但 VRPN 仍用 host receipt stamp，formal 179 active swing 冻结 target/clock，
   真实击球位置/trajectory residual 未进入训练，0.5 秒行为量尺不完整，调试输出未形成单条关联 trace，且

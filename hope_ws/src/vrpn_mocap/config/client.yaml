@@ -6,3 +6,7 @@
     update_freq: 100.
     refresh_freq: 1.
     multi_sensor: false
+    # Historical/default behavior: stamp locally when the callback receives a sample.
+    # Set to vrpn_packet only when the VRPN server and ROS host clocks are synchronized.
+    source_timestamp_mode: receipt
+    vrpn_source_max_abs_skew_s: 0.1

@@ -36,6 +36,7 @@
 #include "geometry_msgs/msg/twist_stamped.hpp"
 #include "rclcpp/qos.hpp"
 #include "rclcpp/rclcpp.hpp"
+#include "vrpn_mocap/source_timestamp.hpp"
 
 namespace vrpn_mocap
 {
@@ -94,12 +95,17 @@ namespace vrpn_mocap
 
     void MainLoop();
 
+    bool ResolveMessageTimestamp(
+        int64_t packet_seconds, int64_t packet_microseconds, rclcpp::Time *stamp) const;
+
     std::string ValidNodeName(const std::string &name);
 
     const std::string name_;
     const bool multi_sensor_;
     const std::string frame_id_;
     const bool sensor_data_qos_;
+    const SourceTimestampMode source_timestamp_mode_;
+    const double vrpn_source_max_abs_skew_s_;
     const std::shared_ptr<vrpn_Connection> connection_;
 
     vrpn_Tracker_Remote vrpn_tracker_;
