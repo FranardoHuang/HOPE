@@ -13,6 +13,13 @@
 
 ## 2026-07-17
 
+- ready-to-strike 首次 Pod2 CPU-only 真实生成在发布前 fail closed：正式 v4rg 的三项 canonical migration
+  provenance 被 v1 严格字段表误当成 unexpected，正反手均无候选 NPZ/contract、无 TOPP、无 GPU 行为，
+  因此不是动作或动力学失败。失败 namespace 永久保留。修复版只新增完整 canonical-v2 三元组这一精确
+  变体，逐位继承 primary source、不混入 ready-source，并继续拒绝 partial/坏 SHA/point/tool/未知字段；
+  也明确不声称已重算 legacy ancestor bytes。专项 `21 passed`，下一次只用新源码和新 namespace。见
+  [短路径实验](experiments/2026-07/EXP-MOTION-READY-TO-STRIKE-0P5.md)。
+
 - 动作加速从“只给完整旧 clip 做 TOPP”扩成可审计的 ready-to-strike 空间路径候选：严格取动作第0帧
   姿态、显式零速度、解析 quintic 接入，触球前0.1秒/触球行保持逐字节。独立红队抓到并修复了 join
   `q/-q` 符号跳变和 joint-velocity suffix 过度声明；专项 `8 passed`。输出仍固定训练/部署权限为 false，

@@ -56,7 +56,10 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
 
 - **动作加速当前边界：** 完整旧 v4rg 只重定时得到 `0.98/0.78 s`，因此新增的 host-only
   ready-to-strike 生成器从动作第0帧零速准备态直接接入保真的触球前0.1秒。四元数符号跳变与
-  joint-velocity 过度声明已经红队修复，专项 `8 passed`；但尚未对真实动作生成候选，也没有
+  joint-velocity 过度声明已经红队修复。Pod2 首次真实生成又在发布前暴露 source gate 假拒绝：正式
+  v4rg 的完整 migration 三元组被当成额外字段，正反手均无候选、无 TOPP、无 GPU 行为；失败 namespace
+  已冻结。修复版精确接受并逐位保留 canonical 三元组，仍拒绝残缺、坏值和未知字段，专项 `21 passed`；
+  但尚未得到真实动作候选，也没有
   production FK、TOPP≤0.5、L0/L1、桌网、动力学或行为通过，不能写成0.5秒动作已完成。见
   [短路径实验](experiments/2026-07/EXP-MOTION-READY-TO-STRIKE-0P5.md)。
 

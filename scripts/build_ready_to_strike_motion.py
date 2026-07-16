@@ -49,7 +49,14 @@ SCHEMA2_METADATA_KEYS = (
     "body_lin_vel_point",
     "body_names",
 )
+SCHEMA2_MIGRATION_PROVENANCE_KEYS = (
+    "kinematics_migration_source_sha256",
+    "kinematics_migration_source_point",
+    "kinematics_migration_tool",
+)
 REQUIRED_KEYS = frozenset(SCHEMA2_TIME_KEYS + SCHEMA2_METADATA_KEYS)
+ALLOWED_KEYS = REQUIRED_KEYS | frozenset(SCHEMA2_MIGRATION_PROVENANCE_KEYS)
+CANONICAL_MIGRATION_TOOL = "migrate_motion_kinematics.py/v2"
 CONTRACT_SCHEMA_VERSION = 1
 PROTECTED_PRECONTACT_SECONDS = 0.1
 
@@ -152,6 +159,52 @@ def _scalar_text(value: np.ndarray, label: str) -> str:
     return str(item)
 
 
+def _canonical_scalar_text(value: np.ndarray, label: str) -> str:
+    """Read one exact scalar string emitted by the canonical migration tool."""
+
+    array = np.asarray(value)
+    if array.shape != () or array.dtype.kind != "U" or array.dtype.hasobject:
+        raise MotionBuildError(f"{label} must be one canonical unicode scalar string")
+    return _scalar_text(array, label)
+
+
+def _migration_provenance(arrays: Mapping[str, np.ndarray]) -> dict[str, str] | None:
+    present = frozenset(SCHEMA2_MIGRATION_PROVENANCE_KEYS) & frozenset(arrays)
+    if not present:
+        return None
+    if present != frozenset(SCHEMA2_MIGRATION_PROVENANCE_KEYS):
+        missing = sorted(frozenset(SCHEMA2_MIGRATION_PROVENANCE_KEYS) - present)
+        raise MotionBuildError(f"partial migration provenance; missing={missing}")
+    source_sha = _canonical_scalar_text(
+        arrays["kinematics_migration_source_sha256"],
+        "kinematics_migration_source_sha256",
+    )
+    if len(source_sha) != 64 or any(character not in "0123456789abcdef" for character in source_sha):
+        raise MotionBuildError(
+            "kinematics_migration_source_sha256 must be one lowercase SHA-256"
+        )
+    source_point = _canonical_scalar_text(
+        arrays["kinematics_migration_source_point"],
+        "kinematics_migration_source_point",
+    )
+    if source_point not in ("link_origin", "center_of_mass"):
+        raise MotionBuildError(
+            "kinematics_migration_source_point must be link_origin or center_of_mass"
+        )
+    tool = _canonical_scalar_text(
+        arrays["kinematics_migration_tool"], "kinematics_migration_tool"
+    )
+    if tool != CANONICAL_MIGRATION_TOOL:
+        raise MotionBuildError(
+            f"kinematics_migration_tool must be {CANONICAL_MIGRATION_TOOL!r}"
+        )
+    return {
+        "kinematics_migration_source_sha256": source_sha,
+        "kinematics_migration_source_point": source_point,
+        "kinematics_migration_tool": tool,
+    }
+
+
 def _validate_zip_members(payload: bytes, label: str) -> None:
     try:
         with zipfile.ZipFile(io.BytesIO(payload)) as archive:
@@ -171,11 +224,17 @@ def load_schema2_snapshot(payload: bytes, label: str) -> dict[str, np.ndarray]:
     try:
         with np.load(io.BytesIO(payload), allow_pickle=False) as archive:
             keys = tuple(archive.files)
-            if len(keys) != len(set(keys)) or set(keys) != REQUIRED_KEYS:
+            key_set = set(keys)
+            if len(keys) != len(key_set) or not REQUIRED_KEYS.issubset(key_set):
                 missing = sorted(REQUIRED_KEYS - set(keys))
-                unexpected = sorted(set(keys) - REQUIRED_KEYS)
+                unexpected = sorted(set(keys) - ALLOWED_KEYS)
                 raise MotionBuildError(
                     f"{label} schema-2 field set changed; missing={missing} unexpected={unexpected}"
+                )
+            unexpected = sorted(key_set - ALLOWED_KEYS)
+            if unexpected:
+                raise MotionBuildError(
+                    f"{label} schema-2 field set changed; missing=[] unexpected={unexpected}"
                 )
             arrays = {key: np.asarray(archive[key]).copy() for key in keys}
     except MotionBuildError:
@@ -248,6 +307,10 @@ def load_schema2_snapshot(payload: bytes, label: str) -> dict[str, np.ndarray]:
         raise MotionBuildError(
             f"{label} joint_vel must be producer-exact gradient(joint_pos, 1/fps)"
         )
+    try:
+        _migration_provenance(arrays)
+    except MotionBuildError as exc:
+        raise MotionBuildError(f"{label} {exc}") from exc
     return arrays
 
 
@@ -615,6 +678,17 @@ def build_candidate(
         "finite": True,
         "quaternion_max_norm_error": quat_norm_error,
         "contact_time_from_frame0_s": contact_output / float(fps),
+        "source_migration_provenance": _migration_provenance(source),
+        "source_migration_provenance_preserved": all(
+            np.array_equal(output[key], source[key])
+            for key in SCHEMA2_MIGRATION_PROVENANCE_KEYS
+            if key in source
+        ),
+        "ready_source_migration_provenance": _migration_provenance(ready_source),
+        "migration_provenance_validation": {
+            "canonical_syntax_and_verbatim_lineage_only": True,
+            "legacy_ancestor_bytes_rehashed": False,
+        },
     }
     return output, proof
 
@@ -804,6 +878,7 @@ def build_contract(
             "not_table_net_or_dynamics_safe",
             "not_trainable",
             "not_deployable",
+            "migration_legacy_ancestor_bytes_not_rehashed",
         ],
     }
 

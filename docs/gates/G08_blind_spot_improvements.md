@@ -427,7 +427,10 @@ Research track，主选也不是晋级动作。完整 ledger 与命令见
 2026-07-17 增加了一个仍保持训练关闭的 ready-to-strike host candidate gate：输入必须是 canonical
 schema-2，等待姿态固定为所选 `ready-source` 第0帧且速度显式全零；quintic 只改 join 前路径，触球前
 0.1秒六通道逐字节保留。红队用合法 `q/-q` 输入抓到并修复了 join 四元数分量跳变，也纠正了
-`joint_vel` 在 join 重算却被误写成全 suffix bitwise 的声明。专项 `8 passed`。这只允许生成候选；
+`joint_vel` 在 join 重算却被误写成全 suffix bitwise 的声明。首次 Pod2 真实生成又抓到标准 migration
+三元组被 source gate 假拒绝：两侧均未写候选、未启动 TOPP，不能算动作失败。修复后只接受 core-only
+或完整 canonical-v2 三元组，逐位保留 primary source 血缘且拒绝残缺/未知/坏值，专项 `21 passed`。
+这只允许生成候选；
 production FK、TOPP `<=0.5 s`、L0、vendor L1、桌网、动力学和行为卷仍全部开放，所以 G08 不晋级。
 见[实验](../experiments/2026-07/EXP-MOTION-READY-TO-STRIKE-0P5.md)和
 [操作](../operations/run_ready_to_strike_motion.md)。

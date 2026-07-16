@@ -31,7 +31,9 @@ def _sha(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-def _motion_arrays(*, frames: int, ready: bool) -> dict[str, np.ndarray]:
+def _motion_arrays(
+    *, frames: int, ready: bool, migration_provenance: bool = False
+) -> dict[str, np.ndarray]:
     fps = 50
     dt = 1.0 / fps
     joints = 3
@@ -65,7 +67,7 @@ def _motion_arrays(*, frames: int, ready: bool) -> dict[str, np.ndarray]:
     body_quat[..., 0] = 1.0
     body_lin = np.gradient(body_pos, dt, axis=0).astype(np.float32)
     body_ang = np.zeros((frames, bodies, 3), dtype=np.float32)
-    return {
+    arrays = {
         "fps": np.array([fps], dtype=np.int64),
         "joint_pos": joint_pos,
         "joint_vel": joint_vel,
@@ -78,6 +80,13 @@ def _motion_arrays(*, frames: int, ready: bool) -> dict[str, np.ndarray]:
         "body_lin_vel_point": np.array("center_of_mass"),
         "body_names": np.array(["pelvis_link", "racket_link"]),
     }
+    if migration_provenance:
+        arrays.update(
+            kinematics_migration_source_sha256=np.array("a" * 64),
+            kinematics_migration_source_point=np.array("link_origin"),
+            kinematics_migration_tool=np.array("migrate_motion_kinematics.py/v2"),
+        )
+    return arrays
 
 
 def _write_motion(path: Path, *, frames: int = 40, ready: bool = False) -> dict[str, np.ndarray]:
@@ -126,6 +135,145 @@ def test_quintic_boundary_conditions_are_c2_exact() -> None:
     np.testing.assert_allclose(p[-1], p1, rtol=0.0, atol=1.0e-12)
     np.testing.assert_allclose(v[-1], v1, rtol=0.0, atol=1.0e-11)
     np.testing.assert_allclose(a[-1], a1, rtol=0.0, atol=1.0e-10)
+
+
+def test_canonical_migration_provenance_is_preserved_and_bound(tmp_path: Path) -> None:
+    source_path = tmp_path / "source.npz"
+    ready_path = tmp_path / "ready.npz"
+    output_path = tmp_path / "candidate.npz"
+    contract_path = tmp_path / "candidate.json"
+    source = _motion_arrays(frames=40, ready=False, migration_provenance=True)
+    ready = _motion_arrays(frames=12, ready=True, migration_provenance=True)
+    ready["kinematics_migration_source_sha256"] = np.array("b" * 64)
+    ready["kinematics_migration_source_point"] = np.array("center_of_mass")
+    with source_path.open("wb") as stream:
+        np.savez(stream, **source)
+    with ready_path.open("wb") as stream:
+        np.savez(stream, **ready)
+
+    completed = subprocess.run(
+        _command(source_path, ready_path, output_path, contract_path),
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    with np.load(output_path, allow_pickle=False) as archive:
+        output = {key: np.asarray(archive[key]).copy() for key in archive.files}
+    for key in M.SCHEMA2_MIGRATION_PROVENANCE_KEYS:
+        assert np.array_equal(output[key], source[key])
+        assert output[key].dtype == source[key].dtype
+        assert output[key].shape == source[key].shape
+    contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    proof = contract["proof"]
+    assert proof["source_migration_provenance"] == {
+        "kinematics_migration_source_sha256": "a" * 64,
+        "kinematics_migration_source_point": "link_origin",
+        "kinematics_migration_tool": "migrate_motion_kinematics.py/v2",
+    }
+    assert proof["ready_source_migration_provenance"][
+        "kinematics_migration_source_sha256"
+    ] == "b" * 64
+    assert proof["source_migration_provenance_preserved"] is True
+    assert proof["migration_provenance_validation"] == {
+        "canonical_syntax_and_verbatim_lineage_only": True,
+        "legacy_ancestor_bytes_rehashed": False,
+    }
+    assert "migration_legacy_ancestor_bytes_not_rehashed" in contract["explicit_non_claims"]
+
+
+def test_ready_only_migration_provenance_does_not_become_output_lineage(
+    tmp_path: Path,
+) -> None:
+    source_path = tmp_path / "source.npz"
+    ready_path = tmp_path / "ready.npz"
+    output_path = tmp_path / "candidate.npz"
+    contract_path = tmp_path / "candidate.json"
+    source = _motion_arrays(frames=40, ready=False)
+    ready = _motion_arrays(frames=12, ready=True, migration_provenance=True)
+    with source_path.open("wb") as stream:
+        np.savez(stream, **source)
+    with ready_path.open("wb") as stream:
+        np.savez(stream, **ready)
+
+    completed = subprocess.run(
+        _command(source_path, ready_path, output_path, contract_path),
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 0, completed.stderr
+    with np.load(output_path, allow_pickle=False) as archive:
+        assert not (set(archive.files) & set(M.SCHEMA2_MIGRATION_PROVENANCE_KEYS))
+    contract = json.loads(contract_path.read_text(encoding="utf-8"))
+    assert contract["proof"]["source_migration_provenance"] is None
+    assert contract["proof"]["ready_source_migration_provenance"] is not None
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("missing_sha", "partial migration provenance"),
+        ("missing_point", "partial migration provenance"),
+        ("missing_tool", "partial migration provenance"),
+        ("unknown", "unexpected"),
+        ("uppercase_sha", "lowercase SHA-256"),
+        ("nonscalar_sha", "canonical unicode scalar string"),
+        ("bytes_sha", "canonical unicode scalar string"),
+        ("object_sha", "Object arrays cannot be loaded"),
+        ("integer_sha", "canonical unicode scalar string"),
+        ("bad_point", "must be link_origin or center_of_mass"),
+        ("bad_tool", "kinematics_migration_tool must be"),
+    ],
+)
+def test_noncanonical_migration_provenance_fails_closed_without_outputs(
+    tmp_path: Path, mutation: str, message: str
+) -> None:
+    source_path = tmp_path / "source.npz"
+    ready_path = tmp_path / "ready.npz"
+    output_path = tmp_path / "candidate.npz"
+    contract_path = tmp_path / "candidate.json"
+    source = _motion_arrays(frames=40, ready=False, migration_provenance=True)
+    if mutation == "missing_sha":
+        del source["kinematics_migration_source_sha256"]
+    elif mutation == "missing_point":
+        del source["kinematics_migration_source_point"]
+    elif mutation == "missing_tool":
+        del source["kinematics_migration_tool"]
+    elif mutation == "unknown":
+        source["unexpected_provenance"] = np.array("not allowed")
+    elif mutation == "uppercase_sha":
+        source["kinematics_migration_source_sha256"] = np.array("A" * 64)
+    elif mutation == "nonscalar_sha":
+        source["kinematics_migration_source_sha256"] = np.array(["a" * 64])
+    elif mutation == "bytes_sha":
+        source["kinematics_migration_source_sha256"] = np.array(b"a" * 64)
+    elif mutation == "object_sha":
+        source["kinematics_migration_source_sha256"] = np.array("a" * 64, dtype=object)
+    elif mutation == "integer_sha":
+        source["kinematics_migration_source_sha256"] = np.array(7, dtype=np.int64)
+    elif mutation == "bad_point":
+        source["kinematics_migration_source_point"] = np.array("racket_origin")
+    elif mutation == "bad_tool":
+        source["kinematics_migration_tool"] = np.array("migrate_motion_kinematics.py/v3")
+    else:  # pragma: no cover - parametrization is exhaustive
+        raise AssertionError(mutation)
+    with source_path.open("wb") as stream:
+        np.savez(stream, **source)
+    _write_motion(ready_path, frames=12, ready=True)
+
+    completed = subprocess.run(
+        _command(source_path, ready_path, output_path, contract_path),
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert completed.returncode == 2
+    assert message in completed.stderr
+    assert not output_path.exists() and not contract_path.exists()
 
 
 def test_build_preserves_ready_contact_window_and_velocity_continuity(tmp_path: Path) -> None:

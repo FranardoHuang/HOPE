@@ -35,6 +35,12 @@ run-up 上界是正手 `0.98 s`、反手 `0.78 s`。因此单纯把完整旧 cli
 - 输出 NPZ 与 JSON 使用 no-clobber；下游必须两份同时存在并核 SHA。双文件发布不是 crash-atomic，
   若进程被 `SIGKILL` 留下孤儿文件，保全现场并人工判 invalid，禁止自动删除后重放。
 - 输出 contract 固定 `training/deployment/hardware_authorized=false`。host 生成成功不得越过后续门。
+- 输入允许两种精确 schema-2 形态：没有迁移溯源的原生核心字段，或完整携带
+  `kinematics_migration_source_sha256/source_point/tool` 三元组。三项只允许 canonical migration v2
+  的 scalar unicode 形态并必须全有；未知字段、残缺三元组、坏 SHA/point/tool 均拒绝。输出逐位继承
+  击球 source 的三元组，不把 ready-source 的三元组冒充输出血缘；JSON 分别绑定两份当前输入 SHA。
+  历史 legacy ancestor bytes 尚未重读复算，因此这只证明 canonical syntax 与逐位保留，不证明祖先
+  制品仍可取或其 SHA 已重新验证。
 
 ## 完整而不混因果的四格
 
@@ -52,8 +58,13 @@ run-up 上界是正手 `0.98 s`、反手 `0.78 s`。因此单纯把完整旧 cli
 
 - 决定：`inconclusive`；采用 host-only candidate builder，不采用任何生成动作。
 - 是否已纳入当前 setting：`no`。
+- 真实 attempt 1：Pod2 CPU-only、namespace
+  `/workspace/codexschema/ready_to_strike_0p5_20260717/attempt_2137b82b`。正/反手都在写候选前
+  fail closed，原因是 v1 生成器把正式 v4rg 的完整 canonical migration 三元组误判为 unexpected；
+  没有候选 NPZ/contract、没有启动 TOPP、没有占 GPU，也不是动作/动力学失败。该 namespace 永久保留，
+  不重放。合同修复后的专项为 `21 passed`；下一次只能使用新源码和新 namespace。
 - 下一门：在 ignored runtime 资产上按预注册 join ladder 生成正/反手候选，production FK 重建后逐个跑
   TOPP；只把 `<=0.5 s` 的候选送 L0/L1/桌网/动力学，再用绑定该 motion SHA 的 0.5 秒 K100 和
-  vendor MuJoCo 判行为。
+vendor MuJoCo 判行为。
 
 复现入口见[操作文档](../../operations/run_ready_to_strike_motion.md)。

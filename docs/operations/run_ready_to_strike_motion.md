@@ -44,6 +44,22 @@ join 还必须至少早于受保护的触球前 `0.1 s` 一行。不要看到结
 之一，或进程被强杀，保留目录作为失败证据；不得删除后用同一个 attempt 自动重放。输出目录只能是
 可信私有 real directory，不能含 symlink。
 
+输入字段集必须精确。原生 schema-2 可以只有六个时序通道、`fps` 和四项 active kinematics metadata；
+若存在历史迁移溯源，则以下三项必须同时存在且由 canonical v2 writer 产生：
+
+```text
+kinematics_migration_source_sha256 = lowercase 64-hex unicode scalar
+kinematics_migration_source_point  = link_origin | center_of_mass unicode scalar
+kinematics_migration_tool          = migrate_motion_kinematics.py/v2 unicode scalar
+```
+
+不要删除正式资产的三元组来绕过检查。生成器把击球 source 三项逐位复制到输出，并只在 JSON 中另行记录
+ready-source；它不会重读旧 legacy ancestor bytes，所以这不是 ancestor SHA 的重新认证。三项残缺、数组而非
+scalar、bytes/object/integer、未知额外字段或非法值都会在发布前拒绝。
+
+2026-07-17 的首次 Pod2 namespace `attempt_2137b82b` 使用旧 v1 source gate，正反手均因错误拒绝上述
+完整三元组而停止；没有候选、TOPP 或 GPU 行为。该目录只作证据，不得删除或在同 namespace 重发。
+
 ## 下一步不是直接训练
 
 每条候选依次执行：
