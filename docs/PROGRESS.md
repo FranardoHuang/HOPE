@@ -13,12 +13,17 @@
 
 ## 2026-07-17
 
+- Stage-2 远端执行前的真实 source-root 对账发现 tracked runner 仍错误地从 `b1f5a38` 训练 checkout
+  寻找后置 `66f93559` generator；该 checkout 按合同本来就不含它。未创建 Stage-2 namespace、未启动 child。
+  runner 已改为读取并冻结 Stage-1 receipt 认证的 immutable generator copy，旧 checkout 只提供
+  TOPP/MJCF/URDF/body-order；missing/tampered copy 均在 namespace 前 fail closed，组合回归 `51 passed`。
+
 - ready×join Stage-1 historical attestor 已在 Pod2 唯一 no-clobber consume 中成功发布 receipt
   `7cf1c7c9…c377f`。六格 candidate、完整 schema-2、production-FK TOPP 输出/provenance、frame0 零速、
   protected window 与 source closure 均重验通过；可信 screening 时间为 `1.28/0.70/1.54/1.94/0.78/1.42 s`，
   全部仍高于 `0.5 s`。这关闭了端点证据假绿，不等于动力学或行为通过；四个预注册 `d=12` 中点的
   tracked CPU-only runner 已经独立红队，绑定冻结输入、contact/fps timing、唯一 namespace 和 3600 秒
-  child timeout，组合回归 `49 passed`，下一步仅为一次性执行。
+  child timeout；随后双 source-root 修复后的组合回归为 `51 passed`，下一步仅为一次性执行。
 
 - Pod2 task-revision `+500` 已为 quality 父本六格和 continuous 父本一格发布行为 receipt。quality 六格
   completion=`0.919–0.971`、virtual-return=`0.278–0.395`，没有任何一格达到预注册 dense-collapse 门；

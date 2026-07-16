@@ -31,7 +31,7 @@
   "required_attestation_receipt_sha256": "7cf1c7c9613eb4a319dc8038934d3b439b8d3f948fab6b2650872e71f54c377f",
   "stage2_runner": {
     "path": "scripts/run_ready_to_strike_join_ladder_stage2.py",
-    "sha256": "d04951f1393407ec4a4a60b038fb31982b339ed4cc9fdfe0e3a83a30ca49d676"
+    "sha256": "835cb56f9aac7c5b85791368e1de26745140a5de1af00144b0167fc2c26cf9f4"
   },
   "stage2_namespace": "/workspace/codexschema/ready_to_strike_0p5_20260717/join_ladder_stage2_d12_8d74025e",
   "launch_authorized": true,

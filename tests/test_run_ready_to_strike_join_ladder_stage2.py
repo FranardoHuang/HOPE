@@ -36,6 +36,11 @@ def _write(path: Path, payload: bytes) -> None:
 
 def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]:
     queue = json.loads((REPO / "configs/ready_to_strike_join_ladder_20260717.yaml").read_text())
+    stage1 = tmp_path / "stage1"
+    stage1.mkdir()
+    generator_payload = b"attested-stage1-generator\n"
+    _write(stage1 / "build_ready_to_strike_motion.py", generator_payload)
+    queue["runtime"]["generator_sha256"] = _sha(generator_payload)
     runtime = tmp_path / "runtime"
     queue["runtime"]["checkout_path"] = str(runtime)
     runtime_payloads: dict[str, bytes] = {}
@@ -61,8 +66,6 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]
     queue_sha = _sha(queue_payload)
     monkeypatch.setattr(runner, "EXPECTED_QUEUE_SHA256", queue_sha)
 
-    stage1 = tmp_path / "stage1"
-    stage1.mkdir()
     stage2 = tmp_path / "stage2"
     observations = []
     for cell_id, values in runner.EXPECTED_OBSERVATIONS.items():
@@ -401,6 +404,30 @@ def test_missing_receipt_fails_before_namespace(
     paths["receipt"].unlink()
 
     with pytest.raises(runner.Stage2Error, match="attestation receipt"):
+        _plan(paths)
+    assert not paths["root"].exists()
+
+
+def test_missing_attested_stage1_generator_copy_fails_before_namespace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _fixture(tmp_path, monkeypatch)
+    stage1 = Path(json.loads(paths["activation"].read_text())["stage1_namespace"])
+    (stage1 / "build_ready_to_strike_motion.py").unlink()
+
+    with pytest.raises(runner.Stage2Error, match="Stage1 generator copy"):
+        _plan(paths)
+    assert not paths["root"].exists()
+
+
+def test_tampered_attested_stage1_generator_copy_fails_before_namespace(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    paths = _fixture(tmp_path, monkeypatch)
+    stage1 = Path(json.loads(paths["activation"].read_text())["stage1_namespace"])
+    (stage1 / "build_ready_to_strike_motion.py").write_bytes(b"tampered\n")
+
+    with pytest.raises(runner.Stage2Error, match="generator copy SHA changed"):
         _plan(paths)
     assert not paths["root"].exists()
 

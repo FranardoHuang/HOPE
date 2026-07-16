@@ -67,7 +67,6 @@ EXPECTED_OBSERVATIONS = {
 }
 
 RUNTIME_RELATIVE_PATHS = {
-    "generator_sha256": Path("scripts/build_ready_to_strike_motion.py"),
     "topp_sha256": Path("hope_training/whole_body_tracking/scripts/topp_mintime.py"),
     "mjcf_sha256": Path("agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml"),
     "urdf_sha256": Path("agi/URDF/A3T2.5-URDF-std-pingpang/urdf/URDF-JOINT-LINK.urdf"),
@@ -256,7 +255,7 @@ def _validate_queue(queue: Any) -> Mapping[str, Any]:
         "topp_sha256", "mjcf_sha256", "urdf_sha256", "body_order_sha256",
     }, "queue.runtime")
     _require(Path(runtime["checkout_path"]).is_absolute(), "runtime checkout must be absolute")
-    for key in RUNTIME_RELATIVE_PATHS:
+    for key in (*RUNTIME_RELATIVE_PATHS, "generator_sha256"):
         _require(_is_sha256(runtime[key]), f"runtime {key} SHA is malformed")
     assets = _exact_keys(queue["assets"], {"forehand", "backhand"}, "queue.assets")
     for name, asset in assets.items():
@@ -764,11 +763,18 @@ def _validate_inputs(*, activation_path: Path | str, queue_path: Path | str,
         _load_json(receipt_snapshot.payload, "Stage1 receipt"),
         receipt_sha=receipt_sha, receipt_payload=receipt_snapshot.payload,
         queue=queue, activation=activation)
+    stage1_generator = _read_snapshot(
+        _absolute(activation["stage1_namespace"]) / "build_ready_to_strike_motion.py",
+        "attested Stage1 generator copy",
+    )
+    _require(stage1_generator.sha256 == queue["runtime"]["generator_sha256"],
+             "attested Stage1 generator copy SHA changed")
     runtime_root = _absolute(queue["runtime"]["checkout_path"])
     _require(runtime_root.is_dir(), "runtime checkout is missing")
     snapshots: dict[str, Snapshot] = {
         "runner": source_snapshot, "activation": activation_snapshot,
         "queue": queue_snapshot, "receipt": receipt_snapshot,
+        "stage1_generator": stage1_generator,
     }
     for key, relative in RUNTIME_RELATIVE_PATHS.items():
         snapshot = _read_snapshot(runtime_root / relative, f"runtime {key}")
@@ -858,8 +864,9 @@ def _run_stage2_impl(*, activation_path: Path | str, queue_path: Path | str,
         "activation": snapshot_root / "activation.json",
         "queue": snapshot_root / "queue.json",
         "receipt": snapshot_root / "stage1_historical_attestation.json",
+        "stage1_generator": snapshot_root / "build_ready_to_strike_motion.py",
     }
-    for key in ("runner", "activation", "queue", "receipt"):
+    for key in ("runner", "activation", "queue", "receipt", "stage1_generator"):
         _write_exclusive(snapshot_destinations[key], snapshots[key].payload)
     runtime_snapshot_root = snapshot_root / "runtime"
     runtime_snapshot_root.mkdir(mode=0o700)
@@ -880,7 +887,7 @@ def _run_stage2_impl(*, activation_path: Path | str, queue_path: Path | str,
 
     queue: Mapping[str, Any] = context["queue"]
     runtime_root: Path = context["runtime_root"]
-    generator = runtime_snapshot_root / RUNTIME_RELATIVE_PATHS["generator_sha256"]
+    generator = snapshot_destinations["stage1_generator"]
     topp = runtime_snapshot_root / RUNTIME_RELATIVE_PATHS["topp_sha256"]
     mjcf = runtime_snapshot_root / RUNTIME_RELATIVE_PATHS["mjcf_sha256"]
     urdf = runtime_snapshot_root / RUNTIME_RELATIVE_PATHS["urdf_sha256"]

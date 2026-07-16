@@ -128,7 +128,9 @@ python3 scripts/run_ready_to_strike_join_ladder_stage2.py \
 ```
 
 runner 先以 O_EXCL 冻结 generator、TOPP 闭包、MJCF、URDF、body order、两份动作资产和所有控制文件，
-generator/TOPP 只读冻结副本。四个 TOPP 可并行，但每个 CPU child 的 reviewed timeout 为 3600 秒；任一格
+generator 必须来自 Stage-1 namespace 中已被 receipt 认证的 immutable copy；旧 `b1f5a38` 训练 checkout
+按设计不含后置 `66f93559` generator，不能从那里假取。TOPP/MJCF/URDF/body-order 仍来自绑定的旧 runtime
+checkout。generator/TOPP 只读冻结副本。四个 TOPP 可并行，但每个 CPU child 的 reviewed timeout 为 3600 秒；任一格
 失败都发布 terminal summary、全批不重试。`runup_s` 必须同时等于 output contact-frame/fps 与 timing bound，
 budget scale 必须为冻结默认 `1.5`。成功只说明 Stage-2 screening 执行完整；只有 `<=0.5 s` 且 hard gate
 全过的格才能进入 L0/L1，仍无训练、部署或真机权限。
