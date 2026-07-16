@@ -1530,7 +1530,8 @@ class PhysicalBallManager:
                 lin_vel_w, ang_vel_w, self._mass, self._prm.k_d, self._prm.k_m
             )
         force_w = force_w * active.unsqueeze(-1)
-        # Isaac Lab 2.1 applies external wrenches in the BODY frame at the COM: rotate world->body.
+        # Isaac Lab 2.1 applies this BODY-frame wrench at the link transform origin.  The
+        # origin-centred SphereCfg has zero COM offset, so the point is also the ball COM.
         self._force_b[:, 0, :] = _sb.quat_rotate_inverse_wxyz(self._ball.data.root_quat_w, force_w)
         self._ball.set_external_force_and_torque(self._force_b, self._torque_b)
         self._ball.write_data_to_sim()

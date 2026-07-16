@@ -40,8 +40,9 @@ HONESTY NOTES (read before trusting the numbers):
 * Aero wrench mechanism: identical to ``table_tennis/table_tennis_env.py`` — a
   ``sim.add_physics_callback`` registered per-substep callback that reads the ball state, computes
   the venue aero force, rotates it WORLD -> BODY (Isaac Lab 2.1 ``set_external_force_and_torque``
-  applies wrenches in the body frame at the COM; ``is_global`` only exists in >= 2.2 — see
-  table_tennis_env.py and isaac_ball_inloop_check.py), and writes it to the sim.
+  applies wrenches in the body frame at the link transform origin; this origin-centred
+  ``SphereCfg`` has zero COM offset, so origin and COM coincide; ``is_global`` only exists in
+  >= 2.2 — see table_tennis_env.py and isaac_ball_inloop_check.py), and writes it to the sim.
 
 This module is importable WITHOUT Isaac (top-level imports are torch-only); the driver lazy-loads
 ``virtual_ball`` through the package at runtime. The pure helpers below are unit-tested Isaac-free
@@ -459,7 +460,8 @@ class ShadowBallDriver:
         ang_vel_w = self._ball.data.root_ang_vel_w
         force_w = venue_aero_force(lin_vel_w, ang_vel_w, self._mass, self._prm.k_d, self._prm.k_m)
         force_w = force_w * active.unsqueeze(-1)
-        # Isaac Lab 2.1 applies external wrenches in the BODY frame at the COM: rotate world->body.
+        # Isaac Lab 2.1 applies this BODY-frame wrench at the link transform origin.  The
+        # origin-centred SphereCfg has zero COM offset, so the point is also the ball COM.
         self._force_b[:, 0, :] = quat_rotate_inverse_wxyz(self._ball.data.root_quat_w, force_w)
         self._ball.set_external_force_and_torque(self._force_b, self._torque_b)
         self._ball.write_data_to_sim()

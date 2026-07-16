@@ -66,6 +66,11 @@ Done:
 - The table-tennis scene now includes a tracked Purdue PACE table/net USD visual overlay under `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/table_usd/`. Physics still comes from invisible cuboid colliders; the USD is visual-only.
 - Table-tennis ball/table contact now follows Purdue PACE materials by default: ball mass `3.4 g`, ball restitution/friction `0.9/0.1`, table restitution/friction `0.95/0.4`, multiplicative combine for an effective ball-table normal restitution of `0.855`. HOPE-calibrated aero drag is available but off by default for Purdue parity.
 - `tests/test_table_tennis_geometry.py` covers table/frame geometry and pure drag/Magnus math; the drag/Magnus tests skip automatically if host `torch` is missing.
+- Isaac Lab 2.1 的 `Articulation.write_data_to_sim()` 会把 external wrench 以
+  `position_data=None, is_global=False` 提交到 link transform origin，并非 COM。当前 shadow/physical/
+  standalone/table-tennis ball 都是原点居中的单一 `SphereCfg`，只设置质量且没有 authored COM offset，
+  因此 origin 与 COM 重合，现有 WORLD→BODY 空气动力行为不变。`isaac_ball_inloop_check.py` 现会在
+  `sim.reset()` 后要求 local COM offset 逐 bit 为零；未来球资产若改变，该检查先失败再允许重新推导 wrench。
 - A historical diagnostic found stable rollouts when MuJoCo used `implicitfast` with kd in
   `dof_damping`, while the AGI explicit-Euler path diverged in about `0.1 s`. That did **not**
   establish actuator parity: passive kd sits outside motor effort clipping. The 2026-07-14 source

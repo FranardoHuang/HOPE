@@ -226,6 +226,17 @@ def main() -> int:
                         translation=(30.0 * (i % grid), 30.0 * (i // grid), 5.0))
     balls = RigidObject(RigidObjectCfg(prim_path="/World/Ball_.*", spawn=None))
     sim.reset()
+    # Isaac Lab 2.1 stages this BODY-frame wrench at the link transform origin because
+    # write_data_to_sim() passes position_data=None.  The current plain SphereCfg is intended to
+    # be origin-centred, so fail closed if a future asset or mass-property change moves its COM.
+    com_pos_b = balls.data.com_pos_b
+    if not torch.equal(com_pos_b, torch.zeros_like(com_pos_b)):
+        max_offset = float(torch.linalg.vector_norm(com_pos_b, dim=-1).max().item())
+        simulation_app.close()
+        raise RuntimeError(
+            "ball link origin no longer coincides exactly with COM; "
+            f"max local COM offset={max_offset:.9g} m"
+        )
     print(f"[in-loop] scene ready: {balls.num_instances} instances in one view", flush=True)
 
     offsets = torch.tensor([[30.0 * (i % grid), 30.0 * (i // grid), 0.0] for i in range(K)],
@@ -256,9 +267,10 @@ def main() -> int:
         w = balls.data.root_ang_vel_w
         speed = torch.linalg.norm(v, dim=-1, keepdim=True)
         a = -kd * speed * v + km * torch.cross(w, v, dim=-1)
-        # Isaac Lab 2.1 applies external wrenches in the BODY frame at COM (is_global only in
-        # >=2.2); rotate world->body — same convention as table_tennis_env.py. The ball spins
-        # fast (up to ~95 rad/s): skipping this rotates the force ~0.5 rad per 5 ms step.
+        # Isaac Lab 2.1 applies the BODY-frame wrench at the link transform origin
+        # (position_data=None).  The exact-zero COM guard above proves that origin is also this
+        # SphereCfg's COM.  Rotate world->body; the ball spins up to ~95 rad/s, so skipping this
+        # would rotate the force about 0.5 rad per 5 ms step.
         f_b = quat_rotate_inverse(balls.data.root_quat_w, mass * a).unsqueeze(1)
         balls.set_external_force_and_torque(f_b, torch.zeros_like(f_b))
         balls.write_data_to_sim()

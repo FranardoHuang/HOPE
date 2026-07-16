@@ -13,6 +13,11 @@
 
 ## 2026-07-16
 
+- 固定 Isaac Lab 2.1/PhysX 源码审计纠正了球空气动力的作用点说明：`position_data=None` 是 link
+  transform origin，不是 COM。现有三类球均为原点居中的单一 `SphereCfg`，所以行为仍等价；standalone
+  in-loop 检查新增 exact-zero local COM offset 门，未来资产一旦偏置就 fail closed，而不是静默产生
+  `r×F` 转矩。详见 [G04](gates/G04_sim_modeling_mujoco_isaac.md)。
+
 - 10:20 CST 的 rolling timing 单连接/Pod 只读审计确认已真实消费 `24/24` 个唯一 claim：`22` 条 live/fatal0，
   Pod1/Pod2 分别三卡 `4/3/4` 与 `4/4/3`；另外两条在首迭代前因动态 URDF importer malloc `rc134`
   退出，精确进程和 NVML context 均 absent，按基础设施拒绝保全且不自动重跑。随机横向躯干推力不再
