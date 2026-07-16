@@ -1575,6 +1575,27 @@ def cmd_fill(
     )
 
 
+def cmd_prepare_source_assets(
+    queue: dict[str, Any],
+    *,
+    job_id: str,
+    pod: str,
+    execute: bool,
+    confirm: str | None,
+) -> dict[str, Any]:
+    """Expose the reviewed ignored-asset hydrator through the successor entry point."""
+
+    job = _job(queue, job_id)
+    _require_launchable_job(job)
+    return continuation.lean.cmd_prepare_source_assets(
+        queue,
+        job_id=job_id,
+        pod=pod,
+        execute=execute,
+        confirm=confirm,
+    )
+
+
 def cmd_full_scene_probe(
     queue: dict[str, Any],
     *,
@@ -1911,6 +1932,11 @@ def _parser() -> argparse.ArgumentParser:
     fill.add_argument("--count", type=int, required=True)
     fill.add_argument("--execute", action="store_true")
     fill.add_argument("--confirm")
+    prepare = sub.add_parser("prepare-source-assets")
+    prepare.add_argument("--job-id", required=True)
+    prepare.add_argument("--pod", required=True)
+    prepare.add_argument("--execute", action="store_true")
+    prepare.add_argument("--confirm")
     full_scene = sub.add_parser("full-scene-probe")
     full_scene.add_argument("--job-id", required=True)
     full_scene.add_argument("--pod", required=True)
@@ -1968,6 +1994,14 @@ def main(argv: list[str] | None = None) -> int:
         elif args.mode == "fill":
             result = cmd_fill(
                 queue, count=args.count, execute=args.execute, confirm=args.confirm
+            )
+        elif args.mode == "prepare-source-assets":
+            result = cmd_prepare_source_assets(
+                queue,
+                job_id=args.job_id,
+                pod=args.pod,
+                execute=args.execute,
+                confirm=args.confirm,
             )
         elif args.mode == "full-scene-probe":
             result = cmd_full_scene_probe(

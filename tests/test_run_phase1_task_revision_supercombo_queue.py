@@ -120,7 +120,8 @@ def test_pending_queue_is_valid_but_not_activation_ready():
     assert set(result["transport_blocked_job_ids"]) == Q.TRANSPORT_BLOCKED_JOB_IDS
     assert result["formal_evidence_eligible"] is False
     assert all(job["status"] == "blocked" for job in queue["jobs"])
-    assert any("source_commit is pending" in row for row in result["blockers"])
+    assert not any("source_commit is pending" in row for row in result["blockers"])
+    assert any("source_full_scene_probe_evidence" in row for row in result["blockers"])
     assert any("22 jobs remain blocked" in row for row in result["blockers"])
 
 
@@ -481,6 +482,45 @@ def test_pending_fill_fails_before_any_ssh(monkeypatch):
     with pytest.raises(Q.SuccessorQueueError, match="successor fill is blocked"):
         Q.cmd_fill(queue, count=1, execute=False, confirm=None)
     assert calls == []
+
+
+def test_successor_exposes_reviewed_source_asset_prepare_without_activation(monkeypatch):
+    queue = Q.load_queue(QUEUE)
+    calls = []
+
+    def fake_prepare(value, *, job_id, pod, execute, confirm):
+        calls.append((value, job_id, pod, execute, confirm))
+        return {"mode": "prepare-source-assets", "dry_run": not execute}
+
+    monkeypatch.setattr(Q.continuation.lean, "cmd_prepare_source_assets", fake_prepare)
+    result = Q.cmd_prepare_source_assets(
+        queue,
+        job_id="taskrev_p1_core_high_noise",
+        pod="pod1",
+        execute=False,
+        confirm=None,
+    )
+    assert result == {"mode": "prepare-source-assets", "dry_run": True}
+    assert calls == [
+        (queue, "taskrev_p1_core_high_noise", "pod1", False, None)
+    ]
+
+
+def test_transport_blocked_job_cannot_prepare_successor_asset(monkeypatch):
+    queue = Q.load_queue(QUEUE)
+    monkeypatch.setattr(
+        Q.continuation.lean,
+        "cmd_prepare_source_assets",
+        lambda *_args, **_kwargs: pytest.fail("blocked job delegated"),
+    )
+    with pytest.raises(Q.SuccessorQueueError, match="scientific NO-LAUNCH"):
+        Q.cmd_prepare_source_assets(
+            queue,
+            job_id="taskrev_p1_core_low_noise",
+            pod="pod1",
+            execute=False,
+            confirm=None,
+        )
 
 
 def test_generic_probe_pass_cannot_bypass_specialized_probe_blocker(monkeypatch):

@@ -536,6 +536,21 @@ python3 scripts/run_phase1_task_revision_supercombo_queue.py \
 source 进入最终 clean commit 后，只允许预注册代表格 `taskrev_p1_core_high_noise` 做一次 4096-env、两 update、
 非科学 full-scene probe。先 dry-run；真实执行只加下面的唯一确认词：
 
+新 detached checkout 首次使用前，必须从同一个 successor 入口显式水合 Git-ignored A3 runtime；不能直接
+调用旧 generic queue（它的 Pod2 容量合同不同），也不能让 full-scene probe 隐式复制资产：
+
+```bash
+python3 scripts/run_phase1_task_revision_supercombo_queue.py \
+  --queue configs/phase1_task_revision_supercombo_20260716.yaml \
+  prepare-source-assets --job-id taskrev_p1_core_high_noise --pod pod1
+
+# 真实水合才追加：
+# --execute --confirm SIM_ONLY_PREPARE_ONE_LEAN_QUEUE_SOURCE_ASSET
+```
+
+prepare 只允许 scientific-launchable 格，仍不要求全局激活；两条 transport NO-LAUNCH 格不能借此入口进入
+任何后续运行。target/receipt 已存在时只能逐字节 exact verify，绝不覆盖。
+
 ```bash
 python3 scripts/run_phase1_task_revision_supercombo_queue.py \
   --queue configs/phase1_task_revision_supercombo_20260716.yaml \
