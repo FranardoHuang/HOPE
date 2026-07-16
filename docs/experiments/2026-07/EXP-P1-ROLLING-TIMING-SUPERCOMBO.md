@@ -1,6 +1,6 @@
 # EXP-P1-ROLLING-TIMING-SUPERCOMBO — 快速准备、时间戳补偿与组合训练漏斗
 
-- 状态：`blocked`（source/full-scene training path 已过；等待 parent runtime attestation 与 continuation runner）
+- 状态：`blocked`（source/full-scene training path 与 continuation runner 已过；等待 parent runtime attestation）
 - 阶段/轴：阶段 1，动作重定时、actor 可见目标/TTS 延迟、预测收敛抖动、击球 Reward 配比与脚朝向
 - 人类负责人：Franco
 - 执行者：Codex
@@ -221,4 +221,4 @@ trainer/hard-contract/full-scene source gate 后，才可作为空槽的 matched
 
 - 决定：`blocked / preregistration draft only`
 - 是否纳入当前 setting：`no`
-- 下一个 gate：per-Pod parent runtime attestation + continuation runner validate/dry-run
+- 下一个 gate：per-Pod parent runtime attestation + activated queue dry-run

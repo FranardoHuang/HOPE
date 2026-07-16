@@ -1,7 +1,7 @@
 schema_version: 1
 simulation_only: true
 launch_authorized: false
-preregistration_status: blocked_pending_parent_runtime_attestation_and_hotstart_harness
+preregistration_status: blocked_pending_parent_runtime_attestation
 formal_evidence_eligible: false
 
 ssh:
@@ -49,7 +49,11 @@ blocking_contract:
     strict_finalizer_status: failed_closed_on_supervisor_identity_capture_race
     strict_result_sha256: 6158f38e5e46595cddb69ff1117a2e4bc30e5c33a88b6f1a7e381651a273746f
     engineering_launch_interpretation: source_scene_and_training_path_passed_finalizer_infrastructure_bug_does_not_change_model_or_behavior
-  hotstart_harness: PENDING_SOURCE_BOUND_ROLLING_HOTSTART_HARNESS
+  hotstart_harness:
+    source_commit: a36045ea88f120473b40e7924dc9c467cb4e76f0
+    runner_script_sha256: 27202d79f362d5ee5cccae639e72b3252d8b8ee75e75b32d60a3425c048542b2
+    reviewed_tests_passed: true
+    reviewed_test_count: 88
   activation_is_manual: true
   automatic_launch: false
   automatic_retry: false
