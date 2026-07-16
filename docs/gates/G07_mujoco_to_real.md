@@ -78,12 +78,12 @@ Done (2026-06-30 → 2026-07-02, recorded 2026-07-03):
 
 Not done:
 
-- **No mocap in the loop.** The runner consumes zero VRPN/mocap topics; racket targets are
-  scripted, world/torso pose is synthesized (`loc_mode: perfect_tracking`; only IMU orientation is
-  real). The ROS chain (vrpn_mocap → relay → hope_planner → `/racket/command` → hope_wbc_runner)
-  exists but is not bridged into the C++ runner. Closing this loop also requires deciding who owns
-  the HOPE-world → robot-frame target transform (it needs the mocap base pose at the interface
-  boundary even though the 175-D actor obs itself does not).
+- **No accepted mocap-in-the-loop behavior.** The successful 2026-07-02 runner used scripted racket
+  targets and synthesized world/torso pose (`loc_mode: perfect_tracking`; only IMU orientation was
+  real). Formal ROS flat-topic source wiring into the C++ runner now exists, but has no exact
+  ROS/AimRT first tick, vendor MuJoCo behavior or hardware result. Closing the loop also requires
+  validating ownership of the HOPE-world → robot-frame target transform (it needs the mocap base
+  pose at the interface boundary even though the 175-D actor obs itself does not).
 - Acceptance evidence for the successful runs (dates, checkpoint SHAs, MDU capture paths, observed
   behavior vs MuJoCo) is not yet recorded in this gate.
 - No quality baseline on hardware (hit-rate style metrics need the mocap/ball loop).
@@ -166,3 +166,52 @@ Release, formal ONNX runtime loading, backend first tick, vendor simulator behav
 remain open. See
 [the experiment record](../experiments/2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md). No real
 robot command ran; G07 remains `Partial`.
+
+## Audit update 2026-07-16: RallyV10 field-test timing and task-lifecycle gaps
+
+The RallyV10 field observations (Jiayi's 110-D policy/planner route) were audited against the actual
+Python planner, ROS transport and C++ runner. This is a source-and-contract audit only; no robot command was run. The eight requested
+questions are not all closed end to end:
+
+1. **Capture timestamp / latency — Partial.** The planner validates a source stamp, maps it to
+   monotonic time, publishes it in formal schema 3, and the C++ consumer subtracts source age from
+   the remaining strike time. However, the vendored VRPN client currently discards the VRPN packet
+   timestamp and stamps the ROS message with host receipt time. The relay preserves that receipt
+   stamp. Camera-to-host latency therefore cannot yet be compensated or measured absolutely.
+2. **Continuously revised target and time-to-strike — Partial.** The Python planner re-estimates the
+   ball, predicts the trajectory and republishes target plus countdown for each admitted sample.
+   The formal 179-D runner rechecks the latest tuple before engage, but freezes target and clock
+   during the active swing. The optional 110-D streaming path updates position and velocity during the swing but
+   still freezes the strike clock. Neither path has a vendor Gate3 behavior result.
+3. **Trajectory prediction — Partial.** The ROS planner really does call the repository's
+   `BallTrajectoryPredictor` before target planning; the C++ runner only consumes the result. There
+   is no evidence that the field V10 launch used this exact source/config, and measured venue
+   residuals have not been replayed into training or passed through vendor Gate3.
+4. **Training distribution parity — Partial.** Current Stage 1 still uses a fixed reference station
+   and fixed per-clip target-sampling boxes. The rolling timing jobs use engineering timing bins, not a fitted venue
+   distribution; real strike-position coverage has not been compared quantitatively.
+5. **Fast preparation / retiming — Partial.** Training now has approximately 1.0/0.7/0.5-second and
+   clip-dependent random retiming, while the question-bank demanded absolute racket target remains
+   unchanged. This is uniform clip retiming, not [TOPP](../DEFINITIONS.md#topp); new-motion TOPP and
+   an equivalent deployed reference/target-speed interface remain open.
+6. **Readable debugging — Partial.** Existing 10 Hz planner diagnostics expose counts, validity and
+   time-to-strike, while the runner throttles some gate warnings. There is still no single low-rate
+   correlated record containing ball distance to strike plane, source age, predicted intercept,
+   command sequence/epoch, runner state and accept/reject reason.
+7. **Minimum catchable preparation time — Partial.** Multiple 0.5-second training jobs are live and
+   checkpoint-finite, but the running source lacks the complete per-update eligible/ready/physical-
+   fall ledger needed for a behavior decision. No 0.5-second ability claim is allowed yet.
+8. **Repeated task consumption — Open.** Formal sequence numbers reject stale/out-of-order ROS 2
+   DDS transport rows
+   and the mailbox keeps the latest row, but there is no consumed ball/rally/task identifier. After
+   a swing and the default rest period, a still-fresh valid producer stream may engage again. This
+   is not equivalent to consuming one planned strike exactly once, and the field repetition report
+   has not been reproduced or fixed in the vendor runtime.
+
+Before the next field attempt, the shortest closure order is: preserve the real VRPN capture stamp;
+add a compact correlated planner/runner trace; add a ball/rally task identity with exactly-once
+consume semantics; then test rolling target/countdown revisions in shared-interface MuJoCo and
+vendor Gate3. G07 remains `Partial`.
+
+Reproduction evidence: planner/runner causal source `6d6b778a`; focused host source tests passed
+`66/66` during this audit. These tests do not replace the open runtime and behavior gates above.

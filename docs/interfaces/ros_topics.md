@@ -18,6 +18,13 @@ Rates: the rig streams at 300 Hz during play (team contract, 2026-07); the bridg
 `update_freq` is aligned to 300 Hz. The vendored client's own `client.yaml` default is 100 Hz —
 always launch through `avatar_pro_hope_bridge.launch.py`.
 
+Timestamp boundary (audited 2026-07-16): the current vendored VRPN tracker callback does **not**
+preserve the packet capture timestamp. It publishes `header.stamp` from the ROS host clock at
+receipt, and the relay preserves that value. Formal planner/C++ source-age logic is therefore based
+on host receipt time, not camera capture time. Do not describe it as end-to-end capture-latency
+compensation until the callback forwards the VRPN message timestamp, clock synchronization is
+recorded, and a capture→planner→runner latency report passes.
+
 Current relay config defaults the input object names to `PPT` for the table and `ppp2`/`ppp3` for the
 two robot rigid bodies, while publishing the normalized output topics `/P1/pose` and `/P2/pose`. These
 input names are still TODO(confirm); G01 must record the live CMTracker names before deployment or data
@@ -81,6 +88,11 @@ Missing, stale, malformed or implausible base state publishes finite invalid row
 only a newer causal racket row may re-arm. Planner mocap yaw proposes side, while the C++ runner
 rejects a proposal inconsistent with its boot-aligned-IMU target geometry outside the explicit
 ±`0.04 m` overlap. Human-readable READY logs are diagnostic only and cannot authorize a serve.
+
+The formal command sequence is a transport ordering field, not a ball/rally task identity. The C++
+mailbox rejects stale rows and keeps the latest valid row, but current messages do not prove that one
+planned strike is consumed exactly once. A still-fresh stream can become eligible again after the
+runner returns to idle; task-level deduplication remains a deployment blocker.
 
 ## Deploy Runtime Topics
 

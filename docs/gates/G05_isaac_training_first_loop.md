@@ -2711,6 +2711,13 @@ judge/stop/retry/第二 job，因此只把 historical-claim checkpoint source ga
 整体仍 `Partial`。同轮 Pod1 `/proc` 专用双读也恢复 11 条 `live_exact` 与 latest `model_2600–3100` 的
 finite/合同/optimizer 证据；budget-v1 只到 `model_3100`，`model_3600` 不存在且未 signal。
 
+15:36 CST，第二个 registered job 也通过同一 source gate：其 per-job exact claim 摘要是
+`691a52c.../0968d24...`，runner 仍严格为 `428cbf.../90d7f...`；唯一 Pod2 SSH 发布 receipt content
+SHA=`37d6bd2...`，checkpoint=`ff1b210...`、filename/embedded=`5200`、全部浮点元素 finite，hard
+SHA=`aa80162...`、actual claim=`691a52c...`、binding=`7593d66...`、lineage=`0`、process live。没有访问
+第一 receipt、judge/stop/retry。两份 checkpoint source gate 均实测通过，但行为量尺仍缺，G05 继续
+`Partial`。同轮 Pod1 latest 扩至 `model_2600–3200`；budget-v1 只到 `3200`，未 signal。
+
 首次真实 continuation 又抓到 budget 字段语义错误：parent `1600` 配 CLI `max_iterations=3601` 时，RSL
 实际报告 `1601/5201`，说明该值是追加 update 数而非绝对终点。首 trainer 健康且 binding 正确；本地等待
 在 remote watchdog 前退出，未重发或 signal trainer。runner 已改为 CLI 传 `2001`，同时在 claim 中分别绑定

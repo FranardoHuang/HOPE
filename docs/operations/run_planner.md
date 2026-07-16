@@ -57,6 +57,13 @@ revocation, never permission for the runner to guess.
 
 Confirm live topic wiring before relying on outputs.
 
+Current runtime semantics (audited 2026-07-16): the Python node recomputes the estimate, trajectory,
+target and `time_to_strike` from each admitted sample. Formal 179-D C++ execution consumes the
+latest tuple before engage but freezes target and clock for the active swing; it is not a fully
+rolling in-swing planner. Also note that the current VRPN bridge supplies host receipt time rather
+than camera capture time. Source-age checks are useful safety checks, but are not yet end-to-end
+capture-latency compensation.
+
 Relevant source:
 
 - `hope_ws/src/hope_planner/hope_planner/node.py`
@@ -73,6 +80,13 @@ ros2 topic echo /racket/command
 ```
 
 4. Record latency and prediction sanity checks in G03.
+
+For a useful low-rate field trace, record at least: source/capture age, ball distance to the strike
+plane, predicted intercept position/velocity, time-to-strike, command epoch/sequence, runner state,
+and the accept/wait/reject reason. The existing 10 Hz diagnostics expose only part of this list; a
+single correlated planner/runner trace remains to be implemented. Until it exists, save the planner
+diagnostics topic together with runner stdout and do not infer a task-lifecycle bug from either log
+alone.
 
 Host-only source checks, without ROS, a simulator or a runner:
 

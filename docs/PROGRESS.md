@@ -13,6 +13,22 @@
 
 ## 2026-07-16
 
+- 完成 V10 现场八项问题的源码/合同复核：训练侧 rolling TTS 同源补偿、统一 motion retiming 与 Python
+  planner 逐样本重规划已经存在；但 VRPN 仍用 host receipt stamp，formal 179 active swing 冻结 target/clock，
+  真实击球位置/trajectory residual 未进入训练，0.5 秒行为量尺不完整，调试输出未形成单条关联 trace，且
+  command sequence 没有“一颗球/一个 task 只消费一次”的语义。没有运行真机，G07 保持 `Partial`。见
+  [G07 八项审计](gates/G07_mujoco_to_real.md#audit-update-2026-07-16-rallyv10-field-test-timing-and-task-lifecycle-gaps)、
+  [planner 操作](operations/run_planner.md)与[ROS topic 合同](interfaces/ros_topics.md)。
+
+- 15:36 CST，第二份 registered checkpoint 也完成唯一 Pod2 SSH/no-clobber attestation：
+  `rolling_p2_trange_comp2_j0_equal_f03@5200` 的 job-specific exact variants 为
+  `691a52c.../428cbf...` 与 `0968d24.../90d7f...`，不能复用第一 job 的 `7878/aee` 摘要。remote actual
+  精确匹配 `691a52c...`；receipt content SHA=`37d6bd2...`，checkpoint SHA=`ff1b210...`，
+  filename/embedded=`5200`，74 个浮点 tensor / `1,762,715` elements、nonfinite=`0`，hard schema-3
+  SHA=`aa80162...`、binding=`7593d66...`、lineage=`0`、process=`live`。第一份 receipt 未触碰，也没有
+  judge/stop/retry。同轮 Pod1 仍为 11 live_exact、GPU `4/3/4`、fatal0，latest `model_2600–3200` 全过；
+  budget-v1 latest=`3200`、`model_3600` 不存在，未 signal。
+
 - 约 15:10 CST，reviewed historical-claim attestor 对
   `rolling_p2_t05_comp2_j0_equal_f03@5200` 只连 Pod2 一次并成功 no-clobber 发布 receipt
   （content SHA=`521910d...`）：checkpoint SHA=`72dbcb9...`，filename/embedded=`5200`，74 个浮点 tensor、`1,762,715`

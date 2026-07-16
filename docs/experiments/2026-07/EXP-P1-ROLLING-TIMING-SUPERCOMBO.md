@@ -243,13 +243,31 @@ SHA=`7878d92...`；binding content SHA=`4b9c5b2...`，且 binding 内 claim 引�
 process=`live`。没有 judge、stop、retry 或第二 job；该 receipt 只关闭 checkpoint 身份、finite 与 lineage，
 不改变“量尺不完整，继续训练”。
 
-同轮 Pod1 唯一只读 SSH 已改用 `/proc` 专用双读，不再把伪文件套 regular-file size/mtime 门：source clean
+15:36 CST，第二份 `rolling_p2_trange_comp2_j0_equal_f03@5200` 走同一 reviewed contract，但完整 claim
+摘要必须按自己的 job/run/slot 重建：dry-run 只列 `691a52c.../428cbf...` 与
+`0968d24.../90d7f...`，而不是第一 job 的 `7878/aee`。两路独立复核确认 Pod2/GPU1、registered schedule、
+receipt path、单 SSH、actual-digest TOCTOU 与 no-clobber 边界后，唯一 execute rc=`0`；runtime
+`ec90e18...` 为 `existing_exact`，没有重写。receipt content SHA=`37d6bd2...`，checkpoint
+SHA=`ff1b210...`、filename/embedded=`5200`、74 个浮点 tensor（总 tensor 76）/ `1,762,715` elements、
+nonfinite=`0`；hard schema=`3` / SHA=`aa80162...` / lineage=`0`，actual claim=`691a52c...`，binding
+content SHA=`7593d66...` 且内部 claim 引用一致，取证时 process=`live`。第一 job/receipt 未访问；仍没有
+judge、stop、retry 或行为排名。
+
+15:35 CST 的新一轮 Pod1 唯一只读 SSH 继续用 `/proc` 专用双读：source clean
 exact `704bf3a`，11 条 PID=PGID/starttime/argv 与 immutable binding 均 `live_exact`，一个既有 importer
-malloc job 保持 rejected；GPU 并发 `4/3/4`、util=`92/97/97%`，accepted fatal=`0`。11 份 latest
-`model_2600–3100` 均 filename=embedded、74 个浮点 tensor（总 tensor 76）/ `1,762,715` elements、
+malloc job 保持 rejected；GPU 并发 `4/3/4`、util=`96/98/91%`，accepted fatal=`0`。11 份 latest
+`model_2600–3200` 均 filename=embedded、74 个浮点 tensor（总 tensor 76）/ `1,762,715` elements、
 nonfinite=`0`、schema-3 hard/
-claim/lineage=`0`、optimizer state/groups 完整。budget-v1 PGID `2199057` latest=`3100`，`model_3600`
+claim/lineage=`0`、optimizer state/groups 完整。budget-v1 PGID `2199057` latest=`3200`，`model_3600`
 不存在，未 signal；worker/judge/Kit process 均为 `0`。
+
+15:50 CST 的双 Pod 各一次只读刷新仍为 `11 live_exact + 1 importer rejected` / Pod，accepted fatal=`0`：
+Pod1 GPU=`4/3/4`、Pod2 GPU=`4/4/3`，没有额外或错卡 compute PID；22 份 latest checkpoint 均继续通过
+embedded/finite/schema-3 hard/claim/binding/lineage=`0` 与 optimizer 完整性。budget-v1 PGID `2199057`
+已到 `model_3300`，`model_3600` 仍不存在且未 signal；Pod2 可见后排 checkpoint 已到 `model_5600–5900`。
+两份 `model_5200` receipt 都作为 stable regular JSON 存在；完整文件 SHA 分别为 `c3b5af89...` / `d271c768...`，
+与各自 canonical content SHA `521910d...` / `37d6bd2...` 是不同层次且相互一致。该刷新仍只证明结构健康，不补齐行为量尺，
+不据 EMA 排名或淘汰。
 
 13:46 CST 的上一轮 Pod1 审计曾证明 source clean、12/12 claim 的 job/Pod/GPU/run/source 一致、GPU `4/3/4`、
 11 个 trainer PID 同时在 `/proc` 与 NVML、accepted fatal regex=`0`；但审计脚本错误地把 `/proc/<pid>/stat`

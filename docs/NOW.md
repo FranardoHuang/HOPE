@@ -53,14 +53,26 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   字段差异仍 fail closed。约 15:10 CST，reviewed consumer 对该 job 只连 Pod2 一次并成功 O_EXCL 发布首份
   `model_5200` receipt：filename/embedded=`5200`，74 个浮点 tensor、`1,762,715` 元素全部 finite，schema-3
   hard/claim/binding 对齐，lineage=`0`，取证时进程仍 live；receipt content SHA=`521910d...`。这只关闭
-  checkpoint 完整性，不是行为领先，第二份 `model_5200` 本轮未触碰，两条都继续、不排名、不停止。
-  15:14 CST 的 Pod1 唯一只读连接已用 `/proc` 专用双读修复上轮 UNKNOWN：`11 live_exact + 1 importer
-  rejected`，GPU=`4/3/4`、util=`92/97/97%`、accepted fatal=`0`；11 份 latest `model_2600–3100` 均
+  checkpoint 完整性，不是行为领先。15:36 CST，第二个 job 的独立 dry-run 正确生成自身 per-job claim
+  `691a52c.../0968d24...`（仍绑定 reviewed runner `428cbf.../90d7f...`），唯一 Pod2 SSH 随后也成功发布
+  `model_5200` receipt：content SHA=`37d6bd2...`、checkpoint=`ff1b210...`、hard=`aa80162...`、binding=
+  `7593d66...`，同为 embedded=`5200`、全部 finite、lineage=`0`、process live；第一份 receipt 未触碰。
+  两条都继续、不排名、不停止。15:50 CST 的 Pod1 唯一只读连接仍为 `11 live_exact + 1 importer
+  rejected`，GPU=`4/3/4`、util=`84/84/96%`、accepted fatal=`0`；11 份 latest checkpoint 均
   embedded/finite/schema-3 hard/claim/binding/lineage=`0` 且 optimizer 完整。budget-v1 PGID `2199057`
-  仍 live、latest=`3100`、`model_3600` 不存在，未 signal。后续 source 必须增加 per-update 整数机会/
+  仍 live、latest=`3300`、`model_3600` 不存在，未 signal；Pod2 同轮为 `11 live_exact + 1 importer
+  rejected`、GPU=`4/4/3`、fatal=`0`，accepted checkpoints 全部通过同一完整性门。后续 source 必须增加 per-update 整数机会/
   完成/物理跌倒 union 与 ready-phase `sum+count`，现役模型若要提前排序只能另走绑定 checkpoint 的不可变
   同卷评估。`qdot` 是确定性的关节速度超限惩罚，不是随机外力；随机横向躯干推力正在
   补 trainer/物理响应门，过门后才占释放槽做同母本 no-force/force 配对。
+
+- **V10 现场问题复核：** 训练侧“目标与 TTS 同源延迟并扣除已知延迟”和约 `1.0/0.7/0.5 s`
+  reference retiming 已进入现役 source；Python planner 也确实逐样本重新估计、预测并发布目标。但端到端
+  仍未闭环：当前 VRPN bridge 写的是 host receipt time 而非 capture time；formal 179 runner 在 active swing
+  中冻结 target/clock；训练的击球位置仍是 Stage-1 固定区域，prediction jitter 也不是场馆 residual；现役
+  logger 不能回答 0.5 秒是否真能接；transport sequence 不能替代“一颗球只消费一次”的 task id。统一低频
+  planner/runner trace 也缺 ball-plane distance、source age、intercept、sequence 与接受原因的关联记录。
+  详细逐项边界见 [G07 的八项现场审计](gates/G07_mujoco_to_real.md#audit-update-2026-07-16-rallyv10-field-test-timing-and-task-lifecycle-gaps)。
 
 - **最新可分享结果：** 反手拉 B/C 的 rank-0 主选已在 Pod1 CPU-only runtime 完成 exact 整轨
   SE(2) 实体化；后续 schema-2/FK 源码门也已进入 `main` 并通过 `17` 项专项回归。逐资产 no-write

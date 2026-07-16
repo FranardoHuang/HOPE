@@ -628,6 +628,10 @@ SHA 与 actual claim digest；digest 可由独立 contract 唯一映射回 revie
 no-clobber receipt（content SHA=`521910d...`）记录 embedded=`5200`、全部浮点 tensor finite、schema-3 hard
 SHA=`4e84c51...`、lineage=`0` 与 attestor runtime=`ec90e18...`。这不是第二个历史 variant 的 blanket
 授权；每个后续 job 仍须独立 dry-run、每轮最多一次目标 Pod SSH，并由 remote actual 完整匹配其中一个候选。
+第二个 `rolling_p2_trange_comp2_j0_equal_f03@5200` 的 dry-run 因 job/run/slot 不同，正确得到自己的
+`691a52c.../0968d24...` 两个 claim digest，但仍只绑定同一 reviewed runner `428cbf.../90d7f...`；唯一
+execute 也已 no-clobber 发布 receipt content SHA=`37d6bd2...`，且没有访问第一 job。不要把某一 job 的
+claim digest 当成全局 variant ID；全局冻结的是 runner lineage，完整 claim 必须逐 job 重建并 exact-match。
 
 运行态每 30 分钟按队列内 `pruning_contract` 审计。`+200` 只淘汰结构/合同/non-finite/fatal；`+500`
 只允许淘汰连续两窗 dense 明显崩坏，不能把缺少 eligible hit 的稀疏零值判失败；`+1000` 仅在同 parent
