@@ -631,7 +631,8 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
 ### 训练引擎与机器人物理
 
 - **[10｜P0] RallyV11 TOPP 加速动作 fresh 训练。** 责任人 yikang；执行者 Codex；分支
-  `codex/rally-v11-topp-fast-20260716`，基于 `hitter`。2026-07-16 真机复核发现现役挥拍动作
+  `codex/rally-v11-topp-prestrike-20260716`（当前 baseline 分支
+  `codex/rally-v11-topp-fast-20260716`），基于 `hitter`。2026-07-16 真机复核发现现役挥拍动作
   速度不足，当前优先级切换为：用 `main` 已验证的 TOPP v3 对 v12fix 正反手动作做触球锁窗的
   min-time 重定时，新建严格 hash/phase/receipt 绑定的 RallyV11 fast task，保持 station-relative
   击球平面 `0.58 m` 与 RallyV11 全身/下半身 Reward 合同。host gate、32-env smoke、8000-env
@@ -640,8 +641,10 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
   `num_envs=8000`、`max_iterations=20000`、`num_steps_per_env=24`；其余两张卡明确留给其他人。
   W&B [`i0jw4ohr`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/i0jw4ohr) 已越过
   `model_0` 保存并持续推进（首份看板快照到 iteration 49）；GPU1/GPU2 无 compute process。
-  TOPP 输出、oracle 剂量与触球帧保真均已绑定，但“已启动”仍不等于性能改善，后续只按 checkpoint
-  与冻结评估证据判断。
+  用户随后把优化目标收紧为“尽可能缩短第 0 帧到击球帧的时间”，而不是最短整段时长；新分支将
+  保持触球关键窗与击球后时序，把全部压缩预算优先投到击球前，并按最快 MuJoCo-oracle PASS 候选
+  重新绑定 receipt/phase/hash。当前 run 保留作 baseline，在新动作通过 audit/oracle/Isaac smoke
+  前不停止；“已启动”仍不等于性能改善，后续只按 checkpoint 与冻结评估证据判断。
 - **[4｜P0] 原生 MuJoCo 训练候选。** 责任人 franco；执行者 Codex；下一证据：修正四个源码缺口
   后复核，再测单环境核心、并行吞吐和一次限预算 PPO 更新。[实验](experiments/2026-07/EXP-MUJOCO-NATIVE-TRAINING.md)
 - **[9｜P0] Hitter 实机 planner 时序与训练反应时间基线。** 责任人 yikang；执行者 Codex；分支
