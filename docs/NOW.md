@@ -634,10 +634,14 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
   `codex/rally-v11-topp-fast-20260716`，基于 `hitter`。2026-07-16 真机复核发现现役挥拍动作
   速度不足，当前优先级切换为：用 `main` 已验证的 TOPP v3 对 v12fix 正反手动作做触球锁窗的
   min-time 重定时，新建严格 hash/phase/receipt 绑定的 RallyV11 fast task，保持 station-relative
-  击球平面 `0.58 m` 与 RallyV11 全身/下半身 Reward 合同。先过 host gate、32-env smoke 和
-  8000-env 显存探针，再只占用一张空闲 RTX 5090 fresh 发射 seed 0：
+  击球平面 `0.58 m` 与 RallyV11 全身/下半身 Reward 合同。host gate、32-env smoke、8000-env
+  显存探针与在线 W&B checkpoint/ONNX save smoke 已通过；commit `edf9e4e` 的唯一正式 run
+  已在 GPU0 fresh 发射 seed 0：
   `num_envs=8000`、`max_iterations=20000`、`num_steps_per_env=24`；其余两张卡明确留给其他人。
-  TOPP 输出、oracle 剂量、触球帧保真和该训练首迭代未核验前，不把“已启动”写成性能改善。
+  W&B [`i0jw4ohr`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/i0jw4ohr) 已越过
+  `model_0` 保存并持续推进（首份看板快照到 iteration 49）；GPU1/GPU2 无 compute process。
+  TOPP 输出、oracle 剂量与触球帧保真均已绑定，但“已启动”仍不等于性能改善，后续只按 checkpoint
+  与冻结评估证据判断。
 - **[4｜P0] 原生 MuJoCo 训练候选。** 责任人 franco；执行者 Codex；下一证据：修正四个源码缺口
   后复核，再测单环境核心、并行吞吐和一次限预算 PPO 更新。[实验](experiments/2026-07/EXP-MUJOCO-NATIVE-TRAINING.md)
 - **[9｜P0] Hitter 实机 planner 时序与训练反应时间基线。** 责任人 yikang；执行者 Codex；分支
