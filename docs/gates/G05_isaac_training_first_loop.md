@@ -2600,3 +2600,21 @@ Pod1 十二格约在 `model_1000–1200`，Pod2 七组合中五条已通过 `mod
 保留长曲线在 `model_1400/1500/4500/4500/4600`。训练仪表仍没有 activation/eligible sparse-hit 整数
 分母，Pod1 exact-hit 也只有约 `0.47%–0.54%`；因此当前只能保留自由臂时长、Reward 配比和 qdot/全栈的
 方向诊断，不能形成行为赢家、停臂或正式因果结论，G05 保持 `Partial`。
+
+#### 2026-07-16 rolling target/TTS 与题库 retiming 源码门
+
+真实测试暴露出一个训练/部署共同缺口：planner 会持续更新目标，但 actor 可能看到上一份位置、速度和
+拍面，旁边却是本 tick 的剩余击球时间。`main@704bf3a2` 为此新增
+[`atomic planner tuple timing`](../DEFINITIONS.md#atomic-planner-tuple-timing)：显式
+`source_timestamp_compensated` 模式让位置、速度、拍面、动作侧和 TTS 经过同一 delay/drop ring，并从
+source TTS 扣除已知 step delay；`uncompensated` 只作 matched stale-time 负控；默认 `live` 保持历史
+checkpoint 行为。只有 policy 改读 actor TTS，critic、Reward 和真值指标继续使用 live TTS。reset/dropout
+也按整元组 backfill/hold，mode 与 delay 进入 schema-3 hard contract。
+
+同一提交同时修正了 question-bank retiming 的假冲突：motion retiming 可以改变老师路径的时钟和参考
+速度，但 schema-3 bank 的最终 demanded racket velocity 是对同一来球反解出的绝对物理答案，不随老师
+动作一起缩放。仍然拒绝真正不相容的 `hitter_pure` target ownership，以及不重排同一来球却 mid-swing
+换 bank row。Pod2 exact Isaac 环境中新增 10 个 timing/retiming cases 全过；两文件全集与父提交具有完全
+相同的 6 个既有环境/fixture 失败，因此没有把它们冒充本次回归。该门只授权下一轮单 seed、formal-ineligible
+工程组合；尚无 4096-env source probe、训练曲线、vendor MuJoCo 或真实行为结论，G05 保持 `Partial`。详见
+[rolling supercombo 卷宗](../experiments/2026-07/EXP-P1-ROLLING-TIMING-SUPERCOMBO.md)。

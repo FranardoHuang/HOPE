@@ -71,6 +71,8 @@
 | `accepted baseline` | 已通过预定稳定性、留出卷和必要部署门，团队可以正式往上比的基线。`formal target` 不会自动变成 accepted baseline。 |
 | `plant` | 机器人与环境在仿真里的物理对象：质量、惯量、摩擦、驱动器和数值积分都在内。 |
 | <a id="qdot-limit-hinge"></a>`qdot-limit hinge` / 关节速度限位铰链惩罚 | 只在实际关节速度超过各自运行时速度上限的一定比例后开始收费：`mean(relu(abs(qd)/limit-margin)^2)`。它读取 31 个 articulation 关节的真实速度和同顺序真实上限，不是 action-rate 平滑的别名；权重为非正惩罚，默认 `0` 表示关闭。 |
+| <a id="atomic-planner-tuple-timing"></a>`atomic planner tuple timing` / 同源时刻的规划目标元组 | policy 看到的击球位置、拍速、拍面、动作侧和剩余击球时间来自同一个 source sample。`source_timestamp_compensated` 会在延迟完整元组的同时扣除已知 transport delay；`uncompensated` 是故意不扣延迟的负控；`live` 保留旧行为。它只闭合训练观测一致性，不代表 VRPN 已提供相机采集时间，也不代表部署 runner 已支持 rolling revision。 |
+| <a id="available-time-bucket"></a>`available-time bucket` / 可用准备时间档 | 用固定的每动作时间缩放把“动作开始到预定触球”压到约 1.0、0.7 或 0.5 秒，从而直接测 policy 在不同来球提前量下是否还能完成击球。它不是把球或题库答案放慢；稀疏击球机会不足时，0 回球不能作为早停理由。 |
 | <a id="sparse-reward-eligibility-ledger"></a>`sparse Reward eligibility ledger` / 稀疏 Reward 资格账本 | 不看 Reward 均值猜机制是否有效，而是逐级数 exact-strike 机会、virtual capture、解析过网/落点/合法回球，以及 qdot observed/hinge-active/excess。缺机会或 hit-conditioned 通道未触发时必须继续训练；两个连续 milestone 分母完整也只表示可交给外部预注册规则判读，不会自动 stop、晋级或买 seed。当前 virtual 结果仍是解析 Phase A，不是物理触球。 |
 | <a id="conditional-face-guidance"></a>`racket_face_conditional_guidance_weight` / 不逃离就绪区的固定预算 Reward | 默认关闭的非正拍面/就绪联合塑形。它只在击球时间窗收费：未进入触点/完整拍速紧支撑门时保持固定最大成本，进入后按就绪度把成本连续换成 15° 以上的 signed-face 误差。位置或拍速越就绪，成本绝不会更高；在外门之外拍面梯度为零，策略不能靠故意离开门来免罚。输出 `[0,1]`，权重绝对值是每个时间窗 step 的最大罚金。它不替代 signed-face honesty、碰撞/跌倒或 Gate3。 |
 | <a id="v1-free-wrist-velocity"></a>`V1` / 持拍手腕线速度模仿释放 | 在 body linear-velocity imitation 中排除持拍手腕，让球拍速度主要由击球目标 Reward 决定；位置、姿态、角速度模仿和所有安全约束仍保留。`V1=true` 只表示该排除已配置，必须另以 eligible denominator 与 exclusion numerator 证明运行时真的作用。 |

@@ -66,6 +66,24 @@ Notes:
   comparison only; it depends on world-base-position terms and is not deploy-honest. The deploy
   runner still accepts 180-D ONNX for legacy checkpoints.
 
+### Actor-visible planner tuple timing
+
+`racket_target_pos_b`, `racket_target_vel_w`, the optional 179-D face tail, swing identity and
+`time_to_strike` describe one planner decision and must not mix different source times. Training
+now exposes three explicit modes through `task.racket.target_delay_tts_mode`:
+
+- `live` preserves the historical contract and keeps the live countdown beside a delayed target;
+- `source_timestamp_compensated` delays the complete tuple and converts the source countdown to
+  current remaining time by subtracting the configured transport delay;
+- `uncompensated` delays the complete tuple without compensation and exists only as an engineering
+  negative control.
+
+Only the actor sees the delayed/compensated countdown. The critic, Reward eligibility and truth
+metrics keep the current simulator countdown. Reset and dropout operate on the whole tuple, not
+individual fields. This source contract prevents a training-only mixed-age observation; it does
+not prove that the deployment transport carries a camera capture timestamp, that the C++ runner
+accepts rolling revisions, or that vendor MuJoCo behavior passes. Those remain G06/G07 work.
+
 ### Other registered actor layouts
 
 | Dim | Contract | Delta / source | C++ publish status |

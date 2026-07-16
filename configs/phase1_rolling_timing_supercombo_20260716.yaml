@@ -1,0 +1,749 @@
+schema_version: 1
+simulation_only: true
+launch_authorized: false
+preregistration_status: blocked_pending_full_scene_probe_parent_runtime_attestation_and_hotstart_harness
+formal_evidence_eligible: false
+
+ssh:
+  key: ~/.ssh/id_ed25519_runpod
+
+pods:
+  pod1:
+    host: 162.43.172.171
+    port: 18333
+    gpus: [0, 1, 2]
+    max_trainers_per_gpu: 4
+  pod2:
+    host: 162.43.172.181
+    port: 13146
+    gpus: [0, 1, 2]
+    max_trainers_per_gpu: 4
+
+dispatch_pods: [pod1, pod2]
+
+blocking_contract:
+  launch_remains_forbidden_until_all_true:
+    - target_delay_tts_mode_source_gate_and_full_scene_probe_pass
+    - old_pool_exact_stop_audit_confirms_all_24_process_identities_absent_and_fatal_count_zero
+    - frozen_local_parent_portfolio_is_selected_from_the_bound_stop_receipts
+    - parent_checkpoint_hard_contract_claim_binding_and_optimizer_are_attested
+    - retimed_question_bank_absolute_answer_contract_passes_on_the_integrated_source
+    - hotstart_harness_materializes_parent_relative_milestones_and_preserves_optimizer
+    - dry_run_assignment_is_exactly_four_jobs_per_gpu_and_no_external_compute_pid_is_displaced
+  source_checkout: /workspace/codexschema/nohope_rolling_timing_704bf3a
+  source_commit: 704bf3a273280b0bf96b8ba7b70cd8961b2208a9
+  source_full_scene_probe_receipt: PENDING_SOURCE_BOUND_4096_ENV_FULL_SCENE_PROBE
+  hotstart_harness: PENDING_SOURCE_BOUND_ROLLING_HOTSTART_HARNESS
+  activation_is_manual: true
+  automatic_launch: false
+  automatic_retry: false
+
+predecessor_stop_contract:
+  evidence_state: exact_identity_stop_audit_complete_no_separate_receipt_published
+  stop_before_source_mutation_or_new_launch: true
+  pod1:
+    expected_accepted_trainers: 12
+    reported_latest_checkpoint_range: [1500, 1700]
+    reported_fatal_count: 0
+    stop_receipt_path: null
+    stop_receipt_sha256: null
+    stop_audit_result: 12_of_12_bound_processes_absent_and_all_three_gpus_compute_empty
+  pod2:
+    expected_accepted_trainers: 12
+    reported_pool_composition:
+      mature: 5
+      demo: 7
+    reported_latest_checkpoint_range: [1900, 5100]
+    reported_fatal_count: 0
+    stop_receipt_path: null
+    stop_receipt_sha256: null
+    stop_audit_result: 12_of_12_bound_processes_absent_and_all_three_gpus_compute_empty
+  receipt_must_bind:
+    - exact_pid_pgid_starttime_and_absence_after_stop
+    - gpu_context_absence
+    - last_stable_checkpoint_path_sha256_and_embedded_iteration
+    - hard_contract_queue_claim_and_run_binding_sha256
+    - optimizer_state_and_all_tensor_finiteness
+    - per_run_fatal_count_and_aggregate_fatal_count
+
+parent_selection:
+  policy: pod1_one_continuity_parent_and_pod2_six_six_quality_continuity_portfolio_without_cross_pod_copy
+  selection_state: frozen_from_exact_binding_resolved_post_stop_ranking
+  pod1_local_best:
+    preferred_candidate_reason: strongest_current_matched_direction_is_16s_free_non_striking_arm
+    origin_config: configs/phase1_pod1_long_balance_reward_grid_20260715.yaml
+    original_job_id: p1_pod1_arm_free_ep16_seed3
+    original_run_name: phase1_pod1_arm_free_ep16_seed3_20260715
+    original_run_dir: /workspace/codexschema/phase1_long_pod1_20260715/runs/phase1_pod1_arm_free_ep16_seed3
+    original_queue_claim_path: /workspace/codexschema/phase1_long_pod1_20260715/runs/phase1_pod1_arm_free_ep16_seed3/queue_claim.json
+    original_queue_claim_sha256: f40507860eb8b2133d47d3d0232a279831c116ef36320ea34e8a4e3bdcce547a
+    original_run_binding_path: /workspace/codexschema/phase1_long_pod1_20260715/runs/phase1_pod1_arm_free_ep16_seed3/run_binding.json
+    original_run_binding_sha256: e1d534d8c719ac1b7dde49ae69b4c064d4a5ae3f81462c32216815dc0fecaa44
+    selected_rsl_log_dir: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_16-18-03_phase1_pod1_arm_free_ep16_seed3_20260715
+    ranking_snapshot_checkpoint_filename: model_1600.pt
+    selected_checkpoint_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_16-18-03_phase1_pod1_arm_free_ep16_seed3_20260715/model_1600.pt
+    selected_embedded_iteration: 1600
+    selected_checkpoint_sha256: fd69dd6c9eac8ba4910de2a75de2709b5927a8d5302a8763ce1205c91c209b57
+    selected_hard_contract_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_16-18-03_phase1_pod1_arm_free_ep16_seed3_20260715/params/training_contract.json
+    selected_hard_contract_sha256: a9e922e18ac0ac2262b46d276247f68cbe9268a1d7283867aa7ef30bce0b2e70
+    process_live_in_read_only_ranking_snapshot: 0
+    immutable_stop_receipt_still_required: false
+    selection_is_final: true
+  pod2_quality_basin:
+    preferred_candidate_reason: strongest_reported_precision_and_10cm_quality_basin
+    origin_config: configs/phase1_pod2_demo_hotstart_portfolio_20260716.yaml
+    original_job_id: demo_qdot_v1v2_face_w0p2
+    original_run_name: phase1_demo_qdot_v1v2_face_w0p2_seed3_20260716
+    original_run_dir: /workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_qdot_v1v2_face_w0p2
+    original_queue_claim_path: /workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_qdot_v1v2_face_w0p2/queue_claim.json
+    original_queue_claim_sha256: 9dcd2d4d6e9fa5f0f0fb338452f63b436d4d34e499486ab62180d26d554db1bc
+    original_run_binding_path: /workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_qdot_v1v2_face_w0p2/run_binding.json
+    original_run_binding_sha256: b5caa418e716b35dc4261e9fcde70c5e2261bd4a1dacf5e82792d89fdc01c813
+    selected_rsl_log_dir: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_18-12-12_phase1_demo_qdot_v1v2_face_w0p2_seed3_20260716
+    ranking_snapshot_checkpoint_filename: model_4700.pt
+    selected_checkpoint_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_18-12-12_phase1_demo_qdot_v1v2_face_w0p2_seed3_20260716/model_4700.pt
+    selected_embedded_iteration: 4700
+    selected_checkpoint_sha256: 32adc2a816e8742df93695a866f1621af22c6454cdcdea6e0ee5fc0e6e866b17
+    selected_hard_contract_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_18-12-12_phase1_demo_qdot_v1v2_face_w0p2_seed3_20260716/params/training_contract.json
+    selected_hard_contract_sha256: 4fd5e6b6ade92f10c20abf02f33e7986dd31c2b87827114f922f4a752af4cd0f
+    process_live_in_read_only_ranking_snapshot: 0
+    immutable_stop_receipt_still_required: false
+    assigned_descendants: 6
+    selection_is_final: true
+  pod2_continuous_basin:
+    preferred_candidate_reason: strongest_reported_continuous_completion_return_and_low_fall_basin
+    origin_config: configs/phase1_pod2_demo_hotstart_portfolio_20260716.yaml
+    original_job_id: demo_qdot_long_carry_free_arm_16s
+    original_run_name: phase1_demo_qdot_long_carry_free_arm_16s_seed3_20260716
+    original_run_dir: /workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_qdot_long_carry_free_arm_16s
+    original_queue_claim_path: /workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_qdot_long_carry_free_arm_16s/queue_claim.json
+    original_queue_claim_sha256: 2d0d072de238d48a3dc42c3a0ae20a07994efda8661d76c6164376c9469980b4
+    original_run_binding_path: /workspace/codexschema/phase1_demo_hotstart_20260716/runs/demo_qdot_long_carry_free_arm_16s/run_binding.json
+    original_run_binding_sha256: bab17599cba4c6d4a63026e348d082926f54cee98f6cc8bb0dab84ac9b5931af
+    selected_rsl_log_dir: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_18-37-52_phase1_demo_qdot_long_carry_free_arm_16s_seed3_20260716
+    ranking_snapshot_checkpoint_filename: model_4500.pt
+    selected_checkpoint_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_18-37-52_phase1_demo_qdot_long_carry_free_arm_16s_seed3_20260716/model_4500.pt
+    selected_embedded_iteration: 4500
+    selected_checkpoint_sha256: ea818f2ac5433e2736d5224c0f1a1cc686bc18608bee495a06c57f75ca2af198
+    selected_hard_contract_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_18-37-52_phase1_demo_qdot_long_carry_free_arm_16s_seed3_20260716/params/training_contract.json
+    selected_hard_contract_sha256: e3bddb560c5a487e3dea9a65a7b16129c37f210c5c30df9d634a8b708066a46e
+    process_live_in_read_only_ranking_snapshot: 0
+    immutable_stop_receipt_still_required: false
+    assigned_descendants: 6
+    selection_is_final: true
+  selection_guard:
+    - do_not_construct_an_rsl_log_path_from_timestamp_or_mtime
+    - resolve_only_through_the_exact_run_binding_and_stop_receipt
+    - reject_a_parent_without_nonempty_optimizer_state_and_param_groups
+    - reject_cross_pod_checkpoint_copy_as_the_default_parent
+    - record_any_fallback_candidate_before_activation
+
+timing_contract:
+  policy_hz: 50
+  native_start_to_contact_ticks:
+    forehand: 66
+    backhand: 45
+  fixed_per_clip_profiles:
+    about_1p0s:
+      speed_scale_per_clip: [1.32, 1.0]
+      derived_start_to_contact_s: [1.0, 0.9]
+    about_0p7s:
+      speed_scale_per_clip: [1.886, 1.286]
+      derived_start_to_contact_s: [0.6999, 0.6998]
+    about_0p5s:
+      speed_scale_per_clip: [2.64, 1.8]
+      derived_start_to_contact_s: [0.5, 0.5]
+  stochastic_profile:
+    speed_scale_range: [1.286, 1.886]
+    derived_clip_dependent_envelope_s:
+      forehand: [0.6999, 1.0264]
+      backhand: [0.4772, 0.6998]
+    interpretation: engineering_deadline_diversity_not_a_uniform_tts_distribution
+  runtime_attestation_required: true
+  question_bank_answer_semantics: absolute_physics_answer_unchanged_by_reference_retiming
+
+decision_contract:
+  purpose: single_seed_mechanism_funnel_for_fast_realistic_preparation
+  descendants_formal_exact_eligible: false
+  checkpoint_offsets_from_parent: [200, 500, 1000, 2000]
+  milestone_semantics: relative_to_each_attested_parent_embedded_iteration
+  checkpoints_200_500: structural_activation_finiteness_and_safety_only
+  checkpoint_1000: within_parent_mechanism_direction
+  checkpoint_2000: single_seed_portfolio_ranking_only
+  sparse_hit_behavior_may_stop_before_minimum_eligible_events: false
+  about_0p5s_sparse_opportunity_rule: never_stop_for_zero_sparse_outcome_until_eligible_opportunity_floor_is_met
+  second_seed_authorized: false
+  formal_promotion_authorized: false
+  judge_authorized: false
+  real_robot_authorized: false
+  cross_pod_score_difference_is_causal: false
+  pod2_parent_basin_difference_is_causal: false
+  pod2_parent_basin_role: engineering_portfolio_axis_for_next_morning_candidate_selection
+  delay_stress_is_venue_calibrated: false
+  prediction_jitter_stress_is_venue_calibrated: false
+
+x-action: &action signed_face_v4rg_shared_face
+x-motion: &motion
+  action: signed_face_v4rg_shared_face
+  bindings:
+    motion_file: /workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_forehand_v4rg_cal.npz
+    motion_file_2: /workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_backhand_v4rg_cal.npz
+x-bank: &bank
+  action: signed_face_v4rg_shared_face
+  train_path: /workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_bank_rebind_v2/s1_v4rg_runtime_order_schema3_train_882fea4_rebound.npz
+  train_arg: ++task.racket.question_bank
+x-exam: &exam
+  action: signed_face_v4rg_shared_face
+  path: /workspace/codexschema/phase1_signed_face_rescue_20260713/papers/signed_face_exam_k100_v1/signed_face_exam_k100.schedule.json
+  family: signed_face_rebound_k100_v1
+x-source: &source
+  checkout: /workspace/codexschema/nohope_rolling_timing_704bf3a
+  commit: 704bf3a273280b0bf96b8ba7b70cd8961b2208a9
+  ignored_runtime_asset:
+    target_relative_path: hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
+    donor:
+      checkout: /workspace/codexschema/nohope
+      commit: 6d93bcb16c422a2f42748c2dc99432559653480b
+      relative_path: hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
+    file_count: 46
+    total_file_bytes: 15378264
+    tree_content_sha256: 0137f59b1fe45e7d5f8fa731bedca905f5466bc98e8d1354081fe071d60426c6
+    symlinks_forbidden: true
+    target_must_be_gitignored: true
+
+x-base: &base
+  - task=HOPEPingPongVirtualBall
+  - algo=ppo
+  - headless=true
+  - logger=tensorboard
+  - video=false
+  - task.actor_obs_contract=deploy_parity_face179
+  - task.env.episode_length_s=16.0
+  - task.sim.dt=0.005
+  - task.sim.decimation=4
+  - task.actions.qdes_clamp=true
+  - task.plant.zero_joint_friction=true
+  - task.motion.wrap_teleport=false
+  - task.motion.stand_start_prob=0.25
+  - task.motion.hold_steps_range=[0,100]
+  - task.motion.stand_start_min_hold=25
+  - task.motion.post_swing_buffer_size=4096
+  - task.motion.post_swing_min_fill=256
+  - task.motion.post_swing_min_hold=25
+  - task.motion.clip_switch_prob=0.0
+  - task.motion.speed_scale_range=[1.0,1.0]
+  - task.motion.speed_scale_per_clip=[1.886,1.286]
+  - ++task.motion.rsi_skip_settle_frames=0
+  - ++task.motion.rsi_hold_root_stand_z=false
+  - ++task.motion.stagger_initial_clock=false
+  - ++task.motion.stagger_hold_max_steps=150
+  - ++task.racket.question_bank_allow_legacy=false
+  - ++task.racket.face_command=true
+  - ++task.racket.face_command_obs=true
+  - ++task.racket.station_obs=false
+  - ++task.racket.mount_normal_sign_per_clip=[1.0,-1.0]
+  - task.racket.target_mode=uniform
+  - task.racket.normal_mode=velocity
+  - task.racket.adaptive_sigma=true
+  - task.racket.target_delay_steps=2
+  - task.racket.target_delay_tts_mode=source_timestamp_compensated
+  - task.racket.target_jitter_pos_per_s=0.0
+  - task.racket.target_jitter_vel_per_s=0.0
+  - task.racket.target_noise_white=0.0019
+  - task.racket.target_noise_ar1_sigma=0.0052
+  - task.racket.target_noise_ar1_rho=0.717
+  - task.racket.target_dropout_prob=0.0
+  - task.racket.target_post_strike_dropout_s=0.0
+  - task.racket.target_bias_per_swing=0.0
+  - task.racket.midswing_resample_prob=0.0
+  - task.racket.midswing_resample_tts_floor=0.3
+  - task.racket.vb_spin_mode=minimize
+  - task.racket.vb_metrics_only=true
+  - ++task.racket.rally_legacy_metrics=true
+  - task.racket.achieved_target_mix_prob=0.30
+  - task.racket.achieved_buffer_size=4096
+  - task.racket.achieved_min_fill=256
+  - task.racket.achieved_jitter_pos=0.03
+  - task.racket.achieved_jitter_vel=0.15
+  - task.racket.achieved_clamp_inflate=0.20
+  - task.racket.clean_reference_strike_velocity=true
+  - task.racket.clean_strike_vel_window=2
+  - task.racket.strike_window_s=0.12
+  - task.racket.strike_success_pos_thresh=0.075
+  - ++task.physical_ball=true
+  - task.rewards.racket_position_weight=14.0
+  - task.rewards.racket_position_std=0.2
+  - task.rewards.racket_velocity_weight=10.0
+  - task.rewards.racket_velocity_std=1.0
+  - task.rewards.racket_normal_weight=5.0
+  - task.rewards.racket_normal_std=0.3
+  - task.rewards.foot_orientation_weight=-0.3
+  - task.rewards.free_wrist_ori_mimic=true
+  - ++task.rewards.free_wrist_vel_mimic=true
+  - ++task.rewards.motion_scale_in_window=0.25
+  - ++task.rewards.free_non_striking_arm_mimic=true
+  - task.rewards.base_decel_weight=0.0
+  - task.motion.post_swing_start_prob=0.0
+  - task.rewards.joint_velocity_limit_hinge_weight=-5.0
+  - task.rewards.joint_velocity_limit_hinge_margin=0.85
+  - ++task.rewards.racket_face_conditional_guidance_weight=-0.4
+  - ++task.motion.allow_legacy_link_origin_velocity=false
+  - ++task.motion.event_timing_mode=disabled
+  - task.racket.strike_phase_per_clip=[0.471,0.338]
+  - ++task.racket.face_command_pairing=shared_plus_y
+  - ++task.rewards.racket_guidance_weight=0.0
+  - ++task.rewards.racket_face_guidance_weight=0.0
+  - ++task.rewards.racket_face_guidance_theta_max=3.141592653589793
+  - ++kit_carb_tasking_thread_count=16
+  - ++kit_tbb_thread_count=16
+
+x-budget: &budget
+  num_envs: 4096
+  max_iterations: 2001
+  save_interval: 100
+  iteration_semantics: additional_updates_after_full_state_resume
+x-milestones: &milestones [200, 500, 1000, 2000]
+x-blocker: &blocker >-
+  Global launch gate is closed: source-bound full-scene probe, exact parent runtime
+  attestations, and the parent-relative hot-start harness are still PENDING.
+
+x-pod1-warm-start: &pod1_warm_start
+  parent: pod1_local_best
+  checkpoint_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_16-18-03_phase1_pod1_arm_free_ep16_seed3_20260715/model_1600.pt
+  transfer_mode: strict_full_state_preserve_optimizer
+  checkpoint_tolerant: false
+  allow_missing_contract: false
+  allow_contract_mismatch: true
+  descendant_exact_eligible: false
+x-pod2-quality-warm-start: &pod2_quality_warm_start
+  parent: pod2_quality_basin
+  checkpoint_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_18-12-12_phase1_demo_qdot_v1v2_face_w0p2_seed3_20260716/model_4700.pt
+  transfer_mode: strict_full_state_preserve_optimizer
+  checkpoint_tolerant: false
+  allow_missing_contract: false
+  allow_contract_mismatch: true
+  descendant_exact_eligible: false
+x-pod2-continuous-warm-start: &pod2_continuous_warm_start
+  parent: pod2_continuous_basin
+  checkpoint_path: /workspace/codexschema/nohope_p1_activation_successor_2c2d70d/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-15_18-37-52_phase1_demo_qdot_long_carry_free_arm_16s_seed3_20260716/model_4500.pt
+  transfer_mode: strict_full_state_preserve_optimizer
+  checkpoint_tolerant: false
+  allow_missing_contract: false
+  allow_contract_mismatch: true
+  descendant_exact_eligible: false
+
+x-pod1-gpu0: &pod1_gpu0
+  policy: dispatch_gpu_round_robin
+  required_slot: pod1/gpu0
+x-pod1-gpu1: &pod1_gpu1
+  policy: dispatch_gpu_round_robin
+  required_slot: pod1/gpu1
+x-pod1-gpu2: &pod1_gpu2
+  policy: dispatch_gpu_round_robin
+  required_slot: pod1/gpu2
+x-pod2-gpu0: &pod2_gpu0
+  policy: dispatch_gpu_round_robin
+  required_slot: pod2/gpu0
+x-pod2-gpu1: &pod2_gpu1
+  policy: dispatch_gpu_round_robin
+  required_slot: pod2/gpu1
+x-pod2-gpu2: &pod2_gpu2
+  policy: dispatch_gpu_round_robin
+  required_slot: pod2/gpu2
+
+jobs:
+  # Round 1: one new mechanism cell per GPU before any GPU gets a second cell.
+  - &pod1_job
+    id: rolling_p1_t10_comp2_j0_std_f03
+    human_name: 约1秒准备时间的共享组合基线，检查放慢后是否既来得及又不丢击球速度
+    scientific_question: does_about_1s_preparation_preserve_speed_and_balance_under_the_shared_core
+    launch_round: 1
+    action: *action
+    status: blocked
+    blocker: *blocker
+    motion: *motion
+    bank: *bank
+    exam: *exam
+    source: *source
+    runtime_binding: true
+    warm_start: *pod1_warm_start
+    recipe:
+      base: *base
+      delta:
+        - task.motion.speed_scale_per_clip=[1.32,1.0]
+    seed: 3
+    budget: *budget
+    milestones: *milestones
+    milestone_semantics: offsets_from_attested_parent
+    resource: *pod1_gpu0
+    formal_evidence_eligible: false
+    run_name: phase1_rolling_p1_t10_comp2_j0_std_f03_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/p1_t10_comp2_j0_std_f03
+
+  - <<: *pod1_job
+    id: rolling_p1_t07_comp2_j0_std_f03
+    human_name: 约0.7秒准备时间的补偿基线，作为快动作主参考和陈旧TTS负控的匹配处理组
+    scientific_question: can_about_0p7s_be_the_fast_compensated_reference_without_losing_control
+    recipe:
+      base: *base
+      delta:
+        - task.motion.speed_scale_per_clip=[1.886,1.286]
+    resource: *pod1_gpu1
+    run_name: phase1_rolling_p1_t07_comp2_j0_std_f03_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/p1_t07_comp2_j0_std_f03
+
+  - <<: *pod1_job
+    id: rolling_p1_t05_comp2_j0_std_f03
+    human_name: 正反手都约0.5秒到触球，直接测试部署所需的最低准备时间是否可学
+    scientific_question: can_both_sides_reach_contact_in_about_0p5s_under_the_shared_core
+    recipe:
+      base: *base
+      delta:
+        - task.motion.speed_scale_per_clip=[2.64,1.8]
+    resource: *pod1_gpu2
+    run_name: phase1_rolling_p1_t05_comp2_j0_std_f03_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/p1_t05_comp2_j0_std_f03
+
+  - &pod2_job
+    id: rolling_p2_t05_comp2_j0_equal_f03
+    human_name: 约0.5秒动作配均分击球Reward，检查均分是否比14比10比5更适合极短准备窗
+    scientific_question: does_equal_reward_allocation_help_the_about_0p5s_deadline
+    launch_round: 1
+    action: *action
+    status: blocked
+    blocker: *blocker
+    motion: *motion
+    bank: *bank
+    exam: *exam
+    source: *source
+    runtime_binding: true
+    warm_start: *pod2_quality_warm_start
+    recipe:
+      base: *base
+      delta:
+        - task.motion.speed_scale_per_clip=[2.64,1.8]
+        - task.rewards.racket_position_weight=9.67
+        - task.rewards.racket_velocity_weight=9.67
+        - task.rewards.racket_normal_weight=9.66
+    seed: 3
+    budget: *budget
+    milestones: *milestones
+    milestone_semantics: offsets_from_attested_parent
+    resource: *pod2_gpu0
+    formal_evidence_eligible: false
+    run_name: phase1_rolling_p2_t05_comp2_j0_equal_f03_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/p2_t05_comp2_j0_equal_f03
+
+  - <<: *pod2_job
+    id: rolling_p2_trange_comp2_j0_equal_f03
+    human_name: 随机快慢动作配均分Reward，检查策略能否同时适应约0.48到1.03秒的clip相关时限
+    scientific_question: does_equal_reward_support_deadline_diversity_instead_of_one_fixed_clock
+    recipe:
+      base: *base
+      delta:
+        - task.motion.speed_scale_per_clip=null
+        - task.motion.speed_scale_range=[1.286,1.886]
+        - task.rewards.racket_position_weight=9.67
+        - task.rewards.racket_velocity_weight=9.67
+        - task.rewards.racket_normal_weight=9.66
+    resource: *pod2_gpu1
+    run_name: phase1_rolling_p2_trange_comp2_j0_equal_f03_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/p2_trange_comp2_j0_equal_f03
+
+  - <<: *pod2_job
+    id: rolling_p2_t10_comp2_j0_std_f06
+    human_name: 约1秒动作配更强脚朝向约束，检查有充足准备时间时能否先稳住脚再完整挥拍
+    scientific_question: does_foot_minus_0p6_help_when_about_1s_is_available
+    recipe:
+      base: *base
+      delta:
+        - task.motion.speed_scale_per_clip=[1.32,1.0]
+        - task.rewards.foot_orientation_weight=-0.6
+    resource: *pod2_gpu2
+    run_name: phase1_rolling_p2_t10_comp2_j0_std_f06_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/p2_t10_comp2_j0_std_f06
+
+  # Round 2.
+  - <<: *pod1_job
+    id: rolling_p1_trange_comp2_j0_std_f03
+    human_name: 随机快慢动作的14比10比5基线，检查固定deadline专精是否会妨碍时限泛化
+    scientific_question: does_random_retiming_improve_deadline_generalization_under_standard_reward
+    launch_round: 2
+    recipe:
+      base: *base
+      delta:
+        - task.motion.speed_scale_per_clip=null
+        - task.motion.speed_scale_range=[1.286,1.886]
+    resource: *pod1_gpu0
+    run_name: phase1_rolling_p1_trange_comp2_j0_std_f03_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/p1_trange_comp2_j0_std_f03
+
+  - <<: *pod1_job
+    id: rolling_p1_t07_uncomp2_j0_std_f03
+    human_name: 与0.7秒补偿基线逐项匹配但故意保留陈旧TTS，隔离时间戳补偿本身的作用
+    scientific_question: does_stale_uncompensated_tts_hurt_when_every_other_input_is_matched
+    launch_round: 2
+    recipe:
+      base: *base
+      delta:
+        - task.motion.speed_scale_per_clip=[1.886,1.286]
+        - task.racket.target_delay_tts_mode=uncompensated
+    matched_treatment_job: rolling_p1_t07_comp2_j0_std_f03
+    negative_control_scope: only_tts_elapsed_time_subtraction_is_removed
+    resource: *pod1_gpu1
+    run_name: phase1_rolling_p1_t07_uncomp2_j0_std_f03_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/p1_t07_uncomp2_j0_std_f03
+
+  - <<: *pod1_job
+    id: rolling_p1_t07_comp4_j0_std_f03
+    human_name: 约0.7秒动作下把工程延迟压力从40毫秒增到80毫秒，检查补偿还能否稳定工作
+    scientific_question: can_timestamp_compensation_tolerate_an_unscaled_80ms_engineering_delay_stress
+    launch_round: 2
+    recipe:
+      base: *base
+      delta:
+        - task.motion.speed_scale_per_clip=[1.886,1.286]
+        - task.racket.target_delay_steps=4
+    resource: *pod1_gpu2
+    run_name: phase1_rolling_p1_t07_comp4_j0_std_f03_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/p1_t07_comp4_j0_std_f03
+
+  - <<: *pod2_job
+    id: rolling_p2_t07_comp2_j0_std_f06
+    human_name: 约0.7秒动作配更强脚朝向约束，测试快速挥拍与站姿纪律的直接折中
+    scientific_question: does_foot_minus_0p6_preserve_the_about_0p7s_fast_swing
+    launch_round: 2
+    recipe:
+      base: *base
+      delta:
+        - task.motion.speed_scale_per_clip=[1.886,1.286]
+        - task.rewards.foot_orientation_weight=-0.6
+    resource: *pod2_gpu0
+    run_name: phase1_rolling_p2_t07_comp2_j0_std_f06_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/p2_t07_comp2_j0_std_f06
+
+  - <<: *pod2_job
+    id: rolling_p2_t05_comp2_j0_std_f06
+    human_name: 约0.5秒动作配更强脚朝向约束，检查强站姿约束会帮助极速动作还是把动作压死
+    scientific_question: does_foot_minus_0p6_help_or_block_the_about_0p5s_deadline
+    launch_round: 2
+    recipe:
+      base: *base
+      delta:
+        - task.motion.speed_scale_per_clip=[2.64,1.8]
+        - task.rewards.foot_orientation_weight=-0.6
+    resource: *pod2_gpu1
+    run_name: phase1_rolling_p2_t05_comp2_j0_std_f06_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/p2_t05_comp2_j0_std_f06
+
+  - <<: *pod2_job
+    id: rolling_p2_trange_comp2_j0_std_f06
+    human_name: 随机快慢动作配更强脚朝向约束，检查站姿纪律能否跨deadline泛化
+    scientific_question: does_foot_minus_0p6_generalize_across_the_random_retiming_envelope
+    launch_round: 2
+    recipe:
+      base: *base
+      delta:
+        - task.motion.speed_scale_per_clip=null
+        - task.motion.speed_scale_range=[1.286,1.886]
+        - task.rewards.foot_orientation_weight=-0.6
+    resource: *pod2_gpu2
+    run_name: phase1_rolling_p2_trange_comp2_j0_std_f06_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/p2_trange_comp2_j0_std_f06
+
+  # Round 3.
+  - <<: *pod1_job
+    id: rolling_p1_t10_comp2_jmid_std_f03
+    human_name: 约1秒动作加入中等预测收敛抖动，检查较长准备窗能否吸收早期预测误差
+    scientific_question: can_about_1s_absorb_moderate_tts_decaying_prediction_jitter
+    launch_round: 3
+    recipe:
+      base: *base
+      delta:
+        - task.motion.speed_scale_per_clip=[1.32,1.0]
+        - task.racket.target_jitter_pos_per_s=0.03
+        - task.racket.target_jitter_vel_per_s=0.15
+    resource: *pod1_gpu0
+    run_name: phase1_rolling_p1_t10_comp2_jmid_std_f03_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/p1_t10_comp2_jmid_std_f03
+
+  - <<: *pod1_job
+    id: rolling_p1_t07_comp2_jmid_std_f03
+    human_name: 约0.7秒动作加入中等预测收敛抖动，检查主速度档对逐步收敛目标的鲁棒性
+    scientific_question: can_about_0p7s_track_moderate_prediction_jitter_that_decays_to_contact
+    launch_round: 3
+    recipe:
+      base: *base
+      delta:
+        - task.motion.speed_scale_per_clip=[1.886,1.286]
+        - task.racket.target_jitter_pos_per_s=0.03
+        - task.racket.target_jitter_vel_per_s=0.15
+    resource: *pod1_gpu1
+    run_name: phase1_rolling_p1_t07_comp2_jmid_std_f03_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/p1_t07_comp2_jmid_std_f03
+
+  - <<: *pod1_job
+    id: rolling_p1_t05_comp2_jmid_std_f03
+    human_name: 约0.5秒动作加入中等预测收敛抖动，测试极速准备对早期目标误差还有多少容忍度
+    scientific_question: does_moderate_prediction_jitter_make_the_about_0p5s_deadline_unlearnable
+    launch_round: 3
+    recipe:
+      base: *base
+      delta:
+        - task.motion.speed_scale_per_clip=[2.64,1.8]
+        - task.racket.target_jitter_pos_per_s=0.03
+        - task.racket.target_jitter_vel_per_s=0.15
+    resource: *pod1_gpu2
+    run_name: phase1_rolling_p1_t05_comp2_jmid_std_f03_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/p1_t05_comp2_jmid_std_f03
+
+  - &pod2_continuous_job
+    <<: *pod2_job
+    id: rolling_p2_t07_comp2_j0_equal_f06
+    human_name: 约0.7秒动作同时用均分Reward和更强脚约束，检查均分能否抵消站姿约束对挥拍的挤压
+    scientific_question: does_equal_reward_offset_the_fast_swing_cost_of_foot_minus_0p6
+    launch_round: 3
+    warm_start: *pod2_continuous_warm_start
+    recipe:
+      base: *base
+      delta:
+        - task.motion.speed_scale_per_clip=[1.886,1.286]
+        - task.rewards.racket_position_weight=9.67
+        - task.rewards.racket_velocity_weight=9.67
+        - task.rewards.racket_normal_weight=9.66
+        - task.rewards.foot_orientation_weight=-0.6
+    resource: *pod2_gpu0
+    run_name: phase1_rolling_p2_t07_comp2_j0_equal_f06_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/p2_t07_comp2_j0_equal_f06
+
+  - <<: *pod2_continuous_job
+    id: rolling_p2_t07_comp2_jmid_equal_f03
+    human_name: 约0.7秒动作同时用均分Reward和中等预测抖动，检查均分是否提升追踪收敛目标的韧性
+    scientific_question: does_equal_reward_improve_robustness_to_moderate_prediction_jitter
+    launch_round: 3
+    recipe:
+      base: *base
+      delta:
+        - task.motion.speed_scale_per_clip=[1.886,1.286]
+        - task.racket.target_jitter_pos_per_s=0.03
+        - task.racket.target_jitter_vel_per_s=0.15
+        - task.rewards.racket_position_weight=9.67
+        - task.rewards.racket_velocity_weight=9.67
+        - task.rewards.racket_normal_weight=9.66
+    resource: *pod2_gpu1
+    run_name: phase1_rolling_p2_t07_comp2_jmid_equal_f03_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/p2_t07_comp2_jmid_equal_f03
+
+  - <<: *pod2_continuous_job
+    id: rolling_p2_t07_comp2_jmid_std_f06
+    human_name: 约0.7秒动作同时加中等预测抖动和更强脚约束，检查两种稳健化是否冲突
+    scientific_question: do_prediction_jitter_and_foot_minus_0p6_compound_or_complement_each_other
+    launch_round: 3
+    recipe:
+      base: *base
+      delta:
+        - task.motion.speed_scale_per_clip=[1.886,1.286]
+        - task.racket.target_jitter_pos_per_s=0.03
+        - task.racket.target_jitter_vel_per_s=0.15
+        - task.rewards.foot_orientation_weight=-0.6
+    resource: *pod2_gpu2
+    run_name: phase1_rolling_p2_t07_comp2_jmid_std_f06_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/p2_t07_comp2_jmid_std_f06
+
+  # Round 4.
+  - <<: *pod1_job
+    id: rolling_p1_t07_comp2_jhigh_std_f03
+    human_name: 约0.7秒动作加入强预测收敛抖动，测出鲁棒化开始压坏可控性的压力边界
+    scientific_question: where_does_unscaled_prediction_jitter_stress_begin_to_break_the_fast_policy
+    launch_round: 4
+    recipe:
+      base: *base
+      delta:
+        - task.motion.speed_scale_per_clip=[1.886,1.286]
+        - task.racket.target_jitter_pos_per_s=0.05
+        - task.racket.target_jitter_vel_per_s=0.25
+    resource: *pod1_gpu0
+    run_name: phase1_rolling_p1_t07_comp2_jhigh_std_f03_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/p1_t07_comp2_jhigh_std_f03
+
+  - <<: *pod1_job
+    id: rolling_p1_t10_comp2_j0_equal_f03
+    human_name: 约1秒动作使用三项近似均分Reward，检查更均衡的监督在宽松时限下是否仍优于14比10比5
+    scientific_question: does_equal_reward_help_even_when_preparation_time_is_not_the_bottleneck
+    launch_round: 4
+    recipe:
+      base: *base
+      delta:
+        - task.motion.speed_scale_per_clip=[1.32,1.0]
+        - task.rewards.racket_position_weight=9.67
+        - task.rewards.racket_velocity_weight=9.67
+        - task.rewards.racket_normal_weight=9.66
+    resource: *pod1_gpu1
+    run_name: phase1_rolling_p1_t10_comp2_j0_equal_f03_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/p1_t10_comp2_j0_equal_f03
+
+  - <<: *pod1_job
+    id: rolling_p1_t07_comp2_j0_equal_f03
+    human_name: 约0.7秒动作使用三项近似均分Reward，作为主速度档的Reward配比对照
+    scientific_question: does_equal_reward_beat_14_10_5_at_the_about_0p7s_reference_deadline
+    launch_round: 4
+    recipe:
+      base: *base
+      delta:
+        - task.motion.speed_scale_per_clip=[1.886,1.286]
+        - task.rewards.racket_position_weight=9.67
+        - task.rewards.racket_velocity_weight=9.67
+        - task.rewards.racket_normal_weight=9.66
+    resource: *pod1_gpu2
+    run_name: phase1_rolling_p1_t07_comp2_j0_equal_f03_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/p1_t07_comp2_j0_equal_f03
+
+  - <<: *pod2_continuous_job
+    id: rolling_p2_t07_comp4_jmid_std_f03
+    human_name: 约0.7秒动作同时承受80毫秒补偿延迟和中等预测抖动，测试两种真实链路误差的组合压力
+    scientific_question: can_compensation_handle_longer_delay_and_prediction_jitter_together
+    launch_round: 4
+    recipe:
+      base: *base
+      delta:
+        - task.motion.speed_scale_per_clip=[1.886,1.286]
+        - task.racket.target_delay_steps=4
+        - task.racket.target_jitter_pos_per_s=0.03
+        - task.racket.target_jitter_vel_per_s=0.15
+    resource: *pod2_gpu0
+    run_name: phase1_rolling_p2_t07_comp4_jmid_std_f03_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/p2_t07_comp4_jmid_std_f03
+
+  - <<: *pod2_continuous_job
+    id: rolling_p2_t05_comp2_jmid_equal_f06
+    human_name: 约0.5秒动作叠加均分Reward、中等预测抖动和更强脚约束，检查完整极速稳健栈是否仍可学习
+    scientific_question: can_the_full_robustness_stack_survive_the_about_0p5s_deadline
+    launch_round: 4
+    recipe:
+      base: *base
+      delta:
+        - task.motion.speed_scale_per_clip=[2.64,1.8]
+        - task.racket.target_jitter_pos_per_s=0.03
+        - task.racket.target_jitter_vel_per_s=0.15
+        - task.rewards.racket_position_weight=9.67
+        - task.rewards.racket_velocity_weight=9.67
+        - task.rewards.racket_normal_weight=9.66
+        - task.rewards.foot_orientation_weight=-0.6
+    resource: *pod2_gpu1
+    run_name: phase1_rolling_p2_t05_comp2_jmid_equal_f06_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/p2_t05_comp2_jmid_equal_f06
+
+  - <<: *pod2_continuous_job
+    id: rolling_p2_trange_comp4_j0_std_f03
+    human_name: 随机快慢动作配80毫秒补偿延迟，检查时间戳补偿能否跨变化deadline保持一致
+    scientific_question: does_timestamp_compensation_generalize_across_random_reference_speeds
+    launch_round: 4
+    recipe:
+      base: *base
+      delta:
+        - task.motion.speed_scale_per_clip=null
+        - task.motion.speed_scale_range=[1.286,1.886]
+        - task.racket.target_delay_steps=4
+    resource: *pod2_gpu2
+    run_name: phase1_rolling_p2_trange_comp4_j0_std_f03_seed3_20260716
+    run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/p2_trange_comp4_j0_std_f03

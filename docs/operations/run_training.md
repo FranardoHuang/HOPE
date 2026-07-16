@@ -59,8 +59,12 @@ The training scaffold exists under:
   clip switch, reset). At speed s the clip clock advances s frames per control step (float shadow
   clock, round() indexing = deploy-clock parity), reference joint/body/anchor velocities read ×s,
   `time_to_strike` runs ÷s (computed from the float clock so the exact-strike detector still fires
-  once per swing), and the racket velocity target scales ×s (uniform boxes, reference_perturbed,
-  and the HER clamp box). Positions/normals are speed-invariant. Retiming is TRAIN-ONLY:
+  once per swing), and provisional racket velocity targets scale ×s (uniform boxes,
+  `reference_perturbed`, and the HER clamp box). A schema-3 question bank is different: its
+  demanded racket velocity is an absolute inverse-physics answer for the unchanged incoming ball,
+  so the final bank assignment deliberately overwrites the provisional speed-scaled target. This
+  makes `question_bank` compatible with fixed `motion.speed_scale_per_clip` or a speed range without
+  silently slowing the required return. Positions/normals are speed-invariant. Retiming is TRAIN-ONLY:
   play/eval force it back to `[1.0, 1.0]`. Deploy note: the runner's `swing_speed` knob retimes
   the clock but does NOT scale reference/target velocities — enabling it for an R14-trained
   policy requires adding those two scalings. Watch metric: `playback_speed`.
@@ -73,6 +77,15 @@ The training scaffold exists under:
   family (`target_delay_steps`, `target_jitter_pos_per_s`, `target_jitter_vel_per_s`,
   `midswing_resample_prob`, `target_noise_white`, `target_noise_ar1_sigma`,
   `target_noise_ar1_rho`) — every one of these defaults off.
+- `racket.target_delay_tts_mode` makes the actor-visible planner tuple time-coherent when
+  `target_delay_steps > 0`. `live` is the historical/default behavior: delayed position, velocity,
+  face and sign are paired with the live countdown. `source_timestamp_compensated` delays all five
+  fields atomically and subtracts `target_delay_steps * policy_dt` from that delayed countdown;
+  `uncompensated` delays the same tuple but intentionally leaves its old countdown untouched as a
+  matched negative control. Only the policy observation switches to this actor countdown; critic,
+  Reward gates and truth metrics retain live `time_to_strike`. Reset backfills the complete tuple,
+  while dropout holds the complete tuple. The selected mode and delay are checkpoint hard-contract
+  fields. See [atomic planner tuple](../DEFINITIONS.md#atomic-planner-tuple-timing).
 - `rewards.free_wrist_ori_mimic` (R16, default `false`): drop `right_wrist_yaw_Link` (the racket
   mount) from the `motion_body_ori` / `motion_body_ang_vel` body lists — the wrist's ORIENTATION
   stops being imitated while position/linear-velocity mimic keep the swing path. Rationale

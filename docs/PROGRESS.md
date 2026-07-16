@@ -13,6 +13,12 @@
 
 ## 2026-07-16
 
+- 真实测试触发的 training-critical 修复已进入 `main@704bf3a2`：actor 可显式消费同源延迟的
+  position/velocity/face/side/TTS 元组，并按已知 step delay 更新剩余击球时间；schema-3 题库现在可与
+  约 `1.0/0.7/0.5 s` 老师动作 retiming 合用，但绝对物理出球答案不被错误缩放。Pod2 新增 10 个专项
+  cases 全过，全集 6 个失败与父提交逐项相同。该能力只过 source gate，下一步是 4096-env probe 和
+  [24 条单 seed 工程组合](experiments/2026-07/EXP-P1-ROLLING-TIMING-SUPERCOMBO.md)。
+
 - 05:29 CST 的全池只读审计逐条覆盖双 Pod `24/24`，而非只看新到里程碑的候选：两边均三卡
   `4/4/4`、全部 live/fatal0，24 份 latest checkpoint 的 embedded iteration、finite、hard/claim/binding
   与 lineage 均通过。Pod1 12 条约到 `model_1000–1200`；16 秒自由臂有最强 matched 方向，但 10 秒近似
