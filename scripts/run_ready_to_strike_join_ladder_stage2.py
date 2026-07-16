@@ -36,14 +36,14 @@ import numpy as np
 SCHEMA_VERSION = 1
 CONFIRM_TOKEN = "RUN_READY_TO_STRIKE_STAGE2_ONCE"
 CHILD_TIMEOUT_S = 3600
-EXPECTED_ACTIVATION_ID = "ready_to_strike_join_ladder_stage2_v3_20260717"
+EXPECTED_ACTIVATION_ID = "ready_to_strike_join_ladder_stage2_v4_20260717"
 EXPECTED_EXPERIMENT_ID = "ready_to_strike_join_ladder_20260717"
 EXPECTED_QUEUE_SHA256 = "cfa112f799dab9af33914fdfb5bfff90d21b4692e38b16a4627393936a527b8b"
 EXPECTED_PREREG_COMMIT = "8d74025e88fee832fae0ac2f672ec0eb9b2d3d5a"
 EXPECTED_EVIDENCE_STATUS = "historical_stage1_attested_screening_only"
 EXPECTED_STAGE2_NAMESPACE = (
     "/workspace/codexschema/ready_to_strike_0p5_20260717/"
-    "join_ladder_stage2_d12_v3_mjcf_closure"
+    "join_ladder_stage2_d12_v4_contract_lineage"
 )
 EXPECTED_PRIOR_ATTEMPT = {
     "namespace": (
@@ -72,13 +72,13 @@ EXPECTED_MJCF_CLOSURE_MANIFEST_SHA256 = (
 )
 EXPECTED_PRIOR_CANDIDATES = {
     "fh_rf_d12": ("a6c181f1b29b7e683a2efa70414f908c0896d110b21721c39565e3641a4eeb17",
-                  "a8c7b966b7c21dfd8c992dc286ae3a7c6788396124a2d54104b65adc09593630"),
+                  "7c8e1f3a5184829d66e48f33e2ed93dbe93c044b2b4feea1dd921f2dddd9fb1a"),
     "fh_rb_d12": ("ac3089ed72492eb92a4bdb63c218070af9303fa7fb4ec6df909f7e406ea13c6a",
-                  "ae19f06a65dc369b042109a93117069481fcde9167eae3a39189dd0a1f694e4d"),
+                  "9970770e897b9464f258888e645bd45f6de8cebdfc640816e194ad713a20a535"),
     "bh_rf_d12": ("c892336ee0363e0867535be9fc892a071c49ae3af338412bcc090f06d66c6c64",
-                  "bf8918968a60817f76ed83b76b26b932a6b068c960e3a2113e181d9cc0c93b4a"),
+                  "f7686ef8dad9709eecf9009d276b90b2a2d04ae72836c93585aa95d4ad2afbfb"),
     "bh_rb_d12": ("d9ce654c861d343be8fd6ed81ac40a15fda9b95d6bf2969bacdb936697e68643",
-                  "224cab63deb9bb76c514f8e19ca29e224be54f3b819a34f35137208c1da741df"),
+                  "e504637a42bf1c26d6100d5a682974a5e950c0a18aeeb10c120754a87cce1790"),
 }
 EXPECTED_PRIOR_TOPP_LOGS = {
     "fh_rf_d12": "36aac9645dd1b2441467a3ad1d57b889912f2b346cd7cdf3493b4f4a65760583",

@@ -422,6 +422,32 @@ def test_v2_activation_bytes_remain_immutable() -> None:
     assert _sha(payload) == "8742aadff796218f170fede3f6e386e54314e086740f4ad82b9242f52667ab10"
 
 
+def test_v3_preflight_activation_bytes_remain_immutable() -> None:
+    payload = (REPO / "configs/ready_to_strike_join_ladder_stage2_activation_v3_20260717.json").read_bytes()
+    assert _sha(payload) == "5b42fa8dd43cd29e5fc858a2ef895a5e92bc547c52fedd2d9e3dfaf7e68ab488"
+
+
+def test_v4_binds_the_observed_v2_contract_lineage_not_v1_contracts() -> None:
+    assert runner.EXPECTED_PRIOR_CANDIDATES == {
+        "fh_rf_d12": (
+            "a6c181f1b29b7e683a2efa70414f908c0896d110b21721c39565e3641a4eeb17",
+            "7c8e1f3a5184829d66e48f33e2ed93dbe93c044b2b4feea1dd921f2dddd9fb1a",
+        ),
+        "fh_rb_d12": (
+            "ac3089ed72492eb92a4bdb63c218070af9303fa7fb4ec6df909f7e406ea13c6a",
+            "9970770e897b9464f258888e645bd45f6de8cebdfc640816e194ad713a20a535",
+        ),
+        "bh_rf_d12": (
+            "c892336ee0363e0867535be9fc892a071c49ae3af338412bcc090f06d66c6c64",
+            "f7686ef8dad9709eecf9009d276b90b2a2d04ae72836c93585aa95d4ad2afbfb",
+        ),
+        "bh_rb_d12": (
+            "d9ce654c861d343be8fd6ed81ac40a15fda9b95d6bf2969bacdb936697e68643",
+            "e504637a42bf1c26d6100d5a682974a5e950c0a18aeeb10c120754a87cce1790",
+        ),
+    }
+
+
 def _flag(command: list[str], name: str) -> str:
     return command[command.index(name) + 1]
 
@@ -1073,7 +1099,7 @@ def test_unexpected_post_namespace_failure_gets_terminal_summary(
 
 def test_current_repo_activation_exactly_binds_the_tracked_runner() -> None:
     activation = json.loads(
-        (REPO / "configs/ready_to_strike_join_ladder_stage2_activation_v3_20260717.json").read_text()
+        (REPO / "configs/ready_to_strike_join_ladder_stage2_activation_v4_20260717.json").read_text()
     )
     queue = runner._validate_queue(json.loads(
         (REPO / "configs/ready_to_strike_join_ladder_20260717.yaml").read_text()

@@ -122,7 +122,13 @@ run-up 上界是正手 `0.98 s`、反手 `0.78 s`。因此单纯把完整旧 cli
   `75 files / 14,127,373 bytes / manifest e0381752…b962de`；拒绝 DTD/entity/include、路径逃逸、重复、
   symlink、worktree 漂移和第三种 prior。v3 activation 使用新 one-shot namespace，精确消费 v2 summary、
   runner、activation、V1 prior、四份 candidate/contract 和四份 missing-mesh log。相关生成器、attestor、
-  runner 回归为 `66 passed`；远端 execute 完成前仍只能写 source gate，不能写成 0.5 秒已通过。
+  runner 回归为 `66 passed`。但唯一远端 dry-run 在创建结果 root 前又抓到 lineage 账错：代码把 v1
+  generator contract SHA 配给了 v2 candidate；candidate SHA 本身一致。stderr SHA=`c58baf2d…2e16`，
+  execute/TOPP 均未启动，v3 source 与 activation 永久冻结。
+- v4 只把四个 expected contract 改为 v2 summary 的真实值
+  `7c8e1f3a…/9970770e…/f7686ef8…/e504637a…`，并使用新的 runner-bound activation 与结果 namespace；
+  candidate、join、hold、预算、TOPP、MJCF closure 和所有 acceptance 不变。相关回归 `68 passed`、
+  独立红队 GO；远端 execute 完成前仍只能写 source gate，不能写成 0.5 秒已通过。
 - 下一门：在 ignored runtime 资产上按预注册 join ladder 生成正/反手候选，production FK 重建后逐个跑
   TOPP；只把 `<=0.5 s` 的候选送 L0/L1/桌网/动力学，再用绑定该 motion SHA 的 0.5 秒 K100 和
 vendor MuJoCo 判行为。

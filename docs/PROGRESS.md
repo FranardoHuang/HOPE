@@ -17,7 +17,9 @@
   逐字节一致，随后因隔离 MJCF 漏复制 XML 引用的 STL，四个 TOPP 均在算法前 rc1，无 timing、无重试。
   v3 零 generator 调用并精确复用这四份 candidate，只从 frozen Git objects 补齐 `1 XML + 74 mesh`
   closure（75 文件、14,127,373 字节、manifest `e0381752…b962de`）；wrong prior/log/blob/tree/mode 与 XML
-  include/path 反例均 fail closed，相关回归 `66 passed`。远端一次性 execute 仍待完成，G08 保持 Partial。
+  include/path 反例均 fail closed。v3 唯一远端 dry-run 又在结果 root 前发现 expected contract 误绑 v1
+  而非 v2，execute/TOPP 未启动；v4 使用新 activation/namespace 绑定四份真实 v2 contract，其余配方不变。
+  v4 相关回归 `68 passed`、独立红队 GO；远端一次性 execute 仍待完成，G08 保持 Partial。
 
 - ready×join Stage-2 v1 dry-run 通过后唯一 execute 自然终止并保全失败 summary
   `f92e6b8b…63c0e`：四个 generator 均 rc0，但 runner 重复了历史已知量尺错误，把 generator 的 float32
