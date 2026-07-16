@@ -234,7 +234,7 @@ def _certificate(
                 _evidence(Path(queue["assets"]["forehand"]["path"])),
                 _evidence(Path(queue["assets"]["backhand"]["path"])),
             ],
-            "scale": 1.0,
+            "scale": M.TOPP_BUDGET_SCALE,
             "envelope": [1.0, 2.0, 3.0],
         },
         "runtime_provenance": {

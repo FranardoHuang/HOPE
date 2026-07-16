@@ -90,6 +90,8 @@ run-up 上界是正手 `0.98 s`、反手 `0.78 s`。因此单纯把完整旧 cli
   第二次 dry-run 又在 receipt 前发现审计器误用 TOPP 的 float64 工作区重算 source/candidate；正式 generator
   对两者使用 float32 producer-gradient。修复后 source/candidate 与 TOPP output 各按自己的冻结 producer
   重算，不接受二选一宽容匹配。
+  第三次 dry-run 在 receipt 前发现 budget scale 预期写错：历史证书与冻结 TOPP v3 默认均为 `1.5`，
+  不是 `1.0`。attestor 改为精确要求 `1.5`，不放宽成任意正数。
 - 下一门：在 ignored runtime 资产上按预注册 join ladder 生成正/反手候选，production FK 重建后逐个跑
   TOPP；只把 `<=0.5 s` 的候选送 L0/L1/桌网/动力学，再用绑定该 motion SHA 的 0.5 秒 K100 和
 vendor MuJoCo 判行为。

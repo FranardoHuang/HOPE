@@ -87,6 +87,7 @@ TOPP_CERTIFICATE_KEYS = {
     "runtime_provenance",
 }
 TOPP_TOOL = "topp_mintime.py v3 (unified-budget min-time bidirectional retiming)"
+TOPP_BUDGET_SCALE = 1.5
 TOPP_ALGORITHM_SCOPE = (
     "heuristic upper bound within the sampled gamma ladder plus greedy local repair; "
     "not strict TOPP and not a global minimum proof"
@@ -767,7 +768,9 @@ def _validate_topp_certificate(
 
     clips = certificate.get("budget_provenance")
     clips = _exact_keys(clips, {"clips", "scale", "envelope"}, "TOPP budget provenance")
-    _require(_finite_number(clips["scale"], "TOPP budget scale", minimum=0.0) == 1.0,
+    _require(
+        _finite_number(clips["scale"], "TOPP budget scale", minimum=0.0)
+        == TOPP_BUDGET_SCALE,
              "TOPP budget scale changed")
     _require(isinstance(clips["clips"], list) and len(clips["clips"]) == 2,
              "TOPP must bind exactly two budget clips")

@@ -18,7 +18,8 @@
   两个 source root 合成一个。失败只留下 content-addressed attestor source、无 receipt/候选重跑/训练 signal。
   source gate 已改为核 Stage-1 中实际执行的 immutable generator copy 对注册 SHA。第二次 dry-run 又在
   receipt 前抓到审计器把 schema-2 generator 的 float32 producer-gradient 误当成 TOPP 的 float64-workspace
-  gradient；现已分开精确重算两条生产链，专项仍为 `47 passed`。
+  gradient；现已分开精确重算两条生产链。第三次 dry-run 又抓到 historical TOPP 使用冻结工具的默认
+  budget scale `1.5`，而 attestor 错写成 `1.0`；已固定为 source-pinned `1.5`，专项仍为 `47 passed`。
 
 - ready×join Stage 1 六个新端点格都自然产生 candidate/TOPP 原始制品；raw 数值显示 `d=17` 全面更慢，
   反手 own-frame0 ready 将最近 join 从 `0.94` 改善到 `0.78 s`，正手则 own-ready `0.64` 优于
