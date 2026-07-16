@@ -701,6 +701,163 @@ def test_zero_eligible_denominators_are_null_and_never_stop():
     assert result["windows"][0]["derived"]["virtual_legal_return_per_strike"] is None
 
 
+@pytest.mark.parametrize("missing", [False, True])
+def test_plus_200_revision_activation_absent_is_explicit_stop_and_sparse_zero_is_irrelevant(
+    missing,
+):
+    queue = Q.load_queue(QUEUE)
+    counters = _exact_counters()
+    counters["virtual_legal_return_count"] = 0
+    counters["planner_revision_attempt_count"] = 0
+    counters["planner_revision_accepted_count"] = 0
+    counters["planner_revision_rejected_count"] = 0
+    counters["planner_revision_last_precontact_attempt_count"] = 0
+    counters["planner_revision_last_precontact_accepted_count"] = 0
+    counters["planner_revision_actor_visible_count"] = 0
+    counters["planner_revision_last_precontact_actor_visible_count"] = 0
+    if missing:
+        counters.pop("planner_revision_actor_visible_count")
+    parsed = Q.parse_exact_behavior_log(
+        _exact_log([_exact_record(update, counters=counters) for update in range(1, 201)]),
+        required_counters=Q._required_behavior_counters(queue),
+    )
+    result = Q.analyze_behavior_windows(
+        parsed,
+        milestone=200,
+        milestone_offset=200,
+        required_counters=Q._required_behavior_counters(queue),
+    )
+    assert result["decision"] == "stop_revision_or_ledger_activation_absent"
+    assert result["sparse_outcome_used_for_activation_decision"] is False
+    assert any((":missing" if missing else ":zero") in row for row in result["decision_reasons"])
+
+
+def test_plus_200_sparse_return_zero_with_revision_activation_continues():
+    queue = Q.load_queue(QUEUE)
+    counters = _exact_counters()
+    counters["virtual_legal_return_count"] = 0
+    parsed = Q.parse_exact_behavior_log(
+        _exact_log([_exact_record(update, counters=counters) for update in range(1, 201)]),
+        required_counters=Q._required_behavior_counters(queue),
+    )
+    result = Q.analyze_behavior_windows(
+        parsed,
+        milestone=200,
+        milestone_offset=200,
+        required_counters=Q._required_behavior_counters(queue),
+    )
+    assert result["decision"] == "continue_training_no_automatic_stop"
+
+
+def _portfolio_behavior_content(job_id: str, *, offset: int, strong: bool) -> dict:
+    counters = _exact_counters(completion=9 if strong else 1)
+    if strong:
+        for key in (
+            "physical_fall_count",
+            "pre_strike_physical_fall_count",
+            "post_strike_physical_fall_count",
+            "termination_reason_base_fell_tilt_count",
+            "termination_reason_base_too_low_count",
+        ):
+            counters[key] = 0
+        counters["virtual_capture_count"] = 4
+        counters["virtual_net_clear_count"] = 4
+        counters["virtual_landing_valid_count"] = 4
+        counters["virtual_legal_return_count"] = 4
+        counters["ready_tilt_rad_sum"] = 0.1
+        counters["ready_base_speed_xy_mps_sum"] = 0.1
+        counters["ready_foot_contact_fraction_sum"] = 10.0
+        counters["ready_foot_slip_speed_mps_sum"] = 0.1
+    start = offset - 199
+    records = {
+        update: _exact_record(update, counters=counters)
+        for update in range(start, offset + 1)
+    }
+    analysis = Q.analyze_behavior_windows(
+        records,
+        milestone=offset,
+        milestone_offset=offset,
+        required_counters=set(counters),
+    )
+    return {"job_id": job_id, "behavior": analysis}
+
+
+def test_plus_1000_portfolio_pareto_keeps_two_and_timing_coverage():
+    queue = Q.load_queue(QUEUE)
+    parent = "pod1_local_best"
+    ids = [
+        "taskrev_p1_fast_curriculum_low_noise",
+        "taskrev_p1_broad_curriculum_low_noise",
+        "taskrev_p1_core_high_noise",
+    ]
+    contents = {
+        ids[0]: _portfolio_behavior_content(ids[0], offset=1000, strong=False),
+        ids[1]: _portfolio_behavior_content(ids[1], offset=1000, strong=True),
+        ids[2]: _portfolio_behavior_content(ids[2], offset=1000, strong=False),
+    }
+    result = Q.analyze_parent_portfolio(
+        queue,
+        parent=parent,
+        milestone_offset=1000,
+        behavior_contents=contents,
+    )
+    assert len(result["survivor_job_ids"]) >= 2
+    assert result["minimum_survivors_satisfied"] is True
+    assert result["exact_0p5_coverage_satisfied"] is True
+    assert result["broad_arrival_coverage_satisfied"] is True
+    assert result["eliminated_job_ids"]
+    assert result["sparse_return_zero_used_for_elimination"] is False
+    assert all(row["tolerance"] == 0.0 for row in result["metric_contract"])
+
+
+def test_plus_500_portfolio_guard_will_not_kill_below_two_survivors():
+    queue = Q.load_queue(QUEUE)
+    ids = ["taskrev_p1_core_high_noise", "taskrev_p1_strong_foot_ready"]
+    contents = {
+        job_id: _portfolio_behavior_content(job_id, offset=500, strong=False)
+        for job_id in ids
+    }
+    assert all(
+        content["behavior"]["decision"] == "stop_clear_dense_collapse"
+        for content in contents.values()
+    )
+    result = Q.analyze_parent_portfolio(
+        queue,
+        parent="pod1_local_best",
+        milestone_offset=500,
+        behavior_contents=contents,
+    )
+    assert result["eliminated_job_ids"] == []
+    assert sorted(result["survivor_job_ids"]) == sorted(ids)
+    assert result["portfolio_stop_authorized"] is False
+
+
+def test_fast_curriculum_cannot_substitute_for_exact_0p5_exposure():
+    queue = Q.load_queue(QUEUE)
+    parent = "pod1_local_best"
+    ids = [
+        "taskrev_p1_fast_curriculum_low_noise",
+        "taskrev_p1_broad_curriculum_low_noise",
+        "taskrev_p1_core_high_noise",
+    ]
+    contents = {
+        job_id: _portfolio_behavior_content(job_id, offset=1000, strong=index == 1)
+        for index, job_id in enumerate(ids)
+    }
+    for content in contents.values():
+        for window in content["behavior"]["windows"]:
+            window["counters"]["planner_initial_tts_exact_0p5_count"] = 0
+    result = Q.analyze_parent_portfolio(
+        queue,
+        parent=parent,
+        milestone_offset=1000,
+        behavior_contents=contents,
+    )
+    assert result["exact_0p5_coverage_satisfied"] is False
+    assert result["eliminated_job_ids"] == []
+    assert result["portfolio_stop_authorized"] is False
+
+
 def test_ready_improvement_prevents_dense_collapse_stop():
     queue = Q.load_queue(QUEUE)
     records = [_exact_record(update) for update in range(301, 501)]
@@ -718,6 +875,30 @@ def test_ready_improvement_prevents_dense_collapse_stop():
     )
     assert result["decision"] == "continue_training_no_automatic_stop"
     assert any("ready_metric_improved:ready_tilt_rad_mean" in row for row in result["decision_reasons"])
+
+
+def test_any_strict_ready_improvement_protects_plus_500_without_hidden_tolerance():
+    queue = Q.load_queue(QUEUE)
+    records = [_exact_record(update) for update in range(301, 501)]
+    # First-window mean is 0.100.  A 0.001 improvement is smaller than the old
+    # code-only 0.005 tolerance but the frozen YAML declares no tolerance.
+    for record in records[100:]:
+        record["counters"]["ready_tilt_rad_sum"] = 0.99
+        record["derived"] = Q._derived_behavior(record["counters"])
+    parsed = Q.parse_exact_behavior_log(
+        _exact_log(records), required_counters=Q._required_behavior_counters(queue)
+    )
+    result = Q.analyze_behavior_windows(
+        parsed,
+        milestone=500,
+        milestone_offset=500,
+        required_counters=Q._required_behavior_counters(queue),
+    )
+    assert result["decision"] == "continue_training_no_automatic_stop"
+    assert any(
+        "ready_metric_improved:ready_tilt_rad_mean" in row
+        for row in result["decision_reasons"]
+    )
 
 
 @pytest.mark.parametrize(
@@ -868,6 +1049,44 @@ def test_behavior_dry_run_never_ssh_and_exposes_pending_blockers(monkeypatch):
     assert result["automatic_stop_authorized"] is False
     assert result["activation_blockers"]
     assert calls == []
+    with pytest.raises(Q.SuccessorQueueError, match="--execute requires"):
+        Q.cmd_exact_stop_behavior(
+            queue,
+            job_id=job["id"],
+            milestone=milestone,
+            execute=True,
+            confirm="wrong",
+        )
+    assert calls == []
+
+
+def test_pruning_cycle_dry_run_batches_at_most_one_ssh_per_pod_and_never_signals(
+    monkeypatch,
+):
+    queue = _as_pending(Q.load_queue(QUEUE))
+    calls = []
+    monkeypatch.setattr(
+        Q.continuation.lean,
+        "_run_ssh",
+        lambda *_args, **_kwargs: calls.append("ssh"),
+    )
+    result = Q.cmd_pruning_cycle(
+        queue,
+        pod="all",
+        milestone_offset=1000,
+        execute=False,
+        confirm=None,
+        write_receipts=True,
+    )
+    assert result["selected_pods"] == ["pod1", "pod2"]
+    assert result["maximum_ssh_connections_per_pod"] == 1
+    assert result["automatic_signal_authorized"] is False
+    assert set(result["pods"]) == {"pod1", "pod2"}
+    assert all(
+        "same_parent_all_attested_portfolio" in row["machine_checklist"]
+        for row in result["pods"].values()
+    )
+    assert calls == []
 
 
 def test_exact_stop_is_explicit_dry_run_only_and_never_ssh(monkeypatch):
@@ -891,15 +1110,43 @@ def test_exact_stop_is_explicit_dry_run_only_and_never_ssh(monkeypatch):
     assert result["automatic_retry_authorized"] is False
     assert result["activation_blockers"]
     assert calls == []
-    with pytest.raises(Q.SuccessorQueueError, match="--execute requires"):
-        Q.cmd_exact_stop_behavior(
-            queue,
-            job_id=job["id"],
-            milestone=milestone,
-            execute=True,
-            confirm="wrong",
-        )
-    assert calls == []
+
+
+def test_exact_stop_source_rebinds_starttime_and_argv_immediately_before_signal():
+    source = SCRIPT.read_text(encoding="utf-8")
+    stop = source.split("def exact_stop_behavior_local(", 1)[1].split(
+        "\ndef cmd_exact_stop_behavior(", 1
+    )[0]
+    assert "_require_bound_leader_evidence(leader_evidence, process)" in stop
+    assert stop.count("runtime._verify_bound_process(") == 1
+    assert "binding_content, proc_root=Path(\"/proc\"), getpgid=os.getpgid" in stop
+    assert stop.index("runtime._verify_bound_process(") < stop.index(
+        "exact_group.term_group("
+    )
+    assert stop.index("exact_group.bind_leader(") < stop.index(
+        "runtime._verify_bound_process("
+    )
+
+
+@pytest.mark.parametrize("field", ["pid", "pgid", "starttime_ticks"])
+def test_exact_stop_rejects_post_intent_pid_identity_reuse(field):
+    process = {
+        "pid": 123,
+        "pgid": 123,
+        "starttime_ticks": 456,
+        "argv": ["python", "train.py"],
+    }
+    leader = {
+        "leader": {
+            "pid": process["pid"],
+            "pgid": process["pgid"],
+            "starttime_ticks": process["starttime_ticks"],
+        }
+    }
+    Q._require_bound_leader_evidence(leader, process)
+    leader["leader"][field] += 1
+    with pytest.raises(Q.SuccessorQueueError, match="differs from immutable binding"):
+        Q._require_bound_leader_evidence(leader, process)
 
 
 def test_remote_consumer_embeds_sha_bound_queue_without_remote_control_file_write():

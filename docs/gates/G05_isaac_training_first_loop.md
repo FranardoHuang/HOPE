@@ -46,6 +46,29 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-17, task-revision pool uniquely launched; Gate remains `Partial`):
+
+- All 22 delay-zero cells consumed exactly one immutable launch claim. An independent read-only
+  recomputation after the final batch found 19 `live_exact` trainers and no unsubmitted launchable
+  cell. Pod1 task-revision occupancy is `3/3/2` and Pod2 is `3/4/4`; the independent RallyV11 on
+  Pod1 GPU0 was not touched. Every live row had `PID=PGID`, matching claim/binding, `/proc` and
+  NVML, had crossed its resumed first iteration and had no OOM, Traceback or Killed marker.
+- Three rows terminated before the first training iteration: two dynamic-URDF importer malloc
+  exits (`rc134`) and one reviewed boot stale-timeout. Their processes and NVML contexts are absent;
+  they are infrastructure rejections, not Reward or hypothesis failures, and are not automatically
+  replayed. The two positive-delay rows remain intentional NO-LAUNCH because governor and actor
+  transport are not atomic at non-zero delay.
+- This closes the launch/runtime part of G05 only. No checkpoint has yet completed the 0.5-second
+  K100. The CPU-only v4rg TOPP run-up certificates passed their safety/fidelity gates but found
+  only `0.98 s` forehand and `0.78 s` backhand feasible upper bounds, not a 0.5-second certificate.
+- The same-parent pruning consumer is now complete: `+200` checks revision/ledger activation,
+  `+500` combines dense-collapse with a portfolio guard, and `+1000` applies the YAML-bound
+  tolerance Pareto while retaining at least two cells plus an actually observed exact-0.5 sample
+  and broad timing
+  coverage. The first read-only `+200` scan produced zero stops because some still-live siblings
+  had not yet reached the shared milestone; infrastructure-terminal rows were excluded. Actual
+  portfolio receipts, the 0.5-second K100 result and vendor MuJoCo remain open.
+
 Follow-up note (2026-07-17, task-revision `A6` full-scene gate passed; Gate remains `Partial`):
 
 - The clean `b1f5a380` source passed one 4096-env/two-update generic and specialized probe on Pod1

@@ -13,6 +13,31 @@
 
 ## 2026-07-17
 
+- task-revision 行为淘汰闭环已补齐：`+200` 只在两个完整整数窗都证明 revision/ledger 机制未激活时淘汰，
+  `+500` 的 dense-collapse 还要过同父本组合保护，`+1000` 按 YAML 容差 Pareto，并至少保留两条、一个
+  实际记录过 exact-0.5 样本的候选和一个 broad 候选；exact stop 必须同时消费单臂与 portfolio 两份 no-clobber receipt，
+  signal 前再验 PID/PGID/starttime/argv。专项 `57 passed`，现役 24 格 claim 重建逐字节无漂移。首次
+  每 Pod 单 SSH 的只读 `+200` 扫描中，Pod1 `4 ready + 4 live waiting + 2 infra excluded`；Pod2 quality
+  父本 `4 ready + 2 waiting`，continuous 父本 `5 waiting + 1 infra excluded`，因此正确地产生 0 个 stop，
+  等同父本 live sibling 到齐后再发布组合决定。红队另抓到并修复了三处合入前漏洞：fast curriculum
+  不再替代 exact-0.5 暴露、`+500` 不再使用 YAML 未声明的隐藏改善容差、exact stop 在 intent 后与
+  signal 前再次对拍 PID/PGID/starttime/argv，防止 PID reuse/exec 漂移误伤。见
+  [task-revision cutover](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md)。
+
+- task-revision successor 的 22 个 delay-zero 格已各消费唯一 launch claim：最终只读复核为 `19 live_exact`
+  与 `3` 个首训练 iteration 前的基础设施拒绝，未漏发、未自动重试。Pod1 八条按 `3/3/2` 分布，Pod2
+  十一条按 `3/4/4` 分布；live 臂的 PID=PGID、claim/binding、`/proc`、NVML 与首步均一致，未见 OOM、
+  Traceback 或 Killed。两条 positive-delay 格继续因 governor/actor 非原子 transport 保持 NO-LAUNCH。
+  三个失败 namespace（两个 importer malloc `rc134`、一个 boot stale-timeout）不是 Reward 结论。0.5 秒
+  K100 尚无 checkpoint 分数；v4rg 正反手 TOPP 证书已转入 CPU-only 实跑。见
+  [task-revision cutover](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md)。
+
+- Pod2 CPU-only 一次性跑完现役 v4rg 正反手 TOPP run-up：两侧证书均通过 production FK、finite、静止
+  frame0、触球行逐位、拍速/拍面、关节/CoP/摩擦/力矩门，进程自然退出且未占 GPU。当前搜索族找到的
+  最佳可行上界为正手 `0.98 s`、反手 `0.78 s`，因此没有 0.5 秒动力学证书；这不能反推 0.5 秒绝对
+  不可能，仍须 K100 实际回球。NPZ SHA 为 `64f34305…9a6da` / `3a09894b…1f5f7`。见
+  [0.5 秒卷](experiments/2026-07/EXP-P1-TIMING-EXAM-0P5.md)。
+
 - task-revision `A6` 已通过 4096-env 两-update generic + specialized full-scene 门：finite
   model-1、fatal0、schema-3/lineage 正确、进程/NVML 自然清空；四个准备时间分层全覆盖（exact 0.5 秒
   `2,406` 样本），同球 revision `176,387=165,417+10,970`，最后触球前接受且 actor 可见 `839`。

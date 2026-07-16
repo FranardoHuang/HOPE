@@ -596,6 +596,13 @@ mixture 分层、revision 守恒、最后 precontact accepted/actor-visible 和 
 specialized consumer 观察到。激活证据只授权 22 条 `target_delay_steps=0` 格；两条 delay-two 格仍须
 保持 `governor_actor_transport_not_atomic`，不得随全局激活变成 ready。A6 不是 K100 0.5 秒行为成绩。
 
+激活后的唯一 launch sweep 已完成：22 个可启动格全部各有一个 claim，最终动态审计为 19 条
+`live_exact`、3 条首训练 iteration 前 infrastructure-terminal、0 条未提交。Pod1 的 task-revision trainer
+按 GPU 为 `3/3/2`（GPU0 另有一条团队 RallyV11，禁止触碰），Pod2 为 `3/4/4`。两个 importer malloc
+`rc134` 与一个 boot stale-timeout 的 namespace 永久保全且不自动 replay；不能把 expected marker 或 parent
+字符串中的 iteration 误读成训练首步。两条 positive-delay 格仍是 intentional NO-LAUNCH，不得用重复 seed、
+失败格 retry 或 filler 填补。
+
 科学 run 的行为比较不读 TensorBoard EMA，而只消费 runner 每个 PPO update 发出的唯一
 `HOPE_EXACT_BEHAVIOR_UPDATE_JSON`。absolute milestone 可从 `plan` 读取。先只读 inspect；需要创建 checkpoint
 和行为 receipt 时使用 attest：
@@ -620,8 +627,37 @@ consumer 先逐字节重建 claim，重验 binding、numeric PID=PGID、starttim
 结果是 null 且继续训练，绝不能把稀疏回台零值当失败。receipt 写入
 `behavior_milestones/model_N.json`，重复消费 fail closed。
 
-只有 receipt 明确给出 `stop_clear_dense_collapse` 时，operator 才可手动调用 exact stop；rolling 自动任务
-不得隐式 signal：
+单臂 receipt 不能独自授权 stop。必须再运行
+[`task-revision pruning portfolio`](../DEFINITIONS.md#task-revision-pruning-portfolio)（同父本组合保护式淘汰）
+cycle：每个 Pod 一次 SSH 批量读取已经存在的 checkpoint；只读 inspect 不写 receipt、不 signal，attest
+只发布已到档单臂与同父本组合的 no-clobber receipt，也不直接 signal。`+200` 只判 revision/ledger
+机制是否在两个完整窗内激活；`+500` 的 dense-collapse 还要通过同父本覆盖保护；`+1000` 用 YAML 绑定
+容差作 Pareto，并至少保留两条、一个实际记录过 exact-0.5 样本与一个 broad 候选。`+500` YAML 没有
+声明 ready-improvement 容差，因此任意严格有限改善都保护该格，consumer 不得藏代码内 tolerance。
+只要一个仍 live 的同父本
+sibling 尚未到共同 milestone，portfolio 必须保持 waiting：
+
+```bash
+python3 scripts/run_phase1_task_revision_supercombo_queue.py \
+  --queue configs/phase1_task_revision_supercombo_20260716.yaml \
+  inspect-pruning-cycle --pod all --milestone-offset 200
+# 真实 inspect 才追加：
+# --execute --confirm SIM_ONLY_INSPECT_ONE_TASK_REVISION_PARENT_PORTFOLIO
+
+python3 scripts/run_phase1_task_revision_supercombo_queue.py \
+  --queue configs/phase1_task_revision_supercombo_20260716.yaml \
+  attest-pruning-cycle --pod all --milestone-offset 200
+# 真实 attest 才追加：
+# --execute --confirm SIM_ONLY_ATTEST_ONE_TASK_REVISION_PARENT_PORTFOLIO
+```
+
+`--milestone-offset` 只接受预注册的 `200/500/1000`。首次真实只读 `+200` scan 中，Pod1 为
+`4 ready + 4 live waiting + 2 infrastructure excluded`；Pod2 的 quality parent 为
+`4 ready + 2 waiting`，continuous parent 为 `5 waiting + 1 infrastructure excluded`。因此组合 receipt
+与 stop 都正确保持为零；这不是“默认不淘汰”，而是拒绝跨进度误比。
+
+只有单臂 behavior receipt **与**同父本 portfolio receipt 都明确淘汰该 job 时，operator 才可手动调用
+exact stop；rolling 自动任务不得跳过组合保护或隐式 signal：
 
 ```bash
 python3 scripts/run_phase1_task_revision_supercombo_queue.py \
@@ -631,10 +667,11 @@ python3 scripts/run_phase1_task_revision_supercombo_queue.py \
 # --execute --confirm SIM_ONLY_EXACT_STOP_ONE_TASK_REVISION_BEHAVIOR_FAILURE
 ```
 
-stop consumer 会重新读取 behavior/checkpoint receipt、claim/binding 和 PID/PGID/starttime/argv，先写 no-clobber
-intent，再用 reviewed `exact_process_group.py` 对该数值 PGID 做成员双读；先 TERM，20 秒后仍存在时只对 intent
-已绑定且未被新成员/PID reuse 污染的 residual 做 KILL。它不用 `pgrep -f`、`pkill` 或 `killall`，不自动 retry，
-也不接收命令行 PID/路径。
+stop consumer 会重新读取 behavior/checkpoint/portfolio receipt、claim/binding 和 PID/PGID/starttime/argv，
+先写 no-clobber intent；intent 后再次把 leader PID/PGID/starttime 与 immutable binding 逐项对拍，并在
+signal 前再读一次包含 argv 的完整进程身份。随后用 reviewed `exact_process_group.py` 对该数值 PGID 做成员双读；先 TERM，20 秒后
+仍存在时只对 intent 已绑定且未被新成员/PID reuse 污染的 residual 做 KILL。它不用 `pgrep -f`、`pkill`
+或 `killall`，不自动 retry，也不接收命令行 PID/路径。
 
 ## Rolling timing 双 Pod 严格续训（2026-07-16）
 

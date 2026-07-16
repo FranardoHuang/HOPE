@@ -1,6 +1,6 @@
 # NOW — 当前训练流程、课程阶段与下一步
 
-最近复核：2026-07-16 CST。本页说明现在到底在训什么、整套训练怎样连起来、每个课程阶段在解决
+最近复核：2026-07-17 CST。本页说明现在到底在训什么、整套训练怎样连起来、每个课程阶段在解决
 什么问题，以及下一项工作为什么值得做。实验过程放在[实验登记册](experiments/README.md)，
 复现命令和 Gate 结果放在对应 [Gate](gates/) 与操作文档。
 
@@ -31,7 +31,26 @@
 做成安全可训练候选；把四个不同因果格先跨卡铺开以修正现役 policy 的拍面反号；把胜出 policy 连同我们的
 planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行为以厂商 MuJoCo 为准。
 
-- **当前训练池：** 旧 `24/24` 长曲线已按绑定身份停止，三份较强母本的 optimizer 被完整恢复到
+- **当前 task-revision 训练池：** formal 179-D 与训练现已统一为“一颗球一个 `task_id`、同球估计用递增
+  `task_revision`”，挥拍中位置、速度、signed 拍面与剩余击球时间每个 policy tick 继续原子更新；phase
+  governor 只接受可达的动作加速。准备时间不是以 `0.5 s` 为下限，而是同时采样 `<0.5 s` 压力、exact
+  `0.5 s` 基线、`0.5–0.9 s` 快球和 `0.9–1.7 s` 宽分布。4096-env `A6` 已证明这些机制真实激活；随后
+  22 个 delay-zero 格全部各发射一次。最终独立只读复核为 **19 条 `live_exact`、3 条首 iteration 前基础
+  设施拒绝、0 条漏发**：Pod1 八条按 `3/3/2`，Pod2 十一条按 `3/4/4`；live 臂持续前进且未见 OOM/
+  Traceback/Killed。两个 importer malloc `rc134` 与一个 boot stale-timeout 不算科学失败且不自动重跑；
+  两个 positive-delay 格因 governor/actor transport 尚非同 tick 原子继续 NO-LAUNCH。0.5 秒 K100 paper
+  已在两 Pod 物化但尚无 checkpoint 行为分数；现役 v4rg 正反手 TOPP 已在 Pod2 CPU-only 一次完成，
+  两侧安全证书均通过，但当前搜索族只找到正手 `0.98 s`、反手 `0.78 s` 的可行 run-up 上界，没有
+  0.5 秒动力学证书。这不证明 0.5 秒绝对不可能，却证明旧固定倍率不能冒充可行动作加速。
+  `+200` 机制失活、`+500` 极端崩坏和 `+1000` 同父本容差 Pareto 的组合保护式淘汰 consumer
+  已闭合：停臂必须同时有单臂行为 receipt 和同父本 portfolio receipt，且至少保留两条以及
+  实际 exact-0.5 暴露与 broad 两类时间覆盖。首次只读 `+200` 扫描中，Pod1 有 4 条到档、4 条同父本
+  live sibling 尚未到档，Pod2 quality 父本为 4 条到档/2 条等待、continuous 父本 5 条全部等待；
+  3 条 infrastructure-terminal 被排除，故本轮合法 stop 为 0，而不是默认让所有臂永生。首个合格
+  checkpoint 正在跑 K100，之后按 receipt 淘汰并把胜者送 vendor MuJoCo。详见
+  [task-revision 卷宗](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md)。
+
+- **已停止的前代 rolling 池（只作背景）：** 旧 `24/24` 长曲线已按绑定身份停止，三份较强母本的 optimizer 被完整恢复到
   [24 格快速准备组合漏斗](experiments/2026-07/EXP-P1-ROLLING-TIMING-SUPERCOMBO.md)。2026-07-16
   11:29 CST 的每 Pod 单连接只读审计确认 `24` 条都已消费唯一 claim，其中 `22` 条 live、fatal=`0`；两条在首迭代前由动态 URDF importer
   以 malloc `rc134` 退出，精确 PID/PGID 与 GPU context 均 absent，记为**基础设施拒绝**而不是 Reward
@@ -66,13 +85,14 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   同卷评估。`qdot` 是确定性的关节速度超限惩罚，不是随机外力；随机横向躯干推力正在
   补 trainer/物理响应门，过门后才占释放槽做同母本 no-force/force 配对。
 
-- **V10 现场问题复核：** 训练侧“目标与 TTS 同源延迟并扣除已知延迟”和约 `1.0/0.7/0.5 s`
-  reference retiming 已进入现役 source；Python planner 也确实逐样本重新估计、预测并发布目标。但端到端
-  仍未闭环：当前 VRPN bridge 写的是 host receipt time 而非 capture time；formal 179 runner 在 active swing
-  中冻结 target/clock；训练的击球位置仍是 Stage-1 固定区域，prediction jitter 也不是场馆 residual；现役
-  logger 不能回答 0.5 秒是否真能接；transport sequence 不能替代“一颗球只消费一次”的 task id。统一低频
-  planner/runner trace 也缺 ball-plane distance、source age、intercept、sequence 与接受原因的关联记录。
-  详细逐项边界见 [G07 的八项现场审计](gates/G07_mujoco_to_real.md#audit-update-2026-07-16-rallyv10-field-test-timing-and-task-lifecycle-gaps)。
+- **V10 现场问题复核后的采用状态：** 旧 formal 179-D runner 的 active-swing target/TTS freeze、同球重复开
+  task、VRPN capture age 未补偿和 planner/runner 盲盒 trace 已被 task-revision 协议取代：一颗物理球固定
+  一个 `task_id`，触球前每个 policy tick 用递增 `task_revision` 原子更新目标、signed 拍面与剩余时间，
+  capture age 进入外推，低频 trace 关联 ball-plane distance、source age、intercept、revision 与接受/拒绝
+  原因。训练 actor 同样逐 tick 看同球修订，题库/Reward truth/critic 保持 immutable，避免把追踪噪声写成
+  答案。尚未闭合的是行为层：Stage-1 来球位置仍不等于场馆 residual，positive-delay transport 仍
+  NO-LAUNCH，0.5 秒 K100 和 vendor MuJoCo 尚未给出能否回球的成绩。详细边界见
+  [G07 的八项现场审计](gates/G07_mujoco_to_real.md#audit-update-2026-07-16-rallyv10-field-test-timing-and-task-lifecycle-gaps)。
 
 - **最新可分享结果：** 反手拉 B/C 的 rank-0 主选已在 Pod1 CPU-only runtime 完成 exact 整轨
   SE(2) 实体化；后续 schema-2/FK 源码门也已进入 `main` 并通过 `17` 项专项回归。逐资产 no-write

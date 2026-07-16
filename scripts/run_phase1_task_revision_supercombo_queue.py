@@ -49,6 +49,8 @@ FINALIZE_FULL_SCENE_PROBE_CONFIRM = (
 BEHAVIOR_INSPECT_CONFIRM = "SIM_ONLY_INSPECT_ONE_TASK_REVISION_BEHAVIOR_WINDOW"
 BEHAVIOR_ATTEST_CONFIRM = "SIM_ONLY_ATTEST_ONE_TASK_REVISION_BEHAVIOR_WINDOW"
 BEHAVIOR_STOP_CONFIRM = "SIM_ONLY_EXACT_STOP_ONE_TASK_REVISION_BEHAVIOR_FAILURE"
+PORTFOLIO_INSPECT_CONFIRM = "SIM_ONLY_INSPECT_ONE_TASK_REVISION_PARENT_PORTFOLIO"
+PORTFOLIO_ATTEST_CONFIRM = "SIM_ONLY_ATTEST_ONE_TASK_REVISION_PARENT_PORTFOLIO"
 LOCAL_PROBE_FINALIZE_CONFIRM = "SIM_ONLY_LOCAL_FINALIZE_TASK_REVISION_PROBE"
 PENDING_STATUS = "pending_source_commit_and_full_scene_probe"
 ACTIVATED_STATUS = continuation.ACTIVATED_PREREGISTRATION_STATUS
@@ -98,12 +100,23 @@ REQUIRED_TASK_IDENTITY_OVERRIDES = {
 }
 EXACT_EVENT_PREFIX = "HOPE_EXACT_BEHAVIOR_UPDATE_JSON="
 READY_METRICS = {
-    "ready_tilt_rad_mean": ("minimize", 0.005),
-    "ready_base_speed_xy_mps_mean": ("minimize", 0.02),
-    "ready_station_offset_m_mean": ("minimize", 0.01),
-    "ready_foot_contact_fraction_mean": ("maximize", 0.01),
-    "ready_foot_slip_speed_mps_mean": ("minimize", 0.01),
+    "ready_tilt_rad_mean": "minimize",
+    "ready_base_speed_xy_mps_mean": "minimize",
+    "ready_station_offset_m_mean": "minimize",
+    "ready_foot_contact_fraction_mean": "maximize",
+    "ready_foot_slip_speed_mps_mean": "minimize",
 }
+REVISION_ACTIVATION_COUNTERS = frozenset(
+    {
+        "planner_revision_attempt_count",
+        "planner_revision_accepted_count",
+        "planner_revision_last_precontact_attempt_count",
+        "planner_revision_last_precontact_accepted_count",
+        "planner_revision_actor_visible_count",
+        "planner_revision_last_precontact_actor_visible_count",
+    }
+)
+PORTFOLIO_OFFSETS = frozenset({200, 500, 1000})
 TRANSPORT_BLOCKED_JOB_IDS = frozenset(
     {
         "taskrev_p1_core_low_noise",
@@ -589,21 +602,28 @@ def _validate_counter_invariants(counters: Mapping[str, int | float], label: str
     )
     if sample != components or sample != strata:
         raise SuccessorQueueError(f"{label} initial-TTS mixture accounting invariant failed")
-    attempts = int(counters["planner_revision_attempt_count"])
-    accepted = int(counters["planner_revision_accepted_count"])
-    rejected = int(counters["planner_revision_rejected_count"])
-    last_attempts = int(counters["planner_revision_last_precontact_attempt_count"])
-    last_accepted = int(counters["planner_revision_last_precontact_accepted_count"])
-    if attempts != accepted + rejected:
-        raise SuccessorQueueError(f"{label} planner-revision accounting invariant failed")
-    if not 0 <= last_accepted <= last_attempts <= attempts or last_accepted > accepted:
-        raise SuccessorQueueError(f"{label} last-precontact revision invariant failed")
-    actor_visible = int(counters["planner_revision_actor_visible_count"])
-    last_actor_visible = int(
-        counters["planner_revision_last_precontact_actor_visible_count"]
-    )
-    if not 0 <= actor_visible <= accepted or not 0 <= last_actor_visible <= last_accepted:
-        raise SuccessorQueueError(f"{label} planner actor-visible invariant failed")
+    # A producer that never registered one of these counters is itself a +200
+    # mechanism-activation failure.  Keep the parser capable of carrying that
+    # evidence to the registered two-window decision instead of turning it into
+    # an ambiguous sparse-return failure.  The full-scene probe still requires
+    # the complete counter set separately.
+    missing_activation = REVISION_ACTIVATION_COUNTERS - set(counters)
+    if not missing_activation:
+        attempts = int(counters["planner_revision_attempt_count"])
+        accepted = int(counters["planner_revision_accepted_count"])
+        rejected = int(counters["planner_revision_rejected_count"])
+        last_attempts = int(counters["planner_revision_last_precontact_attempt_count"])
+        last_accepted = int(counters["planner_revision_last_precontact_accepted_count"])
+        if attempts != accepted + rejected:
+            raise SuccessorQueueError(f"{label} planner-revision accounting invariant failed")
+        if not 0 <= last_accepted <= last_attempts <= attempts or last_accepted > accepted:
+            raise SuccessorQueueError(f"{label} last-precontact revision invariant failed")
+        actor_visible = int(counters["planner_revision_actor_visible_count"])
+        last_actor_visible = int(
+            counters["planner_revision_last_precontact_actor_visible_count"]
+        )
+        if not 0 <= actor_visible <= accepted or not 0 <= last_actor_visible <= last_accepted:
+            raise SuccessorQueueError(f"{label} planner actor-visible invariant failed")
     contact_count = int(counters["ready_foot_contact_eligible_sample_count"])
     contact_sum = float(counters["ready_foot_contact_fraction_sum"])
     if contact_sum > float(contact_count) + 1.0e-9:
@@ -658,10 +678,16 @@ def parse_exact_behavior_log(
             raise SuccessorQueueError(f"exact behavior line {line_number} provider is invalid")
         providers.add(provider)
         counters = record.get("counters")
-        if not isinstance(counters, dict) or not required_counters.issubset(counters):
-            missing = sorted(required_counters - set(counters or {}))
+        if not isinstance(counters, dict):
             raise SuccessorQueueError(
-                f"exact behavior update {update} is missing counters: {missing}"
+                f"exact behavior update {update} counters must be a mapping"
+            )
+        missing = required_counters - set(counters)
+        non_activation_missing = missing - REVISION_ACTIVATION_COUNTERS
+        if non_activation_missing:
+            raise SuccessorQueueError(
+                "exact behavior update "
+                f"{update} is missing counters: {sorted(non_activation_missing)}"
             )
         _validate_counter_invariants(counters, f"exact behavior update {update}")
         if record.get("derived") != _derived_behavior(counters):
@@ -710,8 +736,12 @@ def analyze_behavior_windows(
     for index, ids in enumerate((first_ids, second_ids), start=1):
         selected = [records[update] for update in ids]
         aggregate = _sum_window(selected)
-        if not required_counters.issubset(aggregate):
-            raise SuccessorQueueError(f"behavior window {index} lost required counters")
+        missing = required_counters - set(aggregate)
+        if missing - REVISION_ACTIVATION_COUNTERS:
+            raise SuccessorQueueError(
+                f"behavior window {index} lost required counters: "
+                + ",".join(sorted(missing - REVISION_ACTIVATION_COUNTERS))
+            )
         _validate_counter_invariants(aggregate, f"behavior window {index}")
         windows.append(
             {
@@ -725,6 +755,32 @@ def analyze_behavior_windows(
         )
 
     reasons: list[str] = []
+    activation_failures: list[str] = []
+    if milestone_offset == 200:
+        for window in windows:
+            counters = window["counters"]
+            for name in sorted(REVISION_ACTIVATION_COUNTERS):
+                if name not in counters:
+                    activation_failures.append(
+                        f"window_{window['index']}:{name}:missing"
+                    )
+                elif int(counters[name]) <= 0:
+                    activation_failures.append(f"window_{window['index']}:{name}:zero")
+
+    if activation_failures:
+        return {
+            "schema_version": 1,
+            "milestone": milestone,
+            "milestone_offset_from_parent": milestone_offset,
+            "window_alignment": "checkpoint_iteration_is_last_update_of_second_window",
+            "provider": "racket_target",
+            "windows": windows,
+            "decision": "stop_revision_or_ledger_activation_absent",
+            "decision_reasons": activation_failures,
+            "sparse_zero_without_positive_eligible_denominator_may_stop": False,
+            "sparse_outcome_used_for_activation_decision": False,
+            "stop_execution": "manual_reviewed_exact_consumer_only",
+        }
     stop = milestone_offset == 500
     for window in windows:
         derived = window["derived"]
@@ -750,12 +806,16 @@ def analyze_behavior_windows(
         reasons.append("ready_denominator_zero:" + ",".join(sorted(ready_missing)))
     else:
         improvements = []
-        for name, (direction, tolerance) in READY_METRICS.items():
+        for name, direction in READY_METRICS.items():
             before = float(first[name])
             after = float(second[name])
-            if direction == "minimize" and after < before - tolerance:
+            # The frozen YAML says "improves no ready metric" and declares no
+            # tolerance.  Any strict finite improvement therefore protects the
+            # cell; hidden code-only tolerances would silently loosen the
+            # preregistered stop rule.
+            if direction == "minimize" and after < before:
                 improvements.append(name)
-            if direction == "maximize" and after > before + tolerance:
+            if direction == "maximize" and after > before:
                 improvements.append(name)
         if improvements:
             stop = False
@@ -778,6 +838,265 @@ def analyze_behavior_windows(
         "decision_reasons": reasons,
         "sparse_zero_without_positive_eligible_denominator_may_stop": False,
         "stop_execution": "manual_reviewed_exact_consumer_only",
+    }
+
+
+def _portfolio_metric_contract(
+    queue: Mapping[str, Any],
+) -> list[dict[str, Any]]:
+    """Return YAML-bound Pareto axes.
+
+    A scalar metric entry means an exact (zero-tolerance) comparison.  A future
+    queue may replace it with ``{name, tolerance}`` without changing the
+    consumer.  This makes the tolerance an explicit property of the tracked
+    YAML contract instead of an unrecorded command-line choice.
+    """
+
+    plus_1000 = _mapping(
+        _mapping(queue.get("pruning_contract"), "pruning_contract").get("plus_1000"),
+        "pruning_contract.plus_1000",
+    )
+    configured = _mapping(plus_1000.get("pareto_metrics"), "plus_1000.pareto_metrics")
+    axes: list[dict[str, Any]] = []
+    seen: set[str] = set()
+    for direction in ("maximize", "minimize"):
+        values = configured.get(direction)
+        if not isinstance(values, list) or not values:
+            raise SuccessorQueueError(f"plus_1000.pareto_metrics.{direction} is empty")
+        for value in values:
+            if isinstance(value, str):
+                name = value
+                tolerance = 0.0
+                source = "yaml_scalar_exact_zero"
+            elif isinstance(value, dict) and set(value) == {"name", "tolerance"}:
+                name = value["name"]
+                tolerance = value["tolerance"]
+                source = "yaml_explicit"
+            else:
+                raise SuccessorQueueError(
+                    f"plus_1000.pareto_metrics.{direction} entry is malformed"
+                )
+            if not isinstance(name, str) or not name or name in seen:
+                raise SuccessorQueueError("Pareto metric names must be unique strings")
+            if (
+                isinstance(tolerance, bool)
+                or not isinstance(tolerance, (int, float))
+                or not math.isfinite(float(tolerance))
+                or float(tolerance) < 0.0
+            ):
+                raise SuccessorQueueError(f"Pareto tolerance for {name} is invalid")
+            seen.add(name)
+            axes.append(
+                {
+                    "name": name,
+                    "direction": direction,
+                    "tolerance": float(tolerance),
+                    "tolerance_source": source,
+                }
+            )
+    return axes
+
+
+def _portfolio_metric_value(derived: Mapping[str, Any], name: str) -> float | None:
+    aliases = {"swing_closeout_completion_rate": "swing_completion_rate"}
+    value = derived.get(aliases.get(name, name))
+    if value is None:
+        return None
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise SuccessorQueueError(f"portfolio metric {name} is not numeric/null")
+    result = float(value)
+    if not math.isfinite(result):
+        raise SuccessorQueueError(f"portfolio metric {name} is non-finite")
+    return result
+
+
+def _job_timing_roles(job: Mapping[str, Any]) -> dict[str, bool]:
+    revision = _validate_revision(job, _compiled_overrides(job))
+    components = revision["initial_tts_mixture"]["components"]
+    weights = {str(row["name"]): float(row["weight"]) for row in components}
+    maximum = max(weights.values())
+    return {
+        "fast_curriculum": weights["fast_deploy"] == maximum,
+        "broad_curriculum": weights["broad_arrival"] == maximum,
+    }
+
+
+def _receipt_last_window(content: Mapping[str, Any]) -> dict[str, Any]:
+    behavior = _mapping(content.get("behavior"), "portfolio behavior analysis")
+    windows = behavior.get("windows")
+    if not isinstance(windows, list) or len(windows) != 2:
+        raise SuccessorQueueError("portfolio behavior receipt must bind two windows")
+    window = _mapping(windows[1], "portfolio trailing behavior window")
+    if window.get("update_count") != 100:
+        raise SuccessorQueueError("portfolio trailing behavior window must contain 100 updates")
+    derived = _mapping(window.get("derived"), "portfolio trailing derived metrics")
+    counters = _mapping(window.get("counters"), "portfolio trailing raw counters")
+    return {"behavior": behavior, "derived": derived, "counters": counters}
+
+
+def _dominates(
+    left: Mapping[str, float | None],
+    right: Mapping[str, float | None],
+    axes: list[dict[str, Any]],
+) -> bool:
+    """Tolerance-aware dominance; unknown metrics are protected, never imputed."""
+
+    strictly_better = False
+    for axis in axes:
+        name = axis["name"]
+        a = left[name]
+        b = right[name]
+        if a is None or b is None:
+            return False
+        tolerance = axis["tolerance"]
+        if axis["direction"] == "maximize":
+            if a < b - tolerance:
+                return False
+            strictly_better = strictly_better or a > b + tolerance
+        else:
+            if a > b + tolerance:
+                return False
+            strictly_better = strictly_better or a < b - tolerance
+    return strictly_better
+
+
+def analyze_parent_portfolio(
+    queue: Mapping[str, Any],
+    *,
+    parent: str,
+    milestone_offset: int,
+    behavior_contents: Mapping[str, Mapping[str, Any]],
+) -> dict[str, Any]:
+    """Select stop-authorized cells without destroying parent-level coverage."""
+
+    if milestone_offset not in PORTFOLIO_OFFSETS:
+        raise SuccessorQueueError("portfolio offset must be one of 200, 500, or 1000")
+    parent_jobs = {
+        job["id"]: job
+        for job in queue["jobs"]
+        if _job_launch_authorized(job) and job["warm_start"]["parent"] == parent
+    }
+    if not parent_jobs:
+        raise SuccessorQueueError(f"unknown or scientifically blocked parent: {parent}")
+    unknown = set(behavior_contents) - set(parent_jobs)
+    if unknown:
+        raise SuccessorQueueError(f"portfolio contains other-parent jobs: {sorted(unknown)}")
+
+    axes = _portfolio_metric_contract(queue)
+    rows: dict[str, dict[str, Any]] = {}
+    for job_id, raw_content in behavior_contents.items():
+        content = _mapping(raw_content, f"portfolio behavior content {job_id}")
+        if content.get("job_id") != job_id:
+            raise SuccessorQueueError("portfolio behavior job identity changed")
+        trailing = _receipt_last_window(content)
+        behavior = trailing["behavior"]
+        if behavior.get("milestone_offset_from_parent") != milestone_offset:
+            raise SuccessorQueueError("portfolio behavior offset differs from requested offset")
+        metric_values = {
+            axis["name"]: _portfolio_metric_value(trailing["derived"], axis["name"])
+            for axis in axes
+        }
+        counters = trailing["counters"]
+        roles = _job_timing_roles(parent_jobs[job_id])
+        roles["exact_0p5_exposed"] = int(
+            counters.get("planner_initial_tts_exact_0p5_count", 0)
+        ) > 0
+        rows[job_id] = {
+            "job_id": job_id,
+            "single_job_decision": behavior.get("decision"),
+            "metrics": metric_values,
+            "roles": roles,
+        }
+
+    included = sorted(rows)
+    absent = sorted(set(parent_jobs) - set(rows))
+    minimum = int(
+        _mapping(
+            _mapping(queue["pruning_contract"], "pruning_contract").get("plus_1000"),
+            "plus_1000",
+        ).get("minimum_survivors_per_parent", 2)
+    )
+    if minimum < 2:
+        raise SuccessorQueueError("minimum_survivors_per_parent must be at least two")
+
+    dominators = {
+        job_id: sorted(
+            other
+            for other in included
+            if other != job_id
+            and _dominates(rows[other]["metrics"], rows[job_id]["metrics"], axes)
+        )
+        for job_id in included
+    }
+    if milestone_offset == 200:
+        proposed = {
+            job_id
+            for job_id in included
+            if rows[job_id]["single_job_decision"]
+            == "stop_revision_or_ledger_activation_absent"
+        }
+    elif milestone_offset == 500:
+        proposed = {
+            job_id
+            for job_id in included
+            if rows[job_id]["single_job_decision"] == "stop_clear_dense_collapse"
+        }
+    else:
+        proposed = {job_id for job_id in included if dominators[job_id]}
+
+    survivors = set(included) - proposed
+
+    def candidate_order(job_id: str) -> tuple[int, str]:
+        return (len(dominators[job_id]), job_id)
+
+    for job_id in sorted(proposed, key=candidate_order):
+        if len(survivors) >= minimum:
+            break
+        survivors.add(job_id)
+
+    def preserve_role(predicate) -> bool:
+        if any(predicate(rows[job_id]["roles"]) for job_id in survivors):
+            return True
+        choices = [job_id for job_id in included if predicate(rows[job_id]["roles"])]
+        if not choices:
+            return False
+        survivors.add(min(choices, key=candidate_order))
+        return True
+
+    exact_0p5 = preserve_role(lambda role: role["exact_0p5_exposed"])
+    broad = preserve_role(lambda role: role["broad_curriculum"])
+    coverage_satisfied = len(survivors) >= minimum and exact_0p5 and broad
+    eliminated = sorted(set(included) - survivors) if coverage_satisfied else []
+    survivors = set(included) - set(eliminated)
+    decisions = {
+        job_id: (
+            "eliminate"
+            if job_id in eliminated
+            else "retain_portfolio_guard"
+        )
+        for job_id in included
+    }
+    return {
+        "schema_version": 1,
+        "parent": parent,
+        "milestone_offset_from_parent": milestone_offset,
+        "included_attested_job_ids": included,
+        "unattested_job_ids": absent,
+        "metric_contract": axes,
+        "rows": [
+            {**rows[job_id], "dominated_by": dominators[job_id]}
+            for job_id in included
+        ],
+        "decisions": decisions,
+        "eliminated_job_ids": eliminated,
+        "survivor_job_ids": sorted(survivors),
+        "minimum_survivors_per_parent": minimum,
+        "minimum_survivors_satisfied": len(survivors) >= minimum,
+        "exact_0p5_coverage_satisfied": exact_0p5,
+        "broad_arrival_coverage_satisfied": broad,
+        "portfolio_stop_authorized": bool(eliminated) and coverage_satisfied,
+        "sparse_return_zero_used_for_elimination": False,
+        "unknown_metric_imputed": False,
     }
 
 
@@ -1002,6 +1321,301 @@ def inspect_or_attest_behavior_local(
     }
 
 
+def _portfolio_receipt_path(
+    queue: Mapping[str, Any], *, parent: str, milestone_offset: int
+) -> Path:
+    root = _mapping(queue.get("namespace_contract"), "namespace_contract").get("root")
+    if not isinstance(root, str) or not root.startswith("/workspace/"):
+        raise SuccessorQueueError("portfolio namespace root must be absolute /workspace")
+    if not continuation.lean.SAFE_ID.fullmatch(parent):
+        raise SuccessorQueueError("portfolio parent name is unsafe")
+    return (
+        Path(root)
+        / "portfolio_decisions"
+        / parent
+        / f"offset_{milestone_offset}.json"
+    )
+
+
+def inspect_or_attest_parent_portfolio_local(
+    queue: Mapping[str, Any],
+    *,
+    parent: str,
+    milestone_offset: int,
+    write_receipt: bool,
+) -> dict[str, Any]:
+    """Bind every same-parent behavior receipt currently attested on one Pod."""
+
+    if milestone_offset not in PORTFOLIO_OFFSETS:
+        raise SuccessorQueueError("portfolio offset must be one of 200, 500, or 1000")
+    jobs = [
+        job
+        for job in queue["jobs"]
+        if _job_launch_authorized(job) and job["warm_start"]["parent"] == parent
+    ]
+    if not jobs:
+        raise SuccessorQueueError(f"no launchable jobs use parent {parent}")
+    pods = {job["resource"]["required_slot"].split("/", 1)[0] for job in jobs}
+    sources = {(job["source"]["checkout"], job["source"]["commit"]) for job in jobs}
+    if len(pods) != 1 or len(sources) != 1:
+        raise SuccessorQueueError("same-parent portfolio must remain on one Pod and source")
+    _verify_clean_source(jobs[0]["source"])
+    runtime, _runtime_path = _load_runtime(jobs[0]["source"]["checkout"])
+
+    contents: dict[str, dict[str, Any]] = {}
+    receipt_bindings: list[dict[str, Any]] = []
+    for job in jobs:
+        absolute = continuation._absolute_schedule(
+            job, continuation._parent_records_from_job_context(job)
+        )
+        milestone = absolute["parent_iteration"] + milestone_offset
+        if milestone not in absolute["milestones"]:
+            raise SuccessorQueueError("portfolio offset is not registered for every parent cell")
+        path = Path(job["run_dir"]) / "behavior_milestones" / f"model_{milestone}.json"
+        if not path.exists():
+            continue
+        receipt, raw = runtime._read_regular_json(path, "portfolio behavior receipt")
+        content = _validate_envelope(receipt, "portfolio behavior receipt")
+        behavior = _mapping(content.get("behavior"), "portfolio behavior analysis")
+        if (
+            content.get("job_id") != job["id"]
+            or behavior.get("milestone") != milestone
+            or behavior.get("milestone_offset_from_parent") != milestone_offset
+        ):
+            raise SuccessorQueueError("portfolio behavior receipt identity changed")
+        contents[job["id"]] = content
+        receipt_bindings.append(
+            {
+                "job_id": job["id"],
+                "path": str(path),
+                "file_sha256": hashlib.sha256(raw).hexdigest(),
+                "content_sha256": receipt["content_sha256"],
+            }
+        )
+    analysis = analyze_parent_portfolio(
+        queue,
+        parent=parent,
+        milestone_offset=milestone_offset,
+        behavior_contents=contents,
+    )
+    pruning_contract = _mapping(queue.get("pruning_contract"), "pruning_contract")
+    content = {
+        "schema_version": 1,
+        "parent": parent,
+        "pod": next(iter(pods)),
+        "milestone_offset_from_parent": milestone_offset,
+        "behavior_receipts": sorted(receipt_bindings, key=lambda row: row["job_id"]),
+        "pruning_contract_sha256": continuation._canonical_sha256(pruning_contract),
+        "analysis": analysis,
+        "consumer_source": _consumer_source_evidence(),
+        "automatic_signal_authorized": False,
+        "automatic_retry": False,
+    }
+    receipt = {
+        "schema_version": 1,
+        "content": content,
+        "content_sha256": continuation._canonical_sha256(content),
+    }
+    path = _portfolio_receipt_path(
+        queue, parent=parent, milestone_offset=milestone_offset
+    )
+    if write_receipt:
+        path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        if not stat.S_ISDIR(path.parent.lstat().st_mode):
+            raise SuccessorQueueError("portfolio decision parent is not a real directory")
+        runtime._atomic_publish_json(path, receipt, "parent portfolio decision receipt")
+    return {
+        "mode": "attest-portfolio" if write_receipt else "inspect-portfolio",
+        "read_only": not write_receipt,
+        "receipt_path": str(path),
+        "receipt": receipt,
+    }
+
+
+def run_pruning_cycle_local(
+    queue: Mapping[str, Any],
+    *,
+    pod: str,
+    milestone_offset: int,
+    write_receipts: bool,
+) -> dict[str, Any]:
+    """In one Pod-local process, attest every ready checkpoint then each parent.
+
+    This function never signals.  A live bound cell that has not reached the
+    checkpoint keeps its entire parent portfolio waiting, while an exited cell
+    with no checkpoint is explicitly recorded as an infrastructure exclusion.
+    """
+
+    if milestone_offset not in PORTFOLIO_OFFSETS:
+        raise SuccessorQueueError("pruning-cycle offset must be 200, 500, or 1000")
+    jobs = [
+        job
+        for job in queue["jobs"]
+        if _job_launch_authorized(job)
+        and job["resource"]["required_slot"].split("/", 1)[0] == pod
+    ]
+    if not jobs:
+        raise SuccessorQueueError(f"no launchable jobs are assigned to {pod}")
+    _verify_clean_source(jobs[0]["source"])
+    runtime, _runtime_path = _load_runtime(jobs[0]["source"]["checkout"])
+    rows: list[dict[str, Any]] = []
+    parent_waiting: dict[str, bool] = {}
+    for job in jobs:
+        parent = job["warm_start"]["parent"]
+        parent_waiting.setdefault(parent, False)
+        slot = continuation._slots(queue)[job["resource"]["required_slot"]]
+        claim_spec = continuation._attestor_claim_spec(queue, job, slot)
+        binding_path = Path(claim_spec["binding_path"])
+        if not binding_path.exists():
+            rows.append(
+                {
+                    "job_id": job["id"],
+                    "parent": parent,
+                    "state": "unbound_never_launched_excluded",
+                }
+            )
+            continue
+        binding, binding_content, _claim, _claim_content = runtime._load_binding(
+            binding_path
+        )
+        if (
+            binding_content.get("job_id") != job["id"]
+            or binding_content.get("claim_content_sha256")
+            != claim_spec["content_sha256"]
+            or binding_content.get("pod") != pod
+            or binding_content.get("run_dir") != job["run_dir"]
+            or binding.get("content_sha256") is None
+        ):
+            raise SuccessorQueueError("pruning-cycle binding differs from registered cell")
+        process_state = runtime._verify_bound_process(
+            binding_content, proc_root=Path("/proc"), getpgid=os.getpgid
+        )
+        absolute = continuation._absolute_schedule(
+            job, continuation._parent_records_from_job_context(job)
+        )
+        milestone = absolute["parent_iteration"] + milestone_offset
+        checkpoint = Path(str(binding_content["rsl_log_dir"])) / f"model_{milestone}.pt"
+        checkpoint_ready = False
+        try:
+            info = checkpoint.lstat()
+            checkpoint_ready = stat.S_ISREG(info.st_mode) and info.st_size > 0
+            if not checkpoint_ready:
+                raise SuccessorQueueError(
+                    f"registered checkpoint is not a non-empty regular file: {checkpoint}"
+                )
+        except FileNotFoundError:
+            checkpoint_ready = False
+        behavior_path = (
+            Path(job["run_dir"])
+            / "behavior_milestones"
+            / f"model_{milestone}.json"
+        )
+        if behavior_path.exists():
+            state = "behavior_receipt_present"
+        elif not checkpoint_ready:
+            if process_state == "live":
+                state = "waiting_for_checkpoint"
+                parent_waiting[parent] = True
+            else:
+                state = "exited_before_checkpoint_excluded"
+        elif not write_receipts:
+            state = "checkpoint_ready_behavior_receipt_absent"
+            parent_waiting[parent] = True
+        else:
+            inspect_or_attest_behavior_local(
+                queue,
+                job_id=job["id"],
+                milestone=milestone,
+                write_receipt=True,
+            )
+            state = "behavior_attested_now"
+        rows.append(
+            {
+                "job_id": job["id"],
+                "parent": parent,
+                "milestone": milestone,
+                "process_state": process_state,
+                "checkpoint_ready": checkpoint_ready,
+                "behavior_receipt_path": str(behavior_path),
+                "state": state,
+            }
+        )
+
+    portfolios: list[dict[str, Any]] = []
+    for parent in sorted(parent_waiting):
+        if parent_waiting[parent]:
+            portfolios.append({"parent": parent, "state": "waiting_for_all_live_cells"})
+            continue
+        path = _portfolio_receipt_path(
+            queue, parent=parent, milestone_offset=milestone_offset
+        )
+        if path.exists():
+            receipt, _raw = runtime._read_regular_json(
+                path, "existing parent portfolio decision receipt"
+            )
+            content = _validate_envelope(
+                receipt, "existing parent portfolio decision receipt"
+            )
+            portfolios.append(
+                {
+                    "parent": parent,
+                    "state": "portfolio_receipt_present",
+                    "receipt_path": str(path),
+                    "content_sha256": receipt["content_sha256"],
+                    "eliminated_job_ids": _mapping(
+                        content.get("analysis"), "existing portfolio analysis"
+                    ).get("eliminated_job_ids", []),
+                }
+            )
+            continue
+        inspected = inspect_or_attest_parent_portfolio_local(
+            queue,
+            parent=parent,
+            milestone_offset=milestone_offset,
+            write_receipt=False,
+        )
+        analysis = _mapping(
+            _validate_envelope(inspected["receipt"], "inspected portfolio").get(
+                "analysis"
+            ),
+            "inspected portfolio analysis",
+        )
+        if not write_receipts or analysis.get("portfolio_stop_authorized") is not True:
+            portfolios.append(
+                {
+                    "parent": parent,
+                    "state": "no_elimination_receipt_not_published",
+                    "analysis": analysis,
+                }
+            )
+            continue
+        attested = inspect_or_attest_parent_portfolio_local(
+            queue,
+            parent=parent,
+            milestone_offset=milestone_offset,
+            write_receipt=True,
+        )
+        portfolios.append(
+            {
+                "parent": parent,
+                "state": "portfolio_attested_now",
+                "receipt_path": attested["receipt_path"],
+                "analysis": _validate_envelope(
+                    attested["receipt"], "attested portfolio"
+                )["analysis"],
+            }
+        )
+    return {
+        "mode": "attest-pruning-cycle" if write_receipts else "inspect-pruning-cycle",
+        "pod": pod,
+        "milestone_offset_from_parent": milestone_offset,
+        "jobs": rows,
+        "portfolios": portfolios,
+        "ssh_signal_count": 0,
+        "automatic_stop_authorized": False,
+    }
+
+
 def _validated_stop_inputs(
     queue: Mapping[str, Any], *, job_id: str, milestone: int
 ) -> dict[str, Any]:
@@ -1015,6 +1629,9 @@ def _validated_stop_inputs(
     )
     if milestone not in absolute["milestones"]:
         raise SuccessorQueueError("exact stop milestone is not registered")
+    milestone_offset = milestone - absolute["parent_iteration"]
+    if milestone_offset not in PORTFOLIO_OFFSETS:
+        raise SuccessorQueueError("exact stop requires a registered portfolio offset")
     _verify_clean_source(job["source"])
     runtime, runtime_path = _load_runtime(job["source"]["checkout"])
     claim_spec = continuation._attestor_claim_spec(queue, job, slot)
@@ -1040,17 +1657,70 @@ def _validated_stop_inputs(
     behavior_analysis = _mapping(
         behavior_content.get("behavior"), "behavior decision analysis"
     )
+    allowed_single_decision = {
+        200: "stop_revision_or_ledger_activation_absent",
+        500: "stop_clear_dense_collapse",
+        # +1000 is deliberately a portfolio decision; the single-cell receipt
+        # must remain neutral rather than inventing a scalar winner score.
+        1000: "continue_training_no_automatic_stop",
+    }[milestone_offset]
     if (
         behavior_content.get("job_id") != job_id
         or behavior_content.get("binding_content_sha256") != binding["content_sha256"]
         or behavior_content.get("claim_content_sha256") != claim_spec["content_sha256"]
         or behavior_content.get("process_identity") != binding_content.get("process")
         or behavior_analysis.get("milestone") != milestone
-        or behavior_analysis.get("decision") != "stop_clear_dense_collapse"
+        or behavior_analysis.get("decision") != allowed_single_decision
         or behavior_analysis.get("stop_execution")
         != "manual_reviewed_exact_consumer_only"
     ):
         raise SuccessorQueueError("behavior receipt does not authorize this exact stop")
+
+    parent = job["warm_start"]["parent"]
+    portfolio_path = _portfolio_receipt_path(
+        queue, parent=parent, milestone_offset=milestone_offset
+    )
+    portfolio, portfolio_raw = runtime._read_regular_json(
+        portfolio_path, "parent portfolio decision receipt"
+    )
+    portfolio_content = _validate_envelope(
+        portfolio, "parent portfolio decision receipt"
+    )
+    portfolio_analysis = _mapping(
+        portfolio_content.get("analysis"), "parent portfolio analysis"
+    )
+    behavior_bindings = portfolio_content.get("behavior_receipts")
+    if not isinstance(behavior_bindings, list):
+        raise SuccessorQueueError("parent portfolio behavior bindings are malformed")
+    bound_behavior = [
+        row
+        for row in behavior_bindings
+        if isinstance(row, dict) and row.get("job_id") == job_id
+    ]
+    if (
+        portfolio_content.get("parent") != parent
+        or portfolio_content.get("pod") != slot.pod
+        or portfolio_content.get("milestone_offset_from_parent") != milestone_offset
+        or portfolio_content.get("pruning_contract_sha256")
+        != continuation._canonical_sha256(
+            _mapping(queue.get("pruning_contract"), "pruning_contract")
+        )
+        or portfolio_analysis.get("parent") != parent
+        or portfolio_analysis.get("milestone_offset_from_parent") != milestone_offset
+        or portfolio_analysis.get("portfolio_stop_authorized") is not True
+        or portfolio_analysis.get("minimum_survivors_satisfied") is not True
+        or portfolio_analysis.get("exact_0p5_coverage_satisfied") is not True
+        or portfolio_analysis.get("broad_arrival_coverage_satisfied") is not True
+        or job_id not in portfolio_analysis.get("eliminated_job_ids", [])
+        or len(bound_behavior) != 1
+        or bound_behavior[0].get("path") != str(behavior_path)
+        or bound_behavior[0].get("file_sha256")
+        != hashlib.sha256(behavior_raw).hexdigest()
+        or bound_behavior[0].get("content_sha256") != behavior["content_sha256"]
+    ):
+        raise SuccessorQueueError(
+            "parent portfolio receipt does not authorize this exact elimination"
+        )
     milestone_info = _mapping(
         behavior_content.get("milestone_receipt"), "bound checkpoint receipt"
     )
@@ -1085,10 +1755,29 @@ def _validated_stop_inputs(
         "behavior_path": behavior_path,
         "behavior": behavior,
         "behavior_raw": behavior_raw,
+        "portfolio_path": portfolio_path,
+        "portfolio": portfolio,
+        "portfolio_raw": portfolio_raw,
         "milestone_path": milestone_path,
         "milestone_receipt": milestone_receipt,
         "milestone_raw": milestone_raw,
     }
+
+
+def _require_bound_leader_evidence(
+    leader_evidence: Mapping[str, Any], process: Mapping[str, Any]
+) -> None:
+    """Require the post-intent proc read to equal the immutable binding."""
+
+    leader = _mapping(leader_evidence.get("leader"), "exact-stop leader evidence")
+    if (
+        leader.get("pid") != process.get("pid")
+        or leader.get("pgid") != process.get("pgid")
+        or leader.get("starttime_ticks") != process.get("starttime_ticks")
+    ):
+        raise SuccessorQueueError(
+            "exact-stop leader evidence differs from immutable binding"
+        )
 
 
 def exact_stop_behavior_local(
@@ -1139,6 +1828,11 @@ def exact_stop_behavior_local(
             evidence["behavior_raw"]
         ).hexdigest(),
         "behavior_receipt_content_sha256": evidence["behavior"]["content_sha256"],
+        "portfolio_receipt_path": str(evidence["portfolio_path"]),
+        "portfolio_receipt_file_sha256": hashlib.sha256(
+            evidence["portfolio_raw"]
+        ).hexdigest(),
+        "portfolio_receipt_content_sha256": evidence["portfolio"]["content_sha256"],
         "checkpoint_receipt_path": str(evidence["milestone_path"]),
         "checkpoint_receipt_file_sha256": hashlib.sha256(
             evidence["milestone_raw"]
@@ -1158,12 +1852,29 @@ def exact_stop_behavior_local(
         evidence["job"]["source"]["checkout"]
     )
     if evidence["process_state"] == "live":
-        exact_group.bind_leader(Path("/proc"), pid, pgid, leader_path)
+        leader_evidence = exact_group.bind_leader(Path("/proc"), pid, pgid, leader_path)
+        _require_bound_leader_evidence(leader_evidence, process)
         behavior_again, raw_again = runtime._read_regular_json(
             evidence["behavior_path"], "behavior decision receipt"
         )
         if raw_again != evidence["behavior_raw"] or behavior_again != evidence["behavior"]:
             raise SuccessorQueueError("behavior receipt changed before exact signal")
+        portfolio_again, portfolio_raw_again = runtime._read_regular_json(
+            evidence["portfolio_path"], "parent portfolio decision receipt"
+        )
+        if (
+            portfolio_raw_again != evidence["portfolio_raw"]
+            or portfolio_again != evidence["portfolio"]
+        ):
+            raise SuccessorQueueError("parent portfolio receipt changed before exact signal")
+        # Close the initial-verify -> intent/receipt-read TOCTOU.  bind_leader
+        # rechecks PID/PGID/starttime, while this final runtime read also binds
+        # the immutable argv.  exact_process_group.term_group then performs one
+        # more starttime/group check immediately around the signal.
+        if runtime._verify_bound_process(
+            binding_content, proc_root=Path("/proc"), getpgid=os.getpgid
+        ) != "live":
+            raise SuccessorQueueError("bound process exited before exact signal")
         exact_group.term_group(Path("/proc"), leader_path, term_path)
         signals.append("SIGTERM")
         deadline = time.monotonic() + 20.0
@@ -1706,6 +2417,8 @@ def _remote_task_revision_command(
     allowed = {
         "finalize_task_revision_probe_local",
         "inspect_or_attest_behavior_local",
+        "inspect_or_attest_parent_portfolio_local",
+        "run_pruning_cycle_local",
         "exact_stop_behavior_local",
     }
     if function not in allowed:
@@ -1745,7 +2458,7 @@ def _remote_task_revision_command(
         "queue=ns['continuation']._LoadedContinuationQueue(req['queue'],source_path=pathlib.Path('/embedded/task_revision_queue.yaml'),source_sha256=hashlib.sha256(qraw).hexdigest());"
         "ns['validate_successor_contract'](queue);"
         "ns['continuation']._bind_parent_context(queue);"
-        "assert req['function'] in {'finalize_task_revision_probe_local','inspect_or_attest_behavior_local','exact_stop_behavior_local'};"
+        "assert req['function'] in {'finalize_task_revision_probe_local','inspect_or_attest_behavior_local','inspect_or_attest_parent_portfolio_local','run_pruning_cycle_local','exact_stop_behavior_local'};"
         "result=ns[req['function']](queue,**req['kwargs']);"
         "print(json.dumps(result,allow_nan=False,ensure_ascii=False,sort_keys=True))"
     )
@@ -1924,6 +2637,101 @@ def cmd_behavior(
     return result
 
 
+def cmd_pruning_cycle(
+    queue: dict[str, Any],
+    *,
+    pod: str,
+    milestone_offset: int,
+    execute: bool,
+    confirm: str | None,
+    write_receipts: bool,
+) -> dict[str, Any]:
+    """Run at most one receipt-only SSH per selected Pod; never signal trainers."""
+
+    if milestone_offset not in PORTFOLIO_OFFSETS:
+        raise SuccessorQueueError("pruning-cycle offset must be 200, 500, or 1000")
+    selected = ["pod1", "pod2"] if pod == "all" else [pod]
+    if any(name not in {"pod1", "pod2"} for name in selected):
+        raise SuccessorQueueError("pruning-cycle pod must be all, pod1, or pod2")
+    expected_confirm = (
+        PORTFOLIO_ATTEST_CONFIRM if write_receipts else PORTFOLIO_INSPECT_CONFIRM
+    )
+    if execute and confirm != expected_confirm:
+        raise SuccessorQueueError(f"--execute requires --confirm {expected_confirm}")
+    commands: dict[str, list[str]] = {}
+    for pod_name in selected:
+        representative = next(
+            job
+            for job in queue["jobs"]
+            if _job_launch_authorized(job)
+            and job["resource"]["required_slot"].startswith(pod_name + "/")
+        )
+        commands[pod_name] = _remote_task_revision_command(
+            queue,
+            representative,
+            function="run_pruning_cycle_local",
+            kwargs={
+                "pod": pod_name,
+                "milestone_offset": milestone_offset,
+                "write_receipts": write_receipts,
+            },
+        )
+    result: dict[str, Any] = {
+        "mode": "attest-pruning-cycle" if write_receipts else "inspect-pruning-cycle",
+        "dry_run": not execute,
+        "milestone_offset_from_parent": milestone_offset,
+        "selected_pods": selected,
+        "maximum_ssh_connections_per_pod": 1,
+        "automatic_signal_authorized": False,
+        "automatic_retry_authorized": False,
+        "pods": {},
+    }
+    if not execute:
+        result["activation_blockers"] = successor_activation_blockers(queue)
+        result["pods"] = {
+            pod_name: {
+                "ssh_argv": [
+                    *continuation.lean._ssh_prefix(queue, pod_name),
+                    f"bash -lc {shlex.quote(shlex.join(command))}",
+                ],
+                "machine_checklist": [
+                    "exact_claim_and_binding",
+                    "checkpoint_exists_and_is_regular",
+                    "behavior_receipt_absent_before_attest",
+                    "two_complete_100_update_windows",
+                    "same_parent_all_attested_portfolio",
+                    "minimum_two_survivors",
+                    "exact_0p5_exposed_survivor",
+                    "broad_arrival_survivor",
+                    "no_clobber_portfolio_receipt_only_if_elimination_exists",
+                ],
+            }
+            for pod_name, command in commands.items()
+        }
+        return result
+    blockers = successor_activation_blockers(queue)
+    if blockers:
+        raise SuccessorQueueError(
+            "pruning cycle is activation-blocked: " + "; ".join(blockers)
+        )
+    for pod_name in selected:
+        raw = continuation.lean._run_ssh(
+            queue,
+            pod_name,
+            shlex.join(commands[pod_name]),
+            timeout=900,
+            phase=f"{'attest' if write_receipts else 'inspect'}-pruning-cycle:"
+            f"{pod_name}:{milestone_offset}",
+        )
+        try:
+            result["pods"][pod_name] = json.loads(raw)
+        except json.JSONDecodeError as exc:
+            raise SuccessorQueueError(
+                f"remote pruning-cycle consumer returned malformed JSON on {pod_name}"
+            ) from exc
+    return result
+
+
 def cmd_exact_stop_behavior(
     queue: dict[str, Any],
     *,
@@ -2016,6 +2824,14 @@ def _parser() -> argparse.ArgumentParser:
         behavior.add_argument("--milestone", required=True, type=int)
         behavior.add_argument("--execute", action="store_true")
         behavior.add_argument("--confirm")
+    for mode in ("inspect-pruning-cycle", "attest-pruning-cycle"):
+        pruning = sub.add_parser(mode)
+        pruning.add_argument("--pod", choices=("all", "pod1", "pod2"), default="all")
+        pruning.add_argument(
+            "--milestone-offset", required=True, type=int, choices=sorted(PORTFOLIO_OFFSETS)
+        )
+        pruning.add_argument("--execute", action="store_true")
+        pruning.add_argument("--confirm")
     stop = sub.add_parser("exact-stop-behavior")
     stop.add_argument("--job-id", required=True)
     stop.add_argument("--milestone", required=True, type=int)
@@ -2032,6 +2848,13 @@ def _parser() -> argparse.ArgumentParser:
         behavior.add_argument("--job-id", required=True)
         behavior.add_argument("--milestone", required=True, type=int)
         behavior.add_argument("--confirm", required=True)
+    for mode in ("_local-inspect-pruning-cycle", "_local-attest-pruning-cycle"):
+        pruning = sub.add_parser(mode)
+        pruning.add_argument("--pod", required=True, choices=("pod1", "pod2"))
+        pruning.add_argument(
+            "--milestone-offset", required=True, type=int, choices=sorted(PORTFOLIO_OFFSETS)
+        )
+        pruning.add_argument("--confirm", required=True)
     local_stop = sub.add_parser("_local-exact-stop-behavior")
     local_stop.add_argument("--job-id", required=True)
     local_stop.add_argument("--milestone", required=True, type=int)
@@ -2091,6 +2914,15 @@ def main(argv: list[str] | None = None) -> int:
                 confirm=args.confirm,
                 write_receipt=args.mode == "attest-behavior",
             )
+        elif args.mode in {"inspect-pruning-cycle", "attest-pruning-cycle"}:
+            result = cmd_pruning_cycle(
+                queue,
+                pod=args.pod,
+                milestone_offset=args.milestone_offset,
+                execute=args.execute,
+                confirm=args.confirm,
+                write_receipts=args.mode == "attest-pruning-cycle",
+            )
         elif args.mode == "exact-stop-behavior":
             result = cmd_exact_stop_behavior(
                 queue,
@@ -2122,6 +2954,23 @@ def main(argv: list[str] | None = None) -> int:
                 job_id=args.job_id,
                 milestone=args.milestone,
                 write_receipt=args.mode == "_local-attest-behavior",
+            )
+        elif args.mode in {
+            "_local-inspect-pruning-cycle",
+            "_local-attest-pruning-cycle",
+        }:
+            expected = (
+                PORTFOLIO_ATTEST_CONFIRM
+                if args.mode == "_local-attest-pruning-cycle"
+                else PORTFOLIO_INSPECT_CONFIRM
+            )
+            if args.confirm != expected:
+                raise SuccessorQueueError("local pruning-cycle confirmation mismatch")
+            result = run_pruning_cycle_local(
+                queue,
+                pod=args.pod,
+                milestone_offset=args.milestone_offset,
+                write_receipts=args.mode == "_local-attest-pruning-cycle",
             )
         elif args.mode == "_local-exact-stop-behavior":
             if args.confirm != BEHAVIOR_STOP_CONFIRM:

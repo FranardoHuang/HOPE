@@ -1,9 +1,12 @@
 # EXP-P1-TASK-REVISION-CUTOVER
 
-Status: `activation-ready` — `A6` passed the 4096-env, two-update generic and task-revision
-full-scene gates with a finite checkpoint, exact integer ledger and live final-precontact revisions.
-The 22 delay-zero cells are unblocked; the two non-atomic delayed-transport cells remain NO-LAUNCH.
-This is runtime/harness acceptance, not a behavior winner or 0.5-second return result.
+Status: `running / no behavior verdict` — `A6` passed the 4096-env, two-update generic and
+task-revision full-scene gates with a finite checkpoint, exact integer ledger and live
+final-precontact revisions. All 22 delay-zero cells have now consumed exactly one launch claim:
+19 crossed their first training iteration and remain live, while three failed before the first
+training iteration in the importer/boot path. The two non-atomic delayed-transport cells remain
+NO-LAUNCH. This is runtime/harness acceptance and a live engineering search, not a behavior
+winner or 0.5-second return result.
 
 - Human owner: Franco
 - Executor: Codex
@@ -74,11 +77,19 @@ on each Pod from the same immutable source schedule; both copies are 48,963 byte
 `6f5f1526…672d` and semantic SHA `fa7e3c21…3b66`. No checkpoint has taken the exam yet, so
 0.5-second ability remains **unknown**.
 
-`topp_mintime.py` now distinguishes total-motion and run-up objectives, prepends a static
-zero-velocity frame when required and never lets an oracle bypass CoP/friction/torque gates. Its
-reported result is a feasible upper bound in the searched family, not a global optimum. The
-current forehand heuristic is about 0.94 s and no backhand final-static certificate or 0.5-second
-dynamics certificate exists. This is source progress, not completion of action acceleration.
+`topp_mintime.py` distinguishes total-motion and run-up objectives, prepends a static zero-velocity
+frame when required and never lets an oracle bypass CoP/friction/torque gates. On Pod2 the exact
+main-matching tool was consumed once, CPU-only and in parallel, against the current v4rg forehand
+and backhand paths. Both no-clobber certificates passed finite, production-FK, frame-0-zero,
+contact-bitwise, signed-face, joint, CoP, friction and torque gates. The best feasible run-up found
+was `0.98 s` forehand and `0.78 s` backhand; neither side obtained a 0.5-second dynamics
+certificate. The result is a feasible upper bound in the searched family, not a global optimum or
+a proof that 0.5 seconds is physically impossible.
+
+The output root is
+`/workspace/codexschema/phase1_task_revision_supercombo_20260716/topp_v4rg_runup_36e42103`.
+Forehand NPZ/certificate SHAs are `64f34305…9a6da` / `fe295146…c16`; backhand are
+`3a09894b…1f5f7` / `3da9dde9…7531`. Both processes exited naturally with no GPU use or signal.
 
 ## Source verification so far
 
@@ -137,13 +148,51 @@ returns `activation_ready=true`, 22 launchable cells and no blockers. These two 
 mechanism activation only; their one virtual capture and zero legal returns are not a behavior
 verdict.
 
+## Activated pool launch result
+
+The activated queue was launched in cross-GPU rounds from the clean source
+`b1f5a3803efa14f91e594912959cec2de473a5a6`. A final read-only audit after all launch attempts
+recomputed claims, process identity and NVML state rather than trusting launcher output:
+
+- `22/22` launchable cells have one immutable claim; there are no unsubmitted launchable cells;
+- `19` are `live_exact`, with numeric `PID=PGID`, matching claim/binding, `/proc` and NVML;
+- Pod1 has eight live task-revision trainers distributed `3/3/2`; the independent RallyV11
+  process on GPU0 was neither counted nor touched;
+- Pod2 has eleven live task-revision trainers distributed `3/4/4`;
+- all live logs were fatal-free at the audit boundary and had advanced beyond the first resumed
+  iteration;
+- three cells are terminal before the first training iteration and have no surviving `/proc` or
+  NVML process: `p1_free_non_striking_arm` and `p2_combo_high_noise_free_medium` exited with
+  importer malloc `rc134`; `p1_fast_curriculum_high_noise` hit the reviewed boot stale-timeout.
+
+Those three rows are **infrastructure rejections**, not evidence against the free-arm, fast/high-
+noise or high-noise combo hypotheses. Their namespaces and logs are preserved and are not
+automatically retried. The two positive-delay rows remain intentionally unclaimed because the
+governor and actor would observe different revision ticks; they are not idle omissions.
+
+The behavior consumer now binds exact two-window integer ledgers and rejects sparse-zero
+misclassification. `+200` can stop only if revision/last-precontact/actor-visible mechanism
+counters are absent or zero in the complete windows; `+500` requires the registered clear dense
+collapse; `+1000` uses YAML-bound tolerance-aware Pareto dominance. Every stop additionally needs
+a no-clobber same-parent portfolio receipt that retains at least two cells plus actual exact-0.5 exposure and
+broad-arrival coverage. The public pruning cycle batches all ready checkpoints in at most one SSH
+per Pod and never signals by itself.
+
+The first real read-only `+200` cycle found four ready Pod1 `model_1800` checkpoints and four live
+rows still waiting; Pod2 had four ready quality-parent `model_4900` checkpoints while its two later
+quality rows and all continuous-parent rows were still waiting for their registered milestone.
+The three infrastructure-terminal rows were explicitly excluded. No row was stopped or ranked;
+the portfolio correctly waits for every still-live sibling rather than rewarding early starters.
+
 ## Acceptance sequence
 
 1. Launch the 22 activated delay-zero cells in cross-GPU rounds; keep the two transport cells
    blocked and verify every child resumes full policy/value/optimizer state.
 2. At +200 verify structure/mechanism only; at +500/+1000 consume two complete integer windows and
-   prune only under the registered rules, preserving exact-0.5 and stochastic-timing candidates.
-3. Run the K100 0.5-second exam and the no-clobber TOPP safety certificate. Record failures as
-   failures; do not replace either with training Reward or a fixed clock multiplier.
+   prune only through the same-parent portfolio receipt, preserving at least two cells and both
+   actual exact-0.5 exposure and broad-arrival coverage.
+3. Run the K100 0.5-second exam. The first no-clobber TOPP run-up certificates are complete and
+   show `0.98/0.78 s`, so the old fixed 0.5-second multiplier is not certified; do not replace the
+   missing behavior result with training Reward or reinterpret this upper bound as impossibility.
 4. Vendor MuJoCo Gate3/Gate3B remains the final judge; no real-robot command is allowed by this
    experiment.
