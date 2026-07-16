@@ -26,9 +26,15 @@
     "activate_both_ready_sources_at_midpoint": true,
     "shared_ready_not_yet_selected": true
   },
-  "evidence_status": "raw_stage1_pending_historical_attestation",
+  "evidence_status": "historical_stage1_attested_screening_only",
   "required_attestation_receipt": "/workspace/codexschema/ready_to_strike_0p5_20260717/join_ladder_stage1_8d74025e/stage1_historical_attestation.json",
-  "launch_authorized": false,
+  "required_attestation_receipt_sha256": "7cf1c7c9613eb4a319dc8038934d3b439b8d3f948fab6b2650872e71f54c377f",
+  "stage2_runner": {
+    "path": "scripts/run_ready_to_strike_join_ladder_stage2.py",
+    "sha256": "d04951f1393407ec4a4a60b038fb31982b339ed4cc9fdfe0e3a83a30ca49d676"
+  },
+  "stage2_namespace": "/workspace/codexschema/ready_to_strike_0p5_20260717/join_ladder_stage2_d12_8d74025e",
+  "launch_authorized": true,
   "authorized_stage2_cells": [
     {"cell_id": "fh_rf_d12", "action": "forehand", "ready_source": "forehand", "delta": 12},
     {"cell_id": "fh_rb_d12", "action": "forehand", "ready_source": "backhand", "delta": 12},

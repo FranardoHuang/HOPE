@@ -81,8 +81,8 @@ run-up 上界是正手 `0.98 s`、反手 `0.78 s`。因此单纯把完整旧 cli
   冻结规则因此选择四个 `d=12` 中点格；机器 activation 见
   [`stage2_activation`](../../../configs/ready_to_strike_join_ladder_stage2_activation_20260717.json)。但原始
   Stage 1 summary 未绑定一次性 consumer 源码，且旧 parser 未全量重验 certificate provenance；因此这些
-  数值先降级为 raw，`launch_authorized=false`。独立 historical attestor 全量重建 candidate/certificate/
-  runtime binding 并发布 no-clobber receipt 后，才允许点火中点，不重跑六格。
+  数值曾先降级为 raw。独立 historical attestor 已全量重建 candidate/certificate/runtime binding 并发布
+  no-clobber receipt；六格不重跑，四个中点仅由下述 tracked Stage-2 runner 消费。
 - Historical attestor production dry-run attempt 1 在 receipt 前正确停止：queue 的训练 checkout 是
   `b1f5a38`，而 generator 由单独的 `generator_source_commit=66f93559` 提供并以不可变副本执行；首版
   attestor 错误要求旧 checkout 自己含该文件。失败没有 receipt、候选重跑或 signal。修复只核实际执行
@@ -92,6 +92,17 @@ run-up 上界是正手 `0.98 s`、反手 `0.78 s`。因此单纯把完整旧 cli
   重算，不接受二选一宽容匹配。
   第三次 dry-run 在 receipt 前发现 budget scale 预期写错：历史证书与冻结 TOPP v3 默认均为 `1.5`，
   不是 `1.0`。attestor 改为精确要求 `1.5`，不放宽成任意正数。
+- 修复后的唯一 Pod2 no-clobber consume 已成功发布 Stage-1 historical attestation receipt
+  `7cf1c7c9613eb4a319dc8038934d3b439b8d3f948fab6b2650872e71f54c377f`。六个端点的 candidate、完整
+  schema-2、ready/contact/protected-window、production-FK TOPP 输出和 provenance 均重新解析并绑定；
+  可信 screening 时间为 `1.28/0.70/1.54/1.94/0.78/1.42 s`，全部高于 `0.5 s`。receipt 明确保持
+  `physics/source/MJCF exact=false` 和 training/deployment authority=false；Stage 2 只能用绑定该 receipt
+  与 tracked runner bytes 的新 namespace 跑四个 `d=12`，不得重放 Stage 1。
+- Stage-2 runner 的独立红队先后关闭四类假绿：child 不得读可变原资产而必须读 O_EXCL snapshot；
+  certificate timing 必须与 contact-frame/fps 一致；activation 固定唯一结果 namespace；并发 loser/旧目录
+  不得被写 terminal marker。runner 另固定 TOPP budget scale=`1.5`、3600 秒 CPU child timeout，并在拥有
+  namespace 后的异常发布 terminal summary。专项与 Stage-1/生成器组合回归 `49 passed`；activation 现只
+  授权这四个 CPU-only screening 格，训练/部署/真机权限仍为 false。
 - 下一门：在 ignored runtime 资产上按预注册 join ladder 生成正/反手候选，production FK 重建后逐个跑
   TOPP；只把 `<=0.5 s` 的候选送 L0/L1/桌网/动力学，再用绑定该 motion SHA 的 0.5 秒 K100 和
 vendor MuJoCo 判行为。

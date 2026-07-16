@@ -108,10 +108,22 @@ def test_stage2_activation_is_exactly_the_registered_crossover_branch() -> None:
     ]
     assert activation["decision"]["ready_by_side_crossover"] is True
     assert activation["decision"]["activate_both_ready_sources_at_midpoint"] is True
-    assert activation["evidence_status"] == "raw_stage1_pending_historical_attestation"
-    assert activation["launch_authorized"] is False
+    assert activation["evidence_status"] == "historical_stage1_attested_screening_only"
+    assert activation["launch_authorized"] is True
     assert activation["required_attestation_receipt"] == (
         activation["stage1_namespace"] + "/stage1_historical_attestation.json"
+    )
+    assert activation["required_attestation_receipt_sha256"] == (
+        "7cf1c7c9613eb4a319dc8038934d3b439b8d3f948fab6b2650872e71f54c377f"
+    )
+    assert activation["stage2_runner"] == {
+        "path": "scripts/run_ready_to_strike_join_ladder_stage2.py",
+        "sha256": hashlib.sha256(
+            (ROOT / "scripts/run_ready_to_strike_join_ladder_stage2.py").read_bytes()
+        ).hexdigest(),
+    }
+    assert activation["stage2_namespace"].endswith(
+        "/join_ladder_stage2_d12_8d74025e"
     )
     cells = activation["authorized_stage2_cells"]
     assert {(cell["action"], cell["ready_source"], cell["delta"]) for cell in cells} == {

@@ -13,6 +13,18 @@
 
 ## 2026-07-17
 
+- ready×join Stage-1 historical attestor 已在 Pod2 唯一 no-clobber consume 中成功发布 receipt
+  `7cf1c7c9…c377f`。六格 candidate、完整 schema-2、production-FK TOPP 输出/provenance、frame0 零速、
+  protected window 与 source closure 均重验通过；可信 screening 时间为 `1.28/0.70/1.54/1.94/0.78/1.42 s`，
+  全部仍高于 `0.5 s`。这关闭了端点证据假绿，不等于动力学或行为通过；四个预注册 `d=12` 中点的
+  tracked CPU-only runner 已经独立红队，绑定冻结输入、contact/fps timing、唯一 namespace 和 3600 秒
+  child timeout，组合回归 `49 passed`，下一步仅为一次性执行。
+
+- Pod2 task-revision `+500` 已为 quality 父本六格和 continuous 父本一格发布行为 receipt。quality 六格
+  completion=`0.919–0.971`、virtual-return=`0.278–0.395`，没有任何一格达到预注册 dense-collapse 门；
+  ready 四项缺测，禁止据 null 排名，故合法 stop=`0`。同轮 `+1000` inspect 证明所有 `model_5500/5700`
+  尚不存在；当前不能冒充 Pareto 结论，也没有 signal。
+
 - Stage-1 historical attestor 的首次 production dry-run 在写 receipt 前 fail closed：旧 task-revision
   checkout `b1f5a38` 不含来自独立 `generator_source_commit=66f93559` 的后置生成器，首版 attestor 错把
   两个 source root 合成一个。失败只留下 content-addressed attestor source、无 receipt/候选重跑/训练 signal。
@@ -24,8 +36,8 @@
 - ready×join Stage 1 六个新端点格都自然产生 candidate/TOPP 原始制品；raw 数值显示 `d=17` 全面更慢，
   反手 own-frame0 ready 将最近 join 从 `0.94` 改善到 `0.78 s`，正手则 own-ready `0.64` 优于
   backhand-ready `0.70 s`，形成 side crossover。独立红队随后抓到一次性 summary 未绑定 consumer 源码、
-  parser 未全量重验 certificate provenance，故结果降级为 pending historical attestation；预注册选择的
-  四个 `d=12` 中点保持 `launch_authorized=false`，六格不重跑。见
+  parser 未全量重验 certificate provenance，故结果曾降级为 pending historical attestation；上方 receipt
+  已关闭该阻塞。六格不重跑，四个 `d=12` 中点转由唯一 tracked runner activation 消费。见
   [短路径实验](experiments/2026-07/EXP-MOTION-READY-TO-STRIKE-0P5.md)。
 
 - 新源码 `66f93559` 的 Pod2 CPU-only attempt2 已对真实 v4rg 成功生成正/反手 0.5秒 host 候选，随后

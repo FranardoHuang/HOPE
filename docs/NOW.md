@@ -50,7 +50,11 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   1 条 infrastructure-terminal 排除。Pod1 最近只读为 4 条到档、4 条 live sibling 等待、2 条
   infrastructure-terminal 排除。这里零 stop 是机制正常的结论，不是默认让所有臂永生；行为优劣从
   `+500` 开始判。最新 Pod2 `+500` cycle 显示十一条 live 臂仍未到共同 `model_5000/5200`，故尚无合法
-  行为淘汰；一条既有 importer 失败继续排除且没有 signal。首个合格
+  `+500` 行为取证已在 Pod2 到档格上闭合：quality 父本六条 completion 为 `0.919–0.971`、virtual-return
+  为 `0.278–0.395`，没有一条满足“连续两个窗口 completion<0.40”的崩坏门；ready 四项在本批日志中均为
+  null，不能拿缺失量尺做淘汰。因此这轮合法 stop 仍为 0。continuous 父本只有一条到 `model_5000`，其余
+  等待；`+1000` 所需 `model_5500/5700` 全部尚不存在，所以还不能做同父本 Pareto 排序。一条既有
+  importer 失败继续排除且全程没有 signal。首个合格
   checkpoint 正在跑 K100，之后按 receipt 淘汰并把胜者送 vendor MuJoCo。详见
   [task-revision 卷宗](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md)。
 
@@ -64,7 +68,10 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   并用两侧 minimax 区分 forehand/backhand frame0 哪个可作共同 ready。端点实测已显示 `d=17` 全面
   慢于 `d=6`；反手 own-ready 把 raw `0.94` 改善到 `0.78 s`，但正手自己的 ready 仍更好，故冻结规则
   选择两个 ready 的四个 `d=12` 中点。红队发现一次性 runner 未持久绑定 consumer 且 certificate parser
-  不够严格，现已将端点数值降级为待 historical attestation，`d=12` 暂不点火；目前仍没有
+  不够严格后，独立 historical attestor 已全量重验并发布唯一 receipt
+  `7cf1c7c9…c377f`：六个端点升级为可信的 screening evidence，分别为正手 `1.28/0.70/1.54 s`、反手
+  `1.94/0.78/1.42 s`，仍全部高于 `0.5 s`。四个 `d=12` 中点的 exact tracked runner activation
+  已闭合，下一步是在唯一 CPU-only namespace 一次执行，不再被旧端点取证阻塞；目前仍没有
   production FK、TOPP≤0.5、L0/L1、桌网、动力学或行为通过，不能写成0.5秒动作已完成。见
   [短路径实验](experiments/2026-07/EXP-MOTION-READY-TO-STRIKE-0P5.md)。
 

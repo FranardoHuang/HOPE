@@ -102,6 +102,37 @@ schema-2 source/candidate 的 `joint_vel` 必须按 generator 的 float32 输入
 它只把旧结果升级为 screening evidence；因为历史证书没有完整 argv、transitive source 和 MJCF closure，
 `physics_replay_exact/source_closure_exact/mjcf_closure_exact` 仍必须是 `false`，不能冒充动力学重放或部署通过。
 
+## Stage-2 四个中点的一次性执行
+
+Stage-1 receipt `7cf1c7c9…c377f` 已成功发布后，四个 `delta=12` 中点只能由 tracked runner 消费一次。
+activation 精确绑定 runner SHA、Stage-1 receipt SHA 和唯一结果目录；换目录重复执行会在创建任何 namespace
+前 fail closed。先从包含 runner 的 clean main source 做 dry-run：
+
+```bash
+python3 scripts/run_ready_to_strike_join_ladder_stage2.py \
+  --activation configs/ready_to_strike_join_ladder_stage2_activation_20260717.json \
+  --queue configs/ready_to_strike_join_ladder_20260717.yaml \
+  --root /workspace/codexschema/ready_to_strike_0p5_20260717/join_ladder_stage2_d12_8d74025e
+```
+
+dry-run 必须报告四格且不创建结果目录。确认 receipt、runner、queue、旧 runtime 与两份动作资产 SHA 全部
+一致后，才可用同一组输入执行：
+
+```bash
+python3 scripts/run_ready_to_strike_join_ladder_stage2.py \
+  --activation configs/ready_to_strike_join_ladder_stage2_activation_20260717.json \
+  --queue configs/ready_to_strike_join_ladder_20260717.yaml \
+  --root /workspace/codexschema/ready_to_strike_0p5_20260717/join_ladder_stage2_d12_8d74025e \
+  --execute \
+  --confirm RUN_READY_TO_STRIKE_STAGE2_ONCE
+```
+
+runner 先以 O_EXCL 冻结 generator、TOPP 闭包、MJCF、URDF、body order、两份动作资产和所有控制文件，
+generator/TOPP 只读冻结副本。四个 TOPP 可并行，但每个 CPU child 的 reviewed timeout 为 3600 秒；任一格
+失败都发布 terminal summary、全批不重试。`runup_s` 必须同时等于 output contact-frame/fps 与 timing bound，
+budget scale 必须为冻结默认 `1.5`。成功只说明 Stage-2 screening 执行完整；只有 `<=0.5 s` 且 hard gate
+全过的格才能进入 L0/L1，仍无训练、部署或真机权限。
+
 ## 下一步不是直接训练
 
 每条候选依次执行：
