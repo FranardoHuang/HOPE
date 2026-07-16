@@ -623,6 +623,12 @@ filename=embedded、finite 与 lineage，并 O_EXCL 写 `milestones/model_N.json
 SHA 与 actual claim digest；digest 可由独立 contract 唯一映射回 reviewed runner variant。该命令每次只连接
 目标 Pod 一次，不运行 judge，也没有 stop/signal/retry。
 
+2026-07-16 首次 production 消费已验证这条兼容路径：
+`rolling_p2_t05_comp2_j0_equal_f03@5200` 精确匹配 historical corrected-budget claim `7878d92...`，并以
+no-clobber receipt（content SHA=`521910d...`）记录 embedded=`5200`、全部浮点 tensor finite、schema-3 hard
+SHA=`4e84c51...`、lineage=`0` 与 attestor runtime=`ec90e18...`。这不是第二个历史 variant 的 blanket
+授权；每个后续 job 仍须独立 dry-run、每轮最多一次目标 Pod SSH，并由 remote actual 完整匹配其中一个候选。
+
 运行态每 30 分钟按队列内 `pruning_contract` 审计。`+200` 只淘汰结构/合同/non-finite/fatal；`+500`
 只允许淘汰连续两窗 dense 明显崩坏，不能把缺少 eligible hit 的稀疏零值判失败；`+1000` 仅在同 parent
 内按 completion、signed composite、解析回球和 pre/post fall 作容差 Pareto 淘汰，并保留时间覆盖。停臂只按
@@ -631,7 +637,7 @@ SHA 与 actual claim digest；digest 可由独立 contract 唯一映射回 revie
 
 2026-07-16 对 source=`704bf3a` 的 logger 审计表明，上述 `+500/+1000` 行为规则在**当前 22 条**上不能
 机器执行：completion/fall 是重叠历史 EMA，physical-fall union、ready-phase eligible denominator/sum 和
-content-bound parent baseline 均缺失。即使 `model_5200` 已出现，也只能先做 checkpoint attestation；行为
+content-bound parent baseline 均缺失。首份 `model_5200` checkpoint receipt 已通过也不会补出行为窗口；行为
 状态必须保持“量尺不完整，继续训练”，不得据 TensorBoard EMA stop。未来 source 需逐 update
 发布 consume-once 整数事件账和 phase `sum+count`，或另立 checkpoint-bound immutable exam；当前 runner
 不会从旧日志伪造行为窗。

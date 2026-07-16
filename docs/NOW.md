@@ -50,9 +50,14 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   `continuation_runner_script_sha256`，budget/题目/source/run/slot 全相同，绑定进程仍 `live_exact`、checkpoint
   为 regular、receipt absent。这不是 trainer 或 checkpoint 失败，也不授权直接重试。milestone consumer
   只精确白名单两份逐 job 完整重建的 corrected-budget claim，明确排除旧 budget-v1；任何第三 runner 或其他
-  字段差异仍 fail closed。两份 `model_5200` 继续、不排名、不停止。本轮 Pod1 的 source/GPU/claim/fatal
-  仍健康，但审计脚本误把 `/proc` 伪文件当普通文件，导致 exact identity/checkpoint 刷新为 UNKNOWN；不得据此
-  判断 `model_3600` 或停止 PGID `2199057`。后续 source 必须增加 per-update 整数机会/
+  字段差异仍 fail closed。约 15:10 CST，reviewed consumer 对该 job 只连 Pod2 一次并成功 O_EXCL 发布首份
+  `model_5200` receipt：filename/embedded=`5200`，74 个浮点 tensor、`1,762,715` 元素全部 finite，schema-3
+  hard/claim/binding 对齐，lineage=`0`，取证时进程仍 live；receipt content SHA=`521910d...`。这只关闭
+  checkpoint 完整性，不是行为领先，第二份 `model_5200` 本轮未触碰，两条都继续、不排名、不停止。
+  15:14 CST 的 Pod1 唯一只读连接已用 `/proc` 专用双读修复上轮 UNKNOWN：`11 live_exact + 1 importer
+  rejected`，GPU=`4/3/4`、util=`92/97/97%`、accepted fatal=`0`；11 份 latest `model_2600–3100` 均
+  embedded/finite/schema-3 hard/claim/binding/lineage=`0` 且 optimizer 完整。budget-v1 PGID `2199057`
+  仍 live、latest=`3100`、`model_3600` 不存在，未 signal。后续 source 必须增加 per-update 整数机会/
   完成/物理跌倒 union 与 ready-phase `sum+count`，现役模型若要提前排序只能另走绑定 checkpoint 的不可变
   同卷评估。`qdot` 是确定性的关节速度超限惩罚，不是随机外力；随机横向躯干推力正在
   补 trainer/物理响应门，过门后才占释放槽做同母本 no-force/force 配对。

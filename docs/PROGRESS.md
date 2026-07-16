@@ -13,6 +13,15 @@
 
 ## 2026-07-16
 
+- 约 15:10 CST，reviewed historical-claim attestor 对
+  `rolling_p2_t05_comp2_j0_equal_f03@5200` 只连 Pod2 一次并成功 no-clobber 发布 receipt
+  （content SHA=`521910d...`）：checkpoint SHA=`72dbcb9...`，filename/embedded=`5200`，74 个浮点 tensor、`1,762,715`
+  元素 nonfinite=`0`；schema-3 hard SHA=`4e84c51...`、claim=`7878d92...`、binding=`4b9c5b2...`、
+  lineage=`0`，取证时 process=`live`。它只证明 checkpoint 身份/finite/合同，不提供行为排序。15:14 CST
+  Pod1 唯一只读审计用 `/proc` 专用双读闭合上轮 UNKNOWN：11 条 live_exact、GPU `4/3/4`、accepted
+  fatal0，latest `model_2600–3100` 全部 finite/合同/optimizer 正确；budget-v1 PGID `2199057` 只到
+  `model_3100`，未出现 `model_3600`，无 signal。既有 importer malloc 失败保持 rejected、未重试。
+
 - 13:46 CST，Pod2 唯一只读 inspector 证明首份 `model_5200` 的 actual immutable claim=`7878d92...`、
   launcher runner=`428cbf...`，claim/binding/process=`live_exact`、checkpoint regular、receipt absent；相对
   当前 `aee7132.../90d7f26...` 的完整 content 唯一差异是 continuation runner SHA，corrected budget、

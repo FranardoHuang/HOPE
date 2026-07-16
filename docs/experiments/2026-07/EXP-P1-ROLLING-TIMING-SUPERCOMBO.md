@@ -234,9 +234,26 @@ remote actual 仍须**逐字段等于其中恰好一个完整候选**。prefligh
 27202d...`、任意第三 runner、budget/recipe/parent/source/run/slot/bank/argv 任一漂移全部拒绝。旧
 budget-v1 job 还在 contract 中显式 deny，继续等待独立 exact-stop 路径。
 
-同轮 Pod1 唯一连接仍证明 source clean、12/12 claim 的 job/Pod/GPU/run/source 一致、GPU `4/3/4`、
+约 15:10 CST，production dry-run 只列出上述两个 exact variant 后，本轮 Pod2 唯一 SSH 对
+`rolling_p2_t05_comp2_j0_equal_f03@5200` 执行一次 reviewed attestation 并 rc=`0`。content-addressed runtime
+`ec90e18...` 以 `created_no_replace` 物化；receipt 以 O_EXCL/no-replace 发布，content SHA=`521910d...`。
+checkpoint SHA=`72dbcb9...`，filename/embedded iteration 均为 `5200`，74 个浮点 tensor、`1,762,715`
+elements、nonfinite=`0`；hard contract schema=`3` / SHA=`4e84c51...` / lineage=`0`，actual claim
+SHA=`7878d92...`；binding content SHA=`4b9c5b2...`，且 binding 内 claim 引用与 actual 一致；取证时
+process=`live`。没有 judge、stop、retry 或第二 job；该 receipt 只关闭 checkpoint 身份、finite 与 lineage，
+不改变“量尺不完整，继续训练”。
+
+同轮 Pod1 唯一只读 SSH 已改用 `/proc` 专用双读，不再把伪文件套 regular-file size/mtime 门：source clean
+exact `704bf3a`，11 条 PID=PGID/starttime/argv 与 immutable binding 均 `live_exact`，一个既有 importer
+malloc job 保持 rejected；GPU 并发 `4/3/4`、util=`92/97/97%`，accepted fatal=`0`。11 份 latest
+`model_2600–3100` 均 filename=embedded、74 个浮点 tensor（总 tensor 76）/ `1,762,715` elements、
+nonfinite=`0`、schema-3 hard/
+claim/lineage=`0`、optimizer state/groups 完整。budget-v1 PGID `2199057` latest=`3100`，`model_3600`
+不存在，未 signal；worker/judge/Kit process 均为 `0`。
+
+13:46 CST 的上一轮 Pod1 审计曾证明 source clean、12/12 claim 的 job/Pod/GPU/run/source 一致、GPU `4/3/4`、
 11 个 trainer PID 同时在 `/proc` 与 NVML、accepted fatal regex=`0`；但审计脚本错误地把 `/proc/<pid>/stat`
-当 regular file 做 size/mtime stable-read，11 条 live 在 identity 阶段统一 fail closed。本轮 exact argv/
+当 regular file 做 size/mtime stable-read，11 条 live 在 identity 阶段统一 fail closed。当时 exact argv/
 starttime/checkpoint 因而是 UNKNOWN，不得据此推断 `model_3600` absent 或停止 PGID `2199057`；这不是 trainer
 失败，下一轮需用 proc 专用双读。
 

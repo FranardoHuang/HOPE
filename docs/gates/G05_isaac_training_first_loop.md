@@ -2703,6 +2703,14 @@ digest=`7878d92...`、runner=`428cbf...`，binding/process=`live_exact`、`model
 size/mtime 检查 `/proc`，所以本轮 identity/checkpoint 为 UNKNOWN，未停止任何臂。兼容 source gate 即使合入
 也只解锁后续一次 no-clobber checkpoint attestation，不改变“量尺不完整，继续训练”或 G05=`Partial`。
 
+约 15:10 CST，上述兼容门第一次真实消费通过：`rolling_p2_t05_comp2_j0_equal_f03@5200` 的 production
+dry-run 只列两个 exact variant，唯一 Pod2 SSH 随后 O_EXCL 发布 receipt（content SHA=`521910d...`）；checkpoint
+filename/embedded=`5200`、74 个浮点 tensor / `1,762,715` elements、nonfinite=`0`，schema-3 hard
+SHA=`4e84c51...`、actual claim=`7878d92...`、binding=`4b9c5b2...`、lineage=`0`，取证时进程 live。没有
+judge/stop/retry/第二 job，因此只把 historical-claim checkpoint source gate 从未实测改为实测通过，G05
+整体仍 `Partial`。同轮 Pod1 `/proc` 专用双读也恢复 11 条 `live_exact` 与 latest `model_2600–3100` 的
+finite/合同/optimizer 证据；budget-v1 只到 `model_3100`，`model_3600` 不存在且未 signal。
+
 首次真实 continuation 又抓到 budget 字段语义错误：parent `1600` 配 CLI `max_iterations=3601` 时，RSL
 实际报告 `1601/5201`，说明该值是追加 update 数而非绝对终点。首 trainer 健康且 binding 正确；本地等待
 在 remote watchdog 前退出，未重发或 signal trainer。runner 已改为 CLI 传 `2001`，同时在 claim 中分别绑定
