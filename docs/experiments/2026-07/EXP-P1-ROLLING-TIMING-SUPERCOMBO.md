@@ -1,16 +1,16 @@
 # EXP-P1-ROLLING-TIMING-SUPERCOMBO — 快速准备、时间戳补偿与组合训练漏斗
 
-- 状态：`activated / ready`（source/full-scene、continuation runner 与三份 parent runtime attestation 已过；尚未点火）
+- 状态：`running / demo-only inexact`（24 个唯一 claim 已消费；最近可信状态为 22 live、2 个 importer 基础设施拒绝）
 - 阶段/轴：阶段 1，动作重定时、actor 可见目标/TTS 延迟、预测收敛抖动、击球 Reward 配比与脚朝向
 - 人类负责人：Franco
 - 执行者：Codex
-- 最高证据等级：`E1`（训练源码与增量回归；尚无本轮 4096-env/行为结果）
+- 最高证据等级：`E2`（4096-env full-scene source probe 与真实 continuation 已运行；尚无 vendor MuJoCo 行为结果）
 - 创建日期/最后复核日期：2026-07-16 / 2026-07-16
 
 共享术语按[术语与人话对照](../../DEFINITIONS.md)解释。本实验的机器草案是
 [`phase1_rolling_timing_supercombo_20260716.yaml`](../../../configs/phase1_rolling_timing_supercombo_20260716.yaml)。
 顶层 [`launch_authorized=true`](../../DEFINITIONS.md#launch-authorized)，24 条 job 已在一次性 parent inspect
-通过后切为 `ready`；只授权本轮仿真续训，不授权自动重试、第二 seed、判卷、晋级或真机。
+通过后消费各自唯一 claim；只授权本轮仿真续训，不授权自动重试、第二 seed、判卷、晋级或真机。
 
 ## 先回答：qdot 是不是随机施加力
 
@@ -189,6 +189,12 @@ parent/optimizer/claim 恢复错误或已配置 dense 机制完全没接上的�
 处置；不自动 retry。这样少掉的并发会直接提高同卡幸存者到 `+2000` 的吞吐。随机横向躯干力只有完成
 trainer/hard-contract/full-scene source gate 后，才可作为空槽的 matched no-force/force replacement；当前
 不能用 qdot 代替。
+
+2026-07-16 10:20 CST 的每 Pod 单连接只读审计确认：Pod1/Pod2 分别 `11 live + 1 rejected`，三卡并发为
+`4/3/4` 与 `4/4/3`，22 条 live 均 PID=PGID/starttime/binding 一致、source=`704bf3a`、fatal=`0`；六卡
+利用率为 `94–97%`，swap=`0`。两条 rejected 仍为首迭代前 importer malloc `rc134`，进程和 NVML context
+均 absent。旧 budget-v1 诊断臂当前 `model_2200`，尚未到 `model_3600` exact-stop 门；Pod2 最快两条为
+`model_5000`，尚未到该母本 `+500/model_5200`。因此本轮没有达到行为淘汰条件，22 条继续。
 
 ## 为什么 formal-ineligible
 

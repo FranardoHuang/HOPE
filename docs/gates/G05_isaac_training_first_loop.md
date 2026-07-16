@@ -2633,9 +2633,16 @@ argv 和自身 bytes，并强制同 Pod parent、六卡四轮、每卡四条。�
 `actor.*`、`critic.*`、全部浮点 tensor finite 和非空 optimizer state/groups。`88` 个 runner/generic queue
 专项测试通过。随后每 Pod 一条只读 SSH 完成三份 parent 核验：embedded iteration 为 `1600/4700/4500`，
 三者均 actor/critic 各 `8` keys、74 个浮点 tensor / 1,762,715 elements、nonfinite `0`、optimizer state
-`17` entries / `1` group。队列静态 dry-run 为四轮各六条、每槽四条，现只授权本轮 demo-only inexact
-仿真续训；尚未启动 child 或观察首迭代，因此 G05 保持 `Partial`。操作见
+`17` entries / `1` group。队列静态 dry-run 为四轮各六条、每槽四条；随后 24 个唯一 claim 已全部消费，
+最近完整可信状态为 22 条 live/fatal0，Pod1/Pod2 三卡分别 `4/3/4` 与 `4/4/3`。另外两条在首迭代前
+由动态 URDF importer malloc `rc134` 退出，精确进程与 NVML context 均 absent；按基础设施拒绝保全且
+不自动重跑，不构成 Reward 负结论。现只授权本轮 demo-only inexact 仿真续训，因此 G05 保持 `Partial`。操作见
 [rolling timing 双 Pod 严格续训](../operations/run_lean_training_queue.md#rolling-timing-双-pod-严格续训2026-07-16)。
+
+2026-07-16 10:20 CST 的下一次每 Pod 单连接只读审计仍为 22 live/2 importer rejected，22 条
+PID=PGID/starttime/binding、source=`704bf3a` 与 fatal=`0` 全部一致；六卡利用率 `94–97%`。旧 budget-v1
+诊断臂只到 `model_2200`，Pod2 最快两条只到 `model_5000`，尚未分别越过 exact-stop `model_3600` 和
+本母本 `+500/model_5200`，故当前没有可按预注册合同执行的行为淘汰。
 
 首次真实 continuation 又抓到 budget 字段语义错误：parent `1600` 配 CLI `max_iterations=3601` 时，RSL
 实际报告 `1601/5201`，说明该值是追加 update 数而非绝对终点。首 trainer 健康且 binding 正确；本地等待

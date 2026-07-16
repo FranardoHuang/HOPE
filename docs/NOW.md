@@ -31,22 +31,20 @@
 做成安全可训练候选；把四个不同因果格先跨卡铺开以修正现役 policy 的拍面反号；把胜出 policy 连同我们的
 planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行为以厂商 MuJoCo 为准。
 
-- **当前训练池：** 2026-07-16 约 05:29 CST 的最后一份完整可信审计覆盖了全部 `24/24` 条，而不是只看
-  新到 milestone 的四条：两台 Pod 都是三卡各 `4/4/4`、全部 live、fatal=`0`，latest checkpoint 的
-  embedded iteration、finite、hard-contract/claim/binding 与 lineage 均通过。07:47 CST 的下一轮两个
-  单连接都在限时内没有返回审计输出，因此当前连接态诚实记为 `UNKNOWN`；没有远端写入或 signal，不能
-  写成训练失败。Pod1 的 12 条是非击球臂模仿开关 × `10/16/24` 秒，以及六种 Reward 配比，当前约在
-  iteration `1030–1243` / `model_1000–1200`。16 秒自由臂相对匹配对照给出最强方向信号，但 10 秒近似
-  打平、24 秒没有优势，说明收益不随 episode 单调增加；Reward 近似均分当前最均衡，位置/速度/拍面单项
-  重押会牺牲其他项，双倍总强度增加 fall。Pod2 的 12 条包含七个演示组合和五条保留长曲线：七组合中
-  `426506/427190/428347/431061/431910` 已通过绝对 `model_4000`（母本后 `+500`）完整性门，
-  `432838/433601` 尚在 `model_3900`，不是失败；五条保留线已到 `model_1400/1500/4500/4500/4600`。
-  当前方向上，强 qdot 的 fall 较低、普通对照 hit 略高、全栈组合的 10 cm 指标较高但 fall 也更高；所有
-  训练的 eligible sparse-hit/activation 整数分母仍缺，Pod1 exact-hit 也只有约 `0.47%–0.54%`，所以这些
-  都只是单 seed、单末窗诊断，**没有行为胜者，也不据此停臂**。剩余两组合先到 `+500`，七组合再到
-  `+1000`，最终仍由厂商 MuJoCo 同卷判分。详见
-  [Pod1 十二格卷宗](experiments/2026-07/EXP-P1-POD1-LONG-BALANCE-REWARD-GRID.md)与
-  [演示组合卷宗](experiments/2026-07/EXP-P1-DEMO-HOTSTART-PORTFOLIO.md)。
+- **当前训练池：** 旧 `24/24` 长曲线已按绑定身份停止，三份较强母本的 optimizer 被完整恢复到
+  [24 格快速准备组合漏斗](experiments/2026-07/EXP-P1-ROLLING-TIMING-SUPERCOMBO.md)。2026-07-16
+  10:20 CST 的完整只读审计确认 `24` 条都已消费唯一 claim，其中 `22` 条 live、fatal=`0`；两条在首迭代前由动态 URDF importer
+  以 malloc `rc134` 退出，精确 PID/PGID 与 GPU context 均 absent，记为**基础设施拒绝**而不是 Reward
+  失败，且不自动重跑。Pod1/Pod2 分别为三卡 `4/3/4` 与 `4/4/3`；GPU 利用率约
+  `90–97% / 88–96%`，显存约 `17–23 GiB/卡`，主机可用内存约 `908/917 GiB`、swap=`0`。本轮比较约
+  `1.0/0.7/0.5 s` 与随机准备时间、时间戳补偿、预测抖动、Reward 配比和脚朝向；全部是单 seed、热启动、
+  demo-only 的工程候选，不能冒充正式因果结论。每 30 分钟按机器合同早判：`+200` 只停结构/finite/
+  恢复失败，`+500` 只停连续两窗均明显崩坏，`+1000` 才在**同一母本**内做多目标 Pareto 淘汰；每个母本
+  至少留两条，并保留一个约 0.5 秒档和一个随机时长档。稀疏击球机会不足时零值绝不算失败，释放的算力
+  直接加速幸存者到 `+2000`。当前旧 budget-v1 诊断臂在 `model_2200`，必须等 `model_3600` finite/
+  binding 通过后才精确停止；Pod2 最快两条在 `model_5000`，尚未到其 `+500/model_5200`，所以本轮没有
+  合法的行为淘汰对象。`qdot` 是确定性的关节速度超限惩罚，不是随机外力；随机横向躯干推力正在
+  补 trainer/物理响应门，过门后才占释放槽做同母本 no-force/force 配对。
 
 - **最新可分享结果：** 反手拉 B/C 的 rank-0 主选已在 Pod1 CPU-only runtime 完成 exact 整轨
   SE(2) 实体化；后续 schema-2/FK 源码门也已进入 `main` 并通过 `17` 项专项回归。逐资产 no-write

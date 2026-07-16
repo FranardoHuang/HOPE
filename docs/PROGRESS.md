@@ -13,6 +13,15 @@
 
 ## 2026-07-16
 
+- 10:20 CST 的 rolling timing 单连接/Pod 只读审计确认已真实消费 `24/24` 个唯一 claim：`22` 条 live/fatal0，
+  Pod1/Pod2 分别三卡 `4/3/4` 与 `4/4/3`；另外两条在首迭代前因动态 URDF importer malloc `rc134`
+  退出，精确进程和 NVML context 均 absent，按基础设施拒绝保全且不自动重跑。随机横向躯干推力不再
+  由 `qdot` 冒充；待 trainer hard-contract 与 full-scene dynamics-response 门通过后，优先用释放槽做
+  同母本 no-force/force 配对。旧 budget-v1 诊断臂当前 `model_2200`，未到 exact-stop 的 `model_3600`；
+  Pod2 最快两条为 `model_5000`，未到本母本 `+500/model_5200`，故当前无合法行为淘汰。详见
+  [组合卷宗](experiments/2026-07/EXP-P1-ROLLING-TIMING-SUPERCOMBO.md)与
+  [横向扰动卷宗](experiments/2026-07/EXP-P1-LATERAL-BALANCE-PERTURBATION.md)。
+
 - rolling fill 的本地等待由全局逐条串行改为每批 Pod1/Pod2 各至多一条并发，同 Pod 仍由 host Kit lock
   串行。两 future settle 后才继续；部分失败保留 sibling 成功 claim 并停止后续批次，绝不自动 retry。
   同一进程 attempted overlay 还拒绝 snapshot 短暂漏 claim 时重提交 job；rolling+generic runner
@@ -29,7 +38,8 @@
   `+200/+500/+1000/+2000` 会转为绝对 checkpoint，三份 parent 必须在原 Pod 通过 checkpoint/hard/claim/
   binding、actor+critic、finite 与完整 optimizer 只读核验；激活状态、full-scene evidence 和 runner bytes
   都有 fail-closed allowlist/SHA 门。runner 与 generic queue 共 `88 passed`；三份 parent 已用每 Pod 一条
-  只读 SSH 通过，24 条 dry-run 精确为四轮×六卡且每卡四条，队列现为 ready，但尚未启动 trainer。
+  只读 SSH 通过，24 条 dry-run 精确为四轮×六卡且每卡四条；该条记录的是点火前 source 门，真实运行态
+  以上方最新条目为准。
   详见[组合卷宗](experiments/2026-07/EXP-P1-ROLLING-TIMING-SUPERCOMBO.md)。
 
 - 真实测试触发的 training-critical 修复已进入 `main@704bf3a2`：actor 可显式消费同源延迟的
