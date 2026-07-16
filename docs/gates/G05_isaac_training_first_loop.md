@@ -2643,3 +2643,9 @@ argv 和自身 bytes，并强制同 Pod parent、六卡四轮、每卡四条。�
 trainer arg=`2001`、absolute exclusive bound=`3601` 与最后 checkpoint=`3600`，并保留 first
 marker=`1601/3601`。首条旧 schedule 只能作
 inexact 方向诊断，到 `model_3600` 精确收口；剩余格使用修正合同。G05 仍为 `Partial`。
+
+为不把两个独立 Pod 的首迭代等待串成一条长链，续训 runner 每批最多并发 Pod1/Pod2 各一条；同 Pod 永不
+并发且仍经过 host Kit boot lock。两 future 全 settle 后才取下一份 live snapshot；一边失败时保留另一边
+成功证据并立即停止后续批次，不 retry/replay；本进程 attempted overlay 又防止下一 snapshot 短暂漏 claim
+时重提交相同 job。`92` 个 rolling/generic runner 测试通过；这是调度能力，
+不改变任何训练配方或 G05 行为结论。

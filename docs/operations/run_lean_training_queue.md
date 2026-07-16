@@ -551,6 +551,14 @@ receipt/Hydra/parent/GPU 容量。父 checkpoint 必须具备 full-state optimiz
 iteration 必须严格等于 parent iteration `+1`；这两份证据不混写成日志中的虚构 `optimizer=resumed` marker。
 失败只保全证据，不自动 retry、迁移或 signal 已有 trainer。
 
+为避免双 Pod 被本地串行等待拖成近两小时，execute 每批最多同时提交 Pod1/Pod2 各一条；同一 Pod 永远只有
+一个 future，且远端 per-host Kit boot lock 仍是第二道串行边界。两边都 settle 后才重读 live claims 并进入
+下一批。任一边失败时会等待另一边完成、保留 sibling 成功结果，随后停止后续批次；不会自动 retry/replay。
+CLI 以 rc=`2` 输出单行 `BATCH_RESULT=<JSON>`，逐项列出 attempted/succeeded/failed slot、异常类型和 scheduler
+lock；该 JSON 是部分成功审计，不得误读成整批成功。
+同一 fill 进程还维护只用于 job-ID 排除的 attempted overlay；即使下一次远端 snapshot 暂时漏掉刚写的 claim，
+也不会再次提交该 job。overlay 不增加 occupancy，真实容量仍只来自 NVML 与远端 claim。
+
 运行态每 30 分钟按队列内 `pruning_contract` 审计。`+200` 只淘汰结构/合同/non-finite/fatal；`+500`
 只允许淘汰连续两窗 dense 明显崩坏，不能把缺少 eligible hit 的稀疏零值判失败；`+1000` 仅在同 parent
 内按 completion、signed composite、解析回球和 pre/post fall 作容差 Pareto 淘汰，并保留时间覆盖。停臂只按

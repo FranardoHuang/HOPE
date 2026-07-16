@@ -13,6 +13,11 @@
 
 ## 2026-07-16
 
+- rolling fill 的本地等待由全局逐条串行改为每批 Pod1/Pod2 各至多一条并发，同 Pod 仍由 host Kit lock
+  串行。两 future settle 后才继续；部分失败保留 sibling 成功 claim 并停止后续批次，绝不自动 retry。
+  同一进程 attempted overlay 还拒绝 snapshot 短暂漏 claim 时重提交 job；rolling+generic runner
+  `92 passed`。该改动只缩短点火墙钟时间，不改变训练 recipe。
+
 - rolling continuation 首条真实点火抓到 RSL resume budget 语义：parent `1600` 下 CLI
   `max_iterations=3601` 实际日志为 `1601/5201`，字段表示追加 updates 而非绝对终点。本地等待已在 remote
   watchdog 前退出，健康 trainer/证据保留且未重发。runner 修为 trainer arg `2001` + claim absolute

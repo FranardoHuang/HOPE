@@ -42,6 +42,25 @@ class ContinuationQueueError(RuntimeError):
     """The rolling continuation contract or one launch preflight failed."""
 
 
+class ContinuationLaunchBatchError(ContinuationQueueError):
+    """One cross-Pod launch batch failed after every submitted future settled.
+
+    ``result`` deliberately retains successful siblings from the failed batch
+    (and successful earlier batches) so callers can audit the exact attempted
+    set without guessing or replaying a no-clobber namespace.
+    """
+
+    def __init__(self, result: dict[str, Any]):
+        self.result = result
+        successful = [row["job_id"] for row in result["launched"]]
+        failed = [row["job_id"] for row in result["failed"]]
+        super().__init__(
+            "cross-Pod launch batch failed after all submitted attempts settled; "
+            f"successful={successful}; failed={failed}; "
+            f"attempted_count={result['attempted_count']}"
+        )
+
+
 CONFIRM = "SIM_ONLY_LAUNCH_ONE_ROLLING_CONTINUATION_JOB"
 QUEUE_PATH = Path("configs/phase1_rolling_timing_supercombo_20260716.yaml")
 EXPECTED_JOBS = 24
@@ -1232,6 +1251,25 @@ def _dry_assignments(queue: Mapping[str, Any], count: int) -> list[tuple[dict[st
     return result
 
 
+def _cross_pod_launch_batch(
+    assignments: list[tuple[dict[str, Any], lean.Slot]], remaining: int
+) -> list[tuple[dict[str, Any], lean.Slot]]:
+    """Select at most one ready job per Pod for one concurrent batch."""
+
+    if remaining <= 0:
+        return []
+    result: list[tuple[dict[str, Any], lean.Slot]] = []
+    selected_pods: set[str] = set()
+    for job, slot in assignments:
+        if slot.pod in selected_pods:
+            continue
+        result.append((job, slot))
+        selected_pods.add(slot.pod)
+        if len(result) >= remaining:
+            break
+    return result
+
+
 def _unique_parent_jobs(queue: Mapping[str, Any]) -> list[dict[str, Any]]:
     """Return one representative job per referenced parent in YAML order."""
 
@@ -1388,46 +1426,107 @@ def cmd_fill(
         }
 
     launched: list[dict[str, Any]] = []
+    attempted_count = 0
+    # Remote claims remain the durable no-clobber truth.  This local overlay is
+    # additionally required within one invocation: a transiently incomplete
+    # next snapshot must never cause an already-submitted job to be replayed.
+    attempted_claims: dict[str, dict[str, Any]] = {}
     lean.GLOBAL_SCHEDULER_LOCK.parent.mkdir(parents=True, exist_ok=True)
     with lean.GLOBAL_SCHEDULER_LOCK.open("a+", encoding="utf-8") as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
-        for _ in range(count):
+        while attempted_count < count:
             try:
                 occupancy, claims = lean.live_snapshot(queue)
                 _validate_live_claim_slots(queue, claims)
                 effective = lean._effective_occupancy(queue, occupancy, claims)
             except lean.QueueError as exc:
                 raise ContinuationQueueError(str(exc)) from exc
-            assignments = _assign_current_round(queue, effective, claims)
+            scheduling_claims = dict(claims)
+            for job_id, synthetic in attempted_claims.items():
+                scheduling_claims.setdefault(job_id, synthetic)
+            _validate_live_claim_slots(queue, scheduling_claims)
+            assignments = _assign_current_round(
+                queue, effective, scheduling_claims
+            )
             if not assignments:
                 break
-            job, slot = assignments[0]
-            try:
-                output = lean._run_ssh(
+            batch = _cross_pod_launch_batch(assignments, count - attempted_count)
+            if not batch:
+                break
+
+            def launch_one(job: dict[str, Any], slot: lean.Slot) -> str:
+                return lean._run_ssh(
                     queue,
                     slot.pod,
                     _launch_script(queue, job, slot),
                     timeout=lean.KIT_BOOT_TIMEOUT_SECONDS + 60,
                     phase=f"rolling-continuation-launch:{job['id']}",
                 )
-            except lean.QueueError as exc:
-                # A timeout or nonzero exit is intentionally not replayed: the
-                # caller must inspect the no-clobber run namespace first.
-                raise ContinuationQueueError(str(exc)) from exc
-            launched.append(
-                {
-                    "launch_round": job["launch_round"],
-                    "job_id": job["id"],
-                    "required_slot": slot.name,
-                    "remote_output": output,
-                }
-            )
+
+            # Concurrency exists only across Pods.  There is never more than
+            # one future per Pod in a batch, and the next batch is not sampled
+            # until both futures have settled.  The remote per-Pod host boot
+            # lock remains an independent second serialization boundary.
+            batch_failed: list[dict[str, Any]] = []
+            with ThreadPoolExecutor(max_workers=len(batch)) as pool:
+                for job, slot in batch:
+                    attempted_claims[job["id"]] = {
+                        "pod": slot.pod,
+                        "gpu": slot.gpu,
+                        # Avoid double-counting an already-visible NVML PID;
+                        # this overlay exists only for job-id exclusion.
+                        "state": "launched",
+                    }
+                futures = [
+                    (job, slot, pool.submit(launch_one, job, slot))
+                    for job, slot in batch
+                ]
+                attempted_count += len(futures)
+                for job, slot, future in futures:
+                    try:
+                        output = future.result()
+                    except Exception as exc:
+                        batch_failed.append(
+                            {
+                                "launch_round": job["launch_round"],
+                                "job_id": job["id"],
+                                "required_slot": slot.name,
+                                "error_kind": type(exc).__name__,
+                                "error": str(exc),
+                            }
+                        )
+                    else:
+                        launched.append(
+                            {
+                                "launch_round": job["launch_round"],
+                                "job_id": job["id"],
+                                "required_slot": slot.name,
+                                "remote_output": output,
+                            }
+                        )
+
+            if batch_failed:
+                # Never continue, retry, or replay after a failed submitted
+                # launch.  The structured exception preserves successful
+                # siblings and makes the exact attempted set explicit.
+                raise ContinuationLaunchBatchError(
+                    {
+                        "mode": "fill",
+                        "dry_run": False,
+                        "count_limit": count,
+                        "attempted_count": attempted_count,
+                        "scheduler_lock": str(lean.GLOBAL_SCHEDULER_LOCK),
+                        "launched": launched,
+                        "failed": batch_failed,
+                    }
+                )
     if not launched:
         raise ContinuationQueueError("no unclaimed job in the current launch round fits its required slot")
     return {
         "mode": "fill",
         "dry_run": False,
         "count_limit": count,
+        "attempted_count": attempted_count,
         "scheduler_lock": str(lean.GLOBAL_SCHEDULER_LOCK),
         "launched": launched,
     }
@@ -1467,6 +1566,20 @@ def main(argv: list[str] | None = None) -> int:
             )
         else:  # pragma: no cover - argparse owns the mode surface.
             raise ContinuationQueueError(f"unsupported mode: {args.mode}")
+    except ContinuationLaunchBatchError as exc:
+        print(
+            "BATCH_RESULT="
+            + json.dumps(
+                exc.result,
+                allow_nan=False,
+                ensure_ascii=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+            file=sys.stderr,
+        )
+        print(f"ERROR: {exc}", file=sys.stderr)
+        return 2
     except (ContinuationQueueError, lean.QueueError) as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2

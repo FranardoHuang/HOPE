@@ -238,3 +238,8 @@ runner v2 改为传 `2001`，plan/claim 另记 absolute exclusive bound=`parent+
 demo-only extra-budget schedule 诊断；它在目标
 `model_3600` 之前的 checkpoint 仍可看候选方向，但不能与 v2 格作 matched learning-schedule 因果比较，且到
 `model_3600` 后按 exact identity 收口，不消费到 `5201`。这不是自动 retry 授权。
+
+点火实测又表明 4096-env child 从创建到首 iteration 约需数分钟；本地逐条等待会让两台彼此独立的 Pod
+无意义串行。runner 因此只在**跨 Pod**并发：每批 Pod1/Pod2 各至多一条，同 Pod 仍由 host boot lock 串行。
+一个 future 失败时必须先等 sibling settle、保留成功 claim，再停止后续批次；不自动重试。首轮目前保全
+四条健康 child 和一条 Pod1 importer rc134 失败；该失败没有 iteration，不能作配方负结果，也不会按同名重发。

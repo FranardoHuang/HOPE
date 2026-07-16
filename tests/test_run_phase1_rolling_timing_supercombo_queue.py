@@ -6,6 +6,7 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
+import threading
 from types import SimpleNamespace
 
 import pytest
@@ -436,6 +437,187 @@ def test_execute_needs_exact_confirmation_before_live_snapshot(tmp_path, monkeyp
     with pytest.raises(Q.ContinuationQueueError, match=Q.CONFIRM):
         Q.cmd_fill(queue, count=1, execute=True, confirm="wrong")
     assert calls == []
+
+
+def test_execute_fill_launches_only_one_per_pod_concurrently_and_counts_attempts(
+    tmp_path, monkeypatch
+):
+    queue = _loaded(tmp_path)
+    monkeypatch.setattr(Q.lean, "GLOBAL_SCHEDULER_LOCK", tmp_path / "scheduler.lock")
+    lock = threading.Lock()
+    barrier = threading.Barrier(2)
+    claims = {}
+    snapshot_calls = 0
+    active_total = 0
+    max_active_total = 0
+    active_by_pod = {"pod1": 0, "pod2": 0}
+    max_active_by_pod = {"pod1": 0, "pod2": 0}
+    job_slots = {
+        job["id"]: job["resource"]["required_slot"] for job in queue["jobs"]
+    }
+
+    def fake_snapshot(_queue):
+        nonlocal snapshot_calls
+        with lock:
+            snapshot_calls += 1
+            return (
+                {slot: 0 for slot in Q.EXPECTED_SLOTS},
+                copy.deepcopy(claims),
+            )
+
+    def fake_ssh(_queue, pod, _remote, **kwargs):
+        nonlocal active_total, max_active_total
+        job_id = kwargs["phase"].removeprefix("rolling-continuation-launch:")
+        slot = job_slots[job_id]
+        with lock:
+            active_total += 1
+            active_by_pod[pod] += 1
+            max_active_total = max(max_active_total, active_total)
+            max_active_by_pod[pod] = max(max_active_by_pod[pod], active_by_pod[pod])
+        try:
+            barrier.wait(timeout=2)
+            with lock:
+                claims[job_id] = {
+                    "pod": pod,
+                    "gpu": int(slot.removeprefix(f"{pod}/gpu")),
+                    "state": "launched",
+                }
+            return f"launched {job_id}"
+        finally:
+            with lock:
+                active_by_pod[pod] -= 1
+                active_total -= 1
+
+    monkeypatch.setattr(Q.lean, "live_snapshot", fake_snapshot)
+    monkeypatch.setattr(Q.lean, "_run_ssh", fake_ssh)
+    result = Q.cmd_fill(queue, count=4, execute=True, confirm=Q.CONFIRM)
+
+    assert result["attempted_count"] == 4
+    assert len(result["launched"]) == 4
+    assert snapshot_calls == 2
+    assert max_active_total == 2
+    assert max_active_by_pod == {"pod1": 1, "pod2": 1}
+    assert [row["required_slot"].split("/", 1)[0] for row in result["launched"]] == [
+        "pod1",
+        "pod2",
+        "pod1",
+        "pod2",
+    ]
+
+
+def test_execute_fill_never_replays_attempted_jobs_when_next_snapshot_omits_claims(
+    tmp_path, monkeypatch
+):
+    queue = _loaded(tmp_path)
+    monkeypatch.setattr(Q.lean, "GLOBAL_SCHEDULER_LOCK", tmp_path / "scheduler.lock")
+    barrier = threading.Barrier(2)
+    calls = []
+
+    def empty_snapshot(_queue):
+        return {slot: 0 for slot in Q.EXPECTED_SLOTS}, {}
+
+    def fake_ssh(_queue, pod, _remote, **kwargs):
+        job_id = kwargs["phase"].removeprefix("rolling-continuation-launch:")
+        calls.append((pod, job_id))
+        barrier.wait(timeout=2)
+        return f"launched {job_id}"
+
+    monkeypatch.setattr(Q.lean, "live_snapshot", empty_snapshot)
+    monkeypatch.setattr(Q.lean, "_run_ssh", fake_ssh)
+    result = Q.cmd_fill(queue, count=4, execute=True, confirm=Q.CONFIRM)
+
+    assert result["attempted_count"] == 4
+    attempted_ids = [row["job_id"] for row in result["launched"]]
+    assert attempted_ids == ["rolling_job_0", "rolling_job_3", "rolling_job_1", "rolling_job_4"]
+    assert len(attempted_ids) == len(set(attempted_ids))
+    assert {job_id for _pod, job_id in calls} == set(attempted_ids)
+
+
+def test_execute_fill_waits_for_cross_pod_sibling_and_reports_partial_success(
+    tmp_path, monkeypatch
+):
+    queue = _loaded(tmp_path)
+    monkeypatch.setattr(Q.lean, "GLOBAL_SCHEDULER_LOCK", tmp_path / "scheduler.lock")
+    barrier = threading.Barrier(2)
+    lock = threading.Lock()
+    calls = []
+    snapshot_calls = 0
+    pod2_finished = threading.Event()
+
+    def fake_snapshot(_queue):
+        nonlocal snapshot_calls
+        snapshot_calls += 1
+        return {slot: 0 for slot in Q.EXPECTED_SLOTS}, {}
+
+    def fake_ssh(_queue, pod, _remote, **kwargs):
+        job_id = kwargs["phase"].removeprefix("rolling-continuation-launch:")
+        with lock:
+            calls.append((pod, job_id))
+        barrier.wait(timeout=2)
+        if pod == "pod1":
+            raise Q.lean.QueueError("pod1 deliberate launch failure")
+        pod2_finished.set()
+        return "pod2 launched successfully"
+
+    monkeypatch.setattr(Q.lean, "live_snapshot", fake_snapshot)
+    monkeypatch.setattr(Q.lean, "_run_ssh", fake_ssh)
+    with pytest.raises(Q.ContinuationLaunchBatchError) as caught:
+        Q.cmd_fill(queue, count=4, execute=True, confirm=Q.CONFIRM)
+
+    error = caught.value
+    assert pod2_finished.is_set()
+    assert snapshot_calls == 1
+    assert sorted(pod for pod, _job_id in calls) == ["pod1", "pod2"]
+    assert error.result["attempted_count"] == 2
+    assert [row["required_slot"] for row in error.result["launched"]] == ["pod2/gpu0"]
+    assert [row["required_slot"] for row in error.result["failed"]] == ["pod1/gpu0"]
+    assert error.result["failed"][0]["error_kind"] == "QueueError"
+    assert "successful=['rolling_job_3']" in str(error)
+    assert "failed=['rolling_job_0']" in str(error)
+
+
+def test_main_prints_machine_readable_partial_batch_result(tmp_path, monkeypatch, capsys):
+    queue_path = _write(tmp_path, _queue())
+    partial = {
+        "mode": "fill",
+        "dry_run": False,
+        "count_limit": 2,
+        "attempted_count": 2,
+        "scheduler_lock": "/tmp/lock",
+        "launched": [{"job_id": "ok", "required_slot": "pod2/gpu0"}],
+        "failed": [
+            {
+                "job_id": "bad",
+                "required_slot": "pod1/gpu0",
+                "error_kind": "QueueError",
+                "error": "failed",
+            }
+        ],
+    }
+
+    def fail_fill(*_args, **_kwargs):
+        raise Q.ContinuationLaunchBatchError(partial)
+
+    monkeypatch.setattr(Q, "cmd_fill", fail_fill)
+    rc = Q.main(
+        [
+            "--queue",
+            str(queue_path),
+            "fill",
+            "--count",
+            "2",
+            "--execute",
+            "--confirm",
+            Q.CONFIRM,
+        ]
+    )
+    captured = capsys.readouterr()
+    assert rc == 2
+    assert captured.out == ""
+    lines = captured.err.splitlines()
+    assert lines[0].startswith("BATCH_RESULT=")
+    assert json.loads(lines[0].removeprefix("BATCH_RESULT=")) == partial
+    assert lines[1].startswith("ERROR: cross-Pod launch batch failed")
 
 
 def test_existing_claim_must_match_required_slot(tmp_path):
