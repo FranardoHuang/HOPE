@@ -630,6 +630,14 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
 
 ### 训练引擎与机器人物理
 
+- **[10｜P0] RallyV11 TOPP 加速动作 fresh 训练。** 责任人 yikang；执行者 Codex；分支
+  `codex/rally-v11-topp-fast-20260716`，基于 `hitter`。2026-07-16 真机复核发现现役挥拍动作
+  速度不足，当前优先级切换为：用 `main` 已验证的 TOPP v3 对 v12fix 正反手动作做触球锁窗的
+  min-time 重定时，新建严格 hash/phase/receipt 绑定的 RallyV11 fast task，保持 station-relative
+  击球平面 `0.58 m` 与 RallyV11 全身/下半身 Reward 合同。先过 host gate、32-env smoke 和
+  8000-env 显存探针，再只占用一张空闲 RTX 5090 fresh 发射 seed 0：
+  `num_envs=8000`、`max_iterations=20000`、`num_steps_per_env=24`；其余两张卡明确留给其他人。
+  TOPP 输出、oracle 剂量、触球帧保真和该训练首迭代未核验前，不把“已启动”写成性能改善。
 - **[4｜P0] 原生 MuJoCo 训练候选。** 责任人 franco；执行者 Codex；下一证据：修正四个源码缺口
   后复核，再测单环境核心、并行吞吐和一次限预算 PPO 更新。[实验](experiments/2026-07/EXP-MUJOCO-NATIVE-TRAINING.md)
 - **[9｜P0] Hitter 实机 planner 时序与训练反应时间基线。** 责任人 yikang；执行者 Codex；分支
