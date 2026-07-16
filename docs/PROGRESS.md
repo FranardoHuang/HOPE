@@ -13,6 +13,14 @@
 
 ## 2026-07-16
 
+- 13:46 CST，Pod2 唯一只读 inspector 证明首份 `model_5200` 的 actual immutable claim=`7878d92...`、
+  launcher runner=`428cbf...`，claim/binding/process=`live_exact`、checkpoint regular、receipt absent；相对
+  当前 `aee7132.../90d7f26...` 的完整 content 唯一差异是 continuation runner SHA，corrected budget、
+  题目/source/run/slot 全同。milestone attestor 因此改为从独立 YAML contract 对每个 job 完整重建并精确
+  匹配 `428cbf...` 与 `90d7f26...` 两个 reviewed corrected-budget 变体，再把 actual digest 交给 runtime；
+  旧 budget-v1、第三 runner 或任何其他字段漂移仍拒绝。Pod1 同轮 source/claim/GPU/fatal 健康，但自定义审计
+  对 `/proc` 伪文件误用 regular-file size/mtime 门，identity/checkpoint 刷新安全标 UNKNOWN，未停止任何臂。
+
 - 12:45 CST，Pod1 单连接仍为 `11 live + 1 importer rejected`、fatal0，11 份 latest `model_2100–2600`
   均 embedded/finite/schema-3 hard/claim/binding/lineage 一致；budget-v1 只到 `model_2600`，未触发
   `model_3600` stop。Pod2 的唯一连接按注册命令消费第一份 `model_5200` attestation，但在任何 receipt

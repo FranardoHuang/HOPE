@@ -65,6 +65,9 @@ CONFIRM = "SIM_ONLY_LAUNCH_ONE_ROLLING_CONTINUATION_JOB"
 ATTEST_CONFIRM = "SIM_ONLY_ATTEST_ONE_ROLLING_CONTINUATION_MILESTONE"
 INSPECT_CONFIRM = "SIM_ONLY_INSPECT_ONE_ROLLING_ATTESTATION_INPUT"
 QUEUE_PATH = Path("configs/phase1_rolling_timing_supercombo_20260716.yaml")
+ATTESTATION_CONTRACT_PATH = Path(
+    "configs/phase1_rolling_timing_attestation_contract_20260716.yaml"
+)
 EXPECTED_JOBS = 24
 EXPECTED_ROUNDS = 4
 EXPECTED_SLOTS = tuple(
@@ -74,6 +77,37 @@ EXPECTED_OFFSETS = [200, 500, 1000, 2000]
 EXPECTED_ADDITIONAL_BUDGET = 2001
 ACTIVATED_PREREGISTRATION_STATUS = "activated_demo_only_inexact"
 PARENT_KEY_RE = re.compile(r"^pod([12])_[A-Za-z0-9_]+$")
+
+REVIEWED_ATTESTATION_RUNNERS = {
+    "corrected_budget_serial_2907594_3ffb": {
+        "reviewed_commits": [
+            "2907594faf88888526d2fbd257814988e2dff53a",
+            "3ffb06d642478b88707aa806268e1b4bc04dd819",
+        ],
+        "runner_script_sha256": (
+            "428cbf590a9f93ce7c3c0badcda93a511661152c7f3680344457abc5f574dabb"
+        ),
+        "semantics": {
+            "resume_budget": "additional_updates_with_absolute_exclusive_bound",
+            "dispatch": "pre_parallel_cross_pod_launch",
+        },
+    },
+    "corrected_budget_parallel_c49dc": {
+        "reviewed_commits": [
+            "c49dc314b9c8216bac51314be1e8490e0d51b10f",
+        ],
+        "runner_script_sha256": (
+            "90d7f26d9674df3d75c86debdc6fd53a7546755616e22f55b907fadcf7a62ef4"
+        ),
+        "semantics": {
+            "resume_budget": "additional_updates_with_absolute_exclusive_bound",
+            "dispatch": "parallel_at_most_one_future_per_pod_wait_all_no_replay",
+        },
+    },
+}
+DENIED_ATTESTATION_JOBS = {
+    "rolling_p1_t10_comp2_j0_std_f03": "legacy_budget_v1_claim_is_not_corrected_budget",
+}
 
 _ATTEST_CLAIM_PREFLIGHT = r"""
 import base64, hashlib, json, os, stat, sys
@@ -111,8 +145,8 @@ canonical = json.dumps(
     separators=(",", ":"), sort_keys=True,
 ).encode("utf-8")
 digest = hashlib.sha256(canonical).hexdigest()
-if digest != claim["content_sha256"] or digest != spec["content_sha256"]:
-    raise RuntimeError("queue claim canonical digest differs from registered job")
+if digest != claim["content_sha256"]:
+    raise RuntimeError("queue claim canonical digest is not self-consistent")
 content = claim["content"]
 for key in ("job_id", "run_dir", "source", "pod", "gpu"):
     if content.get(key) != spec[key]:
@@ -120,13 +154,25 @@ for key in ("job_id", "run_dir", "source", "pod", "gpu"):
 argv = claim["training_argv"]
 if not isinstance(argv, list) or any(type(item) is not str for item in argv):
     raise RuntimeError("queue claim argv must be a string list")
+allowed = spec["allowed_variants"]
+if not isinstance(allowed, list) or not allowed:
+    raise RuntimeError("registered exact claim variants are missing")
+matches = [
+    item for item in allowed
+    if isinstance(item, dict)
+    and item.get("content_sha256") == digest
+    and item.get("content") == content
+    and item.get("training_argv") == argv
+]
+if len(matches) != 1:
+    raise RuntimeError("queue claim is not one exact reviewed corrected-budget variant")
 for expected in (
     "++training_queue_claim_path=" + spec["claim_path"],
     "++training_run_binding_path=" + spec["binding_path"],
 ):
     if argv.count(expected) != 1:
         raise RuntimeError("queue claim path override differs from registered job")
-print(json.dumps({"status": "claim_preflight_passed", "content_sha256": digest}))
+print(digest)
 """.strip()
 
 _INSPECT_ATTESTATION_INPUT = r"""
@@ -1716,6 +1762,119 @@ def _attestor_claim_spec(
     }
 
 
+def _load_attestation_contract(
+    path: Path, *, queue_path: Path, queue: Mapping[str, Any]
+) -> dict[str, Any]:
+    raw = _stable_regular_bytes(path, "rolling attestation contract")
+    try:
+        value = yaml.safe_load(raw.decode("utf-8"))
+    except (UnicodeDecodeError, yaml.YAMLError) as exc:
+        raise ContinuationQueueError("rolling attestation contract is invalid YAML") from exc
+    contract = _mapping(value, "rolling attestation contract")
+    expected_keys = {
+        "schema_version",
+        "simulation_only",
+        "queue",
+        "claim_semantics",
+        "variants",
+        "denied_jobs",
+    }
+    if set(contract) != expected_keys:
+        raise ContinuationQueueError("rolling attestation contract keys changed")
+    if contract.get("schema_version") != 1 or contract.get("simulation_only") is not True:
+        raise ContinuationQueueError(
+            "rolling attestation contract must be schema_version=1 and simulation_only=true"
+        )
+    if contract.get("claim_semantics") != (
+        "rebuild_complete_current_job_and_change_only_continuation_runner_script_sha256"
+    ):
+        raise ContinuationQueueError("rolling attestation claim semantics changed")
+    queue_binding = _mapping(contract.get("queue"), "attestation contract queue")
+    if set(queue_binding) != {"path", "file_sha256"}:
+        raise ContinuationQueueError("attestation contract queue binding keys changed")
+    registered_path = Path(_text(queue_binding.get("path"), "attestation queue path"))
+    if not registered_path.is_absolute():
+        registered_path = Path(__file__).resolve().parents[1] / registered_path
+    if os.path.abspath(registered_path) != os.path.abspath(queue_path):
+        raise ContinuationQueueError("attestation contract binds a different queue path")
+    expected_queue_sha = _sha256(
+        queue_binding.get("file_sha256"), "attestation queue file_sha256"
+    )
+    queue_raw = _stable_regular_bytes(queue_path, "rolling queue YAML")
+    actual_queue_sha = hashlib.sha256(queue_raw).hexdigest()
+    if actual_queue_sha != expected_queue_sha:
+        raise ContinuationQueueError("attestation contract queue file SHA mismatch")
+    try:
+        file_queue = yaml.safe_load(queue_raw.decode("utf-8"))
+    except (UnicodeDecodeError, yaml.YAMLError) as exc:  # pragma: no cover - load_queue owns it.
+        raise ContinuationQueueError("bound rolling queue is invalid YAML") from exc
+
+    def public_value(value: Any) -> Any:
+        if isinstance(value, Mapping):
+            return {
+                key: public_value(item)
+                for key, item in value.items()
+                if not (isinstance(key, str) and key.startswith("_"))
+            }
+        if isinstance(value, list):
+            return [public_value(item) for item in value]
+        return value
+
+    if public_value(queue) != file_queue:
+        raise ContinuationQueueError(
+            "in-memory rolling queue differs from the SHA-bound queue file"
+        )
+    variants = _mapping(contract.get("variants"), "attestation variants")
+    if variants != REVIEWED_ATTESTATION_RUNNERS:
+        raise ContinuationQueueError("attestation variants differ from reviewed exact runners")
+    denied = _mapping(contract.get("denied_jobs"), "attestation denied_jobs")
+    if denied != DENIED_ATTESTATION_JOBS:
+        raise ContinuationQueueError("attestation denied_jobs changed")
+    return contract
+
+
+def _attestor_claim_variants(
+    queue: Mapping[str, Any],
+    job: Mapping[str, Any],
+    slot: lean.Slot,
+    contract: Mapping[str, Any],
+) -> dict[str, Any]:
+    variants = _mapping(contract.get("variants"), "attestation variants")
+    exact: list[dict[str, Any]] = []
+    for variant_id, raw_variant in variants.items():
+        variant = _mapping(raw_variant, f"attestation variant {variant_id}")
+        runner_sha = _sha256(
+            variant.get("runner_script_sha256"),
+            f"attestation variant {variant_id} runner_script_sha256",
+        )
+        claim, _argv, _absolute = _launch_contract(
+            queue, job, slot, runner_script_sha256=runner_sha
+        )
+        exact.append(
+            {
+                "variant_id": variant_id,
+                "runner_script_sha256": runner_sha,
+                "content_sha256": claim["content_sha256"],
+                "content": claim["content"],
+                "training_argv": claim["training_argv"],
+            }
+        )
+    digests = [row["content_sha256"] for row in exact]
+    if len(digests) != len(set(digests)):
+        raise ContinuationQueueError("reviewed attestation variants are not digest-unique")
+    run_dir = job["run_dir"].rstrip("/")
+    return {
+        "claim_path": f"{run_dir}/queue_claim.json",
+        "binding_path": f"{run_dir}/run_binding.json",
+        "job_id": job["id"],
+        "run_dir": job["run_dir"],
+        "source": dict(job["source"]),
+        "pod": slot.pod,
+        "gpu": slot.gpu,
+        "allowed_variants": exact,
+    }
+
+
 def _milestone_attestor_script(
     job: Mapping[str, Any],
     milestone: int,
@@ -1738,13 +1897,14 @@ def _milestone_attestor_script(
             binding,
             "--milestone",
             str(milestone),
-            "--expected-claim-content-sha256",
-            claim_spec["content_sha256"],
-            "--expected-job-id",
-            claim_spec["job_id"],
-            "--expected-runtime-sha256",
-            runtime_sha256,
         ]
+    )
+    command += (
+        ' --expected-claim-content-sha256 "$actual_claim_digest"'
+        + " --expected-job-id "
+        + shlex.quote(claim_spec["job_id"])
+        + " --expected-runtime-sha256 "
+        + shlex.quote(runtime_sha256)
     )
     encoded_spec = base64.b64encode(
         json.dumps(
@@ -1756,12 +1916,18 @@ def _milestone_attestor_script(
         ).encode("utf-8")
     ).decode("ascii")
     claim_preflight = shlex.join(
-        [lean.ISAAC_PYTHON, "-c", _ATTEST_CLAIM_PREFLIGHT, encoded_spec]
+        [lean.ISAAC_PYTHON, "-B", "-c", _ATTEST_CLAIM_PREFLIGHT, encoded_spec]
     )
     return f"""set -euo pipefail
-test "$(git -C {shlex.quote(source)} rev-parse HEAD)" = {shlex.quote(job['source']['commit'])}
-test -z "$(git -C {shlex.quote(source)} status --porcelain)"
-{claim_preflight}
+export GIT_OPTIONAL_LOCKS=0
+export PYTHONDONTWRITEBYTECODE=1
+test "$(git --no-optional-locks -C {shlex.quote(source)} rev-parse HEAD)" = {shlex.quote(job['source']['commit'])}
+test -z "$(git --no-optional-locks -C {shlex.quote(source)} status --porcelain)"
+actual_claim_digest="$({claim_preflight})"
+case "$actual_claim_digest" in
+  (????????????????????????????????????????????????????????????????) ;;
+  (*) echo "invalid exact claim digest from preflight" >&2; exit 1 ;;
+esac
 {materialize_runtime}
 cd {shlex.quote(workdir)}
 source {shlex.quote(workdir + '/' + lean.SETUP_RELATIVE)}
@@ -1824,11 +1990,21 @@ def cmd_attest_milestone(
     milestone: int,
     execute: bool,
     confirm: str | None,
+    queue_path: Path = QUEUE_PATH,
+    attestation_contract_path: Path = ATTESTATION_CONTRACT_PATH,
 ) -> dict[str, Any]:
     jobs = {job["id"]: job for job in queue["jobs"]}
     job = jobs.get(job_id)
     if job is None:
         raise ContinuationQueueError(f"unknown queue job: {job_id}")
+    contract = _load_attestation_contract(
+        attestation_contract_path, queue_path=queue_path, queue=queue
+    )
+    denied = _mapping(contract.get("denied_jobs"), "attestation denied_jobs")
+    if job_id in denied:
+        raise ContinuationQueueError(
+            f"{job_id} is denied by the attestation contract: {denied[job_id]}"
+        )
     absolute = _absolute_schedule(job, _parent_records_from_job_context(job))
     registered = absolute["milestones"]
     if type(milestone) is not int or milestone not in registered:
@@ -1848,7 +2024,7 @@ def cmd_attest_milestone(
         )
     runtime_raw, runtime_sha256 = _lean_runtime_payload()
     run_dir = job["run_dir"].rstrip("/")
-    claim_spec = _attestor_claim_spec(queue, job, slot)
+    claim_spec = _attestor_claim_variants(queue, job, slot, contract)
     remote = _milestone_attestor_script(
         job, milestone, runtime_raw, runtime_sha256, claim_spec
     )
@@ -1862,7 +2038,15 @@ def cmd_attest_milestone(
         "registered_absolute_milestones": registered,
         "binding_path": f"{run_dir}/run_binding.json",
         "receipt_path": f"{run_dir}/milestones/model_{milestone}.json",
-        "expected_launch_claim_content_sha256": claim_spec["content_sha256"],
+        "allowed_exact_claim_variants": [
+            {
+                "variant_id": row["variant_id"],
+                "runner_script_sha256": row["runner_script_sha256"],
+                "content_sha256": row["content_sha256"],
+            }
+            for row in claim_spec["allowed_variants"]
+        ],
+        "attestation_contract_path": str(attestation_contract_path),
         "lean_queue_runtime_sha256": runtime_sha256,
     }
     if not execute:
@@ -2146,6 +2330,7 @@ def main(argv: list[str] | None = None) -> int:
                 milestone=args.milestone,
                 execute=args.execute,
                 confirm=args.confirm,
+                queue_path=args.queue.resolve(),
             )
         elif args.mode == "inspect-milestone-binding":
             result = cmd_inspect_milestone_binding(

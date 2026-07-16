@@ -45,11 +45,14 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   “量尺不完整，继续训练”；稀疏击球零值仍绝不算失败。12:45 CST 的 Pod1 单连接刷新仍是
   `11 live + 1 importer rejected`、fatal=`0`，11 份 latest `model_2100–2600` 的 embedded iteration、finite、
   hard/claim/binding 与 lineage 全过；旧 budget-v1 诊断臂现到 `model_2600`，`model_3600` 尚不存在。
-  Pod2 本轮唯一连接用于第一份 `model_5200` 取证：attestor 在任何 receipt/checkpoint load 前发现远端
-  immutable claim 的 canonical digest 与按现行 YAML 重建值不一致并 fail closed，无 receipt、无 retry，
-  这不是 trainer 或 checkpoint 失败。历史可复算的三代 launcher claim digest 不同，actual 值尚未读出；
-  下一轮只允许专用只读 inspector 稳定读取 actual claim/binding 后再决定如何迁移取证合同。两份
-  `model_5200` 继续、不排名、不停止。后续 source 必须增加 per-update 整数机会/
+  13:46 CST 的 Pod2 唯一只读 inspector 已闭合根因：第一份 `model_5200` 的 actual claim=`7878d92...`，
+  自洽绑定修正 budget 的旧 runner=`428cbf...`；与现行 `aee7132.../90d7f26...` 的完整 content 唯一差异是
+  `continuation_runner_script_sha256`，budget/题目/source/run/slot 全相同，绑定进程仍 `live_exact`、checkpoint
+  为 regular、receipt absent。这不是 trainer 或 checkpoint 失败，也不授权直接重试。milestone consumer
+  只精确白名单两份逐 job 完整重建的 corrected-budget claim，明确排除旧 budget-v1；任何第三 runner 或其他
+  字段差异仍 fail closed。两份 `model_5200` 继续、不排名、不停止。本轮 Pod1 的 source/GPU/claim/fatal
+  仍健康，但审计脚本误把 `/proc` 伪文件当普通文件，导致 exact identity/checkpoint 刷新为 UNKNOWN；不得据此
+  判断 `model_3600` 或停止 PGID `2199057`。后续 source 必须增加 per-update 整数机会/
   完成/物理跌倒 union 与 ready-phase `sum+count`，现役模型若要提前排序只能另走绑定 checkpoint 的不可变
   同卷评估。`qdot` 是确定性的关节速度超限惩罚，不是随机外力；随机横向躯干推力正在
   补 trainer/物理响应门，过门后才占释放槽做同母本 no-force/force 配对。

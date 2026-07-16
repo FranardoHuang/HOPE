@@ -250,9 +250,40 @@ def _write(tmp_path: Path, queue: dict) -> Path:
 
 
 def _loaded(tmp_path: Path, queue: dict | None = None) -> dict:
-    value = Q.load_queue(_write(tmp_path, _queue() if queue is None else queue))
+    queue_path = _write(tmp_path, _queue() if queue is None else queue)
+    value = Q.load_queue(queue_path)
     Q._bind_parent_context(value)
+    contract_path = tmp_path / "attestation-contract.yaml"
+    contract_path.write_text(
+        yaml.safe_dump(
+            {
+                "schema_version": 1,
+                "simulation_only": True,
+                "queue": {
+                    "path": str(queue_path),
+                    "file_sha256": hashlib.sha256(queue_path.read_bytes()).hexdigest(),
+                },
+                "claim_semantics": (
+                    "rebuild_complete_current_job_and_change_only_"
+                    "continuation_runner_script_sha256"
+                ),
+                "variants": copy.deepcopy(Q.REVIEWED_ATTESTATION_RUNNERS),
+                "denied_jobs": copy.deepcopy(Q.DENIED_ATTESTATION_JOBS),
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    value["_test_queue_path"] = queue_path
+    value["_test_attestation_contract_path"] = contract_path
     return value
+
+
+def _attestation_paths(queue: dict) -> dict:
+    return {
+        "queue_path": queue["_test_queue_path"],
+        "attestation_contract_path": queue["_test_attestation_contract_path"],
+    }
 
 
 def test_exact_24_job_four_round_layout_and_absolute_plan(tmp_path):
@@ -287,6 +318,7 @@ def test_milestone_attestor_dry_run_uses_registered_absolute_schedule_and_no_ssh
         milestone=3600,
         execute=False,
         confirm=None,
+        **_attestation_paths(queue),
     )
     assert result["dry_run"] is True
     assert result["pod"] == "pod1"
@@ -331,6 +363,7 @@ def test_milestone_attestor_rejects_unknown_job_or_unregistered_iteration_before
             milestone=milestone,
             execute=True,
             confirm=Q.ATTEST_CONFIRM,
+            **_attestation_paths(queue),
         )
     assert calls == []
 
@@ -348,6 +381,7 @@ def test_milestone_attestor_execute_requires_dedicated_confirmation_before_ssh(
             milestone=5200,
             execute=True,
             confirm=Q.CONFIRM,
+            **_attestation_paths(queue),
         )
     assert calls == []
 
@@ -369,6 +403,7 @@ def test_milestone_attestor_execute_uses_yaml_pod_and_one_no_signal_ssh(
         milestone=5200,
         execute=True,
         confirm=Q.ATTEST_CONFIRM,
+        **_attestation_paths(queue),
     )
     assert result["dry_run"] is False
     assert result["pod"] == "pod2"
@@ -381,9 +416,13 @@ def test_milestone_attestor_execute_uses_yaml_pod_and_one_no_signal_ssh(
     }
     assert "/workspace/rolling/runs/job_3/run_binding.json" in remote
     assert result["lean_queue_runtime_sha256"] in remote
-    assert remote.index("claim_preflight_passed") < remote.rindex(
+    assert remote.index('actual_claim_digest="$(') < remote.rindex(
         "lean_queue_runtime.py attest"
     )
+    assert "export GIT_OPTIONAL_LOCKS=0" in remote
+    assert "export PYTHONDONTWRITEBYTECODE=1" in remote
+    assert remote.count("git --no-optional-locks") == 2
+    assert " -B -c " in remote
     assert all(token not in remote for token in ("kill ", "pkill", "killall", "signal"))
 
 
@@ -392,13 +431,18 @@ def test_milestone_attestor_remote_preflight_rejects_old_claim_after_job_drift(
     tmp_path, drift
 ):
     queue = _loaded(tmp_path)
+    contract = Q._load_attestation_contract(
+        queue["_test_attestation_contract_path"],
+        queue_path=queue["_test_queue_path"],
+        queue=queue,
+    )
     original_job = queue["jobs"][0]
     original_job["run_dir"] = str(tmp_path / "old-run")
     Path(original_job["run_dir"]).mkdir()
     original_slot = Q._slots(queue)[original_job["resource"]["required_slot"]]
-    launch_runner_sha = queue["blocking_contract"]["hotstart_harness"][
-        "runner_script_sha256"
-    ]
+    launch_runner_sha = Q.REVIEWED_ATTESTATION_RUNNERS[
+        "corrected_budget_serial_2907594_3ffb"
+    ]["runner_script_sha256"]
     old_claim, _argv, _absolute = Q._launch_contract(
         queue,
         original_job,
@@ -407,7 +451,9 @@ def test_milestone_attestor_remote_preflight_rejects_old_claim_after_job_drift(
     )
     claim_path = Path(original_job["run_dir"]) / "queue_claim.json"
     claim_path.write_text(json.dumps(old_claim), encoding="utf-8")
-    original = Q._attestor_claim_spec(queue, original_job, original_slot)
+    original = Q._attestor_claim_variants(
+        queue, original_job, original_slot, contract
+    )
 
     def run_preflight(spec):
         encoded = base64.b64encode(
@@ -434,12 +480,16 @@ def test_milestone_attestor_remote_preflight_rejects_old_claim_after_job_drift(
     else:
         job["resource"]["required_slot"] = "pod1/gpu1"
     slot = Q._slots(changed)[job["resource"]["required_slot"]]
-    replacement = Q._attestor_claim_spec(changed, job, slot)
+    replacement = Q._attestor_claim_variants(changed, job, slot, contract)
 
-    assert replacement["content_sha256"] != original["content_sha256"]
+    assert {
+        row["content_sha256"] for row in replacement["allowed_variants"]
+    }.isdisjoint(
+        row["content_sha256"] for row in original["allowed_variants"]
+    )
     rejected = run_preflight(replacement)
     assert rejected.returncode != 0
-    assert "claim_preflight_passed" not in rejected.stdout
+    assert rejected.stdout == ""
 
 
 def test_milestone_attestor_cli_defaults_to_dry_run_surface():
@@ -449,6 +499,196 @@ def test_milestone_attestor_cli_defaults_to_dry_run_surface():
     assert args.mode == "attest-milestone"
     assert args.execute is False
     assert args.confirm is None
+
+
+def test_production_attestation_contract_rebuilds_only_two_exact_historical_variants():
+    queue_path = ROOT / "configs/phase1_rolling_timing_supercombo_20260716.yaml"
+    contract_path = ROOT / "configs/phase1_rolling_timing_attestation_contract_20260716.yaml"
+    queue = Q.load_queue(queue_path)
+    Q._bind_parent_context(queue)
+    result = Q.cmd_attest_milestone(
+        queue,
+        job_id="rolling_p2_t05_comp2_j0_equal_f03",
+        milestone=5200,
+        execute=False,
+        confirm=None,
+        queue_path=queue_path,
+        attestation_contract_path=contract_path,
+    )
+    assert result["allowed_exact_claim_variants"] == [
+        {
+            "variant_id": "corrected_budget_serial_2907594_3ffb",
+            "runner_script_sha256": (
+                "428cbf590a9f93ce7c3c0badcda93a511661152c7f3680344457abc5f574dabb"
+            ),
+            "content_sha256": (
+                "7878d92e98a10d6326b83a2bcbeb191b1da3c457e296aa9e1fbf6c5d4a27d2a9"
+            ),
+        },
+        {
+            "variant_id": "corrected_budget_parallel_c49dc",
+            "runner_script_sha256": (
+                "90d7f26d9674df3d75c86debdc6fd53a7546755616e22f55b907fadcf7a62ef4"
+            ),
+            "content_sha256": (
+                "aee7132b0c182e745d0388d8a141a16233da69abffa49c2f525117169ce96adc"
+            ),
+        },
+    ]
+
+
+def test_production_attestation_variants_are_globally_unique_and_only_change_runner():
+    queue_path = ROOT / "configs/phase1_rolling_timing_supercombo_20260716.yaml"
+    contract_path = ROOT / "configs/phase1_rolling_timing_attestation_contract_20260716.yaml"
+    queue = Q.load_queue(queue_path)
+    Q._bind_parent_context(queue)
+    contract = Q._load_attestation_contract(
+        contract_path,
+        queue_path=queue_path,
+        queue=queue,
+    )
+    slots = Q._slots(queue)
+    all_digests = []
+
+    assert len(queue["jobs"]) == Q.EXPECTED_JOBS == 24
+    for job in queue["jobs"]:
+        slot = slots[job["resource"]["required_slot"]]
+        variants = Q._attestor_claim_variants(
+            queue, job, slot, contract
+        )["allowed_variants"]
+        assert len(variants) == 2
+        first, second = variants
+
+        first_content = copy.deepcopy(first["content"])
+        second_content = copy.deepcopy(second["content"])
+        first_runner = first_content["continuation"].pop(
+            "continuation_runner_script_sha256"
+        )
+        second_runner = second_content["continuation"].pop(
+            "continuation_runner_script_sha256"
+        )
+        assert first_runner == first["runner_script_sha256"]
+        assert second_runner == second["runner_script_sha256"]
+        assert first_runner != second_runner
+        assert first_content == second_content
+
+        for variant in variants:
+            assert Q._canonical_sha256(variant["content"]) == variant["content_sha256"]
+            assert variant["training_argv"] == [
+                *variant["content"]["training_argv_without_claim"],
+                f"++training_launch_claim_sha256={variant['content_sha256']}",
+            ]
+        assert first["training_argv"][:-1] == second["training_argv"][:-1]
+        assert first["training_argv"][-1] != second["training_argv"][-1]
+        all_digests.extend(variant["content_sha256"] for variant in variants)
+
+    assert len(all_digests) == 48
+    assert len(set(all_digests)) == 48
+
+
+def test_exact_variant_preflight_accepts_each_reviewed_digest_and_rejects_unknown(
+    tmp_path,
+):
+    queue = _loaded(tmp_path)
+    contract = Q._load_attestation_contract(
+        queue["_test_attestation_contract_path"],
+        queue_path=queue["_test_queue_path"],
+        queue=queue,
+    )
+    job = queue["jobs"][3]
+    job["run_dir"] = str(tmp_path / "run")
+    Path(job["run_dir"]).mkdir()
+    slot = Q._slots(queue)[job["resource"]["required_slot"]]
+    spec = Q._attestor_claim_variants(queue, job, slot, contract)
+    claim_path = Path(spec["claim_path"])
+
+    def run(claim):
+        claim_path.write_text(json.dumps(claim), encoding="utf-8")
+        encoded = base64.b64encode(
+            json.dumps(spec, separators=(",", ":"), sort_keys=True).encode()
+        ).decode()
+        return subprocess.run(
+            [sys.executable, "-c", Q._ATTEST_CLAIM_PREFLIGHT, encoded],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    for row in spec["allowed_variants"]:
+        claim = {
+            "schema_version": 2,
+            "content": row["content"],
+            "content_sha256": row["content_sha256"],
+            "training_argv": row["training_argv"],
+        }
+        accepted = run(claim)
+        assert accepted.returncode == 0, accepted.stderr
+        assert accepted.stdout.strip() == row["content_sha256"]
+
+    unknown, _argv, _absolute = Q._launch_contract(
+        queue, job, slot, runner_script_sha256="f" * 64
+    )
+    rejected = run(unknown)
+    assert rejected.returncode != 0
+    assert rejected.stdout == ""
+    assert "not one exact reviewed corrected-budget variant" in rejected.stderr
+
+    argv_tampered = copy.deepcopy(
+        {
+            "schema_version": 2,
+            "content": spec["allowed_variants"][0]["content"],
+            "content_sha256": spec["allowed_variants"][0]["content_sha256"],
+            "training_argv": [*spec["allowed_variants"][0]["training_argv"], "x=1"],
+        }
+    )
+    assert run(argv_tampered).returncode != 0
+
+
+def test_attestation_contract_denies_legacy_budget_job_before_ssh(monkeypatch):
+    queue_path = ROOT / "configs/phase1_rolling_timing_supercombo_20260716.yaml"
+    queue = Q.load_queue(queue_path)
+    Q._bind_parent_context(queue)
+    calls = []
+    monkeypatch.setattr(Q.lean, "_run_ssh", lambda *_a, **_k: calls.append("ssh"))
+    with pytest.raises(Q.ContinuationQueueError, match="legacy_budget_v1"):
+        Q.cmd_attest_milestone(
+            queue,
+            job_id="rolling_p1_t10_comp2_j0_std_f03",
+            milestone=3600,
+            execute=True,
+            confirm=Q.ATTEST_CONFIRM,
+            queue_path=queue_path,
+            attestation_contract_path=(
+                ROOT / "configs/phase1_rolling_timing_attestation_contract_20260716.yaml"
+            ),
+        )
+    assert calls == []
+
+
+def test_attestation_contract_queue_sha_and_runtime_receipt_are_no_clobber(
+    tmp_path,
+):
+    queue = _loaded(tmp_path)
+    contract_path = queue["_test_attestation_contract_path"]
+    contract = yaml.safe_load(contract_path.read_text(encoding="utf-8"))
+    contract["queue"]["file_sha256"] = "0" * 64
+    contract_path.write_text(yaml.safe_dump(contract, sort_keys=False), encoding="utf-8")
+    with pytest.raises(Q.ContinuationQueueError, match="queue file SHA mismatch"):
+        Q.cmd_attest_milestone(
+            queue,
+            job_id="rolling_job_3",
+            milestone=5200,
+            execute=False,
+            confirm=None,
+            **_attestation_paths(queue),
+        )
+    runtime_raw, runtime_sha = Q._lean_runtime_payload()
+    assert runtime_sha == hashlib.sha256(runtime_raw).hexdigest()
+    assert b"O_EXCL" in runtime_raw
+    _runtime, materializer = Q.lean._runtime_snapshot_materializer(
+        runtime_raw, runtime_sha
+    )
+    assert "os.link" in materializer
 
 
 def test_milestone_binding_inspector_dry_run_is_read_only_and_uses_no_ssh(

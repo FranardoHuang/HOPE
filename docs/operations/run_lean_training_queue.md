@@ -583,6 +583,15 @@ checkpoint/receipt presence。它不物化 attestor runtime、不加载 checkpoi
 也没有 stop/signal/retry。`actual_claim_differs_expected` 是诊断结果，不是训练失败或兼容授权；必须先把
 actual 谱系绑定回不可变 source/runner，再另行评审 attestor，不能靠放宽摘要“修绿”。
 
+第一份 Pod2 `model_5200` 的 inspector 已证明 actual claim=`7878d92...`、runner=`428cbf...`，相对当前
+claim=`aee7132...`、runner=`90d7f26...` 的完整 content 只有 runner SHA 不同；两者都使用修正后的追加
+`2001` / absolute exclusive `6701` budget，binding/process 仍 exact，receipt absent。兼容输入单独冻结在
+`configs/phase1_rolling_timing_attestation_contract_20260716.yaml`：它绑定本 queue 文件 SHA，只登记
+`428cbf...` 和 `90d7f26...` 两个 reviewed corrected-budget runner，并显式拒绝旧 budget-v1 job。
+attestor 对目标 job 分别完整重建两个 schema-2 claim，remote actual 必须逐字段等于其中恰好一个；这不是
+“允许 continuation 字段不同”的通配规则，第三 runner 或 parent/source/recipe/run/slot/budget/argv 任一
+漂移仍在 checkpoint load 前 fail closed。
+
 已有 checkpoint 只能通过 rolling runner 的专用 no-clobber 入口取证。`job-id` 必须来自 YAML，`milestone`
 必须是 parent iteration 加冻结 offset 后的**绝对**编号；Pod、run directory、binding、claim 与 receipt 路径均
 由该 job 派生，不接受 CLI PID 或手写远端路径。先 dry-run：
@@ -602,13 +611,17 @@ python3 scripts/run_phase1_rolling_timing_supercombo_queue.py \
   --execute --confirm SIM_ONLY_ATTEST_ONE_ROLLING_CONTINUATION_MILESTONE
 ```
 
-远端先核训练 checkout 仍 clean exact，但绝不修改活训练工作树。因为旧 trainer source 不含新 expected-identity
-参数，同一 SSH 会把本地 reviewed `lean_queue_runtime.py` bytes 以 SHA 为目录名、O_EXCL/no-replace 地发布到
+dry-run 必须列出该 job 的两个完整候选 digest/runner；若只出现一个、出现第三个、contract 与 queue SHA
+不符或 job 在 deny 表中，禁止 execute。远端先核训练 checkout 仍 clean exact，但绝不修改活训练工作树。
+因为旧 trainer source 不含新 expected-identity 参数，同一 SSH 会把本地 reviewed
+`lean_queue_runtime.py` bytes 以 SHA 为目录名、O_EXCL/no-replace 地发布到
 `/workspace/codexschema/lean_queue_attestor_runtime/<sha>/`；已存在时只接受逐字节相同的只读 regular file，
-symlink、竞争写入或内容不符都 fail closed。随后 immutable launch claim 与 runtime 进程内 expected
-claim/job/runtime SHA 再次对拍，才沿 `run_binding.json` 打开 exact checkpoint/hard/claim，检查
+symlink、竞争写入或内容不符都 fail closed。preflight 先返回唯一匹配的 **actual claim digest**，随后
+immutable launch claim 与 runtime 进程内 actual claim/job/runtime SHA 再次对拍，才沿
+`run_binding.json` 打开 exact checkpoint/hard/claim，检查
 filename=embedded、finite 与 lineage，并 O_EXCL 写 `milestones/model_N.json`。receipt 记录 attestor runtime
-SHA。该命令每次只连接目标 Pod 一次，不运行 judge，也没有 stop/signal/retry。
+SHA 与 actual claim digest；digest 可由独立 contract 唯一映射回 reviewed runner variant。该命令每次只连接
+目标 Pod 一次，不运行 judge，也没有 stop/signal/retry。
 
 运行态每 30 分钟按队列内 `pruning_contract` 审计。`+200` 只淘汰结构/合同/non-finite/fatal；`+500`
 只允许淘汰连续两窗 dense 明显崩坏，不能把缺少 eligible hit 的稀疏零值判失败；`+1000` 仅在同 parent
@@ -644,6 +657,7 @@ python3 -m py_compile scripts/run_lean_training_queue.py \
 bash -n hope_training/whole_body_tracking/scripts/launch_kit_training_locked.sh
 ```
 
-本源码门只证明 YAML 绑定、调度与 fail-closed 选择逻辑；没有证明动作效果或 exam 成绩。整合 focused
-source result 为 `126 passed`；现有 source-pinned launcher 同时保留 180 秒 stale-log watchdog 与总 boot
-timeout。strict caeb runtime probe 已通过，但它只授权科学队列点火，不能写成科学训练或行为通过。
+本源码门只证明 YAML 绑定、调度与 fail-closed 选择逻辑；没有证明动作效果或 exam 成绩。相关整合回归
+必须按上面的命令重跑，不在操作文档冻结会随测试增长而失效的计数。现有 source-pinned launcher 同时保留
+180 秒 stale-log watchdog 与总 boot timeout。strict caeb runtime probe 已通过，但它只授权科学队列点火，
+不能写成科学训练或行为通过。

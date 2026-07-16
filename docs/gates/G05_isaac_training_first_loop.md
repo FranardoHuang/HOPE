@@ -2693,6 +2693,16 @@ runtime materialization、checkpoint load 或 receipt 发布前发现 actual imm
 字段差异；不物化 attestor runtime、不写 receipt、不 signal。该 inspector 尚未在 Pod2 执行，原 attestation
 也不得重试；G05 保持 `Partial`。
 
+2026-07-16 13:46 CST，Pod2 唯一只读 inspector 已把该差异闭合为 producer lineage：actual claim/self
+digest=`7878d92...`、runner=`428cbf...`，binding/process=`live_exact`、`model_5200` regular、receipt absent；
+相对当前 `aee7132.../90d7f26...` 的完整 claim 只有 continuation runner SHA 不同，corrected budget 与
+其余字段逐字相同。新的 attestation contract 只登记这两个 reviewed corrected-budget runner，并对每个 job
+完整重建两个 exact claim 候选；remote actual 必须逐字段等于恰好一个候选，actual digest 再交给 runtime
+复核 binding。它不是任意 diff 容差：旧 budget-v1、第三 runner 或 budget/recipe/source/parent/run/slot/argv
+任一漂移仍 fail closed。Pod1 同轮 source/claim/GPU/fatal 健康，但临时审计脚本错误使用 regular-file
+size/mtime 检查 `/proc`，所以本轮 identity/checkpoint 为 UNKNOWN，未停止任何臂。兼容 source gate 即使合入
+也只解锁后续一次 no-clobber checkpoint attestation，不改变“量尺不完整，继续训练”或 G05=`Partial`。
+
 首次真实 continuation 又抓到 budget 字段语义错误：parent `1600` 配 CLI `max_iterations=3601` 时，RSL
 实际报告 `1601/5201`，说明该值是追加 update 数而非绝对终点。首 trainer 健康且 binding 正确；本地等待
 在 remote watchdog 前退出，未重发或 signal trainer。runner 已改为 CLI 传 `2001`，同时在 claim 中分别绑定

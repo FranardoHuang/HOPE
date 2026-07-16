@@ -82,14 +82,19 @@ receipt 同样使用 no-clobber 原子发布；第二次取证同一路径会失
 checkpoint 身份、finite 与训练合同谱系，不是 q10/q50 判卷、行为晋级或自动 stop/promote。
 
 rolling continuation 不能直接把 binding path 交给通用 runtime。专用 runner 只接受冻结 YAML 的 `job-id`
-与 parent+offset 物化后的 absolute milestone；它从 job 派生 Pod/run directory，并用发射时冻结的 runner SHA
-重建 schema-2 launch claim。目标 Pod 的唯一 SSH 内先 O_NOFOLLOW 稳定读取现存 claim，重验 canonical digest、
-job/source/Pod/GPU/run directory 和 claim/binding argv override。它不修改活 trainer checkout；同一 SSH 把
-reviewed `lean_queue_runtime.py` 以 SHA 命名、O_EXCL/no-replace 地物化为只读 content-addressed snapshot，
-已有 snapshot 只接受逐字节相同，symlink/race/mismatch 全拒绝。runtime 进程内再对拍 expected claim/job/
-自身 SHA，最后才调用上面的 no-clobber attestor，并把 runtime SHA 写进 receipt。run directory、source、
-recipe 或 slot 漂移都会在 checkpoint 打开前拒绝。这个 wrapper 没有 PID、checkpoint path、stop、signal
-或 retry 输入面。
+与 parent+offset 物化后的 absolute milestone；它从 job 派生 Pod/run directory。独立 attestation contract
+同时绑定 queue 文件 SHA，只登记两个 reviewed corrected-budget runner，并显式 deny 旧 budget-v1 job。wrapper
+用每个 runner SHA 对目标 job 完整重建 schema-2 claim；目标 Pod 的唯一 SSH 内先 O_NOFOLLOW 稳定读取现存
+claim，重验 canonical digest、job/source/Pod/GPU/run directory 和 claim/binding argv override，再要求 actual
+content 与 training argv 逐字段等于**恰好一个**完整候选。它不接受“某字段可以不同”的容差，也不修改活
+trainer checkout。
+
+同一 SSH 把 reviewed `lean_queue_runtime.py` 以 SHA 命名、O_EXCL/no-replace 地物化为只读
+content-addressed snapshot；已有 snapshot 只接受逐字节相同，symlink/race/mismatch 全拒绝。preflight 返回
+唯一匹配的 actual claim digest，runtime 进程内再对拍该 digest/job/自身 SHA，最后才调用 no-clobber
+attestor，并把 runtime SHA 与 actual claim digest 写进 receipt。receipt digest 可由冻结 contract 唯一映射回
+reviewed runner variant；第三 runner 或 run directory/source/recipe/parent/slot/budget/argv 漂移都会在
+checkpoint 打开前拒绝。这个 wrapper 没有 PID、checkpoint path、stop、signal 或 retry 输入面。
 
 expected claim 不一致时不得把 remote claim 改成当前 YAML，也不得重复 attestation。专用
 `inspect-milestone-binding` 与 attestor 共用 YAML `job-id + absolute milestone` 输入面，但只做一条目标 Pod

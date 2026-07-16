@@ -217,6 +217,29 @@ attestation 来验证。下一轮先使用 YAML 派生、严格只读、单 SSH 
 O_NOFOLLOW 自校验 actual claim/binding、绑定进程与 checkpoint/receipt presence，并报告 actual/expected
 digest、runner SHA、budget 与字段差异；只有 actual 谱系无歧义后，才能预注册新的兼容 attestor。
 
+2026-07-16 13:46 CST，下一轮 Pod2 唯一连接执行上述 inspector 并得到无歧义结果：actual claim canonical/
+declared digest 均为 `7878d92e98a10d6326b83a2bcbeb191b1da3c457e296aa9e1fbf6c5d4a27d2a9`，
+`continuation_runner_script_sha256=428cbf590a9f93ce7c3c0badcda93a511661152c7f3680344457abc5f574dabb`；
+binding self-valid 且 exact 指向 actual claim，PID=PGID `437711` / starttime `560049168` 仍 `live_exact`，
+`model_5200.pt` 是 non-empty regular file，receipt absent。actual 与现行 `aee7132.../90d7f26...` 的
+`content_diff_keys=[continuation]`；两边 budget 都是 4096 env、追加 `2001`、absolute exclusive `6701`、
+milestones `4900/5200/5700/6700`、save interval `100`，逐字段相同。因此根因是 corrected-budget runner
+在 cross-Pod 并发升级前已经消费该 claim，不是 queue claim 损坏、budget 漂移或训练失败。
+
+兼容 consumer 不采用“允许一个字段 diff”的开放规则。独立 attestation contract 只登记 reviewed
+`428cbf...` 与 `90d7f26...`；runner 用同一完整构造器、只替换 runner SHA，为每个 YAML job/slot/parent
+分别重建两个 schema-2 claim；全 24 job 的生产合同测试断言两候选只有该叶及其派生 claim-SHA argv 不同，
+remote actual 仍须**逐字段等于其中恰好一个完整候选**。preflight
+输出 actual digest，reviewed runtime 用该 digest 再验 binding，防 TOCTOU；旧 budget-v1 `b639160.../
+27202d...`、任意第三 runner、budget/recipe/parent/source/run/slot/bank/argv 任一漂移全部拒绝。旧
+budget-v1 job 还在 contract 中显式 deny，继续等待独立 exact-stop 路径。
+
+同轮 Pod1 唯一连接仍证明 source clean、12/12 claim 的 job/Pod/GPU/run/source 一致、GPU `4/3/4`、
+11 个 trainer PID 同时在 `/proc` 与 NVML、accepted fatal regex=`0`；但审计脚本错误地把 `/proc/<pid>/stat`
+当 regular file 做 size/mtime stable-read，11 条 live 在 identity 阶段统一 fail closed。本轮 exact argv/
+starttime/checkpoint 因而是 UNKNOWN，不得据此推断 `model_3600` absent 或停止 PGID `2199057`；这不是 trainer
+失败，下一轮需用 proc 专用双读。
+
 同轮 source/event-schema 审计进一步推翻了“现役 `704bf3a` 可以直接执行上面的 `+500/+1000` 行为淘汰”这一
 假设：completion 和 pre/post-fall 是跨全历史、逐 simulator step 衰减的 EMA，比值无法重建两个不重叠的
 100-update 窗；pre/post numerator 又包含所有 `terminated`，不是 `base_fell_tilt ∪ base_too_low` 的绝对
