@@ -661,6 +661,11 @@ write-side cycle 发布单臂 receipt 前，只能在已经由 binding 验证的
 尝试曾因该目录缺失在第一份 behavior receipt 前 fail closed，未 signal；修复版必须先过缺 parent、文件、
 symlink 三类负测，再做一次新的显式 consume。
 
+修复进入 `main@85ab36df` 后，Pod2 的新显式 consume 成功发布 9 条 behavior receipt；quality parent
+6 条均为 `continue_training_no_automatic_stop`，因为 revision/last-precontact/actor-visible/exact-0.5
+全部激活。continuous parent 只消费已到档的 3 条，另 2 条仍等 checkpoint。cycle signal count 为 0，
+没有无淘汰意义的 portfolio receipt。该结果不得改写为 +500 排名。
+
 只有单臂 behavior receipt **与**同父本 portfolio receipt 都明确淘汰该 job 时，operator 才可手动调用
 exact stop；rolling 自动任务不得跳过组合保护或隐式 signal：
 

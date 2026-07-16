@@ -245,7 +245,12 @@ initial-TTS mixture with a point mass at 0.5 s. A separate K100
 have source implementations. The old rolling pool was stopped because its EMA logs cannot
 retroactively supply this ruler.
 
-This is still `Partial`. No ROS 2 Jazzy/VRPN Release build, full-scene Isaac probe, real 0.5-second
-behavior score, dynamics-certified 0.5-second TOPP trajectory, vendor MuJoCo Gate3/Gate3B run or
-real-robot command has passed. The new runner/profile must fail closed until all metadata and
+This is still `Partial`. The 4096-environment Isaac `A6` probe has since proved that the actor sees
+same-ball revisions, all four preparation-time strata (including exact 0.5 seconds) and the integer
+ledger in a real PPO update; 22 delay-zero cells were uniquely launched, with 19 currently live and
+three pre-iteration infrastructure rejections. That closes the training activation path, not the
+deployment path. The first production-FK TOPP run-up search found only `0.98 s` forehand and
+`0.78 s` backhand feasible upper bounds, so it did not certify a 0.5-second motion. No ROS 2
+Jazzy/VRPN Release build, completed 0.5-second K100 behavior score, vendor MuJoCo Gate3/Gate3B run
+or real-robot command has passed. The new runner/profile must fail closed until all metadata and
 schema-4 inputs agree; no legacy model is upgraded by re-export alone.

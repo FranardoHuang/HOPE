@@ -72,8 +72,11 @@ Follow-up note (2026-07-17, task-revision pool uniquely launched; Gate remains `
   behavior receipt: the no-clobber runtime correctly refused to publish into an absent
   `behavior_milestones/` parent. No behavior/portfolio receipt or signal was produced. The source
   successor creates only that fixed direct child below the already bound real run directory and
-  rejects missing parents, files and symlinks; this repair has host tests but still needs its one
-  Pod runtime consume, so the pruning run gate remains `Partial`.
+  rejects missing parents, files and symlinks. After the repair entered `main@85ab36df`, one Pod2
+  cycle successfully published nine behavior receipts. The six-cell quality parent had all
+  revision/exact-0.5 mechanisms active and therefore correctly produced zero +200 eliminations;
+  the continuous parent still has two live siblings before checkpoint. This closes the Pod2 +200
+  runtime mechanism consume, not the +500 behavior comparison, so G05 remains `Partial`.
 
 Follow-up note (2026-07-17, task-revision `A6` full-scene gate passed; Gate remains `Partial`):
 

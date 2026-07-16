@@ -17,7 +17,9 @@
   正确要求父目录已存在，而新 consumer 漏建绑定 run_dir 下的 `behavior_milestones/`。没有 behavior/
   portfolio receipt、signal 或 retry；可能新建的 checkpoint receipt仍是独立合法制品。修复版只允许在
   已验证真实 run_dir 下用单级 `mkdir` 建固定目录名，缺 parent、文件或 symlink 均拒绝；专项增至
-  `65 passed`。旧失败输出保留，只在本修复进入 main 后做新的显式远端消费。见
+  `65 passed`。旧失败输出保留；修复进入 `main@85ab36df` 后的唯一 Pod2 consume 成功为 9 条到档臂发布
+  behavior receipt。quality 父本 6/6 机制激活、exact-0.5 暴露且 `+200` 合法零淘汰；continuous 父本
+  3 条已取证、2 条仍等 checkpoint、1 条 infrastructure-terminal 排除。全程 signal=`0`。见
   [task-revision cutover](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md)。
 
 - task-revision 行为淘汰闭环已补齐：`+200` 只在两个完整整数窗都证明 revision/ledger 机制未激活时淘汰，

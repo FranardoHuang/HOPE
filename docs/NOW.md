@@ -44,9 +44,12 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   0.5 秒动力学证书。这不证明 0.5 秒绝对不可能，却证明旧固定倍率不能冒充可行动作加速。
   `+200` 机制失活、`+500` 极端崩坏和 `+1000` 同父本容差 Pareto 的组合保护式淘汰 consumer
   已闭合：停臂必须同时有单臂行为 receipt 和同父本 portfolio receipt，且至少保留两条以及
-  实际 exact-0.5 暴露与 broad 两类时间覆盖。首次只读 `+200` 扫描中，Pod1 有 4 条到档、4 条同父本
-  live sibling 尚未到档，Pod2 quality 父本为 4 条到档/2 条等待、continuous 父本 5 条全部等待；
-  3 条 infrastructure-terminal 被排除，故本轮合法 stop 为 0，而不是默认让所有臂永生。首个合格
+  实际 exact-0.5 暴露与 broad 两类时间覆盖。修复 receipt-directory harness 后，Pod2 首个 write-side
+  `+200` cycle 已对 9 条到档臂发布整数行为 receipt：quality 父本 6/6 的 revision/last-precontact/
+  actor-visible 与 exact-0.5 暴露都激活，合法 stop 为 0；continuous 父本 3 条已取证、2 条仍等 checkpoint、
+  1 条 infrastructure-terminal 排除。Pod1 最近只读为 4 条到档、4 条 live sibling 等待、2 条
+  infrastructure-terminal 排除。这里零 stop 是机制正常的结论，不是默认让所有臂永生；行为优劣从
+  `+500` 开始判。首个合格
   checkpoint 正在跑 K100，之后按 receipt 淘汰并把胜者送 vendor MuJoCo。详见
   [task-revision 卷宗](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md)。
 

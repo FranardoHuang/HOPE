@@ -192,6 +192,14 @@ the bound run directory; missing parents, ordinary files and symlinks fail close
 consumer infrastructure failure, not a training or Reward result, and the failed invocation is
 retained rather than silently replayed.
 
+After that repair entered `main@85ab36df`, one new explicit Pod2 cycle published nine behavior
+receipts. All six quality-parent cells had positive revision, last-precontact, actor-visible and
+exact-0.5 exposure counts, so the registered +200 rule retained all six; no portfolio elimination
+receipt was published and no signal was sent. Three continuous-parent cells were also attested,
+while two still-live siblings remained before their checkpoint and one infrastructure-terminal
+cell stayed excluded. This is a positive mechanism-activation result, not a behavior winner claim;
+the first behavior comparison remains +500.
+
 ## Acceptance sequence
 
 1. Launch the 22 activated delay-zero cells in cross-GPU rounds; keep the two transport cells
