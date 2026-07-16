@@ -19,6 +19,11 @@
   cases 全过，全集 6 个失败与父提交逐项相同。该能力只过 source gate，下一步是 4096-env probe 和
   [24 条单 seed 工程组合](experiments/2026-07/EXP-P1-ROLLING-TIMING-SUPERCOMBO.md)。
 
+- rolling source 的 Pod2 4096-env×2-update probe 已自然 rc0：0.7 秒 compensated 配方写出 finite
+  `model_1`、schema-3/fresh lineage 且 fatal0，结束后进程/GPU 为空。strict finalizer 另抓到 supervisor
+  Popen 后 `/proc` starttime 首读竞态并 fail closed；训练本体证据接受为工程点火门，probe 不自动重跑，
+  identity capture 修复并行处理。
+
 - 05:29 CST 的全池只读审计逐条覆盖双 Pod `24/24`，而非只看新到里程碑的候选：两边均三卡
   `4/4/4`、全部 live/fatal0，24 份 latest checkpoint 的 embedded iteration、finite、hard/claim/binding
   与 lineage 均通过。Pod1 12 条约到 `model_1000–1200`；16 秒自由臂有最强 matched 方向，但 10 秒近似

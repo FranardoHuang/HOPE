@@ -2616,5 +2616,12 @@ checkpoint 行为。只有 policy 改读 actor TTS，critic、Reward 和真值�
 动作一起缩放。仍然拒绝真正不相容的 `hitter_pure` target ownership，以及不重排同一来球却 mid-swing
 换 bank row。Pod2 exact Isaac 环境中新增 10 个 timing/retiming cases 全过；两文件全集与父提交具有完全
 相同的 6 个既有环境/fixture 失败，因此没有把它们冒充本次回归。该门只授权下一轮单 seed、formal-ineligible
-工程组合；尚无 4096-env source probe、训练曲线、vendor MuJoCo 或真实行为结论，G05 保持 `Partial`。详见
+工程组合；尚无长训练曲线、vendor MuJoCo 或真实行为结论，G05 保持 `Partial`。详见
 [rolling supercombo 卷宗](../experiments/2026-07/EXP-P1-ROLLING-TIMING-SUPERCOMBO.md)。
+
+随后 Pod2 以 0.7 秒/40 ms compensated 格直接跑 4096 environments × 2 updates：训练自然 rc0，first
+iteration 已观察，`model_1.pt` embedded iteration=1，74 个浮点 tensor / 1,762,715 元素 nonfinite=0，
+schema-3 hard contract、fresh lineage=1、fatal0 与自然空进程组均通过。严格 finalizer 没有假绿：Popen
+后第一次 `/proc` 读取竞态令 exit receipt 的 trainer starttime 为 null，而 trainer-owned binding 有真实
+starttime，故 immutable result 按身份不一致失败。该失败属于 supervisor 取证基础设施，不推翻已经独立
+复核的 scene/training/checkpoint；不自动重跑 probe，另修 bounded identity capture。G05 仍为 `Partial`。

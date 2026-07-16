@@ -1,6 +1,6 @@
 # EXP-P1-ROLLING-TIMING-SUPERCOMBO — 快速准备、时间戳补偿与组合训练漏斗
 
-- 状态：`blocked`（source gate 已过；等待 full-scene probe、parent runtime attestation 与 continuation runner）
+- 状态：`blocked`（source/full-scene training path 已过；等待 parent runtime attestation 与 continuation runner）
 - 阶段/轴：阶段 1，动作重定时、actor 可见目标/TTS 延迟、预测收敛抖动、击球 Reward 配比与脚朝向
 - 人类负责人：Franco
 - 执行者：Codex
@@ -188,14 +188,17 @@ eligible exact-strike / virtual-capture / qdot-active 分母未达到冻结下�
    `DEFINITIONS.md`、G05、训练 operation、policy 接口与 `PROGRESS.md` 已同步。
 2. **已完成：** 跑 host/Pod2 单元合同门：三种 TTS mode、delay ring wrap/reset、同一步多次 observation 不重抽、compensated TTS 精确减
    `delay_steps × 0.02 s`、uncompensated 负控不减、hard contract/metric 字段、默认 `live` 路径回归。
-3. **已完成 source 回归，等待 full-scene：** 对 retiming + schema-3 bank 跑 source gate；bank answer 保持
+3. **已完成：** 对 retiming + schema-3 bank 跑 source gate；bank answer 保持
    absolute；错误 clip count、非正 scale、同时误启 event timing 必须 fail closed。
 4. **已完成 exact stop：** 旧 24 条均按绑定 identity 停止且 GPU compute 为空；不额外制造不参与
    后代 provenance 的 stop receipt。
 5. 对三份选中 parent（Pod1 一份、Pod2 两份）做只读 runtime attest；验证完整 optimizer、finite、contract/claim/binding 和
    source lineage。parent 选择变化时先更新本实验，不在聊天里暗换。
-6. 直接做 4096-env×2 update full-scene probe；不再串一个不能代表正式 scene 的 512-env smoke。日志必须含 retiming profile、
-   TTS mode、actor/live TTS、qdot observed/active、prediction jitter scale 与 `q_des CLAMP ACTIVE`。
+6. **训练路径已完成：** 直接做 4096-env×2 update full-scene probe；不再串一个不能代表正式 scene 的
+   512-env smoke。Pod2 0.7 秒补偿格自然 rc0，`model_1` 的 1,762,715 个浮点元素全 finite、schema-3/
+   fresh lineage 通过且 fatal0。严格 finalizer 因 Popen 后第一次 `/proc` identity 读取竞态得到 null
+   starttime 而 fail closed；训练本体、checkpoint 与自然退出证据均已独立复核。该基础设施 bug 另修，
+   不把一次成功 physics run 重跑成“更好结果”。
 7. 对队列做静态审计：24 unique ids/run names/run dirs；12/12 Pod；六槽各 4；四轮各 6；仅一条
    `uncompensated`，且它与 #2 除 TTS mode 外逐项相等；全部 blocked、`launch_authorized=false`、formal-ineligible。
 8. 只有以上 receipt/测试审完并由人明确授权，才另做 activation patch；激活本身不得自动执行 `fill` 或 retry。
@@ -204,4 +207,4 @@ eligible exact-strike / virtual-capture / qdot-active 分母未达到冻结下�
 
 - 决定：`blocked / preregistration draft only`
 - 是否纳入当前 setting：`no`
-- 下一个 gate：per-Pod parent runtime attestation + source-bound 4096-env full-scene probe + continuation runner dry-run
+- 下一个 gate：per-Pod parent runtime attestation + continuation runner validate/dry-run

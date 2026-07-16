@@ -391,6 +391,112 @@ def _rewrite_exit(fixture, mutate):
     _write_json(fixture["exit_path"], value)
 
 
+class _FakeChild:
+    def __init__(self, pid, poll_values):
+        self.pid = pid
+        self._poll_values = iter(poll_values)
+        self.poll_count = 0
+
+    def poll(self):
+        self.poll_count += 1
+        return next(self._poll_values)
+
+
+def test_trainer_identity_capture_retries_transient_first_read(tmp_path):
+    del tmp_path
+    child = _FakeChild(61001, [None])
+    argv = ["/exact/python", "/exact/train.py"]
+    clock = [0.0]
+    reads = [0]
+
+    def read_identity(pid):
+        assert pid == child.pid
+        reads[0] += 1
+        if reads[0] == 1:
+            raise P.queue_runtime.LeanQueueRuntimeError("transient proc stat race")
+        return {
+            "pid": child.pid,
+            "pgid": 61000,
+            "starttime_ticks": 123456,
+            "argv": argv,
+        }
+
+    identity, error = P._capture_trainer_identity_bounded(
+        child,
+        supervisor_pid=61000,
+        trainer_argv=argv,
+        timeout_seconds=0.1,
+        poll_seconds=0.01,
+        identity_reader=read_identity,
+        monotonic=lambda: clock[0],
+        sleeper=lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+    )
+
+    assert error is None
+    assert identity["starttime_ticks"] == 123456
+    assert identity["argv"] == argv
+    assert reads[0] == 2
+    assert child.poll_count == 1
+
+
+def test_trainer_exit_before_identity_capture_is_explicit_failure():
+    child = _FakeChild(62001, [0])
+    argv = ["/exact/python", "/exact/train.py"]
+
+    identity, error = P._capture_trainer_identity_bounded(
+        child,
+        supervisor_pid=62000,
+        trainer_argv=argv,
+        identity_reader=lambda _pid: (_ for _ in ()).throw(
+            FileNotFoundError("child already exited")
+        ),
+    )
+
+    assert identity == {
+        "pid": 62001,
+        "pgid": 62000,
+        "starttime_ticks": None,
+        "argv": argv,
+    }
+    assert error is not None
+    assert "child_exited_before_complete_identity" in error
+    assert "returncode=0" in error
+
+
+def test_trainer_identity_capture_timeout_cannot_unlock_probe(tmp_path):
+    child = _FakeChild(63001, [None, None, None])
+    argv = ["/exact/python", "/exact/train.py"]
+    clock = [0.0]
+
+    identity, error = P._capture_trainer_identity_bounded(
+        child,
+        supervisor_pid=63000,
+        trainer_argv=argv,
+        timeout_seconds=0.02,
+        poll_seconds=0.01,
+        identity_reader=lambda _pid: (_ for _ in ()).throw(
+            P.queue_runtime.LeanQueueRuntimeError("proc identity incomplete")
+        ),
+        monotonic=lambda: clock[0],
+        sleeper=lambda seconds: clock.__setitem__(0, clock[0] + seconds),
+    )
+
+    assert identity["starttime_ticks"] is None
+    assert error is not None and "timeout_before_complete_identity" in error
+    fixture = _fixture(tmp_path)
+
+    def record_failed_capture(content):
+        content["trainer_process"] = identity
+        content["supervision_error"] = error
+
+    _rewrite_exit(fixture, record_failed_capture)
+    result = _finalize(fixture)
+    content = result["result"]["content"]
+    assert content["status"] == "failed"
+    assert content["unlock_authorized"] is False
+    assert "differs from immutable binding" in content["failure_reason"]
+
+
 def _write_launcher_terminal(
     fixture, *, terminal_kind="pre_marker_exit", terminal_exit_code=7
 ):

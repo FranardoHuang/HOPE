@@ -1,7 +1,7 @@
 schema_version: 1
 simulation_only: true
 launch_authorized: false
-preregistration_status: blocked_pending_full_scene_probe_parent_runtime_attestation_and_hotstart_harness
+preregistration_status: blocked_pending_parent_runtime_attestation_and_hotstart_harness
 formal_evidence_eligible: false
 
 ssh:
@@ -23,7 +23,7 @@ dispatch_pods: [pod1, pod2]
 
 blocking_contract:
   launch_remains_forbidden_until_all_true:
-    - target_delay_tts_mode_source_gate_and_full_scene_probe_pass
+    - target_delay_tts_mode_source_gate_and_full_scene_physics_run_pass
     - old_pool_exact_stop_audit_confirms_all_24_process_identities_absent_and_fatal_count_zero
     - frozen_local_parent_portfolio_is_selected_from_the_bound_stop_receipts
     - parent_checkpoint_hard_contract_claim_binding_and_optimizer_are_attested
@@ -32,7 +32,23 @@ blocking_contract:
     - dry_run_assignment_is_exactly_four_jobs_per_gpu_and_no_external_compute_pid_is_displaced
   source_checkout: /workspace/codexschema/nohope_rolling_timing_704bf3a
   source_commit: 704bf3a273280b0bf96b8ba7b70cd8961b2208a9
-  source_full_scene_probe_receipt: PENDING_SOURCE_BOUND_4096_ENV_FULL_SCENE_PROBE
+  source_full_scene_probe_evidence:
+    pod: pod2
+    gpu: 0
+    attempt_id: a1
+    run_dir: /workspace/codexschema/phase1_rolling_timing_supercombo_20260716/runs/_full_scene_probes/rolling_p1_t07_comp2_j0_std_f03/704bf3a273280b0bf96b8ba7b70cd8961b2208a9/pod2/gpu0/a1
+    training_runtime_status: passed_natural_exit_rc0
+    first_iteration_observed: true
+    checkpoint_iteration: 1
+    checkpoint_sha256: 52f1f902f858982dbcfcc4a2f913ca47596173d3b8da6127631e0b68a4638fab
+    hard_contract_sha256: 8f437357fd2b6e3dd05f171d6b9ee234b958535f0bb81771366f892449810026
+    tensor_nonfinite_count: 0
+    fatal_count: 0
+    training_contract_lineage_exact: 1
+    process_group_naturally_empty: true
+    strict_finalizer_status: failed_closed_on_supervisor_identity_capture_race
+    strict_result_sha256: 6158f38e5e46595cddb69ff1117a2e4bc30e5c33a88b6f1a7e381651a273746f
+    engineering_launch_interpretation: source_scene_and_training_path_passed_finalizer_infrastructure_bug_does_not_change_model_or_behavior
   hotstart_harness: PENDING_SOURCE_BOUND_ROLLING_HOTSTART_HARNESS
   activation_is_manual: true
   automatic_launch: false
@@ -304,8 +320,8 @@ x-budget: &budget
   iteration_semantics: additional_updates_after_full_state_resume
 x-milestones: &milestones [200, 500, 1000, 2000]
 x-blocker: &blocker >-
-  Global launch gate is closed: source-bound full-scene probe, exact parent runtime
-  attestations, and the parent-relative hot-start harness are still PENDING.
+  Global launch gate is closed: exact parent runtime attestations and the
+  parent-relative hot-start harness are still PENDING.
 
 x-pod1-warm-start: &pod1_warm_start
   parent: pod1_local_best

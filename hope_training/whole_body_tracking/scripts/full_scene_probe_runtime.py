@@ -44,6 +44,8 @@ RESULT_NAME = "probe_result.json"
 FIRST_ITERATION_MARKER = "Learning iteration"
 PHASE_PREFIX = "[train.py] LEAN_QUEUE_PHASE "
 SUPERVISOR_PHASE_PREFIX = "[full_scene_probe] PHASE "
+TRAINER_IDENTITY_CAPTURE_TIMEOUT_SECONDS = 2.0
+TRAINER_IDENTITY_CAPTURE_POLL_SECONDS = 0.01
 REQUIRED_TRAINER_PHASES = (
     "scene_import_start",
     "scene_import_done",
@@ -174,6 +176,73 @@ def _process_identity(pid: int, proc_root: Path = Path("/proc")) -> dict[str, An
     return queue_runtime._process_identity(pid, proc_root=proc_root, getpgid=os.getpgid)
 
 
+def _capture_trainer_identity_bounded(
+    child: Any,
+    *,
+    supervisor_pid: int,
+    trainer_argv: list[str],
+    timeout_seconds: float = TRAINER_IDENTITY_CAPTURE_TIMEOUT_SECONDS,
+    poll_seconds: float = TRAINER_IDENTITY_CAPTURE_POLL_SECONDS,
+    identity_reader: Callable[[int], Mapping[str, Any]] = _process_identity,
+    monotonic: Callable[[], float] = time.monotonic,
+    sleeper: Callable[[float], None] = time.sleep,
+) -> tuple[dict[str, Any], str | None]:
+    """Capture the post-exec trainer identity without ever signalling it.
+
+    Immediately after ``Popen`` Linux may expose neither a complete ``stat``
+    record nor the post-exec ``cmdline``.  A single read therefore cannot be
+    used as immutable launch evidence.  This bounded loop accepts only the
+    exact child PID, inherited process group, positive start time, and claimed
+    argv.  Child exit or timeout produces an explicitly incomplete identity;
+    the non-None supervision error makes the terminal gate fail closed.
+    """
+
+    if timeout_seconds <= 0.0 or poll_seconds <= 0.0:
+        raise ValueError("trainer identity capture bounds must be positive")
+    deadline = monotonic() + timeout_seconds
+    last_error = "identity_not_yet_observed"
+    while True:
+        try:
+            observed = dict(identity_reader(child.pid))
+        except (queue_runtime.LeanQueueRuntimeError, OSError) as exc:
+            last_error = f"{type(exc).__name__}:{exc}"
+        else:
+            starttime = observed.get("starttime_ticks")
+            if observed.get("pid") != child.pid:
+                last_error = "observed_pid_differs_from_spawned_child"
+            elif observed.get("pgid") != supervisor_pid:
+                last_error = "trainer_did_not_inherit_supervisor_pgid"
+            elif type(starttime) is not int or starttime <= 0:
+                last_error = "trainer_starttime_is_not_a_positive_integer"
+            elif observed.get("argv") != trainer_argv:
+                last_error = "trainer_cmdline_has_not_reached_claimed_post_exec_argv"
+            else:
+                return observed, None
+
+        returncode = child.poll()
+        if returncode is not None:
+            reason = (
+                "trainer_identity_capture:child_exited_before_complete_identity:"
+                f"returncode={returncode}:last_error={last_error}"
+            )
+            break
+        now = monotonic()
+        if now >= deadline:
+            reason = (
+                "trainer_identity_capture:timeout_before_complete_identity:"
+                f"timeout_seconds={timeout_seconds:g}:last_error={last_error}"
+            )
+            break
+        sleeper(min(poll_seconds, deadline - now))
+
+    return {
+        "pid": child.pid,
+        "pgid": supervisor_pid,
+        "starttime_ticks": None,
+        "argv": trainer_argv,
+    }, reason
+
+
 def _binding_digest_if_valid(binding_path: Path) -> str | None:
     try:
         binding, _content = _load_envelope(binding_path, "probe run binding")
@@ -244,22 +313,11 @@ def supervise(
         )
         return exit_receipt
 
-    supervision_error = None
-    try:
-        trainer_identity = _process_identity(child.pid)
-    except (queue_runtime.LeanQueueRuntimeError, OSError) as exc:
-        trainer_identity = {
-            "pid": child.pid,
-            "pgid": supervisor_pid,
-            "starttime_ticks": None,
-            "argv": trainer_argv,
-        }
-        supervision_error = f"trainer_identity_capture:{type(exc).__name__}:{exc}"
-    else:
-        if trainer_identity["pgid"] != supervisor_pid:
-            supervision_error = "probe trainer did not inherit the supervisor PGID"
-        elif trainer_identity["argv"] != trainer_argv:
-            supervision_error = "spawned trainer /proc argv differs from immutable claim"
+    trainer_identity, supervision_error = _capture_trainer_identity_bounded(
+        child,
+        supervisor_pid=supervisor_pid,
+        trainer_argv=trainer_argv,
+    )
 
     first_iteration = False
     while child.poll() is None:

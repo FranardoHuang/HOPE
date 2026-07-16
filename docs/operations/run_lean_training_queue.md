@@ -192,6 +192,13 @@ SHA-256 分别为 `0d03bd0305a56e56440b14e1f41278a26c0cad3a84cc1245325faed1ef29b
 finite、fatal0 与自然空 PGID，因此 `unlock_authorized=true` 可被显式队列变更消费。probe 本身仍
 `not_science=true / attestable=false / promotable=false`，不能当 Reward 结果或晋级证据。
 
+2026-07-16 的 rolling-timing source `704bf3a2` 又暴露一个 supervisor 身份竞态：4096-env×2-update
+训练自然 rc0、finite `model_1`、schema-3/fresh lineage、fatal0 与自然空进程组均独立通过，但 child
+Popen 后第一次 `/proc` 读取瞬时失败，旧 supervisor 便把 `starttime_ticks=null` 固化进 exit receipt；strict
+finalizer 正确拒绝了它。修复后的 supervisor 在最多 2 秒内只读重采样，只有 PID/PGID/正整数 starttime
+和 post-exec argv 全匹配才接受；child 早退或超时仍发布不可通过的身份错误，绝不 signal。旧 a1 failure
+保持不可变、不会因代码修复被追认或自动重跑。
+
 该 caeb attempt 在当时的 queue shell 中确实完成了 source-asset doctor 重哈希；但它使用的旧 runtime
 并没有 in-process `current_closure`，所以不把新能力倒算到旧 result。新 source 的验收结果必须实际携带上述
 当前闭包证据。终档 checkpoint 的内嵌 iteration 与 fresh lineage 只接受 plain integer，`true` 不等于合法的
