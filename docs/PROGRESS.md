@@ -13,6 +13,13 @@
 
 ## 2026-07-17
 
+- ready×join Stage 1 六个新端点格都自然产生 candidate/TOPP 原始制品；raw 数值显示 `d=17` 全面更慢，
+  反手 own-frame0 ready 将最近 join 从 `0.94` 改善到 `0.78 s`，正手则 own-ready `0.64` 优于
+  backhand-ready `0.70 s`，形成 side crossover。独立红队随后抓到一次性 summary 未绑定 consumer 源码、
+  parser 未全量重验 certificate provenance，故结果降级为 pending historical attestation；预注册选择的
+  四个 `d=12` 中点保持 `launch_authorized=false`，六格不重跑。见
+  [短路径实验](experiments/2026-07/EXP-MOTION-READY-TO-STRIKE-0P5.md)。
+
 - 新源码 `66f93559` 的 Pod2 CPU-only attempt2 已对真实 v4rg 成功生成正/反手 0.5秒 host 候选，随后
   production-FK TOPP 两侧 hard acceptance 全过，但当前 join 的可行 run-up 上界为 `0.64/0.94 s`，故
   没有 0.5秒动力学证书、未送 L0/L1/桌网/训练。下一轮预注册保持安全合同不变，先跑 join 端点

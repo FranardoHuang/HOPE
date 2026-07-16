@@ -74,6 +74,15 @@ run-up 上界是正手 `0.98 s`、反手 `0.78 s`。因此单纯把完整旧 cli
   两端 `6/17` × 正反手 × forehand/backhand frame0 ready 的小因子阵（两个既有格不重跑），再按冻结
   规则跑中点 `12`，只在主点附近细化 `9/14`。shared-ready 按两侧 minimax 选，单侧胜者只作诊断。
   若全失败，停止这个 two-ready/hold/join family，再单独改变一个结构轴，绝不放宽 TOPP 动力学限值。
+- Stage 1 实测：六个新端点格全部 natural exit、candidate 与 TOPP hard acceptance 通过。`d=17` 相对
+  `d=6` 在四个 side×ready 配对上都严格更慢；正手为 RF `0.64→1.28 s`、RB `0.70→1.54 s`，反手为
+  RF `0.94→1.94 s`、RB `0.78→1.42 s`。反手 own-ready 将最近 join 从 `0.94` 改善到 `0.78 s`，但
+  正手相反（RF `0.64` 优于 RB `0.70 s`），所以发生 ready×side crossover，尚不能宣布共同 ready。
+  冻结规则因此选择四个 `d=12` 中点格；机器 activation 见
+  [`stage2_activation`](../../../configs/ready_to_strike_join_ladder_stage2_activation_20260717.json)。但原始
+  Stage 1 summary 未绑定一次性 consumer 源码，且旧 parser 未全量重验 certificate provenance；因此这些
+  数值先降级为 raw，`launch_authorized=false`。独立 historical attestor 全量重建 candidate/certificate/
+  runtime binding 并发布 no-clobber receipt 后，才允许点火中点，不重跑六格。
 - 下一门：在 ignored runtime 资产上按预注册 join ladder 生成正/反手候选，production FK 重建后逐个跑
   TOPP；只把 `<=0.5 s` 的候选送 L0/L1/桌网/动力学，再用绑定该 motion SHA 的 0.5 秒 K100 和
 vendor MuJoCo 判行为。

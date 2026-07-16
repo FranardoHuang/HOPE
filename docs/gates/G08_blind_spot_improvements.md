@@ -432,7 +432,11 @@ schema-2，等待姿态固定为所选 `ready-source` 第0帧且速度显式全�
 或完整 canonical-v2 三元组，逐位保留 primary source 血缘且拒绝残缺/未知/坏值，专项 `21 passed`。
 第二次新 namespace 已成功生成两侧真实 host 候选；production-FK TOPP hard acceptance 全过，但可行
 run-up 上界只有正手 `0.64 s`、反手 `0.94 s`，未达 0.5 秒。下一轮已冻结 `6/12/17` 主梯、`9/14`
-按需细化和两种 frame0 ready 的端点因子阵，不重放已跑格。TOPP `<=0.5 s`、L0、vendor L1、桌网、
+按需细化和两种 frame0 ready 的端点因子阵，不重放已跑格。Stage 1 raw 数值显示 `d=17` 全面更慢，且
+反手 own-ready 改善、正手 own-ready 更优，构成 side crossover；但一次性 summary 未绑定 consumer、
+parser 未全量重验 certificate provenance，故四个 `d=12` 中点在 independent historical attestation
+前保持 NO-LAUNCH。
+TOPP `<=0.5 s`、L0、vendor L1、桌网、
 动力学和行为卷仍全部开放，
 所以 G08 不晋级。
 见[实验](../experiments/2026-07/EXP-MOTION-READY-TO-STRIKE-0P5.md)和

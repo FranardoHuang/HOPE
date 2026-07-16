@@ -67,6 +67,34 @@ scalar、bytes/object/integer、未知额外字段或非法值都会在发布前
 端点因子阵，再按冻结规则跑中点 `12` 与按需细化 `9/14`；已跑的 shared-ready `delta=6` 不重放。
 新格逐个报告，不因某一格失败自动 retry。
 
+## Stage-1 历史结果的只读认证
+
+端点 Stage-1 的原始 runner 没有把自身源码写进 summary，所以原始数值不能直接解锁下一层。不要重跑
+六格；用 tracked historical attestor 对既有树做一次只读重建。默认命令只 dry-run，不写 receipt：
+
+```bash
+python3 scripts/attest_ready_to_strike_ladder_stage1.py \
+  --root /workspace/codexschema/ready_to_strike_0p5_20260717/join_ladder_stage1_8d74025e \
+  --queue configs/ready_to_strike_join_ladder_20260717.yaml
+```
+
+dry-run 成功后，才允许在同一组未变输入上发布唯一的 no-clobber receipt：
+
+```bash
+python3 scripts/attest_ready_to_strike_ladder_stage1.py \
+  --root /workspace/codexschema/ready_to_strike_0p5_20260717/join_ladder_stage1_8d74025e \
+  --queue configs/ready_to_strike_join_ladder_20260717.yaml \
+  --execute \
+  --confirm ATTEST_READY_TO_STRIKE_STAGE1_ONCE
+```
+
+执行源码、queue 和 Stage-1 树必须位于同一台 host 的绝对路径；如果 Pod 上没有该 tracked source，先以
+O_EXCL 写入 Stage-1 根目录并核 source SHA，再从该副本运行。receipt 固定为根目录下
+`stage1_historical_attestation.json`，存在即拒绝再次执行。认证会重验候选 schema-2、generator contract、
+TOPP input/output、生产 FK body order、直接工具依赖、预算、触球行、拍速、拍面、首帧零速及可行时间上界。
+它只把旧结果升级为 screening evidence；因为历史证书没有完整 argv、transitive source 和 MJCF closure，
+`physics_replay_exact/source_closure_exact/mjcf_closure_exact` 仍必须是 `false`，不能冒充动力学重放或部署通过。
+
 ## 下一步不是直接训练
 
 每条候选依次执行：

@@ -14,6 +14,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/build_ready_to_strike_motion.py"
 LADDER = ROOT / "configs/ready_to_strike_join_ladder_20260717.yaml"
+STAGE2_ACTIVATION = ROOT / "configs/ready_to_strike_join_ladder_stage2_activation_20260717.json"
 
 
 def _load_module():
@@ -88,6 +89,46 @@ def test_join_ladder_binds_exact_sources_and_keeps_all_runtime_authority_false()
     assert fixed["deployment_authorized"] is False
     assert fixed["hardware_authorized"] is False
     assert queue["acceptance"]["candidate_start_to_contact_s_max"] == 0.5
+
+
+def test_stage2_activation_is_exactly_the_registered_crossover_branch() -> None:
+    queue = json.loads(LADDER.read_text(encoding="utf-8"))
+    activation = json.loads(STAGE2_ACTIVATION.read_text(encoding="utf-8"))
+    assert activation["parent_queue"]["sha256"] == hashlib.sha256(
+        LADDER.read_bytes()
+    ).hexdigest()
+    observations = {row["cell_id"]: row for row in activation["observations"]}
+    assert len(observations) == 8
+    assert all(row["start_to_contact_s"] > 0.5 for row in observations.values())
+    assert observations["fh_rf_d06"]["start_to_contact_s"] < observations["fh_rb_d06"][
+        "start_to_contact_s"
+    ]
+    assert observations["bh_rb_d06"]["start_to_contact_s"] < observations["bh_rf_d06"][
+        "start_to_contact_s"
+    ]
+    assert activation["decision"]["ready_by_side_crossover"] is True
+    assert activation["decision"]["activate_both_ready_sources_at_midpoint"] is True
+    assert activation["evidence_status"] == "raw_stage1_pending_historical_attestation"
+    assert activation["launch_authorized"] is False
+    assert activation["required_attestation_receipt"] == (
+        activation["stage1_namespace"] + "/stage1_historical_attestation.json"
+    )
+    cells = activation["authorized_stage2_cells"]
+    assert {(cell["action"], cell["ready_source"], cell["delta"]) for cell in cells} == {
+        ("forehand", "forehand", 12),
+        ("forehand", "backhand", 12),
+        ("backhand", "forehand", 12),
+        ("backhand", "backhand", 12),
+    }
+    assert queue["staged_cells"]["stage2_midpoint_rule"]["delta"] == 12
+    assert activation["runtime_authority"] == {
+        "cpu_only": True,
+        "automatic_retry": False,
+        "trainer_signal": False,
+        "robot_command": False,
+        "training_authorized": False,
+        "deployment_authorized": False,
+    }
 
 
 def _sha(path: Path) -> str:

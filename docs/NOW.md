@@ -61,7 +61,10 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   已冻结。修复版精确接受并逐位保留 canonical 三元组，仍拒绝残缺、坏值和未知字段，专项 `21 passed`。
   第二次新 namespace 已成功生成两条真实候选；production-FK TOPP hard gate 都通过，但正/反手可行
   run-up 上界为 `0.64/0.94 s`，仍没有 0.5 秒证书。下一轮已冻结 `6/12/17` 主梯、`9/14` 按需细化，
-  并用两侧 minimax 区分 forehand/backhand frame0 哪个可作共同 ready；目前仍没有
+  并用两侧 minimax 区分 forehand/backhand frame0 哪个可作共同 ready。端点实测已显示 `d=17` 全面
+  慢于 `d=6`；反手 own-ready 把 raw `0.94` 改善到 `0.78 s`，但正手自己的 ready 仍更好，故冻结规则
+  选择两个 ready 的四个 `d=12` 中点。红队发现一次性 runner 未持久绑定 consumer 且 certificate parser
+  不够严格，现已将端点数值降级为待 historical attestation，`d=12` 暂不点火；目前仍没有
   production FK、TOPP≤0.5、L0/L1、桌网、动力学或行为通过，不能写成0.5秒动作已完成。见
   [短路径实验](experiments/2026-07/EXP-MOTION-READY-TO-STRIKE-0P5.md)。
 
