@@ -13,15 +13,16 @@ This module is intentionally split in two:
 * :class:`LateralPulseScheduler` is a pure, deterministic torch scheduler/kernel.
 * :func:`dispatch_lateral_wrench_fail_closed` is an adapter seam.  The separate
   ``isaac_lateral_perturbation`` module contains a default-off Isaac Lab 2.1 runtime candidate;
-  it remains probe-only because the exact full-scene and throughput gates have not run and Isaac
-  exposes no solver-consumed wrench getter.  A reviewed runtime adapter must stage without
+  the opt-in trainer path remains launch-ineligible because the exact full-scene and throughput
+  gates have not run and Isaac exposes no solver-consumed wrench getter.  A reviewed runtime adapter must stage without
   changing the live backend, return an exact preflight receipt, then overwrite/read back its
   complete full-articulation command state (including explicit zero commands).  The Isaac
   candidate separately submits that WORLD command at an explicit, freshly computed torso COM
   before every physics substep; pinned Isaac's ``position_data=None`` link-origin path is not a
   valid substitute.  A failed commit or later substep submission is terminal and must never be
-  followed by another simulator step.  Until that adapter and its ledger consumer are implemented
-  and tested, this feature is not runtime-ready.
+  followed by another simulator step.  The candidate and its bounded trainer ledger are wired
+  behind an explicit opt-in, but the full-scene solver-response and throughput gates have not run;
+  therefore this feature remains launch-ineligible.
 
 Keeping the seam explicit prevents two common but scientifically invalid shortcuts: using
 ``push_by_setting_velocity`` instead of a force, or leaving a non-zero external-force buffer alive
@@ -482,19 +483,19 @@ class LateralPerturbationStep:
     interrupted_for_reset_mask: torch.Tensor
     strike_interrupted_sampled_impulse_y_mps: torch.Tensor
     strike_interrupted_commanded_impulse_y_mps: torch.Tensor
-    strike_interrupted_applied_impulse_y_mps: torch.Tensor
+    strike_interrupted_backend_accepted_impulse_y_mps: torch.Tensor
     strike_abandoned_uncommanded_impulse_y_mps: torch.Tensor
-    strike_abandoned_unapplied_impulse_y_mps: torch.Tensor
+    strike_abandoned_not_backend_accepted_impulse_y_mps: torch.Tensor
     window_interrupted_sampled_impulse_y_mps: torch.Tensor
     window_interrupted_commanded_impulse_y_mps: torch.Tensor
-    window_interrupted_applied_impulse_y_mps: torch.Tensor
+    window_interrupted_backend_accepted_impulse_y_mps: torch.Tensor
     window_abandoned_uncommanded_impulse_y_mps: torch.Tensor
-    window_abandoned_unapplied_impulse_y_mps: torch.Tensor
+    window_abandoned_not_backend_accepted_impulse_y_mps: torch.Tensor
     reset_interrupted_sampled_impulse_y_mps: torch.Tensor
     reset_interrupted_commanded_impulse_y_mps: torch.Tensor
-    reset_interrupted_applied_impulse_y_mps: torch.Tensor
+    reset_interrupted_backend_accepted_impulse_y_mps: torch.Tensor
     reset_abandoned_uncommanded_impulse_y_mps: torch.Tensor
-    reset_abandoned_unapplied_impulse_y_mps: torch.Tensor
+    reset_abandoned_not_backend_accepted_impulse_y_mps: torch.Tensor
     remaining_steps_after_step: torch.Tensor
 
     def clone(self) -> "LateralPerturbationStep":
@@ -523,14 +524,14 @@ class LateralPerturbationStep:
             strike_interrupted_commanded_impulse_y_mps=(
                 self.strike_interrupted_commanded_impulse_y_mps.clone()
             ),
-            strike_interrupted_applied_impulse_y_mps=(
-                self.strike_interrupted_applied_impulse_y_mps.clone()
+            strike_interrupted_backend_accepted_impulse_y_mps=(
+                self.strike_interrupted_backend_accepted_impulse_y_mps.clone()
             ),
             strike_abandoned_uncommanded_impulse_y_mps=(
                 self.strike_abandoned_uncommanded_impulse_y_mps.clone()
             ),
-            strike_abandoned_unapplied_impulse_y_mps=(
-                self.strike_abandoned_unapplied_impulse_y_mps.clone()
+            strike_abandoned_not_backend_accepted_impulse_y_mps=(
+                self.strike_abandoned_not_backend_accepted_impulse_y_mps.clone()
             ),
             window_interrupted_sampled_impulse_y_mps=(
                 self.window_interrupted_sampled_impulse_y_mps.clone()
@@ -538,14 +539,14 @@ class LateralPerturbationStep:
             window_interrupted_commanded_impulse_y_mps=(
                 self.window_interrupted_commanded_impulse_y_mps.clone()
             ),
-            window_interrupted_applied_impulse_y_mps=(
-                self.window_interrupted_applied_impulse_y_mps.clone()
+            window_interrupted_backend_accepted_impulse_y_mps=(
+                self.window_interrupted_backend_accepted_impulse_y_mps.clone()
             ),
             window_abandoned_uncommanded_impulse_y_mps=(
                 self.window_abandoned_uncommanded_impulse_y_mps.clone()
             ),
-            window_abandoned_unapplied_impulse_y_mps=(
-                self.window_abandoned_unapplied_impulse_y_mps.clone()
+            window_abandoned_not_backend_accepted_impulse_y_mps=(
+                self.window_abandoned_not_backend_accepted_impulse_y_mps.clone()
             ),
             reset_interrupted_sampled_impulse_y_mps=(
                 self.reset_interrupted_sampled_impulse_y_mps.clone()
@@ -553,14 +554,14 @@ class LateralPerturbationStep:
             reset_interrupted_commanded_impulse_y_mps=(
                 self.reset_interrupted_commanded_impulse_y_mps.clone()
             ),
-            reset_interrupted_applied_impulse_y_mps=(
-                self.reset_interrupted_applied_impulse_y_mps.clone()
+            reset_interrupted_backend_accepted_impulse_y_mps=(
+                self.reset_interrupted_backend_accepted_impulse_y_mps.clone()
             ),
             reset_abandoned_uncommanded_impulse_y_mps=(
                 self.reset_abandoned_uncommanded_impulse_y_mps.clone()
             ),
-            reset_abandoned_unapplied_impulse_y_mps=(
-                self.reset_abandoned_unapplied_impulse_y_mps.clone()
+            reset_abandoned_not_backend_accepted_impulse_y_mps=(
+                self.reset_abandoned_not_backend_accepted_impulse_y_mps.clone()
             ),
             remaining_steps_after_step=self.remaining_steps_after_step.clone(),
         )
@@ -589,7 +590,7 @@ class LateralWrenchPreflightReceipt:
     actual_total_mass_kg: torch.Tensor
     commanded_force_w: torch.Tensor
     commanded_torque_w: torch.Tensor
-    applied_force_mask: torch.Tensor
+    scheduled_nonzero_force_mask: torch.Tensor
     preflight_token: object
 
     def __post_init__(self) -> None:
@@ -602,10 +603,13 @@ class LateralWrenchPreflightReceipt:
         ):
             if type(getattr(self, name)) is not bool:
                 raise ValueError(f"receipt {name} must be a bool")
-        if not isinstance(self.applied_force_mask, torch.Tensor):
-            raise ValueError("receipt applied_force_mask must be a torch.Tensor")
-        if self.applied_force_mask.ndim != 1 or self.applied_force_mask.dtype != torch.bool:
-            raise ValueError("receipt applied_force_mask must be a 1-D bool tensor")
+        if not isinstance(self.scheduled_nonzero_force_mask, torch.Tensor):
+            raise ValueError("receipt scheduled_nonzero_force_mask must be a torch.Tensor")
+        if (
+            self.scheduled_nonzero_force_mask.ndim != 1
+            or self.scheduled_nonzero_force_mask.dtype != torch.bool
+        ):
+            raise ValueError("receipt scheduled_nonzero_force_mask must be a 1-D bool tensor")
         if not _is_sha256_hex(self.world_to_backend_transform_identity_sha256):
             raise ValueError(
                 "receipt world_to_backend_transform_identity_sha256 must be lowercase SHA-256"
@@ -634,10 +638,12 @@ class LateralWrenchPreflightReceipt:
                 raise ValueError(f"receipt {name} must use the actual-mass dtype")
             if value.device != self.actual_total_mass_kg.device:
                 raise ValueError(f"receipt {name} must use the actual-mass device")
-        if self.applied_force_mask.shape != self.actual_total_mass_kg.shape:
-            raise ValueError("receipt applied_force_mask must match actual_total_mass_kg shape")
-        if self.applied_force_mask.device != self.actual_total_mass_kg.device:
-            raise ValueError("receipt applied_force_mask must use the actual-mass device")
+        if self.scheduled_nonzero_force_mask.shape != self.actual_total_mass_kg.shape:
+            raise ValueError(
+                "receipt scheduled_nonzero_force_mask must match actual_total_mass_kg shape"
+            )
+        if self.scheduled_nonzero_force_mask.device != self.actual_total_mass_kg.device:
+            raise ValueError("receipt scheduled_nonzero_force_mask must use actual-mass device")
         if self.preflight_token is None:
             raise ValueError("receipt preflight_token cannot be None")
         _assert_all_prewrite(
@@ -663,11 +669,11 @@ class LateralApplicationLedgerRow:
     commanded_normalized_accel_y_mps2: torch.Tensor
     commanded_world_force_y_N: torch.Tensor
     commanded_world_impulse_y_Ns: torch.Tensor
-    applied_force_mask: torch.Tensor
+    backend_accepted_force_mask: torch.Tensor
     selected_start_count: torch.Tensor
-    applied_nonzero_start_count: torch.Tensor
-    nonzero_force_env_count: torch.Tensor
-    commanded_normalized_impulse_abs_mps: torch.Tensor
+    backend_accepted_nonzero_start_count: torch.Tensor
+    backend_accepted_force_env_count: torch.Tensor
+    backend_accepted_normalized_impulse_abs_mps: torch.Tensor
 
     def clone(self) -> "LateralApplicationLedgerRow":
         """Deep-clone all tensor fields so callers cannot mutate scheduler-owned state."""
@@ -688,12 +694,14 @@ class LateralApplicationLedgerRow:
             ),
             commanded_world_force_y_N=self.commanded_world_force_y_N.clone(),
             commanded_world_impulse_y_Ns=self.commanded_world_impulse_y_Ns.clone(),
-            applied_force_mask=self.applied_force_mask.clone(),
+            backend_accepted_force_mask=self.backend_accepted_force_mask.clone(),
             selected_start_count=self.selected_start_count.clone(),
-            applied_nonzero_start_count=self.applied_nonzero_start_count.clone(),
-            nonzero_force_env_count=self.nonzero_force_env_count.clone(),
-            commanded_normalized_impulse_abs_mps=(
-                self.commanded_normalized_impulse_abs_mps.clone()
+            backend_accepted_nonzero_start_count=self.backend_accepted_nonzero_start_count.clone(),
+            backend_accepted_force_env_count=(
+                self.backend_accepted_force_env_count.clone()
+            ),
+            backend_accepted_normalized_impulse_abs_mps=(
+                self.backend_accepted_normalized_impulse_abs_mps.clone()
             ),
         )
 
@@ -708,10 +716,10 @@ class _PreparedApplication:
     force_w: torch.Tensor
     torque_w: torch.Tensor
     active_force_mask: torch.Tensor
-    applied_impulse_per_env: torch.Tensor
-    applied_starts: torch.Tensor
-    applied_force_env_count: torch.Tensor
-    applied_step_impulse: torch.Tensor
+    backend_accepted_impulse_per_env: torch.Tensor
+    backend_accepted_starts: torch.Tensor
+    backend_accepted_force_env_count: torch.Tensor
+    backend_accepted_step_impulse: torch.Tensor
     private_ledger: LateralApplicationLedgerRow
     public_ledger: LateralApplicationLedgerRow
     application_backend_token: object | None = None
@@ -772,9 +780,9 @@ def _counter_zeros(device: torch.device) -> dict[str, torch.Tensor]:
         "interrupted_for_window_count",
         "interrupted_for_reset_count",
         "active_force_env_step_count",
-        "wrench_write_step_count",
-        "applied_pulse_count",
-        "applied_force_env_step_count",
+        "backend_accepted_command_step_count",
+        "backend_accepted_pulse_count",
+        "backend_accepted_force_env_step_count",
     )
     state = {
         _COUNT_PREFIX + name: torch.zeros((), dtype=torch.long, device=device)
@@ -783,22 +791,22 @@ def _counter_zeros(device: torch.device) -> dict[str, torch.Tensor]:
     for name in (
         "sampled_normalized_impulse_abs_sum_mps",
         "commanded_normalized_impulse_abs_sum_mps",
-        "applied_normalized_impulse_abs_sum_mps",
+        "backend_accepted_normalized_impulse_abs_sum_mps",
         "reset_interrupted_sampled_impulse_abs_sum_mps",
         "reset_interrupted_commanded_impulse_abs_sum_mps",
-        "reset_interrupted_applied_impulse_abs_sum_mps",
+        "reset_interrupted_backend_accepted_impulse_abs_sum_mps",
         "reset_abandoned_uncommanded_impulse_abs_sum_mps",
-        "reset_abandoned_unapplied_impulse_abs_sum_mps",
+        "reset_abandoned_not_backend_accepted_impulse_abs_sum_mps",
         "strike_interrupted_sampled_impulse_abs_sum_mps",
         "strike_interrupted_commanded_impulse_abs_sum_mps",
-        "strike_interrupted_applied_impulse_abs_sum_mps",
+        "strike_interrupted_backend_accepted_impulse_abs_sum_mps",
         "strike_abandoned_uncommanded_impulse_abs_sum_mps",
-        "strike_abandoned_unapplied_impulse_abs_sum_mps",
+        "strike_abandoned_not_backend_accepted_impulse_abs_sum_mps",
         "window_interrupted_sampled_impulse_abs_sum_mps",
         "window_interrupted_commanded_impulse_abs_sum_mps",
-        "window_interrupted_applied_impulse_abs_sum_mps",
+        "window_interrupted_backend_accepted_impulse_abs_sum_mps",
         "window_abandoned_uncommanded_impulse_abs_sum_mps",
-        "window_abandoned_unapplied_impulse_abs_sum_mps",
+        "window_abandoned_not_backend_accepted_impulse_abs_sum_mps",
     ):
         state[_COUNT_PREFIX + name] = torch.zeros(
             (), dtype=torch.float64, device=device
@@ -847,7 +855,7 @@ class LateralPulseScheduler:
             num_envs, dtype=torch.float64, device=self.device
         )
         self._active_commanded_impulse_y = torch.zeros_like(self._active_impulse_y)
-        self._active_applied_impulse_y = torch.zeros_like(self._active_impulse_y)
+        self._active_backend_accepted_impulse_y = torch.zeros_like(self._active_impulse_y)
         self._last_episode_indices = torch.full(
             (num_envs,), -1, dtype=torch.long, device=self.device
         )
@@ -999,18 +1007,18 @@ class LateralPulseScheduler:
             self._active_commanded_impulse_y,
             torch.zeros_like(self._active_commanded_impulse_y),
         )
-        reset_applied_impulse = torch.where(
+        reset_backend_accepted_impulse = torch.where(
             interrupted_reset,
-            self._active_applied_impulse_y,
-            torch.zeros_like(self._active_applied_impulse_y),
+            self._active_backend_accepted_impulse_y,
+            torch.zeros_like(self._active_backend_accepted_impulse_y),
         )
         reset_abandoned_uncommanded = reset_sampled_impulse - reset_commanded_impulse
-        reset_abandoned_unapplied = reset_commanded_impulse - reset_applied_impulse
+        reset_abandoned_not_backend_accepted = reset_commanded_impulse - reset_backend_accepted_impulse
 
         self._remaining_steps.masked_fill_(actual_reset, 0)
         self._active_impulse_y.masked_fill_(actual_reset, 0.0)
         self._active_commanded_impulse_y.masked_fill_(actual_reset, 0.0)
-        self._active_applied_impulse_y.masked_fill_(actual_reset, 0.0)
+        self._active_backend_accepted_impulse_y.masked_fill_(actual_reset, 0.0)
         self._last_episode_indices.copy_(episode_indices)
         self._last_episode_steps.copy_(episode_steps)
 
@@ -1031,37 +1039,37 @@ class LateralPulseScheduler:
                 self._active_commanded_impulse_y,
                 torch.zeros_like(self._active_commanded_impulse_y),
             )
-            applied = torch.where(
+            backend_accepted = torch.where(
                 mask,
-                self._active_applied_impulse_y,
-                torch.zeros_like(self._active_applied_impulse_y),
+                self._active_backend_accepted_impulse_y,
+                torch.zeros_like(self._active_backend_accepted_impulse_y),
             )
             return (
                 sampled,
                 commanded,
-                applied,
+                backend_accepted,
                 sampled - commanded,
-                commanded - applied,
+                commanded - backend_accepted,
             )
 
         (
             strike_sampled_impulse,
             strike_commanded_impulse,
-            strike_applied_impulse,
+            strike_backend_accepted_impulse,
             strike_abandoned_uncommanded,
-            strike_abandoned_unapplied,
+            strike_abandoned_not_backend_accepted,
         ) = interrupted_values(interrupted_strike)
         (
             window_sampled_impulse,
             window_commanded_impulse,
-            window_applied_impulse,
+            window_backend_accepted_impulse,
             window_abandoned_uncommanded,
-            window_abandoned_unapplied,
+            window_abandoned_not_backend_accepted,
         ) = interrupted_values(interrupted_window)
         self._remaining_steps.masked_fill_(interrupted, 0)
         self._active_impulse_y.masked_fill_(interrupted, 0.0)
         self._active_commanded_impulse_y.masked_fill_(interrupted, 0.0)
-        self._active_applied_impulse_y.masked_fill_(interrupted, 0.0)
+        self._active_backend_accepted_impulse_y.masked_fill_(interrupted, 0.0)
 
         zero_opp = torch.zeros_like(episode_steps)
         offsets_u = _counter_uniform(
@@ -1155,7 +1163,7 @@ class LateralPulseScheduler:
         self._remaining_steps[selected] = self.cfg.pulse_duration_steps
         self._active_impulse_y[selected] = sampled_impulse[selected]
         self._active_commanded_impulse_y[selected] = 0.0
-        self._active_applied_impulse_y[selected] = 0.0
+        self._active_backend_accepted_impulse_y[selected] = 0.0
 
         active_force = self._remaining_steps.gt(0) & self._active_impulse_y.ne(0.0)
         normalized_accel = torch.where(
@@ -1199,12 +1207,12 @@ class LateralPulseScheduler:
         reset_ledger = {
             "reset_interrupted_sampled_impulse_abs_sum_mps": reset_sampled_impulse,
             "reset_interrupted_commanded_impulse_abs_sum_mps": reset_commanded_impulse,
-            "reset_interrupted_applied_impulse_abs_sum_mps": reset_applied_impulse,
+            "reset_interrupted_backend_accepted_impulse_abs_sum_mps": reset_backend_accepted_impulse,
             "reset_abandoned_uncommanded_impulse_abs_sum_mps": (
                 reset_abandoned_uncommanded
             ),
-            "reset_abandoned_unapplied_impulse_abs_sum_mps": (
-                reset_abandoned_unapplied
+            "reset_abandoned_not_backend_accepted_impulse_abs_sum_mps": (
+                reset_abandoned_not_backend_accepted
             ),
             "strike_interrupted_sampled_impulse_abs_sum_mps": (
                 strike_sampled_impulse
@@ -1212,14 +1220,14 @@ class LateralPulseScheduler:
             "strike_interrupted_commanded_impulse_abs_sum_mps": (
                 strike_commanded_impulse
             ),
-            "strike_interrupted_applied_impulse_abs_sum_mps": (
-                strike_applied_impulse
+            "strike_interrupted_backend_accepted_impulse_abs_sum_mps": (
+                strike_backend_accepted_impulse
             ),
             "strike_abandoned_uncommanded_impulse_abs_sum_mps": (
                 strike_abandoned_uncommanded
             ),
-            "strike_abandoned_unapplied_impulse_abs_sum_mps": (
-                strike_abandoned_unapplied
+            "strike_abandoned_not_backend_accepted_impulse_abs_sum_mps": (
+                strike_abandoned_not_backend_accepted
             ),
             "window_interrupted_sampled_impulse_abs_sum_mps": (
                 window_sampled_impulse
@@ -1227,14 +1235,14 @@ class LateralPulseScheduler:
             "window_interrupted_commanded_impulse_abs_sum_mps": (
                 window_commanded_impulse
             ),
-            "window_interrupted_applied_impulse_abs_sum_mps": (
-                window_applied_impulse
+            "window_interrupted_backend_accepted_impulse_abs_sum_mps": (
+                window_backend_accepted_impulse
             ),
             "window_abandoned_uncommanded_impulse_abs_sum_mps": (
                 window_abandoned_uncommanded
             ),
-            "window_abandoned_unapplied_impulse_abs_sum_mps": (
-                window_abandoned_unapplied
+            "window_abandoned_not_backend_accepted_impulse_abs_sum_mps": (
+                window_abandoned_not_backend_accepted
             ),
         }
         for counter_name, values in reset_ledger.items():
@@ -1263,30 +1271,30 @@ class LateralPulseScheduler:
             interrupted_for_reset_mask=interrupted_reset,
             strike_interrupted_sampled_impulse_y_mps=strike_sampled_impulse,
             strike_interrupted_commanded_impulse_y_mps=strike_commanded_impulse,
-            strike_interrupted_applied_impulse_y_mps=strike_applied_impulse,
+            strike_interrupted_backend_accepted_impulse_y_mps=strike_backend_accepted_impulse,
             strike_abandoned_uncommanded_impulse_y_mps=(
                 strike_abandoned_uncommanded
             ),
-            strike_abandoned_unapplied_impulse_y_mps=(
-                strike_abandoned_unapplied
+            strike_abandoned_not_backend_accepted_impulse_y_mps=(
+                strike_abandoned_not_backend_accepted
             ),
             window_interrupted_sampled_impulse_y_mps=window_sampled_impulse,
             window_interrupted_commanded_impulse_y_mps=window_commanded_impulse,
-            window_interrupted_applied_impulse_y_mps=window_applied_impulse,
+            window_interrupted_backend_accepted_impulse_y_mps=window_backend_accepted_impulse,
             window_abandoned_uncommanded_impulse_y_mps=(
                 window_abandoned_uncommanded
             ),
-            window_abandoned_unapplied_impulse_y_mps=(
-                window_abandoned_unapplied
+            window_abandoned_not_backend_accepted_impulse_y_mps=(
+                window_abandoned_not_backend_accepted
             ),
             reset_interrupted_sampled_impulse_y_mps=reset_sampled_impulse,
             reset_interrupted_commanded_impulse_y_mps=reset_commanded_impulse,
-            reset_interrupted_applied_impulse_y_mps=reset_applied_impulse,
+            reset_interrupted_backend_accepted_impulse_y_mps=reset_backend_accepted_impulse,
             reset_abandoned_uncommanded_impulse_y_mps=(
                 reset_abandoned_uncommanded
             ),
-            reset_abandoned_unapplied_impulse_y_mps=(
-                reset_abandoned_unapplied
+            reset_abandoned_not_backend_accepted_impulse_y_mps=(
+                reset_abandoned_not_backend_accepted
             ),
             remaining_steps_after_step=self._remaining_steps.clone(),
         )
@@ -1336,19 +1344,19 @@ class LateralPulseScheduler:
             "interrupted_for_reset_mask",
             "strike_interrupted_sampled_impulse_y_mps",
             "strike_interrupted_commanded_impulse_y_mps",
-            "strike_interrupted_applied_impulse_y_mps",
+            "strike_interrupted_backend_accepted_impulse_y_mps",
             "strike_abandoned_uncommanded_impulse_y_mps",
-            "strike_abandoned_unapplied_impulse_y_mps",
+            "strike_abandoned_not_backend_accepted_impulse_y_mps",
             "window_interrupted_sampled_impulse_y_mps",
             "window_interrupted_commanded_impulse_y_mps",
-            "window_interrupted_applied_impulse_y_mps",
+            "window_interrupted_backend_accepted_impulse_y_mps",
             "window_abandoned_uncommanded_impulse_y_mps",
-            "window_abandoned_unapplied_impulse_y_mps",
+            "window_abandoned_not_backend_accepted_impulse_y_mps",
             "reset_interrupted_sampled_impulse_y_mps",
             "reset_interrupted_commanded_impulse_y_mps",
-            "reset_interrupted_applied_impulse_y_mps",
+            "reset_interrupted_backend_accepted_impulse_y_mps",
             "reset_abandoned_uncommanded_impulse_y_mps",
-            "reset_abandoned_unapplied_impulse_y_mps",
+            "reset_abandoned_not_backend_accepted_impulse_y_mps",
             "remaining_steps_after_step",
         )
         equality_predicates = []
@@ -1490,10 +1498,10 @@ class LateralPulseScheduler:
                 force_w=force_w,
                 torque_w=torque_w,
                 active_force_mask=canonical.active_force_mask.clone(),
-                applied_impulse_per_env=zeros,
-                applied_starts=zero_count,
-                applied_force_env_count=zero_count.clone(),
-                applied_step_impulse=zero_sum,
+                backend_accepted_impulse_per_env=zeros,
+                backend_accepted_starts=zero_count,
+                backend_accepted_force_env_count=zero_count.clone(),
+                backend_accepted_step_impulse=zero_sum,
                 private_ledger=cached.clone(),
                 public_ledger=cached.clone(),
                 application_backend_token=application_backend_token,
@@ -1501,16 +1509,16 @@ class LateralPulseScheduler:
             )
 
         active_force_mask = canonical.active_force_mask.clone()
-        applied_starts = (
+        backend_accepted_starts = (
             canonical.nonzero_start_mask & active_force_mask
         ).sum(dtype=torch.long)
-        applied_force_env_count = active_force_mask.sum(dtype=torch.long)
-        applied_impulse_per_env = torch.where(
+        backend_accepted_force_env_count = active_force_mask.sum(dtype=torch.long)
+        backend_accepted_impulse_per_env = torch.where(
             active_force_mask,
             canonical.normalized_accel_y_mps2 * float(self.cfg.policy_dt_s),
             torch.zeros_like(canonical.normalized_accel_y_mps2),
         )
-        applied_step_impulse = applied_impulse_per_env.abs().sum(dtype=torch.float64)
+        backend_accepted_step_impulse = backend_accepted_impulse_per_env.abs().sum(dtype=torch.float64)
         ledger = LateralApplicationLedgerRow(
             step_token=canonical.step_token,
             body_name=self.cfg.body_name,
@@ -1529,13 +1537,17 @@ class LateralPulseScheduler:
             commanded_world_impulse_y_Ns=(
                 force_w[:, 0, 1].detach().clone() * float(self.cfg.policy_dt_s)
             ),
-            applied_force_mask=active_force_mask.clone(),
+            backend_accepted_force_mask=active_force_mask.clone(),
             selected_start_count=canonical.selected_start_mask.sum(
                 dtype=torch.long
             ).detach().clone(),
-            applied_nonzero_start_count=applied_starts.detach().clone(),
-            nonzero_force_env_count=applied_force_env_count.detach().clone(),
-            commanded_normalized_impulse_abs_mps=applied_step_impulse.detach().clone(),
+            backend_accepted_nonzero_start_count=backend_accepted_starts.detach().clone(),
+            backend_accepted_force_env_count=(
+                backend_accepted_force_env_count.detach().clone()
+            ),
+            backend_accepted_normalized_impulse_abs_mps=(
+                backend_accepted_step_impulse.detach().clone()
+            ),
         )
         prepared = _PreparedApplication(
             nonce=object(),
@@ -1544,10 +1556,10 @@ class LateralPulseScheduler:
             force_w=force_w.detach().clone(),
             torque_w=torque_w.detach().clone(),
             active_force_mask=active_force_mask,
-            applied_impulse_per_env=applied_impulse_per_env.detach().clone(),
-            applied_starts=applied_starts.detach().clone(),
-            applied_force_env_count=applied_force_env_count.detach().clone(),
-            applied_step_impulse=applied_step_impulse.detach().clone(),
+            backend_accepted_impulse_per_env=backend_accepted_impulse_per_env.detach().clone(),
+            backend_accepted_starts=backend_accepted_starts.detach().clone(),
+            backend_accepted_force_env_count=backend_accepted_force_env_count.detach().clone(),
+            backend_accepted_step_impulse=backend_accepted_step_impulse.detach().clone(),
             private_ledger=ledger.clone(),
             public_ledger=ledger.clone(),
             application_backend_token=application_backend_token,
@@ -1579,17 +1591,17 @@ class LateralPulseScheduler:
             return prepared.public_ledger
         if self._pending_application is not prepared:
             raise RuntimeError("cannot commit a foreign lateral application transaction")
-        self._active_applied_impulse_y.add_(prepared.applied_impulse_per_env)
-        self._counters[_COUNT_PREFIX + "wrench_write_step_count"].add_(1)
-        self._counters[_COUNT_PREFIX + "applied_pulse_count"].add_(
-            prepared.applied_starts
+        self._active_backend_accepted_impulse_y.add_(prepared.backend_accepted_impulse_per_env)
+        self._counters[_COUNT_PREFIX + "backend_accepted_command_step_count"].add_(1)
+        self._counters[_COUNT_PREFIX + "backend_accepted_pulse_count"].add_(
+            prepared.backend_accepted_starts
         )
-        self._counters[_COUNT_PREFIX + "applied_force_env_step_count"].add_(
-            prepared.applied_force_env_count
+        self._counters[_COUNT_PREFIX + "backend_accepted_force_env_step_count"].add_(
+            prepared.backend_accepted_force_env_count
         )
         self._counters[
-            _COUNT_PREFIX + "applied_normalized_impulse_abs_sum_mps"
-        ].add_(prepared.applied_step_impulse)
+            _COUNT_PREFIX + "backend_accepted_normalized_impulse_abs_sum_mps"
+        ].add_(prepared.backend_accepted_step_impulse)
         self._last_application_ledger = prepared.private_ledger
         self._last_application_backend_token = prepared.application_backend_token
         self._pending_application = None
@@ -1824,15 +1836,15 @@ def dispatch_lateral_wrench_fail_closed(
                 actual_tensor == expected_tensor,
                 f"adapter preflight receipt {name} does not match the canonical command",
             )
-        if receipt.applied_force_mask.shape != (scheduler.num_envs,):
-            raise RuntimeError("adapter preflight applied_force_mask has the wrong shape")
-        if receipt.applied_force_mask.dtype != torch.bool:
-            raise RuntimeError("adapter preflight applied_force_mask has the wrong dtype")
-        if receipt.applied_force_mask.device != scheduler.device:
-            raise RuntimeError("adapter preflight applied_force_mask has the wrong device")
+        if receipt.scheduled_nonzero_force_mask.shape != (scheduler.num_envs,):
+            raise RuntimeError("adapter preflight scheduled_nonzero_force_mask has wrong shape")
+        if receipt.scheduled_nonzero_force_mask.dtype != torch.bool:
+            raise RuntimeError("adapter preflight scheduled_nonzero_force_mask has wrong dtype")
+        if receipt.scheduled_nonzero_force_mask.device != scheduler.device:
+            raise RuntimeError("adapter preflight scheduled_nonzero_force_mask has wrong device")
         _assert_all_prewrite(
-            receipt.applied_force_mask == prepared.active_force_mask,
-            "adapter preflight applied_force_mask does not match the canonical force mask",
+            receipt.scheduled_nonzero_force_mask == prepared.active_force_mask,
+            "adapter preflight scheduled_nonzero_force_mask does not match canonical schedule",
         )
     except BaseException:
         try:

@@ -301,15 +301,20 @@ Follow-up note (2026-07-16, lateral-balance trainer E1 binding; Gate remains `Pa
   `0.04--0.08 m/s` treatment.
 - An enabled run's schema-3 hard contract binds the resolved integer-step schedule, cell/seed,
   common-random schedule and hard-safety identities, direct-COM Isaac backend/transform identities,
-  the complete active EventManager term manifest and metric schema.  Any interval EventManager term
-  is rejected before a force submit.  The historical absent/disabled path attaches no env-cfg field,
-  constructs no hook and emits no lateral hard-contract key.  Disabled cell/seed, unknown fields, T1
-  event timing, non-torso semantics and competing writers fail closed.
+  every active EventManager term's exact typed parameters plus manifest SHA, including the pinned
+  `SceneEntityCfg` selector and resolved ids, every EventTermCfg behavior field, and plain function
+  source identity. Unknown config types, decorated/method callables, non-finite/callable/opaque
+  parameter values and any interval term are rejected before a force submit; pre/post-step hashes
+  catch post-attach drift. The historical absent/disabled path attaches no env-cfg field,
+  constructs no hook and emits no lateral hard-contract key.  Disabled cell/seed, unknown fields,
+  T1 event timing, non-torso semantics and competing writers fail closed.
 - Trainer mode prevents unbounded 4096-environment receipt retention and instead returns a copied
-  `extras['log']` row with integer opportunity/selected/commanded/applied/zero-overwrite counts,
-  abandoned and sampled/commanded/applied impulse totals, and actual randomized total-mass
-  min/mean/max.  Metric collisions or malformed Gym output terminally clear the private wrench.
-  Focused scheduler/adapter/translation regression is `170 passed` (`40 + 34 + 96`).
+  `extras['log']` row with integer opportunity/selected/commanded/backend-accepted/zero-overwrite
+  counts, abandoned and sampled/commanded/backend-accepted impulse totals, and actual randomized
+  total-mass min/mean/max.  “Backend accepted” means scheduler commit plus synchronous setter/scene
+  submission succeeded; it is never solver-consumed evidence.  Metric collisions or malformed Gym
+  output terminally clear the private wrench.  Focused scheduler/adapter/translation regression is
+  `173 passed` (`40 + 37 + 96`).
 - This is E1 source/mock evidence only.  No full-scene trainer, solver-response, throughput,
   checkpoint or behavior was run; correctness-first host synchronizations remain.  Therefore
   `launch_authorized=false`, the current rolling portfolio must not depend on it, and G05 remains
@@ -374,14 +379,14 @@ Follow-up note (2026-07-15, lateral-balance perturbation source gate; Gate remai
 - Red-team review rejected the first linear counter streams and silent reset truncation.  The
   successor uses Random123-compatible domain-separated Philox4x32-10 (known-vector and
   cross-stream/cross-seed distribution tests), exposes the potential draws plus a common-random
-  schedule SHA, and records sampled/commanded/applied/abandoned impulse when reset interrupts a
+  schedule SHA, and records sampled/commanded/backend-accepted/abandoned impulse when reset interrupts a
   pulse.  Reset cannot immediately restart a pulse.  Hot-path tensor validity/application
   accounting no longer calls `.item()` or `bool(torch.any(...))`.
 - A second red-team pass found that finite-but-extreme config values, float64-to-float32 casts and
   mass multiplication could emit an infinite or arbitrarily large force, and that the typed
   receipt did not bind the randomized mass or commanded force.  The successor freezes an
   immutable `0.15 m/s`, `2.0 m/s^2`, `0.02--0.20 s`, `200 N` envelope; validates config, derived,
-  cast and final wrench layers; and binds actual total mass, WORLD force/impulse, applied mask and
+  cast and final wrench layers; and binds actual total mass, WORLD force/impulse, scheduled mask and
   transform identity into the receipt/application ledger.  Applying at torso COM only removes an
   explicit/link-local lever-arm torque; it does not imply zero whole-articulation `r x F` angular
   impulse or contact response.
@@ -404,7 +409,7 @@ Follow-up note (2026-07-15, lateral-balance perturbation source gate; Gate remai
   host-visible before backend commit; monkeypatched async-assert attacks produce zero writer calls.
   This correctness-first implementation now has multiple hot-path host completions, not one, and
   therefore still fails the preregistered no-host-sync runtime gate.  Strike and safe-window
-  interruptions now preserve per-environment sampled/commanded/applied/abandoned impulse just like
+  interruptions now preserve per-environment sampled/commanded/backend-accepted/abandoned impulse just like
   reset, satisfy both conservation identities, and issue an actual full-buffer zero commit on the
   interruption tick in the runtime-ack test.
 - Focused source verification is `36 passed`; this is E1 only.  The Isaac adapter, WORLD-to-BODY

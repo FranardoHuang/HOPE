@@ -36,8 +36,10 @@ setter 已收到显式 COM/WORLD command，且私有 command readback 与内建 
    dangling symlink）必须不存在。L0/L1 使用不同的新路径，禁止删除旧回执重跑。
 5. 只在 simulator-only 隔离环境运行；不要启动 trainer、worker、judge、vendor stack 或机器人命令。
 
-probe 会把所有 active EventManager term 的 mode/name/function identity/parameter-key manifest 写入回执，
-并拒绝任何 interval term；reset/startup term 若留下 external wrench，也会在 adapter attach 或 reset readback
+probe 会把所有 active EventManager term 的 EventTermCfg 行为字段、plain function source identity 与 exact
+typed 参数写入 manifest；pinned `SceneEntityCfg` 绑定 selector/resolved ids。未知 config、decorated/method func、
+非有限/callable/opaque 参数与任何 interval term 都拒绝，每步前后重验漂移，不使用带地址的 `repr`。reset/startup
+term 若留下 external wrench，也会在 adapter attach 或 reset readback
 处 fail closed。它不仅关闭已知的 `push_robot`，也不允许另一个未列名的周期 writer 与本 adapter 争 buffer。
 
 本 feature 不在 Pod 上执行以下命令。review 后的首次 full-scene canary 可用：
@@ -93,7 +95,8 @@ hope_isaac_py \
 - `receipt_transcript_schema=typed_dataclass_tensor_bytes_v1` 且有 64-hex transcript SHA；该摘要覆盖每步
   episode index/step、eligible/strike/safe-window、scheduler/application ledger、所有 physics substep 与 reset，
   不能用只含总数的日志替代；
-- 两格都必须出现 eligible/selected opportunity；L0 的非零 application 为 `0`，L1 必须有非零 application。
+- 两格都必须出现 eligible/selected opportunity；L0 的非零 backend-submitted application 为 `0`，L1 必须
+  有非零 backend-submitted application。该回执只证明 direct setter 接受提交，绝不证明 solver consumed。
   未激活时 probe fail closed，保留日志，不得把零 wrench readback 冒充 treatment 通过；
 - result 仍明确 no solver readback/no training/no launch。任何缺字段、非 finite、异常退出、输出已存在、
   checkout/asset 漂移或 scene-write 次数不符都 fail closed，并保全日志与已有输出。

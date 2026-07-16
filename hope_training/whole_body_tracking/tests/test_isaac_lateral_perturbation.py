@@ -7,6 +7,7 @@ import math
 import os
 import sys
 import types
+from dataclasses import dataclass, field
 from pathlib import Path
 
 import pytest
@@ -42,6 +43,22 @@ def _load_runtime_modules():
 
 
 L, IL, ART = _load_runtime_modules()
+
+
+def _fixture_event_term():
+    return None
+
+
+def _fixture_decorated_event_term():
+    return None
+
+
+_fixture_decorated_event_term.__wrapped__ = _fixture_event_term
+
+
+class _FixtureEventOwner:
+    def term(self):
+        return None
 
 
 def _yaw_quat(yaw_rad: float) -> torch.Tensor:
@@ -176,6 +193,38 @@ class _Scene:
 
 class _Cfg:
     decimation = 4
+
+
+@dataclass
+class _SceneEntityCfgFixture:
+    name: str
+    joint_names: str | list[str] | None = None
+    joint_ids: list[int] | slice = field(default_factory=lambda: slice(None))
+    fixed_tendon_names: str | list[str] | None = None
+    fixed_tendon_ids: list[int] | slice = field(default_factory=lambda: slice(None))
+    body_names: str | list[str] | None = None
+    body_ids: list[int] | slice = field(default_factory=lambda: slice(None))
+    object_collection_names: str | list[str] | None = None
+    object_collection_ids: list[int] | slice = field(default_factory=lambda: slice(None))
+    preserve_order: bool = False
+
+
+_SceneEntityCfgFixture.__module__ = "isaaclab.managers.scene_entity_cfg"
+_SceneEntityCfgFixture.__qualname__ = "SceneEntityCfg"
+
+
+@dataclass
+class _EventTermCfgFixture:
+    func: object
+    params: dict[str, object]
+    mode: str
+    interval_range_s: tuple[float, float] | None = None
+    is_global_time: bool = False
+    min_step_count_between_reset: int = 0
+
+
+_EventTermCfgFixture.__module__ = "isaaclab.managers.manager_term_cfg"
+_EventTermCfgFixture.__qualname__ = "EventTermCfg"
 
 
 class _EventManager:
@@ -525,14 +574,14 @@ def test_training_runtime_emits_bounded_scalar_metrics_without_receipt_growth():
         "eligible_opportunity_count",
         "selected_start_count",
         "nonzero_pulse_command_count",
-        "applied_pulse_count",
+        "backend_accepted_pulse_count",
         "zero_overwrite_step_count",
     )
     for name in integer_names:
         value = log[prefix + name]
         assert value.ndim == 0
         assert value.dtype == torch.long
-    assert log[prefix + "applied_pulse_count"].item() == 0
+    assert log[prefix + "backend_accepted_pulse_count"].item() == 0
     assert log[prefix + "zero_overwrite_step_count"].item() == 1
     assert log[prefix + "actual_total_mass_min_kg"].item() == pytest.approx(33.0)
     assert log[prefix + "actual_total_mass_mean_kg"].item() == pytest.approx(33.0)
@@ -543,7 +592,11 @@ def test_training_runtime_emits_bounded_scalar_metrics_without_receipt_growth():
         "explicit_current_torso_com_world"
     )
     assert runtime.hard_contract["active_event_terms"] == []
+    assert len(runtime.hard_contract["active_event_terms_identity_sha256"]) == 64
     assert runtime.hard_contract["interval_event_terms_present"] is False
+    assert "never solver-consumed" in runtime.hard_contract[
+        "backend_accepted_metric_semantics"
+    ]
     for name in (
         *runtime.hard_contract["integer_metrics"],
         *runtime.hard_contract["mass_metrics_kg"],
@@ -592,24 +645,166 @@ def test_training_hard_contract_rejects_cell_config_mismatch():
         )
 
 
+def test_event_term_parameter_values_are_canonical_and_change_contract_sha():
+    def manager(gain: float, *, min_reset_steps: int = 0):
+        return _EventManager(
+            active_terms={"reset": ["reset_root_state"]},
+            term_cfgs={
+                "reset_root_state": _EventTermCfgFixture(
+                    func=_fixture_event_term,
+                    mode="reset",
+                    min_step_count_between_reset=min_reset_steps,
+                    params={
+                        "gain": gain,
+                        "enabled": True,
+                        "axes": ["y", 2],
+                        "range": (-0.1, 0.1),
+                        "nested": {"mode": "uniform", "optional": None},
+                        "asset_cfg": _SceneEntityCfgFixture(
+                            "robot",
+                            body_names=["torso_link"],
+                            body_ids=[1],
+                            preserve_order=True,
+                        ),
+                    },
+                )
+            },
+        )
+
+    first = IL.isaac_lateral_event_term_manifest(manager(0.25))
+    second = IL.isaac_lateral_event_term_manifest(manager(0.50))
+    parameters = first[0]["term_cfg"]["parameters"]
+    assert parameters["gain"] == {"type": "float", "value": 0.25}
+    assert parameters["axes"]["type"] == "list"
+    assert parameters["range"]["type"] == "tuple"
+    assert parameters["nested"]["type"] == "mapping"
+    scene_entity = parameters["asset_cfg"]
+    assert scene_entity["python_type"] == {
+        "module": "isaaclab.managers.scene_entity_cfg",
+        "qualname": "SceneEntityCfg",
+    }
+    assert scene_entity["fields"]["body_ids"]["items"][0] == {
+        "type": "int",
+        "value": 1,
+    }
+    callable_identity = first[0]["term_cfg"]["callable_implementation"]
+    assert callable_identity["module_file_sha256"]
+    assert callable_identity["implementation_source_sha256"]
+    cfg = L.frozen_lateral_training_config(cell="L0", seed=1, policy_dt_s=0.02)
+    first_contract = IL.isaac_lateral_training_hard_contract(
+        cell="L0", cfg=cfg, event_term_manifest=first
+    )
+    second_contract = IL.isaac_lateral_training_hard_contract(
+        cell="L0", cfg=cfg, event_term_manifest=second
+    )
+    assert first_contract["active_event_terms_identity_sha256"] != second_contract[
+        "active_event_terms_identity_sha256"
+    ]
+    behavior_changed = IL.isaac_lateral_training_hard_contract(
+        cell="L0",
+        cfg=cfg,
+        event_term_manifest=IL.isaac_lateral_event_term_manifest(
+            manager(0.25, min_reset_steps=7)
+        ),
+    )
+    assert first_contract["active_event_terms_identity_sha256"] != behavior_changed[
+        "active_event_terms_identity_sha256"
+    ]
+
+
+def test_event_term_parameter_manifest_rejects_nonfinite_callable_and_opaque_values():
+    bad_values = (
+        (float("nan"), "non-finite"),
+        (float("inf"), "non-finite"),
+        (lambda: None, "callable"),
+        (object(), "opaque"),
+        ({1: "not-json-safe"}, "non-string"),
+    )
+    for value, match in bad_values:
+        event_manager = _EventManager(
+            active_terms={"reset": ["reset_root_state"]},
+            term_cfgs={
+                "reset_root_state": _EventTermCfgFixture(
+                    func=_fixture_event_term,
+                    mode="reset",
+                    params={"bad": value},
+                )
+            },
+        )
+        with pytest.raises(RuntimeError, match=match) as error:
+            IL.isaac_lateral_event_term_manifest(event_manager)
+        assert "0x" not in str(error.value)
+
+    for func, match in (
+        (_fixture_decorated_event_term, "decorated callable"),
+        (_FixtureEventOwner().term, "unsupported callable implementation type"),
+    ):
+        event_manager = _EventManager(
+            active_terms={"reset": ["reset_root_state"]},
+            term_cfgs={
+                "reset_root_state": _EventTermCfgFixture(
+                    func=func,
+                    mode="reset",
+                    params={},
+                )
+            },
+        )
+        with pytest.raises(RuntimeError, match=match) as error:
+            IL.isaac_lateral_event_term_manifest(event_manager)
+        assert "0x" not in str(error.value)
+
+    unknown_cfg_manager = _EventManager(
+        active_terms={"reset": ["reset_root_state"]},
+        term_cfgs={
+            "reset_root_state": types.SimpleNamespace(
+                func=_fixture_event_term,
+                mode="reset",
+                params={},
+            )
+        },
+    )
+    with pytest.raises(RuntimeError, match="unsupported cfg type") as error:
+        IL.isaac_lateral_event_term_manifest(unknown_cfg_manager)
+    assert "0x" not in str(error.value)
+
+
 def test_training_runtime_rejects_interval_event_terms_before_any_force_submit():
     env = _FakeEnv()
-
-    def random_push_term():
-        return None
 
     env.event_manager = _EventManager(
         active_terms={"interval": ["competing_random_push"]},
         term_cfgs={
-            "competing_random_push": types.SimpleNamespace(
-                func=random_push_term,
-                params={"asset_cfg": object()},
+            "competing_random_push": _EventTermCfgFixture(
+                func=_fixture_event_term,
+                mode="interval",
+                interval_range_s=(1.0, 3.0),
+                params={"magnitude": 1.0},
             )
         },
     )
     cfg = L.frozen_lateral_training_config(cell="L1", seed=1, policy_dt_s=0.02)
-    with pytest.raises(RuntimeError, match="refuses all interval EventManager terms"):
+    with pytest.raises(RuntimeError, match="supports only startup/reset"):
         IL.IsaacLateralPerturbationTrainingRuntime(env, cfg, cell="L1")
+    assert env.robot.root_physx_view.apply_calls == []
+    assert env.scene.write_count == 0
+
+
+def test_training_runtime_rejects_event_parameter_drift_after_attach():
+    env = _FakeEnv()
+    term_cfg = _EventTermCfgFixture(
+        func=_fixture_event_term,
+        mode="reset",
+        params={"gain": 0.25},
+    )
+    env.event_manager = _EventManager(
+        active_terms={"reset": ["reset_root_state"]},
+        term_cfgs={"reset_root_state": term_cfg},
+    )
+    cfg = L.frozen_lateral_training_config(cell="L1", seed=1, policy_dt_s=0.02)
+    runtime = IL.IsaacLateralPerturbationTrainingRuntime(env, cfg, cell="L1")
+    term_cfg.params["gain"] = 0.50
+    with pytest.raises(RuntimeError, match="drifted after lateral runtime attach"):
+        runtime.step(torch.zeros(env.num_envs, 1))
     assert env.robot.root_physx_view.apply_calls == []
     assert env.scene.write_count == 0
 

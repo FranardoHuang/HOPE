@@ -148,7 +148,7 @@ class _RecordingAdapter:
             actual_total_mass_kg=total_mass_kg.clone(),
             commanded_force_w=force_w.clone(),
             commanded_torque_w=torque_w.clone(),
-            applied_force_mask=torch.any(
+            scheduled_nonzero_force_mask=torch.any(
                 force_w.reshape(force_w.shape[0], -1) != 0.0, dim=1
             ),
             preflight_token=preflight_token,
@@ -406,19 +406,19 @@ def test_preregistered_train_and_eval_boundaries_are_machine_readable_and_blocke
         "lateral_perturbation_interrupted_for_reset_count",
         "lateral_perturbation_reset_interrupted_sampled_impulse_abs_sum_mps",
         "lateral_perturbation_reset_abandoned_uncommanded_impulse_abs_sum_mps",
-        "lateral_perturbation_reset_abandoned_unapplied_impulse_abs_sum_mps",
+        "lateral_perturbation_reset_abandoned_not_backend_accepted_impulse_abs_sum_mps",
         "lateral_perturbation_strike_interrupted_sampled_impulse_abs_sum_mps",
-        "lateral_perturbation_strike_abandoned_unapplied_impulse_abs_sum_mps",
+        "lateral_perturbation_strike_abandoned_not_backend_accepted_impulse_abs_sum_mps",
         "lateral_perturbation_window_interrupted_sampled_impulse_abs_sum_mps",
-        "lateral_perturbation_window_abandoned_unapplied_impulse_abs_sum_mps",
+        "lateral_perturbation_window_abandoned_not_backend_accepted_impulse_abs_sum_mps",
     } <= set(payload["activation_and_application_counters"])
     assert {
         "adapter_side_effect_free_preflight_receipt",
         "adapter_commit_returned_none_after_exact_readback",
         "strike_interrupted_sampled_impulse_y_mps",
-        "strike_abandoned_unapplied_impulse_y_mps",
+        "strike_abandoned_not_backend_accepted_impulse_y_mps",
         "window_interrupted_sampled_impulse_y_mps",
-        "window_abandoned_unapplied_impulse_y_mps",
+        "window_abandoned_not_backend_accepted_impulse_y_mps",
     } <= set(payload["per_step_ledger_required"])
     metrics = set(payload["held_out_eval"]["metrics"])
     assert {
@@ -564,7 +564,7 @@ def test_episode_reset_mid_pulse_has_reconciled_abandonment_ledger_and_no_restar
     assert reset.normalized_accel_y_mps2.item() == 0.0
     sampled = reset.reset_interrupted_sampled_impulse_y_mps
     commanded = reset.reset_interrupted_commanded_impulse_y_mps
-    applied = reset.reset_interrupted_applied_impulse_y_mps
+    backend_accepted = reset.reset_interrupted_backend_accepted_impulse_y_mps
     assert torch.allclose(
         sampled,
         commanded + reset.reset_abandoned_uncommanded_impulse_y_mps,
@@ -573,11 +573,11 @@ def test_episode_reset_mid_pulse_has_reconciled_abandonment_ledger_and_no_restar
     )
     assert torch.allclose(
         commanded,
-        applied + reset.reset_abandoned_unapplied_impulse_y_mps,
+        backend_accepted + reset.reset_abandoned_not_backend_accepted_impulse_y_mps,
         atol=1e-15,
         rtol=0.0,
     )
-    assert torch.allclose(commanded, applied, atol=1e-15, rtol=0.0)
+    assert torch.allclose(commanded, backend_accepted, atol=1e-15, rtol=0.0)
     assert 0.0 < commanded.abs().item() < sampled.abs().item()
     _dispatch(scheduler, reset, adapter)
     counters = scheduler.consume_counters()
@@ -591,7 +591,7 @@ def test_episode_reset_mid_pulse_has_reconciled_abandonment_ledger_and_no_restar
         reset.reset_abandoned_uncommanded_impulse_y_mps.abs().item()
     )
     assert counters[
-        "lateral_perturbation_reset_abandoned_unapplied_impulse_abs_sum_mps"
+        "lateral_perturbation_reset_abandoned_not_backend_accepted_impulse_abs_sum_mps"
     ].item() == pytest.approx(0.0, abs=1e-15)
 
 
@@ -617,9 +617,9 @@ def test_plan_only_reset_ledger_exposes_commanded_but_unacknowledged_impulse():
         **_inputs(1, 0, episode_index=1, eligible=True, safe=20),
     )
     assert reset.interrupted_for_reset_mask.item()
-    assert reset.reset_interrupted_applied_impulse_y_mps.item() == 0.0
+    assert reset.reset_interrupted_backend_accepted_impulse_y_mps.item() == 0.0
     assert torch.equal(
-        reset.reset_abandoned_unapplied_impulse_y_mps,
+        reset.reset_abandoned_not_backend_accepted_impulse_y_mps,
         reset.reset_interrupted_commanded_impulse_y_mps,
     )
 
@@ -690,12 +690,12 @@ def test_control_and_treatment_share_schedule_but_only_treatment_applies_force()
         "selected_start_count",
         "selected_left_count",
         "selected_right_count",
-        "wrench_write_step_count",
+        "backend_accepted_command_step_count",
     ):
         key = "lateral_perturbation_" + suffix
         assert cc[key].item() == tc[key].item()
-    assert cc["lateral_perturbation_applied_pulse_count"].item() == 0
-    assert tc["lateral_perturbation_applied_pulse_count"].item() > 0
+    assert cc["lateral_perturbation_backend_accepted_pulse_count"].item() == 0
+    assert tc["lateral_perturbation_backend_accepted_pulse_count"].item() > 0
     assert all(torch.all(force == 0.0) for _, force, _ in control_adapter.calls)
     assert any(torch.any(force != 0.0) for _, force, _ in treatment_adapter.calls)
 
@@ -889,9 +889,9 @@ def test_public_forged_receipt_cannot_unlock_scheduler_without_dispatch_capabili
         )
     assert scheduler.cached_application_ledger(0) is None
     counters = scheduler.consume_counters()
-    assert counters["lateral_perturbation_wrench_write_step_count"].item() == 0
-    assert counters["lateral_perturbation_applied_pulse_count"].item() == 0
-    assert counters["lateral_perturbation_applied_force_env_step_count"].item() == 0
+    assert counters["lateral_perturbation_backend_accepted_command_step_count"].item() == 0
+    assert counters["lateral_perturbation_backend_accepted_pulse_count"].item() == 0
+    assert counters["lateral_perturbation_backend_accepted_force_env_step_count"].item() == 0
     with pytest.raises(RuntimeError, match="previous full-wrench application receipt"):
         scheduler.step(step_token=1, **_inputs(2, 1))
 
@@ -929,14 +929,17 @@ def test_bad_preflight_receipt_never_writes_backend_caches_or_unlocks(monkeypatc
     result = scheduler.step(step_token=0, **_inputs(2, 0))
 
     def wrong_mask(receipt):
-        return replace(receipt, applied_force_mask=~receipt.applied_force_mask)
+        return replace(
+            receipt,
+            scheduled_nonzero_force_mask=~receipt.scheduled_nonzero_force_mask,
+        )
 
     adapter = _RecordingAdapter(receipt_override=wrong_mask)
     # Simulate the CUDA failure mode: queued async assertions never become host-visible before
     # Python could call a one-phase writer.  The source must still perform its own synchronous
     # pre-commit validation.
     monkeypatch.setattr(L, "_assert_all_async", lambda *_args, **_kwargs: None)
-    with pytest.raises(RuntimeError, match="applied_force_mask"):
+    with pytest.raises(RuntimeError, match="scheduled_nonzero_force_mask"):
         _dispatch(scheduler, result, adapter)
     assert len(adapter.preflight_calls) == 1
     assert adapter.calls == []
@@ -1027,7 +1030,7 @@ def test_commit_exception_marks_backend_dirty_and_blocks_retry():
     assert torch.any(adapter.backend_force_w != 0.0)
     assert scheduler.cached_application_ledger(0) is None
     counters = scheduler.consume_counters()
-    assert counters["lateral_perturbation_wrench_write_step_count"].item() == 0
+    assert counters["lateral_perturbation_backend_accepted_command_step_count"].item() == 0
     with pytest.raises(RuntimeError, match="DIRTY/UNKNOWN"):
         _dispatch(scheduler, result, _RecordingAdapter())
     with pytest.raises(RuntimeError, match="DIRTY/UNKNOWN"):
@@ -1057,7 +1060,7 @@ def test_non_none_commit_result_is_dirty_unknown_not_success():
         _dispatch(scheduler, result, _RecordingAdapter())
 
 
-def test_strike_and_window_interrupts_reconcile_sampled_commanded_applied_impulse():
+def test_strike_and_window_interrupts_reconcile_sampled_commanded_backend_accepted_impulse():
     def exercise(reason, *, runtime_ack):
         scheduler = L.LateralPulseScheduler(
             1,
@@ -1100,12 +1103,14 @@ def test_strike_and_window_interrupts_reconcile_sampled_commanded_applied_impuls
 
         sampled = getattr(interrupted, f"{reason}_interrupted_sampled_impulse_y_mps")
         commanded = getattr(interrupted, f"{reason}_interrupted_commanded_impulse_y_mps")
-        applied = getattr(interrupted, f"{reason}_interrupted_applied_impulse_y_mps")
+        backend_accepted = getattr(
+            interrupted, f"{reason}_interrupted_backend_accepted_impulse_y_mps"
+        )
         abandoned_uncommanded = getattr(
             interrupted, f"{reason}_abandoned_uncommanded_impulse_y_mps"
         )
-        abandoned_unapplied = getattr(
-            interrupted, f"{reason}_abandoned_unapplied_impulse_y_mps"
+        abandoned_not_backend_accepted = getattr(
+            interrupted, f"{reason}_abandoned_not_backend_accepted_impulse_y_mps"
         )
         assert bool(sampled.ne(0.0)[0])
         assert bool(commanded.ne(0.0)[0])
@@ -1117,22 +1122,24 @@ def test_strike_and_window_interrupts_reconcile_sampled_commanded_applied_impuls
         )
         torch.testing.assert_close(
             commanded,
-            applied + abandoned_unapplied,
+            backend_accepted + abandoned_not_backend_accepted,
             rtol=0.0,
             atol=1.0e-15,
         )
         if runtime_ack:
-            torch.testing.assert_close(applied, commanded, rtol=0.0, atol=1.0e-15)
-            assert torch.all(abandoned_unapplied == 0.0)
-        else:
-            assert torch.all(applied == 0.0)
             torch.testing.assert_close(
-                abandoned_unapplied, commanded, rtol=0.0, atol=1.0e-15
+                backend_accepted, commanded, rtol=0.0, atol=1.0e-15
+            )
+            assert torch.all(abandoned_not_backend_accepted == 0.0)
+        else:
+            assert torch.all(backend_accepted == 0.0)
+            torch.testing.assert_close(
+                abandoned_not_backend_accepted, commanded, rtol=0.0, atol=1.0e-15
             )
         assert torch.equal(sampled, start_result.sampled_normalized_impulse_y_mps)
 
         counters = scheduler.consume_counters()
-        for quantity in ("sampled", "commanded", "applied"):
+        for quantity in ("sampled", "commanded", "backend_accepted"):
             expected = getattr(
                 interrupted, f"{reason}_interrupted_{quantity}_impulse_y_mps"
             ).abs().sum()
@@ -1144,7 +1151,7 @@ def test_strike_and_window_interrupts_reconcile_sampled_commanded_applied_impuls
                 rtol=0.0,
                 atol=1.0e-15,
             )
-        for quantity in ("uncommanded", "unapplied"):
+        for quantity in ("uncommanded", "not_backend_accepted"):
             expected = getattr(
                 interrupted, f"{reason}_abandoned_{quantity}_impulse_y_mps"
             ).abs().sum()
@@ -1234,7 +1241,7 @@ def test_typed_application_ledger_binds_mass_world_force_and_transform_identity(
         ledger.commanded_world_impulse_y_Ns,
         expected_force_y * scheduler.cfg.policy_dt_s,
     )
-    assert torch.equal(ledger.applied_force_mask, result.active_force_mask)
+    assert torch.equal(ledger.backend_accepted_force_mask, result.active_force_mask)
     assert torch.equal(
         ledger.commanded_world_force_y_N / ledger.actual_total_mass_kg,
         ledger.commanded_normalized_accel_y_mps2,
@@ -1475,7 +1482,7 @@ def test_tampered_public_step_is_rejected_before_write_and_same_tick_can_retry()
         canonical_accel.to(dtype=mass.dtype),
     )
     counters = scheduler.consume_counters()
-    assert counters["lateral_perturbation_wrench_write_step_count"].item() == 1
+    assert counters["lateral_perturbation_backend_accepted_command_step_count"].item() == 1
 
 
 def test_adapter_seam_writes_zero_after_pulse_and_accounts_once():
@@ -1501,9 +1508,9 @@ def test_adapter_seam_writes_zero_after_pulse_and_accounts_once():
     assert torch.all(adapter.calls[1][1] == 0.0)
     assert torch.all(adapter.calls[1][2] == 0.0)
     counters = scheduler.consume_counters()
-    assert counters["lateral_perturbation_wrench_write_step_count"].item() == 2
-    assert counters["lateral_perturbation_applied_pulse_count"].item() == 4
-    assert counters["lateral_perturbation_applied_force_env_step_count"].item() == 4
+    assert counters["lateral_perturbation_backend_accepted_command_step_count"].item() == 2
+    assert counters["lateral_perturbation_backend_accepted_pulse_count"].item() == 4
+    assert counters["lateral_perturbation_backend_accepted_force_env_step_count"].item() == 4
 
 
 def test_adapter_seam_rejects_stale_force_contract_or_false_receipt():
@@ -1535,13 +1542,13 @@ def test_adapter_seam_rejects_stale_force_contract_or_false_receipt():
             actual_total_mass_kg=receipt.actual_total_mass_kg,
             commanded_force_w=receipt.commanded_force_w,
             commanded_torque_w=receipt.commanded_torque_w,
-            applied_force_mask=~receipt.applied_force_mask,
+            scheduled_nonzero_force_mask=~receipt.scheduled_nonzero_force_mask,
             preflight_token=receipt.preflight_token,
         )
 
     false_receipt = _RecordingAdapter(receipt_override=wrong_mask)
-    with pytest.raises(RuntimeError, match="applied_force_mask"):
+    with pytest.raises(RuntimeError, match="scheduled_nonzero_force_mask"):
         _dispatch(scheduler, result, false_receipt)
     counters = scheduler.consume_counters()
-    assert counters["lateral_perturbation_applied_pulse_count"].item() == 0
-    assert counters["lateral_perturbation_wrench_write_step_count"].item() == 0
+    assert counters["lateral_perturbation_backend_accepted_pulse_count"].item() == 0
+    assert counters["lateral_perturbation_backend_accepted_command_step_count"].item() == 0

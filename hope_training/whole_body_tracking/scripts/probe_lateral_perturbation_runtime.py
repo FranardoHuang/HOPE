@@ -105,48 +105,6 @@ def _update_receipt_digest(digest: Any, value: Any) -> None:
     raise RuntimeError(f"unsupported receipt field type for exact digest: {type(value)!r}")
 
 
-def _event_term_manifest_and_reject_interval(event_manager: object) -> list[dict[str, object]]:
-    """Bind every active EventManager term and reject mid-episode competing writers."""
-
-    active = getattr(event_manager, "active_terms", None)
-    get_term_cfg = getattr(event_manager, "get_term_cfg", None)
-    if not isinstance(active, dict) or not callable(get_term_cfg):
-        raise RuntimeError("EventManager exposes no auditable active-term contract")
-    manifest: list[dict[str, object]] = []
-    for mode in sorted(active):
-        names = active[mode]
-        if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
-            raise RuntimeError("EventManager active-term names have an unexpected shape")
-        for name in names:
-            cfg = get_term_cfg(name)
-            func = getattr(cfg, "func", None)
-            if func is None:
-                raise RuntimeError(f"EventManager term {name!r} exposes no callable")
-            identity_source = func if hasattr(func, "__qualname__") else type(func)
-            identity = (
-                f"{getattr(identity_source, '__module__', '')}."
-                f"{getattr(identity_source, '__qualname__', type(func).__qualname__)}"
-            )
-            params = getattr(cfg, "params", None)
-            if not isinstance(params, dict):
-                raise RuntimeError(f"EventManager term {name!r} exposes no parameter mapping")
-            manifest.append(
-                {
-                    "mode": mode,
-                    "name": name,
-                    "function_identity": identity,
-                    "parameter_keys": sorted(str(key) for key in params),
-                }
-            )
-    interval_names = [row["name"] for row in manifest if row["mode"] == "interval"]
-    if interval_names:
-        raise RuntimeError(
-            "runtime probe refuses all interval EventManager terms; disable and bind them explicitly: "
-            + ", ".join(str(name) for name in interval_names)
-        )
-    return manifest
-
-
 parser = argparse.ArgumentParser(description="Run one strict, no-training Isaac lateral-wrench full-scene probe.")
 parser.add_argument(
     "--task",
@@ -378,6 +336,7 @@ def main() -> None:
     import whole_body_tracking.tasks.tracking.mdp.isaac_lateral_perturbation as lateral_runtime_module
     from whole_body_tracking.tasks.tracking.mdp.isaac_lateral_perturbation import (
         IsaacLateralPerturbationRuntimeHook,
+        isaac_lateral_event_term_manifest,
         isaac_lateral_backend_contract,
         isaac_lateral_backend_identity_sha256,
         isaac_lateral_transform_contract,
@@ -428,7 +387,7 @@ def main() -> None:
     try:
         for motion_input in motion_inputs:
             motion_input.verify_path_unchanged()
-        event_term_manifest = _event_term_manifest_and_reject_interval(base_env.event_manager)
+        event_term_manifest = isaac_lateral_event_term_manifest(base_env.event_manager)
         reset_output = env.reset()
         if not isinstance(reset_output, tuple) or len(reset_output) != 2:
             raise RuntimeError("Gym environment did not return an explicit reset observation/info pair")

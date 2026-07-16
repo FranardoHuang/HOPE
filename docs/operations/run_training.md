@@ -1081,9 +1081,13 @@ pre-swing hold 且非 strike window 时，给 `torso_link` COM 施加 WORLD-Y �
 `L0` 是同随机机会的零推力对照；`L1` 是冻结的 `0.04–0.08 m/s` 归一化冲量、`0.10 s` pulse、每
 `0.50 s` 一个机会、eligible 后选择概率 `0.5`。命令行不能改 body/frame/XZ force/torque/强度/时长；
 disabled 时不能同时提供 cell/seed。启用后的 checkpoint hard contract 会绑定 cell/seed、resolved tick、
-共同随机题、hard-safety、Isaac backend/显式 COM transform、全部 active EventManager term manifest 与 metric
-schema；任一 interval term 在首次 force submit 前拒绝。日志输出 opportunity/selected/
-commanded/applied/zero-overwrite 整数、abandoned 与三本 impulse 账、实际整机质量 min/mean/max。
+共同随机题、hard-safety、Isaac backend/显式 COM transform、全部 active EventManager term 的 exact typed
+参数值与 manifest SHA，以及 metric schema。pinned `SceneEntityCfg` 的 selector/resolved ids、EventTermCfg 全
+行为字段与 plain module function source identity 会绑定；未知 config、decorated/method func、非有限/callable/
+opaque 参数或任一 interval term 在首次 submit 前拒绝，每步前后重验 attach 后漂移。日志输出 opportunity/
+selected/commanded/backend-accepted/zero-overwrite 整数、
+abandoned 与三本 impulse 账、实际整机质量 min/mean/max。`backend_accepted_*` 只证同步 setter/scene-write
+提交边界，不是 solver-consumed 证据。
 
 目前不要把上述三行加入任何 queue：exact Isaac full-scene、solver dynamics response、同 GPU throughput 与
 no-host-sync 门尚未通过，机器预注册仍为 `launch_authorized=false`。现在只允许运行 dependency-light source

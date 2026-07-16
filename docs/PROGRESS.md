@@ -29,9 +29,12 @@
 
 - 随机横向躯干推力已补齐 default-off trainer E1 接线：Hydra 只允许冻结的 L0 零推力同调度对照或
   L1 `0.04–0.08 m/s` recovery/hold treatment 与 uint32 题种子；启用时 checkpoint hard contract 绑定
-  schedule/safety/Isaac explicit-COM backend 与全量 active EventManager manifest，并拒绝 interval writer；
-  训练日志有 opportunity/command/backend-accepted/abandoned/zero-write、质量与冲量标量，且不无界保留
-  4096-env receipt。聚焦与相邻回归 `173 + 107 passed`；没有 Pod/full-scene/
+  schedule/safety/Isaac explicit-COM backend，以及 active EventManager term 的 exact、typed、JSON-safe 参数值
+  manifest/SHA；pinned `SceneEntityCfg` 会绑定 selector 与 resolved ids，EventTermCfg 全行为字段和 plain function
+  source identity 也入账；未知/非有限/callable 参数、decorated/method func 与 interval writer 都 fail closed，
+  每步前后重验可抓 attach 后漂移。训练日志有 opportunity/
+  command/backend-accepted/abandoned/zero-write、质量与冲量标量，且不无界保留 4096-env receipt；这里的
+  backend-accepted 只证提交边界，不证 solver consumed。聚焦与相邻回归 `173 + 107 passed`；没有 Pod/full-scene/
   solver-response/throughput/checkpoint，`launch_authorized=false` 不变。见
   [实验卷宗](experiments/2026-07/EXP-P1-LATERAL-BALANCE-PERTURBATION.md)与
   [接口合同](interfaces/lateral_perturbation_adapter_contract.md)。
@@ -451,13 +454,13 @@
 
 - 稀疏平衡失败的横向扰动消融已完成 source-only 红队修正版：`torso_link` 质心 WORLD-Y 有界脉冲按
   随机化后整机总质量缩放，`L0/L1` 用 domain-separated Philox4x32-10 共同随机题并暴露 potential draw/
-  schedule SHA；episode reset 截断会记录 sampled/commanded/applied/abandoned 冲量且当步禁止重启。
+  schedule SHA；episode reset 截断会记录 sampled/commanded/backend-accepted/abandoned 冲量且当步禁止重启。
   后续红队新增不可由配置放大的 `0.15 m/s` 冲量、`2.0 m/s²` 加速度、`0.02--0.20 s` 时长和 `200 N`
   WORLD-Y force 硬包络，并把 scheduler→adapter 改成 source-token 绑定的无副作用 preflight + 原子/no-throw
   commit：删除公开 acknowledgement，mass/cast/final wrench/receipt/cache 全在写前 host-visible 校验；坏
   receipt/stale token 不写 backend、不 cache、不解锁，同 step token 可换全新 preflight nonce 重试。commit 进入后异常或非
   `None` 返回会永久标成 `DIRTY/UNKNOWN`；cache 还绑定 live backend token，不能重放给同 SHA 新实例。
-  strike/window 现在和 reset 一样逐环境保存 sampled/commanded/applied/abandoned 恒等式并在中断 tick 真正
+  strike/window 现在和 reset 一样逐环境保存 sampled/commanded/backend-accepted/abandoned 恒等式并在中断 tick 真正
   写零。源码专项增至 `36 passed`。torso COM 仅意味着 zero explicit/link-local lever-arm torque，不代表
   整机无 `r×F` 角冲量。
   GPU throughput 门和不可变 ball×action-family held-out paper 仍 pending，故继续

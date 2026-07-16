@@ -1,4 +1,4 @@
-"""Probe-only Isaac Lab 2.1 adapter for the lateral-balance perturbation source.
+"""Default-off Isaac Lab 2.1 adapter for the lateral-balance perturbation source.
 
 The pinned Isaac Lab ``Articulation.write_data_to_sim`` path submits external forces with
 ``position_data=None``.  In the pinned PhysX tensor API that means the link transform (link
@@ -15,16 +15,18 @@ external-wrench command buffers to apply the perturbation.  Before every physics
 
 The direct PhysX setter has no solver-consumed wrench getter.  Receipts therefore prove the exact
 command and explicit COM position submitted at the synchronous setter/scene-write boundary, not
-the wrench integrated by the solver.  This module remains probe-only and is not registered in any
-training task.
+the wrench integrated by the solver.  An explicit opt-in trainer wrapper imports this candidate,
+but launch remains forbidden until the strict full-scene solver-response and throughput gates pass.
 """
 
 from __future__ import annotations
 
 import hashlib
+import inspect
 import json
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, fields, is_dataclass
+from pathlib import Path
 from typing import Any, Callable
 
 import torch
@@ -64,21 +66,50 @@ _TRANSFORM_CONTRACT = {
     "algorithm": "com_w_equals_link_origin_w_plus_quat_rotate_wxyz_com_b_v1",
 }
 
-_TRAINING_METRIC_SCHEMA_VERSION = 1
+_SCENE_ENTITY_CFG_TYPE = (
+    "isaaclab.managers.scene_entity_cfg",
+    "SceneEntityCfg",
+)
+_SCENE_ENTITY_CFG_FIELDS = (
+    "name",
+    "joint_names",
+    "joint_ids",
+    "fixed_tendon_names",
+    "fixed_tendon_ids",
+    "body_names",
+    "body_ids",
+    "object_collection_names",
+    "object_collection_ids",
+    "preserve_order",
+)
+_EVENT_TERM_CFG_TYPE = (
+    "isaaclab.managers.manager_term_cfg",
+    "EventTermCfg",
+)
+_EVENT_TERM_CFG_FIELDS = (
+    "func",
+    "params",
+    "mode",
+    "interval_range_s",
+    "is_global_time",
+    "min_step_count_between_reset",
+)
+
+_TRAINING_METRIC_SCHEMA_VERSION = 2
 _TRAINING_COUNTER_METRICS = {
     "opportunity_count": "lateral_perturbation_opportunity_count",
     "eligible_opportunity_count": "lateral_perturbation_eligible_opportunity_count",
     "selected_start_count": "lateral_perturbation_selected_start_count",
     "nonzero_pulse_command_count": "lateral_perturbation_nonzero_pulse_command_count",
-    "applied_pulse_count": "lateral_perturbation_applied_pulse_count",
+    "backend_accepted_pulse_count": "lateral_perturbation_backend_accepted_pulse_count",
     "sampled_normalized_impulse_abs_sum_mps": (
         "lateral_perturbation_sampled_normalized_impulse_abs_sum_mps"
     ),
     "commanded_normalized_impulse_abs_sum_mps": (
         "lateral_perturbation_commanded_normalized_impulse_abs_sum_mps"
     ),
-    "applied_normalized_impulse_abs_sum_mps": (
-        "lateral_perturbation_applied_normalized_impulse_abs_sum_mps"
+    "backend_accepted_normalized_impulse_abs_sum_mps": (
+        "lateral_perturbation_backend_accepted_normalized_impulse_abs_sum_mps"
     ),
 }
 _TRAINING_ABANDONED_COUNTERS = {
@@ -87,18 +118,270 @@ _TRAINING_ABANDONED_COUNTERS = {
         "lateral_perturbation_strike_abandoned_uncommanded_impulse_abs_sum_mps",
         "lateral_perturbation_window_abandoned_uncommanded_impulse_abs_sum_mps",
     ),
-    "abandoned_unapplied_impulse_abs_sum_mps": (
-        "lateral_perturbation_reset_abandoned_unapplied_impulse_abs_sum_mps",
-        "lateral_perturbation_strike_abandoned_unapplied_impulse_abs_sum_mps",
-        "lateral_perturbation_window_abandoned_unapplied_impulse_abs_sum_mps",
+    "abandoned_not_backend_accepted_impulse_abs_sum_mps": (
+        "lateral_perturbation_reset_abandoned_not_backend_accepted_impulse_abs_sum_mps",
+        "lateral_perturbation_strike_abandoned_not_backend_accepted_impulse_abs_sum_mps",
+        "lateral_perturbation_window_abandoned_not_backend_accepted_impulse_abs_sum_mps",
     ),
 }
 
 
 def _canonical_sha256(payload: dict[str, object]) -> str:
     return hashlib.sha256(
-        json.dumps(payload, sort_keys=True, separators=(",", ":"), ensure_ascii=True).encode("utf-8")
+        json.dumps(
+            payload,
+            allow_nan=False,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+        ).encode("utf-8")
     ).hexdigest()
+
+
+def _canonical_event_parameter_value(value: object, *, path: str) -> dict[str, object]:
+    """Encode one EventManager parameter without repr-, coercion- or type-loss.
+
+    Only exact JSON-safe scalar/container building blocks are supported.  Every node carries a
+    type tag so ``True`` cannot alias ``1`` and a tuple cannot alias a list.  Opaque configuration
+    objects are deliberately rejected instead of leaking process-specific ``repr`` addresses into
+    a checkpoint identity.
+    """
+
+    value_type_identity = (type(value).__module__, type(value).__qualname__)
+    if value_type_identity == _SCENE_ENTITY_CFG_TYPE:
+        return _canonical_scene_entity_cfg(value, path=path)
+    if callable(value):
+        raise RuntimeError(f"{path} contains an unsupported callable parameter value")
+    if value is None:
+        return {"type": "null"}
+    if type(value) is bool:
+        return {"type": "bool", "value": value}
+    if type(value) is int:
+        return {"type": "int", "value": value}
+    if type(value) is float:
+        if not math.isfinite(value):
+            raise RuntimeError(f"{path} contains a non-finite float")
+        return {"type": "float", "value": value}
+    if type(value) is str:
+        return {"type": "str", "value": value}
+    if type(value) in (list, tuple):
+        return {
+            "type": "list" if type(value) is list else "tuple",
+            "items": [
+                _canonical_event_parameter_value(item, path=f"{path}[{index}]")
+                for index, item in enumerate(value)
+            ],
+        }
+    if type(value) is dict:
+        if not all(type(key) is str for key in value):
+            raise RuntimeError(f"{path} contains a non-string mapping key")
+        return {
+            "type": "mapping",
+            "entries": [
+                {
+                    "key": key,
+                    "value": _canonical_event_parameter_value(
+                        value[key], path=f"{path}.{key}"
+                    ),
+                }
+                for key in sorted(value)
+            ],
+        }
+    value_type = type(value)
+    raise RuntimeError(
+        f"{path} contains unsupported opaque parameter type "
+        f"{value_type.__module__}.{value_type.__qualname__}"
+    )
+
+
+def _exact_dataclass_field_names(
+    value: object, *, expected: tuple[str, ...], path: str
+) -> None:
+    if not is_dataclass(value) or isinstance(value, type):
+        raise RuntimeError(f"{path} is not the pinned dataclass/configclass shape")
+    actual = tuple(field.name for field in fields(value))
+    if actual != expected:
+        raise RuntimeError(
+            f"{path} field schema differs from the pinned Isaac Lab v2.1.0 contract"
+        )
+
+
+def _canonical_scene_entity_field(value: object, *, path: str) -> dict[str, object]:
+    if type(value) is slice:
+        parts = (value.start, value.stop, value.step)
+        if not all(part is None or type(part) is int for part in parts):
+            raise RuntimeError(f"{path} contains a non-integer slice component")
+        return {
+            "type": "slice",
+            "start": _canonical_event_parameter_value(value.start, path=f"{path}.start"),
+            "stop": _canonical_event_parameter_value(value.stop, path=f"{path}.stop"),
+            "step": _canonical_event_parameter_value(value.step, path=f"{path}.step"),
+        }
+    return _canonical_event_parameter_value(value, path=path)
+
+
+def _canonical_scene_entity_cfg(value: object, *, path: str) -> dict[str, object]:
+    """Whitelist the exact pinned SceneEntityCfg, including resolved selector ids."""
+
+    _exact_dataclass_field_names(value, expected=_SCENE_ENTITY_CFG_FIELDS, path=path)
+    encoded_fields = {
+        name: _canonical_scene_entity_field(
+            getattr(value, name), path=f"{path}.{name}"
+        )
+        for name in _SCENE_ENTITY_CFG_FIELDS
+    }
+    name_value = getattr(value, "name")
+    if type(name_value) is not str or not name_value:
+        raise RuntimeError(f"{path}.name must be a non-empty exact string")
+    if type(getattr(value, "preserve_order")) is not bool:
+        raise RuntimeError(f"{path}.preserve_order must be an exact bool")
+    return {
+        "type": "pinned_isaaclab_configclass",
+        "python_type": {
+            "module": _SCENE_ENTITY_CFG_TYPE[0],
+            "qualname": _SCENE_ENTITY_CFG_TYPE[1],
+        },
+        "isaaclab_tag": _ISAACLAB_TAG,
+        "isaaclab_commit": _ISAACLAB_COMMIT,
+        "fields": encoded_fields,
+    }
+
+
+def _callable_implementation_identity(func: object, *, term_name: str) -> dict[str, object]:
+    """Bind a plain module-level Python function to exact source bytes, never an object repr."""
+
+    if not callable(func):
+        raise RuntimeError(f"EventManager term {term_name!r} func is not callable")
+    if not inspect.isfunction(func):
+        func_type = type(func)
+        raise RuntimeError(
+            f"EventManager term {term_name!r} uses unsupported callable implementation type "
+            f"{func_type.__module__}.{func_type.__qualname__}"
+        )
+    if hasattr(func, "__wrapped__"):
+        raise RuntimeError(
+            f"EventManager term {term_name!r} uses a decorated callable; wrapper chain is unbound"
+        )
+    source_callable = func
+    kind = "plain_module_python_function"
+    module = getattr(source_callable, "__module__", None)
+    qualname = getattr(source_callable, "__qualname__", None)
+    if type(module) is not str or not module or type(qualname) is not str or not qualname:
+        raise RuntimeError(
+            f"EventManager term {term_name!r} callable exposes no stable module/qualname"
+        )
+    if "<locals>" in qualname:
+        raise RuntimeError(
+            f"EventManager term {term_name!r} callable is not a module-level function"
+        )
+    source_path_raw = inspect.getsourcefile(source_callable)
+    if type(source_path_raw) is not str or not source_path_raw:
+        raise RuntimeError(f"EventManager term {term_name!r} callable exposes no source file")
+    source_path = Path(source_path_raw)
+    if source_path.is_symlink() or not source_path.is_file():
+        raise RuntimeError(
+            f"EventManager term {term_name!r} callable source is not a regular non-symlink file"
+        )
+    try:
+        source_lines, first_line = inspect.getsourcelines(source_callable)
+        module_bytes = source_path.read_bytes()
+    except (OSError, IOError, TypeError) as exc:
+        raise RuntimeError(
+            f"EventManager term {term_name!r} callable source cannot be read exactly"
+        ) from exc
+    implementation_bytes = "".join(source_lines).encode("utf-8")
+    closure = getattr(source_callable, "__closure__", None)
+    closure_values = []
+    if closure is not None:
+        for index, cell in enumerate(closure):
+            try:
+                cell_value = cell.cell_contents
+            except ValueError as exc:
+                raise RuntimeError(
+                    f"EventManager term {term_name!r} callable has an empty closure cell"
+                ) from exc
+            closure_values.append(
+                _canonical_event_parameter_value(
+                    cell_value,
+                    path=f"EventManager term {term_name!r} callable closure[{index}]",
+                )
+            )
+    return {
+        "kind": kind,
+        "module": module,
+        "qualname": qualname,
+        "source_first_line": int(first_line),
+        "implementation_source_sha256": hashlib.sha256(implementation_bytes).hexdigest(),
+        "module_file_sha256": hashlib.sha256(module_bytes).hexdigest(),
+        "defaults": _canonical_event_parameter_value(
+            getattr(source_callable, "__defaults__", None),
+            path=f"EventManager term {term_name!r} callable defaults",
+        ),
+        "keyword_defaults": _canonical_event_parameter_value(
+            getattr(source_callable, "__kwdefaults__", None),
+            path=f"EventManager term {term_name!r} callable keyword defaults",
+        ),
+        "closure": closure_values,
+    }
+
+
+def _canonical_event_term_cfg(
+    term_cfg: object, *, active_mode: str, term_name: str
+) -> dict[str, object]:
+    cfg_type_identity = (type(term_cfg).__module__, type(term_cfg).__qualname__)
+    if cfg_type_identity != _EVENT_TERM_CFG_TYPE:
+        cfg_type = type(term_cfg)
+        raise RuntimeError(
+            f"EventManager term {term_name!r} uses unsupported cfg type "
+            f"{cfg_type.__module__}.{cfg_type.__qualname__}"
+        )
+    _exact_dataclass_field_names(
+        term_cfg,
+        expected=_EVENT_TERM_CFG_FIELDS,
+        path=f"EventManager term {term_name!r} cfg",
+    )
+    mode = getattr(term_cfg, "mode")
+    if type(mode) is not str or mode != active_mode:
+        raise RuntimeError(
+            f"EventManager term {term_name!r} cfg mode does not match active mode"
+        )
+    params = getattr(term_cfg, "params")
+    if type(params) is not dict or not all(type(key) is str for key in params):
+        raise RuntimeError(
+            f"EventManager term {term_name!r} exposes no exact string-key parameter mapping"
+        )
+    return {
+        "python_type": {
+            "module": _EVENT_TERM_CFG_TYPE[0],
+            "qualname": _EVENT_TERM_CFG_TYPE[1],
+        },
+        "callable_implementation": _callable_implementation_identity(
+            getattr(term_cfg, "func"), term_name=term_name
+        ),
+        "behavior": {
+            "mode": _canonical_event_parameter_value(
+                mode, path=f"EventManager term {term_name!r} mode"
+            ),
+            "interval_range_s": _canonical_event_parameter_value(
+                getattr(term_cfg, "interval_range_s"),
+                path=f"EventManager term {term_name!r} interval_range_s",
+            ),
+            "is_global_time": _canonical_event_parameter_value(
+                getattr(term_cfg, "is_global_time"),
+                path=f"EventManager term {term_name!r} is_global_time",
+            ),
+            "min_step_count_between_reset": _canonical_event_parameter_value(
+                getattr(term_cfg, "min_step_count_between_reset"),
+                path=f"EventManager term {term_name!r} min_step_count_between_reset",
+            ),
+        },
+        "parameters": {
+            key: _canonical_event_parameter_value(
+                params[key], path=f"EventManager term {term_name!r} parameter {key!r}"
+            )
+            for key in sorted(params)
+        },
+    }
 
 
 def isaac_lateral_backend_contract() -> dict[str, object]:
@@ -122,7 +405,7 @@ def isaac_lateral_transform_identity_sha256() -> str:
 
 
 def isaac_lateral_event_term_manifest(event_manager: object) -> list[dict[str, object]]:
-    """Bind all active EventManager terms and reject any mid-episode writer class."""
+    """Bind every active term and its exact supported parameters; reject interval writers."""
 
     active = getattr(event_manager, "active_terms", None)
     get_term_cfg = getattr(event_manager, "get_term_cfg", None)
@@ -130,36 +413,35 @@ def isaac_lateral_event_term_manifest(event_manager: object) -> list[dict[str, o
         raise RuntimeError("EventManager exposes no auditable active-term contract")
     manifest: list[dict[str, object]] = []
     for mode in sorted(active):
+        if mode not in ("startup", "reset"):
+            raise RuntimeError(
+                f"lateral runtime supports only startup/reset EventManager modes, got {mode!r}"
+            )
         names = active[mode]
-        if not isinstance(names, list) or not all(isinstance(name, str) for name in names):
+        if not isinstance(names, list) or not all(type(name) is str and name for name in names):
             raise RuntimeError("EventManager active-term names have an unexpected shape")
+        if len(set(names)) != len(names):
+            raise RuntimeError(f"EventManager mode {mode!r} contains duplicate term names")
         for name in names:
             term_cfg = get_term_cfg(name)
-            func = getattr(term_cfg, "func", None)
-            if func is None:
-                raise RuntimeError(f"EventManager term {name!r} exposes no callable")
-            identity_source = func if hasattr(func, "__qualname__") else type(func)
-            params = getattr(term_cfg, "params", None)
-            if not isinstance(params, dict):
-                raise RuntimeError(f"EventManager term {name!r} exposes no parameter mapping")
             manifest.append(
                 {
                     "mode": mode,
                     "name": name,
-                    "function_identity": (
-                        f"{getattr(identity_source, '__module__', '')}."
-                        f"{getattr(identity_source, '__qualname__', type(func).__qualname__)}"
+                    "term_cfg": _canonical_event_term_cfg(
+                        term_cfg, active_mode=mode, term_name=name
                     ),
-                    "parameter_keys": sorted(str(key) for key in params),
                 }
             )
-    interval_names = [row["name"] for row in manifest if row["mode"] == "interval"]
-    if interval_names:
-        raise RuntimeError(
-            "lateral runtime refuses all interval EventManager terms; disable and bind them "
-            "explicitly: " + ", ".join(str(name) for name in interval_names)
-        )
     return manifest
+
+
+def isaac_lateral_event_term_manifest_identity_sha256(
+    event_term_manifest: list[dict[str, object]],
+) -> str:
+    """Return the canonical identity used both by attach and live drift checks."""
+
+    return _canonical_sha256({"schema_version": 2, "terms": event_term_manifest})
 
 
 def isaac_lateral_training_hard_contract(
@@ -170,6 +452,22 @@ def isaac_lateral_training_hard_contract(
 ) -> dict[str, object]:
     """Bind an enabled trainer cell to its scheduler, adapter and metric identities."""
 
+    manifest_payload = [dict(row) for row in event_term_manifest]
+    # ``allow_nan=False`` also defends this public seam from a caller that bypasses the manifest
+    # builder.  The round trip gives the returned contract a detached, JSON-only copy.
+    try:
+        manifest_payload = json.loads(
+            json.dumps(
+                manifest_payload,
+                allow_nan=False,
+                ensure_ascii=True,
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        )
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError("active EventManager manifest is not canonical JSON") from exc
+
     return {
         **frozen_lateral_training_contract(cell=cell, cfg=cfg),
         "isaac_backend": isaac_lateral_backend_contract(),
@@ -178,7 +476,10 @@ def isaac_lateral_training_hard_contract(
         "world_to_backend_transform_identity_sha256": (
             isaac_lateral_transform_identity_sha256()
         ),
-        "active_event_terms": [dict(row) for row in event_term_manifest],
+        "active_event_terms": manifest_payload,
+        "active_event_terms_identity_sha256": (
+            isaac_lateral_event_term_manifest_identity_sha256(manifest_payload)
+        ),
         "interval_event_terms_present": False,
         "metrics_schema_version": _TRAINING_METRIC_SCHEMA_VERSION,
         "integer_metrics": [
@@ -186,7 +487,7 @@ def isaac_lateral_training_hard_contract(
             "eligible_opportunity_count",
             "selected_start_count",
             "nonzero_pulse_command_count",
-            "applied_pulse_count",
+            "backend_accepted_pulse_count",
             "zero_overwrite_step_count",
         ],
         "mass_metrics_kg": [
@@ -197,10 +498,14 @@ def isaac_lateral_training_hard_contract(
         "impulse_metrics_mps": [
             "sampled_normalized_impulse_abs_sum_mps",
             "commanded_normalized_impulse_abs_sum_mps",
-            "applied_normalized_impulse_abs_sum_mps",
+            "backend_accepted_normalized_impulse_abs_sum_mps",
             "abandoned_uncommanded_impulse_abs_sum_mps",
-            "abandoned_unapplied_impulse_abs_sum_mps",
+            "abandoned_not_backend_accepted_impulse_abs_sum_mps",
         ],
+        "backend_accepted_metric_semantics": (
+            "scheduler commit and synchronous direct-setter/scene-write submission accepted; "
+            "never solver-consumed or solver-integrated evidence"
+        ),
         "solver_execution_readback_available": False,
     }
 
@@ -651,7 +956,7 @@ class IsaacLab21LateralWrenchAdapter:
             actual_mass == total_mass_kg,
             "dispatch total mass does not match current post-randomization PhysX mass",
         )
-        applied_mask = force_w[:, 0, 1].ne(0.0)
+        scheduled_mask = force_w[:, 0, 1].ne(0.0)
         receipt = LateralWrenchPreflightReceipt(
             step_token=step_token,
             body_name=self.body_name,
@@ -667,7 +972,7 @@ class IsaacLab21LateralWrenchAdapter:
             actual_total_mass_kg=actual_mass.clone(),
             commanded_force_w=force_w.clone(),
             commanded_torque_w=torque_w.clone(),
-            applied_force_mask=applied_mask.clone(),
+            scheduled_nonzero_force_mask=scheduled_mask.clone(),
             preflight_token=preflight_token,
         )
         self._pending = _StagedIsaacWrench(
@@ -897,6 +1202,7 @@ class IsaacLateralPerturbationRuntimeHook:
         self._receipts: list[IsaacLateralPolicyStepReceipt] = []
         self._pending_training_metrics: dict[str, torch.Tensor] | None = None
         self._event_term_manifest: list[dict[str, object]] = []
+        self._event_term_manifest_identity_sha256 = ""
         if not enabled:
             self._adapter = None
             self._scheduler = None
@@ -908,6 +1214,11 @@ class IsaacLateralPerturbationRuntimeHook:
             raise RuntimeError("runtime hook requires a vectorized environment")
         self._event_term_manifest = isaac_lateral_event_term_manifest(
             getattr(env, "event_manager", None)
+        )
+        self._event_term_manifest_identity_sha256 = (
+            isaac_lateral_event_term_manifest_identity_sha256(
+                self._event_term_manifest
+            )
         )
         step_dt = float(getattr(env, "step_dt", float("nan")))
         if not math.isfinite(step_dt) or not math.isclose(
@@ -950,6 +1261,20 @@ class IsaacLateralPerturbationRuntimeHook:
     @property
     def event_term_manifest(self) -> list[dict[str, object]]:
         return [dict(row) for row in self._event_term_manifest]
+
+    @property
+    def event_term_manifest_identity_sha256(self) -> str:
+        return self._event_term_manifest_identity_sha256
+
+    def _assert_event_term_contract_unchanged(self) -> None:
+        live = isaac_lateral_event_term_manifest(
+            getattr(self._env, "event_manager", None)
+        )
+        live_sha256 = isaac_lateral_event_term_manifest_identity_sha256(live)
+        if live_sha256 != self._event_term_manifest_identity_sha256:
+            raise RuntimeError(
+                "active EventManager term config drifted after lateral runtime attach"
+            )
 
     @property
     def terminal_zero_submit_succeeded(self) -> bool:
@@ -1124,6 +1449,7 @@ class IsaacLateralPerturbationRuntimeHook:
         dispatch_succeeded = False
         scene_hook_installed = False
         try:
+            self._assert_event_term_contract_unchanged()
             result, application, eligible, strike, safe = self._prepare_policy_step()
             dispatch_succeeded = True
             if not callable(original_write):
@@ -1172,6 +1498,7 @@ class IsaacLateralPerturbationRuntimeHook:
             setattr(scene, "write_data_to_sim", intercepted_scene_write)
             scene_hook_installed = True
             output = self._env.step(action)
+            self._assert_event_term_contract_unchanged()
 
             if scene_write_count != decimation + int(reset_scene_write_observed):
                 raise RuntimeError("pinned ManagerBasedRLEnv exposed an unexpected scene-write count")
@@ -1243,7 +1570,7 @@ class IsaacLateralPerturbationRuntimeHook:
                         (counters[name] for name in counter_names),
                         torch.zeros((), dtype=torch.float64, device=self._device),
                     ).detach().clone()
-                nonzero_force_count = application.nonzero_force_env_count
+                nonzero_force_count = application.backend_accepted_force_env_count
                 metrics["zero_overwrite_step_count"] = nonzero_force_count.eq(0).to(
                     dtype=torch.long
                 )
@@ -1408,6 +1735,7 @@ __all__ = [
     "isaac_lateral_backend_contract",
     "isaac_lateral_backend_identity_sha256",
     "isaac_lateral_event_term_manifest",
+    "isaac_lateral_event_term_manifest_identity_sha256",
     "isaac_lateral_transform_contract",
     "isaac_lateral_transform_identity_sha256",
     "isaac_lateral_training_hard_contract",

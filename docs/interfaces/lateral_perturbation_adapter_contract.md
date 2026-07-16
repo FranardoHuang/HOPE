@@ -72,14 +72,24 @@ preflight 拒绝时必须无副作用 discard staging，回到 `PLANNED`，允�
 L0/L1 cell 都 fail closed。
 
 启用的 checkpoint hard contract 绑定 resolved tick schedule、共同随机题与 hard-safety SHA、Isaac backend/
-transform identity、全部 active EventManager term manifest 和 metric schema；任一 interval term 在首次
-force submit 前 fail closed。trainer 模式不累积完整 per-step receipt；每个成功 step 只复制输出
+transform identity、全部 active EventManager term 的 exact typed 参数值与 manifest SHA，以及 metric schema。
+唯一非 JSON container 白名单是 pinned Isaac Lab v2.1.0 `SceneEntityCfg`：其完整 dataclass schema、name/names、
+resolved ids 与 `preserve_order` 全绑定；EventTermCfg 的 mode/interval/global-time/reset-throttle、plain module
+function 的 module/qualname/函数片段 SHA/模块文件 SHA/defaults/closure 也全绑定。未知 configclass、decorated/
+method/callable-instance func、非有限/callable/opaque 参数或任一 interval term 都在首次 submit 前 fail closed；
+每个 env.step 前后重新 canonical/hash，抓 attach 后 mutation。编码不用对象 `repr`，不会把进程地址写进身份。
+trainer 模式不累积完整 per-step receipt；每个成功 step 只复制输出
 `extras['log']` 并加入下列标量，不改 environment-owned extras：
 
-- 整数：opportunity、eligible opportunity、selected、nonzero commanded pulse、applied pulse、full-zero
-  overwrite step；
-- 浮点：sampled/commanded/applied 与 abandoned-uncommanded/unapplied 归一化冲量和；
+- 整数：opportunity、eligible opportunity、selected、nonzero commanded pulse、backend-accepted pulse、
+  full-zero overwrite step；
+- 浮点：sampled/commanded/backend-accepted 与 abandoned-uncommanded/not-backend-accepted 归一化冲量和；
 - 浮点：该 step 实际随机化后 articulation 总质量 min/mean/max。
+
+scheduler/ledger schema v2 已统一使用 `backend_accepted_*`/`not_backend_accepted_*`；preflight 尚未 commit 的
+mask 叫 `scheduled_nonzero_force_mask`。scheduler 的 backend-accepted 层只表示 private full-command commit 与
+exact readback 成功；trainer 只在该 step 所有 synchronous direct-setter/scene-write submission 完成后发布
+这些 metric。两者都绝不表示 PhysX solver 已消费或积分该 wrench；solver-executed 层当前明确 unavailable。
 
 metric key 已存在、输出不是五元 Gym tuple、extras/log 类型错误、T1 event timing、竞争 writer 或 terminal
 zero 失败均中止 run。这个 source 接口不等于 launch 授权；full-scene 和 throughput 门仍在下节。
@@ -114,10 +124,15 @@ CUDA sync 与私有 readback 自称 atomic/noexcept。当前 candidate 已实现
   setter 使用 WORLD force、显式 WORLD position 与 `is_global=true`。`position_data=None` 被合同禁止；
   输入 pose/COM finite 还不够，旋转/加法后的 torso COM 和 full setter positions 必须再次 finite；float overflow
   必须在 direct setter 前 terminal fail closed；
+
+仓库 [`shadow_ball.py`](../../hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/shadow_ball.py)
+与 [`physical_ball.py`](../../hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/physical_ball.py)
+中“Isaac Lab 2.1 默认在 COM 施力”的既有注释与固定 PhysX API 文档不符：`position_data=None` 是 link transform
+origin。这里不顺手改那两条球路径；球体 COM 近似 origin，真实行为影响需另做独立审计，不能据注释推断。
 - subset reset 的额外 full-scene write 前，先检查竞争 writer，再用同一显式 position API 提交**全 batch**
   zero；这样非 reset rows 不会在 decimation 之外多受一次力，
   scheduler 在下一 policy tick 重施仍有效的 pulse，并用 episode index 变化保存 reset rows 的
-  sampled/commanded/applied/abandoned 账；
+  sampled/commanded/backend-accepted/abandoned 账；
 - dispatch 成功后若 scene write 抛错、setter 返回类型异常、environment output 不合法或后续任何验证失败，
   hook 都进入 terminal guard；若没有竞争 writer，它用最后可信/当前显式 positions 提交全零并禁止继续。
   若发现竞争 writer，则不覆盖对方 bytes，保全证据且在下一 physics step 前终止；
@@ -178,9 +193,10 @@ reset、strike 和 safe-window closure 三类原因必须先逐环境保存账�
 
 ```text
 sampled = commanded + abandoned_uncommanded
-commanded = applied + abandoned_unapplied
+commanded = backend_accepted + abandoned_not_backend_accepted
 ```
 
-runtime-ack 路径中，已成功 commit 的 tick 应有 `applied == commanded`；plan-only 源码测试允许
-`applied=0`，此时 `abandoned_unapplied == commanded`。strike/window 中断 tick 仍必须 commit 一次全零
-command，不能只清 scheduler 内存。
+runtime-ack 路径中，已成功 commit 的 tick 应有 `backend_accepted == commanded`；plan-only 源码测试允许
+`backend_accepted=0`，此时
+`abandoned_not_backend_accepted == commanded`。这仍不是 solver ACK。strike/window 中断 tick 仍必须
+commit 一次全零 command，不能只清 scheduler 内存。

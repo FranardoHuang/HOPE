@@ -69,10 +69,10 @@ AND safe_window_remaining_steps >= pulse_duration_steps
 
 - pulse 启动后若击球窗意外开始或 recovery/hold 安全窗缩短，下一步必须写零，不能把残余外力带进挥拍。
 - episode reset、strike 和 safe-window closure 截断 pulse 时都必须先保存逐环境账再清状态；reset 当步禁止
-  立刻重启。三类账都同时保存原采样冲量、已 command/已 applied 冲量、尚未 command 和已 command 未
-  applied 的放弃量，并逐环境满足
+  立刻重启。三类账都同时保存原采样冲量、已 command/已 backend-accepted 冲量、尚未 command 和已
+  command 但未被 backend 接受的放弃量，并逐环境满足
   `sampled = commanded + abandoned_uncommanded` 与
-  `commanded = applied + abandoned_unapplied`。
+  `commanded = backend_accepted + abandoned_not_backend_accepted`。
 - 每个 simulator step 都必须覆盖完整 torso wrench buffer；无脉冲的环境也显式写零。漏一步就 fail closed，
   因为旧外力可能继续存活。
 - 允许任何时刻扰动的 `anytime` 版本是**后续独立因果轴**。它不能混进首格；只有 recovery/hold 格在留出
@@ -108,7 +108,7 @@ WORLD-Y force 每层都必须 finite 且在界内；极大但 finite 的输入�
    `None`。Python/CUDA copy 不能自证 atomic/noexcept；异常/非 `None` 必须在 application ledger 前把 backend
    标成 terminal `DIRTY/UNKNOWN`，禁止 retry、advance 或下一 simulator step。
    preflight receipt 与 application ledger 必须逐环境绑定随机化后实际总质量、runtime dtype 的 normalized
-   acceleration、命令 WORLD-Y force/impulse、applied mask、WORLD→backend transform SHA、adapter/backend
+   acceleration、命令 WORLD-Y force/impulse、`scheduled_nonzero_force_mask`、WORLD→backend transform SHA、adapter/backend
    SHA 与 live backend object token；同一步换质量、力、transform 或 live backend 都会拒绝。详细接口见
    [横向扰动 adapter 事务合同](../../interfaces/lateral_perturbation_adapter_contract.md)。
 
@@ -153,10 +153,16 @@ XYZ force/持续时间/强度字段：`L1` 继续冻结为每 `0.50 s` 一个机
 混用会 fail closed。
 
 启用时，checkpoint hard contract 逐项绑定 resolved policy dt/整数 tick、cell/seed、共同随机题 SHA、hard
-safety envelope、Isaac backend/显式 COM transform identity 和 metric schema。trainer 不保留逐 step 的完整
-4096-env probe transcript，避免 receipt 随 PPO step 无界增长；它只向 `extras['log']` 的副本发布标量：
-opportunity/eligible/selected/commanded/applied/zero-overwrite 整数、reset/strike/window 的 abandoned impulse、
-sampled/commanded/applied impulse，以及随机化后整机质量 min/mean/max。原 env-owned `extras` 不被改写；
+safety envelope、Isaac backend/显式 COM transform identity、active EventManager term 的 exact typed 参数值/
+manifest SHA 和 metric schema。pinned `SceneEntityCfg` 的 selector/resolved ids、EventTermCfg 全行为字段与 plain
+module function source identity 均绑定；未知 config、decorated/method func、非有限/callable/opaque 参数或
+interval term 在任何 submit 前 fail closed；每步前后重验会抓 attach 后漂移，且不使用对象 `repr` 地址。
+trainer 不保留逐 step 的完整 4096-env probe
+transcript，避免 receipt 随 PPO step 无界增长；它只向 `extras['log']` 的副本发布标量：opportunity/eligible/
+selected/commanded/backend-accepted/zero-overwrite 整数、reset/strike/window 的 abandoned impulse、sampled/
+commanded/backend-accepted impulse，以及随机化后整机质量 min/mean/max。这里 backend-accepted 只表示
+scheduler commit 与 synchronous setter/scene-write submission 成功，**不表示 solver consumed**。原 env-owned
+`extras` 不被改写；
 metric key 竞争、非五元 Gym output、非 dict log 或关闭时 terminal zero 失败都让 run 无效。
 
 这个接线没有改变 `launch_authorized=false`：当前 adapter 每个 substep 仍有 correctness-first host sync，
@@ -168,10 +174,11 @@ metric key 竞争、非五元 Gym output、非 dict log 或关闭时 terminal ze
 - opportunity 总数、eligible denominator、selected numerator；
 - 左/右选择数与采样强度总量；
 - 非零 pulse command、strike-window skip、窗口不足、意外中断；
-- 每步 side-effect-free preflight receipt、成功 full-buffer commit/readback、真正 applied pulse 数与 applied impulse 总量；
+- 每步 side-effect-free preflight receipt、成功 full-buffer commit/readback、backend-accepted pulse 数与
+  backend-accepted impulse 总量；solver-executed 层 unavailable，不得从前两层推断；
 - 每次 pulse 的 environment/episode/step、采样 `Δv_y`、命令 `F_y`、剩余 pulse step 和 adapter ledger。
 - potential 随机 draw、共同随机题 SHA，以及 reset/strike/window 截断时各自的
-  sampled/commanded/applied/abandoned 五项冲量账。
+  sampled/commanded/backend-accepted/abandoned 五项冲量账。
 - 实际总质量、命令 WORLD force、transform identity 和 backend identity 必须由 typed preflight receipt
   原样回显，再与 dispatch
   输入逐 tensor 对账；这使 `F_y / total_mass = normalized_accel_y` 可独立复算，但仍不是 simulator 已执行
@@ -196,8 +203,9 @@ metric key 竞争、非五元 Gym output、非 dict log 或关闭时 terminal ze
   completion。这是正确性优先的 E1 实现，同时意味着它尚未满足 hot-path no-host-sync 门；runtime 接线必须
   消除所有这些同步或重设计 handoff，再通过同 GPU throughput 门，才能把 `launch_authorized` 改成 true。
 
-`L0` 必须有 eligible/selected，但 `applied_pulse_count=0`；`L1` 必须有非零 applied pulse。采样、命令和
-application 三本冲量账对不上时，结果无效而不是“近似通过”。
+`L0` 必须有 eligible/selected，但 trainer `backend_accepted_pulse_count=0`；`L1` 必须有非零
+backend-accepted pulse。采样、命令和 backend-accepted application 三本冲量账对不上时，结果无效而不是
+“近似通过”；backend-accepted 也绝不作为 solver-consumed 证据。
 
 ## 留出考试与决策规则
 
@@ -258,8 +266,8 @@ application 三本冲量账对不上时，结果无效而不是“近似通过�
   hope_training/whole_body_tracking/tests/test_reward_flags_overrides.py
 ```
 
-当前 trainer/scheduler/adapter/translation 聚焦测试为 `170 passed`：scheduler/transaction 文件 `40`
-项、dependency-light adapter/hook 文件 `34` 项、训练 override/hard-contract 文件 `96` 项。覆盖包括：
+当前 trainer/scheduler/adapter/translation 聚焦测试为 `173 passed`：scheduler/transaction 文件 `40`
+项、dependency-light adapter/hook 文件 `37` 项、训练 override/hard-contract 文件 `96` 项。覆盖包括：
 Random123 Philox 零 counter/key 已知向量、四个 domain 与相邻 seed 的分桶
 均匀性和交叉相关性、`L0/L1` potential draw/SHA 完全相同、左右对称与幅度界、recovery/hold eligibility、
 strike skip、完整 pulse 冲量、reset 中断五项账、同一步幂等、漏步/漏 application receipt fail closed、
@@ -268,9 +276,10 @@ mass×acceleration overflow 和 force 上限的负测、X/Z force 与 torque 恒
 另含 adapter preflight 原地篡改/异常后的 caller bit-exact、不公开 acknowledge、CUDA async-assert
 neutered、坏 receipt/stale token、不同 live backend cache replay、commit 抛异常/非 `None` 返回等攻击回归；
 所有 precommit 失败都满足 backend write=0/cache 空，side-effect-free staging 会 discard，同 tick 可安全重试。
-strike/window/reset 的逐环境 sampled/commanded/applied/abandoned 恒等式及中断 tick backend 全零也已覆盖。
-adapter/hook/artifact 测试覆盖：随机化后真实总质量读取、全量 active EventManager term manifest 绑定、
-任一 interval term 在首次 force submit 前 fail closed、显式非零 local-COM
+strike/window/reset 的逐环境 sampled/commanded/backend-accepted/abandoned 恒等式及中断
+tick backend 全零也已覆盖。adapter/hook/artifact 测试覆盖：随机化后真实总质量读取、active EventManager
+term 的 exact typed 参数值/manifest SHA 绑定、参数值变化会改变 SHA、非有限/callable/opaque 参数拒绝且无
+对象地址 `repr`、任一 interval term 在首次 force submit 前 fail closed、显式非零 local-COM
 offset 旋转到 WORLD、派生 WORLD COM overflow 在 setter 前 terminal 拒绝、每 substep 传非 `None position_data`、
 只写 `torso_link` WORLD force、既有 wrench owner、
 same-tick/non-torso 与 reset writer 拒绝、direct setter 内同 tick 竞争 writer、scene/direct-setter exception、
