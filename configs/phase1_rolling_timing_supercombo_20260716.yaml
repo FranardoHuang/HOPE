@@ -50,11 +50,12 @@ blocking_contract:
     strict_result_sha256: 6158f38e5e46595cddb69ff1117a2e4bc30e5c33a88b6f1a7e381651a273746f
     engineering_launch_interpretation: source_scene_and_training_path_passed_finalizer_infrastructure_bug_does_not_change_model_or_behavior
   hotstart_harness:
-    source_commit: 2907594faf88888526d2fbd257814988e2dff53a
-    runner_script_sha256: 428cbf590a9f93ce7c3c0badcda93a511661152c7f3680344457abc5f574dabb
+    source_commit: c49dc314b9c8216bac51314be1e8490e0d51b10f
+    runner_script_sha256: 90d7f26d9674df3d75c86debdc6fd53a7546755616e22f55b907fadcf7a62ef4
     reviewed_tests_passed: true
-    reviewed_test_count: 88
+    reviewed_test_count: 92
     resume_budget_semantics: trainer_arg_is_additional_updates_claim_bound_is_absolute_exclusive
+    cross_pod_launch_semantics: at_most_one_future_per_pod_wait_all_then_stop_on_any_failure_no_replay
   parent_runtime_attestation:
     inspected_utc: 2026-07-16T01:04:47Z
     mode: one_read_only_ssh_connection_per_pod
