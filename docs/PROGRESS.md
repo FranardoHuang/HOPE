@@ -13,6 +13,16 @@
 
 ## 2026-07-16
 
+- 11:29 CST 的 rolling 审计仍为双 Pod `22 live/2 importer rejected`、fatal0；Pod2 两条已出现
+  `model_5200`，但尚无 milestone receipt。source/event-schema 复核证明现役 completion/fall 是重叠历史
+  EMA，physical-fall union、ready-phase `sum+count` 与母本机器基线均缺失，不能物化冻结的两个
+  100-update 行为窗。因此当前 22 条只允许结构淘汰，统一记为“量尺不完整，继续训练”；不得从
+  TensorBoard EMA 假造自动 Pareto。rolling runner 已补默认 dry-run、YAML/immutable-claim/source-bound 的
+  no-clobber checkpoint attestor；content-addressed runtime snapshot、post-preflight swap、symlink/race/
+  mismatch 负测和 generic 回归共 `126 passed`。它只证明 checkpoint，不运行 judge 或 signal。详见
+  [组合卷宗](experiments/2026-07/EXP-P1-ROLLING-TIMING-SUPERCOMBO.md)与
+  [运行操作](operations/run_lean_training_queue.md#rolling-timing-双-pod-严格续训2026-07-16)。
+
 - 固定 Isaac Lab 2.1/PhysX 源码审计纠正了球空气动力的作用点说明：`position_data=None` 是 link
   transform origin，不是 COM。现有三类球均为原点居中的单一 `SphereCfg`，所以行为仍等价；standalone
   in-loop 检查新增 exact-zero local COM offset 门，未来资产一旦偏置就 fail closed，而不是静默产生

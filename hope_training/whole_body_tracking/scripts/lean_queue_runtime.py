@@ -688,6 +688,9 @@ def attest_milestone(
     binding_path: str | Path,
     milestone: int,
     *,
+    expected_claim_content_sha256: str | None = None,
+    expected_job_id: str | None = None,
+    expected_runtime_sha256: str | None = None,
     checkpoint_loader: Callable[[Path], Any] | None = None,
     torch_module: Any | None = None,
     proc_root: str | Path = "/proc",
@@ -697,6 +700,39 @@ def attest_milestone(
 
     binding_path_obj = _canonical_absolute_path(str(binding_path), "binding path")
     binding, content, _claim, _claim_content = _load_binding(binding_path_obj)
+    expected_values = (
+        expected_claim_content_sha256,
+        expected_job_id,
+        expected_runtime_sha256,
+    )
+    if any(value is not None for value in expected_values) and not all(
+        value is not None for value in expected_values
+    ):
+        raise LeanQueueRuntimeError(
+            "expected claim SHA, job id, and runtime SHA must be supplied together"
+        )
+    if expected_claim_content_sha256 is not None:
+        expected_claim = _require_sha256(
+            expected_claim_content_sha256, "expected claim content SHA"
+        )
+        expected_job = _require_text(expected_job_id, "expected job id")
+        expected_runtime = _require_sha256(
+            expected_runtime_sha256, "expected runtime SHA"
+        )
+        if content.get("claim_content_sha256") != expected_claim:
+            raise LeanQueueRuntimeError(
+                "bound claim content SHA differs from the caller-registered job"
+            )
+        if content.get("job_id") != expected_job:
+            raise LeanQueueRuntimeError(
+                "bound job id differs from the caller-registered job"
+            )
+        runtime_path = _canonical_absolute_path(__file__, "attestor runtime path")
+        runtime_bytes = _read_regular_bytes(runtime_path, "attestor runtime")
+        if _sha256_bytes(runtime_bytes) != expected_runtime:
+            raise LeanQueueRuntimeError(
+                "attestor runtime bytes differ from the caller-pinned SHA"
+            )
     if content.get("attestable") is not True or content.get("not_science") is not False:
         raise LeanQueueRuntimeError(
             "ordinary milestone attestation refuses non-science full-scene probes"
@@ -786,6 +822,8 @@ def attest_milestone(
             "lineage_exact": lineage,
         },
     }
+    if expected_runtime_sha256 is not None:
+        receipt_content["attestor_runtime_sha256"] = expected_runtime_sha256
     receipt = {
         "schema_version": 1,
         "content": receipt_content,
@@ -806,6 +844,9 @@ def _parser() -> argparse.ArgumentParser:
     attest = sub.add_parser("attest")
     attest.add_argument("--binding", type=Path, required=True)
     attest.add_argument("--milestone", type=int, required=True)
+    attest.add_argument("--expected-claim-content-sha256")
+    attest.add_argument("--expected-job-id")
+    attest.add_argument("--expected-runtime-sha256")
     return parser
 
 
@@ -814,7 +855,13 @@ def main(argv: list[str] | None = None) -> int:
     try:
         if args.command != "attest":
             raise LeanQueueRuntimeError(f"unsupported command: {args.command}")
-        result = attest_milestone(args.binding, args.milestone)
+        result = attest_milestone(
+            args.binding,
+            args.milestone,
+            expected_claim_content_sha256=args.expected_claim_content_sha256,
+            expected_job_id=args.expected_job_id,
+            expected_runtime_sha256=args.expected_runtime_sha256,
+        )
     except LeanQueueRuntimeError as exc:
         print(f"ERROR: {exc}", file=sys.stderr)
         return 2

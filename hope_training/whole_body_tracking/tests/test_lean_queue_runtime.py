@@ -361,6 +361,124 @@ def test_attestor_rejects_hard_contract_or_claim_lineage_mismatch(
         _attest(fixture, checkpoint)
 
 
+@pytest.mark.parametrize("mismatch", ["claim", "job", "runtime"])
+def test_attestor_rejects_caller_expected_identity_mismatch_before_checkpoint(
+    tmp_path, mismatch
+):
+    fixture = _fixture(tmp_path)
+    _publish(fixture)
+    calls = []
+    expected_claim = fixture["claim_digest"]
+    expected_job = "job0"
+    expected_runtime = hashlib.sha256(MODULE_PATH.read_bytes()).hexdigest()
+    if mismatch == "claim":
+        expected_claim = "0" * 64
+    elif mismatch == "job":
+        expected_job = "job1"
+    else:
+        expected_runtime = "0" * 64
+    with pytest.raises(R.LeanQueueRuntimeError, match="caller"):
+        R.attest_milestone(
+            fixture["binding_path"],
+            200,
+            expected_claim_content_sha256=expected_claim,
+            expected_job_id=expected_job,
+            expected_runtime_sha256=expected_runtime,
+            checkpoint_loader=lambda _path: calls.append("checkpoint"),
+            torch_module=FakeTorch,
+            proc_root=fixture["proc_root"],
+            getpgid=lambda _pid: fixture["pid"],
+        )
+    assert calls == []
+    assert not (fixture["run_dir"] / "milestones/model_200.json").exists()
+
+
+def test_attestor_expected_identity_is_all_or_none(tmp_path):
+    fixture = _fixture(tmp_path)
+    _publish(fixture)
+    with pytest.raises(R.LeanQueueRuntimeError, match="must be supplied together"):
+        R.attest_milestone(
+            fixture["binding_path"],
+            200,
+            expected_job_id="job0",
+            checkpoint_loader=lambda _path: pytest.fail("checkpoint opened"),
+            torch_module=FakeTorch,
+            proc_root=fixture["proc_root"],
+            getpgid=lambda _pid: fixture["pid"],
+        )
+
+
+def test_attestor_rejects_self_consistent_claim_binding_swap_after_outer_preflight(
+    tmp_path,
+):
+    fixture = _fixture(tmp_path)
+    _publish(fixture)
+    expected_claim = fixture["claim_digest"]
+    expected_runtime = hashlib.sha256(MODULE_PATH.read_bytes()).hexdigest()
+
+    old_claim = json.loads(fixture["claim_path"].read_text(encoding="utf-8"))
+    fixture["binding_path"].unlink()
+    fixture["claim_path"].unlink()
+    swapped_content = dict(old_claim["content"])
+    swapped_content["job_id"] = "swapped_job"
+    swapped_digest = R.canonical_sha256(swapped_content)
+    swapped_argv = [
+        *swapped_content["training_argv_without_claim"],
+        f"++training_launch_claim_sha256={swapped_digest}",
+    ]
+    swapped_claim = {
+        "schema_version": 2,
+        "content": swapped_content,
+        "content_sha256": swapped_digest,
+        "training_argv": swapped_argv,
+    }
+    fixture["claim_path"].write_text(
+        json.dumps(swapped_claim, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+    fixture["claim_digest"] = swapped_digest
+    fixture["full_argv"] = swapped_argv
+    _write_proc(
+        fixture["proc_root"], fixture["pid"], fixture["starttime"], swapped_argv
+    )
+    _publish(fixture)
+
+    calls = []
+    with pytest.raises(R.LeanQueueRuntimeError, match="caller-registered job"):
+        R.attest_milestone(
+            fixture["binding_path"],
+            200,
+            expected_claim_content_sha256=expected_claim,
+            expected_job_id="job0",
+            expected_runtime_sha256=expected_runtime,
+            checkpoint_loader=lambda _path: calls.append("checkpoint"),
+            torch_module=FakeTorch,
+            proc_root=fixture["proc_root"],
+            getpgid=lambda _pid: fixture["pid"],
+        )
+    assert calls == []
+    assert not (fixture["run_dir"] / "milestones/model_200.json").exists()
+
+
+def test_attestor_expected_identity_records_runtime_sha_in_receipt(tmp_path):
+    fixture = _fixture(tmp_path)
+    _publish(fixture)
+    _path, checkpoint = _checkpoint(fixture)
+    runtime_sha = hashlib.sha256(MODULE_PATH.read_bytes()).hexdigest()
+    result = R.attest_milestone(
+        fixture["binding_path"],
+        200,
+        expected_claim_content_sha256=fixture["claim_digest"],
+        expected_job_id="job0",
+        expected_runtime_sha256=runtime_sha,
+        checkpoint_loader=lambda _path: checkpoint,
+        torch_module=FakeTorch,
+        proc_root=fixture["proc_root"],
+        getpgid=lambda _pid: fixture["pid"],
+    )
+    assert result["receipt"]["content"]["attestor_runtime_sha256"] == runtime_sha
+
+
 def test_attestor_writes_one_immutable_exact_lineage_receipt(tmp_path):
     fixture = _fixture(tmp_path)
     binding = _publish(fixture)

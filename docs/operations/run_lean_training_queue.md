@@ -559,11 +559,45 @@ lock；该 JSON 是部分成功审计，不得误读成整批成功。
 同一 fill 进程还维护只用于 job-ID 排除的 attempted overlay；即使下一次远端 snapshot 暂时漏掉刚写的 claim，
 也不会再次提交该 job。overlay 不增加 occupancy，真实容量仍只来自 NVML 与远端 claim。
 
+已有 checkpoint 只能通过 rolling runner 的专用 no-clobber 入口取证。`job-id` 必须来自 YAML，`milestone`
+必须是 parent iteration 加冻结 offset 后的**绝对**编号；Pod、run directory、binding、claim 与 receipt 路径均
+由该 job 派生，不接受 CLI PID 或手写远端路径。先 dry-run：
+
+```bash
+python3 scripts/run_phase1_rolling_timing_supercombo_queue.py \
+  --queue configs/phase1_rolling_timing_supercombo_20260716.yaml \
+  attest-milestone --job-id REPLACE_WITH_JOB_ID --milestone REPLACE_WITH_ABSOLUTE_ITERATION
+```
+
+人工复核 dry-run 的 job/Pod/absolute schedule/runtime SHA 后，才允许一次真实消费：
+
+```bash
+python3 scripts/run_phase1_rolling_timing_supercombo_queue.py \
+  --queue configs/phase1_rolling_timing_supercombo_20260716.yaml \
+  attest-milestone --job-id REPLACE_WITH_JOB_ID --milestone REPLACE_WITH_ABSOLUTE_ITERATION \
+  --execute --confirm SIM_ONLY_ATTEST_ONE_ROLLING_CONTINUATION_MILESTONE
+```
+
+远端先核训练 checkout 仍 clean exact，但绝不修改活训练工作树。因为旧 trainer source 不含新 expected-identity
+参数，同一 SSH 会把本地 reviewed `lean_queue_runtime.py` bytes 以 SHA 为目录名、O_EXCL/no-replace 地发布到
+`/workspace/codexschema/lean_queue_attestor_runtime/<sha>/`；已存在时只接受逐字节相同的只读 regular file，
+symlink、竞争写入或内容不符都 fail closed。随后 immutable launch claim 与 runtime 进程内 expected
+claim/job/runtime SHA 再次对拍，才沿 `run_binding.json` 打开 exact checkpoint/hard/claim，检查
+filename=embedded、finite 与 lineage，并 O_EXCL 写 `milestones/model_N.json`。receipt 记录 attestor runtime
+SHA。该命令每次只连接目标 Pod 一次，不运行 judge，也没有 stop/signal/retry。
+
 运行态每 30 分钟按队列内 `pruning_contract` 审计。`+200` 只淘汰结构/合同/non-finite/fatal；`+500`
 只允许淘汰连续两窗 dense 明显崩坏，不能把缺少 eligible hit 的稀疏零值判失败；`+1000` 仅在同 parent
 内按 completion、signed composite、解析回球和 pre/post fall 作容差 Pareto 淘汰，并保留时间覆盖。停臂只按
 绑定 numeric PGID 精确处理，不自动 retry。释放的吞吐先加速幸存者；新格只有另有预注册且 source/full-scene
 门已过才可占空槽。
+
+2026-07-16 对 source=`704bf3a` 的 logger 审计表明，上述 `+500/+1000` 行为规则在**当前 22 条**上不能
+机器执行：completion/fall 是重叠历史 EMA，physical-fall union、ready-phase eligible denominator/sum 和
+content-bound parent baseline 均缺失。即使 `model_5200` 已出现，也只能先做 checkpoint attestation；行为
+状态必须保持“量尺不完整，继续训练”，不得据 TensorBoard EMA stop。未来 source 需逐 update
+发布 consume-once 整数事件账和 phase `sum+count`，或另立 checkpoint-bound immutable exam；当前 runner
+不会从旧日志伪造行为窗。
 
 ## 验证
 

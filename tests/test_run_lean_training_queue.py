@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import base64
+import hashlib
 import importlib.util
 import json
 import os
 from pathlib import Path
 import shlex
 import subprocess
+import stat
 import sys
 
 import pytest
@@ -26,6 +29,17 @@ def _load_module():
 
 
 Q = _load_module()
+
+
+def _run_runtime_snapshot(root: Path, raw: bytes):
+    digest = hashlib.sha256(raw).hexdigest()
+    encoded = base64.b64encode(raw).decode("ascii")
+    return subprocess.run(
+        [sys.executable, "-c", Q._RUNTIME_SNAPSHOT_PROGRAM, encoded, digest, str(root)],
+        capture_output=True,
+        text=True,
+        check=False,
+    )
 
 
 def _job(index: int, *, status: str = "ready") -> dict:
@@ -1218,6 +1232,74 @@ def test_fill_rescans_after_first_iteration_before_next_job(tmp_path, monkeypatc
     ]
 
 
+def test_runtime_snapshot_materializer_is_atomic_read_only_and_reusable(tmp_path):
+    root = tmp_path / "runtime-root"
+    raw = b"reviewed lean runtime\n"
+    digest = hashlib.sha256(raw).hexdigest()
+    first = _run_runtime_snapshot(root, raw)
+    second = _run_runtime_snapshot(root, raw)
+    assert first.returncode == second.returncode == 0
+    assert json.loads(first.stdout)["state"] == "created_no_replace"
+    assert json.loads(second.stdout)["state"] == "existing_exact"
+    target = root / digest / "lean_queue_runtime.py"
+    assert target.read_bytes() == raw
+    assert stat.S_ISREG(target.lstat().st_mode)
+    assert target.lstat().st_mode & 0o222 == 0
+
+
+def test_runtime_snapshot_materializer_rejects_existing_mismatch_without_replacing(
+    tmp_path,
+):
+    root = tmp_path / "runtime-root"
+    raw = b"reviewed lean runtime\n"
+    digest = hashlib.sha256(raw).hexdigest()
+    target = root / digest / "lean_queue_runtime.py"
+    target.parent.mkdir(parents=True)
+    target.write_bytes(b"attacker bytes\n")
+    target.chmod(0o444)
+    result = _run_runtime_snapshot(root, raw)
+    assert result.returncode != 0
+    assert target.read_bytes() == b"attacker bytes\n"
+
+
+@pytest.mark.parametrize("symlink_kind", ["root", "target"])
+def test_runtime_snapshot_materializer_rejects_symlinks(tmp_path, symlink_kind):
+    root = tmp_path / "runtime-root"
+    raw = b"reviewed lean runtime\n"
+    digest = hashlib.sha256(raw).hexdigest()
+    if symlink_kind == "root":
+        elsewhere = tmp_path / "elsewhere"
+        elsewhere.mkdir()
+        root.symlink_to(elsewhere, target_is_directory=True)
+    else:
+        target = root / digest / "lean_queue_runtime.py"
+        target.parent.mkdir(parents=True)
+        victim = tmp_path / "victim"
+        victim.write_bytes(b"victim\n")
+        target.symlink_to(victim)
+    result = _run_runtime_snapshot(root, raw)
+    assert result.returncode != 0
+
+
+def test_runtime_snapshot_materializer_concurrent_publish_is_no_replace(tmp_path):
+    root = tmp_path / "runtime-root"
+    raw = b"reviewed lean runtime\n" * 1000
+    digest = hashlib.sha256(raw).hexdigest()
+    encoded = base64.b64encode(raw).decode("ascii")
+    processes = [
+        subprocess.Popen(
+            [sys.executable, "-c", Q._RUNTIME_SNAPSHOT_PROGRAM, encoded, digest, str(root)],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        for _ in range(4)
+    ]
+    results = [process.communicate(timeout=10) + (process.returncode,) for process in processes]
+    assert all(returncode == 0 for _stdout, _stderr, returncode in results)
+    assert (root / digest / "lean_queue_runtime.py").read_bytes() == raw
+
+
 def test_milestone_attestor_dry_run_follows_only_binding_and_does_not_ssh(monkeypatch):
     queue = _queue()
     calls = []
@@ -1233,6 +1315,12 @@ def test_milestone_attestor_dry_run_follows_only_binding_and_does_not_ssh(monkey
     assert result["binding_path"] == "/workspace/runs/0/run_binding.json"
     assert result["receipt_path"] == "/workspace/runs/0/milestones/model_200.json"
     assert "lean_queue_runtime.py attest" in result["remote_script"]
+    assert "--expected-claim-content-sha256" in result["remote_script"]
+    assert "--expected-job-id job0" in result["remote_script"]
+    assert "--expected-runtime-sha256" in result["remote_script"]
+    assert result["lean_queue_runtime_sha256"] in result["remote_script"]
+    assert Q.ATTESTOR_RUNTIME_ROOT in result["remote_script"]
+    assert "/workspace/source/hope_training/whole_body_tracking/scripts/lean_queue_runtime.py" not in result["remote_script"]
     assert "model_200.pt" not in result["remote_script"]
     assert calls == []
 
@@ -1254,6 +1342,47 @@ def test_milestone_attestor_execute_requires_its_own_confirmation_before_ssh(mon
     else:
         raise AssertionError("execute without attestor confirmation did not fail")
     assert calls == []
+
+
+def test_milestone_attestor_execute_passes_immutable_expected_identity(monkeypatch):
+    queue = _queue()
+    job = queue["jobs"][0]
+    slot = Q.slots(queue)[0]
+    immutable_claim, _argv = Q._launch_contract(queue, job, slot)
+    claim_state = {
+        "pod": slot.pod,
+        "gpu": slot.gpu,
+        "state": "launched",
+        "claim_schema_version": 2,
+        "claim_content_sha256": immutable_claim["content_sha256"],
+        "claim_path": f"{job['run_dir']}/queue_claim.json",
+    }
+    occupancy = {item.name: 0 for item in Q.slots(queue)}
+    monkeypatch.setattr(
+        Q, "live_snapshot", lambda *_args: (occupancy, {job["id"]: claim_state})
+    )
+    calls = []
+
+    def fake_ssh(_queue, pod, remote, **kwargs):
+        calls.append((pod, remote, kwargs))
+        return "receipt"
+
+    monkeypatch.setattr(Q, "_run_ssh", fake_ssh)
+    result = Q.cmd_attest_milestone(
+        queue,
+        job_id=job["id"],
+        milestone=200,
+        execute=True,
+        confirm=Q.ATTEST_CONFIRM,
+    )
+    assert result["expected_launch_claim_content_sha256"] == immutable_claim[
+        "content_sha256"
+    ]
+    assert len(calls) == 1
+    _pod, remote, _kwargs = calls[0]
+    assert f"--expected-claim-content-sha256 {immutable_claim['content_sha256']}" in remote
+    assert "--expected-job-id job0" in remote
+    assert f"--expected-runtime-sha256 {result['lean_queue_runtime_sha256']}" in remote
 
 
 def test_milestone_attestor_rejects_mutable_source_drift_before_ssh(monkeypatch):

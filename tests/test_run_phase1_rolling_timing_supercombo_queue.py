@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+import base64
 import copy
 import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 import sys
 import threading
 from types import SimpleNamespace
@@ -271,6 +273,182 @@ def test_exact_24_job_four_round_layout_and_absolute_plan(tmp_path):
     assert pod2["parent_iteration"] == 4700
     assert pod2["absolute_iteration_exclusive_bound"] == 6701
     assert pod2["milestones"] == [4900, 5200, 5700, 6700]
+
+
+def test_milestone_attestor_dry_run_uses_registered_absolute_schedule_and_no_ssh(
+    tmp_path, monkeypatch
+):
+    queue = _loaded(tmp_path)
+    calls = []
+    monkeypatch.setattr(Q.lean, "_run_ssh", lambda *_a, **_k: calls.append("ssh"))
+    result = Q.cmd_attest_milestone(
+        queue,
+        job_id="rolling_job_0",
+        milestone=3600,
+        execute=False,
+        confirm=None,
+    )
+    assert result["dry_run"] is True
+    assert result["pod"] == "pod1"
+    assert result["required_slot"] == "pod1/gpu0"
+    assert result["registered_absolute_milestones"] == [1800, 2100, 2600, 3600]
+    assert result["binding_path"] == "/workspace/rolling/runs/job_0/run_binding.json"
+    assert result["receipt_path"] == (
+        "/workspace/rolling/runs/job_0/milestones/model_3600.json"
+    )
+    assert result["lean_queue_runtime_sha256"] in result["remote_script"]
+    assert Q.lean.ATTESTOR_RUNTIME_ROOT in result["remote_script"]
+    assert "lean_queue_runtime.py attest" in result["remote_script"]
+    assert "--expected-claim-content-sha256" in result["remote_script"]
+    assert "--expected-job-id rolling_job_0" in result["remote_script"]
+    assert "--expected-runtime-sha256" in result["remote_script"]
+    assert "model_3600.pt" not in result["remote_script"]
+    assert (
+        "/workspace/source/hope_training/whole_body_tracking/scripts/lean_queue_runtime.py"
+        not in result["remote_script"]
+    )
+    assert calls == []
+
+
+@pytest.mark.parametrize(
+    ("job_id", "milestone", "message"),
+    [
+        ("missing", 3600, "unknown queue job"),
+        ("rolling_job_0", 200, "registered absolute milestones"),
+        ("rolling_job_3", 5100, "registered absolute milestones"),
+    ],
+)
+def test_milestone_attestor_rejects_unknown_job_or_unregistered_iteration_before_ssh(
+    tmp_path, monkeypatch, job_id, milestone, message
+):
+    queue = _loaded(tmp_path)
+    calls = []
+    monkeypatch.setattr(Q.lean, "_run_ssh", lambda *_a, **_k: calls.append("ssh"))
+    with pytest.raises(Q.ContinuationQueueError, match=message):
+        Q.cmd_attest_milestone(
+            queue,
+            job_id=job_id,
+            milestone=milestone,
+            execute=True,
+            confirm=Q.ATTEST_CONFIRM,
+        )
+    assert calls == []
+
+
+def test_milestone_attestor_execute_requires_dedicated_confirmation_before_ssh(
+    tmp_path, monkeypatch
+):
+    queue = _loaded(tmp_path)
+    calls = []
+    monkeypatch.setattr(Q.lean, "_run_ssh", lambda *_a, **_k: calls.append("ssh"))
+    with pytest.raises(Q.ContinuationQueueError, match=Q.ATTEST_CONFIRM):
+        Q.cmd_attest_milestone(
+            queue,
+            job_id="rolling_job_3",
+            milestone=5200,
+            execute=True,
+            confirm=Q.CONFIRM,
+        )
+    assert calls == []
+
+
+def test_milestone_attestor_execute_uses_yaml_pod_and_one_no_signal_ssh(
+    tmp_path, monkeypatch
+):
+    queue = _loaded(tmp_path)
+    calls = []
+
+    def fake_ssh(queue_arg, pod, remote, **kwargs):
+        calls.append((queue_arg, pod, remote, kwargs))
+        return '{"receipt_path":"/workspace/rolling/runs/job_3/milestones/model_5200.json"}'
+
+    monkeypatch.setattr(Q.lean, "_run_ssh", fake_ssh)
+    result = Q.cmd_attest_milestone(
+        queue,
+        job_id="rolling_job_3",
+        milestone=5200,
+        execute=True,
+        confirm=Q.ATTEST_CONFIRM,
+    )
+    assert result["dry_run"] is False
+    assert result["pod"] == "pod2"
+    assert len(calls) == 1
+    _queue_arg, pod, remote, kwargs = calls[0]
+    assert pod == "pod2"
+    assert kwargs == {
+        "timeout": 120,
+        "phase": "rolling-attest-milestone:rolling_job_3:5200",
+    }
+    assert "/workspace/rolling/runs/job_3/run_binding.json" in remote
+    assert result["lean_queue_runtime_sha256"] in remote
+    assert remote.index("claim_preflight_passed") < remote.rindex(
+        "lean_queue_runtime.py attest"
+    )
+    assert all(token not in remote for token in ("kill ", "pkill", "killall", "signal"))
+
+
+@pytest.mark.parametrize("drift", ["run_dir", "source", "recipe", "slot"])
+def test_milestone_attestor_remote_preflight_rejects_old_claim_after_job_drift(
+    tmp_path, drift
+):
+    queue = _loaded(tmp_path)
+    original_job = queue["jobs"][0]
+    original_job["run_dir"] = str(tmp_path / "old-run")
+    Path(original_job["run_dir"]).mkdir()
+    original_slot = Q._slots(queue)[original_job["resource"]["required_slot"]]
+    launch_runner_sha = queue["blocking_contract"]["hotstart_harness"][
+        "runner_script_sha256"
+    ]
+    old_claim, _argv, _absolute = Q._launch_contract(
+        queue,
+        original_job,
+        original_slot,
+        runner_script_sha256=launch_runner_sha,
+    )
+    claim_path = Path(original_job["run_dir"]) / "queue_claim.json"
+    claim_path.write_text(json.dumps(old_claim), encoding="utf-8")
+    original = Q._attestor_claim_spec(queue, original_job, original_slot)
+
+    def run_preflight(spec):
+        encoded = base64.b64encode(
+            json.dumps(spec, separators=(",", ":"), sort_keys=True).encode()
+        ).decode()
+        return subprocess.run(
+            [sys.executable, "-c", Q._ATTEST_CLAIM_PREFLIGHT, encoded],
+            capture_output=True,
+            text=True,
+            check=False,
+        )
+
+    assert run_preflight(original).returncode == 0
+
+    changed = copy.deepcopy(queue)
+    job = changed["jobs"][0]
+    if drift == "run_dir":
+        job["run_dir"] = "/workspace/rolling/runs/drifted"
+    elif drift == "source":
+        job["source"]["checkout"] = "/workspace/drifted-source"
+        job["source"]["commit"] = "e" * 40
+    elif drift == "recipe":
+        job["recipe"]["delta"].append("task.racket.target_delay_steps=4")
+    else:
+        job["resource"]["required_slot"] = "pod1/gpu1"
+    slot = Q._slots(changed)[job["resource"]["required_slot"]]
+    replacement = Q._attestor_claim_spec(changed, job, slot)
+
+    assert replacement["content_sha256"] != original["content_sha256"]
+    rejected = run_preflight(replacement)
+    assert rejected.returncode != 0
+    assert "claim_preflight_passed" not in rejected.stdout
+
+
+def test_milestone_attestor_cli_defaults_to_dry_run_surface():
+    args = Q._parser().parse_args(
+        ["attest-milestone", "--job-id", "rolling_job_0", "--milestone", "3600"]
+    )
+    assert args.mode == "attest-milestone"
+    assert args.execute is False
+    assert args.confirm is None
 
 
 def test_pending_queue_reports_blockers_without_ssh(tmp_path, monkeypatch):

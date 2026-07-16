@@ -33,17 +33,20 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
 
 - **当前训练池：** 旧 `24/24` 长曲线已按绑定身份停止，三份较强母本的 optimizer 被完整恢复到
   [24 格快速准备组合漏斗](experiments/2026-07/EXP-P1-ROLLING-TIMING-SUPERCOMBO.md)。2026-07-16
-  10:20 CST 的完整只读审计确认 `24` 条都已消费唯一 claim，其中 `22` 条 live、fatal=`0`；两条在首迭代前由动态 URDF importer
+  11:29 CST 的每 Pod 单连接只读审计确认 `24` 条都已消费唯一 claim，其中 `22` 条 live、fatal=`0`；两条在首迭代前由动态 URDF importer
   以 malloc `rc134` 退出，精确 PID/PGID 与 GPU context 均 absent，记为**基础设施拒绝**而不是 Reward
   失败，且不自动重跑。Pod1/Pod2 分别为三卡 `4/3/4` 与 `4/4/3`；GPU 利用率约
-  `90–97% / 88–96%`，显存约 `17–23 GiB/卡`，主机可用内存约 `908/917 GiB`、swap=`0`。本轮比较约
+  `90–98% / 89–97%`，显存约 `17–23 GiB/卡`，主机可用内存约 `907/916 GiB`、swap=`0`。本轮比较约
   `1.0/0.7/0.5 s` 与随机准备时间、时间戳补偿、预测抖动、Reward 配比和脚朝向；全部是单 seed、热启动、
-  demo-only 的工程候选，不能冒充正式因果结论。每 30 分钟按机器合同早判：`+200` 只停结构/finite/
-  恢复失败，`+500` 只停连续两窗均明显崩坏，`+1000` 才在**同一母本**内做多目标 Pareto 淘汰；每个母本
-  至少留两条，并保留一个约 0.5 秒档和一个随机时长档。稀疏击球机会不足时零值绝不算失败，释放的算力
-  直接加速幸存者到 `+2000`。当前旧 budget-v1 诊断臂在 `model_2200`，必须等 `model_3600` finite/
-  binding 通过后才精确停止；Pod2 最快两条在 `model_5000`，尚未到其 `+500/model_5200`，所以本轮没有
-  合法的行为淘汰对象。`qdot` 是确定性的关节速度超限惩罚，不是随机外力；随机横向躯干推力正在
+  demo-only 的工程候选，不能冒充正式因果结论。每 30 分钟继续检查结构/finite/恢复和 checkpoint；但
+  11:29 CST 的量尺审计推翻了“现役 source 可自动执行 `+500/+1000` 行为淘汰”的假设：completion 与
+  pre/post-fall 是跨历史 EMA，termination 混有非物理 guard，dense ready/balance 又缺 phase 分母与母本
+  receipt，无法重建两个互不重叠的 100-update 窗。因此现役 22 条只能结构淘汰，行为状态统一为
+  “量尺不完整，继续训练”；稀疏击球零值仍绝不算失败。Pod1 旧 budget-v1 诊断臂现到
+  `model_2400`，`model_3600` 尚不存在；Pod2 已有两份 `model_5200`，但还没有专用 no-clobber milestone
+  receipt，更没有可信行为窗，所以都继续、不排名、不停止。后续 source 必须增加 per-update 整数机会/
+  完成/物理跌倒 union 与 ready-phase `sum+count`，现役模型若要提前排序只能另走绑定 checkpoint 的不可变
+  同卷评估。`qdot` 是确定性的关节速度超限惩罚，不是随机外力；随机横向躯干推力正在
   补 trainer/物理响应门，过门后才占释放槽做同母本 no-force/force 配对。
 
 - **最新可分享结果：** 反手拉 B/C 的 rank-0 主选已在 Pod1 CPU-only runtime 完成 exact 整轨

@@ -20,6 +20,7 @@ from pathlib import Path
 from pathlib import PurePosixPath
 import re
 import shlex
+import stat
 import subprocess
 import sys
 from typing import Any
@@ -63,6 +64,7 @@ WBT_RELATIVE = "hope_training/whole_body_tracking"
 SETUP_RELATIVE = "setup_train_env.sh"
 ENTRYPOINT_RELATIVE = "scripts/train.py"
 QUEUE_RUNTIME_RELATIVE = "scripts/lean_queue_runtime.py"
+ATTESTOR_RUNTIME_ROOT = "/workspace/codexschema/lean_queue_attestor_runtime"
 FULL_SCENE_PROBE_RUNTIME_RELATIVE = "scripts/full_scene_probe_runtime.py"
 KIT_LAUNCHER_RELATIVE = "scripts/launch_kit_training_locked.sh"
 KIT_BOOT_MARKER = "Learning iteration"
@@ -98,6 +100,109 @@ UNIQUE_NUMERIC_PID_AWK = (
     r'{gsub(/^[ \t]+|[ \t]+$/, "", $0); '
     r'if ($0 ~ /^[0-9]+$/) seen[$0]=1} END {print length(seen)}'
 )
+
+_RUNTIME_SNAPSHOT_PROGRAM = r'''import base64
+import hashlib
+import json
+import os
+import stat
+import sys
+
+raw = base64.b64decode(sys.argv[1], validate=True)
+expected = sys.argv[2]
+root = sys.argv[3]
+if len(expected) != 64 or hashlib.sha256(raw).hexdigest() != expected:
+    raise RuntimeError("runtime payload SHA mismatch")
+base, root_name = os.path.split(root)
+if not base or not root_name or os.path.normpath(root) != root:
+    raise RuntimeError("runtime snapshot root must be normalized absolute")
+directory_flags = os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) | getattr(os, "O_NOFOLLOW", 0)
+base_fd = os.open(base, directory_flags)
+try:
+    try:
+        os.mkdir(root_name, 0o755, dir_fd=base_fd)
+    except FileExistsError:
+        pass
+    root_fd = os.open(root_name, directory_flags, dir_fd=base_fd)
+finally:
+    os.close(base_fd)
+try:
+    try:
+        os.mkdir(expected, 0o755, dir_fd=root_fd)
+    except FileExistsError:
+        pass
+    sha_fd = os.open(expected, directory_flags, dir_fd=root_fd)
+finally:
+    os.close(root_fd)
+
+target = "lean_queue_runtime.py"
+signature = lambda value: (
+    value.st_dev, value.st_ino, value.st_mode, value.st_size, value.st_mtime_ns
+)
+
+def verify_target():
+    before = os.stat(target, dir_fd=sha_fd, follow_symlinks=False)
+    if not stat.S_ISREG(before.st_mode) or before.st_mode & 0o222:
+        raise RuntimeError("runtime snapshot must be a read-only regular non-symlink file")
+    flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    fd = os.open(target, flags, dir_fd=sha_fd)
+    try:
+        opened = os.fstat(fd)
+        if signature(opened) != signature(before):
+            raise RuntimeError("runtime snapshot changed while opening")
+        chunks = []
+        while True:
+            chunk = os.read(fd, 1024 * 1024)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        after = os.fstat(fd)
+    finally:
+        os.close(fd)
+    outside = os.stat(target, dir_fd=sha_fd, follow_symlinks=False)
+    if signature(before) != signature(after) or signature(before) != signature(outside):
+        raise RuntimeError("runtime snapshot changed while reading")
+    observed = b"".join(chunks)
+    if observed != raw or hashlib.sha256(observed).hexdigest() != expected:
+        raise RuntimeError("existing runtime snapshot bytes mismatch")
+
+try:
+    verify_target()
+    state = "existing_exact"
+except FileNotFoundError:
+    temporary = f".{target}.tmp.{os.getpid()}"
+    flags = (
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+    )
+    fd = os.open(temporary, flags, 0o400, dir_fd=sha_fd)
+    try:
+        offset = 0
+        while offset < len(raw):
+            offset += os.write(fd, raw[offset:])
+        os.fchmod(fd, 0o444)
+        os.fsync(fd)
+    finally:
+        os.close(fd)
+    try:
+        try:
+            os.link(
+                temporary, target, src_dir_fd=sha_fd, dst_dir_fd=sha_fd,
+                follow_symlinks=False,
+            )
+            state = "created_no_replace"
+            os.fsync(sha_fd)
+        except FileExistsError:
+            state = "race_existing_exact"
+    finally:
+        os.unlink(temporary, dir_fd=sha_fd)
+    verify_target()
+finally:
+    os.close(sha_fd)
+
+path = root + "/" + expected + "/" + target
+print(json.dumps({"path": path, "sha256": expected, "state": state}, sort_keys=True))
+'''
 
 
 # This program is sent as one quoted ``python3 -c`` argument to exactly one
@@ -1929,10 +2034,55 @@ printf '%s\\n' phase=first_iter >> {shlex.quote(run_dir + '/run.log.launch')}
     return _gpu_launch_lock_script(slot, body)
 
 
-def _milestone_attestor_script(job: dict[str, Any], milestone: int) -> str:
+def _queue_runtime_payload() -> tuple[bytes, str]:
+    path = (
+        Path(__file__).resolve().parents[1]
+        / WBT_RELATIVE
+        / QUEUE_RUNTIME_RELATIVE
+    )
+    before = path.lstat()
+    if not stat.S_ISREG(before.st_mode):
+        raise QueueError("lean queue runtime must be a regular non-symlink file")
+    raw = path.read_bytes()
+    after = path.lstat()
+    signature = lambda value: (
+        value.st_dev, value.st_ino, value.st_mode, value.st_size, value.st_mtime_ns
+    )
+    if signature(before) != signature(after):
+        raise QueueError("lean queue runtime changed while hashing")
+    return raw, hashlib.sha256(raw).hexdigest()
+
+
+def _runtime_snapshot_materializer(
+    runtime_raw: bytes,
+    runtime_sha256: str,
+    *,
+    root: str = ATTESTOR_RUNTIME_ROOT,
+) -> tuple[str, str]:
+    if hashlib.sha256(runtime_raw).hexdigest() != runtime_sha256:
+        raise QueueError("reviewed runtime payload differs from its SHA")
+    snapshot = f"{root.rstrip('/')}/{runtime_sha256}/lean_queue_runtime.py"
+    encoded = base64.b64encode(runtime_raw).decode("ascii")
+    command = shlex.join(
+        [ISAAC_PYTHON, "-c", _RUNTIME_SNAPSHOT_PROGRAM, encoded, runtime_sha256, root]
+    )
+    return snapshot, command
+
+
+def _milestone_attestor_script(
+    job: dict[str, Any],
+    milestone: int,
+    *,
+    expected_claim_content_sha256: str,
+    expected_job_id: str,
+    expected_runtime_sha256: str,
+    runtime_raw: bytes,
+) -> str:
     source = job["source"]["checkout"].rstrip("/")
     workdir = f"{source}/{WBT_RELATIVE}"
-    runtime = f"{workdir}/{QUEUE_RUNTIME_RELATIVE}"
+    runtime, materialize_runtime = _runtime_snapshot_materializer(
+        runtime_raw, expected_runtime_sha256
+    )
     binding = f"{job['run_dir'].rstrip('/')}/run_binding.json"
     command = shlex.join(
         [
@@ -1943,12 +2093,18 @@ def _milestone_attestor_script(job: dict[str, Any], milestone: int) -> str:
             binding,
             "--milestone",
             str(milestone),
+            "--expected-claim-content-sha256",
+            expected_claim_content_sha256,
+            "--expected-job-id",
+            expected_job_id,
+            "--expected-runtime-sha256",
+            expected_runtime_sha256,
         ]
     )
     return f"""set -euo pipefail
 test "$(git -C {shlex.quote(source)} rev-parse HEAD)" = {shlex.quote(job['source']['commit'])}
 test -z "$(git -C {shlex.quote(source)} status --porcelain)"
-test -f {shlex.quote(runtime)}
+{materialize_runtime}
 cd {shlex.quote(workdir)}
 source {shlex.quote(workdir + '/' + SETUP_RELATIVE)}
 PYTHONPATH="${{HOPE_WBT_PYTHONPATH}}" {command}
@@ -2010,11 +2166,20 @@ def cmd_attest_milestone(
             f"{job['run_dir'].rstrip('/')}/milestones/model_{milestone}.json"
         ),
     }
+    runtime_raw, runtime_sha256 = _queue_runtime_payload()
     if not execute:
-        remote = _milestone_attestor_script(job, milestone)
+        remote = _milestone_attestor_script(
+            job,
+            milestone,
+            expected_claim_content_sha256="<immutable-claim-content-sha256>",
+            expected_job_id=job_id,
+            expected_runtime_sha256=runtime_sha256,
+            runtime_raw=runtime_raw,
+        )
         return {
             **base,
             "pod_resolution": "immutable queue claim at execute time",
+            "lean_queue_runtime_sha256": runtime_sha256,
             "remote_script": remote,
         }
     _occupancy, claims = live_snapshot(queue)
@@ -2023,7 +2188,15 @@ def cmd_attest_milestone(
         raise QueueError(f"{job_id} has no immutable queue claim on either Pod")
     _require_attestor_claim_matches_current_job(queue, job, claim)
     pod = claim["pod"]
-    remote = _milestone_attestor_script(job, milestone)
+    expected_claim_content_sha256 = claim["claim_content_sha256"]
+    remote = _milestone_attestor_script(
+        job,
+        milestone,
+        expected_claim_content_sha256=expected_claim_content_sha256,
+        expected_job_id=job_id,
+        expected_runtime_sha256=runtime_sha256,
+        runtime_raw=runtime_raw,
+    )
     output = _run_ssh(
         queue,
         pod,
@@ -2031,7 +2204,13 @@ def cmd_attest_milestone(
         timeout=120,
         phase=f"attest-milestone:{job_id}:{milestone}",
     )
-    return {**base, "pod": pod, "remote_output": output}
+    return {
+        **base,
+        "pod": pod,
+        "expected_launch_claim_content_sha256": expected_claim_content_sha256,
+        "lean_queue_runtime_sha256": runtime_sha256,
+        "remote_output": output,
+    }
 
 
 def cmd_plan(queue: dict[str, Any], *, live: bool) -> dict[str, Any]:

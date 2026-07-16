@@ -2672,6 +2672,16 @@ PID=PGID/starttime/binding、source=`704bf3a` 与 fatal=`0` 全部一致；六�
 诊断臂只到 `model_2200`，Pod2 最快两条只到 `model_5000`，尚未分别越过 exact-stop `model_3600` 和
 本母本 `+500/model_5200`，故当前没有可按预注册合同执行的行为淘汰。
 
+2026-07-16 11:29 CST 的只读刷新仍有 22 条 live/fatal0，Pod1/Pod2 三卡为 `4/3/4` 与 `4/4/3`，
+利用率 `89–98%`。Pod1 budget-v1 只到 `model_2400`，所以 `model_3600` exact-stop 尚未解锁；Pod2 两条
+quality-parent 后代已写 `model_5200`，但尚无 no-clobber milestone receipt。更重要的是，source/logger
+审计确认现役 completion/pre/post-fall 是跨历史 EMA，pre/post numerator 混入所有 termination；ready/balance
+又缺 phase eligible denominator/sum 和 content-bound parent baseline。这些字段不能重建预注册的两个独立
+100-update 窗，当前 22 条因此只能做结构/finite/合同淘汰，行为状态必须为
+“量尺不完整，继续训练”。专用 runner 新增的 source-bound milestone attestor 只闭合 checkpoint
+身份，不把描述性 EMA 升格成行为分数；未来必须用 consume-once per-update 整数账或 checkpoint-bound
+immutable exam 才能恢复自动行为淘汰。G05 保持 `Partial`。
+
 首次真实 continuation 又抓到 budget 字段语义错误：parent `1600` 配 CLI `max_iterations=3601` 时，RSL
 实际报告 `1601/5201`，说明该值是追加 update 数而非绝对终点。首 trainer 健康且 binding 正确；本地等待
 在 remote watchdog 前退出，未重发或 signal trainer。runner 已改为 CLI 传 `2001`，同时在 claim 中分别绑定

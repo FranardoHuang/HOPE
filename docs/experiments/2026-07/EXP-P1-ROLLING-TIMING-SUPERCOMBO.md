@@ -196,6 +196,26 @@ trainer/hard-contract/full-scene source gate 后，才可作为空槽的 matched
 均 absent。旧 budget-v1 诊断臂当前 `model_2200`，尚未到 `model_3600` exact-stop 门；Pod2 最快两条为
 `model_5000`，尚未到该母本 `+500/model_5200`。因此本轮没有达到行为淘汰条件，22 条继续。
 
+2026-07-16 11:29 CST 的下一轮每 Pod 单连接审计仍为 Pod1/Pod2 各 `11 live + 1 rejected`，并发
+`4/3/4` 与 `4/4/3`、fatal=`0`、GPU 利用率 `89–98%`。Pod1 的旧 budget-v1 臂只到
+`model_2400`，`model_3600` 不存在；Pod2 已有两份 `model_5200`，但没有对应 no-clobber milestone receipt。
+这两份文件的出现不是行为门通过，也不授权 stop。
+
+同轮 source/event-schema 审计进一步推翻了“现役 `704bf3a` 可以直接执行上面的 `+500/+1000` 行为淘汰”这一
+假设：completion 和 pre/post-fall 是跨全历史、逐 simulator step 衰减的 EMA，比值无法重建两个不重叠的
+100-update 窗；pre/post numerator 又包含所有 `terminated`，不是 `base_fell_tilt ∪ base_too_low` 的绝对
+物理跌倒 union。ready/balance tags 是瞬时全环境均值或 phase-diluted Reward，没有 recovery/hold eligible
+分母与累计和；parent 末窗也没有 content-bound 同语义 receipt。因此现役 22 条的行为状态统一为
+“量尺不完整，继续训练”：只允许 fatal/non-finite/合同/恢复错误等结构淘汰，不允许从历史 EMA
+自动停臂或写 Pareto 胜者。
+
+后续可比较 source 必须 consume-once 地逐 update 写整数 `swing_start`、exact completion、pre/post absolute
+physical-fall union、各 termination 原因，并为 ready/hold 的倾角、接触、滑动、base speed/station offset 写
+`eligible_count + sum`。materializer 再绑定 event/checkpoint/hard/claim/binding/parent SHA，严格消费两个各
+100 个唯一 update 的窗口；缺步、重复、非有限或缺字段只能发布“量尺不完整，继续训练”。这些
+整数不能倒灌进已经运行的 source；现役 checkpoint 若要提前排序，必须另立同题、不可变、checkpoint-bound
+行为卷，不能把描述性 TensorBoard 曲线升级成淘汰依据。
+
 ## 为什么 formal-ineligible
 
 每个 child 都从不同历史合同的 optimizer 热启动，并同时改动共享组合与 timing；`checkpoint_allow_contract_mismatch=true`

@@ -62,6 +62,7 @@ class ContinuationLaunchBatchError(ContinuationQueueError):
 
 
 CONFIRM = "SIM_ONLY_LAUNCH_ONE_ROLLING_CONTINUATION_JOB"
+ATTEST_CONFIRM = "SIM_ONLY_ATTEST_ONE_ROLLING_CONTINUATION_MILESTONE"
 QUEUE_PATH = Path("configs/phase1_rolling_timing_supercombo_20260716.yaml")
 EXPECTED_JOBS = 24
 EXPECTED_ROUNDS = 4
@@ -72,6 +73,60 @@ EXPECTED_OFFSETS = [200, 500, 1000, 2000]
 EXPECTED_ADDITIONAL_BUDGET = 2001
 ACTIVATED_PREREGISTRATION_STATUS = "activated_demo_only_inexact"
 PARENT_KEY_RE = re.compile(r"^pod([12])_[A-Za-z0-9_]+$")
+
+_ATTEST_CLAIM_PREFLIGHT = r"""
+import base64, hashlib, json, os, stat, sys
+
+spec = json.loads(base64.b64decode(sys.argv[1], validate=True))
+path = spec["claim_path"]
+flags = os.O_RDONLY | getattr(os, "O_NOFOLLOW", 0)
+fd = os.open(path, flags)
+try:
+    before = os.fstat(fd)
+    if not stat.S_ISREG(before.st_mode) or before.st_size <= 0:
+        raise RuntimeError("queue claim must be a non-empty regular file")
+    chunks = []
+    while True:
+        chunk = os.read(fd, 1024 * 1024)
+        if not chunk:
+            break
+        chunks.append(chunk)
+    after = os.fstat(fd)
+finally:
+    os.close(fd)
+outside = os.lstat(path)
+signature = lambda value: (
+    value.st_dev, value.st_ino, value.st_mode, value.st_size, value.st_mtime_ns
+)
+if signature(before) != signature(after) or signature(after) != signature(outside):
+    raise RuntimeError("queue claim changed during stable read")
+claim = json.loads(b"".join(chunks))
+if set(claim) != {"schema_version", "content", "content_sha256", "training_argv"}:
+    raise RuntimeError("queue claim top-level keys changed")
+if claim["schema_version"] != 2 or not isinstance(claim["content"], dict):
+    raise RuntimeError("queue claim schema changed")
+canonical = json.dumps(
+    claim["content"], allow_nan=False, ensure_ascii=False,
+    separators=(",", ":"), sort_keys=True,
+).encode("utf-8")
+digest = hashlib.sha256(canonical).hexdigest()
+if digest != claim["content_sha256"] or digest != spec["content_sha256"]:
+    raise RuntimeError("queue claim canonical digest differs from registered job")
+content = claim["content"]
+for key in ("job_id", "run_dir", "source", "pod", "gpu"):
+    if content.get(key) != spec[key]:
+        raise RuntimeError(f"queue claim {key} differs from registered job")
+argv = claim["training_argv"]
+if not isinstance(argv, list) or any(type(item) is not str for item in argv):
+    raise RuntimeError("queue claim argv must be a string list")
+for expected in (
+    "++training_queue_claim_path=" + spec["claim_path"],
+    "++training_run_binding_path=" + spec["binding_path"],
+):
+    if argv.count(expected) != 1:
+        raise RuntimeError("queue claim path override differs from registered job")
+print(json.dumps({"status": "claim_preflight_passed", "content_sha256": digest}))
+""".strip()
 
 # Every item below is generated once by this harness.  In particular, a YAML
 # row may not retain a fresh-run ``checkpoint_path=null`` and then silently
@@ -1094,6 +1149,12 @@ def _runner_payload() -> tuple[bytes, str]:
     return raw, hashlib.sha256(raw).hexdigest()
 
 
+def _lean_runtime_payload() -> tuple[bytes, str]:
+    """Return the reviewed runtime bytes that the remote attestor must use."""
+
+    return lean._queue_runtime_payload()
+
+
 def _parent_validation_command(
     job: Mapping[str, Any], runner_raw: bytes, runner_sha256: str
 ) -> str:
@@ -1394,6 +1455,147 @@ def cmd_inspect_parents(queue: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _attestor_claim_spec(
+    queue: Mapping[str, Any], job: Mapping[str, Any], slot: lean.Slot
+) -> dict[str, Any]:
+    blocking = _mapping(queue.get("blocking_contract"), "blocking_contract")
+    harness = _mapping(blocking.get("hotstart_harness"), "hotstart_harness")
+    launch_runner_sha256 = _sha256(
+        harness.get("runner_script_sha256"), "hotstart_harness.runner_script_sha256"
+    )
+    claim, _argv, _absolute = _launch_contract(
+        queue,
+        job,
+        slot,
+        runner_script_sha256=launch_runner_sha256,
+    )
+    content = claim["content"]
+    run_dir = job["run_dir"].rstrip("/")
+    return {
+        "claim_path": f"{run_dir}/queue_claim.json",
+        "binding_path": f"{run_dir}/run_binding.json",
+        "content_sha256": claim["content_sha256"],
+        "job_id": content["job_id"],
+        "run_dir": content["run_dir"],
+        "source": content["source"],
+        "pod": content["pod"],
+        "gpu": content["gpu"],
+    }
+
+
+def _milestone_attestor_script(
+    job: Mapping[str, Any],
+    milestone: int,
+    runtime_raw: bytes,
+    runtime_sha256: str,
+    claim_spec: Mapping[str, Any],
+) -> str:
+    source = job["source"]["checkout"].rstrip("/")
+    workdir = f"{source}/{lean.WBT_RELATIVE}"
+    runtime, materialize_runtime = lean._runtime_snapshot_materializer(
+        runtime_raw, runtime_sha256
+    )
+    binding = f"{job['run_dir'].rstrip('/')}/run_binding.json"
+    command = shlex.join(
+        [
+            lean.ISAAC_PYTHON,
+            runtime,
+            "attest",
+            "--binding",
+            binding,
+            "--milestone",
+            str(milestone),
+            "--expected-claim-content-sha256",
+            claim_spec["content_sha256"],
+            "--expected-job-id",
+            claim_spec["job_id"],
+            "--expected-runtime-sha256",
+            runtime_sha256,
+        ]
+    )
+    encoded_spec = base64.b64encode(
+        json.dumps(
+            claim_spec,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    ).decode("ascii")
+    claim_preflight = shlex.join(
+        [lean.ISAAC_PYTHON, "-c", _ATTEST_CLAIM_PREFLIGHT, encoded_spec]
+    )
+    return f"""set -euo pipefail
+test "$(git -C {shlex.quote(source)} rev-parse HEAD)" = {shlex.quote(job['source']['commit'])}
+test -z "$(git -C {shlex.quote(source)} status --porcelain)"
+{claim_preflight}
+{materialize_runtime}
+cd {shlex.quote(workdir)}
+source {shlex.quote(workdir + '/' + lean.SETUP_RELATIVE)}
+PYTHONPATH="${{HOPE_WBT_PYTHONPATH}}" {command}
+"""
+
+
+def cmd_attest_milestone(
+    queue: dict[str, Any],
+    *,
+    job_id: str,
+    milestone: int,
+    execute: bool,
+    confirm: str | None,
+) -> dict[str, Any]:
+    jobs = {job["id"]: job for job in queue["jobs"]}
+    job = jobs.get(job_id)
+    if job is None:
+        raise ContinuationQueueError(f"unknown queue job: {job_id}")
+    absolute = _absolute_schedule(job, _parent_records_from_job_context(job))
+    registered = absolute["milestones"]
+    if type(milestone) is not int or milestone not in registered:
+        raise ContinuationQueueError(
+            f"{job_id} milestone must be one of the registered absolute milestones {registered}"
+        )
+    if execute and confirm != ATTEST_CONFIRM:
+        raise ContinuationQueueError(
+            f"--execute requires --confirm {ATTEST_CONFIRM}"
+        )
+
+    required_slot = job["resource"]["required_slot"]
+    slot = _slots(queue).get(required_slot)
+    if slot is None:
+        raise ContinuationQueueError(
+            f"{job_id} required slot is not registered: {required_slot}"
+        )
+    runtime_raw, runtime_sha256 = _lean_runtime_payload()
+    run_dir = job["run_dir"].rstrip("/")
+    claim_spec = _attestor_claim_spec(queue, job, slot)
+    remote = _milestone_attestor_script(
+        job, milestone, runtime_raw, runtime_sha256, claim_spec
+    )
+    result = {
+        "mode": "attest-milestone",
+        "dry_run": not execute,
+        "job_id": job_id,
+        "pod": slot.pod,
+        "required_slot": required_slot,
+        "milestone": milestone,
+        "registered_absolute_milestones": registered,
+        "binding_path": f"{run_dir}/run_binding.json",
+        "receipt_path": f"{run_dir}/milestones/model_{milestone}.json",
+        "expected_launch_claim_content_sha256": claim_spec["content_sha256"],
+        "lean_queue_runtime_sha256": runtime_sha256,
+    }
+    if not execute:
+        return {**result, "remote_script": remote}
+    output = lean._run_ssh(
+        queue,
+        slot.pod,
+        remote,
+        timeout=120,
+        phase=f"rolling-attest-milestone:{job_id}:{milestone}",
+    )
+    return {**result, "remote_output": output}
+
+
 def cmd_fill(
     queue: dict[str, Any], *, count: int, execute: bool, confirm: str | None
 ) -> dict[str, Any]:
@@ -1539,6 +1741,11 @@ def _parser() -> argparse.ArgumentParser:
     sub.add_parser("validate")
     sub.add_parser("plan")
     sub.add_parser("inspect-parents")
+    attest = sub.add_parser("attest-milestone")
+    attest.add_argument("--job-id", required=True)
+    attest.add_argument("--milestone", type=int, required=True)
+    attest.add_argument("--execute", action="store_true")
+    attest.add_argument("--confirm")
     fill = sub.add_parser("fill")
     fill.add_argument("--count", type=int, required=True)
     fill.add_argument("--execute", action="store_true")
@@ -1557,6 +1764,14 @@ def main(argv: list[str] | None = None) -> int:
             result = cmd_plan(queue)
         elif args.mode == "inspect-parents":
             result = cmd_inspect_parents(queue)
+        elif args.mode == "attest-milestone":
+            result = cmd_attest_milestone(
+                queue,
+                job_id=args.job_id,
+                milestone=args.milestone,
+                execute=args.execute,
+                confirm=args.confirm,
+            )
         elif args.mode == "fill":
             result = cmd_fill(
                 queue,
