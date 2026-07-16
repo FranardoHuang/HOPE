@@ -1,9 +1,9 @@
 # EXP-P1-TASK-REVISION-CUTOVER
 
-Status: `blocked` — replacement source is implemented. `A5` proved the metric-shape fix crosses a
-real rollout and exits naturally, but its producer wrote the initial-TTS mixture as a key list
-instead of an object; the finalizer correctly rejected it. The producer and pre-write structural
-gate are fixed in source and await a fresh `A6`; there is still no accepted behavior result.
+Status: `activation-ready` — `A6` passed the 4096-env, two-update generic and task-revision
+full-scene gates with a finite checkpoint, exact integer ledger and live final-precontact revisions.
+The 22 delay-zero cells are unblocked; the two non-atomic delayed-transport cells remain NO-LAUNCH.
+This is runtime/harness acceptance, not a behavior winner or 0.5-second return result.
 
 - Human owner: Franco
 - Executor: Codex
@@ -126,19 +126,24 @@ does not change the legacy generic converter, preserving planner-OFF contract by
 malformed shape is now a fail-closed regression. A fresh source commit plus a unique no-clobber
 `A6` attempt are still required.
 
+`A6` then passed both no-clobber finalizers. Its model-1 checkpoint contains 74 floating tensors
+and 1,762,715 floating elements with zero non-finite values; schema-3 hard contract SHA is
+`74d7a884…cf45`, fatal count is zero, and the exact process group plus NVML context are naturally
+empty. Across exact update ids 0 and 1 it sampled all four preparation-time components, including
+2,406 exact-0.5 samples and 1,772 sub-0.5 stress samples. It recorded 176,387 revision attempts,
+165,417 accepts, and 839 accepted/actor-visible revisions on the last precontact interval. The
+specialized receipt file/content SHAs are `524b6923…f46c` / `77db7925…d54a`; queue validation now
+returns `activation_ready=true`, 22 launchable cells and no blockers. These two short updates prove
+mechanism activation only; their one virtual capture and zero legal returns are not a behavior
+verdict.
+
 ## Acceptance sequence
 
-1. Finish independent ledger and whole-chain producer→wire→C++→training→export red-team.
-2. Merge source and synchronized interface/operation/Gate docs to `main` only after the full local
-   regression is green.
-3. In a clean detached Linux source, run one no-clobber full-scene Isaac probe and verify natural
-   exit, finite checkpoint, schema-3 hard contract, exact mixture partition, accepted same-task
-   revisions and per-update integer ledger.
-4. Run the K100 0.5-second exam and the no-clobber TOPP safety certificate. Record failures as
+1. Launch the 22 activated delay-zero cells in cross-GPU rounds; keep the two transport cells
+   blocked and verify every child resumes full policy/value/optimizer state.
+2. At +200 verify structure/mechanism only; at +500/+1000 consume two complete integer windows and
+   prune only under the registered rules, preserving exact-0.5 and stochastic-timing candidates.
+3. Run the K100 0.5-second exam and the no-clobber TOPP safety certificate. Record failures as
    failures; do not replace either with training Reward or a fixed clock multiplier.
-5. Only then launch the 22 scientifically authorized delay-zero rows from the 24-row, one-seed
-   preregistration round-robin across the six GPUs and reactivate one recurring monitor. The two
-   delay-two rows remain NO-LAUNCH until coupled transport exists. Pruning uses two complete exact
-   outcome windows, never legacy EMA.
-6. Vendor MuJoCo Gate3/Gate3B remains the final judge; no real-robot command is allowed by this
+4. Vendor MuJoCo Gate3/Gate3B remains the final judge; no real-robot command is allowed by this
    experiment.

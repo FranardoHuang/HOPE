@@ -46,6 +46,17 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-17, task-revision `A6` full-scene gate passed; Gate remains `Partial`):
+
+- The clean `b1f5a380` source passed one 4096-env/two-update generic and specialized probe on Pod1
+  GPU1. The checkpoint is finite (74 floating tensors / 1,762,715 elements), schema-3 hard contract
+  and lineage are bound, fatal count is zero, and exact PID/NVML state is naturally absent.
+- All four preparation-time strata were observed; exact 0.5 seconds has 2,406 samples. Same-ball
+  revision accounting is exact (`176,387 = 165,417 accepted + 10,970 rejected`), including 839
+  accepted and actor-visible last-precontact updates. The specialized receipt content SHA is
+  `77db7925…d54a`; the queue is activation-ready for 22 delay-zero cells. This proves runtime
+  mechanics only, not 0.5-second return ability or a winning policy.
+
 Follow-up note (2026-07-17, task-revision `A5` reached rollout but hard-contract producer failed;
 Gate remains `Partial`):
 

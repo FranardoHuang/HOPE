@@ -85,6 +85,28 @@ def _first_launchable(queue: dict) -> dict:
     return next(job for job in queue["jobs"] if job["scientific_launch_authorized"])
 
 
+def _as_pending(queue: dict) -> dict:
+    """Return a synthetic pre-activation state for fail-closed negative tests."""
+
+    queue["launch_authorized"] = False
+    queue["preregistration_status"] = Q.PENDING_STATUS
+    queue["namespace_contract"]["status"] = Q.PENDING_STATUS
+    blocking = queue["blocking_contract"]
+    blocking["source_full_scene_probe_evidence"] = "PENDING_FULL_SCENE_PROBE"
+    blocking["task_revision_full_scene_probe_evidence"] = (
+        "PENDING_TASK_REVISION_PROBE"
+    )
+    blocking["hotstart_harness"] = "PENDING_REVIEWED_SUCCESSOR_HARNESS_BINDING"
+    for job in queue["jobs"]:
+        job["status"] = "blocked"
+        job["blocker"] = (
+            Q.TRANSPORT_BLOCKER
+            if not job["scientific_launch_authorized"]
+            else "PENDING synthetic activation evidence"
+        )
+    return queue
+
+
 def _activated_value() -> dict:
     value = _raw_queue()
     commit = "a" * 40
@@ -139,8 +161,18 @@ def _activated_value() -> dict:
     return value
 
 
-def test_pending_queue_is_valid_but_not_activation_ready():
+def test_checked_in_queue_is_activated_and_ready():
     queue = Q.load_queue(QUEUE)
+    result = Q.cmd_validate(queue)
+    assert result["activation_ready"] is True
+    assert result["pending"] is False
+    assert result["blockers"] == []
+    assert sum(job["status"] == "ready" for job in queue["jobs"]) == 22
+    assert sum(job["status"] == "blocked" for job in queue["jobs"]) == 2
+
+
+def test_synthetic_pending_queue_is_valid_but_not_activation_ready():
+    queue = _as_pending(Q.load_queue(QUEUE))
     result = Q.cmd_validate(queue)
     assert result["schema_valid"] is True
     assert result["successor_contract_valid"] is True
@@ -506,7 +538,7 @@ def test_successor_contract_fails_closed_on_scientific_drift(tmp_path, mutate, m
 
 
 def test_pending_fill_fails_before_any_ssh(monkeypatch):
-    queue = Q.load_queue(QUEUE)
+    queue = _as_pending(Q.load_queue(QUEUE))
     calls = []
     monkeypatch.setattr(
         Q.continuation.lean,
@@ -559,6 +591,9 @@ def test_transport_blocked_job_cannot_prepare_successor_asset(monkeypatch):
 
 def test_generic_probe_pass_cannot_bypass_specialized_probe_blocker(monkeypatch):
     queue = Q.load_queue(QUEUE)
+    queue["blocking_contract"]["task_revision_full_scene_probe_evidence"] = (
+        "PENDING_TASK_REVISION_PROBE"
+    )
     monkeypatch.setattr(Q.continuation, "activation_blockers", lambda _queue: [])
     blockers = Q.successor_activation_blockers(queue)
     assert blockers == [
@@ -813,7 +848,7 @@ def test_full_scene_probe_delegates_to_reviewed_generic_harness(monkeypatch):
 
 
 def test_behavior_dry_run_never_ssh_and_exposes_pending_blockers(monkeypatch):
-    queue = Q.load_queue(QUEUE)
+    queue = _as_pending(Q.load_queue(QUEUE))
     calls = []
     monkeypatch.setattr(
         Q.continuation.lean,
@@ -836,7 +871,7 @@ def test_behavior_dry_run_never_ssh_and_exposes_pending_blockers(monkeypatch):
 
 
 def test_exact_stop_is_explicit_dry_run_only_and_never_ssh(monkeypatch):
-    queue = Q.load_queue(QUEUE)
+    queue = _as_pending(Q.load_queue(QUEUE))
     calls = []
     monkeypatch.setattr(
         Q.continuation.lean,

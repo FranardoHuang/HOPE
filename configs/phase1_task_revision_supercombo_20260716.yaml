@@ -1,7 +1,7 @@
 schema_version: 1
 simulation_only: true
-launch_authorized: false
-preregistration_status: pending_source_commit_and_full_scene_probe
+launch_authorized: true
+preregistration_status: activated_demo_only_inexact
 formal_evidence_eligible: false
 
 ssh:
@@ -23,7 +23,7 @@ dispatch_pods: [pod1, pod2]
 
 namespace_contract:
   root: /workspace/codexschema/phase1_task_revision_supercombo_20260716
-  status: pending_source_commit_and_full_scene_probe
+  status: activated_no_clobber
   no_clobber: true
   predecessor_namespace_reuse_forbidden: true
 
@@ -36,9 +36,45 @@ blocking_contract:
     - dry_run_plan_is_exactly_four_rounds_over_six_gpus
   source_checkout: /workspace/codexschema/nohope_task_revision_b1f5a38
   source_commit: b1f5a3803efa14f91e594912959cec2de473a5a6
-  source_full_scene_probe_evidence: PENDING_FULL_SCENE_PROBE
-  task_revision_full_scene_probe_evidence: PENDING_TASK_REVISION_PROBE
-  hotstart_harness: PENDING_REVIEWED_SUCCESSOR_HARNESS_BINDING
+  source_full_scene_probe_evidence:
+    pod: pod1
+    gpu: 1
+    attempt_id: b1f5a38_probe_a6
+    run_dir: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/_full_scene_probes/taskrev_p1_core_high_noise/b1f5a3803efa14f91e594912959cec2de473a5a6/pod1/gpu1/b1f5a38_probe_a6
+    training_runtime_status: passed_natural_exit_rc0
+    first_iteration_observed: true
+    checkpoint_iteration: 1
+    checkpoint_sha256: f9906e1abe3057c7ce8327e2a80c900814bb82b27baffa9e03308e85d2255015
+    hard_contract_sha256: 74d7a8844682dfdb0859301381ec1ac920d354904ac44b47ea7143e33bc7cf45
+    tensor_nonfinite_count: 0
+    fatal_count: 0
+    training_contract_lineage_exact: 1
+    process_group_naturally_empty: true
+    result_path: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/_full_scene_probes/taskrev_p1_core_high_noise/b1f5a3803efa14f91e594912959cec2de473a5a6/pod1/gpu1/b1f5a38_probe_a6/probe_result.json
+    result_file_sha256: 3052fb4323d7e3ae5b11e931ca2c592d595153e0f67e548d83a09515f0977fbd
+    result_content_sha256: fb04dcf87b2e12ef2ec6edf948fb6380db2fcb54d45632410bef5846d9f352da
+  task_revision_full_scene_probe_evidence:
+    status: passed
+    unlock_authorized: true
+    representative_job_id: taskrev_p1_core_high_noise
+    initial_tts_mixture_all_strata_observed: true
+    planner_revision_attempt_accept_reject_accounting_exact: true
+    planner_revision_accepted_observed: true
+    planner_revision_last_precontact_accepted_observed: true
+    planner_revision_actor_visible_observed: true
+    planner_revision_last_precontact_actor_visible_observed: true
+    exact_behavior_ledger_schema_complete: true
+    receipt_path: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/_full_scene_probes/taskrev_p1_core_high_noise/b1f5a3803efa14f91e594912959cec2de473a5a6/pod1/gpu1/b1f5a38_probe_a6/task_revision_probe_result.json
+    receipt_file_sha256: 524b692331b5529b7368d0e80346c1b65309367e082450c5880a7b484ef6f46c
+    receipt_content_sha256: 77db79258b6b50fa6fa47e0539f32d4e9d0a4958269139eb42c39bd41e24d54a
+  hotstart_harness:
+    source_commit: 718be0b835bb1078b74c798963245a1d4145271b
+    runner_script_sha256: f014b34088f50d3c5e5998518c1d7ed2fb73b5fef4a5e66b9863cb0589344305
+    reviewed_tests_passed: true
+    reviewed_test_count: 203
+    parent_runtime_reverified: true
+    unique_parent_count: 3
+    optimizer_resume_eligible_count: 3
   activation_is_manual: true
   automatic_launch: false
   automatic_retry: false
@@ -427,8 +463,8 @@ x-pod2-gpu2: &pod2_gpu2 {policy: dispatch_gpu_round_robin, required_slot: pod2/g
 
 x-pod1-job: &pod1_job
   action: *action
-  status: blocked
-  blocker: *blocker
+  status: ready
+  blocker: null
   motion: *motion
   bank: *bank
   exam: *exam
@@ -445,8 +481,8 @@ x-pod1-job: &pod1_job
   formal_evidence_eligible: false
 x-pod2-quality-job: &pod2_quality_job
   action: *action
-  status: blocked
-  blocker: *blocker
+  status: ready
+  blocker: null
   motion: *motion
   bank: *bank
   exam: *exam
@@ -463,8 +499,8 @@ x-pod2-quality-job: &pod2_quality_job
   formal_evidence_eligible: false
 x-pod2-continuous-job: &pod2_continuous_job
   action: *action
-  status: blocked
-  blocker: *blocker
+  status: ready
+  blocker: null
   motion: *motion
   bank: *bank
   exam: *exam
@@ -491,6 +527,8 @@ jobs:
     matched_timestamp_job: taskrev_p1_uncompensated_negative
     scientific_launch_authorized: false
     scientific_blocker: governor_actor_transport_not_atomic
+    status: blocked
+    blocker: governor_actor_transport_not_atomic
     recipe:
       base: *base
       delta: [*planner_balanced_low, task.racket.target_delay_steps=2]
@@ -515,6 +553,8 @@ jobs:
     matched_timestamp_job: taskrev_p1_core_low_noise
     scientific_launch_authorized: false
     scientific_blocker: governor_actor_transport_not_atomic
+    status: blocked
+    blocker: governor_actor_transport_not_atomic
     recipe:
       base: *base
       delta: [*planner_balanced_low, task.racket.target_delay_steps=2, ++task.racket.target_delay_tts_mode=uncompensated]

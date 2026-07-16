@@ -591,6 +591,11 @@ python3 scripts/run_phase1_task_revision_supercombo_queue.py \
 `training_contract.json`、构造 runner 之前调用 schema-3 structure validator；任一失败都必须在新
 attempt namespace 中重跑 full-scene，不能放宽 finalizer。
 
+`A6` 已按该 successor 通过：model-1 finite、hard schema-3/lineage/fatal/process 终档正确，四个 TTS
+mixture 分层、revision 守恒、最后 precontact accepted/actor-visible 和 exact update ledger 全部被
+specialized consumer 观察到。激活证据只授权 22 条 `target_delay_steps=0` 格；两条 delay-two 格仍须
+保持 `governor_actor_transport_not_atomic`，不得随全局激活变成 ready。A6 不是 K100 0.5 秒行为成绩。
+
 科学 run 的行为比较不读 TensorBoard EMA，而只消费 runner 每个 PPO update 发出的唯一
 `HOPE_EXACT_BEHAVIOR_UPDATE_JSON`。absolute milestone 可从 `plan` 读取。先只读 inspect；需要创建 checkpoint
 和行为 receipt 时使用 attest：

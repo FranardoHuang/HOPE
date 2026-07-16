@@ -13,6 +13,13 @@
 
 ## 2026-07-17
 
+- task-revision `A6` 已通过 4096-env 两-update generic + specialized full-scene 门：finite
+  model-1、fatal0、schema-3/lineage 正确、进程/NVML 自然清空；四个准备时间分层全覆盖（exact 0.5 秒
+  `2,406` 样本），同球 revision `176,387=165,417+10,970`，最后触球前接受且 actor 可见 `839`。
+  specialized receipt content SHA=`77db7925…d54a`；队列现为 22 格 ready、2 格 transport NO-LAUNCH。
+  这只解锁训练，不是行为或半秒回球结论。见
+  [task-revision cutover](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md)。
+
 - task-revision full-scene `A5` 已越过 A4 的 CUDA metric-shape 根因、进入真实 PPO iteration 并自然
   完成两次 update，但 finalizer 正确拒绝其 malformed hard contract：Hydra mixture dict 被旧通用
   converter 写成 key list。修复版改从已验证 runtime object 生成 canonical object，并在 sidecar/runner
