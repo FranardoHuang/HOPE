@@ -529,6 +529,12 @@ checkpoint/hard/原始 claim/binding/RSL directory、专用 runner bytes、完�
 `formal_evidence_eligible=false`。base recipe 与 job delta 先做确定性 last-write flatten，因此同一个 Hydra key
 不能在最终 argv 中出现两次。
 
+RSL-RL 的 `max_iterations` 在 resume 时表示**从 parent 之后再跑多少 update**，不是绝对终点。runner
+因此给 trainer 传 `2001`，同时在 plan/claim 中记录 absolute exclusive bound：parent `1600` 的 denominator
+是 `3601`、最后预期 checkpoint 是 `3600`，首个 marker 是 `1601/3601`。把 `3601` 直接传给 trainer 会实际
+跑到 `5201`；这一真实反例已经进入负测试，
+不能再靠字段名猜语义。
+
 激活前先 dry-run；真实发射使用独立确认词：
 
 ```bash

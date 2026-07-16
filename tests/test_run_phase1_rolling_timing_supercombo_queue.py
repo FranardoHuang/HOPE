@@ -263,12 +263,12 @@ def test_exact_24_job_four_round_layout_and_absolute_plan(tmp_path):
     ]
     pod1 = plan["jobs"][0]
     assert pod1["parent_iteration"] == 1600
-    assert pod1["max_iterations"] == 3601
+    assert pod1["absolute_iteration_exclusive_bound"] == 3601
     assert pod1["milestones"] == [1800, 2100, 2600, 3600]
     assert pod1["absolute_checkpoint_filenames"][-1] == "model_3600.pt"
     pod2 = plan["jobs"][3]
     assert pod2["parent_iteration"] == 4700
-    assert pod2["max_iterations"] == 6701
+    assert pod2["absolute_iteration_exclusive_bound"] == 6701
     assert pod2["milestones"] == [4900, 5200, 5700, 6700]
 
 
@@ -559,7 +559,7 @@ def test_claim_uses_absolute_budget_and_one_harness_checkpoint(tmp_path):
     job = queue["jobs"][0]
     slot = Q._slots(queue)[job["resource"]["required_slot"]]
     claim, argv, absolute = Q._launch_contract(queue, job, slot)
-    assert absolute["max_iterations"] == 3601
+    assert absolute["absolute_iteration_exclusive_bound"] == 3601
     assert claim["content"]["budget"]["milestones"] == [1800, 2100, 2600, 3600]
     assert claim["content"]["formal_evidence_eligible"] is False
     assert claim["content"]["continuation"]["descendant_exact_eligible"] is False
@@ -587,7 +587,10 @@ def test_claim_uses_absolute_budget_and_one_harness_checkpoint(tmp_path):
     keys = [Q.lean._override_key(value, "argv") for value in argv[2:]]
     assert len(keys) == len(set(keys))
     assert keys.count("checkpoint_path") == 1
-    assert f"max_iterations=3601" in argv
+    assert f"max_iterations=2001" in argv
+    assert "max_iterations=3601" not in argv
+    assert claim["content"]["budget"]["trainer_max_iterations_arg"] == 2001
+    assert claim["content"]["budget"]["absolute_iteration_exclusive_bound"] == 3601
     optimizer_flags = {
         "checkpoint_tolerant=false",
         "checkpoint_allow_missing_contract=false",

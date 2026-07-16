@@ -607,9 +607,11 @@ def _absolute_schedule(
 ) -> dict[str, Any]:
     parent_name = job["warm_start"]["parent"]
     parent_iteration = parents[parent_name]["selected_embedded_iteration"]
-    max_iterations = parent_iteration + job["budget"]["max_iterations"]
+    absolute_iteration_exclusive_bound = (
+        parent_iteration + job["budget"]["max_iterations"]
+    )
     milestones = [parent_iteration + offset for offset in job["milestones"]]
-    if milestones[-1] >= max_iterations:
+    if milestones[-1] >= absolute_iteration_exclusive_bound:
         raise ContinuationQueueError(
             f"{job['id']} terminal milestone is unreachable after absolute conversion"
         )
@@ -621,7 +623,7 @@ def _absolute_schedule(
         "parent": parent_name,
         "parent_iteration": parent_iteration,
         "additional_iterations": job["budget"]["max_iterations"],
-        "max_iterations": max_iterations,
+        "absolute_iteration_exclusive_bound": absolute_iteration_exclusive_bound,
         "milestones": milestones,
     }
 
@@ -686,7 +688,10 @@ def _training_argv(
             f"{job['bank']['train_arg']}={job['bank']['train_path']}",
             f"seed={job['seed']}",
             f"num_envs={job['budget']['num_envs']}",
-            f"max_iterations={absolute['max_iterations']}",
+            # RSL-RL interprets max_iterations as the number of updates to run
+            # *after* loading a resumed checkpoint.  The human-facing plan and
+            # milestone filenames remain absolute iterations.
+            f"max_iterations={absolute['additional_iterations']}",
             f"algo.runner.save_interval={job['budget']['save_interval']}",
             f"run_name={job['run_name']}",
             "device=cuda:0",
@@ -779,7 +784,10 @@ def _launch_contract(
         "budget": {
             "num_envs": job["budget"]["num_envs"],
             "additional_iterations": absolute["additional_iterations"],
-            "max_iterations": absolute["max_iterations"],
+            "trainer_max_iterations_arg": absolute["additional_iterations"],
+            "absolute_iteration_exclusive_bound": absolute[
+                "absolute_iteration_exclusive_bound"
+            ],
             "save_interval": job["budget"]["save_interval"],
             "milestones": absolute["milestones"],
             "milestone_offsets": list(job["milestones"]),
@@ -1139,7 +1147,10 @@ def _launch_script(
         lean._child_env_command(argv, slot.gpu)
     ) + f" {lean.GPU_LAUNCH_LOCK_FD}>&-"
     first_iteration = absolute["parent_iteration"] + 1
-    marker = f"Learning iteration {first_iteration}/{absolute['max_iterations']}"
+    marker = (
+        "Learning iteration "
+        f"{first_iteration}/{absolute['absolute_iteration_exclusive_bound']}"
+    )
     body = _doctor_body(
         queue, job, slot, argv, runner_raw, runner_sha256
     ) + f"""
@@ -1153,7 +1164,7 @@ test ! -e {shlex.quote(run_dir + '/run_binding.json')}
 export KIT_BOOT_MARKER={shlex.quote(marker)}
 export KIT_BOOT_TIMEOUT_S={lean.KIT_BOOT_TIMEOUT_SECONDS}
 {launch}
-printf '%s\n' {shlex.quote(f"phase=first_iter expected_iteration={first_iteration} absolute_max_iterations={absolute['max_iterations']} parent_iteration={absolute['parent_iteration']}")} >> {shlex.quote(run_dir + '/run.log.launch')}
+printf '%s\n' {shlex.quote(f"phase=first_iter expected_iteration={first_iteration} absolute_iteration_exclusive_bound={absolute['absolute_iteration_exclusive_bound']} parent_iteration={absolute['parent_iteration']}")} >> {shlex.quote(run_dir + '/run.log.launch')}
 """
     return lean._gpu_launch_lock_script(slot, body)
 

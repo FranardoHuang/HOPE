@@ -225,3 +225,16 @@ trainer/hard-contract/full-scene source gate 后，才可作为空槽的 matched
 - 决定：`activated / demo-only inexact engineering portfolio`
 - 是否纳入当前 setting：`yes, for the 24-run overnight engineering funnel only`
 - 下一个 gate：activated queue dry-run → 24 个 child 首迭代/identity/optimizer lineage
+
+## 点火首条抓到的 resume budget 语义反例
+
+第一条 Pod1 约 1 秒格按 runner v1 点火后，parent=`1600`、CLI `max_iterations=3601` 的真实 RSL 日志写成
+`Learning iteration 1601/5201`，而不是预期 `1601/3601`。这证明 RSL 把该 CLI 字段解释为恢复后的**追加
+update 数**。trainer 本身健康、binding/identity 正确且持续产生日志；本地 fill/SSH 已在远端 boot watchdog
+动作前中止，避免错误 marker 把健康 PGID 当失败清理。没有重发或覆盖该 namespace。
+
+runner v2 改为传 `2001`，plan/claim 另记 absolute exclusive bound=`parent+2001`，最后 checkpoint 是
+`parent+2000`；所以剩余 23 格的首 marker 与终档分别仍是 parent+1 与 parent+2000。首条 v1 只保留为
+demo-only extra-budget schedule 诊断；它在目标
+`model_3600` 之前的 checkpoint 仍可看候选方向，但不能与 v2 格作 matched learning-schedule 因果比较，且到
+`model_3600` 后按 exact identity 收口，不消费到 `5201`。这不是自动 retry 授权。

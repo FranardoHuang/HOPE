@@ -2636,3 +2636,10 @@ argv 和自身 bytes，并强制同 Pod parent、六卡四轮、每卡四条。�
 `17` entries / `1` group。队列静态 dry-run 为四轮各六条、每槽四条，现只授权本轮 demo-only inexact
 仿真续训；尚未启动 child 或观察首迭代，因此 G05 保持 `Partial`。操作见
 [rolling timing 双 Pod 严格续训](../operations/run_lean_training_queue.md#rolling-timing-双-pod-严格续训2026-07-16)。
+
+首次真实 continuation 又抓到 budget 字段语义错误：parent `1600` 配 CLI `max_iterations=3601` 时，RSL
+实际报告 `1601/5201`，说明该值是追加 update 数而非绝对终点。首 trainer 健康且 binding 正确；本地等待
+在 remote watchdog 前退出，未重发或 signal trainer。runner 已改为 CLI 传 `2001`，同时在 claim 中分别绑定
+trainer arg=`2001`、absolute exclusive bound=`3601` 与最后 checkpoint=`3600`，并保留 first
+marker=`1601/3601`。首条旧 schedule 只能作
+inexact 方向诊断，到 `model_3600` 精确收口；剩余格使用修正合同。G05 仍为 `Partial`。

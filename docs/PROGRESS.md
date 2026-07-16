@@ -13,6 +13,13 @@
 
 ## 2026-07-16
 
+- rolling continuation 首条真实点火抓到 RSL resume budget 语义：parent `1600` 下 CLI
+  `max_iterations=3601` 实际日志为 `1601/5201`，字段表示追加 updates 而非绝对终点。本地等待已在 remote
+  watchdog 前退出，健康 trainer/证据保留且未重发。runner 修为 trainer arg `2001` + claim absolute
+  exclusive bound `3601` / 最后 checkpoint `3600`；首条仅作 schedule-v1 inexact 诊断并计划在
+  `model_3600` 精确收口，其余格使用修正合同。
+  详见[组合卷宗](experiments/2026-07/EXP-P1-ROLLING-TIMING-SUPERCOMBO.md)。
+
 - 24 格 rolling timing 组合有了独立 continuation runner：相对 parent 的
   `+200/+500/+1000/+2000` 会转为绝对 checkpoint，三份 parent 必须在原 Pod 通过 checkpoint/hard/claim/
   binding、actor+critic、finite 与完整 optimizer 只读核验；激活状态、full-scene evidence 和 runner bytes
