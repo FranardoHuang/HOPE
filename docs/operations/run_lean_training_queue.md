@@ -504,6 +504,53 @@ stale watchdog；P1 不改变其 source-pinned/exact-PGID 语义，也不会让 
 task/assets/plant、完整 recipe 与正式 `num_envs`。c7 canary 只闭合旧终档语义；strict caeb probe 已按本页
 证据闭合当前 4096-env full-scene 启动/终档门，但尚无科学 trainer 或 Reward 结果。
 
+## Rolling timing 双 Pod 严格续训（2026-07-16）
+
+快速动作、滚动剩余击球时间和预测扰动的 24 格组合不允许走 fresh-only generic runner，也不复用旧的
+demo-hotstart snapshot。专用入口先在本机校验冻结 YAML，再对每台 Pod 只建立一次只读 SSH，核验三份唯一 parent：
+
+```bash
+python3 scripts/run_phase1_rolling_timing_supercombo_queue.py \
+  --queue configs/phase1_rolling_timing_supercombo_20260716.yaml validate
+python3 scripts/run_phase1_rolling_timing_supercombo_queue.py \
+  --queue configs/phase1_rolling_timing_supercombo_20260716.yaml plan
+python3 scripts/run_phase1_rolling_timing_supercombo_queue.py \
+  --queue configs/phase1_rolling_timing_supercombo_20260716.yaml inspect-parents
+```
+
+`inspect-parents` 完全只读且允许队列尚未激活。它按 YAML 的 exact path/SHA 检查 parent checkpoint、相邻 hard
+contract、原始 queue claim、run binding、embedded iteration、全部 floating tensor finite，以及同时存在的
+`actor.*`/`critic.*` 权重和非空 optimizer `state/param_groups`；同一 Pod 的多个 parent 在一个连接内顺序检查。timeout 直接返回 UNKNOWN/
+失败，不重放、不写远端。
+
+专用 runner 将相对 parent 的 `+200/+500/+1000/+2000` 转成绝对 checkpoint。例如 parent=`model_1600`
+对应 `1800/2100/2600/3600`；parent=`model_4700` 对应 `4900/5200/5700/6700`。child claim 同时绑定 parent
+checkpoint/hard/原始 claim/binding/RSL directory、专用 runner bytes、完整最终 Hydra argv 与
+`formal_evidence_eligible=false`。base recipe 与 job delta 先做确定性 last-write flatten，因此同一个 Hydra key
+不能在最终 argv 中出现两次。
+
+激活前先 dry-run；真实发射使用独立确认词：
+
+```bash
+python3 scripts/run_phase1_rolling_timing_supercombo_queue.py \
+  --queue configs/phase1_rolling_timing_supercombo_20260716.yaml fill --count 24
+python3 scripts/run_phase1_rolling_timing_supercombo_queue.py \
+  --queue configs/phase1_rolling_timing_supercombo_20260716.yaml \
+  fill --count 24 --execute \
+  --confirm SIM_ONLY_LAUNCH_ONE_ROLLING_CONTINUATION_JOB
+```
+
+runner 按六张卡一圈一条的冻结顺序发射，每张卡上限四条；每条都在创建 run 前原子核验 source/ignored-asset
+receipt/Hydra/parent/GPU 容量。父 checkpoint 必须具备 full-state optimizer 恢复资格，child 首个 learning
+iteration 必须严格等于 parent iteration `+1`；这两份证据不混写成日志中的虚构 `optimizer=resumed` marker。
+失败只保全证据，不自动 retry、迁移或 signal 已有 trainer。
+
+运行态每 30 分钟按队列内 `pruning_contract` 审计。`+200` 只淘汰结构/合同/non-finite/fatal；`+500`
+只允许淘汰连续两窗 dense 明显崩坏，不能把缺少 eligible hit 的稀疏零值判失败；`+1000` 仅在同 parent
+内按 completion、signed composite、解析回球和 pre/post fall 作容差 Pareto 淘汰，并保留时间覆盖。停臂只按
+绑定 numeric PGID 精确处理，不自动 retry。释放的吞吐先加速幸存者；新格只有另有预注册且 source/full-scene
+门已过才可占空槽。
+
 ## 验证
 
 ```bash
@@ -513,9 +560,11 @@ python3 -m pytest -q \
   hope_training/whole_body_tracking/tests/test_lean_queue_runtime.py \
   hope_training/whole_body_tracking/tests/test_full_scene_probe_runtime.py \
   tests/test_run_lean_training_queue.py \
+  tests/test_run_phase1_rolling_timing_supercombo_queue.py \
   hope_training/whole_body_tracking/tests/test_training_launch_claim.py \
   hope_training/whole_body_tracking/tests/test_training_thread_caps.py
 python3 -m py_compile scripts/run_lean_training_queue.py \
+  scripts/run_phase1_rolling_timing_supercombo_queue.py \
   hope_training/whole_body_tracking/scripts/exact_process_group.py \
   hope_training/whole_body_tracking/scripts/train.py \
   hope_training/whole_body_tracking/scripts/lean_queue_runtime.py \

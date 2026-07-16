@@ -198,6 +198,54 @@ decision_contract:
   delay_stress_is_venue_calibrated: false
   prediction_jitter_stress_is_venue_calibrated: false
 
+pruning_contract:
+  cadence_minutes: 30
+  purpose: release_throughput_from_clear_losers_without_censoring_sparse_learning
+  metric_window_updates: 100
+  exact_process_management_only: true
+  automatic_retry: false
+  plus_200:
+    behavior_pruning_authorized: false
+    stop_only_for:
+      - nonfinite_checkpoint_or_runtime_tensor
+      - fatal_oom_traceback_malloc_or_killed_exit
+      - checkpoint_parent_claim_binding_or_optimizer_resume_mismatch
+      - configured_dense_mechanism_absent_from_hard_contract_or_runtime_observer
+  plus_500:
+    sparse_zero_is_failure: false
+    stop_for_dense_collapse_only_if_all_true:
+      - two_consecutive_windows_complete
+      - completion_rate_below_0p40
+      - combined_pre_post_fall_rate_above_0p10
+      - no_dense_balance_or_tracking_metric_improves_over_the_same_parent_snapshot
+    keep_if_sparse_eligibility_is_missing: true
+  plus_1000:
+    comparison_scope: same_parent_only
+    objectives_maximize:
+      - completion_rate
+      - strike_composite_success_exact
+      - virtual_rally_return_rate
+    objectives_minimize:
+      - pre_strike_fall_rate
+      - post_strike_fall_rate
+    pareto_tolerance_absolute:
+      completion_rate: 0.02
+      strike_composite_success_exact: 0.03
+      virtual_rally_return_rate: 0.03
+      pre_strike_fall_rate: 0.01
+      post_strike_fall_rate: 0.01
+    stop_only_if_dominated_in_all_observed_objectives_and_strictly_worse_in_at_least_two: true
+    minimum_survivors_per_parent: 2
+    preserve_at_least_one_about_0p5s_candidate_globally: true
+    preserve_at_least_one_stochastic_timing_candidate_globally: true
+  plus_2000:
+    terminal_portfolio_ranking: true
+    vendor_mujoco_required_before_demo_winner_claim: true
+  freed_gpu_policy:
+    first_effect: remaining_survivors_receive_higher_aggregate_throughput
+    replacement_allowed_only_if_preregistered_and_source_gate_passed: true
+    priority_replacement: matched_no_force_vs_lateral_torso_force_pair_after_trainer_contract_passes
+
 x-action: &action signed_face_v4rg_shared_face
 x-motion: &motion
   action: signed_face_v4rg_shared_face

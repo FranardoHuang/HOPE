@@ -2625,3 +2625,11 @@ schema-3 hard contract、fresh lineage=1、fatal0 与自然空进程组均通过
 后第一次 `/proc` 读取竞态令 exit receipt 的 trainer starttime 为 null，而 trainer-owned binding 有真实
 starttime，故 immutable result 按身份不一致失败。该失败属于 supervisor 取证基础设施，不推翻已经独立
 复核的 scene/training/checkpoint；不自动重跑 probe，另修 bounded identity capture。G05 仍为 `Partial`。
+
+24 格 rolling 续训另有专用 fail-closed runner；generic fresh queue 不因本轮而放宽。runner 将每个 parent 的
+`+200/+500/+1000/+2000` 物化为绝对 checkpoint，绑定原始 checkpoint/hard/claim/binding、完整最终 Hydra
+argv 和自身 bytes，并强制同 Pod parent、六卡四轮、每卡四条。激活门只接受 exact
+`activated_demo_only_inexact`，还会逐字段复核上述 full-scene 训练证据及 reviewed runner SHA；父模型只读门要求
+`actor.*`、`critic.*`、全部浮点 tensor finite 和非空 optimizer state/groups。`88` 个 runner/generic queue
+专项测试通过；尚未完成三份 parent 的远端只读核验，也未启动本轮 trainer，因此这里只闭合发射源码门，G05
+保持 `Partial`。操作见[rolling timing 双 Pod 严格续训](../operations/run_lean_training_queue.md#rolling-timing-双-pod-严格续训2026-07-16)。

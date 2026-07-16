@@ -176,6 +176,20 @@ embedded iteration 物化绝对路径，并在 claim/hard contract 中同时记�
 尤其约 0.5 秒格在早期可能因为完整动作机会少而没有 hit-conditioned sparse outcome。只要没有独立结构或安全失败，
 eligible exact-strike / virtual-capture / qdot-active 分母未达到冻结下限时就必须继续，不能用“稀疏 Reward=0”早停。
 
+### 自动淘汰与把吞吐还给胜者
+
+自动审计每 30 分钟检查一次，但不把“经常看”变成“随便停”。`+200` 只允许停止 non-finite、fatal、
+parent/optimizer/claim 恢复错误或已配置 dense 机制完全没接上的结构失败；不按行为分数淘汰。`+500` 的稀疏
+回球仍不得因零值停止，只有连续两个完整窗口同时出现 completion `<0.40`、pre+post fall `>0.10`，且没有
+任何 dense 平衡/追踪项相对同一 parent 改善，才算明显崩坏。
+
+`+1000` 才在**同一 parent** 内做多目标 Pareto 淘汰：最大化 completion、signed composite 与解析合法
+回球，最小化 pre/post fall；只有在所有已观察目标均被另一格支配、至少两项严格更差时才停。每个 parent
+至少保留两格，并全局保留至少一个约 0.5 秒格和一个随机 timing 格。停臂只对绑定的 numeric PGID 做 exact
+处置；不自动 retry。这样少掉的并发会直接提高同卡幸存者到 `+2000` 的吞吐。随机横向躯干力只有完成
+trainer/hard-contract/full-scene source gate 后，才可作为空槽的 matched no-force/force replacement；当前
+不能用 qdot 代替。
+
 ## 为什么 formal-ineligible
 
 每个 child 都从不同历史合同的 optimizer 热启动，并同时改动共享组合与 timing；`checkpoint_allow_contract_mismatch=true`
