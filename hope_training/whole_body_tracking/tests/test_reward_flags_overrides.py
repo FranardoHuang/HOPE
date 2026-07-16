@@ -32,6 +32,7 @@ Run:  python -m pytest hope_training/whole_body_tracking/tests/test_reward_flags
 from __future__ import annotations
 
 import os
+import inspect
 import sys
 import types
 
@@ -140,6 +141,8 @@ def _make_env_cfg(anchor_pos_none=True):
         strike_success_pos_thresh=0.075,
         track_envelope_violation=False,
         target_mode="uniform",
+        target_delay_steps=0,
+        target_delay_tts_mode="live",
         midswing_resample_prob=0.0,
         midswing_resample_tts_floor=0.3,
         question_bank="",
@@ -179,8 +182,14 @@ def _make_env_cfg(anchor_pos_none=True):
         allow_legacy_link_origin_velocity=False,
     )
     observations = _NS(
-        policy=_NS(command=_Term(func="generated_commands", params={"command_name": "motion"})),
-        critic=_NS(command=_Term(func="generated_commands", params={"command_name": "motion"})),
+        policy=_NS(
+            command=_Term(func="generated_commands", params={"command_name": "motion"}),
+            time_to_strike=_Term(func="live_time_to_strike", params={"command_name": "racket_target"}),
+        ),
+        critic=_NS(
+            command=_Term(func="generated_commands", params={"command_name": "motion"}),
+            time_to_strike=_Term(func="live_time_to_strike", params={"command_name": "racket_target"}),
+        ),
     )
     terminations = _NS(
         time_out="TIME_OUT",
@@ -411,12 +420,56 @@ def test_question_bank_rejects_midswing_question_redraw():
         _apply({"racket": {"question_bank": "/tmp/bank.npz", "midswing_resample_prob": 0.01}})
 
 
-def test_question_bank_rejects_per_clip_retiming_even_when_values_are_one():
-    with pytest.raises(train_mod._OverrideError, match="speed_scale_per_clip"):
-        _apply({
-            "motion": {"speed_scale_per_clip": [1.0, 1.0]},
-            "racket": {"question_bank": "/tmp/bank.npz"},
-        })
+def test_question_bank_allows_speed_range_retiming_and_keeps_speed_contract_fields():
+    env_cfg, applied = _apply({
+        "motion": {"speed_scale_range": [0.8, 1.2]},
+        "racket": {"question_bank": "/tmp/bank.npz"},
+    })
+    assert env_cfg.commands.motion.speed_scale_range == (0.8, 1.2)
+    assert env_cfg.commands.racket_target.question_bank == "/tmp/bank.npz"
+    assert any("speed_scale_range" in item for item in applied)
+    source = inspect.getsource(train_mod._build_training_hard_contract)
+    assert '"motion_speed_scale_range"' in source
+    assert '"motion_speed_scale_per_clip"' in source
+
+
+def test_question_bank_allows_fixed_per_clip_retiming_override():
+    env_cfg, applied = _apply({
+        "motion": {"speed_scale_per_clip": [1.25, 0.9]},
+        "racket": {"question_bank": "/tmp/bank.npz"},
+    })
+    assert env_cfg.commands.motion.speed_scale_per_clip == (1.25, 0.9)
+    assert env_cfg.commands.racket_target.question_bank == "/tmp/bank.npz"
+    assert any("speed_scale_per_clip" in item for item in applied)
+
+
+@pytest.mark.parametrize(
+    "mode", ["source_timestamp_compensated", "uncompensated"]
+)
+def test_atomic_tts_mode_override_swaps_only_policy_and_is_hard_contract_bound(
+    mode, monkeypatch
+):
+    fake_mdp = _stub_mdp_module(monkeypatch)
+    env_cfg, applied = _apply({
+        "racket": {"target_delay_steps": 2, "target_delay_tts_mode": mode}
+    })
+    assert env_cfg.commands.racket_target.target_delay_steps == 2
+    assert env_cfg.commands.racket_target.target_delay_tts_mode == mode
+    assert env_cfg.observations.policy.time_to_strike.func is fake_mdp.actor_time_to_strike
+    assert env_cfg.observations.critic.time_to_strike.func == "live_time_to_strike"
+    assert any("critic remains live" in item for item in applied)
+    source = inspect.getsource(train_mod._build_training_hard_contract)
+    assert '"racket_target_delay_tts_mode"' in source
+    assert '"racket_target_delay_steps"' in source
+
+
+def test_atomic_tts_mode_live_is_default_noop_and_unknown_mode_fails_loud():
+    env_cfg, applied = _apply({})
+    assert env_cfg.commands.racket_target.target_delay_tts_mode == "live"
+    assert env_cfg.observations.policy.time_to_strike.func == "live_time_to_strike"
+    assert not any("actor_time_to_strike" in item for item in applied)
+    with pytest.raises(train_mod._OverrideError, match="target_delay_tts_mode"):
+        _apply({"racket": {"target_delay_tts_mode": "timestamp-ish"}})
 
 
 @pytest.mark.parametrize("pairing", ["shared_plus_y", "legacy_signed_vs_A"])
@@ -922,6 +975,7 @@ def _stub_mdp_module(monkeypatch):
     """train.py lazily imports whole_body_tracking...mdp inside the R-a branch — stub the chain."""
     fake_mdp = types.ModuleType("whole_body_tracking.tasks.tracking.mdp")
     fake_mdp.generated_commands_actor_leg_masked = "LEG_MASKED_FUNC"
+    fake_mdp.actor_time_to_strike = object()
     fake_tracking = types.ModuleType("whole_body_tracking.tasks.tracking")
     fake_tracking.mdp = fake_mdp
     fake_tasks = types.ModuleType("whole_body_tracking.tasks")

@@ -114,10 +114,17 @@ def racket_target_vel_w(env: ManagerBasedRLEnv, command_name: str) -> torch.Tens
 
 
 def time_to_strike(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
-    """Time remaining until the strike (s). NOT delayed by A1 target latency ON PURPOSE: the swing
-    clock is generated robot-side by the deploy runner, not by the mocap link, so it carries no
-    mocap/planner transport latency."""
+    """TRUE live time remaining until strike (s), used by the privileged critic/default actor.
+
+    The explicit atomic planner-tuple training modes wire the policy term to
+    :func:`actor_time_to_strike` in ``train.py`` while leaving this live critic source untouched.
+    """
     return _cmd(env, command_name).time_to_strike.unsqueeze(-1)
+
+
+def actor_time_to_strike(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """Actor-visible planner TTS: live, source-timestamp compensated, or stale negative control."""
+    return _cmd(env, command_name).actor_time_to_strike().unsqueeze(-1)
 
 
 def base_target_pos_b(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:

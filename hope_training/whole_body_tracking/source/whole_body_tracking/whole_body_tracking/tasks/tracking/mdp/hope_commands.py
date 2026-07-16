@@ -63,6 +63,12 @@ _RECOVERY_START_YAW_THRESHOLD = 0.30
 
 _FACE_COMMAND_PAIRINGS = ("shared_plus_y", "legacy_signed_vs_A")
 
+_TARGET_DELAY_TTS_MODES = (
+    "live",
+    "source_timestamp_compensated",
+    "uncompensated",
+)
+
 
 def _face_command_pairing(cfg: "RacketTargetCommandCfg") -> str:
     """Return a validated face-command grading convention.
@@ -77,6 +83,23 @@ def _face_command_pairing(cfg: "RacketTargetCommandCfg") -> str:
             f"{_FACE_COMMAND_PAIRINGS}, got {pairing!r}"
         )
     return pairing
+
+
+def _target_delay_tts_mode(cfg: "RacketTargetCommandCfg") -> str:
+    """Return the actor-visible time-to-strike delay convention.
+
+    ``live`` is the historical behavior.  The other two modes put TTS in the same delayed planner
+    tuple as position/velocity/normal/side; ``source_timestamp_compensated`` then advances the
+    source value by the known transport age while ``uncompensated`` is the explicit stale-TTS
+    negative control.
+    """
+    mode = str(getattr(cfg, "target_delay_tts_mode", "live"))
+    if mode not in _TARGET_DELAY_TTS_MODES:
+        raise ValueError(
+            "target_delay_tts_mode must be one of "
+            f"{_TARGET_DELAY_TTS_MODES}, got {mode!r}"
+        )
+    return mode
 
 
 def face_tracking_pair(command: "RacketTargetCommand") -> tuple[torch.Tensor, torch.Tensor]:
@@ -105,6 +128,7 @@ class RacketTargetCommand(CommandTerm):
         # Validate even when face_command is currently disabled: a typo must fail at environment
         # construction instead of lying dormant until a later curriculum/override enables it.
         _face_command_pairing(cfg)
+        _target_delay_tts_mode(cfg)
         super().__init__(cfg, env)
 
         self.robot: Articulation = env.scene[cfg.asset_name]
@@ -518,6 +542,10 @@ class RacketTargetCommand(CommandTerm):
         self._resample_n_acc = 0.0
         self._replay_n_acc = 0.0
 
+        # Live strike timing is the reward/critic/physics truth.  A separately materialized actor
+        # TTS exists only in the two explicit atomic-planner-tuple modes below.
+        self.time_to_strike = torch.zeros(self.num_envs, device=self.device)
+
         # --- A1 target latency & time-variance (mocap->planner->runner realism) --------------------
         # MOTIVATION: training previously handed the actor a PERFECT, instantly-updated target; the
         # real loop (mocap -> planner -> runner) delivers it LATE (transport + planning latency),
@@ -530,6 +558,8 @@ class RacketTargetCommand(CommandTerm):
         # RNG draw. Only the ACTOR-visible view is degraded — rewards, metrics, the privileged critic,
         # and the achieved-target-replay WRITE always use the TRUE live target.
         self._delay_steps = max(int(cfg.target_delay_steps), 0)
+        self._delay_tts_mode = _target_delay_tts_mode(cfg)
+        self._delay_tts_active = self._delay_tts_mode != "live"
         self._jitter_pos = max(float(cfg.target_jitter_pos_per_s), 0.0)
         self._jitter_vel = max(float(cfg.target_jitter_vel_per_s), 0.0)
         # Calibrated MEASUREMENT noise (ball_physics_venue.yaml `capture:` block, 2026-07-03 fit):
@@ -556,6 +586,8 @@ class RacketTargetCommand(CommandTerm):
             # first two used to expose question N+1's normal/sign next to question N's target.
             self._held_normal = torch.zeros(self.num_envs, 3, device=self.device)
             self._held_sign = torch.ones(self.num_envs, device=self.device)
+            if self._delay_tts_active:
+                self._held_tts = torch.zeros(self.num_envs, device=self.device)
         # The actor view is materialized (separate tensors) whenever latency OR jitter is on;
         # otherwise the delayed_* attributes ARE the live tensors (which are only ever index-assigned
         # after __init__, so the alias stays valid for the whole run).
@@ -565,23 +597,26 @@ class RacketTargetCommand(CommandTerm):
             or float(cfg.target_dropout_prob) > 0.0
             or float(cfg.target_post_strike_dropout_s) > 0.0
             or float(cfg.target_bias_per_swing) > 0.0
+            or self._delay_tts_active
         )
         if self._delay_steps > 0:
             # Ring buffers (length delay+1) over the ACTOR-VISIBLE target quantities: the slot
             # written this step is read back `delay` pushes later (see _push_actor_target).
-            # time_to_strike is NOT buffered ON PURPOSE: the swing clock is generated robot-side by
-            # the deploy runner, not by the mocap link, so it carries no mocap latency.
             _L = self._delay_steps + 1
             self._delay_buf_pos = torch.zeros(_L, self.num_envs, 3, device=self.device)
             self._delay_buf_vel = torch.zeros(_L, self.num_envs, 3, device=self.device)
             self._delay_buf_normal = torch.zeros(_L, self.num_envs, 3, device=self.device)
             self._delay_buf_sign = torch.ones(_L, self.num_envs, device=self.device)
+            if self._delay_tts_active:
+                self._delay_buf_tts = torch.zeros(_L, self.num_envs, device=self.device)
             self._delay_ptr = 0
         if self._actor_view_active:
             self.delayed_racket_target_pos_w = self.racket_target_pos_w.clone()
             self.delayed_racket_target_vel_w = self.racket_target_vel_w.clone()
             self.delayed_target_normal_cmd = self.target_normal_cmd.clone()
             self.delayed_swing_sign = self.swing_sign.clone()
+            if self._delay_tts_active:
+                self.delayed_time_to_strike = self.time_to_strike.clone()
         else:
             # Flags off: zero-overhead aliases of the live tensors (byte-identical baseline).
             self.delayed_racket_target_pos_w = self.racket_target_pos_w
@@ -595,9 +630,9 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["target_delay_steps_in_effect"] = torch.full(
             (self.num_envs,), float(self._delay_steps), device=self.device
         )
+        self.metrics["actor_time_to_strike_s"] = torch.zeros(self.num_envs, device=self.device)
 
         # Strike timing / gating.
-        self.time_to_strike = torch.zeros(self.num_envs, device=self.device)
         self.pre_strike = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
         self.strike_window = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         # 1c split windows: refreshed alongside strike_window in _compute_strike_timing. With the
@@ -2261,17 +2296,20 @@ class RacketTargetCommand(CommandTerm):
         values, so a delayed read reproduces the prediction noise AS OF push time (what the mocap
         link actually emitted then). The TRUE live target is untouched — rewards, metrics, the
         privileged critic, and the achieved-target-replay write keep reading racket_target_pos_w /
-        racket_target_vel_w / target_normal_cmd / swing_sign.  The four actor-visible fields are
-        emitted atomically: delay and dropout can never mix two question rows. time_to_strike is
-        never delayed: the swing clock is generated robot-side by the deploy runner, not by the
-        mocap link.
+        racket_target_vel_w / target_normal_cmd / swing_sign / time_to_strike.  In the explicit
+        non-live TTS modes, all five actor-visible fields are emitted atomically: delay and dropout
+        can never mix two question rows. ``source_timestamp_compensated`` advances the delayed
+        source TTS by the configured transport age; ``uncompensated`` deliberately exposes the
+        stale source value as a negative control.
         """
         if not self._actor_view_active:
+            self.metrics["actor_time_to_strike_s"][:] = self.time_to_strike
             return  # default path: delayed_* alias the live tensors — nothing to compute, no RNG
         pos = self.racket_target_pos_w
         vel = self.racket_target_vel_w
         normal = self.target_normal_cmd
         sign = self.swing_sign
+        tts = self.time_to_strike
         if self._jitter_pos > 0.0 or self._jitter_vel > 0.0:
             scale = self.time_to_strike.clamp(0.0, 1.0).unsqueeze(-1)
             if self._jitter_pos > 0.0:
@@ -2307,10 +2345,14 @@ class RacketTargetCommand(CommandTerm):
             vel = torch.where(d3, self._held_vel, vel)
             normal = torch.where(d3, self._held_normal, normal)
             sign = torch.where(drop, self._held_sign, sign)
+            if self._delay_tts_active:
+                tts = torch.where(drop, self._held_tts, tts)
             self._held_pos.copy_(pos)
             self._held_vel.copy_(vel)
             self._held_normal.copy_(normal)
             self._held_sign.copy_(sign)
+            if self._delay_tts_active:
+                self._held_tts.copy_(tts)
         if self._delay_steps > 0:
             # Write this step's (jittered) target into slot `w`; the next slot in the length-
             # (delay+1) ring was written exactly `delay` pushes ago — that is the actor's view.
@@ -2319,18 +2361,29 @@ class RacketTargetCommand(CommandTerm):
             self._delay_buf_vel[w].copy_(vel)
             self._delay_buf_normal[w].copy_(normal)
             self._delay_buf_sign[w].copy_(sign)
+            if self._delay_tts_active:
+                self._delay_buf_tts[w].copy_(tts)
             r = (w + 1) % (self._delay_steps + 1)
             self._delay_ptr = r
             self.delayed_racket_target_pos_w.copy_(self._delay_buf_pos[r])
             self.delayed_racket_target_vel_w.copy_(self._delay_buf_vel[r])
             self.delayed_target_normal_cmd.copy_(self._delay_buf_normal[r])
             self.delayed_swing_sign.copy_(self._delay_buf_sign[r])
+            if self._delay_tts_active:
+                delayed_tts = self._delay_buf_tts[r]
+                if self._delay_tts_mode == "source_timestamp_compensated":
+                    delayed_tts = delayed_tts - self._delay_steps * float(self._env.step_dt)
+                self.delayed_time_to_strike.copy_(delayed_tts)
         else:
             # Jitter-only (delay==0): the actor view is live + this step's noise, no latency.
             self.delayed_racket_target_pos_w.copy_(pos)
             self.delayed_racket_target_vel_w.copy_(vel)
             self.delayed_target_normal_cmd.copy_(normal)
             self.delayed_swing_sign.copy_(sign)
+            if self._delay_tts_active:
+                # Zero transport delay is explicitly equivalent to live TTS in both atomic modes.
+                self.delayed_time_to_strike.copy_(tts)
+        self.metrics["actor_time_to_strike_s"][:] = self.actor_time_to_strike()
 
     def _reset_actor_target_state(self, env_ids: Sequence[int]) -> None:
         """Start a true episode with a fresh, internally consistent A1 sensor state.
@@ -2347,6 +2400,8 @@ class RacketTargetCommand(CommandTerm):
         self.delayed_racket_target_vel_w[ids] = self.racket_target_vel_w[ids]
         self.delayed_target_normal_cmd[ids] = self.target_normal_cmd[ids]
         self.delayed_swing_sign[ids] = self.swing_sign[ids]
+        if self._delay_tts_active:
+            self.delayed_time_to_strike[ids] = self.time_to_strike[ids]
         if self._mnoise_ar1_sigma > 0.0:
             self._mnoise_ar1_state[ids] = 0.0
         if self._a1v2_active:
@@ -2357,11 +2412,15 @@ class RacketTargetCommand(CommandTerm):
             self._held_vel[ids] = self.racket_target_vel_w[ids]
             self._held_normal[ids] = self.target_normal_cmd[ids]
             self._held_sign[ids] = self.swing_sign[ids]
+            if self._delay_tts_active:
+                self._held_tts[ids] = self.time_to_strike[ids]
         if self._delay_steps > 0:
             self._delay_buf_pos[:, ids] = self.racket_target_pos_w[ids].unsqueeze(0)
             self._delay_buf_vel[:, ids] = self.racket_target_vel_w[ids].unsqueeze(0)
             self._delay_buf_normal[:, ids] = self.target_normal_cmd[ids].unsqueeze(0)
             self._delay_buf_sign[:, ids] = self.swing_sign[ids].unsqueeze(0)
+            if self._delay_tts_active:
+                self._delay_buf_tts[:, ids] = self.time_to_strike[ids].unsqueeze(0)
 
     def _count_swing_starts(self, env_ids, count_prestrike_falls: bool) -> None:
         """UNCONDITIONAL swing accounting (Phase A wandb fix). Increment-only here; the decay is
@@ -3466,6 +3525,17 @@ class RacketTargetCommand(CommandTerm):
         """Actor-visible demanded face normal from the same atomic A1 message as pos/vel/sign."""
         return self.delayed_target_normal_cmd
 
+    def actor_time_to_strike(self) -> torch.Tensor:
+        """Actor-visible TTS from the configured planner-tuple timing convention.
+
+        The default ``live`` branch returns the live tensor itself (not a copy), preserving the
+        historical observation path.  Atomic delayed modes return the materialized ring output;
+        rewards, exact-strike gates, physics and the privileged critic never call this accessor.
+        """
+        if self._delay_tts_mode == "live":
+            return self.time_to_strike
+        return self.delayed_time_to_strike
+
     def _target_xy_err_b(self, target_xy_w: torch.Tensor) -> torch.Tensor:
         """(world XY target − current base XY) rotated into the yaw-heading base frame — the shared
         math behind both station-style obs terms (Hitter base_target_pos_b / R10c station anchor)."""
@@ -3692,12 +3762,20 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # (ball-prediction error that shrinks as the strike approaches — SMASH Eq. 14), and REFINED
     # mid-swing (the planner re-plans WHERE, not WHEN). PACE injects sensor delays for the same
     # reason. Without this, the mocap-closed-loop deployment faces out-of-distribution target
-    # dynamics. Scope: ONLY the ACTOR-visible target view (pos/vel/face-command/swing_sign) is degraded; rewards,
-    # metrics, the privileged critic, and the achieved-target-replay write use the TRUE live target.
-    # time_to_strike is NEVER delayed: the swing clock is generated robot-side by the deploy runner,
-    # not by the mocap link. ALL defaults OFF => byte-identical baseline (delay==0 aliases the live
-    # tensors; jitter==0 / prob==0 short-circuit before any RNG draw).
+    # dynamics. Scope: ONLY the ACTOR-visible planner tuple is degraded; rewards, true timing,
+    # metrics/gates, the privileged critic, and the achieved-target-replay write use live values.
+    # ALL defaults OFF => byte-identical baseline (delay==0 aliases the live target tensors;
+    # target_delay_tts_mode="live" returns the live TTS tensor; jitter/prob==0 draw no RNG).
     target_delay_steps: int = 0  # actor sees atomic pos/vel/face-command/swing_sign this many 50 Hz steps late
+    # Actor-visible TTS convention:
+    #   live                         historical behavior; target fields can be delayed but TTS is live.
+    #   source_timestamp_compensated TTS rides the same delayed tuple, then the runner-equivalent
+    #                                source timestamp correction subtracts delay_steps * step_dt.
+    #   uncompensated                TTS rides the tuple without correction (explicit stale-TTS
+    #                                negative control; diagnoses "planner says wait" failures).
+    # With delay_steps=0 both atomic modes are numerically equivalent to live.  Reward/critic/strike
+    # masks always use ``time_to_strike`` and are unaffected by this actor-only switch.
+    target_delay_tts_mode: str = "live"
     # SMASH-style tts-decaying gaussian noise on the ACTOR-visible target, drawn ONCE per step on the
     # ring-buffer push (determinism within a step): per-step std = knob * clamp(time_to_strike, 0, 1),
     # i.e. the knob is the std at time_to_strike >= 1 s, decaying to 0 at the strike (prediction

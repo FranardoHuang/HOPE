@@ -231,6 +231,16 @@ def _as_face_command_pairing(value) -> str:
     return pairing
 
 
+def _as_target_delay_tts_mode(value) -> str:
+    mode = str(value)
+    allowed = ("live", "source_timestamp_compensated", "uncompensated")
+    if mode not in allowed:
+        raise _OverrideError(
+            f"task.racket.target_delay_tts_mode must be one of {allowed}, got {mode!r}"
+        )
+    return mode
+
+
 def _as_yaw_range(value):
     if len(value) != 2:
         raise _OverrideError("stand_start_yaw_range must contain exactly [lo, hi]")
@@ -694,6 +704,9 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
             racket, "midswing_resample_tts_floor"
         ),
         "racket_target_delay_steps": attr(racket, "target_delay_steps"),
+        "racket_target_delay_tts_mode": attr(
+            racket, "target_delay_tts_mode", "live"
+        ),
         "racket_target_jitter_pos_per_s": attr(racket, "target_jitter_pos_per_s"),
         "racket_target_jitter_vel_per_s": attr(racket, "target_jitter_vel_per_s"),
         "racket_target_noise_white": attr(racket, "target_noise_white"),
@@ -947,7 +960,8 @@ _RACKET_KEYS = (
     "achieved_jitter_pos", "achieved_jitter_vel", "achieved_clamp_inflate",
     # A1 target latency & time-variance (actor-visible delay, SMASH tts-decaying jitter,
     # mid-swing target refinement). Defaults OFF; byte-identical baseline.
-    "target_delay_steps", "target_jitter_pos_per_s", "target_jitter_vel_per_s",
+    "target_delay_steps", "target_delay_tts_mode",
+    "target_jitter_pos_per_s", "target_jitter_vel_per_s",
     "midswing_resample_prob", "midswing_resample_tts_floor",
     # A1v2 calibrated mocap-degradation channels (white/AR1 noise, frame dropout, per-swing bias).
     "target_noise_white", "target_noise_ar1_sigma", "target_noise_ar1_rho",
@@ -1932,6 +1946,32 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             # mid-swing (midswing_resample_*), matching the real mocap->planner->runner loop.
             # Rewards/critic keep the live target. All default OFF (byte-identical baseline).
             _set_attr(C, "target_delay_steps", _get(rk, "target_delay_steps"), int, applied, "racket_target")
+            _tts_mode_requested = _get(rk, "target_delay_tts_mode")
+            _set_attr(
+                C,
+                "target_delay_tts_mode",
+                _tts_mode_requested,
+                _as_target_delay_tts_mode,
+                applied,
+                "racket_target",
+            )
+            if _tts_mode_requested is not None and C.target_delay_tts_mode != "live":
+                # The shipped observation cfg intentionally shares the live TTS callable between
+                # policy and critic.  Only the explicit atomic-tuple arm swaps the POLICY source;
+                # the critic keeps mdp.time_to_strike and rewards/gates read cmd.time_to_strike.
+                from whole_body_tracking.tasks.tracking import mdp as _mdp
+
+                _require(
+                    hasattr(env_cfg, "observations")
+                    and hasattr(env_cfg.observations, "policy")
+                    and getattr(env_cfg.observations.policy, "time_to_strike", None) is not None,
+                    "observations.policy.time_to_strike (task.racket.target_delay_tts_mode)",
+                )
+                env_cfg.observations.policy.time_to_strike.func = _mdp.actor_time_to_strike
+                applied.append(
+                    "observations.policy.time_to_strike.func=actor_time_to_strike "
+                    f"(atomic planner tuple mode={C.target_delay_tts_mode}; critic remains live)"
+                )
             _set_attr(C, "target_jitter_pos_per_s", _get(rk, "target_jitter_pos_per_s"), float, applied, "racket_target")
             _set_attr(C, "target_jitter_vel_per_s", _get(rk, "target_jitter_vel_per_s"), float, applied, "racket_target")
             _set_attr(C, "midswing_resample_prob", _get(rk, "midswing_resample_prob"), float, applied, "racket_target")
@@ -1993,10 +2033,11 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                         "[diagnostic] face_command pairing=legacy_signed_vs_A; "
                         "signed measured normal is graded against the A-frame bank target"
                     )
-            # Bank vs retiming: bank demanded velocities are ABSOLUTE physics answers (inverse-
-            # solved racket velocity for a real incoming ball) — a swing replayed at speed s cannot
-            # have its answer rescaled by s (the ball does not slow down). Same loud-fail pattern
-            # as _check_unknown_keys: never let the combination start and silently train wrong.
+            # The question-bank answer is an ABSOLUTE physics target.  This remains compatible with
+            # motion retiming because _apply_question_bank_targets runs after generic target sampling
+            # and overwrites the speed-scaled provisional velocity with the unscaled bank answer.
+            # Keep only the real semantic conflicts: HitterPure target ownership and mid-swing bank
+            # row redraw without rescheduling the paired incoming ball.
             if str(getattr(C, "question_bank", "") or ""):
                 _target_mode = str(getattr(C, "target_mode", "uniform"))
                 if _target_mode == "hitter_pure":
@@ -2011,21 +2052,6 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                         "[train.py] racket.question_bank is incompatible with "
                         f"racket.midswing_resample_prob={_ms_prob}: a redraw would change the "
                         "question without rescheduling the same physical/shadow ball. Set it to 0.")
-                _ssr = tuple(float(x) for x in getattr(
-                    getattr(env_cfg.commands, "motion", None), "speed_scale_range", (1.0, 1.0)))
-                if _ssr != (1.0, 1.0):
-                    raise _OverrideError(
-                        f"[train.py] racket.question_bank is set but motion.speed_scale_range="
-                        f"{_ssr}: bank demanded velocities are absolute physics answers; retiming "
-                        "cannot scale them. Set motion.speed_scale_range: [1.0, 1.0] or drop the bank.")
-                _spc = getattr(getattr(env_cfg.commands, "motion", None),
-                               "speed_scale_per_clip", None)
-                if _spc is not None:
-                    raise _OverrideError(
-                        "[train.py] racket.question_bank is set but "
-                        f"motion.speed_scale_per_clip={tuple(float(x) for x in _spc)}: even a "
-                        "fixed per-clip clock activates retiming, while bank answers are absolute "
-                        "physics targets. Set motion.speed_scale_per_clip: null or drop the bank.")
             # face_command_obs (+4 actor dims: demanded normal (3) + zero-filled rho placeholder (1),
             # the contract-day 175 -> 179 layout): the obs groups were finalized in __post_init__
             # BEFORE overrides run, so setting env_cfg.face_command_obs here would be a silent

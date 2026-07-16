@@ -21,8 +21,9 @@ hope_observations.py). What is tested is therefore the actual shipped math, not 
 * H0  HitterPure's four body-imitation terms and three reference-relative terminations are
       swing-only; held envs receive no teacher-velocity income / hidden reference death while
       absolute safety remains a separate config concern.
-* A1  target position/velocity/demanded-normal/swing-sign remain one atomic actor message through
-      delay/dropout, and a true reset clears every stateful sensor-defect buffer.
+* A1  target position/velocity/demanded-normal/swing-sign/TTS remain one atomic actor message
+      through delay/dropout; source-timestamp compensation and its stale-TTS negative control are
+      distinct, and a true reset clears/backfills every stateful sensor-defect buffer.
 * P2.4 base_decel is zero during a frozen hold; debug raw/gated telemetry records the real mask.
 * D6 qdot-limit hinge uses realized joint velocity divided by the actual 31 runtime-ordered
       articulation limits; reordered joints and zero/non-finite limits fail closed.
@@ -1052,12 +1053,21 @@ def test_leg_mask_refuses_wrong_joint_count():
 # --------------------------------------------------------------------------------------------- #
 # A1 atomic target-message contract + reward gate diagnostics
 # --------------------------------------------------------------------------------------------- #
-def _make_a1_cmd(delay_steps=0, dropout_prob=0.0, ar1_sigma=0.0):
+def _make_a1_cmd(
+    delay_steps=0,
+    dropout_prob=0.0,
+    ar1_sigma=0.0,
+    tts_mode="live",
+):
     cmd = hope_commands_mod.RacketTargetCommand.__new__(hope_commands_mod.RacketTargetCommand)
     cmd.num_envs = 1
     cmd.device = "cpu"
+    cmd._env = types.SimpleNamespace(step_dt=0.02)
+    cmd.metrics = {"actor_time_to_strike_s": torch.zeros(1)}
     cmd._actor_view_active = True
     cmd._delay_steps = delay_steps
+    cmd._delay_tts_mode = tts_mode
+    cmd._delay_tts_active = tts_mode != "live"
     cmd._delay_ptr = 0
     cmd._jitter_pos = 0.0
     cmd._jitter_vel = 0.0
@@ -1079,12 +1089,16 @@ def _make_a1_cmd(delay_steps=0, dropout_prob=0.0, ar1_sigma=0.0):
     cmd.delayed_racket_target_vel_w = cmd.racket_target_vel_w.clone()
     cmd.delayed_target_normal_cmd = cmd.target_normal_cmd.clone()
     cmd.delayed_swing_sign = cmd.swing_sign.clone()
+    if cmd._delay_tts_active:
+        cmd.delayed_time_to_strike = cmd.time_to_strike.clone()
     if delay_steps > 0:
         length = delay_steps + 1
         cmd._delay_buf_pos = cmd.racket_target_pos_w.unsqueeze(0).repeat(length, 1, 1)
         cmd._delay_buf_vel = cmd.racket_target_vel_w.unsqueeze(0).repeat(length, 1, 1)
         cmd._delay_buf_normal = cmd.target_normal_cmd.unsqueeze(0).repeat(length, 1, 1)
         cmd._delay_buf_sign = cmd.swing_sign.unsqueeze(0).repeat(length, 1)
+        if cmd._delay_tts_active:
+            cmd._delay_buf_tts = cmd.time_to_strike.unsqueeze(0).repeat(length, 1)
     if cmd._a1v2_active:
         cmd._swing_bias = torch.zeros(1, 3)
         cmd._drop_cd = torch.zeros(1, dtype=torch.long)
@@ -1093,6 +1107,8 @@ def _make_a1_cmd(delay_steps=0, dropout_prob=0.0, ar1_sigma=0.0):
         cmd._held_vel = cmd.racket_target_vel_w.clone()
         cmd._held_normal = cmd.target_normal_cmd.clone()
         cmd._held_sign = cmd.swing_sign.clone()
+        if cmd._delay_tts_active:
+            cmd._held_tts = cmd.time_to_strike.clone()
     return cmd
 
 
@@ -1130,6 +1146,60 @@ def test_a1_delay_keeps_face_command_atomic_with_pos_vel_and_side():
     _assert_actor_question(cmd, "b")
 
 
+@pytest.mark.parametrize(
+    ("mode", "expected_first_tts", "expected_delayed_tts"),
+    [
+        ("source_timestamp_compensated", 0.46, 0.44),
+        ("uncompensated", 0.50, 0.48),
+    ],
+)
+def test_a1_delay_two_keeps_tts_atomic_and_distinguishes_timestamp_compensation(
+    mode, expected_first_tts, expected_delayed_tts
+):
+    cmd = _make_a1_cmd(delay_steps=2, tts_mode=mode)
+    _set_question_b(cmd)
+
+    # The two backfilled source tuples both carry question A/TTS=0.50.  Compensation advances
+    # that source TTS by the known 2*20 ms transport age; the negative control exposes 0.50 stale.
+    cmd.time_to_strike[:] = 0.48
+    cmd._push_actor_target()
+    _assert_actor_question(cmd, "a")
+    assert cmd.actor_time_to_strike().item() == pytest.approx(expected_first_tts)
+
+    cmd.time_to_strike[:] = 0.46
+    cmd._push_actor_target()
+    _assert_actor_question(cmd, "a")
+
+    # Third push reads the first question-B source tuple (source TTS=0.48) atomically with B.
+    cmd.time_to_strike[:] = 0.44
+    cmd._push_actor_target()
+    _assert_actor_question(cmd, "b")
+    assert cmd.actor_time_to_strike().item() == pytest.approx(expected_delayed_tts)
+    assert cmd.metrics["actor_time_to_strike_s"].item() == pytest.approx(expected_delayed_tts)
+
+
+def test_a1_default_live_tts_is_the_live_tensor_alias_even_when_targets_are_delayed():
+    cmd = _make_a1_cmd(delay_steps=2, tts_mode="live")
+    assert cmd.actor_time_to_strike() is cmd.time_to_strike
+    cmd.time_to_strike[:] = 0.37
+    _set_question_b(cmd)
+    cmd._push_actor_target()
+    _assert_actor_question(cmd, "a")
+    assert cmd.actor_time_to_strike().item() == pytest.approx(0.37)
+    obs = hope_observations_mod.actor_time_to_strike(
+        _fake_env(racket_target=cmd), "racket_target"
+    )
+    assert obs.item() == pytest.approx(0.37)
+
+
+@pytest.mark.parametrize("mode", ["source_timestamp_compensated", "uncompensated"])
+def test_a1_atomic_tts_zero_delay_is_numerically_live(mode):
+    cmd = _make_a1_cmd(delay_steps=0, tts_mode=mode)
+    cmd.time_to_strike[:] = 0.31
+    cmd._push_actor_target()
+    assert cmd.actor_time_to_strike().item() == pytest.approx(0.31)
+
+
 def test_a1_dropout_holds_the_entire_target_message():
     cmd = _make_a1_cmd(dropout_prob=1.0)
     _set_question_b(cmd)
@@ -1141,25 +1211,36 @@ def test_a1_dropout_holds_the_entire_target_message():
 
 
 def test_a1_true_reset_clears_state_and_backfills_all_message_fields():
-    cmd = _make_a1_cmd(delay_steps=2, dropout_prob=1.0, ar1_sigma=0.2)
+    cmd = _make_a1_cmd(
+        delay_steps=2,
+        dropout_prob=1.0,
+        ar1_sigma=0.2,
+        tts_mode="source_timestamp_compensated",
+    )
     _set_question_b(cmd)
+    cmd.time_to_strike[:] = 0.63
     cmd._drop_cd[:] = 9
     cmd._swing_bias[:] = 3.0
     cmd._held_pos[:] = -3.0
     cmd._held_vel[:] = -4.0
     cmd._held_normal[:] = -5.0
     cmd._held_sign[:] = 0.0
+    cmd._held_tts[:] = -6.0
+    cmd.delayed_time_to_strike[:] = -7.0
     cmd._reset_actor_target_state(torch.tensor([0]))
     _assert_actor_question(cmd, "b")
     assert torch.all(cmd._delay_buf_pos == cmd.racket_target_pos_w.unsqueeze(0))
     assert torch.all(cmd._delay_buf_vel == cmd.racket_target_vel_w.unsqueeze(0))
     assert torch.all(cmd._delay_buf_normal == cmd.target_normal_cmd.unsqueeze(0))
     assert torch.all(cmd._delay_buf_sign == cmd.swing_sign.unsqueeze(0))
+    assert torch.all(cmd._delay_buf_tts == cmd.time_to_strike.unsqueeze(0))
+    assert torch.equal(cmd.delayed_time_to_strike, cmd.time_to_strike)
     assert torch.all(cmd._mnoise_ar1_state == 0.0)
     assert torch.all(cmd._swing_bias == 0.0)
     assert torch.all(cmd._drop_cd == 0)
     assert torch.equal(cmd._held_normal, cmd.target_normal_cmd)
     assert torch.equal(cmd._held_sign, cmd.swing_sign)
+    assert torch.equal(cmd._held_tts, cmd.time_to_strike)
 
 
 def test_debug_reward_log_records_real_gate_instead_of_identity():
