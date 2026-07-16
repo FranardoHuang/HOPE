@@ -13,6 +13,16 @@
 
 ## 2026-07-17
 
+- 动作加速从“只给完整旧 clip 做 TOPP”扩成可审计的 ready-to-strike 空间路径候选：严格取动作第0帧
+  姿态、显式零速度、解析 quintic 接入，触球前0.1秒/触球行保持逐字节。独立红队抓到并修复了 join
+  `q/-q` 符号跳变和 joint-velocity suffix 过度声明；专项 `8 passed`。输出仍固定训练/部署权限为 false，
+  必须继续过 production FK、TOPP≤0.5、L0/L1/桌网/动力学与行为卷。见
+  [短路径实验](experiments/2026-07/EXP-MOTION-READY-TO-STRIKE-0P5.md)。
+
+- Pod2 的 `+500` write-side cycle 使用唯一 SSH 完成只读/receipt 判定：十一条 live 臂均尚未到共同
+  `model_5000/5200`，一条既有 importer 失败被排除；没有 behavior/portfolio receipt、没有 signal。
+  因此当前零淘汰是“未到共同 +500 门”而不是默认保活，后续到档后才比较 dense collapse。
+
 - Pod2 首次 `+200` write-side pruning cycle 在第一条 behavior receipt 前 fail closed：reviewed atomic writer
   正确要求父目录已存在，而新 consumer 漏建绑定 run_dir 下的 `behavior_milestones/`。没有 behavior/
   portfolio receipt、signal 或 retry；可能新建的 checkpoint receipt仍是独立合法制品。修复版只允许在

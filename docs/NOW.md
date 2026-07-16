@@ -49,9 +49,16 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   actor-visible 与 exact-0.5 暴露都激活，合法 stop 为 0；continuous 父本 3 条已取证、2 条仍等 checkpoint、
   1 条 infrastructure-terminal 排除。Pod1 最近只读为 4 条到档、4 条 live sibling 等待、2 条
   infrastructure-terminal 排除。这里零 stop 是机制正常的结论，不是默认让所有臂永生；行为优劣从
-  `+500` 开始判。首个合格
+  `+500` 开始判。最新 Pod2 `+500` cycle 显示十一条 live 臂仍未到共同 `model_5000/5200`，故尚无合法
+  行为淘汰；一条既有 importer 失败继续排除且没有 signal。首个合格
   checkpoint 正在跑 K100，之后按 receipt 淘汰并把胜者送 vendor MuJoCo。详见
   [task-revision 卷宗](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md)。
+
+- **动作加速当前边界：** 完整旧 v4rg 只重定时得到 `0.98/0.78 s`，因此新增的 host-only
+  ready-to-strike 生成器从动作第0帧零速准备态直接接入保真的触球前0.1秒。四元数符号跳变与
+  joint-velocity 过度声明已经红队修复，专项 `8 passed`；但尚未对真实动作生成候选，也没有
+  production FK、TOPP≤0.5、L0/L1、桌网、动力学或行为通过，不能写成0.5秒动作已完成。见
+  [短路径实验](experiments/2026-07/EXP-MOTION-READY-TO-STRIKE-0P5.md)。
 
 - **已停止的前代 rolling 池（只作背景）：** 旧 `24/24` 长曲线已按绑定身份停止，三份较强母本的 optimizer 被完整恢复到
   [24 格快速准备组合漏斗](experiments/2026-07/EXP-P1-ROLLING-TIMING-SUPERCOMBO.md)。2026-07-16

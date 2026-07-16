@@ -40,8 +40,9 @@ runtime/feature 细节，写进实验正文或“决定”列。全局 P0/P1 只
 
 | ID | 问题 | 人类负责人 | 执行者 | 状态 | 证据 | 决定 |
 | --- | --- | --- | --- | --- | --- | --- |
-| [EXP-P1-TASK-REVISION-CUTOVER](2026-07/EXP-P1-TASK-REVISION-CUTOVER.md) | 同一颗球能否在挥拍中实时修订 target/TTS，同时保持 exactly-once、宽准备时间、可达加速和可淘汰量尺？ | Franco | Codex | blocked | E1 | replacement source under red-team；必须先过 full-scene、0.5 K100 和 TOPP 运行门，旧池不得恢复 |
-| [EXP-P1-TIMING-EXAM-0P5](2026-07/EXP-P1-TIMING-EXAM-0P5.md) | 同一不可变双侧题表能否验证策略在仅 0.5 秒准备时间内真实完成击球？ | Franco | Codex | blocked | E1 | K100 试卷和 Isaac 诊断接线已实现；私有题表、checkpoint 行为、TOPP 可行性和 vendor MuJoCo 均未运行 |
+| [EXP-MOTION-READY-TO-STRIKE-0P5](2026-07/EXP-MOTION-READY-TO-STRIKE-0P5.md) | 能否从动作第0帧零速准备态直接接入保真触球窗，得到真正可行的0.5秒动作？ | Franco | Codex | ready/source-only | E1 source | host候选生成器可用但训练授权关闭；必须过production FK、TOPP≤0.5、L0/L1/桌网/动力学与同卷行为 |
+| [EXP-P1-TASK-REVISION-CUTOVER](2026-07/EXP-P1-TASK-REVISION-CUTOVER.md) | 同一颗球能否在挥拍中实时修订 target/TTS，同时保持 exactly-once、宽准备时间、可达加速和可淘汰量尺？ | Franco | Codex | running/no-verdict | E2 runtime | A6 机制门通过；22 个可启动格已唯一 claim，19 live、3 infrastructure-terminal；等待行为淘汰、0.5 K100、TOPP 与 vendor MuJoCo |
+| [EXP-P1-TIMING-EXAM-0P5](2026-07/EXP-P1-TIMING-EXAM-0P5.md) | 同一不可变双侧题表能否验证策略在仅 0.5 秒准备时间内真实完成击球？ | Franco | Codex | paper-ready/unknown | E2 artifact | 两 Pod 已物化同一 K100 paper；尚无 checkpoint 行为分数、TOPP 绑定卷或 vendor MuJoCo 结果 |
 | [EXP-P1-FACE-PLANT-SCALEOUT](2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md) | 拍面×plant 广度矩阵哪些方向值得继续购买迭代？ | franco | Codex | completed/rejected | E4（诊断） | 16 臂已全部保留证据并停止；24/24 最近格的正手 signed composite=0，旧矩阵不能选 baseline |
 | [EXP-P1-FRESH-SZ-STABILITY](2026-07/EXP-P1-FRESH-SZ-STABILITY.md) | 最接近正式 setting 的方案在不同 seed/checkpoint 间是否稳定？ | franco | Codex | completed/rejected | model-2000/4000：E4 diagnostic | 2k 与 4k 稳定性都失败；seed4 持续弱，旧 parsed 正手分被 signed-face 反例推翻 |
 | [EXP-P1-FACE-SIGN-FORENSIC](2026-07/EXP-P1-FACE-SIGN-FORENSIC.md) | 高解析上台率是否隐去了拍面反号？ | franco | Codex | running | E4（旧卷诊断）+ E1（新源码） | `n/-n`/physical-B 源码门已实现；fresh canary 和修正后同卷未跑，旧分不晋级 |

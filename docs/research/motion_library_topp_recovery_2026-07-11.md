@@ -255,6 +255,17 @@ schema-2 改变了 body order/速度语义，所以 L0/L1 仍不得继承旧 GMR
 
 ### 新动作的配对合同
 
+2026-07-17 的实际 run-up 结果把“只重定时完整旧 clip”的边界量化了：现役 v4rg 正手/反手在
+production FK、静止 frame0、触球行/拍速/拍面、关节/CoP/摩擦/力矩门下分别只找到 `0.98 s` 和
+`0.78 s` 的可行上界，没有 0.5 秒证书。这不证明 0.5 秒绝对不可能，但说明必须同时搜索更短的空间路径。
+
+新增 `build_ready_to_strike_motion.py` 只做一件事：取所选动作第0帧姿态并显式置零速度，用解析 quintic
+位置桥接到原动作的 pre-contact join，同时保留触球前0.1秒和触球行。它输出 host candidate 且所有
+训练/部署权限为 false；join 离散速度误差明确进 contract。完整路径是
+`candidate → production FK → TOPP<=0.5 → L0/L1/桌网/动力学 → K100/vendor`，不是生成 NPZ 后直接训练。
+四元数符号跳变与“joint_vel 全 suffix bitwise”的两个红队反例已在 source gate 修复；双文件发布的
+crash 非原子边界也已写进[操作文档](../operations/run_ready_to_strike_motion.md)。
+
 每条通过空间门禁的动作只生成两个主资产：
 
 - `native`：同一 A3 空间路径和原始 50 Hz 时间律；

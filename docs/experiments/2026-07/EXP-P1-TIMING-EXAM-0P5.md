@@ -2,9 +2,10 @@
 
 ## 状态
 
-- 状态：`blocked`。逐题试卷合同、严格 materializer/validator 和 **Isaac inexact 诊断接线**已实现并通过
-  本地测试；私有题表尚未消费，也没有对真实 checkpoint 跑出 100 题行为分数。vendor MuJoCo 仍未接入，
-  formal judge 仍未授权。
+- 状态：`paper-ready / behavior-unknown`。逐题试卷合同、严格 materializer/validator 和 **Isaac inexact
+  诊断接线**已实现并通过本地测试；同一份私有题表已经在两台 Pod 各 no-clobber 物化一次，paper file
+  SHA=`6f5f1526…672d`、semantic SHA=`fa7e3c21…3b66`。尚无任何真实 checkpoint 跑完 100 题，因此
+  0.5 秒回球能力仍是 UNKNOWN。vendor MuJoCo 仍未接入，formal judge 仍未授权。
 - Human owner：Franco
 - Executor：Codex
 - 分支：`Franco_codex/rolling-task-revision-20260716`
@@ -194,14 +195,17 @@ fail closed。
 
 结论边界：代码层已经可以对 **[`v4rg`](../../DEFINITIONS.md) motion-contract 匹配的 checkpoint**
 做真正 25-tick Isaac 诊断；
-但截至本记录尚未消费私有 paper、尚未启动 simulator，所以“0.5 秒能否接住”的行为答案仍是未知，不能写成通过。
+但截至本记录尚未用任何 checkpoint 消费该 paper、尚未启动 simulator，所以“0.5 秒能否接住”的行为答案
+仍是未知，不能写成通过。
 
 ## 未闭环项
 
-1. 尚未在恢复的 exact private schedule 上运行一次 materialize，因此没有正式 paper file SHA。
+1. exact private schedule 已在两台 Pod 各 materialize 一次；当前缺的是把 checkpoint、paper、exam bank、
+   evaluator source 和 scorecard/result receipt 绑定成一次不可重放的实际 K100 执行。
 2. Isaac adapter 已接线但尚未实际消费；vendor MuJoCo evaluator 仍会走 native/reset clock，不能保证保留逐题
    retiming，因此当前必须 fail closed，尚无同卷跨引擎 100 行结果。
-3. 当前统一相位 time law 没有 TOPP/动力学证书；0.5 秒只能作为待测基本门。
+3. 当前统一相位 time law 没有 0.5 秒 TOPP/动力学证书；首次 production-FK run-up 搜索只找到正手
+   `0.98 s`、反手 `0.78 s` 的可行上界。0.5 秒仍是必须实测的基本门，但旧固定倍率不能被追认为动力学可行。
 4. 本卷初态是零速度第 0 帧，不等价于上一拍 carry-state；连续恢复需要另一张绑定 post-swing 初态的卷。
 5. 本实现只授权显式 `allow_inexact_contract` 的 Isaac 诊断；没有授权 trainer、formal judge、
    production planner/runner、部署或真机命令。

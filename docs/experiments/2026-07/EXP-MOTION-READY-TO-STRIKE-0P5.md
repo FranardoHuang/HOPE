@@ -1,0 +1,59 @@
+# EXP-MOTION-READY-TO-STRIKE-0P5：从静止准备态压缩到触球
+
+- 状态：`ready`（host 候选生成器完成；真实动作候选和后续门禁尚未运行）
+- 阶段/轴：动作空间路径 × 时间律 × 模仿约束
+- 集成小目标：让动作从所选 clip 的第 0 帧静止准备态出发，在 0.5 秒内进入保真的触球窗
+- 人类负责人：Franco
+- 执行者：Codex
+- 最高证据等级：E1 source gate
+- 创建日期/最后复核日期：2026-07-17
+
+这里的 [schema-2 motion](../../DEFINITIONS.md) 是机器人动作资产合同；
+[`TOPP`](../../DEFINITIONS.md) 是在固定空间路径上找受速度、加速度、力矩和接触稳定约束的时间律。
+“0.5 秒候选”只表示路径的触球行被放在第 25 个 50 Hz tick，不表示该路径已经动力学可行或能回球。
+
+## 问题与假设
+
+现役 `v4rg`（第四版正反手参考挥拍）只重定时固定长路径时，production-FK TOPP 找到的最佳可行
+run-up 上界是正手 `0.98 s`、反手 `0.78 s`。因此单纯把完整旧 clip 加速不能闭合 0.5 秒。
+
+新假设是：从动作自己的第 0 帧姿态、全零速度出发，用一条 quintic 位置桥接跳过与击球无关的长引拍，
+并逐字节保留触球前 `0.1 s` 和触球行，可能得到更短且仍可由 TOPP/动力学认证的空间路径。
+
+证伪条件：预注册的桥接族没有任一候选同时达到 production FK、TOPP run-up `<=0.5 s`、L0、vendor L1
+自碰/自打、桌网整轨余隙 `>=5 mm` 和动力学稳定；或实际 K100/厂商 MuJoCo 表明缩短路径不能回球。
+
+## 固定的构造合同
+
+- 等待态只取显式 `ready-source` 的 **第 0 帧姿态**；输入文件里的速度不继承，输出从 bitwise zero
+  速度开始，并至少保留三行 producer-gradient 为零的 50 Hz 样本。
+- `joint_pos` 和 link-position 使用解析 quintic endpoint 条件构造；这是 host 候选，不是运行时 C2
+  或动力学证书。join 处离散速度误差必须进 contract，不能藏掉。
+- 触球前 `0.1 s` 到触球行的六个 schema-2 时序通道逐字节等于原动作。
+- 四元数导数工作区围绕原始 join 行做 hemisphere alignment；发布的 join 行必须保持原始 `q/-q`
+  字节符号，避免等价旋转在分量空间跳变。
+- 输出 NPZ 与 JSON 使用 no-clobber；下游必须两份同时存在并核 SHA。双文件发布不是 crash-atomic，
+  若进程被 `SIGKILL` 留下孤儿文件，保全现场并人工判 invalid，禁止自动删除后重放。
+- 输出 contract 固定 `training/deployment/hardware_authorized=false`。host 生成成功不得越过后续门。
+
+## 完整而不混因果的四格
+
+| 格 | 空间路径 | 击球窗模仿 | 回答的问题 |
+| --- | --- | --- | --- |
+| A | 原完整路径 | 现役模仿 | 基线 |
+| B | 新 ready-to-strike 路径 | 现役模仿 | 只缩短路径是否已足够 |
+| C | 原完整路径 | 放松击球窗模仿 | 只释放 policy 控制预算是否足够 |
+| D | 新 ready-to-strike 路径 | 放松击球窗模仿 | 两者是否必须联合 |
+
+先离线筛路径；只有 B 的动作证书全过才允许 B/D 进入单 seed 训练。C 使用与现役相同安全门。
+若 B、C 都无单独改善而 D 改善，结论是交互项，不能把收益单记到 TOPP 或 Reward。
+
+## 决策与当前边界
+
+- 决定：`inconclusive`；采用 host-only candidate builder，不采用任何生成动作。
+- 是否已纳入当前 setting：`no`。
+- 下一门：在 ignored runtime 资产上按预注册 join ladder 生成正/反手候选，production FK 重建后逐个跑
+  TOPP；只把 `<=0.5 s` 的候选送 L0/L1/桌网/动力学，再用绑定该 motion SHA 的 0.5 秒 K100 和
+  vendor MuJoCo 判行为。
+
+复现入口见[操作文档](../../operations/run_ready_to_strike_motion.md)。
