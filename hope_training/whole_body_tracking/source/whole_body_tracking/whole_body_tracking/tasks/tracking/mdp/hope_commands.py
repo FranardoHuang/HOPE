@@ -675,9 +675,10 @@ class RacketTargetCommand(CommandTerm):
             # The planner-owned clock deliberately disables the legacy hold counters: preparation
             # time comes from the task deadline, not from a second frozen-reference clock.  Keep a
             # separate instrumentation-only identity latch so the exact behavior ledger can still
-            # sample the robot once at the beginning of every physical-ball task.  Without this,
-            # defining "ready" exclusively as ``motion.in_hold`` makes every planner-revision run
-            # report a silent zero denominator even though task-entry state is observable.
+            # sample the robot once on the first metrics tick after every physical-ball task is
+            # installed.  Without this, defining "ready" exclusively as ``motion.in_hold`` makes
+            # every planner-revision run report a silent zero denominator even though the first
+            # post-install state is observable.
             self._exact_ready_sampled_control_epoch = torch.zeros(
                 n, dtype=torch.long, device=self.device
             )
@@ -3657,6 +3658,7 @@ class RacketTargetCommand(CommandTerm):
             "ready_foot_slip_eligible_sample_count",
             "ready_phase_sample_count",
             "ready_planner_task_entry_sample_count",
+            "ready_planner_legacy_hold_violation_count",
             "ready_foot_sensor_unavailable_sample_count",
             "ready_nonfinite_value_count",
         ):
@@ -3793,9 +3795,11 @@ class RacketTargetCommand(CommandTerm):
 
         Legacy playback exposes readiness as every hold/recovery step.  Planner-revision playback
         intentionally sets all legacy holds to zero because its initial TTS owns preparation time;
-        for that mode, readiness is sampled exactly once at each new ``(control_epoch, task_id)``.
-        The task-entry latch is instrumentation-only and never affects observations, rewards,
-        resets, sampling, or the phase governor.
+        for that mode, readiness is sampled exactly once on the first metrics tick after each new
+        ``(control_epoch, task_id)`` is installed.  This is deliberately named a task-entry sample
+        in the ledger, but it is not an in-function instantaneous snapshot of installation.  The
+        identity latch is instrumentation-only and never affects observations, rewards, resets,
+        sampling, or the phase governor.
         """
 
         motion = self._motion()
@@ -3810,11 +3814,17 @@ class RacketTargetCommand(CommandTerm):
             eligible = in_hold.detach().bool()
 
         planner_entry = torch.zeros_like(eligible)
+        planner_legacy_hold_violation = torch.zeros_like(eligible)
         if getattr(self, "planner_revision_enabled", False):
             if not getattr(motion, "planner_revision_enabled", False):
                 raise RuntimeError(
                     "planner ready instrumentation requires the planner-owned motion clock"
                 )
+            # MotionCommand's constructor already rejects every non-zero legacy hold clock in
+            # planner mode.  Keep this device-side runtime witness in case a later state-machine
+            # regression nevertheless raises ``in_hold``.  Such a hold must never enter ready
+            # denominators: the planner deadline is the sole preparation clock.
+            planner_legacy_hold_violation = eligible
             # Unit-test construction may bypass __init__; lazy allocation preserves the same
             # zero/zero sentinel used by the real constructor without weakening live validation.
             if not hasattr(self, "_exact_ready_sampled_control_epoch"):
@@ -3836,12 +3846,15 @@ class RacketTargetCommand(CommandTerm):
                     | (task != self._exact_ready_sampled_task_id)
                 )
             )
-            eligible = eligible | planner_entry
+            eligible = planner_entry
 
         ledger = self._ensure_exact_behavior_decision_counters()
         ledger["ready_phase_sample_count"].add_(eligible.sum(dtype=torch.long))
         ledger["ready_planner_task_entry_sample_count"].add_(
             planner_entry.sum(dtype=torch.long)
+        )
+        ledger["ready_planner_legacy_hold_violation_count"].add_(
+            planner_legacy_hold_violation.sum(dtype=torch.long)
         )
         data = self.robot.data
         tilt = torch.acos(self.metrics["base_upright"].detach().clamp(-1.0, 1.0))

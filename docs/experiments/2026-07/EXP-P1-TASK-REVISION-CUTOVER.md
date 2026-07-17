@@ -1,12 +1,14 @@
 # EXP-P1-TASK-REVISION-CUTOVER
 
-Status: `running / no behavior verdict` — `A6` passed the 4096-env, two-update generic and
+Status: `blocked / no behavior verdict` — `A6` passed the 4096-env, two-update generic and
 task-revision full-scene gates with a finite checkpoint, exact integer ledger and live
-final-precontact revisions. All 22 delay-zero cells have now consumed exactly one launch claim:
-19 crossed their first training iteration and remain live, while three failed before the first
-training iteration in the importer/boot path. The two non-atomic delayed-transport cells remain
-NO-LAUNCH. This is runtime/harness acceptance and a live engineering search, not a behavior
-winner or 0.5-second return result.
+final-precontact revisions. All 22 delay-zero cells consumed exactly one launch claim: 19 crossed
+their first training iteration and later received checkpoint-bound `+1000` behavior receipts,
+while three failed before the first training iteration in the importer/boot path. The old 19
+receipts cannot produce a winner because their ready/balance denominators are structurally zero;
+they are not evidence that every setting should continue. The two non-atomic delayed-transport
+cells remain NO-LAUNCH. This is runtime/harness evidence, not a behavior winner or 0.5-second
+return result.
 
 - Human owner: Franco
 - Executor: Codex
@@ -229,6 +231,51 @@ receipt. The blocking reason is now evidence, not scheduling: all four ready/bal
 were `null` because their eligible denominators were zero. The preregistered Pareto consumer correctly
 refused to impute them or silently drop those axes. This pool therefore cannot yield a formal winner;
 future long runs must prove nonzero ready denominators in the full-scene probe before launch.
+
+## Ready denominator root cause and successor ruler
+
+The old planner-mode source deliberately zeroed every legacy hold clock because initial
+time-to-strike (TTS, the planner's remaining time before contact) is the sole preparation clock,
+but the ready ruler still admitted samples only when `motion.in_hold` was true. It therefore made
+all planner-mode ready denominators zero by construction. This was a measurement bug, not evidence
+that all 19 settings had equal balance or deserved more training. A checkpoint receipt contains
+only the counters emitted by its frozen source, so the missing denominators cannot be reconstructed
+or backfilled after the fact; none of those 19 receipts can authorize behavior pruning.
+
+The successor source uses only a new active `(control_epoch, task_id)` identity as planner-mode
+eligibility. It samples readiness on the first metrics sample after that task has been installed and
+becomes active; it does **not** claim an instantaneous sample inside the task-install function.
+Changing only `task_revision` for the same physical ball does not create another sample. A next-ball
+`task_id` or true-reset `control_epoch` creates exactly one new sample. Legacy non-planner playback
+keeps its existing per-hold/recovery-step semantics; planner eligibility is never
+`legacy hold OR new task`.
+
+Four integer witnesses make that distinction auditable:
+
+- `ready_phase_sample_count`: total ready samples admitted to the per-quantity denominators;
+- `ready_planner_task_entry_sample_count`: the admitted planner samples caused by a new task
+  identity;
+- `ready_planner_legacy_hold_violation_count`: unexpected legacy holds observed in planner mode;
+  these are violations and never eligibility;
+- `ready_foot_sensor_unavailable_sample_count`: admitted samples for which foot contact/slip could
+  not be measured, rather than fabricated zero foot observations.
+
+The exact source at `2d8d0eb0a6e17eb66a51e2b878ba27e885470dff` was checked once on Pod2 with
+CPU only and a clean worktree. The first command used
+`/workspace/hope_isaac_venv/bin/python -m pytest` and stopped before test collection because that
+environment has no `pytest`; no source test ran, so this is an environment failure, not a source
+failure. Without installing anything, a direct-import probe under the same Python then passed all
+three selected ready-ledger functions (`3/3`) and left the worktree clean. The final successor
+candidate's four focused functions also pass under the local Torch shim, including the
+legacy-hold-as-violation negative case; static Python compile, abstract-syntax-tree inspection and
+diff checks pass. Formal pytest and full-manager ordering still require the RunPod runtime, so this
+is not a full-scene gate.
+
+The run gate remains `Partial`: before any successor pool can be called pruneable, a clean detached
+full-scene probe must show nonzero and conserved task-entry/ready denominators, zero planner legacy-
+hold violations, explicit foot-sensor availability, a finite checkpoint and exact source/contract
+binding. A real run must then emit two disjoint complete 100-update integer windows. Until both
+steps pass, there is no legal ready/balance ranking, stop decision or historical backfill.
 
 ## Acceptance sequence
 

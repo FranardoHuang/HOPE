@@ -46,6 +46,28 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-17, planner ready-ruler source repair; Gate remains `Partial`):
+
+- Root cause is now explicit: planner mode correctly sets legacy hold clocks to zero because
+  time-to-strike (TTS, the planner's remaining time before contact) owns preparation, but the old
+  ready ruler admitted only `motion.in_hold`. The 19 existing `+1000` receipts therefore have
+  structurally zero ready denominators. A frozen checkpoint cannot be retroactively given counters
+  its source never emitted, so those receipts cannot be backfilled, ranked or used to stop arms.
+- The successor ruler samples on the first metrics sample after each active new
+  `(control_epoch, task_id)` has been installed. Same-ball `task_revision` updates do not count
+  again, and an unexpected planner-mode legacy hold is a violation, never an alternative
+  eligibility path. It exposes four witnesses: `ready_phase_sample_count`,
+  `ready_planner_task_entry_sample_count`, `ready_planner_legacy_hold_violation_count` and
+  `ready_foot_sensor_unavailable_sample_count`.
+- Pod2 checked exact source `2d8d0eb0…e885470dff` once with CPU only: the first pytest command
+  stopped before collection because `/workspace/hope_isaac_venv` has no pytest, which is an
+  environment failure rather than a failed source test; a no-install direct-import probe under the
+  same Python then passed the three selected functions (`3/3`) and preserved a clean worktree. The
+  final candidate's four focused functions also pass under the local Torch shim, including the
+  illegal-hold negative case. This is not full-scene evidence. A clean full-scene probe plus two
+  complete disjoint 100-update integer windows are still required before behavior pruning, so G05
+  stays `Partial`.
+
 Follow-up note (2026-07-17, exact-0.5 K100 persistent source gate passed; Gate remains `Partial`):
 
 - The checkpoint-bound [0.5-second timing exam](../DEFINITIONS.md#timing-exam-0p5) now has a frozen

@@ -13,6 +13,16 @@
 
 ## 2026-07-17
 
+- planner-mode ready 分母的结构性零值已定位并补 source candidate：旧量尺只认已被 task-revision
+  协议清零的 legacy hold，所以 19 份 `+1000` receipt 不可回填、不可排名或淘汰。新量尺在新
+  `(control_epoch, task_id)` 安装后的首次 metrics sample 恰记一次，同球 revision 不重复；四个显式
+  witness 区分总样本、新 task、非法 legacy hold 和脚传感器不可用。Pod2 首次 pytest 因环境缺 pytest
+  在收集前结束，不是源码失败；同一 Python 的 no-install CPU direct probe 随后 `3/3` 通过，最终候选
+  四个 focused 函数也在本地 Torch shim 下通过。full-scene 与两个完整 100-update 窗仍未跑，G05 保持
+  `Partial`。见
+  [task-revision 实验](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md)和
+  [训练操作](operations/run_training.md)。
+
 - exact-0.5 K100 now has a frozen checkpoint-bound persistent source gate: harness `c2ce2784…1b63`,
   activation `996775d6…7cfb6`, focused `35 passed, 1 skipped`. The skip is the delegated cgroup-v2
   runtime probe, so no Pod launch or behavior score is claimed and status remains `NO_LAUNCH`/G05-G06

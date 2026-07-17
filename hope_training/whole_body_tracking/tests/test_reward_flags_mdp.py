@@ -2377,6 +2377,7 @@ def test_exact_ready_balance_aggregates_have_explicit_phase_and_sensor_denominat
     first = command.consume_exact_behavior_decision_counters()
     assert first["ready_phase_sample_count"].item() == 3
     assert first["ready_planner_task_entry_sample_count"].item() == 0
+    assert first["ready_planner_legacy_hold_violation_count"].item() == 0
     assert first["ready_foot_sensor_unavailable_sample_count"].item() == 0
     for key in (
         "ready_tilt_eligible_sample_count",
@@ -2400,7 +2401,7 @@ def test_exact_ready_balance_aggregates_have_explicit_phase_and_sensor_denominat
     assert second["ready_foot_contact_eligible_sample_count"].item() == 0
 
 
-def test_exact_ready_planner_task_entry_has_nonzero_full_scene_denominators_once():
+def test_exact_ready_planner_first_post_install_sample_has_nonzero_denominators_once():
     command = _exact_behavior_command(types.SimpleNamespace(active_terms=()))
     command.planner_revision_enabled = True
     command._motion_term = types.SimpleNamespace(
@@ -2412,6 +2413,7 @@ def test_exact_ready_planner_task_entry_has_nonzero_full_scene_denominators_once
     command._event_timing_bound = True
     command._planner_control_epoch = torch.tensor([1, 1, 2, 2])
     command._planner_task_id = torch.tensor([1, 2, 1, 3])
+    command._planner_task_revision = torch.ones(4, dtype=torch.long)
     command.metrics = {
         "base_upright": torch.cos(torch.tensor([0.1, 0.2, 0.3, 0.4])),
         "foot_contact_frac": torch.tensor([1.0, 0.5, 1.0, 0.5]),
@@ -2436,6 +2438,7 @@ def test_exact_ready_planner_task_entry_has_nonzero_full_scene_denominators_once
     first = command.consume_exact_behavior_decision_counters()
     assert first["ready_phase_sample_count"].item() == 4
     assert first["ready_planner_task_entry_sample_count"].item() == 4
+    assert first["ready_planner_legacy_hold_violation_count"].item() == 0
     for key in (
         "ready_tilt_eligible_sample_count",
         "ready_base_speed_eligible_sample_count",
@@ -2446,7 +2449,8 @@ def test_exact_ready_planner_task_entry_has_nonzero_full_scene_denominators_once
         assert first[key].item() == 4
     assert first["ready_foot_sensor_unavailable_sample_count"].item() == 0
 
-    # The same task identity is sampled only once, even if a planner estimate is revised many times.
+    # A same-ball revision changes only task_revision and must not create another ready sample.
+    command._planner_task_revision += 17
     command._book_exact_ready_behavior_samples()
     second = command.consume_exact_behavior_decision_counters()
     assert second["ready_phase_sample_count"].item() == 0
@@ -2459,6 +2463,80 @@ def test_exact_ready_planner_task_entry_has_nonzero_full_scene_denominators_once
     assert third["ready_phase_sample_count"].item() == 1
     assert third["ready_planner_task_entry_sample_count"].item() == 1
     assert third["ready_foot_contact_eligible_sample_count"].item() == 1
+
+    # A partial vector-env true reset reuses task_id=1 under a new epoch.  Only the reset env is
+    # new; unchanged neighbors must keep their one-shot latches.
+    command._planner_control_epoch[1] += 1
+    command._planner_task_id[1] = 1
+    command._book_exact_ready_behavior_samples()
+    fourth = command.consume_exact_behavior_decision_counters()
+    assert fourth["ready_phase_sample_count"].item() == 1
+    assert fourth["ready_planner_task_entry_sample_count"].item() == 1
+    assert fourth["ready_tilt_eligible_sample_count"].item() == 1
+
+    # An installed identity is not sampled while inactive and is not prematurely latched.  It is
+    # sampled exactly once when the task becomes active on a later metrics tick.
+    command._planner_task_id[3] += 1
+    command._motion_term._planner_active[3] = False
+    command._book_exact_ready_behavior_samples()
+    inactive = command.consume_exact_behavior_decision_counters()
+    assert inactive["ready_phase_sample_count"].item() == 0
+    command._motion_term._planner_active[3] = True
+    command._book_exact_ready_behavior_samples()
+    activated = command.consume_exact_behavior_decision_counters()
+    assert activated["ready_phase_sample_count"].item() == 1
+    assert activated["ready_planner_task_entry_sample_count"].item() == 1
+
+
+def test_exact_ready_planner_legacy_hold_is_violation_not_eligibility():
+    command = _exact_behavior_command(types.SimpleNamespace(active_terms=()), num_envs=3)
+    command.planner_revision_enabled = True
+    command._motion_term = types.SimpleNamespace(
+        event_timing_enabled=False,
+        planner_revision_enabled=True,
+        in_hold=torch.tensor([True, True, False]),
+        _planner_active=torch.tensor([True, False, True]),
+    )
+    command._event_timing_bound = True
+    command._planner_control_epoch = torch.ones(3, dtype=torch.long)
+    command._planner_task_id = torch.ones(3, dtype=torch.long)
+    command.metrics = {
+        "base_upright": torch.ones(3),
+        "foot_contact_frac": torch.ones(3),
+        "foot_slip_speed": torch.zeros(3),
+    }
+    command.robot = types.SimpleNamespace(
+        data=types.SimpleNamespace(
+            root_pos_w=torch.tensor(
+                [[0.0, 0.0, 1.0], [9.0, 9.0, 1.0], [0.1, 0.2, 1.0]]
+            ),
+            root_lin_vel_w=torch.zeros(3, 3),
+        )
+    )
+    command.base_target_pos_w = torch.zeros(3, 2)
+    command._foot_idx_robot = [0, 1]
+    command._foot_idx_contact = [0, 1]
+    command._contact_sensor = object()
+
+    command._book_exact_ready_behavior_samples()
+    first = command.consume_exact_behavior_decision_counters()
+    # Both unexpected hold envs are witnessed, but only the two active new task identities enter
+    # the ready denominator.  In particular, inactive env 1's hold cannot leak into the sums.
+    assert first["ready_planner_legacy_hold_violation_count"].item() == 2
+    assert first["ready_phase_sample_count"].item() == 2
+    assert first["ready_planner_task_entry_sample_count"].item() == 2
+    assert first["ready_station_offset_eligible_sample_count"].item() == 2
+    assert first["ready_station_offset_m_sum"].item() == pytest.approx(
+        math.sqrt(0.1**2 + 0.2**2)
+    )
+
+    # The same identities stay one-shot.  A persistent illegal hold remains visible as a fresh
+    # violation each metrics tick but never creates another ready observation.
+    command._book_exact_ready_behavior_samples()
+    second = command.consume_exact_behavior_decision_counters()
+    assert second["ready_planner_legacy_hold_violation_count"].item() == 2
+    assert second["ready_phase_sample_count"].item() == 0
+    assert second["ready_tilt_eligible_sample_count"].item() == 0
 
 
 def test_exact_ready_missing_foot_sensor_is_explicitly_unavailable_not_zero_observation():

@@ -683,6 +683,30 @@ signal 前再读一次包含 argv 的完整进程身份。随后用 reviewed `ex
 仍存在时只对 intent 已绑定且未被新成员/PID reuse 污染的 residual 做 KILL。它不用 `pgrep -f`、`pkill`
 或 `killall`，不自动 retry，也不接收命令行 PID/路径。
 
+### Task-revision ready 分母的 successor 门
+
+旧 19 份 `+1000` behavior receipt 已经逐 checkpoint 绑定，但不能用于 ready/balance 淘汰：现役
+planner 模式把 legacy hold 时钟全部清零，而旧量尺只用 `motion.in_hold` 作为 ready eligibility，故其
+ready 分母结构性为零。receipt 不能补出冻结 source 没记录的事件；禁止离线插值、借用邻近 run 或重写
+旧 receipt。
+
+successor 在每个 active 新 `(control_epoch, task_id)` 安装后的首次 metrics sample 恰采一次；同球只增
+`task_revision` 时不重复。planner eligibility 只能来自这个新 task identity，绝不能写成
+`legacy hold OR task entry`。四个必需 witness 是：总 ready 样本
+`ready_phase_sample_count`、新 task 样本 `ready_planner_task_entry_sample_count`、非法旧 hold
+`ready_planner_legacy_hold_violation_count`、脚接触传感器不可用
+`ready_foot_sensor_unavailable_sample_count`。最后一项只解释 foot contact/slip 为何没有分母，不能把缺测
+伪造成数值零；legacy-hold violation 只报警，不能进入 ready 和。
+
+Pod2 已对 exact source `2d8d0eb0…e885470dff` 做一次 CPU-only direct probe。第一次调用 Isaac Python 的
+pytest 在测试收集前因环境没有 pytest 而停止；没有源码测试执行，不能记为源码失败。保持零安装后，使用
+同一 Python direct import 的三个指定函数均通过，前后 worktree clean。该 `3/3` 只关闭 dependency-light
+source 机制检查；最终候选四个 focused 函数另在本地 Torch shim 下通过，包括 illegal-hold 负例。下一
+queue 在 `launch_authorized=true` 前仍必须用 clean detached source 跑 full-scene，
+同时证明 finite checkpoint、exact source/contract、非零且守恒的 task-entry/ready 分母、零 planner
+legacy-hold violation 与明确的 foot-sensor availability。科学淘汰还必须再取得两个互不重叠、完整的
+100-update 整数窗；此前只允许写“量尺仍 Partial，继续或等待”，不得排名或 signal。
+
 ## Rolling timing 双 Pod 严格续训（2026-07-16）
 
 > **历史记录，禁止运行。** 本节以下所有
