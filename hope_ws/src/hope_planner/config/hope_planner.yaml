@@ -12,6 +12,7 @@ hope_planner:
     # Gate3's sim overlay may bind a slower, separately reviewed cadence.
     max_predict_time: 2.0
     solve_period_s: 0.02
+    use_latest_only_solve_worker: true
     # Virtual hit plane X (m); ~0.0 = HOPE origin end of table. MUST be matched to the
     # ROBOT PLACEMENT: the current deploy_parity policy (model_11400/7500_hopex lineage)
     # strikes at base-relative x in [0.56, 0.78] (box center 0.67), so

@@ -6,6 +6,7 @@ read .racket_command for the latest desired racket state.
 See HOPE_7DOF_Racket_Model_based_Planner_Reference_Setup.md, Section 6.
 """
 
+from dataclasses import dataclass, replace
 from typing import Optional
 
 import numpy as np
@@ -14,6 +15,25 @@ from .ball_state_estimator import BallStateEstimator
 from .ball_trajectory_predictor import BallTrajectoryPredictor, StrikeTarget
 from .constants import BallPhysics, PlannerConfig, TableParams
 from .racket_target_planner import RacketCommand, RacketTargetPlanner
+
+
+@dataclass(frozen=True)
+class PlannerEstimateSnapshot:
+    """Immutable estimator window and config used by one asynchronous solve."""
+
+    t_buffer: tuple[float, ...]
+    p_buffer: np.ndarray
+    config: PlannerConfig
+
+
+@dataclass(frozen=True)
+class PlannerPipelineResult:
+    """Stage-2/3 result that is inert until the ROS executor accepts it."""
+
+    command: Optional[RacketCommand]
+    strike: Optional[StrikeTarget]
+    t_est: float
+    config: PlannerConfig
 
 
 class HOPEPlanner:
@@ -51,27 +71,96 @@ class HOPEPlanner:
         -------
         RacketCommand or None
         """
+        snapshot = self.ingest_measurement(t, p_ball)
+        if snapshot is None:
+            self._latest_command = None
+            return None
+        result = self.solve_snapshot(snapshot)
+        self.accept_result(result)
+        return result.command
+
+    def ingest_measurement(
+        self, t: float, p_ball: np.ndarray
+    ) -> Optional[PlannerEstimateSnapshot]:
+        """Ingest one sample and copy the latest Stage-1 estimate cheaply.
+
+        The returned object owns every numpy buffer that the asynchronous
+        Stage-2/3 worker reads.  Slow prediction therefore never holds a lock
+        around the live estimator and cannot block the next 300 Hz ingest.
+        ``None`` means the fit window has not become ready yet.
+        """
+
         self.estimator.push(t, p_ball)
-
         if not self.estimator.ready:
-            self._latest_command = None
             return None
+        config = replace(self.config, target_land=self.config.target_land.copy())
+        return PlannerEstimateSnapshot(
+            t_buffer=tuple(float(v) for v in self.estimator.t_buffer),
+            p_buffer=np.asarray(self.estimator.p_buffer, dtype=float).copy(),
+            config=config,
+        )
 
-        p_est, v_est, t_est = self.estimator.estimate()
-        self._latest_t = t_est
+    def solve_snapshot(self, snapshot: PlannerEstimateSnapshot) -> PlannerPipelineResult:
+        """Run Stage 2/3 from an immutable estimate without touching live caches."""
 
-        # Only predict if the ball is moving toward P1 (v_x < 0).
+        if not isinstance(snapshot, PlannerEstimateSnapshot):
+            raise TypeError("solve_snapshot requires a PlannerEstimateSnapshot")
+        config = replace(snapshot.config, target_land=snapshot.config.target_land.copy())
+        estimator = BallStateEstimator(config)
+        estimator.t_buffer = list(snapshot.t_buffer)
+        estimator.p_buffer = [row.copy() for row in snapshot.p_buffer]
+        p_est, v_est, t_est = estimator.estimate()
         if v_est[0] >= 0:
-            self._latest_command = None
-            self._latest_strike = None
-            return None
+            return PlannerPipelineResult(
+                command=None, strike=None, t_est=float(t_est), config=config
+            )
+        predictor = BallTrajectoryPredictor(self.physics, config, self.table)
+        target_planner = RacketTargetPlanner(self.physics, config, self.table)
+        strike = predictor.predict(p_est, v_est, t_est)
+        command = target_planner.plan(strike)
+        return PlannerPipelineResult(
+            command=command,
+            strike=strike,
+            t_est=float(t_est),
+            config=config,
+        )
 
-        strike = self.predictor.predict(p_est, v_est, t_est)
-        self._latest_strike = strike
+    def replan_result(
+        self,
+        result: PlannerPipelineResult,
+        *,
+        target_land_y: float | None = None,
+        delta_t_flight: float | None = None,
+    ) -> PlannerPipelineResult:
+        """Pure Stage-3 replan for a side-specific aim selected by the worker."""
 
-        command = self.target_planner.plan(strike)
-        self._latest_command = command
-        return command
+        if result.strike is None:
+            return result
+        config = replace(result.config, target_land=result.config.target_land.copy())
+        if target_land_y is not None:
+            config.target_land[1] = float(target_land_y)
+        if delta_t_flight is not None:
+            config.delta_t_flight = float(delta_t_flight)
+        command = RacketTargetPlanner(self.physics, config, self.table).plan(result.strike)
+        return PlannerPipelineResult(
+            command=command,
+            strike=result.strike,
+            t_est=result.t_est,
+            config=config,
+        )
+
+    def accept_result(self, result: PlannerPipelineResult) -> None:
+        """Install a freshness-checked result on the executor thread."""
+
+        if not isinstance(result, PlannerPipelineResult):
+            raise TypeError("accept_result requires a PlannerPipelineResult")
+        self._latest_command = result.command
+        self._latest_strike = result.strike
+        self._latest_t = result.t_est
+        # Side-specific aim remains visible to the strike-spec diagnostics, but
+        # an old asynchronous result must never roll back the live hit plane.
+        self.config.target_land = result.config.target_land.copy()
+        self.config.delta_t_flight = float(result.config.delta_t_flight)
 
     def push_measurement(self, t: float, p_ball: np.ndarray) -> None:
         """Ingest one measurement without solving or mutating cached output.
@@ -81,7 +170,7 @@ class HOPEPlanner:
         ``strike_target`` and the command publication age remain unchanged.
         """
 
-        self.estimator.push(t, p_ball)
+        self.ingest_measurement(t, p_ball)
 
     def replan_latest(self) -> Optional[RacketCommand]:
         """Re-run Stage 3 after an optional per-side aim change.

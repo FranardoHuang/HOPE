@@ -28,7 +28,10 @@ QUEUE = Path("configs/phase1_task_revision_supercombo_20260716.yaml")
 HISTORICAL_ACTIVATION_V1 = Path(
     "configs/phase1_task_revision_0p5_exam_activation_v1_20260717.json"
 )
-ACTIVATION = Path("configs/phase1_task_revision_0p5_exam_activation_v2_20260717.json")
+HISTORICAL_ACTIVATION_V2 = Path(
+    "configs/phase1_task_revision_0p5_exam_activation_v2_20260717.json"
+)
+ACTIVATION = Path("configs/phase1_task_revision_0p5_exam_activation_v3_20260717.json")
 V1_FAILURE_RECEIPT = Path(
     "configs/phase1_task_revision_0p5_exam_v1_failure_20260717.json"
 )
@@ -37,6 +40,25 @@ V1_ACTIVATION_SHA256 = (
 )
 V1_HARNESS_SHA256 = (
     "c2ce27845cb26a1ff2474a547556364f72235bcbd830ae5a7768d85fe8141b63"
+)
+V2_ACTIVATION_SHA256 = (
+    "2b91248b8ec7f626ea5281ea9abdf4512662d6e88ddb9ff399d637340bfc0626"
+)
+V2_HARNESS_SHA256 = (
+    "be17289c6dbe917d42d505818ed40e8bf82b8d8ebd19767820504df74724cc59"
+)
+V2_FAILURE_LOG_SHA256 = (
+    "f8c3be8b54e57d452847254e2a184dee9014361a621de5957996123fd77a9e28"
+)
+V2_FAILURE_REASON = (
+    "timing rider requires a native-clock command before activation"
+)
+V2_SUPERVISOR_PID = 502505
+V2_SUPERVISOR_START_TICKS = 573485617
+V2_EVALUATOR_PID = 502542
+V2_STOP_CONFIRM = "SIM_ONLY_STOP_EXACT_FAILED_TASKREV_0P5_K100_V2"
+V3_ACTIVATION_ID = (
+    "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_native_clock_v3"
 )
 CONFIRM = "SIM_ONLY_LAUNCH_ONE_PERSISTENT_TASKREV_0P5_K100"
 RESULT_MARKER = "TASKREV_0P5_RESULT_JSON="
@@ -212,6 +234,125 @@ def _source_closure(root: Path) -> dict[str, str]:
     return result
 
 
+def build_v2_exact_stop_plan(
+    queue_path: Path,
+    *,
+    activation_path: Path,
+    eval_gpu: int,
+) -> dict[str, Any]:
+    """Build the sole authority to stop the already-consumed failed v2 run.
+
+    This deliberately does not route through :func:`load_activation`: v2 binds
+    the old harness bytes and may never be made launchable by the fixed v3
+    harness.  The stop consumer reads the immutable v2 activation only to bind
+    the extant process namespace and never authorizes a launch or retry.
+    """
+
+    queue_path = queue_path.resolve()
+    root = queue_path.parent.parent.resolve()
+    activation_path = activation_path.resolve()
+    expected_activation_path = (root / HISTORICAL_ACTIVATION_V2).resolve()
+    if activation_path != expected_activation_path:
+        raise ExamError("v2 exact-stop requires the tracked historical v2 activation")
+    if sha256_file(activation_path) != V2_ACTIVATION_SHA256:
+        raise ExamError("historical v2 activation bytes differ")
+    activation = _strict_json(activation_path)
+    if (
+        activation.get("schema_version") != 2
+        or activation.get("activation_id")
+        != "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_asset_restored_v2"
+        or activation.get("harness")
+        != {
+            "path": "scripts/run_phase1_task_revision_0p5_exam.py",
+            "sha256": V2_HARNESS_SHA256,
+        }
+        or activation.get("authority", {}).get("automatic_retry") is not False
+        or activation.get("authority", {}).get("maximum_launches") != 1
+    ):
+        raise ExamError("historical v2 activation identity/authority differs")
+    queue = activation.get("queue")
+    if (
+        not isinstance(queue, dict)
+        or queue.get("path") != str(QUEUE)
+        or queue.get("sha256") != sha256_file(queue_path)
+    ):
+        raise ExamError("historical v2 queue binding differs")
+    if eval_gpu != 0:
+        raise ExamError("historical v2 exact-stop is bound to physical evaluator GPU 0")
+    selection = activation.get("selection")
+    if not isinstance(selection, dict):
+        raise ExamError("historical v2 selection is missing")
+    expected_root = Path(
+        "/workspace/codexschema/phase1_task_revision_supercombo_20260716/"
+        "runs/p2_equal_reward"
+    )
+    expected_state = str(
+        expected_root / "timing_exam_0p5_supervisor_asset_restored_v2" / "model_5700"
+    )
+    expected_output = str(
+        expected_root / "timing_exam_0p5_asset_restored_v2" / "model_5700"
+    )
+    if (
+        selection.get("job_id") != "taskrev_p2_equal_reward"
+        or selection.get("milestone") != 5700
+        or selection.get("pod") != "pod2"
+        or selection.get("state_dir") != expected_state
+        or selection.get("output_dir") != expected_output
+    ):
+        raise ExamError("historical v2 selection namespace differs")
+    return {
+        "schema_version": 1,
+        "operation": "exact_stop_consumed_v2_native_clock_failure",
+        "activation": {
+            "path": str(HISTORICAL_ACTIVATION_V2),
+            "sha256": V2_ACTIVATION_SHA256,
+            "activation_id": activation["activation_id"],
+        },
+        "queue": {"path": str(QUEUE), "sha256": queue["sha256"]},
+        "consumer_harness": {
+            "path": "scripts/run_phase1_task_revision_0p5_exam.py",
+            "sha256": sha256_file(Path(__file__).resolve()),
+        },
+        "host": "162.43.172.181",
+        "port": 13146,
+        "ssh_key": str(Path("~/.ssh/id_ed25519_runpod").expanduser()),
+        "job_id": "taskrev_p2_equal_reward",
+        "milestone": 5700,
+        "eval_gpu": 0,
+        "state_dir": expected_state,
+        "output_dir": expected_output,
+        "failure_log": {
+            "path": str(Path(expected_output) / "evaluator.log"),
+            "sha256": V2_FAILURE_LOG_SHA256,
+            "exact_reason": V2_FAILURE_REASON,
+        },
+        "supervisor": {
+            "pid": V2_SUPERVISOR_PID,
+            "pgid": V2_SUPERVISOR_PID,
+            "sid": V2_SUPERVISOR_PID,
+            "start_ticks": V2_SUPERVISOR_START_TICKS,
+        },
+        "evaluator": {
+            "pid": V2_EVALUATOR_PID,
+            "pgid": V2_EVALUATOR_PID,
+            "sid": V2_EVALUATOR_PID,
+        },
+        "catastrophic_cleanup": activation["catastrophic_cleanup"],
+        "stop_intent_name": "exact_stop_native_clock_failure_v1.json",
+        "stop_result_name": "exact_stop_native_clock_failure_result_v1.json",
+        "wait_timeout_seconds": 120.0,
+        "ssh_timeout_seconds": 150.0,
+        "automatic_retry": False,
+        "retry_authorized": False,
+        "launch_authorized": False,
+        "trainer_signal": False,
+        "robot_command": False,
+        "evaluator_direct_signal": False,
+        "cgroup_kill_by_consumer": False,
+        "sigkill_by_consumer": False,
+    }
+
+
 def _positive_number(where: str, value: Any, minimum: float, maximum: float) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise ExamError(f"{where} must be numeric")
@@ -231,7 +372,16 @@ def load_activation(path: Path, *, root: Path) -> dict[str, Any]:
             raise ExamError("historical v1 activation bytes differ")
         raise ExamError(
             "historical v1 activation is consumed failed_no_retry; current HEAD only "
-            "authorizes the asset-restored v2 activation"
+            "authorizes the fresh native-clock v3 activation"
+        )
+    if activation.get("activation_id") == (
+        "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_asset_restored_v2"
+    ):
+        if sha256_file(path) != V2_ACTIVATION_SHA256:
+            raise ExamError("historical v2 activation bytes differ")
+        raise ExamError(
+            "historical v2 activation is consumed by its native-clock failure; "
+            "only the fresh v3 activation may launch"
         )
     expected = {
         "schema_version",
@@ -247,15 +397,15 @@ def load_activation(path: Path, *, root: Path) -> dict[str, Any]:
         "catastrophic_cleanup",
         "supervision",
         "authority",
+        "v2_failed_attempt",
     }
     if set(activation) != expected:
         raise ExamError("activation top-level keys differ")
     if (
-        activation.get("schema_version") != 2
-        or activation.get("activation_id")
-        != "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_asset_restored_v2"
+        activation.get("schema_version") != 3
+        or activation.get("activation_id") != V3_ACTIVATION_ID
     ):
-        raise ExamError("activation is not the sole asset-restored v2 authority")
+        raise ExamError("activation is not the sole fresh native-clock v3 authority")
     selection = activation.get("selection")
     if not isinstance(selection, dict) or set(selection) != {
         "job_id",
@@ -313,21 +463,47 @@ def load_activation(path: Path, *, root: Path) -> dict[str, Any]:
         "/workspace/codexschema/phase1_task_revision_supercombo_20260716/"
         "runs/p2_equal_reward"
     )
+    v2_failed_attempt = activation.get("v2_failed_attempt")
+    expected_v2_state = str(
+        expected_run_root
+        / "timing_exam_0p5_supervisor_asset_restored_v2"
+        / "model_5700"
+    )
+    if not isinstance(v2_failed_attempt, dict) or v2_failed_attempt != {
+        "activation": {
+            "path": str(HISTORICAL_ACTIVATION_V2),
+            "sha256": V2_ACTIVATION_SHA256,
+            "activation_id": (
+                "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_asset_restored_v2"
+            ),
+        },
+        "state_dir": expected_v2_state,
+        "stop_result": {
+            "basename": "exact_stop_native_clock_failure_result_v1.json",
+            "artifact_kind": "taskrev_0p5_v2_exact_stop_result",
+            "status": "v2_failed_no_retry_stopped_exact",
+            "failure_log_sha256": V2_FAILURE_LOG_SHA256,
+            "failure_reason": V2_FAILURE_REASON,
+            "signal": "SIGTERM_supervisor_once",
+            "retry_authorized": False,
+            "evaluator_direct_signal": False,
+            "cgroup_kill_by_consumer": False,
+            "sigkill_by_consumer": False,
+        },
+    }:
+        raise ExamError("activation v2 failed-attempt binding differs")
     consumption = activation.get("consumption")
     if not isinstance(consumption, dict) or consumption != {
-        "historical_v1_state_dir": str(
-            expected_run_root / "timing_exam_0p5_supervisor_v1" / "model_5700"
-        ),
-        "v2_attempt_dir": str(
+        "v3_attempt_dir": str(
             expected_run_root
-            / "timing_exam_0p5_attempt_asset_restored_v2"
+            / "timing_exam_0p5_attempt_native_clock_v3"
             / "model_5700"
         ),
-        "assets_validated_before_any_consumption_write": True,
+        "v2_stop_result_required_before_any_consumption_write": True,
         "no_clobber": True,
         "retry_authorized": False,
     }:
-        raise ExamError("activation one-shot consumption binding differs")
+        raise ExamError("activation v3 one-shot consumption binding differs")
     queue = activation.get("queue")
     harness = activation.get("harness")
     if not isinstance(queue, dict) or set(queue) != {"path", "sha256"}:
@@ -407,7 +583,7 @@ def load_activation(path: Path, *, root: Path) -> dict[str, Any]:
     if not isinstance(authority, dict) or authority != {
         "launch_authorized": True,
         "automatic_retry": False,
-        "new_activation_after_asset_restoration": True,
+        "fresh_activation_after_v2_native_clock_failure": True,
         "maximum_launches": 1,
         "formal_evidence_eligible": False,
         "evaluation_contract_exact": False,
@@ -421,7 +597,7 @@ def load_activation(path: Path, *, root: Path) -> dict[str, Any]:
     except ValueError as exc:
         raise ExamError("activation must be a tracked file inside the repository") from exc
     if activation["_repo_path"] != str(ACTIVATION):
-        raise ExamError("current HEAD authorizes only the tracked v2 activation path")
+        raise ExamError("current HEAD authorizes only the tracked v3 activation path")
     activation["_path"] = str(path)
     activation["_sha256"] = sha256_file(path)
     return activation
@@ -470,11 +646,11 @@ def build_plan(
     ):
         raise ExamError("task-revision queue points to an unexpected timing paper")
     expected_output = str(
-        Path(job["run_dir"]) / "timing_exam_0p5_asset_restored_v2" / f"model_{milestone}"
+        Path(job["run_dir"]) / "timing_exam_0p5_native_clock_v3" / f"model_{milestone}"
     )
     expected_state = str(
         Path(job["run_dir"])
-        / "timing_exam_0p5_supervisor_asset_restored_v2"
+        / "timing_exam_0p5_supervisor_native_clock_v3"
         / f"model_{milestone}"
     )
     expected_milestone = str(Path(job["run_dir"]) / "milestones" / f"model_{milestone}.json")
@@ -492,6 +668,7 @@ def build_plan(
             "activation_id": activation["activation_id"],
         },
         "prior_attempt": activation["prior_attempt"],
+        "v2_failed_attempt": activation["v2_failed_attempt"],
         "consumption": activation["consumption"],
         "job_id": job["id"],
         "milestone": milestone,
@@ -2855,43 +3032,74 @@ def supervisor_child(spec, lock_fd, supervisor_log_fd, state_guard, output_paren
         except OSError:
             pass
 
-def claim_activation_once(spec):
+def validate_v2_stop_before_v3(spec):
+    """Require the exact v2 failure/cleanup result before v3 consumes anything."""
+    predecessor = spec.get("v2_failed_attempt")
+    if not isinstance(predecessor, dict):
+        raise RuntimeError("v3 launch lacks a bound v2 failed attempt")
+    state = Path(predecessor.get("state_dir", ""))
+    expected = predecessor.get("stop_result")
+    if not state.is_absolute() or not isinstance(expected, dict):
+        raise RuntimeError("v3 v2-stop binding shape differs")
+    basename = expected.get("basename")
+    if (not isinstance(basename, str) or Path(basename).name != basename or
+            basename in {"", ".", ".."}):
+        raise RuntimeError("v3 v2-stop result basename differs")
+    state_guard = open_directory_guard(state, create_missing=False)
+    try:
+        result, raw = guarded_stable_json(
+            state_guard, basename, "v2 exact-stop result")
+    finally:
+        close_directory_guard(state_guard)
+    if (result.get("schema_version") != 1 or
+            result.get("artifact_kind") != expected.get("artifact_kind") or
+            result.get("status") != expected.get("status") or
+            result.get("activation") != predecessor.get("activation") or
+            result.get("job_id") != spec.get("job_id") or
+            result.get("milestone") != spec.get("milestone") or
+            result.get("failure_log_sha256") != expected.get("failure_log_sha256") or
+            result.get("failure_reason") != expected.get("failure_reason") or
+            result.get("signal") != expected.get("signal") or
+            result.get("retry_authorized") is not expected.get("retry_authorized") or
+            result.get("evaluator_direct_signal") is not expected.get("evaluator_direct_signal") or
+            result.get("cgroup_kill_by_consumer") is not expected.get("cgroup_kill_by_consumer") or
+            result.get("sigkill_by_consumer") is not expected.get("sigkill_by_consumer") or
+            result.get("cgroup_removed") is not True or
+            result.get("guardian_finish_result") not in {"D0", "K0"} or
+            not _sha_text(result.get("stop_intent_sha256")) or
+            not _sha_text(result.get("terminal_sha256"))):
+        raise RuntimeError("v3 requires the exact completed v2 stop result")
+    return {
+        "path": str(state / basename),
+        "file_sha256": hashlib.sha256(raw).hexdigest(),
+        "stop_intent_sha256": result["stop_intent_sha256"],
+        "terminal_sha256": result["terminal_sha256"],
+        "guardian_finish_result": result["guardian_finish_result"],
+        "content": result,
+    }
+
+
+def claim_activation_once(spec, v2_stop_binding):
+    """No-clobber v3 consumption after its v2 failure was exactly closed."""
     consumption = spec["consumption"]
-    attempt = Path(consumption["v2_attempt_dir"])
-    historical = Path(consumption["historical_v1_state_dir"])
+    attempt = Path(consumption["v3_attempt_dir"])
     attempt_parent = None
-    historical_parent = None
-    historical_guard = None
     attempt_guard = None
     try:
         attempt_parent = open_directory_guard(attempt.parent, create_missing=True)
         if guarded_child_exists(attempt_parent, attempt.name):
-            raise RuntimeError(
-                f"asset-restored v2 activation attempt is already consumed: {attempt}")
-        historical_parent = open_directory_guard(historical.parent, create_missing=True)
-        if guarded_child_exists(historical_parent, historical.name):
-            raise RuntimeError(
-                "historical v1 state namespace already exists; v2 refuses to infer or "
-                "overwrite its state")
-        historical_guard = create_child_directory_guard(
-            historical_parent, historical.name)
-        guarded_publish_json(historical_guard, "v1_consumed.json", {
-            "schema_version": 1,
-            "artifact_kind": "taskrev_0p5_historical_activation_consumed_tombstone",
-            "historical_activation": spec["prior_attempt"],
-            "replacement_activation": spec["activation"],
-            "status": "failed_no_retry",
-            "retry_authorized": False,
-            "trainer_or_robot_signals": [],
-            "published_utc": utc(),
-        })
+            raise RuntimeError(f"native-clock v3 activation attempt is already consumed: {attempt}")
         attempt_guard = create_child_directory_guard(attempt_parent, attempt.name)
+        if validate_v2_stop_before_v3(spec) != v2_stop_binding:
+            raise RuntimeError("v2 exact-stop result changed before v3 attempt publication")
         guarded_publish_json(attempt_guard, "attempt.json", {
             "schema_version": 1,
-            "artifact_kind": "taskrev_0p5_asset_restored_v2_attempt",
+            "artifact_kind": "taskrev_0p5_native_clock_v3_attempt",
             "plan_sha256": canonical(spec),
             "activation": spec["activation"],
             "prior_attempt": spec["prior_attempt"],
+            "v2_failed_attempt": spec["v2_failed_attempt"],
+            "v2_exact_stop_binding": v2_stop_binding,
             "exam_bank": spec["exam_bank"],
             "exam_rebind_report": spec["exam_rebind_report"],
             "status": "consumed",
@@ -2904,21 +3112,20 @@ def claim_activation_once(spec):
         close_directory_guard(attempt_guard)
         raise
     finally:
-        close_directory_guard(historical_guard)
-        close_directory_guard(historical_parent)
         close_directory_guard(attempt_parent)
 
 def launch(spec):
     # No write is permitted until both restored assets have exact size and SHA.
     validate_restored_assets(spec)
-    attempt_guard = claim_activation_once(spec)
+    v2_stop_binding = validate_v2_stop_before_v3(spec)
+    attempt_guard = claim_activation_once(spec, v2_stop_binding)
     try:
         context = validate_inputs(spec, validate_process=True)
     except BaseException as exc:
         try:
             guarded_publish_json(attempt_guard, "preflight_failure.json", {
                 "schema_version": 1,
-                "artifact_kind": "taskrev_0p5_asset_restored_v2_preflight_failure",
+                "artifact_kind": "taskrev_0p5_native_clock_v3_preflight_failure",
                 "activation": spec["activation"],
                 "status": "failed_no_retry",
                 "error": f"{type(exc).__name__}: {exc}",
@@ -3099,6 +3306,295 @@ def last_heartbeat(path, guard=None):
             raise
     return result
 
+def _sha_text(value):
+    return isinstance(value, str) and len(value) == 64 and all(
+        row in "0123456789abcdef" for row in value)
+
+def validate_v2_exact_stop_inputs(spec):
+    """Read and bind the consumed v2 process chain without mutating it."""
+    if (spec.get("operation") != "exact_stop_consumed_v2_native_clock_failure" or
+            spec.get("automatic_retry") is not False or
+            spec.get("retry_authorized") is not False or
+            spec.get("launch_authorized") is not False or
+            spec.get("evaluator_direct_signal") is not False or
+            spec.get("cgroup_kill_by_consumer") is not False or
+            spec.get("sigkill_by_consumer") is not False):
+        raise RuntimeError("v2 exact-stop authority differs")
+    state = Path(spec["state_dir"])
+    output = Path(spec["output_dir"])
+    state_guard = open_directory_guard(state, create_missing=False)
+    output_guard = None
+    cgroup_guard = None
+    try:
+        output_guard = open_directory_guard(output, create_missing=False)
+        hello, hello_raw = guarded_stable_json(
+            state_guard, "child_hello.json", "v2 supervisor hello")
+        ledger, ledger_raw = guarded_stable_json(
+            state_guard, "launch_ledger.json", "v2 launch ledger")
+        token, token_raw = guarded_stable_json(
+            state_guard, "commit_token.json", "v2 commit token")
+        decision, decision_raw = guarded_stable_json(
+            state_guard, "launch_decision.json", "v2 launch decision")
+        ack, ack_raw = guarded_stable_json(
+            state_guard, "commit_ack.json", "v2 commit acknowledgment")
+        hello_sha = hashlib.sha256(hello_raw).hexdigest()
+        ledger_sha = hashlib.sha256(ledger_raw).hexdigest()
+        token_sha = hashlib.sha256(token_raw).hexdigest()
+        decision_sha = hashlib.sha256(decision_raw).hexdigest()
+        expected_supervisor = spec["supervisor"]
+        plan_sha = hello.get("plan_sha256")
+        if (set(hello) != {
+                "schema_version", "artifact_kind", "plan_sha256", "activation",
+                "job_id", "milestone", "pid", "pgid", "proc_start_ticks",
+                "argv_sha256", "commit_deadline_monotonic_ns", "automatic_retry"} or
+                hello.get("schema_version") != 1 or
+                hello.get("artifact_kind") != "taskrev_0p5_supervisor_hello" or
+                not _sha_text(plan_sha) or
+                hello.get("activation") != spec["activation"] or
+                hello.get("job_id") != spec["job_id"] or
+                hello.get("milestone") != spec["milestone"] or
+                hello.get("pid") != expected_supervisor["pid"] or
+                hello.get("pgid") != expected_supervisor["pgid"] or
+                hello.get("proc_start_ticks") != expected_supervisor["start_ticks"] or
+                not _sha_text(hello.get("argv_sha256")) or
+                hello.get("automatic_retry") is not False):
+            raise RuntimeError("v2 supervisor hello differs from frozen stop target")
+        if (ledger.get("artifact_kind") != "taskrev_0p5_launch_ledger" or
+                ledger.get("plan_sha256") != plan_sha or
+                ledger.get("activation") != spec["activation"] or
+                ledger.get("job_id") != spec["job_id"] or
+                ledger.get("milestone") != spec["milestone"] or
+                ledger.get("pid") != expected_supervisor["pid"] or
+                ledger.get("pgid") != expected_supervisor["pgid"] or
+                ledger.get("proc_start_ticks") != expected_supervisor["start_ticks"] or
+                ledger.get("hello_sha256") != hello_sha or
+                ledger.get("state_dir") != spec["state_dir"] or
+                ledger.get("output_dir") != spec["output_dir"] or
+                ledger.get("automatic_retry") is not False):
+            raise RuntimeError("v2 launch ledger does not bind supervisor hello")
+        if (token.get("artifact_kind") != "taskrev_0p5_commit_token" or
+                token.get("pid") != expected_supervisor["pid"] or
+                token.get("pgid") != expected_supervisor["pgid"] or
+                token.get("proc_start_ticks") != expected_supervisor["start_ticks"] or
+                token.get("hello_sha256") != hello_sha or
+                token.get("ledger_sha256") != ledger_sha or
+                token.get("retry_authorized") is not False):
+            raise RuntimeError("v2 commit token does not bind launch ledger")
+        if (decision.get("artifact_kind") != "taskrev_0p5_launch_decision" or
+                decision.get("decision") != "commit" or
+                decision.get("plan_sha256") != plan_sha or
+                decision.get("pid") != expected_supervisor["pid"] or
+                decision.get("pgid") != expected_supervisor["pgid"] or
+                decision.get("proc_start_ticks") != expected_supervisor["start_ticks"] or
+                decision.get("hello_sha256") != hello_sha or
+                decision.get("ledger_sha256") != ledger_sha or
+                decision.get("token_sha256") != token_sha or
+                decision.get("retry_authorized") is not False):
+            raise RuntimeError("v2 commit decision does not bind token")
+        catastrophic = ack.get("catastrophic_cleanup")
+        if (ack.get("artifact_kind") != "taskrev_0p5_supervisor_commit_ack" or
+                ack.get("plan_sha256") != plan_sha or
+                ack.get("pid") != expected_supervisor["pid"] or
+                ack.get("pgid") != expected_supervisor["pgid"] or
+                ack.get("proc_start_ticks") != expected_supervisor["start_ticks"] or
+                ack.get("hello_sha256") != hello_sha or
+                ack.get("ledger_sha256") != ledger_sha or
+                ack.get("token_sha256") != token_sha or
+                ack.get("decision_sha256") != decision_sha or
+                ack.get("kit_lock_held") is not True or
+                ack.get("automatic_retry") is not False or
+                not isinstance(catastrophic, dict) or
+                catastrophic.get("contract") != spec["catastrophic_cleanup"] or
+                catastrophic.get("cgroup_exact_members") != [expected_supervisor["pid"]] or
+                catastrophic.get("supervisor_contained") is not True or
+                catastrophic.get("guardian_live_exact") is not True or
+                not isinstance(catastrophic.get("guardian"), dict)):
+            raise RuntimeError("v2 acknowledgment does not bind cleanup chain")
+
+        supervisor = proc_identity(expected_supervisor["pid"])
+        if (supervisor is None or supervisor["pgid"] != expected_supervisor["pgid"] or
+                supervisor["sid"] != expected_supervisor["sid"] or
+                supervisor["start_ticks"] != expected_supervisor["start_ticks"] or
+                canonical(supervisor["argv"]) != hello["argv_sha256"]):
+            raise RuntimeError("v2 supervisor live identity/argv differs")
+        guardian = catastrophic["guardian"]
+        guardian_current = exact_live(guardian)
+        if guardian_current is None:
+            raise RuntimeError("v2 cleanup guardian is not live exact")
+        evaluator_doc, evaluator_raw = guarded_stable_json(
+            state_guard, "evaluator_identity.json", "v2 evaluator identity")
+        expected_evaluator = spec["evaluator"]
+        if (set(evaluator_doc) != {
+                "schema_version", "artifact_kind", "pid", "pgid",
+                "proc_start_ticks", "argv_sha256", "started_utc"} or
+                evaluator_doc.get("schema_version") != 1 or
+                evaluator_doc.get("artifact_kind") != "taskrev_0p5_owned_evaluator" or
+                evaluator_doc.get("pid") != expected_evaluator["pid"] or
+                evaluator_doc.get("pgid") != expected_evaluator["pgid"] or
+                not _sha_text(evaluator_doc.get("argv_sha256"))):
+            raise RuntimeError("v2 evaluator identity receipt differs")
+        evaluator = proc_identity(expected_evaluator["pid"])
+        if (evaluator is None or evaluator["pgid"] != expected_evaluator["pgid"] or
+                evaluator["sid"] != expected_evaluator["sid"] or
+                evaluator["start_ticks"] != evaluator_doc["proc_start_ticks"] or
+                canonical(evaluator["argv"]) != evaluator_doc["argv_sha256"]):
+            raise RuntimeError("v2 evaluator live identity/argv differs")
+
+        failure_raw = guarded_stable_bytes(
+            output_guard, "evaluator.log", "v2 evaluator failure log")
+        if hashlib.sha256(failure_raw).hexdigest() != spec["failure_log"]["sha256"]:
+            raise RuntimeError("v2 evaluator failure log SHA differs")
+        reason = spec["failure_log"]["exact_reason"].encode("utf-8")
+        if failure_raw.count(reason) != 1:
+            raise RuntimeError("v2 evaluator failure reason is missing or ambiguous")
+
+        cgroup_path = Path(catastrophic.get("cgroup_path", ""))
+        if not cgroup_path.is_absolute():
+            raise RuntimeError("v2 acknowledgment cgroup path is not absolute")
+        cgroup_guard = open_directory_guard(cgroup_path, create_missing=False)
+        members = cgroup_processes(cgroup_guard)
+        if expected_supervisor["pid"] not in members or expected_evaluator["pid"] not in members:
+            raise RuntimeError("v2 owned cgroup lacks supervisor/evaluator")
+        for pid in members:
+            if pid == expected_supervisor["pid"]:
+                continue
+            row = proc_identity(pid)
+            if row is None or row["pgid"] != expected_evaluator["pgid"]:
+                raise RuntimeError("v2 owned cgroup contains an unbound process")
+        return {
+            "plan_sha256": plan_sha,
+            "chain": {
+                "hello_sha256": hello_sha, "ledger_sha256": ledger_sha,
+                "token_sha256": token_sha, "decision_sha256": decision_sha,
+                "ack_sha256": hashlib.sha256(ack_raw).hexdigest(),
+                "evaluator_identity_sha256": hashlib.sha256(evaluator_raw).hexdigest(),
+            },
+            "supervisor": supervisor,
+            "guardian": guardian,
+            "evaluator": evaluator,
+            "cgroup_path": str(cgroup_path),
+            "cgroup_members": members,
+            "failure_log_sha256": hashlib.sha256(failure_raw).hexdigest(),
+        }
+    finally:
+        close_directory_guard(cgroup_guard)
+        close_directory_guard(output_guard)
+        close_directory_guard(state_guard)
+
+def stop_v2_exact(spec):
+    """Signal only the frozen v2 supervisor once, then verify guardian cleanup."""
+    first = validate_v2_exact_stop_inputs(spec)
+    state_guard = open_directory_guard(Path(spec["state_dir"]), create_missing=False)
+    try:
+        intent = {
+            "schema_version": 1,
+            "artifact_kind": "taskrev_0p5_v2_exact_stop_intent",
+            "operation": spec["operation"],
+            "activation": spec["activation"],
+            "job_id": spec["job_id"],
+            "milestone": spec["milestone"],
+            "supervisor": spec["supervisor"],
+            "evaluator": spec["evaluator"],
+            "failure_log": spec["failure_log"],
+            "validated_chain": first["chain"],
+            "plan_sha256": first["plan_sha256"],
+            "created_utc": utc(),
+            "signal": "SIGTERM_supervisor_once",
+            "retry_authorized": False,
+            "evaluator_direct_signal": False,
+            "cgroup_kill_by_consumer": False,
+            "sigkill_by_consumer": False,
+        }
+        guarded_publish_json(state_guard, spec["stop_intent_name"], intent)
+        intent_sha = guarded_sha(
+            state_guard, spec["stop_intent_name"], "v2 exact-stop intent")
+    finally:
+        close_directory_guard(state_guard)
+
+    second = validate_v2_exact_stop_inputs(spec)
+    if (second["chain"] != first["chain"] or
+            second["plan_sha256"] != first["plan_sha256"] or
+            second["failure_log_sha256"] != first["failure_log_sha256"] or
+            second["supervisor"] != first["supervisor"] or
+            second["evaluator"] != first["evaluator"] or
+            second["guardian"] != first["guardian"] or
+            second["cgroup_path"] != first["cgroup_path"]):
+        raise RuntimeError("v2 exact-stop inputs changed after stop-intent publication")
+    current = proc_identity(spec["supervisor"]["pid"])
+    if current != second["supervisor"]:
+        raise RuntimeError("v2 supervisor changed immediately before SIGTERM")
+    os.kill(spec["supervisor"]["pid"], signal.SIGTERM)
+
+    deadline = time.monotonic() + float(spec["wait_timeout_seconds"])
+    state_guard = None
+    terminal = None
+    terminal_raw = None
+    while time.monotonic() < deadline:
+        if proc_identity(spec["supervisor"]["pid"]) is None:
+            try:
+                state_guard = open_directory_guard(
+                    Path(spec["state_dir"]), create_missing=False)
+                if guarded_child_exists(state_guard, "terminal.json"):
+                    terminal, terminal_raw = guarded_stable_json(
+                        state_guard, "terminal.json", "v2 stopped terminal")
+                    break
+            finally:
+                close_directory_guard(state_guard)
+                state_guard = None
+        time.sleep(0.25)
+    if terminal is None:
+        raise RuntimeError("v2 exact-stop timed out; no additional signal is authorized")
+    content = terminal.get("content", {})
+    catastrophic = content.get("catastrophic_cleanup")
+    if (canonical(content) != terminal.get("content_sha256") or
+            content.get("status") != "failed_no_retry" or
+            content.get("retry_authorized") is not False or
+            content.get("job_id") != spec["job_id"] or
+            content.get("milestone") != spec["milestone"] or
+            content.get("trainer_or_robot_signals") != [] or
+            content.get("owned_process_groups_empty") is not True or
+            not isinstance(catastrophic, dict) or
+            catastrophic.get("contract") != spec["catastrophic_cleanup"] or
+            catastrophic.get("guardian_finish_result") not in {"D0", "K0"} or
+            catastrophic.get("cgroup_populated_zero_acknowledged") is not True or
+            catastrophic.get("cgroup_removed_after_populated_zero") is not True):
+        raise RuntimeError("v2 stopped terminal lacks exact failed-no-retry cleanup proof")
+    if proc_identity(spec["supervisor"]["pid"]) is not None:
+        raise RuntimeError("v2 supervisor remains live after terminal")
+    if exact_live(first["evaluator"]) is not None:
+        raise RuntimeError("v2 evaluator remains live exact after terminal")
+    if exact_live(first["guardian"]) is not None:
+        raise RuntimeError("v2 guardian remains live exact after terminal")
+    if Path(first["cgroup_path"]).exists():
+        raise RuntimeError("v2 owned cgroup still exists after terminal")
+
+    result = {
+        "schema_version": 1,
+        "artifact_kind": "taskrev_0p5_v2_exact_stop_result",
+        "status": "v2_failed_no_retry_stopped_exact",
+        "activation": spec["activation"],
+        "job_id": spec["job_id"],
+        "milestone": spec["milestone"],
+        "stop_intent_sha256": intent_sha,
+        "terminal_sha256": hashlib.sha256(terminal_raw).hexdigest(),
+        "failure_log_sha256": spec["failure_log"]["sha256"],
+        "failure_reason": spec["failure_log"]["exact_reason"],
+        "signal": "SIGTERM_supervisor_once",
+        "guardian_finish_result": catastrophic["guardian_finish_result"],
+        "cgroup_removed": True,
+        "evaluator_direct_signal": False,
+        "cgroup_kill_by_consumer": False,
+        "sigkill_by_consumer": False,
+        "retry_authorized": False,
+        "finished_utc": utc(),
+    }
+    state_guard = open_directory_guard(Path(spec["state_dir"]), create_missing=False)
+    try:
+        guarded_publish_json(state_guard, spec["stop_result_name"], result)
+    finally:
+        close_directory_guard(state_guard)
+    return result
+
 def inspect(spec):
     state_dir = Path(spec["state_dir"])
     output = Path(spec["output_dir"])
@@ -3234,8 +3730,10 @@ if __name__ == "__main__":
             value = launch(request)
         elif action == "inspect":
             value = inspect(request)
+        elif action == "stop-v2":
+            value = stop_v2_exact(request)
         else:
-            raise RuntimeError("remote action must be launch or inspect")
+            raise RuntimeError("remote action must be launch, inspect, or stop-v2")
         print(MARKER + json.dumps(value, allow_nan=False, sort_keys=True), flush=True)
     except BaseException as exc:
         print(MARKER + json.dumps({"status": "failed_no_retry", "retry_authorized": False,
@@ -3245,8 +3743,8 @@ if __name__ == "__main__":
 
 
 def _remote_command(plan: Mapping[str, Any], *, action: str) -> str:
-    if action not in {"launch", "inspect"}:
-        raise ExamError("remote action must be launch or inspect")
+    if action not in {"launch", "inspect", "stop-v2"}:
+        raise ExamError("remote action must be launch, inspect, or stop-v2")
     program = zlib.compress(REMOTE_PROGRAM.encode("utf-8"), level=9)
     encoded_program = base64.b64encode(program).decode("ascii")
     request = dict(plan)
@@ -3276,15 +3774,27 @@ def remote_action(plan: Mapping[str, Any], *, action: str) -> dict[str, Any]:
         f"bash -lc {shlex.quote(_remote_command(plan, action=action))}",
     ]
     try:
+        ssh_timeout = (
+            plan.get("supervision", {}).get("ssh_timeout_seconds")
+            if isinstance(plan.get("supervision"), Mapping)
+            else None
+        )
+        if ssh_timeout is None:
+            ssh_timeout = plan.get("ssh_timeout_seconds")
         completed = subprocess.run(
             command, text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
-            timeout=float(plan["supervision"]["ssh_timeout_seconds"]), check=False,
+            timeout=float(ssh_timeout), check=False,
         )
     except subprocess.TimeoutExpired as exc:
         if action == "launch":
             raise ExamError(
                 "bounded SSH launch observation timed out; launch state is UNKNOWN and must be "
                 "resolved with inspect, never replayed"
+            ) from exc
+        if action == "stop-v2":
+            raise ExamError(
+                "bounded SSH exact-stop timed out; stop state is UNKNOWN and no second signal "
+                "is authorized"
             ) from exc
         raise ExamError("bounded read-only SSH inspect timed out; remote state is UNKNOWN") from exc
     rows = [
@@ -3321,15 +3831,25 @@ def parser() -> argparse.ArgumentParser:
     launch.add_argument("--confirm")
     inspect = commands.add_parser("inspect", help="read persistent supervisor state")
     inspect.add_argument("--execute", action="store_true")
+    stop_v2 = commands.add_parser(
+        "stop-v2", help="exactly stop the consumed failed v2 supervisor"
+    )
+    stop_v2.add_argument("--execute", action="store_true")
+    stop_v2.add_argument("--confirm")
     return value
 
 
 def main(argv: list[str] | None = None) -> int:
     args = parser().parse_args(argv)
     try:
-        plan = build_plan(
-            args.queue, activation_path=args.activation, eval_gpu=args.eval_gpu
-        )
+        if args.action == "stop-v2":
+            plan = build_v2_exact_stop_plan(
+                args.queue, activation_path=args.activation, eval_gpu=args.eval_gpu
+            )
+        else:
+            plan = build_plan(
+                args.queue, activation_path=args.activation, eval_gpu=args.eval_gpu
+            )
         if args.action == "plan" or not getattr(args, "execute", False):
             print(
                 json.dumps(
@@ -3340,11 +3860,16 @@ def main(argv: list[str] | None = None) -> int:
             return 0
         if args.action == "launch" and args.confirm != CONFIRM:
             raise ExamError("launch confirmation token mismatch")
+        if args.action == "stop-v2" and args.confirm != V2_STOP_CONFIRM:
+            raise ExamError("v2 exact-stop confirmation token mismatch")
         if sha256_file(args.activation.resolve()) != plan["activation"]["sha256"]:
             raise ExamError("activation changed after plan construction")
         if sha256_file(args.queue.resolve()) != plan["queue"]["sha256"]:
             raise ExamError("queue changed after plan construction")
-        if sha256_file(Path(__file__).resolve()) != plan["harness"]["sha256"]:
+        harness_binding = (
+            plan["consumer_harness"] if args.action == "stop-v2" else plan["harness"]
+        )
+        if sha256_file(Path(__file__).resolve()) != harness_binding["sha256"]:
             raise ExamError("exam harness changed after plan construction")
         print(
             json.dumps(

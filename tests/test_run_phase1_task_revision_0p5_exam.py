@@ -17,7 +17,10 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "run_phase1_task_revision_0p5_exam.py"
 QUEUE = ROOT / "configs" / "phase1_task_revision_supercombo_20260716.yaml"
-ACTIVATION = ROOT / "configs" / "phase1_task_revision_0p5_exam_activation_v2_20260717.json"
+ACTIVATION = ROOT / "configs" / "phase1_task_revision_0p5_exam_activation_v3_20260717.json"
+HISTORICAL_ACTIVATION_V2 = (
+    ROOT / "configs" / "phase1_task_revision_0p5_exam_activation_v2_20260717.json"
+)
 HISTORICAL_ACTIVATION_V1 = (
     ROOT / "configs" / "phase1_task_revision_0p5_exam_activation_v1_20260717.json"
 )
@@ -197,10 +200,10 @@ def test_build_plan_is_fixed_to_pod2_equal_reward_model5700():
         "e10d2c248d90daa3172ea80147a394dad64ce326eb4052889c25bfb9d3df420b"
     )
     assert plan["output_dir"].endswith(
-        "/p2_equal_reward/timing_exam_0p5_asset_restored_v2/model_5700"
+        "/p2_equal_reward/timing_exam_0p5_native_clock_v3/model_5700"
     )
     assert plan["state_dir"].endswith(
-        "/p2_equal_reward/timing_exam_0p5_supervisor_asset_restored_v2/model_5700"
+        "/p2_equal_reward/timing_exam_0p5_supervisor_native_clock_v3/model_5700"
     )
     assert plan["behavior_receipt"].endswith("/behavior_milestones/model_5700.json")
     assert plan["automatic_retry"] is False
@@ -213,9 +216,7 @@ def test_build_plan_is_fixed_to_pod2_equal_reward_model5700():
         "trusted_single_operator_filesystem": True,
         "unsupported_result": "NO_LAUNCH",
     }
-    assert plan["source_closure"]["evaluator"] == (
-        "67300ba2faae0f3443496219f1c6cf3fcc16afa182b45e6f95d4fbb82c60c094"
-    )
+    assert plan["source_closure"]["evaluator"] == E._source_closure(ROOT)["evaluator"]
     assert plan["prior_attempt"] == {
         "failure_receipt_path": str(E.V1_FAILURE_RECEIPT),
         "failure_receipt_sha256": E.sha256_file(V1_FAILURE_RECEIPT),
@@ -234,15 +235,156 @@ def test_build_plan_is_fixed_to_pod2_equal_reward_model5700():
         "bytes": 18795,
         "sha256": "dd4332edb47f1fb1f4d51ca00ceed612dbcadf9e395eb536c9b73bef9de69ad0",
     }
-    assert plan["consumption"]["historical_v1_state_dir"].endswith(
-        "/p2_equal_reward/timing_exam_0p5_supervisor_v1/model_5700"
+    assert plan["consumption"]["v3_attempt_dir"].endswith(
+        "/p2_equal_reward/timing_exam_0p5_attempt_native_clock_v3/model_5700"
     )
-    assert plan["consumption"]["v2_attempt_dir"].endswith(
-        "/p2_equal_reward/timing_exam_0p5_attempt_asset_restored_v2/model_5700"
-    )
-    assert plan["consumption"]["assets_validated_before_any_consumption_write"] is True
+    assert plan["consumption"]["v2_stop_result_required_before_any_consumption_write"] is True
     assert plan["consumption"]["no_clobber"] is True
     assert plan["consumption"]["retry_authorized"] is False
+
+
+def test_v2_exact_stop_plan_binds_only_known_failed_process_and_log():
+    plan = E.build_v2_exact_stop_plan(
+        QUEUE, activation_path=HISTORICAL_ACTIVATION_V2, eval_gpu=0
+    )
+    assert plan["operation"] == "exact_stop_consumed_v2_native_clock_failure"
+    assert plan["activation"]["sha256"] == E.V2_ACTIVATION_SHA256
+    assert plan["supervisor"] == {
+        "pid": 502505, "pgid": 502505, "sid": 502505,
+        "start_ticks": 573485617,
+    }
+    assert plan["evaluator"] == {"pid": 502542, "pgid": 502542, "sid": 502542}
+    assert plan["failure_log"]["sha256"] == E.V2_FAILURE_LOG_SHA256
+    assert plan["failure_log"]["exact_reason"] == E.V2_FAILURE_REASON
+    assert plan["wait_timeout_seconds"] == 120.0
+    assert plan["launch_authorized"] is False
+    assert plan["retry_authorized"] is False
+    assert plan["evaluator_direct_signal"] is False
+    assert plan["cgroup_kill_by_consumer"] is False
+    assert plan["sigkill_by_consumer"] is False
+    with pytest.raises(E.ExamError, match="physical evaluator GPU 0"):
+        E.build_v2_exact_stop_plan(
+            QUEUE, activation_path=HISTORICAL_ACTIVATION_V2, eval_gpu=1
+        )
+
+
+def test_v2_stop_dry_run_and_confirmation_fail_before_ssh(monkeypatch, capsys):
+    calls = []
+    monkeypatch.setattr(E, "remote_action", lambda *_a, **_k: calls.append(True))
+    base = [
+        "--queue", str(QUEUE), "--activation", str(HISTORICAL_ACTIVATION_V2),
+        "--eval-gpu", "0", "stop-v2",
+    ]
+    assert E.main(base) == 0
+    value = json.loads(capsys.readouterr().out)
+    assert value["dry_run"] is True
+    assert value["mode"] == "stop-v2"
+    assert calls == []
+    assert E.main([*base, "--execute", "--confirm", "WRONG"]) == 2
+    assert "exact-stop confirmation token mismatch" in capsys.readouterr().err
+    assert calls == []
+
+
+def test_remote_v2_exact_stop_signals_supervisor_once_and_requires_cleanup(
+        monkeypatch, tmp_path):
+    remote = _remote_namespace()
+    state = tmp_path / "state"
+    state.mkdir()
+    terminal_content = {
+        "status": "failed_no_retry", "retry_authorized": False,
+        "job_id": "taskrev_p2_equal_reward", "milestone": 5700,
+        "trainer_or_robot_signals": [], "owned_process_groups_empty": True,
+        "catastrophic_cleanup": {
+            "contract": {"exact": True},
+            "guardian_finish_result": "K0",
+            "cgroup_populated_zero_acknowledged": True,
+            "cgroup_removed_after_populated_zero": True,
+        },
+    }
+    terminal = {"content": terminal_content,
+                "content_sha256": remote["canonical"](terminal_content)}
+    (state / "terminal.json").write_bytes(remote["cbytes"](terminal) + b"\n")
+    supervisor = {"pid": 502505, "pgid": 502505, "sid": 502505,
+                  "ppid": 1, "state": "S", "start_ticks": 573485617,
+                  "argv": ["supervisor"]}
+    evaluator = {"pid": 502542, "pgid": 502542, "sid": 502542,
+                 "ppid": 502505, "state": "S", "start_ticks": 8,
+                 "argv": ["evaluator"]}
+    guardian = {"pid": 502520, "pgid": 502520, "sid": 502520,
+                "ppid": 502505, "state": "S", "start_ticks": 7,
+                "argv": ["guardian"]}
+    evidence = {
+        "plan_sha256": "a" * 64,
+        "chain": {"hello_sha256": "b" * 64},
+        "supervisor": supervisor,
+        "guardian": guardian,
+        "evaluator": evaluator,
+        "cgroup_path": str(tmp_path / "removed-cgroup"),
+        "cgroup_members": [502505, 502542],
+        "failure_log_sha256": E.V2_FAILURE_LOG_SHA256,
+    }
+    monkeypatch.setitem(remote, "validate_v2_exact_stop_inputs", lambda _spec: dict(evidence))
+    stopped = {"value": False}
+    monkeypatch.setitem(
+        remote, "proc_identity",
+        lambda pid: (supervisor if pid == 502505 and not stopped["value"] else None),
+    )
+    signals = []
+    def one_signal(pid, number):
+        signals.append((pid, number))
+        stopped["value"] = True
+    monkeypatch.setattr(remote["os"], "kill", one_signal)
+    monkeypatch.setitem(remote, "exact_live", lambda _identity: None)
+    spec = {
+        "operation": "exact_stop_consumed_v2_native_clock_failure",
+        "state_dir": str(state), "output_dir": str(tmp_path / "output"),
+        "job_id": "taskrev_p2_equal_reward", "milestone": 5700,
+        "activation": {"activation_id": "v2", "path": "v2", "sha256": "c" * 64},
+        "failure_log": {"path": "log", "sha256": E.V2_FAILURE_LOG_SHA256,
+                        "exact_reason": E.V2_FAILURE_REASON},
+        "supervisor": {"pid": 502505}, "evaluator": {"pid": 502542},
+        "catastrophic_cleanup": {"exact": True},
+        "stop_intent_name": "stop-intent.json", "stop_result_name": "stop-result.json",
+        "wait_timeout_seconds": 1.0,
+    }
+    result = remote["stop_v2_exact"](spec)
+    assert result["status"] == "v2_failed_no_retry_stopped_exact"
+    assert signals == [(502505, remote["signal"].SIGTERM)]
+    assert json.loads((state / "stop-intent.json").read_text())["retry_authorized"] is False
+    assert json.loads((state / "stop-result.json").read_text())["sigkill_by_consumer"] is False
+
+
+def test_remote_v2_stop_revalidates_after_intent_before_signal(monkeypatch, tmp_path):
+    remote = _remote_namespace()
+    state = tmp_path / "state"
+    state.mkdir()
+    supervisor = {"pid": 502505, "pgid": 502505, "sid": 502505,
+                  "ppid": 1, "state": "S", "start_ticks": 573485617,
+                  "argv": ["supervisor"]}
+    base = {
+        "plan_sha256": "a" * 64, "chain": {"hello_sha256": "b" * 64},
+        "supervisor": supervisor, "guardian": {"pid": 4},
+        "evaluator": {"pid": 502542}, "cgroup_path": "/cg",
+        "cgroup_members": [502505, 502542],
+        "failure_log_sha256": E.V2_FAILURE_LOG_SHA256,
+    }
+    rows = iter([dict(base), {**base, "failure_log_sha256": "0" * 64}])
+    monkeypatch.setitem(remote, "validate_v2_exact_stop_inputs", lambda _spec: next(rows))
+    calls = []
+    monkeypatch.setattr(remote["os"], "kill", lambda *args: calls.append(args))
+    spec = {
+        "operation": "exact_stop_consumed_v2_native_clock_failure",
+        "state_dir": str(state), "job_id": "taskrev_p2_equal_reward", "milestone": 5700,
+        "activation": {"activation_id": "v2"},
+        "failure_log": {"sha256": E.V2_FAILURE_LOG_SHA256,
+                        "exact_reason": E.V2_FAILURE_REASON},
+        "supervisor": {"pid": 502505}, "evaluator": {"pid": 502542},
+        "stop_intent_name": "stop-intent.json",
+    }
+    with pytest.raises(RuntimeError, match="changed after stop-intent"):
+        remote["stop_v2_exact"](spec)
+    assert (state / "stop-intent.json").is_file()
+    assert calls == []
 
 
 def test_historical_v1_is_consumed_and_cannot_plan_or_launch():
@@ -347,18 +489,16 @@ def test_missing_restored_asset_fails_before_any_launch_side_effect(monkeypatch,
     assert not lock.exists()
 
 
-def test_v2_claim_tombstones_v1_and_consumes_activation_once(tmp_path):
+def test_v3_claim_binds_v2_failure_and_consumes_activation_once(tmp_path):
     remote = _remote_namespace()
-    historical = tmp_path / "v1-state" / "model_5700"
-    attempt = tmp_path / "v2-attempt" / "model_5700"
+    attempt = tmp_path / "v3-attempt" / "model_5700"
     spec = {
         "consumption": {
-            "historical_v1_state_dir": str(historical),
-            "v2_attempt_dir": str(attempt),
+            "v3_attempt_dir": str(attempt),
         },
         "activation": {
-            "activation_id": "asset-restored-v2",
-            "path": "activation-v2.json",
+            "activation_id": "native-clock-v3",
+            "path": "activation-v3.json",
             "sha256": "a" * 64,
         },
         "prior_attempt": {
@@ -367,25 +507,64 @@ def test_v2_claim_tombstones_v1_and_consumes_activation_once(tmp_path):
             "status": "failed_no_retry",
             "retry_authorized": False,
         },
+        "v2_failed_attempt": {"status": "v2_failed_no_retry_stopped_exact"},
         "exam_bank": {"path": "/workspace/bank", "bytes": 3, "sha256": "c" * 64},
         "exam_rebind_report": {
             "path": "/workspace/report", "bytes": 4, "sha256": "d" * 64,
         },
     }
-    guard = remote["claim_activation_once"](spec)
+    stop_binding = {
+        "path": "/tmp/v2/stop-result.json",
+        "file_sha256": "d" * 64,
+        "stop_intent_sha256": "e" * 64,
+        "terminal_sha256": "f" * 64,
+        "guardian_finish_result": "D0",
+        "content": {"status": "v2_failed_no_retry_stopped_exact"},
+    }
+    original_validate = remote["validate_v2_stop_before_v3"]
+    remote["validate_v2_stop_before_v3"] = lambda _spec: stop_binding
+    guard = remote["claim_activation_once"](spec, stop_binding)
     remote["close_directory_guard"](guard)
-    tombstone = json.loads((historical / "v1_consumed.json").read_text())
     marker = json.loads((attempt / "attempt.json").read_text())
-    assert tombstone["status"] == "failed_no_retry"
-    assert tombstone["retry_authorized"] is False
+    assert marker["v2_failed_attempt"] == spec["v2_failed_attempt"]
+    assert marker["artifact_kind"] == "taskrev_0p5_native_clock_v3_attempt"
     assert marker["status"] == "consumed"
     assert marker["automatic_retry"] is False
     assert marker["retry_authorized"] is False
+    assert marker["v2_exact_stop_binding"] == stop_binding
     with pytest.raises(RuntimeError, match="already consumed"):
-        remote["claim_activation_once"](spec)
+        remote["claim_activation_once"](spec, stop_binding)
+    remote["validate_v2_stop_before_v3"] = original_validate
 
 
-def test_v2_preflight_failure_after_asset_check_is_consumed_no_retry(
+def test_v3_claim_rejects_stop_result_change_before_attempt_publish(tmp_path):
+    remote = _remote_namespace()
+    attempt = tmp_path / "v3-attempt" / "model_5700"
+    spec = {
+        "consumption": {"v3_attempt_dir": str(attempt)},
+        "activation": {"activation_id": "native-clock-v3"},
+        "prior_attempt": {},
+        "v2_failed_attempt": {},
+        "exam_bank": {},
+        "exam_rebind_report": {},
+    }
+    validated = {
+        "path": "/tmp/v2/stop-result.json",
+        "file_sha256": "a" * 64,
+        "stop_intent_sha256": "b" * 64,
+        "terminal_sha256": "c" * 64,
+        "guardian_finish_result": "D0",
+        "content": {"status": "v2_failed_no_retry_stopped_exact"},
+    }
+    changed = dict(validated, file_sha256="d" * 64)
+    remote["validate_v2_stop_before_v3"] = lambda _spec: changed
+    with pytest.raises(RuntimeError, match="changed before v3 attempt"):
+        remote["claim_activation_once"](spec, validated)
+    assert attempt.is_dir()
+    assert not (attempt / "attempt.json").exists()
+
+
+def test_v3_preflight_failure_after_asset_check_is_consumed_no_retry(
         monkeypatch, tmp_path):
     remote = _remote_namespace()
     bank = tmp_path / "bank.npz"
@@ -395,12 +574,11 @@ def test_v2_preflight_failure_after_asset_check_is_consumed_no_retry(
     attempt = tmp_path / "attempt" / "model_5700"
     spec = {
         "consumption": {
-            "historical_v1_state_dir": str(tmp_path / "v1" / "model_5700"),
-            "v2_attempt_dir": str(attempt),
+            "v3_attempt_dir": str(attempt),
         },
         "activation": {
-            "activation_id": "asset-restored-v2",
-            "path": "activation-v2.json",
+            "activation_id": "native-clock-v3",
+            "path": "activation-v3.json",
             "sha256": "a" * 64,
         },
         "prior_attempt": {
@@ -409,6 +587,7 @@ def test_v2_preflight_failure_after_asset_check_is_consumed_no_retry(
             "status": "failed_no_retry",
             "retry_authorized": False,
         },
+        "v2_failed_attempt": {"status": "v2_failed_no_retry_stopped_exact"},
         "exam_bank": {
             "path": str(bank), "bytes": bank.stat().st_size,
             "sha256": remote["sha"](bank),
@@ -424,6 +603,15 @@ def test_v2_preflight_failure_after_asset_check_is_consumed_no_retry(
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             RuntimeError("remaining preflight failed")),
     )
+    stop_binding = {
+        "path": "/tmp/v2/stop-result.json",
+        "file_sha256": "d" * 64,
+        "stop_intent_sha256": "e" * 64,
+        "terminal_sha256": "f" * 64,
+        "guardian_finish_result": "D0",
+        "content": {"status": "v2_failed_no_retry_stopped_exact"},
+    }
+    monkeypatch.setitem(remote, "validate_v2_stop_before_v3", lambda _spec: stop_binding)
     with pytest.raises(RuntimeError, match="remaining preflight failed"):
         remote["launch"](spec)
     failure = json.loads((attempt / "preflight_failure.json").read_text())
@@ -431,6 +619,44 @@ def test_v2_preflight_failure_after_asset_check_is_consumed_no_retry(
     assert failure["retry_authorized"] is False
     with pytest.raises(RuntimeError, match="already consumed"):
         remote["launch"](spec)
+
+
+def test_v3_refuses_to_consume_before_exact_v2_stop_result(tmp_path):
+    remote = _remote_namespace()
+    bank = tmp_path / "bank.npz"
+    report = tmp_path / "report.json"
+    bank.write_bytes(b"bank")
+    report.write_bytes(b"report")
+    old_state = tmp_path / "v2-state"
+    old_state.mkdir()
+    attempt = tmp_path / "v3-attempt" / "model_5700"
+    spec = {
+        "consumption": {"v3_attempt_dir": str(attempt)},
+        "activation": {"activation_id": "native-clock-v3", "path": "v3", "sha256": "a" * 64},
+        "prior_attempt": {},
+        "v2_failed_attempt": {
+            "activation": {"activation_id": "v2", "path": "v2", "sha256": "b" * 64},
+            "state_dir": str(old_state),
+            "stop_result": {
+                "basename": "exact-stop.json",
+                "artifact_kind": "taskrev_0p5_v2_exact_stop_result",
+                "status": "v2_failed_no_retry_stopped_exact",
+                "failure_log_sha256": "c" * 64,
+                "failure_reason": "native-clock failure",
+                "signal": "SIGTERM_supervisor_once",
+                "retry_authorized": False,
+                "evaluator_direct_signal": False,
+                "cgroup_kill_by_consumer": False,
+                "sigkill_by_consumer": False,
+            },
+        },
+        "job_id": "taskrev_p2_equal_reward", "milestone": 5700,
+        "exam_bank": {"path": str(bank), "bytes": bank.stat().st_size, "sha256": remote["sha"](bank)},
+        "exam_rebind_report": {"path": str(report), "bytes": report.stat().st_size, "sha256": remote["sha"](report)},
+    }
+    with pytest.raises(FileNotFoundError):
+        remote["launch"](spec)
+    assert not attempt.exists()
 
 
 @pytest.mark.parametrize("gpu", [-1, 3, 99])
@@ -1108,7 +1334,8 @@ def test_launch_two_phase_commit_is_no_clobber_and_returns_after_ack(tmp_path):
         },
     }
     remote["validate_restored_assets"] = lambda _spec: {}
-    remote["claim_activation_once"] = lambda _spec: None
+    remote["validate_v2_stop_before_v3"] = lambda _spec: {}
+    remote["claim_activation_once"] = lambda _spec, _binding: None
     remote["validate_inputs"] = lambda _spec, validate_process=True: {}
     remote["stable_resource_gate"] = lambda _spec: [{"free_mib": 9999}]
     remote["prepare_owned_cgroup"] = lambda _spec: {
@@ -1202,7 +1429,8 @@ def test_launch_cgroup_preflight_fails_before_state_or_output_namespace(
         "supervision": {},
     }
     remote["validate_restored_assets"] = lambda _spec: {}
-    remote["claim_activation_once"] = lambda _spec: None
+    remote["validate_v2_stop_before_v3"] = lambda _spec: {}
+    remote["claim_activation_once"] = lambda _spec, _binding: None
     remote["validate_inputs"] = lambda _spec, validate_process=True: {}
     remote["stable_resource_gate"] = lambda _spec: []
     remote["_PRCTL"] = lambda *_args: 0
@@ -1380,5 +1608,5 @@ def test_remote_command_embeds_one_action_and_no_ssh():
     assert command.startswith("/workspace/hope_isaac_venv/bin/python -B -c ")
     assert "ssh" not in command
     assert E.REMOTE_PROGRAM not in command
-    with pytest.raises(E.ExamError, match="launch or inspect"):
+    with pytest.raises(E.ExamError, match="launch, inspect, or stop-v2"):
         E._remote_command(plan, action="stop")

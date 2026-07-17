@@ -10,6 +10,7 @@ hope_planner:
     # 300 Hz mocap stream still feeds the estimator on skipped solve callbacks;
     # no cached command or task revision is republished between admissions.
     solve_period_s: 0.02
+    use_latest_only_solve_worker: true
 
     # A transport sequence is not a ball identity. A new task is armed only
     # after a trustworthy no-ball gap followed by an inbound track, or an

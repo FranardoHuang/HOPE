@@ -70,18 +70,21 @@ Follow-up note (2026-07-17, ready-ruler successor queue source paper; Gate remai
   [experiment](../experiments/2026-07/EXP-P1-TASK-REVISION-READY-SUCCESSOR.md) and
   [operation](../operations/run_phase1_task_revision_ready_successor.md).
 
-Follow-up note (2026-07-17, exact-0.5 K100 v1 input failure closed and v2 prepared; Gate remains `Partial`):
+Follow-up note (2026-07-17, exact-0.5 K100 v2 failed before question one and v3 prepared; Gate remains `Partial`):
 
 - The only v1 Pod2 launch exited `rc=2` after about `5.779 s` in `validate_inputs` because the immutable
   exam bank was absent. It created no supervisor, delegated cgroup, commit ACK or evaluator and sent no
   trainer signal. Failure receipt `f53a6813…1728` makes v1 permanently consumed with no retry authority.
-- The bank and rebind report are now restored on Pod2 with no-clobber mode `0444` and exact
-  size/SHA pairs `63,643 / 60e1a7ad…d1ca` and `18,795 / dd4332ed…ad0`. The asset-restored v2 binds
-  harness `be17289c…cc59`, activation `2b91248b…0626`, the v1 tombstone and fresh state/output/attempt
-  namespaces. It verifies assets before the tombstone/attempt marker and all later preflight work.
-- The v2 focused source suite is `41 passed, 1 skipped`; the skip remains the local delegated-cgroup
-  runtime probe. No v2 Pod launch or behavior score exists, so exact-0.5 ability is still open and G05
-  remains `Partial`.
+- The asset-restored v2 was launched exactly once on Pod2, then failed before its first question with
+  `timing rider requires a native-clock command before activation`; log SHA is `f8c3be8b…a9e28` and no
+  scorecard exists. Its supervisor `502505` and evaluator `502542` remain in cleanup, so v2 is consumed
+  and must never be relaunched. This is zero questions executed, not a 0/100 ability result.
+- V3 installs the native external command, verifies an unchanged zero-velocity frame-0 reference, and
+  only then activates retiming. Harness plus adapter tests are `61 passed, 1 skipped`; the skip remains
+  the local delegated-cgroup runtime probe. Before any v3 consumption write, the consumer requires an
+  exact v2 stop result proving failed-no-retry, guardian `D0/K0`, cgroup removal and evaluator absence.
+  The stop consumer may send one `SIGTERM` only to the exact supervisor; it cannot directly signal the
+  evaluator, use `cgroup.kill`, send `SIGKILL`, or retry. Exact-0.5 behavior therefore remains open.
 
 Follow-up note (2026-07-17, planner ready-ruler source repair; Gate remains `Partial`):
 

@@ -30,11 +30,13 @@
   当前 join-ladder family 则按预注册负结果停止；这仍是 screening，不是行为或部署通过。见
   [动作卷宗](experiments/2026-07/EXP-MOTION-READY-TO-STRIKE-0P5.md)。
 
-- exact-0.5 K100 v1 的唯一 Pod2 launch 在约 `5.779 s` 后于 `validate_inputs` 因 immutable bank 缺失
-  `rc=2` fail closed；receipt `f53a6813…1728` 证明 supervisor/cgroup/ACK/evaluator 均未创建，v1 永久
-  禁止重发。bank/report 已按 `0444`、exact size/SHA no-clobber 恢复；资产恢复版 v2 绑定 harness
-  `be17289c…cc59`、activation `2b91248b…0626`、旧失败墓碑与 fresh namespace，专项
-  `41 passed, 1 skipped`。v2 尚未 RunPod launch，也没有行为分，G05 保持 `Partial`。见
+- exact-0.5 K100 v1 的输入失败保持冻结。资产恢复版 v2 已在 Pod2 唯一启动，却在首题前以
+  `timing rider requires a native-clock command before activation` 失败；日志 `f8c3be8b…a9e28`，没有
+  scorecard，因此是“0 题执行/能力未测”，不是 0/100。v2 supervisor `502505` 与 evaluator `502542`
+  仍卡在清理且禁止重发。v3 把 native command、零速第0帧验证放到 retiming activation 之前；harness+
+  adapter `61 passed, 1 skipped`。v3 在任何消费写入前强制绑定 v2 exact-stop result；stop 只允许精确
+  supervisor 单次 `SIGTERM`，不得直接 signal evaluator、`cgroup.kill`、`SIGKILL` 或 retry。G05 保持
+  `Partial`。见
   [实验](experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md)与
   [操作](operations/run_phase1_task_revision_0p5_exam.md)。
 
@@ -56,9 +58,11 @@
   See the [experiment](experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md) and
   [operation](operations/run_phase1_task_revision_0p5_exam.md).
 
-- Formal arena/task-revision planner cadence is now 50 Hz while every qualified 300 Hz mocap sample
-  still feeds the estimator; a 300-sample burst proves 300 ingests, 50 current-sample solves and one
-  task with revisions `1..50` (`218 passed, 2 skipped`). The double-Pod `+1000` cycle also completed:
+- Formal arena/task-revision planner now ingests every qualified 300 Hz mocap sample but sends only
+  the latest immutable snapshot to a one-slot worker capped at 50 Hz; there is no FIFO/catch-up, and
+  stale completions cannot cross source/no-ball/close-rearm/epoch/base-authority boundaries. Optional
+  strike-spec diagnostics use a separate worker. Full planner source regression is `225 passed,
+  2 skipped`; ROS/Jazzy 300 Hz stress remains open. The double-Pod `+1000` cycle also completed:
   all 19 ready checkpoints have receipts, but the old pool cannot legally eliminate because four
   ready/balance denominators are zero. See [planner operation](operations/run_planner.md) and the
   [task-revision experiment](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md).

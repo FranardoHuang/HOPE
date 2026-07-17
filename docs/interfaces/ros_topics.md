@@ -19,10 +19,13 @@ Rates: the rig streams at 300 Hz during play (team contract, 2026-07); the bridg
 always launch through `avatar_pro_hope_bridge.launch.py`.
 
 Planner cadence is deliberately different from sensor cadence: every qualified `/poses` sample is
-ingested into the estimator, while the production arena and schema-4 profiles admit expensive solve
-and command publication at 50 Hz (`solve_period_s=0.02`). Cadence-rejected samples do not refresh an
-old command or increment `task_revision`. This source contract has a 300-sample burst regression;
-ROS/Jazzy load and slow-solve latency remain a runtime Gate.
+ingested and replaces the sole pending immutable solve snapshot. Production arena/schema-4 profiles
+bind `use_latest_only_solve_worker=true` and start expensive Stage 2/3 at most at 50 Hz
+(`solve_period_s=0.02`), with no FIFO and no catch-up burst. Publication/task lifecycle stay on the
+ROS executor; stale completions are rejected across source revoke, no-ball/close/rearm, epoch and base
+authority boundaries. A newer valid base sequence or ordinary same-ball revision does not invalidate
+the captured completion. Source regressions cover bounded latest-value and lifecycle behavior;
+ROS/Jazzy 300 Hz load plus injected slow-solve latency remains a runtime Gate.
 
 Timestamp boundary (source implemented 2026-07-16, runtime still `Partial`): the vendored VRPN
 tracker now has an explicit `source_timestamp_mode`:

@@ -39,6 +39,10 @@ Runtime parameters that must travel with a formal 179 planner/policy pairing:
   `0.02 s` (50 Hz), while all qualified 300 Hz samples still enter the estimator. `0.0` is now an
   explicit diagnostic override only; do not use it with the live 300 Hz feed. The Gate3 simulator
   profile independently binds `0.033 s`.
+- `use_latest_only_solve_worker`: all arena, task-revision and Gate3 profiles bind `true`. The ROS
+  callback only validates/ingests and replaces one immutable pending snapshot; a worker starts at most
+  once per `solve_period_s`, never keeps a FIFO and never catches up in a burst. `false` is a
+  deterministic diagnostic fallback and must not be used with the live 300 Hz feed.
 - `base_pose_max_age_s`: formal base receive-age limit, `0.2 s` in both profiles. Expiry or invalid
   recovery revokes both flat rows; READY stdout remains diagnostic-only.
 - `swing_side_split_y` / `swing_side_hysteresis_y`: choose side in corrected base-yaw coordinates.
@@ -75,12 +79,15 @@ The runner must be started with its task-revision option and must load ONNX meta
 with an old frozen-target model, or a revision-trained model with schema 3, fails closed. These are
 source gates only until the clean Linux Release/full-scene/vendor tests pass.
 
-The mocap subscription uses best-effort keep-last depth 1. A qualified 300 Hz sample is always
-ingested, but only the current sample admitted by the 50 Hz source-time cadence runs Stage 1–3 and
-publishes a new revision. A skipped sample never republishes the cached task, and base-source lease
-expiry is checked before the cadence return. One admitted solve is still synchronous in the ROS
-callback; a venue acceptance run must therefore inject slow solves and show that base localization
-stays fresh before this is called a complete asynchronous runtime.
+The mocap subscription uses best-effort keep-last depth 1. Every qualified 300 Hz sample is ingested
+and submitted as an immutable snapshot to a one-slot latest-value worker; a newer sample replaces the
+only pending snapshot. Expensive Stage 2/3 starts at most at the configured 50 Hz boundary and never
+runs a FIFO catch-up burst. Publication, task lifecycle and invalidation remain on the ROS executor.
+No-ball/source rejection, disarm, close/rearm, epoch change and base revoke invalidate older
+completions; an ordinary same-ball revision or newer-but-still-valid base sample does not. Optional
+strike-spec diagnostics use a separate latest-only worker so a 15–42 ms diagnostic solve cannot stall
+the command worker. A venue acceptance run must still prove this under ROS/Jazzy with real 300 Hz
+traffic and injected slow solves; source tests are not field behavior evidence.
 
 VRPN still defaults to host receipt time. Capture-stamp experiments must explicitly set
 `source_timestamp_mode=vrpn_packet`, prove the VRPN and ROS clocks are synchronized within
@@ -118,5 +125,5 @@ PYTHONPATH=hope_ws/src/hope_planner python3 -m pytest -q \
   tests/test_planner_side_contract_source.py
 ```
 
-Current feature integration result: `218 passed, 2 optional skipped`. This is not yet an accepted
-latest-main/runtime result; ROS/Jazzy Release, first tick and vendor behavior remain separate gates.
+Current feature integration result: `225 passed, 2 optional skipped`. This is not yet an accepted
+ROS/Jazzy runtime result; Release build, 300 Hz stress, first tick and vendor behavior remain separate gates.

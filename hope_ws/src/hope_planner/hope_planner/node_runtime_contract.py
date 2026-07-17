@@ -9,13 +9,18 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 import math
-from typing import Sequence
+import threading
+import time
+from typing import Callable, Generic, Sequence, TypeVar
 
 import numpy as np
 
 
 _QUATERNION_EPS = 1.0e-9
 MAX_EXACT_FLOAT64_INTEGER = (1 << 53) - 1
+
+_SolvePayload = TypeVar("_SolvePayload")
+_SolveOutput = TypeVar("_SolveOutput")
 
 
 class FormalWireExhaustion(RuntimeError):
@@ -28,6 +33,287 @@ class FormalBaseBarrierRejection(ValueError):
     This is not new bad-sample evidence. Callers must keep the original barrier
     fixed so a constant-latency source can eventually advance beyond it.
     """
+
+
+@dataclass(frozen=True)
+class LatestSolveIdentity:
+    """Immutable source identity carried through one asynchronous solve.
+
+    ``source_sequence`` orders accepted ball measurements inside the node.
+    ``control_epoch``/``base_authority_generation``/``task_authority_generation``
+    bind the solve to the formal localization and task authority visible when
+    its snapshot was made. ``base_sequence_ref`` is the exact historical base
+    row the command must reference; a harmless newer refresh does not revoke
+    authority and therefore must not starve a 15 ms solve on a 300 Hz stream.
+    """
+
+    source_sequence: int
+    control_epoch: int
+    base_sequence_ref: int
+    base_authority_generation: int
+    task_authority_generation: int
+    source_time_s: float
+    source_monotonic_s: float | None
+    base_source_monotonic_s: float | None = None
+
+    def __post_init__(self) -> None:
+        for label, value in (
+            ("source_sequence", self.source_sequence),
+            ("control_epoch", self.control_epoch),
+            ("base_sequence_ref", self.base_sequence_ref),
+            ("base_authority_generation", self.base_authority_generation),
+            ("task_authority_generation", self.task_authority_generation),
+        ):
+            if type(value) is not int or not (0 <= value <= MAX_EXACT_FLOAT64_INTEGER):
+                raise ValueError(f"{label} must be an exact non-negative wire integer")
+        source_time_s = float(self.source_time_s)
+        if not math.isfinite(source_time_s) or source_time_s < 0.0:
+            raise ValueError("solve source time must be finite and non-negative")
+        if self.source_monotonic_s is not None:
+            source_monotonic_s = float(self.source_monotonic_s)
+            if not math.isfinite(source_monotonic_s) or source_monotonic_s < 0.0:
+                raise ValueError(
+                    "solve source monotonic time must be finite and non-negative"
+                )
+        if self.base_source_monotonic_s is not None:
+            base_source_monotonic_s = float(self.base_source_monotonic_s)
+            if (
+                not math.isfinite(base_source_monotonic_s)
+                or base_source_monotonic_s < 0.0
+            ):
+                raise ValueError(
+                    "solve base source monotonic time must be finite and non-negative"
+                )
+
+
+@dataclass(frozen=True)
+class LatestSolveRequest(Generic[_SolvePayload]):
+    identity: LatestSolveIdentity
+    payload: _SolvePayload
+
+
+@dataclass(frozen=True)
+class LatestSolveCompletion(Generic[_SolvePayload, _SolveOutput]):
+    request: LatestSolveRequest[_SolvePayload]
+    output: _SolveOutput | None
+    error: Exception | None = None
+
+
+class LatestOnlySolveWorker(Generic[_SolvePayload, _SolveOutput]):
+    """One bounded latest-value slot feeding a non-catching-up solve thread.
+
+    There is never a FIFO: while a solve is running (or waiting for its rate
+    boundary), a newer request atomically replaces the sole pending request.
+    Start times are separated by ``period_s``; a slow solve starts the next
+    latest request at its natural completion time and never runs a burst to
+    repay missed 50 Hz ticks.  ``submit`` only holds the condition lock long
+    enough to replace one reference, so a slow Stage 2/3 solve cannot block the
+    300 Hz estimator-ingest callback.
+
+    The worker is deliberately ROS-free.  Publication and task-lifecycle
+    mutation stay on the ROS executor after ``take_latest`` and a freshness
+    check.
+    """
+
+    def __init__(
+        self,
+        solve: Callable[[_SolvePayload], _SolveOutput],
+        *,
+        period_s: float,
+        name: str = "hope-latest-solve",
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        period_s = float(period_s)
+        if not math.isfinite(period_s) or period_s < 0.0:
+            raise ValueError("latest-only solve period must be finite and non-negative")
+        self._solve = solve
+        self._period_s = period_s
+        self._clock = clock
+        self._condition = threading.Condition()
+        self._pending: LatestSolveRequest[_SolvePayload] | None = None
+        self._completion: LatestSolveCompletion[_SolvePayload, _SolveOutput] | None = None
+        self._closed = False
+        self._busy = False
+        self._last_submitted_sequence = -1
+        self._next_start_monotonic_s = float("-inf")
+        self._submitted_count = 0
+        self._started_count = 0
+        self._completed_count = 0
+        self._failed_count = 0
+        self._pending_overwrite_count = 0
+        self._completion_overwrite_count = 0
+        self._thread = threading.Thread(target=self._run, name=name, daemon=True)
+        self._thread.start()
+
+    def submit(self, request: LatestSolveRequest[_SolvePayload]) -> bool:
+        if not isinstance(request, LatestSolveRequest):
+            raise TypeError("latest-only worker requires a LatestSolveRequest")
+        sequence = request.identity.source_sequence
+        with self._condition:
+            if self._closed:
+                return False
+            if sequence <= self._last_submitted_sequence:
+                raise ValueError("solve source_sequence must increase strictly")
+            self._last_submitted_sequence = sequence
+            self._submitted_count += 1
+            if self._pending is not None:
+                self._pending_overwrite_count += 1
+            self._pending = request
+            self._condition.notify_all()
+            return True
+
+    def take_latest(
+        self,
+    ) -> LatestSolveCompletion[_SolvePayload, _SolveOutput] | None:
+        with self._condition:
+            completion = self._completion
+            self._completion = None
+            return completion
+
+    def wait_idle(self, timeout_s: float) -> bool:
+        """Test/diagnostic wait; production callbacks never call this."""
+
+        timeout_s = float(timeout_s)
+        if not math.isfinite(timeout_s) or timeout_s < 0.0:
+            raise ValueError("worker idle timeout must be finite and non-negative")
+        deadline = self._clock() + timeout_s
+        with self._condition:
+            while self._busy or self._pending is not None:
+                remaining = deadline - self._clock()
+                if remaining <= 0.0:
+                    return False
+                self._condition.wait(timeout=remaining)
+            return True
+
+    def close(self, timeout_s: float = 2.0) -> bool:
+        """Discard the pending slot, request shutdown, and join boundedly."""
+
+        timeout_s = float(timeout_s)
+        if not math.isfinite(timeout_s) or timeout_s < 0.0:
+            raise ValueError("worker close timeout must be finite and non-negative")
+        with self._condition:
+            self._closed = True
+            self._pending = None
+            self._completion = None
+            self._condition.notify_all()
+        self._thread.join(timeout=timeout_s)
+        return not self._thread.is_alive()
+
+    @property
+    def counters(self) -> dict[str, int]:
+        with self._condition:
+            return {
+                "submitted": self._submitted_count,
+                "started": self._started_count,
+                "completed": self._completed_count,
+                "failed": self._failed_count,
+                "pending_overwritten": self._pending_overwrite_count,
+                "completion_overwritten": self._completion_overwrite_count,
+            }
+
+    def _run(self) -> None:
+        while True:
+            with self._condition:
+                while self._pending is None and not self._closed:
+                    self._condition.wait()
+                if self._closed:
+                    return
+
+                delay_s = self._next_start_monotonic_s - self._clock()
+                if delay_s > 0.0:
+                    # A newer submit may replace the pending slot during this
+                    # wait. Re-enter the loop and take only that latest value.
+                    self._condition.wait(timeout=delay_s)
+                    continue
+                request = self._pending
+                self._pending = None
+                self._busy = True
+                start_s = self._clock()
+                self._next_start_monotonic_s = start_s + self._period_s
+                self._started_count += 1
+
+            assert request is not None
+            output = None
+            error = None
+            try:
+                output = self._solve(request.payload)
+            except Exception as exc:  # surfaced to the ROS executor; worker survives
+                error = exc
+
+            with self._condition:
+                self._busy = False
+                self._completed_count += 1
+                if error is not None:
+                    self._failed_count += 1
+                if not self._closed:
+                    if self._completion is not None:
+                        self._completion_overwrite_count += 1
+                    self._completion = LatestSolveCompletion(
+                        request=request, output=output, error=error
+                    )
+                self._condition.notify_all()
+
+
+@dataclass
+class LatestSolveFreshnessGate:
+    """Executor-side ordered publication gate for asynchronous completions."""
+
+    last_consumed_source_sequence: int = -1
+
+    def accept(
+        self,
+        completion: LatestSolveCompletion[object, object],
+        *,
+        current_control_epoch: int,
+        current_base_authority_generation: int,
+        current_task_authority_generation: int,
+        now_monotonic_s: float,
+        max_source_age_s: float | None,
+        max_base_source_age_s: float | None = None,
+    ) -> bool:
+        identity = completion.request.identity
+        if (
+            identity.control_epoch != current_control_epoch
+            or identity.base_authority_generation
+            != current_base_authority_generation
+            or identity.task_authority_generation
+            != current_task_authority_generation
+            or identity.source_sequence <= self.last_consumed_source_sequence
+        ):
+            return False
+        if max_source_age_s is not None:
+            if identity.source_monotonic_s is None:
+                return False
+            now = float(now_monotonic_s)
+            max_age = float(max_source_age_s)
+            if (
+                not math.isfinite(now)
+                or not math.isfinite(max_age)
+                or max_age < 0.0
+            ):
+                raise ValueError("solve freshness clock/age contract is invalid")
+            age = now - float(identity.source_monotonic_s)
+            if age < 0.0 or age > max_age:
+                return False
+        if max_base_source_age_s is not None:
+            if identity.base_source_monotonic_s is None:
+                return False
+            now = float(now_monotonic_s)
+            max_base_age = float(max_base_source_age_s)
+            if (
+                not math.isfinite(now)
+                or not math.isfinite(max_base_age)
+                or max_base_age < 0.0
+            ):
+                raise ValueError("solve base freshness clock/age contract is invalid")
+            base_age = now - float(identity.base_source_monotonic_s)
+            if base_age < 0.0 or base_age > max_base_age:
+                return False
+        # A fresh solver exception is still consumed: the node emits a
+        # same-task invalid revision so an older valid command cannot remain
+        # live until subscriber timeout. Stale exceptions are rejected above.
+        self.last_consumed_source_sequence = identity.source_sequence
+        return True
 
 
 @dataclass

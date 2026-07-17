@@ -294,6 +294,7 @@ def test_native_installer_then_r14_rider_consumes_per_row_time_law(tmp_path: Pat
     motion = FakeMotionCommand(
         device="cpu",
         cfg=SimpleNamespace(speed_scale_range=(1.0, 1.0), speed_scale_per_clip=None),
+        planner_revision_enabled=False,
         retiming_active=False,
         _speed_per_clip=None,
         motion=SimpleNamespace(
@@ -309,7 +310,21 @@ def test_native_installer_then_r14_rider_consumes_per_row_time_law(tmp_path: Pat
         speed_scale=FakeTensor(np.ones(100, dtype=np.float32)),
         hold_counter=FakeTensor(np.zeros(100, dtype=np.int64)),
         just_resampled=FakeTensor(np.zeros(100, dtype=bool)),
+        in_hold=FakeTensor(np.zeros(100, dtype=bool)),
     )
+    ready = A.install_zero_velocity_frame0_reference(
+        motion,
+        env_ids=np.arange(100),
+        clip_ids=clips,
+        paper=paper,
+        torch_module=FakeTorch,
+    )
+    assert ready["reference_pose_is_exact_motion_frame0"] is True
+    assert ready["live_reference_velocity_max_abs_after_override"] == {
+        "joint_vel": 0.0,
+        "body_lin_vel_w": 0.0,
+        "body_ang_vel_w": 0.0,
+    }
     profile = A.activate_runtime_retiming(
         motion,
         env_ids=np.arange(100),
@@ -325,21 +340,8 @@ def test_native_installer_then_r14_rider_consumes_per_row_time_law(tmp_path: Pat
         np.asarray([2.64 if clip == 0 else 1.8 for clip in clips]),
     )
     assert profile["native_external_installer_ran_first"] is True
+    assert profile["native_zero_velocity_frame0_verified_before_activation"] is True
     assert profile["play_or_export_path_used"] is False
-    motion.in_hold = FakeTensor(np.zeros(100, dtype=bool))
-    ready = A.install_zero_velocity_frame0_reference(
-        motion,
-        env_ids=np.arange(100),
-        clip_ids=clips,
-        paper=paper,
-        torch_module=FakeTorch,
-    )
-    assert ready["reference_pose_is_exact_motion_frame0"] is True
-    assert ready["live_reference_velocity_max_abs_after_override"] == {
-        "joint_vel": 0.0,
-        "body_lin_vel_w": 0.0,
-        "body_ang_vel_w": 0.0,
-    }
     final = A.verify_runtime_retiming_preserved(
         motion,
         paper=paper,
@@ -347,6 +349,64 @@ def test_native_installer_then_r14_rider_consumes_per_row_time_law(tmp_path: Pat
         torch_module=FakeTorch,
     )
     assert final["preserved_through_finalization"] is True
+
+
+def test_retiming_cannot_activate_before_zero_velocity_frame0_install(tmp_path: Path):
+    paper, _, _, _ = _fixture(tmp_path)
+    clips = np.asarray([index % 2 for index in range(100)], dtype=np.int64)
+    starts_table = FakeTensor([0, 141], dtype=np.int64)
+    starts = starts_table[FakeTensor(clips)]
+    motion = FakeMotionCommand(
+        device="cpu",
+        cfg=SimpleNamespace(speed_scale_range=(1.0, 1.0), speed_scale_per_clip=None),
+        planner_revision_enabled=False,
+        retiming_active=False,
+        _speed_per_clip=None,
+        motion=SimpleNamespace(
+            seg_start=starts_table,
+            joint_pos=FakeTensor(np.zeros((276, 3), dtype=np.float32)),
+            joint_vel=FakeTensor(np.ones((276, 3), dtype=np.float32)),
+            body_lin_vel_w=FakeTensor(np.ones((276, 2, 3), dtype=np.float32)),
+            body_ang_vel_w=FakeTensor(np.ones((276, 2, 3), dtype=np.float32)),
+        ),
+        clip_id=FakeTensor(clips.copy()),
+        time_steps=FakeTensor(starts.value.copy()),
+        time_steps_f=FakeTensor(starts.value.astype(np.float32)),
+        speed_scale=FakeTensor(np.ones(100, dtype=np.float32)),
+        hold_counter=FakeTensor(np.zeros(100, dtype=np.int64)),
+        just_resampled=FakeTensor(np.zeros(100, dtype=bool)),
+        in_hold=FakeTensor(np.zeros(100, dtype=bool)),
+    )
+    with pytest.raises(A.IsaacBankExamError, match="zero-velocity frame-0 command"):
+        A.activate_runtime_retiming(
+            motion,
+            env_ids=np.arange(100),
+            clip_ids=clips,
+            paper=paper,
+            segment_lengths=(141, 136),
+            strike_phases=(0.47, 1.0 / 3.0),
+            torch_module=FakeTorch,
+        )
+    assert motion.retiming_active is False
+    assert motion._speed_per_clip is None
+
+
+def test_saved_planner_clock_is_disabled_before_gym_make_and_unknown_owner_rejected():
+    motion = SimpleNamespace(
+        speed_scale_range=(1.0, 1.0),
+        speed_scale_per_clip=None,
+        event_timing_mode="disabled",
+        planner_revision_enabled=True,
+    )
+    env_cfg = SimpleNamespace(commands=SimpleNamespace(motion=motion))
+    profile = A.apply_timing_native_clock_eval_profile(env_cfg)
+    assert profile["saved_planner_revision_enabled"] is True
+    assert profile["runtime_planner_revision_enabled"] is False
+    assert motion.planner_revision_enabled is False
+
+    motion.event_timing_mode = "post_strike_t1"
+    with pytest.raises(A.IsaacBankExamError, match="event-timing clock owner"):
+        A.apply_timing_native_clock_eval_profile(env_cfg)
 
 
 def test_frame0_requires_exact_zero_velocity(tmp_path: Path):
@@ -469,6 +529,13 @@ def test_evaluator_keeps_timing_mode_default_off_and_never_calls_play():
     assert "if timing_paper is not None:" in source
     assert "motion_cmd.install_external_exam_timing(env_ids, clip_ids, holds)" in source
     assert "activate_runtime_retiming(" in source
+    assert "apply_timing_native_clock_eval_profile(env_cfg)" in source
+    assert source.index("apply_timing_native_clock_eval_profile(env_cfg)") < source.index(
+        "env = gym.make"
+    )
+    assert source.index("motion_cmd.install_external_exam_timing") < source.index(
+        'timing_ready_profile["motion_reference"] = install_zero_velocity_frame0_reference'
+    ) < source.index("timing_runtime_profile = activate_runtime_retiming")
     assert "play.py" not in source
     assert source.index("policy = runner.get_inference_policy") < source.index(
         "inexact_reasons.extend(TIMING_DIAGNOSTIC_REASONS)"

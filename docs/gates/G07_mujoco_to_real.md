@@ -85,9 +85,11 @@ Not done:
   validating ownership of the HOPE-world → robot-frame target transform (it needs the mocap base
   pose at the interface boundary even though the 175-D actor obs itself does not).
 - The arena source no longer solves at the full 300 Hz mocap rate: all qualified samples feed the
-  estimator and Stage 1–3 solve/publication is source-time-decimated to 50 Hz. The dependency-light
-  300-sample regression passes, but a single solve is still synchronous in the ROS callback. A
-  ROS/Jazzy stress run with injected slow solves and base-freshness evidence remains required.
+  estimator and atomically replace a single pending immutable snapshot. Stage 2/3 runs in a
+  latest-only worker at no more than 50 Hz, never queues a FIFO or catch-up burst, and the executor
+  rejects completions that cross no-ball/source-revoke/close-rearm/epoch/base-authority boundaries.
+  Strike-spec diagnostics use a separate worker. Dependency-light regressions pass, but a ROS/Jazzy
+  300 Hz stress run with injected slow solves and base-freshness evidence remains required.
 - Acceptance evidence for the successful runs (dates, checkpoint SHAs, MDU capture paths, observed
   behavior vs MuJoCo) is not yet recorded in this gate.
 - No quality baseline on hardware (hit-rate style metrics need the mocap/ball loop).

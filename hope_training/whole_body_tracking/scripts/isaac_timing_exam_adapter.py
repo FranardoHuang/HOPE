@@ -35,6 +35,59 @@ DIAGNOSTIC_REASONS = (
 )
 
 
+def apply_timing_native_clock_eval_profile(env_cfg: Any) -> dict[str, Any]:
+    """Give the timing paper one native-clock command to initialize from.
+
+    Task-revision checkpoints save ``planner_revision_enabled=True``.  Replaying
+    that saved config constructs :class:`MotionCommand` with the planner phase
+    governor already owning the float clock, even though BankExam later installs
+    a fixed external item.  The timing rider must not steal an already-active
+    clock.  Instead, this evaluator-only profile disables the saved planner clock
+    *before* ``gym.make``; ``install_external_exam_timing`` then installs the real
+    clip/frame-0 native command, and only the post-install runtime checks below may
+    activate the paper's R14 clock.
+
+    Unknown event-timing or R14 owners are rejected rather than cleared.  The
+    saved pickle and training artifacts are never mutated on disk.
+    """
+
+    commands = getattr(env_cfg, "commands", None)
+    motion = getattr(commands, "motion", None)
+    if motion is None:
+        raise IsaacBankExamError("timing native-clock profile requires commands.motion")
+    speed_range = tuple(
+        float(value) for value in getattr(motion, "speed_scale_range", ())
+    )
+    speed_per_clip = getattr(motion, "speed_scale_per_clip", None)
+    if speed_range != (1.0, 1.0) or speed_per_clip is not None:
+        raise IsaacBankExamError(
+            "timing native-clock profile refuses a saved R14 speed owner"
+        )
+    event_mode = str(getattr(motion, "event_timing_mode", "disabled"))
+    if event_mode != "disabled":
+        raise IsaacBankExamError(
+            "timing native-clock profile refuses a saved event-timing clock owner"
+        )
+    if not hasattr(motion, "planner_revision_enabled"):
+        raise IsaacBankExamError(
+            "timing native-clock profile requires explicit planner_revision_enabled"
+        )
+    saved_planner_revision_enabled = bool(motion.planner_revision_enabled)
+    motion.planner_revision_enabled = False
+    profile = {
+        "schema": "hope.isaac-timing-native-clock-eval-profile.v1",
+        "saved_planner_revision_enabled": saved_planner_revision_enabled,
+        "runtime_planner_revision_enabled": False,
+        "speed_scale_range": [1.0, 1.0],
+        "speed_scale_per_clip": None,
+        "event_timing_mode": "disabled",
+        "applied_before_gym_make": True,
+        "saved_config_or_checkpoint_mutated": False,
+    }
+    profile["sha256"] = canonical_sha256(profile)
+    return profile
+
+
 def sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
@@ -472,7 +525,7 @@ def activate_runtime_retiming(
     strike_phases: Sequence[float],
     torch_module: Any,
 ) -> dict[str, Any]:
-    """Activate existing R14 state after the native external installer set frame 0."""
+    """Activate R14 only after a native, zero-velocity frame-0 command exists."""
 
     speeds = validate_runtime_time_laws(
         paper, segment_lengths=segment_lengths, strike_phases=strike_phases
@@ -481,6 +534,10 @@ def activate_runtime_retiming(
         motion_cmd, "_speed_per_clip", None
     ) is not None:
         raise IsaacBankExamError("timing rider requires a native-clock command before activation")
+    if bool(getattr(motion_cmd, "planner_revision_enabled", False)):
+        raise IsaacBankExamError(
+            "timing rider cannot activate while planner revision owns the reference clock"
+        )
     if tuple(float(v) for v in motion_cmd.cfg.speed_scale_range) != (1.0, 1.0):
         raise IsaacBankExamError("timing rider refuses a preexisting random speed range")
     for name in (
@@ -499,6 +556,10 @@ def activate_runtime_retiming(
         raise IsaacBankExamError("timing rider env/clip vectors do not match paper K")
     if bool((motion_cmd.hold_counter[ids] != 0).any()):
         raise IsaacBankExamError("timing rider requires zero effective hold after frame-0 install")
+    if bool((motion_cmd.speed_scale[ids] != 1.0).any()):
+        raise IsaacBankExamError(
+            "timing rider requires an exact native speed scale before activation"
+        )
     expected_clips = torch_module.as_tensor(
         [0 if row["side"] == "forehand" else 1 for row in paper["rows"]],
         device=motion_cmd.device,
@@ -511,6 +572,23 @@ def activate_runtime_retiming(
         (motion_cmd.time_steps_f[ids] != starts.float()).any()
     ):
         raise IsaacBankExamError("timing rider must start every clip at exact frame 0")
+    for name in ("joint_vel", "body_lin_vel_w", "body_ang_vel_w"):
+        value = getattr(motion_cmd, name, None)
+        if value is None:
+            raise IsaacBankExamError(
+                f"timing rider native frame-0 command lacks motion_cmd.{name}"
+            )
+        selected = value[ids]
+        if not bool(torch_module.isfinite(selected).all()):
+            raise IsaacBankExamError(
+                f"timing rider native frame-0 command {name} contains NaN/Inf"
+            )
+        maximum = float(selected.abs().max()) if selected.numel() else 0.0
+        if maximum != 0.0:
+            raise IsaacBankExamError(
+                "timing rider requires a verified zero-velocity frame-0 command before "
+                f"activation: {name} max={maximum}"
+            )
     speed_table = torch_module.as_tensor(speeds, device=motion_cmd.device, dtype=motion_cmd.time_steps_f.dtype)
     motion_cmd._speed_per_clip = speed_table
     motion_cmd.cfg.speed_scale_per_clip = speeds
@@ -524,6 +602,7 @@ def activate_runtime_retiming(
         "effective_hold_steps": 0,
         "initial_state_id": INITIAL_STATE_ID,
         "native_external_installer_ran_first": True,
+        "native_zero_velocity_frame0_verified_before_activation": True,
         "r14_float_clock_active": True,
         "play_or_export_path_used": False,
     }
@@ -547,8 +626,9 @@ def install_zero_velocity_frame0_reference(
     velocity rows in memory.  Positions, later velocity rows, the source NPZ, and
     the saved training configuration remain untouched.
 
-    This must run after the native installer and R14 activation but before
-    ``install_external_exam_questions`` refreshes the first actor observation.
+    This must run after the native installer and *before* R14 activation and
+    ``install_external_exam_questions``.  Activation independently rechecks the
+    exact-zero live reference, so callers cannot manufacture a success profile.
     """
 
     if not isinstance(paper.get("_validated_binding"), Mapping):
@@ -561,6 +641,20 @@ def install_zero_velocity_frame0_reference(
     ).reshape(-1)
     if len(ids) != len(paper["rows"]) or len(clips) != len(ids):
         raise IsaacBankExamError("frame-0 install env/clip vectors do not match paper K")
+    if bool(getattr(motion_cmd, "retiming_active", False)) or getattr(
+        motion_cmd, "_speed_per_clip", None
+    ) is not None:
+        raise IsaacBankExamError(
+            "frame-0 install requires the native clock before retiming activation"
+        )
+    if bool(getattr(motion_cmd, "planner_revision_enabled", False)):
+        raise IsaacBankExamError(
+            "frame-0 install cannot run while planner revision owns the reference clock"
+        )
+    if tuple(float(value) for value in motion_cmd.cfg.speed_scale_range) != (1.0, 1.0):
+        raise IsaacBankExamError("frame-0 install requires native speed_scale_range")
+    if bool((motion_cmd.speed_scale[ids] != 1.0).any()):
+        raise IsaacBankExamError("frame-0 install requires exact native speed scale")
     if bool((motion_cmd.hold_counter[ids] != 0).any()) or bool(
         motion_cmd.in_hold[ids].any()
     ):

@@ -51,26 +51,23 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   ledger 的 ready tilt/base speed/foot contact/foot slip 四项分母全部为零，预注册组合器禁止填补缺失值，
   因而没有发布 portfolio-stop receipt。旧臂多数已经自然终档；这一批不能再宣称排出胜者，也不能靠
   事后删指标制造胜者。后续新池必须先在 full-scene probe 证明 ready 分母非零，才允许占用长训槽。
-  自动 rolling 任务在本次 task-revision/TOPP 关键修复期间保持暂停。旧同步 K100 长时间没有形成可信
-  终态，不进入成绩。checkpoint-bound [持久监督器](DEFINITIONS.md#persistent-supervisor) v1 的唯一 Pod2
-  launch 在约 `5.779 s` 后因 exam bank 缺失于输入门 `rc=2` fail closed，supervisor/cgroup/ACK/evaluator
-  均未创建；receipt `f53a6813…1728` 已将 v1 永久冻结且不授权 retry。bank/report 随后按 `0444`、exact
-  size/SHA no-clobber 恢复；资产恢复版 v2 绑定 harness `be17289c…cc59`、activation
-  `2b91248b…0626`、v1 失败墓碑与 fresh namespace，专项 `41 passed, 1 skipped`。skip 仍是本地主机的
-  delegated cgroup-v2 实探针。v2 已在 Pod2/GPU0 唯一启动并进入 `running_exact`：supervisor
-  `502505`、evaluator `502542`，guardian/ACK/heartbeat 均精确；15:01Z 仍在运行且尚无行为终档，不能提前
-  报 0.5 秒成绩。Pod2 其余两卡可用于通过门的新训练；13:38Z Pod1 有 Yikang 与 Codex 各一条 trainer
-  （都在 GPU0）及 GPU2 一条 BankExam，GPU1 基本空闲。自动任务仍按本次修复窗口暂停；K100 只允许
-  后续只读 inspect，不得重发。终档随后仍需 vendor MuJoCo 同题。详见
-  [task-revision 卷宗](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md)。
+  自动 rolling 任务在本次 task-revision/TOPP 关键修复期间保持暂停。exact-0.5 K100 v1 因缺 bank 在
+  输入门失败并永久冻结；资产恢复版 v2 又在首题前抓到 native-clock 命令安装晚于 retiming activation 的
+  顺序错误。其日志 `f8c3be8b…a9e28`、无 scorecard，所以是“0 题执行/能力未测”，不是 0/100；v2
+  supervisor `502505` 与 evaluator `502542` 仍待精确 stop，禁止重发。v3 已改为先安装 native command、
+  验证零速第0帧，再激活 retiming，并把 v2 stop-result file/intent/terminal SHA 二次稳定读取后写入
+  no-clobber attempt；源码 `61 passed, 1 skipped`。23:44 CST 只读快照：Pod2 为 0 trainer，失败
+  evaluator 低利用率占三卡；Pod1 有 Yikang trainer 正常推进，Codex trainer 停在 model3600 约9小时，
+  另有旧 BankExam evaluator 低利用率占三卡。清理与新启动都只可精确管理已绑定 PID/PGID，不得碰
+  Yikang。终档仍需 vendor MuJoCo 同题。详见
+  [0.5 秒卷宗](experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md)。
 
-- **300 Hz 动捕不会再触发 300 Hz planner solve：** 正式 arena、节点默认和 schema-4 overlay 现都显式
-  绑定 `solve_period_s=0.02`。每个通过 frame/timestamp 门的 300 Hz 样本仍进入 estimator，但昂贵的
-  trajectory/target solve 与发布最多 50 Hz；跳过 solve 的 callback 也会先执行 base lease 过期撤销，且
-  不刷新缓存命令或 task revision。300-sample burst 回归得到 300 次 ingest、50 次 solve、同球
-  `task_id=1/revision=1..50`；全 planner suite 为 `218 passed, 2 skipped`。单次 solve 目前仍在 ROS
-  callback 内同步执行，真实 300 Hz ROS/Jazzy 压测和异步 latest-only worker 仍是部署 Gate，不能把源码
-  回归写成场馆已通过。
+- **300 Hz 动捕不会再触发 300 Hz planner solve：** 正式 arena、schema-4 与 Gate3 profile 显式绑定
+  latest-only worker。每个合格样本都进入 estimator 并替换唯一 pending snapshot；Stage 2/3 最多 50 Hz，
+  无 FIFO、无补跑 burst，发布和 task lifecycle 留在 executor。source/no-ball/close-rearm/epoch/base revoke
+  会淘汰旧 completion，普通同球 revision 与仍有效的新 base sample 不会误杀；strike-spec 诊断另用独立
+  worker。全 planner suite 为 `225 passed, 2 skipped`。真实 ROS/Jazzy 300 Hz 慢求解压力、Release build
+  和 planner→DDS→C++/vendor 行为仍是部署 Gate，不能把源码回归写成场馆已通过。
 
 - **动作加速当前边界：** 完整旧 v4rg 只重定时得到 `0.98/0.78 s`，因此新增的 host-only
   ready-to-strike 生成器从动作第0帧零速准备态直接接入保真的触球前0.1秒。四元数符号跳变与

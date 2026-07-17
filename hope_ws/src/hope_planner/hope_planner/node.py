@@ -10,6 +10,7 @@ humanoid must achieve the commanded racket state via its own forward
 kinematics. See HOPE_7DOF_Racket_Model_based_Planner_Reference_Setup.md.
 """
 
+from dataclasses import dataclass
 import time
 
 import numpy as np
@@ -18,7 +19,7 @@ from diagnostic_msgs.msg import DiagnosticArray, DiagnosticStatus, KeyValue
 from geometry_msgs.msg import PoseArray
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPolicy
-from std_msgs.msg import Float64MultiArray
+from std_msgs.msg import Float64MultiArray, Header
 
 # hope_msgs is OPTIONAL (FLAT-ONLY mode): on the robot MDU only the std_msgs flat topics
 # are consumed (by the C++ --planner runner), and building hope_msgs typesupport for
@@ -56,6 +57,11 @@ from .node_runtime_contract import (
     FormalSourceFrameContract,
     FormalWireCounters,
     FormalWireExhaustion,
+    LatestOnlySolveWorker,
+    LatestSolveFreshnessGate,
+    LatestSolveIdentity,
+    LatestSolveRequest,
+    MAX_EXACT_FLOAT64_INTEGER,
     SolveCadence,
     SourceStampGuard,
     SwingSideSelector,
@@ -66,8 +72,53 @@ from .node_runtime_contract import (
     ros_stamp_fields_to_seconds,
     validate_formal_source_clock_mode,
 )
-from .planner import HOPEPlanner
+from .planner import HOPEPlanner, PlannerEstimateSnapshot, PlannerPipelineResult
 from .strike_spec_planner import StrikeSpecPlanner
+
+
+@dataclass(frozen=True)
+class _NodeSolvePayload:
+    """ROS-free immutable data owned by one latest-only solve request."""
+
+    snapshot: PlannerEstimateSnapshot
+    # Do not put a ROS Header (or any other ROS message) in the worker slot:
+    # generated messages are mutable and the executor can reuse/mutate them
+    # while Stage 2/3 is still running.  The executor rebuilds the optional
+    # mirror header from these plain scalars when it publishes a completion.
+    header_stamp_sec: int
+    header_stamp_nanosec: int
+    source_time_s: float
+    source_monotonic_s: float | None
+    raw_ball_position: np.ndarray
+    base_position_w: np.ndarray | None
+    base_quaternion_wxyz: np.ndarray | None
+    prior_swing_sign: float
+    side_split_y: float
+    side_hysteresis_y: float
+    target_land_y_fh: float
+    target_land_y_bh: float
+    delta_t_flight_fh: float
+    delta_t_flight_bh: float
+    per_side_aim: bool
+    policy_z_offset: float
+    inbound_track_ready: bool
+
+
+@dataclass(frozen=True)
+class _NodeSolveOutput:
+    pipeline: PlannerPipelineResult
+    swing_sign: float
+
+
+@dataclass(frozen=True)
+class _NodeStrikeSpecPayload:
+    """Immutable diagnostic-only input for its own latest-value worker."""
+
+    source_time_s: float
+    p_ball: np.ndarray
+    v_ball: np.ndarray
+    target_land_xy: np.ndarray
+    racket_speed_budget: float
 
 
 class HOPEPlannerNode(Node):
@@ -91,6 +142,11 @@ class HOPEPlannerNode(Node):
         # production default because a 300 Hz venue stream would otherwise run
         # Stage 1-3 in every subscription callback and starve base localization.
         self.declare_parameter("solve_period_s", 0.02)
+        # Production arena/task-revision profiles use an independent bounded
+        # latest-value worker: /poses only validates, ingests and snapshots.
+        # Disable only for deterministic diagnostics that intentionally run the
+        # historical synchronous callback path.
+        self.declare_parameter("use_latest_only_solve_worker", True)
         # PER-SIDE aim/flight (2026-07-08, from the Gate-3 rally vel-gate finding): the two
         # trained clips return in OPPOSITE cross-court directions (fh vy [+0.96,+1.96], bh vy
         # [-1.21,-0.21] world), so NO single target_land_y makes both sides' demanded racket
@@ -259,6 +315,7 @@ class HOPEPlannerNode(Node):
         self._robot_position_w = None
         self._robot_quaternion_wxyz = None
         self._formal_base_state = FormalBaseSourceState()
+        self._base_authority_generation = 0
         self._formal_base_pose_guard = FormalBasePosePlausibilityGuard()
         # per-side aim/flight (NaN = disabled); consumed in _poses_cb before the solve
         self._land_y_fh = float(self.get_parameter("target_land_y_fh").value)
@@ -272,8 +329,10 @@ class HOPEPlannerNode(Node):
             split_y=float(self.get_parameter("swing_side_split_y").value),
             hysteresis_y=float(self.get_parameter("swing_side_hysteresis_y").value),
         )
-        self._solve_cadence = SolveCadence(
-            period_s=float(self.get_parameter("solve_period_s").value)
+        self._solve_period_s = float(self.get_parameter("solve_period_s").value)
+        self._solve_cadence = SolveCadence(period_s=self._solve_period_s)
+        self._use_latest_solve_worker = bool(
+            self.get_parameter("use_latest_only_solve_worker").value
         )
         self._publish_flat = bool(self.get_parameter("publish_flat_cmd").value)
         self._racket_flat_schema = int(self.get_parameter("racket_flat_schema").value)
@@ -295,6 +354,7 @@ class HOPEPlannerNode(Node):
         self._wire_counters = FormalWireCounters()
         self._task_lifecycle = None
         self._task_boundary = None
+        self._task_authority_generation = 0
         self._pending_ball_discontinuity = False
         if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V4_FACE179_TASK:
             self._task_lifecycle = FormalTaskLifecycle(
@@ -390,6 +450,16 @@ class HOPEPlannerNode(Node):
         from .constants import TableParams
         table = TableParams(y_max=float(self.get_parameter("table_y_max").value))
         self.planner = HOPEPlanner(physics=physics, config=config, table=table)
+        self._ball_source_sequence = 0
+        self._solve_freshness = LatestSolveFreshnessGate()
+        self._spec_solve_freshness = LatestSolveFreshnessGate()
+        self._latest_solve_worker = None
+        if self._use_latest_solve_worker:
+            self._latest_solve_worker = LatestOnlySolveWorker(
+                self._solve_latest_payload,
+                period_s=self._solve_period_s,
+                name="hope-stage23-latest",
+            )
 
         # Flag-gated EKF SHADOW estimator: fed the same measurements as the
         # legacy polyfit estimator; the planner still ACTS on the legacy path.
@@ -435,6 +505,7 @@ class HOPEPlannerNode(Node):
         self._spec_next_t = float("-inf")
         self._spec_log_next_t = float("-inf")
         self._spec_warm_q = None      # previous fast solve's q, warm start
+        self._n_worker_spec_errors = 0
 
         # Flag-gated SHADOW solver harness (see the parameter block). None = off =
         # the only new code on the hot path is `is not None` checks; the harness,
@@ -473,6 +544,32 @@ class HOPEPlannerNode(Node):
                     f"SHADOW spec solver ON: backend={backend.name}, "
                     f"log={'off' if log_path is None else log_path} "
                     "(production command path unaffected; diffs in diagnostics + CSV)")
+
+        if self._shadow is not None and self._latest_solve_worker is not None:
+            # Shadow is an explicit synchronous diagnostic double-run. Preserve
+            # its historical warm-state ordering instead of sharing it with the
+            # production worker; normal arena/task-revision launches keep the
+            # worker because shadow defaults off.
+            self._latest_solve_worker.close(timeout_s=2.0)
+            self._latest_solve_worker = None
+            self._use_latest_solve_worker = False
+            self.get_logger().warning(
+                "latest-only solve worker disabled for explicit shadow diagnostic mode"
+            )
+
+        # Strike-spec is useful diagnostics, never command authority.  It gets
+        # its own bounded worker so its 15--40 ms inverse solve cannot extend a
+        # Stage-2/3 command worker tick (or cause a 300 Hz mocap callback to
+        # wait behind diagnostics).  Shadow mode deliberately stays on the
+        # historical synchronous path above and therefore does not start this.
+        self._latest_spec_worker = None
+        self._spec_worker_warm_q = None
+        if self._latest_solve_worker is not None and self._spec_planner is not None:
+            self._latest_spec_worker = LatestOnlySolveWorker(
+                self._solve_latest_strike_spec,
+                period_s=(self._spec_period if self._use_fast_spec else 1.0),
+                name="hope-strike-spec-latest",
+            )
 
         # Best-effort, depth-1 QoS for high-rate mocap topics (REP-2003 sensor style).
         mocap_qos = QoSProfile(
@@ -615,6 +712,7 @@ class HOPEPlannerNode(Node):
                 expired_this_callback = (
                     expired_this_callback or expired_during_admission
                 )
+                base_authority_was_active = self._formal_base_state.lease.active
                 try:
                     if self._racket_flat_schema in (
                         RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
@@ -649,6 +747,8 @@ class HOPEPlannerNode(Node):
                         throttle_duration_sec=2.0,
                     )
                     return
+                if not base_authority_was_active:
+                    self._base_authority_generation += 1
                 if self._racket_flat_schema in (
                     RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
                     RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
@@ -698,6 +798,15 @@ class HOPEPlannerNode(Node):
         self._last_effective_tts = float("nan")
         self._last_ball_source_age_s = float("nan")
         self._last_ball_plane_distance_m = float("nan")
+        self._n_async_solve_stale = 0
+        self._n_async_solve_errors = 0
+        self._n_async_spec_stale = 0
+        if self._latest_solve_worker is not None:
+            # Completion processing is deliberately on the ROS executor: task
+            # lifecycle, wire counters and publishers remain single-owner.
+            self.create_timer(0.005, self._drain_latest_solve)
+        if self._latest_spec_worker is not None:
+            self.create_timer(0.005, self._drain_latest_strike_spec)
         self.create_timer(0.1, self._publish_diagnostics)
 
         self.get_logger().info(
@@ -726,6 +835,7 @@ class HOPEPlannerNode(Node):
         try:
             self._wire_counters.advance_epoch()
             if self._task_lifecycle is not None:
+                self._task_authority_generation += 1
                 self._task_lifecycle.observe_epoch(
                     self._wire_counters.control_epoch
                 )
@@ -840,6 +950,11 @@ class HOPEPlannerNode(Node):
     def _disarm_formal_task(self) -> None:
         """Forget task identity when the ball source itself is untrustworthy."""
 
+        # This is also the command-authority barrier for schema-3/legacy
+        # async completions.  Increment before the schema-4 early return so a
+        # rejected source can never let an in-flight command survive merely
+        # because that profile has no task lifecycle object.
+        self._task_authority_generation += 1
         if self._task_lifecycle is None:
             return
         self._task_lifecycle.disarm(self._wire_counters.control_epoch)
@@ -863,6 +978,7 @@ class HOPEPlannerNode(Node):
             self._wire_counters.control_epoch
         )
         if terminal is not None:
+            self._task_authority_generation += 1
             self._publish_flat_racket_invalid(
                 source_monotonic_s, task_revision=terminal
             )
@@ -943,6 +1059,7 @@ class HOPEPlannerNode(Node):
                 self._wire_counters.control_epoch,
                 no_ball_or_new_serve_confirmed=True,
             )
+            self._task_authority_generation += 1
         inbound = ball_vx is not None and (
             ball_vx <= self._task_boundary.inbound_vx_threshold_mps
         )
@@ -955,6 +1072,11 @@ class HOPEPlannerNode(Node):
 
         if self._task_lifecycle is None:
             return
+        # A trusted no-ball observation is an authority boundary even when a
+        # previous task was already inactive.  Invalidate any worker result
+        # captured before this observation: it must never publish into the
+        # next serve merely because no active task happened to exist yet.
+        self._task_authority_generation += 1
         assert self._task_boundary is not None
         decision = self._task_boundary.observe_absent(
             source_time_s, task_active=self._formal_task_active()
@@ -962,14 +1084,34 @@ class HOPEPlannerNode(Node):
         if decision is FormalBallTrackDecision.CLOSE_ACTIVE:
             self._publish_task_close(source_monotonic_s)
             return
-        revision = self._task_lifecycle.publish(
-            self._wire_counters.control_epoch,
-            inbound_track_ready=False,
-            solver_valid=False,
+        revision = self._publish_task_revision(
+            inbound_track_ready=False, solver_valid=False
         )
         self._publish_flat_racket_invalid(
             source_monotonic_s, task_revision=revision
         )
+
+    def _publish_task_revision(
+        self, *, inbound_track_ready: bool, solver_valid: bool
+    ) -> FormalTaskRevision | None:
+        if self._task_lifecycle is None:
+            return None
+        revision = self._task_lifecycle.publish(
+            self._wire_counters.control_epoch,
+            inbound_track_ready=inbound_track_ready,
+            solver_valid=solver_valid,
+        )
+        return revision
+
+    @staticmethod
+    def _racket_header_from_payload(payload: _NodeSolvePayload) -> Header:
+        """Build a fresh ROS header only on the executor/publisher thread."""
+
+        header = Header()
+        header.stamp.sec = int(payload.header_stamp_sec)
+        header.stamp.nanosec = int(payload.header_stamp_nanosec)
+        header.frame_id = "world"
+        return header
 
     def _publish_flat_base(
         self, *, valid: bool, position_w=None, quaternion_wxyz=None,
@@ -1063,6 +1205,7 @@ class HOPEPlannerNode(Node):
         )
         self._clear_formal_base_geometry()
         if transitioned:
+            self._base_authority_generation += 1
             if self._racket_flat_schema in (
                 RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
                 RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
@@ -1080,6 +1223,7 @@ class HOPEPlannerNode(Node):
             now_monotonic_s, self._base_pose_max_age_s
         ):
             return False
+        self._base_authority_generation += 1
         self._clear_formal_base_geometry()
         if self._racket_flat_schema in (
             RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
@@ -1108,6 +1252,459 @@ class HOPEPlannerNode(Node):
             return False
         self.get_logger().info("HOPE planner READY: corrected base pose fresh")
         return True
+
+    def _solve_latest_payload(self, payload: _NodeSolvePayload) -> _NodeSolveOutput:
+        """Worker-thread Stage 2/3 solve over immutable estimator/base state."""
+
+        pipeline = self.planner.solve_snapshot(payload.snapshot)
+        cmd = pipeline.command
+        strike = pipeline.strike
+        swing_sign = 0.0
+        if (
+            cmd is not None
+            and cmd.valid
+            and strike is not None
+            and strike.valid
+            and payload.base_position_w is not None
+            and payload.base_quaternion_wxyz is not None
+        ):
+            intercept_w = np.asarray(strike.p_ball, dtype=float).copy()
+            intercept_w[2] += payload.policy_z_offset
+            selector = SwingSideSelector(
+                split_y=payload.side_split_y,
+                hysteresis_y=payload.side_hysteresis_y,
+                sign=payload.prior_swing_sign,
+            )
+            swing_sign = selector.select(
+                intercept_w,
+                payload.base_position_w,
+                payload.base_quaternion_wxyz,
+            )
+            if payload.per_side_aim:
+                forehand = swing_sign > 0.0
+                land_y = (
+                    payload.target_land_y_fh
+                    if forehand
+                    else payload.target_land_y_bh
+                )
+                dtf = (
+                    payload.delta_t_flight_fh
+                    if forehand
+                    else payload.delta_t_flight_bh
+                )
+                pipeline = self.planner.replan_result(
+                    pipeline,
+                    target_land_y=None if np.isnan(land_y) else land_y,
+                    delta_t_flight=None if np.isnan(dtf) else dtf,
+                )
+        return _NodeSolveOutput(pipeline=pipeline, swing_sign=swing_sign)
+
+    def _submit_latest_strike_spec(
+        self,
+        identity: LatestSolveIdentity,
+        source_time_s: float,
+        pipeline: PlannerPipelineResult,
+    ) -> None:
+        """Offer a post-command diagnostic snapshot without delaying command IO."""
+
+        worker = self._latest_spec_worker
+        strike = pipeline.strike
+        cmd = pipeline.command
+        if (
+            worker is None
+            or self._spec_planner is None
+            or cmd is None
+            or not cmd.valid
+            or strike is None
+            or not strike.valid
+            or source_time_s < self._spec_next_t
+        ):
+            return
+        self._spec_next_t = source_time_s + (
+            self._spec_period if self._use_fast_spec else 1.0
+        )
+        worker.submit(
+            LatestSolveRequest(
+                identity=identity,
+                payload=_NodeStrikeSpecPayload(
+                    source_time_s=float(source_time_s),
+                    p_ball=np.asarray(strike.p_ball, dtype=float).copy(),
+                    v_ball=np.asarray(strike.v_ball, dtype=float).copy(),
+                    target_land_xy=np.asarray(
+                        pipeline.config.target_land[:2], dtype=float
+                    ).copy(),
+                    racket_speed_budget=float(self._racket_speed_budget),
+                ),
+            )
+        )
+
+    def _solve_latest_strike_spec(self, payload: _NodeStrikeSpecPayload):
+        """Run diagnostic inverse solve on its own worker thread only."""
+
+        if self._spec_planner is None:
+            return None
+        try:
+            if self._use_fast_spec:
+                spec = self._spec_planner.solve_fast_spec(
+                    payload.p_ball,
+                    payload.v_ball,
+                    None,
+                    payload.target_land_xy,
+                    payload.racket_speed_budget,
+                    max_iter=(
+                        self._spec_max_iter
+                        if self._spec_worker_warm_q is not None
+                        else None
+                    ),
+                    q0=self._spec_worker_warm_q,
+                    with_sensitivities=self._spec_sens,
+                )
+                if spec is not None:
+                    self._spec_worker_warm_q = np.array(
+                        [
+                            spec.tilt_pitch_deg,
+                            spec.tilt_yaw_deg,
+                            spec.v_n_signed,
+                            spec.v_t_vec[0],
+                            spec.v_t_vec[1],
+                        ]
+                    )
+                else:
+                    self._spec_worker_warm_q = None
+            else:
+                spec = self._spec_planner.solve(
+                    payload.p_ball,
+                    payload.v_ball,
+                    None,
+                    payload.target_land_xy,
+                    payload.racket_speed_budget,
+                )
+            return spec
+        except Exception:
+            # LatestOnlySolveWorker transports the exception to its executor
+            # drain, where logging/counters are single-owner and ROS-safe.
+            self._spec_worker_warm_q = None
+            raise
+
+    def _drain_latest_strike_spec(self) -> None:
+        """Install only diagnostic results; never mutate command authority."""
+
+        worker = self._latest_spec_worker
+        if worker is None:
+            return
+        completion = worker.take_latest()
+        if completion is None:
+            return
+        if not self._spec_solve_freshness.accept(
+            completion,
+            current_control_epoch=self._wire_counters.control_epoch,
+            current_base_authority_generation=self._base_authority_generation,
+            current_task_authority_generation=self._task_authority_generation,
+            now_monotonic_s=time.monotonic(),
+            max_source_age_s=(
+                self._ball_source_guard.max_age_s
+                if self._racket_flat_schema
+                in (
+                    RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+                    RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
+                )
+                else None
+            ),
+            max_base_source_age_s=(
+                self._base_pose_max_age_s
+                if self._racket_flat_schema
+                in (
+                    RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+                    RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
+                )
+                else None
+            ),
+        ):
+            self._n_async_spec_stale += 1
+            return
+        if completion.error is not None:
+            self._n_worker_spec_errors += 1
+            self._last_spec = None
+            self.get_logger().warning(
+                "background strike-spec solve failed "
+                f"({type(completion.error).__name__}: {completion.error}); "
+                "command solve remains usable",
+                throttle_duration_sec=5.0,
+            )
+            return
+        self._last_spec = completion.output
+
+    def _drain_latest_solve(self) -> None:
+        """Executor-owned completion gate and publisher for the async worker."""
+
+        if self._latest_solve_worker is None:
+            return
+        completion = self._latest_solve_worker.take_latest()
+        if completion is None:
+            return
+        if not self._solve_freshness.accept(
+            completion,
+            current_control_epoch=self._wire_counters.control_epoch,
+            current_base_authority_generation=self._base_authority_generation,
+            current_task_authority_generation=self._task_authority_generation,
+            now_monotonic_s=time.monotonic(),
+            max_source_age_s=(
+                self._ball_source_guard.max_age_s
+                if self._racket_flat_schema
+                in (
+                    RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+                    RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
+                )
+                else None
+            ),
+            max_base_source_age_s=(
+                self._base_pose_max_age_s
+                if self._racket_flat_schema
+                in (
+                    RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+                    RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
+                )
+                else None
+            ),
+        ):
+            self._n_async_solve_stale += 1
+            return
+        if completion.error is not None:
+            self._n_async_solve_errors += 1
+            self.get_logger().warning(
+                "planner worker solve failed "
+                f"({type(completion.error).__name__}: {completion.error}); "
+                "fresh source consumed as an invalid revision",
+                throttle_duration_sec=2.0,
+            )
+            payload = completion.request.payload
+            failed = _NodeSolveOutput(
+                pipeline=PlannerPipelineResult(
+                    command=None,
+                    strike=None,
+                    t_est=payload.source_time_s,
+                    config=payload.snapshot.config,
+                ),
+                swing_sign=0.0,
+            )
+            self.planner.accept_result(failed.pipeline)
+            self._publish_async_solved(
+                payload, failed, completion.request.identity
+            )
+            return
+        solved = completion.output
+        if not isinstance(solved, _NodeSolveOutput):
+            self._n_async_solve_errors += 1
+            self.get_logger().error("planner worker returned an invalid output type")
+            payload = completion.request.payload
+            failed = _NodeSolveOutput(
+                pipeline=PlannerPipelineResult(
+                    command=None,
+                    strike=None,
+                    t_est=payload.source_time_s,
+                    config=payload.snapshot.config,
+                ),
+                swing_sign=0.0,
+            )
+            self.planner.accept_result(failed.pipeline)
+            self._publish_async_solved(
+                payload, failed, completion.request.identity
+            )
+            return
+        self.planner.accept_result(solved.pipeline)
+        if solved.swing_sign in (-1.0, 1.0):
+            self._side_selector.sign = solved.swing_sign
+        self._publish_async_solved(
+            completion.request.payload, solved, completion.request.identity
+        )
+        if self._last_valid:
+            self._submit_latest_strike_spec(
+                completion.request.identity,
+                completion.request.payload.source_time_s,
+                solved.pipeline,
+            )
+
+    def _publish_async_solved(
+        self,
+        payload: _NodeSolvePayload,
+        solved: _NodeSolveOutput,
+        identity: LatestSolveIdentity,
+    ) -> None:
+        """Publish one freshness-checked result without re-running Stage 2/3."""
+
+        t = payload.source_time_s
+        ball_source_monotonic_s = payload.source_monotonic_s
+        p_ball = payload.raw_ball_position
+        cmd = solved.pipeline.command
+        inbound_track_ready = payload.inbound_track_ready
+
+        if cmd is None:
+            self._last_valid = False
+            self._last_tts = float("nan")
+            self._last_effective_tts = float("nan")
+            if self._task_lifecycle is not None:
+                revision = self._publish_task_revision(
+                    inbound_track_ready=inbound_track_ready,
+                    solver_valid=False,
+                )
+                self._publish_flat_racket_invalid(
+                    ball_source_monotonic_s, task_revision=revision
+                )
+            elif self._racket_flat_schema in (
+                RACKET_FLAT_SCHEMA_V2_FACE179,
+                RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+            ):
+                self._publish_flat_racket_invalid(ball_source_monotonic_s)
+            if self.cmd_pub is not None and self._racket_flat_schema in (2, 3, 4):
+                out = RacketCommand()
+                out.header = self._racket_header_from_payload(payload)
+                out.normal.x = 1.0
+                out.valid = False
+                self.cmd_pub.publish(out)
+            return
+
+        task_revision = None
+        if self._task_lifecycle is not None:
+            task_revision = self._publish_task_revision(
+                inbound_track_ready=inbound_track_ready,
+                solver_valid=bool(cmd.valid),
+            )
+        wire_command_valid = bool(cmd.valid) and (
+            self._task_lifecycle is None or task_revision is not None
+        )
+        self._last_valid = wire_command_valid
+        tts = self.planner.time_to_strike
+        if (
+            tts is not None
+            and self._racket_flat_schema == RACKET_FLAT_SCHEMA_V4_FACE179_TASK
+        ):
+            publish_now_ros_s = self._now_ros_s()
+            self._last_ball_source_age_s = max(0.0, publish_now_ros_s - t)
+            self._last_tts = float(tts)
+            self._last_effective_tts = latency_compensated_time_to_strike(
+                float(tts), t, publish_now_ros_s
+            )
+        else:
+            self._last_tts = tts if tts is not None else float("nan")
+            self._last_effective_tts = self._last_tts
+        if cmd.valid:
+            self._n_planner_valid += 1
+
+        flat_data = None
+        flat_contract_error = None
+        if self.flat_cmd_pub is not None:
+            formal_wire = {}
+            if self._racket_flat_schema in (
+                RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH,
+                RACKET_FLAT_SCHEMA_V4_FACE179_TASK,
+            ):
+                formal_wire = {
+                    "control_epoch": self._wire_counters.control_epoch,
+                    "command_sequence": self._next_sequence("_racket_sequence"),
+                    # The runner keeps a bounded history of formal base rows.
+                    # Bind the exact row used by this solve; a harmless newer
+                    # refresh must not relabel the command with unseen geometry.
+                    "base_sequence_ref": identity.base_sequence_ref,
+                    "source_monotonic_s": ball_source_monotonic_s,
+                }
+            if self._racket_flat_schema == RACKET_FLAT_SCHEMA_V4_FACE179_TASK:
+                formal_wire.update(
+                    task_id=0 if task_revision is None else task_revision.task_id,
+                    task_revision=(
+                        0 if task_revision is None else task_revision.task_revision
+                    ),
+                )
+            try:
+                if (
+                    self._racket_flat_schema == RACKET_FLAT_SCHEMA_V4_FACE179_TASK
+                    and task_revision is None
+                ):
+                    flat_data = pack_invalid_racket_command_flat(
+                        schema=self._racket_flat_schema, **formal_wire
+                    )
+                else:
+                    flat_data, flat_contract_error = pack_racket_command_flat_fail_closed(
+                        schema=self._racket_flat_schema,
+                        valid=wire_command_valid,
+                        swing_sign=solved.swing_sign,
+                        position_w=(
+                            float(cmd.p_intercept[0]),
+                            float(cmd.p_intercept[1]),
+                            float(cmd.p_intercept[2]) + self._policy_z_offset,
+                        ),
+                        velocity_w=cmd.v_racket,
+                        time_to_strike=(
+                            float(self._last_tts)
+                            if self._last_tts == self._last_tts
+                            else 0.0
+                        ),
+                        strike_time=float(cmd.t_strike),
+                        frame_code=0,
+                        normal_cmd_w=cmd.n_racket,
+                        rho=0.0,
+                        **formal_wire,
+                    )
+            except (IndexError, TypeError, ValueError, OverflowError) as exc:
+                if self._racket_flat_schema not in (2, 3, 4):
+                    raise
+                flat_data = pack_invalid_racket_command_flat(
+                    schema=self._racket_flat_schema, **formal_wire
+                )
+                flat_contract_error = str(exc)
+            if flat_contract_error is not None:
+                self._last_valid = False
+                self._n_flat_contract_rejected += 1
+                self.get_logger().error(
+                    "formal racket command rejected; published valid=0 revocation instead: "
+                    f"{flat_contract_error}",
+                    throttle_duration_sec=2.0,
+                )
+
+        if self.flat_cmd_pub is not None:
+            fm = Float64MultiArray()
+            fm.data = flat_data
+            self.flat_cmd_pub.publish(fm)
+
+        if self.cmd_pub is not None:
+            try:
+                out = RacketCommand()
+                out.header = self._racket_header_from_payload(payload)
+                if flat_contract_error is not None or (
+                    self._racket_flat_schema == RACKET_FLAT_SCHEMA_V4_FACE179_TASK
+                    and task_revision is None
+                ):
+                    out.normal.x = 1.0
+                    out.valid = False
+                else:
+                    out.position.x = float(cmd.p_intercept[0])
+                    out.position.y = float(cmd.p_intercept[1])
+                    out.position.z = float(cmd.p_intercept[2]) + self._policy_z_offset
+                    out.velocity.x = float(cmd.v_racket[0])
+                    out.velocity.y = float(cmd.v_racket[1])
+                    out.velocity.z = float(cmd.v_racket[2])
+                    out.normal.x = float(cmd.n_racket[0])
+                    out.normal.y = float(cmd.n_racket[1])
+                    out.normal.z = float(cmd.n_racket[2])
+                    out.strike_time = float(cmd.t_strike)
+                    out.time_to_strike = float(self._last_tts)
+                    out.ball_velocity_outgoing.x = float(cmd.v_ball_outgoing[0])
+                    out.ball_velocity_outgoing.y = float(cmd.v_ball_outgoing[1])
+                    out.ball_velocity_outgoing.z = float(cmd.v_ball_outgoing[2])
+                    out.valid = wire_command_valid
+                    out.clears_net = bool(cmd.clears_net)
+                    out.bypasses_net_posts = bool(cmd.bypasses_net_posts)
+                    out.predicted_bounces = int(cmd.num_bounces)
+                self.cmd_pub.publish(out)
+            except Exception as exc:
+                self._n_custom_mirror_rejected += 1
+                self.get_logger().error(
+                    "optional RacketCommand mirror failed after formal flat publication: "
+                    f"{type(exc).__name__}: {exc}",
+                    throttle_duration_sec=2.0,
+                )
+        if self._last_valid:
+            self._n_valid += 1
+            self._last_intercept_y = float(cmd.p_intercept[1])
 
     def _poses_cb(self, msg: PoseArray) -> None:
         self._n_received += 1
@@ -1153,6 +1750,14 @@ class HOPEPlannerNode(Node):
             and self._racket_flat_schema != RACKET_FLAT_SCHEMA_V4_FACE179_TASK
         ):
             if formal_epoch_schema:
+                # Schema 3 has no task wire, but an empty trusted pose array
+                # is still command-authority loss: an in-flight async result
+                # must not revive its prior valid command afterward.
+                self._last_valid = False
+                self._last_tts = float("nan")
+                self._last_effective_tts = float("nan")
+                self._last_ball_source_age_s = float("nan")
+                self._task_authority_generation += 1
                 self._publish_flat_racket_invalid()
             return
         if formal_epoch_schema:
@@ -1206,52 +1811,35 @@ class HOPEPlannerNode(Node):
                 return
             self._ball_source_guard.commit(float(t))
 
-        # Keep every 300 Hz measurement in both estimators, but only solve and
-        # publish on admitted cadence ticks. A skipped callback deliberately
-        # does not republish the cached command, so it cannot refresh stale
-        # data at the C++ subscriber. Expire the independent base lease before
-        # cadence admission: a skipped ball solve must never postpone a safety
-        # revoke until the 10 Hz diagnostics timer.
+        # Keep every 300 Hz measurement in both estimators and copy one bounded
+        # Stage-1 window. Stage 2/3 never runs in this callback when the
+        # latest-only worker is enabled. Expire the independent base lease
+        # first: a skipped solve must never postpone a safety revoke.
         self._expire_formal_base_if_needed(time.monotonic())
-        try:
-            solve_now = self._solve_cadence.admit(t)
-        except ValueError as exc:
-            self.get_logger().warning(
-                f"invalid planner timestamp ({exc}); sample suppressed",
-                throttle_duration_sec=2.0,
-            )
-            return
-        if not solve_now:
-            self.planner.push_measurement(t, p_ball)
-            if self._task_lifecycle is not None:
-                self._pending_ball_discontinuity = bool(
-                    self._pending_ball_discontinuity
-                    or self.planner.estimator.discontinuity_detected
-                )
-            if self._kf is not None:
-                self._kf.push(t, p_ball)
-            return
 
-        # adaptive hit plane: track the live robot (see robot_pose_topic above). Mutating
-        # config.x_hit is safe — the predictor reads it per predict() call. Disabled by
-        # x_hit_follow_robot=false (hitter_pure profile: FIXED plane, paper §IV-B).
+        # adaptive hit plane: snapshot the current corrected base before
+        # ingest. The worker receives a copied PlannerConfig, so a later base
+        # callback cannot mutate an in-flight solve.
         if self._robot_x is not None and self._x_hit_follow_robot:
             self.planner.config.x_hit = float(
-                np.clip(self._robot_x + self._x_hit_offset, self._x_hit_min, self._x_hit_max))
+                np.clip(
+                    self._robot_x + self._x_hit_offset,
+                    self._x_hit_min,
+                    self._x_hit_max,
+                )
+            )
+        snapshot = self.planner.ingest_measurement(t, p_ball)
+        self._ball_source_sequence += 1
+        if self._ball_source_sequence > MAX_EXACT_FLOAT64_INTEGER:
+            self._disarm_formal_task()
+            self._publish_flat_racket_invalid(ball_source_monotonic_s)
+            raise RuntimeError("planner ball source sequence exhausted")
 
-        # CRASH GUARD (field 2026-07-07): garbage measurements (e.g. a mocap feed in
-        # millimetres) made the outgoing-velocity solve raise FloatingPointError and
-        # KILLED the node mid-demo. A planner glitch must degrade to "no command"
-        # (the runner's safe stand), never to a dead planner.
-        try:
-            cmd = self.planner.update(t, p_ball)
-        except (FloatingPointError, ValueError, np.linalg.LinAlgError) as exc:
-            self.get_logger().warning(
-                f"planner solve failed ({type(exc).__name__}: {exc}) - treating as no-solution; "
-                "if persistent, check the mocap feed (units/units-of-metres, frame, outliers)",
-                throttle_duration_sec=2.0)
-            cmd = None
-
+        if self._task_lifecycle is not None:
+            self._pending_ball_discontinuity = bool(
+                self._pending_ball_discontinuity
+                or self.planner.estimator.discontinuity_detected
+            )
         if self._kf is not None:
             self._kf.push(t, p_ball)
             if self._kf.ready and self.planner.estimator.ready:
@@ -1262,6 +1850,108 @@ class HOPEPlannerNode(Node):
             else:
                 self._kf_pos_delta = float("nan")
                 self._kf_vel_delta = float("nan")
+
+        inbound_track_ready = False
+        if self._latest_solve_worker is not None:
+            latest_strike_time_s = None
+            latest_strike = self.planner.strike_target
+            if latest_strike is not None:
+                candidate = float(latest_strike.t_strike)
+                if np.isfinite(candidate) and candidate >= 0.0:
+                    latest_strike_time_s = candidate
+            continue_sample, inbound_track_ready = self._observe_formal_task_present(
+                source_time_s=float(t),
+                source_monotonic_s=ball_source_monotonic_s,
+                raw_ball_position=p_ball,
+                predicted_strike_time_s=latest_strike_time_s,
+            )
+            if not continue_sample:
+                self._last_valid = False
+                self._last_tts = float("nan")
+                self._last_effective_tts = float("nan")
+                return
+
+        if snapshot is None:
+            return
+        if self._latest_solve_worker is None:
+            try:
+                solve_now = self._solve_cadence.admit(t)
+            except ValueError as exc:
+                self.get_logger().warning(
+                    f"invalid planner timestamp ({exc}); sample suppressed",
+                    throttle_duration_sec=2.0,
+                )
+                return
+            if not solve_now:
+                return
+
+        payload = _NodeSolvePayload(
+            snapshot=snapshot,
+            header_stamp_sec=int(msg.header.stamp.sec),
+            header_stamp_nanosec=int(msg.header.stamp.nanosec),
+            source_time_s=float(t),
+            source_monotonic_s=ball_source_monotonic_s,
+            raw_ball_position=p_ball.copy(),
+            base_position_w=(
+                None
+                if self._robot_position_w is None
+                else self._robot_position_w.copy()
+            ),
+            base_quaternion_wxyz=(
+                None
+                if self._robot_quaternion_wxyz is None
+                else self._robot_quaternion_wxyz.copy()
+            ),
+            prior_swing_sign=float(self._side_selector.sign),
+            side_split_y=float(self._side_selector.split_y),
+            side_hysteresis_y=float(self._side_selector.hysteresis_y),
+            target_land_y_fh=float(self._land_y_fh),
+            target_land_y_bh=float(self._land_y_bh),
+            delta_t_flight_fh=float(self._dtf_fh),
+            delta_t_flight_bh=float(self._dtf_bh),
+            per_side_aim=bool(self._per_side_aim),
+            policy_z_offset=float(self._policy_z_offset),
+            inbound_track_ready=bool(inbound_track_ready),
+        )
+        identity = LatestSolveIdentity(
+            source_sequence=self._ball_source_sequence,
+            control_epoch=self._wire_counters.control_epoch,
+            base_sequence_ref=self._wire_counters.base_sequence,
+            base_authority_generation=self._base_authority_generation,
+            task_authority_generation=self._task_authority_generation,
+            source_time_s=float(t),
+            source_monotonic_s=ball_source_monotonic_s,
+            base_source_monotonic_s=(
+                self._formal_base_state.lease.base_source_monotonic_s
+            ),
+        )
+        if self._latest_solve_worker is not None:
+            self._latest_solve_worker.submit(
+                LatestSolveRequest(identity=identity, payload=payload)
+            )
+            return
+
+        # Explicit diagnostic fallback: preserve the synchronous source path
+        # when use_latest_only_solve_worker=false.
+        try:
+            solved = self._solve_latest_payload(payload)
+        except (FloatingPointError, ValueError, np.linalg.LinAlgError) as exc:
+            self.get_logger().warning(
+                f"planner solve failed ({type(exc).__name__}: {exc}) - treating as no-solution; "
+                "if persistent, check the mocap feed (units/units-of-metres, frame, outliers)",
+                throttle_duration_sec=2.0,
+            )
+            solved = _NodeSolveOutput(
+                pipeline=PlannerPipelineResult(
+                    command=None,
+                    strike=None,
+                    t_est=float(t),
+                    config=snapshot.config,
+                ),
+                swing_sign=0.0,
+            )
+        self.planner.accept_result(solved.pipeline)
+        cmd = solved.pipeline.command
 
         predicted_strike_time_s = None
         strike_target = self.planner.strike_target
@@ -1286,8 +1976,7 @@ class HOPEPlannerNode(Node):
             self._last_tts = float("nan")
             self._last_effective_tts = float("nan")
             if self._task_lifecycle is not None:
-                revision = self._task_lifecycle.publish(
-                    self._wire_counters.control_epoch,
+                revision = self._publish_task_revision(
                     inbound_track_ready=inbound_track_ready,
                     solver_valid=False,
                 )
@@ -1347,8 +2036,7 @@ class HOPEPlannerNode(Node):
                     if cmd is None:
                         self._last_valid = False
                         if self._task_lifecycle is not None:
-                            revision = self._task_lifecycle.publish(
-                                self._wire_counters.control_epoch,
+                            revision = self._publish_task_revision(
                                 inbound_track_ready=inbound_track_ready,
                                 solver_valid=False,
                             )
@@ -1362,8 +2050,7 @@ class HOPEPlannerNode(Node):
 
         task_revision = None
         if self._task_lifecycle is not None:
-            task_revision = self._task_lifecycle.publish(
-                self._wire_counters.control_epoch,
+            task_revision = self._publish_task_revision(
                 inbound_track_ready=inbound_track_ready,
                 solver_valid=bool(cmd.valid),
             )
@@ -1690,6 +2377,45 @@ class HOPEPlannerNode(Node):
                 value=f"{self._last_ball_plane_distance_m:.4f}",
             ),
         ]
+        if self._latest_solve_worker is not None:
+            worker_counts = self._latest_solve_worker.counters
+            status.values += [
+                KeyValue(key="async_solve_enabled", value="True"),
+                KeyValue(
+                    key="async_solve_submitted",
+                    value=str(worker_counts["submitted"]),
+                ),
+                KeyValue(
+                    key="async_solve_started",
+                    value=str(worker_counts["started"]),
+                ),
+                KeyValue(
+                    key="async_solve_pending_overwritten",
+                    value=str(worker_counts["pending_overwritten"]),
+                ),
+                KeyValue(
+                    key="async_solve_completion_overwritten",
+                    value=str(worker_counts["completion_overwritten"]),
+                ),
+                KeyValue(
+                    key="async_solve_stale_dropped",
+                    value=str(self._n_async_solve_stale),
+                ),
+                KeyValue(
+                    key="async_solve_errors",
+                    value=str(self._n_async_solve_errors),
+                ),
+                KeyValue(
+                    key="async_strike_spec_errors",
+                    value=str(self._n_worker_spec_errors),
+                ),
+                KeyValue(
+                    key="async_strike_spec_stale_dropped",
+                    value=str(self._n_async_spec_stale),
+                ),
+            ]
+        else:
+            status.values.append(KeyValue(key="async_solve_enabled", value="False"))
         if self._task_lifecycle is not None:
             status.values += [
                 KeyValue(
@@ -1766,6 +2492,21 @@ class HOPEPlannerNode(Node):
                 ]
         arr.status = [status]
         self.diag_pub.publish(arr)
+
+    def destroy_node(self):
+        worker = self._latest_solve_worker
+        self._latest_solve_worker = None
+        if worker is not None and not worker.close(timeout_s=2.0):
+            self.get_logger().error(
+                "planner latest-only solve worker did not stop within 2 seconds"
+            )
+        spec_worker = self._latest_spec_worker
+        self._latest_spec_worker = None
+        if spec_worker is not None and not spec_worker.close(timeout_s=2.0):
+            self.get_logger().error(
+                "planner latest-only strike-spec worker did not stop within 2 seconds"
+            )
+        return super().destroy_node()
 
 
 def main(args=None):

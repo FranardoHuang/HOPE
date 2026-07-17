@@ -1,5 +1,7 @@
 import math
 from pathlib import Path
+import threading
+import time
 
 import numpy as np
 import pytest
@@ -13,6 +15,11 @@ from hope_planner.node_runtime_contract import (
     FormalSourceFrameContract,
     FormalWireCounters,
     FormalWireExhaustion,
+    LatestOnlySolveWorker,
+    LatestSolveCompletion,
+    LatestSolveFreshnessGate,
+    LatestSolveIdentity,
+    LatestSolveRequest,
     MAX_EXACT_FLOAT64_INTEGER,
     SolveCadence,
     SourceStampGuard,
@@ -409,6 +416,242 @@ def test_50hz_cadence_ingests_300hz_burst_and_only_revises_current_samples():
     assert [revision.task_revision for revision in revisions] == list(range(1, 51))
 
 
+def _latest_request(
+    sequence: int,
+    payload=None,
+    *,
+    epoch: int = 7,
+    base_sequence: int = 11,
+    base_authority_generation: int = 3,
+    task_authority_generation: int = 5,
+    source_monotonic_s: float = 10.0,
+    base_source_monotonic_s: float = 10.0,
+):
+    return LatestSolveRequest(
+        identity=LatestSolveIdentity(
+            source_sequence=sequence,
+            control_epoch=epoch,
+            base_sequence_ref=base_sequence,
+            base_authority_generation=base_authority_generation,
+            task_authority_generation=task_authority_generation,
+            source_time_s=source_monotonic_s,
+            source_monotonic_s=source_monotonic_s,
+            base_source_monotonic_s=base_source_monotonic_s,
+        ),
+        payload=sequence if payload is None else payload,
+    )
+
+
+def test_latest_only_worker_slow_solve_never_blocks_300_ingests_or_builds_fifo():
+    entered = threading.Event()
+    release = threading.Event()
+    solved = []
+
+    def slow_solve(value):
+        solved.append(value)
+        entered.set()
+        assert release.wait(timeout=1.0)
+        return value * 10
+
+    worker = LatestOnlySolveWorker(slow_solve, period_s=0.02)
+    try:
+        assert worker.submit(_latest_request(1))
+        assert entered.wait(timeout=1.0)
+        ingest_started = time.perf_counter()
+        ingested = []
+        for sequence in range(2, 301):
+            # This list append stands in for the already-completed estimator
+            # ingest; submit must only replace one pointer while solve is stuck.
+            ingested.append(sequence)
+            assert worker.submit(_latest_request(sequence))
+        ingest_elapsed = time.perf_counter() - ingest_started
+        assert len(ingested) == 299
+        assert ingest_elapsed < 0.1
+
+        release.set()
+        assert worker.wait_idle(timeout_s=1.0)
+        completion = worker.take_latest()
+        assert completion is not None
+        assert completion.request.identity.source_sequence == 300
+        assert completion.output == 3000
+        counts = worker.counters
+        assert counts["submitted"] == 300
+        assert counts["started"] == 2
+        assert counts["pending_overwritten"] == 298
+        # The first completion was never published; the latest completion
+        # replaced it rather than creating a second result queue.
+        assert counts["completion_overwritten"] == 1
+        assert solved == [1, 300]
+    finally:
+        assert worker.close(timeout_s=1.0)
+
+
+def test_real_estimator_ingests_300_samples_while_worker_solves_at_most_50():
+    planner = HOPEPlanner()
+    worker = LatestOnlySolveWorker(
+        lambda snapshot: snapshot.t_buffer[-1], period_s=0.02
+    )
+    submitted = 0
+    try:
+        for index in range(300):
+            t = index / 300.0
+            snapshot = planner.ingest_measurement(
+                t, np.array([2.0 - 2.0 * t, 0.1, 0.8 - 0.2 * t])
+            )
+            if snapshot is None:
+                continue
+            submitted += 1
+            worker.submit(
+                _latest_request(
+                    index + 1,
+                    payload=snapshot,
+                    source_monotonic_s=10.0 + t,
+                    base_source_monotonic_s=10.0 + t,
+                )
+            )
+        assert planner.estimator.t_buffer[-1] == pytest.approx(299 / 300.0)
+        assert len(planner.estimator.t_buffer) == planner.config.fit_window
+        assert submitted == 295
+        assert worker.wait_idle(timeout_s=1.0)
+        counts = worker.counters
+        assert counts["started"] <= 50
+        completion = worker.take_latest()
+        assert completion is not None
+        assert completion.request.identity.source_sequence == 300
+        assert completion.output == pytest.approx(299 / 300.0)
+    finally:
+        assert worker.close(timeout_s=1.0)
+
+
+def test_latest_only_worker_does_not_catch_up_after_slow_solve():
+    starts = []
+
+    def slower_than_period(value):
+        starts.append(time.monotonic())
+        time.sleep(0.03)
+        return value
+
+    worker = LatestOnlySolveWorker(slower_than_period, period_s=0.02)
+    try:
+        for sequence in range(1, 31):
+            worker.submit(_latest_request(sequence))
+            time.sleep(0.001)
+        assert worker.wait_idle(timeout_s=1.0)
+        # One in flight plus the one latest pending value: no 30-item catch-up.
+        assert len(starts) <= 3
+        assert all(b - a >= 0.025 for a, b in zip(starts, starts[1:]))
+    finally:
+        assert worker.close(timeout_s=1.0)
+
+
+def test_async_completion_gate_drops_revoked_authority_age_and_sequence():
+    gate = LatestSolveFreshnessGate()
+
+    def completion(
+        sequence,
+        *,
+        epoch=7,
+        base=11,
+        base_generation=3,
+        task_generation=5,
+        source=10.0,
+        base_source=10.0,
+        error=None,
+    ):
+        return LatestSolveCompletion(
+            request=_latest_request(
+                sequence,
+                epoch=epoch,
+                base_sequence=base,
+                base_authority_generation=base_generation,
+                task_authority_generation=task_generation,
+                source_monotonic_s=source,
+                base_source_monotonic_s=base_source,
+            ),
+            output=object(),
+            error=error,
+        )
+
+    common = dict(
+        current_control_epoch=7,
+        current_base_authority_generation=3,
+        current_task_authority_generation=5,
+        now_monotonic_s=10.1,
+        max_source_age_s=0.2,
+        max_base_source_age_s=0.2,
+    )
+    assert not gate.accept(completion(1, epoch=6), **common)
+    assert not gate.accept(completion(2, base_generation=2), **common)
+    assert not gate.accept(completion(3, task_generation=4), **common)
+    assert not gate.accept(completion(4, source=9.8), **common)
+    assert not gate.accept(completion(5, base_source=9.8), **common)
+    # A normal newer base refresh does not revoke the captured historical row;
+    # the exact base_sequence_ref remains 10 and is published unchanged.
+    assert gate.accept(completion(6, base=10, error=RuntimeError("solve")), **common)
+    assert gate.last_consumed_source_sequence == 6
+    assert not gate.accept(completion(6, base=10), **common)
+    assert not gate.accept(completion(5), **common)
+    assert gate.accept(completion(7, base=9), **common)
+
+
+def test_async_completion_gate_allows_legacy_identity_only_when_age_is_disabled():
+    """Schema 1/2 have no source clock, so their node path disables age checks."""
+
+    completion = LatestSolveCompletion(
+        request=LatestSolveRequest(
+            identity=LatestSolveIdentity(
+                source_sequence=1,
+                control_epoch=7,
+                base_sequence_ref=11,
+                base_authority_generation=3,
+                task_authority_generation=5,
+                source_time_s=10.0,
+                source_monotonic_s=None,
+                base_source_monotonic_s=None,
+            ),
+            payload=object(),
+        ),
+        output=object(),
+    )
+    common = dict(
+        current_control_epoch=7,
+        current_base_authority_generation=3,
+        current_task_authority_generation=5,
+        now_monotonic_s=10.1,
+    )
+    assert LatestSolveFreshnessGate().accept(
+        completion,
+        max_source_age_s=None,
+        max_base_source_age_s=None,
+        **common,
+    )
+    assert not LatestSolveFreshnessGate().accept(
+        completion,
+        max_source_age_s=0.2,
+        max_base_source_age_s=None,
+        **common,
+    )
+
+
+def test_latest_only_worker_close_discards_pending_and_rejects_new_submit():
+    entered = threading.Event()
+    release = threading.Event()
+
+    def solve(value):
+        entered.set()
+        release.wait(timeout=1.0)
+        return value
+
+    worker = LatestOnlySolveWorker(solve, period_s=0.0)
+    worker.submit(_latest_request(1))
+    assert entered.wait(timeout=1.0)
+    worker.submit(_latest_request(2))
+    release.set()
+    assert worker.close(timeout_s=1.0)
+    assert worker.take_latest() is None
+    assert not worker.submit(_latest_request(3))
+
+
 def test_cadence_rejected_measurement_keeps_cached_command_and_stage2_tuple():
     planner = HOPEPlanner()
     cached_command = object()
@@ -490,6 +733,7 @@ def test_gate3_sim_profile_binds_long_horizon_and_nonstarving_cadence():
     ]
     assert params["max_predict_time"] == 2.6
     assert params["solve_period_s"] == 0.033
+    assert params["use_latest_only_solve_worker"] is True
     assert params["base_pose_max_age_s"] == 0.2
     assert params["ball_source_stamp_max_age_s"] == 0.2
     assert params["formal_source_clock_mode"] == "system"
@@ -516,6 +760,7 @@ def test_gate3_sim_profile_binds_long_horizon_and_nonstarving_cadence():
     assert base_params["formal_base_source_frame_id"] == "world"
     assert base_params["formal_common_frame_required"] is True
     assert base_params["use_shadow_solver"] is False
+    assert base_params["use_latest_only_solve_worker"] is True
     FormalSourceFrameContract(
         ball_frame_id=base_params["formal_ball_source_frame_id"],
         base_frame_id=base_params["formal_base_source_frame_id"],
@@ -549,6 +794,8 @@ def test_arena_and_task_revision_profiles_bind_50hz_solve_cadence():
 
     assert arena["solve_period_s"] == 0.02
     assert revision["solve_period_s"] == 0.02
+    assert arena["use_latest_only_solve_worker"] is True
+    assert revision["use_latest_only_solve_worker"] is True
 
 
 def test_task_revision_overlay_is_explicit_schema4_and_freezes_ball_boundaries():
@@ -563,6 +810,7 @@ def test_task_revision_overlay_is_explicit_schema4_and_freezes_ball_boundaries()
     assert params == {
         "racket_flat_schema": 4,
         "solve_period_s": 0.02,
+        "use_latest_only_solve_worker": True,
         "formal_task_no_ball_rearm_s": 0.10,
         "formal_task_inbound_vx_threshold_mps": -0.30,
         "formal_task_outbound_vx_threshold_mps": 0.30,
@@ -628,14 +876,90 @@ def test_ros_node_wires_one_corrected_base_to_flat_adaptive_x_and_side():
     assert "self._publish_flat_racket_invalid()" in ball_frame_reject
     assert "_revoke_formal_base" not in ball_frame_reject
     assert "self._solve_cadence.admit(t)" in pose_callback
-    assert "self.planner.push_measurement(t, p_ball)" in pose_callback
+    assert "snapshot = self.planner.ingest_measurement(t, p_ball)" in pose_callback
+    assert "self._latest_solve_worker.submit(" in pose_callback
+    assert pose_callback.index(
+        "if self._latest_solve_worker is None:"
+    ) < pose_callback.index("self._solve_cadence.admit(t)")
     assert "self._side_selector.select(" in pose_callback
     assert "self._robot_position_w," in pose_callback
     assert "self._robot_quaternion_wxyz," in pose_callback
     assert pose_callback.index(
         "self._expire_formal_base_if_needed(time.monotonic())"
-    ) < pose_callback.index("if not solve_now:")
+    ) < pose_callback.index("snapshot = self.planner.ingest_measurement(t, p_ball)")
     assert "swing_sign=swing_sign" in pose_callback
+    # The worker slot is deliberately ROS-free: mutable generated messages
+    # stay on the executor and are reconstructed only when publishing.
+    payload_decl = source.split("class _NodeSolvePayload", 1)[1].split(
+        "class _NodeSolveOutput", 1
+    )[0]
+    assert "header: object" not in payload_decl
+    assert "header_stamp_sec: int" in payload_decl
+    assert "header_stamp_nanosec: int" in payload_decl
+    assert "copy.deepcopy(msg.header)" not in pose_callback
+    assert "header_stamp_sec=int(msg.header.stamp.sec)" in pose_callback
+    assert "header_stamp_nanosec=int(msg.header.stamp.nanosec)" in pose_callback
+    async_publish = source.split("def _publish_async_solved", 1)[1].split(
+        "def _poses_cb", 1
+    )[0]
+    assert "self._racket_header_from_payload(payload)" in async_publish
+    assert "payload.header" not in async_publish
+
+    # Schema 1/2 lack source-monotonic identity and must not self-reject every
+    # async completion. Schema 3 empty packets invalidate the authority token
+    # before publishing the revocation, so an old worker result cannot revive.
+    drain = source.split("def _drain_latest_solve", 1)[1].split(
+        "def _publish_async_solved", 1
+    )[0]
+    assert "max_source_age_s=(" in drain
+    assert "RACKET_FLAT_SCHEMA_V3_FACE179_EPOCH" in drain
+    empty_legacy = pose_callback.split(
+        "and self._racket_flat_schema != RACKET_FLAT_SCHEMA_V4_FACE179_TASK", 1
+    )[1].split("if formal_epoch_schema:", 1)[1].split("return", 1)[0]
+    assert empty_legacy.index("self._last_valid = False") < empty_legacy.index(
+        "self._task_authority_generation += 1"
+    )
+    assert empty_legacy.index("self._task_authority_generation += 1") < empty_legacy.index(
+        "self._publish_flat_racket_invalid()"
+    )
+
+    # Inverse strike-spec diagnostics must not run inside the command worker.
+    solve_worker = source.split("def _solve_latest_payload", 1)[1].split(
+        "def _submit_latest_strike_spec", 1
+    )[0]
+    assert "_solve_worker_strike_spec" not in solve_worker
+    assert "_spec_planner.solve" not in solve_worker
+    assert "def _solve_latest_strike_spec" in source
+    assert "self._submit_latest_strike_spec(" in drain
+    invalid_output = drain.split(
+        "if not isinstance(solved, _NodeSolveOutput):", 1
+    )[1].split("\n            return", 1)[0]
+    assert "self.planner.accept_result(failed.pipeline)" in invalid_output
+    assert "self._publish_async_solved(" in invalid_output
+    spec_drain = source.split("def _drain_latest_strike_spec", 1)[1].split(
+        "def _drain_latest_solve", 1
+    )[0]
+    assert spec_drain.index("self._spec_solve_freshness.accept(") < spec_drain.index(
+        "if completion.error is not None:"
+    )
+
+    # A normal same-ball revision must not invalidate a newer captured
+    # completion. Only source/no-ball/rearm/close/base-revoke boundaries bump
+    # the authority generation used by LatestSolveFreshnessGate.
+    revision_helper = source.split("def _publish_task_revision", 1)[1].split(
+        "def _racket_header_from_payload", 1
+    )[0]
+    assert "_task_authority_generation" not in revision_helper
+    absent_helper = source.split("def _observe_formal_task_absent", 1)[1].split(
+        "def _publish_task_revision", 1
+    )[0]
+    assert "self._task_authority_generation += 1" in absent_helper
+    disarm_helper = source.split("def _disarm_formal_task", 1)[1].split(
+        "def _formal_task_active", 1
+    )[0]
+    assert disarm_helper.index("self._task_authority_generation += 1") < disarm_helper.index(
+        "if self._task_lifecycle is None"
+    )
     clear_method = source.split("def _clear_formal_base_geometry", 1)[1].split(
         "def _publish_formal_revocation", 1
     )[0]
@@ -647,6 +971,38 @@ def test_ros_node_wires_one_corrected_base_to_flat_adaptive_x_and_side():
     assert "self._publish_flat_racket_invalid()" in revoke_method
     assert "self._publish_flat_base(valid=False)" in revoke_method
     assert revoke_method.count("try:") >= 2
+
+
+def test_node_async_path_binds_historical_base_and_consumes_fresh_errors_invalid():
+    source = (
+        Path(__file__).resolve().parents[1] / "hope_planner" / "node.py"
+    ).read_text(encoding="utf-8")
+    callback = source.split("def _poses_cb", 1)[1].split(
+        "def _publish_diagnostics", 1
+    )[0]
+    assert callback.index("snapshot = self.planner.ingest_measurement(t, p_ball)") < (
+        callback.index("self._latest_solve_worker.submit(")
+    )
+    assert callback.index("self._observe_formal_task_present(") < callback.index(
+        "LatestSolveIdentity("
+    )
+    assert "base_sequence_ref=self._wire_counters.base_sequence" in callback
+    assert "base_authority_generation=self._base_authority_generation" in callback
+    assert "task_authority_generation=self._task_authority_generation" in callback
+
+    drain = source.split("def _drain_latest_solve", 1)[1].split(
+        "def _publish_async_solved", 1
+    )[0]
+    assert drain.index("self._solve_freshness.accept(") < drain.index(
+        "if completion.error is not None:"
+    )
+    error_branch = drain.split("if completion.error is not None:", 1)[1]
+    assert "self._publish_async_solved(" in error_branch
+    async_publish = source.split("def _publish_async_solved", 1)[1].split(
+        "def _poses_cb", 1
+    )[0]
+    assert '"base_sequence_ref": identity.base_sequence_ref' in async_publish
+    assert "_observe_formal_task_present" not in async_publish
 
 
 def test_ready_heartbeat_is_new_sample_only_throttled_and_timer_only_revokes():
@@ -669,6 +1025,7 @@ def test_node_binds_configurable_prediction_horizon_into_planner_config():
     ).read_text(encoding="utf-8")
     assert 'self.declare_parameter("max_predict_time", 2.0)' in source
     assert 'self.declare_parameter("solve_period_s", 0.02)' in source
+    assert 'self.declare_parameter("use_latest_only_solve_worker", True)' in source
     assert 'max_predict_time=float(self.get_parameter("max_predict_time").value)' in source
     assert 'self.declare_parameter("base_pose_max_age_s", 0.2)' in source
     assert 'if not self.has_parameter("use_sim_time"):' in source

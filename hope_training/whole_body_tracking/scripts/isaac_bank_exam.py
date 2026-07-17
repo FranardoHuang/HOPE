@@ -65,6 +65,7 @@ from isaac_bank_exam_adapter import (  # noqa: E402
 from isaac_timing_exam_adapter import (  # noqa: E402
     DIAGNOSTIC_REASONS as TIMING_DIAGNOSTIC_REASONS,
     activate_runtime_retiming,
+    apply_timing_native_clock_eval_profile,
     finalize_timing_records,
     initialize_timing_record,
     install_zero_velocity_frame0_reference,
@@ -437,6 +438,14 @@ def _run(cfg, simulation_app):
             + json.dumps(hydration_profile["hydrated_fields"], sort_keys=True)
         )
     profile = apply_nominal_eval_profile(env_cfg, num_envs=num_envs)
+    if timing_paper is not None:
+        # A task-revision checkpoint saved its planner phase governor as the clock
+        # owner.  The timing paper must first construct one genuine native command;
+        # only then may its R14 rider activate.  This evaluator-only config change
+        # happens before gym.make and is recorded in the nominal profile.
+        profile["timing_native_clock_profile"] = (
+            apply_timing_native_clock_eval_profile(env_cfg)
+        )
     if phase_b_contract is not None:
         phase_b_profile = apply_phase_b_eval_profile(env_cfg, phase_b_contract)
         phase_b_profile["saved_config_compatibility"] = phase_b_saved_config_compatibility
@@ -872,6 +881,13 @@ def _run(cfg, simulation_app):
     motion_cmd.install_external_exam_timing(env_ids, clip_ids, holds)
     timing_runtime_profile = None
     if timing_paper is not None:
+        timing_ready_profile["motion_reference"] = install_zero_velocity_frame0_reference(
+            motion_cmd,
+            env_ids=env_ids,
+            clip_ids=clip_ids,
+            paper=timing_paper,
+            torch_module=torch,
+        )
         timing_runtime_profile = activate_runtime_retiming(
             motion_cmd,
             env_ids=env_ids,
@@ -879,13 +895,6 @@ def _run(cfg, simulation_app):
             paper=timing_paper,
             segment_lengths=segment_lengths,
             strike_phases=strike_phases,
-            torch_module=torch,
-        )
-        timing_ready_profile["motion_reference"] = install_zero_velocity_frame0_reference(
-            motion_cmd,
-            env_ids=env_ids,
-            clip_ids=clip_ids,
-            paper=timing_paper,
             torch_module=torch,
         )
     racket_cmd.install_external_exam_questions(env_ids, exam_bank, clip_ids, bank_rows)

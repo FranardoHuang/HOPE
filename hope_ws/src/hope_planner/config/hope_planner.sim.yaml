@@ -21,6 +21,7 @@ hope_planner:
     # enters the explicitly selected clip's metadata-derived windup window.
     max_predict_time: 2.6
     solve_period_s: 0.033
+    use_latest_only_solve_worker: true
     # Match C++ --external-base-max-age; stale yaw must revoke formal side.
     base_pose_max_age_s: 0.2
     ball_source_stamp_max_age_s: 0.2
