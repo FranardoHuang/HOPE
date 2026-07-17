@@ -54,12 +54,14 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   自动 rolling 任务在本次 task-revision/TOPP 关键修复期间保持暂停。exact-0.5 K100 v1 因缺 bank 在
   输入门失败并永久冻结；资产恢复版 v2 又在首题前抓到 native-clock 命令安装晚于 retiming activation 的
   顺序错误。其日志 `f8c3be8b…a9e28`、无 scorecard，所以是“0 题执行/能力未测”，不是 0/100；v2
-  supervisor `502505` 与 evaluator `502542` 仍待精确 stop，禁止重发。v3 已改为先安装 native command、
-  验证零速第0帧，再激活 retiming，并把 v2 stop-result file/intent/terminal SHA 二次稳定读取后写入
-  no-clobber attempt；源码 `61 passed, 1 skipped`。23:44 CST 只读快照：Pod2 为 0 trainer，失败
-  evaluator 低利用率占三卡；Pod1 有 Yikang trainer 正常推进，Codex trainer 停在 model3600 约9小时，
-  另有旧 BankExam evaluator 低利用率占三卡。清理与新启动都只可精确管理已绑定 PID/PGID，不得碰
-  Yikang。终档仍需 vendor MuJoCo 同题。详见
+  随后自然结束为 `failed_no_retry`，terminal=`2d3a9c7d…4894d`、guardian=`D0`；历史
+  supervisor/evaluator/guardian 和旧 cgroup 均 absent，先前 stop 尝试没有发出 signal，也不得重放。
+  v3 已改为先安装 native command、验证零速第0帧，再激活 retiming，并在任何新进程创建前反复绑定
+  自然 terminal/错误日志、旧 PID/cgroup absence 与 stop-artifact absence；源码合并专项
+  `88 passed, 1 skipped`。最近只读快照：Pod2 为 0 trainer 且旧 v2 链已清空；Pod1 有 Yikang trainer
+  正常推进，Codex trainer 停在 model3600 约10小时，另有旧 BankExam evaluator 无 timeout 地占用三卡。
+  清理与新启动都只可精确管理已绑定 PID/PGID，不得碰 Yikang。v3 尚未唯一执行，终档仍需 vendor
+  MuJoCo 同题。详见
   [0.5 秒卷宗](experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md)。
 
 - **300 Hz 动捕不会再触发 300 Hz planner solve：** 正式 arena、schema-4 与 Gate3 profile 显式绑定

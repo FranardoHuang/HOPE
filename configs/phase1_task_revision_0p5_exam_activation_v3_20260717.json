@@ -10,7 +10,7 @@
     "state_dir": "/workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/timing_exam_0p5_supervisor_native_clock_v3/model_5700",
     "milestone_receipt": "/workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/milestones/model_5700.json",
     "behavior_receipt": "/workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/behavior_milestones/model_5700.json",
-    "rationale": "Fresh native-clock activation after the v2 evaluator failed before scoring; it is a new namespace and is blocked until the exact v2 stop receipt proves the old process chain is gone."
+    "rationale": "Fresh native-clock activation after the v2 evaluator failed before scoring; it is a new namespace and is blocked until the exact natural failed terminal plus absent historical process/cgroup proof closes the old process chain."
   },
   "prior_attempt": {
     "failure_receipt_path": "configs/phase1_task_revision_0p5_exam_v1_failure_20260717.json",
@@ -27,18 +27,29 @@
       "activation_id": "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_asset_restored_v2"
     },
     "state_dir": "/workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/timing_exam_0p5_supervisor_asset_restored_v2/model_5700",
-    "stop_result": {
-      "basename": "exact_stop_native_clock_failure_result_v1.json",
-      "artifact_kind": "taskrev_0p5_v2_exact_stop_result",
-      "status": "v2_failed_no_retry_stopped_exact",
+    "output_dir": "/workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/timing_exam_0p5_asset_restored_v2/model_5700",
+    "natural_terminal": {
+      "basename": "terminal.json",
+      "file_sha256": "2d3a9c7dac3d23b072b2c5672f1a9a0e23fc7fdc7b233cb693da95f2acf4894d",
+      "content_sha256": "76cd812139f084c90b08c3b80700327dd599b0e706f9b044a15c164765a3bb7d",
+      "status": "failed_no_retry",
+      "guardian_finish_result": "D0",
+      "cgroup_path": "/sys/fs/cgroup/taskrev0p5_taskrev_p2_equal_reward_5700_2b91248b8ec7f626"
+    },
+    "failure_log": {
+      "basename": "evaluator.log",
       "failure_log_sha256": "f8c3be8b54e57d452847254e2a184dee9014361a621de5957996123fd77a9e28",
-      "failure_reason": "timing rider requires a native-clock command before activation",
-      "signal": "SIGTERM_supervisor_once",
-      "retry_authorized": false,
-      "evaluator_direct_signal": false,
-      "cgroup_kill_by_consumer": false,
-      "sigkill_by_consumer": false
-    }
+      "failure_reason": "timing rider requires a native-clock command before activation"
+    },
+    "historical_processes": [
+      {"role": "supervisor", "pid": 502505, "start_ticks": 573485617},
+      {"role": "guardian", "pid": 502506, "start_ticks": 573485624},
+      {"role": "evaluator", "pid": 502542}
+    ],
+    "forbidden_stop_artifacts": [
+      "exact_stop_native_clock_failure_v1.json",
+      "exact_stop_native_clock_failure_result_v1.json"
+    ]
   },
   "required_assets": {
     "exam_bank": {
@@ -54,7 +65,7 @@
   },
   "consumption": {
     "v3_attempt_dir": "/workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/timing_exam_0p5_attempt_native_clock_v3/model_5700",
-    "v2_stop_result_required_before_any_consumption_write": true,
+    "v2_natural_terminal_required_before_any_consumption_write": true,
     "no_clobber": true,
     "retry_authorized": false
   },
@@ -64,7 +75,7 @@
   },
   "harness": {
     "path": "scripts/run_phase1_task_revision_0p5_exam.py",
-    "sha256": "cf3a765f228f2af979c6db1af61cdadb4bd928dc048e5dba8f64306ed83f1e7f"
+    "sha256": "2c117866b3fa7a39d5d8480567c0d192668ea068eebd763399f339bf40c8445b"
   },
   "resource_gate": {
     "allowed_eval_gpus": [0, 1, 2],

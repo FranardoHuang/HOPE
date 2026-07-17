@@ -53,9 +53,20 @@ V2_FAILURE_LOG_SHA256 = (
 V2_FAILURE_REASON = (
     "timing rider requires a native-clock command before activation"
 )
+V2_TERMINAL_FILE_SHA256 = (
+    "2d3a9c7dac3d23b072b2c5672f1a9a0e23fc7fdc7b233cb693da95f2acf4894d"
+)
+V2_TERMINAL_CONTENT_SHA256 = (
+    "76cd812139f084c90b08c3b80700327dd599b0e706f9b044a15c164765a3bb7d"
+)
 V2_SUPERVISOR_PID = 502505
 V2_SUPERVISOR_START_TICKS = 573485617
+V2_GUARDIAN_PID = 502506
+V2_GUARDIAN_START_TICKS = 573485624
 V2_EVALUATOR_PID = 502542
+V2_CGROUP_PATH = (
+    "/sys/fs/cgroup/taskrev0p5_taskrev_p2_equal_reward_5700_2b91248b8ec7f626"
+)
 V2_STOP_CONFIRM = "SIM_ONLY_STOP_EXACT_FAILED_TASKREV_0P5_K100_V2"
 V3_ACTIVATION_ID = (
     "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_native_clock_v3"
@@ -469,6 +480,11 @@ def load_activation(path: Path, *, root: Path) -> dict[str, Any]:
         / "timing_exam_0p5_supervisor_asset_restored_v2"
         / "model_5700"
     )
+    expected_v2_output = str(
+        expected_run_root
+        / "timing_exam_0p5_asset_restored_v2"
+        / "model_5700"
+    )
     if not isinstance(v2_failed_attempt, dict) or v2_failed_attempt != {
         "activation": {
             "path": str(HISTORICAL_ACTIVATION_V2),
@@ -478,18 +494,31 @@ def load_activation(path: Path, *, root: Path) -> dict[str, Any]:
             ),
         },
         "state_dir": expected_v2_state,
-        "stop_result": {
-            "basename": "exact_stop_native_clock_failure_result_v1.json",
-            "artifact_kind": "taskrev_0p5_v2_exact_stop_result",
-            "status": "v2_failed_no_retry_stopped_exact",
+        "output_dir": expected_v2_output,
+        "natural_terminal": {
+            "basename": "terminal.json",
+            "file_sha256": V2_TERMINAL_FILE_SHA256,
+            "content_sha256": V2_TERMINAL_CONTENT_SHA256,
+            "status": "failed_no_retry",
+            "guardian_finish_result": "D0",
+            "cgroup_path": V2_CGROUP_PATH,
+        },
+        "failure_log": {
+            "basename": "evaluator.log",
             "failure_log_sha256": V2_FAILURE_LOG_SHA256,
             "failure_reason": V2_FAILURE_REASON,
-            "signal": "SIGTERM_supervisor_once",
-            "retry_authorized": False,
-            "evaluator_direct_signal": False,
-            "cgroup_kill_by_consumer": False,
-            "sigkill_by_consumer": False,
         },
+        "historical_processes": [
+            {"role": "supervisor", "pid": V2_SUPERVISOR_PID,
+             "start_ticks": V2_SUPERVISOR_START_TICKS},
+            {"role": "guardian", "pid": V2_GUARDIAN_PID,
+             "start_ticks": V2_GUARDIAN_START_TICKS},
+            {"role": "evaluator", "pid": V2_EVALUATOR_PID},
+        ],
+        "forbidden_stop_artifacts": [
+            "exact_stop_native_clock_failure_v1.json",
+            "exact_stop_native_clock_failure_result_v1.json",
+        ],
     }:
         raise ExamError("activation v2 failed-attempt binding differs")
     consumption = activation.get("consumption")
@@ -499,7 +528,7 @@ def load_activation(path: Path, *, root: Path) -> dict[str, Any]:
             / "timing_exam_0p5_attempt_native_clock_v3"
             / "model_5700"
         ),
-        "v2_stop_result_required_before_any_consumption_write": True,
+        "v2_natural_terminal_required_before_any_consumption_write": True,
         "no_clobber": True,
         "retry_authorized": False,
     }:
@@ -714,6 +743,7 @@ def build_plan(
 
 REMOTE_PROGRAM = r'''
 import ctypes
+import datetime
 import errno
 import fcntl
 import hashlib
@@ -1667,6 +1697,20 @@ def proc_identity(pid):
     except (FileNotFoundError, ProcessLookupError, PermissionError, UnicodeError,
             ValueError, OSError):
         return None
+
+def require_proc_pid_absent(pid, label):
+    """Prove /proc/<pid> is absent; unreadable or occupied is not absence."""
+    try:
+        proc_fd = os.open(
+            f"/proc/{pid}", os.O_RDONLY | getattr(os, "O_DIRECTORY", 0) |
+            getattr(os, "O_NOFOLLOW", 0))
+    except (FileNotFoundError, ProcessLookupError):
+        return
+    except OSError as exc:
+        raise RuntimeError(f"cannot prove {label} PID {pid} absent: {exc}") from exc
+    else:
+        os.close(proc_fd)
+        raise RuntimeError(f"{label} PID {pid} is still occupied")
 
 def exact_live(expected):
     current = proc_identity(int(expected["pid"]))
@@ -2948,6 +2992,7 @@ def supervisor_child(spec, lock_fd, supervisor_log_fd, state_guard, output_paren
                     publish_terminal(state_guard, {
                         "status": ("failed_no_retry" if commit_token_observed else
                                    "uncommitted_failed_no_retry"),
+                        "retry_authorized": False,
                         "commit_token_observed": commit_token_observed,
                         "job_id": spec.get("job_id"), "milestone": spec.get("milestone"),
                         "finished_utc": utc(), "error": f"{type(exc).__name__}: {exc}",
@@ -3032,55 +3077,107 @@ def supervisor_child(spec, lock_fd, supervisor_log_fd, state_guard, output_paren
         except OSError:
             pass
 
-def validate_v2_stop_before_v3(spec):
-    """Require the exact v2 failure/cleanup result before v3 consumes anything."""
+def validate_v2_terminal_before_v3(spec):
+    """Bind the naturally failed v2 terminal and prove its old domain is gone."""
     predecessor = spec.get("v2_failed_attempt")
     if not isinstance(predecessor, dict):
         raise RuntimeError("v3 launch lacks a bound v2 failed attempt")
     state = Path(predecessor.get("state_dir", ""))
-    expected = predecessor.get("stop_result")
-    if not state.is_absolute() or not isinstance(expected, dict):
-        raise RuntimeError("v3 v2-stop binding shape differs")
+    output = Path(predecessor.get("output_dir", ""))
+    expected = predecessor.get("natural_terminal")
+    expected_failure = predecessor.get("failure_log")
+    historical = predecessor.get("historical_processes")
+    forbidden = predecessor.get("forbidden_stop_artifacts")
+    if (not state.is_absolute() or not output.is_absolute() or
+            not isinstance(expected, dict) or not isinstance(expected_failure, dict) or
+            not isinstance(historical, list) or not isinstance(forbidden, list)):
+        raise RuntimeError("v3 v2 natural-terminal binding shape differs")
     basename = expected.get("basename")
-    if (not isinstance(basename, str) or Path(basename).name != basename or
-            basename in {"", ".", ".."}):
-        raise RuntimeError("v3 v2-stop result basename differs")
+    failure_basename = expected_failure.get("basename")
+    for label, value in (("terminal", basename), ("failure log", failure_basename)):
+        if (not isinstance(value, str) or Path(value).name != value or
+                value in {"", ".", ".."}):
+            raise RuntimeError(f"v3 v2 {label} basename differs")
     state_guard = open_directory_guard(state, create_missing=False)
+    output_guard = None
     try:
-        result, raw = guarded_stable_json(
-            state_guard, basename, "v2 exact-stop result")
+        output_guard = open_directory_guard(output, create_missing=False)
+        terminal, terminal_raw = guarded_stable_json(
+            state_guard, basename, "v2 natural terminal")
+        failure_raw = guarded_stable_bytes(
+            output_guard, failure_basename, "v2 evaluator failure log")
+        for name in forbidden:
+            if (not isinstance(name, str) or Path(name).name != name or
+                    name in {"", ".", ".."}):
+                raise RuntimeError("v3 forbidden stop-artifact basename differs")
+            if guarded_child_exists(state_guard, name):
+                raise RuntimeError("v3 predecessor unexpectedly contains a stop artifact")
     finally:
+        close_directory_guard(output_guard)
         close_directory_guard(state_guard)
-    if (result.get("schema_version") != 1 or
-            result.get("artifact_kind") != expected.get("artifact_kind") or
-            result.get("status") != expected.get("status") or
-            result.get("activation") != predecessor.get("activation") or
-            result.get("job_id") != spec.get("job_id") or
-            result.get("milestone") != spec.get("milestone") or
-            result.get("failure_log_sha256") != expected.get("failure_log_sha256") or
-            result.get("failure_reason") != expected.get("failure_reason") or
-            result.get("signal") != expected.get("signal") or
-            result.get("retry_authorized") is not expected.get("retry_authorized") or
-            result.get("evaluator_direct_signal") is not expected.get("evaluator_direct_signal") or
-            result.get("cgroup_kill_by_consumer") is not expected.get("cgroup_kill_by_consumer") or
-            result.get("sigkill_by_consumer") is not expected.get("sigkill_by_consumer") or
-            result.get("cgroup_removed") is not True or
-            result.get("guardian_finish_result") not in {"D0", "K0"} or
-            not _sha_text(result.get("stop_intent_sha256")) or
-            not _sha_text(result.get("terminal_sha256"))):
-        raise RuntimeError("v3 requires the exact completed v2 stop result")
+
+    content = terminal.get("content")
+    catastrophic = content.get("catastrophic_cleanup") if isinstance(content, dict) else None
+    if (hashlib.sha256(terminal_raw).hexdigest() != expected.get("file_sha256") or
+            not isinstance(content, dict) or
+            canonical(content) != terminal.get("content_sha256") or
+            terminal.get("content_sha256") != expected.get("content_sha256") or
+            content.get("status") != expected.get("status") or
+            content.get("job_id") != spec.get("job_id") or
+            content.get("milestone") != spec.get("milestone") or
+            content.get("trainer_or_robot_signals") != [] or
+            content.get("owned_process_groups_empty") is not True or
+            not isinstance(content.get("signals"), list) or
+            not isinstance(catastrophic, dict) or
+            catastrophic.get("contract") != spec.get("catastrophic_cleanup") or
+            catastrophic.get("cgroup_path") != expected.get("cgroup_path") or
+            catastrophic.get("guardian_finish_result") !=
+                expected.get("guardian_finish_result") or
+            catastrophic.get("cgroup_populated_zero_acknowledged") is not True or
+            catastrophic.get("cgroup_removed_after_populated_zero") is not True):
+        raise RuntimeError("v3 requires the exact natural v2 failed terminal")
+    if (hashlib.sha256(failure_raw).hexdigest() !=
+            expected_failure.get("failure_log_sha256") or
+            failure_raw.count(expected_failure.get("failure_reason", "").encode("utf-8")) != 1):
+        raise RuntimeError("v3 v2 failure log differs")
+
+    seen_roles = set()
+    for row in historical:
+        if (not isinstance(row, dict) or row.get("role") in seen_roles or
+                type(row.get("pid")) is not int or row["pid"] <= 1):
+            raise RuntimeError("v3 historical process binding differs")
+        seen_roles.add(row["role"])
+        # Any current occupant of a frozen historical PID is ambiguous.  Fail
+        # closed even if it looks like unrelated PID reuse.
+        require_proc_pid_absent(row["pid"], f"v3 predecessor {row['role']}")
+    if seen_roles != {"supervisor", "guardian", "evaluator"}:
+        raise RuntimeError("v3 historical process roles differ")
+    cgroup_path = Path(expected.get("cgroup_path", ""))
+    if not cgroup_path.is_absolute():
+        raise RuntimeError("v3 predecessor cgroup path is not absolute")
+    try:
+        os.lstat(cgroup_path)
+    except FileNotFoundError:
+        pass
+    else:
+        raise RuntimeError("v3 predecessor cgroup still exists")
     return {
         "path": str(state / basename),
-        "file_sha256": hashlib.sha256(raw).hexdigest(),
-        "stop_intent_sha256": result["stop_intent_sha256"],
-        "terminal_sha256": result["terminal_sha256"],
-        "guardian_finish_result": result["guardian_finish_result"],
-        "content": result,
+        "file_sha256": hashlib.sha256(terminal_raw).hexdigest(),
+        "content_sha256": terminal["content_sha256"],
+        "failure_log_path": str(output / failure_basename),
+        "failure_log_sha256": hashlib.sha256(failure_raw).hexdigest(),
+        "guardian_finish_result": catastrophic["guardian_finish_result"],
+        "historical_pids_absent": [row["pid"] for row in historical],
+        "cgroup_path": str(cgroup_path),
+        "cgroup_absent": True,
+        "stop_artifacts_absent": list(forbidden),
+        "content": content,
     }
 
 
-def claim_activation_once(spec, v2_stop_binding):
-    """No-clobber v3 consumption after its v2 failure was exactly closed."""
+def claim_activation_once(spec, v2_terminal_binding):
+    """No-clobber v3 consumption after its natural v2 failure was closed."""
     consumption = spec["consumption"]
     attempt = Path(consumption["v3_attempt_dir"])
     attempt_parent = None
@@ -3090,8 +3187,8 @@ def claim_activation_once(spec, v2_stop_binding):
         if guarded_child_exists(attempt_parent, attempt.name):
             raise RuntimeError(f"native-clock v3 activation attempt is already consumed: {attempt}")
         attempt_guard = create_child_directory_guard(attempt_parent, attempt.name)
-        if validate_v2_stop_before_v3(spec) != v2_stop_binding:
-            raise RuntimeError("v2 exact-stop result changed before v3 attempt publication")
+        if validate_v2_terminal_before_v3(spec) != v2_terminal_binding:
+            raise RuntimeError("v2 natural terminal changed before v3 attempt publication")
         guarded_publish_json(attempt_guard, "attempt.json", {
             "schema_version": 1,
             "artifact_kind": "taskrev_0p5_native_clock_v3_attempt",
@@ -3099,7 +3196,7 @@ def claim_activation_once(spec, v2_stop_binding):
             "activation": spec["activation"],
             "prior_attempt": spec["prior_attempt"],
             "v2_failed_attempt": spec["v2_failed_attempt"],
-            "v2_exact_stop_binding": v2_stop_binding,
+            "v2_natural_terminal_binding": v2_terminal_binding,
             "exam_bank": spec["exam_bank"],
             "exam_rebind_report": spec["exam_rebind_report"],
             "status": "consumed",
@@ -3117,8 +3214,8 @@ def claim_activation_once(spec, v2_stop_binding):
 def launch(spec):
     # No write is permitted until both restored assets have exact size and SHA.
     validate_restored_assets(spec)
-    v2_stop_binding = validate_v2_stop_before_v3(spec)
-    attempt_guard = claim_activation_once(spec, v2_stop_binding)
+    v2_terminal_binding = validate_v2_terminal_before_v3(spec)
+    attempt_guard = claim_activation_once(spec, v2_terminal_binding)
     try:
         context = validate_inputs(spec, validate_process=True)
     except BaseException as exc:
@@ -3152,6 +3249,12 @@ def launch(spec):
     cgroup_transferred = False
     try:
         gpu_samples = stable_resource_gate(spec)
+        # The predecessor closure is part of launch authority, not merely an
+        # attempt-ledger annotation.  Re-prove it after the potentially slow
+        # input/resource preflight and before any v3 supervisor namespace,
+        # cgroup, lock, or process can be created.
+        if validate_v2_terminal_before_v3(spec) != v2_terminal_binding:
+            raise RuntimeError("v2 natural terminal changed before v3 process creation")
         output_parent_guard = open_directory_guard(output.parent, create_missing=True)
         state_parent_guard = open_directory_guard(state_dir.parent, create_missing=True)
         if guarded_child_exists(output_parent_guard, output.name):
@@ -3295,16 +3398,34 @@ def last_heartbeat(path, guard=None):
     result = None
     rows = raw.splitlines(keepends=True)
     for index, row in enumerate(rows):
-        payload = row[:-1] if row.endswith(b"\n") else row
+        # A JSONL record is committed only by its trailing newline.  A final
+        # unterminated row can be a prefix of a larger append even when that
+        # prefix happens to parse as valid JSON, so never authenticate it.
+        if not row.endswith(b"\n"):
+            break
+        payload = row[:-1]
         if not payload:
             continue
-        try:
-            result = strict_loads(payload, f"heartbeat row {index}")
-        except Exception:
-            if index == len(rows) - 1 and not row.endswith(b"\n"):
-                break
-            raise
+        result = strict_loads(payload, f"heartbeat row {index}")
     return result
+
+def committed_heartbeat_age_seconds(value):
+    if value is None:
+        return None
+    if not isinstance(value, dict) or not isinstance(value.get("utc"), str):
+        raise RuntimeError("committed heartbeat lacks a strict UTC timestamp")
+    try:
+        stamp = datetime.datetime.strptime(
+            value["utc"], "%Y-%m-%dT%H:%M:%SZ"
+        ).replace(tzinfo=datetime.timezone.utc)
+    except ValueError as exc:
+        raise RuntimeError("committed heartbeat UTC timestamp is malformed") from exc
+    if stamp.strftime("%Y-%m-%dT%H:%M:%SZ") != value["utc"]:
+        raise RuntimeError("committed heartbeat UTC timestamp is not canonical")
+    age = time.time() - stamp.timestamp()
+    if age < -5.0:
+        raise RuntimeError("committed heartbeat timestamp is in the future")
+    return max(0.0, age)
 
 def _sha_text(value):
     return isinstance(value, str) and len(value) == 64 and all(
@@ -3623,13 +3744,11 @@ def inspect(spec):
             output_guard = None
         log_info = guarded_file_stat(state_guard, "supervisor.log")
         heartbeat_value = last_heartbeat(state_dir / "heartbeat.jsonl", state_guard)
-        heartbeat_age = None
-        heartbeat_fresh = False
-        if guarded_child_exists(state_guard, "heartbeat.jsonl"):
-            heartbeat_info = guarded_file_stat(state_guard, "heartbeat.jsonl")
-            heartbeat_age = max(0.0, (time.time_ns() - heartbeat_info.st_mtime_ns) / 1e9)
-            heartbeat_fresh = heartbeat_age <= max(
-                10.0, 3.0 * spec["supervision"]["heartbeat_seconds"])
+        heartbeat_age = committed_heartbeat_age_seconds(heartbeat_value)
+        heartbeat_fresh = bool(
+            heartbeat_age is not None and
+            heartbeat_age <= max(10.0, 3.0 * spec["supervision"]["heartbeat_seconds"])
+        )
         common = {
             "read_only": True, "retry_authorized": False, "state_dir": str(state_dir),
             "output_dir": str(output), "job_id": spec["job_id"], "milestone": spec["milestone"],
@@ -3674,9 +3793,15 @@ def inspect(spec):
                     content.get("trainer_or_robot_signals") != []):
                 raise RuntimeError("terminal receipt canonical digest differs")
             if decision is not None and decision.get("decision") == "commit":
-                validate_committed_chain(state_guard, spec, require_ack=True)
+                has_ack = guarded_child_exists(state_guard, "commit_ack.json")
+                validate_committed_chain(
+                    state_guard, spec,
+                    require_ack=(status == "complete_inexact_isaac_k100" or has_ack),
+                )
                 catastrophic = content.get("catastrophic_cleanup")
                 if (status not in {"complete_inexact_isaac_k100", "failed_no_retry"} or
+                        (status == "failed_no_retry" and
+                         content.get("commit_token_observed") is not True) or
                         not isinstance(catastrophic, dict) or
                         catastrophic.get("contract") != spec["catastrophic_cleanup"] or
                         catastrophic.get("guardian_finish_result") not in {"D0", "K0"} or
@@ -3685,11 +3810,50 @@ def inspect(spec):
                         (status == "complete_inexact_isaac_k100" and
                          catastrophic.get("guardian_finish_result") != "D0")):
                     raise RuntimeError("committed terminal lacks exact guardian cleanup proof")
-            elif (decision is None or decision.get("decision") != "abort_deadline" or
+                if status == "complete_inexact_isaac_k100":
+                    if output_guard is None:
+                        raise RuntimeError("complete terminal lacks its output directory")
+                    final_binding = content.get("final_receipt")
+                    expected_final_path = str(output / "final_receipt.json")
+                    if (not isinstance(final_binding, dict) or
+                            set(final_binding) != {"path", "sha256", "content_sha256"} or
+                            final_binding.get("path") != expected_final_path or
+                            not _sha_text(final_binding.get("sha256")) or
+                            not _sha_text(final_binding.get("content_sha256"))):
+                        raise RuntimeError("complete terminal final-receipt binding differs")
+                    final_receipt, final_raw = guarded_stable_json(
+                        output_guard, "final_receipt.json", "bound final receipt")
+                    final_content = final_receipt.get("content")
+                    if (hashlib.sha256(final_raw).hexdigest() !=
+                            final_binding["sha256"] or
+                            not isinstance(final_content, dict) or
+                            canonical(final_content) != final_receipt.get("content_sha256") or
+                            final_receipt.get("content_sha256") !=
+                            final_binding["content_sha256"] or
+                            final_content.get("job_id") != spec["job_id"] or
+                            final_content.get("milestone") != spec["milestone"] or
+                            final_content.get("retry_authorized", False) is not False or
+                            final_content.get("trainer_or_robot_signals", []) != []):
+                        raise RuntimeError("complete terminal final receipt differs")
+            elif decision is None:
+                catastrophic = content.get("catastrophic_cleanup")
+                if (status != "uncommitted_failed_no_retry" or
+                        content.get("commit_token_observed") is not False or
+                        content.get("owned_process_groups_empty") is not True or
+                        content.get("signals") != [] or
+                        not isinstance(catastrophic, dict) or
+                        catastrophic.get("contract") != spec["catastrophic_cleanup"] or
+                        catastrophic.get("cgroup_removed_after_populated_zero") is not True or
+                        catastrophic.get("guardian_finish_result") is not None or
+                        catastrophic.get("cgroup_populated_zero_acknowledged") is not False):
+                    raise RuntimeError("pre-decision failure terminal lacks cleanup proof")
+            elif (decision.get("decision") != "abort_deadline" or
                   status not in {"uncommitted_deadline_abort", "uncommitted_failed_no_retry"} or
                   (status == "uncommitted_deadline_abort" and
                    content.get("launch_decision_sha256") !=
-                       hashlib.sha256(decision_raw).hexdigest())):
+                       hashlib.sha256(decision_raw).hexdigest()) or
+                  (status == "uncommitted_failed_no_retry" and
+                   content.get("commit_token_observed") is not False)):
                 raise RuntimeError("uncommitted terminal does not bind the abort decision")
             common.update(status=status, terminal=content,
                           terminal_file_sha256=hashlib.sha256(terminal_raw).hexdigest())

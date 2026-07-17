@@ -6,6 +6,7 @@ import json
 import os
 from pathlib import Path
 import select
+import shlex
 import signal
 import subprocess
 import sys
@@ -238,7 +239,9 @@ def test_build_plan_is_fixed_to_pod2_equal_reward_model5700():
     assert plan["consumption"]["v3_attempt_dir"].endswith(
         "/p2_equal_reward/timing_exam_0p5_attempt_native_clock_v3/model_5700"
     )
-    assert plan["consumption"]["v2_stop_result_required_before_any_consumption_write"] is True
+    assert plan["consumption"][
+        "v2_natural_terminal_required_before_any_consumption_write"
+    ] is True
     assert plan["consumption"]["no_clobber"] is True
     assert plan["consumption"]["retry_authorized"] is False
 
@@ -489,7 +492,7 @@ def test_missing_restored_asset_fails_before_any_launch_side_effect(monkeypatch,
     assert not lock.exists()
 
 
-def test_v3_claim_binds_v2_failure_and_consumes_activation_once(tmp_path):
+def test_v3_claim_binds_natural_v2_failure_and_consumes_activation_once(tmp_path):
     remote = _remote_namespace()
     attempt = tmp_path / "v3-attempt" / "model_5700"
     spec = {
@@ -507,23 +510,28 @@ def test_v3_claim_binds_v2_failure_and_consumes_activation_once(tmp_path):
             "status": "failed_no_retry",
             "retry_authorized": False,
         },
-        "v2_failed_attempt": {"status": "v2_failed_no_retry_stopped_exact"},
+        "v2_failed_attempt": {"status": "failed_no_retry"},
         "exam_bank": {"path": "/workspace/bank", "bytes": 3, "sha256": "c" * 64},
         "exam_rebind_report": {
             "path": "/workspace/report", "bytes": 4, "sha256": "d" * 64,
         },
     }
-    stop_binding = {
-        "path": "/tmp/v2/stop-result.json",
+    terminal_binding = {
+        "path": "/tmp/v2/terminal.json",
         "file_sha256": "d" * 64,
-        "stop_intent_sha256": "e" * 64,
-        "terminal_sha256": "f" * 64,
+        "content_sha256": "e" * 64,
+        "failure_log_path": "/tmp/v2/evaluator.log",
+        "failure_log_sha256": "f" * 64,
         "guardian_finish_result": "D0",
-        "content": {"status": "v2_failed_no_retry_stopped_exact"},
+        "historical_pids_absent": [502505, 502506, 502542],
+        "cgroup_path": "/sys/fs/cgroup/old",
+        "cgroup_absent": True,
+        "stop_artifacts_absent": ["stop-intent.json", "stop-result.json"],
+        "content": {"status": "failed_no_retry"},
     }
-    original_validate = remote["validate_v2_stop_before_v3"]
-    remote["validate_v2_stop_before_v3"] = lambda _spec: stop_binding
-    guard = remote["claim_activation_once"](spec, stop_binding)
+    original_validate = remote["validate_v2_terminal_before_v3"]
+    remote["validate_v2_terminal_before_v3"] = lambda _spec: terminal_binding
+    guard = remote["claim_activation_once"](spec, terminal_binding)
     remote["close_directory_guard"](guard)
     marker = json.loads((attempt / "attempt.json").read_text())
     assert marker["v2_failed_attempt"] == spec["v2_failed_attempt"]
@@ -531,13 +539,13 @@ def test_v3_claim_binds_v2_failure_and_consumes_activation_once(tmp_path):
     assert marker["status"] == "consumed"
     assert marker["automatic_retry"] is False
     assert marker["retry_authorized"] is False
-    assert marker["v2_exact_stop_binding"] == stop_binding
+    assert marker["v2_natural_terminal_binding"] == terminal_binding
     with pytest.raises(RuntimeError, match="already consumed"):
-        remote["claim_activation_once"](spec, stop_binding)
-    remote["validate_v2_stop_before_v3"] = original_validate
+        remote["claim_activation_once"](spec, terminal_binding)
+    remote["validate_v2_terminal_before_v3"] = original_validate
 
 
-def test_v3_claim_rejects_stop_result_change_before_attempt_publish(tmp_path):
+def test_v3_claim_rejects_natural_terminal_change_before_attempt_publish(tmp_path):
     remote = _remote_namespace()
     attempt = tmp_path / "v3-attempt" / "model_5700"
     spec = {
@@ -549,15 +557,14 @@ def test_v3_claim_rejects_stop_result_change_before_attempt_publish(tmp_path):
         "exam_rebind_report": {},
     }
     validated = {
-        "path": "/tmp/v2/stop-result.json",
+        "path": "/tmp/v2/terminal.json",
         "file_sha256": "a" * 64,
-        "stop_intent_sha256": "b" * 64,
-        "terminal_sha256": "c" * 64,
+        "content_sha256": "b" * 64,
         "guardian_finish_result": "D0",
-        "content": {"status": "v2_failed_no_retry_stopped_exact"},
+        "content": {"status": "failed_no_retry"},
     }
     changed = dict(validated, file_sha256="d" * 64)
-    remote["validate_v2_stop_before_v3"] = lambda _spec: changed
+    remote["validate_v2_terminal_before_v3"] = lambda _spec: changed
     with pytest.raises(RuntimeError, match="changed before v3 attempt"):
         remote["claim_activation_once"](spec, validated)
     assert attempt.is_dir()
@@ -587,7 +594,7 @@ def test_v3_preflight_failure_after_asset_check_is_consumed_no_retry(
             "status": "failed_no_retry",
             "retry_authorized": False,
         },
-        "v2_failed_attempt": {"status": "v2_failed_no_retry_stopped_exact"},
+        "v2_failed_attempt": {"status": "failed_no_retry"},
         "exam_bank": {
             "path": str(bank), "bytes": bank.stat().st_size,
             "sha256": remote["sha"](bank),
@@ -603,15 +610,16 @@ def test_v3_preflight_failure_after_asset_check_is_consumed_no_retry(
         lambda *_args, **_kwargs: (_ for _ in ()).throw(
             RuntimeError("remaining preflight failed")),
     )
-    stop_binding = {
-        "path": "/tmp/v2/stop-result.json",
+    terminal_binding = {
+        "path": "/tmp/v2/terminal.json",
         "file_sha256": "d" * 64,
-        "stop_intent_sha256": "e" * 64,
-        "terminal_sha256": "f" * 64,
+        "content_sha256": "e" * 64,
         "guardian_finish_result": "D0",
-        "content": {"status": "v2_failed_no_retry_stopped_exact"},
+        "content": {"status": "failed_no_retry"},
     }
-    monkeypatch.setitem(remote, "validate_v2_stop_before_v3", lambda _spec: stop_binding)
+    monkeypatch.setitem(
+        remote, "validate_v2_terminal_before_v3", lambda _spec: terminal_binding
+    )
     with pytest.raises(RuntimeError, match="remaining preflight failed"):
         remote["launch"](spec)
     failure = json.loads((attempt / "preflight_failure.json").read_text())
@@ -621,7 +629,7 @@ def test_v3_preflight_failure_after_asset_check_is_consumed_no_retry(
         remote["launch"](spec)
 
 
-def test_v3_refuses_to_consume_before_exact_v2_stop_result(tmp_path):
+def test_v3_refuses_to_consume_before_exact_v2_natural_terminal(tmp_path):
     remote = _remote_namespace()
     bank = tmp_path / "bank.npz"
     report = tmp_path / "report.json"
@@ -629,6 +637,8 @@ def test_v3_refuses_to_consume_before_exact_v2_stop_result(tmp_path):
     report.write_bytes(b"report")
     old_state = tmp_path / "v2-state"
     old_state.mkdir()
+    old_output = tmp_path / "v2-output"
+    old_output.mkdir()
     attempt = tmp_path / "v3-attempt" / "model_5700"
     spec = {
         "consumption": {"v3_attempt_dir": str(attempt)},
@@ -637,18 +647,26 @@ def test_v3_refuses_to_consume_before_exact_v2_stop_result(tmp_path):
         "v2_failed_attempt": {
             "activation": {"activation_id": "v2", "path": "v2", "sha256": "b" * 64},
             "state_dir": str(old_state),
-            "stop_result": {
-                "basename": "exact-stop.json",
-                "artifact_kind": "taskrev_0p5_v2_exact_stop_result",
-                "status": "v2_failed_no_retry_stopped_exact",
+            "output_dir": str(old_output),
+            "natural_terminal": {
+                "basename": "terminal.json",
+                "file_sha256": "c" * 64,
+                "content_sha256": "d" * 64,
+                "status": "failed_no_retry",
+                "guardian_finish_result": "D0",
+                "cgroup_path": str(tmp_path / "missing-cgroup"),
+            },
+            "failure_log": {
+                "basename": "evaluator.log",
                 "failure_log_sha256": "c" * 64,
                 "failure_reason": "native-clock failure",
-                "signal": "SIGTERM_supervisor_once",
-                "retry_authorized": False,
-                "evaluator_direct_signal": False,
-                "cgroup_kill_by_consumer": False,
-                "sigkill_by_consumer": False,
             },
+            "historical_processes": [
+                {"role": "supervisor", "pid": 502505},
+                {"role": "guardian", "pid": 502506},
+                {"role": "evaluator", "pid": 502542},
+            ],
+            "forbidden_stop_artifacts": ["stop-intent.json", "stop-result.json"],
         },
         "job_id": "taskrev_p2_equal_reward", "milestone": 5700,
         "exam_bank": {"path": str(bank), "bytes": bank.stat().st_size, "sha256": remote["sha"](bank)},
@@ -657,6 +675,122 @@ def test_v3_refuses_to_consume_before_exact_v2_stop_result(tmp_path):
     with pytest.raises(FileNotFoundError):
         remote["launch"](spec)
     assert not attempt.exists()
+
+
+def test_v3_validates_real_natural_terminal_and_absence_closure(monkeypatch, tmp_path):
+    remote = _remote_namespace()
+    state = tmp_path / "v2-state"
+    output = tmp_path / "v2-output"
+    state.mkdir()
+    output.mkdir()
+    cgroup = tmp_path / "old-cgroup"
+    contract = {
+        "requires_delegated_cgroup_v2": True,
+        "guardian_required": True,
+        "cgroup_kill_required": True,
+        "trusted_single_operator_filesystem": True,
+        "unsupported_result": "NO_LAUNCH",
+    }
+    content = {
+        "status": "failed_no_retry",
+        "job_id": "taskrev_p2_equal_reward",
+        "milestone": 5700,
+        "trainer_or_robot_signals": [],
+        "owned_process_groups_empty": True,
+        "signals": [{"target": "owned_evaluator_pgid", "signal": "SIGTERM"}],
+        "catastrophic_cleanup": {
+            "contract": contract,
+            "cgroup_path": str(cgroup),
+            "guardian_finish_result": "D0",
+            "cgroup_populated_zero_acknowledged": True,
+            "cgroup_removed_after_populated_zero": True,
+        },
+    }
+    terminal = {
+        "schema_version": 1,
+        "content": content,
+        "content_sha256": remote["canonical"](content),
+    }
+    terminal_raw = remote["cbytes"](terminal) + b"\n"
+    (state / "terminal.json").write_bytes(terminal_raw)
+    reason = "native-clock failure"
+    failure_raw = f"prefix\n{reason}\nsuffix\n".encode()
+    (output / "evaluator.log").write_bytes(failure_raw)
+    spec = {
+        "v2_failed_attempt": {
+            "activation": {"activation_id": "v2"},
+            "state_dir": str(state),
+            "output_dir": str(output),
+            "natural_terminal": {
+                "basename": "terminal.json",
+                "file_sha256": remote["hashlib"].sha256(terminal_raw).hexdigest(),
+                "content_sha256": terminal["content_sha256"],
+                "status": "failed_no_retry",
+                "guardian_finish_result": "D0",
+                "cgroup_path": str(cgroup),
+            },
+            "failure_log": {
+                "basename": "evaluator.log",
+                "failure_log_sha256": remote["hashlib"].sha256(failure_raw).hexdigest(),
+                "failure_reason": reason,
+            },
+            "historical_processes": [
+                {"role": "supervisor", "pid": 99_999_991},
+                {"role": "guardian", "pid": 99_999_992},
+                {"role": "evaluator", "pid": 99_999_993},
+            ],
+            "forbidden_stop_artifacts": ["stop-intent.json", "stop-result.json"],
+        },
+        "job_id": "taskrev_p2_equal_reward",
+        "milestone": 5700,
+        "catastrophic_cleanup": contract,
+    }
+    binding = remote["validate_v2_terminal_before_v3"](spec)
+    assert binding["file_sha256"] == spec["v2_failed_attempt"]["natural_terminal"][
+        "file_sha256"
+    ]
+    assert binding["historical_pids_absent"] == [99_999_991, 99_999_992, 99_999_993]
+    assert binding["cgroup_absent"] is True
+
+    (state / "stop-intent.json").write_text("{}\n")
+    with pytest.raises(RuntimeError, match="stop artifact"):
+        remote["validate_v2_terminal_before_v3"](spec)
+    (state / "stop-intent.json").unlink()
+
+    cgroup.mkdir()
+    with pytest.raises(RuntimeError, match="cgroup still exists"):
+        remote["validate_v2_terminal_before_v3"](spec)
+    cgroup.rmdir()
+
+def test_proc_absence_probe_fails_closed_on_permission_error(monkeypatch):
+    remote = _remote_namespace()
+
+    def denied(*_args, **_kwargs):
+        raise PermissionError("denied")
+
+    monkeypatch.setattr(remote["os"], "open", denied)
+    with pytest.raises(RuntimeError, match="cannot prove old PID"):
+        remote["require_proc_pid_absent"](12345, "old")
+
+
+def test_proc_absence_probe_rejects_occupied_pid(monkeypatch, tmp_path):
+    remote = _remote_namespace()
+    original_open = remote["os"].open
+    directory_fd = original_open(
+        tmp_path, remote["os"].O_RDONLY | getattr(remote["os"], "O_DIRECTORY", 0)
+    )
+
+    def occupied(path, flags, *args, **kwargs):
+        if path == "/proc/12345":
+            return remote["os"].dup(directory_fd)
+        return original_open(path, flags, *args, **kwargs)
+
+    monkeypatch.setattr(remote["os"], "open", occupied)
+    try:
+        with pytest.raises(RuntimeError, match="still occupied"):
+            remote["require_proc_pid_absent"](12345, "old")
+    finally:
+        remote["os"].close(directory_fd)
 
 
 @pytest.mark.parametrize("gpu", [-1, 3, 99])
@@ -1226,12 +1360,34 @@ def test_last_heartbeat_tolerates_only_partial_final_row(tmp_path):
     assert remote["last_heartbeat"](path) == {"phase": "running"}
 
 
+def test_last_heartbeat_ignores_valid_but_unterminated_final_row(tmp_path):
+    remote = _remote_namespace()
+    path = tmp_path / "heartbeat.jsonl"
+    path.write_bytes(b'{"phase":"running"}\n{"phase":"terminal_complete"}')
+    assert remote["last_heartbeat"](path) == {"phase": "running"}
+
+
 def test_last_heartbeat_rejects_complete_malformed_row(tmp_path):
     remote = _remote_namespace()
     path = tmp_path / "heartbeat.jsonl"
     path.write_bytes(b'{"phase":"running"}\n{"phase":}\n')
     with pytest.raises(Exception, match="Expecting value"):
         remote["last_heartbeat"](path)
+
+
+@pytest.mark.parametrize(
+    "stamp",
+    [
+        "2026-07-18T01:02:03+00:00",
+        "2026-07-18T09:02:03+08:00",
+        "2026-07-18T01:02:03.123Z",
+        "2026-07-18 01:02:03Z",
+    ],
+)
+def test_committed_heartbeat_age_rejects_noncanonical_utc(stamp):
+    remote = _remote_namespace()
+    with pytest.raises(RuntimeError, match="UTC timestamp"):
+        remote["committed_heartbeat_age_seconds"]({"phase": "running", "utc": stamp})
 
 
 def test_heartbeat_append_rejects_short_record(monkeypatch, tmp_path):
@@ -1261,7 +1417,8 @@ def test_inspect_requires_fresh_heartbeat_and_exact_ack(monkeypatch, tmp_path):
     guard, hello = _publish_committed_chain(remote, spec)
     try:
         remote["guarded_publish_bytes"](
-            guard, "heartbeat.jsonl", b'{"phase":"evaluator_running"}\n')
+            guard, "heartbeat.jsonl",
+            b'{"phase":"evaluator_running","utc":"2000-01-01T00:00:00Z"}\n')
     finally:
         remote["close_directory_guard"](guard)
 
@@ -1272,12 +1429,23 @@ def test_inspect_requires_fresh_heartbeat_and_exact_ack(monkeypatch, tmp_path):
     }
     monkeypatch.setitem(remote, "proc_identity", lambda pid: supervisor if pid == 4242 else None)
     monkeypatch.setitem(remote, "exact_live", lambda _identity: {"state": "S"})
-    heartbeat = Path(spec["state_dir"]) / "heartbeat.jsonl"
-    stale = time.time() - 200
-    os.utime(heartbeat, (stale, stale))
     assert remote["inspect"](spec)["status"] == "running_stale_heartbeat"
-    os.utime(heartbeat, None)
+    heartbeat = Path(spec["state_dir"]) / "heartbeat.jsonl"
+    heartbeat.chmod(0o600)
+    heartbeat.write_bytes(
+        (json.dumps({
+            "phase": "evaluator_running",
+            "utc": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+        }, separators=(",", ":")) + "\n").encode()
+    )
     assert remote["inspect"](spec)["status"] == "running_exact"
+
+    heartbeat.write_bytes(
+        b'{"phase":"evaluator_running","utc":"2000-01-01T00:00:00Z"}\n'
+        b'{"phase":"terminal_complete","utc":"2099-01-01T00:00:00Z"}'
+    )
+    os.utime(heartbeat, None)
+    assert remote["inspect"](spec)["status"] == "running_stale_heartbeat"
 
     wrong_spec = _committed_spec(tmp_path, "wrong_ack")
     wrong_guard, _ = _publish_committed_chain(remote, wrong_spec, wrong_ack=True)
@@ -1315,6 +1483,167 @@ def test_fake_committed_terminal_without_ack_is_rejected(monkeypatch, tmp_path):
         remote["inspect"](spec)
 
 
+def test_complete_terminal_requires_stable_bound_final_receipt(monkeypatch, tmp_path):
+    remote = _remote_namespace()
+    spec = _committed_spec(tmp_path)
+    guard, _ = _publish_committed_chain(remote, spec)
+    output = Path(spec["output_dir"])
+    output.mkdir()
+    final_content = {
+        "job_id": spec["job_id"],
+        "milestone": spec["milestone"],
+        "retry_authorized": False,
+        "trainer_or_robot_signals": [],
+    }
+    final_receipt = {
+        "schema_version": 1,
+        "content": final_content,
+        "content_sha256": remote["canonical"](final_content),
+    }
+    final_raw = remote["cbytes"](final_receipt) + b"\n"
+    (output / "final_receipt.json").write_bytes(final_raw)
+    terminal_content = {
+        "status": "complete_inexact_isaac_k100",
+        "job_id": spec["job_id"],
+        "milestone": spec["milestone"],
+        "retry_authorized": False,
+        "trainer_or_robot_signals": [],
+        "final_receipt": {
+            "path": str(output / "final_receipt.json"),
+            "sha256": remote["hashlib"].sha256(final_raw).hexdigest(),
+            "content_sha256": final_receipt["content_sha256"],
+        },
+        "catastrophic_cleanup": {
+            "contract": spec["catastrophic_cleanup"],
+            "guardian_finish_result": "D0",
+            "cgroup_populated_zero_acknowledged": True,
+            "cgroup_removed_after_populated_zero": True,
+        },
+    }
+    remote["guarded_publish_json"](guard, "terminal.json", {
+        "schema_version": 1,
+        "content": terminal_content,
+        "content_sha256": remote["canonical"](terminal_content),
+    })
+    remote["close_directory_guard"](guard)
+    monkeypatch.setitem(remote, "proc_identity", lambda _pid: None)
+    result = remote["inspect"](spec)
+    assert result["status"] == "complete_inexact_isaac_k100"
+
+    (output / "final_receipt.json").write_bytes(final_raw + b" ")
+    with pytest.raises(RuntimeError, match="final receipt differs"):
+        remote["inspect"](spec)
+
+
+def test_inspect_accepts_committed_failed_no_retry_terminal(monkeypatch, tmp_path):
+    remote = _remote_namespace()
+    spec = _committed_spec(tmp_path)
+    guard, _ = _publish_committed_chain(remote, spec)
+    content = {
+        "status": "failed_no_retry",
+        "retry_authorized": False,
+        "commit_token_observed": True,
+        "job_id": spec["job_id"],
+        "milestone": spec["milestone"],
+        "trainer_or_robot_signals": [],
+        "owned_process_groups_empty": True,
+        "signals": [],
+        "catastrophic_cleanup": {
+            "contract": spec["catastrophic_cleanup"],
+            "guardian_finish_result": "D0",
+            "cgroup_populated_zero_acknowledged": True,
+            "cgroup_removed_after_populated_zero": True,
+        },
+    }
+    remote["guarded_publish_json"](guard, "terminal.json", {
+        "schema_version": 1,
+        "content": content,
+        "content_sha256": remote["canonical"](content),
+    })
+    remote["close_directory_guard"](guard)
+    monkeypatch.setitem(remote, "proc_identity", lambda _pid: None)
+    assert remote["inspect"](spec)["status"] == "failed_no_retry"
+
+
+def test_inspect_accepts_committed_failed_before_ack_terminal(monkeypatch, tmp_path):
+    remote = _remote_namespace()
+    spec = _committed_spec(tmp_path)
+    guard, _ = _publish_committed_chain(remote, spec, include_ack=False)
+    content = {
+        "status": "failed_no_retry",
+        "retry_authorized": False,
+        "commit_token_observed": True,
+        "job_id": spec["job_id"],
+        "milestone": spec["milestone"],
+        "trainer_or_robot_signals": [],
+        "owned_process_groups_empty": True,
+        "signals": [],
+        "catastrophic_cleanup": {
+            "contract": spec["catastrophic_cleanup"],
+            "guardian_finish_result": "D0",
+            "cgroup_populated_zero_acknowledged": True,
+            "cgroup_removed_after_populated_zero": True,
+        },
+    }
+    remote["guarded_publish_json"](guard, "terminal.json", {
+        "schema_version": 1,
+        "content": content,
+        "content_sha256": remote["canonical"](content),
+    })
+    remote["close_directory_guard"](guard)
+    monkeypatch.setitem(remote, "proc_identity", lambda _pid: None)
+    assert remote["inspect"](spec)["status"] == "failed_no_retry"
+
+
+def test_inspect_accepts_predecision_uncommitted_failed_no_retry_terminal(
+        monkeypatch, tmp_path):
+    remote = _remote_namespace()
+    spec = _committed_spec(tmp_path)
+    state = Path(spec["state_dir"])
+    state.mkdir()
+    (state / "supervisor.log").write_bytes(b"")
+    guard = remote["open_directory_guard"](state)
+    hello = {
+        "schema_version": 1,
+        "artifact_kind": "taskrev_0p5_supervisor_hello",
+        "plan_sha256": remote["canonical"](spec),
+        "activation": spec["activation"],
+        "job_id": spec["job_id"],
+        "milestone": spec["milestone"],
+        "pid": 4242,
+        "pgid": 4242,
+        "proc_start_ticks": 12345,
+        "argv_sha256": remote["canonical"](["exact-supervisor"]),
+        "commit_deadline_monotonic_ns": 2_000_000,
+        "automatic_retry": False,
+    }
+    remote["guarded_publish_json"](guard, "child_hello.json", hello)
+    content = {
+        "status": "uncommitted_failed_no_retry",
+        "retry_authorized": False,
+        "commit_token_observed": False,
+        "job_id": spec["job_id"],
+        "milestone": spec["milestone"],
+        "trainer_or_robot_signals": [],
+        "signals": [],
+        "owned_process_groups_empty": True,
+        "catastrophic_cleanup": {
+            "contract": spec["catastrophic_cleanup"],
+            "cgroup_removed_after_populated_zero": True,
+            "guardian_finish_result": None,
+            "cgroup_populated_zero_acknowledged": False,
+        },
+    }
+    remote["guarded_publish_json"](guard, "terminal.json", {
+        "schema_version": 1,
+        "content": content,
+        "content_sha256": remote["canonical"](content),
+    })
+    remote["close_directory_guard"](guard)
+    monkeypatch.setitem(remote, "proc_identity", lambda _pid: None)
+    assert remote["inspect"](spec)["status"] == "uncommitted_failed_no_retry"
+
+
 def test_launch_two_phase_commit_is_no_clobber_and_returns_after_ack(tmp_path):
     remote = _remote_namespace()
     state = tmp_path / "state"
@@ -1334,7 +1663,7 @@ def test_launch_two_phase_commit_is_no_clobber_and_returns_after_ack(tmp_path):
         },
     }
     remote["validate_restored_assets"] = lambda _spec: {}
-    remote["validate_v2_stop_before_v3"] = lambda _spec: {}
+    remote["validate_v2_terminal_before_v3"] = lambda _spec: {}
     remote["claim_activation_once"] = lambda _spec, _binding: None
     remote["validate_inputs"] = lambda _spec, validate_process=True: {}
     remote["stable_resource_gate"] = lambda _spec: [{"free_mib": 9999}]
@@ -1429,7 +1758,7 @@ def test_launch_cgroup_preflight_fails_before_state_or_output_namespace(
         "supervision": {},
     }
     remote["validate_restored_assets"] = lambda _spec: {}
-    remote["validate_v2_stop_before_v3"] = lambda _spec: {}
+    remote["validate_v2_terminal_before_v3"] = lambda _spec: {}
     remote["claim_activation_once"] = lambda _spec, _binding: None
     remote["validate_inputs"] = lambda _spec, validate_process=True: {}
     remote["stable_resource_gate"] = lambda _spec: []
@@ -1448,6 +1777,47 @@ def test_launch_cgroup_preflight_fails_before_state_or_output_namespace(
     assert not state.exists()
     assert not output.exists()
     assert not (tmp_path / "kit.lock").exists()
+
+
+def test_launch_revalidates_predecessor_after_resource_gate_before_cgroup(
+        monkeypatch, tmp_path):
+    remote = _remote_namespace()
+    spec = {
+        "state_dir": str(tmp_path / "state"),
+        "output_dir": str(tmp_path / "output"),
+        "kit_lock": str(tmp_path / "kit.lock"),
+        "job_id": "taskrev_p2_equal_reward",
+        "milestone": 5700,
+        "activation": {"sha256": "a" * 64},
+        "supervision": {},
+    }
+    remote["validate_restored_assets"] = lambda _spec: {}
+    calls = []
+
+    def predecessor(_spec):
+        calls.append("predecessor")
+        if len(calls) == 1:
+            return {"file_sha256": "a" * 64}
+        raise RuntimeError("predecessor drift after resource gate")
+
+    remote["validate_v2_terminal_before_v3"] = predecessor
+    remote["claim_activation_once"] = lambda _spec, _binding: None
+    remote["validate_inputs"] = lambda _spec, validate_process=True: {}
+    remote["stable_resource_gate"] = lambda _spec: calls.append("resource") or []
+    reached = []
+    remote["prepare_owned_cgroup"] = lambda _spec: reached.append("cgroup")
+    remote["proc_identity"] = lambda _pid: {
+        "pid": 1, "pgid": 1, "sid": 1, "ppid": 0,
+        "state": "S", "start_ticks": 1, "argv": ["launcher"],
+    }
+    remote["_PRCTL"] = lambda *_args: 0
+
+    with pytest.raises(RuntimeError, match="predecessor drift"):
+        remote["launch"](spec)
+    assert calls == ["predecessor", "resource", "predecessor"]
+    assert reached == []
+    assert not Path(spec["state_dir"]).exists()
+    assert not Path(spec["output_dir"]).exists()
 
 
 def test_cgroup_migration_rejects_partial_control_write(monkeypatch, tmp_path):
@@ -1605,8 +1975,9 @@ time.sleep(600)
 def test_remote_command_embeds_one_action_and_no_ssh():
     plan = E.build_plan(QUEUE, activation_path=ACTIVATION, eval_gpu=0)
     command = E._remote_command(plan, action="inspect")
-    assert command.startswith("/workspace/hope_isaac_venv/bin/python -B -c ")
-    assert "ssh" not in command
+    argv = shlex.split(command)
+    assert argv[:3] == ["/workspace/hope_isaac_venv/bin/python", "-B", "-c"]
+    assert all(Path(value).name != "ssh" for value in argv)
     assert E.REMOTE_PROGRAM not in command
     with pytest.raises(E.ExamError, match="launch, inspect, or stop-v2"):
         E._remote_command(plan, action="stop")

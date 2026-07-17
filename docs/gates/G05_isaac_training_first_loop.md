@@ -70,21 +70,21 @@ Follow-up note (2026-07-17, ready-ruler successor queue source paper; Gate remai
   [experiment](../experiments/2026-07/EXP-P1-TASK-REVISION-READY-SUCCESSOR.md) and
   [operation](../operations/run_phase1_task_revision_ready_successor.md).
 
-Follow-up note (2026-07-17, exact-0.5 K100 v2 failed before question one and v3 prepared; Gate remains `Partial`):
+Follow-up note (updated 2026-07-18, exact-0.5 K100 v2 failed before question one and v3 prepared; Gate remains `Partial`):
 
 - The only v1 Pod2 launch exited `rc=2` after about `5.779 s` in `validate_inputs` because the immutable
   exam bank was absent. It created no supervisor, delegated cgroup, commit ACK or evaluator and sent no
   trainer signal. Failure receipt `f53a6813…1728` makes v1 permanently consumed with no retry authority.
 - The asset-restored v2 was launched exactly once on Pod2, then failed before its first question with
   `timing rider requires a native-clock command before activation`; log SHA is `f8c3be8b…a9e28` and no
-  scorecard exists. Its supervisor `502505` and evaluator `502542` remain in cleanup, so v2 is consumed
-  and must never be relaunched. This is zero questions executed, not a 0/100 ability result.
+  scorecard exists. It later naturally published a `failed_no_retry` terminal with guardian `D0`; the
+  historical supervisor `502505`, guardian `502506`, evaluator `502542` and owned cgroup are now absent.
+  V2 must never be relaunched or stopped again. This is zero questions executed, not a 0/100 ability result.
 - V3 installs the native external command, verifies an unchanged zero-velocity frame-0 reference, and
-  only then activates retiming. Harness plus adapter tests are `61 passed, 1 skipped`; the skip remains
-  the local delegated-cgroup runtime probe. Before any v3 consumption write, the consumer requires an
-  exact v2 stop result proving failed-no-retry, guardian `D0/K0`, cgroup removal and evaluator absence.
-  The stop consumer may send one `SIGTERM` only to the exact supervisor; it cannot directly signal the
-  evaluator, use `cgroup.kill`, send `SIGKILL`, or retry. Exact-0.5 behavior therefore remains open.
+  only then activates retiming. Harness plus adapter tests are `88 passed, 1 skipped`; the skip remains
+  the local delegated-cgroup runtime probe. Before any v3 process creation, the consumer repeatedly binds
+  the natural v2 terminal/log plus old PID/cgroup and stop-artifact absence. The previous exact-stop attempt
+  wrote no intent/result and sent no signal; it must not be replayed. Exact-0.5 behavior therefore remains open.
 
 Follow-up note (2026-07-17, planner ready-ruler source repair; Gate remains `Partial`):
 
@@ -2898,3 +2898,18 @@ CUDA 全局 env-id 越界。0.36 秒支路第 18 步缩集、首 PPO 窗 24 步�
 反例还能复现相同的最后三个失败位置。源码修为固定 `[num_envs]`、逐 tick 清零和按原 env id scatter，
 并新增 4096-env/high-id partial-reset 回归。`A4` 无 checkpoint，进程与 GPU context 已 absent；修复版
 尚未 fresh full-scene 通过，因此 successor queue 仍不得点火，G05 保持 `Partial`。
+
+### 2026-07-18 exact-0.5 K100 v2 自然终档与 v3 启动门
+
+资产恢复版 v2 在第 1 题前暴露 native-clock 安装顺序错误后，最终自然写出 `failed_no_retry` terminal；
+terminal file/content SHA 为 `2d3a9c7d…4894d/76cd8121…bb7d`，错误日志为
+`f8c3be8b…a9e28`，guardian=`D0`。单次只读取证确认历史 supervisor/evaluator/guardian、owned cgroup
+与 Kit lock holder 均 absent，且 exact-stop 尝试没有写 intent/result 或发 signal。v1/v2 永久禁止重发或
+再 stop。
+
+v3 runner `2c117866…445b` 与 activation `68f2a5eb…404d` 改为在 attempt 前、attempt 发布前以及资源
+检查后/创建新 cgroup 前三次重验同一自然 terminal/错误日志、旧 PID/cgroup absence 和 stop-artifact
+absence；`/proc` 不可读不能当作 absent。heartbeat freshness 只认带换行且 strict UTC 的最后完整记录，
+成功 terminal 必须稳定绑定 final receipt，失败 terminal 的 committed-before-ACK 与 pre-decision 分支也可
+被同一 inspect 合法复核。专项为 `60 passed, 1 skipped`，连同物化器/timing adapter 为
+`88 passed, 1 skipped`。这只解锁一次 fresh Pod2 v3 运行；尚无 K100 行为分数，G05 保持 `Partial`。

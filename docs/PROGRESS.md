@@ -11,6 +11,16 @@
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
 
+## 2026-07-18
+
+- exact-0.5 K100 v2 已自然 `failed_no_retry` 并完成 guardian D0 清理；旧三进程、cgroup 与 Kit lock holder
+  均 absent，先前 exact-stop 在 signal 前 fail closed，禁止重放。v3 改为三次绑定自然 terminal/log 与
+  absence 闭包，并修复 heartbeat 短写 freshness、成功 final receipt 和两类自产失败 terminal 的 inspect
+  一致性。runner/activation=`2c117866…445b/68f2a5eb…404d`，合并专项 `88 passed, 1 skipped`；仍待唯一
+  Pod2 v3 行为执行，G05 保持 `Partial`。见
+  [实验](experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md)与
+  [操作](operations/run_phase1_task_revision_0p5_exam.md)。
+
 ## 2026-07-17
 
 - ready 量尺 successor 已冻结为 source-only、plan-only 的 Pod2 四格：先跑 4096-env×2-update
@@ -32,11 +42,10 @@
 
 - exact-0.5 K100 v1 的输入失败保持冻结。资产恢复版 v2 已在 Pod2 唯一启动，却在首题前以
   `timing rider requires a native-clock command before activation` 失败；日志 `f8c3be8b…a9e28`，没有
-  scorecard，因此是“0 题执行/能力未测”，不是 0/100。v2 supervisor `502505` 与 evaluator `502542`
-  仍卡在清理且禁止重发。v3 把 native command、零速第0帧验证放到 retiming activation 之前；harness+
-  adapter `61 passed, 1 skipped`。v3 在任何消费写入前强制绑定 v2 exact-stop result；stop 只允许精确
-  supervisor 单次 `SIGTERM`，不得直接 signal evaluator、`cgroup.kill`、`SIGKILL` 或 retry。G05 保持
-  `Partial`。见
+  scorecard，因此是“0 题执行/能力未测”，不是 0/100。后续 2026-07-18 复核已确认它自然 D0 终止，旧
+  supervisor/evaluator/guardian/cgroup absent，人工 stop 未发 signal 且不得重放。v3 把 native command、
+  零速第0帧验证放到 retiming activation 之前，并绑定自然终档闭包；最新合并专项为
+  `88 passed, 1 skipped`。G05 保持 `Partial`。见
   [实验](experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md)与
   [操作](operations/run_phase1_task_revision_0p5_exam.md)。
 
