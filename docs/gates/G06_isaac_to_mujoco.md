@@ -56,6 +56,20 @@ This gate is the sim-to-sim bridge before real deployment.
 
 ## Current State
 
+### 2026-07-17 exact-0.5 Isaac K100 source gate does not close MuJoCo parity
+
+The checkpoint-bound [0.5-second timing exam](../DEFINITIONS.md#timing-exam-0p5) now has a frozen
+one-launch/read-only-inspect supervisor (harness `c2ce2784…1b63`, activation `996775d6…7cfb6`,
+`35 passed, 1 skipped`). It selects the neutral `taskrev_p2_equal_reward@model_5700` checkpoint and
+keeps all 100 exact-25-tick attempts in the denominator. The source binds the evaluator, checkpoint,
+hard contract, claim/binding, paper, runtime, resource floor, guardian and owned-cgroup cleanup.
+
+No Pod delegated cgroup probe, launch or behavior score has run, so this remains `NO_LAUNCH` and
+G06 remains `Partial`. Even a completed Isaac result is explicitly inexact; the same checkpoint and
+immutable questions must still run in vendor MuJoCo before any parity or deployment claim. See the
+[experiment](../experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md) and
+[operation](../operations/run_phase1_task_revision_0p5_exam.md).
+
 ### 2026-07-15 analytic Reward is not the physical referee
 
 The current VirtualBall task does use achieved racket FK state to analytically predict contact, net

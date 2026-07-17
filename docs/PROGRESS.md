@@ -13,6 +13,13 @@
 
 ## 2026-07-17
 
+- exact-0.5 K100 now has a frozen checkpoint-bound persistent source gate: harness `c2ce2784…1b63`,
+  activation `996775d6…7cfb6`, focused `35 passed, 1 skipped`. The skip is the delegated cgroup-v2
+  runtime probe, so no Pod launch or behavior score is claimed and status remains `NO_LAUNCH`/G05-G06
+  `Partial`. Pod2's 13:05Z read-only snapshot was zero trainers/all three GPUs free; Pod1 is unknown.
+  See the [experiment](experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md) and
+  [operation](operations/run_phase1_task_revision_0p5_exam.md).
+
 - Formal arena/task-revision planner cadence is now 50 Hz while every qualified 300 Hz mocap sample
   still feeds the estimator; a 300-sample burst proves 300 ingests, 50 current-sample solves and one
   task with revisions `1..50` (`218 passed, 2 skipped`). The double-Pod `+1000` cycle also completed:

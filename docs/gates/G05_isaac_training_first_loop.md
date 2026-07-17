@@ -46,6 +46,27 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-17, exact-0.5 K100 persistent source gate passed; Gate remains `Partial`):
+
+- The checkpoint-bound [0.5-second timing exam](../DEFINITIONS.md#timing-exam-0p5) now has a frozen
+  one-launch/read-only-inspect supervisor. Harness SHA is `c2ce2784…1b63`, activation SHA is
+  `996775d6…7cfb6`, and the focused suite is `35 passed, 1 skipped`. It binds
+  `taskrev_p2_equal_reward@model_5700`, the fixed exact-25-tick K100, checkpoint/hard/claim/binding,
+  runtime, resource floors, no-retry commit chain, guardian and owned-cgroup cleanup.
+- This is source evidence only. The skipped host test is the delegated cgroup-v2 runtime probe; no
+  Pod probe, launch or behavior score has run. Status is therefore `NO_LAUNCH` until the reviewed
+  Pod preflight passes, and G05 remains `Partial`. At 2026-07-17 13:05Z Pod2 had zero trainers and
+  all three GPUs free; Pod1 is `UNKNOWN`. See the [experiment](../experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md)
+  and [operation](../operations/run_phase1_task_revision_0p5_exam.md).
+
+Follow-up note (2026-07-17, task-revision pool terminal refresh; Gate remains `Partial`):
+
+- The old statement below that 19 trainers were live is historical launch-time evidence. By the
+  `+1000` cycle, all 19 checkpoint-ready cells had behavior receipts; most had naturally exited,
+  Pod2 later reached zero trainers, and no scientific stop signal was issued. Four ready/balance
+  denominators were zero, so the preregistered portfolio correctly produced no winner or elimination.
+  Future long runs must prove nonzero ready denominators in a full-scene probe first.
+
 Follow-up note (2026-07-17, task-revision pool uniquely launched; Gate remains `Partial`):
 
 - All 22 delay-zero cells consumed exactly one immutable launch claim. An independent read-only

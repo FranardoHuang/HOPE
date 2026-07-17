@@ -50,8 +50,10 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   因而没有发布 portfolio-stop receipt。旧臂多数已经自然终档；这一批不能再宣称排出胜者，也不能靠
   事后删指标制造胜者。后续新池必须先在 full-scene probe 证明 ready 分母非零，才允许占用长训槽。
   自动 rolling 任务在本次 task-revision/TOPP 关键修复期间保持暂停。旧同步 K100 长时间没有形成可信
-  终态，不进入成绩；新的
-  checkpoint-bound 持久监督器仍在 source 红队，只有通过后才会唯一启动。随后按 receipt 淘汰并把胜者
+  终态，不进入成绩；新的 checkpoint-bound [持久监督器](DEFINITIONS.md#persistent-supervisor) source gate
+  已冻结（harness `c2ce2784…1b63`、activation `996775d6…7cfb6`，`35 passed, 1 skipped`），但 skip 正是
+  Pod delegated cgroup-v2 实探针；正式 launch 和行为分都没跑，所以仍为 `NO_LAUNCH`/Partial。13:05Z
+  Pod2 只读快照为 `0 trainer / 3 GPU 空闲`，Pod1=`UNKNOWN`。通过运行门后才允许唯一启动，随后按 receipt 淘汰并把胜者
   送 vendor MuJoCo。详见
   [task-revision 卷宗](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md)。
 
@@ -98,8 +100,8 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   budget 和 acceptance 不变。后续已把两份 Python package 的完整 RECORD、实际加载 ELF、每条
   `DT_NEEDED` 解析边、canonical `ldd/readelf`、MJCF pre/post snapshot 和四个 child 的 terminal 状态全部
   绑定；TOPP rc 非零时不再能假报 `mjcf_closure_exact=true`。本地 Stage-2 专项 `112 passed`，独立红队
-  P0/P1 均为 0，runner/activation SHA 为 `e3d2e1f9…05f0` / `87598e0a…99c2`。当前 source gate 已转绿，
-  但唯一远端 v7 dry-run/execute 尚未消费。因而仍没有 TOPP timing、
+  P0/P1 均为 0，runner/activation SHA 为 `e3d2e1f9…05f0` / `87598e0a…99c2`。当前 source gate 已转绿；
+  唯一远端 v7 尝试在 dry-run 的 source/symlink 对账中 fail closed，execute=`0`。因而仍没有 TOPP timing、
   TOPP≤0.5、L0/L1、桌网、动力学或行为通过，不能写成0.5秒动作已完成。见
   [短路径实验](experiments/2026-07/EXP-MOTION-READY-TO-STRIKE-0P5.md)。
 
