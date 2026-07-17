@@ -57,14 +57,14 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   触球、回台都为 `0/50`，总计物理摔倒 `0/100`，全部因半秒 deadline guard 结束。
   这个 checkpoint 已被严格半秒要求否定；正手最新完整卷的 hit/return 仍为 `0/50`。
 
-  2026-07-18 06:42 CST 运行快照：Pod2 为 `12/12`、三卡 `4/4/4`；Pod1 为
-  `11/12`、三卡 `4/4/3`，共 `23` 条 live trainer，fatal=`0`。`HOPE_AGIBOT_A3_USD_PATH`
-  已让 `UsdFileCfg` 直接加载完整预转换 USD；Pod1 新增的 5 条都在不启动 URDF
-  importer 的情况下越过首迭代，所以 importer 绕过已是运行验证能力。GPU2
-  第四路 `Z/Z2` 两次都在进入 env/reward 前的 Kit USD shader discovery 处以
-  `malloc(): invalid size` 自然退出；同 USD 的其他作业正常，且当时显存/RAM 充足，
-  因此它们不记为配方失败，也不继续第三次盲试。等 GPU2 自然降到两路后，
-  再把该格作为第三路启动。
+  2026-07-18 07:42 CST 运行快照：Pod1 的 K2、P2、W 已在 iteration `6700`、
+  fatal=`0` 自然终档；现为 9 个 trainer 进程，三卡 `4/3/2`，其中 8 条已 accepted、
+  Z3 仍是 boot pending。Pod2 的 A 对照和
+  C2（短准备 + 关节速度惩罚关闭）也在 iteration `6700`、fatal=`0` 自然终档；
+  现为 10 条 live trainer，三卡 `3/4/3`。两 Pod 其余 live trainer 均未见 fatal。
+  Pod1 GPU2 的 Z3 只有一次启动，当时仍在 boot/import，还没有第一个
+  `Learning iteration`；本轮没有重放，也不把 Z3 写成训练成功。详细运行映射与处置见
+  [半秒冲刺卷宗](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)。
 
   旧 18 条 source 不能事后补出“初始准备时间（TTS）× outcome”分桶；
   新增 5 条已实际输出 `<0.5`、`=0.5`、`(0.5,0.9]`、`>0.9 s` 四桶的整数
@@ -74,8 +74,8 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   `87.43/87.16/85.92/82.41%`，合法回台率为 `19.41/29.90/30.75/18.97%`。拍心优先×强准备姿态
   （U）与拍心优先×触球窗老师静音（Y）呈折中，拍速优先×自由非击球臂（X）居中；没有一条在
   所有维度被同父本明确支配，因此 `+100` 不淘汰。`<0.5 s` 已不是零能力，但这些都只是 Isaac
-  训练内 virtual outcome，不是 vendor MuJoCo 成绩。旧 18 臂不与新账本假配对；GPU2 仍有三路，
-  Z3 启动条件为 false。二十三个单 seed 问题、判读边界和
+  训练内 virtual outcome，不是 vendor MuJoCo 成绩。旧 18 臂不与新账本假配对；Z3 已进入
+  唯一一次 boot/import，但尚未越过首个 `Learning iteration`。二十三个单 seed 问题、判读边界和
   实际 run 映射见
   [半秒冲刺卷宗](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)；严格半秒负结果见
   [0.5 秒卷宗](experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md)。Isaac 结果仍需 vendor MuJoCo 同题。
@@ -95,8 +95,8 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   `94.47/31.98/0.612%`、`46.93/70.82/22.84%`、`94.92/31.47/0.552%`、
   `47.49/69.41/23.14%`、`94.56/32.15/0.572%`。这把候选清楚分成稳定位置组 U/W/Y 与激进
   拍速组 V/X：Y/W 位于当前稳定 demo 前沿；V/X 尚非 demo-ready，却是唯一高回台前沿。由于没有
-  全维支配，按既定规则 stop=`0`。这些仍是训练内 virtual outcome，vendor MuJoCo 尚未验证；GPU2
-  仍有三路，Z3 条件为 false。
+  全维支配，按既定规则 stop=`0`。这些仍是训练内 virtual outcome，vendor MuJoCo 尚未验证；
+  Z3 仍是 boot pending，不算 accepted trainer。
 
 - **300 Hz 动捕不会再触发 300 Hz planner solve：** 正式 arena、schema-4 与 Gate3 profile 显式绑定
   latest-only worker。每个合格样本都进入 estimator 并替换唯一 pending snapshot；Stage 2/3 最多 50 Hz，

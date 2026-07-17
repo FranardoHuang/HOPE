@@ -73,13 +73,13 @@
 
 `full_combo` 是演示候选搜索，不是单变量因果结论；单变量格负责解释它为什么有效或无效。
 
-## 当前接受运行的 run 映射
+## 已接受运行及自然终档的 run 映射
 
 | 实际 `run_name` | 对应问题 | 实际课程 | 说明 |
 | --- | --- | --- | --- |
-| `hs_a_control_seed3` | 旧课程对照 | 旧 balanced `0.15/0.20/0.30/0.35` | Pod2 accepted；不等同于新表的 short-focus control |
+| `hs_a_control_seed3` | 旧课程对照 | 旧 balanced `0.15/0.20/0.30/0.35` | Pod2；iteration `6700`、fatal=`0` 自然终档；不等同于新表的 short-focus control |
 | `hs_b2_deadline_focus_seed3` | focus 下 qdot `-5` 对照 | `legacy_focus_1 = 0.25/0.40/0.25/0.10` | Pod2 accepted；与下一条组成旧课程内的 qdot 配对 |
-| `hs_c2_deadline_qdot0_seed3` | focus 下 qdot `0` | `legacy_focus_1 = 0.25/0.40/0.25/0.10` | Pod2 accepted；只与上一条作直接 qdot 比较 |
+| `hs_c2_deadline_qdot0_seed3` | focus 下 qdot `0` | `legacy_focus_1 = 0.25/0.40/0.25/0.10` | Pod2；iteration `6700`、fatal=`0` 自然终档；只与上一条作直接 qdot 比较 |
 | `hs_d2_ultra_half_qdot0_seed3` | ultra-half 课程 + qdot 0 | `0.05/0.70/0.20/0.05` | Pod2，accepted |
 | `hs_e_feasible_qdot0_seed3` | feasible 课程 + qdot 0 | `0.05/0.10/0.45/0.40` | Pod2，accepted |
 | `hs_f_focus_window_mimic0_seed3` | 触球窗老师静音 + qdot 0 | short-focus `0.10/0.45/0.40/0.05` | Pod2，accepted |
@@ -90,20 +90,31 @@
 | `hs_q2_focus_qdot0_mimic075_window0_seed3` | 全局模仿 `0.75`、触球窗静音 + qdot 0 | short-focus | Pod2，accepted |
 | `hs_r2_focus_qdot0_vel7_17_5_seed3` | 拍心/拍速/拍面 `7/17/5` + qdot 0 | short-focus | Pod2，accepted |
 | `hs_p1_j2_focus_qdot0_ready2x_seed3` | 强准备姿态 + qdot 0 | short-focus | Pod1，accepted |
-| `hs_p1_k2_focus_qdot0_freearm_seed3` | 自由非击球臂 + qdot 0 | short-focus | Pod1，accepted |
+| `hs_p1_k2_focus_qdot0_freearm_seed3` | 自由非击球臂 + qdot 0 | short-focus | Pod1；iteration `6700`、fatal=`0` 自然终档 |
 | `hs_p1_l2_fullcombo_seed3` | 完整组合 | short-focus | Pod1，accepted |
 | `hs_p1_m2_focus_qdot0_ready_free_seed3` | 强准备姿态 × 自由非击球臂 + qdot 0 | short-focus | Pod1，accepted |
 | `hs_p1_n2_ultra_fullcombo_seed3` | ultra-half 课程 × 完整组合 | ultra-half | Pod1，accepted |
-| `hs_p1_p2_focus_qdot0_actionrate_half_seed3` | action-rate 惩罚减半 + qdot 0 | short-focus | Pod1，accepted |
+| `hs_p1_p2_focus_qdot0_actionrate_half_seed3` | action-rate 惩罚减半 + qdot 0 | short-focus | Pod1；iteration `6700`、fatal=`0` 自然终档 |
 | `hs_p1_u_cached_pos_ready_seed3` | 拍心优先 × 强准备姿态 | short-focus | Pod1，cached USD，accepted |
 | `hs_p1_v_cached_vel_ready_seed3` | 拍速优先 × 强准备姿态 | short-focus | Pod1，cached USD，accepted |
-| `hs_p1_w_cached_pos_free_seed3` | 拍心优先 × 自由非击球臂 | short-focus | Pod1，cached USD，accepted |
+| `hs_p1_w_cached_pos_free_seed3` | 拍心优先 × 自由非击球臂 | short-focus | Pod1，cached USD；iteration `6700`、fatal=`0` 自然终档 |
 | `hs_p1_x_cached_vel_free_seed3` | 拍速优先 × 自由非击球臂 | short-focus | Pod1，cached USD，accepted |
 | `hs_p1_y_cached_pos_window0_seed3` | 拍心优先 × 触球窗老师静音 | short-focus | Pod1，cached USD，accepted |
 
 前三条是已经启动的旧课程映射，不能被改写成新 short-focus 的严格配对。其余 accepted run 均已通过
 “配置解析、首 iteration、fatal 扫描”这三个简化启动检查；这里的 accepted 只表示训练确实在跑，
-不表示这个格已经胜出。
+或已经自然终档，不表示这个格已经胜出。
+
+## 07:42 CST 运行快照
+
+- Pod1：K2、P2、W 都在 iteration `6700`、fatal=`0` 自然终档。其余 8 条 accepted trainer
+  仍 live，另有 1 条 Z3 处于 boot pending；9 个 trainer 进程的 GPU 分布为 `4/3/2`，均未见 fatal。
+- Pod2：A 旧课程对照和 C2 短准备+qdot0 都在 iteration `6700`、fatal=`0` 自然终档。
+  其余 10 条 accepted trainer 仍 live，GPU 分布为 `3/4/3`，均 fatal=`0`。
+- Z3 只启动过这一次：它的 launcher PGID 是 `2483018`、trainer PID 是 `2483019`，
+  位于 Pod1 GPU2。快照时仍在 boot/import，没有第一个 `Learning iteration`，日志也没有
+  fatal。本轮没有重放或第二份 Z3；在首 iteration 出现前，Z3 始终是
+  **boot pending**，不是 accepted trainer。
 
 ## 启动失败与精确处置
 
@@ -120,10 +131,10 @@
 | S4 | importer | importer 挂起；核对精确进程组后只停止 S4 |
 | Z、Z2 | Kit 启动 | GPU2 第四路两次在 env/reward 前的 USD shader discovery 处 allocator abort；保留日志，不判配方失败，不再盲试 |
 
-Pod1 当前是 11 条 accepted run 和 1 个空槽。预转换 USD 的 5 条新作业均已越过
-首 iteration，并开始直接输出四个初始 TTS 桶的整数机会、完成、触球和合法回台计数。
-GPU2 空槽保留到现有三路自然降到两路，然后才作为第三路补 `velocity_window0`；
-不在同一第四路条件下继续碰运气。
+07:42 CST 时 Pod1 有 8 条 accepted trainer 仍 live，Z3 另处于 boot pending。预转换 USD
+作业已证明能越过首 iteration 并输出四个初始 TTS 桶的整数机会、完成、触球和
+合法回台计数；但 Z3 自己尚未越过首 iteration，所以不能借用其他 cached-USD 作业的
+成功把它写成 accepted。
 
 ## `+100`（5701–5800）训练内早判
 

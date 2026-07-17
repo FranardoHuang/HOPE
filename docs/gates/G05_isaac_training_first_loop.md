@@ -46,6 +46,17 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-18 07:42 CST, five natural terminals and one boot pending; Gate remains `Partial`):
+
+- Pod1 K2, P2 and W naturally reached terminal iteration `6700` with zero fatal events. Pod1 then had eight
+  accepted trainers plus one boot-pending Z3 process at `4/3/2` across its GPUs. Pod2 A control and C2 deadline-plus-qdot0 also naturally reached
+  iteration `6700` with zero fatal events; Pod2 then had ten live trainers at `3/4/3`. All remaining live
+  trainers on both Pods had zero fatal events at this snapshot.
+- The single Z3 launch on Pod1 GPU2 was still in boot/import with no first `Learning iteration` and no fatal
+  event. It was not replayed in this cycle and is not accepted as a successful trainer. Detailed run identity
+  and runtime state are recorded in the
+  [half-second sprint experiment](../experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md). G05 remains `Partial`.
+
 Follow-up note (2026-07-18 06:42 CST, completed `+500` window; Gate remains `Partial`):
 
 - Pod1 remains at 11 live trainers (`4/4/3`) and Pod2 at 12 (`4/4/4`), with zero fatal events. GPU2 still

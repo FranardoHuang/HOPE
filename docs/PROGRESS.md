@@ -13,6 +13,13 @@
 
 ## 2026-07-18
 
+- 07:42 CST，Pod1 的 K2/P2/W 与 Pod2 的 A/C2 均在 iteration `6700`、fatal=`0`
+  自然终档。Pod1 当时有 9 个 trainer 进程（8 条 accepted + 1 条 Z3 boot pending），
+  GPU `4/3/2`；Pod2 为 10 条 accepted，GPU
+  `3/4/3`；两 Pod 其余 live trainer 均 fatal=`0`。Pod1 GPU2 的 Z3 唯一启动仍在
+  boot/import，未出现第一个 `Learning iteration`，本轮未重放，因此不记为已接受训练。
+  详细 PID 与 run 映射见[半秒冲刺](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)。
+
 - 06:42 CST，Pod1/Pod2 仍为 `11`/`12` 条 live trainer、GPU `4/4/3` 与 `4/4/4`，fatal=`0`；
   `5701–6200` 的 `+500` 累计窗完整。稳定位置组 U/W/Y 的“完成率/合法回台率/fall 率”为
   `91.68/31.42/1.432%`、`93.02/30.78/1.241%`、`92.00/31.52/1.322%`；激进拍速组 V/X
