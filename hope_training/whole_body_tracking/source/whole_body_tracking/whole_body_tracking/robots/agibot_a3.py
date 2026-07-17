@@ -19,6 +19,8 @@ each arm 7 (shoulder pitch/roll/yaw, elbow, wrist roll/pitch/yaw), each leg 6
 (hip pitch/roll/yaw, knee, ankle pitch/roll). The right arm holds the paddle.
 """
 
+import os
+
 import isaaclab.sim as sim_utils
 from isaaclab.actuators import ImplicitActuatorCfg
 from isaaclab.assets.articulation import ArticulationCfg
@@ -137,34 +139,54 @@ A3_MOUNT_OFFSET = (0.21021, 0.032078, 0.032036)
 # action scale 0.25*effort/stiffness EXACTLY matches the deploy's a3_action_scale, so training and
 # deployment stay consistent (target = action*action_scale + default_angle). Head 40/2 = deploy default.
 ##
-AGIBOT_A3_CFG = ArticulationCfg(
-    spawn=sim_utils.UrdfFileCfg(
+def _make_agibot_a3_spawn_cfg():
+    rigid_props = sim_utils.RigidBodyPropertiesCfg(
+        disable_gravity=False,
+        retain_accelerations=False,
+        linear_damping=0.0,
+        angular_damping=0.0,
+        max_linear_velocity=1000.0,
+        max_angular_velocity=1000.0,
+        max_depenetration_velocity=1.0,
+    )
+    articulation_props = sim_utils.ArticulationRootPropertiesCfg(
+        # Self-collision is OFF: in the official URDF the merged wrist body carries 4 overlapping
+        # collision meshes (wrist + hand_pingpang + red/black blades, all coincident) with thin blade
+        # hulls, which corrupts PhysX at sim start ("free(): corrupted unsorted chunks" -> Aborted).
+        # WBC imitation does not need self-collision. NOTE: the official MJCF a3_pingpong.xml already
+        # ships a clean collision setup (convex hulls + primitive racket/hand geoms + adjacent-body
+        # <contact><exclude> list) — port that into the URDF to re-enable; it is NOT an Agibot blocker.
+        enabled_self_collisions=False,
+        solver_position_iteration_count=8,
+        solver_velocity_iteration_count=4,
+    )
+
+    # A pre-converted USD bypasses the URDF importer entirely.  With no override, retain the
+    # established URDF conversion path byte-for-byte at the configuration level.
+    preconverted_usd_path = os.environ.get("HOPE_AGIBOT_A3_USD_PATH")
+    if preconverted_usd_path:
+        return sim_utils.UsdFileCfg(
+            usd_path=preconverted_usd_path,
+            activate_contact_sensors=True,
+            rigid_props=rigid_props,
+            articulation_props=articulation_props,
+        )
+
+    return sim_utils.UrdfFileCfg(
         fix_base=False,
         replace_cylinders_with_capsules=True,
         asset_path=AGIBOT_A3_URDF_PATH,
         activate_contact_sensors=True,
-        rigid_props=sim_utils.RigidBodyPropertiesCfg(
-            disable_gravity=False,
-            retain_accelerations=False,
-            linear_damping=0.0,
-            angular_damping=0.0,
-            max_linear_velocity=1000.0,
-            max_angular_velocity=1000.0,
-            max_depenetration_velocity=1.0,
-        ),
-        articulation_props=sim_utils.ArticulationRootPropertiesCfg(
-            # Self-collision is OFF: in the official URDF the merged wrist body carries 4 overlapping
-            # collision meshes (wrist + hand_pingpang + red/black blades, all coincident) with thin blade
-            # hulls, which corrupts PhysX at sim start ("free(): corrupted unsorted chunks" -> Aborted).
-            # WBC imitation does not need self-collision. NOTE: the official MJCF a3_pingpong.xml already
-            # ships a clean collision setup (convex hulls + primitive racket/hand geoms + adjacent-body
-            # <contact><exclude> list) — port that into the URDF to re-enable; it is NOT an Agibot blocker.
-            enabled_self_collisions=False, solver_position_iteration_count=8, solver_velocity_iteration_count=4
-        ),
+        rigid_props=rigid_props,
+        articulation_props=articulation_props,
         joint_drive=sim_utils.UrdfConverterCfg.JointDriveCfg(
             gains=sim_utils.UrdfConverterCfg.JointDriveCfg.PDGainsCfg(stiffness=0, damping=0)
         ),
-    ),
+    )
+
+
+AGIBOT_A3_CFG = ArticulationCfg(
+    spawn=_make_agibot_a3_spawn_cfg(),
     init_state=ArticulationCfg.InitialStateCfg(
         # Standing pose = a3.py ``default_angles`` (OFFICIAL Agibot deploy config,
         # a3_policy_parameters.hpp). This is used BOTH as the reset pose AND the action offset

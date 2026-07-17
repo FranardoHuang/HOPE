@@ -70,30 +70,37 @@ Follow-up note (2026-07-17, ready-ruler successor queue source paper; Gate remai
   [experiment](../experiments/2026-07/EXP-P1-TASK-REVISION-READY-SUCCESSOR.md) and
   [operation](../operations/run_phase1_task_revision_ready_successor.md).
 
-Follow-up note (updated 2026-07-18, exact-0.5 K100 v2 failed before question one, v3 source-gate false rejection, v4 prepared; Gate remains `Partial`):
+Follow-up note (2026-07-18, direct exact-0.5 K100 completed; Gate remains `Partial`):
 
-- The only v1 Pod2 launch exited `rc=2` after about `5.779 s` in `validate_inputs` because the immutable
-  exam bank was absent. It created no supervisor, delegated cgroup, commit ACK or evaluator and sent no
-  trainer signal. Failure receipt `f53a6813…1728` makes v1 permanently consumed with no retry authority.
-- The asset-restored v2 was launched exactly once on Pod2, then failed before its first question with
-  `timing rider requires a native-clock command before activation`; log SHA is `f8c3be8b…a9e28` and no
-  scorecard exists. It later naturally published a `failed_no_retry` terminal with guardian `D0`; the
-  historical supervisor `502505`, guardian `502506`, evaluator `502542` and owned cgroup are now absent.
-  V2 must never be relaunched or stopped again. This is zero questions executed, not a 0/100 ability result.
-- V3 installs the native external command, verifies an unchanged zero-velocity frame-0 reference, and
-  only then activates retiming. Harness plus adapter tests are `88 passed, 1 skipped`; the skip remains
-  the local delegated-cgroup runtime probe. Before any v3 process creation, the consumer repeatedly binds
-  the natural v2 terminal/log plus old PID/cgroup and stop-artifact absence. The previous exact-stop attempt
-  wrote no intent/result and sent no signal; it must not be replayed. Exact-0.5 behavior therefore remains open.
-- The sole v3 launch was then rejected before any v3 attempt/state/output/cgroup existed because the source gate
-  incorrectly required the frozen failure phrase to occur exactly once; the exact log SHA was unchanged and the
-  traceback legitimately contained it twice. V3 is now immutable `failed_no_retry`. V4 keeps the same behavior
-  fix but validates raw SHA, 36,059 bytes and the exact final exception line. Runner/activation are
-  `1e12d791…d99d7c7/4f93c0c3…ccd864`; combined tests remain `88 passed, 1 skipped`.
-- V4 was likewise rejected before any namespace because the real Python exception class includes its module prefix.
-  V5 removes all traceback-text parsing and relies only on the already exact raw SHA and byte count. V4 is frozen
-  by receipt `b7ca44ba…7afed7`; v5 runner/activation are `c0fe1555…7c55c/cb4b8e67…a51886`, with
-  `89 passed, 1 skipped`.
+- The versioned launch harness was removed from the active workflow. A direct Pod2 evaluator run now needs only
+  the checkpoint, question bank, timing paper, an unused output directory and an idle GPU; operators no longer
+  provide or compare SHA values before launch.
+- Two real runtime bugs were fixed: both planner-revision owners are disabled before `gym.make`, and frame-0 body
+  velocities are zeroed in the MotionLoader backing tensors instead of an advanced-index copy. The focused suite
+  is `18 passed`, including asymmetric planner state and property-copy regressions.
+- `taskrev_p2_equal_reward@model_5700` completed all 100 scheduled questions from exact zero-velocity frame 0.
+  It reached/ hit/returned `0/100`, had `0/100` physical falls, and ended all 100 attempts by deadline guard.
+  Both sides were `0/50`. This rejects this checkpoint for the strict 0.5-second requirement; it is still an
+  Isaac diagnostic and not vendor MuJoCo evidence. See the
+  [experiment](../experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md) and
+  [direct operation](../operations/run_phase1_task_revision_0p5_exam.md).
+- At the 2026-07-18 03:48 CST snapshot, Pod2 had 12 accepted trainers at `4/4/4` across its three GPUs.
+  Pod1 had six accepted trainers and six empty slots. Its two old Codex-only teardown hangs were removed by their
+  exact process groups; the later `S3` and `S4` short-preparation attempts both hung in the dynamic URDF importer
+  and were also stopped by their own exact process groups. No seventh Pod1 trainer was booting at this snapshot.
+  This is a dated snapshot, not a permanent capacity claim. The separate rolling automation remains paused.
+- The minimal source repair constructs `UsdFileCfg` directly from `HOPE_AGIBOT_A3_USD_PATH`, bypassing the
+  dynamic URDF importer completely. It has not yet crossed a real first training iteration on Pod1, so it is a
+  source candidate rather than an accepted runtime fix and G05 remains `Partial`.
+- The 18 currently live trainers use the old source. They record and activate same-ball target/TTS revisions, but
+  do not emit outcome counts cross-tabulated by initial TTS bucket, and those missing counts cannot be reconstructed
+  retrospectively. The new source on this branch implements integer opportunity, completion, hit and legal-return
+  counts for four initial-TTS buckets: `<0.5`, `=0.5`, `(0.5,0.9]` and `>0.9 s`. New cached-USD jobs will record
+  these counters directly. Consequently `+100` after the common parent is the first fair early comparison point;
+  earlier observations may only reject boot, stability, or activation failures, and the old 18 arms cannot identify
+  which preparation-time bucket has learned to hit or return. The latest completed forehand timing exam remains
+  hit/return `0/50`. The current sprint and its single-seed questions are recorded in the
+  [half-second sprint experiment](../experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md).
 
 Follow-up note (2026-07-17, planner ready-ruler source repair; Gate remains `Partial`):
 
@@ -2908,21 +2915,15 @@ CUDA 全局 env-id 越界。0.36 秒支路第 18 步缩集、首 PPO 窗 24 步�
 并新增 4096-env/high-id partial-reset 回归。`A4` 无 checkpoint，进程与 GPU context 已 absent；修复版
 尚未 fresh full-scene 通过，因此 successor queue 仍不得点火，G05 保持 `Partial`。
 
-### 2026-07-18 exact-0.5 K100 v2 自然终档、v3 假拒绝与 v4 启动门
+### 2026-07-18 exact-0.5 K100 直接行为结果
 
-资产恢复版 v2 在第 1 题前暴露 native-clock 安装顺序错误后，最终自然写出 `failed_no_retry` terminal；
-terminal file/content SHA 为 `2d3a9c7d…4894d/76cd8121…bb7d`，错误日志为
-`f8c3be8b…a9e28`，guardian=`D0`。单次只读取证确认历史 supervisor/evaluator/guardian、owned cgroup
-与 Kit lock holder 均 absent，且 exact-stop 尝试没有写 intent/result 或发 signal。v1/v2 永久禁止重发或
-再 stop。
+旧的版本化启动门反复在题目执行前制造假拒绝，已从现行操作路径删除。现在 evaluator 直接读取
+checkpoint、题库和 timing paper；操作者不再提供 SHA 或维护 activation/receipt 版本。首次完整直跑暴露并
+修复两项真实程序问题：planner 的 motion/racket-target 两端必须在环境构造前同时关闭旧 revision owner；
+MotionLoader 的 body velocity property 是高级索引副本，必须写其 backing tensor 才能得到真正的第 0 帧
+零速度参考。
 
-v3 runner `2c117866…445b` 与 activation `68f2a5eb…404d` 改为在 attempt 前、attempt 发布前以及资源
-检查后/创建新 cgroup 前三次重验同一自然 terminal/错误日志、旧 PID/cgroup absence 和 stop-artifact
-absence；`/proc` 不可读不能当作 absent。heartbeat freshness 只认带换行且 strict UTC 的最后完整记录，
-成功 terminal 必须稳定绑定 final receipt，失败 terminal 的 committed-before-ACK 与 pre-decision 分支也可
-被同一 inspect 合法复核。专项为 `60 passed, 1 skipped`，连同物化器/timing adapter 为
-`88 passed, 1 skipped`。v3 随后因 occurrence-count 假门在零 namespace 阶段失败并永久冻结；v4
-runner/activation=`1e12d791…d99d7c7/4f93c0c3…ccd864` 只改用 raw SHA + bytes + 最后异常行并采用
-fresh namespace。v4 又被异常类模块前缀假拒绝且零 namespace；v5 删除文本解析，仅保留 raw SHA+bytes，
-runner/activation=`c0fe1555…7c55c/cb4b8e67…a51886`。这只解锁一次 Pod2 v5 运行；尚无 K100 行为分数，
-G05 保持 `Partial`。
+修复后 Pod2 完成 100/100 题且结果文件状态为 `valid`：正反手各 50 题，触球与回台均为 `0`，物理摔倒
+为 `0`，100 题都因 0.5 秒 deadline guard 结束。该 checkpoint 因此不能满足严格半秒要求；下一轮训练要
+直接覆盖更短且更宽的准备时间、动作加速和同一拍 target/TTS 更新。Isaac 结果仍不是 vendor MuJoCo 门，
+所以 G05 保持 `Partial`。

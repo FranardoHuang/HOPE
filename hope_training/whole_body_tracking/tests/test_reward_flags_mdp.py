@@ -2308,6 +2308,84 @@ def test_exact_swing_closeout_pairs_window_denominator_and_transfers_wrap_strike
     assert second["swing_completion_count"].item() == 1
 
 
+def test_exact_initial_tts_buckets_pair_closeout_and_sparse_outcomes_per_update():
+    command = _exact_behavior_command(types.SimpleNamespace(active_terms=()), num_envs=4)
+    command.planner_revision_enabled = True
+    command._motion_term = types.SimpleNamespace(
+        _multiseg=False,
+        just_resampled=torch.zeros(4, dtype=torch.bool),
+    )
+    command._exact_attempt_active[:] = True
+    with torch.inference_mode():
+        command._assign_exact_attempt_initial_tts(
+            torch.arange(4), torch.tensor([0.49, 0.50, 0.90, 0.91])
+        )
+        command._book_sparse_reward_eligibility(
+            exact_strike=torch.tensor([True, True, True, False]),
+            capture=torch.tensor([True, False, True, False]),
+            net_clear=torch.tensor([True, False, True, False]),
+            landing_valid=torch.tensor([True, False, True, False]),
+            legal_return=torch.tensor([False, False, True, False]),
+        )
+        command._exact_attempt_completed[:] = torch.tensor([True, False, True, False])
+        command._close_exact_swing_attempts(torch.arange(4))
+    snapshot = command.consume_exact_behavior_decision_counters()
+
+    for bucket in ("lt_0p5", "eq_0p5", "gt_0p5_le_0p9", "gt_0p9"):
+        assert snapshot[f"planner_initial_tts_{bucket}_swing_outcome_count"].item() == 1
+    assert snapshot["planner_initial_tts_lt_0p5_swing_completion_count"].item() == 1
+    assert snapshot["planner_initial_tts_eq_0p5_swing_completion_count"].item() == 0
+    assert snapshot["planner_initial_tts_gt_0p5_le_0p9_swing_completion_count"].item() == 1
+    assert snapshot["planner_initial_tts_gt_0p9_swing_completion_count"].item() == 0
+    assert snapshot["planner_initial_tts_lt_0p5_strike_opportunity_count"].item() == 1
+    assert snapshot["planner_initial_tts_eq_0p5_strike_opportunity_count"].item() == 1
+    assert snapshot["planner_initial_tts_gt_0p5_le_0p9_strike_opportunity_count"].item() == 1
+    assert snapshot["planner_initial_tts_gt_0p9_strike_opportunity_count"].item() == 0
+    assert snapshot["planner_initial_tts_lt_0p5_virtual_capture_count"].item() == 1
+    assert snapshot["planner_initial_tts_gt_0p5_le_0p9_virtual_capture_count"].item() == 1
+    assert snapshot["planner_initial_tts_gt_0p5_le_0p9_virtual_legal_return_count"].item() == 1
+    assert snapshot["planner_initial_tts_lt_0p5_virtual_legal_return_count"].item() == 0
+
+    second = command.consume_exact_behavior_decision_counters()
+    assert all(
+        value.item() == 0
+        for name, value in second.items()
+        if name.startswith("planner_initial_tts_")
+    )
+
+
+def test_exact_initial_tts_bucket_defers_same_wrap_sparse_outcome_to_new_task():
+    command = _exact_behavior_command(types.SimpleNamespace(active_terms=()), num_envs=2)
+    command.planner_revision_enabled = True
+    command._motion_term = types.SimpleNamespace(
+        _multiseg=False,
+        just_resampled=torch.tensor([True, False]),
+    )
+    command._exact_attempt_active[:] = True
+    command._assign_exact_attempt_initial_tts(
+        torch.arange(2), torch.tensor([0.49, 0.50])
+    )
+    command._book_sparse_reward_eligibility(
+        exact_strike=torch.tensor([True, True]),
+        capture=torch.tensor([True, True]),
+        net_clear=torch.tensor([True, True]),
+        landing_valid=torch.tensor([True, True]),
+        legal_return=torch.tensor([True, True]),
+    )
+
+    # Env 0's strike belongs to the task that starts on this wrap.  Close the old <0.5 task,
+    # then assign the new >0.9 task and flush the parked outcomes into that new bucket.
+    command._close_exact_swing_attempts(torch.tensor([0]))
+    command._assign_exact_attempt_initial_tts(torch.tensor([0]), torch.tensor([1.10]))
+    snapshot = command.consume_exact_behavior_decision_counters()
+    assert snapshot["planner_initial_tts_lt_0p5_swing_outcome_count"].item() == 1
+    assert snapshot["planner_initial_tts_lt_0p5_strike_opportunity_count"].item() == 0
+    assert snapshot["planner_initial_tts_eq_0p5_strike_opportunity_count"].item() == 1
+    assert snapshot["planner_initial_tts_gt_0p9_strike_opportunity_count"].item() == 1
+    assert snapshot["planner_initial_tts_gt_0p9_virtual_capture_count"].item() == 1
+    assert snapshot["planner_initial_tts_gt_0p9_virtual_legal_return_count"].item() == 1
+
+
 def test_exact_terminal_reason_masks_reject_numeric_truthiness():
     reasons = {"base_fell_tilt": torch.tensor([0.0, 0.2])}
     tm = types.SimpleNamespace(

@@ -13,18 +13,22 @@
 
 ## 2026-07-18
 
-- exact-0.5 K100 v4 又因真实异常类带模块前缀而被冗余末行文本门假拒绝，仍为零远端 namespace；已以
-  receipt `b7ca44ba…7afed7` 冻结。v5 删除全部 traceback 文本解析，只保留 exact raw SHA+36,059 bytes，
-  runner/activation=`c0fe1555…7c55c/cb4b8e67…a51886`，合并回归 `89 passed, 1 skipped`，待唯一 Pod2 launch。
-- exact-0.5 K100 v3 的唯一 Pod2 launch 在零远端 namespace 阶段假拒绝：v2 log SHA 完全一致，但旧门错误
-  要求异常文案只出现一次，实际 traceback 源码行与末行各一次。v3 已用 receipt `32525b0f…bbc82d3`
-  冻结为 `failed_no_retry`；v4 只改成 raw SHA + bytes + 最后异常行并使用 fresh namespace。runner/activation
-  `1e12d791…d99d7c7/4f93c0c3…ccd864`，合并专项 `88 passed, 1 skipped`，仍待唯一 Pod2 行为执行。
-- exact-0.5 K100 v2 已自然 `failed_no_retry` 并完成 guardian D0 清理；旧三进程、cgroup 与 Kit lock holder
-  均 absent，先前 exact-stop 在 signal 前 fail closed，禁止重放。v3 改为三次绑定自然 terminal/log 与
-  absence 闭包，并修复 heartbeat 短写 freshness、成功 final receipt 和两类自产失败 terminal 的 inspect
-  一致性。runner/activation=`2c117866…445b/68f2a5eb…404d`，合并专项 `88 passed, 1 skipped`；仍待唯一
-  Pod2 v3 行为执行，G05 保持 `Partial`。见
+- 03:48 CST 直接训练冲刺快照：Pod2 已有 12 条越过首迭代的作业，三卡 `4/4/4`；
+  Pod1 为 6 条已越过首迭代、6 个空槽。Pod1 的旧 Codex trainer/BankExam hang 以及
+  后来卡在动态 URDF importer 的 `S3`/`S4` 均已按各自精确进程组停止。最小源码
+  修复用 `HOPE_AGIBOT_A3_USD_PATH` 直接创建 `UsdFileCfg`，完全绕过动态 importer；尚待
+  Pod1 实际越过首训练迭代，不先写成修复通过。当前 live 18 臂是旧 source：虽已激活
+  同球实时 target/TTS revision，却没有且不能追溯初始 TTS×outcome 分桶。本分支新
+  source 已按 `<0.5`/`=0.5`/`(0.5,0.9]`/`>0.9 s` 四桶写整数机会、完成、触球和
+  合法回台计数，cached-USD 新作业会直接记录。每条到父模型后 `+100` 才作第一次
+  公平早判，之前不排名。自动 rolling 任务仍暂停。见
+  [半秒冲刺](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)。
+
+- 0.5 秒 K100 已改成无人工 SHA/activation/receipt 的直接 evaluator 路径，并在 Pod2 完成第一份真实
+  100 题结果：`model_5700` 正反手都为触球 `0/50`、回台 `0/50`，总计 `0/100`，但物理摔倒 `0/100`。
+  运行前修掉 planner 两端半配置和 MotionLoader 高级索引副本导致的假清零；聚焦回归 `18 passed`。
+  该 checkpoint 的严格半秒能力被否定，下一批训练转向更宽/更短准备时间、动作加速和拍内 target/TTS
+  更新；G05 仍保持 `Partial`。见
   [实验](experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md)与
   [操作](operations/run_phase1_task_revision_0p5_exam.md)。
 

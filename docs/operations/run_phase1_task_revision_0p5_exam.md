@@ -1,89 +1,69 @@
-# 运行 task-revision exact-0.5 K100
+# 直接运行 0.5 秒 K100
 
-本操作只运行一份 [`0.5 秒时序卷`](../DEFINITIONS.md#timing-exam-0p5)：100 题都从第 0 帧零速度准备态
-开始，25 个 50 Hz tick 后触球。[`K100`](../DEFINITIONS.md#q50-and-k100) 的所有未触球、来不及、摔倒和
-未上台都保留在分母。结果只是 Isaac inexact 诊断；不能替代 vendor MuJoCo。
+这是一条简单的行为测试：100 道固定题都从动作第 0 帧的零速度状态开始，给策略
+0.5 秒（50 Hz 下 25 个控制周期）完成触球。正手、反手各 50 题；未触球、来不及、
+摔倒和未上台都保留在分母。
 
-当前状态：v1 输入失败已冻结；v2 唯一 Pod2 launch 在首题前暴露 native-clock 安装顺序错误，日志 SHA
-`f8c3be8b…a9e28`，没有 scorecard。v2 随后自然结束为 `failed_no_retry`，terminal 文件 SHA
-`2d3a9c7d…4894d`、guardian=`D0`，历史 supervisor/evaluator/guardian 与 owned cgroup 均已消失；此前的
-exact-stop 尝试在发 signal 前 fail closed，且没有 stop intent/result。禁止重发 v1/v2，也禁止再对旧 PID
-执行 stop。v3 唯一 launch 又在任何远端 namespace 创建前被错误的“异常文案只能出现一次”门假拒绝；
-日志 SHA 实际完全一致，但 traceback 中源码行和末行各出现一次。v3 已冻结为 `failed_no_retry`。v4 又因
-异常类带模块前缀而被冗余的末行文本门假拒绝，且同样零 namespace。当前 v5 彻底删除文本解析，只保留
-整文件 SHA+字节数；执行器 SHA `c0fe1555…7c55c`，activation SHA `cb4b8e67…a51886`；执行器、物化器和 timing adapter
-合并专项为 `88 passed, 1 skipped`。任何 SSH timeout 都是 `UNKNOWN`，不得重放。
+当前结论：2026-07-18 在 Pod2 对 `taskrev_p2_equal_reward@model_5700` 的第一次完整直跑已经结束。
+100 题全部完成，触球 `0/100`、回台 `0/100`、物理摔倒 `0/100`，两侧各有 50 次超时。
+这说明该策略在这条严格 0.5 秒诊断卷上来不及击球；结果是 Isaac 诊断，不替代 vendor MuJoCo。
 
-## 1. 本地 source gate（不 SSH、不写远端）
+## 原则
 
-```bash
-SOURCE=/path/to/clean/exact-main/nohope
-cd "$SOURCE"
+- 不再为一次测试制作 v1/v2/v3、activation、receipt 或人工 SHA 对拍。
+- 直接运行 evaluator；每次只换一个新的输出目录，旧输出不覆盖。
+- 启动前只确认三件事：checkpoint 存在、题表存在、目标 GPU 没有别人的进程。
+- 成功与否看输出 JSON 的 `status` 和 100 道题是否完整，不把 Kit 关闭阶段的 shell 返回码当成行为结论。
+- 不发真机命令，不按进程名宽泛停止；若需要停止，只管理本次记录的 PID/PGID。
 
-test "$(sha256sum scripts/run_phase1_task_revision_0p5_exam.py | awk '{print $1}')" = \
-  c0fe155502a1511177fc0702082df37c5e0721ce6629b748bafa48dfe927c55c
-test "$(sha256sum configs/phase1_task_revision_0p5_exam_activation_v5_20260718.json | awk '{print $1}')" = \
-  cb4b8e6777b5f97a42b60516c3760ba0243cce8ee35d3db4da947db9c2a51886
-test "$(sha256sum configs/phase1_task_revision_0p5_exam_v4_failure_20260718.json | awk '{print $1}')" = \
-  b7ca44ba34f1ecc396ad3af2984f8c40123f00a12a2d4384bfadc0ce957afed7
-test "$(sha256sum configs/phase1_task_revision_0p5_exam_v1_failure_20260717.json | awk '{print $1}')" = \
-  f53a68136feca34af5e6f7764e11c734f6e151edfff4375ca4a23e29bd611728
-pytest -q \
-  tests/test_run_phase1_task_revision_0p5_exam.py \
-  tests/test_materialize_phase1_timing_exam_0p5.py \
-  hope_training/whole_body_tracking/tests/test_isaac_timing_exam_adapter.py
-```
+## Pod2 直接命令
 
-本地没有 writable delegated cgroup-v2 child 时，预计合并专项为 `88 passed, 1 skipped`；不能把该 skip 写成 Pod
-runtime 通过。
-
-## 2. v2 自然终档前置门
-
-v5 的 `plan/launch` 会在任何 attempt 写入前、attempt 发布前和资源检查后/创建 cgroup 前三次稳定重读
-v2 terminal 与错误日志，并要求三个历史 PID、旧 cgroup 和两个 stop artifact 全部不存在。该门读取的是
-自然终档，不会向旧进程发 signal；它还要求 v3/v4 attempt/state/output/cgroup 全部不存在。日志只用
-整文件 SHA 与字节数，不再解析 traceback 文本。任何漂移都 fail closed。
-
-## 3. v5 唯一 launch
-
-先生成 v5 plan；它在任何远端消费写入前必须验证上述闭包：
+下面命令不要求操作者提供任何 SHA。`OUT` 必须是新目录，`GPU` 必须是实际空闲卡。
 
 ```bash
-python3 scripts/run_phase1_task_revision_0p5_exam.py \
-  --queue configs/phase1_task_revision_supercombo_20260716.yaml \
-  --activation configs/phase1_task_revision_0p5_exam_activation_v5_20260718.json \
-  --eval-gpu 1 plan
+SRC=/workspace/codexschema/nohope_eval_simple_20260718
+RUN=/workspace/codexschema/nohope_task_revision_b1f5a38/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-16_20-04-47_phase1_taskrev_p2_equal_reward_seed3_20260716
+BANK=/workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_exam_bank_rebind_v1/s1_v4rg_runtime_order_schema3_exam_882fea4_rebound.npz
+SCHEDULE=/workspace/codexschema/phase1_signed_face_rescue_20260713/papers/signed_face_exam_k100_v1/signed_face_exam_k100.schedule.json
+TIMING=/workspace/codexschema/phase1_task_revision_supercombo_20260716/papers/timing_exam_0p5_k100.schedule.json
+OUT=/workspace/codexschema/simple_exact_0p5_20260718/next_attempt
+GPU=1
 
-python3 scripts/run_phase1_task_revision_0p5_exam.py \
-  --queue configs/phase1_task_revision_supercombo_20260716.yaml \
-  --activation configs/phase1_task_revision_0p5_exam_activation_v5_20260718.json \
-  --eval-gpu 1 launch --execute \
-  --confirm SIM_ONLY_LAUNCH_ONE_PERSISTENT_TASKREV_0P5_K100_V5
+test ! -e "$OUT"
+mkdir -p "$OUT"
+source "$SRC/hope_training/whole_body_tracking/setup_train_env.sh"
+CUDA_VISIBLE_DEVICES="$GPU" PYTHONPATH="$HOPE_WBT_PYTHONPATH" \
+  /workspace/hope_isaac_venv/bin/python \
+  "$SRC/hope_training/whole_body_tracking/scripts/isaac_bank_exam.py" \
+  task=HOPEPingPongVirtualBall headless=true device=cuda:0 \
+  "+run_dir=$RUN" "+checkpoint=$RUN/model_5700.pt" \
+  "+exam_bank=$BANK" "+schedule_json=$SCHEDULE" \
+  +per_clip_quota=50 +schedule_seed=0 +noise_scale=0.0 \
+  +allow_inexact_contract=true "+timing_paper=$TIMING" \
+  "+output_dir=$OUT" +output_stem=isaac_timing_0p5 \
+  >"$OUT/evaluator.log" 2>&1
 ```
 
-v5 使用全新 state/output/attempt namespace；在 gym 创建后先关闭保存的 planner clock owner、安装 native
-external command、验证第 0 帧位置不变且速度严格为零，最后才激活 retiming。SSH timeout 后状态是
-`UNKNOWN`，**绝不重复 launch**；下一步只能 inspect。
-监督器只可清理自己 owned cgroup 内的 evaluator/转换器；不得 signal trainer、worker、其他 evaluator、
-真机或宽泛进程名。
+需要后台运行时，用普通的 `nohup setsid` 记录本次 PID；不要再包一层版本化 launcher。
 
-## 4. 只读 inspect
+## 最小验收
 
 ```bash
-python3 scripts/run_phase1_task_revision_0p5_exam.py \
-  --queue configs/phase1_task_revision_supercombo_20260716.yaml \
-  --activation configs/phase1_task_revision_0p5_exam_activation_v5_20260718.json \
-  --eval-gpu 1 inspect --execute
+python3 - "$OUT/isaac_timing_0p5.json" <<'PY'
+import json, sys
+
+result = json.load(open(sys.argv[1]))
+attempts = result["attempts"]
+assert result["status"] == "valid"
+assert len(attempts) == 100
+assert sum(bool(row["finalized"]) for row in attempts) == 100
+assert sum(bool(row["censored"]) for row in attempts) == 0
+print(result["summary"])
+PY
 ```
 
-`running_exact` 只代表身份/guardian/心跳精确；`complete_inexact_isaac_k100` 才允许读取终档。终档还必须
-包含 guardian `D0`、cgroup `populated=0`、删除确认、绑定 K100 scorecard 与 `retry_authorized=false`。
-`cleanup_unproven_quarantine`、stale heartbeat、缺 ACK、任何 malformed terminal 都保持 fail closed；不删
-namespace、不手改 receipt、不重发。
+结果只回答“这个 checkpoint 在这 100 道 0.5 秒题上做到了什么”。后续训练应直接针对
+准备时间分布、动作加速和同一拍中的目标更新，不再为这份负结果重复建 harness。
 
-## 5. 结果边界
-
-- 本卷回答 exact 0.5 秒下的实际触球/上台率，不回答动作 TOPP 动力学证书。
-- Isaac score 永久 `evaluation_contract_exact=false`；同一 checkpoint 仍须 vendor MuJoCo 同题门。
-- 不得据 source gate、`running_exact` 或单侧分数停止 trainer、晋级策略、部署或发真机命令。
-- 权威实验记录：[EXP-P1-TASK-REVISION-0P5-K100](../experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md)。
+权威实验记录见
+[EXP-P1-TASK-REVISION-0P5-K100](../experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md)。

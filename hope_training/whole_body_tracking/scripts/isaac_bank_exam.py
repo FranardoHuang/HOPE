@@ -89,6 +89,26 @@ def _cfg(cfg, key: str, default=None):
     return default if value is None else value
 
 
+def _load_timing_paper_from_path(path: Path) -> tuple[dict[str, Any], str]:
+    """Load a timing paper without making callers pre-compute duplicate digests."""
+
+    if not path.is_file():
+        raise IsaacBankExamError(f"timing paper does not exist: {path}")
+    file_sha = timing_sha256_file(path)
+    try:
+        raw = json.loads(path.read_text(encoding="utf-8"))
+    except (OSError, UnicodeError, json.JSONDecodeError) as exc:
+        raise IsaacBankExamError(f"cannot read timing paper {path}: {exc}") from exc
+    if not isinstance(raw, dict):
+        raise IsaacBankExamError("timing paper must be a JSON object")
+    paper = load_timing_paper(
+        path,
+        expected_file_sha256=file_sha,
+        expected_semantic_sha256=raw.get("paper_semantic_sha256"),
+    )
+    return paper, file_sha
+
+
 def _git_head(repo: Path) -> str | None:
     try:
         return subprocess.check_output(
@@ -356,21 +376,8 @@ def _run(cfg, simulation_app):
     timing_paper_file_sha = None
     if timing_requested:
         timing_paper_path = Path(timing_paper_raw).expanduser().resolve()
-        timing_paper_file_sha = str(
-            _cfg(cfg, "expected_timing_paper_sha256", "")
-        ).strip()
-        timing_paper_semantic_sha = str(
-            _cfg(cfg, "expected_timing_paper_semantic_sha256", "")
-        ).strip()
-        if not timing_paper_file_sha or not timing_paper_semantic_sha:
-            raise IsaacBankExamError(
-                "timing paper requires +expected_timing_paper_sha256=... and "
-                "+expected_timing_paper_semantic_sha256=..."
-            )
-        timing_paper = load_timing_paper(
-            timing_paper_path,
-            expected_file_sha256=timing_paper_file_sha,
-            expected_semantic_sha256=timing_paper_semantic_sha,
+        timing_paper, timing_paper_file_sha = _load_timing_paper_from_path(
+            timing_paper_path
         )
     contract_path = run_dir / "params" / "training_contract.json"
     if training_contract_sha is not None and sha256_file(contract_path) != training_contract_sha:

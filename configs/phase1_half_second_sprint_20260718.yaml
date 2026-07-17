@@ -1,0 +1,405 @@
+schema_version: 1
+name: phase1_half_second_sprint_20260718
+purpose: >-
+  用同一个 model_5700 单 seed 热启动，快速比较十八种“半秒内完成击球”训练方案。
+  这里保留公共输入和每格真正改变的参数，不复制旧队列的发布流程，也不做
+  SHA、receipt、claim 或 activation 流程。
+simulation_only: true
+
+simple_launch:
+  bookkeeping: none
+  forbidden_prelaunch_ceremony: [sha, receipt, claim, activation]
+  startup_checks:
+    - configuration_parses
+    - first_training_iteration_appears
+    - fatal_log_scan_is_clean
+  note: >-
+    启动前只检查参数能解析；启动后只等第一个训练 iteration 并扫 fatal。
+    训练结论由 checkpoint 行为读数给出，不让发布式账本阻塞 GPU。
+
+common:
+  source_checkout: /workspace/codexschema/nohope_task_revision_b1f5a38
+  parent_checkpoint: /workspace/codexschema/nohope_task_revision_b1f5a38/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-16_20-04-47_phase1_taskrev_p2_equal_reward_seed3_20260716/model_5700.pt
+  resume: full_policy_value_optimizer_normalizer
+  seed: 3
+  motion_files:
+    forehand: /workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_forehand_v4rg_cal.npz
+    backhand: /workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_backhand_v4rg_cal.npz
+  training_question_bank: /workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_bank_rebind_v2/s1_v4rg_runtime_order_schema3_train_882fea4_rebound.npz
+  runtime:
+    num_envs: 4096
+    additional_updates_initial: 1001
+    winner_extension_to_updates: 4001
+    save_interval_updates: 100
+  inherited_recipe: phase1_task_revision_model_5700
+  baseline_reward_settings:
+    task.rewards.joint_velocity_limit_hinge_weight: -5.0
+    task.rewards.action_rate_weight: -0.1
+    task.rewards.motion_scale: 1.0
+    task.rewards.motion_scale_in_window: 0.25
+    task.rewards.racket_position_weight: 9.67
+    task.rewards.racket_velocity_weight: 9.67
+    task.rewards.racket_normal_weight: 9.66
+    task.rewards.foot_orientation_weight: -0.3
+    task.rewards.prestrike_upright_weight: -1.0
+    task.rewards.free_non_striking_arm_mimic: false
+
+time_to_strike_components:
+  late_stress: {range_s: [0.36, 0.49]}
+  exact_half_second: {range_s: [0.50, 0.50]}
+  fast_deploy: {range_s: [0.50, 0.90]}
+  broad_arrival: {range_s: [0.90, 1.70]}
+
+curricula:
+  short_focus:
+    human_name: 半秒为主、仍保留更短压力和少量长来球
+    weights: {late_stress: 0.10, exact_half_second: 0.45, fast_deploy: 0.40, broad_arrival: 0.05}
+  ultra_half:
+    human_name: 极强半秒点质量
+    weights: {late_stress: 0.05, exact_half_second: 0.70, fast_deploy: 0.20, broad_arrival: 0.05}
+  feasible:
+    human_name: 更多可完成的快速与长准备样本
+    weights: {late_stress: 0.05, exact_half_second: 0.10, fast_deploy: 0.45, broad_arrival: 0.40}
+  legacy_focus_1:
+    human_name: 已启动旧 focus 课程，仅用于解释当前 run
+    weights: {late_stress: 0.25, exact_half_second: 0.40, fast_deploy: 0.25, broad_arrival: 0.10}
+  legacy_balanced:
+    human_name: 已启动旧 balanced 课程，仅用于解释当前 run
+    weights: {late_stress: 0.15, exact_half_second: 0.20, fast_deploy: 0.30, broad_arrival: 0.35}
+
+cells:
+  - id: control
+    human_name: 短准备课程对照
+    question: 只改变准备时间分布，model_5700 能否开始完成半秒击球？
+    curriculum: short_focus
+    overrides: {}
+
+  - id: focus_qdot0
+    human_name: 短准备课程并关闭关节速度铰链惩罚
+    question: 关节速度铰链惩罚是否是半秒动作来不及的主要瓶颈？
+    curriculum: short_focus
+    overrides:
+      task.rewards.joint_velocity_limit_hinge_weight: 0.0
+
+  - id: ultra_half
+    human_name: 七成题严格给半秒
+    question: 更密集的半秒样本是否比普通短准备课程学得更快？
+    curriculum: ultra_half
+    overrides: {}
+
+  - id: feasible
+    human_name: 先用较多可完成样本搭学习台阶
+    question: 先提高快速与长准备样本的完成率，能否再迁移到半秒？
+    curriculum: feasible
+    overrides: {}
+
+  - id: actionrate0
+    human_name: 关闭动作变化率惩罚
+    question: action-rate 平滑惩罚是否阻止策略快速起拍？
+    curriculum: short_focus
+    overrides:
+      task.rewards.action_rate_weight: 0.0
+
+  - id: window_mimic0
+    human_name: 触球窗内老师动作完全静音
+    question: 临近触球时，老师模仿是否与实时球拍目标冲突？
+    curriculum: short_focus
+    overrides:
+      task.rewards.motion_scale_in_window: 0.0
+
+  - id: global_mimic_half
+    human_name: 全程老师动作降到一半
+    question: 把模仿降为较软先验，能否让实时球拍目标主导？
+    curriculum: short_focus
+    overrides:
+      task.rewards.motion_scale: 0.5
+
+  - id: position_heavy
+    human_name: 固定总预算下更重视拍心到位
+    question: 先让拍心赶到球附近，是否比同时追拍速和拍面更容易起步？
+    curriculum: short_focus
+    overrides:
+      task.rewards.racket_position_weight: 17.0
+      task.rewards.racket_velocity_weight: 7.0
+      task.rewards.racket_normal_weight: 5.0
+
+  - id: strong_ready
+    human_name: 加强脚姿态和击球前直立稳定
+    question: 更强准备姿态约束能否在加速起拍时守住平衡？
+    curriculum: short_focus
+    overrides:
+      task.rewards.foot_orientation_weight: -0.6
+      task.rewards.prestrike_upright_weight: -2.0
+
+  - id: free_arm
+    human_name: 非击球臂不再模仿老师
+    question: 放开非击球臂后，它能否更专注于快速动作中的平衡控制？
+    curriculum: short_focus
+    overrides:
+      task.rewards.free_non_striking_arm_mimic: true
+
+  - id: ready_free
+    human_name: 强准备姿态加自由非击球臂
+    question: 准备姿态奖励与自由非击球臂组合是否优于各自单独使用？
+    curriculum: short_focus
+    overrides:
+      task.rewards.foot_orientation_weight: -0.6
+      task.rewards.prestrike_upright_weight: -2.0
+      task.rewards.free_non_striking_arm_mimic: true
+
+  - id: full_combo
+    human_name: 半秒冲刺完整组合
+    question: 把速度、目标主导和准备平衡一起放开，能否最快得到可演示候选？
+    curriculum: short_focus
+    overrides:
+      task.rewards.joint_velocity_limit_hinge_weight: 0.0
+      task.rewards.action_rate_weight: 0.0
+      task.rewards.motion_scale: 0.5
+      task.rewards.motion_scale_in_window: 0.0
+      task.rewards.racket_position_weight: 17.0
+      task.rewards.racket_velocity_weight: 7.0
+      task.rewards.racket_normal_weight: 5.0
+      task.rewards.foot_orientation_weight: -0.6
+      task.rewards.prestrike_upright_weight: -2.0
+      task.rewards.free_non_striking_arm_mimic: true
+
+  - id: full_combo_ultra
+    human_name: 完整组合配极强半秒课程
+    question: 完整组合与七成严格半秒样本之间是否存在增益或冲突？
+    curriculum: ultra_half
+    overrides:
+      task.rewards.joint_velocity_limit_hinge_weight: 0.0
+      task.rewards.action_rate_weight: 0.0
+      task.rewards.motion_scale: 0.5
+      task.rewards.motion_scale_in_window: 0.0
+      task.rewards.racket_position_weight: 17.0
+      task.rewards.racket_velocity_weight: 7.0
+      task.rewards.racket_normal_weight: 5.0
+      task.rewards.foot_orientation_weight: -0.6
+      task.rewards.prestrike_upright_weight: -2.0
+      task.rewards.free_non_striking_arm_mimic: true
+
+  - id: full_combo_feasible
+    human_name: 完整组合配可完成课程
+    question: 完整组合是否需要更多可完成样本先搭出台阶？
+    curriculum: feasible
+    overrides:
+      task.rewards.joint_velocity_limit_hinge_weight: 0.0
+      task.rewards.action_rate_weight: 0.0
+      task.rewards.motion_scale: 0.5
+      task.rewards.motion_scale_in_window: 0.0
+      task.rewards.racket_position_weight: 17.0
+      task.rewards.racket_velocity_weight: 7.0
+      task.rewards.racket_normal_weight: 5.0
+      task.rewards.foot_orientation_weight: -0.6
+      task.rewards.prestrike_upright_weight: -2.0
+      task.rewards.free_non_striking_arm_mimic: true
+
+  - id: mimic075_window0
+    human_name: 全程保留四分之三老师、触球窗静音
+    question: 触球窗外保留更多老师约束，能否兼顾稳定和实时目标？
+    curriculum: short_focus
+    overrides:
+      task.rewards.joint_velocity_limit_hinge_weight: 0.0
+      task.rewards.motion_scale: 0.75
+      task.rewards.motion_scale_in_window: 0.0
+
+  - id: velocity_heavy
+    human_name: 固定总预算下更重视目标拍速
+    question: 半秒来球的主要瓶颈是否是拍速，而不是拍心到位？
+    curriculum: short_focus
+    overrides:
+      task.rewards.joint_velocity_limit_hinge_weight: 0.0
+      task.rewards.racket_position_weight: 7.0
+      task.rewards.racket_velocity_weight: 17.0
+      task.rewards.racket_normal_weight: 5.0
+
+  - id: position_ready
+    human_name: 拍心到位配强准备姿态
+    question: 拍心优先与更稳的准备姿态结合，是否比各自单用更有效？
+    curriculum: short_focus
+    overrides:
+      task.rewards.joint_velocity_limit_hinge_weight: 0.0
+      task.rewards.racket_position_weight: 17.0
+      task.rewards.racket_velocity_weight: 7.0
+      task.rewards.racket_normal_weight: 5.0
+      task.rewards.foot_orientation_weight: -0.6
+      task.rewards.prestrike_upright_weight: -2.0
+
+  - id: actionrate_half
+    human_name: 动作变化率惩罚减半
+    question: 完全关闭平滑惩罚是否过猛，减半是否提供更好的速度稳定折中？
+    curriculum: short_focus
+    overrides:
+      task.rewards.joint_velocity_limit_hinge_weight: 0.0
+      task.rewards.action_rate_weight: -0.05
+
+actual_runs:
+  - run_name: hs_a_control_seed3
+    pod: pod2
+    role: 旧 balanced 对照，不等同于本表 short_focus control
+    closest_cell: control
+    curriculum: legacy_balanced
+    qdot_hinge_weight: -5.0
+    state: accepted_running
+  - run_name: hs_b2_deadline_focus_seed3
+    pod: pod2
+    role: 旧 focus 下的 qdot -5 匹配对照
+    closest_cell: focus_qdot0
+    curriculum: legacy_focus_1
+    qdot_hinge_weight: -5.0
+    state: accepted_running
+  - run_name: hs_c2_deadline_qdot0_seed3
+    pod: pod2
+    role: 旧 focus 下的 qdot 0 treatment
+    closest_cell: focus_qdot0
+    curriculum: legacy_focus_1
+    qdot_hinge_weight: 0.0
+    state: accepted_running
+  - run_name: hs_d2_ultra_half_qdot0_seed3
+    pod: pod2
+    role: ultra_half 课程格
+    closest_cell: ultra_half
+    curriculum: ultra_half
+    qdot_hinge_weight: 0.0
+    state: accepted_running
+  - run_name: hs_e_feasible_qdot0_seed3
+    pod: pod2
+    role: feasible 课程格
+    closest_cell: feasible
+    curriculum: feasible
+    qdot_hinge_weight: 0.0
+    state: accepted_running
+  - run_name: hs_f_focus_window_mimic0_seed3
+    pod: pod2
+    role: short_focus 下触球窗老师静音格
+    closest_cell: window_mimic0
+    curriculum: short_focus
+    qdot_hinge_weight: 0.0
+    state: accepted_running
+  - run_name: hs_g2_focus_actionrate0_seed3
+    pod: pod2
+    role: short_focus 下关闭动作变化率惩罚
+    closest_cell: actionrate0
+    curriculum: short_focus
+    qdot_hinge_weight: 0.0
+    state: accepted_running
+  - run_name: hs_h4_focus_qdot0_globalmimic05_seed3
+    pod: pod2
+    role: short_focus 下全局老师模仿减半
+    closest_cell: global_mimic_half
+    curriculum: short_focus
+    qdot_hinge_weight: 0.0
+    state: accepted_running
+  - run_name: hs_i3_focus_qdot0_pos17_7_5_seed3
+    pod: pod2
+    role: short_focus 下拍心/拍速/拍面为 17/7/5
+    closest_cell: position_heavy
+    curriculum: short_focus
+    qdot_hinge_weight: 0.0
+    state: accepted_running
+  - run_name: hs_o2_feasible_fullcombo_seed3
+    pod: pod2
+    role: feasible 课程与完整组合交互
+    closest_cell: full_combo_feasible
+    curriculum: feasible
+    qdot_hinge_weight: 0.0
+    state: accepted_running
+  - run_name: hs_q2_focus_qdot0_mimic075_window0_seed3
+    pod: pod2
+    role: short_focus 下全局老师 0.75 且触球窗静音
+    closest_cell: mimic075_window0
+    curriculum: short_focus
+    qdot_hinge_weight: 0.0
+    state: accepted_running
+  - run_name: hs_r2_focus_qdot0_vel7_17_5_seed3
+    pod: pod2
+    role: short_focus 下拍心/拍速/拍面为 7/17/5
+    closest_cell: velocity_heavy
+    curriculum: short_focus
+    qdot_hinge_weight: 0.0
+    state: accepted_running
+  - run_name: hs_p1_j2_focus_qdot0_ready2x_seed3
+    pod: pod1
+    role: short_focus 下加强准备姿态
+    closest_cell: strong_ready
+    curriculum: short_focus
+    qdot_hinge_weight: 0.0
+    state: accepted_running
+  - run_name: hs_p1_k2_focus_qdot0_freearm_seed3
+    pod: pod1
+    role: short_focus 下释放非击球臂模仿
+    closest_cell: free_arm
+    curriculum: short_focus
+    qdot_hinge_weight: 0.0
+    state: accepted_running
+  - run_name: hs_p1_l2_fullcombo_seed3
+    pod: pod1
+    role: short_focus 完整组合
+    closest_cell: full_combo
+    curriculum: short_focus
+    qdot_hinge_weight: 0.0
+    state: accepted_running
+  - run_name: hs_p1_m2_focus_qdot0_ready_free_seed3
+    pod: pod1
+    role: short_focus 下加强准备姿态并释放非击球臂
+    closest_cell: ready_free
+    curriculum: short_focus
+    qdot_hinge_weight: 0.0
+    state: accepted_running
+  - run_name: hs_p1_n2_ultra_fullcombo_seed3
+    pod: pod1
+    role: ultra_half 课程与完整组合交互
+    closest_cell: full_combo_ultra
+    curriculum: ultra_half
+    qdot_hinge_weight: 0.0
+    state: accepted_running
+  - run_name: hs_p1_p2_focus_qdot0_actionrate_half_seed3
+    pod: pod1
+    role: short_focus 下动作变化率惩罚减半
+    closest_cell: actionrate_half
+    curriculum: short_focus
+    qdot_hinge_weight: 0.0
+    state: accepted_running
+
+rejected_or_stopped_attempts:
+  - attempts: [B, C]
+    reason: 参数前缀替换误伤相邻权重，Hydra 配置解析失败
+    stage: before_first_iteration
+  - attempts: [D]
+    reason: 多个 Kit 同时导入时 importer rc134
+    stage: before_first_iteration
+  - attempts: [G]
+    reason: 生成脚本时把参数追加到 shebang，脚本未启动训练
+    stage: before_first_iteration
+  - attempts: [H, H3]
+    reason: H 使用无效配置键；H3 使用无效 CUDA device
+    stage: before_first_iteration
+  - attempts: [I2]
+    reason: importer 挂起；核对精确进程组后只停止该次尝试
+    stage: importer
+  - attempts: [O3]
+    reason: 重复发射；在第一个 iteration 前只停止重复实例
+    stage: before_first_iteration
+  - attempts: [S2]
+    reason: importer malloc 失败
+    stage: before_first_iteration
+  - attempts: [S3]
+    reason: importer 挂起；核对精确进程组后只停止该次尝试
+    stage: importer
+  - attempts: [S4]
+    reason: importer 挂起；核对精确进程组后只停止该次尝试
+    stage: importer
+
+pod1_capacity:
+  accepted_running: 6
+  empty_slots: 6
+  next_launch_blocker: preconverted USD source
+  note: S3/S4 均已 exact stopped/rejected，不是 booting 或 running
+
+readout:
+  checkpoints_after_parent: [100, 200, 500, 1000, 2000, 4000]
+  early_readout: >-
+    先看是否自然续训、是否摔倒和是否出现击球机会；真实击球机会不足时，零回台不能判失败。
+  ranking_readout: >-
+    同一个 parent 内比较半秒题的触球、合法回台、摔倒、准备姿态和平衡；不为弱格复制 seed。

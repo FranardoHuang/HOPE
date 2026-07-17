@@ -453,6 +453,32 @@ def test_exact_behavior_completion_uses_paired_closeouts_not_phase_shifted_event
     assert derived["pre_strike_physical_fall_rate"] == pytest.approx(0.0)
 
 
+def test_exact_behavior_derives_each_initial_tts_bucket_from_integer_counts(monkeypatch):
+    contract = _load_contract_module()
+    runner_module = _load_runner_module(monkeypatch, contract)
+    counters = {
+        "planner_initial_tts_lt_0p5_swing_outcome_count": 4,
+        "planner_initial_tts_lt_0p5_swing_completion_count": 1,
+        "planner_initial_tts_lt_0p5_strike_opportunity_count": 2,
+        "planner_initial_tts_lt_0p5_virtual_capture_count": 1,
+        "planner_initial_tts_lt_0p5_virtual_legal_return_count": 1,
+        "planner_initial_tts_eq_0p5_swing_outcome_count": 2,
+        "planner_initial_tts_eq_0p5_swing_completion_count": 2,
+        "planner_initial_tts_eq_0p5_strike_opportunity_count": 2,
+        "planner_initial_tts_eq_0p5_virtual_capture_count": 2,
+        "planner_initial_tts_eq_0p5_virtual_legal_return_count": 1,
+    }
+    derived = runner_module.exact_behavior_decision_values(counters)
+    assert derived["planner_initial_tts_lt_0p5_swing_completion_rate"] == pytest.approx(0.25)
+    assert derived["planner_initial_tts_lt_0p5_virtual_capture_per_strike"] == pytest.approx(0.50)
+    assert derived["planner_initial_tts_lt_0p5_virtual_legal_return_per_strike"] == pytest.approx(0.50)
+    assert derived["planner_initial_tts_eq_0p5_swing_completion_rate"] == pytest.approx(1.0)
+    assert derived["planner_initial_tts_eq_0p5_virtual_capture_per_strike"] == pytest.approx(1.0)
+    assert derived["planner_initial_tts_eq_0p5_virtual_legal_return_per_strike"] == pytest.approx(0.5)
+    assert derived["planner_initial_tts_gt_0p5_le_0p9_swing_completion_rate"] is None
+    assert derived["planner_initial_tts_gt_0p9_virtual_legal_return_per_strike"] is None
+
+
 def test_exact_behavior_receipt_is_not_disabled_with_dashboard_logging(monkeypatch, capsys):
     contract = _load_contract_module()
     runner_module = _load_runner_module(monkeypatch, contract)

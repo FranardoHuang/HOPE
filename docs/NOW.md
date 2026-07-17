@@ -1,6 +1,6 @@
 # NOW — 当前训练流程、课程阶段与下一步
 
-最近复核：2026-07-17 CST。本页说明现在到底在训什么、整套训练怎样连起来、每个课程阶段在解决
+最近复核：2026-07-18 CST。本页说明现在到底在训什么、整套训练怎样连起来、每个课程阶段在解决
 什么问题，以及下一项工作为什么值得做。实验过程放在[实验登记册](experiments/README.md)，
 复现命令和 Gate 结果放在对应 [Gate](gates/) 与操作文档。
 
@@ -51,19 +51,27 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   ledger 的 ready tilt/base speed/foot contact/foot slip 四项分母全部为零，预注册组合器禁止填补缺失值，
   因而没有发布 portfolio-stop receipt。旧臂多数已经自然终档；这一批不能再宣称排出胜者，也不能靠
   事后删指标制造胜者。后续新池必须先在 full-scene probe 证明 ready 分母非零，才允许占用长训槽。
-  自动 rolling 任务在本次 task-revision/TOPP 关键修复期间保持暂停。exact-0.5 K100 v1 因缺 bank 在
-  输入门失败并永久冻结；资产恢复版 v2 又在首题前抓到 native-clock 命令安装晚于 retiming activation 的
-  顺序错误。其日志 `f8c3be8b…a9e28`、无 scorecard，所以是“0 题执行/能力未测”，不是 0/100；v2
-  随后自然结束为 `failed_no_retry`，terminal=`2d3a9c7d…4894d`、guardian=`D0`；历史
-  supervisor/evaluator/guardian 和旧 cgroup 均 absent，先前 stop 尝试没有发出 signal，也不得重放。
-  v3 已改为先安装 native command、验证零速第0帧，再激活 retiming，但唯一 launch 被旧日志门假拒绝：
-  raw SHA 没漂移，只因同一句在 traceback 出现两次；v3 零 namespace 且已冻结。v4 仅改为 raw SHA、字节数
-  与最后异常行精确匹配，但真实类名带模块前缀，v4 也在零 namespace 阶段假拒绝并冻结。v5 彻底删除
-  traceback 文本解析，只保留 exact raw SHA+bytes；合并专项 `89 passed, 1 skipped`。最近只读快照：Pod2 为 0 trainer；Pod1 有 Yikang trainer
-  正常推进，Codex trainer 停在 model3600 约10小时，另有旧 BankExam evaluator 无 timeout 地占用三卡。
-  清理与新启动都只可精确管理已绑定 PID/PGID，不得碰 Yikang。v5 尚未唯一执行，终档仍需 vendor
-  MuJoCo 同题。详见
-  [0.5 秒卷宗](experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md)。
+  自动 rolling 任务在本次直接训练冲刺期间保持暂停。0.5 秒 K100 已废弃版本化
+  launch/receipt 和人工 SHA 对拍，改为直接 evaluator。修掉 planner 两端半配置和
+  MotionLoader body-velocity 副本写入后，Pod2 对 `model_5700` 完成 100/100 题：正反手
+  触球、回台都为 `0/50`，总计物理摔倒 `0/100`，全部因半秒 deadline guard 结束。
+  这个 checkpoint 已被严格半秒要求否定；正手最新完整卷的 hit/return 仍为 `0/50`。
+
+  2026-07-18 03:48 CST 运行快照：Pod2 已有 `12/12` 条越过首训练迭代的作业
+  （accepted），三卡为 `4/4/4`；Pod1 有 6 条 accepted、6 个空槽。Pod1 的旧 Codex
+  trainer/BankExam hang 已只按它们各自的精确进程组清理；后续短准备训练
+  `S3`/`S4` 又卡在动态 URDF importer，两条也都已精确停止，不是第 7 条正在训练。
+  最小源码修复改为由 `HOPE_AGIBOT_A3_USD_PATH` 直接构造 `UsdFileCfg`，完全绕过这条
+  动态 URDF importer 路径；它尚待 Pod1 真实越过首训练迭代，所以 G05 仍为
+  `Partial`。当前 live 的 18 条仍是旧 source：同一颗球的 target/TTS 实时 revision 已激活，
+  但旧日志没有“初始准备时间（TTS）× outcome”分桶，也不能事后补出。本分支的
+  新 source 已实现四个初始 TTS 桶（`<0.5`、`=0.5`、`(0.5,0.9]`、`>0.9 s`）的整数
+  机会、完成、触球与合法回台计数；后续绕过 importer 的 cached-USD 新作业会在训练时
+  直接记录。每条到共同父模型后 `+100` 才做第一次公平早判，更早只查启动、
+  稳定和机制是否激活；旧 18 臂不能冒充已知道哪个 TTS 区间已学会回球。
+  十二种单 seed 配方、判读边界和实际 run 映射见
+  [半秒冲刺卷宗](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)；严格半秒负结果见
+  [0.5 秒卷宗](experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md)。Isaac 结果仍需 vendor MuJoCo 同题。
 
 - **300 Hz 动捕不会再触发 300 Hz planner solve：** 正式 arena、schema-4 与 Gate3 profile 显式绑定
   latest-only worker。每个合格样本都进入 estimator 并替换唯一 pending snapshot；Stage 2/3 最多 50 Hz，

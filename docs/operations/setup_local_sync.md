@@ -18,6 +18,7 @@ Small tracked runtime assets, such as the Purdue PACE table/net USD visual overl
 | `external_repos/TTRL-ICRA2026/` | Auto-synced local TTRL reference clone | Public but may be access-gated: [purdue-tracelab/TTRL-ICRA2026](https://github.com/purdue-tracelab/TTRL-ICRA2026.git) | G05, G08 |
 | `external_repos/IsaacLab/` | Local Isaac Lab source checkout used by `setup_train_env.sh` when a pre-provisioned Isaac Lab checkout is absent | Public: [isaac-sim/IsaacLab](https://github.com/isaac-sim/IsaacLab.git), observed tag `v2.1.0` / commit `21f7136` | G05 |
 | `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` | Package-local Isaac A3 URDF, meshes, and config; ignored by upstream `**/assets/` rule | Normally rebuild from tracked `agi/URDF/A3T2.5-URDF-std-pingpang/`. For C3/D3 K100 v2, do **not** rebuild or hand-copy: the attestor inventories the exact training checkout source under `/workspace/codexschema/nohope_signed_face_c3d3_l1_4467d79/.../assets/agibot_a3` and hydrates a fresh eval checkout per [v2 operation](run_phase1_signed_face_c3d3_k100_v2.md) | G04, G05, G06 |
+| Stable A3 pre-converted runtime directory containing `model.usd` and `configuration/` | Optional Isaac robot-scene cache selected by `HOPE_AGIBOT_A3_USD_PATH`; it avoids converting the same robot description again in every training process | Copy the complete directory produced by one successful conversion to an ignored, stable runtime path; do not commit it | G05 training sprint |
 | `hope_training/GMR/` | Motion retargeting (SMPL-X -> robot) clone | Public: [YanjieZe/GMR](https://github.com/YanjieZe/GMR.git) (observed pin `bb1bbe4`) | G05 motion references |
 | `hope_training/GVHMR/` | Video -> SMPL-X motion recovery clone | Public: [zju3dv/GVHMR](https://github.com/zju3dv/GVHMR.git) (observed pin `6ec3ca3`) | G05 motion references |
 | GMR body-models dir (`SMPLX_NEUTRAL/MALE/FEMALE.pkl`) | SMPL-X body models for retargeting | License-gated: [smpl-x.is.tue.mpg.de](https://smpl-x.is.tue.mpg.de) | G05 motion references |
@@ -171,6 +172,29 @@ above. The conditional and V1+V2/base-decel queue rows bind the same accepted tr
 It verifies all 46 accepted files plus the 43 unique URDF-referenced meshes, publishes with
 no-replace semantics, and writes a source-external receipt consumed before any science claim. A
 timeout or preserved staging directory is not permission to replay the copy.
+
+### Optional: reuse one successful A3 conversion during a training sprint
+
+`HOPE_AGIBOT_A3_USD_PATH` may point directly to `model.usd` from a successful Isaac conversion.
+That file depends on sibling files under `configuration/`, so restore the **entire conversion
+directory**; copying `model.usd` alone is incomplete. Keep this generated runtime cache outside Git
+at a stable path shared by the training processes:
+
+```bash
+SOURCE=/path/to/one/successful/a3_conversion
+DEST=/workspace/codexschema/runtime_assets/a3_preconverted
+
+test -f "$SOURCE/model.usd"
+test -d "$SOURCE/configuration"
+mkdir -p "$DEST"
+cp -a "$SOURCE/." "$DEST/"
+export HOPE_AGIBOT_A3_USD_PATH="$DEST/model.usd"
+```
+
+With the variable set, training loads the pre-converted scene and avoids starting a separate robot
+converter in every process. If the variable is unset or empty, the existing robot-description
+importer remains the fallback. This cache is an ignored runtime optimization, not a Git asset; this
+simple restore path does not require a hash or receipt.
 
 ### Signed-face epoch-1 v6 and superseded v6r1 private evidence
 

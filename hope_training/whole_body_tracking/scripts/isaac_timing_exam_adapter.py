@@ -55,6 +55,11 @@ def apply_timing_native_clock_eval_profile(env_cfg: Any) -> dict[str, Any]:
     motion = getattr(commands, "motion", None)
     if motion is None:
         raise IsaacBankExamError("timing native-clock profile requires commands.motion")
+    racket_target = getattr(commands, "racket_target", None)
+    if racket_target is None:
+        raise IsaacBankExamError(
+            "timing native-clock profile requires commands.racket_target"
+        )
     speed_range = tuple(
         float(value) for value in getattr(motion, "speed_scale_range", ())
     )
@@ -70,14 +75,32 @@ def apply_timing_native_clock_eval_profile(env_cfg: Any) -> dict[str, Any]:
         )
     if not hasattr(motion, "planner_revision_enabled"):
         raise IsaacBankExamError(
-            "timing native-clock profile requires explicit planner_revision_enabled"
+            "timing native-clock profile requires explicit "
+            "commands.motion.planner_revision_enabled"
         )
-    saved_planner_revision_enabled = bool(motion.planner_revision_enabled)
+    if not hasattr(racket_target, "planner_revision_enabled"):
+        raise IsaacBankExamError(
+            "timing native-clock profile requires explicit "
+            "commands.racket_target.planner_revision_enabled"
+        )
+    saved_motion_planner_revision_enabled = bool(motion.planner_revision_enabled)
+    saved_racket_target_planner_revision_enabled = bool(
+        racket_target.planner_revision_enabled
+    )
     motion.planner_revision_enabled = False
+    racket_target.planner_revision_enabled = False
     profile = {
         "schema": "hope.isaac-timing-native-clock-eval-profile.v1",
-        "saved_planner_revision_enabled": saved_planner_revision_enabled,
+        "saved_planner_revision_enabled": saved_motion_planner_revision_enabled,
         "runtime_planner_revision_enabled": False,
+        "saved_motion_planner_revision_enabled": (
+            saved_motion_planner_revision_enabled
+        ),
+        "saved_racket_target_planner_revision_enabled": (
+            saved_racket_target_planner_revision_enabled
+        ),
+        "runtime_motion_planner_revision_enabled": False,
+        "runtime_racket_target_planner_revision_enabled": False,
         "speed_scale_range": [1.0, 1.0],
         "speed_scale_per_clip": None,
         "event_timing_mode": "disabled",
@@ -667,18 +690,74 @@ def install_zero_velocity_frame0_reference(
     ):
         raise IsaacBankExamError("frame-0 reference install requires both clocks at seg_start")
 
-    velocity_fields = ("joint_vel", "body_lin_vel_w", "body_ang_vel_w")
     before_max: dict[str, float] = {}
     unique_starts = torch_module.unique(starts)
-    for name in velocity_fields:
-        value = getattr(motion_cmd.motion, name, None)
-        if value is None or not hasattr(value, "shape") or value.shape[0] <= int(unique_starts.max()):
-            raise IsaacBankExamError(f"frame-0 reference lacks motion.{name}")
-        selected = value[unique_starts]
+    maximum_start = int(unique_starts.max())
+
+    joint_vel = getattr(motion_cmd.motion, "joint_vel", None)
+    if (
+        joint_vel is None
+        or not hasattr(joint_vel, "shape")
+        or joint_vel.shape[0] <= maximum_start
+    ):
+        raise IsaacBankExamError("frame-0 reference lacks motion.joint_vel")
+    selected_joint_vel = joint_vel[unique_starts]
+    if not bool(torch_module.isfinite(selected_joint_vel).all()):
+        raise IsaacBankExamError("frame-0 motion.joint_vel contains NaN/Inf")
+    before_max["joint_vel"] = (
+        float(selected_joint_vel.abs().max()) if selected_joint_vel.numel() else 0.0
+    )
+    joint_vel[unique_starts] = 0.0
+
+    # ``MotionLoader.body_*_vel_w`` selects ``_body_indexes`` with advanced
+    # indexing.  The returned tensor is therefore a copy, not a writable view.
+    # Mutate the loader's backing tensors explicitly, but only at the two
+    # segment-start rows and only for the configured body columns consumed by
+    # ``MotionCommand``.  Non-selected bodies and all later frames stay intact.
+    body_indexes_raw = getattr(motion_cmd.motion, "_body_indexes", None)
+    if body_indexes_raw is None:
+        raise IsaacBankExamError("frame-0 reference lacks motion._body_indexes")
+    try:
+        body_indexes = [
+            int(value)
+            for value in (
+                body_indexes_raw.detach().cpu().tolist()
+                if hasattr(body_indexes_raw, "detach")
+                else list(body_indexes_raw)
+            )
+        ]
+    except (TypeError, ValueError) as exc:
+        raise IsaacBankExamError(
+            "frame-0 reference has invalid motion._body_indexes"
+        ) from exc
+    if not body_indexes or len(set(body_indexes)) != len(body_indexes):
+        raise IsaacBankExamError(
+            "frame-0 reference motion._body_indexes must be non-empty and unique"
+        )
+
+    start_rows = [
+        int(value) for value in unique_starts.detach().cpu().tolist()
+    ]
+    for name in ("body_lin_vel_w", "body_ang_vel_w"):
+        selected_value = getattr(motion_cmd.motion, name, None)
+        backing = getattr(motion_cmd.motion, f"_{name}", None)
+        if (
+            selected_value is None
+            or backing is None
+            or not hasattr(selected_value, "shape")
+            or not hasattr(backing, "shape")
+            or selected_value.shape[0] <= maximum_start
+            or backing.shape[0] <= maximum_start
+            or len(backing.shape) < 2
+            or any(index < 0 or index >= backing.shape[1] for index in body_indexes)
+        ):
+            raise IsaacBankExamError(f"frame-0 reference lacks motion.{name} backing")
+        selected = selected_value[unique_starts]
         if not bool(torch_module.isfinite(selected).all()):
             raise IsaacBankExamError(f"frame-0 motion.{name} contains NaN/Inf")
         before_max[name] = float(selected.abs().max()) if selected.numel() else 0.0
-        value[unique_starts] = 0.0
+        for start_row in start_rows:
+            backing[start_row, body_indexes] = 0.0
 
     reference_velocity_fields = {
         "joint_vel": motion_cmd.joint_vel[ids],
@@ -701,7 +780,7 @@ def install_zero_velocity_frame0_reference(
     return {
         "schema": "hope.isaac-timing-frame0-reference.v1",
         "initial_state_id": INITIAL_STATE_ID,
-        "segment_start_rows": [int(value) for value in unique_starts.detach().cpu().tolist()],
+        "segment_start_rows": start_rows,
         "source_velocity_max_abs_before_evaluator_override": before_max,
         "live_reference_velocity_max_abs_after_override": after_max,
         "reference_pose_is_exact_motion_frame0": True,

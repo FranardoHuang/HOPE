@@ -282,6 +282,22 @@ class FakeMotionCommand(SimpleNamespace):
         return FakeTensor(value.value * self.speed_scale.value[:, None, None])
 
 
+class FakeMotionLoader(SimpleNamespace):
+    """Mirror MotionLoader's advanced-index properties returning copies."""
+
+    @property
+    def body_lin_vel_w(self):
+        return FakeTensor(
+            self._body_lin_vel_w.value[:, self._body_indexes].copy()
+        )
+
+    @property
+    def body_ang_vel_w(self):
+        return FakeTensor(
+            self._body_ang_vel_w.value[:, self._body_indexes].copy()
+        )
+
+
 def test_native_installer_then_r14_rider_consumes_per_row_time_law(tmp_path: Path):
     paper, _, _, _ = _fixture(tmp_path)
     clips = np.asarray([index % 2 for index in range(100)], dtype=np.int64)
@@ -297,12 +313,13 @@ def test_native_installer_then_r14_rider_consumes_per_row_time_law(tmp_path: Pat
         planner_revision_enabled=False,
         retiming_active=False,
         _speed_per_clip=None,
-        motion=SimpleNamespace(
+        motion=FakeMotionLoader(
             seg_start=starts_table,
             joint_pos=FakeTensor(segment_joint_pos),
             joint_vel=FakeTensor(segment_joint_vel),
-            body_lin_vel_w=FakeTensor(segment_body_lin_vel),
-            body_ang_vel_w=FakeTensor(segment_body_ang_vel),
+            _body_lin_vel_w=FakeTensor(segment_body_lin_vel),
+            _body_ang_vel_w=FakeTensor(segment_body_ang_vel),
+            _body_indexes=[1],
         ),
         clip_id=FakeTensor(clips.copy()),
         time_steps=FakeTensor(starts.value.copy()),
@@ -325,6 +342,25 @@ def test_native_installer_then_r14_rider_consumes_per_row_time_law(tmp_path: Pat
         "body_lin_vel_w": 0.0,
         "body_ang_vel_w": 0.0,
     }
+    for start in (0, 141):
+        np.testing.assert_array_equal(
+            motion.motion._body_lin_vel_w.value[start, 1], np.zeros(3)
+        )
+        np.testing.assert_array_equal(
+            motion.motion._body_ang_vel_w.value[start, 1], np.zeros(3)
+        )
+        np.testing.assert_array_equal(
+            motion.motion._body_lin_vel_w.value[start, 0], np.ones(3)
+        )
+        np.testing.assert_array_equal(
+            motion.motion._body_ang_vel_w.value[start, 0], np.ones(3)
+        )
+    np.testing.assert_array_equal(
+        motion.motion._body_lin_vel_w.value[1, 1], np.ones(3)
+    )
+    np.testing.assert_array_equal(
+        motion.motion._body_ang_vel_w.value[1, 1], np.ones(3)
+    )
     profile = A.activate_runtime_retiming(
         motion,
         env_ids=np.arange(100),
@@ -362,12 +398,13 @@ def test_retiming_cannot_activate_before_zero_velocity_frame0_install(tmp_path: 
         planner_revision_enabled=False,
         retiming_active=False,
         _speed_per_clip=None,
-        motion=SimpleNamespace(
+        motion=FakeMotionLoader(
             seg_start=starts_table,
             joint_pos=FakeTensor(np.zeros((276, 3), dtype=np.float32)),
             joint_vel=FakeTensor(np.ones((276, 3), dtype=np.float32)),
-            body_lin_vel_w=FakeTensor(np.ones((276, 2, 3), dtype=np.float32)),
-            body_ang_vel_w=FakeTensor(np.ones((276, 2, 3), dtype=np.float32)),
+            _body_lin_vel_w=FakeTensor(np.ones((276, 2, 3), dtype=np.float32)),
+            _body_ang_vel_w=FakeTensor(np.ones((276, 2, 3), dtype=np.float32)),
+            _body_indexes=[0, 1],
         ),
         clip_id=FakeTensor(clips.copy()),
         time_steps=FakeTensor(starts.value.copy()),
@@ -398,15 +435,73 @@ def test_saved_planner_clock_is_disabled_before_gym_make_and_unknown_owner_rejec
         event_timing_mode="disabled",
         planner_revision_enabled=True,
     )
-    env_cfg = SimpleNamespace(commands=SimpleNamespace(motion=motion))
+    racket_target = SimpleNamespace(planner_revision_enabled=True)
+    env_cfg = SimpleNamespace(
+        commands=SimpleNamespace(motion=motion, racket_target=racket_target)
+    )
     profile = A.apply_timing_native_clock_eval_profile(env_cfg)
     assert profile["saved_planner_revision_enabled"] is True
     assert profile["runtime_planner_revision_enabled"] is False
+    assert profile["saved_motion_planner_revision_enabled"] is True
+    assert profile["saved_racket_target_planner_revision_enabled"] is True
+    assert profile["runtime_motion_planner_revision_enabled"] is False
+    assert profile["runtime_racket_target_planner_revision_enabled"] is False
     assert motion.planner_revision_enabled is False
+    assert racket_target.planner_revision_enabled is False
 
     motion.event_timing_mode = "post_strike_t1"
     with pytest.raises(A.IsaacBankExamError, match="event-timing clock owner"):
         A.apply_timing_native_clock_eval_profile(env_cfg)
+
+
+@pytest.mark.parametrize("motion_enabled,racket_enabled", [(True, False), (False, True)])
+def test_saved_asymmetric_planner_revision_state_is_normalized_before_gym_make(
+    motion_enabled: bool,
+    racket_enabled: bool,
+):
+    motion = SimpleNamespace(
+        speed_scale_range=(1.0, 1.0),
+        speed_scale_per_clip=None,
+        event_timing_mode="disabled",
+        planner_revision_enabled=motion_enabled,
+    )
+    racket_target = SimpleNamespace(planner_revision_enabled=racket_enabled)
+    env_cfg = SimpleNamespace(
+        commands=SimpleNamespace(motion=motion, racket_target=racket_target)
+    )
+
+    profile = A.apply_timing_native_clock_eval_profile(env_cfg)
+
+    assert profile["saved_motion_planner_revision_enabled"] is motion_enabled
+    assert profile["saved_racket_target_planner_revision_enabled"] is racket_enabled
+    assert motion.planner_revision_enabled is False
+    assert racket_target.planner_revision_enabled is False
+
+
+@pytest.mark.parametrize("missing", ["motion", "racket_target"])
+def test_missing_planner_revision_field_fails_without_partial_mutation(missing: str):
+    motion = SimpleNamespace(
+        speed_scale_range=(1.0, 1.0),
+        speed_scale_per_clip=None,
+        event_timing_mode="disabled",
+        planner_revision_enabled=True,
+    )
+    racket_target = SimpleNamespace(planner_revision_enabled=True)
+    delattr(motion if missing == "motion" else racket_target, "planner_revision_enabled")
+    env_cfg = SimpleNamespace(
+        commands=SimpleNamespace(motion=motion, racket_target=racket_target)
+    )
+
+    with pytest.raises(
+        A.IsaacBankExamError,
+        match=rf"commands\.{missing}\.planner_revision_enabled",
+    ):
+        A.apply_timing_native_clock_eval_profile(env_cfg)
+
+    if missing != "motion":
+        assert motion.planner_revision_enabled is True
+    if missing != "racket_target":
+        assert racket_target.planner_revision_enabled is True
 
 
 def test_frame0_requires_exact_zero_velocity(tmp_path: Path):

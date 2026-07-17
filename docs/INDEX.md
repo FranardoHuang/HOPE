@@ -36,6 +36,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | 理解或修改训练 setting | [NOW 完整流程与当前阶段](NOW.md#1-当前一套训练是怎样完整跑起来的) → 相关实验 → [G05](gates/G05_isaac_training_first_loop.md) → [`run_training.md`](operations/run_training.md) |
 | 认领工作、排队或分配算力 | [NOW 唯一队列](NOW.md#统一工作队列唯一优先级账本) → [跑批作战手册](runbook.md#统一队列排序与算力纪律) → 对应实验 run table |
 | 新增/运行消融 | [`experiments/README.md`](experiments/README.md) + [模板](experiments/TEMPLATE.md) → [G05](gates/G05_isaac_training_first_loop.md) → 训练操作文档 |
+| 当前半秒击球冲刺 | [十二种单 seed 冲刺配方与运行映射](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md) → [严格 0.5 秒负结果](experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md) → [G05](gates/G05_isaac_training_first_loop.md) |
 | 原生 MuJoCo `Trainer-v0`/fine-tune | [MuJoCo 实验](experiments/2026-07/EXP-MUJOCO-NATIVE-TRAINING.md) → [v0 preflight](research/mujoco_training_v0_preflight_2026-07-12.md) → [G06](gates/G06_isaac_to_mujoco.md) |
 | 评估/checkpoint 排名 | [Fresh 稳定性](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md)或[历史尺](experiments/2026-07/EXP-P1-HISTORICAL-SCHEMA3.md) → [G06](gates/G06_isaac_to_mujoco.md) |
 | 拍面符号/解析判分复核 | [Face-sign forensic](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md) → [术语：raw-A/physical-B](DEFINITIONS.md) → G05/G06 |
@@ -52,6 +53,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 
 | ID | 简短状态 |
 | --- | --- |
+| [`EXP-P1-HALF-SECOND-SPRINT`](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md) | 运行中：从共同 `model_5700` 以单 seed 比较准备时间、动作速度、模仿强度与平衡 Reward；`+100` 前只判启动/激活，暂无 TTS×outcome 分桶或胜者结论 |
 | [`EXP-P1-TASK-REVISION-CUTOVER`](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md) | 旧 rolling 池已精确停止；同一物理球的原子 target/TTS revision、宽准备时间、相位 governor、0.5 秒卷与整数淘汰量尺处于 source 红队，full-scene/行为尚未通过 |
 | [`EXP-P1-FACE-PLANT-SCALEOUT`](experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md) | 16 条 fresh 广度臂已分两波全部精确停止并保留证据；旧 face×plant 矩阵不能选 baseline |
 | [`EXP-P1-FRESH-SZ-STABILITY`](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md) | 实验 completed/rejected；2k 与 4k 四 seed 稳定性都失败，seed4 持续弱；不晋级 baseline |

@@ -26,6 +26,12 @@ from whole_body_tracking.utils.training_contract import (
 
 
 _EXACT_BEHAVIOR_EVENT = "hope_exact_behavior_update"
+_PLANNER_INITIAL_TTS_BUCKETS = (
+    "lt_0p5",
+    "eq_0p5",
+    "gt_0p5_le_0p9",
+    "gt_0p9",
+)
 
 
 def _ratio_or_none(counters: dict, numerator: str, denominator: str):
@@ -41,7 +47,7 @@ def _ratio_or_none(counters: dict, numerator: str, denominator: str):
 def exact_behavior_decision_values(counters: dict) -> dict[str, float | None]:
     """Derive dashboard values from one record; windows must sum counters before calling this."""
 
-    return {
+    values = {
         "swing_completion_rate": _ratio_or_none(
             counters, "swing_completion_count", "swing_outcome_count"
         ),
@@ -87,6 +93,24 @@ def exact_behavior_decision_values(counters: dict) -> dict[str, float | None]:
             "ready_foot_slip_eligible_sample_count",
         ),
     }
+    for bucket_name in _PLANNER_INITIAL_TTS_BUCKETS:
+        prefix = f"planner_initial_tts_{bucket_name}_"
+        values[f"{prefix}swing_completion_rate"] = _ratio_or_none(
+            counters,
+            f"{prefix}swing_completion_count",
+            f"{prefix}swing_outcome_count",
+        )
+        values[f"{prefix}virtual_capture_per_strike"] = _ratio_or_none(
+            counters,
+            f"{prefix}virtual_capture_count",
+            f"{prefix}strike_opportunity_count",
+        )
+        values[f"{prefix}virtual_legal_return_per_strike"] = _ratio_or_none(
+            counters,
+            f"{prefix}virtual_legal_return_count",
+            f"{prefix}strike_opportunity_count",
+        )
+    return values
 
 
 class MyOnPolicyRunner(OnPolicyRunner):

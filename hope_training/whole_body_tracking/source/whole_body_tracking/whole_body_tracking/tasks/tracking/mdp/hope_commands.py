@@ -77,6 +77,21 @@ _TARGET_DELAY_TTS_MODES = (
     "uncompensated",
 )
 
+# Initial planner deadline buckets used by the per-update behavior ledger.  The 0.5 s row is a
+# real point mass in the configured mixture, so equality is intentionally exact; 0.9 s belongs to
+# the middle bucket.  These names are part of the additive stdout-JSON counter interface.
+_PLANNER_INITIAL_TTS_BUCKETS = (
+    "lt_0p5",
+    "eq_0p5",
+    "gt_0p5_le_0p9",
+    "gt_0p9",
+)
+_TIMING_BUCKET_SPARSE_EVENTS = (
+    "strike_opportunity_count",
+    "virtual_capture_count",
+    "virtual_legal_return_count",
+)
+
 
 def _face_command_pairing(cfg: "RacketTargetCommandCfg") -> str:
     """Return a validated face-command grading convention.
@@ -498,6 +513,20 @@ class RacketTargetCommand(CommandTerm):
         self._exact_pending_completion = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
         )
+        # The initial planner deadline belongs to the whole swing attempt, not to the live TTS
+        # countdown.  Latch one bucket per attempt so its eventual close-out and sparse strike
+        # outcomes can be compared without reconstructing state from EMA curves.  -1 means this is
+        # a legacy/non-planner attempt and is deliberately absent from bucket denominators.
+        self._exact_attempt_initial_tts_bucket = torch.full(
+            (self.num_envs,), -1, dtype=torch.long, device=self.device
+        )
+        # A defensive exact strike may fire on the same step Motion wraps into the next clip,
+        # before RacketTargetCommand samples that new task's initial TTS.  Park those three sparse
+        # outcomes until _begin_same_ball_planner_task assigns the new bucket.
+        self._exact_pending_timing_bucket_events = {
+            name: torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+            for name in _TIMING_BUCKET_SPARSE_EVENTS
+        }
         self._prestrike_fall_acc = 0.0
         # POST-strike falls (fall AFTER reaching the strike frame — the follow-through/recovery fall that
         # swing_completion_rate + pre_strike_fall_rate are both blind to; it was the actual backhand
@@ -2343,6 +2372,93 @@ class RacketTargetCommand(CommandTerm):
             device=self.device,
         )
 
+    @staticmethod
+    def _planner_initial_tts_bucket_ids(initial_tts: torch.Tensor) -> torch.Tensor:
+        """Classify task-entry preparation time into four disjoint deployment buckets."""
+
+        if initial_tts.ndim != 1:
+            raise ValueError("planner initial TTS bucket input must be one-dimensional")
+        if not bool(torch.isfinite(initial_tts).all()):
+            raise ValueError("planner initial TTS bucket input must be finite")
+        buckets = torch.full_like(initial_tts, -1, dtype=torch.long)
+        buckets[initial_tts < 0.5] = 0
+        buckets[initial_tts == 0.5] = 1
+        buckets[(initial_tts > 0.5) & (initial_tts <= 0.9)] = 2
+        buckets[initial_tts > 0.9] = 3
+        if bool((buckets < 0).any()):
+            raise RuntimeError("planner initial TTS bucket partition is incomplete")
+        return buckets
+
+    def _ensure_exact_timing_bucket_state(self) -> None:
+        """Lazy allocation for unit-test construction and older restored command objects."""
+
+        if not hasattr(self, "_exact_attempt_initial_tts_bucket"):
+            self._exact_attempt_initial_tts_bucket = torch.full(
+                (self.num_envs,), -1, dtype=torch.long, device=self.device
+            )
+        if not hasattr(self, "_exact_pending_timing_bucket_events"):
+            self._exact_pending_timing_bucket_events = {
+                name: torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+                for name in _TIMING_BUCKET_SPARSE_EVENTS
+            }
+
+    def _assign_exact_attempt_initial_tts(
+        self, env_ids: torch.Tensor, initial_tts: torch.Tensor
+    ) -> None:
+        """Latch a new attempt's bucket and flush any same-wrap sparse outcomes into it."""
+
+        ids = torch.as_tensor(env_ids, dtype=torch.long, device=self.device).reshape(-1)
+        tts = torch.as_tensor(initial_tts, dtype=torch.float32, device=self.device).reshape(-1)
+        if len(ids) != len(tts):
+            raise ValueError("planner initial TTS bucket assignment length mismatch")
+        self._ensure_exact_timing_bucket_state()
+        bucket_ids = self._planner_initial_tts_bucket_ids(tts)
+        self._exact_attempt_initial_tts_bucket[ids] = bucket_ids
+
+        ledger = self._ensure_exact_behavior_decision_counters()
+        with torch.inference_mode():
+            for event_name, pending in self._exact_pending_timing_bucket_events.items():
+                selected_pending = pending[ids]
+                for bucket_id, bucket_name in enumerate(_PLANNER_INITIAL_TTS_BUCKETS):
+                    ledger[f"planner_initial_tts_{bucket_name}_{event_name}"].add_(
+                        (selected_pending & (bucket_ids == bucket_id)).sum(dtype=torch.long)
+                    )
+                pending[ids] = False
+
+    def _book_exact_timing_bucket_sparse_events(
+        self, masks: dict[str, torch.Tensor]
+    ) -> None:
+        """Book strike/capture/return masks against the attempt's latched initial TTS."""
+
+        if not getattr(self, "planner_revision_enabled", False):
+            return
+        self._ensure_exact_timing_bucket_state()
+        ledger = self._ensure_exact_behavior_decision_counters()
+        motion = self._motion()
+        wrapped = getattr(motion, "just_resampled", None)
+        if wrapped is None:
+            wrapped = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        else:
+            wrapped = wrapped.detach().to(device=self.device)
+            if wrapped.dtype != torch.bool or wrapped.shape != (self.num_envs,):
+                raise ValueError("motion.just_resampled must be a per-env boolean mask")
+
+        bucket_ids = self._exact_attempt_initial_tts_bucket
+        for event_name in _TIMING_BUCKET_SPARSE_EVENTS:
+            mask = masks.get(event_name)
+            if mask is None:
+                continue
+            mask = mask.detach().to(device=self.device)
+            if mask.dtype != torch.bool or mask.shape != (self.num_envs,):
+                raise ValueError(f"{event_name} must be a per-env boolean mask")
+            pending = mask & wrapped
+            self._exact_pending_timing_bucket_events[event_name] |= pending
+            current = mask & ~wrapped
+            for bucket_id, bucket_name in enumerate(_PLANNER_INITIAL_TTS_BUCKETS):
+                ledger[f"planner_initial_tts_{bucket_name}_{event_name}"].add_(
+                    (current & (bucket_ids == bucket_id)).sum(dtype=torch.long)
+                )
+
     def _sample_planner_initial_tts(self, count: int) -> torch.Tensor:
         """Draw the checkpoint-bound preparation-time mixture exactly once per new task."""
 
@@ -2418,6 +2534,7 @@ class RacketTargetCommand(CommandTerm):
             self._planner_task_id[ids] = 1
         self._planner_task_revision[ids] = 1
         initial_tts = self._sample_planner_initial_tts(len(ids))
+        self._assign_exact_attempt_initial_tts(ids, initial_tts)
         strike_step = self._strike_steps_for_envs(ids)
         normal = self.target_normal_cmd[ids]
         normal = normal / torch.linalg.vector_norm(normal, dim=-1, keepdim=True).clamp(min=1.0e-12)
@@ -3163,6 +3280,20 @@ class RacketTargetCommand(CommandTerm):
         completed = ended & self._exact_attempt_completed[ids]
         ledger["swing_outcome_count"].add_(ended.sum(dtype=torch.long))
         ledger["swing_completion_count"].add_(completed.sum(dtype=torch.long))
+        if getattr(self, "planner_revision_enabled", False):
+            self._ensure_exact_timing_bucket_state()
+            timing_bucket = self._exact_attempt_initial_tts_bucket[ids]
+            for bucket_id, bucket_name in enumerate(_PLANNER_INITIAL_TTS_BUCKETS):
+                in_bucket = timing_bucket == bucket_id
+                ledger[f"planner_initial_tts_{bucket_name}_swing_outcome_count"].add_(
+                    (ended & in_bucket).sum(dtype=torch.long)
+                )
+                ledger[f"planner_initial_tts_{bucket_name}_swing_completion_count"].add_(
+                    (completed & in_bucket).sum(dtype=torch.long)
+                )
+            # The new attempt exists after this call but receives its bucket later in the same
+            # resample, when _begin_same_ball_planner_task samples its initial deadline.
+            self._exact_attempt_initial_tts_bucket[ids] = -1
         self._exact_attempt_active[ids] = True
         self._exact_attempt_completed[ids] = self._exact_pending_completion[ids]
         self._exact_pending_completion[ids] = False
@@ -3600,6 +3731,8 @@ class RacketTargetCommand(CommandTerm):
         for name, mask in masks.items():
             ledger[name].add_(mask.detach().sum(dtype=torch.long))
 
+        self._book_exact_timing_bucket_sparse_events(masks)
+
         motion = self._motion()
         if getattr(motion, "_multiseg", False):
             clip_id = motion.clip_id
@@ -3680,6 +3813,17 @@ class RacketTargetCommand(CommandTerm):
             ):
                 if name not in ledger:
                     ledger[name] = torch.zeros((), dtype=torch.long, device=self.device)
+            for bucket_name in _PLANNER_INITIAL_TTS_BUCKETS:
+                for event_name in (
+                    "swing_outcome_count",
+                    "swing_completion_count",
+                    *_TIMING_BUCKET_SPARSE_EVENTS,
+                ):
+                    name = f"planner_initial_tts_{bucket_name}_{event_name}"
+                    if name not in ledger:
+                        ledger[name] = torch.zeros(
+                            (), dtype=torch.long, device=self.device
+                        )
             mixture = getattr(self, "_planner_initial_tts_mixture", None)
             if mixture is not None:
                 for index, _component in enumerate(mixture.components):
