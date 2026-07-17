@@ -46,6 +46,23 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-18 05:13 CST, first TTS-by-outcome `+100` window; Gate remains `Partial`):
+
+- Pod1 has 11 accepted trainers at `4/4/3`, iterations `5929–6286`; Pod2 has 12 at `4/4/4`,
+  iterations `6018–6238`. Fatal count is zero. GPU2 still has three trainers, so the predeclared Z3
+  third-process condition is false.
+- All five new Pod1 cells completed the common-parent `5701–5800` window with sufficient denominators in
+  each initial time-to-strike bucket: `<0.5`, `=0.5`, `(0.5,0.9]`, and `>0.9 s`. The velocity-priority plus
+  strong-ready cell (V) recorded legal-return rates `21.96/36.03/38.21/27.01%` and completion rates
+  `62.29/61.14/59.40/55.10%`. The position-priority plus free non-striking arm cell (W) recorded the highest
+  completion rates, `87.43/87.16/85.92/82.41%`, with legal-return rates
+  `19.41/29.90/30.75/18.97%`. Position-priority plus strong-ready (U) and position-priority plus a muted
+  contact-window teacher (Y) trade completion against return, while velocity-priority plus a free non-striking
+  arm (X) is intermediate.
+- No cell is dominated on every recorded dimension, so no cell is stopped at `+100`. The `<0.5 s` bucket is
+  no longer zero-capability in the training ledger, but all reported returns are Isaac training-time virtual
+  outcomes, not vendor MuJoCo behavior. G05 therefore remains `Partial`.
+
 Follow-up note (2026-07-17, ready-ruler successor queue source paper; Gate remains `Partial`):
 
 - A new plan-only queue freezes one Pod2 4096-environment/two-update full-scene probe followed by a
