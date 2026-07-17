@@ -90,6 +90,10 @@ Follow-up note (updated 2026-07-18, exact-0.5 K100 v2 failed before question one
   traceback legitimately contained it twice. V3 is now immutable `failed_no_retry`. V4 keeps the same behavior
   fix but validates raw SHA, 36,059 bytes and the exact final exception line. Runner/activation are
   `1e12d791…d99d7c7/4f93c0c3…ccd864`; combined tests remain `88 passed, 1 skipped`.
+- V4 was likewise rejected before any namespace because the real Python exception class includes its module prefix.
+  V5 removes all traceback-text parsing and relies only on the already exact raw SHA and byte count. V4 is frozen
+  by receipt `b7ca44ba…7afed7`; v5 runner/activation are `c0fe1555…7c55c/cb4b8e67…a51886`, with
+  `89 passed, 1 skipped`.
 
 Follow-up note (2026-07-17, planner ready-ruler source repair; Gate remains `Partial`):
 
@@ -2919,4 +2923,6 @@ absence；`/proc` 不可读不能当作 absent。heartbeat freshness 只认带�
 被同一 inspect 合法复核。专项为 `60 passed, 1 skipped`，连同物化器/timing adapter 为
 `88 passed, 1 skipped`。v3 随后因 occurrence-count 假门在零 namespace 阶段失败并永久冻结；v4
 runner/activation=`1e12d791…d99d7c7/4f93c0c3…ccd864` 只改用 raw SHA + bytes + 最后异常行并采用
-fresh namespace。这只解锁一次 Pod2 v4 运行；尚无 K100 行为分数，G05 保持 `Partial`。
+fresh namespace。v4 又被异常类模块前缀假拒绝且零 namespace；v5 删除文本解析，仅保留 raw SHA+bytes，
+runner/activation=`c0fe1555…7c55c/cb4b8e67…a51886`。这只解锁一次 Pod2 v5 运行；尚无 K100 行为分数，
+G05 保持 `Partial`。

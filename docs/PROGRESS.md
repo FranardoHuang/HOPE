@@ -13,6 +13,9 @@
 
 ## 2026-07-18
 
+- exact-0.5 K100 v4 又因真实异常类带模块前缀而被冗余末行文本门假拒绝，仍为零远端 namespace；已以
+  receipt `b7ca44ba…7afed7` 冻结。v5 删除全部 traceback 文本解析，只保留 exact raw SHA+36,059 bytes，
+  runner/activation=`c0fe1555…7c55c/cb4b8e67…a51886`，合并回归 `89 passed, 1 skipped`，待唯一 Pod2 launch。
 - exact-0.5 K100 v3 的唯一 Pod2 launch 在零远端 namespace 阶段假拒绝：v2 log SHA 完全一致，但旧门错误
   要求异常文案只出现一次，实际 traceback 源码行与末行各一次。v3 已用 receipt `32525b0f…bbc82d3`
   冻结为 `failed_no_retry`；v4 只改成 raw SHA + bytes + 最后异常行并使用 fresh namespace。runner/activation

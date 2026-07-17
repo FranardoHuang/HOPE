@@ -18,7 +18,7 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "run_phase1_task_revision_0p5_exam.py"
 QUEUE = ROOT / "configs" / "phase1_task_revision_supercombo_20260716.yaml"
-ACTIVATION = ROOT / "configs" / "phase1_task_revision_0p5_exam_activation_v4_20260718.json"
+ACTIVATION = ROOT / "configs" / "phase1_task_revision_0p5_exam_activation_v5_20260718.json"
 HISTORICAL_ACTIVATION_V2 = (
     ROOT / "configs" / "phase1_task_revision_0p5_exam_activation_v2_20260717.json"
 )
@@ -201,10 +201,10 @@ def test_build_plan_is_fixed_to_pod2_equal_reward_model5700():
         "e10d2c248d90daa3172ea80147a394dad64ce326eb4052889c25bfb9d3df420b"
     )
     assert plan["output_dir"].endswith(
-        "/p2_equal_reward/timing_exam_0p5_native_clock_v4/model_5700"
+        "/p2_equal_reward/timing_exam_0p5_native_clock_v5/model_5700"
     )
     assert plan["state_dir"].endswith(
-        "/p2_equal_reward/timing_exam_0p5_supervisor_native_clock_v4/model_5700"
+        "/p2_equal_reward/timing_exam_0p5_supervisor_native_clock_v5/model_5700"
     )
     assert plan["behavior_receipt"].endswith("/behavior_milestones/model_5700.json")
     assert plan["automatic_retry"] is False
@@ -236,8 +236,8 @@ def test_build_plan_is_fixed_to_pod2_equal_reward_model5700():
         "bytes": 18795,
         "sha256": "dd4332edb47f1fb1f4d51ca00ceed612dbcadf9e395eb536c9b73bef9de69ad0",
     }
-    assert plan["consumption"]["v4_attempt_dir"].endswith(
-        "/p2_equal_reward/timing_exam_0p5_attempt_native_clock_v4/model_5700"
+    assert plan["consumption"]["v5_attempt_dir"].endswith(
+        "/p2_equal_reward/timing_exam_0p5_attempt_native_clock_v5/model_5700"
     )
     assert plan["consumption"][
         "v2_natural_terminal_required_before_any_consumption_write"
@@ -492,16 +492,16 @@ def test_missing_restored_asset_fails_before_any_launch_side_effect(monkeypatch,
     assert not lock.exists()
 
 
-def test_v4_claim_binds_predecessors_and_consumes_activation_once(tmp_path):
+def test_v5_claim_binds_predecessors_and_consumes_activation_once(tmp_path):
     remote = _remote_namespace()
-    attempt = tmp_path / "v4-attempt" / "model_5700"
+    attempt = tmp_path / "v5-attempt" / "model_5700"
     spec = {
         "consumption": {
-            "v4_attempt_dir": str(attempt),
+            "v5_attempt_dir": str(attempt),
         },
         "activation": {
-            "activation_id": "native-clock-v4",
-            "path": "activation-v4.json",
+            "activation_id": "native-clock-v5",
+            "path": "activation-v5.json",
             "sha256": "a" * 64,
         },
         "prior_attempt": {
@@ -512,6 +512,7 @@ def test_v4_claim_binds_predecessors_and_consumes_activation_once(tmp_path):
         },
         "v2_failed_attempt": {"status": "failed_no_retry"},
         "v3_failed_attempt": {"status": "failed_no_retry"},
+        "v4_failed_attempt": {"status": "failed_no_retry"},
         "exam_bank": {"path": "/workspace/bank", "bytes": 3, "sha256": "c" * 64},
         "exam_rebind_report": {
             "path": "/workspace/report", "bytes": 4, "sha256": "d" * 64,
@@ -531,36 +532,41 @@ def test_v4_claim_binds_predecessors_and_consumes_activation_once(tmp_path):
         "content": {"status": "failed_no_retry"},
     }
     absence_binding = {"v3_attempt_dir_absent": True}
-    original_validate = remote["validate_v2_terminal_before_v4"]
-    original_absence = remote["validate_v3_absence_before_v4"]
-    remote["validate_v2_terminal_before_v4"] = lambda _spec: terminal_binding
-    remote["validate_v3_absence_before_v4"] = lambda _spec: absence_binding
+    v4_absence_binding = {"v4_attempt_dir_absent": True}
+    original_validate = remote["validate_v2_terminal_before_v5"]
+    original_absence = remote["validate_v3_absence_before_v5"]
+    remote["validate_v2_terminal_before_v5"] = lambda _spec: terminal_binding
+    remote["validate_v3_absence_before_v5"] = lambda _spec: absence_binding
+    remote["validate_v4_absence_before_v5"] = lambda _spec: v4_absence_binding
     guard = remote["claim_activation_once"](
-        spec, terminal_binding, absence_binding)
+        spec, terminal_binding, absence_binding, v4_absence_binding)
     remote["close_directory_guard"](guard)
     marker = json.loads((attempt / "attempt.json").read_text())
     assert marker["v2_failed_attempt"] == spec["v2_failed_attempt"]
-    assert marker["artifact_kind"] == "taskrev_0p5_native_clock_v4_attempt"
+    assert marker["artifact_kind"] == "taskrev_0p5_native_clock_v5_attempt"
     assert marker["status"] == "consumed"
     assert marker["automatic_retry"] is False
     assert marker["retry_authorized"] is False
     assert marker["v2_natural_terminal_binding"] == terminal_binding
     assert marker["v3_absence_binding"] == absence_binding
+    assert marker["v4_absence_binding"] == v4_absence_binding
     with pytest.raises(RuntimeError, match="already consumed"):
-        remote["claim_activation_once"](spec, terminal_binding, absence_binding)
-    remote["validate_v2_terminal_before_v4"] = original_validate
-    remote["validate_v3_absence_before_v4"] = original_absence
+        remote["claim_activation_once"](
+            spec, terminal_binding, absence_binding, v4_absence_binding)
+    remote["validate_v2_terminal_before_v5"] = original_validate
+    remote["validate_v3_absence_before_v5"] = original_absence
 
 
-def test_v4_claim_rejects_natural_terminal_change_before_attempt_publish(tmp_path):
+def test_v5_claim_rejects_natural_terminal_change_before_attempt_publish(tmp_path):
     remote = _remote_namespace()
-    attempt = tmp_path / "v4-attempt" / "model_5700"
+    attempt = tmp_path / "v5-attempt" / "model_5700"
     spec = {
-        "consumption": {"v4_attempt_dir": str(attempt)},
-        "activation": {"activation_id": "native-clock-v4"},
+        "consumption": {"v5_attempt_dir": str(attempt)},
+        "activation": {"activation_id": "native-clock-v5"},
         "prior_attempt": {},
         "v2_failed_attempt": {},
         "v3_failed_attempt": {},
+        "v4_failed_attempt": {},
         "exam_bank": {},
         "exam_rebind_report": {},
     }
@@ -573,15 +579,16 @@ def test_v4_claim_rejects_natural_terminal_change_before_attempt_publish(tmp_pat
     }
     changed = dict(validated, file_sha256="d" * 64)
     absence = {"v3_absent": True}
-    remote["validate_v2_terminal_before_v4"] = lambda _spec: changed
-    remote["validate_v3_absence_before_v4"] = lambda _spec: absence
-    with pytest.raises(RuntimeError, match="changed before v4 attempt"):
-        remote["claim_activation_once"](spec, validated, absence)
+    remote["validate_v2_terminal_before_v5"] = lambda _spec: changed
+    remote["validate_v3_absence_before_v5"] = lambda _spec: absence
+    remote["validate_v4_absence_before_v5"] = lambda _spec: {}
+    with pytest.raises(RuntimeError, match="changed before v5 attempt"):
+        remote["claim_activation_once"](spec, validated, absence, {})
     assert attempt.is_dir()
     assert not (attempt / "attempt.json").exists()
 
 
-def test_v4_preflight_failure_after_asset_check_is_consumed_no_retry(
+def test_v5_preflight_failure_after_asset_check_is_consumed_no_retry(
         monkeypatch, tmp_path):
     remote = _remote_namespace()
     bank = tmp_path / "bank.npz"
@@ -591,11 +598,11 @@ def test_v4_preflight_failure_after_asset_check_is_consumed_no_retry(
     attempt = tmp_path / "attempt" / "model_5700"
     spec = {
         "consumption": {
-            "v4_attempt_dir": str(attempt),
+            "v5_attempt_dir": str(attempt),
         },
         "activation": {
-            "activation_id": "native-clock-v4",
-            "path": "activation-v4.json",
+            "activation_id": "native-clock-v5",
+            "path": "activation-v5.json",
             "sha256": "a" * 64,
         },
         "prior_attempt": {
@@ -606,6 +613,7 @@ def test_v4_preflight_failure_after_asset_check_is_consumed_no_retry(
         },
         "v2_failed_attempt": {"status": "failed_no_retry"},
         "v3_failed_attempt": {"status": "failed_no_retry"},
+        "v4_failed_attempt": {"status": "failed_no_retry"},
         "exam_bank": {
             "path": str(bank), "bytes": bank.stat().st_size,
             "sha256": remote["sha"](bank),
@@ -629,10 +637,13 @@ def test_v4_preflight_failure_after_asset_check_is_consumed_no_retry(
         "content": {"status": "failed_no_retry"},
     }
     monkeypatch.setitem(
-        remote, "validate_v2_terminal_before_v4", lambda _spec: terminal_binding
+        remote, "validate_v2_terminal_before_v5", lambda _spec: terminal_binding
     )
     monkeypatch.setitem(
-        remote, "validate_v3_absence_before_v4", lambda _spec: {"absent": True}
+        remote, "validate_v3_absence_before_v5", lambda _spec: {"absent": True}
+    )
+    monkeypatch.setitem(
+        remote, "validate_v4_absence_before_v5", lambda _spec: {"absent": True}
     )
     with pytest.raises(RuntimeError, match="remaining preflight failed"):
         remote["launch"](spec)
@@ -643,7 +654,7 @@ def test_v4_preflight_failure_after_asset_check_is_consumed_no_retry(
         remote["launch"](spec)
 
 
-def test_v4_refuses_to_consume_before_exact_v2_natural_terminal(tmp_path):
+def test_v5_refuses_to_consume_before_exact_v2_natural_terminal(tmp_path):
     remote = _remote_namespace()
     bank = tmp_path / "bank.npz"
     report = tmp_path / "report.json"
@@ -653,10 +664,10 @@ def test_v4_refuses_to_consume_before_exact_v2_natural_terminal(tmp_path):
     old_state.mkdir()
     old_output = tmp_path / "v2-output"
     old_output.mkdir()
-    attempt = tmp_path / "v4-attempt" / "model_5700"
+    attempt = tmp_path / "v5-attempt" / "model_5700"
     spec = {
-        "consumption": {"v4_attempt_dir": str(attempt)},
-        "activation": {"activation_id": "native-clock-v4", "path": "v4", "sha256": "a" * 64},
+        "consumption": {"v5_attempt_dir": str(attempt)},
+        "activation": {"activation_id": "native-clock-v5", "path": "v4", "sha256": "a" * 64},
         "prior_attempt": {},
         "v2_failed_attempt": {
             "activation": {"activation_id": "v2", "path": "v2", "sha256": "b" * 64},
@@ -683,6 +694,7 @@ def test_v4_refuses_to_consume_before_exact_v2_natural_terminal(tmp_path):
             "forbidden_stop_artifacts": ["stop-intent.json", "stop-result.json"],
         },
         "v3_failed_attempt": {},
+        "v4_failed_attempt": {},
         "job_id": "taskrev_p2_equal_reward", "milestone": 5700,
         "exam_bank": {"path": str(bank), "bytes": bank.stat().st_size, "sha256": remote["sha"](bank)},
         "exam_rebind_report": {"path": str(report), "bytes": report.stat().st_size, "sha256": remote["sha"](report)},
@@ -692,7 +704,7 @@ def test_v4_refuses_to_consume_before_exact_v2_natural_terminal(tmp_path):
     assert not attempt.exists()
 
 
-def test_v4_validates_real_natural_terminal_and_absence_closure(monkeypatch, tmp_path):
+def test_v5_validates_real_natural_terminal_and_absence_closure(monkeypatch, tmp_path):
     remote = _remote_namespace()
     state = tmp_path / "v2-state"
     output = tmp_path / "v2-output"
@@ -728,11 +740,10 @@ def test_v4_validates_real_natural_terminal_and_absence_closure(monkeypatch, tmp
     }
     terminal_raw = remote["cbytes"](terminal) + b"\n"
     (state / "terminal.json").write_bytes(terminal_raw)
-    reason = "native-clock failure"
-    terminal_line = "IsaacBankExamError: native-clock failure"
-    # The reason may occur more than once in a traceback.  Integrity is the
-    # full raw SHA/size plus the exact final exception line, never a count.
-    failure_raw = f"prefix {reason}\ncontext {reason}\n{terminal_line}\n".encode()
+    failure_raw = (
+        b"prefix native-clock failure\n"
+        b"isaac_bank_exam_adapter.IsaacBankExamError: native-clock failure\n"
+    )
     (output / "evaluator.log").write_bytes(failure_raw)
     spec = {
         "v2_failed_attempt": {
@@ -751,8 +762,6 @@ def test_v4_validates_real_natural_terminal_and_absence_closure(monkeypatch, tmp
                 "basename": "evaluator.log",
                 "failure_log_sha256": remote["hashlib"].sha256(failure_raw).hexdigest(),
                 "failure_log_bytes": len(failure_raw),
-                "failure_reason": reason,
-                "terminal_exception_line": terminal_line,
             },
             "historical_processes": [
                 {"role": "supervisor", "pid": 99_999_991},
@@ -765,35 +774,52 @@ def test_v4_validates_real_natural_terminal_and_absence_closure(monkeypatch, tmp
         "milestone": 5700,
         "catastrophic_cleanup": contract,
     }
-    binding = remote["validate_v2_terminal_before_v4"](spec)
+    binding = remote["validate_v2_terminal_before_v5"](spec)
     assert binding["file_sha256"] == spec["v2_failed_attempt"]["natural_terminal"][
         "file_sha256"
     ]
     assert binding["historical_pids_absent"] == [99_999_991, 99_999_992, 99_999_993]
     assert binding["cgroup_absent"] is True
 
-    wrong_tail = f"prefix {reason}\ncontext {reason}\nRuntimeError: wrong tail\n".encode()
-    (output / "evaluator.log").write_bytes(wrong_tail)
-    failure_binding = spec["v2_failed_attempt"]["failure_log"]
-    failure_binding["failure_log_sha256"] = remote["hashlib"].sha256(
-        wrong_tail).hexdigest()
-    failure_binding["failure_log_bytes"] = len(wrong_tail)
-    with pytest.raises(RuntimeError, match="terminal exception line differs"):
-        remote["validate_v2_terminal_before_v4"](spec)
+    drift = failure_raw[:-1] + b"X"
+    (output / "evaluator.log").write_bytes(drift)
+    with pytest.raises(RuntimeError, match="failure log bytes differ"):
+        remote["validate_v2_terminal_before_v5"](spec)
     (output / "evaluator.log").write_bytes(failure_raw)
-    failure_binding["failure_log_sha256"] = remote["hashlib"].sha256(
-        failure_raw).hexdigest()
-    failure_binding["failure_log_bytes"] = len(failure_raw)
 
     (state / "stop-intent.json").write_text("{}\n")
     with pytest.raises(RuntimeError, match="stop artifact"):
-        remote["validate_v2_terminal_before_v4"](spec)
+        remote["validate_v2_terminal_before_v5"](spec)
     (state / "stop-intent.json").unlink()
 
     cgroup.mkdir()
     with pytest.raises(RuntimeError, match="cgroup still exists"):
-        remote["validate_v2_terminal_before_v4"](spec)
+        remote["validate_v2_terminal_before_v5"](spec)
     cgroup.rmdir()
+
+
+def test_v5_requires_v4_namespace_absent(tmp_path):
+    remote = _remote_namespace()
+    attempt = tmp_path / "old-v4-attempt"
+    state = tmp_path / "old-v4-state"
+    output = tmp_path / "old-v4-output"
+    cgroup = tmp_path / "old-v4-cgroup"
+    spec = {
+        "v4_failed_attempt": {"observed_remote_state": {
+            "v4_attempt_dir": str(attempt), "v4_attempt_dir_exists": False,
+            "v4_state_dir": str(state), "v4_state_dir_exists": False,
+            "v4_output_dir": str(output), "v4_output_dir_exists": False,
+            "v4_cgroup_path": str(cgroup), "v4_cgroup_path_exists": False,
+        }},
+        "consumption": {"v5_attempt_dir": str(tmp_path / "new-v5-attempt")},
+        "state_dir": str(tmp_path / "new-v5-state"),
+        "output_dir": str(tmp_path / "new-v5-output"),
+    }
+    binding = remote["validate_v4_absence_before_v5"](spec)
+    assert binding["v4_attempt_dir_absent"] is True
+    attempt.mkdir()
+    with pytest.raises(RuntimeError, match="v4 attempt namespace unexpectedly exists"):
+        remote["validate_v4_absence_before_v5"](spec)
 
 def test_proc_absence_probe_fails_closed_on_permission_error(monkeypatch):
     remote = _remote_namespace()
@@ -1696,9 +1722,10 @@ def test_launch_two_phase_commit_is_no_clobber_and_returns_after_ack(tmp_path):
         },
     }
     remote["validate_restored_assets"] = lambda _spec: {}
-    remote["validate_v2_terminal_before_v4"] = lambda _spec: {}
-    remote["validate_v3_absence_before_v4"] = lambda _spec: {}
-    remote["claim_activation_once"] = lambda _spec, _v2, _v3: None
+    remote["validate_v2_terminal_before_v5"] = lambda _spec: {}
+    remote["validate_v3_absence_before_v5"] = lambda _spec: {}
+    remote["validate_v4_absence_before_v5"] = lambda _spec: {}
+    remote["claim_activation_once"] = lambda _spec, _v2, _v3, _v4: None
     remote["validate_inputs"] = lambda _spec, validate_process=True: {}
     remote["stable_resource_gate"] = lambda _spec: [{"free_mib": 9999}]
     remote["prepare_owned_cgroup"] = lambda _spec: {
@@ -1792,9 +1819,10 @@ def test_launch_cgroup_preflight_fails_before_state_or_output_namespace(
         "supervision": {},
     }
     remote["validate_restored_assets"] = lambda _spec: {}
-    remote["validate_v2_terminal_before_v4"] = lambda _spec: {}
-    remote["validate_v3_absence_before_v4"] = lambda _spec: {}
-    remote["claim_activation_once"] = lambda _spec, _v2, _v3: None
+    remote["validate_v2_terminal_before_v5"] = lambda _spec: {}
+    remote["validate_v3_absence_before_v5"] = lambda _spec: {}
+    remote["validate_v4_absence_before_v5"] = lambda _spec: {}
+    remote["claim_activation_once"] = lambda _spec, _v2, _v3, _v4: None
     remote["validate_inputs"] = lambda _spec, validate_process=True: {}
     remote["stable_resource_gate"] = lambda _spec: []
     remote["_PRCTL"] = lambda *_args: 0
@@ -1835,9 +1863,10 @@ def test_launch_revalidates_predecessor_after_resource_gate_before_cgroup(
             return {"file_sha256": "a" * 64}
         raise RuntimeError("predecessor drift after resource gate")
 
-    remote["validate_v2_terminal_before_v4"] = predecessor
-    remote["validate_v3_absence_before_v4"] = lambda _spec: {}
-    remote["claim_activation_once"] = lambda _spec, _v2, _v3: None
+    remote["validate_v2_terminal_before_v5"] = predecessor
+    remote["validate_v3_absence_before_v5"] = lambda _spec: {}
+    remote["validate_v4_absence_before_v5"] = lambda _spec: {}
+    remote["claim_activation_once"] = lambda _spec, _v2, _v3, _v4: None
     remote["validate_inputs"] = lambda _spec, validate_process=True: {}
     remote["stable_resource_gate"] = lambda _spec: calls.append("resource") or []
     reached = []

@@ -34,12 +34,18 @@ HISTORICAL_ACTIVATION_V2 = Path(
 HISTORICAL_ACTIVATION_V3 = Path(
     "configs/phase1_task_revision_0p5_exam_activation_v3_20260717.json"
 )
-ACTIVATION = Path("configs/phase1_task_revision_0p5_exam_activation_v4_20260718.json")
+HISTORICAL_ACTIVATION_V4 = Path(
+    "configs/phase1_task_revision_0p5_exam_activation_v4_20260718.json"
+)
+ACTIVATION = Path("configs/phase1_task_revision_0p5_exam_activation_v5_20260718.json")
 V1_FAILURE_RECEIPT = Path(
     "configs/phase1_task_revision_0p5_exam_v1_failure_20260717.json"
 )
 V3_FAILURE_RECEIPT = Path(
     "configs/phase1_task_revision_0p5_exam_v3_failure_20260718.json"
+)
+V4_FAILURE_RECEIPT = Path(
+    "configs/phase1_task_revision_0p5_exam_v4_failure_20260718.json"
 )
 V1_ACTIVATION_SHA256 = (
     "996775d6c64a75d4c626d60da20fc52ec27ca86548008aeac900c380de87cfb6"
@@ -58,6 +64,12 @@ V3_ACTIVATION_SHA256 = (
 )
 V3_HARNESS_SHA256 = (
     "2c117866b3fa7a39d5d8480567c0d192668ea068eebd763399f339bf40c8445b"
+)
+V4_ACTIVATION_SHA256 = (
+    "4f93c0c33b05913d48d50682cdbce1652a9950cbaa34fc01879919746accd864"
+)
+V4_HARNESS_SHA256 = (
+    "1e12d79128cd37991c09e0d9ae44b27df2c9853e3c3c82437a639802ed99d7c7"
 )
 V2_FAILURE_LOG_SHA256 = (
     "f8c3be8b54e57d452847254e2a184dee9014361a621de5957996123fd77a9e28"
@@ -85,10 +97,10 @@ V2_CGROUP_PATH = (
 )
 V2_STOP_CONFIRM = "SIM_ONLY_STOP_EXACT_FAILED_TASKREV_0P5_K100_V2"
 HISTORICAL_LAUNCH_CONFIRM = "SIM_ONLY_LAUNCH_ONE_PERSISTENT_TASKREV_0P5_K100"
-V4_ACTIVATION_ID = (
-    "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_native_clock_v4"
+V5_ACTIVATION_ID = (
+    "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_native_clock_v5"
 )
-CONFIRM = "SIM_ONLY_LAUNCH_ONE_PERSISTENT_TASKREV_0P5_K100_V4"
+CONFIRM = "SIM_ONLY_LAUNCH_ONE_PERSISTENT_TASKREV_0P5_K100_V5"
 RESULT_MARKER = "TASKREV_0P5_RESULT_JSON="
 ISAAC_PYTHON = "/workspace/hope_isaac_venv/bin/python"
 KIT_LOCK = "/workspace/.kit_boot.lock"
@@ -334,6 +346,92 @@ def _load_v3_failure_receipt(path: Path) -> dict[str, Any]:
     return receipt
 
 
+def _load_v4_failure_receipt(path: Path) -> dict[str, Any]:
+    """Load the immutable failed-no-retry record for the sole v4 launch."""
+    receipt = _strict_json(path)
+    expected_argv = [
+        "python3", "scripts/run_phase1_task_revision_0p5_exam.py",
+        "--queue", str(QUEUE), "--activation", str(HISTORICAL_ACTIVATION_V4),
+        "--eval-gpu", "1", "launch", "--execute", "--confirm",
+        "SIM_ONLY_LAUNCH_ONE_PERSISTENT_TASKREV_0P5_K100_V4",
+    ]
+    if set(receipt) != {
+        "schema_version", "artifact_kind", "receipt_id", "status", "attempt",
+        "failure", "observed_remote_state", "authority",
+    }:
+        raise ExamError("v4 failure receipt top-level keys differ")
+    if (
+        receipt.get("schema_version") != 1
+        or receipt.get("artifact_kind")
+        != "phase1-task-revision-0p5-k100-launch-failure-receipt"
+        or receipt.get("receipt_id")
+        != "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_v4_failed_no_retry"
+        or receipt.get("status") != "failed_no_retry"
+    ):
+        raise ExamError("v4 failure receipt identity differs")
+    if receipt.get("attempt") != {
+        "activation_id": (
+            "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_native_clock_v4"
+        ),
+        "activation_path": str(HISTORICAL_ACTIVATION_V4),
+        "activation_sha256": V4_ACTIVATION_SHA256,
+        "harness_path": "scripts/run_phase1_task_revision_0p5_exam.py",
+        "harness_sha256": V4_HARNESS_SHA256,
+        "source_commit": "174f984170601405859b4ce3369b2379f437831e",
+        "queue_path": str(QUEUE),
+        "queue_sha256": (
+            "e050a056e40f9988989826ed8de03f8a7bfd8ada9c4420cd005c66eadb5b5497"
+        ),
+        "job_id": "taskrev_p2_equal_reward",
+        "milestone": 5700,
+        "pod": "pod2",
+        "physical_eval_gpu": 1,
+        "argv": expected_argv,
+        "runner_exit_code": 2,
+        "remote_result_status": "failed_no_retry",
+        "transcript_evidence": "operator_observed_reconstructed_no_raw_transcript",
+    }:
+        raise ExamError("v4 failure receipt attempt facts differ")
+    if receipt.get("failure") != {
+        "stage": "validate_v2_terminal_before_v4",
+        "exception_type": "RuntimeError",
+        "exception_message": "v4 v2 terminal exception line differs",
+        "predecessor_failure_log_sha256": V2_FAILURE_LOG_SHA256,
+        "predecessor_failure_log_bytes": V2_FAILURE_LOG_BYTES,
+        "observed_terminal_exception_line": (
+            "isaac_bank_exam_adapter.IsaacBankExamError: timing rider requires a "
+            "native-clock command before activation"
+        ),
+    }:
+        raise ExamError("v4 failure receipt failure facts differ")
+    root = Path(
+        "/workspace/codexschema/phase1_task_revision_supercombo_20260716/"
+        "runs/p2_equal_reward"
+    )
+    if receipt.get("observed_remote_state") != {
+        "v4_attempt_dir": str(root / "timing_exam_0p5_attempt_native_clock_v4/model_5700"),
+        "v4_attempt_dir_exists": False,
+        "v4_state_dir": str(root / "timing_exam_0p5_supervisor_native_clock_v4/model_5700"),
+        "v4_state_dir_exists": False,
+        "v4_output_dir": str(root / "timing_exam_0p5_native_clock_v4/model_5700"),
+        "v4_output_dir_exists": False,
+        "v4_cgroup_path": (
+            "/sys/fs/cgroup/taskrev0p5_taskrev_p2_equal_reward_5700_"
+            "4f93c0c33b05913d"
+        ),
+        "v4_cgroup_path_exists": False,
+    }:
+        raise ExamError("v4 failure receipt remote-state facts differ")
+    if receipt.get("authority") != {
+        "automatic_retry": False,
+        "retry_authorized": False,
+        "v4_launch_consumed": True,
+        "v4_launch_authorized": False,
+    }:
+        raise ExamError("v4 failure receipt retry authority differs")
+    return receipt
+
+
 def _load_queue_module(root: Path):
     path = root / "scripts/run_phase1_task_revision_supercombo_queue.py"
     spec = importlib.util.spec_from_file_location("task_revision_queue_for_0p5", path)
@@ -508,7 +606,7 @@ def load_activation(path: Path, *, root: Path) -> dict[str, Any]:
             raise ExamError("historical v1 activation bytes differ")
         raise ExamError(
             "historical v1 activation is consumed failed_no_retry; current HEAD only "
-            "authorizes the fresh source-gate-fixed v4 activation"
+            "authorizes the fresh byte-bound v5 activation"
         )
     if activation.get("activation_id") == (
         "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_asset_restored_v2"
@@ -517,7 +615,7 @@ def load_activation(path: Path, *, root: Path) -> dict[str, Any]:
             raise ExamError("historical v2 activation bytes differ")
         raise ExamError(
             "historical v2 activation is consumed by its native-clock failure; "
-            "only the fresh source-gate-fixed v4 activation may launch"
+            "only the fresh byte-bound v5 activation may launch"
         )
     if activation.get("activation_id") == (
         "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_native_clock_v3"
@@ -526,7 +624,16 @@ def load_activation(path: Path, *, root: Path) -> dict[str, Any]:
             raise ExamError("historical v3 activation bytes differ")
         raise ExamError(
             "historical v3 activation is consumed failed_no_retry; current HEAD only "
-            "authorizes the fresh source-gate-fixed v4 activation"
+            "authorizes the fresh byte-bound v5 activation"
+        )
+    if activation.get("activation_id") == (
+        "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_native_clock_v4"
+    ):
+        if sha256_file(path) != V4_ACTIVATION_SHA256:
+            raise ExamError("historical v4 activation bytes differ")
+        raise ExamError(
+            "historical v4 activation is consumed failed_no_retry; current HEAD only "
+            "authorizes the fresh byte-bound v5 activation"
         )
     expected = {
         "schema_version",
@@ -544,14 +651,15 @@ def load_activation(path: Path, *, root: Path) -> dict[str, Any]:
         "authority",
         "v2_failed_attempt",
         "v3_failed_attempt",
+        "v4_failed_attempt",
     }
     if set(activation) != expected:
         raise ExamError("activation top-level keys differ")
     if (
-        activation.get("schema_version") != 4
-        or activation.get("activation_id") != V4_ACTIVATION_ID
+        activation.get("schema_version") != 5
+        or activation.get("activation_id") != V5_ACTIVATION_ID
     ):
-        raise ExamError("activation is not the sole fresh native-clock v4 authority")
+        raise ExamError("activation is not the sole fresh native-clock v5 authority")
     selection = activation.get("selection")
     if not isinstance(selection, dict) or set(selection) != {
         "job_id",
@@ -642,8 +750,6 @@ def load_activation(path: Path, *, root: Path) -> dict[str, Any]:
             "basename": "evaluator.log",
             "failure_log_sha256": V2_FAILURE_LOG_SHA256,
             "failure_log_bytes": V2_FAILURE_LOG_BYTES,
-            "failure_reason": V2_FAILURE_REASON,
-            "terminal_exception_line": V2_FAILURE_TERMINAL_LINE,
         },
         "historical_processes": [
             {"role": "supervisor", "pid": V2_SUPERVISOR_PID,
@@ -676,19 +782,38 @@ def load_activation(path: Path, *, root: Path) -> dict[str, Any]:
         "observed_remote_state": v3_receipt["observed_remote_state"],
     }:
         raise ExamError("activation v3 failed-attempt binding differs")
+    try:
+        actual_v4_failure_receipt_sha256 = sha256_file(root / V4_FAILURE_RECEIPT)
+    except OSError as exc:
+        raise ExamError("v4 failure receipt is missing or unreadable") from exc
+    v4_receipt = _load_v4_failure_receipt(root / V4_FAILURE_RECEIPT)
+    v4_failed_attempt = activation.get("v4_failed_attempt")
+    if not isinstance(v4_failed_attempt, dict) or v4_failed_attempt != {
+        "failure_receipt_path": str(V4_FAILURE_RECEIPT),
+        "failure_receipt_sha256": actual_v4_failure_receipt_sha256,
+        "activation_id": (
+            "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_native_clock_v4"
+        ),
+        "status": "failed_no_retry",
+        "retry_authorized": False,
+        "v4_launch_consumed": True,
+        "observed_remote_state": v4_receipt["observed_remote_state"],
+    }:
+        raise ExamError("activation v4 failed-attempt binding differs")
     consumption = activation.get("consumption")
     if not isinstance(consumption, dict) or consumption != {
-        "v4_attempt_dir": str(
+        "v5_attempt_dir": str(
             expected_run_root
-            / "timing_exam_0p5_attempt_native_clock_v4"
+            / "timing_exam_0p5_attempt_native_clock_v5"
             / "model_5700"
         ),
         "v2_natural_terminal_required_before_any_consumption_write": True,
         "v3_absence_required_before_any_consumption_write": True,
+        "v4_absence_required_before_any_consumption_write": True,
         "no_clobber": True,
         "retry_authorized": False,
     }:
-        raise ExamError("activation v4 one-shot consumption binding differs")
+        raise ExamError("activation v5 one-shot consumption binding differs")
     queue = activation.get("queue")
     harness = activation.get("harness")
     if not isinstance(queue, dict) or set(queue) != {"path", "sha256"}:
@@ -768,7 +893,7 @@ def load_activation(path: Path, *, root: Path) -> dict[str, Any]:
     if not isinstance(authority, dict) or authority != {
         "launch_authorized": True,
         "automatic_retry": False,
-        "fresh_activation_after_v3_source_gate_failure": True,
+        "fresh_activation_after_v4_source_gate_failure": True,
         "maximum_launches": 1,
         "formal_evidence_eligible": False,
         "evaluation_contract_exact": False,
@@ -782,7 +907,7 @@ def load_activation(path: Path, *, root: Path) -> dict[str, Any]:
     except ValueError as exc:
         raise ExamError("activation must be a tracked file inside the repository") from exc
     if activation["_repo_path"] != str(ACTIVATION):
-        raise ExamError("current HEAD authorizes only the tracked v4 activation path")
+        raise ExamError("current HEAD authorizes only the tracked v5 activation path")
     activation["_path"] = str(path)
     activation["_sha256"] = sha256_file(path)
     return activation
@@ -831,11 +956,11 @@ def build_plan(
     ):
         raise ExamError("task-revision queue points to an unexpected timing paper")
     expected_output = str(
-        Path(job["run_dir"]) / "timing_exam_0p5_native_clock_v4" / f"model_{milestone}"
+        Path(job["run_dir"]) / "timing_exam_0p5_native_clock_v5" / f"model_{milestone}"
     )
     expected_state = str(
         Path(job["run_dir"])
-        / "timing_exam_0p5_supervisor_native_clock_v4"
+        / "timing_exam_0p5_supervisor_native_clock_v5"
         / f"model_{milestone}"
     )
     expected_milestone = str(Path(job["run_dir"]) / "milestones" / f"model_{milestone}.json")
@@ -855,6 +980,7 @@ def build_plan(
         "prior_attempt": activation["prior_attempt"],
         "v2_failed_attempt": activation["v2_failed_attempt"],
         "v3_failed_attempt": activation["v3_failed_attempt"],
+        "v4_failed_attempt": activation["v4_failed_attempt"],
         "consumption": activation["consumption"],
         "job_id": job["id"],
         "milestone": milestone,
@@ -3234,11 +3360,11 @@ def supervisor_child(spec, lock_fd, supervisor_log_fd, state_guard, output_paren
         except OSError:
             pass
 
-def validate_v2_terminal_before_v4(spec):
+def validate_v2_terminal_before_v5(spec):
     """Bind the naturally failed v2 terminal and prove its old domain is gone."""
     predecessor = spec.get("v2_failed_attempt")
     if not isinstance(predecessor, dict):
-        raise RuntimeError("v4 launch lacks a bound v2 failed attempt")
+        raise RuntimeError("v5 launch lacks a bound v2 failed attempt")
     state = Path(predecessor.get("state_dir", ""))
     output = Path(predecessor.get("output_dir", ""))
     expected = predecessor.get("natural_terminal")
@@ -3248,13 +3374,13 @@ def validate_v2_terminal_before_v4(spec):
     if (not state.is_absolute() or not output.is_absolute() or
             not isinstance(expected, dict) or not isinstance(expected_failure, dict) or
             not isinstance(historical, list) or not isinstance(forbidden, list)):
-        raise RuntimeError("v4 v2 natural-terminal binding shape differs")
+        raise RuntimeError("v5 v2 natural-terminal binding shape differs")
     basename = expected.get("basename")
     failure_basename = expected_failure.get("basename")
     for label, value in (("terminal", basename), ("failure log", failure_basename)):
         if (not isinstance(value, str) or Path(value).name != value or
                 value in {"", ".", ".."}):
-            raise RuntimeError(f"v4 v2 {label} basename differs")
+            raise RuntimeError(f"v5 v2 {label} basename differs")
     state_guard = open_directory_guard(state, create_missing=False)
     output_guard = None
     try:
@@ -3266,9 +3392,9 @@ def validate_v2_terminal_before_v4(spec):
         for name in forbidden:
             if (not isinstance(name, str) or Path(name).name != name or
                     name in {"", ".", ".."}):
-                raise RuntimeError("v4 forbidden stop-artifact basename differs")
+                raise RuntimeError("v5 forbidden stop-artifact basename differs")
             if guarded_child_exists(state_guard, name):
-                raise RuntimeError("v4 predecessor unexpectedly contains a stop artifact")
+                raise RuntimeError("v5 predecessor unexpectedly contains a stop artifact")
     finally:
         close_directory_guard(output_guard)
         close_directory_guard(state_guard)
@@ -3292,37 +3418,32 @@ def validate_v2_terminal_before_v4(spec):
                 expected.get("guardian_finish_result") or
             catastrophic.get("cgroup_populated_zero_acknowledged") is not True or
             catastrophic.get("cgroup_removed_after_populated_zero") is not True):
-        raise RuntimeError("v4 requires the exact natural v2 failed terminal")
+        raise RuntimeError("v5 requires the exact natural v2 failed terminal")
     if (hashlib.sha256(failure_raw).hexdigest() !=
             expected_failure.get("failure_log_sha256") or
             len(failure_raw) != expected_failure.get("failure_log_bytes")):
-        raise RuntimeError("v4 v2 failure log bytes differ")
-    failure_lines = failure_raw.splitlines()
-    expected_terminal_line = expected_failure.get("terminal_exception_line")
-    if (not failure_lines or not isinstance(expected_terminal_line, str) or
-            failure_lines[-1] != expected_terminal_line.encode("utf-8")):
-        raise RuntimeError("v4 v2 terminal exception line differs")
+        raise RuntimeError("v5 v2 failure log bytes differ")
 
     seen_roles = set()
     for row in historical:
         if (not isinstance(row, dict) or row.get("role") in seen_roles or
                 type(row.get("pid")) is not int or row["pid"] <= 1):
-            raise RuntimeError("v4 historical process binding differs")
+            raise RuntimeError("v5 historical process binding differs")
         seen_roles.add(row["role"])
         # Any current occupant of a frozen historical PID is ambiguous.  Fail
         # closed even if it looks like unrelated PID reuse.
-        require_proc_pid_absent(row["pid"], f"v4 predecessor {row['role']}")
+        require_proc_pid_absent(row["pid"], f"v5 predecessor {row['role']}")
     if seen_roles != {"supervisor", "guardian", "evaluator"}:
-        raise RuntimeError("v4 historical process roles differ")
+        raise RuntimeError("v5 historical process roles differ")
     cgroup_path = Path(expected.get("cgroup_path", ""))
     if not cgroup_path.is_absolute():
-        raise RuntimeError("v4 predecessor cgroup path is not absolute")
+        raise RuntimeError("v5 predecessor cgroup path is not absolute")
     try:
         os.lstat(cgroup_path)
     except FileNotFoundError:
         pass
     else:
-        raise RuntimeError("v4 predecessor cgroup still exists")
+        raise RuntimeError("v5 predecessor cgroup still exists")
     return {
         "path": str(state / basename),
         "file_sha256": hashlib.sha256(terminal_raw).hexdigest(),
@@ -3338,11 +3459,11 @@ def validate_v2_terminal_before_v4(spec):
     }
 
 
-def validate_v3_absence_before_v4(spec):
+def validate_v3_absence_before_v5(spec):
     """Re-prove that the consumed v3 source-gate failure created no namespace."""
     predecessor = spec.get("v3_failed_attempt")
     if not isinstance(predecessor, dict):
-        raise RuntimeError("v4 launch lacks a bound v3 failed attempt")
+        raise RuntimeError("v5 launch lacks a bound v3 failed attempt")
     observed = predecessor.get("observed_remote_state")
     required = {
         "v3_attempt_dir", "v3_attempt_dir_exists",
@@ -3351,46 +3472,46 @@ def validate_v3_absence_before_v4(spec):
         "v3_cgroup_path", "v3_cgroup_path_exists",
     }
     if not isinstance(observed, dict) or set(observed) != required:
-        raise RuntimeError("v4 v3 absence binding shape differs")
+        raise RuntimeError("v5 v3 absence binding shape differs")
     bindings = {}
     for label in ("attempt", "state", "output"):
         path_text = observed.get(f"v3_{label}_dir")
         if (observed.get(f"v3_{label}_dir_exists") is not False or
                 not isinstance(path_text, str)):
-            raise RuntimeError(f"v4 v3 {label} absence expectation differs")
+            raise RuntimeError(f"v5 v3 {label} absence expectation differs")
         path = Path(path_text)
         if not path.is_absolute():
-            raise RuntimeError(f"v4 v3 {label} path is not absolute")
+            raise RuntimeError(f"v5 v3 {label} path is not absolute")
         try:
             os.lstat(path)
         except FileNotFoundError:
             pass
         except OSError as exc:
             raise RuntimeError(
-                f"v4 cannot prove v3 {label} namespace absent: {exc}") from exc
+                f"v5 cannot prove v3 {label} namespace absent: {exc}") from exc
         else:
-            raise RuntimeError(f"v4 v3 {label} namespace unexpectedly exists")
+            raise RuntimeError(f"v5 v3 {label} namespace unexpectedly exists")
         bindings[f"v3_{label}_dir"] = str(path)
         bindings[f"v3_{label}_dir_absent"] = True
     cgroup_text = observed.get("v3_cgroup_path")
     if (observed.get("v3_cgroup_path_exists") is not False or
             not isinstance(cgroup_text, str)):
-        raise RuntimeError("v4 v3 cgroup absence expectation differs")
+        raise RuntimeError("v5 v3 cgroup absence expectation differs")
     cgroup_path = Path(cgroup_text)
     if not cgroup_path.is_absolute():
-        raise RuntimeError("v4 v3 cgroup path is not absolute")
+        raise RuntimeError("v5 v3 cgroup path is not absolute")
     try:
         os.lstat(cgroup_path)
     except FileNotFoundError:
         pass
     except OSError as exc:
-        raise RuntimeError(f"v4 cannot prove v3 cgroup absent: {exc}") from exc
+        raise RuntimeError(f"v5 cannot prove v3 cgroup absent: {exc}") from exc
     else:
-        raise RuntimeError("v4 v3 cgroup unexpectedly exists")
+        raise RuntimeError("v5 v3 cgroup unexpectedly exists")
     bindings["v3_cgroup_path"] = str(cgroup_path)
     bindings["v3_cgroup_absent"] = True
     current_paths = {
-        str(Path(spec["consumption"]["v4_attempt_dir"])),
+        str(Path(spec["consumption"]["v5_attempt_dir"])),
         str(Path(spec["state_dir"])),
         str(Path(spec["output_dir"])),
     }
@@ -3399,35 +3520,104 @@ def validate_v3_absence_before_v4(spec):
         bindings["v3_state_dir"],
         bindings["v3_output_dir"],
     }:
-        raise RuntimeError("v4 namespace overlaps consumed v3 namespace")
+        raise RuntimeError("v5 namespace overlaps consumed v3 namespace")
     return bindings
 
 
-def claim_activation_once(spec, v2_terminal_binding, v3_absence_binding):
-    """No-clobber v4 consumption after the v2/v3 predecessor chain is closed."""
+def validate_v4_absence_before_v5(spec):
+    """Re-prove that the consumed v4 source-gate failure created no namespace."""
+    predecessor = spec.get("v4_failed_attempt")
+    if not isinstance(predecessor, dict):
+        raise RuntimeError("v5 launch lacks a bound v4 failed attempt")
+    observed = predecessor.get("observed_remote_state")
+    required = {
+        "v4_attempt_dir", "v4_attempt_dir_exists",
+        "v4_state_dir", "v4_state_dir_exists",
+        "v4_output_dir", "v4_output_dir_exists",
+        "v4_cgroup_path", "v4_cgroup_path_exists",
+    }
+    if not isinstance(observed, dict) or set(observed) != required:
+        raise RuntimeError("v5 v4 absence binding shape differs")
+    bindings = {}
+    for label in ("attempt", "state", "output"):
+        path_text = observed.get(f"v4_{label}_dir")
+        if (observed.get(f"v4_{label}_dir_exists") is not False or
+                not isinstance(path_text, str)):
+            raise RuntimeError(f"v5 v4 {label} absence expectation differs")
+        path = Path(path_text)
+        if not path.is_absolute():
+            raise RuntimeError(f"v5 v4 {label} path is not absolute")
+        try:
+            os.lstat(path)
+        except FileNotFoundError:
+            pass
+        except OSError as exc:
+            raise RuntimeError(
+                f"v5 cannot prove v4 {label} namespace absent: {exc}") from exc
+        else:
+            raise RuntimeError(f"v5 v4 {label} namespace unexpectedly exists")
+        bindings[f"v4_{label}_dir"] = str(path)
+        bindings[f"v4_{label}_dir_absent"] = True
+    cgroup_text = observed.get("v4_cgroup_path")
+    if (observed.get("v4_cgroup_path_exists") is not False or
+            not isinstance(cgroup_text, str)):
+        raise RuntimeError("v5 v4 cgroup absence expectation differs")
+    cgroup_path = Path(cgroup_text)
+    if not cgroup_path.is_absolute():
+        raise RuntimeError("v5 v4 cgroup path is not absolute")
+    try:
+        os.lstat(cgroup_path)
+    except FileNotFoundError:
+        pass
+    except OSError as exc:
+        raise RuntimeError(f"v5 cannot prove v4 cgroup absent: {exc}") from exc
+    else:
+        raise RuntimeError("v5 v4 cgroup unexpectedly exists")
+    bindings["v4_cgroup_path"] = str(cgroup_path)
+    bindings["v4_cgroup_absent"] = True
+    current_paths = {
+        str(Path(spec["consumption"]["v5_attempt_dir"])),
+        str(Path(spec["state_dir"])),
+        str(Path(spec["output_dir"])),
+    }
+    if current_paths & {
+        bindings["v4_attempt_dir"], bindings["v4_state_dir"],
+        bindings["v4_output_dir"],
+    }:
+        raise RuntimeError("v5 namespace overlaps consumed v4 namespace")
+    return bindings
+
+
+def claim_activation_once(
+        spec, v2_terminal_binding, v3_absence_binding, v4_absence_binding):
+    """No-clobber v5 consumption after the predecessor chain is closed."""
     consumption = spec["consumption"]
-    attempt = Path(consumption["v4_attempt_dir"])
+    attempt = Path(consumption["v5_attempt_dir"])
     attempt_parent = None
     attempt_guard = None
     try:
         attempt_parent = open_directory_guard(attempt.parent, create_missing=True)
         if guarded_child_exists(attempt_parent, attempt.name):
-            raise RuntimeError(f"native-clock v4 activation attempt is already consumed: {attempt}")
+            raise RuntimeError(f"native-clock v5 activation attempt is already consumed: {attempt}")
         attempt_guard = create_child_directory_guard(attempt_parent, attempt.name)
-        if validate_v2_terminal_before_v4(spec) != v2_terminal_binding:
-            raise RuntimeError("v2 natural terminal changed before v4 attempt publication")
-        if validate_v3_absence_before_v4(spec) != v3_absence_binding:
-            raise RuntimeError("v3 absence proof changed before v4 attempt publication")
+        if validate_v2_terminal_before_v5(spec) != v2_terminal_binding:
+            raise RuntimeError("v2 natural terminal changed before v5 attempt publication")
+        if validate_v3_absence_before_v5(spec) != v3_absence_binding:
+            raise RuntimeError("v3 absence proof changed before v5 attempt publication")
+        if validate_v4_absence_before_v5(spec) != v4_absence_binding:
+            raise RuntimeError("v4 absence proof changed before v5 attempt publication")
         guarded_publish_json(attempt_guard, "attempt.json", {
             "schema_version": 1,
-            "artifact_kind": "taskrev_0p5_native_clock_v4_attempt",
+            "artifact_kind": "taskrev_0p5_native_clock_v5_attempt",
             "plan_sha256": canonical(spec),
             "activation": spec["activation"],
             "prior_attempt": spec["prior_attempt"],
             "v2_failed_attempt": spec["v2_failed_attempt"],
             "v3_failed_attempt": spec["v3_failed_attempt"],
+            "v4_failed_attempt": spec["v4_failed_attempt"],
             "v2_natural_terminal_binding": v2_terminal_binding,
             "v3_absence_binding": v3_absence_binding,
+            "v4_absence_binding": v4_absence_binding,
             "exam_bank": spec["exam_bank"],
             "exam_rebind_report": spec["exam_rebind_report"],
             "status": "consumed",
@@ -3445,17 +3635,18 @@ def claim_activation_once(spec, v2_terminal_binding, v3_absence_binding):
 def launch(spec):
     # No write is permitted until both restored assets have exact size and SHA.
     validate_restored_assets(spec)
-    v2_terminal_binding = validate_v2_terminal_before_v4(spec)
-    v3_absence_binding = validate_v3_absence_before_v4(spec)
+    v2_terminal_binding = validate_v2_terminal_before_v5(spec)
+    v3_absence_binding = validate_v3_absence_before_v5(spec)
+    v4_absence_binding = validate_v4_absence_before_v5(spec)
     attempt_guard = claim_activation_once(
-        spec, v2_terminal_binding, v3_absence_binding)
+        spec, v2_terminal_binding, v3_absence_binding, v4_absence_binding)
     try:
         context = validate_inputs(spec, validate_process=True)
     except BaseException as exc:
         try:
             guarded_publish_json(attempt_guard, "preflight_failure.json", {
                 "schema_version": 1,
-                "artifact_kind": "taskrev_0p5_native_clock_v4_preflight_failure",
+                "artifact_kind": "taskrev_0p5_native_clock_v5_preflight_failure",
                 "activation": spec["activation"],
                 "status": "failed_no_retry",
                 "error": f"{type(exc).__name__}: {exc}",
@@ -3484,12 +3675,14 @@ def launch(spec):
         gpu_samples = stable_resource_gate(spec)
         # The predecessor closure is part of launch authority, not merely an
         # attempt-ledger annotation.  Re-prove it after the potentially slow
-        # input/resource preflight and before any v4 supervisor namespace,
+        # input/resource preflight and before any v5 supervisor namespace,
         # cgroup, lock, or process can be created.
-        if validate_v2_terminal_before_v4(spec) != v2_terminal_binding:
-            raise RuntimeError("v2 natural terminal changed before v4 process creation")
-        if validate_v3_absence_before_v4(spec) != v3_absence_binding:
-            raise RuntimeError("v3 absence proof changed before v4 process creation")
+        if validate_v2_terminal_before_v5(spec) != v2_terminal_binding:
+            raise RuntimeError("v2 natural terminal changed before v5 process creation")
+        if validate_v3_absence_before_v5(spec) != v3_absence_binding:
+            raise RuntimeError("v3 absence proof changed before v5 process creation")
+        if validate_v4_absence_before_v5(spec) != v4_absence_binding:
+            raise RuntimeError("v4 absence proof changed before v5 process creation")
         output_parent_guard = open_directory_guard(output.parent, create_missing=True)
         state_parent_guard = open_directory_guard(state_dir.parent, create_missing=True)
         if guarded_child_exists(output_parent_guard, output.name):

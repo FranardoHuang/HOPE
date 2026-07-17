@@ -58,9 +58,10 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   supervisor/evaluator/guardian 和旧 cgroup 均 absent，先前 stop 尝试没有发出 signal，也不得重放。
   v3 已改为先安装 native command、验证零速第0帧，再激活 retiming，但唯一 launch 被旧日志门假拒绝：
   raw SHA 没漂移，只因同一句在 traceback 出现两次；v3 零 namespace 且已冻结。v4 仅改为 raw SHA、字节数
-  与最后异常行精确匹配，并使用 fresh namespace；源码合并专项仍为 `88 passed, 1 skipped`。最近只读快照：Pod2 为 0 trainer；Pod1 有 Yikang trainer
+  与最后异常行精确匹配，但真实类名带模块前缀，v4 也在零 namespace 阶段假拒绝并冻结。v5 彻底删除
+  traceback 文本解析，只保留 exact raw SHA+bytes；合并专项 `89 passed, 1 skipped`。最近只读快照：Pod2 为 0 trainer；Pod1 有 Yikang trainer
   正常推进，Codex trainer 停在 model3600 约10小时，另有旧 BankExam evaluator 无 timeout 地占用三卡。
-  清理与新启动都只可精确管理已绑定 PID/PGID，不得碰 Yikang。v4 尚未唯一执行，终档仍需 vendor
+  清理与新启动都只可精确管理已绑定 PID/PGID，不得碰 Yikang。v5 尚未唯一执行，终档仍需 vendor
   MuJoCo 同题。详见
   [0.5 秒卷宗](experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md)。
 
