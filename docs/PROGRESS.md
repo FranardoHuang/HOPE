@@ -13,6 +13,11 @@
 
 ## 2026-07-17
 
+- Stage2 TOPP v8 在 Pod2 唯一自然结束：四格均 generator/TOPP `rc=0`、MJCF closure 通过，但最短时间
+  `0.80/0.86/1.10/0.94 s`，`0/4 <=0.5 s`；summary `ac880412…b7030c`。解释器闭包假拒绝已闭环，
+  当前 join-ladder family 则按预注册负结果停止；这仍是 screening，不是行为或部署通过。见
+  [动作卷宗](experiments/2026-07/EXP-MOTION-READY-TO-STRIKE-0P5.md)。
+
 - exact-0.5 K100 v1 的唯一 Pod2 launch 在约 `5.779 s` 后于 `validate_inputs` 因 immutable bank 缺失
   `rc=2` fail closed；receipt `f53a6813…1728` 证明 supervisor/cgroup/ACK/evaluator 均未创建，v1 永久
   禁止重发。bank/report 已按 `0444`、exact size/SHA no-clobber 恢复；资产恢复版 v2 绑定 harness

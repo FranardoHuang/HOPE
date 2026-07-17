@@ -41,8 +41,10 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   `rc134` 与一个 boot stale-timeout 不算科学失败且不自动重跑；两个 positive-delay 格因 governor/actor
   transport 尚非同 tick 原子继续 NO-LAUNCH。0.5 秒 K100 paper
   已在两 Pod 物化但尚无 checkpoint 行为分数；现役 v4rg 正反手 TOPP 已在 Pod2 CPU-only 一次完成，
-  两侧安全证书均通过，但当前搜索族只找到正手 `0.98 s`、反手 `0.78 s` 的可行 run-up 上界，没有
-  0.5 秒动力学证书。这不证明 0.5 秒绝对不可能，却证明旧固定倍率不能冒充可行动作加速。
+  两侧安全证书均通过。Stage2 v8 随后在 Pod2 唯一执行，四个中点均被 TOPP 合法求解且 MJCF 闭包
+  通过，但时间为 `0.80/0.86/1.10/0.94 s`，`0/4` 达到 `0.5 s`；当前 join-ladder family 因此按预注册
+  停止，不再靠更多同族中点碰运气。这不证明 0.5 秒绝对不可能，却证明现役动作形状仍是瓶颈，旧固定
+  倍率和当前拼接族都不能冒充可行动作加速。
   `+200` 机制失活、`+500` 极端崩坏和 `+1000` 同父本容差 Pareto 的组合保护式淘汰 consumer
   已闭合。2026-07-17 双 Pod 各一次 no-clobber `+1000` cycle 已为全部 19 条到档臂补齐行为 receipt；
   3 条基础设施失败仍排除，`ssh_signal_count=0`。这次仍没有合法淘汰项：不是因为没执行比较，而是旧
