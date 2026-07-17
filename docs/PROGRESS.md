@@ -13,6 +13,10 @@
 
 ## 2026-07-18
 
+- exact-0.5 K100 v3 的唯一 Pod2 launch 在零远端 namespace 阶段假拒绝：v2 log SHA 完全一致，但旧门错误
+  要求异常文案只出现一次，实际 traceback 源码行与末行各一次。v3 已用 receipt `32525b0f…bbc82d3`
+  冻结为 `failed_no_retry`；v4 只改成 raw SHA + bytes + 最后异常行并使用 fresh namespace。runner/activation
+  `1e12d791…d99d7c7/4f93c0c3…ccd864`，合并专项 `88 passed, 1 skipped`，仍待唯一 Pod2 行为执行。
 - exact-0.5 K100 v2 已自然 `failed_no_retry` 并完成 guardian D0 清理；旧三进程、cgroup 与 Kit lock holder
   均 absent，先前 exact-stop 在 signal 前 fail closed，禁止重放。v3 改为三次绑定自然 terminal/log 与
   absence 闭包，并修复 heartbeat 短写 freshness、成功 final receipt 和两类自产失败 terminal 的 inspect

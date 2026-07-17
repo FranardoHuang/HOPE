@@ -70,7 +70,7 @@ Follow-up note (2026-07-17, ready-ruler successor queue source paper; Gate remai
   [experiment](../experiments/2026-07/EXP-P1-TASK-REVISION-READY-SUCCESSOR.md) and
   [operation](../operations/run_phase1_task_revision_ready_successor.md).
 
-Follow-up note (updated 2026-07-18, exact-0.5 K100 v2 failed before question one and v3 prepared; Gate remains `Partial`):
+Follow-up note (updated 2026-07-18, exact-0.5 K100 v2 failed before question one, v3 source-gate false rejection, v4 prepared; Gate remains `Partial`):
 
 - The only v1 Pod2 launch exited `rc=2` after about `5.779 s` in `validate_inputs` because the immutable
   exam bank was absent. It created no supervisor, delegated cgroup, commit ACK or evaluator and sent no
@@ -85,6 +85,11 @@ Follow-up note (updated 2026-07-18, exact-0.5 K100 v2 failed before question one
   the local delegated-cgroup runtime probe. Before any v3 process creation, the consumer repeatedly binds
   the natural v2 terminal/log plus old PID/cgroup and stop-artifact absence. The previous exact-stop attempt
   wrote no intent/result and sent no signal; it must not be replayed. Exact-0.5 behavior therefore remains open.
+- The sole v3 launch was then rejected before any v3 attempt/state/output/cgroup existed because the source gate
+  incorrectly required the frozen failure phrase to occur exactly once; the exact log SHA was unchanged and the
+  traceback legitimately contained it twice. V3 is now immutable `failed_no_retry`. V4 keeps the same behavior
+  fix but validates raw SHA, 36,059 bytes and the exact final exception line. Runner/activation are
+  `1e12d791…d99d7c7/4f93c0c3…ccd864`; combined tests remain `88 passed, 1 skipped`.
 
 Follow-up note (2026-07-17, planner ready-ruler source repair; Gate remains `Partial`):
 
@@ -2899,7 +2904,7 @@ CUDA 全局 env-id 越界。0.36 秒支路第 18 步缩集、首 PPO 窗 24 步�
 并新增 4096-env/high-id partial-reset 回归。`A4` 无 checkpoint，进程与 GPU context 已 absent；修复版
 尚未 fresh full-scene 通过，因此 successor queue 仍不得点火，G05 保持 `Partial`。
 
-### 2026-07-18 exact-0.5 K100 v2 自然终档与 v3 启动门
+### 2026-07-18 exact-0.5 K100 v2 自然终档、v3 假拒绝与 v4 启动门
 
 资产恢复版 v2 在第 1 题前暴露 native-clock 安装顺序错误后，最终自然写出 `failed_no_retry` terminal；
 terminal file/content SHA 为 `2d3a9c7d…4894d/76cd8121…bb7d`，错误日志为
@@ -2912,4 +2917,6 @@ v3 runner `2c117866…445b` 与 activation `68f2a5eb…404d` 改为在 attempt �
 absence；`/proc` 不可读不能当作 absent。heartbeat freshness 只认带换行且 strict UTC 的最后完整记录，
 成功 terminal 必须稳定绑定 final receipt，失败 terminal 的 committed-before-ACK 与 pre-decision 分支也可
 被同一 inspect 合法复核。专项为 `60 passed, 1 skipped`，连同物化器/timing adapter 为
-`88 passed, 1 skipped`。这只解锁一次 fresh Pod2 v3 运行；尚无 K100 行为分数，G05 保持 `Partial`。
+`88 passed, 1 skipped`。v3 随后因 occurrence-count 假门在零 namespace 阶段失败并永久冻结；v4
+runner/activation=`1e12d791…d99d7c7/4f93c0c3…ccd864` 只改用 raw SHA + bytes + 最后异常行并采用
+fresh namespace。这只解锁一次 Pod2 v4 运行；尚无 K100 行为分数，G05 保持 `Partial`。

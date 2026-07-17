@@ -1,6 +1,6 @@
 # EXP-P1-TASK-REVISION-0P5-K100 — 0.5 秒能否实际接住
 
-- 状态：`Partial / OPEN`（v2 在首题前暴露 native-clock 顺序错误并已自然 D0 终止；v3 尚未运行）
+- 状态：`Partial / OPEN`（v2 在首题前暴露 native-clock 顺序错误；v3 source gate 假拒绝且零远端 namespace；v4 待唯一运行）
 - 阶段/轴：Phase-1 / 准备时间与同球 revision
 - 集成小目标：用固定 0.5 秒题表直接测回球能力，而不是从 Reward 或动作倍率推断
 - 人类负责人：Franco
@@ -26,8 +26,8 @@
 | --- | --- |
 | 选定 checkpoint | `taskrev_p2_equal_reward@model_5700`，Pod2；由 milestone/behavior receipt 绑定 |
 | 题表 | fixed exact-25-tick K100；100 题、每侧 50，缺失仍计入分母 |
-| activation | v3 `configs/phase1_task_revision_0p5_exam_activation_v3_20260717.json`，SHA `68f2a5eb…404d`；v2 activation `2b91248b…0626` 永久禁止重发/停止 |
-| 持久执行器 | `scripts/run_phase1_task_revision_0p5_exam.py`，SHA `2c117866…445b` |
+| activation | v4 `configs/phase1_task_revision_0p5_exam_activation_v4_20260718.json`，SHA `4f93c0c3…ccd864`；v1/v2/v3 永久禁止重发 |
+| 持久执行器 | `scripts/run_phase1_task_revision_0p5_exam.py`，SHA `1e12d791…d99d7c7` |
 | 输入资产 | bank `63,643 B / 60e1a7ad…d1ca`；重绑定报告 `18,795 B / dd4332ed…ad0` |
 | v1 失败墓碑 | `configs/phase1_task_revision_0p5_exam_v1_failure_20260717.json`，SHA `f53a6813…1728` |
 | 结果资格 | Isaac diagnostic only；`formal_evidence_eligible=false`、`evaluation_contract_exact=false` |
@@ -58,7 +58,10 @@
   cgroup 全部 absent；`/proc` permission/error 不能冒充 absent。heartbeat freshness 只取最后一个带换行
   且 strict UTC 的完整 JSONL record；完整 terminal 还必须逐字节绑定 final receipt。
 - 2026-07-18 的 Pod2 单次只读取证已确认 v2 全链 absent；source gate、错误日志和自然终档都不能写成
-  0.5 秒能力结果。v3 仍需唯一 RunPod 执行后才有行为结论。
+  0.5 秒能力结果。随后 v3 唯一 launch 因旧校验要求 failure reason 在整份 traceback 中恰好出现一次而
+  假拒绝；实际 raw SHA 完全一致、文案正常出现两次，且 v3 attempt/state/output/cgroup 全部 absent。
+  v3 receipt `32525b0f…bbc82d3` 将它冻结为 `failed_no_retry`。v4 改为 raw SHA + 36,059 bytes + 最后
+  异常行精确匹配，专项/合并回归仍为 `60 passed, 1 skipped` / `88 passed, 1 skipped`。
 
 ## 运行表
 
@@ -66,7 +69,8 @@
 | --- | --- | --- | --- | --- | --- |
 | v1 exact-0.5 中性代表卷 `phase1_task_revision_0p5_k100_p2_equal_reward_model5700_v1` | `failed_no_retry` | `model_5700` | Pod2 `rc=2`、约 `5.779 s`；receipt `f53a6813…1728` | 无 | bank 缺失；supervisor/cgroup/ACK/evaluator 均未创建；永久禁止重发 |
 | 资产恢复版 v2 `phase1_task_revision_0p5_k100_p2_equal_reward_model5700_asset_restored_v2` | `failed_no_retry / naturally closed` | `model_5700` | log `f8c3be8b…a9e28`；terminal `2d3a9c7d…4894d`；D0/旧进程与 cgroup absent | 无 scorecard | 0 题执行；永久禁止重发或再 stop |
-| native-clock 修正版 v3 `phase1_task_revision_0p5_k100_p2_equal_reward_model5700_native_clock_v3` | `source ready / not launched` | `model_5700` | source `88 passed, 1 skipped`；fresh activation/output/state | 尚无 | 自然终档闭包已过只读取证；仍需唯一 RunPod launch |
+| native-clock 修正版 v3 `phase1_task_revision_0p5_k100_p2_equal_reward_model5700_native_clock_v3` | `failed_no_retry / zero remote namespace` | `model_5700` | log SHA 未漂移；reason 两次；receipt `32525b0f…bbc82d3` | 无 | source gate 假拒绝；禁止重发 |
+| 最小门修正版 v4 `phase1_task_revision_0p5_k100_p2_equal_reward_model5700_native_clock_v4` | `source ready / not launched` | `model_5700` | runner/activation `1e12d791…d99d7c7/4f93c0c3…ccd864`；`88 passed, 1 skipped` | 尚无 | 只修日志语义门并使用 fresh namespace；待唯一 launch |
 
 ## 分动作成绩表
 
@@ -79,5 +83,5 @@
 
 - 决定：`inconclusive`
 - 是否已纳入当前 setting：`no`
-- 下一门：按[操作文档](../../operations/run_phase1_task_revision_0p5_exam.md)在 Pod2 以 fresh v3 namespace
-  唯一启动并用只读 `inspect` 验证；v1/v2 永久禁止重发或再 stop。之后还要在 vendor MuJoCo 同题复核。
+- 下一门：按[操作文档](../../operations/run_phase1_task_revision_0p5_exam.md)在 Pod2 以 fresh v4 namespace
+  唯一启动并用只读 `inspect` 验证；v1/v2/v3 永久禁止重发。之后还要在 vendor MuJoCo 同题复核。

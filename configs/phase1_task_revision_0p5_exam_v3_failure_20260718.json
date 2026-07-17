@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "artifact_kind": "phase1-task-revision-0p5-k100-launch-failure-receipt",
+  "receipt_id": "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_v3_failed_no_retry",
+  "status": "failed_no_retry",
+  "attempt": {
+    "activation_id": "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_native_clock_v3",
+    "activation_path": "configs/phase1_task_revision_0p5_exam_activation_v3_20260717.json",
+    "activation_sha256": "68f2a5eb75bb626194de4ee83da0c01283fd52fb9f385779f317cefda245404d",
+    "harness_path": "scripts/run_phase1_task_revision_0p5_exam.py",
+    "harness_sha256": "2c117866b3fa7a39d5d8480567c0d192668ea068eebd763399f339bf40c8445b",
+    "source_commit": "32c13c27ecc80b0f0886013109c789e8abbd76dc",
+    "queue_path": "configs/phase1_task_revision_supercombo_20260716.yaml",
+    "queue_sha256": "e050a056e40f9988989826ed8de03f8a7bfd8ada9c4420cd005c66eadb5b5497",
+    "job_id": "taskrev_p2_equal_reward",
+    "milestone": 5700,
+    "pod": "pod2",
+    "physical_eval_gpu": 1,
+    "argv": [
+      "python3",
+      "scripts/run_phase1_task_revision_0p5_exam.py",
+      "--queue",
+      "configs/phase1_task_revision_supercombo_20260716.yaml",
+      "--activation",
+      "configs/phase1_task_revision_0p5_exam_activation_v3_20260717.json",
+      "--eval-gpu",
+      "1",
+      "launch",
+      "--execute",
+      "--confirm",
+      "SIM_ONLY_LAUNCH_ONE_PERSISTENT_TASKREV_0P5_K100"
+    ],
+    "runner_exit_code": 2,
+    "remote_result_status": "failed_no_retry",
+    "transcript_evidence": "operator_observed_reconstructed_no_raw_transcript"
+  },
+  "failure": {
+    "stage": "validate_v2_terminal_before_v3",
+    "exception_type": "RuntimeError",
+    "exception_message": "v3 v2 failure log differs",
+    "predecessor_failure_log_sha256": "f8c3be8b54e57d452847254e2a184dee9014361a621de5957996123fd77a9e28",
+    "predecessor_failure_log_bytes": 36059,
+    "predecessor_failure_reason": "timing rider requires a native-clock command before activation",
+    "predecessor_terminal_exception_line": "IsaacBankExamError: timing rider requires a native-clock command before activation",
+    "predecessor_terminal_file_sha256": "2d3a9c7dac3d23b072b2c5672f1a9a0e23fc7fdc7b233cb693da95f2acf4894d",
+    "predecessor_terminal_content_sha256": "76cd812139f084c90b08c3b80700327dd599b0e706f9b044a15c164765a3bb7d"
+  },
+  "observed_remote_state": {
+    "v3_attempt_dir": "/workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/timing_exam_0p5_attempt_native_clock_v3/model_5700",
+    "v3_attempt_dir_exists": false,
+    "v3_state_dir": "/workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/timing_exam_0p5_supervisor_native_clock_v3/model_5700",
+    "v3_state_dir_exists": false,
+    "v3_output_dir": "/workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/timing_exam_0p5_native_clock_v3/model_5700",
+    "v3_output_dir_exists": false,
+    "v3_cgroup_path": "/sys/fs/cgroup/taskrev0p5_taskrev_p2_equal_reward_5700_68f2a5eb75bb6261",
+    "v3_cgroup_path_exists": false
+  },
+  "authority": {
+    "automatic_retry": false,
+    "retry_authorized": false,
+    "v3_launch_consumed": true,
+    "v3_launch_authorized": false
+  }
+}

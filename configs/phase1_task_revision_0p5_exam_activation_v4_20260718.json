@@ -1,0 +1,140 @@
+{
+  "schema_version": 4,
+  "activation_id": "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_native_clock_v4",
+  "created_utc": "2026-07-17T17:22:05Z",
+  "selection": {
+    "job_id": "taskrev_p2_equal_reward",
+    "milestone": 5700,
+    "pod": "pod2",
+    "output_dir": "/workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/timing_exam_0p5_native_clock_v4/model_5700",
+    "state_dir": "/workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/timing_exam_0p5_supervisor_native_clock_v4/model_5700",
+    "milestone_receipt": "/workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/milestones/model_5700.json",
+    "behavior_receipt": "/workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/behavior_milestones/model_5700.json",
+    "rationale": "Fresh v4 namespace after the sole v3 launch failed before any remote namespace: preserve full-log SHA honesty while validating the exact terminal exception line instead of assuming the root-cause phrase occurs once in a traceback."
+  },
+  "prior_attempt": {
+    "failure_receipt_path": "configs/phase1_task_revision_0p5_exam_v1_failure_20260717.json",
+    "failure_receipt_sha256": "f53a68136feca34af5e6f7764e11c734f6e151edfff4375ca4a23e29bd611728",
+    "activation_id": "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_v1",
+    "status": "failed_no_retry",
+    "retry_authorized": false,
+    "v1_launch_consumed": true
+  },
+  "v2_failed_attempt": {
+    "activation": {
+      "path": "configs/phase1_task_revision_0p5_exam_activation_v2_20260717.json",
+      "sha256": "2b91248b8ec7f626ea5281ea9abdf4512662d6e88ddb9ff399d637340bfc0626",
+      "activation_id": "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_asset_restored_v2"
+    },
+    "state_dir": "/workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/timing_exam_0p5_supervisor_asset_restored_v2/model_5700",
+    "output_dir": "/workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/timing_exam_0p5_asset_restored_v2/model_5700",
+    "natural_terminal": {
+      "basename": "terminal.json",
+      "file_sha256": "2d3a9c7dac3d23b072b2c5672f1a9a0e23fc7fdc7b233cb693da95f2acf4894d",
+      "content_sha256": "76cd812139f084c90b08c3b80700327dd599b0e706f9b044a15c164765a3bb7d",
+      "status": "failed_no_retry",
+      "guardian_finish_result": "D0",
+      "cgroup_path": "/sys/fs/cgroup/taskrev0p5_taskrev_p2_equal_reward_5700_2b91248b8ec7f626"
+    },
+    "failure_log": {
+      "basename": "evaluator.log",
+      "failure_log_sha256": "f8c3be8b54e57d452847254e2a184dee9014361a621de5957996123fd77a9e28",
+      "failure_log_bytes": 36059,
+      "failure_reason": "timing rider requires a native-clock command before activation",
+      "terminal_exception_line": "IsaacBankExamError: timing rider requires a native-clock command before activation"
+    },
+    "historical_processes": [
+      {"role": "supervisor", "pid": 502505, "start_ticks": 573485617},
+      {"role": "guardian", "pid": 502506, "start_ticks": 573485624},
+      {"role": "evaluator", "pid": 502542}
+    ],
+    "forbidden_stop_artifacts": [
+      "exact_stop_native_clock_failure_v1.json",
+      "exact_stop_native_clock_failure_result_v1.json"
+    ]
+  },
+  "v3_failed_attempt": {
+    "failure_receipt_path": "configs/phase1_task_revision_0p5_exam_v3_failure_20260718.json",
+    "failure_receipt_sha256": "32525b0f9fce31ac754fafd6307b7d04eae09a328d711572070aa1c68bbc82d3",
+    "activation_id": "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_native_clock_v3",
+    "status": "failed_no_retry",
+    "retry_authorized": false,
+    "v3_launch_consumed": true,
+    "observed_remote_state": {
+      "v3_attempt_dir": "/workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/timing_exam_0p5_attempt_native_clock_v3/model_5700",
+      "v3_attempt_dir_exists": false,
+      "v3_state_dir": "/workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/timing_exam_0p5_supervisor_native_clock_v3/model_5700",
+      "v3_state_dir_exists": false,
+      "v3_output_dir": "/workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/timing_exam_0p5_native_clock_v3/model_5700",
+      "v3_output_dir_exists": false,
+      "v3_cgroup_path": "/sys/fs/cgroup/taskrev0p5_taskrev_p2_equal_reward_5700_68f2a5eb75bb6261",
+      "v3_cgroup_path_exists": false
+    }
+  },
+  "required_assets": {
+    "exam_bank": {
+      "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_exam_bank_rebind_v1/s1_v4rg_runtime_order_schema3_exam_882fea4_rebound.npz",
+      "bytes": 63643,
+      "sha256": "60e1a7ade72eaf64e17a1b83795125551f08c6699c8a3cc3c269500d8e6cd1ca"
+    },
+    "rebind_report": {
+      "path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_exam_bank_rebind_v1/rebind_report.json",
+      "bytes": 18795,
+      "sha256": "dd4332edb47f1fb1f4d51ca00ceed612dbcadf9e395eb536c9b73bef9de69ad0"
+    }
+  },
+  "consumption": {
+    "v4_attempt_dir": "/workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/timing_exam_0p5_attempt_native_clock_v4/model_5700",
+    "v2_natural_terminal_required_before_any_consumption_write": true,
+    "v3_absence_required_before_any_consumption_write": true,
+    "no_clobber": true,
+    "retry_authorized": false
+  },
+  "queue": {
+    "path": "configs/phase1_task_revision_supercombo_20260716.yaml",
+    "sha256": "e050a056e40f9988989826ed8de03f8a7bfd8ada9c4420cd005c66eadb5b5497"
+  },
+  "harness": {
+    "path": "scripts/run_phase1_task_revision_0p5_exam.py",
+    "sha256": "1e12d79128cd37991c09e0d9ae44b27df2c9853e3c3c82437a639802ed99d7c7"
+  },
+  "resource_gate": {
+    "allowed_eval_gpus": [0, 1, 2],
+    "minimum_selected_gpu_free_mib": 6000,
+    "minimum_other_gpu_free_mib": 3000,
+    "headroom_rationale": "Sample all three Pod2 GPUs twice: the selected evaluator GPU needs 6000 MiB, while each other GPU keeps 3000 MiB because one Isaac evaluator has historically opened 690-1558 MiB contexts on non-selected cards.",
+    "stable_samples": 2,
+    "sample_interval_seconds": 1.0
+  },
+  "catastrophic_cleanup": {
+    "requires_delegated_cgroup_v2": true,
+    "guardian_required": true,
+    "cgroup_kill_required": true,
+    "trusted_single_operator_filesystem": true,
+    "unsupported_result": "NO_LAUNCH"
+  },
+  "supervision": {
+    "hello_timeout_seconds": 30.0,
+    "commit_timeout_seconds": 60.0,
+    "ack_observation_seconds": 15.0,
+    "ssh_timeout_seconds": 60.0,
+    "heartbeat_seconds": 30.0,
+    "evaluator_total_timeout_seconds": 3600.0,
+    "completed_artifact_teardown_grace_seconds": 180.0,
+    "exact_term_grace_seconds": 30.0,
+    "converter_timeout_seconds": 300.0,
+    "guardian_ready_timeout_seconds": 10.0,
+    "guardian_finish_timeout_seconds": 60.0
+  },
+  "authority": {
+    "launch_authorized": true,
+    "automatic_retry": false,
+    "fresh_activation_after_v3_source_gate_failure": true,
+    "maximum_launches": 1,
+    "formal_evidence_eligible": false,
+    "evaluation_contract_exact": false,
+    "trainer_signal": false,
+    "robot_command": false,
+    "broad_signal": false
+  }
+}
