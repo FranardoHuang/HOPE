@@ -672,6 +672,18 @@ class RacketTargetCommand(CommandTerm):
             self._planner_visible_last_precontact = torch.zeros(
                 n, dtype=torch.bool, device=self.device
             )
+            # The planner-owned clock deliberately disables the legacy hold counters: preparation
+            # time comes from the task deadline, not from a second frozen-reference clock.  Keep a
+            # separate instrumentation-only identity latch so the exact behavior ledger can still
+            # sample the robot once at the beginning of every physical-ball task.  Without this,
+            # defining "ready" exclusively as ``motion.in_hold`` makes every planner-revision run
+            # report a silent zero denominator even though task-entry state is observable.
+            self._exact_ready_sampled_control_epoch = torch.zeros(
+                n, dtype=torch.long, device=self.device
+            )
+            self._exact_ready_sampled_task_id = torch.zeros(
+                n, dtype=torch.long, device=self.device
+            )
             # Actor delivery is a different event from producer acceptance.  Keep the complete
             # task identity so a delayed ring cannot confuse revision 2 of two adjacent balls.
             self._planner_actor_control_epoch = torch.zeros(
@@ -3643,6 +3655,9 @@ class RacketTargetCommand(CommandTerm):
             "ready_station_offset_eligible_sample_count",
             "ready_foot_contact_eligible_sample_count",
             "ready_foot_slip_eligible_sample_count",
+            "ready_phase_sample_count",
+            "ready_planner_task_entry_sample_count",
+            "ready_foot_sensor_unavailable_sample_count",
             "ready_nonfinite_value_count",
         ):
             if name not in ledger:
@@ -3774,13 +3789,60 @@ class RacketTargetCommand(CommandTerm):
         )
 
     def _book_exact_ready_behavior_samples(self) -> None:
-        """Accumulate hold/recovery balance sums with an explicit denominator per quantity."""
+        """Accumulate ready-state balance sums with an explicit denominator per quantity.
 
-        in_hold = getattr(self._motion(), "in_hold", None)
+        Legacy playback exposes readiness as every hold/recovery step.  Planner-revision playback
+        intentionally sets all legacy holds to zero because its initial TTS owns preparation time;
+        for that mode, readiness is sampled exactly once at each new ``(control_epoch, task_id)``.
+        The task-entry latch is instrumentation-only and never affects observations, rewards,
+        resets, sampling, or the phase governor.
+        """
+
+        motion = self._motion()
+        in_hold = getattr(motion, "in_hold", None)
         if in_hold is None:
-            return
-        eligible = in_hold.detach().bool()
+            if not getattr(self, "planner_revision_enabled", False):
+                return
+            eligible = torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+        else:
+            eligible = in_hold.detach().bool()
+
+        planner_entry = torch.zeros_like(eligible)
+        if getattr(self, "planner_revision_enabled", False):
+            if not getattr(motion, "planner_revision_enabled", False):
+                raise RuntimeError(
+                    "planner ready instrumentation requires the planner-owned motion clock"
+                )
+            # Unit-test construction may bypass __init__; lazy allocation preserves the same
+            # zero/zero sentinel used by the real constructor without weakening live validation.
+            if not hasattr(self, "_exact_ready_sampled_control_epoch"):
+                self._exact_ready_sampled_control_epoch = torch.zeros(
+                    self.num_envs, dtype=torch.long, device=self.device
+                )
+                self._exact_ready_sampled_task_id = torch.zeros(
+                    self.num_envs, dtype=torch.long, device=self.device
+                )
+            epoch = self._planner_control_epoch.detach()
+            task = self._planner_task_id.detach()
+            active = motion._planner_active.detach().bool()
+            planner_entry = (
+                active
+                & (epoch > 0)
+                & (task > 0)
+                & (
+                    (epoch != self._exact_ready_sampled_control_epoch)
+                    | (task != self._exact_ready_sampled_task_id)
+                )
+            )
+            eligible = eligible | planner_entry
+
         ledger = self._ensure_exact_behavior_decision_counters()
+        ledger["ready_phase_sample_count"].add_(eligible.sum(dtype=torch.long))
+        ledger["ready_planner_task_entry_sample_count"].add_(
+            planner_entry.sum(dtype=torch.long)
+        )
         data = self.robot.data
         tilt = torch.acos(self.metrics["base_upright"].detach().clamp(-1.0, 1.0))
         base_speed = torch.linalg.vector_norm(data.root_lin_vel_w[:, :2].detach(), dim=-1)
@@ -3827,6 +3889,21 @@ class RacketTargetCommand(CommandTerm):
                 "ready_foot_slip_eligible_sample_count",
                 "ready_foot_slip_speed_mps_sum",
                 slip,
+            )
+        else:
+            # A zero foot denominator is ambiguous unless the ledger says whether the phase was
+            # absent or the contact sensor was unavailable.  Count the latter explicitly; never
+            # fabricate zero contact/slip observations.
+            ledger["ready_foot_sensor_unavailable_sample_count"].add_(
+                eligible.sum(dtype=torch.long)
+            )
+
+        if getattr(self, "planner_revision_enabled", False):
+            self._exact_ready_sampled_control_epoch[planner_entry] = (
+                self._planner_control_epoch[planner_entry]
+            )
+            self._exact_ready_sampled_task_id[planner_entry] = (
+                self._planner_task_id[planner_entry]
             )
 
     def consume_exact_behavior_decision_counters(self) -> dict[str, torch.Tensor]:

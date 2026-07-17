@@ -2375,6 +2375,9 @@ def test_exact_ready_balance_aggregates_have_explicit_phase_and_sensor_denominat
 
     command._book_exact_ready_behavior_samples()
     first = command.consume_exact_behavior_decision_counters()
+    assert first["ready_phase_sample_count"].item() == 3
+    assert first["ready_planner_task_entry_sample_count"].item() == 0
+    assert first["ready_foot_sensor_unavailable_sample_count"].item() == 0
     for key in (
         "ready_tilt_eligible_sample_count",
         "ready_base_speed_eligible_sample_count",
@@ -2395,6 +2398,103 @@ def test_exact_ready_balance_aggregates_have_explicit_phase_and_sensor_denominat
     second = command.consume_exact_behavior_decision_counters()
     assert second["ready_tilt_eligible_sample_count"].item() == 0
     assert second["ready_foot_contact_eligible_sample_count"].item() == 0
+
+
+def test_exact_ready_planner_task_entry_has_nonzero_full_scene_denominators_once():
+    command = _exact_behavior_command(types.SimpleNamespace(active_terms=()))
+    command.planner_revision_enabled = True
+    command._motion_term = types.SimpleNamespace(
+        event_timing_enabled=False,
+        planner_revision_enabled=True,
+        in_hold=torch.zeros(4, dtype=torch.bool),
+        _planner_active=torch.ones(4, dtype=torch.bool),
+    )
+    command._event_timing_bound = True
+    command._planner_control_epoch = torch.tensor([1, 1, 2, 2])
+    command._planner_task_id = torch.tensor([1, 2, 1, 3])
+    command.metrics = {
+        "base_upright": torch.cos(torch.tensor([0.1, 0.2, 0.3, 0.4])),
+        "foot_contact_frac": torch.tensor([1.0, 0.5, 1.0, 0.5]),
+        "foot_slip_speed": torch.tensor([0.0, 0.1, 0.2, 0.3]),
+    }
+    command.robot = types.SimpleNamespace(
+        data=types.SimpleNamespace(
+            root_pos_w=torch.tensor(
+                [[0.0, 0.0, 1.0], [0.1, 0.0, 1.0], [0.0, 0.2, 1.0], [0.3, 0.4, 1.0]]
+            ),
+            root_lin_vel_w=torch.tensor(
+                [[0.0, 0.0, 0.0], [0.1, 0.0, 0.0], [0.0, 0.2, 0.0], [0.3, 0.4, 0.0]]
+            ),
+        )
+    )
+    command.base_target_pos_w = torch.zeros(4, 2)
+    command._foot_idx_robot = [0, 1]
+    command._foot_idx_contact = [0, 1]
+    command._contact_sensor = object()
+
+    command._book_exact_ready_behavior_samples()
+    first = command.consume_exact_behavior_decision_counters()
+    assert first["ready_phase_sample_count"].item() == 4
+    assert first["ready_planner_task_entry_sample_count"].item() == 4
+    for key in (
+        "ready_tilt_eligible_sample_count",
+        "ready_base_speed_eligible_sample_count",
+        "ready_station_offset_eligible_sample_count",
+        "ready_foot_contact_eligible_sample_count",
+        "ready_foot_slip_eligible_sample_count",
+    ):
+        assert first[key].item() == 4
+    assert first["ready_foot_sensor_unavailable_sample_count"].item() == 0
+
+    # The same task identity is sampled only once, even if a planner estimate is revised many times.
+    command._book_exact_ready_behavior_samples()
+    second = command.consume_exact_behavior_decision_counters()
+    assert second["ready_phase_sample_count"].item() == 0
+    assert second["ready_tilt_eligible_sample_count"].item() == 0
+
+    # A same-episode next ball changes task_id and produces one new task-entry sample.
+    command._planner_task_id[2] += 1
+    command._book_exact_ready_behavior_samples()
+    third = command.consume_exact_behavior_decision_counters()
+    assert third["ready_phase_sample_count"].item() == 1
+    assert third["ready_planner_task_entry_sample_count"].item() == 1
+    assert third["ready_foot_contact_eligible_sample_count"].item() == 1
+
+
+def test_exact_ready_missing_foot_sensor_is_explicitly_unavailable_not_zero_observation():
+    command = _exact_behavior_command(types.SimpleNamespace(active_terms=()), num_envs=2)
+    command._motion_term = types.SimpleNamespace(
+        event_timing_enabled=False,
+        in_hold=torch.tensor([True, True]),
+    )
+    command._event_timing_bound = True
+    command.metrics = {
+        "base_upright": torch.ones(2),
+        # Historical zero-filled metric buffers may exist even when no sensor resolved.  They must
+        # not become eligible observations.
+        "foot_contact_frac": torch.zeros(2),
+        "foot_slip_speed": torch.zeros(2),
+    }
+    command.robot = types.SimpleNamespace(
+        data=types.SimpleNamespace(
+            root_pos_w=torch.tensor([[0.0, 0.0, 1.0], [0.1, 0.2, 1.0]]),
+            root_lin_vel_w=torch.zeros(2, 3),
+        )
+    )
+    command.base_target_pos_w = torch.zeros(2, 2)
+    command._foot_idx_robot = []
+    command._foot_idx_contact = []
+    command._contact_sensor = None
+
+    command._book_exact_ready_behavior_samples()
+    snapshot = command.consume_exact_behavior_decision_counters()
+    assert snapshot["ready_phase_sample_count"].item() == 2
+    assert snapshot["ready_tilt_eligible_sample_count"].item() == 2
+    assert snapshot["ready_foot_contact_eligible_sample_count"].item() == 0
+    assert snapshot["ready_foot_slip_eligible_sample_count"].item() == 0
+    assert snapshot["ready_foot_contact_fraction_sum"].item() == 0.0
+    assert snapshot["ready_foot_slip_speed_mps_sum"].item() == 0.0
+    assert snapshot["ready_foot_sensor_unavailable_sample_count"].item() == 2
 
 
 def test_exact_planner_revision_activation_counters_book_and_reset_per_update():
