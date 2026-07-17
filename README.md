@@ -1,0 +1,93 @@
+# HOPE PingPong
+
+HOPE PingPong is an open-source stack for training and deploying a **whole-body table-tennis
+policy** on the [Agibot A3](https://www.zhiyuan-robot.com/) humanoid (31 actuated DOF). A single
+feed-forward policy — shared by forehand and backhand — stands at a fixed station and returns a
+continuous stream of incoming balls, choosing forehand or backhand per ball, using its legs only
+to balance and recentre in place.
+
+It is a **reference implementation**: the motions, rewards, action adapter, side selector, and
+physics constants shipped here are clean, documented examples meant to be replaced with your own.
+
+## What you can do
+
+```
+install dependencies
+  -> train one unified forehand/backhand policy on the sample motions
+  -> export an actor-only ONNX policy
+  -> start the planner
+  -> return a continuous stream of incoming balls in simulation
+  -> forehand / backhand chosen automatically per ball
+  -> keep a fixed station and rally continuously
+  -> swap in your own motions, reward, side selector, or policy and iterate
+```
+
+The whole product is intentionally focused. It **includes**: one unified forehand+backhand policy;
+one forehand and one backhand sample motion; automatic side selection; continuous multi-rally play
+with no robot-state reset between balls; a fixed station and base heading; leg control for in-place
+balance and recovery; a no-spin ball model; Isaac Lab + PPO training; planner, MuJoCo, and Agibot
+run entry points; and a single public metric, `success_rate`.
+
+It **excludes** (by design): station movement, footstep planning, locomotion, ball spin, motion
+retiming/TOPP, opponent adaptation, shot strategy, and all internal shadow/gate/debug/replay,
+failure-check, and checkpoint-promotion machinery.
+
+## The one metric
+
+`success_rate` is the only reported number. A ball counts once it enters the robot's strike task; a
+return succeeds when the racket **actually contacts** the ball **and** the ball **crosses the net**
+**and** its **first bounce lands on the opponent half**.
+
+```
+success_rate = successful_return_tasks / incoming_balls_that_entered_a_strike_task
+```
+
+Forehand, backhand, and all rally rounds merge into this one number. It is descriptive only — no
+threshold, no best-checkpoint selection, no effect on exit codes or deployment.
+
+## Repository layout
+
+| Path | What |
+|------|------|
+| [`configs/ball_physics.yaml`](configs/ball_physics.yaml) | The single no-spin ball-physics config (real-data fit), read by training, planner, and eval. |
+| [`hope_training/`](hope_training/) | Isaac Lab + PPO training package, the two sample motions, and the ball-physics fitting code. |
+| [`hope_ws/`](hope_ws/) | ROS 2 workspace: `hope_msgs` (RacketCommand), `hope_planner`, `hope_bringup`, and the vendored `vrpn_mocap` driver. |
+| [`HitchopenRevised/`](HitchopenRevised/) | The deploy side: the Mulan-licensed MuJoCo simulation and a clean-room reference runner. See note below. |
+| [`mocap/`](mocap/) | The motion-capture frame and topic contract. |
+| [`docs/`](docs/) | Interfaces and how-to guides (index below). |
+
+### A note on `HitchopenRevised/`
+
+The Agibot A3 deployment runner in production is a proprietary, modified fork of Agibot's official
+deploy code and is **not** redistributed here. `HitchopenRevised` (a revised fork of the official
+Agibot A3 deploy code, by Intelligent Racing Inc. dba Hitch Interactive) ships instead:
+
+- the **Mulan-licensed AimRT MuJoCo simulation** (runnable), and
+- a **clean-room Python reference runner** that implements the public 111-D observation / 31-D
+  action / `RacketCommand` contract and drives the MuJoCo sim, plus an integration seam for wiring
+  the contract into your own licensed Agibot vendor package on the real robot.
+
+The A3 URDF and meshes are also not redistributed (no upstream open-source license); you supply your
+own — see [`HitchopenRevised/URDF/README.md`](HitchopenRevised/URDF/README.md).
+
+## Documentation
+
+- [docs/QUICKSTART.md](docs/QUICKSTART.md) — end-to-end: install → train → export → evaluate → run in sim.
+- [docs/TRAIN_POLICY.md](docs/TRAIN_POLICY.md) — training the unified forehand/backhand policy.
+- [docs/REPLACE_MOTIONS.md](docs/REPLACE_MOTIONS.md) — the motion-clip format and how to use your own.
+- [docs/POLICY_INTERFACE.md](docs/POLICY_INTERFACE.md) — the 111-D observation and 31-D action contract.
+- [docs/PLANNER_INTERFACE.md](docs/PLANNER_INTERFACE.md) — the planner pipeline and `RacketCommand`.
+- [docs/RUN_ON_AGIBOT.md](docs/RUN_ON_AGIBOT.md) — running in MuJoCo and integrating your vendor package.
+- [docs/EXTENDING_HOPE_PINGPONG.md](docs/EXTENDING_HOPE_PINGPONG.md) — bring your own reward, adapter, side selector, motions, physics.
+
+## Motions are reference examples only
+
+The two clips under `hope_training/motions/preprocessed/` are short, physically-neutral placeholders
+that make the pipeline run out of the box. **They are not performance-tuned.** Replace them with your
+own retargeted forehand/backhand motions before training a policy you intend to deploy.
+
+## License
+
+Apache-2.0. Copyright 2025–2026 Intelligent Racing Inc. (dba Hitch Interactive). See
+[LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for third-party components
+(the vendored VRPN driver, the AimRT MuJoCo simulation, and the table USD asset).
