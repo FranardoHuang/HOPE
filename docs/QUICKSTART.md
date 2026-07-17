@@ -26,12 +26,12 @@ python -m pip install hydra-core omegaconf     # used by the Hydra entry points
 ## 2. Supply the A3 robot asset
 
 The A3 URDF/meshes are not redistributed. Place your own A3 ping-pong URDF package under
-`HitchopenRevised/URDF/` (see [`HitchopenRevised/URDF/README.md`](../HitchopenRevised/URDF/README.md)),
+`a3_deploy/URDF/` (see [`a3_deploy/URDF/README.md`](../a3_deploy/URDF/README.md)),
 then build the Isaac asset:
 
 ```bash
 python hope_training/whole_body_tracking/scripts/prepare_a3_isaac_asset.py \
-    --source-root HitchopenRevised/URDF/<your_a3_package> --force
+    --source-root a3_deploy/URDF/<your_a3_package> --force
 ```
 
 ## 3. Train the unified policy
@@ -72,8 +72,8 @@ Copy the exported policy to the runner and drive the MuJoCo simulation:
 
 ```bash
 cp logs/rsl_rl/hope_pingpong/<run>/exported/hope_pingpong.onnx \
-   HitchopenRevised/a3_deploy_example/models/
-cd HitchopenRevised/a3_deploy_example
+   a3_deploy/a3_deploy_example/models/
+cd a3_deploy/a3_deploy_example
 bash scripts/run_pingpong_sim.sh
 ```
 

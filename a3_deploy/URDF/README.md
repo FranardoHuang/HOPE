@@ -12,7 +12,7 @@ Obtain the `A3T2.5-URDF-std-pingpang` package from your Agibot A3 robot vendor /
 robot support materials and place it here so the tree looks like:
 
 ```
-HitchopenRevised/URDF/
+a3_deploy/URDF/
   README.md                          # this file (the only file shipped here)
   A3T2.5-URDF-std-pingpang/
     urdf/
@@ -37,8 +37,8 @@ you invoke the tools.
   (`prepare_a3_isaac_asset.py`) reads the URDF and meshes from this directory to
   build the Isaac Lab robot asset. Because the URDF is not shipped, that step is
   documented to require the model you place here; point it at
-  `HitchopenRevised/URDF/A3T2.5-URDF-std-pingpang/urdf/URDF-JOINT-LINK.urdf`.
-- **The MuJoCo sim.** `HitchopenRevised/A3_MuJoCo_Sim` uses its own `a3_pingpong`
+  `a3_deploy/URDF/A3T2.5-URDF-std-pingpang/urdf/URDF-JOINT-LINK.urdf`.
+- **The MuJoCo sim.** `a3_deploy/A3_MuJoCo_Sim` uses its own `a3_pingpong`
   MJCF and a bundled copy of the robot meshes, so it runs **without** this URDF
   directory. Note, however, that the sim's bundled STL meshes are the **same**
   physical-robot assets as the URDF meshes here — see the licensing note in the

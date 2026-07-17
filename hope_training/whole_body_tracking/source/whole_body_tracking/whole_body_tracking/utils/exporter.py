@@ -31,7 +31,7 @@ CONTROL_RATE_HZ = 50
 # The ActionAdapter constants (default_q, action_scale, clamp limits) are shipped as an editable
 # EXAMPLE config, referenced by path and read by BOTH training and the reference runner. They are not
 # baked into the policy.
-ACTION_ADAPTER_CONFIG = "HitchopenRevised/a3_deploy_example/config/action_adapter.yaml"
+ACTION_ADAPTER_CONFIG = "a3_deploy/a3_deploy_example/config/action_adapter.yaml"
 # Canonical joint-order source (31 DOF), relative to the repo root.
 JOINT_ORDER_CONFIG = "hope_training/config/joint_order_agibot_a3.yaml"
 

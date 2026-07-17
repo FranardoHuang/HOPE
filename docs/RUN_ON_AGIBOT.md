@@ -1,7 +1,7 @@
 # Running on the Agibot A3
 
-The deploy side of HOPE PingPong lives under [`HitchopenRevised/`](../HitchopenRevised).
-**HitchopenRevised** is a revised fork of the official AgiBot A3 deploy stack. The proprietary
+The deploy side of HOPE PingPong lives under [`a3_deploy/`](../a3_deploy).
+**`a3_deploy/`** is a revised fork of the official AgiBot A3 deploy stack. The proprietary
 vendor runner is **not** redistributed in this repository; instead you get:
 
 1. a **clean-room Python reference runner** that implements the public policy contract and runs
@@ -15,8 +15,8 @@ Nothing here executes real-robot control on your behalf.
 
 | Item | Why | Where it goes |
 |------|-----|---------------|
-| A trained policy `hope_pingpong.onnx` | the actor network | `HitchopenRevised/a3_deploy_example/models/` (see [export](TRAIN_POLICY.md)) |
-| The A3 URDF/meshes (`A3T2.5-URDF-std-pingpang`) | not redistributed (no upstream OSS license) | `HitchopenRevised/URDF/` — see its `README.md` |
+| A trained policy `hope_pingpong.onnx` | the actor network | `a3_deploy/a3_deploy_example/models/` (see [export](TRAIN_POLICY.md)) |
+| The A3 URDF/meshes (`A3T2.5-URDF-std-pingpang`) | not redistributed (no upstream OSS license) | `a3_deploy/URDF/` — see its `README.md` |
 | Your own AgiBot vendor deploy package | required for the **real robot** path only | referenced by `run_pingpong_real.sh` |
 
 The MuJoCo simulation ships with a runnable `a3_pingpong` model, so the **simulation path needs
@@ -30,7 +30,7 @@ The reference runner drives MuJoCo in-process via `MujocoDirectBridge`: it loads
 realizes the 31 joint-position targets with an explicit PD controller.
 
 ```bash
-cd HitchopenRevised/a3_deploy_example
+cd a3_deploy/a3_deploy_example
 # place your exported hope_pingpong.onnx under models/ first
 bash scripts/run_pingpong_sim.sh
 ```
@@ -64,7 +64,7 @@ bypass those mechanisms.
 ## ActionAdapter (shared with training)
 
 Both the reference runner and training read the same
-`HitchopenRevised/a3_deploy_example/config/action_adapter.yaml`:
+`a3_deploy/a3_deploy_example/config/action_adapter.yaml`:
 
 ```
 q_des = default_q + raw_action * action_scale   # then a deterministic joint clamp
@@ -76,7 +76,7 @@ in sync. See [POLICY_INTERFACE.md](POLICY_INTERFACE.md) for the full action cont
 
 ## Runtime config
 
-`HitchopenRevised/a3_deploy_example/config/hope_pingpong_runtime.yaml` holds the clean 111-D
+`a3_deploy/a3_deploy_example/config/hope_pingpong_runtime.yaml` holds the clean 111-D
 runtime settings (control rate 50 Hz, observation normalization none, ONNX path, joint-order
 file, ActionAdapter path). It contains no model version numbers, recipes, or internal
 references.

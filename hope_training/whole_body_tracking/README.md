@@ -30,11 +30,11 @@ Optionally `source setup_train_env.sh` (in the GPU/Isaac shell) to put the worki
 ## Robot asset (you supply the URDF)
 
 The A3 URDF and meshes are **not** redistributed here. Place your own A3 ping-pong URDF package under
-`HitchopenRevised/URDF/` (see [`HitchopenRevised/URDF/README.md`](../../HitchopenRevised/URDF/README.md)),
+`a3_deploy/URDF/` (see [`a3_deploy/URDF/README.md`](../../a3_deploy/URDF/README.md)),
 then generate the Isaac asset:
 
 ```bash
-python scripts/prepare_a3_isaac_asset.py --source-root HitchopenRevised/URDF/<your_a3_package> --force
+python scripts/prepare_a3_isaac_asset.py --source-root a3_deploy/URDF/<your_a3_package> --force
 python scripts/prepare_a3_isaac_asset.py --check   # verify the prepared asset
 ```
 

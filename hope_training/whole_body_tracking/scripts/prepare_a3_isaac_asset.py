@@ -2,19 +2,19 @@
 """Prepare (or verify) the Agibot A3 ping-pong URDF as an Isaac Lab asset.
 
 **You supply the URDF.** The A3 URDF + meshes are not redistributed with this repository. Place your
-own Agibot A3 ping-pong URDF package under ``HitchopenRevised/URDF/`` in this layout::
+own Agibot A3 ping-pong URDF package under ``a3_deploy/URDF/`` in this layout::
 
-    HitchopenRevised/URDF/<your_a3_package>/
+    a3_deploy/URDF/<your_a3_package>/
         urdf/<robot>.urdf
         meshes/*.STL
 
-(see ``HitchopenRevised/URDF/README.md``). This script copies the meshes and rewrites the URDF's
+(see ``a3_deploy/URDF/README.md``). This script copies the meshes and rewrites the URDF's
 ``package://.../meshes/*.STL`` references to repo-relative ``../meshes/*.STL`` so Isaac Lab can load the
 model without ROS package resolution. The generated asset is written under the training package's
 ``assets/agibot_a3`` directory (git-ignored; regenerate it locally).
 
 Usage:
-    python scripts/prepare_a3_isaac_asset.py --source-root HitchopenRevised/URDF/<your_a3_package>
+    python scripts/prepare_a3_isaac_asset.py --source-root a3_deploy/URDF/<your_a3_package>
     python scripts/prepare_a3_isaac_asset.py --check     # verify an already-prepared asset
 """
 
@@ -29,13 +29,13 @@ import xml.etree.ElementTree as ET
 def _repo_root() -> pathlib.Path:
     here = pathlib.Path(__file__).resolve()
     for parent in here.parents:
-        if (parent / "hope_training").is_dir() and (parent / "HitchopenRevised").is_dir():
+        if (parent / "hope_training").is_dir() and (parent / "a3_deploy").is_dir():
             return parent
     return here.parents[3]
 
 
 REPO_ROOT = _repo_root()
-DEFAULT_SOURCE_ROOT = REPO_ROOT / "HitchopenRevised" / "URDF" / "agibot_a3_pingpong"
+DEFAULT_SOURCE_ROOT = REPO_ROOT / "a3_deploy" / "URDF" / "agibot_a3_pingpong"
 DEFAULT_OUTPUT_ROOT = (
     REPO_ROOT
     / "hope_training"
@@ -72,7 +72,7 @@ def _find_source_urdf(source_root: pathlib.Path) -> pathlib.Path:
     if not candidates:
         raise FileNotFoundError(
             f"no .urdf found under {urdf_dir}. Provide your own A3 URDF package "
-            "(see HitchopenRevised/URDF/README.md)."
+            "(see a3_deploy/URDF/README.md)."
         )
     return candidates[0]
 

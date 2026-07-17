@@ -53,7 +53,7 @@ threshold, no best-checkpoint selection, no effect on exit codes or deployment.
 | [`hope_training/`](hope_training/) | Isaac Lab + PPO training package, the two sample motions, and the ball-physics fitting code. |
 | [`hope_ws/`](hope_ws/) | ROS 2 workspace: `hope_msgs` (RacketCommand), `hope_planner`, `hope_bringup`, and the vendored `vrpn_mocap` driver. |
 | [`agibot/`](agibot/) | Agibot A3 materials: deploy example, URDF/meshes, AimRT MuJoCo sim, and PKU open-source hardware. |
-| [`HitchopenRevised/`](HitchopenRevised/) | The deploy side: the Mulan-licensed MuJoCo simulation and a clean-room reference runner. See note below. |
+| [`a3_deploy/`](a3_deploy/) | The deploy side: the Mulan-licensed MuJoCo simulation and a clean-room reference runner. See note below. |
 | [`mocap/`](mocap/) | The motion-capture frame and topic contract. |
 | [`docs/`](docs/) | Interfaces and how-to guides (index below). |
 
@@ -64,7 +64,7 @@ The repository ships two ways to run the policy on the Agibot A3:
 - [`agibot/`](agibot/) — the full Agibot A3 deploy example (deploy sources, URDF/meshes, the AimRT
   MuJoCo simulation, and the PKU open-source hardware). Component licensing is summarized in
   [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-- [`HitchopenRevised/`](HitchopenRevised/) — a lightweight reference runner (by Intelligent Racing
+- [`a3_deploy/`](a3_deploy/) — a lightweight reference runner (by Intelligent Racing
   Inc. dba Hitch Interactive) that implements the public 111-D observation / 31-D action /
   `RacketCommand` contract and drives the Mulan-licensed MuJoCo simulation. It is a minimal,
   dependency-light illustration of the deployment contract described in

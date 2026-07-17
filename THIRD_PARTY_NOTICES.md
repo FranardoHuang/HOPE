@@ -37,19 +37,19 @@ unmodified except for documentation links.
 
 ## AimRT MuJoCo simulation
 
-- Location: `HitchopenRevised/A3_MuJoCo_Sim/aimrt_mujoco_sim/`
+- Location: `a3_deploy/A3_MuJoCo_Sim/aimrt_mujoco_sim/`
 - License: Mulan Permissive Software License, Version 2 (Mulan PSL v2)
 - Origin: AgiBot AimRT-based MuJoCo simulation.
 
 The Mulan PSL v2 license text is retained in
-`HitchopenRevised/A3_MuJoCo_Sim/aimrt_mujoco_sim/LICENSE`. As published, this package bundles:
+`a3_deploy/A3_MuJoCo_Sim/aimrt_mujoco_sim/LICENSE`. As published, this package bundles:
 
 - **`joint_msgs`** (AgiBot ROS/AimRT message definitions), distributed under the same Mulan
   PSL v2 license as part of the simulation package.
 - The **`a3_pingpong` MuJoCo model and meshes**, which are AgiBot A3 robot CAD geometry
   distributed as part of this Mulan-licensed simulation package. This is the runnable robot
   model shipped with the repository. The equivalent standalone URDF/meshes are **not**
-  redistributed here (see `HitchopenRevised/URDF/README.md`).
+  redistributed here (see `a3_deploy/URDF/README.md`).
 
 ---
 

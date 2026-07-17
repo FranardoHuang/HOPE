@@ -31,7 +31,7 @@ Emits only ``{"success_rate": <float>}`` to stdout (and optionally --json-out); 
 one-line human summary goes to stderr.
 
 Requires ``mujoco``, ``onnxruntime``, ``pyyaml`` and ``numpy`` plus the shipped
-reference deploy package (``HitchopenRevised/a3_deploy_example``) and the
+reference deploy package (``a3_deploy/a3_deploy_example``) and the
 ``a3_pingpong`` MJCF. Runs OUTSIDE Isaac.
 """
 
@@ -48,17 +48,17 @@ import numpy as np
 def _repo_root() -> pathlib.Path:
     here = pathlib.Path(__file__).resolve()
     for parent in here.parents:
-        if (parent / "HitchopenRevised").is_dir() and (parent / "hope_training").is_dir():
+        if (parent / "a3_deploy").is_dir() and (parent / "hope_training").is_dir():
             return parent
     return here.parents[3]
 
 
 def _reference_pkg_dir(repo_root: pathlib.Path) -> pathlib.Path:
-    return repo_root / "HitchopenRevised" / "a3_deploy_example" / "reference"
+    return repo_root / "a3_deploy" / "a3_deploy_example" / "reference"
 
 
 def _default_runtime_config(repo_root: pathlib.Path) -> pathlib.Path:
-    return repo_root / "HitchopenRevised" / "a3_deploy_example" / "config" / "hope_pingpong_runtime.yaml"
+    return repo_root / "a3_deploy" / "a3_deploy_example" / "config" / "hope_pingpong_runtime.yaml"
 
 
 def _load_success_metric(repo_root: pathlib.Path):

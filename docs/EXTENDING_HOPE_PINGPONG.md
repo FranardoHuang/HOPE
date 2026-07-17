@@ -26,13 +26,13 @@ reward freely without changing how success is measured.
 The policy emits a 31-D raw action; the **ActionAdapter** turns it into 31 joint-position targets.
 Training and the deploy runner read the **same** config so they stay in sync:
 
-- Config (shared): `HitchopenRevised/a3_deploy_example/config/action_adapter.yaml`
+- Config (shared): `a3_deploy/a3_deploy_example/config/action_adapter.yaml`
   (`default_q`, `action_scale`, clamp limits — the shipped values are neutral examples, **tune them
   for your robot**).
 - Training side: `hope_training/.../tasks/tracking/mdp/hope_actions.py`
   (`ClampedJointPositionAction`).
 - Deploy side: the `action_adapter` module in
-  `HitchopenRevised/a3_deploy_example/reference/a3_deploy_onnx_ref_pingpong/`.
+  `a3_deploy/a3_deploy_example/reference/a3_deploy_onnx_ref_pingpong/`.
 
 Keep the two sides reading the same file so a change applies everywhere. See
 [POLICY_INTERFACE.md](POLICY_INTERFACE.md#actionadapter).

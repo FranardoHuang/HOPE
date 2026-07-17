@@ -65,7 +65,7 @@ q_des = clamp(q_des, q_min, q_max)      # deterministic numeric transform, not a
 ```
 
 The example constants (`default_q`, `action_scale`, clamp limits) live in a single shared
-config, `HitchopenRevised/a3_deploy_example/config/action_adapter.yaml`, read by **both**
+config, `a3_deploy/a3_deploy_example/config/action_adapter.yaml`, read by **both**
 training and the reference runner so you edit them in one place. The shipped values are a
 neutral starting point — **tune them for your robot**. The deterministic clamp is a numeric
 transform; it never emits a failure/rejection status.
