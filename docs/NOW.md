@@ -50,11 +50,15 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   因而没有发布 portfolio-stop receipt。旧臂多数已经自然终档；这一批不能再宣称排出胜者，也不能靠
   事后删指标制造胜者。后续新池必须先在 full-scene probe 证明 ready 分母非零，才允许占用长训槽。
   自动 rolling 任务在本次 task-revision/TOPP 关键修复期间保持暂停。旧同步 K100 长时间没有形成可信
-  终态，不进入成绩；新的 checkpoint-bound [持久监督器](DEFINITIONS.md#persistent-supervisor) source gate
-  已冻结（harness `c2ce2784…1b63`、activation `996775d6…7cfb6`，`35 passed, 1 skipped`），但 skip 正是
-  Pod delegated cgroup-v2 实探针；正式 launch 和行为分都没跑，所以仍为 `NO_LAUNCH`/Partial。13:05Z
-  Pod2 只读快照为 `0 trainer / 3 GPU 空闲`，Pod1=`UNKNOWN`。通过运行门后才允许唯一启动，随后按 receipt 淘汰并把胜者
-  送 vendor MuJoCo。详见
+  终态，不进入成绩。checkpoint-bound [持久监督器](DEFINITIONS.md#persistent-supervisor) v1 的唯一 Pod2
+  launch 在约 `5.779 s` 后因 exam bank 缺失于输入门 `rc=2` fail closed，supervisor/cgroup/ACK/evaluator
+  均未创建；receipt `f53a6813…1728` 已将 v1 永久冻结且不授权 retry。bank/report 随后按 `0444`、exact
+  size/SHA no-clobber 恢复；资产恢复版 v2 绑定 harness `be17289c…cc59`、activation
+  `2b91248b…0626`、v1 失败墓碑与 fresh namespace，专项 `41 passed, 1 skipped`。skip 仍是本地主机的
+  delegated cgroup-v2 实探针，v2 Pod launch 和行为分尚未运行，所以仍为 `NO_LAUNCH`/Partial。13:39Z
+  最新只读快照为 Pod2 `0 trainer / 3 GPU 空闲`；13:38Z Pod1 有 Yikang 与 Codex 各一条 trainer（都在
+  GPU0）及 GPU2 一条 BankExam，GPU1 基本空闲。自动任务仍按本次修复窗口暂停，不能把空卡误写成训练
+  正在跑。通过运行门后才允许 v2 唯一启动，随后按 receipt 淘汰并把胜者送 vendor MuJoCo。详见
   [task-revision 卷宗](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md)。
 
 - **300 Hz 动捕不会再触发 300 Hz planner solve：** 正式 arena、节点默认和 schema-4 overlay 现都显式

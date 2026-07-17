@@ -133,7 +133,7 @@ The training scaffold exists under:
 - Before launching a pruneable successor, run a clean detached full-scene probe that proves a
   finite checkpoint, exact source/contract binding, nonzero conserved task-entry and ready
   denominators, zero planner legacy-hold violations and explicit sensor availability. The Pod2
-  CPU-only direct probe (`3/3`) checks source mechanics only. It does not replace the full-scene
+  CPU-only direct probe (`4/4` on exact `0ebd14a6…a8dd`) checks source mechanics only. It does not replace the full-scene
   probe or the two complete disjoint 100-update windows required for any ranking or stop.
 - `rewards.free_wrist_ori_mimic` (R16, default `false`): drop `right_wrist_yaw_Link` (the racket
   mount) from the `motion_body_ori` / `motion_body_ang_vel` body lists — the wrist's ORIENTATION

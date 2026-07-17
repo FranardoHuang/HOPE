@@ -698,10 +698,9 @@ successor 在每个 active 新 `(control_epoch, task_id)` 安装后的首次 met
 `ready_foot_sensor_unavailable_sample_count`。最后一项只解释 foot contact/slip 为何没有分母，不能把缺测
 伪造成数值零；legacy-hold violation 只报警，不能进入 ready 和。
 
-Pod2 已对 exact source `2d8d0eb0…e885470dff` 做一次 CPU-only direct probe。第一次调用 Isaac Python 的
-pytest 在测试收集前因环境没有 pytest 而停止；没有源码测试执行，不能记为源码失败。保持零安装后，使用
-同一 Python direct import 的三个指定函数均通过，前后 worktree clean。该 `3/3` 只关闭 dependency-light
-source 机制检查；最终候选四个 focused 函数另在本地 Torch shim 下通过，包括 illegal-hold 负例。下一
+Pod2 已对最终 exact source `0ebd14a6…a8dd` 做 CPU-only direct probe；四个 focused 函数全部通过，前后
+worktree clean。此前缺 pytest、临时浮点 stub 过严和 exact source 尚未物化的拒绝都只算 harness 失败。
+该 `4/4` 只关闭 dependency-light source 机制检查，包括 illegal-hold 负例。下一
 queue 在 `launch_authorized=true` 前仍必须用 clean detached source 跑 full-scene，
 同时证明 finite checkpoint、exact source/contract、非零且守恒的 task-entry/ready 分母、零 planner
 legacy-hold violation 与明确的 foot-sensor availability。科学淘汰还必须再取得两个互不重叠、完整的

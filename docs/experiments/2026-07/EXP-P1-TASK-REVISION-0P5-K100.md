@@ -1,6 +1,6 @@
 # EXP-P1-TASK-REVISION-0P5-K100 — 0.5 秒能否实际接住
 
-- 状态：`ready`（source gate 通过；Pod runtime 与行为卷未运行）
+- 状态：`Partial / OPEN`（v1 输入门已真实失败且永久冻结；资产恢复后的 v2 尚未启动）
 - 阶段/轴：Phase-1 / 准备时间与同球 revision
 - 集成小目标：用固定 0.5 秒题表直接测回球能力，而不是从 Reward 或动作倍率推断
 - 人类负责人：Franco
@@ -26,20 +26,31 @@
 | --- | --- |
 | 选定 checkpoint | `taskrev_p2_equal_reward@model_5700`，Pod2；由 milestone/behavior receipt 绑定 |
 | 题表 | fixed exact-25-tick K100；100 题、每侧 50，缺失仍计入分母 |
-| activation | `configs/phase1_task_revision_0p5_exam_activation_v1_20260717.json`，SHA `996775d6…7cfb6` |
-| 持久执行器 | `scripts/run_phase1_task_revision_0p5_exam.py`，SHA `c2ce2784…1b63` |
+| activation | v2 `configs/phase1_task_revision_0p5_exam_activation_v2_20260717.json`，SHA `2b91248b…0626` |
+| 持久执行器 | `scripts/run_phase1_task_revision_0p5_exam.py`，v2 SHA `be17289c…cc59` |
+| 输入资产 | bank `63,643 B / 60e1a7ad…d1ca`；重绑定报告 `18,795 B / dd4332ed…ad0` |
+| v1 失败墓碑 | `configs/phase1_task_revision_0p5_exam_v1_failure_20260717.json`，SHA `f53a6813…1728` |
 | 结果资格 | Isaac diagnostic only；`formal_evidence_eligible=false`、`evaluation_contract_exact=false` |
 | 重试/信号 | 自动重试=false；trainer/robot/broad signal=false |
 
-## source gate 与当前阻塞
+## v1 真实失败、v2 source gate 与当前阻塞
 
-- 专项回归：`35 passed, 1 skipped`。skip 是本地主机没有可写的 delegated cgroup-v2 child；它不能替代
+- v1 是唯一一次 Pod2 launch：`rc=2`、墙钟约 `5.779 s`，在 `validate_inputs` 因 immutable exam bank
+  缺失而 fail closed。它没有物化 supervisor、delegated cgroup、commit ACK 或 evaluator，也没有 signal
+  trainer；失败 receipt 为 `f53a6813…1728`。这份 activation 已消费且 `retry_authorized=false`，永久禁止
+  重发。
+- 缺失的 bank 与 rebind report 后来按 exact SHA/size、`0444`、no-clobber 恢复到 Pod2：分别为
+  `63,643 B / 60e1a7ad…d1ca` 与 `18,795 B / dd4332ed…ad0`。这是输入资产恢复，不是 v1 retry，也不是
+  行为通过。
+- v2 专项回归：`41 passed, 1 skipped`。skip 是本地主机没有可写的 delegated cgroup-v2 child；它不能替代
   Pod 上的实际探针。
-- 持久执行器把 activation、queue、checkpoint、hard contract、claim/binding、运行时、题表与输出路径
-  绑定；唯一 `launch` 使用不可覆盖提交链，唯一 `inspect` 只读。监督器只拥有本次 evaluator，并要求
+- v2 在任何远端消费写入前依次验证资产 SHA/size、v1 failure tombstone 和 fresh v2 attempt marker，再
+  执行其余 preflight；state/output 使用 `asset_restored_v2` 新 namespace，不会覆盖 v1。持久执行器把
+  activation、queue、checkpoint、hard contract、claim/binding、运行时、题表与输出路径绑定；唯一
+  `launch` 使用不可覆盖提交链，唯一 `inspect` 只读。监督器只拥有本次 evaluator，并要求
   guardian、真实 `cgroup.kill` 探针、精确 PID/PGID/starttime、心跳、总 deadline、终态清理确认。
-- **当前仍为 `NO_LAUNCH`：** Pod 上 delegated cgroup-v2 写入/迁移/`cgroup.kill` 探针尚未实测，正式
-  launch 尚未执行，也没有 behavior score。source gate 通过不能写成 0.5 秒能力通过。
+- **当前 v2 仍为 `NO_LAUNCH`：** v2 尚未在 Pod2 执行，Pod delegated cgroup-v2 探针与行为卷也没有
+  v2 结果。source gate 和资产恢复不能写成 0.5 秒能力通过。
 - 2026-07-17 13:05Z 的单次只读资源快照为 Pod2 `0 trainer / 3 GPU 空闲`；Pod1 未核，记为
   `UNKNOWN`，不从旧状态推断。
 
@@ -47,7 +58,8 @@
 
 | 运行（人话名 + `run_name`） | 状态 | Checkpoint | 证据 | 结果产物 | 有效性说明 |
 | --- | --- | --- | --- | --- | --- |
-| exact-0.5 中性代表卷 `phase1_task_revision_0p5_k100_p2_equal_reward_model5700_v1` | `ready / NO_LAUNCH` | `model_5700` | source `35 passed, 1 skipped` | 尚无 | Pod probe、launch、K100 score 均未跑 |
+| v1 exact-0.5 中性代表卷 `phase1_task_revision_0p5_k100_p2_equal_reward_model5700_v1` | `failed_no_retry` | `model_5700` | Pod2 `rc=2`、约 `5.779 s`；receipt `f53a6813…1728` | 无 | bank 缺失；supervisor/cgroup/ACK/evaluator 均未创建；永久禁止重发 |
+| 资产恢复版 v2 `phase1_task_revision_0p5_k100_p2_equal_reward_model5700_asset_restored_v2` | `ready / NO_LAUNCH` | `model_5700` | source `41 passed, 1 skipped`；输入 SHA/size/0444 已恢复 | 尚无 | fresh namespace；v2 Pod launch 与 K100 score 均未跑 |
 
 ## 分动作成绩表
 
@@ -60,6 +72,5 @@
 
 - 决定：`inconclusive`
 - 是否已纳入当前 setting：`no`
-- 下一门：按[操作文档](../../operations/run_phase1_task_revision_0p5_exam.md)在 Pod2 先通过实际 runtime
-  probe，再且仅一次启动；终档必须由只读 `inspect` 验证。之后还要在 vendor MuJoCo 同题复核。
-
+- 下一门：按[操作文档](../../operations/run_phase1_task_revision_0p5_exam.md)只使用 v2，先生成 plan，再在
+  Pod2 且仅一次启动；终档必须由只读 `inspect` 验证。v1 永久禁止。之后还要在 vendor MuJoCo 同题复核。

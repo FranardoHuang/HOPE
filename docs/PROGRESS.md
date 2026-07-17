@@ -13,20 +13,29 @@
 
 ## 2026-07-17
 
+- exact-0.5 K100 v1 的唯一 Pod2 launch 在约 `5.779 s` 后于 `validate_inputs` 因 immutable bank 缺失
+  `rc=2` fail closed；receipt `f53a6813…1728` 证明 supervisor/cgroup/ACK/evaluator 均未创建，v1 永久
+  禁止重发。bank/report 已按 `0444`、exact size/SHA no-clobber 恢复；资产恢复版 v2 绑定 harness
+  `be17289c…cc59`、activation `2b91248b…0626`、旧失败墓碑与 fresh namespace，专项
+  `41 passed, 1 skipped`。v2 尚未 RunPod launch，也没有行为分，G05 保持 `Partial`。见
+  [实验](experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md)与
+  [操作](operations/run_phase1_task_revision_0p5_exam.md)。
+
 - planner-mode ready 分母的结构性零值已定位并补 source candidate：旧量尺只认已被 task-revision
   协议清零的 legacy hold，所以 19 份 `+1000` receipt 不可回填、不可排名或淘汰。新量尺在新
   `(control_epoch, task_id)` 安装后的首次 metrics sample 恰记一次，同球 revision 不重复；四个显式
-  witness 区分总样本、新 task、非法 legacy hold 和脚传感器不可用。Pod2 首次 pytest 因环境缺 pytest
-  在收集前结束，不是源码失败；同一 Python 的 no-install CPU direct probe 随后 `3/3` 通过，最终候选
-  四个 focused 函数也在本地 Torch shim 下通过。full-scene 与两个完整 100-update 窗仍未跑，G05 保持
+  witness 区分总样本、新 task、非法 legacy hold 和脚传感器不可用。最终 exact commit
+  `0ebd14a6…a8dd` 已在 Pod2 的 clean、CPU-only worktree 通过四个 focused 函数（`4/4`）；此前缺 pytest、
+  过严浮点 stub 和 source materialization 的 harness 拒绝均保留为基础设施证据，未冒充源码失败或通过。
+  full-scene 与两个完整 100-update 窗仍未跑，G05 保持
   `Partial`。见
   [task-revision 实验](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md)和
   [训练操作](operations/run_training.md)。
 
-- exact-0.5 K100 now has a frozen checkpoint-bound persistent source gate: harness `c2ce2784…1b63`,
+- Historical v1 exact-0.5 K100 source milestone: harness `c2ce2784…1b63`,
   activation `996775d6…7cfb6`, focused `35 passed, 1 skipped`. The skip is the delegated cgroup-v2
-  runtime probe, so no Pod launch or behavior score is claimed and status remains `NO_LAUNCH`/G05-G06
-  `Partial`. Pod2's 13:05Z read-only snapshot was zero trainers/all three GPUs free; Pod1 is unknown.
+  runtime probe; the later v1 Pod launch failure and v2 successor are recorded above. This source-only
+  checkpoint did not claim a behavior score. Pod2's 13:05Z read-only snapshot was zero trainers/all three GPUs free; Pod1 was unknown.
   See the [experiment](experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md) and
   [operation](operations/run_phase1_task_revision_0p5_exam.md).
 

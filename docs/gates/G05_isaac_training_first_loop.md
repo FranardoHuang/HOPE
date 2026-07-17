@@ -46,6 +46,19 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-17, exact-0.5 K100 v1 input failure closed and v2 prepared; Gate remains `Partial`):
+
+- The only v1 Pod2 launch exited `rc=2` after about `5.779 s` in `validate_inputs` because the immutable
+  exam bank was absent. It created no supervisor, delegated cgroup, commit ACK or evaluator and sent no
+  trainer signal. Failure receipt `f53a6813…1728` makes v1 permanently consumed with no retry authority.
+- The bank and rebind report are now restored on Pod2 with no-clobber mode `0444` and exact
+  size/SHA pairs `63,643 / 60e1a7ad…d1ca` and `18,795 / dd4332ed…ad0`. The asset-restored v2 binds
+  harness `be17289c…cc59`, activation `2b91248b…0626`, the v1 tombstone and fresh state/output/attempt
+  namespaces. It verifies assets before the tombstone/attempt marker and all later preflight work.
+- The v2 focused source suite is `41 passed, 1 skipped`; the skip remains the local delegated-cgroup
+  runtime probe. No v2 Pod launch or behavior score exists, so exact-0.5 ability is still open and G05
+  remains `Partial`.
+
 Follow-up note (2026-07-17, planner ready-ruler source repair; Gate remains `Partial`):
 
 - Root cause is now explicit: planner mode correctly sets legacy hold clocks to zero because
@@ -59,25 +72,22 @@ Follow-up note (2026-07-17, planner ready-ruler source repair; Gate remains `Par
   eligibility path. It exposes four witnesses: `ready_phase_sample_count`,
   `ready_planner_task_entry_sample_count`, `ready_planner_legacy_hold_violation_count` and
   `ready_foot_sensor_unavailable_sample_count`.
-- Pod2 checked exact source `2d8d0eb0…e885470dff` once with CPU only: the first pytest command
-  stopped before collection because `/workspace/hope_isaac_venv` has no pytest, which is an
-  environment failure rather than a failed source test; a no-install direct-import probe under the
-  same Python then passed the three selected functions (`3/3`) and preserved a clean worktree. The
-  final candidate's four focused functions also pass under the local Torch shim, including the
-  illegal-hold negative case. This is not full-scene evidence. A clean full-scene probe plus two
+- Pod2 checked final exact source `0ebd14a6…a8dd` CPU-only in a clean detached worktree; all four
+  focused functions passed (`4/4`), including the illegal-hold negative case and unavailable-sensor
+  accounting. Earlier missing-pytest, temporary-float-stub and source-materialization failures remain
+  recorded as harness failures, not source verdicts. This is not full-scene evidence. A clean full-scene probe plus two
   complete disjoint 100-update integer windows are still required before behavior pruning, so G05
   stays `Partial`.
 
-Follow-up note (2026-07-17, exact-0.5 K100 persistent source gate passed; Gate remains `Partial`):
+Follow-up note (2026-07-17, historical v1 exact-0.5 K100 source gate; superseded by the v1 failure note above):
 
-- The checkpoint-bound [0.5-second timing exam](../DEFINITIONS.md#timing-exam-0p5) now has a frozen
+- The checkpoint-bound [0.5-second timing exam](../DEFINITIONS.md#timing-exam-0p5) first froze a v1
   one-launch/read-only-inspect supervisor. Harness SHA is `c2ce2784…1b63`, activation SHA is
   `996775d6…7cfb6`, and the focused suite is `35 passed, 1 skipped`. It binds
   `taskrev_p2_equal_reward@model_5700`, the fixed exact-25-tick K100, checkpoint/hard/claim/binding,
   runtime, resource floors, no-retry commit chain, guardian and owned-cgroup cleanup.
-- This is source evidence only. The skipped host test is the delegated cgroup-v2 runtime probe; no
-  Pod probe, launch or behavior score has run. Status is therefore `NO_LAUNCH` until the reviewed
-  Pod preflight passes, and G05 remains `Partial`. At 2026-07-17 13:05Z Pod2 had zero trainers and
+- At this checkpoint it was source evidence only. The skipped host test was the delegated cgroup-v2
+  runtime probe; the later v1 Pod launch and its input failure are recorded above. At 2026-07-17 13:05Z Pod2 had zero trainers and
   all three GPUs free; Pod1 is `UNKNOWN`. See the [experiment](../experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md)
   and [operation](../operations/run_phase1_task_revision_0p5_exam.md).
 

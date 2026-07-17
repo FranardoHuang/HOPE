@@ -56,17 +56,18 @@ This gate is the sim-to-sim bridge before real deployment.
 
 ## Current State
 
-### 2026-07-17 exact-0.5 Isaac K100 source gate does not close MuJoCo parity
+### 2026-07-17 exact-0.5 Isaac K100 remains upstream of MuJoCo parity
 
-The checkpoint-bound [0.5-second timing exam](../DEFINITIONS.md#timing-exam-0p5) now has a frozen
-one-launch/read-only-inspect supervisor (harness `c2ce2784…1b63`, activation `996775d6…7cfb6`,
-`35 passed, 1 skipped`). It selects the neutral `taskrev_p2_equal_reward@model_5700` checkpoint and
-keeps all 100 exact-25-tick attempts in the denominator. The source binds the evaluator, checkpoint,
-hard contract, claim/binding, paper, runtime, resource floor, guardian and owned-cgroup cleanup.
+The first checkpoint-bound [0.5-second timing exam](../DEFINITIONS.md#timing-exam-0p5) launch failed
+closed before evaluator creation because its immutable bank was absent; v1 is permanently consumed.
+The bank/report were then restored with exact size/SHA and no-clobber permissions. The asset-restored
+v2 supervisor binds harness `be17289c…cc59`, activation `2b91248b…0626`, the v1 failure receipt,
+`taskrev_p2_equal_reward@model_5700`, all 100 exact-25-tick attempts and a fresh state/output namespace.
+Its focused source suite is `41 passed, 1 skipped`; the skipped delegated-cgroup probe and the v2
+RunPod behavior exam are still open.
 
-No Pod delegated cgroup probe, launch or behavior score has run, so this remains `NO_LAUNCH` and
-G06 remains `Partial`. Even a completed Isaac result is explicitly inexact; the same checkpoint and
-immutable questions must still run in vendor MuJoCo before any parity or deployment claim. See the
+G06 therefore remains `Partial`. Even a completed Isaac result is explicitly inexact; the same
+checkpoint and immutable questions must still run in vendor MuJoCo before any parity or deployment claim. See the
 [experiment](../experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md) and
 [operation](../operations/run_phase1_task_revision_0p5_exam.md).
 

@@ -260,16 +260,14 @@ Four integer witnesses make that distinction auditable:
 - `ready_foot_sensor_unavailable_sample_count`: admitted samples for which foot contact/slip could
   not be measured, rather than fabricated zero foot observations.
 
-The exact source at `2d8d0eb0a6e17eb66a51e2b878ba27e885470dff` was checked once on Pod2 with
-CPU only and a clean worktree. The first command used
-`/workspace/hope_isaac_venv/bin/python -m pytest` and stopped before test collection because that
-environment has no `pytest`; no source test ran, so this is an environment failure, not a source
-failure. Without installing anything, a direct-import probe under the same Python then passed all
-three selected ready-ledger functions (`3/3`) and left the worktree clean. The final successor
-candidate's four focused functions also pass under the local Torch shim, including the
-legacy-hold-as-violation negative case; static Python compile, abstract-syntax-tree inspection and
-diff checks pass. Formal pytest and full-manager ordering still require the RunPod runtime, so this
-is not a full-scene gate.
+The final source commit `0ebd14a6ee9e4ba835dea02dd7084e1ed665a8dd` was materialized from an
+exact thin bundle on Pod2 and checked CPU-only in a clean detached worktree. All four focused
+functions passed (`4/4`): legacy denominators, one sample per new planner task, illegal legacy hold
+as violation-only, and missing foot sensor as unavailable rather than zero. Earlier probes that
+stopped for missing `pytest`, an over-strict temporary `approx` stub, or absent source objects are
+retained as harness failures; none was counted as a source pass or failure. Static compile, syntax
+and diff checks also pass. Full-manager ordering still requires the full-scene RunPod probe, so this
+is not yet a full-scene gate.
 
 The run gate remains `Partial`: before any successor pool can be called pruneable, a clean detached
 full-scene probe must show nonzero and conserved task-entry/ready denominators, zero planner legacy-
