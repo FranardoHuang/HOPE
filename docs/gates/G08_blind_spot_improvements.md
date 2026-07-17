@@ -441,16 +441,18 @@ CPU-only runner activation。tracked runner 已通过独立红队并绑定 recei
 contact/fps timing 一致性与 child timeout；generator 从 Stage-1 receipt 认证副本读取，旧 runtime checkout
 不再被错误要求含后置 source。v1 四格 generator 已成功但因 candidate float32/TOPP float64 梯度量尺
 混用而在 TOPP 前 fail closed；旧 summary `f92e6b8b…63c0e` 冻结。v2 只修量尺并绑定旧失败；唯一
-execute 已证明四份 candidate 与 v1 逐字节一致，但隔离 MJCF 快照漏了 XML 引用的 STL，四个 TOPP
-在算法前 missing-mesh rc1，summary `6910db28…f1476` 冻结且不得重放。v3 不再调用 generator，只复验
-并冻结同四份 candidate，唯一变化是从 runtime commit 的 Git objects 补齐 `1 XML + 74 mesh`：固定
+execute 已证明四份 candidate 与 v1 逐字节一致，四个 TOPP 均 rc1、无 timing，summary
+`6910db28…f1476` 冻结且不得重放；这些是 v2 的全部正式结论，诊断 `run.log` 不作根因或授权输入。
+v3 不再调用 generator，只复验并冻结同四份 candidate，并从 runtime commit 的 Git objects 提供新的
+`1 XML + 74 mesh` 完整执行环境：固定
 `75 files / 14,127,373 bytes / manifest e0381752…b962de`，拒绝 include、路径逃逸、symlink 和 worktree
 fallback。v3 唯一远端 dry-run 在结果 root 前又发现 expected contract 仍误绑 v1，而实际 v2 contract
 因 snapshot path 证据不同已有新 SHA；execute/TOPP 未启动。v4 仅修四个 actual contract 绑定并使用新
 activation/namespace，相关回归 `68 passed` 且独立红队 GO；随后 dry-run 又在结果 root 前证明 exact log
-SHA 后的 `.stl`/英文 errno 文本猜测会假拒绝真实日志，execute/TOPP 未启动。v5 删除重复文本解释，只保留
-完整 log SHA，并使用新 activation/root；相关回归 `70 passed`、独立红队 GO，远端 execute 仍待完成，
-不能提前记通过。
+SHA 后的 `.stl`/英文 errno 文本猜测会假拒绝真实日志，execute/TOPP 未启动。v5 删除重复文本解释但仍
+保留日志 SHA，随后因一份 SHA 手抄一字符错误再次 pre-root fail closed。当前 v6 移除旧 V1 summary、
+generator 副本与全部日志前置，只复验 v2 四份 candidate/contract，保持零 generator 调用，并预备在上述
+Git-object 闭包中各执行一次 TOPP；相关回归 `76 passed`、独立红队 GO，仍待远端 dry-run/execute，不能提前记通过。
 TOPP `<=0.5 s`、L0、vendor L1、桌网、
 动力学和行为卷仍全部开放，
 所以 G08 不晋级。

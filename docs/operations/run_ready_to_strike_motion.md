@@ -102,7 +102,7 @@ schema-2 source/candidate 的 `joint_vel` 必须按 generator 的 float32 输入
 它只把旧结果升级为 screening evidence；因为历史证书没有完整 argv、transitive source 和 MJCF closure，
 `physics_replay_exact/source_closure_exact/mjcf_closure_exact` 仍必须是 `false`，不能冒充动力学重放或部署通过。
 
-## Stage-2 四个中点的一次性执行（当前 v5）
+## Stage-2 四个中点的一次性执行（当前 v6，尚未远端执行）
 
 Stage-1 receipt `7cf1c7c9…c377f` 已成功发布后，四个 `delta=12` 中点只能由 tracked runner 消费一次。
 activation 精确绑定 runner SHA、Stage-1 receipt SHA 和唯一结果目录；换目录重复执行会在创建任何 namespace
@@ -110,9 +110,9 @@ activation 精确绑定 runner SHA、Stage-1 receipt SHA 和唯一结果目录�
 
 ```bash
 python3 scripts/run_ready_to_strike_join_ladder_stage2.py \
-  --activation configs/ready_to_strike_join_ladder_stage2_activation_v5_20260717.json \
+  --activation configs/ready_to_strike_join_ladder_stage2_activation_v6_20260717.json \
   --queue configs/ready_to_strike_join_ladder_20260717.yaml \
-  --root /workspace/codexschema/ready_to_strike_0p5_20260717/join_ladder_stage2_d12_v5_exact_log_bytes
+  --root /workspace/codexschema/ready_to_strike_0p5_20260717/join_ladder_stage2_d12_v6_scientific_inputs_only
 ```
 
 dry-run 必须报告四格且不创建结果目录。确认 receipt、runner、queue、旧 runtime 与两份动作资产 SHA 全部
@@ -120,16 +120,19 @@ dry-run 必须报告四格且不创建结果目录。确认 receipt、runner、q
 
 ```bash
 python3 scripts/run_ready_to_strike_join_ladder_stage2.py \
-  --activation configs/ready_to_strike_join_ladder_stage2_activation_v5_20260717.json \
+  --activation configs/ready_to_strike_join_ladder_stage2_activation_v6_20260717.json \
   --queue configs/ready_to_strike_join_ladder_20260717.yaml \
-  --root /workspace/codexschema/ready_to_strike_0p5_20260717/join_ladder_stage2_d12_v5_exact_log_bytes \
+  --root /workspace/codexschema/ready_to_strike_0p5_20260717/join_ladder_stage2_d12_v6_scientific_inputs_only \
   --execute \
   --confirm RUN_READY_TO_STRIKE_STAGE2_ONCE
 ```
 
-v5 不再重跑 generator：它先完整消费 v2 的 terminal summary、runner、activation、V1 prior、四份
-candidate/contract 和四份 missing-mesh log，逐字节复验 lineage 后把同一 candidate 复制进新 namespace。
-因此本轮唯一改变是补齐 MJCF 外部资产闭包。runner 解析原 XML，拒绝 DTD/entity/include、路径逃逸、
+v6 不再重跑 generator：它只从 v2 的 terminal summary 读取正式科学事实，并逐字节复验四份
+candidate/contract 后复制进新 namespace。旧 V1 summary、generator 副本和 `run.log` 都不是本轮科学输入；
+日志只留作诊断，不能因为文本或手抄 SHA 漂移改变实验是否获准。v2 的正式结论只有“四份
+candidate/contract 已生成、四次 TOPP 返回 rc1、没有 timing”，不能据诊断日志宣称已定位 rc1 根因。
+
+本轮新执行环境从冻结 Git objects 提供完整 MJCF 闭包。runner 解析原 XML，拒绝 DTD/entity/include、路径逃逸、
 重复引用和非 regular/symlink 文件；然后从冻结 commit 的 Git object 读取 `1 XML + 74 mesh`，核
 model-tree OID、每个 blob OID、SHA 和大小，以原相对目录 O_EXCL 快照。闭包固定为 `75 files / 14,127,373
 bytes / e0381752…b962de`，worktree fallback 不构成授权。TOPP/URDF/body-order 与两份预算动作也只读冻结。
@@ -144,14 +147,19 @@ budget scale 必须为冻结默认 `1.5`。成功只说明 Stage-2 screening 执
 candidate/TOPP 两条已冻结的 producer 合同分开验证，并在新 activation 中精确绑定旧 failure summary、
 旧 runner/activation SHA 和 `automatic_retry=false`。旧 summary 缺失或改变时，v2 在创建新 namespace 前拒绝。
 v2 namespace `join_ladder_stage2_d12_v2_float32_producer` 也已永久消费：四份 candidate 与 v1 逐字节一致，
-但四个 TOPP 都因隔离 MJCF 旁缺少其引用的 STL 而 rc1；summary SHA=`6910db28…f1476`，四份 log 已逐一
-绑定。v3 dry-run 在创建结果 namespace 前又正确拒绝：consumer 错把 v1 contract SHA 配给 v2 candidate；
+四个 TOPP 均 rc1，summary SHA=`6910db28…f1476`，没有 timing。旧日志只作诊断；正式合同不把日志文本
+或 SHA 当作候选、时间律或结果证据。v3 dry-run 在创建结果 namespace 前又正确拒绝：consumer 错把 v1
+contract SHA 配给 v2 candidate；
 stderr SHA=`c58baf2d…2e16`，execute/TOPP 均未启动，固定 v3 结果目录仍不存在且不得用新源码复用该 activation。
 v4 使用新 source、activation 和 namespace，绑定 v2 summary 中实际四份 contract SHA；除此之外只修
 source-closure，不改 candidate、join、hold、预算、acceptance 或 TOPP 算法。
 v4 dry-run 随后又在结果 root 前暴露重复量尺：四份 log 已按完整 SHA 绑定，consumer 仍额外猜测日志必须
 同时含 `.stl` 与英文 `no such file or directory`；真实不可变 log 格式不同，execute/TOPP 同样未启动。
-v5 使用新 activation/namespace，删除这条脆弱文本解释，只保留四份 exact log SHA；其他输入与配方不变。
+v5 使用新 activation/namespace，删除这条脆弱文本解释，却仍保留四份 exact log SHA；其中一个 SHA 又因
+手抄一字符错误而在结果 root 前 fail closed，execute/TOPP 仍未启动。这个反例说明诊断日志不应进入科学
+合同。v6 因此删除全部旧日志、V1 summary 和 generator 副本前置，只保留 v2 summary 中的四份
+candidate/contract 与 `TOPP rc1/timing unavailable` 事实，并以新 activation/root 运行一次完整闭包下的 TOPP。
+当前 v6 相关回归 `76 passed`、独立红队 GO，仍待远端 dry-run/execute，不能写成行为或动力学通过。
 
 ## 下一步不是直接训练
 

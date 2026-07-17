@@ -79,7 +79,7 @@ run-up 上界是正手 `0.98 s`、反手 `0.78 s`。因此单纯把完整旧 cli
   RF `0.94→1.94 s`、RB `0.78→1.42 s`。反手 own-ready 将最近 join 从 `0.94` 改善到 `0.78 s`，但
   正手相反（RF `0.64` 优于 RB `0.70 s`），所以发生 ready×side crossover，尚不能宣布共同 ready。
   冻结规则因此选择四个 `d=12` 中点格；机器 activation 见
-  [`stage2_activation`](../../../configs/ready_to_strike_join_ladder_stage2_activation_20260717.json)。但原始
+  [`Stage-2 v6 activation`](../../../configs/ready_to_strike_join_ladder_stage2_activation_v6_20260717.json)。但原始
   Stage 1 summary 未绑定一次性 consumer 源码，且旧 parser 未全量重验 certificate provenance；因此这些
   数值曾先降级为 raw。独立 historical attestor 已全量重建 candidate/certificate/runtime binding 并发布
   no-clobber receipt；六格不重跑，四个中点仅由下述 tracked Stage-2 runner 消费。
@@ -113,15 +113,15 @@ run-up 上界是正手 `0.98 s`、反手 `0.78 s`。因此单纯把完整旧 cli
   acceptance 不变。v2 activation 固定新 namespace，并精确绑定 v1 summary/runner/activation/failure class；
   prior 缺失或篡改均在 namespace 前拒绝。
 - Stage-2 v2 的唯一 execute 已结束且不得重放：四格 generator 均 rc0，四份 candidate/contract 与 v1
-  逐字节一致，说明 float32 producer 量尺修复有效；随后四个 TOPP 均 rc1。完整 log 定位为 source
-  closure 错误：隔离快照复制了 `a3_pingpong.xml`，却没有复制 XML 引用的 `meshes/*.STL`，所以 MuJoCo
-  在算法开始前因 missing mesh 退出。summary SHA=`6910db28…f1476`；这不是动作、预算或动力学失败，
-  也没有任何 timing 值。
-- v3 保持四份 v2 candidate 字节不变且 **零 generator 调用**，只补 MJCF 外部资产闭包。runner 从
+  逐字节一致，说明 float32 producer 量尺修复有效；随后四个 TOPP 均 rc1，summary SHA=
+  `6910db28…f1476`，没有任何 timing 值。这三项是 v2 的完整正式结论；`run.log` 只作诊断，不能据其文本
+  把 rc1 的根因写成已证实，也不能让日志 SHA 决定后续科学执行。
+- v3 保持四份 v2 candidate 字节不变且 **零 generator 调用**，并从冻结 Git objects 建立新的完整 MJCF
+  执行环境。runner 从
   frozen runtime commit 的 Git objects 读取并绑定 model tree `0870b9bf…9048`、`1 XML + 74 mesh`、
   `75 files / 14,127,373 bytes / manifest e0381752…b962de`；拒绝 DTD/entity/include、路径逃逸、重复、
-  symlink、worktree 漂移和第三种 prior。v3 activation 使用新 one-shot namespace，精确消费 v2 summary、
-  runner、activation、V1 prior、四份 candidate/contract 和四份 missing-mesh log。相关生成器、attestor、
+  symlink、worktree 漂移和第三种 prior。v3 activation 使用新 one-shot namespace，仍多余消费 v2 summary、
+  runner、activation、V1 prior、四份 candidate/contract 和四份诊断 log。相关生成器、attestor、
   runner 回归为 `66 passed`。但唯一远端 dry-run 在创建结果 root 前又抓到 lineage 账错：代码把 v1
   generator contract SHA 配给了 v2 candidate；candidate SHA 本身一致。stderr SHA=`c58baf2d…2e16`，
   execute/TOPP 均未启动，v3 source 与 activation 永久冻结。
@@ -131,9 +131,12 @@ run-up 上界是正手 `0.98 s`、反手 `0.78 s`。因此单纯把完整旧 cli
   独立红队 GO；但唯一 dry-run 又在结果 root 前被重复文本量尺假拒绝：四份 log 已经 exact SHA 绑定，
   consumer 仍猜测必须同时含 `.stl` 和 `no such file or directory`，真实不可变 log 格式不同。execute/TOPP
   未启动，v4 activation 永久冻结。
-- v5 删除上述重复文本解释，只保留四份 exact log SHA；使用新 runner-bound activation 与结果 namespace，
-  其余所有字节级输入和科学配方不变。相关回归 `70 passed`、独立红队 GO；远端 execute 完成前仍只能
-  写 source gate，不能写成 0.5 秒已通过。
+- v5 删除上述重复文本解释，却仍保留四份 exact log SHA；其中一个 SHA 因手抄一字符错误在结果 root 前
+  fail closed，execute/TOPP 仍未启动。这个负例说明诊断日志不应成为科学合同。
+- 当前 v6 使用新 activation/root，移除旧 V1 summary、generator 副本和全部 `run.log` 前置；只复验并
+  复用 v2 四份 candidate/contract，保持 **零 generator 调用**，在 Git-object `75-file/74-mesh` 完整闭包中
+  各跑一次 TOPP。v6 相关回归 `76 passed`、独立红队 GO，当前仍待远端 dry-run/execute；没有 timing、
+  production FK、动力学或行为通过，不能写成 0.5 秒已完成。
 - 下一门：在 ignored runtime 资产上按预注册 join ladder 生成正/反手候选，production FK 重建后逐个跑
   TOPP；只把 `<=0.5 s` 的候选送 L0/L1/桌网/动力学，再用绑定该 motion SHA 的 0.5 秒 K100 和
 vendor MuJoCo 判行为。

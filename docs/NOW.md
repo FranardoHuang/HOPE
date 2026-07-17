@@ -78,14 +78,15 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   但量尺把 candidate float32 producer-gradient 混成 TOPP float64 workspace-gradient，故四格在 TOPP 前
   fail closed；旧 summary `f92e6b8b…63c0e` 已冻结且不重放。v2 只修该量尺，绑定旧失败并使用唯一新
   CPU-only namespace，动作/join/预算/acceptance 不变。v2 唯一 execute 已证明四份 candidate 与 v1
-  逐字节一致，随后因隔离 MJCF XML 漏复制其引用的 STL，四个 TOPP 都在算法前 missing-mesh rc1；
-  summary `6910db28…f1476` 冻结且不得重放。v3 直接复验并复用这四份 candidate，零 generator 调用，
-  唯一改变是从 frozen runtime Git objects 补齐 `1 XML + 74 mesh` 的 exact closure（75 文件、
+  逐字节一致；四个 TOPP 均 rc1、没有 timing，summary `6910db28…f1476` 冻结且不得重放。这是 v2 的
+  全部正式结论，诊断 `run.log` 不作根因或授权输入。v3 直接复验并复用这四份 candidate，零 generator
+  调用，并从 frozen runtime Git objects 提供 `1 XML + 74 mesh` 的 exact closure（75 文件、
   14,127,373 字节、manifest `e0381752…b962de`）。但 v3 唯一 Pod2 dry-run 在结果 root 前抓到 v1/v2
   contract SHA 账本混用，未启动 execute/TOPP。v4 用新 activation/namespace 绑定 v2 四份实际 contract，
   随后 dry-run 又发现 exact log SHA 后的英文文本猜测会假拒绝真实日志，同样未启动 execute/TOPP。v5
-  删除重复文本解释、只保留 exact bytes，其他科学配方完全不变；本地相关回归 `70 passed`、独立红队 GO。
-  在真实结果出现前仍没有
+  删除重复文本解释却仍因一份 log SHA 手抄一字符错误 pre-root fail closed。当前 v6 移除旧 V1 summary、
+  generator 副本和全部日志前置，只复验 v2 四份 candidate/contract，保持零 generator 调用，并准备在
+  Git-object 完整闭包中各跑一次 TOPP。v6 相关回归 `76 passed`、独立红队 GO，尚待远端 dry-run/execute；在真实结果出现前仍没有
   production FK、TOPP≤0.5、L0/L1、桌网、动力学或行为通过，不能写成0.5秒动作已完成。见
   [短路径实验](experiments/2026-07/EXP-MOTION-READY-TO-STRIKE-0P5.md)。
 

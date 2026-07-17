@@ -178,8 +178,12 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]
         "stage1_receipt_sha256": _sha(receipt_payload),
         "runner_sha256": prior_runner_sha,
         "prior_failed_attempt_summary_sha256": prior_v1_summary_sha,
-        "runtime_snapshot_shas": {"runtime.py": "7" * 64},
-        "asset_snapshot_shas": {"forehand": "8" * 64, "backhand": "9" * 64},
+        "runtime_snapshot_shas": {
+            relative: _sha(payload) for relative, payload in runtime_payloads.items()
+        },
+        "asset_snapshot_shas": {
+            name: asset["sha256"] for name, asset in queue["assets"].items()
+        },
         "rows": prior_rows,
         "screening_acceptance": {
             "at_or_below_0p5_cells": [], "timing_by_cell_s": {},
@@ -211,9 +215,7 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]
         "summary_sha256": _sha(prior_summary_payload),
         "runner_sha256": prior_runner_sha,
         "activation_sha256": prior_activation_sha,
-        "failure_class": (
-            "mjcf_snapshot_omitted_referenced_mesh_assets"
-        ),
+        "failure_class": "prior_v2_topp_rc1_no_timing",
         "automatic_retry": False,
     }
     monkeypatch.setattr(runner, "EXPECTED_PRIOR_ATTEMPT", prior_binding)
@@ -307,11 +309,8 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]
             )
             contract_path = fixture_root / f"{cell_id}.contract.json"
             contract_path.write_bytes(b"fixture-contract\n")
-            log_path = fixture_root / f"{cell_id}.log"
-            log_path.write_bytes(b"missing mesh.STL: No such file or directory\n")
             candidate = runner._read_snapshot(candidate_path, "fixture prior candidate")
             contract = runner._read_snapshot(contract_path, "fixture prior contract")
-            log = runner._read_snapshot(log_path, "fixture prior log")
             info = {
                 "candidate_sha256": candidate.sha256,
                 "generator_contract_sha256": contract.sha256,
@@ -320,11 +319,15 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]
                 "max_joint_step_rad": 0.0,
             }
             records[cell_id] = {
-                "candidate": candidate, "contract": contract, "log": log, "info": info,
+                "candidate": candidate, "contract": contract, "info": info,
             }
             snapshots[f"prior:candidate:{cell_id}"] = candidate
             snapshots[f"prior:contract:{cell_id}"] = contract
-            snapshots[f"prior:topp_log:{cell_id}"] = log
+        for name in ("forehand", "backhand"):
+            asset = runner._read_snapshot(
+                Path(queue["assets"][name]["path"]), f"fixture prior {name} asset"
+            )
+            snapshots[f"prior:asset:{name}"] = asset
         return records, snapshots
 
     monkeypatch.setattr(runner, "_collect_prior_v2_inputs", fake_prior_inputs)
@@ -348,7 +351,7 @@ def _plan(paths: dict[str, Path]) -> dict[str, object]:
 
 def _prepare_real_prior_v2_preflight_prefix(
     paths: dict[str, Path], monkeypatch: pytest.MonkeyPatch,
-) -> tuple[dict[str, object], dict[str, object], str, str, str]:
+) -> tuple[dict[str, object], dict[str, object], dict[str, str], dict[str, str], Path]:
     activation = json.loads(paths["activation"].read_text())
     queue = json.loads(paths["queue"].read_text())
     prior_root = Path(activation["prior_failed_attempt"]["namespace"])
@@ -378,43 +381,87 @@ def _prepare_real_prior_v2_preflight_prefix(
     monkeypatch.setattr(runner, "EXPECTED_PRIOR_ATTEMPT", binding)
     monkeypatch.setattr(runner, "EXPECTED_PRIOR_V1_SUMMARY_SHA256",
                         _sha(controls["v1_summary"]))
-    cell_id = next(iter(runner.EXPECTED_STAGE2_CELLS))
-    cell_root = prior_root / cell_id
-    candidate_payload = b"prior-v2-candidate\n"
-    contract_payload = b"prior-v2-contract\n"
-    log_payload = b"missing mesh.STL: No such file or directory\n"
-    _write(cell_root / "candidate.npz", candidate_payload)
-    _write(cell_root / "candidate.contract.json", contract_payload)
-    _write(cell_root / "topp/run.log", log_payload)
-    return activation, queue, _sha(candidate_payload), _sha(contract_payload), _sha(log_payload)
+    candidate_shas: dict[str, str] = {}
+    contract_shas: dict[str, str] = {}
+    for cell_id in runner.EXPECTED_STAGE2_CELLS:
+        cell_root = prior_root / cell_id
+        candidate_payload = f"prior-v2-candidate-{cell_id}\n".encode()
+        contract_payload = f"prior-v2-contract-{cell_id}\n".encode()
+        _write(cell_root / "candidate.npz", candidate_payload)
+        _write(cell_root / "candidate.contract.json", contract_payload)
+        _write(cell_root / "topp/run.log", f"diagnostic-{cell_id}\n".encode())
+        candidate_shas[cell_id] = _sha(candidate_payload)
+        contract_shas[cell_id] = _sha(contract_payload)
+    return activation, queue, candidate_shas, contract_shas, prior_root
 
 
-@pytest.mark.parametrize("tamper", ["candidate", "log"])
-def test_real_prior_v2_preflight_rejects_tampered_candidate_or_log_before_runtime(
-    tamper: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+@pytest.mark.parametrize("tamper", ["candidate", "contract"])
+def test_real_prior_v2_preflight_rejects_tampered_scientific_input_before_runtime(
+    tamper: str,
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     paths = _fixture(tmp_path, monkeypatch)
-    activation, queue, candidate_sha, contract_sha, log_sha = (
+    activation, queue, candidate_shas, contract_shas, _prior_root = (
         _prepare_real_prior_v2_preflight_prefix(paths, monkeypatch)
     )
     cell_id = next(iter(runner.EXPECTED_STAGE2_CELLS))
-    candidates = dict(runner.EXPECTED_PRIOR_CANDIDATES)
+    candidates = {
+        name: (candidate_shas[name], contract_shas[name])
+        for name in runner.EXPECTED_STAGE2_CELLS
+    }
     candidates[cell_id] = (
-        "0" * 64 if tamper == "candidate" else candidate_sha,
-        contract_sha,
+        "0" * 64 if tamper == "candidate" else candidate_shas[cell_id],
+        "0" * 64 if tamper == "contract" else contract_shas[cell_id],
     )
-    logs = dict(runner.EXPECTED_PRIOR_TOPP_LOGS)
-    logs[cell_id] = "0" * 64 if tamper == "log" else log_sha
     monkeypatch.setattr(runner, "EXPECTED_PRIOR_CANDIDATES", candidates)
-    monkeypatch.setattr(runner, "EXPECTED_PRIOR_TOPP_LOGS", logs)
     receipt_sha = _sha(b"prior-v2-receipt\n")
-    message = "candidate or contract SHA" if tamper == "candidate" else "TOPP log SHA"
 
-    with pytest.raises(runner.Stage2Error, match=message):
+    with pytest.raises(runner.Stage2Error, match="candidate or contract SHA"):
         REAL_COLLECT_PRIOR_V2_INPUTS(
             activation=activation, queue=queue, body_order=("body",),
-            expected_receipt_sha=receipt_sha,
         )
+
+
+def test_real_prior_v2_collector_ignores_diagnostic_and_obsolete_control_files(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _fixture(tmp_path, monkeypatch)
+    activation, queue, candidate_shas, contract_shas, prior_root = (
+        _prepare_real_prior_v2_preflight_prefix(paths, monkeypatch)
+    )
+    monkeypatch.setattr(runner, "EXPECTED_PRIOR_CANDIDATES", {
+        name: (candidate_shas[name], contract_shas[name])
+        for name in runner.EXPECTED_STAGE2_CELLS
+    })
+
+    def accept_candidate(candidate, contract, **_kwargs):
+        return {
+            "candidate_sha256": candidate.sha256,
+            "generator_contract_sha256": contract.sha256,
+            "frames": 40, "phase": 25.0 / 39.0,
+            "joint_path_l2": 0.0, "joint_curvature_l2": 0.0,
+            "max_joint_step_rad": 0.0,
+        }
+
+    monkeypatch.setattr(runner, "_validate_candidate", accept_candidate)
+    (prior_root / "snapshots/build_ready_to_strike_motion.py").unlink()
+    (prior_root / "snapshots/prior_stage2_failure_summary.json").unlink()
+    for index, cell_id in enumerate(runner.EXPECTED_STAGE2_CELLS):
+        log = prior_root / cell_id / "topp/run.log"
+        if index % 2:
+            log.unlink()
+        else:
+            log.write_bytes(f"arbitrary changed diagnostic {index}\n".encode())
+
+    records, snapshots = REAL_COLLECT_PRIOR_V2_INPUTS(
+        activation=activation, queue=queue, body_order=("body",),
+    )
+    assert set(records) == set(runner.EXPECTED_STAGE2_CELLS)
+    assert set(snapshots) == {
+        *(f"prior:asset:{name}" for name in ("forehand", "backhand")),
+        *(f"prior:candidate:{cell}" for cell in runner.EXPECTED_STAGE2_CELLS),
+        *(f"prior:contract:{cell}" for cell in runner.EXPECTED_STAGE2_CELLS),
+    }
 
 
 def test_v2_activation_bytes_remain_immutable() -> None:
@@ -432,10 +479,19 @@ def test_v4_preflight_activation_bytes_remain_immutable() -> None:
     assert _sha(payload) == "818f23d97b07cc52b2d8677d9d1e9d7670ab13cbcb85589b23e369450d3ef969"
 
 
-def test_v5_does_not_reinterpret_sha_bound_prior_log_text() -> None:
+def test_v5_preflight_activation_bytes_remain_immutable() -> None:
+    payload = (REPO / "configs/ready_to_strike_join_ladder_stage2_activation_v5_20260717.json").read_bytes()
+    assert _sha(payload) == "4541044946f3359632369330e02037c824b87ee4b92da8f4133964711b81bdf2"
+
+
+def test_v6_excludes_diagnostic_logs_from_scientific_input_contract() -> None:
     source = SCRIPT.read_bytes().lower()
     assert b"no such file or directory" not in source
-    assert b'log_lower' not in source
+    assert b"expected_prior_topp_logs" not in source
+    collect_source = source[source.index(b"def _collect_prior_v2_inputs"):]
+    collect_source = collect_source[:collect_source.index(b"def _validate_inputs")]
+    assert b"topp/run.log" not in collect_source
+    assert b"prior:topp_log" not in collect_source
 
 
 def test_v4_binds_the_observed_v2_contract_lineage_not_v1_contracts() -> None:
@@ -806,27 +862,25 @@ def test_missing_receipt_fails_before_namespace(
     assert not paths["root"].exists()
 
 
-def test_missing_attested_stage1_generator_copy_fails_before_namespace(
+def test_missing_attested_stage1_generator_copy_is_not_a_v6_runtime_input(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     paths = _fixture(tmp_path, monkeypatch)
     stage1 = Path(json.loads(paths["activation"].read_text())["stage1_namespace"])
     (stage1 / "build_ready_to_strike_motion.py").unlink()
 
-    with pytest.raises(runner.Stage2Error, match="Stage1 generator copy"):
-        _plan(paths)
+    assert _plan(paths)["status"] == "dry_run_passed_no_namespace_created"
     assert not paths["root"].exists()
 
 
-def test_tampered_attested_stage1_generator_copy_fails_before_namespace(
+def test_tampered_attested_stage1_generator_copy_is_not_a_v6_runtime_input(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     paths = _fixture(tmp_path, monkeypatch)
     stage1 = Path(json.loads(paths["activation"].read_text())["stage1_namespace"])
     (stage1 / "build_ready_to_strike_motion.py").write_bytes(b"tampered\n")
 
-    with pytest.raises(runner.Stage2Error, match="generator copy SHA changed"):
-        _plan(paths)
+    assert _plan(paths)["status"] == "dry_run_passed_no_namespace_created"
     assert not paths["root"].exists()
 
 
@@ -862,6 +916,65 @@ def test_tampered_prior_failure_summary_blocks_v2_before_namespace(
     prior.write_bytes(prior.read_bytes() + b" ")
 
     with pytest.raises(runner.Stage2Error, match="summary bytes changed"):
+        _plan(paths)
+    assert not paths["root"].exists()
+
+
+def _rewrite_prior_summary(
+    paths: dict[str, Path], monkeypatch: pytest.MonkeyPatch, mutate,
+) -> None:
+    activation = json.loads(paths["activation"].read_text())
+    prior_path = Path(activation["prior_failed_attempt"]["summary_path"])
+    prior = json.loads(prior_path.read_text())
+    mutate(prior)
+    payload = _canonical(prior)
+    prior_path.write_bytes(payload)
+    binding = dict(runner.EXPECTED_PRIOR_ATTEMPT)
+    binding["summary_sha256"] = _sha(payload)
+    activation["prior_failed_attempt"] = binding
+    paths["activation"].write_bytes(_canonical(activation))
+    monkeypatch.setattr(runner, "EXPECTED_PRIOR_ATTEMPT", binding)
+
+
+@pytest.mark.parametrize(
+    ("field", "message"),
+    [
+        ("runtime_snapshot_shas", "runtime inputs differ"),
+        ("asset_snapshot_shas", "assets differ"),
+    ],
+)
+def test_prior_summary_scientific_map_drift_fails_before_namespace(
+    field: str, message: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _fixture(tmp_path, monkeypatch)
+
+    def mutate(prior):
+        first = next(iter(prior[field]))
+        prior[field][first] = "0" * 64
+
+    _rewrite_prior_summary(paths, monkeypatch, mutate)
+    with pytest.raises(runner.Stage2Error, match=message):
+        _plan(paths)
+    assert not paths["root"].exists()
+
+
+@pytest.mark.parametrize("drift", ["topp_rc", "timing"])
+def test_prior_v2_cannot_invent_success_or_timing(
+    drift: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _fixture(tmp_path, monkeypatch)
+
+    def mutate(prior):
+        if drift == "topp_rc":
+            prior["rows"][0]["topp_rc"] = 0
+        else:
+            prior["screening_acceptance"]["timing_by_cell_s"] = {
+                prior["rows"][0]["cell_id"]: 0.5
+            }
+
+    _rewrite_prior_summary(paths, monkeypatch, mutate)
+    match = "did not fail in TOPP" if drift == "topp_rc" else "screening outcome changed"
+    with pytest.raises(runner.Stage2Error, match=match):
         _plan(paths)
     assert not paths["root"].exists()
 
@@ -1000,6 +1113,13 @@ def test_execute_runs_each_registered_cell_once_and_separates_timing_gate(
     assert sum("--output-contract" in command for command in calls) == 0
     assert sum("--report" in command for command in calls) == 4
     assert result["generator_commands_executed"] == 0
+    assert result["prior_diagnostic_logs_consumed"] is False
+    assert result["prior_v2_timing_available"] is False
+    assert set(result["prior_v2_snapshot_shas"]) == {
+        *(f"asset:{name}" for name in ("forehand", "backhand")),
+        *(f"candidate:{cell}" for cell in runner.EXPECTED_STAGE2_CELLS),
+        *(f"contract:{cell}" for cell in runner.EXPECTED_STAGE2_CELLS),
+    }
     topp_calls = [command for command in calls if "--report" in command]
     assert all(Path(_flag(command, "--input")).parent.parent == paths["root"]
                for command in topp_calls)
@@ -1110,7 +1230,7 @@ def test_unexpected_post_namespace_failure_gets_terminal_summary(
 
 def test_current_repo_activation_exactly_binds_the_tracked_runner() -> None:
     activation = json.loads(
-        (REPO / "configs/ready_to_strike_join_ladder_stage2_activation_v5_20260717.json").read_text()
+        (REPO / "configs/ready_to_strike_join_ladder_stage2_activation_v6_20260717.json").read_text()
     )
     queue = runner._validate_queue(json.loads(
         (REPO / "configs/ready_to_strike_join_ladder_20260717.yaml").read_text()

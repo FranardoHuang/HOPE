@@ -36,14 +36,14 @@ import numpy as np
 SCHEMA_VERSION = 1
 CONFIRM_TOKEN = "RUN_READY_TO_STRIKE_STAGE2_ONCE"
 CHILD_TIMEOUT_S = 3600
-EXPECTED_ACTIVATION_ID = "ready_to_strike_join_ladder_stage2_v5_20260717"
+EXPECTED_ACTIVATION_ID = "ready_to_strike_join_ladder_stage2_v6_20260717"
 EXPECTED_EXPERIMENT_ID = "ready_to_strike_join_ladder_20260717"
 EXPECTED_QUEUE_SHA256 = "cfa112f799dab9af33914fdfb5bfff90d21b4692e38b16a4627393936a527b8b"
 EXPECTED_PREREG_COMMIT = "8d74025e88fee832fae0ac2f672ec0eb9b2d3d5a"
 EXPECTED_EVIDENCE_STATUS = "historical_stage1_attested_screening_only"
 EXPECTED_STAGE2_NAMESPACE = (
     "/workspace/codexschema/ready_to_strike_0p5_20260717/"
-    "join_ladder_stage2_d12_v5_exact_log_bytes"
+    "join_ladder_stage2_d12_v6_scientific_inputs_only"
 )
 EXPECTED_PRIOR_ATTEMPT = {
     "namespace": (
@@ -57,7 +57,7 @@ EXPECTED_PRIOR_ATTEMPT = {
     "summary_sha256": "6910db2826654123c576afa67b9c2e873c4785c2bd095b2f61abb26d5f1f1476",
     "runner_sha256": "049295e63e6f786cdb6aeb9ae8fe1d30d8418f8aad8253587fce52d76f44b9c5",
     "activation_sha256": "8742aadff796218f170fede3f6e386e54314e086740f4ad82b9242f52667ab10",
-    "failure_class": "mjcf_snapshot_omitted_referenced_mesh_assets",
+    "failure_class": "prior_v2_topp_rc1_no_timing",
     "automatic_retry": False,
 }
 
@@ -80,13 +80,6 @@ EXPECTED_PRIOR_CANDIDATES = {
     "bh_rb_d12": ("d9ce654c861d343be8fd6ed81ac40a15fda9b95d6bf2969bacdb936697e68643",
                   "e504637a42bf1c26d6100d5a682974a5e950c0a18aeeb10c120754a87cce1790"),
 }
-EXPECTED_PRIOR_TOPP_LOGS = {
-    "fh_rf_d12": "36aac9645dd1b2441467a3ad1d57b889912f2b346cd7cdf3493b4f4a65760583",
-    "fh_rb_d12": "81db850b93837a91154807b852a37f09541cf777a15384d1a0cd650a51ea3d2b",
-    "bh_rf_d12": "7d66169ff4691d4cb96bfcc0584d4e2886e210472f88c01ca7db5ba76bb54a0a",
-    "bh_rb_d12": "9ee20f066ddd387bbbc06c323c6c06046f4f0f51745ba858811220698a66a24f",
-}
-
 EXPECTED_STAGE1_CELLS = {
     "fh_rf_d17": ("forehand", "forehand", 17),
     "fh_rb_d06": ("forehand", "backhand", 6),
@@ -1060,29 +1053,11 @@ def _validate_topp(certificate: Snapshot, output: Snapshot, markdown: Snapshot, 
 
 def _collect_prior_v2_inputs(*, activation: Mapping[str, Any],
                              queue: Mapping[str, Any],
-                             body_order: Sequence[str],
-                             expected_receipt_sha: str) -> tuple[
+                             body_order: Sequence[str]) -> tuple[
                                  dict[str, dict[str, Any]], dict[str, Snapshot]
                              ]:
     prior_root = _absolute(activation["prior_failed_attempt"]["namespace"])
-    expected_control = {
-        "runner": (prior_root / "snapshots/run_ready_to_strike_join_ladder_stage2.py",
-                   EXPECTED_PRIOR_ATTEMPT["runner_sha256"]),
-        "activation": (prior_root / "snapshots/activation.json",
-                       EXPECTED_PRIOR_ATTEMPT["activation_sha256"]),
-        "queue": (prior_root / "snapshots/queue.json", EXPECTED_QUEUE_SHA256),
-        "receipt": (prior_root / "snapshots/stage1_historical_attestation.json",
-                     expected_receipt_sha),
-        "generator": (prior_root / "snapshots/build_ready_to_strike_motion.py",
-                      queue["runtime"]["generator_sha256"]),
-        "v1_summary": (prior_root / "snapshots/prior_stage2_failure_summary.json",
-                       EXPECTED_PRIOR_V1_SUMMARY_SHA256),
-    }
     snapshots: dict[str, Snapshot] = {}
-    for name, (path, expected_sha) in expected_control.items():
-        snapshot = _read_snapshot(path, f"prior V2 {name}")
-        _require(snapshot.sha256 == expected_sha, f"prior V2 {name} SHA changed")
-        snapshots[f"prior:control:{name}"] = snapshot
     prior_assets: dict[str, Path] = {}
     for name in ("forehand", "backhand"):
         path = prior_root / f"snapshots/assets/{name}.npz"
@@ -1092,20 +1067,18 @@ def _collect_prior_v2_inputs(*, activation: Mapping[str, Any],
         snapshots[f"prior:asset:{name}"] = snapshot
         prior_assets[name] = path
     records: dict[str, dict[str, Any]] = {}
-    generator_path = expected_control["generator"][0]
+    generator_path = prior_root / "snapshots/build_ready_to_strike_motion.py"
     for cell_id, (action, ready_source, delta) in EXPECTED_STAGE2_CELLS.items():
         candidate_path = prior_root / cell_id / "candidate.npz"
         contract_path = prior_root / cell_id / "candidate.contract.json"
-        log_path = prior_root / cell_id / "topp/run.log"
         candidate = _read_snapshot(candidate_path, f"prior V2 {cell_id} candidate")
         contract = _read_snapshot(contract_path, f"prior V2 {cell_id} contract")
-        log = _read_snapshot(log_path, f"prior V2 {cell_id} TOPP log")
         expected_candidate, expected_contract = EXPECTED_PRIOR_CANDIDATES[cell_id]
         _require(candidate.sha256 == expected_candidate
                  and contract.sha256 == expected_contract,
-                 f"prior V2 {cell_id} candidate or contract SHA changed")
-        _require(log.sha256 == EXPECTED_PRIOR_TOPP_LOGS[cell_id],
-                 f"prior V2 {cell_id} TOPP log SHA changed")
+                 f"prior V2 {cell_id} candidate or contract SHA changed: "
+                 f"candidate={candidate.sha256} expected={expected_candidate}; "
+                 f"contract={contract.sha256} expected={expected_contract}")
         cell = {"cell_id": cell_id, "action": action,
                 "ready_source": ready_source, "delta": delta}
         info = _validate_candidate(
@@ -1117,11 +1090,10 @@ def _collect_prior_v2_inputs(*, activation: Mapping[str, Any],
                  and info["generator_contract_sha256"] == expected_contract,
                  f"prior V2 {cell_id} candidate validation lineage changed")
         records[cell_id] = {
-            "candidate": candidate, "contract": contract, "log": log, "info": info,
+            "candidate": candidate, "contract": contract, "info": info,
         }
         snapshots[f"prior:candidate:{cell_id}"] = candidate
         snapshots[f"prior:contract:{cell_id}"] = contract
-        snapshots[f"prior:topp_log:{cell_id}"] = log
     return records, snapshots
 
 
@@ -1156,18 +1128,11 @@ def _validate_inputs(*, activation_path: Path | str, queue_path: Path | str,
         payload=prior_summary_snapshot.payload,
         expected_receipt_sha=receipt_sha,
     )
-    stage1_generator = _read_snapshot(
-        _absolute(activation["stage1_namespace"]) / "build_ready_to_strike_motion.py",
-        "attested Stage1 generator copy",
-    )
-    _require(stage1_generator.sha256 == queue["runtime"]["generator_sha256"],
-             "attested Stage1 generator copy SHA changed")
     runtime_root = _absolute(queue["runtime"]["checkout_path"])
     _require(runtime_root.is_dir(), "runtime checkout is missing")
     snapshots: dict[str, Snapshot] = {
         "runner": source_snapshot, "activation": activation_snapshot,
         "queue": queue_snapshot, "receipt": receipt_snapshot,
-        "stage1_generator": stage1_generator,
         "prior_summary": prior_summary_snapshot,
     }
     for key, relative in RUNTIME_RELATIVE_PATHS.items():
@@ -1190,6 +1155,21 @@ def _validate_inputs(*, activation_path: Path | str, queue_path: Path | str,
         snapshot = _read_snapshot(asset["path"], f"asset {name}")
         _require(snapshot.sha256 == asset["sha256"], f"asset {name} SHA changed")
         snapshots[f"asset:{name}"] = snapshot
+    current_prior_runtime = {
+        key.split(":", 1)[1]: value.sha256
+        for key, value in snapshots.items()
+        if key.startswith("runtime:")
+        and Path(key.split(":", 1)[1]) in (
+            set(TOPP_CLOSURE_PATHS) | set(RUNTIME_RELATIVE_PATHS.values())
+        )
+    }
+    _require(prior_summary["runtime_snapshot_shas"] == current_prior_runtime,
+             "prior V2 runtime inputs differ from the frozen current TOPP closure")
+    current_assets = {
+        name: snapshots[f"asset:{name}"].sha256 for name in ("forehand", "backhand")
+    }
+    _require(prior_summary["asset_snapshot_shas"] == current_assets,
+             "prior V2 assets differ from the frozen current assets")
     try:
         body_order = tuple(
             line.strip()
@@ -1203,7 +1183,6 @@ def _validate_inputs(*, activation_path: Path | str, queue_path: Path | str,
              "runtime body order must contain unique non-empty names")
     prior_candidate_records, prior_input_snapshots = _collect_prior_v2_inputs(
         activation=activation, queue=queue, body_order=body_order,
-        expected_receipt_sha=receipt_sha,
     )
     snapshots.update(prior_input_snapshots)
     return {
@@ -1277,11 +1256,9 @@ def _run_stage2_impl(*, activation_path: Path | str, queue_path: Path | str,
         "activation": snapshot_root / "activation.json",
         "queue": snapshot_root / "queue.json",
         "receipt": snapshot_root / "stage1_historical_attestation.json",
-        "stage1_generator": snapshot_root / "build_ready_to_strike_motion.py",
         "prior_summary": snapshot_root / "prior_stage2_failure_summary.json",
     }
-    for key in ("runner", "activation", "queue", "receipt", "stage1_generator",
-                "prior_summary"):
+    for key in ("runner", "activation", "queue", "receipt", "prior_summary"):
         _write_exclusive(snapshot_destinations[key], snapshots[key].payload)
     runtime_snapshot_root = snapshot_root / "runtime"
     runtime_snapshot_root.mkdir(mode=0o700)
@@ -1450,6 +1427,8 @@ def _run_stage2_impl(*, activation_path: Path | str, queue_path: Path | str,
             key.removeprefix("prior:"): value.sha256
             for key, value in sorted(snapshots.items()) if key.startswith("prior:")
         },
+        "prior_diagnostic_logs_consumed": False,
+        "prior_v2_timing_available": False,
         "mjcf_asset_closure": context["mjcf_asset_closure"],
         "rows": rows,
         "screening_acceptance": {

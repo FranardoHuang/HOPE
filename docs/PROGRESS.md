@@ -14,14 +14,17 @@
 ## 2026-07-17
 
 - ready×join Stage-2 v2 唯一 execute 已保全 summary `6910db28…f1476`：四份 candidate/contract 与 v1
-  逐字节一致，随后因隔离 MJCF 漏复制 XML 引用的 STL，四个 TOPP 均在算法前 rc1，无 timing、无重试。
-  v3 零 generator 调用并精确复用这四份 candidate，只从 frozen Git objects 补齐 `1 XML + 74 mesh`
+  逐字节一致，四个 TOPP 均 rc1、无 timing、无重试；这是全部正式结论，`run.log` 只作诊断，不能据其
+  文本宣称 rc1 根因。v3 零 generator 调用并精确复用这四份 candidate，只从 frozen Git objects 提供
+  `1 XML + 74 mesh`
   closure（75 文件、14,127,373 字节、manifest `e0381752…b962de`）；wrong prior/log/blob/tree/mode 与 XML
   include/path 反例均 fail closed。v3 唯一远端 dry-run 又在结果 root 前发现 expected contract 误绑 v1
   而非 v2，execute/TOPP 未启动；v4 使用新 activation/namespace 绑定四份真实 v2 contract，其余配方不变。
   v4 相关回归 `68 passed`、独立红队 GO，但唯一 dry-run 又在结果 root 前暴露 exact log SHA 后的脆弱
-  英文文本猜测；真实日志格式不同，execute/TOPP 未启动。v5 删除重复文本解释、使用新 activation/root，
-  本地相关回归 `70 passed`、独立红队 GO；远端一次性 execute 仍待完成，G08 保持 Partial。
+  英文文本猜测；真实日志格式不同，execute/TOPP 未启动。v5 删除重复文本解释却仍因一份 log SHA 手抄
+  一字符错误而 pre-root fail closed。当前 v6 把旧 V1 summary、generator 副本与全部日志移出科学输入，
+  只复验 v2 四份 candidate/contract，并预备在 Git-object 完整闭包中各跑一次 TOPP；相关回归
+  `76 passed`、独立红队 GO，尚待远端 dry-run/execute，G08 保持 Partial。
 
 - ready×join Stage-2 v1 dry-run 通过后唯一 execute 自然终止并保全失败 summary
   `f92e6b8b…63c0e`：四个 generator 均 rc0，但 runner 重复了历史已知量尺错误，把 generator 的 float32
