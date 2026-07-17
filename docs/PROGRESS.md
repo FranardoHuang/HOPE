@@ -13,15 +13,14 @@
 
 ## 2026-07-18
 
-- 03:48 CST 直接训练冲刺快照：Pod2 已有 12 条越过首迭代的作业，三卡 `4/4/4`；
-  Pod1 为 6 条已越过首迭代、6 个空槽。Pod1 的旧 Codex trainer/BankExam hang 以及
-  后来卡在动态 URDF importer 的 `S3`/`S4` 均已按各自精确进程组停止。最小源码
-  修复用 `HOPE_AGIBOT_A3_USD_PATH` 直接创建 `UsdFileCfg`，完全绕过动态 importer；尚待
-  Pod1 实际越过首训练迭代，不先写成修复通过。当前 live 18 臂是旧 source：虽已激活
-  同球实时 target/TTS revision，却没有且不能追溯初始 TTS×outcome 分桶。本分支新
-  source 已按 `<0.5`/`=0.5`/`(0.5,0.9]`/`>0.9 s` 四桶写整数机会、完成、触球和
-  合法回台计数，cached-USD 新作业会直接记录。每条到父模型后 `+100` 才作第一次
-  公平早判，之前不排名。自动 rolling 任务仍暂停。见
+- 04:04 CST 直接训练冲刺为 Pod2 `12/12`、Pod1 `11/12`，共 23 条 accepted trainer。
+  `HOPE_AGIBOT_A3_USD_PATH` 直接 `UsdFileCfg` 的 5 条 Pod1 新作业均已越过首迭代，
+  并真实输出 `<0.5`/`=0.5`/`(0.5,0.9]`/`>0.9 s` 四个初始 TTS 桶的整数
+  机会、完成、触球和合法回台计数。GPU2 第四路 `Z/Z2` 在 env/reward 前的 Kit
+  shader discovery 处两次同点 allocator abort；显存/RAM 充足且同 USD 其他作业正常，
+  所以保留日志、不判配方失败、不做第三次盲试。等 GPU2 自然降到两路后再以
+  第三路补该格。旧 18 臂不能事后追溯 TTS×outcome；新 5 臂从 `+100` 开始比较。
+  自动 rolling 任务仍暂停。见
   [半秒冲刺](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)。
 
 - 0.5 秒 K100 已改成无人工 SHA/activation/receipt 的直接 evaluator 路径，并在 Pod2 完成第一份真实

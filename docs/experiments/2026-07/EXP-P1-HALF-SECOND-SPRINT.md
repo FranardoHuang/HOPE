@@ -1,4 +1,4 @@
-# EXP-P1-HALF-SECOND-SPRINT — 用十八种单 seed 方案冲刺半秒击球
+# EXP-P1-HALF-SECOND-SPRINT — 用二十三个单 seed 问题冲刺半秒击球
 
 - 状态：`running`
 - 阶段/轴：Phase 1 / 准备时间、动作速度、模仿强度与平衡 Reward
@@ -18,7 +18,7 @@
 
 现役代表 `model_5700` 在严格 [0.5 秒 K100](EXP-P1-TASK-REVISION-0P5-K100.md) 中是
 `0/100` 触球、`0/100` 上台、`0/100` 摔倒。它首先暴露的是“来不及完成击球”，不是单拍平衡崩溃。
-因此本轮不再复制同一失败设置的 seed，而是从同一 parent 同时测试十八个不同解释：课程是否太慢、
+因此本轮不再复制同一失败设置的 seed，而是从同一 parent 同时测试二十三个不同解释：课程是否太慢、
 速度惩罚是否太强、老师动作是否在触球窗和球拍目标打架、拍心梯度是否不够直接，以及加强准备姿态与
 释放非击球臂能否守住加速后的平衡。
 
@@ -48,7 +48,7 @@
 只有 `ultra_half` 和 `feasible` 改课程分布：前者为
 `0.05/0.70/0.20/0.05`，后者为 `0.05/0.10/0.45/0.40`。
 
-## 十八个不同科学格
+## 二十三个不同科学格
 
 | 格 | 人话问题 | 相对普通对照的唯一主要变化 |
 | --- | --- | --- |
@@ -95,6 +95,11 @@
 | `hs_p1_m2_focus_qdot0_ready_free_seed3` | 强准备姿态 × 自由非击球臂 + qdot 0 | short-focus | Pod1，accepted |
 | `hs_p1_n2_ultra_fullcombo_seed3` | ultra-half 课程 × 完整组合 | ultra-half | Pod1，accepted |
 | `hs_p1_p2_focus_qdot0_actionrate_half_seed3` | action-rate 惩罚减半 + qdot 0 | short-focus | Pod1，accepted |
+| `hs_p1_u_cached_pos_ready_seed3` | 拍心优先 × 强准备姿态 | short-focus | Pod1，cached USD，accepted |
+| `hs_p1_v_cached_vel_ready_seed3` | 拍速优先 × 强准备姿态 | short-focus | Pod1，cached USD，accepted |
+| `hs_p1_w_cached_pos_free_seed3` | 拍心优先 × 自由非击球臂 | short-focus | Pod1，cached USD，accepted |
+| `hs_p1_x_cached_vel_free_seed3` | 拍速优先 × 自由非击球臂 | short-focus | Pod1，cached USD，accepted |
+| `hs_p1_y_cached_pos_window0_seed3` | 拍心优先 × 触球窗老师静音 | short-focus | Pod1，cached USD，accepted |
 
 前三条是已经启动的旧课程映射，不能被改写成新 short-focus 的严格配对。其余 accepted run 均已通过
 “配置解析、首 iteration、fatal 扫描”这三个简化启动检查；这里的 accepted 只表示训练确实在跑，
@@ -113,9 +118,12 @@
 | S2 | importer | importer malloc 失败，保留日志，不把它算成科学失败 |
 | S3 | importer | importer 挂起；核对精确进程组后只停止 S3 |
 | S4 | importer | importer 挂起；核对精确进程组后只停止 S4 |
+| Z、Z2 | Kit 启动 | GPU2 第四路两次在 env/reward 前的 USD shader discovery 处 allocator abort；保留日志，不判配方失败，不再盲试 |
 
-Pod1 当前是 6 条 accepted run 和 6 个空槽。S3/S4 都已经 exact stopped/rejected，不是 booting 或 running；
-空槽等待预转换 USD source，避免继续用动态 importer 重复制造相同基础设施失败。
+Pod1 当前是 11 条 accepted run 和 1 个空槽。预转换 USD 的 5 条新作业均已越过
+首 iteration，并开始直接输出四个初始 TTS 桶的整数机会、完成、触球和合法回台计数。
+GPU2 空槽保留到现有三路自然降到两路，然后才作为第三路补 `velocity_window0`；
+不在同一第四路条件下继续碰运气。
 
 ## 判读与停止
 
@@ -127,5 +135,5 @@ Pod1 当前是 6 条 accepted run 和 6 个空槽。S3/S4 都已经 exact stoppe
 ## 当前决定
 
 - 决定：`inconclusive / running`。
-- 已采用的训练策略：同 parent、单 seed、十八个不同科学问题并行；优先产生可击球候选，再用单变量格解释。
+- 已采用的训练策略：同 parent、单 seed、二十三个不同科学问题并行；优先产生可击球候选，再用单变量格解释。
 - 当前不能声称：任何格已经解决半秒击球、连续对打或跨引擎部署。

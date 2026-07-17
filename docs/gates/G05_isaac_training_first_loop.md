@@ -84,18 +84,19 @@ Follow-up note (2026-07-18, direct exact-0.5 K100 completed; Gate remains `Parti
   Isaac diagnostic and not vendor MuJoCo evidence. See the
   [experiment](../experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md) and
   [direct operation](../operations/run_phase1_task_revision_0p5_exam.md).
-- At the 2026-07-18 03:48 CST snapshot, Pod2 had 12 accepted trainers at `4/4/4` across its three GPUs.
-  Pod1 had six accepted trainers and six empty slots. Its two old Codex-only teardown hangs were removed by their
-  exact process groups; the later `S3` and `S4` short-preparation attempts both hung in the dynamic URDF importer
-  and were also stopped by their own exact process groups. No seventh Pod1 trainer was booting at this snapshot.
-  This is a dated snapshot, not a permanent capacity claim. The separate rolling automation remains paused.
-- The minimal source repair constructs `UsdFileCfg` directly from `HOPE_AGIBOT_A3_USD_PATH`, bypassing the
-  dynamic URDF importer completely. It has not yet crossed a real first training iteration on Pod1, so it is a
-  source candidate rather than an accepted runtime fix and G05 remains `Partial`.
-- The 18 currently live trainers use the old source. They record and activate same-ball target/TTS revisions, but
+- At the 2026-07-18 04:04 CST snapshot, Pod2 had `12/12` accepted trainers at `4/4/4`; Pod1 had `11/12`
+  at `4/4/3`, for 23 live trainers. Five new Pod1 jobs loaded a complete pre-converted A3 composition through
+  `HOPE_AGIBOT_A3_USD_PATH` and `UsdFileCfg`, crossed their first training iteration, and never initialized the
+  dynamic URDF importer. The importer bypass is therefore runtime-verified; G05 remains `Partial` because policy
+  quality and vendor MuJoCo are still open.
+- The GPU2 fourth-slot `Z` and one unchanged infrastructure retry `Z2` both aborted during Kit USD shader discovery,
+  before env or Reward construction, with `malloc(): invalid size`. Other jobs using the same USD remained live and
+  both device and host memory had ample headroom. They are infrastructure failures, not policy-setting failures.
+  No third blind retry is allowed; the cell may start as a third process only after GPU2 naturally drops to two.
+- The original 18 trainers use the old source. They record and activate same-ball target/TTS revisions, but
   do not emit outcome counts cross-tabulated by initial TTS bucket, and those missing counts cannot be reconstructed
   retrospectively. The new source on this branch implements integer opportunity, completion, hit and legal-return
-  counts for four initial-TTS buckets: `<0.5`, `=0.5`, `(0.5,0.9]` and `>0.9 s`. New cached-USD jobs will record
+  counts for four initial-TTS buckets: `<0.5`, `=0.5`, `(0.5,0.9]` and `>0.9 s`. The five cached-USD jobs now emit
   these counters directly. Consequently `+100` after the common parent is the first fair early comparison point;
   earlier observations may only reject boot, stability, or activation failures, and the old 18 arms cannot identify
   which preparation-time bucket has learned to hit or return. The latest completed forehand timing exam remains

@@ -57,19 +57,20 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   触球、回台都为 `0/50`，总计物理摔倒 `0/100`，全部因半秒 deadline guard 结束。
   这个 checkpoint 已被严格半秒要求否定；正手最新完整卷的 hit/return 仍为 `0/50`。
 
-  2026-07-18 03:48 CST 运行快照：Pod2 已有 `12/12` 条越过首训练迭代的作业
-  （accepted），三卡为 `4/4/4`；Pod1 有 6 条 accepted、6 个空槽。Pod1 的旧 Codex
-  trainer/BankExam hang 已只按它们各自的精确进程组清理；后续短准备训练
-  `S3`/`S4` 又卡在动态 URDF importer，两条也都已精确停止，不是第 7 条正在训练。
-  最小源码修复改为由 `HOPE_AGIBOT_A3_USD_PATH` 直接构造 `UsdFileCfg`，完全绕过这条
-  动态 URDF importer 路径；它尚待 Pod1 真实越过首训练迭代，所以 G05 仍为
-  `Partial`。当前 live 的 18 条仍是旧 source：同一颗球的 target/TTS 实时 revision 已激活，
-  但旧日志没有“初始准备时间（TTS）× outcome”分桶，也不能事后补出。本分支的
-  新 source 已实现四个初始 TTS 桶（`<0.5`、`=0.5`、`(0.5,0.9]`、`>0.9 s`）的整数
-  机会、完成、触球与合法回台计数；后续绕过 importer 的 cached-USD 新作业会在训练时
-  直接记录。每条到共同父模型后 `+100` 才做第一次公平早判，更早只查启动、
-  稳定和机制是否激活；旧 18 臂不能冒充已知道哪个 TTS 区间已学会回球。
-  十二种单 seed 配方、判读边界和实际 run 映射见
+  2026-07-18 04:04 CST 运行快照：Pod2 为 `12/12`、三卡 `4/4/4`；Pod1 为
+  `11/12`、三卡 `4/4/3`，共 `23` 条 accepted trainer。`HOPE_AGIBOT_A3_USD_PATH`
+  已让 `UsdFileCfg` 直接加载完整预转换 USD；Pod1 新增的 5 条都在不启动 URDF
+  importer 的情况下越过首迭代，所以 importer 绕过已是运行验证能力。GPU2
+  第四路 `Z/Z2` 两次都在进入 env/reward 前的 Kit USD shader discovery 处以
+  `malloc(): invalid size` 自然退出；同 USD 的其他作业正常，且当时显存/RAM 充足，
+  因此它们不记为配方失败，也不继续第三次盲试。等 GPU2 自然降到两路后，
+  再把该格作为第三路启动。
+
+  旧 18 条 source 不能事后补出“初始准备时间（TTS）× outcome”分桶；
+  新增 5 条已实际输出 `<0.5`、`=0.5`、`(0.5,0.9]`、`>0.9 s` 四桶的整数
+  机会、完成、触球和合法回台计数。每条到共同父模型后 `+100` 才做第一次
+  公平早判；旧 18 臂不与新账本假配对。二十三个单 seed 问题、判读边界和
+  实际 run 映射见
   [半秒冲刺卷宗](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)；严格半秒负结果见
   [0.5 秒卷宗](experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md)。Isaac 结果仍需 vendor MuJoCo 同题。
 

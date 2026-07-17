@@ -1,7 +1,7 @@
 schema_version: 1
 name: phase1_half_second_sprint_20260718
 purpose: >-
-  用同一个 model_5700 单 seed 热启动，快速比较十八种“半秒内完成击球”训练方案。
+  用同一个 model_5700 单 seed 热启动，快速比较二十三种“半秒内完成击球”训练问题。
   这里保留公共输入和每格真正改变的参数，不复制旧队列的发布流程，也不做
   SHA、receipt、claim 或 activation 流程。
 simulation_only: true
@@ -19,6 +19,8 @@ simple_launch:
 
 common:
   source_checkout: /workspace/codexschema/nohope_task_revision_b1f5a38
+  cached_usd_successor_source: /workspace/codexschema/nohope_halfsecond_cachedusd_latest
+  preconverted_a3_usd: /workspace/codexschema/simple_half_second_sprint_20260718/assets/a3_preconverted_usd/model.usd
   parent_checkpoint: /workspace/codexschema/nohope_task_revision_b1f5a38/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-16_20-04-47_phase1_taskrev_p2_equal_reward_seed3_20260716/model_5700.pt
   resume: full_policy_value_optimizer_normalizer
   seed: 3
@@ -234,6 +236,62 @@ cells:
       task.rewards.joint_velocity_limit_hinge_weight: 0.0
       task.rewards.action_rate_weight: -0.05
 
+  - id: velocity_ready
+    human_name: 拍速优先配强准备姿态
+    question: 拍速优先与强准备姿态组合，能否在赶球时守住平衡？
+    curriculum: short_focus
+    overrides:
+      task.rewards.joint_velocity_limit_hinge_weight: 0.0
+      task.rewards.racket_position_weight: 7.0
+      task.rewards.racket_velocity_weight: 17.0
+      task.rewards.racket_normal_weight: 5.0
+      task.rewards.foot_orientation_weight: -0.6
+      task.rewards.prestrike_upright_weight: -2.0
+
+  - id: position_free
+    human_name: 拍心优先配自由非击球臂
+    question: 释放非击球臂后，是否更容易让拍心快速到位且保持平衡？
+    curriculum: short_focus
+    overrides:
+      task.rewards.joint_velocity_limit_hinge_weight: 0.0
+      task.rewards.racket_position_weight: 17.0
+      task.rewards.racket_velocity_weight: 7.0
+      task.rewards.racket_normal_weight: 5.0
+      task.rewards.free_non_striking_arm_mimic: true
+
+  - id: velocity_free
+    human_name: 拍速优先配自由非击球臂
+    question: 自由非击球臂能否补偿拍速优先带来的平衡扰动？
+    curriculum: short_focus
+    overrides:
+      task.rewards.joint_velocity_limit_hinge_weight: 0.0
+      task.rewards.racket_position_weight: 7.0
+      task.rewards.racket_velocity_weight: 17.0
+      task.rewards.racket_normal_weight: 5.0
+      task.rewards.free_non_striking_arm_mimic: true
+
+  - id: position_window0
+    human_name: 拍心优先配触球窗老师静音
+    question: 拍心赶球时，只在触球窗去掉模仿约束是否更有效？
+    curriculum: short_focus
+    overrides:
+      task.rewards.joint_velocity_limit_hinge_weight: 0.0
+      task.rewards.motion_scale_in_window: 0.0
+      task.rewards.racket_position_weight: 17.0
+      task.rewards.racket_velocity_weight: 7.0
+      task.rewards.racket_normal_weight: 5.0
+
+  - id: velocity_window0
+    human_name: 拍速优先配触球窗老师静音
+    question: 拍速赶球时，触球窗模仿是否与实时速度目标冲突？
+    curriculum: short_focus
+    overrides:
+      task.rewards.joint_velocity_limit_hinge_weight: 0.0
+      task.rewards.motion_scale_in_window: 0.0
+      task.rewards.racket_position_weight: 7.0
+      task.rewards.racket_velocity_weight: 17.0
+      task.rewards.racket_normal_weight: 5.0
+
 actual_runs:
   - run_name: hs_a_control_seed3
     pod: pod2
@@ -361,6 +419,41 @@ actual_runs:
     curriculum: short_focus
     qdot_hinge_weight: 0.0
     state: accepted_running
+  - run_name: hs_p1_u_cached_pos_ready_seed3
+    pod: pod1
+    role: 拍心优先与强准备姿态交互
+    closest_cell: position_ready
+    curriculum: short_focus
+    qdot_hinge_weight: 0.0
+    state: accepted_running
+  - run_name: hs_p1_v_cached_vel_ready_seed3
+    pod: pod1
+    role: 拍速优先与强准备姿态交互
+    closest_cell: velocity_ready
+    curriculum: short_focus
+    qdot_hinge_weight: 0.0
+    state: accepted_running
+  - run_name: hs_p1_w_cached_pos_free_seed3
+    pod: pod1
+    role: 拍心优先与自由非击球臂交互
+    closest_cell: position_free
+    curriculum: short_focus
+    qdot_hinge_weight: 0.0
+    state: accepted_running
+  - run_name: hs_p1_x_cached_vel_free_seed3
+    pod: pod1
+    role: 拍速优先与自由非击球臂交互
+    closest_cell: velocity_free
+    curriculum: short_focus
+    qdot_hinge_weight: 0.0
+    state: accepted_running
+  - run_name: hs_p1_y_cached_pos_window0_seed3
+    pod: pod1
+    role: 拍心优先与触球窗老师静音交互
+    closest_cell: position_window0
+    curriculum: short_focus
+    qdot_hinge_weight: 0.0
+    state: accepted_running
 
 rejected_or_stopped_attempts:
   - attempts: [B, C]
@@ -390,12 +483,20 @@ rejected_or_stopped_attempts:
   - attempts: [S4]
     reason: importer 挂起；核对精确进程组后只停止该次尝试
     stage: importer
+  - attempts: [Z, Z2]
+    reason: >-
+      同一 velocity_window0 配方在 GPU2 第四路冷启动时，两次均在 env/reward
+      构造前的 Kit USD shader discovery 以 malloc invalid size 自然退出；
+      保留日志，不做第三次盲试，不判科学配方失败
+    stage: before_environment
 
 pod1_capacity:
-  accepted_running: 6
-  empty_slots: 6
-  next_launch_blocker: preconverted USD source
-  note: S3/S4 均已 exact stopped/rejected，不是 booting 或 running
+  accepted_running: 11
+  empty_slots: 1
+  next_launch_blocker: GPU2 fourth Kit allocator abort
+  note: >-
+    预转换 USD 已让 5 条新作业越过首迭代；等 GPU2 自然降到两路后，
+    再把 velocity_window0 作为第三路启动
 
 readout:
   checkpoints_after_parent: [100, 200, 500, 1000, 2000, 4000]
