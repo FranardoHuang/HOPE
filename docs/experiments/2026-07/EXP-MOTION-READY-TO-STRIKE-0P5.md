@@ -155,10 +155,17 @@ run-up 上界是正手 `0.98 s`、反手 `0.78 s`。因此单纯把完整旧 cli
 - v8 只修这个过绑定：入口 symlink 字面值保留为 TOCTOU 证据，但身份改为 canonical realpath、目标 binary
   SHA、Python version、venv prefix，以及 NumPy/MuJoCo 的完整 RECORD 与实际 ELF/dependency closure。
   四份 candidate/contract、四个 `delta=12` cell、join、hold、预算、TOPP 与 acceptance 全不变。
-  runner/activation SHA 为 `40e89c6a…ae09` / `e878de11…0447`，专项 `91 passed`；source gate 通过，
-  远端尚未执行。仍没有 timing、production FK、动力学或行为通过，不能写成 0.5 秒已完成。
-- 下一门：在 ignored runtime 资产上按预注册 join ladder 生成正/反手候选，production FK 重建后逐个跑
-  TOPP；只把 `<=0.5 s` 的候选送 L0/L1/桌网/动力学，再用绑定该 motion SHA 的 0.5 秒 K100 和
-vendor MuJoCo 判行为。
+  runner/activation SHA 为 `40e89c6a…ae09` / `e878de11…0447`，专项 `91 passed`。Pod2 的唯一远端
+  dry-run 随后报告预注册四格且没有创建结果 root；同一 SSH 中的唯一 execute 自然结束、rc=`0`，没有
+  retry、trainer/GPU/真机 signal。terminal summary SHA 为
+  `ac88041207add625cf9ff0b83484dfe6fef9c30edfbc9a3e4398b51222b7030c`。四格 generator/TOPP 均
+  rc=`0`，时间依次为正手×正手 ready `0.80 s`、正手×反手 ready `0.86 s`、反手×正手 ready
+  `1.10 s`、反手×反手 ready `0.94 s`，所以 `<=0.5 s` 为 **0/4**，没有格获准进入 L0/L1。
+  输入稳定性错误为空且 `mjcf_closure_exact=true`；但 `physics_replay_exact=false`、
+  `source_closure_exact=false`、`strict_global_minimum_proven=false`，结果仍只是 screening evidence，
+  不是完整动力学、行为或部署通过。
+- 决策：按预注册规则停止当前 two-ready/hold/join family，不重放 v8，也不把 0/4 用调阈值变成成功。
+  下一轮必须另立一个结构轴（例如新的更短空间路径），重新过 production FK/TOPP `<=0.5 s` 后才可进入
+  L0/L1/桌网/动力学，再用绑定新 motion SHA 的 0.5 秒 K100 和 vendor MuJoCo 判行为。
 
 复现入口见[操作文档](../../operations/run_ready_to_strike_motion.md)。

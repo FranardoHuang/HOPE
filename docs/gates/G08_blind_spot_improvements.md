@@ -463,9 +463,13 @@ canonical `ldd/readelf` 与 MJCF pre/post snapshot，但唯一远端 dry-run 把
 execute=`0`。v8 以 canonical realpath、
 binary SHA、Python version、venv prefix 和 RECORD/ELF closure 定义解释器身份，字面 link 只作 TOCTOU
 证据；科学四格不变。runner/activation=`40e89c6a…ae09/e878de11…0447`，专项 `91 passed`，source gate
-已通过，远端尚未执行。
-TOPP `<=0.5 s`、L0、vendor L1、桌网、
-动力学和行为卷仍全部开放，
+通过。Pod2 唯一 dry-run 报告四格且未创建 root；同一 SSH 中唯一 execute 自然结束、rc=`0`、无 retry
+或 trainer/GPU/真机 signal，terminal summary=`ac880412…b7030c`。四格 generator/TOPP 均 rc=`0`，
+正手×正手/反手 ready 为 `0.80/0.86 s`，反手×正手/反手 ready 为 `1.10/0.94 s`，因此 `<=0.5 s`
+为 **0/4**。输入稳定性为空、`mjcf_closure_exact=true`，但 `physics_replay_exact=false`、
+`source_closure_exact=false`、`strict_global_minimum_proven=false`；这只是 screening，不是完整动力学或行为
+通过。当前 two-ready/hold/join family 按预注册规则停止且不重放；L0、vendor L1、桌网、动力学和行为卷
+没有候选进入，仍全部开放，
 所以 G08 不晋级。
 见[实验](../experiments/2026-07/EXP-MOTION-READY-TO-STRIKE-0P5.md)和
 [操作](../operations/run_ready_to_strike_motion.md)。

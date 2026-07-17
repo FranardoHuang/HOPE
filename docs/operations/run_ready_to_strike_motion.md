@@ -102,11 +102,12 @@ schema-2 source/candidate 的 `joint_vel` 必须按 generator 的 float32 输入
 它只把旧结果升级为 screening evidence；因为历史证书没有完整 argv、transitive source 和 MJCF closure，
 `physics_replay_exact/source_closure_exact/mjcf_closure_exact` 仍必须是 `false`，不能冒充动力学重放或部署通过。
 
-## Stage-2 四个中点的一次性执行（当前 v8，尚未远端执行）
+## Stage-2 四个中点的一次性执行（v8 已唯一执行，禁止重放）
 
-Stage-1 receipt `7cf1c7c9…c377f` 已成功发布后，四个 `delta=12` 中点只能由 tracked runner 消费一次。
+Stage-1 receipt `7cf1c7c9…c377f` 发布后，四个 `delta=12` 中点已由 tracked runner 唯一消费。
 activation 精确绑定 runner SHA、Stage-1 receipt SHA 和唯一结果目录；换目录重复执行会在创建任何 namespace
-前 fail closed。先从包含 runner 的 clean main source 做 dry-run：
+前 fail closed。以下 dry-run/execute 命令只记录真实执行入口，固定 root 已存在，**不得再次运行**。当时先从
+包含 runner 的 clean main source 做 dry-run：
 
 ```bash
 python3 scripts/run_ready_to_strike_join_ladder_stage2.py \
@@ -116,7 +117,7 @@ python3 scripts/run_ready_to_strike_join_ladder_stage2.py \
 ```
 
 dry-run 必须报告四格且不创建结果目录。确认 receipt、runner、queue、旧 runtime 与两份动作资产 SHA 全部
-一致后，才可用同一组输入执行：
+一致后，当时在同一 SSH 中用同一组输入执行：
 
 ```bash
 python3 scripts/run_ready_to_strike_join_ladder_stage2.py \
@@ -126,6 +127,23 @@ python3 scripts/run_ready_to_strike_join_ladder_stage2.py \
   --execute \
   --confirm RUN_READY_TO_STRIKE_STAGE2_ONCE
 ```
+
+真实 Pod2 结果：dry-run rc=`0` 且报告四格、root 仍不存在；唯一 execute 随后自然结束、rc=`0`，没有
+retry 或 trainer/GPU/真机 signal。terminal summary SHA 为
+`ac88041207add625cf9ff0b83484dfe6fef9c30edfbc9a3e4398b51222b7030c`。四格 generator/TOPP 均
+rc=`0`，时间为：
+
+| 动作 | frame0 ready | run-up | `<=0.5 s` |
+| --- | --- | ---: | --- |
+| 正手 | 正手 | `0.80 s` | no |
+| 正手 | 反手 | `0.86 s` | no |
+| 反手 | 正手 | `1.10 s` | no |
+| 反手 | 反手 | `0.94 s` | no |
+
+因此本 family 为 `0/4`，不得送 L0/L1。输入稳定性错误为空、生产 MJCF 闭包在本次执行中
+`mjcf_closure_exact=true`；`physics_replay_exact=false`、`source_closure_exact=false`、
+`strict_global_minimum_proven=false`，所以这里只是 CPU-only screening，不是动力学重放、行为或部署通过。
+固定 root 与 summary 必须保留，不重试、不换 root 重放。
 
 v8 不再重跑 generator：它只从 v2 的 terminal summary 读取正式科学事实，并逐字节复验四份
 candidate/contract 后复制进新 namespace。旧 V1 summary、generator 副本和 `run.log` 都不是本轮科学输入；
@@ -173,8 +191,9 @@ execute natural terminal；summary=`b5209bc7…`，四格 generator=`0`、TOPP r
 canonical interpreter identity，继续绑定两份 package 完整 RECORD、实际加载 ELF、每条 `DT_NEEDED`
 解析边、canonical `ldd/readelf` 与 MJCF pre/post snapshot；科学四格和 acceptance 不变。TOPP 非零或
 snapshot 漂移时 exact 标志必须为 false。本地 Stage-2 专项 `91 passed`，runner/activation SHA 为
-`40e89c6a…ae09` / `e878de11…0447`，上面的**唯一一次**远端 dry-run/execute 已获 source 授权但尚未执行。
-这仍不是 behavior、动力学或 0.5 秒通过；若 dry-run 或 execute 失败，保全新 namespace 且不重放。
+`40e89c6a…ae09` / `e878de11…0447`。上面的唯一远端 dry-run/execute 已完成，summary
+`ac880412…b7030c`；四格 TOPP rc=`0`，但时间 `0.80/0.86/1.10/0.94 s` 全未过 0.5 秒，因此
+two-ready/hold/join family 停止且不重放。这仍不是 behavior 或完整动力学通过。
 
 ## 下一步不是直接训练
 
