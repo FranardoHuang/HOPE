@@ -136,6 +136,21 @@ The training scaffold exists under:
 
 `TrackingFlat` and `HOPEPingPong` forehand training have run end-to-end on the copied Agibot A3 URDF asset (31 actuated DOF), including WandB logging, checkpoint save, and ONNX export. This proves the pipeline can run; it is NOT an accepted quality baseline. G04/G05 remain Partial, and G06/G07 are not accepted until sim-to-sim and dry-run deployment gates record verification.
 
+## Training-critical change barrier
+
+Before changing any contract that affects a live trainer, checkpoint consumer, evaluator, pruning
+rule, planner-policy tuple, motion timing law, or recurring Pod command, first set the existing
+training automation to `PAUSED` and verify that state. Pausing the automation does not itself stop
+trainers; it prevents a stale recurring turn from inspecting, attesting, pruning, launching or
+signalling against a contract while that contract is being changed.
+
+Keep the automation paused while implementation, independent review, source tests, documentation,
+and any required one-shot runtime gate are incomplete. Resume the **same** automation only after the
+verified change is on `main`, the operation document contains the exact command, and every in-flight
+one-shot mutation has an unambiguous no-clobber state. Never create a second automation to work around
+this barrier. Read-only operator inspection remains allowed, but it cannot publish receipts, signal a
+process, retry a run, or be reported as a behavior verdict.
+
 This branch adds:
 
 - a scrubbed `setup_train_env.sh` as the training shell setup source of truth (site paths are now overridable env vars).

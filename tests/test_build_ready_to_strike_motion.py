@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts/build_ready_to_strike_motion.py"
 LADDER = ROOT / "configs/ready_to_strike_join_ladder_20260717.yaml"
 STAGE2_ACTIVATION_V1 = ROOT / "configs/ready_to_strike_join_ladder_stage2_activation_20260717.json"
-STAGE2_ACTIVATION = ROOT / "configs/ready_to_strike_join_ladder_stage2_activation_v6_20260717.json"
+STAGE2_ACTIVATION = ROOT / "configs/ready_to_strike_join_ladder_stage2_activation_v7_20260717.json"
 
 
 def _load_module():
@@ -124,7 +124,7 @@ def test_stage2_activation_is_exactly_the_registered_crossover_branch() -> None:
         ).hexdigest(),
     }
     assert activation["stage2_namespace"].endswith(
-        "/join_ladder_stage2_d12_v6_scientific_inputs_only"
+        "/join_ladder_stage2_d12_v7_mjeval_runtime"
     )
     assert activation["prior_failed_attempt"]["summary_sha256"] == (
         "6910db2826654123c576afa67b9c2e873c4785c2bd095b2f61abb26d5f1f1476"
@@ -133,6 +133,14 @@ def test_stage2_activation_is_exactly_the_registered_crossover_branch() -> None:
         "prior_v2_topp_rc1_no_timing"
     )
     assert activation["prior_failed_attempt"]["automatic_retry"] is False
+    assert activation["topp_runtime"]["interpreter"] == {
+        "path": "/workspace/hope_mjeval_venv/bin/python",
+        "symlink_target": "/usr/bin/python3.12",
+        "target_sha256": "1d3cf64f97cadc79fdc6fe2496a21b7b456cb94211978cfef5a65f616af74fd5",
+        "python_version": "3.12.3",
+    }
+    assert set(activation["topp_runtime"]["packages"]) == {"numpy", "mujoco"}
+    assert "scipy" not in activation["topp_runtime"]["packages"]
     cells = activation["authorized_stage2_cells"]
     assert {(cell["action"], cell["ready_source"], cell["delta"]) for cell in cells} == {
         ("forehand", "forehand", 12),

@@ -200,6 +200,27 @@ while two still-live siblings remained before their checkpoint and one infrastru
 cell stayed excluded. This is a positive mechanism-activation result, not a behavior winner claim;
 the first behavior comparison remains +500.
 
+The subsequent unique Pod2 `+1000` pruning cycle exited naturally with rc0. It published three
+checkpoint-bound behavior receipts: `p2_equal_reward@5700` (equal Reward weights),
+`p2_no_joint_speed_penalty@5700` (no joint-speed penalty), and
+`p2_fast_equal_reward@5500` (fast-arrival equal Reward weights). The other eight live cells were
+still waiting for their registered checkpoints, while the existing
+`p2_combo_high_noise_free_medium` importer terminal remained explicitly excluded. Both parent
+portfolios therefore returned `waiting_for_all_live_cells`: no portfolio receipt, signal, or legal
+stop was produced. In plain language, the comparison is not complete yet; zero eliminations does
+not mean every cell is good and does not identify a winner.
+
+A later read-only all-Pod `+1000` inspection found that this wait had ended at the checkpoint layer:
+every non-infrastructure cell on both Pods had reached its registered checkpoint. Pod1 had eight
+checkpoint-ready cells, of which seven were still live and one had exited after writing the
+checkpoint; two importer/boot failures remained excluded. Pod2 had eleven checkpoint-ready live
+cells and one excluded importer failure. Only the three earlier Pod2 behavior receipts existed;
+all remaining ready rows were `checkpoint_ready_behavior_receipt_absent`. The inspector made zero
+SSH signals and wrote no receipt. Therefore the next legal action is one no-clobber `+1000`
+attestation cycle, followed by portfolio analysis; it is no longer scientifically correct to say
+that the pool is waiting for checkpoints, but it is still too early to stop a row before those
+behavior and portfolio receipts exist.
+
 ## Acceptance sequence
 
 1. Launch the 22 activated delay-zero cells in cross-GPU rounds; keep the two transport cells

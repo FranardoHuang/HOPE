@@ -13,6 +13,17 @@
 
 ## 2026-07-17
 
+- main `8b371eb7` 的 ready×join Stage-2 v6 已完成唯一远端 dry-run/execute：dry-run 全绿，execute natural
+  terminal，summary=`b5209bc7…`。四格都保持 generator=`0`，TOPP 均 rc=`1`、没有 timing；冻结的
+  `75 files / 74 mesh` closure 与退出后无残留均通过。只读 forensics 证明四份日志同 SHA
+  `f1d5088e…`，共同首错为 `/usr/bin/python3` 缺 `mujoco`，故结论是 runtime dependency closure 失败，
+  不是动作失败。项目实际 TOPP 依赖仅 `numpy+mujoco`，此前 `scipy` 硬门属于过度检查并废除；targeted
+  probe 已证明 `/workspace/hope_mjeval_venv/bin/python` 在清空 `PYTHONPATH` 后可加载 `numpy 2.5`、
+  `mujoco 3.10` 和 exact MJCF（`nq=38,nv=37,nbody=33,ngeom=79,nmesh=74`）。v7 只绑定该解释器、包
+  closure 和 preflight，科学配方不变。后续把完整 RECORD、实际 native ELF/`DT_NEEDED` 解析、canonical
+  `ldd/readelf` 与 MJCF pre/post snapshot 补齐；本地 Stage-2 专项 `112 passed`、独立红队 P0/P1 均为 0，
+  source gate 转绿。唯一远端 v7 仍未消费，所以 timing/TOPP≤0.5/L0/L1/行为均未知，G08 保持 Partial。
+
 - ready×join Stage-2 v2 唯一 execute 已保全 summary `6910db28…f1476`：四份 candidate/contract 与 v1
   逐字节一致，四个 TOPP 均 rc1、无 timing、无重试；这是全部正式结论，`run.log` 只作诊断，不能据其
   文本宣称 rc1 根因。v3 零 generator 调用并精确复用这四份 candidate，只从 frozen Git objects 提供
@@ -22,9 +33,9 @@
   而非 v2，execute/TOPP 未启动；v4 使用新 activation/namespace 绑定四份真实 v2 contract，其余配方不变。
   v4 相关回归 `68 passed`、独立红队 GO，但唯一 dry-run 又在结果 root 前暴露 exact log SHA 后的脆弱
   英文文本猜测；真实日志格式不同，execute/TOPP 未启动。v5 删除重复文本解释却仍因一份 log SHA 手抄
-  一字符错误而 pre-root fail closed。当前 v6 把旧 V1 summary、generator 副本与全部日志移出科学输入，
-  只复验 v2 四份 candidate/contract，并预备在 Git-object 完整闭包中各跑一次 TOPP；相关回归
-  `76 passed`、独立红队 GO，尚待远端 dry-run/execute，G08 保持 Partial。
+  一字符错误而 pre-root fail closed。v6 把旧 V1 summary、generator 副本与全部日志移出科学输入，
+  只复验 v2 四份 candidate/contract，并在 Git-object 完整闭包中各跑一次 TOPP；本次真实运行结果与
+  runtime dependency 根因见上一条。
 
 - ready×join Stage-2 v1 dry-run 通过后唯一 execute 自然终止并保全失败 summary
   `f92e6b8b…63c0e`：四个 generator 均 rc0，但 runner 重复了历史已知量尺错误，把 generator 的 float32
@@ -47,8 +58,11 @@
 
 - Pod2 task-revision `+500` 已为 quality 父本六格和 continuous 父本一格发布行为 receipt。quality 六格
   completion=`0.919–0.971`、virtual-return=`0.278–0.395`，没有任何一格达到预注册 dense-collapse 门；
-  ready 四项缺测，禁止据 null 排名，故合法 stop=`0`。同轮 `+1000` inspect 证明所有 `model_5500/5700`
-  尚不存在；当前不能冒充 Pareto 结论，也没有 signal。
+  ready 四项缺测，禁止据 null 排名，故合法 stop=`0`。后续唯一 Pod2 `+1000` pruning cycle 自然 rc0，
+  为 `p2_equal_reward@5700`、`p2_no_joint_speed_penalty@5700`、`p2_fast_equal_reward@5500` 发布三份
+  behavior receipt；其余 8 条 live 等待 checkpoint，既有 `p2_combo_high_noise_free_medium` importer
+  terminal 被排除。两个 parent 均为 `waiting_for_all_live_cells`，没有 portfolio receipt、signal 或合法
+  stop。这表示同父本比较尚未凑齐，不表示所有臂表现都好，也没有行为胜者。
 
 - Stage-1 historical attestor 的首次 production dry-run 在写 receipt 前 fail closed：旧 task-revision
   checkout `b1f5a38` 不含来自独立 `generator_source_commit=66f93559` 的后置生成器，首版 attestor 错把

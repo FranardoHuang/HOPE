@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import base64
 import hashlib
 import importlib.util
 import json
+import os
 from pathlib import Path
 import subprocess
 import sys
+import threading
 
 import numpy as np
 import pytest
@@ -20,6 +23,10 @@ sys.modules[SPEC.name] = runner
 SPEC.loader.exec_module(runner)
 REAL_COLLECT_PRIOR_V2_INPUTS = runner._collect_prior_v2_inputs
 REAL_RUN_GIT_READONLY = runner._run_git_readonly
+REAL_INSPECT_TOPP_RUNTIME = runner._inspect_topp_runtime
+REAL_OBSERVE_MJCF_RUNTIME_PREFLIGHT = runner._observe_mjcf_runtime_preflight
+REAL_PREFLIGHT_MJCF_RUNTIME = runner._preflight_mjcf_runtime
+REAL_COLLECT_DYNAMIC_DEPENDENCY_CLOSURE = runner._collect_dynamic_dependency_closure
 
 
 def _canonical(document: object) -> bytes:
@@ -257,6 +264,7 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]
             for cell_id, values in runner.EXPECTED_STAGE2_CELLS.items()
         ],
         "prior_failed_attempt": prior_binding,
+        "topp_runtime": runner.EXPECTED_TOPP_RUNTIME,
         "runtime_authority": {
             "cpu_only": True,
             "automatic_retry": False,
@@ -280,6 +288,36 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]
         }, {})
 
     monkeypatch.setattr(runner, "_collect_mjcf_mesh_closure", fake_mjcf_closure)
+
+    fake_runtime_receipt = {
+        "interpreter": {
+            "path": runner.EXPECTED_TOPP_RUNTIME["interpreter"]["path"],
+            "symlink_target": runner.EXPECTED_TOPP_RUNTIME["interpreter"]["symlink_target"],
+            "target_sha256": runner.EXPECTED_TOPP_RUNTIME["interpreter"]["target_sha256"],
+            "python_version": runner.EXPECTED_TOPP_RUNTIME["interpreter"]["python_version"],
+            "venv_prefix": "/workspace/hope_mjeval_venv",
+        },
+        "packages": {}, "probe_argv": ["fixture-runtime-probe"],
+        "probe_rc": 0, "probe_stdout_sha256": "e" * 64,
+        "pythonpath_removed": True, "pythonhome_removed": True,
+    }
+    monkeypatch.setattr(
+        runner, "_inspect_topp_runtime",
+        lambda _contract: (fake_runtime_receipt, {}),
+    )
+    monkeypatch.setattr(
+        runner, "_preflight_mjcf_runtime",
+        lambda **_kwargs: {
+            "loader": "mujoco.MjModel.from_xml_path",
+            "argv": [runner.EXPECTED_TOPP_RUNTIME["interpreter"]["path"], "fixture"],
+            "returncode": 0,
+            "dimensions": {"nq": 38, "nv": 37, "nbody": 33, "ngeom": 79, "nmesh": 74},
+            "stdout_sha256": "f" * 64, "stderr_sha256": _sha(b""),
+            "snapshot_tree_before_sha256": "1" * 64,
+            "snapshot_tree_after_sha256": "1" * 64,
+            "output_files_created": [],
+        },
+    )
 
     def fake_prior_inputs(**_kwargs):
         body_names_path = runtime / runner.RUNTIME_RELATIVE_PATHS["body_order_sha256"]
@@ -484,7 +522,12 @@ def test_v5_preflight_activation_bytes_remain_immutable() -> None:
     assert _sha(payload) == "4541044946f3359632369330e02037c824b87ee4b92da8f4133964711b81bdf2"
 
 
-def test_v6_excludes_diagnostic_logs_from_scientific_input_contract() -> None:
+def test_v6_activation_bytes_remain_immutable() -> None:
+    payload = (REPO / "configs/ready_to_strike_join_ladder_stage2_activation_v6_20260717.json").read_bytes()
+    assert _sha(payload) == "e32135c05e676cfda7902cc0acc3cb30bbc8239cb126f222d96d454c3a3ce3da"
+
+
+def test_v7_excludes_diagnostic_logs_from_scientific_input_contract() -> None:
     source = SCRIPT.read_bytes().lower()
     assert b"no such file or directory" not in source
     assert b"expected_prior_topp_logs" not in source
@@ -492,6 +535,630 @@ def test_v6_excludes_diagnostic_logs_from_scientific_input_contract() -> None:
     collect_source = collect_source[:collect_source.index(b"def _validate_inputs")]
     assert b"topp/run.log" not in collect_source
     assert b"prior:topp_log" not in collect_source
+
+
+def _synthetic_topp_runtime(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> tuple[dict[str, object], dict[str, Path], dict[str, object]]:
+    venv = tmp_path / "hope_mjeval_venv"
+    interpreter = venv / "bin" / "python"
+    interpreter.parent.mkdir(parents=True)
+    target = tmp_path / "usr" / "bin" / "python3.12"
+    _write(target, b"\x7fELF-python-3.12.3\n")
+    os.symlink(str(target), interpreter)
+    site = venv / "lib" / "python3.12" / "site-packages"
+    files: dict[str, Path] = {"target": target}
+    packages: dict[str, object] = {}
+    probe_packages: dict[str, object] = {}
+    for name, version in (("numpy", "2.5.0"), ("mujoco", "3.10.0")):
+        package_dir = site / name
+        dist = site / f"{name}-{version}.dist-info"
+        paths = {
+            "module": package_dir / "__init__.py",
+            "metadata": dist / "METADATA",
+            "record": dist / "RECORD",
+            "wheel": dist / "WHEEL",
+            "native": package_dir / f"_{name}_native.so",
+            "pyc": package_dir / "__pycache__" / "cached.pyc",
+        }
+        if name == "mujoco":
+            paths["libmujoco"] = package_dir / "lib" / "libmujoco.so.3.10.0"
+            paths["optional"] = (
+                package_dir / "experimental" / "studio"
+                / "native_viewer_cc.cpython-312-x86_64-linux-gnu.so"
+            )
+        for label, path in paths.items():
+            if label == "record":
+                continue
+            payload = (b"\x7fELF" + f"-{name}-{version}-{label}\n".encode()
+                       if label in {"native", "libmujoco"}
+                       else f"{name}-{version}-{label}\n".encode())
+            _write(path, payload)
+            files[f"{name}:{label}"] = path
+        record_rows = []
+        recorded_labels = ["module", "metadata", "wheel", "native"]
+        if name == "mujoco":
+            recorded_labels.extend(["libmujoco", "optional"])
+        for label in recorded_labels:
+            payload = paths[label].read_bytes()
+            digest = base64.urlsafe_b64encode(hashlib.sha256(payload).digest()).rstrip(b"=").decode()
+            record_rows.append(
+                f"{paths[label].relative_to(site).as_posix()},sha256={digest},{len(payload)}"
+            )
+        record_rows.extend([
+            f"{paths['pyc'].relative_to(site).as_posix()},,",
+            f"{paths['record'].relative_to(site).as_posix()},,",
+        ])
+        _write(paths["record"], ("\n".join(record_rows) + "\n").encode())
+        files[f"{name}:record"] = paths["record"]
+        record_snapshot = runner._read_snapshot(paths["record"], f"fixture {name} RECORD")
+        record_closure, _native = runner._verify_distribution_record(
+            package_name=name, version=version, site_packages=site,
+            venv_root=venv, record_snapshot=record_snapshot,
+        )
+        packages[name] = {
+            "version": version,
+            **{f"{label}_sha256": _sha(paths[label].read_bytes())
+               for label in ("module", "metadata", "record", "wheel")},
+            "record_file_count": record_closure["file_count"],
+            "record_total_bytes": record_closure["total_bytes"],
+            "record_manifest_sha256": record_closure["verified_manifest_sha256"],
+            "record_native_elf_count": record_closure["native_elf_count"],
+            "record_unhashed_row_count": (
+                record_closure["explicitly_bound_unhashed_row_count"]
+            ),
+        }
+        probe_packages[name] = {
+            "version": version,
+            **{label: str(paths[label]) for label in ("module", "metadata", "record", "wheel")},
+        }
+    ldd = tmp_path / "usr" / "bin" / "ldd"
+    _write(ldd, b"reviewed-ldd\n")
+    readelf = tmp_path / "usr" / "bin" / "readelf"
+    _write(readelf, b"reviewed-readelf\n")
+    dynamic_contract = {
+        "ldd_path": str(ldd), "ldd_sha256": _sha(ldd.read_bytes()),
+        "readelf_path": str(readelf), "readelf_sha256": _sha(readelf.read_bytes()),
+        "allowed_virtual_dependencies": ["linux-vdso.so.1"],
+        "elf_input_count": 2, "resolved_file_count": 1, "edge_count": 2,
+        "manifest_sha256": "d" * 64,
+    }
+    contract: dict[str, object] = {
+        "interpreter": {
+            "path": str(interpreter), "symlink_target": str(target),
+            "target_sha256": _sha(target.read_bytes()), "python_version": "3.12.3",
+        },
+        "packages": packages,
+        "dynamic_dependencies": dynamic_contract,
+        "mjcf_model": {
+            "loader": "mujoco.MjModel.from_xml_path",
+            "nq": 38, "nv": 37, "nbody": 33, "ngeom": 79, "nmesh": 74,
+        },
+    }
+    probe: dict[str, object] = {
+        "python_version": "3.12.3", "executable": str(interpreter),
+        "prefix": str(venv), "packages": probe_packages,
+    }
+
+    def fake_probe(command, *, cwd, env):
+        assert command[:4] == [str(interpreter), "-I", "-B", "-c"]
+        assert "PYTHONPATH" not in env and "PYTHONHOME" not in env
+        return subprocess.CompletedProcess(command, 0, json.dumps(probe), "")
+
+    monkeypatch.setattr(runner, "EXPECTED_TOPP_RUNTIME", contract)
+    monkeypatch.setattr(runner, "_run_runtime_command", fake_probe)
+    monkeypatch.setattr(
+        runner, "_collect_dynamic_dependency_closure",
+        lambda **_kwargs: {
+            "ldd": {"path": str(ldd), "sha256": _sha(ldd.read_bytes())},
+            "readelf": {"path": str(readelf), "sha256": _sha(readelf.read_bytes())},
+            "elf_input_count": 2, "resolved_file_count": 1, "edge_count": 2,
+            "manifest_sha256": "d" * 64,
+            "allowed_virtual_dependencies": ["linux-vdso.so.1"],
+        },
+    )
+    return contract, files, probe
+
+
+@pytest.mark.parametrize(
+    "tamper", ["target", "numpy:module", "numpy:metadata", "numpy:record",
+               "numpy:wheel", "numpy:native", "numpy:pyc",
+               "mujoco:module", "mujoco:metadata", "mujoco:record",
+               "mujoco:wheel", "mujoco:native", "mujoco:libmujoco",
+               "mujoco:optional", "mujoco:pyc"],
+)
+def test_v7_runtime_rejects_real_file_tamper(
+    tamper: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contract, files, _probe = _synthetic_topp_runtime(tmp_path, monkeypatch)
+    files[tamper].write_bytes(files[tamper].read_bytes() + b"tamper")
+    with pytest.raises(runner.Stage2Error, match="(?:SHA|size|bytes|manifest) changed"):
+        REAL_INSPECT_TOPP_RUNTIME(contract)
+
+
+def test_v7_runtime_rejects_wrong_interpreter_symlink(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contract, _files, _probe = _synthetic_topp_runtime(tmp_path, monkeypatch)
+    interpreter = Path(contract["interpreter"]["path"])
+    interpreter.unlink()
+    wrong = tmp_path / "wrong-python"
+    _write(wrong, b"\x7fELF-python-3.12.3\n")
+    os.symlink(str(wrong), interpreter)
+    with pytest.raises(runner.Stage2Error, match="symlink target changed"):
+        REAL_INSPECT_TOPP_RUNTIME(contract)
+
+
+def test_v7_runtime_rejects_wrong_package_version(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contract, _files, probe = _synthetic_topp_runtime(tmp_path, monkeypatch)
+    probe["packages"]["numpy"]["version"] = "2.5.1"
+    with pytest.raises(runner.Stage2Error, match="numpy version changed"):
+        REAL_INSPECT_TOPP_RUNTIME(contract)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("absolute", "absolute or empty"),
+        ("escape", "escapes the fixed venv"),
+        ("duplicate", "duplicate path"),
+        ("canonical_duplicate", "duplicate canonical destination"),
+        ("noncanonical_path", "noncanonical path"),
+        ("partial_hash", "partial hash or size"),
+        ("missing", "component is missing"),
+        ("symlink", "contains symlink"),
+    ],
+)
+def test_v7_record_parser_rejects_unsafe_or_incomplete_closure(
+    mutation: str, message: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contract, files, _probe = _synthetic_topp_runtime(tmp_path, monkeypatch)
+    venv = Path(contract["interpreter"]["path"]).parent.parent
+    site = venv / "lib" / "python3.12" / "site-packages"
+    record_path = files["numpy:record"]
+    rows = record_path.read_text().splitlines()
+    if mutation == "absolute":
+        rows[0] = "/escape," + rows[0].split(",", 1)[1]
+    elif mutation == "escape":
+        rows[0] = "../../../../../../escape," + rows[0].split(",", 1)[1]
+    elif mutation == "duplicate":
+        rows.insert(1, rows[0])
+    elif mutation == "canonical_duplicate":
+        rows.insert(1, "numpy/sub/../__init__.py," + rows[0].split(",", 1)[1])
+    elif mutation == "noncanonical_path":
+        rows[0] = "numpy//__init__.py," + rows[0].split(",", 1)[1]
+    elif mutation == "partial_hash":
+        fields = rows[0].split(",")
+        rows[0] = f"{fields[0]},,{fields[2]}"
+    elif mutation == "missing":
+        files["numpy:module"].unlink()
+    elif mutation == "symlink":
+        module = files["numpy:module"]
+        payload = module.read_bytes()
+        module.unlink()
+        replacement = tmp_path / "replacement.py"
+        _write(replacement, payload)
+        os.symlink(str(replacement), module)
+    if mutation not in {"missing", "symlink"}:
+        record_path.write_text("\n".join(rows) + "\n")
+    record = runner._read_snapshot(record_path, "mutated RECORD")
+    with pytest.raises(runner.Stage2Error, match=message):
+        runner._verify_distribution_record(
+            package_name="numpy", version="2.5.0", site_packages=site,
+            venv_root=venv, record_snapshot=record,
+        )
+
+
+def test_v7_record_parser_allows_bound_console_script_inside_fixed_venv(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contract, files, _probe = _synthetic_topp_runtime(tmp_path, monkeypatch)
+    venv = Path(contract["interpreter"]["path"]).parent.parent
+    site = venv / "lib" / "python3.12" / "site-packages"
+    script = venv / "bin" / "f2py"
+    _write(script, b"#!/bin/sh\n")
+    digest = base64.urlsafe_b64encode(hashlib.sha256(script.read_bytes()).digest()).rstrip(b"=").decode()
+    record_path = files["numpy:record"]
+    rows = record_path.read_text().splitlines()
+    rows.insert(-1, f"../../../bin/f2py,sha256={digest},{len(script.read_bytes())}")
+    record_path.write_text("\n".join(rows) + "\n")
+    record = runner._read_snapshot(record_path, "console-script RECORD")
+    receipt, _elfs = runner._verify_distribution_record(
+        package_name="numpy", version="2.5.0", site_packages=site,
+        venv_root=venv, record_snapshot=record,
+    )
+    assert receipt["file_count"] == 7
+
+
+def _synthetic_dynamic_closure(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> tuple[dict[str, object], dict[str, Path], dict[str, runner.Snapshot]]:
+    ldd = tmp_path / "usr" / "bin" / "ldd"
+    _write(ldd, b"reviewed ldd\n")
+    readelf = tmp_path / "usr" / "bin" / "readelf"
+    _write(readelf, b"reviewed readelf\n")
+    sources = {}
+    source_paths = []
+    for name in ("python3.12", "native.so"):
+        path = tmp_path / "elf" / name
+        _write(path, b"\x7fELF-" + name.encode())
+        snapshot = runner._read_snapshot(path, f"fixture ELF {name}")
+        sources[str(path)] = snapshot
+        source_paths.append(path)
+    dependencies = []
+    for name in ("libfixture.so", "ld-linux-x86-64.so.2"):
+        path = tmp_path / "lib" / name
+        _write(path, b"\x7fELF-lib-" + name.encode())
+        dependencies.append(path)
+
+    def fake_ldd(command, *, cwd, env):
+        assert command[0] == str(ldd)
+        assert not ({"LD_AUDIT", "LD_DEBUG", "LD_LIBRARY_PATH", "LD_PRELOAD"} & set(env))
+        output = (
+            "linux-vdso.so.1 (0x00007fff)\n"
+            f"libfixture.so => {dependencies[0]} (0x00007fff)\n"
+            f"{dependencies[1]} (0x00007fff)\n"
+        )
+        return subprocess.CompletedProcess(command, 0, output, "")
+
+    monkeypatch.setattr(runner, "_run_ldd_command", fake_ldd)
+    edges = [
+        {"soname": "ld-linux-x86-64.so.2", "resolved_path": str(dependencies[1]),
+         "resolution_kind": "ldd_absolute"},
+        {"soname": "libfixture.so", "resolved_path": str(dependencies[0]),
+         "resolution_kind": "ldd_absolute"},
+    ]
+    source_rows = [{
+        "path": str(path), "bytes": len(sources[str(path)].payload),
+        "sha256": sources[str(path)].sha256, "dependencies": edges,
+        "virtual_dependencies": ["linux-vdso.so.1"],
+        "linkage_kind": "dynamic", "static_verification": None,
+    } for path in sorted(source_paths)]
+    resolved_rows = sorted(({
+        "path": str(path), "bytes": len(path.read_bytes()),
+        "sha256": _sha(path.read_bytes()),
+    } for path in dependencies), key=lambda row: row["path"])
+    manifest = {
+        "ldd": {"path": str(ldd), "sha256": _sha(ldd.read_bytes())},
+        "readelf": {"path": str(readelf), "sha256": _sha(readelf.read_bytes())},
+        "sources": source_rows, "resolved_files": resolved_rows,
+    }
+    contract = {
+        "ldd_path": str(ldd), "ldd_sha256": _sha(ldd.read_bytes()),
+        "readelf_path": str(readelf), "readelf_sha256": _sha(readelf.read_bytes()),
+        "allowed_virtual_dependencies": ["linux-vdso.so.1"],
+        "elf_input_count": 2, "resolved_file_count": 2, "edge_count": 4,
+        "manifest_sha256": _sha(_canonical(manifest)),
+    }
+    return contract, {
+        "ldd": ldd, "readelf": readelf, "dependency": dependencies[0],
+    }, sources
+
+
+def test_v7_dynamic_dependency_closure_is_content_addressed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contract, _files, sources = _synthetic_dynamic_closure(tmp_path, monkeypatch)
+    receipt = REAL_COLLECT_DYNAMIC_DEPENDENCY_CLOSURE(
+        elf_inputs=sources, contract=contract)
+    assert receipt["manifest_sha256"] == contract["manifest_sha256"]
+    assert receipt["elf_input_count"] == 2
+    assert receipt["resolved_file_count"] == 2
+    assert receipt["edge_count"] == 4
+
+
+def test_v7_readelf_symlink_alias_is_rejected_but_canonical_target_passes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contract, files, sources = _synthetic_dynamic_closure(tmp_path, monkeypatch)
+    receipt = REAL_COLLECT_DYNAMIC_DEPENDENCY_CLOSURE(
+        elf_inputs=sources, contract=contract)
+    assert receipt["readelf"]["path"] == str(files["readelf"])
+    alias = files["readelf"].with_name("readelf-alias")
+    os.symlink(str(files["readelf"]), alias)
+    with pytest.raises(runner.Stage2Error, match="reviewed readelf tool contains symlink"):
+        runner._observe_dynamic_dependency_closure(
+            elf_inputs=sources, ldd_path=contract["ldd_path"],
+            readelf_path=alias,
+            allowed_virtual_dependencies=["linux-vdso.so.1"],
+        )
+
+
+@pytest.mark.parametrize("tamper", ["ldd", "readelf", "dependency"])
+def test_v7_dynamic_dependency_tamper_fails_closed(
+    tamper: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contract, files, sources = _synthetic_dynamic_closure(tmp_path, monkeypatch)
+    files[tamper].write_bytes(files[tamper].read_bytes() + b"tamper")
+    with pytest.raises(
+        runner.Stage2Error,
+        match="(?:(?:ldd|readelf) tool SHA|manifest) changed",
+    ):
+        REAL_COLLECT_DYNAMIC_DEPENDENCY_CLOSURE(
+            elf_inputs=sources, contract=contract)
+
+
+def test_v7_loaded_elf_tamper_fails_before_ldd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contract, _files, sources = _synthetic_dynamic_closure(tmp_path, monkeypatch)
+    source = Path(next(iter(sources)))
+    payload = source.read_bytes()
+    source.write_bytes(payload[:-1] + bytes([payload[-1] ^ 1]))
+    with pytest.raises(runner.Stage2Error, match="loaded ELF changed before ldd"):
+        REAL_COLLECT_DYNAMIC_DEPENDENCY_CLOSURE(
+            elf_inputs=sources, contract=contract)
+
+
+def test_v7_loaded_elf_missing_dependency_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contract, _files, sources = _synthetic_dynamic_closure(tmp_path, monkeypatch)
+
+    def missing_dependency(command, *, cwd, env):
+        return subprocess.CompletedProcess(
+            command, 0,
+            "linux-vdso.so.1 (0x0)\nlibmissing.so => not found\n", "",
+        )
+
+    monkeypatch.setattr(runner, "_run_ldd_command", missing_dependency)
+    with pytest.raises(
+        runner.Stage2Error,
+        match="libmissing.so.*does not uniquely match an actual loaded ELF",
+    ):
+        runner._observe_dynamic_dependency_closure(
+            elf_inputs=sources,
+            ldd_path=contract["ldd_path"],
+            readelf_path=contract["readelf_path"],
+            allowed_virtual_dependencies=["linux-vdso.so.1"],
+        )
+
+
+def test_v7_unresolved_soname_resolves_only_to_unique_actual_loaded_elf(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ldd = tmp_path / "usr" / "bin" / "ldd"
+    readelf = tmp_path / "usr" / "bin" / "readelf"
+    plugin = tmp_path / "venv" / "mujoco" / "plugin" / "libactuator.so"
+    libmujoco = tmp_path / "venv" / "mujoco" / "lib" / "libmujoco.so.3.10.0"
+    dependency = tmp_path / "lib" / "libc.so.6"
+    for path, payload in (
+        (ldd, b"reviewed ldd"), (readelf, b"reviewed readelf"),
+        (plugin, b"\x7fELF-plugin"), (libmujoco, b"\x7fELF-libmujoco"),
+        (dependency, b"\x7fELF-libc"),
+    ):
+        _write(path, payload)
+    sources = {
+        str(path): runner._read_snapshot(path, f"loaded {path.name}")
+        for path in (plugin, libmujoco)
+    }
+
+    def fake_ldd(command, *, cwd, env):
+        if command[1] == str(plugin):
+            stdout = "libmujoco.so.3.10.0 => not found\n"
+        else:
+            stdout = f"libc.so.6 => {dependency} (0x0)\n"
+        return subprocess.CompletedProcess(command, 0, stdout, "")
+
+    monkeypatch.setattr(runner, "_run_ldd_command", fake_ldd)
+    receipt, manifest = runner._observe_dynamic_dependency_closure(
+        elf_inputs=sources, ldd_path=ldd, readelf_path=readelf,
+        allowed_virtual_dependencies=["linux-vdso.so.1"],
+    )
+    assert receipt["edge_count"] == 2
+    plugin_row = next(row for row in manifest["sources"] if row["path"] == str(plugin))
+    assert plugin_row["dependencies"] == [{
+        "soname": "libmujoco.so.3.10.0",
+        "resolved_path": str(libmujoco),
+        "resolution_kind": "actual_loaded_unique_soname",
+    }]
+
+
+def test_v7_unresolved_soname_rejects_multiple_loaded_basename_matches(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    ldd = tmp_path / "usr" / "bin" / "ldd"
+    readelf = tmp_path / "usr" / "bin" / "readelf"
+    plugin = tmp_path / "plugin.so"
+    duplicate_a = tmp_path / "a" / "libduplicate.so"
+    duplicate_b = tmp_path / "b" / "libduplicate.so"
+    dependency = tmp_path / "libc.so.6"
+    for path, payload in (
+        (ldd, b"reviewed ldd"), (readelf, b"reviewed readelf"),
+        (plugin, b"\x7fELF-plugin"), (duplicate_a, b"\x7fELF-a"),
+        (duplicate_b, b"\x7fELF-b"), (dependency, b"\x7fELF-libc"),
+    ):
+        _write(path, payload)
+    sources = {
+        str(path): runner._read_snapshot(path, f"loaded {path}")
+        for path in (plugin, duplicate_a, duplicate_b)
+    }
+
+    def fake_ldd(command, *, cwd, env):
+        stdout = ("libduplicate.so => not found\n" if command[1] == str(plugin)
+                  else f"libc.so.6 => {dependency} (0x0)\n")
+        return subprocess.CompletedProcess(command, 0, stdout, "")
+
+    monkeypatch.setattr(runner, "_run_ldd_command", fake_ldd)
+    with pytest.raises(
+        runner.Stage2Error,
+        match="libduplicate.so.*does not uniquely match an actual loaded ELF",
+    ):
+        runner._observe_dynamic_dependency_closure(
+            elf_inputs=sources, ldd_path=ldd, readelf_path=readelf,
+            allowed_virtual_dependencies=["linux-vdso.so.1"],
+        )
+
+
+def test_v7_exact_static_ldd_is_verified_by_readelf_and_manifested(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "elf" / "static-extension.so"
+    ldd = tmp_path / "usr" / "bin" / "ldd"
+    readelf = tmp_path / "usr" / "bin" / "readelf"
+    _write(source, b"\x7fELF-static-extension")
+    _write(ldd, b"reviewed ldd")
+    _write(readelf, b"reviewed readelf")
+    snapshot = runner._read_snapshot(source, "static fixture")
+
+    monkeypatch.setattr(
+        runner, "_run_ldd_command",
+        lambda command, **_kwargs: subprocess.CompletedProcess(
+            command, 0, "\tstatically linked\n", ""),
+    )
+    readelf_stdout = (
+        "\nDynamic section at offset 0x10 contains 2 entries:\n"
+        "  Tag        Type                         Name/Value\n"
+        " 0x000000000000000e (SONAME)             Library soname: [fixture.so]\n"
+        " 0x0000000000000000 (NULL)               0x0\n"
+    )
+    monkeypatch.setattr(
+        runner, "_run_readelf_command",
+        lambda command, **_kwargs: subprocess.CompletedProcess(
+            command, 0, readelf_stdout, ""),
+    )
+    receipt, manifest = runner._observe_dynamic_dependency_closure(
+        elf_inputs={str(source): snapshot}, ldd_path=ldd,
+        readelf_path=readelf,
+        allowed_virtual_dependencies=["linux-vdso.so.1"],
+    )
+    assert receipt["elf_input_count"] == 1
+    assert receipt["edge_count"] == 0
+    assert manifest["sources"][0]["linkage_kind"] == "static_no_dependencies"
+    assert manifest["sources"][0]["dependencies"] == []
+    assert manifest["sources"][0]["static_verification"]["needed_count"] == 0
+
+
+def test_v7_static_ldd_claim_with_needed_entry_fails_closed(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    source = tmp_path / "elf" / "fake-static.so"
+    ldd = tmp_path / "usr" / "bin" / "ldd"
+    readelf = tmp_path / "usr" / "bin" / "readelf"
+    _write(source, b"\x7fELF-fake-static")
+    _write(ldd, b"reviewed ldd")
+    _write(readelf, b"reviewed readelf")
+    snapshot = runner._read_snapshot(source, "fake-static fixture")
+    monkeypatch.setattr(
+        runner, "_run_ldd_command",
+        lambda command, **_kwargs: subprocess.CompletedProcess(
+            command, 0, "\tstatically linked\n", ""),
+    )
+    readelf_stdout = (
+        "Dynamic section at offset 0x10 contains 2 entries:\n"
+        "  Tag        Type                         Name/Value\n"
+        " 0x0000000000000001 (NEEDED)             Shared library: [libbad.so]\n"
+        " 0x0000000000000000 (NULL)               0x0\n"
+    )
+    monkeypatch.setattr(
+        runner, "_run_readelf_command",
+        lambda command, **_kwargs: subprocess.CompletedProcess(
+            command, 0, readelf_stdout, ""),
+    )
+    with pytest.raises(runner.Stage2Error, match="ldd claimed static but readelf found NEEDED"):
+        runner._observe_dynamic_dependency_closure(
+            elf_inputs={str(source): snapshot}, ldd_path=ldd,
+            readelf_path=readelf,
+            allowed_virtual_dependencies=["linux-vdso.so.1"],
+        )
+
+
+def _synthetic_mjcf_snapshot(tmp_path: Path) -> Path:
+    root = tmp_path / "snapshot" / "runtime"
+    mjcf = root / runner.RUNTIME_RELATIVE_PATHS["mjcf_sha256"]
+    _write(mjcf, b"<mujoco/>\n")
+    _write(mjcf.parent / "meshes" / "one.stl", b"mesh\n")
+    return root
+
+
+def test_v7_unloaded_optional_record_elf_is_verified_but_not_sent_to_ldd(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contract, files, _probe = _synthetic_topp_runtime(tmp_path, monkeypatch)
+    root = _synthetic_mjcf_snapshot(tmp_path)
+    loaded_paths = sorted({
+        str(files["target"].resolve()),
+        str(files["numpy:native"].resolve()),
+        str(files["mujoco:native"].resolve()),
+        str(files["mujoco:libmujoco"].resolve()),
+    })
+    optional = str(files["mujoco:optional"].resolve())
+
+    def fake_preflight(command, *, cwd, env):
+        result = {
+            "nq": 38, "nv": 37, "nbody": 33, "ngeom": 79, "nmesh": 74,
+            "loaded_elf_paths": loaded_paths,
+        }
+        return subprocess.CompletedProcess(command, 0, json.dumps(result), "")
+
+    monkeypatch.setattr(runner, "_run_runtime_command", fake_preflight)
+    receipt, loaded = REAL_OBSERVE_MJCF_RUNTIME_PREFLIGHT(
+        runtime_snapshot_root=root, contract=contract)
+    assert receipt["loaded_elf_count"] == 4
+    assert optional not in loaded
+
+    dependency = tmp_path / "lib" / "libfixture.so"
+    _write(dependency, b"\x7fELF-fixture-dependency")
+    ldd_sources: list[str] = []
+
+    def fake_ldd(command, *, cwd, env):
+        ldd_sources.append(command[1])
+        output = (
+            "linux-vdso.so.1 (0x0)\n"
+            f"libfixture.so => {dependency} (0x0)\n"
+        )
+        return subprocess.CompletedProcess(command, 0, output, "")
+
+    monkeypatch.setattr(runner, "_run_ldd_command", fake_ldd)
+    dynamic, _manifest = runner._observe_dynamic_dependency_closure(
+        elf_inputs=loaded,
+        ldd_path=contract["dynamic_dependencies"]["ldd_path"],
+        readelf_path=contract["dynamic_dependencies"]["readelf_path"],
+        allowed_virtual_dependencies=["linux-vdso.so.1"],
+    )
+    assert dynamic["elf_input_count"] == 4
+    assert ldd_sources == loaded_paths
+    assert optional not in ldd_sources
+
+
+@pytest.mark.parametrize("failure", ["dimensions", "returncode", "output_file"])
+def test_v7_mjcf_preflight_fails_closed(
+    failure: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contract, files, _probe = _synthetic_topp_runtime(tmp_path, monkeypatch)
+    root = _synthetic_mjcf_snapshot(tmp_path)
+    loaded_paths = sorted({
+        str(files["target"].resolve()),
+        str(files["numpy:native"].resolve()),
+        str(files["mujoco:native"].resolve()),
+        str(files["mujoco:libmujoco"].resolve()),
+    })
+
+    def fake_preflight(command, *, cwd, env):
+        assert command[0] == contract["interpreter"]["path"]
+        assert command[1:4] == ["-I", "-B", "-c"]
+        assert "PYTHONPATH" not in env and "PYTHONHOME" not in env
+        dimensions = {"nq": 38, "nv": 37, "nbody": 33, "ngeom": 79, "nmesh": 74}
+        dimensions["loaded_elf_paths"] = loaded_paths
+        if failure == "dimensions":
+            dimensions["nq"] = 39
+        if failure == "output_file":
+            (root / "unreviewed.out").write_bytes(b"side effect\n")
+        return subprocess.CompletedProcess(
+            command, 9 if failure == "returncode" else 0,
+            json.dumps(dimensions), "preflight failed" if failure == "returncode" else "",
+        )
+
+    monkeypatch.setattr(runner, "_run_runtime_command", fake_preflight)
+    match = {
+        "dimensions": "dimensions changed",
+        "returncode": "preflight failed rc=9",
+        "output_file": "created or changed snapshot files",
+    }[failure]
+    with pytest.raises(runner.Stage2Error, match=match):
+        REAL_PREFLIGHT_MJCF_RUNTIME(runtime_snapshot_root=root, contract=contract)
 
 
 def test_v4_binds_the_observed_v2_contract_lineage_not_v1_contracts() -> None:
@@ -1110,6 +1777,9 @@ def test_execute_runs_each_registered_cell_once_and_separates_timing_gate(
 
     assert result["status"] == "stage2_execution_complete_no_retry"
     assert len(calls) == 4
+    assert all(command[:3] == [
+        runner.EXPECTED_TOPP_RUNTIME["interpreter"]["path"], "-I", "-B",
+    ] for command in calls)
     assert sum("--output-contract" in command for command in calls) == 0
     assert sum("--report" in command for command in calls) == 4
     assert result["generator_commands_executed"] == 0
@@ -1136,7 +1806,117 @@ def test_execute_runs_each_registered_cell_once_and_separates_timing_gate(
         "forehand": json.loads(paths["queue"].read_text())["assets"]["forehand"]["sha256"],
         "backhand": json.loads(paths["queue"].read_text())["assets"]["backhand"]["sha256"],
     }
+    assert result["mjcf_runtime_postflight"] == result["mjcf_runtime_preflight"]
+    assert result["execution_snapshot_stability"]["postflight_matches_preflight"] is True
+    assert result["execution_snapshot_stability"]["runtime"]["file_count"] > 0
+    assert result["execution_snapshot_stability"]["assets"]["file_count"] == 2
+    assert result["formal_claims"]["mjcf_closure_exact"] is True
+    assert (paths["root"] / "snapshots" / "mjcf_runtime_postflight.json").is_file()
     assert (paths["root"] / "stage2_summary.json").is_file()
+
+
+def test_execute_rejects_child_tamper_of_materialized_mjcf_tree(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _fixture(tmp_path, monkeypatch)
+    calls: list[list[str]] = []
+    base_executor = _fake_executor(paths, calls)
+    lock = threading.Lock()
+    tampered = False
+
+    def tampering_executor(command, *, cwd, env):
+        nonlocal tampered
+        completed = base_executor(command, cwd=cwd, env=env)
+        with lock:
+            if not tampered:
+                mjcf = Path(_flag(list(command), "--mjcf"))
+                os.chmod(mjcf, 0o600)
+                mjcf.write_bytes(mjcf.read_bytes() + b"child-tamper")
+                tampered = True
+        return completed
+
+    with pytest.raises(runner.Stage2Error, match="no retry attempted"):
+        runner.run_stage2(
+            activation_path=paths["activation"], queue_path=paths["queue"],
+            root=paths["root"], execute=True, confirm=runner.CONFIRM_TOKEN,
+            runner_source=paths["source"], command_runner=tampering_executor,
+        )
+
+    summary = json.loads((paths["root"] / "stage2_summary.json").read_text())
+    assert len(calls) == 4
+    assert summary["status"] == "stage2_terminal_failure_no_retry"
+    assert any("materialized runtime snapshot changed during Stage2" in error
+               for error in summary["input_stability_errors"])
+    assert summary["execution_snapshot_stability"]["runtime"] is None
+    assert summary["formal_claims"]["mjcf_closure_exact"] is False
+
+
+def test_execute_rejects_system_dynamic_closure_drift_at_postflight(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _fixture(tmp_path, monkeypatch)
+    calls: list[list[str]] = []
+    stable_preflight = runner._preflight_mjcf_runtime
+    preflight_calls = 0
+
+    def drifting_preflight(**kwargs):
+        nonlocal preflight_calls
+        preflight_calls += 1
+        if preflight_calls == 1:
+            return stable_preflight(**kwargs)
+        raise runner.Stage2Error("TOPP dynamic dependency manifest changed")
+
+    monkeypatch.setattr(runner, "_preflight_mjcf_runtime", drifting_preflight)
+    with pytest.raises(runner.Stage2Error, match="no retry attempted"):
+        runner.run_stage2(
+            activation_path=paths["activation"], queue_path=paths["queue"],
+            root=paths["root"], execute=True, confirm=runner.CONFIRM_TOKEN,
+            runner_source=paths["source"],
+            command_runner=_fake_executor(paths, calls),
+        )
+
+    summary = json.loads((paths["root"] / "stage2_summary.json").read_text())
+    assert preflight_calls == 2
+    assert len(calls) == 4
+    assert summary["status"] == "stage2_terminal_failure_no_retry"
+    assert "TOPP dynamic dependency manifest changed" in summary["input_stability_errors"]
+    assert summary["mjcf_runtime_postflight"] is None
+    assert summary["execution_snapshot_stability"]["postflight_matches_preflight"] is False
+    assert summary["formal_claims"]["mjcf_closure_exact"] is False
+    assert not (paths["root"] / "snapshots" / "mjcf_runtime_postflight.json").exists()
+
+
+def test_execute_rejects_any_postflight_receipt_difference(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    paths = _fixture(tmp_path, monkeypatch)
+    calls: list[list[str]] = []
+    stable_preflight = runner._preflight_mjcf_runtime
+    preflight_calls = 0
+
+    def differing_postflight(**kwargs):
+        nonlocal preflight_calls
+        preflight_calls += 1
+        receipt = dict(stable_preflight(**kwargs))
+        if preflight_calls == 2:
+            receipt["stdout_sha256"] = "0" * 64
+        return receipt
+
+    monkeypatch.setattr(runner, "_preflight_mjcf_runtime", differing_postflight)
+    with pytest.raises(runner.Stage2Error, match="no retry attempted"):
+        runner.run_stage2(
+            activation_path=paths["activation"], queue_path=paths["queue"],
+            root=paths["root"], execute=True, confirm=runner.CONFIRM_TOKEN,
+            runner_source=paths["source"],
+            command_runner=_fake_executor(paths, calls),
+        )
+    summary = json.loads((paths["root"] / "stage2_summary.json").read_text())
+    assert preflight_calls == 2
+    assert any("actual-loaded dynamic closure changed" in error
+               for error in summary["input_stability_errors"])
+    assert summary["mjcf_runtime_postflight"]["stdout_sha256"] == "0" * 64
+    assert summary["execution_snapshot_stability"]["postflight_matches_preflight"] is False
+    assert summary["formal_claims"]["mjcf_closure_exact"] is False
 
 
 def test_execute_failure_is_terminal_summary_and_never_retried(
@@ -1160,6 +1940,8 @@ def test_execute_failure_is_terminal_summary_and_never_retried(
     assert failed["generator_rc"] == 0
     assert failed["topp_rc"] == 7
     assert summary["generator_commands_executed"] == 0
+    assert summary["execution_snapshot_stability"]["postflight_matches_preflight"] is True
+    assert summary["formal_claims"]["mjcf_closure_exact"] is False
 
 
 def test_execute_rejects_nonregistered_topp_budget_scale(
@@ -1230,7 +2012,7 @@ def test_unexpected_post_namespace_failure_gets_terminal_summary(
 
 def test_current_repo_activation_exactly_binds_the_tracked_runner() -> None:
     activation = json.loads(
-        (REPO / "configs/ready_to_strike_join_ladder_stage2_activation_v6_20260717.json").read_text()
+        (REPO / "configs/ready_to_strike_join_ladder_stage2_activation_v7_20260717.json").read_text()
     )
     queue = runner._validate_queue(json.loads(
         (REPO / "configs/ready_to_strike_join_ladder_20260717.yaml").read_text()
@@ -1240,6 +2022,7 @@ def test_current_repo_activation_exactly_binds_the_tracked_runner() -> None:
         activation, queue, runner_sha256=_sha(SCRIPT.read_bytes())
     )
     assert validated["launch_authorized"] is True
+    assert validated["topp_runtime"] == runner.EXPECTED_TOPP_RUNTIME
     assert len(cells) == 4
     assert receipt_path == Path(validated["required_attestation_receipt"])
     assert receipt_sha == validated["required_attestation_receipt_sha256"]

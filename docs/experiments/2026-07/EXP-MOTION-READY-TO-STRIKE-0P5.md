@@ -79,7 +79,7 @@ run-up 上界是正手 `0.98 s`、反手 `0.78 s`。因此单纯把完整旧 cli
   RF `0.94→1.94 s`、RB `0.78→1.42 s`。反手 own-ready 将最近 join 从 `0.94` 改善到 `0.78 s`，但
   正手相反（RF `0.64` 优于 RB `0.70 s`），所以发生 ready×side crossover，尚不能宣布共同 ready。
   冻结规则因此选择四个 `d=12` 中点格；机器 activation 见
-  [`Stage-2 v6 activation`](../../../configs/ready_to_strike_join_ladder_stage2_activation_v6_20260717.json)。但原始
+  [`Stage-2 v7 activation`](../../../configs/ready_to_strike_join_ladder_stage2_activation_v7_20260717.json)。但原始
   Stage 1 summary 未绑定一次性 consumer 源码，且旧 parser 未全量重验 certificate provenance；因此这些
   数值曾先降级为 raw。独立 historical attestor 已全量重建 candidate/certificate/runtime binding 并发布
   no-clobber receipt；六格不重跑，四个中点仅由下述 tracked Stage-2 runner 消费。
@@ -133,10 +133,24 @@ run-up 上界是正手 `0.98 s`、反手 `0.78 s`。因此单纯把完整旧 cli
   未启动，v4 activation 永久冻结。
 - v5 删除上述重复文本解释，却仍保留四份 exact log SHA；其中一个 SHA 因手抄一字符错误在结果 root 前
   fail closed，execute/TOPP 仍未启动。这个负例说明诊断日志不应成为科学合同。
-- 当前 v6 使用新 activation/root，移除旧 V1 summary、generator 副本和全部 `run.log` 前置；只复验并
-  复用 v2 四份 candidate/contract，保持 **零 generator 调用**，在 Git-object `75-file/74-mesh` 完整闭包中
-  各跑一次 TOPP。v6 相关回归 `76 passed`、独立红队 GO，当前仍待远端 dry-run/execute；没有 timing、
-  production FK、动力学或行为通过，不能写成 0.5 秒已完成。
+- main `8b371eb7` 的 v6 使用新 activation/root，移除旧 V1 summary、generator 副本和全部 `run.log`
+  前置；只复验并复用 v2 四份 candidate/contract，保持 **零 generator 调用**，在 Git-object
+  `75-file/74-mesh` 完整闭包中各跑一次 TOPP。唯一远端 dry-run 全绿，随后 execute natural terminal；
+  summary=`b5209bc7…`，四格均 generator=`0`、TOPP rc=`1`、无 timing，`75/74` closure 与退出后无残留
+  均正确。这只证明 runner 真正走到 TOPP，不是动作或动力学失败。
+- execute 后的只读 forensics 发现四份 `run.log` 逐字节一致（SHA=`f1d5088e…`），共同首错为
+  `/usr/bin/python3` 无法 import `mujoco`。失败因此分类为 **runtime dependency closure**；日志仍只是
+  根因诊断，不回到科学授权合同。项目中 `topp_mintime.py` 的实际运行依赖只有 `numpy+mujoco`，旧
+  `scipy` 硬门是过度检查并已废除。隔离 probe 在清空 `PYTHONPATH` 后使用
+  `/workspace/hope_mjeval_venv/bin/python`，成功加载 `numpy 2.5`、`mujoco 3.10` 和 exact MJCF，模型维度
+  为 `nq=38,nv=37,nbody=33,ngeom=79,nmesh=74`。
+- v7 使用新 activation/root，显式绑定上述解释器、两份 package 的完整 RECORD、实际加载的 native ELF、
+  每条 `DT_NEEDED` 解析边与 canonical `ldd/readelf`，并在四个 child 前后重跑 import/MJCF/dynamic
+  closure。四份 candidate/contract、join、hold、预算、TOPP 算法和 acceptance 不变；任一 TOPP 非零、
+  runtime 或 MJCF snapshot 漂移都会令 `mjcf_closure_exact=false`。本地 Stage-2 专项 `112 passed`，独立
+  红队 P0/P1 均为 0；runner/activation SHA 为 `e3d2e1f9…05f0` / `87598e0a…99c2`。source gate 已转绿，
+  但唯一远端 v7 dry-run/execute 尚未消费。仍没有 timing、production FK、动力学或行为通过，不能写成
+  0.5 秒已完成。
 - 下一门：在 ignored runtime 资产上按预注册 join ladder 生成正/反手候选，production FK 重建后逐个跑
   TOPP；只把 `<=0.5 s` 的候选送 L0/L1/桌网/动力学，再用绑定该 motion SHA 的 0.5 秒 K100 和
 vendor MuJoCo 判行为。

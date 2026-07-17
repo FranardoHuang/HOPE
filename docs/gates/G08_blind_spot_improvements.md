@@ -450,9 +450,16 @@ fallback。v3 唯一远端 dry-run 在结果 root 前又发现 expected contract
 因 snapshot path 证据不同已有新 SHA；execute/TOPP 未启动。v4 仅修四个 actual contract 绑定并使用新
 activation/namespace，相关回归 `68 passed` 且独立红队 GO；随后 dry-run 又在结果 root 前证明 exact log
 SHA 后的 `.stl`/英文 errno 文本猜测会假拒绝真实日志，execute/TOPP 未启动。v5 删除重复文本解释但仍
-保留日志 SHA，随后因一份 SHA 手抄一字符错误再次 pre-root fail closed。当前 v6 移除旧 V1 summary、
-generator 副本与全部日志前置，只复验 v2 四份 candidate/contract，保持零 generator 调用，并预备在上述
-Git-object 闭包中各执行一次 TOPP；相关回归 `76 passed`、独立红队 GO，仍待远端 dry-run/execute，不能提前记通过。
+保留日志 SHA，随后因一份 SHA 手抄一字符错误再次 pre-root fail closed。main `8b371eb7` 的 v6 移除旧
+V1 summary、generator 副本与全部日志前置，只复验 v2 四份 candidate/contract，保持零 generator 调用，
+并在上述 Git-object 闭包中完成唯一远端 dry-run/execute。dry-run 全绿；terminal summary=`b5209bc7…`，
+四格 generator=`0`、TOPP rc=`1`、无 timing，`75 files/74 mesh` closure 与无残留正确。只读 forensics
+确认四日志同 SHA `f1d5088e…`，共同首错是 `/usr/bin/python3` 缺 `mujoco`，所以它是 runtime dependency
+closure 失败、不是动作失败。项目实际 TOPP 依赖仅 `numpy+mujoco`，`scipy` 过度硬门已废除；隔离 probe
+证明 `/workspace/hope_mjeval_venv/bin/python` 可加载 `numpy 2.5`、`mujoco 3.10` 与 exact MJCF
+(`nq=38,nv=37,nbody=33,ngeom=79,nmesh=74`)。v7 绑定该解释器、完整 package/native dependency closure、
+canonical `ldd/readelf` 与 MJCF pre/post snapshot，科学配方不变；本地 Stage-2 专项 `112 passed`，独立红队
+P0/P1 均为 0，source gate 已转绿。唯一远端 v7 尚未消费。
 TOPP `<=0.5 s`、L0、vendor L1、桌网、
 动力学和行为卷仍全部开放，
 所以 G08 不晋级。

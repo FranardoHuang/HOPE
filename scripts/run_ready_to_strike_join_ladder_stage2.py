@@ -15,7 +15,9 @@ before a namespace or subprocess is created.
 from __future__ import annotations
 
 import argparse
+import base64
 from concurrent.futures import ThreadPoolExecutor, as_completed
+import csv
 from dataclasses import dataclass
 import hashlib
 import io
@@ -23,9 +25,11 @@ import json
 import math
 import os
 from pathlib import Path, PurePosixPath
+import re
 import stat
 import subprocess
 import sys
+import tempfile
 from typing import Any, Callable, Mapping, Sequence
 import zipfile
 import xml.etree.ElementTree as ET
@@ -36,14 +40,14 @@ import numpy as np
 SCHEMA_VERSION = 1
 CONFIRM_TOKEN = "RUN_READY_TO_STRIKE_STAGE2_ONCE"
 CHILD_TIMEOUT_S = 3600
-EXPECTED_ACTIVATION_ID = "ready_to_strike_join_ladder_stage2_v6_20260717"
+EXPECTED_ACTIVATION_ID = "ready_to_strike_join_ladder_stage2_v7_20260717"
 EXPECTED_EXPERIMENT_ID = "ready_to_strike_join_ladder_20260717"
 EXPECTED_QUEUE_SHA256 = "cfa112f799dab9af33914fdfb5bfff90d21b4692e38b16a4627393936a527b8b"
 EXPECTED_PREREG_COMMIT = "8d74025e88fee832fae0ac2f672ec0eb9b2d3d5a"
 EXPECTED_EVIDENCE_STATUS = "historical_stage1_attested_screening_only"
 EXPECTED_STAGE2_NAMESPACE = (
     "/workspace/codexschema/ready_to_strike_0p5_20260717/"
-    "join_ladder_stage2_d12_v6_scientific_inputs_only"
+    "join_ladder_stage2_d12_v7_mjeval_runtime"
 )
 EXPECTED_PRIOR_ATTEMPT = {
     "namespace": (
@@ -70,6 +74,87 @@ EXPECTED_MJCF_CLOSURE_TOTAL_BYTES = 14127373
 EXPECTED_MJCF_CLOSURE_MANIFEST_SHA256 = (
     "e0381752eab46013c08559b331abb261beaa88a207a3c2f1155ab00857b962de"
 )
+EXPECTED_TOPP_RUNTIME = {
+    "interpreter": {
+        "path": "/workspace/hope_mjeval_venv/bin/python",
+        "symlink_target": "/usr/bin/python3.12",
+        "target_sha256": (
+            "1d3cf64f97cadc79fdc6fe2496a21b7b456cb94211978cfef5a65f616af74fd5"
+        ),
+        "python_version": "3.12.3",
+    },
+    "packages": {
+        "numpy": {
+            "version": "2.5.0",
+            "module_sha256": (
+                "09295a80660f17925ae23765ce8cbd7ff7ceae968d5f2f89349f1cb74c0b9e11"
+            ),
+            "metadata_sha256": (
+                "981cedfa033b69d5a8e153e42cf5f26f7027dd0b3701c37d8d8a2b83e8315d48"
+            ),
+            "record_sha256": (
+                "ad8472357bd1a24f7c0e38ec421a28a07560bb948d27db25fa61cf7ff62f8a9a"
+            ),
+            "wheel_sha256": (
+                "ac90a994678616346852fc495a154e351832198199a0e921c9e8f4b372b28e82"
+            ),
+            "record_file_count": 1339,
+            "record_total_bytes": 68935821,
+            "record_manifest_sha256": (
+                "a07476342bb248770c73f8ab4ecf07036ad9a84fe325c9606afe837dfaaf8ea8"
+            ),
+            "record_native_elf_count": 22,
+            "record_unhashed_row_count": 407,
+        },
+        "mujoco": {
+            "version": "3.10.0",
+            "module_sha256": (
+                "c734d493d95933f4414633325491e8e6658670455a3c94981a6c1d26600d43e1"
+            ),
+            "metadata_sha256": (
+                "e37572aef23253626ac77d51bba1eaee630f69037c315e8f715fc56758f7fe3f"
+            ),
+            "record_sha256": (
+                "1dbbdae72fe8522bdf8d6640d7a4059948229a491ffbbac3bd964e40019c9f76"
+            ),
+            "wheel_sha256": (
+                "b40ad1e4df54976de0a343902219f27fbed3bc20eb34efbef032b05c5a0f93e9"
+            ),
+            "record_file_count": 324,
+            "record_total_bytes": 60705862,
+            "record_manifest_sha256": (
+                "726014ea93041792bdc179cdf65f2595d6ed9e6c3e94037bb40bae585cabe62a"
+            ),
+            "record_native_elf_count": 22,
+            "record_unhashed_row_count": 91,
+        },
+    },
+    "dynamic_dependencies": {
+        "ldd_path": "/usr/bin/ldd",
+        "ldd_sha256": (
+            "429938a30ba5d51f4cdba476e8f8f8b1595d51b14a665ab6edf642454ff662ea"
+        ),
+        "readelf_path": "/usr/bin/x86_64-linux-gnu-readelf",
+        "readelf_sha256": (
+            "6d54602a1ee13f1214973086bd60efe2dae4363f8f5ab7516eaaf3e259dca90e"
+        ),
+        "allowed_virtual_dependencies": ["linux-vdso.so.1"],
+        "elf_input_count": 38,
+        "resolved_file_count": 17,
+        "edge_count": 167,
+        "manifest_sha256": (
+            "088ea1213da73d9149eb624f87211d4b1cc64c0f2fa4f2bc788e875582ae5982"
+        ),
+    },
+    "mjcf_model": {
+        "loader": "mujoco.MjModel.from_xml_path",
+        "nq": 38,
+        "nv": 37,
+        "nbody": 33,
+        "ngeom": 79,
+        "nmesh": 74,
+    },
+}
 EXPECTED_PRIOR_CANDIDATES = {
     "fh_rf_d12": ("a6c181f1b29b7e683a2efa70414f908c0896d110b21721c39565e3641a4eeb17",
                   "7c8e1f3a5184829d66e48f33e2ed93dbe93c044b2b4feea1dd921f2dddd9fb1a"),
@@ -260,6 +345,733 @@ def _read_snapshot(path: Path | str, label: str) -> Snapshot:
         return Snapshot(absolute, payload, stat.S_IMODE(before.st_mode))
     finally:
         os.close(fd)
+
+
+_TOPP_RUNTIME_PROBE = r"""
+import importlib.metadata as metadata
+import json
+from pathlib import Path
+import sys
+
+import mujoco
+import numpy
+
+def package_record(name, module):
+    distribution = metadata.distribution(name)
+    files = list(distribution.files or ())
+    selected = {}
+    for leaf in ("METADATA", "RECORD", "WHEEL"):
+        matches = [entry for entry in files if str(entry).endswith(".dist-info/" + leaf)]
+        if len(matches) != 1:
+            raise RuntimeError(f"{name} has {len(matches)} {leaf} records")
+        selected[leaf.lower()] = str(Path(distribution.locate_file(matches[0])).resolve())
+    return {
+        "version": distribution.version,
+        "module": str(Path(module.__file__).resolve()),
+        **selected,
+    }
+
+print(json.dumps({
+    "python_version": ".".join(str(value) for value in sys.version_info[:3]),
+    "executable": str(Path(sys.executable).absolute()),
+    "prefix": str(Path(sys.prefix).resolve()),
+    "packages": {
+        "numpy": package_record("numpy", numpy),
+        "mujoco": package_record("mujoco", mujoco),
+    },
+}, allow_nan=False, separators=(",", ":"), sort_keys=True))
+"""
+
+_MJCF_PREFLIGHT_PROBE = r"""
+import json
+import os
+from pathlib import Path
+import sys
+import mujoco
+
+model = mujoco.MjModel.from_xml_path(sys.argv[1])
+candidate_paths = set()
+for module in tuple(sys.modules.values()):
+    path = getattr(module, "__file__", None)
+    if isinstance(path, str) and os.path.isabs(path):
+        candidate_paths.add(path)
+with open("/proc/self/maps", "r", encoding="utf-8") as stream:
+    for line in stream:
+        fields = line.rstrip("\n").split(None, 5)
+        if len(fields) == 6 and fields[5].startswith("/"):
+            candidate_paths.add(fields[5])
+loaded_elf_paths = set()
+for raw_path in sorted(candidate_paths):
+    if raw_path.endswith(" (deleted)"):
+        loaded_elf_paths.add(raw_path)
+        continue
+    try:
+        with open(raw_path, "rb") as stream:
+            if stream.read(4) == b"\x7fELF":
+                loaded_elf_paths.add(os.path.realpath(raw_path))
+    except OSError:
+        loaded_elf_paths.add(raw_path + " (unreadable)")
+print(json.dumps({
+    "nq": int(model.nq),
+    "nv": int(model.nv),
+    "nbody": int(model.nbody),
+    "ngeom": int(model.ngeom),
+    "nmesh": int(model.nmesh),
+    "loaded_elf_paths": sorted(loaded_elf_paths),
+}, allow_nan=False, separators=(",", ":"), sort_keys=True))
+"""
+
+
+def _topp_runtime_env() -> dict[str, str]:
+    env = dict(os.environ)
+    env.pop("PYTHONPATH", None)
+    env.pop("PYTHONHOME", None)
+    for key in tuple(env):
+        if key.startswith("LD_"):
+            env.pop(key, None)
+    env.update({
+        "PYTHONDONTWRITEBYTECODE": "1",
+        "PYTHONNOUSERSITE": "1",
+        "CUDA_VISIBLE_DEVICES": "",
+        "OMP_NUM_THREADS": "1",
+        "MKL_NUM_THREADS": "1",
+        "OPENBLAS_NUM_THREADS": "1",
+        "NUMEXPR_NUM_THREADS": "1",
+    })
+    return env
+
+
+def _run_runtime_command(command: Sequence[str], *, cwd: Path,
+                         env: Mapping[str, str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        list(command), cwd=cwd, env=dict(env), text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL, check=False, timeout=120,
+    )
+
+
+def _verify_distribution_record(*, package_name: str, version: str,
+                                site_packages: Path, venv_root: Path,
+                                record_snapshot: Snapshot) -> tuple[
+                                    dict[str, Any], dict[str, Snapshot]
+                                ]:
+    """Verify and content-address every file named by a wheel RECORD."""
+    try:
+        text = record_snapshot.payload.decode("utf-8")
+        rows = list(csv.reader(io.StringIO(text, newline="")))
+    except (UnicodeDecodeError, csv.Error) as exc:
+        raise Stage2Error(f"TOPP runtime {package_name} RECORD is invalid: {exc}") from exc
+    _require(rows, f"TOPP runtime {package_name} RECORD is empty")
+    record_relative = f"{package_name}-{version}.dist-info/RECORD"
+    seen: set[str] = set()
+    manifest: list[dict[str, Any]] = []
+    native_elfs: dict[str, Snapshot] = {}
+    self_rows = 0
+    explicitly_bound_unhashed_rows = 0
+    destinations: set[str] = set()
+    for index, row in enumerate(rows, start=1):
+        _require(len(row) == 3,
+                 f"TOPP runtime {package_name} RECORD row {index} must have three fields")
+        raw_path, hash_field, size_field = row
+        _require(raw_path != "" and "\\" not in raw_path and "\0" not in raw_path,
+                 f"TOPP runtime {package_name} RECORD row {index} has invalid path")
+        relative = PurePosixPath(raw_path)
+        _require(not relative.is_absolute() and all(part not in ("", ".") for part in relative.parts),
+                 f"TOPP runtime {package_name} RECORD row {index} contains absolute or empty path")
+        normalized = relative.as_posix()
+        _require(raw_path == normalized,
+                 f"TOPP runtime {package_name} RECORD row {index} has noncanonical path")
+        _require(normalized not in seen,
+                 f"TOPP runtime {package_name} RECORD has duplicate path {normalized}")
+        seen.add(normalized)
+        path = _absolute(os.path.normpath(os.path.join(site_packages, *relative.parts)))
+        try:
+            destination_relative = path.relative_to(venv_root).as_posix()
+        except ValueError as exc:
+            raise Stage2Error(
+                f"TOPP runtime {package_name} RECORD row {index} escapes the fixed venv"
+            ) from exc
+        _require(str(path) not in destinations,
+                 f"TOPP runtime {package_name} RECORD has duplicate canonical destination {path}")
+        destinations.add(str(path))
+        snapshot = _read_snapshot(path, f"TOPP runtime {package_name} RECORD {normalized}")
+        if normalized == record_relative:
+            self_rows += 1
+            _require(hash_field == "" and size_field == "",
+                     f"TOPP runtime {package_name} RECORD self row must use its bound empty fields")
+            _require(snapshot.payload == record_snapshot.payload,
+                     f"TOPP runtime {package_name} RECORD self row bytes changed")
+            expected_sha = record_snapshot.sha256
+        else:
+            if hash_field == "" and size_field == "":
+                explicitly_bound_unhashed_rows += 1
+                expected_sha = snapshot.sha256
+                manifest.append({
+                    "path": normalized, "venv_relative_path": destination_relative,
+                    "bytes": len(snapshot.payload), "sha256": snapshot.sha256,
+                    "record_hash_present": False,
+                })
+                if snapshot.payload.startswith(b"\x7fELF"):
+                    native_elfs[str(path)] = snapshot
+                continue
+            _require(hash_field != "" and size_field != "",
+                     f"TOPP runtime {package_name} RECORD row {normalized} has partial hash or size")
+            _require(hash_field.startswith("sha256=") and hash_field.count("=") == 1,
+                     f"TOPP runtime {package_name} RECORD row {normalized} uses unsupported hash")
+            encoded = hash_field.split("=", 1)[1]
+            _require(encoded != "", f"TOPP runtime {package_name} RECORD row {normalized} has empty hash")
+            try:
+                expected_digest = base64.b64decode(
+                    encoded + "=" * (-len(encoded) % 4), altchars=b"-_", validate=True)
+                expected_size = int(size_field, 10)
+            except (ValueError, base64.binascii.Error) as exc:
+                raise Stage2Error(
+                    f"TOPP runtime {package_name} RECORD row {normalized} is malformed"
+                ) from exc
+            _require(len(expected_digest) == 32 and expected_size >= 0
+                     and str(expected_size) == size_field,
+                     f"TOPP runtime {package_name} RECORD row {normalized} has noncanonical hash or size")
+            canonical_digest = base64.urlsafe_b64encode(
+                expected_digest).rstrip(b"=").decode("ascii")
+            _require(encoded == canonical_digest,
+                     f"TOPP runtime {package_name} RECORD row {normalized} has noncanonical hash or size")
+            _require(len(snapshot.payload) == expected_size,
+                     f"TOPP runtime {package_name} RECORD row {normalized} size changed")
+            expected_sha = expected_digest.hex()
+            _require(snapshot.sha256 == expected_sha,
+                     f"TOPP runtime {package_name} RECORD row {normalized} SHA changed")
+        manifest.append({
+            "path": normalized, "venv_relative_path": destination_relative,
+            "bytes": len(snapshot.payload), "sha256": snapshot.sha256,
+            "record_hash_present": normalized != record_relative,
+        })
+        if snapshot.payload.startswith(b"\x7fELF"):
+            native_elfs[str(path)] = snapshot
+    _require(self_rows == 1,
+             f"TOPP runtime {package_name} RECORD must contain exactly one self row")
+    manifest.sort(key=lambda row: row["path"])
+    return ({
+        "record_sha256": record_snapshot.sha256,
+        "file_count": len(manifest),
+        "total_bytes": sum(row["bytes"] for row in manifest),
+        "verified_manifest_sha256": _sha256(_canonical_json(manifest)),
+        "native_elf_count": len(native_elfs),
+        "explicitly_bound_unhashed_row_count": explicitly_bound_unhashed_rows,
+        "record_self_row_empty_and_explicitly_bound": True,
+    }, native_elfs)
+
+
+def _run_ldd_command(command: Sequence[str], *, cwd: Path,
+                     env: Mapping[str, str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        list(command), cwd=cwd, env=dict(env), text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL, check=False, timeout=60,
+    )
+
+
+def _run_readelf_command(command: Sequence[str], *, cwd: Path,
+                         env: Mapping[str, str]) -> subprocess.CompletedProcess[str]:
+    return subprocess.run(
+        list(command), cwd=cwd, env=dict(env), text=True,
+        stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+        stdin=subprocess.DEVNULL, check=False, timeout=60,
+    )
+
+
+def _dynamic_dependency_env() -> dict[str, str]:
+    env = _topp_runtime_env()
+    env["LC_ALL"] = "C"
+    return env
+
+
+def _parse_ldd_output(payload: str, *, source: Path) -> tuple[
+    list[tuple[str, str]], list[str], list[str]
+]:
+    resolved: list[tuple[str, str]] = []
+    virtual: list[str] = []
+    unresolved: list[str] = []
+    seen: set[str] = set()
+    for raw_line in payload.splitlines():
+        line = raw_line.strip()
+        if not line:
+            continue
+        if "=>" in line:
+            soname, remainder = (part.strip() for part in line.split("=>", 1))
+            _require(soname != "" and soname not in seen,
+                     f"ldd returned duplicate or empty dependency for {source}")
+            seen.add(soname)
+            if remainder == "not found":
+                unresolved.append(soname)
+                continue
+            _require(not remainder.startswith("not found"),
+                     f"ldd dependency {soname} has malformed not-found output for {source}")
+            reported = remainder.rsplit(" (", 1)[0].strip()
+            _require(Path(reported).is_absolute(),
+                     f"ldd dependency {soname} is not absolute for {source}")
+            resolved.append((soname, reported))
+            continue
+        token = line.split(" ", 1)[0]
+        _require(token not in seen,
+                 f"ldd returned duplicate dependency {token} for {source}")
+        seen.add(token)
+        if token == "linux-vdso.so.1":
+            virtual.append(token)
+            continue
+        _require(Path(token).is_absolute(),
+                 f"ldd returned unparsed output for {source}: {line}")
+        resolved.append((Path(token).name, token))
+    _require(resolved or unresolved,
+             f"ldd returned no resolved or unresolved dependencies for {source}")
+    return resolved, virtual, unresolved
+
+
+def _verify_static_elf_has_no_needed(*, source: Path, readelf_path: Path) -> dict[str, Any]:
+    command = [str(readelf_path), "-d", str(source)]
+    try:
+        completed = _run_readelf_command(
+            command, cwd=source.parent, env=_dynamic_dependency_env())
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Stage2Error(f"readelf failed to run for {source}: {exc}") from exc
+    _require(completed.returncode == 0,
+             f"readelf failed rc={completed.returncode} for {source}: {completed.stderr.strip()}")
+    _require(completed.stderr == "", f"readelf wrote stderr for {source}")
+    lines = completed.stdout.splitlines()
+    if lines and lines[0] == "":
+        lines = lines[1:]
+    dynamic_entries: list[str] = []
+    if lines == ["There is no dynamic section in this file."]:
+        section_kind = "no_dynamic_section"
+    else:
+        _require(lines and re.fullmatch(
+            r"Dynamic section at offset 0x[0-9a-fA-F]+ contains [0-9]+ entries:",
+            lines[0]) is not None,
+            f"readelf dynamic-section header is malformed for {source}")
+        expected_count = int(lines[0].rsplit(" ", 2)[1])
+        _require(len(lines) >= 2 and lines[1].split() == ["Tag", "Type", "Name/Value"],
+                 f"readelf dynamic-section columns are malformed for {source}")
+        for line in lines[2:]:
+            if line == "":
+                continue
+            match = re.fullmatch(
+                r"\s*0x[0-9a-fA-F]+ \(([A-Z0-9_]+)\)\s+.*", line)
+            _require(match is not None,
+                     f"readelf dynamic-section row is malformed for {source}: {line}")
+            dynamic_entries.append(match.group(1))
+        _require(len(dynamic_entries) == expected_count,
+                 f"readelf dynamic-section entry count changed for {source}")
+        section_kind = "dynamic_section_without_needed"
+    _require("NEEDED" not in dynamic_entries,
+             f"ldd claimed static but readelf found NEEDED for {source}")
+    return {
+        "argv": command, "returncode": completed.returncode,
+        "stdout_sha256": _sha256(completed.stdout.encode("utf-8")),
+        "stderr_sha256": _sha256(completed.stderr.encode("utf-8")),
+        "section_kind": section_kind,
+        "dynamic_entry_count": len(dynamic_entries), "needed_count": 0,
+    }
+
+
+def _observe_dynamic_dependency_closure(
+    *, elf_inputs: Mapping[str, Snapshot], ldd_path: Path | str,
+    readelf_path: Path | str,
+    allowed_virtual_dependencies: Sequence[str],
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    ldd_path = _absolute(ldd_path)
+    ldd_snapshot = _read_snapshot(ldd_path, "reviewed ldd tool")
+    readelf_path = _absolute(readelf_path)
+    readelf_snapshot = _read_snapshot(readelf_path, "reviewed readelf tool")
+    allowed_virtual = list(allowed_virtual_dependencies)
+    _require(allowed_virtual == ["linux-vdso.so.1"],
+             "TOPP dynamic dependency virtual allowlist changed")
+    sources: list[dict[str, Any]] = []
+    dependency_files: dict[str, dict[str, Any]] = {}
+    edge_count = 0
+    loaded_by_soname: dict[str, list[str]] = {}
+    for loaded_path in elf_inputs:
+        canonical = str(_absolute(loaded_path))
+        loaded_by_soname.setdefault(Path(canonical).name, []).append(canonical)
+    for source_path_text, source_snapshot in sorted(elf_inputs.items()):
+        source_path = _absolute(source_path_text)
+        _require(source_snapshot.payload.startswith(b"\x7fELF"),
+                 f"dynamic dependency input is not ELF: {source_path}")
+        current_source = _read_snapshot(
+            source_path, f"unchanged loaded ELF before ldd {source_path}")
+        _require(current_source.payload == source_snapshot.payload,
+                 f"loaded ELF changed before ldd: {source_path}")
+        command = [str(ldd_path), str(source_path)]
+        try:
+            completed = _run_ldd_command(
+                command, cwd=source_path.parent, env=_dynamic_dependency_env())
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            raise Stage2Error(f"ldd failed to run for {source_path}: {exc}") from exc
+        _require(completed.returncode == 0,
+                 f"ldd failed rc={completed.returncode} for {source_path}: {completed.stderr.strip()}")
+        _require(completed.stderr == "", f"ldd wrote stderr for {source_path}")
+        static_verification: dict[str, Any] | None = None
+        if completed.stdout == "\tstatically linked\n":
+            dependencies: list[tuple[str, str]] = []
+            virtual: list[str] = []
+            unresolved: list[str] = []
+            linkage_kind = "static_no_dependencies"
+            static_verification = _verify_static_elf_has_no_needed(
+                source=source_path, readelf_path=readelf_path)
+        else:
+            dependencies, virtual, unresolved = _parse_ldd_output(
+                completed.stdout, source=source_path)
+            linkage_kind = "dynamic"
+        current_source = _read_snapshot(
+            source_path, f"unchanged loaded ELF after ldd {source_path}")
+        _require(current_source.payload == source_snapshot.payload,
+                 f"loaded ELF changed while running ldd: {source_path}")
+        _require(set(virtual) <= set(allowed_virtual),
+                 f"ldd returned unreviewed virtual dependency for {source_path}")
+        edges: list[dict[str, str]] = []
+        resolved_dependencies = [
+            (soname, reported, "ldd_absolute")
+            for soname, reported in dependencies
+        ]
+        for soname in unresolved:
+            matches = loaded_by_soname.get(soname, [])
+            _require(len(matches) == 1,
+                     f"ldd unresolved dependency {soname} for {source_path} "
+                     "does not uniquely match an actual loaded ELF")
+            resolved_dependencies.append(
+                (soname, matches[0], "actual_loaded_unique_soname"))
+        for soname, reported, resolution_kind in resolved_dependencies:
+            resolved_path = _absolute(os.path.realpath(reported))
+            snapshot = _read_snapshot(resolved_path, f"ldd dependency {soname}")
+            row = {
+                "path": str(resolved_path), "bytes": len(snapshot.payload),
+                "sha256": snapshot.sha256,
+            }
+            existing = dependency_files.setdefault(str(resolved_path), row)
+            _require(existing == row,
+                     f"dynamic dependency file changed while collecting: {resolved_path}")
+            edges.append({
+                "soname": soname, "resolved_path": str(resolved_path),
+                "resolution_kind": resolution_kind,
+            })
+        edges.sort(key=lambda row: (
+            row["soname"], row["resolved_path"], row["resolution_kind"]))
+        edge_count += len(edges)
+        sources.append({
+            "path": str(source_path), "bytes": len(source_snapshot.payload),
+            "sha256": source_snapshot.sha256, "dependencies": edges,
+            "virtual_dependencies": sorted(virtual),
+            "linkage_kind": linkage_kind,
+            "static_verification": static_verification,
+        })
+    dependency_rows = sorted(dependency_files.values(), key=lambda row: row["path"])
+    manifest = {
+        "ldd": {"path": str(ldd_path), "sha256": ldd_snapshot.sha256},
+        "readelf": {"path": str(readelf_path), "sha256": readelf_snapshot.sha256},
+        "sources": sources,
+        "resolved_files": dependency_rows,
+    }
+    current_ldd = _read_snapshot(ldd_path, "unchanged reviewed ldd tool")
+    _require(current_ldd.payload == ldd_snapshot.payload,
+             "reviewed ldd tool changed while collecting dependencies")
+    current_readelf = _read_snapshot(readelf_path, "unchanged reviewed readelf tool")
+    _require(current_readelf.payload == readelf_snapshot.payload,
+             "reviewed readelf tool changed while collecting dependencies")
+    manifest_sha = _sha256(_canonical_json(manifest))
+    receipt = {
+        "ldd": manifest["ldd"],
+        "readelf": manifest["readelf"],
+        "elf_input_count": len(sources),
+        "resolved_file_count": len(dependency_rows),
+        "edge_count": edge_count,
+        "manifest_sha256": manifest_sha,
+        "allowed_virtual_dependencies": list(allowed_virtual),
+    }
+    return receipt, manifest
+
+
+def _collect_dynamic_dependency_closure(
+    *, elf_inputs: Mapping[str, Snapshot], contract: Mapping[str, Any],
+) -> dict[str, Any]:
+    contract = _exact_keys(contract, {
+        "ldd_path", "ldd_sha256", "readelf_path", "readelf_sha256",
+        "allowed_virtual_dependencies",
+        "elf_input_count", "resolved_file_count", "edge_count", "manifest_sha256",
+    }, "TOPP dynamic dependency contract")
+    ldd_snapshot = _read_snapshot(contract["ldd_path"], "reviewed ldd tool")
+    _require(ldd_snapshot.sha256 == contract["ldd_sha256"],
+             "reviewed ldd tool SHA changed")
+    readelf_snapshot = _read_snapshot(contract["readelf_path"], "reviewed readelf tool")
+    _require(readelf_snapshot.sha256 == contract["readelf_sha256"],
+             "reviewed readelf tool SHA changed")
+    receipt, _manifest = _observe_dynamic_dependency_closure(
+        elf_inputs=elf_inputs, ldd_path=contract["ldd_path"],
+        readelf_path=contract["readelf_path"],
+        allowed_virtual_dependencies=contract["allowed_virtual_dependencies"],
+    )
+    _require(receipt["ldd"]["sha256"] == contract["ldd_sha256"],
+             "reviewed ldd tool SHA changed")
+    _require(receipt["readelf"]["sha256"] == contract["readelf_sha256"],
+             "reviewed readelf tool SHA changed")
+    _require(receipt["elf_input_count"] == contract["elf_input_count"],
+             "TOPP dynamic dependency ELF input count changed")
+    _require(receipt["resolved_file_count"] == contract["resolved_file_count"],
+             "TOPP dynamic dependency resolved file count changed")
+    _require(receipt["edge_count"] == contract["edge_count"],
+             "TOPP dynamic dependency edge count changed")
+    _require(receipt["manifest_sha256"] == contract["manifest_sha256"],
+             "TOPP dynamic dependency manifest changed")
+    return receipt
+
+
+def _inspect_topp_runtime(
+    contract: Mapping[str, Any],
+) -> tuple[dict[str, Any], dict[str, Snapshot]]:
+    """Validate the exact interpreter and package files used by TOPP."""
+    _require(contract == EXPECTED_TOPP_RUNTIME, "TOPP runtime contract changed")
+    interpreter_contract = _exact_keys(contract["interpreter"], {
+        "path", "symlink_target", "target_sha256", "python_version",
+    }, "TOPP runtime interpreter")
+    interpreter = _absolute(interpreter_contract["path"])
+    _ensure_no_symlink_components(interpreter.parent, "TOPP interpreter parent")
+    try:
+        link_info_before = interpreter.lstat()
+        link_target = os.readlink(interpreter)
+    except (FileNotFoundError, OSError) as exc:
+        raise Stage2Error(f"cannot inspect TOPP interpreter symlink: {exc}") from exc
+    _require(stat.S_ISLNK(link_info_before.st_mode),
+             "TOPP interpreter must be a symlink")
+    _require(link_target == interpreter_contract["symlink_target"],
+             "TOPP interpreter symlink target changed")
+    target = _absolute(link_target)
+    target_snapshot = _read_snapshot(target, "TOPP interpreter target")
+    _require(target_snapshot.sha256 == interpreter_contract["target_sha256"],
+             "TOPP interpreter target SHA changed")
+    try:
+        link_info_after = interpreter.lstat()
+    except OSError as exc:
+        raise Stage2Error(f"cannot re-inspect TOPP interpreter symlink: {exc}") from exc
+    before_identity = (
+        link_info_before.st_dev, link_info_before.st_ino, link_info_before.st_size,
+        link_info_before.st_mtime_ns, link_info_before.st_ctime_ns,
+    )
+    after_identity = (
+        link_info_after.st_dev, link_info_after.st_ino, link_info_after.st_size,
+        link_info_after.st_mtime_ns, link_info_after.st_ctime_ns,
+    )
+    _require(before_identity == after_identity and os.readlink(interpreter) == link_target,
+             "TOPP interpreter symlink changed while inspecting")
+
+    command = [str(interpreter), "-I", "-B", "-c", _TOPP_RUNTIME_PROBE]
+    try:
+        completed = _run_runtime_command(
+            command, cwd=interpreter.parent, env=_topp_runtime_env())
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Stage2Error(f"TOPP runtime probe could not run: {exc}") from exc
+    _require(completed.returncode == 0,
+             f"TOPP runtime probe failed rc={completed.returncode}: {completed.stderr.strip()}")
+    _require(completed.stderr == "", "TOPP runtime probe wrote stderr")
+    probe = _exact_keys(_load_json(completed.stdout.encode("utf-8"), "TOPP runtime probe"), {
+        "python_version", "executable", "prefix", "packages",
+    }, "TOPP runtime probe")
+    _require(probe["python_version"] == interpreter_contract["python_version"],
+             "TOPP Python version changed")
+    _require(_absolute(probe["executable"]) == interpreter,
+             "TOPP probe ran under the wrong interpreter")
+    venv_root = interpreter.parent.parent
+    _require(_absolute(probe["prefix"]) == venv_root,
+             "TOPP interpreter does not use the expected venv prefix")
+    site_packages = venv_root / "lib" / "python3.12" / "site-packages"
+    expected_paths = {
+        "numpy": {
+            "module": site_packages / "numpy" / "__init__.py",
+            "metadata": site_packages / "numpy-2.5.0.dist-info" / "METADATA",
+            "record": site_packages / "numpy-2.5.0.dist-info" / "RECORD",
+            "wheel": site_packages / "numpy-2.5.0.dist-info" / "WHEEL",
+        },
+        "mujoco": {
+            "module": site_packages / "mujoco" / "__init__.py",
+            "metadata": site_packages / "mujoco-3.10.0.dist-info" / "METADATA",
+            "record": site_packages / "mujoco-3.10.0.dist-info" / "RECORD",
+            "wheel": site_packages / "mujoco-3.10.0.dist-info" / "WHEEL",
+        },
+    }
+    packages = _exact_keys(probe["packages"], {"numpy", "mujoco"},
+                           "TOPP runtime packages")
+    package_receipts: dict[str, Any] = {}
+    snapshots = {"topp_runtime:interpreter_target": target_snapshot}
+    for package_name in ("numpy", "mujoco"):
+        package_contract = _exact_keys(contract["packages"][package_name], {
+            "version", "module_sha256", "metadata_sha256", "record_sha256",
+            "wheel_sha256", "record_file_count", "record_total_bytes",
+            "record_manifest_sha256", "record_native_elf_count",
+            "record_unhashed_row_count",
+        }, f"TOPP runtime {package_name} contract")
+        package_probe = _exact_keys(packages[package_name], {
+            "version", "module", "metadata", "record", "wheel",
+        }, f"TOPP runtime {package_name} probe")
+        _require(package_probe["version"] == package_contract["version"],
+                 f"TOPP runtime {package_name} version changed")
+        receipt_files: dict[str, Any] = {}
+        for label in ("module", "metadata", "record", "wheel"):
+            path = _absolute(package_probe[label])
+            _require(path == expected_paths[package_name][label],
+                     f"TOPP runtime {package_name} {label} path changed")
+            snapshot = _read_snapshot(path, f"TOPP runtime {package_name} {label}")
+            expected_sha = package_contract[f"{label}_sha256"]
+            _require(snapshot.sha256 == expected_sha,
+                     f"TOPP runtime {package_name} {label} SHA changed")
+            snapshots[f"topp_runtime:{package_name}:{label}"] = snapshot
+            receipt_files[label] = {"path": str(path), "sha256": snapshot.sha256}
+        package_receipts[package_name] = {
+            "version": package_probe["version"], "files": receipt_files,
+        }
+        record_receipt, _package_elfs = _verify_distribution_record(
+            package_name=package_name,
+            version=package_probe["version"],
+            site_packages=site_packages,
+            venv_root=venv_root,
+            record_snapshot=snapshots[f"topp_runtime:{package_name}:record"],
+        )
+        _require(record_receipt["file_count"] == package_contract["record_file_count"],
+                 f"TOPP runtime {package_name} RECORD file count changed")
+        _require(record_receipt["total_bytes"] == package_contract["record_total_bytes"],
+                 f"TOPP runtime {package_name} RECORD total bytes changed")
+        _require(record_receipt["verified_manifest_sha256"]
+                 == package_contract["record_manifest_sha256"],
+                 f"TOPP runtime {package_name} RECORD manifest changed")
+        _require(record_receipt["native_elf_count"]
+                 == package_contract["record_native_elf_count"],
+                 f"TOPP runtime {package_name} RECORD native ELF count changed")
+        _require(record_receipt["explicitly_bound_unhashed_row_count"]
+                 == package_contract["record_unhashed_row_count"],
+                 f"TOPP runtime {package_name} RECORD unhashed row count changed")
+        package_receipts[package_name]["record_closure"] = record_receipt
+    receipt = {
+        "interpreter": {
+            "path": str(interpreter), "symlink_target": link_target,
+            "target_sha256": target_snapshot.sha256,
+            "python_version": probe["python_version"],
+            "venv_prefix": str(venv_root),
+        },
+        "packages": package_receipts,
+        "probe_argv": command,
+        "probe_rc": completed.returncode,
+        "probe_stdout_sha256": _sha256(completed.stdout.encode("utf-8")),
+        "pythonpath_removed": True,
+        "pythonhome_removed": True,
+    }
+    return receipt, snapshots
+
+
+def _tree_manifest(root: Path) -> list[dict[str, Any]]:
+    rows: list[dict[str, Any]] = []
+    for path in sorted(root.rglob("*"), key=lambda item: item.as_posix()):
+        info = path.lstat()
+        relative = path.relative_to(root).as_posix()
+        _require(not stat.S_ISLNK(info.st_mode),
+                 f"MJCF preflight tree contains symlink: {relative}")
+        if stat.S_ISDIR(info.st_mode):
+            rows.append({"path": relative, "kind": "directory",
+                         "mode": stat.S_IMODE(info.st_mode)})
+        else:
+            _require(stat.S_ISREG(info.st_mode),
+                     f"MJCF preflight tree contains special file: {relative}")
+            snapshot = _read_snapshot(path, f"MJCF preflight file {relative}")
+            rows.append({"path": relative, "kind": "file", "mode": snapshot.mode,
+                         "bytes": len(snapshot.payload), "sha256": snapshot.sha256})
+    return rows
+
+
+def _observe_mjcf_runtime_preflight(*, runtime_snapshot_root: Path,
+                                    contract: Mapping[str, Any]) -> tuple[
+                                        dict[str, Any], dict[str, Snapshot]
+                                    ]:
+    """Load the exact MJCF and return the actually mapped ELF set."""
+    interpreter = _absolute(contract["interpreter"]["path"])
+    mjcf = runtime_snapshot_root / RUNTIME_RELATIVE_PATHS["mjcf_sha256"]
+    _require(mjcf.is_file(), "O_EXCL MJCF snapshot is missing")
+    before = _tree_manifest(runtime_snapshot_root)
+    command = [str(interpreter), "-I", "-B", "-c", _MJCF_PREFLIGHT_PROBE, str(mjcf)]
+    try:
+        completed = _run_runtime_command(
+            command, cwd=runtime_snapshot_root, env=_topp_runtime_env())
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        raise Stage2Error(f"MJCF runtime preflight could not run: {exc}") from exc
+    _require(completed.returncode == 0,
+             f"MJCF runtime preflight failed rc={completed.returncode}: {completed.stderr.strip()}")
+    _require(completed.stderr == "", "MJCF runtime preflight wrote stderr")
+    probe = _exact_keys(
+        _load_json(completed.stdout.encode("utf-8"), "MJCF runtime preflight"),
+        {"nq", "nv", "nbody", "ngeom", "nmesh", "loaded_elf_paths"},
+        "MJCF runtime preflight result",
+    )
+    dimensions = {key: probe[key] for key in ("nq", "nv", "nbody", "ngeom", "nmesh")}
+    expected = _exact_keys(contract["mjcf_model"], {
+        "loader", "nq", "nv", "nbody", "ngeom", "nmesh",
+    }, "MJCF runtime model contract")
+    _require(expected["loader"] == "mujoco.MjModel.from_xml_path",
+             "MJCF runtime loader changed")
+    _require(dimensions == {key: expected[key] for key in dimensions},
+             "MJCF runtime model dimensions changed")
+    loaded_paths = probe["loaded_elf_paths"]
+    _require(isinstance(loaded_paths, list) and loaded_paths
+             and all(isinstance(path, str) and path for path in loaded_paths),
+             "MJCF runtime loaded ELF path list is malformed or empty")
+    _require(loaded_paths == sorted(set(loaded_paths)),
+             "MJCF runtime loaded ELF paths are duplicate or noncanonical")
+    loaded_elfs: dict[str, Snapshot] = {}
+    venv_root = _absolute(contract["interpreter"]["path"]).parent.parent
+    interpreter_target = _absolute(contract["interpreter"]["symlink_target"])
+    for raw_path in loaded_paths:
+        _require(not raw_path.endswith(" (deleted)")
+                 and not raw_path.endswith(" (unreadable)")
+                 and not raw_path.startswith("["),
+                 f"MJCF runtime has deleted, unreadable, or anonymous ELF mapping: {raw_path}")
+        path = _absolute(raw_path)
+        _require(Path(raw_path).is_absolute(),
+                 f"MJCF runtime loaded ELF path is not absolute: {raw_path}")
+        resolved = _absolute(os.path.realpath(path))
+        _require(path == resolved,
+                 f"MJCF runtime loaded ELF path is not canonical: {raw_path}")
+        snapshot = _read_snapshot(resolved, f"MJCF runtime loaded ELF {resolved}")
+        _require(snapshot.payload.startswith(b"\x7fELF"),
+                 f"MJCF runtime reported a non-ELF mapping: {resolved}")
+        _require(str(resolved) not in loaded_elfs,
+                 f"MJCF runtime loaded ELF resolves twice: {resolved}")
+        loaded_elfs[str(resolved)] = snapshot
+    _require(str(interpreter_target) in loaded_elfs,
+             "MJCF runtime did not report the fixed interpreter ELF")
+    _require(any(path.startswith(str(venv_root / "lib" / "python3.12" / "site-packages" / "numpy") + "/")
+                 for path in loaded_elfs),
+             "MJCF runtime did not load a NumPy native ELF")
+    _require(any(path.startswith(str(venv_root / "lib" / "python3.12" / "site-packages" / "mujoco") + "/")
+                 for path in loaded_elfs),
+             "MJCF runtime did not load a MuJoCo native ELF")
+    _require(any(Path(path).name.startswith("libmujoco.so") for path in loaded_elfs),
+             "MJCF runtime did not load libmujoco")
+    after = _tree_manifest(runtime_snapshot_root)
+    _require(after == before,
+             "MJCF runtime preflight created or changed snapshot files")
+    return ({
+        "loader": expected["loader"], "argv": command,
+        "returncode": completed.returncode, "dimensions": dict(dimensions),
+        "loaded_elf_paths": sorted(loaded_elfs),
+        "loaded_elf_count": len(loaded_elfs),
+        "stdout_sha256": _sha256(completed.stdout.encode("utf-8")),
+        "stderr_sha256": _sha256(completed.stderr.encode("utf-8")),
+        "snapshot_tree_before_sha256": _sha256(_canonical_json(before)),
+        "snapshot_tree_after_sha256": _sha256(_canonical_json(after)),
+        "output_files_created": [],
+    }, loaded_elfs)
+
+
+def _preflight_mjcf_runtime(*, runtime_snapshot_root: Path,
+                            contract: Mapping[str, Any]) -> dict[str, Any]:
+    """Validate exact MJCF behavior and its actually loaded native closure."""
+    receipt, loaded_elfs = _observe_mjcf_runtime_preflight(
+        runtime_snapshot_root=runtime_snapshot_root, contract=contract)
+    receipt["dynamic_dependencies"] = _collect_dynamic_dependency_closure(
+        elf_inputs=loaded_elfs, contract=contract["dynamic_dependencies"])
+    return receipt
 
 
 def _git_blob_oid(payload: bytes) -> str:
@@ -506,7 +1318,7 @@ def _validate_activation(activation: Any, queue: Mapping[str, Any], *,
         "required_attestation_receipt", "required_attestation_receipt_sha256",
         "stage2_runner", "stage2_namespace", "launch_authorized",
         "authorized_stage2_cells", "prior_failed_attempt",
-        "runtime_authority",
+        "topp_runtime", "runtime_authority",
     }, "activation")
     _require(activation["schema_version"] == 1, "activation schema changed")
     _require(activation["activation_id"] == EXPECTED_ACTIVATION_ID, "unknown activation id")
@@ -527,6 +1339,8 @@ def _validate_activation(activation: Any, queue: Mapping[str, Any], *,
              "Stage2 namespace differs from the source-pinned one-shot namespace")
     _require(activation["prior_failed_attempt"] == EXPECTED_PRIOR_ATTEMPT,
              "prior failed attempt binding changed")
+    _require(activation["topp_runtime"] == EXPECTED_TOPP_RUNTIME,
+             "activation TOPP runtime contract changed")
     runtime_authority = {
         "cpu_only": True, "automatic_retry": False, "trainer_signal": False,
         "robot_command": False, "training_authorized": False,
@@ -1135,6 +1949,9 @@ def _validate_inputs(*, activation_path: Path | str, queue_path: Path | str,
         "queue": queue_snapshot, "receipt": receipt_snapshot,
         "prior_summary": prior_summary_snapshot,
     }
+    topp_runtime_receipt, topp_runtime_snapshots = _inspect_topp_runtime(
+        activation["topp_runtime"])
+    snapshots.update(topp_runtime_snapshots)
     for key, relative in RUNTIME_RELATIVE_PATHS.items():
         snapshot = _read_snapshot(runtime_root / relative, f"runtime {key}")
         _require(snapshot.sha256 == queue["runtime"][key], f"runtime {key} SHA changed")
@@ -1191,6 +2008,50 @@ def _validate_inputs(*, activation_path: Path | str, queue_path: Path | str,
         "cells": cells, "snapshots": snapshots, "runtime_root": runtime_root,
         "body_order": body_order, "mjcf_asset_closure": mjcf_closure,
         "prior_candidate_records": prior_candidate_records,
+        "topp_runtime_receipt": topp_runtime_receipt,
+    }
+
+
+def _materialize_runtime_snapshot(*, snapshots: Mapping[str, Snapshot],
+                                  destination: Path) -> None:
+    destination.mkdir(mode=0o700, parents=True)
+    for key, snapshot in snapshots.items():
+        if not key.startswith("runtime:"):
+            continue
+        relative = Path(key.split(":", 1)[1])
+        output = destination / relative
+        output.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+        _write_exclusive(output, snapshot.payload)
+
+
+def _verify_materialized_snapshot_tree(
+    *, snapshots: Mapping[str, Snapshot], destination: Path,
+    key_prefix: str, expected_tree: Sequence[Mapping[str, Any]], label: str,
+) -> dict[str, Any]:
+    """Re-read every copied input and reject added, missing, or changed tree entries."""
+    file_shas: dict[str, str] = {}
+    for key, original in sorted(snapshots.items()):
+        if not key.startswith(key_prefix):
+            continue
+        relative = key.removeprefix(key_prefix)
+        relative_path = PurePosixPath(relative)
+        _require(relative != "" and not relative_path.is_absolute()
+                 and all(part not in ("", ".", "..") for part in relative_path.parts),
+                 f"{label} snapshot key is malformed: {key}")
+        current = _read_snapshot(
+            destination.joinpath(*relative_path.parts), f"unchanged {label} {relative}")
+        _require(current.payload == original.payload,
+                 f"{label} changed during Stage2: {relative}")
+        file_shas[relative] = current.sha256
+    _require(file_shas, f"{label} snapshot set is empty")
+    current_tree = _tree_manifest(destination)
+    expected_rows = [dict(row) for row in expected_tree]
+    _require(current_tree == expected_rows,
+             f"{label} tree changed during Stage2")
+    return {
+        "file_count": len(file_shas),
+        "file_shas": file_shas,
+        "tree_manifest_sha256": _sha256(_canonical_json(current_tree)),
     }
 
 
@@ -1204,6 +2065,14 @@ def plan_stage2(*, activation_path: Path | str, queue_path: Path | str,
         contact = queue["assets"][cell["action"]]["contact_frame"]
         plans.append({**cell, "join_frame": contact - 12, "blend_intervals": 10,
                       "output_contact_frame": 25})
+    with tempfile.TemporaryDirectory(prefix="ready-stage2-v7-mjcf-") as temporary:
+        runtime_snapshot_root = Path(os.path.realpath(temporary)) / "runtime"
+        _materialize_runtime_snapshot(
+            snapshots=context["snapshots"], destination=runtime_snapshot_root)
+        mjcf_preflight = _preflight_mjcf_runtime(
+            runtime_snapshot_root=runtime_snapshot_root,
+            contract=context["activation"]["topp_runtime"],
+        )
     return {
         "schema_version": SCHEMA_VERSION,
         "status": "dry_run_passed_no_namespace_created",
@@ -1216,6 +2085,8 @@ def plan_stage2(*, activation_path: Path | str, queue_path: Path | str,
         "mjcf_mesh_manifest_sha256": (
             context["mjcf_asset_closure"]["mesh_manifest_sha256"]
         ),
+        "topp_runtime_receipt": context["topp_runtime_receipt"],
+        "mjcf_runtime_preflight": mjcf_preflight,
         "runtime_authority": context["activation"]["runtime_authority"],
     }
 
@@ -1261,14 +2132,21 @@ def _run_stage2_impl(*, activation_path: Path | str, queue_path: Path | str,
     for key in ("runner", "activation", "queue", "receipt", "prior_summary"):
         _write_exclusive(snapshot_destinations[key], snapshots[key].payload)
     runtime_snapshot_root = snapshot_root / "runtime"
-    runtime_snapshot_root.mkdir(mode=0o700)
-    for key, snapshot in snapshots.items():
-        if not key.startswith("runtime:"):
-            continue
-        relative = Path(key.split(":", 1)[1])
-        destination = runtime_snapshot_root / relative
-        destination.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
-        _write_exclusive(destination, snapshot.payload)
+    _materialize_runtime_snapshot(
+        snapshots=snapshots, destination=runtime_snapshot_root)
+    runtime_snapshot_tree = _tree_manifest(runtime_snapshot_root)
+    mjcf_preflight = _preflight_mjcf_runtime(
+        runtime_snapshot_root=runtime_snapshot_root,
+        contract=context["activation"]["topp_runtime"],
+    )
+    _write_exclusive(
+        snapshot_root / "topp_runtime_receipt.json",
+        _canonical_json(context["topp_runtime_receipt"]),
+    )
+    _write_exclusive(
+        snapshot_root / "mjcf_runtime_preflight.json",
+        _canonical_json(mjcf_preflight),
+    )
     prior_snapshot_root = snapshot_root / "prior_v2"
     prior_snapshot_root.mkdir(mode=0o700)
     for key, snapshot in snapshots.items():
@@ -1283,6 +2161,11 @@ def _run_stage2_impl(*, activation_path: Path | str, queue_path: Path | str,
         destination = asset_snapshot_root / f"{name}.npz"
         _write_exclusive(destination, snapshots[f"asset:{name}"].payload)
         asset_snapshot_paths[name] = destination
+    materialized_asset_snapshots = {
+        f"asset:{name}.npz": snapshots[f"asset:{name}"]
+        for name in ("forehand", "backhand")
+    }
+    asset_snapshot_tree = _tree_manifest(asset_snapshot_root)
 
     queue: Mapping[str, Any] = context["queue"]
     runtime_root: Path = context["runtime_root"]
@@ -1290,12 +2173,7 @@ def _run_stage2_impl(*, activation_path: Path | str, queue_path: Path | str,
     mjcf = runtime_snapshot_root / RUNTIME_RELATIVE_PATHS["mjcf_sha256"]
     urdf = runtime_snapshot_root / RUNTIME_RELATIVE_PATHS["urdf_sha256"]
     body_order = runtime_snapshot_root / RUNTIME_RELATIVE_PATHS["body_order_sha256"]
-    env = dict(os.environ)
-    env.update({
-        "CUDA_VISIBLE_DEVICES": "", "PYTHONDONTWRITEBYTECODE": "1",
-        "OMP_NUM_THREADS": "1", "MKL_NUM_THREADS": "1",
-        "OPENBLAS_NUM_THREADS": "1", "NUMEXPR_NUM_THREADS": "1",
-    })
+    env = _topp_runtime_env()
     rows: list[dict[str, Any]] = []
     candidate_records: dict[str, tuple[Path, Snapshot, dict[str, Any]]] = {}
     for cell in context["cells"]:
@@ -1325,7 +2203,8 @@ def _run_stage2_impl(*, activation_path: Path | str, queue_path: Path | str,
         topp_root = root_path / cell["cell_id"] / "topp"
         topp_root.mkdir(mode=0o700)
         command = [
-            sys.executable, "-B", str(topp), "--input", str(candidate_path),
+            context["activation"]["topp_runtime"]["interpreter"]["path"],
+            "-I", "-B", str(topp), "--input", str(candidate_path),
             "--phase", format(info["phase"], ".17g"), "--objective", "runup",
             "--budget-clips", str(asset_snapshot_paths["forehand"]),
             str(asset_snapshot_paths["backhand"]), "--mjcf", str(mjcf),
@@ -1385,6 +2264,51 @@ def _run_stage2_impl(*, activation_path: Path | str, queue_path: Path | str,
                      f"input changed during Stage2: {original.path}")
         except Stage2Error as exc:
             input_stability_errors.append(str(exc))
+    try:
+        final_runtime_receipt, _unused_runtime_snapshots = _inspect_topp_runtime(
+            context["activation"]["topp_runtime"])
+        _require(final_runtime_receipt == context["topp_runtime_receipt"],
+                 "TOPP runtime changed during Stage2")
+    except Stage2Error as exc:
+        input_stability_errors.append(str(exc))
+    materialized_runtime_postcheck: dict[str, Any] | None = None
+    try:
+        materialized_runtime_postcheck = _verify_materialized_snapshot_tree(
+            snapshots=snapshots, destination=runtime_snapshot_root,
+            key_prefix="runtime:", expected_tree=runtime_snapshot_tree,
+            label="materialized runtime snapshot",
+        )
+    except Stage2Error as exc:
+        input_stability_errors.append(str(exc))
+    materialized_asset_postcheck: dict[str, Any] | None = None
+    try:
+        materialized_asset_postcheck = _verify_materialized_snapshot_tree(
+            snapshots=materialized_asset_snapshots, destination=asset_snapshot_root,
+            key_prefix="asset:", expected_tree=asset_snapshot_tree,
+            label="materialized asset snapshot",
+        )
+    except Stage2Error as exc:
+        input_stability_errors.append(str(exc))
+    mjcf_postflight: dict[str, Any] | None = None
+    try:
+        mjcf_postflight = _preflight_mjcf_runtime(
+            runtime_snapshot_root=runtime_snapshot_root,
+            contract=context["activation"]["topp_runtime"],
+        )
+        _require(mjcf_postflight == mjcf_preflight,
+                 "MJCF runtime or actual-loaded dynamic closure changed during Stage2")
+    except Stage2Error as exc:
+        input_stability_errors.append(str(exc))
+    if mjcf_postflight is not None:
+        _write_exclusive(
+            snapshot_root / "mjcf_runtime_postflight.json",
+            _canonical_json(mjcf_postflight),
+        )
+    execution_snapshot_stable = (
+        materialized_runtime_postcheck is not None
+        and materialized_asset_postcheck is not None
+        and mjcf_postflight == mjcf_preflight
+    )
     execution_complete = (
         len(rows) == 4 and not input_stability_errors
         and all(row.get("generator_rc") == 0 and row.get("topp_rc") == 0
@@ -1430,6 +2354,14 @@ def _run_stage2_impl(*, activation_path: Path | str, queue_path: Path | str,
         "prior_diagnostic_logs_consumed": False,
         "prior_v2_timing_available": False,
         "mjcf_asset_closure": context["mjcf_asset_closure"],
+        "topp_runtime_receipt": context["topp_runtime_receipt"],
+        "mjcf_runtime_preflight": mjcf_preflight,
+        "mjcf_runtime_postflight": mjcf_postflight,
+        "execution_snapshot_stability": {
+            "runtime": materialized_runtime_postcheck,
+            "assets": materialized_asset_postcheck,
+            "postflight_matches_preflight": mjcf_postflight == mjcf_preflight,
+        },
         "rows": rows,
         "screening_acceptance": {
             "at_or_below_0p5_cells": accepted_cells,
@@ -1440,7 +2372,8 @@ def _run_stage2_impl(*, activation_path: Path | str, queue_path: Path | str,
         "input_stability_errors": input_stability_errors,
         "formal_claims": {
             "physics_replay_exact": False, "source_closure_exact": False,
-            "mjcf_closure_exact": True, "screening_evidence_only": True,
+            "mjcf_closure_exact": execution_complete and execution_snapshot_stable,
+            "screening_evidence_only": True,
             "strict_global_minimum_proven": False,
         },
         "runtime_authority": context["activation"]["runtime_authority"],

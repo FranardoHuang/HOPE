@@ -49,17 +49,22 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   actor-visible 与 exact-0.5 暴露都激活，合法 stop 为 0；continuous 父本 3 条已取证、2 条仍等 checkpoint、
   1 条 infrastructure-terminal 排除。Pod1 最近只读为 4 条到档、4 条 live sibling 等待、2 条
   infrastructure-terminal 排除。这里零 stop 是机制正常的结论，不是默认让所有臂永生；行为优劣从
-  `+500` 开始判。最新 Pod2 `+500` cycle 显示十一条 live 臂仍未到共同 `model_5000/5200`，故尚无合法
-  `+500` 行为取证已在 Pod2 到档格上闭合：quality 父本六条 completion 为 `0.919–0.971`、virtual-return
+  `+500` 开始判。Pod2 `+500` 行为取证已在到档格上闭合：quality 父本六条 completion 为
+  `0.919–0.971`、virtual-return
   为 `0.278–0.395`，没有一条满足“连续两个窗口 completion<0.40”的崩坏门；ready 四项在本批日志中均为
-  null，不能拿缺失量尺做淘汰。因此这轮合法 stop 仍为 0。最新 Pod2 只读动态复核为 11 条 live、
-  1 条既有 importer malloc terminal，三卡 `3/4/4` 且利用率 `96–97%`；本轮 inspector 没有穿过实际
-  checkpoint 制品路径，所以不把 `latest=null` 冒充“没有 +1000”。下一轮只用 reviewed
-  `inspect-pruning-cycle --milestone-offset 1000` 闭合 checkpoint+behavior+portfolio 三联 receipt，之后
-  才能合法 Pareto stop。自动 rolling 任务在本次 task-revision/TOPP 关键修复期间保持暂停；trainer 本身
+  null，不能拿缺失量尺做淘汰。因此这轮合法 stop 仍为 0。随后 Pod2 唯一一次 `+1000` pruning cycle
+  自然 rc0，并为“等权 Reward”“去掉关节速度惩罚”“快速等权 Reward”三格分别在
+  `model_5700/5700/5500` 发布 behavior receipt。随后一次双 Pod 只读 `+1000` inspector 确认：全部
+  非 infrastructure 格都已到注册 checkpoint；Pod1 为 8 条到档（7 live、1 checkpoint 后退出）加 2 条
+  importer/boot 排除，Pod2 为 11 条到档 live 加 1 条 importer 排除。除上述三份外，其余到档格仍缺
+  behavior receipt，因此还没有同父本 portfolio receipt 或合法 stop。下一步已从“等 checkpoint”变为
+  “唯一一次 no-clobber +1000 attestation → portfolio → 只停有双回执授权的格”。这个零淘汰只表示
+  比较尚未消费完整，**不是所有格都好，也不是已经排出胜者**。自动 rolling 任务在本次 task-revision/TOPP
+  关键修复期间保持暂停；trainer 本身
   未因此停止。一条既有
-  importer 失败继续排除且全程没有 signal。首个合格
-  checkpoint 正在跑 K100，之后按 receipt 淘汰并把胜者送 vendor MuJoCo。详见
+  importer 失败继续排除且全程没有 signal。旧同步 K100 长时间没有形成可信终态，不进入成绩；新的
+  checkpoint-bound 持久监督器仍在 source 红队，只有通过后才会唯一启动。随后按 receipt 淘汰并把胜者
+  送 vendor MuJoCo。详见
   [task-revision 卷宗](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md)。
 
 - **动作加速当前边界：** 完整旧 v4rg 只重定时得到 `0.98/0.78 s`，因此新增的 host-only
@@ -84,10 +89,22 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   14,127,373 字节、manifest `e0381752…b962de`）。但 v3 唯一 Pod2 dry-run 在结果 root 前抓到 v1/v2
   contract SHA 账本混用，未启动 execute/TOPP。v4 用新 activation/namespace 绑定 v2 四份实际 contract，
   随后 dry-run 又发现 exact log SHA 后的英文文本猜测会假拒绝真实日志，同样未启动 execute/TOPP。v5
-  删除重复文本解释却仍因一份 log SHA 手抄一字符错误 pre-root fail closed。当前 v6 移除旧 V1 summary、
-  generator 副本和全部日志前置，只复验 v2 四份 candidate/contract，保持零 generator 调用，并准备在
-  Git-object 完整闭包中各跑一次 TOPP。v6 相关回归 `76 passed`、独立红队 GO，尚待远端 dry-run/execute；在真实结果出现前仍没有
-  production FK、TOPP≤0.5、L0/L1、桌网、动力学或行为通过，不能写成0.5秒动作已完成。见
+  删除重复文本解释却仍因一份 log SHA 手抄一字符错误 pre-root fail closed。main `8b371eb7` 上的 v6
+  随后移除旧 V1 summary、generator 副本和全部日志前置，只复验 v2 四份 candidate/contract，保持零
+  generator 调用，并在 Git-object 完整闭包中执行唯一一次远端 dry-run/execute。dry-run 全绿；execute
+  natural terminal，summary=`b5209bc7…`：四格都是 generator=`0`、TOPP rc=`1`、无 timing，`75` 文件/
+  `74` mesh closure 与残留进程检查均正确。后续只读 forensics 发现四份日志逐字节相同
+  （SHA=`f1d5088e…`），共同首错为 `/usr/bin/python3` 缺少 `mujoco`，因此这是 **runtime dependency
+  closure** 失败，不是四个动作共同失败。项目实际 TOPP import closure 只有 `numpy+mujoco`；此前把
+  `scipy` 当硬门属于过度检查，现已废除。去掉 `PYTHONPATH` 的 targeted probe 又证明
+  `/workspace/hope_mjeval_venv/bin/python` 可加载 `numpy 2.5`、`mujoco 3.10` 和 exact MJCF
+  (`nq=38,nv=37,nbody=33,ngeom=79,nmesh=74`)。v7 只增加该解释器/包 closure 与 preflight，动作、join、
+  budget 和 acceptance 不变。后续已把两份 Python package 的完整 RECORD、实际加载 ELF、每条
+  `DT_NEEDED` 解析边、canonical `ldd/readelf`、MJCF pre/post snapshot 和四个 child 的 terminal 状态全部
+  绑定；TOPP rc 非零时不再能假报 `mjcf_closure_exact=true`。本地 Stage-2 专项 `112 passed`，独立红队
+  P0/P1 均为 0，runner/activation SHA 为 `e3d2e1f9…05f0` / `87598e0a…99c2`。当前 source gate 已转绿，
+  但唯一远端 v7 dry-run/execute 尚未消费。因而仍没有 TOPP timing、
+  TOPP≤0.5、L0/L1、桌网、动力学或行为通过，不能写成0.5秒动作已完成。见
   [短路径实验](experiments/2026-07/EXP-MOTION-READY-TO-STRIKE-0P5.md)。
 
 - **已停止的前代 rolling 池（只作背景）：** 旧 `24/24` 长曲线已按绑定身份停止，三份较强母本的 optimizer 被完整恢复到
