@@ -35,37 +35,33 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   `task_revision`”，挥拍中位置、速度、signed 拍面与剩余击球时间每个 policy tick 继续原子更新；phase
   governor 只接受可达的动作加速。准备时间不是以 `0.5 s` 为下限，而是同时采样 `<0.5 s` 压力、exact
   `0.5 s` 基线、`0.5–0.9 s` 快球和 `0.9–1.7 s` 宽分布。4096-env `A6` 已证明这些机制真实激活；随后
-  22 个 delay-zero 格全部各发射一次。最终独立只读复核为 **19 条 `live_exact`、3 条首 iteration 前基础
-  设施拒绝、0 条漏发**：Pod1 八条按 `3/3/2`，Pod2 十一条按 `3/4/4`；live 臂持续前进且未见 OOM/
-  Traceback/Killed。两个 importer malloc `rc134` 与一个 boot stale-timeout 不算科学失败且不自动重跑；
-  两个 positive-delay 格因 governor/actor transport 尚非同 tick 原子继续 NO-LAUNCH。0.5 秒 K100 paper
+  22 个 delay-zero 格全部各发射一次。最终 `+1000` 取证时，Pod1 八条有效臂已到档、两条基础设施
+  拒绝，只有“强脚底准备”仍 live；Pod2 十一条有效臂已到档且全部自然结束、一条 importer 拒绝。
+  因此旧说法“19 条仍 live”已经过期，也没有需要用 signal 清理的 Pod2 训练。两个 importer malloc
+  `rc134` 与一个 boot stale-timeout 不算科学失败且不自动重跑；两个 positive-delay 格因 governor/actor
+  transport 尚非同 tick 原子继续 NO-LAUNCH。0.5 秒 K100 paper
   已在两 Pod 物化但尚无 checkpoint 行为分数；现役 v4rg 正反手 TOPP 已在 Pod2 CPU-only 一次完成，
   两侧安全证书均通过，但当前搜索族只找到正手 `0.98 s`、反手 `0.78 s` 的可行 run-up 上界，没有
   0.5 秒动力学证书。这不证明 0.5 秒绝对不可能，却证明旧固定倍率不能冒充可行动作加速。
   `+200` 机制失活、`+500` 极端崩坏和 `+1000` 同父本容差 Pareto 的组合保护式淘汰 consumer
-  已闭合：停臂必须同时有单臂行为 receipt 和同父本 portfolio receipt，且至少保留两条以及
-  实际 exact-0.5 暴露与 broad 两类时间覆盖。修复 receipt-directory harness 后，Pod2 首个 write-side
-  `+200` cycle 已对 9 条到档臂发布整数行为 receipt：quality 父本 6/6 的 revision/last-precontact/
-  actor-visible 与 exact-0.5 暴露都激活，合法 stop 为 0；continuous 父本 3 条已取证、2 条仍等 checkpoint、
-  1 条 infrastructure-terminal 排除。Pod1 最近只读为 4 条到档、4 条 live sibling 等待、2 条
-  infrastructure-terminal 排除。这里零 stop 是机制正常的结论，不是默认让所有臂永生；行为优劣从
-  `+500` 开始判。Pod2 `+500` 行为取证已在到档格上闭合：quality 父本六条 completion 为
-  `0.919–0.971`、virtual-return
-  为 `0.278–0.395`，没有一条满足“连续两个窗口 completion<0.40”的崩坏门；ready 四项在本批日志中均为
-  null，不能拿缺失量尺做淘汰。因此这轮合法 stop 仍为 0。随后 Pod2 唯一一次 `+1000` pruning cycle
-  自然 rc0，并为“等权 Reward”“去掉关节速度惩罚”“快速等权 Reward”三格分别在
-  `model_5700/5700/5500` 发布 behavior receipt。随后一次双 Pod 只读 `+1000` inspector 确认：全部
-  非 infrastructure 格都已到注册 checkpoint；Pod1 为 8 条到档（7 live、1 checkpoint 后退出）加 2 条
-  importer/boot 排除，Pod2 为 11 条到档 live 加 1 条 importer 排除。除上述三份外，其余到档格仍缺
-  behavior receipt，因此还没有同父本 portfolio receipt 或合法 stop。下一步已从“等 checkpoint”变为
-  “唯一一次 no-clobber +1000 attestation → portfolio → 只停有双回执授权的格”。这个零淘汰只表示
-  比较尚未消费完整，**不是所有格都好，也不是已经排出胜者**。自动 rolling 任务在本次 task-revision/TOPP
-  关键修复期间保持暂停；trainer 本身
-  未因此停止。一条既有
-  importer 失败继续排除且全程没有 signal。旧同步 K100 长时间没有形成可信终态，不进入成绩；新的
+  已闭合。2026-07-17 双 Pod 各一次 no-clobber `+1000` cycle 已为全部 19 条到档臂补齐行为 receipt；
+  3 条基础设施失败仍排除，`ssh_signal_count=0`。这次仍没有合法淘汰项：不是因为没执行比较，而是旧
+  ledger 的 ready tilt/base speed/foot contact/foot slip 四项分母全部为零，预注册组合器禁止填补缺失值，
+  因而没有发布 portfolio-stop receipt。旧臂多数已经自然终档；这一批不能再宣称排出胜者，也不能靠
+  事后删指标制造胜者。后续新池必须先在 full-scene probe 证明 ready 分母非零，才允许占用长训槽。
+  自动 rolling 任务在本次 task-revision/TOPP 关键修复期间保持暂停。旧同步 K100 长时间没有形成可信
+  终态，不进入成绩；新的
   checkpoint-bound 持久监督器仍在 source 红队，只有通过后才会唯一启动。随后按 receipt 淘汰并把胜者
   送 vendor MuJoCo。详见
   [task-revision 卷宗](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md)。
+
+- **300 Hz 动捕不会再触发 300 Hz planner solve：** 正式 arena、节点默认和 schema-4 overlay 现都显式
+  绑定 `solve_period_s=0.02`。每个通过 frame/timestamp 门的 300 Hz 样本仍进入 estimator，但昂贵的
+  trajectory/target solve 与发布最多 50 Hz；跳过 solve 的 callback 也会先执行 base lease 过期撤销，且
+  不刷新缓存命令或 task revision。300-sample burst 回归得到 300 次 ingest、50 次 solve、同球
+  `task_id=1/revision=1..50`；全 planner suite 为 `218 passed, 2 skipped`。单次 solve 目前仍在 ROS
+  callback 内同步执行，真实 300 Hz ROS/Jazzy 压测和异步 latest-only worker 仍是部署 Gate，不能把源码
+  回归写成场馆已通过。
 
 - **动作加速当前边界：** 完整旧 v4rg 只重定时得到 `0.98/0.78 s`，因此新增的 host-only
   ready-to-strike 生成器从动作第0帧零速准备态直接接入保真的触球前0.1秒。四元数符号跳变与

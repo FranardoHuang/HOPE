@@ -35,8 +35,10 @@ Runtime parameters that must travel with a formal 179 planner/policy pairing:
 - `max_predict_time`: forward horizon. The arena default is `2.0 s`; the simulator profile binds
   `2.6 s`. An early prediction does not authorize an early swing: the runner waits for the selected
   clip's metadata windup window and rechecks the tuple each policy tick.
-- `solve_period_s`: expensive solve cadence. `0.0` preserves every-measurement solving; the Gate3
-  simulator profile binds `0.033 s` while all 300 Hz samples still enter the estimator.
+- `solve_period_s`: expensive solve cadence. The production arena and task-revision profiles bind
+  `0.02 s` (50 Hz), while all qualified 300 Hz samples still enter the estimator. `0.0` is now an
+  explicit diagnostic override only; do not use it with the live 300 Hz feed. The Gate3 simulator
+  profile independently binds `0.033 s`.
 - `base_pose_max_age_s`: formal base receive-age limit, `0.2 s` in both profiles. Expiry or invalid
   recovery revokes both flat rows; READY stdout remains diagnostic-only.
 - `swing_side_split_y` / `swing_side_hysteresis_y`: choose side in corrected base-yaw coordinates.
@@ -72,6 +74,13 @@ The runner must be started with its task-revision option and must load ONNX meta
 `planner_task_revision` document exactly matches the producer/training profile. A schema-4 producer
 with an old frozen-target model, or a revision-trained model with schema 3, fails closed. These are
 source gates only until the clean Linux Release/full-scene/vendor tests pass.
+
+The mocap subscription uses best-effort keep-last depth 1. A qualified 300 Hz sample is always
+ingested, but only the current sample admitted by the 50 Hz source-time cadence runs Stage 1–3 and
+publishes a new revision. A skipped sample never republishes the cached task, and base-source lease
+expiry is checked before the cadence return. One admitted solve is still synchronous in the ROS
+callback; a venue acceptance run must therefore inject slow solves and show that base localization
+stays fresh before this is called a complete asynchronous runtime.
 
 VRPN still defaults to host receipt time. Capture-stamp experiments must explicitly set
 `source_timestamp_mode=vrpn_packet`, prove the VRPN and ROS clocks are synchronized within
@@ -109,5 +118,5 @@ PYTHONPATH=hope_ws/src/hope_planner python3 -m pytest -q \
   tests/test_planner_side_contract_source.py
 ```
 
-Current feature integration result: `215 passed, 2 optional skipped`. This is not yet an accepted
+Current feature integration result: `218 passed, 2 optional skipped`. This is not yet an accepted
 latest-main/runtime result; ROS/Jazzy Release, first tick and vendor behavior remain separate gates.

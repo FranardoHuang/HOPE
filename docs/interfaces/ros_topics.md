@@ -18,6 +18,12 @@ Rates: the rig streams at 300 Hz during play (team contract, 2026-07); the bridg
 `update_freq` is aligned to 300 Hz. The vendored client's own `client.yaml` default is 100 Hz —
 always launch through `avatar_pro_hope_bridge.launch.py`.
 
+Planner cadence is deliberately different from sensor cadence: every qualified `/poses` sample is
+ingested into the estimator, while the production arena and schema-4 profiles admit expensive solve
+and command publication at 50 Hz (`solve_period_s=0.02`). Cadence-rejected samples do not refresh an
+old command or increment `task_revision`. This source contract has a 300-sample burst regression;
+ROS/Jazzy load and slow-solve latency remain a runtime Gate.
+
 Timestamp boundary (source implemented 2026-07-16, runtime still `Partial`): the vendored VRPN
 tracker now has an explicit `source_timestamp_mode`:
 

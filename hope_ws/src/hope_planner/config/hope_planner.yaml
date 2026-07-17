@@ -6,12 +6,12 @@ hope_planner:
     # "ball"). Confirm against your live stream: `ros2 topic echo /poses --once`
     # and count the ball's index. TODO: confirm against your live /poses.
     ball_pose_index: 0
-    # Planner runtime cadence/horizon. The arena defaults preserve legacy
-    # every-frame solves and the 2.0 s horizon; Gate3's sim overlay widens the
-    # horizon and decimates solves so 300 Hz ball callbacks cannot starve the
-    # independent base-pose callback.
+    # Planner runtime cadence/horizon. Every qualified 300 Hz arena sample is
+    # still ingested by the estimator, while expensive solve/publication is
+    # admitted at the 50 Hz policy cadence so base localization is not starved.
+    # Gate3's sim overlay may bind a slower, separately reviewed cadence.
     max_predict_time: 2.0
-    solve_period_s: 0.0
+    solve_period_s: 0.02
     # Virtual hit plane X (m); ~0.0 = HOPE origin end of table. MUST be matched to the
     # ROBOT PLACEMENT: the current deploy_parity policy (model_11400/7500_hopex lineage)
     # strikes at base-relative x in [0.56, 0.78] (box center 0.67), so

@@ -13,6 +13,13 @@
 
 ## 2026-07-17
 
+- Formal arena/task-revision planner cadence is now 50 Hz while every qualified 300 Hz mocap sample
+  still feeds the estimator; a 300-sample burst proves 300 ingests, 50 current-sample solves and one
+  task with revisions `1..50` (`218 passed, 2 skipped`). The double-Pod `+1000` cycle also completed:
+  all 19 ready checkpoints have receipts, but the old pool cannot legally eliminate because four
+  ready/balance denominators are zero. See [planner operation](operations/run_planner.md) and the
+  [task-revision experiment](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md).
+
 - main `8b371eb7` 的 ready×join Stage-2 v6 已完成唯一远端 dry-run/execute：dry-run 全绿，execute natural
   terminal，summary=`b5209bc7…`。四格都保持 generator=`0`，TOPP 均 rc=`1`、没有 timing；冻结的
   `75 files / 74 mesh` closure 与退出后无残留均通过。只读 forensics 证明四份日志同 SHA

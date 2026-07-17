@@ -86,9 +86,11 @@ class HOPEPlannerNode(Node):
         # arrivals need margin above the historical 2.0 s boundary because the
         # earliest fit can briefly predict a later crossing.
         self.declare_parameter("max_predict_time", 2.0)
-        # 0.0 preserves every-frame solves. Gate3 sets 0.033 s so a 300 Hz ball
-        # stream cannot starve the independent base-pose callback.
-        self.declare_parameter("solve_period_s", 0.0)
+        # Ingest every mocap sample, but solve/publish at the 50 Hz policy cadence.
+        # ``0.0`` remains an explicit diagnostic override; it is no longer the
+        # production default because a 300 Hz venue stream would otherwise run
+        # Stage 1-3 in every subscription callback and starve base localization.
+        self.declare_parameter("solve_period_s", 0.02)
         # PER-SIDE aim/flight (2026-07-08, from the Gate-3 rally vel-gate finding): the two
         # trained clips return in OPPOSITE cross-court directions (fh vy [+0.96,+1.96], bh vy
         # [-1.21,-0.21] world), so NO single target_land_y makes both sides' demanded racket
@@ -1207,7 +1209,10 @@ class HOPEPlannerNode(Node):
         # Keep every 300 Hz measurement in both estimators, but only solve and
         # publish on admitted cadence ticks. A skipped callback deliberately
         # does not republish the cached command, so it cannot refresh stale
-        # data at the C++ subscriber.
+        # data at the C++ subscriber. Expire the independent base lease before
+        # cadence admission: a skipped ball solve must never postpone a safety
+        # revoke until the 10 Hz diagnostics timer.
+        self._expire_formal_base_if_needed(time.monotonic())
         try:
             solve_now = self._solve_cadence.admit(t)
         except ValueError as exc:
@@ -1226,10 +1231,6 @@ class HOPEPlannerNode(Node):
             if self._kf is not None:
                 self._kf.push(t, p_ball)
             return
-
-        # Detect expiry before cadence admission so a throttled ball solve can
-        # never delay the control-plane revoke.
-        self._expire_formal_base_if_needed(time.monotonic())
 
         # adaptive hit plane: track the live robot (see robot_pose_topic above). Mutating
         # config.x_hit is safe — the predictor reads it per predict() call. Disabled by

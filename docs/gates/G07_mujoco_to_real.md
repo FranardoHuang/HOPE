@@ -84,6 +84,10 @@ Not done:
   ROS/AimRT first tick, vendor MuJoCo behavior or hardware result. Closing the loop also requires
   validating ownership of the HOPE-world → robot-frame target transform (it needs the mocap base
   pose at the interface boundary even though the 175-D actor obs itself does not).
+- The arena source no longer solves at the full 300 Hz mocap rate: all qualified samples feed the
+  estimator and Stage 1–3 solve/publication is source-time-decimated to 50 Hz. The dependency-light
+  300-sample regression passes, but a single solve is still synchronous in the ROS callback. A
+  ROS/Jazzy stress run with injected slow solves and base-freshness evidence remains required.
 - Acceptance evidence for the successful runs (dates, checkpoint SHAs, MDU capture paths, observed
   behavior vs MuJoCo) is not yet recorded in this gate.
 - No quality baseline on hardware (hit-rate style metrics need the mocap/ball loop).

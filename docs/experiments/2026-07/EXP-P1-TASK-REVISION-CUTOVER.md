@@ -221,6 +221,15 @@ attestation cycle, followed by portfolio analysis; it is no longer scientificall
 that the pool is waiting for checkpoints, but it is still too early to stop a row before those
 behavior and portfolio receipts exist.
 
+The following no-clobber `+1000` attestation was then executed exactly once per Pod. It published
+behavior receipts for all 19 checkpoint-ready cells, kept the same three infrastructure terminals
+excluded, and sent zero signals. At attestation time Pod2's eleven valid cells had all exited
+naturally; on Pod1 only `p1_strong_foot_ready` remained live. Neither parent produced an elimination
+receipt. The blocking reason is now evidence, not scheduling: all four ready/balance derived metrics
+were `null` because their eligible denominators were zero. The preregistered Pareto consumer correctly
+refused to impute them or silently drop those axes. This pool therefore cannot yield a formal winner;
+future long runs must prove nonzero ready denominators in the full-scene probe before launch.
+
 ## Acceptance sequence
 
 1. Launch the 22 activated delay-zero cells in cross-GPU rounds; keep the two transport cells
