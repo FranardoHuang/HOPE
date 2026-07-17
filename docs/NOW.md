@@ -57,10 +57,11 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   均未创建；receipt `f53a6813…1728` 已将 v1 永久冻结且不授权 retry。bank/report 随后按 `0444`、exact
   size/SHA no-clobber 恢复；资产恢复版 v2 绑定 harness `be17289c…cc59`、activation
   `2b91248b…0626`、v1 失败墓碑与 fresh namespace，专项 `41 passed, 1 skipped`。skip 仍是本地主机的
-  delegated cgroup-v2 实探针，v2 Pod launch 和行为分尚未运行，所以仍为 `NO_LAUNCH`/Partial。13:39Z
-  最新只读快照为 Pod2 `0 trainer / 3 GPU 空闲`；13:38Z Pod1 有 Yikang 与 Codex 各一条 trainer（都在
-  GPU0）及 GPU2 一条 BankExam，GPU1 基本空闲。自动任务仍按本次修复窗口暂停，不能把空卡误写成训练
-  正在跑。通过运行门后才允许 v2 唯一启动，随后按 receipt 淘汰并把胜者送 vendor MuJoCo。详见
+  delegated cgroup-v2 实探针。v2 已在 Pod2/GPU0 唯一启动并进入 `running_exact`：supervisor
+  `502505`、evaluator `502542`，guardian/ACK/heartbeat 均精确；15:01Z 仍在运行且尚无行为终档，不能提前
+  报 0.5 秒成绩。Pod2 其余两卡可用于通过门的新训练；13:38Z Pod1 有 Yikang 与 Codex 各一条 trainer
+  （都在 GPU0）及 GPU2 一条 BankExam，GPU1 基本空闲。自动任务仍按本次修复窗口暂停；K100 只允许
+  后续只读 inspect，不得重发。终档随后仍需 vendor MuJoCo 同题。详见
   [task-revision 卷宗](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md)。
 
 - **300 Hz 动捕不会再触发 300 Hz planner solve：** 正式 arena、节点默认和 schema-4 overlay 现都显式
