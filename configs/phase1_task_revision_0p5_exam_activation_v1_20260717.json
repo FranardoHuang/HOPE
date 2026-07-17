@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "activation_id": "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_v1",
+  "created_utc": "2026-07-17T04:00:00Z",
+  "selection": {
+    "job_id": "taskrev_p2_equal_reward",
+    "milestone": 5700,
+    "pod": "pod2",
+    "output_dir": "/workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/timing_exam_0p5/model_5700",
+    "state_dir": "/workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/timing_exam_0p5_supervisor_v1/model_5700",
+    "milestone_receipt": "/workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/milestones/model_5700.json",
+    "behavior_receipt": "/workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/behavior_milestones/model_5700.json",
+    "rationale": "Pre-outcome neutral quality-basin representative at parent+1000; fixed equal reward is not declared a winner."
+  },
+  "queue": {
+    "path": "configs/phase1_task_revision_supercombo_20260716.yaml",
+    "sha256": "e050a056e40f9988989826ed8de03f8a7bfd8ada9c4420cd005c66eadb5b5497"
+  },
+  "harness": {
+    "path": "scripts/run_phase1_task_revision_0p5_exam.py",
+    "sha256": "c2ce27845cb26a1ff2474a547556364f72235bcbd830ae5a7768d85fe8141b63"
+  },
+  "resource_gate": {
+    "allowed_eval_gpus": [0, 1, 2],
+    "minimum_selected_gpu_free_mib": 6000,
+    "minimum_other_gpu_free_mib": 3000,
+    "headroom_rationale": "Sample all three Pod2 GPUs twice: the selected evaluator GPU needs 6000 MiB, while each other GPU keeps 3000 MiB because one Isaac evaluator has historically opened 690-1558 MiB contexts on non-selected cards.",
+    "stable_samples": 2,
+    "sample_interval_seconds": 1.0
+  },
+  "catastrophic_cleanup": {
+    "requires_delegated_cgroup_v2": true,
+    "guardian_required": true,
+    "cgroup_kill_required": true,
+    "trusted_single_operator_filesystem": true,
+    "unsupported_result": "NO_LAUNCH"
+  },
+  "supervision": {
+    "hello_timeout_seconds": 30.0,
+    "commit_timeout_seconds": 60.0,
+    "ack_observation_seconds": 15.0,
+    "ssh_timeout_seconds": 60.0,
+    "heartbeat_seconds": 30.0,
+    "evaluator_total_timeout_seconds": 3600.0,
+    "completed_artifact_teardown_grace_seconds": 180.0,
+    "exact_term_grace_seconds": 30.0,
+    "converter_timeout_seconds": 300.0,
+    "guardian_ready_timeout_seconds": 10.0,
+    "guardian_finish_timeout_seconds": 60.0
+  },
+  "authority": {
+    "launch_authorized": true,
+    "automatic_retry": false,
+    "formal_evidence_eligible": false,
+    "evaluation_contract_exact": false,
+    "trainer_signal": false,
+    "robot_command": false,
+    "broad_signal": false
+  }
+}
