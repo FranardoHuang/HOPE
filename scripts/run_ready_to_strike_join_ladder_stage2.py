@@ -40,14 +40,14 @@ import numpy as np
 SCHEMA_VERSION = 1
 CONFIRM_TOKEN = "RUN_READY_TO_STRIKE_STAGE2_ONCE"
 CHILD_TIMEOUT_S = 3600
-EXPECTED_ACTIVATION_ID = "ready_to_strike_join_ladder_stage2_v7_20260717"
+EXPECTED_ACTIVATION_ID = "ready_to_strike_join_ladder_stage2_v8_20260717"
 EXPECTED_EXPERIMENT_ID = "ready_to_strike_join_ladder_20260717"
 EXPECTED_QUEUE_SHA256 = "cfa112f799dab9af33914fdfb5bfff90d21b4692e38b16a4627393936a527b8b"
 EXPECTED_PREREG_COMMIT = "8d74025e88fee832fae0ac2f672ec0eb9b2d3d5a"
 EXPECTED_EVIDENCE_STATUS = "historical_stage1_attested_screening_only"
 EXPECTED_STAGE2_NAMESPACE = (
     "/workspace/codexschema/ready_to_strike_0p5_20260717/"
-    "join_ladder_stage2_d12_v7_mjeval_runtime"
+    "join_ladder_stage2_d12_v8_canonical_interpreter"
 )
 EXPECTED_PRIOR_ATTEMPT = {
     "namespace": (
@@ -77,11 +77,12 @@ EXPECTED_MJCF_CLOSURE_MANIFEST_SHA256 = (
 EXPECTED_TOPP_RUNTIME = {
     "interpreter": {
         "path": "/workspace/hope_mjeval_venv/bin/python",
-        "symlink_target": "/usr/bin/python3.12",
-        "target_sha256": (
+        "canonical_realpath": "/usr/bin/python3.12",
+        "binary_sha256": (
             "1d3cf64f97cadc79fdc6fe2496a21b7b456cb94211978cfef5a65f616af74fd5"
         ),
         "python_version": "3.12.3",
+        "venv_prefix": "/workspace/hope_mjeval_venv",
     },
     "packages": {
         "numpy": {
@@ -825,41 +826,53 @@ def _collect_dynamic_dependency_closure(
 def _inspect_topp_runtime(
     contract: Mapping[str, Any],
 ) -> tuple[dict[str, Any], dict[str, Snapshot]]:
-    """Validate the exact interpreter and package files used by TOPP."""
+    """Validate the exact interpreter and package files used by TOPP.
+
+    The venv entry-point symlink text is deliberately evidence, not identity:
+    relative and absolute links can name the same final interpreter.  Identity
+    is the canonical final path plus its bytes, Python version, venv prefix,
+    distribution RECORD closures, and native ELF closure.  The outer symlink
+    and final target are nevertheless snapshotted on both sides of the whole
+    inspection so a concurrent retarget or binary replacement fails closed.
+    """
     _require(contract == EXPECTED_TOPP_RUNTIME, "TOPP runtime contract changed")
     interpreter_contract = _exact_keys(contract["interpreter"], {
-        "path", "symlink_target", "target_sha256", "python_version",
+        "path", "canonical_realpath", "binary_sha256", "python_version",
+        "venv_prefix",
     }, "TOPP runtime interpreter")
     interpreter = _absolute(interpreter_contract["path"])
     _ensure_no_symlink_components(interpreter.parent, "TOPP interpreter parent")
+
+    def identity(info: os.stat_result) -> tuple[int, int, int, int, int]:
+        return (info.st_dev, info.st_ino, info.st_size,
+                info.st_mtime_ns, info.st_ctime_ns)
+
+    expected_realpath = _absolute(interpreter_contract["canonical_realpath"])
+    _require(Path(interpreter_contract["canonical_realpath"]).is_absolute()
+             and _absolute(os.path.realpath(expected_realpath)) == expected_realpath,
+             "TOPP interpreter canonical realpath contract is not canonical")
     try:
         link_info_before = interpreter.lstat()
-        link_target = os.readlink(interpreter)
+        observed_link_target = os.readlink(interpreter)
+        canonical_before = _absolute(os.path.realpath(interpreter))
+        link_info_before_confirm = interpreter.lstat()
+        observed_link_target_confirm = os.readlink(interpreter)
     except (FileNotFoundError, OSError) as exc:
         raise Stage2Error(f"cannot inspect TOPP interpreter symlink: {exc}") from exc
     _require(stat.S_ISLNK(link_info_before.st_mode),
              "TOPP interpreter must be a symlink")
-    _require(link_target == interpreter_contract["symlink_target"],
-             "TOPP interpreter symlink target changed")
-    target = _absolute(link_target)
-    target_snapshot = _read_snapshot(target, "TOPP interpreter target")
-    _require(target_snapshot.sha256 == interpreter_contract["target_sha256"],
-             "TOPP interpreter target SHA changed")
+    _require(identity(link_info_before) == identity(link_info_before_confirm)
+             and observed_link_target == observed_link_target_confirm,
+             "TOPP interpreter symlink changed while taking the initial snapshot")
+    _require(canonical_before == expected_realpath,
+             "TOPP interpreter canonical realpath changed")
     try:
-        link_info_after = interpreter.lstat()
+        target_info_before = expected_realpath.lstat()
     except OSError as exc:
-        raise Stage2Error(f"cannot re-inspect TOPP interpreter symlink: {exc}") from exc
-    before_identity = (
-        link_info_before.st_dev, link_info_before.st_ino, link_info_before.st_size,
-        link_info_before.st_mtime_ns, link_info_before.st_ctime_ns,
-    )
-    after_identity = (
-        link_info_after.st_dev, link_info_after.st_ino, link_info_after.st_size,
-        link_info_after.st_mtime_ns, link_info_after.st_ctime_ns,
-    )
-    _require(before_identity == after_identity and os.readlink(interpreter) == link_target,
-             "TOPP interpreter symlink changed while inspecting")
-
+        raise Stage2Error(f"cannot inspect TOPP interpreter target: {exc}") from exc
+    target_snapshot = _read_snapshot(expected_realpath, "TOPP interpreter target")
+    _require(target_snapshot.sha256 == interpreter_contract["binary_sha256"],
+             "TOPP interpreter binary SHA changed")
     command = [str(interpreter), "-I", "-B", "-c", _TOPP_RUNTIME_PROBE]
     try:
         completed = _run_runtime_command(
@@ -876,7 +889,10 @@ def _inspect_topp_runtime(
              "TOPP Python version changed")
     _require(_absolute(probe["executable"]) == interpreter,
              "TOPP probe ran under the wrong interpreter")
-    venv_root = interpreter.parent.parent
+    venv_root = _absolute(interpreter_contract["venv_prefix"])
+    _require(Path(interpreter_contract["venv_prefix"]).is_absolute()
+             and venv_root == interpreter.parent.parent,
+             "TOPP interpreter venv prefix contract changed")
     _require(_absolute(probe["prefix"]) == venv_root,
              "TOPP interpreter does not use the expected venv prefix")
     site_packages = venv_root / "lib" / "python3.12" / "site-packages"
@@ -945,12 +961,45 @@ def _inspect_topp_runtime(
                  == package_contract["record_unhashed_row_count"],
                  f"TOPP runtime {package_name} RECORD unhashed row count changed")
         package_receipts[package_name]["record_closure"] = record_receipt
+
+    try:
+        link_info_after = interpreter.lstat()
+        observed_link_target_after = os.readlink(interpreter)
+        canonical_after = _absolute(os.path.realpath(interpreter))
+        target_info_after = expected_realpath.lstat()
+        target_snapshot_after = _read_snapshot(
+            expected_realpath, "TOPP interpreter target after runtime inspection")
+    except OSError as exc:
+        raise Stage2Error(f"cannot re-inspect TOPP interpreter runtime: {exc}") from exc
+    _require(identity(link_info_before) == identity(link_info_after)
+             and observed_link_target == observed_link_target_after,
+             "TOPP interpreter symlink changed while inspecting")
+    _require(canonical_after == canonical_before == expected_realpath,
+             "TOPP interpreter canonical realpath changed while inspecting")
+    _require(identity(target_info_before) == identity(target_info_after)
+             and target_snapshot_after.payload == target_snapshot.payload
+             and target_snapshot_after.mode == target_snapshot.mode,
+             "TOPP interpreter binary changed while inspecting")
     receipt = {
         "interpreter": {
-            "path": str(interpreter), "symlink_target": link_target,
-            "target_sha256": target_snapshot.sha256,
+            "path": str(interpreter),
+            "observed_symlink_target": observed_link_target,
+            "canonical_realpath": str(expected_realpath),
+            "binary_sha256": target_snapshot.sha256,
             "python_version": probe["python_version"],
             "venv_prefix": str(venv_root),
+            "symlink_identity": {
+                "device": link_info_before.st_dev, "inode": link_info_before.st_ino,
+                "size": link_info_before.st_size,
+                "mtime_ns": link_info_before.st_mtime_ns,
+                "ctime_ns": link_info_before.st_ctime_ns,
+            },
+            "binary_identity": {
+                "device": target_info_before.st_dev, "inode": target_info_before.st_ino,
+                "size": target_info_before.st_size,
+                "mtime_ns": target_info_before.st_mtime_ns,
+                "ctime_ns": target_info_before.st_ctime_ns,
+            },
         },
         "packages": package_receipts,
         "probe_argv": command,
@@ -1020,7 +1069,7 @@ def _observe_mjcf_runtime_preflight(*, runtime_snapshot_root: Path,
              "MJCF runtime loaded ELF paths are duplicate or noncanonical")
     loaded_elfs: dict[str, Snapshot] = {}
     venv_root = _absolute(contract["interpreter"]["path"]).parent.parent
-    interpreter_target = _absolute(contract["interpreter"]["symlink_target"])
+    interpreter_target = _absolute(contract["interpreter"]["canonical_realpath"])
     for raw_path in loaded_paths:
         _require(not raw_path.endswith(" (deleted)")
                  and not raw_path.endswith(" (unreadable)")
@@ -2065,7 +2114,7 @@ def plan_stage2(*, activation_path: Path | str, queue_path: Path | str,
         contact = queue["assets"][cell["action"]]["contact_frame"]
         plans.append({**cell, "join_frame": contact - 12, "blend_intervals": 10,
                       "output_contact_frame": 25})
-    with tempfile.TemporaryDirectory(prefix="ready-stage2-v7-mjcf-") as temporary:
+    with tempfile.TemporaryDirectory(prefix="ready-stage2-v8-mjcf-") as temporary:
         runtime_snapshot_root = Path(os.path.realpath(temporary)) / "runtime"
         _materialize_runtime_snapshot(
             snapshots=context["snapshots"], destination=runtime_snapshot_root)

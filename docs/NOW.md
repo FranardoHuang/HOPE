@@ -96,12 +96,16 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   closure** 失败，不是四个动作共同失败。项目实际 TOPP import closure 只有 `numpy+mujoco`；此前把
   `scipy` 当硬门属于过度检查，现已废除。去掉 `PYTHONPATH` 的 targeted probe 又证明
   `/workspace/hope_mjeval_venv/bin/python` 可加载 `numpy 2.5`、`mujoco 3.10` 和 exact MJCF
-  (`nq=38,nv=37,nbody=33,ngeom=79,nmesh=74`)。v7 只增加该解释器/包 closure 与 preflight，动作、join、
+  (`nq=38,nv=37,nbody=33,ngeom=79,nmesh=74`)。v7 增加该解释器/包 closure 与 preflight，动作、join、
   budget 和 acceptance 不变。后续已把两份 Python package 的完整 RECORD、实际加载 ELF、每条
   `DT_NEEDED` 解析边、canonical `ldd/readelf`、MJCF pre/post snapshot 和四个 child 的 terminal 状态全部
   绑定；TOPP rc 非零时不再能假报 `mjcf_closure_exact=true`。本地 Stage-2 专项 `112 passed`，独立红队
-  P0/P1 均为 0，runner/activation SHA 为 `e3d2e1f9…05f0` / `87598e0a…99c2`。当前 source gate 已转绿；
-  唯一远端 v7 尝试在 dry-run 的 source/symlink 对账中 fail closed，execute=`0`。因而仍没有 TOPP timing、
+  P0/P1 均为 0；但唯一远端 v7 dry-run 把 venv symlink 的 `readlink()` 字面 target 误当身份，在进一步
+  核验 canonical binary/包闭包前就因文本不同 fail closed，结果 root/child 均未创建、execute=`0`；
+  该次尝试无法判断实际 binary 是否漂移。v8
+  改以 canonical realpath、binary SHA、Python version、venv prefix 与 RECORD/ELF closure 定义身份，
+  科学四格不变；runner/activation=`40e89c6a…ae09/e878de11…0447`，专项 `91 passed`，远端尚未执行。
+  因而仍没有 TOPP timing、
   TOPP≤0.5、L0/L1、桌网、动力学或行为通过，不能写成0.5秒动作已完成。见
   [短路径实验](experiments/2026-07/EXP-MOTION-READY-TO-STRIKE-0P5.md)。
 

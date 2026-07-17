@@ -35,8 +35,12 @@
   probe 已证明 `/workspace/hope_mjeval_venv/bin/python` 在清空 `PYTHONPATH` 后可加载 `numpy 2.5`、
   `mujoco 3.10` 和 exact MJCF（`nq=38,nv=37,nbody=33,ngeom=79,nmesh=74`）。v7 只绑定该解释器、包
   closure 和 preflight，科学配方不变。后续把完整 RECORD、实际 native ELF/`DT_NEEDED` 解析、canonical
-  `ldd/readelf` 与 MJCF pre/post snapshot 补齐；本地 Stage-2 专项 `112 passed`、独立红队 P0/P1 均为 0，
-  source gate 转绿。唯一远端 v7 仍未消费，所以 timing/TOPP≤0.5/L0/L1/行为均未知，G08 保持 Partial。
+  `ldd/readelf` 与 MJCF pre/post snapshot 补齐。唯一远端 v7 dry-run 随后在 root/child 前 fail closed：
+  `readlink()` 字面 target 被过度当作解释器身份，在 binary/包闭包核验前便因文本不同拒绝；实际 binary
+  是否漂移在该次尝试中仍未知，execute=`0`。v8 改用 canonical realpath+binary SHA+Python version+
+  venv prefix+RECORD/ELF closure，科学
+  四格不变；runner/activation=`40e89c6a…ae09/e878de11…0447`，专项 `91 passed`，远端尚未执行。因此
+  timing/TOPP≤0.5/L0/L1/行为仍未知，G08 保持 Partial。
 
 - ready×join Stage-2 v2 唯一 execute 已保全 summary `6910db28…f1476`：四份 candidate/contract 与 v1
   逐字节一致，四个 TOPP 均 rc1、无 timing、无重试；这是全部正式结论，`run.log` 只作诊断，不能据其

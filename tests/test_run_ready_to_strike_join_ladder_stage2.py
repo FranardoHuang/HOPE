@@ -292,10 +292,15 @@ def _fixture(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> dict[str, Path]
     fake_runtime_receipt = {
         "interpreter": {
             "path": runner.EXPECTED_TOPP_RUNTIME["interpreter"]["path"],
-            "symlink_target": runner.EXPECTED_TOPP_RUNTIME["interpreter"]["symlink_target"],
-            "target_sha256": runner.EXPECTED_TOPP_RUNTIME["interpreter"]["target_sha256"],
+            "observed_symlink_target": "python3.12",
+            "canonical_realpath": runner.EXPECTED_TOPP_RUNTIME["interpreter"]["canonical_realpath"],
+            "binary_sha256": runner.EXPECTED_TOPP_RUNTIME["interpreter"]["binary_sha256"],
             "python_version": runner.EXPECTED_TOPP_RUNTIME["interpreter"]["python_version"],
-            "venv_prefix": "/workspace/hope_mjeval_venv",
+            "venv_prefix": runner.EXPECTED_TOPP_RUNTIME["interpreter"]["venv_prefix"],
+            "symlink_identity": {"device": 1, "inode": 2, "size": 10,
+                                 "mtime_ns": 3, "ctime_ns": 4},
+            "binary_identity": {"device": 1, "inode": 3, "size": 20,
+                                "mtime_ns": 5, "ctime_ns": 6},
         },
         "packages": {}, "probe_argv": ["fixture-runtime-probe"],
         "probe_rc": 0, "probe_stdout_sha256": "e" * 64,
@@ -527,6 +532,11 @@ def test_v6_activation_bytes_remain_immutable() -> None:
     assert _sha(payload) == "e32135c05e676cfda7902cc0acc3cb30bbc8239cb126f222d96d454c3a3ce3da"
 
 
+def test_v7_activation_bytes_remain_immutable() -> None:
+    payload = (REPO / "configs/ready_to_strike_join_ladder_stage2_activation_v7_20260717.json").read_bytes()
+    assert _sha(payload) == "87598e0a39fe06ed7827c4fcd1809b05481021ca80defc6b24ff7743d8cd99c2"
+
+
 def test_v7_excludes_diagnostic_logs_from_scientific_input_contract() -> None:
     source = SCRIPT.read_bytes().lower()
     assert b"no such file or directory" not in source
@@ -625,8 +635,9 @@ def _synthetic_topp_runtime(
     }
     contract: dict[str, object] = {
         "interpreter": {
-            "path": str(interpreter), "symlink_target": str(target),
-            "target_sha256": _sha(target.read_bytes()), "python_version": "3.12.3",
+            "path": str(interpreter), "canonical_realpath": str(target),
+            "binary_sha256": _sha(target.read_bytes()), "python_version": "3.12.3",
+            "venv_prefix": str(venv),
         },
         "packages": packages,
         "dynamic_dependencies": dynamic_contract,
@@ -676,16 +687,51 @@ def test_v7_runtime_rejects_real_file_tamper(
         REAL_INSPECT_TOPP_RUNTIME(contract)
 
 
-def test_v7_runtime_rejects_wrong_interpreter_symlink(
+def test_v8_runtime_accepts_relative_or_absolute_symlink_to_same_binary(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     contract, _files, _probe = _synthetic_topp_runtime(tmp_path, monkeypatch)
     interpreter = Path(contract["interpreter"]["path"])
+    target = Path(contract["interpreter"]["canonical_realpath"])
+    REAL_INSPECT_TOPP_RUNTIME(contract)
     interpreter.unlink()
+    os.symlink(os.path.relpath(target, interpreter.parent), interpreter)
+    receipt, _snapshots = REAL_INSPECT_TOPP_RUNTIME(contract)
+    assert receipt["interpreter"]["canonical_realpath"] == str(target)
+
+
+def test_v8_runtime_rejects_different_binary_even_with_identical_bytes(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contract, _files, _probe = _synthetic_topp_runtime(tmp_path, monkeypatch)
+    interpreter = Path(contract["interpreter"]["path"])
+    target = Path(contract["interpreter"]["canonical_realpath"])
     wrong = tmp_path / "wrong-python"
-    _write(wrong, b"\x7fELF-python-3.12.3\n")
+    _write(wrong, target.read_bytes())
+    interpreter.unlink()
     os.symlink(str(wrong), interpreter)
-    with pytest.raises(runner.Stage2Error, match="symlink target changed"):
+    with pytest.raises(runner.Stage2Error, match="canonical realpath changed"):
+        REAL_INSPECT_TOPP_RUNTIME(contract)
+
+
+@pytest.mark.parametrize("race", ["symlink", "binary"])
+def test_v8_runtime_rejects_interpreter_inspection_race(
+    race: str, tmp_path: Path, monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    contract, _files, probe = _synthetic_topp_runtime(tmp_path, monkeypatch)
+    interpreter = Path(contract["interpreter"]["path"])
+    target = Path(contract["interpreter"]["canonical_realpath"])
+
+    def racing_probe(command, *, cwd, env):
+        if race == "symlink":
+            interpreter.unlink()
+            os.symlink(os.path.relpath(target, interpreter.parent), interpreter)
+        else:
+            target.write_bytes(target.read_bytes() + b"race")
+        return subprocess.CompletedProcess(command, 0, json.dumps(probe), "")
+
+    monkeypatch.setattr(runner, "_run_runtime_command", racing_probe)
+    with pytest.raises(runner.Stage2Error, match="changed while inspecting"):
         REAL_INSPECT_TOPP_RUNTIME(contract)
 
 
@@ -2012,7 +2058,7 @@ def test_unexpected_post_namespace_failure_gets_terminal_summary(
 
 def test_current_repo_activation_exactly_binds_the_tracked_runner() -> None:
     activation = json.loads(
-        (REPO / "configs/ready_to_strike_join_ladder_stage2_activation_v7_20260717.json").read_text()
+        (REPO / "configs/ready_to_strike_join_ladder_stage2_activation_v8_20260717.json").read_text()
     )
     queue = runner._validate_queue(json.loads(
         (REPO / "configs/ready_to_strike_join_ladder_20260717.yaml").read_text()

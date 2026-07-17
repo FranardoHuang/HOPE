@@ -102,7 +102,7 @@ schema-2 source/candidate 的 `joint_vel` 必须按 generator 的 float32 输入
 它只把旧结果升级为 screening evidence；因为历史证书没有完整 argv、transitive source 和 MJCF closure，
 `physics_replay_exact/source_closure_exact/mjcf_closure_exact` 仍必须是 `false`，不能冒充动力学重放或部署通过。
 
-## Stage-2 四个中点的一次性执行（当前 v7，尚未远端执行）
+## Stage-2 四个中点的一次性执行（当前 v8，尚未远端执行）
 
 Stage-1 receipt `7cf1c7c9…c377f` 已成功发布后，四个 `delta=12` 中点只能由 tracked runner 消费一次。
 activation 精确绑定 runner SHA、Stage-1 receipt SHA 和唯一结果目录；换目录重复执行会在创建任何 namespace
@@ -110,9 +110,9 @@ activation 精确绑定 runner SHA、Stage-1 receipt SHA 和唯一结果目录�
 
 ```bash
 python3 scripts/run_ready_to_strike_join_ladder_stage2.py \
-  --activation configs/ready_to_strike_join_ladder_stage2_activation_v7_20260717.json \
+  --activation configs/ready_to_strike_join_ladder_stage2_activation_v8_20260717.json \
   --queue configs/ready_to_strike_join_ladder_20260717.yaml \
-  --root /workspace/codexschema/ready_to_strike_0p5_20260717/join_ladder_stage2_d12_v7_mjeval_runtime
+  --root /workspace/codexschema/ready_to_strike_0p5_20260717/join_ladder_stage2_d12_v8_canonical_interpreter
 ```
 
 dry-run 必须报告四格且不创建结果目录。确认 receipt、runner、queue、旧 runtime 与两份动作资产 SHA 全部
@@ -120,14 +120,14 @@ dry-run 必须报告四格且不创建结果目录。确认 receipt、runner、q
 
 ```bash
 python3 scripts/run_ready_to_strike_join_ladder_stage2.py \
-  --activation configs/ready_to_strike_join_ladder_stage2_activation_v7_20260717.json \
+  --activation configs/ready_to_strike_join_ladder_stage2_activation_v8_20260717.json \
   --queue configs/ready_to_strike_join_ladder_20260717.yaml \
-  --root /workspace/codexschema/ready_to_strike_0p5_20260717/join_ladder_stage2_d12_v7_mjeval_runtime \
+  --root /workspace/codexschema/ready_to_strike_0p5_20260717/join_ladder_stage2_d12_v8_canonical_interpreter \
   --execute \
   --confirm RUN_READY_TO_STRIKE_STAGE2_ONCE
 ```
 
-v7 不再重跑 generator：它只从 v2 的 terminal summary 读取正式科学事实，并逐字节复验四份
+v8 不再重跑 generator：它只从 v2 的 terminal summary 读取正式科学事实，并逐字节复验四份
 candidate/contract 后复制进新 namespace。旧 V1 summary、generator 副本和 `run.log` 都不是本轮科学输入；
 日志只留作诊断，不能因为文本或手抄 SHA 漂移改变实验是否获准。v2 的正式结论只有“四份
 candidate/contract 已生成、四次 TOPP 返回 rc1、没有 timing”，不能据诊断日志宣称已定位 rc1 根因。
@@ -136,7 +136,9 @@ candidate/contract 已生成、四次 TOPP 返回 rc1、没有 timing”，不�
 重复引用和非 regular/symlink 文件；然后从冻结 commit 的 Git object 读取 `1 XML + 74 mesh`，核
 model-tree OID、每个 blob OID、SHA 和大小，以原相对目录 O_EXCL 快照。闭包固定为 `75 files / 14,127,373
 bytes / e0381752…b962de`，worktree fallback 不构成授权。TOPP/URDF/body-order 与两份预算动作也只读冻结。
-v7 还必须把解释器精确绑定为 `/workspace/hope_mjeval_venv/bin/python`，核它在去除外部 `PYTHONPATH`
+v8 还必须把解释器入口绑定为 `/workspace/hope_mjeval_venv/bin/python`，并以 canonical realpath、目标
+binary SHA、Python version 和 venv prefix 作为身份；`readlink()` 字面 target 只保留为前后不变的 TOCTOU
+证据，不再把语义等价的 symlink 拼写当失败。它还核解释器在去除外部 `PYTHONPATH`
 后可 import 实际所需的 `numpy+mujoco`，并在启动四个 child 前用 exact MJCF 做一次 parser preflight。
 项目的 TOPP 脚本并不 import `scipy`，因此不得再用 `scipy` 是否存在作为启动门。四个 TOPP 可并行，
 但每个 CPU child 的 reviewed timeout 为 3600 秒；任一格
@@ -166,11 +168,12 @@ execute natural terminal；summary=`b5209bc7…`，四格 generator=`0`、TOPP r
 `75 files/74 mesh` closure 与无残留均正确。只读 forensics 发现四份 log 同 SHA `f1d5088e…`，共同首错为
 `/usr/bin/python3` 缺 `mujoco`，故分类为 runtime dependency closure 而非动作失败。targeted probe 已在
 清空 `PYTHONPATH` 后用 `/workspace/hope_mjeval_venv/bin/python` 成功 import `numpy 2.5`、`mujoco 3.10`
-并加载 exact MJCF（`nq=38,nv=37,nbody=33,ngeom=79,nmesh=74`）。v7 只修解释器/包 closure 与 preflight，
-科学配方不变。后续 v7 已绑定两份 package 完整 RECORD、实际加载 ELF、每条 `DT_NEEDED` 解析边、
-canonical `ldd/readelf` 与 MJCF pre/post snapshot；TOPP 非零或 snapshot 漂移时 exact 标志必须为 false。
-本地 Stage-2 专项 `112 passed`，独立红队 P0/P1 均为 0，runner/activation SHA 为
-`e3d2e1f9…05f0` / `87598e0a…99c2`，因此上面的**唯一一次**远端 dry-run/execute 已获 source 授权。
+并加载 exact MJCF（`nq=38,nv=37,nbody=33,ngeom=79,nmesh=74`）。v7 绑定 package/ELF closure 后的唯一
+远端 dry-run 因 `readlink()` 字面 target 过绑定而在 root/child 前 fail closed，execute=`0`。v8 只改为
+canonical interpreter identity，继续绑定两份 package 完整 RECORD、实际加载 ELF、每条 `DT_NEEDED`
+解析边、canonical `ldd/readelf` 与 MJCF pre/post snapshot；科学四格和 acceptance 不变。TOPP 非零或
+snapshot 漂移时 exact 标志必须为 false。本地 Stage-2 专项 `91 passed`，runner/activation SHA 为
+`40e89c6a…ae09` / `e878de11…0447`，上面的**唯一一次**远端 dry-run/execute 已获 source 授权但尚未执行。
 这仍不是 behavior、动力学或 0.5 秒通过；若 dry-run 或 execute 失败，保全新 namespace 且不重放。
 
 ## 下一步不是直接训练

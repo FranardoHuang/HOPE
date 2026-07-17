@@ -458,8 +458,12 @@ V1 summary、generator 副本与全部日志前置，只复验 v2 四份 candida
 closure 失败、不是动作失败。项目实际 TOPP 依赖仅 `numpy+mujoco`，`scipy` 过度硬门已废除；隔离 probe
 证明 `/workspace/hope_mjeval_venv/bin/python` 可加载 `numpy 2.5`、`mujoco 3.10` 与 exact MJCF
 (`nq=38,nv=37,nbody=33,ngeom=79,nmesh=74`)。v7 绑定该解释器、完整 package/native dependency closure、
-canonical `ldd/readelf` 与 MJCF pre/post snapshot，科学配方不变；本地 Stage-2 专项 `112 passed`，独立红队
-P0/P1 均为 0，source gate 已转绿。唯一远端 v7 尚未消费。
+canonical `ldd/readelf` 与 MJCF pre/post snapshot，但唯一远端 dry-run 把 venv symlink 的 `readlink()`
+字面 target 误当身份，在 binary/包闭包核验前便因文本不同拒绝；实际 binary 是否漂移仍未知，
+execute=`0`。v8 以 canonical realpath、
+binary SHA、Python version、venv prefix 和 RECORD/ELF closure 定义解释器身份，字面 link 只作 TOCTOU
+证据；科学四格不变。runner/activation=`40e89c6a…ae09/e878de11…0447`，专项 `91 passed`，source gate
+已通过，远端尚未执行。
 TOPP `<=0.5 s`、L0、vendor L1、桌网、
 动力学和行为卷仍全部开放，
 所以 G08 不晋级。

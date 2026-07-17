@@ -79,7 +79,7 @@ run-up 上界是正手 `0.98 s`、反手 `0.78 s`。因此单纯把完整旧 cli
   RF `0.94→1.94 s`、RB `0.78→1.42 s`。反手 own-ready 将最近 join 从 `0.94` 改善到 `0.78 s`，但
   正手相反（RF `0.64` 优于 RB `0.70 s`），所以发生 ready×side crossover，尚不能宣布共同 ready。
   冻结规则因此选择四个 `d=12` 中点格；机器 activation 见
-  [`Stage-2 v7 activation`](../../../configs/ready_to_strike_join_ladder_stage2_activation_v7_20260717.json)。但原始
+  [`Stage-2 v8 activation`](../../../configs/ready_to_strike_join_ladder_stage2_activation_v8_20260717.json)。但原始
   Stage 1 summary 未绑定一次性 consumer 源码，且旧 parser 未全量重验 certificate provenance；因此这些
   数值曾先降级为 raw。独立 historical attestor 已全量重建 candidate/certificate/runtime binding 并发布
   no-clobber receipt；六格不重跑，四个中点仅由下述 tracked Stage-2 runner 消费。
@@ -148,9 +148,15 @@ run-up 上界是正手 `0.98 s`、反手 `0.78 s`。因此单纯把完整旧 cli
   每条 `DT_NEEDED` 解析边与 canonical `ldd/readelf`，并在四个 child 前后重跑 import/MJCF/dynamic
   closure。四份 candidate/contract、join、hold、预算、TOPP 算法和 acceptance 不变；任一 TOPP 非零、
   runtime 或 MJCF snapshot 漂移都会令 `mjcf_closure_exact=false`。本地 Stage-2 专项 `112 passed`，独立
-  红队 P0/P1 均为 0；runner/activation SHA 为 `e3d2e1f9…05f0` / `87598e0a…99c2`。source gate 已转绿，
-  但唯一远端 v7 dry-run/execute 尚未消费。仍没有 timing、production FK、动力学或行为通过，不能写成
-  0.5 秒已完成。
+  红队 P0/P1 均为 0；runner/activation SHA 为 `e3d2e1f9…05f0` / `87598e0a…99c2`。唯一远端 v7
+  dry-run 在结果 root 和 child 前 fail closed：v7 把 venv 入口 symlink 的 `readlink()` **字面 target**
+  当成 runtime 身份，在 canonical binary SHA 与包闭包核验前就因文本不同拒绝；该次尝试并未证明实际
+  binary 相同或漂移。execute=`0`，四个科学 cell 未消费，也没有 timing。
+- v8 只修这个过绑定：入口 symlink 字面值保留为 TOCTOU 证据，但身份改为 canonical realpath、目标 binary
+  SHA、Python version、venv prefix，以及 NumPy/MuJoCo 的完整 RECORD 与实际 ELF/dependency closure。
+  四份 candidate/contract、四个 `delta=12` cell、join、hold、预算、TOPP 与 acceptance 全不变。
+  runner/activation SHA 为 `40e89c6a…ae09` / `e878de11…0447`，专项 `91 passed`；source gate 通过，
+  远端尚未执行。仍没有 timing、production FK、动力学或行为通过，不能写成 0.5 秒已完成。
 - 下一门：在 ignored runtime 资产上按预注册 join ladder 生成正/反手候选，production FK 重建后逐个跑
   TOPP；只把 `<=0.5 s` 的候选送 L0/L1/桌网/动力学，再用绑定该 motion SHA 的 0.5 秒 K100 和
 vendor MuJoCo 判行为。
