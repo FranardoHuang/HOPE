@@ -6,6 +6,22 @@ that is actually included in this repository.
 
 ---
 
+## whole_body_tracking training framework (BeyondMimic)
+
+- Location: `hope_training/whole_body_tracking/`
+- License: MIT
+- Copyright: Copyright (c) 2024, The Isaac Lab Project Developers
+- Origin: Derived from BeyondMimic (`HybridRobotics/whole_body_tracking`), an Isaac Lab
+  motion-tracking reinforcement-learning extension.
+
+The HOPE PingPong training package is a fork/derivative of the BeyondMimic
+`whole_body_tracking` project, adapted to the table-tennis task. The upstream MIT license text
+is retained in `hope_training/whole_body_tracking/LICENCE`. The SMPL-X → robot retargeting and
+video → SMPL-X extraction stages referenced in the docs use GMR (`YanjieZe/GMR`, MIT) and GVHMR
+respectively; those tools are not redistributed here.
+
+---
+
 ## vrpn_mocap
 
 - Location: `hope_ws/src/vrpn_mocap/`
@@ -46,6 +62,25 @@ The Mulan PSL v2 license text is retained in
 
 The MIT license text is retained alongside the asset in
 `table_usd/LICENSE-PACE-ICRA2026-MIT.txt`.
+
+---
+
+## Agibot A3 materials (`agibot/`)
+
+- Location: `agibot/`
+- Origin: Agibot A3 robot deployment example, URDF/meshes, AimRT MuJoCo simulation, and
+  open-source hardware add-ons.
+
+The `agibot/` tree contains Agibot A3 robot materials, each component under its own terms:
+
+- `agibot/A3_MuJoCo_Sim/aimrt_mujoco_sim/` — the AimRT MuJoCo simulation, under the **Mulan
+  Permissive Software License, Version 2 (Mulan PSL v2)**, retained in its `LICENSE`.
+- `agibot/code_deployment/` — the A3 deploy example. It bundles third-party runtime SDKs (for
+  example Unitree SDK2, ONNX Runtime, RKNN runtime, RapidJSON), each governed by its own license
+  retained in-tree alongside the respective component. The Agibot-authored deploy sources carry
+  `Agibot Inc.` copyright headers and are included under Agibot's terms.
+- `agibot/pku/` — open-source hardware (hip marker shell, wrist racket adapter); see its README.
+- `agibot/URDF/` — Agibot A3 URDF and meshes, carrying Agibot's copyright.
 
 ---
 

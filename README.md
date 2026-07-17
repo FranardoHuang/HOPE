@@ -52,23 +52,23 @@ threshold, no best-checkpoint selection, no effect on exit codes or deployment.
 | [`configs/ball_physics.yaml`](configs/ball_physics.yaml) | The single no-spin ball-physics config (real-data fit), read by training, planner, and eval. |
 | [`hope_training/`](hope_training/) | Isaac Lab + PPO training package, the two sample motions, and the ball-physics fitting code. |
 | [`hope_ws/`](hope_ws/) | ROS 2 workspace: `hope_msgs` (RacketCommand), `hope_planner`, `hope_bringup`, and the vendored `vrpn_mocap` driver. |
+| [`agibot/`](agibot/) | Agibot A3 materials: deploy example, URDF/meshes, AimRT MuJoCo sim, and PKU open-source hardware. |
 | [`HitchopenRevised/`](HitchopenRevised/) | The deploy side: the Mulan-licensed MuJoCo simulation and a clean-room reference runner. See note below. |
 | [`mocap/`](mocap/) | The motion-capture frame and topic contract. |
 | [`docs/`](docs/) | Interfaces and how-to guides (index below). |
 
-### A note on `HitchopenRevised/`
+### Two deploy paths
 
-The Agibot A3 deployment runner in production is a proprietary, modified fork of Agibot's official
-deploy code and is **not** redistributed here. `HitchopenRevised` (a revised fork of the official
-Agibot A3 deploy code, by Intelligent Racing Inc. dba Hitch Interactive) ships instead:
+The repository ships two ways to run the policy on the Agibot A3:
 
-- the **Mulan-licensed AimRT MuJoCo simulation** (runnable), and
-- a **clean-room Python reference runner** that implements the public 111-D observation / 31-D
-  action / `RacketCommand` contract and drives the MuJoCo sim, plus an integration seam for wiring
-  the contract into your own licensed Agibot vendor package on the real robot.
-
-The A3 URDF and meshes are also not redistributed (no upstream open-source license); you supply your
-own — see [`HitchopenRevised/URDF/README.md`](HitchopenRevised/URDF/README.md).
+- [`agibot/`](agibot/) — the full Agibot A3 deploy example (deploy sources, URDF/meshes, the AimRT
+  MuJoCo simulation, and the PKU open-source hardware). Component licensing is summarized in
+  [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+- [`HitchopenRevised/`](HitchopenRevised/) — a lightweight reference runner (by Intelligent Racing
+  Inc. dba Hitch Interactive) that implements the public 111-D observation / 31-D action /
+  `RacketCommand` contract and drives the Mulan-licensed MuJoCo simulation. It is a minimal,
+  dependency-light illustration of the deployment contract described in
+  [docs/POLICY_INTERFACE.md](docs/POLICY_INTERFACE.md).
 
 ## Documentation
 
@@ -85,6 +85,13 @@ own — see [`HitchopenRevised/URDF/README.md`](HitchopenRevised/URDF/README.md)
 The two clips under `hope_training/motions/preprocessed/` are short, physically-neutral placeholders
 that make the pipeline run out of the box. **They are not performance-tuned.** Replace them with your
 own retargeted forehand/backhand motions before training a policy you intend to deploy.
+
+## Credits
+
+The whole-body training package is built on [BeyondMimic](https://github.com/HybridRobotics/whole_body_tracking)
+(MIT), an Isaac Lab motion-tracking framework, adapted here for table tennis; SMPL-X → robot
+retargeting and video → SMPL-X extraction referenced in the docs use [GMR](https://github.com/YanjieZe/GMR)
+(MIT) and GVHMR. See [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## License
 
