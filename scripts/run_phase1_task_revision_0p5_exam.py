@@ -25,7 +25,19 @@ import zlib
 
 
 QUEUE = Path("configs/phase1_task_revision_supercombo_20260716.yaml")
-ACTIVATION = Path("configs/phase1_task_revision_0p5_exam_activation_v1_20260717.json")
+HISTORICAL_ACTIVATION_V1 = Path(
+    "configs/phase1_task_revision_0p5_exam_activation_v1_20260717.json"
+)
+ACTIVATION = Path("configs/phase1_task_revision_0p5_exam_activation_v2_20260717.json")
+V1_FAILURE_RECEIPT = Path(
+    "configs/phase1_task_revision_0p5_exam_v1_failure_20260717.json"
+)
+V1_ACTIVATION_SHA256 = (
+    "996775d6c64a75d4c626d60da20fc52ec27ca86548008aeac900c380de87cfb6"
+)
+V1_HARNESS_SHA256 = (
+    "c2ce27845cb26a1ff2474a547556364f72235bcbd830ae5a7768d85fe8141b63"
+)
 CONFIRM = "SIM_ONLY_LAUNCH_ONE_PERSISTENT_TASKREV_0P5_K100"
 RESULT_MARKER = "TASKREV_0P5_RESULT_JSON="
 ISAAC_PYTHON = "/workspace/hope_isaac_venv/bin/python"
@@ -37,6 +49,16 @@ SCHEDULE_PATH = (
 EXAM_BANK_PATH = (
     "/workspace/codexschema/phase1_signed_face_rescue_20260713/assets/"
     "schema3_exam_bank_rebind_v1/s1_v4rg_runtime_order_schema3_exam_882fea4_rebound.npz"
+)
+EXAM_BANK_BYTES = 63643
+EXAM_BANK_SHA256 = "60e1a7ade72eaf64e17a1b83795125551f08c6699c8a3cc3c269500d8e6cd1ca"
+EXAM_REBIND_REPORT_PATH = (
+    "/workspace/codexschema/phase1_signed_face_rescue_20260713/assets/"
+    "schema3_exam_bank_rebind_v1/rebind_report.json"
+)
+EXAM_REBIND_REPORT_BYTES = 18795
+EXAM_REBIND_REPORT_SHA256 = (
+    "dd4332edb47f1fb1f4d51ca00ceed612dbcadf9e395eb536c9b73bef9de69ad0"
 )
 PAPER_FILE_SHA256 = "6f5f152652acd0eb3a80bb5d903f617a1272e665c62c4ce3edc3fdba712f672d"
 PAPER_SEMANTIC_SHA256 = "fa7e3c21d0427c4509359297596ee071ecbb06f6cfd5a8d3a252a350c6393b66"
@@ -77,6 +99,81 @@ def _strict_json(path: Path) -> dict[str, Any]:
     if not isinstance(value, dict):
         raise ExamError("activation root must be an object")
     return value
+
+
+def _load_v1_failure_receipt(path: Path) -> dict[str, Any]:
+    receipt = _strict_json(path)
+    expected_argv = [
+        "python3",
+        "scripts/run_phase1_task_revision_0p5_exam.py",
+        "--queue",
+        "configs/phase1_task_revision_supercombo_20260716.yaml",
+        "--activation",
+        "configs/phase1_task_revision_0p5_exam_activation_v1_20260717.json",
+        "--eval-gpu",
+        "0",
+        "launch",
+        "--execute",
+        "--confirm",
+        CONFIRM,
+    ]
+    if set(receipt) != {
+        "schema_version", "artifact_kind", "receipt_id", "status", "attempt",
+        "failure", "side_effects", "authority",
+    }:
+        raise ExamError("v1 failure receipt top-level keys differ")
+    if (
+        receipt.get("schema_version") != 1
+        or receipt.get("artifact_kind")
+        != "phase1-task-revision-0p5-k100-launch-failure-receipt"
+        or receipt.get("receipt_id")
+        != "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_v1_failed_no_retry"
+        or receipt.get("status") != "failed_no_retry"
+    ):
+        raise ExamError("v1 failure receipt identity differs")
+    attempt = receipt.get("attempt")
+    if not isinstance(attempt, dict) or attempt != {
+        "activation_id": "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_v1",
+        "activation_path": str(HISTORICAL_ACTIVATION_V1),
+        "activation_sha256": V1_ACTIVATION_SHA256,
+        "harness_path": "scripts/run_phase1_task_revision_0p5_exam.py",
+        "harness_sha256": V1_HARNESS_SHA256,
+        "source_commit": "3455e2f4c08b04533476f595d70288129308649b",
+        "job_id": "taskrev_p2_equal_reward",
+        "milestone": 5700,
+        "pod": "pod2",
+        "physical_eval_gpu": 0,
+        "argv": expected_argv,
+        "argv_evidence": "reconstructed_from_tracked_operation_and_observed_physical_gpu0",
+        "exit_code": 2,
+        "observed_rounded_wall_seconds": 5.779,
+    }:
+        raise ExamError("v1 failure receipt attempt facts differ")
+    if receipt.get("failure") != {
+        "stage": "validate_inputs",
+        "exception_type": "FileNotFoundError",
+        "errno": 2,
+        "missing_path": EXAM_BANK_PATH,
+    }:
+        raise ExamError("v1 failure receipt failure facts differ")
+    if receipt.get("side_effects") != {
+        "runtime_materialized": False,
+        "supervisor_created": False,
+        "delegated_cgroup_created": False,
+        "commit_ack_created": False,
+        "evaluator_created": False,
+        "trainer_signalled": False,
+        "robot_command_sent": False,
+    }:
+        raise ExamError("v1 failure receipt side-effect boundary differs")
+    if receipt.get("authority") != {
+        "automatic_retry": False,
+        "retry_authorized": False,
+        "v1_launch_consumed": True,
+        "v1_launch_authorized": False,
+    }:
+        raise ExamError("v1 failure receipt retry authority differs")
+    return receipt
 
 
 def _load_queue_module(root: Path):
@@ -127,11 +224,23 @@ def _positive_number(where: str, value: Any, minimum: float, maximum: float) -> 
 def load_activation(path: Path, *, root: Path) -> dict[str, Any]:
     path = path.resolve()
     activation = _strict_json(path)
+    if activation.get("activation_id") == (
+        "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_v1"
+    ):
+        if sha256_file(path) != V1_ACTIVATION_SHA256:
+            raise ExamError("historical v1 activation bytes differ")
+        raise ExamError(
+            "historical v1 activation is consumed failed_no_retry; current HEAD only "
+            "authorizes the asset-restored v2 activation"
+        )
     expected = {
         "schema_version",
         "activation_id",
         "created_utc",
         "selection",
+        "prior_attempt",
+        "required_assets",
+        "consumption",
         "queue",
         "harness",
         "resource_gate",
@@ -141,6 +250,12 @@ def load_activation(path: Path, *, root: Path) -> dict[str, Any]:
     }
     if set(activation) != expected:
         raise ExamError("activation top-level keys differ")
+    if (
+        activation.get("schema_version") != 2
+        or activation.get("activation_id")
+        != "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_asset_restored_v2"
+    ):
+        raise ExamError("activation is not the sole asset-restored v2 authority")
     selection = activation.get("selection")
     if not isinstance(selection, dict) or set(selection) != {
         "job_id",
@@ -163,6 +278,56 @@ def load_activation(path: Path, *, root: Path) -> dict[str, Any]:
         value = selection.get(key)
         if not isinstance(value, str) or not value.startswith("/workspace/"):
             raise ExamError(f"activation selection.{key} must be absolute /workspace")
+    prior = activation.get("prior_attempt")
+    try:
+        actual_failure_receipt_sha256 = sha256_file(root / V1_FAILURE_RECEIPT)
+    except OSError as exc:
+        raise ExamError("v1 failure receipt is missing or unreadable") from exc
+    if not isinstance(prior, dict) or prior != {
+        "failure_receipt_path": str(V1_FAILURE_RECEIPT),
+        "failure_receipt_sha256": actual_failure_receipt_sha256,
+        "activation_id": "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_v1",
+        "status": "failed_no_retry",
+        "retry_authorized": False,
+        "v1_launch_consumed": True,
+    }:
+        raise ExamError("activation prior-attempt binding differs")
+    if prior["failure_receipt_sha256"] != actual_failure_receipt_sha256:
+        raise ExamError("v1 failure receipt bytes differ")
+    _load_v1_failure_receipt(root / prior["failure_receipt_path"])
+    required_assets = activation.get("required_assets")
+    if not isinstance(required_assets, dict) or required_assets != {
+        "exam_bank": {
+            "path": EXAM_BANK_PATH,
+            "bytes": EXAM_BANK_BYTES,
+            "sha256": EXAM_BANK_SHA256,
+        },
+        "rebind_report": {
+            "path": EXAM_REBIND_REPORT_PATH,
+            "bytes": EXAM_REBIND_REPORT_BYTES,
+            "sha256": EXAM_REBIND_REPORT_SHA256,
+        },
+    }:
+        raise ExamError("activation restored-asset binding differs")
+    expected_run_root = Path(
+        "/workspace/codexschema/phase1_task_revision_supercombo_20260716/"
+        "runs/p2_equal_reward"
+    )
+    consumption = activation.get("consumption")
+    if not isinstance(consumption, dict) or consumption != {
+        "historical_v1_state_dir": str(
+            expected_run_root / "timing_exam_0p5_supervisor_v1" / "model_5700"
+        ),
+        "v2_attempt_dir": str(
+            expected_run_root
+            / "timing_exam_0p5_attempt_asset_restored_v2"
+            / "model_5700"
+        ),
+        "assets_validated_before_any_consumption_write": True,
+        "no_clobber": True,
+        "retry_authorized": False,
+    }:
+        raise ExamError("activation one-shot consumption binding differs")
     queue = activation.get("queue")
     harness = activation.get("harness")
     if not isinstance(queue, dict) or set(queue) != {"path", "sha256"}:
@@ -242,6 +407,8 @@ def load_activation(path: Path, *, root: Path) -> dict[str, Any]:
     if not isinstance(authority, dict) or authority != {
         "launch_authorized": True,
         "automatic_retry": False,
+        "new_activation_after_asset_restoration": True,
+        "maximum_launches": 1,
         "formal_evidence_eligible": False,
         "evaluation_contract_exact": False,
         "trainer_signal": False,
@@ -253,6 +420,8 @@ def load_activation(path: Path, *, root: Path) -> dict[str, Any]:
         activation["_repo_path"] = str(path.relative_to(root.resolve()))
     except ValueError as exc:
         raise ExamError("activation must be a tracked file inside the repository") from exc
+    if activation["_repo_path"] != str(ACTIVATION):
+        raise ExamError("current HEAD authorizes only the tracked v2 activation path")
     activation["_path"] = str(path)
     activation["_sha256"] = sha256_file(path)
     return activation
@@ -300,8 +469,14 @@ def build_plan(
         "papers/timing_exam_0p5_k100.schedule.json"
     ):
         raise ExamError("task-revision queue points to an unexpected timing paper")
-    expected_output = str(Path(job["run_dir"]) / "timing_exam_0p5" / f"model_{milestone}")
-    expected_state = str(Path(job["run_dir"]) / "timing_exam_0p5_supervisor_v1" / f"model_{milestone}")
+    expected_output = str(
+        Path(job["run_dir"]) / "timing_exam_0p5_asset_restored_v2" / f"model_{milestone}"
+    )
+    expected_state = str(
+        Path(job["run_dir"])
+        / "timing_exam_0p5_supervisor_asset_restored_v2"
+        / f"model_{milestone}"
+    )
     expected_milestone = str(Path(job["run_dir"]) / "milestones" / f"model_{milestone}.json")
     expected_behavior = str(Path(job["run_dir"]) / "behavior_milestones" / f"model_{milestone}.json")
     if selection["output_dir"] != expected_output or selection["state_dir"] != expected_state:
@@ -316,6 +491,8 @@ def build_plan(
             "sha256": activation["_sha256"],
             "activation_id": activation["activation_id"],
         },
+        "prior_attempt": activation["prior_attempt"],
+        "consumption": activation["consumption"],
         "job_id": job["id"],
         "milestone": milestone,
         "milestone_offset_from_parent": milestone - absolute["parent_iteration"],
@@ -346,7 +523,8 @@ def build_plan(
             "semantic_sha256": PAPER_SEMANTIC_SHA256,
         },
         "schedule": {"path": SCHEDULE_PATH},
-        "exam_bank": {"path": EXAM_BANK_PATH},
+        "exam_bank": activation["required_assets"]["exam_bank"],
+        "exam_rebind_report": activation["required_assets"]["rebind_report"],
         "kit_lock": KIT_LOCK,
         "resource_gate": activation["resource_gate"],
         "catastrophic_cleanup": activation["catastrophic_cleanup"],
@@ -443,6 +621,25 @@ def sha(path):
         return h.hexdigest()
     finally:
         os.close(fd)
+
+def validate_exact_asset(binding, label):
+    if (not isinstance(binding, dict) or
+            set(binding) != {"path", "bytes", "sha256"} or
+            not isinstance(binding.get("path"), str) or
+            not Path(binding["path"]).is_absolute() or
+            isinstance(binding.get("bytes"), bool) or
+            not isinstance(binding.get("bytes"), int) or binding["bytes"] <= 0 or
+            not isinstance(binding.get("sha256"), str) or
+            len(binding["sha256"]) != 64):
+        raise RuntimeError(f"{label} binding shape differs")
+    path = Path(binding["path"])
+    info = path.lstat()
+    if (not stat.S_ISREG(info.st_mode) or info.st_nlink != 1 or
+            info.st_size != binding["bytes"]):
+        raise RuntimeError(f"{label} file type/link/size differs: {path}")
+    if sha(path) != binding["sha256"]:
+        raise RuntimeError(f"{label} SHA-256 differs: {path}")
+    return path
 
 def utc():
     return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime())
@@ -1389,7 +1586,19 @@ def source_environment(source):
                MKL_NUM_THREADS="1", OPENBLAS_NUM_THREADS="1", NUMEXPR_NUM_THREADS="1")
     return env
 
+def validate_restored_assets(spec):
+    # Asset restoration is the sole new causal condition of activation v2.  Bind
+    # both no-clobber restored outputs before any runtime materialization,
+    # namespace creation, cgroup creation, supervisor, ACK, or evaluator.
+    bank = validate_exact_asset(spec["exam_bank"], "restored exam bank")
+    rebind_report = validate_exact_asset(
+        spec["exam_rebind_report"], "restored exam-bank rebind report")
+    return {"bank": bank, "rebind_report": rebind_report}
+
 def validate_inputs(spec, *, validate_process=True):
+    restored_assets = validate_restored_assets(spec)
+    bank = restored_assets["bank"]
+    rebind_report = restored_assets["rebind_report"]
     source = Path(spec["source_checkout"])
     if subprocess.check_output(
         ["git", "rev-parse", "HEAD"], cwd=source, text=True, timeout=10
@@ -1473,8 +1682,9 @@ def validate_inputs(spec, *, validate_process=True):
         any(row.get("tts_ticks") != 25 or row.get("tts_seconds") != 0.5 for row in paper["rows"])):
         raise RuntimeError("timing paper is not the fixed exact-25-tick K100")
     schedule = Path(spec["schedule"]["path"])
-    bank = Path(spec["exam_bank"]["path"])
-    if sha(schedule) != paper["source_schedule"]["file_sha256"] or sha(bank) != paper["source_schedule"]["bank_sha256"]:
+    if (sha(schedule) != paper["source_schedule"]["file_sha256"] or
+            sha(bank) != paper["source_schedule"]["bank_sha256"] or
+            paper["source_schedule"]["bank_sha256"] != spec["exam_bank"]["sha256"]):
         raise RuntimeError("schedule/bank differs from paper")
     return {
         "source": source, "runtime": runtime, "binding": binding, "bound": bound,
@@ -1483,6 +1693,7 @@ def validate_inputs(spec, *, validate_process=True):
         "milestone": milestone, "milestone_raw": milestone_raw,
         "behavior": behavior, "behavior_raw": behavior_raw,
         "paper": paper, "paper_raw": paper_raw, "schedule": schedule, "bank": bank,
+        "rebind_report": rebind_report,
     }
 
 def evaluator_command(spec, context):
@@ -2111,7 +2322,13 @@ def validate_and_convert(spec, context, *, evaluator_state, signals, gpu_samples
         "hard_contract": {"path": str(context["hard_path"]), "sha256": context["hard_sha"]},
         "paper": spec["paper"],
         "schedule": {"path": str(context["schedule"]), "sha256": sha(context["schedule"])},
-        "exam_bank": {"path": str(context["bank"]), "sha256": sha(context["bank"])},
+        "exam_bank": {"path": str(context["bank"]), "bytes": spec["exam_bank"]["bytes"],
+                      "sha256": sha(context["bank"])},
+        "exam_rebind_report": {
+            "path": str(context["rebind_report"]),
+            "bytes": spec["exam_rebind_report"]["bytes"],
+            "sha256": sha(context["rebind_report"]),
+        },
         "source_commit": spec["source_commit"], "source_closure": spec["source_closure"],
         "kit_lock": spec["kit_lock"], "gpu_gate_samples": gpu_samples,
         "catastrophic_cleanup": {
@@ -2638,8 +2855,81 @@ def supervisor_child(spec, lock_fd, supervisor_log_fd, state_guard, output_paren
         except OSError:
             pass
 
+def claim_activation_once(spec):
+    consumption = spec["consumption"]
+    attempt = Path(consumption["v2_attempt_dir"])
+    historical = Path(consumption["historical_v1_state_dir"])
+    attempt_parent = None
+    historical_parent = None
+    historical_guard = None
+    attempt_guard = None
+    try:
+        attempt_parent = open_directory_guard(attempt.parent, create_missing=True)
+        if guarded_child_exists(attempt_parent, attempt.name):
+            raise RuntimeError(
+                f"asset-restored v2 activation attempt is already consumed: {attempt}")
+        historical_parent = open_directory_guard(historical.parent, create_missing=True)
+        if guarded_child_exists(historical_parent, historical.name):
+            raise RuntimeError(
+                "historical v1 state namespace already exists; v2 refuses to infer or "
+                "overwrite its state")
+        historical_guard = create_child_directory_guard(
+            historical_parent, historical.name)
+        guarded_publish_json(historical_guard, "v1_consumed.json", {
+            "schema_version": 1,
+            "artifact_kind": "taskrev_0p5_historical_activation_consumed_tombstone",
+            "historical_activation": spec["prior_attempt"],
+            "replacement_activation": spec["activation"],
+            "status": "failed_no_retry",
+            "retry_authorized": False,
+            "trainer_or_robot_signals": [],
+            "published_utc": utc(),
+        })
+        attempt_guard = create_child_directory_guard(attempt_parent, attempt.name)
+        guarded_publish_json(attempt_guard, "attempt.json", {
+            "schema_version": 1,
+            "artifact_kind": "taskrev_0p5_asset_restored_v2_attempt",
+            "plan_sha256": canonical(spec),
+            "activation": spec["activation"],
+            "prior_attempt": spec["prior_attempt"],
+            "exam_bank": spec["exam_bank"],
+            "exam_rebind_report": spec["exam_rebind_report"],
+            "status": "consumed",
+            "automatic_retry": False,
+            "retry_authorized": False,
+            "published_utc": utc(),
+        })
+        return attempt_guard
+    except BaseException:
+        close_directory_guard(attempt_guard)
+        raise
+    finally:
+        close_directory_guard(historical_guard)
+        close_directory_guard(historical_parent)
+        close_directory_guard(attempt_parent)
+
 def launch(spec):
-    context = validate_inputs(spec, validate_process=True)
+    # No write is permitted until both restored assets have exact size and SHA.
+    validate_restored_assets(spec)
+    attempt_guard = claim_activation_once(spec)
+    try:
+        context = validate_inputs(spec, validate_process=True)
+    except BaseException as exc:
+        try:
+            guarded_publish_json(attempt_guard, "preflight_failure.json", {
+                "schema_version": 1,
+                "artifact_kind": "taskrev_0p5_asset_restored_v2_preflight_failure",
+                "activation": spec["activation"],
+                "status": "failed_no_retry",
+                "error": f"{type(exc).__name__}: {exc}",
+                "automatic_retry": False,
+                "retry_authorized": False,
+                "failed_utc": utc(),
+            })
+        finally:
+            close_directory_guard(attempt_guard)
+        raise
+    close_directory_guard(attempt_guard)
     output = Path(spec["output_dir"])
     state_dir = Path(spec["state_dir"])
     current_process = proc_identity(os.getpid())

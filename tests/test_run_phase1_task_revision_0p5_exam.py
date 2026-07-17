@@ -17,7 +17,13 @@ import pytest
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "run_phase1_task_revision_0p5_exam.py"
 QUEUE = ROOT / "configs" / "phase1_task_revision_supercombo_20260716.yaml"
-ACTIVATION = ROOT / "configs" / "phase1_task_revision_0p5_exam_activation_v1_20260717.json"
+ACTIVATION = ROOT / "configs" / "phase1_task_revision_0p5_exam_activation_v2_20260717.json"
+HISTORICAL_ACTIVATION_V1 = (
+    ROOT / "configs" / "phase1_task_revision_0p5_exam_activation_v1_20260717.json"
+)
+V1_FAILURE_RECEIPT = (
+    ROOT / "configs" / "phase1_task_revision_0p5_exam_v1_failure_20260717.json"
+)
 
 
 def _load_module():
@@ -190,7 +196,12 @@ def test_build_plan_is_fixed_to_pod2_equal_reward_model5700():
     assert plan["expected_claim_content_sha256"] == (
         "e10d2c248d90daa3172ea80147a394dad64ce326eb4052889c25bfb9d3df420b"
     )
-    assert plan["output_dir"].endswith("/p2_equal_reward/timing_exam_0p5/model_5700")
+    assert plan["output_dir"].endswith(
+        "/p2_equal_reward/timing_exam_0p5_asset_restored_v2/model_5700"
+    )
+    assert plan["state_dir"].endswith(
+        "/p2_equal_reward/timing_exam_0p5_supervisor_asset_restored_v2/model_5700"
+    )
     assert plan["behavior_receipt"].endswith("/behavior_milestones/model_5700.json")
     assert plan["automatic_retry"] is False
     assert plan["formal_evidence_eligible"] is False
@@ -205,6 +216,221 @@ def test_build_plan_is_fixed_to_pod2_equal_reward_model5700():
     assert plan["source_closure"]["evaluator"] == (
         "67300ba2faae0f3443496219f1c6cf3fcc16afa182b45e6f95d4fbb82c60c094"
     )
+    assert plan["prior_attempt"] == {
+        "failure_receipt_path": str(E.V1_FAILURE_RECEIPT),
+        "failure_receipt_sha256": E.sha256_file(V1_FAILURE_RECEIPT),
+        "activation_id": "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_v1",
+        "status": "failed_no_retry",
+        "retry_authorized": False,
+        "v1_launch_consumed": True,
+    }
+    assert plan["exam_bank"] == {
+        "path": E.EXAM_BANK_PATH,
+        "bytes": 63643,
+        "sha256": "60e1a7ade72eaf64e17a1b83795125551f08c6699c8a3cc3c269500d8e6cd1ca",
+    }
+    assert plan["exam_rebind_report"] == {
+        "path": E.EXAM_REBIND_REPORT_PATH,
+        "bytes": 18795,
+        "sha256": "dd4332edb47f1fb1f4d51ca00ceed612dbcadf9e395eb536c9b73bef9de69ad0",
+    }
+    assert plan["consumption"]["historical_v1_state_dir"].endswith(
+        "/p2_equal_reward/timing_exam_0p5_supervisor_v1/model_5700"
+    )
+    assert plan["consumption"]["v2_attempt_dir"].endswith(
+        "/p2_equal_reward/timing_exam_0p5_attempt_asset_restored_v2/model_5700"
+    )
+    assert plan["consumption"]["assets_validated_before_any_consumption_write"] is True
+    assert plan["consumption"]["no_clobber"] is True
+    assert plan["consumption"]["retry_authorized"] is False
+
+
+def test_historical_v1_is_consumed_and_cannot_plan_or_launch():
+    assert E.sha256_file(HISTORICAL_ACTIVATION_V1) == E.V1_ACTIVATION_SHA256
+    receipt = E._load_v1_failure_receipt(V1_FAILURE_RECEIPT)
+    assert receipt["status"] == "failed_no_retry"
+    assert receipt["authority"] == {
+        "automatic_retry": False,
+        "retry_authorized": False,
+        "v1_launch_consumed": True,
+        "v1_launch_authorized": False,
+    }
+    with pytest.raises(E.ExamError, match="v1 activation is consumed failed_no_retry"):
+        E.build_plan(QUEUE, activation_path=HISTORICAL_ACTIVATION_V1, eval_gpu=0)
+
+
+def test_v2_rejects_missing_or_drifted_v1_failure_receipt(monkeypatch):
+    original = E.sha256_file
+
+    def missing(path):
+        if Path(path).resolve() == V1_FAILURE_RECEIPT.resolve():
+            raise FileNotFoundError(path)
+        return original(Path(path))
+
+    monkeypatch.setattr(E, "sha256_file", missing)
+    with pytest.raises(E.ExamError, match="v1 failure receipt is missing"):
+        E.build_plan(QUEUE, activation_path=ACTIVATION, eval_gpu=0)
+
+    monkeypatch.setattr(
+        E,
+        "sha256_file",
+        lambda path: "0" * 64
+        if Path(path).resolve() == V1_FAILURE_RECEIPT.resolve()
+        else original(Path(path)),
+    )
+    with pytest.raises(E.ExamError, match="prior-attempt binding differs"):
+        E.build_plan(QUEUE, activation_path=ACTIVATION, eval_gpu=0)
+
+
+def test_remote_restored_assets_require_exact_size_and_sha_before_launch(tmp_path):
+    remote = _remote_namespace()
+    bank = tmp_path / "bank.npz"
+    report = tmp_path / "report.json"
+    bank.write_bytes(b"exact-bank")
+    report.write_bytes(b"exact-report")
+    bank_binding = {
+        "path": str(bank), "bytes": bank.stat().st_size,
+        "sha256": remote["sha"](bank),
+    }
+    report_binding = {
+        "path": str(report), "bytes": report.stat().st_size,
+        "sha256": remote["sha"](report),
+    }
+    assert remote["validate_exact_asset"](bank_binding, "bank") == bank
+    assert remote["validate_exact_asset"](report_binding, "report") == report
+
+    bank.unlink()
+    with pytest.raises(FileNotFoundError):
+        remote["validate_exact_asset"](bank_binding, "bank")
+    bank.write_bytes(b"drift-bank")
+    with pytest.raises(RuntimeError, match="SHA-256 differs"):
+        remote["validate_exact_asset"](bank_binding, "bank")
+    report.write_bytes(b"longer-report")
+    with pytest.raises(RuntimeError, match="size differs"):
+        remote["validate_exact_asset"](report_binding, "report")
+
+
+def test_missing_restored_asset_fails_before_any_launch_side_effect(monkeypatch, tmp_path):
+    remote = _remote_namespace()
+    state = tmp_path / "states" / "asset_restored_v2"
+    output = tmp_path / "outputs" / "asset_restored_v2"
+    lock = tmp_path / "kit.lock"
+    missing = tmp_path / "missing-bank.npz"
+    spec = {
+        "state_dir": str(state),
+        "output_dir": str(output),
+        "kit_lock": str(lock),
+        "exam_bank": {"path": str(missing), "bytes": 1, "sha256": "a" * 64},
+        "exam_rebind_report": {
+            "path": str(tmp_path / "missing-report.json"),
+            "bytes": 1,
+            "sha256": "b" * 64,
+        },
+    }
+    reached = []
+    monkeypatch.setitem(
+        remote,
+        "stable_resource_gate",
+        lambda _spec: reached.append("resource") or [],
+    )
+    monkeypatch.setitem(
+        remote,
+        "prepare_owned_cgroup",
+        lambda _spec: reached.append("cgroup") or {},
+    )
+
+    with pytest.raises(FileNotFoundError):
+        remote["launch"](spec)
+    assert reached == []
+    assert not state.exists()
+    assert not output.exists()
+    assert not lock.exists()
+
+
+def test_v2_claim_tombstones_v1_and_consumes_activation_once(tmp_path):
+    remote = _remote_namespace()
+    historical = tmp_path / "v1-state" / "model_5700"
+    attempt = tmp_path / "v2-attempt" / "model_5700"
+    spec = {
+        "consumption": {
+            "historical_v1_state_dir": str(historical),
+            "v2_attempt_dir": str(attempt),
+        },
+        "activation": {
+            "activation_id": "asset-restored-v2",
+            "path": "activation-v2.json",
+            "sha256": "a" * 64,
+        },
+        "prior_attempt": {
+            "activation_id": "historical-v1",
+            "failure_receipt_sha256": "b" * 64,
+            "status": "failed_no_retry",
+            "retry_authorized": False,
+        },
+        "exam_bank": {"path": "/workspace/bank", "bytes": 3, "sha256": "c" * 64},
+        "exam_rebind_report": {
+            "path": "/workspace/report", "bytes": 4, "sha256": "d" * 64,
+        },
+    }
+    guard = remote["claim_activation_once"](spec)
+    remote["close_directory_guard"](guard)
+    tombstone = json.loads((historical / "v1_consumed.json").read_text())
+    marker = json.loads((attempt / "attempt.json").read_text())
+    assert tombstone["status"] == "failed_no_retry"
+    assert tombstone["retry_authorized"] is False
+    assert marker["status"] == "consumed"
+    assert marker["automatic_retry"] is False
+    assert marker["retry_authorized"] is False
+    with pytest.raises(RuntimeError, match="already consumed"):
+        remote["claim_activation_once"](spec)
+
+
+def test_v2_preflight_failure_after_asset_check_is_consumed_no_retry(
+        monkeypatch, tmp_path):
+    remote = _remote_namespace()
+    bank = tmp_path / "bank.npz"
+    report = tmp_path / "report.json"
+    bank.write_bytes(b"bank")
+    report.write_bytes(b"report")
+    attempt = tmp_path / "attempt" / "model_5700"
+    spec = {
+        "consumption": {
+            "historical_v1_state_dir": str(tmp_path / "v1" / "model_5700"),
+            "v2_attempt_dir": str(attempt),
+        },
+        "activation": {
+            "activation_id": "asset-restored-v2",
+            "path": "activation-v2.json",
+            "sha256": "a" * 64,
+        },
+        "prior_attempt": {
+            "activation_id": "historical-v1",
+            "failure_receipt_sha256": "b" * 64,
+            "status": "failed_no_retry",
+            "retry_authorized": False,
+        },
+        "exam_bank": {
+            "path": str(bank), "bytes": bank.stat().st_size,
+            "sha256": remote["sha"](bank),
+        },
+        "exam_rebind_report": {
+            "path": str(report), "bytes": report.stat().st_size,
+            "sha256": remote["sha"](report),
+        },
+    }
+    monkeypatch.setitem(
+        remote,
+        "validate_inputs",
+        lambda *_args, **_kwargs: (_ for _ in ()).throw(
+            RuntimeError("remaining preflight failed")),
+    )
+    with pytest.raises(RuntimeError, match="remaining preflight failed"):
+        remote["launch"](spec)
+    failure = json.loads((attempt / "preflight_failure.json").read_text())
+    assert failure["status"] == "failed_no_retry"
+    assert failure["retry_authorized"] is False
+    with pytest.raises(RuntimeError, match="already consumed"):
+        remote["launch"](spec)
 
 
 @pytest.mark.parametrize("gpu", [-1, 3, 99])
@@ -881,6 +1107,8 @@ def test_launch_two_phase_commit_is_no_clobber_and_returns_after_ack(tmp_path):
             "ack_observation_seconds": 2.0,
         },
     }
+    remote["validate_restored_assets"] = lambda _spec: {}
+    remote["claim_activation_once"] = lambda _spec: None
     remote["validate_inputs"] = lambda _spec, validate_process=True: {}
     remote["stable_resource_gate"] = lambda _spec: [{"free_mib": 9999}]
     remote["prepare_owned_cgroup"] = lambda _spec: {
@@ -973,6 +1201,8 @@ def test_launch_cgroup_preflight_fails_before_state_or_output_namespace(
         "activation": {"sha256": "a" * 64},
         "supervision": {},
     }
+    remote["validate_restored_assets"] = lambda _spec: {}
+    remote["claim_activation_once"] = lambda _spec: None
     remote["validate_inputs"] = lambda _spec, validate_process=True: {}
     remote["stable_resource_gate"] = lambda _spec: []
     remote["_PRCTL"] = lambda *_args: 0

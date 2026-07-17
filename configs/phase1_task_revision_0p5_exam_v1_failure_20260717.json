@@ -1,0 +1,56 @@
+{
+  "schema_version": 1,
+  "artifact_kind": "phase1-task-revision-0p5-k100-launch-failure-receipt",
+  "receipt_id": "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_v1_failed_no_retry",
+  "status": "failed_no_retry",
+  "attempt": {
+    "activation_id": "phase1_task_revision_0p5_k100_p2_equal_reward_model5700_v1",
+    "activation_path": "configs/phase1_task_revision_0p5_exam_activation_v1_20260717.json",
+    "activation_sha256": "996775d6c64a75d4c626d60da20fc52ec27ca86548008aeac900c380de87cfb6",
+    "harness_path": "scripts/run_phase1_task_revision_0p5_exam.py",
+    "harness_sha256": "c2ce27845cb26a1ff2474a547556364f72235bcbd830ae5a7768d85fe8141b63",
+    "source_commit": "3455e2f4c08b04533476f595d70288129308649b",
+    "job_id": "taskrev_p2_equal_reward",
+    "milestone": 5700,
+    "pod": "pod2",
+    "physical_eval_gpu": 0,
+    "argv": [
+      "python3",
+      "scripts/run_phase1_task_revision_0p5_exam.py",
+      "--queue",
+      "configs/phase1_task_revision_supercombo_20260716.yaml",
+      "--activation",
+      "configs/phase1_task_revision_0p5_exam_activation_v1_20260717.json",
+      "--eval-gpu",
+      "0",
+      "launch",
+      "--execute",
+      "--confirm",
+      "SIM_ONLY_LAUNCH_ONE_PERSISTENT_TASKREV_0P5_K100"
+    ],
+    "argv_evidence": "reconstructed_from_tracked_operation_and_observed_physical_gpu0",
+    "exit_code": 2,
+    "observed_rounded_wall_seconds": 5.779
+  },
+  "failure": {
+    "stage": "validate_inputs",
+    "exception_type": "FileNotFoundError",
+    "errno": 2,
+    "missing_path": "/workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_exam_bank_rebind_v1/s1_v4rg_runtime_order_schema3_exam_882fea4_rebound.npz"
+  },
+  "side_effects": {
+    "runtime_materialized": false,
+    "supervisor_created": false,
+    "delegated_cgroup_created": false,
+    "commit_ack_created": false,
+    "evaluator_created": false,
+    "trainer_signalled": false,
+    "robot_command_sent": false
+  },
+  "authority": {
+    "automatic_retry": false,
+    "retry_authorized": false,
+    "v1_launch_consumed": true,
+    "v1_launch_authorized": false
+  }
+}
