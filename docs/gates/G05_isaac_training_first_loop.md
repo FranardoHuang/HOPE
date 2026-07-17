@@ -46,6 +46,30 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-17, ready-ruler successor queue source paper; Gate remains `Partial`):
+
+- A new plan-only queue freezes one Pod2 4096-environment/two-update full-scene probe followed by a
+  four-cell same-parent comparison: baseline/strong ready Reward ×
+  [`qdot-limit hinge`](../DEFINITIONS.md#qdot-limit-hinge) `-5/0`. Qdot hinge is a joint-speed
+  penalty, not a random lateral push. All four cells resume complete state from the Pod2 equal-Reward
+  `model_5700` parent and use one seed as a mechanism funnel.
+- The minimal source gate exposes local `validate/plan`, one read-only Pod2 parent inspector and one
+  full-scene probe/finalizer; runner SHA is `2cf2f3dd…5c8f` and its focused suite is `32 passed`.
+  Fill, behavior/portfolio consumers and exact stop are deliberately blocked next-iteration interfaces,
+  not hidden commands.
+- Launch remains false until a no-clobber probe receipt proves positive and conserved planner task-entry
+  ready denominators, explicit foot-sensor unavailability, zero legacy-hold violations/nonfinite values,
+  complete task-revision counters, a finite checkpoint and exact source/hard/claim/binding/lineage. The
+  parent has passed the separate Pod2 read-only semantic binding inspection (inspection content
+  `e17cedb1…ade4`, evidence content `85967393…1096`); both evidence documents are then
+  frozen into a new activation commit rather than patched on a Pod.
+- Each future `+200/+500/+1000` decision requires two disjoint complete 100-update integer windows.
+  Sparse legal-return zero with insufficient eligible opportunities cannot stop a cell, and same-parent
+  portfolio review retains at least two cells. At this source milestone no full-scene probe, trainer,
+  behavior receipt, ranking or signal has run. See the
+  [experiment](../experiments/2026-07/EXP-P1-TASK-REVISION-READY-SUCCESSOR.md) and
+  [operation](../operations/run_phase1_task_revision_ready_successor.md).
+
 Follow-up note (2026-07-17, exact-0.5 K100 v1 input failure closed and v2 prepared; Gate remains `Partial`):
 
 - The only v1 Pod2 launch exited `rc=2` after about `5.779 s` in `validate_inputs` because the immutable

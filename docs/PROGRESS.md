@@ -13,6 +13,18 @@
 
 ## 2026-07-17
 
+- ready 量尺 successor 已冻结为 source-only、plan-only 的 Pod2 四格：先跑 4096-env×2-update
+  full-scene probe，严格验证 task-entry/ready/foot-unavailable/legacy-hold/nonfinite/task-revision
+  整数守恒；probe 和 equal-Reward `model_5700` parent receipt 写回新 activation commit 后，才允许比较
+  baseline/strong ready Reward × qdot-limit hinge `-5/0`。qdot 是关节超速惩罚，不是随机力；未来
+  `+200/+500/+1000` 各需两个完整 100-update 窗，稀疏合法回台 eligible 不足时零值不得淘汰。
+  最小 runner SHA=`2cf2f3dd…5c8f`、专项 `32 passed`，当前只实现 validate/plan、read-only parent
+  inspector 与 probe/finalize；Pod2 parent 只读语义检查已通过（inspection `e17cedb1…ade4`，evidence
+  `85967393…1096`），fill、behavior/portfolio/stop 是下一迭代 blocked 接口。未运行
+  probe/trainer、未排名或 signal，保持 `Partial / NO-LAUNCH`。见
+  [实验](experiments/2026-07/EXP-P1-TASK-REVISION-READY-SUCCESSOR.md)与
+  [操作](operations/run_phase1_task_revision_ready_successor.md)。
+
 - Stage2 TOPP v8 在 Pod2 唯一自然结束：四格均 generator/TOPP `rc=0`、MJCF closure 通过，但最短时间
   `0.80/0.86/1.10/0.94 s`，`0/4 <=0.5 s`；summary `ac880412…b7030c`。解释器闭包假拒绝已闭环，
   当前 join-ladder family 则按预注册负结果停止；这仍是 screening，不是行为或部署通过。见

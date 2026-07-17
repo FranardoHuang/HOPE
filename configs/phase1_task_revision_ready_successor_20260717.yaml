@@ -1,0 +1,467 @@
+schema_version: 1
+simulation_only: true
+launch_authorized: false
+preregistration_status: pending_ready_ledger_full_scene_probe_and_parent_binding
+formal_evidence_eligible: false
+
+ssh:
+  key: ~/.ssh/id_ed25519_runpod
+
+pods:
+  pod2:
+    host: 162.43.172.181
+    port: 13146
+    gpus: [0, 1, 2]
+    max_trainers_per_gpu: 4
+dispatch_pods: [pod2]
+
+namespace_contract:
+  root: /workspace/codexschema/phase1_task_revision_ready_successor_20260717
+  status: pending_ready_ledger_full_scene_probe_and_parent_binding
+  no_clobber: true
+  old_task_revision_queue_or_receipt_reuse_forbidden: true
+
+blocking_contract:
+  source_checkout: /workspace/codexschema/nohope_main_d7c38fcf
+  source_commit: d7c38fcf70e7e9420800437fd5b467168ae72580
+  ready_full_scene_probe_evidence: PENDING_READY_LEDGER_FULL_SCENE_PROBE
+  parent_binding_evidence:
+    schema_version: 1
+    kind: ready_successor_parent_semantic_inspection_v2
+    status: passed
+    inspector_runner_source_sha256: 2cf2f3ddecbc7bc1d685254f19e71e59c7dc7be58aae002c74b45f5f4e3b5c8f
+    inspector_program_sha256: 9e26ac5a368413fcb85f04bccd39c2ccaaa1515967044a446dfc9e91b072aadd
+    inspection_content_sha256: e17cedb16c5057455e5f9cf62033d33199a96fa36bf7539c1a44c6705ce6ade4
+    inspection:
+      schema_version: 1
+      status: passed
+      read_only: true
+      no_write: true
+      no_signal: true
+      job_id: taskrev_p2_equal_reward
+      milestone: 5700
+      expected_claim_content_sha256: e10d2c248d90daa3172ea80147a394dad64ce326eb4052889c25bfb9d3df420b
+      queue_claim:
+        path: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/queue_claim.json
+        file_sha256: 7e11016516f0ced7407a584ecbd2b73fd13f577df7f51a71da52dd147e7e9df6
+        content_sha256: e10d2c248d90daa3172ea80147a394dad64ce326eb4052889c25bfb9d3df420b
+      run_binding:
+        path: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/run_binding.json
+        file_sha256: 745b9f1d7e7cc67f4cac4b543cd8bd718bdb027c4061113dde5be33ebd85e9d0
+        content_sha256: 9fe7528abd43e3420b890ad789cfcc46c29a3038ac9ec86e291ac886801661f1
+      milestone_receipt:
+        path: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/milestones/model_5700.json
+        file_sha256: 90ca9c17dee0705cdf7db59ac0f72e8aa72e65de288a82a8e9c11ba082c8a5f4
+        content_sha256: 4150ef69e71fea841260e203e773f4e7a27792de2ba73da61bd13c7f66e4e43d
+        binding_content_sha256: 9fe7528abd43e3420b890ad789cfcc46c29a3038ac9ec86e291ac886801661f1
+      checkpoint:
+        path: /workspace/codexschema/nohope_task_revision_b1f5a38/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-16_20-04-47_phase1_taskrev_p2_equal_reward_seed3_20260716/model_5700.pt
+        file_sha256: 521d41e9ed529eaf2e740358122944bd726d5eb78403794dbc3730f18bbf984c
+        embedded_iteration: 5700
+        floating_tensor_count: 74
+        floating_element_count: 1762715
+        nonfinite_element_count: 0
+        optimizer_state_present: true
+        training_launch_claim_sha256: e10d2c248d90daa3172ea80147a394dad64ce326eb4052889c25bfb9d3df420b
+        lineage_exact: 0
+      hard_contract:
+        path: /workspace/codexschema/nohope_task_revision_b1f5a38/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-16_20-04-47_phase1_taskrev_p2_equal_reward_seed3_20260716/params/training_contract.json
+        file_sha256: 7d30b6037e26c7c7d4a98efcd4f447c1286b3982fd703ee7d1c73a6b1b03bf70
+        schema_version: 3
+        lineage_exact: 0
+      parent_selection_patch:
+        original_queue_claim_sha256: 7e11016516f0ced7407a584ecbd2b73fd13f577df7f51a71da52dd147e7e9df6
+        original_run_binding_sha256: 745b9f1d7e7cc67f4cac4b543cd8bd718bdb027c4061113dde5be33ebd85e9d0
+        selected_checkpoint_sha256: 521d41e9ed529eaf2e740358122944bd726d5eb78403794dbc3730f18bbf984c
+        selected_hard_contract_path: /workspace/codexschema/nohope_task_revision_b1f5a38/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-16_20-04-47_phase1_taskrev_p2_equal_reward_seed3_20260716/params/training_contract.json
+        selected_hard_contract_sha256: 7d30b6037e26c7c7d4a98efcd4f447c1286b3982fd703ee7d1c73a6b1b03bf70
+        selection_is_final: true
+    evidence_content_sha256: 85967393a8f5de4bd363a8087ee88340984489646ed01491eeac434292211096
+  parent_integrity_evidence:
+    schema_version: 1
+    kind: ready_successor_parent_inspection_v1
+    status: passed
+    read_only: true
+    no_write: true
+    no_signal: true
+    inspector_runner_source_sha256: c8d731b5d954d178ab9c9e0071dd71cc2c37b80c4084c049b1e375d977431659
+    inspector_program_sha256: 7ba57d95cb76ecd2fb81812f3d8e9505777aa8e9b0e74e629e5ac1f97b566c86
+    job_id: taskrev_p2_equal_reward
+    milestone: 5700
+    expected_claim_content_sha256: e10d2c248d90daa3172ea80147a394dad64ce326eb4052889c25bfb9d3df420b
+    queue_claim:
+      path: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/queue_claim.json
+      file_sha256: 7e11016516f0ced7407a584ecbd2b73fd13f577df7f51a71da52dd147e7e9df6
+      content_sha256: e10d2c248d90daa3172ea80147a394dad64ce326eb4052889c25bfb9d3df420b
+    run_binding:
+      path: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/run_binding.json
+      file_sha256: 745b9f1d7e7cc67f4cac4b543cd8bd718bdb027c4061113dde5be33ebd85e9d0
+      content_sha256: 9fe7528abd43e3420b890ad789cfcc46c29a3038ac9ec86e291ac886801661f1
+    milestone_receipt:
+      path: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/milestones/model_5700.json
+      file_sha256: 90ca9c17dee0705cdf7db59ac0f72e8aa72e65de288a82a8e9c11ba082c8a5f4
+      content_sha256: 4150ef69e71fea841260e203e773f4e7a27792de2ba73da61bd13c7f66e4e43d
+    checkpoint:
+      path: /workspace/codexschema/nohope_task_revision_b1f5a38/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-16_20-04-47_phase1_taskrev_p2_equal_reward_seed3_20260716/model_5700.pt
+      file_sha256: 521d41e9ed529eaf2e740358122944bd726d5eb78403794dbc3730f18bbf984c
+      embedded_iteration: 5700
+      floating_tensor_count: 74
+      floating_element_count: 1762715
+      nonfinite_element_count: 0
+      optimizer_state_present: true
+    hard_contract:
+      path: /workspace/codexschema/nohope_task_revision_b1f5a38/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-16_20-04-47_phase1_taskrev_p2_equal_reward_seed3_20260716/params/training_contract.json
+      file_sha256: 7d30b6037e26c7c7d4a98efcd4f447c1286b3982fd703ee7d1c73a6b1b03bf70
+      schema_version: 3
+    evidence_content_sha256: ed123c73312fa1217191ad41fcbd5e4b209a372726cf3a56983584f1335b7de3
+  runner_source_gate:
+    path: scripts/run_phase1_task_revision_ready_successor_queue.py
+    sha256: 2cf2f3ddecbc7bc1d685254f19e71e59c7dc7be58aae002c74b45f5f4e3b5c8f
+    reviewed_tests_passed: true
+  activation_is_manual: true
+  activation_supported_by_this_runner: false
+  future_fill_requires_remote_stable_receipt_revalidation: true
+  automatic_launch: false
+  automatic_retry: false
+
+parent_selection:
+  status: inspected_exact_parent_binding
+  pod2_equal_reward_model5700:
+    original_job_id: taskrev_p2_equal_reward
+    original_run_dir: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward
+    original_queue_claim_path: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/queue_claim.json
+    original_queue_claim_sha256: 7e11016516f0ced7407a584ecbd2b73fd13f577df7f51a71da52dd147e7e9df6
+    original_claim_content_sha256: e10d2c248d90daa3172ea80147a394dad64ce326eb4052889c25bfb9d3df420b
+    original_run_binding_path: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/run_binding.json
+    original_run_binding_sha256: 745b9f1d7e7cc67f4cac4b543cd8bd718bdb027c4061113dde5be33ebd85e9d0
+    milestone_receipt_path: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/milestones/model_5700.json
+    behavior_receipt_path: /workspace/codexschema/phase1_task_revision_supercombo_20260716/runs/p2_equal_reward/behavior_milestones/model_5700.json
+    selected_rsl_log_dir: /workspace/codexschema/nohope_task_revision_b1f5a38/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-16_20-04-47_phase1_taskrev_p2_equal_reward_seed3_20260716
+    ranking_snapshot_checkpoint_filename: model_5700.pt
+    selected_checkpoint_path: /workspace/codexschema/nohope_task_revision_b1f5a38/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-16_20-04-47_phase1_taskrev_p2_equal_reward_seed3_20260716/model_5700.pt
+    selected_embedded_iteration: 5700
+    selected_checkpoint_sha256: 521d41e9ed529eaf2e740358122944bd726d5eb78403794dbc3730f18bbf984c
+    selected_hard_contract_path: /workspace/codexschema/nohope_task_revision_b1f5a38/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-16_20-04-47_phase1_taskrev_p2_equal_reward_seed3_20260716/params/training_contract.json
+    selected_hard_contract_sha256: 7d30b6037e26c7c7d4a98efcd4f447c1286b3982fd703ee7d1c73a6b1b03bf70
+    selection_is_final: true
+    immutable_stop_receipt_still_required: false
+
+full_scene_probe_contract:
+  representative_job_id: ready_baseline_qdot_zero
+  pod: pod2
+  gpu: 1
+  num_envs: 4096
+  additional_updates: 2
+  generic_reviewed_result_required: true
+  specialized_no_clobber_result: ready_successor_probe_result.json
+  generic_pass_without_specialized_pass_may_unlock_launch: false
+  required_ready_invariants:
+    - ready_phase_sample_count_positive
+    - ready_planner_task_entry_sample_count_equals_ready_phase_sample_count
+    - ready_tilt_eligible_sample_count_equals_ready_phase_sample_count
+    - ready_base_speed_eligible_sample_count_equals_ready_phase_sample_count
+    - ready_station_offset_eligible_sample_count_equals_ready_phase_sample_count
+    - ready_foot_contact_eligible_plus_unavailable_equals_ready_phase_sample_count
+    - ready_foot_slip_eligible_plus_unavailable_equals_ready_phase_sample_count
+    - ready_planner_legacy_hold_violation_count_equals_zero
+    - ready_nonfinite_value_count_equals_zero
+
+task_revision_execution_contract:
+  actor_visible_revision_fields: [target_position, target_velocity, signed_target_normal, time_to_strike]
+  update_window: every_policy_tick_through_last_pre_contact_tick
+  policy_tick_s: 0.02
+  same_ball_revision_is_not_a_new_task: true
+  side_and_clip_are_task_invariant: true
+
+exact_behavior_ledger_contract:
+  schema: exact_behavior_update_v1_ready_task_entry
+  event_prefix: HOPE_EXACT_BEHAVIOR_UPDATE_JSON=
+  consume_once_per_update: true
+  window_updates: 100
+  missing_or_duplicate_update_action: continue_training_no_decision
+  derive_after_summing_window_counters: true
+  required_counters:
+    - swing_start_count
+    - swing_outcome_count
+    - swing_completion_count
+    - strike_opportunity_count
+    - virtual_capture_count
+    - virtual_net_clear_count
+    - virtual_landing_valid_count
+    - virtual_legal_return_count
+    - physical_fall_count
+    - pre_strike_physical_fall_count
+    - post_strike_physical_fall_count
+    - non_physical_terminal_reset_count
+    - termination_reason_base_fell_tilt_count
+    - termination_reason_base_too_low_count
+    - ready_tilt_eligible_sample_count
+    - ready_tilt_rad_sum
+    - ready_base_speed_eligible_sample_count
+    - ready_base_speed_xy_mps_sum
+    - ready_station_offset_eligible_sample_count
+    - ready_station_offset_m_sum
+    - ready_foot_contact_eligible_sample_count
+    - ready_foot_contact_fraction_sum
+    - ready_foot_slip_eligible_sample_count
+    - ready_foot_slip_speed_mps_sum
+    - ready_phase_sample_count
+    - ready_planner_task_entry_sample_count
+    - ready_planner_legacy_hold_violation_count
+    - ready_foot_sensor_unavailable_sample_count
+    - ready_nonfinite_value_count
+    - planner_initial_tts_sample_count
+    - planner_initial_tts_sub_0p5_count
+    - planner_initial_tts_exact_0p5_count
+    - planner_initial_tts_above_0p5_count
+    - planner_initial_tts_component_0_count
+    - planner_initial_tts_component_1_count
+    - planner_initial_tts_component_2_count
+    - planner_initial_tts_component_3_count
+    - planner_revision_attempt_count
+    - planner_revision_accepted_count
+    - planner_revision_rejected_count
+    - planner_revision_last_precontact_attempt_count
+    - planner_revision_last_precontact_accepted_count
+    - planner_revision_actor_visible_count
+    - planner_revision_last_precontact_actor_visible_count
+
+behavior_decision_receipt_contract:
+  directory: behavior_milestones
+  publish: atomic_no_clobber
+  exact_log_prefix_bound_by_inode_size_and_sha256: true
+  checkpoint_receipt_required: true
+  claim_binding_process_identity_required: true
+  automatic_signal_authorized: false
+  exact_stop_consumer: reviewed_numeric_identity_v1
+  manual_command: exact-stop-behavior
+  required_revalidation: [job, claim, binding, pid, pgid, starttime, argv, checkpoint_receipt, behavior_receipt]
+  no_clobber_intent_before_signal: true
+  exact_group_membership_required_before_term_or_kill: true
+
+pruning_contract:
+  checkpoint_offsets_from_parent: [200, 500, 1000]
+  behavior_decision_requires_two_disjoint_complete_windows: true
+  window_updates: 100
+  sparse_zero_without_positive_eligible_denominator_may_stop: false
+  plus_200:
+    behavior_ranking_authorized: false
+    stop_only_for: [fatal, nonfinite, resume_or_contract_mismatch, task_revision_or_ready_ledger_activation_absent]
+  plus_500:
+    stop_only_if_all_true:
+      - both_windows_completion_rate_below_0p40
+      - both_windows_physical_fall_rate_above_0p10
+      - second_window_improves_no_ready_metric
+  plus_1000:
+    comparison_scope: same_parent_same_seed_only
+    pareto_metrics:
+      maximize: [swing_closeout_completion_rate, virtual_legal_return_per_strike, ready_foot_contact_fraction_mean]
+      minimize: [pre_strike_physical_fall_rate, post_strike_physical_fall_rate, ready_tilt_rad_mean, ready_base_speed_xy_mps_mean, ready_station_offset_m_mean, ready_foot_slip_speed_mps_mean]
+    minimum_survivors_per_parent: 2
+    preserve_one_qdot_zero_cell: true
+    preserve_one_qdot_minus5_cell: true
+  stop_execution: reviewed_exact_numeric_identity_only
+  automatic_stop: false
+
+x-action: &action signed_face_v4rg_shared_face
+x-motion: &motion
+  action: *action
+  bindings:
+    motion_file: /workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_forehand_v4rg_cal.npz
+    motion_file_2: /workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_backhand_v4rg_cal.npz
+x-bank: &bank
+  action: *action
+  train_path: /workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_bank_rebind_v2/s1_v4rg_runtime_order_schema3_train_882fea4_rebound.npz
+  train_arg: ++task.racket.question_bank
+x-exam: &exam
+  action: *action
+  path: /workspace/codexschema/phase1_task_revision_supercombo_20260716/papers/timing_exam_0p5_k100.schedule.json
+  family: task_revision_timing_exam_0p5_k100_v1
+x-source: &source
+  checkout: /workspace/codexschema/nohope_main_d7c38fcf
+  commit: d7c38fcf70e7e9420800437fd5b467168ae72580
+  ignored_runtime_asset:
+    target_relative_path: hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
+    donor:
+      checkout: /workspace/codexschema/nohope
+      commit: 6d93bcb16c422a2f42748c2dc99432559653480b
+      relative_path: hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
+    file_count: 46
+    total_file_bytes: 15378264
+    tree_content_sha256: 0137f59b1fe45e7d5f8fa731bedca905f5466bc98e8d1354081fe071d60426c6
+    symlinks_forbidden: true
+    target_must_be_gitignored: true
+
+x-planner-balanced-low: &planner_balanced_low >-
+  ++task.planner_revision={enabled: true, initial_tts_mixture: {components: [{name: "late_stress", range_s: [0.36, 0.49], weight: 0.15}, {name: "baseline_0p5", range_s: [0.5, 0.5], weight: 0.2}, {name: "fast_deploy", range_s: [0.5, 0.9], weight: 0.3}, {name: "broad_arrival", range_s: [0.9, 1.7], weight: 0.35}], contract_version: "initial_tts_mixture_v1"}, initial_tts_range_s: [0.36, 1.7], normal_std_rad: 0.05, position_std_m: 0.02, profile: {contract_version: "phase_governor_v1", early_deadline_tolerance_s: 1.0e-6, max_deadline_revision_delta_s: 0.25, max_normal_revision_delta_rad: 0.2, max_phase_acceleration_per_s2: 20.0, max_phase_rate_per_s: 4.0, max_position_revision_delta_m: 0.1, max_tts_s: 2.0, max_velocity_revision_delta_mps: 0.5, min_tts_s: 0.02, normal_unit_tolerance: 0.0001, policy_dt_s: 0.02, schema_version: 1}, tts_std_s: 0.08, velocity_std_mps: 0.1}
+
+x-base: &base
+  - task=HOPEPingPongVirtualBall
+  - algo=ppo
+  - headless=true
+  - logger=tensorboard
+  - video=false
+  - task.actor_obs_contract=deploy_parity_face179
+  - task.env.episode_length_s=16.0
+  - task.sim.dt=0.005
+  - task.sim.decimation=4
+  - task.actions.qdes_clamp=true
+  - task.plant.zero_joint_friction=true
+  - task.motion.wrap_teleport=false
+  - task.motion.stand_start_prob=0.25
+  - task.motion.hold_steps_range=[0,0]
+  - task.motion.stand_start_min_hold=0
+  - task.motion.post_swing_buffer_size=4096
+  - task.motion.post_swing_min_fill=256
+  - task.motion.post_swing_min_hold=0
+  - task.motion.clip_switch_prob=0.0
+  - task.motion.speed_scale_range=[1.0,1.0]
+  - ++task.motion.rsi_skip_settle_frames=0
+  - ++task.motion.rsi_hold_root_stand_z=false
+  - ++task.motion.stagger_initial_clock=false
+  - ++task.motion.stagger_hold_max_steps=150
+  - ++task.racket.question_bank_allow_legacy=false
+  - ++task.racket.face_command=true
+  - ++task.racket.face_command_obs=true
+  - ++task.racket.station_obs=false
+  - ++task.racket.mount_normal_sign_per_clip=[1.0,-1.0]
+  - task.racket.target_mode=uniform
+  - task.racket.normal_mode=velocity
+  - task.racket.adaptive_sigma=true
+  - task.racket.target_delay_steps=0
+  - ++task.racket.target_delay_tts_mode=source_timestamp_compensated
+  - task.racket.target_jitter_pos_per_s=0.0
+  - task.racket.target_jitter_vel_per_s=0.0
+  - task.racket.target_noise_white=0.0019
+  - task.racket.target_noise_ar1_sigma=0.0052
+  - task.racket.target_noise_ar1_rho=0.717
+  - task.racket.target_dropout_prob=0.0
+  - task.racket.target_post_strike_dropout_s=0.0
+  - task.racket.target_bias_per_swing=0.0
+  - task.racket.midswing_resample_prob=0.0
+  - task.racket.midswing_resample_tts_floor=0.3
+  - task.racket.vb_spin_mode=minimize
+  - task.racket.vb_metrics_only=true
+  - ++task.racket.rally_legacy_metrics=true
+  - task.racket.achieved_target_mix_prob=0.30
+  - task.racket.achieved_buffer_size=4096
+  - task.racket.achieved_min_fill=256
+  - task.racket.achieved_jitter_pos=0.03
+  - task.racket.achieved_jitter_vel=0.15
+  - task.racket.achieved_clamp_inflate=0.20
+  - task.racket.clean_reference_strike_velocity=true
+  - task.racket.clean_strike_vel_window=2
+  - task.racket.strike_window_s=0.12
+  - task.racket.strike_success_pos_thresh=0.075
+  - ++task.physical_ball=true
+  - task.rewards.racket_position_weight=14.0
+  - task.rewards.racket_position_std=0.2
+  - task.rewards.racket_velocity_weight=10.0
+  - task.rewards.racket_velocity_std=1.0
+  - task.rewards.racket_normal_weight=5.0
+  - task.rewards.racket_normal_std=0.3
+  - task.rewards.foot_orientation_weight=-0.3
+  - task.rewards.prestrike_upright_weight=-1.0
+  - task.rewards.free_wrist_ori_mimic=true
+  - ++task.rewards.free_wrist_vel_mimic=true
+  - ++task.rewards.motion_scale_in_window=0.25
+  - ++task.rewards.free_non_striking_arm_mimic=false
+  - task.rewards.base_decel_weight=0.0
+  - task.motion.post_swing_start_prob=0.0
+  - task.rewards.joint_velocity_limit_hinge_weight=-5.0
+  - task.rewards.joint_velocity_limit_hinge_margin=0.85
+  - ++task.rewards.racket_face_conditional_guidance_weight=-0.4
+  - ++task.motion.allow_legacy_link_origin_velocity=false
+  - ++task.motion.event_timing_mode=disabled
+  - task.racket.strike_phase_per_clip=[0.471,0.338]
+  - ++task.racket.face_command_pairing=shared_plus_y
+  - ++task.rewards.racket_guidance_weight=0.0
+  - ++task.rewards.racket_face_guidance_weight=0.0
+  - ++task.rewards.racket_face_guidance_theta_max=3.141592653589793
+  - ++kit_carb_tasking_thread_count=16
+  - ++kit_tbb_thread_count=16
+
+x-budget: &budget
+  num_envs: 4096
+  max_iterations: 1001
+  save_interval: 100
+  iteration_semantics: additional_updates_after_full_state_resume
+x-milestones: &milestones [200, 500, 1000]
+x-warm-start: &warm_start
+  parent: pod2_equal_reward_model5700
+  checkpoint_path: /workspace/codexschema/nohope_task_revision_b1f5a38/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-16_20-04-47_phase1_taskrev_p2_equal_reward_seed3_20260716/model_5700.pt
+  transfer_mode: strict_full_state_preserve_optimizer
+  checkpoint_tolerant: false
+  allow_missing_contract: false
+  allow_contract_mismatch: true
+  descendant_exact_eligible: false
+x-job: &job
+  action: *action
+  status: blocked
+  blocker: pending_ready_probe_and_exact_parent_binding
+  motion: *motion
+  bank: *bank
+  exam: *exam
+  source: *source
+  runtime_binding: true
+  warm_start: *warm_start
+  seed: 3
+  budget: *budget
+  milestones: *milestones
+  milestone_semantics: offsets_from_model_5700_parent
+  behavior_ledger_contract_ref: exact_behavior_update_v1_ready_task_entry
+  formal_evidence_eligible: false
+
+jobs:
+  - <<: *job
+    id: ready_baseline_qdot_minus5
+    human_name: 现有准备奖励和现有关节速度限位惩罚
+    scientific_question: does_the_existing_ready_reward_remain_stable_with_the_qdot_limit_hinge_weight_minus5
+    launch_round: 1
+    ready_role: baseline
+    qdot_limit_hinge_weight: -5.0
+    recipe:
+      base: *base
+      delta: [*planner_balanced_low, task.rewards.racket_position_weight=9.67, task.rewards.racket_velocity_weight=9.67, task.rewards.racket_normal_weight=9.66]
+    resource: {policy: dispatch_gpu_round_robin, required_slot: pod2/gpu0}
+    run_name: phase1_ready_successor_baseline_qdot_minus5_seed3_20260717
+    run_dir: /workspace/codexschema/phase1_task_revision_ready_successor_20260717/runs/ready_baseline_qdot_minus5
+  - <<: *job
+    id: ready_baseline_qdot_zero
+    human_name: 现有准备奖励但关闭关节速度限位惩罚
+    scientific_question: does_removing_the_qdot_limit_hinge_penalty_improve_short_deadline_reach_without_balance_collapse
+    launch_round: 1
+    ready_role: baseline
+    qdot_limit_hinge_weight: 0.0
+    recipe:
+      base: *base
+      delta: [*planner_balanced_low, task.rewards.racket_position_weight=9.67, task.rewards.racket_velocity_weight=9.67, task.rewards.racket_normal_weight=9.66, task.rewards.joint_velocity_limit_hinge_weight=0.0]
+    resource: {policy: dispatch_gpu_round_robin, required_slot: pod2/gpu1}
+    run_name: phase1_ready_successor_baseline_qdot_zero_seed3_20260717
+    run_dir: /workspace/codexschema/phase1_task_revision_ready_successor_20260717/runs/ready_baseline_qdot_zero
+  - <<: *job
+    id: ready_strong_qdot_minus5
+    human_name: 加强稳脚和挥拍前直立但保留现有关节速度限位惩罚
+    scientific_question: do_stronger_ready_rewards_reduce_balance_debt_with_the_qdot_limit_hinge_weight_minus5
+    launch_round: 1
+    ready_role: strong
+    qdot_limit_hinge_weight: -5.0
+    recipe:
+      base: *base
+      delta: [*planner_balanced_low, task.rewards.racket_position_weight=9.67, task.rewards.racket_velocity_weight=9.67, task.rewards.racket_normal_weight=9.66, task.rewards.foot_orientation_weight=-0.6, task.rewards.prestrike_upright_weight=-2.0]
+    resource: {policy: dispatch_gpu_round_robin, required_slot: pod2/gpu2}
+    run_name: phase1_ready_successor_strong_qdot_minus5_seed3_20260717
+    run_dir: /workspace/codexschema/phase1_task_revision_ready_successor_20260717/runs/ready_strong_qdot_minus5
+  - <<: *job
+    id: ready_strong_qdot_zero
+    human_name: 加强稳脚和挥拍前直立并关闭关节速度限位惩罚
+    scientific_question: can_stronger_ready_rewards_protect_balance_after_removing_the_qdot_limit_hinge_penalty
+    launch_round: 2
+    ready_role: strong
+    qdot_limit_hinge_weight: 0.0
+    recipe:
+      base: *base
+      delta: [*planner_balanced_low, task.rewards.racket_position_weight=9.67, task.rewards.racket_velocity_weight=9.67, task.rewards.racket_normal_weight=9.66, task.rewards.foot_orientation_weight=-0.6, task.rewards.prestrike_upright_weight=-2.0, task.rewards.joint_velocity_limit_hinge_weight=0.0]
+    resource: {policy: dispatch_gpu_round_robin, preferred_slot: pod2/gpu0}
+    run_name: phase1_ready_successor_strong_qdot_zero_seed3_20260717
+    run_dir: /workspace/codexschema/phase1_task_revision_ready_successor_20260717/runs/ready_strong_qdot_zero
