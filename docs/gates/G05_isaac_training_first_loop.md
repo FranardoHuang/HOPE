@@ -46,6 +46,21 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-18 05:42 CST, second independent 100-update window; Gate remains `Partial`):
+
+- Pod1 remains at 11 live trainers (`4/4/3`) and Pod2 at 12 (`4/4/4`), with zero fatal events. GPU2 still
+  has three trainers, so Z3 remains ineligible to start.
+- All five new cells completed the independent `5801–5900` window. Overall completion/legal-return/total-fall
+  rates, with pre/post fall in parentheses, were U `93.80/31.29/0.956% (0.143/0.814%)`, V
+  `44.19/62.59/21.80% (20.17/1.62%)`, W `94.37/30.81/0.901% (0.150/0.751%)`, X
+  `46.38/59.55/21.39% (19.61/1.77%)`, and Y `93.58/31.52/0.855% (0.126/0.729%)`.
+- The position-priority cells improved completion and legal return while reducing falls. The velocity-priority
+  cells gained about `27.56` percentage points in legal return, but V/X completion fell by `16.07/24.01`
+  percentage points and their pre-fall rates are about `20%`. Y is currently safest, W has the highest
+  completion, and V the highest legal return. No cell dominates another across return, completion, and safety,
+  so none is stopped. Legal return remains an Isaac training-time virtual outcome, not vendor MuJoCo behavior;
+  G05 stays `Partial`.
+
 Follow-up note (2026-07-18 05:13 CST, first TTS-by-outcome `+100` window; Gate remains `Partial`):
 
 - Pod1 has 11 accepted trainers at `4/4/3`, iterations `5929–6286`; Pod2 has 12 at `4/4/4`,
