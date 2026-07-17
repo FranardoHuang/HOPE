@@ -57,7 +57,7 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   触球、回台都为 `0/50`，总计物理摔倒 `0/100`，全部因半秒 deadline guard 结束。
   这个 checkpoint 已被严格半秒要求否定；正手最新完整卷的 hit/return 仍为 `0/50`。
 
-  2026-07-18 05:42 CST 运行快照：Pod2 为 `12/12`、三卡 `4/4/4`；Pod1 为
+  2026-07-18 06:42 CST 运行快照：Pod2 为 `12/12`、三卡 `4/4/4`；Pod1 为
   `11/12`、三卡 `4/4/3`，共 `23` 条 live trainer，fatal=`0`。`HOPE_AGIBOT_A3_USD_PATH`
   已让 `UsdFileCfg` 直接加载完整预转换 USD；Pod1 新增的 5 条都在不启动 URDF
   importer 的情况下越过首迭代，所以 importer 绕过已是运行验证能力。GPU2
@@ -88,6 +88,15 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   完成率分别下降 `16.07/24.01` 个百分点且 pre-fall 约 `20%`。当前 Y 安全最好、W 完成最好、V
   回台最高，仍无一臂在 return、completion 与 safety 三维全部支配另一臂，因此继续训练、不淘汰。
   这些合法回台仍是训练内 virtual outcome，不是 vendor MuJoCo 行为。
+
+  `5701–6200` 的 `+500` 累计窗现已完整。U/V/W/X/Y 的“完成率/合法回台率/fall 率”分别为
+  `91.68/31.42/1.432%`、`48.66/61.38/20.71%`、`93.02/30.78/1.241%`、
+  `50.91/59.08/20.35%`、`92.00/31.52/1.322%`；最近 `5901–6200` 则为
+  `94.47/31.98/0.612%`、`46.93/70.82/22.84%`、`94.92/31.47/0.552%`、
+  `47.49/69.41/23.14%`、`94.56/32.15/0.572%`。这把候选清楚分成稳定位置组 U/W/Y 与激进
+  拍速组 V/X：Y/W 位于当前稳定 demo 前沿；V/X 尚非 demo-ready，却是唯一高回台前沿。由于没有
+  全维支配，按既定规则 stop=`0`。这些仍是训练内 virtual outcome，vendor MuJoCo 尚未验证；GPU2
+  仍有三路，Z3 条件为 false。
 
 - **300 Hz 动捕不会再触发 300 Hz planner solve：** 正式 arena、schema-4 与 Gate3 profile 显式绑定
   latest-only worker。每个合格样本都进入 estimator 并替换唯一 pending snapshot；Stage 2/3 最多 50 Hz，
