@@ -46,6 +46,22 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-18 18:51 CST, most processes exited and `+1000` is readable but unjudged; Gate remains `Partial`):
+
+- Pod1 had only three training-side NVML compute processes, distributed `0/1/2` across GPU0/1/2 at `0/0/1%`
+  utilization. U/W/X/Y
+  each had `model_6700` with the process absent. V also had `model_6700`, but its trainer remained live; L2
+  remained live at iteration `6700`. Z3 had spent about 11 hours 37 minutes in its single startup without an
+  `rsl_rl` log or first `Learning iteration`. It is a startup hang, not an accepted trainer, and its fatal status
+  cannot be claimed as zero.
+- Pod2 had only two NVML trainers at `1/0/1`: D2 and F were both live at iteration `6700`, with zero fatal log
+  matches. A/C2 retain their earlier confirmed natural-terminal status. Eight other Pod2 processes were absent,
+  but their terminal material was not individually bound in this review, so their terminal/exit status remains
+  `UNKNOWN` rather than natural-terminal.
+- All five U/V/W/X/Y `model_6700` files exist, making their `+1000` integer ledgers available to read. They have
+  not yet been aggregated or judged, so no `+1000` winner or stop decision is recorded. Detailed state is in the
+  [half-second sprint experiment](../experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md). G05 remains `Partial`.
+
 Follow-up note (2026-07-18 07:42 CST, five natural terminals and one boot pending; Gate remains `Partial`):
 
 - Pod1 K2, P2 and W naturally reached terminal iteration `6700` with zero fatal events. Pod1 then had eight

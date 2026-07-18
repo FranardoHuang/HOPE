@@ -13,6 +13,15 @@
 
 ## 2026-07-18
 
+- 18:51 CST，Pod1 仅 3 个 NVML 训练侧 compute process（GPU `0/1/2`，util `0/0/1%`）：V 与 L2 已到
+  iteration `6700` 但进程仍 live，U/W/X/Y 的 `model_6700` 存在且进程 absent。
+  Z3 唯一启动约 11 小时 37 分仍无 `rsl_rl` 日志/首个 `Learning iteration`，只能记为
+  启动挂起，不写 fatal=`0` 或 accepted。Pod2 仅 D2/F 两个 trainer 仍 live（GPU
+  `1/0/1`），均到 iteration `6700`且日志 fatal 扫描为 `0`；除已确认自然终档的
+  A/C2 外，其余 8 条 absent 作业的 terminal/exit 仍为 `UNKNOWN`。U/V/W/X/Y 的
+  `model_6700` 都已存在，`+1000` 账本可读但尚未聚合/判定。详见
+  [半秒冲刺](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)。
+
 - 07:42 CST，Pod1 的 K2/P2/W 与 Pod2 的 A/C2 均在 iteration `6700`、fatal=`0`
   自然终档。Pod1 当时有 9 个 trainer 进程（8 条 accepted + 1 条 Z3 boot pending），
   GPU `4/3/2`；Pod2 为 10 条 accepted，GPU

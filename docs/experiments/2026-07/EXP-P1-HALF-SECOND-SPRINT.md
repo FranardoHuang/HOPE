@@ -78,32 +78,49 @@
 | 实际 `run_name` | 对应问题 | 实际课程 | 说明 |
 | --- | --- | --- | --- |
 | `hs_a_control_seed3` | 旧课程对照 | 旧 balanced `0.15/0.20/0.30/0.35` | Pod2；iteration `6700`、fatal=`0` 自然终档；不等同于新表的 short-focus control |
-| `hs_b2_deadline_focus_seed3` | focus 下 qdot `-5` 对照 | `legacy_focus_1 = 0.25/0.40/0.25/0.10` | Pod2 accepted；与下一条组成旧课程内的 qdot 配对 |
+| `hs_b2_deadline_focus_seed3` | focus 下 qdot `-5` 对照 | `legacy_focus_1 = 0.25/0.40/0.25/0.10` | Pod2；18:51 进程 absent，terminal/exit `UNKNOWN`；与下一条组成旧课程内的 qdot 配对 |
 | `hs_c2_deadline_qdot0_seed3` | focus 下 qdot `0` | `legacy_focus_1 = 0.25/0.40/0.25/0.10` | Pod2；iteration `6700`、fatal=`0` 自然终档；只与上一条作直接 qdot 比较 |
-| `hs_d2_ultra_half_qdot0_seed3` | ultra-half 课程 + qdot 0 | `0.05/0.70/0.20/0.05` | Pod2，accepted |
-| `hs_e_feasible_qdot0_seed3` | feasible 课程 + qdot 0 | `0.05/0.10/0.45/0.40` | Pod2，accepted |
-| `hs_f_focus_window_mimic0_seed3` | 触球窗老师静音 + qdot 0 | short-focus `0.10/0.45/0.40/0.05` | Pod2，accepted |
-| `hs_g2_focus_actionrate0_seed3` | 关闭 action-rate 惩罚 | short-focus | Pod2，accepted |
-| `hs_h4_focus_qdot0_globalmimic05_seed3` | 全局模仿减半 + qdot 0 | short-focus | Pod2，accepted |
-| `hs_i3_focus_qdot0_pos17_7_5_seed3` | 拍心/拍速/拍面 `17/7/5` + qdot 0 | short-focus | Pod2，accepted |
-| `hs_o2_feasible_fullcombo_seed3` | feasible 课程 × 完整组合 | feasible | Pod2，accepted |
-| `hs_q2_focus_qdot0_mimic075_window0_seed3` | 全局模仿 `0.75`、触球窗静音 + qdot 0 | short-focus | Pod2，accepted |
-| `hs_r2_focus_qdot0_vel7_17_5_seed3` | 拍心/拍速/拍面 `7/17/5` + qdot 0 | short-focus | Pod2，accepted |
-| `hs_p1_j2_focus_qdot0_ready2x_seed3` | 强准备姿态 + qdot 0 | short-focus | Pod1，accepted |
+| `hs_d2_ultra_half_qdot0_seed3` | ultra-half 课程 + qdot 0 | `0.05/0.70/0.20/0.05` | Pod2；PID `511462` 在 iteration `6700` 仍 live，日志 fatal 扫描 `0` |
+| `hs_e_feasible_qdot0_seed3` | feasible 课程 + qdot 0 | `0.05/0.10/0.45/0.40` | Pod2；18:51 进程 absent，terminal/exit `UNKNOWN` |
+| `hs_f_focus_window_mimic0_seed3` | 触球窗老师静音 + qdot 0 | short-focus `0.10/0.45/0.40/0.05` | Pod2；PID `510075` 在 iteration `6700` 仍 live，日志 fatal 扫描 `0` |
+| `hs_g2_focus_actionrate0_seed3` | 关闭 action-rate 惩罚 | short-focus | Pod2；18:51 进程 absent，terminal/exit `UNKNOWN` |
+| `hs_h4_focus_qdot0_globalmimic05_seed3` | 全局模仿减半 + qdot 0 | short-focus | Pod2；18:51 进程 absent，terminal/exit `UNKNOWN` |
+| `hs_i3_focus_qdot0_pos17_7_5_seed3` | 拍心/拍速/拍面 `17/7/5` + qdot 0 | short-focus | Pod2；18:51 进程 absent，terminal/exit `UNKNOWN` |
+| `hs_o2_feasible_fullcombo_seed3` | feasible 课程 × 完整组合 | feasible | Pod2；18:51 进程 absent，terminal/exit `UNKNOWN` |
+| `hs_q2_focus_qdot0_mimic075_window0_seed3` | 全局模仿 `0.75`、触球窗静音 + qdot 0 | short-focus | Pod2；18:51 进程 absent，terminal/exit `UNKNOWN` |
+| `hs_r2_focus_qdot0_vel7_17_5_seed3` | 拍心/拍速/拍面 `7/17/5` + qdot 0 | short-focus | Pod2；18:51 进程 absent，terminal/exit `UNKNOWN` |
+| `hs_p1_j2_focus_qdot0_ready2x_seed3` | 强准备姿态 + qdot 0 | short-focus | Pod1；18:51 进程 absent，terminal/exit `UNKNOWN` |
 | `hs_p1_k2_focus_qdot0_freearm_seed3` | 自由非击球臂 + qdot 0 | short-focus | Pod1；iteration `6700`、fatal=`0` 自然终档 |
-| `hs_p1_l2_fullcombo_seed3` | 完整组合 | short-focus | Pod1，accepted |
-| `hs_p1_m2_focus_qdot0_ready_free_seed3` | 强准备姿态 × 自由非击球臂 + qdot 0 | short-focus | Pod1，accepted |
-| `hs_p1_n2_ultra_fullcombo_seed3` | ultra-half 课程 × 完整组合 | ultra-half | Pod1，accepted |
+| `hs_p1_l2_fullcombo_seed3` | 完整组合 | short-focus | Pod1；PID `2457833` 在 iteration `6700` 仍 live |
+| `hs_p1_m2_focus_qdot0_ready_free_seed3` | 强准备姿态 × 自由非击球臂 + qdot 0 | short-focus | Pod1；18:51 进程 absent，terminal/exit `UNKNOWN` |
+| `hs_p1_n2_ultra_fullcombo_seed3` | ultra-half 课程 × 完整组合 | ultra-half | Pod1；18:51 进程 absent，terminal/exit `UNKNOWN` |
 | `hs_p1_p2_focus_qdot0_actionrate_half_seed3` | action-rate 惩罚减半 + qdot 0 | short-focus | Pod1；iteration `6700`、fatal=`0` 自然终档 |
-| `hs_p1_u_cached_pos_ready_seed3` | 拍心优先 × 强准备姿态 | short-focus | Pod1，cached USD，accepted |
-| `hs_p1_v_cached_vel_ready_seed3` | 拍速优先 × 强准备姿态 | short-focus | Pod1，cached USD，accepted |
+| `hs_p1_u_cached_pos_ready_seed3` | 拍心优先 × 强准备姿态 | short-focus | Pod1，cached USD；`model_6700` 存在，进程 absent |
+| `hs_p1_v_cached_vel_ready_seed3` | 拍速优先 × 强准备姿态 | short-focus | Pod1，cached USD；`model_6700` 存在，PID `2465551` 仍 live |
 | `hs_p1_w_cached_pos_free_seed3` | 拍心优先 × 自由非击球臂 | short-focus | Pod1，cached USD；iteration `6700`、fatal=`0` 自然终档 |
-| `hs_p1_x_cached_vel_free_seed3` | 拍速优先 × 自由非击球臂 | short-focus | Pod1，cached USD，accepted |
-| `hs_p1_y_cached_pos_window0_seed3` | 拍心优先 × 触球窗老师静音 | short-focus | Pod1，cached USD，accepted |
+| `hs_p1_x_cached_vel_free_seed3` | 拍速优先 × 自由非击球臂 | short-focus | Pod1，cached USD；`model_6700` 存在，进程 absent |
+| `hs_p1_y_cached_pos_window0_seed3` | 拍心优先 × 触球窗老师静音 | short-focus | Pod1，cached USD；`model_6700` 存在，进程 absent |
 
 前三条是已经启动的旧课程映射，不能被改写成新 short-focus 的严格配对。其余 accepted run 均已通过
 “配置解析、首 iteration、fatal 扫描”这三个简化启动检查；这里的 accepted 只表示训练确实在跑，
 或已经自然终档，不表示这个格已经胜出。
+
+## 18:51 CST 运行快照
+
+- **Pod1 NVML：**只有 3 个训练侧 compute process，GPU0/1/2 为 `0/1/2`，利用率
+  `0/0/1%`。V 的 `model_6700` 已存在，trainer PID `2465551` 仍 live；L2 trainer PID
+  `2457833` 停在 iteration `6700` 且仍 live。U/W/X/Y 的 `model_6700` 均存在，对应
+  进程均 absent（W 保留 07:42 已确认的自然终档结论）。
+- **Z3：**launcher PGID `2483018`、trainer PID `2483019`，位于 Pod1 GPU2。唯一启动
+  已约 11 小时 37 分，仍没有 `rsl_rl` 日志或第一个 `Learning iteration`。这是
+  **启动挂起**；无训练日志也意味着不能写 fatal=`0`，更不能写 accepted。
+- **Pod2 NVML：**只有 2 个 trainer，GPU0/1/2 为 `1/0/1`。D2 PID `511462` 与 F PID
+  `510075` 均已到 iteration `6700`、进程仍 live，两份日志的 fatal 扫描均为 `0`。
+  A/C2 继续使用既有已确认自然终档结论。B2/E/G2/H4/I3/O2/Q2/R2 八条进程虽
+  absent，本轮却未能逐条绑定终档材料，因此它们的 terminal/exit 统一为
+  `UNKNOWN`；不从“进程 absent”倒推“自然终档”。
+- **`+1000` 判读：**U/V/W/X/Y 五个 `model_6700` 都已存在，所以四个初始 TTS 桶的
+  整数账本已具备读取条件；本快照尚未聚合或判定，不发布胜者或 stop 结论。
 
 ## 07:42 CST 运行快照
 

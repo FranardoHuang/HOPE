@@ -57,13 +57,16 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   触球、回台都为 `0/50`，总计物理摔倒 `0/100`，全部因半秒 deadline guard 结束。
   这个 checkpoint 已被严格半秒要求否定；正手最新完整卷的 hit/return 仍为 `0/50`。
 
-  2026-07-18 07:42 CST 运行快照：Pod1 的 K2、P2、W 已在 iteration `6700`、
-  fatal=`0` 自然终档；现为 9 个 trainer 进程，三卡 `4/3/2`，其中 8 条已 accepted、
-  Z3 仍是 boot pending。Pod2 的 A 对照和
-  C2（短准备 + 关节速度惩罚关闭）也在 iteration `6700`、fatal=`0` 自然终档；
-  现为 10 条 live trainer，三卡 `3/4/3`。两 Pod 其余 live trainer 均未见 fatal。
-  Pod1 GPU2 的 Z3 只有一次启动，当时仍在 boot/import，还没有第一个
-  `Learning iteration`；本轮没有重放，也不把 Z3 写成训练成功。详细运行映射与处置见
+  2026-07-18 18:51 CST 运行快照：Pod1 的 NVML 只有 3 个训练侧 compute process，GPU0/1/2 为
+  `0/1/2`，利用率 `0/0/1%`。U/W/X/Y 都已有 `model_6700`且进程 absent；V 也有
+  `model_6700`，但 trainer 仍 live；L2 停在 iteration `6700`且仍 live。Z3 的唯一启动已
+  持续约 11 小时 37 分，仍无 `rsl_rl` 日志或首个 `Learning iteration`，是启动挂起；
+  不能把它写成 fatal=`0` 或 accepted。
+
+  Pod2 只有 2 个 NVML trainer，GPU0/1/2 为 `1/0/1`。D2 和 F 均已到 iteration
+  `6700`、进程仍 live，日志 fatal 扫描为 `0`。除已有自然终档证据的 A/C2 外，
+  另外 8 条旧进程虽 absent，本轮未能逐条绑定终档材料，所以只能写
+  `terminal/exit UNKNOWN`，不冒充自然终档。详细运行映射与处置见
   [半秒冲刺卷宗](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)。
 
   旧 18 条 source 不能事后补出“初始准备时间（TTS）× outcome”分桶；
@@ -95,8 +98,9 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   `94.47/31.98/0.612%`、`46.93/70.82/22.84%`、`94.92/31.47/0.552%`、
   `47.49/69.41/23.14%`、`94.56/32.15/0.572%`。这把候选清楚分成稳定位置组 U/W/Y 与激进
   拍速组 V/X：Y/W 位于当前稳定 demo 前沿；V/X 尚非 demo-ready，却是唯一高回台前沿。由于没有
-  全维支配，按既定规则 stop=`0`。这些仍是训练内 virtual outcome，vendor MuJoCo 尚未验证；
-  Z3 仍是 boot pending，不算 accepted trainer。
+  全维支配，按既定规则 stop=`0`。这些仍是训练内 virtual outcome，vendor MuJoCo 尚未验证。
+  U/V/W/X/Y 的 `model_6700` 现均存在，所以 `+1000` 整数账本已具备读取条件；但尚未
+  聚合或判定，不先宣布胜者。Z3 仍是启动挂起，不算 accepted trainer。
 
 - **300 Hz 动捕不会再触发 300 Hz planner solve：** 正式 arena、schema-4 与 Gate3 profile 显式绑定
   latest-only worker。每个合格样本都进入 estimator 并替换唯一 pending snapshot；Stage 2/3 最多 50 Hz，
