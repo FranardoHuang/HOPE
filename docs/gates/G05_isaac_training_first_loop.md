@@ -46,6 +46,20 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-18 19:23 CST, Z3 closed exactly while other incomplete gates remain untouched; Gate remains `Partial`):
+
+- Pod1's only connection revalidated Z3's numeric process group/trainer identity, start time, command line and
+  source. It still had no first `Learning iteration`, so only that recorded process group was handled. The trainer
+  is now absent from `/proc`; its evidence directory is preserved and it must not be replayed. V and L2 remain
+  NVML-live. The complete terminal-gate evidence was truncated from this review's output, so neither was signaled.
+- Pod2's only connection revalidated D2 and F as live. The review looked for stdout in the source timestamp
+  directory, but their actual logs are under `simple_half_second_sprint_20260718/<run>/run.log`. Current
+  iteration/fatal conditions are therefore `UNKNOWN`, and neither process was signaled. The other eight exits
+  remain `UNKNOWN`; the earlier confirmed A/C2 natural terminals are unchanged.
+- The remote `+1000` aggregation script ran for U/V/W/X/Y, but its long middle section containing the integer
+  output was truncated. Exact metrics, ranking and stop decisions remain `UNKNOWN`. Detailed evidence is in the
+  [half-second sprint experiment](../experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md). G05 remains `Partial`.
+
 Follow-up note (2026-07-18 18:51 CST, most processes exited and `+1000` is readable but unjudged; Gate remains `Partial`):
 
 - Pod1 had only three training-side NVML compute processes, distributed `0/1/2` across GPU0/1/2 at `0/0/1%`

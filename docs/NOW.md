@@ -57,16 +57,16 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   触球、回台都为 `0/50`，总计物理摔倒 `0/100`，全部因半秒 deadline guard 结束。
   这个 checkpoint 已被严格半秒要求否定；正手最新完整卷的 hit/return 仍为 `0/50`。
 
-  2026-07-18 18:51 CST 运行快照：Pod1 的 NVML 只有 3 个训练侧 compute process，GPU0/1/2 为
-  `0/1/2`，利用率 `0/0/1%`。U/W/X/Y 都已有 `model_6700`且进程 absent；V 也有
-  `model_6700`，但 trainer 仍 live；L2 停在 iteration `6700`且仍 live。Z3 的唯一启动已
-  持续约 11 小时 37 分，仍无 `rsl_rl` 日志或首个 `Learning iteration`，是启动挂起；
-  不能把它写成 fatal=`0` 或 accepted。
+  2026-07-18 19:23 CST 运行快照：Pod1 唯一连接重验 Z3 的进程组、trainer 身份、
+  启动时间、命令行和 source 仍相符，且持续没有首个 `Learning iteration`。它是启动
+  挂起；已只精确处置 Z3 自己的数值进程组，最终 trainer `/proc` absent，证据目录保留且
+  绝不重放。V 和 L2 仍在 NVML 中 live；本轮输出截断，没有取回完整终档门条件，
+  因此两条都未 signal。
 
-  Pod2 只有 2 个 NVML trainer，GPU0/1/2 为 `1/0/1`。D2 和 F 均已到 iteration
-  `6700`、进程仍 live，日志 fatal 扫描为 `0`。除已有自然终档证据的 A/C2 外，
-  另外 8 条旧进程虽 absent，本轮未能逐条绑定终档材料，所以只能写
-  `terminal/exit UNKNOWN`，不冒充自然终档。详细运行映射与处置见
+  Pod2 唯一连接确认 D2/F 身份仍 live。本轮误从 source 的时间目录找 stdout；实际
+  `run.log` 在 `simple_half_second_sprint_20260718/<run>/run.log`，所以本次的 iteration/fatal 条件是
+  `UNKNOWN`，fail-closed 不 signal。A/C2 既有自然终档不推翻；其余 8 条 exit 仍为
+  `UNKNOWN`。详细运行映射与处置见
   [半秒冲刺卷宗](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)。
 
   旧 18 条 source 不能事后补出“初始准备时间（TTS）× outcome”分桶；
@@ -77,8 +77,8 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   `87.43/87.16/85.92/82.41%`，合法回台率为 `19.41/29.90/30.75/18.97%`。拍心优先×强准备姿态
   （U）与拍心优先×触球窗老师静音（Y）呈折中，拍速优先×自由非击球臂（X）居中；没有一条在
   所有维度被同父本明确支配，因此 `+100` 不淘汰。`<0.5 s` 已不是零能力，但这些都只是 Isaac
-  训练内 virtual outcome，不是 vendor MuJoCo 成绩。旧 18 臂不与新账本假配对；Z3 已进入
-  唯一一次 boot/import，但尚未越过首个 `Learning iteration`。二十三个单 seed 问题、判读边界和
+  训练内 virtual outcome，不是 vendor MuJoCo 成绩。旧 18 臂不与新账本假配对；Z3 后来仍
+  未越过首个 `Learning iteration`，已按启动挂起精确收口且不重放。二十三个单 seed 问题、判读边界和
   实际 run 映射见
   [半秒冲刺卷宗](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)；严格半秒负结果见
   [0.5 秒卷宗](experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md)。Isaac 结果仍需 vendor MuJoCo 同题。
@@ -99,8 +99,9 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   `47.49/69.41/23.14%`、`94.56/32.15/0.572%`。这把候选清楚分成稳定位置组 U/W/Y 与激进
   拍速组 V/X：Y/W 位于当前稳定 demo 前沿；V/X 尚非 demo-ready，却是唯一高回台前沿。由于没有
   全维支配，按既定规则 stop=`0`。这些仍是训练内 virtual outcome，vendor MuJoCo 尚未验证。
-  U/V/W/X/Y 的 `model_6700` 现均存在，所以 `+1000` 整数账本已具备读取条件；但尚未
-  聚合或判定，不先宣布胜者。Z3 仍是启动挂起，不算 accepted trainer。
+  U/V/W/X/Y 的 `model_6700` 现均存在，所以 `+1000` 整数账本已具备读取条件。
+  远端聚合脚本已运行，但整数输出的超长中段被截断，具体数字仍为 `UNKNOWN`；本轮不
+  宣布胜者或 stop。Z3 已精确收口、证据保留，不重放。
 
 - **300 Hz 动捕不会再触发 300 Hz planner solve：** 正式 arena、schema-4 与 Gate3 profile 显式绑定
   latest-only worker。每个合格样本都进入 estimator 并替换唯一 pending snapshot；Stage 2/3 最多 50 Hz，

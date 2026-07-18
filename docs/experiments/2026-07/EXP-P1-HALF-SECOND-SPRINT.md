@@ -80,9 +80,9 @@
 | `hs_a_control_seed3` | 旧课程对照 | 旧 balanced `0.15/0.20/0.30/0.35` | Pod2；iteration `6700`、fatal=`0` 自然终档；不等同于新表的 short-focus control |
 | `hs_b2_deadline_focus_seed3` | focus 下 qdot `-5` 对照 | `legacy_focus_1 = 0.25/0.40/0.25/0.10` | Pod2；18:51 进程 absent，terminal/exit `UNKNOWN`；与下一条组成旧课程内的 qdot 配对 |
 | `hs_c2_deadline_qdot0_seed3` | focus 下 qdot `0` | `legacy_focus_1 = 0.25/0.40/0.25/0.10` | Pod2；iteration `6700`、fatal=`0` 自然终档；只与上一条作直接 qdot 比较 |
-| `hs_d2_ultra_half_qdot0_seed3` | ultra-half 课程 + qdot 0 | `0.05/0.70/0.20/0.05` | Pod2；PID `511462` 在 iteration `6700` 仍 live，日志 fatal 扫描 `0` |
+| `hs_d2_ultra_half_qdot0_seed3` | ultra-half 课程 + qdot 0 | `0.05/0.70/0.20/0.05` | Pod2；PID `511462` / PGID `511460` 仍 live；18:51 已见 iteration `6700`/fatal 扫描 `0`，19:23 当前值因找错日志路径为 `UNKNOWN` |
 | `hs_e_feasible_qdot0_seed3` | feasible 课程 + qdot 0 | `0.05/0.10/0.45/0.40` | Pod2；18:51 进程 absent，terminal/exit `UNKNOWN` |
-| `hs_f_focus_window_mimic0_seed3` | 触球窗老师静音 + qdot 0 | short-focus `0.10/0.45/0.40/0.05` | Pod2；PID `510075` 在 iteration `6700` 仍 live，日志 fatal 扫描 `0` |
+| `hs_f_focus_window_mimic0_seed3` | 触球窗老师静音 + qdot 0 | short-focus `0.10/0.45/0.40/0.05` | Pod2；PID `510075` / PGID `510073` 仍 live；18:51 已见 iteration `6700`/fatal 扫描 `0`，19:23 当前值因找错日志路径为 `UNKNOWN` |
 | `hs_g2_focus_actionrate0_seed3` | 关闭 action-rate 惩罚 | short-focus | Pod2；18:51 进程 absent，terminal/exit `UNKNOWN` |
 | `hs_h4_focus_qdot0_globalmimic05_seed3` | 全局模仿减半 + qdot 0 | short-focus | Pod2；18:51 进程 absent，terminal/exit `UNKNOWN` |
 | `hs_i3_focus_qdot0_pos17_7_5_seed3` | 拍心/拍速/拍面 `17/7/5` + qdot 0 | short-focus | Pod2；18:51 进程 absent，terminal/exit `UNKNOWN` |
@@ -91,12 +91,12 @@
 | `hs_r2_focus_qdot0_vel7_17_5_seed3` | 拍心/拍速/拍面 `7/17/5` + qdot 0 | short-focus | Pod2；18:51 进程 absent，terminal/exit `UNKNOWN` |
 | `hs_p1_j2_focus_qdot0_ready2x_seed3` | 强准备姿态 + qdot 0 | short-focus | Pod1；18:51 进程 absent，terminal/exit `UNKNOWN` |
 | `hs_p1_k2_focus_qdot0_freearm_seed3` | 自由非击球臂 + qdot 0 | short-focus | Pod1；iteration `6700`、fatal=`0` 自然终档 |
-| `hs_p1_l2_fullcombo_seed3` | 完整组合 | short-focus | Pod1；PID `2457833` 在 iteration `6700` 仍 live |
+| `hs_p1_l2_fullcombo_seed3` | 完整组合 | short-focus | Pod1；PID `2457833` / PGID `2457829` 在 iteration `6700` 仍 live；19:23 终档门输出截断，未 signal |
 | `hs_p1_m2_focus_qdot0_ready_free_seed3` | 强准备姿态 × 自由非击球臂 + qdot 0 | short-focus | Pod1；18:51 进程 absent，terminal/exit `UNKNOWN` |
 | `hs_p1_n2_ultra_fullcombo_seed3` | ultra-half 课程 × 完整组合 | ultra-half | Pod1；18:51 进程 absent，terminal/exit `UNKNOWN` |
 | `hs_p1_p2_focus_qdot0_actionrate_half_seed3` | action-rate 惩罚减半 + qdot 0 | short-focus | Pod1；iteration `6700`、fatal=`0` 自然终档 |
 | `hs_p1_u_cached_pos_ready_seed3` | 拍心优先 × 强准备姿态 | short-focus | Pod1，cached USD；`model_6700` 存在，进程 absent |
-| `hs_p1_v_cached_vel_ready_seed3` | 拍速优先 × 强准备姿态 | short-focus | Pod1，cached USD；`model_6700` 存在，PID `2465551` 仍 live |
+| `hs_p1_v_cached_vel_ready_seed3` | 拍速优先 × 强准备姿态 | short-focus | Pod1，cached USD；`model_6700` 存在，PID `2465551` / PGID `2465546` 仍 live；19:23 终档门输出截断，未 signal |
 | `hs_p1_w_cached_pos_free_seed3` | 拍心优先 × 自由非击球臂 | short-focus | Pod1，cached USD；iteration `6700`、fatal=`0` 自然终档 |
 | `hs_p1_x_cached_vel_free_seed3` | 拍速优先 × 自由非击球臂 | short-focus | Pod1，cached USD；`model_6700` 存在，进程 absent |
 | `hs_p1_y_cached_pos_window0_seed3` | 拍心优先 × 触球窗老师静音 | short-focus | Pod1，cached USD；`model_6700` 存在，进程 absent |
@@ -104,6 +104,24 @@
 前三条是已经启动的旧课程映射，不能被改写成新 short-focus 的严格配对。其余 accepted run 均已通过
 “配置解析、首 iteration、fatal 扫描”这三个简化启动检查；这里的 accepted 只表示训练确实在跑，
 或已经自然终档，不表示这个格已经胜出。
+
+## 19:23 CST 运行与处置快照
+
+- **Z3 精确收口：**Pod1 唯一 SSH 连接重新核对 launcher PGID `2483018`、trainer
+  PID `2483019` 的身份、starttime、cmdline 与 source，均与原启动一致；它仍持续无
+  首个 `Learning iteration`，所以只对该数值 PGID 做精确处置。最终 trainer `/proc`
+  absent；证据目录完整保留，Z3 绝不重放。
+- **Pod1 其余 live：**V PID/PGID `2465551/2465546` 与 L2 `2457833/2457829` 仍在
+  NVML 中 live。本轮完整终档门所需的输出在返回时被截断，因此没有足够证据对
+  V 或 L2 发 signal。
+- **Pod2 实际日志位置：**唯一 SSH 连接确认 D2 PID/PGID `511462/511460` 与 F
+  `510075/510073` 身份仍 live。但本轮误从 source 时间目录寻找 stdout；真正日志是
+  `simple_half_second_sprint_20260718/<run>/run.log`。因此这次的当前 iteration/fatal 条件为
+  `UNKNOWN`，两条都 fail-closed 不 signal。A/C2 既有自然终档不推翻；
+  B2/E/G2/H4/I3/O2/Q2/R2 八条 exit 继续为 `UNKNOWN`。
+- **`+1000` 账本：**远端脚本已针对 U/V/W/X/Y 运行，但四桶整数输出的超长
+  中段被截断。本轮没有可靠的具体数字，所以聚合、排名、胜者和 stop 结论均为
+  `UNKNOWN`。
 
 ## 18:51 CST 运行快照
 

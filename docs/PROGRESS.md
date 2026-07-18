@@ -13,6 +13,15 @@
 
 ## 2026-07-18
 
+- 19:23 CST，Pod1 唯一连接重验 Z3 身份/启动时间/命令/source 一致且长时间无
+  首个 `Learning iteration`；只精确处置该数值进程组，最终 trainer `/proc` absent，证据
+  保留且不重放。V/L2 仍 NVML live，因完整终档门输出被截断而未 signal。Pod2 唯一
+  连接确认 D2/F 身份仍 live；本轮误找 stdout 路径，实际日志在
+  `simple_half_second_sprint_20260718/<run>/run.log`，所以当前 iteration/fatal 条件为
+  `UNKNOWN`，fail-closed 不 signal；其余 8 条 exit 仍 `UNKNOWN`，A/C2 已确认自然终档不变。
+  五臂 `+1000` 聚合脚本已跑，但整数输出中段截断，数字和胜者仍 `UNKNOWN`。见
+  [半秒冲刺](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)。
+
 - 18:51 CST，Pod1 仅 3 个 NVML 训练侧 compute process（GPU `0/1/2`，util `0/0/1%`）：V 与 L2 已到
   iteration `6700` 但进程仍 live，U/W/X/Y 的 `model_6700` 存在且进程 absent。
   Z3 唯一启动约 11 小时 37 分仍无 `rsl_rl` 日志/首个 `Learning iteration`，只能记为
