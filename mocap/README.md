@@ -11,13 +11,23 @@ work. Configure your own rig's network address in the launch files (see `hope_ws
 A single right-handed world frame is shared by mocap, planner, training, and the ball
 physics model:
 
-| Axis | Direction |
-|------|-----------|
-| +x   | forward (toward the opponent half of the table) |
-| +y   | left      |
-| +z   | up        |
+| Axis | Direction | Range over the table |
+|------|-----------|----------------------|
+| +x   | forward (toward the opponent half of the table) | `[0, length]` |
+| +y   | left      | `[-width, 0]` |
+| +z   | up        | `0` **is the table surface** |
+
+The **origin is the near-side left corner of the table _surface_**, from the robot's
+(P1's) perspective. Because `z = 0` is the playing surface, the floor sits at
+`z = -0.76 m`.
 
 Units are SI: metres and seconds. Timestamps are on a single shared clock.
+
+These dimensions and landmarks are not duplicated by hand anywhere: the single source
+of truth is
+`hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/geometry.py`,
+which derives everything from [`configs/ball_physics.yaml`](../configs/ball_physics.yaml)
+so the simulator, planner, and evaluator share one world.
 
 The motion-capture system provides **positions only**. The robot's base orientation (yaw)
 is taken from the robot IMU, not from mocap — this is why the policy observation includes an
@@ -50,3 +60,9 @@ publishes synthetic `/poses` trajectories.
 This is a generic interface description, not a venue setup guide. Rig-specific hardware,
 camera counts, network addresses, and calibration recordings are deployment details you
 supply for your own environment.
+
+For a worked example of one such environment, see the preserved arena design document —
+[MOCAP_SYSTEM_DESIGN.md](MOCAP_SYSTEM_DESIGN.md) ([中文](MOCAP_SYSTEM_DESIGN_ZH.md)). It
+covers the OptiTrack/Motive configuration, camera layout, tracked-object taxonomy,
+`base_link` marker placement, and ball-tracking choices used for the original HOPE arena.
+It predates this stack, so treat the contract above as authoritative where the two differ.

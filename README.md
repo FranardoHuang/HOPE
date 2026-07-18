@@ -54,8 +54,8 @@ threshold, no best-checkpoint selection, no effect on exit codes or deployment.
 | [`hope_ws/`](hope_ws/) | ROS 2 workspace: `hope_msgs` (RacketCommand), `hope_planner`, `hope_bringup`, and the vendored `vrpn_mocap` driver. |
 | [`agibot/`](agibot/) | Agibot A3 materials: deploy example, URDF/meshes, AimRT MuJoCo sim, and PKU open-source hardware. |
 | [`a3_deploy/`](a3_deploy/) | The deploy side: the Mulan-licensed MuJoCo simulation and a clean-room reference runner. See note below. |
-| [`mocap/`](mocap/) | The motion-capture frame and topic contract. |
-| [`docs/`](docs/) | Interfaces and how-to guides (index below). |
+| [`mocap/`](mocap/) | The motion-capture frame and topic contract, plus the preserved arena design document (EN/ZH). |
+| [`docs/`](docs/) | Interfaces and how-to guides (index below), plus [`docs/reference/`](docs/reference/) — preserved design documents and the competition rules. |
 
 ### Two deploy paths
 
@@ -79,6 +79,17 @@ The repository ships two ways to run the policy on the Agibot A3:
 - [docs/PLANNER_INTERFACE.md](docs/PLANNER_INTERFACE.md) — the planner pipeline and `RacketCommand`.
 - [docs/RUN_ON_AGIBOT.md](docs/RUN_ON_AGIBOT.md) — running in MuJoCo and integrating your vendor package.
 - [docs/EXTENDING_HOPE_PINGPONG.md](docs/EXTENDING_HOPE_PINGPONG.md) — bring your own reward, adapter, side selector, motions, physics.
+- [ROADMAP.md](ROADMAP.md) — what is shipped, what is out of scope by design, and what is next.
+
+### Background and rules
+
+[docs/reference/](docs/reference/) preserves the original HOPE system design
+documents — the planner derivation, the WBC training plan, the deployment and
+safety architecture, the mocap arena build — plus the **HOPE AI Challenge 2026
+competition rules** (EN/ZH). That material predates this stack and is kept for
+design context; where it disagrees with the code, the documents above win.
+[docs/reference/REMOVED_FROM_STARTER.md](docs/reference/REMOVED_FROM_STARTER.md)
+records what the focused rewrite dropped and what replaced it.
 
 ## Motions are reference examples only
 
