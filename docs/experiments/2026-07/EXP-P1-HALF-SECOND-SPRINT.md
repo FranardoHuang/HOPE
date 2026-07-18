@@ -73,16 +73,16 @@
 
 `full_combo` 是演示候选搜索，不是单变量因果结论；单变量格负责解释它为什么有效或无效。
 
-## 已接受运行及自然终档的 run 映射
+## 已接受运行及终档状态的 run 映射
 
 | 实际 `run_name` | 对应问题 | 实际课程 | 说明 |
 | --- | --- | --- | --- |
 | `hs_a_control_seed3` | 旧课程对照 | 旧 balanced `0.15/0.20/0.30/0.35` | Pod2；iteration `6700`、fatal=`0` 自然终档；不等同于新表的 short-focus control |
 | `hs_b2_deadline_focus_seed3` | focus 下 qdot `-5` 对照 | `legacy_focus_1 = 0.25/0.40/0.25/0.10` | Pod2；18:51 进程 absent，terminal/exit `UNKNOWN`；与下一条组成旧课程内的 qdot 配对 |
 | `hs_c2_deadline_qdot0_seed3` | focus 下 qdot `0` | `legacy_focus_1 = 0.25/0.40/0.25/0.10` | Pod2；iteration `6700`、fatal=`0` 自然终档；只与上一条作直接 qdot 比较 |
-| `hs_d2_ultra_half_qdot0_seed3` | ultra-half 课程 + qdot 0 | `0.05/0.70/0.20/0.05` | Pod2；PID `511462` / PGID `511460` 仍 live；18:51 已见 iteration `6700`/fatal 扫描 `0`，19:23 当前值因找错日志路径为 `UNKNOWN` |
+| `hs_d2_ultra_half_qdot0_seed3` | ultra-half 课程 + qdot 0 | `0.05/0.70/0.20/0.05` | Pod2；PID `511462` / PGID `511460`；20:52 通过终档审计后精确 TERM→KILL，最终组成员 `0`、NVML absent；这是 terminal teardown，不是自然终档 |
 | `hs_e_feasible_qdot0_seed3` | feasible 课程 + qdot 0 | `0.05/0.10/0.45/0.40` | Pod2；18:51 进程 absent，terminal/exit `UNKNOWN` |
-| `hs_f_focus_window_mimic0_seed3` | 触球窗老师静音 + qdot 0 | short-focus `0.10/0.45/0.40/0.05` | Pod2；PID `510075` / PGID `510073` 仍 live；18:51 已见 iteration `6700`/fatal 扫描 `0`，19:23 当前值因找错日志路径为 `UNKNOWN` |
+| `hs_f_focus_window_mimic0_seed3` | 触球窗老师静音 + qdot 0 | short-focus `0.10/0.45/0.40/0.05` | Pod2；PID `510075` / PGID `510073`；20:52 通过终档审计后精确 TERM→KILL，最终组成员 `0`、NVML absent；这是 terminal teardown，不是自然终档 |
 | `hs_g2_focus_actionrate0_seed3` | 关闭 action-rate 惩罚 | short-focus | Pod2；18:51 进程 absent，terminal/exit `UNKNOWN` |
 | `hs_h4_focus_qdot0_globalmimic05_seed3` | 全局模仿减半 + qdot 0 | short-focus | Pod2；18:51 进程 absent，terminal/exit `UNKNOWN` |
 | `hs_i3_focus_qdot0_pos17_7_5_seed3` | 拍心/拍速/拍面 `17/7/5` + qdot 0 | short-focus | Pod2；18:51 进程 absent，terminal/exit `UNKNOWN` |
@@ -91,19 +91,35 @@
 | `hs_r2_focus_qdot0_vel7_17_5_seed3` | 拍心/拍速/拍面 `7/17/5` + qdot 0 | short-focus | Pod2；18:51 进程 absent，terminal/exit `UNKNOWN` |
 | `hs_p1_j2_focus_qdot0_ready2x_seed3` | 强准备姿态 + qdot 0 | short-focus | Pod1；18:51 进程 absent，terminal/exit `UNKNOWN` |
 | `hs_p1_k2_focus_qdot0_freearm_seed3` | 自由非击球臂 + qdot 0 | short-focus | Pod1；iteration `6700`、fatal=`0` 自然终档 |
-| `hs_p1_l2_fullcombo_seed3` | 完整组合 | short-focus | Pod1；PID `2457833` / PGID `2457829` 在 iteration `6700` 仍 live；19:23 终档门输出截断，未 signal |
+| `hs_p1_l2_fullcombo_seed3` | 完整组合 | short-focus | Pod1；PID `2457833` / PGID `2457829`；20:52 通过终档审计后精确 TERM→KILL、NVML absent，但短等待后 `/proc` 仍见一个组成员，最终状态 `UNKNOWN`；以后只读确认 absent/zombie，绝不再 signal |
 | `hs_p1_m2_focus_qdot0_ready_free_seed3` | 强准备姿态 × 自由非击球臂 + qdot 0 | short-focus | Pod1；18:51 进程 absent，terminal/exit `UNKNOWN` |
 | `hs_p1_n2_ultra_fullcombo_seed3` | ultra-half 课程 × 完整组合 | ultra-half | Pod1；18:51 进程 absent，terminal/exit `UNKNOWN` |
 | `hs_p1_p2_focus_qdot0_actionrate_half_seed3` | action-rate 惩罚减半 + qdot 0 | short-focus | Pod1；iteration `6700`、fatal=`0` 自然终档 |
 | `hs_p1_u_cached_pos_ready_seed3` | 拍心优先 × 强准备姿态 | short-focus | Pod1，cached USD；`model_6700` 存在，进程 absent |
-| `hs_p1_v_cached_vel_ready_seed3` | 拍速优先 × 强准备姿态 | short-focus | Pod1，cached USD；`model_6700` 存在，PID `2465551` / PGID `2465546` 仍 live；19:23 终档门输出截断，未 signal |
+| `hs_p1_v_cached_vel_ready_seed3` | 拍速优先 × 强准备姿态 | short-focus | Pod1，cached USD；PID `2465551` / PGID `2465546`；20:52 通过终档审计后精确 TERM→KILL，最终进程组 absent；这是 terminal teardown，不是自然终档 |
 | `hs_p1_w_cached_pos_free_seed3` | 拍心优先 × 自由非击球臂 | short-focus | Pod1，cached USD；iteration `6700`、fatal=`0` 自然终档 |
 | `hs_p1_x_cached_vel_free_seed3` | 拍速优先 × 自由非击球臂 | short-focus | Pod1，cached USD；`model_6700` 存在，进程 absent |
 | `hs_p1_y_cached_pos_window0_seed3` | 拍心优先 × 触球窗老师静音 | short-focus | Pod1，cached USD；`model_6700` 存在，进程 absent |
 
 前三条是已经启动的旧课程映射，不能被改写成新 short-focus 的严格配对。其余 accepted run 均已通过
-“配置解析、首 iteration、fatal 扫描”这三个简化启动检查；这里的 accepted 只表示训练确实在跑，
-或已经自然终档，不表示这个格已经胜出。
+“配置解析、首 iteration、fatal 扫描”这三个简化启动检查；这里的 accepted 只表示训练确实开始过，
+并已运行或到达终档，不表示自然退出，也不表示这个格已经胜出。
+
+## 2026-07-18 20:52 CST 四臂终档 teardown 收尾
+
+- **先修正审计谓词：**旧的 substring 身份匹配和粗粒度 fatal 搜索可能误判。本轮改为读取 NUL
+  分隔命令行中的完整 `run_name` token，并在完整日志行上识别语义 fatal。V、L2、D2、F 四条都
+  通过 trainer 身份、唯一日志、最后 iteration=`6700`、连续 10 秒无增长、fatal=`0` 和配方指纹
+  六项检查，才允许处置。
+- **Pod1：**V trainer PID `2465551` / PGID `2465546` 先精确 TERM；组仍存在后只对同一数值 PGID
+  精确 KILL，最终进程组 absent。L2 trainer PID `2457833` / PGID `2457829` 同样精确 TERM→KILL；
+  最终 NVML absent，三张 GPU 均为显存 `0`、利用率 `0%`，但短等待后 `/proc` 仍见一个组成员。
+  因此 L2 最终状态保持 `UNKNOWN`；下一轮只允许只读确认 absent/zombie，绝不再次 signal。
+- **Pod2：**D2 PID `511462` / PGID `511460` 与 F PID `510075` / PGID `510073` 都精确
+  TERM→KILL，最终组成员 `0`、NVML absent。三卡显存均为 `0`；GPU2 瞬时利用率 `51%`，但没有
+  对应 NVML 进程，不能把这一个采样点写成 trainer live。
+- **诚实分类：**四条都只是完成终档后的 teardown closure，**不是自然终档**；既有 model 与结果
+  证据不变。W/Y 仍是下一步同卷 vendor MuJoCo 双候选，不再盲加 Isaac step。
 
 ## 2026-07-18 约 19:48 CST 运行与判读快照
 

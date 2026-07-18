@@ -57,16 +57,14 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   触球、回台都为 `0/50`，总计物理摔倒 `0/100`，全部因半秒 deadline guard 结束。
   这个 checkpoint 已被严格半秒要求否定；正手最新完整卷的 hit/return 仍为 `0/50`。
 
-  2026-07-18 19:23 CST 运行快照：Pod1 唯一连接重验 Z3 的进程组、trainer 身份、
-  启动时间、命令行和 source 仍相符，且持续没有首个 `Learning iteration`。它是启动
-  挂起；已只精确处置 Z3 自己的数值进程组，最终 trainer `/proc` absent，证据目录保留且
-  绝不重放。V 和 L2 仍在 NVML 中 live；本轮输出截断，没有取回完整终档门条件，
-  因此两条都未 signal。
-
-  Pod2 唯一连接确认 D2/F 身份仍 live。本轮误从 source 的时间目录找 stdout；实际
-  `run.log` 在 `simple_half_second_sprint_20260718/<run>/run.log`，所以本次的 iteration/fatal 条件是
-  `UNKNOWN`，fail-closed 不 signal。A/C2 既有自然终档不推翻；其余 8 条 exit 仍为
-  `UNKNOWN`。详细运行映射与处置见
+  2026-07-18 20:52 CST，四条停在终档后的训练已完成精确收尾。审计改为读取 NUL 分隔的完整
+  `run_name` token，并按完整日志行判断真正 fatal；V、L2、D2、F 均通过 trainer 身份、唯一日志、
+  最后 iteration=`6700`、10 秒不再增长、fatal=`0` 和配方指纹核对。Pod1 的 V 已精确
+  TERM→KILL 且进程组最终 absent；L2 同样只处置自己的数值进程组，NVML 已 absent、三卡显存与
+  利用率均为零，但短等待后 `/proc` 仍见一个组成员，所以其最终状态仍是 `UNKNOWN`，以后只读确认
+  absent/zombie，绝不再次 signal。Pod2 的 D2/F 均精确 TERM→KILL，最终组成员为零且 NVML absent；
+  三卡显存为零，GPU2 瞬时 `51%` 利用率没有对应 NVML 进程，不能倒推训练仍在运行。这四条都是
+  **终档 teardown 收尾**，不是自然终档；model 和结果沿用此前已取得的证据。详细运行映射与处置见
   [半秒冲刺卷宗](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)。
 
   旧 18 条 source 不能事后补出“初始准备时间（TTS）× outcome”分桶；
@@ -111,8 +109,8 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   但约 `22%–24%` fall 使其不具备 demo-ready 安全性。下一步是 W/Y 跑同卷 vendor MuJoCo，
   不再盲加 Isaac step。训练内 virtual outcome 不能代替该部署裁判。
 
-  Z3 已精确收口并保留证据，不重放。Pod1 的 V/L2 与 Pod2 的 D2/F 仍 live；由于 checkpoint/log
-  路径门尚未完整闭合，本轮没有对它们发 signal。
+  Z3 已精确收口并保留证据，不重放；V/L2/D2/F 的终档 teardown 也已按各自数值进程组收尾，
+  但不能写成自然终档。L2 的最终进程态仍为 `UNKNOWN`，只允许后续只读复核，不再 signal。
 
 - **300 Hz 动捕不会再触发 300 Hz planner solve：** 正式 arena、schema-4 与 Gate3 profile 显式绑定
   latest-only worker。每个合格样本都进入 estimator 并替换唯一 pending snapshot；Stage 2/3 最多 50 Hz，

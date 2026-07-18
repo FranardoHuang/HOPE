@@ -13,6 +13,14 @@
 
 ## 2026-07-18
 
+- 20:52 CST，修正四条终档臂的审计条件：用 NUL 分隔的完整 `run_name` token 核身份，并按完整
+  日志行识别真正 fatal；V/L2/D2/F 都通过唯一日志、iteration `6700`、10 秒稳定、fatal=`0` 与
+  配方指纹检查。V、D2、F 已仅对各自数值进程组完成 TERM→KILL，最终组 absent/成员为零且 NVML
+  absent；L2 也完成精确 TERM→KILL 且 NVML absent、Pod1 三卡显存/利用率归零，但短等待后
+  `/proc` 仍有一个组成员，所以最终状态保持 `UNKNOWN`，以后只读确认 absent/zombie，绝不再 signal。
+  四条都属于终档 teardown 收尾，不能写成自然终档。W/Y 的下一步仍是同卷 vendor MuJoCo；G05
+  保持 `Partial`。详见[半秒冲刺](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)。
+
 - 约 19:48 CST，新五臂 `+1000` 已完整：`5701–6700` 的 1000-update 窗和 `6201–6700`
   最近 500-update 窗均为 missing=`0`、duplicate=`0`。U/V/W/X/Y 累计“完成率/合法回台率/fall 率”
   为 `93.31/31.94/0.87%`、`48.40/70.14/22.05%`、`94.14/31.52/0.74%`、

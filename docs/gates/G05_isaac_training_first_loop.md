@@ -46,6 +46,20 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-18 20:52 CST, four terminal teardowns closed; Gate remains `Partial`):
+
+- The four-arm audit now matches a NUL-complete `run_name` token and scans semantic fatal conditions over full
+  log lines. V, L2, D2, and F each passed trainer identity, unique-log, last-iteration `6700`, ten-second
+  stability, fatal-zero, and recipe-fingerprint checks before any action.
+- Pod1 V was handled only through its numeric process group with exact TERM then KILL, and the group is absent.
+  L2 received the same exact-group teardown and is NVML-absent; all Pod1 GPUs ended at zero memory and zero
+  utilization. One `/proc` group member remained after the short wait, so L2's final state is `UNKNOWN`; future
+  work may only verify absent/zombie read-only and must never signal it again.
+- Pod2 D2 and F each received exact TERM then KILL; both groups ended with zero members and no NVML process.
+  GPU memory was zero on all cards. GPU2's instantaneous 51% utilization had no NVML process and is not evidence
+  of a live trainer. These four closures are terminal teardowns, not natural terminals; existing model/result
+  evidence is unchanged. W/Y still proceed to the same vendor MuJoCo exam, and G05 remains `Partial`.
+
 Follow-up note (2026-07-18 about 19:48 CST, complete `+1000` comparison; Gate remains `Partial`):
 
 - All five new cells have complete ledgers for both updates `5701–6700` and the recent `6201–6700` window:
