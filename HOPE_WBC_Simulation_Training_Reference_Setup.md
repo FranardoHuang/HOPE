@@ -2,6 +2,14 @@
 
 v0.5 — 2026-03-25
 
+> **Preserved reference document.** This predates the current HOPE
+> stack (it describes a broader dual-backend Isaac Lab / mjlab plan) and is kept
+> for design background and provenance. Where it disagrees with the shipped
+> code, the authoritative training path is
+> [`docs/TRAIN_POLICY.md`](docs/TRAIN_POLICY.md) and the policy contract is
+> [`docs/POLICY_INTERFACE.md`](docs/POLICY_INTERFACE.md). Index:
+> [`REFERENCE_DOCS.md`](REFERENCE_DOCS.md).
+
 ## Overview
 
 This document describes the simulation training pipeline for the HOPE ping-pong whole-body controller (WBC), which is the Stage-4 whole-body controller in the HOPE hierarchical pipeline. The WBC is a reinforcement learning policy that receives racket target commands from the HOPE model-based planner (Stages 1–3) and produces coordinated whole-body joint commands to position the paddle at the desired interception point with the correct velocity and orientation.

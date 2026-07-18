@@ -2,6 +2,12 @@
 
 v0.1 — 2026-03-19
 
+> **Preserved reference document.** This predates the current HOPE
+> stack and is kept for design background and provenance. Where it disagrees
+> with the shipped code, the authoritative planner contract is
+> [`docs/PLANNER_INTERFACE.md`](docs/PLANNER_INTERFACE.md). Index:
+> [`REFERENCE_DOCS.md`](REFERENCE_DOCS.md).
+
 ## Overview
 
 This document provides a reference implementation of the model-based planner (Stages 1–3) for computing the desired 7-DOF racket state — interception position, velocity, and face orientation — for a humanoid ping-pong player. The planner operates within the HOPE canonical world frame defined in the companion document *HOPE Motion Capture System Reference Setup for Ping-Pong Arena*.
