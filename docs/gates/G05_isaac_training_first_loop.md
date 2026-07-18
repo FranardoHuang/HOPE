@@ -46,6 +46,25 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-18 about 19:48 CST, complete `+1000` comparison; Gate remains `Partial`):
+
+- All five new cells have complete ledgers for both updates `5701–6700` and the recent `6201–6700` window:
+  missing and duplicate updates are zero in every cell and window. Cumulative completion/legal-return/fall rates
+  were U `93.31/31.94/0.87%`, V `48.40/70.14/22.05%`, W `94.14/31.52/0.74%`, X
+  `49.68/68.08/22.00%`, and Y `93.57/32.31/0.82%`. Recent-500 rates were U
+  `94.99/32.46/0.30%`, V `48.14/79.06/23.40%`, W `95.28/32.27/0.24%`, X
+  `48.49/77.33/23.61%`, and Y `95.18/33.10/0.31%`.
+- In the recent `<0.5 s` bucket, completion/legal-return rates were U `96.42/26.15%`, V
+  `48.88/63.26%`, W `96.61/26.39%`, X `49.22/60.31%`, and Y `96.53/26.34%`. All five cells remain
+  non-dominated across completion, legal return, fall, sub-half-second completion, and sub-half-second return;
+  no cell is stopped on one metric alone.
+- W/Y are the two demo-priority candidates and U is the stable reserve. V/X preserve the high-return frontier,
+  but `22%–24%` fall rates make them not demo-ready. The next behavior gate is the same vendor MuJoCo exam for
+  W/Y, not more blind Isaac updates. Training-time virtual outcomes are not deployment evidence, so G05 remains
+  `Partial`.
+- Z3 has been closed exactly and will not be replayed. Pod1 V/L2 and Pod2 D2/F remain live; their checkpoint/log
+  path gate was incomplete, so none was signaled.
+
 Follow-up note (2026-07-18 19:23 CST, Z3 closed exactly while other incomplete gates remain untouched; Gate remains `Partial`):
 
 - Pod1's only connection revalidated Z3's numeric process group/trainer identity, start time, command line and
