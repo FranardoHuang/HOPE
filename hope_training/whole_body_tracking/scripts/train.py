@@ -84,26 +84,56 @@ def _set_dotted(obj, dotted: str, value, applied: list, where: str) -> None:
 
 
 def _apply_domain_rand(env_cfg, dr, applied: list) -> None:
-    """Apply the shared link-mass / PD-gain randomization knobs, guarded by hasattr."""
+    """Apply the shared link-mass / PD-gain randomization knobs.
+
+    The event terms are named ``events.link_mass`` and ``events.pd_gains`` in
+    :class:`HOPEPingPongEnvCfg.EventCfg` — the override MUST target those exact fields
+    (see ``tests/test_domain_rand_overrides.py``). Semantics per range knob:
+      * absent          -> keep the env-cfg default;
+      * ``null``        -> disable the event entirely (set the term to None);
+      * ``[lo, hi]``    -> override the distribution parameters.
+    """
     if dr is None:
         return
     events = getattr(env_cfg, "events", None)
     if events is None:
         return
-    mass_range = dr.get("link_mass_range")
-    if mass_range is not None and hasattr(events, "randomize_link_mass") and events.randomize_link_mass is not None:
-        events.randomize_link_mass.params["mass_distribution_params"] = (float(mass_range[0]), float(mass_range[1]))
-        applied.append(f"events.randomize_link_mass = {tuple(float(v) for v in mass_range)}")
-    if hasattr(events, "randomize_pd_gains"):
-        pd_range = dr.get("pd_gain_range")
-        if pd_range is None:
-            if events.randomize_pd_gains is not None:
-                events.randomize_pd_gains = None
-                applied.append("events.randomize_pd_gains = None (fixed PD gains)")
-        elif events.randomize_pd_gains is not None:
-            events.randomize_pd_gains.params["stiffness_distribution_params"] = (float(pd_range[0]), float(pd_range[1]))
-            events.randomize_pd_gains.params["damping_distribution_params"] = (float(pd_range[0]), float(pd_range[1]))
-            applied.append(f"events.randomize_pd_gains = {tuple(float(v) for v in pd_range)}")
+
+    def _apply(range_key: str, event_name: str, param_keys: tuple[str, ...]) -> None:
+        if range_key not in dr:
+            return
+        if not hasattr(events, event_name):
+            print(
+                f"[train.py] WARNING: domain_rand.{range_key}: events.{event_name} does not "
+                "exist on this env cfg; skipped.",
+                flush=True,
+            )
+            return
+        rng = dr.get(range_key)
+        if rng is None:
+            if getattr(events, event_name) is not None:
+                setattr(events, event_name, None)
+                applied.append(f"events.{event_name} = None (disabled)")
+            return
+        term = getattr(events, event_name)
+        if term is None:
+            print(
+                f"[train.py] WARNING: domain_rand.{range_key}: events.{event_name} is already "
+                "disabled in the env cfg; range ignored.",
+                flush=True,
+            )
+            return
+        lo, hi = float(rng[0]), float(rng[1])
+        for key in param_keys:
+            term.params[key] = (lo, hi)
+        applied.append(f"events.{event_name} = {(lo, hi)}")
+
+    _apply("link_mass_range", "link_mass", ("mass_distribution_params",))
+    _apply(
+        "pd_gain_range",
+        "pd_gains",
+        ("stiffness_distribution_params", "damping_distribution_params"),
+    )
 
 
 def _apply_task_overrides(env_cfg, cfg, applied: list) -> None:

@@ -3,6 +3,10 @@
 Forward-integrates the ball trajectory with explicit Euler using a simple
 flight model (quadratic drag + gravity) and a diagonal table-bounce model, and
 returns the predicted ball state at the fixed virtual hitting plane.
+
+Table contact follows the shared ``configs/ball_physics.yaml`` convention: the
+ball CENTROID contacts the surface at z = ball radius (0.02 m for a 40 mm ball),
+and the bounce event is interpolated to that plane within the crossing step.
 """
 
 from dataclasses import dataclass
@@ -61,6 +65,10 @@ class BallTrajectoryPredictor:
         dt = self.config.dt_integrate
         max_steps = int(self.config.max_predict_time / dt)
         x_hit = self.config.x_hit
+        # Contact plane for the ball CENTROID: the ball touches the table when its
+        # centre reaches z = ball radius (configs/ball_physics.yaml convention),
+        # not when the centre reaches the table surface z = 0.
+        contact_z = self.physics.radius
 
         p = p0.copy()
         v = v0.copy()
@@ -82,15 +90,15 @@ class BallTrajectoryPredictor:
             t += dt
             bounce_this_step = False
 
-            # --- Bounce detection ---
-            if p_new[2] < 0.0 and v_new[2] < 0.0:
+            # --- Bounce detection (centroid contact at z = ball radius, interpolated) ---
+            if p_new[2] < contact_z and v_new[2] < 0.0:
                 if self._is_on_table(p_new):
                     dz = p[2] - p_new[2]
-                    frac = p[2] / dz if dz > 1e-9 else 0.5
+                    frac = (p[2] - contact_z) / dz if dz > 1e-9 else 0.5
                     frac = np.clip(frac, 0.0, 1.0)
 
                     p_bounce = p + frac * (p_new - p)
-                    p_bounce[2] = 0.0
+                    p_bounce[2] = contact_z
                     v_at_bounce = v + a * (frac * dt)
                     v_post = self._apply_bounce(v_at_bounce)
 
@@ -101,7 +109,7 @@ class BallTrajectoryPredictor:
                     bounces += 1
                     bounce_this_step = True
                 else:
-                    p_new[2] = max(p_new[2], 0.0)
+                    p_new[2] = max(p_new[2], contact_z)
 
             # --- Hitting-plane crossing detection ---
             if p_prev_x > x_hit and p_new[0] <= x_hit and v_new[0] < 0:
@@ -123,9 +131,11 @@ class BallTrajectoryPredictor:
                 p_cross[0] = x_hit
 
                 # A crossing at table-skim height with the ball still falling
-                # means no bounce was modelled (off-table, z clamped to 0): the
-                # ball is effectively dead, so it is not a usable strike.
-                dead_ball = p_cross[2] < 0.05 and v_cross[2] < 0.0
+                # means no bounce was modelled (off-table, centroid clamped at the
+                # contact height z = ball radius): the ball is effectively dead, so
+                # it is not a usable strike. The margin keeps the threshold strictly
+                # above the clamp height.
+                dead_ball = p_cross[2] < contact_z + 0.03 and v_cross[2] < 0.0
                 return StrikeTarget(
                     p_ball=p_cross, v_ball=v_cross,
                     t_strike=t_cross, num_bounces=bounces, valid=not dead_ball,

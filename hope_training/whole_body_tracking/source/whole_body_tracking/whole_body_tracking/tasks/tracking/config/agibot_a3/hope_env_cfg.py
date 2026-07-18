@@ -36,11 +36,11 @@ from whole_body_tracking.robots.agibot_a3 import (
     A3_FEET_BODIES,
     A3_TRACKED_BODIES,
     A3_UPPER_TRACKED,
-    AGIBOT_A3_ACTION_SCALE,
     AGIBOT_A3_CFG,
     AGIBOT_A3_PASSIVE_HEAD_JOINT_NAMES,
 )
 from whole_body_tracking.tasks.tracking.tracking_env_cfg import MySceneCfg
+from whole_body_tracking.utils.action_adapter_config import load_action_adapter_config
 
 
 def _find_motion_clip(name: str) -> str:
@@ -311,9 +311,15 @@ class HOPEPingPongEnvCfg(ManagerBasedRLEnvCfg):
         self.sim.physics_material = self.scene.terrain.physics_material
         self.sim.physx.gpu_max_rigid_patch_count = 10 * 2**15
 
-        # Robot + shared action adapter.
+        # Robot + shared action adapter. default_q / action_scale / joint clamp all come from the
+        # ONE shared config the deploy runner reads (action_adapter.yaml), so the same raw action
+        # produces the same joint targets — and the same joint_pos observation — in training and
+        # deployment (see tests/test_action_adapter_parity.py).
+        adapter = load_action_adapter_config()
         self.scene.robot = AGIBOT_A3_CFG.replace(prim_path="{ENV_REGEX_NS}/Robot")
-        self.actions.joint_pos.scale = AGIBOT_A3_ACTION_SCALE
+        self.scene.robot.init_state.joint_pos = adapter.default_q_by_name()
+        self.actions.joint_pos.scale = adapter.action_scale_by_name()
+        self.actions.joint_pos.position_clamp = adapter.position_clamp_by_name()
 
         self.viewer.eye = (1.5, 1.5, 1.5)
         self.viewer.origin_type = "asset_root"

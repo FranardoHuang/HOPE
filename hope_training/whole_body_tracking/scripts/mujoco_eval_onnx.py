@@ -30,6 +30,20 @@ real simulated ball. Forehand, backhand and all serves merge into the one number
 Emits only ``{"success_rate": <float>}`` to stdout (and optionally --json-out); a
 one-line human summary goes to stderr.
 
+Two evaluation modes (``--eval-mode``):
+
+  * ``continuous`` (default) — deploy-faithful continuous rally: the robot, policy
+    ``last_action``, lifecycle and fixed station are initialized ONCE; between serves
+    the policy keeps running through its follow-through/recovery with no state reset
+    and no teleport, exactly like the deploy runner. The serve side follows the
+    pattern FH, FH, BH, BH, ... so all four adjacent transitions (FH->FH, FH->BH,
+    BH->BH, BH->FH) are exercised; the transitions actually seen are reported on
+    stderr. A fall keeps affecting later serves — that is the honest continuous
+    measurement.
+  * ``independent`` — independent-strike evaluation: every serve resets the robot to
+    its stand with a fresh lifecycle/last_action/station. This measures isolated
+    swings only; it does NOT validate between-swing transitions.
+
 Requires ``mujoco``, ``onnxruntime``, ``pyyaml`` and ``numpy`` plus the shipped
 reference deploy package (``a3_deploy/a3_deploy_example``) and the
 ``a3_pingpong`` MJCF. Runs OUTSIDE Isaac.
@@ -231,53 +245,96 @@ def run_eval(args) -> dict:
     head_idx = list(HEAD_INDICES)
     net_clear_z = table.net_height + physics.ball_radius
     contact_radius = args.contact_radius
-    max_ticks = max(1, int(round(args.max_trial_seconds / runtime_cfg.control_dt)))
+    dt = runtime_cfg.control_dt
+    max_ticks = max(1, int(round(args.max_trial_seconds / dt)))
     rng = np.random.default_rng(args.seed)
+    continuous = args.eval_mode == "continuous"
+
+    def _policy_tick(lifecycle, source, last_action, fixed_station_xy):
+        """One 50 Hz policy step (identical to the deploy runner's tick).
+
+        Returns (events, applied_action) — the caller keeps ``applied_action`` as
+        the next tick's ``last_action``.
+        """
+        state = scene.read_robot_state()
+        target = lifecycle.update(source.poll(), state)
+        obs = build_observation(state, target, last_action, default_q, fixed_station_xy)
+        raw_action = policy.infer(obs)
+        # Applied action = raw with the passive head columns zeroed, matching both
+        # the deploy runner and training's zeroed last_action feedback.
+        applied_action = np.asarray(raw_action, dtype=np.float64).copy()
+        if runtime_cfg.passive_neck:
+            applied_action[head_idx] = 0.0
+        q_des = runtime_cfg.action_adapter.decode(applied_action)
+        if runtime_cfg.passive_neck:
+            q_des[head_idx] = default_q[head_idx]
+        scene.write_targets(q_des, kp, kd)
+        return scene.step(), applied_action
+
+    def _park_ball():
+        """Drop the ball out of play (past the far edge) between rally serves."""
+        scene.set_ball(
+            [scene.near_edge_x + scene.length + 1.0, 0.0, scene.table_height + 0.5],
+            [0.0, 0.0, 0.0],
+        )
+
+    # Continuous mode: ONE initialization for the whole session — robot state,
+    # last_action, lifecycle and the fixed station all persist across serves
+    # (matching the deploy runner). Independent mode re-creates them per serve.
+    scene.reset_stand()
+    lifecycle = SwingLifecycle(runtime_cfg.lifecycle)
+    source = QueueRacketCommandSource()
+    last_action = np.zeros(31, dtype=np.float64)
+    fixed_station_xy = scene.base_pos_w()[:2].copy()
+    max_rest_ticks = max(1, int(round(args.max_rest_seconds / dt)))
+    transitions_seen: set = set()
+    prev_side = None
+    task_counter = 0
 
     for trial in range(args.num_serves):
-        # Alternate forehand / backhand so both sides (and all four adjacent side
-        # transitions across the session) are exercised in the one merged number.
-        side = FOREHAND if (trial % 2 == 0) else BACKHAND
+        # Side pattern FH, FH, BH, BH, ... exercises all four adjacent side
+        # transitions (FH->FH, FH->BH, BH->BH, BH->FH) across the session.
+        side = FOREHAND if (trial % 4) < 2 else BACKHAND
+        if prev_side is not None:
+            transitions_seen.add((prev_side, side))
+        prev_side = side
         _strike_pt, serve_pos, serve_vel = _sample_serve(rng, side, scene, physics, args)
 
-        # Each serve is an independent strike task: reset the robot to its stand, place
-        # the incoming ball, and start a fresh lifecycle / policy history. (The deploy
-        # runner is continuous; resetting per serve here just makes every attempt an
-        # independent trial for the denominator -- an eval-harness choice, not a scored
-        # threshold or model-admission step.)
-        scene.reset_stand()
-        scene.set_ball(serve_pos, serve_vel)
-        lifecycle = SwingLifecycle(runtime_cfg.lifecycle)
-        source = QueueRacketCommandSource()
-        last_action = np.zeros(31, dtype=np.float64)
-        fixed_station_xy = scene.base_pos_w()[:2].copy()
+        if not continuous:
+            # Independent-strike evaluation: fresh robot + policy state per serve.
+            scene.reset_stand()
+            lifecycle = SwingLifecycle(runtime_cfg.lifecycle)
+            source = QueueRacketCommandSource()
+            last_action = np.zeros(31, dtype=np.float64)
+            fixed_station_xy = scene.base_pos_w()[:2].copy()
+        elif trial > 0:
+            # Continuous rally: keep the policy running (no reset, no teleport)
+            # through follow-through/recovery until it is ready for the next ball.
+            _park_ball()
+            for _ in range(max_rest_ticks):
+                _events, last_action = _policy_tick(
+                    lifecycle, source, last_action, fixed_station_xy
+                )
+                if lifecycle.phase.value == "ready":
+                    break
 
-        task_id = trial + 1
+        scene.set_ball(serve_pos, serve_vel)
+        task_counter += 1
+        task_id = task_counter
         revision = 0
         contacted = False
         net_clear = False
         first_bounce = None
 
         for _tick in range(max_ticks):
-            state = scene.read_robot_state()
             ball_pos, ball_vel = scene.ball_state()
-
             cmd = _predict_command(
                 ball_pos, ball_vel, side, scene, physics, args, task_id, revision, RacketCommand
             )
             revision += 1
             source.submit(cmd)
-            target = lifecycle.update(source.poll(), state)
 
-            obs = build_observation(state, target, last_action, default_q, fixed_station_xy)
-            raw_action = policy.infer(obs)
-            last_action = np.asarray(raw_action, dtype=np.float64).copy()
-            q_des = runtime_cfg.action_adapter.decode(raw_action)
-            if runtime_cfg.passive_neck:
-                q_des[head_idx] = default_q[head_idx]
-            scene.write_targets(q_des, kp, kd)
-
-            events = scene.step()
+            events, last_action = _policy_tick(lifecycle, source, last_action, fixed_station_xy)
 
             # --- contact: real MuJoCo ball<->racket contact, or the allowed proximity
             #     fallback (ball within contact_radius of the racket site with the
@@ -322,9 +379,18 @@ def run_eval(args) -> dict:
         accumulator.add_bool(success)
 
     scene.close()
+    if continuous:
+        _names = {FOREHAND: "FH", BACKHAND: "BH"}
+        seen = sorted(f"{_names[a]}->{_names[b]}" for a, b in transitions_seen)
+        all_four = len(transitions_seen) == 4
+        print(
+            f"[mujoco_eval] adjacent side transitions exercised: {', '.join(seen) or 'none'}"
+            + ("" if all_four else "  (increase --num-serves >= 5 to cover all four)"),
+            file=sys.stderr,
+        )
     print(
-        f"[mujoco_eval] serves={accumulator.attempts} returns={accumulator.successes} "
-        f"success_rate={accumulator.value:.4f}",
+        f"[mujoco_eval] mode={args.eval_mode} serves={accumulator.attempts} "
+        f"returns={accumulator.successes} success_rate={accumulator.value:.4f}",
         file=sys.stderr,
     )
     return accumulator.as_dict()
@@ -337,6 +403,17 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--runtime-config", default=None, help="hope_pingpong_runtime.yaml (default: shipped).")
     parser.add_argument("--reference-dir", default=None, help="Dir containing the reference deploy package.")
     parser.add_argument("--num-serves", type=int, default=50, help="Number of served balls (denominator).")
+    parser.add_argument(
+        "--eval-mode", choices=["continuous", "independent"], default="continuous",
+        help="continuous (default): one uninterrupted rally session — robot/policy state persist "
+             "across serves and all four adjacent side transitions are exercised. "
+             "independent: reset the robot per serve (isolated-swing evaluation only).",
+    )
+    parser.add_argument(
+        "--max-rest-seconds", type=float, default=2.0,
+        help="continuous mode: max seconds the policy gets between serves to finish "
+             "follow-through/recovery before the next ball is served.",
+    )
     parser.add_argument(
         "--max-trial-seconds", type=float, default=3.0, help="Max simulated seconds per serve before scoring."
     )

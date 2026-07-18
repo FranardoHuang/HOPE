@@ -28,7 +28,7 @@ Assembled in this exact order every tick:
 | `[0:3]`     | `base_ang_vel`           | 3  | pelvis body, rad/s | Pelvis angular velocity (IMU). |
 | `[3:34]`    | `joint_pos`              | 31 | rad | `q - default_q`, joint order below. |
 | `[34:65]`   | `joint_vel`              | 31 | rad/s | Encoder joint velocities. |
-| `[65:96]`   | `last_action`            | 31 | raw | The exact `raw_action` applied on the previous tick. |
+| `[65:96]`   | `last_action`            | 31 | raw | The action **applied** on the previous tick: `raw_action` with the passive head columns (idx 3, 4) zeroed. |
 | `[96:99]`   | `projected_gravity`      | 3  | base frame, unit | Gravity direction in the base frame (IMU). |
 | `[99:101]`  | `base_forward_xy`        | 2  | world xy, unit | Base forward unit vector projected to world XY (from IMU yaw). |
 | `[101:103]` | `fixed_station_error_xy` | 2  | world xy, m | Fixed station position (a startup constant) minus current base XY. |
@@ -51,9 +51,12 @@ Notes:
 
 ## Action (31 dims)
 
-Each tick the actor emits `raw_action[31]` in the joint order below. `raw_action` is:
-1. fed back verbatim as next tick's `last_action`, and
-2. passed through the **ActionAdapter** to produce 31 joint-position targets.
+Each tick the actor emits `raw_action[31]` in the joint order below. The two passive head
+columns (idx 3, 4) are zeroed to form the **applied action**, which is:
+1. fed back as next tick's `last_action` (so those two columns are always 0 — exactly as
+   training zeroes them in its applied-action feedback), and
+2. passed through the **ActionAdapter** to produce 31 joint-position targets (the head is
+   held at its default angle).
 
 ### ActionAdapter
 

@@ -15,6 +15,7 @@ install(DIRECTORY
 
 install(PROGRAMS
   scripts/fake_ball_publisher
+  scripts/pose_to_posearray
   DESTINATION lib/${PROJECT_NAME}
 )
 
@@ -23,6 +24,10 @@ if(BUILD_TESTING)
   # Skip the copyright linter until per-file headers are added.
   set(ament_cmake_copyright_FOUND TRUE)
   ament_lint_auto_find_test_dependencies()
+  find_package(ament_cmake_pytest REQUIRED)
+  ament_add_pytest_test(pose_to_posearray_test test/test_pose_to_posearray.py
+    TIMEOUT 60
+  )
 endif()
 
 ament_package()

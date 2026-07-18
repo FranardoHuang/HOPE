@@ -33,6 +33,7 @@ class FakeBallPublisher(Node):
         self.declare_parameter("drag_k", 0.1261)        # match the planner's drag
         self.declare_parameter("restitution_h", 0.63)   # match the planner's table tangential retention
         self.declare_parameter("restitution_v", 0.92)   # match the planner's table normal restitution
+        self.declare_parameter("ball_radius", 0.020)    # m; centroid contacts the table at z = radius
         self.declare_parameter("table_x_max", 2.74)     # bounce only over the table
         self.declare_parameter("end_x", -0.6)           # serve ends past the robot
         self.declare_parameter("pause_s", 1.0)          # gap between serves
@@ -54,6 +55,7 @@ class FakeBallPublisher(Node):
         self._k = float(gp("drag_k").value)
         self._ch = float(gp("restitution_h").value)
         self._cv = float(gp("restitution_v").value)
+        self._radius = float(gp("ball_radius").value)
         self._x_max = float(gp("table_x_max").value)
         self._end_x = float(gp("end_x").value)
         self._pause_len = float(gp("pause_s").value)
@@ -102,8 +104,10 @@ class FakeBallPublisher(Node):
         a = -self._k * np.linalg.norm(self._v) * self._v + self._g
         self._v = self._v + a * self._dt
         self._p = self._p + self._v * self._dt
-        if self._p[2] <= 0.0 and self._v[2] < 0.0 and 0.0 <= self._p[0] <= self._x_max:
-            self._p[2] = 0.001
+        # Centroid table contact at z = ball radius (same convention as the planner's
+        # predictor and configs/ball_physics.yaml).
+        if self._p[2] <= self._radius and self._v[2] < 0.0 and 0.0 <= self._p[0] <= self._x_max:
+            self._p[2] = self._radius
             self._v[0] *= self._ch
             self._v[1] *= self._ch
             self._v[2] = -self._cv * self._v[2]

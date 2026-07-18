@@ -40,9 +40,23 @@ The runner executes the full per-strike lifecycle — `ready → swing → follo
 `task_revision` updates applied to the target. Robot state and `last_action` are never reset
 between balls.
 
-Racket commands are supplied through a thread-safe `QueueRacketCommandSource` mailbox. Point
-your planner (`hope_ws/src/hope_planner`, see [PLANNER_INTERFACE.md](PLANNER_INTERFACE.md)) at
-it, or use the built-in demo feed for a standalone smoke test.
+Racket commands come from one of three sources: the built-in demo feed (default, standalone
+smoke test), `--idle` (no commands), or `--planner` — the **full planner → runner path**,
+which subscribes the live planner's `hope_msgs/RacketCommand` over ROS 2:
+
+```bash
+# Terminal 1: mocap (or fake ball) + planner
+cd hope_ws && colcon build && source install/setup.bash
+ros2 launch hope_bringup hope_bringup.launch.py use_fake_ball:=true
+
+# Terminal 2: the reference runner consuming /racket/command
+cd a3_deploy/a3_deploy_example/reference
+python -m a3_deploy_onnx_ref_pingpong --planner --view --realtime
+```
+
+`--planner` needs a sourced ROS 2 environment with the built `hope_msgs` package (see
+[PLANNER_INTERFACE.md](PLANNER_INTERFACE.md) for the message contract; the bridge lives in
+`reference/a3_deploy_onnx_ref_pingpong/ros_command_source.py`).
 
 > The bundled MuJoCo model is a robot-only scene (no ball/table physics in MJCF yet), so the
 > simulation path validates policy execution and joint control. Full rally physics and

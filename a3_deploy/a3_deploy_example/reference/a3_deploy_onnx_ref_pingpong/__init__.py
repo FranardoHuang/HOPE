@@ -12,6 +12,7 @@ Public modules:
   observation      -- the 111-D observation builder
   action_adapter   -- the shared ActionAdapter (raw_action -> joint targets)
   racket_command   -- RacketCommand + command sources
+  ros_command_source -- ROS 2 planner bridge (hope_msgs/RacketCommand -> source)
   lifecycle        -- ready -> swing -> follow-through -> recovery state machine
   onnx_policy      -- onnxruntime actor wrapper (obs[1,111] -> raw_action[1,31])
   sim_bridge       -- MuJoCo (default) and AimRT-process (seam) bridges
@@ -34,6 +35,7 @@ from .racket_command import (
     RacketCommand,
     RacketCommandSource,
 )
+from .ros_command_source import RosRacketCommandSource, racket_command_from_msg
 
 __all__ = [
     "ActionAdapter",
@@ -53,4 +55,6 @@ __all__ = [
     "QueueRacketCommandSource",
     "RacketCommand",
     "RacketCommandSource",
+    "RosRacketCommandSource",
+    "racket_command_from_msg",
 ]

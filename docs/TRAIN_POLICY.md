@@ -53,7 +53,10 @@ contacts the ball, the ball crosses the net, and its first bounce lands on the o
 
 - `scripts/mujoco_eval_onnx.py` is the **authoritative** evaluator: it runs the exported ONNX against
   a real MuJoCo ball that physically bounces off the racket, table, and net, and reports
-  `success_rate` from that simulated trajectory. Use this number.
+  `success_rate` from that simulated trajectory. Use this number. By default it evaluates a
+  **continuous rally** (robot/policy state persist across serves, serve pattern FH, FH, BH, BH, …
+  so all four adjacent side transitions are exercised); pass `--eval-mode independent` for the
+  isolated per-serve variant (resets the robot each serve; does not validate transitions).
 - `scripts/evaluate.py` is a **fast in-Isaac estimate**: during training the reward terms above shape
   contact/net/bounce with a no-spin *analytic* outgoing-ball model (the racket's strike velocity is
   rolled out ballistically), and `evaluate.py` reports that same analytic estimate. It is a cheap

@@ -12,9 +12,10 @@ import copy
 
 from isaaclab.utils import configclass
 
-from whole_body_tracking.robots.agibot_a3 import AGIBOT_A3_ACTION_SCALE, AGIBOT_A3_CFG
+from whole_body_tracking.robots.agibot_a3 import AGIBOT_A3_CFG
 from whole_body_tracking.tasks.table_tennis import geometry
 from whole_body_tracking.tasks.table_tennis.table_tennis_env_cfg import TableTennisEnvCfg
+from whole_body_tracking.utils.action_adapter_config import load_action_adapter_config
 
 # Pelvis height above the floor in the A3 standing keyframe (= AGIBOT_A3_CFG init z).
 A3_STAND_PELVIS_HEIGHT: float = float(AGIBOT_A3_CFG.init_state.pos[2])
@@ -39,5 +40,7 @@ class AgibotA3TableTennisEnvCfg(TableTennisEnvCfg):
         robot.init_state.rot = (1.0, 0.0, 0.0, 0.0)
         self.scene.robot = robot
 
-        # Per-joint action scale, matching the A3 deploy decoder.
-        self.actions.joint_pos.scale = AGIBOT_A3_ACTION_SCALE
+        # Shared action adapter (same file the deploy runner reads): action scale + default pose.
+        adapter = load_action_adapter_config()
+        robot.init_state.joint_pos = adapter.default_q_by_name()
+        self.actions.joint_pos.scale = adapter.action_scale_by_name()

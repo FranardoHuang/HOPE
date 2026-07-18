@@ -88,6 +88,22 @@ def main() -> int:
 
         env = gym.make(args.task, cfg=env_cfg, render_mode=None)
         joint_names = list(env.unwrapped.scene["robot"].data.joint_names)
+        # HARD GATE: the articulation's joint enumeration (which fixes the obs
+        # joint_pos/joint_vel/last_action slices and all 31 action columns of the
+        # exported ONNX) must equal the canonical deploy joint order. If your asset
+        # enumerates differently, every column would be silently permuted at deploy.
+        from whole_body_tracking.utils.action_adapter_config import load_joint_order
+
+        expected_order = list(load_joint_order())
+        if joint_names != expected_order:
+            raise RuntimeError(
+                "Articulation joint order does not match the canonical deploy joint order "
+                "(hope_training/config/joint_order_agibot_a3.yaml).\n"
+                f"  articulation: {joint_names}\n"
+                f"  canonical:    {expected_order}\n"
+                "Fix your A3 URDF/USD so its joint enumeration matches the canonical order "
+                "(or update the canonical order everywhere: training, planner, deploy runner)."
+            )
         env = RslRlVecEnvWrapper(env)
 
         agent_cfg = RslRlOnPolicyRunnerCfg(**runner_kwargs(load_ppo_params(), args.experiment_name))

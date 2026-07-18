@@ -41,8 +41,9 @@ Flags: `--backend {mujoco,aimrt}`, `--onnx`, `--model-xml`, `--view`, `--realtim
 2. poll the latest `RacketCommand`; advance the swing lifecycle;
 3. assemble the 111-D observation (raw, no normalization);
 4. run the ONNX actor → `raw_action[31]`;
-5. feed `raw_action` back verbatim as the next `last_action`;
-6. map `raw_action` → 31 joint targets via the shared ActionAdapter (holding the
+5. zero the passive head columns (idx 3, 4) to form the **applied action** and feed
+   that back as the next `last_action` (matching training's zeroed feedback);
+6. map the applied action → 31 joint targets via the shared ActionAdapter (holding the
    passive neck at its default);
 7. write the targets and step the sim.
 
@@ -69,6 +70,23 @@ a higher `task_revision` refines the target/time-to-strike **before** contact on
 The PD gains are **example** simulation gains from the runtime config, not vendor
 deploy gains.
 
+## Live planner input (`--planner`)
+
+`RosRacketCommandSource` (`ros_command_source.py`) is the wired planner → runner
+path: it subscribes the planner's `hope_msgs/RacketCommand` topic (default
+`/racket/command`) on a background rclpy executor and feeds the 50 Hz loop through
+the same `QueueRacketCommandSource` mailbox the other sources use:
+
+```bash
+# needs a sourced ROS 2 env + built hope_msgs (cd hope_ws && colcon build && source install/setup.bash)
+python -m a3_deploy_onnx_ref_pingpong --planner --view --realtime
+```
+
+The included `ExampleCommandFeed` (the default source) is a planner-less
+demonstration feed so the sim is runnable without a planner; it is **not** part of
+the deploy contract and is not a scripted swing (the swing trajectory is always
+produced by the learned policy). `--idle` runs with no commands at all.
+
 ## Integration seams (explicitly not wired)
 
 - **`AimrtSimBridge`** — driving the live AimRT MuJoCo sim *process* over its
@@ -76,11 +94,6 @@ deploy gains.
   `joint_msgs` typesupport (a vendor build). It raises `NotImplementedError` with
   the exact channel/message mapping rather than faking state. Use
   `MujocoDirectBridge` to actually run.
-- **`QueueRacketCommandSource`** — a thread-safe mailbox where a live planner
-  (e.g. a ROS2 subscriber on `RacketCommand.msg`) calls `submit(...)`. The included
-  `ExampleCommandFeed` is a planner-less demonstration source so the sim is
-  runnable without a planner; it is **not** part of the deploy contract and is not
-  a scripted swing (the swing trajectory is always produced by the learned policy).
 
 ## Notes
 

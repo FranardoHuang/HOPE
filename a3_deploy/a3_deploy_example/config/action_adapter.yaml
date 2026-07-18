@@ -2,7 +2,10 @@
 #
 # This is the ONE file that both the training package and the reference deploy
 # runner read, so the raw-action -> joint-target mapping is defined in exactly one
-# place. Keep the training copy byte-identical (or symlink to this file).
+# place. Training loads it directly (whole_body_tracking.utils.action_adapter_config
+# resolves this path at task-config time and wires default_q / action_scale / clamp
+# into the articulation and action term); there is NO separate training copy.
+# Parity is asserted by hope_training/whole_body_tracking/tests/test_action_adapter_parity.py.
 #
 # Transform (deterministic; not a rejection filter, emits no status):
 #     q_des = default_q + raw_action * action_scale

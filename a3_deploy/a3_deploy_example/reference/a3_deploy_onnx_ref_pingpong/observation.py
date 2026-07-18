@@ -10,7 +10,7 @@ There is exactly one layout; no normalization is applied (raw observation).
 | [0:3]      | base_ang_vel            | 3   | pelvis body, rad/s     |
 | [3:34]     | joint_pos               | 31  | rad, q - default_q     |
 | [34:65]    | joint_vel               | 31  | rad/s                  |
-| [65:96]    | last_action             | 31  | raw (previous tick)    |
+| [65:96]    | last_action             | 31  | applied (prev tick)(*) |
 | [96:99]    | projected_gravity       | 3   | base frame, unit       |
 | [99:101]   | base_forward_xy         | 2   | world xy, unit         |
 | [101:103]  | fixed_station_error_xy  | 2   | world xy, m            |
@@ -22,6 +22,10 @@ There is exactly one layout; no normalization is applied (raw observation).
 ``fixed_station_error_xy`` = fixed_station_xy (a startup constant) - current base
 xy. It is NOT constant zero: the base drifts across rallies, and this term is the
 in-place recentring feedback the policy uses to hold its station.
+
+(*) ``last_action`` is the previous tick's APPLIED action: the actor's raw output
+with the passive head columns (idx 3, 4) zeroed, exactly as training zeroes them
+in its applied-action feedback. Those two columns are therefore always 0 here.
 """
 
 from __future__ import annotations

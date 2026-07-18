@@ -43,7 +43,8 @@ Forehand/backhand is chosen by the planner from where the ball crosses the fixed
 
 - Parameter: `swing_side_split_y` (and `swing_side_hysteresis_y`) in
   `hope_ws/src/hope_planner/config/hope_planner.yaml`.
-- Logic: `hope_ws/src/hope_planner/hope_planner/node.py`.
+- Logic: `hope_ws/src/hope_planner/hope_planner/side_selection.py` (pure function; the node
+  delegates to it). Convention: `crossing_y < split -> FOREHAND`, at/above -> BACKHAND.
 
 Replace the simple lateral split with your own rule. The chosen side is published as the formal
 `swing_side` field of `RacketCommand` ([PLANNER_INTERFACE.md](PLANNER_INTERFACE.md)) and fed into the

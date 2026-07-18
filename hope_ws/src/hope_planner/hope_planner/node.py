@@ -22,6 +22,7 @@ from rclpy.qos import DurabilityPolicy, HistoryPolicy, QoSProfile, ReliabilityPo
 
 from .constants import PlannerConfig, load_ball_physics, load_paddle_params, load_table_params
 from .planner import HOPEPlanner
+from .side_selection import select_swing_side
 
 _TASK_ID_WRAP = 1 << 64
 _REVISION_WRAP = 1 << 32
@@ -115,17 +116,15 @@ class HOPEPlannerNode(Node):
     def _select_side(self, intercept_y: float) -> int:
         """Binary forehand/backhand split on the predicted lateral y (optional hysteresis).
 
-        y below the split -> FOREHAND, at/above -> BACKHAND. The hysteresis band
-        is applied relative to the previous task's side so a ball arriving near
-        the split does not flip the choice between consecutive rallies.
+        y below the split -> FOREHAND, at/above -> BACKHAND (the convention in
+        docs/PLANNER_INTERFACE.md). Delegates to the pure
+        :func:`~hope_planner.side_selection.select_swing_side`, whose boundary
+        behaviour is pinned by test/test_side_selection.py. The ROS message
+        constants match the pure module's (+1 / -1) by definition of the msg.
         """
-        lo = self._split_y - self._hysteresis_y
-        hi = self._split_y + self._hysteresis_y
-        if self._prev_side == RacketCommand.FOREHAND:
-            return RacketCommand.BACKHAND if intercept_y > hi else RacketCommand.FOREHAND
-        if self._prev_side == RacketCommand.BACKHAND:
-            return RacketCommand.FOREHAND if intercept_y < lo else RacketCommand.BACKHAND
-        return RacketCommand.FOREHAND if intercept_y < self._split_y else RacketCommand.BACKHAND
+        return select_swing_side(
+            float(intercept_y), self._split_y, self._hysteresis_y, self._prev_side
+        )
 
     def _poses_cb(self, msg: PoseArray) -> None:
         if len(msg.poses) <= self._ball_index:

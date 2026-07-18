@@ -6,9 +6,9 @@ The exported policy is a single-input, single-output network:
 
     observation[1, 111]  ->  raw_action[1, 31]
 
-No observation normalization is applied (the observation is raw). ``raw_action`` is
-fed back verbatim as the next tick's ``last_action`` before it is passed through the
-ActionAdapter.
+No observation normalization is applied (the observation is raw). The runner zeroes
+the passive head columns of ``raw_action`` to form the applied action, which is fed
+back as the next tick's ``last_action`` and passed through the ActionAdapter.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from pathlib import Path
 import numpy as np
 
 from .observation import OBS_DIM
-from .joint_order import NUM_JOINTS
+from .joint_order import JOINT_NAMES, NUM_JOINTS
 
 
 class OnnxPolicy:
@@ -44,6 +44,23 @@ class OnnxPolicy:
         self._output_name = outputs[0].name
         self._validate_shape(inputs[0].shape, OBS_DIM, "observation input")
         self._validate_shape(outputs[0].shape, NUM_JOINTS, "raw_action output")
+
+        # If the exporter embedded the joint order, it must equal the canonical order
+        # this runner assumes for every obs/action column — a mismatch means every
+        # joint column would be silently permuted. Models without the metadata key
+        # (e.g. hand-authored test actors) are accepted unchecked.
+        meta = self._sess.get_modelmeta().custom_metadata_map or {}
+        embedded = meta.get("joint_order", "")
+        if embedded:
+            embedded_names = tuple(embedded.split(","))
+            if embedded_names != tuple(JOINT_NAMES):
+                raise ValueError(
+                    "ONNX metadata joint_order does not match this runner's canonical "
+                    f"joint order.\n  onnx:      {list(embedded_names)}\n"
+                    f"  canonical: {list(JOINT_NAMES)}\n"
+                    "Re-export the policy from an asset whose articulation enumerates "
+                    "joints in the canonical order (joint_order_agibot_a3.yaml)."
+                )
 
     @staticmethod
     def _validate_shape(shape, expected_last: int, what: str) -> None:

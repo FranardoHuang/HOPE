@@ -7,8 +7,10 @@ Per tick, in order:
   2. poll the latest RacketCommand and advance the swing lifecycle;
   3. assemble the 111-D observation;
   4. run the ONNX actor -> raw_action[31];
-  5. feed raw_action back verbatim as the next last_action;
-  6. pass raw_action through the shared ActionAdapter -> 31 joint targets
+  5. zero the passive head columns (idx 3, 4) to form the APPLIED action, and feed
+     that back as the next last_action — matching training, where the zeroed
+     applied action (not the actor's raw output) is the last_action observation;
+  6. pass the applied action through the shared ActionAdapter -> 31 joint targets
      (holding the passive neck at its default);
   7. write the targets (with the example PD gains) and step the sim.
 
@@ -78,10 +80,15 @@ class PingPongReferenceRunner:
                     state, target, self.last_action, self.default_q, self.fixed_station_xy
                 )
                 raw_action = self.policy.infer(obs)
-                # Feed the exact emitted action back as next tick's last_action.
-                self.last_action = np.asarray(raw_action, dtype=np.float64).copy()
+                # The APPLIED action: with a passive neck the head columns are never
+                # actuated, so they are zeroed before feedback — training exposes the
+                # same zeroed columns in its last_action observation.
+                applied_action = np.asarray(raw_action, dtype=np.float64).copy()
+                if self.cfg.passive_neck:
+                    applied_action[_HEAD_IDX] = 0.0
+                self.last_action = applied_action.copy()
 
-                q_des = self.cfg.action_adapter.decode(raw_action)
+                q_des = self.cfg.action_adapter.decode(applied_action)
                 if self.cfg.passive_neck:
                     q_des[_HEAD_IDX] = self.default_q[_HEAD_IDX]
 

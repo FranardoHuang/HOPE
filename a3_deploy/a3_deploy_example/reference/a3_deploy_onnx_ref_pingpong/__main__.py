@@ -7,6 +7,14 @@
 By default it loads the shipped runtime config, drives the in-process MuJoCo
 bridge, and feeds an example (planner-less) command stream so the policy visibly
 swings. Point ``--onnx`` at your exported ``hope_pingpong.onnx``.
+
+Command feeds (mutually exclusive):
+  * default      -- the built-in ExampleCommandFeed (planner-less demo);
+  * ``--planner``-- subscribe the live planner's ``hope_msgs/RacketCommand`` on
+                    ``--command-topic`` (needs a sourced ROS 2 env + built
+                    hope_msgs; see ros_command_source.py). This is the documented
+                    full planner -> runner control path;
+  * ``--idle``   -- no commands at all (robot just holds its stand).
 """
 
 from __future__ import annotations
@@ -17,6 +25,7 @@ from pathlib import Path
 
 from .config import RuntimeConfig
 from .racket_command import ExampleCommandFeed, QueueRacketCommandSource
+from .ros_command_source import DEFAULT_COMMAND_TOPIC
 from .runner import PingPongReferenceRunner
 
 _DEFAULT_CONFIG = Path(__file__).resolve().parents[2] / "config" / "hope_pingpong_runtime.yaml"
@@ -35,8 +44,14 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument("--realtime", action="store_true", help="pace the loop at wall-clock 50 Hz")
     p.add_argument("--duration", type=float, default=None, help="run for N seconds")
     p.add_argument("--max-ticks", type=int, default=None, help="run for N control ticks")
-    p.add_argument("--idle", action="store_true",
-                   help="no command feed (robot just holds a stand)")
+    feed = p.add_mutually_exclusive_group()
+    feed.add_argument("--planner", action="store_true",
+                      help="consume the live planner's hope_msgs/RacketCommand via ROS 2 "
+                           "(the full planner -> runner path; needs rclpy + built hope_msgs)")
+    feed.add_argument("--idle", action="store_true",
+                      help="no command feed (robot just holds a stand)")
+    p.add_argument("--command-topic", default=DEFAULT_COMMAND_TOPIC,
+                   help=f"planner command topic for --planner (default: {DEFAULT_COMMAND_TOPIC})")
     return p
 
 
@@ -71,14 +86,27 @@ def main(argv: list[str] | None = None) -> int:
         bridge = AimrtSimBridge()  # documented seam: raises with wiring guidance
 
     # Command source.
-    source = QueueRacketCommandSource() if args.idle else ExampleCommandFeed(dt=cfg.control_dt)
+    if args.planner:
+        from .ros_command_source import RosRacketCommandSource
+
+        source = RosRacketCommandSource(topic=args.command_topic)
+        print(f"[ref] consuming planner commands on {args.command_topic}", file=sys.stderr)
+    elif args.idle:
+        source = QueueRacketCommandSource()
+    else:
+        source = ExampleCommandFeed(dt=cfg.control_dt)
 
     max_ticks = args.max_ticks
     if args.duration is not None:
         max_ticks = int(round(args.duration / cfg.control_dt))
 
     runner = PingPongReferenceRunner(cfg, bridge, source)
-    runner.run(max_ticks=max_ticks, realtime=args.realtime)
+    try:
+        runner.run(max_ticks=max_ticks, realtime=args.realtime)
+    finally:
+        close = getattr(source, "close", None)
+        if close is not None:
+            close()
     return 0
 
 

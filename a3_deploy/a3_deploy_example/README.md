@@ -30,7 +30,7 @@ runner.
 | Piece | Spec |
 | --- | --- |
 | Observation | **111-D**, single layout, no normalization (raw). See `reference/.../observation.py`. |
-| Action | **31-D** `raw_action`, fed back verbatim as next-tick `last_action`. |
+| Action | **31-D** `raw_action`; the passive head columns (idx 3, 4) are zeroed to form the **applied action**, which is fed back as next-tick `last_action` (matching training). |
 | ONNX | `observation[1, 111] -> raw_action[1, 31]`, single output. |
 | ActionAdapter | `q_des = default_q + raw_action * action_scale`, then a joint clamp. One shared config: `config/action_adapter.yaml`. |
 | Joint order | 31-DOF Agibot A3, fixed. See `reference/.../joint_order.py`. |
@@ -77,8 +77,9 @@ module layout, the design, and the integration seams.
 Real-robot execution is **not** performed by anything in this repository. Bring up
 your own licensed AgiBot vendor deploy package and its safety systems (motor
 protection, hard limits, e-stop), then wire the public contract above into it:
-build the 111-D observation, run `hope_pingpong.onnx`, map `raw_action` through the
-shared ActionAdapter to 31 joint targets, and command the vendor backend at 50 Hz.
+build the 111-D observation, run `hope_pingpong.onnx`, zero the passive head columns
+to form the applied action (also the next `last_action`), map it through the shared
+ActionAdapter to 31 joint targets, and command the vendor backend at 50 Hz.
 The vendor backend's gains, limits, and e-stop stay authoritative; the public code
 never sets, probes, or bypasses them.
 

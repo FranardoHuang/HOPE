@@ -156,17 +156,20 @@ AGIBOT_A3_CFG = ArticulationCfg(
     ),
     init_state=ArticulationCfg.InitialStateCfg(
         # EXAMPLE neutral standing pose (slight hip/knee bend, arms in a ready posture, waist/neck 0).
-        # Used both as the reset pose and as the action offset (use_default_offset=True), so it must
-        # match whatever default pose your deploy action adapter uses. Replace for your robot.
+        # Used both as the reset pose and as the action offset (use_default_offset=True).
+        # NOTE: HOPEPingPongEnvCfg OVERRIDES this dict with the exact per-joint default_q from the
+        # SHARED deploy config (a3_deploy/a3_deploy_example/config/action_adapter.yaml) — that
+        # file is the single source of truth for the default pose; the values here are a matching
+        # fallback for uses outside the task cfg. Edit the shared YAML, not this dict.
         pos=(0.0, 0.0, 1.0),
         joint_pos={
-            ".*_hip_pitch_joint": -0.20,
-            ".*_knee_joint": 0.42,
-            ".*_ankle_pitch_joint": -0.22,
+            ".*_hip_pitch_joint": -0.15,
+            ".*_knee_joint": 0.30,
+            ".*_ankle_pitch_joint": -0.15,
             ".*_shoulder_pitch_joint": 0.20,
-            "left_shoulder_roll_joint": 0.12,
-            "right_shoulder_roll_joint": -0.12,
-            ".*_elbow_joint": 0.40,
+            "left_shoulder_roll_joint": 0.15,
+            "right_shoulder_roll_joint": -0.15,
+            ".*_elbow_joint": 0.30,
         },
         joint_vel={".*": 0.0},
     ),
@@ -289,7 +292,7 @@ AGIBOT_A3_CFG = ArticulationCfg(
 )
 
 
-# Action scale for the joint-position residual action (q_des = default_q + action * scale). A single
-# uniform value is the deploy-shared example; tune per your robot's gains/effort if needed. This is the
-# same scale the reference runner's action adapter uses (see the deploy action_adapter config).
-AGIBOT_A3_ACTION_SCALE: float = 0.25
+# The action scale / default pose / joint clamp for the joint-position residual action
+# (q_des = default_q + action * scale) are NOT defined here: they load from the ONE shared
+# adapter config, a3_deploy/a3_deploy_example/config/action_adapter.yaml, via
+# whole_body_tracking.utils.action_adapter_config — the same file the deploy runner reads.

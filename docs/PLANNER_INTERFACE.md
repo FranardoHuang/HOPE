@@ -44,12 +44,27 @@ The planner predicts the ball's lateral (`y`) position where it crosses the fixe
 plane and compares it to `swing_side_split_y` (with optional small hysteresis):
 
 ```
-crossing_y >= swing_side_split_y  -> FOREHAND (+1)
-crossing_y <  swing_side_split_y  -> BACKHAND (-1)
+crossing_y <  swing_side_split_y  -> FOREHAND (+1)
+crossing_y >= swing_side_split_y  -> BACKHAND (-1)
 ```
 
-There is no higher-level shot selection, side optimization, or opponent adaptation. `swing_side`
-is a formal field of the message — it is no longer inferred downstream from the target's Y sign.
+A ball arriving **below** the split (toward the paddle side, `-y`) is taken forehand; a ball
+at or above the split is taken backhand. Boundary cases, with `split = swing_side_split_y`
+and hysteresis `h` (`prev` = the previous task's side):
+
+| `crossing_y`            | `prev`     | selected side |
+|-------------------------|------------|---------------|
+| `< split`               | none       | FOREHAND      |
+| `= split` or `> split`  | none       | BACKHAND      |
+| `<= split + h`          | FOREHAND   | FOREHAND (sticky) |
+| `> split + h`           | FOREHAND   | BACKHAND      |
+| `>= split - h`          | BACKHAND   | BACKHAND (sticky) |
+| `< split - h`           | BACKHAND   | FOREHAND      |
+
+This convention is implemented in `hope_planner/side_selection.py` and pinned by
+`hope_planner/test/test_side_selection.py`. There is no higher-level shot selection, side
+optimization, or opponent adaptation. `swing_side` is a formal field of the message — it is
+no longer inferred downstream from the target's Y sign.
 
 ## `RacketCommand.msg`
 

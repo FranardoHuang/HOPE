@@ -77,12 +77,19 @@ cd a3_deploy/a3_deploy_example
 bash scripts/run_pingpong_sim.sh
 ```
 
-To close the loop with the planner (ROS 2), build the workspace and launch the planner + a synthetic
-or real mocap source:
+To close the loop with the planner (ROS 2), build the workspace, launch the planner + a synthetic
+or real mocap source, then start the runner in `--planner` mode so it consumes the planner's
+`/racket/command`:
 
 ```bash
 cd hope_ws && colcon build && source install/setup.bash
 ros2 launch hope_bringup hope_bringup.launch.py use_fake_ball:=true   # mocap-free smoke test
+# (real mocap: hope_bringup.launch.py mocap_server:=<host> ball_pose_topic:=/vrpn_mocap/<tracker>/pose
+#  — the pose_to_posearray adapter turns the per-tracker PoseStamped into the planner's /poses)
+
+# in another terminal (same ROS env sourced):
+cd a3_deploy/a3_deploy_example/reference
+python -m a3_deploy_onnx_ref_pingpong --planner --view --realtime
 ```
 
 The runner consumes `RacketCommand`, selects forehand/backhand from `swing_side`, and runs the
