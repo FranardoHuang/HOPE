@@ -77,14 +77,20 @@ rows through serve generation, same-ball
 [`task_revision`](../DEFINITIONS.md#planner-task-revision), the production planner and the vendor
 runner. The old `pp_gate3_rally.sh` / `pp_rally_conductor.py` path remains quarantined and forbidden.
 
-Only one read-only location pass for the W/Y `model_6700` files and export preflight is allowed at
-this stage; no vendor behavior run is authorized. That Pod1 pass confirmed that the expected
-training root is enumerable and CPU PyTorch 2.8 is available. However, the frozen locator required
-a basename ending in `_<full run_name>` with `model_6700.pt` in the same directory, and both W and Y
-returned zero matches. No directory was guessed and no checkpoint was loaded, so embedded iteration,
-finiteness, actor `179→31` dimensions and export sidecars remain `UNKNOWN`. The next read-only pass
-must search each full `run_name` within the same bounded root, inspect the actual nested naming, and
-load only after one unique match; it must not assume each run is a direct child of the root.
+Two read-only Pod1 location passes exited normally without reconnecting. Each W/Y wrapper has one
+exact full-`run_name` `run.log`, but neither log exposes an unambiguous RSL/checkpoint absolute path;
+the cached-source bounded root also contains no `model_6700.pt` that adjacent material can attribute
+exactly to W or Y. Source inspection explains the mismatch: `train.py` anchors `logs/rsl_rl/...` to
+the launch working directory, Hydra leaves that directory unchanged, and the sprint YAML did not
+record the launcher cwd. This is a locator failure, not a model failure. The next read-only pass must
+derive cwd from the unique wrapper's adjacent launcher and load only one derived full-run-name
+checkpoint. Embedded iteration, finiteness, actor `179→31` dimensions and sidecars remain `UNKNOWN`.
+
+The standalone exporter also has no true zero-write `--plan` or `--dry-run`: its full path creates
+the output directory and atomically replaces `policy.onnx`; `--help` and `--contract-import-smoke`
+do not validate W/Y materials. No export is authorized until checkpoint location is unique. A future
+plan mode must complete all material loading and validation but exit before directory creation, or
+the actual W/Y exports must use separate new output directories.
 
 The next runtime capability is the adapter described in
 the acceptance criteria above, with the exact same 100 questions (50 per side), frame-0 zero

@@ -1208,6 +1208,11 @@ ONNX that lacks the envelope metadata is intentionally rejected by the current C
 The Isaac-free standalone exporter has the same rule and cannot copy the envelope from its donor.
 Pass the exact train NPZ explicitly:
 
+The script currently has no `--plan` or `--dry-run`. `--help` and `--contract-import-smoke` do not
+load or validate checkpoint, motion, donor, harvest, or train-bank materials. A full invocation
+creates `--out` and atomically replaces `<out>/policy.onnx`, so use a new output directory and do not
+describe either lightweight command as an export preflight.
+
 ```bash
 python scripts/standalone_onnx_export.py \
   --ckpt /abs/run/model_<N>.pt \

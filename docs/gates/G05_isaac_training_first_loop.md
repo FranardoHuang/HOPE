@@ -3061,8 +3061,9 @@ MotionLoader 的 body velocity property 是高级索引副本，必须写其 bac
 
 ### 2026-07-19 W/Y checkpoint 只读定位未闭合
 
-Pod1 唯一一次只读检查确认预期训练根可枚举，CPU PyTorch 2.8 可用；但冻结规则要求目录 basename
-以 `_<完整 run_name>` 结尾且同目录存在 `model_6700.pt`，W/Y 均为 `0` 匹配。本轮没有猜目录或加载
-checkpoint，所以内部 iteration、finite、actor 输入 `179`/输出 `31` 与导出 sidecar 均为 `UNKNOWN`，
-不形成训练产物验收或 vendor 结果。下一轮只读检查只在同一受限根内按完整 `run_name` 查真实嵌套/
-命名，不再假设 run 位于根下一层；唯一后才加载。G05 保持 `Partial`。
+两轮 Pod1 只读连接均正常退出且未重连。W/Y 各自的完整 `run_name` wrapper `run.log` 已唯一，但日志
+没有给出可唯一解析的 RSL/checkpoint 绝对路径；cached-source 受限根内也没有可由相邻材料精确归属的
+`model_6700.pt`。`train.py` 实际按 launcher 启动工作目录创建 `logs/rsl_rl/...`，Hydra 不改变该目录，
+而 sprint 配置未保存实际 launcher 工作目录。这说明旧日志根假设错误，不说明模型失败。下一轮只读
+唯一 wrapper 旁的 launcher 以还原 `cd`/工作目录；唯一闭合后才加载并检查 iteration、finite、actor
+输入 `179`/输出 `31` 与 sidecar。当前全部保持 `UNKNOWN`，G05 保持 `Partial`。

@@ -152,14 +152,23 @@
 适配器与行为输出均不存在，所以 W/Y 仍只是演示优先双候选，U 只是稳定备选；G05/G06 保持
 `Partial`，`Gate3-D0` 保持 `Open`，不能宣称演示成功。
 
-### Pod1 唯一只读定位结果
+### Pod1 两轮只读定位结果
 
-预期训练根存在且可枚举，CPU PyTorch 2.8 可用；但冻结的“basename 以 `_<完整 run_name>` 结尾且
-含 `model_6700.pt`”规则令 W/Y 都得到 `0` 匹配。这只说明首次定位假设过窄，不证明 checkpoint 缺失。
-本轮没有猜目录或加载模型，因此内部 iteration、finite、actor `179→31` 及
-`params/training_contract.json`、`env.pkl`、`agent.pkl`、`env.yaml` 均为 `UNKNOWN`；没有导出、仿真或
-vendor 行为。下一轮只读检查在同一受限训练根内按完整 `run_name` 查真实嵌套/命名，不再假设 run 是
-根下一层；每个候选唯一后才加载。G05/G06 继续 `Partial`，`Gate3-D0` 继续 `Open`。
+两次连接都 exit `0` 且没有重连或写远端。第二轮已为 W/Y 各自找到唯一完整 `run_name` 的 wrapper
+`run.log`，但两份日志均没有打印可唯一解析的 RSL/checkpoint 绝对路径；在 cached-source 受限根递归
+查找后，可由相邻配置或完整 `run_name` 精确归属的 `model_6700.pt` 候选仍都是 `0`。所以内部
+iteration、finite、actor `179→31` 及 `params/training_contract.json`、`env.pkl`、`agent.pkl`、
+`env.yaml` 继续为 `UNKNOWN`；没有加载、导出、仿真或 vendor 行为。这不是模型失败。
+
+本地源码给出根因边界：`scripts/train.py` 以进程启动时的工作目录计算
+`logs/rsl_rl/<experiment>/...`，而 Hydra 配置 `chdir=false`；sprint YAML 只记 source/run name，没有记
+实际 launcher 工作目录。cached-source 根因此只是旧假设，不是输出真源。下一轮只读每份唯一 wrapper
+旁的 launcher，提取 `cd`/工作目录并推导唯一日志根；仍不能唯一便保持 `UNKNOWN`。
+
+导出侧也有独立阻塞：`standalone_onnx_export.py` 当前没有 `--plan` 或 `--dry-run`。`--help` 与
+`--contract-import-smoke` 不验证 W/Y 材料；完整命令会创建输出目录并原子替换 `policy.onnx`。在
+checkpoint 唯一闭合前不运行；之后要么先增加真正零写入、完成全部材料验证的 `--plan`，要么只向
+全新的 W/Y 独立目录执行正式导出。G05/G06 继续 `Partial`，`Gate3-D0` 继续 `Open`。
 
 ## 2026-07-18 20:52 CST 四臂终档 teardown 收尾
 

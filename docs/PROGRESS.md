@@ -13,11 +13,13 @@
 
 ## 2026-07-19
 
-- Pod1 唯一一次只读 W/Y checkpoint 定位确认预期训练根可枚举、CPU PyTorch 2.8 可用；但按冻结的
-  “basename 以 `_<完整 run_name>` 结尾且含 `model_6700.pt`”规则，两者均为 `0` 匹配。没有猜目录或
-  加载模型，iteration、finite、actor `179→31` 与导出 sidecar 均为 `UNKNOWN`。下一轮只读检查改为
-  在受限根内按完整 `run_name` 查真实嵌套/命名，唯一后才加载；G05/G06 保持 `Partial`、
-  `Gate3-D0` 保持 `Open`。详见[半秒冲刺](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)。
+- 两轮 Pod1 只读定位均 exit `0` 且未重连。第二轮已为 W/Y 各找到唯一完整 `run_name` 的 wrapper
+  `run.log`，但日志没有输出可唯一解析的 RSL/checkpoint 绝对路径；cached-source 受限根中也没有可由
+  相邻材料精确归属的 `model_6700.pt`。本地源码复核确认日志根由 launcher 的启动工作目录决定，而
+  sprint 配置没有保存该目录。W/Y 因此继续 `UNKNOWN`，没有加载、导出或 vendor 结论；下一轮只读
+  wrapper 旁的 launcher 来还原工作目录。另确认 standalone exporter 没有真正的零写入 plan/dry-run，
+  完整运行会创建输出并替换 `policy.onnx`，所以当前不执行。详见
+  [半秒冲刺](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)。
 
 - 约 10:26 CST，Pod1 单次只读 SSH 确认 L2 PGID `2457829` 成员数为 `0`，NVML compute app
   为空，GPU0/1/2 的利用率与显存占用均为零；L2 已从待确认状态闭合为进程组与计算进程完全

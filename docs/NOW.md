@@ -43,12 +43,14 @@ runner 送入同一 MuJoCo XML 场景模型（MJCF）与 plant 的适配器。�
 [半秒冲刺卷宗](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)与
 [G06](gates/G06_isaac_to_mujoco.md)。
 
-2026-07-19 的唯一一次 Pod1 只读检查确认预期训练根存在且可枚举，CPU PyTorch 2.8 可用；但冻结的
-“basename 以 `_<完整 run_name>` 结尾且含 `model_6700.pt`”规则令 W/Y 均为 `0` 匹配。本轮没有猜
-目录或加载 checkpoint，故内部 iteration、finite、actor `179→31` 与导出 sidecar 都保持 `UNKNOWN`，
-不构成 vendor 通过。下一轮只读检查将在同一受限训练根内按完整 `run_name` 查真实嵌套/命名，不再
-假设 run 位于训练根下一层；每个候选只有唯一匹配后才加载。G05/G06 仍为 `Partial`，`Gate3-D0`
-仍为 `Open`。
+2026-07-19 两次 Pod1 只读定位均正常结束且未重连：W/Y 各自的 wrapper `run.log` 已唯一找到，但日志
+没有给出可唯一解析的训练输出绝对路径；把 cached-source 当日志根后，也没有找到可由相邻材料精确
+归属的 `model_6700.pt`。源码复核解释了这个偏差：`train.py` 按启动时工作目录创建
+`logs/rsl_rl/...`，Hydra 不改变该目录，而 sprint 配置没有保存 launcher 的实际工作目录。因此 W/Y
+checkpoint 仍为 `UNKNOWN`，没有加载或导出，也不是模型失败。下一轮只读检查只从两份唯一 wrapper
+旁的 launcher 提取 `cd`/工作目录，再查由它推导的唯一输出目录。另已确认 standalone ONNX exporter
+没有真正的零写入 `--plan`/`--dry-run`；完整调用会创建输出目录并替换 `policy.onnx`，所以当前不会
+把 `--help` 或 import smoke 冒充导出前置检查。G05/G06 仍为 `Partial`，`Gate3-D0` 仍为 `Open`。
 
 - **本轮 task-revision 训练池（已结束）：** formal 179-D 与训练现已统一为“一颗球一个 `task_id`、同球估计用递增
   `task_revision`”，挥拍中位置、速度、signed 拍面与剩余击球时间每个 policy tick 继续原子更新；phase
