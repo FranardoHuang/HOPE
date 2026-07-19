@@ -91,7 +91,7 @@
 | `hs_r2_focus_qdot0_vel7_17_5_seed3` | 拍心/拍速/拍面 `7/17/5` + qdot 0 | short-focus | Pod2；18:51 进程 absent，terminal/exit `UNKNOWN` |
 | `hs_p1_j2_focus_qdot0_ready2x_seed3` | 强准备姿态 + qdot 0 | short-focus | Pod1；18:51 进程 absent，terminal/exit `UNKNOWN` |
 | `hs_p1_k2_focus_qdot0_freearm_seed3` | 自由非击球臂 + qdot 0 | short-focus | Pod1；iteration `6700`、fatal=`0` 自然终档 |
-| `hs_p1_l2_fullcombo_seed3` | 完整组合 | short-focus | Pod1；PID `2457833` / PGID `2457829`；20:52 通过终档审计后精确 TERM→KILL、NVML absent，但短等待后 `/proc` 仍见一个组成员，最终状态 `UNKNOWN`；以后只读确认 absent/zombie，绝不再 signal |
+| `hs_p1_l2_fullcombo_seed3` | 完整组合 | short-focus | Pod1；PID `2457833` / PGID `2457829`；20:52 精确 TERM→KILL 后 NVML absent，7 月 19 日约 10:26 只读复核确认组成员 `0`、NVML compute app 为空、三卡利用率和显存均为零；最终完全 absent，不是自然终档 |
 | `hs_p1_m2_focus_qdot0_ready_free_seed3` | 强准备姿态 × 自由非击球臂 + qdot 0 | short-focus | Pod1；18:51 进程 absent，terminal/exit `UNKNOWN` |
 | `hs_p1_n2_ultra_fullcombo_seed3` | ultra-half 课程 × 完整组合 | ultra-half | Pod1；18:51 进程 absent，terminal/exit `UNKNOWN` |
 | `hs_p1_p2_focus_qdot0_actionrate_half_seed3` | action-rate 惩罚减半 + qdot 0 | short-focus | Pod1；iteration `6700`、fatal=`0` 自然终档 |
@@ -104,6 +104,16 @@
 前三条是已经启动的旧课程映射，不能被改写成新 short-focus 的严格配对。其余 accepted run 均已通过
 “配置解析、首 iteration、fatal 扫描”这三个简化启动检查；这里的 accepted 只表示训练确实开始过，
 并已运行或到达终档，不表示自然退出，也不表示这个格已经胜出。
+
+## 2026-07-19 约 10:26 CST 双 Pod Isaac 训练池结束
+
+- Pod1 单次只读 SSH 复核 L2 PGID `2457829`：进程组成员数 `0`，NVML compute app 为空，
+  GPU0/1/2 的利用率均为 `0%`、显存占用均为 `0`。这关闭了 20:52 留下的短暂
+  `UNKNOWN`；L2 的进程组与计算进程现已完全 absent。
+- Pod1 的 V/L2/Z3 与 Pod2 的 D2/F 至此全部收口，双 Pod Isaac 训练池结束。V/L2/D2/F
+  的分类不变：它们是终档后的 teardown closure，**不是自然终档**。
+- 当前路线不再给这些候选盲加 Isaac step。W/Y 进入同题、同 planner、同判分边界的 vendor MuJoCo
+  demo 对比，U 保留为稳定备选；部署行为尚未通过，因此 G05 继续为 `Partial`。
 
 ## 2026-07-18 20:52 CST 四臂终档 teardown 收尾
 

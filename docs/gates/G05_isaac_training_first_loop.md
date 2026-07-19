@@ -46,6 +46,15 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-19 about 10:26 CST, Isaac pool closed; Gate remains `Partial`):
+
+- One read-only Pod1 SSH confirmed that L2 PGID `2457829` has zero members, no NVML compute application, and
+  zero utilization and memory use on GPU0/1/2. L2 is therefore fully absent at both process-group and compute
+  levels rather than `UNKNOWN`.
+- Pod1 V/L2/Z3 and Pod2 D2/F are now all closed, so the two-Pod Isaac pool has ended. V/L2/D2/F remain terminal
+  teardowns rather than natural terminals. W/Y advance as the vendor MuJoCo same-exam demo pair, with U retained
+  as the stable reserve. Deployment behavior is still unverified, so G05 remains `Partial`.
+
 Follow-up note (2026-07-18 20:52 CST, four terminal teardowns closed; Gate remains `Partial`):
 
 - The four-arm audit now matches a NUL-complete `run_name` token and scans semantic fatal conditions over full

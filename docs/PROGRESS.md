@@ -11,6 +11,14 @@
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
 
+## 2026-07-19
+
+- 约 10:26 CST，Pod1 单次只读 SSH 确认 L2 PGID `2457829` 成员数为 `0`，NVML compute app
+  为空，GPU0/1/2 的利用率与显存占用均为零；L2 已从待确认状态闭合为进程组与计算进程完全
+  absent。Pod1 V/L2/Z3 和 Pod2 D2/F 至此全部收口，双 Pod Isaac 训练池结束；V/L2/D2/F
+  是终档 teardown，不是自然终档。下一步为 W/Y 准备同卷 vendor MuJoCo，U 保留为稳定备选；
+  G05 保持 `Partial`。详见[半秒冲刺](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)。
+
 ## 2026-07-18
 
 - 20:52 CST，修正四条终档臂的审计条件：用 NUL 分隔的完整 `run_name` token 核身份，并按完整

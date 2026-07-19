@@ -1,6 +1,6 @@
 # NOW — 当前训练流程、课程阶段与下一步
 
-最近复核：2026-07-18 CST。本页说明现在到底在训什么、整套训练怎样连起来、每个课程阶段在解决
+最近复核：2026-07-19 CST。本页说明现在到底在训什么、整套训练怎样连起来、每个课程阶段在解决
 什么问题，以及下一项工作为什么值得做。实验过程放在[实验登记册](experiments/README.md)，
 复现命令和 Gate 结果放在对应 [Gate](gates/) 与操作文档。
 
@@ -27,11 +27,12 @@
 
 ## 当下状态与团队 focus
 
-现在围绕“几天内做出可录屏、可解释的好球”并行推进三条最短链：把 Franco 五种用途动作和横移老师
-做成安全可训练候选；把四个不同因果格先跨卡铺开以修正现役 policy 的拍面反号；把胜出 policy 连同我们的
-planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行为以厂商 MuJoCo 为准。
+当前最短链已经从继续加 Isaac step 切到 **vendor MuJoCo 同卷准备**：双 Pod 的本轮 Isaac 训练池已
+全部结束，W/Y 是 demo 双候选，U 是稳定备选；下一步先用同一题目、planner 和判分边界比较 W/Y，
+再决定 demo 采用项。Franco 五种用途动作、横移老师和 planner 仍并行推进，但不能取代这次部署裁判。
+Isaac 只负责训练/诊断，最终行为以厂商 MuJoCo 为准。
 
-- **当前 task-revision 训练池：** formal 179-D 与训练现已统一为“一颗球一个 `task_id`、同球估计用递增
+- **本轮 task-revision 训练池（已结束）：** formal 179-D 与训练现已统一为“一颗球一个 `task_id`、同球估计用递增
   `task_revision`”，挥拍中位置、速度、signed 拍面与剩余击球时间每个 policy tick 继续原子更新；phase
   governor 只接受可达的动作加速。准备时间不是以 `0.5 s` 为下限，而是同时采样 `<0.5 s` 压力、exact
   `0.5 s` 基线、`0.5–0.9 s` 快球和 `0.9–1.7 s` 宽分布。4096-env `A6` 已证明这些机制真实激活；随后
@@ -56,6 +57,13 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   MotionLoader body-velocity 副本写入后，Pod2 对 `model_5700` 完成 100/100 题：正反手
   触球、回台都为 `0/50`，总计物理摔倒 `0/100`，全部因半秒 deadline guard 结束。
   这个 checkpoint 已被严格半秒要求否定；正手最新完整卷的 hit/return 仍为 `0/50`。
+
+  2026-07-19 约 10:26 CST，Pod1 单次只读 SSH 已确认 L2 的 PGID `2457829` 成员数为 `0`，
+  NVML compute app 为空，GPU0/1/2 的利用率和显存占用均为零。L2 先前的最终状态 `UNKNOWN`
+  因而闭合为进程组与计算进程完全 absent。至此 Pod1 的 V/L2/Z3 与 Pod2 的 D2/F 均已收口，
+  双 Pod Isaac 训练池结束；V/L2/D2/F 仍只记作终档 teardown，不改写成自然终档。当前工作转为
+  准备 W/Y 的 vendor MuJoCo 同卷，U 保留为稳定备选。详细证据见
+  [半秒冲刺卷宗](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)。
 
   2026-07-18 20:52 CST，四条停在终档后的训练已完成精确收尾。审计改为读取 NUL 分隔的完整
   `run_name` token，并按完整日志行判断真正 fatal；V、L2、D2、F 均通过 trainer 身份、唯一日志、
@@ -110,7 +118,8 @@ planner 送进厂商 MuJoCo `Gate3`。Isaac 只负责训练/诊断，最终行�
   不再盲加 Isaac step。训练内 virtual outcome 不能代替该部署裁判。
 
   Z3 已精确收口并保留证据，不重放；V/L2/D2/F 的终档 teardown 也已按各自数值进程组收尾，
-  但不能写成自然终档。L2 的最终进程态仍为 `UNKNOWN`，只允许后续只读复核，不再 signal。
+  但不能写成自然终档。7 月 19 日的只读复核已确认 L2 进程组和 NVML 计算进程完全 absent，
+  因此双 Pod Isaac 训练池已经结束。
 
 - **300 Hz 动捕不会再触发 300 Hz planner solve：** 正式 arena、schema-4 与 Gate3 profile 显式绑定
   latest-only worker。每个合格样本都进入 estimator 并替换唯一 pending snapshot；Stage 2/3 最多 50 Hz，
