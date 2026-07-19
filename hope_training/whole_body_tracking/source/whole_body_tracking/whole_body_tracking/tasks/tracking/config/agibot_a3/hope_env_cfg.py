@@ -838,6 +838,34 @@ class HOPEVirtualBallRewardsCfg(HOPEDeployParityRewardsCfg):
         },
     )
 
+    # Deploy-space recovery slew (DEFAULT OFF): unlike action_rate_l2, this reads q_des after the
+    # configured affine transform and train==deploy clamp.  It charges only the exact 15 waist/leg
+    # joints during the same swing's 0.20..1.55 s post-contact recovery, normalized by each joint's
+    # physical 20-ms velocity allowance.  The zero-valued probe is enabled for every explicitly
+    # configured control/treatment arm so reset-invalid first steps and tail activation are auditable.
+    processed_qdes_slew_hinge = RewTerm(
+        func=mdp.processed_qdes_slew_hinge,
+        weight=0.0,
+        params={
+            "action_name": "joint_pos",
+            "command_name": "racket_target",
+            "margin": 0.85,
+            "recovery_start_s": 0.20,
+            "recovery_end_s": 1.55,
+        },
+    )
+    processed_qdes_slew_hinge_probe = RewTerm(
+        func=mdp.processed_qdes_slew_hinge_probe,
+        weight=0.0,
+        params={
+            "action_name": "joint_pos",
+            "command_name": "racket_target",
+            "margin": 0.85,
+            "recovery_start_s": 0.20,
+            "recovery_end_s": 1.55,
+        },
+    )
+
     racket_velocity = RewTerm(
         func=mdp.racket_velocity_tracking_exp,
         weight=0.5,

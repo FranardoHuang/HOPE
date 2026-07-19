@@ -852,6 +852,15 @@ class RacketTargetCommand(CommandTerm):
         # Strike timing / gating.
         self.pre_strike = torch.ones(self.num_envs, dtype=torch.bool, device=self.device)
         self.strike_window = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
+        # Wall/control-time recovery clock.  It cannot be reconstructed from the reference phase
+        # under the planner governor because playback speed is time-varying.
+        self._post_strike_elapsed_s = torch.zeros(
+            self.num_envs, dtype=torch.float32, device=self.device
+        )
+        self._post_strike_elapsed_valid = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        self._post_strike_elapsed_last_step = -1
         # 1c split windows: refreshed alongside strike_window in _compute_strike_timing. With the
         # cfg fields at their None defaults these are recomputed from strike_window_s each step,
         # i.e. numerically identical to strike_window (byte-identical default path).
@@ -2091,6 +2100,8 @@ class RacketTargetCommand(CommandTerm):
             return
         n = len(env_ids)
         env_ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+        self._post_strike_elapsed_s[env_ids_t] = 0.0
+        self._post_strike_elapsed_valid[env_ids_t] = False
         # A reset/wrap may replace one held state with another without a boolean edge. Force
         # the next fresh metrics tick to stamp the new hold's yaw instead of reusing old state.
         self._hold_edge_pending[env_ids_t] = True
@@ -2371,6 +2382,62 @@ class RacketTargetCommand(CommandTerm):
             float(round(self.cfg.strike_phase * (total - 1))),
             device=self.device,
         )
+
+    def _advance_post_strike_elapsed(self, exact_strike: torch.Tensor) -> None:
+        """Advance an exact, reset-aware control-time clock for the current attempt.
+
+        The planner phase governor can change ``motion.speed_scale`` every tick.  Consequently,
+        dividing a cumulative reference-frame gap by the *current* speed is not elapsed wall time.
+        This latch starts from the phase-aligned exact-strike opportunity (independent of hit
+        success), advances once per unique 50-Hz control tick, and closes at reset/wrap/T1 reveal.
+        """
+
+        token = getattr(self._env, "common_step_counter", None)
+        if type(token) is not int:
+            raise RuntimeError(
+                "post-strike elapsed clock requires integer env.common_step_counter"
+            )
+        if self._post_strike_elapsed_last_step == token:
+            return
+        self._post_strike_elapsed_last_step = token
+
+        dt = float(self._env.step_dt)
+        if not math.isfinite(dt) or dt <= 0.0:
+            raise RuntimeError("post-strike elapsed clock requires finite positive env.step_dt")
+        exact = exact_strike.detach().bool()
+        if tuple(exact.shape) != (self.num_envs,):
+            raise RuntimeError("exact_strike must be a per-environment boolean mask")
+
+        motion = self._motion()
+        wrapped = getattr(motion, "just_resampled", None)
+        if wrapped is None:
+            wrapped = torch.zeros_like(exact)
+        revealed = getattr(motion, "event_just_installed", None)
+        if revealed is None:
+            revealed = torch.zeros_like(exact)
+        wrapped = wrapped.detach().bool()
+        revealed = revealed.detach().bool()
+        if tuple(wrapped.shape) != (self.num_envs,) or tuple(revealed.shape) != (
+            self.num_envs,
+        ):
+            raise RuntimeError("wrap/reveal masks must be per-environment")
+
+        # The exact opportunity can lie on the small positive-TTS side of the +/-dt/2 detector.
+        # In that case ``pre_strike`` is still true, but this is nevertheless the unique origin
+        # for the attempt.  Let exact win over pre-strike; wrap/reveal always win over exact.
+        close = (self.pre_strike.detach().bool() & ~exact) | wrapped | revealed
+        continuing = self._post_strike_elapsed_valid & ~close
+        self._post_strike_elapsed_s[continuing] += dt
+        origin = exact & ~wrapped & ~revealed
+        self._post_strike_elapsed_s[origin] = 0.0
+        self._post_strike_elapsed_valid[origin] = True
+        self._post_strike_elapsed_s[close] = 0.0
+        self._post_strike_elapsed_valid[close] = False
+
+    def post_strike_age_and_same_attempt(self) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return the control-time recovery age and current-attempt validity mask."""
+
+        return self._post_strike_elapsed_s, self._post_strike_elapsed_valid
 
     @staticmethod
     def _planner_initial_tts_bucket_ids(initial_tts: torch.Tensor) -> torch.Tensor:
@@ -4210,6 +4277,7 @@ class RacketTargetCommand(CommandTerm):
             # first origin, the normal exact clip strike is accepted and is the sole arming event.
             exact_strike = exact_strike & motion.event_exact_strike_allowed
             motion.record_event_exact_strike(torch.where(exact_strike)[0])
+        self._advance_post_strike_elapsed(exact_strike)
         self._latch_exact_swing_completion(exact_strike)
         self.metrics["exact_strike_hit_rate"] = exact_strike.float()
 

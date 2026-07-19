@@ -109,6 +109,26 @@ def _make_env_cfg(anchor_pos_none=True):
                 "expected_joint_count": 31,
             },
         ),
+        processed_qdes_slew_hinge=_Term(
+            weight=0.0,
+            params={
+                "action_name": "joint_pos",
+                "command_name": "racket_target",
+                "margin": 0.85,
+                "recovery_start_s": 0.20,
+                "recovery_end_s": 1.55,
+            },
+        ),
+        processed_qdes_slew_hinge_probe=_Term(
+            weight=0.0,
+            params={
+                "action_name": "joint_pos",
+                "command_name": "racket_target",
+                "margin": 0.85,
+                "recovery_start_s": 0.20,
+                "recovery_end_s": 1.55,
+            },
+        ),
         racket_guidance=_Term(weight=0.0, params={"command_name": "racket_target", "d_max": 0.5}),
         racket_face_guidance=_Term(weight=0.0, params={"command_name": "racket_target", "theta_max": 1.5707963}),
         racket_face_conditional_guidance=_Term(
@@ -300,6 +320,31 @@ def _qdot_runtime_facts():
     }
 
 
+_A3_RUNTIME_JOINTS = [
+    "left_hip_pitch_joint", "right_hip_pitch_joint", "waist_yaw_joint",
+    "left_hip_roll_joint", "right_hip_roll_joint", "waist_roll_joint",
+    "left_hip_yaw_joint", "right_hip_yaw_joint", "waist_pitch_joint",
+    "left_knee_joint", "right_knee_joint", "head_yaw_joint",
+    "left_shoulder_pitch_joint", "right_shoulder_pitch_joint",
+    "left_ankle_pitch_joint", "right_ankle_pitch_joint", "head_pitch_joint",
+    "left_shoulder_roll_joint", "right_shoulder_roll_joint",
+    "left_ankle_roll_joint", "right_ankle_roll_joint",
+    "left_shoulder_yaw_joint", "right_shoulder_yaw_joint",
+    "left_elbow_joint", "right_elbow_joint",
+    "left_wrist_roll_joint", "right_wrist_roll_joint",
+    "left_wrist_pitch_joint", "right_wrist_pitch_joint",
+    "left_wrist_yaw_joint", "right_wrist_yaw_joint",
+]
+
+
+def _qdes_runtime_facts():
+    return {
+        "articulation_joint_names": list(_A3_RUNTIME_JOINTS),
+        "joint_names": list(_A3_RUNTIME_JOINTS),
+        "joint_velocity_limits": [10.0 + index for index in range(31)],
+    }
+
+
 def test_qdot_limit_hinge_default_off_and_override_markers():
     env_cfg, applied = _apply({})
     assert env_cfg.rewards.joint_velocity_limit_hinge.weight == 0.0
@@ -391,6 +436,116 @@ def test_qdot_limit_hinge_contract_rejects_runtime_order_or_count_drift():
         train_mod._joint_velocity_limit_hinge_reward_contract(
             env_cfg, _qdot_runtime_facts()
         )
+
+
+def test_processed_qdes_slew_default_off_and_explicit_overrides_enable_probe():
+    env_cfg, applied = _apply({})
+    assert env_cfg.rewards.processed_qdes_slew_hinge.weight == 0.0
+    assert env_cfg.rewards.processed_qdes_slew_hinge_probe.weight == 0.0
+    assert train_mod._processed_qdes_slew_hinge_reward_contract(
+        env_cfg, _qdes_runtime_facts()
+    ) is None
+    assert not any("processed_qdes_slew" in marker for marker in applied)
+
+    env_cfg, applied = _apply(
+        {
+            "rewards": {
+                "processed_qdes_slew_hinge_weight": -0.4,
+                "processed_qdes_slew_hinge_margin": 0.8,
+                "processed_qdes_slew_hinge_recovery_start_s": 0.25,
+                "processed_qdes_slew_hinge_recovery_end_s": 1.25,
+            }
+        }
+    )
+    term = env_cfg.rewards.processed_qdes_slew_hinge
+    probe = env_cfg.rewards.processed_qdes_slew_hinge_probe
+    assert term.weight == pytest.approx(-0.4)
+    assert term.params["action_name"] == "joint_pos"
+    assert term.params["command_name"] == "racket_target"
+    assert term.params["margin"] == pytest.approx(0.8)
+    assert term.params["recovery_start_s"] == pytest.approx(0.25)
+    assert term.params["recovery_end_s"] == pytest.approx(1.25)
+    assert probe.weight == 1.0
+    assert probe.params == term.params
+    assert any("processed_qdes_slew_hinge_probe" in marker for marker in applied)
+
+    contract = train_mod._processed_qdes_slew_hinge_reward_contract(
+        env_cfg, _qdes_runtime_facts()
+    )
+    assert contract["enabled"] is True
+    assert contract["joint_count"] == 15
+    assert contract["control_dt_s"] == pytest.approx(0.02)
+    assert contract["control_dt_source"] == "env_cfg.sim.dt_times_decimation"
+    assert contract["age_source"] == "per_env_exact_strike_control_tick_latch"
+    assert contract["joint_names"] == [
+        name
+        for name in _A3_RUNTIME_JOINTS
+        if "waist_" in name
+        or any(part in name for part in ("_hip_", "_knee_", "_ankle_"))
+    ]
+
+
+def test_processed_qdes_slew_explicit_zero_control_is_hard_contract_bound():
+    env_cfg, _ = _apply(
+        {"rewards": {"processed_qdes_slew_hinge_weight": 0.0}}
+    )
+    contract = train_mod._processed_qdes_slew_hinge_reward_contract(
+        env_cfg, _qdes_runtime_facts()
+    )
+    assert contract["enabled"] is False
+    assert contract["weight"] == 0.0
+    assert env_cfg.rewards.processed_qdes_slew_hinge_probe.weight == 1.0
+
+
+@pytest.mark.parametrize("weight", [True, 0.1, float("nan"), float("inf"), float("-inf"), "bad"])
+def test_processed_qdes_slew_rejects_non_penalty_weight(weight):
+    with pytest.raises(train_mod._OverrideError, match="finite and <= 0"):
+        _apply({"rewards": {"processed_qdes_slew_hinge_weight": weight}})
+
+
+@pytest.mark.parametrize("margin", [True, 0.0, 1.0, -0.1, float("nan"), "bad"])
+def test_processed_qdes_slew_rejects_bad_margin(margin):
+    with pytest.raises(train_mod._OverrideError, match="margin/window"):
+        _apply({"rewards": {"processed_qdes_slew_hinge_margin": margin}})
+
+
+@pytest.mark.parametrize(
+    "rewards",
+    [
+        {"processed_qdes_slew_hinge_recovery_start_s": -0.1},
+        {"processed_qdes_slew_hinge_recovery_start_s": 1.55},
+        {"processed_qdes_slew_hinge_recovery_end_s": 0.20},
+        {"processed_qdes_slew_hinge_recovery_end_s": float("inf")},
+        {"processed_qdes_slew_hinge_recovery_start_s": True},
+    ],
+)
+def test_processed_qdes_slew_rejects_bad_recovery_window(rewards):
+    with pytest.raises(train_mod._OverrideError, match="margin/window"):
+        _apply({"rewards": rewards})
+
+
+def test_processed_qdes_slew_contract_rejects_control_dt_drift():
+    env_cfg, _ = _apply(
+        {"rewards": {"processed_qdes_slew_hinge_weight": -0.4}}
+    )
+    env_cfg.decimation = 2
+    with pytest.raises(RuntimeError, match=r"dt \* decimation == 0\.02"):
+        train_mod._processed_qdes_slew_hinge_reward_contract(
+            env_cfg, _qdes_runtime_facts()
+        )
+
+
+@pytest.mark.parametrize("weight", [True, 0.1, float("nan"), float("inf"), float("-inf"), "bad"])
+def test_action_rate_weight_rejects_bool_nonfinite_and_positive(weight):
+    with pytest.raises(train_mod._OverrideError, match="finite and <= 0"):
+        _apply({"rewards": {"action_rate_weight": weight}})
+
+
+@pytest.mark.parametrize("weight", [0.0, -0.05])
+def test_action_rate_weight_accepts_finite_nonpositive_values(weight):
+    env_cfg, applied = _apply({"rewards": {"action_rate_weight": weight}})
+    assert env_cfg.rewards.action_rate_l2.weight == pytest.approx(weight)
+    assert f"rewards.action_rate_l2.weight={weight}" in applied
 
 
 def test_zero_joint_friction_is_explicit_and_all_actuators_are_zeroed():

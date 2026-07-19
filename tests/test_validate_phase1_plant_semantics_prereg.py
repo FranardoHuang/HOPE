@@ -42,7 +42,15 @@ def test_tracked_preregistration_and_declared_git_baseline_pass():
 
 def test_current_checkout_drift_blocks_old_prereg_without_launching_anything():
     data = _manifest()
-    with pytest.raises(MODULE.PlantPreregError, match="training_contract.py"):
+    drifted = [
+        item["path"]
+        for item in data["repository_baseline"]["audited_sources"]
+        if hashlib.sha256((ROOT / item["path"]).read_bytes()).hexdigest()
+        != item["sha256"]
+    ]
+    assert drifted
+    assert any(path.endswith("training_contract.py") for path in drifted)
+    with pytest.raises(MODULE.PlantPreregError, match="audited source SHA mismatch"):
         MODULE.verify_repository_baseline(data, ROOT)
 
     result = subprocess.run(
@@ -54,7 +62,8 @@ def test_current_checkout_drift_blocks_old_prereg_without_launching_anything():
     )
     assert result.returncode == 2, result.stdout + result.stderr
     assert "PLANT_SEMANTICS_PREREG_FAIL" in result.stdout
-    assert "training_contract.py" in result.stdout
+    assert "audited source SHA mismatch" in result.stdout
+    assert drifted[0] in result.stdout
 
 
 @pytest.mark.parametrize("cell", ["SZ", "SP", "LZ", "LP"])

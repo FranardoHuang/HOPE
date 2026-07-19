@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import copy
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 
 import pytest
 
@@ -26,7 +28,60 @@ def _write(tmp_path: Path, doc: dict) -> Path:
     return path
 
 
-def test_design_passes_and_launch_reports_every_missing_binding(capsys):
+def _current_source_fixture() -> dict:
+    """Rebind only source bytes in memory; the preregistration stays frozen."""
+    doc = copy.deepcopy(_load())
+    for dependency in doc["planner_policy_source_dependencies"]:
+        dependency["sha256"] = VALIDATOR.sha256_file(ROOT / dependency["path"])
+    plan_gate = doc["plan_gate_dependency"]
+    plan_gate["source_sha256"] = VALIDATOR.sha256_file(ROOT / plan_gate["source_path"])
+    plan_gate["legacy_audit_sha256"] = VALIDATOR.sha256_file(
+        ROOT / plan_gate["legacy_audit_path"]
+    )
+    for key in ("fake_ball_source", "vendor_sim_config"):
+        record = doc["frame_contract"][key]
+        record["sha256"] = VALIDATOR.sha256_file(ROOT / record["path"])
+    return doc
+
+
+def test_tracked_preregistration_fails_closed_after_reviewed_source_changes(capsys):
+    digest = VALIDATOR.sha256_file(PREREG)
+    assert VALIDATOR.main(
+        [
+            "--repo-root",
+            str(ROOT),
+            "--prereg",
+            str(PREREG),
+            "--expected-prereg-sha256",
+            digest,
+            "--mode",
+            "design-check",
+        ]
+    ) == 2
+    assert "actual source SHA changed" in capsys.readouterr().err
+
+
+def test_design_passes_and_launch_reports_every_missing_binding(capsys, monkeypatch):
+    doc = _current_source_fixture()
+    monkeypatch.setattr(
+        VALIDATOR,
+        "EXPECTED_SOURCE_DEPENDENCIES",
+        copy.deepcopy(doc["planner_policy_source_dependencies"]),
+    )
+    monkeypatch.setattr(
+        VALIDATOR, "EXPECTED_PLAN_GATE_DEPENDENCY", copy.deepcopy(doc["plan_gate_dependency"])
+    )
+    monkeypatch.setattr(
+        VALIDATOR, "EXPECTED_FRAME_CONTRACT", copy.deepcopy(doc["frame_contract"])
+    )
+    original_read_json = VALIDATOR.read_json
+
+    def read_json(path):
+        if Path(path).resolve() == PREREG.resolve():
+            return copy.deepcopy(doc)
+        return original_read_json(path)
+
+    monkeypatch.setattr(VALIDATOR, "read_json", read_json)
     digest = VALIDATOR.sha256_file(PREREG)
     assert (
         VALIDATOR.main(
@@ -144,8 +199,23 @@ def test_reviewed_source_subset_is_exact_and_full_runtime_closure_stays_blocked(
         ),
         "agi/a3_deploy_example/src/a3/a3_deploy_onnx_ref/CMakeLists.txt",
     ]
+    drifted = []
     for dependency in dependencies:
-        assert VALIDATOR.sha256_file(ROOT / dependency["path"]) == dependency["sha256"]
+        result = subprocess.run(
+            [
+                "git",
+                "show",
+                f"6d6b778aff4970f90c0e6df0e0ea63ce30fbe380:{dependency['path']}",
+            ],
+            cwd=ROOT,
+            capture_output=True,
+            check=False,
+        )
+        assert result.returncode == 0, result.stderr.decode(errors="replace")
+        assert VALIDATOR.hashlib.sha256(result.stdout).hexdigest() == dependency["sha256"]
+        if VALIDATOR.sha256_file(ROOT / dependency["path"]) != dependency["sha256"]:
+            drifted.append(dependency["path"])
+    assert "hope_ws/src/hope_planner/hope_planner/node.py" in drifted
     assert _load()["runtime_bindings"]["planner_runtime_dependency_closure_sha256"] is None
     assert _load()["runtime_bindings"]["runner_transitive_shared_library_closure_sha256"] is None
 
@@ -495,8 +565,11 @@ def test_duplicate_keys_and_nonfinite_json_fail_closed(tmp_path: Path):
         )
 
 
-def test_actual_source_byte_change_fails_closed(tmp_path: Path):
-    dependencies = _load()["planner_policy_source_dependencies"]
+def test_actual_source_byte_change_fails_closed(tmp_path: Path, monkeypatch):
+    dependencies = _current_source_fixture()["planner_policy_source_dependencies"]
+    monkeypatch.setattr(
+        VALIDATOR, "EXPECTED_SOURCE_DEPENDENCIES", copy.deepcopy(dependencies)
+    )
     for dependency in dependencies:
         source = ROOT / dependency["path"]
         destination = tmp_path / dependency["path"]

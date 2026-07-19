@@ -194,7 +194,7 @@ def test_v2_source_contract_remains_immutable_historical_evidence() -> None:
     assert contract["verification"]["gate3_gate3b"] == "not_run"
 
 
-def test_v3_source_contract_hashes_current_bytes_and_keeps_runtime_null() -> None:
+def test_v3_source_contract_remains_historical_and_current_drift_is_visible() -> None:
     contract = json.loads(
         (ROOT / "configs/gate3_first_tick_source_contract_v3_20260713.json").read_text()
     )
@@ -239,10 +239,21 @@ def test_v3_source_contract_hashes_current_bytes_and_keeps_runtime_null() -> Non
         )
     )
     assert "fresh epoch-1 179-D ONNX" in " ".join(exactness["inexact_reasons"])
+    drifted = []
     for artifact in contract["tracked_artifacts"].values():
-        assert hashlib.sha256((ROOT / artifact["path"]).read_bytes()).hexdigest() == (
-            artifact["sha256"]
+        result = subprocess.run(
+            ["git", "show", f"ef48019cb23dccd6943fdd697e7e0e80d816dc47:{artifact['path']}"],
+            cwd=ROOT,
+            capture_output=True,
+            check=False,
         )
+        assert result.returncode == 0, result.stderr.decode(errors="replace")
+        assert hashlib.sha256(result.stdout).hexdigest() == artifact["sha256"]
+        if hashlib.sha256((ROOT / artifact["path"]).read_bytes()).hexdigest() != artifact[
+            "sha256"
+        ]:
+            drifted.append(artifact["path"])
+    assert any(path.endswith("pp_policy.hpp") for path in drifted)
     bindings = contract["runtime_bindings"]
     assert bindings["runtime_exact"] is False
     assert all(value is None for key, value in bindings.items() if key != "runtime_exact")

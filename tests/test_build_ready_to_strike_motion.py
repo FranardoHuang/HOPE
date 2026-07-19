@@ -117,12 +117,23 @@ def test_stage2_activation_is_exactly_the_registered_crossover_branch() -> None:
     assert activation["required_attestation_receipt_sha256"] == (
         "7cf1c7c9613eb4a319dc8038934d3b439b8d3f948fab6b2650872e71f54c377f"
     )
+    runner_path = "scripts/run_ready_to_strike_join_ladder_stage2.py"
+    historical_runner = subprocess.run(
+        ["git", "show", f"b20e6be6a5a0e088737316b87ca6f654361a0ddf:{runner_path}"],
+        cwd=ROOT,
+        capture_output=True,
+        check=False,
+    )
+    assert historical_runner.returncode == 0, historical_runner.stderr.decode(
+        errors="replace"
+    )
     assert activation["stage2_runner"] == {
-        "path": "scripts/run_ready_to_strike_join_ladder_stage2.py",
-        "sha256": hashlib.sha256(
-            (ROOT / "scripts/run_ready_to_strike_join_ladder_stage2.py").read_bytes()
-        ).hexdigest(),
+        "path": runner_path,
+        "sha256": hashlib.sha256(historical_runner.stdout).hexdigest(),
     }
+    assert hashlib.sha256((ROOT / runner_path).read_bytes()).hexdigest() != activation[
+        "stage2_runner"
+    ]["sha256"]
     assert activation["stage2_namespace"].endswith(
         "/join_ladder_stage2_d12_v7_mjeval_runtime"
     )

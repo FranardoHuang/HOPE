@@ -765,6 +765,394 @@ def consume_joint_velocity_limit_hinge_activation_counters(
     return snapshot
 
 
+# The deploy-space recovery smoother is deliberately narrower than action_rate_l2: it observes the
+# affine-transformed, q_des-clamped target, only on the three waist + twelve leg joints, and only in
+# the same swing's post-contact recovery window.  Keep the semantic joint set explicit so a renamed,
+# missing, or accidentally arm-inclusive action contract fails closed instead of changing the mean.
+_PROCESSED_QDES_RECOVERY_JOINT_NAMES = frozenset(
+    {
+        "waist_yaw_joint",
+        "waist_roll_joint",
+        "waist_pitch_joint",
+        "left_hip_pitch_joint",
+        "left_hip_roll_joint",
+        "left_hip_yaw_joint",
+        "left_knee_joint",
+        "left_ankle_pitch_joint",
+        "left_ankle_roll_joint",
+        "right_hip_pitch_joint",
+        "right_hip_roll_joint",
+        "right_hip_yaw_joint",
+        "right_knee_joint",
+        "right_ankle_pitch_joint",
+        "right_ankle_roll_joint",
+    }
+)
+_PROCESSED_QDES_CONTROL_DT_S = 0.02
+_PROCESSED_QDES_ACTIVATION_ATTR = "_hope_processed_qdes_slew_activation_counters"
+_PROCESSED_QDES_OBSERVED_STEP_ATTR = "_hope_processed_qdes_slew_observed_step"
+_PROCESSED_QDES_ACTIVE_STEP_ATTR = "_hope_processed_qdes_slew_active_step"
+_PROCESSED_QDES_SIGNATURE_ATTR = "_hope_processed_qdes_slew_signature"
+_PROCESSED_QDES_OBSERVED_COUNT = "observed_sample_count"
+_PROCESSED_QDES_VALID_COUNT = "previous_qdes_valid_sample_count"
+_PROCESSED_QDES_INVALID_COUNT = "previous_qdes_invalid_first_step_sample_count"
+_PROCESSED_QDES_ELIGIBLE_COUNT = "recovery_eligible_sample_count"
+_PROCESSED_QDES_ACTIVE_COUNT = "reward_enabled_eligible_sample_count"
+_PROCESSED_QDES_TAIL_ACTIVE_COUNT = "tail_active_sample_count"
+_PROCESSED_QDES_EXCESS_JOINT_COUNT = "above_margin_joint_count"
+_PROCESSED_QDES_TAIL_SUM = "gated_tail_value_sum"
+
+
+def _processed_qdes_slew_hinge_values(
+    env: ManagerBasedRLEnv,
+    action_name: str = "joint_pos",
+    command_name: str = "racket_target",
+    margin: float = 0.85,
+    recovery_start_s: float = 0.20,
+    recovery_end_s: float = 1.55,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Return gated tail value, eligibility, history validity, and per-joint excess.
+
+    For each selected joint, ``u = abs(q_des[t] - q_des[t-1]) / (qdot_limit * 0.02)`` and::
+
+        tail = 1 - exp(-square(relu(u - margin) / (1 - margin)))
+
+    The environment reward is the mean over the exact 15-joint waist/leg set.  Reset-invalid
+    history and samples outside the same-attempt recovery window return exact zero.
+    """
+
+    if action_name != "joint_pos":
+        raise ValueError("processed_qdes_slew_hinge action_name must be exactly 'joint_pos'")
+    if command_name != "racket_target":
+        raise ValueError(
+            "processed_qdes_slew_hinge command_name must be exactly 'racket_target'"
+        )
+    if isinstance(margin, bool):
+        raise ValueError("processed_qdes_slew_hinge margin must be finite and in (0, 1)")
+    margin = float(margin)
+    if not math.isfinite(margin) or not 0.0 < margin < 1.0:
+        raise ValueError("processed_qdes_slew_hinge margin must be finite and in (0, 1)")
+    if isinstance(recovery_start_s, bool) or isinstance(recovery_end_s, bool):
+        raise ValueError(
+            "processed_qdes_slew_hinge recovery window must be finite and satisfy 0 <= start < end"
+        )
+    recovery_start_s = float(recovery_start_s)
+    recovery_end_s = float(recovery_end_s)
+    if (
+        not math.isfinite(recovery_start_s)
+        or not math.isfinite(recovery_end_s)
+        or recovery_start_s < 0.0
+        or recovery_start_s >= recovery_end_s
+    ):
+        raise ValueError(
+            "processed_qdes_slew_hinge recovery window must be finite and satisfy 0 <= start < end"
+        )
+    raw_control_dt = getattr(env, "step_dt", None)
+    if (
+        isinstance(raw_control_dt, bool)
+        or not isinstance(raw_control_dt, (int, float))
+        or not math.isfinite(float(raw_control_dt))
+        or not math.isclose(
+            float(raw_control_dt),
+            _PROCESSED_QDES_CONTROL_DT_S,
+            rel_tol=0.0,
+            abs_tol=1.0e-9,
+        )
+    ):
+        raise RuntimeError(
+            "processed_qdes_slew_hinge requires env.step_dt == 0.02 s control time"
+        )
+
+    action = env.action_manager.get_term(action_name)
+    processed = getattr(action, "processed_actions", None)
+    previous = getattr(action, "previous_processed_qdes", None)
+    previous_valid = getattr(action, "previous_processed_qdes_valid", None)
+    if (
+        not torch.is_tensor(processed)
+        or not torch.is_tensor(previous)
+        or processed.ndim != 2
+        or previous.shape != processed.shape
+        or not torch.is_tensor(previous_valid)
+        or previous_valid.dtype != torch.bool
+        or tuple(previous_valid.shape) != (tuple(processed.shape)[0],)
+    ):
+        raise RuntimeError(
+            "processed_qdes_slew_hinge requires reset-aware processed q_des history from joint_pos"
+        )
+
+    asset = getattr(action, "_asset", None)
+    data = getattr(asset, "data", None)
+    runtime_names = list(
+        getattr(data, "joint_names", getattr(asset, "joint_names", ()))
+    )
+    action_names = list(getattr(action, "_joint_names", ()))
+    joint_count = len(runtime_names)
+    if (
+        joint_count != 31
+        or len(set(runtime_names)) != joint_count
+        or action_names != runtime_names
+        or tuple(processed.shape)[1] != joint_count
+    ):
+        raise RuntimeError(
+            "processed_qdes_slew_hinge requires identity 31-joint A3 action/articulation order"
+        )
+    raw_joint_ids = getattr(action, "_joint_ids", slice(None))
+    if isinstance(raw_joint_ids, slice):
+        action_joint_ids = list(range(joint_count))[raw_joint_ids]
+    else:
+        if hasattr(raw_joint_ids, "tolist"):
+            raw_joint_ids = raw_joint_ids.tolist()
+        action_joint_ids = [int(value) for value in raw_joint_ids]
+    if action_joint_ids != list(range(joint_count)):
+        raise RuntimeError(
+            "processed_qdes_slew_hinge requires identity 31-joint A3 action/articulation order"
+        )
+    selected = [
+        index
+        for index, name in enumerate(runtime_names)
+        if name in _PROCESSED_QDES_RECOVERY_JOINT_NAMES
+    ]
+    if (
+        len(selected) != 15
+        or {runtime_names[index] for index in selected}
+        != _PROCESSED_QDES_RECOVERY_JOINT_NAMES
+    ):
+        raise RuntimeError(
+            "processed_qdes_slew_hinge requires the exact 15 A3 waist/leg joints"
+        )
+
+    runtime_limits = getattr(data, "joint_vel_limits", None)
+    if not torch.is_tensor(runtime_limits):
+        raise RuntimeError(
+            "processed_qdes_slew_hinge requires runtime articulation joint velocity limits"
+        )
+    if runtime_limits.ndim == 1 and tuple(runtime_limits.shape) == (joint_count,):
+        selected_limits = runtime_limits[selected]
+    elif (
+        runtime_limits.ndim == 2
+        and tuple(runtime_limits.shape)[1] == joint_count
+        and tuple(runtime_limits.shape)[0] in (1, tuple(processed.shape)[0])
+    ):
+        selected_limits = runtime_limits[:, selected]
+    else:
+        raise RuntimeError(
+            "processed_qdes_slew_hinge requires joint_vel_limits shaped [31], [1,31], or [num_envs,31]"
+        )
+    limits_valid = torch.all(torch.isfinite(selected_limits) & selected_limits.gt(0.0))
+    if limits_valid.device.type == "cpu":
+        if not bool(limits_valid):
+            raise RuntimeError(
+                "processed_qdes_slew_hinge requires finite positive waist/leg velocity limits"
+            )
+    else:
+        torch._assert_async(limits_valid)
+
+    current_selected = processed[:, selected]
+    previous_selected = previous[:, selected]
+    normalized = torch.abs(current_selected - previous_selected) / (
+        selected_limits * _PROCESSED_QDES_CONTROL_DT_S
+    )
+    normalized_excess = torch.relu(normalized - margin)
+    per_joint_tail = 1.0 - torch.exp(
+        -torch.square(normalized_excess / (1.0 - margin))
+    )
+    raw_value = torch.mean(per_joint_tail, dim=-1)
+
+    cmd = _cmd(env, command_name)
+    clock = getattr(cmd, "post_strike_age_and_same_attempt", None)
+    if not callable(clock):
+        raise RuntimeError(
+            "processed_qdes_slew_hinge requires racket_target's same-attempt post-strike clock"
+        )
+    age_s, same_attempt = clock()
+    if (
+        not torch.is_tensor(age_s)
+        or not torch.is_tensor(same_attempt)
+        or tuple(age_s.shape) != tuple(previous_valid.shape)
+        or tuple(same_attempt.shape) != tuple(previous_valid.shape)
+        or same_attempt.dtype != torch.bool
+    ):
+        raise RuntimeError(
+            "processed_qdes_slew_hinge received an invalid same-attempt post-strike clock"
+        )
+    in_recovery = (
+        same_attempt
+        & age_s.ge(recovery_start_s)
+        & age_s.le(recovery_end_s)
+    )
+    eligible = previous_valid & in_recovery
+    value = torch.where(eligible, raw_value, torch.zeros_like(raw_value))
+    excess = eligible.unsqueeze(-1) & normalized_excess.gt(0.0)
+    return value, eligible, previous_valid, excess
+
+
+def _processed_qdes_slew_counter_state(
+    env: ManagerBasedRLEnv, template: torch.Tensor
+) -> dict[str, torch.Tensor]:
+    state = getattr(env, _PROCESSED_QDES_ACTIVATION_ATTR, None)
+    if state is None:
+        state = {
+            _PROCESSED_QDES_OBSERVED_COUNT: torch.zeros(
+                (), dtype=torch.long, device=template.device
+            ),
+            _PROCESSED_QDES_VALID_COUNT: torch.zeros(
+                (), dtype=torch.long, device=template.device
+            ),
+            _PROCESSED_QDES_INVALID_COUNT: torch.zeros(
+                (), dtype=torch.long, device=template.device
+            ),
+            _PROCESSED_QDES_ELIGIBLE_COUNT: torch.zeros(
+                (), dtype=torch.long, device=template.device
+            ),
+            _PROCESSED_QDES_ACTIVE_COUNT: torch.zeros(
+                (), dtype=torch.long, device=template.device
+            ),
+            _PROCESSED_QDES_TAIL_ACTIVE_COUNT: torch.zeros(
+                (), dtype=torch.long, device=template.device
+            ),
+            _PROCESSED_QDES_EXCESS_JOINT_COUNT: torch.zeros(
+                (), dtype=torch.long, device=template.device
+            ),
+            _PROCESSED_QDES_TAIL_SUM: torch.zeros(
+                (), dtype=template.dtype, device=template.device
+            ),
+        }
+        setattr(env, _PROCESSED_QDES_ACTIVATION_ATTR, state)
+    return state
+
+
+def _record_processed_qdes_slew_activation(
+    env: ManagerBasedRLEnv,
+    values: torch.Tensor,
+    eligible: torch.Tensor,
+    previous_valid: torch.Tensor,
+    excess: torch.Tensor,
+    *,
+    hinge_active: bool,
+    signature: tuple[str, str, float, float, float],
+) -> None:
+    """Book one simulator step, idempotently sharing the probe and real term."""
+
+    token = getattr(env, "common_step_counter", None)
+    token = token if type(token) is int else None
+    state = _processed_qdes_slew_counter_state(env, values)
+    already_observed = (
+        token is not None
+        and getattr(env, _PROCESSED_QDES_OBSERVED_STEP_ATTR, None) == token
+    )
+    if already_observed:
+        if getattr(env, _PROCESSED_QDES_SIGNATURE_ATTR, None) != signature:
+            raise RuntimeError(
+                "processed q_des slew probe and RewardTerm used different parameters in one step"
+            )
+    else:
+        state[_PROCESSED_QDES_OBSERVED_COUNT].add_(values.numel())
+        state[_PROCESSED_QDES_VALID_COUNT].add_(
+            previous_valid.detach().sum(dtype=torch.long)
+        )
+        state[_PROCESSED_QDES_INVALID_COUNT].add_(
+            (~previous_valid.detach()).sum(dtype=torch.long)
+        )
+        state[_PROCESSED_QDES_ELIGIBLE_COUNT].add_(
+            eligible.detach().sum(dtype=torch.long)
+        )
+        state[_PROCESSED_QDES_TAIL_ACTIVE_COUNT].add_(
+            torch.any(excess.detach(), dim=-1).sum(dtype=torch.long)
+        )
+        state[_PROCESSED_QDES_EXCESS_JOINT_COUNT].add_(
+            excess.detach().sum(dtype=torch.long)
+        )
+        state[_PROCESSED_QDES_TAIL_SUM].add_(values.detach().sum())
+        if token is not None:
+            setattr(env, _PROCESSED_QDES_OBSERVED_STEP_ATTR, token)
+            setattr(env, _PROCESSED_QDES_SIGNATURE_ATTR, signature)
+    if hinge_active and (
+        token is None or getattr(env, _PROCESSED_QDES_ACTIVE_STEP_ATTR, None) != token
+    ):
+        state[_PROCESSED_QDES_ACTIVE_COUNT].add_(
+            eligible.detach().sum(dtype=torch.long)
+        )
+        if token is not None:
+            setattr(env, _PROCESSED_QDES_ACTIVE_STEP_ATTR, token)
+
+
+def processed_qdes_slew_hinge_probe(
+    env: ManagerBasedRLEnv,
+    action_name: str = "joint_pos",
+    command_name: str = "racket_target",
+    margin: float = 0.85,
+    recovery_start_s: float = 0.20,
+    recovery_end_s: float = 1.55,
+) -> torch.Tensor:
+    """Measure processed-q_des recovery slew while contributing exact zero reward."""
+
+    values, eligible, previous_valid, excess = _processed_qdes_slew_hinge_values(
+        env, action_name, command_name, margin, recovery_start_s, recovery_end_s
+    )
+    _record_processed_qdes_slew_activation(
+        env,
+        values,
+        eligible,
+        previous_valid,
+        excess,
+        hinge_active=False,
+        signature=(
+            action_name,
+            command_name,
+            float(margin),
+            float(recovery_start_s),
+            float(recovery_end_s),
+        ),
+    )
+    return torch.zeros_like(values)
+
+
+def processed_qdes_slew_hinge(
+    env: ManagerBasedRLEnv,
+    action_name: str = "joint_pos",
+    command_name: str = "racket_target",
+    margin: float = 0.85,
+    recovery_start_s: float = 0.20,
+    recovery_end_s: float = 1.55,
+) -> torch.Tensor:
+    """Penalize deploy-space waist/leg q_des slew only during same-swing recovery."""
+
+    values, eligible, previous_valid, excess = _processed_qdes_slew_hinge_values(
+        env, action_name, command_name, margin, recovery_start_s, recovery_end_s
+    )
+    _record_processed_qdes_slew_activation(
+        env,
+        values,
+        eligible,
+        previous_valid,
+        excess,
+        hinge_active=True,
+        signature=(
+            action_name,
+            command_name,
+            float(margin),
+            float(recovery_start_s),
+            float(recovery_end_s),
+        ),
+    )
+    return values
+
+
+def consume_processed_qdes_slew_hinge_activation_counters(
+    env: ManagerBasedRLEnv,
+) -> dict[str, torch.Tensor]:
+    """Snapshot and reset one PPO update's processed-q_des recovery ledger."""
+
+    action = env.action_manager.get_term("joint_pos")
+    template = action.processed_actions[:, 0]
+    state = _processed_qdes_slew_counter_state(env, template)
+    snapshot = {name: value.detach().clone() for name, value in state.items()}
+    with torch.inference_mode():
+        for value in state.values():
+            value.zero_()
+    return snapshot
+
+
 def racket_strike_success(
     env: ManagerBasedRLEnv, command_name: str, std_pos: float, std_vel: float, std_normal: float
 ) -> torch.Tensor:

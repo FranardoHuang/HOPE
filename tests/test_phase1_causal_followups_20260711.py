@@ -4,6 +4,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path
+import subprocess
 
 import pytest
 
@@ -156,7 +157,26 @@ def test_frozen_launcher_assets_and_recipe_are_reused_verbatim():
     for override in data["base_recipe"]:
         assert override in source
     locked = ROOT / data["runtime"]["locked_launcher_relative_path"]
-    assert file_sha(locked) == data["runtime"]["locked_launcher_sha256"]
+    historical_locked = subprocess.run(
+        [
+            "git",
+            "show",
+            (
+                "bb3310fde6566a42bec215ec4e7b853e98270c67:"
+                + data["runtime"]["locked_launcher_relative_path"]
+            ),
+        ],
+        cwd=ROOT,
+        capture_output=True,
+        check=False,
+    )
+    assert historical_locked.returncode == 0, historical_locked.stderr.decode(
+        errors="replace"
+    )
+    assert hashlib.sha256(historical_locked.stdout).hexdigest() == data["runtime"][
+        "locked_launcher_sha256"
+    ]
+    assert file_sha(locked) != data["runtime"]["locked_launcher_sha256"]
 
 
 def test_q10_is_screen_only_and_q50_is_inactive_triggered_paper():

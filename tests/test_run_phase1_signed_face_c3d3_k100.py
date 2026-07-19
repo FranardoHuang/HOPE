@@ -6,6 +6,7 @@ import json
 from pathlib import Path
 import subprocess
 import sys
+from unittest import mock
 
 import pytest
 
@@ -27,8 +28,35 @@ def _load_module():
 R = _load_module()
 
 
+def _rebound_document(path: Path, module) -> dict:
+    document = json.loads(path.read_text(encoding="utf-8"))
+    for source in document["source_bindings"].values():
+        source["sha256"] = module.sha256_file(ROOT / source["path"])
+    return document
+
+
 def _manifest():
-    return R.load_manifest(MANIFEST_PATH, repo_root=ROOT)
+    """Validate execution logic against current bytes without altering receipts."""
+    execution_document = _rebound_document(MANIFEST_PATH, R)
+    attestor_path = ROOT / execution_document["source_bindings"]["checkpoint_attestor_manifest"]["path"]
+    attestor_document = _rebound_document(attestor_path, R.A)
+    original_runner_read_json = R.read_json
+    original_attestor_read_json = R.A.read_json
+
+    def runner_read_json(path, label):
+        if Path(path).resolve() == MANIFEST_PATH.resolve():
+            return copy.deepcopy(execution_document)
+        return original_runner_read_json(path, label)
+
+    def attestor_read_json(path, label):
+        if Path(path).resolve() == attestor_path.resolve():
+            return copy.deepcopy(attestor_document)
+        return original_attestor_read_json(path, label)
+
+    with mock.patch.object(R, "read_json", side_effect=runner_read_json), mock.patch.object(
+        R.A, "read_json", side_effect=attestor_read_json
+    ):
+        return R.load_manifest(MANIFEST_PATH, repo_root=ROOT)
 
 
 def _write_json(path: Path, value: dict) -> None:
@@ -214,18 +242,21 @@ def test_frozen_manifest_binds_terminal_pair_attestor_and_same_k100():
     assert manifest["authorization"] == R.MANIFEST_AUTHORIZATION
 
 
-def test_static_and_source_plan_are_read_only(tmp_path: Path):
+def test_tracked_manifest_fails_closed_after_attestor_source_changes():
+    with pytest.raises(R.ContractError, match="source binding play_exporter bytes changed"):
+        R.load_manifest(MANIFEST_PATH, repo_root=ROOT)
+
+
+def test_static_and_source_plan_are_read_only(tmp_path: Path, monkeypatch, capsys):
     before = set(tmp_path.iterdir())
+    manifest = _manifest()
+    monkeypatch.setattr(R, "load_manifest", lambda *args, **kwargs: manifest)
     for mode, status in (
         ("static-validate", "source_reviewed_runtime_request_and_attestations_required"),
         ("source-plan", "source_plan_only_runtime_request_absent_no_launch"),
     ):
-        completed = subprocess.run(
-            [sys.executable, str(RUNNER_PATH), mode], cwd=ROOT,
-            text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=False,
-        )
-        assert completed.returncode == 0, completed.stderr
-        result = json.loads(completed.stdout)
+        assert R.main([mode]) == 0
+        result = json.loads(capsys.readouterr().out)
         assert result["status"] == status
         assert result["writes_or_launches_performed"] is False
         assert result["l2_training_authorized"] is False
@@ -450,7 +481,9 @@ def test_generic_claim_rejects_extra_field_even_when_rehashed(tmp_path: Path, mo
         R._validate_attestation("C3", request, manifest)
 
 
-def test_plan_and_execute_require_runtime_request(capsys):
+def test_plan_and_execute_require_runtime_request(capsys, monkeypatch):
+    manifest = _manifest()
+    monkeypatch.setattr(R, "load_manifest", lambda *args, **kwargs: manifest)
     with pytest.raises(R.ContractError, match="requires --request"):
         R.main(["plan"])
     with pytest.raises(R.ContractError, match="requires --request"):

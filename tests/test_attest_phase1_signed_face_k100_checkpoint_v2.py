@@ -5,6 +5,7 @@ import importlib.util
 import json
 from pathlib import Path
 import sys
+from unittest import mock
 
 import pytest
 
@@ -28,8 +29,24 @@ A = _load(SCRIPT, "signed_k100_checkpoint_attestor_v2_under_test")
 S = _load(SCHEDULE_MODULE, "signed_k100_checkpoint_schedule_under_test")
 
 
+def _tracked_manifest_document():
+    return json.loads(MANIFEST.read_text(encoding="utf-8"))
+
+
 def _manifest():
-    return A.load_manifest(MANIFEST, repo_root=ROOT)
+    """Load a current-source fixture without rewriting the frozen manifest."""
+    document = _tracked_manifest_document()
+    for source in document["source_bindings"].values():
+        source["sha256"] = A.sha256_file(ROOT / source["path"])
+    original_read_json = A.read_json
+
+    def read_json(path, label):
+        if Path(path).resolve() == MANIFEST.resolve():
+            return copy.deepcopy(document)
+        return original_read_json(path, label)
+
+    with mock.patch.object(A, "read_json", side_effect=read_json):
+        return A.load_manifest(MANIFEST, repo_root=ROOT)
 
 
 def _fingerprint(packages):
@@ -218,7 +235,12 @@ def _paper_fixture(tmp_path: Path, manifest):
     return schedule_path, activation_path
 
 
-def test_tracked_manifest_is_attestation_only_and_correction_preserves_original():
+def test_tracked_manifest_fails_closed_after_bound_source_changes():
+    with pytest.raises(A.ContractError, match="source binding play_exporter bytes changed"):
+        A.load_manifest(MANIFEST, repo_root=ROOT)
+
+
+def test_manifest_semantics_are_attestation_only_and_correction_preserves_original():
     manifest = _manifest()
     assert manifest["authorization"] == A.ATTESTATION_AUTHORIZATION
     assert manifest["paper"]["signed_face_contract"]["mount_normal_sign_per_clip"] == [1.0, -1.0]

@@ -142,6 +142,48 @@ def _install_isaaclab_stub():
     envs.ManagerBasedEnv = type("ManagerBasedEnv", (), {})
     isaaclab.envs = envs
 
+    envs_mdp = _module("isaaclab.envs.mdp")
+    envs_actions = _module("isaaclab.envs.mdp.actions")
+    actions_cfg = _module("isaaclab.envs.mdp.actions.actions_cfg")
+    joint_actions = _module("isaaclab.envs.mdp.actions.joint_actions")
+
+    class JointPositionAction:
+        def __init__(self, cfg, env):
+            self.cfg = cfg
+            self._asset = env.scene[cfg.asset_name]
+            self.num_envs = env.num_envs
+            self.device = env.device
+            self._joint_ids = slice(None)
+            self._joint_names = list(self._asset.data.joint_names)
+            self._raw_actions = torch.zeros(
+                self.num_envs, len(self._joint_names), device=self.device
+            )
+            self._processed_actions = torch.zeros_like(self._raw_actions)
+            self._scale = float(getattr(cfg, "scale", 1.0))
+            self._offset = (
+                self._asset.data.default_joint_pos.clone()
+                if getattr(cfg, "use_default_offset", False)
+                else 0.0
+            )
+
+        @property
+        def processed_actions(self):
+            return self._processed_actions
+
+        def process_actions(self, actions):
+            self._raw_actions[:] = actions
+            self._processed_actions = self._raw_actions * self._scale + self._offset
+
+        def reset(self, env_ids=None):
+            self._raw_actions[env_ids] = 0.0
+
+    actions_cfg.JointPositionActionCfg = type("JointPositionActionCfg", (), {})
+    joint_actions.JointPositionAction = JointPositionAction
+    envs_actions.actions_cfg = actions_cfg
+    envs_actions.joint_actions = joint_actions
+    envs_mdp.actions = envs_actions
+    envs.mdp = envs_mdp
+
     utils = _module("isaaclab.utils")
 
     def configclass(cls):
@@ -199,6 +241,7 @@ _load(f"{_PKG}.stage1_question_bank", "stage1_question_bank.py")
 hope_commands_mod = _load(f"{_PKG}.hope_commands", "hope_commands.py")
 hope_rewards_mod = _load(f"{_PKG}.hope_rewards", "hope_rewards.py")
 hope_observations_mod = _load(f"{_PKG}.hope_observations", "hope_observations.py")
+hope_actions_mod = _load(f"{_PKG}.hope_actions", "hope_actions.py")
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -2212,6 +2255,225 @@ def test_qdot_limit_hinge_rejects_order_zero_nonfinite_and_per_env_drift():
     env, asset_cfg = _qdot_limit_env(limits)
     with pytest.raises(RuntimeError, match="identical articulation velocity limits"):
         hope_rewards_mod.joint_velocity_limit_hinge(env, asset_cfg)
+
+
+def test_clamped_action_keeps_reset_aware_previous_processed_qdes():
+    n = 2
+    names = list(_A3_JOINTS)
+    limits = torch.stack(
+        (
+            torch.full((n, len(names)), -0.5),
+            torch.full((n, len(names)), 0.5),
+        ),
+        dim=-1,
+    )
+    asset = types.SimpleNamespace(
+        data=types.SimpleNamespace(
+            joint_names=names,
+            default_joint_pos=torch.zeros(n, len(names)),
+            soft_joint_pos_limits=limits,
+        )
+    )
+    cfg = types.SimpleNamespace(
+        asset_name="robot", scale=1.0, use_default_offset=True, clamp=True
+    )
+    env = types.SimpleNamespace(
+        scene={"robot": asset}, num_envs=n, device="cpu"
+    )
+    action = hope_actions_mod.ClampedJointPositionAction(cfg, env)
+
+    first = torch.zeros(n, len(names))
+    first[:, 0] = torch.tensor([0.8, -0.8])
+    action.process_actions(first)
+    assert action.processed_actions[:, 0].tolist() == pytest.approx([0.5, -0.5])
+    assert action.previous_processed_qdes_valid.tolist() == [False, False]
+
+    second = torch.full((n, len(names)), 0.1)
+    action.process_actions(second)
+    assert action.previous_processed_qdes[:, 0].tolist() == pytest.approx([0.5, -0.5])
+    assert action.previous_processed_qdes_valid.tolist() == [True, True]
+
+    action.reset(env_ids=torch.tensor([0]))
+    third = torch.full((n, len(names)), 0.2)
+    action.process_actions(third)
+    assert action.previous_processed_qdes[:, 0].tolist() == pytest.approx([0.1, 0.1])
+    assert action.previous_processed_qdes_valid.tolist() == [False, True]
+
+
+def test_post_strike_clock_counts_control_ticks_and_closes_on_wrap_or_reveal():
+    cmd = hope_commands_mod.RacketTargetCommand.__new__(
+        hope_commands_mod.RacketTargetCommand
+    )
+    cmd.num_envs = 4
+    cmd.device = "cpu"
+    cmd._env = types.SimpleNamespace(step_dt=0.02, common_step_counter=10)
+    cmd.pre_strike = torch.zeros(4, dtype=torch.bool)
+    cmd._post_strike_elapsed_s = torch.zeros(4)
+    cmd._post_strike_elapsed_valid = torch.zeros(4, dtype=torch.bool)
+    cmd._post_strike_elapsed_last_step = -1
+    motion = types.SimpleNamespace(
+        retiming_active=True,
+        time_steps_f=torch.full((4,), 60.0),
+        # Deliberately time-varying and irrelevant: wall time must not be inferred from it.
+        speed_scale=torch.tensor([0.1, 0.5, 2.0, 4.0]),
+        just_resampled=torch.zeros(4, dtype=torch.bool),
+        event_just_installed=torch.zeros(4, dtype=torch.bool),
+    )
+    cmd._motion_term = motion
+    exact = torch.tensor([True, False, True, False])
+    hope_commands_mod.RacketTargetCommand._advance_post_strike_elapsed(cmd, exact)
+    age, same_attempt = cmd.post_strike_age_and_same_attempt()
+    assert age.tolist() == pytest.approx([0.0, 0.0, 0.0, 0.0])
+    assert same_attempt.tolist() == [True, False, True, False]
+
+    # A duplicate call in one manager step is idempotent; the next unique tick adds exactly 20 ms.
+    hope_commands_mod.RacketTargetCommand._advance_post_strike_elapsed(
+        cmd, torch.zeros(4, dtype=torch.bool)
+    )
+    assert age.tolist() == pytest.approx([0.0, 0.0, 0.0, 0.0])
+    cmd._env.common_step_counter = 11
+    motion.just_resampled[0] = True
+    motion.event_just_installed[2] = True
+    hope_commands_mod.RacketTargetCommand._advance_post_strike_elapsed(
+        cmd, torch.zeros(4, dtype=torch.bool)
+    )
+    assert age.tolist() == pytest.approx([0.0, 0.0, 0.0, 0.0])
+    assert same_attempt.tolist() == [False, False, False, False]
+
+
+def test_post_strike_clock_advances_exactly_twenty_ms_per_unique_tick():
+    cmd = hope_commands_mod.RacketTargetCommand.__new__(
+        hope_commands_mod.RacketTargetCommand
+    )
+    cmd.num_envs = 1
+    cmd.device = "cpu"
+    cmd._env = types.SimpleNamespace(step_dt=0.02, common_step_counter=1)
+    cmd.pre_strike = torch.zeros(1, dtype=torch.bool)
+    cmd._post_strike_elapsed_s = torch.zeros(1)
+    cmd._post_strike_elapsed_valid = torch.zeros(1, dtype=torch.bool)
+    cmd._post_strike_elapsed_last_step = -1
+    cmd._motion_term = types.SimpleNamespace(
+        just_resampled=torch.zeros(1, dtype=torch.bool),
+        event_just_installed=torch.zeros(1, dtype=torch.bool),
+        speed_scale=torch.tensor([4.0]),
+    )
+    cmd._advance_post_strike_elapsed(torch.ones(1, dtype=torch.bool))
+    for step in range(2, 12):
+        cmd._env.common_step_counter = step
+        cmd._motion_term.speed_scale.fill_(0.1 if step % 2 else 4.0)
+        cmd._advance_post_strike_elapsed(torch.zeros(1, dtype=torch.bool))
+    age, valid = cmd.post_strike_age_and_same_attempt()
+    assert age.item() == pytest.approx(0.20)
+    assert valid.item() is True
+
+
+def test_post_strike_clock_arms_on_positive_half_tick_exact_opportunity():
+    cmd = hope_commands_mod.RacketTargetCommand.__new__(
+        hope_commands_mod.RacketTargetCommand
+    )
+    cmd.num_envs = 1
+    cmd.device = "cpu"
+    cmd._env = types.SimpleNamespace(step_dt=0.02, common_step_counter=1)
+    # exact_strike may fire at +8 ms, before the strict tts>0 pre-strike flag falls.
+    cmd.pre_strike = torch.ones(1, dtype=torch.bool)
+    cmd._post_strike_elapsed_s = torch.zeros(1)
+    cmd._post_strike_elapsed_valid = torch.zeros(1, dtype=torch.bool)
+    cmd._post_strike_elapsed_last_step = -1
+    cmd._motion_term = types.SimpleNamespace(
+        just_resampled=torch.zeros(1, dtype=torch.bool),
+        event_just_installed=torch.zeros(1, dtype=torch.bool),
+    )
+    cmd._advance_post_strike_elapsed(torch.ones(1, dtype=torch.bool))
+    age, valid = cmd.post_strike_age_and_same_attempt()
+    assert age.item() == 0.0
+    assert valid.item() is True
+
+    cmd._env.common_step_counter = 2
+    cmd.pre_strike.zero_()
+    cmd._advance_post_strike_elapsed(torch.zeros(1, dtype=torch.bool))
+    assert age.item() == pytest.approx(0.02)
+    assert valid.item() is True
+
+
+def _processed_qdes_slew_env(*, step_dt=0.02):
+    n = 4
+    names = list(_A3_JOINTS)
+    selected = [
+        index
+        for index, name in enumerate(names)
+        if name in hope_rewards_mod._PROCESSED_QDES_RECOVERY_JOINT_NAMES
+    ]
+    previous = torch.zeros(n, len(names))
+    processed = torch.zeros_like(previous)
+    # qdot limit 10 rad/s * 0.02 s = 0.2 rad allowance. env0 stays below margin;
+    # env1 has u=1 on every selected joint; env2 is reset-invalid; env3 is off-window.
+    processed[0, selected] = 0.1
+    processed[1, selected] = 0.2
+    processed[2, selected] = 2.0
+    processed[3, selected] = 0.2
+    # An arbitrarily large arm target must not enter the 15-joint mean.
+    arm_index = names.index("right_elbow_joint")
+    processed[:, arm_index] = 100.0
+    asset = types.SimpleNamespace(
+        data=types.SimpleNamespace(
+            joint_names=names,
+            joint_vel_limits=torch.full((n, len(names)), 10.0),
+        )
+    )
+    action = types.SimpleNamespace(
+        processed_actions=processed,
+        previous_processed_qdes=previous,
+        previous_processed_qdes_valid=torch.tensor([True, True, False, True]),
+        _asset=asset,
+        _joint_names=names,
+        _joint_ids=slice(None),
+    )
+    command = types.SimpleNamespace(
+        post_strike_age_and_same_attempt=lambda: (
+            torch.tensor([0.20, 1.55, 0.50, 0.50]),
+            torch.tensor([True, True, True, False]),
+        )
+    )
+    return types.SimpleNamespace(
+        step_dt=step_dt,
+        common_step_counter=17,
+        action_manager=types.SimpleNamespace(get_term=lambda name: action),
+        command_manager=types.SimpleNamespace(get_term=lambda name: command),
+    )
+
+
+def test_processed_qdes_slew_formula_gate_invalid_first_step_and_update_ledger():
+    env = _processed_qdes_slew_env()
+    probe = hope_rewards_mod.processed_qdes_slew_hinge_probe(env)
+    reward = hope_rewards_mod.processed_qdes_slew_hinge(env)
+    expected_tail = 1.0 - math.exp(-1.0)
+    assert torch.equal(probe, torch.zeros(4))
+    assert reward.tolist() == pytest.approx([0.0, expected_tail, 0.0, 0.0])
+
+    counters = (
+        hope_rewards_mod.consume_processed_qdes_slew_hinge_activation_counters(env)
+    )
+    assert counters["observed_sample_count"].item() == 4
+    assert counters["previous_qdes_valid_sample_count"].item() == 3
+    assert counters["previous_qdes_invalid_first_step_sample_count"].item() == 1
+    assert counters["recovery_eligible_sample_count"].item() == 2
+    assert counters["reward_enabled_eligible_sample_count"].item() == 2
+    assert counters["tail_active_sample_count"].item() == 1
+    assert counters["above_margin_joint_count"].item() == 15
+    assert counters["gated_tail_value_sum"].item() == pytest.approx(expected_tail)
+    assert all(
+        value.item() == 0
+        for value in hope_rewards_mod.consume_processed_qdes_slew_hinge_activation_counters(
+            env
+        ).values()
+    )
+
+
+def test_processed_qdes_slew_rejects_control_dt_drift():
+    with pytest.raises(RuntimeError, match=r"step_dt == 0\.02"):
+        hope_rewards_mod.processed_qdes_slew_hinge(
+            _processed_qdes_slew_env(step_dt=0.01)
+        )
 
 
 def _exact_behavior_command(termination_manager, num_envs=4):

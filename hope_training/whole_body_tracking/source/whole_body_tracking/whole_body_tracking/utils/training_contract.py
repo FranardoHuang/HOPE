@@ -1166,6 +1166,84 @@ def validate_schema3_contract_structure(contract: Mapping) -> None:
                     "schema-3 joint_velocity_limit_hinge_reward "
                     f"{key} must be exactly {expected!r}"
                 )
+
+    qdes_slew = contract.get("processed_qdes_slew_hinge_reward")
+    if qdes_slew is not None:
+        if not isinstance(qdes_slew, Mapping):
+            raise ValueError(
+                "schema-3 processed_qdes_slew_hinge_reward must be an object"
+            )
+        if type(qdes_slew.get("schema_version")) is not int or qdes_slew.get(
+            "schema_version"
+        ) != 1:
+            raise ValueError(
+                "schema-3 processed_qdes_slew_hinge_reward schema_version must be integer 1"
+            )
+        enabled = qdes_slew.get("enabled")
+        raw_weight = qdes_slew.get("weight")
+        raw_margin = qdes_slew.get("margin")
+        raw_start = qdes_slew.get("recovery_start_s")
+        raw_end = qdes_slew.get("recovery_end_s")
+        if not isinstance(enabled, bool) or any(
+            isinstance(value, bool) or not isinstance(value, (int, float))
+            for value in (raw_weight, raw_margin, raw_start, raw_end)
+        ):
+            raise ValueError(
+                "schema-3 processed_qdes_slew_hinge_reward has invalid enabled/weight/margin/window"
+            )
+        weight, margin, start, end = map(
+            float, (raw_weight, raw_margin, raw_start, raw_end)
+        )
+        if (
+            not all(math.isfinite(value) for value in (weight, margin, start, end))
+            or weight > 0.0
+            or not 0.0 < margin < 1.0
+            or start < 0.0
+            or start >= end
+            or enabled != (weight < 0.0)
+        ):
+            raise ValueError(
+                "schema-3 processed_qdes_slew_hinge_reward has invalid enabled/weight/margin/window"
+            )
+        selected_names = qdes_slew.get("joint_names")
+        expected_names = {
+            "waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint",
+            "left_hip_pitch_joint", "left_hip_roll_joint", "left_hip_yaw_joint",
+            "left_knee_joint", "left_ankle_pitch_joint", "left_ankle_roll_joint",
+            "right_hip_pitch_joint", "right_hip_roll_joint", "right_hip_yaw_joint",
+            "right_knee_joint", "right_ankle_pitch_joint", "right_ankle_roll_joint",
+        }
+        if (
+            type(qdes_slew.get("joint_count")) is not int
+            or qdes_slew.get("joint_count") != 15
+            or not isinstance(selected_names, (list, tuple))
+            or len(selected_names) != 15
+            or set(selected_names) != expected_names
+            or [name for name in joint_names if name in expected_names]
+            != list(selected_names)
+        ):
+            raise ValueError(
+                "schema-3 processed_qdes_slew_hinge_reward requires the runtime-ordered 15 A3 waist/leg joints"
+            )
+        expected_fixed = {
+            "action_name": "joint_pos",
+            "command_name": "racket_target",
+            "joint_order": "runtime_articulation_subsequence",
+            "control_dt_s": 0.02,
+            "control_dt_source": "env_cfg.sim.dt_times_decimation",
+            "velocity_limit_source": "runtime_execution_facts.joint_velocity_limits",
+            "age_source": "per_env_exact_strike_control_tick_latch",
+            "formula": (
+                "mean(1-exp(-square(relu(abs(delta_processed_qdes)/(joint_velocity_limits*0.02)-margin)/(1-margin))))"
+            ),
+            "gate": "same_attempt_post_strike_age_s_inclusive",
+        }
+        for key, expected in expected_fixed.items():
+            if qdes_slew.get(key) != expected:
+                raise ValueError(
+                    "schema-3 processed_qdes_slew_hinge_reward "
+                    f"{key} must be exactly {expected!r}"
+                )
     if contract["joint_friction_backend"] != JOINT_FRICTION_BACKEND:
         raise ValueError("schema-3 joint_friction_backend must be physx")
     if contract["joint_friction_semantics"] != JOINT_FRICTION_SEMANTICS:

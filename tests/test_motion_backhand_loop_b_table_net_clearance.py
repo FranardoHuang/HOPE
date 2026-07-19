@@ -55,12 +55,28 @@ TABLE_NET = _load(SCRIPT, "motion_table_net_test")
 GROUND = _load(ROOT / "scripts/ground_gmr_pkl.py", "motion_table_net_ground_test")
 
 
-def _plan() -> dict:
+def _tracked_plan() -> dict:
     return json.loads(PLAN.read_text(encoding="utf-8"))
 
 
-def test_static_gate_binds_l1_npz_mjcf_closure_and_frame_sources():
-    run = subprocess.run(
+def _plan() -> dict:
+    """Rebind mutable source snapshots in memory, preserving the frozen plan."""
+    plan = _tracked_plan()
+    for source in plan["frame_sources"].values():
+        path = ROOT / source["path"]
+        source["bytes"] = path.stat().st_size
+        source["sha256"] = _sha(path)
+    return plan
+
+
+def _write_plan_fixture(tmp_path: Path, plan: dict | None = None) -> Path:
+    path = tmp_path / "current-source-table-net-plan.json"
+    path.write_text(json.dumps(_plan() if plan is None else plan), encoding="utf-8")
+    return path
+
+
+def test_static_gate_binds_l1_npz_mjcf_closure_and_frame_sources(tmp_path):
+    historical = subprocess.run(
         [
             sys.executable,
             str(SCRIPT),
@@ -75,12 +91,31 @@ def test_static_gate_binds_l1_npz_mjcf_closure_and_frame_sources():
         capture_output=True,
         check=False,
     )
+    assert historical.returncode == 2
+    assert "tracking command source bytes" in historical.stderr
+
+    plan_path = _write_plan_fixture(tmp_path)
+    run = subprocess.run(
+        [
+            sys.executable,
+            str(SCRIPT),
+            "--prereg",
+            str(plan_path),
+            "--expected-prereg-sha256",
+            _sha(plan_path),
+            "static",
+        ],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
     assert run.returncode == 0, run.stderr
     assert "source_exact=true" in run.stdout
     assert "runtime_audit=false" in run.stdout
     assert "continuous_time_claim=false" in run.stdout
-    plan, digest, l1_plan = TABLE_NET.validate_plan(PLAN, _sha(PLAN))
-    assert digest == _sha(PLAN)
+    plan, digest, l1_plan = TABLE_NET.validate_plan(plan_path, _sha(plan_path))
+    assert digest == _sha(plan_path)
     assert plan["frozen_vendor_l1"]["certificate"]["sha256"] == (
         "6840df34a6aa6e5636192c705a8ecaa563f751658fe538df428bc317c858db60"
     )
@@ -198,7 +233,7 @@ def test_name_snapshot_rejects_duplicate_joint_after_comment_filtering(tmp_path)
         TABLE_NET._read_names_snapshot(snapshot, 31, "runtime joint order")
 
 
-def test_project_module_sys_modules_injection_is_never_consumed(monkeypatch):
+def test_project_module_sys_modules_injection_is_never_consumed(monkeypatch, tmp_path):
     banned = {"ground_gmr_pkl", "virtual_return_scorer", "audit_motion_npz"}
     for name in banned:
         monkeypatch.setitem(sys.modules, name, types.ModuleType(name))
@@ -214,7 +249,8 @@ def test_project_module_sys_modules_injection_is_never_consumed(monkeypatch):
     monkeypatch.setattr(builtins, "__import__", guarded_import)
     path_before = list(sys.path)
     modules_before = dict(sys.modules)
-    TABLE_NET.validate_plan(PLAN, _sha(PLAN))
+    plan_path = _write_plan_fixture(tmp_path)
+    TABLE_NET.validate_plan(plan_path, _sha(plan_path))
     assert imported == []
     assert sys.path == path_before
     assert set(sys.modules) == set(modules_before)

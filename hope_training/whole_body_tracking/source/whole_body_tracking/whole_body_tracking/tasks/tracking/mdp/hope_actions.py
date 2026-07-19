@@ -22,6 +22,8 @@ comparisons must keep clamp state uniform within the batch.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
+
 import torch
 
 from isaaclab.envs.mdp.actions.actions_cfg import JointPositionActionCfg
@@ -37,18 +39,59 @@ class ClampedJointPositionAction(JointPositionAction):
     def __init__(self, cfg, env):
         super().__init__(cfg, env)
         self._clamp_enabled = bool(getattr(cfg, "clamp", False))
+        # Keep deploy-space q_des history next to the action term that owns the affine transform
+        # and safety clamp.  ActionManager.prev_action is the previous *normalized actor output*;
+        # it cannot attest the target the PD controller actually received after offset/scale/clamp.
+        # A separate validity bit is essential because JointAction.reset() clears only raw_actions
+        # and intentionally leaves processed_actions untouched in Isaac Lab 2.1.
+        self._previous_processed_qdes = torch.zeros_like(self._processed_actions)
+        self._previous_processed_qdes_valid = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        self._processed_qdes_valid = torch.zeros_like(
+            self._previous_processed_qdes_valid
+        )
         if self._clamp_enabled:
             print("[hope_actions] q_des CLAMP ACTIVE: processed joint targets clamped to "
                   "joint limits (train==deploy, pp_joint_limits parity)", flush=True)
 
     def process_actions(self, actions: torch.Tensor):
+        # Snapshot the preceding deploy-space target before JointPositionAction overwrites it.
+        # On the first action after reset the numeric snapshot is deliberately ignored by the
+        # copied validity bit, so an episode boundary can never create a fictitious slew charge.
+        self._previous_processed_qdes.copy_(self._processed_actions)
+        self._previous_processed_qdes_valid.copy_(self._processed_qdes_valid)
         super().process_actions(actions)
-        if not self._clamp_enabled:
-            return
-        limits = self._asset.data.soft_joint_pos_limits[:, self._joint_ids, :]
-        self._processed_actions = torch.clamp(
-            self._processed_actions, min=limits[..., 0], max=limits[..., 1]
-        )
+        if self._clamp_enabled:
+            limits = self._asset.data.soft_joint_pos_limits[:, self._joint_ids, :]
+            self._processed_actions = torch.clamp(
+                self._processed_actions, min=limits[..., 0], max=limits[..., 1]
+            )
+        self._processed_qdes_valid.fill_(True)
+
+    def reset(self, env_ids: Sequence[int] | None = None) -> None:
+        """Invalidate deploy-space history for reset environments.
+
+        Isaac's ActionManager resolves ``None`` to ``slice(None)`` before calling terms, but
+        accepting ``None`` here as well keeps direct callers safe and matches the base API.
+        """
+
+        super().reset(env_ids=env_ids)
+        ids = slice(None) if env_ids is None else env_ids
+        self._processed_qdes_valid[ids] = False
+        self._previous_processed_qdes_valid[ids] = False
+
+    @property
+    def previous_processed_qdes(self) -> torch.Tensor:
+        """Previous affine-transformed and clamp-applied joint-position target."""
+
+        return self._previous_processed_qdes
+
+    @property
+    def previous_processed_qdes_valid(self) -> torch.Tensor:
+        """Per-environment validity of :attr:`previous_processed_qdes`."""
+
+        return self._previous_processed_qdes_valid
 
 
 @configclass

@@ -386,6 +386,19 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                         self._scalar_tensor(counter_value),
                         step,
                     )
+            if "processed_qdes_slew_hinge_probe" in active_reward_terms:
+                from whole_body_tracking.tasks.tracking.mdp.hope_rewards import (
+                    consume_processed_qdes_slew_hinge_activation_counters,
+                )
+
+                for counter_name, counter_value in (
+                    consume_processed_qdes_slew_hinge_activation_counters(env).items()
+                ):
+                    self._log_scalar(
+                        f"Live/processed_qdes_slew/{counter_name}",
+                        self._scalar_tensor(counter_value),
+                        step,
+                    )
 
         if hasattr(env, "termination_manager"):
             tm = env.termination_manager

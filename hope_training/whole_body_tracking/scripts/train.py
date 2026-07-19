@@ -679,6 +679,158 @@ def _joint_velocity_limit_hinge_reward_contract(env_cfg, runtime_facts: dict) ->
     }
 
 
+def _processed_qdes_slew_hinge_reward_contract(
+    env_cfg, runtime_facts: dict
+) -> dict | None:
+    """Conditionally bind the deploy-space recovery slew arm.
+
+    The default-off declaration must not change any historical/default canonical hard-contract
+    bytes.  Therefore the subsection is absent until either the real term is enabled or train.py
+    has raised its zero-valued probe for an explicitly configured control/treatment arm.
+    """
+
+    rewards = getattr(env_cfg, "rewards", None)
+    term = None if rewards is None else getattr(
+        rewards, "processed_qdes_slew_hinge", None
+    )
+    probe = None if rewards is None else getattr(
+        rewards, "processed_qdes_slew_hinge_probe", None
+    )
+    if term is None and probe is None:
+        return None
+    if term is None or probe is None:
+        raise RuntimeError(
+            "processed_qdes_slew_hinge and its activation probe must be declared together"
+        )
+
+    raw_weight = getattr(term, "weight", None)
+    raw_probe_weight = getattr(probe, "weight", None)
+    for label, value in (("weight", raw_weight), ("probe weight", raw_probe_weight)):
+        if isinstance(value, bool) or not isinstance(value, (int, float)):
+            raise RuntimeError(
+                f"rewards.processed_qdes_slew_hinge {label} must be finite and non-positive/zero-valued"
+            )
+        if not math.isfinite(float(value)):
+            raise RuntimeError(
+                f"rewards.processed_qdes_slew_hinge {label} must be finite and non-positive/zero-valued"
+            )
+    weight = float(raw_weight)
+    probe_weight = float(raw_probe_weight)
+    if weight > 0.0 or probe_weight not in (0.0, 1.0):
+        raise RuntimeError(
+            "rewards.processed_qdes_slew_hinge weight must be <= 0 and probe weight must be 0 or 1"
+        )
+    if weight == 0.0 and probe_weight == 0.0:
+        return None
+
+    try:
+        control_dt = float(env_cfg.sim.dt) * int(env_cfg.decimation)
+    except (AttributeError, TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "processed_qdes_slew_hinge requires env_cfg.sim.dt * decimation == 0.02 s"
+        ) from exc
+    if not math.isfinite(control_dt) or not math.isclose(
+        control_dt, 0.02, rel_tol=0.0, abs_tol=1.0e-9
+    ):
+        raise RuntimeError(
+            "processed_qdes_slew_hinge requires env_cfg.sim.dt * decimation == 0.02 s"
+        )
+
+    params = getattr(term, "params", None)
+    probe_params = getattr(probe, "params", None)
+    if not isinstance(params, dict) or not isinstance(probe_params, dict):
+        raise RuntimeError(
+            "rewards.processed_qdes_slew_hinge params must be mappings"
+        )
+    if params != probe_params:
+        raise RuntimeError(
+            "processed_qdes_slew_hinge probe params must exactly match the real term"
+        )
+    if params.get("action_name") != "joint_pos":
+        raise RuntimeError(
+            "processed_qdes_slew_hinge action_name must be exactly 'joint_pos'"
+        )
+    if params.get("command_name") != "racket_target":
+        raise RuntimeError(
+            "processed_qdes_slew_hinge command_name must be exactly 'racket_target'"
+        )
+    raw_margin = params.get("margin")
+    raw_start = params.get("recovery_start_s")
+    raw_end = params.get("recovery_end_s")
+    if any(
+        isinstance(value, bool) or not isinstance(value, (int, float))
+        for value in (raw_margin, raw_start, raw_end)
+    ):
+        raise RuntimeError(
+            "processed_qdes_slew_hinge margin/window must be finite with 0 < margin < 1 and 0 <= start < end"
+        )
+    margin, start, end = map(float, (raw_margin, raw_start, raw_end))
+    if (
+        not all(math.isfinite(value) for value in (margin, start, end))
+        or not 0.0 < margin < 1.0
+        or start < 0.0
+        or start >= end
+    ):
+        raise RuntimeError(
+            "processed_qdes_slew_hinge margin/window must be finite with 0 < margin < 1 and 0 <= start < end"
+        )
+
+    runtime_names = runtime_facts.get("joint_names")
+    articulation_names = runtime_facts.get("articulation_joint_names")
+    limits = runtime_facts.get("joint_velocity_limits")
+    waist_leg_names = {
+        "waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint",
+        "left_hip_pitch_joint", "left_hip_roll_joint", "left_hip_yaw_joint",
+        "left_knee_joint", "left_ankle_pitch_joint", "left_ankle_roll_joint",
+        "right_hip_pitch_joint", "right_hip_roll_joint", "right_hip_yaw_joint",
+        "right_knee_joint", "right_ankle_pitch_joint", "right_ankle_roll_joint",
+    }
+    if (
+        not isinstance(runtime_names, list)
+        or len(runtime_names) != 31
+        or runtime_names != articulation_names
+    ):
+        raise RuntimeError(
+            "processed_qdes_slew_hinge requires identity 31-joint A3 runtime order"
+        )
+    selected_names = [name for name in runtime_names if name in waist_leg_names]
+    if len(selected_names) != 15 or set(selected_names) != waist_leg_names:
+        raise RuntimeError(
+            "processed_qdes_slew_hinge requires the exact 15 A3 waist/leg joints"
+        )
+    if not isinstance(limits, list) or len(limits) != 31:
+        raise RuntimeError(
+            "processed_qdes_slew_hinge requires 31 runtime joint velocity limits"
+        )
+    selected_limits = [float(limits[runtime_names.index(name)]) for name in selected_names]
+    if any(not math.isfinite(value) or value <= 0.0 for value in selected_limits):
+        raise RuntimeError(
+            "processed_qdes_slew_hinge requires finite positive waist/leg velocity limits"
+        )
+
+    return {
+        "schema_version": 1,
+        "enabled": weight < 0.0,
+        "weight": weight,
+        "margin": margin,
+        "recovery_start_s": start,
+        "recovery_end_s": end,
+        "action_name": "joint_pos",
+        "command_name": "racket_target",
+        "joint_count": 15,
+        "joint_names": selected_names,
+        "joint_order": "runtime_articulation_subsequence",
+        "control_dt_s": control_dt,
+        "control_dt_source": "env_cfg.sim.dt_times_decimation",
+            "velocity_limit_source": "runtime_execution_facts.joint_velocity_limits",
+            "age_source": "per_env_exact_strike_control_tick_latch",
+            "formula": (
+            "mean(1-exp(-square(relu(abs(delta_processed_qdes)/(joint_velocity_limits*0.02)-margin)/(1-margin))))"
+        ),
+        "gate": "same_attempt_post_strike_age_s_inclusive",
+    }
+
+
 def _build_training_hard_contract(env, actor_contract) -> dict:
     """Immutable actor/task facts that must match across a checkpoint resume.
 
@@ -703,6 +855,9 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
     racket = None if racket_cmd is None else racket_cmd.cfg
     runtime_facts = runtime_execution_facts(env, actor_contract)
     lateral_training = _resolve_lateral_training_runtime(env)
+    processed_qdes_slew_contract = _processed_qdes_slew_hinge_reward_contract(
+        env_cfg, runtime_facts
+    )
     motion_files = motion.motion_file
     if not isinstance(motion_files, (list, tuple, ListConfig)):
         motion_files = [motion_files]
@@ -913,6 +1068,13 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
         ),
         "joint_velocity_limit_hinge_reward": (
             _joint_velocity_limit_hinge_reward_contract(env_cfg, runtime_facts)
+        ),
+        **(
+            {}
+            if processed_qdes_slew_contract is None
+            else {
+                "processed_qdes_slew_hinge_reward": processed_qdes_slew_contract
+            }
         ),
         **(
             {}
@@ -1223,6 +1385,9 @@ _REWARD_KEYS = (
     "hold_heading_weight", "hold_heading_std", "foot_orientation_hold_gate",
     "base_decel_weight", "base_decel_std", "base_decel_v_gain", "base_decel_v_max",
     "joint_velocity_limit_hinge_weight", "joint_velocity_limit_hinge_margin",
+    "processed_qdes_slew_hinge_weight", "processed_qdes_slew_hinge_margin",
+    "processed_qdes_slew_hinge_recovery_start_s",
+    "processed_qdes_slew_hinge_recovery_end_s",
     # R16 / V1 wrist-mimic surgery (orientation 2026-07-04; linear velocity 2026-07-08 §③).
     "free_wrist_ori_mimic", "free_wrist_vel_mimic",
     # A0/A1 non-striking-arm imitation ablation (2026-07-14).  This deliberately has one
@@ -1850,6 +2015,110 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 "rewards.joint_velocity_limit_hinge_probe="
                 f"(margin={float(_qdot_term.params['margin'])},weight=1.0)"
             )
+        # Processed-q_des recovery slew (default OFF).  This is not a duplicate action_rate_l2:
+        # the term reads the deploy-space target after offset/scale/clamp, restricts itself to the
+        # 15 waist/leg joints, and opens only for the same attempt's post-contact recovery clock.
+        _slew_weight = _get(rw, "processed_qdes_slew_hinge_weight")
+        _slew_margin = _get(rw, "processed_qdes_slew_hinge_margin")
+        _slew_start = _get(rw, "processed_qdes_slew_hinge_recovery_start_s")
+        _slew_end = _get(rw, "processed_qdes_slew_hinge_recovery_end_s")
+        _slew_requested = any(
+            value is not None
+            for value in (_slew_weight, _slew_margin, _slew_start, _slew_end)
+        )
+        if _slew_requested:
+            _require(
+                hasattr(R, "processed_qdes_slew_hinge")
+                and R.processed_qdes_slew_hinge is not None,
+                "rewards.processed_qdes_slew_hinge",
+            )
+            _require(
+                hasattr(R, "processed_qdes_slew_hinge_probe")
+                and R.processed_qdes_slew_hinge_probe is not None,
+                "rewards.processed_qdes_slew_hinge_probe",
+            )
+            _slew_term = R.processed_qdes_slew_hinge
+            _slew_probe = R.processed_qdes_slew_hinge_probe
+            if _slew_weight is not None:
+                if isinstance(_slew_weight, bool):
+                    raise _OverrideError(
+                        "rewards.processed_qdes_slew_hinge.weight must be finite and <= 0"
+                    )
+                try:
+                    _slew_weight_value = float(_slew_weight)
+                except (TypeError, ValueError) as exc:
+                    raise _OverrideError(
+                        "rewards.processed_qdes_slew_hinge.weight must be finite and <= 0"
+                    ) from exc
+                if not math.isfinite(_slew_weight_value) or _slew_weight_value > 0.0:
+                    raise _OverrideError(
+                        "rewards.processed_qdes_slew_hinge.weight must be finite and <= 0"
+                    )
+                _slew_term.weight = _slew_weight_value
+                applied.append(
+                    f"rewards.processed_qdes_slew_hinge.weight={_slew_weight_value}"
+                )
+
+            _slew_param_overrides = (
+                ("margin", _slew_margin),
+                ("recovery_start_s", _slew_start),
+                ("recovery_end_s", _slew_end),
+            )
+            for _param_name, _raw_value in _slew_param_overrides:
+                if _raw_value is None:
+                    continue
+                if isinstance(_raw_value, bool):
+                    raise _OverrideError(
+                        "rewards.processed_qdes_slew_hinge margin/window must be finite with "
+                        "0 < margin < 1 and 0 <= start < end"
+                    )
+                try:
+                    _param_value = float(_raw_value)
+                except (TypeError, ValueError) as exc:
+                    raise _OverrideError(
+                        "rewards.processed_qdes_slew_hinge margin/window must be finite with "
+                        "0 < margin < 1 and 0 <= start < end"
+                    ) from exc
+                if not math.isfinite(_param_value):
+                    raise _OverrideError(
+                        "rewards.processed_qdes_slew_hinge margin/window must be finite with "
+                        "0 < margin < 1 and 0 <= start < end"
+                    )
+                _require(
+                    _param_name in _slew_term.params,
+                    f"rewards.processed_qdes_slew_hinge.params['{_param_name}']",
+                )
+                _slew_term.params[_param_name] = _param_value
+                applied.append(
+                    f"rewards.processed_qdes_slew_hinge.params.{_param_name}={_param_value}"
+                )
+            _resolved_margin = float(_slew_term.params["margin"])
+            _resolved_start = float(_slew_term.params["recovery_start_s"])
+            _resolved_end = float(_slew_term.params["recovery_end_s"])
+            if (
+                not 0.0 < _resolved_margin < 1.0
+                or _resolved_start < 0.0
+                or _resolved_start >= _resolved_end
+            ):
+                raise _OverrideError(
+                    "rewards.processed_qdes_slew_hinge margin/window must be finite with "
+                    "0 < margin < 1 and 0 <= start < end"
+                )
+            if _slew_term.params.get("action_name") != "joint_pos":
+                raise _OverrideError(
+                    "rewards.processed_qdes_slew_hinge.action_name must be exactly 'joint_pos'"
+                )
+            if _slew_term.params.get("command_name") != "racket_target":
+                raise _OverrideError(
+                    "rewards.processed_qdes_slew_hinge.command_name must be exactly 'racket_target'"
+                )
+            _slew_probe.weight = 1.0
+            _slew_probe.params.clear()
+            _slew_probe.params.update(_slew_term.params)
+            applied.append(
+                "rewards.processed_qdes_slew_hinge_probe="
+                f"(margin={_resolved_margin},recovery={_resolved_start}..{_resolved_end},weight=1.0)"
+            )
         _foot_hold_gate = _get(rw, "foot_orientation_hold_gate")
         if _foot_hold_gate is not None:
             _require(hasattr(R, "foot_orientation"), "rewards.foot_orientation")
@@ -2117,8 +2386,34 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             applied.append(f"rewards.racket_face_conditional_guidance.weight={_cfgw}")
 
         # --- penalties / regularization (negative weights: energy + smoothness + safety) --------
+        _action_rate_weight = _get(rw, "action_rate_weight")
+        if _action_rate_weight is not None:
+            if isinstance(_action_rate_weight, bool):
+                raise _OverrideError(
+                    "rewards.action_rate_l2.weight must be finite and <= 0"
+                )
+            try:
+                _action_rate_weight_value = float(_action_rate_weight)
+            except (TypeError, ValueError) as exc:
+                raise _OverrideError(
+                    "rewards.action_rate_l2.weight must be finite and <= 0"
+                ) from exc
+            if (
+                not math.isfinite(_action_rate_weight_value)
+                or _action_rate_weight_value > 0.0
+            ):
+                raise _OverrideError(
+                    "rewards.action_rate_l2.weight must be finite and <= 0"
+                )
+            _require(
+                hasattr(R, "action_rate_l2") and R.action_rate_l2 is not None,
+                "rewards.action_rate_l2",
+            )
+            R.action_rate_l2.weight = _action_rate_weight_value
+            applied.append(
+                f"rewards.action_rate_l2.weight={_action_rate_weight_value}"
+            )
         for _name, _key in (
-            ("action_rate_l2", "action_rate_weight"),
             ("joint_limit", "joint_limit_weight"),
             ("undesired_contacts", "undesired_contacts_weight"),
             ("pre_strike_foot_slip", "pre_strike_foot_slip_weight"),
