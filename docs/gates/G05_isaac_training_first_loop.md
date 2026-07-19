@@ -3058,3 +3058,11 @@ MotionLoader 的 body velocity property 是高级索引副本，必须写其 bac
 为 `0`，100 题都因 0.5 秒 deadline guard 结束。该 checkpoint 因此不能满足严格半秒要求；下一轮训练要
 直接覆盖更短且更宽的准备时间、动作加速和同一拍 target/TTS 更新。Isaac 结果仍不是 vendor MuJoCo 门，
 所以 G05 保持 `Partial`。
+
+### 2026-07-19 W/Y checkpoint 只读定位未闭合
+
+Pod1 唯一一次只读检查确认预期训练根可枚举，CPU PyTorch 2.8 可用；但冻结规则要求目录 basename
+以 `_<完整 run_name>` 结尾且同目录存在 `model_6700.pt`，W/Y 均为 `0` 匹配。本轮没有猜目录或加载
+checkpoint，所以内部 iteration、finite、actor 输入 `179`/输出 `31` 与导出 sidecar 均为 `UNKNOWN`，
+不形成训练产物验收或 vendor 结果。下一轮只读检查只在同一受限根内按完整 `run_name` 查真实嵌套/
+命名，不再假设 run 位于根下一层；唯一后才加载。G05 保持 `Partial`。

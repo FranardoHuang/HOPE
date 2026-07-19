@@ -43,6 +43,13 @@ runner 送入同一 MuJoCo XML 场景模型（MJCF）与 plant 的适配器。�
 [半秒冲刺卷宗](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)与
 [G06](gates/G06_isaac_to_mujoco.md)。
 
+2026-07-19 的唯一一次 Pod1 只读检查确认预期训练根存在且可枚举，CPU PyTorch 2.8 可用；但冻结的
+“basename 以 `_<完整 run_name>` 结尾且含 `model_6700.pt`”规则令 W/Y 均为 `0` 匹配。本轮没有猜
+目录或加载 checkpoint，故内部 iteration、finite、actor `179→31` 与导出 sidecar 都保持 `UNKNOWN`，
+不构成 vendor 通过。下一轮只读检查将在同一受限训练根内按完整 `run_name` 查真实嵌套/命名，不再
+假设 run 位于训练根下一层；每个候选只有唯一匹配后才加载。G05/G06 仍为 `Partial`，`Gate3-D0`
+仍为 `Open`。
+
 - **本轮 task-revision 训练池（已结束）：** formal 179-D 与训练现已统一为“一颗球一个 `task_id`、同球估计用递增
   `task_revision`”，挥拍中位置、速度、signed 拍面与剩余击球时间每个 policy tick 继续原子更新；phase
   governor 只接受可达的动作加速。准备时间不是以 `0.5 s` 为下限，而是同时采样 `<0.5 s` 压力、exact

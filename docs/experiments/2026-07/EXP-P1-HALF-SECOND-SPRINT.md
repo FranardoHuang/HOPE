@@ -152,6 +152,15 @@
 适配器与行为输出均不存在，所以 W/Y 仍只是演示优先双候选，U 只是稳定备选；G05/G06 保持
 `Partial`，`Gate3-D0` 保持 `Open`，不能宣称演示成功。
 
+### Pod1 唯一只读定位结果
+
+预期训练根存在且可枚举，CPU PyTorch 2.8 可用；但冻结的“basename 以 `_<完整 run_name>` 结尾且
+含 `model_6700.pt`”规则令 W/Y 都得到 `0` 匹配。这只说明首次定位假设过窄，不证明 checkpoint 缺失。
+本轮没有猜目录或加载模型，因此内部 iteration、finite、actor `179→31` 及
+`params/training_contract.json`、`env.pkl`、`agent.pkl`、`env.yaml` 均为 `UNKNOWN`；没有导出、仿真或
+vendor 行为。下一轮只读检查在同一受限训练根内按完整 `run_name` 查真实嵌套/命名，不再假设 run 是
+根下一层；每个候选唯一后才加载。G05/G06 继续 `Partial`，`Gate3-D0` 继续 `Open`。
+
 ## 2026-07-18 20:52 CST 四臂终档 teardown 收尾
 
 - **先修正审计谓词：**旧的 substring 身份匹配和粗粒度 fatal 搜索可能误判。本轮改为读取 NUL

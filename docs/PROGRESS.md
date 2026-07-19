@@ -13,6 +13,12 @@
 
 ## 2026-07-19
 
+- Pod1 唯一一次只读 W/Y checkpoint 定位确认预期训练根可枚举、CPU PyTorch 2.8 可用；但按冻结的
+  “basename 以 `_<完整 run_name>` 结尾且含 `model_6700.pt`”规则，两者均为 `0` 匹配。没有猜目录或
+  加载模型，iteration、finite、actor `179→31` 与导出 sidecar 均为 `UNKNOWN`。下一轮只读检查改为
+  在受限根内按完整 `run_name` 查真实嵌套/命名，唯一后才加载；G05/G06 保持 `Partial`、
+  `Gate3-D0` 保持 `Open`。详见[半秒冲刺](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)。
+
 - 约 10:26 CST，Pod1 单次只读 SSH 确认 L2 PGID `2457829` 成员数为 `0`，NVML compute app
   为空，GPU0/1/2 的利用率与显存占用均为零；L2 已从待确认状态闭合为进程组与计算进程完全
   absent。Pod1 V/L2/Z3 和 Pod2 D2/F 至此全部收口，双 Pod Isaac 训练池结束；V/L2/D2/F

@@ -78,7 +78,15 @@ rows through serve generation, same-ball
 runner. The old `pp_gate3_rally.sh` / `pp_rally_conductor.py` path remains quarantined and forbidden.
 
 Only one read-only location pass for the W/Y `model_6700` files and export preflight is allowed at
-this stage; no vendor behavior run is authorized. The next capability is the adapter described in
+this stage; no vendor behavior run is authorized. That Pod1 pass confirmed that the expected
+training root is enumerable and CPU PyTorch 2.8 is available. However, the frozen locator required
+a basename ending in `_<full run_name>` with `model_6700.pt` in the same directory, and both W and Y
+returned zero matches. No directory was guessed and no checkpoint was loaded, so embedded iteration,
+finiteness, actor `179→31` dimensions and export sidecars remain `UNKNOWN`. The next read-only pass
+must search each full `run_name` within the same bounded root, inspect the actual nested naming, and
+load only after one unique match; it must not assume each run is a direct child of the root.
+
+The next runtime capability is the adapter described in
 the acceptance criteria above, with the exact same 100 questions (50 per side), frame-0 zero
 velocity, 25 ticks, forehand time scale `2.64`, backhand time scale `1.8`, and the same planner,
 MuJoCo XML model (MJCF) and effective plant. Until that adapter and its per-question output exist,

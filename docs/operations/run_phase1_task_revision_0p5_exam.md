@@ -12,7 +12,18 @@
 
 2026-07-19 当前边界：`W`（拍心优先 × 自由非击球臂）和 `Y`（拍心优先 × 触球窗老师静音）
 只是厂商 MuJoCo 同卷的演示优先候选，`U`（拍心优先 × 强准备）是稳定备选。现有路径尚不能运行
-W/Y 厂商行为卷；只允许一次只读定位两份 `model_6700` 和导出 preflight（导出前置检查）。
+W/Y 厂商行为卷；首次只读定位未唯一找到两份 `model_6700`，导出 preflight（导出前置检查）尚未开始。
+
+### W/Y checkpoint 只读定位边界
+
+Pod1 唯一一次只读检查确认预期训练根可枚举，CPU PyTorch 2.8 可用。但冻结谓词要求 basename 以
+`_<完整 run_name>` 结尾且同目录有 `model_6700.pt`，W/Y 均为 `0` 匹配。本轮没有猜目录或加载模型；
+iteration、finite、actor `179→31` 与导出 sidecar 均为 `UNKNOWN`。
+
+下一轮仍只读：在同一受限训练根内分别按完整 `run_name` 查真实嵌套/命名，不再假设 run 是根下一层。
+每个候选只有恰好一个匹配且其中存在 `model_6700.pt` 后，才允许 CPU 加载并检查内部 iteration、
+finite、actor 维度及 `params/training_contract.json`、`env.pkl`、`agent.pkl`、`env.yaml` 是否存在。零匹配
+或多匹配都保持 `UNKNOWN`，不得按“最新”猜目录，也不得据此启动 vendor 行为。
 
 ## 为什么当前不能直接跑 W/Y 厂商同卷
 
