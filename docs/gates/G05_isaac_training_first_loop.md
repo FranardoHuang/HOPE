@@ -46,6 +46,21 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Current State
 
+Follow-up note (2026-07-19, W/Y static export inputs closed; Gate remains `Partial`):
+
+- One read-only, exact full-filesystem search located exactly one W and one Y `model_6700.pt`. Both load on CPU
+  with embedded iteration `6700`, `74` floating tensors / `1,762,715` floating elements / zero non-finite
+  elements, an actor shape of `179→31`, and all four expected `params` materials present:
+  `training_contract.json`, `env.pkl`, `agent.pkl`, and `env.yaml`.
+- `standalone_onnx_export.py` now has a genuinely zero-write `--plan` source path. It uses a weights-only
+  checkpoint load, requires a non-negative integer `checkpoint_iteration`, validates finite actor/normalizer,
+  donor, motions, harvest, train bank, contract and the formal face-179 envelope, then exits before the first
+  output-side effect. Its JSON explicitly reports `artifact_written=false` and
+  `graph_export_not_executed=true`. The focused local suite is `97 passed in 0.38s`, including the unchanged
+  normal-export fake smoke.
+- Neither real W/Y plan has run on a Pod, no ONNX has been produced, and no vendor scene or policy behavior has
+  run. These are static artifact/source gates only; G05 remains `Partial`.
+
 Follow-up note (2026-07-19 about 10:26 CST, Isaac pool closed; Gate remains `Partial`):
 
 - One read-only Pod1 SSH confirmed that L2 PGID `2457829` has zero members, no NVML compute application, and
@@ -3059,12 +3074,15 @@ MotionLoader 的 body velocity property 是高级索引副本，必须写其 bac
 直接覆盖更短且更宽的准备时间、动作加速和同一拍 target/TTS 更新。Isaac 结果仍不是 vendor MuJoCo 门，
 所以 G05 保持 `Partial`。
 
-### 2026-07-19 W/Y checkpoint 只读定位未闭合
+### 2026-07-19 W/Y checkpoint 静态制品闭合
 
-三轮 Pod1 只读连接均正常退出且未重连。W/Y 各自的完整 `run_name` wrapper `run.log` 已唯一，但日志
-没有给出可唯一解析的 RSL/checkpoint 绝对路径；cached-source 受限根内也没有可由相邻材料精确归属的
-`model_6700.pt`。`train.py` 实际按 launcher 启动工作目录创建 `logs/rsl_rl/...`，Hydra 不改变该目录，
-而 sprint 配置未保存实际 launcher 工作目录。这说明旧日志根假设错误，不说明模型失败。第三轮已确认
-两臂各有唯一 regular `run.sh`，但仍无法静态闭合绝对 cwd。下一轮改为在 `/workspace/codexschema`
-内按完整 run name 与 model 文件名精确全域查找；唯一闭合后才加载并检查 iteration、finite、actor
-输入 `179`/输出 `31` 与 sidecar。当前全部保持 `UNKNOWN`，G05 保持 `Partial`。
+前三轮定位因 launcher cwd 未入账而失败；后续一次 Pod1 只读全域精确查找不再推断 cwd，
+按完整 `run_name` 为 W/Y 各得到唯一 regular `model_6700.pt`。两份 checkpoint 均为
+iteration `6700`，均有 `74` 个浮点 tensor、`1,762,715` 个浮点元素且 non-finite `0`，
+actor 形状均为 `179→31`；`params/training_contract.json`、`env.pkl`、`agent.pkl` 与
+`env.yaml` 全部存在。这只是静态 checkpoint/导出材料闭合，不是 vendor 行为。
+
+standalone exporter 的 `--plan` 源码门现会验证完整材料，并且在第一次写入前退出；
+`checkpoint_iteration` 必须是非负整数，成功 JSON 明确记录没有写 artifact 或执行 graph export。
+五文件聚焦回归为 `97 passed in 0.38s`，包含普通导出 fake smoke。真实 W/Y plan、ONNX、
+vendor MuJoCo 和行为卷均未运行，因此 G05 保持 `Partial`。

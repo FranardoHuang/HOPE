@@ -20,13 +20,20 @@ Usage:
 
 from __future__ import annotations
 
+import sys
+
+# Plan mode dynamically imports dependency-light source modules below. Disable bytecode before
+# any other import so a nominally zero-write inspection cannot create __pycache__ beside source.
+if "--plan" in sys.argv:
+    sys.dont_write_bytecode = True
+
 import argparse
 import copy
 import hashlib
 import importlib.util
 import json
+import operator
 import os
-import sys
 
 import numpy as np
 
@@ -103,6 +110,19 @@ def _require(condition: bool, message: str) -> None:
     """Optimization-safe contract check (unlike assert, survives ``python -O``)."""
     if not condition:
         raise SystemExit(f"[FATAL] {message}")
+
+
+def _require_finite_tensor_mapping(values, *, label: str) -> None:
+    _require(isinstance(values, dict), f"{label} must be a state-dict object")
+    for key, value in values.items():
+        if torch.is_tensor(value) and (value.is_floating_point() or value.is_complex()):
+            _require(bool(torch.isfinite(value).all().item()), f"{label} {key} contains NaN/Inf")
+
+
+def _require_module_finite(module: nn.Module, *, label: str) -> None:
+    for key, value in module.state_dict().items():
+        if value.is_floating_point() or value.is_complex():
+            _require(bool(torch.isfinite(value).all().item()), f"{label} {key} contains NaN/Inf")
 
 
 def _sha256_file(path: str) -> str:
@@ -339,18 +359,50 @@ def main() -> int:
     )
     p.add_argument("--out", required=True)
     p.add_argument("--run-path", default="standalone-export")
+    p.add_argument(
+        "--plan",
+        action="store_true",
+        help=(
+            "load and validate every export input, then print a machine-readable plan without "
+            "creating or modifying any output"
+        ),
+    )
     p.add_argument("--bake-obs-norm", action="store_true",
                    help="bake the checkpoint's empirical obs normalization into the graph (DEPLOY artifacts)")
     args = p.parse_args()
 
-    ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=False)
+    ckpt = torch.load(args.ckpt, map_location="cpu", weights_only=args.plan)
     msd = ckpt["model_state_dict"]
     donor = onnx.load(args.donor)
+    onnx.checker.check_model(donor)
     donor_activation, donor_activation_count = _donor_activation(donor)
     actor = build_actor(
         msd, donor_activation, expected_activations=donor_activation_count
     )
     in_dim = actor[0].in_features
+    _require_module_finite(actor, label="checkpoint actor")
+    if args.plan:
+        _require(
+            in_dim == 179 and actor[-1].out_features == 31,
+            "plan requires a current 179-input/31-output actor",
+        )
+        try:
+            raw_checkpoint_iteration = ckpt["iter"]
+            if isinstance(raw_checkpoint_iteration, bool):
+                raise TypeError("bool is not a checkpoint iteration")
+            checkpoint_iteration = operator.index(raw_checkpoint_iteration)
+        except (KeyError, TypeError) as exc:
+            raise SystemExit("[FATAL] plan requires an integer checkpoint iteration") from exc
+        _require(checkpoint_iteration >= 0, "plan checkpoint iteration must be non-negative")
+    if "obs_norm_state_dict" in ckpt:
+        _require_finite_tensor_mapping(
+            ckpt["obs_norm_state_dict"], label="checkpoint obs_norm_state_dict"
+        )
+    if args.bake_obs_norm:
+        _require(
+            "obs_norm_state_dict" in ckpt,
+            "--bake-obs-norm requires checkpoint obs_norm_state_dict",
+        )
     training_contract_path = os.path.join(
         os.path.dirname(os.path.abspath(args.ckpt)), "params", "training_contract.json"
     )
@@ -439,6 +491,7 @@ def main() -> int:
         normalizer = EmpiricalNormalization(shape=[in_dim])
         normalizer.load_state_dict(ckpt["obs_norm_state_dict"])
         normalizer.eval()
+        _require_module_finite(normalizer, label="checkpoint observation normalizer")
     else:
         normalizer = nn.Identity()
 
@@ -519,6 +572,8 @@ def main() -> int:
         )
 
     contract_schema = 0
+    train_bank_validated = False
+    formal_face179_materials_validated = False
     if training_contract is not None:
         try:
             contract_schema = int(training_contract.get("schema_version", 0))
@@ -697,6 +752,8 @@ def main() -> int:
                         clip_order=FORMAL_CLIP_ORDER,
                     )
                 )
+                train_bank_validated = True
+                formal_face179_materials_validated = True
     else:
         # Older/no checkpoint contracts cannot prove per-clip point semantics.  Never propagate a
         # donor's per-clip claim into a newly exported actor.  The evaluator may apply its narrow
@@ -715,6 +772,30 @@ def main() -> int:
         training_contract if contract_schema == TRAINING_CONTRACT_SCHEMA_VERSION else None,
     )
     donor_meta["motion_harvest_donor_sha256"] = donor_sha256
+
+    # Plan mode is deliberately placed after the complete material-validation path above and
+    # before the first output-side effect below. It therefore exercises checkpoint/contract,
+    # motion clips, donor, harvested buffers, normalization, train-bank and face-envelope checks
+    # exactly like a real export, while making it impossible to create an output directory,
+    # temporary ONNX, or installed policy artifact.
+    planned_out_path = os.path.abspath(os.path.join(args.out, "policy.onnx"))
+    if args.plan:
+        print(json.dumps({
+            "artifact_written": False,
+            "checkpoint_iteration": checkpoint_iteration,
+            "graph_export_not_executed": True,
+            "input_dim": int(in_dim),
+            "materials_validated": True,
+            "obs_norm_baked": bool(args.bake_obs_norm),
+            "output_dim": int(actor[-1].out_features),
+            "plan": True,
+            "formal_face179_materials_validated": formal_face179_materials_validated,
+            "train_bank_validated": train_bank_validated,
+            "training_contract_present": training_contract is not None,
+            "training_contract_schema": contract_schema if training_contract is not None else None,
+            "would_write": [planned_out_path],
+        }, sort_keys=True, separators=(",", ":")))
+        return 0
 
     # Every checkpoint, donor, clip, harvest, bank, contract and envelope input has now been
     # validated. Only now create an export artifact, always at a same-directory temporary path.

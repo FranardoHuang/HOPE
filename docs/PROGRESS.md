@@ -13,13 +13,20 @@
 
 ## 2026-07-19
 
-- 三轮 Pod1 只读定位均 exit `0` 且未重连。第二轮已为 W/Y 各找到唯一完整 `run_name` 的 wrapper
+- 一次 Pod1 只读全域精确查找已为 W/Y 各唯一定位 `model_6700.pt`。两份 checkpoint 均为
+  iteration `6700`，各含 `74` 个浮点 tensor / `1,762,715` 个元素 / non-finite `0`，actor 均为
+  `179→31`，导出所需四份 `params` 材料齐全。standalone exporter 已新增真正零写入的
+  `--plan`：它以 `weights_only` 加载、完成 finite/donor/全材料验证后在首次写入前退出，
+  JSON 含 `checkpoint_iteration`、`artifact_written=false` 与 `graph_export_not_executed=true`。
+  本地聚焦回归为 `97 passed in 0.38s`，且普通导出 fake smoke 已通过；真实 W/Y plan 尚未在 Pod 运行，
+  这些都不是 vendor 行为分。G05/G06 仍为 `Partial`、`Gate3-D0` 仍为 `Open`。详见
+  [半秒冲刺](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)。
+
+- 在上述全域精确查找之前，三轮 Pod1 只读定位均 exit `0` 且未重连。第二轮已为 W/Y 各找到唯一完整 `run_name` 的 wrapper
   `run.log`，但日志没有输出可唯一解析的 RSL/checkpoint 绝对路径；cached-source 受限根中也没有可由
   相邻材料精确归属的 `model_6700.pt`。本地源码复核确认日志根由 launcher 的启动工作目录决定，而
   sprint 配置没有保存该目录。第三轮确认每臂有唯一 regular `run.sh`，但仍无法静态闭合绝对 cwd。
-  W/Y 因此继续 `UNKNOWN`；下一轮改为在 `/workspace/codexschema` 内按完整 run name 与 model 文件精确
-  全域查找，不再猜 cwd。另确认 standalone exporter 没有真正的零写入 plan/dry-run，
-  完整运行会创建输出并替换 `policy.onnx`，所以当前不执行。详见
+  当时 W/Y 因此保持 `UNKNOWN`；后续全域精确查找已按上一条闭合，不倒写前三轮的失败结论。详见
   [半秒冲刺](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)。
 
 - 约 10:26 CST，Pod1 单次只读 SSH 确认 L2 PGID `2457829` 成员数为 `0`，NVML compute app

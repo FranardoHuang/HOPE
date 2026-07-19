@@ -1208,10 +1208,12 @@ ONNX that lacks the envelope metadata is intentionally rejected by the current C
 The Isaac-free standalone exporter has the same rule and cannot copy the envelope from its donor.
 Pass the exact train NPZ explicitly:
 
-The script currently has no `--plan` or `--dry-run`. `--help` and `--contract-import-smoke` do not
-load or validate checkpoint, motion, donor, harvest, or train-bank materials. A full invocation
-creates `--out` and atomically replaces `<out>/policy.onnx`, so use a new output directory and do not
-describe either lightweight command as an export preflight.
+Use `--plan` for a genuine zero-write preflight. Plan mode loads the checkpoint with
+`weights_only=True`, requires a non-negative integer `checkpoint_iteration`, checks actor and
+normalizer finiteness, validates the donor ONNX, motions, harvest, train bank, training contract and
+formal face-179 envelope, then exits before creating `--out`, a temporary file, an ONNX graph or an
+artifact. `--help` and `--contract-import-smoke` remain lightweight commands and are not export
+preflights.
 
 ```bash
 python scripts/standalone_onnx_export.py \
@@ -1220,7 +1222,25 @@ python scripts/standalone_onnx_export.py \
   --donor /abs/same-config-donor/policy.onnx \
   --harvest /abs/same-donor-harvest.npz \
   --train-bank /abs/s1_<family>_v3_train.npz \
-  --out /abs/run/exported --run-path <label> --bake-obs-norm
+  --out /abs/run/exported --run-path <label> --bake-obs-norm --plan
+```
+
+Plan success prints one JSON object. Require its `checkpoint_iteration` to equal the requested
+checkpoint and require `artifact_written=false`, `graph_export_not_executed=true`, `input_dim=179`,
+`output_dim=31`, `materials_validated=true`, `train_bank_validated=true`, and
+`formal_face179_materials_validated=true`. The `would_write` path is descriptive only. Verify that a
+missing output remains absent or an existing output (including `policy.onnx`) remains byte-identical.
+Remove `--plan` only for the subsequent real export, and keep W/Y in separate new output directories.
+
+Focused source regression (`97 passed in 0.38s` on 2026-07-19):
+
+```bash
+python3 -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_standalone_onnx_export_plan.py \
+  hope_training/whole_body_tracking/tests/test_export_obs_norm_contract.py \
+  hope_training/whole_body_tracking/tests/test_export_planner_task_revision_contract.py \
+  hope_training/whole_body_tracking/tests/test_stage1_normal_envelope.py \
+  hope_training/whole_body_tracking/tests/test_training_contract_schema3.py
 ```
 
 This path runs the same schema-3 bank loader and motion/anchor validation before deriving the

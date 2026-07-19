@@ -138,8 +138,8 @@
   `agi/a3_deploy_example/scripts/pp_rally_conductor.py` 是隔离中的旧连续演练路径；其宽泛进程操作和旧
   时序合同不满足本卷，禁止复制、启动或用来补缺口。
 
-现阶段只允许**一次只读定位** W/Y 各自的 `model_6700` 与导出 preflight（导出前置检查）；不得启动
-厂商行为卷。下一项能力必须先实现并验证同一条适配链：
+现阶段 W/Y 的 checkpoint 已完成**一次只读制品闭合**；下一步只跑两份零写入 ONNX
+`--plan`，不得启动厂商行为卷。之后必须先实现并验证同一条适配链：
 
 1. 不改题序地消费同一 100 题，正手/反手各 50 题；每题从动作第 0 帧零速度开始，固定 25 个
    50 Hz 控制周期，正手时间倍率 `2.64`、反手时间倍率 `1.8`。
@@ -152,25 +152,39 @@
 适配器与行为输出均不存在，所以 W/Y 仍只是演示优先双候选，U 只是稳定备选；G05/G06 保持
 `Partial`，`Gate3-D0` 保持 `Open`，不能宣称演示成功。
 
-### Pod1 三轮只读定位结果
+### Pod1 W/Y checkpoint 与零写入导出计划
 
-三次连接都 exit `0` 且没有重连或写远端。第二轮已为 W/Y 各自找到唯一完整 `run_name` 的 wrapper
-`run.log`，但两份日志均没有打印可唯一解析的 RSL/checkpoint 绝对路径；在 cached-source 受限根递归
-查找后，可由相邻配置或完整 `run_name` 精确归属的 `model_6700.pt` 候选仍都是 `0`。所以内部
-iteration、finite、actor `179→31` 及 `params/training_contract.json`、`env.pkl`、`agent.pkl`、
-`env.yaml` 继续为 `UNKNOWN`；没有加载、导出、仿真或 vendor 行为。这不是模型失败。
+前三轮因 launcher cwd 没有入账而无法从 cached-source 根定位；第四轮不再推断 cwd，只在
+`/workspace/codexschema` 单一文件系统下枚举 regular `model_6700.pt`，再按 parent basename 是否
+精确以 `_<完整 run_name>` 结尾筛选。一次 Pod1 只读 SSH 为两臂各得到唯一匹配：
 
-本地源码给出根因边界：`scripts/train.py` 以进程启动时的工作目录计算
-`logs/rsl_rl/<experiment>/...`，而 Hydra 配置 `chdir=false`；sprint YAML 只记 source/run name，没有记
-实际 launcher 工作目录。cached-source 根因此只是旧假设，不是输出真源。第三轮确认每臂各有唯一
-regular `run.sh`，但静态规则无法从中得到可接受的绝对 cwd（`cwd_count=0`）。下一轮不再增加 cwd
-猜法，而是在单一文件系统 `/workspace/codexschema` 内枚举 regular `model_6700.pt`，仅按 parent
-basename 是否精确以 `_<完整 run_name>` 结尾筛选；0 或多匹配仍保持 `UNKNOWN`。
+- W：`simple_half_second_sprint_20260718/pod1/hs_p1_w_cached_pos_free_seed3/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-17_19-58-17_hs_p1_w_cached_pos_free_seed3/model_6700.pt`
+- Y：`simple_half_second_sprint_20260718/pod1/hs_p1_y_cached_pos_window0_seed3/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-17_19-59-30_hs_p1_y_cached_pos_window0_seed3/model_6700.pt`
 
-导出侧也有独立阻塞：`standalone_onnx_export.py` 当前没有 `--plan` 或 `--dry-run`。`--help` 与
-`--contract-import-smoke` 不验证 W/Y 材料；完整命令会创建输出目录并原子替换 `policy.onnx`。在
-checkpoint 唯一闭合前不运行；之后要么先增加真正零写入、完成全部材料验证的 `--plan`，要么只向
-全新的 W/Y 独立目录执行正式导出。G05/G06 继续 `Partial`，`Gate3-D0` 继续 `Open`。
+两份 checkpoint 内部 `iter=6700`，均包含 `74` 个浮点 tensor、`1,762,715` 个浮点元素，
+non-finite 元素均为 `0`；state dict 形状同时证明 actor 输入 `179`、输出 `31`。两个运行目录
+的 `params/training_contract.json`、`env.pkl`、`agent.pkl` 与 `env.yaml` 全部存在。这只闭合
+训练 checkpoint 和导出材料的静态前置，没有加载 vendor 场景、执行策略或给出行为成绩。
+
+`standalone_onnx_export.py` 现新增真正零写入的 `--plan`。plan 使用 `weights_only=True`
+加载 checkpoint，拒绝非整数、布尔或负数 `checkpoint_iteration`，并在 donor ONNX 安全检查、
+checkpoint/normalizer finite、motion、harvest、train-bank、训练合同和 formal face-179 envelope 全部验证
+后，于创建目录、生成 graph 或写临时文件之前退出。成功 JSON 包含
+`checkpoint_iteration`、`artifact_written=false`、`graph_export_not_executed=true`、`input_dim=179`、
+`output_dim=31`、`train_bank_validated` 与 `formal_face179_materials_validated` 等明确字段。本地以下
+聚焦回归为 `97 passed in 0.38s`，且普通导出 fake smoke 仍会写出 `policy.onnx`，未被 plan 分支回归：
+
+```bash
+python3 -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_standalone_onnx_export_plan.py \
+  hope_training/whole_body_tracking/tests/test_export_obs_norm_contract.py \
+  hope_training/whole_body_tracking/tests/test_export_planner_task_revision_contract.py \
+  hope_training/whole_body_tracking/tests/test_stage1_normal_envelope.py \
+  hope_training/whole_body_tracking/tests/test_training_contract_schema3.py
+```
+
+真实 W/Y `--plan` 尚未在 Pod 运行，两份 ONNX 也尚未生成。G05/G06 继续 `Partial`，
+`Gate3-D0` 继续 `Open`。
 
 ## 2026-07-18 20:52 CST 四臂终档 teardown 收尾
 

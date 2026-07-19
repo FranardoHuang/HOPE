@@ -12,20 +12,34 @@
 
 2026-07-19 当前边界：`W`（拍心优先 × 自由非击球臂）和 `Y`（拍心优先 × 触球窗老师静音）
 只是厂商 MuJoCo 同卷的演示优先候选，`U`（拍心优先 × 强准备）是稳定备选。现有路径尚不能运行
-W/Y 厂商行为卷；三轮只读定位仍未唯一找到两份 `model_6700`，导出 preflight（导出前置检查）尚未开始。
+W/Y 厂商行为卷；两份 `model_6700` 已唯一闭合，导出所需静态材料齐全，但真实 ONNX
+`--plan` 与导出尚未在 Pod 运行。
 
-### W/Y checkpoint 只读定位边界
+### W/Y checkpoint 只读闭合
 
-三轮 Pod1 只读连接均 exit `0` 且未重连。W/Y 各有唯一完整 `run_name` 的 wrapper `run.log`，但日志
-没有可唯一解析的 RSL/checkpoint 绝对路径；cached-source 受限根中也没有能由相邻材料精确归属的
-`model_6700.pt`。`train.py` 以 launcher 启动工作目录生成 `logs/rsl_rl/...`，Hydra 不改变它，而 sprint
-配置没记录该目录。第三轮确认每臂各有唯一 regular `run.sh`，但静态解析得不到可接受的绝对 cwd。
-下一轮不再猜 cwd：只在 `/workspace/codexschema` 单一文件系统内枚举 regular `model_6700.pt`，并按
-parent basename 精确以 `_<完整 run_name>` 结尾筛选。仍不唯一就保持 `UNKNOWN`，不得按“最新”猜。
+一次 Pod1 只读全域精确查找已为两臂各定位唯一 checkpoint（以下相对
+`/workspace/codexschema`）：
 
-现有 `standalone_onnx_export.py` 没有真正的 `--plan`/`--dry-run`：完整调用会创建输出目录并替换
-`policy.onnx`，`--help` 与 import smoke 也不验证 W/Y 材料。checkpoint 唯一闭合前不得运行；闭合后先
-补零写入 plan，或把正式 W/Y 导出分别写到全新独立目录。
+- W：`simple_half_second_sprint_20260718/pod1/hs_p1_w_cached_pos_free_seed3/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-17_19-58-17_hs_p1_w_cached_pos_free_seed3/model_6700.pt`
+- Y：`simple_half_second_sprint_20260718/pod1/hs_p1_y_cached_pos_window0_seed3/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-17_19-59-30_hs_p1_y_cached_pos_window0_seed3/model_6700.pt`
+
+两者的 checkpoint iteration 均为 `6700`，各有 `74` 个浮点 tensor / `1,762,715` 个元素 /
+non-finite `0`，actor 为 `179→31`，且 `params/training_contract.json`、`env.pkl`、`agent.pkl`、
+`env.yaml` 都存在。这不是 vendor 行为通过。
+
+### 零写入 ONNX plan
+
+`standalone_onnx_export.py --plan` 会用 `weights_only=True` 加载 checkpoint，走完 donor、motion、
+harvest、normalizer、train-bank、training contract 和 formal face-179 envelope 验证，再在第一次
+目录/临时文件/graph/artifact 写入前退出。成功 JSON 必须至少含：
+
+- `checkpoint_iteration=6700`（必须是非负整数）；
+- `artifact_written=false`；
+- `graph_export_not_executed=true`；
+- `input_dim=179`、`output_dim=31` 和 formal/train-bank 验证字段。
+
+本地五文件聚焦回归为 `97 passed in 0.38s`，普通导出 fake smoke 也未回归。下一步才是在
+Pod 上分别为 W/Y 执行 plan；当前不得把本地 source gate 或 checkpoint 静态检查写成 vendor 通过。
 
 ## 为什么当前不能直接跑 W/Y 厂商同卷
 

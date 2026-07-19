@@ -37,21 +37,23 @@
 Python MuJoCo 评估器虽支持 179 维与固定题库，却不消费逐题 25 周期
 时序卷；Gate3 假球入口只接每题“初始位置 + 初始速度”的六元发球。当前缺少把同一 100 题经发球、
 [`task_revision`](DEFINITIONS.md#planner-task-revision)（同一来球实时任务修订）、生产 planner、C++
-runner 送入同一 MuJoCo XML 场景模型（MJCF）与 plant 的适配器。现阶段只允许一次只读定位 W/Y
-`model_6700` 与导出 preflight（导出前置检查），不启动行为卷；旧连续演练脚本保持隔离禁用。G05/G06 继续
+runner 送入同一 MuJoCo XML 场景模型（MJCF）与 plant 的适配器。W/Y 两份 `model_6700`
+已完成只读制品前置检查；下一步是在 Pod 上分别跑真正零写入的 ONNX 导出 `--plan`，
+而不是启动行为卷。旧连续演练脚本保持隔离禁用。G05/G06 继续
 `Partial`，`Gate3-D0` 继续 `Open`，不能宣称演示成功。详细合同见
 [半秒冲刺卷宗](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)与
 [G06](gates/G06_isaac_to_mujoco.md)。
 
-2026-07-19 三次 Pod1 只读定位均正常结束且未重连：W/Y 各自的 wrapper `run.log` 已唯一找到，但日志
-没有给出可唯一解析的训练输出绝对路径；把 cached-source 当日志根后，也没有找到可由相邻材料精确
-归属的 `model_6700.pt`。源码复核解释了这个偏差：`train.py` 按启动时工作目录创建
-`logs/rsl_rl/...`，Hydra 不改变该目录，而 sprint 配置没有保存 launcher 的实际工作目录。因此 W/Y
-checkpoint 仍为 `UNKNOWN`，没有加载或导出，也不是模型失败。第三轮确认两臂各自有唯一 regular
-`run.sh`，但静态解析仍得不到可接受的绝对工作目录。下一轮不再推断 cwd，而是在
-`/workspace/codexschema` 内按完整 `run_name` 与 `model_6700.pt` 做一次精确全域查找。另已确认 standalone ONNX exporter
-没有真正的零写入 `--plan`/`--dry-run`；完整调用会创建输出目录并替换 `policy.onnx`，所以当前不会
-把 `--help` 或 import smoke 冒充导出前置检查。G05/G06 仍为 `Partial`，`Gate3-D0` 仍为 `Open`。
+2026-07-19 一次 Pod1 只读全域精确查找已为 W/Y 各唯一定位 `model_6700.pt`。两份 checkpoint
+内部 iteration 均为 `6700`，均有 `74` 个浮点 tensor、`1,762,715` 个浮点元素且
+non-finite 为 `0`；actor 结构均为 `179→31`，两份 `params` 内的训练合同、`env.pkl`、
+`agent.pkl` 与 `env.yaml` 也都存在。这只是静态训练制品检查，不是 vendor 成绩。
+standalone ONNX exporter 同时新增真正零写入的 `--plan`：它以 `weights_only`
+加载 checkpoint，走完 finite、donor、motion、harvest、train-bank 与 formal face-179 材料验证，
+然后在第一次输出写入之前返回；JSON 显式给出 `checkpoint_iteration`、
+`artifact_written=false` 和 `graph_export_not_executed=true`。本地聚焦回归为 `97 passed in 0.38s`，普通导出的
+fake smoke 仍通过；真实 W/Y `--plan` 尚未在 Pod 运行。G05/G06 仍为 `Partial`，
+`Gate3-D0` 仍为 `Open`。
 
 - **本轮 task-revision 训练池（已结束）：** formal 179-D 与训练现已统一为“一颗球一个 `task_id`、同球估计用递增
   `task_revision`”，挥拍中位置、速度、signed 拍面与剩余击球时间每个 policy tick 继续原子更新；phase
@@ -758,7 +760,8 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
 ### 部署验证
 
 - **[3｜P0] W/Y 179 维模型的 0.5 秒同卷 Gate3-D0 单拍全链。** 责任人 franco；执行者 Codex；
-  现阶段先用一次只读检查同时完成两份 `model_6700` 定位与导出 preflight，再实现
+  两份 `model_6700` 的唯一定位、finite、`179→31` 与导出材料检查已闭合；现先分别运行
+  零写入 `--plan`，再实现
   “同一 100 题 → 六元发球 →
   同球 `task_revision` → owned 生产 planner → C++ runner → 同一厂商 MJCF/plant”的适配器，并逐题
   输出 attempt/completion/hit/return/fall/deadline。适配器通过前不启动行为、不使用隔离中的旧连续

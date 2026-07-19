@@ -77,22 +77,19 @@ rows through serve generation, same-ball
 [`task_revision`](../DEFINITIONS.md#planner-task-revision), the production planner and the vendor
 runner. The old `pp_gate3_rally.sh` / `pp_rally_conductor.py` path remains quarantined and forbidden.
 
-Three read-only Pod1 location passes exited normally without reconnecting. Each W/Y wrapper has one
-exact full-`run_name` `run.log`, but neither log exposes an unambiguous RSL/checkpoint absolute path;
-the cached-source bounded root also contains no `model_6700.pt` that adjacent material can attribute
-exactly to W or Y. Source inspection explains the mismatch: `train.py` anchors `logs/rsl_rl/...` to
-the launch working directory, Hydra leaves that directory unchanged, and the sprint YAML did not
-record the launcher cwd. The third pass found one regular `run.sh` per arm, but static parsing still
-could not produce an acceptable absolute cwd. This is a locator failure, not a model failure. The
-next pass will stop inferring cwd and make one exact filesystem-wide search below
-`/workspace/codexschema`, accepting only a unique `model_6700.pt` whose parent basename ends with the
-full run name. Embedded iteration, finiteness, actor `179→31` dimensions and sidecars remain `UNKNOWN`.
+One exact, read-only filesystem-wide Pod1 search has now located one W and one Y `model_6700.pt`.
+Both checkpoints load with embedded iteration `6700`, `74` floating tensors / `1,762,715` floating
+elements / zero non-finite elements, and actor dimensions `179→31`. Each run also contains
+`params/training_contract.json`, `env.pkl`, `agent.pkl`, and `env.yaml`. This closes only the static
+training/export-input check; it is not vendor behavior or parity evidence.
 
-The standalone exporter also has no true zero-write `--plan` or `--dry-run`: its full path creates
-the output directory and atomically replaces `policy.onnx`; `--help` and `--contract-import-smoke`
-do not validate W/Y materials. No export is authorized until checkpoint location is unique. A future
-plan mode must complete all material loading and validation but exit before directory creation, or
-the actual W/Y exports must use separate new output directories.
+The standalone exporter now has a genuinely zero-write `--plan`. It uses a weights-only checkpoint
+load, requires a non-negative integer `checkpoint_iteration`, validates finite checkpoint materials,
+the donor, motions, harvest, train bank, contract and formal face-179 envelope, and exits before the
+first directory/temp/graph/artifact write. Its JSON reports `artifact_written=false`,
+`graph_export_not_executed=true`, dimensions and formal-material status. The five-file focused suite
+passes `97` tests in `0.38s`, including the unchanged normal-export fake smoke. Neither real W/Y plan
+has run on a Pod and no ONNX artifact has been created.
 
 The next runtime capability is the adapter described in
 the acceptance criteria above, with the exact same 100 questions (50 per side), frame-0 zero
