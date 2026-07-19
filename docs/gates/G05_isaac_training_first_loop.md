@@ -3061,9 +3061,10 @@ MotionLoader 的 body velocity property 是高级索引副本，必须写其 bac
 
 ### 2026-07-19 W/Y checkpoint 只读定位未闭合
 
-两轮 Pod1 只读连接均正常退出且未重连。W/Y 各自的完整 `run_name` wrapper `run.log` 已唯一，但日志
+三轮 Pod1 只读连接均正常退出且未重连。W/Y 各自的完整 `run_name` wrapper `run.log` 已唯一，但日志
 没有给出可唯一解析的 RSL/checkpoint 绝对路径；cached-source 受限根内也没有可由相邻材料精确归属的
 `model_6700.pt`。`train.py` 实际按 launcher 启动工作目录创建 `logs/rsl_rl/...`，Hydra 不改变该目录，
-而 sprint 配置未保存实际 launcher 工作目录。这说明旧日志根假设错误，不说明模型失败。下一轮只读
-唯一 wrapper 旁的 launcher 以还原 `cd`/工作目录；唯一闭合后才加载并检查 iteration、finite、actor
+而 sprint 配置未保存实际 launcher 工作目录。这说明旧日志根假设错误，不说明模型失败。第三轮已确认
+两臂各有唯一 regular `run.sh`，但仍无法静态闭合绝对 cwd。下一轮改为在 `/workspace/codexschema`
+内按完整 run name 与 model 文件名精确全域查找；唯一闭合后才加载并检查 iteration、finite、actor
 输入 `179`/输出 `31` 与 sidecar。当前全部保持 `UNKNOWN`，G05 保持 `Partial`。

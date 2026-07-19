@@ -13,11 +13,12 @@
 
 ## 2026-07-19
 
-- 两轮 Pod1 只读定位均 exit `0` 且未重连。第二轮已为 W/Y 各找到唯一完整 `run_name` 的 wrapper
+- 三轮 Pod1 只读定位均 exit `0` 且未重连。第二轮已为 W/Y 各找到唯一完整 `run_name` 的 wrapper
   `run.log`，但日志没有输出可唯一解析的 RSL/checkpoint 绝对路径；cached-source 受限根中也没有可由
   相邻材料精确归属的 `model_6700.pt`。本地源码复核确认日志根由 launcher 的启动工作目录决定，而
-  sprint 配置没有保存该目录。W/Y 因此继续 `UNKNOWN`，没有加载、导出或 vendor 结论；下一轮只读
-  wrapper 旁的 launcher 来还原工作目录。另确认 standalone exporter 没有真正的零写入 plan/dry-run，
+  sprint 配置没有保存该目录。第三轮确认每臂有唯一 regular `run.sh`，但仍无法静态闭合绝对 cwd。
+  W/Y 因此继续 `UNKNOWN`；下一轮改为在 `/workspace/codexschema` 内按完整 run name 与 model 文件精确
+  全域查找，不再猜 cwd。另确认 standalone exporter 没有真正的零写入 plan/dry-run，
   完整运行会创建输出并替换 `policy.onnx`，所以当前不执行。详见
   [半秒冲刺](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)。
 

@@ -12,15 +12,16 @@
 
 2026-07-19 当前边界：`W`（拍心优先 × 自由非击球臂）和 `Y`（拍心优先 × 触球窗老师静音）
 只是厂商 MuJoCo 同卷的演示优先候选，`U`（拍心优先 × 强准备）是稳定备选。现有路径尚不能运行
-W/Y 厂商行为卷；两轮只读定位仍未唯一找到两份 `model_6700`，导出 preflight（导出前置检查）尚未开始。
+W/Y 厂商行为卷；三轮只读定位仍未唯一找到两份 `model_6700`，导出 preflight（导出前置检查）尚未开始。
 
 ### W/Y checkpoint 只读定位边界
 
-两轮 Pod1 只读连接均 exit `0` 且未重连。W/Y 各有唯一完整 `run_name` 的 wrapper `run.log`，但日志
+三轮 Pod1 只读连接均 exit `0` 且未重连。W/Y 各有唯一完整 `run_name` 的 wrapper `run.log`，但日志
 没有可唯一解析的 RSL/checkpoint 绝对路径；cached-source 受限根中也没有能由相邻材料精确归属的
 `model_6700.pt`。`train.py` 以 launcher 启动工作目录生成 `logs/rsl_rl/...`，Hydra 不改变它，而 sprint
-配置没记录该目录。所以下一轮只读唯一 wrapper 旁的 launcher，提取 `cd`/工作目录，再只接受推导根内
-唯一完整 `run_name` 的 `model_6700.pt`。仍不唯一就保持 `UNKNOWN`，不得按“最新”猜。
+配置没记录该目录。第三轮确认每臂各有唯一 regular `run.sh`，但静态解析得不到可接受的绝对 cwd。
+下一轮不再猜 cwd：只在 `/workspace/codexschema` 单一文件系统内枚举 regular `model_6700.pt`，并按
+parent basename 精确以 `_<完整 run_name>` 结尾筛选。仍不唯一就保持 `UNKNOWN`，不得按“最新”猜。
 
 现有 `standalone_onnx_export.py` 没有真正的 `--plan`/`--dry-run`：完整调用会创建输出目录并替换
 `policy.onnx`，`--help` 与 import smoke 也不验证 W/Y 材料。checkpoint 唯一闭合前不得运行；闭合后先

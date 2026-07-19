@@ -152,9 +152,9 @@
 适配器与行为输出均不存在，所以 W/Y 仍只是演示优先双候选，U 只是稳定备选；G05/G06 保持
 `Partial`，`Gate3-D0` 保持 `Open`，不能宣称演示成功。
 
-### Pod1 两轮只读定位结果
+### Pod1 三轮只读定位结果
 
-两次连接都 exit `0` 且没有重连或写远端。第二轮已为 W/Y 各自找到唯一完整 `run_name` 的 wrapper
+三次连接都 exit `0` 且没有重连或写远端。第二轮已为 W/Y 各自找到唯一完整 `run_name` 的 wrapper
 `run.log`，但两份日志均没有打印可唯一解析的 RSL/checkpoint 绝对路径；在 cached-source 受限根递归
 查找后，可由相邻配置或完整 `run_name` 精确归属的 `model_6700.pt` 候选仍都是 `0`。所以内部
 iteration、finite、actor `179→31` 及 `params/training_contract.json`、`env.pkl`、`agent.pkl`、
@@ -162,8 +162,10 @@ iteration、finite、actor `179→31` 及 `params/training_contract.json`、`env
 
 本地源码给出根因边界：`scripts/train.py` 以进程启动时的工作目录计算
 `logs/rsl_rl/<experiment>/...`，而 Hydra 配置 `chdir=false`；sprint YAML 只记 source/run name，没有记
-实际 launcher 工作目录。cached-source 根因此只是旧假设，不是输出真源。下一轮只读每份唯一 wrapper
-旁的 launcher，提取 `cd`/工作目录并推导唯一日志根；仍不能唯一便保持 `UNKNOWN`。
+实际 launcher 工作目录。cached-source 根因此只是旧假设，不是输出真源。第三轮确认每臂各有唯一
+regular `run.sh`，但静态规则无法从中得到可接受的绝对 cwd（`cwd_count=0`）。下一轮不再增加 cwd
+猜法，而是在单一文件系统 `/workspace/codexschema` 内枚举 regular `model_6700.pt`，仅按 parent
+basename 是否精确以 `_<完整 run_name>` 结尾筛选；0 或多匹配仍保持 `UNKNOWN`。
 
 导出侧也有独立阻塞：`standalone_onnx_export.py` 当前没有 `--plan` 或 `--dry-run`。`--help` 与
 `--contract-import-smoke` 不验证 W/Y 材料；完整命令会创建输出目录并原子替换 `policy.onnx`。在
