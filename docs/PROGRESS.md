@@ -16,8 +16,21 @@
 - 约 10:26 CST，Pod1 单次只读 SSH 确认 L2 PGID `2457829` 成员数为 `0`，NVML compute app
   为空，GPU0/1/2 的利用率与显存占用均为零；L2 已从待确认状态闭合为进程组与计算进程完全
   absent。Pod1 V/L2/Z3 和 Pod2 D2/F 至此全部收口，双 Pod Isaac 训练池结束；V/L2/D2/F
-  是终档 teardown，不是自然终档。下一步为 W/Y 准备同卷 vendor MuJoCo，U 保留为稳定备选；
+  是终档 teardown，不是自然终档。下一步为 `W`（拍心优先 × 自由非击球臂）/`Y`（拍心优先 ×
+  触球窗老师静音）准备同卷厂商 MuJoCo，`U`（拍心优先 × 强准备）保留为稳定备选；
   G05 保持 `Partial`。详见[半秒冲刺](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)。
+
+- 本地只读源码定位确认 W/Y 仍是准备态，尚不能行为运行：现有
+  [0.5 秒时序卷](DEFINITIONS.md#timing-exam-0p5)使用
+  [K100（100 道固定同卷题）](DEFINITIONS.md#q50-and-k100)，但直接驱动 policy、绕过生产 planner；Python MuJoCo
+  评估器虽支持 179 维与固定题库，却不消费逐题 25 周期时序卷；Gate3 假球入口只接六元发球列表。
+  下一能力是同一 100 题（每侧 50、第 0 帧零速度、25 周期、正手倍率 `2.64`、反手倍率 `1.8`）经
+  同一生产规划器（planner）、MuJoCo XML 场景模型（MJCF）和执行 plant 的适配器，并逐题输出
+  attempt/completion/hit/return/fall/deadline。现阶段只允许一次只读定位两份 `model_6700` 与导出
+  preflight（导出前置检查）；旧连续演练脚本保持隔离禁用。
+  G05/G06 保持 `Partial`、`Gate3-D0` 保持 `Open`，没有厂商演示结果。详见
+  [半秒冲刺](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)与
+  [G06](gates/G06_isaac_to_mujoco.md)。
 
 ## 2026-07-18
 

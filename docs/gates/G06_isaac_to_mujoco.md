@@ -31,6 +31,7 @@ This gate is the sim-to-sim bridge before real deployment.
 
 - [../operations/run_training.md](../operations/run_training.md)
 - [../operations/run_deploy_dryrun.md](../operations/run_deploy_dryrun.md)
+- [../operations/run_phase1_task_revision_0p5_exam.md](../operations/run_phase1_task_revision_0p5_exam.md)
 - [../operations/run_phase1_signed_face_exam_k100.md](../operations/run_phase1_signed_face_exam_k100.md)
 - [../operations/run_shared_interface_rehearsal.md](../operations/run_shared_interface_rehearsal.md)
 - [../operations/run_gate3_first_tick_harness.md](../operations/run_gate3_first_tick_harness.md)
@@ -51,10 +52,39 @@ This gate is the sim-to-sim bridge before real deployment.
 - Formal return training/scoring uses physical ball-racket-table/net contact and landing state;
   analytic virtual return remains diagnostic and cannot promote a policy.
 - The first fine-tune paper is preregistered before launch: same source checkpoint, frozen control
-  versus warm-start fine-tune, equal budget, multiple seeds and an immutable held-out K100 with
+  versus warm-start fine-tune, equal budget, multiple seeds and an immutable held-out
+  [K100](../DEFINITIONS.md#q50-and-k100) (100 fixed questions, 50 per side) with
   per-side fall/hit/return. Final promotion still requires independent vendor Gate3/Gate3B.
+- The selected 0.5-second vendor paper preserves all 100 question rows and order, starts every question
+  from zero-velocity motion frame 0, and reaches contact at tick 25 of 50 Hz control. Each row must
+  traverse the same production planner, C++ runner, vendor MJCF and effective plant, then emit
+  attempt/completion/hit/return/fall/deadline fields without deleting failures.
 
 ## Current State
+
+### 2026-07-19 demo-priority vendor same-paper is preparation-only
+
+A local read-only source audit found no runnable production path from the 0.5-second timing paper to
+the vendor chain. The two demo-priority candidates are `W` (racket-position priority with the
+non-striking arm free) and `Y` (racket-position priority with imitation muted in the strike window);
+`U` (racket-position priority with a stronger ready pose) remains the stable fallback.
+
+The completed Isaac K100 drives the policy directly and bypasses the production planner. The Python
+`mujoco_eval_onnx.py` path supports 179-D observations and a fixed bank, but it does not consume the
+per-question timing paper or retime every row to 25 control ticks. Gate3's fake-ball input accepts a
+flat `N × 6` serve list (initial position plus velocity), and no adapter currently maps timing-paper
+rows through serve generation, same-ball
+[`task_revision`](../DEFINITIONS.md#planner-task-revision), the production planner and the vendor
+runner. The old `pp_gate3_rally.sh` / `pp_rally_conductor.py` path remains quarantined and forbidden.
+
+Only one read-only location pass for the W/Y `model_6700` files and export preflight is allowed at
+this stage; no vendor behavior run is authorized. The next capability is the adapter described in
+the acceptance criteria above, with the exact same 100 questions (50 per side), frame-0 zero
+velocity, 25 ticks, forehand time scale `2.64`, backhand time scale `1.8`, and the same planner,
+MuJoCo XML model (MJCF) and effective plant. Until that adapter and its per-question output exist,
+W/Y are candidates rather than a successful demo. G05 and G06 remain `Partial`; `Gate3-D0` remains
+`Open`. Detailed evidence and the frozen output contract are in the
+[half-second sprint record](../experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md).
 
 ### 2026-07-17 exact-0.5 Isaac K100 remains upstream of MuJoCo parity
 

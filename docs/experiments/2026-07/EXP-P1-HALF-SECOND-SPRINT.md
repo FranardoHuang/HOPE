@@ -13,6 +13,9 @@
 [`initial TTS mixture`](../../DEFINITIONS.md#initial-tts-mixture) 是“新球揭题时还剩多少准备时间”的
 混合分布；[`qdot-limit hinge`](../../DEFINITIONS.md#qdot-limit-hinge) 是接近关节速度上限后才收费的惩罚，
 不是随机推力。
+本记录中的 [`K100`](../../DEFINITIONS.md#q50-and-k100) 是固定顺序的 100 道同卷题，正手、反手各
+50 道且失败题不删；[0.5 秒时序卷](../../DEFINITIONS.md#timing-exam-0p5)要求每题从第 0 帧零速度开始，
+在 50 Hz 下第 25 个控制周期触球。
 
 ## 为什么现在直接跑组合
 
@@ -112,8 +115,42 @@
   `UNKNOWN`；L2 的进程组与计算进程现已完全 absent。
 - Pod1 的 V/L2/Z3 与 Pod2 的 D2/F 至此全部收口，双 Pod Isaac 训练池结束。V/L2/D2/F
   的分类不变：它们是终档后的 teardown closure，**不是自然终档**。
-- 当前路线不再给这些候选盲加 Isaac step。W/Y 进入同题、同 planner、同判分边界的 vendor MuJoCo
-  demo 对比，U 保留为稳定备选；部署行为尚未通过，因此 G05 继续为 `Partial`。
+- 当前路线不再给这些候选盲加 Isaac step。`W`（拍心优先 × 自由非击球臂）与 `Y`（拍心优先 ×
+  触球窗老师静音）进入同题、同生产规划器（planner）、同判分边界的厂商 MuJoCo 准备，`U`（拍心
+  优先 × 强准备）保留为稳定备选。当前尚不能启动这份行为卷，更没有演示结果；G05 继续为 `Partial`。
+
+## 2026-07-19 本地只读：W/Y 厂商 MuJoCo 同卷仍缺适配器
+
+这次只读源码定位没有启动仿真、评估器或训练。结论是 W/Y 已进入**准备阶段**，但现有入口之间仍缺
+一段生产适配器，因此不能把“准备”写成厂商行为已经运行：
+
+- 已完成的 0.5 秒 K100 使用 `isaac_bank_exam.py` 与 `isaac_timing_exam_adapter.py` 直接把固定题交给
+  policy；逐题记录也明确把 planner 可行性来源写成“固定题考试绕过 planner”。它能回答 Isaac 诊断，
+  不能代表生产 planner、C++ runner 与厂商 MuJoCo 的全链行为。
+- `mujoco_eval_onnx.py` 已支持 179 维 actor 和 bank（固定题库）模式，也能消费普通共享题序；但它没有
+  消费 0.5 秒 timing paper（逐题时序卷）的入口，不会把每道题按 25 个控制周期重新定时并送进生产
+  planner，因此现状不能直接拿它跑 W/Y 同卷。
+- Gate3 的 `fake_ball_publisher` 入口只接扁平的 `N × 6` 发球列表；每道发球只有初始位置
+  `(x, y, z)` 与初始速度 `(vx, vy, vz)` 六个数。仓库里没有把 K100 timing paper 逐题转换为该发球
+  输入、再沿 [`planner task revision`](../../DEFINITIONS.md#planner-task-revision)（同一来球的实时目标修订）
+  驱动生产 planner 的适配器。
+- `agi/a3_deploy_example/scripts/pp_gate3_rally.sh` 与
+  `agi/a3_deploy_example/scripts/pp_rally_conductor.py` 是隔离中的旧连续演练路径；其宽泛进程操作和旧
+  时序合同不满足本卷，禁止复制、启动或用来补缺口。
+
+现阶段只允许**一次只读定位** W/Y 各自的 `model_6700` 与导出 preflight（导出前置检查）；不得启动
+厂商行为卷。下一项能力必须先实现并验证同一条适配链：
+
+1. 不改题序地消费同一 100 题，正手/反手各 50 题；每题从动作第 0 帧零速度开始，固定 25 个
+   50 Hz 控制周期，正手时间倍率 `2.64`、反手时间倍率 `1.8`。
+2. 每题经同一个生产 planner、同一个 MuJoCo XML 场景模型（MJCF）和同一个执行 plant（执行器、
+   比例微分控制与时间步配置），并把题目转换成发球与同球 `task_revision` 更新，而不是直接把目标
+   塞给 policy。
+3. 逐题输出 `attempt`（尝试/题号）、`completion`（动作完成）、`hit`（物理触球）、`return`
+   （合法回台）、`fall`（摔倒）和 `deadline`（25 周期截止）字段；100 题全部保留在分母。
+
+适配器与行为输出均不存在，所以 W/Y 仍只是演示优先双候选，U 只是稳定备选；G05/G06 保持
+`Partial`，`Gate3-D0` 保持 `Open`，不能宣称演示成功。
 
 ## 2026-07-18 20:52 CST 四臂终档 teardown 收尾
 
@@ -328,6 +365,6 @@ completion / return。所有数字均为百分比。
 
 ## 当前决定
 
-- 决定：`inconclusive / running`。
+- 决定：`inconclusive / vendor-preparation-only`；W/Y 为演示优先双候选，U 为稳定备选。
 - 已采用的训练策略：同 parent、单 seed、二十三个不同科学问题并行；优先产生可击球候选，再用单变量格解释。
-- 当前不能声称：任何格已经解决半秒击球、连续对打或跨引擎部署。
+- 当前不能声称：任何格已经解决半秒击球、连续对打、跨引擎部署或厂商 MuJoCo 演示。

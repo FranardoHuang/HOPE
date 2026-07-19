@@ -28,9 +28,20 @@
 ## 当下状态与团队 focus
 
 当前最短链已经从继续加 Isaac step 切到 **vendor MuJoCo 同卷准备**：双 Pod 的本轮 Isaac 训练池已
-全部结束，W/Y 是 demo 双候选，U 是稳定备选；下一步先用同一题目、planner 和判分边界比较 W/Y，
-再决定 demo 采用项。Franco 五种用途动作、横移老师和 planner 仍并行推进，但不能取代这次部署裁判。
-Isaac 只负责训练/诊断，最终行为以厂商 MuJoCo 为准。
+全部结束，`W`（拍心优先 × 自由非击球臂）/`Y`（拍心优先 × 触球窗老师静音）是演示优先双候选，
+`U`（拍心优先 × 强准备）是稳定备选。Franco 五种用途动作、横移老师和生产规划器（planner）仍并行
+推进，但不能取代这次部署裁判；Isaac 只负责训练/诊断，最终行为以厂商 MuJoCo 为准。
+
+2026-07-19 本地只读源码定位确认：现有 [0.5 秒时序卷](DEFINITIONS.md#timing-exam-0p5)使用
+[K100（100 道固定同卷题）](DEFINITIONS.md#q50-and-k100)，但属于直接 policy 诊断并绕过生产 planner；
+Python MuJoCo 评估器虽支持 179 维与固定题库，却不消费逐题 25 周期
+时序卷；Gate3 假球入口只接每题“初始位置 + 初始速度”的六元发球。当前缺少把同一 100 题经发球、
+[`task_revision`](DEFINITIONS.md#planner-task-revision)（同一来球实时任务修订）、生产 planner、C++
+runner 送入同一 MuJoCo XML 场景模型（MJCF）与 plant 的适配器。现阶段只允许一次只读定位 W/Y
+`model_6700` 与导出 preflight（导出前置检查），不启动行为卷；旧连续演练脚本保持隔离禁用。G05/G06 继续
+`Partial`，`Gate3-D0` 继续 `Open`，不能宣称演示成功。详细合同见
+[半秒冲刺卷宗](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)与
+[G06](gates/G06_isaac_to_mujoco.md)。
 
 - **本轮 task-revision 训练池（已结束）：** formal 179-D 与训练现已统一为“一颗球一个 `task_id`、同球估计用递增
   `task_revision`”，挥拍中位置、速度、signed 拍面与剩余击球时间每个 policy tick 继续原子更新；phase
@@ -41,7 +52,7 @@ Isaac 只负责训练/诊断，最终行为以厂商 MuJoCo 为准。
   因此旧说法“19 条仍 live”已经过期，也没有需要用 signal 清理的 Pod2 训练。两个 importer malloc
   `rc134` 与一个 boot stale-timeout 不算科学失败且不自动重跑；两个 positive-delay 格因 governor/actor
   transport 尚非同 tick 原子继续 NO-LAUNCH。0.5 秒 K100 paper
-  已在两 Pod 物化但尚无 checkpoint 行为分数；现役 v4rg 正反手 TOPP 已在 Pod2 CPU-only 一次完成，
+  已在两 Pod 物化；当时 W/Y 尚无该卷行为分数，现役 v4rg 正反手 TOPP 已在 Pod2 CPU-only 一次完成，
   两侧安全证书均通过。Stage2 v8 随后在 Pod2 唯一执行，四个中点均被 TOPP 合法求解且 MJCF 闭包
   通过，但时间为 `0.80/0.86/1.10/0.94 s`，`0/4` 达到 `0.5 s`；当前 join-ladder family 因此按预注册
   停止，不再靠更多同族中点碰运气。这不证明 0.5 秒绝对不可能，却证明现役动作形状仍是瓶颈，旧固定
@@ -62,7 +73,7 @@ Isaac 只负责训练/诊断，最终行为以厂商 MuJoCo 为准。
   NVML compute app 为空，GPU0/1/2 的利用率和显存占用均为零。L2 先前的最终状态 `UNKNOWN`
   因而闭合为进程组与计算进程完全 absent。至此 Pod1 的 V/L2/Z3 与 Pod2 的 D2/F 均已收口，
   双 Pod Isaac 训练池结束；V/L2/D2/F 仍只记作终档 teardown，不改写成自然终档。当前工作转为
-  准备 W/Y 的 vendor MuJoCo 同卷，U 保留为稳定备选。详细证据见
+  上述 W/Y 厂商 MuJoCo 同卷的准备阶段，U 保留为稳定备选。详细证据见
   [半秒冲刺卷宗](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)。
 
   2026-07-18 20:52 CST，四条停在终档后的训练已完成精确收尾。审计改为读取 NUL 分隔的完整
@@ -736,9 +747,13 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
 
 ### 部署验证
 
-- **[3｜P0] 当前 179 维模型的 Gate3-D0 单拍全链。** 责任人 franco；执行者 Codex；exact source/build
-  前置已闭合，下一证据是固定同卷完成 owned planner → C++ runner → 厂商 MuJoCo 的首个 no-publish
-  有效周期和行为记录。[实验](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md)
+- **[3｜P0] W/Y 179 维模型的 0.5 秒同卷 Gate3-D0 单拍全链。** 责任人 franco；执行者 Codex；
+  现阶段先用一次只读检查同时完成两份 `model_6700` 定位与导出 preflight，再实现
+  “同一 100 题 → 六元发球 →
+  同球 `task_revision` → owned 生产 planner → C++ runner → 同一厂商 MJCF/plant”的适配器，并逐题
+  输出 attempt/completion/hit/return/fall/deadline。适配器通过前不启动行为、不使用隔离中的旧连续
+  演练脚本；W/Y 仍只是演示优先候选，U 是稳定备选。[半秒卷宗](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)；
+  [Gate3-D0 实验](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md)
 - **[7｜P1] Gate3 历史谱系复核。** 责任人 yikang；执行者 Codex/direct；分支
   `yikang-standhit-0714`。2026-07-15 已完成 mechanics 门并发射：以 W&B
   `ayzxv1ma/model_10600`（旧 Gate3 v4
