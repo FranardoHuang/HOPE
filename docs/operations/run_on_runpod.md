@@ -211,12 +211,13 @@ fresh curve worker 在 childless/lock-free 复核后也只按各自 PGID TERM �
 
 最初这次闭合只恢复了发射输入，没有启动 probe；随后唯一启动的 Pod1 W-C probe2 自然退出，但被错误的
 逐-update recovery 非零门假拒绝，未产生 receipt。不得把 staging 或该假拒绝签成科学结果，也不得先启动
-再补 SHA。probe3 queue/runner bytes 冻结后的独立清单已经写入
+再补 SHA。probe3 的 W-C/W-N/V-C 后来均自然退出，但 verifier 未绑定 24-step 完整 rollout，故其中 W-C
+旧 receipt 和另两格 runtime 都不能解锁 train。probe4 queue/runner bytes 冻结后的独立清单已经写入
 [`phase1_balance_action_slew_launch_manifest_20260720.json`](../../configs/phase1_balance_action_slew_launch_manifest_20260720.json)，
-文件 SHA-256=`2d3e7955a1f7e6af3624826f1e7ceaaebd9b2bb0a2c1c72d4b43d0a7ce3bae17`；清单存在只授权命令渲染，
+文件 SHA-256=`283fd0027212abd4249a22d7a8ab4a91860702542ed717cdb2de0c1acdd1eefe`；清单存在只授权命令渲染，
 每台真实发射前仍须由 remote preflight 对 exact 路径重算全部哈希、tree/count/bytes、source clean HEAD 与 GPU。
-旧 manifest `d7e95130…a2e47` 和旧输出根只作不可变历史；当前 no-clobber 根是
-`/workspace/codexschema/phase1_balance_action_slew_v2_20260720`，不得在旧 W-C 目录补写 receipt。
+旧 manifest `d7e95130…a2e47`、`2d3e7955…3bae17` 和两个旧输出根只作不可变历史；当前 no-clobber 根是
+`/workspace/codexschema/phase1_balance_action_slew_v3_20260720`，不得在旧目录补写或替换 receipt。
 
 两 Pod 首次预检时都存在 `/workspace/.cache/ov/_cache.lock`，且 `fuser` 没有 holder；紧邻闭合操作重验后，
 两个 exact orphan lock 已删除。历史删除不保证下一次 boot 时仍无锁；如果文件重新出现，必须先证明没有
@@ -246,7 +247,7 @@ cd "$BALANCE_REPO_ROOT"
 python3 scripts/run_phase1_balance_action_slew_queue.py --stage probe
 ```
 
-`--stage probe` 表示六格各 `4096 env × 2 update` 的非科学完整场景探针；默认输出会显示 manifest gate
+`--stage probe` 表示六格各 `4096 env × 24 step/env × 2 update` 的非科学完整场景探针；默认输出会显示 manifest gate
 blocked。先独立生成并审过 [`launch manifest`](../DEFINITIONS.md#balance-launch-manifest)，把 exact 路径和
 文件 SHA 放入任务专用 `BALANCE_LAUNCH_MANIFEST`、`BALANCE_LAUNCH_MANIFEST_SHA256`。随后才可用
 [`--authorize-launch`](../DEFINITIONS.md#balance-command-render-latch)渲染命令；runner 自身会重复检查同一
@@ -296,11 +297,16 @@ probe 必须自然退出到 absolute milestone `[6701]` 的 `model_6701.pt`（ex
 bound=`6702`）。退出后逐条执行原 JSON 的 `jobs[].probe_verifier_command`；它会在确认 policy/value/full
 optimizer/two normalizers finite、C/N/H exact hard-contract/applied markers、lineage=`0`，以及 6700/6701
 processed-q_des、completion/fall/legal-return、ready-tilt、qdot tag 的分母与守恒账；processed-q_des
-recovery-eligible 允许单个 update 为零但两步合计必须非零，其余预注册分母逐 update 非零，并在确认
+recovery-eligible 允许单个 update 为零但两步合计必须非零；processed-q_des/qdot observed 必须逐 update
+精确等于 `4096×24=98304`，其余预注册分母逐 update 非零，并在确认
 无 fatal、leader/PGID/GPU 均释放后，向 `jobs[].probe_receipt_remote_path` 不可覆盖地写收据。不能套用
 fresh-probe 相对 milestone `[1]`。将六份收据逐字节复制成本地
 [`probe receipt set`](../DEFINITIONS.md#balance-probe-receipt-set)，exact 布局为
 `$BALANCE_PROBE_RECEIPTS_DIR/{w_c,w_n,w_h,v_c,v_n,v_h}/probe_receipt.json`。
+该本地目录只对 trusted operator 开放写权；内容寻址和多重 SHA 绑定用于防止下载损坏、
+旧收据混入和配置漂移，不是抵御恶意本地 root 的数字签名；详见
+[`receipt trusted-operator boundary`](../DEFINITIONS.md#balance-receipt-trust-boundary)。操作者必须从远端
+`jobs[].probe_receipt_remote_path` 逐字节复制 verifier 生成的 exact bytes，不得手写或“修复”收据。
 
 没有 `--probe-approved` 人工捷径。只有同一 manifest 下六份收据全部通过本地重验，才允许生成
 `+200/+500/+1000` 科学 continuation 命令；脚本仍不执行：

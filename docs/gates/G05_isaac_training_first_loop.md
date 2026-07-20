@@ -77,12 +77,14 @@ Follow-up note (2026-07-20, W/Y export mechanics pass but exact lineage blocks p
   space is an upper-only matched control versus static-v4rg lower-body imitation or a non-demo stability
   constraint. Wave B exact flags and matrix remain under audit and must not be guessed. Neither wave can promote a
   policy or replace the ordered continuous-recovery gates `T0 → T1 → T2`.
-- The only launched Wave A probe2 cell, Pod1 W-C, naturally exited at `model_6701.pt` with finite checkpoint and
+- The Wave A probe2 W-C cell naturally exited at `model_6701.pt` with finite checkpoint and
   complete two-update ledgers. The outer verifier rejected step 6700 only because it required a positive recovery
   denominator inside the first 0.48 s rollout, although the earliest possible eligibility is 0.56 s; step 6701 had
-  `31459` eligible samples. No receipt or mechanism result was accepted. Probe3 preserves per-update conservation,
-  requires positive eligibility over the two-update aggregate, and moves all cells to a fresh no-clobber namespace.
-  Gate remains `Partial`; six accepted receipts and all long-run outputs remain pending.
+  `31459` eligible samples. Probe3 then naturally completed W-C/W-N/V-C, but its verifier only required denominators
+  divisible by 4096 and did not bind the frozen 24 steps/env; the old W-C receipt and all three runtimes cannot unlock
+  training. Probe4 explicitly overrides 24 steps/env and requires qdes/qdot observed=`98304` per update in a third
+  fresh namespace. No mechanism result was accepted. Gate remains `Partial`; six accepted receipts and every
+  long-run output remain pending.
 
 Follow-up note (2026-07-20, recent Jiayi/Yikang branches audited; no branch-wide merge or behavior promotion):
 

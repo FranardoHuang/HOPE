@@ -44,10 +44,13 @@ HYDRA_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 EXPECTED_QUEUE_ID = "phase1_balance_action_slew_20260720"
-EXPECTED_NAMESPACE = "/workspace/codexschema/phase1_balance_action_slew_v2_20260720"
+EXPECTED_NAMESPACE = "/workspace/codexschema/phase1_balance_action_slew_v3_20260720"
 EXPECTED_SOURCE = "/workspace/codexschema/nohope_balance_action_slew_20260720"
 EXPECTED_REMOTE_SOURCE_COMMIT = "54c9a62656f0e60e5bb41cbcfa0e5a972b793906"
 PARENT_ITERATION = 6700
+PROBE_NUM_ENVS = 4096
+NUM_STEPS_PER_ENV = 24
+EXPECTED_SAMPLES_PER_UPDATE = PROBE_NUM_ENVS * NUM_STEPS_PER_ENV
 EXPECTED_JOBS = {
     "w_c": ("W", "C", "pod1", 0),
     "w_n": ("W", "N", "pod1", 1),
@@ -520,15 +523,15 @@ def _validate_budget(name: str, budget: dict[str, Any]) -> None:
         _exact_keys(
             budget,
             {
-                "num_envs", "additional_updates", "max_iterations",
+                "num_envs", "num_steps_per_env", "additional_updates", "max_iterations",
                 "save_interval", "exclusive_iteration_upper_bound",
                 "terminal_checkpoint_iteration", "terminal_checkpoint_basename",
             },
             "budgets.probe",
         )
-        expected = (4096, 2, 2, 1, 6702, 6701, "model_6701.pt")
+        expected = (4096, 24, 2, 2, 1, 6702, 6701, "model_6701.pt")
         actual = (
-            budget["num_envs"], budget["additional_updates"],
+            budget["num_envs"], budget["num_steps_per_env"], budget["additional_updates"],
             budget["max_iterations"], budget["save_interval"],
             budget["exclusive_iteration_upper_bound"],
             budget["terminal_checkpoint_iteration"],
@@ -538,18 +541,18 @@ def _validate_budget(name: str, budget: dict[str, Any]) -> None:
         _exact_keys(
             budget,
             {
-                "num_envs", "additional_updates", "max_iterations",
+                "num_envs", "num_steps_per_env", "additional_updates", "max_iterations",
                 "save_interval", "offsets_from_parent", "absolute_milestones",
             },
             "budgets.train",
         )
-        expected = (4096, 1001, 1001, 100, [200, 500, 1000], [6900, 7200, 7700])
+        expected = (4096, 24, 1001, 1001, 100, [200, 500, 1000], [6900, 7200, 7700])
         actual = (
-            budget["num_envs"], budget["additional_updates"],
+            budget["num_envs"], budget["num_steps_per_env"], budget["additional_updates"],
             budget["max_iterations"], budget["save_interval"],
             budget["offsets_from_parent"], budget["absolute_milestones"],
         )
-    for key in ("num_envs", "additional_updates", "max_iterations", "save_interval"):
+    for key in ("num_envs", "num_steps_per_env", "additional_updates", "max_iterations", "save_interval"):
         _positive_int(budget[key], f"budgets.{name}.{key}")
     if actual != expected:
         raise QueueError(f"budgets.{name} must encode the fixed probe/milestone budget")
@@ -1070,7 +1073,7 @@ def _stage_run_dir(queue: Mapping[str, Any], job: Mapping[str, Any], stage: str)
 def _stage_run_name(job: Mapping[str, Any], stage: str) -> str:
     if stage == "train":
         return str(job["run_name"])
-    return f"phase1_balance_slew_probe3_{job['id']}_seed3_20260720"
+    return f"phase1_balance_slew_probe4_{job['id']}_seed3_20260720"
 
 
 def _training_argv(
@@ -1099,6 +1102,7 @@ def _training_argv(
         "checkpoint_allow_contract_mismatch=true",
         f"seed={queue['common']['seed']}",
         f"num_envs={budget['num_envs']}",
+        f"algo.num_steps_per_env={budget['num_steps_per_env']}",
         f"max_iterations={budget['max_iterations']}",
         f"algo.runner.save_interval={budget['save_interval']}",
         f"run_name={_stage_run_name(job, stage)}",
@@ -1192,6 +1196,7 @@ def _build_claim(
     if stage == "probe":
         budget_binding = {
             "num_envs": budget["num_envs"],
+            "num_steps_per_env": budget["num_steps_per_env"],
             "max_iterations": budget["max_iterations"],
             "save_interval": budget["save_interval"],
             "milestones": [budget["terminal_checkpoint_iteration"]],
@@ -1202,6 +1207,7 @@ def _build_claim(
     else:
         budget_binding = {
             "num_envs": budget["num_envs"],
+            "num_steps_per_env": budget["num_steps_per_env"],
             "max_iterations": budget["max_iterations"],
             "save_interval": budget["save_interval"],
             "milestones": list(budget["absolute_milestones"]),
@@ -1879,7 +1885,7 @@ for step in spec["expected_steps"]:
     tail = row["tail_active_sample_count"]
     joints = row["above_margin_joint_count"]
     tail_sum = row["gated_tail_value_sum"]
-    if observed != valid + invalid or observed % spec["num_envs"] != 0 or not (0 <= eligible <= valid <= observed):
+    if observed != valid + invalid or observed != spec["expected_samples_per_update"] or not (0 <= eligible <= valid <= observed):
         raise SystemExit(f"activation denominator inconsistency at step {step}")
     if not (0 <= tail <= eligible and tail <= joints <= 15 * tail):
         raise SystemExit(f"activation tail/joint inconsistency at step {step}")
@@ -1915,7 +1921,7 @@ for step in spec["expected_steps"]:
     qdot_observed = row["qdot_observed_sample_count"]
     qdot_excess = row["qdot_excess_sample_count"]
     qdot_sum = row["qdot_normalized_excess_square_sum"]
-    if qdot_observed <= 0 or qdot_observed % spec["num_envs"] != 0:
+    if qdot_observed != spec["expected_samples_per_update"]:
         raise SystemExit(f"qdot observed denominator inconsistency at step {step}")
     if not (0 <= qdot_excess <= qdot_observed):
         raise SystemExit(f"qdot excess denominator inconsistency at step {step}")
@@ -1952,7 +1958,12 @@ receipt_content = {
         "hard_contract_sha256": hard_sha,
     },
     "checkpoint_state_audit": state_audit,
-    "activation": {"expected_steps": spec["expected_steps"], "rows": activation_rows, "totals": totals},
+    "activation": {
+        "expected_steps": spec["expected_steps"],
+        "expected_samples_per_update": spec["expected_samples_per_update"],
+        "rows": activation_rows,
+        "totals": totals,
+    },
     "runtime": spec["expected_runtime"],
 }
 receipt = {"schema_version": 1, "content": receipt_content, "content_sha256": hashlib.sha256(canonical(receipt_content)).hexdigest()}
@@ -1977,9 +1988,17 @@ PROBE_VERIFIER_PROGRAM_SHA256 = hashlib.sha256(
 
 def _validate_activation_payload(value: Any, mechanism: str, label: str) -> None:
     activation = _mapping(value, label)
-    _exact_keys(activation, {"expected_steps", "rows", "totals"}, label)
+    _exact_keys(
+        activation,
+        {"expected_steps", "expected_samples_per_update", "rows", "totals"},
+        label,
+    )
     if activation["expected_steps"] != list(PROBE_STEPS):
         raise QueueError(f"{label}.expected_steps must be {list(PROBE_STEPS)}")
+    if activation["expected_samples_per_update"] != EXPECTED_SAMPLES_PER_UPDATE:
+        raise QueueError(
+            f"{label}.expected_samples_per_update must be {EXPECTED_SAMPLES_PER_UPDATE}"
+        )
     rows = _list(activation["rows"], f"{label}.rows")
     if len(rows) != len(PROBE_STEPS):
         raise QueueError(f"{label}.rows must contain exactly two updates")
@@ -2007,7 +2026,7 @@ def _validate_activation_payload(value: Any, mechanism: str, label: str) -> None
         tail = integers["tail_active_sample_count"]
         joints = integers["above_margin_joint_count"]
         tail_sum = float(row["gated_tail_value_sum"])
-        if observed != valid + invalid or observed % 4096 != 0 or not 0 <= eligible <= valid <= observed:
+        if observed != valid + invalid or observed != EXPECTED_SAMPLES_PER_UPDATE or not 0 <= eligible <= valid <= observed:
             raise QueueError(f"{label} activation denominator inconsistency at {expected_step}")
         if not 0 <= tail <= eligible or not tail <= joints <= 15 * tail:
             raise QueueError(f"{label} tail/joint inconsistency at {expected_step}")
@@ -2044,7 +2063,7 @@ def _validate_activation_payload(value: Any, mechanism: str, label: str) -> None
         qdot_observed = integers["qdot_observed_sample_count"]
         qdot_excess = integers["qdot_excess_sample_count"]
         qdot_sum = float(row["qdot_normalized_excess_square_sum"])
-        if qdot_observed <= 0 or qdot_observed % 4096 != 0:
+        if qdot_observed != EXPECTED_SAMPLES_PER_UPDATE:
             raise QueueError(f"{label} qdot observed denominator inconsistency at {expected_step}")
         if not 0 <= qdot_excess <= qdot_observed:
             raise QueueError(f"{label} qdot excess denominator inconsistency at {expected_step}")
@@ -2224,6 +2243,11 @@ def _probe_verifier_spec(
         "terminal_checkpoint_basename": "model_6701.pt",
         "terminal_checkpoint_iteration": 6701,
         "num_envs": queue["budgets"]["probe"]["num_envs"],
+        "num_steps_per_env": queue["budgets"]["probe"]["num_steps_per_env"],
+        "expected_samples_per_update": (
+            queue["budgets"]["probe"]["num_envs"]
+            * queue["budgets"]["probe"]["num_steps_per_env"]
+        ),
         "expected_steps": list(PROBE_STEPS),
         "counter_tags": dict(PROBE_COUNTER_TAGS),
         "float_counter_names": sorted(PROBE_FLOAT_COUNTERS),
@@ -2480,6 +2504,7 @@ def cmd_plan(queue: Mapping[str, Any]) -> dict[str, Any]:
         "probe_gate": {
             "required_before_train_command_generation": True,
             **queue["budgets"]["probe"],
+            "expected_samples_per_update": EXPECTED_SAMPLES_PER_UPDATE,
         },
         "train_budget": dict(queue["budgets"]["train"]),
         "jobs": [

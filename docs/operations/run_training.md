@@ -1186,21 +1186,23 @@ python3 -m pytest -q \
 python3 scripts/run_phase1_balance_action_slew_queue.py --stage probe
 ```
 
-`--stage probe` 的人话是“选择 4096-env×2-update 非科学合同探针”；默认调用只验证并打印六格计划，
+`--stage probe` 的人话是“选择 4096-env×24-step/env×2-update 非科学合同探针”；默认调用只验证并打印六格计划，
 `commands_emitted=false`，不会 SSH，并明确报告 manifest gate 仍 blocked。当前独立生成并复核的
 [`launch manifest`](../DEFINITIONS.md#balance-launch-manifest)：它必须绑定 exact source、当前 queue
 config/runner、A3 asset tree、`model.usd` 及完整 6-file sibling bundle tree、两份动作、题库、W/V checkpoint
 与 parent contract 的 SHA-256。只复制或只哈希 `model.usd` 会漏掉它依赖的 `configuration/`，必须拒绝。
 本轮 exact 文件为 `configs/phase1_balance_action_slew_launch_manifest_20260720.json`，文件 SHA-256 为
-`2d3e7955a1f7e6af3624826f1e7ceaaebd9b2bb0a2c1c72d4b43d0a7ce3bae17`。把该 exact 路径、SHA 分别放进
+`283fd0027212abd4249a22d7a8ab4a91860702542ed717cdb2de0c1acdd1eefe`。把该 exact 路径、SHA 分别放进
 任务专用变量 `BALANCE_LAUNCH_MANIFEST`、`BALANCE_LAUNCH_MANIFEST_SHA256`；不得用占位 hash，也不得把
 清单存在误写成 probe 已启动。
 
 旧 manifest `d7e95130…a2e47` 只启动过 Pod1 W-C probe2；trainer 自然退出，但 outer verifier 错把
 首个 `0.48 s` rollout 的 recovery-eligible=`0` 当成失败，未发布 receipt。旧 namespace 与旧 manifest
-都冻结为历史证据，不得补写或重发。当前 probe3 使用 no-clobber 根
-`/workspace/codexschema/phase1_balance_action_slew_v2_20260720`；逐 update 仍验计数守恒，但恢复资格只要求
-两步合计非零。只有本页当前 manifest 进入最新 `origin/main` 后才可发射。
+都冻结为历史证据，不得补写或重发。manifest `2d3e7955…3bae17` 的 probe3 随后自然完成 W-C/W-N/V-C；
+W-C 的旧 receipt 虽有真实 `98304/update`，但 verifier 未把 24-step rollout 写成硬门，三格都不能解锁
+train。当前 probe4 使用 no-clobber 根 `/workspace/codexschema/phase1_balance_action_slew_v3_20260720`，显式
+override `algo.num_steps_per_env=24`，要求 processed-q-des/qdot observed 逐 update 都精确为 `98304`，恢复
+资格则只要求两步合计非零。只有本页当前 manifest 进入最新 `origin/main` 后才可发射。
 
 通过该复核后，[`--authorize-launch`](../DEFINITIONS.md#balance-command-render-latch)仍只允许**渲染**启动
 命令，不执行 SSH；runner 自身也会重复检查同一 `origin/main` authority，不能靠跳过本页绕过：
@@ -1245,12 +1247,16 @@ python3 scripts/run_phase1_balance_action_slew_queue.py \
 `jobs[].probe_verifier_command`；verifier 才会在远端不可覆盖地发布 `probe_receipt.json`。把六份收据逐字节
 复制到任务专用本地目录 `BALANCE_PROBE_RECEIPTS_DIR`，布局必须是
 `DIR/{w_c,w_n,w_h,v_c,v_n,v_h}/probe_receipt.json`。
+收据目录是 [trusted-operator capability](../DEFINITIONS.md#balance-receipt-trust-boundary)：重验会阻止损坏、
+旧 identity 和误配，但不提供抵御恶意本地 root 的数字签名。必须保留 verifier 生成的远端
+bytes 不变并逐字节复制；任何人工重写都使该格失效。
 
 六份 [`probe receipt`](../DEFINITIONS.md#balance-probe-receipt-set)会重验 absolute milestone `[6701]`、
 terminal checkpoint、policy/value/full optimizer/two normalizers、C/N/H exact 参数与 applied markers、
 lineage=`0`、claim/binding，以及 6700/6701 两步的 processed-q_des、completion/fall/legal-return、ready-tilt、
-qdot tag 和守恒账；processed-q_des recovery-eligible 可逐步为零但两步合计必须非零，其他预注册分母仍
-逐步非零。最后再检查 fatal、进程组和 GPU 释放。没有
+qdot tag 和守恒账；processed-q_des/qdot observed 必须逐 update 精确等于 `4096×24=98304`，
+processed-q_des recovery-eligible 可逐步为零但两步合计必须非零，其他预注册分母仍逐步非零。最后再
+检查 fatal、进程组和 GPU 释放。没有
 `--probe-approved` 人工捷径；train 只接受同一 manifest 下收齐的六份 exact 收据，并只生成命令：
 
 ```bash

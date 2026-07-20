@@ -133,8 +133,8 @@ def _activation(mechanism: str) -> dict:
         eligible = 200
         row = {
             "step": step,
-            "observed_sample_count": 4096,
-            "previous_qdes_valid_sample_count": 2048,
+            "observed_sample_count": Q.EXPECTED_SAMPLES_PER_UPDATE,
+            "previous_qdes_valid_sample_count": Q.EXPECTED_SAMPLES_PER_UPDATE - 2048,
             "previous_qdes_invalid_first_step_sample_count": 2048,
             "recovery_eligible_sample_count": eligible,
             "reward_enabled_eligible_sample_count": eligible if mechanism == "H" else 0,
@@ -151,13 +151,14 @@ def _activation(mechanism: str) -> dict:
             "racket_ready_tilt_eligible_sample_count": 200,
             "racket_ready_tilt_rad_sum": 20.0,
             "racket_ready_nonfinite_value_count": 0,
-            "qdot_observed_sample_count": 4096,
+            "qdot_observed_sample_count": Q.EXPECTED_SAMPLES_PER_UPDATE,
             "qdot_excess_sample_count": 100,
             "qdot_normalized_excess_square_sum": 50.0,
         }
         rows.append(row)
     return {
         "expected_steps": list(Q.PROBE_STEPS),
+        "expected_samples_per_update": Q.EXPECTED_SAMPLES_PER_UPDATE,
         "rows": rows,
         "totals": {
             counter: sum(float(row[counter]) for row in rows)
@@ -284,6 +285,7 @@ def test_probe_budget_uses_exclusive_6702_and_terminal_6701():
     queue = Q.load_queue(QUEUE)
     assert queue["budgets"]["probe"] == {
         "num_envs": 4096,
+        "num_steps_per_env": 24,
         "additional_updates": 2,
         "max_iterations": 2,
         "save_interval": 1,
@@ -298,6 +300,8 @@ def test_probe_claim_uses_absolute_terminal_milestone_and_custom_binding(tmp_pat
     _, _, manifest = _manifest(tmp_path, queue)
     claim, argv = Q._build_claim(queue, queue["jobs"][0], "probe", manifest)
     assert claim["content"]["budget"]["milestones"] == [6701]
+    assert claim["content"]["budget"]["num_steps_per_env"] == 24
+    assert "algo.num_steps_per_env=24" in argv
     assert claim["content"]["purpose"] == "balance_action_slew_probe_not_science"
     assert not any("training_queue_claim_path" in item for item in argv)
     assert not any("training_run_binding_path" in item for item in argv)
@@ -321,6 +325,8 @@ def test_verifier_requires_optimizer_lineage_contract_and_exact_log_markers(tmp_
     job = queue["jobs"][2]
     claim, _ = Q._build_claim(queue, job, "probe", manifest)
     spec = Q._probe_verifier_spec(queue, job, manifest, claim)
+    assert spec["num_steps_per_env"] == 24
+    assert spec["expected_samples_per_update"] == 98304
     assert spec["expected_processed_qdes_contract"] == {
         "schema_version": 1,
         "enabled": True,
@@ -347,6 +353,8 @@ def test_verifier_requires_optimizer_lineage_contract_and_exact_log_markers(tmp_
     assert "expected_applied_markers" in verifier
     assert "0 <= eligible <= valid <= observed" in verifier
     assert "two-update probe did not observe any recovery-eligible sample" in verifier
+    assert 'observed != spec["expected_samples_per_update"]' in verifier
+    assert 'qdot_observed != spec["expected_samples_per_update"]' in verifier
 
 
 def test_counter_validator_rejects_impossible_ledgers_and_allows_tail_underflow():
@@ -403,8 +411,8 @@ def test_counter_validator_rejects_impossible_ledgers_and_allows_tail_underflow(
 
     attacks = []
     bad = copy.deepcopy(valid)
-    bad["rows"][0]["observed_sample_count"] = 4097
-    bad["rows"][0]["previous_qdes_valid_sample_count"] = 2049
+    bad["rows"][0]["observed_sample_count"] = Q.EXPECTED_SAMPLES_PER_UPDATE + 1
+    bad["rows"][0]["previous_qdes_valid_sample_count"] += 1
     bad["totals"]["observed_sample_count"] += 1
     bad["totals"]["previous_qdes_valid_sample_count"] += 1
     attacks.append(bad)
@@ -419,9 +427,11 @@ def test_counter_validator_rejects_impossible_ledgers_and_allows_tail_underflow(
     bad = copy.deepcopy(valid)
     for row in bad["rows"]:
         row["previous_qdes_invalid_first_step_sample_count"] = 1
-        row["previous_qdes_valid_sample_count"] = 4095
+        row["previous_qdes_valid_sample_count"] = Q.EXPECTED_SAMPLES_PER_UPDATE - 1
     bad["totals"]["previous_qdes_invalid_first_step_sample_count"] = 2.0
-    bad["totals"]["previous_qdes_valid_sample_count"] = 8190.0
+    bad["totals"]["previous_qdes_valid_sample_count"] = float(
+        2 * (Q.EXPECTED_SAMPLES_PER_UPDATE - 1)
+    )
     attacks.append(bad)
     for candidate in attacks:
         with pytest.raises(Q.QueueError):
@@ -438,8 +448,8 @@ def test_counter_validator_rejects_impossible_ledgers_and_allows_tail_underflow(
         ("racket_virtual_legal_return_count", 81, "legal-return denominator"),
         ("racket_ready_tilt_eligible_sample_count", 0, "ready-tilt denominator"),
         ("racket_ready_nonfinite_value_count", 1, "ready-tilt denominator"),
-        ("qdot_observed_sample_count", 4095, "qdot observed denominator"),
-        ("qdot_excess_sample_count", 4097, "qdot excess denominator"),
+        ("qdot_observed_sample_count", 4096, "qdot observed denominator"),
+        ("qdot_excess_sample_count", Q.EXPECTED_SAMPLES_PER_UPDATE + 1, "qdot excess denominator"),
         ("qdot_normalized_excess_square_sum", 0.0, "qdot excess/value"),
     ],
 )
@@ -450,6 +460,41 @@ def test_scientific_metric_probe_invariants_fail_closed(field, value, message):
     activation["totals"][field] += float(value) - float(old)
     with pytest.raises(Q.QueueError, match=message):
         Q._validate_activation_payload(activation, "H", "scientific-metric")
+
+
+@pytest.mark.parametrize(
+    "observed",
+    [4096, Q.EXPECTED_SAMPLES_PER_UPDATE - 4096, Q.EXPECTED_SAMPLES_PER_UPDATE + 4096],
+)
+def test_probe_rejects_incomplete_or_extra_rollout_denominators(observed):
+    activation = _activation("H")
+    row = activation["rows"][0]
+    old_observed = row["observed_sample_count"]
+    old_valid = row["previous_qdes_valid_sample_count"]
+    row["observed_sample_count"] = observed
+    row["previous_qdes_valid_sample_count"] = observed - row[
+        "previous_qdes_invalid_first_step_sample_count"
+    ]
+    activation["totals"]["observed_sample_count"] += observed - old_observed
+    activation["totals"]["previous_qdes_valid_sample_count"] += (
+        row["previous_qdes_valid_sample_count"] - old_valid
+    )
+    with pytest.raises(Q.QueueError, match="activation denominator"):
+        Q._validate_activation_payload(activation, "H", "qdes-rollout")
+
+    activation = _activation("H")
+    old = activation["rows"][0]["qdot_observed_sample_count"]
+    activation["rows"][0]["qdot_observed_sample_count"] = observed
+    activation["totals"]["qdot_observed_sample_count"] += observed - old
+    with pytest.raises(Q.QueueError, match="qdot observed denominator"):
+        Q._validate_activation_payload(activation, "H", "qdot-rollout")
+
+
+def test_probe_rejects_forged_expected_samples_per_update():
+    activation = _activation("H")
+    activation["expected_samples_per_update"] = 4096
+    with pytest.raises(Q.QueueError, match="expected_samples_per_update"):
+        Q._validate_activation_payload(activation, "H", "forged-rollout")
 
 
 def test_probe_metric_tags_cover_slew_behavior_ready_and_qdot():
