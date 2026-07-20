@@ -297,7 +297,7 @@ build hard contract 阶段 fail-closed：`lower-body reward contracts require th
 与已过 probe9 真机验证的 `processed_qdes_slew_hinge` 同款纪律——只要求 31 唯一名字集合与 articulation
 一致，目标关节**按名字**选取；同步修正把"换序必须失败"当作合同的旧单测，并新增真实 BFS 顺序回归测试。
 原 root 连同该失败 probe 按不可覆盖惯例封存，只作历史；全部 24 格转到新 root
-`/workspace/codexschema/phase1_balance_temporal_matrix_20260720c`，source.commit 同步更新。该失败不是任何机制的负例。
+`/workspace/codexschema/phase1_balance_temporal_matrix_20260720d`，source.commit 同步更新。该失败不是任何机制的负例。
 
 ### g2 第二层拒绝（同日）
 
@@ -305,5 +305,5 @@ build hard contract 阶段 fail-closed：`lower-body reward contracts require th
 列表按运行时枚举顺序写入，而校验器要求规范部署顺序。修复：contract builder 一律输出规范部署顺序
 的腿关节列表（`joint_order` 字面量改为 `canonical_deploy_order_selected_by_name`，pose/bundle 两块
 builder 与 validator 同步；probe9 已验证的 slew hinge 合同保持原字面量不动）。root 再次换代到
-`/workspace/codexschema/phase1_balance_temporal_matrix_20260720c`；两次失败都发生在任何训练更新之前，
+`/workspace/codexschema/phase1_balance_temporal_matrix_20260720d`；两次失败都发生在任何训练更新之前，
 不构成机制证据。

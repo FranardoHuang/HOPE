@@ -12,7 +12,7 @@
 - 本轮**没有** manifest-SHA 多层审批链：按发射工序教训改用统一计划表（`--plan`）＋依赖核对单
   （`--checklist`）＋逐字渲染人工核对；parent checkpoint SHA-256 直接钉死在 renderer 里
 - 远端 checkout：`/workspace/codexschema/nohope_btm_20260720`（clean detached exact commit）
-- namespace：`/workspace/codexschema/phase1_balance_temporal_matrix_20260720c`
+- namespace：`/workspace/codexschema/phase1_balance_temporal_matrix_20260720d`
   （probe 在 `probes/<job_id>`，science 在 `runs/<job_id>`，no-clobber）
 - 每格：`4096 environments`、`seed=3`、从各自 parent `model_6700` 续 `10001` updates、save/100；
   probe 每格 `2` updates 自然退出到 `model_6701.pt`
@@ -106,7 +106,7 @@ ssh <pod> 'sha256sum <W_model_6700.pt> <V_model_6700.pt>'
 ssh <pod> 'test -x /workspace/bin/kit_boot_lock.sh && echo LOCK_OK'
 
 # 人话：namespace 必须全新（no-clobber）；24 个 run_dir 与 24 个 probe dir 都不得已存在
-ssh <pod> 'ls /workspace/codexschema/phase1_balance_temporal_matrix_20260720c 2>&1'
+ssh <pod> 'ls /workspace/codexschema/phase1_balance_temporal_matrix_20260720d 2>&1'
 
 # 人话：每张目标卡零 compute 进程后才允许发射该卡
 ssh <pod> 'nvidia-smi --query-compute-apps=pid,used_memory --format=csv'
@@ -140,7 +140,7 @@ run_dir no-clobber），随后经 `kit_boot_lock.sh` 串行 boot 并后台运行
 才允许渲染并执行**该格**的 science 命令；任何一条不过就停发该格并排查。
 
 ```bash
-PROBE_DIR=/workspace/codexschema/phase1_balance_temporal_matrix_20260720c/probes/<job_id>
+PROBE_DIR=/workspace/codexschema/phase1_balance_temporal_matrix_20260720d/probes/<job_id>
 
 # 人话：真的进入过学习循环（应出现 2 个 update 的 Learning iteration 行）
 ssh <pod> "grep -n 'Learning iteration' $PROBE_DIR/run.log | tail -n 4"
