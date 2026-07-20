@@ -11,6 +11,16 @@
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
 
+## 2026-07-20
+
+- 新增默认关闭的 Wave-B 下肢稳定机制与 W/V×B0/B1/B2 六格 probe/long 队列预注册：B1 是静态
+  `v4rg` 十二腿关节软模仿，B2 是无参考脚距下界与实际腿速尾部；每格显式声明双 weight，并共用
+  不看成功结果的 pre `0.30 s` / same-attempt post `0.40 s` inclusive gate。source/reward/schema-3/queue
+  focused 回归为 `269 passed`，默认不生成 SSH，六条 long 仍被六份自然退出 probe receipt 锁住；尚无 RunPod probe、
+  科学训练或行为结果。M0 当前 0/4，不进入本轮。详见
+  [实验记录](experiments/2026-07/EXP-P1-LOWER-BODY-STABILITY-20260720.md)与
+  [操作页](operations/run_phase1_lower_body_stability_wave.md)。
+
 ## 2026-07-19
 
 - 一次 Pod1 只读全域精确查找已为 W/Y 各唯一定位 `model_6700.pt`。两份 checkpoint 均为

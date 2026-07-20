@@ -1,0 +1,302 @@
+schema_version: 1
+queue_id: phase1_lower_body_stability_20260720
+purpose: >-
+  Diagnostic W/V matched-parent ablation of upper-only control versus static
+  v4rg twelve-leg soft imitation versus a reference-free stance-width and
+  realized leg-qdot constraint.  This queue is simulation-only and never drives
+  a robot.
+simulation_only: true
+real_robot_authorized: false
+launch_authorized_by_default: false
+formal_exact_eligible: false
+evidence_class: diagnostic_only_intentional_parent_contract_mismatch
+
+ssh:
+  key: ~/.ssh/id_ed25519_runpod
+pods:
+  pod1: {host: 162.43.172.171, port: 18333, gpus: [0, 1, 2]}
+  pod2: {host: 162.43.172.181, port: 13146, gpus: [0, 1, 2]}
+
+namespace:
+  root: /workspace/codexschema/phase1_lower_body_stability_20260720
+  no_clobber: true
+  automatic_retry: false
+
+source:
+  checkout: /workspace/codexschema/nohope_lowerbody_wave_20260720
+  identity_mode: clean_detached_exact_commit
+  commit: 5db7366aaa1562d592093dc0d512ec212f14e39e
+  worktree_relative: hope_training/whole_body_tracking
+  python: /workspace/hope_isaac_venv/bin/python
+  setup_relative: setup_train_env.sh
+  trainer_relative: scripts/train.py
+  locked_launcher_relative: scripts/launch_kit_training_locked.sh
+  required_relative_files:
+    - cfg/algo/ppo.yaml
+    - scripts/exact_process_group.py
+    - source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/hope_commands.py
+    - source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/hope_rewards.py
+    - source/whole_body_tracking/whole_body_tracking/tasks/tracking/config/agibot_a3/hope_env_cfg.py
+    - source/whole_body_tracking/whole_body_tracking/utils/my_on_policy_runner.py
+    - source/whole_body_tracking/whole_body_tracking/utils/training_contract.py
+  note: >-
+    Training runs from a clean detached checkout of the exact registered commit.
+    The intentional W/V hard-contract mismatch keeps every descendant formal-exact
+    ineligible even when the source checkout is clean.
+
+launch_manifest_contract:
+  schema_version: 1
+  status: explicit_reviewed_manifest_required_per_authorized_render
+  manifest_is_separate_reviewed_input: true
+  required_cli: [--launch-manifest, --expected-launch-manifest-sha256]
+  required_bindings:
+    - exact_clean_source_commit_and_required_source_file_sha256
+    - queue_config_and_queue_runner_sha256
+    - a3_runtime_asset_tree_sha256_file_count_and_total_bytes
+    - preconverted_usd_exact_file_and_six_file_bundle_tree_motion_bank_checkpoint_and_parent_contract_sha256
+  claim_publish: exclusive_no_clobber_before_trainer_start
+  probe_receipt_basename: probe_receipt.json
+  probe_verifier_publish: exclusive_no_clobber_after_natural_exit
+  train_unlock: all_six_local_probe_receipts_must_verify
+  automatic_probe_approval: false
+  note: >-
+    Every authorized command render must explicitly supply one separately reviewed
+    manifest and its exact file digest.  A checked-in manifest is not ambient launch
+    authority, and no placeholder digest is accepted.
+
+assets:
+  a3_runtime_asset_root: /workspace/codexschema/nohope_lowerbody_wave_20260720/hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
+  preconverted_a3_usd: /workspace/codexschema/simple_half_second_sprint_20260718/assets/a3_preconverted_usd/model.usd
+  motion_forehand: /workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_forehand_v4rg_cal.npz
+  motion_backhand: /workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_backhand_v4rg_cal.npz
+  training_question_bank: /workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_bank_rebind_v2/s1_v4rg_runtime_order_schema3_train_882fea4_rebound.npz
+
+parents:
+  W:
+    human_name: position-heavy plus free non-striking arm
+    checkpoint_iteration: 6700
+    checkpoint_path: /workspace/codexschema/simple_half_second_sprint_20260718/pod1/hs_p1_w_cached_pos_free_seed3/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-17_19-58-17_hs_p1_w_cached_pos_free_seed3/model_6700.pt
+    hard_contract_path: /workspace/codexschema/simple_half_second_sprint_20260718/pod1/hs_p1_w_cached_pos_free_seed3/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-17_19-58-17_hs_p1_w_cached_pos_free_seed3/params/training_contract.json
+    transfer_mode: full_policy_value_optimizer_normalizer
+    checkpoint_tolerant: false
+    checkpoint_allow_missing_contract: false
+    checkpoint_allow_contract_mismatch: true
+    descendant_formal_exact_eligible: false
+    recipe_overrides:
+      - task.rewards.racket_position_weight=17.0
+      - task.rewards.racket_velocity_weight=7.0
+      - task.rewards.racket_normal_weight=5.0
+      - task.rewards.foot_orientation_weight=-0.3
+      - task.rewards.prestrike_upright_weight=-1.0
+      - ++task.rewards.free_non_striking_arm_mimic=true
+  V:
+    human_name: velocity-heavy plus strong ready posture
+    checkpoint_iteration: 6700
+    checkpoint_path: /workspace/codexschema/simple_half_second_sprint_20260718/pod1/hs_p1_v_cached_vel_ready_seed3/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-17_19-58-18_hs_p1_v_cached_vel_ready_seed3/model_6700.pt
+    hard_contract_path: /workspace/codexschema/simple_half_second_sprint_20260718/pod1/hs_p1_v_cached_vel_ready_seed3/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-17_19-58-18_hs_p1_v_cached_vel_ready_seed3/params/training_contract.json
+    transfer_mode: full_policy_value_optimizer_normalizer
+    checkpoint_tolerant: false
+    checkpoint_allow_missing_contract: false
+    checkpoint_allow_contract_mismatch: true
+    descendant_formal_exact_eligible: false
+    recipe_overrides:
+      - task.rewards.racket_position_weight=7.0
+      - task.rewards.racket_velocity_weight=17.0
+      - task.rewards.racket_normal_weight=5.0
+      - task.rewards.foot_orientation_weight=-0.6
+      - task.rewards.prestrike_upright_weight=-2.0
+      - ++task.rewards.free_non_striking_arm_mimic=false
+
+common:
+  seed: 3
+  curriculum: short_focus
+  qdot_limit_hinge_weight: 0.0
+  initial_tts_weights:
+    late_stress: 0.10
+    exact_half_second: 0.45
+    fast_deploy: 0.40
+    broad_arrival: 0.05
+  planner_revision_override: >-
+    ++task.planner_revision={enabled: true, initial_tts_mixture: {components: [{name: "late_stress", range_s: [0.36, 0.49], weight: 0.10}, {name: "baseline_0p5", range_s: [0.5, 0.5], weight: 0.45}, {name: "fast_deploy", range_s: [0.5, 0.9], weight: 0.40}, {name: "broad_arrival", range_s: [0.9, 1.7], weight: 0.05}], contract_version: "initial_tts_mixture_v1"}, initial_tts_range_s: [0.36, 1.7], normal_std_rad: 0.05, position_std_m: 0.02, profile: {contract_version: "phase_governor_v1", early_deadline_tolerance_s: 1.0e-6, max_deadline_revision_delta_s: 0.25, max_normal_revision_delta_rad: 0.2, max_phase_acceleration_per_s2: 20.0, max_phase_rate_per_s: 4.0, max_position_revision_delta_m: 0.1, max_tts_s: 2.0, max_velocity_revision_delta_mps: 0.5, min_tts_s: 0.02, normal_unit_tolerance: 0.0001, policy_dt_s: 0.02, schema_version: 1}, tts_std_s: 0.08, velocity_std_mps: 0.1}
+  base_overrides:
+    - task=HOPEPingPongVirtualBall
+    - algo=ppo
+    - headless=true
+    - logger=tensorboard
+    - video=false
+    - task.actor_obs_contract=deploy_parity_face179
+    - task.env.episode_length_s=16.0
+    - task.sim.dt=0.005
+    - task.sim.decimation=4
+    - task.actions.qdes_clamp=true
+    - task.plant.zero_joint_friction=true
+    - task.motion.wrap_teleport=false
+    - task.motion.stand_start_prob=0.25
+    - task.motion.hold_steps_range=[0,0]
+    - task.motion.stand_start_min_hold=0
+    - task.motion.post_swing_buffer_size=4096
+    - task.motion.post_swing_min_fill=256
+    - task.motion.post_swing_min_hold=0
+    - task.motion.clip_switch_prob=0.0
+    - task.motion.speed_scale_range=[1.0,1.0]
+    - ++task.motion.rsi_skip_settle_frames=0
+    - ++task.motion.rsi_hold_root_stand_z=false
+    - ++task.motion.stagger_initial_clock=false
+    - ++task.motion.stagger_hold_max_steps=150
+    - ++task.racket.question_bank_allow_legacy=false
+    - ++task.racket.face_command=true
+    - ++task.racket.face_command_obs=true
+    - ++task.racket.station_obs=false
+    - ++task.racket.mount_normal_sign_per_clip=[1.0,-1.0]
+    - task.racket.target_mode=uniform
+    - task.racket.normal_mode=velocity
+    - task.racket.adaptive_sigma=true
+    - task.racket.target_delay_steps=0
+    - ++task.racket.target_delay_tts_mode=source_timestamp_compensated
+    - task.racket.target_jitter_pos_per_s=0.0
+    - task.racket.target_jitter_vel_per_s=0.0
+    - task.racket.target_noise_white=0.0019
+    - task.racket.target_noise_ar1_sigma=0.0052
+    - task.racket.target_noise_ar1_rho=0.717
+    - task.racket.target_dropout_prob=0.0
+    - task.racket.target_post_strike_dropout_s=0.0
+    - task.racket.target_bias_per_swing=0.0
+    - task.racket.midswing_resample_prob=0.0
+    - task.racket.midswing_resample_tts_floor=0.3
+    - task.racket.vb_spin_mode=minimize
+    - task.racket.vb_metrics_only=true
+    - ++task.racket.rally_legacy_metrics=true
+    - task.racket.achieved_target_mix_prob=0.30
+    - task.racket.achieved_buffer_size=4096
+    - task.racket.achieved_min_fill=256
+    - task.racket.achieved_jitter_pos=0.03
+    - task.racket.achieved_jitter_vel=0.15
+    - task.racket.achieved_clamp_inflate=0.20
+    - task.racket.clean_reference_strike_velocity=true
+    - task.racket.clean_strike_vel_window=2
+    - task.racket.strike_window_s=0.12
+    - task.racket.strike_success_pos_thresh=0.075
+    - ++task.physical_ball=true
+    - task.rewards.racket_position_std=0.2
+    - task.rewards.racket_velocity_std=1.0
+    - task.rewards.racket_normal_std=0.3
+    - task.rewards.action_rate_weight=-0.1
+    - task.rewards.free_wrist_ori_mimic=true
+    - ++task.rewards.free_wrist_vel_mimic=true
+    - ++task.rewards.motion_scale_in_window=0.25
+    - task.rewards.base_decel_weight=0.0
+    - task.motion.post_swing_start_prob=0.0
+    - task.rewards.joint_velocity_limit_hinge_weight=0.0
+    - task.rewards.joint_velocity_limit_hinge_margin=0.85
+    - ++task.rewards.racket_face_conditional_guidance_weight=-0.4
+    - ++task.motion.allow_legacy_link_origin_velocity=false
+    - ++task.motion.event_timing_mode=disabled
+    - task.racket.strike_phase_per_clip=[0.471,0.338]
+    - ++task.racket.face_command_pairing=shared_plus_y
+    - ++task.rewards.racket_guidance_weight=0.0
+    - ++task.rewards.racket_face_guidance_weight=0.0
+    - ++task.rewards.racket_face_guidance_theta_max=3.141592653589793
+    - ++kit_carb_tasking_thread_count=16
+    - ++kit_tbb_thread_count=16
+
+mechanisms:
+  B0:
+    human_name: upper-only control with both lower-body probes enabled
+    lower_body_pose_imitation_weight: 0.0
+    lower_body_pose_imitation_std: 0.35
+    lower_body_pose_imitation_support_pre_s: 0.30
+    lower_body_pose_imitation_support_post_s: 0.40
+    lower_body_stability_bundle_weight: 0.0
+    lower_body_stability_min_stance_width_m: 0.22
+    lower_body_stability_stance_scale_m: 0.05
+    lower_body_stability_leg_velocity_margin_radps: 1.0
+    lower_body_stability_leg_velocity_scale_radps: 0.5
+    lower_body_stability_support_pre_s: 0.30
+    lower_body_stability_support_post_s: 0.40
+  B1:
+    human_name: static v4rg twelve-leg soft pose imitation
+    lower_body_pose_imitation_weight: 0.5
+    lower_body_pose_imitation_std: 0.35
+    lower_body_pose_imitation_support_pre_s: 0.30
+    lower_body_pose_imitation_support_post_s: 0.40
+    lower_body_stability_bundle_weight: 0.0
+    lower_body_stability_min_stance_width_m: 0.22
+    lower_body_stability_stance_scale_m: 0.05
+    lower_body_stability_leg_velocity_margin_radps: 1.0
+    lower_body_stability_leg_velocity_scale_radps: 0.5
+    lower_body_stability_support_pre_s: 0.30
+    lower_body_stability_support_post_s: 0.40
+  B2:
+    human_name: reference-free stance floor and realized leg-qdot settle
+    lower_body_pose_imitation_weight: 0.0
+    lower_body_pose_imitation_std: 0.35
+    lower_body_pose_imitation_support_pre_s: 0.30
+    lower_body_pose_imitation_support_post_s: 0.40
+    lower_body_stability_bundle_weight: -0.25
+    lower_body_stability_min_stance_width_m: 0.22
+    lower_body_stability_stance_scale_m: 0.05
+    lower_body_stability_leg_velocity_margin_radps: 1.0
+    lower_body_stability_leg_velocity_scale_radps: 0.5
+    lower_body_stability_support_pre_s: 0.30
+    lower_body_stability_support_post_s: 0.40
+
+measurement_contract:
+  enabled_in_all_cells: true
+  sources: [lower_body_pose_imitation_probe, lower_body_stability_bundle_probe]
+  phase: inclusive_pre_0p30_or_same_attempt_post_0p40
+  success_conditioned: false
+  moving_teacher_authorized: false
+  required_before_scientific_interpretation: true
+
+budgets:
+  probe:
+    num_envs: 4096
+    num_steps_per_env: 24
+    additional_updates: 2
+    max_iterations: 2
+    save_interval: 1
+    exclusive_iteration_upper_bound: 6702
+    terminal_checkpoint_iteration: 6701
+    terminal_checkpoint_basename: model_6701.pt
+  train:
+    num_envs: 4096
+    num_steps_per_env: 24
+    additional_updates: 1001
+    max_iterations: 1001
+    save_interval: 100
+    offsets_from_parent: [200, 500, 1000]
+    absolute_milestones: [6900, 7200, 7700]
+
+startup_checks:
+  - reviewed_launch_manifest_binds_source_config_runner_and_inputs
+  - source_checkout_exists_and_is_clean
+  - required_source_and_asset_paths_are_regular
+  - parent_checkpoint_is_model_6700_full_state_and_finite
+  - assigned_gpu_has_zero_compute_processes
+  - hydra_configuration_resolves_without_kit
+  - output_directory_is_new_and_no_clobber
+  - queue_claim_is_exclusively_published_before_trainer_start
+  - first_training_iteration_appears
+  - fatal_log_scan_is_clean
+  - probe_natural_exit_terminal_checkpoint_counter_consistency_and_gpu_release
+
+stop_contract:
+  automatic_stop: false
+  stop_command_generated: false
+  exact_numeric_pgid_only: true
+  required_identity_fields: [pid, pgid, leader_starttime_ticks, command]
+  launcher_state_basename: run.log.launch
+  leader_identity_basename: run.log.launch.leader.json
+  pre_term_identity_basename: run.log.launch.pre_term.json
+  pre_kill_identity_basename: run.log.launch.pre_kill.json
+  rule: >-
+    A later operator may signal only the exact numeric PGID after revalidating
+    the launcher-bound pid, pgid, starttime and argv; no broad pkill is allowed.
+
+jobs:
+  - {id: w_b0, parent: W, mechanism: B0, pod: pod1, gpu: 0, run_name: phase1_lbwave_w_b0_seed3_20260720, run_dir: /workspace/codexschema/phase1_lower_body_stability_20260720/runs/w_b0}
+  - {id: w_b1, parent: W, mechanism: B1, pod: pod1, gpu: 1, run_name: phase1_lbwave_w_b1_static_pose_seed3_20260720, run_dir: /workspace/codexschema/phase1_lower_body_stability_20260720/runs/w_b1}
+  - {id: w_b2, parent: W, mechanism: B2, pod: pod1, gpu: 2, run_name: phase1_lbwave_w_b2_support_settle_seed3_20260720, run_dir: /workspace/codexschema/phase1_lower_body_stability_20260720/runs/w_b2}
+  - {id: v_b0, parent: V, mechanism: B0, pod: pod2, gpu: 0, run_name: phase1_lbwave_v_b0_seed3_20260720, run_dir: /workspace/codexschema/phase1_lower_body_stability_20260720/runs/v_b0}
+  - {id: v_b1, parent: V, mechanism: B1, pod: pod2, gpu: 1, run_name: phase1_lbwave_v_b1_static_pose_seed3_20260720, run_dir: /workspace/codexschema/phase1_lower_body_stability_20260720/runs/v_b1}
+  - {id: v_b2, parent: V, mechanism: B2, pod: pod2, gpu: 2, run_name: phase1_lbwave_v_b2_support_settle_seed3_20260720, run_dir: /workspace/codexschema/phase1_lower_body_stability_20260720/runs/v_b2}

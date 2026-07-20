@@ -43,6 +43,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | 当前 Reward 是否真的按上台给分 | [Reward / physical-truth 审计](experiments/2026-07/EXP-P1-REWARD-PHYSICAL-TRUTH-AUDIT-20260715.md) → [G05](gates/G05_isaac_training_first_loop.md) → [G06](gates/G06_isaac_to_mujoco.md) |
 | 当前 179-D `Gate3-D0` 演示 | [`Gate3-D0` 实验](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md) → [exact planner-policy build](experiments/2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md) → [G06](gates/G06_isaac_to_mujoco.md) → [`run_gate3_first_tick_harness.md`](operations/run_gate3_first_tick_harness.md) |
 | 恢复/等待/连续对打 | [NOW 连续能力](NOW.md#22-连续能力每个课程阶段都要另考) → [Recovery A/B/C](experiments/2026-07/EXP-RECOVERY-TUPLE-ABC.md) → [横向平衡扰动 source gate](experiments/2026-07/EXP-P1-LATERAL-BALANCE-PERTURBATION.md) / [adapter 事务接口](interfaces/lateral_perturbation_adapter_contract.md) → [T1 接口](interfaces/t1_event_training_contract.md) → G05/G06 |
+| 下肢稳定 B0/B1/B2 消融 | [Wave-B 实验](experiments/2026-07/EXP-P1-LOWER-BODY-STABILITY-20260720.md) → [专用 NO-LAUNCH/probe/long 操作](operations/run_phase1_lower_body_stability_wave.md) → [G05](gates/G05_isaac_training_first_loop.md)；M0 当前 0/4，不进入队列 |
 | 借鉴 Jiayi V9 / Yikang 支线并核对泛化局限 | [选择性跨线审计](experiments/2026-07/EXP-V9-YIKANG-CROSS-LEARNING-20260715.md) → [G05](gates/G05_isaac_training_first_loop.md) / [G06](gates/G06_isaac_to_mujoco.md)；旧 `7/7` 只测挥拍/恢复周期，未测物理触球或落台 |
 | 新动作/动作库 | [空间重定向实验（含 B/C 主选 SE(2) 实体化）](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md) + [0.5秒短路径](experiments/2026-07/EXP-MOTION-READY-TO-STRIKE-0P5.md) + [Franco/高点拍压/横移老师设计](experiments/motion_v12_high_press_lateral_teacher_20260713.md) → [S0/M0 exact GVHMR](experiments/motion_video_gvhmr_prereg_franco_static_motion_20260713.md) → [post-GVHMR handoff](experiments/motion_post_gvhmr_s0_m0_handoff_20260713.md) → [canonical-beta](experiments/motion_canonical_beta_s0_m0_20260713.md) → [exact GMR/横移脚距](experiments/motion_exact_gmr_s0_m0_20260713.md) → [G08](gates/G08_blind_spot_improvements.md) → 动作操作文档 |
 | Planner 或 ROS runtime | [G04](gates/G04_sim_modeling_mujoco_isaac.md) / [G06](gates/G06_isaac_to_mujoco.md) → [`run_planner.md`](operations/run_planner.md) → 下方接口文档 |
@@ -71,6 +72,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | [`EXP-RECOVERY-TUPLE-ABC`](experiments/2026-07/EXP-RECOVERY-TUPLE-ABC.md) | A/B/C 旧结构合同已验证；T0/T1/T2 与新 reward 次序仅完成文档设计，machine prereg 待同步 |
 | [`EXP-V9-YIKANG-CROSS-LEARNING-20260715`](experiments/2026-07/EXP-V9-YIKANG-CROSS-LEARNING-20260715.md) | 只读审计完成：保留定向恢复、vector settle、动作首帧准备态和随机长等待为候选；旧 `7/7` 无物理触球/落台，且固定正手区不能证明球路泛化 |
 | [`EXP-P1-LATERAL-BALANCE-PERTURBATION`](experiments/2026-07/EXP-P1-LATERAL-BALANCE-PERTURBATION.md) | E1 source gate：scheduler/显式 COM adapter/default-off trainer 与 hard contract 已接，`173 passed`；full-scene/solver-response/throughput/held-out paper pending，禁止 launch |
+| [`EXP-P1-LOWER-BODY-STABILITY-20260720`](experiments/2026-07/EXP-P1-LOWER-BODY-STABILITY-20260720.md) | `preregistered / E1`：W/V×Wave-B B0/B1/B2 六格 source/queue 已冻结；六份 full-scene probe receipt 未产生，long 保持 NO-LAUNCH；M0 不进入本轮 |
 | [`EXP-MOTION-SPATIAL-RETARGET`](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md) | B 主选的 schema-2/FK 一次性 consume 已通过并解锁 L0；C 保持未消费后备，安全/动力学/RL 仍阻断 |
 | [`EXP-GATE3-CURRENT179-D0`](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md) | 实验 blocked；`Gate3-D0` 严格模型 preflight 通过，当前行为尚未运行 |
 | [`EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD`](experiments/2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md) | 实验 completed；exact 源码通过 portable Release 与 latest-main 回归，runtime gates 保持 open |
@@ -102,6 +104,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | --- | --- |
 | 构建与测试 | [`build_and_test.md`](operations/build_and_test.md) |
 | Isaac 训练 | [`run_training.md`](operations/run_training.md) |
+| Wave-B 下肢稳定六格 probe/long | [`run_phase1_lower_body_stability_wave.md`](operations/run_phase1_lower_body_stability_wave.md) |
 | 稀疏 Reward milestone 资格判读 | [`run_sparse_reward_milestone_classifier.md`](operations/run_sparse_reward_milestone_classifier.md) |
 | A0/A1 非击球臂模仿配对 | [`run_phase1_non_striking_arm_imitation_a01.md`](operations/run_phase1_non_striking_arm_imitation_a01.md) |
 | 随挥结束 natural-wrap 教师状态 capture/attestation | [`run_post_swing_teacher_capture.md`](operations/run_post_swing_teacher_capture.md) |

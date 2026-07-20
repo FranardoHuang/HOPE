@@ -1406,6 +1406,14 @@ physics/source-family contract and failed before learning. Preserve v1-v5; run o
 recursive audit, deterministic environment, module-origin, restored-asset tree and no-clobber rebound
 train-bank report closure are recorded in the dedicated operation page.
 
+### Wave-B 下肢稳定六格队列
+
+W/V 两个 `model_6700` parent 内比较 upper-only control、静态 `v4rg` 十二腿软模仿和无参考
+stance/qdot bundle 时，只使用
+[`run_phase1_lower_body_stability_wave.md`](run_phase1_lower_body_stability_wave.md)。该队列默认不生成 SSH；
+六条 long 只有在六份 `4096 env × 24 steps × 2 update` 自然退出 probe receipt 全部验证后才可渲染。M0 横移老师
+不在本轮，且没有真机授权。
+
 ## First-Loop Rule
 
 Before setting a baseline quality target, record:

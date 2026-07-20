@@ -1,11 +1,13 @@
 # EXP-P1-LOWER-BODY-STABILITY-20260720 — 静态下肢软老师与无参考稳定约束消融
 
-- 状态：`Partial / NO-LAUNCH`（源码与本地单测候选；RunPod full-scene probe 尚未运行）
+- 状态：`preregistered`
+- 运行态：`E1 source/queue only；NO-LAUNCH`。六格完整场景启动探针尚未产生受理 receipt；六条科学
+  长训在六份 exact probe receipt 全部通过前保持锁定。
 - 阶段/轴：Phase 1 / 下肢稳定学习
 - 人类负责人：Franco
 - 执行者：Codex
-- 创建日期：2026-07-20
-- 最高证据等级：源码与 CPU/模拟 Torch 单测；没有 Isaac full-scene、训练或行为结果
+- 创建日期/最后复核日期：2026-07-20 / 2026-07-20
+- 最高证据等级：`E1` 源码、队列、CPU/模拟 Torch 单测；没有 Isaac full-scene、训练或行为结果
 
 本记录中的 B0、B1、B2 是三条[实验臂](../../DEFINITIONS.md)：B0 是两种新机制都关闭但两套
 测量探针都开启的对照；B1 只开启静态 v4rg 十二腿关节软模仿；B2 只开启无动作参考的支撑宽度与腿速
@@ -119,6 +121,38 @@ weight_B2   = -0.25
 继续训练，必须显式使用 `checkpoint_allow_contract_mismatch=true`，属于 causal continuation，不是
 fresh/formal exact lineage；必须保留 parent，不得声称连续谱系完全匹配。
 
+## 队列与不可变输入预注册
+
+本轮唯一机器队列是
+[`configs/phase1_lower_body_stability_20260720.yaml`](../../../configs/phase1_lower_body_stability_20260720.yaml)，
+命令渲染器是
+[`scripts/run_phase1_lower_body_stability_queue.py`](../../../scripts/run_phase1_lower_body_stability_queue.py)，
+操作步骤见
+[`run_phase1_lower_body_stability_wave.md`](../../operations/run_phase1_lower_body_stability_wave.md)。二者只定义
+局部依赖 `validate -> reviewed manifest -> 六份 probe receipt -> long`；全局顺序、算力认领和暂停/恢复仅以
+最新 `origin/main:docs/NOW.md` 为准。
+
+- exact source：`5db7366aaa1562d592093dc0d512ec212f14e39e`，远端必须是 clean detached checkout；
+- `cfg/algo/ppo.yaml` SHA `ffa64ffe...7a42` 把 `num_steps_per_env=24` 绑入 manifest/claim，每个
+  probe update 因此必须恰有 `4096 * 24 = 98304` 个 observed sample；
+- W parent：checkpoint `2caab3dd...fcce`，相邻 hard contract `e208b682...8551`；
+- V parent：checkpoint `ad901910...2716`，相邻 hard contract `274cb3bd...aee0`；
+- 静态 v4rg 正/反手：`f2cb2d9f...1687` / `17225533...7534`；schema-3 train bank：
+  `3a9d8851...5b71`；
+- A3 ignored runtime tree：46 files / 15378264 bytes / tree `071640ea...b070`；预转换 USD bundle：
+  6 files / 21897893 bytes / tree `716487df...beb4d`，其中 `model.usd` 为 `1b3fecd7...693c`；
+- 三格共同显式固定 `action_rate_l2=-0.1`，并要求 processed-qdes slew block 缺席；因此本轮唯一
+  within-parent 科学差异是 11 个成对 Wave-B override；
+- config SHA `7193d789...3146`；runner SHA `abc8d34d...8556`；checked-in reviewed manifest
+  [`phase1_lower_body_stability_launch_manifest_20260720.json`](../../../configs/phase1_lower_body_stability_launch_manifest_20260720.json)
+  的 file SHA 为 `bae461b0...5565`、canonical content SHA 为 `feed3ed1...d576`。它绑定十份 required
+  source file 和上述输入，但自身不是 ambient launch authority；每次授权渲染仍必须显式传入 manifest
+  路径与 exact file SHA。
+
+长训固定到 `model_6900`、`model_7200`、`model_7700` 三个 absolute milestones；renderer 只有在本地目录
+同时存在六格 verifier 生成的 canonical receipt 且每份都与同一 manifest/claim/probe program 绑定时，才会
+生成任何 long SSH argv。continuation checkpoint 的 `training_contract_lineage_exact` 必须继续为 `0`。
+
 ## Probe 与 hard-contract 发射门
 
 未带任何 Wave-B override 时，四个 reward/probe term 都是 weight `0`，两份新 hard-contract block
@@ -152,18 +186,43 @@ probe receipt，必须 fail closed，而不是把“没有日志”解释成零�
 
 ## 行为指标与裁决
 
-所有格按 parent 分层、同 checkpoint 窗和同题分母报告：
+所有格按 parent 分层。每个 absolute milestone 只读截至该点的最后 100 个完整 PPO update：
+`6900 -> 6801..6900`、`7200 -> 7101..7200`、`7700 -> 7601..7700`。100 个 step 必须逐个存在，
+不得插值、换成累计窗、从邻近点补数或事后挑最好 checkpoint。先对 exact ledger counter 求和，
+再作除法，不先平均每 update 的 ratio：
 
-- 稳定：pre/post fall、survival/completion、base roll/pitch、base angular velocity、signed stance width、
-  narrow/crossover rate、foot slip/contact；
-- 控制平滑：腿部 `Delta action`、`Delta^2 action`、12-leg qdot tail；action-rate 与本轮机制分开报告；
-- 模仿：B1 的 12-leg absolute error 与 reference-motion magnitude；
-- 乒乓球任务：exact hit、return、position/velocity/normal error、composite 和 deadline；
-- 不得只报平均 reward，也不得因跌倒、未触球或 reset 删除 attempt。
+- physical fall rate = `sum(physical_fall_count) / sum(swing_outcome_count)`；
+- completion rate = `sum(swing_completion_count) / sum(swing_outcome_count)`；
+- legal return rate = `sum(virtual_legal_return_count) / sum(strike_opportunity_count)`；
+- narrow/crossover rate = `sum(bundle.narrow_or_crossed_sample_count) /
+  sum(bundle.support_eligible_sample_count)`；
+- stance-tail mean 与 leg-qdot-tail mean 分别是 `sum(bundle.gated_stance_tail_sum) / sum(eligible)` 和
+  `sum(bundle.gated_leg_velocity_tail_sum) / sum(eligible)`；
+- B1 pose absolute-error readout = `sum(pose.gated_joint_abs_error_mean_sum) /
+  sum(pose.support_eligible_sample_count)`；
+  它只证明模仿通道改变，不是稳定晋级主门。
 
-首轮只作单 seed 机制 screen。任何候选必须同时改善稳定主指标且不显著破坏 hit/return；若 B1 只降低
-腿误差却压住合法重心转移，或 B2 只降低 qdot 却降低击球完成率，都不能采用。胜者才与 matched B0
-购买第二 seed 和统一 push evaluation；push-training 仍是另一个实验轴。
+前三项读 `Live/racket_target/`，后四项读 `Live/lower_body_wave/{pose,bundle}/`。分母为零、
+100-step 不完整、任一 update 的 pose/bundle observed 不是 `4096 * 24 = 98304`、计数不守恒或
+fatal 非零，整个 milestone 记为 `invalid`，不把缺失数当成零。base roll/pitch、base angular velocity、
+signed stance width、foot slip/contact、腿部 `Delta action`、`Delta^2 action`、hit/error/composite/deadline 都在
+同一窗报告，但只是辅助诊断，不得代替下面冻结的门。
+
+`model_6900` 只看 activation/明显崩坏，`model_7200` 只报方向；单 seed 晋级决定只使用
+`model_7700` 固定窗。B1 和 B2 各自相对同 parent B0 判读，禁止跨 W/V 比绝对值。某个 treatment
+只有同时通过下列全部条件，才能与 matched B0 申请新的多 seed formal-fresh 预注册：
+
+1. V stratum 的 fall 相对下降至少 `25%` 且绝对下降至少 `5` 个百分点；
+2. V 的 narrow/crossover rate 或 leg-qdot-tail mean 至少相对下降 `20%` 且绝对下降
+   `0.01`（两者均是 `[0,1]` 有界量）；另一项不得高于 `B0 + max(0.02, 0.10*B0)`；
+3. W 的 fall 不高于 `max(0.5%, B0 + 0.2 个百分点)`，且 W 的 narrow rate 与
+   leg-qdot-tail mean 都不高于各自 `B0 + max(0.02, 0.10*B0)`；
+4. W 和 V 的 completion 分别下降不超过 `2` 个百分点，legal return 分别下降不超过
+   `3` 个百分点；physical-fall 硬失败不能由更高 reward/composite 抵消。
+
+如果 B1 只降低 pose error，或 B2 只降低自己的 bundle reward 而没通过独立 stability/task 门，
+都不晋级。若 B1/B2 同时通过，两者都进多 seed 与 push evaluation，不用单 seed 强选一个；
+若有效数据下都失败，则拒绝当前剂量。push-training 仍是另一个实验轴。
 
 ## M0 横移老师的明确阻塞
 
@@ -189,8 +248,14 @@ schema-2 teacher。移动条件化实验保持 deferred；下一步必须另建 
 
 本分支已覆盖：50 Hz inclusive 边界、reset/same-attempt、12 腿关节且无手臂、B2 不读损坏的 motion
 reference、base-yaw stance 投影、配置原子拒绝、双 probe ledger、schema-3 pair/顺序/body fail-closed。
+独立队列还覆盖默认不发射、六卡唯一映射、显式双 weight、M0 零枚举、manifest/source/input SHA 绑定、
+claim no-clobber、自然退出、完整 policy/value/optimizer/双 normalizer checkpoint、GPU/PGID 释放和六 receipt
+解锁。用本地 `fast` CPU Python 共同运行 Wave-B source、reward override、schema-3 contract 与 queue suites
+得到 `269 passed`（分别为 `35 + 124 + 68 + 42`）；这仍是 E1，不是 Isaac runtime。
 本地 Torch 是旧 CPU 测试运行时，不能替代目标 Isaac/RunPod 环境；正式 runtime-valid 状态必须等 clean
 detached source 在 RunPod 复跑 focused Torch tests 和六格 full-scene probe 后另行记录。
 
-本记录不更新 `NOW` 队列，不宣称 launch、checkpoint 或行为结果。合入主分支后，由统一队列另行绑定
-exact source commit、六格 config/claim、Pod/GPU slot 和 terminal receipts。
+M0 是独立输入资产门的 negative evidence，不是 Wave-B 第七格；当前 0/4 只拒绝这四份输出进入本轮，
+不否定未来重新通过 schema-2/L0/L1/桌网/动力学门的左右移动老师。本记录不更新 `NOW` 队列，不宣称
+launch、checkpoint 或行为结果；真正点火前必须先在最新 `origin/main` 的唯一队列里完成 owner/executor/
+branch 认领。

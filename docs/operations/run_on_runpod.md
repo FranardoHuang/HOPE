@@ -296,6 +296,12 @@ bash /workspace/smoke_test/run_smoke.sh <name>
 `setup_train_env.local.sh`, and copies the git-ignored `assets/agibot_a3` from
 `/workspace/shared/assets` (fresh clones cannot build the env without it).
 
+## Wave-B 专用入口
+
+下肢稳定的 W/V×B0/B1/B2 六格不得手拼 SSH。使用
+[`run_phase1_lower_body_stability_wave.md`](run_phase1_lower_body_stability_wave.md) 的 manifest、自然退出 probe、
+六 receipt 解锁与 exact PGID 流程；本页的通用 Pod 纪律仍然适用。
+
 ## Update Rule
 
 Any change to the pod endpoint, venv contents, folder convention, or smoke procedure must update
