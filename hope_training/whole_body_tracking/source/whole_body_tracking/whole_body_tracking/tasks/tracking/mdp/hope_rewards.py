@@ -1153,6 +1153,590 @@ def consume_processed_qdes_slew_hinge_activation_counters(
     return snapshot
 
 
+# Wave-B lower-body diagnostics --------------------------------------------------------------- #
+#
+# Both mechanisms below are intentionally default-off and share one phase gate: a bounded
+# pre-contact support interval plus the existing reset/wrap/reveal-aware post-strike clock.  The
+# clock is armed by the phase-aligned strike opportunity, not by racket contact or task success,
+# so a failed attempt remains in the sample instead of being silently selected away.
+_A3_RUNTIME_JOINT_ORDER = (
+    "waist_yaw_joint",
+    "waist_roll_joint",
+    "waist_pitch_joint",
+    "head_yaw_joint",
+    "head_pitch_joint",
+    "left_shoulder_pitch_joint",
+    "left_shoulder_roll_joint",
+    "left_shoulder_yaw_joint",
+    "left_elbow_joint",
+    "left_wrist_roll_joint",
+    "left_wrist_pitch_joint",
+    "left_wrist_yaw_joint",
+    "right_shoulder_pitch_joint",
+    "right_shoulder_roll_joint",
+    "right_shoulder_yaw_joint",
+    "right_elbow_joint",
+    "right_wrist_roll_joint",
+    "right_wrist_pitch_joint",
+    "right_wrist_yaw_joint",
+    "left_hip_pitch_joint",
+    "left_hip_roll_joint",
+    "left_hip_yaw_joint",
+    "left_knee_joint",
+    "left_ankle_pitch_joint",
+    "left_ankle_roll_joint",
+    "right_hip_pitch_joint",
+    "right_hip_roll_joint",
+    "right_hip_yaw_joint",
+    "right_knee_joint",
+    "right_ankle_pitch_joint",
+    "right_ankle_roll_joint",
+)
+_LOWER_BODY_LEG_JOINT_NAMES = frozenset(_A3_RUNTIME_JOINT_ORDER[-12:])
+_LOWER_BODY_FOOT_BODY_NAMES = ("left_ankle_roll_Link", "right_ankle_roll_Link")
+
+_LOWER_BODY_POSE_COUNTER_ATTR = "_hope_lower_body_pose_activation_counters"
+_LOWER_BODY_POSE_OBSERVED_STEP_ATTR = "_hope_lower_body_pose_observed_step"
+_LOWER_BODY_POSE_ACTIVE_STEP_ATTR = "_hope_lower_body_pose_active_step"
+_LOWER_BODY_POSE_SIGNATURE_ATTR = "_hope_lower_body_pose_signature"
+_LOWER_BODY_BUNDLE_COUNTER_ATTR = "_hope_lower_body_bundle_activation_counters"
+_LOWER_BODY_BUNDLE_OBSERVED_STEP_ATTR = "_hope_lower_body_bundle_observed_step"
+_LOWER_BODY_BUNDLE_ACTIVE_STEP_ATTR = "_hope_lower_body_bundle_active_step"
+_LOWER_BODY_BUNDLE_SIGNATURE_ATTR = "_hope_lower_body_bundle_signature"
+
+
+def _finite_scalar(value, *, name: str, positive: bool = False, nonnegative: bool = False) -> float:
+    if isinstance(value, bool):
+        raise ValueError(f"{name} must be a finite number")
+    try:
+        parsed = float(value)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{name} must be a finite number") from exc
+    if not math.isfinite(parsed):
+        raise ValueError(f"{name} must be a finite number")
+    if positive and parsed <= 0.0:
+        raise ValueError(f"{name} must be finite and > 0")
+    if nonnegative and parsed < 0.0:
+        raise ValueError(f"{name} must be finite and >= 0")
+    return parsed
+
+
+def _lower_body_support_gate(
+    env: ManagerBasedRLEnv,
+    racket_command_name: str,
+    motion_command_name: str,
+    support_pre_s: float,
+    support_post_s: float,
+) -> torch.Tensor:
+    """Inclusive support gate without success-conditioned sample selection."""
+
+    if racket_command_name != "racket_target" or motion_command_name != "motion":
+        raise ValueError(
+            "lower-body support rewards require racket_target and motion command names"
+        )
+    support_pre_s = _finite_scalar(
+        support_pre_s, name="lower-body support_pre_s", nonnegative=True
+    )
+    support_post_s = _finite_scalar(
+        support_post_s, name="lower-body support_post_s", nonnegative=True
+    )
+    racket = _cmd(env, racket_command_name)
+    motion = env.command_manager.get_term(motion_command_name)
+    time_to_strike = getattr(racket, "time_to_strike", None)
+    pre_strike = getattr(racket, "pre_strike", None)
+    in_hold = getattr(motion, "in_hold", None)
+    clock = getattr(racket, "post_strike_age_and_same_attempt", None)
+    if (
+        not torch.is_tensor(time_to_strike)
+        or not torch.is_tensor(pre_strike)
+        or pre_strike.dtype != torch.bool
+        or not torch.is_tensor(in_hold)
+        or in_hold.dtype != torch.bool
+        or not callable(clock)
+    ):
+        raise RuntimeError(
+            "lower-body support rewards require live TTS/pre-strike, motion hold, and "
+            "same-attempt post-strike clock tensors"
+        )
+    age_s, same_attempt = clock()
+    expected_shape = tuple(time_to_strike.shape)
+    if (
+        time_to_strike.ndim != 1
+        or tuple(pre_strike.shape) != expected_shape
+        or tuple(in_hold.shape) != expected_shape
+        or not torch.is_tensor(age_s)
+        or tuple(age_s.shape) != expected_shape
+        or not torch.is_tensor(same_attempt)
+        or tuple(same_attempt.shape) != expected_shape
+        or same_attempt.dtype != torch.bool
+    ):
+        raise RuntimeError("lower-body support reward phase tensors must be aligned per environment")
+
+    pre_support = (
+        (~in_hold)
+        & pre_strike
+        & time_to_strike.ge(0.0)
+        & time_to_strike.le(support_pre_s)
+    )
+    post_support = same_attempt & age_s.ge(0.0) & age_s.le(support_post_s)
+    return pre_support | post_support
+
+
+def _lower_body_runtime_tensors(
+    env: ManagerBasedRLEnv,
+    motion_command_name: str,
+    *,
+    require_motion_reference: bool,
+) -> tuple[object, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor | None, list[int]]:
+    """Resolve the exact current-main A3 reference/runtime order or fail closed."""
+
+    if motion_command_name != "motion":
+        raise ValueError("lower-body rewards require motion_command_name='motion'")
+    robot = env.scene["robot"]
+    data = robot.data
+    runtime_names = tuple(
+        str(name)
+        for name in getattr(data, "joint_names", getattr(robot, "joint_names", ()))
+    )
+    if runtime_names != _A3_RUNTIME_JOINT_ORDER:
+        raise RuntimeError(
+            "lower-body rewards require the exact 31-joint A3 runtime articulation order"
+        )
+    q = getattr(data, "joint_pos", None)
+    qd = getattr(data, "joint_vel", None)
+    default_q = getattr(data, "default_joint_pos", None)
+    motion = env.command_manager.get_term(motion_command_name)
+    if getattr(motion, "robot", None) is not robot:
+        raise RuntimeError("lower-body rewards require motion and reward to reference the same robot")
+    reference = None
+    expected_width = len(_A3_RUNTIME_JOINT_ORDER)
+    if (
+        not torch.is_tensor(q)
+        or q.ndim != 2
+        or q.shape[1] != expected_width
+        or not torch.is_tensor(qd)
+        or tuple(qd.shape) != tuple(q.shape)
+        or not torch.is_tensor(default_q)
+        or tuple(default_q.shape) not in (tuple(q.shape), (1, expected_width))
+    ):
+        raise RuntimeError(
+            "lower-body rewards require aligned [env,31] runtime/default tensors"
+        )
+    if require_motion_reference:
+        reference = getattr(motion, "joint_pos", None)
+        loaded_reference = getattr(getattr(motion, "motion", None), "joint_pos", None)
+        if (
+            not torch.is_tensor(reference)
+            or tuple(reference.shape) != tuple(q.shape)
+            or not torch.is_tensor(loaded_reference)
+            or loaded_reference.ndim != 2
+            or loaded_reference.shape[1] != expected_width
+        ):
+            raise RuntimeError(
+                "lower-body pose imitation requires an aligned [env,31] current motion "
+                "tensor and a 31-column loaded motion reference"
+            )
+    leg_ids = [
+        index for index, name in enumerate(runtime_names) if name in _LOWER_BODY_LEG_JOINT_NAMES
+    ]
+    if (
+        len(leg_ids) != 12
+        or {runtime_names[index] for index in leg_ids} != _LOWER_BODY_LEG_JOINT_NAMES
+    ):
+        raise RuntimeError("lower-body rewards require exactly 12 leg joints")
+    return robot, q, qd, default_q, reference, leg_ids
+
+
+def _lower_body_pose_values(
+    env: ManagerBasedRLEnv,
+    racket_command_name: str = "racket_target",
+    motion_command_name: str = "motion",
+    std: float = 0.35,
+    support_pre_s: float = 0.30,
+    support_post_s: float = 0.40,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Return bounded 12-leg pose imitation and diagnostic raw magnitudes."""
+
+    std = _finite_scalar(std, name="lower_body_pose_imitation std", positive=True)
+    _, q, _, default_q, reference, leg_ids = _lower_body_runtime_tensors(
+        env, motion_command_name, require_motion_reference=True
+    )
+    eligible = _lower_body_support_gate(
+        env,
+        racket_command_name,
+        motion_command_name,
+        support_pre_s,
+        support_post_s,
+    )
+    delta = q[:, leg_ids] - reference[:, leg_ids]
+    error_sq_mean = torch.mean(torch.square(delta), dim=-1)
+    kernel = torch.exp(-error_sq_mean / (std * std))
+    value = torch.where(eligible, kernel, torch.zeros_like(kernel))
+    reference_motion_l1 = torch.mean(
+        torch.abs(reference[:, leg_ids] - default_q[:, leg_ids]), dim=-1
+    )
+    return value, eligible, torch.mean(torch.abs(delta), dim=-1), reference_motion_l1
+
+
+def _lower_body_pose_counter_state(
+    env: ManagerBasedRLEnv, template: torch.Tensor
+) -> dict[str, torch.Tensor]:
+    state = getattr(env, _LOWER_BODY_POSE_COUNTER_ATTR, None)
+    if state is None:
+        state = {
+            "observed_sample_count": torch.zeros((), dtype=torch.long, device=template.device),
+            "support_eligible_sample_count": torch.zeros((), dtype=torch.long, device=template.device),
+            "reward_enabled_eligible_sample_count": torch.zeros((), dtype=torch.long, device=template.device),
+            "gated_kernel_sum": torch.zeros((), dtype=template.dtype, device=template.device),
+            "gated_joint_abs_error_mean_sum": torch.zeros((), dtype=template.dtype, device=template.device),
+            "gated_reference_motion_l1_mean_sum": torch.zeros((), dtype=template.dtype, device=template.device),
+        }
+        setattr(env, _LOWER_BODY_POSE_COUNTER_ATTR, state)
+    return state
+
+
+def _record_lower_body_pose_activation(
+    env: ManagerBasedRLEnv,
+    values: torch.Tensor,
+    eligible: torch.Tensor,
+    joint_error: torch.Tensor,
+    reference_motion: torch.Tensor,
+    *,
+    reward_active: bool,
+    signature: tuple,
+) -> None:
+    token = getattr(env, "common_step_counter", None)
+    token = token if type(token) is int else None
+    state = _lower_body_pose_counter_state(env, values)
+    already = token is not None and getattr(env, _LOWER_BODY_POSE_OBSERVED_STEP_ATTR, None) == token
+    if already:
+        if getattr(env, _LOWER_BODY_POSE_SIGNATURE_ATTR, None) != signature:
+            raise RuntimeError("lower-body pose probe and reward used different parameters in one step")
+    else:
+        mask = eligible.detach()
+        state["observed_sample_count"].add_(values.numel())
+        state["support_eligible_sample_count"].add_(mask.sum(dtype=torch.long))
+        state["gated_kernel_sum"].add_(values.detach().sum())
+        state["gated_joint_abs_error_mean_sum"].add_((joint_error.detach() * mask).sum())
+        state["gated_reference_motion_l1_mean_sum"].add_((reference_motion.detach() * mask).sum())
+        if token is not None:
+            setattr(env, _LOWER_BODY_POSE_OBSERVED_STEP_ATTR, token)
+            setattr(env, _LOWER_BODY_POSE_SIGNATURE_ATTR, signature)
+    if reward_active and (
+        token is None or getattr(env, _LOWER_BODY_POSE_ACTIVE_STEP_ATTR, None) != token
+    ):
+        state["reward_enabled_eligible_sample_count"].add_(
+            eligible.detach().sum(dtype=torch.long)
+        )
+        if token is not None:
+            setattr(env, _LOWER_BODY_POSE_ACTIVE_STEP_ATTR, token)
+
+
+def lower_body_pose_imitation_probe(
+    env: ManagerBasedRLEnv,
+    racket_command_name: str = "racket_target",
+    motion_command_name: str = "motion",
+    std: float = 0.35,
+    support_pre_s: float = 0.30,
+    support_post_s: float = 0.40,
+) -> torch.Tensor:
+    values, eligible, joint_error, reference_motion = _lower_body_pose_values(
+        env, racket_command_name, motion_command_name, std, support_pre_s, support_post_s
+    )
+    _record_lower_body_pose_activation(
+        env,
+        values,
+        eligible,
+        joint_error,
+        reference_motion,
+        reward_active=False,
+        signature=(
+            racket_command_name,
+            motion_command_name,
+            float(std),
+            float(support_pre_s),
+            float(support_post_s),
+        ),
+    )
+    return torch.zeros_like(values)
+
+
+def lower_body_pose_imitation(
+    env: ManagerBasedRLEnv,
+    racket_command_name: str = "racket_target",
+    motion_command_name: str = "motion",
+    std: float = 0.35,
+    support_pre_s: float = 0.30,
+    support_post_s: float = 0.40,
+) -> torch.Tensor:
+    """Positive v4rg 12-leg pose imitation only in the same swing's support window."""
+
+    values, eligible, joint_error, reference_motion = _lower_body_pose_values(
+        env, racket_command_name, motion_command_name, std, support_pre_s, support_post_s
+    )
+    _record_lower_body_pose_activation(
+        env,
+        values,
+        eligible,
+        joint_error,
+        reference_motion,
+        reward_active=True,
+        signature=(
+            racket_command_name,
+            motion_command_name,
+            float(std),
+            float(support_pre_s),
+            float(support_post_s),
+        ),
+    )
+    return values
+
+
+def _lower_body_stability_bundle_values(
+    env: ManagerBasedRLEnv,
+    racket_command_name: str = "racket_target",
+    motion_command_name: str = "motion",
+    min_stance_width_m: float = 0.22,
+    stance_scale_m: float = 0.05,
+    leg_velocity_margin_radps: float = 1.0,
+    leg_velocity_scale_radps: float = 0.5,
+    support_pre_s: float = 0.30,
+    support_post_s: float = 0.40,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Return a bounded, reference-free physical support bundle.
+
+    This deliberately does not repeat motion-reference foot orientation, slip, base-upright, or
+    dense all-joint velocity costs.  It charges only (1) collapse/crossover below an absolute
+    physical support width and (2) a 12-leg realized-qdot tail above a free margin.
+    """
+
+    min_stance_width_m = _finite_scalar(
+        min_stance_width_m, name="lower_body_stability min_stance_width_m", positive=True
+    )
+    stance_scale_m = _finite_scalar(
+        stance_scale_m, name="lower_body_stability stance_scale_m", positive=True
+    )
+    leg_velocity_margin_radps = _finite_scalar(
+        leg_velocity_margin_radps,
+        name="lower_body_stability leg_velocity_margin_radps",
+        nonnegative=True,
+    )
+    leg_velocity_scale_radps = _finite_scalar(
+        leg_velocity_scale_radps,
+        name="lower_body_stability leg_velocity_scale_radps",
+        positive=True,
+    )
+    robot, q, qd, _, _, leg_ids = _lower_body_runtime_tensors(
+        env, motion_command_name, require_motion_reference=False
+    )
+    eligible = _lower_body_support_gate(
+        env,
+        racket_command_name,
+        motion_command_name,
+        support_pre_s,
+        support_post_s,
+    )
+
+    body_names = tuple(str(name) for name in getattr(robot, "body_names", ()))
+    if (
+        len(body_names) == 0
+        or len(set(body_names)) != len(body_names)
+        or any(name not in body_names for name in _LOWER_BODY_FOOT_BODY_NAMES)
+    ):
+        raise RuntimeError("lower-body stability requires unique left/right A3 ankle-roll bodies")
+    foot_ids = [body_names.index(name) for name in _LOWER_BODY_FOOT_BODY_NAMES]
+    body_pos_w = getattr(robot.data, "body_pos_w", None)
+    if (
+        not torch.is_tensor(body_pos_w)
+        or body_pos_w.ndim != 3
+        or body_pos_w.shape[0] != q.shape[0]
+        or body_pos_w.shape[1] != len(body_names)
+        or body_pos_w.shape[2] != 3
+    ):
+        raise RuntimeError("lower-body stability requires runtime body_pos_w shaped [env,body,3]")
+    base_quat = getattr(_cmd(env, racket_command_name), "base_quat_w", None)
+    if not torch.is_tensor(base_quat) or tuple(base_quat.shape) != (q.shape[0], 4):
+        raise RuntimeError("lower-body stability requires per-environment base quaternion wxyz")
+    quat = base_quat / torch.norm(base_quat, dim=-1, keepdim=True).clamp(min=1.0e-12)
+    w, x, y, z = quat.unbind(dim=-1)
+    sin_yaw = 2.0 * (w * z + x * y)
+    cos_yaw = 1.0 - 2.0 * (y * y + z * z)
+    left_minus_right = body_pos_w[:, foot_ids[0], :2] - body_pos_w[:, foot_ids[1], :2]
+    signed_width = -sin_yaw * left_minus_right[:, 0] + cos_yaw * left_minus_right[:, 1]
+    stance_excess = torch.relu(min_stance_width_m - signed_width) / stance_scale_m
+    stance_tail = 1.0 - torch.exp(-torch.square(stance_excess))
+
+    leg_velocity_excess = torch.relu(
+        torch.abs(qd[:, leg_ids]) - leg_velocity_margin_radps
+    ) / leg_velocity_scale_radps
+    leg_velocity_tail = torch.mean(
+        1.0 - torch.exp(-torch.square(leg_velocity_excess)), dim=-1
+    )
+    raw_bundle = (stance_tail + leg_velocity_tail) / 2.0
+    value = torch.where(eligible, raw_bundle, torch.zeros_like(raw_bundle))
+    return value, eligible, stance_tail, leg_velocity_tail, signed_width
+
+
+def _lower_body_bundle_counter_state(
+    env: ManagerBasedRLEnv, template: torch.Tensor
+) -> dict[str, torch.Tensor]:
+    state = getattr(env, _LOWER_BODY_BUNDLE_COUNTER_ATTR, None)
+    if state is None:
+        state = {
+            "observed_sample_count": torch.zeros((), dtype=torch.long, device=template.device),
+            "support_eligible_sample_count": torch.zeros((), dtype=torch.long, device=template.device),
+            "reward_enabled_eligible_sample_count": torch.zeros((), dtype=torch.long, device=template.device),
+            "narrow_or_crossed_sample_count": torch.zeros((), dtype=torch.long, device=template.device),
+            "gated_bundle_sum": torch.zeros((), dtype=template.dtype, device=template.device),
+            "gated_stance_tail_sum": torch.zeros((), dtype=template.dtype, device=template.device),
+            "gated_leg_velocity_tail_sum": torch.zeros((), dtype=template.dtype, device=template.device),
+            "gated_signed_stance_width_m_sum": torch.zeros((), dtype=template.dtype, device=template.device),
+        }
+        setattr(env, _LOWER_BODY_BUNDLE_COUNTER_ATTR, state)
+    return state
+
+
+def _record_lower_body_bundle_activation(
+    env: ManagerBasedRLEnv,
+    values: torch.Tensor,
+    eligible: torch.Tensor,
+    stance_tail: torch.Tensor,
+    velocity_tail: torch.Tensor,
+    signed_width: torch.Tensor,
+    *,
+    min_stance_width_m: float,
+    reward_active: bool,
+    signature: tuple,
+) -> None:
+    token = getattr(env, "common_step_counter", None)
+    token = token if type(token) is int else None
+    state = _lower_body_bundle_counter_state(env, values)
+    already = token is not None and getattr(env, _LOWER_BODY_BUNDLE_OBSERVED_STEP_ATTR, None) == token
+    if already:
+        if getattr(env, _LOWER_BODY_BUNDLE_SIGNATURE_ATTR, None) != signature:
+            raise RuntimeError("lower-body stability probe and reward used different parameters in one step")
+    else:
+        mask = eligible.detach()
+        state["observed_sample_count"].add_(values.numel())
+        state["support_eligible_sample_count"].add_(mask.sum(dtype=torch.long))
+        state["narrow_or_crossed_sample_count"].add_(
+            (mask & signed_width.detach().lt(min_stance_width_m)).sum(dtype=torch.long)
+        )
+        state["gated_bundle_sum"].add_(values.detach().sum())
+        state["gated_stance_tail_sum"].add_((stance_tail.detach() * mask).sum())
+        state["gated_leg_velocity_tail_sum"].add_((velocity_tail.detach() * mask).sum())
+        state["gated_signed_stance_width_m_sum"].add_((signed_width.detach() * mask).sum())
+        if token is not None:
+            setattr(env, _LOWER_BODY_BUNDLE_OBSERVED_STEP_ATTR, token)
+            setattr(env, _LOWER_BODY_BUNDLE_SIGNATURE_ATTR, signature)
+    if reward_active and (
+        token is None or getattr(env, _LOWER_BODY_BUNDLE_ACTIVE_STEP_ATTR, None) != token
+    ):
+        state["reward_enabled_eligible_sample_count"].add_(
+            eligible.detach().sum(dtype=torch.long)
+        )
+        if token is not None:
+            setattr(env, _LOWER_BODY_BUNDLE_ACTIVE_STEP_ATTR, token)
+
+
+def lower_body_stability_bundle_probe(
+    env: ManagerBasedRLEnv,
+    racket_command_name: str = "racket_target",
+    motion_command_name: str = "motion",
+    min_stance_width_m: float = 0.22,
+    stance_scale_m: float = 0.05,
+    leg_velocity_margin_radps: float = 1.0,
+    leg_velocity_scale_radps: float = 0.5,
+    support_pre_s: float = 0.30,
+    support_post_s: float = 0.40,
+) -> torch.Tensor:
+    args = (
+        racket_command_name,
+        motion_command_name,
+        min_stance_width_m,
+        stance_scale_m,
+        leg_velocity_margin_radps,
+        leg_velocity_scale_radps,
+        support_pre_s,
+        support_post_s,
+    )
+    values, eligible, stance, velocity, width = _lower_body_stability_bundle_values(
+        env, *args
+    )
+    signature = tuple(float(value) if index >= 2 else value for index, value in enumerate(args))
+    _record_lower_body_bundle_activation(
+        env,
+        values,
+        eligible,
+        stance,
+        velocity,
+        width,
+        min_stance_width_m=float(min_stance_width_m),
+        reward_active=False,
+        signature=signature,
+    )
+    return torch.zeros_like(values)
+
+
+def lower_body_stability_bundle(
+    env: ManagerBasedRLEnv,
+    racket_command_name: str = "racket_target",
+    motion_command_name: str = "motion",
+    min_stance_width_m: float = 0.22,
+    stance_scale_m: float = 0.05,
+    leg_velocity_margin_radps: float = 1.0,
+    leg_velocity_scale_radps: float = 0.5,
+    support_pre_s: float = 0.30,
+    support_post_s: float = 0.40,
+) -> torch.Tensor:
+    """Negative-weight B2 bundle: fixed support-width floor plus realized leg-qdot tail."""
+
+    args = (
+        racket_command_name,
+        motion_command_name,
+        min_stance_width_m,
+        stance_scale_m,
+        leg_velocity_margin_radps,
+        leg_velocity_scale_radps,
+        support_pre_s,
+        support_post_s,
+    )
+    values, eligible, stance, velocity, width = _lower_body_stability_bundle_values(
+        env, *args
+    )
+    signature = tuple(float(value) if index >= 2 else value for index, value in enumerate(args))
+    _record_lower_body_bundle_activation(
+        env,
+        values,
+        eligible,
+        stance,
+        velocity,
+        width,
+        min_stance_width_m=float(min_stance_width_m),
+        reward_active=True,
+        signature=signature,
+    )
+    return values
+
+
+def consume_lower_body_wave_activation_counters(
+    env: ManagerBasedRLEnv,
+) -> dict[str, torch.Tensor]:
+    """Snapshot/reset both Wave-B ledgers exactly once per PPO update."""
+
+    template = env.scene["robot"].data.joint_pos[:, 0]
+    pose = _lower_body_pose_counter_state(env, template)
+    bundle = _lower_body_bundle_counter_state(env, template)
+    snapshot = {
+        **{f"pose/{name}": value.detach().clone() for name, value in pose.items()},
+        **{f"bundle/{name}": value.detach().clone() for name, value in bundle.items()},
+    }
+    with torch.no_grad():
+        for value in (*pose.values(), *bundle.values()):
+            value.zero_()
+    return snapshot
+
+
 def racket_strike_success(
     env: ManagerBasedRLEnv, command_name: str, std_pos: float, std_vel: float, std_normal: float
 ) -> torch.Tensor:

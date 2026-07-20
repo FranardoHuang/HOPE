@@ -831,6 +831,232 @@ def _processed_qdes_slew_hinge_reward_contract(
     }
 
 
+_A3_LOWER_BODY_RUNTIME_JOINT_ORDER = (
+    "waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint",
+    "head_yaw_joint", "head_pitch_joint",
+    "left_shoulder_pitch_joint", "left_shoulder_roll_joint", "left_shoulder_yaw_joint",
+    "left_elbow_joint", "left_wrist_roll_joint", "left_wrist_pitch_joint", "left_wrist_yaw_joint",
+    "right_shoulder_pitch_joint", "right_shoulder_roll_joint", "right_shoulder_yaw_joint",
+    "right_elbow_joint", "right_wrist_roll_joint", "right_wrist_pitch_joint", "right_wrist_yaw_joint",
+    "left_hip_pitch_joint", "left_hip_roll_joint", "left_hip_yaw_joint",
+    "left_knee_joint", "left_ankle_pitch_joint", "left_ankle_roll_joint",
+    "right_hip_pitch_joint", "right_hip_roll_joint", "right_hip_yaw_joint",
+    "right_knee_joint", "right_ankle_pitch_joint", "right_ankle_roll_joint",
+)
+_A3_LOWER_BODY_LEG_JOINTS = frozenset(_A3_LOWER_BODY_RUNTIME_JOINT_ORDER[-12:])
+
+
+def _lower_body_runtime_contract_names(
+    runtime_facts: dict,
+    reference_joint_width: int | None = None,
+    *,
+    require_motion_reference: bool,
+) -> tuple[list[str], list[str]]:
+    names = runtime_facts.get("joint_names")
+    articulation = runtime_facts.get("articulation_joint_names")
+    if (
+        not isinstance(names, list)
+        or tuple(names) != _A3_LOWER_BODY_RUNTIME_JOINT_ORDER
+        or names != articulation
+    ):
+        raise RuntimeError(
+            "lower-body reward contracts require the exact 31-joint A3 runtime order"
+        )
+    if require_motion_reference and (
+        type(reference_joint_width) is not int or reference_joint_width != 31
+    ):
+        raise RuntimeError(
+            "lower-body pose imitation requires a 31-column motion reference"
+        )
+    legs = [name for name in names if name in _A3_LOWER_BODY_LEG_JOINTS]
+    if len(legs) != 12:
+        raise RuntimeError("lower-body reward contracts require the exact 12-leg joint set")
+    return names, legs
+
+
+def _lower_body_reward_number(value, *, name: str, positive=False, nonnegative=False) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise RuntimeError(f"rewards.{name} must be a finite number")
+    value = float(value)
+    if not math.isfinite(value):
+        raise RuntimeError(f"rewards.{name} must be a finite number")
+    if positive and value <= 0.0:
+        raise RuntimeError(f"rewards.{name} must be finite and > 0")
+    if nonnegative and value < 0.0:
+        raise RuntimeError(f"rewards.{name} must be finite and >= 0")
+    return value
+
+
+def _lower_body_pose_imitation_reward_contract(
+    env_cfg, runtime_facts: dict, *, reference_joint_width: int = 31
+) -> dict | None:
+    rewards = getattr(env_cfg, "rewards", None)
+    term = None if rewards is None else getattr(rewards, "lower_body_pose_imitation", None)
+    probe = None if rewards is None else getattr(
+        rewards, "lower_body_pose_imitation_probe", None
+    )
+    if term is None and probe is None:
+        return None
+    if term is None or probe is None:
+        raise RuntimeError("lower_body_pose_imitation and probe must be declared together")
+    weight = _lower_body_reward_number(
+        getattr(term, "weight", None),
+        name="lower_body_pose_imitation.weight",
+        nonnegative=True,
+    )
+    probe_weight = _lower_body_reward_number(
+        getattr(probe, "weight", None), name="lower_body_pose_imitation_probe.weight"
+    )
+    if probe_weight not in (0.0, 1.0):
+        raise RuntimeError("lower_body_pose_imitation probe weight must be 0 or 1")
+    if weight == 0.0 and probe_weight == 0.0:
+        return None
+    if probe_weight != 1.0:
+        raise RuntimeError(
+            "explicit lower_body_pose_imitation requires its weight-independent probe"
+        )
+    params = getattr(term, "params", None)
+    probe_params = getattr(probe, "params", None)
+    if not isinstance(params, dict) or params != probe_params:
+        raise RuntimeError("lower_body_pose_imitation probe params must match the reward")
+    if (
+        params.get("racket_command_name") != "racket_target"
+        or params.get("motion_command_name") != "motion"
+    ):
+        raise RuntimeError("lower_body_pose_imitation requires racket_target/motion commands")
+    std = _lower_body_reward_number(
+        params.get("std"), name="lower_body_pose_imitation.std", positive=True
+    )
+    pre = _lower_body_reward_number(
+        params.get("support_pre_s"),
+        name="lower_body_pose_imitation.support_pre_s",
+        nonnegative=True,
+    )
+    post = _lower_body_reward_number(
+        params.get("support_post_s"),
+        name="lower_body_pose_imitation.support_post_s",
+        nonnegative=True,
+    )
+    _, legs = _lower_body_runtime_contract_names(
+        runtime_facts,
+        reference_joint_width,
+        require_motion_reference=True,
+    )
+    return {
+        "schema_version": 1,
+        "enabled": weight > 0.0,
+        "probe_enabled": True,
+        "activation_ledger": "weight_independent_control_step_counters",
+        "weight": weight,
+        "std_rad": std,
+        "support_pre_s": pre,
+        "support_post_s": post,
+        "racket_command_name": "racket_target",
+        "motion_command_name": "motion",
+        "joint_count": 12,
+        "joint_names": legs,
+        "joint_order": "runtime_articulation_subsequence",
+        "reference_joint_order": "motion_command_runtime_articulation_identity",
+        "formula": "exp(-mean(square(q_leg-qref_leg))/square(std_rad))",
+        "gate": "phase_tts_pre_or_same_attempt_post_inclusive",
+        "success_conditioned": False,
+    }
+
+
+def _lower_body_stability_bundle_reward_contract(
+    env_cfg, runtime_facts: dict
+) -> dict | None:
+    rewards = getattr(env_cfg, "rewards", None)
+    term = None if rewards is None else getattr(rewards, "lower_body_stability_bundle", None)
+    probe = None if rewards is None else getattr(
+        rewards, "lower_body_stability_bundle_probe", None
+    )
+    if term is None and probe is None:
+        return None
+    if term is None or probe is None:
+        raise RuntimeError("lower_body_stability_bundle and probe must be declared together")
+    weight = _lower_body_reward_number(
+        getattr(term, "weight", None), name="lower_body_stability_bundle.weight"
+    )
+    probe_weight = _lower_body_reward_number(
+        getattr(probe, "weight", None), name="lower_body_stability_bundle_probe.weight"
+    )
+    if weight > 0.0:
+        raise RuntimeError("lower_body_stability_bundle weight must be finite and <= 0")
+    if probe_weight not in (0.0, 1.0):
+        raise RuntimeError("lower_body_stability_bundle probe weight must be 0 or 1")
+    if weight == 0.0 and probe_weight == 0.0:
+        return None
+    if probe_weight != 1.0:
+        raise RuntimeError(
+            "explicit lower_body_stability_bundle requires its weight-independent probe"
+        )
+    params = getattr(term, "params", None)
+    probe_params = getattr(probe, "params", None)
+    if not isinstance(params, dict) or params != probe_params:
+        raise RuntimeError("lower_body_stability_bundle probe params must match the reward")
+    if (
+        params.get("racket_command_name") != "racket_target"
+        or params.get("motion_command_name") != "motion"
+    ):
+        raise RuntimeError("lower_body_stability_bundle requires racket_target/motion commands")
+    numeric_specs = (
+        ("min_stance_width_m", True, False),
+        ("stance_scale_m", True, False),
+        ("leg_velocity_margin_radps", False, True),
+        ("leg_velocity_scale_radps", True, False),
+        ("support_pre_s", False, True),
+        ("support_post_s", False, True),
+    )
+    values = {
+        name: _lower_body_reward_number(
+            params.get(name),
+            name=f"lower_body_stability_bundle.{name}",
+            positive=positive,
+            nonnegative=nonnegative,
+        )
+        for name, positive, nonnegative in numeric_specs
+    }
+    _, legs = _lower_body_runtime_contract_names(
+        runtime_facts,
+        require_motion_reference=False,
+    )
+    articulation_bodies = runtime_facts.get("articulation_body_names")
+    required_foot_bodies = ["left_ankle_roll_Link", "right_ankle_roll_Link"]
+    if (
+        not isinstance(articulation_bodies, list)
+        or len(set(articulation_bodies)) != len(articulation_bodies)
+        or any(name not in articulation_bodies for name in required_foot_bodies)
+    ):
+        raise RuntimeError(
+            "lower_body_stability_bundle requires exact left/right A3 ankle-roll bodies"
+        )
+    return {
+        "schema_version": 1,
+        "enabled": weight < 0.0,
+        "probe_enabled": True,
+        "activation_ledger": "weight_independent_control_step_counters",
+        "weight": weight,
+        **values,
+        "racket_command_name": "racket_target",
+        "motion_command_name": "motion",
+        "leg_joint_count": 12,
+        "leg_joint_names": legs,
+        "foot_body_names": required_foot_bodies,
+        "joint_order": "runtime_articulation_subsequence",
+        "stance_width_frame": "base_yaw_lateral_signed_left_minus_right",
+        "components": [
+            "stance_width_lower_hinge",
+            "twelve_leg_realized_qdot_tail",
+        ],
+        "formula": "mean(bounded_stance_tail,bounded_leg_qdot_tail)",
+        "gate": "phase_tts_pre_or_same_attempt_post_inclusive",
+        "success_conditioned": False,
+        "uses_motion_reference": False,
+        "duplicates_slip_or_upright": False,
+    }
+
+
 def _build_training_hard_contract(env, actor_contract) -> dict:
     """Immutable actor/task facts that must match across a checkpoint resume.
 
@@ -858,6 +1084,32 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
     processed_qdes_slew_contract = _processed_qdes_slew_hinge_reward_contract(
         env_cfg, runtime_facts
     )
+    loaded_joint_reference = getattr(getattr(motion_cmd, "motion", None), "joint_pos", None)
+    loaded_joint_reference_shape = tuple(getattr(loaded_joint_reference, "shape", ()))
+    reference_joint_width = (
+        int(loaded_joint_reference_shape[1])
+        if len(loaded_joint_reference_shape) == 2
+        else -1
+    )
+    lower_body_pose_contract = _lower_body_pose_imitation_reward_contract(
+        env_cfg, runtime_facts, reference_joint_width=reference_joint_width
+    )
+    lower_body_bundle_contract = _lower_body_stability_bundle_reward_contract(
+        env_cfg, runtime_facts
+    )
+    if (lower_body_pose_contract is None) != (lower_body_bundle_contract is None):
+        raise RuntimeError(
+            "explicit Wave-B cells require both B1 and B2 contract blocks"
+        )
+    if (
+        lower_body_pose_contract is not None
+        and lower_body_bundle_contract is not None
+        and lower_body_pose_contract["enabled"]
+        and lower_body_bundle_contract["enabled"]
+    ):
+        raise RuntimeError(
+            "Wave-B B1 pose imitation and B2 stability bundle are mutually exclusive"
+        )
     motion_files = motion.motion_file
     if not isinstance(motion_files, (list, tuple, ListConfig)):
         motion_files = [motion_files]
@@ -1075,6 +1327,16 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
             else {
                 "processed_qdes_slew_hinge_reward": processed_qdes_slew_contract
             }
+        ),
+        **(
+            {}
+            if lower_body_pose_contract is None
+            else {"lower_body_pose_imitation_reward": lower_body_pose_contract}
+        ),
+        **(
+            {}
+            if lower_body_bundle_contract is None
+            else {"lower_body_stability_bundle_reward": lower_body_bundle_contract}
         ),
         **(
             {}
@@ -1388,6 +1650,18 @@ _REWARD_KEYS = (
     "processed_qdes_slew_hinge_weight", "processed_qdes_slew_hinge_margin",
     "processed_qdes_slew_hinge_recovery_start_s",
     "processed_qdes_slew_hinge_recovery_end_s",
+    # Wave-B mutually-exclusive lower-body diagnostics. Explicit zero-valued controls still
+    # activate their measurement probes and hard-contract identity.
+    "lower_body_pose_imitation_weight", "lower_body_pose_imitation_std",
+    "lower_body_pose_imitation_support_pre_s",
+    "lower_body_pose_imitation_support_post_s",
+    "lower_body_stability_bundle_weight",
+    "lower_body_stability_min_stance_width_m",
+    "lower_body_stability_stance_scale_m",
+    "lower_body_stability_leg_velocity_margin_radps",
+    "lower_body_stability_leg_velocity_scale_radps",
+    "lower_body_stability_support_pre_s",
+    "lower_body_stability_support_post_s",
     # R16 / V1 wrist-mimic surgery (orientation 2026-07-04; linear velocity 2026-07-08 §③).
     "free_wrist_ori_mimic", "free_wrist_vel_mimic",
     # A0/A1 non-striking-arm imitation ablation (2026-07-14).  This deliberately has one
@@ -2118,6 +2392,205 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             applied.append(
                 "rewards.processed_qdes_slew_hinge_probe="
                 f"(margin={_resolved_margin},recovery={_resolved_start}..{_resolved_end},weight=1.0)"
+            )
+
+        # Wave B: mutually-exclusive lower-body hypotheses with weight-independent probes.  B1
+        # is a positive bounded pose kernel on the exact twelve v4rg leg joints.  B2 is one
+        # reference-free negative bounded bundle (stance collapse + realized leg-qdot tail).
+        # Existing foot_orientation/upright/slip terms are deliberately untouched.
+        def _lower_body_number(raw, label, *, positive=False, nonnegative=False):
+            if isinstance(raw, bool):
+                raise _OverrideError(f"rewards.{label} must be a finite number")
+            try:
+                value = float(raw)
+            except (TypeError, ValueError) as exc:
+                raise _OverrideError(
+                    f"rewards.{label} must be a finite number"
+                ) from exc
+            if not math.isfinite(value):
+                raise _OverrideError(f"rewards.{label} must be a finite number")
+            if positive and value <= 0.0:
+                raise _OverrideError(f"rewards.{label} must be finite and > 0")
+            if nonnegative and value < 0.0:
+                raise _OverrideError(f"rewards.{label} must be finite and >= 0")
+            return value
+
+        _pose_fields = (
+            ("std", "lower_body_pose_imitation_std", True, False),
+            ("support_pre_s", "lower_body_pose_imitation_support_pre_s", False, True),
+            ("support_post_s", "lower_body_pose_imitation_support_post_s", False, True),
+        )
+        _pose_weight_raw = _get(rw, "lower_body_pose_imitation_weight")
+        _pose_requested = _pose_weight_raw is not None or any(
+            _get(rw, key) is not None for _, key, _, _ in _pose_fields
+        )
+        _bundle_fields = (
+            ("min_stance_width_m", "lower_body_stability_min_stance_width_m", True, False),
+            ("stance_scale_m", "lower_body_stability_stance_scale_m", True, False),
+            (
+                "leg_velocity_margin_radps",
+                "lower_body_stability_leg_velocity_margin_radps",
+                False,
+                True,
+            ),
+            (
+                "leg_velocity_scale_radps",
+                "lower_body_stability_leg_velocity_scale_radps",
+                True,
+                False,
+            ),
+            ("support_pre_s", "lower_body_stability_support_pre_s", False, True),
+            ("support_post_s", "lower_body_stability_support_post_s", False, True),
+        )
+        _bundle_weight_raw = _get(rw, "lower_body_stability_bundle_weight")
+        _bundle_requested = _bundle_weight_raw is not None or any(
+            _get(rw, key) is not None for _, key, _, _ in _bundle_fields
+        )
+        # Validate the paired cell envelope before mutating either reward cfg; every valid
+        # B0/B1/B2 cell binds both probes.
+        if (_pose_requested or _bundle_requested) and (
+            _pose_weight_raw is None or _bundle_weight_raw is None
+        ):
+            raise _OverrideError(
+                "Wave-B B0/B1/B2 requires both lower_body_pose_imitation_weight "
+                "and lower_body_stability_bundle_weight explicitly"
+            )
+        _pose_term = _pose_probe = None
+        _bundle_term = _bundle_probe = None
+        _pose_weight = _bundle_weight = None
+        _pose_param_values = {}
+        _bundle_param_values = {}
+        if _pose_requested:
+            _require(
+                hasattr(R, "lower_body_pose_imitation")
+                and R.lower_body_pose_imitation is not None,
+                "rewards.lower_body_pose_imitation",
+            )
+            _require(
+                hasattr(R, "lower_body_pose_imitation_probe")
+                and R.lower_body_pose_imitation_probe is not None,
+                "rewards.lower_body_pose_imitation_probe",
+            )
+            _pose_term = R.lower_body_pose_imitation
+            _pose_probe = R.lower_body_pose_imitation_probe
+            _require(
+                isinstance(_pose_term.params, dict) and isinstance(_pose_probe.params, dict),
+                "rewards.lower_body_pose_imitation.params",
+            )
+            _pose_weight = _lower_body_number(
+                _pose_weight_raw,
+                "lower_body_pose_imitation_weight",
+                nonnegative=True,
+            )
+            for _param, _key, _positive, _nonnegative in _pose_fields:
+                _raw = _get(rw, _key)
+                if _raw is None:
+                    continue
+                _require(
+                    _param in _pose_term.params,
+                    f"rewards.lower_body_pose_imitation.params['{_param}']",
+                )
+                _pose_param_values[_param] = _lower_body_number(
+                    _raw, _key, positive=_positive, nonnegative=_nonnegative
+                )
+            if (
+                _pose_term.params.get("racket_command_name") != "racket_target"
+                or _pose_term.params.get("motion_command_name") != "motion"
+            ):
+                raise _OverrideError(
+                    "rewards.lower_body_pose_imitation requires racket_target/motion commands"
+                )
+        if _bundle_requested:
+            _require(
+                hasattr(R, "lower_body_stability_bundle")
+                and R.lower_body_stability_bundle is not None,
+                "rewards.lower_body_stability_bundle",
+            )
+            _require(
+                hasattr(R, "lower_body_stability_bundle_probe")
+                and R.lower_body_stability_bundle_probe is not None,
+                "rewards.lower_body_stability_bundle_probe",
+            )
+            _bundle_term = R.lower_body_stability_bundle
+            _bundle_probe = R.lower_body_stability_bundle_probe
+            _require(
+                isinstance(_bundle_term.params, dict) and isinstance(_bundle_probe.params, dict),
+                "rewards.lower_body_stability_bundle.params",
+            )
+            _bundle_weight = _lower_body_number(
+                _bundle_weight_raw, "lower_body_stability_bundle_weight"
+            )
+            if _bundle_weight > 0.0:
+                raise _OverrideError(
+                    "rewards.lower_body_stability_bundle_weight must be finite and <= 0"
+                )
+            for _param, _key, _positive, _nonnegative in _bundle_fields:
+                _raw = _get(rw, _key)
+                if _raw is None:
+                    continue
+                _require(
+                    _param in _bundle_term.params,
+                    f"rewards.lower_body_stability_bundle.params['{_param}']",
+                )
+                _bundle_param_values[_param] = _lower_body_number(
+                    _raw, _key, positive=_positive, nonnegative=_nonnegative
+                )
+            if (
+                _bundle_term.params.get("racket_command_name") != "racket_target"
+                or _bundle_term.params.get("motion_command_name") != "motion"
+            ):
+                raise _OverrideError(
+                    "rewards.lower_body_stability_bundle requires racket_target/motion commands"
+                )
+        if (
+            _pose_weight is not None
+            and _bundle_weight is not None
+            and _pose_weight > 0.0
+            and _bundle_weight < 0.0
+        ):
+            raise _OverrideError(
+                "Wave-B B1 pose imitation and B2 stability bundle are mutually exclusive"
+            )
+        if _pose_requested:
+            _pose_term.weight = _pose_weight
+            applied.append(
+                f"rewards.lower_body_pose_imitation.weight={_pose_weight}"
+            )
+            for _param, _value in _pose_param_values.items():
+                _pose_term.params[_param] = _value
+                applied.append(
+                    f"rewards.lower_body_pose_imitation.params.{_param}={_value}"
+                )
+            _pose_probe.weight = 1.0
+            _pose_probe.params.clear()
+            _pose_probe.params.update(_pose_term.params)
+            applied.append("rewards.lower_body_pose_imitation_probe.weight=1.0")
+
+        if _bundle_requested:
+            _bundle_term.weight = _bundle_weight
+            applied.append(
+                f"rewards.lower_body_stability_bundle.weight={_bundle_weight}"
+            )
+            for _param, _value in _bundle_param_values.items():
+                _bundle_term.params[_param] = _value
+                applied.append(
+                    f"rewards.lower_body_stability_bundle.params.{_param}={_value}"
+                )
+            _bundle_probe.weight = 1.0
+            _bundle_probe.params.clear()
+            _bundle_probe.params.update(_bundle_term.params)
+            applied.append("rewards.lower_body_stability_bundle_probe.weight=1.0")
+
+        if (
+            hasattr(R, "lower_body_pose_imitation")
+            and R.lower_body_pose_imitation is not None
+            and hasattr(R, "lower_body_stability_bundle")
+            and R.lower_body_stability_bundle is not None
+            and float(R.lower_body_pose_imitation.weight) > 0.0
+            and float(R.lower_body_stability_bundle.weight) < 0.0
+        ):
+            raise _OverrideError(
+                "Wave-B B1 pose imitation and B2 stability bundle are mutually exclusive"
             )
         _foot_hold_gate = _get(rw, "foot_orientation_hold_gate")
         if _foot_hold_gate is not None:

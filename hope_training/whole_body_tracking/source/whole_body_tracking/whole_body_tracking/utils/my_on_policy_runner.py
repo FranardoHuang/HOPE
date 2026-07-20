@@ -399,6 +399,22 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                         self._scalar_tensor(counter_value),
                         step,
                     )
+            if (
+                "lower_body_pose_imitation_probe" in active_reward_terms
+                or "lower_body_stability_bundle_probe" in active_reward_terms
+            ):
+                from whole_body_tracking.tasks.tracking.mdp.hope_rewards import (
+                    consume_lower_body_wave_activation_counters,
+                )
+
+                for counter_name, counter_value in (
+                    consume_lower_body_wave_activation_counters(env).items()
+                ):
+                    self._log_scalar(
+                        f"Live/lower_body_wave/{counter_name}",
+                        self._scalar_tensor(counter_value),
+                        step,
+                    )
 
         if hasattr(env, "termination_manager"):
             tm = env.termination_manager
