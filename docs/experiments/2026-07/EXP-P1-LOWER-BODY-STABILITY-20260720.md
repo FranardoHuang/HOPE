@@ -1,6 +1,6 @@
 # EXP-P1-LOWER-BODY-STABILITY-20260720 — 静态下肢软老师与无参考稳定约束消融
 
-- 状态：`preregistered`
+- 状态：`superseded`（2026-07-20：本六格队列被 [24 格平衡×时序矩阵](EXP-P1-BALANCE-TEMPORAL-MATRIX-20260720.md) 取代；B1/B2 机制以 S3/S2 档原样并入该矩阵，本记录只作机制与源码出处，不再单独发射）
 - 运行态：`E1 source/queue only；NO-LAUNCH`。六格完整场景启动探针尚未产生受理 receipt；六条科学
   长训在六份 exact probe receipt 全部通过前保持锁定。
 - 阶段/轴：Phase 1 / 下肢稳定学习

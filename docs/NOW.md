@@ -855,8 +855,16 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
   `main` 选择性重做，并先过 exact 动作、MuJoCo oracle 与冻结行为卷；不得整体 merge 旧分支。
 - **[4｜P0] 原生 MuJoCo 训练候选。** 责任人 franco；执行者 Codex；下一证据：修正四个源码缺口
   后复核，再测单环境核心、并行吞吐和一次限预算 PPO 更新。[实验](experiments/2026-07/EXP-MUJOCO-NATIVE-TRAINING.md)
-- **[11｜P1] 稳定机制 Wave A/B。** 责任人 franco；执行者 Codex；执行分支
-  `Franco_codex/balance-ablation-round-20260720`。Wave A 只比较同父本
+- **[11｜P0] 平衡×时序 24 格广度矩阵（吸收 Wave A/B）。** 责任人 franco；执行者 Claude；执行分支
+  `Franco_codex/balance-temporal-matrix-20260720`。人话：把"动作平滑怎么给"（N 无平滑 / C 现役全身
+  raw action-rate / H 恢复期腿腰执行目标铰链）和"稳定机制给哪种"（S0 无 / S1 挥拍后安顿债务包 /
+  S2 无参考支撑包 / S3 下肢软模仿）在 W、V 两个 `model_6700` 诊断父本上交叉成 24 格，单 seed 3、
+  每格续训 10001 updates，两 pod 六卡每卡 4 条。Wave A probe10 科学位与 Wave B 六格队列由本矩阵
+  取代（superseded），probe9 六份 receipt 只作 runtime mechanics 证据；父本谱系 mismatch 故后代
+  formal-exact ineligible，胜者机制须另在 exact-lineage（qdot `model_1000` 族）重跑正名。机器真源：
+  [矩阵实验](experiments/2026-07/EXP-P1-BALANCE-TEMPORAL-MATRIX-20260720.md)、
+  [队列配置](../configs/phase1_balance_temporal_matrix_20260720.yaml)、
+  [操作页](operations/run_phase1_balance_temporal_matrix.md)。以下为并入的 Wave A/B 历史：Wave A 只比较同父本
   `phase1_balance_action_slew_20260720` 队列的
   W/V 的原 dense action-rate、无 action-rate 与腿/腰 processed-qdes slew hinge 六格，先过短合同 probe，
   再按 `+200/+500/+1000` 看 fall、completion、return 与姿态/目标突变尾部。所有子项因显式新 Reward

@@ -3,6 +3,7 @@ from __future__ import annotations
 import copy
 import importlib.util
 from pathlib import Path
+import re
 import shlex
 import sys
 
@@ -378,8 +379,22 @@ def test_all_three_mechanism_weight_keys_explicit_in_every_level():
 # ---------------------------------------------------------------- commit gate
 
 
-def test_placeholder_commit_accepted_for_plan_and_checklist():
+def _placeholder(tmp_path):
+    """In-memory variant of the checked-in queue with the commit reset to the placeholder."""
+
+    value = _raw()
+    value["source"]["commit"] = "PENDING_EXACT_COMMIT"
+    return _write_yaml(tmp_path, value)
+
+
+def test_checked_in_commit_is_exact_40_hex():
     queue = Q.load_queue(QUEUE)
+    commit = queue["source"]["commit"]
+    assert re.fullmatch(r"[0-9a-f]{40}", commit), commit
+
+
+def test_placeholder_commit_accepted_for_plan_and_checklist(tmp_path):
+    queue = Q.load_queue(_placeholder(tmp_path))
     assert queue["source"]["commit"] == "PENDING_EXACT_COMMIT"
     plan = Q.cmd_plan(queue)
     assert "PENDING_EXACT_COMMIT" in plan
@@ -387,8 +402,8 @@ def test_placeholder_commit_accepted_for_plan_and_checklist():
     assert "PENDING_EXACT_COMMIT" in checklist
 
 
-def test_placeholder_commit_refuses_render():
-    queue = Q.load_queue(QUEUE)
+def test_placeholder_commit_refuses_render(tmp_path):
+    queue = Q.load_queue(_placeholder(tmp_path))
     job = queue["jobs"][0]
     with pytest.raises(Q.QueueError, match="placeholder"):
         Q.render_command(queue, job, "probe")
@@ -396,8 +411,9 @@ def test_placeholder_commit_refuses_render():
         Q.render_command(queue, job, "science")
 
 
-def test_placeholder_commit_refuses_render_via_cli():
-    result = Q.main(["--queue", str(QUEUE), "--render-stage", "probe", "--job", "all"])
+def test_placeholder_commit_refuses_render_via_cli(tmp_path):
+    path = _placeholder(tmp_path)
+    result = Q.main(["--queue", str(path), "--render-stage", "probe", "--job", "all"])
     assert result == 2
 
 
@@ -649,8 +665,8 @@ def test_checklist_contains_parent_sha_verification_and_stagger():
     assert "180 s" in checklist
 
 
-def test_checklist_flags_placeholder_commit_as_blocking():
-    checklist = Q.cmd_checklist(Q.load_queue(QUEUE))
+def test_checklist_flags_placeholder_commit_as_blocking(tmp_path):
+    checklist = Q.cmd_checklist(Q.load_queue(_placeholder(tmp_path)))
     assert "[阻塞]" in checklist
     assert "PENDING_EXACT_COMMIT" in checklist
 

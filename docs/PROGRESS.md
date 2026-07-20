@@ -13,6 +13,14 @@
 
 ## 2026-07-20
 
+- 预注册并实现 24 格平衡×时序广度矩阵 {W,V}×{N,C,H}×{S0,S1,S2,S3}：新增挥拍后安顿债务包
+  `post_swing_settle_debt`（Jiayi V13 思想在 main 重做，77 单测）、24 格 lean 队列渲染器（63 单测，
+  修正 v8/v9 的 180 s stale_timeout 死因）、动作语义唯一真源 `motion_role_catalog.json` + 校验器
+  （30 单测）、首个真 `mj_step` 动作动力学重放 `motion_dynamic_replay.py`（22 单测）。Wave A 科学位与
+  Wave B 六格队列标记 superseded。详见
+  [矩阵实验](experiments/2026-07/EXP-P1-BALANCE-TEMPORAL-MATRIX-20260720.md)与
+  [组合语义合同](interfaces/stroke_footwork_composition.md)。
+
 - Wave A v8 的第一条科学长训只发 W-N（Pod1 GPU0）：current-main 命令制品 SHA-256
   `be346f94...4b42a`，`04:45:02Z–04:48:25Z` 停在 `sim.reset`，无首个 iteration、Reward 或
   checkpoint；locked launcher rc=`125`。外层 rc=`121` 来自 train stage 错要 probe-only child evidence，

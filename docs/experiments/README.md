@@ -40,7 +40,8 @@ runtime/feature 细节，写进实验正文或“决定”列。全局 P0/P1 只
 
 | ID | 问题 | 人类负责人 | 执行者 | 状态 | 证据 | 决定 |
 | --- | --- | --- | --- | --- | --- | --- |
-| [EXP-P1-LOWER-BODY-STABILITY-20260720](2026-07/EXP-P1-LOWER-BODY-STABILITY-20260720.md) | 静态下肢软模仿还是无参考支撑/腿速约束更能改善稳定且不伤击球？ | Franco | Codex | preregistered | E1 | W/V×Wave-B B0/B1/B2 六格 source/queue 已冻结；probe 未运行，长训 NO-LAUNCH；M0 不进入本轮 |
+| [EXP-P1-BALANCE-TEMPORAL-MATRIX-20260720](2026-07/EXP-P1-BALANCE-TEMPORAL-MATRIX-20260720.md) | 时序平滑（N/C/H）与稳定机制（S0 对照、S1 挥拍后安顿债务、S2 支撑包、S3 下肢软模仿）哪个组合能在高摔倒 parent 上降摔且不伤击球？ | Franco | Claude | preregistered | E1 | {W,V}×{N,C,H}×{S0..S3} 24 格单 seed 3 广度矩阵；两 pod 各 3 卡每卡 4 条；取代 Wave A 科学位与 Wave B 六格 |
+| [EXP-P1-LOWER-BODY-STABILITY-20260720](2026-07/EXP-P1-LOWER-BODY-STABILITY-20260720.md) | 静态下肢软模仿还是无参考支撑/腿速约束更能改善稳定且不伤击球？ | Franco | Codex | superseded | E1 | B1/B2 机制以 S3/S2 档并入 24 格矩阵（EXP-P1-BALANCE-TEMPORAL-MATRIX）；六格队列不再单独发射 |
 | [EXP-MOTION-READY-TO-STRIKE-0P5](2026-07/EXP-MOTION-READY-TO-STRIKE-0P5.md) | 能否从动作第0帧零速准备态直接接入保真触球窗，得到真正可行的0.5秒动作？ | Franco | Codex | ready/source-only | E1 source | host候选生成器可用但训练授权关闭；必须过production FK、TOPP≤0.5、L0/L1/桌网/动力学与同卷行为 |
 | [EXP-P1-TASK-REVISION-CUTOVER](2026-07/EXP-P1-TASK-REVISION-CUTOVER.md) | 同一颗球能否在挥拍中实时修订 target/TTS，同时保持 exactly-once、宽准备时间、可达加速和可淘汰量尺？ | Franco | Codex | completed | E2 runtime | A6 机制门通过；22 格均已收口，19 格到终档、3 格为首迭代前基础设施拒绝而非科学负例；旧 ready/balance 分母为零，未产生行为胜者 |
 | [EXP-P1-TIMING-EXAM-0P5](2026-07/EXP-P1-TIMING-EXAM-0P5.md) | 同一不可变双侧题表能否验证策略在仅 0.5 秒准备时间内真实完成击球？ | Franco | Codex | paper-ready/unknown | E2 artifact | 两 Pod 已物化同一 K100 paper；尚无 checkpoint 行为分数、TOPP 绑定卷或 vendor MuJoCo 结果 |

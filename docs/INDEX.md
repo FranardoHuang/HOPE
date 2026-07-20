@@ -61,7 +61,8 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | ID | 简短状态 |
 | --- | --- |
 | [`EXP-P1-HALF-SECOND-SPRINT`](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md) | 已结束：U/V/W/X/Y 到 `+1000`，W/Y 为诊断候选；真实 plan/export 已通过结构与推理，但 exact-lineage=`0` 阻断 production/vendor |
-| [`EXP-P1-BALANCE-ACTION-SLEW-20260720`](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md) | v8 science attempt1=`infrastructure-only / non-science`：W-N 在 `sim.reset` 收口，余五格未发；fresh v9/probe10 已预注册、未发射，仍 inconclusive / not adopted。不得绕过 `T0→T1→T2`；Wave B M0 moving teacher 继续拒绝 |
+| [`EXP-P1-BALANCE-TEMPORAL-MATRIX-20260720`](experiments/2026-07/EXP-P1-BALANCE-TEMPORAL-MATRIX-20260720.md) | `preregistered / E1`：{W,V}×{N,C,H}×{S0,S1,S2,S3} 24 格单 seed 广度矩阵（时序平滑 × 稳定机制），取代 Wave A probe10 科学位与 Wave B 六格队列；父本为诊断谱系 `model_6700`，续训 10001 updates |
+| [`EXP-P1-BALANCE-ACTION-SLEW-20260720`](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md) | v8 science attempt1=`infrastructure-only / non-science`：W-N 在 `sim.reset` 收口，余五格未发；科学位已被 24 格矩阵取代（superseded）；probe9 收据只作 mechanics 证据。不得绕过 `T0→T1→T2`；Wave B M0 moving teacher 继续拒绝 |
 | [`EXP-P1-TASK-REVISION-CUTOVER`](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md) | 旧 rolling 池已精确停止；同一物理球的原子 target/TTS revision、宽准备时间、相位 governor、0.5 秒卷与整数淘汰量尺处于 source 红队，full-scene/行为尚未通过 |
 | [`EXP-P1-FACE-PLANT-SCALEOUT`](experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md) | 16 条 fresh 广度臂已分两波全部精确停止并保留证据；旧 face×plant 矩阵不能选 baseline |
 | [`EXP-P1-FRESH-SZ-STABILITY`](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md) | 实验 completed/rejected；2k 与 4k 四 seed 稳定性都失败，seed4 持续弱；不晋级 baseline |
@@ -79,7 +80,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | [`EXP-RECOVERY-TUPLE-ABC`](experiments/2026-07/EXP-RECOVERY-TUPLE-ABC.md) | A/B/C 旧结构合同已验证；T0/T1/T2 与新 reward 次序仅完成文档设计，machine prereg 待同步 |
 | [`EXP-V9-YIKANG-CROSS-LEARNING-20260715`](experiments/2026-07/EXP-V9-YIKANG-CROSS-LEARNING-20260715.md) | 只读审计完成：保留定向恢复、vector settle、动作首帧准备态和随机长等待为候选；旧 `7/7` 无物理触球/落台，且固定正手区不能证明球路泛化 |
 | [`EXP-P1-LATERAL-BALANCE-PERTURBATION`](experiments/2026-07/EXP-P1-LATERAL-BALANCE-PERTURBATION.md) | E1 source gate：scheduler/显式 COM adapter/default-off trainer 与 hard contract 已接，`173 passed`；full-scene/solver-response/throughput/held-out paper pending，禁止 launch |
-| [`EXP-P1-LOWER-BODY-STABILITY-20260720`](experiments/2026-07/EXP-P1-LOWER-BODY-STABILITY-20260720.md) | `preregistered / E1`：W/V×Wave-B B0/B1/B2 六格 source/queue 已冻结；六份 full-scene probe receipt 未产生，long 保持 NO-LAUNCH；M0 不进入本轮 |
+| [`EXP-P1-LOWER-BODY-STABILITY-20260720`](experiments/2026-07/EXP-P1-LOWER-BODY-STABILITY-20260720.md) | `superseded`：B1/B2 机制以 S3/S2 档并入 24 格矩阵；本六格队列不再单独发射；M0 不进入本轮 |
 | [`EXP-MOTION-SPATIAL-RETARGET`](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md) | B 主选的 schema-2/FK 一次性 consume 已通过并解锁 L0；C 保持未消费后备，安全/动力学/RL 仍阻断 |
 | [`EXP-GATE3-CURRENT179-D0`](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md) | 实验 blocked；`Gate3-D0` 严格模型 preflight 通过，当前行为尚未运行 |
 | [`EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD`](experiments/2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md) | 实验 completed；exact 源码通过 portable Release 与 latest-main 回归，runtime gates 保持 open |

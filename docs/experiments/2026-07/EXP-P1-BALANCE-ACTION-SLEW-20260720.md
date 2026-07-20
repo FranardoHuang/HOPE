@@ -1,6 +1,6 @@
 # EXP-P1-BALANCE-ACTION-SLEW-20260720 — 腿腰恢复期执行目标突变是否比全身 raw-action 平滑更适合乒乓
 
-- 状态：`preregistered`
+- 状态：`superseded`（2026-07-20：fresh v9/probe10 科学长训位被 [24 格平衡×时序矩阵](EXP-P1-BALANCE-TEMPORAL-MATRIX-20260720.md) 的 {N,C,H}×S0 六格取代，永久不再单独发射；probe9/v8 六份 receipt（set SHA `cc9ff591…d9c8`）作为 runtime mechanics 证据被该矩阵引用。本记录保留 C/N/H 机制定义与全部 probe 历史）
 - 运行态：[`W/V × C/N/H`](../../DEFINITIONS.md#balance-action-slew-matrix) 六格中，`probe2 W-C false reject；probe3 W-C/W-N/V-C verifier contract rejected；probe4 W-C Hydra compose rejected；probe5 five receipts passed / W-H pre-trainer identity reject；probe6 W-C transaction-wrapper pre-trainer reject；probe7 W-C/V-C/V-N receipts passed / W-N scene-boot watchdog teardown / W-H,V-H not launched；probe8 W-N sim.reset SIGABRT / other five not launched；probe9 6/6 completed；v8 scientific W-N sim.reset stale / other five not launched；fresh v9/probe10 preregistered / not launched`
 - 阶段/轴：Phase 1 / 单拍后的平衡恢复与动作平滑
 - 集成小目标：降低高回台候选的摔倒与腿腰突变，同时不压低稳定候选的击球完成和回台
