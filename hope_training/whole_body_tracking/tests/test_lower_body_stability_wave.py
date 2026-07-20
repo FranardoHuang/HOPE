@@ -168,10 +168,12 @@ def test_b2_uses_the_same_inclusive_pre_and_reset_aware_post_boundaries():
 def test_wave_mechanisms_fail_closed_on_joint_and_body_contract_drift(mutation):
     env, robot, motion, _, _, _ = _wave_env(2)
     if mutation == "runtime_order":
-        robot.data.joint_names[0], robot.data.joint_names[1] = (
-            robot.data.joint_names[1],
-            robot.data.joint_names[0],
-        )
+        # A permutation of the same 31 names is legal (live articulation is
+        # breadth-first); real drift is a wrong or duplicated name.
+        robot.data.joint_names[0] = "not_a_joint"
+        with pytest.raises(RuntimeError, match="exact 31-joint"):
+            hope_rewards_mod.lower_body_pose_imitation(env)
+        robot.data.joint_names[0] = robot.data.joint_names[1]
         with pytest.raises(RuntimeError, match="exact 31-joint"):
             hope_rewards_mod.lower_body_pose_imitation(env)
     elif mutation == "reference_width":
@@ -476,3 +478,86 @@ def test_runner_consumes_wave_ledgers_when_either_probe_is_active():
     assert '"lower_body_pose_imitation_probe" in active_reward_terms' in source
     assert '"lower_body_stability_bundle_probe" in active_reward_terms' in source
     assert "consume_lower_body_wave_activation_counters" in source
+
+
+# ---------------------------------------------------------------------------
+# Regression: the LIVE Isaac articulation enumerates joints breadth-first
+# (left_hip_pitch, right_hip_pitch, waist_yaw, ...), NOT in the deploy-runtime
+# order.  The first full-scene probe on 2026-07-20 fail-closed on a hardcoded
+# full-order equality; these tests pin the by-name selection fix.
+_A3_LIVE_BFS_ARTICULATION_ORDER = [
+    "left_hip_pitch_joint", "right_hip_pitch_joint", "waist_yaw_joint",
+    "left_hip_roll_joint", "right_hip_roll_joint", "waist_roll_joint",
+    "left_hip_yaw_joint", "right_hip_yaw_joint", "waist_pitch_joint",
+    "left_knee_joint", "right_knee_joint", "head_yaw_joint",
+    "left_shoulder_pitch_joint", "right_shoulder_pitch_joint",
+    "left_ankle_pitch_joint", "right_ankle_pitch_joint", "head_pitch_joint",
+    "left_shoulder_roll_joint", "right_shoulder_roll_joint",
+    "left_ankle_roll_joint", "right_ankle_roll_joint",
+    "left_shoulder_yaw_joint", "right_shoulder_yaw_joint",
+    "left_elbow_joint", "right_elbow_joint",
+    "left_wrist_roll_joint", "right_wrist_roll_joint",
+    "left_wrist_pitch_joint", "right_wrist_pitch_joint",
+    "left_wrist_yaw_joint", "right_wrist_yaw_joint",
+]
+
+
+def _bfs_env(n=2):
+    env, robot, motion, racket, age, same = _wave_env(n)
+    robot.joint_names = list(_A3_LIVE_BFS_ARTICULATION_ORDER)
+    robot.data.joint_names = list(_A3_LIVE_BFS_ARTICULATION_ORDER)
+    return env, robot, motion, racket, age, same
+
+
+def test_live_bfs_articulation_order_is_accepted_by_reward_runtime():
+    assert sorted(_A3_LIVE_BFS_ARTICULATION_ORDER) == sorted(JOINTS)
+    env, robot, motion, racket, age, same = _bfs_env(2)
+    same[:] = True
+    age[:] = 0.1
+    racket.pre_strike[:] = False
+    bundle = hope_rewards_mod.lower_body_stability_bundle(env)
+    pose = hope_rewards_mod.lower_body_pose_imitation(env)
+    assert torch.isfinite(bundle).all()
+    assert torch.isfinite(pose).all()
+
+
+def test_live_bfs_order_selects_the_same_12_leg_joints_by_name():
+    env, robot, motion, racket, age, same = _bfs_env(2)
+    _, _, _, _, _, leg_ids = hope_rewards_mod._lower_body_runtime_tensors(
+        env, "motion", require_motion_reference=False
+    )
+    names = [_A3_LIVE_BFS_ARTICULATION_ORDER[i] for i in leg_ids]
+    assert set(names) == set(hope_rewards_mod._LOWER_BODY_LEG_JOINT_NAMES)
+    assert len(leg_ids) == 12
+
+
+def test_live_bfs_order_accepted_by_train_contract_names():
+    names, legs = train_mod._lower_body_runtime_contract_names(
+        {
+            "joint_names": list(_A3_LIVE_BFS_ARTICULATION_ORDER),
+            "articulation_joint_names": list(_A3_LIVE_BFS_ARTICULATION_ORDER),
+        },
+        31,
+        require_motion_reference=True,
+    )
+    assert len(legs) == 12
+    assert names == list(_A3_LIVE_BFS_ARTICULATION_ORDER)
+
+
+def test_scrambled_or_wrong_name_set_still_rejected_by_train_contract_names():
+    wrong = list(_A3_LIVE_BFS_ARTICULATION_ORDER)
+    wrong[0] = "not_a_joint"
+    with pytest.raises(RuntimeError, match="runtime order"):
+        train_mod._lower_body_runtime_contract_names(
+            {"joint_names": wrong, "articulation_joint_names": wrong},
+            31,
+            require_motion_reference=False,
+        )
+    mismatched = {
+        "joint_names": list(_A3_LIVE_BFS_ARTICULATION_ORDER),
+        "articulation_joint_names": list(reversed(_A3_LIVE_BFS_ARTICULATION_ORDER)),
+    }
+    with pytest.raises(RuntimeError, match="runtime order"):
+        train_mod._lower_body_runtime_contract_names(
+            mismatched, 31, require_motion_reference=False
+        )

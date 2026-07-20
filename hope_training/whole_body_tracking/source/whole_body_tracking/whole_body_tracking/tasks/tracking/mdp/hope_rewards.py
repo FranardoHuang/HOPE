@@ -1298,7 +1298,14 @@ def _lower_body_runtime_tensors(
         str(name)
         for name in getattr(data, "joint_names", getattr(robot, "joint_names", ()))
     )
-    if runtime_names != _A3_RUNTIME_JOINT_ORDER:
+    # The live Isaac articulation enumerates joints breadth-first, not in the
+    # deploy-runtime order; require the exact A3 name set (31, unique) and select
+    # leg indices by name below, matching processed_qdes_slew_hinge's discipline.
+    if (
+        len(runtime_names) != len(_A3_RUNTIME_JOINT_ORDER)
+        or len(set(runtime_names)) != len(runtime_names)
+        or set(runtime_names) != set(_A3_RUNTIME_JOINT_ORDER)
+    ):
         raise RuntimeError(
             "lower-body rewards require the exact 31-joint A3 runtime articulation order"
         )

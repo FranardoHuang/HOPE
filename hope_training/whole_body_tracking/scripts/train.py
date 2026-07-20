@@ -854,9 +854,16 @@ def _lower_body_runtime_contract_names(
 ) -> tuple[list[str], list[str]]:
     names = runtime_facts.get("joint_names")
     articulation = runtime_facts.get("articulation_joint_names")
+    # The live Isaac articulation enumerates joints breadth-first (left_hip_pitch,
+    # right_hip_pitch, waist_yaw, ...), not in the deploy-runtime order, so this
+    # contract requires identity with the articulation and the exact A3 name set,
+    # and selects target joints by name — the same discipline the proven
+    # processed_qdes_slew_hinge contract uses.
     if (
         not isinstance(names, list)
-        or tuple(names) != _A3_LOWER_BODY_RUNTIME_JOINT_ORDER
+        or len(names) != len(_A3_LOWER_BODY_RUNTIME_JOINT_ORDER)
+        or len(set(names)) != len(names)
+        or set(names) != set(_A3_LOWER_BODY_RUNTIME_JOINT_ORDER)
         or names != articulation
     ):
         raise RuntimeError(

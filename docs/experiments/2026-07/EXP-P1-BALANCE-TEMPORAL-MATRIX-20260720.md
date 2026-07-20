@@ -287,3 +287,14 @@ watchdog 仍只对已绑定的 exact PGID 发信号；超时放宽不改变 fail
 从零到发射的操作步骤、错峰纪律、监控与收口清单见
 [run_phase1_balance_temporal_matrix](../../operations/run_phase1_balance_temporal_matrix.md)。
 本记录当前没有任何 SSH、claim、checkpoint 或行为结果；judge、第二 seed、部署与真机均未授权。
+
+## 2026-07-20 g1 探针失败与修复（发射前）
+
+第一格 probe `w_n_s0`（Pod1 GPU0，原 root `/workspace/codexschema/phase1_balance_temporal_matrix_20260720`）在
+build hard contract 阶段 fail-closed：`lower-body reward contracts require the exact 31-joint A3 runtime order`。
+根因：Wave B 合同/reward 把 31 关节的**部署顺序整条硬编码**为相等条件，而真实 Isaac articulation 是
+广度优先顺序（`left_hip_pitch, right_hip_pitch, waist_yaw, …`，以 W 父本 hard contract 为证）。修复：改为
+与已过 probe9 真机验证的 `processed_qdes_slew_hinge` 同款纪律——只要求 31 唯一名字集合与 articulation
+一致，目标关节**按名字**选取；同步修正把"换序必须失败"当作合同的旧单测，并新增真实 BFS 顺序回归测试。
+原 root 连同该失败 probe 按不可覆盖惯例封存，只作历史；全部 24 格转到新 root
+`/workspace/codexschema/phase1_balance_temporal_matrix_20260720b`，source.commit 同步更新。该失败不是任何机制的负例。
