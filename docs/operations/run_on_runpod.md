@@ -519,7 +519,12 @@ signal。详细科学量尺见 [实验记录](../experiments/2026-07/EXP-P1-BALA
 
 ## Launch Rules (hard-won 2026-07-03 — read before starting ANY job over ssh)
 
-1. **One Kit boot at a time, pod-wide.** Parallel Isaac boots deadlock each other (worst with cold
+1. **One Kit boot at a time, pod-wide.** (2026-07-20 修复：`kit_boot_lock.sh` 旧版把持锁的
+   fd 9 泄漏给长跑训练子进程——训练跑多久锁就被占多久，同 pod 后续所有发射永久阻塞在 flock 上；
+   探针类短任务退出快所以从未暴露。现版本以 `9>&-` 启动子进程，锁只在 boot 阶段持有。两 pod 均已
+   打补丁，原件备份为 `kit_boot_lock.sh.bak_20260720`。同日第二个教训：广度波 4 条/卡时，发射预检
+   要求"该卡零 compute 进程"会自相矛盾——检查应为"同卡已有进程 < 4"。）
+   原始规则： Parallel Isaac boots deadlock each other (worst with cold
    caches right after a restart: five jobs sat 20+ min at 0 progress). Wrap every training/play
    launch in the global boot lock:
    ```bash

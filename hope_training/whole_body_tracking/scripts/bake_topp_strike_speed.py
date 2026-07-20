@@ -199,6 +199,17 @@ def solve_window_rate(data: dict, T: int, c: int, fps: float, target_mps: float,
     if f_lo > 0:
         return None, 0, "target strike speed below the reachable minimum — bad ratio?"
     lo, hi = rho_lo, rho_hi
+    # 先试解析种子 ρ=target/v0 对应的名义速率(≈r):r=1 时 proxy 恰=v0 → 原样返回 1.0,
+    # 保证恒等 bake 逐字节不变;其余情况种子只是把括号收紧一半。
+    seed = float(np.clip(target_mps / max(_proxy_clean_speed(data, c, 1.0, fps), 1e-12),
+                         rho_lo, rho_hi))
+    f_seed = _proxy_clean_speed(data, c, seed, fps) - target_mps
+    if abs(f_seed) <= SOLVER_REL_TOL * target_mps:
+        return seed, 1, ""
+    if f_seed > 0:
+        hi = seed
+    else:
+        lo = seed
     for it in range(1, SOLVER_MAX_ITERS + 1):
         mid = 0.5 * (lo + hi)
         f_mid = _proxy_clean_speed(data, c, mid, fps) - target_mps
@@ -378,7 +389,7 @@ def bake(data: dict, phase: float, ratio: float, vlim: np.ndarray, acc_env: np.n
     base.error_frac = float(error)
     base.rho = float(rho)
     base.warp = warp
-    base.out = out if base.feasible else out   # 判卷证据保留;CLI 只在可行时落盘
+    base.out = out                # 判卷证据保留;CLI 只在可行时落盘
     base.kin = kin
     base.contact = dict(frame=int(c), phase=float(c) / (T - 1),
                         registered_phase=float(phase), row_bitwise=True,

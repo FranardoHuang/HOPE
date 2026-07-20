@@ -73,7 +73,11 @@ SIGNED STROKE-SCALE(轴 C,2026-07-20)
   (L_hi < L_target)不触发,二分逐轮 hi_a=A 收敛到 A≈0,**静默输出一张几乎恒等的片**;
   且 joint_headroom 只按 +w 一侧算限位余量,连符号翻转后的余量都算错。现在:缩短时方向整体
   取 -w(headroom 按元素符号自动换到正确一侧),幅度解算先粗扫网格找 L(A) 穿越括号(容忍
-  最深帧 argmax 跳变/过冲导致的非单调)再二分,两个方向都 fail-loud。
+  过冲导致的非单调)再二分,两个方向都 fail-loud。缩短的**剂量口径 = 固定段(峰帧→触球)
+  弧长比**:引拍被压平时账本口径(argmax 最深帧)身份不稳定,L(A) 向下跳变,目标落进缺口
+  时二分收敛到跳变边沿、剂量失控(真实 v4rg 实测过要 0.65 出 1.19 的事故形态);固定段
+  连续无此病,argmax 账本口径照旧另记进 manifest(ratio_ledger_argmax)。加深时 argmax
+  稳定,两口径逐位重合,老行为不变。
 
 USAGE (pod, mjeval venv: numpy + mujoco)
     python hope_training/whole_body_tracking/scripts/extend_stroke.py \
@@ -223,12 +227,20 @@ def bump_profile(T: int, s0: int, d: int, s1: int) -> np.ndarray:
     return P
 
 
+def segment_L(blade: np.ndarray, d: int, c: int) -> float:
+    """固定段 d→c 的逐帧位移弧长和 [m]。
+
+    缩短剂量的度量段:峰帧钉死 ⇒ 对 argmax 跳变免疫,L(A) 连续(账本口径在引拍被压平时
+    最深帧身份不稳定,L 会向下跳,二分会收敛到跳变边沿 —— 真实 v4rg 实测过 0.65 档要
+    1.19 的事故形态)。"""
+    return float(np.sum(np.linalg.norm(np.diff(blade[d : c + 1], axis=0), axis=1)))
+
+
 def deep_frame_and_L(blade: np.ndarray, c: int) -> tuple[int, float]:
     """账本口径: d = 触球前离触球点欧氏最远帧;L_deep = d→c 的逐帧位移弧长和."""
     dist = np.linalg.norm(blade[: c + 1] - blade[c], axis=1)
     d = int(np.argmax(dist))
-    L = float(np.sum(np.linalg.norm(np.diff(blade[d : c + 1], axis=0), axis=1)))
-    return d, L
+    return d, segment_L(blade, d, c)
 
 
 def a_min_of(v_star: float, L: float) -> float:
@@ -326,17 +338,24 @@ def joint_headroom(q: np.ndarray, cols: np.ndarray, w: np.ndarray, P: np.ndarray
 
 def solve_amplitude(q: np.ndarray, plan: MorphPlan, blade_fn, c: int,
                     L_target: float, A_max: float, tol: float = 1e-4,
-                    iters: int = 60, grid_pts: int = 33) -> tuple[float, float, int]:
-    """Solve A ∈ [0, A_max] so L_deep(morphed) == L_target — SIGNED, fail-loud.
+                    iters: int = 60, grid_pts: int = 33,
+                    fixed_d: int | None = None) -> tuple[float, float, int]:
+    """Solve A ∈ [0, A_max] so L(morphed) == L_target — SIGNED, fail-loud.
 
-    加深(L_target ≥ L(0),方向 w 沿加深梯度):L(A) 单调升,老式二分,报文原样保留。
-    缩短(L_target < L(0),morph() 已把方向整体翻成 -w):L(A) 在 0 附近下降,但最深帧
-    argmax 可能跳变、拍面可能"过冲"穿过触球位姿再变远,L(A) 在整个 [0, A_max] 上不保证
-    单调 —— 先粗扫网格找**第一段**穿越 L_target 的括号,再在括号内二分。两个方向的
-    "方向反号"与"目标不可达"都 SystemExit(历史缺陷 = 负目标静默收敛到 A≈0,见模块 docstring)。
+    加深(L_target ≥ L(0),方向 w 沿加深梯度):L = 账本口径(argmax 最深帧→触球),
+    L(A) 单调升,老式二分,报文原样保留。
+    缩短(L_target < L(0),morph() 已把方向整体翻成 -w,并传 fixed_d = 峰帧):
+    L = **固定段** fixed_d→c 弧长(segment_L)。不用账本口径求解,因为引拍压平时 argmax
+    身份不稳定 ⇒ L(A) 向下跳变,目标落进缺口时二分收敛到跳变边沿,产物剂量失控。
+    固定段 L(A) 连续,但拍面可能"过冲"穿过触球位姿再变远 ⇒ 仍不保证全域单调 ——
+    先粗扫网格找**第一段**穿越 L_target 的括号,再在括号内二分。两个方向的"方向反号"
+    与"目标不可达"都 SystemExit(历史缺陷 = 负目标静默收敛到 A≈0,见模块 docstring)。
+    返回 (A, 求解口径的 L, 最终产物的账本口径最深帧)。
     """
     def L_of(A: float) -> tuple[float, int]:
-        d, L = deep_frame_and_L(blade_fn(plan.apply(q, A)), c)
+        blade = blade_fn(plan.apply(q, A))
+        d, L_ledger = deep_frame_and_L(blade, c)
+        L = L_ledger if fixed_d is None else segment_L(blade, fixed_d, c)
         return L, d
 
     L0, _ = L_of(0.0)
@@ -471,7 +490,13 @@ def morph(data: dict, phase: float, joint_names: list[str], extend_frac: float,
         w = w / np.abs(w).max()
         m, bind = joint_headroom(q, cols, w, P, lo, hi)
 
-    L_target = L_src * (1.0 + float(extend_frac))
+    # 缩短的剂量度量段:峰帧 d 钉死(segment_L)——账本口径在引拍压平时 argmax 跳变,
+    # L(A) 不连续会让二分收敛到跳变边沿(剂量失控)。加深时 argmax 稳定,两口径重合。
+    L_src_meas = segment_L(blade_src, d, c) if shorten else L_src
+    if not np.isfinite(L_src_meas) or L_src_meas <= 0.0:
+        raise SystemExit(f"degenerate measurement segment f{d}→f{c}: L={L_src_meas} — fail-closed")
+    L_target = L_src_meas * scale
+    fixed_d = d if shorten else None
 
     def attempt(w_try: np.ndarray):
         """(plan, A_max, binding) for a candidate direction, or None if it cannot reach ΔL."""
@@ -485,7 +510,8 @@ def morph(data: dict, phase: float, joint_names: list[str], extend_frac: float,
         pl = MorphPlan(cols=cols, names=list(joint_names), weights=w_try, grad=g, P=P,
                        s0=s0, d=d, s1=s1)
         try:
-            A_, L_, dout_ = solve_amplitude(q, pl, blade_fn, c, L_target, A_max_)
+            A_, L_, dout_ = solve_amplitude(q, pl, blade_fn, c, L_target, A_max_,
+                                            fixed_d=fixed_d)
         except SystemExit:
             return None
         pl.amp = A_
@@ -503,7 +529,8 @@ def morph(data: dict, phase: float, joint_names: list[str], extend_frac: float,
             raise SystemExit(f"no amplitude headroom: {joint_names[k]} @ f{bb[k]} (fail-loud)")
         pl = MorphPlan(cols=cols, names=list(joint_names), weights=w, grad=g, P=P,
                        s0=s0, d=d, s1=s1)
-        solve_amplitude(q, pl, blade_fn, c, L_target, A_max_)   # raises with the real message
+        solve_amplitude(q, pl, blade_fn, c, L_target, A_max_,
+                        fixed_d=fixed_d)                        # raises with the real message
         raise SystemExit("unreachable ΔL (unexpected)")         # pragma: no cover
 
     plan, A_max, (b_joint, b_frame), L_out, d_out = first
@@ -533,6 +560,8 @@ def morph(data: dict, phase: float, joint_names: list[str], extend_frac: float,
     A = plan.amp
     w, g = plan.weights, plan.grad
     q_out = plan.apply(q)
+    # 账本口径(argmax)对最终产物的重测:加深时与求解口径逐位一致;缩短时如实另记
+    d_ledger_out, L_ledger_out = deep_frame_and_L(blade_fn(q_out), c)
 
     # hard invariants — fail-loud, never silent
     if not np.array_equal(q_out[s1:], q[s1:]):
@@ -549,10 +578,12 @@ def morph(data: dict, phase: float, joint_names: list[str], extend_frac: float,
 
     info = dict(
         contact_frame=c, s0=s0, s1=s1, lock_frames=int(lock_frames),
-        deep_frame_src=int(d_src), deep_frame_out=int(d_out), peak_frame=int(d),
-        L_deep_src_fk=float(L_src), L_deep_out_fk=float(L_out), L_target=float(L_target),
-        extend_frac_req=float(extend_frac), extend_frac_out=float(L_out / L_src - 1.0),
-        stroke_scale_req=float(scale), stroke_scale_out=float(L_out / L_src),
+        deep_frame_src=int(d_src), deep_frame_out=int(d_ledger_out), peak_frame=int(d),
+        L_deep_src_fk=float(L_src), L_deep_out_fk=float(L_ledger_out), L_target=float(L_target),
+        L_meas_src_fk=float(L_src_meas), L_meas_out_fk=float(L_out),
+        extend_frac_req=float(extend_frac), extend_frac_out=float(L_out / L_src_meas - 1.0),
+        stroke_scale_req=float(scale), stroke_scale_out=float(L_out / L_src_meas),
+        stroke_scale_out_ledger=float(L_ledger_out / L_src),
         direction=("shorten" if shorten else "deepen"),
         amp_rad=float(A), amp_max_rad=float(A_max),
         amp_binding_joint=b_joint, amp_binding_frame=b_frame,
@@ -856,7 +887,8 @@ def build_scale_manifest(*, scale: float, input_path: str, output_path: str,
                          v_star_out_mps: float, proofs: dict, kappa: float,
                          v_start_mps: float, a_max_mps2: float, a_max_source: str,
                          ratio_fk: float | None = None, joints_used=None,
-                         ratio_tol: float = 0.05) -> dict:
+                         ratio_tol: float = 0.05,
+                         ratio_ledger: float | None = None) -> dict:
     """独立 scale 资产的 manifest(一层内容 sha256 + 实测 L/L0 + 触球锚不变证明)。
 
     fail-closed:scale 非法、实测比例偏离请求超 ratio_tol(专治历史"静默恒等片"缺陷)、
@@ -895,7 +927,11 @@ def build_scale_manifest(*, scale: float, input_path: str, output_path: str,
         scale=dict(requested=scale, extend_frac=round(scale - 1.0, 10),
                    L_src_m=round(float(L_src_m), 6), L_out_m=round(float(L_out_m), 6),
                    ratio_measured_stored=round(ratio_stored, 6),
-                   ratio_measured_fk=(None if ratio_fk is None else round(float(ratio_fk), 6))),
+                   ratio_measured_fk=(None if ratio_fk is None else round(float(ratio_fk), 6)),
+                   ratio_ledger_argmax=(None if ratio_ledger is None
+                                        else round(float(ratio_ledger), 6)),
+                   measure="segment arc length peak_frame→contact (argmax-jump immune); "
+                           "ratio_ledger_argmax = 账本口径(argmax 最深帧),缩短时可能偏离"),
         bucket=bucket_of_scale(scale),
         buckets_contract={k: list(v) for k, v in STROKE_SCALE_BUCKETS.items()},
         contact_invariance=dict(proofs),
@@ -1136,16 +1172,21 @@ def main(argv=None) -> int:
                 v_star_src_mps=round(v_star, 4), v_star_out_mps=round(v_star_out, 4),
                 v_star_dev_frac=round(abs(v_star_out - v_star) / v_star, 8),
                 face_normal_contact_dot=round(face_dot, 8))
+            # 剂量口径 = 固定段(峰帧→触球)弧长比,stored 与 FK 双侧对账;账本口径另记
+            d_peak = int(info["peak_frame"])
+            L_src_seg_stored = segment_L(blade_src_stored, d_peak, c)
+            L_out_seg_stored = segment_L(blade_out_npz, d_peak, c)
             a_max, a_max_source = resolve_a_max(args.a_max, v_star, L_src_stored)
             manifest = build_scale_manifest(
                 scale=scale, input_path=args.input, output_path=args.output,
                 src_sha256=sha256_of_file(args.input), out_sha256=sha256_of_file(args.output),
                 phase=args.phase, contact_frame_idx=c, fps=fps, frames=jp_src.shape[0],
-                L_src_m=L_src_stored, L_out_m=L_out_npz,
+                L_src_m=L_src_seg_stored, L_out_m=L_out_seg_stored,
                 v_star_src_mps=v_star, v_star_out_mps=v_star_out, proofs=proofs,
                 kappa=args.kappa, v_start_mps=args.v_start, a_max_mps2=a_max,
                 a_max_source=a_max_source,
-                ratio_fk=info["L_deep_out_fk"] / info["L_deep_src_fk"],
+                ratio_fk=info["stroke_scale_out"],
+                ratio_ledger=info["stroke_scale_out_ledger"],
                 joints_used=info["joints_used"])
         except SystemExit:
             if os.path.exists(args.output):

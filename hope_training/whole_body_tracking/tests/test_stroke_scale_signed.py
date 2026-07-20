@@ -171,7 +171,10 @@ def test_shorten_actually_shortens_to_target():
 
 
 def test_scale_ratio_monotonic_across_the_seven_point_grid():
-    """0.65 → 1.35 的实测 L/L0 必须严格单调升,且缩短侧 < 1 < 加深侧。"""
+    """0.65 → 1.35 的实测 L/L0 必须严格单调升、逐点命中,且缩短侧 < 1 < 加深侧。
+
+    缩短剂量按固定段(峰帧→触球)弧长比度量 —— 账本口径(argmax 最深帧)在引拍压平时
+    身份跳变、L(A) 不连续,目标落进缺口会收敛到缺口边缘;固定段连续,逐点应精确命中。"""
     data, phase = make_clip()
     ratios = []
     for scale in (0.65, 0.80, 0.90, 1.10, 1.20, 1.35):
@@ -179,7 +182,7 @@ def test_scale_ratio_monotonic_across_the_seven_point_grid():
         ratios.append(info["stroke_scale_out"])
         assert info["stroke_scale_out"] == pytest.approx(scale, rel=2e-3)
     assert all(b > a for a, b in zip(ratios, ratios[1:]))
-    assert ratios[2] < 1.0 < ratios[3]
+    assert all(r < 1.0 for r in ratios[:3]) and all(r > 1.0 for r in ratios[3:])
 
 
 def test_shorten_direction_is_negated_deepening_gradient():

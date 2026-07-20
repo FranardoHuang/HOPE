@@ -307,3 +307,13 @@ build hard contract 阶段 fail-closed：`lower-body reward contracts require th
 builder 与 validator 同步；probe9 已验证的 slew hinge 合同保持原字面量不动）。root 再次换代到
 `/workspace/codexschema/phase1_balance_temporal_matrix_20260720d`；两次失败都发生在任何训练更新之前，
 不构成机制证据。
+
+## 2026-07-20 发射期两处基础设施修复（不影响机制结论）
+
+1. **每卡零进程预检与 4 条/卡设计矛盾**：science 远端体沿用"目标卡必须零 compute 进程"，导致每卡
+   第一格上卡后其余三格被拒（Pod1 v_n_s1/s2/s3、Pod2 v_c_s1/s2/s3、another w_n_s0 因僵尸探针进程）。
+   修复：预检改为"同卡已有唯一 compute PID < 4"。
+2. **`kit_boot_lock.sh` flock 泄漏**：pod 级 boot 锁的 fd 9 被长跑训练子进程继承，v_n_s0/v_c_s0 各自
+   把锁攥满整个训练期，两 pod 各只有 1 条真训练、其余 launcher 全部阻塞（历史探针/短任务从未暴露此
+   缺陷）。修复：子进程以 `9>&-` 启动；被阻塞的 wrapper 组（子进程仅 flock）按 PGID 精确清除，
+   无产物 run_dir 清空后逐字补发。两次事件均发生在任何训练更新之前，不构成任何格子的机制证据。
