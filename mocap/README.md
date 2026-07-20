@@ -1,10 +1,14 @@
 # Motion capture interface
 
-HOPE drives its planner from an external motion-capture system that streams
-**ball** (and optionally **robot base**) positions into ROS 2. This document defines the
-generic frame and topic contract the rest of the stack expects. It is deliberately
-vendor-neutral — any optical/VRPN motion-capture rig that can publish the topics below will
-work. Configure your own rig's network address in the launch files (see `hope_ws/`).
+HOPE drives its planner from an external motion-capture system that streams rigid-body
+poses into ROS 2. During competition the arena streams the named rigid bodies `Ball`,
+`P1`, and `P2` (the shipped bringup aggregates only `Ball` into `/poses` by default). A
+`Table` asset is used for setup/calibration only and appears only in training-data
+recordings — it is not streamed during competition. This document defines the generic
+frame and topic contract
+the rest of the stack expects. It is deliberately vendor-neutral — any optical
+motion-capture rig that can publish the topics below will work. Configure your own rig's
+network address in the launch files (see `hope_ws/`).
 
 ## Coordinate frame
 
@@ -29,28 +33,61 @@ of truth is
 which derives everything from [`configs/ball_physics.yaml`](../configs/ball_physics.yaml)
 so the simulator, planner, and evaluator share one world.
 
-The motion-capture system provides **positions only**. The robot's base orientation (yaw)
-is taken from the robot IMU, not from mocap — this is why the policy observation includes an
-IMU-derived `base_forward_xy` term (see [POLICY_INTERFACE.md](../docs/POLICY_INTERFACE.md)).
-If your rig also produces a base yaw estimate, treat it as advisory only.
+The competition stream contains vendor-defined **6-DOF rigid bodies** (`Ball`, plus `P1`/`P2`
+where used). Conceptually, the ball
+pose may be inspected as `(x, y, z, pitch, yaw, roll)`, but the ROS 2 wire contract uses
+`geometry_msgs/Pose`: position `(x, y, z)` plus quaternion orientation
+`(qx, qy, qz, qw)`. Euler angles are derived using an explicitly documented axis and rotation
+order; never write pitch/yaw/roll values directly into `Pose.orientation`.
+
+The current no-spin planner consumes only the ball position, so preserving orientation does
+not change its input behavior. The orientation remains available for validation and future
+spin-aware estimation. The robot's control-facing base orientation (yaw) is taken from the
+robot IMU, not from mocap — this is why the policy observation includes an IMU-derived
+`base_forward_xy` term (see [POLICY_INTERFACE.md](../docs/POLICY_INTERFACE.md)). Treat a
+mocap base-yaw estimate as advisory unless a robot integration contract says otherwise.
 
 ## Topics
 
 | Topic | Type | Rate (typical) | Meaning |
 |-------|------|----------------|---------|
-| `/poses` | `geometry_msgs/PoseArray` | ~300 Hz | Tracked ball position(s) in the world frame. Only `position` is used; orientation is ignored. |
-| `<robot_base_pose>` | `geometry_msgs/PoseStamped` | ~300 Hz (optional) | Robot base position in the world frame, used for the fixed-station recentring term. Topic name is a launch parameter. |
+| `/poses` | `geometry_msgs/PoseArray` | ~300 Hz | Full tracked pose(s) in the world frame. `Ball` first (the shipped bringup aggregates only `Ball`, a single-pose array); add `P1`, `P2` after it when aggregating robot bases. The planner reads `Ball` at `ball_pose_index` and currently consumes only its position. |
+| `/tf` (optional) | `tf2_msgs/TFMessage` | ~300 Hz | Named transforms for `world → Ball` (and `world → P1`, `world → P2` where streamed). The shipped VRPN path does **not** publish `/tf`; add a `tf2_ros` broadcaster if your deployment needs named transforms. |
+| `<robot_base_pose>` | `geometry_msgs/PoseStamped` | ~300 Hz (optional) | Full robot-base pose in the world frame, used for the fixed-station recentring term. Topic name is a launch parameter. |
 
 The planner consumes every incoming mocap sample for its estimator but runs its (more
-expensive) trajectory solve at **at most 50 Hz**. Source timestamps are propagated so the
-planner can extrapolate for capture latency.
+expensive) trajectory solve at **at most 50 Hz**. Source timestamps are propagated where the
+source provides them; the vendored VRPN path (both vendors) uses receipt time by default and
+requires `use_vrpn_timestamps: true` plus synchronized clocks (NTP/PTP) for server capture
+timestamps.
 
 ## Bringing up mocap
 
-The repository vendors a third-party VRPN ROS 2 client (`hope_ws/src/vrpn_mocap`, MIT
-licensed) that bridges a VRPN motion-capture server to ROS 2. Point it at your server and
-map your tracked rigid bodies to the topics above. A generic bringup that wires mocap into
-the planner lives in `hope_ws/src/hope_bringup/`.
+Both vendors use the **same uniform path**: the vendor application solves the named
+rigid bodies and serves them as **VRPN** trackers; the vendored ROS 2 client
+(`hope_ws/src/vrpn_mocap`, MIT licensed) publishes
+`/vrpn_mocap/<sender>/pose_id_<sensor_id>` as `geometry_msgs/PoseStamped` (with
+`multi_sensor: true`); and the shipped `hope_bringup/pose_to_posearray` adapter copies the
+complete pose — including its quaternion — into `/poses`. Use the vendor-native rigid-body
+stream; do not reconstruct the ball from an unlabeled point cloud on the ROS host.
+
+- **OptiTrack:** enable Motive's **VRPN Streaming Engine** (default port 3883; rigid bodies
+  only — markers/skeletons are not carried over VRPN). Two caveats: Motive's *Up Axis*
+  setting is not clearly documented as applying to the VRPN stream, whose frame can differ
+  by Motive version and installation (Y-up output is commonly observed) — verify the streamed
+  frame at surveyed table landmarks first, and only if it is Y-up apply a full-pose
+  (position + quaternion) Y-up → Z-up conversion on the ROS 2 side before `/poses`
+  (required engineering, not included in this repository; the preserved arena design
+  document, Section 6.2, specifies the transform and the validation);
+  and disable *Zero When Untracked* so occlusions surface as dropouts rather than
+  all-zero poses.
+- **Chingmu:** CMTracker/MCServer serves the named rigid bodies as VRPN trackers directly;
+  configure it to stream Z-up so no software frame conversion is needed.
+
+Topic and sender names are case-sensitive. Configure them for the actual asset name shown
+by Motive or CMTracker instead of assuming that `Ball` and `ball` are interchangeable.
+A generic bringup that wires the VRPN path into the planner lives in
+`hope_ws/src/hope_bringup/`.
 
 For testing without a physical rig, `hope_ws/src/hope_bringup/scripts/fake_ball_publisher`
 publishes synthetic `/poses` trajectories.
@@ -63,6 +100,6 @@ supply for your own environment.
 
 For a worked example of one such environment, see the preserved arena design document —
 [HOPE_Motion_Capture_System_and_Coordinates_Reference_Setup.md](HOPE_Motion_Capture_System_and_Coordinates_Reference_Setup.md) ([中文](HOPE_Motion_Capture_System_and_Coordinates_Reference_Setup_ZH.md)). It
-covers the OptiTrack/Motive configuration, camera layout, tracked-object taxonomy,
-`base_link` marker placement, and ball-tracking choices used for the original HOPE arena.
+covers OptiTrack/Motive and Chingmu/CMTracker configuration, camera layout,
+tracked-object taxonomy, `base_link` marker placement, and 6-DOF ball tracking.
 It predates this stack, so treat the contract above as authoritative where the two differ.

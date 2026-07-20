@@ -36,6 +36,9 @@ a3_deploy/URDF/A3*/
 # Machine-local Isaac paths (copied from setup_train_env.local.example.sh)
 hope_training/whole_body_tracking/setup_train_env.local.sh
 
+# Local research notes
+/research/
+
 # OS / editor
 .DS_Store
 *.swp
