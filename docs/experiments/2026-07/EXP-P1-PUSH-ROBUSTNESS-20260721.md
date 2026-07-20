@@ -1,8 +1,10 @@
 # EXP-P1-PUSH-ROBUSTNESS-20260721 — 训练时随机推撞是否是平衡的希望（12 臂 push 波）
 
 - 状态：`preregistered`
-- 运行态：`E1 prereg only；NO-LAUNCH`。12 臂均未发射；queue config/renderer/单测为同轮并行
-  实现、已落盘待合入 main（见冻结 setting），`source.commit` 占位与 `--checklist` 依赖核对单
+- 运行态（2026-07-20 更新）：大小轴 6 臂已发射。probe `w_p02`（Pod1 GPU0）自然退出、event manager
+  确认 `push_robot interval 5–15s ±0.2 m/s` 真挂载、合同块完整；随后 6 条 science 全部 rc=0：
+  `p1push_{w,v}_{p02,p035,p05}_seed3_20260721`（Pod1 GPU0/1、Pod2 GPU1/2，source commit `f67c844f`）。
+  方向/频率 6 臂（yaw/ang/fast）待矩阵 +4000 收口释放槽位后发射。对照 = 矩阵在跑的 `w_c_s0`/`v_c_s0`。
   在键面统一并合入 main 前锁死渲染（fail-closed）。
 - 阶段/轴：Phase 1 / 平衡鲁棒性：训练时外部推撞（push）单轴消融（幅度 × 角速度 × 频率）
 - 集成小目标：给"从未被推过"的现役配方补上文献标配的训练时随机推撞，回答多大/什么成分/
