@@ -45,8 +45,11 @@ duplicated by hand.
 
 ## Mocap frame
 
-Motion capture streams **positions only**, in the same world frame. The robot's
-base yaw comes from the robot IMU, not from mocap. The authoritative mocap frame
+The arena motion-capture stream publishes four named rigid bodies — `Ball`,
+`Table`, `P1`, and `P2` — in the same world frame. Each ROS 2 pose contains
+position `(x, y, z)` and quaternion orientation `(qx, qy, qz, qw)`; the current
+no-spin planner consumes only the Ball position. The robot's base yaw comes from
+the robot IMU, not from mocap. The authoritative mocap frame
 and topic contract is [`mocap/README.md`](../../mocap/README.md); the preserved
 arena design document
 [`mocap/HOPE_Motion_Capture_System_and_Coordinates_Reference_Setup.md`](../../mocap/HOPE_Motion_Capture_System_and_Coordinates_Reference_Setup.md)

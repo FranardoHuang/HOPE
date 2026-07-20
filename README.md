@@ -65,10 +65,10 @@ install → train → export → evaluate → run loop, and
 
 | Document | Description | Version |
 |----------|-------------|---------|
-| [Motion Capture System Reference Setup](mocap/HOPE_Motion_Capture_System_and_Coordinates_Reference_Setup.md) | OptiTrack/ROS 2 arena configuration, coordinate frames, tracked object taxonomy, humanoid base_link marker setup, ball tracking, and streaming pipeline | v0.4 |
+| [Motion Capture System Reference Setup](mocap/HOPE_Motion_Capture_System_and_Coordinates_Reference_Setup.md) | OptiTrack and Chingmu ROS 2 arena configuration, coordinate frames, four tracked rigid bodies (`Ball`, `Table`, `P1`, `P2`), humanoid `base_link` marker setup, and streaming pipelines | v0.6 |
 | [7DOF Racket Model-based Planner Reference Setup](HOPE_7DOF_Racket_Model_based_Planner_Reference_Setup.md) | Ball state estimation, trajectory prediction, and racket target planning (Stages 1–3 of the HITTER framework), reimplemented in the HOPE canonical frame | v0.1 |
 | [WBC Simulation Training Reference Setup](HOPE_WBC_Simulation_Training_Reference_Setup.md) | SMPL-X motion acquisition, GMR retargeting, BeyondMimic RL training pipeline for whole-body control (Stage 4), with dual-backend support for Isaac Lab and mjlab | v0.5 |
-| [Hardware Deployment Reference Setup](HOPE_Hardware_Deployment_Reference_Setup.md) | Real-robot deployment via `legged_control2` (G1) or AimRT (A3): ONNX inference, ROS 2 node graph, PD gain tuning, safety procedures, and competition workflow | v0.2 |
+| [Hardware Deployment Reference Setup](HOPE_Hardware_Deployment_Reference_Setup.md) | Platform-specific real-robot deployment paths (including `legged_control2` and AimRT): ONNX inference, ROS 2 node graph, PD gain tuning, safety procedures, and competition workflow | v0.2 |
 
 The three documents at the repository root each contain a **Section 0 prologue**
 listing implementation differences from the original HITTER work (see
@@ -102,22 +102,26 @@ The competition rulebooks ship at the repository root:
 ## System Architecture
 
 ```
+       ┌──────────────────────────────┐   ┌──────────────────────────────┐
+       │ OptiTrack Motive             │   │ Chingmu CMTracker / MCServer │
+       │ (VRPN Streaming Engine)      │   │ (VRPN server)                │
+       │ 4 named 6-DOF rigid bodies:  │   │ 4 named 6-DOF rigid bodies:  │
+       │ Ball / Table / P1 / P2       │   │ Ball / Table / P1 / P2       │
+       └──────────────┬───────────────┘   └──────────────┬───────────────┘
+                      │            VRPN tracker           │
+                      │            reports                │
+                      └──────────────────┬────────────────┘
+                                         ▼
                     ┌─────────────────────────────┐
-                    │  Motion Capture Cameras      │
-                    │  (OptiTrack / ChingMu)       │
+                    │  vendored vrpn_mocap         │
+                    │  /vrpn_mocap/<name>/         │
+                    │    pose_id_<N> (PoseStamped) │
                     └──────────┬──────────────────┘
-                               │ VRPN
+                               │ pose_to_posearray
                                ▼
                     ┌─────────────────────────────┐
-                    │  vrpn_mocap (ROS 2)          │
-                    │  per-tracker PoseStamped     │
-                    │  /vrpn_mocap/<t>/pose_id_<N> │
-                    └──────────┬──────────────────┘
-                               │
-                               ▼
-                    ┌─────────────────────────────┐
-                    │  pose_to_posearray           │
-                    │  → /poses (PoseArray)        │
+                    │ /poses: full rigid-body pose │
+                    │ xyz + quaternion (xyzw)      │
                     └──────────┬──────────────────┘
                                │
                                ▼
@@ -159,6 +163,12 @@ The competition rulebooks ship at the repository root:
                     └─────────────────────────────┘
 ```
 
+The motion-capture arena stream contains four named rigid bodies: `Ball`, `Table`, `P1`, and
+`P2`. The ball pose includes position `(x, y, z)` and quaternion orientation
+`(qx, qy, qz, qw)`; pitch/yaw/roll are derived display values. The shipped planner currently
+uses only the ball position, while the full pose is preserved for validation and future
+spin-aware estimation.
+
 The same policy runner drives either the shipped MuJoCo simulation
 (`a3_deploy/a3_deploy_example/scripts/run_pingpong_sim.sh`) or, via your own
 licensed Agibot vendor deploy package, the real robot
@@ -166,13 +176,15 @@ licensed Agibot vendor deploy package, the real robot
 
 ## Key Design Decisions
 
-**Racket tracking is prohibited.** The motion capture system tracks exactly three categories of objects: the ping-pong table origin frame (PPT), each humanoid's `base_link` (P1, P2), and the ball. No reflective markers may be placed on the racket, the robot's hand, or the wrist link. Each robot must infer its paddle's 6-DOF pose through forward kinematics from its own `base_link` + joint encoders. This is a deliberate competition constraint that tests autonomous paddle control through the robot's internal body model.
+**Racket tracking is prohibited.** The motion capture system tracks exactly four named rigid bodies: `Ball`, `Table`, `P1`, and `P2`. `Table` is the table-origin rigid body; `P1` and `P2` are the two humanoid `base_link` rigid bodies. The ball stream contains position `(x, y, z)` and orientation, represented in ROS 2 as a quaternion `(qx, qy, qz, qw)`. Pitch, yaw, and roll are derived views, not fields carried by `geometry_msgs/Pose`. No reflective markers may be placed on the racket, the robot's hand, or the wrist link. Each robot must infer its paddle's 6-DOF pose through forward kinematics from its own `base_link` + joint encoders. This is a deliberate competition constraint that tests autonomous paddle control through the robot's internal body model.
 
-**One robot, end to end.** The preserved reference design documents discuss both Unitree G1 and Agibot Expedition A3 paths. The shipped stack targets the A3 (31 actuated DOF) end to end: Isaac Lab training of one unified forehand/backhand policy (`HOPE-PingPong-AgibotA3-v0`), MuJoCo evaluation with real ball physics, and a clean-room deploy reference runner, alongside Agibot's own deploy example and MuJoCo/AimRT simulation reference.
+**Implementation scope.** The preserved reference documents include robot-specific integration examples; the code currently shipped in this repository implements the Agibot A3 (31 actuated DOF) path end to end: Isaac Lab training of one unified forehand/backhand policy (`HOPE-PingPong-AgibotA3-v0`), MuJoCo evaluation with real ball physics, and a clean-room deploy reference runner, alongside Agibot's own deploy example and MuJoCo/AimRT simulation reference.
 
 **Open-source training stack.** The WBC training pipeline is built entirely on open-source code: [BeyondMimic](https://github.com/HybridRobotics/whole_body_tracking) (MIT license), from which the `hope_training/whole_body_tracking/` extension derives, [GMR](https://github.com/YanjieZe/GMR) (MIT license) for SMPL-X to robot retargeting, and [GVHMR](https://github.com/zju3dv/GVHMR) for monocular video-to-SMPL-X extraction. The HITTER paper's trained weights are not released; all training starts from scratch, and the bundled motion clips are placeholders to be replaced with your own retargeted swings ([docs/REPLACE_MOTIONS.md](docs/REPLACE_MOTIONS.md)).
 
 ## Supported Robots
+
+The table below reports current repository implementation coverage.
 
 | Robot | DOF | Status |
 |-------|-----|--------|
@@ -200,7 +212,7 @@ Each piece has its own dependencies — install only what the step you are on ne
 - **Training / export**: NVIDIA Isaac Sim + Isaac Lab (with `rsl_rl`), Python 3.10, PyTorch, CUDA GPU
 - **MuJoCo evaluation / reference runner**: `mujoco`, `onnxruntime`, `numpy` (no GPU needed)
 - **Planner workspace**: ROS 2 Jazzy (`rclpy`), `numpy`, `pyyaml`
-- **Real arena**: OptiTrack Motive or a compatible VRPN motion-capture system
+- **Real arena**: OptiTrack Motive (VRPN Streaming Engine) or Chingmu CMTracker/MCServer — both stream **VRPN** into the vendored ROS 2 client; configure named 6-DOF rigid bodies `Ball`, `Table`, `P1`, and `P2` (OptiTrack note: Motive's VRPN stream is Y-up — apply the full-pose conversion described in the mocap docs)
 
 ## Related Repositories
 

@@ -482,7 +482,7 @@ A typical HOPE competition match follows this sequence:
 
 3. **Forehand/backhand switching requires two ONNX models.** BeyondMimic's ONNX exporter embeds a single reference motion per file. Since the policy uses two reference motions (forehand and backhand), deployment requires two ONNX models. Forehand is triggered when the ball's Y position is negative (robot's right side) and backhand when positive (left side). The runtime switching logic — loading both ONNX sessions and selecting which to query each control step based on the planner's swing type signal — must be implemented in the controller node. This is not provided by `motion_tracking_controller` out of the box, which loads a single ONNX file. A multi-skill policy trained with BeyondMimic's diffusion distillation (future work) would eliminate this dual-model requirement.
 
-4. **A3 deployment is experimental.** The Agibot A3 deployment path is based on AimRT patterns from the X1/X2 platforms. The A3 (Expedition series) is pre-production and its exact joint-level control API may differ.
+4. **A3 deployment is experimental.** The Agibot A3 deployment path is based on AimRT patterns from the X1/X2 platforms; the A3's exact joint-level control API may differ — verify against your vendor deploy package.
 
 5. **No ball spin response.** Consistent with the training setup, the deployed policy does not adjust racket orientation to counteract incoming spin.
 

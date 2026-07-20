@@ -11,7 +11,7 @@ mocap-less smoke test).
 /vrpn_mocap/<tracker>/pose_id_<N>      geometry_msgs/PoseStamped   (vendored vrpn_mocap client)
         |  pose_to_posearray (hope_bringup)
         v
-/poses                                 geometry_msgs/PoseArray     (ball at index 0)
+/poses                                 geometry_msgs/PoseArray     (Ball/Table/P1/P2; Ball at index 0)
         |  hope_planner
         v
 /racket/command                        hope_msgs/RacketCommand
@@ -41,7 +41,8 @@ Notes per hop:
 - **`/poses`** — `pose_to_posearray` caches the latest pose from each configured
   input topic and, whenever the trigger topic (the ball, `trigger_index` 0)
   updates, publishes a `PoseArray` whose slot *i* is input topic *i*'s latest
-  pose, trigger stamp passed through unmodified. The planner reads the ball at
+  pose (including its quaternion), trigger stamp passed through unmodified. The
+  canonical arena input order is `Ball`, `Table`, `P1`, `P2`; the planner reads the ball at
   `ball_pose_index` (default 0). With `use_fake_ball:=true`,
   `fake_ball_publisher` publishes this form directly.
 - **`/racket/command`** — the planner feeds every mocap sample to its estimator
