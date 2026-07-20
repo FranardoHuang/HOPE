@@ -1,7 +1,8 @@
 schema_version: 1
 queue_id: phase1_push_robustness_20260721
 purpose: >-
-  人话：Wave P 12 臂 push 鲁棒性 = 2 父本(W/V) x 6 档推撞，全部固定矩阵 C+S0
+  人话：Wave P 18 臂 push 鲁棒性 = 2 父本(W/V) x 9 档推撞（7 档速度推 + 2 档同冲量
+  力推 f035/f08），全部固定矩阵 C+S0
   配方（action_rate=-0.10、slew=0、三个稳定机制 weight=0、测量探针全开），从各自
   parent model_6700 续训 10001 个 update。当前配方 push_robot=None 是对齐 HITTER
   的历史决定，本波按论文证据推翻它（PACE：push vxy ±0.2 每 5-15 s；BeyondMimic：
@@ -234,7 +235,8 @@ recipe:
       - ++task.rewards.lower_body_pose_imitation_support_pre_s=0.3
       - ++task.rewards.lower_body_pose_imitation_support_post_s=0.4
 
-# 人话：唯一的实验维度——底座推撞 6 档。键名按工作树 train.py 落盘的 _PUSH_KEYS
+# 人话：唯一的实验维度——底座推撞 9 档（7 档速度推 + 2 档力推）。速度档键名按工作树
+# train.py 落盘的 _PUSH_KEYS
 # 白名单逐字：enable + interval_range_s + vel_xy_mps（水平推幅度，装配成 x/y 对称
 # 区间，z 永不推）+ ang_vel_radps（角速度幅度）+ ang_axes（none|yaw|rpy 选轴）。
 # 展开由 training_contract.push_robot_event_block 单源完成（对称 velocity_range），
@@ -300,6 +302,57 @@ mechanisms:
         - ++task.push.vel_xy_mps=0.35
         - ++task.push.ang_vel_radps=0.0
         - ++task.push.ang_axes=none
+    # 人话：F 轴（2026-07-21 追加，Franco 拍板）——力推 vs 速度推、同冲量可比。
+    # 机制：每 interval_range_s 触发一次，对 pelvis link 原点施水平随机方向、幅度
+    # force_n 的恒力，持续 duration_s（0.30 s = 15 个 50 Hz 控制步）后清零。
+    # 键面：task.force_push.{enable,interval_range_s,force_n,duration_s}，默认全关、
+    # 缺席=逐字节 no-op；F 臂不写任何 task.push.* 键（单变量）。force_n 由主控按
+    # 真实质量算好写死（不搞自动换算魔法），质量与 Δv_equiv 出处见 force_push_contract。
+    f035:
+      human_name: 人话：力推中档——对 pelvis link 原点施 68.0 N 水平恒力持续 0.30 s，每 5-15 s 一次；同冲量对表 p035（Δv_equiv=0.35005 m/s @ 58.27723163 kg）
+      overrides:
+        - ++task.force_push.enable=true
+        - ++task.force_push.interval_range_s=[5.0,15.0]
+        - ++task.force_push.force_n=68.0
+        - ++task.force_push.duration_s=0.3
+    f08:
+      human_name: 人话：力推超强档——对 pelvis link 原点施 155.4 N 水平恒力持续 0.30 s，每 5-15 s 一次；同冲量对表 p08（Δv_equiv=0.79997 m/s @ 58.27723163 kg）
+      overrides:
+        - ++task.force_push.enable=true
+        - ++task.force_push.interval_range_s=[5.0,15.0]
+        - ++task.force_push.force_n=155.4
+        - ++task.force_push.duration_s=0.3
+
+# 人话：F 轴冻结合同——力推与速度推同冲量对表，主控按真实质量把 force_n 写死。
+# 质量真源（2026-07-21 pod1 只读核对）：A3 URDF 43 个 link 质量逐项求和 = 58.27723163 kg，
+#   文件 /workspace/codexschema/nohope_balance_action_slew_20260720/hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/urdf/model.urdf
+#   sha256 79655f05d204c24f028778425aa971410773d1f8bbbd214de6fdb8f8ae75d1cc；
+#   W 父本 hard contract training_contract.json 同日核对：无质量字段，故以 URDF 为准。
+# 换算 Δv_equiv = force_n x duration_s / m：
+#   f035: 68.0 N x 0.30 s / 58.27723163 kg = 0.35005 m/s（对表 p035 的 0.35，误差 +0.015%）
+#   f08:  155.4 N x 0.30 s / 58.27723163 kg = 0.79997 m/s（对表 p08 的 0.8，误差 -0.004%）
+# 施力点语义显式化（Yikang V9 教训）：施在 pelvis link 原点就诚实写
+# pelvis_link_origin（逐字 = training_contract.FORCE_PUSH_APPLICATION_POINT），
+# 不许标 COM；运行时 training_contract 的 force_push 块必须记录真实读到的
+# 机器人总质量、换算出的 Δv_equiv 与 application_point（必填），供与速度档对表。
+force_push_contract:
+  application_point: pelvis_link_origin
+  robot_mass_kg: 58.27723163
+  robot_mass_source: >-
+    人话：pod1 A3 URDF（assets/agibot_a3/urdf/model.urdf，sha256
+    79655f05d204c24f028778425aa971410773d1f8bbbd214de6fdb8f8ae75d1cc）43 个 link
+    质量逐项求和 = 58.27723163 kg，2026-07-21 只读核对；W 父本 hard contract
+    training_contract.json 同日核对无质量字段。
+  duration_s: 0.3
+  duration_control_steps: 15
+  delta_v_equiv_mps: {f035: 0.35005, f08: 0.79997}
+  matched_velocity_levels: {f035: p035, f08: p08}
+  wiring_confirmed_in_source_commit: false
+  wiring_note: >-
+    人话：task.force_push.* wiring 由并行 agent 落盘；主控把 wiring 合入 main、冻结
+    新 40-hex commit、逐字核对 train.py _FORCE_PUSH_KEYS == (enable,
+    interval_range_s, force_n, duration_s) 后才把本开关翻 true。false 时渲染器拒绝
+    出任何 f035/f08 的 SSH 命令（fail-closed），速度臂不受影响。
 
 probe_contract:
   # 人话：三个稳定机制的测量探针在 12 臂全开——每臂都显式写三个机制 weight
@@ -342,6 +395,10 @@ launch_order:
   - v_ang
   - w_p08
   - v_p08
+  - w_f035
+  - v_f08
+  - w_f08
+  - v_f035
 
 jobs:
   - {id: w_p02, parent: W, push: p02, run_name: p1push_w_p02_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/w_p02}
@@ -351,6 +408,8 @@ jobs:
   - {id: w_yaw, parent: W, push: yaw, run_name: p1push_w_yaw_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/w_yaw}
   - {id: w_ang, parent: W, push: ang, run_name: p1push_w_ang_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/w_ang}
   - {id: w_fast, parent: W, push: fast, run_name: p1push_w_fast_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/w_fast}
+  - {id: w_f035, parent: W, push: f035, run_name: p1push_w_f035_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/w_f035}
+  - {id: w_f08, parent: W, push: f08, run_name: p1push_w_f08_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/w_f08}
   - {id: v_p02, parent: V, push: p02, run_name: p1push_v_p02_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/v_p02}
   - {id: v_p035, parent: V, push: p035, run_name: p1push_v_p035_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/v_p035}
   - {id: v_p05, parent: V, push: p05, run_name: p1push_v_p05_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/v_p05}
@@ -358,3 +417,5 @@ jobs:
   - {id: v_yaw, parent: V, push: yaw, run_name: p1push_v_yaw_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/v_yaw}
   - {id: v_ang, parent: V, push: ang, run_name: p1push_v_ang_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/v_ang}
   - {id: v_fast, parent: V, push: fast, run_name: p1push_v_fast_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/v_fast}
+  - {id: v_f035, parent: V, push: f035, run_name: p1push_v_f035_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/v_f035}
+  - {id: v_f08, parent: V, push: f08, run_name: p1push_v_f08_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/v_f08}

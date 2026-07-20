@@ -1,12 +1,13 @@
-# Phase 1 push 鲁棒性 12 臂波：从零到发射
+# Phase 1 push 鲁棒性 18 臂波：从零到发射
 
-本页只操作 12 臂 push 波 `{W,V} × {p02, p035, p05, yaw, ang, fast}` 的仿真训练队列。实验真源是
+本页只操作 18 臂 push 波 `{W,V} × {p02, p035, p05, p08, yaw, ang, fast}`（速度推）
+＋ `{W,V} × {f035, f08}`（力推，同冲量对表，见第 11 节）的仿真训练队列。实验真源是
 [EXP-P1-PUSH-ROBUSTNESS-20260721](../experiments/2026-07/EXP-P1-PUSH-ROBUSTNESS-20260721.md)；
 共享代号人话见[术语表](../DEFINITIONS.md)。本页不授权真机、部署、第二 seed 或对照重买。
 
 入口与不变量（人话：这轮用哪些文件、哪些数字永远不变）：
 
-- config：`configs/phase1_push_robustness_20260721.yaml`（12 臂唯一机器队列＋冻结
+- config：`configs/phase1_push_robustness_20260721.yaml`（18 臂唯一机器队列＋冻结
   `launch_order`；已落盘、待合入 main，合入前本页只读不执行）
 - renderer：`scripts/run_phase1_push_robustness_queue.py`（lean runner：只打印计划表/核对单/
   逐字 SSH 命令，自己绝不 SSH、绝不发信号、绝不写远端；本波不写死 pod/gpu，渲染时用
@@ -20,9 +21,11 @@
 - 每臂：`4096 environments`、`seed=3`、从各自 parent `model_6700` 续 `10001` updates、
   save/100；probe 每臂 `2` updates 自然退出到 `model_6701.pt`
 - 配方：矩阵 `C+S0` 逐字（`action_rate_weight=-0.1`、slew hinge `0`、三稳定机制 weight `0`、
-  probe 全开）＋该臂八个 `task.push.*` 键显式值（`enable`＋`interval_range_s`＋六个
-  五键 `enable/interval_range_s/vel_xy_mps/ang_vel_radps/ang_axes`，x/y 对称 ±v 由 contract 单源展开、z 永不推）；对照是矩阵在跑的 `w_c_s0`/`v_c_s0`，
-  **不发对照**
+  probe 全开）＋该臂 push 键显式值——速度臂五键
+  `task.push.{enable,interval_range_s,vel_xy_mps,ang_vel_radps,ang_axes}`（x/y 对称
+  ±v 由 contract 单源展开、z 永不推）；F 臂四键
+  `task.force_push.{enable,interval_range_s,force_n,duration_s}`（不含任何
+  `task.push.*`，单变量）；对照是矩阵在跑的 `w_c_s0`/`v_c_s0`，**不发对照**
 - 发射器：远端用 `/workspace/bin/kit_boot_lock.sh` + `setsid nohup`；**不用**
   `launch_kit_training_locked.sh`（其 `180 s` stale 门是 Wave A v8/v9 死因）
 - watchdog：boot 停滞 `1800 s`、首个 iteration 后停滞 `900 s` 才判死；唯一允许的重试是逐字
@@ -258,5 +261,70 @@ bash hope_training/whole_body_tracking/scripts/judge.sh <run_dir> <run_dir>/.../
 6. 文档同步：实验记录运行表与结果、`PROGRESS.md` 一条带日期摘要、长训启动/成绩/owner 变化
    时更新最新 main 的 `NOW` 统一队列；重要结论进 main 才动 `TIMELINE`；
 7. `_r2` retry 只发一次且逐字同配方；同 phase 二次失败转根因线。
+
+## 11. F 臂（力推 f035/f08）补充步骤
+
+人话：F 臂＝力推 vs 速度推的同冲量对表臂（`f035↔p035`、`f08↔p08`），机制/换算/施力
+点语义见实验记录的
+[F 轴节](../experiments/2026-07/EXP-P1-PUSH-ROBUSTNESS-20260721.md#f-轴力推-vs-速度推同冲量2026-07-21-追加franco-拍板)。
+发射顺序在 `launch_order` 里排全部 14 条速度臂之后：`w_f035 → v_f08 → w_f08 →
+v_f035`。渲染/发射/probe/收口与速度臂同一套纪律，只多下面几道 F 专属的门。
+
+### 11.1 渲染解锁前置（比速度臂多两道门）
+
+人话：F 臂键面（`task.force_push.*`）是并行新实现；wiring 没确认合入 exact commit
+之前，renderer 对任何 F 臂直接拒绝渲染（fail-closed），速度臂不受影响。
+
+```bash
+# 门 1：grep 远端 checkout 在 exact commit 上的 train.py——F 键白名单必须逐字等于
+# (enable, interval_range_s, force_n, duration_s)；不一致＝键面没统一，全部 F 臂不发
+ssh <pod> 'grep -n "task.force_push\|_FORCE_PUSH_KEYS" \
+  /workspace/codexschema/nohope_push_20260721/hope_training/whole_body_tracking/scripts/train.py'
+
+# 门 2：主控过门 1 后把 config 的 force_push_contract.wiring_confirmed_in_source_commit
+# 翻 true 并重跑队列单测；false 时渲染器拒绝出任何 f035/f08 命令
+python3 scripts/run_phase1_push_robustness_queue.py --plan | grep "F 臂渲染"
+```
+
+### 11.2 渲染与人工核对
+
+```bash
+# 人话：渲染命令与速度臂同款；核对注释行 job_id/槽位/run_name 之外，F 臂必须
+# 只有四个 task.force_push.* 键、绝无任何 task.push.* 键（单变量）
+python3 scripts/run_phase1_push_robustness_queue.py \
+  --render-stage probe --render-job w_f035 --pod <pod1|pod2> --gpu <0|1|2>
+```
+
+计划表（`--plan`）里 F 臂一行给全对表参数，执行前逐字核对：
+`f035` = `68.0 N × 0.3 s`、`Δv_equiv 0.35005 m/s`（对表 `p035`）；`f08` =
+`155.4 N × 0.3 s`、`Δv_equiv 0.79997 m/s`（对表 `p08`）；质量 `58.27723163 kg`
+（pod1 A3 URDF 43 link 质量和，sha256 `79655f05...75d1cc`；W 父本 hard contract 无
+质量字段）；施力点 `pelvis_link_origin`。
+
+### 11.3 F 臂 probe 收口加检（在第 7 步单子之外）
+
+```bash
+PROBE_DIR=/workspace/codexschema/phase1_push_robustness_20260721/probes/<job_id>
+
+# 人话：force_push 配置回显必须在 applied 行出现，间隔/力幅/时长与计划表一致
+ssh <pod> "grep -nE 'force_push' $PROBE_DIR/run.log | tail -n 20"
+
+# 人话：training_contract 的 force_push 合同块必须记录——运行时真实读到的机器人
+# 总质量、换算出的 Δv_equiv、application_point（必填）；与 yaml force_push_contract
+# 对表：质量 58.27723163 kg、f035 Δv 0.35005、f08 Δv 0.79997、application_point
+# 逐字 'pelvis_link_origin'（施在 pelvis link 原点就诚实写 pelvis_link_origin，
+# 不许标 COM——Yikang V9 教训）。任何一项对不上即停发该臂
+ssh <pod> "grep -n 'force_push' $PROBE_DIR/*/params/training_contract.json"
+```
+
+probe 触发预期与速度臂同款纪律：`5–15 s` 间隔在约 `0.96 s` 的 probe 仿真时间内
+**预期零次触发**，只核对配置回显与合同块落盘，不得把"没推过"当失败，也不得当机制
+证据；触发量级留到 science `6900/7200/7700` 观察点核对。
+
+### 11.4 判读纪律
+
+F 臂只做两类比较：与**同 parent 同冲量**速度臂（`f035↔p035`、`f08↔p08`）比 stance/
+倾角响应与回球（实验记录假设 4），与矩阵 `w_c_s0`/`v_c_s0` 对照比绝对水平；判据、
+固定窗口、K100 同卷、停止规则与速度臂逐字同波，不另立门。
 
 本页没有任何真机命令。G07 安全门闭合前不得把训练 argv 改成部署或真实机器人控制。

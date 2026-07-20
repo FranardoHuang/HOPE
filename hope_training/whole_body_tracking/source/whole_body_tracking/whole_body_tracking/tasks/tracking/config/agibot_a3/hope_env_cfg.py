@@ -453,6 +453,12 @@ class HOPEEventCfg(EventCfg):
     # noise/delays only — there is no random shove. Keep friction (physics_material) and CoM (base_com)
     # from the base EventCfg; disable the base interval push.
     push_robot = None
+    # F-axis interval FORCE push pair (default OFF = both None, byte-identical; see
+    # HOPEForcePushCfg). Two terms on purpose: force_push fires the horizontal constant force,
+    # force_push_sweep clears expired forces every control step — Isaac interval events are NOT
+    # called per-step, so expiry needs its own high-frequency term or the force never clears.
+    force_push = None
+    force_push_sweep = None
 
     # link mass randomization (±10%) — HITTER prose randomizes link mass.
     randomize_link_mass = EventTerm(
@@ -543,6 +549,80 @@ def apply_push_robot_event(env_cfg) -> None:
                 for axis, rng in block["velocity_range"].items()
             }
         },
+    )
+
+
+##
+# F-axis interval FORCE push (matched-impulse companion of the Wave-P velocity push; default OFF).
+##
+
+
+@configclass
+class HOPEForcePushCfg:
+    """F 轴持续力推开关组(默认全关 = ``events.force_push``/``force_push_sweep`` 双 None,逐字节 no-op)。
+
+    人话:开了以后,每隔 ``interval_range_s`` 秒(uniform 抽样)朝水平随机方向,对 pelvis_link
+    施加幅度 ``force_n`` 牛的恒力,持续 ``duration_s`` 秒(默认 0.30 s = 15 个控制步 @ 50 Hz)
+    后清零。与速度推档位(p02/p035/p05/p08)按同冲量对表:Δv_equiv = force_n × duration_s /
+    m_robot;机器人总质量在运行时读 articulation 写进训练合同,臂的 ``force_n`` 由主控按真实
+    质量在渲染前算好写死(配置面只有 force_n 与 duration_s,不搞自动换算魔法)。施力点 =
+    pelvis link 原点,合同 application_point 诚实写 "pelvis_link_origin",不许标 COM
+    (Yikang V9 教训)。
+
+    两条启用路径共用 ``training_contract.force_push_event_block`` 的同一套校验/装配
+    (fail-loud,单一来源):(i) cfg 直启 —— ``__post_init__`` 末尾消费本旗标组
+    (``apply_force_push_event``);(ii) YAML/CLI —— train.py 的 ``task.force_push.*`` 覆盖在
+    ``__post_init__`` 之后运行(face_command_obs 时序),自己构造同款事件对(施力 + 清扫)。
+    """
+
+    enable: bool = False
+    interval_range_s: tuple[float, float] = (5.0, 15.0)
+    force_n: float = 0.0
+    duration_s: float = 0.30
+
+
+def apply_force_push_event(env_cfg) -> None:
+    """Consume the ``force_push`` flag group: build the force event + expiry sweeper when enabled.
+
+    人话:把开关组翻译成两个事件——interval 触发的施力事件(``push_by_applying_wrench``)+
+    每个控制步跑一次的到期清扫事件(``sweep_expired_force_pushes``)。Isaac 的 interval 事件
+    不逐步调用,清零必须有高频兜底,否则恒力永远挂着。没开就什么都不动(两个事件都保持
+    None,行为逐字节不变)。Idempotent — train.py 的 task.force_push 覆盖路径和 cfg 直启路径
+    可以都跑一遍,结果相同;矛盾配方(enable=true 但 force_n=0、duration 不是整数个控制步等)
+    在 ``force_push_event_block`` 里 fail-loud。
+    """
+
+    force_push = getattr(env_cfg, "force_push", None)
+    if force_push is None or not force_push.enable:
+        return
+    from whole_body_tracking.utils.training_contract import force_push_event_block
+
+    control_dt_s = float(env_cfg.sim.dt) * int(env_cfg.decimation)
+    block = force_push_event_block(
+        enable=True,
+        interval_range_s=tuple(force_push.interval_range_s),
+        force_n=float(force_push.force_n),
+        duration_s=float(force_push.duration_s),
+        control_dt_s=control_dt_s,
+    )
+    env_cfg.events.force_push = EventTerm(
+        func=mdp.push_by_applying_wrench,
+        mode="interval",
+        interval_range_s=(
+            float(block["interval_range_s"][0]),
+            float(block["interval_range_s"][1]),
+        ),
+        params={
+            "force_n": float(block["force_n"]),
+            "duration_steps": int(block["duration_steps"]),
+            "body_name": str(block["body_name"]),
+        },
+    )
+    env_cfg.events.force_push_sweep = EventTerm(
+        func=mdp.sweep_expired_force_pushes,
+        mode="interval",
+        interval_range_s=(control_dt_s, control_dt_s),
+        params={},
     )
 
 
@@ -775,6 +855,13 @@ class HOPEPingPongAgibotA3EnvCfg(AgibotA3FlatEnvCfg):
     # __post_init__ 之后运行并自己构造 EventTerm(face_command_obs 时序);这里的旗标由
     # __post_init__ 末尾的 apply_push_robot_event 消费(cfg 直启路径)。
     push: HOPEPushRobotCfg = HOPEPushRobotCfg()
+    # F-axis interval FORCE push (DEFAULT OFF = events.force_push/force_push_sweep stay None,
+    # byte-identical). 人话:训练时每隔几秒朝水平随机方向对 pelvis_link 施加持续 duration_s
+    # 的恒力,与速度推同冲量可比(Δv_equiv = F·Δt/m 记进合同);见 HOPEForcePushCfg。
+    # train.py 的 task.force_push.* 覆盖在 __post_init__ 之后运行并自己构造事件对
+    # (face_command_obs 时序);这里的旗标由 __post_init__ 末尾的 apply_force_push_event
+    # 消费(cfg 直启路径)。
+    force_push: HOPEForcePushCfg = HOPEForcePushCfg()
     commands: HOPECommandsCfg = HOPECommandsCfg()
     observations: HOPEObservationsCfg = HOPEObservationsCfg()
     rewards: HOPERewardsCfg = HOPERewardsCfg()
@@ -835,6 +922,11 @@ class HOPEPingPongAgibotA3EnvCfg(AgibotA3FlatEnvCfg):
         # __post_init__ and builds the term itself. Both share the same validator/assembly
         # (training_contract.push_robot_event_block), so the two paths cannot drift.
         apply_push_robot_event(self)
+        # F-axis interval FORCE push (defaults OFF = events.force_push/force_push_sweep stay
+        # None, byte-identical). Same two-path wiring as the velocity push: this consumes the
+        # cfg-flag spelling, train.py's task.force_push override runs AFTER this __post_init__
+        # and builds the term pair itself; both share training_contract.force_push_event_block.
+        apply_force_push_event(self)
 
 
 @configclass

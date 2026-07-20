@@ -496,6 +496,277 @@ def _push_robot_event_contract(env_cfg) -> dict | None:
     return block
 
 
+# YAML keys under `force_push:` (F-axis interval FORCE push; matched-impulse companion of the
+# velocity push, default OFF = no force push, byte-identical to every running matrix cell).
+# Same fail-loud contract as _PUSH_KEYS: every key must be whitelisted here AND consumed below.
+_FORCE_PUSH_KEYS = ("enable", "interval_range_s", "force_n", "duration_s")
+
+
+def _force_push_control_dt_s(env_cfg) -> float:
+    """Read the control step length (sim.dt x decimation) off the composed env cfg, fail-closed."""
+
+    sim = getattr(env_cfg, "sim", None)
+    dt = None if sim is None else getattr(sim, "dt", None)
+    decimation = getattr(env_cfg, "decimation", None)
+    if (
+        isinstance(dt, bool)
+        or not isinstance(dt, (int, float))
+        or not math.isfinite(float(dt))
+        or float(dt) <= 0.0
+        or isinstance(decimation, bool)
+        or type(decimation) is not int
+        or decimation < 1
+    ):
+        raise _OverrideError(
+            "task.force_push requires a composed env cfg with finite sim.dt > 0 and "
+            f"integer decimation >= 1, got dt={dt!r} decimation={decimation!r}"
+        )
+    return float(dt) * int(decimation)
+
+
+def _apply_force_push_task_override(env_cfg, task, applied) -> None:
+    """Translate the default-off ``task.force_push.*`` surface into the force-push event pair.
+
+    人话:训练时每隔几秒朝水平随机方向对 pelvis_link 施加持续 ``duration_s`` 秒的恒力(推底座
+    练抗扰),与速度推档位按同冲量对表(Δv_equiv = F·Δt/m,运行时算好写进合同)。An absent
+    ``task.force_push`` section (all currently running matrix cells) is a byte-for-byte no-op:
+    ``events.force_push`` and ``events.force_push_sweep`` both stay ``None``.  ``enable=false``
+    may not carry dormant fields; ``enable=true`` requires the COMPLETE recipe (interval +
+    force_n + duration_s) so every arm states its push explicitly.  Consistency is validated by
+    ``training_contract.force_push_event_block`` — the single assembly source shared with the
+    env-cfg flag path (hope_env_cfg.apply_force_push_event) and the schema-3 validator.  The
+    sweeper term is wired HERE together with the force term: Isaac interval events are not
+    called per step, so expiry needs its own high-frequency term or the force never clears.
+    """
+
+    node = _get(task, "force_push")
+    if node is None:
+        return
+    try:
+        node.keys()
+    except Exception as exc:
+        raise _OverrideError(f"task.force_push must be a mapping, got {node!r}") from exc
+    _check_unknown_keys(node, _FORCE_PUSH_KEYS, "task.force_push")
+    enable_raw = _get(node, "enable")
+    if enable_raw is None:
+        raise _OverrideError("task.force_push must explicitly set enable=true|false")
+    enable = _as_explicit_bool(enable_raw, "task.force_push.enable")
+    if not enable:
+        dormant = sorted(
+            key
+            for key in _FORCE_PUSH_KEYS
+            if key != "enable" and _get(node, key) is not None
+        )
+        if dormant:
+            raise _OverrideError(
+                f"task.force_push.enable=false may not carry dormant force-push fields "
+                f"{dormant} — a disabled push with a loaded force/duration is a config "
+                "error; delete them or set enable=true"
+            )
+        applied.append("force_push.enable=False (historical no-force-push path)")
+        return
+    missing = sorted(key for key in _FORCE_PUSH_KEYS if _get(node, key) is None)
+    if missing:
+        raise _OverrideError(
+            f"task.force_push.enable=true requires the complete force-push recipe; "
+            f"missing {missing}"
+        )
+    raw_interval = _get(node, "interval_range_s")
+    try:
+        interval_items = list(raw_interval)
+    except TypeError as exc:
+        raise _OverrideError(
+            "task.force_push.interval_range_s must be a [lo, hi] pair of seconds, "
+            f"got {raw_interval!r}"
+        ) from exc
+    if len(interval_items) != 2:
+        raise _OverrideError(
+            "task.force_push.interval_range_s must be a [lo, hi] pair of seconds, "
+            f"got {raw_interval!r}"
+        )
+    interval = tuple(
+        _as_exact_float(value, f"task.force_push.interval_range_s[{index}]")
+        for index, value in enumerate(interval_items)
+    )
+    force_n = _as_exact_float(_get(node, "force_n"), "task.force_push.force_n")
+    duration_s = _as_exact_float(_get(node, "duration_s"), "task.force_push.duration_s")
+    control_dt_s = _force_push_control_dt_s(env_cfg)
+    from whole_body_tracking.utils.training_contract import force_push_event_block
+
+    try:
+        block = force_push_event_block(
+            enable=True,
+            interval_range_s=interval,
+            force_n=force_n,
+            duration_s=duration_s,
+            control_dt_s=control_dt_s,
+        )
+    except ValueError as exc:
+        raise _OverrideError(f"task.force_push: {exc}") from exc
+    _require(
+        hasattr(env_cfg, "events")
+        and hasattr(env_cfg.events, "force_push")
+        and hasattr(env_cfg.events, "force_push_sweep"),
+        "events.force_push + events.force_push_sweep (task.force_push.enable=true)",
+    )
+    from isaaclab.managers import EventTermCfg as _EventTerm
+
+    from whole_body_tracking.tasks.tracking import mdp as _mdp
+
+    env_cfg.events.force_push = _EventTerm(
+        func=_mdp.push_by_applying_wrench,
+        mode="interval",
+        interval_range_s=(
+            float(block["interval_range_s"][0]),
+            float(block["interval_range_s"][1]),
+        ),
+        params={
+            "force_n": float(block["force_n"]),
+            "duration_steps": int(block["duration_steps"]),
+            "body_name": str(block["body_name"]),
+        },
+    )
+    env_cfg.events.force_push_sweep = _EventTerm(
+        func=_mdp.sweep_expired_force_pushes,
+        mode="interval",
+        interval_range_s=(control_dt_s, control_dt_s),
+        params={},
+    )
+    force_push_flags = getattr(env_cfg, "force_push", None)
+    if force_push_flags is not None:  # keep the descriptive HOPE cfg flag group honest
+        force_push_flags.enable = True
+        force_push_flags.interval_range_s = (
+            float(block["interval_range_s"][0]),
+            float(block["interval_range_s"][1]),
+        )
+        force_push_flags.force_n = float(force_n)
+        force_push_flags.duration_s = float(duration_s)
+    applied.append(
+        "events.force_push=interval "
+        f"{float(block['interval_range_s'][0])}-{float(block['interval_range_s'][1])}s "
+        f"F={float(force_n)}N dur={float(duration_s)}s "
+        f"({int(block['duration_steps'])} steps @ pelvis_link origin) "
+        "+ per-control-step expiry sweep (F-axis force push)"
+    )
+
+
+def _force_push_event_contract(env_cfg, env) -> dict | None:
+    """Bind the (post-override) F-axis force-push event pair into the hard contract.
+
+    人话:合同照抄实际生效的力推事件,并记录运行时真实读到的机器人总质量与换算出的
+    Δv_equiv = force_n × duration_s / m_robot,供与速度推档位(p02/p035/p05/p08)对表。
+    质量读的是 articulation 的初始质量表(data.default_mass,USD 名义值;逐 env 的
+    randomize_link_mass ±10% 让每个 env 的真实 Δv 也散 ±10%,合同记名义值)。没开
+    (= 两个事件都 None,所有在跑矩阵格)就不写这个块,合同字节与历史逐位相同。半接线
+    (旗标开着但事件没挂 / 施力事件在但清扫事件缺 —— 力永远清不掉)与走样的事件形状一律
+    REFUSED,绝不静默漏出合同。
+    """
+
+    events = getattr(env_cfg, "events", None)
+    term = None if events is None else getattr(events, "force_push", None)
+    sweep = None if events is None else getattr(events, "force_push_sweep", None)
+    flags = getattr(env_cfg, "force_push", None)
+    if term is None:
+        if flags is not None and bool(getattr(flags, "enable", False)):
+            raise RuntimeError(
+                "force_push.enable=true but events.force_push is None (half-wired force push)"
+            )
+        if sweep is not None:
+            raise RuntimeError(
+                "events.force_push_sweep is active without events.force_push "
+                "(half-wired force push)"
+            )
+        return None
+    if flags is None:
+        raise RuntimeError(
+            "events.force_push is active but the descriptive force_push flag group is "
+            "missing (half-wired force push)"
+        )
+    if not bool(getattr(flags, "enable", False)):
+        raise RuntimeError(
+            "events.force_push is active but force_push.enable=false (half-wired force push)"
+        )
+    if sweep is None:
+        raise RuntimeError(
+            "events.force_push without events.force_push_sweep — expired forces would "
+            "never clear (half-wired force push)"
+        )
+    func = getattr(term, "func", None)
+    func_name = func if isinstance(func, str) else getattr(func, "__name__", None)
+    if func_name != "push_by_applying_wrench":
+        raise RuntimeError(
+            f"force_push event func must be push_by_applying_wrench, got {func_name!r}"
+        )
+    if getattr(term, "mode", None) != "interval":
+        raise RuntimeError(
+            f"force_push event mode must be 'interval', got {getattr(term, 'mode', None)!r}"
+        )
+    sweep_func = getattr(sweep, "func", None)
+    sweep_name = (
+        sweep_func if isinstance(sweep_func, str) else getattr(sweep_func, "__name__", None)
+    )
+    if sweep_name != "sweep_expired_force_pushes":
+        raise RuntimeError(
+            f"force_push sweep func must be sweep_expired_force_pushes, got {sweep_name!r}"
+        )
+    if getattr(sweep, "mode", None) != "interval":
+        raise RuntimeError("force_push sweep mode must be 'interval'")
+    params = getattr(term, "params", None)
+    if not isinstance(params, dict) or set(params) != {
+        "force_n", "duration_steps", "body_name",
+    }:
+        raise RuntimeError(
+            "force_push event params must be exactly {force_n, duration_steps, body_name}"
+        )
+    control_dt_s = _force_push_control_dt_s(env_cfg)
+    sweep_interval = tuple(float(v) for v in sweep.interval_range_s)
+    if sweep_interval != (control_dt_s, control_dt_s):
+        raise RuntimeError(
+            "force_push sweep interval must be exactly (control_dt, control_dt) so expiry "
+            f"runs every control step, got {sweep_interval!r} vs dt={control_dt_s!r}"
+        )
+    interval = tuple(float(value) for value in term.interval_range_s)
+    duration_s = float(getattr(flags, "duration_s"))
+    from whole_body_tracking.utils.training_contract import (
+        bind_force_push_runtime_mass,
+        force_push_event_block,
+    )
+
+    block = force_push_event_block(
+        enable=True,
+        interval_range_s=interval,
+        force_n=float(params["force_n"]),
+        duration_s=duration_s,
+        control_dt_s=control_dt_s,
+    )
+    if (
+        str(params["body_name"]) != block["body_name"]
+        or int(params["duration_steps"]) != block["duration_steps"]
+        or float(getattr(flags, "force_n")) != block["force_n"]
+        or tuple(float(v) for v in getattr(flags, "interval_range_s")) != tuple(
+            block["interval_range_s"]
+        )
+    ):
+        raise RuntimeError(
+            "force_push event term disagrees with the descriptive flag group / canonical "
+            "assembly (body_name, duration_steps, force_n or interval drifted)"
+        )
+    robot = env.scene["robot"]
+    masses = getattr(getattr(robot, "data", None), "default_mass", None)
+    if masses is None:
+        raise RuntimeError(
+            "force_push contract requires articulation data.default_mass to record the "
+            "runtime robot mass"
+        )
+    try:
+        robot_mass_kg = float(masses[0].sum())
+    except Exception as exc:
+        raise RuntimeError(
+            "force_push contract could not sum articulation data.default_mass"
+        ) from exc
+    return bind_force_push_runtime_mass(block, robot_mass_kg=robot_mass_kg)
+
+
 def _resolve_lateral_training_runtime(env):
     """Return ``(cfg, hard_contract)`` for an enabled cell, else ``None``."""
 
@@ -1442,6 +1713,7 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
         env_cfg, runtime_facts
     )
     push_robot_contract = _push_robot_event_contract(env_cfg)
+    force_push_contract = _force_push_event_contract(env_cfg, env)
     if (
         post_swing_settle_contract is not None
         and post_swing_settle_contract["enabled"]
@@ -1693,6 +1965,11 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
             {}
             if push_robot_contract is None
             else {"push_robot_event": push_robot_contract}
+        ),
+        **(
+            {}
+            if force_push_contract is None
+            else {"force_push_event": force_push_contract}
         ),
         **(
             {}
@@ -2265,6 +2542,11 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
     # 机器人一把练抗扰平衡;论文依据 PACE(±0.2 m/s 每 5–15 s)与 BeyondMimic(±0.5 m/s +
     # rpy 角速度每 1–3 s)。
     _apply_push_robot_task_override(env_cfg, task, applied)
+
+    # F-axis interval FORCE push (task.force_push.*; default OFF/absent = events.force_push +
+    # events.force_push_sweep both stay None). 人话:每隔几秒朝水平随机方向对 pelvis_link 施加
+    # 持续 duration_s 的恒力,与速度推同冲量可比(Δv_equiv = F·Δt/m 运行时记进合同)。
+    _apply_force_push_task_override(env_cfg, task, applied)
 
     # env base (num_envs is applied earlier via parse_env_cfg). Read every value through _get so the
     # logic works on both OmegaConf nodes (runtime) and plain dicts (unit tests).

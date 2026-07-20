@@ -186,21 +186,21 @@ def test_controls_point_at_matrix_no_push_baseline(tmp_path):
 # ---------------------------------------------------------------- jobs / arms
 
 
-def test_exactly_14_unique_jobs():
+def test_exactly_18_unique_jobs():
     queue = Q.load_queue(QUEUE)
     jobs = queue["jobs"]
-    assert len(jobs) == 14
-    assert len({job["id"] for job in jobs}) == 14
-    assert len({job["run_name"] for job in jobs}) == 14
-    assert len({job["run_dir"] for job in jobs}) == 14
+    assert len(jobs) == 18
+    assert len({job["id"] for job in jobs}) == 18
+    assert len({job["run_name"] for job in jobs}) == 18
+    assert len({job["run_dir"] for job in jobs}) == 18
 
 
 def test_parent_push_coverage_complete():
     queue = Q.load_queue(QUEUE)
     cells = {(job["parent"], job["push"]) for job in queue["jobs"]}
-    assert len(cells) == 14
+    assert len(cells) == 18
     for parent in ("W", "V"):
-        for push in ("p02", "p035", "p05", "yaw", "ang", "fast"):
+        for push in ("p02", "p035", "p05", "p08", "yaw", "ang", "fast", "f035", "f08"):
             assert (parent, push) in cells
 
 
@@ -248,13 +248,17 @@ def test_launch_order_frozen_and_interleaved(tmp_path):
     order = queue["launch_order"]
     assert order == list(Q.LAUNCH_ORDER)
     assert sorted(order) == sorted(job["id"] for job in queue["jobs"])
-    # parent 全程交错，前 6 位覆盖全部 6 档。
+    # parent 全程交错，前 6 位覆盖全部 6 个基础速度档。
     parents = [job_id.split("_", 1)[0] for job_id in order]
     for left, right in zip(parents, parents[1:]):
         assert left != right
     assert {job_id.split("_", 1)[1] for job_id in order[:6]} == {
         "p02", "p035", "p05", "yaw", "ang", "fast",
     }
+    # F 臂（力推）排在全部 14 条速度臂之后，前 2 位 F 臂覆盖两个力推档。
+    assert all(job_id.split("_", 1)[1] not in ("f035", "f08") for job_id in order[:14])
+    assert {job_id.split("_", 1)[1] for job_id in order[14:16]} == {"f035", "f08"}
+    assert {job_id.split("_", 1)[1] for job_id in order[14:]} == {"f035", "f08"}
     value = _raw()
     value["launch_order"][0], value["launch_order"][1] = (
         value["launch_order"][1], value["launch_order"][0]
@@ -320,7 +324,7 @@ def test_push_keys_match_train_py_whitelist():
         "enable", "interval_range_s", "vel_xy_mps", "ang_vel_radps", "ang_axes",
     }
     queue = Q.load_queue(QUEUE)
-    for level in ("p02", "p035", "p05", "yaw", "ang", "fast"):
+    for level in ("p02", "p035", "p05", "p08", "yaw", "ang", "fast"):
         used = {
             raw.split("=", 1)[0].lstrip("+").removeprefix("task.push.")
             for raw in queue["mechanisms"]["push"][level]["overrides"]
@@ -328,9 +332,11 @@ def test_push_keys_match_train_py_whitelist():
         assert used == whitelist
 
 
-def test_push_enabled_in_every_arm_both_stages():
+def test_push_enabled_in_every_velocity_arm_both_stages():
     queue = Q.load_queue(QUEUE)
     for job in queue["jobs"]:
+        if job["push"] in ("f035", "f08"):
+            continue
         for stage in ("probe", "science"):
             compiled = _compiled(queue, job["id"], stage)
             assert compiled["task.push.enable"] == "true"
@@ -375,6 +381,163 @@ def test_push_level_drift_rejected(tmp_path):
     overrides[index] = "++task.push.vel_xy_mps=0.6"
     with pytest.raises(Q.QueueError):
         _load(tmp_path, value)
+
+
+# ---------------------------------------------------------------- F 轴（力推）
+
+
+def test_force_levels_exact_verbatim():
+    queue = Q.load_queue(QUEUE)
+    assert queue["mechanisms"]["push"]["f035"]["overrides"] == [
+        "++task.force_push.enable=true",
+        "++task.force_push.interval_range_s=[5.0,15.0]",
+        "++task.force_push.force_n=68.0",
+        "++task.force_push.duration_s=0.3",
+    ]
+    assert queue["mechanisms"]["push"]["f08"]["overrides"] == [
+        "++task.force_push.enable=true",
+        "++task.force_push.interval_range_s=[5.0,15.0]",
+        "++task.force_push.force_n=155.4",
+        "++task.force_push.duration_s=0.3",
+    ]
+
+
+def test_force_impulse_matches_velocity_levels():
+    # 同冲量对表：Δv_equiv = force_n x duration / m 必须对上 p035/p08 的速度档。
+    queue = Q.load_queue(QUEUE)
+    contract = queue["force_push_contract"]
+    assert contract["robot_mass_kg"] == Q.ROBOT_MASS_KG == 58.27723163
+    assert contract["duration_s"] == Q.FORCE_PUSH_DURATION_S == 0.3
+    assert contract["duration_control_steps"] == 15
+    for level, (force, target_dv) in Q.EXPECTED_FORCE_LEVELS.items():
+        computed = force * Q.FORCE_PUSH_DURATION_S / Q.ROBOT_MASS_KG
+        assert abs(computed - target_dv) < 0.005
+        assert abs(contract["delta_v_equiv_mps"][level] - computed) < 1e-4
+    assert contract["matched_velocity_levels"] == {"f035": "p035", "f08": "p08"}
+
+
+def test_force_contract_application_point_honest():
+    # 施力点诚实标注（Yikang V9 教训）：施在 pelvis link 原点就写 pelvis_link_origin，
+    # 不许标 COM；token 逐字 = training_contract.FORCE_PUSH_APPLICATION_POINT。
+    queue = Q.load_queue(QUEUE)
+    assert queue["force_push_contract"]["application_point"] == "pelvis_link_origin"
+    contract_py = (
+        ROOT / "hope_training" / "whole_body_tracking" / "source"
+        / "whole_body_tracking" / "whole_body_tracking" / "utils"
+        / "training_contract.py"
+    )
+    if contract_py.exists():
+        text = contract_py.read_text(encoding="utf-8")
+        match = re.search(
+            r"FORCE_PUSH_APPLICATION_POINT\s*=\s*[\"']([^\"']+)[\"']", text
+        )
+        if match is not None:
+            assert match.group(1) == "pelvis_link_origin"
+
+
+def test_force_contract_application_point_drift_rejected(tmp_path):
+    value = _raw()
+    value["force_push_contract"]["application_point"] = "pelvis COM"
+    with pytest.raises(Q.QueueError, match="application_point"):
+        _load(tmp_path, value)
+
+
+def test_force_contract_mass_drift_rejected(tmp_path):
+    value = _raw()
+    value["force_push_contract"]["robot_mass_kg"] = 60.0
+    with pytest.raises(Q.QueueError, match="robot_mass_kg"):
+        _load(tmp_path, value)
+
+
+def test_force_level_force_drift_rejected(tmp_path):
+    value = _raw()
+    overrides = value["mechanisms"]["push"]["f035"]["overrides"]
+    index = overrides.index("++task.force_push.force_n=68.0")
+    overrides[index] = "++task.force_push.force_n=70.0"
+    with pytest.raises(Q.QueueError):
+        _load(tmp_path, value)
+
+
+def test_force_level_duration_drift_rejected(tmp_path):
+    value = _raw()
+    overrides = value["mechanisms"]["push"]["f08"]["overrides"]
+    index = overrides.index("++task.force_push.duration_s=0.3")
+    overrides[index] = "++task.force_push.duration_s=0.5"
+    with pytest.raises(Q.QueueError):
+        _load(tmp_path, value)
+
+
+def test_force_arm_single_variable_no_velocity_push_keys():
+    # 单变量：F 臂 override 不含任何 task.push.* 键（velocity push 缺席=逐字节
+    # no-op），速度臂反向不含任何 task.force_push.* 键。
+    queue = Q.load_queue(QUEUE)
+    for job in queue["jobs"]:
+        for stage in ("probe", "science"):
+            compiled = _compiled(queue, job["id"], stage)
+            if job["push"] in ("f035", "f08"):
+                assert compiled["task.force_push.enable"] == "true"
+                assert compiled["task.force_push.duration_s"] == "0.3"
+                assert not any(key.startswith("task.push.") for key in compiled)
+            else:
+                assert compiled["task.push.enable"] == "true"
+                assert not any(key.startswith("task.force_push.") for key in compiled)
+
+
+def test_force_arm_with_velocity_push_key_rejected(tmp_path):
+    # 往 F 臂塞一个 task.push.* 键（哪怕 enable=false）也必须被拒——冻结逐字校验兜底。
+    value = _raw()
+    value["mechanisms"]["push"]["f035"]["overrides"].append("++task.push.enable=false")
+    with pytest.raises(Q.QueueError):
+        _load(tmp_path, value)
+
+
+def test_force_keys_match_train_py_whitelist_when_present():
+    # 键面真源交叉断言：wiring 是并行作业。train.py 一旦落盘 _FORCE_PUSH_KEYS，
+    # 必须逐字等于冻结四键；尚未落盘时，fail-closed 要求渲染闸门必须还关着
+    # （wiring_confirmed_in_source_commit 不得为 true）。
+    train_py = ROOT / "hope_training" / "whole_body_tracking" / "scripts" / "train.py"
+    text = train_py.read_text(encoding="utf-8")
+    match = re.search(r"_FORCE_PUSH_KEYS\s*=\s*\(([^)]*)\)", text)
+    queue = Q.load_queue(QUEUE)
+    if match is None:
+        assert queue["force_push_contract"]["wiring_confirmed_in_source_commit"] is not True, (
+            "train.py has no _FORCE_PUSH_KEYS wiring yet, so the F-arm render gate "
+            "must stay closed"
+        )
+        return
+    whitelist = {
+        item.strip().strip("\"'") for item in match.group(1).split(",") if item.strip()
+    }
+    assert whitelist == {"enable", "interval_range_s", "force_n", "duration_s"}
+    for level in ("f035", "f08"):
+        used = {
+            raw.split("=", 1)[0].lstrip("+").removeprefix("task.force_push.")
+            for raw in queue["mechanisms"]["push"][level]["overrides"]
+        }
+        assert used == whitelist
+
+
+def test_force_arm_render_locked_until_wiring_confirmed(tmp_path):
+    # 渲染闸门：wiring_confirmed_in_source_commit=false 时 F 臂渲染被拒，
+    # 速度臂不受影响；翻 true 后 F 臂渲染出带四键的完整命令。
+    value = _rendered()
+    assert value["force_push_contract"]["wiring_confirmed_in_source_commit"] is False
+    queue = _load(tmp_path, value)
+    with pytest.raises(Q.QueueError, match="wiring"):
+        Q.render_command(queue, _job(queue, "w_f035"), "probe", "pod1", 0)
+    with pytest.raises(Q.QueueError, match="wiring"):
+        Q.render_command(queue, _job(queue, "v_f08"), "science", "pod2", 1)
+    velocity = Q.render_command(queue, _job(queue, "w_p02"), "science", "pod1", 0)
+    assert velocity.startswith("ssh ")
+
+    value = _rendered()
+    value["force_push_contract"]["wiring_confirmed_in_source_commit"] = True
+    queue = _load(tmp_path, value)
+    command = Q.render_command(queue, _job(queue, "w_f035"), "science", "pod1", 0)
+    assert "task.force_push.enable=true" in command
+    assert "task.force_push.force_n=68.0" in command
+    assert "task.force_push.duration_s=0.3" in command
+    assert "task.push." not in command
 
 
 # ---------------------------------------------------------------- commit gate
@@ -552,7 +715,7 @@ def test_probe_budget_and_disjoint_namespaces(tmp_path):
     assert science_dir.endswith("/runs/v_p05")
 
 
-def test_all_12_arms_compile_without_duplicate_keys(tmp_path):
+def test_all_18_arms_compile_without_duplicate_keys(tmp_path):
     queue = _load(tmp_path, _rendered())
     for job in queue["jobs"]:
         for stage in ("probe", "science"):
@@ -614,7 +777,7 @@ def test_remote_body_verifies_commit_and_no_clobber(tmp_path):
 # ---------------------------------------------------------------- plan / checklist
 
 
-def test_plan_lists_12_rows_and_fill_order():
+def test_plan_lists_18_rows_and_fill_order():
     queue = Q.load_queue(QUEUE)
     plan = Q.cmd_plan(queue)
     for job in queue["jobs"]:
@@ -626,8 +789,25 @@ def test_plan_lists_12_rows_and_fill_order():
     assert "axes=rpy" in plan
     assert "axes=yaw" in plan
     assert "interval=1.0-3.0s" in plan
+    # F 轴行：力推参数、同冲量对表与施力点诚实标注都要上计划表。
+    assert "force=68.0N x 0.3s" in plan
+    assert "force=155.4N x 0.3s" in plan
+    assert "Δv_equiv=0.35005m/s" in plan
+    assert "Δv_equiv=0.79997m/s" in plan
+    assert "point=pelvis_link_origin" in plan
+    assert "58.27723163" in plan
     for index, job_id in enumerate(queue["launch_order"], start=1):
         assert f"{index:2d}. {job_id}" in plan
+
+
+def test_plan_shows_force_render_gate_state():
+    queue = Q.load_queue(QUEUE)
+    plan = Q.cmd_plan(queue)
+    if queue["force_push_contract"]["wiring_confirmed_in_source_commit"]:
+        assert "F 臂渲染: 已解锁" in plan
+    else:
+        assert "F 臂渲染: 锁定" in plan
+        assert "_FORCE_PUSH_KEYS" in plan
 
 
 def test_checklist_contains_inherited_guards_and_push_wiring_check():
@@ -646,6 +826,14 @@ def test_checklist_contains_inherited_guards_and_push_wiring_check():
     assert "task.push" in checklist
     assert "p1btm_w_c_s0_seed3_20260720" in checklist
     assert "_r2" in checklist
+    # F 轴加检条目：远端 _FORCE_PUSH_KEYS 逐字核对、渲染闸门、合同对表与诚实施力点。
+    assert "_FORCE_PUSH_KEYS" in checklist
+    assert "task.force_push" in checklist
+    assert "wiring_confirmed_in_source_commit" in checklist
+    assert "pelvis_link_origin" in checklist
+    assert "58.27723163" in checklist
+    assert "0.35005" in checklist
+    assert "0.79997" in checklist
 
 
 def test_cli_plan_and_checklist_succeed_with_placeholder(capsys):

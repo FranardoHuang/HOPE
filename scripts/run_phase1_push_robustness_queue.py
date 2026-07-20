@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-"""渲染 Wave P 14 臂 {W,V}x{p02,p035,p05,p08,yaw,ang,fast} push 鲁棒性队列的 SSH 命令。
+"""渲染 Wave P 18 臂 {W,V}x{p02,p035,p05,p08,yaw,ang,fast,f035,f08} push 队列的 SSH 命令。
 
-人话：这个程序只做三件事——(1) ``--plan`` 打印 12 臂计划表和推荐填充顺序；(2)
+人话：这个程序只做三件事——(1) ``--plan`` 打印 18 臂计划表和推荐填充顺序；(2)
 ``--render-stage probe|science --render-job <id> --pod <pod1|pod2> --gpu <0|1|2>``
 输出单臂的逐字 SSH 命令给人工核对后执行（本波不写死 pod/gpu，空槽即填，目标卡
 在渲染时注入）；(3) ``--checklist`` 输出发射前依赖核对单。它自己绝不 SSH、绝不
 发信号、绝不写远端。所有校验 fail-closed：YAML 缺键、占位 commit、C+S0 配方漂移、
 push 档位漂移、ang_axes 与角速度幅度错配、非法 pod/gpu、run_name 重复，都直接拒绝。
+
+F 轴（f035/f08）＝间隔触发的持续水平力推 pelvis link 原点，与速度档同冲量对表
+（Δv_equiv = force_n x duration_s / m，质量真源见 yaml force_push_contract）；
+F 臂只写 task.force_push.* 四键、不写任何 task.push.* 键（单变量），且在
+force_push_contract.wiring_confirmed_in_source_commit=true 之前渲染被锁死。
 
 温度/稳定配方固定为矩阵 C+S0（无 push 对照 = 矩阵 w_c_s0/v_c_s0，不重复买）。
 远端命令不使用 scripts/launch_kit_training_locked.sh（其 180 s stale 门杀死过
@@ -35,22 +40,24 @@ PLACEHOLDER_COMMIT = "PENDING_EXACT_COMMIT"
 KIT_BOOT_LOCK = "/workspace/bin/kit_boot_lock.sh"
 PARENT_ITERATION = 6700
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
-JOB_ID = re.compile(r"^(w|v)_(p02|p035|p05|p08|yaw|ang|fast)$")
+JOB_ID = re.compile(r"^(w|v)_(p02|p035|p05|p08|yaw|ang|fast|f035|f08)$")
 HYDRA_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
-PUSH_ORDER = ("p02", "p035", "p05", "p08", "yaw", "ang", "fast")
+PUSH_ORDER = ("p02", "p035", "p05", "p08", "yaw", "ang", "fast", "f035", "f08")
 PARENT_ORDER = ("W", "V")
 VALID_GPUS = (0, 1, 2)
 # 同卡在跑 compute 进程必须 < 4 才允许发射（逐字继承矩阵预检）。
 MAX_PROCS_PER_GPU = 4
 
-# 人话：空槽即填的冻结顺序——parent 与档位交错，前 6 位覆盖全部 6 档。
+# 人话：空槽即填的冻结顺序——parent 与档位交错，前 6 位覆盖 6 个速度档；
+# F 臂（力推）排在全部速度臂之后，前 2 位 F 臂覆盖两个力推档。
 LAUNCH_ORDER = (
     "w_p02", "v_p035", "w_p05", "v_yaw", "w_ang", "v_fast",
     "w_p035", "v_p02", "w_yaw", "v_p05", "w_fast", "v_ang",
     "w_p08", "v_p08",
+    "w_f035", "v_f08", "w_f08", "v_f035",
 )
 
 EXPECTED_PARENT_SHA256 = {
@@ -130,6 +137,19 @@ def _push_overrides(interval: str, xy: str, ang: str, axes: str) -> list[str]:
     ]
 
 
+def _force_push_overrides(interval: str, force: str, duration: str) -> list[str]:
+    # F 轴键面与并行 wiring agent 冻结设计逐字一致：
+    # task.force_push.{enable, interval_range_s, force_n, duration_s}，默认全关、
+    # 缺席=逐字节 no-op。F 臂绝不写 task.push.*（单变量）。渲染前仍须 grep 远端
+    # checkout 在 exact commit 上的 train.py 核对 _FORCE_PUSH_KEYS 逐字一致。
+    return [
+        "++task.force_push.enable=true",
+        f"++task.force_push.interval_range_s={interval}",
+        f"++task.force_push.force_n={force}",
+        f"++task.force_push.duration_s={duration}",
+    ]
+
+
 EXPECTED_PUSH = {
     "p02": _push_overrides("[5.0,15.0]", "0.2", "0.0", "none"),
     "p035": _push_overrides("[5.0,15.0]", "0.35", "0.0", "none"),
@@ -139,11 +159,30 @@ EXPECTED_PUSH = {
     "fast": _push_overrides("[1.0,3.0]", "0.35", "0.0", "none"),
     # 2026-07-21 追加：±0.5 在 W 父本零摔，补 ±0.8 上界框住"必须应对"区（capture point ~26 cm）。
     "p08": _push_overrides("[5.0,15.0]", "0.8", "0.0", "none"),
+    # 2026-07-21 追加 F 轴：持续水平力推 pelvis link 原点，同冲量对表 p035/p08。
+    "f035": _force_push_overrides("[5.0,15.0]", "68.0", "0.3"),
+    "f08": _force_push_overrides("[5.0,15.0]", "155.4", "0.3"),
 }
 ALLOWED_XY_MAGNITUDES = (0.2, 0.35, 0.5, 0.8)
 ALLOWED_ANGULAR_MAGNITUDES = (0.0, 0.5)
 # train.py/training_contract 的合法轴选择（PUSH_ROBOT_ANG_AXES 同款）。
 ALLOWED_ANG_AXES = ("none", "yaw", "rpy")
+
+# F 轴（力推）冻结常数。质量真源：pod1 A3 URDF 43 个 link 质量和（2026-07-21 只读
+# 核对，sha256 79655f05d204c24f028778425aa971410773d1f8bbbd214de6fdb8f8ae75d1cc）；
+# W 父本 hard contract training_contract.json 无质量字段，故以 URDF 为准。
+ROBOT_MASS_KG = 58.27723163
+FORCE_PUSH_DURATION_S = 0.3
+FORCE_PUSH_DURATION_STEPS = 15  # 0.30 s / 0.02 s（50 Hz 控制步）
+# level -> (force_n, 对表速度档的 Δv 目标 m/s)；Δv_equiv = force_n x duration / m。
+EXPECTED_FORCE_LEVELS = {"f035": (68.0, 0.35), "f08": (155.4, 0.8)}
+# force_n 已按真实质量取整写死，Δv_equiv 与目标的偏差必须小于 5 mm/s。
+FORCE_IMPULSE_TOLERANCE_MPS = 0.005
+# 施力点诚实标注（Yikang V9 教训）：施在 pelvis link 原点就写 pelvis_link_origin
+# （逐字 = training_contract.FORCE_PUSH_APPLICATION_POINT），不许标 COM。
+EXPECTED_APPLICATION_POINT = "pelvis_link_origin"
+EXPECTED_MATCHED_VELOCITY = {"f035": "p035", "f08": "p08"}
+FORCE_PUSH_KEYS = ("enable", "interval_range_s", "force_n", "duration_s")
 
 EXPECTED_PODS = {
     "pod1": ("162.43.172.171", 18333),
@@ -182,12 +221,14 @@ EXPECTED_ASSETS = {
     "training_question_bank": "/workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_bank_rebind_v2/s1_v4rg_runtime_order_schema3_train_882fea4_rebound.npz",
 }
 
-# science 阶段命令必须含的键（值另行断言）。
+# science 阶段命令必须含的键（值另行断言）；push 家族键按臂族在 _training_argv
+# 内单独断言：速度臂必含 task.push.enable 且无任何 task.force_push.*，F 臂必含
+# task.force_push.enable 且无任何 task.push.*（单变量）。
 REQUIRED_SCIENCE_KEYS = (
     "checkpoint_path", "checkpoint_tolerant", "checkpoint_allow_missing_contract",
     "checkpoint_allow_contract_mismatch", "seed", "num_envs",
     "algo.runner.num_steps_per_env", "max_iterations", "algo.runner.save_interval",
-    "run_name", "device", "logger", "task.push.enable",
+    "run_name", "device", "logger",
 )
 
 
@@ -440,12 +481,54 @@ def _validate_recipe(recipe: dict[str, Any]) -> None:
             )
 
 
+def _validate_force_push(name: str, overrides: Sequence[str]) -> None:
+    """F 轴档位校验：四个 task.force_push.* 键、同冲量对表、绝无 task.push.*。"""
+
+    label = f"mechanisms.push.{name}"
+    compiled = _override_map(overrides, label)
+    if set(compiled) != {
+        "task.force_push.enable", "task.force_push.interval_range_s",
+        "task.force_push.force_n", "task.force_push.duration_s",
+    }:
+        raise QueueError(
+            f"{label} must set exactly the four task.force_push.* frozen-surface keys"
+        )
+    if any(key.startswith("task.push.") for key in compiled):
+        raise QueueError(
+            f"{label} is a force-push level; task.push.* keys are forbidden "
+            "(absent velocity push == byte-for-byte no-op, single variable)"
+        )
+    if compiled["task.force_push.enable"] != "true":
+        raise QueueError(f"{label} must set task.force_push.enable=true")
+    lo, hi = _override_range(overrides, "task.force_push.interval_range_s", label)
+    if not 0.0 < lo < hi:
+        raise QueueError(f"{label} interval must satisfy 0 < min < max")
+    force = _override_value(overrides, "task.force_push.force_n", label)
+    duration = _override_value(overrides, "task.force_push.duration_s", label)
+    expected_force, target_dv = EXPECTED_FORCE_LEVELS[name]
+    if force != expected_force:
+        raise QueueError(
+            f"{label} force_n must be {expected_force} N (frozen by real robot mass)"
+        )
+    if duration != FORCE_PUSH_DURATION_S:
+        raise QueueError(f"{label} duration_s must be {FORCE_PUSH_DURATION_S}")
+    delta_v = force * duration / ROBOT_MASS_KG
+    if abs(delta_v - target_dv) > FORCE_IMPULSE_TOLERANCE_MPS:
+        raise QueueError(
+            f"{label} impulse mismatch: force_n x duration / m = {delta_v:.5f} m/s "
+            f"but the matched velocity level expects {target_dv} m/s"
+        )
+
+
 def _validate_push(name: str, mechanism: dict[str, Any]) -> None:
     _exact_keys(mechanism, {"human_name", "overrides"}, f"mechanisms.push.{name}")
     _text(mechanism["human_name"], f"mechanisms.push.{name}.human_name")
     overrides = _list(mechanism["overrides"], f"mechanisms.push.{name}.overrides")
     if overrides != EXPECTED_PUSH[name]:
         raise QueueError(f"mechanisms.push.{name}.overrides changed from frozen design")
+    if name in EXPECTED_FORCE_LEVELS:
+        _validate_force_push(name, overrides)
+        return
     label = f"mechanisms.push.{name}"
     compiled = _override_map(overrides, label)
     if set(compiled) != {
@@ -482,7 +565,7 @@ def _validate_push(name: str, mechanism: dict[str, Any]) -> None:
 
 
 def _expected_jobs_order() -> list[tuple[str, str, str]]:
-    """冻结的 jobs 排列：先 W 后 V，档位按 p02..fast。"""
+    """冻结的 jobs 排列：先 W 后 V，档位按 p02..fast,f035,f08。"""
 
     result = []
     for parent in PARENT_ORDER:
@@ -493,8 +576,8 @@ def _expected_jobs_order() -> list[tuple[str, str, str]]:
 
 def _validate_jobs(queue: dict[str, Any]) -> None:
     jobs = _list(queue["jobs"], "jobs")
-    if len(jobs) != 14:
-        raise QueueError("the queue must contain exactly 14 jobs")
+    if len(jobs) != 18:
+        raise QueueError("the queue must contain exactly 18 jobs")
     ids: set[str] = set()
     names: set[str] = set()
     dirs: set[str] = set()
@@ -507,7 +590,8 @@ def _validate_jobs(queue: dict[str, Any]) -> None:
         match = JOB_ID.fullmatch(job_id)
         if match is None:
             raise QueueError(
-                f"jobs[{index}].id must match w|v_p02|p035|p05|yaw|ang|fast: {job_id!r}"
+                f"jobs[{index}].id must match "
+                f"w|v_p02|p035|p05|p08|yaw|ang|fast|f035|f08: {job_id!r}"
             )
         parent, push = match.group(1).upper(), match.group(2)
         if (job["parent"], job["push"]) != (parent, push):
@@ -531,10 +615,10 @@ def _validate_jobs(queue: dict[str, Any]) -> None:
             raise QueueError(f"push cell duplicated: {cell}")
         cells.add(cell)
         observed.append((job_id, parent, push))
-    if len(cells) != 14:
+    if len(cells) != 18:
         raise QueueError("parent x push coverage is incomplete")
     if observed != _expected_jobs_order():
-        raise QueueError("jobs must keep the frozen W-then-V, p02..fast ordering")
+        raise QueueError("jobs must keep the frozen W-then-V, p02..f08 ordering")
 
     order = _list(queue["launch_order"], "launch_order")
     if order != list(LAUNCH_ORDER):
@@ -542,7 +626,7 @@ def _validate_jobs(queue: dict[str, Any]) -> None:
             "launch_order must keep the frozen parent/level interleaved fill order"
         )
     if set(order) != ids:
-        raise QueueError("launch_order must be a permutation of the 12 job ids")
+        raise QueueError("launch_order must be a permutation of the 18 job ids")
 
 
 def _validate_controls(controls: dict[str, Any]) -> None:
@@ -559,6 +643,81 @@ def _validate_controls(controls: dict[str, Any]) -> None:
     _text(controls["human_note"], "controls.human_note")
 
 
+def _validate_force_push_contract(contract: dict[str, Any]) -> None:
+    """F 轴冻结合同：质量/时长/Δv_equiv 对表、施力点诚实标注、wiring 渲染闸门。"""
+
+    _exact_keys(
+        contract,
+        {
+            "application_point", "robot_mass_kg", "robot_mass_source", "duration_s",
+            "duration_control_steps", "delta_v_equiv_mps", "matched_velocity_levels",
+            "wiring_confirmed_in_source_commit", "wiring_note",
+        },
+        "force_push_contract",
+    )
+    if contract["application_point"] != EXPECTED_APPLICATION_POINT:
+        raise QueueError(
+            "force_push_contract.application_point must be exactly "
+            f"{EXPECTED_APPLICATION_POINT!r} — 施在 pelvis link 原点就诚实写 link "
+            "origin，不许标 COM（Yikang V9 教训）"
+        )
+    if _finite_number(contract["robot_mass_kg"], "force_push_contract.robot_mass_kg") != ROBOT_MASS_KG:
+        raise QueueError(
+            f"force_push_contract.robot_mass_kg must be the URDF-audited {ROBOT_MASS_KG}"
+        )
+    _text(contract["robot_mass_source"], "force_push_contract.robot_mass_source")
+    if _finite_number(contract["duration_s"], "force_push_contract.duration_s") != FORCE_PUSH_DURATION_S:
+        raise QueueError(f"force_push_contract.duration_s must be {FORCE_PUSH_DURATION_S}")
+    if contract["duration_control_steps"] != FORCE_PUSH_DURATION_STEPS:
+        raise QueueError(
+            f"force_push_contract.duration_control_steps must be {FORCE_PUSH_DURATION_STEPS}"
+        )
+    delta_v = _mapping(contract["delta_v_equiv_mps"], "force_push_contract.delta_v_equiv_mps")
+    if set(delta_v) != set(EXPECTED_FORCE_LEVELS):
+        raise QueueError("force_push_contract.delta_v_equiv_mps must cover exactly f035/f08")
+    for level, (force, target_dv) in EXPECTED_FORCE_LEVELS.items():
+        recorded = _finite_number(
+            delta_v[level], f"force_push_contract.delta_v_equiv_mps.{level}"
+        )
+        computed = force * FORCE_PUSH_DURATION_S / ROBOT_MASS_KG
+        if abs(recorded - computed) > 1e-4:
+            raise QueueError(
+                f"force_push_contract.delta_v_equiv_mps.{level} must equal "
+                f"force_n x duration / m = {computed:.5f}"
+            )
+        if abs(computed - target_dv) > FORCE_IMPULSE_TOLERANCE_MPS:
+            raise QueueError(
+                f"force_push_contract {level} impulse drifted off the matched "
+                f"velocity level target {target_dv} m/s"
+            )
+    if contract["matched_velocity_levels"] != EXPECTED_MATCHED_VELOCITY:
+        raise QueueError(
+            "force_push_contract.matched_velocity_levels must map f035->p035, f08->p08"
+        )
+    if not isinstance(contract["wiring_confirmed_in_source_commit"], bool):
+        raise QueueError(
+            "force_push_contract.wiring_confirmed_in_source_commit must be a bool"
+        )
+    _text(contract["wiring_note"], "force_push_contract.wiring_note")
+
+
+def _require_force_wiring_confirmed(
+    queue: Mapping[str, Any], job: Mapping[str, Any]
+) -> None:
+    """F 臂渲染闸门：wiring 未确认合入 source.commit 前拒绝出任何 f035/f08 命令。"""
+
+    if job["push"] not in EXPECTED_FORCE_LEVELS:
+        return
+    if queue["force_push_contract"]["wiring_confirmed_in_source_commit"] is not True:
+        raise QueueError(
+            "task.force_push.* wiring is not confirmed merged into source.commit "
+            "(force_push_contract.wiring_confirmed_in_source_commit=false); refusing "
+            "to render any f035/f08 command until the controller flips it after "
+            "verifying train.py _FORCE_PUSH_KEYS at the frozen commit — velocity "
+            "arms are unaffected"
+        )
+
+
 def _validate_queue(queue: dict[str, Any]) -> dict[str, Any]:
     _exact_keys(
         queue,
@@ -567,8 +726,8 @@ def _validate_queue(queue: dict[str, Any]) -> dict[str, Any]:
             "real_robot_authorized", "launch_authorized_by_default",
             "formal_exact_eligible", "evidence_class", "ssh", "pods", "namespace",
             "source", "watchdog", "assets", "controls", "parents", "common",
-            "recipe", "mechanisms", "probe_contract", "budgets", "launch_order",
-            "jobs",
+            "recipe", "mechanisms", "force_push_contract", "probe_contract",
+            "budgets", "launch_order", "jobs",
         },
         "queue",
     )
@@ -683,6 +842,10 @@ def _validate_queue(queue: dict[str, Any]) -> dict[str, Any]:
         "task.push.vel_xy_mps",
         "task.push.ang_vel_radps",
         "task.push.ang_axes",
+        "task.force_push.enable",
+        "task.force_push.interval_range_s",
+        "task.force_push.force_n",
+        "task.force_push.duration_s",
         "checkpoint_path", "run_name", "seed", "num_envs", "max_iterations",
         "algo.runner.save_interval", "algo.runner.num_steps_per_env", "device",
         "task.rewards.racket_position_weight",
@@ -702,9 +865,16 @@ def _validate_queue(queue: dict[str, Any]) -> dict[str, Any]:
     _exact_keys(mechanisms, {"push"}, "mechanisms")
     push = _mapping(mechanisms["push"], "mechanisms.push")
     if set(push) != set(PUSH_ORDER):
-        raise QueueError("mechanisms.push must be exactly p02, p035, p05, p08, yaw, ang, fast")
+        raise QueueError(
+            "mechanisms.push must be exactly p02, p035, p05, p08, yaw, ang, fast, "
+            "f035, f08"
+        )
     for name, mechanism in push.items():
         _validate_push(name, _mapping(mechanism, f"mechanisms.push.{name}"))
+
+    _validate_force_push_contract(
+        _mapping(queue["force_push_contract"], "force_push_contract")
+    )
 
     _mapping(queue["probe_contract"], "probe_contract")
 
@@ -806,6 +976,30 @@ def _training_argv(
     for key in REQUIRED_SCIENCE_KEYS:
         if key not in compiled:
             raise QueueError(f"{job['id']}.{stage} command is missing required key {key}")
+    # 单变量纪律：F 臂只带 task.force_push.*（velocity push 缺席=逐字节 no-op），
+    # 速度臂只带 task.push.*；两族键绝不混写。
+    if job["push"] in EXPECTED_FORCE_LEVELS:
+        if "task.force_push.enable" not in compiled:
+            raise QueueError(
+                f"{job['id']}.{stage} command is missing required key task.force_push.enable"
+            )
+        mixed = sorted(key for key in compiled if key.startswith("task.push."))
+        if mixed:
+            raise QueueError(
+                f"{job['id']} is a force-push arm; velocity-push keys {mixed} are "
+                "forbidden (single variable: absent task.push == no-op)"
+            )
+    else:
+        if "task.push.enable" not in compiled:
+            raise QueueError(
+                f"{job['id']}.{stage} command is missing required key task.push.enable"
+            )
+        mixed = sorted(key for key in compiled if key.startswith("task.force_push."))
+        if mixed:
+            raise QueueError(
+                f"{job['id']} is a velocity-push arm; force-push keys {mixed} are "
+                "forbidden (single variable: absent task.force_push == no-op)"
+            )
     return argv
 
 
@@ -813,6 +1007,7 @@ def _remote_body(
     queue: Mapping[str, Any], job: Mapping[str, Any], stage: str, gpu: int
 ) -> str:
     commit = _require_render_commit(queue)
+    _require_force_wiring_confirmed(queue, job)
     source = queue["source"]
     checkout = source["checkout"]
     workdir = f"{checkout}/{source['worktree_relative']}"
@@ -887,6 +1082,15 @@ def render_command(
 def _push_params(queue: Mapping[str, Any], job: Mapping[str, Any]) -> dict[str, Any]:
     overrides = queue["mechanisms"]["push"][job["push"]]["overrides"]
     label = job["id"]
+    if job["push"] in EXPECTED_FORCE_LEVELS:
+        interval = _override_range(overrides, "task.force_push.interval_range_s", label)
+        force = _override_value(overrides, "task.force_push.force_n", label)
+        duration = _override_value(overrides, "task.force_push.duration_s", label)
+        return {
+            "interval_s": interval, "force_n": force, "duration_s": duration,
+            "delta_v_mps": force * duration / ROBOT_MASS_KG,
+            "matched_level": EXPECTED_MATCHED_VELOCITY[job["push"]],
+        }
     interval = _override_range(overrides, "task.push.interval_range_s", label)
     xy = _override_value(overrides, "task.push.vel_xy_mps", label)
     ang = _override_value(overrides, "task.push.ang_vel_radps", label)
@@ -901,19 +1105,41 @@ def cmd_plan(queue: Mapping[str, Any]) -> str:
         if _commit_is_placeholder(commit)
         else f"commit: {commit}"
     )
+    force_gate = queue["force_push_contract"]["wiring_confirmed_in_source_commit"]
+    force_gate_line = (
+        "F 臂渲染: 已解锁（force_push wiring 已确认合入 source.commit）"
+        if force_gate
+        else "F 臂渲染: 锁定——task.force_push.* wiring 未确认合入 source.commit，"
+        "主控核对 train.py _FORCE_PUSH_KEYS 后翻 wiring_confirmed_in_source_commit"
+        "（速度臂不受影响）"
+    )
     lines = [
-        f"queue: {queue['queue_id']}  12 臂 = {{W,V}} x {{p02,p035,p05,yaw,ang,fast}}，配方固定 C+S0",
+        f"queue: {queue['queue_id']}  18 臂 = {{W,V}} x {{p02,p035,p05,p08,yaw,ang,fast}}"
+        " 速度推 + {W,V} x {f035,f08} 力推（同冲量对表），配方固定 C+S0",
         commit_line,
         "budgets: probe 4096env x 24steps x 2it | science 4096env x 24steps x 10001it save100",
         "watchdog: boot 停滞 1800 s / 首迭代后停滞 900 s 才判死；重试只许逐字 _r2 一次",
         "对照: 不重复买——矩阵 w_c_s0/v_c_s0（同 C+S0 配方、无 push）就是无 push 基线",
         "槽位: 本波不写死 pod/gpu；矩阵谁毕业谁腾卡，渲染时 --pod/--gpu 注入目标卡",
+        f"F 轴: 力推 pelvis link origin，Δv_equiv=force_n x 0.30 s / {ROBOT_MASS_KG} kg，"
+        "对表 f035<->p035、f08<->p08",
+        force_gate_line,
         "",
     ]
     for job in queue["jobs"]:
         parent_human = queue["parents"][job["parent"]]["human_name"]
         push_human = queue["mechanisms"]["push"][job["push"]]["human_name"]
         params = _push_params(queue, job)
+        if "force_n" in params:
+            lines.append(
+                f"{job['id']:8s} {job['run_name']}\n"
+                f"         人话: {parent_human} | {push_human}\n"
+                f"         force_push: interval={params['interval_s'][0]}-{params['interval_s'][1]}s "
+                f"force={params['force_n']}N x {params['duration_s']}s "
+                f"Δv_equiv={params['delta_v_mps']:.5f}m/s (对表 {params['matched_level']}) "
+                "point=pelvis_link_origin"
+            )
+            continue
         lines.append(
             f"{job['id']:8s} {job['run_name']}\n"
             f"         人话: {parent_human} | {push_human}\n"
@@ -942,9 +1168,10 @@ def cmd_checklist(queue: Mapping[str, Any]) -> str:
         "HEAD == source.commit（clean detached exact commit）。",
         "2. grep 远端 checkout 的 train.py 复核 push wiring 在 exact commit 里：\n"
         "   _PUSH_KEYS 白名单必须逐字等于 (enable, interval_range_s, vel_xy_mps, "
-        "ang_vel_radps, ang_axes)，即本 yaml 每臂五个 task.push.* 键（本地工作树已 "
+        "ang_vel_radps, ang_axes)，即本 yaml 每条速度臂五个 task.push.* 键（本地工作树已 "
         "grep 核对一致；若远端键名不同必须先停下重议再渲染，缺一个键则 boot 即 "
-        "fail-loud；ang_axes='none' 必须配 ang_vel_radps=0，yaw|rpy 必须配 >0）。",
+        "fail-loud；ang_axes='none' 必须配 ang_vel_radps=0，yaw|rpy 必须配 >0；"
+        "F 臂另见第 14/15 条）。",
         f"3. 两 pod 都确认 {KIT_BOOT_LOCK} 存在且可执行；本轮不用 "
         "launch_kit_training_locked.sh 的 180 s stale 门（v8/v9 死因）。",
         "4. 五条资产路径逐一 test -f / test -d（USD、正反手 motion、题库、A3 资产树）。",
@@ -953,8 +1180,8 @@ def cmd_checklist(queue: Mapping[str, Any]) -> str:
         f"      期望 {parents['W']['checkpoint_sha256']}\n"
         f"   V: sha256sum {parents['V']['checkpoint_path']}\n"
         f"      期望 {parents['V']['checkpoint_sha256']}",
-        f"6. namespace {queue['namespace']['root']} 全新（no_clobber）；12 个 run_dir 与 "
-        "12 个 probe dir 都不得已存在。",
+        f"6. namespace {queue['namespace']['root']} 全新（no_clobber）；18 个 run_dir 与 "
+        "18 个 probe dir 都不得已存在。",
         "7. 空槽即填：矩阵 24 格谁先毕业谁腾卡；发射前该卡 nvidia-smi compute 进程数 "
         "< 4（命令内已带预检），按 launch_order 拉最前面就绪的臂，渲染时 "
         "--render-job <id> --pod <pod> --gpu <g> 注入目标卡。",
@@ -969,8 +1196,19 @@ def cmd_checklist(queue: Mapping[str, Any]) -> str:
         "12. 对照不重复买：矩阵 w_c_s0/v_c_s0（p1btm_w_c_s0_seed3_20260720 / "
         "p1btm_v_c_s0_seed3_20260720）就是本波的无 push 对照，同 C+S0 配方、"
         "push_robot=None，汇总时直接对比。",
-        "13. 全部 12 臂 science 里程碑（6900/7200/7700/8700/10700/12700/16700）落盘后，"
+        "13. 全部 18 臂 science 里程碑（6900/7200/7700/8700/10700/12700/16700）落盘后，"
         "汇总时按诊断谱系解读：W/V contract 有意 mismatch，胜者档位须另在 exact-lineage 重跑。",
+        "14. F 臂（f035/f08）加检：grep 远端 train.py 的 _FORCE_PUSH_KEYS 白名单必须"
+        "逐字等于 (enable, interval_range_s, force_n, duration_s)，即 F 臂四个 "
+        "task.force_push.* 键；force_push_contract.wiring_confirmed_in_source_commit="
+        "false 时渲染器拒绝出任何 F 臂命令（fail-closed，速度臂不受影响）；F 臂 "
+        "override 不得含任何 task.push.* 键（单变量，velocity push 缺席=逐字节 no-op）。",
+        f"15. F 臂 probe 收口加检：training_contract 的 force_push 合同块必须记录运行时"
+        f"真实读到的机器人总质量与换算 Δv_equiv，且 application_point 必填、逐字为 "
+        f"'pelvis_link_origin'（施在 pelvis link 原点就诚实写 pelvis_link_origin，"
+        f"不许标 COM——Yikang V9 教训）；与 yaml force_push_contract 对表：质量 {ROBOT_MASS_KG} kg"
+        "（URDF 43 link 质量和）、f035 = 68.0 N x 0.30 s → Δv 0.35005 m/s（对表 p035）、"
+        "f08 = 155.4 N x 0.30 s → Δv 0.79997 m/s（对表 p08）；对不上即停发该臂。",
     ]
     return "\n".join(lines)
 
@@ -992,7 +1230,7 @@ def cmd_render(
 def main(argv: Sequence[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--queue", type=Path, default=DEFAULT_QUEUE)
-    parser.add_argument("--plan", action="store_true", help="打印 12 臂计划表（默认）")
+    parser.add_argument("--plan", action="store_true", help="打印 18 臂计划表（默认）")
     parser.add_argument("--render-stage", choices=("probe", "science"))
     parser.add_argument("--render-job", default=None, help="job id（配合 --render-stage）")
     parser.add_argument("--pod", default=None, help="渲染时注入的目标 pod（pod1|pod2）")

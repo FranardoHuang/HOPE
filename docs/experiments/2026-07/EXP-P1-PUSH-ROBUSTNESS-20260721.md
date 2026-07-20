@@ -115,6 +115,65 @@ run name 模式为 `p1push_{w|v}_{p02|p035|p05|yaw|ang|fast}_seed3_20260721`。�
 机器真源是 queue config，其 12 条 job 的 override 与本表不符时必须先修订本记录再渲染命令。
 `W` 与 `V` 配方不同，一切比较都在各自 parent 内进行。
 
+## F 轴：力推 vs 速度推（同冲量）（2026-07-21 追加，Franco 拍板）
+
+本节把队列从 14 臂扩到 **18 臂**：新增 2 个力推档 `f035/f08` × 2 父本＝4 条 F 臂
+（`{w,v}_{f035,f08}`），`launch_order` 排在全部 14 条速度臂之后
+（`w_f035 → v_f08 → w_f08 → v_f035`）。机器真源仍是 queue config。
+
+### 动机（Franco：力推与速度推都要，且同冲量可比）
+
+稳站姿**能抗力但抗不了速度注入**：速度推（基类 `push_by_setting_velocity`）把 Δv
+一步写进 root 速度，支撑腿刚度再大也拦不住，练的是"被打飞后回正"；力推是持续
+`0.30 s` 的推挤，可以靠站姿刚度与踝/髋力矩当场顶住，练的是"抵抗"。两种扰动的最优
+响应不同，文献标配只买了速度推——F 轴是"能不能只靠抵抗活下来"的独立探针。**同冲量
+配对才可比**：不配平冲量，"力推更容易/更难"只是剂量差，不是机制差。
+
+### 机制（冻结）
+
+- **间隔触发的持续水平力**：每 `interval_range_s`（默认 `5–15 s`）触发一次，对
+  pelvis/base 施加水平随机方向、幅度 `force_n` 的**恒力**，持续 `duration_s`
+  （`0.30 s` = 15 个 50 Hz 控制步）后清零。
+- **键面**：`task.force_push.{enable,interval_range_s,force_n,duration_s}`，默认全
+  关，缺席＝逐字节 no-op。**F 臂不写任何 `task.push.*` 键**（单变量，队列单测断言
+  双向：速度臂也不含 `task.force_push.*`）。
+- **同冲量换算**：`Δv_equiv = force_n × duration_s / m_robot`。质量真源：2026-07-21
+  pod1 只读核对 A3 URDF（`assets/agibot_a3/urdf/model.urdf`，sha256
+  `79655f05d204c24f028778425aa971410773d1f8bbbd214de6fdb8f8ae75d1cc`）43 个 link 质量
+  逐项求和＝**58.27723163 kg**；W 父本 hard contract `training_contract.json` 同日核
+  对**无质量字段**，故以 URDF 为准。`force_n` 由主控按真实质量算好写死进 config
+  （配置面只有 `force_n` 与 `duration_s`，不搞自动换算魔法）：
+  - `f035`：`68.0 N × 0.30 s` → `Δv_equiv 0.35005 m/s`（对表 `p035` 的 `0.35`，偏差 +0.015%）
+  - `f08`：`155.4 N × 0.30 s` → `Δv_equiv 0.79997 m/s`（对表 `p08` 的 `0.8`，偏差 −0.004%）
+- **运行时合同**：`training_contract` 的 force_push 块必须记录**运行时真实读到的**
+  机器人总质量、换算出的 `Δv_equiv` 与 `application_point`（必填），F 臂 probe 收口
+  与本节数值对表，对不上停发。
+
+### 施力点诚实标注（Yikang V9 反例）
+
+V9 的教训：文档标"COM 推力"、实现施在 link 原点，判读时把杠杆效应误当机制差。本波
+施在 **pelvis link 原点**就诚实写 `pelvis_link_origin`（逐字 =
+`training_contract.FORCE_PUSH_APPLICATION_POINT`），**不许标 COM**；合同字段
+`application_point` 必填、逐字冻结（config/renderer/单测三方断言，wiring 侧
+schema-3 validator 同 token 再验一遍），probe 收口再对表一次。
+
+### 可证伪假设 4（力 vs 速度、同冲量）
+
+同 parent 同卷下，`f035/f08` 臂的 stance/倾角响应（固定窗 fall、ready tilt）优于同
+冲量速度臂 `p035/p08`，且回球不低于对应速度臂 `− 3` 题。成立→"抵抗"训练比"回正"
+训练便宜，力推可作为更温和的鲁棒性剂量；F 臂两项全面更差→拒绝，说明速度注入练出
+的"回正"才是缺失技能，F 轴收档。判据同波：终点 `model_16700` K100 同卷（无 push
+考卷）为主判据，固定 100-update 窗 Isaac 先行指标只作方向参考，环境混杂披露、停止
+规则、谱系限制逐字沿用本记录前文。
+
+### F 臂渲染闸门（fail-closed）
+
+`task.force_push.*` wiring 由并行 agent 落盘。queue config 的
+`force_push_contract.wiring_confirmed_in_source_commit=false` 在主控逐字核对
+train.py `_FORCE_PUSH_KEYS == (enable, interval_range_s, force_n, duration_s)`、把
+wiring 合入 main 并冻结新 40-hex commit 之前，锁死全部 F 臂渲染（速度臂不受影响）；
+本地单测同时断言"wiring 未落盘时闸门必须还关着"。
+
 ## 发射策略：空槽即填，不建专属池
 
 矩阵 24 格（现 23/24 在跑）占满两 Pod 六卡、每卡 4 条。本波**不抢占任何在跑矩阵格**，服从

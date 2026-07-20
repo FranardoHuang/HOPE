@@ -1325,6 +1325,206 @@ def _validate_push_robot_event_contract(contract: Mapping) -> None:
         )
 
 
+# --------------------------------------------------------------------------------------------- #
+# F-axis interval FORCE push (matched-impulse companion of the Wave-P velocity push; default OFF).
+# --------------------------------------------------------------------------------------------- #
+FORCE_PUSH_EVENT_KEY = "force_push_event"
+FORCE_PUSH_EVENT_FUNC = "push_by_applying_wrench"
+FORCE_PUSH_SWEEP_FUNC = "sweep_expired_force_pushes"
+FORCE_PUSH_EVENT_MODE = "interval"
+FORCE_PUSH_BODY_NAME = "pelvis_link"
+# 施力点语义显式化(Yikang V9 教训:把 link 原点标成 COM):PhysX 在 positions=None 时把外力
+# 施加在 link 原点,合同必须诚实写 "pelvis_link_origin",不许标 COM。
+FORCE_PUSH_APPLICATION_POINT = "pelvis_link_origin"
+_FORCE_PUSH_ASSEMBLY_KEYS = frozenset(
+    {
+        "schema_version", "enabled", "func", "mode", "interval_range_s",
+        "force_n", "duration_s", "duration_steps", "control_dt_s",
+        "body_name", "application_point",
+    }
+)
+_FORCE_PUSH_EVENT_KEYS = _FORCE_PUSH_ASSEMBLY_KEYS | {
+    "robot_mass_kg", "delta_v_equiv_mps",
+}
+
+
+def force_push_event_block(
+    *, enable, interval_range_s, force_n, duration_s, control_dt_s
+):
+    """Translate the force-push flag group into the canonical assembly block (no runtime mass yet).
+
+    人话:把"要不要力推、隔几秒推一次、推多少牛、持续几秒"翻译成 force_push 事件的合同装配块。
+    ``enable=False`` 返回 ``None``(= 不推,合同不写这个块,历史/在跑配置逐字节不变),但此时
+    非零 force_n 是配置错误(fail-closed:关着的开关不许挂上膛的力)。``duration_s`` 必须是
+    控制步长的整数倍(恒力持续整数个控制步,0.30 s = 15 步 @ 50 Hz),否则 fail-loud。This is
+    the single validation/assembly source shared by the env cfg flag path
+    (hope_env_cfg.apply_force_push_event), the train.py ``task.force_push`` override, and the
+    schema-3 contract validator. 运行时质量与 Δv_equiv 由 :func:`bind_force_push_runtime_mass`
+    在拿到真实 articulation 质量后追加。
+    """
+
+    if not isinstance(enable, bool):
+        raise ValueError("force_push_event enable must be an explicit boolean")
+    if not enable:
+        if force_n is not None and (isinstance(force_n, bool) or float(force_n) != 0.0):
+            raise ValueError(
+                f"force_push_event disabled but force_n={force_n!r} is nonzero — "
+                "delete the dormant force or set enable=true"
+            )
+        return None
+    try:
+        interval_items = list(interval_range_s)
+    except TypeError as exc:
+        raise ValueError(
+            "force_push_event interval_range_s must be a [lo, hi] pair of seconds"
+        ) from exc
+    if len(interval_items) != 2:
+        raise ValueError(
+            "force_push_event interval_range_s must be a [lo, hi] pair of seconds"
+        )
+    interval_lo = _wave_finite(
+        interval_items[0], name="force_push_event.interval_range_s[0]", positive=True
+    )
+    interval_hi = _wave_finite(
+        interval_items[1], name="force_push_event.interval_range_s[1]", positive=True
+    )
+    if interval_lo > interval_hi:
+        raise ValueError(
+            "force_push_event interval_range_s must satisfy 0 < lo <= hi"
+        )
+    force = _wave_finite(force_n, name="force_push_event.force_n", positive=True)
+    duration = _wave_finite(
+        duration_s, name="force_push_event.duration_s", positive=True
+    )
+    control_dt = _wave_finite(
+        control_dt_s, name="force_push_event.control_dt_s", positive=True
+    )
+    duration_steps = int(round(duration / control_dt))
+    if duration_steps < 1 or abs(duration_steps * control_dt - duration) > 1e-9:
+        raise ValueError(
+            "force_push_event duration_s must be a positive whole number of control "
+            f"steps (duration_s={duration!r} is not an integer multiple of "
+            f"control_dt_s={control_dt!r})"
+        )
+    return {
+        "schema_version": 1,
+        "enabled": True,
+        "func": FORCE_PUSH_EVENT_FUNC,
+        "mode": FORCE_PUSH_EVENT_MODE,
+        "interval_range_s": [interval_lo, interval_hi],
+        "force_n": force,
+        "duration_s": duration,
+        "duration_steps": duration_steps,
+        "control_dt_s": control_dt,
+        "body_name": FORCE_PUSH_BODY_NAME,
+        "application_point": FORCE_PUSH_APPLICATION_POINT,
+    }
+
+
+def bind_force_push_runtime_mass(block, *, robot_mass_kg):
+    """Append the runtime articulation mass + matched-impulse Δv to an assembly block.
+
+    人话:合同必须记运行时真实读到的机器人总质量与换算出的 Δv_equiv = force_n × duration_s /
+    m_robot,供与速度推档位(p02/p035/p05/p08)对表。装配块形状不对、质量非正,一律 raise。
+    """
+
+    if not isinstance(block, Mapping) or set(block) != _FORCE_PUSH_ASSEMBLY_KEYS:
+        raise ValueError(
+            "force_push_event runtime binding requires the exact canonical assembly block"
+        )
+    if block.get("enabled") is not True:
+        raise ValueError("force_push_event runtime binding requires an enabled block")
+    mass = _wave_finite(
+        robot_mass_kg, name="force_push_event.robot_mass_kg", positive=True
+    )
+    delta_v = float(block["force_n"]) * float(block["duration_s"]) / mass
+    return {**block, "robot_mass_kg": mass, "delta_v_equiv_mps": delta_v}
+
+
+def _validate_force_push_event_contract(contract: Mapping) -> None:
+    """F-axis interval force-push block (task.force_push; matched-impulse vs the velocity push).
+
+    Absent block = force push disabled (every historical/no-push run, byte-identical contract).
+    A present block is always an ENABLED push and must be internally consistent: interval /
+    duration_steps must equal the canonical re-assembly from its own fields, and the recorded
+    Δv_equiv must equal force_n x duration_s / robot_mass_kg recomputed — a hand-edited sidecar
+    cannot smuggle a different impulse past a resume. ``application_point`` 必须是
+    ``pelvis_link_origin``(Yikang V9 反例:link 原点被标成 COM)。
+    """
+
+    block = contract.get(FORCE_PUSH_EVENT_KEY)
+    if block is None:
+        if FORCE_PUSH_EVENT_KEY in contract:
+            raise ValueError(
+                "schema-3 force_push_event must be omitted when disabled, not null"
+            )
+        return
+    block = _require_exact_mapping_keys(
+        block, _FORCE_PUSH_EVENT_KEYS, name="schema-3 force_push_event"
+    )
+    if type(block["schema_version"]) is not int or block["schema_version"] != 1:
+        raise ValueError("schema-3 force_push_event schema_version must be integer 1")
+    if block["enabled"] is not True:
+        raise ValueError(
+            "schema-3 force_push_event enabled must be true "
+            "(a disabled force push is spelled by omitting the block)"
+        )
+    if block["func"] != FORCE_PUSH_EVENT_FUNC:
+        raise ValueError(
+            f"schema-3 force_push_event func must be {FORCE_PUSH_EVENT_FUNC!r}"
+        )
+    if block["mode"] != FORCE_PUSH_EVENT_MODE:
+        raise ValueError(
+            f"schema-3 force_push_event mode must be {FORCE_PUSH_EVENT_MODE!r}"
+        )
+    if block["body_name"] != FORCE_PUSH_BODY_NAME:
+        raise ValueError(
+            f"schema-3 force_push_event body_name must be {FORCE_PUSH_BODY_NAME!r}"
+        )
+    if block["application_point"] != FORCE_PUSH_APPLICATION_POINT:
+        raise ValueError(
+            "schema-3 force_push_event application_point must be "
+            f"{FORCE_PUSH_APPLICATION_POINT!r} — the wrench lands on the pelvis LINK "
+            "ORIGIN, and labelling it as the COM is exactly the Yikang V9 mistake"
+        )
+    try:
+        expected = force_push_event_block(
+            enable=True,
+            interval_range_s=block["interval_range_s"],
+            force_n=block["force_n"],
+            duration_s=block["duration_s"],
+            control_dt_s=block["control_dt_s"],
+        )
+    except ValueError as exc:
+        raise ValueError(f"schema-3 force_push_event is invalid: {exc}") from exc
+    stored_interval = [float(v) for v in block["interval_range_s"]]
+    if (
+        stored_interval != expected["interval_range_s"]
+        or type(block["duration_steps"]) is not int
+        or block["duration_steps"] != expected["duration_steps"]
+    ):
+        raise ValueError(
+            "schema-3 force_push_event is internally inconsistent: the stored "
+            "interval/duration_steps does not equal the canonical assembly from "
+            "duration_s/control_dt_s"
+        )
+    try:
+        expected_full = bind_force_push_runtime_mass(
+            expected, robot_mass_kg=block["robot_mass_kg"]
+        )
+    except ValueError as exc:
+        raise ValueError(f"schema-3 force_push_event is invalid: {exc}") from exc
+    if (
+        isinstance(block["delta_v_equiv_mps"], bool)
+        or not isinstance(block["delta_v_equiv_mps"], (int, float))
+        or float(block["delta_v_equiv_mps"]) != expected_full["delta_v_equiv_mps"]
+    ):
+        raise ValueError(
+            "schema-3 force_push_event is internally inconsistent: delta_v_equiv_mps "
+            "must equal force_n * duration_s / robot_mass_kg recomputed"
+        )
+
+
 def _validate_post_swing_settle_debt_contract(contract: Mapping) -> None:
     """S1 post-swing settle debt block (Jiayi V13 post-swing debts idea, clean main-side redo).
 
@@ -1709,6 +1909,7 @@ def validate_schema3_contract_structure(contract: Mapping) -> None:
     )
     _validate_post_swing_settle_debt_contract(contract)
     _validate_push_robot_event_contract(contract)
+    _validate_force_push_event_contract(contract)
     if contract["joint_friction_backend"] != JOINT_FRICTION_BACKEND:
         raise ValueError("schema-3 joint_friction_backend must be physx")
     if contract["joint_friction_semantics"] != JOINT_FRICTION_SEMANTICS:
