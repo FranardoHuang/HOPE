@@ -49,6 +49,12 @@ class HOPEPlannerNode(Node):
         self.declare_parameter("target_land_y", -0.7625)  # fixed landing target y (m)
         self.declare_parameter("delta_t_flight", 0.5)     # desired post-strike flight time (s)
         self.declare_parameter("max_predict_time", 2.0)   # prediction horizon (s)
+        # Velocity-fit window IN SAMPLES — coupled to the mocap sample rate. Keep
+        # the window >= ~100 ms of samples; 31 ≈ 103 ms at a 300 Hz rig (the
+        # default). A faster rig must scale it up or the time window silently
+        # shrinks (e.g. an OptiTrack rig at 360 Hz: 31 samples ≈ 86 ms; use
+        # round(31 * rate / 300) = 37).
+        self.declare_parameter("fit_window", 31)
         # Push every mocap sample into the estimator; run the predict+plan solve
         # at most every solve_period_s (<= 50 Hz). 0.0 = solve on every sample.
         self.declare_parameter("solve_period_s", 0.02)
@@ -78,6 +84,7 @@ class HOPEPlannerNode(Node):
             ]),
             delta_t_flight=float(self.get_parameter("delta_t_flight").value),
             max_predict_time=float(self.get_parameter("max_predict_time").value),
+            fit_window=int(self.get_parameter("fit_window").value),
             C_r=paddle["C_r"],
             paddle_a_t=paddle["paddle_a_t"],
             paddle_b_t=paddle["paddle_b_t"],

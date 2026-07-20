@@ -1,0 +1,51 @@
+optitrack_mct_relay:
+  ros__parameters:
+    # NOTE: the Motive PC hostname/IP is a launch arg of
+    # optitrack_hope_bridge.launch.py (hostname), NOT here. The mct driver
+    # config (rigid bodies, single-marker ball tracker) lives in
+    # optitrack_mct.yaml.
+    #
+    # Where the vendored motion_capture_tracking node publishes its
+    # NamedPoseArray after the launch-file remap. Raw driver topics live under
+    # /optitrack/* on purpose -- the bare /poses name is the HOPE contract
+    # (geometry_msgs/PoseArray) that THIS relay produces.
+    input_poses_topic: "/optitrack/poses"
+
+    # STANDARDIZED object names (the HOPE tracked-object taxonomy, see
+    # mocap/README.md): Motive rigid-body ASSETS must be named EXACTLY P1 / P2
+    # (+ PPT for the table if used), and the ball entry is named Ball. A
+    # mismatch = no data relayed; check with
+    # `ros2 topic echo --once /optitrack/poses` after the driver is up.
+    ppt_object: "PPT"      # table rigid body (optional)
+    p1_object: "P1"        # our robot's base rigid body (standardized)
+    p2_object: "P2"        # opponent robot rigid body (standardized)
+    # Ball entry name in the NamedPoseArray. MODE A (rigid-body ball): the
+    # Motive rigid-body ASSET name. MODE B (single-marker): the
+    # librigidbodytracker body name from optitrack_mct.yaml. Either way the
+    # standardized name is Ball; the relay does not care which mode produced it.
+    ball_object: "Ball"
+
+    # Unit conversion for every relayed position (poses, ball point, TF). THE
+    # CHAIN WORKS IN METRES and Motive/NatNet streams METRES -> 1.0. Kept as a
+    # parameter because some venue feeds (seen on the VRPN side) turn out to
+    # stream millimetres; if /P1/pose ever reads hundreds, set 0.001.
+    position_scale: 1.0
+
+    world_frame: "world"
+
+    # Warn (throttled) when mocap frames keep arriving without a ball entry
+    # for this long. /poses is paused while the ball is absent BY DESIGN (the
+    # planner's velocity polyfit must never see a re-emitted stale ball).
+    ball_stale_warn_s: 2.0
+
+    # Published HOPE-standard topics.
+    table_pose_topic: "/table/pose"
+    p1_pose_topic: "/P1/pose"
+    p2_pose_topic: "/P2/pose"
+    ball_point_topic: "/ball/point"
+    poses_topic: "/poses"
+
+    # Keep ball first so hope_planner's default ball_pose_index=0 works.
+    pose_array_order: ["ball", "PPT", "P1", "P2"]
+    publish_tf: true
+    publish_pose_array: true

@@ -345,6 +345,19 @@ OptiTrack 与 Vicon 均不直接以 ROS 2 消息格式发布跟踪数据。需�
   ```
 - 通过 **tf2** 与可配置 QoS 的 `/poses` 话题发布。
 
+> **状态：** OptiTrack 路径已按本文档推荐方案在发布的技术栈中落地：
+> `motion_capture_tracking` 以固定 commit **vendor** 进
+> `hope_ws/src/motion_capture_tracking/`（仅保留开源 NatNet 后端，并带 NatNet
+> 单播修复，见其 `PIN.md`；不使用上文的 apt 安装方式），配套中继
+> `optitrack_mct_relay` 输出与 VRPN 路径（`vrpn_mocap` + `pose_to_posearray`，
+> 第 6.5 节）完全相同的 HOPE 话题。两套后端按场地可选
+> （`hope_bringup.launch.py mocap_backend:=vrpn|optitrack`）。球：支持 Motive
+> **刚体资产** `Ball`（模式 A；pivot 设在球心），§5.2 的单 marker 参考设计保留
+> 为模式 B（`hope_bringup/config/optitrack_mct.yaml` 中的注释块）。操作文档：
+> [`docs/OPTITRACK.md`](../docs/OPTITRACK.md)。注意第 6.5 节「客户端选择」的
+> 告诫仍然成立：青瞳/VRPN 场地请使用 `vrpn_mocap`，而非
+> `motion_capture_tracking` 的（已移除的）VRPN 后端。
+
 ### 6.3  Motive 流式设置检查表
 
 在从 Motive 向 ROS 2 主机流式传输之前，请在 Data Streaming 面板中核实以下设置：

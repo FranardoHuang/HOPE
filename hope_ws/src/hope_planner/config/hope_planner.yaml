@@ -36,6 +36,10 @@ hope_planner:
     # every solve_period_s (<= 50 Hz). 0.0 solves on every sample.
     solve_period_s: 0.02
     max_predict_time: 2.0          # forward prediction horizon (s)
+    # Velocity-fit window IN SAMPLES — coupled to the mocap sample rate (keep
+    # the window >= ~100 ms of samples). 31 ≈ 103 ms at a 300 Hz rig; for other
+    # rates use round(31 * rate / 300) — e.g. an OptiTrack rig at 360 Hz -> 37.
+    fit_window: 31
 
     # --- Table placement ---
     # Table's +y edge in the play frame (table occupies y in [y_max - width, y_max]).

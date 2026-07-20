@@ -347,6 +347,20 @@ The `mocap4ros2_optitrack` driver (MOCAP4ROS2 Project) is a common OptiTrack-onl
   ```
 - Publishes via **tf2** and a `/poses` topic with configurable QoS.
 
+> **Status:** The OptiTrack path is implemented in the shipped stack exactly as
+> recommended here: `motion_capture_tracking` is **vendored at a pinned commit**
+> (`hope_ws/src/motion_capture_tracking/`, open-source NatNet backend only, with
+> NatNet unicast fixes — see its `PIN.md`; the apt install above is NOT used),
+> with a relay `optitrack_mct_relay` producing the same HOPE topics as the VRPN
+> path (`vrpn_mocap` + `pose_to_posearray`, Section 6.5). Backends are
+> selectable per venue (`hope_bringup.launch.py mocap_backend:=vrpn|optitrack`).
+> Ball: a Motive **rigid-body asset** named `Ball` (MODE A; pivot at the sphere
+> center) is supported alongside the §5.2 single-marker design (MODE B, the
+> commented block in `hope_bringup/config/optitrack_mct.yaml`). Operations doc:
+> [`docs/OPTITRACK.md`](../docs/OPTITRACK.md). Note the "Driver choice" caveat
+> in Section 6.5 still holds: for ChingMu/VRPN rigs use `vrpn_mocap`, NOT
+> `motion_capture_tracking`'s (removed) VRPN backend.
+
 ### 6.3  Motive Streaming Settings Checklist
 
 Before streaming from Motive to the ROS 2 host, verify these settings in the Data Streaming pane:
