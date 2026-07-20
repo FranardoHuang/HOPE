@@ -302,6 +302,13 @@ OptiTrack 相机 → Motive（VRPN Streaming Engine）：Ball/P1/P2 刚体 ─�
 这一点是线上格式的关键事实：`(pitch, yaw, roll)` 只是操作界面的表示方式，VRPN tracker 报告以四元数传输姿态，ROS 2 消息全程保留。适配器 `pose_to_posearray` 执行 `out.poses[i] = input.pose`，**不会**丢弃球体姿态。`PoseArray` 没有每个位姿的名称字段；应保持配置的输入顺序稳定（`Ball` 通常在 `ball_pose_index: 0`），需要名称时使用场次元数据（或可选的 `tf2` broadcaster）。
 
 > **为什么不用 NatNet？** Motive 的 NatNet 流仍可用于诊断或其他消费者，但 HOPE 参考路径不使用它：基于 NatNet 的 ROS 2 桥接发布自定义消息类型（例如 `motion_capture_tracking` 的 `/poses` 是自定义 `NamedPoseArray`，而非本仓库规划器订阅的 `geometry_msgs/PoseArray`），若无额外转换节点无法接入本技术栈。VRPN 路径在两家厂商上都不需要此类转换。
+>
+> **状态：** 本仓库现已附带该转换节点，作为 OptiTrack 场地的**可选**替代后端：vendored 的
+> `motion_capture_tracking` 驱动（`hope_ws/src/motion_capture_tracking/`，固定 commit，
+> 仅保留开源 NatNet 解包后端——见其 `PIN.md`）加 `optitrack_mct_relay` 适配器，将
+> `NamedPoseArray` 转换为与 VRPN 路径完全相同的 `/poses` 契约。通过
+> `hope_bringup.launch.py mocap_backend:=optitrack` 选用；上文的 VRPN 路径仍是默认与
+> 参考路径。操作指南：[`docs/OPTITRACK.md`](../docs/OPTITRACK.md)。
 
 ### 6.2  OptiTrack / VRPN 路径
 

@@ -15,7 +15,11 @@ install(DIRECTORY
 
 install(PROGRAMS
   scripts/fake_ball_publisher
+  scripts/fake_optitrack_publisher
+  scripts/mocap_rate_probe.py
+  scripts/optitrack_mct_relay
   scripts/pose_to_posearray
+  scripts/with_fastdds_unicast.sh
   DESTINATION lib/${PROJECT_NAME}
 )
 

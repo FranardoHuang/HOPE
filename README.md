@@ -86,7 +86,7 @@ The competition rulebooks ship at the repository root:
 |------|---------|
 | [README.md](README.md) | Repository orientation and the shortest train → export → evaluate → run commands. New teams should start here. |
 | [QUICKSTART_A3_ISAAC.md](QUICKSTART_A3_ISAAC.md) | Step-by-step fresh-clone A3/Isaac setup. |
-| `docs/` | Task guides ([TRAIN_POLICY](docs/TRAIN_POLICY.md), [REPLACE_MOTIONS](docs/REPLACE_MOTIONS.md), [RUN_ON_AGIBOT](docs/RUN_ON_AGIBOT.md), [EXTENDING_HOPE_PINGPONG](docs/EXTENDING_HOPE_PINGPONG.md), [REMOVED_FROM_STARTER](docs/REMOVED_FROM_STARTER.md)) and the public contracts ([POLICY_INTERFACE](docs/POLICY_INTERFACE.md), [PLANNER_INTERFACE](docs/PLANNER_INTERFACE.md), `docs/interfaces/`). |
+| `docs/` | Task guides ([TRAIN_POLICY](docs/TRAIN_POLICY.md), [REPLACE_MOTIONS](docs/REPLACE_MOTIONS.md), [RUN_ON_AGIBOT](docs/RUN_ON_AGIBOT.md), [OPTITRACK](docs/OPTITRACK.md), [EXTENDING_HOPE_PINGPONG](docs/EXTENDING_HOPE_PINGPONG.md), [REMOVED_FROM_STARTER](docs/REMOVED_FROM_STARTER.md)) and the public contracts ([POLICY_INTERFACE](docs/POLICY_INTERFACE.md), [PLANNER_INTERFACE](docs/PLANNER_INTERFACE.md), `docs/interfaces/`). |
 | [A3_ASSETS.md](A3_ASSETS.md) | Asset map for the racket-equipped A3 URDF, the generated Isaac copy, joint order, and the Agibot-provided A3 reference materials. |
 | [REFERENCE_DOCS.md](REFERENCE_DOCS.md) | Index of preserved architecture, rules, mocap, training, and deployment reference documents. |
 | [ROADMAP.md](ROADMAP.md) | What is shipped, what is out of scope by design, and what comes next. |
@@ -94,7 +94,7 @@ The competition rulebooks ship at the repository root:
 | `HOPE_AI_Challenge_2026_Rules_EN.docx`, `..._ZH.docx` | Challenge rulebooks (English / 中文). |
 | `configs/` | The shared no-spin ball model ([ball_physics.yaml](configs/ball_physics.yaml)) used by training, planner, and eval. |
 | `hope_training/` | The Isaac Lab training extension (`whole_body_tracking/` with task cfg, train/export/eval scripts), placeholder motion clips (`motions/preprocessed/`), the canonical A3 joint order (`config/joint_order_agibot_a3.yaml`), and the ball-physics fitting tools (`ball_physics_fit/`). |
-| `hope_ws/` | ROS 2 workspace: `hope_planner` (no-spin planner), `hope_bringup` (launch files, `pose_to_posearray` adapter, fake-ball publisher), `hope_msgs` (`RacketCommand.msg`), and the vendored `vrpn_mocap` driver. |
+| `hope_ws/` | ROS 2 workspace: `hope_planner` (no-spin planner), `hope_bringup` (launch files, `pose_to_posearray` / `optitrack_mct_relay` adapters, fake-ball publishers), `hope_msgs` (`RacketCommand.msg`), and the vendored mocap drivers (`vrpn_mocap` for VRPN rigs, `motion_capture_tracking` for OptiTrack/NatNet). |
 | `a3_deploy/` | Public deploy contract and clean-room reference runner (`a3_deploy_example/`), the MuJoCo/AimRT simulation fork (`A3_MuJoCo_Sim/`), and the optional user-supplied URDF override location (`URDF/`). |
 | `agibot/` | Agibot-provided A3 bundle: the racket-equipped source URDF (`URDF/A3T2.5-URDF-std-pingpang/`), the vendor deploy example (`code_deployment/`), the MuJoCo/AimRT simulation reference (`A3_MuJoCo_Sim/`), and mounting hardware models (`pku/`). |
 | `mocap/` | Motion-capture frame/topic contract ([mocap/README.md](mocap/README.md)) and the preserved mocap reference documents (EN/ZH). |
@@ -170,6 +170,14 @@ used for calibration only and appears only in training-data recordings. The ball
 uses only the ball position, while the full pose is preserved for validation and future
 spin-aware estimation.
 
+> The diagram shows the **VRPN reference path** (both vendors stream VRPN into
+> the vendored `vrpn_mocap` client + `pose_to_posearray`, the default
+> `mocap_backend:=vrpn`). For OptiTrack rigs an alternative **NatNet backend**
+> (the vendored `motion_capture_tracking` driver + `optitrack_mct_relay`) is
+> selectable with `mocap_backend:=optitrack` and feeds the identical `/poses`
+> contract — everything below that hop is unchanged. See
+> [docs/OPTITRACK.md](docs/OPTITRACK.md).
+
 The same policy runner drives either the shipped MuJoCo simulation
 (`a3_deploy/a3_deploy_example/scripts/run_pingpong_sim.sh`) or, via your own
 licensed Agibot vendor deploy package, the real robot
@@ -213,7 +221,7 @@ Each piece has its own dependencies — install only what the step you are on ne
 - **Training / export**: NVIDIA Isaac Sim + Isaac Lab (with `rsl_rl`), Python 3.10, PyTorch, CUDA GPU
 - **MuJoCo evaluation / reference runner**: `mujoco`, `onnxruntime`, `numpy` (no GPU needed)
 - **Planner workspace**: ROS 2 Jazzy (`rclpy`), `numpy`, `pyyaml`
-- **Real arena**: OptiTrack Motive (VRPN Streaming Engine) or Chingmu CMTracker/MCServer — both stream **VRPN** into the vendored ROS 2 client; configure named 6-DOF rigid bodies `Ball`, `P1`, and `P2` — plus a calibration-only `Table` asset that is not streamed in competition (OptiTrack note: verify the VRPN stream's up-axis at table landmarks and apply the full-pose conversion described in the mocap docs only if it streams Y-up)
+- **Real arena**: OptiTrack Motive (VRPN Streaming Engine) or Chingmu CMTracker/MCServer — both stream **VRPN** into the vendored ROS 2 client; configure named 6-DOF rigid bodies `Ball`, `P1`, and `P2` — plus a calibration-only `Table` asset that is not streamed in competition (OptiTrack note: verify the VRPN stream's up-axis at table landmarks and apply the full-pose conversion described in the mocap docs only if it streams Y-up). OptiTrack rigs can alternatively stream **NatNet** via the vendored `motion_capture_tracking` driver (`mocap_backend:=optitrack`, see [docs/OPTITRACK.md](docs/OPTITRACK.md))
 
 ## Related Repositories
 

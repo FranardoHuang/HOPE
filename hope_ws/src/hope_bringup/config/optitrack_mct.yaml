@@ -1,0 +1,89 @@
+# Parameters for the vendored motion_capture_tracking node (OptiTrack backend).
+# Wildcard header: this file is passed ONLY to that node (namespace /optitrack)
+# by optitrack_hope_bridge.launch.py, which also overrides `hostname` from its
+# launch arg and remaps poses -> /optitrack/poses, /tf -> /optitrack/tf.
+#
+# ---- BALL MODES (pick ONE, never both) --------------------------------------
+# MODE A — rigid-body ball: the ball is a Motive rigid-body ASSET named exactly
+#   `Ball` (>=3 markers), streamed like P1/PPT. Nothing to configure here —
+#   keep the librigidbodytracker block below COMMENTED OUT (an enabled tracker
+#   body would fight the same-named vendor body and lock onto stray points).
+#   Motive: Rigid Bodies ON; Unlabeled Markers not needed (OFF is cleanest).
+#   Set the asset PIVOT to the sphere CENTER in Motive — the planner's bounce
+#   geometry assumes ball-center positions. Occlusion drops the asset's
+#   tracking-valid bit and the driver omits it from the frame (verified:
+#   rigidBodies() filters on it), so the relay's /poses gating works unchanged.
+#   Expect dropouts on fast/spinning balls if fewer than 3 markers stay
+#   co-visible (mocap reference §5.3 caveat).
+# MODE B — single unlabeled marker (mocap reference §5.1/5.2 design):
+#   fully-coated retroreflective ball = ONE point at the ball center, tracked
+#   from the unlabeled cloud by librigidbodytracker. Uncomment the block below.
+#   Motive: Unlabeled Markers ON and Labeled Markers OFF become LOAD-BEARING
+#   (the tracker re-acquires by nearest-neighbour with a search radius that
+#   grows during occlusion — stray points in the cloud WILL be grabbed).
+# "mocap reference" =
+#   mocap/HOPE_Motion_Capture_System_and_Coordinates_Reference_Setup.md
+# -----------------------------------------------------------------------------
+# Other Motive-side requirements (both modes, mocap reference §6.3): NatNet
+# enabled, Up Axis = Z, Unicast preferred, rigid-body assets named exactly P1
+# (+ PPT, P2 if used). Assets created/renamed in Motive while the bridge runs
+# SELF-HEAL in ~1-2 s (vendored patch #6 re-requests the model definition when
+# an unnamed body streams); restart the bridge only as a fallback.
+/**:
+  ros__parameters:
+    # one of "optitrack" (open-source NatNet depacketizer, all platforms) or
+    # "mock" (bench testing without Motive; streams rigid_bodies statically).
+    # The other libmotioncapture backends are trimmed from the HOPE vendor
+    # copy (see hope_ws/src/motion_capture_tracking/PIN.md).
+    type: "optitrack"
+    # The Motive PC IP is NOT set here: it varies per venue, so it is passed
+    # explicitly per run via the REQUIRED launch arg
+    # (optitrack_hope_bridge.launch.py hostname:=<MOTIVE_PC_IP>).
+    # For a bare `ros2 run motion_capture_tracking motion_capture_tracking_node`
+    # debug session, add `-p hostname:=<MOTIVE_PC_IP>` yourself.
+
+    topics:
+      frame_id: "world"
+      # "ros" = stamp with arrival time (same convention as the vendored VRPN
+      # client's default; the planner polyfits against header.stamp).
+      header_time: "ros"
+      poses:
+        version: 1        # NamedPoseArray; the HOPE relay consumes v1
+        qos:
+          mode: "sensor"  # SensorDataQoS keep-last-1: right for a 300-360 Hz feed
+          deadline: 100.0 # Hz (publisher deadline QoS)
+      tf:
+        child_frame_id: "{}"  # raw body names; /tf is remapped to /optitrack/tf
+
+    # Point-cloud binary log for librigidbodytracker analysis ("" = disabled).
+    logfilepath: ""
+
+    # ---- MODE B block: single-marker ball via librigidbodytracker ----------
+    # COMMENTED OUT for a rigid-body-ball venue (MODE A above). To use the
+    # single-marker ball, uncomment ALL THREE sections and flip the Motive
+    # marker streaming per MODE B notes. P1/P2/PPT must NEVER be listed here:
+    # they are Motive-native assets and stream automatically.
+    # marker_configurations:
+    #   ball_marker:
+    #     offset: [0.0, 0.0, 0.0]
+    #     points:
+    #       p0: [0.0, 0.0, 0.0]   # single marker at the body origin
+    # dynamics_configurations:
+    #   ball_dynamics:
+    #     # m/s per axis. Also the re-acquisition gate: search radius =
+    #     # max_velocity * time-since-last-lock. Hard smashes exceed the
+    #     # 10 m/s used in the reference-design sketch -> 15.
+    #     max_velocity: [15.0, 15.0, 15.0]
+    #     # Orientation limits are meaningless for a single marker (ICP keeps
+    #     # the initial orientation); set wide so they can never trip.
+    #     max_angular_velocity: [100.0, 100.0, 100.0]
+    #     max_roll: 3.2
+    #     max_pitch: 3.2
+    #     max_fitness_score: 0.001
+    # rigid_bodies:
+    #   Ball:                     # STANDARDIZED name; must match the relay's ball_object
+    #     # First-lock guess: place the ball near the table when the driver
+    #     # starts (approx. table centre, mocap reference §5.2).
+    #     initial_position: [1.37, -0.7625, 0.2]
+    #     marker: "ball_marker"
+    #     dynamics: "ball_dynamics"

@@ -89,8 +89,15 @@ by Motive or CMTracker instead of assuming that `Ball` and `ball` are interchang
 A generic bringup that wires the VRPN path into the planner lives in
 `hope_ws/src/hope_bringup/`.
 
+For OptiTrack rigs the repository also vendors the IMRCLab `motion_capture_tracking`
+NatNet driver (`hope_ws/src/motion_capture_tracking/`, MIT licensed) plus an
+`optitrack_mct_relay` adapter that produces the exact same `/poses` contract — select it
+with `mocap_backend:=optitrack` on the bringup launch. See
+[`docs/OPTITRACK.md`](../docs/OPTITRACK.md).
+
 For testing without a physical rig, `hope_ws/src/hope_bringup/scripts/fake_ball_publisher`
-publishes synthetic `/poses` trajectories.
+publishes synthetic `/poses` trajectories (`fake_optitrack_publisher` does the same at the
+OptiTrack driver level).
 
 ## What is intentionally not here
 

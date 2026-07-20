@@ -20,6 +20,19 @@ mocap-less smoke test).
 50 Hz policy control loop
 ```
 
+The chain above shows the default **VRPN backend**. With
+`mocap_backend:=optitrack` the first two hops are replaced by the vendored
+NatNet driver + relay — the `/poses` hop and everything below it are identical
+(see [the OptiTrack backend](#optitrack-backend) below and
+[docs/OPTITRACK.md](../OPTITRACK.md)):
+
+```text
+/optitrack/poses                       motion_capture_tracking_interfaces/NamedPoseArray
+        |  optitrack_mct_relay (hope_bringup)
+        v
+/poses (+ /ball/point, /{table,P1,P2}/pose, TF)
+```
+
 ## Topics
 
 | Topic | Type | From → to | QoS |
@@ -52,6 +65,47 @@ Notes per hop:
   [`hope_ws/src/hope_planner/config/hope_planner.yaml`](../../hope_ws/src/hope_planner/config/hope_planner.yaml).
   The reference runner's `--planner` mode subscribes with the matching reliable
   QoS and hands the newest command to the 50 Hz control loop.
+
+## OptiTrack backend
+
+`ros2 launch hope_bringup hope_bringup.launch.py mocap_backend:=optitrack mocap_server:=<MOTIVE_PC_IP>`
+(or the standalone `optitrack_hope_bridge.launch.py`) swaps the mocap source
+while keeping the `/poses` contract byte-identical. Operational guide:
+[docs/OPTITRACK.md](../OPTITRACK.md).
+
+| Topic | Type | From → to | QoS |
+|-------|------|-----------|-----|
+| `/optitrack/poses` | `motion_capture_tracking_interfaces/NamedPoseArray` | vendored `motion_capture_tracking` driver → `optitrack_mct_relay` | sensor-data (best-effort, volatile, keep-last 1) |
+| `/poses` | `geometry_msgs/PoseArray` | `optitrack_mct_relay` → `hope_planner` | best-effort, volatile, keep-last 1 |
+| `/ball/point` | `geometry_msgs/PointStamped` | `optitrack_mct_relay` → (debug / downstream consumers) | best-effort, volatile, keep-last 1 |
+| `/table/pose`, `/P1/pose`, `/P2/pose` | `geometry_msgs/PoseStamped` | `optitrack_mct_relay` → (debug / downstream consumers) | best-effort, volatile, keep-last 1 |
+
+Notes:
+
+- **`/optitrack/poses`** — ONE message per camera frame carrying every tracked
+  object by name (Motive rigid-body assets `P1`/`P2`/`PPT` verbatim, plus the
+  ball entry `Ball` — either a Motive asset or a `librigidbodytracker`
+  single-marker body, see
+  [`optitrack_mct.yaml`](../../hope_ws/src/hope_bringup/config/optitrack_mct.yaml)).
+  ⚠ deliberately remapped AWAY from the bare `/poses` name by
+  `optitrack_hope_bridge.launch.py`: same name, DIFFERENT message type than the
+  HOPE contract — an unremapped driver breaks the planner with a DDS type
+  mismatch. The driver's raw TF is likewise remapped to `/optitrack/tf` /
+  `/optitrack/tf_static` so the relay stays the only
+  `world → ball/PPT/P1/P2` TF authority; `/optitrack/pointCloud` carries the
+  unlabeled-marker cloud (ball-tracker debugging).
+- **`/poses`** — published by the relay ONLY on frames that contain the ball
+  entry (an occluded ball is omitted by the driver), so a stale ball position
+  is never re-emitted at rigid-body timestamps — the same
+  ball-triggered publishing the VRPN path gets from `pose_to_posearray`.
+  Order is `["ball", "PPT", "P1", "P2"]` (ball first, matching the planner's
+  default `ball_pose_index: 0`); absent objects are skipped.
+- **Rates** — OptiTrack rigs commonly stream 360 Hz (vs the 300 Hz VRPN
+  default). The planner's `fit_window` is coupled to the rate
+  (`round(31 × rate / 300)`, ≥ ~100 ms of samples — 360 Hz → 37); see
+  [docs/OPTITRACK.md](../OPTITRACK.md). Measured `ros2 topic hz` can read
+  below the camera rate under receive-side drops; that is normal for a
+  best-effort sensor stream.
 
 ## `hope_msgs/RacketCommand`
 

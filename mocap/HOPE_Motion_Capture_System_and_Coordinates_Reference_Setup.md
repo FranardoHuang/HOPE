@@ -314,6 +314,14 @@ This is the important wire-level fact: `(pitch, yaw, roll)` is an operator-facin
 > `NamedPoseArray`, not the `geometry_msgs/PoseArray` the shipped planner subscribes to),
 > so they do not connect to the shipped stack without an extra conversion node. The VRPN
 > path needs no such conversion on either vendor.
+>
+> **Status:** the repository does now ship that conversion node as an OPTIONAL alternative
+> backend for OptiTrack venues: the vendored `motion_capture_tracking` driver
+> (`hope_ws/src/motion_capture_tracking/`, pinned commit, open-source NatNet depacketizer
+> only — see its `PIN.md`) plus the `optitrack_mct_relay` adapter, which converts the
+> `NamedPoseArray` into the same `/poses` contract as the VRPN path. Select it with
+> `hope_bringup.launch.py mocap_backend:=optitrack`; the VRPN path above remains the
+> default and reference. Operations guide: [`docs/OPTITRACK.md`](../docs/OPTITRACK.md).
 
 ### 6.2  OptiTrack / VRPN Path
 
