@@ -1,13 +1,13 @@
 # EXP-P1-BALANCE-ACTION-SLEW-20260720 — 腿腰恢复期执行目标突变是否比全身 raw-action 平滑更适合乒乓
 
 - 状态：`ready`
-- 运行态：`probe2 W-C false reject；probe3 W-C/W-N/V-C verifier contract rejected；probe4 W-C Hydra compose rejected；probe5 five receipts passed / W-H pre-trainer identity reject；probe6 W-C transaction-wrapper pre-trainer reject / other five not launched；probe7 manifest-bound / not launched`
+- 运行态：`probe2 W-C false reject；probe3 W-C/W-N/V-C verifier contract rejected；probe4 W-C Hydra compose rejected；probe5 five receipts passed / W-H pre-trainer identity reject；probe6 W-C transaction-wrapper pre-trainer reject；probe7 W-C/V-C/V-N receipts passed / W-N scene-boot watchdog teardown / W-H,V-H not launched；probe8 manifest-bound / not launched`
 - 阶段/轴：Phase 1 / 单拍后的平衡恢复与动作平滑
 - 集成小目标：降低高回台候选的摔倒与腿腰突变，同时不压低稳定候选的击球完成和回台
 - 人类负责人：Franco
 - 执行者：Codex
 - 复核/决策负责人：Franco
-- 最高证据等级：Wave A runtime mechanics=`E3`（probe5 五格两步探针）；机制结论=`E1`（无可解锁六收据集）；外部 M0 moving input gate=`E2`
+- 最高证据等级：Wave A runtime mechanics=`E3`（probe5 五格、probe7 三格 exact 两步探针）；机制结论=`E1`（无可解锁同代六收据集）；外部 M0 moving input gate=`E2`
 - 创建日期/最后复核日期：2026-07-20 / 2026-07-20
 
 本记录使用的 [`raw action-rate`](../../DEFINITIONS.md#raw-action-rate-l2) 是每个 50 Hz tick
@@ -73,15 +73,15 @@ completion、return 与 fall 有交叉取舍，不能据此把全局 `-0.05` 或
 硬门阻断；它必须绑定 source、queue 与全部远端输入的 SHA-256，其中 preconverted `model.usd` 还要连同
 依赖的完整 6-file sibling bundle 做 tree hash。当前冻结清单是
 [`phase1_balance_action_slew_launch_manifest_20260720.json`](../../../configs/phase1_balance_action_slew_launch_manifest_20260720.json)，
-文件 SHA-256=`4552fe23abd551d8959a9de05cc5f9d761d0da25eed88138d61fa45cc6558e9e`、content
-SHA-256=`6e3518d97d48fad550e7971a5178b1f11c15895696f03d30d5a62d1e27741640`。它只把 probe command
+文件 SHA-256=`887c0b9e097e50300d83eef27e587d112f70132958e6e8d9b68af74437fa7231`、content
+SHA-256=`13f92d5eda71e90abd6a14a1498c2afd98d3cb825cb26e2f5b74958b5a795f84`。它只把 probe command
 从“缺清单”解锁为“可渲染”，不表示已经 SSH 或启动。train command 仍必须消费六份
 [`probe receipt`](../../DEFINITIONS.md#balance-probe-receipt-set)。
 
 | 字段 | 冻结值/SHA |
 | --- | --- |
 | source checkout | `/workspace/codexschema/nohope_balance_action_slew_20260720`；clean detached `54c9a62656f0e60e5bb41cbcfa0e5a972b793906` |
-| queue bytes | config SHA-256 `912bd8d212791d99ce6a6851a8f05c12d182cdfa9d5566e02381f1b4703b8f3c`；runner SHA-256 `3fbaf23f97fdb40e05a448f9f769267b21c7cca3bd767aa082c0d5b965ecd7d7` |
+| queue bytes | config SHA-256 `0c84613f05439237f6e36d37e0c9210984465d928b9c0cba50999bd8995145f9`；runner SHA-256 `2bc9d59e21413a812a742529c6f3291f5710c384e0f4af7ee7098f33b25ba17d` |
 | 动作 | `v4rg_runtime_order_v3` 正/反手，路径固定在 YAML |
 | 观测/action | `deploy_parity_face179`，actor `179→31`；`qdes_clamp=true` |
 | plant/engine | Isaac `HOPEPingPongVirtualBall`，`dt=0.005`、decimation `4`，即 50 Hz；零关节摩擦 |
@@ -226,8 +226,42 @@ evidence 与失败后 PGID/child 残留审计保持不变。新 no-clobber root 
 `912bd8d212791d99ce6a6851a8f05c12d182cdfa9d5566e02381f1b4703b8f3c` /
 `3fbaf23f97fdb40e05a448f9f769267b21c7cca3bd767aa082c0d5b965ecd7d7`；manifest file/content SHA-256
 分别为 `4552fe23abd551d8959a9de05cc5f9d761d0da25eed88138d61fa45cc6558e9e` /
-`6e3518d97d48fad550e7971a5178b1f11c15895696f03d30d5a62d1e27741640`。probe7 当前尚未发射；只有该代
-六份 exact receipt 全齐才可生成科学训练命令。
+`6e3518d97d48fad550e7971a5178b1f11c15895696f03d30d5a62d1e27741640`。该 identity 冻结时 probe7 尚未
+发射；下一节记录其后续 runtime，不能倒写或补用 v6 收据。
+
+### 2026-07-20 probe7 三收据与 W-N scene-boot transient；probe8 替换批
+
+probe7/v6 的 W-C、V-C、V-N 均 natural exit=`0`、normal exit=`true`，dedicated verifier 证明 6700/6701
+两步的 processed-q_des/qdot observed 各为 `98304`，并在退出后闭合 exact process group 与 assigned GPU。
+三份 receipt 的 file/content SHA-256 为：
+
+- W-C：`9e36cdb52691383c40c9659a1c9120328a3bd9297bd3e69601301f6a97504438` /
+  `38b360ddff1811107ba3c13a039081d6b5ead3cbd52cd2513ffd8c127af669fc`；
+- V-C：`85320e1ef03b9f6bf9af7c67aadff8f274e1500e47e4bc3a31260b76490de07f` /
+  `06c93fea66eb8a8ed19d30b098ce2727253870ca9129a80e796b136beef48c43`；
+- V-N：`31a7d1cdc476832190f54f37413cfe6d07d81a7237ee0423ddea4e1724c61dbd` /
+  `74797a461f3dc1fe780fc702319952e68423ab2963337e0793ab13b6a3dbb527`。
+
+W-N 于 `2026-07-20T03:22:50Z` 发射，已进入 RSL/scene config，却冻结在 `Starting the simulation`；没有
+Learning iteration、binding、terminal status 或 receipt。`run.log` 为 22601 B、SHA-256
+`9c46896bbc2a12324a209635374556ab8a4100cd96acd5e9ad01595cbfaa0e3b`，最后 mtime
+`03:23:06.408757Z`；180 s locked watchdog 只对已经绑定的 exact process group 先 TERM 再 KILL，最终
+rc=`125`。launch ledger SHA-256=`7b087a6f54c78ab83d070bb96aab2152dda10cd294d7dee08df2f3dacc74d1b3`；
+事后 exact groups 稳定 absent、GPU1 empty、Kit/cache locks free。V-N 在 W-N 失败被确认前 6 s 已经发出，
+因此允许它自然完成并验证；W-H/V-H 从未发射。
+
+同一 v6 identity 下 W-C 已证明 W parent 可完成，V-N 已证明 `action_rate=0` 可完成；结合 exact argv 对比，
+W parent 与无 action-rate 都不是 W-N 冻结的必要原因。故 W-N 只记 infrastructure-only transient，不是 N
+机制负例，也不修改 Reward 结论或 180 s timeout。v6 namespace/manifest 永久 immutable：三份收据不能与
+W-N 重试或下一代混成六份，v6 任何格都不得补发。
+
+probe8 使用 fresh no-clobber root `/workspace/codexschema/phase1_balance_action_slew_v7_20260720`，六个
+run name 为 `phase1_balance_slew_probe8_{w_c,w_n,w_h,v_c,v_n,v_h}_seed3_20260720`。config/runner
+SHA-256 分别为 `0c84613f05439237f6e36d37e0c9210984465d928b9c0cba50999bd8995145f9` /
+`2bc9d59e21413a812a742529c6f3291f5710c384e0f4af7ee7098f33b25ba17d`；manifest file/content SHA-256
+分别为 `887c0b9e097e50300d83eef27e587d112f70132958e6e8d9b68af74437fa7231` /
+`13f92d5eda71e90abd6a14a1498c2afd98d3cb825cb26e2f5b74958b5a795f84`。probe8 当前尚未发射；W-N 是
+唯一首发 canary，只有它先发布 exact receipt 才能发其他五格，最终仍须同代六份收据齐全。
 
 ## 预算、量尺与停止规则
 
@@ -310,7 +344,8 @@ band，仍因 no-narrowing 失败。manifest 顶层和每个结果
 | Wave A probe4 W-C | `Hydra compose rejected before run-dir` | W `model_6700` / seed3 | E1 fail-closed preflight | 无 run dir/log/checkpoint/receipt | 错误 Hydra key；未进 Kit、未占 GPU，不是机制结果 |
 | Wave A probe5 六格 | `five verified receipts / W-H pre-trainer identity reject` | W/V `model_6700` / seed3 | E3 mechanics only | W-C/W-N/V-C/V-N/V-H receipts；W-H 无 binding/checkpoint/receipt | 五收据不能解锁；W-H 是 fork→exec 采样竞态，不是 H 负例 |
 | Wave A probe6 六格 | `W-C transaction-wrapper rejected / other five not launched` | W `model_6700` / seed3 | E1 fail-closed infrastructure | 81 B `run.log`；无 evidence/binding/terminal/checkpoint/receipt/RSL | multiline Python 参数被逐行缩进破坏；残留/GPU/locks 全空，不是机制负例 |
-| Wave A probe7 六格 | `manifest-bound / not launched` | W/V `model_6700` / seed3 | E1 source/queue/manifest | launch manifest `4552fe23…58e9e`；新 v6 namespace 尚无 runtime | transaction body byte-preserving + multiline byte-equality 回归；diagnostic only |
+| Wave A probe7 六格 | `W-C/V-C/V-N verified；W-N watchdog teardown；W-H/V-H not launched` | W/V `model_6700` / seed3 | E3 mechanics / E1 result | 三份 exact receipt；W-N 只有 run log/ledger、无 binding/terminal/receipt | W-N 是 scene-boot infrastructure transient；v6 immutable，不作 Reward 结论 |
+| Wave A probe8 六格 | `manifest-bound / not launched` | W/V `model_6700` / seed3 | E1 source/queue/manifest | launch manifest `887c0b9e…a7231`；新 v7 namespace 尚无 runtime | W-N-only first canary；其 receipt 通过前禁止发其他五格 |
 | Wave B 下半身 matched ablation | `design pending / M0 moving rejected` | 未冻结 | E2 input gate | M0 manifest `fdd60fcf…396e` | moving teacher no-launch；只继续静态 v4rg 或 non-demo constraint 设计 |
 
 ## 分动作成绩表
@@ -325,7 +360,7 @@ Wave A 是 single-swing continuation 诊断，不能声称完成 T0/T1/T2 连续
 
 ## 决定
 
-- 决定：`inconclusive`（probe5 只有五收据；probe6 W-C 在 trainer 前被 transaction wrapper 拒绝且其余五格未发；仍无同 identity 六收据）
+- 决定：`inconclusive`（probe7 只有 W-C/V-C/V-N 三收据；W-N 是基础设施 transient，W-H/V-H 未发；仍无同 identity 六收据）
 - 是否已纳入当前 setting：`no`
 - 局限/下一个 gate：先过六格 2-update full-scene probe，再按里程碑购买 Wave A；Wave B 另行审计与预注册。
 
@@ -334,5 +369,5 @@ Wave A 是 single-swing continuation 诊断，不能声称完成 T0/T1/T2 连续
 只读 plan、命令生成和 Pod 启动纪律见
 [Run Training](../../operations/run_training.md#恢复期腿腰-processed-q_des-slew-wave-a)与
 [RunPod](../../operations/run_on_runpod.md#2026-07-20-action-slew-wave-a-启动前状态与发射纪律)。
-当前记录启动过上述 probe2 W-C、probe3 W-C/W-N/V-C、probe5 六格尝试及 probe6 W-C；probe6 的其余
-五格与 probe7 均未发，也从未启动科学长训、judge、部署或真机。
+当前记录还启动过 probe7 W-C/V-C/V-N/W-N；其中前三格验证通过，W-N 由 locked watchdog 精确拆除，
+W-H/V-H 未发。probe8 尚未发射，也从未启动科学长训、judge、部署或真机。

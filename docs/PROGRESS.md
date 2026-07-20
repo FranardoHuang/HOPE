@@ -62,12 +62,16 @@
   `run.log` 只有 `IndentationError: unexpected indent`。locked launcher 未绑定快速退出的 child，也未发
   signal；leader/child evidence、binding、terminal、checkpoint、receipt 与 RSL 均 absent，PID=PGID
   `2712318` 双扫稳定 absent，GPU0=`0 MiB / 0%`、locks free；其他五格未发。v5 因而永久只作失败历史，
-  不是机制负例。当前 [probe7 替换批](DEFINITIONS.md#balance-probe-generations) 使用全新 v6 no-clobber 根和
-  `phase1_balance_slew_probe7_{w_c,w_n,w_h,v_c,v_n,v_h}_seed3_20260720`，transaction body 改为逐字节保留
-  且新增 multiline payload byte-equality 回归；尚未发射。其 [launch manifest](DEFINITIONS.md#balance-launch-manifest)
-  文件/content SHA-256 为 `4552fe23…58e9e` / `6e3518d9…41640`，config/runner 为
-  `912bd8d2…b8f3c` / `3fbaf23f…cd7d7`。六份同一 identity 的 probe7 receipt 齐全前不得生成长训；
-  运行 authority 只来自合入后的 `origin/main` NOW 条目。详见
+  不是机制负例。probe7/v6 的 W-C、V-C、V-N 随后 natural exit `0` 并各发布 exact receipt；两步均为
+  `98304` samples，进程/GPU 闭合。W-N 于 `03:22:50Z` 到达 scene config 后冻结在
+  `Starting the simulation`，无 Learning iteration/binding/terminal/receipt；180 s locked watchdog exact
+  TERM→KILL 后 rc=`125`，组/GPU1/locks 全空。V-N 在失败被确认前 6 s 已发并自然验证；W-H/V-H 未发。
+  W-C/V-N 成功排除 W parent 与 `action_rate=0` 各自为必要失败原因，故不改 Reward 结论或 timeout；v6
+  immutable，禁止重试或混收据。当前 [probe8 替换批](DEFINITIONS.md#balance-probe-generations) 使用 fresh v7
+  no-clobber root 和 `phase1_balance_slew_probe8_{w_c,w_n,w_h,v_c,v_n,v_h}_seed3_20260720`，尚未发射；
+  W-N 必须作为唯一首发 canary 先取得 receipt。新 manifest file/content 为 `887c0b9e…a7231` /
+  `13f92d5e…95f84`，config/runner 为 `0c84613f…145f9` / `2bc9d59e…ba17d`。probe8 六份同一 identity
+  receipt 齐全前不得生成长训；运行 authority 只来自合入后的 `origin/main` NOW 条目。详见
   [Wave A 实验](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md)。
 
 ## 2026-07-19

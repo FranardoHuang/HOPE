@@ -44,7 +44,7 @@ HYDRA_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 EXPECTED_QUEUE_ID = "phase1_balance_action_slew_20260720"
-EXPECTED_NAMESPACE = "/workspace/codexschema/phase1_balance_action_slew_v6_20260720"
+EXPECTED_NAMESPACE = "/workspace/codexschema/phase1_balance_action_slew_v7_20260720"
 EXPECTED_SOURCE = "/workspace/codexschema/nohope_balance_action_slew_20260720"
 EXPECTED_REMOTE_SOURCE_COMMIT = "54c9a62656f0e60e5bb41cbcfa0e5a972b793906"
 PARENT_ITERATION = 6700
@@ -1073,7 +1073,7 @@ def _stage_run_dir(queue: Mapping[str, Any], job: Mapping[str, Any], stage: str)
 def _stage_run_name(job: Mapping[str, Any], stage: str) -> str:
     if stage == "train":
         return str(job["run_name"])
-    return f"phase1_balance_slew_probe7_{job['id']}_seed3_20260720"
+    return f"phase1_balance_slew_probe8_{job['id']}_seed3_20260720"
 
 
 def _training_argv(

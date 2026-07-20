@@ -106,25 +106,35 @@ Follow-up note (2026-07-20, W/Y export mechanics pass but exact lineage blocks p
   `/workspace/codexschema/phase1_balance_action_slew_v5_20260720` and manifest file/content SHA-256
   `718bbee0a556cc3640ee636e20f8eb2adb293cee8d0bb1820afceebf5ce1a267` /
   `3cbb019e9d315abdc687d1635c9deffc13eae9577ee2d820b0e3c30ba9b7cfd8` are immutable history and cannot be retried.
-- Probe7 (the seventh non-scientific contract-probe attempt) is the current fresh attempt. It uses the no-clobber
-  root `/workspace/codexschema/phase1_balance_action_slew_v6_20260720`. The current config/runner SHA-256 values are
+- Probe7 (the seventh non-scientific contract-probe attempt) produced natural exits and exact verifier receipts for
+  W-C, V-C and V-N. W-N reached RSL at `2026-07-20T03:22:50Z` and then froze at `Starting the simulation`, before
+  any learning iteration, trainer binding, terminal checkpoint or receipt. Its locked 180 s watchdog used exact
+  TERM/KILL and returned rc `125`; subsequent checks closed the exact groups, assigned GPU and Kit/cache locks.
+  V-N had already been launched six seconds before the W-N failure became known and later verified successfully;
+  W-H and V-H were never launched. This is transient launch infrastructure evidence, not a negative result for
+  `action_rate=0` or either parent policy/mechanism. The v6 root
+  `/workspace/codexschema/phase1_balance_action_slew_v6_20260720`, its three receipts, and its config/runner and
+  manifest file/content SHA-256 values
   `912bd8d212791d99ce6a6851a8f05c12d182cdfa9d5566e02381f1b4703b8f3c` /
-  `3fbaf23f97fdb40e05a448f9f769267b21c7cca3bd767aa082c0d5b965ecd7d7`; the exact
-  [`launch manifest`](../DEFINITIONS.md#balance-launch-manifest) file/content SHA-256 values are
+  `3fbaf23f97fdb40e05a448f9f769267b21c7cca3bd767aa082c0d5b965ecd7d7` /
   `4552fe23abd551d8959a9de05cc5f9d761d0da25eed88138d61fa45cc6558e9e` /
-  `6e3518d97d48fad550e7971a5178b1f11c15895696f03d30d5a62d1e27741640`. The failure helper now wraps the
-  transaction without changing its body bytes, and a multiline payload byte-equality regression guards that
-  contract. After `Popen`, the supervisor still publishes and follows the same child PID with the bounded exact
-  identity wait; the launcher and state/marker/binding/fatal postchecks remain one audited transaction. Any failure
-  stops the full six-cell batch. Before a later launch, exact leader PGID, child PID, assigned GPU and Kit/cache
-  locks must all be proven absent; failure-audit rc `121` still requires manual closure audit.
-- Reproducible probe7 command-render gate (it emits JSON but does not SSH or start a trainer):
+  `6e3518d97d48fad550e7971a5178b1f11c15895696f03d30d5a62d1e27741640` are immutable history: no retry or mixing.
+- Probe8 (the eighth non-scientific contract-probe attempt) is the current replacement and has not been launched.
+  It uses fresh root `/workspace/codexschema/phase1_balance_action_slew_v7_20260720`. The current config/runner
+  SHA-256 values are `0c84613f05439237f6e36d37e0c9210984465d928b9c0cba50999bd8995145f9` /
+  `2bc9d59e21413a812a742529c6f3291f5710c384e0f4af7ee7098f33b25ba17d`; the exact
+  [`launch manifest`](../DEFINITIONS.md#balance-launch-manifest) file/content SHA-256 values are
+  `887c0b9e097e50300d83eef27e587d112f70132958e6e8d9b68af74437fa7231` /
+  `13f92d5eda71e90abd6a14a1498c2afd98d3cb825cb26e2f5b74958b5a795f84`. W-N is the sole first canary: it must
+  naturally exit, pass its verifier and prove exact process/GPU/lock closure before any other probe8 cell starts.
+  The locked 180 s watchdog must not be relaxed. Afterwards, at most one Kit boot per Pod may proceed at a time.
+- Reproducible probe8 command-render gate (it emits JSON but does not SSH or start a trainer):
 
   ```bash
   BALANCE_REPO_ROOT="$(git rev-parse --show-toplevel)"
   cd "$BALANCE_REPO_ROOT"
   BALANCE_LAUNCH_MANIFEST="$BALANCE_REPO_ROOT/configs/phase1_balance_action_slew_launch_manifest_20260720.json"
-  BALANCE_LAUNCH_MANIFEST_SHA256="4552fe23abd551d8959a9de05cc5f9d761d0da25eed88138d61fa45cc6558e9e"
+  BALANCE_LAUNCH_MANIFEST_SHA256="887c0b9e097e50300d83eef27e587d112f70132958e6e8d9b68af74437fa7231"
   git fetch origin main
   test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
   git cat-file -e origin/main:configs/phase1_balance_action_slew_launch_manifest_20260720.json
@@ -132,7 +142,7 @@ Follow-up note (2026-07-20, W/Y export mechanics pass but exact lineage blocks p
     --stage probe --authorize-launch \
     --launch-manifest "$BALANCE_LAUNCH_MANIFEST" \
     --expected-launch-manifest-sha256 "$BALANCE_LAUNCH_MANIFEST_SHA256" \
-    > /tmp/phase1_balance_slew_probe7_commands.json
+    > /tmp/phase1_balance_slew_probe8_commands.json
   ```
 
   Inputs are a clean current-main authority checkout, the manifest above and its manifest-bound remote assets and
