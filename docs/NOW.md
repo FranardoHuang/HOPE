@@ -48,6 +48,9 @@ MuJoCo/Gate3，V11 fast/prestrike 分别停在 `2816/18274`，代理 checkpoint 
 
 新的 processed-qdes action-slew 六格矩阵是 Wave A，只用于判断腿/腰执行目标突变是否能降低单拍后的
 fall 与姿态尾部风险；它是默认关闭、同父本、单 seed 的诊断，不是完整稳定方案或已采用 setting。
+唯一启动的 Pod1 W-C probe2 已自然到 `model_6701.pt`，但旧 verifier 错把首个 `0.48 s` rollout 合法的
+recovery-eligible=`0` 当成失败，未产生 receipt，也不构成机制负结果。probe3 已改为逐 update 守恒且
+两步合计 eligibility 非零，并使用新 no-clobber 根与 manifest `2d3e7955…3bae17`；旧 manifest/目录禁止重用。
 Wave B 的 M0 左右 moving teacher 已因 stance `0/4` 被 input gate 拒绝；当前只允许审计
 upper-only matched control 对静态 v4rg 下半身模仿或 non-demo stability constraint，exact flags/矩阵仍待
 源码审计，不得猜写。
@@ -825,7 +828,9 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
   再按 `+200/+500/+1000` 看 fall、completion、return 与姿态/目标突变尾部。所有子项因显式新 Reward
   合同而 formal-ineligible；结果只能筛机制，不能晋级 policy。Wave B 的 M0 moving teacher 已因 stance
   `0/4` 拒绝；当前只设计 upper-only control 对静态 v4rg 下半身模仿或 non-demo constraint，其 exact
-  flags/矩阵必须先由源码/合同审计冻结，当前不猜。两波都不能替代
+  flags/矩阵必须先由源码/合同审计冻结，当前不猜。Wave A 的 probe2 W-C outer-verifier 假拒绝已保留；
+  下一证据是从新根 `/workspace/codexschema/phase1_balance_action_slew_v2_20260720` 发射 probe3 六格并收齐
+  六份 exact receipt，缺任一份都不得生成长训。两波都不能替代
   `T0/T1/T2` 连续恢复卷。[Wave A 实验](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md)
 - **[9｜P0] Hitter 实机 planner 时序与训练反应时间基线。** 责任人 yikang；执行者 Codex；分支
   `codex/hitter-lowerbody-mujoco-alignment`，基于 `hitter`。2026-07-16 用户将本轮顺序收敛为：

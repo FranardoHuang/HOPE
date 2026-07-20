@@ -42,11 +42,13 @@
   [G05 支线审计](gates/G05_isaac_training_first_loop.md)。
 
 - 稳定机制拆成两波：Wave A 是 W/V processed-qdes action-slew 六格单拍诊断，不是完整稳定方案；
-  Wave B 的 M0 moving teacher 已因 stance `0/4` 被 input gate 拒绝，当前只审计 upper-only control 对静态
-  v4rg 下半身模仿或 non-demo stability constraint，exact flags/矩阵待源码审计后再冻结，不猜写。
-  Wave A 的 source/config/runner、两棵 asset tree、动作/题库和 W/V parents 已绑定到 launch manifest
-  `d7e95130…a2e47`；命令渲染门已具备输入，但本条记录时仍是 `not launched`，没有 probe/runtime 结果。
-  两波都不得绕过连续恢复的 `T0 → T1 → T2` 顺序。见
+  Wave B 的 M0 moving teacher 已因 stance `0/4` 被 input gate 拒绝；实现支线把候选收敛为 upper-only
+  control、静态 v4rg 十二腿关节软模仿与无参考脚距/qdot 稳定约束，合入前仍不改变现役 setting。Wave A
+  唯一启动的 Pod1 W-C probe2 自然跑完
+  `6700/6701`，但旧 verifier 错误要求首个 `0.48 s` rollout 也有触球后 `0.20 s` recovery sample，故在
+  合法 `eligible=0` 处假拒绝且没有 receipt；第二步已有 `31459` 个 eligible sample。probe3 已改为逐步
+  守恒、两步合计 eligibility 非零，并转入新 no-clobber namespace；新 manifest 为
+  `2d3e7955…3bae17`，进入 `origin/main` 前不得重发。两波都不得绕过连续恢复的 `T0 → T1 → T2` 顺序。见
   [Wave A 实验](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md)。
 
 ## 2026-07-19

@@ -1,13 +1,13 @@
 # EXP-P1-BALANCE-ACTION-SLEW-20260720 — 腿腰恢复期执行目标突变是否比全身 raw-action 平滑更适合乒乓
 
 - 状态：`ready`
-- 运行态：`manifest-bound / not launched`
+- 运行态：`probe2 W-C natural exit / outer-verifier rejected；probe3 manifest-bound / not launched`
 - 阶段/轴：Phase 1 / 单拍后的平衡恢复与动作平滑
 - 集成小目标：降低高回台候选的摔倒与腿腰突变，同时不压低稳定候选的击球完成和回台
 - 人类负责人：Franco
 - 执行者：Codex
 - 复核/决策负责人：Franco
-- 最高证据等级：Wave A=`E1`（source、合同与 queue）；外部 M0 moving input gate=`E2`，不提升 Wave A 假设证据
+- 最高证据等级：Wave A runtime mechanics=`E3`（仅 W-C 两步探针）；机制结论=`E1`（无受理收据）；外部 M0 moving input gate=`E2`
 - 创建日期/最后复核日期：2026-07-20 / 2026-07-20
 
 本记录使用的 [`raw action-rate`](../../DEFINITIONS.md#raw-action-rate-l2) 是每个 50 Hz tick
@@ -73,8 +73,8 @@ completion、return 与 fall 有交叉取舍，不能据此把全局 `-0.05` 或
 硬门阻断；它必须绑定 source、queue 与全部远端输入的 SHA-256，其中 preconverted `model.usd` 还要连同
 依赖的完整 6-file sibling bundle 做 tree hash。当前冻结清单是
 [`phase1_balance_action_slew_launch_manifest_20260720.json`](../../../configs/phase1_balance_action_slew_launch_manifest_20260720.json)，
-文件 SHA-256=`d7e951301e8df58a40e5566d45375afc990201a4a40265e683ef1990df2a2e47`、content
-SHA-256=`c980007bf5703b647d8216477bdece181cb7625e4581f84b8349beeb087e052d`。它只把 probe command
+文件 SHA-256=`2d3e7955a1f7e6af3624826f1e7ceaaebd9b2bb0a2c1c72d4b43d0a7ce3bae17`、content
+SHA-256=`e86873a2aeedc1c408d9d1c19f95c8818455213811852cc92858f92ea3399215`。它只把 probe command
 从“缺清单”解锁为“可渲染”，不表示已经 SSH 或启动。train command 仍必须消费六份
 [`probe receipt`](../../DEFINITIONS.md#balance-probe-receipt-set)。
 
@@ -126,12 +126,34 @@ ankle-pitch `0.184`、ankle-roll `0.328 rad/tick`；runtime 仍以实际 articul
 
 `W` 与 `V` 的不同 parent 配方不构成 W-vs-V 单变量比较；机制只在各自 parent 内比较 `C/N/H`。
 
+### 2026-07-20 W-C probe2 假拒绝与 probe3 修订
+
+Pod1 GPU0 的 `phase1_balance_slew_probe2_w_c_seed3_20260720` 是唯一实际启动的旧探针。它从 W
+`model_6700.pt` 自然跑完两个 update，`2026-07-20T01:08:47.435447Z` 开始、
+`2026-07-20T01:09:24.372852Z` 退出，terminal status 为 `exit_code=0`、`normal_exit=true`，并生成
+`model_6700.pt`、`model_6701.pt`、hard contract 和完整 TensorBoard ledger。进程组与 GPU 已自然释放；
+没有人工 signal。
+
+旧 outer verifier 没有发布 receipt，因为它错误要求**每个** update 都有非零恢复期分母。第 6700 步
+包含 `24 × 4096 = 98304` 个样本，其中 previous-q-des valid/invalid=`89899/8405`，但
+recovery-eligible=`0`；初始准备时间最短 `0.36 s`，再加触球后 `0.20 s` 的窗口起点，最早资格时刻
+`0.56 s` 已超出首个 `24 × 0.02 = 0.48 s` rollout。第 6701 步已有 recovery-eligible=`31459`、
+tail-active=`31456`、above-margin joints=`189191`、gated-tail sum=`11670.224609375`，证明通道实际激活。
+故这次拒绝是量尺错误，不是 trainer 崩溃，也不能写成 W-C 机制失败。
+
+probe3 的修订仍逐 update 强制 observed=`valid+invalid`、tail/joint/value 守恒；它只允许某一 update 的
+recovery-eligible 为零，并新增**两步合计必须大于零**的硬门。为保持 no-clobber，全部六格转到新根
+`/workspace/codexschema/phase1_balance_action_slew_v2_20260720`，旧 probe2 目录原样保留且不得补写 receipt。
+probe3 的 config、runner、manifest 进入 `origin/main` 前，不允许重发任何一格；旧 manifest 也不再提供
+发射权限。
+
 ## 预算、量尺与停止规则
 
 1. 六格先各跑 `4096 env × 2 update` 的完整场景合同探针。每格必须自然退出到独立
    `model_6701.pt`（absolute milestone=`[6701]`，exclusive iteration upper bound=`6702`）；dedicated exact
    verifier 须证明 6700/6701 两步 processed-q_des、completion/fall/legal-return、ready-tilt、qdot tag 的
-   非零分母与守恒账，finite policy/value/full optimizer/two normalizers、C/N/H exact
+   分母与守恒账；processed-q_des 恢复资格允许单个 update 为零，但两步合计必须非零，其余预注册行为
+   分母仍须逐 update 非零。另须证明 finite policy/value/full optimizer/two normalizers、C/N/H exact
    weight-margin-window-applied markers、lineage=`0`、fatal scan，以及 leader/PGID/GPU 已释放并发布不可覆盖
    收据。不能借用 lean fresh-probe 的相对 `[1]` 语义。只有本地按 `DIR/JOB_ID/probe_receipt.json` 收齐并
    重验全部六份，才允许生成科学训练命令；人工写一个“probe 已通过”布尔值无效。
@@ -200,7 +222,8 @@ band，仍因 no-narrowing 失败。manifest 顶层和每个结果
 
 | 运行 | 状态 | Checkpoint/seed | 证据 | 结果产物 | 有效性说明 |
 | --- | --- | --- | --- | --- | --- |
-| Wave A 六格 | `manifest-bound / not launched` | W/V `model_6700` / seed3 | E1 source/queue/manifest | launch manifest `d7e95130…a2e47`；暂无 runtime 产物 | intentional parent-contract mismatch；diagnostic only |
+| Wave A probe2 W-C | `natural exit / verifier rejected` | W `model_6700` / seed3 | E3 mechanics only | `model_6701.pt` 与两步 ledger；无 receipt | 首步 recovery 分母合法为零；不作机制结论，不重用旧目录 |
+| Wave A probe3 六格 | `manifest-bound / not launched` | W/V `model_6700` / seed3 | E1 source/queue/manifest | launch manifest `2d3e7955…3bae17`；新 v2 namespace 尚无 runtime | intentional parent-contract mismatch；diagnostic only |
 | Wave B 下半身 matched ablation | `design pending / M0 moving rejected` | 未冻结 | E2 input gate | M0 manifest `fdd60fcf…396e` | moving teacher no-launch；只继续静态 v4rg 或 non-demo constraint 设计 |
 
 ## 分动作成绩表
@@ -215,7 +238,7 @@ Wave A 是 single-swing continuation 诊断，不能声称完成 T0/T1/T2 连续
 
 ## 决定
 
-- 决定：`inconclusive`（预注册与 launch-manifest 绑定完成，尚无 runtime）
+- 决定：`inconclusive`（W-C probe2 只闭合 trainer mechanics，outer-verifier 量尺已修订；六格仍无受理收据）
 - 是否已纳入当前 setting：`no`
 - 局限/下一个 gate：先过六格 2-update full-scene probe，再按里程碑购买 Wave A；Wave B 另行审计与预注册。
 
@@ -224,4 +247,4 @@ Wave A 是 single-swing continuation 诊断，不能声称完成 T0/T1/T2 连续
 只读 plan、命令生成和 Pod 启动纪律见
 [Run Training](../../operations/run_training.md#恢复期腿腰-processed-q_des-slew-wave-a)与
 [RunPod](../../operations/run_on_runpod.md#2026-07-20-action-slew-wave-a-启动前状态与发射纪律)。
-当前记录没有启动 simulator、trainer、judge 或真机。
+当前记录只启动过上述 Pod1 W-C 两步 Isaac 探针；没有启动科学长训、judge、部署或真机。

@@ -209,11 +209,14 @@ fresh curve worker 在 childless/lock-free 复核后也只按各自 PGID TERM �
 | A3 runtime asset 候选树 | 两台均为 46 files / `15,378,264 B`，tree SHA `a9512461…a90` | source exact path 已恢复 | 在 queue exact path 重算，不能借用候选路径结论 |
 | 普通进程审计 | Pod1 有 PGID `2010084`、`2010190`、`2010154`，其中 planner 独立在 `2010190` | 三个 exact PGID 已按身份对账停止并复核 absent | 每次发射仍重查 PID/PGID/starttime/argv，不能从历史 absent 外推 |
 
-这次闭合只恢复了发射输入，没有启动 probe。不得把 staging 成功本身签成 reviewed authority，也不得先启动
-再补 SHA。queue/runner bytes 冻结后的独立清单已经写入
+最初这次闭合只恢复了发射输入，没有启动 probe；随后唯一启动的 Pod1 W-C probe2 自然退出，但被错误的
+逐-update recovery 非零门假拒绝，未产生 receipt。不得把 staging 或该假拒绝签成科学结果，也不得先启动
+再补 SHA。probe3 queue/runner bytes 冻结后的独立清单已经写入
 [`phase1_balance_action_slew_launch_manifest_20260720.json`](../../configs/phase1_balance_action_slew_launch_manifest_20260720.json)，
-文件 SHA-256=`d7e951301e8df58a40e5566d45375afc990201a4a40265e683ef1990df2a2e47`；清单存在只授权命令渲染，
+文件 SHA-256=`2d3e7955a1f7e6af3624826f1e7ceaaebd9b2bb0a2c1c72d4b43d0a7ce3bae17`；清单存在只授权命令渲染，
 每台真实发射前仍须由 remote preflight 对 exact 路径重算全部哈希、tree/count/bytes、source clean HEAD 与 GPU。
+旧 manifest `d7e95130…a2e47` 和旧输出根只作不可变历史；当前 no-clobber 根是
+`/workspace/codexschema/phase1_balance_action_slew_v2_20260720`，不得在旧 W-C 目录补写 receipt。
 
 两 Pod 首次预检时都存在 `/workspace/.cache/ov/_cache.lock`，且 `fuser` 没有 holder；紧邻闭合操作重验后，
 两个 exact orphan lock 已删除。历史删除不保证下一次 boot 时仍无锁；如果文件重新出现，必须先证明没有
@@ -292,7 +295,8 @@ argv、source HEAD=`54c9a62656f0e60e5bb41cbcfa0e5a972b793906`、物理 GPU、fir
 probe 必须自然退出到 absolute milestone `[6701]` 的 `model_6701.pt`（exclusive iteration upper
 bound=`6702`）。退出后逐条执行原 JSON 的 `jobs[].probe_verifier_command`；它会在确认 policy/value/full
 optimizer/two normalizers finite、C/N/H exact hard-contract/applied markers、lineage=`0`，以及 6700/6701
-processed-q_des、completion/fall/legal-return、ready-tilt、qdot tag 的非零分母与守恒账、
+processed-q_des、completion/fall/legal-return、ready-tilt、qdot tag 的分母与守恒账；processed-q_des
+recovery-eligible 允许单个 update 为零但两步合计必须非零，其余预注册分母逐 update 非零，并在确认
 无 fatal、leader/PGID/GPU 均释放后，向 `jobs[].probe_receipt_remote_path` 不可覆盖地写收据。不能套用
 fresh-probe 相对 milestone `[1]`。将六份收据逐字节复制成本地
 [`probe receipt set`](../DEFINITIONS.md#balance-probe-receipt-set)，exact 布局为

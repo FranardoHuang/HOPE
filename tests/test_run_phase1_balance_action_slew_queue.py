@@ -345,6 +345,8 @@ def test_verifier_requires_optimizer_lineage_contract_and_exact_log_markers(tmp_
     assert "training_contract_lineage_exact" in verifier and "exact lineage value 0" in verifier
     assert "expected_processed_qdes_contract" in verifier
     assert "expected_applied_markers" in verifier
+    assert "0 <= eligible <= valid <= observed" in verifier
+    assert "two-update probe did not observe any recovery-eligible sample" in verifier
 
 
 def test_counter_validator_rejects_impossible_ledgers_and_allows_tail_underflow():
@@ -369,6 +371,35 @@ def test_counter_validator_rejects_impossible_ledgers_and_allows_tail_underflow(
     over_bound["totals"]["gated_tail_value_sum"] += 0.0009858
     with pytest.raises(Q.QueueError, match="tail/value bound"):
         Q._validate_activation_payload(over_bound, "H", "over-bound")
+
+    # The first 24-step rollout is only 0.48 s long.  With the registered
+    # arrival-time mixture and a recovery gate that starts 0.20 s after strike,
+    # it can legitimately contain no recovery sample; the two-update probe as a
+    # whole must still exercise the gate.
+    startup_zero = copy.deepcopy(valid)
+    for field in (
+        "recovery_eligible_sample_count",
+        "reward_enabled_eligible_sample_count",
+        "tail_active_sample_count",
+        "above_margin_joint_count",
+        "gated_tail_value_sum",
+    ):
+        startup_zero["totals"][field] -= startup_zero["rows"][0][field]
+        startup_zero["rows"][0][field] = 0
+    Q._validate_activation_payload(startup_zero, "H", "startup-zero")
+
+    no_recovery = copy.deepcopy(startup_zero)
+    for field in (
+        "recovery_eligible_sample_count",
+        "reward_enabled_eligible_sample_count",
+        "tail_active_sample_count",
+        "above_margin_joint_count",
+        "gated_tail_value_sum",
+    ):
+        no_recovery["totals"][field] -= no_recovery["rows"][1][field]
+        no_recovery["rows"][1][field] = 0
+    with pytest.raises(Q.QueueError, match="any recovery-eligible sample"):
+        Q._validate_activation_payload(no_recovery, "H", "no-recovery")
 
     attacks = []
     bad = copy.deepcopy(valid)

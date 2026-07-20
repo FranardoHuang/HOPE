@@ -1192,9 +1192,15 @@ python3 scripts/run_phase1_balance_action_slew_queue.py --stage probe
 config/runner、A3 asset tree、`model.usd` 及完整 6-file sibling bundle tree、两份动作、题库、W/V checkpoint
 与 parent contract 的 SHA-256。只复制或只哈希 `model.usd` 会漏掉它依赖的 `configuration/`，必须拒绝。
 本轮 exact 文件为 `configs/phase1_balance_action_slew_launch_manifest_20260720.json`，文件 SHA-256 为
-`d7e951301e8df58a40e5566d45375afc990201a4a40265e683ef1990df2a2e47`。把该 exact 路径、SHA 分别放进
+`2d3e7955a1f7e6af3624826f1e7ceaaebd9b2bb0a2c1c72d4b43d0a7ce3bae17`。把该 exact 路径、SHA 分别放进
 任务专用变量 `BALANCE_LAUNCH_MANIFEST`、`BALANCE_LAUNCH_MANIFEST_SHA256`；不得用占位 hash，也不得把
 清单存在误写成 probe 已启动。
+
+旧 manifest `d7e95130…a2e47` 只启动过 Pod1 W-C probe2；trainer 自然退出，但 outer verifier 错把
+首个 `0.48 s` rollout 的 recovery-eligible=`0` 当成失败，未发布 receipt。旧 namespace 与旧 manifest
+都冻结为历史证据，不得补写或重发。当前 probe3 使用 no-clobber 根
+`/workspace/codexschema/phase1_balance_action_slew_v2_20260720`；逐 update 仍验计数守恒，但恢复资格只要求
+两步合计非零。只有本页当前 manifest 进入最新 `origin/main` 后才可发射。
 
 通过该复核后，[`--authorize-launch`](../DEFINITIONS.md#balance-command-render-latch)仍只允许**渲染**启动
 命令，不执行 SSH；runner 自身也会重复检查同一 `origin/main` authority，不能靠跳过本页绕过：
@@ -1243,7 +1249,8 @@ python3 scripts/run_phase1_balance_action_slew_queue.py \
 六份 [`probe receipt`](../DEFINITIONS.md#balance-probe-receipt-set)会重验 absolute milestone `[6701]`、
 terminal checkpoint、policy/value/full optimizer/two normalizers、C/N/H exact 参数与 applied markers、
 lineage=`0`、claim/binding，以及 6700/6701 两步的 processed-q_des、completion/fall/legal-return、ready-tilt、
-qdot tag、非零分母和守恒账，再检查 fatal、进程组和 GPU 释放。没有
+qdot tag 和守恒账；processed-q_des recovery-eligible 可逐步为零但两步合计必须非零，其他预注册分母仍
+逐步非零。最后再检查 fatal、进程组和 GPU 释放。没有
 `--probe-approved` 人工捷径；train 只接受同一 manifest 下收齐的六份 exact 收据，并只生成命令：
 
 ```bash

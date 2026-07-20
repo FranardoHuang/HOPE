@@ -44,7 +44,7 @@ HYDRA_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 EXPECTED_QUEUE_ID = "phase1_balance_action_slew_20260720"
-EXPECTED_NAMESPACE = "/workspace/codexschema/phase1_balance_action_slew_20260720"
+EXPECTED_NAMESPACE = "/workspace/codexschema/phase1_balance_action_slew_v2_20260720"
 EXPECTED_SOURCE = "/workspace/codexschema/nohope_balance_action_slew_20260720"
 EXPECTED_REMOTE_SOURCE_COMMIT = "54c9a62656f0e60e5bb41cbcfa0e5a972b793906"
 PARENT_ITERATION = 6700
@@ -1070,7 +1070,7 @@ def _stage_run_dir(queue: Mapping[str, Any], job: Mapping[str, Any], stage: str)
 def _stage_run_name(job: Mapping[str, Any], stage: str) -> str:
     if stage == "train":
         return str(job["run_name"])
-    return f"phase1_balance_slew_probe2_{job['id']}_seed3_20260720"
+    return f"phase1_balance_slew_probe3_{job['id']}_seed3_20260720"
 
 
 def _training_argv(
@@ -1879,7 +1879,7 @@ for step in spec["expected_steps"]:
     tail = row["tail_active_sample_count"]
     joints = row["above_margin_joint_count"]
     tail_sum = row["gated_tail_value_sum"]
-    if observed != valid + invalid or observed % spec["num_envs"] != 0 or not (0 < eligible <= valid <= observed):
+    if observed != valid + invalid or observed % spec["num_envs"] != 0 or not (0 <= eligible <= valid <= observed):
         raise SystemExit(f"activation denominator inconsistency at step {step}")
     if not (0 <= tail <= eligible and tail <= joints <= 15 * tail):
         raise SystemExit(f"activation tail/joint inconsistency at step {step}")
@@ -1925,6 +1925,8 @@ activation_rows = [{"step": step, **rows[step]} for step in spec["expected_steps
 totals = {counter: sum(row[counter] for row in activation_rows) for counter in spec["counter_tags"]}
 if totals["previous_qdes_invalid_first_step_sample_count"] < spec["num_envs"]:
     raise SystemExit("two-update probe did not observe one full reset-invalid denominator")
+if totals["recovery_eligible_sample_count"] <= 0:
+    raise SystemExit("two-update probe did not observe any recovery-eligible sample")
 receipt_content = {
     "schema_version": 1,
     "queue_id": spec["queue_id"],
@@ -2005,7 +2007,7 @@ def _validate_activation_payload(value: Any, mechanism: str, label: str) -> None
         tail = integers["tail_active_sample_count"]
         joints = integers["above_margin_joint_count"]
         tail_sum = float(row["gated_tail_value_sum"])
-        if observed != valid + invalid or observed % 4096 != 0 or not 0 < eligible <= valid <= observed:
+        if observed != valid + invalid or observed % 4096 != 0 or not 0 <= eligible <= valid <= observed:
             raise QueueError(f"{label} activation denominator inconsistency at {expected_step}")
         if not 0 <= tail <= eligible or not tail <= joints <= 15 * tail:
             raise QueueError(f"{label} tail/joint inconsistency at {expected_step}")
@@ -2059,6 +2061,8 @@ def _validate_activation_payload(value: Any, mechanism: str, label: str) -> None
             raise QueueError(f"{label}.totals.{counter} does not sum the rows")
     if calculated["previous_qdes_invalid_first_step_sample_count"] < 4096:
         raise QueueError(f"{label} did not observe a full reset-invalid denominator")
+    if calculated["recovery_eligible_sample_count"] <= 0:
+        raise QueueError(f"{label} did not observe any recovery-eligible sample")
 
 
 def _validate_probe_receipt(
