@@ -971,6 +971,177 @@ def runtime_execution_facts(
     return facts
 
 
+_A3_LOWER_BODY_RUNTIME_JOINT_ORDER = (
+    "waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint",
+    "head_yaw_joint", "head_pitch_joint",
+    "left_shoulder_pitch_joint", "left_shoulder_roll_joint", "left_shoulder_yaw_joint",
+    "left_elbow_joint", "left_wrist_roll_joint", "left_wrist_pitch_joint", "left_wrist_yaw_joint",
+    "right_shoulder_pitch_joint", "right_shoulder_roll_joint", "right_shoulder_yaw_joint",
+    "right_elbow_joint", "right_wrist_roll_joint", "right_wrist_pitch_joint", "right_wrist_yaw_joint",
+    "left_hip_pitch_joint", "left_hip_roll_joint", "left_hip_yaw_joint",
+    "left_knee_joint", "left_ankle_pitch_joint", "left_ankle_roll_joint",
+    "right_hip_pitch_joint", "right_hip_roll_joint", "right_hip_yaw_joint",
+    "right_knee_joint", "right_ankle_pitch_joint", "right_ankle_roll_joint",
+)
+_A3_LOWER_BODY_LEGS = tuple(_A3_LOWER_BODY_RUNTIME_JOINT_ORDER[-12:])
+
+
+def _wave_finite(value: object, *, name: str, positive=False, nonnegative=False) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError(f"schema-3 {name} must be a finite number")
+    value = float(value)
+    if not math.isfinite(value):
+        raise ValueError(f"schema-3 {name} must be a finite number")
+    if positive and value <= 0.0:
+        raise ValueError(f"schema-3 {name} must be finite and > 0")
+    if nonnegative and value < 0.0:
+        raise ValueError(f"schema-3 {name} must be finite and >= 0")
+    return value
+
+
+def _validate_lower_body_wave_contracts(
+    contract: Mapping,
+    joint_names: list[str],
+    articulation_joint_names: list[str],
+) -> None:
+    pose = contract.get("lower_body_pose_imitation_reward")
+    bundle = contract.get("lower_body_stability_bundle_reward")
+    if (pose is None) != (bundle is None):
+        raise ValueError("schema-3 explicit Wave-B cells require both B1 and B2 blocks")
+    if pose is not None:
+        pose = _require_exact_mapping_keys(
+            pose,
+            frozenset(
+                {
+                    "schema_version", "enabled", "probe_enabled", "activation_ledger",
+                    "weight", "std_rad", "support_pre_s", "support_post_s",
+                    "racket_command_name", "motion_command_name", "joint_count",
+                    "joint_names", "joint_order", "reference_joint_order", "formula",
+                    "gate", "success_conditioned",
+                }
+            ),
+            name="schema-3 lower_body_pose_imitation_reward",
+        )
+        if type(pose["schema_version"]) is not int or pose["schema_version"] != 1:
+            raise ValueError("schema-3 lower_body_pose_imitation_reward schema_version must be 1")
+        if (
+            not isinstance(pose["enabled"], bool)
+            or pose["probe_enabled"] is not True
+            or pose["success_conditioned"] is not False
+        ):
+            raise ValueError("schema-3 lower_body_pose_imitation_reward flags are invalid")
+        weight = _wave_finite(
+            pose["weight"], name="lower_body_pose_imitation_reward.weight", nonnegative=True
+        )
+        _wave_finite(pose["std_rad"], name="lower_body_pose_imitation_reward.std_rad", positive=True)
+        _wave_finite(
+            pose["support_pre_s"],
+            name="lower_body_pose_imitation_reward.support_pre_s",
+            nonnegative=True,
+        )
+        _wave_finite(
+            pose["support_post_s"],
+            name="lower_body_pose_imitation_reward.support_post_s",
+            nonnegative=True,
+        )
+        if pose["enabled"] != (weight > 0.0):
+            raise ValueError("schema-3 lower_body_pose_imitation_reward enabled disagrees with weight")
+        expected = {
+            "racket_command_name": "racket_target",
+            "motion_command_name": "motion",
+            "activation_ledger": "weight_independent_control_step_counters",
+            "joint_count": 12,
+            "joint_names": list(_A3_LOWER_BODY_LEGS),
+            "joint_order": "runtime_articulation_subsequence",
+            "reference_joint_order": "motion_command_runtime_articulation_identity",
+            "formula": "exp(-mean(square(q_leg-qref_leg))/square(std_rad))",
+            "gate": "phase_tts_pre_or_same_attempt_post_inclusive",
+        }
+        for key, value in expected.items():
+            if pose[key] != value:
+                raise ValueError(
+                    f"schema-3 lower_body_pose_imitation_reward {key} must be {value!r}"
+                )
+
+    if bundle is not None:
+        bundle = _require_exact_mapping_keys(
+            bundle,
+            frozenset(
+                {
+                    "schema_version", "enabled", "probe_enabled", "activation_ledger",
+                    "weight", "min_stance_width_m", "stance_scale_m",
+                    "leg_velocity_margin_radps", "leg_velocity_scale_radps",
+                    "support_pre_s", "support_post_s", "racket_command_name",
+                    "motion_command_name", "leg_joint_count", "leg_joint_names",
+                    "foot_body_names", "joint_order", "stance_width_frame", "components",
+                    "formula", "gate", "success_conditioned", "uses_motion_reference",
+                    "duplicates_slip_or_upright",
+                }
+            ),
+            name="schema-3 lower_body_stability_bundle_reward",
+        )
+        if type(bundle["schema_version"]) is not int or bundle["schema_version"] != 1:
+            raise ValueError("schema-3 lower_body_stability_bundle_reward schema_version must be 1")
+        if (
+            not isinstance(bundle["enabled"], bool)
+            or bundle["probe_enabled"] is not True
+            or bundle["success_conditioned"] is not False
+            or bundle["uses_motion_reference"] is not False
+            or bundle["duplicates_slip_or_upright"] is not False
+        ):
+            raise ValueError("schema-3 lower_body_stability_bundle_reward flags are invalid")
+        weight = _wave_finite(bundle["weight"], name="lower_body_stability_bundle_reward.weight")
+        if weight > 0.0 or bundle["enabled"] != (weight < 0.0):
+            raise ValueError("schema-3 lower_body_stability_bundle_reward weight/enabled is invalid")
+        for name in (
+            "min_stance_width_m", "stance_scale_m", "leg_velocity_scale_radps",
+        ):
+            _wave_finite(bundle[name], name=f"lower_body_stability_bundle_reward.{name}", positive=True)
+        for name in ("leg_velocity_margin_radps", "support_pre_s", "support_post_s"):
+            _wave_finite(
+                bundle[name], name=f"lower_body_stability_bundle_reward.{name}", nonnegative=True
+            )
+        expected = {
+            "racket_command_name": "racket_target",
+            "motion_command_name": "motion",
+            "activation_ledger": "weight_independent_control_step_counters",
+            "leg_joint_count": 12,
+            "leg_joint_names": list(_A3_LOWER_BODY_LEGS),
+            "foot_body_names": ["left_ankle_roll_Link", "right_ankle_roll_Link"],
+            "joint_order": "runtime_articulation_subsequence",
+            "stance_width_frame": "base_yaw_lateral_signed_left_minus_right",
+            "components": [
+                "stance_width_lower_hinge",
+                "twelve_leg_realized_qdot_tail",
+            ],
+            "formula": "mean(bounded_stance_tail,bounded_leg_qdot_tail)",
+            "gate": "phase_tts_pre_or_same_attempt_post_inclusive",
+        }
+        for key, value in expected.items():
+            if bundle[key] != value:
+                raise ValueError(
+                    f"schema-3 lower_body_stability_bundle_reward {key} must be {value!r}"
+                )
+        articulation_bodies = contract.get("articulation_body_names")
+        if (
+            not isinstance(articulation_bodies, (list, tuple))
+            or any(name not in articulation_bodies for name in bundle["foot_body_names"])
+        ):
+            raise ValueError(
+                "schema-3 lower_body_stability_bundle_reward foot bodies are absent from articulation"
+            )
+
+    if (pose is not None or bundle is not None) and (
+        tuple(joint_names) != _A3_LOWER_BODY_RUNTIME_JOINT_ORDER
+        or articulation_joint_names != joint_names
+    ):
+        raise ValueError(
+            "schema-3 lower-body rewards require exact A3 runtime/articulation joint identity"
+        )
+    if pose is not None and bundle is not None and pose["enabled"] and bundle["enabled"]:
+        raise ValueError("schema-3 Wave-B B1 and B2 rewards are mutually exclusive")
+
+
 def validate_schema3_contract_structure(contract: Mapping) -> None:
     """Validate a schema-3 sidecar without promoting it to a formal-exact lineage.
 
@@ -1244,6 +1415,11 @@ def validate_schema3_contract_structure(contract: Mapping) -> None:
                     "schema-3 processed_qdes_slew_hinge_reward "
                     f"{key} must be exactly {expected!r}"
                 )
+    _validate_lower_body_wave_contracts(
+        contract,
+        [str(value) for value in joint_names],
+        [str(value) for value in contract["articulation_joint_names"]],
+    )
     if contract["joint_friction_backend"] != JOINT_FRICTION_BACKEND:
         raise ValueError("schema-3 joint_friction_backend must be physx")
     if contract["joint_friction_semantics"] != JOINT_FRICTION_SEMANTICS:

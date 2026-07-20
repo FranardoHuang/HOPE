@@ -2,6 +2,10 @@
 
 - **signed-face A2/B2**：同一个已审计父 checkpoint 的跨 Pod 热启动探索 L1；A2 是 guidance `0.0`
   对照，B2 只把 signed-face guidance 改为 `-0.4`，两条 child 都是 lineage-inexact，不能当 fresh 证据。
+- **Wave-B B0/B1/B2**：下肢稳定实验内部的三格 matched-parent screen；B0 同时把两种新 reward
+  设为 `0` 但保留双探针，B1 只开静态 `v4rg` 十二腿关节软模仿 `+0.5`，B2 只开不读取动作参考的
+  脚距下界与实际腿速 bundle `-0.25`。它与上面的 signed-face `B2` 无关，使用时必须带
+  `Wave-B` 前缀。
 
 本文件是现行术语真源。新人和 agent 不需要去历史归档猜缩写。
 
@@ -18,6 +22,7 @@
 | --- | --- |
 | `setting` | 一整套可复现配方：动作、观测、reward、题库、plant、训练方法和裁决尺必须一起指定。只换一项就是新 setting。 |
 | `arm` / 实验臂 | 一条具体训练或对照配置，不是机器人的手臂。每条臂必须说清与对照相比只改了什么。 |
+| `Wave-B` / 下肢稳定首轮 | W/V 两个旧 `model_6700` parent 内分别比较 B0/B1/B2 的六格 causal continuation；两种机制共用不看成功结果的挥拍前 `0.30 s` 与同 attempt 挥拍后 `0.40 s` inclusive gate。它不是课程 Stage，也不授权当前 0/4 stance 验收失败的 M0 横移老师。 |
 | `run` | 某条实验臂的一次实际执行。同一实验可以有多个 run。 |
 | <a id="launch-authorized"></a>`launch_authorized` / 科学训练发射闩 | 轻量训练 YAML 顶层的显式布尔门。`false` 时 `launch-next` 与 `fill` 在 SSH、claim 或 Kit 启动前拒绝；`plan/status/doctor` 和独立的 source-asset/probe/finalizer 前置门仍可运行。只有 terminal probe 证据审完并把目标行改为 `ready` 后才可设为 `true`；它不授权 judge、第二 seed、晋级或真机。 |
 | <a id="dispatch-pods"></a>`dispatch_pods` / 活跃 Pod 集合 | YAML 队列里唯一允许 live snapshot、claim 检查和接收**新** trainer 的 Pod 名单。未列入的 Pod 不被普通 status/doctor/fill/launch/attest 访问；交接前必须先把其历史行改成终态，并给新任务使用从未发射的 namespace。它表达当前资源归属，不改变每卡容量上限。 |

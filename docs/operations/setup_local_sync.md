@@ -877,6 +877,39 @@ SHA-256 `0c2a565d7b7040afdda97baecdaf2cea923beaf3cf9c45a574d218bb82386e46`. Comp
 against it rather than copying hashes from a shell transcript. Its `validation.frozen_mode=0444`
 matches the four audited remote NPZs.
 
+## Wave-B 下肢稳定队列的 ignored/remote 输入
+
+[`run_phase1_lower_body_stability_wave.md`](run_phase1_lower_body_stability_wave.md) 的 source checkout 是
+`/workspace/codexschema/nohope_lowerbody_wave_20260720`。Git 不携带 A3 runtime asset tree；在每个 Pod 的
+clean detached checkout 中，从团队已审计的 shared asset 副本恢复到：
+
+```bash
+WAVE_B_SOURCE=/workspace/codexschema/nohope_lowerbody_wave_20260720
+WAVE_B_ASSET_DST="$WAVE_B_SOURCE/hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3"
+
+test -d /workspace/shared/assets/agibot_a3
+test ! -L "$WAVE_B_ASSET_DST"
+mkdir -p "$WAVE_B_ASSET_DST"
+rsync -a /workspace/shared/assets/agibot_a3/ "$WAVE_B_ASSET_DST/"
+```
+
+renderer 的 remote preflight 会重新计算全树，不以复制成功作为验收。受理值是 46 个 regular files、
+15378264 bytes、tree SHA-256 `071640ea68a4b3d51e8d11154af3098b42b79f356901588d110b5f49e7e6b070`，
+且禁止 symlink。
+
+其余大制品保留在已登记的 `/workspace/codexschema/` 根，不复制进 Git：
+
+- six-file USD bundle：`simple_half_second_sprint_20260718/assets/a3_preconverted_usd/`，6 files、
+  21897893 bytes、tree `716487dfdf02a5973f78263f0ae8a09e4680c04159e57dbe20796b7825dbeb4d`；
+- static v4rg forehand/backhand：`f2cb2d9f...1687` / `17225533...7534`；
+- schema-3 train bank：`3a9d8851...5b71`；
+- W/V parent checkpoints：`2caab3dd...fcce` / `ad901910...2716`，相邻 hard contracts：
+  `e208b682...8551` / `274cb3bd...aee0`。
+
+这些输入任一缺失时必须从保留该 exact SHA 的团队 Pod/制品备份按同一绝对路径恢复，并重新生成 reviewed
+manifest；禁止用同名重生成文件、M0 diagnostic GMR 输出或别的 checkpoint 代替。manifest preflight
+未通过前只能本地 plan，不能 launch。
+
 ## Expected Policy
 
 - Keep source and small config in git.

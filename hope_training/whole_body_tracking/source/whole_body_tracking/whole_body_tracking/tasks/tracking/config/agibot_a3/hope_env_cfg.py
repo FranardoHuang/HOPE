@@ -866,6 +866,63 @@ class HOPEVirtualBallRewardsCfg(HOPEDeployParityRewardsCfg):
         },
     )
 
+    # Wave B (DEFAULT OFF): two mutually exclusive lower-body stability hypotheses.  B1 pays a
+    # bounded pose kernel on the exact twelve leg joints from the current v4rg motion command.
+    # B2 is reference-free: it combines an absolute anti-collapse stance-width hinge with only
+    # the realized leg-qdot tail above a free margin.  Both use a phase opportunity/same-attempt
+    # support gate, never hit success.
+    # Their zero-valued probes are raised to weight 1.0 only by explicit B0/B1/B2 overrides.
+    lower_body_pose_imitation = RewTerm(
+        func=mdp.lower_body_pose_imitation,
+        weight=0.0,
+        params={
+            "racket_command_name": "racket_target",
+            "motion_command_name": "motion",
+            "std": 0.35,
+            "support_pre_s": 0.30,
+            "support_post_s": 0.40,
+        },
+    )
+    lower_body_pose_imitation_probe = RewTerm(
+        func=mdp.lower_body_pose_imitation_probe,
+        weight=0.0,
+        params={
+            "racket_command_name": "racket_target",
+            "motion_command_name": "motion",
+            "std": 0.35,
+            "support_pre_s": 0.30,
+            "support_post_s": 0.40,
+        },
+    )
+    lower_body_stability_bundle = RewTerm(
+        func=mdp.lower_body_stability_bundle,
+        weight=0.0,
+        params={
+            "racket_command_name": "racket_target",
+            "motion_command_name": "motion",
+            "min_stance_width_m": 0.22,
+            "stance_scale_m": 0.05,
+            "leg_velocity_margin_radps": 1.0,
+            "leg_velocity_scale_radps": 0.5,
+            "support_pre_s": 0.30,
+            "support_post_s": 0.40,
+        },
+    )
+    lower_body_stability_bundle_probe = RewTerm(
+        func=mdp.lower_body_stability_bundle_probe,
+        weight=0.0,
+        params={
+            "racket_command_name": "racket_target",
+            "motion_command_name": "motion",
+            "min_stance_width_m": 0.22,
+            "stance_scale_m": 0.05,
+            "leg_velocity_margin_radps": 1.0,
+            "leg_velocity_scale_radps": 0.5,
+            "support_pre_s": 0.30,
+            "support_post_s": 0.40,
+        },
+    )
+
     racket_velocity = RewTerm(
         func=mdp.racket_velocity_tracking_exp,
         weight=0.5,

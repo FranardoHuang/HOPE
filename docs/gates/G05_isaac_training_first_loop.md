@@ -34,6 +34,7 @@ This gate should prove that the training stack can consume A3 assets and produce
 ## Operation Docs
 
 - [../operations/run_training.md](../operations/run_training.md)
+- [../operations/run_phase1_lower_body_stability_wave.md](../operations/run_phase1_lower_body_stability_wave.md)
 - [../operations/setup_local_sync.md](../operations/setup_local_sync.md)
 
 ## Acceptance Criteria
@@ -219,6 +220,27 @@ Follow-up note (2026-07-20, S0/M0 exact-GMR evidence recovered; no training auth
   input-gate rejected and must not consume an RL GPU. Formal/schema2/training/hardware are false for both batches.
   G05 remains `Partial`; exact hashes and per-row failures are in
   [the motion experiment](../experiments/motion_exact_gmr_s0_m0_20260713.md).
+Follow-up note (2026-07-20, lower-body Wave-B source/queue preregistered; Gate remains `Partial`):
+
+- Inputs are bound, but not yet runtime-consumed: exact source `5db7366a...e39e`；W/V `model_6700` parent
+  checkpoints and adjacent hard contracts；static `v4rg_runtime_order_v3` forehand/backhand；schema-3 train bank；
+  ignored A3 runtime tree；six-file preconverted USD bundle；and the reviewed queue manifest.
+- Implemented: default-off twelve-leg soft pose imitation and reference-free signed-stance/qdot bundle；every
+  explicit Wave-B B0/B1/B2 cell declares both weights, enables both weight-independent ledgers, and writes both
+  schema-3 hard-contract blocks. The common inclusive gate is pre-strike `0.30 s` or same-attempt post-strike
+  `0.40 s`, without success conditioning.
+- Queue discipline: W/V×B0/B1/B2 uses six unique GPU slots, `4096 env × 24 steps × 2 update` probe namespaces, natural
+  exit and full policy/value/optimizer/two-normalizer checkpoint validation. Long SSH argv cannot be generated
+  until all six canonical receipts verify against one manifest; each update must contain exactly `98304` observed
+  samples. Authorized rendering also requires HEAD/bytes and the owner/executor/two-branch/queue-id claim in one
+  latest `origin/main` NOW entry; default invocation emits no SSH command.
+- Validation on this branch: Wave-B source/reward/schema-3/queue focused suites jointly report
+  `269 passed` (`35 + 124 + 68 + 42`). Queue compile and default no-launch plan pass；checked-in
+  config/runner/manifest digests bind exactly；12 probe/train remote bodies and 6 verifier bodies pass `bash -n`.
+- Outputs pending: six RunPod full-scene probe receipts, then six long science claims/bindings/checkpoints and
+  matched behavior metrics. There is no Isaac full-scene, PPO behavior, vendor MuJoCo or real-robot evidence；
+  descendants intentionally retain `training_contract_lineage_exact=0`. M0 moving teachers are 0/4 at their
+  separate stance gate and are absent from this queue. G05 therefore remains `Partial`.
 
 Follow-up note (2026-07-19, W/Y static export inputs closed; Gate remains `Partial`):
 

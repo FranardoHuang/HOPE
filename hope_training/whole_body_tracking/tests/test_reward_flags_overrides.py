@@ -129,6 +129,52 @@ def _make_env_cfg(anchor_pos_none=True):
                 "recovery_end_s": 1.55,
             },
         ),
+        lower_body_pose_imitation=_Term(
+            weight=0.0,
+            params={
+                "racket_command_name": "racket_target",
+                "motion_command_name": "motion",
+                "std": 0.35,
+                "support_pre_s": 0.30,
+                "support_post_s": 0.40,
+            },
+        ),
+        lower_body_pose_imitation_probe=_Term(
+            weight=0.0,
+            params={
+                "racket_command_name": "racket_target",
+                "motion_command_name": "motion",
+                "std": 0.35,
+                "support_pre_s": 0.30,
+                "support_post_s": 0.40,
+            },
+        ),
+        lower_body_stability_bundle=_Term(
+            weight=0.0,
+            params={
+                "racket_command_name": "racket_target",
+                "motion_command_name": "motion",
+                "min_stance_width_m": 0.22,
+                "stance_scale_m": 0.05,
+                "leg_velocity_margin_radps": 1.0,
+                "leg_velocity_scale_radps": 0.5,
+                "support_pre_s": 0.30,
+                "support_post_s": 0.40,
+            },
+        ),
+        lower_body_stability_bundle_probe=_Term(
+            weight=0.0,
+            params={
+                "racket_command_name": "racket_target",
+                "motion_command_name": "motion",
+                "min_stance_width_m": 0.22,
+                "stance_scale_m": 0.05,
+                "leg_velocity_margin_radps": 1.0,
+                "leg_velocity_scale_radps": 0.5,
+                "support_pre_s": 0.30,
+                "support_post_s": 0.40,
+            },
+        ),
         racket_guidance=_Term(weight=0.0, params={"command_name": "racket_target", "d_max": 0.5}),
         racket_face_guidance=_Term(weight=0.0, params={"command_name": "racket_target", "theta_max": 1.5707963}),
         racket_face_conditional_guidance=_Term(
