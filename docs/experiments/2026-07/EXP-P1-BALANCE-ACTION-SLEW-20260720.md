@@ -1,7 +1,7 @@
 # EXP-P1-BALANCE-ACTION-SLEW-20260720 — 腿腰恢复期执行目标突变是否比全身 raw-action 平滑更适合乒乓
 
 - 状态：`ready`
-- 运行态：`probe2 W-C false reject；probe3 W-C/W-N/V-C natural exit but verifier contract rejected；probe4 manifest-bound / not launched`
+- 运行态：`probe2 W-C false reject；probe3 W-C/W-N/V-C natural exit but verifier contract rejected；probe4 W-C Hydra compose rejected before run-dir；probe5 manifest-bound / not launched`
 - 阶段/轴：Phase 1 / 单拍后的平衡恢复与动作平滑
 - 集成小目标：降低高回台候选的摔倒与腿腰突变，同时不压低稳定候选的击球完成和回台
 - 人类负责人：Franco
@@ -73,8 +73,8 @@ completion、return 与 fall 有交叉取舍，不能据此把全局 `-0.05` 或
 硬门阻断；它必须绑定 source、queue 与全部远端输入的 SHA-256，其中 preconverted `model.usd` 还要连同
 依赖的完整 6-file sibling bundle 做 tree hash。当前冻结清单是
 [`phase1_balance_action_slew_launch_manifest_20260720.json`](../../../configs/phase1_balance_action_slew_launch_manifest_20260720.json)，
-文件 SHA-256=`283fd0027212abd4249a22d7a8ab4a91860702542ed717cdb2de0c1acdd1eefe`、content
-SHA-256=`0702e14dbbe0ddbc0e2fccf84bc6aa7c6736aefdfa715b0e96c9f6433bb46073`。它只把 probe command
+文件 SHA-256=`6bfa73587968f8f0af71b5617e8c324f75114b304bbe1452d0b0e4617d1f51bc`、content
+SHA-256=`093a4cc7a0ce91aad74948ed39b581e5f4a0693ba114f3144062b6cc4386a462`。它只把 probe command
 从“缺清单”解锁为“可渲染”，不表示已经 SSH 或启动。train command 仍必须消费六份
 [`probe receipt`](../../DEFINITIONS.md#balance-probe-receipt-set)。
 
@@ -157,12 +157,29 @@ W-C 的真实两行恰好都是 `98304`、合计 `196608`，所以 runtime 数�
 verifier identity 不够严格，W-C receipt 不能解锁 train。W-N/V-C 在告警到达时已经启动，允许其自然退出，
 没有运行旧 verifier、没有发布 receipt；其余三格没有启动，没有发送任何 signal。
 
-probe4 显式把 `algo.num_steps_per_env=24` 写进命令和 claim，在 verifier spec/receipt 中绑定
+probe4 意图把 24-step rollout 写进命令和 claim，在 verifier spec/receipt 中绑定
 `expected_samples_per_update=4096×24=98304`，并要求每个 update 的 processed-q-des observed 与 qdot
 observed 都**精确等于** `98304`；两步 totals 因而必须为 `196608`。测试新增 `4096`、`98304±4096`
 及 forged expected-denominator 攻击。全部六格再次转到全新 no-clobber 根
 `/workspace/codexschema/phase1_balance_action_slew_v3_20260720`，run name 使用 `probe4`；v2 的三格与 receipt
 保持历史只读，不能补写、替换或复用。
+
+### 2026-07-20 probe4 Hydra 组合门拒绝与 probe5 修订
+
+probe4 W-C 的唯一次 SSH 尝试在远端 manifest/source/checkpoint 预检通过后，被真实
+Hydra `--cfg job --resolve` 组合门拒绝：命令错写了不存在的 `algo.num_steps_per_env=24`。
+真实消费路径是 [`algo.runner.num_steps_per_env=24`](../../DEFINITIONS.md#ppo-num-steps-per-env)；Hydra 建议的
+`+algo.num_steps_per_env=24` 只会添加训练不读的死字段，不可采用。该 compose guard 位于建 run
+directory 和调用 Kit launcher 之前，所以 v3 root、claim、log、checkpoint、TensorBoard、PID/PGID
+全部不存在；GPU0 为 `0 MiB / 0% / no compute app`，boot lock 仍是 probe3 时间且无 holder。
+这是 fail-closed 基础设施拒绝，不是 trainer natural exit 或科学负结果。
+
+probe5 改用真实 runner key，增加“配置层级必须存在”单测和 Hydra 可用时的真实 compose 测试，
+并转到新 no-clobber 根 `/workspace/codexschema/phase1_balance_action_slew_v4_20260720`。probe run name
+使用 `probe5`；probe4 命令、manifest 和 v3 根只作失败历史，不可再发。Pod1 上用 probe5
+W-C 的**完整 exact argv**只运行 `--cfg job --resolve`，已得到 exit `0`：解析后
+`algo.runner.num_steps_per_env=24`、`cfg.algo` 顶层无死字段、`max_iterations=2`、run name 为
+`phase1_balance_slew_probe5_w_c_seed3_20260720`。这是零训练 compose 证据，不是 probe 已启动。
 
 ## 预算、量尺与停止规则
 
@@ -242,7 +259,8 @@ band，仍因 no-narrowing 失败。manifest 顶层和每个结果
 | --- | --- | --- | --- | --- | --- |
 | Wave A probe2 W-C | `natural exit / verifier rejected` | W `model_6700` / seed3 | E3 mechanics only | `model_6701.pt` 与两步 ledger；无 receipt | 首步 recovery 分母合法为零；不作机制结论，不重用旧目录 |
 | Wave A probe3 W-C/W-N/V-C | `natural exit / verifier contract rejected` | W/V `model_6700` / seed3 | E3 mechanics only | 三份 `model_6701.pt`；W-C 有旧 receipt，另两格无 receipt | verifier 未绑定 24-step rollout；全部不可解锁 train |
-| Wave A probe4 六格 | `manifest-bound / not launched` | W/V `model_6700` / seed3 | E1 source/queue/manifest | launch manifest `283fd002…1eefe`；新 v3 namespace 尚无 runtime | exact 98304/update gate；diagnostic only |
+| Wave A probe4 W-C | `Hydra compose rejected before run-dir` | W `model_6700` / seed3 | E1 fail-closed preflight | 无 run dir/log/checkpoint/receipt | 错误 Hydra key；未进 Kit、未占 GPU，不是机制结果 |
+| Wave A probe5 六格 | `manifest-bound / not launched` | W/V `model_6700` / seed3 | E1 source/queue/manifest | launch manifest `6bfa7358…1f51bc`；新 v4 namespace 尚无 runtime | exact 98304/update gate；diagnostic only |
 | Wave B 下半身 matched ablation | `design pending / M0 moving rejected` | 未冻结 | E2 input gate | M0 manifest `fdd60fcf…396e` | moving teacher no-launch；只继续静态 v4rg 或 non-demo constraint 设计 |
 
 ## 分动作成绩表
@@ -257,7 +275,7 @@ Wave A 是 single-swing continuation 诊断，不能声称完成 T0/T1/T2 连续
 
 ## 决定
 
-- 决定：`inconclusive`（probe2/3 只闭合 trainer mechanics；两次 verifier 合同缺口均已修订，六格仍无可解锁收据）
+- 决定：`inconclusive`（probe2/3 只闭合 trainer mechanics；probe4 在 run-dir 前 fail closed；六格仍无可解锁收据）
 - 是否已纳入当前 setting：`no`
 - 局限/下一个 gate：先过六格 2-update full-scene probe，再按里程碑购买 Wave A；Wave B 另行审计与预注册。
 

@@ -82,9 +82,13 @@ Follow-up note (2026-07-20, W/Y export mechanics pass but exact lineage blocks p
   denominator inside the first 0.48 s rollout, although the earliest possible eligibility is 0.56 s; step 6701 had
   `31459` eligible samples. Probe3 then naturally completed W-C/W-N/V-C, but its verifier only required denominators
   divisible by 4096 and did not bind the frozen 24 steps/env; the old W-C receipt and all three runtimes cannot unlock
-  training. Probe4 explicitly overrides 24 steps/env and requires qdes/qdot observed=`98304` per update in a third
-  fresh namespace. No mechanism result was accepted. Gate remains `Partial`; six accepted receipts and every
-  long-run output remain pending.
+  training. Probe4 bound the exact `98304` ledger but its only W-C attempt used the nonexistent Hydra key
+  `algo.num_steps_per_env`; the real compose guard rejected it before run-directory creation or Kit launch, leaving
+  no process, checkpoint, log, receipt, or GPU allocation. Probe5 uses the actual
+  [`algo.runner.num_steps_per_env=24`](../DEFINITIONS.md#ppo-num-steps-per-env), preserves exact qdes/qdot
+  observed=`98304` per update, and moves to a fourth fresh namespace. Its full W-C exact argv passed a zero-training
+  remote `--cfg job --resolve` check with runner value 24 and no dead top-level field. No mechanism result was accepted. Gate remains
+  `Partial`; six accepted receipts and every long-run output remain pending.
 
 Follow-up note (2026-07-20, recent Jiayi/Yikang branches audited; no branch-wide merge or behavior promotion):
 

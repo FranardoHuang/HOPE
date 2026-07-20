@@ -1192,7 +1192,7 @@ python3 scripts/run_phase1_balance_action_slew_queue.py --stage probe
 config/runner、A3 asset tree、`model.usd` 及完整 6-file sibling bundle tree、两份动作、题库、W/V checkpoint
 与 parent contract 的 SHA-256。只复制或只哈希 `model.usd` 会漏掉它依赖的 `configuration/`，必须拒绝。
 本轮 exact 文件为 `configs/phase1_balance_action_slew_launch_manifest_20260720.json`，文件 SHA-256 为
-`283fd0027212abd4249a22d7a8ab4a91860702542ed717cdb2de0c1acdd1eefe`。把该 exact 路径、SHA 分别放进
+`6bfa73587968f8f0af71b5617e8c324f75114b304bbe1452d0b0e4617d1f51bc`。把该 exact 路径、SHA 分别放进
 任务专用变量 `BALANCE_LAUNCH_MANIFEST`、`BALANCE_LAUNCH_MANIFEST_SHA256`；不得用占位 hash，也不得把
 清单存在误写成 probe 已启动。
 
@@ -1200,9 +1200,12 @@ config/runner、A3 asset tree、`model.usd` 及完整 6-file sibling bundle tree
 首个 `0.48 s` rollout 的 recovery-eligible=`0` 当成失败，未发布 receipt。旧 namespace 与旧 manifest
 都冻结为历史证据，不得补写或重发。manifest `2d3e7955…3bae17` 的 probe3 随后自然完成 W-C/W-N/V-C；
 W-C 的旧 receipt 虽有真实 `98304/update`，但 verifier 未把 24-step rollout 写成硬门，三格都不能解锁
-train。当前 probe4 使用 no-clobber 根 `/workspace/codexschema/phase1_balance_action_slew_v3_20260720`，显式
-override `algo.num_steps_per_env=24`，要求 processed-q-des/qdot observed 逐 update 都精确为 `98304`，恢复
-资格则只要求两步合计非零。只有本页当前 manifest 进入最新 `origin/main` 后才可发射。
+train。probe4 W-C 已因错写 `algo.num_steps_per_env=24` 而在建 run-dir/Kit 前被真实 Hydra compose 门
+fail closed，没有运行产物或 GPU compute。当前 probe5 使用 no-clobber 根
+`/workspace/codexschema/phase1_balance_action_slew_v4_20260720`，显式 override
+[`algo.runner.num_steps_per_env=24`](../DEFINITIONS.md#ppo-num-steps-per-env)，要求 processed-q-des/qdot observed 逐
+update 都精确为 `98304`，恢复资格则只要求两步合计非零。只有本页当前 manifest 进入最新
+`origin/main` 后才可发射。
 
 通过该复核后，[`--authorize-launch`](../DEFINITIONS.md#balance-command-render-latch)仍只允许**渲染**启动
 命令，不执行 SSH；runner 自身也会重复检查同一 `origin/main` authority，不能靠跳过本页绕过：

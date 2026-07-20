@@ -16,6 +16,9 @@ import yaml
 ROOT = Path(__file__).resolve().parents[1]
 SCRIPT = ROOT / "scripts" / "run_phase1_balance_action_slew_queue.py"
 QUEUE = ROOT / "configs" / "phase1_balance_action_slew_20260720.yaml"
+PPO_CONFIG = (
+    ROOT / "hope_training" / "whole_body_tracking" / "cfg" / "algo" / "ppo.yaml"
+)
 
 
 def _module():
@@ -295,13 +298,39 @@ def test_probe_budget_uses_exclusive_6702_and_terminal_6701():
     }
 
 
+def test_rollout_override_targets_existing_hydra_runner_key():
+    algo = yaml.safe_load(PPO_CONFIG.read_text(encoding="utf-8"))
+    assert algo["runner"]["num_steps_per_env"] == 24
+    queue = Q.load_queue(QUEUE)
+    argv = Q._training_argv(queue, queue["jobs"][0], "probe")
+    assert "algo.runner.num_steps_per_env=24" in argv
+    assert not any(item.startswith("algo.num_steps_per_env=") for item in argv)
+
+
+def test_training_argv_really_composes_rollout_key_when_hydra_available():
+    pytest.importorskip("hydra")
+    queue = Q.load_queue(QUEUE)
+    argv = Q._training_argv(queue, queue["jobs"][0], "probe")
+    result = subprocess.run(
+        [sys.executable, str(ROOT / "hope_training/whole_body_tracking/scripts/train.py"),
+         "--cfg", "job", "--resolve", *argv[2:]],
+        cwd=ROOT / "hope_training/whole_body_tracking",
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    resolved = yaml.safe_load(result.stdout)
+    assert resolved["algo"]["runner"]["num_steps_per_env"] == 24
+    assert "num_steps_per_env" not in resolved["algo"]
+
+
 def test_probe_claim_uses_absolute_terminal_milestone_and_custom_binding(tmp_path):
     queue = Q.load_queue(QUEUE)
     _, _, manifest = _manifest(tmp_path, queue)
     claim, argv = Q._build_claim(queue, queue["jobs"][0], "probe", manifest)
     assert claim["content"]["budget"]["milestones"] == [6701]
     assert claim["content"]["budget"]["num_steps_per_env"] == 24
-    assert "algo.num_steps_per_env=24" in argv
+    assert "algo.runner.num_steps_per_env=24" in argv
     assert claim["content"]["purpose"] == "balance_action_slew_probe_not_science"
     assert not any("training_queue_claim_path" in item for item in argv)
     assert not any("training_run_binding_path" in item for item in argv)

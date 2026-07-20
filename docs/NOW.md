@@ -50,9 +50,11 @@ MuJoCo/Gate3，V11 fast/prestrike 分别停在 `2816/18274`，代理 checkpoint 
 fall 与姿态尾部风险；它是默认关闭、同父本、单 seed 的诊断，不是完整稳定方案或已采用 setting。
 probe2 W-C 已自然到 `model_6701.pt`，但旧 verifier 错把首个 `0.48 s` rollout 合法的
 recovery-eligible=`0` 当成失败。probe3 的 W-C/W-N/V-C 也均自然退出；独立复核发现 verifier 未绑定
-`24 steps/env`，所以旧 W-C receipt 与三格 runtime 都不能解锁长训，其余三格未启动。probe4 现在显式
-要求 qdes/qdot 每 update exact `4096×24=98304`，使用 v3 no-clobber 根与 manifest
-`283fd002…1eefe`；两个旧 manifest/目录禁止重用。这些都不构成机制正负结果。
+`24 steps/env`，所以旧 W-C receipt 与三格 runtime 都不能解锁长训，其余三格未启动。probe4 W-C
+在建 run-dir/Kit 之前被真实 Hydra compose 门拒绝：错写了 `algo.num_steps_per_env=24`；v3 root、
+log、checkpoint 与 GPU compute 均不存在，不是科学负例。probe5 已改为
+[`algo.runner.num_steps_per_env=24`](DEFINITIONS.md#ppo-num-steps-per-env)，继续要求 qdes/qdot 每 update exact
+`4096×24=98304`，使用 v4 no-clobber 根与 manifest `6bfa7358…1f51bc`；所有旧 manifest/目录禁止重用。
 Wave B 的 M0 左右 moving teacher 已因 stance `0/4` 被 input gate 拒绝；当前只允许审计
 upper-only matched control 对静态 v4rg 下半身模仿或 non-demo stability constraint，exact flags/矩阵仍待
 源码审计，不得猜写。
@@ -831,7 +833,8 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
   合同而 formal-ineligible；结果只能筛机制，不能晋级 policy。Wave B 的 M0 moving teacher 已因 stance
   `0/4` 拒绝；当前只设计 upper-only control 对静态 v4rg 下半身模仿或 non-demo constraint，其 exact
   flags/矩阵必须先由源码/合同审计冻结，当前不猜。Wave A 的 probe2/3 verifier 缺口与 runtime 已保留；
-  下一证据是从新根 `/workspace/codexschema/phase1_balance_action_slew_v3_20260720` 发射 probe4 六格并收齐
+  probe4 W-C 在创建任何运行产物前因 Hydra key 错写 fail closed；下一证据是从新根
+  `/workspace/codexschema/phase1_balance_action_slew_v4_20260720` 发射 probe5 六格并收齐
   六份 exact receipt，缺任一份都不得生成长训。两波都不能替代
   `T0/T1/T2` 连续恢复卷。[Wave A 实验](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md)
 - **[9｜P0] Hitter 实机 planner 时序与训练反应时间基线。** 责任人 yikang；执行者 Codex；分支

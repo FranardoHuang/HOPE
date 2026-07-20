@@ -47,9 +47,12 @@
   probe2 W-C 自然跑完 `6700/6701`，但旧 verifier 错误要求首个 `0.48 s` rollout 也有触球后 `0.20 s`
   recovery sample，故在合法 `eligible=0` 处假拒绝。probe3 随后自然完成 W-C/W-N/V-C；red-team 发现其
   verifier 只验分母能被 4096 整除、未绑定 `24 steps/env`，所以 W-C 旧 receipt 与三格 runtime 均不能
-  解锁长训，其余三格未启动。probe4 已显式固定 `algo.num_steps_per_env=24`，要求 qdes/qdot 每 update
-  exact `98304`，并转入 v3 no-clobber namespace；新 manifest 为 `283fd002…1eefe`，进入
-  `origin/main` 前不得重发。两波都不得绕过连续恢复的 `T0 → T1 → T2` 顺序。见
+  解锁长训，其余三格未启动。probe4 W-C 随后在建 run-dir/Kit 之前被真实 Hydra compose 拒绝：
+  `algo.num_steps_per_env=24` 不是现有 key；v3 root、log、checkpoint、PID/PGID 和 GPU compute 均不存在。
+  probe5 改为 [`algo.runner.num_steps_per_env=24`](DEFINITIONS.md#ppo-num-steps-per-env)，保持 qdes/qdot 每 update exact
+  `98304`，并转入 v4 no-clobber namespace；新 manifest 为 `6bfa7358…1f51bc`。Pod1 已用 W-C 完整
+  exact argv 运行零训练 `--cfg job --resolve`，exit `0`且解析为 runner `24`、顶层无死字段。两波都不得绕过
+  连续恢复的 `T0 → T1 → T2` 顺序。见
   [Wave A 实验](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md)。
 
 ## 2026-07-19

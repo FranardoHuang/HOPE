@@ -212,12 +212,16 @@ fresh curve worker 在 childless/lock-free 复核后也只按各自 PGID TERM �
 最初这次闭合只恢复了发射输入，没有启动 probe；随后唯一启动的 Pod1 W-C probe2 自然退出，但被错误的
 逐-update recovery 非零门假拒绝，未产生 receipt。不得把 staging 或该假拒绝签成科学结果，也不得先启动
 再补 SHA。probe3 的 W-C/W-N/V-C 后来均自然退出，但 verifier 未绑定 24-step 完整 rollout，故其中 W-C
-旧 receipt 和另两格 runtime 都不能解锁 train。probe4 queue/runner bytes 冻结后的独立清单已经写入
+旧 receipt 和另两格 runtime 都不能解锁 train。probe4 W-C 又因命令错写
+`algo.num_steps_per_env=24` 而在远端 Hydra compose 门 fail closed；该门位于建 run-dir 与 Kit launcher 之前，
+所以 v3 root/log/checkpoint/process/GPU compute 全部不存在。probe5 改用真实的
+[`algo.runner.num_steps_per_env=24`](../DEFINITIONS.md#ppo-num-steps-per-env)，表示每个环境每次 PPO update
+收集 24 step。queue/runner bytes 冻结后的独立清单已写入
 [`phase1_balance_action_slew_launch_manifest_20260720.json`](../../configs/phase1_balance_action_slew_launch_manifest_20260720.json)，
-文件 SHA-256=`283fd0027212abd4249a22d7a8ab4a91860702542ed717cdb2de0c1acdd1eefe`；清单存在只授权命令渲染，
+文件 SHA-256=`6bfa73587968f8f0af71b5617e8c324f75114b304bbe1452d0b0e4617d1f51bc`；清单存在只授权命令渲染，
 每台真实发射前仍须由 remote preflight 对 exact 路径重算全部哈希、tree/count/bytes、source clean HEAD 与 GPU。
-旧 manifest `d7e95130…a2e47`、`2d3e7955…3bae17` 和两个旧输出根只作不可变历史；当前 no-clobber 根是
-`/workspace/codexschema/phase1_balance_action_slew_v3_20260720`，不得在旧目录补写或替换 receipt。
+旧 manifest `d7e95130…a2e47`、`2d3e7955…3bae17`、`283fd002…1eefe` 及 v1/v2/v3 输出根只作不可变历史；
+当前 no-clobber 根是 `/workspace/codexschema/phase1_balance_action_slew_v4_20260720`，不得在旧目录补写或替换 receipt。
 
 两 Pod 首次预检时都存在 `/workspace/.cache/ov/_cache.lock`，且 `fuser` 没有 holder；紧邻闭合操作重验后，
 两个 exact orphan lock 已删除。历史删除不保证下一次 boot 时仍无锁；如果文件重新出现，必须先证明没有
