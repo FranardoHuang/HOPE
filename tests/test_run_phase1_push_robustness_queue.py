@@ -191,8 +191,8 @@ def test_exactly_14_unique_jobs():
     jobs = queue["jobs"]
     assert len(jobs) == 14
     assert len({job["id"] for job in jobs}) == 14
-    assert len({job["run_name"] for job in jobs}) == 12
-    assert len({job["run_dir"] for job in jobs}) == 12
+    assert len({job["run_name"] for job in jobs}) == 14
+    assert len({job["run_dir"] for job in jobs}) == 14
 
 
 def test_parent_push_coverage_complete():
