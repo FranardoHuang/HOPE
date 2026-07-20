@@ -186,11 +186,11 @@ def test_controls_point_at_matrix_no_push_baseline(tmp_path):
 # ---------------------------------------------------------------- jobs / arms
 
 
-def test_exactly_12_unique_jobs():
+def test_exactly_14_unique_jobs():
     queue = Q.load_queue(QUEUE)
     jobs = queue["jobs"]
     assert len(jobs) == 14
-    assert len({job["id"] for job in jobs}) == 12
+    assert len({job["id"] for job in jobs}) == 14
     assert len({job["run_name"] for job in jobs}) == 12
     assert len({job["run_dir"] for job in jobs}) == 12
 
