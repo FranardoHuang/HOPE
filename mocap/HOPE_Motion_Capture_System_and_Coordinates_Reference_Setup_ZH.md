@@ -327,7 +327,7 @@ Motive 预期设置：
 ros2 launch vrpn_mocap client.launch.yaml server:=MOTIVE_PC_IP port:=3883
 ```
 
-确认四个资产均出现为 `/vrpn_mocap/<asset>/pose_id_0`，且完整的 `Ball` 位姿出现在配置的 `/poses` 索引处。
+确认三个比赛资产均出现为 `/vrpn_mocap/<asset>/pose_id_0`，且完整的 `Ball` 位姿出现在配置的 `/poses` 索引处。`Table` 资产仅在搭建/标定时核验，比赛期间不得存在其 VRPN 话题。
 
 ### 6.3  青瞳 / VRPN 路径
 
@@ -425,7 +425,7 @@ ros2 topic echo /poses --once                       # 规划器输入
 
 ## 8  小结
 
-HOPE 动作捕捉参考系统发布恰好四个具名刚体：
+HOPE 动作捕捉参考系统定义四个具名刚体资产；比赛期间仅流式传输 `Ball`、`P1` 与 `P2`：
 
 1. **`Ball`**——乒乓球的 6 自由度刚体位姿；ROS 2 接收位置与四元数，当前规划器使用位置。
 2. **`Table`**——仅用于搭建/标定的资产，锚定世界坐标系原点（旧版笔记称 `PPT`）；其位姿出现在训练数据录制中，但比赛期间**不**流式传输。

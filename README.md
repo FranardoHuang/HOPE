@@ -105,7 +105,7 @@ The competition rulebooks ship at the repository root:
        ┌──────────────────────────────┐   ┌──────────────────────────────┐
        │ OptiTrack Motive             │   │ Chingmu CMTracker / MCServer │
        │ (VRPN Streaming Engine)      │   │ (VRPN server)                │
-       │ 4 named 6-DOF rigid bodies:  │   │ 4 named 6-DOF rigid bodies:  │
+       │ 3 competition 6-DOF bodies:  │   │ 3 competition 6-DOF bodies:  │
        │ Ball / P1 / P2               │   │ Ball / P1 / P2               │
        └──────────────┬───────────────┘   └──────────────┬───────────────┘
                       │            VRPN tracker           │

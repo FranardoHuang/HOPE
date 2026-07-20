@@ -339,7 +339,7 @@ Then run the same vendored client as for Chingmu, pointed at the Motive host:
 ros2 launch vrpn_mocap client.launch.yaml server:=MOTIVE_PC_IP port:=3883
 ```
 
-Verify that all four assets appear as `/vrpn_mocap/<asset>/pose_id_0` and that the full `Ball` pose appears at the configured `/poses` index.
+Verify that the three competition assets appear as `/vrpn_mocap/<asset>/pose_id_0` and that the full `Ball` pose appears at the configured `/poses` index. The `Table` asset is validated only during setup/calibration and must not have a competition VRPN topic.
 
 ### 6.3  Chingmu / VRPN Path
 
@@ -435,7 +435,7 @@ The planner operates entirely in the HOPE canonical world frame defined in Secti
 
 ## 8  Summary
 
-The HOPE motion capture reference system publishes exactly four named rigid bodies:
+The HOPE motion capture reference system defines four named rigid-body assets; only `Ball`, `P1`, and `P2` are streamed during competition:
 
 1. **`Ball`** — the ping-pong ball as a vendor-tracked 6-DOF rigid body. ROS 2 receives position plus quaternion orientation; the current no-spin planner uses position only.
 2. **`Table`** — a setup/calibration-only asset anchoring the world frame origin (legacy arena notes may call this `PPT`); it appears in training-data recordings but is **not** streamed during competition.

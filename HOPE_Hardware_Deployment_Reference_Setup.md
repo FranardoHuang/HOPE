@@ -16,7 +16,7 @@ This document describes how to deploy trained HOPE ping-pong WBC policies onto p
 
 The deployment architecture is a ROS 2 Jazzy graph running on the robot's onboard computer or a tethered workstation. The policy runs ONNX CPU inference at 50 Hz, reads joint encoder feedback and `base_link` pose from the motion capture system, receives racket target commands from the planner, and outputs 29-DOF (G1) or equivalent-DOF (A3) joint position commands that are converted to torques by a PD controller on the robot's actuator bus.
 
-> **HOPE Racket Tracking Prohibition.** As documented in all companion references, the motion capture system tracks only the table origin (PPT), humanoid base_links (P1/P2), and the ball. The racket is NEVER tracked. The deployed policy infers its paddle state via forward kinematics from `base_link` + joint encoders through the fixed wrist mount (see WBC Training doc Section 2.8).
+> **HOPE Racket Tracking Prohibition.** During competition the motion-capture stream contains the ball and humanoid base links (P1/P2); the `Table`/PPT asset is used only during setup and calibration to establish the surveyed world origin. The racket is NEVER tracked. The deployed policy infers its paddle state via forward kinematics from `base_link` + joint encoders through the fixed wrist mount (see WBC Training doc Section 2.8).
 
 ---
 
@@ -59,7 +59,6 @@ The deployment runs as a ROS 2 Jazzy graph. All nodes run on a single machine (t
 │  │    /ball/point          (PointStamped, 360 Hz)               │         │
 │  │    /P1/pose             (PoseStamped, 360 Hz)                │         │
 │  │    /P2/pose             (PoseStamped, 360 Hz)                │         │
-│  │    /table/pose          (PoseStamped, 10 Hz)                 │         │
 │  └──────────┬──────────────────────────┬───────────────────────┘         │
 │             │                          │                                  │
 │             ▼                          ▼                                  │
@@ -202,7 +201,7 @@ The MuJoCo simulation should show the G1 model performing the trained swing moti
 1. ☐ Robot is powered on and standing in a stable position
 2. ☐ 3D-printed racket mount is securely attached to the right wrist link
 3. ☐ Racket is mounted and the `T_mount` transform matches the simulation model (see WBC Training doc Section 2.8)
-4. ☐ OptiTrack system is running and tracking the table (PPT), robot base_link (P1), and ball
+4. ☐ Table/PPT calibration has been verified; the motion-capture system is tracking the robot base_link (P1) and ball
 5. ☐ `motion_capture_tracking` node is publishing `/P1/pose` and `/ball/point`
 6. ☐ HOPE planner node is running and publishing `/racket/command`
 7. ☐ E-stop (Unitree RC joystick button B) has been tested
@@ -412,7 +411,6 @@ ros2 topic hz /ball/point /P1/pose /racket/command
 | `/ball/point` | `geometry_msgs/PointStamped` | `motion_capture_tracking` | HOPE Planner | 360 Hz |
 | `/P1/pose` | `geometry_msgs/PoseStamped` | `motion_capture_tracking` | HOPE Planner, WBC Controller | 360 Hz |
 | `/P2/pose` | `geometry_msgs/PoseStamped` | `motion_capture_tracking` | (opponent's controller) | 360 Hz |
-| `/table/pose` | `geometry_msgs/PoseStamped` | `motion_capture_tracking` | (drift monitor) | 10 Hz |
 | `/racket/command` | `hope_msgs/RacketCommand` | HOPE Planner | WBC Controller | 50 Hz |
 | `/joint_states` | `sensor_msgs/JointState` | Robot driver | WBC Controller | 500 Hz |
 
