@@ -1052,7 +1052,7 @@ def _validate_lower_body_wave_contracts(
             "activation_ledger": "weight_independent_control_step_counters",
             "joint_count": 12,
             "joint_names": list(_A3_LOWER_BODY_LEGS),
-            "joint_order": "runtime_articulation_subsequence",
+            "joint_order": "canonical_deploy_order_selected_by_name",
             "reference_joint_order": "motion_command_runtime_articulation_identity",
             "formula": "exp(-mean(square(q_leg-qref_leg))/square(std_rad))",
             "gate": "phase_tts_pre_or_same_attempt_post_inclusive",
@@ -1108,7 +1108,7 @@ def _validate_lower_body_wave_contracts(
             "leg_joint_count": 12,
             "leg_joint_names": list(_A3_LOWER_BODY_LEGS),
             "foot_body_names": ["left_ankle_roll_Link", "right_ankle_roll_Link"],
-            "joint_order": "runtime_articulation_subsequence",
+            "joint_order": "canonical_deploy_order_selected_by_name",
             "stance_width_frame": "base_yaw_lateral_signed_left_minus_right",
             "components": [
                 "stance_width_lower_hinge",

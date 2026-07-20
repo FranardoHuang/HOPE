@@ -28,7 +28,7 @@ import yaml
 
 DEFAULT_QUEUE = Path("configs/phase1_balance_temporal_matrix_20260720.yaml")
 EXPECTED_QUEUE_ID = "phase1_balance_temporal_matrix_20260720"
-EXPECTED_NAMESPACE = "/workspace/codexschema/phase1_balance_temporal_matrix_20260720b"
+EXPECTED_NAMESPACE = "/workspace/codexschema/phase1_balance_temporal_matrix_20260720c"
 EXPECTED_CHECKOUT = "/workspace/codexschema/nohope_btm_20260720"
 PLACEHOLDER_COMMIT = "PENDING_EXACT_COMMIT"
 KIT_BOOT_LOCK = "/workspace/bin/kit_boot_lock.sh"

@@ -875,7 +875,13 @@ def _lower_body_runtime_contract_names(
         raise RuntimeError(
             "lower-body pose imitation requires a 31-column motion reference"
         )
-    legs = [name for name in names if name in _A3_LOWER_BODY_LEG_JOINTS]
+    # The contract records the canonical deploy-order leg list regardless of the
+    # live articulation enumeration; the runtime selects indices by name.
+    legs = [
+        name
+        for name in _A3_LOWER_BODY_RUNTIME_JOINT_ORDER
+        if name in _A3_LOWER_BODY_LEG_JOINTS
+    ]
     if len(legs) != 12:
         raise RuntimeError("lower-body reward contracts require the exact 12-leg joint set")
     return names, legs
@@ -962,7 +968,7 @@ def _lower_body_pose_imitation_reward_contract(
         "motion_command_name": "motion",
         "joint_count": 12,
         "joint_names": legs,
-        "joint_order": "runtime_articulation_subsequence",
+        "joint_order": "canonical_deploy_order_selected_by_name",
         "reference_joint_order": "motion_command_runtime_articulation_identity",
         "formula": "exp(-mean(square(q_leg-qref_leg))/square(std_rad))",
         "gate": "phase_tts_pre_or_same_attempt_post_inclusive",
@@ -1050,7 +1056,7 @@ def _lower_body_stability_bundle_reward_contract(
         "leg_joint_count": 12,
         "leg_joint_names": legs,
         "foot_body_names": required_foot_bodies,
-        "joint_order": "runtime_articulation_subsequence",
+        "joint_order": "canonical_deploy_order_selected_by_name",
         "stance_width_frame": "base_yaw_lateral_signed_left_minus_right",
         "components": [
             "stance_width_lower_hinge",

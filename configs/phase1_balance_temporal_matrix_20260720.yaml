@@ -18,7 +18,7 @@ pods:
   pod2: {host: 162.43.172.181, port: 13146, gpus: [0, 1, 2]}
 
 namespace:
-  root: /workspace/codexschema/phase1_balance_temporal_matrix_20260720b
+  root: /workspace/codexschema/phase1_balance_temporal_matrix_20260720c
   no_clobber: true
   automatic_retry: false
 
@@ -346,27 +346,27 @@ budgets:
 # 人话：GPU 分配按 (S, T, parent) 排序后轮流发到 pod1g0,pod1g1,pod1g2,pod2g0,
 # pod2g1,pod2g2，每张卡恰好 4 条（同一 (parent,T) 格的四个 S 档共卡）。写死如下。
 jobs:
-  - {id: w_n_s0, parent: W, temporal: N, stability: S0, pod: pod1, gpu: 0, run_name: p1btm_w_n_s0_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720b/runs/w_n_s0}
-  - {id: v_n_s0, parent: V, temporal: N, stability: S0, pod: pod1, gpu: 1, run_name: p1btm_v_n_s0_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720b/runs/v_n_s0}
-  - {id: w_c_s0, parent: W, temporal: C, stability: S0, pod: pod1, gpu: 2, run_name: p1btm_w_c_s0_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720b/runs/w_c_s0}
-  - {id: v_c_s0, parent: V, temporal: C, stability: S0, pod: pod2, gpu: 0, run_name: p1btm_v_c_s0_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720b/runs/v_c_s0}
-  - {id: w_h_s0, parent: W, temporal: H, stability: S0, pod: pod2, gpu: 1, run_name: p1btm_w_h_s0_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720b/runs/w_h_s0}
-  - {id: v_h_s0, parent: V, temporal: H, stability: S0, pod: pod2, gpu: 2, run_name: p1btm_v_h_s0_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720b/runs/v_h_s0}
-  - {id: w_n_s1, parent: W, temporal: N, stability: S1, pod: pod1, gpu: 0, run_name: p1btm_w_n_s1_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720b/runs/w_n_s1}
-  - {id: v_n_s1, parent: V, temporal: N, stability: S1, pod: pod1, gpu: 1, run_name: p1btm_v_n_s1_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720b/runs/v_n_s1}
-  - {id: w_c_s1, parent: W, temporal: C, stability: S1, pod: pod1, gpu: 2, run_name: p1btm_w_c_s1_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720b/runs/w_c_s1}
-  - {id: v_c_s1, parent: V, temporal: C, stability: S1, pod: pod2, gpu: 0, run_name: p1btm_v_c_s1_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720b/runs/v_c_s1}
-  - {id: w_h_s1, parent: W, temporal: H, stability: S1, pod: pod2, gpu: 1, run_name: p1btm_w_h_s1_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720b/runs/w_h_s1}
-  - {id: v_h_s1, parent: V, temporal: H, stability: S1, pod: pod2, gpu: 2, run_name: p1btm_v_h_s1_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720b/runs/v_h_s1}
-  - {id: w_n_s2, parent: W, temporal: N, stability: S2, pod: pod1, gpu: 0, run_name: p1btm_w_n_s2_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720b/runs/w_n_s2}
-  - {id: v_n_s2, parent: V, temporal: N, stability: S2, pod: pod1, gpu: 1, run_name: p1btm_v_n_s2_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720b/runs/v_n_s2}
-  - {id: w_c_s2, parent: W, temporal: C, stability: S2, pod: pod1, gpu: 2, run_name: p1btm_w_c_s2_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720b/runs/w_c_s2}
-  - {id: v_c_s2, parent: V, temporal: C, stability: S2, pod: pod2, gpu: 0, run_name: p1btm_v_c_s2_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720b/runs/v_c_s2}
-  - {id: w_h_s2, parent: W, temporal: H, stability: S2, pod: pod2, gpu: 1, run_name: p1btm_w_h_s2_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720b/runs/w_h_s2}
-  - {id: v_h_s2, parent: V, temporal: H, stability: S2, pod: pod2, gpu: 2, run_name: p1btm_v_h_s2_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720b/runs/v_h_s2}
-  - {id: w_n_s3, parent: W, temporal: N, stability: S3, pod: pod1, gpu: 0, run_name: p1btm_w_n_s3_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720b/runs/w_n_s3}
-  - {id: v_n_s3, parent: V, temporal: N, stability: S3, pod: pod1, gpu: 1, run_name: p1btm_v_n_s3_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720b/runs/v_n_s3}
-  - {id: w_c_s3, parent: W, temporal: C, stability: S3, pod: pod1, gpu: 2, run_name: p1btm_w_c_s3_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720b/runs/w_c_s3}
-  - {id: v_c_s3, parent: V, temporal: C, stability: S3, pod: pod2, gpu: 0, run_name: p1btm_v_c_s3_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720b/runs/v_c_s3}
-  - {id: w_h_s3, parent: W, temporal: H, stability: S3, pod: pod2, gpu: 1, run_name: p1btm_w_h_s3_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720b/runs/w_h_s3}
-  - {id: v_h_s3, parent: V, temporal: H, stability: S3, pod: pod2, gpu: 2, run_name: p1btm_v_h_s3_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720b/runs/v_h_s3}
+  - {id: w_n_s0, parent: W, temporal: N, stability: S0, pod: pod1, gpu: 0, run_name: p1btm_w_n_s0_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720c/runs/w_n_s0}
+  - {id: v_n_s0, parent: V, temporal: N, stability: S0, pod: pod1, gpu: 1, run_name: p1btm_v_n_s0_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720c/runs/v_n_s0}
+  - {id: w_c_s0, parent: W, temporal: C, stability: S0, pod: pod1, gpu: 2, run_name: p1btm_w_c_s0_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720c/runs/w_c_s0}
+  - {id: v_c_s0, parent: V, temporal: C, stability: S0, pod: pod2, gpu: 0, run_name: p1btm_v_c_s0_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720c/runs/v_c_s0}
+  - {id: w_h_s0, parent: W, temporal: H, stability: S0, pod: pod2, gpu: 1, run_name: p1btm_w_h_s0_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720c/runs/w_h_s0}
+  - {id: v_h_s0, parent: V, temporal: H, stability: S0, pod: pod2, gpu: 2, run_name: p1btm_v_h_s0_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720c/runs/v_h_s0}
+  - {id: w_n_s1, parent: W, temporal: N, stability: S1, pod: pod1, gpu: 0, run_name: p1btm_w_n_s1_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720c/runs/w_n_s1}
+  - {id: v_n_s1, parent: V, temporal: N, stability: S1, pod: pod1, gpu: 1, run_name: p1btm_v_n_s1_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720c/runs/v_n_s1}
+  - {id: w_c_s1, parent: W, temporal: C, stability: S1, pod: pod1, gpu: 2, run_name: p1btm_w_c_s1_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720c/runs/w_c_s1}
+  - {id: v_c_s1, parent: V, temporal: C, stability: S1, pod: pod2, gpu: 0, run_name: p1btm_v_c_s1_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720c/runs/v_c_s1}
+  - {id: w_h_s1, parent: W, temporal: H, stability: S1, pod: pod2, gpu: 1, run_name: p1btm_w_h_s1_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720c/runs/w_h_s1}
+  - {id: v_h_s1, parent: V, temporal: H, stability: S1, pod: pod2, gpu: 2, run_name: p1btm_v_h_s1_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720c/runs/v_h_s1}
+  - {id: w_n_s2, parent: W, temporal: N, stability: S2, pod: pod1, gpu: 0, run_name: p1btm_w_n_s2_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720c/runs/w_n_s2}
+  - {id: v_n_s2, parent: V, temporal: N, stability: S2, pod: pod1, gpu: 1, run_name: p1btm_v_n_s2_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720c/runs/v_n_s2}
+  - {id: w_c_s2, parent: W, temporal: C, stability: S2, pod: pod1, gpu: 2, run_name: p1btm_w_c_s2_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720c/runs/w_c_s2}
+  - {id: v_c_s2, parent: V, temporal: C, stability: S2, pod: pod2, gpu: 0, run_name: p1btm_v_c_s2_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720c/runs/v_c_s2}
+  - {id: w_h_s2, parent: W, temporal: H, stability: S2, pod: pod2, gpu: 1, run_name: p1btm_w_h_s2_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720c/runs/w_h_s2}
+  - {id: v_h_s2, parent: V, temporal: H, stability: S2, pod: pod2, gpu: 2, run_name: p1btm_v_h_s2_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720c/runs/v_h_s2}
+  - {id: w_n_s3, parent: W, temporal: N, stability: S3, pod: pod1, gpu: 0, run_name: p1btm_w_n_s3_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720c/runs/w_n_s3}
+  - {id: v_n_s3, parent: V, temporal: N, stability: S3, pod: pod1, gpu: 1, run_name: p1btm_v_n_s3_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720c/runs/v_n_s3}
+  - {id: w_c_s3, parent: W, temporal: C, stability: S3, pod: pod1, gpu: 2, run_name: p1btm_w_c_s3_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720c/runs/w_c_s3}
+  - {id: v_c_s3, parent: V, temporal: C, stability: S3, pod: pod2, gpu: 0, run_name: p1btm_v_c_s3_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720c/runs/v_c_s3}
+  - {id: w_h_s3, parent: W, temporal: H, stability: S3, pod: pod2, gpu: 1, run_name: p1btm_w_h_s3_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720c/runs/w_h_s3}
+  - {id: v_h_s3, parent: V, temporal: H, stability: S3, pod: pod2, gpu: 2, run_name: p1btm_v_h_s3_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720c/runs/v_h_s3}
