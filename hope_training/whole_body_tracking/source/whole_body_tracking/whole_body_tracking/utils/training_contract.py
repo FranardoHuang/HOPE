@@ -1131,9 +1131,14 @@ def _validate_lower_body_wave_contracts(
                 "schema-3 lower_body_stability_bundle_reward foot bodies are absent from articulation"
             )
 
+    # The live articulation enumerates the same 31 joints breadth-first; require
+    # the exact A3 name set and runtime==articulation identity, not one fixed order.
     if (pose is not None or bundle is not None) and (
-        tuple(joint_names) != _A3_LOWER_BODY_RUNTIME_JOINT_ORDER
-        or articulation_joint_names != joint_names
+        not isinstance(joint_names, (list, tuple))
+        or len(joint_names) != len(_A3_LOWER_BODY_RUNTIME_JOINT_ORDER)
+        or len(set(joint_names)) != len(joint_names)
+        or set(joint_names) != set(_A3_LOWER_BODY_RUNTIME_JOINT_ORDER)
+        or list(articulation_joint_names or []) != list(joint_names)
     ):
         raise ValueError(
             "schema-3 lower-body rewards require exact A3 runtime/articulation joint identity"

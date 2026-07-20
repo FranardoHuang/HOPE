@@ -561,3 +561,64 @@ def test_scrambled_or_wrong_name_set_still_rejected_by_train_contract_names():
         train_mod._lower_body_runtime_contract_names(
             mismatched, 31, require_motion_reference=False
         )
+
+
+def _minimal_wave_contract(weight_pose=0.0, weight_bundle=-0.25):
+    return {
+        "lower_body_pose_imitation_reward": {
+            "schema_version": 1, "enabled": weight_pose > 0.0, "probe_enabled": True,
+            "activation_ledger": "weight_independent_control_step_counters",
+            "weight": weight_pose, "std_rad": 0.35,
+            "support_pre_s": 0.30, "support_post_s": 0.40,
+            "racket_command_name": "racket_target", "motion_command_name": "motion",
+            "joint_count": 12, "joint_names": list(TC._A3_LOWER_BODY_LEGS),
+            "joint_order": "canonical_deploy_order_selected_by_name",
+            "reference_joint_order": "motion_command_runtime_articulation_identity",
+            "formula": "exp(-mean(square(q_leg-qref_leg))/square(std_rad))",
+            "gate": "phase_tts_pre_or_same_attempt_post_inclusive",
+            "success_conditioned": False,
+        },
+        "lower_body_stability_bundle_reward": {
+            "schema_version": 1, "enabled": weight_bundle < 0.0, "probe_enabled": True,
+            "activation_ledger": "weight_independent_control_step_counters",
+            "weight": weight_bundle, "min_stance_width_m": 0.22, "stance_scale_m": 0.05,
+            "leg_velocity_margin_radps": 1.0, "leg_velocity_scale_radps": 0.5,
+            "support_pre_s": 0.30, "support_post_s": 0.40,
+            "racket_command_name": "racket_target", "motion_command_name": "motion",
+            "leg_joint_count": 12, "leg_joint_names": list(TC._A3_LOWER_BODY_LEGS),
+            "foot_body_names": ["left_ankle_roll_Link", "right_ankle_roll_Link"],
+            "joint_order": "canonical_deploy_order_selected_by_name",
+            "stance_width_frame": "base_yaw_lateral_signed_left_minus_right",
+            "components": ["stance_width_lower_hinge", "twelve_leg_realized_qdot_tail"],
+            "formula": "mean(bounded_stance_tail,bounded_leg_qdot_tail)",
+            "gate": "phase_tts_pre_or_same_attempt_post_inclusive",
+            "success_conditioned": False, "uses_motion_reference": False,
+            "duplicates_slip_or_upright": False,
+        },
+        "articulation_body_names": [
+            "pelvis_link", "left_ankle_roll_Link", "right_ankle_roll_Link",
+        ],
+    }
+
+
+def test_schema3_wave_validator_accepts_live_bfs_full_order():
+    contract = _minimal_wave_contract()
+    TC._validate_lower_body_wave_contracts(
+        contract,
+        list(_A3_LIVE_BFS_ARTICULATION_ORDER),
+        list(_A3_LIVE_BFS_ARTICULATION_ORDER),
+    )
+
+
+def test_schema3_wave_validator_rejects_wrong_set_or_mismatched_articulation():
+    contract = _minimal_wave_contract()
+    wrong = list(_A3_LIVE_BFS_ARTICULATION_ORDER)
+    wrong[3] = "bogus_joint"
+    with pytest.raises(ValueError, match="joint identity"):
+        TC._validate_lower_body_wave_contracts(contract, wrong, wrong)
+    with pytest.raises(ValueError, match="joint identity"):
+        TC._validate_lower_body_wave_contracts(
+            contract,
+            list(_A3_LIVE_BFS_ARTICULATION_ORDER),
+            list(reversed(_A3_LIVE_BFS_ARTICULATION_ORDER)),
+        )
