@@ -995,7 +995,7 @@ def run_identity_scale(args) -> int:
         fps=fps, frames=T, L_src_m=L_src, L_out_m=L_src,
         v_star_src_mps=v_star, v_star_out_mps=v_star, proofs=proofs,
         kappa=args.kappa, v_start_mps=args.v_start, a_max_mps2=a_max,
-        a_max_source=a_max_source, ratio_fk=1.0)
+        a_max_source=a_max_source, ratio_fk=1.0, ratio_ledger=1.0)
     mpath = args.manifest or (args.output + ".manifest.json")
     with open(mpath, "w") as fh:
         json.dump(manifest, fh, indent=2, default=float)
