@@ -119,22 +119,40 @@ Follow-up note (2026-07-20, W/Y export mechanics pass but exact lineage blocks p
   `3fbaf23f97fdb40e05a448f9f769267b21c7cca3bd767aa082c0d5b965ecd7d7` /
   `4552fe23abd551d8959a9de05cc5f9d761d0da25eed88138d61fa45cc6558e9e` /
   `6e3518d97d48fad550e7971a5178b1f11c15895696f03d30d5a62d1e27741640` are immutable history: no retry or mixing.
-- Probe8 (the eighth non-scientific contract-probe attempt) is the current replacement and has not been launched.
-  It uses fresh root `/workspace/codexschema/phase1_balance_action_slew_v7_20260720`. The current config/runner
-  SHA-256 values are `0c84613f05439237f6e36d37e0c9210984465d928b9c0cba50999bd8995145f9` /
-  `2bc9d59e21413a812a742529c6f3291f5710c384e0f4af7ee7098f33b25ba17d`; the exact
-  [`launch manifest`](../DEFINITIONS.md#balance-launch-manifest) file/content SHA-256 values are
-  `887c0b9e097e50300d83eef27e587d112f70132958e6e8d9b68af74437fa7231` /
-  `13f92d5eda71e90abd6a14a1498c2afd98d3cb825cb26e2f5b74958b5a795f84`. W-N is the sole first canary: it must
-  naturally exit, pass its verifier and prove exact process/GPU/lock closure before any other probe8 cell starts.
-  The locked 180 s watchdog must not be relaxed. Afterwards, at most one Kit boot per Pod may proceed at a time.
-- Reproducible probe8 command-render gate (it emits JSON but does not SSH or start a trainer):
+- Probe8 (the eighth non-scientific contract-probe attempt) launched only W-N on Pod1 GPU1 from fresh v7. It ran
+  from `2026-07-20T03:44:19.857Z` to `03:44:32.112Z`; after all 4096 environments were created, `sim.reset`
+  aborted with `malloc(): invalid size (unsorted)`. The trainer returned `-6`/`SIGABRT` and the outer transaction
+  returned `134`, before any first learning iteration, binding, RSL run directory, checkpoint or receipt. The
+  manifest/claim/supervisor-spec/log/launch/leader/terminal/child-evidence SHA-256 values are respectively
+  `887c0b9e…a7231`, `8472ecf9…fa8b`, `334ed262…c23c`, `b3437c87…f49c`, `edc4782f…ce8`,
+  `b7f981c8…8815`, `ad5c46a7…6268` and `c2d6c31b…26f`. The other five cells were not launched; exact
+  process groups, assigned GPUs and Kit/cache locks closed on both Pods. Because the abort preceded managers and
+  RewardManager construction, this is infrastructure-only evidence, not an N-mechanism or Reward result. The v7
+  root and manifest are immutable: no retry, completion or cross-generation receipt mixing is allowed.
+- Probe9 (the ninth non-scientific contract-probe attempt) is preregistered and manifest-bound but not launched.
+  Its fresh no-clobber root is `/workspace/codexschema/phase1_balance_action_slew_v8_20260720`, with run names
+  `phase1_balance_slew_probe9_{w_n,w_c,w_h,v_c,v_n,v_h}_seed3_20260720`. Config/runner SHA-256 values are
+  `c7ec75a9917b8bdcf7976186633b021c69fb82e591898dad6b8d5c93cfdb37d5` /
+  `24b5f7831ad49c2b88266fed65c37e6e4bcdddaacab28ffa917fce66ef918db1`; manifest content/file SHA-256 values are
+  `97c36e471fb8fc6b93fe212f20846de6697db518192e7a45c6618e5924947e28` /
+  `688599c2e01653bbb703553223a58e53656da1fe83d76aa7bcaa9f8a3ee75353`. Its first two cells form a crossover gate
+  inside the same full six-cell identity: launch only
+  W-N on Pod1 GPU0 first; only after natural exit, exact receipt and process/GPU/lock closure may W-C launch on
+  Pod1 GPU1. Only if both pass may W-H, V-C, V-N and V-H run globally serially. Any failure freezes v8 and forbids
+  every later cell. Scientific train rendering still requires all six current receipts and preserves the swapped
+  W-N/GPU0 and W-C/GPU1 assignment; it may not switch back after the probe.
+- The crossover has a narrow interpretation boundary. W-N/GPU0 pass plus W-C/GPU1 fail strengthens an association
+  with the Pod1-GPU1/full-scene boot path, but does not prove that GPU1 caused the failure or is permanently bad:
+  recipe, launch order, cache state and allocator randomness remain confounded. If both pass, that proves only that
+  the exact probe9 swapped mapping completed one fresh reset and two-update verifier; it neither erases probe7/8
+  nor proves GPU equivalence or any action-slew benefit. The experiment remains inconclusive and not adopted.
+- Reproducible probe9 command-render gate (it emits JSON but does not SSH or start a trainer):
 
   ```bash
   BALANCE_REPO_ROOT="$(git rev-parse --show-toplevel)"
   cd "$BALANCE_REPO_ROOT"
   BALANCE_LAUNCH_MANIFEST="$BALANCE_REPO_ROOT/configs/phase1_balance_action_slew_launch_manifest_20260720.json"
-  BALANCE_LAUNCH_MANIFEST_SHA256="887c0b9e097e50300d83eef27e587d112f70132958e6e8d9b68af74437fa7231"
+  BALANCE_LAUNCH_MANIFEST_SHA256="688599c2e01653bbb703553223a58e53656da1fe83d76aa7bcaa9f8a3ee75353"
   git fetch origin main
   test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
   git cat-file -e origin/main:configs/phase1_balance_action_slew_launch_manifest_20260720.json
@@ -142,7 +160,7 @@ Follow-up note (2026-07-20, W/Y export mechanics pass but exact lineage blocks p
     --stage probe --authorize-launch \
     --launch-manifest "$BALANCE_LAUNCH_MANIFEST" \
     --expected-launch-manifest-sha256 "$BALANCE_LAUNCH_MANIFEST_SHA256" \
-    > /tmp/phase1_balance_slew_probe8_commands.json
+    > /tmp/phase1_balance_slew_probe9_commands.json
   ```
 
   Inputs are a clean current-main authority checkout, the manifest above and its manifest-bound remote assets and

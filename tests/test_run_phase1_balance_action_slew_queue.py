@@ -298,9 +298,17 @@ def test_matrix_is_wv_by_cnh_on_six_unique_gpus():
         for job in queue["jobs"]
     }
     assert observed == {
-        ("W", "C"): ("pod1", 0), ("W", "N"): ("pod1", 1), ("W", "H"): ("pod1", 2),
+        ("W", "C"): ("pod1", 1), ("W", "N"): ("pod1", 0), ("W", "H"): ("pod1", 2),
         ("V", "C"): ("pod2", 0), ("V", "N"): ("pod2", 1), ("V", "H"): ("pod2", 2),
     }
+
+
+def test_probe9_crossover_order_is_frozen():
+    queue = Q.load_queue(QUEUE)
+    assert tuple(job["id"] for job in queue["jobs"]) == Q.EXPECTED_JOB_ORDER
+    assert Q.EXPECTED_JOB_ORDER[:2] == ("w_n", "w_c")
+    assert (queue["jobs"][0]["pod"], queue["jobs"][0]["gpu"]) == ("pod1", 0)
+    assert (queue["jobs"][1]["pod"], queue["jobs"][1]["gpu"]) == ("pod1", 1)
 
 
 def test_each_parent_changes_only_registered_slew_factors():
@@ -1182,6 +1190,26 @@ def test_duplicate_job_identity_or_resource_is_rejected(tmp_path, kind):
         raw["jobs"][1]["id"] = raw["jobs"][0]["id"]
     with pytest.raises(Q.QueueError, match="duplicate|changed its matrix"):
         Q.load_queue(_write_yaml(tmp_path, raw))
+
+
+def test_probe9_crossover_order_change_is_rejected(tmp_path):
+    raw = _raw()
+    raw["jobs"][0], raw["jobs"][1] = raw["jobs"][1], raw["jobs"][0]
+    with pytest.raises(Q.QueueError, match="crossover order"):
+        Q.load_queue(_write_yaml(tmp_path, raw))
+
+
+def test_probe9_receipt_cannot_move_w_n_back_to_gpu1(tmp_path):
+    queue = Q.load_queue(QUEUE)
+    _, _, manifest = _manifest(tmp_path, queue)
+    receipts = _receipt_dir(tmp_path, queue, manifest)
+    target = receipts / "w_n" / "probe_receipt.json"
+    envelope = json.loads(target.read_text())
+    envelope["content"]["gpu"] = 1
+    envelope["content_sha256"] = Q._canonical_sha256(envelope["content"])
+    target.write_bytes(Q._json_document(envelope))
+    with pytest.raises(Q.QueueError, match="identity mismatch: gpu"):
+        Q._load_probe_receipts(queue, manifest, receipts)
 
 
 def test_duplicate_yaml_key_and_unknown_field_are_rejected(tmp_path):

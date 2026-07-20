@@ -251,20 +251,32 @@ rc `125` 结束；随后 exact groups、Pod1 GPU1、Kit/cache locks 全部闭合
 `4552fe23abd551d8959a9de05cc5f9d761d0da25eed88138d61fa45cc6558e9e` /
 `6e3518d97d48fad550e7971a5178b1f11c15895696f03d30d5a62d1e27741640` 冻结为历史，禁止重试、补写或混用。
 
-当前是 probe8（第八次、只检查启动和收据合同而不作科学比较的两-update 探针），尚未发射，使用 fresh
-no-clobber 根 `/workspace/codexschema/phase1_balance_action_slew_v7_20260720`。queue config/runner bytes 的
-SHA-256 分别是 `0c84613f05439237f6e36d37e0c9210984465d928b9c0cba50999bd8995145f9` /
-`2bc9d59e21413a812a742529c6f3291f5710c384e0f4af7ee7098f33b25ba17d`；冻结后的当前
-[`launch manifest`](../DEFINITIONS.md#balance-launch-manifest)
-[`phase1_balance_action_slew_launch_manifest_20260720.json`](../../configs/phase1_balance_action_slew_launch_manifest_20260720.json)
-文件 SHA-256=`887c0b9e097e50300d83eef27e587d112f70132958e6e8d9b68af74437fa7231`，content SHA-256=
-`13f92d5eda71e90abd6a14a1498c2afd98d3cb825cb26e2f5b74958b5a795f84`。failure helper 继续只包裹
-transaction、不修改 body bytes，multiline payload byte-equality regression 继续固定该合同。清单存在只授权
-命令渲染；每台真实发射前仍须由 remote preflight 对 exact 路径重算全部哈希、tree/count/bytes、source
-clean HEAD 与 GPU。
+probe8 的 v7 只发射了 W-N。`2026-07-20T03:44:13Z`，它在 Pod1 物理 GPU1 到达
+`Starting the simulation`（`sim.reset()` 边界）后因 `malloc(): invalid size (unsorted)` 触发
+`SIGABRT`；trainer terminal status 记录 exit `-6`，外层 transaction 返回 rc `134`。它没有 first
+iteration、trainer binding、terminal checkpoint 或 receipt，其余 W-C/W-H/V-C/V-N/V-H 五格从未发射。
+失败后 exact leader/child 均 absent、Pod1 全部 GPU 无 compute context、Kit/cache lock 无 holder；可访问的
+系统日志与 telemetry 快照未见 Xid/OOM。v7 根 `/workspace/codexschema/phase1_balance_action_slew_v7_20260720`、失败证据与
+config/runner 和 manifest 文件/content SHA-256
+`0c84613f05439237f6e36d37e0c9210984465d928b9c0cba50999bd8995145f9` /
+`2bc9d59e21413a812a742529c6f3291f5710c384e0f4af7ee7098f33b25ba17d` /
+`887c0b9e097e50300d83eef27e587d112f70132958e6e8d9b68af74437fa7231` /
+`13f92d5eda71e90abd6a14a1498c2afd98d3cb825cb26e2f5b74958b5a795f84` 冻结为不可变历史：禁止补写、同
+namespace 重发或与后续收据混用。closure 闭合不是重试授权，该失败也不是 N 机制负例。
 旧 manifest `d7e95130…a2e47`、`2d3e7955…3bae17`、`283fd002…1eefe` 及 v1/v2/v3 输出根也只作不可变历史。
 
-probe8 supervisor 在 `Popen` 后、首次 `/proc` 读取前先不可覆盖地发布 `trainer_child_evidence.json`，
+当前 probe9（第九次同类非科学合同探针）已预登记并绑定 manifest，但尚未发射。fresh no-clobber
+根为 `/workspace/codexschema/phase1_balance_action_slew_v8_20260720`，run name 固定为
+`phase1_balance_slew_probe9_{job}_seed3_20260720`。queue config/runner bytes SHA-256 分别是
+`c7ec75a9917b8bdcf7976186633b021c69fb82e591898dad6b8d5c93cfdb37d5` /
+`24b5f7831ad49c2b88266fed65c37e6e4bcdddaacab28ffa917fce66ef918db1`；当前
+[`launch manifest`](../DEFINITIONS.md#balance-launch-manifest)
+[`phase1_balance_action_slew_launch_manifest_20260720.json`](../../configs/phase1_balance_action_slew_launch_manifest_20260720.json)
+文件 SHA-256=`688599c2e01653bbb703553223a58e53656da1fe83d76aa7bcaa9f8a3ee75353`，content SHA-256=
+`97c36e471fb8fc6b93fe212f20846de6697db518192e7a45c6618e5924947e28`。清单存在只授权命令渲染；每台
+真实发射前仍须由 remote preflight 对 exact 路径重算全部哈希、tree/count/bytes、source clean HEAD 与 GPU。
+
+probe9 supervisor 在 `Popen` 后、首次 `/proc` 读取前先不可覆盖地发布 `trainer_child_evidence.json`，
 再只跟踪其中同一个 child PID，最多等 `5 s`、每 `10 ms` 重读一次。每次 identity
 sample 都在读 cmdline 和 `getpgid` 前后双读 `/proc/<pid>/stat`，解析 PID/PGRP/starttime；两次 tuple 必须
 一致，且 PGRP 必须与 `getpgid` 一致。第一次可读的 starttime 成为不可变锚；任一次可读身份偏离 supervisor
@@ -323,7 +335,7 @@ blocked。先独立生成并审过 [`launch manifest`](../DEFINITIONS.md#balance
 set -euo pipefail
 BALANCE_REPO_ROOT="$(git rev-parse --show-toplevel)"
 BALANCE_LAUNCH_MANIFEST="$BALANCE_REPO_ROOT/configs/phase1_balance_action_slew_launch_manifest_20260720.json"
-BALANCE_LAUNCH_MANIFEST_SHA256="887c0b9e097e50300d83eef27e587d112f70132958e6e8d9b68af74437fa7231"
+BALANCE_LAUNCH_MANIFEST_SHA256="688599c2e01653bbb703553223a58e53656da1fe83d76aa7bcaa9f8a3ee75353"
 git fetch origin main
 test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
 git cat-file -e origin/main:configs/phase1_balance_action_slew_launch_manifest_20260720.json
@@ -352,18 +364,19 @@ python3 scripts/run_phase1_balance_action_slew_queue.py \
   --stage probe --authorize-launch \
   --launch-manifest "$BALANCE_LAUNCH_MANIFEST" \
   --expected-launch-manifest-sha256 "$BALANCE_LAUNCH_MANIFEST_SHA256" \
-  > /tmp/phase1_balance_slew_probe8_commands.json
+  > /tmp/phase1_balance_slew_probe9_commands.json
 ```
 
 以上 `origin/main` 四道门任一失败时，只能保留计划 JSON，禁止执行 SSH。不要把 JSON 整体 pipe 给 shell。
-队列固定 W 三格到 Pod1 GPU0/1/2、V 三格到 Pod2 GPU0/1/2，但 probe8 不得按 JSON 顺序连续发射：W-N
-是唯一首个 canary，只执行 `/tmp/phase1_balance_slew_probe8_commands.json` 中 `job_id=w_n` 的
-`jobs[].launch_command`。它必须自然退出、由同一 job 的 `probe_verifier_command` 发布 exact receipt，并完成
-leader/child groups、Pod1 GPU1、Kit/cache locks 的 exact closure；三项全部通过前禁止发射其他五格。若 W-N
-失败或命中 locked `180 s` watchdog，整批停止并冻结 v7，不得放宽 timeout 或在同一 namespace 重试。
-W-N 闭合后才可继续其余格；每个 Pod 在任一时刻只允许一个 Kit 处于 boot/import，必须看到该 Pod 前一条
-真实 `Learning iteration`、host boot lock 已释放后，才启动下一条；两个 Pod 的新 boot 仍错峰约 60 秒。
-boot 后 trainer 可以并行。每条都要保留 `.launch` sidecar 并核对 PID、PGID、leader starttime、argv、source
+probe9 使用 swap mapping：W-N 在 Pod1 物理 GPU0、W-C 在 Pod1 物理 GPU1、W-H 在 Pod1 物理
+GPU2，V-C/V-N/V-H 在 Pod2 物理 GPU0/1/2。本轮探针必须全局串行，不得在两 Pod 之间重叠
+boot 或 trainer：先且只执行 `/tmp/phase1_balance_slew_probe9_commands.json` 中 `job_id=w_n` 的
+`jobs[].launch_command`。W-N 必须自然退出、由同一 job 的 `probe_verifier_command` 发布 exact receipt，并完成
+leader/child groups、Pod1 GPU0、Kit/cache locks 的 exact closure。全部通过后才能以同样流程发射 W-C 到
+Pod1 GPU1；W-C 的 verifier/receipt/closure 全部通过后，才按 W-H→V-C→V-N→V-H 的固定顺序逐格
+发射。每格都必须在下一格前完成自然退出、verifier、receipt 和 closure。任意一格失败或命中固定
+`180 s` watchdog，立即冻结整个 v8；不发射后续格、不在同 namespace 重试、不放宽 timeout。
+每条都要保留 `.launch` sidecar 并核对 PID、PGID、leader starttime、argv、source
 HEAD=`54c9a62656f0e60e5bb41cbcfa0e5a972b793906`、物理 GPU、first iteration 和 fatal scan。
 
 probe 必须自然退出到 absolute milestone `[6701]` 的 `model_6701.pt`（exclusive iteration upper
@@ -375,23 +388,24 @@ recovery-eligible 允许单个 update 为零但两步合计必须非零；proces
 无 fatal、leader/PGID/GPU 均释放后，向 `jobs[].probe_receipt_remote_path` 不可覆盖地写收据。不能套用
 fresh-probe 相对 milestone `[1]`。将六份收据逐字节复制成本地
 [`probe receipt set`](../DEFINITIONS.md#balance-probe-receipt-set)，exact 布局为
-`$BALANCE_PROBE_RECEIPTS_DIR/{w_c,w_n,w_h,v_c,v_n,v_h}/probe_receipt.json`；probe8 的当前目录固定为
-`/tmp/phase1_balance_action_slew_probe_receipts_20260720_v7`。
+`$BALANCE_PROBE_RECEIPTS_DIR/{w_c,w_n,w_h,v_c,v_n,v_h}/probe_receipt.json`；probe9 的当前目录固定为
+`/tmp/phase1_balance_action_slew_probe_receipts_20260720_v8`。
 该本地目录只对 trusted operator 开放写权；内容寻址和多重 SHA 绑定用于防止下载损坏、
 旧收据混入和配置漂移，不是抵御恶意本地 root 的数字签名；详见
 [`receipt trusted-operator boundary`](../DEFINITIONS.md#balance-receipt-trust-boundary)。操作者必须从远端
 `jobs[].probe_receipt_remote_path` 逐字节复制 verifier 生成的 exact bytes，不得手写或“修复”收据。
 
-没有 `--probe-approved` 人工捷径。只有当前 probe8 manifest 下六份 fresh v7 收据全部通过本地重验，才允许
-生成 `+200/+500/+1000` 科学 continuation 命令；probe5 的五份 v4 收据、probe6 的 v5 失败记录及 probe7
-的三份 v6 收据都不能补齐 v7，也不能和任一 probe8 receipt 组合。脚本仍只生成命令，不执行：
+没有 `--probe-approved` 人工捷径。只有当前 probe9 manifest 下六份 fresh v8 收据全部通过本地重验，才允许
+生成 `+200/+500/+1000` 科学 continuation 命令；probe5 的五份 v4 收据、probe6 的 v5 失败记录、probe7
+的三份 v6 收据与 probe8 的 v7 失败证据都不能补齐 v8，也不能和任一 probe9 receipt 组合。脚本仍只生成
+命令，不执行：
 
 ```bash
 set -euo pipefail
 BALANCE_REPO_ROOT="$(git rev-parse --show-toplevel)"
 BALANCE_LAUNCH_MANIFEST="$BALANCE_REPO_ROOT/configs/phase1_balance_action_slew_launch_manifest_20260720.json"
-BALANCE_LAUNCH_MANIFEST_SHA256="887c0b9e097e50300d83eef27e587d112f70132958e6e8d9b68af74437fa7231"
-BALANCE_PROBE_RECEIPTS_DIR="/tmp/phase1_balance_action_slew_probe_receipts_20260720_v7"
+BALANCE_LAUNCH_MANIFEST_SHA256="688599c2e01653bbb703553223a58e53656da1fe83d76aa7bcaa9f8a3ee75353"
+BALANCE_PROBE_RECEIPTS_DIR="/tmp/phase1_balance_action_slew_probe_receipts_20260720_v8"
 git fetch origin main
 test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
 git cat-file -e origin/main:configs/phase1_balance_action_slew_launch_manifest_20260720.json
@@ -423,6 +437,9 @@ python3 scripts/run_phase1_balance_action_slew_queue.py \
   --probe-receipts-dir "$BALANCE_PROBE_RECEIPTS_DIR" \
   > /tmp/phase1_balance_slew_train_commands.json
 ```
+
+科学 train 仍保持 probe9 的 swap mapping：W-N 在 Pod1 物理 GPU0、W-C 在 Pod1 物理 GPU1，
+W-H 在 Pod1 物理 GPU2；不得在切到 train 时悄然恢复旧 C/N GPU 映射。
 
 每个 child 都显式使用
 [`checkpoint_allow_contract_mismatch=true`](../DEFINITIONS.md#checkpoint-contract-mismatch)，所以只作

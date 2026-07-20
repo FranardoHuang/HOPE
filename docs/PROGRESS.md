@@ -67,11 +67,21 @@
   `Starting the simulation`，无 Learning iteration/binding/terminal/receipt；180 s locked watchdog exact
   TERM→KILL 后 rc=`125`，组/GPU1/locks 全空。V-N 在失败被确认前 6 s 已发并自然验证；W-H/V-H 未发。
   W-C/V-N 成功排除 W parent 与 `action_rate=0` 各自为必要失败原因，故不改 Reward 结论或 timeout；v6
-  immutable，禁止重试或混收据。当前 [probe8 替换批](DEFINITIONS.md#balance-probe-generations) 使用 fresh v7
-  no-clobber root 和 `phase1_balance_slew_probe8_{w_c,w_n,w_h,v_c,v_n,v_h}_seed3_20260720`，尚未发射；
-  W-N 必须作为唯一首发 canary 先取得 receipt。新 manifest file/content 为 `887c0b9e…a7231` /
-  `13f92d5e…95f84`，config/runner 为 `0c84613f…145f9` / `2bc9d59e…ba17d`。probe8 六份同一 identity
-  receipt 齐全前不得生成长训；运行 authority 只来自合入后的 `origin/main` NOW 条目。详见
+  immutable，禁止重试或混收据。[probe8 替换批](DEFINITIONS.md#balance-probe-generations) 随后只发 v7
+  W-N：`2026-07-20T03:44:19.857Z–03:44:32.112Z` 在 Pod1 GPU1 的 `sim.reset` 阶段 SIGABRT
+  （trainer exit=`-6`、外层 rc=`134`），`run.log` 末行为 `malloc(): invalid size (unsorted)`，没有首个
+  Learning iteration、binding 或 receipt；其余五格未发。manifest/claim/launch-spec/run-log/launch-log/
+  leader/terminal/child 文件 SHA-256 依次为 `887c0b9e…a7231`、`8472ecf9…fa8b`、`334ed262…c23c`、
+  `b3437c87…f49c`、`edc4782f…ce8`、`b7f981c8…8815`、`ad5c46a7…6268`、`c2d6c31b…26f`。事后
+  Pod1 v7 只有 `probes/w_n`、Pod2 v7 root 不存在；`03:49:31–03:49:33Z` 两轮 closure 均见六张 GPU、
+  相关进程和 Kit/cache lock holder 全空。这是 pre-RewardManager infrastructure 失败，不是 Reward 结果；
+  v7 immutable、禁止重试。当前 [probe9 替换批](DEFINITIONS.md#balance-probe-generations) 已
+  preregistered / manifest-bound / not launched，使用 fresh v8 root 与
+  `phase1_balance_slew_probe9_{w_n,w_c,w_h,v_c,v_n,v_h}_seed3_20260720`；config/runner 为
+  `c7ec75a9…37d5` / `24b5f783…db1`，manifest content/file 为 `97c36e47…7e28` / `688599c2…5353`。
+  唯一顺序是 W-N Pod1 GPU0→receipt+closure→W-C Pod1 GPU1→receipt+closure→W-H→V-C→V-N→V-H，
+  后四格逐格串行；任一失败冻结后续。六份同代 receipt 齐全前不得生成科学长训，train 保持 W-N/W-C
+  GPU swap；运行 authority 只来自合入后的 `origin/main` NOW 条目。详见
   [Wave A 实验](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md)。
 
 ## 2026-07-19

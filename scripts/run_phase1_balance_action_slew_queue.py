@@ -44,7 +44,7 @@ HYDRA_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 EXPECTED_QUEUE_ID = "phase1_balance_action_slew_20260720"
-EXPECTED_NAMESPACE = "/workspace/codexschema/phase1_balance_action_slew_v7_20260720"
+EXPECTED_NAMESPACE = "/workspace/codexschema/phase1_balance_action_slew_v8_20260720"
 EXPECTED_SOURCE = "/workspace/codexschema/nohope_balance_action_slew_20260720"
 EXPECTED_REMOTE_SOURCE_COMMIT = "54c9a62656f0e60e5bb41cbcfa0e5a972b793906"
 PARENT_ITERATION = 6700
@@ -52,13 +52,14 @@ PROBE_NUM_ENVS = 4096
 NUM_STEPS_PER_ENV = 24
 EXPECTED_SAMPLES_PER_UPDATE = PROBE_NUM_ENVS * NUM_STEPS_PER_ENV
 EXPECTED_JOBS = {
-    "w_c": ("W", "C", "pod1", 0),
-    "w_n": ("W", "N", "pod1", 1),
+    "w_c": ("W", "C", "pod1", 1),
+    "w_n": ("W", "N", "pod1", 0),
     "w_h": ("W", "H", "pod1", 2),
     "v_c": ("V", "C", "pod2", 0),
     "v_n": ("V", "N", "pod2", 1),
     "v_h": ("V", "H", "pod2", 2),
 }
+EXPECTED_JOB_ORDER = ("w_n", "w_c", "w_h", "v_c", "v_n", "v_h")
 EXPECTED_MECHANISMS = {
     "C": (-0.10, 0.0),
     "N": (0.0, 0.0),
@@ -846,6 +847,8 @@ def _validate_queue(queue: dict[str, Any]) -> dict[str, Any]:
         ("pod2", 0), ("pod2", 1), ("pod2", 2),
     }:
         raise QueueError("six-cell matrix or six unique GPU slots is incomplete")
+    if tuple(job["id"] for job in normalized_jobs) != EXPECTED_JOB_ORDER:
+        raise QueueError("jobs must preserve the reviewed probe9 crossover order")
 
     # Compile both stages now.  This proves every cell has exactly one value
     # for every Hydra key and that the only within-parent scientific factors
@@ -1073,7 +1076,7 @@ def _stage_run_dir(queue: Mapping[str, Any], job: Mapping[str, Any], stage: str)
 def _stage_run_name(job: Mapping[str, Any], stage: str) -> str:
     if stage == "train":
         return str(job["run_name"])
-    return f"phase1_balance_slew_probe8_{job['id']}_seed3_20260720"
+    return f"phase1_balance_slew_probe9_{job['id']}_seed3_20260720"
 
 
 def _training_argv(

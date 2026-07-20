@@ -65,10 +65,17 @@ probe7/v6 随后让 W-C、V-C、V-N 自然 exit `0` 并各发布 exact receipt�
 Learning iteration、binding、terminal 或 receipt；180 s locked watchdog 对 exact 组依次 TERM/KILL，
 rc=`125`，事后组/GPU1/locks 全空。V-N 在 W-N 失败被确认前 6 s 已发，随后自然完成并验证；W-H/V-H
 从未发。W-C 与 V-N 的成功分别排除了 W parent 和 `action_rate=0` 作为必要失败原因，故当前只记一次
-基础设施 transient，不修改 Reward 结论或 timeout。v6 永久不可重试、补格或混收据。当前
-[probe8 替换批](DEFINITIONS.md#balance-probe-generations) 使用全新 v7 no-clobber 根，尚未发射；必须先让
-W-N 单独通过并发布 receipt，才允许发其他五格。只有同一 probe8 manifest identity 的六份 fresh receipt
-齐全才能生成长训命令；所有旧 manifest/目录禁止重用。
+基础设施 transient，不修改 Reward 结论或 timeout。v6 永久不可重试、补格或混收据。
+[probe8 替换批](DEFINITIONS.md#balance-probe-generations) 随后只发了 v7 的 W-N：它于
+`2026-07-20T03:44:19.857Z–03:44:32.112Z` 在 Pod1 GPU1 的 `sim.reset` 阶段 SIGABRT
+（trainer exit=`-6`，外层 rc=`134`），`run.log` 末行为 `malloc(): invalid size (unsorted)`；没有首个
+Learning iteration、binding 或 receipt，其余五格未发。事后 Pod1 v7 只有 `probes/w_n`，Pod2 v7 root
+不存在；`03:49:31–03:49:33Z` 两轮 closure 均确认六张 GPU、相关进程与 Kit/cache lock holder 全空。
+这是进入 RewardManager/机制比较前的基础设施失败，不是 C/N/H Reward 结果；v7 永久 immutable、禁止重试或
+混收据。当前 [probe9 替换批](DEFINITIONS.md#balance-probe-generations) 已在 fresh v8 root 预注册并绑定
+manifest，但尚未发射：严格串行为 W-N（Pod1 GPU0）→receipt+closure→W-C（Pod1 GPU1）
+→receipt+closure→W-H→V-C→V-N→V-H；任一失败都冻结整批。只有同一 probe9 manifest identity 的六份
+fresh receipt 齐全才能生成科学长训命令，且长训保持 W-N/W-C 的 GPU swap；所有旧 manifest/目录禁止重用。
 Wave B 的 M0 左右 moving teacher 已因 stance `0/4` 被 input gate 拒绝；当前只允许审计
 upper-only matched control 对静态 v4rg 下半身模仿或 non-demo stability constraint，exact flags/矩阵仍待
 源码审计，不得猜写。
@@ -865,18 +872,39 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
   对 exact 组依次 TERM/KILL，rc=`125`，事后进程组、GPU1 与 locks 全空。V-N 在该失败被确认前 6 s 已发，
   后续自然完成且验证通过；W-H/V-H 未发。W-C/V-N 的成功和 exact argv 对比排除了 W parent、
   `action_rate=0` 各自作为必要失败原因，因此只记 infrastructure transient，不改 Reward 结论或 timeout。
-  v6 immutable，三份收据不可与重试或新代混用。当前
-  [probe8 替换批](DEFINITIONS.md#balance-probe-generations) 使用全新
-  `/workspace/codexschema/phase1_balance_action_slew_v7_20260720` no-clobber 根；六个 `run_name` 为
+  v6 immutable，三份收据不可与重试或新代混用。
+  [probe8 替换批](DEFINITIONS.md#balance-probe-generations) 使用
+  `/workspace/codexschema/phase1_balance_action_slew_v7_20260720` no-clobber 根与
   `phase1_balance_slew_probe8_{w_c,w_n,w_h,v_c,v_n,v_h}_seed3_20260720`（第八版六格零训练合同探针，
-  不是行为成绩）。它绑定 [launch manifest](DEFINITIONS.md#balance-launch-manifest) 文件 SHA-256
-  `887c0b9e097e50300d83eef27e587d112f70132958e6e8d9b68af74437fa7231`、内容 SHA-256
-  `13f92d5eda71e90abd6a14a1498c2afd98d3cb825cb26e2f5b74958b5a795f84`；config/runner SHA-256 分别为
+  不是行为成绩）。它绑定 [launch manifest](DEFINITIONS.md#balance-launch-manifest) 文件/内容 SHA-256
+  `887c0b9e097e50300d83eef27e587d112f70132958e6e8d9b68af74437fa7231` /
+  `13f92d5eda71e90abd6a14a1498c2afd98d3cb825cb26e2f5b74958b5a795f84`，config/runner SHA-256 为
   `0c84613f05439237f6e36d37e0c9210984465d928b9c0cba50999bd8995145f9` /
-  `2bc9d59e21413a812a742529c6f3291f5710c384e0f4af7ee7098f33b25ba17d`。probe8 尚未发射；W-N 是唯一首发
-  canary，只有其 exact receipt 通过后才能发其他五格。任一失败仍须立即停止整批，并证明 exact PGID、
-  child PID、assigned GPU 与 Kit/cache locks 全空。只有六份同一 manifest identity 的 probe8 receipt
-  全部闭合后才能生成长训命令。
+  `2bc9d59e21413a812a742529c6f3291f5710c384e0f4af7ee7098f33b25ba17d`。该批只发 W-N：它于
+  `2026-07-20T03:44:19.857Z–03:44:32.112Z` 在 Pod1 GPU1 的 `sim.reset` 阶段 SIGABRT，trainer
+  exit=`-6`、外层 rc=`134`，`run.log` 末行为 `malloc(): invalid size (unsorted)`；没有首个 Learning
+  iteration、binding、receipt 或 RSL run directory，其余五格未发。关键文件 SHA-256 为 claim
+  `8472ecf98edd269b50b03925be1ab778d5d195b816e2e8bcc8e0be29499ffa8b`、launch spec
+  `334ed262de0fbb4549087fcd4f5c216d3fe3c12f46954f45e545eafd4c71c23c`、run log
+  `b3437c878aa1b0d5d8e0646e01c6d3a3d1d822a042289411cdd0e79613c3f49c`、launch log
+  `edc4782f57d0c9e498351161fbe224f38a4db7a93f1fde588a681a5346e13ce8`、leader evidence
+  `b7f981c8d59cb92ef96b6d7851350386cf913212090df070105abd0fa27e8815`、terminal
+  `ad5c46a7755f9b684fa2acad94387e2ebfc08db4f9adc186336fe8e295356268`、child evidence
+  `c2d6c31bb231a30716bc5fc1c160f8f5855d9529102a2241ca1187c75a96226f`。事后 Pod1 v7 只有
+  `probes/w_n`，Pod2 v7 root 不存在；`03:49:31–03:49:33Z` 两轮 closure 均确认 exact PID/PGID、所有
+  probe8/v7 argv、六张 GPU compute context 与 Kit/cache lock holder 全空。故 probe8 是
+  **pre-RewardManager infrastructure** 失败，不是 C/N/H 机制结果；v7 immutable，禁止重试、补格或混收据。
+  当前 [probe9 替换批](DEFINITIONS.md#balance-probe-generations) 已 preregistered / manifest-bound / not
+  launched：fresh no-clobber root 为 `/workspace/codexschema/phase1_balance_action_slew_v8_20260720`，六个
+  `run_name` 为 `phase1_balance_slew_probe9_{w_n,w_c,w_h,v_c,v_n,v_h}_seed3_20260720`（第九版六格零训练
+  合同探针）。config/runner SHA-256 为
+  `c7ec75a9917b8bdcf7976186633b021c69fb82e591898dad6b8d5c93cfdb37d5` /
+  `24b5f7831ad49c2b88266fed65c37e6e4bcdddaacab28ffa917fce66ef918db1`，manifest 内容/文件 SHA-256 为
+  `97c36e471fb8fc6b93fe212f20846de6697db518192e7a45c6618e5924947e28` /
+  `688599c2e01653bbb703553223a58e53656da1fe83d76aa7bcaa9f8a3ee75353`。发射顺序严格为 W-N（Pod1
+  GPU0）→receipt+closure→W-C（Pod1 GPU1）→receipt+closure→W-H→V-C→V-N→V-H，后四格也逐格串行；
+  任一失败立即冻结，不启动后续。只有同一 probe9 manifest identity 的六份 fresh receipt 全部闭合后
+  才能生成科学长训命令；科学 train 保持 W-N/W-C 的 GPU swap，不得在 probe 后换回旧映射。
   该条目只有进入 `origin/main` 后才构成运行 authority；六份收据闭合前仍不得发长训。两波都不能替代
   `T0/T1/T2` 连续恢复卷。[Wave A 实验](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md)
 - **[9｜P0] Hitter 实机 planner 时序与训练反应时间基线。** 责任人 yikang；执行者 Codex；分支
