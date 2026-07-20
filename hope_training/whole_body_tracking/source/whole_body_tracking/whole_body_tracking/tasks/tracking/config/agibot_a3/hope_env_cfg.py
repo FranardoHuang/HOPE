@@ -482,6 +482,71 @@ class HOPEEventCfg(EventCfg):
 
 
 ##
+# Wave-P random base push (PACE/BeyondMimic-style shove; default OFF = HITTER no-push).
+##
+
+
+@configclass
+class HOPEPushRobotCfg:
+    """Wave-P 随机推撞开关组(默认全关 = 现役 HITTER 对齐配方,``events.push_robot=None`` 逐位不变)。
+
+    人话:开了以后,每隔 ``interval_range_s`` 秒(uniform 抽样)随机把底座线速度加上
+    ±``vel_xy_mps`` 的水平推;``ang_axes`` 选 "yaw"/"rpy" 时再给对应转轴加 ±``ang_vel_radps``
+    的角速度踢("none" = 只推不踢)。论文依据:PACE push vxy±0.2 每 5–15 s;BeyondMimic
+    push vxy±0.5 + rpy 角速度 每 1–3 s。当前配方 ``push_robot=None`` 是对齐 HITTER 的历史
+    决定,Wave-P 用这组开关推翻它。
+
+    两条启用路径共用 ``training_contract.push_robot_event_block`` 的同一套校验/区间装配
+    (fail-loud,单一来源):(i) cfg 直启 —— ``__post_init__`` 末尾消费本旗标组
+    (``apply_push_robot_event``);(ii) YAML/CLI —— train.py 的 ``task.push.*`` 覆盖在
+    ``__post_init__`` 之后运行(face_command_obs 时序),自己构造同款 EventTerm。
+    """
+
+    enable: bool = False
+    interval_range_s: tuple[float, float] = (5.0, 15.0)
+    vel_xy_mps: float = 0.0
+    ang_vel_radps: float = 0.0
+    ang_axes: str = "none"  # "none" | "yaw" | "rpy"
+
+
+def apply_push_robot_event(env_cfg) -> None:
+    """Consume the ``push`` flag group: build ``events.push_robot`` when enabled.
+
+    人话:把开关组翻译成真正的 interval push 事件;没开就什么都不动(所有在跑矩阵格 =
+    push_robot None,行为逐位不变)。Idempotent — train.py 的 task.push 覆盖路径和 cfg
+    直启路径可以都跑一遍,结果相同;矛盾的配方(enable=true 但幅度全零、轴组合不一致等)
+    在 ``push_robot_event_block`` 里 fail-loud。
+    """
+
+    push = getattr(env_cfg, "push", None)
+    if push is None or not push.enable:
+        return
+    from whole_body_tracking.utils.training_contract import push_robot_event_block
+
+    block = push_robot_event_block(
+        enable=True,
+        interval_range_s=tuple(push.interval_range_s),
+        vel_xy_mps=float(push.vel_xy_mps),
+        ang_vel_radps=float(push.ang_vel_radps),
+        ang_axes=str(push.ang_axes),
+    )
+    env_cfg.events.push_robot = EventTerm(
+        func=mdp.push_by_setting_velocity,
+        mode="interval",
+        interval_range_s=(
+            float(block["interval_range_s"][0]),
+            float(block["interval_range_s"][1]),
+        ),
+        params={
+            "velocity_range": {
+                axis: (float(rng[0]), float(rng[1]))
+                for axis, rng in block["velocity_range"].items()
+            }
+        },
+    )
+
+
+##
 # Environment configuration.
 ##
 
@@ -704,6 +769,12 @@ class HOPEPingPongAgibotA3EnvCfg(AgibotA3FlatEnvCfg):
     # task.physical_ball override runs AFTER __post_init__ (face_command_obs timing), so it calls
     # the (idempotent) attach itself. METRICS-ONLY — see physical_ball.py; racket impulse=Phase B.
     physical_ball: bool = False
+    # Wave-P random base push (DEFAULT OFF = events.push_robot stays None, the HITTER-aligned
+    # historical recipe every running matrix cell trains with). 人话:训练时每隔几秒随机推
+    # 机器人一把,练抗扰平衡;见 HOPEPushRobotCfg。train.py 的 task.push.* 覆盖在
+    # __post_init__ 之后运行并自己构造 EventTerm(face_command_obs 时序);这里的旗标由
+    # __post_init__ 末尾的 apply_push_robot_event 消费(cfg 直启路径)。
+    push: HOPEPushRobotCfg = HOPEPushRobotCfg()
     commands: HOPECommandsCfg = HOPECommandsCfg()
     observations: HOPEObservationsCfg = HOPEObservationsCfg()
     rewards: HOPERewardsCfg = HOPERewardsCfg()
@@ -759,6 +830,11 @@ class HOPEPingPongAgibotA3EnvCfg(AgibotA3FlatEnvCfg):
             self.physical_ball = True
             rt.physical_ball = True
             attach_physical_ball_scene(self)
+        # Wave-P random base push (defaults OFF = events.push_robot stays None, byte-identical).
+        # This consumes the cfg-flag spelling; train.py's task.push override runs AFTER this
+        # __post_init__ and builds the term itself. Both share the same validator/assembly
+        # (training_contract.push_robot_event_block), so the two paths cannot drift.
+        apply_push_robot_event(self)
 
 
 @configclass

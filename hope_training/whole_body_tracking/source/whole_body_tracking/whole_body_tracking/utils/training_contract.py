@@ -1147,6 +1147,184 @@ def _validate_lower_body_wave_contracts(
         raise ValueError("schema-3 Wave-B B1 and B2 rewards are mutually exclusive")
 
 
+# --------------------------------------------------------------------------------------------- #
+# Wave-P random base push (PACE/BeyondMimic-style shove; default OFF = HITTER no-push recipe).
+# --------------------------------------------------------------------------------------------- #
+PUSH_ROBOT_EVENT_KEY = "push_robot_event"
+PUSH_ROBOT_EVENT_FUNC = "push_by_setting_velocity"
+PUSH_ROBOT_EVENT_MODE = "interval"
+PUSH_ROBOT_ANG_AXES = ("none", "yaw", "rpy")
+_PUSH_ROBOT_EVENT_KEYS = frozenset(
+    {
+        "schema_version", "enabled", "func", "mode", "interval_range_s",
+        "vel_xy_mps", "ang_vel_radps", "ang_axes", "velocity_range",
+    }
+)
+
+
+def push_robot_event_block(
+    *, enable, interval_range_s, vel_xy_mps, ang_vel_radps, ang_axes
+):
+    """Translate the push flag group into the canonical ``push_robot_event`` contract block.
+
+    人话:把"要不要推、隔几秒推一次、水平推多快、角速度踢多快、踢哪些转轴"翻译成 push_robot
+    事件的对称速度区间表 + 合同块。``enable=False`` 返回 ``None``(= 不推,合同不写这个块,
+    所有历史/在跑配置逐位不变),但此时任何非零幅度都是配置错误(fail-closed:关着的开关
+    不许挂着上膛的参数)。This is the single validation/assembly source shared by the env cfg
+    flag path, the train.py ``task.push`` override, and the schema-3 contract validator.
+    """
+
+    if not isinstance(enable, bool):
+        raise ValueError("push_robot_event enable must be an explicit boolean")
+    if not enable:
+        for name, value in (
+            ("vel_xy_mps", vel_xy_mps),
+            ("ang_vel_radps", ang_vel_radps),
+        ):
+            if value is not None and (isinstance(value, bool) or float(value) != 0.0):
+                raise ValueError(
+                    f"push_robot_event disabled but {name}={value!r} is nonzero — "
+                    "delete the dormant amplitude or set enable=true"
+                )
+        if ang_axes not in (None, "none"):
+            raise ValueError(
+                f"push_robot_event disabled but ang_axes={ang_axes!r} selects push axes — "
+                "delete it or set enable=true"
+            )
+        return None
+    try:
+        interval_items = list(interval_range_s)
+    except TypeError as exc:
+        raise ValueError(
+            "push_robot_event interval_range_s must be a [lo, hi] pair of seconds"
+        ) from exc
+    if len(interval_items) != 2:
+        raise ValueError(
+            "push_robot_event interval_range_s must be a [lo, hi] pair of seconds"
+        )
+    interval_lo = _wave_finite(
+        interval_items[0], name="push_robot_event.interval_range_s[0]", positive=True
+    )
+    interval_hi = _wave_finite(
+        interval_items[1], name="push_robot_event.interval_range_s[1]", positive=True
+    )
+    if interval_lo > interval_hi:
+        raise ValueError(
+            "push_robot_event interval_range_s must satisfy 0 < lo <= hi"
+        )
+    vel = _wave_finite(vel_xy_mps, name="push_robot_event.vel_xy_mps", nonnegative=True)
+    ang = _wave_finite(
+        ang_vel_radps, name="push_robot_event.ang_vel_radps", nonnegative=True
+    )
+    if ang_axes not in PUSH_ROBOT_ANG_AXES:
+        raise ValueError(
+            f"push_robot_event ang_axes must be one of {PUSH_ROBOT_ANG_AXES}, got {ang_axes!r}"
+        )
+    if ang_axes == "none" and ang != 0.0:
+        raise ValueError(
+            "push_robot_event ang_axes='none' requires ang_vel_radps=0 "
+            "(pick ang_axes='yaw'|'rpy' to push angular velocity)"
+        )
+    if ang_axes != "none" and ang == 0.0:
+        raise ValueError(
+            f"push_robot_event ang_axes={ang_axes!r} requires ang_vel_radps > 0 "
+            "(a zero angular push must spell ang_axes='none')"
+        )
+    if vel == 0.0 and ang == 0.0:
+        raise ValueError(
+            "push_robot_event enabled but every amplitude is zero — "
+            "an enabled push must push something (or set enable=false)"
+        )
+    velocity_range = {"x": [-vel, vel], "y": [-vel, vel]}
+    if ang_axes == "yaw":
+        velocity_range["yaw"] = [-ang, ang]
+    elif ang_axes == "rpy":
+        velocity_range["roll"] = [-ang, ang]
+        velocity_range["pitch"] = [-ang, ang]
+        velocity_range["yaw"] = [-ang, ang]
+    return {
+        "schema_version": 1,
+        "enabled": True,
+        "func": PUSH_ROBOT_EVENT_FUNC,
+        "mode": PUSH_ROBOT_EVENT_MODE,
+        "interval_range_s": [interval_lo, interval_hi],
+        "vel_xy_mps": vel,
+        "ang_vel_radps": ang,
+        "ang_axes": ang_axes,
+        "velocity_range": velocity_range,
+    }
+
+
+def _validate_push_robot_event_contract(contract: Mapping) -> None:
+    """Wave-P random base-push block (task.push; PACE/BeyondMimic push, HITTER default = none).
+
+    Absent block = push disabled (every historical/no-push run, byte-identical contract).  A
+    present block is always an ENABLED push and must be internally consistent: its stored
+    velocity box must equal the canonical re-assembly from its own amplitudes/axes, so a
+    hand-edited or drifted sidecar cannot smuggle a different push recipe past a resume.
+    """
+
+    block = contract.get(PUSH_ROBOT_EVENT_KEY)
+    if block is None:
+        if PUSH_ROBOT_EVENT_KEY in contract:
+            raise ValueError(
+                "schema-3 push_robot_event must be omitted when disabled, not null"
+            )
+        return
+    block = _require_exact_mapping_keys(
+        block, _PUSH_ROBOT_EVENT_KEYS, name="schema-3 push_robot_event"
+    )
+    if type(block["schema_version"]) is not int or block["schema_version"] != 1:
+        raise ValueError("schema-3 push_robot_event schema_version must be integer 1")
+    if block["enabled"] is not True:
+        raise ValueError(
+            "schema-3 push_robot_event enabled must be true "
+            "(a disabled push is spelled by omitting the block)"
+        )
+    if block["func"] != PUSH_ROBOT_EVENT_FUNC:
+        raise ValueError(
+            f"schema-3 push_robot_event func must be {PUSH_ROBOT_EVENT_FUNC!r}"
+        )
+    if block["mode"] != PUSH_ROBOT_EVENT_MODE:
+        raise ValueError(
+            f"schema-3 push_robot_event mode must be {PUSH_ROBOT_EVENT_MODE!r}"
+        )
+    try:
+        expected = push_robot_event_block(
+            enable=True,
+            interval_range_s=block["interval_range_s"],
+            vel_xy_mps=block["vel_xy_mps"],
+            ang_vel_radps=block["ang_vel_radps"],
+            ang_axes=block["ang_axes"],
+        )
+    except ValueError as exc:
+        raise ValueError(f"schema-3 push_robot_event is invalid: {exc}") from exc
+    stored_range = block["velocity_range"]
+    if not isinstance(stored_range, Mapping):
+        raise ValueError("schema-3 push_robot_event velocity_range must be an object")
+    normalized_range = {}
+    for axis, rng in stored_range.items():
+        if (
+            not isinstance(rng, (list, tuple))
+            or len(rng) != 2
+            or any(isinstance(v, bool) or not isinstance(v, (int, float)) for v in rng)
+        ):
+            raise ValueError(
+                f"schema-3 push_robot_event velocity_range.{axis} must be a [lo, hi] pair"
+            )
+        normalized_range[str(axis)] = [float(rng[0]), float(rng[1])]
+    stored_interval = [float(v) for v in block["interval_range_s"]]
+    if (
+        normalized_range != expected["velocity_range"]
+        or stored_interval != expected["interval_range_s"]
+    ):
+        raise ValueError(
+            "schema-3 push_robot_event is internally inconsistent: the stored "
+            "velocity_range/interval does not equal the canonical assembly from "
+            "vel_xy_mps/ang_vel_radps/ang_axes"
+        )
+
+
 def _validate_post_swing_settle_debt_contract(contract: Mapping) -> None:
     """S1 post-swing settle debt block (Jiayi V13 post-swing debts idea, clean main-side redo).
 
@@ -1530,6 +1708,7 @@ def validate_schema3_contract_structure(contract: Mapping) -> None:
         [str(value) for value in contract["articulation_joint_names"]],
     )
     _validate_post_swing_settle_debt_contract(contract)
+    _validate_push_robot_event_contract(contract)
     if contract["joint_friction_backend"] != JOINT_FRICTION_BACKEND:
         raise ValueError("schema-3 joint_friction_backend must be physx")
     if contract["joint_friction_semantics"] != JOINT_FRICTION_SEMANTICS:

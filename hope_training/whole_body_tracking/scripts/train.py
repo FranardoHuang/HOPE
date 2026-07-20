@@ -284,6 +284,218 @@ def _apply_lateral_perturbation_task_override(env_cfg, task, applied) -> None:
     )
 
 
+# YAML keys under `push:` (Wave-P random base push; PACE/BeyondMimic-style shove, default OFF =
+# the HITTER-aligned no-push recipe every running matrix cell trains with).  Same fail-loud
+# contract as _RACKET_KEYS/_MOTION_KEYS: every key must be whitelisted here AND consumed below.
+_PUSH_KEYS = ("enable", "interval_range_s", "vel_xy_mps", "ang_vel_radps", "ang_axes")
+
+
+def _apply_push_robot_task_override(env_cfg, task, applied) -> None:
+    """Translate the default-off ``task.push.*`` surface into the interval push event.
+
+    人话:训练时每隔几秒随机"推机器人一把"(直接改底座线速度/角速度),练抗扰平衡。
+    An absent ``task.push`` section (all currently running matrix cells) is a byte-for-byte
+    no-op: ``events.push_robot`` stays ``None``.  ``enable=false`` may not carry dormant
+    amplitudes/axes; ``enable=true`` requires the COMPLETE recipe (interval + both amplitudes +
+    axes) so every arm states its push explicitly.  Amplitude/axis consistency is validated by
+    ``training_contract.push_robot_event_block`` — the single assembly source shared with the
+    env-cfg flag path (hope_env_cfg.apply_push_robot_event) and the schema-3 validator.
+    """
+
+    node = _get(task, "push")
+    if node is None:
+        return
+    try:
+        node.keys()
+    except Exception as exc:
+        raise _OverrideError(f"task.push must be a mapping, got {node!r}") from exc
+    _check_unknown_keys(node, _PUSH_KEYS, "task.push")
+    enable_raw = _get(node, "enable")
+    if enable_raw is None:
+        raise _OverrideError("task.push must explicitly set enable=true|false")
+    enable = _as_explicit_bool(enable_raw, "task.push.enable")
+    if not enable:
+        dormant = sorted(
+            key for key in _PUSH_KEYS if key != "enable" and _get(node, key) is not None
+        )
+        if dormant:
+            raise _OverrideError(
+                f"task.push.enable=false may not carry dormant push fields {dormant} — "
+                "a disabled push with a loaded amplitude/axis is a config error; delete "
+                "them or set enable=true"
+            )
+        applied.append("push.enable=False (historical no-push path)")
+        return
+    missing = sorted(key for key in _PUSH_KEYS if _get(node, key) is None)
+    if missing:
+        raise _OverrideError(
+            f"task.push.enable=true requires the complete push recipe; missing {missing}"
+        )
+    raw_interval = _get(node, "interval_range_s")
+    try:
+        interval_items = list(raw_interval)
+    except TypeError as exc:
+        raise _OverrideError(
+            f"task.push.interval_range_s must be a [lo, hi] pair of seconds, got {raw_interval!r}"
+        ) from exc
+    if len(interval_items) != 2:
+        raise _OverrideError(
+            f"task.push.interval_range_s must be a [lo, hi] pair of seconds, got {raw_interval!r}"
+        )
+    interval = tuple(
+        _as_exact_float(value, f"task.push.interval_range_s[{index}]")
+        for index, value in enumerate(interval_items)
+    )
+    vel_xy = _as_exact_float(_get(node, "vel_xy_mps"), "task.push.vel_xy_mps")
+    ang_vel = _as_exact_float(_get(node, "ang_vel_radps"), "task.push.ang_vel_radps")
+    ang_axes = str(_get(node, "ang_axes"))
+    from whole_body_tracking.utils.training_contract import push_robot_event_block
+
+    try:
+        block = push_robot_event_block(
+            enable=True,
+            interval_range_s=interval,
+            vel_xy_mps=vel_xy,
+            ang_vel_radps=ang_vel,
+            ang_axes=ang_axes,
+        )
+    except ValueError as exc:
+        raise _OverrideError(f"task.push: {exc}") from exc
+    _require(
+        hasattr(env_cfg, "events") and hasattr(env_cfg.events, "push_robot"),
+        "events.push_robot (task.push.enable=true)",
+    )
+    from isaaclab.managers import EventTermCfg as _EventTerm
+
+    from whole_body_tracking.tasks.tracking import mdp as _mdp
+
+    env_cfg.events.push_robot = _EventTerm(
+        func=_mdp.push_by_setting_velocity,
+        mode="interval",
+        interval_range_s=(
+            float(block["interval_range_s"][0]),
+            float(block["interval_range_s"][1]),
+        ),
+        params={
+            "velocity_range": {
+                axis: (float(rng[0]), float(rng[1]))
+                for axis, rng in block["velocity_range"].items()
+            }
+        },
+    )
+    push_flags = getattr(env_cfg, "push", None)
+    if push_flags is not None:  # keep the descriptive HOPE cfg flag group honest
+        push_flags.enable = True
+        push_flags.interval_range_s = (
+            float(block["interval_range_s"][0]),
+            float(block["interval_range_s"][1]),
+        )
+        push_flags.vel_xy_mps = float(vel_xy)
+        push_flags.ang_vel_radps = float(ang_vel)
+        push_flags.ang_axes = ang_axes
+    applied.append(
+        "events.push_robot=interval "
+        f"{float(block['interval_range_s'][0])}-{float(block['interval_range_s'][1])}s "
+        f"vxy=±{float(vel_xy)}m/s ang=±{float(ang_vel)}rad/s axes={ang_axes} "
+        "(Wave-P random base push)"
+    )
+
+
+def _push_robot_event_contract(env_cfg) -> dict | None:
+    """Bind the (post-override) random base-push event into the hard contract.
+
+    人话:合同照抄实际生效的 push 事件;没开(= push_robot None,所有在跑矩阵格)就不写
+    这个块,合同字节与历史逐位相同。An unrecognized push term shape (non-interval mode,
+    asymmetric box, z push, unequal x/y, alien axis set) or a half-wired flag/term pair is
+    REFUSED rather than silently escaping the contract.
+    """
+
+    events = getattr(env_cfg, "events", None)
+    term = None if events is None else getattr(events, "push_robot", None)
+    push_flags = getattr(env_cfg, "push", None)
+    if term is None:
+        if push_flags is not None and bool(getattr(push_flags, "enable", False)):
+            raise RuntimeError(
+                "push.enable=true but events.push_robot is None (half-wired push)"
+            )
+        return None
+    if push_flags is not None and not bool(getattr(push_flags, "enable", False)):
+        raise RuntimeError(
+            "events.push_robot is active but push.enable=false (half-wired push)"
+        )
+    func = getattr(term, "func", None)
+    func_name = func if isinstance(func, str) else getattr(func, "__name__", None)
+    if func_name != "push_by_setting_velocity":
+        raise RuntimeError(
+            f"push_robot event func must be push_by_setting_velocity, got {func_name!r}"
+        )
+    if getattr(term, "mode", None) != "interval":
+        raise RuntimeError(
+            f"push_robot event mode must be 'interval', got {getattr(term, 'mode', None)!r}"
+        )
+    interval = tuple(float(value) for value in term.interval_range_s)
+    params = getattr(term, "params", None)
+    velocity_range = params.get("velocity_range") if isinstance(params, dict) else None
+    if not hasattr(velocity_range, "items"):
+        raise RuntimeError("push_robot event params must carry a velocity_range mapping")
+    axes_present = {str(axis) for axis in velocity_range}
+
+    def _symmetric_amplitude(axis):
+        rng = velocity_range[axis]
+        lo, hi = float(rng[0]), float(rng[1])
+        if not (hi >= 0.0 and lo == -hi):
+            raise RuntimeError(
+                f"push_robot velocity_range.{axis} must be a symmetric ±v pair, got {rng!r}"
+            )
+        return hi
+
+    if not {"x", "y"} <= axes_present:
+        raise RuntimeError("push_robot velocity_range must push x and y")
+    vel_x = _symmetric_amplitude("x")
+    vel_y = _symmetric_amplitude("y")
+    if vel_x != vel_y:
+        raise RuntimeError(
+            "push_robot x/y amplitudes must match (one shared vel_xy_mps)"
+        )
+    angular_axes = axes_present - {"x", "y"}
+    if angular_axes == set():
+        ang_axes, ang_vel = "none", 0.0
+    elif angular_axes == {"yaw"}:
+        ang_axes, ang_vel = "yaw", _symmetric_amplitude("yaw")
+    elif angular_axes == {"roll", "pitch", "yaw"}:
+        amplitudes = {
+            axis: _symmetric_amplitude(axis) for axis in ("roll", "pitch", "yaw")
+        }
+        if len(set(amplitudes.values())) != 1:
+            raise RuntimeError(
+                "push_robot roll/pitch/yaw amplitudes must match (one shared ang_vel_radps)"
+            )
+        ang_axes, ang_vel = "rpy", amplitudes["yaw"]
+    else:
+        raise RuntimeError(
+            f"push_robot velocity_range axes {sorted(axes_present)} do not match the "
+            "none|yaw|rpy Wave-P recipe"
+        )
+    from whole_body_tracking.utils.training_contract import push_robot_event_block
+
+    block = push_robot_event_block(
+        enable=True,
+        interval_range_s=interval,
+        vel_xy_mps=vel_x,
+        ang_vel_radps=ang_vel,
+        ang_axes=ang_axes,
+    )
+    canonical = {
+        str(axis): [float(rng[0]), float(rng[1])]
+        for axis, rng in velocity_range.items()
+    }
+    if canonical != block["velocity_range"]:
+        raise RuntimeError(
+            "push_robot velocity_range disagrees with the canonical Wave-P assembly"
+        )
+    return block
+
+
 def _resolve_lateral_training_runtime(env):
     """Return ``(cfg, hard_contract)`` for an enabled cell, else ``None``."""
 
@@ -1229,6 +1441,7 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
     post_swing_settle_contract = _post_swing_settle_debt_reward_contract(
         env_cfg, runtime_facts
     )
+    push_robot_contract = _push_robot_event_contract(env_cfg)
     if (
         post_swing_settle_contract is not None
         and post_swing_settle_contract["enabled"]
@@ -1475,6 +1688,11 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
             {}
             if post_swing_settle_contract is None
             else {"post_swing_settle_debt_reward": post_swing_settle_contract}
+        ),
+        **(
+            {}
+            if push_robot_contract is None
+            else {"push_robot_event": push_robot_contract}
         ),
         **(
             {}
@@ -2041,6 +2259,12 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
     # EventManager term: the reviewed adapter must own every substep write, prove a complete zero
     # overwrite when inactive, and fail closed on any competing writer.
     _apply_lateral_perturbation_task_override(env_cfg, task, applied)
+
+    # Wave-P random base push (task.push.*; default OFF/absent = events.push_robot stays None,
+    # the HITTER-aligned recipe every running matrix cell trains with). 人话:每隔几秒随机推
+    # 机器人一把练抗扰平衡;论文依据 PACE(±0.2 m/s 每 5–15 s)与 BeyondMimic(±0.5 m/s +
+    # rpy 角速度每 1–3 s)。
+    _apply_push_robot_task_override(env_cfg, task, applied)
 
     # env base (num_envs is applied earlier via parse_env_cfg). Read every value through _get so the
     # logic works on both OmegaConf nodes (runtime) and plain dicts (unit tests).
