@@ -61,6 +61,20 @@ WHAT IT DOES
     v2 法则跑法:--joints armchain --forbid-joints legs,waist_pitch_roll
     (预设本就不含它们;显式写上是把"法则被强制过"钉进报告。)
 
+SIGNED STROKE-SCALE(轴 C,2026-07-20)
+  --stroke-scale S(与 --extend-frac 二选一):S>1 加深(老路径),S<1 **缩短**,S=1 恒等
+  直拷(逐字节,不动任何数组)。每个 --stroke-scale 产物旁写独立 manifest JSON:源/出双端
+  sha256(内容寻址)、实测 L/L0、触球锚不变证明(触球行/锁窗/随挥/腿/ready 逐位 + root 冻结
+  + 拍面法向符号)、写死的分桶合同(train 0.80/1.00/1.20 · interpolation 0.90/1.10 ·
+  OOD 0.65/1.35)、两种下游测速模式元数据(模式一:v* 钉死只变 L,记 a_min=v*²/(2L);
+  模式二:固定加速度利用率 κ=0.8 的建议速度 v_max(L)=κ·√(v_start²+2·a_max·L),只算数不改轨迹)。
+  历史缺陷(为什么以前负 --extend-frac 出不了缩短片):solve_amplitude 只在 [0, A_max] 上
+  单边二分,方向 w 又固定取"加深梯度",L(A) 单调升;负目标落在括号外 ⇒ reachability 检查
+  (L_hi < L_target)不触发,二分逐轮 hi_a=A 收敛到 A≈0,**静默输出一张几乎恒等的片**;
+  且 joint_headroom 只按 +w 一侧算限位余量,连符号翻转后的余量都算错。现在:缩短时方向整体
+  取 -w(headroom 按元素符号自动换到正确一侧),幅度解算先粗扫网格找 L(A) 穿越括号(容忍
+  最深帧 argmax 跳变/过冲导致的非单调)再二分,两个方向都 fail-loud。
+
 USAGE (pod, mjeval venv: numpy + mujoco)
     python hope_training/whole_body_tracking/scripts/extend_stroke.py \
         --input  .../v5_height_fix/hope_backhand_v5hLs_cal.npz --phase 0.391 \
@@ -80,9 +94,11 @@ Unit tests: tests/test_extend_stroke.py (pure CPU, synthetic clips + analytic st
 from __future__ import annotations
 
 import argparse
+import hashlib
 import importlib.util
 import json
 import os
+import shutil
 import sys
 from dataclasses import dataclass
 from datetime import datetime, timezone
@@ -116,6 +132,70 @@ FORBID_ALIASES = {"legs": LEG_JOINTS, "waist_pitch_roll": WAIST_PITCH_ROLL}
 
 # 纯时间律地板:v5topp bh 的 oracle CoP 剂量(stroke_ledger_0709 §四)。行程手术的判据线。
 TIMELAW_COP_FLOOR = 0.0905
+
+# 轴 C 分桶合同 —— 写死,不给下游任何再解释空间(各轴同一比例约定;轴 D 的 β 亦同)。
+STROKE_SCALE_BUCKETS = {
+    "train": (0.80, 1.00, 1.20),
+    "interpolation": (0.90, 1.10),
+    "OOD": (0.65, 1.35),
+}
+KAPPA_DEFAULT = 0.8        # 固定加速度利用率模式的默认 κ(模式二,建议速度只算数不改轨迹)
+
+
+def bucket_of_scale(scale: float) -> str:
+    """七点分桶合同:train 0.80/1.00/1.20 · interpolation 0.90/1.10 · OOD 0.65/1.35。
+
+    人话:这个 scale 属于哪个评测桶。不在七点上的 scale 记 'unassigned'(合法工具用途,
+    但不进任何评测桶)。"""
+    for bucket, scales in STROKE_SCALE_BUCKETS.items():
+        if any(abs(float(scale) - s) <= 1e-9 for s in scales):
+            return bucket
+    return "unassigned"
+
+
+def v_max_suggested(kappa: float, v_start: float, a_max: float, L: float) -> float:
+    """模式二建议击球速度:v_max(L) = κ·√(v_start² + 2·a_max·L)。只算数,不改轨迹。
+
+    人话:引拍行程 L 变了以后,在固定加速度利用率 κ 下这段行程"配得上"的击球速度上限。
+    全部输入必须有限且非负 —— fail-closed。"""
+    for name, val in (("kappa", kappa), ("v_start", v_start), ("a_max", a_max), ("L", L)):
+        v = float(val)
+        if not np.isfinite(v) or v < 0.0:
+            raise SystemExit(f"speed-suggestion input {name}={val!r} must be finite and >= 0")
+    return float(kappa) * float(np.sqrt(float(v_start) ** 2 + 2.0 * float(a_max) * float(L)))
+
+
+def resolve_a_max(cli_a_max, v_star: float, L_src: float) -> tuple[float, str]:
+    """模式二的 a_max:CLI 显式给,或默认从源片推导 a_max = v*²/(2·L_src)。"""
+    if cli_a_max is not None:
+        a = float(cli_a_max)
+        if not np.isfinite(a) or a <= 0.0:
+            raise SystemExit(f"--a-max {cli_a_max} must be finite and > 0")
+        return a, "cli"
+    return a_min_of(v_star, L_src), "derived: v_star^2/(2*L_src) of the source clip"
+
+
+def sha256_of_file(path: str) -> str:
+    h = hashlib.sha256()
+    with open(path, "rb") as fh:
+        for chunk in iter(lambda: fh.read(1 << 20), b""):
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _assert_finite_numbers(tree, path: str = "manifest") -> None:
+    """fail-closed:manifest 里任何数字都必须有限,NaN/inf 直接拒绝出档。"""
+    if isinstance(tree, dict):
+        for k, v in tree.items():
+            _assert_finite_numbers(v, f"{path}.{k}")
+    elif isinstance(tree, (list, tuple)):
+        for i, v in enumerate(tree):
+            _assert_finite_numbers(v, f"{path}[{i}]")
+    elif isinstance(tree, bool) or tree is None or isinstance(tree, str):
+        return
+    elif isinstance(tree, (int, float, np.integer, np.floating)):
+        if not np.isfinite(tree):
+            raise SystemExit(f"non-finite value at {path}: {tree!r} — fail-closed, manifest refused")
 
 
 # ------------------------------------------------------------------ small math -- #
@@ -246,31 +326,57 @@ def joint_headroom(q: np.ndarray, cols: np.ndarray, w: np.ndarray, P: np.ndarray
 
 def solve_amplitude(q: np.ndarray, plan: MorphPlan, blade_fn, c: int,
                     L_target: float, A_max: float, tol: float = 1e-4,
-                    iters: int = 60) -> tuple[float, float, int]:
-    """Bisect A ∈ [0, A_max] so L_deep(morphed) == L_target. Fail-loud when unreachable."""
+                    iters: int = 60, grid_pts: int = 33) -> tuple[float, float, int]:
+    """Solve A ∈ [0, A_max] so L_deep(morphed) == L_target — SIGNED, fail-loud.
+
+    加深(L_target ≥ L(0),方向 w 沿加深梯度):L(A) 单调升,老式二分,报文原样保留。
+    缩短(L_target < L(0),morph() 已把方向整体翻成 -w):L(A) 在 0 附近下降,但最深帧
+    argmax 可能跳变、拍面可能"过冲"穿过触球位姿再变远,L(A) 在整个 [0, A_max] 上不保证
+    单调 —— 先粗扫网格找**第一段**穿越 L_target 的括号,再在括号内二分。两个方向的
+    "方向反号"与"目标不可达"都 SystemExit(历史缺陷 = 负目标静默收敛到 A≈0,见模块 docstring)。
+    """
     def L_of(A: float) -> tuple[float, int]:
         d, L = deep_frame_and_L(blade_fn(plan.apply(q, A)), c)
         return L, d
 
     L0, _ = L_of(0.0)
     L_hi, _ = L_of(A_max)
-    if L_hi < L0:
-        raise SystemExit(
-            f"morph direction SHORTENS the path (L {L0:.4f} → {L_hi:.4f} m at A_max) — "
-            f"梯度方向与加深方向反号,拒绝出片(检查 --joints / --peak-frame)")
-    if L_hi < L_target:
-        raise SystemExit(
-            f"target L_deep {L_target:.4f} m unreachable inside the URDF limits: max "
-            f"achievable {L_hi:.4f} m (+{(L_hi / L0 - 1) * 100:.1f}% vs source {L0:.4f} m) "
-            f"at A_max={A_max:.4f} rad — 加行程被限位挡住,报告须如实记这条缺口")
+    shorten = L_target < L0
+    if not shorten:
+        if L_hi < L0:
+            raise SystemExit(
+                f"morph direction SHORTENS the path (L {L0:.4f} → {L_hi:.4f} m at A_max) — "
+                f"梯度方向与加深方向反号,拒绝出片(检查 --joints / --peak-frame)")
+        if L_hi < L_target:
+            raise SystemExit(
+                f"target L_deep {L_target:.4f} m unreachable inside the URDF limits: max "
+                f"achievable {L_hi:.4f} m (+{(L_hi / L0 - 1) * 100:.1f}% vs source {L0:.4f} m) "
+                f"at A_max={A_max:.4f} rad — 加行程被限位挡住,报告须如实记这条缺口")
+        lo_a, hi_a = 0.0, A_max
+    else:
+        grid = np.linspace(0.0, A_max, max(int(grid_pts), 3))
+        Ls = np.array([L_of(a)[0] for a in grid])
+        cross = np.flatnonzero(Ls <= L_target)
+        if cross.size == 0:
+            L_min = float(Ls.min())
+            if L_min > L0 - 1e-12:
+                raise SystemExit(
+                    f"morph direction LENGTHENS the path (L {L0:.4f} m, min over [0, A_max] "
+                    f"{L_min:.4f} m) — 缩短方向反号,拒绝出片(检查 --joints / --peak-frame)")
+            raise SystemExit(
+                f"target L_deep {L_target:.4f} m unreachable: min achievable {L_min:.4f} m "
+                f"({L_min / L0 * 100:.1f}% of source {L0:.4f} m) inside the URDF limits at "
+                f"A_max={A_max:.4f} rad — 缩短被限位/几何挡住,报告须如实记这条缺口")
+        k = int(cross[0])                      # Ls[0] = L0 > L_target ⇒ k >= 1
+        lo_a, hi_a = float(grid[k - 1]), float(grid[k])
 
-    lo_a, hi_a, A = 0.0, A_max, A_max
+    A = hi_a
     for _ in range(iters):
         A = 0.5 * (lo_a + hi_a)
         L, _ = L_of(A)
         if abs(L - L_target) <= tol * L_target:
             break
-        if L < L_target:
+        if (L > L_target) == shorten:
             lo_a = A
         else:
             hi_a = A
@@ -282,7 +388,14 @@ def morph(data: dict, phase: float, joint_names: list[str], extend_frac: float,
           blade_fn, limits: dict, lock_frames: int = LOCK_FRAMES, s0: int = 0,
           peak_frame: int | None = None, strict_limits: bool = False,
           alloc: str = "grad", on_blocked: str = "drop", refine_iters: int = 1):
-    """Source npz dict -> (morphed joint_pos (T,J) float64, plan, info dict)."""
+    """Source npz dict -> (morphed joint_pos (T,J) float64, plan, info dict).
+
+    extend_frac 有符号:>0 加深,<0 缩短(方向整体取 -w,限位余量自动换侧),=0 微幅恒等。
+    """
+    scale = 1.0 + float(extend_frac)
+    if not np.isfinite(scale) or scale <= 0.0:
+        raise SystemExit(f"stroke scale 1+extend_frac = {scale} must be finite and > 0 — fail-closed")
+    shorten = float(extend_frac) < 0.0
     q = np.asarray(data["joint_pos"], dtype=np.float64)
     unknown = [k for k in data.keys() if k not in KNOWN_KEYS and not k.startswith("_")]
     if unknown:
@@ -316,6 +429,10 @@ def morph(data: dict, phase: float, joint_names: list[str], extend_frac: float,
         w = np.sign(g)
     else:
         raise SystemExit(f"unknown --alloc {alloc!r}")
+    if shorten:
+        w = -w      # signed stroke-scale:缩短 = 沿加深梯度的反方向把拍面推向触球位姿
+
+    dir_word = "shortening" if shorten else "deepening"
 
     P = bump_profile(T, s0, d, s1)
 
@@ -340,7 +457,7 @@ def morph(data: dict, phase: float, joint_names: list[str], extend_frac: float,
     blocked = [i for i in range(len(cols)) if m[i] <= BLOCKED_EPS]
     blocked_names = [joint_names[i] for i in blocked]
     if blocked:
-        msg = (f"joints with ZERO deepening headroom (pinned at a URDF limit in the "
+        msg = (f"joints with ZERO {dir_word} headroom (pinned at a URDF limit in the "
                f"morph direction): {[(joint_names[i], f'f{bind[i]}') for i in blocked]}")
         if on_blocked == "fail":
             raise SystemExit(f"--on-blocked fail: {msg}")
@@ -402,6 +519,8 @@ def morph(data: dict, phase: float, joint_names: list[str], extend_frac: float,
         if not np.isfinite(g_new).all() or np.abs(g_new).max() < 1e-12:
             break
         w_new = np.sign(g_new) if alloc == "equal" else g_new / np.abs(g_new).max()
+        if shorten:
+            w_new = -w_new
         cand = attempt(w_new)
         if cand is None or cand[0].amp >= plan.amp * (1.0 - 1e-6):
             break
@@ -433,6 +552,8 @@ def morph(data: dict, phase: float, joint_names: list[str], extend_frac: float,
         deep_frame_src=int(d_src), deep_frame_out=int(d_out), peak_frame=int(d),
         L_deep_src_fk=float(L_src), L_deep_out_fk=float(L_out), L_target=float(L_target),
         extend_frac_req=float(extend_frac), extend_frac_out=float(L_out / L_src - 1.0),
+        stroke_scale_req=float(scale), stroke_scale_out=float(L_out / L_src),
+        direction=("shorten" if shorten else "deepen"),
         amp_rad=float(A), amp_max_rad=float(A_max),
         amp_binding_joint=b_joint, amp_binding_frame=b_frame,
         amp_headroom_frac=float(A / A_max),
@@ -723,6 +844,130 @@ def report_md(rep: dict) -> str:
     return "\n".join(L)
 
 
+# ------------------------------------------------------------- scale manifest ---- #
+HARD_INVARIANTS = ("contact_row_bitwise", "lock_window_bitwise", "follow_through_bitwise",
+                   "legs_bitwise", "ready_pose_bitwise", "non_selected_joints_bitwise")
+
+
+def build_scale_manifest(*, scale: float, input_path: str, output_path: str,
+                         src_sha256: str, out_sha256: str, phase: float,
+                         contact_frame_idx: int, fps: float, frames: int,
+                         L_src_m: float, L_out_m: float, v_star_src_mps: float,
+                         v_star_out_mps: float, proofs: dict, kappa: float,
+                         v_start_mps: float, a_max_mps2: float, a_max_source: str,
+                         ratio_fk: float | None = None, joints_used=None,
+                         ratio_tol: float = 0.05) -> dict:
+    """独立 scale 资产的 manifest(一层内容 sha256 + 实测 L/L0 + 触球锚不变证明)。
+
+    fail-closed:scale 非法、实测比例偏离请求超 ratio_tol(专治历史"静默恒等片"缺陷)、
+    任一硬不变式缺失或为 False、任何数字非有限 → SystemExit,拒绝出档(资产作废)。
+    """
+    scale = float(scale)
+    if not np.isfinite(scale) or scale <= 0.0:
+        raise SystemExit(f"stroke scale {scale!r} must be finite and > 0")
+    if not np.isfinite(L_src_m) or L_src_m <= 0.0 or not np.isfinite(L_out_m) or L_out_m <= 0.0:
+        raise SystemExit(f"arc lengths must be finite/positive: L_src={L_src_m}, L_out={L_out_m}")
+    for name, v in (("v_star_src_mps", v_star_src_mps), ("v_star_out_mps", v_star_out_mps)):
+        if not np.isfinite(v) or float(v) <= 0.0:
+            raise SystemExit(f"non-finite/non-positive value at manifest.{name}: {v!r} — fail-closed")
+    ratio_stored = float(L_out_m) / float(L_src_m)
+    ref_ratio = ratio_stored if ratio_fk is None else float(ratio_fk)
+    if abs(ref_ratio - scale) > ratio_tol * scale:
+        raise SystemExit(
+            f"measured stroke ratio {ref_ratio:.4f} deviates from requested scale {scale:.4f} "
+            f"by more than {ratio_tol * 100:.0f}% — 剂量没对上(历史缺陷形态:静默恒等片),"
+            f"拒绝出 manifest")
+    missing = [k for k in HARD_INVARIANTS if k not in proofs]
+    if missing:
+        raise SystemExit(f"manifest proofs missing hard invariants {missing} — fail-closed")
+    broken = [k for k in HARD_INVARIANTS if not proofs[k]]
+    if broken:
+        raise SystemExit(f"hard invariants violated: {broken} — 触球锚/冻结被破坏,拒绝出 manifest")
+    manifest = dict(
+        tool="extend_stroke.py --stroke-scale (axis C: signed stroke-scale)",
+        generated_utc=datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%SZ"),
+        axis="C_stroke_scale_signed",
+        source=dict(path=os.path.abspath(str(input_path)), sha256=str(src_sha256),
+                    frames=int(frames), fps=float(fps), phase=float(phase),
+                    contact_frame=int(contact_frame_idx)),
+        output=dict(path=os.path.abspath(str(output_path)), sha256=str(out_sha256),
+                    frames=int(frames)),
+        scale=dict(requested=scale, extend_frac=round(scale - 1.0, 10),
+                   L_src_m=round(float(L_src_m), 6), L_out_m=round(float(L_out_m), 6),
+                   ratio_measured_stored=round(ratio_stored, 6),
+                   ratio_measured_fk=(None if ratio_fk is None else round(float(ratio_fk), 6))),
+        bucket=bucket_of_scale(scale),
+        buckets_contract={k: list(v) for k, v in STROKE_SCALE_BUCKETS.items()},
+        contact_invariance=dict(proofs),
+        joints_used=(None if joints_used is None else list(joints_used)),
+        speed_modes=dict(
+            fixed_strike_velocity=dict(
+                v_star_mps=round(float(v_star_src_mps), 4),
+                L_m=round(float(L_out_m), 6),
+                a_min_mps2=round(a_min_of(v_star_src_mps, L_out_m), 4),
+                note="模式一:击球速度钉死在源片 v*,只变行程 L;a_min = v*²/(2L) 是新的加速度下界"),
+            fixed_accel_utilization=dict(
+                kappa=float(kappa), v_start_mps=float(v_start_mps),
+                a_max_mps2=round(float(a_max_mps2), 4), a_max_source=str(a_max_source),
+                v_max_suggested_mps=round(
+                    v_max_suggested(kappa, v_start_mps, a_max_mps2, L_out_m), 4),
+                note="模式二:固定加速度利用率 κ,建议速度 v_max(L)=κ·√(v_start²+2·a_max·L);"
+                     "只算数,不改轨迹")),
+    )
+    _assert_finite_numbers(manifest)
+    return manifest
+
+
+def run_identity_scale(args) -> int:
+    """--stroke-scale 1.0:恒等直拷(逐字节),不做 morph — scale=1 的资产就是源片本身。
+
+    仍出 manifest:L/L0 = 1 实测、触球锚证明(逐字节拷贝 ⇒ 平凡成立且如实为 True)、
+    分桶(1.0 ∈ train)、两种测速模式元数据。不需要 MuJoCo:全部量在 stored blade 口径度量。
+    """
+    data = dict(np.load(args.input))
+    unknown = [k for k in data.keys() if k not in KNOWN_KEYS and not k.startswith("_")]
+    if unknown:
+        raise SystemExit(f"unknown npz keys {unknown} — refusing to copy what I don't understand")
+    q = np.asarray(data["joint_pos"])
+    if q.ndim != 2 or q.shape[1] != len(ISAAC_JOINT_NAMES):
+        raise SystemExit(f"joint_pos shape {q.shape}, expected (T, {len(ISAAC_JOINT_NAMES)})")
+    T = q.shape[0]
+    c = st.contact_frame(args.phase, T)
+    if not (0 <= c < T):
+        raise SystemExit(f"contact frame {c} outside clip of {T} frames")
+    fps = float(np.asarray(data["fps"]).reshape(-1)[0])
+    blade = st.blade_positions(data)
+    _, L_src = deep_frame_and_L(blade, c)
+    v_star = st.clean_speed_at(blade, c, 1.0 / fps)
+    if not np.isfinite(L_src) or L_src <= 0.0 or not np.isfinite(v_star) or v_star <= 0.0:
+        raise SystemExit(f"degenerate source stroke: L={L_src}, v*={v_star} — fail-closed")
+    shutil.copyfile(args.input, args.output)
+    src_sha = sha256_of_file(args.input)
+    out_sha = sha256_of_file(args.output)
+    if src_sha != out_sha:
+        raise SystemExit("identity copy is not byte-identical — I/O corruption, fail-closed")
+    a_max, a_max_source = resolve_a_max(args.a_max, v_star, L_src)
+    proofs = dict(contact_row_bitwise=True, lock_window_bitwise=True,
+                  follow_through_bitwise=True, legs_bitwise=True, ready_pose_bitwise=True,
+                  non_selected_joints_bitwise=True, root_pos_max_dev_m=0.0,
+                  root_quat_max_dev=0.0, identity_bytes=True,
+                  v_star_src_mps=round(v_star, 4), v_star_out_mps=round(v_star, 4),
+                  v_star_dev_frac=0.0, face_normal_contact_dot=1.0)
+    manifest = build_scale_manifest(
+        scale=1.0, input_path=args.input, output_path=args.output,
+        src_sha256=src_sha, out_sha256=out_sha, phase=args.phase, contact_frame_idx=c,
+        fps=fps, frames=T, L_src_m=L_src, L_out_m=L_src,
+        v_star_src_mps=v_star, v_star_out_mps=v_star, proofs=proofs,
+        kappa=args.kappa, v_start_mps=args.v_start, a_max_mps2=a_max,
+        a_max_source=a_max_source, ratio_fk=1.0)
+    mpath = args.manifest or (args.output + ".manifest.json")
+    with open(mpath, "w") as fh:
+        json.dump(manifest, fh, indent=2, default=float)
+    print(f"scale=1.0 恒等直拷: {os.path.abspath(args.output)} "
+          f"(sha256 {out_sha[:12]}… == source), manifest: {os.path.abspath(mpath)}")
+    return 0
+
+
 # -------------------------------------------------------------------------- CLI -- #
 def repo_root_of(script: str) -> str:
     return os.path.normpath(os.path.join(os.path.dirname(os.path.abspath(script)), "../../.."))
@@ -739,8 +984,21 @@ def main(argv=None) -> int:
                     help="preset (waist|armchain) or comma-separated Isaac joint names")
     ap.add_argument("--forbid-joints", default="legs",
                     help="comma list / aliases (legs, waist_pitch_roll); fail-loud on overlap")
-    ap.add_argument("--extend-frac", type=float, required=True,
-                    help="target ΔL_deep as a fraction of the source L_deep (e.g. 0.20)")
+    ap.add_argument("--extend-frac", type=float, default=None,
+                    help="target ΔL_deep as a fraction of the source L_deep (e.g. 0.20); "
+                         "legacy spelling — exactly one of --extend-frac/--stroke-scale")
+    ap.add_argument("--stroke-scale", type=float, default=None,
+                    help="signed stroke scale L/L0(人话:引拍长度倍数;<1 缩短, >1 加深, "
+                         "1.0 恒等直拷)。exactly one of --extend-frac/--stroke-scale;"
+                         "always writes a per-asset manifest JSON")
+    ap.add_argument("--manifest", default=None,
+                    help="manifest JSON path (default with --stroke-scale: <output>.manifest.json)")
+    ap.add_argument("--kappa", type=float, default=KAPPA_DEFAULT,
+                    help="固定加速度利用率模式(模式二)的 κ,默认 0.8;只进 manifest 元数据")
+    ap.add_argument("--v-start", type=float, default=0.0,
+                    help="模式二的 v_start [m/s],默认 0;只进 manifest 元数据")
+    ap.add_argument("--a-max", type=float, default=None,
+                    help="模式二的 a_max [m/s²];默认从源片推导 = v*²/(2·L_src)")
     ap.add_argument("--alloc", choices=("grad", "equal"), default="grad")
     ap.add_argument("--on-blocked", choices=("drop", "fail"), default="drop",
                     help="joints with zero deepening headroom: drop (WARN) or fail-loud")
@@ -773,6 +1031,20 @@ def main(argv=None) -> int:
     ap.add_argument("--md", default=None)
     args = ap.parse_args(argv)
 
+    # --- signed stroke-scale resolution (fail-closed, before any file I/O) -------------
+    if (args.extend_frac is None) == (args.stroke_scale is None):
+        raise SystemExit("exactly one of --extend-frac / --stroke-scale is required (fail-closed)")
+    if args.stroke_scale is not None:
+        if not np.isfinite(args.stroke_scale) or args.stroke_scale <= 0.0:
+            raise SystemExit(f"--stroke-scale {args.stroke_scale} must be finite and > 0")
+        extend_frac = float(args.stroke_scale) - 1.0
+    else:
+        if not np.isfinite(args.extend_frac):
+            raise SystemExit(f"--extend-frac {args.extend_frac} must be finite")
+        extend_frac = float(args.extend_frac)
+    if args.stroke_scale is not None and float(args.stroke_scale) == 1.0:
+        return run_identity_scale(args)     # 恒等直拷:逐字节,无 morph,无 MuJoCo
+
     root = repo_root_of(__file__)
     if args.urdf is None:
         args.urdf = os.path.join(root, "agi/URDF/A3T2.5-URDF-std-pingpang/urdf/URDF-JOINT-LINK.urdf")
@@ -795,7 +1067,7 @@ def main(argv=None) -> int:
                  np.asarray(data["body_quat_w"], dtype=np.float64)[:, ROOT_BODY_COL])
 
     q_out, plan, info, blade_src_fk = morph(
-        data, args.phase, joints, args.extend_frac, fk.blade, limits,
+        data, args.phase, joints, extend_frac, fk.blade, limits,
         lock_frames=args.lock_frames, s0=args.morph_start, peak_frame=args.peak_frame,
         strict_limits=args.strict_limits, alloc=args.alloc, on_blocked=args.on_blocked,
         refine_iters=args.refine_iters)
@@ -825,6 +1097,63 @@ def main(argv=None) -> int:
     blade_out_npz = st.blade_positions(out)
     _, L_out_npz = deep_frame_and_L(blade_out_npz, c)
     v_star_out = st.clean_speed_at(blade_out_npz, c, 1.0 / fps)
+
+    # --- per-asset scale manifest(--stroke-scale 必写;--manifest 显式给也写)------------
+    if args.stroke_scale is not None or args.manifest:
+        try:
+            scale = (float(args.stroke_scale) if args.stroke_scale is not None
+                     else 1.0 + extend_frac)
+            jp_src = np.asarray(data["joint_pos"])
+            jp_out = np.asarray(out["joint_pos"])
+            leg_cols = [ISAAC_JOINT_NAMES.index(n) for n in LEG_JOINTS]
+            sel = {int(j) for j in plan.cols}
+            non_sel = [j for j in range(jp_src.shape[1]) if j not in sel]
+            n_src = st.blade_face_normals(data)
+            n_out = st.blade_face_normals(out)
+            face_dot = float(np.dot(n_src[c], n_out[c])
+                             / (np.linalg.norm(n_src[c]) * np.linalg.norm(n_out[c])))
+            if face_dot < 0.999:
+                raise SystemExit(f"blade face normal at contact rotated (dot={face_dot:.6f})"
+                                 f" — signed face 被破坏,拒绝出 manifest")
+            root_pos_dev = float(np.abs(
+                np.asarray(out["body_pos_w"], np.float64)[:, ROOT_BODY_COL]
+                - np.asarray(data["body_pos_w"], np.float64)[:, ROOT_BODY_COL]).max())
+            root_quat_dev = float(np.abs(
+                np.asarray(out["body_quat_w"], np.float64)[:, ROOT_BODY_COL]
+                - np.asarray(data["body_quat_w"], np.float64)[:, ROOT_BODY_COL]).max())
+            if root_pos_dev > 1e-6 or root_quat_dev > 1e-6:
+                raise SystemExit(f"root pose drifted (pos {root_pos_dev:.2e} m, quat "
+                                 f"{root_quat_dev:.2e}) — root 冻结被破坏,拒绝出 manifest")
+            proofs = dict(
+                contact_row_bitwise=bool(np.array_equal(jp_out[c], jp_src[c])),
+                lock_window_bitwise=bool(np.array_equal(jp_out[info["s1"]:], jp_src[info["s1"]:])),
+                follow_through_bitwise=bool(np.array_equal(jp_out[c:], jp_src[c:])),
+                legs_bitwise=bool(np.array_equal(jp_out[:, leg_cols], jp_src[:, leg_cols])),
+                ready_pose_bitwise=bool(np.array_equal(jp_out[0], jp_src[0])),
+                non_selected_joints_bitwise=bool(np.array_equal(jp_out[:, non_sel],
+                                                                jp_src[:, non_sel])),
+                root_pos_max_dev_m=root_pos_dev, root_quat_max_dev=root_quat_dev,
+                v_star_src_mps=round(v_star, 4), v_star_out_mps=round(v_star_out, 4),
+                v_star_dev_frac=round(abs(v_star_out - v_star) / v_star, 8),
+                face_normal_contact_dot=round(face_dot, 8))
+            a_max, a_max_source = resolve_a_max(args.a_max, v_star, L_src_stored)
+            manifest = build_scale_manifest(
+                scale=scale, input_path=args.input, output_path=args.output,
+                src_sha256=sha256_of_file(args.input), out_sha256=sha256_of_file(args.output),
+                phase=args.phase, contact_frame_idx=c, fps=fps, frames=jp_src.shape[0],
+                L_src_m=L_src_stored, L_out_m=L_out_npz,
+                v_star_src_mps=v_star, v_star_out_mps=v_star_out, proofs=proofs,
+                kappa=args.kappa, v_start_mps=args.v_start, a_max_mps2=a_max,
+                a_max_source=a_max_source,
+                ratio_fk=info["L_deep_out_fk"] / info["L_deep_src_fk"],
+                joints_used=info["joints_used"])
+        except SystemExit:
+            if os.path.exists(args.output):
+                os.unlink(args.output)      # fail-closed:manifest 出不了,资产一并作废
+            raise
+        mpath = args.manifest or (args.output + ".manifest.json")
+        with open(mpath, "w") as fh:
+            json.dump(manifest, fh, indent=2, default=float)
 
     oracle_src = oracle_out = None
     if args.oracle:

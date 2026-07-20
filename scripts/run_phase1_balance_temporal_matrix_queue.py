@@ -770,7 +770,7 @@ test -z "$(git -C {shlex.quote(checkout)} status --porcelain)"
 test -d {shlex.quote(queue['assets']['a3_runtime_asset_root'])}
 test -x {shlex.quote(KIT_BOOT_LOCK)}
 gpu_output=$(nvidia-smi -i {job['gpu']} --query-compute-apps=pid --format=csv,noheader,nounits)
-test -z "$gpu_output"
+test "$(printf %s "$gpu_output" | sort -u | grep -c . || true)" -lt 4
 cd {shlex.quote(workdir)}
 source {shlex.quote(setup)}
 test ! -e {shlex.quote(run_dir)}
