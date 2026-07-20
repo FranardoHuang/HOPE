@@ -75,13 +75,19 @@
   `b3437c87…f49c`、`edc4782f…ce8`、`b7f981c8…8815`、`ad5c46a7…6268`、`c2d6c31b…26f`。事后
   Pod1 v7 只有 `probes/w_n`、Pod2 v7 root 不存在；`03:49:31–03:49:33Z` 两轮 closure 均见六张 GPU、
   相关进程和 Kit/cache lock holder 全空。这是 pre-RewardManager infrastructure 失败，不是 Reward 结果；
-  v7 immutable、禁止重试。当前 [probe9 替换批](DEFINITIONS.md#balance-probe-generations) 已
-  preregistered / manifest-bound / not launched，使用 fresh v8 root 与
-  `phase1_balance_slew_probe9_{w_n,w_c,w_h,v_c,v_n,v_h}_seed3_20260720`；config/runner 为
-  `c7ec75a9…37d5` / `24b5f783…db1`，manifest content/file 为 `97c36e47…7e28` / `688599c2…5353`。
-  唯一顺序是 W-N Pod1 GPU0→receipt+closure→W-C Pod1 GPU1→receipt+closure→W-H→V-C→V-N→V-H，
-  后四格逐格串行；任一失败冻结后续。六份同代 receipt 齐全前不得生成科学长训，train 保持 W-N/W-C
-  GPU swap；运行 authority 只来自合入后的 `origin/main` NOW 条目。详见
+  v7 immutable、禁止重试。[probe9 替换批](DEFINITIONS.md#balance-probe-generations) 已在
+  `2026-07-20T04:14:32Z–04:22:42Z` 严格按 W-N Pod1 GPU0→closure→W-C Pod1 GPU1→closure→W-H→V-C
+  →V-N→V-H 完成；六格均 natural exit=`0`、normal=`true`、first iteration=`true`、exact verifier passed，
+  且每格 closure 后才启动下一格。receipt file/content 为 W-N `ee8c5378…8c5ff` / `afce94d7…80f9`、W-C
+  `b948a4d8…18d5` / `e5daf19c…d3f0`、W-H `a80502c9…8111` / `32abf562…7e68`、V-C
+  `c3db6c38…edc1` / `ae30d1b5…3446`、V-N `06919a60…4bc7` / `bc99acd0…979c`、V-H
+  `b7a24015…1ec2` / `0905ad8f…32a7`，共同 verifier=`d736a205…0ebc`。本地 receipt-set 重验通过，
+  SHA-256=`cc9ff5910992c46b9020654a78d8473ceb376bb5d9dc4adc984b90f454b3d9c8`；当前六张 GPU、相关进程和
+  locks 全空。W-N GPU0/W-C GPU1 通过不证明 GPU 等价，也不抹掉 probe7/8。same-swapped 科学长训在
+  `origin/main=16263be5` 的合入前历史 render 为 `/tmp/phase1_balance_slew_train_commands.json`，SHA-256=
+  `fc6f1ea38a5a823016d83675d56fc41b50b70dbde1bba60602b26d6c743802df`；它未执行 SSH，本文档合入后
+  authority 过期，禁止执行，须在最新 `origin/main` 重新 render 并审计。结果仍 inconclusive / not
+  adopted。运行 authority 只来自合入后的 `origin/main` NOW 条目。详见
   [Wave A 实验](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md)。
 
 ## 2026-07-19

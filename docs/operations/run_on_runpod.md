@@ -251,9 +251,9 @@ rc `125` 结束；随后 exact groups、Pod1 GPU1、Kit/cache locks 全部闭合
 `4552fe23abd551d8959a9de05cc5f9d761d0da25eed88138d61fa45cc6558e9e` /
 `6e3518d97d48fad550e7971a5178b1f11c15895696f03d30d5a62d1e27741640` 冻结为历史，禁止重试、补写或混用。
 
-probe8 的 v7 只发射了 W-N。`2026-07-20T03:44:13Z`，它在 Pod1 物理 GPU1 到达
-`Starting the simulation`（`sim.reset()` 边界）后因 `malloc(): invalid size (unsorted)` 触发
-`SIGABRT`；trainer terminal status 记录 exit `-6`，外层 transaction 返回 rc `134`。它没有 first
+probe8 的 v7 只发射了 W-N。它在 `2026-07-20T03:44:19.857Z` 于 Pod1 物理 GPU1 到达
+`Starting the simulation`（`sim.reset()` 边界），随后因 `malloc(): invalid size (unsorted)` 触发
+`SIGABRT`，并于 `03:44:32.112Z` 结束；trainer terminal status 记录 exit `-6`，外层 transaction 返回 rc `134`。它没有 first
 iteration、trainer binding、terminal checkpoint 或 receipt，其余 W-C/W-H/V-C/V-N/V-H 五格从未发射。
 失败后 exact leader/child 均 absent、Pod1 全部 GPU 无 compute context、Kit/cache lock 无 holder；可访问的
 系统日志与 telemetry 快照未见 Xid/OOM。v7 根 `/workspace/codexschema/phase1_balance_action_slew_v7_20260720`、失败证据与
@@ -265,16 +265,16 @@ config/runner 和 manifest 文件/content SHA-256
 namespace 重发或与后续收据混用。closure 闭合不是重试授权，该失败也不是 N 机制负例。
 旧 manifest `d7e95130…a2e47`、`2d3e7955…3bae17`、`283fd002…1eefe` 及 v1/v2/v3 输出根也只作不可变历史。
 
-当前 probe9（第九次同类非科学合同探针）已预登记并绑定 manifest，但尚未发射。fresh no-clobber
+probe9（第九次同类非科学合同探针）已在绑定 manifest 下严格串行完成 6/6，不再是待发射工作。fresh no-clobber
 根为 `/workspace/codexschema/phase1_balance_action_slew_v8_20260720`，run name 固定为
 `phase1_balance_slew_probe9_{job}_seed3_20260720`。queue config/runner bytes SHA-256 分别是
 `c7ec75a9917b8bdcf7976186633b021c69fb82e591898dad6b8d5c93cfdb37d5` /
-`24b5f7831ad49c2b88266fed65c37e6e4bcdddaacab28ffa917fce66ef918db1`；当前
+`24b5f7831ad49c2b88266fed65c37e6e4bcdddaacab28ffa917fce66ef918db1`；其
 [`launch manifest`](../DEFINITIONS.md#balance-launch-manifest)
 [`phase1_balance_action_slew_launch_manifest_20260720.json`](../../configs/phase1_balance_action_slew_launch_manifest_20260720.json)
 文件 SHA-256=`688599c2e01653bbb703553223a58e53656da1fe83d76aa7bcaa9f8a3ee75353`，content SHA-256=
-`97c36e471fb8fc6b93fe212f20846de6697db518192e7a45c6618e5924947e28`。清单存在只授权命令渲染；每台
-真实发射前仍须由 remote preflight 对 exact 路径重算全部哈希、tree/count/bytes、source clean HEAD 与 GPU。
+`97c36e471fb8fc6b93fe212f20846de6697db518192e7a45c6618e5924947e28`。清单存在当时只授权命令渲染；每格
+真实发射前都由 remote preflight 对 exact 路径重算全部哈希、tree/count/bytes、source clean HEAD 与 GPU。
 
 probe9 supervisor 在 `Popen` 后、首次 `/proc` 读取前先不可覆盖地发布 `trainer_child_evidence.json`，
 再只跟踪其中同一个 child PID，最多等 `5 s`、每 `10 ms` 重读一次。每次 identity
@@ -283,6 +283,17 @@ sample 都在读 cmdline 和 `getpgid` 前后双读 `/proc/<pid>/stat`，解析 
 exact PGID、starttime 改变，或超时前始终没有出现 exact trainer argv 都 fail closed。缺失中的 `/proc` 可
 重试，但不会放宽到“相似命令”。identity 失败还会用 no-clobber 方式持久化 child PID、expected PGID、
 first starttime、最后一次 sanitised identity 与失败原因到 `trainer_identity_failure.json`。
+
+probe9 按 W-N→W-C→W-H→V-C→V-N→V-H 全局严格串行完成；六格均 natural exit，且每格都在
+下一格前通过 verifier、不可覆盖 receipt 和 exact process/GPU/lock closure。六份 receipt 文件 SHA-256 为：
+W-N `ee8c53780d6bb5f0ce5b0c31032cd8c336bfb63f922ff54b5c7d86fe5788c5ff`，
+W-C `b948a4d8c701263a7805768ca7821b4257b07f008500e2aac7a5a237415018d5`，
+W-H `a80502c9d9968601e844cc475ec287181d51821c88dc5a1c6728a621943a8111`，
+V-C `c3db6c38446028dafe6a95455a65d0a2c12e9ab488be72fcf57546012f10edc1`，
+V-N `06919a60dea539dda46357db39867f73cf9d4b019ab5313b72076d786e974bc7`，
+V-H `b7a24015cc939cd19054be0710b5eead2dfb9954a8d4a9e8669b8980bdeb1ec2`。六格共用 verifier program SHA-256
+`d736a205b10f1a68375df4fc51af0df547d1c0cf8096e8fa1d1867dabf590ebc`；本地 fresh v8 receipt set 重验通过，set
+SHA-256=`cc9ff5910992c46b9020654a78d8473ceb376bb5d9dc4adc984b90f454b3d9c8`。
 
 launcher 与 state/marker/binding/fatal postcheck 被包进同一 transaction；任一格 transaction 非零都必须
 停止**整批**，即使自动失败审计证明进程组已空，也不能接着点下一格。自动审计
@@ -314,8 +325,8 @@ fi
 这不授权删除任何其他 cache、run directory、checkpoint 或日志。若进程/lock 所有权不清，停止而不是用
 `pkill`、`killall` 或模式匹配清场。
 
-本轮 [`W/V × C/N/H`](../DEFINITIONS.md#balance-action-slew-matrix) queue 默认 **NO-LAUNCH**。先在 clean
-本地 checkout 验证计划；远端训练 checkout 必须是 clean detached
+以下是 probe9 [`W/V × C/N/H`](../DEFINITIONS.md#balance-action-slew-matrix) 已完成的历史渲染流程；
+probe9/v8 已冻结，不得重新执行这些 probe 命令。当时远端训练 checkout 为 clean detached
 `54c9a62656f0e60e5bb41cbcfa0e5a972b793906`：
 
 ```bash
@@ -367,17 +378,10 @@ python3 scripts/run_phase1_balance_action_slew_queue.py \
   > /tmp/phase1_balance_slew_probe9_commands.json
 ```
 
-以上 `origin/main` 四道门任一失败时，只能保留计划 JSON，禁止执行 SSH。不要把 JSON 整体 pipe 给 shell。
-probe9 使用 swap mapping：W-N 在 Pod1 物理 GPU0、W-C 在 Pod1 物理 GPU1、W-H 在 Pod1 物理
-GPU2，V-C/V-N/V-H 在 Pod2 物理 GPU0/1/2。本轮探针必须全局串行，不得在两 Pod 之间重叠
-boot 或 trainer：先且只执行 `/tmp/phase1_balance_slew_probe9_commands.json` 中 `job_id=w_n` 的
-`jobs[].launch_command`。W-N 必须自然退出、由同一 job 的 `probe_verifier_command` 发布 exact receipt，并完成
-leader/child groups、Pod1 GPU0、Kit/cache locks 的 exact closure。全部通过后才能以同样流程发射 W-C 到
-Pod1 GPU1；W-C 的 verifier/receipt/closure 全部通过后，才按 W-H→V-C→V-N→V-H 的固定顺序逐格
-发射。每格都必须在下一格前完成自然退出、verifier、receipt 和 closure。任意一格失败或命中固定
-`180 s` watchdog，立即冻结整个 v8；不发射后续格、不在同 namespace 重试、不放宽 timeout。
-每条都要保留 `.launch` sidecar 并核对 PID、PGID、leader starttime、argv、source
-HEAD=`54c9a62656f0e60e5bb41cbcfa0e5a972b793906`、物理 GPU、first iteration 和 fatal scan。
+实际 probe9 执行时，`origin/main` 四道门均通过，且没有把 JSON 整体 pipe 给 shell。它使用 swap mapping：
+W-N/W-C/W-H 在 Pod1 物理 GPU0/1/2，V-C/V-N/V-H 在 Pod2 物理 GPU0/1/2，并按
+W-N→W-C→W-H→V-C→V-N→V-H 全局串行。每条均保留 `.launch` sidecar，并核对 PID、PGID、leader
+starttime、argv、source HEAD=`54c9a62656f0e60e5bb41cbcfa0e5a972b793906`、物理 GPU、first iteration 和 fatal scan。
 
 probe 必须自然退出到 absolute milestone `[6701]` 的 `model_6701.pt`（exclusive iteration upper
 bound=`6702`）。退出后逐条执行原 JSON 的 `jobs[].probe_verifier_command`；它会在确认 policy/value/full
@@ -388,15 +392,15 @@ recovery-eligible 允许单个 update 为零但两步合计必须非零；proces
 无 fatal、leader/PGID/GPU 均释放后，向 `jobs[].probe_receipt_remote_path` 不可覆盖地写收据。不能套用
 fresh-probe 相对 milestone `[1]`。将六份收据逐字节复制成本地
 [`probe receipt set`](../DEFINITIONS.md#balance-probe-receipt-set)，exact 布局为
-`$BALANCE_PROBE_RECEIPTS_DIR/{w_c,w_n,w_h,v_c,v_n,v_h}/probe_receipt.json`；probe9 的当前目录固定为
+`$BALANCE_PROBE_RECEIPTS_DIR/{w_c,w_n,w_h,v_c,v_n,v_h}/probe_receipt.json`；probe9 的历史 exact 目录固定为
 `/tmp/phase1_balance_action_slew_probe_receipts_20260720_v8`。
 该本地目录只对 trusted operator 开放写权；内容寻址和多重 SHA 绑定用于防止下载损坏、
 旧收据混入和配置漂移，不是抵御恶意本地 root 的数字签名；详见
 [`receipt trusted-operator boundary`](../DEFINITIONS.md#balance-receipt-trust-boundary)。操作者必须从远端
 `jobs[].probe_receipt_remote_path` 逐字节复制 verifier 生成的 exact bytes，不得手写或“修复”收据。
 
-没有 `--probe-approved` 人工捷径。只有当前 probe9 manifest 下六份 fresh v8 收据全部通过本地重验，才允许
-生成 `+200/+500/+1000` 科学 continuation 命令；probe5 的五份 v4 收据、probe6 的 v5 失败记录、probe7
+没有 `--probe-approved` 人工捷径。probe9 manifest 下六份 fresh v8 收据已全部通过本地重验，因而已解锁
+`+200/+500/+1000` 科学 continuation 命令渲染；probe5 的五份 v4 收据、probe6 的 v5 失败记录、probe7
 的三份 v6 收据与 probe8 的 v7 失败证据都不能补齐 v8，也不能和任一 probe9 receipt 组合。脚本仍只生成
 命令，不执行：
 
@@ -438,14 +442,21 @@ python3 scripts/run_phase1_balance_action_slew_queue.py \
   > /tmp/phase1_balance_slew_train_commands.json
 ```
 
-科学 train 仍保持 probe9 的 swap mapping：W-N 在 Pod1 物理 GPU0、W-C 在 Pod1 物理 GPU1，
-W-H 在 Pod1 物理 GPU2；不得在切到 train 时悄然恢复旧 C/N GPU 映射。
+上述命令曾在 `origin/main=16263be5` 渲染 `/tmp/phase1_balance_slew_train_commands.json`，文件 SHA-256=
+`fc6f1ea38a5a823016d83675d56fc41b50b70dbde1bba60602b26d6c743802df`；它是未执行 SSH 的合入前历史制品。
+本运行态更新进入 `main` 后，旧 JSON 的 commit/NOW authority 过期，禁止执行；必须在最新
+`origin/main` 重新 render 并审计。六格长训尚未启动。不得把新 JSON 整体 pipe 给 shell；必须从重新审计的
+制品逐条取 `ssh_argv` 执行。
 
-每个 child 都显式使用
+最新 `main` 重渲染和审计通过后，六格长训每格是 `1001` updates，里程碑为 `+200/+500/+1000`。swap mapping 保持不变：
+W-N/W-C/W-H 在 Pod1 物理 GPU0/1/2，V-C/V-N/V-H 在 Pod2 物理 GPU0/1/2。每个 Pod 内 Kit boot 必须串行，
+两 Pod 的新 boot 继续错峰；只有前一条进入真实 `Learning iteration` 且 boot lock 释放后才启动该 Pod
+下一条。六条完成 boot 后允许并行训练，并应保持六张 GPU 满载。每个 child 都显式使用
 [`checkpoint_allow_contract_mismatch=true`](../DEFINITIONS.md#checkpoint-contract-mismatch)，所以只作
 diagnostic、永久 formal-ineligible。queue 不生成 stop 命令、没有 automatic retry；若后续人工决定停止，
 必须先保全 checkpoint/log，再按本页“已登记 Phase-1 实验臂的算力释放”重验 exact 数值 PGID，先 TERM、
-条件满足才 KILL。详细科学量尺见
+条件满足才 KILL；任意 launch 失败都停止新发射、先闭合 exact 身份/GPU/lock 证据，禁止 broad signal。
+详细科学量尺见
 [实验记录](../experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md)。
 
 ## Hard Rules (summary — full list in the pod README)

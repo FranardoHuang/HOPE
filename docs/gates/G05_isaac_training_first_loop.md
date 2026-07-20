@@ -129,23 +129,35 @@ Follow-up note (2026-07-20, W/Y export mechanics pass but exact lineage blocks p
   process groups, assigned GPUs and Kit/cache locks closed on both Pods. Because the abort preceded managers and
   RewardManager construction, this is infrastructure-only evidence, not an N-mechanism or Reward result. The v7
   root and manifest are immutable: no retry, completion or cross-generation receipt mixing is allowed.
-- Probe9 (the ninth non-scientific contract-probe attempt) is preregistered and manifest-bound but not launched.
+- Probe9 (the ninth non-scientific contract-probe attempt) completed from `2026-07-20T04:14:32Z` through
+  `04:22:42Z`.
   Its fresh no-clobber root is `/workspace/codexschema/phase1_balance_action_slew_v8_20260720`, with run names
   `phase1_balance_slew_probe9_{w_n,w_c,w_h,v_c,v_n,v_h}_seed3_20260720`. Config/runner SHA-256 values are
   `c7ec75a9917b8bdcf7976186633b021c69fb82e591898dad6b8d5c93cfdb37d5` /
   `24b5f7831ad49c2b88266fed65c37e6e4bcdddaacab28ffa917fce66ef918db1`; manifest content/file SHA-256 values are
   `97c36e471fb8fc6b93fe212f20846de6697db518192e7a45c6618e5924947e28` /
   `688599c2e01653bbb703553223a58e53656da1fe83d76aa7bcaa9f8a3ee75353`. Its first two cells form a crossover gate
-  inside the same full six-cell identity: launch only
-  W-N on Pod1 GPU0 first; only after natural exit, exact receipt and process/GPU/lock closure may W-C launch on
-  Pod1 GPU1. Only if both pass may W-H, V-C, V-N and V-H run globally serially. Any failure freezes v8 and forbids
-  every later cell. Scientific train rendering still requires all six current receipts and preserves the swapped
-  W-N/GPU0 and W-C/GPU1 assignment; it may not switch back after the probe.
-- The crossover has a narrow interpretation boundary. W-N/GPU0 pass plus W-C/GPU1 fail strengthens an association
-  with the Pod1-GPU1/full-scene boot path, but does not prove that GPU1 caused the failure or is permanently bad:
-  recipe, launch order, cache state and allocator randomness remain confounded. If both pass, that proves only that
-  the exact probe9 swapped mapping completed one fresh reset and two-update verifier; it neither erases probe7/8
-  nor proves GPU equivalence or any action-slew benefit. The experiment remains inconclusive and not adopted.
+  inside the same full six-cell identity. The runtime followed the frozen order exactly: W-N on Pod1 GPU0 exited
+  naturally, published its exact receipt and closed process/GPU/locks before W-C launched on Pod1 GPU1; after the
+  same W-C closure, W-H, V-C, V-N and V-H ran globally serially. All six returned natural exit `0`,
+  `normal_exit=true`, crossed the first iteration, passed the exact verifier and closed before the next cell.
+  Receipt file/content SHA-256 values are W-N `ee8c5378…8c5ff` / `afce94d7…80f9`, W-C
+  `b948a4d8…18d5` / `e5daf19c…d3f0`, W-H `a80502c9…8111` / `32abf562…7e68`, V-C
+  `c3db6c38…edc1` / `ae30d1b5…3446`, V-N `06919a60…4bc7` / `bc99acd0…979c`, and V-H
+  `b7a24015…1ec2` / `0905ad8f…32a7`; their common verifier SHA-256 is `d736a205…0ebc`.
+- The six copied receipts passed local validation under the same manifest, with receipt-set SHA-256
+  `cc9ff5910992c46b9020654a78d8473ceb376bb5d9dc4adc984b90f454b3d9c8`. The crossover has a narrow
+  interpretation boundary: the two passes exclude only deterministic failure of W-N on GPU0 and W-C on GPU1.
+  They neither erase probe7/8 nor prove GPU equivalence or any action-slew benefit. This remains a non-scientific
+  qualification probe.
+- The verified receipt set unlocked command generation for the same-swapped scientific training mapping. The
+  pre-main command-generation-only artifact `/tmp/phase1_balance_slew_train_commands.json`, rendered against
+  `origin/main=16263be5`, has SHA-256
+  `fc6f1ea38a5a823016d83675d56fc41b50b70dbde1bba60602b26d6c743802df`; it never executed SSH. This runtime-doc
+  commit invalidates that artifact's commit/NOW authority, so it must not be launched. A fresh render and review
+  against the then-current `origin/main` is required. That render must preserve W-N/GPU0 and W-C/GPU1, `1001`
+  updates per cell and the preregistered `+200/+500/+1000` milestones. No trainer has launched; the experiment
+  remains inconclusive and not adopted until scientific results exist.
 - Reproducible probe9 command-render gate (it emits JSON but does not SSH or start a trainer):
 
   ```bash
@@ -164,10 +176,10 @@ Follow-up note (2026-07-20, W/Y export mechanics pass but exact lineage blocks p
   ```
 
   Inputs are a clean current-main authority checkout, the manifest above and its manifest-bound remote assets and
-  parents. The output is a six-job command plan; each executed probe can only publish its own immutable
-  `probe_receipt.json` after the terminal-checkpoint and ledger verifier passes. Scientific train command rendering
-  remains blocked until all six receipts come from this same current manifest. No long-run mechanism result has been
-  accepted, and G05 remains `Partial`.
+  parents. The output is the historical six-job command plan used above; each probe published its own immutable
+  `probe_receipt.json` only after the terminal-checkpoint and ledger verifier passed. All six current-manifest
+  receipts are now present and locally validated, so train command rendering is ready and completed, but execution
+  has not started. No long-run mechanism result has been accepted, and G05 remains `Partial`.
 
 Follow-up note (2026-07-20, recent Jiayi/Yikang branches audited; no branch-wide merge or behavior promotion):
 

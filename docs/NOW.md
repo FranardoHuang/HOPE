@@ -72,10 +72,14 @@ rc=`125`，事后组/GPU1/locks 全空。V-N 在 W-N 失败被确认前 6 s 已�
 Learning iteration、binding 或 receipt，其余五格未发。事后 Pod1 v7 只有 `probes/w_n`，Pod2 v7 root
 不存在；`03:49:31–03:49:33Z` 两轮 closure 均确认六张 GPU、相关进程与 Kit/cache lock holder 全空。
 这是进入 RewardManager/机制比较前的基础设施失败，不是 C/N/H Reward 结果；v7 永久 immutable、禁止重试或
-混收据。当前 [probe9 替换批](DEFINITIONS.md#balance-probe-generations) 已在 fresh v8 root 预注册并绑定
-manifest，但尚未发射：严格串行为 W-N（Pod1 GPU0）→receipt+closure→W-C（Pod1 GPU1）
-→receipt+closure→W-H→V-C→V-N→V-H；任一失败都冻结整批。只有同一 probe9 manifest identity 的六份
-fresh receipt 齐全才能生成科学长训命令，且长训保持 W-N/W-C 的 GPU swap；所有旧 manifest/目录禁止重用。
+混收据。[probe9 替换批](DEFINITIONS.md#balance-probe-generations) 已于
+`2026-07-20T04:14:32Z–04:22:42Z` 在 fresh v8 root 严格按 W-N（Pod1 GPU0）→closure→W-C（Pod1
+GPU1）→closure→W-H→V-C→V-N→V-H 完成六格，每格都在下一格前 natural exit=`0`、normal=`true`、
+看到首个 iteration、通过 exact verifier 并闭合进程/GPU/locks。六份同代 receipt 的本地重验已通过，
+receipt-set SHA-256 为 `cc9ff5910992c46b9020654a78d8473ceb376bb5d9dc4adc984b90f454b3d9c8`；
+科学长训只有未执行的合入前历史 render，本 NOW 进入 `main` 后必须保持 W-N/W-C GPU swap 重渲染并审计。W-N 在 GPU0 与 W-C 在 GPU1 都通过只排除
+“该格在该卡必然失败”，不证明 GPU 等价，也不抹掉 probe7/8 的历史。六格科学结果仍未知、未采用；
+所有旧 manifest/目录禁止重用。
 Wave B 的 M0 左右 moving teacher 已因 stance `0/4` 被 input gate 拒绝；当前只允许审计
 upper-only matched control 对静态 v4rg 下半身模仿或 non-demo stability constraint，exact flags/矩阵仍待
 源码审计，不得猜写。
@@ -894,18 +898,31 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
   `probes/w_n`，Pod2 v7 root 不存在；`03:49:31–03:49:33Z` 两轮 closure 均确认 exact PID/PGID、所有
   probe8/v7 argv、六张 GPU compute context 与 Kit/cache lock holder 全空。故 probe8 是
   **pre-RewardManager infrastructure** 失败，不是 C/N/H 机制结果；v7 immutable，禁止重试、补格或混收据。
-  当前 [probe9 替换批](DEFINITIONS.md#balance-probe-generations) 已 preregistered / manifest-bound / not
-  launched：fresh no-clobber root 为 `/workspace/codexschema/phase1_balance_action_slew_v8_20260720`，六个
+  [probe9 替换批](DEFINITIONS.md#balance-probe-generations) 使用 fresh no-clobber root
+  `/workspace/codexschema/phase1_balance_action_slew_v8_20260720`，六个
   `run_name` 为 `phase1_balance_slew_probe9_{w_n,w_c,w_h,v_c,v_n,v_h}_seed3_20260720`（第九版六格零训练
   合同探针）。config/runner SHA-256 为
   `c7ec75a9917b8bdcf7976186633b021c69fb82e591898dad6b8d5c93cfdb37d5` /
   `24b5f7831ad49c2b88266fed65c37e6e4bcdddaacab28ffa917fce66ef918db1`，manifest 内容/文件 SHA-256 为
   `97c36e471fb8fc6b93fe212f20846de6697db518192e7a45c6618e5924947e28` /
-  `688599c2e01653bbb703553223a58e53656da1fe83d76aa7bcaa9f8a3ee75353`。发射顺序严格为 W-N（Pod1
-  GPU0）→receipt+closure→W-C（Pod1 GPU1）→receipt+closure→W-H→V-C→V-N→V-H，后四格也逐格串行；
-  任一失败立即冻结，不启动后续。只有同一 probe9 manifest identity 的六份 fresh receipt 全部闭合后
-  才能生成科学长训命令；科学 train 保持 W-N/W-C 的 GPU swap，不得在 probe 后换回旧映射。
-  该条目只有进入 `origin/main` 后才构成运行 authority；六份收据闭合前仍不得发长训。两波都不能替代
+  `688599c2e01653bbb703553223a58e53656da1fe83d76aa7bcaa9f8a3ee75353`。该批已于
+  `2026-07-20T04:14:32Z–04:22:42Z` 严格按 W-N（Pod1 GPU0）→receipt+closure→W-C（Pod1
+  GPU1）→receipt+closure→W-H→V-C→V-N→V-H 逐格完成；每格都在下一格启动前 natural exit=`0`、
+  normal=`true`、first iteration=`true`、exact verifier passed，并完成进程/GPU/lock closure。六份 receipt
+  的 file/content SHA-256 分别为 W-N `ee8c5378…8c5ff` / `afce94d7…80f9`、W-C
+  `b948a4d8…18d5` / `e5daf19c…d3f0`、W-H `a80502c9…8111` / `32abf562…7e68`、V-C
+  `c3db6c38…edc1` / `ae30d1b5…3446`、V-N `06919a60…4bc7` / `bc99acd0…979c`、V-H
+  `b7a24015…1ec2` / `0905ad8f…32a7`；共同 verifier SHA-256 为 `d736a205…0ebc`。本地六收据集重验
+  succeeded，set SHA-256 为 `cc9ff5910992c46b9020654a78d8473ceb376bb5d9dc4adc984b90f454b3d9c8`。
+  当前两 Pod 六张 GPU、相关进程与 Kit/cache lock holder 全空。W-N GPU0 与 W-C GPU1 的成功只排除各自
+  在该卡必然失败，不证明 GPU 等价，也不覆盖 probe7/8 的 immutable 失败历史。
+  六格科学长训的 same-swapped mapping 已解锁命令生成。`origin/main=16263be5` 上曾渲染
+  `/tmp/phase1_balance_slew_train_commands.json`，SHA-256 为
+  `fc6f1ea38a5a823016d83675d56fc41b50b70dbde1bba60602b26d6c743802df`，但它从未执行 SSH；本 NOW
+  更新进入 `main` 后旧 commit/NOW authority 过期，禁止执行。发射前必须在最新 `origin/main`
+  重新 render 并审计。
+  probe receipt 不是科学结果；六格长训结果仍 inconclusive / not adopted。该条目只有进入 `origin/main`
+  后才构成运行 authority。两波都不能替代
   `T0/T1/T2` 连续恢复卷。[Wave A 实验](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md)
 - **[9｜P0] Hitter 实机 planner 时序与训练反应时间基线。** 责任人 yikang；执行者 Codex；分支
   `codex/hitter-lowerbody-mujoco-alignment`，基于 `hitter`。2026-07-16 用户将本轮顺序收敛为：

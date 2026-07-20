@@ -1191,8 +1191,8 @@ python3 scripts/run_phase1_balance_action_slew_queue.py --stage probe
 [`launch manifest`](../DEFINITIONS.md#balance-launch-manifest)：它必须绑定 exact source、当前 queue
 config/runner、A3 asset tree、`model.usd` 及完整 6-file sibling bundle tree、两份动作、题库、W/V checkpoint
 与 parent contract 的 SHA-256。只复制或只哈希 `model.usd` 会漏掉它依赖的 `configuration/`，必须拒绝。
-本轮 exact 文件为 `configs/phase1_balance_action_slew_launch_manifest_20260720.json`；当前 probe9（第九次、
-非科学两-update 合同探针）已预登记并绑定 manifest，但尚未发射。其文件 SHA-256 为
+本轮 exact 文件为 `configs/phase1_balance_action_slew_launch_manifest_20260720.json`；probe9（第九次、
+非科学两-update 合同探针）已在该 manifest 下严格串行完成 6/6，不再是待发射工作。其文件 SHA-256 为
 `688599c2e01653bbb703553223a58e53656da1fe83d76aa7bcaa9f8a3ee75353`，content SHA-256 为
 `97c36e471fb8fc6b93fe212f20846de6697db518192e7a45c6618e5924947e28`，所绑定的 config/runner SHA-256
 分别为 `c7ec75a9917b8bdcf7976186633b021c69fb82e591898dad6b8d5c93cfdb37d5` /
@@ -1240,9 +1240,9 @@ receipt、以及 config/runner 和 manifest 文件/content SHA-256
 `4552fe23abd551d8959a9de05cc5f9d761d0da25eed88138d61fa45cc6558e9e` /
 `6e3518d97d48fad550e7971a5178b1f11c15895696f03d30d5a62d1e27741640` 冻结为历史，禁止重试、补写或混用。
 
-probe8 的 v7 只发射了 W-N。`2026-07-20T03:44:13Z`，它在 Pod1 物理 GPU1 到达
-`Starting the simulation`（`sim.reset()` 边界）后因 `malloc(): invalid size (unsorted)` 触发
-`SIGABRT`；trainer terminal status 记录 exit `-6`，外层 transaction 返回 rc `134`。它没有 first
+probe8 的 v7 只发射了 W-N。它在 `2026-07-20T03:44:19.857Z` 于 Pod1 物理 GPU1 到达
+`Starting the simulation`（`sim.reset()` 边界），随后因 `malloc(): invalid size (unsorted)` 触发
+`SIGABRT`，并于 `03:44:32.112Z` 结束；trainer terminal status 记录 exit `-6`，外层 transaction 返回 rc `134`。它没有 first
 iteration、trainer binding、terminal checkpoint 或 receipt，其余 W-C/W-H/V-C/V-N/V-H 五格从未发射。
 失败后 exact leader/child 均 absent、Pod1 全部 GPU 无 compute context、Kit/cache lock 无 holder；可访问的
 系统日志与 telemetry 快照未见 Xid/OOM。closure 已闭合，但这不授权重试。v7 根
@@ -1253,7 +1253,7 @@ SHA-256 `0c84613f05439237f6e36d37e0c9210984465d928b9c0cba50999bd8995145f9` /
 `13f92d5eda71e90abd6a14a1498c2afd98d3cb825cb26e2f5b74958b5a795f84` 全部冻结为不可变历史，禁止补写、
 同 namespace 重发或与后续收据混用。该失败发生在 RewardManager/action reward 生效前，不是 N 机制负例。
 
-当前 probe9 尚未发射，使用 fresh no-clobber 根
+probe9 使用 fresh no-clobber 根
 `/workspace/codexschema/phase1_balance_action_slew_v8_20260720`，run name 固定为
 `phase1_balance_slew_probe9_{job}_seed3_20260720`，仍显式 override `algo.runner.num_steps_per_env=24`，要求
 processed-q-des/qdot observed 逐 update 精确为 `98304`，恢复资格只要求两步合计非零。其 supervisor 在
@@ -1261,7 +1261,18 @@ processed-q-des/qdot observed 逐 update 精确为 `98304`，恢复资格只要�
 `5 s`、每 `10 ms` 一次；每个 identity sample 双读 `/proc/<pid>/stat` 的 PID/PGRP/starttime tuple，
 并要求两次结果相同、PGRP 与 `getpgid` 相同。第一次可读 starttime 之后必须不变，所有可读身份必须保持
 exact supervisor PGID，且只接受 exact final trainer argv。identity 失败会 no-clobber 持久化最后身份摘要，
-任意身份读取异常也必须走该 failure path。只有本页当前 probe9 manifest 进入最新 `origin/main` 后才可发射。
+任意身份读取异常也必须走该 failure path。实际发射前该 manifest 已进入当时最新 `origin/main`。
+
+probe9 按 W-N→W-C→W-H→V-C→V-N→V-H 全局严格串行完成；六格均 natural exit，且每格都在
+下一格前通过 verifier、不可覆盖 receipt 和 exact process/GPU/lock closure。六份 receipt 文件 SHA-256 为：
+W-N `ee8c53780d6bb5f0ce5b0c31032cd8c336bfb63f922ff54b5c7d86fe5788c5ff`，
+W-C `b948a4d8c701263a7805768ca7821b4257b07f008500e2aac7a5a237415018d5`，
+W-H `a80502c9d9968601e844cc475ec287181d51821c88dc5a1c6728a621943a8111`，
+V-C `c3db6c38446028dafe6a95455a65d0a2c12e9ab488be72fcf57546012f10edc1`，
+V-N `06919a60dea539dda46357db39867f73cf9d4b019ab5313b72076d786e974bc7`，
+V-H `b7a24015cc939cd19054be0710b5eead2dfb9954a8d4a9e8669b8980bdeb1ec2`。六格共用 verifier program SHA-256
+`d736a205b10f1a68375df4fc51af0df547d1c0cf8096e8fa1d1867dabf590ebc`；本地 fresh v8 receipt set 重验通过，set
+SHA-256=`cc9ff5910992c46b9020654a78d8473ceb376bb5d9dc4adc984b90f454b3d9c8`。
 
 probe9 的 failure helper 只包裹 transaction，不再修改 transaction body bytes；multiline payload
 byte-equality regression 会对原始 payload 和嵌入 launcher 的 payload 做逐字节等值检查，防止 probe6 的
@@ -1276,8 +1287,8 @@ launch。即使自动审计返回空组，在继续前仍必须人工证明 exac
 compute context、`/workspace/.kit_boot.lock` holder 与 `/workspace/.cache/ov/_cache.lock` holder/orphan
 全部 absent；不得自动重跑或 broad kill。
 
-通过该复核后，[`--authorize-launch`](../DEFINITIONS.md#balance-command-render-latch)仍只允许**渲染**启动
-命令，不执行 SSH；runner 自身也会重复检查同一 `origin/main` authority，不能靠跳过本页绕过：
+以下是 probe9 已使用的历史命令渲染流程。[`--authorize-launch`](../DEFINITIONS.md#balance-command-render-latch)
+在这一步仍只渲染命令、不执行 SSH；probe9/v8 现已完成并冻结，不得重新执行下面的 probe 命令：
 
 ```bash
 set -euo pipefail
@@ -1315,17 +1326,11 @@ python3 scripts/run_phase1_balance_action_slew_queue.py \
   > /tmp/phase1_balance_slew_probe9_commands.json
 ```
 
-上面的 `origin/main` exact commit、统一队列认领、执行分支与 tracked manifest 四道门必须保持通过；否则
-只能保留默认 NO-LAUNCH plan，禁止渲染授权命令或执行 SSH。通过后，必须由操作者按
+实际 probe9 执行时，`origin/main` exact commit、统一队列认领、执行分支与 tracked manifest 四道门均通过，并由操作者按
 [RunPod 启动纪律](run_on_runpod.md#2026-07-20-action-slew-wave-a-启动前状态与发射纪律)
-执行。probe9 必须全局串行，不得在两 Pod 之间重叠 boot 或 trainer：先且只执行
-`/tmp/phase1_balance_slew_probe9_commands.json` 中 `job_id=w_n` 的 `jobs[].launch_command`，且 W-N 映射到
-Pod1 物理 GPU0。W-N 必须自然退出到 `model_6701.pt`，由同一 job 的
-`probe_verifier_command` 发布 exact receipt，再闭合 exact leader/child groups、GPU 与 Kit/cache locks。三项
-全部通过后才能以同样流程发射 W-C 到 Pod1 物理 GPU1；W-C 的 verifier/receipt/closure 全部通过后，
-才按 W-H→V-C→V-N→V-H 的固定顺序逐格发射，每一格都要在下一格前完成自然退出、verifier、receipt
-和 closure。任意一格失败或命中固定 `180 s` watchdog，立即冻结整个 v8；不发射后续格、不在同
-namespace 重试、不放宽 timeout。只有 verifier 才能在
+执行。实际执行严格遵守 W-N（Pod1 GPU0）→W-C（Pod1 GPU1）→W-H→V-C→V-N→V-H 全局
+串行；每格的 natural exit、verifier、receipt 和 closure 均在下一格之前完成，因而没有触发 v8 freeze。
+只有 verifier 才能在
 远端不可覆盖地发布 `probe_receipt.json`。把六份收据逐字节复制到任务专用本地目录
 `BALANCE_PROBE_RECEIPTS_DIR=/tmp/phase1_balance_action_slew_probe_receipts_20260720_v8`，布局必须是
 `DIR/{w_c,w_n,w_h,v_c,v_n,v_h}/probe_receipt.json`。
@@ -1339,7 +1344,7 @@ lineage=`0`、claim/binding，以及 6700/6701 两步的 processed-q_des、compl
 qdot tag 和守恒账；processed-q_des/qdot observed 必须逐 update 精确等于 `4096×24=98304`，
 processed-q_des recovery-eligible 可逐步为零但两步合计必须非零，其他预注册分母仍逐步非零。最后再
 检查 fatal、进程组和 GPU 释放。没有
-`--probe-approved` 人工捷径；train 只接受当前 probe9 manifest 下收齐的六份 fresh v8 exact 收据。probe5
+`--probe-approved` 人工捷径；train 只接受 probe9 manifest 下收齐的六份 fresh v8 exact 收据，本轮已全部通过本地重验。probe5
 的五份 v4 receipt、probe6 的 v5 失败记录、probe7 的三份 v6 receipt 和 probe8 的 v7 失败证据都不能补齐 v8 或与
 probe9 收据混用，并且脚本只生成命令：
 
@@ -1381,12 +1386,22 @@ python3 scripts/run_phase1_balance_action_slew_queue.py \
   > /tmp/phase1_balance_slew_train_commands.json
 ```
 
-禁止把输出 JSON 直接整体 pipe 给 shell；每个 Pod 同时只能 boot 一个 Kit，科学里程碑按
-`+200/+500/+1000` 判。完整接受门、六个唯一 `run_name` 与 Wave B 下半身老师预留见
+上述命令曾在 `origin/main=16263be5` 渲染 `/tmp/phase1_balance_slew_train_commands.json`，文件 SHA-256=
+`fc6f1ea38a5a823016d83675d56fc41b50b70dbde1bba60602b26d6c743802df`；它是未执行 SSH 的合入前历史制品。
+本运行态更新进入 `main` 后，旧 JSON 的 commit/NOW authority 过期，禁止执行；必须在最新
+`origin/main` 重新 render 并审计。六格长训尚未启动。禁止把新 JSON 整体 pipe 给 shell；必须从
+重新审计的 JSON 逐条取 `ssh_argv` 执行。
+
+最新 `main` 重渲染和审计通过后，六格长训每格都是 `1001` updates，科学里程碑固定为 `+200/+500/+1000`。科学 train
+保持 probe9 的 swap mapping：W-N/W-C/W-H 分别使用 Pod1 物理 GPU0/1/2，V-C/V-N/V-H 分别使用
+Pod2 物理 GPU0/1/2。每个 Pod 内 Kit boot 必须串行，两 Pod 的新 boot 继续错峰；只有前一条已进入真实
+`Learning iteration` 且 boot lock 释放后，才发射该 Pod 下一条。六条都完成 boot 后允许并行训练，并应
+保持六张 GPU 满载直到预登记里程碑或终止条件。无 automatic retry；任一启动失败都停止新发射并先闭合
+exact 身份/GPU/lock 证据。若需停止已运行格，只能按 `.launch`/leader evidence 重验 exact 数字 PGID、PID、
+starttime 和 argv 后先 TERM，条件满足才 KILL；禁止 broad signal。完整接受门、六个唯一 `run_name` 与 Wave B
+下半身老师预留见
 [实验记录](../experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md)。Wave B 尚无审过的 flag 或
 machine contract；M0 moving-teacher input gate 已 reject，不得从本节猜命令或把文件存在写成训练授权。
-科学 train 仍保持 probe9 的 swap mapping：W-N 在 Pod1 物理 GPU0、W-C 在 Pod1 物理 GPU1，
-W-H 在 Pod1 物理 GPU2；不得在从 probe 切到 train 时悄然恢复旧 C/N GPU 映射。
 
 ### 恢复/等待窗随机横向躯干推力（source 已接线，当前 `NO-LAUNCH`）
 
