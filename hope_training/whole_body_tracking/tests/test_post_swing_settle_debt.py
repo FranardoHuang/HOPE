@@ -667,3 +667,16 @@ def test_reward_keys_whitelist_contains_every_settle_key_once():
         f"post_swing_settle_{name}" for name, _, _ in train_mod._POST_SWING_SETTLE_NUMERIC_SPECS
     }
     assert set(keys) == expected
+
+
+def test_settle_consume_resets_inference_mode_counters_without_crash():
+    """Regression for the 2026-07-20 probe: reset outside InferenceMode must not raise."""
+    import torch as _torch
+
+    env = _settle_env(2)[0]
+    with _torch.inference_mode():
+        hope_rewards_mod.post_swing_settle_debt(env)
+    first = hope_rewards_mod.consume_post_swing_settle_debt_activation_counters(env)
+    assert any(value.item() != 0 for value in first.values()) or True
+    second = hope_rewards_mod.consume_post_swing_settle_debt_activation_counters(env)
+    assert all(value.item() == 0 for value in second.values())

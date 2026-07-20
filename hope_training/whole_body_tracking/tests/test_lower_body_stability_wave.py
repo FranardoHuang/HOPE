@@ -622,3 +622,16 @@ def test_schema3_wave_validator_rejects_wrong_set_or_mismatched_articulation():
             list(_A3_LIVE_BFS_ARTICULATION_ORDER),
             list(reversed(_A3_LIVE_BFS_ARTICULATION_ORDER)),
         )
+
+
+def test_consume_resets_inference_mode_counters_without_crash():
+    """Counters are created inside env.step (torch.inference_mode); the consume/reset
+    path runs at log time outside it and crashed on 2026-07-20 probe attempt 4."""
+    env, robot, motion, racket, age, same = _wave_env(2)
+    with torch.inference_mode():
+        hope_rewards_mod.lower_body_stability_bundle(env)
+        hope_rewards_mod.lower_body_pose_imitation(env)
+    first = hope_rewards_mod.consume_lower_body_wave_activation_counters(env)
+    assert first["bundle/observed_sample_count"].item() == 2
+    second = hope_rewards_mod.consume_lower_body_wave_activation_counters(env)
+    assert all(value.item() == 0 for value in second.values())

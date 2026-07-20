@@ -1738,7 +1738,9 @@ def consume_lower_body_wave_activation_counters(
         **{f"pose/{name}": value.detach().clone() for name, value in pose.items()},
         **{f"bundle/{name}": value.detach().clone() for name, value in bundle.items()},
     }
-    with torch.no_grad():
+    # inference_mode (not no_grad): the counters are inference tensors created inside
+    # env.step, and in-place resets outside InferenceMode are rejected by torch.
+    with torch.inference_mode():
         for value in (*pose.values(), *bundle.values()):
             value.zero_()
     return snapshot
@@ -2146,7 +2148,8 @@ def consume_post_swing_settle_debt_activation_counters(
     template = env.scene["robot"].data.root_pos_w[:, 0]
     state = _post_swing_settle_counter_state(env, template)
     snapshot = {name: value.detach().clone() for name, value in state.items()}
-    with torch.no_grad():
+    # inference_mode (not no_grad): see consume_lower_body_wave_activation_counters.
+    with torch.inference_mode():
         for value in state.values():
             value.zero_()
     return snapshot
