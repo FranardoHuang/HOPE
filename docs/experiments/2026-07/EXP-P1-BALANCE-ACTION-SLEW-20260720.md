@@ -1,7 +1,7 @@
 # EXP-P1-BALANCE-ACTION-SLEW-20260720 — 腿腰恢复期执行目标突变是否比全身 raw-action 平滑更适合乒乓
 
 - 状态：`ready`
-- 运行态：`probe2 W-C false reject；probe3 W-C/W-N/V-C natural exit but verifier contract rejected；probe4 W-C Hydra compose rejected before run-dir；probe5 manifest-bound / not launched`
+- 运行态：`probe2 W-C false reject；probe3 W-C/W-N/V-C verifier contract rejected；probe4 W-C Hydra compose rejected；probe5 five receipts passed / W-H pre-trainer identity reject；probe6 manifest-bound / not launched`
 - 阶段/轴：Phase 1 / 单拍后的平衡恢复与动作平滑
 - 集成小目标：降低高回台候选的摔倒与腿腰突变，同时不压低稳定候选的击球完成和回台
 - 人类负责人：Franco
@@ -73,8 +73,8 @@ completion、return 与 fall 有交叉取舍，不能据此把全局 `-0.05` 或
 硬门阻断；它必须绑定 source、queue 与全部远端输入的 SHA-256，其中 preconverted `model.usd` 还要连同
 依赖的完整 6-file sibling bundle 做 tree hash。当前冻结清单是
 [`phase1_balance_action_slew_launch_manifest_20260720.json`](../../../configs/phase1_balance_action_slew_launch_manifest_20260720.json)，
-文件 SHA-256=`6bfa73587968f8f0af71b5617e8c324f75114b304bbe1452d0b0e4617d1f51bc`、content
-SHA-256=`093a4cc7a0ce91aad74948ed39b581e5f4a0693ba114f3144062b6cc4386a462`。它只把 probe command
+文件 SHA-256=`718bbee0a556cc3640ee636e20f8eb2adb293cee8d0bb1820afceebf5ce1a267`、content
+SHA-256=`3cbb019e9d315abdc687d1635c9deffc13eae9577ee2d820b0e3c30ba9b7cfd8`。它只把 probe command
 从“缺清单”解锁为“可渲染”，不表示已经 SSH 或启动。train command 仍必须消费六份
 [`probe receipt`](../../DEFINITIONS.md#balance-probe-receipt-set)。
 
@@ -181,6 +181,31 @@ W-C 的**完整 exact argv**只运行 `--cfg job --resolve`，已得到 exit `0`
 `algo.runner.num_steps_per_env=24`、`cfg.algo` 顶层无死字段、`max_iterations=2`、run name 为
 `phase1_balance_slew_probe5_w_c_seed3_20260720`。这是零训练 compose 证据，不是 probe 已启动。
 
+### 2026-07-20 probe5 五收据与 W-H exec 身份竞态；probe6 修订
+
+probe5 在双 Pod 完成了 W-C/W-N/V-C/V-N/V-H：五格均 natural exit=`0`、normal exit=`true`，
+dedicated verifier 均通过，receipt content SHA 依次为 `8cd90351…8f62c`、`3480cc2d…148a2`、
+`c9a18fcf…58dd24`、`fb0c26df…075cd5`、`3ba6f291…3f91ba`。W-H 则在首个 training iteration 之前被
+supervisor 拒绝：旧实现在 `Popen(argv)` 后只读一次 `/proc/<child>/cmdline`，把 fork→exec 瞬间的
+暂时 argv 当成身份不一致。现场只有 50 B 错误日志与 launcher evidence；binding、terminal status、
+RSL run-dir、checkpoint 和 receipt 全部不存在。leader PID=PGID `2708248`已自然消失，
+双扫该 PGID members=`0`、GPU2=`0 MiB / 0% / no compute`、Kit lock 无 holder；未发任何 signal。
+这是启动身份采样竞态，不是 H 机制训练失败。同一 manifest 必须六收据齐全，因此五份旧收据
+不能解锁 train，也不能混入新 identity。
+
+probe6 在 `Popen` 后、首次 `/proc` 读取前先不可覆盖地保存 child PID；随后对同一 child 最多等待
+`5 s`、每 `10 ms` 复核。每次身份读取都要求两份 `/proc/stat` 的
+PID/PGID/starttime 完全一致并与 `getpgid` 相符，首个可读 starttime 后也必须始终不变；只有与
+supervisor 同 PGID 的 exact argv 出现才接受。early exit、PGID/starttime 漂移或
+timeout 会不可覆盖地写最后身份证据；所有身份读取异常也必须走该 failure path。外层把 launcher 与
+state/marker/binding/fatal postcheck 包进同一 transaction，任一失败后都两次稳定扫描 exact PGID 和 child
+PID，且用 `lstat`/`O_NOFOLLOW` 拒绝 dangling symlink 或非普通失败证据；只有都为空才返回原错误，
+否则 rc=`121` 要求人工身份审计。身份等待与外层审计本身都不发 signal；既有 locked launcher 的
+boot watchdog 仍只能按其原合同向已绑定 exact PGID 发信号。任何失败后
+仍须确认 exact PGID/child/GPU/locks 全空，否则停止全批。行为测试覆盖了 exec 过渡、瞬时 `/proc`
+absent、child exit、PGID 漂移、starttime 变化和 timeout。新 root 为
+`/workspace/codexschema/phase1_balance_action_slew_v5_20260720`，run name 使用 `probe6`。
+
 ## 预算、量尺与停止规则
 
 1. 六格先各跑 `4096 env × 24 step/env × 2 update` 的完整场景合同探针。每格必须自然退出到独立
@@ -260,7 +285,8 @@ band，仍因 no-narrowing 失败。manifest 顶层和每个结果
 | Wave A probe2 W-C | `natural exit / verifier rejected` | W `model_6700` / seed3 | E3 mechanics only | `model_6701.pt` 与两步 ledger；无 receipt | 首步 recovery 分母合法为零；不作机制结论，不重用旧目录 |
 | Wave A probe3 W-C/W-N/V-C | `natural exit / verifier contract rejected` | W/V `model_6700` / seed3 | E3 mechanics only | 三份 `model_6701.pt`；W-C 有旧 receipt，另两格无 receipt | verifier 未绑定 24-step rollout；全部不可解锁 train |
 | Wave A probe4 W-C | `Hydra compose rejected before run-dir` | W `model_6700` / seed3 | E1 fail-closed preflight | 无 run dir/log/checkpoint/receipt | 错误 Hydra key；未进 Kit、未占 GPU，不是机制结果 |
-| Wave A probe5 六格 | `manifest-bound / not launched` | W/V `model_6700` / seed3 | E1 source/queue/manifest | launch manifest `6bfa7358…1f51bc`；新 v4 namespace 尚无 runtime | exact 98304/update gate；diagnostic only |
+| Wave A probe5 六格 | `five verified receipts / W-H pre-trainer identity reject` | W/V `model_6700` / seed3 | E3 mechanics only | W-C/W-N/V-C/V-N/V-H receipts；W-H 无 binding/checkpoint/receipt | 五收据不能解锁；W-H 是 fork→exec 采样竞态，不是 H 负例 |
+| Wave A probe6 六格 | `manifest-bound / not launched` | W/V `model_6700` / seed3 | E1 source/queue/manifest | launch manifest `718bbee0…1a267`；新 v5 namespace 尚无 runtime | 有界 exec 身份等待 + 失败残留审计；diagnostic only |
 | Wave B 下半身 matched ablation | `design pending / M0 moving rejected` | 未冻结 | E2 input gate | M0 manifest `fdd60fcf…396e` | moving teacher no-launch；只继续静态 v4rg 或 non-demo constraint 设计 |
 
 ## 分动作成绩表
@@ -275,7 +301,7 @@ Wave A 是 single-swing continuation 诊断，不能声称完成 T0/T1/T2 连续
 
 ## 决定
 
-- 决定：`inconclusive`（probe2/3 只闭合 trainer mechanics；probe4 在 run-dir 前 fail closed；六格仍无可解锁收据）
+- 决定：`inconclusive`（probe5 五收据通过，W-H 在 trainer 前被身份竞态拒绝；仍无同 identity 六收据）
 - 是否已纳入当前 setting：`no`
 - 局限/下一个 gate：先过六格 2-update full-scene probe，再按里程碑购买 Wave A；Wave B 另行审计与预注册。
 

@@ -44,7 +44,7 @@ HYDRA_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 EXPECTED_QUEUE_ID = "phase1_balance_action_slew_20260720"
-EXPECTED_NAMESPACE = "/workspace/codexschema/phase1_balance_action_slew_v4_20260720"
+EXPECTED_NAMESPACE = "/workspace/codexschema/phase1_balance_action_slew_v5_20260720"
 EXPECTED_SOURCE = "/workspace/codexschema/nohope_balance_action_slew_20260720"
 EXPECTED_REMOTE_SOURCE_COMMIT = "54c9a62656f0e60e5bb41cbcfa0e5a972b793906"
 PARENT_ITERATION = 6700
@@ -1073,7 +1073,7 @@ def _stage_run_dir(queue: Mapping[str, Any], job: Mapping[str, Any], stage: str)
 def _stage_run_name(job: Mapping[str, Any], stage: str) -> str:
     if stage == "train":
         return str(job["run_name"])
-    return f"phase1_balance_slew_probe5_{job['id']}_seed3_20260720"
+    return f"phase1_balance_slew_probe6_{job['id']}_seed3_20260720"
 
 
 def _training_argv(
@@ -1348,6 +1348,7 @@ import re
 import stat
 import subprocess
 import sys
+import time
 
 if len(sys.argv) < 14 or sys.argv[12] != "--":
     raise SystemExit("probe supervisor requires bound metadata -- TRAIN_ARGV")
@@ -1408,17 +1409,88 @@ def proc_identity(pid):
     cmdline = (proc / "cmdline").read_bytes()
     pgid = os.getpgid(pid)
     stat_after = (proc / "stat").read_text(encoding="utf-8")
-    def starttime(value):
+    def identity(value):
         close = value.rfind(")")
+        if close < 0 or not value.startswith(f"{pid} ("):
+            raise SystemExit("process stat identity is malformed")
         fields = value[close + 2:].split()
-        if close < 0 or len(fields) <= 19 or not fields[19].isdigit():
-            raise SystemExit("process stat lacks starttime")
-        return int(fields[19])
-    before_start = starttime(stat_before)
-    if starttime(stat_after) != before_start:
+        if (
+            len(fields) <= 19
+            or not fields[2].isdigit()
+            or not fields[19].isdigit()
+        ):
+            raise SystemExit("process stat lacks pgrp/starttime")
+        return (pid, int(fields[2]), int(fields[19]))
+    before_identity = identity(stat_before)
+    after_identity = identity(stat_after)
+    if before_identity != after_identity or pgid != before_identity[1]:
         raise SystemExit("process identity changed while binding")
     process_argv = [part.decode("utf-8", "strict") for part in cmdline.split(b"\0") if part]
-    return {"pid": pid, "pgid": pgid, "starttime_ticks": before_start, "argv": process_argv}
+    return {
+        "pid": pid,
+        "pgid": before_identity[1],
+        "starttime_ticks": before_identity[2],
+        "argv": process_argv,
+    }
+def wait_for_trainer_identity(
+    child, expected_argv, expected_pgid, timeout_s=5.0, failure_path=None
+):
+    deadline = time.monotonic() + timeout_s
+    first_starttime = None
+    last_identity = None
+    def fail(reason):
+        if failure_path is not None:
+            sanitized = None
+            if last_identity is not None:
+                sanitized = {
+                    "pid": last_identity["pid"],
+                    "pgid": last_identity["pgid"],
+                    "starttime_ticks": last_identity["starttime_ticks"],
+                    "argv_sha256": hashlib.sha256(
+                        b"\0".join(part.encode("utf-8") for part in last_identity["argv"])
+                    ).hexdigest(),
+                }
+            content = {
+                "schema_version": 1,
+                "child_pid": child.pid,
+                "expected_pgid": expected_pgid,
+                "first_starttime_ticks": first_starttime,
+                "last_identity": sanitized,
+                "reason": reason,
+                "timeout_s": timeout_s,
+            }
+            document = {
+                "schema_version": 1,
+                "content": content,
+                "content_sha256": hashlib.sha256(canonical(content)).hexdigest(),
+            }
+            publish(failure_path, document, "probe trainer identity failure")
+        raise SystemExit(reason)
+    while True:
+        if child.poll() is not None:
+            fail("probe trainer exited before publishing exact identity")
+        try:
+            identity = proc_identity(child.pid)
+        except (FileNotFoundError, ProcessLookupError):
+            identity = None
+        except (Exception, SystemExit) as exc:
+            fail(
+                "probe trainer identity inspection failed: "
+                f"{type(exc).__name__}: {exc}"
+            )
+        if identity is not None:
+            last_identity = identity
+            if identity["pgid"] != expected_pgid:
+                fail("probe trainer process group differs from supervisor")
+            if first_starttime is None:
+                first_starttime = identity["starttime_ticks"]
+            elif identity["starttime_ticks"] != first_starttime:
+                fail("probe trainer PID was reused while waiting for exec")
+            if identity["argv"] == expected_argv:
+                return identity
+        if time.monotonic() >= deadline:
+            fail("probe trainer exact argv did not appear before exec timeout")
+        time.sleep(0.01)
 claim = load_document(claim_path, "probe queue claim")
 claim_digest = claim["content_sha256"]
 if claim.get("schema_version") != 2 or claim.get("training_argv") != argv:
@@ -1440,9 +1512,27 @@ supervisor = proc_identity(os.getpid())
 if supervisor["pid"] != supervisor["pgid"]:
     raise SystemExit("probe supervisor is not its process-group leader")
 child = subprocess.Popen(argv, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-trainer = proc_identity(child.pid)
-if trainer["pgid"] != supervisor["pgid"] or trainer["argv"] != argv:
-    raise SystemExit("probe trainer identity differs from claimed child")
+child_evidence_path = str(Path(run_dir) / "trainer_child_evidence.json")
+child_evidence_content = {
+    "schema_version": 1,
+    "child_pid": child.pid,
+    "expected_pgid": supervisor["pgid"],
+    "supervisor_pid": supervisor["pid"],
+    "supervisor_starttime_ticks": supervisor["starttime_ticks"],
+}
+publish(
+    child_evidence_path,
+    {
+        "schema_version": 1,
+        "content": child_evidence_content,
+        "content_sha256": hashlib.sha256(canonical(child_evidence_content)).hexdigest(),
+    },
+    "probe trainer child evidence",
+)
+identity_failure_path = str(Path(run_dir) / "trainer_identity_failure.json")
+trainer = wait_for_trainer_identity(
+    child, argv, supervisor["pgid"], failure_path=identity_failure_path
+)
 rsl_dir = None
 binding = None
 marker_observed = False
@@ -1622,6 +1712,171 @@ verify_tree(
     "preconverted A3 USD six-file bundle",
 )
 print("REMOTE_MANIFEST_PREFLIGHT_OK", flush=True)
+'''.strip()
+
+
+POST_LAUNCH_FAILURE_AUDIT_PROGRAM = r'''
+import hashlib
+import json
+import os
+from pathlib import Path
+import stat
+import sys
+import time
+
+evidence_path = Path(sys.argv[1])
+child_evidence_path = Path(sys.argv[2])
+identity_failure_path = Path(sys.argv[3])
+flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
+signature = lambda item: (item.st_dev, item.st_ino, item.st_mode, item.st_size, item.st_mtime_ns)
+def stable_bytes(path, label):
+    before = path.lstat()
+    if not stat.S_ISREG(before.st_mode):
+        raise SystemExit(f"{label} is not a regular file")
+    fd = os.open(path, flags)
+    try:
+        chunks = []
+        while True:
+            chunk = os.read(fd, 65536)
+            if not chunk:
+                break
+            chunks.append(chunk)
+        opened = os.fstat(fd)
+    finally:
+        os.close(fd)
+    after = path.lstat()
+    if signature(before) != signature(opened) or signature(before) != signature(after):
+        raise SystemExit(f"{label} changed while reading")
+    return b"".join(chunks)
+raw = stable_bytes(evidence_path, "launch leader evidence")
+value = json.loads(raw.decode("utf-8"))
+leader = value.get("leader", {})
+pid = int(leader.get("pid", 0))
+pgid = int(leader.get("pgid", 0))
+starttime = int(leader.get("starttime_ticks", 0))
+if value.get("schema_version") != 1 or value.get("kind") != "leader_identity":
+    raise SystemExit("launch leader evidence schema/kind mismatch")
+if pid <= 0 or pid != pgid or starttime <= 0:
+    raise SystemExit("launch leader evidence identity is invalid")
+child_raw = stable_bytes(child_evidence_path, "trainer child evidence")
+child_document = json.loads(child_raw.decode("utf-8"))
+canonical_child = json.dumps(
+    child_document, allow_nan=False, ensure_ascii=False,
+    separators=(",", ":"), sort_keys=True,
+).encode("utf-8") + b"\n"
+if child_raw != canonical_child:
+    raise SystemExit("trainer child evidence is not canonical JSON")
+child_content = child_document.get("content", {})
+expected_child_digest = hashlib.sha256(
+    json.dumps(
+        child_content, allow_nan=False, ensure_ascii=False,
+        separators=(",", ":"), sort_keys=True,
+    ).encode("utf-8")
+).hexdigest()
+if child_document.get("content_sha256") != expected_child_digest:
+    raise SystemExit("trainer child evidence digest mismatch")
+child_pid = int(child_content.get("child_pid", 0))
+if (
+    child_document.get("schema_version") != 1
+    or child_content.get("schema_version") != 1
+    or child_pid <= 0
+    or int(child_content.get("expected_pgid", 0)) != pgid
+    or int(child_content.get("supervisor_pid", 0)) != pid
+    or int(child_content.get("supervisor_starttime_ticks", 0)) != starttime
+):
+    raise SystemExit("trainer child evidence identity is invalid")
+try:
+    identity_failure_before = identity_failure_path.lstat()
+except FileNotFoundError:
+    identity_failure_before = None
+if identity_failure_before is not None:
+    if not stat.S_ISREG(identity_failure_before.st_mode):
+        raise SystemExit("trainer identity failure evidence is not a regular file")
+    failure_raw = stable_bytes(identity_failure_path, "trainer identity failure evidence")
+    failure = json.loads(failure_raw.decode("utf-8"))
+    canonical_failure = json.dumps(
+        failure, allow_nan=False, ensure_ascii=False,
+        separators=(",", ":"), sort_keys=True,
+    ).encode("utf-8") + b"\n"
+    if failure_raw != canonical_failure:
+        raise SystemExit("trainer identity failure evidence is not canonical JSON")
+    failure_content = failure.get("content", {})
+    expected_digest = hashlib.sha256(
+        json.dumps(
+            failure_content, allow_nan=False, ensure_ascii=False,
+            separators=(",", ":"), sort_keys=True,
+        ).encode("utf-8")
+    ).hexdigest()
+    if failure.get("content_sha256") != expected_digest:
+        raise SystemExit("trainer identity failure evidence digest mismatch")
+    failure_child_pid = int(failure_content.get("child_pid", 0))
+    if (
+        failure_child_pid != child_pid
+        or int(failure_content.get("expected_pgid", 0)) != pgid
+    ):
+        raise SystemExit("trainer identity failure evidence child identity mismatch")
+proc_root = Path("/proc")
+def parse_identity(path):
+    candidate_pid = int(path.name)
+    text = (path / "stat").read_text(encoding="utf-8")
+    close = text.rfind(") ")
+    if close < 0 or not text.startswith(f"{candidate_pid} ("):
+        raise RuntimeError("proc stat identity is malformed")
+    fields = text[close + 2:].split()
+    if len(fields) <= 19:
+        raise RuntimeError("proc stat lacks pgrp/starttime")
+    return (candidate_pid, int(fields[2]), int(fields[19]))
+def scan_group():
+    members = []
+    for path in proc_root.iterdir():
+        if not path.name.isdigit():
+            continue
+        try:
+            first = parse_identity(path)
+            observed_pgid = os.getpgid(first[0])
+            second = parse_identity(path)
+        except (FileNotFoundError, ProcessLookupError):
+            continue
+        if first != second or observed_pgid != first[1]:
+            raise RuntimeError("process identity changed during failure audit")
+        if first[1] == pgid:
+            members.append(first)
+    return sorted(members)
+def scan_child():
+    if child_pid is None:
+        return None
+    path = proc_root / str(child_pid)
+    try:
+        first = parse_identity(path)
+        observed_pgid = os.getpgid(child_pid)
+        second = parse_identity(path)
+    except (FileNotFoundError, ProcessLookupError):
+        return None
+    if first != second or observed_pgid != first[1]:
+        raise RuntimeError("trainer child identity changed during failure audit")
+    return first
+deadline = time.monotonic() + 5.0
+last_members = []
+last_child = None
+while True:
+    first = scan_group()
+    first_child = scan_child()
+    time.sleep(0.05)
+    second = scan_group()
+    second_child = scan_child()
+    if first == second and not first and first_child is None and second_child is None:
+        print(json.dumps({"pgid": pgid, "residual_members": 0,
+                          "trainer_child_residual": None,
+                          "status": "POST_LAUNCH_FAILURE_GROUP_EMPTY"}, sort_keys=True), flush=True)
+        break
+    last_members = second
+    last_child = second_child
+    if time.monotonic() >= deadline:
+        print(json.dumps({"pgid": pgid, "residual_members": last_members,
+                          "trainer_child_residual": last_child,
+                          "status": "POST_LAUNCH_FAILURE_RESIDUAL"}, sort_keys=True), flush=True)
+        raise SystemExit(1)
+    time.sleep(0.05)
 '''.strip()
 
 
@@ -2278,6 +2533,32 @@ def _probe_verifier_spec(
     }
 
 
+def _failure_audited_transaction_shell(
+    transaction_body: str, failure_audit: str
+) -> str:
+    """Capture every launch/postcheck failure before proving child closure."""
+
+    indented = "\n".join(f"  {line}" for line in transaction_body.splitlines())
+    return f"""set +e
+(
+  set -e
+{indented}
+)
+transaction_rc=$?
+set -e
+if (( transaction_rc != 0 )); then
+  set +e
+  {failure_audit}
+  failure_audit_rc=$?
+  set -e
+  if (( failure_audit_rc != 0 )); then
+    echo 'launch transaction failed and exact PGID/child did not become empty; manual identity audit required' >&2
+    exit 121
+  fi
+  exit "$transaction_rc"
+fi"""
+
+
 def _remote_launch_body(
     queue: Mapping[str, Any],
     job: Mapping[str, Any],
@@ -2340,6 +2621,13 @@ def _remote_launch_body(
         f"{shlex.quote(launcher)} {shlex.quote(run_log)} "
         f"{child_environment} {shlex.join(launched_argv)}"
     )
+    failure_audit = shlex.join(
+        [
+            source["python"], "-B", "-c", POST_LAUNCH_FAILURE_AUDIT_PROGRAM,
+            f"{state}.leader.json", f"{run_dir}/trainer_child_evidence.json",
+            f"{run_dir}/trainer_identity_failure.json",
+        ]
+    )
     metadata = json.dumps(
         {
             "schema_version": 1,
@@ -2377,6 +2665,21 @@ def _remote_launch_body(
         r"(^|[^[:alnum:]_])(Fatal|Traceback|OutOfMemory|out of memory|OOM|"
         r"bad_alloc|Segmentation fault)([^[:alnum:]_]|$)"
     )
+    launch_transaction = f"""{launch}
+test -s {shlex.quote(state)}
+grep -Eq '^pid=[1-9][0-9]*$' {shlex.quote(state)}
+grep -Eq '^pgid=[1-9][0-9]*$' {shlex.quote(state)}
+grep -Eq '^leader_starttime_ticks=[1-9][0-9]*$' {shlex.quote(state)}
+grep -Fq -- 'Learning iteration' {shlex.quote(run_log)}
+test -s {shlex.quote(binding_path)}
+{binding_audit}
+if grep -Eiq -- {shlex.quote(fatal_pattern)} {shlex.quote(run_log)}; then
+  echo 'fatal log scan failed; no automatic retry or broad signal is authorized' >&2
+  exit 1
+fi"""
+    audited_launch_transaction = _failure_audited_transaction_shell(
+        launch_transaction, failure_audit
+    )
     # No broad process operation is present here.  The reviewed launcher binds
     # pid/pgid/starttime/argv and may only clean its own exact group on boot
     # failure.  Later stop metadata is emitted, but this harness emits no stop.
@@ -2407,18 +2710,7 @@ mkdir {shlex.quote(run_dir)}
 export KIT_BOOT_MARKER='Learning iteration'
 export KIT_BOOT_TIMEOUT_S=900
 export KIT_BOOT_STALE_TIMEOUT_S=180
-{launch}
-test -s {shlex.quote(state)}
-grep -Eq '^pid=[1-9][0-9]*$' {shlex.quote(state)}
-grep -Eq '^pgid=[1-9][0-9]*$' {shlex.quote(state)}
-grep -Eq '^leader_starttime_ticks=[1-9][0-9]*$' {shlex.quote(state)}
-grep -Fq -- 'Learning iteration' {shlex.quote(run_log)}
-test -s {shlex.quote(binding_path)}
-{binding_audit}
-if grep -Eiq -- {shlex.quote(fatal_pattern)} {shlex.quote(run_log)}; then
-  echo 'fatal log scan failed; no automatic retry or broad signal is authorized' >&2
-  exit 1
-fi
+{audited_launch_transaction}
 """.strip()
 
 

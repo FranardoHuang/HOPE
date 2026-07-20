@@ -66,6 +66,52 @@ def _values(argv: list[str]) -> dict[str, str]:
     return Q._override_map(argv[2:], "test argv")
 
 
+def _probe_identity_wait_namespace() -> dict:
+    tree = ast.parse(Q.PROBE_SUPERVISOR_PROGRAM)
+    function = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "wait_for_trainer_identity"
+    )
+    module = ast.fix_missing_locations(ast.Module(body=[function], type_ignores=[]))
+    namespace: dict = {}
+    exec(compile(module, "<probe-identity-wait>", "exec"), namespace)
+    return namespace
+
+
+def _probe_proc_identity_namespace() -> dict:
+    tree = ast.parse(Q.PROBE_SUPERVISOR_PROGRAM)
+    function = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "proc_identity"
+    )
+    module = ast.fix_missing_locations(ast.Module(body=[function], type_ignores=[]))
+    namespace: dict = {}
+    exec(compile(module, "<probe-proc-identity>", "exec"), namespace)
+    return namespace
+
+
+class _FakeMonotonicTime:
+    def __init__(self):
+        self.now = 0.0
+
+    def monotonic(self):
+        return self.now
+
+    def sleep(self, seconds):
+        self.now += seconds
+
+
+class _FakeChild:
+    pid = 12345
+
+    def __init__(self, poll_result=None):
+        self.poll_result = poll_result
+
+    def poll(self):
+        return self.poll_result
+
+
 def _manifest(tmp_path: Path, queue) -> tuple[Path, str, object]:
     sha = lambda value: hashlib.sha256(value).hexdigest()
     content = {
@@ -714,6 +760,295 @@ def test_compose_and_launch_set_usd_path_and_unbuffered(tmp_path):
     assert "nvidia-smi returned nonnumeric nonempty output" in remote_arg
     assert "NF != 1 || $1 !~ /^[1-9][0-9]*$/" in remote_arg
     assert "count=$(nvidia-smi" not in remote_arg
+
+
+def test_probe_supervisor_waits_for_exec_identity_without_signaling():
+    program = Q.PROBE_SUPERVISOR_PROGRAM
+    assert "def wait_for_trainer_identity" in program
+    assert "time.monotonic() + timeout_s" in program
+    assert "child.poll() is not None" in program
+    assert 'identity["pgid"] != expected_pgid' in program
+    assert 'identity["starttime_ticks"] != first_starttime' in program
+    assert 'identity["argv"] == expected_argv' in program
+    assert "time.sleep(0.01)" in program
+    assert "failure_path=identity_failure_path" in program
+    assert "trainer_child_evidence.json" in program
+    child_position = program.index("child = subprocess.Popen")
+    evidence_position = program.index('"probe trainer child evidence"', child_position)
+    wait_position = program.index(
+        "trainer = wait_for_trainer_identity(", evidence_position
+    )
+    assert child_position < evidence_position < wait_position
+    assert "os.kill(" not in program
+    assert "subprocess.run([\"kill\"" not in program
+
+
+def test_probe_proc_identity_rejects_pgrp_change_between_stat_reads():
+    namespace = _probe_proc_identity_namespace()
+    pid = 12345
+
+    def proc_stat(pgrp):
+        fields = ["S", "1", str(pgrp), *("0" for _ in range(16)), "900"]
+        assert len(fields) == 20
+        return f"{pid} (trainer) " + " ".join(fields)
+
+    stat_values = iter([proc_stat(77), proc_stat(78)])
+
+    class FakeProcFile:
+        def __init__(self, name):
+            self.name = name
+
+        def read_text(self, encoding):
+            assert self.name == "stat" and encoding == "utf-8"
+            return next(stat_values)
+
+        def read_bytes(self):
+            assert self.name == "cmdline"
+            return b"trainer\0exact\0"
+
+    class FakeProcDir:
+        def __truediv__(self, name):
+            return FakeProcFile(name)
+
+    class FakeProcRoot:
+        def __truediv__(self, name):
+            assert name == str(pid)
+            return FakeProcDir()
+
+    class FakeOS:
+        @staticmethod
+        def getpgid(observed_pid):
+            assert observed_pid == pid
+            return 77
+
+    namespace["Path"] = lambda root: FakeProcRoot()
+    namespace["os"] = FakeOS
+    with pytest.raises(SystemExit, match="identity changed while binding"):
+        namespace["proc_identity"](pid)
+
+
+def test_probe_supervisor_accepts_only_same_identity_after_exec_transition():
+    namespace = _probe_identity_wait_namespace()
+    clock = _FakeMonotonicTime()
+    identities = iter([
+        {"pid": 12345, "pgid": 77, "starttime_ticks": 900,
+         "argv": ["pre-exec-supervisor"]},
+        {"pid": 12345, "pgid": 77, "starttime_ticks": 900,
+         "argv": ["trainer", "exact"]},
+    ])
+    namespace["time"] = clock
+    namespace["proc_identity"] = lambda _pid: next(identities)
+    result = namespace["wait_for_trainer_identity"](
+        _FakeChild(), ["trainer", "exact"], 77, timeout_s=0.1
+    )
+    assert result["argv"] == ["trainer", "exact"]
+    assert clock.now == 0.01
+
+
+def test_probe_supervisor_retries_transient_missing_proc_identity():
+    namespace = _probe_identity_wait_namespace()
+    clock = _FakeMonotonicTime()
+    calls = 0
+
+    def identity(_pid):
+        nonlocal calls
+        calls += 1
+        if calls == 1:
+            raise ProcessLookupError
+        return {"pid": 12345, "pgid": 77, "starttime_ticks": 900,
+                "argv": ["trainer"]}
+
+    namespace["time"] = clock
+    namespace["proc_identity"] = identity
+    result = namespace["wait_for_trainer_identity"](
+        _FakeChild(), ["trainer"], 77, timeout_s=0.1
+    )
+    assert result["starttime_ticks"] == 900
+    assert calls == 2
+
+
+@pytest.mark.parametrize(
+    ("identities", "poll_result", "message"),
+    [
+        ([], 1, "exited before publishing exact identity"),
+        ([{"pid": 12345, "pgid": 78, "starttime_ticks": 900,
+           "argv": ["trainer"]}], None, "process group differs"),
+        ([{"pid": 12345, "pgid": 77, "starttime_ticks": 900,
+           "argv": ["pre-exec"]},
+          {"pid": 12345, "pgid": 77, "starttime_ticks": 901,
+           "argv": ["trainer"]}], None, "PID was reused"),
+    ],
+)
+def test_probe_supervisor_identity_wait_rejects_unsafe_transition(
+    identities, poll_result, message
+):
+    namespace = _probe_identity_wait_namespace()
+    namespace["time"] = _FakeMonotonicTime()
+    iterator = iter(identities)
+    namespace["proc_identity"] = lambda _pid: next(iterator)
+    with pytest.raises(SystemExit, match=message):
+        namespace["wait_for_trainer_identity"](
+            _FakeChild(poll_result), ["trainer"], 77, timeout_s=0.1
+        )
+
+
+def test_probe_supervisor_identity_wait_times_out_without_accepting_wrong_argv():
+    namespace = _probe_identity_wait_namespace()
+    clock = _FakeMonotonicTime()
+    namespace["time"] = clock
+    namespace["proc_identity"] = lambda _pid: {
+        "pid": 12345, "pgid": 77, "starttime_ticks": 900,
+        "argv": ["never-exact"],
+    }
+    with pytest.raises(SystemExit, match="exact argv did not appear"):
+        namespace["wait_for_trainer_identity"](
+            _FakeChild(), ["trainer"], 77, timeout_s=0.02
+        )
+
+
+def test_probe_supervisor_persists_child_identity_on_wait_failure():
+    namespace = _probe_identity_wait_namespace()
+    namespace["time"] = _FakeMonotonicTime()
+    namespace["hashlib"] = hashlib
+    namespace["canonical"] = Q._canonical_bytes
+    published = []
+    namespace["publish"] = lambda path, value, label: published.append(
+        (path, value, label)
+    )
+    namespace["proc_identity"] = lambda _pid: {
+        "pid": 12345, "pgid": 78, "starttime_ticks": 900,
+        "argv": ["pre-exec"],
+    }
+    with pytest.raises(SystemExit, match="process group differs"):
+        namespace["wait_for_trainer_identity"](
+            _FakeChild(), ["trainer"], 77, timeout_s=0.1,
+            failure_path="identity-failure.json",
+        )
+    assert len(published) == 1
+    path, document, label = published[0]
+    assert path == "identity-failure.json"
+    assert label == "probe trainer identity failure"
+    assert document["content"]["child_pid"] == 12345
+    assert document["content"]["last_identity"]["pgid"] == 78
+    assert document["content"]["last_identity"]["starttime_ticks"] == 900
+
+
+def test_probe_supervisor_routes_proc_identity_error_through_failure_evidence():
+    namespace = _probe_identity_wait_namespace()
+    namespace["time"] = _FakeMonotonicTime()
+    namespace["hashlib"] = hashlib
+    namespace["canonical"] = Q._canonical_bytes
+    published = []
+    namespace["publish"] = lambda path, value, label: published.append(
+        (path, value, label)
+    )
+
+    def broken_identity(_pid):
+        raise SystemExit("process identity changed while binding")
+
+    namespace["proc_identity"] = broken_identity
+    with pytest.raises(SystemExit, match="identity inspection failed"):
+        namespace["wait_for_trainer_identity"](
+            _FakeChild(), ["trainer"], 77, timeout_s=0.1,
+            failure_path="identity-failure.json",
+        )
+    assert len(published) == 1
+    assert published[0][1]["content"]["child_pid"] == 12345
+    assert published[0][1]["content"]["expected_pgid"] == 77
+    assert "identity changed while binding" in published[0][1]["content"]["reason"]
+
+
+def test_failed_launch_requires_stable_empty_exact_pgid_without_signaling(tmp_path):
+    compile(Q.POST_LAUNCH_FAILURE_AUDIT_PROGRAM, "<failure-audit>", "exec")
+    program = Q.POST_LAUNCH_FAILURE_AUDIT_PROGRAM
+    assert 'value.get("kind") != "leader_identity"' in program
+    assert "first != second or observed_pgid != first[1]" in program
+    assert 'first[1] == pgid' in program
+    assert "child_pid = int(failure_content.get" in program
+    assert "def scan_child" in program
+    assert "trainer_child_residual" in program
+    assert "time.monotonic() + 5.0" in program
+    assert "POST_LAUNCH_FAILURE_GROUP_EMPTY" in program
+    assert "POST_LAUNCH_FAILURE_RESIDUAL" in program
+    assert "os.kill(" not in program and "os.killpg(" not in program
+    assert "identity_failure_path.exists()" not in program
+    assert "identity_failure_path.lstat()" in program
+    assert 'stable_bytes(child_evidence_path, "trainer child evidence")' in program
+    assert 'child_content.get("expected_pgid", 0)' in program
+    assert 'failure_child_pid != child_pid' in program
+
+    evidence = tmp_path / "leader.json"
+    evidence.write_text(json.dumps({
+        "schema_version": 1,
+        "kind": "leader_identity",
+        "leader": {"pid": 999999, "pgid": 999999, "starttime_ticks": 1},
+    }), encoding="utf-8")
+    child_content = {
+        "schema_version": 1,
+        "child_pid": 999998,
+        "expected_pgid": 999999,
+        "supervisor_pid": 999999,
+        "supervisor_starttime_ticks": 1,
+    }
+    child_evidence = tmp_path / "trainer_child_evidence.json"
+    child_evidence.write_bytes(Q._canonical_bytes({
+        "schema_version": 1,
+        "content": child_content,
+        "content_sha256": hashlib.sha256(
+            Q._canonical_bytes(child_content)
+        ).hexdigest(),
+    }) + b"\n")
+    dangling = tmp_path / "trainer_identity_failure.json"
+    dangling.symlink_to(tmp_path / "missing-target.json")
+    unsafe = subprocess.run(
+        [
+            sys.executable, "-B", "-c", program, str(evidence),
+            str(child_evidence), str(dangling),
+        ],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    assert unsafe.returncode != 0
+    assert "not a regular file" in unsafe.stderr
+
+    queue = Q.load_queue(QUEUE)
+    path, file_sha, _ = _manifest(tmp_path, queue)
+    result = Q.cmd_launch_commands(
+        queue, stage="probe", launch_manifest_path=path,
+        expected_launch_manifest_sha256=file_sha,
+    )
+    remote_arg = result["jobs"][0]["ssh_argv"][-1]
+    assert "transaction_rc=$?" in remote_arg
+    assert "failure_audit_rc=$?" in remote_arg
+    assert "manual identity audit required" in remote_arg
+    assert "trainer_child_evidence.json" in remote_arg
+
+
+def test_postcheck_failure_always_runs_failure_audit_transaction(tmp_path):
+    audit_marker = tmp_path / "audit-ran"
+    leaked_marker = tmp_path / "postcheck-leaked"
+    body = "\n".join([
+        "true",
+        "false",
+        f"touch {leaked_marker}",
+    ])
+    fragment = Q._failure_audited_transaction_shell(
+        body, f"touch {audit_marker}"
+    )
+    completed = subprocess.run(
+        ["bash", "-c", "set -euo pipefail\n" + fragment],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    assert completed.returncode == 1
+    assert audit_marker.is_file()
+    assert not leaked_marker.exists()
+
+    residual = Q._failure_audited_transaction_shell("false", "false")
+    unsafe = subprocess.run(
+        ["bash", "-c", "set -euo pipefail\n" + residual],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    assert unsafe.returncode == 121
+    assert "manual identity audit required" in unsafe.stderr
 
 
 def test_probe_verifier_proves_terminal_artifacts_counters_and_release(tmp_path):

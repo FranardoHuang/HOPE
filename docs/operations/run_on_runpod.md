@@ -214,14 +214,49 @@ fresh curve worker 在 childless/lock-free 复核后也只按各自 PGID TERM �
 再补 SHA。probe3 的 W-C/W-N/V-C 后来均自然退出，但 verifier 未绑定 24-step 完整 rollout，故其中 W-C
 旧 receipt 和另两格 runtime 都不能解锁 train。probe4 W-C 又因命令错写
 `algo.num_steps_per_env=24` 而在远端 Hydra compose 门 fail closed；该门位于建 run-dir 与 Kit launcher 之前，
-所以 v3 root/log/checkpoint/process/GPU compute 全部不存在。probe5 改用真实的
+所以 v3 root/log/checkpoint/process/GPU compute 全部不存在。
+
+probe5（第五次、只检查合同而不作科学比较的两-update 探针）改用真实的
 [`algo.runner.num_steps_per_env=24`](../DEFINITIONS.md#ppo-num-steps-per-env)，表示每个环境每次 PPO update
-收集 24 step。queue/runner bytes 冻结后的独立清单已写入
-[`phase1_balance_action_slew_launch_manifest_20260720.json`](../../configs/phase1_balance_action_slew_launch_manifest_20260720.json)，
-文件 SHA-256=`6bfa73587968f8f0af71b5617e8c324f75114b304bbe1452d0b0e4617d1f51bc`；清单存在只授权命令渲染，
-每台真实发射前仍须由 remote preflight 对 exact 路径重算全部哈希、tree/count/bytes、source clean HEAD 与 GPU。
-旧 manifest `d7e95130…a2e47`、`2d3e7955…3bae17`、`283fd002…1eefe` 及 v1/v2/v3 输出根只作不可变历史；
-当前 no-clobber 根是 `/workspace/codexschema/phase1_balance_action_slew_v4_20260720`，不得在旧目录补写或替换 receipt。
+收集 24 step，并在 v4 根中发布了 W-C、V-C、W-N、V-N、V-H 五份 exact receipt。W-H 在 trainer binding
+之前 fail closed：旧 supervisor 只读一次 `Popen` child 身份，恰好采到 fork→exec 过渡态 argv，误判为
+trainer identity mismatch。该格没有 first iteration、trainer binding、RSL checkpoint、receipt 或 GPU
+training compute；失败后 exact leader PGID/child PID 均 absent。因此它是启动取证竞态，不是 H 机制负例。
+probe5 的 v4 manifest 文件 SHA-256 是
+`6bfa73587968f8f0af71b5617e8c324f75114b304bbe1452d0b0e4617d1f51bc`，content SHA-256 是
+`093a4cc7a0ce91aad74948ed39b581e5f4a0693ba114f3144062b6cc4386a462`；五份 receipt 与
+`/workspace/codexschema/phase1_balance_action_slew_v4_20260720` 都冻结为历史，不能补写，也不能与新一轮混用。
+
+当前是 probe6（第六次同类合同探针），使用 fresh no-clobber 根
+`/workspace/codexschema/phase1_balance_action_slew_v5_20260720`。queue/runner bytes 冻结后的当前
+[`launch manifest`](../DEFINITIONS.md#balance-launch-manifest)是
+[`phase1_balance_action_slew_launch_manifest_20260720.json`](../../configs/phase1_balance_action_slew_launch_manifest_20260720.json)：
+文件 SHA-256=`718bbee0a556cc3640ee636e20f8eb2adb293cee8d0bb1820afceebf5ce1a267`，content SHA-256=
+`3cbb019e9d315abdc687d1635c9deffc13eae9577ee2d820b0e3c30ba9b7cfd8`，所绑定的 runner SHA-256=
+`dc8f79ac7a7bed1d162c3dc8cfedea97210ad5bb9ea1a671e6569acb551e91f3`。清单存在只授权命令渲染；每台真实
+发射前仍须由 remote preflight 对 exact 路径重算全部哈希、tree/count/bytes、source clean HEAD 与 GPU。
+旧 manifest `d7e95130…a2e47`、`2d3e7955…3bae17`、`283fd002…1eefe` 及 v1/v2/v3 输出根也只作不可变历史。
+
+probe6 supervisor 在 `Popen` 后、首次 `/proc` 读取前先不可覆盖地发布 `trainer_child_evidence.json`，
+再只跟踪其中同一个 child PID，最多等 `5 s`、每 `10 ms` 重读一次。每次 identity
+sample 都在读 cmdline 和 `getpgid` 前后双读 `/proc/<pid>/stat`，解析 PID/PGRP/starttime；两次 tuple 必须
+一致，且 PGRP 必须与 `getpgid` 一致。第一次可读的 starttime 成为不可变锚；任一次可读身份偏离 supervisor
+exact PGID、starttime 改变，或超时前始终没有出现 exact trainer argv 都 fail closed。缺失中的 `/proc` 可
+重试，但不会放宽到“相似命令”。identity 失败还会用 no-clobber 方式持久化 child PID、expected PGID、
+first starttime、最后一次 sanitised identity 与失败原因到 `trainer_identity_failure.json`。
+
+launcher 与 state/marker/binding/fatal postcheck 被包进同一 transaction；任一格 transaction 非零都必须
+停止**整批**，即使自动失败审计证明进程组已空，也不能接着点下一格。自动审计
+不发 signal：它会对 launch leader evidence 与 mandatory child evidence 做稳定 regular-file 读取，并对
+exact leader PGID 与持久化 child PID 做两次稳定 `/proc` 扫描；只有输出
+`POST_LAUNCH_FAILURE_GROUP_EMPTY` 才会返回原 transaction rc。mandatory child evidence 缺失也返回 `121`；
+可选的 `trainer_identity_failure.json` 用 `lstat` 探测；dangling symlink 或任何 non-regular path 都 fail
+closed，绝不能按“不存在”跳过。审计本身非零时外层返回 `121`，其含义是“未能证明 closure”，必须人工
+审计且禁止下一次 launch。任何 launch failure 后，操作者至少还要逐项证明：exact leader PGID absent、
+持久化 child PID absent、该格绑定的
+物理 GPU 无 compute context、`/workspace/.kit_boot.lock` 无 holder，且
+`/workspace/.cache/ov/_cache.lock` 无 holder/无遗留 orphan。四类证据没有全部闭合时，不得清目录、重跑或
+启动同批其他格；也不得用 broad `pkill`/`killall` 代替身份审计。
 
 两 Pod 首次预检时都存在 `/workspace/.cache/ov/_cache.lock`，且 `fuser` 没有 holder；紧邻闭合操作重验后，
 两个 exact orphan lock 已删除。历史删除不保证下一次 boot 时仍无锁；如果文件重新出现，必须先证明没有
@@ -259,6 +294,9 @@ blocked。先独立生成并审过 [`launch manifest`](../DEFINITIONS.md#balance
 
 ```bash
 set -euo pipefail
+BALANCE_REPO_ROOT="$(git rev-parse --show-toplevel)"
+BALANCE_LAUNCH_MANIFEST="$BALANCE_REPO_ROOT/configs/phase1_balance_action_slew_launch_manifest_20260720.json"
+BALANCE_LAUNCH_MANIFEST_SHA256="718bbee0a556cc3640ee636e20f8eb2adb293cee8d0bb1820afceebf5ce1a267"
 git fetch origin main
 test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
 git cat-file -e origin/main:configs/phase1_balance_action_slew_launch_manifest_20260720.json
@@ -287,15 +325,16 @@ python3 scripts/run_phase1_balance_action_slew_queue.py \
   --stage probe --authorize-launch \
   --launch-manifest "$BALANCE_LAUNCH_MANIFEST" \
   --expected-launch-manifest-sha256 "$BALANCE_LAUNCH_MANIFEST_SHA256" \
-  > /tmp/phase1_balance_slew_probe_commands.json
+  > /tmp/phase1_balance_slew_probe6_commands.json
 ```
 
 以上 `origin/main` 四道门任一失败时，只能保留计划 JSON，禁止执行 SSH。不要把 JSON 整体 pipe 给 shell。
 队列固定 W 三格到 Pod1 GPU0/1/2、V 三格到 Pod2 GPU0/1/2；由操作者
-逐条执行 `jobs[].launch_command`。每个 Pod 在任一时刻只允许一个 Kit 处于 boot/import，必须看到前一条
-真实 `Learning iteration`、host boot lock 已释放后，才启动该 Pod 的下一条；两个 Pod 的首个 boot 也错峰
-约 60 秒。boot 后 trainer 可以并行。每条都要保留 `.launch` sidecar 并核对 PID、PGID、leader starttime、
-argv、source HEAD=`54c9a62656f0e60e5bb41cbcfa0e5a972b793906`、物理 GPU、first iteration 和 fatal scan。
+逐条执行 `/tmp/phase1_balance_slew_probe6_commands.json` 中的 `jobs[].launch_command`。每个 Pod 在任一时刻
+只允许一个 Kit 处于 boot/import，必须看到前一条真实 `Learning iteration`、host boot lock 已释放后，才
+启动该 Pod 的下一条；两个 Pod 的首个 boot 也错峰约 60 秒。boot 后 trainer 可以并行。每条都要保留
+`.launch` sidecar 并核对 PID、PGID、leader starttime、argv、source
+HEAD=`54c9a62656f0e60e5bb41cbcfa0e5a972b793906`、物理 GPU、first iteration 和 fatal scan。
 
 probe 必须自然退出到 absolute milestone `[6701]` 的 `model_6701.pt`（exclusive iteration upper
 bound=`6702`）。退出后逐条执行原 JSON 的 `jobs[].probe_verifier_command`；它会在确认 policy/value/full
@@ -312,11 +351,15 @@ fresh-probe 相对 milestone `[1]`。将六份收据逐字节复制成本地
 [`receipt trusted-operator boundary`](../DEFINITIONS.md#balance-receipt-trust-boundary)。操作者必须从远端
 `jobs[].probe_receipt_remote_path` 逐字节复制 verifier 生成的 exact bytes，不得手写或“修复”收据。
 
-没有 `--probe-approved` 人工捷径。只有同一 manifest 下六份收据全部通过本地重验，才允许生成
-`+200/+500/+1000` 科学 continuation 命令；脚本仍不执行：
+没有 `--probe-approved` 人工捷径。只有当前 probe6 manifest 下六份 fresh 收据全部通过本地重验，才允许
+生成 `+200/+500/+1000` 科学 continuation 命令；probe5 的五份 v4 收据不能拿来补齐 v5，也不能和任一
+probe6 receipt 组合。脚本仍只生成命令，不执行：
 
 ```bash
 set -euo pipefail
+BALANCE_REPO_ROOT="$(git rev-parse --show-toplevel)"
+BALANCE_LAUNCH_MANIFEST="$BALANCE_REPO_ROOT/configs/phase1_balance_action_slew_launch_manifest_20260720.json"
+BALANCE_LAUNCH_MANIFEST_SHA256="718bbee0a556cc3640ee636e20f8eb2adb293cee8d0bb1820afceebf5ce1a267"
 git fetch origin main
 test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
 git cat-file -e origin/main:configs/phase1_balance_action_slew_launch_manifest_20260720.json

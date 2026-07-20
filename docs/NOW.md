@@ -52,9 +52,13 @@ probe2 W-C 已自然到 `model_6701.pt`，但旧 verifier 错把首个 `0.48 s` 
 recovery-eligible=`0` 当成失败。probe3 的 W-C/W-N/V-C 也均自然退出；独立复核发现 verifier 未绑定
 `24 steps/env`，所以旧 W-C receipt 与三格 runtime 都不能解锁长训，其余三格未启动。probe4 W-C
 在建 run-dir/Kit 之前被真实 Hydra compose 门拒绝：错写了 `algo.num_steps_per_env=24`；v3 root、
-log、checkpoint 与 GPU compute 均不存在，不是科学负例。probe5 已改为
-[`algo.runner.num_steps_per_env=24`](DEFINITIONS.md#ppo-num-steps-per-env)，继续要求 qdes/qdot 每 update exact
-`4096×24=98304`，使用 v4 no-clobber 根与 manifest `6bfa7358…1f51bc`；所有旧 manifest/目录禁止重用。
+log、checkpoint 与 GPU compute 均不存在，不是科学负例。probe5 随后以
+[`algo.runner.num_steps_per_env=24`](DEFINITIONS.md#ppo-num-steps-per-env) 在 v4 no-clobber 根完成五格 exact
+receipt；W-H 只因 fork→exec 身份采样竞态在 trainer 前 fail closed，事后进程/GPU/locks 全空，不能当
+H 机制负例，也不能拿五份旧收据补新批。当前 [probe6 替换批](DEFINITIONS.md#balance-probe-generations)
+使用全新 v5 no-clobber 根、同一 child 的有界 exact-identity wait、不可覆盖 child evidence，以及覆盖
+launcher 与全部 postcheck 的失败残留审计；尚未发射。只有下方同一 manifest identity 的六份 fresh receipt
+齐全才能生成长训命令；所有旧 manifest/目录禁止重用。
 Wave B 的 M0 左右 moving teacher 已因 stance `0/4` 被 input gate 拒绝；当前只允许审计
 upper-only matched control 对静态 v4rg 下半身模仿或 non-demo stability constraint，exact flags/矩阵仍待
 源码审计，不得猜写。
@@ -833,9 +837,23 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
   合同而 formal-ineligible；结果只能筛机制，不能晋级 policy。Wave B 的 M0 moving teacher 已因 stance
   `0/4` 拒绝；当前只设计 upper-only control 对静态 v4rg 下半身模仿或 non-demo constraint，其 exact
   flags/矩阵必须先由源码/合同审计冻结，当前不猜。Wave A 的 probe2/3 verifier 缺口与 runtime 已保留；
-  probe4 W-C 在创建任何运行产物前因 Hydra key 错写 fail closed；下一证据是从新根
-  `/workspace/codexschema/phase1_balance_action_slew_v4_20260720` 发射 probe5 六格并收齐
-  六份 exact receipt，缺任一份都不得生成长训。两波都不能替代
+  probe4 W-C 在创建任何运行产物前因 Hydra key 错写 fail closed。probe5 已从 v4 no-clobber 根自然完成
+  W-C、V-C、W-N、V-N、V-H 五格并通过五份
+  [六格探针收据](DEFINITIONS.md#balance-probe-receipt-set)；W-H 在 trainer 启动前因为 supervisor 对
+  fork→exec 过渡期的 `/proc/<pid>/cmdline` 只采样一次而 fail closed。事后 exact PGID、child PID、
+  assigned GPU 与 Kit/cache locks 均为空，所以这是发射身份竞态，不是 processed-qdes 机制负例；五份
+  probe5 收据也不能与一次重试混成六格集合。当前 [probe6 替换批](DEFINITIONS.md#balance-probe-generations) 改用全新
+  `/workspace/codexschema/phase1_balance_action_slew_v5_20260720` no-clobber 根；六个 `run_name` 为
+  `phase1_balance_slew_probe6_{w_c,w_n,w_h,v_c,v_n,v_h}_seed3_20260720`（第六版六格零训练合同探针，
+  只回答同一输入身份下能否安全启动并生成 exact receipt，不是行为成绩）。它绑定
+  [launch manifest](DEFINITIONS.md#balance-launch-manifest) 文件 SHA-256
+  `718bbee0a556cc3640ee636e20f8eb2adb293cee8d0bb1820afceebf5ce1a267`、内容 SHA-256
+  `3cbb019e9d315abdc687d1635c9deffc13eae9577ee2d820b0e3c30ba9b7cfd8`；runner 在首次 `/proc` 读取前先
+  不可覆盖地保存 child PID，再只对该 child 以 `10 ms` 间隔等待最多 `5 s`，锁定 PGID/starttime，且只接受
+  exact argv。launcher 与 state/marker/binding/fatal postcheck 属于同一失败审计 transaction；任一失败都必须立即
+  停止整批，并证明 exact PGID、child PID、assigned GPU 与 Kit/cache locks 全空；退出码 `121` 表示
+  必须人工身份审计。只有六份同一 manifest identity 的 probe6 receipt 全部闭合后才能生成长训命令。
+  该条目只有进入 `origin/main` 后才构成运行 authority；六份收据闭合前仍不得发长训。两波都不能替代
   `T0/T1/T2` 连续恢复卷。[Wave A 实验](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md)
 - **[9｜P0] Hitter 实机 planner 时序与训练反应时间基线。** 责任人 yikang；执行者 Codex；分支
   `codex/hitter-lowerbody-mujoco-alignment`，基于 `hitter`。2026-07-16 用户将本轮顺序收敛为：

@@ -84,11 +84,56 @@ Follow-up note (2026-07-20, W/Y export mechanics pass but exact lineage blocks p
   divisible by 4096 and did not bind the frozen 24 steps/env; the old W-C receipt and all three runtimes cannot unlock
   training. Probe4 bound the exact `98304` ledger but its only W-C attempt used the nonexistent Hydra key
   `algo.num_steps_per_env`; the real compose guard rejected it before run-directory creation or Kit launch, leaving
-  no process, checkpoint, log, receipt, or GPU allocation. Probe5 uses the actual
-  [`algo.runner.num_steps_per_env=24`](../DEFINITIONS.md#ppo-num-steps-per-env), preserves exact qdes/qdot
-  observed=`98304` per update, and moves to a fourth fresh namespace. Its full W-C exact argv passed a zero-training
-  remote `--cfg job --resolve` check with runner value 24 and no dead top-level field. No mechanism result was accepted. Gate remains
-  `Partial`; six accepted receipts and every long-run output remain pending.
+  no process, checkpoint, log, receipt, or GPU allocation.
+- Probe5 (the fifth non-scientific two-update contract-probe attempt) corrected the override to
+  [`algo.runner.num_steps_per_env=24`](../DEFINITIONS.md#ppo-num-steps-per-env) and produced exact receipts for
+  W-C, V-C, W-N, V-N and V-H under its v4 manifest (file/content SHA-256
+  `6bfa73587968f8f0af71b5617e8c324f75114b304bbe1452d0b0e4617d1f51bc` /
+  `093a4cc7a0ce91aad74948ed39b581e5f4a0693ba114f3144062b6cc4386a462`). W-H failed closed before trainer
+  binding because the old single-read supervisor sampled the `Popen` child during its fork-to-exec transition and
+  compared that transient argv with the final trainer argv. It produced no first iteration, trainer binding, RSL
+  checkpoint, receipt or GPU training compute; exact post-failure checks found its leader group and child absent.
+  This is a supervisor-evidence race, not a negative result for the H mechanism. The five v4 receipts remain
+  immutable history and cannot be mixed with a later manifest.
+- Probe6 (the sixth non-scientific contract-probe attempt) is the current fresh attempt. It uses the no-clobber root
+  `/workspace/codexschema/phase1_balance_action_slew_v5_20260720` and the exact
+  [`launch manifest`](../DEFINITIONS.md#balance-launch-manifest) whose file SHA-256 is
+  `718bbee0a556cc3640ee636e20f8eb2adb293cee8d0bb1820afceebf5ce1a267` and content SHA-256 is
+  `3cbb019e9d315abdc687d1635c9deffc13eae9577ee2d820b0e3c30ba9b7cfd8`; the bound runner SHA-256 is
+  `dc8f79ac7a7bed1d162c3dc8cfedea97210ad5bb9ea1a671e6569acb551e91f3`. After `Popen` and before the first
+  `/proc` read, the supervisor no-clobber publishes the child PID; it then waits on that same child for at most 5 s
+  at 10 ms intervals. Each identity sample double-reads `/proc/<pid>/stat`,
+  requires the parsed PID/PGRP/starttime tuple to be identical, and requires PGRP to match `getpgid`; every readable
+  identity must stay in the expected PGID, the first observed starttime is immutable, and only the exact final
+  trainer argv is accepted. The launcher plus state/marker/binding/fatal postchecks form one audited transaction;
+  any failure stops the whole six-cell batch. Before any later launch, the exact
+  leader PGID, persisted trainer-child PID,
+  assigned GPU and Kit/cache locks must all be proven absent. The failure audit uses `lstat` on optional identity
+  evidence, so a dangling symlink or non-regular path fails closed instead of being treated as absent. Post-launch
+  failure-audit rc `121` means the automatic audit could not prove closure: manual identity audit is mandatory and
+  no next launch is allowed.
+- Reproducible probe6 command-render gate (it emits JSON but does not SSH or start a trainer):
+
+  ```bash
+  BALANCE_REPO_ROOT="$(git rev-parse --show-toplevel)"
+  cd "$BALANCE_REPO_ROOT"
+  BALANCE_LAUNCH_MANIFEST="$BALANCE_REPO_ROOT/configs/phase1_balance_action_slew_launch_manifest_20260720.json"
+  BALANCE_LAUNCH_MANIFEST_SHA256="718bbee0a556cc3640ee636e20f8eb2adb293cee8d0bb1820afceebf5ce1a267"
+  git fetch origin main
+  test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+  git cat-file -e origin/main:configs/phase1_balance_action_slew_launch_manifest_20260720.json
+  python3 scripts/run_phase1_balance_action_slew_queue.py \
+    --stage probe --authorize-launch \
+    --launch-manifest "$BALANCE_LAUNCH_MANIFEST" \
+    --expected-launch-manifest-sha256 "$BALANCE_LAUNCH_MANIFEST_SHA256" \
+    > /tmp/phase1_balance_slew_probe6_commands.json
+  ```
+
+  Inputs are a clean current-main authority checkout, the manifest above and its manifest-bound remote assets and
+  parents. The output is a six-job command plan; each executed probe can only publish its own immutable
+  `probe_receipt.json` after the terminal-checkpoint and ledger verifier passes. Scientific train command rendering
+  remains blocked until all six receipts come from this same current manifest. No long-run mechanism result has been
+  accepted, and G05 remains `Partial`.
 
 Follow-up note (2026-07-20, recent Jiayi/Yikang branches audited; no branch-wide merge or behavior promotion):
 
