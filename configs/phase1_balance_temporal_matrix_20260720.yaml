@@ -26,7 +26,7 @@ source:
   checkout: /workspace/codexschema/nohope_btm_20260720
   identity_mode: clean_detached_exact_commit
   # 人话：主控合并所有并行实现后才有最终 commit；占位符存在时渲染器拒绝出命令。
-  commit: "06fd13b3720443291faa3cedc9ca96e3b771e756"
+  commit: "2c21feb097234c1dde72baba28137a4f92d2cafc"
   worktree_relative: hope_training/whole_body_tracking
   python: /workspace/hope_isaac_venv/bin/python
   setup_relative: setup_train_env.sh
