@@ -13,6 +13,22 @@
 
 ## 2026-07-20
 
+- Wave A v8 的第一条科学长训只发 W-N（Pod1 GPU0）：current-main 命令制品 SHA-256
+  `be346f94...4b42a`，`04:45:02Z–04:48:25Z` 停在 `sim.reset`，无首个 iteration、Reward 或
+  checkpoint；locked launcher rc=`125`。外层 rc=`121` 来自 train stage 错要 probe-only child evidence，
+  不是第二个 trainer 故障。exact PID/PGID `2728928`、starttime `335835722` 已在四次快照中闭合，GPU 与
+  locks 为空，其余五格未发；v8 immutable，本次是 infrastructure-only / non-science，结果 JSON
+  SHA-256=`ac09b70a...1a75`。详见 [Wave A 实验](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md)
+  与 [NOW](NOW.md#统一工作队列唯一优先级账本)。
+
+- fresh v9/probe10 替换候选已冻结但尚未发射：root
+  `/workspace/codexschema/phase1_balance_action_slew_v9_20260720`，config/runner SHA-256=
+  `3bf5085e...e59e` / `0fff4515...89ce`，manifest content/file SHA-256=`36ceb3c7...456c` /
+  `664375cb...0c4a`。它修正 probe/train stage-aware failure audit，并把 leader/child/failure evidence
+  收紧为 exact schema、严格类型与前后同一 snapshot；保持 W-N GPU0/W-C GPU1 swap；
+  六格必须全局串行取得 fresh `6/6` receipt，之后才可渲染科学 train。状态继续 inconclusive / not
+  adopted；M0 moving teacher 仍因 stance `0/4` 拒绝，不因本次基础设施轮换而解锁。
+
 - 回收的 Pod1 exact evidence 纠正了“两个 S0/M0 `exact_gmr_v2` root 全局 absent / 未 consume”的旧推断。
   S0 在 `2026-07-14T05:05:55.085040Z` 完成，manifest SHA=`a762d6df...d1a23`；唯一 88-frame
   高点拍压输出 finite/30 Hz/31 DoF structural pass，但 ball contact/effectiveness 为 `null`，下一门是独立

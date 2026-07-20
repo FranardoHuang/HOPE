@@ -1,7 +1,7 @@
 # EXP-P1-BALANCE-ACTION-SLEW-20260720 — 腿腰恢复期执行目标突变是否比全身 raw-action 平滑更适合乒乓
 
-- 状态：`ready`
-- 运行态：[`W/V × C/N/H`](../../DEFINITIONS.md#balance-action-slew-matrix) 六格中，`probe2 W-C false reject；probe3 W-C/W-N/V-C verifier contract rejected；probe4 W-C Hydra compose rejected；probe5 five receipts passed / W-H pre-trainer identity reject；probe6 W-C transaction-wrapper pre-trainer reject；probe7 W-C/V-C/V-N receipts passed / W-N scene-boot watchdog teardown / W-H,V-H not launched；probe8 W-N sim.reset SIGABRT / other five not launched；probe9 6/6 completed；scientific long train pre-main render only / not launched`
+- 状态：`preregistered`
+- 运行态：[`W/V × C/N/H`](../../DEFINITIONS.md#balance-action-slew-matrix) 六格中，`probe2 W-C false reject；probe3 W-C/W-N/V-C verifier contract rejected；probe4 W-C Hydra compose rejected；probe5 five receipts passed / W-H pre-trainer identity reject；probe6 W-C transaction-wrapper pre-trainer reject；probe7 W-C/V-C/V-N receipts passed / W-N scene-boot watchdog teardown / W-H,V-H not launched；probe8 W-N sim.reset SIGABRT / other five not launched；probe9 6/6 completed；v8 scientific W-N sim.reset stale / other five not launched；fresh v9/probe10 preregistered / not launched`
 - 阶段/轴：Phase 1 / 单拍后的平衡恢复与动作平滑
 - 集成小目标：降低高回台候选的摔倒与腿腰突变，同时不压低稳定候选的击球完成和回台
 - 人类负责人：Franco
@@ -71,17 +71,18 @@ completion、return 与 fall 有交叉取舍，不能据此把全局 `-0.05` 或
 `54c9a62656f0e60e5bb41cbcfa0e5a972b793906`；不能以启动时的任意 HEAD 代替。
 即使 source 已冻结，命令生成仍被独立复核的 [`launch manifest`](../../DEFINITIONS.md#balance-launch-manifest)
 硬门阻断；它必须绑定 source、queue 与全部远端输入的 SHA-256，其中 preconverted `model.usd` 还要连同
-依赖的完整 6-file sibling bundle 做 tree hash。当前 probe9/v8 冻结清单是
+依赖的完整 6-file sibling bundle 做 tree hash。probe9/v8 清单现只作历史；当前 fresh
+probe10/v9 预注册清单是
 [`phase1_balance_action_slew_launch_manifest_20260720.json`](../../../configs/phase1_balance_action_slew_launch_manifest_20260720.json)，
-文件 SHA-256=`688599c2e01653bbb703553223a58e53656da1fe83d76aa7bcaa9f8a3ee75353`、content
-SHA-256=`97c36e471fb8fc6b93fe212f20846de6697db518192e7a45c6618e5924947e28`。它只把 probe command
+文件 SHA-256=`664375cb08263e6e7cdd82a3b8dd59e9e9ae6a9756333371677417ec4aa60c4a`、content
+SHA-256=`36ceb3c77dc056f4565378a92b03da58865378d86c5849085ba066631cea456c`。它只把 probe command
 从“缺清单”解锁为“可渲染”，不表示已经 SSH 或启动。train command 仍必须消费六份
 [`probe receipt`](../../DEFINITIONS.md#balance-probe-receipt-set)。
 
 | 字段 | 冻结值/SHA |
 | --- | --- |
 | source checkout | `/workspace/codexschema/nohope_balance_action_slew_20260720`；clean detached `54c9a62656f0e60e5bb41cbcfa0e5a972b793906` |
-| queue bytes | config SHA-256 `c7ec75a9917b8bdcf7976186633b021c69fb82e591898dad6b8d5c93cfdb37d5`；runner SHA-256 `24b5f7831ad49c2b88266fed65c37e6e4bcdddaacab28ffa917fce66ef918db1` |
+| queue bytes | config SHA-256 `3bf5085ea8396513d162b9cce249dfb761b39b2827ec722959343c953683e59e`；runner SHA-256 `0fff4515cbe7e62798e8c39f701851c46e68287c7321e7618161fa9dde4789ce` |
 | 动作 | `v4rg_runtime_order_v3` 正/反手，路径固定在 YAML |
 | 观测/action | `deploy_parity_face179`，actor `179→31`；`qdes_clamp=true` |
 | plant/engine | Isaac `HOPEPingPongVirtualBall`，`dt=0.005`、decimation `4`，即 50 Hz；零关节摩擦 |
@@ -118,12 +119,12 @@ ankle-pitch `0.184`、ankle-roll `0.328 rad/tick`；runtime 仍以实际 articul
 
 | 运行（人话 + `run_name`） | parent | raw action-rate | processed-q_des | 固定槽 |
 | --- | --- | ---: | ---: | --- |
-| W 当前 dense 对照 — `phase1_balance_slew_w_c_dense_m0p10_seed3_20260720` | W 稳定 parent | `-0.10` | `0` | Pod1 GPU0 |
-| W 无平滑负控 — `phase1_balance_slew_w_n_none_seed3_20260720` | W 稳定 parent | `0` | `0` | Pod1 GPU1 |
-| W 恢复期腿腰 replacement — `phase1_balance_slew_w_h_processed_qdes_seed3_20260720` | W 稳定 parent | `0` | `-0.25` | Pod1 GPU2 |
-| V 当前 dense 对照 — `phase1_balance_slew_v_c_dense_m0p10_seed3_20260720` | V 高摔倒 parent | `-0.10` | `0` | Pod2 GPU0 |
-| V 无平滑负控 — `phase1_balance_slew_v_n_none_seed3_20260720` | V 高摔倒 parent | `0` | `0` | Pod2 GPU1 |
-| V 恢复期腿腰 replacement — `phase1_balance_slew_v_h_processed_qdes_seed3_20260720` | V 高摔倒 parent | `0` | `-0.25` | Pod2 GPU2 |
+| W 当前 dense 对照 — `phase1_balance_slew_science_retry2_w_c_dense_m0p10_seed3_20260720` | W 稳定 parent | `-0.10` | `0` | Pod1 GPU1 |
+| W 无平滑负控 — `phase1_balance_slew_science_retry2_w_n_none_seed3_20260720` | W 稳定 parent | `0` | `0` | Pod1 GPU0 |
+| W 恢复期腿腰 replacement — `phase1_balance_slew_science_retry2_w_h_processed_qdes_seed3_20260720` | W 稳定 parent | `0` | `-0.25` | Pod1 GPU2 |
+| V 当前 dense 对照 — `phase1_balance_slew_science_retry2_v_c_dense_m0p10_seed3_20260720` | V 高摔倒 parent | `-0.10` | `0` | Pod2 GPU0 |
+| V 无平滑负控 — `phase1_balance_slew_science_retry2_v_n_none_seed3_20260720` | V 高摔倒 parent | `0` | `0` | Pod2 GPU1 |
+| V 恢复期腿腰 replacement — `phase1_balance_slew_science_retry2_v_h_processed_qdes_seed3_20260720` | V 高摔倒 parent | `0` | `-0.25` | Pod2 GPU2 |
 
 `W` 与 `V` 的不同 parent 配方不构成 W-vs-V 单变量比较；机制只在各自 parent 内比较 `C/N/H`。
 
@@ -296,12 +297,55 @@ SHA-256 分别为：
 “W-N 在 GPU0 必然失败”与“W-C 在 GPU1 必然失败”；它不推翻 probe7/8 的 immutable 失败历史，
 不证明 GPU 等价，也不是 action-slew 的科学结果。
 
-六收据 gate 现已解锁 same-swapped 科学长训的**命令生成**；
-`/tmp/phase1_balance_slew_train_commands.json` 曾在 `origin/main=16263be5` 上渲染，SHA-256 为
-`fc6f1ea38a5a823016d83675d56fc41b50b70dbde1bba60602b26d6c743802df`。它是未执行 SSH 的合入前历史
-command-generation artifact；本记录进入 `main` 后其 commit/NOW authority 立即过期，禁止执行。若后续发射，
-必须在最新 `origin/main` 重新 render 并复核，仍保持 W-N→GPU0、W-C→GPU1 的已冻结对调，
-六格各跑 `1001` updates，只在预注册 `+200/+500/+1000` 里程碑判读。
+六收据 gate 曾解锁 same-swapped 科学长训的**命令生成**；
+`/tmp/phase1_balance_slew_train_commands.json` 在 `origin/main=16263be5` 上渲染，SHA-256 为
+`fc6f1ea38a5a823016d83675d56fc41b50b70dbde1bba60602b26d6c743802df`。它是从未执行 SSH 的历史
+command-generation artifact，authority 过期后没有被发射。
+
+### 2026-07-20 v8 科学长训首格 sim.reset stale、failure-audit 分层缺陷与 fresh probe10/v9
+
+在 `origin/main=d5c08bb91728edfa75801a630531527aeb2ae06c` 上重新渲染并复核的 v8 科学长训 command artifact
+是 `/tmp/phase1_balance_slew_train_commands_d5c08bb9.json`，SHA-256=
+`be346f94cf6bf738da36804bf59f6a60bc5249f3c6bf5474abf617358db4b42a`。只发射了第一格 W-N（Pod1
+GPU0）：`2026-07-20T04:45:02Z` 启动，`04:45:11.250Z` 发布 exact binding，`04:45:15.781Z`
+后 `run.log` 不再增长，locked launcher 在 `sim.reset` 前后持续无进展满 `180 s` 后按 exact process-group
+合同 TERM/KILL，并于 `04:48:25.971Z` 以 terminal kind=`stale_timeout`、exit=`125` 结束。没有出现
+first learning iteration、RSL run directory、checkpoint 或 Reward/机制账；其他五格均未发射。
+
+外层最终 rc=`121` 不是另一项 trainer 结果：旧 post-launch failure audit 对 `train` stage 仍强行读取只有
+`probe` supervisor 才会生成的 `trainer_child_evidence.json`。科学长训中 trainer 自身就是 launch-group
+leader，现场既没有 trainer-child evidence，也没有 identity-failure evidence；因此 audit 错误覆盖了 locked
+launcher 的 `125`。人工复核后 leader PID/PGID、exact group、assigned GPU compute、Kit/cache lock holder
+均为零，并在 `04:49:40–04:52:51Z` 得到稳定闭合快照；没有自动 retry 或后续发射。
+
+逐字段真源是
+[`phase1_balance_action_slew_train_v8_attempt1_result_20260720.json`](../../../configs/phase1_balance_action_slew_train_v8_attempt1_result_20260720.json)，
+文件 SHA-256=`ac09b70a1df89a501165504f4c07158858687127172a8d9d5a6bdf1473e61a75`。其中 launch-spec/leader/
+pre-TERM/pre-KILL SHA-256 依次为
+`0604c6eab0d48a2f147ab626933f84c6b9655b7db8c9b6873c5ec33b760896ca` /
+`a4c6b8fdf66fb7d98e39e024e915835366cb61db73df7e8c3b9d89bf3d31a2c4` /
+`1c415a8b53d027cd67cf27ceaada420e0eaf380bafd72dcac9597f036898881d` /
+`5c0095f48db3cc2aebc2447d28af4dea8afe2f3e792c3940de5c95136eeecc33`；queue-claim
+file/content=`a4ff22dfcd835324e780f24809226cfcfe877c4f9da4b867ab67dff76fb5622f` /
+`0a5a56b80ab1b8e43bc94bb09608ce54329dce4240310846fa4dca15afcd4a01`；run-binding
+file/content=`e0723f916d6a299d874b3b58b9c03cb5f723b07d95d24300b65a3cfd6613a03c` /
+`0cb8fb07f156c5163f30cadfe97b82b77201c17b26040662204418290571d497`；run-log/launch-ledger=
+`a2db80ad7f093a9f3eaf5927d972d7f07098482a16aec0c615fb58292baa0ff2` /
+`5aca7d4786e9ed158aacc5a78f4c41d2702305117f61d97805d095bf116687c1`。v8 root、run 与 manifest
+永久冻结；这只是 infrastructure-only evidence，不是 N 机制、Reward 或 action-slew 的负结果。
+
+fresh v9 把 no-clobber root 改为
+`/workspace/codexschema/phase1_balance_action_slew_v9_20260720`，并把 failure audit 显式绑定 `probe/train`
+stage：probe 继续强制读取并验证 child evidence，train 则强制该两类 probe-only evidence 不存在，再复核
+exact leader group 为空。config/runner SHA-256 分别为
+`3bf5085ea8396513d162b9cce249dfb761b39b2827ec722959343c953683e59e` /
+`0fff4515cbe7e62798e8c39f701851c46e68287c7321e7618161fa9dde4789ce`；manifest content/file
+SHA-256 分别为 `36ceb3c77dc056f4565378a92b03da58865378d86c5849085ba066631cea456c` /
+`664375cb08263e6e7cdd82a3b8dd59e9e9ae6a9756333371677417ec4aa60c4a`。probe10 保持 W-N→Pod1
+GPU0、W-C→Pod1 GPU1、W-H→Pod1 GPU2、V-C/V-N/V-H→Pod2 GPU0/1/2 的同一 crossover 顺序；六个
+probe run name 为 `phase1_balance_slew_probe10_{w_n,w_c,w_h,v_c,v_n,v_h}_seed3_20260720`。
+该 fresh 批目前只完成 source preregistration，尚未发射；必须在同一 v9 identity 下收齐并重验六份
+probe10 receipt，才允许生成任何 `science_retry2` 长训命令。不得复用 probe9 receipt 或 v8 科学 binding。
 
 ## 预算、量尺与停止规则
 
@@ -386,7 +430,9 @@ band，仍因 no-narrowing 失败。manifest 顶层和每个结果
 | Wave A probe6 六格 | `W-C transaction-wrapper rejected / other five not launched` | W `model_6700` / seed3 | E1 fail-closed infrastructure | 81 B `run.log`；无 evidence/binding/terminal/checkpoint/receipt/RSL | multiline Python 参数被逐行缩进破坏；残留/GPU/locks 全空，不是机制负例 |
 | Wave A probe7 六格 | `W-C/V-C/V-N verified；W-N watchdog teardown；W-H/V-H not launched` | W/V `model_6700` / seed3 | E3 mechanics / E1 result | 三份 exact receipt；W-N 只有 run log/ledger、无 binding/terminal/receipt | W-N 是 scene-boot infrastructure transient；v6 immutable，不作 Reward 结论 |
 | Wave A probe8 六格 | `W-N sim.reset SIGABRT / other five not launched` | W `model_6700` / seed3 | E1 infrastructure only | W-N `malloc(): invalid size (unsorted)`，trainer `-6`/outer `134`；无 first iteration/binding/RSL/checkpoint/receipt | pre-managers/pre-RewardManager 失败；两 Pod 闭合，v7 immutable，不作 Reward 结论 |
-| Wave A probe9 六格 | `6/6 verified receipts / pre-main train render only` | W/V `model_6700` / seed3 | E3 mechanics / E1 result | 六份 exact receipt；set `cc9ff591…d9c8`；`16263be5` 历史 train artifact `fc6f1ea3…02df` | crossover 与六收据只解锁 current-main 重渲染；不证明 GPU 等价，不是科学结果，long train 未发 |
+| Wave A probe9 六格 | `6/6 verified receipts / completed` | W/V `model_6700` / seed3 | E3 mechanics / E1 result | 六份 exact receipt；set `cc9ff591…d9c8`；`16263be5` 历史 train artifact `fc6f1ea3…02df` 未执行 | crossover 与六收据不证明 GPU 等价，也不是科学结果 |
+| Wave A v8 科学长训 | `W-N sim.reset stale / other five not launched` | W `model_6700` / seed3 | E1 infrastructure only | authority `d5c08bb9`；train artifact `be346f94…b42a`；locked `125`，outer audit `121`；result `ac09b70a…a75` | 无 iteration/RSL/checkpoint/Reward；stage-blind audit 误读 probe-only evidence；exact closure，v8 frozen，不作 N 机制结论 |
+| Wave A fresh probe10/v9 | `preregistered / not launched` | W/V `model_6700` / seed3 | E1 source | fresh root；stage-aware failure audit；config/runner `3bf5085e…59e` / `0fff4515…89ce`；manifest content/file `36ceb3c7…456c` / `664375cb…0c4a` | 保持 crossover/顺序；必须六份 fresh receipt 齐全后才能生成 `science_retry2` 长训命令 |
 | Wave B 下半身 matched ablation | `design pending / M0 moving rejected` | 未冻结 | E2 input gate | M0 manifest `fdd60fcf…396e` | moving teacher no-launch；只继续静态 v4rg 或 non-demo constraint 设计 |
 
 ## 分动作成绩表
@@ -401,9 +447,9 @@ Wave A 是 single-swing continuation 诊断，不能声称完成 T0/T1/T2 连续
 
 ## 决定
 
-- 决定：`inconclusive / not adopted`（probe9 同 identity 六收据已齐并解锁命令生成，但科学长训未发射，尚无 C/N/H 机制结果）
+- 决定：`inconclusive / not adopted`（v8 科学首格在 first iteration 前停滞，其他五格未发；没有 C/N/H 机制结果）
 - 是否已纳入当前 setting：`no`
-- 局限/下一个 gate：在该运行态记录进入最新 `origin/main` 后重新 render 并审计 same-swapped 命令，再启动六格 `1001`-update 长训，按 `+200/+500/+1000` 里程碑判读；Wave B 另行审计与预注册。
+- 局限/下一个 gate：先把 stage-aware failure audit 与 fresh v9 identity 合入最新 `origin/main`，严格串行完成并重验六格 probe10 receipt；只有同一 v9 六收据齐全后才能生成和复核六格 `science_retry2` 的 `1001`-update 长训命令，再按 `+200/+500/+1000` 里程碑判读。Wave B 另行审计与预注册。
 
 ## 复现与证据
 
@@ -412,5 +458,5 @@ Wave A 是 single-swing continuation 诊断，不能声称完成 T0/T1/T2 连续
 [RunPod](../../operations/run_on_runpod.md#2026-07-20-action-slew-wave-a-启动前状态与发射纪律)。
 当前记录还启动过 probe7 W-C/V-C/V-N/W-N；其中前三格验证通过，W-N 由 locked watchdog 精确拆除，
 W-H/V-H 未发。probe8 只启动 W-N 并在 `sim.reset` 以 `SIGABRT` 退出，其他五格未发。probe9
-六格已串行完成并全部验证；本地六收据集通过后只生成了科学长训命令，尚未执行。
-至今从未启动本实验的科学长训、judge、部署或真机。
+六格已串行完成并全部验证。v8 科学长训只启动 W-N，并在 first iteration 前由 locked stale watchdog
+精确拆除；其他五格未发。fresh v9/probe10 尚未发射。至今没有科学机制结果，也没有启动 judge、部署或真机。

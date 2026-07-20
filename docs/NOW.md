@@ -79,7 +79,12 @@ GPU1）→closure→W-H→V-C→V-N→V-H 完成六格，每格都在下一格�
 receipt-set SHA-256 为 `cc9ff5910992c46b9020654a78d8473ceb376bb5d9dc4adc984b90f454b3d9c8`；
 科学长训只有未执行的合入前历史 render，本 NOW 进入 `main` 后必须保持 W-N/W-C GPU swap 重渲染并审计。W-N 在 GPU0 与 W-C 在 GPU1 都通过只排除
 “该格在该卡必然失败”，不证明 GPU 等价，也不抹掉 probe7/8 的历史。六格科学结果仍未知、未采用；
-所有旧 manifest/目录禁止重用。
+所有旧 manifest/目录禁止重用。随后 current-main v8 的
+[科学长训 attempt1](DEFINITIONS.md#balance-science-attempt-generations) 只发 W-N（Pod1 GPU0）：
+`2026-07-20T04:45:02Z–04:48:25Z` 停在 `sim.reset`，未见首个 iteration、Reward、checkpoint；exact
+组已由 locked launcher 收口，其余五格未发，因此仍是 infrastructure-only、inconclusive / not adopted。
+fresh v9/probe10 只是已冻结、尚未发射的替换候选；它修正 train/probe 失败审计的 stage 语义，并要求
+全局串行完成同代六份 probe receipt 后才允许生成 train 命令。
 Wave B 的 M0 左右 moving teacher 已因 stance `0/4` 被 input gate 拒绝；当前只允许审计
 upper-only matched control 对静态 v4rg 下半身模仿或 non-demo stability constraint，exact flags/矩阵仍待
 源码审计，不得猜写。
@@ -921,8 +926,28 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
   `fc6f1ea38a5a823016d83675d56fc41b50b70dbde1bba60602b26d6c743802df`，但它从未执行 SSH；本 NOW
   更新进入 `main` 后旧 commit/NOW authority 过期，禁止执行。发射前必须在最新 `origin/main`
   重新 render 并审计。
-  probe receipt 不是科学结果；六格长训结果仍 inconclusive / not adopted。该条目只有进入 `origin/main`
-  后才构成运行 authority。两波都不能替代
+  current-main 命令制品 `be346f94cf6bf738da36804bf59f6a60bc5249f3c6bf5474abf617358db4b42a`
+  随后只发了 [v8 科学长训 attempt1](DEFINITIONS.md#balance-science-attempt-generations) 的 W-N（Pod1
+  GPU0）。它于 `2026-07-20T04:45:02Z–04:48:25.971Z` 停在 `sim.reset`，没有首个 Learning iteration、
+  Reward 指标或 checkpoint；locked launcher terminal rc=`125`，exact PID=PGID `2728928`、leader
+  starttime=`335835722`。外层 caller rc=`121` 不是另一种 trainer 错误，而是旧 post-failure audit 在
+  train stage 错误要求只有 probe supervisor 才会产生的 `trainer_child_evidence.json`。`04:49:40Z`、
+  `04:49:47Z`、`04:52:49Z`、`04:52:51Z` 四次闭包均确认 leader/PGID、GPU compute process 与
+  Kit/cache lock holder 全空；其余五格未发。结果 JSON 为
+  [`phase1_balance_action_slew_train_v8_attempt1_result_20260720.json`](../configs/phase1_balance_action_slew_train_v8_attempt1_result_20260720.json)，
+  SHA-256=`ac09b70a1df89a501165504f4c07158858687127172a8d9d5a6bdf1473e61a75`。v8 root immutable，
+  该次只算 infrastructure-only / non-science，不能给 C/N/H 机制结论。
+  fresh v9/probe10 候选继续保持 W-N Pod1 GPU0、W-C Pod1 GPU1 的 swap 与六格全局串行顺序；fresh
+  root 是 `/workspace/codexschema/phase1_balance_action_slew_v9_20260720`，config/runner SHA-256 为
+  `3bf5085ea8396513d162b9cce249dfb761b39b2827ec722959343c953683e59e` /
+  `0fff4515cbe7e62798e8c39f701851c46e68287c7321e7618161fa9dde4789ce`，manifest 内容/文件 SHA-256 为
+  `36ceb3c77dc056f4565378a92b03da58865378d86c5849085ba066631cea456c` /
+  `664375cb08263e6e7cdd82a3b8dd59e9e9ae6a9756333371677417ec4aa60c4a`。新 runner 的 failure audit
+  显式区分 probe/train：probe 仍严格要求 child evidence；train 要求不存在 probe-only child/identity
+  文件，并验证 launcher leader 组闭包。probe10 当前 **未发射**；必须先全局串行取得 fresh v9 同代
+  `6/6` receipt，才允许渲染任何科学 train 命令，禁止复用 probe9/v8 收据。probe receipt 不是科学
+  结果；六格机制状态仍 inconclusive / not adopted。该条目只有进入 `origin/main` 后才构成运行
+  authority。两波都不能替代
   `T0/T1/T2` 连续恢复卷。[Wave A 实验](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md)
 - **[9｜P0] Hitter 实机 planner 时序与训练反应时间基线。** 责任人 yikang；执行者 Codex；分支
   `codex/hitter-lowerbody-mujoco-alignment`，基于 `hitter`。2026-07-16 用户将本轮顺序收敛为：

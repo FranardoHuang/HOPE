@@ -44,7 +44,7 @@ HYDRA_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 EXPECTED_QUEUE_ID = "phase1_balance_action_slew_20260720"
-EXPECTED_NAMESPACE = "/workspace/codexschema/phase1_balance_action_slew_v8_20260720"
+EXPECTED_NAMESPACE = "/workspace/codexschema/phase1_balance_action_slew_v9_20260720"
 EXPECTED_SOURCE = "/workspace/codexschema/nohope_balance_action_slew_20260720"
 EXPECTED_REMOTE_SOURCE_COMMIT = "54c9a62656f0e60e5bb41cbcfa0e5a972b793906"
 PARENT_ITERATION = 6700
@@ -60,6 +60,14 @@ EXPECTED_JOBS = {
     "v_h": ("V", "H", "pod2", 2),
 }
 EXPECTED_JOB_ORDER = ("w_n", "w_c", "w_h", "v_c", "v_n", "v_h")
+EXPECTED_TRAIN_RUN_NAMES = {
+    "w_n": "phase1_balance_slew_science_retry2_w_n_none_seed3_20260720",
+    "w_c": "phase1_balance_slew_science_retry2_w_c_dense_m0p10_seed3_20260720",
+    "w_h": "phase1_balance_slew_science_retry2_w_h_processed_qdes_seed3_20260720",
+    "v_c": "phase1_balance_slew_science_retry2_v_c_dense_m0p10_seed3_20260720",
+    "v_n": "phase1_balance_slew_science_retry2_v_n_none_seed3_20260720",
+    "v_h": "phase1_balance_slew_science_retry2_v_h_processed_qdes_seed3_20260720",
+}
 EXPECTED_MECHANISMS = {
     "C": (-0.10, 0.0),
     "N": (0.0, 0.0),
@@ -838,6 +846,11 @@ def _validate_queue(queue: dict[str, Any]) -> dict[str, Any]:
             job["parent"], job["mechanism"], job["pod"], job["gpu"]
         ) != EXPECTED_JOBS[job_id]:
             raise QueueError(f"job {job_id!r} changed its matrix cell or GPU")
+        if run_name != EXPECTED_TRAIN_RUN_NAMES[job_id]:
+            raise QueueError(
+                f"job {job_id!r} must use fresh science retry2 run_name "
+                f"{EXPECTED_TRAIN_RUN_NAMES[job_id]}"
+            )
         expected_dir = f"{EXPECTED_NAMESPACE}/runs/{job_id}"
         if run_dir != expected_dir:
             raise QueueError(f"job {job_id!r} must use fresh run dir {expected_dir}")
@@ -848,7 +861,7 @@ def _validate_queue(queue: dict[str, Any]) -> dict[str, Any]:
     }:
         raise QueueError("six-cell matrix or six unique GPU slots is incomplete")
     if tuple(job["id"] for job in normalized_jobs) != EXPECTED_JOB_ORDER:
-        raise QueueError("jobs must preserve the reviewed probe9 crossover order")
+        raise QueueError("jobs must preserve the reviewed probe10 crossover order")
 
     # Compile both stages now.  This proves every cell has exactly one value
     # for every Hydra key and that the only within-parent scientific factors
@@ -1076,7 +1089,7 @@ def _stage_run_dir(queue: Mapping[str, Any], job: Mapping[str, Any], stage: str)
 def _stage_run_name(job: Mapping[str, Any], stage: str) -> str:
     if stage == "train":
         return str(job["run_name"])
-    return f"phase1_balance_slew_probe9_{job['id']}_seed3_20260720"
+    return f"phase1_balance_slew_probe10_{job['id']}_seed3_20260720"
 
 
 def _training_argv(
@@ -1727,12 +1740,37 @@ import stat
 import sys
 import time
 
-evidence_path = Path(sys.argv[1])
-child_evidence_path = Path(sys.argv[2])
-identity_failure_path = Path(sys.argv[3])
+if len(sys.argv) != 5:
+    raise SystemExit("failure audit requires stage and three evidence paths")
+stage = sys.argv[1]
+if stage not in {"probe", "train"}:
+    raise SystemExit("failure audit stage must be probe or train")
+evidence_path = Path(sys.argv[2])
+child_evidence_path = Path(sys.argv[3])
+identity_failure_path = Path(sys.argv[4])
 flags = os.O_RDONLY | getattr(os, "O_CLOEXEC", 0) | getattr(os, "O_NOFOLLOW", 0)
 signature = lambda item: (item.st_dev, item.st_ino, item.st_mode, item.st_size, item.st_mtime_ns)
-def stable_bytes(path, label):
+def canonical(value):
+    return json.dumps(
+        value, allow_nan=False, ensure_ascii=False,
+        separators=(",", ":"), sort_keys=True,
+    ).encode("utf-8")
+def exact_keys(value, expected, label):
+    if type(value) is not dict or set(value) != expected:
+        raise SystemExit(f"{label} fields differ from producer schema")
+def positive_int(value, label):
+    if type(value) is not int or value <= 0:
+        raise SystemExit(f"{label} must be a positive exact integer")
+    return value
+def sha256_text(value, label):
+    if (
+        type(value) is not str
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise SystemExit(f"{label} must be a lowercase SHA-256")
+    return value
+def stable_record(path, label):
     before = path.lstat()
     if not stat.S_ISREG(before.st_mode):
         raise SystemExit(f"{label} is not a regular file")
@@ -1750,74 +1788,220 @@ def stable_bytes(path, label):
     after = path.lstat()
     if signature(before) != signature(opened) or signature(before) != signature(after):
         raise SystemExit(f"{label} changed while reading")
-    return b"".join(chunks)
+    return b"".join(chunks), signature(before)
+def stable_bytes(path, label):
+    return stable_record(path, label)[0]
 raw = stable_bytes(evidence_path, "launch leader evidence")
 value = json.loads(raw.decode("utf-8"))
-leader = value.get("leader", {})
-pid = int(leader.get("pid", 0))
-pgid = int(leader.get("pgid", 0))
-starttime = int(leader.get("starttime_ticks", 0))
-if value.get("schema_version") != 1 or value.get("kind") != "leader_identity":
+if raw != canonical(value) + b"\n":
+    raise SystemExit("launch leader evidence is not canonical JSON")
+exact_keys(value, {"schema_version", "kind", "leader"}, "launch leader evidence")
+leader = value["leader"]
+exact_keys(leader, {"pid", "pgid", "starttime_ticks"}, "launch leader identity")
+if (
+    type(value["schema_version"]) is not int
+    or value["schema_version"] != 1
+    or type(value["kind"]) is not str
+    or value["kind"] != "leader_identity"
+):
     raise SystemExit("launch leader evidence schema/kind mismatch")
+pid = positive_int(leader["pid"], "launch leader pid")
+pgid = positive_int(leader["pgid"], "launch leader pgid")
+starttime = positive_int(
+    leader["starttime_ticks"], "launch leader starttime_ticks"
+)
 if pid <= 0 or pid != pgid or starttime <= 0:
     raise SystemExit("launch leader evidence identity is invalid")
-child_raw = stable_bytes(child_evidence_path, "trainer child evidence")
-child_document = json.loads(child_raw.decode("utf-8"))
-canonical_child = json.dumps(
-    child_document, allow_nan=False, ensure_ascii=False,
-    separators=(",", ":"), sort_keys=True,
-).encode("utf-8") + b"\n"
-if child_raw != canonical_child:
-    raise SystemExit("trainer child evidence is not canonical JSON")
-child_content = child_document.get("content", {})
-expected_child_digest = hashlib.sha256(
-    json.dumps(
-        child_content, allow_nan=False, ensure_ascii=False,
-        separators=(",", ":"), sort_keys=True,
-    ).encode("utf-8")
-).hexdigest()
-if child_document.get("content_sha256") != expected_child_digest:
-    raise SystemExit("trainer child evidence digest mismatch")
-child_pid = int(child_content.get("child_pid", 0))
-if (
-    child_document.get("schema_version") != 1
-    or child_content.get("schema_version") != 1
-    or child_pid <= 0
-    or int(child_content.get("expected_pgid", 0)) != pgid
-    or int(child_content.get("supervisor_pid", 0)) != pid
-    or int(child_content.get("supervisor_starttime_ticks", 0)) != starttime
-):
-    raise SystemExit("trainer child evidence identity is invalid")
-try:
-    identity_failure_before = identity_failure_path.lstat()
-except FileNotFoundError:
-    identity_failure_before = None
-if identity_failure_before is not None:
-    if not stat.S_ISREG(identity_failure_before.st_mode):
-        raise SystemExit("trainer identity failure evidence is not a regular file")
-    failure_raw = stable_bytes(identity_failure_path, "trainer identity failure evidence")
-    failure = json.loads(failure_raw.decode("utf-8"))
-    canonical_failure = json.dumps(
-        failure, allow_nan=False, ensure_ascii=False,
-        separators=(",", ":"), sort_keys=True,
-    ).encode("utf-8") + b"\n"
-    if failure_raw != canonical_failure:
-        raise SystemExit("trainer identity failure evidence is not canonical JSON")
-    failure_content = failure.get("content", {})
-    expected_digest = hashlib.sha256(
-        json.dumps(
-            failure_content, allow_nan=False, ensure_ascii=False,
-            separators=(",", ":"), sort_keys=True,
-        ).encode("utf-8")
-    ).hexdigest()
-    if failure.get("content_sha256") != expected_digest:
-        raise SystemExit("trainer identity failure evidence digest mismatch")
-    failure_child_pid = int(failure_content.get("child_pid", 0))
-    if (
-        failure_child_pid != child_pid
-        or int(failure_content.get("expected_pgid", 0)) != pgid
+child_pid = None
+def require_train_evidence_absent():
+    for path, label in (
+        (child_evidence_path, "trainer child evidence"),
+        (identity_failure_path, "trainer identity failure evidence"),
     ):
-        raise SystemExit("trainer identity failure evidence child identity mismatch")
+        try:
+            path.lstat()
+        except FileNotFoundError:
+            continue
+        raise SystemExit(f"unexpected {label} for train failure audit")
+if stage == "train":
+    require_train_evidence_absent()
+else:
+    try:
+        child_raw = stable_bytes(child_evidence_path, "trainer child evidence")
+    except FileNotFoundError:
+        raise SystemExit("trainer child evidence is required for probe failure audit")
+    child_document = json.loads(child_raw.decode("utf-8"))
+    canonical_child = canonical(child_document) + b"\n"
+    if child_raw != canonical_child:
+        raise SystemExit("trainer child evidence is not canonical JSON")
+    exact_keys(
+        child_document,
+        {"schema_version", "content", "content_sha256"},
+        "trainer child evidence",
+    )
+    child_content = child_document["content"]
+    exact_keys(
+        child_content,
+        {
+            "schema_version", "child_pid", "expected_pgid",
+            "supervisor_pid", "supervisor_starttime_ticks",
+        },
+        "trainer child evidence content",
+    )
+    expected_child_digest = hashlib.sha256(canonical(child_content)).hexdigest()
+    child_digest = sha256_text(
+        child_document["content_sha256"], "trainer child evidence digest"
+    )
+    if child_digest != expected_child_digest:
+        raise SystemExit("trainer child evidence digest mismatch")
+    child_pid = positive_int(child_content["child_pid"], "trainer child pid")
+    child_expected_pgid = positive_int(
+        child_content["expected_pgid"], "trainer child expected pgid"
+    )
+    child_supervisor_pid = positive_int(
+        child_content["supervisor_pid"], "trainer child supervisor pid"
+    )
+    child_supervisor_starttime = positive_int(
+        child_content["supervisor_starttime_ticks"],
+        "trainer child supervisor starttime_ticks",
+    )
+    if (
+        type(child_document["schema_version"]) is not int
+        or child_document["schema_version"] != 1
+        or type(child_content["schema_version"]) is not int
+        or child_content["schema_version"] != 1
+        or child_expected_pgid != pgid
+        or child_supervisor_pid != pid
+        or child_supervisor_starttime != starttime
+    ):
+        raise SystemExit("trainer child evidence identity is invalid")
+    def validate_probe_identity_failure():
+        try:
+            identity_failure_before = identity_failure_path.lstat()
+        except FileNotFoundError:
+            return ("absent",)
+        if not stat.S_ISREG(identity_failure_before.st_mode):
+            raise SystemExit("trainer identity failure evidence is not a regular file")
+        failure_raw, failure_signature = stable_record(
+            identity_failure_path, "trainer identity failure evidence"
+        )
+        failure = json.loads(failure_raw.decode("utf-8"))
+        canonical_failure = canonical(failure) + b"\n"
+        if failure_raw != canonical_failure:
+            raise SystemExit("trainer identity failure evidence is not canonical JSON")
+        exact_keys(
+            failure,
+            {"schema_version", "content", "content_sha256"},
+            "trainer identity failure evidence",
+        )
+        failure_content = failure["content"]
+        exact_keys(
+            failure_content,
+            {
+                "schema_version", "child_pid", "expected_pgid",
+                "first_starttime_ticks", "last_identity", "reason", "timeout_s",
+            },
+            "trainer identity failure evidence content",
+        )
+        expected_digest = hashlib.sha256(canonical(failure_content)).hexdigest()
+        failure_digest = sha256_text(
+            failure["content_sha256"], "trainer identity failure evidence digest"
+        )
+        if failure_digest != expected_digest:
+            raise SystemExit("trainer identity failure evidence digest mismatch")
+        if (
+            type(failure["schema_version"]) is not int
+            or failure["schema_version"] != 1
+            or type(failure_content["schema_version"]) is not int
+            or failure_content["schema_version"] != 1
+        ):
+            raise SystemExit("trainer identity failure evidence schema mismatch")
+        failure_child_pid = positive_int(
+            failure_content["child_pid"], "trainer identity failure child pid"
+        )
+        failure_expected_pgid = positive_int(
+            failure_content["expected_pgid"],
+            "trainer identity failure expected pgid",
+        )
+        if (
+            failure_child_pid != child_pid
+            or failure_expected_pgid != pgid
+        ):
+            raise SystemExit("trainer identity failure evidence child identity mismatch")
+        first_starttime = failure_content["first_starttime_ticks"]
+        if first_starttime is not None:
+            first_starttime = positive_int(
+                first_starttime,
+                "trainer identity failure first_starttime_ticks",
+            )
+        timeout_s = failure_content["timeout_s"]
+        if type(timeout_s) is not float or timeout_s != 5.0:
+            raise SystemExit("trainer identity failure timeout_s differs from producer")
+        reason = failure_content["reason"]
+        fixed_reasons = {
+            "probe trainer exited before publishing exact identity",
+            "probe trainer process group differs from supervisor",
+            "probe trainer PID was reused while waiting for exec",
+            "probe trainer exact argv did not appear before exec timeout",
+        }
+        inspection_prefix = "probe trainer identity inspection failed: "
+        if type(reason) is not str or not (
+            reason in fixed_reasons
+            or (reason.startswith(inspection_prefix) and len(reason) > len(inspection_prefix))
+        ):
+            raise SystemExit("trainer identity failure reason differs from producer")
+        last_identity = failure_content["last_identity"]
+        last_pid = last_pgid = last_starttime = None
+        if last_identity is not None:
+            exact_keys(
+                last_identity,
+                {"pid", "pgid", "starttime_ticks", "argv_sha256"},
+                "trainer identity failure last_identity",
+            )
+            last_pid = positive_int(
+                last_identity["pid"], "trainer identity failure last pid"
+            )
+            last_pgid = positive_int(
+                last_identity["pgid"], "trainer identity failure last pgid"
+            )
+            last_starttime = positive_int(
+                last_identity["starttime_ticks"],
+                "trainer identity failure last starttime_ticks",
+            )
+            sha256_text(
+                last_identity["argv_sha256"],
+                "trainer identity failure last argv digest",
+            )
+            if last_pid != child_pid:
+                raise SystemExit("trainer identity failure last pid differs from child")
+        if last_identity is None and first_starttime is not None:
+            raise SystemExit("trainer identity failure starttime lacks last identity")
+        if last_identity is not None and first_starttime is None and reason != (
+            "probe trainer process group differs from supervisor"
+        ):
+            raise SystemExit("trainer identity failure last identity lacks first starttime")
+        if reason == "probe trainer process group differs from supervisor":
+            if last_identity is None or last_pgid == pgid:
+                raise SystemExit("trainer identity failure group reason is inconsistent")
+        elif reason == "probe trainer PID was reused while waiting for exec":
+            if (
+                last_identity is None
+                or first_starttime is None
+                or last_pgid != pgid
+                or last_starttime == first_starttime
+            ):
+                raise SystemExit("trainer identity failure PID-reuse reason is inconsistent")
+        elif last_identity is not None and (
+            first_starttime is None
+            or last_pgid != pgid
+            or last_starttime != first_starttime
+        ):
+            raise SystemExit("trainer identity failure prior identity is inconsistent")
+        return (
+            "present", failure_signature,
+            hashlib.sha256(failure_raw).hexdigest(), failure_raw,
+        )
+    initial_identity_failure_snapshot = validate_probe_identity_failure()
 proc_root = Path("/proc")
 def parse_identity(path):
     candidate_pid = int(path.name)
@@ -1868,6 +2052,14 @@ while True:
     second = scan_group()
     second_child = scan_child()
     if first == second and not first and first_child is None and second_child is None:
+        if stage == "train":
+            require_train_evidence_absent()
+        else:
+            final_identity_failure_snapshot = validate_probe_identity_failure()
+            if final_identity_failure_snapshot != initial_identity_failure_snapshot:
+                raise SystemExit(
+                    "trainer identity failure evidence snapshot changed during failure audit"
+                )
         print(json.dumps({"pgid": pgid, "residual_members": 0,
                           "trainer_child_residual": None,
                           "status": "POST_LAUNCH_FAILURE_GROUP_EMPTY"}, sort_keys=True), flush=True)
@@ -2626,6 +2818,7 @@ def _remote_launch_body(
     failure_audit = shlex.join(
         [
             source["python"], "-B", "-c", POST_LAUNCH_FAILURE_AUDIT_PROGRAM,
+            stage,
             f"{state}.leader.json", f"{run_dir}/trainer_child_evidence.json",
             f"{run_dir}/trainer_identity_failure.json",
         ]

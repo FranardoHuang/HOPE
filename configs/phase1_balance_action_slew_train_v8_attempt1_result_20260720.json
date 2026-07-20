@@ -1,0 +1,76 @@
+{
+  "automatic_retry": false,
+  "automatic_stop_after_failure": false,
+  "caller_exit_code": 121,
+  "closure": {
+    "cache_lock_holder_absent": true,
+    "exact_pgid_members": 0,
+    "gpu_compute_processes": 0,
+    "kit_boot_lock_holder_absent": true,
+    "leader_pid_absent": true,
+    "manual_stable_snapshots_utc": [
+      "2026-07-20T04:49:40.621011274Z",
+      "2026-07-20T04:49:47.935993530Z",
+      "2026-07-20T04:52:49Z",
+      "2026-07-20T04:52:51Z"
+    ],
+    "status": "closed_after_exact_launcher_teardown_and_manual_audit"
+  },
+  "command_artifact": {
+    "origin_main_commit": "d5c08bb91728edfa75801a630531527aeb2ae06c",
+    "path": "/tmp/phase1_balance_slew_train_commands_d5c08bb9.json",
+    "sha256": "be346f94cf6bf738da36804bf59f6a60bc5249f3c6bf5474abf617358db4b42a"
+  },
+  "evidence": {
+    "launch_manifest_file_sha256": "688599c2e01653bbb703553223a58e53656da1fe83d76aa7bcaa9f8a3ee75353",
+    "launch_spec_sha256": "0604c6eab0d48a2f147ab626933f84c6b9655b7db8c9b6873c5ec33b760896ca",
+    "leader_evidence_sha256": "a4c6b8fdf66fb7d98e39e024e915835366cb61db73df7e8c3b9d89bf3d31a2c4",
+    "pre_kill_evidence_sha256": "5c0095f48db3cc2aebc2447d28af4dea8afe2f3e792c3940de5c95136eeecc33",
+    "pre_term_evidence_sha256": "1c415a8b53d027cd67cf27ceaada420e0eaf380bafd72dcac9597f036898881d",
+    "queue_claim_content_sha256": "0a5a56b80ab1b8e43bc94bb09608ce54329dce4240310846fa4dca15afcd4a01",
+    "queue_claim_file_sha256": "a4ff22dfcd835324e780f24809226cfcfe877c4f9da4b867ab67dff76fb5622f",
+    "run_binding_content_sha256": "0cb8fb07f156c5163f30cadfe97b82b77201c17b26040662204418290571d497",
+    "run_binding_file_sha256": "e0723f916d6a299d874b3b58b9c03cb5f723b07d95d24300b65a3cfd6613a03c",
+    "run_log_sha256": "a2db80ad7f093a9f3eaf5927d972d7f07098482a16aec0c615fb58292baa0ff2",
+    "run_log_launch_sha256": "5aca7d4786e9ed158aacc5a78f4c41d2702305117f61d97805d095bf116687c1"
+  },
+  "failure_audit_contract": {
+    "bug": "train_stage_required_probe_only_trainer_child_evidence",
+    "caller_exit_code_overrode_launcher_exit": true,
+    "identity_failure_evidence_present": false,
+    "trainer_child_evidence_present": false,
+    "trainer_is_launch_group_leader": true
+  },
+  "failure_stage": "sim_reset_before_first_learning_iteration",
+  "first_learning_iteration_observed": false,
+  "formal_exact_eligible": false,
+  "job_id": "w_n",
+  "launcher": {
+    "boot_stale_timeout_s": 180,
+    "leader_pgid": 2728928,
+    "leader_pid": 2728928,
+    "leader_starttime_ticks": 335835722,
+    "terminal_exit_code": 125,
+    "terminal_kind": "stale_timeout"
+  },
+  "mechanism_result": null,
+  "next_gate": "fix_stage_aware_failure_audit_then_preregister_fresh_probe10_v9",
+  "other_jobs_launched": [],
+  "pod": "pod1",
+  "physical_gpu": 0,
+  "probe_receipt_set_sha256": "cc9ff5910992c46b9020654a78d8473ceb376bb5d9dc4adc984b90f454b3d9c8",
+  "queue_id": "phase1_balance_action_slew_20260720",
+  "remote_run_dir": "/workspace/codexschema/phase1_balance_action_slew_v8_20260720/runs/w_n",
+  "schema_version": 1,
+  "science_status": "infrastructure_only_no_reward_result",
+  "source_commit": "54c9a62656f0e60e5bb41cbcfa0e5a972b793906",
+  "status": "frozen_failed_pre_first_iteration",
+  "timestamps_utc": {
+    "binding_published": "2026-07-20T04:45:11.250Z",
+    "last_run_log_write": "2026-07-20T04:45:15.781Z",
+    "launcher_finished": "2026-07-20T04:48:25.971Z",
+    "pre_kill": "2026-07-20T04:48:23.783Z",
+    "pre_term": "2026-07-20T04:48:18.325Z",
+    "started": "2026-07-20T04:45:02Z"
+  }
+}

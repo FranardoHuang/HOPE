@@ -17,7 +17,7 @@ pods:
   pod2: {host: 162.43.172.181, port: 13146, gpus: [0, 1, 2]}
 
 namespace:
-  root: /workspace/codexschema/phase1_balance_action_slew_v8_20260720
+  root: /workspace/codexschema/phase1_balance_action_slew_v9_20260720
   no_clobber: true
   automatic_retry: false
 
@@ -270,9 +270,9 @@ stop_contract:
     the launcher-bound pid, pgid, starttime and argv; no broad pkill is allowed.
 
 jobs:
-  - {id: w_n, parent: W, mechanism: N, pod: pod1, gpu: 0, run_name: phase1_balance_slew_w_n_none_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_action_slew_v8_20260720/runs/w_n}
-  - {id: w_c, parent: W, mechanism: C, pod: pod1, gpu: 1, run_name: phase1_balance_slew_w_c_dense_m0p10_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_action_slew_v8_20260720/runs/w_c}
-  - {id: w_h, parent: W, mechanism: H, pod: pod1, gpu: 2, run_name: phase1_balance_slew_w_h_processed_qdes_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_action_slew_v8_20260720/runs/w_h}
-  - {id: v_c, parent: V, mechanism: C, pod: pod2, gpu: 0, run_name: phase1_balance_slew_v_c_dense_m0p10_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_action_slew_v8_20260720/runs/v_c}
-  - {id: v_n, parent: V, mechanism: N, pod: pod2, gpu: 1, run_name: phase1_balance_slew_v_n_none_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_action_slew_v8_20260720/runs/v_n}
-  - {id: v_h, parent: V, mechanism: H, pod: pod2, gpu: 2, run_name: phase1_balance_slew_v_h_processed_qdes_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_action_slew_v8_20260720/runs/v_h}
+  - {id: w_n, parent: W, mechanism: N, pod: pod1, gpu: 0, run_name: phase1_balance_slew_science_retry2_w_n_none_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_action_slew_v9_20260720/runs/w_n}
+  - {id: w_c, parent: W, mechanism: C, pod: pod1, gpu: 1, run_name: phase1_balance_slew_science_retry2_w_c_dense_m0p10_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_action_slew_v9_20260720/runs/w_c}
+  - {id: w_h, parent: W, mechanism: H, pod: pod1, gpu: 2, run_name: phase1_balance_slew_science_retry2_w_h_processed_qdes_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_action_slew_v9_20260720/runs/w_h}
+  - {id: v_c, parent: V, mechanism: C, pod: pod2, gpu: 0, run_name: phase1_balance_slew_science_retry2_v_c_dense_m0p10_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_action_slew_v9_20260720/runs/v_c}
+  - {id: v_n, parent: V, mechanism: N, pod: pod2, gpu: 1, run_name: phase1_balance_slew_science_retry2_v_n_none_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_action_slew_v9_20260720/runs/v_n}
+  - {id: v_h, parent: V, mechanism: H, pod: pod2, gpu: 2, run_name: phase1_balance_slew_science_retry2_v_h_processed_qdes_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_action_slew_v9_20260720/runs/v_h}

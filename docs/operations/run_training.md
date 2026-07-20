@@ -1191,13 +1191,15 @@ python3 scripts/run_phase1_balance_action_slew_queue.py --stage probe
 [`launch manifest`](../DEFINITIONS.md#balance-launch-manifest)：它必须绑定 exact source、当前 queue
 config/runner、A3 asset tree、`model.usd` 及完整 6-file sibling bundle tree、两份动作、题库、W/V checkpoint
 与 parent contract 的 SHA-256。只复制或只哈希 `model.usd` 会漏掉它依赖的 `configuration/`，必须拒绝。
-本轮 exact 文件为 `configs/phase1_balance_action_slew_launch_manifest_20260720.json`；probe9（第九次、
-非科学两-update 合同探针）已在该 manifest 下严格串行完成 6/6，不再是待发射工作。其文件 SHA-256 为
-`688599c2e01653bbb703553223a58e53656da1fe83d76aa7bcaa9f8a3ee75353`，content SHA-256 为
-`97c36e471fb8fc6b93fe212f20846de6697db518192e7a45c6618e5924947e28`，所绑定的 config/runner SHA-256
-分别为 `c7ec75a9917b8bdcf7976186633b021c69fb82e591898dad6b8d5c93cfdb37d5` /
-`24b5f7831ad49c2b88266fed65c37e6e4bcdddaacab28ffa917fce66ef918db1`。把该 exact 路径、文件 SHA 分别放进
-任务专用变量 `BALANCE_LAUNCH_MANIFEST`、`BALANCE_LAUNCH_MANIFEST_SHA256`；不得用占位 hash，也不得把
+当前 fresh v9/probe10 的 exact 文件为
+`configs/phase1_balance_action_slew_launch_manifest_20260720.json`；文件/content SHA-256 分别为
+`664375cb08263e6e7cdd82a3b8dd59e9e9ae6a9756333371677417ec4aa60c4a` /
+`36ceb3c77dc056f4565378a92b03da58865378d86c5849085ba066631cea456c`，所绑定的 config/runner
+SHA-256 分别为 `3bf5085ea8396513d162b9cce249dfb761b39b2827ec722959343c953683e59e` /
+`0fff4515cbe7e62798e8c39f701851c46e68287c7321e7618161fa9dde4789ce`。新 no-clobber 根是
+`/workspace/codexschema/phase1_balance_action_slew_v9_20260720`。这些 bytes 当前只表示
+**source ready / preregistered / not launched**：没有 probe10 命令制品、receipt 或 GPU
+runtime。只有它们进入最新 `origin/main` 后才能按下文重新渲染；不得用占位 hash，也不得把
 清单存在误写成 probe 已启动。
 
 旧 manifest `d7e95130…a2e47` 只启动过 Pod1 W-C probe2；trainer 自然退出，但 outer verifier 错把
@@ -1262,6 +1264,9 @@ processed-q-des/qdot observed 逐 update 精确为 `98304`，恢复资格只要�
 并要求两次结果相同、PGRP 与 `getpgid` 相同。第一次可读 starttime 之后必须不变，所有可读身份必须保持
 exact supervisor PGID，且只接受 exact final trainer argv。identity 失败会 no-clobber 持久化最后身份摘要，
 任意身份读取异常也必须走该 failure path。实际发射前该 manifest 已进入当时最新 `origin/main`。
+该历史 manifest 文件/content SHA-256 是
+`688599c2e01653bbb703553223a58e53656da1fe83d76aa7bcaa9f8a3ee75353` /
+`97c36e471fb8fc6b93fe212f20846de6697db518192e7a45c6618e5924947e28`，不得与 fresh v9 混用。
 
 probe9 按 W-N→W-C→W-H→V-C→V-N→V-H 全局严格串行完成；六格均 natural exit，且每格都在
 下一格前通过 verifier、不可覆盖 receipt 和 exact process/GPU/lock closure。六份 receipt 文件 SHA-256 为：
@@ -1274,18 +1279,27 @@ V-H `b7a24015cc939cd19054be0710b5eead2dfb9954a8d4a9e8669b8980bdeb1ec2`。六格�
 `d736a205b10f1a68375df4fc51af0df547d1c0cf8096e8fa1d1867dabf590ebc`；本地 fresh v8 receipt set 重验通过，set
 SHA-256=`cc9ff5910992c46b9020654a78d8473ceb376bb5d9dc4adc984b90f454b3d9c8`。
 
-probe9 的 failure helper 只包裹 transaction，不再修改 transaction body bytes；multiline payload
-byte-equality regression 会对原始 payload 和嵌入 launcher 的 payload 做逐字节等值检查，防止 probe6 的
-生成错误回归。
+probe9 六收据解锁后，于 `origin/main=d5c08bb91728edfa75801a630531527aeb2ae06c` 渲染的 v8
+long-train 命令制品 `/tmp/phase1_balance_slew_train_commands_d5c08bb9.json` 文件 SHA-256 为
+`be346f94cf6bf738da36804bf59f6a60bc5249f3c6bf5474abf617358db4b42a`。它只发射了 W-N
+（Pod1 物理 GPU0）；日志停在 `Starting the simulation` / `sim.reset()`，从未出现
+`Learning iteration`。locked launcher 的 `180 s` stale watchdog 只收敛 exact 绑定组并以 rc `125`
+结束；外层最终变成 rc `121`，原因是旧 failure audit 误把 probe-only
+`trainer_child_evidence.json` 也当成 train 必需，不是又一个 trainer 错误。人工双重 stable
+快照已确认 leader/exact PGID absent、GPU compute=`0`、Kit/cache lock 无 holder；W-C/W-H/V-C/V-N/V-H
+五格未发射。详细证据见
+[`phase1_balance_action_slew_train_v8_attempt1_result_20260720.json`](../../configs/phase1_balance_action_slew_train_v8_attempt1_result_20260720.json)。
+这是 pre-first-iteration infrastructure failure，没有 Reward 结果；v8 根、命令制品和 W-N 运行证据全部
+冻结，禁止重试或继续发射其余五格。
 
-launcher 与 state/marker/binding/fatal postcheck 属于同一 transaction；任一 transaction failure 都停止整批。
-自动失败审计不发 signal，只对 exact leader PGID 和 mandatory child evidence 中的 child PID 做
-稳定双扫描；它用 `lstat` 探测 optional identity-failure evidence，dangling symlink 或 non-regular path 都
-fail closed，不能当作“不存在”；mandatory child evidence 缺失也 fail closed。返回 rc `121` 表示无法
-证明进程 closure，必须人工审计且禁止下一次
-launch。即使自动审计返回空组，在继续前仍必须人工证明 exact leader PGID、child PID、assigned GPU
-compute context、`/workspace/.kit_boot.lock` holder 与 `/workspace/.cache/ov/_cache.lock` holder/orphan
-全部 absent；不得自动重跑或 broad kill。
+fresh v9 已将失败审计改为 stage-aware：probe 的 supervisor 是 leader，因而必须同时稳定读取
+leader 与 mandatory trainer-child evidence；train 的 locked trainer 本身就是 leader，因而 child/identity-failure
+evidence 必须 absent。审计对 exact PGID（probe 再加 exact child PID）连续两扫，只在 stable empty
+且 train 第二扫后 child evidence 仍 absent 时才报 closure。leader、child 与可选 identity-failure JSON
+均要求 canonical newline、exact producer keys 和严格数值类型；probe 初扫与成功前复扫还必须绑定同一个
+identity-failure snapshot，文件出现、替换或消失都会 fail closed。审计不发任何 signal；它只证明
+closure，不代替 locked launcher 自身有界、exact-target 的 watchdog。任一 transaction 失败仍停止整批，
+禁止 automatic retry 和 broad kill。
 
 以下是 probe9 已使用的历史命令渲染流程。[`--authorize-launch`](../DEFINITIONS.md#balance-command-render-latch)
 在这一步仍只渲染命令、不执行 SSH；probe9/v8 现已完成并冻结，不得重新执行下面的 probe 命令：
@@ -1386,22 +1400,55 @@ python3 scripts/run_phase1_balance_action_slew_queue.py \
   > /tmp/phase1_balance_slew_train_commands.json
 ```
 
-上述命令曾在 `origin/main=16263be5` 渲染 `/tmp/phase1_balance_slew_train_commands.json`，文件 SHA-256=
-`fc6f1ea38a5a823016d83675d56fc41b50b70dbde1bba60602b26d6c743802df`；它是未执行 SSH 的合入前历史制品。
-本运行态更新进入 `main` 后，旧 JSON 的 commit/NOW authority 过期，禁止执行；必须在最新
-`origin/main` 重新 render 并审计。六格长训尚未启动。禁止把新 JSON 整体 pipe 给 shell；必须从
-重新审计的 JSON 逐条取 `ssh_argv` 执行。
+上述 probe9/v8 命令只作历史重现。最后用于 v8 long-train 的 exact 制品是前述
+`be346f94…b42a`；它只发了 W-N 并已冻结失败，不得执行旧 JSON、重发 W-N 或继续其余五格。
 
-最新 `main` 重渲染和审计通过后，六格长训每格都是 `1001` updates，科学里程碑固定为 `+200/+500/+1000`。科学 train
-保持 probe9 的 swap mapping：W-N/W-C/W-H 分别使用 Pod1 物理 GPU0/1/2，V-C/V-N/V-H 分别使用
-Pod2 物理 GPU0/1/2。每个 Pod 内 Kit boot 必须串行，两 Pod 的新 boot 继续错峰；只有前一条已进入真实
-`Learning iteration` 且 boot lock 释放后，才发射该 Pod 下一条。六条都完成 boot 后允许并行训练，并应
-保持六张 GPU 满载直到预登记里程碑或终止条件。无 automatic retry；任一启动失败都停止新发射并先闭合
-exact 身份/GPU/lock 证据。若需停止已运行格，只能按 `.launch`/leader evidence 重验 exact 数字 PGID、PID、
-starttime 和 argv 后先 TERM，条件满足才 KILL；禁止 broad signal。完整接受门、六个唯一 `run_name` 与 Wave B
-下半身老师预留见
-[实验记录](../experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md)。Wave B 尚无审过的 flag 或
-machine contract；M0 moving-teacher input gate 已 reject，不得从本节猜命令或把文件存在写成训练授权。
+fresh v9/probe10 必须从默认 **NO-LAUNCH** plan 开始。只有 config/runner/manifest 与 `NOW` 认领全部进入
+当时最新 `origin/main`、且这四份 authority 在 worktree 中无 tracked 改动时，才允许渲染：
+
+```bash
+set -euo pipefail
+BALANCE_REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$BALANCE_REPO_ROOT"
+python3 scripts/run_phase1_balance_action_slew_queue.py --stage probe \
+  > /tmp/phase1_balance_slew_probe10_plan.json
+
+git fetch origin main
+test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+BALANCE_LAUNCH_MANIFEST="$BALANCE_REPO_ROOT/configs/phase1_balance_action_slew_launch_manifest_20260720.json"
+BALANCE_LAUNCH_MANIFEST_SHA256="664375cb08263e6e7cdd82a3b8dd59e9e9ae6a9756333371677417ec4aa60c4a"
+test "$(sha256sum "$BALANCE_LAUNCH_MANIFEST" | awk '{print $1}')" = "$BALANCE_LAUNCH_MANIFEST_SHA256"
+python3 scripts/run_phase1_balance_action_slew_queue.py \
+  --stage probe --authorize-launch \
+  --launch-manifest "$BALANCE_LAUNCH_MANIFEST" \
+  --expected-launch-manifest-sha256 "$BALANCE_LAUNCH_MANIFEST_SHA256" \
+  > /tmp/phase1_balance_slew_probe10_commands.json
+```
+
+当前不得执行上面生成的 SSH；probe10 仍是 **source/preregistered/not launched**。后续获得运行
+authority 后，操作者只能从 JSON 取单条 `ssh_argv`，不得把整份 JSON pipe 给 shell。probe 必须全局严格
+W-N→W-C→W-H→V-C→V-N→V-H 串行；每格 natural exit、verifier、fresh v9 receipt 与
+exact process/GPU/lock closure 都必须在下一格前完成。不得复用 probe9/v8 receipts。
+
+只有六份 probe10 receipt 均按 exact bytes 收齐到
+`/tmp/phase1_balance_action_slew_probe_receipts_20260720_v9/{job}/probe_receipt.json` 后，才可在同一最新
+`origin/main` authority 下渲染 train：
+
+```bash
+BALANCE_PROBE_RECEIPTS_DIR="/tmp/phase1_balance_action_slew_probe_receipts_20260720_v9"
+python3 scripts/run_phase1_balance_action_slew_queue.py \
+  --stage train --authorize-launch \
+  --launch-manifest "$BALANCE_LAUNCH_MANIFEST" \
+  --expected-launch-manifest-sha256 "$BALANCE_LAUNCH_MANIFEST_SHA256" \
+  --probe-receipts-dir "$BALANCE_PROBE_RECEIPTS_DIR" \
+  > /tmp/phase1_balance_slew_train_v9_commands.json
+```
+
+probe/train 都保持 swap mapping：W-N/W-C/W-H 是 Pod1 GPU0/1/2，V-C/V-N/V-H 是 Pod2 GPU0/1/2。
+long-train 每个 Pod 内 Kit boot 必须串行；前一格进入真实 `Learning iteration` 且 boot lock 释放后才能启动
+同 Pod 下一格。无 automatic retry，任一启动失败立即停止新发射并闭合 exact 身份/GPU/lock；禁止
+broad signal。完整量尺与 Wave B 限制见
+[实验记录](../experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md)。
 
 ### 恢复/等待窗随机横向躯干推力（source 已接线，当前 `NO-LAUNCH`）
 

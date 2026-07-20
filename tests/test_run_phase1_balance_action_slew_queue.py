@@ -113,6 +113,103 @@ class _FakeChild:
         return self.poll_result
 
 
+def _failure_audit_paths(tmp_path: Path) -> tuple[Path, Path, Path]:
+    evidence = tmp_path / "leader.json"
+    evidence.write_bytes(Q._canonical_bytes({
+        "schema_version": 1,
+        "kind": "leader_identity",
+        "leader": {
+            "pid": 2_000_000_000,
+            "pgid": 2_000_000_000,
+            "starttime_ticks": 1,
+        },
+    }) + b"\n")
+    return (
+        evidence,
+        tmp_path / "trainer_child_evidence.json",
+        tmp_path / "trainer_identity_failure.json",
+    )
+
+
+def _write_probe_child_evidence(path: Path) -> None:
+    content = {
+        "schema_version": 1,
+        "child_pid": 1_999_999_999,
+        "expected_pgid": 2_000_000_000,
+        "supervisor_pid": 2_000_000_000,
+        "supervisor_starttime_ticks": 1,
+    }
+    path.write_bytes(Q._canonical_bytes({
+        "schema_version": 1,
+        "content": content,
+        "content_sha256": hashlib.sha256(Q._canonical_bytes(content)).hexdigest(),
+    }) + b"\n")
+
+
+def _write_probe_identity_failure(path: Path) -> None:
+    content = {
+        "schema_version": 1,
+        "child_pid": 1_999_999_999,
+        "expected_pgid": 2_000_000_000,
+        "first_starttime_ticks": 17,
+        "last_identity": {
+            "pid": 1_999_999_999,
+            "pgid": 2_000_000_000,
+            "starttime_ticks": 17,
+            "argv_sha256": "a" * 64,
+        },
+        "reason": "probe trainer exact argv did not appear before exec timeout",
+        "timeout_s": 5.0,
+    }
+    path.write_bytes(Q._canonical_bytes({
+        "schema_version": 1,
+        "content": content,
+        "content_sha256": hashlib.sha256(Q._canonical_bytes(content)).hexdigest(),
+    }) + b"\n")
+
+
+def _rewrite_evidence_document(path: Path, mutate) -> None:
+    document = json.loads(path.read_text(encoding="utf-8"))
+    mutate(document)
+    if type(document.get("content")) is dict:
+        document["content_sha256"] = hashlib.sha256(
+            Q._canonical_bytes(document["content"])
+        ).hexdigest()
+    path.write_bytes(Q._canonical_bytes(document) + b"\n")
+
+
+def _failure_audit_program(evidence: Path) -> str:
+    proc_root = evidence.parent / "empty-proc"
+    proc_root.mkdir(exist_ok=True)
+    return Q.POST_LAUNCH_FAILURE_AUDIT_PROGRAM.replace(
+        'proc_root = Path("/proc")', f"proc_root = Path({str(proc_root)!r})",
+    )
+
+
+def _run_failure_audit(
+    stage: str, evidence: Path, child_evidence: Path, identity_failure: Path,
+    *, between_scans: str | None = None,
+) -> subprocess.CompletedProcess[str]:
+    program = _failure_audit_program(evidence)
+    if between_scans is not None:
+        needle = "    first_child = scan_child()\n    time.sleep(0.05)"
+        assert program.count(needle) == 1
+        program = program.replace(
+            needle,
+            "    first_child = scan_child()\n"
+            f"    {between_scans}\n"
+            "    time.sleep(0.05)",
+            1,
+        )
+    return subprocess.run(
+        [
+            sys.executable, "-B", "-c", program,
+            stage, str(evidence), str(child_evidence), str(identity_failure),
+        ],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+
+
 def _manifest(tmp_path: Path, queue) -> tuple[Path, str, object]:
     sha = lambda value: hashlib.sha256(value).hexdigest()
     content = {
@@ -303,7 +400,7 @@ def test_matrix_is_wv_by_cnh_on_six_unique_gpus():
     }
 
 
-def test_probe9_crossover_order_is_frozen():
+def test_probe10_crossover_order_is_frozen():
     queue = Q.load_queue(QUEUE)
     assert tuple(job["id"] for job in queue["jobs"]) == Q.EXPECTED_JOB_ORDER
     assert Q.EXPECTED_JOB_ORDER[:2] == ("w_n", "w_c")
@@ -970,10 +1067,14 @@ def test_probe_supervisor_routes_proc_identity_error_through_failure_evidence():
 def test_failed_launch_requires_stable_empty_exact_pgid_without_signaling(tmp_path):
     compile(Q.POST_LAUNCH_FAILURE_AUDIT_PROGRAM, "<failure-audit>", "exec")
     program = Q.POST_LAUNCH_FAILURE_AUDIT_PROGRAM
-    assert 'value.get("kind") != "leader_identity"' in program
+    assert '{"schema_version", "kind", "leader"}' in program
+    assert '{"pid", "pgid", "starttime_ticks"}' in program
+    assert "type(value[\"schema_version\"]) is not int" in program
     assert "first != second or observed_pgid != first[1]" in program
     assert 'first[1] == pgid' in program
-    assert "child_pid = int(failure_content.get" in program
+    assert 'failure_content["child_pid"]' in program
+    assert "type(value) is not int" in program
+    assert "fields differ from producer schema" in program
     assert "def scan_child" in program
     assert "trainer_child_residual" in program
     assert "time.monotonic() + 5.0" in program
@@ -983,15 +1084,15 @@ def test_failed_launch_requires_stable_empty_exact_pgid_without_signaling(tmp_pa
     assert "identity_failure_path.exists()" not in program
     assert "identity_failure_path.lstat()" in program
     assert 'stable_bytes(child_evidence_path, "trainer child evidence")' in program
-    assert 'child_content.get("expected_pgid", 0)' in program
+    assert 'child_content["expected_pgid"]' in program
     assert 'failure_child_pid != child_pid' in program
 
     evidence = tmp_path / "leader.json"
-    evidence.write_text(json.dumps({
+    evidence.write_bytes(Q._canonical_bytes({
         "schema_version": 1,
         "kind": "leader_identity",
         "leader": {"pid": 999999, "pgid": 999999, "starttime_ticks": 1},
-    }), encoding="utf-8")
+    }) + b"\n")
     child_content = {
         "schema_version": 1,
         "child_pid": 999998,
@@ -1011,7 +1112,7 @@ def test_failed_launch_requires_stable_empty_exact_pgid_without_signaling(tmp_pa
     dangling.symlink_to(tmp_path / "missing-target.json")
     unsafe = subprocess.run(
         [
-            sys.executable, "-B", "-c", program, str(evidence),
+            sys.executable, "-B", "-c", program, "probe", str(evidence),
             str(child_evidence), str(dangling),
         ],
         text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -1031,6 +1132,236 @@ def test_failed_launch_requires_stable_empty_exact_pgid_without_signaling(tmp_pa
     assert "manual identity audit required" in remote_arg
     assert "trainer_child_evidence.json" in remote_arg
     assert shlex.quote(Q.PROBE_SUPERVISOR_PROGRAM) in remote_arg
+
+
+def test_train_failure_audit_accepts_absent_child_files_and_empty_leader_group(tmp_path):
+    evidence, child_evidence, identity_failure = _failure_audit_paths(tmp_path)
+    completed = _run_failure_audit(
+        "train", evidence, child_evidence, identity_failure,
+    )
+    assert completed.returncode == 0, completed.stderr
+    result = json.loads(completed.stdout)
+    assert result == {
+        "pgid": 2_000_000_000,
+        "residual_members": 0,
+        "status": "POST_LAUNCH_FAILURE_GROUP_EMPTY",
+        "trainer_child_residual": None,
+    }
+
+
+@pytest.mark.parametrize(
+    "case", ["numeric_string", "bool", "outer_extra", "leader_extra"],
+)
+def test_failure_audit_rejects_forged_leader_schema_and_types(tmp_path, case):
+    evidence, child_evidence, identity_failure = _failure_audit_paths(tmp_path)
+    value = json.loads(evidence.read_text(encoding="utf-8"))
+    if case == "numeric_string":
+        value["leader"]["pid"] = str(value["leader"]["pid"])
+    elif case == "bool":
+        value["leader"]["starttime_ticks"] = True
+    elif case == "outer_extra":
+        value["unexpected"] = "forged"
+    else:
+        value["leader"]["unexpected"] = "forged"
+    evidence.write_bytes(Q._canonical_bytes(value) + b"\n")
+    completed = _run_failure_audit(
+        "train", evidence, child_evidence, identity_failure,
+    )
+    assert completed.returncode != 0
+    assert "POST_LAUNCH_FAILURE_GROUP_EMPTY" not in completed.stdout
+
+
+def test_failure_audit_rejects_noncanonical_leader_without_newline(tmp_path):
+    evidence, child_evidence, identity_failure = _failure_audit_paths(tmp_path)
+    value = json.loads(evidence.read_text(encoding="utf-8"))
+    evidence.write_text(json.dumps(value), encoding="utf-8")
+    completed = _run_failure_audit(
+        "train", evidence, child_evidence, identity_failure,
+    )
+    assert completed.returncode != 0
+    assert "launch leader evidence is not canonical JSON" in completed.stderr
+
+
+@pytest.mark.parametrize(
+    ("target", "kind"),
+    [
+        ("child", "regular"),
+        ("child", "symlink"),
+        ("identity", "regular"),
+        ("identity", "symlink"),
+    ],
+)
+def test_train_failure_audit_rejects_unexpected_child_or_identity_file(
+    tmp_path, target, kind,
+):
+    evidence, child_evidence, identity_failure = _failure_audit_paths(tmp_path)
+    path = child_evidence if target == "child" else identity_failure
+    if kind == "regular":
+        path.write_text("unexpected", encoding="utf-8")
+    else:
+        path.symlink_to(tmp_path / "missing-target.json")
+    completed = _run_failure_audit(
+        "train", evidence, child_evidence, identity_failure,
+    )
+    assert completed.returncode != 0
+    assert f"unexpected trainer {'child' if target == 'child' else 'identity failure'} evidence" in completed.stderr
+
+
+def test_probe_failure_audit_requires_then_fully_validates_child_evidence(tmp_path):
+    evidence, child_evidence, identity_failure = _failure_audit_paths(tmp_path)
+    missing = _run_failure_audit(
+        "probe", evidence, child_evidence, identity_failure,
+    )
+    assert missing.returncode != 0
+    assert "trainer child evidence is required for probe failure audit" in missing.stderr
+
+    _write_probe_child_evidence(child_evidence)
+    completed = _run_failure_audit(
+        "probe", evidence, child_evidence, identity_failure,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout)["status"] == "POST_LAUNCH_FAILURE_GROUP_EMPTY"
+
+
+@pytest.mark.parametrize(
+    "case", ["numeric_string", "bool", "outer_extra", "content_extra"],
+)
+def test_probe_failure_audit_rejects_forged_child_schema_and_types(tmp_path, case):
+    evidence, child_evidence, identity_failure = _failure_audit_paths(tmp_path)
+    _write_probe_child_evidence(child_evidence)
+
+    def mutate(document):
+        if case == "numeric_string":
+            document["content"]["child_pid"] = str(
+                document["content"]["child_pid"]
+            )
+        elif case == "bool":
+            document["content"]["expected_pgid"] = True
+        elif case == "outer_extra":
+            document["unexpected"] = "forged"
+        else:
+            document["content"]["unexpected"] = "forged"
+
+    _rewrite_evidence_document(child_evidence, mutate)
+    completed = _run_failure_audit(
+        "probe", evidence, child_evidence, identity_failure,
+    )
+    assert completed.returncode != 0
+    assert "POST_LAUNCH_FAILURE_GROUP_EMPTY" not in completed.stdout
+
+
+def test_probe_failure_audit_accepts_complete_producer_failure_artifact(tmp_path):
+    evidence, child_evidence, identity_failure = _failure_audit_paths(tmp_path)
+    _write_probe_child_evidence(child_evidence)
+    _write_probe_identity_failure(identity_failure)
+    completed = _run_failure_audit(
+        "probe", evidence, child_evidence, identity_failure,
+    )
+    assert completed.returncode == 0, completed.stderr
+    assert json.loads(completed.stdout)["status"] == "POST_LAUNCH_FAILURE_GROUP_EMPTY"
+
+
+@pytest.mark.parametrize(
+    "transition", ["absent_to_valid", "valid_to_other_valid", "valid_to_deleted"],
+)
+def test_probe_failure_audit_binds_one_identity_failure_snapshot(
+    tmp_path, transition,
+):
+    evidence, child_evidence, identity_failure = _failure_audit_paths(tmp_path)
+    _write_probe_child_evidence(child_evidence)
+    candidate = tmp_path / "candidate_identity_failure.json"
+    _write_probe_identity_failure(candidate)
+    if transition == "absent_to_valid":
+        between_scans = (
+            f"identity_failure_path.write_bytes({candidate.read_bytes()!r})"
+        )
+    elif transition == "valid_to_other_valid":
+        _write_probe_identity_failure(identity_failure)
+        _rewrite_evidence_document(
+            candidate,
+            lambda document: document["content"]["last_identity"].__setitem__(
+                "argv_sha256", "b" * 64
+            ),
+        )
+        between_scans = (
+            f"identity_failure_path.write_bytes({candidate.read_bytes()!r})"
+        )
+    else:
+        _write_probe_identity_failure(identity_failure)
+        between_scans = "identity_failure_path.unlink()"
+    completed = _run_failure_audit(
+        "probe", evidence, child_evidence, identity_failure,
+        between_scans=between_scans,
+    )
+    assert completed.returncode != 0
+    assert "snapshot changed during failure audit" in completed.stderr
+    assert "POST_LAUNCH_FAILURE_GROUP_EMPTY" not in completed.stdout
+
+
+@pytest.mark.parametrize(
+    "case",
+    [
+        "missing_field", "numeric_string", "bool", "outer_extra",
+        "content_extra", "last_extra", "timeout_int", "empty_reason",
+    ],
+)
+def test_probe_failure_audit_rejects_forged_failure_artifact(tmp_path, case):
+    evidence, child_evidence, identity_failure = _failure_audit_paths(tmp_path)
+    _write_probe_child_evidence(child_evidence)
+    _write_probe_identity_failure(identity_failure)
+
+    def mutate(document):
+        content = document["content"]
+        if case == "missing_field":
+            del content["reason"]
+        elif case == "numeric_string":
+            content["child_pid"] = str(content["child_pid"])
+        elif case == "bool":
+            content["first_starttime_ticks"] = True
+        elif case == "outer_extra":
+            document["unexpected"] = "forged"
+        elif case == "content_extra":
+            content["unexpected"] = "forged"
+        elif case == "last_extra":
+            content["last_identity"]["unexpected"] = "forged"
+        elif case == "timeout_int":
+            content["timeout_s"] = 5
+        else:
+            content["reason"] = ""
+
+    _rewrite_evidence_document(identity_failure, mutate)
+    completed = _run_failure_audit(
+        "probe", evidence, child_evidence, identity_failure,
+    )
+    assert completed.returncode != 0
+    assert "POST_LAUNCH_FAILURE_GROUP_EMPTY" not in completed.stdout
+
+
+def test_remote_failure_audit_command_binds_explicit_stage(tmp_path):
+    queue = Q.load_queue(QUEUE)
+    path, file_sha, manifest = _manifest(tmp_path, queue)
+    probe = Q.cmd_launch_commands(
+        queue, stage="probe", launch_manifest_path=path,
+        expected_launch_manifest_sha256=file_sha,
+    )
+    receipts = _receipt_dir(tmp_path, queue, manifest)
+    train = Q.cmd_launch_commands(
+        queue, stage="train", launch_manifest_path=path,
+        expected_launch_manifest_sha256=file_sha, probe_receipts_dir=receipts,
+    )
+    for stage, rendered in (("probe", probe), ("train", train)):
+        job = queue["jobs"][0]
+        run_dir = Q._stage_run_dir(queue, job, stage)
+        state = f"{run_dir}/run.log.launch"
+        expected = shlex.join([
+            queue["source"]["python"], "-B", "-c",
+            Q.POST_LAUNCH_FAILURE_AUDIT_PROGRAM, stage,
+            f"{state}.leader.json", f"{run_dir}/trainer_child_evidence.json",
+            f"{run_dir}/trainer_identity_failure.json",
+        ])
+        outer = shlex.split(rendered["jobs"][0]["ssh_argv"][-1])
+        assert outer[:2] == ["bash", "-lc"]
+        assert expected in outer[2]
 
 
 def test_postcheck_failure_always_runs_failure_audit_transaction(tmp_path):
@@ -1059,6 +1390,22 @@ def test_postcheck_failure_always_runs_failure_audit_transaction(tmp_path):
     )
     assert unsafe.returncode == 121
     assert "manual identity audit required" in unsafe.stderr
+
+    combo_root = tmp_path / "rc125-combination"
+    combo_root.mkdir()
+    evidence, child_evidence, identity_failure = _failure_audit_paths(combo_root)
+    audit = shlex.join([
+        sys.executable, "-B", "-c", _failure_audit_program(evidence),
+        "train", str(evidence), str(child_evidence), str(identity_failure),
+    ])
+    preserved = Q._failure_audited_transaction_shell("exit 125", audit)
+    completed = subprocess.run(
+        ["bash", "-c", "set -euo pipefail\n" + preserved],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    assert completed.returncode == 125
+    assert "POST_LAUNCH_FAILURE_GROUP_EMPTY" in completed.stdout
+    assert "manual identity audit required" not in completed.stderr
 
 
 def test_failure_transaction_preserves_multiline_shell_argument_bytes():
@@ -1192,14 +1539,14 @@ def test_duplicate_job_identity_or_resource_is_rejected(tmp_path, kind):
         Q.load_queue(_write_yaml(tmp_path, raw))
 
 
-def test_probe9_crossover_order_change_is_rejected(tmp_path):
+def test_probe10_crossover_order_change_is_rejected(tmp_path):
     raw = _raw()
     raw["jobs"][0], raw["jobs"][1] = raw["jobs"][1], raw["jobs"][0]
     with pytest.raises(Q.QueueError, match="crossover order"):
         Q.load_queue(_write_yaml(tmp_path, raw))
 
 
-def test_probe9_receipt_cannot_move_w_n_back_to_gpu1(tmp_path):
+def test_probe10_receipt_cannot_move_w_n_back_to_gpu1(tmp_path):
     queue = Q.load_queue(QUEUE)
     _, _, manifest = _manifest(tmp_path, queue)
     receipts = _receipt_dir(tmp_path, queue, manifest)
@@ -1210,6 +1557,20 @@ def test_probe9_receipt_cannot_move_w_n_back_to_gpu1(tmp_path):
     target.write_bytes(Q._json_document(envelope))
     with pytest.raises(Q.QueueError, match="identity mismatch: gpu"):
         Q._load_probe_receipts(queue, manifest, receipts)
+
+
+def test_v8_namespace_and_pre_retry2_train_name_are_rejected(tmp_path):
+    raw = _raw()
+    raw["namespace"]["root"] = (
+        "/workspace/codexschema/phase1_balance_action_slew_v8_20260720"
+    )
+    with pytest.raises(Q.QueueError, match="namespace must remain fresh"):
+        Q.load_queue(_write_yaml(tmp_path, raw))
+
+    raw = _raw()
+    raw["jobs"][0]["run_name"] = "phase1_balance_slew_w_n_none_seed3_20260720"
+    with pytest.raises(Q.QueueError, match="fresh science retry2 run_name"):
+        Q.load_queue(_write_yaml(tmp_path, raw))
 
 
 def test_duplicate_yaml_key_and_unknown_field_are_rejected(tmp_path):

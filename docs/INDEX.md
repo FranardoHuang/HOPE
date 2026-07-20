@@ -29,6 +29,8 @@ seed2/3 正手 parsed 高分与 signed composite `0/50` 直接矛盾；signed-fa
 [半秒冲刺五臂](DEFINITIONS.md#half-second-sprint-arms)中的 W/Y 虽已通过真实零写入 plan、fresh `179→31`
 ONNX 结构检查与 CPU 推理，两份 checkpoint lineage 和导出 contract 都是 inexact，因此制品只能诊断；
 本分支对 [NOW 唯一队列](NOW.md#统一工作队列唯一优先级账本)的候选更新是先修 exact lineage，再实现同卷 vendor adapter。
+Wave A v8 科学长训 attempt1 只发 W-N 后在 `sim.reset` 收口、没有首个 iteration 或 Reward 结果；fresh
+v9/probe10 已预注册但尚未发射，六格仍 inconclusive / not adopted；
 ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、标定后机器人物理和新真机测试也都
 没有结果。
 
@@ -58,7 +60,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | ID | 简短状态 |
 | --- | --- |
 | [`EXP-P1-HALF-SECOND-SPRINT`](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md) | 已结束：U/V/W/X/Y 到 `+1000`，W/Y 为诊断候选；真实 plan/export 已通过结构与推理，但 exact-lineage=`0` 阻断 production/vendor |
-| [`EXP-P1-BALANCE-ACTION-SLEW-20260720`](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md) | `ready / manifest-bound / not launched`：Wave A W/V × dense/none/processed-qdes slew 六格；不得绕过 `T0→T1→T2`。Wave B 的 M0 moving teacher 已拒绝，只继续 upper-only control 对静态 v4rg 或 non-demo constraint 的合同审计 |
+| [`EXP-P1-BALANCE-ACTION-SLEW-20260720`](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md) | v8 science attempt1=`infrastructure-only / non-science`：W-N 在 `sim.reset` 收口，余五格未发；fresh v9/probe10 已预注册、未发射，仍 inconclusive / not adopted。不得绕过 `T0→T1→T2`；Wave B M0 moving teacher 继续拒绝 |
 | [`EXP-P1-TASK-REVISION-CUTOVER`](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md) | 旧 rolling 池已精确停止；同一物理球的原子 target/TTS revision、宽准备时间、相位 governor、0.5 秒卷与整数淘汰量尺处于 source 红队，full-scene/行为尚未通过 |
 | [`EXP-P1-FACE-PLANT-SCALEOUT`](experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md) | 16 条 fresh 广度臂已分两波全部精确停止并保留证据；旧 face×plant 矩阵不能选 baseline |
 | [`EXP-P1-FRESH-SZ-STABILITY`](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md) | 实验 completed/rejected；2k 与 4k 四 seed 稳定性都失败，seed4 持续弱；不晋级 baseline |

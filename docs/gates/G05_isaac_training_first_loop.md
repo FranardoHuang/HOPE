@@ -150,21 +150,40 @@ Follow-up note (2026-07-20, W/Y export mechanics pass but exact lineage blocks p
   interpretation boundary: the two passes exclude only deterministic failure of W-N on GPU0 and W-C on GPU1.
   They neither erase probe7/8 nor prove GPU equivalence or any action-slew benefit. This remains a non-scientific
   qualification probe.
-- The verified receipt set unlocked command generation for the same-swapped scientific training mapping. The
-  pre-main command-generation-only artifact `/tmp/phase1_balance_slew_train_commands.json`, rendered against
-  `origin/main=16263be5`, has SHA-256
-  `fc6f1ea38a5a823016d83675d56fc41b50b70dbde1bba60602b26d6c743802df`; it never executed SSH. This runtime-doc
-  commit invalidates that artifact's commit/NOW authority, so it must not be launched. A fresh render and review
-  against the then-current `origin/main` is required. That render must preserve W-N/GPU0 and W-C/GPU1, `1001`
-  updates per cell and the preregistered `+200/+500/+1000` milestones. No trainer has launched; the experiment
-  remains inconclusive and not adopted until scientific results exist.
-- Reproducible probe9 command-render gate (it emits JSON but does not SSH or start a trainer):
+- The verified receipt set first produced a command-generation-only artifact at `origin/main=16263be5`, SHA-256
+  `fc6f1ea38a5a823016d83675d56fc41b50b70dbde1bba60602b26d6c743802df`; it never executed SSH. A fresh v8
+  scientific command artifact rendered under `origin/main=d5c08bb91728edfa75801a630531527aeb2ae06c` has
+  SHA-256 `be346f94cf6bf738da36804bf59f6a60bc5249f3c6bf5474abf617358db4b42a`. Only W-N on Pod1 GPU0 launched,
+  from `2026-07-20T04:45:02Z` through `04:48:25.971Z`. It published an exact binding, then stopped writing its
+  log at `04:45:15.781Z` while still in `sim.reset`; the locked 180 s watchdog closed the exact process group with
+  terminal kind `stale_timeout`, rc `125`. There was no first learning iteration, RSL run directory, checkpoint or
+  Reward result, and the other five cells did not launch.
+- The outer rc `121` was a second infrastructure defect, not a trainer result: the old failure audit required
+  probe-only `trainer_child_evidence.json` even at train stage, where the trainer itself is the group leader. Its
+  bad read overrode rc `125`; stable manual checks then proved zero exact-PGID members, leader, GPU compute and
+  Kit/cache-lock holders. The immutable result is
+  [`phase1_balance_action_slew_train_v8_attempt1_result_20260720.json`](../../configs/phase1_balance_action_slew_train_v8_attempt1_result_20260720.json),
+  SHA-256 `ac09b70a1df89a501165504f4c07158858687127172a8d9d5a6bdf1473e61a75`; launch-spec/leader/run-log/
+  launch-ledger/run-binding-content SHA-256 values are respectively `0604c6ea…96ca`, `a4c6b8fd…a2c4`,
+  `a2db80ad…0ff2`, `5aca7d47…687c` and `0cb8fb07…d497`. v8 is frozen and cannot be retried or completed. This is
+  infrastructure-only evidence, not an N-mechanism or action-slew result.
+- Fresh v9 pre-registers a stage-aware failure audit: probe still requires and fully validates child evidence;
+  train requires probe-only child/identity evidence to be absent before accepting exact group closure. Its root is
+  `/workspace/codexschema/phase1_balance_action_slew_v9_20260720`; config/runner SHA-256 values are
+  `3bf5085ea8396513d162b9cce249dfb761b39b2827ec722959343c953683e59e` /
+  `0fff4515cbe7e62798e8c39f701851c46e68287c7321e7618161fa9dde4789ce`, and manifest content/file SHA-256 values
+  are `36ceb3c77dc056f4565378a92b03da58865378d86c5849085ba066631cea456c` /
+  `664375cb08263e6e7cdd82a3b8dd59e9e9ae6a9756333371677417ec4aa60c4a`. Probe10 preserves the reviewed
+  W-N/GPU0 → W-C/GPU1 → W-H → V-C → V-N → V-H order. It is not launched; all six fresh same-identity receipts
+  must pass local revalidation before any `science_retry2` train command may be generated. G05 remains `Partial`,
+  and the mechanism decision remains inconclusive/not adopted.
+- Reproducible probe10 command-render gate (it emits JSON but does not SSH or start a trainer):
 
   ```bash
   BALANCE_REPO_ROOT="$(git rev-parse --show-toplevel)"
   cd "$BALANCE_REPO_ROOT"
   BALANCE_LAUNCH_MANIFEST="$BALANCE_REPO_ROOT/configs/phase1_balance_action_slew_launch_manifest_20260720.json"
-  BALANCE_LAUNCH_MANIFEST_SHA256="688599c2e01653bbb703553223a58e53656da1fe83d76aa7bcaa9f8a3ee75353"
+  BALANCE_LAUNCH_MANIFEST_SHA256="664375cb08263e6e7cdd82a3b8dd59e9e9ae6a9756333371677417ec4aa60c4a"
   git fetch origin main
   test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
   git cat-file -e origin/main:configs/phase1_balance_action_slew_launch_manifest_20260720.json
@@ -172,14 +191,13 @@ Follow-up note (2026-07-20, W/Y export mechanics pass but exact lineage blocks p
     --stage probe --authorize-launch \
     --launch-manifest "$BALANCE_LAUNCH_MANIFEST" \
     --expected-launch-manifest-sha256 "$BALANCE_LAUNCH_MANIFEST_SHA256" \
-    > /tmp/phase1_balance_slew_probe9_commands.json
+    > /tmp/phase1_balance_slew_probe10_commands.json
   ```
 
-  Inputs are a clean current-main authority checkout, the manifest above and its manifest-bound remote assets and
-  parents. The output is the historical six-job command plan used above; each probe published its own immutable
-  `probe_receipt.json` only after the terminal-checkpoint and ledger verifier passed. All six current-manifest
-  receipts are now present and locally validated, so train command rendering is ready and completed, but execution
-  has not started. No long-run mechanism result has been accepted, and G05 remains `Partial`.
+  Inputs are a clean current-main authority checkout, the fresh v9 manifest above and its manifest-bound remote
+  assets and parents. The output is the six-job probe10 command plan only. No probe10 receipt exists yet, so train
+  command rendering and execution remain blocked. No long-run mechanism result has been accepted, and G05 remains
+  `Partial`.
 
 Follow-up note (2026-07-20, recent Jiayi/Yikang branches audited; no branch-wide merge or behavior promotion):
 
