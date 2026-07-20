@@ -32,7 +32,7 @@ source:
   identity_mode: clean_detached_exact_commit
   # 人话：task.push.* wiring 由并行 agent 落盘，主控合并后才有最终 40-hex commit；
   # 占位符存在时渲染器拒绝出任何 SSH 命令（--plan/--checklist 不受影响）。
-  commit: "f67c844fd4c79b725d878ee0c192204b3290c599"
+  commit: "08ca8e83c34a20f234487ba52b36fafbee8554e3"
   worktree_relative: hope_training/whole_body_tracking
   python: /workspace/hope_isaac_venv/bin/python
   setup_relative: setup_train_env.sh
@@ -347,7 +347,7 @@ force_push_contract:
   duration_control_steps: 15
   delta_v_equiv_mps: {f035: 0.35005, f08: 0.79997}
   matched_velocity_levels: {f035: p035, f08: p08}
-  wiring_confirmed_in_source_commit: false
+  wiring_confirmed_in_source_commit: true
   wiring_note: >-
     人话：task.force_push.* wiring 由并行 agent 落盘；主控把 wiring 合入 main、冻结
     新 40-hex commit、逐字核对 train.py _FORCE_PUSH_KEYS == (enable,

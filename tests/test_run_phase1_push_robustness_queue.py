@@ -521,7 +521,8 @@ def test_force_arm_render_locked_until_wiring_confirmed(tmp_path):
     # 渲染闸门：wiring_confirmed_in_source_commit=false 时 F 臂渲染被拒，
     # 速度臂不受影响；翻 true 后 F 臂渲染出带四键的完整命令。
     value = _rendered()
-    assert value["force_push_contract"]["wiring_confirmed_in_source_commit"] is False
+    # 主控已合并 wiring 并翻闸门；锁死语义用本地副本重现。
+    value["force_push_contract"]["wiring_confirmed_in_source_commit"] = False
     queue = _load(tmp_path, value)
     with pytest.raises(Q.QueueError, match="wiring"):
         Q.render_command(queue, _job(queue, "w_f035"), "probe", "pod1", 0)
