@@ -16,8 +16,8 @@ The remaps are LOAD-BEARING, not cosmetic:
   * the driver's `poses` topic is motion_capture_tracking_interfaces/
     NamedPoseArray -- on the bare /poses name it would collide with the HOPE
     /poses contract (geometry_msgs/PoseArray) as a DDS type mismatch;
-  * the driver broadcasts /tf with raw body names (P1/PPT/...) which would
-    fight the relay's world->P1/PPT transforms and the hope_world statics.
+  * the driver broadcasts /tf with raw body names (P1/Table/...) which would
+    fight the relay's world->P1/Table transforms and the hope_world statics.
 
 Before running against a live rig (see docs/OPTITRACK.md):
   * hostname -> the Motive PC IP on the arena LAN.
@@ -25,7 +25,7 @@ Before running against a live rig (see docs/OPTITRACK.md):
     Bodies ON, NatNet enabled; marker streaming per the ball MODE notes in
     config/optitrack_mct.yaml).
   * rigid-body names + ball tracker are set in config/optitrack_mct.yaml and
-    config/optitrack_relay.yaml (standardized: P1/P2/PPT assets, ball 'Ball').
+    config/optitrack_relay.yaml (standardized: P1/P2/Table assets, ball 'Ball').
 """
 
 from pathlib import Path
@@ -83,7 +83,7 @@ def generate_launch_description():
 
         # Vendored NatNet driver: Motive -> /optitrack/poses (NamedPoseArray),
         # /optitrack/tf, /optitrack/pointCloud. Motive-native rigid bodies
-        # (P1/P2/PPT) and the librigidbodytracker single-marker ball ('Ball',
+        # (P1/P2/Table) and the librigidbodytracker single-marker ball ('Ball',
         # from optitrack_mct.yaml) arrive in the same NamedPoseArray.
         Node(
             package="motion_capture_tracking",
@@ -106,7 +106,7 @@ def generate_launch_description():
         ),
 
         # Relay: /optitrack/poses -> HOPE-standard topics (the relay is the
-        # only /tf authority for ball/PPT/P1/P2).
+        # only /tf authority for ball/Table/P1/P2).
         Node(
             package="hope_bringup",
             executable="optitrack_mct_relay",

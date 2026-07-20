@@ -13,10 +13,11 @@ optitrack_mct_relay:
 
     # STANDARDIZED object names (the HOPE tracked-object taxonomy, see
     # mocap/README.md): Motive rigid-body ASSETS must be named EXACTLY P1 / P2
-    # (+ PPT for the table if used), and the ball entry is named Ball. A
-    # mismatch = no data relayed; check with
+    # (+ Table for the table if used — older notes call it PPT), and the ball
+    # entry is named Ball. A mismatch = no data relayed; check with
     # `ros2 topic echo --once /optitrack/poses` after the driver is up.
-    ppt_object: "PPT"      # table rigid body (optional)
+    table_object: "Table"  # table rigid body (setup/calibration only; not
+                           # streamed during competition)
     p1_object: "P1"        # our robot's base rigid body (standardized)
     p2_object: "P2"        # opponent robot rigid body (standardized)
     # Ball entry name in the NamedPoseArray. MODE A (rigid-body ball): the
@@ -46,6 +47,6 @@ optitrack_mct_relay:
     poses_topic: "/poses"
 
     # Keep ball first so hope_planner's default ball_pose_index=0 works.
-    pose_array_order: ["ball", "PPT", "P1", "P2"]
+    pose_array_order: ["ball", "Table", "P1", "P2"]
     publish_tf: true
     publish_pose_array: true

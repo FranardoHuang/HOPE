@@ -85,7 +85,8 @@ In Motive's Data Streaming pane (see the full table in the
 
 - NatNet **enabled**, Up Axis = **Z** (critical — REP 103 Z-up), Unicast
   preferred, command/data ports 1510/1511.
-- Rigid Bodies **ON**; assets named exactly `P1` (+ `PPT`, `P2` if used) — the
+- Rigid Bodies **ON**; assets named exactly `P1` (+ `Table`, `P2` if used —
+  the table asset is setup/calibration-only; older notes call it `PPT`) — the
   driver streams Motive asset names verbatim and the relay maps by name.
   Assets created/renamed while the bridge runs self-heal in ~1–2 s (the
   vendored driver re-requests the model definition when an unnamed body
@@ -211,7 +212,7 @@ whitelist derived from the route to each peer) and sets
 | Symptom | Cause / fix |
 |---|---|
 | Driver starts but 0 Hz on `/optitrack/poses` | Wrong `hostname`, firewall on UDP 1510/1511, or not on the Motive LAN. `ping` the Motive PC first. |
-| Objects stream but nothing relayed | Motive asset names don't match `optitrack_relay.yaml` (`P1`/`P2`/`PPT`/`Ball`, case-sensitive). Check `ros2 topic echo --once /optitrack/poses`. |
+| Objects stream but nothing relayed | Motive asset names don't match `optitrack_relay.yaml` (`P1`/`P2`/`Table`/`Ball`, case-sensitive). Check `ros2 topic echo --once /optitrack/poses`. |
 | Rigid bodies stream with empty names | Fixed by vendored patch #6 (self-heals in ~1–2 s); if persistent, restart the bridge. |
 | `/P1/pose` positions in the hundreds | Millimetre feed → `position_scale:=0.001`. |
 | `/poses` pauses while `/P1/pose` keeps updating | By design: the ball left the volume / lost tracking; the relay never re-emits a stale ball (protects the planner's velocity fit). |
