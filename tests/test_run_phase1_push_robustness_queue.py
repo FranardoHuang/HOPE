@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib.util
 from pathlib import Path
+import re
 import shlex
 import sys
 
@@ -379,14 +380,20 @@ def test_push_level_drift_rejected(tmp_path):
 # ---------------------------------------------------------------- commit gate
 
 
-def test_checked_in_commit_is_placeholder():
-    # 主控合并 push wiring 后才准填 40-hex；出厂状态必须锁死渲染。
-    queue = Q.load_queue(QUEUE)
-    assert queue["source"]["commit"] == "PENDING_EXACT_COMMIT"
+def _placeholder_path(tmp_path):
+    value = _raw()
+    value["source"]["commit"] = "PENDING_EXACT_COMMIT"
+    return _write_yaml(tmp_path, value)
 
 
-def test_placeholder_commit_accepted_for_plan_and_checklist():
+def test_checked_in_commit_is_exact_40_hex():
+    # 冻结后必须是 40-hex；占位语义由 tmp fixture 继续覆盖。
     queue = Q.load_queue(QUEUE)
+    assert re.fullmatch(r"[0-9a-f]{40}", queue["source"]["commit"])
+
+
+def test_placeholder_commit_accepted_for_plan_and_checklist(tmp_path):
+    queue = Q.load_queue(_placeholder_path(tmp_path))
     plan = Q.cmd_plan(queue)
     assert "PENDING_EXACT_COMMIT" in plan
     checklist = Q.cmd_checklist(queue)
@@ -394,8 +401,8 @@ def test_placeholder_commit_accepted_for_plan_and_checklist():
     assert "[阻塞]" in checklist
 
 
-def test_placeholder_commit_refuses_render():
-    queue = Q.load_queue(QUEUE)
+def test_placeholder_commit_refuses_render(tmp_path):
+    queue = Q.load_queue(_placeholder_path(tmp_path))
     job = queue["jobs"][0]
     with pytest.raises(Q.QueueError, match="placeholder"):
         Q.render_command(queue, job, "probe", "pod1", 0)
@@ -403,9 +410,10 @@ def test_placeholder_commit_refuses_render():
         Q.render_command(queue, job, "science", "pod2", 2)
 
 
-def test_placeholder_commit_refuses_render_via_cli():
+def test_placeholder_commit_refuses_render_via_cli(tmp_path):
+    path = _placeholder_path(tmp_path)
     result = Q.main([
-        "--queue", str(QUEUE), "--render-stage", "probe",
+        "--queue", str(path), "--render-stage", "probe",
         "--render-job", "w_p02", "--pod", "pod1", "--gpu", "0",
     ])
     assert result == 2
