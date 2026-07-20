@@ -45,8 +45,9 @@ duplicated by hand.
 
 ## Mocap frame
 
-The arena motion-capture stream publishes four named rigid bodies — `Ball`,
-`Table`, `P1`, and `P2` — in the same world frame. Each ROS 2 pose contains
+The arena motion-capture stream streams the named rigid bodies — `Ball`,
+`P1`, and `P2` — in the same world frame during competition (a `Table` asset exists for
+calibration only and is not streamed). Each ROS 2 pose contains
 position `(x, y, z)` and quaternion orientation `(qx, qy, qz, qw)`; the current
 no-spin planner consumes only the Ball position. The robot's base yaw comes from
 the robot IMU, not from mocap. The authoritative mocap frame

@@ -13,7 +13,7 @@
 
 ## 1  Compatible Motion Capture Systems
 
-This reference design document creates a reference system compatible with several mainstream motion capture brands — principally **OptiTrack**, **Vicon**, and **青瞳视觉 (CHINGMU)** — and is expected to extend to the other marker-based brands supported by the `motion_capture_tracking` library, including Qualisys, NOKOV, VRPN, FZMotion, and Motion Analysis. These systems differ in their cameras and vendor software — OptiTrack pairs Motive with the NatNet protocol, Vicon uses Vicon Tracker, and Chingmu uses CMTracker/CMAvatar streaming over VRPN, TrackD, DTrack, OpenVR, and its native LiveStream, each shipping C/C++, Python, and ROS SDKs — but this design unifies them under a single ROS 2 REP 103 coordinate frame and `/poses` + `/tf` topic interface. The arena session tracks four named **6-DOF rigid bodies**: `Ball`, `Table`, `P1`, and `P2`. In the current reference path, **both OptiTrack and Chingmu stream these rigid bodies over VRPN** into the same vendored ROS 2 client; Section 6 covers the uniform path (OptiTrack specifics in Section 6.2, Chingmu in Section 6.3).
+This reference design document creates a reference system compatible with several mainstream motion capture brands — principally **OptiTrack**, **Vicon**, and **青瞳视觉 (CHINGMU)** — and is expected to extend to the other marker-based brands supported by the `motion_capture_tracking` library, including Qualisys, NOKOV, VRPN, FZMotion, and Motion Analysis. These systems differ in their cameras and vendor software — OptiTrack pairs Motive with the NatNet protocol, Vicon uses Vicon Tracker, and Chingmu uses CMTracker/CMAvatar streaming over VRPN, TrackD, DTrack, OpenVR, and its native LiveStream, each shipping C/C++, Python, and ROS SDKs — but this design unifies them under a single ROS 2 REP 103 coordinate frame and `/poses` + `/tf` topic interface. During competition the arena streams the named **6-DOF rigid bodies** `Ball`, `P1`, and `P2` (the shipped bringup aggregates only `Ball` into `/poses` by default, so the default `/poses` array has a single pose). A fourth asset, `Table`, is defined for arena setup/calibration only and appears only in training-data recordings — it is **not** tracked or reported during competition. In the current reference path, **both OptiTrack and Chingmu stream these rigid bodies over VRPN** into the same vendored ROS 2 client; Section 6 covers the uniform path (OptiTrack specifics in Section 6.2, Chingmu in Section 6.3).
 
 For the HOPE reference design, the minimum specification is:
 
@@ -58,7 +58,7 @@ The table surface occupies the region: `x ∈ [0, 2.74]`, `y ∈ [−1.525, 0]`,
 OptiTrack Motive defaults to a **Y-up** coordinate system, which is incompatible with ROS 2's Z-up convention. To correct this:
 
 1. In Motive, navigate to **Edit → Settings → Streaming** (or open the Data Streaming pane).
-2. Under **Advanced Network Options**, change **Up Axis** from "Y Axis" to **"Z Axis"**. **Note:** this setting applies to **NatNet** streaming only — Motive's **VRPN** stream (the current HOPE reference path, Section 6.2) is always served in the native Y-up frame, so the OptiTrack VRPN path additionally requires the full-pose frame conversion of Section 6.4 on the ROS 2 side (required engineering — see Section 6.2).
+2. Under **Advanced Network Options**, change **Up Axis** from "Y Axis" to **"Z Axis"**. **Note:** whether this setting also governs Motive's **VRPN** stream (the current HOPE reference path, Section 6.2) is not clearly specified by OptiTrack's documentation and can differ by Motive version and installation — Y-up VRPN output is commonly observed, but must not be assumed. Determine the VRPN stream's actual frame empirically at surveyed table landmarks (Section 6.5) and apply the full-pose frame conversion of Section 6.4 **only if** the stream is verified Y-up (required engineering — see Section 6.2).
 3. Orient the calibration ground plane so that the calibration square's long edge aligns with the desired X-axis direction (toward P2). This sets the world frame orientation during the calibration wand procedure.
 
 Vicon Tracker defaults to Z-up and generally requires no axis correction. However, verify during ground-plane calibration that the X-axis points along the table length toward P2.
@@ -67,7 +67,7 @@ For **青瞳 (Chingmu) CMTracker**, the world frame is fixed by the L-frame / ca
 
 ### 2.3  Table Rigid Body Definition (`Table`; legacy `PPT` name)
 
-Reflective markers or retroreflective patches (at least 10 mm × 10 mm) are attached to the **outer frame** of the table. Collectively, these markers form one rigid body defined in Motive or CMTracker as the asset **`Table`**. Older arena notes may call this same asset `PPT` (Ping-Pong Table); `Table` is the canonical name for the four-body ROS 2 contract.
+Reflective markers or retroreflective patches (at least 10 mm × 10 mm) are attached to the **outer frame** of the table. Collectively, these markers form one rigid body defined in Motive or CMTracker as the asset **`Table`**. Older arena notes may call this same asset `PPT` (Ping-Pong Table); `Table` is the canonical asset name in setup sessions and training-data recordings. **The `Table` asset is a setup/calibration tool only — it is not streamed or reported during competition.**
 
 Placement requirements:
 
@@ -80,13 +80,13 @@ The `Table` rigid body's pivot point must be set to the **near-side left corner 
 The `Table` rigid body serves two purposes:
 
 1. **Origin anchor** — It defines the world frame origin for all other tracked objects.
-2. **Table movement detection** — If the table is bumped or shifted during play, the `Table` pose will deviate from identity, allowing the planner to compensate or flag a re-calibration need.
+2. **Movement verification between sessions** — during setup or verification sessions, a `Table` pose deviating from identity indicates the table was bumped or shifted and the arena needs re-calibration. During competition the table is treated as a static, surveyed world origin: no live `Table` stream exists, so any suspected shift is handled by re-running the verification, not by a runtime topic.
 
 ---
 
 ## 3  Tracked Object Taxonomy
 
-The motion capture system publishes exactly **four named rigid bodies**: `Ball`, `Table`, `P1`, and `P2`. The racket/paddle is explicitly **not** one of them.
+During competition the motion capture system streams the named rigid bodies **`Ball`, `P1`, and `P2`**. The `Table` asset exists only for setup/calibration and in training-data recordings (Section 2.3). The racket/paddle is explicitly tracked by **nothing**, ever.
 
 ### 3.1  Racket Exclusion Policy — Paddle Is NOT Tracked by Motion Capture
 
@@ -110,12 +110,12 @@ The motion capture system publishes exactly **four named rigid bodies**: `Ball`,
 
 | Object ID | Asset type | What is tracked | Markers | Tracking mode |
 |-----------|-----------|-----------------|---------|---------------|
-| **Table** | Rigid body (vendor-tracked) | Ping-pong table frame and world origin | ≥ 4 asymmetric on table outer frame | Vendor 6-DOF |
+| **Table** | Rigid body (setup/calibration only — **not streamed in competition**; poses appear only in training data) | Ping-pong table frame and world origin | ≥ 4 asymmetric on table outer frame | Vendor 6-DOF |
 | **P1** | Rigid body (vendor-tracked) | Player 1 humanoid `base_link` | ≥ 4 asymmetric on torso/pelvis plate | Vendor 6-DOF |
 | **P2** | Rigid body (vendor-tracked) | Player 2 humanoid `base_link` | ≥ 4 asymmetric on torso/pelvis plate | Vendor 6-DOF |
 | **Ball** | Rigid body (vendor-tracked) | Ping-pong ball center pose | Vendor-qualified rigid-body pattern/constellation | Vendor 6-DOF |
 
-No other objects should carry unregistered retroreflective patterns within the tracking volume during play. Give every rigid body a unique asymmetric signature and stable asset name so the vendor solver cannot swap the `Ball`, `Table`, `P1`, or `P2` identities.
+No other objects should carry unregistered retroreflective patterns within the tracking volume during play. Give every rigid body a unique asymmetric signature and stable asset name so the vendor solver cannot swap asset identities.
 
 ---
 
@@ -229,7 +229,7 @@ Node(
 |-------------|--------|---------|
 | Ball 6-DOF pose: position `[x, y, z]` + quaternion `[qx, qy, qz, qw]` at the capture rate | Motion capture → ROS 2 topic | Planner uses position (Stages 1–3); orientation is preserved for validation and future spin-aware estimation |
 | Humanoid `base_link` 6-DOF pose | Motion capture → ROS 2 topic | WBC (Stage 4) for base position commands |
-| `Table` rigid-body pose | Motion capture → ROS 2 topic | Planner (origin reference / drift detection) |
+| `Table` rigid-body pose | Setup/calibration sessions and training-data recordings only — **no competition stream** | Arena calibration (world-origin verification) |
 | Paddle 6-DOF pose | **Forward kinematics** from joint encoders + `base_link` | WBC internal state; **not** from motion capture |
 | Paddle desired state | Planner output (Stage 3) | WBC (Stage 4) as tracking target |
 
@@ -293,9 +293,9 @@ Both vendors stream over **VRPN**, into the same vendored ROS 2 client, through 
 adapter, onto the same planner topic — one uniform path:
 
 ```text
-OptiTrack cameras → Motive (VRPN Streaming Engine): Ball/Table/P1/P2 rigid bodies ─┐
+OptiTrack cameras → Motive (VRPN Streaming Engine): Ball/P1/P2 rigid bodies ───────┐
                                                                                    │ VRPN tracker
-Chingmu cameras → CMTracker/MCServer: Ball/Table/P1/P2 rigid bodies ───────────────┤ reports
+Chingmu cameras → CMTracker/MCServer: Ball/P1/P2 rigid bodies ─────────────────────┤ reports
                                                                                    ▼
   vendored vrpn_mocap → /vrpn_mocap/<sender>/pose_id_<N> (geometry_msgs/PoseStamped)
     → hope_bringup/pose_to_posearray → /poses (geometry_msgs/PoseArray)
@@ -317,7 +317,7 @@ This is the important wire-level fact: `(pitch, yaw, roll)` is an operator-facin
 
 ### 6.2  OptiTrack / VRPN Path
 
-In Motive, define `Ball`, `Table`, `P1`, and `P2` as rigid-body assets, set each pivot (`Ball` at the ball center, `Table` at the world origin, and `P1`/`P2` at each robot's declared `base_link`), and enable the **VRPN Streaming Engine** in the Data Streaming settings. Each rigid body is served as a VRPN tracker under its asset name.
+In Motive, define the competition assets `Ball`, `P1`, and `P2` as rigid bodies, set each pivot (`Ball` at the ball center, `P1`/`P2` at each robot's declared `base_link`), and enable the **VRPN Streaming Engine** in the Data Streaming settings. Each rigid body is served as a VRPN tracker under its asset name. The `Table` asset is used during calibration sessions only (Section 2.3) — disable or delete it before competition streaming so no `Table` tracker is served.
 
 The expected Motive settings are:
 
@@ -325,12 +325,12 @@ The expected Motive settings are:
 |---------|----------------|-------|
 | VRPN Streaming Engine | ✅ Enabled | Serves each rigid body as a VRPN tracker named by asset |
 | VRPN Broadcast Port | 3883 (default) | Must match the `port` parameter of the ROS 2 client |
-| Rigid Bodies | Defined for `Ball`, `Table`, `P1`, `P2` | VRPN streams **rigid bodies only** — markers and skeletons are not carried over VRPN |
+| Rigid Bodies | Defined for `Ball`, `P1`, `P2` (competition); `Table` for calibration sessions only | VRPN streams **rigid bodies only** — markers and skeletons are not carried over VRPN |
 | Zero When Untracked | **Disabled** (recommended) | If enabled, an occluded asset streams an all-zero pose and the downstream consumer sees the ball teleport to the origin. Prefer dropout plus rejection of stale/identity poses (Section 6.5). |
 
 Two OptiTrack-specific caveats:
 
-1. **Frame conversion is mandatory.** Motive's *Up Axis* setting applies to NatNet streaming only; the VRPN stream is served in Motive's native **Y-up** frame regardless. **Required engineering (not included in this repository):** a frame-conversion stage on the ROS 2 side, between the VRPN client and `/poses` — either an option added to the `pose_to_posearray`-style aggregation step, or a small standalone relay node subscribing to each `PoseStamped` topic and republishing it converted. It must apply the fixed Y-up → Z-up **full-pose** transform of Section 6.4 exactly once per sample: rotate the position by Rx(+90°) — `(x, y, z) → (x, −z, y)` — and left-multiply the orientation quaternion by the same fixed rotation (`q_R = Rx(+90°)`, i.e. `(x=√½, y=0, z=0, w=√½)` in `(x, y, z, w)` order), preserving the header stamp and `frame_id`. It should be switchable per deployment (a boolean parameter), since Chingmu sources streaming Z-up natively must pass through unconverted.
+1. **Frame conversion is configuration-specific — verify before enabling.** OptiTrack documents *Up Axis* as selecting the up axis of streamed data, but does not clearly specify whether it applies to the VRPN Streaming Engine; deployments commonly observe Y-up VRPN output regardless of the setting, and behavior can differ by Motive version. Do **not** assume either frame: place the `Ball` asset at surveyed table landmarks (Section 6.5) and read the streamed coordinates. Enable the conversion below **only if** the stream is verified Y-up — applying Rx(+90°) to a stream that is already Z-up double-rotates every pose and silently corrupts the world. **Required engineering (not included in this repository):** a frame-conversion stage on the ROS 2 side, between the VRPN client and `/poses` — either an option added to the `pose_to_posearray`-style aggregation step, or a small standalone relay node subscribing to each `PoseStamped` topic and republishing it converted. It must apply the fixed Y-up → Z-up **full-pose** transform of Section 6.4 exactly once per sample: rotate the position by Rx(+90°) — `(x, y, z) → (x, −z, y)` — and left-multiply the orientation quaternion by the same fixed rotation (`q_R = Rx(+90°)`, i.e. `(x=√½, y=0, z=0, w=√½)` in `(x, y, z, w)` order), preserving the header stamp and `frame_id`. It must be switchable per deployment (a boolean parameter, **off by default**), because Z-up sources — Chingmu configured per Section 2.2, and any Motive installation whose VRPN stream is verified Z-up — must pass through unconverted.
 2. VRPN carries no marker data, so any marker-level diagnostics must use NatNet side by side; this does not affect the reference path.
 
 Then run the same vendored client as for Chingmu, pointed at the Motive host:
@@ -364,7 +364,6 @@ ros2 launch vrpn_mocap client.launch.yaml server:=CHINGMU_SERVER_IP port:=3883
 The client auto-discovers VRPN tracker senders. Its pose callback maps `vrpn_TRACKERCB.pos[0:3]` directly to `PoseStamped.pose.position` and `quat[0:4]` directly to `PoseStamped.pose.orientation.{x,y,z,w}`. With `multi_sensor: true`, typical single-sensor rigid bodies appear as:
 
 ```text
-/vrpn_mocap/Table/pose_id_0  geometry_msgs/PoseStamped
 /vrpn_mocap/P1/pose_id_0     geometry_msgs/PoseStamped
 /vrpn_mocap/P2/pose_id_0     geometry_msgs/PoseStamped
 /vrpn_mocap/Ball/pose_id_0   geometry_msgs/PoseStamped
@@ -376,7 +375,7 @@ Configure `hope_bringup/pose_to_posearray` with the Ball topic first to preserve
 
 ### 6.4  Coordinate and Orientation Conversion
 
-Both vendor outputs must arrive in the canonical REP 103 Z-up frame of Section 2.1. CMTracker can stream Z-up natively (configure it, Section 2.2); Motive's VRPN stream is always in its native Y-up frame (Section 6.2), so the OptiTrack path **always** needs this conversion, implemented per the engineering requirement described in Section 6.2. In every case, transform the **entire pose**, not just its three position values:
+Both vendor outputs must arrive in the canonical REP 103 Z-up frame of Section 2.1. CMTracker can stream Z-up natively (configure it, Section 2.2); the frame of Motive's VRPN stream is installation-dependent and must be verified at landmarks (Sections 6.2 and 6.5) — the conversion is applied only when the stream is verified Y-up, per the engineering requirement described in Section 6.2. Whenever a conversion is applied, transform the **entire pose**, not just its three position values:
 
 ```text
 p_HOPE = R_HOPE_FROM_MOCAP · p_mocap + t_HOPE_FROM_MOCAP
@@ -397,9 +396,9 @@ ros2 topic echo /poses --once                       # the planner input
 
 Confirm all of the following:
 
-- `Table`, each robot base, and `Ball` are distinct, stable rigid bodies; no asset ID swaps occur after occlusion.
+- `Ball` (and `P1`/`P2` where streamed) are distinct, stable rigid bodies; no asset ID swaps occur after occlusion. Confirm **no `Table` topic is being streamed** during competition.
 - `position` is in metres, `orientation` is finite and unit length, and the Ball pivot is at its geometric center.
-- The message `frame_id` and axes match the HOPE world frame — for OptiTrack, verify the Y-up → Z-up full-pose conversion (Section 6.2/6.4) at surveyed table landmarks.
+- The message `frame_id` and axes match the HOPE world frame. **Landmark validation is mandatory before play** for every vendor and installation: place the `Ball` asset at surveyed landmarks (e.g. the net-center line `x = 1.37, y = −0.7625, z = 0.02`) and confirm the streamed coordinates match Section 2.1 — this determines whether the Y-up → Z-up conversion (Sections 6.2/6.4) must be ON or OFF, and catches both a missing conversion and a double rotation.
 - Occlusion produces a **dropout**, not a frozen or all-zero pose: disable Motive's *Zero When Untracked*, and reject stale, identity, or zero-norm poses in the consumer.
 - Capture timestamps are preserved where supported. If `use_vrpn_timestamps: true`, synchronize the mocap server and ROS host with NTP/PTP; otherwise use receipt time and characterize its jitter.
 - `/poses` index order matches the planner configuration. The current no-spin planner reads the Ball position while the full quaternion remains in the message and bag recording.
@@ -415,7 +414,6 @@ Motion Capture System (360 Hz)                         Humanoid (proprioceptive)
   │                                                      │
   ├── Ball 6-DOF rigid-body pose ──▶ HOPE Planner      │
   │      (planner currently uses xyz)  Stages 1–3       │
-  ├── Table 6-DOF ──▶ origin validation   │              │
   │                                        ▼              │
   └── P1 base_link 6-DOF ──────────▶ WBC (Stage 4) ◀── RacketCommand
                                            │              (p_intercept,
@@ -440,7 +438,7 @@ The planner operates entirely in the HOPE canonical world frame defined in Secti
 The HOPE motion capture reference system publishes exactly four named rigid bodies:
 
 1. **`Ball`** — the ping-pong ball as a vendor-tracked 6-DOF rigid body. ROS 2 receives position plus quaternion orientation; the current no-spin planner uses position only.
-2. **`Table`** — the ping-pong table, providing the world frame origin and drift detection (legacy arena notes may call this `PPT`).
+2. **`Table`** — a setup/calibration-only asset anchoring the world frame origin (legacy arena notes may call this `PPT`); it appears in training-data recordings but is **not** streamed during competition.
 3. **`P1`** — the Player 1 humanoid `base_link` rigid body.
 4. **`P2`** — the Player 2 humanoid `base_link` rigid body.
 

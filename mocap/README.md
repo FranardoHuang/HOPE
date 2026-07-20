@@ -1,8 +1,11 @@
 # Motion capture interface
 
 HOPE drives its planner from an external motion-capture system that streams rigid-body
-poses into ROS 2. The canonical arena session publishes four named rigid bodies:
-`Ball`, `Table`, `P1`, and `P2`. This document defines the generic frame and topic contract
+poses into ROS 2. During competition the arena streams the named rigid bodies `Ball`,
+`P1`, and `P2` (the shipped bringup aggregates only `Ball` into `/poses` by default). A
+`Table` asset is used for setup/calibration only and appears only in training-data
+recordings — it is not streamed during competition. This document defines the generic
+frame and topic contract
 the rest of the stack expects. It is deliberately vendor-neutral — any optical
 motion-capture rig that can publish the topics below will work. Configure your own rig's
 network address in the launch files (see `hope_ws/`).
@@ -30,8 +33,8 @@ of truth is
 which derives everything from [`configs/ball_physics.yaml`](../configs/ball_physics.yaml)
 so the simulator, planner, and evaluator share one world.
 
-The canonical arena stream contains four vendor-defined **6-DOF rigid bodies**: `Ball`,
-`Table`, `P1`, and `P2`. Conceptually, the ball
+The competition stream contains vendor-defined **6-DOF rigid bodies** (`Ball`, plus `P1`/`P2`
+where used). Conceptually, the ball
 pose may be inspected as `(x, y, z, pitch, yaw, roll)`, but the ROS 2 wire contract uses
 `geometry_msgs/Pose`: position `(x, y, z)` plus quaternion orientation
 `(qx, qy, qz, qw)`. Euler angles are derived using an explicitly documented axis and rotation
@@ -48,8 +51,8 @@ mocap base-yaw estimate as advisory unless a robot integration contract says oth
 
 | Topic | Type | Rate (typical) | Meaning |
 |-------|------|----------------|---------|
-| `/poses` | `geometry_msgs/PoseArray` | ~300 Hz | Full tracked pose(s) in the world frame. Configure the source order as `Ball`, `Table`, `P1`, `P2` when aggregating all four bodies; the planner reads `Ball` at `ball_pose_index` and currently consumes only its position. |
-| `/tf` (optional) | `tf2_msgs/TFMessage` | ~300 Hz | Named transforms for `world → Ball`, `world → Table`, `world → P1`, and `world → P2`. The shipped VRPN path does **not** publish `/tf`; add a `tf2_ros` broadcaster if your deployment needs named transforms. |
+| `/poses` | `geometry_msgs/PoseArray` | ~300 Hz | Full tracked pose(s) in the world frame. `Ball` first (the shipped bringup aggregates only `Ball`, a single-pose array); add `P1`, `P2` after it when aggregating robot bases. The planner reads `Ball` at `ball_pose_index` and currently consumes only its position. |
+| `/tf` (optional) | `tf2_msgs/TFMessage` | ~300 Hz | Named transforms for `world → Ball` (and `world → P1`, `world → P2` where streamed). The shipped VRPN path does **not** publish `/tf`; add a `tf2_ros` broadcaster if your deployment needs named transforms. |
 | `<robot_base_pose>` | `geometry_msgs/PoseStamped` | ~300 Hz (optional) | Full robot-base pose in the world frame, used for the fixed-station recentring term. Topic name is a launch parameter. |
 
 The planner consumes every incoming mocap sample for its estimator but runs its (more
@@ -70,10 +73,12 @@ stream; do not reconstruct the ball from an unlabeled point cloud on the ROS hos
 
 - **OptiTrack:** enable Motive's **VRPN Streaming Engine** (default port 3883; rigid bodies
   only — markers/skeletons are not carried over VRPN). Two caveats: Motive's *Up Axis*
-  setting applies to NatNet only, so the VRPN stream arrives in Motive's native **Y-up**
-  frame — a full-pose (position + quaternion) Y-up → Z-up conversion is therefore required
-  on the ROS 2 side before `/poses` (required engineering, not included in this repository;
-  the preserved arena design document, Section 6.2, specifies the transform);
+  setting is not clearly documented as applying to the VRPN stream, whose frame can differ
+  by Motive version and installation (Y-up output is commonly observed) — verify the streamed
+  frame at surveyed table landmarks first, and only if it is Y-up apply a full-pose
+  (position + quaternion) Y-up → Z-up conversion on the ROS 2 side before `/poses`
+  (required engineering, not included in this repository; the preserved arena design
+  document, Section 6.2, specifies the transform and the validation);
   and disable *Zero When Untracked* so occlusions surface as dropouts rather than
   all-zero poses.
 - **Chingmu:** CMTracker/MCServer serves the named rigid bodies as VRPN trackers directly;
