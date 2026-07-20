@@ -1,9 +1,11 @@
 # Franco 优先、static 与 motion 的 GVHMR 预注册
 
-- 状态：`completed`（S0/M0 的 GVHMR 结构批已完成；后续 GMR/schema-2 仍未运行）
+- 状态：`completed`（本卷的 S0/M0 GVHMR 结构批已完成；后续 exact GMR 诊断已回收，
+  schema-2 仍未授权）
 - 人类负责人：Franco
 - 执行者：Codex
 - 工作分支：`Franco_codex/motion-gvhmr-prereg-20260713`
+- 创建日期/最后复核日期：2026-07-13 / 2026-07-20
 
 ## 决策与最小目标
 
@@ -21,7 +23,8 @@
 - [`M0`](../DEFINITIONS.md)（motion lateral-teacher batch）：仅四条横移老师，顺序为 left-1、left-2、right-1、right-2。
 
 两批各自拥有不相交的 execution record、state root 和 output namespace；一批失败不授权重试，也不阻塞另一
-批。即使结构审计通过，也不允许 GMR、schema-2、仿真、TOPP、RL、部署或真机。
+批。本 GVHMR 结构批通过本身不自动授权 GMR、schema-2、仿真、TOPP、RL、部署或真机；后续
+exact-GMR 已按独立合同完成结构诊断，授权边界仍以对应卷宗为准。
 
 ## 内容绑定
 
@@ -86,15 +89,16 @@ python3 -m pytest -q \
 结果总账为 `configs/motion_video_gvhmr_s0_m0_results_20260713.json`，SHA-256
 `08b5e8338ac07a20f18034811167c941fed7168703cad4308bc8b2f1e0569726`；它绑定 source、execution record、
 queue state、output、binding 与 structural audit 的逐文件 SHA。该通过只说明 SMPL-X 结构和有限数完整，
-没有 GMR、schema-2、脚接触/末态站距、桌网、自碰、动力学、simulator、RL 或真机结果。
+在本结构批形成时还没有 GMR、schema-2、脚接触/末态站距、桌网、自碰、动力学、simulator、RL 或真机
+结果。后来回收的 exact GMR 只关闭了其中的结构诊断：S0 仍缺高球效果题族，M0 末态 stance
+gate 为 `0/4`，schema-2 及其后各门仍未开。当前结论见
+[exact GMR 卷宗](motion_exact_gmr_s0_m0_20260713.md)。
 
-## 下一步
+## 当时下一步与当前决议
 
-1. 按 [post-GVHMR exact consumer](motion_post_gvhmr_s0_m0_handoff_20260713.md) 先把五份 exact
-   GVHMR 输出收成 immutable handoff，再另建 canonical-beta materialization；不得调用旧的十动作硬编码
-   队列冒充新 lineage；
-2. 在机器人坐标中检查 static 的整轨安全，并检查 motion 的足接触、位移区间和末态初始脚距向量（含前后错位）；
-3. 为 static 建高球/拍压专卷，为 motion 建位移条件合同；结构结果不能提前当击球有效性；
+1. post-GVHMR handoff、canonical-beta 与原 exact-GMR v2 namespace 都已完成；不得重跑或覆盖。
+2. S0 先建独立高球拍压题族；结构结果不能提前当成击球有效性。
+3. M0 保留所需左右位移，同时修复末态回到该动作自己的初始 stance；新候选必须使用新版本 no-clobber 合同。
 4. F1/F2 继续消费既有 Franco 结果；v12 只在上述主线有可比证据后作为 Jiayi 对照进入新版本合同。
 
 GVHMR 命令见[结构批操作文档](../operations/run_motion_video_gvhmr_prereg.md)；结果消费见

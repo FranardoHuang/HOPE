@@ -501,8 +501,9 @@ commit、完整权重树、Python、`nvidia-smi`、validator/argv、独立 stagi
 [GVHMR 预注册实验](../experiments/motion_video_gvhmr_prereg_franco_static_motion_20260713.md)和
 [操作文档](../operations/run_motion_video_gvhmr_prereg.md)。随后 S0 `88/88` 帧、M0 四条
 `105/105、97/97、82/82、96/96` 帧已在 Pod1 通过 exact finite structural audit，详见
-`configs/motion_video_gvhmr_s0_m0_results_20260713.json`。canonical-beta 后来已完成，但尚无 GMR、
-schema-2、足接触/末态脚距、simulator、RL 或真机结果，所以 G08 状态不变，也没有动作晋级。
+`configs/motion_video_gvhmr_s0_m0_results_20260713.json`。canonical-beta 后来已完成；本段当时尚无 GMR
+结果，2026-07-20 回收的 exact-GMR completions 见下方更新。schema-2、simulator、RL 或真机仍无结果，
+所以 G08 状态不变，也没有动作晋级。
 
 这五条结果的下一层已收成两份 exact post-GVHMR handoff，并完成 runtime no-clobber consume；S0/M0
 handoff exact SHA 分别为 `d57a93e0...a1054` / `60c55150...088ef`。其后的 canonical-beta 也已拆成两份
@@ -511,7 +512,8 @@ handoff exact SHA 分别为 `d57a93e0...a1054` / `60c55150...088ef`。其后的 
 `964a7333...f1be3` / `5cef05f7...71a65`，non-beta 内容全 bit-exact。S0 的
 `contact_truth`/效果继续为空且禁止借用拉球题；M0 的末态约束明确为去除公共 root、对齐 heading 后的
 `right_foot_xy - left_foot_xy` 初始/终态稳健向量，横向站距与前后错位都要保留，脚并拢不算成功。
-foot-site mapping 和数值容差已由下段 exact-GMR plan 预注册，但尚无 runtime 结果。详见
+foot-site mapping 和数值容差已由下段 exact-GMR plan 预注册；本段当时尚无 runtime 结果，当前以
+2026-07-20 completion 回收更新为准。详见
 [post-GVHMR 卷宗](../experiments/motion_post_gvhmr_s0_m0_handoff_20260713.md)。
 canonical-beta 的计划、运行边界与未来 A3 脚距 null contract 见
 [canonical-beta 卷宗](../experiments/motion_canonical_beta_s0_m0_20260713.md)。
@@ -608,7 +610,7 @@ pairs 排除，enabled-robot 实际穿透仍 hard fail。dry-run 也必须在 ru
 **不是**数学连续时间证书，且不含桌网或动力学。两次 Pod2 runtime 假拒绝修复后，exact
 `main@7dec698` 的 full `dry-run` 与唯一 no-clobber audit 已通过：1201 样本自碰/`<5 mm` 自打/warning
 =`0/0/0`，最小余隙 `0.1382918358 m`，certificate SHA-256 `6840df34...db60`。B 现只解锁独立桌网
-整轨门，动力学或训练仍不得越级；G08 继续 Partial。见
+整轨门，动力学或训练仍不得越级；G08 仍是 `Research track`，该动作子项未闭合。见
 [L1 卷宗](../experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-VENDOR-L1.md)和
 [L1 操作](../operations/run_motion_backhand_loop_b_vendor_l1_safety.md)。
 
@@ -671,7 +673,8 @@ finite `distance>=threshold`、non-finite fail closed，只让 epsilon 留在 re
 source/static PASS。随后 clean Pod2 `main@c047ea7` 的 full dry-run 与唯一 v4 audit 均通过：`1201 @ 400 Hz`
 逐帧 `37×4` 对，hard/warning/unsafe=`0/0/0`；certificate `93fd5435...9b0e7` 对 saturated reporting 只声明
 `0.099999999999 m` 下界且 pair/midpoint/time=null，已由独立复核接受。B 因此完成桌网有限密扫并只解锁
-下一道 vendor 动力学/平衡门；连续时间、动力学行为、RL、Gate3 与真机仍未证明，所以 G08 保持 Partial。
+下一道 vendor 动力学/平衡门；连续时间、动力学行为、RL、Gate3 与真机仍未证明，所以 G08 仍是
+`Research track`，该动作子项未闭合。
 见[桌网实验卷宗](../experiments/2026-07/EXP-MOTION-BACKHAND-LOOP-B-TABLE-NET.md)和
 [操作文档](../operations/run_motion_backhand_loop_b_table_net_clearance.md)。
 
@@ -709,7 +712,18 @@ S0/M0 两份 `static-v2` 再次 PASS，plan SHA exact，但合同写死的
 consumer 前。恢复审计又确认 Pod2 缺 exact GMR tree/283 MB bundle、SMPLX/model/mapping 和七份 S0/M0
 canonical 输入；现有 Isaac venv 只与冻结 234 行 snapshot 精确重合 87 行。两个 v2 root 与 shared lock
 前后均 absent；没有 GMR 或脚距结果，也不能偷换另一 Python。下一步是权威资产恢复后新建隔离、可重建
-runtime v3，不是重跑 v2 或放宽动作门。G08 保持 Partial。
+runtime v3，不是重跑 v2 或放宽动作门。这是当时基于 Pod2 单点证据的恢复设想；2026-07-20 回收 Pod1
+completion 后，当前下一步改由下节的动作/stance 修复决定。G08 仍是 `Research track`。
+
+### 2026-07-20 S0/M0 exact-GMR completion 回收
+
+后来从 Pod1 回收的 report-last manifests 纠正了“两个 v2 root 全局 absent / 未 consume”的推断；上段
+Pod2 rc127 仍是另一处真实失败 location。S0/M0 都已达到 `complete_exact_gmr_diagnostic`：S0 的
+88-frame 输出通过 finite/30 Hz/31 DoF 结构门，但 ball contact/effectiveness 仍为 null，必须另建高球拍压
+题族；M0 四份 moving 输出通过同一结构门，却全部失败 frozen stance gate (`0/4`)，因此 input-gate
+rejected/no-RL。下一步是保留横移同时修复末态回到各自动作初始 stance，再重走 exact GMR；两批的
+formal/schema2/training/hardware 都仍为 false，G08 状态不变。详细 manifest/output SHA 与逐条失败值只在
+[exact GMR 卷宗](../experiments/motion_exact_gmr_s0_m0_20260713.md)维护。
 
 ## 文档路由更新（2026-07-12）
 

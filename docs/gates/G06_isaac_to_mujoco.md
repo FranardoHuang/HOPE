@@ -62,6 +62,29 @@ This gate is the sim-to-sim bridge before real deployment.
 
 ## Current State
 
+### 2026-07-20 W/Y export is diagnostic-only; lineage precedes the vendor adapter
+
+Both real W/Y zero-write plans passed on exact `origin/main@a0c1284`, and fresh `179→31` ONNX artifacts passed
+an independent structural check plus finite CPU ONNX Runtime inference. W's ONNX SHA-256 is
+`ee0e2e83c8f3dc8302fcef609fe13b2feaf69e247e39f405d1ea6c30b652d970`; Y's is
+`72da43d96ab9dd95e1da6aba2ed548ad26e61863b70cf8120c120132b7b8f995`.
+
+The promotion gate nevertheless fails closed before vendor behavior: both checkpoints record
+`training_contract_lineage_exact=0`, and both ONNX exports record `training_contract_exact=0`. They are useful
+diagnostic artifacts, not deployable policies. The local prerequisite chain is:
+
+1. remediate or retrain W/Y with exact checkpoint lineage and re-export an exact-contract ONNX;
+2. implement the frozen K100-to-serve/`task_revision`/production-planner/C++-runner/vendor-MJCF adapter;
+3. run and preserve all 100 vendor rows before comparing or promoting either candidate.
+
+This is a dependency description, not a competing priority list; global execution order is owned only by
+[`docs/NOW.md`](../NOW.md).
+
+The native MuJoCo trainer remains valuable, but it follows this lineage-and-adapter chain rather than replacing
+it. A separate processed-qdes action-slew matrix may run as a single-swing diagnostic; it cannot satisfy this
+Gate or bypass the continuous-recovery order `T0 → T1 → T2`. G06 remains `Partial`, and `Gate3-D0` remains
+`Open`.
+
 ### 2026-07-19 demo-priority vendor same-paper is preparation-only
 
 A local read-only source audit found no runnable production path from the 0.5-second timing paper to
@@ -223,14 +246,18 @@ Not done:
 
 ## Next Steps
 
-1. Implement the frozen evaluator semantics independently in a native MuJoCo `rsl_rl VecEnv`; keep
+1. Remediate W/Y checkpoint lineage and produce a fresh ONNX with both checkpoint lineage and exported
+   training contract exact; keep the current inexact artifacts diagnostic-only.
+2. Implement the frozen 100-row vendor adapter, then run the exact same paper through serve generation,
+   same-ball `task_revision`, production planner, C++ runner, vendor MJCF and effective plant.
+3. Implement the frozen evaluator semantics independently in a native MuJoCo `rsl_rl VecEnv`; keep
    trainer and evaluator imports separate, pass reset/action-tape parity plus an independent reward
    replay canary, then require one finite PPO smoke before any long run.
-2. Preregister and run the same-checkpoint frozen-control versus warm-start-fine-tune multi-seed
+4. Preregister and run the same-checkpoint frozen-control versus warm-start-fine-tune multi-seed
    held-out K100 paper; do not let the training environment grade itself.
-3. Record the accepted sim2sim numbers for the shipped checkpoint (implicit cross-check + explicit
+5. Record the accepted sim2sim numbers for the shipped checkpoint (implicit cross-check + explicit
    clipped-PD gate + `--deploy-faithful` protocol) in this gate.
-4. When the mocap→planner bridge lands, extend the MuJoCo rehearsal to consume live
+6. When the mocap→planner bridge lands, extend the MuJoCo rehearsal to consume live
    `/racket/command` targets instead of sampled planner-equivalents
    (`docs/operations/run_shared_interface_rehearsal.md`).
 

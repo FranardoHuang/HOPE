@@ -4,8 +4,9 @@
 它只授权下一步另行预注册的 canonical-beta materialization，不运行 GMR、schema-2、仿真、训练或真机。
 
 > 2026-07-13：两批 `consume` 已完成。S0 handoff 是 4,970 bytes / `d57a93e0...a1054`，M0 是
-> 9,242 bytes / `60c55150...088ef`。不要删除 output root 或重跑 `consume`；当前下一步入口是
-> [`run_motion_handoff_canonical_betas.md`](run_motion_handoff_canonical_betas.md)。下方 consume 命令只保留为
+> 9,242 bytes / `60c55150...088ef`。不要删除 output root 或重跑 `consume`；
+> [`run_motion_handoff_canonical_betas.md`](run_motion_handoff_canonical_betas.md) 现在是已完成层的历史复现入口，
+> 当前结论路由到 [exact-GMR 卷宗](../experiments/motion_exact_gmr_s0_m0_20260713.md)。下方 consume 命令只保留为
 > 首次执行的可复现记录。
 
 详细证据与边界见
@@ -78,10 +79,12 @@ consumer 先完成所有验证，再以新目录 claim exact output root，以 `
 fsync。root 已存在会 fail closed；不得删除后重跑。中断后即使只留下 output root，也视为保留的失败证据，
 需新版本 prereg 和新 root 才能重试。
 
-## 5. handoff 后仍然 blocked 的项目
+## 5. handoff 完成时的 blocker 与当前边界
 
 - S0 没有真实触球，不能使用拉球题或声称高点拍压有效；
-- M0 没有 robot foot stance 结果；GMR 后必须预注册 foot-site mapping、二维初始/终态脚间向量和数值容差，
-  更窄或双脚并拢必须失败；
-- 新五条 canonical-beta PT 仍未物化；
-- GMR、schema-2、L0、vendor L1/dynamics、RL、Gate3 和硬件均未授权。
+- M0 后来已有 robot foot stance 结果，但冻结门为 `0/4`；更窄或双脚并拢仍必须失败；
+- 新五条 canonical-beta PT 与 exact-GMR 诊断已完成，旧 namespace 不得重跑；
+- schema-2、L0、vendor L1/dynamics、RL、Gate3 和硬件均未授权。
+
+当前 S0/M0 exact-GMR 结论只见
+[该实验卷宗](../experiments/motion_exact_gmr_s0_m0_20260713.md)。

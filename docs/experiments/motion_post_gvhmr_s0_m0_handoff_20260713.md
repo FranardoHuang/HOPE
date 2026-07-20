@@ -3,7 +3,8 @@
 - 状态：`completed`
 - 人类负责人：Franco
 - 执行者：Codex
-- 证据等级：E1（机器合同与 host dry-run）；上游 GVHMR 结构结果另有 E2 证据
+- 证据等级：E2（真实 runtime `inspect/consume` 与不可覆盖 handoff 已完成）
+- 创建日期/最后复核日期：2026-07-13 / 2026-07-20
 
 共享缩写见[术语与人话对照](../DEFINITIONS.md)。本记录只回答一个问题：已经完成的
 [`S0`](../DEFINITIONS.md)（单条反手高点拍压结构批）和
@@ -83,12 +84,14 @@ python3 -m pytest -q tests/test_consume_motion_post_gvhmr_exact.py
 2026-07-13 host 结果：两份 static contract PASS；专项测试 `8 passed`。随后 exact runtime
 `inspect/consume` 已在证据机完成：S0 handoff 为 4,970 bytes、SHA-256
 `d57a93e08513c617f4316924e2ef8d9045e26f960c18c284564b7387bd9a1054`；M0 handoff 为 9,242 bytes、
-SHA-256 `60c551503571ae522f1396ee2f9e8617aca53dca1f10dd031b7ee27fe9d088ef`。这关闭的是 lineage handoff，
-不是 canonical-beta/GMR 结果；下一步另见
-[canonical-beta 实验](motion_canonical_beta_s0_m0_20260713.md)。
+SHA-256 `60c551503571ae522f1396ee2f9e8617aca53dca1f10dd031b7ee27fe9d088ef`。本 handoff 本身关闭的是
+lineage，不是 canonical-beta/GMR 结果；下游后来已完成 canonical-beta 与 exact-GMR 诊断，
+分别见 [canonical-beta 实验](motion_canonical_beta_s0_m0_20260713.md)与
+[exact-GMR 卷宗](motion_exact_gmr_s0_m0_20260713.md)。
 
 ## 结论与未宣称事项
 
 采用这两份合同作为 S0/M0 的唯一 post-GVHMR 入口；不采用目录扫描、basename 推断或手工拼 result
-manifest。当前没有 canonical-beta 新输出、GMR、schema-2、L0/L1、动作安全、击球效果、RL、Gate3
-或真机结论。完整运行命令见[操作文档](../operations/run_motion_post_gvhmr_exact.md)。
+manifest。当时本层没有 canonical-beta 新输出或 GMR；当前两层都已有诊断证据，但 schema-2、
+L0/L1、动作安全、击球效果、RL、Gate3 与真机仍无结论。完整运行命令见
+[操作文档](../operations/run_motion_post_gvhmr_exact.md)。

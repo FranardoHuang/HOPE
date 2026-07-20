@@ -88,8 +88,8 @@ is not required on a fresh Pod.
 ├── hope_isaac_venv/              # SHARED venv: Isaac Sim 4.5 + Isaac Lab 2.1 + torch 2.7.0 cu128 — read-only by convention
 ├── IsaacLab/                     # SHARED Isaac Lab 2.1.0 source — do not edit
 ├── shared/motions/, shared/assets/   # shared motion clips + generated agibot_a3 assets
-├── <name>/nohope                 # your own clone, your own branches (yikang=GPU0, franco=GPU1, jiayi=GPU2)
-├── <name>/env.sh                 # source in EVERY shell before working
+├── <name>/nohope                 # your own clone/branches; GPU lane comes from NOW/experiment queue, never a permanent owner map
+├── <name>/env.sh                 # source in EVERY shell; any CUDA pin is the current lane, not ownership
 ├── setup_user.sh                 # provision a new user: bash setup_user.sh <name> <gpu> [git_name] [git_email]
 ├── smoke_test/                   # environment smoke suite + logs
 └── README_MULTIUSER.md           # pod-side rules (authoritative)
@@ -98,7 +98,7 @@ is not required on a fresh Pod.
 Every shell session:
 
 ```bash
-source /workspace/<name>/env.sh   # activates venv, puts YOUR clone first on PYTHONPATH, pins YOUR GPU
+source /workspace/<name>/env.sh   # activates venv, puts YOUR clone first on PYTHONPATH, may pin the currently assigned GPU
 cd $HOPE_WBT                      # = /workspace/<name>/nohope/hope_training/whole_body_tracking
 ```
 
@@ -187,6 +187,161 @@ kill -KILL -- "-$PGID"
 无 trainer、GPU 0 MiB/0%，train/eval checkout 仍 clean exact。与已停 trainer 对应的四个等待型
 fresh curve worker 在 childless/lock-free 复核后也只按各自 PGID TERM 退出。
 
+<a id="2026-07-20-action-slew-wave-a-启动前状态与发射纪律"></a>
+## 2026-07-20 action-slew Wave A 启动前状态与发射纪律
+
+这里的 [Wave A](../DEFINITIONS.md#balance-stability-waves) 只指 W/V action-slew 六格；下半身 Wave B
+不共享本节的发射授权。M0 四份 moving exact-GMR 已因 `stance_passed=0/4` 且 formal/schema2/training/hardware
+均未授权而输入门拒绝，禁止把它们填到空闲 GPU；immediate Wave B 只保留静态 v4rg 或 non-demo 设计。
+
+2026-07-20 的只读快照中，两 Pod 的六张 RTX 5090 都没有 NVML compute application，显存为 `0 MiB`、
+利用率为 `0%`；这里的“空”只指 GPU trainer/Kit compute，不替代对普通 shell、ROS 或其他无 GPU 进程的
+所有权审计。这个快照会过期，每次发射前必须重新查 `nvidia-smi`、exact process group 和 Kit lock。
+
+同日首次预检说明“GPU 空”还不等于 ready；随后按 no-clobber staging 和 exact-PGID 规则闭合了输入与残留：
+
+| 发射输入/主机状态 | 首次发现 | 2026-07-20 闭合态 | 仍须由 launch gate 重验 |
+| --- | --- | --- | --- |
+| clean detached source C1 `54c9a626…3906` | 两台 queue checkout 均缺 | 两台 exact checkout 已恢复 | clean/detached HEAD 与 required-file SHA |
+| W/V parent 完整 run | Pod1 完整；Pod2 两份均缺 | Pod2 W/V 已完整 staged 到 queue exact 路径 | 两个 checkpoint、contract 与四类 finite state；remote manifest gate 会在每台都验 W/V |
+| preconverted A3 USD | Pod1 6-file bundle 完整；Pod2 整包缺失 | Pod2 完整 6-file bundle 已 staged | `model.usd` SHA 加 bundle file-count/bytes/tree SHA；不能只验单文件 |
+| 正/反手动作与 schema-3 train bank | 两台 SHA 一致 | 未改动 | manifest 仍逐项绑定 |
+| A3 runtime asset 候选树 | 两台均为 46 files / `15,378,264 B`，tree SHA `a9512461…a90` | source exact path 已恢复 | 在 queue exact path 重算，不能借用候选路径结论 |
+| 普通进程审计 | Pod1 有 PGID `2010084`、`2010190`、`2010154`，其中 planner 独立在 `2010190` | 三个 exact PGID 已按身份对账停止并复核 absent | 每次发射仍重查 PID/PGID/starttime/argv，不能从历史 absent 外推 |
+
+这次闭合只恢复了发射输入，没有启动 probe。不得把 staging 成功本身签成 reviewed authority，也不得先启动
+再补 SHA。queue/runner bytes 冻结后的独立清单已经写入
+[`phase1_balance_action_slew_launch_manifest_20260720.json`](../../configs/phase1_balance_action_slew_launch_manifest_20260720.json)，
+文件 SHA-256=`d7e951301e8df58a40e5566d45375afc990201a4a40265e683ef1990df2a2e47`；清单存在只授权命令渲染，
+每台真实发射前仍须由 remote preflight 对 exact 路径重算全部哈希、tree/count/bytes、source clean HEAD 与 GPU。
+
+两 Pod 首次预检时都存在 `/workspace/.cache/ov/_cache.lock`，且 `fuser` 没有 holder；紧邻闭合操作重验后，
+两个 exact orphan lock 已删除。历史删除不保证下一次 boot 时仍无锁；如果文件重新出现，必须先证明没有
+live holder 和未知 Kit，再只删除这个 exact 文件：
+
+```bash
+if [ -e /workspace/.cache/ov/_cache.lock ]; then
+  if fuser -s /workspace/.cache/ov/_cache.lock; then
+    echo "refuse: Kit cache lock has a live holder" >&2
+    exit 1
+  fi
+  rm -- /workspace/.cache/ov/_cache.lock
+fi
+```
+
+这不授权删除任何其他 cache、run directory、checkpoint 或日志。若进程/lock 所有权不清，停止而不是用
+`pkill`、`killall` 或模式匹配清场。
+
+本轮 [`W/V × C/N/H`](../DEFINITIONS.md#balance-action-slew-matrix) queue 默认 **NO-LAUNCH**。先在 clean
+本地 checkout 验证计划；远端训练 checkout 必须是 clean detached
+`54c9a62656f0e60e5bb41cbcfa0e5a972b793906`：
+
+```bash
+BALANCE_REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$BALANCE_REPO_ROOT"
+
+python3 scripts/run_phase1_balance_action_slew_queue.py --stage probe
+```
+
+`--stage probe` 表示六格各 `4096 env × 2 update` 的非科学完整场景探针；默认输出会显示 manifest gate
+blocked。先独立生成并审过 [`launch manifest`](../DEFINITIONS.md#balance-launch-manifest)，把 exact 路径和
+文件 SHA 放入任务专用 `BALANCE_LAUNCH_MANIFEST`、`BALANCE_LAUNCH_MANIFEST_SHA256`。随后才可用
+[`--authorize-launch`](../DEFINITIONS.md#balance-command-render-latch)渲染命令；runner 自身会重复检查同一
+`origin/main` authority，脚本仍不会自行 SSH、写远端或启动进程：
+
+```bash
+set -euo pipefail
+git fetch origin main
+test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+git cat-file -e origin/main:configs/phase1_balance_action_slew_launch_manifest_20260720.json
+python3 - <<'PY'
+import subprocess
+
+text = subprocess.check_output(
+    ["git", "show", "origin/main:docs/NOW.md"], text=True
+)
+title = "- **[11｜P1] 稳定机制 Wave A/B。**"
+start = text.find(title)
+if start < 0:
+    raise SystemExit("Wave A/B claim missing from origin/main NOW")
+end = text.find("\n- **[", start + len(title))
+entry = text[start:] if end < 0 else text[start:end]
+required = (
+    "责任人 franco；执行者 Codex；执行分支",
+    "Franco_codex/balance-ablation-round-20260720",
+    "phase1_balance_action_slew_20260720",
+)
+if any(value not in entry for value in required):
+    raise SystemExit("Wave A/B owner/executor/branch not bound in one NOW entry")
+PY
+
+python3 scripts/run_phase1_balance_action_slew_queue.py \
+  --stage probe --authorize-launch \
+  --launch-manifest "$BALANCE_LAUNCH_MANIFEST" \
+  --expected-launch-manifest-sha256 "$BALANCE_LAUNCH_MANIFEST_SHA256" \
+  > /tmp/phase1_balance_slew_probe_commands.json
+```
+
+以上 `origin/main` 四道门任一失败时，只能保留计划 JSON，禁止执行 SSH。不要把 JSON 整体 pipe 给 shell。
+队列固定 W 三格到 Pod1 GPU0/1/2、V 三格到 Pod2 GPU0/1/2；由操作者
+逐条执行 `jobs[].launch_command`。每个 Pod 在任一时刻只允许一个 Kit 处于 boot/import，必须看到前一条
+真实 `Learning iteration`、host boot lock 已释放后，才启动该 Pod 的下一条；两个 Pod 的首个 boot 也错峰
+约 60 秒。boot 后 trainer 可以并行。每条都要保留 `.launch` sidecar 并核对 PID、PGID、leader starttime、
+argv、source HEAD=`54c9a62656f0e60e5bb41cbcfa0e5a972b793906`、物理 GPU、first iteration 和 fatal scan。
+
+probe 必须自然退出到 absolute milestone `[6701]` 的 `model_6701.pt`（exclusive iteration upper
+bound=`6702`）。退出后逐条执行原 JSON 的 `jobs[].probe_verifier_command`；它会在确认 policy/value/full
+optimizer/two normalizers finite、C/N/H exact hard-contract/applied markers、lineage=`0`，以及 6700/6701
+processed-q_des、completion/fall/legal-return、ready-tilt、qdot tag 的非零分母与守恒账、
+无 fatal、leader/PGID/GPU 均释放后，向 `jobs[].probe_receipt_remote_path` 不可覆盖地写收据。不能套用
+fresh-probe 相对 milestone `[1]`。将六份收据逐字节复制成本地
+[`probe receipt set`](../DEFINITIONS.md#balance-probe-receipt-set)，exact 布局为
+`$BALANCE_PROBE_RECEIPTS_DIR/{w_c,w_n,w_h,v_c,v_n,v_h}/probe_receipt.json`。
+
+没有 `--probe-approved` 人工捷径。只有同一 manifest 下六份收据全部通过本地重验，才允许生成
+`+200/+500/+1000` 科学 continuation 命令；脚本仍不执行：
+
+```bash
+set -euo pipefail
+git fetch origin main
+test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+git cat-file -e origin/main:configs/phase1_balance_action_slew_launch_manifest_20260720.json
+python3 - <<'PY'
+import subprocess
+
+text = subprocess.check_output(
+    ["git", "show", "origin/main:docs/NOW.md"], text=True
+)
+title = "- **[11｜P1] 稳定机制 Wave A/B。**"
+start = text.find(title)
+if start < 0:
+    raise SystemExit("Wave A/B claim missing from origin/main NOW")
+end = text.find("\n- **[", start + len(title))
+entry = text[start:] if end < 0 else text[start:end]
+required = (
+    "责任人 franco；执行者 Codex；执行分支",
+    "Franco_codex/balance-ablation-round-20260720",
+    "phase1_balance_action_slew_20260720",
+)
+if any(value not in entry for value in required):
+    raise SystemExit("Wave A/B owner/executor/branch not bound in one NOW entry")
+PY
+
+python3 scripts/run_phase1_balance_action_slew_queue.py \
+  --stage train --authorize-launch \
+  --launch-manifest "$BALANCE_LAUNCH_MANIFEST" \
+  --expected-launch-manifest-sha256 "$BALANCE_LAUNCH_MANIFEST_SHA256" \
+  --probe-receipts-dir "$BALANCE_PROBE_RECEIPTS_DIR" \
+  > /tmp/phase1_balance_slew_train_commands.json
+```
+
+每个 child 都显式使用
+[`checkpoint_allow_contract_mismatch=true`](../DEFINITIONS.md#checkpoint-contract-mismatch)，所以只作
+diagnostic、永久 formal-ineligible。queue 不生成 stop 命令、没有 automatic retry；若后续人工决定停止，
+必须先保全 checkpoint/log，再按本页“已登记 Phase-1 实验臂的算力释放”重验 exact 数值 PGID，先 TERM、
+条件满足才 KILL。详细科学量尺见
+[实验记录](../experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md)。
+
 ## Hard Rules (summary — full list in the pod README)
 
 1. `/root/` is the ephemeral container disk (wiped on restart). Everything goes under `/workspace`.
@@ -194,7 +349,8 @@ fresh curve worker 在 childless/lock-free 复核后也只按各自 PGID TERM �
    `whole_body_tracking` into it. New common deps: announce, install, refresh
    `/workspace/smoke_test/freeze_baseline.txt`.
 3. Do not edit `/workspace/IsaacLab`; override behavior in your own code.
-4. 交互式/临时作业默认一人一张 GPU；借用前必须查 `nvidia-smi`、通知其他人，
+4. GPU 没有永久的人名所有权。交互式/临时作业默认一人一张 GPU；使用前必须按 `NOW`/实验 queue
+   核对当前分配、查 `nvidia-smi`、通知其他人，
    并显式设置 `CUDA_VISIBLE_DEVICES=<n>`。这条不覆盖已在 [NOW 唯一队列](../NOW.md#统一工作队列唯一优先级账本)
    登记的广度消融波：广度波在短测确认显存/利用率后可同卡并发 3–4 条同类
    4096-env 任务；关键路径/长跑仍独占。新任务必须先跨所有可用 GPU 各放一条，再开始第二、第三轮，

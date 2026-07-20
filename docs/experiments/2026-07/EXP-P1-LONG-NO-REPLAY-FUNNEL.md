@@ -1,13 +1,17 @@
 # EXP-P1-LONG-NO-REPLAY-FUNNEL — 先把早筛候选跑成可解释的 10000-update 长曲线
 
-- 状态：`running`
+- 状态：`completed`
 - 阶段/轴：阶段 1，平衡约束与动作模仿强度
 - 集成小目标：在不引入随挥状态回放的条件下，比较普通配方、关节速度边界惩罚与击球窗模仿放松
 - 人类负责人：Franco
 - 执行者：Codex
 - 复核/决策负责人：Franco
 - 最高证据等级：`E1`
-- 创建日期/最后复核日期：2026-07-15
+- 创建日期/最后复核日期：2026-07-15 / 2026-07-20
+
+2026-07-20 收口：三条 accepted trainer 已在后续 task-revision cutover 前后结束或被精确收口，当前没有
+live trainer。下方 `running` 行只保留 2026-07-15 启动快照；本卷没有走完冻结的 10000-update 行为量尺，
+因此结论为“实验已结束、无可采用胜者”，不得据此把任一 Reward 方向判成科学失败。
 
 共享缩写见[术语与人话对照](../../DEFINITIONS.md)。本卷中的
 [`qdot-limit hinge`](../../DEFINITIONS.md#qdot-limit-hinge) 是“关节接近真实速度上限后才开始收费”的惩罚；

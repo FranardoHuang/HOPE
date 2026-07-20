@@ -1,9 +1,10 @@
 # S0/M0 exact donor canonical-beta materialization
 
-- 状态：`runtime_consumed_exact_gmr_still_blocked`
+- 状态：`completed`（本层 runtime consume 已完成；下游 exact GMR 诊断已回收）
 - 人类负责人：Franco
 - 执行者：Codex
-- 证据等级：E2（绑定 runtime 的真实五条 PT 已完成 inspect/consume）；尚无 GMR/机器人行为
+- 证据等级：E2（绑定 runtime 的真实五条 PT 已完成 inspect/consume）；本卷不声明机器人行为
+- 创建日期/最后复核日期：2026-07-13 / 2026-07-20
 
 共享缩写见[术语与人话对照](../DEFINITIONS.md)。本记录只回答：已经完整绑定的
 [`S0`](../DEFINITIONS.md) 单条高点拍压和 [`M0`](../DEFINITIONS.md) 四条横移老师，能否逐条注入旧 Franco
@@ -102,5 +103,7 @@ Python `3.10.20` runtime 中，S0/M0 均依次通过 `static -> inspect -> consu
 
 ## 决定边界
 
-采用上述五份 canonical-beta PT 作为 S0/M0 下一层 exact GMR prereg 的唯一输入。consume 已完成，但它只把
-下一步改成“可另建 exact GMR prereg”；它不会直接授权 GMR、schema-2、L0/L1、TOPP、RL、Gate3 或真机。
+采用上述五份 canonical-beta PT 作为 S0/M0 exact GMR prereg 的唯一输入。consume 完成时它只授权
+“另建 exact GMR prereg”，不直接授权 schema-2、L0/L1、TOPP、RL、Gate3 或真机。后来 exact-GMR
+v2 已完成诊断：S0 仍缺高球效果门，M0 stance gate 为 `0/4`；当前结论只见
+[exact-GMR 卷宗](motion_exact_gmr_s0_m0_20260713.md)。

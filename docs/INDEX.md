@@ -26,8 +26,11 @@ seed2/3 正手 parsed 高分与 signed composite `0/50` 直接矛盾；signed-fa
 但 fresh 训练 canary 与修正后同卷尚未运行，所以新尺仍未通过行为验收；
 原生 MuJoCo 训练仍只有不允许合入的预检候选；
 当前 planner-policy exact tuple 源码已通过 portable Release 与 latest-main 本地回归，但
-ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、标定后机器人物理和新真机测试
-也都没有结果。
+[半秒冲刺五臂](DEFINITIONS.md#half-second-sprint-arms)中的 W/Y 虽已通过真实零写入 plan、fresh `179→31`
+ONNX 结构检查与 CPU 推理，两份 checkpoint lineage 和导出 contract 都是 inexact，因此制品只能诊断；
+本分支对 [NOW 唯一队列](NOW.md#统一工作队列唯一优先级账本)的候选更新是先修 exact lineage，再实现同卷 vendor adapter。
+ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、标定后机器人物理和新真机测试也都
+没有结果。
 
 ## 按任务划分的最小阅读集
 
@@ -36,7 +39,8 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | 理解或修改训练 setting | [NOW 完整流程与当前阶段](NOW.md#1-当前一套训练是怎样完整跑起来的) → 相关实验 → [G05](gates/G05_isaac_training_first_loop.md) → [`run_training.md`](operations/run_training.md) |
 | 认领工作、排队或分配算力 | [NOW 唯一队列](NOW.md#统一工作队列唯一优先级账本) → [跑批作战手册](runbook.md#统一队列排序与算力纪律) → 对应实验 run table |
 | 新增/运行消融 | [`experiments/README.md`](experiments/README.md) + [模板](experiments/TEMPLATE.md) → [G05](gates/G05_isaac_training_first_loop.md) → 训练操作文档 |
-| 当前半秒击球冲刺 | [二十三个单 seed 问题与运行映射](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md) → [严格 0.5 秒负结果](experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md) → [G05](gates/G05_isaac_training_first_loop.md) |
+| 半秒击球冲刺（已结束） | [二十三个单 seed 问题与运行映射](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md) → [严格 0.5 秒负结果](experiments/2026-07/EXP-P1-TASK-REVISION-0P5-K100.md) → [G05](gates/G05_isaac_training_first_loop.md) |
+| 当前平衡/动作平滑诊断 | [Wave A processed-qdes slew](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md) → [连续恢复顺序](experiments/2026-07/EXP-RECOVERY-TUPLE-ABC.md) → [G05](gates/G05_isaac_training_first_loop.md)；Wave B 的 M0 moving teacher 已 stance `0/4` 拒绝，只继续静态 v4rg/non-demo 合同审计 |
 | 原生 MuJoCo `Trainer-v0`/fine-tune | [MuJoCo 实验](experiments/2026-07/EXP-MUJOCO-NATIVE-TRAINING.md) → [v0 preflight](research/mujoco_training_v0_preflight_2026-07-12.md) → [G06](gates/G06_isaac_to_mujoco.md) |
 | 评估/checkpoint 排名 | [Fresh 稳定性](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md)或[历史尺](experiments/2026-07/EXP-P1-HISTORICAL-SCHEMA3.md) → [G06](gates/G06_isaac_to_mujoco.md) |
 | 拍面符号/解析判分复核 | [Face-sign forensic](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md) → [术语：raw-A/physical-B](DEFINITIONS.md) → G05/G06 |
@@ -53,7 +57,8 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 
 | ID | 简短状态 |
 | --- | --- |
-| [`EXP-P1-HALF-SECOND-SPRINT`](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md) | 运行中：从共同 `model_5700` 以单 seed 比较准备时间、动作速度、模仿强度与平衡 Reward；`+100` 前只判启动/激活，暂无 TTS×outcome 分桶或胜者结论 |
+| [`EXP-P1-HALF-SECOND-SPRINT`](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md) | 已结束：U/V/W/X/Y 到 `+1000`，W/Y 为诊断候选；真实 plan/export 已通过结构与推理，但 exact-lineage=`0` 阻断 production/vendor |
+| [`EXP-P1-BALANCE-ACTION-SLEW-20260720`](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md) | `ready / manifest-bound / not launched`：Wave A W/V × dense/none/processed-qdes slew 六格；不得绕过 `T0→T1→T2`。Wave B 的 M0 moving teacher 已拒绝，只继续 upper-only control 对静态 v4rg 或 non-demo constraint 的合同审计 |
 | [`EXP-P1-TASK-REVISION-CUTOVER`](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md) | 旧 rolling 池已精确停止；同一物理球的原子 target/TTS revision、宽准备时间、相位 governor、0.5 秒卷与整数淘汰量尺处于 source 红队，full-scene/行为尚未通过 |
 | [`EXP-P1-FACE-PLANT-SCALEOUT`](experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md) | 16 条 fresh 广度臂已分两波全部精确停止并保留证据；旧 face×plant 矩阵不能选 baseline |
 | [`EXP-P1-FRESH-SZ-STABILITY`](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md) | 实验 completed/rejected；2k 与 4k 四 seed 稳定性都失败，seed4 持续弱；不晋级 baseline |
@@ -75,12 +80,12 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | [`EXP-GATE3-CURRENT179-D0`](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md) | 实验 blocked；`Gate3-D0` 严格模型 preflight 通过，当前行为尚未运行 |
 | [`EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD`](experiments/2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md) | 实验 completed；exact 源码通过 portable Release 与 latest-main 回归，runtime gates 保持 open |
 | [v12/高点拍压/横移视频登记](experiments/motion_video_intake_v12_static_motion_20260713.md) | 7 段私有视频逐字节登记完成；没有动作处理、安全或行为结论 |
-| [Franco 优先、static/motion GVHMR 结果](experiments/motion_video_gvhmr_prereg_franco_static_motion_20260713.md) | Franco 六段复用旧 exact 结果；[S0/M0](DEFINITIONS.md) 已 `1/1 + 4/4` finite structural pass，v12 未执行；GMR/schema-2 未跑 |
-| [S0/M0 post-GVHMR exact handoff](experiments/motion_post_gvhmr_s0_m0_handoff_20260713.md) | runtime handoff 已完成：S0/M0 exact SHA `d57a93e0...a1054` / `60c55150...088ef`；GMR/schema-2 未跑 |
-| [S0/M0 exact donor canonical-beta](experiments/motion_canonical_beta_s0_m0_20260713.md) | 真实 `1+4` 条 PT 已在绑定 CPU runtime consume 且 non-beta bit-exact；只解锁 exact GMR prereg，A3 脚距仍全 null |
-| [S0/M0 exact GMR 与横移脚距](experiments/motion_exact_gmr_s0_m0_20260713.md) | E1 source/static gate 已通过；16 项 exact runtime closure、retarget 空 site inventory 与 canonical-only M0 stance 已绑定，两份 host static PASS；runtime inspect/consume 尚未运行 |
-| [v12/高点拍压/横移组合设计](experiments/motion_v12_high_press_lateral_teacher_20260713.md) | S0/M0 已完成 GVHMR 与 canonical-beta；没有 GMR/schema-2 动作、仿真或训练结果 |
-| [非击球臂模仿消融](experiments/non_striking_arm_imitation_ablation_20260713.md) | Partial：A0 `model_200` finite/lineage/contract 已绑定；旧 verifier 假拒绝后 A1 absent，v1r1 只补 A1 的恢复门已就绪；尚无配对终档/同卷判读 |
+| [Franco 优先、static/motion GVHMR 结果](experiments/motion_video_gvhmr_prereg_franco_static_motion_20260713.md) | Franco 六段复用旧 exact 结果；S0/M0 已 `1/1 + 4/4` finite structural pass；后续 exact GMR 状态见专门卷宗 |
+| [S0/M0 post-GVHMR exact handoff](experiments/motion_post_gvhmr_s0_m0_handoff_20260713.md) | runtime handoff 已完成：S0/M0 exact SHA `d57a93e0...a1054` / `60c55150...088ef`；后续 exact GMR 已回收，schema-2 仍未授权 |
+| [S0/M0 exact donor canonical-beta](experiments/motion_canonical_beta_s0_m0_20260713.md) | 真实 `1+4` 条 PT 已在绑定 CPU runtime consume 且 non-beta bit-exact；后续 exact GMR completions 已回收，正式门仍关闭 |
+| [S0/M0 exact GMR 与横移脚距](experiments/motion_exact_gmr_s0_m0_20260713.md) | S0/M0 v2 均 `complete_exact_gmr_diagnostic`：S0 结构通过但需独立高球题族；M0 四条结构通过但 stance `0/4`，input-gate rejected/no-RL；formal/schema2/training/hardware 全 false |
+| [v12/高点拍压/横移组合设计](experiments/motion_v12_high_press_lateral_teacher_20260713.md) | S0/M0 已完成 GVHMR、canonical-beta 与 exact GMR 诊断；S0 需高球题族，M0 需末态 stance 修复，schema-2 未授权 |
+| [非击球臂模仿消融](experiments/non_striking_arm_imitation_ablation_20260713.md) | Partial：A0/A1 checkpoint、finite、lineage、contract 与 paired result 已闭合；signed K100 尚未判卷，不再写作运行中 |
 
 ## Gate 索引
 

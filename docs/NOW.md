@@ -1,6 +1,6 @@
 # NOW — 当前训练流程、课程阶段与下一步
 
-最近复核：2026-07-19 CST。本页说明现在到底在训什么、整套训练怎样连起来、每个课程阶段在解决
+最近复核：2026-07-20 CST。本页说明现在到底在训什么、整套训练怎样连起来、每个课程阶段在解决
 什么问题，以及下一项工作为什么值得做。实验过程放在[实验登记册](experiments/README.md)，
 复现命令和 Gate 结果放在对应 [Gate](gates/) 与操作文档。
 
@@ -27,19 +27,41 @@
 
 ## 当下状态与团队 focus
 
-当前最短链已经从继续加 Isaac step 切到 **vendor MuJoCo 同卷准备**：双 Pod 的本轮 Isaac 训练池已
-全部结束，`W`（拍心优先 × 自由非击球臂）/`Y`（拍心优先 × 触球窗老师静音）是演示优先双候选，
-`U`（拍心优先 × 强准备）是稳定备选。Franco 五种用途动作、横移老师和生产规划器（planner）仍并行
-推进，但不能取代这次部署裁判；Isaac 只负责训练/诊断，最终行为以厂商 MuJoCo 为准。
+**2026-07-20 合入 `main` 后生效的候选覆盖：** 双 Pod 各三张 GPU 的 NVML compute process 与显存占用均为零；当前没有
+训练作业。这个快照不代表永久 GPU 归属，也不证明无 GPU 的旧 shell/ROS 进程不存在；每次发射仍须
+重新核验具体 PID/PGID、Kit lock 与卡位。半秒冲刺、Pod1 十二格 long-grid 及相邻长曲线都已经结束或
+在 task-revision cutover 时收口，后文带日期的 `live/running` 只保留为历史快照，不能用于当前调度。
 
-2026-07-19 本地只读源码定位确认：现有 [0.5 秒时序卷](DEFINITIONS.md#timing-exam-0p5)使用
+当前最短 P0 仍是 **vendor MuJoCo 同卷准备**，但新增了一道更早的 exact-lineage 门。`W`（拍心优先 ×
+自由非击球臂）/`Y`（拍心优先 × 触球窗老师静音）真实零写入 `--plan` 均已通过，fresh `179→31`
+ONNX 也通过独立结构检查与 CPU 有限值推理；然而两个 checkpoint 都记录
+`training_contract_lineage_exact=0`，两个 ONNX 都记录 `training_contract_exact=0`。因此制品只能诊断，
+不能发布到 production/vendor。先修复或重训出 exact-lineage checkpoint，再实现“同一 K100 → 发球 →
+同球 `task_revision` → 生产 planner → C++ runner → 厂商 MJCF/plant”适配器；`U`（拍心优先 × 强准备）
+仍是稳定备选。G05/G06 继续 `Partial`，`Gate3-D0` 继续 `Open`。
+
+近期支线审计不产生直接合并或行为晋级：Jiayi V13 只有未验证的 post-swing balance/recovery 组合，
+没有 checkpoint/行为结果，且其分支历史含大量无关/破坏性改动，禁止整体 merge；有用思想只能在最新
+`main` 选择性重做。Yikang V9 的所谓 pelvis COM force 未传 `position_data`，实际在 link origin 施力，
+所以现有 force runs 只算 mechanics/throughput，不能给平衡结论；V10 已终档 iteration `9999` 但没有
+MuJoCo/Gate3，V11 fast/prestrike 分别停在 `2816/18274`，代理 checkpoint 也没有闭合正式行为 Gate。
+
+新的 processed-qdes action-slew 六格矩阵是 Wave A，只用于判断腿/腰执行目标突变是否能降低单拍后的
+fall 与姿态尾部风险；它是默认关闭、同父本、单 seed 的诊断，不是完整稳定方案或已采用 setting。
+Wave B 的 M0 左右 moving teacher 已因 stance `0/4` 被 input gate 拒绝；当前只允许审计
+upper-only matched control 对静态 v4rg 下半身模仿或 non-demo stability constraint，exact flags/矩阵仍待
+源码审计，不得猜写。
+两波都不得绕过连续能力的固定顺序：先 `T0`，再 `T1`，只有前两层仍失败才进入 `T2` 平衡 shaping。
+Franco 五种用途动作、横移老师和生产 planner 继续并行，但都不能取代厂商裁判。
+
+2026-07-19 本地只读源码定位曾确认：现有 [0.5 秒时序卷](DEFINITIONS.md#timing-exam-0p5)使用
 [K100（100 道固定同卷题）](DEFINITIONS.md#q50-and-k100)，但属于直接 policy 诊断并绕过生产 planner；
 Python MuJoCo 评估器虽支持 179 维与固定题库，却不消费逐题 25 周期
 时序卷；Gate3 假球入口只接每题“初始位置 + 初始速度”的六元发球。当前缺少把同一 100 题经发球、
 [`task_revision`](DEFINITIONS.md#planner-task-revision)（同一来球实时任务修订）、生产 planner、C++
 runner 送入同一 MuJoCo XML 场景模型（MJCF）与 plant 的适配器。W/Y 两份 `model_6700`
-已完成只读制品前置检查；下一步是在 Pod 上分别跑真正零写入的 ONNX 导出 `--plan`，
-而不是启动行为卷。旧连续演练脚本保持隔离禁用。G05/G06 继续
+已完成只读制品前置检查；2026-07-20 的 plan/export 与 exact-lineage 结论以上述权威覆盖为准。
+旧连续演练脚本保持隔离禁用。G05/G06 继续
 `Partial`，`Gate3-D0` 继续 `Open`，不能宣称演示成功。详细合同见
 [半秒冲刺卷宗](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)与
 [G06](gates/G06_isaac_to_mujoco.md)。
@@ -52,15 +74,17 @@ standalone ONNX exporter 同时新增真正零写入的 `--plan`：它以 `weigh
 加载 checkpoint，走完 finite、donor、motion、harvest、train-bank 与 formal face-179 材料验证，
 然后在第一次输出写入之前返回；JSON 显式给出 `checkpoint_iteration`、
 `artifact_written=false` 和 `graph_export_not_executed=true`。本地聚焦回归为 `97 passed in 0.38s`，普通导出的
-fake smoke 仍通过；真实 W/Y `--plan` 尚未在 Pod 运行。G05/G06 仍为 `Partial`，
-`Gate3-D0` 仍为 `Open`。
+fake smoke 仍通过。2026-07-20 两份真实 plan 都已通过；W/Y fresh ONNX SHA-256 分别为
+`ee0e2e83...d970` / `72da43d9...f995`，但 checkpoint lineage 与导出 contract 都为 inexact，故停止在
+production/vendor 前。G05/G06 仍为 `Partial`，`Gate3-D0` 仍为 `Open`。
 
 - **本轮 task-revision 训练池（已结束）：** formal 179-D 与训练现已统一为“一颗球一个 `task_id`、同球估计用递增
   `task_revision`”，挥拍中位置、速度、signed 拍面与剩余击球时间每个 policy tick 继续原子更新；phase
   governor 只接受可达的动作加速。准备时间不是以 `0.5 s` 为下限，而是同时采样 `<0.5 s` 压力、exact
   `0.5 s` 基线、`0.5–0.9 s` 快球和 `0.9–1.7 s` 宽分布。4096-env `A6` 已证明这些机制真实激活；随后
-  22 个 delay-zero 格全部各发射一次。最终 `+1000` 取证时，Pod1 八条有效臂已到档、两条基础设施
+  22 个 delay-zero 格全部各发射一次。最终 `+1000` 取证当时，Pod1 八条有效臂已到档、两条基础设施
   拒绝，只有“强脚底准备”仍 live；Pod2 十一条有效臂已到档且全部自然结束、一条 importer 拒绝。
+  该 Pod1 尾项后来也已收口，2026-07-20 没有仍在运行的半秒冲刺训练。
   因此旧说法“19 条仍 live”已经过期，也没有需要用 signal 清理的 Pod2 训练。两个 importer malloc
   `rc134` 与一个 boot stale-timeout 不算科学失败且不自动重跑；两个 positive-delay 格因 governor/actor
   transport 尚非同 tick 原子继续 NO-LAUNCH。0.5 秒 K100 paper
@@ -263,12 +287,13 @@ fake smoke 仍通过；真实 W/Y `--plan` 尚未在 Pod 运行。G05/G06 仍为
   只声明诚实 saturated lower `0.099999999999 m`，pair/midpoint/time=null，并经独立复核接受。B 现只解锁
   vendor 动力学/平衡门；RL、回台、Gate3 和真机仍未授权，C 保持后备。
   高点拍压 S0 与四条横移 M0 不仅通过 exact GVHMR 帧数/finite 审计，还已完成真实五条 PT 的
-  canonical-beta `inspect/consume`，non-beta 内容逐 bit 不变。exact GMR runtime source gate 也已进入
-  `main` 并通过全回归；Pod2 的 v2 runtime `inspect` 已尝试，但在 consumer 前因合同写死的
-  `/workspace/yikang/.../python3.10` 整棵环境不存在而 rc127 fail closed。恢复审计又确认 Pod2 同时缺
-  exact GMR tree/283 MB bundle、SMPLX/model/mapping 与 S0/M0 七份 canonical 输入；现有 Isaac venv 也只与
-  234 行环境快照精确重合 87 行。两批 output root/lock 仍 absent，不是动作失败；必须先从权威备份恢复
-  内容寻址资产，再建独立 v3 runtime，`consume`/schema-2/训练继续 blocked。
+  canonical-beta `inspect/consume`，non-beta 内容逐 bit 不变。2026-07-20 回收的 Pod1 evidence 又确认两批
+  exact-GMR v2 实际都已完成；较后的 Pod2 rc127 仍保留为另一失败 location，不能再据它写“两批 root
+  absent / 未 consume”。S0 completion manifest SHA=`a762d6df...d1a23`，唯一 `88`-frame 输出
+  finite/`30 Hz`/`31 DoF` structural pass，但 ball contact/effectiveness=`null`，下一门是独立高球拍压题族。
+  M0 manifest SHA=`fdd60fcf...396e`，四份 moving 输出同样结构通过，却全部 stance fail (`0/4`)；因此
+  M0 input gate 为 reject/no-launch，不得进 schema-2 或占 RL GPU。下一步先修复横移动作，在保留左右
+  位移的同时回到各自初始 stance；S0/M0 随后才分别进入 schema-2、L0/L1、桌网和动力学。
 - **当前运行态：** 2026-07-15，V1+V2×base-decel fresh v4 两臂已收口。两份 `model_500` 都通过
   filename=embedded、finite、fresh lineage、claim 与同 hard-contract attestation，checkpoint SHA-256 为
   `22f78f88...a6a` / `a1735fbb...c14`。但冻结的 `480–500` 窗内 control post-swing
@@ -294,12 +319,13 @@ fake smoke 仍通过；真实 W/Y `--plan` 尚未在 Pod 运行。G05/G06 仍为
   只判结构；只有真实击球后才有意义的 Reward 若 eligible hit 样本不足必须继续，6000/10000 才看完整
   单 seed 曲线。[六格实验](experiments/2026-07/EXP-P1-LONG-SCALEOUT-SIX-ARM.md)
 
-  2026-07-15 16:40 UTC，Pod1 也已重新授权并按 GPU0→GPU1→GPU2 四圈铺满 12 条不同问题的
+  2026-07-15 16:40 UTC 的历史快照中，Pod1 也曾按 GPU0→GPU1→GPU2 四圈铺满 12 条不同问题的
   10000-update 单 seed 长曲线：非击球臂是否继续模仿 × 10/16/24 秒连续 episode，以及六种击球
   位置/速度/拍面 Reward 配比。两个首发 namespace 在动态 URDF import 的 180 秒 stale 门失败，均为
   0 iteration/0 checkpoint；各自唯一同配方 retry 已过首迭代。现为三卡各四条、利用率
   `97%/93%/97%`，12 条接受臂 PID=PGID、fatal0。Pod2 同时保持九条三卡满池；两 Pod 合计 21 条。
-  当前只证明生产池已铺满，不把早期稀疏回球零值判成失败。
+  当时只证明生产池已铺满，不把早期稀疏回球零值判成失败；该 long-grid 后来已在 task-revision
+  cutover 收口，2026-07-20 不再运行。
   [Pod1 十二格实验](experiments/2026-07/EXP-P1-POD1-LONG-BALANCE-REWARD-GRID.md)
 
   clean main-effect 也已自然终档：两臂关闭 post-swing replay、固定 V1+V2，只比较 base-decel `0/1`。
@@ -313,7 +339,8 @@ fake smoke 仍通过；真实 W/Y `--plan` 尚未在 Pod 运行。G05/G06 仍为
   `natural_clip_wrap` state；唯一授权 attestor attempt-2 从固定 `a38b7e9` rc0，发布 4103-byte receipt
   `e20a6989...d2aba4`。merged-main controller status 已确认 `teacher_receipt_binding_exact=true`。当前只差
   4096-env、首个 PPO rollout 前的 first-reset 采用率与 simulator root/joint readback probe；它未通过前，
-  科学 pair、第二 seed 与 judge 继续 fail closed。Codex 唯一可用卡仍是 Pod2 GPU2，当前三槽已满。
+  科学 pair、第二 seed 与 judge 继续 fail closed。其后的“仅 Pod2 GPU2 可用/三槽已满”只是当日资源
+  快照，已由 2026-07-20 六卡 NVML 空闲状态取代。
 
   Fresh C 的五条单 seed 机制格均已越过 `+500` 且 checkpoint
   finite/contract/lineage 正确。V1+V2 出现当前最强击球精度信号（composite `0.0893`、normal pass
@@ -417,21 +444,20 @@ fake smoke 仍通过；真实 W/Y `--plan` 尚未在 Pod 运行。G05/G06 仍为
   D2 永久不续跑，C2 只保留为 nonconforming 根因证据。全新 C3/D3 已在 Pod1 GPU1/GPU2 各只发一次并
   自然到 `model_24.pt`；31/31 零摩擦、finite/iter24/lineage/claim/hard binding 与 paired receipt
   `bb3cd749...bbde` 均通过。它只证明 L1 provenance，下一步是同一 immutable K100，不得重跑或直接
-  晋级 L2。Franco
-  定为 Pod1 每卡 `4` 个我们的 trainer、Pod2 每卡 `3` 个，为 Yikang 的最多一张卡留动态余量。新增任务
-  先跨六张可用 GPU 各放一条，再开始第二/第三轮，Pod1 才有第四轮。空槽只给已过前置门且有预注册
+  晋级 L2。2026-07-14 的 Pod1/Pod2 每卡 `4/3` trainer 是当轮临时容量，不是永久分区；当前每次发射都
+  重新读取六卡占用并按无固定归属的队列纪律分配。空槽只给已过前置门且有预注册
   早判的不同机制，不复制失败
   seed，也不拿未过动作安全门的任务凑数。
   signed-face exam bank 已过 E2：371 题 old/new replay 逐字节一致并发布新 bank/report；K100 paper
-  已物化为 100 个唯一题、正反手各 50。generic checkpoint attestor 已进入 main，但 C3/D3 actual
-  execution consumer 尚在收口，故 L2/judge/第二 seed/晋级仍阻断。
+  已物化为 100 个唯一题、正反手各 50。C3/D3 actual L1 与 paired receipt 已闭合；下一门是消费同一
+  immutable K100，不得重跑 L1。L2/judge/第二 seed/晋级仍阻断。
 - **Franco focus：** 五种动作的用途、动作专属来球题族、空挥视觉锚点和横移终态站距语义；反手拉
   B/C 先补证，高点拍压作为第五动作，v12 只作后续 Jiayi 对照。
-- **Jiayi focus：** v12/dang 路线与 planner-policy 契合；其候选必须在相同挡球专卷和厂商 MuJoCo 中
-  与 Franco 主线对照，不能用录制版本号直接晋级。
-- **Yikang focus：** Pod1 冲刺、历史 Gate3 谱系复核与独立 physics/reference oracle；现有证据不替代
-  当前 179-D planner-policy tuple 的 vendor runtime 行为。
-- **Codex 执行：** Pod2-only YAML 发射/里程碑早判 harness、单 seed 机制漏斗与失败槽替换；并行推进 exact
+- **Jiayi focus：** V13 目前无运行/行为证据且分支不可整体合并；只允许把经审计的候选思想在最新
+  `main` 选择性重做，再用相同挡球专卷和厂商 MuJoCo 与 Franco 主线对照，不能用版本号直接晋级。
+- **Yikang focus：** V9 COM-force 语义失败，V10/V11 只有终档/代理材料而无正式 Gate3；下一步是独立
+  physics/reference oracle 与当前 179-D planner-policy tuple 的 vendor runtime 行为，不续写旧分支结论。
+- **Codex 执行：** 六卡任务发射/里程碑早判 harness、单 seed 机制漏斗与失败槽替换；并行推进 exact
   动作 lineage、B 主选/C 后备的逐层证书、S0/M0 exact GMR 前置、C3/D3 零摩擦与 signed-face
   checkpoint execution contract 和 main 账本；
   每通过一层就合 main，不把多个未验层绑成一个大任务。
@@ -573,8 +599,9 @@ shaping，不是独立物理裁判。`physical_ball=true` 的 Phase-A engine-int
 
 **效果与差距：** 有的独立初始化达到 100/100，另一个只有 20/100。结果属于整套配方，不能归因
 到某一个 Reward 项。拍面尺和稳定性解决前冻结 Reward；理想状态还需用单变量配对证明各项贡献，
-并验证融合后不伤平衡和连续恢复。解除左侧非击球臂模仿、让它参与平衡的单-seed A0/A1 配对正在运行，
-但尚无 paired milestone/同卷结果，不属于已采用 Reward；见
+并验证融合后不伤平衡和连续恢复。解除左侧非击球臂模仿、让它参与平衡的单-seed A0/A1 配对已经
+完成 checkpoint/合同/lineage 配对闭环；但 signed K100 尚未判卷，因此不属于已采用 Reward，也不再
+写作运行中；见
 [非击球臂实验](experiments/non_striking_arm_imitation_ablation_20260713.md)。
 
 ### 4.5 时序与连续：一拍结束后怎么办
@@ -738,10 +765,11 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
 
 ### 动作主线
 
-- **[1｜P0] Franco 五动作 + 横移老师。** 责任人 franco；执行者 Codex；下一证据：一次性物化反手拉
-  B/C 的 schema-2/FK，并补 L0/L1/桌网/动力学证书；同时一次性完成已 finite 的高点拍压 S0 与横移 M0
-  exact GMR；其 v2 Pod2 inspect 因绑定 runtime 与全部 ignored GMR/input 资产不存在而在 consumer 前拒绝，
-  下一步先从权威备份恢复内容寻址资产并闭合独立 v3 runtime，再进入各自 schema-2。挡、拉、高点拍压
+- **[1｜P0] Franco 五动作 + 横移老师。** 责任人 franco；执行者 Codex；反手拉 B 已完成
+  schema-2/FK、L0、vendor L1 与整轨桌网证书，下一证据是 vendor 动力学/平衡门；C 保持未消费后备，
+  不重复 B 已通过的链。S0/M0 exact-GMR v2 都已完成结构诊断，但 formal/schema2/training/hardware 全
+  false：S0 先建独立高球拍压题族；M0 四条 stance `0/4`，先修成“保留横移且末态回自身初始 stance”，
+  不得占 RL GPU。修复后再分别进入 schema-2、L0/L1、桌网和动力学。挡、拉、高点拍压
   各用自己的题族；先每个候选一个因果格，不把候选当
   seed 重复。只有离线证书通过后才分配 RL GPU。
   [旧动作实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)；
@@ -750,9 +778,9 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
 ### 尺子与阶段 1
 
 - **[2｜P0] 拍面正反与解析判分。** 责任人 franco；执行者 Codex；C2 的真实非零 plant 已证伪旧配对，
-  D2 永久不发；下一证据是运行 main 上全新 C3/D3 显式零摩擦 L1 并形成 fresh paired receipt，然后用
-  一个 seed 跑“热启动/从零 × 线性引导
-  关/开”四个机制单元到相对 checkpoint
+  D2 永久不发；C3/D3 显式零摩擦 L1 与 fresh paired receipt `bb3cd749...bbde` 已闭合，不得重跑。
+  下一证据是用同一 immutable K100 判这对 checkpoint，再决定是否启动一个 seed 的“热启动/从零 ×
+  线性引导关/开”四个机制单元到相对 checkpoint
   `+200/+500/+1000`。只有胜者连同匹配对照才解锁第二 seed，不再给已失败配方复制四 seed。
   [量尺实验](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)；
   [机制漏斗](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)
@@ -760,38 +788,21 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
 ### 部署验证
 
 - **[3｜P0] W/Y 179 维模型的 0.5 秒同卷 Gate3-D0 单拍全链。** 责任人 franco；执行者 Codex；
-  两份 `model_6700` 的唯一定位、finite、`179→31` 与导出材料检查已闭合；现先分别运行
-  零写入 `--plan`，再实现
+  两份 `model_6700` 的唯一定位、finite、`179→31`、零写入 `--plan` 和 fresh ONNX 结构/推理检查均
+  已闭合，但 checkpoint 的 `training_contract_lineage_exact=0`，ONNX 的
+  `training_contract_exact=0`。当前最短 P0 是 exact-lineage remediation 与重新导出；过门后才实现
   “同一 100 题 → 六元发球 →
   同球 `task_revision` → owned 生产 planner → C++ runner → 同一厂商 MJCF/plant”的适配器，并逐题
-  输出 attempt/completion/hit/return/fall/deadline。适配器通过前不启动行为、不使用隔离中的旧连续
-  演练脚本；W/Y 仍只是演示优先候选，U 是稳定备选。[半秒卷宗](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)；
+  输出 attempt/completion/hit/return/fall/deadline。exact lineage 与适配器通过前不启动行为、不使用
+  隔离中的旧连续演练脚本；W/Y 仍只是演示优先候选，U 是稳定备选。
+  [半秒卷宗](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)；
   [Gate3-D0 实验](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md)
-- **[7｜P1] Gate3 历史谱系复核。** 责任人 yikang；执行者 Codex/direct；分支
-  `yikang-standhit-0714`。2026-07-15 已完成 mechanics 门并发射：以 W&B
-  `ayzxv1ma/model_10600`（旧 Gate3 v4
-  3× PASS、每轮 7/7 正手挥拍/恢复周期代理、0 摔；未测物理触球或落台）为唯一共同 warm-start，
-  保持其 reward/观测/动作与 v12fix
-  teacher 不变，运行三个因果分叉：纯 A=站姿可达击球点泛化、纯 B=每个 reset 独立
-  Bernoulli `p=0.05` 随机推扰、A+B；另有同配方 fresh A+B origin 对照（禁止 checkpoint，保留
-  原 yaw curriculum）。exact source `8c8cd53` 的 init/load 门与 B/AB 实际推扰门已过；Pod1 三卡
-  正在运行 A [`5nso93g0`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/5nso93g0)、B
-  [`4osh4ypc`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/4osh4ypc)、A+B
-  [`jndof7jk`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/jndof7jk)，Pod2 GPU0 正在运行 fresh
-  A+B [`xpiapvix`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/xpiapvix)；四条首个 checkpoint
-  均已 finite/loadable。fresh 的短 mechanics 因初始策略 5 秒前摔倒只验证到 push selection，但正式
-  run 到约 iter 322 已记录第一次真实 apply。下一证据：同绝对迭代 checkpoint 的泛化、推扰后存活与固定点回归；随后
-  才做同运行链 Gate3 对照。启动健康不等于质量晋级；旧周期代理与球路泛化局限见
-  [跨线审计](experiments/2026-07/EXP-V9-YIKANG-CROSS-LEARNING-20260715.md)。2026-07-15 已在同一
-  分支完成 `hitter@5f87a4f` 的完整 recipe-7/runtime-v2 移植并推送 exact merge
-  `8e0aaf885dc553ad727a19d1f106b25e98afa866`；现役 V9 force 作业保持原 exact source，不切
-  checkout、不重启。合并后的 Python host 门、本机/Pod2 合同回归、C++ focused/runtime policy
-  smoke 与 32-env×2-update 真 Isaac fresh smoke 均通过。独立 RallyV10 正式 run 已在 Pod2 GPU1
-  以 8000 envs/seed0/10000 updates 发射：W&B
-  [`qpl08mug`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/qpl08mug)，110-D actor/328-D critic，
-  未加载 checkpoint。首个 progressed `model_100.pt` 已通过 embedded iteration、optimizer 与全部
-  tensor finite 审计；下一证据是 deterministic core/planner/mix 选择、recipe-7 ONNX、MuJoCo 与
-  V10 Gate3，不以启动曲线直接晋级。
+- **[7｜P1] Gate3 历史谱系复核。** 责任人 yikang；执行者 Codex/direct；V9 force 分支未向
+  `set_external_force_and_torque` 传 `position_data`，所谓 pelvis-COM force 实际施于 link origin；旧
+  A/B_FORCE/AB_FORCE/AB_FORCE_FRESH 曲线只能保留为 mechanics/throughput，不得作平衡因果结论。
+  RallyV10 W&B `qpl08mug` 已终档 iteration `9999`，但没有 MuJoCo/Gate3；V11 fast/prestrike 分别停在
+  `2816/18274`，已有 stand/trajectory 代理也不是正式行为 Gate。下一证据是在当前 `main` 重做位置语义
+  正确的独立 physics/reference oracle，再走同运行链 vendor Gate3；旧分支不得整体合并。
 - **[OPS｜P1] RallyV10 真机单命令部署与板载 VRPN。** 责任人 dongc1；执行者 Codex；分支
   `hitter`。把 CMTracker/VRPN、relay 与 planner 收敛到 HDU，Laptop 只保留完整 SSH/TTY
   入口，并为 MDU HAL、SHADOW、真机 runner 提供互不自动串联的单命令脚本。下一证据：脚本
@@ -800,23 +811,22 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
 
 ### 训练引擎与机器人物理
 
-- **[10｜P0] RallyV11 TOPP 加速动作 fresh 训练。** 责任人 yikang；执行者 Codex；分支
-  `codex/rally-v11-topp-prestrike-20260716`（当前 baseline 分支
-  `codex/rally-v11-topp-fast-20260716`），基于 `hitter`。2026-07-16 真机复核发现现役挥拍动作
-  速度不足，当前优先级切换为：用 `main` 已验证的 TOPP v3 对 v12fix 正反手动作做触球锁窗的
-  min-time 重定时，新建严格 hash/phase/receipt 绑定的 RallyV11 fast task，保持 station-relative
-  击球平面 `0.58 m` 与 RallyV11 全身/下半身 Reward 合同。host gate、32-env smoke、8000-env
-  显存探针与在线 W&B checkpoint/ONNX save smoke 已通过；commit `edf9e4e` 的唯一正式 run
-  已在 GPU0 fresh 发射 seed 0：
-  `num_envs=8000`、`max_iterations=20000`、`num_steps_per_env=24`；其余两张卡明确留给其他人。
-  W&B [`i0jw4ohr`](https://wandb.ai/BerkeleyPingPong/hope_wbc/runs/i0jw4ohr) 已越过
-  `model_0` 保存并持续推进（首份看板快照到 iteration 49）；GPU1/GPU2 无 compute process。
-  用户随后把优化目标收紧为“尽可能缩短第 0 帧到击球帧的时间”，而不是最短整段时长；新分支将
-  保持触球关键窗与击球后时序，把全部压缩预算优先投到击球前，并按最快 MuJoCo-oracle PASS 候选
-  重新绑定 receipt/phase/hash。当前 run 保留作 baseline，在新动作通过 audit/oracle/Isaac smoke
-  前不停止；“已启动”仍不等于性能改善，后续只按 checkpoint 与冻结评估证据判断。
+- **[10｜P1] RallyV11 TOPP 加速动作证据复核。** 责任人 yikang；执行者 Codex；fast run 已停在
+  iteration `2816`，prestrike run 已停在 `18274`，当前无 live trainer。`model_6600` 的 stand-center
+  代理为 `0.8889` 且 `0/24` fall；后续 `model_11100` 代理反而下降到约 `0.714/0.730`。这些只说明
+  代理曲线未单调改善，没有 MuJoCo/Gate3 晋级结论。下一证据是把可保留的触球锁窗重定时思想在当前
+  `main` 选择性重做，并先过 exact 动作、MuJoCo oracle 与冻结行为卷；不得整体 merge 旧分支。
 - **[4｜P0] 原生 MuJoCo 训练候选。** 责任人 franco；执行者 Codex；下一证据：修正四个源码缺口
   后复核，再测单环境核心、并行吞吐和一次限预算 PPO 更新。[实验](experiments/2026-07/EXP-MUJOCO-NATIVE-TRAINING.md)
+- **[11｜P1] 稳定机制 Wave A/B。** 责任人 franco；执行者 Codex；执行分支
+  `Franco_codex/balance-ablation-round-20260720`。Wave A 只比较同父本
+  `phase1_balance_action_slew_20260720` 队列的
+  W/V 的原 dense action-rate、无 action-rate 与腿/腰 processed-qdes slew hinge 六格，先过短合同 probe，
+  再按 `+200/+500/+1000` 看 fall、completion、return 与姿态/目标突变尾部。所有子项因显式新 Reward
+  合同而 formal-ineligible；结果只能筛机制，不能晋级 policy。Wave B 的 M0 moving teacher 已因 stance
+  `0/4` 拒绝；当前只设计 upper-only control 对静态 v4rg 下半身模仿或 non-demo constraint，其 exact
+  flags/矩阵必须先由源码/合同审计冻结，当前不猜。两波都不能替代
+  `T0/T1/T2` 连续恢复卷。[Wave A 实验](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md)
 - **[9｜P0] Hitter 实机 planner 时序与训练反应时间基线。** 责任人 yikang；执行者 Codex；分支
   `codex/hitter-lowerbody-mujoco-alignment`，基于 `hitter`。2026-07-16 用户将本轮顺序收敛为：
   先审计最新 `main`、`hitter` 与 frame0-wait-v2 已有实现，再补齐端到端球样本时间戳/短 TTS、
@@ -827,7 +837,8 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
 
 ### 连续能力与后续接口
 - **[5｜P1] 等待/恢复结构卷。** 责任人 franco；执行者 Codex；下一证据：同步机器合同后，用冻结
-  Reward 跑 `T0/T1` 配对连续卷。[实验](experiments/2026-07/EXP-RECOVERY-TUPLE-ABC.md)
+  Reward 先跑 `T0`，再跑 `T1`；只有前两层仍失败才允许 `T2` 平衡 shaping。并行单拍 slew 诊断不改变
+  此顺序。[实验](experiments/2026-07/EXP-RECOVERY-TUPLE-ABC.md)
 - **[6｜P1] Hitter V3 规划器—policy 输入对齐。** 责任人 jiayi；执行者 direct；下一证据：旧观测
   排列、训练第 24100 次迭代 checkpoint 归属和第 7 版击球平面三项来源对齐。
 - **[8｜P1] 110 维 RallyV10 左腕/恢复修复。** 责任人 dongc1；执行者 Codex；分支 `hitter`；

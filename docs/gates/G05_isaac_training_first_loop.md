@@ -1,6 +1,6 @@
 # G05 Isaac Training First Loop
 
-Status: Partial
+Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
 ## Goal
 
@@ -38,13 +38,66 @@ This gate should prove that the training stack can consume A3 assets and produce
 
 ## Acceptance Criteria
 
+Core first-loop mechanics (already demonstrated):
+
 - Isaac environment starts with the A3 asset.
 - A random rollout works.
 - A first PPO or equivalent training loop runs.
 - Policy export path is documented.
 - First-loop results are recorded, even if poor.
 
+Current-candidate promotion sub-gate (required before this Gate can close):
+
+- The selected checkpoint has exact training-contract lineage rather than an allowed warm-resume mismatch.
+- A fresh deploy ONNX preserves the exact contract and passes finite, dimension and inference checks.
+- The checkpoint and ONNX are bound to an immutable behavior paper and handoff contract. This closes the G05
+  artifact sub-gate; vendor MuJoCo behavior belongs to downstream [G06](G06_isaac_to_mujoco.md) and is not a
+  G05 closure criterion.
+
 ## Current State
+
+Follow-up note (2026-07-20, W/Y export mechanics pass but exact lineage blocks promotion; Gate remains `Partial`):
+
+- Both real W/Y zero-write `--plan` executions passed against exact `origin/main@a0c1284`: checkpoint iteration
+  `6700`, actor dimensions `179→31`, all formal/material/train-bank checks true,
+  `artifact_written=false`, and `graph_export_not_executed=true`.
+- Fresh diagnostic ONNX artifacts were then generated. W has SHA-256
+  `ee0e2e83c8f3dc8302fcef609fe13b2feaf69e247e39f405d1ea6c30b652d970`; Y has SHA-256
+  `72da43d96ab9dd95e1da6aba2ed548ad26e61863b70cf8120c120132b7b8f995`. Both are `179→31`, contain
+  `94` metadata keys, and pass an independent checker plus finite CPU ONNX Runtime inference.
+- Both source checkpoints report `training_contract_lineage_exact=0`, and both ONNX artifacts report
+  `training_contract_exact=0`. They are diagnostic only and must be rejected by the production runner. The
+  local artifact blocker is exact-lineage remediation; global execution order remains solely in
+  [`docs/NOW.md`](../NOW.md). The vendor adapter and behavior paper remain downstream.
+- A 2026-07-20 NVML audit found no compute process and zero allocated memory on all three GPUs of both Pods.
+  This is an availability snapshot, not permanent GPU ownership and not proof that non-GPU stale processes are
+  absent.
+- The proposed W/V processed-qdes action-slew matrix is Wave A: a default-off, single-swing diagnostic, not the
+  complete stability program. Wave B's M0 moving-teacher input is rejected at stance `0/4`; the remaining design
+  space is an upper-only matched control versus static-v4rg lower-body imitation or a non-demo stability
+  constraint. Wave B exact flags and matrix remain under audit and must not be guessed. Neither wave can promote a
+  policy or replace the ordered continuous-recovery gates `T0 → T1 → T2`.
+
+Follow-up note (2026-07-20, recent Jiayi/Yikang branches audited; no branch-wide merge or behavior promotion):
+
+- Jiayi's V13 branch contains a bundled post-swing balance/recovery proposal but no checkpoint or behavior
+  evidence. Its history also includes destructive/unrelated changes, so the branch is not mergeable as a unit;
+  any useful idea must be reimplemented selectively on current `main` with its own tests and paper.
+- Yikang's V9 force implementation called the external-force API without `position_data`, so the advertised
+  pelvis-COM force was applied at the link origin. The V9 runs are mechanics/throughput evidence only and yield
+  no accepted balance conclusion. V10 finished iteration `9999` but has no MuJoCo/Gate3 behavior result. V11
+  fast stopped at iteration `2816`, prestrike stopped at `18274`; the available proxy checkpoints do not close
+  a formal behavior Gate. None of these branches should be merged wholesale.
+
+Follow-up note (2026-07-20, S0/M0 exact-GMR evidence recovered; no training authorization):
+
+- Pod1 report-last manifests prove both v2 batches reached `complete_exact_gmr_diagnostic`; the later Pod2 rc127
+  remains a separate failed location rather than global absence. S0's 88-frame output is finite/30 Hz/31 DoF but
+  ball contact/effectiveness remain null, so it needs an independent high-ball paper.
+- All four M0 moving outputs pass finite/30 Hz/31-DoF structure but the frozen stance gate is `0/4`; M0 is
+  input-gate rejected and must not consume an RL GPU. Formal/schema2/training/hardware are false for both batches.
+  G05 remains `Partial`; exact hashes and per-row failures are in
+  [the motion experiment](../experiments/motion_exact_gmr_s0_m0_20260713.md).
 
 Follow-up note (2026-07-19, W/Y static export inputs closed; Gate remains `Partial`):
 
@@ -2014,7 +2067,8 @@ completion manifest SHA 为 `964a7333...f1be3` / `5cef05f7...71a65`，五条 non
 这只解锁另建 exact GMR prereg，不直接解锁 schema-2 或 RL。S0 仍不得借用拉球题或声称击球有效；M0 的
 canonical foot-site 与容差现已由 exact-GMR prereg 冻结，初末二维脚间向量和 pass 仍为 null，必须由
 robot-coordinate GMR 产生，双脚
-并拢不能通过。详见 [handoff 记录](../experiments/motion_post_gvhmr_s0_m0_handoff_20260713.md)与
+并拢不能通过。这是 canonical-beta-time 快照；2026-07-20 回收结果已填充并判 stance `0/4`。详见
+[handoff 记录](../experiments/motion_post_gvhmr_s0_m0_handoff_20260713.md)与
 [canonical-beta 记录](../experiments/motion_canonical_beta_s0_m0_20260713.md)。
 
 ### 2026-07-14 S0/M0 exact GMR prereg boundary
@@ -2033,6 +2087,9 @@ runtime are `preregistered_not_executed`; both host static validations pass. Run
 `inspect/consume` and GMR outputs still do not exist. Schema-2, L0/L1, dynamics and RL remain blocked;
 no trainer or hardware command ran. G05 remains `Partial`; details are in
 [the experiment](../experiments/motion_exact_gmr_s0_m0_20260713.md).
+
+This is the preregistration-time snapshot. The recovered 2026-07-20 Pod1 completions in Current State supersede
+only its global “outputs do not exist” inference; all downstream blocks remain.
 
 ### 2026-07-12 文档路由与当前成绩表
 
@@ -2399,7 +2456,8 @@ finalizer 完整比较两 hard contracts，并把 current-only 值锁到预注�
 新增探索训练用的单一 YAML 入口：每条 job 把 action/motion、专属 train bank/immutable exam、source
 commit、base recipe/唯一 delta、seed、训练预算、checkpoint milestone 和资源策略放在一起。默认
 `plan/status/launch-next` 都是 dry-run；只有显式 simulation-only token 才能启动一条 `ready` job，
-`blocked` 永不调度。六卡先各放一条再进入下一圈，Pod1/Pod2 容量分别固定为每卡 `4/3`。
+`blocked` 永不调度。当轮六卡先各放一条再进入下一圈，Pod1/Pod2 的每卡 `4/3` 只是 2026-07-14
+队列的临时容量合同，不是永久 GPU 归属；后续队列必须按当前占用重新审计并明确自身容量。
 
 探索入口只查 clean commit、必需资产存在、GPU 容量、重复 claim 与 Kit boot lock，不引入逐文件 SHA、
 pip/import closure 或 receipt；三个 runner 入口固定为 canonical repo-relative 路径，ready placeholder

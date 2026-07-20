@@ -27,7 +27,7 @@ Small tracked runtime assets, such as the Purdue PACE table/net USD visual overl
 | `${HOME}/Downloads/{Franco,v6_dang,v7_dang}/*.mp4` | Ten private air-swing recordings for the 2026-07-11 shoulder-dominant/block/loop motion-library study | User recording; content-addressed metadata only in `configs/motion_video_intake_20260711.json`; do not publish raw bytes | G05/G08 motion-library, TOPP and recovery study |
 | `${HOME}/Downloads/{v12,static,motion}/*.mp4` | Seven private v12 block, backhand high-press and lateral-locomotion teacher recordings from 2026-07-13 | User recording; schema-2 content-addressed metadata only in `configs/motion_video_intake_20260713.json`; do not publish raw bytes | G05/G08 motion library, fifth-action and lateral composition studies |
 | RunPod `/workspace/codexschema/motion_video_intake_20260711/` | Private content-addressed copy, GVHMR outputs, logs and queue bindings for the same ten recordings | Manually copied from the exact local videos; ignored runtime evidence, not a durable artifact service | G05/G08 motion preprocessing |
-| RunPod `/workspace/codexschema/motion_video_intake_20260713_{s0,m0}/` | Accepted no-clobber runtime evidence for [S0/M0](../DEFINITIONS.md), including GVHMR state, exact post-GVHMR handoff and future canonical-beta outputs | Created on Pod1 on 2026-07-13 through `run_motion_video_gvhmr_prereg.md` and `run_motion_post_gvhmr_exact.md`; exact GVHMR ledger is `configs/motion_video_gvhmr_s0_m0_results_20260713.json`, and handoff bytes/SHA are bound by `configs/motion_canonical_betas_{s0,m0}_prereg_20260713.json`. Copy the complete roots, the five bound GVHMR outputs, both handoffs and donor together; this RunPod path is not a durable artifact service | G08 offline motion preprocessing |
+| RunPod `/workspace/codexschema/motion_video_intake_20260713_{s0,m0}/` | Accepted no-clobber runtime evidence for [S0/M0](../DEFINITIONS.md), including GVHMR, exact handoff, canonical-beta and exact-GMR v2 completions | Created on Pod1 on 2026-07-13/14. Copy each complete root, including `exact_gmr_v2/{outputs,logs,audits,bindings,completion_manifest.json}`; S0/M0 completion manifest SHA-256 is `a762d6df...d1a23` / `fdd60fcf...396e`. Preserve the five bound inputs, both handoffs, donor, runtime closure and GMR bundle together. These paths are not a durable artifact service and must never be reconstructed from the later Pod2 rc127 absence | G04/G08 offline motion preprocessing |
 | RunPod `/workspace/codexschema/motion_spatial_retarget_signed_a4bbbaa_v1/` | Full 640-cell signed spatial-retarget proposal result and launch evidence | Created on Pod1 on 2026-07-13; result is 225,920 bytes, SHA-256 `69c3db16fa78f526aef49f20eeafe0d7e5e3004c4ed27f5e2823bb3574e2465c`; tracked summary is `configs/motion_video_spatial_retarget_signed_results_20260713.json` | G08 B/C candidate materialization |
 | RunPod `/workspace/codexschema/motion_video_intake_20260711/gmr_spatial_retarget_primary_v1/` | Exact B/C rank-0 whole-motion SE(2) outputs and report-last receipts | Created on Pod1 CPU on 2026-07-14; restore exact paths/bytes/SHA from `configs/motion_backhand_loop_bc_se2_materialization_results_20260714.json`. Private PKLs are not tracked; do not rerun into an existing no-clobber root | G04/G08 B/C schema-2 preregistration |
 | RunPod `motion_video_intake_20260711/gmr_provenance/GMR_aabea2e.bundle` | Recovery bundle for the clean five-local-commit GMR diagnostic source used on 2026-07-11; 282,953,810 bytes, SHA-256 `5b94af15f4a367dff8d7dc6c1cf14d26be6a649a25df6e1c1046b0e6ab72e2de` | Copy from the exact Pod1 ignored evidence root or another verified backup; `git bundle verify` and require advertised commit `aabea2eee4be4bc16d4be17dac5ffa85e5a31539` | Reproducing the Franco/v6/v7 diagnostic GMR outputs |
@@ -527,8 +527,8 @@ S0/M0 state roots plus the five output PT files and verify every SHA in
 `configs/motion_video_gvhmr_s0_m0_results_20260713.json`; copying only the PT files loses the accepted lineage.
 The separate [post-GVHMR consumer](run_motion_post_gvhmr_exact.md) also needs the exact 2026-07-11
 `canonical_betas.json` and its `materialization_manifest.json`. Its two preregistrations bind every
-output/binding/audit plus the tracked summary and donor artifacts; static validation passes, but runtime handoff
-has not yet been consumed. Missing evidence must fail closed rather than be reconstructed from matching basenames.
+output/binding/audit plus the tracked summary and donor artifacts; runtime handoff and canonical-beta have both
+been consumed. Missing evidence must fail closed rather than be reconstructed from matching basenames.
 
 The 2026-07-11 CPU-only GMR diagnostic then completed 10/10 under a separate
 serial queue. Restore and verify the exact source bundle before reproducing it:
@@ -594,7 +594,8 @@ The new S0/M0 canonical-beta outputs use a separate exact-GMR consumer; do not
 append them to the consumed ten-asset v1 root. Restore the two completion
 manifests (`964a7333...f1be3` / `5cef05f7...71a65`), their exact five PTs and
 both byte-identical donor `canonical_betas.json` copies at the absolute paths
-in `configs/motion_exact_gmr_{s0,m0}_prereg_20260713.json`. The shared runtime
+in `configs/motion_exact_gmr_s0_prereg_20260714_v2.json` and
+`configs/motion_exact_gmr_m0_prereg_20260714_v2.json`. The shared runtime
 contract additionally requires the ignored GMR commit **and tree OID**, exact
 `a3_mocap.xml`, exact SMPL-X-to-A3 mapping, neutral SMPL-X NPZ, recovery bundle,
 Python/pip closure and independently parsed retarget joint/body/site order. A
@@ -603,10 +604,17 @@ Python/pip closure and independently parsed retarget joint/body/site order. A
 but its site inventory is exactly empty and `left_foot/right_foot` are absent;
 never copy canonical vendor sites into that retarget inventory. Both batch-plan
 `static` calls now pass. Restore every absolute binding from
-`configs/motion_s0_m0_exact_gmr_runtime_20260713.json`, then follow
-[`run_motion_s0_m0_exact_gmr.md`](run_motion_s0_m0_exact_gmr.md) for the
-separate read-only runtime `inspect`; no `consume` is implied by source/static
-success.
+`configs/motion_s0_m0_exact_gmr_runtime_20260714_v2.json` and its package snapshot
+`configs/motion_s0_m0_exact_gmr_pip_freeze_56b0f8af_v2.txt`, then follow
+[`run_motion_s0_m0_exact_gmr.md`](run_motion_s0_m0_exact_gmr.md) for evidence verification.
+
+The authoritative Pod1 exact-GMR v2 roots are already consumed. S0/M0
+`completion_manifest.json` SHA-256 is respectively
+`a762d6df22d4ffdcfc323425c234a0d3b910022d17a1541fa48ab7fe700d1a23` and
+`fdd60fcfdc7290677aa51ec7804278568a267e239de548cdb623d0565dac396e`. Restore each complete
+`exact_gmr_v2` root, including outputs, logs, audits and bindings; verify all bytes before accepting the report-last
+manifest. Never rerun v2 `consume` into these roots or delete them to make a command pass. New S0/M0 action
+versions require new preregistrations and no-clobber roots.
 
 2026-07-15 Pod2 restore audit found **none** of those ignored bindings: the
 GMR worktree and 282,953,810-byte bundle, neutral SMPL-X/model/mapping, S0
@@ -615,8 +623,9 @@ manifest/betas/PT and M0 manifest/betas/four PTs are all absent. The old
 nearest Isaac venv matches only 87 of the 234 frozen package lines. Do not
 recreate v2 by guessing or modifying the shared Isaac venv. Restore the bundle
 and both complete intake roots from the authoritative Pod1/backup copy, verify
-every SHA in the v2 plans, then preregister a new isolated v3 Python runtime
-with wheel hashes and actual import origins before any `inspect` or `consume`.
+every SHA in the v2 plans and completions, and keep the Pod2 rc127 as a separate failed-location record. It does
+not mean the Pod1 exact-GMR roots are absent. Only a new action version may preregister a new isolated runtime
+with wheel hashes and actual import origins before its own `inspect` or `consume`.
 
 Ground exactly one accepted diagnostic GMR pickle with explicit no-clobber
 paths. The command below is the Franco forehand-block pilot shape; use each

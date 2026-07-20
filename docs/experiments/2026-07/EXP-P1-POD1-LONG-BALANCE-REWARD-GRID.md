@@ -1,11 +1,15 @@
 # EXP-P1-POD1-LONG-BALANCE-REWARD-GRID — 连续挥拍平衡与击球 Reward 配比
 
-- 状态：`running`
+- 状态：`completed`
 - 阶段/轴：阶段 1，非击球臂、连续挥拍长度、击球位置/速度/拍面 Reward 配比
 - 人类负责人：Franco
 - 执行者：Codex
 - 最高证据等级：`E3`（12 条科学 trainer 均越过首迭代）
-- 创建日期/最后复核日期：2026-07-15 / 2026-07-16
+- 创建日期/最后复核日期：2026-07-15 / 2026-07-20
+
+2026-07-20 收口：十二条 trainer 均曾越过首 iteration，随后已结束或在 task-revision cutover 中精确收口；
+当前没有 live trainer。2026-07-16 的单末窗信号仍只作方向性诊断，旧稀疏分母不足以合法选胜者，未形成
+vendor 行为结论或 adopted setting。
 
 共享术语见[术语与人话对照](../../DEFINITIONS.md)。本卷回答两个直接问题，而不是复制失败 seed：
 

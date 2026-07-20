@@ -362,7 +362,8 @@ count remain zero. The latest-main `tests/` suite is `850 passed, 10 skipped`; G
 
 For M0, the canonical-beta materialization still has null A3 stance fields. The downstream exact-GMR
 plan now freezes canonical foot sites and tolerances, while initial/terminal `d_xy` and pass remain
-null until robot-coordinate evidence exists. G04 remains `Partial`.
+null until robot-coordinate evidence exists. This is the canonical-beta-time snapshot; the recovered
+2026-07-20 exact-GMR result below populates them and fails stance `0/4`. G04 remains `Partial`.
 
 ## Audit update 2026-07-14: bounded implicit effort and robot-only self-contact semantics
 
@@ -427,4 +428,18 @@ deliberately does not claim a whole-distribution/ELF proof. Both v2 host static 
 v2-specific tests are `15 passed`, old+new focused tests are `28 passed`, and the repository suite is
 `949 passed, 10 skipped`. No v2 runtime inspect/consume,
 GMR output, FK result or simulator ran; G04 remains
-`Partial`.
+`Partial`. This was the source-gate/Pod2 snapshot; the recovered Pod1 completions below supersede only the
+global absence inference.
+
+## Audit update 2026-07-20: S0/M0 exact-GMR completions recovered
+
+Authoritative Pod1 evidence supersedes the old global inference that both v2 roots were absent. S0 and M0 both
+have `complete_exact_gmr_diagnostic` report-last manifests, bound to GMR commit
+`aabea2eee4be4bc16d4be17dac5ffa85e5a31539`; the later Pod2 rc127 remains a separate failed-location record.
+S0 manifest SHA is `a762d6df...d1a23`; its 88-frame output passes finite/30 Hz/31-DoF structure but has null ball
+contact/effectiveness. M0 manifest SHA is `fdd60fcf...396e`; all four moving outputs pass structure but fail the
+frozen stance gate (`0/4`). Thus S0 still needs a high-ball paper and M0 is input-gate rejected until movement is
+preserved while the terminal pose returns to its own initial stance. Formal/schema2/training/hardware remain
+false, so G04 stays `Partial`. The detailed values and exact artifact hashes are in
+[the experiment](../experiments/motion_exact_gmr_s0_m0_20260713.md); restoration is in
+[the local-sync operation](../operations/setup_local_sync.md).

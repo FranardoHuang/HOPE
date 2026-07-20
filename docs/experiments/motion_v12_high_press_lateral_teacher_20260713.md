@@ -4,6 +4,7 @@
 - 人类负责人：Franco
 - 执行者：Codex（设计）；运行时执行者：`UNASSIGNED`
 - 工作分支：`Franco_codex/new-motion-batch-20260713`
+- 创建日期/最后复核日期：2026-07-13 / 2026-07-20
 
 ## 问题与决策范围
 
@@ -15,8 +16,9 @@ Franco 自录的四类挥拍是动作库主线；其六段素材已经完成 exa
 3. 一个按位移条件化的横移下肢老师，能否与不同上肢挥拍组合，同时不丢失球拍接触几何、支撑足合法性或平衡？
 
 原始视频的精确登记已完成；GVHMR-only 离线前处理拆成 [S0/M0](../DEFINITIONS.md) 两个独立结构批，分别处理高点拍压与横移，v12
-本轮不授权。S0/M0 已完成 `1/1 + 4/4` exact finite structural pass，但仍没有 GMR/schema-2 后的机器人
-动作或不可变行为考卷，因此本组合实验状态仍是 `proposed`；GVHMR 通过不授权本记录中的动作组合或训练。
+本轮不授权。S0/M0 已完成 `1/1 + 4/4` exact finite GVHMR 结构批和 exact-GMR 诊断；但 S0
+仍无高球效果题族，M0 的末态 stance gate 为 `0/4`，schema-2 也未授权。因此本组合实验
+状态仍是 `proposed`；结构通过不授权本记录中的动作组合或训练。
 
 ## 输入与不可变绑定
 
@@ -26,7 +28,7 @@ Franco 自录的四类挥拍是动作库主线；其六段素材已经完成 exa
 - 最终物理裁判：单拍使用 Agibot 厂商 MuJoCo 的精确
   [Gate3](../DEFINITIONS.md)，随机到球使用 Gate3B；Isaac 只用于训练和诊断。
 
-启动任何 GMR/组合/训练前仍缺少的绑定包括：canonical-beta GVHMR/GMR 输出、runtime-order
+启动任何组合/训练前仍缺少的绑定包括：修复后且过输入门的 M0 动作、runtime-order
 [schema-2](../DEFINITIONS.md) NPZ、经机器人运动学细化的阶段事件、兼容的题库、选择器训练/考试划分、
 厂商 MJCF/runtime SHA，以及固定的交互步数/随机种子预算。
 
@@ -104,7 +106,8 @@ python3 scripts/validate_motion_video_gvhmr_prereg.py static \
 ```
 
 GVHMR 的 Pod 命令及边界见
-[`run_motion_video_gvhmr_prereg.md`](../operations/run_motion_video_gvhmr_prereg.md)。GMR、组合、考卷和 RL
+[`run_motion_video_gvhmr_prereg.md`](../operations/run_motion_video_gvhmr_prereg.md)。原 exact-GMR v2 namespace 已消费，
+不得重跑；证据边界见 [exact-GMR 操作页](../operations/run_motion_s0_m0_exact_gmr.md)。组合、考卷和 RL
 命令仍有意不提供，直到各自输入/输出 hash、consumer 和不覆盖产物根冻结。
 
 ## 结果
@@ -112,7 +115,9 @@ GVHMR 的 Pod 命令及边界见
 七段原始视频已通过素材登记。主线中的 S0 高点拍压为 `88/88` 帧 finite；M0 四条横移为
 `105/105`、`97/97`、`82/82`、`96/96` 帧 finite，详见
 [`motion_video_gvhmr_s0_m0_results_20260713.json`](../../configs/motion_video_gvhmr_s0_m0_results_20260713.json)。
-这只是人体结构输出，不是 A3 机器人动作、效果、组合或仿真器结果；v12 仍未执行。
+这只是人体结构输出，不是 A3 机器人效果、组合或仿真器结果；v12 仍未执行。后来的 exact-GMR
+诊断证明 moving reference 存在，但 M0 `stance_passed=0/4`，详见
+[exact-GMR 卷宗](motion_exact_gmr_s0_m0_20260713.md)。
 
 ## 局限与未宣称事项
 
@@ -122,6 +127,7 @@ GVHMR 的 Pod 命令及边界见
 ## 决定与下一步
 
 先消费既有 Franco exact 结果：反手拉 B/C 已得到 19/3 个 bounded SE(2) proposal，下一步补候选证书；
-其他三类分别进入适配题族。S0/M0 的 GVHMR 与 canonical-beta 已完成，下一步另建 exact GMR consumer；v12 后排为
-Jiayi 路线对照。候选不做 seed 式重复。只有测得动作针对任务的安全接触流形后，
+其他三类分别进入适配题族。S0 下一步是高球拍压题族；M0 先修复“保留左右位移且末态回到各自
+初始 stance”，再用新 namespace 重走 exact GMR 与 schema-2。v12 后排为 Jiayi 路线对照。
+候选不做 seed 式重复。只有测得动作针对任务的安全接触流形后，
 才冻结对应考卷。任何未通过完整离线证书链的项目，都不得分配 RL GPU。

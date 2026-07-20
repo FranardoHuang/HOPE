@@ -10,10 +10,12 @@
 100 题全部完成，触球 `0/100`、回台 `0/100`、物理摔倒 `0/100`，两侧各有 50 次超时。
 这说明该策略在这条严格 0.5 秒诊断卷上来不及击球；结果是 Isaac 诊断，不替代 vendor MuJoCo。
 
-2026-07-19 当前边界：`W`（拍心优先 × 自由非击球臂）和 `Y`（拍心优先 × 触球窗老师静音）
-只是厂商 MuJoCo 同卷的演示优先候选，`U`（拍心优先 × 强准备）是稳定备选。现有路径尚不能运行
-W/Y 厂商行为卷；两份 `model_6700` 已唯一闭合，导出所需静态材料齐全，但真实 ONNX
-`--plan` 与导出尚未在 Pod 运行。
+2026-07-20 当前边界：`W`（拍心优先 × 自由非击球臂）和 `Y`（拍心优先 × 触球窗老师静音）
+仍只是厂商 MuJoCo 同卷的演示优先候选，`U`（拍心优先 × 强准备）是稳定备选。两份真实
+`model_6700` 已分别通过[零写入 ONNX `--plan`](../DEFINITIONS.md#zero-write-onnx-plan)，fresh ONNX 也通过结构检查和 CPU 推理；但两份
+checkpoint 都记录 `training_contract_lineage_exact=0`，导出 metadata 也记录
+`training_contract_exact=0`。因此这些 ONNX 只能作诊断，不能发布到 production/vendor。当前第一步
+是修复或重建 exact-lineage checkpoint；成功后才实现并运行厂商同卷适配器。
 
 ### W/Y checkpoint 只读闭合
 
@@ -29,7 +31,7 @@ non-finite `0`，actor 为 `179→31`，且 `params/training_contract.json`、`e
 
 ### 零写入 ONNX plan
 
-`standalone_onnx_export.py --plan` 会用 `weights_only=True` 加载 checkpoint，走完 donor、motion、
+[`standalone_onnx_export.py --plan`](../DEFINITIONS.md#zero-write-onnx-plan) 会用 `weights_only=True` 加载 checkpoint，走完 donor、motion、
 harvest、normalizer、train-bank、training contract 和 formal face-179 envelope 验证，再在第一次
 目录/临时文件/graph/artifact 写入前退出。成功 JSON 必须至少含：
 
@@ -38,8 +40,22 @@ harvest、normalizer、train-bank、training contract 和 formal face-179 envelo
 - `graph_export_not_executed=true`；
 - `input_dim=179`、`output_dim=31` 和 formal/train-bank 验证字段。
 
-本地五文件聚焦回归为 `97 passed in 0.38s`，普通导出 fake smoke 也未回归。下一步才是在
-Pod 上分别为 W/Y 执行 plan；当前不得把本地 source gate 或 checkpoint 静态检查写成 vendor 通过。
+本地五文件聚焦回归为 `97 passed in 0.38s`，普通导出 fake smoke 也未回归。2026-07-20，W/Y
+真实 `--plan` 都在 exact `origin/main@a0c1284` detached checkout 上通过：iteration=`6700`、
+input/output=`179→31`、formal/train-bank/material checks=`true`、`artifact_written=false`、
+`graph_export_not_executed=true`；plan 输出目录保持 absent，符合零写入合同。
+
+同日随后生成两份 fresh 诊断 ONNX：
+
+- W：`/workspace/codexschema/wy_export_20260720/w/policy.onnx`，SHA-256
+  `ee0e2e83c8f3dc8302fcef609fe13b2feaf69e247e39f405d1ea6c30b652d970`；
+- Y：`/workspace/codexschema/wy_export_20260720/y/policy.onnx`，SHA-256
+  `72da43d96ab9dd95e1da6aba2ed548ad26e61863b70cf8120c120132b7b8f995`。
+
+两份均为约 `1.3 MB`、`179→31`、含 `94` 个 metadata key，独立 ONNX checker 与 CPU
+ONNX Runtime 的零输入有限值推理都通过。**这不是发布许可：** 两个 checkpoint 的
+`training_contract_lineage_exact=0`，两个导出的 `training_contract_exact=0`。生产 runner 应按合同
+拒绝；不得为继续适配器而放宽该门，也不得把成功导出写成 vendor 行为通过。
 
 ## 为什么当前不能直接跑 W/Y 厂商同卷
 
@@ -52,7 +68,8 @@ Pod 上分别为 W/Y 执行 plan；当前不得把本地 source gate 或 checkpo
   适配器。
 - 旧 `pp_gate3_rally.sh` / `pp_rally_conductor.py` 保持隔离禁用，禁止用其启动或清理逻辑拼接本卷。
 
-在适配器落地前，不启动厂商行为。适配器必须保持同一 100 题、每侧 50 题、每题第 0 帧零速度、
+在 exact-lineage checkpoint 与适配器都落地前，不启动厂商行为。适配器必须保持同一 100 题、
+每侧 50 题、每题第 0 帧零速度、
 50 Hz 下 25 个控制周期、正手倍率 `2.64`、反手倍率 `1.8`，并贯穿同一生产 planner、同一 MuJoCo
 XML 场景模型（MJCF）和同一执行 plant（执行器、比例微分控制与时间步配置）。输出必须逐题包含
 `attempt`（尝试/题号）、`completion`（动作完成）、`hit`（物理触球）、`return`（合法回台）、
@@ -98,6 +115,9 @@ CUDA_VISIBLE_DEVICES="$GPU" PYTHONPATH="$HOPE_WBT_PYTHONPATH" \
   "+output_dir=$OUT" +output_stem=isaac_timing_0p5 \
   >"$OUT/evaluator.log" 2>&1
 ```
+
+这里的 [`allow_inexact_contract=true`](../DEFINITIONS.md#allow-inexact-contract) 只为逐字复现历史
+`model_5700` Isaac 诊断；禁止用于 W/Y、production、vendor 或任何正式晋级。
 
 需要后台运行时，用普通的 `nohup setsid` 记录本次 PID；不要再包一层版本化 launcher。
 

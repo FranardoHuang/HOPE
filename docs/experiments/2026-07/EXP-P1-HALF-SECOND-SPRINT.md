@@ -1,18 +1,20 @@
 # EXP-P1-HALF-SECOND-SPRINT — 用二十三个单 seed 问题冲刺半秒击球
 
-- 状态：`running`
+- 状态：`completed`
 - 阶段/轴：Phase 1 / 准备时间、动作速度、模仿强度与平衡 Reward
 - 集成小目标：从共同 `model_5700` 找到至少一条能在 0.5 秒题中触球的候选
 - 人类负责人：Franco
 - 执行者：Codex
-- 最高证据等级：`E1`（Isaac 训练诊断）
-- 创建日期：2026-07-18
+- 最高证据等级：[`E3`](../../DEFINITIONS.md#证据和文档术语)（Isaac 受控训练诊断；无 vendor 行为卷）
+- 创建日期/最后复核日期：2026-07-18 / 2026-07-20
+- 是否已纳入当前 setting：`no`；本轮只完成候选筛选与诊断，不改写已采用训练配置
 
 这里的 `run_name` 是每条训练的唯一可读名字；参数真源在
 [`phase1_half_second_sprint_20260718.yaml`](../../../configs/phase1_half_second_sprint_20260718.yaml)。
 [`initial TTS mixture`](../../DEFINITIONS.md#initial-tts-mixture) 是“新球揭题时还剩多少准备时间”的
 混合分布；[`qdot-limit hinge`](../../DEFINITIONS.md#qdot-limit-hinge) 是接近关节速度上限后才收费的惩罚，
-不是随机推力。
+不是随机推力；[`raw action-rate`](../../DEFINITIONS.md#raw-action-rate-l2) 是相邻 50 Hz policy 输出的
+全 31 维二次差平滑。
 本记录中的 [`K100`](../../DEFINITIONS.md#q50-and-k100) 是固定顺序的 100 道同卷题，正手、反手各
 50 道且失败题不删；[0.5 秒时序卷](../../DEFINITIONS.md#timing-exam-0p5)要求每题从第 0 帧零速度开始，
 在 50 Hz 下第 25 个控制周期触球。
@@ -73,6 +75,11 @@
 | `velocity_heavy` | 半秒动作更缺拍速还是拍心到位？ | 拍心/拍速/拍面权重 `7/17/5` |
 | `position_ready` | 拍心优先与强准备姿态是否相互增益？ | position-heavy + strong-ready |
 | `actionrate_half` | 平滑惩罚完全关闭是否过猛？ | action-rate 权重 `-0.1 → -0.05` |
+| `velocity_ready` | 拍速优先与强准备姿态能否兼得回台和平衡？ | velocity-heavy + strong-ready |
+| `position_free` | 拍心优先时自由非击球臂能否主动平衡？ | position-heavy + free-arm |
+| `velocity_free` | 拍速优先时自由非击球臂能否压低摔倒？ | velocity-heavy + free-arm |
+| `position_window0` | 拍心优先与触球窗老师静音能否减少目标冲突？ | position-heavy + window mimic `0` |
+| `velocity_window0` | 拍速优先与触球窗老师静音是否可训练？ | velocity-heavy + window mimic `0`；对应 Z3，首 iteration 前 boot 挂起 |
 
 `full_combo` 是演示候选搜索，不是单变量因果结论；单变量格负责解释它为什么有效或无效。
 
@@ -119,6 +126,41 @@
   触球窗老师静音）进入同题、同生产规划器（planner）、同判分边界的厂商 MuJoCo 准备，`U`（拍心
   优先 × 强准备）保留为稳定备选。当前尚不能启动这份行为卷，更没有演示结果；G05 继续为 `Partial`。
 
+## 2026-07-20 action-rate 证据回收
+
+现役 [`action_rate_l2`](../../DEFINITIONS.md#raw-action-rate-l2) 在 50 Hz 每个 tick 计算
+`sum((action[t] - action[t-1])^2)`；这里的 action 是 affine transform 与 q_des clamp 之前的 31 维 policy
+输出，RewardManager 再乘权重与 `0.02 s`。所以它确实只看一个相邻样本，但每步连续收费，并非只发生
+一次联系。本轮从旧运行目录恢复了 `-0.05` 与完全关闭 `0` 两格；二者同为 short-focus、seed3、
+`qdot-limit hinge=0`。两份 `env.yaml` 的逐行 diff 只有 `action_rate_l2.weight=-0.05/0`，两份
+`agent.yaml` 的 diff 只有唯一 `run_name`；训练合同文件 SHA 也相同。但历史合同没有把该 weight 差异写入
+独立 hard-contract 字段，所以这是一份强 matched 的方向性诊断，不追认为 formal-exact 因果卷。
+
+5701–6700 的同口径聚合如下。completion/return/fall 为百分比；其余是当时 TensorBoard 字段的原单位：
+
+| 指标 | action-rate `-0.05` | action-rate `0` | 方向 |
+| --- | ---: | ---: | --- |
+| completion | `87.84` | `94.98` | 关闭后更高 |
+| training virtual legal return | `28.38` | `22.43` | `-0.05` 更高 |
+| physical fall | `0.991` | `0.736` | 关闭后略低 |
+| raw action delta mean | `1.370` | `1.907` | 关闭后放大 `39%` |
+| raw action delta max | `4.331` | `6.476` | 关闭后放大 `50%` |
+| joint velocity max | `7.87` | `9.10` | 关闭后更高 |
+| base pitch magnitude（deg） | `2.30` | `4.72` | 关闭后约翻倍 |
+
+最近 500 update 的 raw action delta mean/max 为 `1.497/4.764`（`-0.05`）对
+`2.382/8.375`（`0`）；完全关闭格最后 100 update 已到 `2.792/10.229`。这证明相邻 action penalty 在
+50 Hz 下有实质平滑作用，不是“小到无效”；但 completion、return、fall 交叉取舍，也证明不能只把全身
+dense 权重加大。后续改用恢复期腿腰 processed-q_des replacement 的 matched 设计，见
+[Wave A 实验](EXP-P1-BALANCE-ACTION-SLEW-20260720.md)。
+
+两份完整运行目录已非破坏性复制到各自 Pod 的 persistent `/workspace`；原目录没有删除：
+
+| 格（人话 + `run_name`） | Pod 证据副本 | 大小 | `model_6700.pt` SHA-256 | `training_contract.json` SHA-256 |
+| --- | --- | ---: | --- | --- |
+| action-rate 减半 — `hs_p1_p2_focus_qdot0_actionrate_half_seed3` | Pod1 `/workspace/codexschema/actionrate_existing_evidence_20260720/2026-07-17_19-28-42_hs_p1_p2_focus_qdot0_actionrate_half_seed3/` | `119M` | `3ade052ba79fd9a58b329c9f0f3eb138ab8a72ac9c269f4587ca8b8344a87d7c` | `274cb3bd70bb36c682fef0dfc725aa48f9a57535cf738d4b1052a3e7df70aee0` |
+| action-rate 关闭 — `hs_g2_focus_actionrate0_seed3` | Pod2 `/workspace/codexschema/actionrate_existing_evidence_20260720/2026-07-17_19-09-05_hs_g2_focus_actionrate0_seed3/` | `119M` | `364de3c629dd3b49b5a04a3f690634a0924ff434cec1ffde35eb27f46e25dea8` | `274cb3bd70bb36c682fef0dfc725aa48f9a57535cf738d4b1052a3e7df70aee0` |
+
 ## 2026-07-19 本地只读：W/Y 厂商 MuJoCo 同卷仍缺适配器
 
 这次只读源码定位没有启动仿真、评估器或训练。结论是 W/Y 已进入**准备阶段**，但现有入口之间仍缺
@@ -138,8 +180,8 @@
   `agi/a3_deploy_example/scripts/pp_rally_conductor.py` 是隔离中的旧连续演练路径；其宽泛进程操作和旧
   时序合同不满足本卷，禁止复制、启动或用来补缺口。
 
-现阶段 W/Y 的 checkpoint 已完成**一次只读制品闭合**；下一步只跑两份零写入 ONNX
-`--plan`，不得启动厂商行为卷。之后必须先实现并验证同一条适配链：
+现阶段 W/Y 的 checkpoint 已完成只读制品闭合和零写入 ONNX `--plan`；实际导出也已生成，但下文的
+谱系位证明它们只能作诊断，不得启动厂商行为卷。之后必须先修复 exact lineage 并实现、验证同一条适配链：
 
 1. 不改题序地消费同一 100 题，正手/反手各 50 题；每题从动作第 0 帧零速度开始，固定 25 个
    50 Hz 控制周期，正手时间倍率 `2.64`、反手时间倍率 `1.8`。
@@ -183,8 +225,19 @@ python3 -m pytest -q \
   hope_training/whole_body_tracking/tests/test_training_contract_schema3.py
 ```
 
-真实 W/Y `--plan` 尚未在 Pod 运行，两份 ONNX 也尚未生成。G05/G06 继续 `Partial`，
-`Gate3-D0` 继续 `Open`。
+2026-07-20 在 exact `origin/main=a0c1284b0761857252cb57faae7536cd97a65b0e` detached checkout 上，W/Y
+两份 `--plan` 都以 `checkpoint_iteration=6700`、`artifact_written=false`、
+`graph_export_not_executed=true`、`179→31`、motion/harvest/train-bank/formal-envelope 全通过。随后生成：
+
+- W：`/workspace/codexschema/wy_export_20260720/w/policy.onnx`，SHA-256
+  `ee0e2e83c8f3dc8302fcef609fe13b2feaf69e247e39f405d1ea6c30b652d970`；
+- Y：`/workspace/codexschema/wy_export_20260720/y/policy.onnx`，SHA-256
+  `72da43d96ab9dd95e1da6aba2ed548ad26e61863b70cf8120c120132b7b8f995`。
+
+两份 ONNX 都通过独立 checker 与 CPU ONNXRuntime finite 零输入推理。但 checkpoint `infos` 明确
+`training_contract_lineage_exact=0`，导出 metadata 明确 `training_contract_exact=0`；这是 warm-resume
+谱系阻塞，不能因 graph/shape/finite 通过就发布为
+production exact。W/Y 导出只保留为诊断制品；G05/G06 继续 `Partial`，`Gate3-D0` 继续 `Open`。
 
 ## 2026-07-18 20:52 CST 四臂终档 teardown 收尾
 
@@ -400,5 +453,5 @@ completion / return。所有数字均为百分比。
 ## 当前决定
 
 - 决定：`inconclusive / vendor-preparation-only`；W/Y 为演示优先双候选，U 为稳定备选。
-- 已采用的训练策略：同 parent、单 seed、二十三个不同科学问题并行；优先产生可击球候选，再用单变量格解释。
+- 本轮实际执行的筛选策略：同 parent、单 seed、二十三个不同科学问题并行；优先产生可击球候选，再用单变量格解释。
 - 当前不能声称：任何格已经解决半秒击球、连续对打、跨引擎部署或厂商 MuJoCo 演示。

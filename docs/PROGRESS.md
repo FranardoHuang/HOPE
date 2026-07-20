@@ -11,6 +11,44 @@
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
 
+## 2026-07-20
+
+- 回收的 Pod1 exact evidence 纠正了“两个 S0/M0 `exact_gmr_v2` root 全局 absent / 未 consume”的旧推断。
+  S0 在 `2026-07-14T05:05:55.085040Z` 完成，manifest SHA=`a762d6df...d1a23`；唯一 88-frame
+  高点拍压输出 finite/30 Hz/31 DoF structural pass，但 ball contact/effectiveness 为 `null`，下一门是独立
+  高球题族。M0 在 `2026-07-14T05:06:21.749762Z` 完成，manifest SHA=`fdd60fcf...396e`；四份 moving
+  输出结构通过但 stance `0/4`，故 input-gate rejected、不得占 RL GPU。较后的 Pod2 rc127 仍是另一处真实
+  失败 location，不删除也不再作为全局 current state。详见
+  [exact GMR 卷宗](experiments/motion_exact_gmr_s0_m0_20260713.md)。
+
+- W/Y 的真实零写入 ONNX `--plan` 均在 exact `origin/main@a0c1284` 通过，随后 fresh `179→31`
+  ONNX 也通过独立 checker 与 CPU ONNX Runtime 有限值推理；W/Y SHA-256 分别为
+  `ee0e2e83...d970` / `72da43d9...f995`。但两份 checkpoint 的
+  `training_contract_lineage_exact=0`，两份 ONNX 的 `training_contract_exact=0`，所以只能诊断，
+  production/vendor 必须拒绝。本分支在 NOW 提议把最短 P0 改为 exact-lineage remediation → 同卷 vendor adapter；
+  G05/G06 保持 `Partial`、`Gate3-D0` 保持 `Open`。见
+  [0.5 秒操作](operations/run_phase1_task_revision_0p5_exam.md)与[G06](gates/G06_isaac_to_mujoco.md)。
+
+- 双 Pod 各三张 GPU 的 NVML compute process 和显存占用均为零，当前没有训练作业；这不是永久卡位
+  归属，发射前仍要核验具体 PID/PGID 与 Kit lock。半秒冲刺、Pod1 十二格 long-grid 及相邻长曲线已
+  结束/收口。B 已通过 schema-2/FK、L0、vendor L1、桌网门，下一门为动力学/平衡；C 为后备。
+  C3/D3 L1 与 A0/A1 checkpoint 配对均已闭合，下一证据分别为 immutable K100/signed K100，不能再写成
+  待发 L1 或运行中。权威队列见 [NOW](NOW.md#统一工作队列唯一优先级账本)。
+
+- 最近支线审计未产生整体 merge：Jiayi V13 无 checkpoint/行为证据且分支含无关破坏性历史；Yikang
+  V9 force 未传 `position_data`，所谓 COM force 实际施于 link origin，故现有 force runs 无平衡因果
+  结论；V10 终档 `9999` 但无 MuJoCo/Gate3，V11 fast/prestrike 停在 `2816/18274`，只有代理材料。
+  可用思想只能在当前 `main` 选择性重做并重测。证据入口见
+  [G05 支线审计](gates/G05_isaac_training_first_loop.md)。
+
+- 稳定机制拆成两波：Wave A 是 W/V processed-qdes action-slew 六格单拍诊断，不是完整稳定方案；
+  Wave B 的 M0 moving teacher 已因 stance `0/4` 被 input gate 拒绝，当前只审计 upper-only control 对静态
+  v4rg 下半身模仿或 non-demo stability constraint，exact flags/矩阵待源码审计后再冻结，不猜写。
+  Wave A 的 source/config/runner、两棵 asset tree、动作/题库和 W/V parents 已绑定到 launch manifest
+  `d7e95130…a2e47`；命令渲染门已具备输入，但本条记录时仍是 `not launched`，没有 probe/runtime 结果。
+  两波都不得绕过连续恢复的 `T0 → T1 → T2` 顺序。见
+  [Wave A 实验](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md)。
+
 ## 2026-07-19
 
 - 一次 Pod1 只读全域精确查找已为 W/Y 各唯一定位 `model_6700.pt`。两份 checkpoint 均为
@@ -716,7 +754,8 @@
   `/workspace/yikang/miniforge3/envs/hope-motion-py310/bin/python3.10` 连父环境都不存在。后续只读恢复审计
   又确认 exact GMR tree/283 MB bundle、SMPLX/model/mapping 与 S0/M0 七份 canonical 输入全部 absent；
   最接近的 Isaac venv 只与 234 行冻结环境精确重合 87 行，不能无猜测重建 v2。没有 GMR 输出，
-  不是动作/脚距失败；两批均不得 consume，须先权威恢复资产再建隔离 v3。见
+  不是动作/脚距失败；在该 Pod2 location 两批均不得 consume，须先权威恢复资产再建隔离 v3。2026-07-20
+  后来回收的 Pod1 S0/M0 completions 已取代“全局 absent/未 consume”推断，但不改写这次 rc127 事实。见
   [exact GMR 卷宗](experiments/motion_exact_gmr_s0_m0_20260713.md)。
 
 - B vendor L1 的第二次 CPU `dry-run` 在 dense 704 报 ankle 超限 `0.656861334 rad`，只读复算证实是
@@ -1192,8 +1231,8 @@
   五个直接 import 的 version/origin/METADATA/RECORD 与 post-converter 重验；S0/M0 `consume` 还共用
   exact marker 的 exclusive flock，只串行而不互相设成功依赖。runtime SHA `a55c52cc...b7b2`，S0/M0 plan
   SHA `0746291e...f2f2` / `a810ee01...41f3`；两份 host `static-v2` 通过，v2 专项 `15 passed`、
-  新旧 focused `28 passed`、仓内回归 `949 passed, 10 skipped`。v2 runtime 未执行，
-  GMR/schema-2/训练/真机仍 blocked。见
+  新旧 focused `28 passed`、仓内回归 `949 passed, 10 skipped`。本条形成时 v2 runtime 未执行，
+  GMR/schema-2/训练/真机仍 blocked；当前以顶部 2026-07-20 completion 回收记录为准。见
   [exact GMR 卷宗](experiments/motion_exact_gmr_s0_m0_20260713.md)与
   [操作](operations/run_motion_s0_m0_exact_gmr.md)。
 
@@ -1417,14 +1456,15 @@
   `d57a93e0...a1054` / `60c55150...088ef`。下一层 canonical-beta 已做成两份独立 no-clobber prereg：
   复用旧 materializer 的 PT/save-reload 审计，只注入旧 Franco exact donor，不重算新 cohort。host static
   与新旧专项为 `15 passed, 1 skipped`，最新 main 重放回归 `620 passed, 9 skipped`；真实 PT 的后续
-  consume 已按本节首条完成，GMR/schema-2/安全/效果/训练仍未授权。
-  M0 的 foot sites、初末二维脚距、容差和 pass 全保持 null，必须由未来 exact GMR 产生。详见
+  consume 已按本节首条完成；本条形成时 GMR/schema-2/安全/效果/训练仍未授权，
+  M0 的 foot sites、初末二维脚距、容差和 pass 全保持 null。后来 exact-GMR 诊断已回收，
+  M0 stance gate 为 `0/4`；当前详情见 [exact-GMR 卷宗](experiments/motion_exact_gmr_s0_m0_20260713.md)。本层详见
   [canonical-beta 卷宗](experiments/motion_canonical_beta_s0_m0_20260713.md)。
 
 - S0/M0 的五条 exact GVHMR 结果已增加 post-GVHMR no-clobber consumer：两份 prereg 同时绑定 tracked
   summary、execution record、queue state、每条 binding/audit/PT 和 canonical-beta donor，host static
-  两批通过，专项 `8 passed`；后续 runtime handoff 与 canonical-beta consume 已按本节其他条目完成，
-  GMR/schema-2 仍未运行；S0
+  两批通过，专项 `8 passed`；后续 runtime handoff 与 canonical-beta consume 已按本节其他条目完成。
+  本条形成时 GMR/schema-2 仍未运行；当前 exact-GMR 已有诊断结果、schema-2 仍未授权。S0
   禁止借用拉球题，M0 后续必须恢复含前后错位的初始二维脚间向量，双脚并拢不算成功。详见
   [实验卷宗](experiments/motion_post_gvhmr_s0_m0_handoff_20260713.md)与
   [操作文档](operations/run_motion_post_gvhmr_exact.md)。

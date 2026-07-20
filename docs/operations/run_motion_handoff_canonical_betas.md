@@ -97,8 +97,10 @@ root 必须原先不存在。consumer 先在 private staging 完成全部 save/r
 - `formal_eligible/training_authorized/hardware_authorized` 全为 false；
 - M0 foot mapping、初末 `d_xy`、容差、`stance_passed` 全为 null。
 
-完成后只允许新建并审查 exact GMR prereg。旧 GMR queue/consumer 不接受这个新 result status/suffix；不得手工
-把新 PT 塞进旧队列。GMR 前仍无 schema-2、安全、动作效果或训练资格。
+本层完成时只允许新建并审查 exact GMR prereg。旧 GMR queue/consumer 不接受这个新 result
+status/suffix；不得手工把新 PT 塞进旧队列。后来 exact-GMR v2 诊断已完成，但仍无
+schema-2、安全、动作效果或训练资格；当前结论见
+[exact-GMR 卷宗](../experiments/motion_exact_gmr_s0_m0_20260713.md)。
 
 2026-07-13 的第一次正式运行已按上述顺序完成。S0/M0 completion manifest SHA 分别为
 `964a7333...f1be3` / `5cef05f7...71a65`，结果数为 `1/4`；五条 non-beta 内容全 bit-exact，donor copy

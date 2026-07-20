@@ -1130,6 +1130,161 @@ exact `task.rewards.joint_velocity_limit_hinge_weight`、margin、完整 argv、
 `joint_velocity_limit_hinge_reward` 和 31 项 `joint_names/joint_velocity_limits`。不得从 treatment 的
 中间 checkpoint 再派生 control，也不得用 action-rate 代替这一轴。
 
+<a id="恢复期腿腰-processed-q_des-slew-wave-a"></a>
+### 恢复期腿腰 processed-q_des slew（Wave A）
+
+这里的 [Wave A](../DEFINITIONS.md#balance-stability-waves) 是 action-slew 单变量波；静态 v4rg 下半身参考或
+non-demo stability constraint 属于另行冻结的 Wave B。M0 四份横移 exact-GMR 虽存在，但 4/4
+`stance_passed=false` 且 formal/schema2/training/hardware 全部 false，本轮禁止把它们当 moving teacher。
+
+现役 [`action_rate_l2`](../DEFINITIONS.md#raw-action-rate-l2) 权重是 `-0.10`：50 Hz 下每 tick 计算
+`sum((action[t]-action[t-1])^2)`，再由 RewardManager 乘 `0.02 s`。它只读 affine transform/clamp 之前的
+31 维 raw action，但每步连续连接，不是只发生一次。历史 `-0.05` 对 `0` 已证明它能显著压低 action delta、
+qdot max 和 base pitch；完成/回台/摔倒有交叉取舍，详见
+[半秒冲刺 action-rate 回收](../experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md#2026-07-20-action-rate-证据回收)。
+
+新 [`processed_qdes_slew_hinge`](../DEFINITIONS.md#processed-qdes-slew-hinge) 默认关闭。它读取 affine
+transform 和 train=deploy clamp 之后的 q_des，仅在同一拍触球后 `0.20–1.55 s` 对 exact 3 腰+12 腿关节
+计算：
+
+```text
+u_j    = abs(q_des[t,j] - q_des[t-1,j]) / (qdot_limit[j] * 0.02)
+tail_j = 1 - exp(-(relu(u_j - 0.85) / 0.15)^2)
+value  = mean(tail_j over 15 joints)
+```
+
+reset 后首步无有效 previous q_des，必须 mask 为零。预注册 treatment weight `-0.25`；`value<1` 且
+RewardManager 乘 `0.02 s`，所以满激活时每 tick 幅值小于 `0.005`、每 eligible 秒小于 `0.25`。这允许
+击球臂快速变化，也不在击球前/触球窗收费。控制频率不是严格 50 Hz、31-joint order/15-joint 集合漂移、
+速度上限非法或 probe 与 Reward 参数不同都会 fail closed。
+
+四个 Hydra key 首次出现时的人话如下，统一链接上面的术语定义：
+
+- `task.rewards.processed_qdes_slew_hinge_weight`：启用/关闭腿腰执行目标尾部惩罚，必须非正；
+- `task.rewards.processed_qdes_slew_hinge_margin`：不收费区的归一化阈值，本轮固定 `0.85`；
+- `task.rewards.processed_qdes_slew_hinge_recovery_start_s`：同一拍触球后开始收费时刻，本轮 `0.20 s`；
+- `task.rewards.processed_qdes_slew_hinge_recovery_end_s`：同一拍停止收费时刻，本轮 `1.55 s`。
+
+不要手写长 Hydra 命令。Wave A 的 W/V×C/N/H 六格、parent、资产、槽位、预算与 intentional
+[`checkpoint_allow_contract_mismatch=true`](../DEFINITIONS.md#checkpoint-contract-mismatch)都只从
+[`configs/phase1_balance_action_slew_20260720.yaml`](../../configs/phase1_balance_action_slew_20260720.yaml)
+读取。远端训练 checkout 必须是 clean detached
+`54c9a62656f0e60e5bb41cbcfa0e5a972b793906`；所有 child 是 diagnostic continuation、永久
+formal-ineligible。
+
+先做 dependency-light 检查和默认 **NO-LAUNCH** plan：
+
+```bash
+BALANCE_REPO_ROOT="$(git rev-parse --show-toplevel)"
+cd "$BALANCE_REPO_ROOT"
+
+python3 -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_reward_flags_mdp.py \
+  hope_training/whole_body_tracking/tests/test_reward_flags_overrides.py \
+  tests/test_run_phase1_balance_action_slew_queue.py
+
+python3 scripts/run_phase1_balance_action_slew_queue.py --stage probe
+```
+
+`--stage probe` 的人话是“选择 4096-env×2-update 非科学合同探针”；默认调用只验证并打印六格计划，
+`commands_emitted=false`，不会 SSH，并明确报告 manifest gate 仍 blocked。当前独立生成并复核的
+[`launch manifest`](../DEFINITIONS.md#balance-launch-manifest)：它必须绑定 exact source、当前 queue
+config/runner、A3 asset tree、`model.usd` 及完整 6-file sibling bundle tree、两份动作、题库、W/V checkpoint
+与 parent contract 的 SHA-256。只复制或只哈希 `model.usd` 会漏掉它依赖的 `configuration/`，必须拒绝。
+本轮 exact 文件为 `configs/phase1_balance_action_slew_launch_manifest_20260720.json`，文件 SHA-256 为
+`d7e951301e8df58a40e5566d45375afc990201a4a40265e683ef1990df2a2e47`。把该 exact 路径、SHA 分别放进
+任务专用变量 `BALANCE_LAUNCH_MANIFEST`、`BALANCE_LAUNCH_MANIFEST_SHA256`；不得用占位 hash，也不得把
+清单存在误写成 probe 已启动。
+
+通过该复核后，[`--authorize-launch`](../DEFINITIONS.md#balance-command-render-latch)仍只允许**渲染**启动
+命令，不执行 SSH；runner 自身也会重复检查同一 `origin/main` authority，不能靠跳过本页绕过：
+
+```bash
+set -euo pipefail
+git fetch origin main
+test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+git cat-file -e origin/main:configs/phase1_balance_action_slew_launch_manifest_20260720.json
+python3 - <<'PY'
+import subprocess
+
+text = subprocess.check_output(
+    ["git", "show", "origin/main:docs/NOW.md"], text=True
+)
+title = "- **[11｜P1] 稳定机制 Wave A/B。**"
+start = text.find(title)
+if start < 0:
+    raise SystemExit("Wave A/B claim missing from origin/main NOW")
+end = text.find("\n- **[", start + len(title))
+entry = text[start:] if end < 0 else text[start:end]
+required = (
+    "责任人 franco；执行者 Codex；执行分支",
+    "Franco_codex/balance-ablation-round-20260720",
+    "phase1_balance_action_slew_20260720",
+)
+if any(value not in entry for value in required):
+    raise SystemExit("Wave A/B owner/executor/branch not bound in one NOW entry")
+PY
+
+python3 scripts/run_phase1_balance_action_slew_queue.py \
+  --stage probe --authorize-launch \
+  --launch-manifest "$BALANCE_LAUNCH_MANIFEST" \
+  --expected-launch-manifest-sha256 "$BALANCE_LAUNCH_MANIFEST_SHA256" \
+  > /tmp/phase1_balance_slew_probe_commands.json
+```
+
+上面的 `origin/main` exact commit、统一队列认领、执行分支与 tracked manifest 四道门必须保持通过；否则
+只能保留默认 NO-LAUNCH plan，禁止渲染授权命令或执行 SSH。通过后，必须由操作者按
+[RunPod 启动纪律](run_on_runpod.md#2026-07-20-action-slew-wave-a-启动前状态与发射纪律)
+逐条执行 `jobs[].launch_command`。每格自然退出到 `model_6701.pt` 后，再逐条执行同一 JSON 中的
+`jobs[].probe_verifier_command`；verifier 才会在远端不可覆盖地发布 `probe_receipt.json`。把六份收据逐字节
+复制到任务专用本地目录 `BALANCE_PROBE_RECEIPTS_DIR`，布局必须是
+`DIR/{w_c,w_n,w_h,v_c,v_n,v_h}/probe_receipt.json`。
+
+六份 [`probe receipt`](../DEFINITIONS.md#balance-probe-receipt-set)会重验 absolute milestone `[6701]`、
+terminal checkpoint、policy/value/full optimizer/two normalizers、C/N/H exact 参数与 applied markers、
+lineage=`0`、claim/binding，以及 6700/6701 两步的 processed-q_des、completion/fall/legal-return、ready-tilt、
+qdot tag、非零分母和守恒账，再检查 fatal、进程组和 GPU 释放。没有
+`--probe-approved` 人工捷径；train 只接受同一 manifest 下收齐的六份 exact 收据，并只生成命令：
+
+```bash
+set -euo pipefail
+git fetch origin main
+test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
+git cat-file -e origin/main:configs/phase1_balance_action_slew_launch_manifest_20260720.json
+python3 - <<'PY'
+import subprocess
+
+text = subprocess.check_output(
+    ["git", "show", "origin/main:docs/NOW.md"], text=True
+)
+title = "- **[11｜P1] 稳定机制 Wave A/B。**"
+start = text.find(title)
+if start < 0:
+    raise SystemExit("Wave A/B claim missing from origin/main NOW")
+end = text.find("\n- **[", start + len(title))
+entry = text[start:] if end < 0 else text[start:end]
+required = (
+    "责任人 franco；执行者 Codex；执行分支",
+    "Franco_codex/balance-ablation-round-20260720",
+    "phase1_balance_action_slew_20260720",
+)
+if any(value not in entry for value in required):
+    raise SystemExit("Wave A/B owner/executor/branch not bound in one NOW entry")
+PY
+
+python3 scripts/run_phase1_balance_action_slew_queue.py \
+  --stage train --authorize-launch \
+  --launch-manifest "$BALANCE_LAUNCH_MANIFEST" \
+  --expected-launch-manifest-sha256 "$BALANCE_LAUNCH_MANIFEST_SHA256" \
+  --probe-receipts-dir "$BALANCE_PROBE_RECEIPTS_DIR" \
+  > /tmp/phase1_balance_slew_train_commands.json
+```
+
+禁止把输出 JSON 直接整体 pipe 给 shell；每个 Pod 同时只能 boot 一个 Kit，科学里程碑按
+`+200/+500/+1000` 判。完整接受门、六个唯一 `run_name` 与 Wave B 下半身老师预留见
+[实验记录](../experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md)。Wave B 尚无审过的 flag 或
+machine contract；M0 moving-teacher input gate 已 reject，不得从本节猜命令或把文件存在写成训练授权。
+
 ### 恢复/等待窗随机横向躯干推力（source 已接线，当前 `NO-LAUNCH`）
 
 这和 qdot-limit 完全不同：qdot-limit 是关节速度惩罚；

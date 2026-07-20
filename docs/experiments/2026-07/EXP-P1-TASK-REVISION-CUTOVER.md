@@ -1,6 +1,6 @@
 # EXP-P1-TASK-REVISION-CUTOVER
 
-Status: `blocked / no behavior verdict` — `A6` passed the 4096-env, two-update generic and
+Status: `completed` — `A6` passed the 4096-env, two-update generic and
 task-revision full-scene gates with a finite checkpoint, exact integer ledger and live
 final-precontact revisions. All 22 delay-zero cells consumed exactly one launch claim: 19 crossed
 their first training iteration and later received checkpoint-bound `+1000` behavior receipts,
@@ -10,9 +10,13 @@ they are not evidence that every setting should continue. The two non-atomic del
 cells remain NO-LAUNCH. This is runtime/harness evidence, not a behavior winner or 0.5-second
 return result.
 
+2026-07-20 closure: all 22 claimed cells are terminal or were closed by the later cutover; no trainer remains
+live. The three pre-iteration failures remain infrastructure rejects, not scientific negatives. The experiment is
+complete with no behavior verdict; its successor ruler is a separate future experiment, not an extension of this pool.
+
 - Human owner: Franco
 - Executor: Codex
-- Date: 2026-07-16
+- Created / last reviewed: 2026-07-16 / 2026-07-20
 - Scope: simulator and source only; no real-robot command is authorized or was run.
 
 ## Problem
