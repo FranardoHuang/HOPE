@@ -268,6 +268,14 @@ mechanisms:
         - ++task.push.vel_xy_mps=0.5
         - ++task.push.ang_vel_radps=0.0
         - ++task.push.ang_axes=none
+    p08:
+      human_name: 人话：超强档——vx,vy ±0.8 m/s，每 5-15 s 一次（2026-07-21 追加：±0.5 在 W 父本上零摔，为框住"膝盖弯折点"补上界；capture point 偏移约 26 cm）
+      overrides:
+        - ++task.push.enable=true
+        - ++task.push.interval_range_s=[5.0,15.0]
+        - ++task.push.vel_xy_mps=0.8
+        - ++task.push.ang_vel_radps=0.0
+        - ++task.push.ang_axes=none
     yaw:
       human_name: 人话：中档 xy ±0.35 m/s 再加偏航角速度 ±0.5 rad/s，每 5-15 s 一次
       overrides:
@@ -332,17 +340,21 @@ launch_order:
   - v_p05
   - w_fast
   - v_ang
+  - w_p08
+  - v_p08
 
 jobs:
   - {id: w_p02, parent: W, push: p02, run_name: p1push_w_p02_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/w_p02}
   - {id: w_p035, parent: W, push: p035, run_name: p1push_w_p035_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/w_p035}
   - {id: w_p05, parent: W, push: p05, run_name: p1push_w_p05_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/w_p05}
+  - {id: w_p08, parent: W, push: p08, run_name: p1push_w_p08_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/w_p08}
   - {id: w_yaw, parent: W, push: yaw, run_name: p1push_w_yaw_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/w_yaw}
   - {id: w_ang, parent: W, push: ang, run_name: p1push_w_ang_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/w_ang}
   - {id: w_fast, parent: W, push: fast, run_name: p1push_w_fast_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/w_fast}
   - {id: v_p02, parent: V, push: p02, run_name: p1push_v_p02_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/v_p02}
   - {id: v_p035, parent: V, push: p035, run_name: p1push_v_p035_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/v_p035}
   - {id: v_p05, parent: V, push: p05, run_name: p1push_v_p05_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/v_p05}
+  - {id: v_p08, parent: V, push: p08, run_name: p1push_v_p08_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/v_p08}
   - {id: v_yaw, parent: V, push: yaw, run_name: p1push_v_yaw_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/v_yaw}
   - {id: v_ang, parent: V, push: ang, run_name: p1push_v_ang_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/v_ang}
   - {id: v_fast, parent: V, push: fast, run_name: p1push_v_fast_seed3_20260721, run_dir: /workspace/codexschema/phase1_push_robustness_20260721/runs/v_fast}

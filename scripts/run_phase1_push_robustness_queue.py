@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""渲染 Wave P 12 臂 {W,V}x{p02,p035,p05,yaw,ang,fast} push 鲁棒性队列的 SSH 命令。
+"""渲染 Wave P 14 臂 {W,V}x{p02,p035,p05,p08,yaw,ang,fast} push 鲁棒性队列的 SSH 命令。
 
 人话：这个程序只做三件事——(1) ``--plan`` 打印 12 臂计划表和推荐填充顺序；(2)
 ``--render-stage probe|science --render-job <id> --pod <pod1|pod2> --gpu <0|1|2>``
@@ -35,12 +35,12 @@ PLACEHOLDER_COMMIT = "PENDING_EXACT_COMMIT"
 KIT_BOOT_LOCK = "/workspace/bin/kit_boot_lock.sh"
 PARENT_ITERATION = 6700
 SAFE_ID = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]*$")
-JOB_ID = re.compile(r"^(w|v)_(p02|p035|p05|yaw|ang|fast)$")
+JOB_ID = re.compile(r"^(w|v)_(p02|p035|p05|p08|yaw|ang|fast)$")
 HYDRA_KEY = re.compile(r"^[A-Za-z_][A-Za-z0-9_.]*$")
 COMMIT = re.compile(r"^[0-9a-f]{40}$")
 SHA256 = re.compile(r"^[0-9a-f]{64}$")
 
-PUSH_ORDER = ("p02", "p035", "p05", "yaw", "ang", "fast")
+PUSH_ORDER = ("p02", "p035", "p05", "p08", "yaw", "ang", "fast")
 PARENT_ORDER = ("W", "V")
 VALID_GPUS = (0, 1, 2)
 # 同卡在跑 compute 进程必须 < 4 才允许发射（逐字继承矩阵预检）。
@@ -50,6 +50,7 @@ MAX_PROCS_PER_GPU = 4
 LAUNCH_ORDER = (
     "w_p02", "v_p035", "w_p05", "v_yaw", "w_ang", "v_fast",
     "w_p035", "v_p02", "w_yaw", "v_p05", "w_fast", "v_ang",
+    "w_p08", "v_p08",
 )
 
 EXPECTED_PARENT_SHA256 = {
@@ -136,8 +137,10 @@ EXPECTED_PUSH = {
     "yaw": _push_overrides("[5.0,15.0]", "0.35", "0.5", "yaw"),
     "ang": _push_overrides("[5.0,15.0]", "0.35", "0.5", "rpy"),
     "fast": _push_overrides("[1.0,3.0]", "0.35", "0.0", "none"),
+    # 2026-07-21 追加：±0.5 在 W 父本零摔，补 ±0.8 上界框住"必须应对"区（capture point ~26 cm）。
+    "p08": _push_overrides("[5.0,15.0]", "0.8", "0.0", "none"),
 }
-ALLOWED_XY_MAGNITUDES = (0.2, 0.35, 0.5)
+ALLOWED_XY_MAGNITUDES = (0.2, 0.35, 0.5, 0.8)
 ALLOWED_ANGULAR_MAGNITUDES = (0.0, 0.5)
 # train.py/training_contract 的合法轴选择（PUSH_ROBOT_ANG_AXES 同款）。
 ALLOWED_ANG_AXES = ("none", "yaw", "rpy")
@@ -490,8 +493,8 @@ def _expected_jobs_order() -> list[tuple[str, str, str]]:
 
 def _validate_jobs(queue: dict[str, Any]) -> None:
     jobs = _list(queue["jobs"], "jobs")
-    if len(jobs) != 12:
-        raise QueueError("the queue must contain exactly 12 jobs")
+    if len(jobs) != 14:
+        raise QueueError("the queue must contain exactly 14 jobs")
     ids: set[str] = set()
     names: set[str] = set()
     dirs: set[str] = set()
@@ -528,7 +531,7 @@ def _validate_jobs(queue: dict[str, Any]) -> None:
             raise QueueError(f"push cell duplicated: {cell}")
         cells.add(cell)
         observed.append((job_id, parent, push))
-    if len(cells) != 12:
+    if len(cells) != 14:
         raise QueueError("parent x push coverage is incomplete")
     if observed != _expected_jobs_order():
         raise QueueError("jobs must keep the frozen W-then-V, p02..fast ordering")
@@ -699,7 +702,7 @@ def _validate_queue(queue: dict[str, Any]) -> dict[str, Any]:
     _exact_keys(mechanisms, {"push"}, "mechanisms")
     push = _mapping(mechanisms["push"], "mechanisms.push")
     if set(push) != set(PUSH_ORDER):
-        raise QueueError("mechanisms.push must be exactly p02, p035, p05, yaw, ang, fast")
+        raise QueueError("mechanisms.push must be exactly p02, p035, p05, p08, yaw, ang, fast")
     for name, mechanism in push.items():
         _validate_push(name, _mapping(mechanism, f"mechanisms.push.{name}"))
 

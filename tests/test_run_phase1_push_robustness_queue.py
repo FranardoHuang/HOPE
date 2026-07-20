@@ -189,7 +189,7 @@ def test_controls_point_at_matrix_no_push_baseline(tmp_path):
 def test_exactly_12_unique_jobs():
     queue = Q.load_queue(QUEUE)
     jobs = queue["jobs"]
-    assert len(jobs) == 12
+    assert len(jobs) == 14
     assert len({job["id"] for job in jobs}) == 12
     assert len({job["run_name"] for job in jobs}) == 12
     assert len({job["run_dir"] for job in jobs}) == 12
@@ -198,7 +198,7 @@ def test_exactly_12_unique_jobs():
 def test_parent_push_coverage_complete():
     queue = Q.load_queue(QUEUE)
     cells = {(job["parent"], job["push"]) for job in queue["jobs"]}
-    assert len(cells) == 12
+    assert len(cells) == 14
     for parent in ("W", "V"):
         for push in ("p02", "p035", "p05", "yaw", "ang", "fast"):
             assert (parent, push) in cells
