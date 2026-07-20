@@ -6,6 +6,7 @@ import hashlib
 import importlib.util
 import json
 from pathlib import Path, PurePosixPath
+import shlex
 import subprocess
 import sys
 
@@ -1021,6 +1022,7 @@ def test_failed_launch_requires_stable_empty_exact_pgid_without_signaling(tmp_pa
     assert "failure_audit_rc=$?" in remote_arg
     assert "manual identity audit required" in remote_arg
     assert "trainer_child_evidence.json" in remote_arg
+    assert shlex.quote(Q.PROBE_SUPERVISOR_PROGRAM) in remote_arg
 
 
 def test_postcheck_failure_always_runs_failure_audit_transaction(tmp_path):
@@ -1049,6 +1051,38 @@ def test_postcheck_failure_always_runs_failure_audit_transaction(tmp_path):
     )
     assert unsafe.returncode == 121
     assert "manual identity audit required" in unsafe.stderr
+
+
+def test_failure_transaction_preserves_multiline_shell_argument_bytes():
+    payload = "import datetime\nimport hashlib\nif True:\n    print('exact')\n"
+    body = " ".join([
+        shlex.quote(sys.executable),
+        "-c",
+        shlex.quote("import sys; sys.stdout.write(sys.argv[1])"),
+        shlex.quote(payload),
+    ])
+    fragment = Q._failure_audited_transaction_shell(body, "false")
+    completed = subprocess.run(
+        ["bash", "-c", "set -euo pipefail\n" + fragment],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    assert completed.returncode == 0
+    assert completed.stdout == payload
+
+    supervisor = Q._failure_audited_transaction_shell(
+        " ".join([
+            shlex.quote(sys.executable), "-B", "-c",
+            shlex.quote(Q.PROBE_SUPERVISOR_PROGRAM),
+        ]),
+        "true",
+    )
+    parsed = subprocess.run(
+        ["bash", "-c", "set -euo pipefail\n" + supervisor],
+        text=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE,
+    )
+    assert parsed.returncode == 1
+    assert "probe supervisor requires bound metadata" in parsed.stderr
+    assert "IndentationError" not in parsed.stderr
 
 
 def test_probe_verifier_proves_terminal_artifacts_counters_and_release(tmp_path):

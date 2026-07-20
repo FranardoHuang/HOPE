@@ -56,19 +56,18 @@
   [Wave A 实验](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md)。
 
 - probe5 随后自然完成 W-C、V-C、W-N、V-N、V-H 五格并通过五份
-  [exact probe receipt](DEFINITIONS.md#balance-probe-receipt-set)；W-H 在 trainer 启动前因 supervisor 单次读取
-  fork→exec 过渡期 `/proc/<pid>/cmdline` 而 fail closed。事后 exact PGID、child PID、assigned GPU、
-  Kit/cache locks 均为空，因此这是发射身份竞态，不是 processed-qdes 机制负例；五份旧收据不可与重试
-  混成六格集合。当前 [probe6 替换批](DEFINITIONS.md#balance-probe-generations) 使用全新 v5 no-clobber 根，六个 `run_name` 为
-  `phase1_balance_slew_probe6_{w_c,w_n,w_h,v_c,v_n,v_h}_seed3_20260720`（第六版六格零训练合同探针，
-  只验证启动/合同/收据，不作行为判分），绑定 [launch manifest](DEFINITIONS.md#balance-launch-manifest)
-  文件 SHA-256 `718bbee0a556cc3640ee636e20f8eb2adb293cee8d0bb1820afceebf5ce1a267`、内容 SHA-256
-  `3cbb019e9d315abdc687d1635c9deffc13eae9577ee2d820b0e3c30ba9b7cfd8`。runner 在首次 `/proc` 读取前先
-  不可覆盖地保存 child PID，再对同一 child 最多等待 `5 s`、每 `10 ms` 重采样，锁定 PGID/starttime，
-  只接受 exact argv；launcher 与全部 postcheck 的任一失败都进入同一 closure audit 并停止整批，
-  且须证明 exact PGID、child PID、assigned GPU 与 Kit/cache locks 全空，退出码 `121` 进入人工身份审计。
-  六份同一 manifest identity 的 probe6 receipt 齐全前不得生成长训；运行 authority 只来自合入后的
-  `origin/main` NOW 条目。详见
+  [exact probe receipt](DEFINITIONS.md#balance-probe-receipt-set)；W-H 的 fork→exec 身份竞态是基础设施拒绝，
+  五份旧收据不可续用。probe6/v5 的 W-C 又在 `2026-07-20T03:01:10Z` 于 trainer/probe supervisor 内、
+  进入 trainer 前失败：transaction wrapper 给 shlex-quoted multiline Python 参数逐行加两个空格，81 B
+  `run.log` 只有 `IndentationError: unexpected indent`。locked launcher 未绑定快速退出的 child，也未发
+  signal；leader/child evidence、binding、terminal、checkpoint、receipt 与 RSL 均 absent，PID=PGID
+  `2712318` 双扫稳定 absent，GPU0=`0 MiB / 0%`、locks free；其他五格未发。v5 因而永久只作失败历史，
+  不是机制负例。当前 [probe7 替换批](DEFINITIONS.md#balance-probe-generations) 使用全新 v6 no-clobber 根和
+  `phase1_balance_slew_probe7_{w_c,w_n,w_h,v_c,v_n,v_h}_seed3_20260720`，transaction body 改为逐字节保留
+  且新增 multiline payload byte-equality 回归；尚未发射。其 [launch manifest](DEFINITIONS.md#balance-launch-manifest)
+  文件/content SHA-256 为 `4552fe23…58e9e` / `6e3518d9…41640`，config/runner 为
+  `912bd8d2…b8f3c` / `3fbaf23f…cd7d7`。六份同一 identity 的 probe7 receipt 齐全前不得生成长训；
+  运行 authority 只来自合入后的 `origin/main` NOW 条目。详见
   [Wave A 实验](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md)。
 
 ## 2026-07-19

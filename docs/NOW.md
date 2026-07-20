@@ -55,10 +55,14 @@ recovery-eligible=`0` 当成失败。probe3 的 W-C/W-N/V-C 也均自然退出�
 log、checkpoint 与 GPU compute 均不存在，不是科学负例。probe5 随后以
 [`algo.runner.num_steps_per_env=24`](DEFINITIONS.md#ppo-num-steps-per-env) 在 v4 no-clobber 根完成五格 exact
 receipt；W-H 只因 fork→exec 身份采样竞态在 trainer 前 fail closed，事后进程/GPU/locks 全空，不能当
-H 机制负例，也不能拿五份旧收据补新批。当前 [probe6 替换批](DEFINITIONS.md#balance-probe-generations)
-使用全新 v5 no-clobber 根、同一 child 的有界 exact-identity wait、不可覆盖 child evidence，以及覆盖
-launcher 与全部 postcheck 的失败残留审计；尚未发射。只有下方同一 manifest identity 的六份 fresh receipt
-齐全才能生成长训命令；所有旧 manifest/目录禁止重用。
+H 机制负例，也不能拿五份旧收据补新批。probe6 的 v5 W-C 又在 `2026-07-20T03:01:10Z` 于
+trainer/probe supervisor 内、进入 trainer 前 fail closed：transaction wrapper 给每一行加两个空格，破坏了
+shlex-quoted multiline Python 参数，81 B `run.log` 只有 `IndentationError: unexpected indent`。locked
+launcher 来不及绑定已经快速退出的 child，也没有发 signal；PID=PGID `2712318` 双扫稳定 absent，GPU0
+为 `0 MiB / 0%` 且 locks free，其他五格未发。这是 launcher 包装缺陷，不是机制负例，v5 永久只作历史。
+当前 [probe7 替换批](DEFINITIONS.md#balance-probe-generations) 改用全新 v6 no-clobber 根，transaction body
+逐字节保留、不再逐行缩进，并以 multiline payload byte-equality 回归锁定；尚未发射。只有下方同一
+manifest identity 的六份 fresh receipt 齐全才能生成长训命令；所有旧 manifest/目录禁止重用。
 Wave B 的 M0 左右 moving teacher 已因 stance `0/4` 被 input gate 拒绝；当前只允许审计
 upper-only matched control 对静态 v4rg 下半身模仿或 non-demo stability constraint，exact flags/矩阵仍待
 源码审计，不得猜写。
@@ -842,17 +846,26 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
   [六格探针收据](DEFINITIONS.md#balance-probe-receipt-set)；W-H 在 trainer 启动前因为 supervisor 对
   fork→exec 过渡期的 `/proc/<pid>/cmdline` 只采样一次而 fail closed。事后 exact PGID、child PID、
   assigned GPU 与 Kit/cache locks 均为空，所以这是发射身份竞态，不是 processed-qdes 机制负例；五份
-  probe5 收据也不能与一次重试混成六格集合。当前 [probe6 替换批](DEFINITIONS.md#balance-probe-generations) 改用全新
-  `/workspace/codexschema/phase1_balance_action_slew_v5_20260720` no-clobber 根；六个 `run_name` 为
-  `phase1_balance_slew_probe6_{w_c,w_n,w_h,v_c,v_n,v_h}_seed3_20260720`（第六版六格零训练合同探针，
+  probe5 收据也不能与一次重试混成六格集合。probe6 改用 v5 no-clobber 根并加入同一 child 的有界
+  exact-identity wait，但 W-C 在 `2026-07-20T03:01:10Z` 于 trainer/probe supervisor 内、进入 trainer 前
+  fail closed：`_failure_audited_transaction_shell` 给 transaction 每行加两个空格，破坏了 shlex-quoted
+  multiline Python 参数，81 B `run.log` 只有 `IndentationError: unexpected indent`。locked launcher
+  无法绑定已快速退出的 child，且未发 signal；leader evidence、child evidence、binding、terminal、
+  checkpoint、receipt 与 RSL 均 absent。PID=PGID `2712318` 已双扫稳定 absent，Pod1 GPU0=`0 MiB / 0%`，
+  Kit/cache locks free；整批停止，其他五格未发。故 v5 是永久基础设施失败历史，不是 C/H/N 机制负例。
+  当前 [probe7 替换批](DEFINITIONS.md#balance-probe-generations) 使用全新
+  `/workspace/codexschema/phase1_balance_action_slew_v6_20260720` no-clobber 根；六个 `run_name` 为
+  `phase1_balance_slew_probe7_{w_c,w_n,w_h,v_c,v_n,v_h}_seed3_20260720`（第七版六格零训练合同探针，
   只回答同一输入身份下能否安全启动并生成 exact receipt，不是行为成绩）。它绑定
   [launch manifest](DEFINITIONS.md#balance-launch-manifest) 文件 SHA-256
-  `718bbee0a556cc3640ee636e20f8eb2adb293cee8d0bb1820afceebf5ce1a267`、内容 SHA-256
-  `3cbb019e9d315abdc687d1635c9deffc13eae9577ee2d820b0e3c30ba9b7cfd8`；runner 在首次 `/proc` 读取前先
-  不可覆盖地保存 child PID，再只对该 child 以 `10 ms` 间隔等待最多 `5 s`，锁定 PGID/starttime，且只接受
-  exact argv。launcher 与 state/marker/binding/fatal postcheck 属于同一失败审计 transaction；任一失败都必须立即
-  停止整批，并证明 exact PGID、child PID、assigned GPU 与 Kit/cache locks 全空；退出码 `121` 表示
-  必须人工身份审计。只有六份同一 manifest identity 的 probe6 receipt 全部闭合后才能生成长训命令。
+  `4552fe23abd551d8959a9de05cc5f9d761d0da25eed88138d61fa45cc6558e9e`、内容 SHA-256
+  `6e3518d97d48fad550e7971a5178b1f11c15895696f03d30d5a62d1e27741640`；config/runner SHA-256 分别为
+  `912bd8d212791d99ce6a6851a8f05c12d182cdfa9d5566e02381f1b4703b8f3c` /
+  `3fbaf23f97fdb40e05a448f9f769267b21c7cca3bd767aa082c0d5b965ecd7d7`。修订后的 transaction body
+  逐字节保留、不再逐行缩进，并由 multiline payload byte-equality 回归约束；有界 child 身份等待和失败残留
+  审计保持 fail closed。任一失败仍须立即停止整批，并证明 exact PGID、child PID、assigned GPU 与
+  Kit/cache locks 全空；退出码 `121` 表示必须人工身份审计。只有六份同一 manifest identity 的 probe7
+  receipt 全部闭合后才能生成长训命令。
   该条目只有进入 `origin/main` 后才构成运行 authority；六份收据闭合前仍不得发长训。两波都不能替代
   `T0/T1/T2` 连续恢复卷。[Wave A 实验](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md)
 - **[9｜P0] Hitter 实机 planner 时序与训练反应时间基线。** 责任人 yikang；执行者 Codex；分支

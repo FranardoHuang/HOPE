@@ -95,30 +95,36 @@ Follow-up note (2026-07-20, W/Y export mechanics pass but exact lineage blocks p
   checkpoint, receipt or GPU training compute; exact post-failure checks found its leader group and child absent.
   This is a supervisor-evidence race, not a negative result for the H mechanism. The five v4 receipts remain
   immutable history and cannot be mixed with a later manifest.
-- Probe6 (the sixth non-scientific contract-probe attempt) is the current fresh attempt. It uses the no-clobber root
-  `/workspace/codexschema/phase1_balance_action_slew_v5_20260720` and the exact
-  [`launch manifest`](../DEFINITIONS.md#balance-launch-manifest) whose file SHA-256 is
-  `718bbee0a556cc3640ee636e20f8eb2adb293cee8d0bb1820afceebf5ce1a267` and content SHA-256 is
-  `3cbb019e9d315abdc687d1635c9deffc13eae9577ee2d820b0e3c30ba9b7cfd8`; the bound runner SHA-256 is
-  `dc8f79ac7a7bed1d162c3dc8cfedea97210ad5bb9ea1a671e6569acb551e91f3`. After `Popen` and before the first
-  `/proc` read, the supervisor no-clobber publishes the child PID; it then waits on that same child for at most 5 s
-  at 10 ms intervals. Each identity sample double-reads `/proc/<pid>/stat`,
-  requires the parsed PID/PGRP/starttime tuple to be identical, and requires PGRP to match `getpgid`; every readable
-  identity must stay in the expected PGID, the first observed starttime is immutable, and only the exact final
-  trainer argv is accepted. The launcher plus state/marker/binding/fatal postchecks form one audited transaction;
-  any failure stops the whole six-cell batch. Before any later launch, the exact
-  leader PGID, persisted trainer-child PID,
-  assigned GPU and Kit/cache locks must all be proven absent. The failure audit uses `lstat` on optional identity
-  evidence, so a dangling symlink or non-regular path fails closed instead of being treated as absent. Post-launch
-  failure-audit rc `121` means the automatic audit could not prove closure: manual identity audit is mandatory and
-  no next launch is allowed.
-- Reproducible probe6 command-render gate (it emits JSON but does not SSH or start a trainer):
+- Probe6 (the sixth non-scientific contract-probe attempt) launched only W-C. At
+  `2026-07-20T03:01:10Z` its generated supervisor Python exited with
+  `IndentationError: unexpected indent` before the locked launcher child could bind. The failure-transaction helper
+  had prefixed two spaces after every newline in an already shlex-quoted multiline program, changing the program
+  bytes. There was no leader/child evidence, binding, terminal marker, checkpoint or receipt. Exact stable
+  double-scans found PID=PGID `2712318` absent; Pod1 GPU0 was empty, the Kit/cache locks were free, and the audit sent
+  no signal. The other five cells were not launched. This is a launcher-generation defect, not a mechanism negative.
+  Its v5 no-clobber root
+  `/workspace/codexschema/phase1_balance_action_slew_v5_20260720` and manifest file/content SHA-256
+  `718bbee0a556cc3640ee636e20f8eb2adb293cee8d0bb1820afceebf5ce1a267` /
+  `3cbb019e9d315abdc687d1635c9deffc13eae9577ee2d820b0e3c30ba9b7cfd8` are immutable history and cannot be retried.
+- Probe7 (the seventh non-scientific contract-probe attempt) is the current fresh attempt. It uses the no-clobber
+  root `/workspace/codexschema/phase1_balance_action_slew_v6_20260720`. The current config/runner SHA-256 values are
+  `912bd8d212791d99ce6a6851a8f05c12d182cdfa9d5566e02381f1b4703b8f3c` /
+  `3fbaf23f97fdb40e05a448f9f769267b21c7cca3bd767aa082c0d5b965ecd7d7`; the exact
+  [`launch manifest`](../DEFINITIONS.md#balance-launch-manifest) file/content SHA-256 values are
+  `4552fe23abd551d8959a9de05cc5f9d761d0da25eed88138d61fa45cc6558e9e` /
+  `6e3518d97d48fad550e7971a5178b1f11c15895696f03d30d5a62d1e27741640`. The failure helper now wraps the
+  transaction without changing its body bytes, and a multiline payload byte-equality regression guards that
+  contract. After `Popen`, the supervisor still publishes and follows the same child PID with the bounded exact
+  identity wait; the launcher and state/marker/binding/fatal postchecks remain one audited transaction. Any failure
+  stops the full six-cell batch. Before a later launch, exact leader PGID, child PID, assigned GPU and Kit/cache
+  locks must all be proven absent; failure-audit rc `121` still requires manual closure audit.
+- Reproducible probe7 command-render gate (it emits JSON but does not SSH or start a trainer):
 
   ```bash
   BALANCE_REPO_ROOT="$(git rev-parse --show-toplevel)"
   cd "$BALANCE_REPO_ROOT"
   BALANCE_LAUNCH_MANIFEST="$BALANCE_REPO_ROOT/configs/phase1_balance_action_slew_launch_manifest_20260720.json"
-  BALANCE_LAUNCH_MANIFEST_SHA256="718bbee0a556cc3640ee636e20f8eb2adb293cee8d0bb1820afceebf5ce1a267"
+  BALANCE_LAUNCH_MANIFEST_SHA256="4552fe23abd551d8959a9de05cc5f9d761d0da25eed88138d61fa45cc6558e9e"
   git fetch origin main
   test "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)"
   git cat-file -e origin/main:configs/phase1_balance_action_slew_launch_manifest_20260720.json
@@ -126,7 +132,7 @@ Follow-up note (2026-07-20, W/Y export mechanics pass but exact lineage blocks p
     --stage probe --authorize-launch \
     --launch-manifest "$BALANCE_LAUNCH_MANIFEST" \
     --expected-launch-manifest-sha256 "$BALANCE_LAUNCH_MANIFEST_SHA256" \
-    > /tmp/phase1_balance_slew_probe6_commands.json
+    > /tmp/phase1_balance_slew_probe7_commands.json
   ```
 
   Inputs are a clean current-main authority checkout, the manifest above and its manifest-bound remote assets and
