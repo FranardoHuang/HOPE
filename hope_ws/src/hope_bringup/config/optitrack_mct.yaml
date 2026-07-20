@@ -5,7 +5,7 @@
 #
 # ---- BALL MODES (pick ONE, never both) --------------------------------------
 # MODE A — rigid-body ball: the ball is a Motive rigid-body ASSET named exactly
-#   `Ball` (>=3 markers), streamed like P1/PPT. Nothing to configure here —
+#   `Ball` (>=3 markers), streamed like P1/Table. Nothing to configure here —
 #   keep the librigidbodytracker block below COMMENTED OUT (an enabled tracker
 #   body would fight the same-named vendor body and lock onto stray points).
 #   Motive: Rigid Bodies ON; Unlabeled Markers not needed (OFF is cleanest).
@@ -26,7 +26,7 @@
 # -----------------------------------------------------------------------------
 # Other Motive-side requirements (both modes, mocap reference §6.3): NatNet
 # enabled, Up Axis = Z, Unicast preferred, rigid-body assets named exactly P1
-# (+ PPT, P2 if used). Assets created/renamed in Motive while the bridge runs
+# (+ Table, P2 if used). Assets created/renamed in Motive while the bridge runs
 # SELF-HEAL in ~1-2 s (vendored patch #6 re-requests the model definition when
 # an unnamed body streams); restart the bridge only as a fallback.
 /**:
@@ -61,7 +61,7 @@
     # ---- MODE B block: single-marker ball via librigidbodytracker ----------
     # COMMENTED OUT for a rigid-body-ball venue (MODE A above). To use the
     # single-marker ball, uncomment ALL THREE sections and flip the Motive
-    # marker streaming per MODE B notes. P1/P2/PPT must NEVER be listed here:
+    # marker streaming per MODE B notes. P1/P2/Table must NEVER be listed here:
     # they are Motive-native assets and stream automatically.
     # marker_configurations:
     #   ball_marker:

@@ -81,7 +81,7 @@ while keeping the `/poses` contract byte-identical. Operational guide:
 Notes:
 
 - **`/optitrack/poses`** — ONE message per camera frame carrying every tracked
-  object by name (Motive rigid-body assets `P1`/`P2`/`PPT` verbatim, plus the
+  object by name (Motive rigid-body assets `P1`/`P2`/`Table` verbatim, plus the
   ball entry `Ball` — either a Motive asset or a `librigidbodytracker`
   single-marker body, see
   [`optitrack_mct.yaml`](../../hope_ws/src/hope_bringup/config/optitrack_mct.yaml)).
@@ -90,13 +90,13 @@ Notes:
   HOPE contract — an unremapped driver breaks the planner with a DDS type
   mismatch. The driver's raw TF is likewise remapped to `/optitrack/tf` /
   `/optitrack/tf_static` so the relay stays the only
-  `world → ball/PPT/P1/P2` TF authority; `/optitrack/pointCloud` carries the
+  `world → ball/Table/P1/P2` TF authority; `/optitrack/pointCloud` carries the
   unlabeled-marker cloud (ball-tracker debugging).
 - **`/poses`** — published by the relay ONLY on frames that contain the ball
   entry (an occluded ball is omitted by the driver), so a stale ball position
   is never re-emitted at rigid-body timestamps — the same
   ball-triggered publishing the VRPN path gets from `pose_to_posearray`.
-  Order is `["ball", "PPT", "P1", "P2"]` (ball first, matching the planner's
+  Order is `["ball", "Table", "P1", "P2"]` (ball first, matching the planner's
   default `ball_pose_index: 0`); absent objects are skipped.
 - **Rates** — OptiTrack rigs commonly stream 360 Hz (vs the 300 Hz VRPN
   default). The planner's `fit_window` is coupled to the rate

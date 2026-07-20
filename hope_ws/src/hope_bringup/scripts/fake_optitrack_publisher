@@ -3,7 +3,7 @@
 
 Publishes /optitrack/poses (motion_capture_tracking_interfaces/NamedPoseArray —
 the vendored driver's remapped output) at ``rate_hz``, mimicking what the real
-node emits: every frame carries the static rigid bodies (P1, PPT) and, while a
+node emits: every frame carries the static rigid bodies (P1, Table) and, while a
 serve is in flight, the ball entry. Between serves the ball is OMITTED from the
 frames — exactly how the driver behaves when the ball leaves the volume — which
 exercises the relay's /poses gating (rigid-body topics keep updating, /poses
@@ -44,11 +44,11 @@ class FakeOptitrackPublisher(Node):
         self.declare_parameter("frame_id", "world")
         self.declare_parameter("ball_name", "Ball")
         self.declare_parameter("p1_name", "P1")
-        self.declare_parameter("ppt_name", "PPT")
+        self.declare_parameter("table_name", "Table")
         # Static rigid-body poses [x, y, z] (identity orientation): robot base
         # near the table's robot end, table marker at the origin corner.
         self.declare_parameter("p1_position", [-0.5, -0.7625, 0.9])
-        self.declare_parameter("ppt_position", [0.0, 0.0, 0.0])
+        self.declare_parameter("table_position", [0.0, 0.0, 0.0])
 
         gp = self.get_parameter
         self._serves = [
@@ -66,9 +66,9 @@ class FakeOptitrackPublisher(Node):
         self._frame = str(gp("frame_id").value)
         self._ball_name = str(gp("ball_name").value)
         self._p1_name = str(gp("p1_name").value)
-        self._ppt_name = str(gp("ppt_name").value)
+        self._table_name = str(gp("table_name").value)
         self._p1_pos = [float(v) for v in gp("p1_position").value]
-        self._ppt_pos = [float(v) for v in gp("ppt_position").value]
+        self._table_pos = [float(v) for v in gp("table_position").value]
         self._g = np.array([0.0, 0.0, -9.81])
 
         qos = QoSProfile(reliability=ReliabilityPolicy.BEST_EFFORT,
@@ -81,7 +81,7 @@ class FakeOptitrackPublisher(Node):
         self.create_timer(self._dt, self._tick)
         self.get_logger().info(
             f"fake OptiTrack NamedPoseArray @{1.0/self._dt:.0f} Hz on /optitrack/poses "
-            f"(bodies: {self._ball_name} in flight only, {self._p1_name}, {self._ppt_name})")
+            f"(bodies: {self._ball_name} in flight only, {self._p1_name}, {self._table_name})")
 
     def _reset(self):
         s = self._serves[self._serve_i % len(self._serves)]
@@ -132,7 +132,7 @@ class FakeOptitrackPublisher(Node):
         if ball_in_flight:
             msg.poses.append(self._named_pose(self._ball_name, self._p))
         msg.poses.append(self._named_pose(self._p1_name, self._p1_pos))
-        msg.poses.append(self._named_pose(self._ppt_name, self._ppt_pos))
+        msg.poses.append(self._named_pose(self._table_name, self._table_pos))
         self._pub.publish(msg)
 
 

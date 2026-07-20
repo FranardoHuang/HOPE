@@ -6,7 +6,7 @@ The vendored ``motion_capture_tracking`` node (hope_ws/src/motion_capture_tracki
 see its PIN.md) depacketizes NatNet from Motive and publishes ONE NamedPoseArray
 per camera frame carrying every tracked object:
 
-* Motive-native rigid bodies (``P1``/``P2``/``PPT``) under their Motive asset
+* Motive-native rigid bodies (``P1``/``P2``/``Table``) under their Motive asset
   names, and
 * optionally the ping-pong ball tracked from the unlabeled-marker point cloud
   by librigidbodytracker (single fully-coated retroreflective ball -> one
@@ -65,7 +65,10 @@ class OptitrackMctRelay(Node):
         self._named_pose_array_type = named_pose_array_type
 
         self.declare_parameter("input_poses_topic", "/optitrack/poses")
-        self.declare_parameter("ppt_object", "PPT")
+        # Table rigid body (setup/calibration only — not streamed during
+        # competition). Canonical asset name is 'Table'; older notes call the
+        # same asset 'PPT'.
+        self.declare_parameter("table_object", "Table")
         self.declare_parameter("p1_object", "P1")
         self.declare_parameter("p2_object", "P2")
         # Ball entry name = the Motive asset name (rigid-body ball) or the
@@ -79,7 +82,7 @@ class OptitrackMctRelay(Node):
         self.declare_parameter("p2_pose_topic", "/P2/pose")
         self.declare_parameter("ball_point_topic", "/ball/point")
         self.declare_parameter("poses_topic", "/poses")
-        self.declare_parameter("pose_array_order", ["ball", "PPT", "P1", "P2"])
+        self.declare_parameter("pose_array_order", ["ball", "Table", "P1", "P2"])
         self.declare_parameter("publish_tf", True)
         self.declare_parameter("publish_pose_array", True)
         # Warn (throttled) when frames keep arriving without a ball entry for
@@ -90,7 +93,7 @@ class OptitrackMctRelay(Node):
         # feeds (seen on the VRPN side) turn out to stream millimetres.
         self.declare_parameter("position_scale", 1.0)
 
-        self._ppt_object = str(self.get_parameter("ppt_object").value)
+        self._table_object = str(self.get_parameter("table_object").value)
         self._p1_object = str(self.get_parameter("p1_object").value)
         self._p2_object = str(self.get_parameter("p2_object").value)
         self._ball_object = str(self.get_parameter("ball_object").value)
@@ -106,7 +109,7 @@ class OptitrackMctRelay(Node):
                 "Motive normally streams metres -> 1.0)")
 
         self._name_to_key = {
-            self._ppt_object: "PPT",
+            self._table_object: "Table",
             self._p1_object: "P1",
             self._p2_object: "P2",
             self._ball_object: "ball",
@@ -133,7 +136,7 @@ class OptitrackMctRelay(Node):
             PointStamped, str(self.get_parameter("ball_point_topic").value), sensor_qos
         )
         self._pose_publishers = {
-            "PPT": self.create_publisher(
+            "Table": self.create_publisher(
                 PoseStamped, str(self.get_parameter("table_pose_topic").value), sensor_qos
             ),
             "P1": self.create_publisher(
@@ -150,7 +153,7 @@ class OptitrackMctRelay(Node):
         )
         self.get_logger().info(
             f"relaying {input_topic} (NamedPoseArray) -> HOPE topics; objects: "
-            f"ball='{self._ball_object}' PPT='{self._ppt_object}' "
+            f"ball='{self._ball_object}' Table='{self._table_object}' "
             f"P1='{self._p1_object}' P2='{self._p2_object}'"
         )
 
