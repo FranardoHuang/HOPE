@@ -483,6 +483,19 @@ binary SHA、Python version、venv prefix 和 RECORD/ELF closure 定义解释器
 保留有符号击球几何、支撑足和安全站距；不能直接“补到同长度后拼关节”，也不能假设左右镜像天然
 有效。TOPP 只在几何与接触先过门后用于重定时。
 
+2026-07-20 语义修订（追加，不改上两段历史表述）：用户已拍板，上文“按横移距离条件化的（独立）
+下肢老师”表述废止。现行冻结语义是：所有非 `motion/` 的击球素材都是原地击球（stationary 只指无
+有意 base 平移/迈步，不冻结腿、允许重心变化）；`motion/` 四条 dang 素材是跨所有击球动作复用的
+共享横移脚步模块，不存在独立 locomotion 动作或独立 stop teacher；横移只能由有效击球意图触发，
+reach/deadband 内用击球动作自身下肢参考，超出才按 `prepare -> strike -> recover` 事件对齐组合，
+且每个派生组合动作都要重新过完整 Gate 链。语义唯一真源是 `configs/motion_role_catalog.json`
+（19 条：v4rg formal runtime 一对带唯一 grandfathered 豁免 + 两份 intake 的 17 条视频；
+`scripts/validate_motion_role_catalog.py` fail-closed 校验 exact-cover/SHA/角色/方向/授权）。
+改名不改安全事实：M0 stance gate 仍 `0/4` reject，Franco 反手拉 B 只有静态/`mj_forward` 证据
+（`mj_step_calls=0`），不得称“不倒”或 training_authorized。人话：走位从今天起只是击球的脚步，
+不是一个独立技能；台账只换了名字，没有放行任何新东西。合同全文见
+[stroke_footwork_composition](../interfaces/stroke_footwork_composition.md)。
+
 动作选择仍按任务覆盖裁决：每个动作先在自己的来球题族和整轨安全门中合格，再用训练集拟合选择器，
 最后在不可变留出集上考试。非击球左臂模仿解除也是单独的配对消融，硬安全始终开启。这些都只是
 设计记录，不是动作采用或训练授权。

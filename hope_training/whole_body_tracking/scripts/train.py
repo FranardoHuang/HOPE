@@ -1057,6 +1057,109 @@ def _lower_body_stability_bundle_reward_contract(
     }
 
 
+# S1 post-swing settle debt (Jiayi V13 post-swing debts idea, clean main-side redo; the numeric
+# margins/scales are this repo's own, not the unmerged branch's unvalidated numbers).
+_POST_SWING_SETTLE_NUMERIC_SPECS = (
+    ("base_lin_margin_mps", False, True),
+    ("base_lin_scale_mps", True, False),
+    ("base_ang_margin_radps", False, True),
+    ("base_ang_scale_radps", True, False),
+    ("tilt_margin_rad", False, True),
+    ("tilt_scale_rad", True, False),
+    ("nominal_root_z_m", True, False),
+    ("root_height_deadband_m", False, True),
+    ("root_height_scale_m", True, False),
+    ("foot_slip_margin_mps", False, True),
+    ("foot_slip_scale_mps", True, False),
+    ("recovery_start_s", False, True),
+    ("recovery_end_s", True, False),
+)
+_POST_SWING_SETTLE_COMPONENTS = [
+    "base_quiet_lin",
+    "base_quiet_ang",
+    "tilt_debt",
+    "root_height_debt",
+    "settle_foot_slip",
+]
+
+
+def _post_swing_settle_debt_reward_contract(env_cfg, runtime_facts: dict) -> dict | None:
+    rewards = getattr(env_cfg, "rewards", None)
+    term = None if rewards is None else getattr(rewards, "post_swing_settle_debt", None)
+    probe = None if rewards is None else getattr(
+        rewards, "post_swing_settle_debt_probe", None
+    )
+    if term is None and probe is None:
+        return None
+    if term is None or probe is None:
+        raise RuntimeError("post_swing_settle_debt and probe must be declared together")
+    weight = _lower_body_reward_number(
+        getattr(term, "weight", None), name="post_swing_settle_debt.weight"
+    )
+    probe_weight = _lower_body_reward_number(
+        getattr(probe, "weight", None), name="post_swing_settle_debt_probe.weight"
+    )
+    if weight > 0.0:
+        raise RuntimeError("post_swing_settle_debt weight must be finite and <= 0")
+    if probe_weight not in (0.0, 1.0):
+        raise RuntimeError("post_swing_settle_debt probe weight must be 0 or 1")
+    if weight == 0.0 and probe_weight == 0.0:
+        return None
+    if probe_weight != 1.0:
+        raise RuntimeError(
+            "explicit post_swing_settle_debt requires its weight-independent probe"
+        )
+    params = getattr(term, "params", None)
+    probe_params = getattr(probe, "params", None)
+    if not isinstance(params, dict) or params != probe_params:
+        raise RuntimeError("post_swing_settle_debt probe params must match the reward")
+    if (
+        params.get("racket_command_name") != "racket_target"
+        or params.get("motion_command_name") != "motion"
+    ):
+        raise RuntimeError("post_swing_settle_debt requires racket_target/motion commands")
+    values = {
+        name: _lower_body_reward_number(
+            params.get(name),
+            name=f"post_swing_settle_debt.{name}",
+            positive=positive,
+            nonnegative=nonnegative,
+        )
+        for name, positive, nonnegative in _POST_SWING_SETTLE_NUMERIC_SPECS
+    }
+    if values["recovery_start_s"] >= values["recovery_end_s"]:
+        raise RuntimeError(
+            "post_swing_settle_debt recovery window must satisfy 0 <= start < end"
+        )
+    articulation_bodies = runtime_facts.get("articulation_body_names")
+    required_foot_bodies = ["left_ankle_roll_Link", "right_ankle_roll_Link"]
+    if (
+        not isinstance(articulation_bodies, list)
+        or len(set(articulation_bodies)) != len(articulation_bodies)
+        or any(name not in articulation_bodies for name in required_foot_bodies)
+    ):
+        raise RuntimeError(
+            "post_swing_settle_debt requires exact left/right A3 ankle-roll bodies"
+        )
+    return {
+        "schema_version": 1,
+        "enabled": weight < 0.0,
+        "probe_enabled": True,
+        "activation_ledger": "weight_independent_control_step_counters",
+        "weight": weight,
+        **values,
+        "racket_command_name": "racket_target",
+        "motion_command_name": "motion",
+        "foot_body_names": required_foot_bodies,
+        "components": list(_POST_SWING_SETTLE_COMPONENTS),
+        "formula": "mean(5x(1-exp(-square(relu(x-margin)/scale))))",
+        "gate": "same_attempt_post_strike_age_s_inclusive",
+        "age_source": "per_env_exact_strike_control_tick_latch",
+        "success_conditioned": False,
+        "uses_motion_reference": False,
+    }
+
+
 def _build_training_hard_contract(env, actor_contract) -> dict:
     """Immutable actor/task facts that must match across a checkpoint resume.
 
@@ -1109,6 +1212,23 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
     ):
         raise RuntimeError(
             "Wave-B B1 pose imitation and B2 stability bundle are mutually exclusive"
+        )
+    post_swing_settle_contract = _post_swing_settle_debt_reward_contract(
+        env_cfg, runtime_facts
+    )
+    if (
+        post_swing_settle_contract is not None
+        and post_swing_settle_contract["enabled"]
+        and (
+            (lower_body_pose_contract is not None and lower_body_pose_contract["enabled"])
+            or (
+                lower_body_bundle_contract is not None
+                and lower_body_bundle_contract["enabled"]
+            )
+        )
+    ):
+        raise RuntimeError(
+            "S1 post_swing_settle_debt and the Wave-B lower-body mechanisms are mutually exclusive"
         )
     motion_files = motion.motion_file
     if not isinstance(motion_files, (list, tuple, ListConfig)):
@@ -1337,6 +1457,11 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
             {}
             if lower_body_bundle_contract is None
             else {"lower_body_stability_bundle_reward": lower_body_bundle_contract}
+        ),
+        **(
+            {}
+            if post_swing_settle_contract is None
+            else {"post_swing_settle_debt_reward": post_swing_settle_contract}
         ),
         **(
             {}
@@ -1662,6 +1787,23 @@ _REWARD_KEYS = (
     "lower_body_stability_leg_velocity_scale_radps",
     "lower_body_stability_support_pre_s",
     "lower_body_stability_support_post_s",
+    # S1 post-swing settle-debt bundle (Jiayi V13 post-swing debts idea, clean main-side redo).
+    # Any explicit S1 key raises the measurement probe; a parameter key without the weight is
+    # refused so every S1 cell states its weight explicitly.
+    "post_swing_settle_debt_weight",
+    "post_swing_settle_base_lin_margin_mps",
+    "post_swing_settle_base_lin_scale_mps",
+    "post_swing_settle_base_ang_margin_radps",
+    "post_swing_settle_base_ang_scale_radps",
+    "post_swing_settle_tilt_margin_rad",
+    "post_swing_settle_tilt_scale_rad",
+    "post_swing_settle_nominal_root_z_m",
+    "post_swing_settle_root_height_deadband_m",
+    "post_swing_settle_root_height_scale_m",
+    "post_swing_settle_foot_slip_margin_mps",
+    "post_swing_settle_foot_slip_scale_mps",
+    "post_swing_settle_recovery_start_s",
+    "post_swing_settle_recovery_end_s",
     # R16 / V1 wrist-mimic surgery (orientation 2026-07-04; linear velocity 2026-07-08 §③).
     "free_wrist_ori_mimic", "free_wrist_vel_mimic",
     # A0/A1 non-striking-arm imitation ablation (2026-07-14).  This deliberately has one
@@ -2591,6 +2733,116 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
         ):
             raise _OverrideError(
                 "Wave-B B1 pose imitation and B2 stability bundle are mutually exclusive"
+            )
+
+        # S1 post-swing settle debt (Jiayi V13 post-swing debts idea, clean main-side redo).
+        # Same fail-loud contract as the Wave-B pair: any explicit S1 key requires the weight,
+        # nothing mutates until every value validates, and the probe follows the reward params.
+        _settle_fields = tuple(
+            (name, f"post_swing_settle_{name}", positive, nonnegative)
+            for name, positive, nonnegative in _POST_SWING_SETTLE_NUMERIC_SPECS
+        )
+        _settle_weight_raw = _get(rw, "post_swing_settle_debt_weight")
+        _settle_requested = _settle_weight_raw is not None or any(
+            _get(rw, key) is not None for _, key, _, _ in _settle_fields
+        )
+        if _settle_requested:
+            if _settle_weight_raw is None:
+                raise _OverrideError(
+                    "S1 requires post_swing_settle_debt_weight explicitly alongside any "
+                    "post_swing_settle_* parameter"
+                )
+            _require(
+                hasattr(R, "post_swing_settle_debt")
+                and R.post_swing_settle_debt is not None,
+                "rewards.post_swing_settle_debt",
+            )
+            _require(
+                hasattr(R, "post_swing_settle_debt_probe")
+                and R.post_swing_settle_debt_probe is not None,
+                "rewards.post_swing_settle_debt_probe",
+            )
+            _settle_term = R.post_swing_settle_debt
+            _settle_probe = R.post_swing_settle_debt_probe
+            _require(
+                isinstance(_settle_term.params, dict)
+                and isinstance(_settle_probe.params, dict),
+                "rewards.post_swing_settle_debt.params",
+            )
+            _settle_weight = _lower_body_number(
+                _settle_weight_raw, "post_swing_settle_debt_weight"
+            )
+            if _settle_weight > 0.0:
+                raise _OverrideError(
+                    "rewards.post_swing_settle_debt_weight must be finite and <= 0"
+                )
+            _settle_param_values = {}
+            for _param, _key, _positive, _nonnegative in _settle_fields:
+                _raw = _get(rw, _key)
+                if _raw is None:
+                    continue
+                _require(
+                    _param in _settle_term.params,
+                    f"rewards.post_swing_settle_debt.params['{_param}']",
+                )
+                _settle_param_values[_param] = _lower_body_number(
+                    _raw, _key, positive=_positive, nonnegative=_nonnegative
+                )
+            if (
+                _settle_term.params.get("racket_command_name") != "racket_target"
+                or _settle_term.params.get("motion_command_name") != "motion"
+            ):
+                raise _OverrideError(
+                    "rewards.post_swing_settle_debt requires racket_target/motion commands"
+                )
+            _settle_start = _settle_param_values.get(
+                "recovery_start_s", _settle_term.params.get("recovery_start_s")
+            )
+            _settle_end = _settle_param_values.get(
+                "recovery_end_s", _settle_term.params.get("recovery_end_s")
+            )
+            if (
+                not isinstance(_settle_start, (int, float))
+                or not isinstance(_settle_end, (int, float))
+                or isinstance(_settle_start, bool)
+                or isinstance(_settle_end, bool)
+                or not float(_settle_start) < float(_settle_end)
+            ):
+                raise _OverrideError(
+                    "rewards.post_swing_settle_debt recovery window must satisfy 0 <= start < end"
+                )
+            _settle_term.weight = _settle_weight
+            applied.append(f"rewards.post_swing_settle_debt.weight={_settle_weight}")
+            for _param, _value in _settle_param_values.items():
+                _settle_term.params[_param] = _value
+                applied.append(
+                    f"rewards.post_swing_settle_debt.params.{_param}={_value}"
+                )
+            _settle_probe.weight = 1.0
+            _settle_probe.params.clear()
+            _settle_probe.params.update(_settle_term.params)
+            applied.append("rewards.post_swing_settle_debt_probe.weight=1.0")
+
+        # Matrix S-axis: S1/S2/S3 are mutually exclusive treatments — a cell enables at most one.
+        if (
+            hasattr(R, "post_swing_settle_debt")
+            and R.post_swing_settle_debt is not None
+            and float(R.post_swing_settle_debt.weight) < 0.0
+            and (
+                (
+                    hasattr(R, "lower_body_pose_imitation")
+                    and R.lower_body_pose_imitation is not None
+                    and float(R.lower_body_pose_imitation.weight) > 0.0
+                )
+                or (
+                    hasattr(R, "lower_body_stability_bundle")
+                    and R.lower_body_stability_bundle is not None
+                    and float(R.lower_body_stability_bundle.weight) < 0.0
+                )
+            )
+        ):
+            raise _OverrideError(
+                "S1 post_swing_settle_debt and the Wave-B lower-body mechanisms are mutually exclusive"
             )
         _foot_hold_gate = _get(rw, "foot_orientation_hold_gate")
         if _foot_hold_gate is not None:

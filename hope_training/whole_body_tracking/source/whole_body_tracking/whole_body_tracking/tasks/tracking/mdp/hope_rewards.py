@@ -1737,6 +1737,414 @@ def consume_lower_body_wave_activation_counters(
     return snapshot
 
 
+# S1 post-swing settle debts ------------------------------------------------------------------- #
+#
+# Idea credit: Jiayi's V13 post-swing debts (an unmerged branch).  This is a clean re-derivation on
+# main, NOT a copy: the five debt channels keep the V13 intent (quiet the base, stand upright and
+# tall, plant the feet after the swing), while every margin/scale below is re-fixed by this repo's
+# conventions — the V13 branch's unvalidated numbers are deliberately not reused.  The activation
+# window deliberately REUSES the processed_qdes_slew_hinge recovery-window mechanism (the racket
+# command's reset/wrap/reveal-aware same-attempt post-strike clock) instead of inventing a second
+# clock, so both recovery mechanisms agree on what "the same swing's 0.20..1.55 s" means; a reset
+# invalidates the attempt through that clock and the term returns exact zero.
+# 人话:挥完拍 0.2–1.55 秒内要"稳稳站好"——身体别乱晃、别歪、别蹲矮、脚别滑;每项有免费额度,
+# 超出的部分按有界"债务尾巴"扣钱,重置后的无效历史一分不扣。
+_POST_SWING_SETTLE_FOOT_BODY_NAMES = _LOWER_BODY_FOOT_BODY_NAMES
+# A3 stand-keyframe pelvis height: robots/agibot_a3.py init_state pos z = 1.0684 m (itself read
+# from the vendor MuJoCo stand keyframe).  Kept as an explicit reward parameter so the training
+# contract records the exact nominal height the run trained with.
+_POST_SWING_SETTLE_NOMINAL_ROOT_Z_M = 1.0684
+_POST_SWING_SETTLE_COUNTER_ATTR = "_hope_post_swing_settle_activation_counters"
+_POST_SWING_SETTLE_OBSERVED_STEP_ATTR = "_hope_post_swing_settle_observed_step"
+_POST_SWING_SETTLE_ACTIVE_STEP_ATTR = "_hope_post_swing_settle_active_step"
+_POST_SWING_SETTLE_SIGNATURE_ATTR = "_hope_post_swing_settle_signature"
+_POST_SWING_SETTLE_COMPONENT_NAMES = (
+    "base_quiet_lin",
+    "base_quiet_ang",
+    "tilt_debt",
+    "root_height_debt",
+    "settle_foot_slip",
+)
+
+
+def _post_swing_settle_tail(
+    magnitude: torch.Tensor, margin: float, scale: float
+) -> torch.Tensor:
+    """Bounded debt tail ``1 - exp(-square(relu(x - margin) / scale))`` in [0, 1)."""
+
+    return 1.0 - torch.exp(-torch.square(torch.relu(magnitude - margin) / scale))
+
+
+def _post_swing_settle_debt_values(
+    env: ManagerBasedRLEnv,
+    racket_command_name: str = "racket_target",
+    motion_command_name: str = "motion",
+    base_lin_margin_mps: float = 0.30,
+    base_lin_scale_mps: float = 0.20,
+    base_ang_margin_radps: float = 0.50,
+    base_ang_scale_radps: float = 0.30,
+    tilt_margin_rad: float = 0.10,
+    tilt_scale_rad: float = 0.10,
+    nominal_root_z_m: float = _POST_SWING_SETTLE_NOMINAL_ROOT_Z_M,
+    root_height_deadband_m: float = 0.05,
+    root_height_scale_m: float = 0.05,
+    foot_slip_margin_mps: float = 0.05,
+    foot_slip_scale_mps: float = 0.10,
+    recovery_start_s: float = 0.20,
+    recovery_end_s: float = 1.55,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Return the gated five-debt settle value, eligibility, and per-component tails [env, 5].
+
+    Component magnitudes (each turned into a bounded tail by ``_post_swing_settle_tail``):
+    ``||root_lin_vel_w||``, ``||root_ang_vel_w||``, ``asin(||projected_gravity_b_xy||)`` (the same
+    tilt quantity strike/prestrike upright terms read as a norm), ``relu(nominal_root_z -
+    deadband - root_z)`` (deadband is the margin), and the two ankle-roll links' mean horizontal
+    speed (the same bodies/tensors the foot-slip metrics read).  Samples outside the same-attempt
+    recovery window — including everything after a reset until the next armed strike — are exact 0.
+    """
+
+    if racket_command_name != "racket_target":
+        raise ValueError(
+            "post_swing_settle_debt racket_command_name must be exactly 'racket_target'"
+        )
+    if motion_command_name != "motion":
+        raise ValueError(
+            "post_swing_settle_debt motion_command_name must be exactly 'motion'"
+        )
+    base_lin_margin_mps = _finite_scalar(
+        base_lin_margin_mps, name="post_swing_settle_debt base_lin_margin_mps", nonnegative=True
+    )
+    base_lin_scale_mps = _finite_scalar(
+        base_lin_scale_mps, name="post_swing_settle_debt base_lin_scale_mps", positive=True
+    )
+    base_ang_margin_radps = _finite_scalar(
+        base_ang_margin_radps, name="post_swing_settle_debt base_ang_margin_radps", nonnegative=True
+    )
+    base_ang_scale_radps = _finite_scalar(
+        base_ang_scale_radps, name="post_swing_settle_debt base_ang_scale_radps", positive=True
+    )
+    tilt_margin_rad = _finite_scalar(
+        tilt_margin_rad, name="post_swing_settle_debt tilt_margin_rad", nonnegative=True
+    )
+    tilt_scale_rad = _finite_scalar(
+        tilt_scale_rad, name="post_swing_settle_debt tilt_scale_rad", positive=True
+    )
+    nominal_root_z_m = _finite_scalar(
+        nominal_root_z_m, name="post_swing_settle_debt nominal_root_z_m", positive=True
+    )
+    root_height_deadband_m = _finite_scalar(
+        root_height_deadband_m,
+        name="post_swing_settle_debt root_height_deadband_m",
+        nonnegative=True,
+    )
+    root_height_scale_m = _finite_scalar(
+        root_height_scale_m, name="post_swing_settle_debt root_height_scale_m", positive=True
+    )
+    foot_slip_margin_mps = _finite_scalar(
+        foot_slip_margin_mps, name="post_swing_settle_debt foot_slip_margin_mps", nonnegative=True
+    )
+    foot_slip_scale_mps = _finite_scalar(
+        foot_slip_scale_mps, name="post_swing_settle_debt foot_slip_scale_mps", positive=True
+    )
+    if isinstance(recovery_start_s, bool) or isinstance(recovery_end_s, bool):
+        raise ValueError(
+            "post_swing_settle_debt recovery window must be finite and satisfy 0 <= start < end"
+        )
+    recovery_start_s = float(recovery_start_s)
+    recovery_end_s = float(recovery_end_s)
+    if (
+        not math.isfinite(recovery_start_s)
+        or not math.isfinite(recovery_end_s)
+        or recovery_start_s < 0.0
+        or recovery_start_s >= recovery_end_s
+    ):
+        raise ValueError(
+            "post_swing_settle_debt recovery window must be finite and satisfy 0 <= start < end"
+        )
+
+    robot = env.scene["robot"]
+    data = robot.data
+    motion = env.command_manager.get_term(motion_command_name)
+    if getattr(motion, "robot", None) is not robot:
+        raise RuntimeError(
+            "post_swing_settle_debt requires motion and reward to reference the same robot"
+        )
+    root_lin_vel = getattr(data, "root_lin_vel_w", None)
+    root_ang_vel = getattr(data, "root_ang_vel_w", None)
+    root_pos = getattr(data, "root_pos_w", None)
+    projected_gravity = getattr(data, "projected_gravity_b", None)
+    if (
+        not torch.is_tensor(root_lin_vel)
+        or root_lin_vel.ndim != 2
+        or root_lin_vel.shape[1] != 3
+        or not torch.is_tensor(root_ang_vel)
+        or tuple(root_ang_vel.shape) != tuple(root_lin_vel.shape)
+        or not torch.is_tensor(root_pos)
+        or tuple(root_pos.shape) != tuple(root_lin_vel.shape)
+        or not torch.is_tensor(projected_gravity)
+        or tuple(projected_gravity.shape) != tuple(root_lin_vel.shape)
+    ):
+        raise RuntimeError(
+            "post_swing_settle_debt requires aligned [env,3] root velocity/position/"
+            "projected-gravity tensors"
+        )
+    num_envs = root_lin_vel.shape[0]
+
+    body_names = tuple(str(name) for name in getattr(robot, "body_names", ()))
+    if (
+        len(body_names) == 0
+        or len(set(body_names)) != len(body_names)
+        or any(name not in body_names for name in _POST_SWING_SETTLE_FOOT_BODY_NAMES)
+    ):
+        raise RuntimeError(
+            "post_swing_settle_debt requires unique left/right A3 ankle-roll bodies"
+        )
+    foot_ids = [body_names.index(name) for name in _POST_SWING_SETTLE_FOOT_BODY_NAMES]
+    body_lin_vel_w = getattr(data, "body_lin_vel_w", None)
+    if (
+        not torch.is_tensor(body_lin_vel_w)
+        or body_lin_vel_w.ndim != 3
+        or body_lin_vel_w.shape[0] != num_envs
+        or body_lin_vel_w.shape[1] != len(body_names)
+        or body_lin_vel_w.shape[2] != 3
+    ):
+        raise RuntimeError(
+            "post_swing_settle_debt requires runtime body_lin_vel_w shaped [env,body,3]"
+        )
+
+    base_lin_speed = torch.norm(root_lin_vel, dim=-1)
+    base_ang_speed = torch.norm(root_ang_vel, dim=-1)
+    tilt_rad = torch.asin(
+        torch.norm(projected_gravity[:, :2], dim=-1).clamp(max=1.0)
+    )
+    root_height_debt_m = torch.relu(
+        nominal_root_z_m - root_height_deadband_m - root_pos[:, 2]
+    )
+    foot_speed_xy = torch.norm(body_lin_vel_w[:, foot_ids, :2], dim=-1).mean(dim=-1)
+    tails = torch.stack(
+        (
+            _post_swing_settle_tail(base_lin_speed, base_lin_margin_mps, base_lin_scale_mps),
+            _post_swing_settle_tail(base_ang_speed, base_ang_margin_radps, base_ang_scale_radps),
+            _post_swing_settle_tail(tilt_rad, tilt_margin_rad, tilt_scale_rad),
+            # The deadband already played the margin's role above, so the tail's margin is 0.
+            _post_swing_settle_tail(root_height_debt_m, 0.0, root_height_scale_m),
+            _post_swing_settle_tail(foot_speed_xy, foot_slip_margin_mps, foot_slip_scale_mps),
+        ),
+        dim=-1,
+    )
+    raw_value = torch.mean(tails, dim=-1)
+
+    # Same-attempt recovery-window gate: identical mechanism (and default window) to
+    # processed_qdes_slew_hinge — one shared clock, never a second bookkeeping of "post swing".
+    cmd = _cmd(env, racket_command_name)
+    clock = getattr(cmd, "post_strike_age_and_same_attempt", None)
+    if not callable(clock):
+        raise RuntimeError(
+            "post_swing_settle_debt requires racket_target's same-attempt post-strike clock"
+        )
+    age_s, same_attempt = clock()
+    if (
+        not torch.is_tensor(age_s)
+        or not torch.is_tensor(same_attempt)
+        or tuple(age_s.shape) != (num_envs,)
+        or tuple(same_attempt.shape) != (num_envs,)
+        or same_attempt.dtype != torch.bool
+    ):
+        raise RuntimeError(
+            "post_swing_settle_debt received an invalid same-attempt post-strike clock"
+        )
+    eligible = (
+        same_attempt
+        & age_s.ge(recovery_start_s)
+        & age_s.le(recovery_end_s)
+    )
+    value = torch.where(eligible, raw_value, torch.zeros_like(raw_value))
+    return value, eligible, tails
+
+
+def _post_swing_settle_counter_state(
+    env: ManagerBasedRLEnv, template: torch.Tensor
+) -> dict[str, torch.Tensor]:
+    state = getattr(env, _POST_SWING_SETTLE_COUNTER_ATTR, None)
+    if state is None:
+        state = {
+            "observed_sample_count": torch.zeros((), dtype=torch.long, device=template.device),
+            "recovery_eligible_sample_count": torch.zeros((), dtype=torch.long, device=template.device),
+            "reward_enabled_eligible_sample_count": torch.zeros((), dtype=torch.long, device=template.device),
+            "gated_debt_sum": torch.zeros((), dtype=template.dtype, device=template.device),
+            **{
+                f"gated_{name}_tail_sum": torch.zeros(
+                    (), dtype=template.dtype, device=template.device
+                )
+                for name in _POST_SWING_SETTLE_COMPONENT_NAMES
+            },
+        }
+        setattr(env, _POST_SWING_SETTLE_COUNTER_ATTR, state)
+    return state
+
+
+def _record_post_swing_settle_activation(
+    env: ManagerBasedRLEnv,
+    values: torch.Tensor,
+    eligible: torch.Tensor,
+    tails: torch.Tensor,
+    *,
+    reward_active: bool,
+    signature: tuple,
+) -> None:
+    """Book one simulator step, idempotently sharing the probe and real term."""
+
+    token = getattr(env, "common_step_counter", None)
+    token = token if type(token) is int else None
+    state = _post_swing_settle_counter_state(env, values)
+    already = (
+        token is not None
+        and getattr(env, _POST_SWING_SETTLE_OBSERVED_STEP_ATTR, None) == token
+    )
+    if already:
+        if getattr(env, _POST_SWING_SETTLE_SIGNATURE_ATTR, None) != signature:
+            raise RuntimeError(
+                "post-swing settle probe and RewardTerm used different parameters in one step"
+            )
+    else:
+        mask = eligible.detach()
+        state["observed_sample_count"].add_(values.numel())
+        state["recovery_eligible_sample_count"].add_(mask.sum(dtype=torch.long))
+        state["gated_debt_sum"].add_(values.detach().sum())
+        gated_tails = tails.detach() * mask.unsqueeze(-1)
+        for index, name in enumerate(_POST_SWING_SETTLE_COMPONENT_NAMES):
+            state[f"gated_{name}_tail_sum"].add_(gated_tails[:, index].sum())
+        if token is not None:
+            setattr(env, _POST_SWING_SETTLE_OBSERVED_STEP_ATTR, token)
+            setattr(env, _POST_SWING_SETTLE_SIGNATURE_ATTR, signature)
+    if reward_active and (
+        token is None or getattr(env, _POST_SWING_SETTLE_ACTIVE_STEP_ATTR, None) != token
+    ):
+        state["reward_enabled_eligible_sample_count"].add_(
+            eligible.detach().sum(dtype=torch.long)
+        )
+        if token is not None:
+            setattr(env, _POST_SWING_SETTLE_ACTIVE_STEP_ATTR, token)
+
+
+def _post_swing_settle_signature(args: tuple) -> tuple:
+    return tuple(
+        float(value) if index >= 2 else value for index, value in enumerate(args)
+    )
+
+
+def post_swing_settle_debt_probe(
+    env: ManagerBasedRLEnv,
+    racket_command_name: str = "racket_target",
+    motion_command_name: str = "motion",
+    base_lin_margin_mps: float = 0.30,
+    base_lin_scale_mps: float = 0.20,
+    base_ang_margin_radps: float = 0.50,
+    base_ang_scale_radps: float = 0.30,
+    tilt_margin_rad: float = 0.10,
+    tilt_scale_rad: float = 0.10,
+    nominal_root_z_m: float = _POST_SWING_SETTLE_NOMINAL_ROOT_Z_M,
+    root_height_deadband_m: float = 0.05,
+    root_height_scale_m: float = 0.05,
+    foot_slip_margin_mps: float = 0.05,
+    foot_slip_scale_mps: float = 0.10,
+    recovery_start_s: float = 0.20,
+    recovery_end_s: float = 1.55,
+) -> torch.Tensor:
+    """Measure the settle debts while contributing exact zero reward."""
+
+    args = (
+        racket_command_name,
+        motion_command_name,
+        base_lin_margin_mps,
+        base_lin_scale_mps,
+        base_ang_margin_radps,
+        base_ang_scale_radps,
+        tilt_margin_rad,
+        tilt_scale_rad,
+        nominal_root_z_m,
+        root_height_deadband_m,
+        root_height_scale_m,
+        foot_slip_margin_mps,
+        foot_slip_scale_mps,
+        recovery_start_s,
+        recovery_end_s,
+    )
+    values, eligible, tails = _post_swing_settle_debt_values(env, *args)
+    _record_post_swing_settle_activation(
+        env,
+        values,
+        eligible,
+        tails,
+        reward_active=False,
+        signature=_post_swing_settle_signature(args),
+    )
+    return torch.zeros_like(values)
+
+
+def post_swing_settle_debt(
+    env: ManagerBasedRLEnv,
+    racket_command_name: str = "racket_target",
+    motion_command_name: str = "motion",
+    base_lin_margin_mps: float = 0.30,
+    base_lin_scale_mps: float = 0.20,
+    base_ang_margin_radps: float = 0.50,
+    base_ang_scale_radps: float = 0.30,
+    tilt_margin_rad: float = 0.10,
+    tilt_scale_rad: float = 0.10,
+    nominal_root_z_m: float = _POST_SWING_SETTLE_NOMINAL_ROOT_Z_M,
+    root_height_deadband_m: float = 0.05,
+    root_height_scale_m: float = 0.05,
+    foot_slip_margin_mps: float = 0.05,
+    foot_slip_scale_mps: float = 0.10,
+    recovery_start_s: float = 0.20,
+    recovery_end_s: float = 1.55,
+) -> torch.Tensor:
+    """Negative-weight S1 bundle: five bounded settle debts in the same-swing recovery window."""
+
+    args = (
+        racket_command_name,
+        motion_command_name,
+        base_lin_margin_mps,
+        base_lin_scale_mps,
+        base_ang_margin_radps,
+        base_ang_scale_radps,
+        tilt_margin_rad,
+        tilt_scale_rad,
+        nominal_root_z_m,
+        root_height_deadband_m,
+        root_height_scale_m,
+        foot_slip_margin_mps,
+        foot_slip_scale_mps,
+        recovery_start_s,
+        recovery_end_s,
+    )
+    values, eligible, tails = _post_swing_settle_debt_values(env, *args)
+    _record_post_swing_settle_activation(
+        env,
+        values,
+        eligible,
+        tails,
+        reward_active=True,
+        signature=_post_swing_settle_signature(args),
+    )
+    return values
+
+
+def consume_post_swing_settle_debt_activation_counters(
+    env: ManagerBasedRLEnv,
+) -> dict[str, torch.Tensor]:
+    """Snapshot/reset one PPO update's post-swing settle ledger."""
+
+    template = env.scene["robot"].data.root_pos_w[:, 0]
+    state = _post_swing_settle_counter_state(env, template)
+    snapshot = {name: value.detach().clone() for name, value in state.items()}
+    with torch.no_grad():
+        for value in state.values():
+            value.zero_()
+    return snapshot
+
+
 def racket_strike_success(
     env: ManagerBasedRLEnv, command_name: str, std_pos: float, std_vel: float, std_normal: float
 ) -> torch.Tensor:

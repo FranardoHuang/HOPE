@@ -923,6 +923,57 @@ class HOPEVirtualBallRewardsCfg(HOPEDeployParityRewardsCfg):
         },
     )
 
+    # S1 (DEFAULT OFF): post-swing settle-debt bundle, a clean main-side redo of the Jiayi V13
+    # post-swing debts idea (unmerged branch; margins/scales re-fixed by this repo's conventions,
+    # not copied).  Five bounded tails — base linear/angular quiet, upright tilt, nominal pelvis
+    # height, and ankle-roll horizontal slip — averaged only inside the same 0.20..1.55 s
+    # same-attempt recovery window the processed_qdes_slew_hinge uses (one shared clock).  The
+    # zero-valued probe is raised to weight 1.0 by any explicit S1 override so eligibility and
+    # per-debt income stay auditable even at weight 0.  人话:挥完拍这一秒多要稳稳站好,五项
+    # "没站稳的债"超过免费额度才扣钱;默认全关,配了就必带探针记账。
+    post_swing_settle_debt = RewTerm(
+        func=mdp.post_swing_settle_debt,
+        weight=0.0,
+        params={
+            "racket_command_name": "racket_target",
+            "motion_command_name": "motion",
+            "base_lin_margin_mps": 0.30,
+            "base_lin_scale_mps": 0.20,
+            "base_ang_margin_radps": 0.50,
+            "base_ang_scale_radps": 0.30,
+            "tilt_margin_rad": 0.10,
+            "tilt_scale_rad": 0.10,
+            "nominal_root_z_m": 1.0684,
+            "root_height_deadband_m": 0.05,
+            "root_height_scale_m": 0.05,
+            "foot_slip_margin_mps": 0.05,
+            "foot_slip_scale_mps": 0.10,
+            "recovery_start_s": 0.20,
+            "recovery_end_s": 1.55,
+        },
+    )
+    post_swing_settle_debt_probe = RewTerm(
+        func=mdp.post_swing_settle_debt_probe,
+        weight=0.0,
+        params={
+            "racket_command_name": "racket_target",
+            "motion_command_name": "motion",
+            "base_lin_margin_mps": 0.30,
+            "base_lin_scale_mps": 0.20,
+            "base_ang_margin_radps": 0.50,
+            "base_ang_scale_radps": 0.30,
+            "tilt_margin_rad": 0.10,
+            "tilt_scale_rad": 0.10,
+            "nominal_root_z_m": 1.0684,
+            "root_height_deadband_m": 0.05,
+            "root_height_scale_m": 0.05,
+            "foot_slip_margin_mps": 0.05,
+            "foot_slip_scale_mps": 0.10,
+            "recovery_start_s": 0.20,
+            "recovery_end_s": 1.55,
+        },
+    )
+
     racket_velocity = RewTerm(
         func=mdp.racket_velocity_tracking_exp,
         weight=0.5,

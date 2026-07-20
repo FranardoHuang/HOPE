@@ -61,11 +61,16 @@ gates must still pass, and no raw video grants permission for a real-robot run.
 
 The 2026-07-13 v12/static/motion intake is separately bound by
 `configs/motion_video_intake_20260713.json`. Its schema distinguishes stroke
-videos from lateral-locomotion teachers, so a lower-body teacher cannot be
-silently treated as a block clip. The seven raw MP4s stay under the user's
-private `${HOME}/Downloads/{v12,static,motion}` folders until an explicitly
-versioned private staging copy is made; intake verification grants no compute
-or simulator authorization.
+videos from lower-body footwork clips, so a footwork clip cannot be silently
+treated as a block clip. The intake file's `lateral_locomotion_teacher` /
+`lateral_step_teacher` labels are frozen historical fields: since 2026-07-20
+the four `motion/` dang clips are semantically the shared lateral footwork
+module, and `configs/motion_role_catalog.json` (checked by
+`scripts/validate_motion_role_catalog.py`) is the single semantic source of
+truth for motion roles; the intake bytes themselves must not change. The seven
+raw MP4s stay under the user's private `${HOME}/Downloads/{v12,static,motion}`
+folders until an explicitly versioned private staging copy is made; intake
+verification grants no compute or simulator authorization.
 
 The diagnostic GMR run also depends on five local source commits not present
 in the observed public upstream. Its 282,953,810-byte recovery bundle remains

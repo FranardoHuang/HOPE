@@ -1142,6 +1142,110 @@ def _validate_lower_body_wave_contracts(
         raise ValueError("schema-3 Wave-B B1 and B2 rewards are mutually exclusive")
 
 
+def _validate_post_swing_settle_debt_contract(contract: Mapping) -> None:
+    """S1 post-swing settle debt block (Jiayi V13 post-swing debts idea, clean main-side redo).
+
+    Absent block = mechanism untouched (legacy/default runs).  A present block must bind the
+    exact five-debt formula, the shared same-attempt recovery-window gate, and every margin/scale
+    the run trained with; it is mutually exclusive with an enabled Wave-B lower-body mechanism.
+    """
+
+    settle = contract.get("post_swing_settle_debt_reward")
+    if settle is None:
+        return
+    settle = _require_exact_mapping_keys(
+        settle,
+        frozenset(
+            {
+                "schema_version", "enabled", "probe_enabled", "activation_ledger",
+                "weight", "base_lin_margin_mps", "base_lin_scale_mps",
+                "base_ang_margin_radps", "base_ang_scale_radps",
+                "tilt_margin_rad", "tilt_scale_rad",
+                "nominal_root_z_m", "root_height_deadband_m", "root_height_scale_m",
+                "foot_slip_margin_mps", "foot_slip_scale_mps",
+                "recovery_start_s", "recovery_end_s",
+                "racket_command_name", "motion_command_name", "foot_body_names",
+                "components", "formula", "gate", "age_source",
+                "success_conditioned", "uses_motion_reference",
+            }
+        ),
+        name="schema-3 post_swing_settle_debt_reward",
+    )
+    if type(settle["schema_version"]) is not int or settle["schema_version"] != 1:
+        raise ValueError("schema-3 post_swing_settle_debt_reward schema_version must be 1")
+    if (
+        not isinstance(settle["enabled"], bool)
+        or settle["probe_enabled"] is not True
+        or settle["success_conditioned"] is not False
+        or settle["uses_motion_reference"] is not False
+    ):
+        raise ValueError("schema-3 post_swing_settle_debt_reward flags are invalid")
+    weight = _wave_finite(settle["weight"], name="post_swing_settle_debt_reward.weight")
+    if weight > 0.0 or settle["enabled"] != (weight < 0.0):
+        raise ValueError("schema-3 post_swing_settle_debt_reward weight/enabled is invalid")
+    for name in (
+        "base_lin_scale_mps", "base_ang_scale_radps", "tilt_scale_rad",
+        "nominal_root_z_m", "root_height_scale_m", "foot_slip_scale_mps",
+    ):
+        _wave_finite(settle[name], name=f"post_swing_settle_debt_reward.{name}", positive=True)
+    for name in (
+        "base_lin_margin_mps", "base_ang_margin_radps", "tilt_margin_rad",
+        "root_height_deadband_m", "foot_slip_margin_mps", "recovery_start_s",
+    ):
+        _wave_finite(
+            settle[name], name=f"post_swing_settle_debt_reward.{name}", nonnegative=True
+        )
+    end = _wave_finite(
+        settle["recovery_end_s"],
+        name="post_swing_settle_debt_reward.recovery_end_s",
+        positive=True,
+    )
+    if float(settle["recovery_start_s"]) >= end:
+        raise ValueError(
+            "schema-3 post_swing_settle_debt_reward recovery window must satisfy 0 <= start < end"
+        )
+    expected = {
+        "racket_command_name": "racket_target",
+        "motion_command_name": "motion",
+        "activation_ledger": "weight_independent_control_step_counters",
+        "foot_body_names": ["left_ankle_roll_Link", "right_ankle_roll_Link"],
+        "components": [
+            "base_quiet_lin",
+            "base_quiet_ang",
+            "tilt_debt",
+            "root_height_debt",
+            "settle_foot_slip",
+        ],
+        "formula": "mean(5x(1-exp(-square(relu(x-margin)/scale))))",
+        "gate": "same_attempt_post_strike_age_s_inclusive",
+        "age_source": "per_env_exact_strike_control_tick_latch",
+    }
+    for key, value in expected.items():
+        if settle[key] != value:
+            raise ValueError(
+                f"schema-3 post_swing_settle_debt_reward {key} must be {value!r}"
+            )
+    articulation_bodies = contract.get("articulation_body_names")
+    if (
+        not isinstance(articulation_bodies, (list, tuple))
+        or any(name not in articulation_bodies for name in settle["foot_body_names"])
+    ):
+        raise ValueError(
+            "schema-3 post_swing_settle_debt_reward foot bodies are absent from articulation"
+        )
+    if settle["enabled"]:
+        for other_key in (
+            "lower_body_pose_imitation_reward",
+            "lower_body_stability_bundle_reward",
+        ):
+            other = contract.get(other_key)
+            if isinstance(other, Mapping) and other.get("enabled") is True:
+                raise ValueError(
+                    "schema-3 S1 post_swing_settle_debt and Wave-B lower-body rewards are "
+                    "mutually exclusive"
+                )
+
+
 def validate_schema3_contract_structure(contract: Mapping) -> None:
     """Validate a schema-3 sidecar without promoting it to a formal-exact lineage.
 
@@ -1420,6 +1524,7 @@ def validate_schema3_contract_structure(contract: Mapping) -> None:
         [str(value) for value in joint_names],
         [str(value) for value in contract["articulation_joint_names"]],
     )
+    _validate_post_swing_settle_debt_contract(contract)
     if contract["joint_friction_backend"] != JOINT_FRICTION_BACKEND:
         raise ValueError("schema-3 joint_friction_backend must be physx")
     if contract["joint_friction_semantics"] != JOINT_FRICTION_SEMANTICS:

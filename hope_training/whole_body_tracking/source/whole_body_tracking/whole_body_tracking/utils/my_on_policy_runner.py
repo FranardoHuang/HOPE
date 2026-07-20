@@ -415,6 +415,19 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                         self._scalar_tensor(counter_value),
                         step,
                     )
+            if "post_swing_settle_debt_probe" in active_reward_terms:
+                from whole_body_tracking.tasks.tracking.mdp.hope_rewards import (
+                    consume_post_swing_settle_debt_activation_counters,
+                )
+
+                for counter_name, counter_value in (
+                    consume_post_swing_settle_debt_activation_counters(env).items()
+                ):
+                    self._log_scalar(
+                        f"Live/post_swing_settle_debt/{counter_name}",
+                        self._scalar_tensor(counter_value),
+                        step,
+                    )
 
         if hasattr(env, "termination_manager"):
             tm = env.termination_manager

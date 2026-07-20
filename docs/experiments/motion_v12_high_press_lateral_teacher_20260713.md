@@ -131,3 +131,23 @@ GVHMR 的 Pod 命令及边界见
 初始 stance”，再用新 namespace 重走 exact GMR 与 schema-2。v12 后排为 Jiayi 路线对照。
 候选不做 seed 式重复。只有测得动作针对任务的安全接触流形后，
 才冻结对应考卷。任何未通过完整离线证书链的项目，都不得分配 RL GPU。
+
+## 2026-07-20 语义修订（追加，不改上文历史表述）
+
+用户已拍板冻结动作语义，取代本文标题与正文中"按（有符号）位移条件化的独立横移下肢老师"的旧表述；
+上文历史段落保留原文，冲突处以本节和 [`configs/motion_role_catalog.json`](../../configs/motion_role_catalog.json)
+为准（校验入口 `scripts/validate_motion_role_catalog.py`，合同全文见
+[stroke_footwork_composition](../interfaces/stroke_footwork_composition.md)）：
+
+1. 所有非 `motion/` 的击球素材都是原地击球（`stationary_strike`）："原地"只指无有意 base 平移/迈步，
+   不冻结腿，允许重心与腿部姿态变化；
+2. `motion/{left,right}_dang{1,2}.mp4` 是跨所有击球动作复用的共享横移脚步模块
+   （`shared_lateral_footwork_module`），不存在独立 locomotion 动作，也不设独立 stop teacher；
+3. 横移只能由有效击球意图触发：所需横向位移在 stationary reach/deadband 内用击球动作自身下半身参考，
+   超出才把共享脚步模块与击球动作按 `prepare -> strike -> recover` 事件对齐组合；无击球意图不得移动；
+4. 每个派生动作 `<strike, footwork, signed distance, phase alignment, retiming>` 都必须重新通过完整
+   Gate 链；重定时/组合参数变化即重置资格；
+5. 语义修正不覆盖安全事实：M0 stance gate 仍是 `0/4` reject；Franco 反手拉 B 只有静态/`mj_forward`
+   证据（`mj_step_calls=0`），不得称"不倒"或 `training_authorized`。
+
+人话：这轮只是把"独立走路老师"改名并定死成"为击球服务的共享脚步模块"，谁能训练、谁被拒收一个都没变。

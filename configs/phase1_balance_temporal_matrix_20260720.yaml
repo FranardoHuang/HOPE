@@ -1,0 +1,372 @@
+schema_version: 1
+queue_id: phase1_balance_temporal_matrix_20260720
+purpose: >-
+  人话：24 格诊断矩阵 {W,V}x{N,C,H}x{S0..S3}，全部 4096 env、seed 3，从各自
+  parent model_6700 续训 10001 个 update，比较时序正则（无/稠密 action_rate/恢复期
+  q_des slew hinge）与三个新稳定机制（挥拍后安顿债务包/下肢稳定捆绑/下肢姿态模仿）。
+  只渲染命令供人工核对后执行，本队列只做仿真，永不驱动真实机器人。
+simulation_only: true
+real_robot_authorized: false
+launch_authorized_by_default: false
+formal_exact_eligible: false
+evidence_class: diagnostic_only_intentional_parent_contract_mismatch
+
+ssh:
+  key: ~/.ssh/id_ed25519_runpod
+pods:
+  pod1: {host: 162.43.172.171, port: 18333, gpus: [0, 1, 2]}
+  pod2: {host: 162.43.172.181, port: 13146, gpus: [0, 1, 2]}
+
+namespace:
+  root: /workspace/codexschema/phase1_balance_temporal_matrix_20260720
+  no_clobber: true
+  automatic_retry: false
+
+source:
+  checkout: /workspace/codexschema/nohope_btm_20260720
+  identity_mode: clean_detached_exact_commit
+  # 人话：主控合并所有并行实现后才有最终 commit；占位符存在时渲染器拒绝出命令。
+  commit: "PENDING_EXACT_COMMIT"
+  worktree_relative: hope_training/whole_body_tracking
+  python: /workspace/hope_isaac_venv/bin/python
+  setup_relative: setup_train_env.sh
+  trainer_relative: scripts/train.py
+  locked_launcher_relative: scripts/launch_kit_training_locked.sh
+  note: >-
+    人话：训练从干净的 detached 精确 commit 检出跑；W/V 与后代 hard contract 有意
+    mismatch，所以整条谱系永远不算 formal-exact，胜者机制须另在 exact-lineage 重跑。
+
+watchdog:
+  # 人话：v8/v9 死于 launch_kit_training_locked.sh 写死的 180 s stale 门（Kit 编译
+  # shader 时日志可以安静 10 分钟以上）。本轮远端命令不用那个 launcher，改用
+  # /workspace/bin/kit_boot_lock.sh + setsid nohup 起进程，boot 停滞 1800 s、
+  # 首个迭代出现后停滞 900 s 才判死，之后靠事后 artifact 验证（run.log +
+  # checkpoint 文件）而不是在线看门狗杀进程。
+  boot_stall_timeout_s: 1800
+  post_first_iteration_stall_timeout_s: 900
+  retry_policy: one_verbatim_retry_suffix_r2
+  retry_note: 人话：唯一允许的重试是逐字重发一次，run_name 加 _r2 后缀，仍需人工核对。
+
+assets:
+  a3_runtime_asset_root: /workspace/codexschema/nohope_balance_action_slew_20260720/hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
+  preconverted_a3_usd: /workspace/codexschema/simple_half_second_sprint_20260718/assets/a3_preconverted_usd/model.usd
+  motion_forehand: /workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_forehand_v4rg_cal.npz
+  motion_backhand: /workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_backhand_v4rg_cal.npz
+  training_question_bank: /workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_bank_rebind_v2/s1_v4rg_runtime_order_schema3_train_882fea4_rebound.npz
+
+parents:
+  W:
+    human_name: position-heavy plus free non-striking arm
+    checkpoint_iteration: 6700
+    checkpoint_path: /workspace/codexschema/simple_half_second_sprint_20260718/pod1/hs_p1_w_cached_pos_free_seed3/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-17_19-58-17_hs_p1_w_cached_pos_free_seed3/model_6700.pt
+    checkpoint_sha256: 2caab3dde3a0ac6c051ff8ac65385a641cac152aa3f84b640126b5ed7b96fcce
+    hard_contract_path: /workspace/codexschema/simple_half_second_sprint_20260718/pod1/hs_p1_w_cached_pos_free_seed3/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-17_19-58-17_hs_p1_w_cached_pos_free_seed3/params/training_contract.json
+    transfer_mode: full_policy_value_optimizer_normalizer
+    checkpoint_tolerant: false
+    checkpoint_allow_missing_contract: false
+    checkpoint_allow_contract_mismatch: true
+    descendant_formal_exact_eligible: false
+    recipe_overrides:
+      - task.rewards.racket_position_weight=17.0
+      - task.rewards.racket_velocity_weight=7.0
+      - task.rewards.racket_normal_weight=5.0
+      - task.rewards.foot_orientation_weight=-0.3
+      - task.rewards.prestrike_upright_weight=-1.0
+      - ++task.rewards.free_non_striking_arm_mimic=true
+  V:
+    human_name: velocity-heavy plus strong ready posture
+    checkpoint_iteration: 6700
+    checkpoint_path: /workspace/codexschema/simple_half_second_sprint_20260718/pod1/hs_p1_v_cached_vel_ready_seed3/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-17_19-58-18_hs_p1_v_cached_vel_ready_seed3/model_6700.pt
+    checkpoint_sha256: ad9019100f199f23669829b0fbc4f8c2ad45c8073f930348f177da9487332716
+    hard_contract_path: /workspace/codexschema/simple_half_second_sprint_20260718/pod1/hs_p1_v_cached_vel_ready_seed3/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-17_19-58-18_hs_p1_v_cached_vel_ready_seed3/params/training_contract.json
+    transfer_mode: full_policy_value_optimizer_normalizer
+    checkpoint_tolerant: false
+    checkpoint_allow_missing_contract: false
+    checkpoint_allow_contract_mismatch: true
+    descendant_formal_exact_eligible: false
+    recipe_overrides:
+      - task.rewards.racket_position_weight=7.0
+      - task.rewards.racket_velocity_weight=17.0
+      - task.rewards.racket_normal_weight=5.0
+      - task.rewards.foot_orientation_weight=-0.6
+      - task.rewards.prestrike_upright_weight=-2.0
+      - ++task.rewards.free_non_striking_arm_mimic=false
+
+common:
+  seed: 3
+  planner_revision_override: >-
+    ++task.planner_revision={enabled: true, initial_tts_mixture: {components: [{name: "late_stress", range_s: [0.36, 0.49], weight: 0.10}, {name: "baseline_0p5", range_s: [0.5, 0.5], weight: 0.45}, {name: "fast_deploy", range_s: [0.5, 0.9], weight: 0.40}, {name: "broad_arrival", range_s: [0.9, 1.7], weight: 0.05}], contract_version: "initial_tts_mixture_v1"}, initial_tts_range_s: [0.36, 1.7], normal_std_rad: 0.05, position_std_m: 0.02, profile: {contract_version: "phase_governor_v1", early_deadline_tolerance_s: 1.0e-6, max_deadline_revision_delta_s: 0.25, max_normal_revision_delta_rad: 0.2, max_phase_acceleration_per_s2: 20.0, max_phase_rate_per_s: 4.0, max_position_revision_delta_m: 0.1, max_tts_s: 2.0, max_velocity_revision_delta_mps: 0.5, min_tts_s: 0.02, normal_unit_tolerance: 0.0001, policy_dt_s: 0.02, schema_version: 1}, tts_std_s: 0.08, velocity_std_mps: 0.1}
+  base_overrides:
+    - task=HOPEPingPongVirtualBall
+    - algo=ppo
+    - headless=true
+    - logger=tensorboard
+    - video=false
+    - task.actor_obs_contract=deploy_parity_face179
+    - task.env.episode_length_s=16.0
+    - task.sim.dt=0.005
+    - task.sim.decimation=4
+    - task.actions.qdes_clamp=true
+    - task.plant.zero_joint_friction=true
+    - task.motion.wrap_teleport=false
+    - task.motion.stand_start_prob=0.25
+    - task.motion.hold_steps_range=[0,0]
+    - task.motion.stand_start_min_hold=0
+    - task.motion.post_swing_buffer_size=4096
+    - task.motion.post_swing_min_fill=256
+    - task.motion.post_swing_min_hold=0
+    - task.motion.clip_switch_prob=0.0
+    - task.motion.speed_scale_range=[1.0,1.0]
+    - ++task.motion.rsi_skip_settle_frames=0
+    - ++task.motion.rsi_hold_root_stand_z=false
+    - ++task.motion.stagger_initial_clock=false
+    - ++task.motion.stagger_hold_max_steps=150
+    - ++task.racket.question_bank_allow_legacy=false
+    - ++task.racket.face_command=true
+    - ++task.racket.face_command_obs=true
+    - ++task.racket.station_obs=false
+    - ++task.racket.mount_normal_sign_per_clip=[1.0,-1.0]
+    - task.racket.target_mode=uniform
+    - task.racket.normal_mode=velocity
+    - task.racket.adaptive_sigma=true
+    - task.racket.target_delay_steps=0
+    - ++task.racket.target_delay_tts_mode=source_timestamp_compensated
+    - task.racket.target_jitter_pos_per_s=0.0
+    - task.racket.target_jitter_vel_per_s=0.0
+    - task.racket.target_noise_white=0.0019
+    - task.racket.target_noise_ar1_sigma=0.0052
+    - task.racket.target_noise_ar1_rho=0.717
+    - task.racket.target_dropout_prob=0.0
+    - task.racket.target_post_strike_dropout_s=0.0
+    - task.racket.target_bias_per_swing=0.0
+    - task.racket.midswing_resample_prob=0.0
+    - task.racket.midswing_resample_tts_floor=0.3
+    - task.racket.vb_spin_mode=minimize
+    - task.racket.vb_metrics_only=true
+    - ++task.racket.rally_legacy_metrics=true
+    - task.racket.achieved_target_mix_prob=0.30
+    - task.racket.achieved_buffer_size=4096
+    - task.racket.achieved_min_fill=256
+    - task.racket.achieved_jitter_pos=0.03
+    - task.racket.achieved_jitter_vel=0.15
+    - task.racket.achieved_clamp_inflate=0.20
+    - task.racket.clean_reference_strike_velocity=true
+    - task.racket.clean_strike_vel_window=2
+    - task.racket.strike_window_s=0.12
+    - task.racket.strike_success_pos_thresh=0.075
+    - ++task.physical_ball=true
+    - task.rewards.racket_position_std=0.2
+    - task.rewards.racket_velocity_std=1.0
+    - task.rewards.racket_normal_std=0.3
+    - task.rewards.free_wrist_ori_mimic=true
+    - ++task.rewards.free_wrist_vel_mimic=true
+    - ++task.rewards.motion_scale_in_window=0.25
+    - task.rewards.base_decel_weight=0.0
+    - task.motion.post_swing_start_prob=0.0
+    - task.rewards.joint_velocity_limit_hinge_weight=0.0
+    - task.rewards.joint_velocity_limit_hinge_margin=0.85
+    - ++task.rewards.racket_face_conditional_guidance_weight=-0.4
+    - ++task.motion.allow_legacy_link_origin_velocity=false
+    - ++task.motion.event_timing_mode=disabled
+    - task.racket.strike_phase_per_clip=[0.471,0.338]
+    - ++task.racket.face_command_pairing=shared_plus_y
+    - ++task.rewards.racket_guidance_weight=0.0
+    - ++task.rewards.racket_face_guidance_weight=0.0
+    - ++task.rewards.racket_face_guidance_theta_max=3.141592653589793
+    - ++kit_carb_tasking_thread_count=16
+    - ++kit_tbb_thread_count=16
+
+mechanisms:
+  temporal:
+    N:
+      human_name: 人话：不给任何动作变化率惩罚（阴性对照），slew 探针仍全程记录
+      overrides:
+        - task.rewards.action_rate_weight=0.0
+        - ++task.rewards.processed_qdes_slew_hinge_weight=0.0
+        - ++task.rewards.processed_qdes_slew_hinge_margin=0.85
+        - ++task.rewards.processed_qdes_slew_hinge_recovery_start_s=0.2
+        - ++task.rewards.processed_qdes_slew_hinge_recovery_end_s=1.55
+    C:
+      human_name: 人话：继承的稠密 raw-action 变化率惩罚（-0.10），全程生效
+      overrides:
+        - task.rewards.action_rate_weight=-0.1
+        - ++task.rewards.processed_qdes_slew_hinge_weight=0.0
+        - ++task.rewards.processed_qdes_slew_hinge_margin=0.85
+        - ++task.rewards.processed_qdes_slew_hinge_recovery_start_s=0.2
+        - ++task.rewards.processed_qdes_slew_hinge_recovery_end_s=1.55
+    H:
+      human_name: 人话：只在击球后恢复窗 0.20-1.55 s 罚超过 85% 限幅的 q_des 变化（-0.25）
+      overrides:
+        - task.rewards.action_rate_weight=0.0
+        - ++task.rewards.processed_qdes_slew_hinge_weight=-0.25
+        - ++task.rewards.processed_qdes_slew_hinge_margin=0.85
+        - ++task.rewards.processed_qdes_slew_hinge_recovery_start_s=0.2
+        - ++task.rewards.processed_qdes_slew_hinge_recovery_end_s=1.55
+  stability:
+    S0:
+      human_name: 人话：三个新机制全 0 的对照格，测量探针全开
+      overrides:
+        - ++task.rewards.post_swing_settle_debt_weight=0.0
+        - ++task.rewards.post_swing_settle_base_lin_margin_mps=0.3
+        - ++task.rewards.post_swing_settle_base_lin_scale_mps=0.2
+        - ++task.rewards.post_swing_settle_base_ang_margin_radps=0.5
+        - ++task.rewards.post_swing_settle_base_ang_scale_radps=0.3
+        - ++task.rewards.post_swing_settle_tilt_margin_rad=0.1
+        - ++task.rewards.post_swing_settle_tilt_scale_rad=0.1
+        - ++task.rewards.post_swing_settle_nominal_root_z_m=1.0684
+        - ++task.rewards.post_swing_settle_root_height_deadband_m=0.05
+        - ++task.rewards.post_swing_settle_root_height_scale_m=0.05
+        - ++task.rewards.post_swing_settle_foot_slip_margin_mps=0.05
+        - ++task.rewards.post_swing_settle_foot_slip_scale_mps=0.1
+        - ++task.rewards.post_swing_settle_recovery_start_s=0.2
+        - ++task.rewards.post_swing_settle_recovery_end_s=1.55
+        - ++task.rewards.lower_body_stability_bundle_weight=0.0
+        - ++task.rewards.lower_body_stability_min_stance_width_m=0.22
+        - ++task.rewards.lower_body_stability_stance_scale_m=0.05
+        - ++task.rewards.lower_body_stability_leg_velocity_margin_radps=1.0
+        - ++task.rewards.lower_body_stability_leg_velocity_scale_radps=0.5
+        - ++task.rewards.lower_body_stability_support_pre_s=0.3
+        - ++task.rewards.lower_body_stability_support_post_s=0.4
+        - ++task.rewards.lower_body_pose_imitation_weight=0.0
+        - ++task.rewards.lower_body_pose_imitation_std=0.35
+        - ++task.rewards.lower_body_pose_imitation_support_pre_s=0.3
+        - ++task.rewards.lower_body_pose_imitation_support_post_s=0.4
+    S1:
+      human_name: 人话：挥拍后安顿债务包（-0.25），其余两机制显式为 0
+      overrides:
+        - ++task.rewards.post_swing_settle_debt_weight=-0.25
+        - ++task.rewards.post_swing_settle_base_lin_margin_mps=0.3
+        - ++task.rewards.post_swing_settle_base_lin_scale_mps=0.2
+        - ++task.rewards.post_swing_settle_base_ang_margin_radps=0.5
+        - ++task.rewards.post_swing_settle_base_ang_scale_radps=0.3
+        - ++task.rewards.post_swing_settle_tilt_margin_rad=0.1
+        - ++task.rewards.post_swing_settle_tilt_scale_rad=0.1
+        - ++task.rewards.post_swing_settle_nominal_root_z_m=1.0684
+        - ++task.rewards.post_swing_settle_root_height_deadband_m=0.05
+        - ++task.rewards.post_swing_settle_root_height_scale_m=0.05
+        - ++task.rewards.post_swing_settle_foot_slip_margin_mps=0.05
+        - ++task.rewards.post_swing_settle_foot_slip_scale_mps=0.1
+        - ++task.rewards.post_swing_settle_recovery_start_s=0.2
+        - ++task.rewards.post_swing_settle_recovery_end_s=1.55
+        - ++task.rewards.lower_body_stability_bundle_weight=0.0
+        - ++task.rewards.lower_body_stability_min_stance_width_m=0.22
+        - ++task.rewards.lower_body_stability_stance_scale_m=0.05
+        - ++task.rewards.lower_body_stability_leg_velocity_margin_radps=1.0
+        - ++task.rewards.lower_body_stability_leg_velocity_scale_radps=0.5
+        - ++task.rewards.lower_body_stability_support_pre_s=0.3
+        - ++task.rewards.lower_body_stability_support_post_s=0.4
+        - ++task.rewards.lower_body_pose_imitation_weight=0.0
+        - ++task.rewards.lower_body_pose_imitation_std=0.35
+        - ++task.rewards.lower_body_pose_imitation_support_pre_s=0.3
+        - ++task.rewards.lower_body_pose_imitation_support_post_s=0.4
+    S2:
+      human_name: 人话：下肢稳定捆绑（站宽下限+落地腿速，-0.25），其余两机制显式为 0
+      overrides:
+        - ++task.rewards.post_swing_settle_debt_weight=0.0
+        - ++task.rewards.post_swing_settle_base_lin_margin_mps=0.3
+        - ++task.rewards.post_swing_settle_base_lin_scale_mps=0.2
+        - ++task.rewards.post_swing_settle_base_ang_margin_radps=0.5
+        - ++task.rewards.post_swing_settle_base_ang_scale_radps=0.3
+        - ++task.rewards.post_swing_settle_tilt_margin_rad=0.1
+        - ++task.rewards.post_swing_settle_tilt_scale_rad=0.1
+        - ++task.rewards.post_swing_settle_nominal_root_z_m=1.0684
+        - ++task.rewards.post_swing_settle_root_height_deadband_m=0.05
+        - ++task.rewards.post_swing_settle_root_height_scale_m=0.05
+        - ++task.rewards.post_swing_settle_foot_slip_margin_mps=0.05
+        - ++task.rewards.post_swing_settle_foot_slip_scale_mps=0.1
+        - ++task.rewards.post_swing_settle_recovery_start_s=0.2
+        - ++task.rewards.post_swing_settle_recovery_end_s=1.55
+        - ++task.rewards.lower_body_stability_bundle_weight=-0.25
+        - ++task.rewards.lower_body_stability_min_stance_width_m=0.22
+        - ++task.rewards.lower_body_stability_stance_scale_m=0.05
+        - ++task.rewards.lower_body_stability_leg_velocity_margin_radps=1.0
+        - ++task.rewards.lower_body_stability_leg_velocity_scale_radps=0.5
+        - ++task.rewards.lower_body_stability_support_pre_s=0.3
+        - ++task.rewards.lower_body_stability_support_post_s=0.4
+        - ++task.rewards.lower_body_pose_imitation_weight=0.0
+        - ++task.rewards.lower_body_pose_imitation_std=0.35
+        - ++task.rewards.lower_body_pose_imitation_support_pre_s=0.3
+        - ++task.rewards.lower_body_pose_imitation_support_post_s=0.4
+    S3:
+      human_name: 人话：下肢姿态软模仿（+0.5，std 0.35，击球前 0.30 s/后 0.40 s 支持窗），其余两机制显式为 0
+      overrides:
+        - ++task.rewards.post_swing_settle_debt_weight=0.0
+        - ++task.rewards.post_swing_settle_base_lin_margin_mps=0.3
+        - ++task.rewards.post_swing_settle_base_lin_scale_mps=0.2
+        - ++task.rewards.post_swing_settle_base_ang_margin_radps=0.5
+        - ++task.rewards.post_swing_settle_base_ang_scale_radps=0.3
+        - ++task.rewards.post_swing_settle_tilt_margin_rad=0.1
+        - ++task.rewards.post_swing_settle_tilt_scale_rad=0.1
+        - ++task.rewards.post_swing_settle_nominal_root_z_m=1.0684
+        - ++task.rewards.post_swing_settle_root_height_deadband_m=0.05
+        - ++task.rewards.post_swing_settle_root_height_scale_m=0.05
+        - ++task.rewards.post_swing_settle_foot_slip_margin_mps=0.05
+        - ++task.rewards.post_swing_settle_foot_slip_scale_mps=0.1
+        - ++task.rewards.post_swing_settle_recovery_start_s=0.2
+        - ++task.rewards.post_swing_settle_recovery_end_s=1.55
+        - ++task.rewards.lower_body_stability_bundle_weight=0.0
+        - ++task.rewards.lower_body_stability_min_stance_width_m=0.22
+        - ++task.rewards.lower_body_stability_stance_scale_m=0.05
+        - ++task.rewards.lower_body_stability_leg_velocity_margin_radps=1.0
+        - ++task.rewards.lower_body_stability_leg_velocity_scale_radps=0.5
+        - ++task.rewards.lower_body_stability_support_pre_s=0.3
+        - ++task.rewards.lower_body_stability_support_post_s=0.4
+        - ++task.rewards.lower_body_pose_imitation_weight=0.5
+        - ++task.rewards.lower_body_pose_imitation_std=0.35
+        - ++task.rewards.lower_body_pose_imitation_support_pre_s=0.3
+        - ++task.rewards.lower_body_pose_imitation_support_post_s=0.4
+
+probe_contract:
+  # 人话：三个机制的测量探针在所有 24 格都要开。grep 实证（本 worktree train.py，
+  # 含已合并的并行 S1 实现）：三个机制都没有独立的 *_probe_weight CLI 键——
+  # _REWARD_KEYS 白名单里只有机制 weight/参数键；显式给出机制 weight 键时
+  # train.py 强制把对应 probe.weight 设为 1.0（settle/bundle/pose 三处
+  # "probe.weight=1.0" applied 行），缺探针项则 fail-loud。本矩阵每格都显式写
+  # 三个机制 weight，因此三个探针必开；若写 *_probe_weight 反而会因
+  # _check_unknown_keys(task.rewards) 在 boot 时 fail-loud，故不写。
+  post_swing_settle_debt: auto_forced_probe_weight_1p0_by_explicit_weight_key
+  lower_body_stability_bundle: auto_forced_probe_weight_1p0_by_explicit_weight_key
+  lower_body_pose_imitation: auto_forced_probe_weight_1p0_by_explicit_weight_key
+  processed_qdes_slew: auto_probe_by_explicit_hinge_keys_in_every_cell
+
+budgets:
+  probe:
+    num_envs: 4096
+    num_steps_per_env: 24
+    max_iterations: 2
+    save_interval: 1
+  science:
+    num_envs: 4096
+    num_steps_per_env: 24
+    max_iterations: 10001
+    save_interval: 100
+    milestone_offsets_from_parent: [200, 500, 1000, 2000, 4000, 6000, 10000]
+    absolute_milestones: [6900, 7200, 7700, 8700, 10700, 12700, 16700]
+
+# 人话：GPU 分配按 (S, T, parent) 排序后轮流发到 pod1g0,pod1g1,pod1g2,pod2g0,
+# pod2g1,pod2g2，每张卡恰好 4 条（同一 (parent,T) 格的四个 S 档共卡）。写死如下。
+jobs:
+  - {id: w_n_s0, parent: W, temporal: N, stability: S0, pod: pod1, gpu: 0, run_name: p1btm_w_n_s0_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720/runs/w_n_s0}
+  - {id: v_n_s0, parent: V, temporal: N, stability: S0, pod: pod1, gpu: 1, run_name: p1btm_v_n_s0_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720/runs/v_n_s0}
+  - {id: w_c_s0, parent: W, temporal: C, stability: S0, pod: pod1, gpu: 2, run_name: p1btm_w_c_s0_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720/runs/w_c_s0}
+  - {id: v_c_s0, parent: V, temporal: C, stability: S0, pod: pod2, gpu: 0, run_name: p1btm_v_c_s0_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720/runs/v_c_s0}
+  - {id: w_h_s0, parent: W, temporal: H, stability: S0, pod: pod2, gpu: 1, run_name: p1btm_w_h_s0_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720/runs/w_h_s0}
+  - {id: v_h_s0, parent: V, temporal: H, stability: S0, pod: pod2, gpu: 2, run_name: p1btm_v_h_s0_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720/runs/v_h_s0}
+  - {id: w_n_s1, parent: W, temporal: N, stability: S1, pod: pod1, gpu: 0, run_name: p1btm_w_n_s1_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720/runs/w_n_s1}
+  - {id: v_n_s1, parent: V, temporal: N, stability: S1, pod: pod1, gpu: 1, run_name: p1btm_v_n_s1_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720/runs/v_n_s1}
+  - {id: w_c_s1, parent: W, temporal: C, stability: S1, pod: pod1, gpu: 2, run_name: p1btm_w_c_s1_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720/runs/w_c_s1}
+  - {id: v_c_s1, parent: V, temporal: C, stability: S1, pod: pod2, gpu: 0, run_name: p1btm_v_c_s1_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720/runs/v_c_s1}
+  - {id: w_h_s1, parent: W, temporal: H, stability: S1, pod: pod2, gpu: 1, run_name: p1btm_w_h_s1_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720/runs/w_h_s1}
+  - {id: v_h_s1, parent: V, temporal: H, stability: S1, pod: pod2, gpu: 2, run_name: p1btm_v_h_s1_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720/runs/v_h_s1}
+  - {id: w_n_s2, parent: W, temporal: N, stability: S2, pod: pod1, gpu: 0, run_name: p1btm_w_n_s2_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720/runs/w_n_s2}
+  - {id: v_n_s2, parent: V, temporal: N, stability: S2, pod: pod1, gpu: 1, run_name: p1btm_v_n_s2_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720/runs/v_n_s2}
+  - {id: w_c_s2, parent: W, temporal: C, stability: S2, pod: pod1, gpu: 2, run_name: p1btm_w_c_s2_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720/runs/w_c_s2}
+  - {id: v_c_s2, parent: V, temporal: C, stability: S2, pod: pod2, gpu: 0, run_name: p1btm_v_c_s2_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720/runs/v_c_s2}
+  - {id: w_h_s2, parent: W, temporal: H, stability: S2, pod: pod2, gpu: 1, run_name: p1btm_w_h_s2_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720/runs/w_h_s2}
+  - {id: v_h_s2, parent: V, temporal: H, stability: S2, pod: pod2, gpu: 2, run_name: p1btm_v_h_s2_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720/runs/v_h_s2}
+  - {id: w_n_s3, parent: W, temporal: N, stability: S3, pod: pod1, gpu: 0, run_name: p1btm_w_n_s3_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720/runs/w_n_s3}
+  - {id: v_n_s3, parent: V, temporal: N, stability: S3, pod: pod1, gpu: 1, run_name: p1btm_v_n_s3_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720/runs/v_n_s3}
+  - {id: w_c_s3, parent: W, temporal: C, stability: S3, pod: pod1, gpu: 2, run_name: p1btm_w_c_s3_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720/runs/w_c_s3}
+  - {id: v_c_s3, parent: V, temporal: C, stability: S3, pod: pod2, gpu: 0, run_name: p1btm_v_c_s3_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720/runs/v_c_s3}
+  - {id: w_h_s3, parent: W, temporal: H, stability: S3, pod: pod2, gpu: 1, run_name: p1btm_w_h_s3_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720/runs/w_h_s3}
+  - {id: v_h_s3, parent: V, temporal: H, stability: S3, pod: pod2, gpu: 2, run_name: p1btm_v_h_s3_seed3_20260720, run_dir: /workspace/codexschema/phase1_balance_temporal_matrix_20260720/runs/v_h_s3}

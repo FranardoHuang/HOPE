@@ -125,9 +125,9 @@
 | `SMPL-X` | 带身体、手和姿态参数的人体模型表示；本项目把它作为视频动作与机器人重定向之间的中间制品，不把它当作 A3 runtime-order 动作。 |
 | `PT` / PyTorch tensor archive | GVHMR/GMR 离线链使用的 PyTorch 序列化动作文件；文件存在或可加载只证明对应结构制品可读，不自动证明动作、schema-2、仿真、训练或硬件资格。 |
 | <a id="motion-s0"></a>`S0`（static high-press batch） | 2026-07-13 新视频的单条高点拍压离线批，只处理 `static/pai.mp4`，不是第 0 个随机种子或训练阶段。2026-07-20 回收确认其 exact-GMR 输出 finite/30 Hz/31-DoF 结构通过，但 ball contact/effectiveness 仍为 null，formal/schema2/training/hardware 全未授权；下一门是独立高球拍压题族，不是直接训练。 |
-| <a id="motion-m0"></a>`M0`（motion lateral-teacher batch） | 同一代新视频的四条横移老师离线结构批，按 left-1/left-2/right-1/right-2 顺序处理。四条是动作候选，不是四个随机 seed。2026-07-20 回收确认 exact-GMR 文件均存在且 finite/31-DoF 结构通过，但机器人 `stance_passed=0/4`，formal/schema2/training/hardware 全未授权；因此当前是 moving-teacher input-gate reject，不是可训练资产。 |
+| <a id="motion-m0"></a>`M0`（motion lateral-teacher batch） | 同一代新视频的四条横移老师离线结构批，按 left-1/left-2/right-1/right-2 顺序处理。四条是动作候选，不是四个随机 seed。2026-07-20 回收确认 exact-GMR 文件均存在且 finite/31-DoF 结构通过，但机器人 `stance_passed=0/4`，formal/schema2/training/hardware 全未授权；因此当前是 moving-teacher input-gate reject，不是可训练资产。2026-07-20 语义修订把这四条改称共享横移脚步模块（见 `configs/motion_role_catalog.json`），改名不改安全事实：`0/4` reject 仍然有效。 |
 | `High press` / 高点拍压 | 右手机器人用反手在较高击球点迎球，球拍向前且拍面朝下，把球压回台内的独立动作类型。它不是被动挡球或反手拉球，必须使用自己的高球来球考卷。 |
-| `Lateral locomotion teacher` / 横移下肢老师 | 只描述准备迈步、击球支撑和恢复三段的下半身/根节点参考动作，并以有符号横移距离为条件。它不是正手或反手挥拍本身，和上半身动作组合后仍须重新过全身安全与动力学门。 |
+| `Shared lateral footwork module` / 共享横移脚步模块（旧称 lateral locomotion teacher） | `motion/` 下四条 dang 素材的现行语义：只描述准备迈步、击球支撑和恢复三段的下半身/根节点参考动作，跨所有击球动作复用，只能由有效击球意图触发；不存在独立 locomotion 动作或独立 stop teacher。它不是正手或反手挥拍本身，和上半身动作组合后仍须重新过全身安全与动力学门；语义真源为 `configs/motion_role_catalog.json`，合同见 [stroke_footwork_composition](interfaces/stroke_footwork_composition.md)。 |
 | `Non-striking arm` / 非击球臂 | 当前右手 A3 动作库中的左臂。取消它的模仿 Reward 只表示允许左臂帮助平衡，不会关闭关节、力矩、自碰或安全停机约束。 |
 | `A0/A1 non-striking-arm pair` / A0/A1 非击球臂配对 | A0 是当前上半身模仿对照；A1 只从位置、姿态、线速度、角速度四条 body-imitation Reward 中删除左 shoulder/elbow/wrist，躯干、右击球臂、权重、题库、seed、预算和所有安全项不变。它不是恢复实验里的 A/B/C，也不是传感延迟 A1。 |
 | `SE(2)` / 平面刚体变换 | 在水平面内只做一次整体偏航旋转和 XY 平移；本项目的动作站位实体化把同一个 proper transform 原子地作用于整条 floating-root 轨迹，禁止镜像、Z、尺度、逐帧、关节或时间编辑。 |
