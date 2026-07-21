@@ -36,7 +36,7 @@ source:
   # 人话：复用 push 波的 checkout；qbar 全关节 barrier wiring 由并行 agent 落盘、
   # 主控合并后才有最终 40-hex commit。占位符存在时渲染器拒绝出任何 SSH 命令
   # （--plan/--checklist 不受影响）。
-  commit: "PENDING_EXACT_COMMIT"
+  commit: "4624c824c7f7ddd32ed86e35780c917ce30b18cb"
   worktree_relative: hope_training/whole_body_tracking
   python: /workspace/hope_isaac_venv/bin/python
   setup_relative: setup_train_env.sh
@@ -367,7 +367,7 @@ mechanisms:
 # 后才把 qbar_wiring_confirmed 翻 true。false 时渲染器拒绝出任何 qbar 臂命令
 # （fail-closed），其余六臂不受影响。
 qbar_contract:
-  qbar_wiring_confirmed: false
+  qbar_wiring_confirmed: true
   expected_cli_keys:
     - task.rewards.qdes_limit_barrier_weight
     - task.rewards.qdes_limit_barrier_margin

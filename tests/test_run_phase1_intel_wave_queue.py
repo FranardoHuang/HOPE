@@ -579,10 +579,11 @@ def _placeholder_path(tmp_path):
     return _write_yaml(tmp_path, value)
 
 
-def test_checked_in_commit_is_placeholder():
-    # 出厂即占位：qbar wiring 合并前不允许携带任何可渲染的 40-hex。
+def test_checked_in_commit_is_exact_40_hex():
+    # 已冻结：qbar wiring 已合并、闸门已开；占位语义由 tmp fixture 继续覆盖。
+    import re as _re
     queue = Q.load_queue(QUEUE)
-    assert queue["source"]["commit"] == "PENDING_EXACT_COMMIT"
+    assert _re.fullmatch(r"[0-9a-f]{40}", queue["source"]["commit"])
     assert queue["source"]["checkout"] == "/workspace/codexschema/nohope_push_20260721"
 
 
