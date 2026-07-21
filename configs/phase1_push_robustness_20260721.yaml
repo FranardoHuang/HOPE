@@ -32,7 +32,7 @@ source:
   identity_mode: clean_detached_exact_commit
   # 人话：task.push.* wiring 由并行 agent 落盘，主控合并后才有最终 40-hex commit；
   # 占位符存在时渲染器拒绝出任何 SSH 命令（--plan/--checklist 不受影响）。
-  commit: "08ca8e83c34a20f234487ba52b36fafbee8554e3"
+  commit: "4624c824c7f7ddd32ed86e35780c917ce30b18cb"
   worktree_relative: hope_training/whole_body_tracking
   python: /workspace/hope_isaac_venv/bin/python
   setup_relative: setup_train_env.sh
