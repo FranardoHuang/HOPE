@@ -166,11 +166,11 @@ SPEED_SCALE_SPDMIX = "task.motion.speed_scale_range=[0.8,1.2]"
 # agent 落盘，主控核对远端 train.py 白名单一致后才翻 qbar_wiring_confirmed。
 EXPECTED_QBAR_EXTRA = [
     "++task.rewards.qdes_limit_barrier_weight=-0.65",
-    "++task.rewards.qdes_limit_barrier_margin=0.08",
+    "++task.rewards.qdes_limit_barrier_margin_frac=0.08",
 ]
 QBAR_CLI_KEYS = [
     "task.rewards.qdes_limit_barrier_weight",
-    "task.rewards.qdes_limit_barrier_margin",
+    "task.rewards.qdes_limit_barrier_margin_frac",
 ]
 QBAR_WEIGHT = -0.65
 QBAR_MARGIN = 0.08
@@ -541,7 +541,7 @@ def _validate_mechanism(name: str, mechanism: dict[str, Any]) -> None:
     if name == "qbar":
         weight = _override_value(extra, "task.rewards.qdes_limit_barrier_weight", label)
         barrier_margin = _override_value(
-            extra, "task.rewards.qdes_limit_barrier_margin", label
+            extra, "task.rewards.qdes_limit_barrier_margin_frac", label
         )
         if weight != QBAR_WEIGHT or barrier_margin != QBAR_MARGIN:
             raise QueueError(
@@ -804,7 +804,7 @@ def _validate_queue(queue: dict[str, Any]) -> dict[str, Any]:
         "task.rewards.lower_body_stability_bundle_weight",
         "task.rewards.lower_body_pose_imitation_weight",
         "task.rewards.qdes_limit_barrier_weight",
-        "task.rewards.qdes_limit_barrier_margin",
+        "task.rewards.qdes_limit_barrier_margin_frac",
         "checkpoint_path", "run_name", "seed", "num_envs", "max_iterations",
         "algo.runner.save_interval", "algo.runner.num_steps_per_env", "device",
         "task.rewards.racket_position_weight",
@@ -1125,7 +1125,7 @@ def cmd_checklist(queue: Mapping[str, Any]) -> str:
         "HEAD == source.commit（clean detached exact commit）。",
         "2. qbar 两臂加检：grep 远端 checkout 在 exact commit 上的 train.py，"
         "确认 qdes_limit_barrier 白名单键逐字等于 "
-        "task.rewards.qdes_limit_barrier_weight / task.rewards.qdes_limit_barrier_margin"
+        "task.rewards.qdes_limit_barrier_weight / task.rewards.qdes_limit_barrier_margin_frac"
         "（本地工作树冻结时 grep 无此 wiring，故 qbar_contract.qbar_wiring_confirmed="
         "false 锁死 qbar 渲染；主控核对一致后才翻 true，其余六臂不受影响；键名不同"
         "必须先停下重议再渲染，缺键则 boot 即 fail-loud）。",

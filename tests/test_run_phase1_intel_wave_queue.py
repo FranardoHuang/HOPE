@@ -484,7 +484,7 @@ def test_qbar_extra_overrides_exact_verbatim():
     queue = Q.load_queue(QUEUE)
     assert queue["mechanisms"]["intel"]["qbar"]["extra_overrides"] == [
         "++task.rewards.qdes_limit_barrier_weight=-0.65",
-        "++task.rewards.qdes_limit_barrier_margin=0.08",
+        "++task.rewards.qdes_limit_barrier_margin_frac=0.08",
     ]
     for level in ("spdmix", "hstrong", "fullbody"):
         assert queue["mechanisms"]["intel"][level]["extra_overrides"] == []
@@ -510,11 +510,11 @@ def test_qbar_arms_single_variable_barrier_keys(tmp_path):
             )
             if job["intel"] == "qbar":
                 assert barrier == [
-                    "task.rewards.qdes_limit_barrier_margin",
+                    "task.rewards.qdes_limit_barrier_margin_frac",
                     "task.rewards.qdes_limit_barrier_weight",
                 ]
                 assert compiled["task.rewards.qdes_limit_barrier_weight"] == "-0.65"
-                assert compiled["task.rewards.qdes_limit_barrier_margin"] == "0.08"
+                assert compiled["task.rewards.qdes_limit_barrier_margin_frac"] == "0.08"
             else:
                 assert barrier == []
 
@@ -535,7 +535,7 @@ def test_qbar_contract_frozen(tmp_path):
     queue = Q.load_queue(QUEUE)
     assert queue["qbar_contract"]["expected_cli_keys"] == [
         "task.rewards.qdes_limit_barrier_weight",
-        "task.rewards.qdes_limit_barrier_margin",
+        "task.rewards.qdes_limit_barrier_margin_frac",
     ]
     assert isinstance(queue["qbar_contract"]["qbar_wiring_confirmed"], bool)
     value = _raw()
@@ -567,7 +567,7 @@ def test_qbar_render_locked_until_wiring_confirmed(tmp_path):
     queue = _load(tmp_path, _rendered_qbar_open())
     command = Q.render_command(queue, _job(queue, "w_qbar"), "science", "pod1", 0)
     assert "task.rewards.qdes_limit_barrier_weight=-0.65" in command
-    assert "task.rewards.qdes_limit_barrier_margin=0.08" in command
+    assert "task.rewards.qdes_limit_barrier_margin_frac=0.08" in command
 
 
 # ---------------------------------------------------------------- commit gate
@@ -761,7 +761,7 @@ def test_push_key_smuggled_into_extra_rejected(tmp_path):
     value = _raw()
     value["mechanisms"]["intel"]["qbar"]["extra_overrides"] = [
         "++task.rewards.qdes_limit_barrier_weight=-0.65",
-        "++task.rewards.qdes_limit_barrier_margin=0.08",
+        "++task.rewards.qdes_limit_barrier_margin_frac=0.08",
         "++task.push.enable=true",
     ]
     with pytest.raises(Q.QueueError):

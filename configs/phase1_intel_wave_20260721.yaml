@@ -359,7 +359,7 @@ mechanisms:
         - ++task.rewards.lower_body_pose_imitation_support_post_s=0.4
       extra_overrides:
         - ++task.rewards.qdes_limit_barrier_weight=-0.65
-        - ++task.rewards.qdes_limit_barrier_margin=0.08
+        - ++task.rewards.qdes_limit_barrier_margin_frac=0.08
 
 # 人话：qbar 渲染闸门。qbar 的 train.py wiring 是并行作业，本 yaml 冻结时本地
 # 工作树 grep 无 qdes_limit_barrier——键名按任务书写死如下。主控合并 wiring、
@@ -370,7 +370,7 @@ qbar_contract:
   qbar_wiring_confirmed: true
   expected_cli_keys:
     - task.rewards.qdes_limit_barrier_weight
-    - task.rewards.qdes_limit_barrier_margin
+    - task.rewards.qdes_limit_barrier_margin_frac
   wiring_note: >-
     人话：全关节（31 关节全部、无 top-k 挑选）qdes 限位 barrier：q_des 距软限位
     不足 margin（0.08 rad）时按有界 tail 罚，逐关节求和不平均（Franco：mean 是
