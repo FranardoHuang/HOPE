@@ -35,6 +35,24 @@ unmodified except for documentation links.
 
 ---
 
+## motion_capture_tracking (IMRCLab)
+
+- Location: `hope_ws/src/motion_capture_tracking/`, `hope_ws/src/motion_capture_tracking_interfaces/`
+- License: MIT
+- Copyright: Copyright (c) 2021 Wolfgang Hönig (submodules: (c) 2016 USC-ACTLab, (c) 2014 whoenig)
+- Origin: OptiTrack/NatNet motion-capture driver for ROS 2
+  (`IMRCLab/motion_capture_tracking`, v1.0.9), with its `libmotioncapture` and
+  `librigidbodytracker` submodules materialized in-tree.
+
+The MIT license text is retained in `hope_ws/src/motion_capture_tracking/LICENSE` (and in
+`deps/libmotioncapture/LICENSE` / `deps/librigidbodytracker/LICENSE`). This package is vendored
+so the planner can be brought up against an OptiTrack/Motive rig via the open-source NatNet
+depacketizer. Local modifications: non-OptiTrack vendor SDK trees removed, non-OptiTrack
+backends disabled, and NatNet unicast/model-definition fixes applied — the complete
+provenance and patch list is `hope_ws/src/motion_capture_tracking/PIN.md`.
+
+---
+
 ## AimRT MuJoCo simulation
 
 - Location: `a3_deploy/A3_MuJoCo_Sim/aimrt_mujoco_sim/`

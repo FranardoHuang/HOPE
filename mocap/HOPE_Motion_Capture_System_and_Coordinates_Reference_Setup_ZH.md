@@ -1,17 +1,18 @@
 # HOPE 乒乓球竞技场动作捕捉系统参考设计
 
-**v0.6** — 2026-07-20
+**v0.7** — 2026-07-21
 
-> **存档参考文档。** 本文档早于当前的 HOPE 技术栈,保留用于场地搭建背景与技术沿革。
-> 现行的坐标系与话题契约以 [`mocap/README.md`](README.md) 为准;仓库内实际使用的驱动为
-> vendored 的 [`hope_ws/src/vrpn_mocap/`](../hope_ws/src/vrpn_mocap)。索引见
+> **场地参考文档。** 本文档记录参考场地配置与仓库内已实现的传输路径。
+> 现行的坐标系与话题契约以 [`mocap/README.md`](README.md) 为准；仓库内实际使用的路径为
+> OptiTrack/NatNet 的 `motion_capture_tracking` + `optitrack_mct_relay`，以及供青瞳使用的
+> vendored `vrpn_mocap`。索引见
 > [`REFERENCE_DOCS.md`](../REFERENCE_DOCS.md)。
 
 ---
 
 ## 1  兼容的动作捕捉系统
 
-本参考设计文档构建了一套兼容多种主流动作捕捉系统的参考方案，重点覆盖 **OptiTrack**、**Vicon** 与 **青瞳视觉（CHINGMU）** 三大常用品牌，并预期可进一步兼容 `motion_capture_tracking` 库所支持的其他基于标记点（marker）的动捕品牌，包括 Qualisys、NOKOV、VRPN、FZMotion 以及 Motion Analysis。各品牌的相机硬件与厂商软件不尽相同——例如 OptiTrack 配合 Motive 与 NatNet 协议、Vicon 配合 Vicon Tracker、青瞳配合 CMTracker/CMAvatar 并支持 VRPN、TrackD、DTrack、OpenVR 及原生 LiveStream 等协议，且各家均提供 C/C++、Python、ROS 等 SDK——但本设计将它们统一到同一套 ROS 2 REP 103 坐标系与 `/poses` + `/tf` 话题接口之下。比赛期间，场地流式传输具名 **6 自由度刚体** `Ball`、`P1` 与 `P2`（仓库自带的 bringup 默认只把 `Ball` 聚合进 `/poses`，因此默认 `/poses` 数组只有一个位姿）。第四个资产 `Table` 仅用于场地搭建/标定，且仅出现在训练数据录制中——比赛期间**不**跟踪、也**不**上报。在当前参考路径中，**OptiTrack 与青瞳都通过 VRPN** 将这些刚体流式传入同一个 vendored ROS 2 客户端；统一路径见第 6 节（OptiTrack 专属内容见第 6.2 节，青瞳见第 6.3 节）。
+本参考设计文档构建了一套兼容多种主流动作捕捉系统的参考方案，重点覆盖 **OptiTrack**、**Vicon** 与 **青瞳视觉（CHINGMU）** 三大常用品牌，并预期可进一步兼容 `motion_capture_tracking` 库所支持的其他基于标记点（marker）的动捕品牌，包括 Qualisys、NOKOV、VRPN、FZMotion 以及 Motion Analysis。各品牌的相机硬件与厂商软件不尽相同——例如 OptiTrack 配合 Motive 与 NatNet 协议、Vicon 配合 Vicon Tracker、青瞳配合 CMTracker/CMAvatar 并支持 VRPN、TrackD、DTrack、OpenVR 及原生 LiveStream 等协议，且各家均提供 C/C++、Python、ROS 等 SDK——但本设计将它们统一到同一套 ROS 2 REP 103 坐标系与 `/poses` + `/tf` 话题接口之下。比赛期间，场地流式传输具名 **6 自由度刚体** `Ball`、`P1` 与 `P2`；规划器要求 `/poses` 的索引 0 为 `Ball`，默认 VRPN bringup 只聚合该球位姿。第四个资产 `Table` 仅用于场地搭建/标定，且仅出现在训练数据录制中——比赛期间**不**跟踪、也**不**上报。仓库内两条路径按传输协议区分：**OptiTrack/Motive 使用 NatNet**，经 `motion_capture_tracking` 与 `optitrack_mct_relay`；**青瞳使用 VRPN**，经 `vrpn_mocap` 与 `pose_to_posearray`。两者最终生成同一 HOPE 规划器契约；细节见第 6 节。
 
 对于 HOPE 参考设计，最低规格为：
 
@@ -56,7 +57,7 @@
 OptiTrack Motive 默认采用 **Y 轴向上** 的坐标系，这与 ROS 2 的 Z 轴向上约定不兼容。修正方法：
 
 1. 在 Motive 中，导航至 **Edit → Settings → Streaming**（或打开 Data Streaming 面板）。
-2. 在 **Advanced Network Options** 下，将 **Up Axis** 由 “Y Axis” 改为 **“Z Axis”**。**注意：** 该设置是否同样作用于 Motive 的 **VRPN** 流（当前 HOPE 参考路径，第 6.2 节），OptiTrack 文档并未明确说明，且可能因 Motive 版本与安装而异——实践中常见 VRPN 输出为 Y-up，但**不得**假定。应在经测量的球台地标处实测 VRPN 流的实际坐标系（第 6.5 节），**仅当**验证为 Y-up 时才应用第 6.4 节的完整位姿转换（所需工程实现见第 6.2 节）。
+2. 在 **Advanced Network Options** 下，将 **Up Axis** 由 “Y Axis” 改为 **“Z Axis”**。该设置是仓库内 OptiTrack **NatNet** 路径（第 6.2 节）的必需条件，使输出直接符合 ROS 2 REP 103。比赛前仍须在经测量的球台地标处验证（第 6.5 节）：若源坐标系出现反向、偏移或其他不符合约定的情况，应在 HOPE relay 上游加入**完整位姿**变换，绝不可逐分量修改 pitch/yaw/roll。
 3. 调整标定地面（ground plane）的朝向，使标定方块（calibration square）的长边对齐期望的 X 轴方向（朝向 P2）。这在标定杆（wand）流程中设定了世界坐标系的朝向。
 
 Vicon Tracker 默认为 Z 轴向上，通常无需进行轴向修正。但应在地面标定过程中确认 X 轴沿球台长度方向指向 P2。
@@ -239,7 +240,7 @@ OptiTrack Motive 与青瞳 CMTracker 现在均将乒乓球解算为具名的**�
 
 ### 5.1  球体准备与资产定义
 
-- 使用厂商认可的刚体球处理方案和标记图案/星座。不得根据已淘汰的单点方案自行推断可用的标记数量或布局。
+- 使用厂商认可的刚体球处理方案和标记图案/星座。**经验证的处理方式：在标准乒乓球上加贴回射标记点（marker dots），在 OptiTrack 与青瞳上均可实现稳定的 6 自由度刚体跟踪。** 不得根据已淘汰的单点方案自行推断可用的标记数量或布局。
 - 尽量减小对球体质量、质心、直径、表面摩擦和空气动力学的影响，并按竞赛规则验证处理后的球。
 - 图案应非对称，并在整个相机空间内与 `Table` 和机器人图案保持可区分。
 - 在 Motive 或 CMTracker 中设置稳定的刚体资产名称和 ID（建议逻辑名称：`Ball`）。话题名和发送方名称区分大小写。
@@ -281,53 +282,50 @@ geometry_msgs/Pose
 
 厂商软件负责相机重建与刚体解算。ROS 2 桥接接收厂商原生数据流，并将每个已解算位姿映射为标准 ROS 消息。位置单位为米；姿态自厂商流至 ROS 2 全程保持四元数。
 
-### 6.1  已确认的传输路径（两家厂商均走 VRPN）
+### 6.1  已确认的传输路径
 
-两家厂商都通过 **VRPN** 流式传输，进入同一个 vendored ROS 2 客户端、经同一个适配器、落到同一个规划器话题——一条统一路径：
+规划器契约统一，但底层协议有意区分：**OptiTrack 使用 NatNet；青瞳使用 VRPN。** 两条路径都保留厂商解算的坐标与四元数，最终在 `/poses` 发布 `geometry_msgs/PoseArray`，且索引 0 为 `Ball`。
 
 ```text
-OptiTrack 相机 → Motive（VRPN Streaming Engine）：Ball/P1/P2 刚体 ──────┐
-                                                                        │ VRPN tracker
-青瞳相机 → CMTracker/MCServer：Ball/P1/P2 刚体 ─────────────────────────┤ reports
-                                                                        ▼
-  vendored vrpn_mocap → /vrpn_mocap/<sender>/pose_id_<N>（geometry_msgs/PoseStamped）
-    → hope_bringup/pose_to_posearray → /poses（geometry_msgs/PoseArray）
+OptiTrack 相机 → Motive → NatNet UDP → motion_capture_tracking_node
+                                      → /optitrack/poses (NamedPoseArray)
+                                      → optitrack_mct_relay → /poses
+
+青瞳相机 → CMTracker/MCServer → VRPN → vrpn_mocap
+                                     → /vrpn_mocap/<sender>/pose_id_<N> (PoseStamped)
+                                     → pose_to_posearray → /poses
 ```
 
 | 系统 | 厂商载荷 | ROS 2 桥接 | ROS 2 结果 |
 |------|----------|------------|------------|
-| **OptiTrack** | 每个 Motive 刚体资产一条 VRPN tracker 报告（VRPN Streaming Engine，**仅限刚体**）：发送方名称、传感器索引、位置向量与四元数 | vendored `vrpn_mocap` | `/vrpn_mocap/<sender>/pose_id_<sensor_id>`，类型 `geometry_msgs/PoseStamped`（`multi_sensor: true`）；适配器将完整位姿复制到 `/poses` |
-| **青瞳** | 具名 CMTracker 刚体的 VRPN tracker 报告：发送方名称、传感器索引、位置向量与四元数 | vendored `vrpn_mocap` | 与 OptiTrack 行完全相同——同一客户端、同一话题、同一适配器 |
+| **OptiTrack / Motive** | `Ball`、`P1`、`P2` 的 NatNet 刚体帧：资产名、位置向量与四元数 | vendored `motion_capture_tracking`（命名空间 `/optitrack`），再经 `optitrack_mct_relay` | `/optitrack/poses` 为 `NamedPoseArray`（`header` 加 `{string name, geometry_msgs/Pose pose}` 条目）；relay 产生 HOPE `/poses`、`/ball/point`、可选的 `/P1/pose` 与 `/P2/pose`，以及 TF |
+| **青瞳** | 具名 CMTracker 刚体的 VRPN tracker 报告：发送方名称、传感器索引、位置向量与四元数 | vendored `vrpn_mocap`，再经 `pose_to_posearray` | `/vrpn_mocap/<sender>/pose_id_<sensor_id>`，类型 `geometry_msgs/PoseStamped`；适配器将完整位姿复制到 `/poses` |
 
-这一点是线上格式的关键事实：`(pitch, yaw, roll)` 只是操作界面的表示方式，VRPN tracker 报告以四元数传输姿态，ROS 2 消息全程保留。适配器 `pose_to_posearray` 执行 `out.poses[i] = input.pose`，**不会**丢弃球体姿态。`PoseArray` 没有每个位姿的名称字段；应保持配置的输入顺序稳定（`Ball` 通常在 `ball_pose_index: 0`），需要名称时使用场次元数据（或可选的 `tf2` broadcaster）。
+`(pitch, yaw, roll)` 只是操作界面的表示方式。两条路径均以四元数传输并保留姿态。`PoseArray` 没有每个位姿的名称字段，因此 `Ball` 必须保持在首位；对象名保留在 OptiTrack 原始流或场次元数据中。OptiTrack 原始话题被刻意放在命名空间下：若将 `NamedPoseArray` 发布到裸 `/poses`，会与规划器的 `geometry_msgs/PoseArray` 发生 DDS 类型冲突。
 
-> **为什么不用 NatNet？** Motive 的 NatNet 流仍可用于诊断或其他消费者，但 HOPE 参考路径不使用它：基于 NatNet 的 ROS 2 桥接发布自定义消息类型（例如 `motion_capture_tracking` 的 `/poses` 是自定义 `NamedPoseArray`，而非本仓库规划器订阅的 `geometry_msgs/PoseArray`），若无额外转换节点无法接入本技术栈。VRPN 路径在两家厂商上都不需要此类转换。
+### 6.2  OptiTrack / NatNet 路径
 
-### 6.2  OptiTrack / VRPN 路径
-
-在 Motive 中将比赛资产 `Ball`、`P1`、`P2` 定义为刚体，设置各自的枢轴（`Ball` 在球心、`P1`/`P2` 在各机器人申报的 `base_link`），并在 Data Streaming 设置中启用 **VRPN Streaming Engine**。每个刚体将以其资产名称作为 VRPN tracker 对外提供。`Table` 资产仅在标定场次使用（第 2.3 节）——比赛流式传输前应停用或删除，确保不对外提供 `Table` tracker。
+在 Motive 中将比赛资产 `Ball`、`P1`、`P2` 定义为刚体，设置各自的枢轴（`Ball` 在球心、`P1`/`P2` 在各机器人申报的 `base_link`）。`Table` 资产仅在独立的搭建/标定或训练数据录制场次中使用（第 2.3 节）；比赛流式传输前应停用或省略。
 
 Motive 预期设置：
 
 | 设置 | 所需取值 | 备注 |
 |------|----------|------|
-| VRPN Streaming Engine | ✅ 启用 | 每个刚体按资产名称作为 VRPN tracker 提供 |
-| VRPN Broadcast Port | 3883（默认） | 需与 ROS 2 客户端的 `port` 参数匹配 |
-| 刚体 | 定义 `Ball`、`P1`、`P2`（比赛）；`Table` 仅限标定场次 | VRPN **仅传输刚体**——标记点与骨骼不经 VRPN 传输 |
-| Zero When Untracked | **禁用**（推荐） | 若启用，被遮挡资产会流式输出全零位姿，下游会看到球"瞬移"到原点。应让遮挡表现为丢帧，并在消费端拒绝过期/单位/零位姿（第 6.5 节）。 |
+| NatNet | ✅ 启用 | 仓库内 OptiTrack 后端的必需项；此路径不使用 Motive 的 VRPN Streaming Engine |
+| Up Axis | **Z** | 与 HOPE ROS 2 REP 103 世界坐标系一致；比赛前须在地标处验证 |
+| 传输方式 | 优先 Unicast | 客户端连接到 Motive PC；NatNet 与服务器协商流细节 |
+| 命令端口 | 通常为 UDP 1510 | vendored 驱动使用 NatNet 命令通道并从 Motive 获得数据端口信息；防火墙须允许协商后的 UDP 数据流量 |
+| 刚体 | 比赛为 `Ball`、`P1`、`P2`；`Table` 仅限标定 | 名称区分大小写，并原样传递至 relay |
+| 球 | 名为 `Ball` 的 6-DOF 刚体资产 | 枢轴设在几何球心；跟踪丢失时 `Ball` 条目消失，relay 暂停 `/poses`，不会重发旧球位姿 |
 
-两条 OptiTrack 专属注意事项：
-
-1. **坐标系转换取决于安装配置——启用前必须验证。** OptiTrack 文档将 *Up Axis* 描述为选择流式数据的向上轴，但并未明确说明其是否作用于 VRPN Streaming Engine；实践中常见 VRPN 输出无论该设置如何均为 Y-up，且行为可能因 Motive 版本而异。**不得**假定任一坐标系：将 `Ball` 资产放在经测量的球台地标处（第 6.5 节）读取流式坐标。**仅当**验证流为 Y-up 时才启用下述转换——对已是 Z-up 的流再施加 Rx(+90°) 会使每个位姿被双重旋转、悄然破坏整个世界坐标。**所需工程实现（本仓库未包含）：** 在 ROS 2 侧、VRPN 客户端与 `/poses` 之间增加一个坐标转换环节——可以作为 `pose_to_posearray` 类聚合步骤的可选项，也可以作为独立的小型中继节点（订阅各 `PoseStamped` 话题并转换后重发）。该环节须对每个样本恰好应用一次第 6.4 节的 Y-up → Z-up **完整位姿**变换：位置按 Rx(+90°) 旋转——`(x, y, z) → (x, −z, y)`——同时用同一固定旋转左乘姿态四元数（`q_R = Rx(+90°)`，按 `(x, y, z, w)` 顺序即 `(x=√½, y=0, z=0, w=√½)`），并保留原始时间戳与 `frame_id`。它必须按部署可开关（布尔参数，**默认关闭**）：Z-up 数据源——按第 2.2 节配置的青瞳，以及任何经验证 VRPN 输出为 Z-up 的 Motive 安装——都必须原样通过、不做转换。
-2. VRPN 不携带标记点数据，任何标记点级诊断需并行使用 NatNet；这不影响参考路径。
-
-随后运行与青瞳相同的 vendored 客户端，指向 Motive 主机：
+以 Motive PC 地址启动完整规划器路径：
 
 ```bash
-ros2 launch vrpn_mocap client.launch.yaml server:=MOTIVE_PC_IP port:=3883
+ros2 launch hope_bringup hope_bringup.launch.py \
+  mocap_backend:=optitrack mocap_server:=MOTIVE_PC_IP
 ```
 
-确认三个比赛资产均出现为 `/vrpn_mocap/<asset>/pose_id_0`，且完整的 `Ball` 位姿出现在配置的 `/poses` 索引处。`Table` 资产仅在搭建/标定时核验，比赛期间不得存在其 VRPN 话题。
+链路为 `Motive → motion_capture_tracking_node → /optitrack/poses → optitrack_mct_relay → /poses`。驱动每个相机帧发布一个 `NamedPoseArray`；relay 按 `config/optitrack_relay.yaml` 映射名称，仅在另行配置时缩放位置，并保留四元数。默认驱动配置使用 ROS 接收时间戳（`topics.header_time: ros`）。旧版 Motive VRPN 的 3883 端口不属于此连接。构建、启动和诊断细节见 [`docs/OPTITRACK.md`](../docs/OPTITRACK.md)。
 
 ### 6.3  青瞳 / VRPN 路径
 
@@ -365,32 +363,37 @@ ros2 launch vrpn_mocap client.launch.yaml server:=CHINGMU_SERVER_IP port:=3883
 
 ### 6.4  坐标与姿态转换
 
-两家厂商的输出都必须以第 2.1 节的标准 REP 103 Z 轴向上坐标系到达。CMTracker 可原生流式输出 Z-up（按第 2.2 节配置）；Motive VRPN 流的坐标系取决于安装，必须在地标处实测（第 6.2、6.5 节）——仅当验证为 Y-up 时才应用本节转换（所需工程实现见第 6.2 节的描述）。凡应用转换时，都必须变换**完整位姿**，而不仅仅是三个位置分量：
+两家厂商的输出都必须以第 2.1 节的标准 REP 103 Z 轴向上坐标系到达。将 Motive 的 NatNet 流和 CMTracker 的 VRPN 流配置为 Z-up（第 2.2 节），并在比赛前用地标验证。仓库内适配器不执行厂商专属的轴向旋转。若场地无法输出标准坐标系，应在 HOPE relay 上游加入一次明确的变换，并变换**完整位姿**，而不仅仅是三个位置分量：
 
 ```text
 p_HOPE = R_HOPE_FROM_MOCAP · p_mocap + t_HOPE_FROM_MOCAP
 R_HOPE_BODY = R_HOPE_FROM_MOCAP · R_mocap_body
 ```
 
-对常见的右手系 Y-up 到 HOPE Z-up 旋转，仅就平移而言映射为 `x_HOPE=x_mocap`、`y_HOPE=-z_mocap`、`z_HOPE=y_mocap`。姿态须用 `tf2` 或四元数/矩阵组合应用同一固定旋转。逐分量修改 pitch/yaw/roll 不是有效的一般位姿变换。
+对不符合约定的右手系 Y-up 源，平移可映射为 `x_HOPE=x_mocap`、`y_HOPE=-z_mocap`、`z_HOPE=y_mocap`。姿态须用 `tf2` 或四元数/矩阵组合应用同一固定旋转。逐分量修改 pitch/yaw/roll 不是有效的一般位姿变换。
 
 在信任任何转换之前，请在经测量的球台地标处核实源坐标系的手性与轴向。镜像的源坐标系需要按安装情况专门校正；不要根据厂商名称猜测。
 
 ### 6.5  ROS 2 验证清单
 
 ```bash
-ros2 topic list | grep -E 'poses|vrpn_mocap'
-ros2 topic echo /vrpn_mocap/Ball/pose_id_0 --once   # 两家厂商通用
-ros2 topic echo /poses --once                       # 规划器输入
+# OptiTrack / NatNet
+ros2 topic echo --once /optitrack/poses
+
+# 青瞳 / VRPN
+ros2 topic echo --once /vrpn_mocap/Ball/pose_id_0
+
+# 任一后端：规划器输入
+ros2 topic echo --once /poses
 ```
 
 确认以下各项：
 
 - `Ball`（以及流式传输时的 `P1`/`P2`）是彼此独立、稳定的刚体；遮挡后不发生资产 ID 互换。确认比赛期间**没有** `Table` 话题在流式传输。
 - `position` 单位为米，`orientation` 有限且为单位长度，Ball 枢轴位于几何球心。
-- 消息 `frame_id` 与轴向匹配 HOPE 世界坐标系。**每个厂商、每次安装在比赛前都必须做地标验证**：将 `Ball` 资产放在经测量的地标处（如球网中心线 `x = 1.37, y = −0.7625, z = 0.02`），确认流式坐标与第 2.1 节一致——以此决定 Y-up → Z-up 转换（第 6.2/6.4 节）应开还是关，并同时排查漏转换与双重旋转两类错误。
-- 遮挡应表现为**丢帧**，而非冻结或全零位姿：禁用 Motive 的 *Zero When Untracked*，并在消费端拒绝过期、单位或零范数位姿。
-- 在支持的情况下保留采集时间戳。若 `use_vrpn_timestamps: true`，用 NTP/PTP 同步动捕服务器与 ROS 主机；否则使用接收时间并测定其抖动。
+- 消息 `frame_id` 与轴向匹配 HOPE 世界坐标系。**每个厂商、每次安装在比赛前都必须做地标验证**：将 `Ball` 资产放在经测量的地标处（如球网中心线 `x = 1.37, y = −0.7625, z = 0.02`），确认流式坐标与第 2.1 节一致。这可发现错误的 Up Axis、原点偏移、镜像坐标系或意外的重复变换。
+- 遮挡应产生**丢帧**，而非冻结或全零位姿。NatNet 路径中，缺少 `Ball` 条目会使 relay 暂停 `/poses`；消费者不得用旧球位姿填充。
+- 仓库默认的 NatNet 驱动（`topics.header_time: ros`）和 VRPN 客户端均使用接收时间。若选用 `topics.header_time: camera` 或 `use_vrpn_timestamps: true`，须使用 NTP/PTP 同步动捕服务器与 ROS 主机。
 - `/poses` 索引顺序与规划器配置一致。当前无旋转规划器读取 Ball 位置，完整四元数仍保留在消息与录包中。
 
 ---
@@ -419,7 +422,7 @@ ros2 topic echo /poses --once                       # 规划器输入
                                      非由动捕测量）
 ```
 
-规划器完全在第 2.1 节定义的 HOPE 标准世界坐标系中运行。OptiTrack 与青瞳桥接在完成配置或第 6.4 节的转换后，交付完整刚体位姿；当前规划器使用 Ball 的平移，四元数仍保留在 ROS 2 消息与录包中。
+规划器完全在第 2.1 节定义的 HOPE 标准世界坐标系中运行。OptiTrack/NatNet 与青瞳/VRPN 路径在完成配置或第 6.4 节的转换后，交付完整刚体位姿；当前规划器使用 Ball 的平移，四元数仍保留在 ROS 2 消息与录包中。
 
 ---
 
@@ -442,7 +445,7 @@ HOPE 动作捕捉参考系统定义四个具名刚体资产；比赛期间仅流
 
 - Su, Z., Zhang, B., Rahmanian, N., Gao, Y., Liao, Q., Regan, C., Sreenath, K., & Sastry, S. S. (2025). HITTER: A HumanoId Table TEnnis Robot via Hierarchical Planning and Learning. *arXiv:2508.21043v2*.
 - HITTER 项目主页：https://humanoid-table-tennis.github.io/
-- motion_capture_tracking（基于 NatNet 的替代方案；发布自定义 `NamedPoseArray`，HOPE 参考路径不使用）：https://github.com/IMRCLab/motion_capture_tracking
+- motion_capture_tracking（已 vendored 进仓库，作为受支持的 OptiTrack/NatNet 后端——`hope_ws/src/motion_capture_tracking/`，精确 pin 与本地补丁见其 PIN.md；发布 `NamedPoseArray`，由 `optitrack_mct_relay` 桥接到 `/poses` 契约；上游：https://github.com/IMRCLab/motion_capture_tracking）
 - OptiTrack Motive VRPN Streaming Engine（仅限刚体；默认端口 3883）：https://docs.optitrack.com/motive-ui-panes/settings/settings-streaming
 - VRPN 协议：https://github.com/vrpn/vrpn
 - OptiTrack Motive 流式设置：https://docs.optitrack.com/v3.0/motive-ui-panes/settings/settings-streaming

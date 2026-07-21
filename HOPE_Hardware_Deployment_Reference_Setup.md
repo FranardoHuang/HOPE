@@ -202,7 +202,7 @@ The MuJoCo simulation should show the G1 model performing the trained swing moti
 2. ☐ 3D-printed racket mount is securely attached to the right wrist link
 3. ☐ Racket is mounted and the `T_mount` transform matches the simulation model (see WBC Training doc Section 2.8)
 4. ☐ Table/PPT calibration has been verified; the motion-capture system is tracking the robot base_link (P1) and ball
-5. ☐ `motion_capture_tracking` node is publishing `/P1/pose` and `/ball/point`
+5. ☐ The mocap bridge (`optitrack_hope_bridge.launch.py`: vendored `motion_capture_tracking` driver + `optitrack_mct_relay`) is publishing `/P1/pose` and `/ball/point`
 6. ☐ HOPE planner node is running and publishing `/racket/command`
 7. ☐ E-stop (Unitree RC joystick button B) has been tested
 8. ☐ All personnel are at least 2 m from the robot's arm reach envelope
@@ -387,9 +387,9 @@ source install/setup.bash
 The full HOPE system requires multiple nodes launched in a specific order:
 
 ```bash
-# Terminal 1: Motion capture bridge
-ros2 launch motion_capture_tracking optitrack.launch.py \
-    server_ip:=192.168.1.100
+# Terminal 1: Motion capture bridge (vendored driver + HOPE relay)
+ros2 launch hope_bringup optitrack_hope_bridge.launch.py \
+    hostname:=192.168.1.100
 
 # Terminal 2: HOPE planner
 ros2 run hope_planner hope_planner_node \
@@ -408,9 +408,9 @@ ros2 topic hz /ball/point /P1/pose /racket/command
 
 | Topic | Type | Publisher | Subscriber(s) | Rate |
 |-------|------|-----------|---------------|------|
-| `/ball/point` | `geometry_msgs/PointStamped` | `motion_capture_tracking` | HOPE Planner | 360 Hz |
-| `/P1/pose` | `geometry_msgs/PoseStamped` | `motion_capture_tracking` | HOPE Planner, WBC Controller | 360 Hz |
-| `/P2/pose` | `geometry_msgs/PoseStamped` | `motion_capture_tracking` | (opponent's controller) | 360 Hz |
+| `/ball/point` | `geometry_msgs/PointStamped` | `optitrack_mct_relay` | HOPE Planner | 360 Hz |
+| `/P1/pose` | `geometry_msgs/PoseStamped` | `optitrack_mct_relay` | HOPE Planner, WBC Controller | 360 Hz |
+| `/P2/pose` | `geometry_msgs/PoseStamped` | `optitrack_mct_relay` | (opponent's controller) | 360 Hz |
 | `/racket/command` | `hope_msgs/RacketCommand` | HOPE Planner | WBC Controller | 50 Hz |
 | `/joint_states` | `sensor_msgs/JointState` | Robot driver | WBC Controller | 500 Hz |
 

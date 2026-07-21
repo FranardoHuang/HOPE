@@ -115,7 +115,13 @@ class PlannerConfig:
     # State estimation
     poly_order: int = 2           # polynomial fit order
     fit_window: int = 31          # number of position samples in the velocity fit
-    mocap_hz: float = 300.0       # nominal motion-capture sample rate
+                                  # (~103 ms at a 300 Hz rig). COUPLED to the mocap rate:
+                                  # keep the window >= ~100 ms of samples, i.e.
+                                  # round(31 * rate / 300) — e.g. an OptiTrack rig at
+                                  # 360 Hz -> 37. Also a ROS parameter of hope_planner_node.
+    mocap_hz: float = 300.0       # documentation constant (not consumed anywhere): nominal
+                                  # motion-capture sample rate. The actual rate is a property
+                                  # of the rig; the rate-coupled knob is fit_window above.
 
     # Trajectory prediction
     dt_integrate: float = 0.001   # integration time step (s)
