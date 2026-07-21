@@ -45,3 +45,4 @@ hope_training/whole_body_tracking/setup_train_env.local.sh
 *~
 .idea/
 .vscode/
+_to_delete/
