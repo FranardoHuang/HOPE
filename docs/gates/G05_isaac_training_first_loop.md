@@ -1144,8 +1144,13 @@ without a compatibility pass.
 
 ## Next Steps
 
-1. Hand the best exact fresh `SZ model_2000` checkpoint and its 179-D contract to G06's native
-   MuJoCo training/fine-tune P0; do not substitute another Isaac-only sweep for that handoff.
+1. The fresh `SZ` line is closed as completed/rejected: four-seed stability failed at both
+   milestones (model-2000 `83/100/100/20`, model-4000 `50/88/98/0` with 21 physical root falls on
+   seed 4), so no fresh SZ checkpoint is handed to G06. The next handoff path is the
+   balance-temporal 24-cell matrix winners (diagnostic lineage; see
+   `docs/experiments/2026-07/EXP-P1-BALANCE-TEMPORAL-MATRIX-20260720.md`), with the winning
+   mechanism then re-run for rehabilitation on the exact-lineage chain (the qdot treatment
+   `model_1000` family: fresh lineage=1, exact schema-3 hard contract).
 2. Re-run the unified `HOPEPingPongDeployParity` smoke and then the real unified forehand+backhand training run under the post-merge uniform-target defaults, from the corrected local `_hopex.npz` clips (`motion_file=`/`motion_file_2=`) or after uploading future verified registry artifacts and recording their aliases. Do not use the v5 R15 clips as product defaults.
 3. Set measurable acceptance metrics for first usable baseline: fall rate, racket error at strike, physical recovery after clip wrap, and command latency assumptions.
 4. Record exact local motion paths or registry artifacts, WandB run IDs when used, checkpoint paths, and ONNX export paths; evaluate the trained checkpoint/ONNX from the W&B run and record exact quality metrics and failure modes here.

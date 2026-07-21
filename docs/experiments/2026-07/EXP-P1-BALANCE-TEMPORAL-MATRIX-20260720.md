@@ -1,9 +1,8 @@
 # EXP-P1-BALANCE-TEMPORAL-MATRIX-20260720 — 时序平滑与挥拍后稳定机制是否正交（24 格矩阵）
 
-- 状态：`preregistered`
-- 运行态：`E1 source/prereg only；NO-LAUNCH`。24 格均未发射；命令渲染被 queue config 的占位
-  `source.commit=PENDING_EXACT_COMMIT` 锁死（fail-closed），发射前还须过 `--checklist`
-  依赖核对单与 `origin/main` NOW 认领。
+- 状态：`running/closing`
+- 运行态：24/24 已于 2026-07-20 发射；筛选终点前移到 +4000 后收口进行中（见下文预算修订与
+  运行表）。动态清退与逐格终档以两 pod 的 `scheduling_ledger_20260720.jsonl` 为准。
 - 阶段/轴：Phase 1 / 单拍后的平衡恢复：时序平滑（T 轴）× 挥拍后稳定机制（S 轴）
 - 集成小目标：在高摔倒 parent 上降摔、在稳定 parent 上不伤击球与回台，并回答两轴是否正交
 - 人类负责人：Franco
@@ -257,30 +256,39 @@ watchdog 仍只对已绑定的 exact PGID 发信号；超时放宽不改变 fail
 - **S1 实现落盘晚于本预注册**：S1 exact 公式以实现+单测为机器真源，语义与本文不符时必须先
   修订本记录再渲染命令（见 S 轴语义）。
 
-## 运行表
+## 运行表（实况汇总，2026-07-22 按两 pod ledger 只读核对）
 
-| 运行 | 状态 | Checkpoint/seed | 证据 | 结果产物 | 有效性说明 |
-| --- | --- | --- | --- | --- | --- |
-| 24 格（上表 #1–#24） | `preregistered / not launched` | W/V `model_6700` / seed3 | E1 source | 无 | 占位 commit 解锁、`--checklist` 全过、`origin/main` 认领齐全前不得执行任何 SSH 命令；probe 未过的格不得发 science |
+24/24 格已于 2026-07-20 全部发射（`v_h_s2` 前两次冷启动冻结封格后，第三次尝试 `_r3` 已实际
+上卡）。精确逐格台账在两 pod 的
+`/workspace/codexschema/phase1_balance_temporal_matrix_20260720d/scheduling_ledger_20260720.jsonl`，
+本表只是人话汇总：
+
+| 组（人话） | 格 | 状态 | 终档/最后 checkpoint（ledger 实录） |
+| --- | --- | --- | --- |
+| +4000 已收口·S0 行 | `w_h_s0` / `v_c_s0` / `v_h_s0` / `w_c_s0` | 到线收口（`v_h_s0` 判卷档 `model_10700`；`w_c_s0` 经宿主机重启续训后收口） | `model_10700` / `model_10700` / `model_10900` / `model_13300` |
+| +4000 已收口·W×C 机制格 | `w_c_s1` / `w_c_s2` / `w_c_s3` | 到线收口；2026-07-21T16:15Z 起又按 `continue_to_25k` 续训（目标 absolute `25000`，`w_c_s0` 同批续训） | `model_11200` / `model_11100` / `model_11400` |
+| +4000 已收口·V×C 机制格 | `v_c_s1` / `v_c_s2` / `v_c_s3` | 到线收口 | `model_13100` / `model_13000` / `model_13100` |
+| 动态清退·永久停 | `{w,v}_n_{s1,s2,s3}` 六格 | 容量让位（N 交互信息价值最低），非科学负例 | `model_7300`–`model_7500` |
+| 动态清退·暂停待续 | `{w,v}_n_s0` 与 `{w,v}_h_{s1,s2,s3}` 八格 | 槽位释放后从最后 checkpoint 续训 | `model_6900`–`model_7800` |
+
+基础设施事件（均不构成机制证据）：`w_c_s2` 一次 malloc 重发（`_r2`）；Pod1 宿主机
+2026-07-21T04:35Z 重启后 W×C 四格从各自最新 checkpoint 手动续训（`_res1_rN`）；`w_c_s1` 续训
+boot 阶段一次 malloc refire。
 
 ## 分动作成绩表
 
-| 动作 | 一次挥拍物理不摔 | 一次挥拍击球 | 一次挥拍上台 | 连续挥拍物理不摔 | 连续挥拍击球 | 连续挥拍上台 |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 正手 | 未测 | 未测 | 未测 | 未测 | 未测 | 未测 |
-| 反手 | 未测 | 未测 | 未测 | 未测 | 未测 | 未测 |
+判卷进行中：已收口格的终档 checkpoint 正在做同卷判读，成绩见 `judge_results_20260722.md`；
+判卷完成前本表不填数。
 
 “物理不摔”将使用 `physical_fall_count`（all-attempt 分母）。本矩阵是 single-swing continuation
 诊断，不声称 T0/T1/T2 连续恢复；即使 Isaac fall 改善，仍须独立 vendor MuJoCo/Gate3 行为卷。
 
 ## 决定
 
-- 决定：`pending`（preregistered，未发射）
+- 决定：`pending`（已发射，+4000 收口与判卷进行中）
 - 是否已纳入当前 setting：`no`
-- 局限/下一个 gate：queue config/renderer 与 S1 实现合入最新 `origin/main`，把占位
-  `source.commit` 换成冻结 40-hex；`origin/main:docs/NOW.md` 完成 owner/executor/branch/queue id
-  认领；`--checklist` 全过、逐格 probe 核对通过后才发对应格科学长训；固定窗判读后领先且机制
-  不同的 2–4 格另立预注册补 seed，胜者机制到 exact-lineage 链正名。
+- 局限/下一个 gate：+4000 收口格判卷完成（`judge_results_20260722.md`）后，领先且机制不同的
+  2–4 格另立预注册补 seed；胜者机制到 exact-lineage 链正名。全部后代 formal-exact-ineligible。
 
 ## 复现与证据
 

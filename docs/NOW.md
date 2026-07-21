@@ -809,6 +809,9 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
   不得占 RL GPU。修复后再分别进入 schema-2、L0/L1、桌网和动力学。挡、拉、高点拍压
   各用自己的题族；先每个候选一个因果格，不把候选当
   seed 重复。只有离线证书通过后才分配 RL GPU。
+  另：[EXP-P1-TASK-REVISION-READY-SUCCESSOR](experiments/2026-07/EXP-P1-TASK-REVISION-READY-SUCCESSOR.md)
+  目前是孤儿实验——既不在实验登记册索引、也不在本队列，其 activation 升级草稿
+  （queue/runner/test 三个文件）仍在 Franco 本地未提交；待 Franco 决定存档还是续作。
   [旧动作实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)；
   [新动作设计](experiments/motion_v12_high_press_lateral_teacher_20260713.md)
 
@@ -816,6 +819,11 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
 
 - **[2｜P0] 拍面正反与解析判分。** 责任人 franco；执行者 Codex；C2 的真实非零 plant 已证伪旧配对，
   D2 永久不发；C3/D3 显式零摩擦 L1 与 fresh paired receipt `bb3cd749...bbde` 已闭合，不得重跑。
+  真 blocker：这对 checkpoint 的 immutable K100 目前卡在一份 parity 合同上——Isaac（PhysX）会对
+  第 8 号关节做 velocity-limit 刹车，MuJoCo 没有等价语义，判卷器因此在第 0 题开始前就对 C3/D3
+  两侧 fail closed（`scheduled=50/side`、`asked=0`，没有任何 K100 成绩）；该 parity 合同修复前
+  paired exact judge 保持 NO-LAUNCH（见
+  [C3/D3 K100 v2 操作页](operations/run_phase1_signed_face_c3d3_k100_v2.md)）。
   下一证据是用同一 immutable K100 判这对 checkpoint，再决定是否启动一个 seed 的“热启动/从零 ×
   线性引导关/开”四个机制单元到相对 checkpoint
   `+200/+500/+1000`。只有胜者连同匹配对照才解锁第二 seed，不再给已失败配方复制四 seed。
