@@ -118,11 +118,53 @@ def question_split(v_in_row) -> str:
     return "exam" if value < EXAM_FRAC else "train"
 
 
+def _is_hex_sha256(value) -> bool:
+    """True only for one lowercase 64-hex SHA-256 string (fail-closed membership checks)."""
+    return (
+        isinstance(value, str)
+        and len(value) == 64
+        and all(ch in "0123456789abcdef" for ch in value)
+    )
+
+
+def allowed_motion_shas(clip_info: dict) -> tuple:
+    """One family's accepted motion SHA-256 set for runtime reconciliation.
+
+    人话:一族题目允许绑定哪些 motion 文件。没有 ``motion_sha256_allowed``(现役所有题库)时
+    退回单一 ``motion_sha256`` —— legacy 行为逐字节不变。重绑脚本
+    (rebind_question_bank_motion_family.py)会把"触球行逐位相同"的 TOPP 烤入变速片段追加进
+    列表;列表必须非空、逐项 64-hex、无重复、且包含原始 motion_sha256(答案是在原件上解出来
+    的,原件永远合法),否则当场拒绝。
+    """
+    primary = clip_info.get("motion_sha256")
+    extra = clip_info.get("motion_sha256_allowed")
+    if extra is None:
+        return (primary,)
+    if (
+        not isinstance(extra, (list, tuple))
+        or not extra
+        or any(not _is_hex_sha256(sha) for sha in extra)
+    ):
+        raise ValueError(
+            f"motion_sha256_allowed must be a non-empty list of 64-hex SHA-256 strings, "
+            f"got {extra!r}"
+        )
+    if len(set(extra)) != len(extra):
+        raise ValueError(f"motion_sha256_allowed contains duplicates: {extra!r}")
+    if primary not in extra:
+        raise ValueError(
+            f"motion_sha256_allowed {extra!r} must contain the primary motion_sha256 "
+            f"{primary!r} (the exact motion the answers were solved on)"
+        )
+    return tuple(extra)
+
+
 def validate_runtime_motion_contract(
     metadata: dict,
     motion_files: Sequence[str],
     segment_lengths: Sequence[int],
     strike_phases: Sequence[float],
+    clip_families: Sequence[int] | None = None,
 ) -> None:
     """Bind a validated bank to the demonstrations/timing actually loaded by training/eval.
 
@@ -130,24 +172,58 @@ def validate_runtime_motion_contract(
     bank internally is insufficient: pointing the task at a different file with the same clip
     name, or changing ``strike_phase_per_clip``, silently asks the answer at the wrong pose/time.
     This check is intentionally content-addressed (paths may differ across pods).
+
+    ``clip_families=None``(现役所有臂)= 旧合同逐字节不变:第 i 个加载 clip 对账 clip_order
+    第 i 名,SHA 必须等于该名下的单一 motion_sha256。传入族表(每个加载 clip 属于题库哪一族,
+    长度 = 加载 clip 数)后改为族寻址对账:clip 数可以多于题库族数(6-clip 变速列表),每个
+    clip 的 motion SHA 必须落在其族的允许列表(:func:`allowed_motion_shas`)里;帧数与击球
+    锚帧仍须逐 clip 严格等于该族记录值 —— TOPP 烤入片段保持帧数/锚帧不变,这正是"题目答案
+    按族复用合法"的前提,松不得。
     """
     order = list(metadata.get("clip_order") or [])
-    if not (len(order) == len(motion_files) == len(segment_lengths) == len(strike_phases)):
-        raise ValueError(
-            "question-bank runtime contract length mismatch: "
-            f"clips={len(order)}, files={len(motion_files)}, segments={len(segment_lengths)}, "
-            f"strike phases={len(strike_phases)}"
-        )
+    if clip_families is None:
+        if not (len(order) == len(motion_files) == len(segment_lengths) == len(strike_phases)):
+            raise ValueError(
+                "question-bank runtime contract length mismatch: "
+                f"clips={len(order)}, files={len(motion_files)}, segments={len(segment_lengths)}, "
+                f"strike phases={len(strike_phases)}"
+            )
+        names = list(order)
+    else:
+        families = list(clip_families)
+        if not (len(families) == len(motion_files) == len(segment_lengths) == len(strike_phases)):
+            raise ValueError(
+                "question-bank family contract length mismatch: "
+                f"families={len(families)}, files={len(motion_files)}, "
+                f"segments={len(segment_lengths)}, strike phases={len(strike_phases)}"
+            )
+        names = []
+        for fam in families:
+            if isinstance(fam, bool) or float(fam) != float(int(fam)):
+                raise ValueError(f"clip family indices must be integers, got {fam!r}")
+            fam = int(fam)
+            if not 0 <= fam < len(order):
+                raise ValueError(
+                    f"clip family index {fam} is outside the bank's clip_order "
+                    f"{order!r} (valid: 0..{len(order) - 1})"
+                )
+            names.append(order[fam])
     clips = metadata.get("clips") or {}
     for name, path, runtime_n, runtime_phase in zip(
-        order, motion_files, segment_lengths, strike_phases
+        names, motion_files, segment_lengths, strike_phases
     ):
         info = clips.get(name) or {}
+        allowed = allowed_motion_shas(info)
         actual_sha = sha256_file(path)
-        if actual_sha != info.get("motion_sha256"):
+        if actual_sha not in allowed:
+            if len(allowed) == 1:
+                raise ValueError(
+                    f"question bank clip {name!r}: loaded motion SHA {actual_sha} != bank "
+                    f"{info.get('motion_sha256')!r} ({path})"
+                )
             raise ValueError(
-                f"question bank clip {name!r}: loaded motion SHA {actual_sha} != bank "
-                f"{info.get('motion_sha256')!r} ({path})"
+                f"question bank clip {name!r}: loaded motion SHA {actual_sha} is not in the "
+                f"family's allowed list {list(allowed)} ({path})"
             )
         runtime_n = int(runtime_n)
         runtime_phase = float(runtime_phase)
@@ -417,6 +493,14 @@ def load_question_bank(
                 raise ValueError(
                     f"question bank {path!r} clip {name!r}: invalid motion_sha256 {motion_sha!r}"
                 )
+            # 重绑扩展键(可选):有就必须自洽,坏列表当场拒绝;没有(现役题库)不加任何检查。
+            if "motion_sha256_allowed" in clip_info:
+                try:
+                    allowed_motion_shas(clip_info)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"question bank {path!r} clip {name!r}: {exc}"
+                    ) from exc
             family_clip = (family.get("clips") or {}).get(name) or {}
             clip_vel_key = f"{name}/clip_vel"
             if clip_vel_key not in data:

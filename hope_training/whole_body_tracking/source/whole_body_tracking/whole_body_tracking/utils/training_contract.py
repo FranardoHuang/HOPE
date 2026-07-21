@@ -1750,6 +1750,36 @@ def validate_schema3_contract_structure(contract: Mapping) -> None:
     for key in ("face_command_enabled", "motion_allow_legacy_link_origin_velocity"):
         if key in contract and not isinstance(contract[key], bool):
             raise ValueError(f"schema-3 {key} must be boolean when present")
+    # Per-clip swing-family table (spdmix v2 硬绑定一).  Optional as total absence: legacy/default
+    # contracts carry no key and stay byte-identical.  When present it must be a complete,
+    # legal-valued table — one "forehand"/"backhand" string per loaded motion segment with both
+    # families represented — because every swing_sign/obs/target-side decision keys off it.
+    # 人话:合同里记了家族表就整表核对,记错的表比没记还危险(判分/观测全按它走)。
+    if "motion_clip_family_per_clip" in contract:
+        families = contract["motion_clip_family_per_clip"]
+        if (
+            not isinstance(families, (list, tuple))
+            or not families
+            or any(type(value) is not str for value in families)
+            or any(value not in ("forehand", "backhand") for value in families)
+        ):
+            raise ValueError(
+                "schema-3 motion_clip_family_per_clip must be a non-empty array of "
+                "'forehand'/'backhand' strings"
+            )
+        if "forehand" not in families or "backhand" not in families:
+            raise ValueError(
+                "schema-3 motion_clip_family_per_clip must name at least one forehand and one "
+                "backhand clip"
+            )
+        segment_lengths = contract["motion_segment_lengths"]
+        if not isinstance(segment_lengths, (list, tuple)) or len(families) != len(
+            segment_lengths
+        ):
+            raise ValueError(
+                "schema-3 motion_clip_family_per_clip must declare exactly one family per loaded "
+                "motion segment"
+            )
     if ACTOR_LEG_REF_MASK_PROVENANCE_KEY in contract:
         epoch = contract[ACTOR_LEG_REF_MASK_PROVENANCE_KEY]
         if (

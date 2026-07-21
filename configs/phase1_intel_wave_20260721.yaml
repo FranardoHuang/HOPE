@@ -1,8 +1,9 @@
 schema_version: 1
 queue_id: phase1_intel_wave_20260721
 purpose: >-
-  人话：Wave Q 情报波 8 臂 = 2 父本(W/V) x 4 档情报臂（spdmix 速度泛化混合、
-  hstrong 强 q_des 平滑、fullbody 下肢模仿加重、qbar 全关节 qdes 限位 barrier），
+  人话：Wave Q 情报波 8 臂 = 2 父本(W/V) x 4 档情报臂（spdmix 速度泛化混合
+  （v2＝TOPP 烤入变速六 clip 列表，正手 0.8/1.0/1.2＋反手 0.8/1.0/1.1，播放时钟
+  恒 1.0）、hstrong 强 q_des 平滑、fullbody 下肢模仿加重、qbar 全关节 qdes 限位 barrier），
   基础配方固定为矩阵 C+S0（action_rate=-0.10、slew=0、三个稳定机制 weight=0、
   测量探针全开；hstrong/qbar 两档把 action_rate 归零是各自档位设计的一部分），
   从各自 parent model_6700 续训 4001 个 update。依据 Franco 2026-07-21 情报：
@@ -47,7 +48,10 @@ source:
     mismatch，所以整条谱系永远不算 formal-exact，胜者档位须另在 exact-lineage 重跑。
     qbar 两臂另受 qbar_contract.qbar_wiring_confirmed 闸门锁死：本地工作树冻结时
     grep 无 qdes_limit_barrier wiring，键名按任务书写死，主控合并并逐字核对远端
-    train.py 白名单后才翻 true（其余六臂不受影响）。
+    train.py 白名单后才翻 true（其余六臂不受影响）。spdmix v2 改造（clip_family_per_clip
+    + 题库族寻址）2026-07-22 落盘本地工作树；发射 spdmix 两臂前主控须把改造合并进
+    source.commit 并重钉 40-hex，再 grep 远端 train.py 确认 clip_family_per_clip
+    在 task.motion 白名单里（checklist 第 3 条），否则 boot 期 fail-loud。
 
 watchdog:
   # 人话：v8/v9 死于 launch_kit_training_locked.sh 写死的 180 s stale 门（Kit 编译
@@ -66,6 +70,19 @@ assets:
   motion_forehand: /workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_forehand_v4rg_cal.npz
   motion_backhand: /workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_backhand_v4rg_cal.npz
   training_question_bank: /workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_bank_rebind_v2/s1_v4rg_runtime_order_schema3_train_882fea4_rebound.npz
+  # 人话：以下三条只有 spdmix 两臂用——TOPP 烤入变速片段（帧数/fps/触球帧不变、触球行
+  # 逐位相同）与按族重绑的题库（允许 SHA=两个 cal 原件+六个烤入；题目张量与上面那份
+  # train bank 逐字节相同，只扩了 meta 的族级允许列表）。上传对账见同目录
+  # upload_manifest_spdmix_v2_20260722.json。其余六臂仍用上面三条 cal 原件+原题库。
+  spdmix_motion_forehand_clips:
+    - /workspace/codexschema/phase1_intel_wave_20260721/assets/topp_speed/hope_forehand_v4rg_speed0p80.npz
+    - /workspace/codexschema/phase1_intel_wave_20260721/assets/topp_speed/hope_forehand_v4rg_speed1p00.npz
+    - /workspace/codexschema/phase1_intel_wave_20260721/assets/topp_speed/hope_forehand_v4rg_speed1p20.npz
+  spdmix_motion_backhand_clips:
+    - /workspace/codexschema/phase1_intel_wave_20260721/assets/topp_speed/hope_backhand_v4rg_speed0p80.npz
+    - /workspace/codexschema/phase1_intel_wave_20260721/assets/topp_speed/hope_backhand_v4rg_speed1p00.npz
+    - /workspace/codexschema/phase1_intel_wave_20260721/assets/topp_speed/hope_backhand_v4rg_speed1p10.npz
+  spdmix_training_question_bank: /workspace/codexschema/phase1_intel_wave_20260721/assets/topp_speed/s1_v4rg_runtime_order_schema3_train_882fea4_family6_rebound.npz
 
 controls:
   # 人话：对照不重复买——矩阵 w_c_s0/v_c_s0 的配方 = 本波去掉情报臂改动后的
@@ -206,17 +223,21 @@ common:
 # 逐字 = 矩阵 C 档；hstrong 与 qbar 把 action_rate 归零（hstrong 换成 hinge -1.0，
 # qbar 让 barrier 当唯一 qdes 惩罚，Franco："把别的去掉"）。非 fullbody 臂的
 # stability 逐字 = 矩阵 S0 档；fullbody = S0 三行替换（模仿 weight 0→2.0 +
-# 支持窗 0.3/0.4→10.0/10.0 全程）。测试有交叉断言防漂移。spdmix 用
-# base_replacements 把 base 里 speed_scale_range=[1.0,1.0] 行原位替换成
-# [0.8,1.2]（不新增键、不重复键）；qbar 用 extra_overrides 携带两个新 barrier 键
+# 支持窗 0.3/0.4→10.0/10.0 全程）。测试有交叉断言防漂移。spdmix v2 不再动
+# speed_scale_range（在线变速 v1 被 governor 单时钟守卫拒绝＝历史）：改用
+# base_replacements 把 strike_phase/mount_normal_sign 两行原位扩成六位（不新增键、
+# 不重复键），extra_overrides 带 clip_family_per_clip 族表，motion/题库三行由渲染器
+# 按 assets 的 spdmix_* 三条注入；qbar 用 extra_overrides 携带两个新 barrier 键
 # （键名见 qbar_contract，wiring 未确认前渲染被锁死）。
 mechanisms:
   intel:
     spdmix:
-      human_name: 人话：速度泛化混合——参考动作播放速度从恒定 1.0 改为均匀采样 0.8-1.2 倍（base 的 speed_scale_range 行原位替换），其余与对照逐字同
+      human_name: 人话：速度泛化混合 v2——参考动作换成 TOPP 烤入变速六 clip 列表（正手 0.8/1.0/1.2＋反手 0.8/1.0/1.1，帧数/触球帧不变），每次挥拍均匀抽一个 clip；播放时钟保持恒定 1.0（governor 单时钟不受扰），题库换按族重绑版，其余与对照逐字同
       base_replacements:
-        - old: task.motion.speed_scale_range=[1.0,1.0]
-          new: task.motion.speed_scale_range=[0.8,1.2]
+        - old: task.racket.strike_phase_per_clip=[0.471,0.338]
+          new: task.racket.strike_phase_per_clip=[0.471,0.471,0.471,0.338,0.338,0.338]
+        - old: ++task.racket.mount_normal_sign_per_clip=[1.0,-1.0]
+          new: ++task.racket.mount_normal_sign_per_clip=[1.0,1.0,1.0,-1.0,-1.0,-1.0]
       temporal_overrides:
         - task.rewards.action_rate_weight=-0.1
         - ++task.rewards.processed_qdes_slew_hinge_weight=0.0
@@ -249,7 +270,10 @@ mechanisms:
         - ++task.rewards.lower_body_pose_imitation_std=0.35
         - ++task.rewards.lower_body_pose_imitation_support_pre_s=0.3
         - ++task.rewards.lower_body_pose_imitation_support_post_s=0.4
-      extra_overrides: []
+      extra_overrides:
+        # 人话：六 clip 各属哪一手——没有这张表，写死的"clip 0 才是正手"会把正手
+        # 1.0/1.2 变体当反手训错（spdmix v2 硬绑定一）；缺席时其余六臂行为逐字节不变。
+        - ++task.motion.clip_family_per_clip=[forehand,forehand,forehand,backhand,backhand,backhand]
     hstrong:
       human_name: 人话：强 q_des 平滑——去掉稠密 action_rate（0.0），恢复窗 q_des slew hinge 权重提到 -1.0（margin 0.85、窗 0.2-1.55 s 与矩阵 H 档逐字同；H 档 -0.25 可当剂量对照）
       base_replacements: []

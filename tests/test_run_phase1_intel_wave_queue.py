@@ -156,11 +156,44 @@ def test_base_overrides_verbatim_from_matrix_yaml():
 
 
 def test_parents_and_assets_verbatim_from_matrix_yaml():
+    # 五条继承资产逐字 = 矩阵 yaml；spdmix v2 另加三条冻结资产（六 clip 烤入列表 +
+    # 按族重绑题库），不改动继承的五条。
     queue = Q.load_queue(QUEUE)
     matrix = _matrix_raw()
-    assert queue["assets"] == matrix["assets"]
+    for key, value in matrix["assets"].items():
+        assert queue["assets"][key] == value
+    assert set(queue["assets"]) - set(matrix["assets"]) == {
+        "spdmix_motion_forehand_clips",
+        "spdmix_motion_backhand_clips",
+        "spdmix_training_question_bank",
+    }
     for name in ("W", "V"):
         assert queue["parents"][name] == matrix["parents"][name]
+
+
+def test_spdmix_assets_frozen_six_bake_clips_and_family_bank(tmp_path):
+    queue = Q.load_queue(QUEUE)
+    prefix = "/workspace/codexschema/phase1_intel_wave_20260721/assets/topp_speed"
+    assert queue["assets"]["spdmix_motion_forehand_clips"] == [
+        f"{prefix}/hope_forehand_v4rg_speed0p80.npz",
+        f"{prefix}/hope_forehand_v4rg_speed1p00.npz",
+        f"{prefix}/hope_forehand_v4rg_speed1p20.npz",
+    ]
+    # 反手 1.2 物理不可行（envelope max_feasible_ratio=1.1931），最近可行档 1.10。
+    assert queue["assets"]["spdmix_motion_backhand_clips"] == [
+        f"{prefix}/hope_backhand_v4rg_speed0p80.npz",
+        f"{prefix}/hope_backhand_v4rg_speed1p00.npz",
+        f"{prefix}/hope_backhand_v4rg_speed1p10.npz",
+    ]
+    assert queue["assets"]["spdmix_training_question_bank"] == (
+        f"{prefix}/s1_v4rg_runtime_order_schema3_train_882fea4_family6_rebound.npz"
+    )
+    value = _raw()
+    value["assets"]["spdmix_motion_backhand_clips"][2] = (
+        f"{prefix}/hope_backhand_v4rg_speed1p20.npz"
+    )
+    with pytest.raises(Q.QueueError, match="spdmix"):
+        _load(tmp_path, value)
 
 
 def test_temporal_c_verbatim_from_matrix_yaml_in_spdmix_and_fullbody():
@@ -342,58 +375,149 @@ def test_launch_order_frozen_exact_sequence(tmp_path):
         _load(tmp_path, value)
 
 
-# ---------------------------------------------------------------- spdmix（逐字断言两种情况）
+# ---------------------------------------------------------------- spdmix v2（逐字断言两种情况）
+
+STRIKE_PHASE_2 = "task.racket.strike_phase_per_clip=[0.471,0.338]"
+STRIKE_PHASE_6 = "task.racket.strike_phase_per_clip=[0.471,0.471,0.471,0.338,0.338,0.338]"
+MOUNT_SIGN_2 = "++task.racket.mount_normal_sign_per_clip=[1.0,-1.0]"
+MOUNT_SIGN_6 = "++task.racket.mount_normal_sign_per_clip=[1.0,1.0,1.0,-1.0,-1.0,-1.0]"
+CLIP_FAMILY_6 = (
+    "++task.motion.clip_family_per_clip="
+    "[forehand,forehand,forehand,backhand,backhand,backhand]"
+)
 
 
 def test_spdmix_base_replacement_frozen(tmp_path):
+    # v2：不再动 speed_scale_range，改为 strike_phase/mount_sign 两行原位扩六位。
     queue = Q.load_queue(QUEUE)
     assert queue["mechanisms"]["intel"]["spdmix"]["base_replacements"] == [
-        {
-            "old": "task.motion.speed_scale_range=[1.0,1.0]",
-            "new": "task.motion.speed_scale_range=[0.8,1.2]",
-        }
+        {"old": STRIKE_PHASE_2, "new": STRIKE_PHASE_6},
+        {"old": MOUNT_SIGN_2, "new": MOUNT_SIGN_6},
     ]
     for level in ("hstrong", "fullbody", "qbar"):
         assert queue["mechanisms"]["intel"][level]["base_replacements"] == []
     value = _raw()
     value["mechanisms"]["intel"]["spdmix"]["base_replacements"][0]["new"] = (
-        "task.motion.speed_scale_range=[0.5,1.5]"
+        "task.racket.strike_phase_per_clip=[0.5,0.5,0.5,0.3,0.3,0.3]"
     )
     with pytest.raises(Q.QueueError, match="base_replacements"):
         _load(tmp_path, value)
 
 
-def test_spdmix_arms_get_verbatim_replacement_others_keep_base(tmp_path):
-    # 任务书逐字断言：spdmix 两臂 argv 含 [0.8,1.2] 不含 [1.0,1.0]；其余六臂反向。
+def test_all_arms_keep_speed_scale_one_no_online_retiming(tmp_path):
+    # v2 铁律：全部 8 臂播放时钟恒 [1.0,1.0]（governor 单时钟守卫）；[0.8,1.2]
+    # 在线变速（v1，启动即被 commands.py 守卫拒绝＝历史）任何臂都不得再出现。
     queue = _load(tmp_path, _rendered_qbar_open())
     for job in queue["jobs"]:
         for stage in ("probe", "science"):
             argv = Q._training_argv(queue, job, stage)
+            assert "task.motion.speed_scale_range=[1.0,1.0]" in argv
+            assert "task.motion.speed_scale_range=[0.8,1.2]" not in argv
+
+
+def test_spdmix_arms_get_six_slot_tables_others_keep_two(tmp_path):
+    # spdmix 两臂：六位 strike_phase/mount_sign + 六位族表；其余六臂两位表、无族表键。
+    queue = _load(tmp_path, _rendered_qbar_open())
+    for job in queue["jobs"]:
+        for stage in ("probe", "science"):
+            argv = Q._training_argv(queue, job, stage)
+            compiled = Q._override_map(argv[2:], job["id"])
             if job["intel"] == "spdmix":
-                assert "task.motion.speed_scale_range=[0.8,1.2]" in argv
-                assert "task.motion.speed_scale_range=[1.0,1.0]" not in argv
+                assert STRIKE_PHASE_6 in argv
+                assert MOUNT_SIGN_6 in argv
+                assert CLIP_FAMILY_6 in argv
+                assert STRIKE_PHASE_2 not in argv
+                assert MOUNT_SIGN_2 not in argv
             else:
-                assert "task.motion.speed_scale_range=[1.0,1.0]" in argv
-                assert "task.motion.speed_scale_range=[0.8,1.2]" not in argv
+                assert STRIKE_PHASE_2 in argv
+                assert MOUNT_SIGN_2 in argv
+                assert "task.motion.clip_family_per_clip" not in compiled
+                assert STRIKE_PHASE_6 not in argv
+                assert MOUNT_SIGN_6 not in argv
+
+
+def test_spdmix_arms_load_six_bake_clips_and_family_bank(tmp_path):
+    # spdmix 两臂：motion_file/motion_file_2 是六个 TOPP 烤入 clip 的列表，题库换按族
+    # 重绑版；其余六臂 cal 原件 + 原题库逐字节不变。
+    queue = _load(tmp_path, _rendered_qbar_open())
+    prefix = "/workspace/codexschema/phase1_intel_wave_20260721/assets/topp_speed"
+    for job in queue["jobs"]:
+        for stage in ("probe", "science"):
+            compiled = _compiled(queue, job["id"], stage)
+            if job["intel"] == "spdmix":
+                assert compiled["motion_file"] == (
+                    f"[{prefix}/hope_forehand_v4rg_speed0p80.npz,"
+                    f"{prefix}/hope_forehand_v4rg_speed1p00.npz,"
+                    f"{prefix}/hope_forehand_v4rg_speed1p20.npz]"
+                )
+                assert compiled["motion_file_2"] == (
+                    f"[{prefix}/hope_backhand_v4rg_speed0p80.npz,"
+                    f"{prefix}/hope_backhand_v4rg_speed1p00.npz,"
+                    f"{prefix}/hope_backhand_v4rg_speed1p10.npz]"
+                )
+                assert compiled["task.racket.question_bank"] == (
+                    f"{prefix}/s1_v4rg_runtime_order_schema3_train_882fea4_family6_rebound.npz"
+                )
+            else:
+                assert compiled["motion_file"] == queue["assets"]["motion_forehand"]
+                assert compiled["motion_file_2"] == queue["assets"]["motion_backhand"]
+                assert compiled["task.racket.question_bank"] == (
+                    queue["assets"]["training_question_bank"]
+                )
 
 
 def test_spdmix_replacement_is_in_place_not_appended(tmp_path):
-    # 原位替换：spdmix argv 的 speed_scale 键只出现一次，位置与 base 行一致。
+    # 原位替换：spdmix argv 的 strike_phase/mount_sign 键各只出现一次，位置与 base 行一致。
     queue = _load(tmp_path, _rendered())
     argv = Q._training_argv(queue, _job(queue, "w_spdmix"), "science")
-    hits = [item for item in argv if item.startswith("task.motion.speed_scale_range=")]
-    assert hits == ["task.motion.speed_scale_range=[0.8,1.2]"]
+    strike_hits = [
+        item for item in argv if item.lstrip("+").startswith("task.racket.strike_phase_per_clip=")
+    ]
+    mount_hits = [
+        item for item in argv
+        if item.lstrip("+").startswith("task.racket.mount_normal_sign_per_clip=")
+    ]
+    assert strike_hits == [STRIKE_PHASE_6]
+    assert mount_hits == [MOUNT_SIGN_6]
     base = queue["common"]["base_overrides"]
-    base_index = base.index("task.motion.speed_scale_range=[1.0,1.0]")
-    assert argv[2:].index("task.motion.speed_scale_range=[0.8,1.2]") == base_index
+    assert argv[2:].index(STRIKE_PHASE_6) == base.index(STRIKE_PHASE_2)
+    assert argv[2:].index(MOUNT_SIGN_6) == base.index(MOUNT_SIGN_2)
+
+
+def test_spdmix_remote_body_prechecks_six_clips_and_family_bank(tmp_path):
+    # 发射预检：spdmix 命令体逐文件 test -f 六个烤入 npz + 按族重绑题库；
+    # 非 spdmix 臂保持 cal 原件 + 原题库预检。
+    queue = _load(tmp_path, _rendered())
+    body = Q._remote_body(queue, _job(queue, "w_spdmix"), "science", 0)
+    prefix = "/workspace/codexschema/phase1_intel_wave_20260721/assets/topp_speed"
+    for name in (
+        "hope_forehand_v4rg_speed0p80.npz", "hope_forehand_v4rg_speed1p00.npz",
+        "hope_forehand_v4rg_speed1p20.npz", "hope_backhand_v4rg_speed0p80.npz",
+        "hope_backhand_v4rg_speed1p00.npz", "hope_backhand_v4rg_speed1p10.npz",
+        "s1_v4rg_runtime_order_schema3_train_882fea4_family6_rebound.npz",
+    ):
+        assert f"test -f {prefix}/{name}" in body
+    assert queue["assets"]["motion_forehand"] not in body
+    other = Q._remote_body(queue, _job(queue, "w_fullbody"), "science", 0)
+    assert f"test -f {queue['assets']['motion_forehand']}" in other
+    assert f"test -f {queue['assets']['training_question_bank']}" in other
+    assert prefix not in other
 
 
 def test_base_missing_replacement_target_rejected(tmp_path):
     value = _raw()
     base = value["common"]["base_overrides"]
-    base[base.index("task.motion.speed_scale_range=[1.0,1.0]")] = (
-        "task.motion.speed_scale_range=[0.9,1.1]"
+    base[base.index(STRIKE_PHASE_2)] = (
+        "task.racket.strike_phase_per_clip=[0.5,0.338]"
     )
+    with pytest.raises(Q.QueueError):
+        _load(tmp_path, value)
+
+
+def test_clip_family_smuggled_into_other_arm_rejected(tmp_path):
+    # 单变量纪律：族表键只属于 spdmix；混进其他臂的 extra 必须被拒绝。
+    value = _raw()
+    value["mechanisms"]["intel"]["fullbody"]["extra_overrides"] = [CLIP_FAMILY_6]
     with pytest.raises(Q.QueueError):
         _load(tmp_path, value)
 
@@ -486,7 +610,9 @@ def test_qbar_extra_overrides_exact_verbatim():
         "++task.rewards.qdes_limit_barrier_weight=-0.65",
         "++task.rewards.qdes_limit_barrier_margin_frac=0.08",
     ]
-    for level in ("spdmix", "hstrong", "fullbody"):
+    # spdmix v2 的 extra 只有族表一行；hstrong/fullbody 保持空。
+    assert queue["mechanisms"]["intel"]["spdmix"]["extra_overrides"] == [CLIP_FAMILY_6]
+    for level in ("hstrong", "fullbody"):
         assert queue["mechanisms"]["intel"][level]["extra_overrides"] == []
 
 
@@ -832,7 +958,9 @@ def test_plan_lists_8_rows_and_fill_order():
     assert "人话" in plan
     assert "推荐填充顺序" in plan
     assert "w_c_s0/v_c_s0" in plan
-    assert "speed_scale uniform[0.8,1.2]" in plan
+    assert "v2 烤入变速六 clip 列表" in plan
+    assert "正手 0.8/1.0/1.2 + 反手 0.8/1.0/1.1" in plan
+    assert "speed_scale 恒 [1.0,1.0]" in plan
     assert "slew hinge -1.0" in plan
     assert "lower_body_pose_imitation +2.0" in plan
     assert "qdes_limit_barrier weight -0.65 margin 0.08" in plan
@@ -863,10 +991,15 @@ def test_checklist_contains_inherited_guards_and_intel_checks():
     assert "180 s" in checklist
     assert "_r2" in checklist
     assert "p1btm_w_c_s0_seed3_20260720" in checklist
-    # 本波加检条目：qbar 白名单/闸门、spdmix 替换、对照跨 commit diff、Jiayi caveat。
+    # 本波加检条目：qbar 白名单/闸门、spdmix v2 六 clip/族表/题库、对照跨 commit diff、
+    # Jiayi caveat。
     assert "qdes_limit_barrier" in checklist
     assert "qbar_wiring_confirmed" in checklist
-    assert "task.motion.speed_scale_range=[0.8,1.2]" in checklist
+    assert "clip_family_per_clip" in checklist
+    assert "speed_scale_range 恒 [1.0,1.0]" in checklist
+    assert "s1_v4rg_runtime_order_schema3_train_882fea4_family6_rebound.npz" in checklist
+    assert "upload_manifest_spdmix_v2_20260722.json" in checklist
+    assert "task.motion.speed_scale_range=[0.8,1.2]" not in checklist
     assert "6900/7200/7700/8700/10700" in checklist
     assert "Jiayi" in checklist
 

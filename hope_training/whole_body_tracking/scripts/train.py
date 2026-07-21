@@ -1983,6 +1983,14 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
         "motion_stand_start_yaw_range": attr(motion, "stand_start_yaw_range"),
         "motion_speed_scale_range": attr(motion, "speed_scale_range"),
         "motion_speed_scale_per_clip": attr(motion, "speed_scale_per_clip"),
+        # 每 clip 的 forehand/backhand 家族表(spdmix v2 硬绑定一)。只在显式配置时写进合同——缺席
+        # (现役所有在跑臂)不落键,合同字节与历史完全一致,老 checkpoint 的 resume 对账
+        # (_contract_diff)不受影响(照 training_contract_extension 的"receipt-free 字节兼容"先例)。
+        **(
+            {}
+            if getattr(motion, "clip_family_per_clip", None) is None
+            else {"motion_clip_family_per_clip": attr(motion, "clip_family_per_clip")}
+        ),
         "motion_post_swing_start_prob": attr(motion, "post_swing_start_prob"),
         "motion_post_swing_buffer_size": attr(motion, "post_swing_buffer_size"),
         "motion_post_swing_min_fill": attr(motion, "post_swing_min_fill"),
@@ -2376,6 +2384,10 @@ _MOTION_KEYS = (
     "speed_scale_range",
     # 2026-07-08 backhand-fix ablation: fixed per-clip reference playback speed (e.g. [1.0, 0.8]).
     "speed_scale_per_clip",
+    # spdmix v2 硬绑定一 (2026-07-22): per-clip forehand/backhand family labels so a 6-clip
+    # speed-variant list stops misreading forehand variants as backhands. Absent = legacy 2-clip
+    # derivation, byte-identical.
+    "clip_family_per_clip",
     # R-c RSI birth fixes (reward_staged_design 2026-07-08 §⑥): (i) skip the clip's first N
     # IK-cold-start frames at every swing entry; (ii) held-RSI births get the default-STAND root
     # height (the stand joints were already used; the crouch root z left the feet 0.29 m under
@@ -2881,6 +2893,11 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             # Backhand-fix ablation (2026-07-08): fixed per-clip reference playback speed.
             _set_attr(M, "speed_scale_per_clip", _get(mt, "speed_scale_per_clip"),
                       lambda v: tuple(float(x) for x in v), applied, "commands.motion")
+            # spdmix v2 硬绑定一 (2026-07-22): 每 clip 的 forehand/backhand 家族表。人话:6-clip
+            # 变速列表里,正手 1.0/1.2 变体不再被"clips==0 才是正手"误判成反手。缺席 = 旧 2-clip
+            # 推导,逐字节不变;值/长度/两族齐全在 MotionCommand 开机时整表校验(fail-loud)。
+            _set_attr(M, "clip_family_per_clip", _get(mt, "clip_family_per_clip"),
+                      lambda v: tuple(str(x) for x in v), applied, "commands.motion")
             # R-c(i): every swing entry (RSI reset AND wrap) starts the reference N frames past the
             # clip start — the v5 clips carry a 3-4 frame IK cold-start transient at frame 0 (GMR
             # warm-up bug); N=6 is the design's stopgap until the source fix lands. Default 0 = off.

@@ -355,6 +355,57 @@ class MotionLoader:
         return self._body_ang_vel_w[:, self._body_indexes]
 
 
+CLIP_FAMILY_FOREHAND = "forehand"
+CLIP_FAMILY_BACKHAND = "backhand"
+_CLIP_FAMILIES = (CLIP_FAMILY_FOREHAND, CLIP_FAMILY_BACKHAND)
+
+
+def resolve_clip_family_is_forehand(clip_family_per_clip, num_segments: int) -> tuple[bool, ...]:
+    """Resolve the per-clip swing-family config into "is clip i a forehand?" booleans.
+
+    人话:回答"第 i 个 clip 是正手还是反手"。没配表(None,现役所有在跑臂)就按老规矩推:
+    单 clip 当正手、恰好 2 clip = (正手, 反手)——和四处写死的 ``clips == 0`` 判断逐字节同值;
+    3 个及以上 clip 没配表直接报错,因为那正是变速正手变体会被悄悄当成反手训错的场景
+    (spdmix v2 可行性备忘 2026-07-22 硬绑定一),宁可开机炸也不猜。配了表就整表核:长度要对上
+    加载的 clip 数、值只认 "forehand"/"backhand"、正反手至少各一个,错了当场 ValueError。
+    """
+    nseg = int(num_segments)
+    if nseg < 1:
+        raise ValueError(f"clip family resolution needs at least one loaded clip, got {nseg}")
+    if clip_family_per_clip is None:
+        if nseg == 1:
+            return (True,)
+        if nseg == 2:
+            return (True, False)
+        raise ValueError(
+            f"the loaded motion has {nseg} clips but task.motion.clip_family_per_clip is unset — "
+            "the legacy 'clip 0 is the forehand, every other clip is the backhand' rule only ever "
+            "matched the exact (forehand, backhand) 2-clip list; with more clips it would silently "
+            "mislabel every extra forehand variant as a backhand (swing_sign/obs/target side all "
+            "wrong). Declare one family per clip in motion_file order, e.g. "
+            '["forehand","forehand","forehand","backhand","backhand","backhand"].'
+        )
+    families = tuple(str(value) for value in clip_family_per_clip)
+    if len(families) != nseg:
+        raise ValueError(
+            f"clip_family_per_clip has {len(families)} entries but the loaded motion has {nseg} "
+            "clip(s) — align it with the motion_file clip order (same order as "
+            "strike_phase_per_clip / mount_normal_sign_per_clip)"
+        )
+    unknown = sorted(set(families) - set(_CLIP_FAMILIES))
+    if unknown:
+        raise ValueError(
+            f"clip_family_per_clip entries must be one of {_CLIP_FAMILIES}, got {unknown}"
+        )
+    if CLIP_FAMILY_FOREHAND not in families or CLIP_FAMILY_BACKHAND not in families:
+        raise ValueError(
+            "clip_family_per_clip must contain at least one forehand and one backhand clip, got "
+            f"{families} — the unified policy keys swing_sign, the swing-type observation and the "
+            "target side off both families"
+        )
+    return tuple(value == CLIP_FAMILY_FOREHAND for value in families)
+
+
 class MotionCommand(CommandTerm):
     cfg: MotionCommandCfg
 
@@ -551,6 +602,25 @@ class MotionCommand(CommandTerm):
         # (swing type) the env is currently imitating.
         self._multiseg = self.motion.num_segments > 1
         self.clip_id = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        # 每 clip 的 forehand/backhand 家族表(spdmix v2 硬绑定一)。显式配置在这里整表校验
+        # (boot fail-loud:长度==clip 数、值合法、正反手至少各一)并落成张量;None(默认,现役
+        # 所有在跑臂)= 不建表、不打印、行为逐字节不变——查表方(clip_family_is_forehand)在第一次
+        # 用到时按"单 clip 正手 / 恰 2 clip = (正手, 反手)"懒推导,>2 clip 缺表当场报错。
+        self._clip_family_is_forehand_t: torch.Tensor | None = None
+        if getattr(self.cfg, "clip_family_per_clip", None) is not None:
+            self._clip_family_is_forehand_t = torch.tensor(
+                resolve_clip_family_is_forehand(
+                    self.cfg.clip_family_per_clip, int(self.motion.num_segments)
+                ),
+                dtype=torch.bool,
+                device=self.device,
+            )
+            print(
+                "[MotionCommand] clip_family_per_clip ACTIVE: "
+                f"{tuple(str(value) for value in self.cfg.clip_family_per_clip)} "
+                "(per-clip forehand/backhand lookup replaces the clips==0 hardcode)",
+                flush=True,
+            )
         # Robust per-step "this env just wrapped to a new swing" signal, consumed by the racket-target
         # command to resample its target. Replaces a time_steps<prev heuristic that fails when a clip
         # wrap jumps the index to a HIGHER segment start (forehand->backhand on the concatenated axis).
@@ -789,6 +859,24 @@ class MotionCommand(CommandTerm):
     @property
     def command(self) -> torch.Tensor:  # TODO Consider again if this is the best observation
         return torch.cat([self.joint_pos, self.joint_vel], dim=1)
+
+    def clip_family_is_forehand(self) -> torch.Tensor:
+        """[num_segments] bool 表:True = 该 clip 属正手家族(False = 反手)。
+
+        人话:配了 clip_family_per_clip 用配置表(__init__ 已整表校验);没配按老规矩懒推导——
+        单 clip 当正手、恰好 2 clip = (正手, 反手),和写死的 ``clips == 0`` 判断逐字节同值;
+        推不出(≥3 clip 没配表)当场报错,绝不猜(见 resolve_clip_family_is_forehand)。
+        """
+        if self._clip_family_is_forehand_t is None:
+            self._clip_family_is_forehand_t = torch.tensor(
+                resolve_clip_family_is_forehand(
+                    getattr(self.cfg, "clip_family_per_clip", None),
+                    int(self.motion.num_segments),
+                ),
+                dtype=torch.bool,
+                device=self.device,
+            )
+        return self._clip_family_is_forehand_t
 
     @property
     def in_hold(self) -> torch.Tensor:
@@ -2593,6 +2681,15 @@ class MotionCommandCfg(CommandTermCfg):
     # Question-bank targets are NOT rescaled (bank overrides target sampling downstream) — the
     # reference swing slows, the physical answer stays the answer.
     speed_scale_per_clip: tuple[float, ...] | None = None
+    # 每 clip 的挥拍家族标签("forehand"/"backhand"),顺序 = motion_file 拼接后的 clip 顺序(同
+    # strike_phase_per_clip / mount_normal_sign_per_clip)。用途:6-clip 变速烤入列表(正手
+    # 0.8/1.0/1.2 + 反手 0.8/1.0/1.1)里,正手 1.0/1.2 变体不再被"clips==0 才是正手"的硬编码误判成
+    # 反手(spdmix v2 可行性备忘 2026-07-22 硬绑定一:swing_sign、swing_type 观测、uniform 目标 y 侧
+    # 全按这张表取)。None(默认)= 现役行为逐字节不变:内部按"单 clip 正手 / 恰好 2 clip = (正手,
+    # 反手)"推导,>2 clip 缺表在查表时 fail-loud——那正是会悄悄训错的场景。显式给出时开机整表校验:
+    # 长度必须 == clip 数、值只认这两个字符串、正反手至少各一个,错了当场报错(见
+    # resolve_clip_family_is_forehand)。
+    clip_family_per_clip: tuple[str, ...] | None = None
 
     # Same-ball task revision + phase-governor contract.  The disabled path allocates no buffers,
     # draws no RNG and preserves the historical reference clock.  When enabled the complete

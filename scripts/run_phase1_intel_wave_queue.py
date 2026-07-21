@@ -9,7 +9,12 @@
 情报档漂移、push/force 键面混入、非法 pod/gpu、run_name 重复，都直接拒绝。
 
 四档情报臂（Franco 2026-07-21 情报，全部单变量对矩阵 C+S0 对照）：
-- spdmix：参考动作播放速度 uniform[0.8,1.2]（base 的 speed_scale_range 行原位替换）；
+- spdmix（v2）：参考动作换成 TOPP 烤入变速六 clip 列表——正手 0.8/1.0/1.2 + 反手
+  0.8/1.0/1.1（帧数/fps/触球帧不变，触球行逐位相同），每次挥拍均匀抽一个 clip；播放
+  时钟 speed_scale_range 保持 [1.0,1.0]（在线变速 v1 被 governor 单时钟守卫拒绝＝
+  历史）。strike_phase/mount_normal_sign 两行 base 原位扩成六位，extra 带
+  clip_family_per_clip 族表，motion_file/motion_file_2/题库三行换 assets 的
+  spdmix_*（题库=按族重绑版，允许 SHA=两个 cal 原件+六个烤入）；
 - hstrong：action_rate=0 + 恢复窗 q_des slew hinge -1.0（margin/窗与矩阵 H 档同）；
 - fullbody：下肢姿态模仿 weight 0→2.0（std 0.35），支持窗放开到全程 pre/post 10.0 s
   （两阶段下肢方案第一阶段：静止击球下肢全程软模仿）；
@@ -158,9 +163,22 @@ EXPECTED_STABILITY_FULLBODY = [
     FULLBODY_POSE_SWAPS.get(line, line) for line in EXPECTED_STABILITY_S0
 ]
 
-# spdmix 档：base 的 speed_scale_range 行原位替换（不新增键、不重复键）。
+# spdmix v2 档：speed_scale_range 全臂恒 [1.0,1.0]（governor 单时钟守卫，松不得）；
+# 变速由六个 TOPP 烤入 clip 承担。strike_phase / mount_normal_sign 两行 base 原位
+# 扩成六位（不新增键、不重复键），extra 带 clip_family_per_clip 族表。
 SPEED_SCALE_BASE = "task.motion.speed_scale_range=[1.0,1.0]"
-SPEED_SCALE_SPDMIX = "task.motion.speed_scale_range=[0.8,1.2]"
+STRIKE_PHASE_BASE = "task.racket.strike_phase_per_clip=[0.471,0.338]"
+STRIKE_PHASE_SPDMIX = (
+    "task.racket.strike_phase_per_clip=[0.471,0.471,0.471,0.338,0.338,0.338]"
+)
+MOUNT_SIGN_BASE = "++task.racket.mount_normal_sign_per_clip=[1.0,-1.0]"
+MOUNT_SIGN_SPDMIX = (
+    "++task.racket.mount_normal_sign_per_clip=[1.0,1.0,1.0,-1.0,-1.0,-1.0]"
+)
+CLIP_FAMILY_SPDMIX = (
+    "++task.motion.clip_family_per_clip="
+    "[forehand,forehand,forehand,backhand,backhand,backhand]"
+)
 
 # qbar 档：全关节 qdes 限位 barrier（无 top-k）。键名按任务书冻结；wiring 由并行
 # agent 落盘，主控核对远端 train.py 白名单一致后才翻 qbar_wiring_confirmed。
@@ -176,7 +194,10 @@ QBAR_WEIGHT = -0.65
 QBAR_MARGIN = 0.08
 
 EXPECTED_BASE_REPLACEMENTS: dict[str, list[dict[str, str]]] = {
-    "spdmix": [{"old": SPEED_SCALE_BASE, "new": SPEED_SCALE_SPDMIX}],
+    "spdmix": [
+        {"old": STRIKE_PHASE_BASE, "new": STRIKE_PHASE_SPDMIX},
+        {"old": MOUNT_SIGN_BASE, "new": MOUNT_SIGN_SPDMIX},
+    ],
     "hstrong": [],
     "fullbody": [],
     "qbar": [],
@@ -194,16 +215,31 @@ EXPECTED_STABILITY = {
     "qbar": EXPECTED_STABILITY_S0,
 }
 EXPECTED_EXTRA = {
-    "spdmix": [],
+    "spdmix": [CLIP_FAMILY_SPDMIX],
     "hstrong": [],
     "fullbody": [],
     "qbar": EXPECTED_QBAR_EXTRA,
 }
+# spdmix v2 铁律：全部 8 臂播放时钟恒 [1.0,1.0]——变速由烤入 clip 承担，governor
+# 单时钟守卫不受扰；[0.8,1.2] 在线变速（v1）在任何臂出现都直接拒绝。
 EXPECTED_SPEED_SCALE = {
-    "spdmix": "[0.8,1.2]",
+    "spdmix": "[1.0,1.0]",
     "hstrong": "[1.0,1.0]",
     "fullbody": "[1.0,1.0]",
     "qbar": "[1.0,1.0]",
+}
+# spdmix v2 的每臂逐字键面（其余六臂 = base 原样两位表 + 无族表键）。
+EXPECTED_STRIKE_PHASE = {
+    level: (STRIKE_PHASE_SPDMIX if level == "spdmix" else STRIKE_PHASE_BASE).split("=", 1)[1]
+    for level in LEVEL_ORDER
+}
+EXPECTED_MOUNT_SIGN = {
+    level: (MOUNT_SIGN_SPDMIX if level == "spdmix" else MOUNT_SIGN_BASE).split("=", 1)[1]
+    for level in LEVEL_ORDER
+}
+EXPECTED_CLIP_FAMILY = {
+    level: (CLIP_FAMILY_SPDMIX.split("=", 1)[1] if level == "spdmix" else None)
+    for level in LEVEL_ORDER
 }
 
 EXPECTED_PODS = {
@@ -235,12 +271,33 @@ EXPECTED_WATCHDOG = {
     "retry_policy": "one_verbatim_retry_suffix_r2",
 }
 
+# spdmix v2 资产：TOPP 烤入变速片段 + 按族重绑题库（上传对账见同目录
+# upload_manifest_spdmix_v2_20260722.json）。只有 spdmix 两臂用；其余六臂仍用
+# cal 原件 + 原 train 题库，argv 逐字节不变。
+SPDMIX_ASSET_DIR = "/workspace/codexschema/phase1_intel_wave_20260721/assets/topp_speed"
+SPDMIX_FOREHAND_CLIPS = [
+    f"{SPDMIX_ASSET_DIR}/hope_forehand_v4rg_speed0p80.npz",
+    f"{SPDMIX_ASSET_DIR}/hope_forehand_v4rg_speed1p00.npz",
+    f"{SPDMIX_ASSET_DIR}/hope_forehand_v4rg_speed1p20.npz",
+]
+SPDMIX_BACKHAND_CLIPS = [
+    f"{SPDMIX_ASSET_DIR}/hope_backhand_v4rg_speed0p80.npz",
+    f"{SPDMIX_ASSET_DIR}/hope_backhand_v4rg_speed1p00.npz",
+    f"{SPDMIX_ASSET_DIR}/hope_backhand_v4rg_speed1p10.npz",
+]
+SPDMIX_QUESTION_BANK = (
+    f"{SPDMIX_ASSET_DIR}/s1_v4rg_runtime_order_schema3_train_882fea4_family6_rebound.npz"
+)
+
 EXPECTED_ASSETS = {
     "a3_runtime_asset_root": "/workspace/codexschema/nohope_balance_action_slew_20260720/hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3",
     "preconverted_a3_usd": "/workspace/codexschema/simple_half_second_sprint_20260718/assets/a3_preconverted_usd/model.usd",
     "motion_forehand": "/workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_forehand_v4rg_cal.npz",
     "motion_backhand": "/workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_backhand_v4rg_cal.npz",
     "training_question_bank": "/workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_bank_rebind_v2/s1_v4rg_runtime_order_schema3_train_882fea4_rebound.npz",
+    "spdmix_motion_forehand_clips": SPDMIX_FOREHAND_CLIPS,
+    "spdmix_motion_backhand_clips": SPDMIX_BACKHAND_CLIPS,
+    "spdmix_training_question_bank": SPDMIX_QUESTION_BANK,
 }
 
 # science 阶段命令必须含的键（值另行断言）。本波剔除 push/force 键面：任何
@@ -757,8 +814,15 @@ def _validate_queue(queue: dict[str, Any]) -> dict[str, Any]:
     assets = _mapping(queue["assets"], "assets")
     _exact_keys(assets, set(EXPECTED_ASSETS), "assets")
     for key, expected in EXPECTED_ASSETS.items():
-        if _remote_path(assets[key], f"assets.{key}") != expected:
-            raise QueueError(f"assets.{key} changed from the Wave A verbatim copy")
+        if isinstance(expected, list):
+            actual = _list(assets[key], f"assets.{key}")
+            if [
+                _remote_path(item, f"assets.{key}[{index}]")
+                for index, item in enumerate(actual)
+            ] != expected:
+                raise QueueError(f"assets.{key} changed from the frozen spdmix v2 list")
+        elif _remote_path(assets[key], f"assets.{key}") != expected:
+            raise QueueError(f"assets.{key} changed from the frozen verbatim copy")
 
     _validate_controls(_mapping(queue["controls"], "controls"))
 
@@ -784,8 +848,14 @@ def _validate_queue(queue: dict[str, Any]) -> dict[str, Any]:
     if SPEED_SCALE_BASE not in base:
         raise QueueError(
             "common.base_overrides must carry the verbatim "
-            f"{SPEED_SCALE_BASE!r} line (the spdmix replacement target)"
+            f"{SPEED_SCALE_BASE!r} line (the governor single-clock pin on all arms)"
         )
+    for required_line in (STRIKE_PHASE_BASE, MOUNT_SIGN_BASE):
+        if required_line not in base:
+            raise QueueError(
+                "common.base_overrides must carry the verbatim "
+                f"{required_line!r} line (the spdmix v2 in-place replacement target)"
+            )
     forbidden_base = sorted(
         key for key in base_map
         if key.startswith("task.push.") or key.startswith("task.force_push.")
@@ -903,6 +973,35 @@ def _base_with_replacements(
     return result
 
 
+def _motion_and_bank_paths(
+    queue: Mapping[str, Any], job: Mapping[str, Any]
+) -> tuple[list[str], list[str], str]:
+    """该臂实际装载的 (正手 clip 列表, 反手 clip 列表, 题库路径)。
+
+    人话：spdmix 两臂换成六个 TOPP 烤入变速片段 + 按族重绑题库；其余六臂保持两个
+    cal 原件 + 原 train 题库，一字不动。
+    """
+    assets = queue["assets"]
+    if job["intel"] == "spdmix":
+        return (
+            [str(path) for path in assets["spdmix_motion_forehand_clips"]],
+            [str(path) for path in assets["spdmix_motion_backhand_clips"]],
+            str(assets["spdmix_training_question_bank"]),
+        )
+    return (
+        [str(assets["motion_forehand"])],
+        [str(assets["motion_backhand"])],
+        str(assets["training_question_bank"]),
+    )
+
+
+def _motion_list_value(paths: Sequence[str]) -> str:
+    """单 clip 渲染裸路径（与历史命令逐字节一致）；多 clip 渲染 Hydra 列表字面量。"""
+    if len(paths) == 1:
+        return paths[0]
+    return "[" + ",".join(paths) + "]"
+
+
 def _training_argv(
     queue: Mapping[str, Any], job: Mapping[str, Any], stage: str
 ) -> list[str]:
@@ -914,6 +1013,7 @@ def _training_argv(
     level = queue["mechanisms"]["intel"][job["intel"]]
     budget = queue["budgets"][stage]
     base = _base_with_replacements(queue, level, job["id"])
+    motion_fh, motion_bh, question_bank = _motion_and_bank_paths(queue, job)
     argv = [
         source["python"],
         f"{workdir}/{source['trainer_relative']}",
@@ -923,9 +1023,9 @@ def _training_argv(
         *level["temporal_overrides"],
         *level["stability_overrides"],
         *level["extra_overrides"],
-        f"motion_file={queue['assets']['motion_forehand']}",
-        f"motion_file_2={queue['assets']['motion_backhand']}",
-        f"++task.racket.question_bank={queue['assets']['training_question_bank']}",
+        f"motion_file={_motion_list_value(motion_fh)}",
+        f"motion_file_2={_motion_list_value(motion_bh)}",
+        f"++task.racket.question_bank={question_bank}",
         f"checkpoint_path={parent['checkpoint_path']}",
         "checkpoint_tolerant=false",
         "checkpoint_allow_missing_contract=false",
@@ -955,13 +1055,36 @@ def _training_argv(
     for key in REQUIRED_SCIENCE_KEYS:
         if key not in compiled:
             raise QueueError(f"{job['id']}.{stage} command is missing required key {key}")
-    # spdmix 逐字纪律：spdmix 两臂必须带 [0.8,1.2]，其余六臂必须保持 [1.0,1.0]。
+    # spdmix v2 逐字纪律：全部 8 臂播放时钟恒 [1.0,1.0]（governor 单时钟守卫）；
+    # 在线变速 [0.8,1.2]（v1）在任何臂出现都直接拒绝。
     speed = compiled.get("task.motion.speed_scale_range")
     if speed != EXPECTED_SPEED_SCALE[job["intel"]]:
         raise QueueError(
             f"{job['id']} speed_scale_range must be "
             f"{EXPECTED_SPEED_SCALE[job['intel']]!r}, got {speed!r}"
         )
+    # spdmix v2 键面纪律：spdmix 两臂六位 strike_phase/mount_sign + 六位族表 + 六 clip
+    # 变速列表 + 按族重绑题库；其余六臂两位表、无族表键、cal 原件 + 原题库（逐字节不变）。
+    for key, expected_by_level in (
+        ("task.racket.strike_phase_per_clip", EXPECTED_STRIKE_PHASE),
+        ("task.racket.mount_normal_sign_per_clip", EXPECTED_MOUNT_SIGN),
+        ("task.motion.clip_family_per_clip", EXPECTED_CLIP_FAMILY),
+    ):
+        expected_value = expected_by_level[job["intel"]]
+        if compiled.get(key) != expected_value:
+            raise QueueError(
+                f"{job['id']} {key} must be {expected_value!r}, got {compiled.get(key)!r}"
+            )
+    motion_fh, motion_bh, question_bank = _motion_and_bank_paths(queue, job)
+    for key, expected_value in (
+        ("motion_file", _motion_list_value(motion_fh)),
+        ("motion_file_2", _motion_list_value(motion_bh)),
+        ("task.racket.question_bank", question_bank),
+    ):
+        if compiled.get(key) != expected_value:
+            raise QueueError(
+                f"{job['id']} {key} must be {expected_value!r}, got {compiled.get(key)!r}"
+            )
     # 单变量纪律：qbar 两臂必带两个 barrier 键，其余六臂绝不出现 barrier 键。
     barrier_keys = sorted(
         key for key in compiled if key.startswith("task.rewards.qdes_limit_barrier")
@@ -994,13 +1117,16 @@ def _remote_body(
     run_parent = str(PurePosixPath(run_dir).parent)
     run_log = f"{run_dir}/run.log"
     argv = _training_argv(queue, job, stage)
+    # 发射前逐文件 test -f：该臂真正装载的 motion clip（spdmix=六个烤入片段）与题库
+    # （spdmix=按族重绑版）都要在场，缺一个立即拒绝。
+    motion_fh, motion_bh, question_bank = _motion_and_bank_paths(queue, job)
     required_files = [
         trainer,
         setup,
         queue["assets"]["preconverted_a3_usd"],
-        queue["assets"]["motion_forehand"],
-        queue["assets"]["motion_backhand"],
-        queue["assets"]["training_question_bank"],
+        *motion_fh,
+        *motion_bh,
+        question_bank,
         parent["checkpoint_path"],
         parent["hard_contract_path"],
     ]
@@ -1057,7 +1183,10 @@ def render_command(
 
 def _level_summary(level_name: str) -> str:
     if level_name == "spdmix":
-        return "speed_scale uniform[0.8,1.2]（base 行原位替换；其余臂保持 [1.0,1.0]）"
+        return (
+            "v2 烤入变速六 clip 列表：正手 0.8/1.0/1.2 + 反手 0.8/1.0/1.1（TOPP 烤入、"
+            "触球行逐位不变），clip_family 族表 + 按族重绑题库；speed_scale 恒 [1.0,1.0]"
+        )
     if level_name == "hstrong":
         return "action_rate=0.0, slew hinge -1.0 @margin 0.85 窗 0.2-1.55s（H 档 -0.25 作剂量对照）"
     if level_name == "fullbody":
@@ -1129,11 +1258,19 @@ def cmd_checklist(queue: Mapping[str, Any]) -> str:
         "（本地工作树冻结时 grep 无此 wiring，故 qbar_contract.qbar_wiring_confirmed="
         "false 锁死 qbar 渲染；主控核对一致后才翻 true，其余六臂不受影响；键名不同"
         "必须先停下重议再渲染，缺键则 boot 即 fail-loud）。",
-        "3. spdmix 两臂加检：渲染出的命令必须带 task.motion.speed_scale_range=[0.8,1.2] "
-        "且不含 [1.0,1.0] 行；其余六臂反向（渲染器已逐字断言，人工再扫一眼）。",
+        "3. spdmix 两臂加检（v2 烤入列表）：(a) grep 远端 checkout 在 exact commit 上的 "
+        "train.py，确认 task.motion 白名单含 clip_family_per_clip（v2 改造 2026-07-22 "
+        "落盘，主控合并并重钉 source.commit 后才发 spdmix；缺 wiring 则 boot 即 "
+        "fail-loud）；(b) 渲染出的命令必须带六位 strike_phase/mount_normal_sign、"
+        "++task.motion.clip_family_per_clip=[forehand x3, backhand x3]、motion_file/"
+        "motion_file_2 六 clip 烤入列表与按族重绑题库 "
+        f"{SPDMIX_QUESTION_BANK}；(c) 全部 8 臂 speed_scale_range 恒 [1.0,1.0]，任何臂"
+        "出现 [0.8,1.2] 都是漂移（渲染器已逐字断言，人工再扫一眼）；(d) 六个烤入 npz + "
+        "题库先 sha256sum 对 upload_manifest_spdmix_v2_20260722.json 逐一相等再发射。",
         f"4. 两 pod 都确认 {KIT_BOOT_LOCK} 存在且可执行；本轮不用 "
         "launch_kit_training_locked.sh 的 180 s stale 门（v8/v9 死因）。",
-        "5. 五条资产路径逐一 test -f / test -d（USD、正反手 motion、题库、A3 资产树）。",
+        "5. 资产路径逐一 test -f / test -d（USD、正反手 motion、题库、A3 资产树；"
+        "spdmix 两臂另加六个烤入 npz + 按族重绑题库，命令内已带 test -f 预检）。",
         "6. launch 前须 sha256sum 验证 parent checkpoint：\n"
         f"   W: sha256sum {parents['W']['checkpoint_path']}\n"
         f"      期望 {parents['W']['checkpoint_sha256']}\n"

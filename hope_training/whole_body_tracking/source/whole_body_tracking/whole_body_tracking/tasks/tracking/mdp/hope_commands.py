@@ -46,7 +46,10 @@ from isaaclab.utils.math import (
     yaw_quat,
 )
 
-from whole_body_tracking.tasks.tracking.mdp.commands import MotionCommand
+from whole_body_tracking.tasks.tracking.mdp.commands import (
+    MotionCommand,
+    resolve_clip_family_is_forehand,
+)
 from whole_body_tracking.tasks.tracking.mdp.planner_revision import (
     InitialTtsMixture,
     PhaseGovernorProfile,
@@ -214,6 +217,10 @@ class RacketTargetCommand(CommandTerm):
         # unconditionally safe; it is only ever written when the bank is active.
         self.target_normal_cmd = torch.zeros(self.num_envs, 3, device=self.device)
         self._question_bank = None
+        # clip→题库族查表缓存((nseg,) long;forehand 族=0/backhand 族=1)。只有配了
+        # cfg.motion.clip_family_per_clip(6-clip 变速列表)才会建;缺席 = None = 现役行为
+        # 逐字节不变(clip_id 直接当题库下标)。见 _qb_bank_family_table。
+        self._qb_family_table = None
         # face_command without a bank would leave target_normal_cmd all-zero: the re-anchored
         # racket_normal reward reads cos = <n_fk, 0> = 0 -> a CONSTANT kernel, i.e. the face reward
         # silently dead while looking configured. Loud error instead.
@@ -348,6 +355,12 @@ class RacketTargetCommand(CommandTerm):
         # 校验后落地)。None = cfg 表为空 = 全部 clip 用标量 mount_normal_sign(现役行为,逐位不变)。
         # 病根见 cfg.mount_normal_sign_per_clip 的注释:正反手用拍子相反的两面,单一符号钉死反手拍面。
         self._mount_sign_per_clip_t = None
+        # 每 clip 的"是不是正手家族"bool 表([num_segments] 张量,懒构建:第一次查表时从 motion 术语的
+        # cfg.clip_family_per_clip 解析,fail-loud;见 _clip_family_is_forehand)。None = 还没解析。
+        # 用途(spdmix v2 硬绑定一):swing_sign / uniform 目标 y 侧 / 事件与考卷安装原来四处写死
+        # ``clips == 0`` = 正手,6-clip 变速列表里正手 1.0/1.2 变体会被误判成反手;现在全部按这张表取。
+        # 缺席配置时表按"单 clip 正手 / 恰 2 clip = (正手, 反手)"推导,与写死判断逐字节同值。
+        self._family_is_forehand_t = None
         # Per-clip reference paddle FACE NORMAL at the strike frame ([num_segments, 3], built lazily). In
         # uniform mode the target normal is set to the imitated swing's actual paddle normal (which the
         # policy can achieve) — NOT the racket-velocity direction, which is ~18-110 deg off the +Y blade
@@ -1213,13 +1226,26 @@ class RacketTargetCommand(CommandTerm):
         if schedule is None:
             raise RuntimeError("post_strike_t1 has no loaded immutable schedule")
         counts = bank.counts.to(device=self.device, dtype=torch.long)
+        # 族寻址(clip_family_per_clip 配了才有;None = 现役行为逐字节不变):日程行的 clip_id
+        # 是加载 clip 序号,题库下标要过族表折算。内容寻址的 question_id 对账保持不变——族表
+        # 配错时哪怕越界检查侥幸通过,问题指纹也对不上,照样当场炸。
+        family_table = self._qb_bank_family_table(motion, bank)
         for flat_index, row in enumerate(schedule.rows):
-            if row.clip_id >= len(counts) or row.bank_row >= int(counts[row.clip_id]):
+            if family_table is None:
+                bank_clip = row.clip_id
+            elif 0 <= row.clip_id < int(family_table.shape[0]):
+                bank_clip = int(family_table[row.clip_id])
+            else:
+                raise ValueError(
+                    f"event schedule row {flat_index} references clip {row.clip_id} outside "
+                    f"the loaded motion's {int(family_table.shape[0])} clip(s)"
+                )
+            if bank_clip >= len(counts) or row.bank_row >= int(counts[bank_clip]):
                 raise ValueError(
                     f"event schedule row {flat_index} references unavailable train-bank row "
                     f"clip={row.clip_id} bank_row={row.bank_row}"
                 )
-            incoming = bank.incoming_vel[row.clip_id, row.bank_row].detach().cpu().numpy()
+            incoming = bank.incoming_vel[bank_clip, row.bank_row].detach().cpu().numpy()
             actual_id = question_id(incoming)
             if actual_id != row.question_id:
                 raise ValueError(
@@ -1245,6 +1271,7 @@ class RacketTargetCommand(CommandTerm):
             files,
             [int(value) for value in ml.seg_len.tolist()],
             phases,
+            clip_families=(family_table.tolist() if family_table is not None else None),
         )
         native_ticks = []
         for clip_id in range(nseg):
@@ -1291,6 +1318,56 @@ class RacketTargetCommand(CommandTerm):
                 f"got {mns}"
             )
         return mns
+
+    def _clip_family_is_forehand(self) -> torch.Tensor:
+        """[num_segments] bool 表:True = 该 clip 属正手家族(懒构建 + fail-loud)。
+
+        人话:替换四处写死的"clips==0 才是正手"判断(spdmix v2 硬绑定一)。没配
+        task.motion.clip_family_per_clip 时按老规矩推——单 clip 当正手、恰好 2 clip = (正手, 反手),
+        和写死判断逐字节同值(现役所有在跑臂);≥3 clip 缺表当场报错,不猜。配了表按表取:同一家族的
+        变速 clip(如正手 0.8/1.0/1.2)swing_sign、swing_type 观测、目标侧全一致。解析/校验规则的
+        单一来源是 commands.resolve_clip_family_is_forehand(和 MotionCommand 开机校验同一份)。
+        """
+        if self._family_is_forehand_t is None:
+            motion = self._motion()
+            self._family_is_forehand_t = torch.tensor(
+                resolve_clip_family_is_forehand(
+                    getattr(getattr(motion, "cfg", None), "clip_family_per_clip", None),
+                    int(motion.motion.num_segments),
+                ),
+                dtype=torch.bool,
+                device=self.device,
+            )
+        return self._family_is_forehand_t
+
+    def _qb_bank_family_table(self, motion, bank) -> torch.Tensor | None:
+        """clip→题库族查表 ((nseg,) long;forehand 族=0 行, backhand 族=1 行),或 None。
+
+        人话(spdmix v2 硬绑定二):题库永远只有正/反手两族题;6-clip 变速列表里每个 clip 先查
+        自己属于哪族,再拿族号当题库下标。cfg.motion.clip_family_per_clip 没配(现役所有在跑臂)
+        返回 None,调用方直接拿 clip_id 当题库下标——行为逐字节不变。配了表就复用
+        _clip_family_is_forehand()(和 swing_sign 同一份 boot 已整表校验的表)折成题库行号;
+        族寻址的允许 motion SHA 列表住在 schema-v3 元数据里,legacy 题库配族表当场报错,不猜。
+        """
+        if getattr(getattr(motion, "cfg", None), "clip_family_per_clip", None) is None:
+            return None
+        if self._qb_family_table is None:
+            metadata = getattr(bank, "metadata", None)
+            if not metadata:
+                raise ValueError(
+                    "clip_family_per_clip requires a schema-v3 question bank: a legacy bank "
+                    "carries no per-family motion-SHA contract to reconcile the extra speed "
+                    "clips against (allow_legacy 题库不配变速族表)"
+                )
+            order = list(metadata.get("clip_order") or [])
+            if order != ["forehand", "backhand"]:
+                raise ValueError(
+                    f"question bank clip_order {order!r} does not match the (forehand, "
+                    f"backhand) family convention required by clip_family_per_clip"
+                )
+            is_forehand = self._clip_family_is_forehand()
+            self._qb_family_table = (~is_forehand).to(dtype=torch.long)
+        return self._qb_family_table
 
     def _strike_frame_for_clip(self, motion, clip_id: int) -> tuple[int, float, int, int]:
         """Return (global strike frame, phase, segment start, segment len) for one reference clip."""
@@ -1518,13 +1595,15 @@ class RacketTargetCommand(CommandTerm):
             # Shared box (legacy / single-clip): identical sampling to before — backward compatible.
             pos[:, 0] += sample_uniform(*self.cfg.racket_pos_x_range, (n,), self.device)
             if motion._multiseg:
-                # Unified policy: the target Y region is conditioned on the swing TYPE (clip) so forehand and
-                # backhand regions are non-overlapping (HITTER §IV). Sample |y| and set the sign per clip:
-                # forehand (clip 0) on -y if forehand_on_negative_y, backhand (clip 1) on the opposite side.
+                # Unified policy: the target Y region is conditioned on the swing FAMILY so forehand and
+                # backhand regions are non-overlapping (HITTER §IV). Sample |y| and set the sign per clip
+                # via the family table (clip_family_per_clip; absent = the legacy (forehand, backhand)
+                # 2-clip derivation, byte-identical to the old clips==0 hardcode): forehand-family clips
+                # on -y if forehand_on_negative_y, backhand-family clips on the opposite side.
                 clip = motion.clip_id[env_ids]
                 ymag = sample_uniform(*self.cfg.racket_pos_y_abs_range, (n,), self.device)
                 fh_sign = -1.0 if self.cfg.forehand_on_negative_y else 1.0
-                sign = torch.where(clip == 0, fh_sign, -fh_sign)
+                sign = torch.where(self._clip_family_is_forehand()[clip], fh_sign, -fh_sign)
                 pos[:, 1] = origins[:, 1] + sign * ymag
             else:
                 pos[:, 1] += sample_uniform(*self.cfg.racket_pos_y_range, (n,), self.device)
@@ -1772,8 +1851,13 @@ class RacketTargetCommand(CommandTerm):
             clip = motion.clip_id[env_ids]
         else:
             clip = torch.zeros(n, dtype=torch.long, device=self.device)
+        # 族寻址:clip → 题库族行(clip_family_per_clip 缺席 = None = clip_id 直接当下标,
+        # 现役行为逐字节不变;同族变速 clip 共享同一份题目/答案——烤入片段触球行逐位相同,
+        # 复用合法,见 validate_runtime_motion_contract 的族级 SHA 对账)。
+        family_table = self._qb_bank_family_table(motion, self._question_bank)
+        bank_clip = clip if family_table is None else family_table[clip]
         pos, incoming_vel, incoming_spin, vel, nrm, diff = select_questions(
-            self._question_bank, clip, torch.rand(n, device=self.device)
+            self._question_bank, bank_clip, torch.rand(n, device=self.device)
         )
         self.racket_target_pos_w[env_ids] = origins + pos
         self.racket_target_vel_w[env_ids] = vel
@@ -1806,11 +1890,19 @@ class RacketTargetCommand(CommandTerm):
         if not torch.equal(live_clips, clips):
             raise RuntimeError("event motion and atomic train-bank question clips disagree")
         counts = self._question_bank.counts.to(device=self.device, dtype=torch.long)
+        # 族寻址:题库行号 = 族表[clip](族表缺席 = clip 直接当行号,现役行为逐字节不变)。
+        family_table = self._qb_bank_family_table(motion, self._question_bank)
+        if family_table is None:
+            bank_clips = clips
+        else:
+            if torch.any(clips < 0) or torch.any(clips >= int(family_table.shape[0])):
+                raise ValueError("event question install references an invalid motion clip")
+            bank_clips = family_table[clips]
         if (
-            torch.any(clips < 0)
-            or torch.any(clips >= len(counts))
+            torch.any(bank_clips < 0)
+            or torch.any(bank_clips >= len(counts))
             or torch.any(rows < 0)
-            or torch.any(rows >= counts[clips])
+            or torch.any(rows >= counts[bank_clips])
         ):
             raise ValueError("event question install references an invalid train-bank row")
         if not self._qb_face_frame_checked:
@@ -1818,15 +1910,15 @@ class RacketTargetCommand(CommandTerm):
 
         origins = self._env.scene.env_origins[ids]
         bank = self._question_bank
-        contact = bank.contact_pos[clips]
+        contact = bank.contact_pos[bank_clips]
         self.racket_target_pos_w[ids] = origins + contact
-        self.racket_target_vel_w[ids] = bank.demanded_vel[clips, rows]
-        demanded_normal = bank.demanded_normal[clips, rows]
+        self.racket_target_vel_w[ids] = bank.demanded_vel[bank_clips, rows]
+        demanded_normal = bank.demanded_normal[bank_clips, rows]
         self.racket_target_normal_w[ids] = demanded_normal
         self.target_normal_cmd[ids] = demanded_normal
-        self.vb_vel_in_w[ids] = bank.incoming_vel[clips, rows]
-        self.vb_spin_in_w[ids] = bank.incoming_spin[clips, rows]
-        self.metrics["question_difficulty_deg"][ids] = bank.difficulty_deg[clips, rows]
+        self.vb_vel_in_w[ids] = bank.incoming_vel[bank_clips, rows]
+        self.vb_spin_in_w[ids] = bank.incoming_spin[bank_clips, rows]
+        self.metrics["question_difficulty_deg"][ids] = bank.difficulty_deg[bank_clips, rows]
 
         # Bank training uses a pinned ready anchor.  Do not draw a fresh base jitter here: the
         # immutable question row and its clip/deadline are installed as one deterministic message.
@@ -1834,7 +1926,9 @@ class RacketTargetCommand(CommandTerm):
         self.station_anchor_pos_w[ids] = origins[:, :2] + torch.tensor(
             self.cfg.station_anchor_offset_xy, dtype=torch.float32, device=self.device
         )
-        self.swing_sign[ids] = torch.where(clips == 0, 1.0, -1.0)
+        # Swing type by clip FAMILY (clip_family_per_clip; absent = the legacy 2-clip derivation,
+        # byte-identical to the old clips==0 hardcode).
+        self.swing_sign[ids] = torch.where(self._clip_family_is_forehand()[clips], 1.0, -1.0)
 
         # This is an intra-episode post-strike transition: close the previous swing's ledger and
         # start the new one, but do not classify it as a pre-strike fall and do not reset session
@@ -1905,12 +1999,23 @@ class RacketTargetCommand(CommandTerm):
         if not isinstance(metadata, dict) or metadata.get("split") != "exam":
             raise ValueError("external BankExam requires a validated schema-v3 exam split")
         counts = exam_bank.counts.to(device=self.device, dtype=torch.long)
-        if torch.any(clips < 0) or torch.any(clips >= len(counts)):
-            raise ValueError("external exam clip ids are outside the exam bank")
-        if torch.any(rows < 0) or torch.any(rows >= counts[clips]):
+        motion = self._motion()
+        # 族寻址(clip_family_per_clip 配了才有;None = 现役行为逐字节不变):考卷传进来的
+        # clip_ids 是加载 clip 序号,题库行号要过族表折算,同族变速 clip 共享同一族考题。
+        family_table = self._qb_bank_family_table(motion, exam_bank)
+        if family_table is None:
+            if torch.any(clips < 0) or torch.any(clips >= len(counts)):
+                raise ValueError("external exam clip ids are outside the exam bank")
+            bank_clips = clips
+        else:
+            if torch.any(clips < 0) or torch.any(clips >= int(family_table.shape[0])):
+                raise ValueError("external exam clip ids are outside the loaded motion clips")
+            bank_clips = family_table[clips]
+            if torch.any(bank_clips >= len(counts)):
+                raise ValueError("external exam clip family is outside the exam bank")
+        if torch.any(rows < 0) or torch.any(rows >= counts[bank_clips]):
             raise ValueError("external exam row is outside its clip's validated question count")
 
-        motion = self._motion()
         live_clips = motion.clip_id[ids] if motion._multiseg else torch.zeros_like(clips)
         if not torch.equal(live_clips, clips):
             raise ValueError(
@@ -1919,26 +2024,29 @@ class RacketTargetCommand(CommandTerm):
 
         # The same +Y/A-frame guard used by training, now against the independently loaded exam
         # bank.  Checking all rows makes a bad regenerated bank fail before any score is emitted.
+        # 族寻址下逐"加载 clip"核:每个 clip 用自己的参考面对照其族的全部考题法向。
         self._ensure_reference_strike_state()
         ref_raw = self._ref_racket_normal_raw_w_per_clip
-        if ref_raw is None or ref_raw.shape[0] < len(counts):
+        n_guard = len(counts) if family_table is None else int(family_table.shape[0])
+        if ref_raw is None or ref_raw.shape[0] < n_guard:
             raise RuntimeError("external exam could not resolve per-clip raw face normals")
         demanded_all = exam_bank.demanded_normal.to(self.device)
-        for clip in range(len(counts)):
-            count = int(counts[clip])
-            dots = torch.mv(demanded_all[clip, :count], ref_raw[clip])
+        for clip in range(n_guard):
+            fam = clip if family_table is None else int(family_table[clip])
+            count = int(counts[fam])
+            dots = torch.mv(demanded_all[fam, :count], ref_raw[clip])
             if float(dots.min()) <= 0.0:
                 raise ValueError(
                     f"external exam clip {clip} contains a demanded normal opposite the +Y/A frame"
                 )
 
         origins = self._env.scene.env_origins[ids]
-        contact = exam_bank.contact_pos.to(self.device)[clips]
-        incoming_vel = exam_bank.incoming_vel.to(self.device)[clips, rows]
-        incoming_spin = exam_bank.incoming_spin.to(self.device)[clips, rows]
-        demanded_vel = exam_bank.demanded_vel.to(self.device)[clips, rows]
-        demanded_normal = demanded_all[clips, rows]
-        difficulty = exam_bank.difficulty_deg.to(self.device)[clips, rows]
+        contact = exam_bank.contact_pos.to(self.device)[bank_clips]
+        incoming_vel = exam_bank.incoming_vel.to(self.device)[bank_clips, rows]
+        incoming_spin = exam_bank.incoming_spin.to(self.device)[bank_clips, rows]
+        demanded_vel = exam_bank.demanded_vel.to(self.device)[bank_clips, rows]
+        demanded_normal = demanded_all[bank_clips, rows]
+        difficulty = exam_bank.difficulty_deg.to(self.device)[bank_clips, rows]
 
         self.racket_target_pos_w[ids] = origins + contact
         self.racket_target_vel_w[ids] = demanded_vel
@@ -1971,7 +2079,9 @@ class RacketTargetCommand(CommandTerm):
         self.station_anchor_pos_w[ids] = origins[:, :2] + torch.tensor(
             self.cfg.station_anchor_offset_xy, dtype=torch.float32, device=self.device
         )
-        self.swing_sign[ids] = torch.where(clips == 0, 1.0, -1.0)
+        # Swing type by clip FAMILY (clip_family_per_clip; absent = the legacy 2-clip derivation,
+        # byte-identical to the old clips==0 hardcode).
+        self.swing_sign[ids] = torch.where(self._clip_family_is_forehand()[clips], 1.0, -1.0)
 
         self._exact_fired[ids] = False
         self._prev_motion_steps[ids] = motion.time_steps[ids]
@@ -2012,8 +2122,12 @@ class RacketTargetCommand(CommandTerm):
         if self._ref_racket_normal_raw_w_per_clip is None:
             raise RuntimeError("reference strike-state initialization produced no raw face normals")
         bank = self._question_bank
+        family_table = None
         if bank.metadata:
             motion = self._motion()
+            # 族寻址(clip_family_per_clip 配了才有;None = 现役行为逐字节不变):运行时 motion
+            # 对账按"每 clip 的 SHA ∈ 其族允许列表"核,下面的 +Y 卫兵也按族取题、逐 clip 对面。
+            family_table = self._qb_bank_family_table(motion, bank)
             files = (
                 [motion.cfg.motion_file]
                 if isinstance(motion.cfg.motion_file, str)
@@ -2031,17 +2145,26 @@ class RacketTargetCommand(CommandTerm):
                 files,
                 [int(value) for value in motion.motion.seg_len.tolist()],
                 phases,
+                clip_families=(family_table.tolist() if family_table is not None else None),
             )
         nseg = int(self._ref_racket_normal_raw_w_per_clip.shape[0])
-        for c in range(min(int(bank.counts.shape[0]), nseg)):
-            q = int(bank.counts[c])
+        n_guard = (
+            min(int(bank.counts.shape[0]), nseg)
+            if family_table is None
+            else min(int(family_table.shape[0]), nseg)
+        )
+        for c in range(n_guard):
+            fam = c if family_table is None else int(family_table[c])
+            q = int(bank.counts[fam])
             if q <= 0:
                 continue
-            rows = bank.demanded_normal[c, :q]
+            rows = bank.demanded_normal[fam, :q]
             ref_raw = self._ref_racket_normal_raw_w_per_clip[c]
             d = torch.mv(rows, ref_raw)
             min_d = float(d.min())
-            cname = self._clip_names.get(c, f"clip{c}")
+            cname = self._clip_names.get(fam, f"clip{fam}")
+            if family_table is not None:
+                cname = f"{cname}[clip{c}]"
             if min_d <= 0.0:
                 raise ValueError(
                     f"question bank {self.cfg.question_bank!r} clip {cname!r}: "
@@ -2071,10 +2194,17 @@ class RacketTargetCommand(CommandTerm):
         contact point into the base demand and reward stepping toward it — exactly what the
         stand-your-ground gate (root-XY excursion < 0.15 m, 0 steps) must rule out. Instead the
         SAME coupling is evaluated ONCE with the bank's FIXED contact point and reused verbatim.
+
+        族寻址(clip_family_per_clip 配了才有)下表按"加载 clip"展开成 (nseg, 2):同族变速
+        clip 共享该族的固定触球点,但 reference_perturbed 的 reach offset 是逐 clip 的,所以锚
+        点也逐 clip 各算各的。两处调用端都拿运行时 clip_id 直接下标,两种模式行号语义一致。
         """
         if self._qb_base_anchor is not None:
             return self._qb_base_anchor
         contact = self._question_bank.contact_pos  # (C, 3), tracking-env frame
+        family_table = self._qb_bank_family_table(self._motion(), self._question_bank)
+        if family_table is not None:
+            contact = contact[family_table]  # (nseg, 3): one row per LOADED clip
         if self.cfg.target_mode == "reference_perturbed":
             self._ensure_reference_strike_state()
             if self._ref_reach_offset_xy_per_clip is None:
@@ -2200,11 +2330,15 @@ class RacketTargetCommand(CommandTerm):
             self.cfg.station_anchor_offset_xy, dtype=torch.float32, device=self.device
         )
 
-        # Swing type. Unified multi-clip: it IS the imitated clip (forehand=clip 0 -> +1, backhand=clip 1
-        # -> -1), matching the swing_type observation. Single-clip legacy: infer from the target Y side.
+        # Swing type. Unified multi-clip: it IS the imitated clip's FAMILY (forehand family -> +1,
+        # backhand family -> -1; clip_family_per_clip, absent = the legacy (forehand, backhand) 2-clip
+        # derivation, byte-identical to the old clips==0 hardcode), matching the swing_type
+        # observation. Single-clip legacy: infer from the target Y side.
         if motion._multiseg:
             clip = motion.clip_id[env_ids]
-            self.swing_sign[env_ids] = torch.where(clip == 0, 1.0, -1.0)
+            self.swing_sign[env_ids] = torch.where(
+                self._clip_family_is_forehand()[clip], 1.0, -1.0
+            )
         else:
             base_y_nom = origins[:, 1] + self.cfg.base_nominal_offset[1]
             dy = self.racket_target_pos_w[env_ids][:, 1] - base_y_nom
