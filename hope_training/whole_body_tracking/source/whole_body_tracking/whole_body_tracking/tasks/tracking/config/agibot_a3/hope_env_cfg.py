@@ -1034,6 +1034,30 @@ class HOPEVirtualBallRewardsCfg(HOPEDeployParityRewardsCfg):
         },
     )
 
+    # Wave Q qbar (DEFAULT OFF): all-joint q_des position-limit barrier — Jiayi V14's 全关节
+    # top-k qdes barrier idea with the top-k removed (Franco 2026-07-21).  Every one of the 31
+    # deploy-space targets pays as soon as it enters the margin band (margin_frac of its motion
+    # range) next to a position limit, on every control step in every phase (dense, no gate).
+    # The zero-valued probe books above-margin joint counts and the max intrusion depth for every
+    # explicitly configured control/treatment arm.  人话:目标角贴近限位就罚,全身 31 关节全程
+    # 盯着,不挑"最狠的几个";默认全关,配了就必带探针记账。
+    qdes_limit_barrier = RewTerm(
+        func=mdp.qdes_limit_barrier,
+        weight=0.0,
+        params={
+            "action_name": "joint_pos",
+            "margin_frac": 0.08,
+        },
+    )
+    qdes_limit_barrier_probe = RewTerm(
+        func=mdp.qdes_limit_barrier_probe,
+        weight=0.0,
+        params={
+            "action_name": "joint_pos",
+            "margin_frac": 0.08,
+        },
+    )
+
     # Wave B (DEFAULT OFF): two mutually exclusive lower-body stability hypotheses.  B1 pays a
     # bounded pose kernel on the exact twelve leg joints from the current v4rg motion command.
     # B2 is reference-free: it combines an absolute anti-collapse stance-width hinge with only

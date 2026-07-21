@@ -1153,6 +1153,279 @@ def consume_processed_qdes_slew_hinge_activation_counters(
     return snapshot
 
 
+# Wave-Q qdes limit barrier ------------------------------------------------------------------- #
+#
+# All-joint deploy-space q_des position-limit barrier.  Unlike processed_qdes_slew_hinge (a rate
+# hinge on a 15-joint subset inside the recovery window), this term charges every one of the 31
+# joints, every control step, as soon as the commanded target enters the margin band next to a
+# position limit.  人话:哪个关节的目标角贴到限位边上就罚哪个,全身 31 个关节全程盯着,
+# 不挑"最狠的几个"。
+_QDES_LIMIT_BARRIER_JOINT_COUNT = 31
+_QDES_LIMIT_BARRIER_ACTIVATION_ATTR = "_hope_qdes_limit_barrier_activation_counters"
+_QDES_LIMIT_BARRIER_OBSERVED_STEP_ATTR = "_hope_qdes_limit_barrier_observed_step"
+_QDES_LIMIT_BARRIER_ACTIVE_STEP_ATTR = "_hope_qdes_limit_barrier_active_step"
+_QDES_LIMIT_BARRIER_SIGNATURE_ATTR = "_hope_qdes_limit_barrier_signature"
+_QDES_LIMIT_BARRIER_OBSERVED_COUNT = "observed_sample_count"
+_QDES_LIMIT_BARRIER_ABOVE_MARGIN_JOINT_COUNT = "above_margin_joint_count"
+_QDES_LIMIT_BARRIER_ABOVE_MARGIN_SAMPLE_COUNT = "above_margin_sample_count"
+_QDES_LIMIT_BARRIER_MAX_INTRUSION = "max_intrusion_depth_frac"
+_QDES_LIMIT_BARRIER_VALUE_SUM = "barrier_value_sum"
+_QDES_LIMIT_BARRIER_ACTIVE_COUNT = "reward_enabled_sample_count"
+
+
+def _qdes_limit_barrier_values(
+    env: ManagerBasedRLEnv,
+    action_name: str = "joint_pos",
+    margin_frac: float = 0.08,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return the per-env barrier value and the per-joint intrusion depth.
+
+    For EVERY joint j of the 31-joint A3 articulation (no top-k, no subset)::
+
+        d_j = min(q_des_j - lo_j, hi_j - q_des_j) / (hi_j - lo_j)     # normalized limit distance
+        t_j = relu(margin_frac - d_j) / margin_frac                    # intrusion depth in [0, 1+]
+        value = sum_j(1 - exp(-t_j^2))                                 # per-joint bounded tails, summed
+
+    SUM aggregation (Franco 2026-07-21 裁定): mean 是稀释器——单关节违规被 ÷31,top-k 的
+    "挑几个狠罚"其实就是在补这个稀释;去 top-k 的正当性来自 sum:违规几个关节就罚几份,
+    每个关节的 tail 有界 (t→∞ 时 →1),满违规单关节 tail≈1,权重 -0.65 下每步约 -0.65×dt.
+    Dense: charged on every control step in every phase (no strike/recovery gate) — 对标 Jiayi
+    v14 的全程 barrier.  q_des is the SAME processed (affine + clamp) target the PD controller
+    receives, and lo/hi are the SAME soft_joint_pos_limits the deploy-parity clamp uses.
+    """
+
+    if action_name != "joint_pos":
+        raise ValueError("qdes_limit_barrier action_name must be exactly 'joint_pos'")
+    if isinstance(margin_frac, bool):
+        raise ValueError(
+            "qdes_limit_barrier margin_frac must be finite and in (0, 0.5)"
+        )
+    margin_frac = float(margin_frac)
+    if not math.isfinite(margin_frac) or not 0.0 < margin_frac < 0.5:
+        raise ValueError(
+            "qdes_limit_barrier margin_frac must be finite and in (0, 0.5)"
+        )
+
+    action = env.action_manager.get_term(action_name)
+    processed = getattr(action, "processed_actions", None)
+    if not torch.is_tensor(processed) or processed.ndim != 2:
+        raise RuntimeError(
+            "qdes_limit_barrier requires processed q_des targets from joint_pos"
+        )
+
+    asset = getattr(action, "_asset", None)
+    data = getattr(asset, "data", None)
+    runtime_names = list(
+        getattr(data, "joint_names", getattr(asset, "joint_names", ()))
+    )
+    action_names = list(getattr(action, "_joint_names", ()))
+    joint_count = len(runtime_names)
+    if (
+        joint_count != _QDES_LIMIT_BARRIER_JOINT_COUNT
+        or len(set(runtime_names)) != joint_count
+        or action_names != runtime_names
+        or tuple(processed.shape)[1] != joint_count
+    ):
+        raise RuntimeError(
+            "qdes_limit_barrier requires identity 31-joint A3 action/articulation order"
+        )
+    raw_joint_ids = getattr(action, "_joint_ids", slice(None))
+    if isinstance(raw_joint_ids, slice):
+        action_joint_ids = list(range(joint_count))[raw_joint_ids]
+    else:
+        if hasattr(raw_joint_ids, "tolist"):
+            raw_joint_ids = raw_joint_ids.tolist()
+        action_joint_ids = [int(value) for value in raw_joint_ids]
+    if action_joint_ids != list(range(joint_count)):
+        raise RuntimeError(
+            "qdes_limit_barrier requires identity 31-joint A3 action/articulation order"
+        )
+
+    limits = getattr(data, "soft_joint_pos_limits", None)
+    if not torch.is_tensor(limits):
+        raise RuntimeError(
+            "qdes_limit_barrier requires runtime articulation soft joint position limits"
+        )
+    if limits.ndim == 2 and tuple(limits.shape) == (joint_count, 2):
+        lower = limits[:, 0]
+        upper = limits[:, 1]
+    elif (
+        limits.ndim == 3
+        and tuple(limits.shape)[1] == joint_count
+        and tuple(limits.shape)[2] == 2
+        and tuple(limits.shape)[0] in (1, tuple(processed.shape)[0])
+    ):
+        lower = limits[:, :, 0]
+        upper = limits[:, :, 1]
+    else:
+        raise RuntimeError(
+            "qdes_limit_barrier requires soft_joint_pos_limits shaped [31,2], [1,31,2], or [num_envs,31,2]"
+        )
+    span = upper - lower
+    limits_valid = torch.all(
+        torch.isfinite(lower) & torch.isfinite(upper) & span.gt(0.0)
+    )
+    if limits_valid.device.type == "cpu":
+        if not bool(limits_valid):
+            raise RuntimeError(
+                "qdes_limit_barrier requires finite joint position limits with lo < hi"
+            )
+    else:
+        torch._assert_async(limits_valid)
+
+    distance = torch.minimum(processed - lower, upper - processed) / span
+    intrusion = torch.relu(margin_frac - distance) / margin_frac
+    value = torch.sum(1.0 - torch.exp(-torch.square(intrusion)), dim=-1)
+    return value, intrusion
+
+
+def _qdes_limit_barrier_counter_state(
+    env: ManagerBasedRLEnv, template: torch.Tensor
+) -> dict[str, torch.Tensor]:
+    state = getattr(env, _QDES_LIMIT_BARRIER_ACTIVATION_ATTR, None)
+    if state is None:
+        state = {
+            _QDES_LIMIT_BARRIER_OBSERVED_COUNT: torch.zeros(
+                (), dtype=torch.long, device=template.device
+            ),
+            _QDES_LIMIT_BARRIER_ABOVE_MARGIN_JOINT_COUNT: torch.zeros(
+                (), dtype=torch.long, device=template.device
+            ),
+            _QDES_LIMIT_BARRIER_ABOVE_MARGIN_SAMPLE_COUNT: torch.zeros(
+                (), dtype=torch.long, device=template.device
+            ),
+            _QDES_LIMIT_BARRIER_MAX_INTRUSION: torch.zeros(
+                (), dtype=template.dtype, device=template.device
+            ),
+            _QDES_LIMIT_BARRIER_VALUE_SUM: torch.zeros(
+                (), dtype=template.dtype, device=template.device
+            ),
+            _QDES_LIMIT_BARRIER_ACTIVE_COUNT: torch.zeros(
+                (), dtype=torch.long, device=template.device
+            ),
+        }
+        setattr(env, _QDES_LIMIT_BARRIER_ACTIVATION_ATTR, state)
+    return state
+
+
+def _record_qdes_limit_barrier_activation(
+    env: ManagerBasedRLEnv,
+    values: torch.Tensor,
+    intrusion: torch.Tensor,
+    *,
+    barrier_active: bool,
+    signature: tuple[str, float],
+) -> None:
+    """Book one simulator step, idempotently sharing the probe and real term."""
+
+    token = getattr(env, "common_step_counter", None)
+    token = token if type(token) is int else None
+    state = _qdes_limit_barrier_counter_state(env, values)
+    already_observed = (
+        token is not None
+        and getattr(env, _QDES_LIMIT_BARRIER_OBSERVED_STEP_ATTR, None) == token
+    )
+    if already_observed:
+        if getattr(env, _QDES_LIMIT_BARRIER_SIGNATURE_ATTR, None) != signature:
+            raise RuntimeError(
+                "qdes limit barrier probe and RewardTerm used different parameters in one step"
+            )
+    else:
+        above = intrusion.detach().gt(0.0)
+        state[_QDES_LIMIT_BARRIER_OBSERVED_COUNT].add_(values.numel())
+        state[_QDES_LIMIT_BARRIER_ABOVE_MARGIN_JOINT_COUNT].add_(
+            above.sum(dtype=torch.long)
+        )
+        state[_QDES_LIMIT_BARRIER_ABOVE_MARGIN_SAMPLE_COUNT].add_(
+            torch.any(above, dim=-1).sum(dtype=torch.long)
+        )
+        state[_QDES_LIMIT_BARRIER_MAX_INTRUSION].copy_(
+            torch.maximum(
+                state[_QDES_LIMIT_BARRIER_MAX_INTRUSION], intrusion.detach().max()
+            )
+        )
+        state[_QDES_LIMIT_BARRIER_VALUE_SUM].add_(values.detach().sum())
+        if token is not None:
+            setattr(env, _QDES_LIMIT_BARRIER_OBSERVED_STEP_ATTR, token)
+            setattr(env, _QDES_LIMIT_BARRIER_SIGNATURE_ATTR, signature)
+    if barrier_active and (
+        token is None
+        or getattr(env, _QDES_LIMIT_BARRIER_ACTIVE_STEP_ATTR, None) != token
+    ):
+        state[_QDES_LIMIT_BARRIER_ACTIVE_COUNT].add_(values.numel())
+        if token is not None:
+            setattr(env, _QDES_LIMIT_BARRIER_ACTIVE_STEP_ATTR, token)
+
+
+def qdes_limit_barrier_probe(
+    env: ManagerBasedRLEnv,
+    action_name: str = "joint_pos",
+    margin_frac: float = 0.08,
+) -> torch.Tensor:
+    """Measure the q_des limit barrier while contributing exact zero reward.
+
+    Same design provenance as :func:`qdes_limit_barrier` — Jiayi V14 全关节 top-k qdes barrier
+    思想,去 top-k 重做(Franco 指示),-0.65/margin 0.08 取自 v14 起点.  人话:零权重探针,
+    只记账(贴限位的关节数、最大侵入深度),不改任何奖励。
+    """
+
+    values, intrusion = _qdes_limit_barrier_values(env, action_name, margin_frac)
+    _record_qdes_limit_barrier_activation(
+        env,
+        values,
+        intrusion,
+        barrier_active=False,
+        signature=(action_name, float(margin_frac)),
+    )
+    return torch.zeros_like(values)
+
+
+def qdes_limit_barrier(
+    env: ManagerBasedRLEnv,
+    action_name: str = "joint_pos",
+    margin_frac: float = 0.08,
+) -> torch.Tensor:
+    """Penalize processed q_des targets inside the margin band next to a position limit.
+
+    Jiayi V14 全关节 top-k qdes barrier 思想,去 top-k 重做(Franco 指示):全部 31 个关节直接罚,
+    不做 top-k、不做子集;-0.65/margin 0.08 取自 v14 起点.  Per-joint bounded tails are SUMMED,
+    not averaged (Franco: mean 把单关节违规 ÷31 稀释掉;sum 让违规几个关节就罚几份,这也是
+    去 top-k 的正当性所在;满违规单关节 tail≈1 → 每步约 -0.65×dt).  Dense — charged on every
+    control step in every phase, matching V14's whole-episode barrier.  人话:目标角贴到限位
+    边缘就开始扣钱,越贴越狠,几个关节贴就扣几份,全身关节一视同仁,全程有效。
+    """
+
+    values, intrusion = _qdes_limit_barrier_values(env, action_name, margin_frac)
+    _record_qdes_limit_barrier_activation(
+        env,
+        values,
+        intrusion,
+        barrier_active=True,
+        signature=(action_name, float(margin_frac)),
+    )
+    return values
+
+
+def consume_qdes_limit_barrier_activation_counters(
+    env: ManagerBasedRLEnv,
+) -> dict[str, torch.Tensor]:
+    """Snapshot and reset one PPO update's q_des limit-barrier ledger.
+
+    The reset MUST run under ``torch.inference_mode()``: the counters are created during rollout
+    collection (inference mode), and an in-place ``zero_()`` on an inference tensor outside
+    InferenceMode raises at the first PPO log flush.
+    """
+
+    action = env.action_manager.get_term("joint_pos")
+    template = action.processed_actions[:, 0]
+    state = _qdes_limit_barrier_counter_state(env, template)
+    snapshot = {name: value.detach().clone() for name, value in state.items()}
+    with torch.inference_mode():
+        for value in state.values():
+            value.zero_()
+    return snapshot
+
+
 # Wave-B lower-body diagnostics --------------------------------------------------------------- #
 #
 # Both mechanisms below are intentionally default-off and share one phase gate: a bounded

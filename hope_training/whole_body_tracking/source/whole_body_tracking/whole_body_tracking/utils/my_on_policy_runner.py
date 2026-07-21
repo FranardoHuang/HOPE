@@ -399,6 +399,22 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                         self._scalar_tensor(counter_value),
                         step,
                     )
+            if "qdes_limit_barrier_probe" in active_reward_terms:
+                # Wave-Q qbar: weight-independent all-joint q_des limit-barrier ledger
+                # (above-margin joint counts + max intrusion depth).  Consumed exactly once
+                # per PPO update; counts/sums must not be averaged over num_envs.
+                from whole_body_tracking.tasks.tracking.mdp.hope_rewards import (
+                    consume_qdes_limit_barrier_activation_counters,
+                )
+
+                for counter_name, counter_value in (
+                    consume_qdes_limit_barrier_activation_counters(env).items()
+                ):
+                    self._log_scalar(
+                        f"Live/qdes_limit_barrier/{counter_name}",
+                        self._scalar_tensor(counter_value),
+                        step,
+                    )
             if (
                 "lower_body_pose_imitation_probe" in active_reward_terms
                 or "lower_body_stability_bundle_probe" in active_reward_terms

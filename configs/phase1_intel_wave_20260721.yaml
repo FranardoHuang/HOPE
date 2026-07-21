@@ -1,0 +1,428 @@
+schema_version: 1
+queue_id: phase1_intel_wave_20260721
+purpose: >-
+  人话：Wave Q 情报波 8 臂 = 2 父本(W/V) x 4 档情报臂（spdmix 速度泛化混合、
+  hstrong 强 q_des 平滑、fullbody 下肢模仿加重、qbar 全关节 qdes 限位 barrier），
+  基础配方固定为矩阵 C+S0（action_rate=-0.10、slew=0、三个稳定机制 weight=0、
+  测量探针全开；hstrong/qbar 两档把 action_rate 归零是各自档位设计的一部分），
+  从各自 parent model_6700 续训 4001 个 update。依据 Franco 2026-07-21 情报：
+  速度泛化是最高价值泛化轴（spdmix；拍面/引拍/脚步轴降级）；现役 q_des penalty
+  可能太小（hstrong 把恢复窗 slew hinge 提到 -1.0；qbar 按 Jiayi v14 去掉
+  top-k、全关节逐关节求和罚限位 barrier，并去掉 action_rate 让 barrier 当唯一
+  qdes 惩罚）；全身学习可能很有用（fullbody 下肢姿态模仿 +2.0、支持窗放开到
+  全程＝两阶段下肢方案第一阶段）。对照不重复买——矩阵 w_c_s0/v_c_s0 与本波
+  基础配方逐字相同，直接当对照。本波不写死 pod/gpu：空槽即填，渲染时注入目标
+  卡。只渲染命令供人工核对后执行，本队列只做仿真，永不驱动真实机器人。
+simulation_only: true
+real_robot_authorized: false
+launch_authorized_by_default: false
+formal_exact_eligible: false
+evidence_class: diagnostic_only_intentional_parent_contract_mismatch
+
+ssh:
+  key: ~/.ssh/id_ed25519_runpod
+pods:
+  pod1: {host: 162.43.172.171, port: 18333, gpus: [0, 1, 2]}
+  pod2: {host: 162.43.172.181, port: 13146, gpus: [0, 1, 2]}
+
+namespace:
+  root: /workspace/codexschema/phase1_intel_wave_20260721
+  no_clobber: true
+  automatic_retry: false
+
+source:
+  checkout: /workspace/codexschema/nohope_push_20260721
+  identity_mode: clean_detached_exact_commit
+  # 人话：复用 push 波的 checkout；qbar 全关节 barrier wiring 由并行 agent 落盘、
+  # 主控合并后才有最终 40-hex commit。占位符存在时渲染器拒绝出任何 SSH 命令
+  # （--plan/--checklist 不受影响）。
+  commit: "PENDING_EXACT_COMMIT"
+  worktree_relative: hope_training/whole_body_tracking
+  python: /workspace/hope_isaac_venv/bin/python
+  setup_relative: setup_train_env.sh
+  trainer_relative: scripts/train.py
+  locked_launcher_relative: scripts/launch_kit_training_locked.sh
+  note: >-
+    人话：训练从干净的 detached 精确 commit 检出跑；W/V 与后代 hard contract 有意
+    mismatch，所以整条谱系永远不算 formal-exact，胜者档位须另在 exact-lineage 重跑。
+    qbar 两臂另受 qbar_contract.qbar_wiring_confirmed 闸门锁死：本地工作树冻结时
+    grep 无 qdes_limit_barrier wiring，键名按任务书写死，主控合并并逐字核对远端
+    train.py 白名单后才翻 true（其余六臂不受影响）。
+
+watchdog:
+  # 人话：v8/v9 死于 launch_kit_training_locked.sh 写死的 180 s stale 门（Kit 编译
+  # shader 时日志可以安静 10 分钟以上）。本轮远端命令不用那个 launcher，改用
+  # /workspace/bin/kit_boot_lock.sh + setsid nohup 起进程，boot 停滞 1800 s、
+  # 首个迭代出现后停滞 900 s 才判死，之后靠事后 artifact 验证（run.log +
+  # checkpoint 文件）而不是在线看门狗杀进程。
+  boot_stall_timeout_s: 1800
+  post_first_iteration_stall_timeout_s: 900
+  retry_policy: one_verbatim_retry_suffix_r2
+  retry_note: 人话：唯一允许的重试是逐字重发一次，run_name 加 _r2 后缀，仍需人工核对。
+
+assets:
+  a3_runtime_asset_root: /workspace/codexschema/nohope_balance_action_slew_20260720/hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3
+  preconverted_a3_usd: /workspace/codexschema/simple_half_second_sprint_20260718/assets/a3_preconverted_usd/model.usd
+  motion_forehand: /workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_forehand_v4rg_cal.npz
+  motion_backhand: /workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/hope_backhand_v4rg_cal.npz
+  training_question_bank: /workspace/codexschema/phase1_signed_face_rescue_20260713/assets/schema3_bank_rebind_v2/s1_v4rg_runtime_order_schema3_train_882fea4_rebound.npz
+
+controls:
+  # 人话：对照不重复买——矩阵 w_c_s0/v_c_s0 的配方 = 本波去掉情报臂改动后的
+  # 基础配方（C+S0、speed_scale 恒 1.0、无强 hinge、下肢模仿 0、无 barrier），
+  # 汇总时直接对比它们的里程碑。
+  baseline_queue_id: phase1_balance_temporal_matrix_20260720
+  baseline_jobs: [w_c_s0, v_c_s0]
+  baseline_run_names: [p1btm_w_c_s0_seed3_20260720, p1btm_v_c_s0_seed3_20260720]
+  human_note: >-
+    人话：矩阵 w_c_s0/v_c_s0 就是本波的对照（同 C+S0 配方、speed_scale=[1.0,1.0]、
+    slew hinge 0、下肢模仿 0、无 qdes barrier），不再另买对照臂。hstrong 另可参考
+    矩阵 H 档 w_h_s0/v_h_s0（同窗同 margin、hinge -0.25）当剂量对照。
+
+parents:
+  W:
+    human_name: position-heavy plus free non-striking arm
+    checkpoint_iteration: 6700
+    checkpoint_path: /workspace/codexschema/simple_half_second_sprint_20260718/pod1/hs_p1_w_cached_pos_free_seed3/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-17_19-58-17_hs_p1_w_cached_pos_free_seed3/model_6700.pt
+    checkpoint_sha256: 2caab3dde3a0ac6c051ff8ac65385a641cac152aa3f84b640126b5ed7b96fcce
+    hard_contract_path: /workspace/codexschema/simple_half_second_sprint_20260718/pod1/hs_p1_w_cached_pos_free_seed3/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-17_19-58-17_hs_p1_w_cached_pos_free_seed3/params/training_contract.json
+    transfer_mode: full_policy_value_optimizer_normalizer
+    checkpoint_tolerant: false
+    checkpoint_allow_missing_contract: false
+    checkpoint_allow_contract_mismatch: true
+    descendant_formal_exact_eligible: false
+    recipe_overrides:
+      - task.rewards.racket_position_weight=17.0
+      - task.rewards.racket_velocity_weight=7.0
+      - task.rewards.racket_normal_weight=5.0
+      - task.rewards.foot_orientation_weight=-0.3
+      - task.rewards.prestrike_upright_weight=-1.0
+      - ++task.rewards.free_non_striking_arm_mimic=true
+  V:
+    human_name: velocity-heavy plus strong ready posture
+    checkpoint_iteration: 6700
+    checkpoint_path: /workspace/codexschema/simple_half_second_sprint_20260718/pod1/hs_p1_v_cached_vel_ready_seed3/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-17_19-58-18_hs_p1_v_cached_vel_ready_seed3/model_6700.pt
+    checkpoint_sha256: ad9019100f199f23669829b0fbc4f8c2ad45c8073f930348f177da9487332716
+    hard_contract_path: /workspace/codexschema/simple_half_second_sprint_20260718/pod1/hs_p1_v_cached_vel_ready_seed3/logs/rsl_rl/agibot_a3_hope_virtualball/2026-07-17_19-58-18_hs_p1_v_cached_vel_ready_seed3/params/training_contract.json
+    transfer_mode: full_policy_value_optimizer_normalizer
+    checkpoint_tolerant: false
+    checkpoint_allow_missing_contract: false
+    checkpoint_allow_contract_mismatch: true
+    descendant_formal_exact_eligible: false
+    recipe_overrides:
+      - task.rewards.racket_position_weight=7.0
+      - task.rewards.racket_velocity_weight=17.0
+      - task.rewards.racket_normal_weight=5.0
+      - task.rewards.foot_orientation_weight=-0.6
+      - task.rewards.prestrike_upright_weight=-2.0
+      - ++task.rewards.free_non_striking_arm_mimic=false
+
+common:
+  seed: 3
+  planner_revision_override: >-
+    ++task.planner_revision={enabled: true, initial_tts_mixture: {components: [{name: "late_stress", range_s: [0.36, 0.49], weight: 0.10}, {name: "baseline_0p5", range_s: [0.5, 0.5], weight: 0.45}, {name: "fast_deploy", range_s: [0.5, 0.9], weight: 0.40}, {name: "broad_arrival", range_s: [0.9, 1.7], weight: 0.05}], contract_version: "initial_tts_mixture_v1"}, initial_tts_range_s: [0.36, 1.7], normal_std_rad: 0.05, position_std_m: 0.02, profile: {contract_version: "phase_governor_v1", early_deadline_tolerance_s: 1.0e-6, max_deadline_revision_delta_s: 0.25, max_normal_revision_delta_rad: 0.2, max_phase_acceleration_per_s2: 20.0, max_phase_rate_per_s: 4.0, max_position_revision_delta_m: 0.1, max_tts_s: 2.0, max_velocity_revision_delta_mps: 0.5, min_tts_s: 0.02, normal_unit_tolerance: 0.0001, policy_dt_s: 0.02, schema_version: 1}, tts_std_s: 0.08, velocity_std_mps: 0.1}
+  base_overrides:
+    - task=HOPEPingPongVirtualBall
+    - algo=ppo
+    - headless=true
+    - logger=tensorboard
+    - video=false
+    - task.actor_obs_contract=deploy_parity_face179
+    - task.env.episode_length_s=16.0
+    - task.sim.dt=0.005
+    - task.sim.decimation=4
+    - task.actions.qdes_clamp=true
+    - task.plant.zero_joint_friction=true
+    - task.motion.wrap_teleport=false
+    - task.motion.stand_start_prob=0.25
+    - task.motion.hold_steps_range=[0,0]
+    - task.motion.stand_start_min_hold=0
+    - task.motion.post_swing_buffer_size=4096
+    - task.motion.post_swing_min_fill=256
+    - task.motion.post_swing_min_hold=0
+    - task.motion.clip_switch_prob=0.0
+    - task.motion.speed_scale_range=[1.0,1.0]
+    - ++task.motion.rsi_skip_settle_frames=0
+    - ++task.motion.rsi_hold_root_stand_z=false
+    - ++task.motion.stagger_initial_clock=false
+    - ++task.motion.stagger_hold_max_steps=150
+    - ++task.racket.question_bank_allow_legacy=false
+    - ++task.racket.face_command=true
+    - ++task.racket.face_command_obs=true
+    - ++task.racket.station_obs=false
+    - ++task.racket.mount_normal_sign_per_clip=[1.0,-1.0]
+    - task.racket.target_mode=uniform
+    - task.racket.normal_mode=velocity
+    - task.racket.adaptive_sigma=true
+    - task.racket.target_delay_steps=0
+    - ++task.racket.target_delay_tts_mode=source_timestamp_compensated
+    - task.racket.target_jitter_pos_per_s=0.0
+    - task.racket.target_jitter_vel_per_s=0.0
+    - task.racket.target_noise_white=0.0019
+    - task.racket.target_noise_ar1_sigma=0.0052
+    - task.racket.target_noise_ar1_rho=0.717
+    - task.racket.target_dropout_prob=0.0
+    - task.racket.target_post_strike_dropout_s=0.0
+    - task.racket.target_bias_per_swing=0.0
+    - task.racket.midswing_resample_prob=0.0
+    - task.racket.midswing_resample_tts_floor=0.3
+    - task.racket.vb_spin_mode=minimize
+    - task.racket.vb_metrics_only=true
+    - ++task.racket.rally_legacy_metrics=true
+    - task.racket.achieved_target_mix_prob=0.30
+    - task.racket.achieved_buffer_size=4096
+    - task.racket.achieved_min_fill=256
+    - task.racket.achieved_jitter_pos=0.03
+    - task.racket.achieved_jitter_vel=0.15
+    - task.racket.achieved_clamp_inflate=0.20
+    - task.racket.clean_reference_strike_velocity=true
+    - task.racket.clean_strike_vel_window=2
+    - task.racket.strike_window_s=0.12
+    - task.racket.strike_success_pos_thresh=0.075
+    - ++task.physical_ball=true
+    - task.rewards.racket_position_std=0.2
+    - task.rewards.racket_velocity_std=1.0
+    - task.rewards.racket_normal_std=0.3
+    - task.rewards.free_wrist_ori_mimic=true
+    - ++task.rewards.free_wrist_vel_mimic=true
+    - ++task.rewards.motion_scale_in_window=0.25
+    - task.rewards.base_decel_weight=0.0
+    - task.motion.post_swing_start_prob=0.0
+    - task.rewards.joint_velocity_limit_hinge_weight=0.0
+    - task.rewards.joint_velocity_limit_hinge_margin=0.85
+    - ++task.rewards.racket_face_conditional_guidance_weight=-0.4
+    - ++task.motion.allow_legacy_link_origin_velocity=false
+    - ++task.motion.event_timing_mode=disabled
+    - task.racket.strike_phase_per_clip=[0.471,0.338]
+    - ++task.racket.face_command_pairing=shared_plus_y
+    - ++task.rewards.racket_guidance_weight=0.0
+    - ++task.rewards.racket_face_guidance_weight=0.0
+    - ++task.rewards.racket_face_guidance_theta_max=3.141592653589793
+    - ++kit_carb_tasking_thread_count=16
+    - ++kit_tbb_thread_count=16
+
+# 人话：唯一的实验维度——4 档情报臂。每档显式携带完整的 temporal（5 行）与
+# stability（26 行）override 串（COMMON 冻结设计）：spdmix/fullbody 的 temporal
+# 逐字 = 矩阵 C 档；hstrong 与 qbar 把 action_rate 归零（hstrong 换成 hinge -1.0，
+# qbar 让 barrier 当唯一 qdes 惩罚，Franco："把别的去掉"）。非 fullbody 臂的
+# stability 逐字 = 矩阵 S0 档；fullbody = S0 三行替换（模仿 weight 0→2.0 +
+# 支持窗 0.3/0.4→10.0/10.0 全程）。测试有交叉断言防漂移。spdmix 用
+# base_replacements 把 base 里 speed_scale_range=[1.0,1.0] 行原位替换成
+# [0.8,1.2]（不新增键、不重复键）；qbar 用 extra_overrides 携带两个新 barrier 键
+# （键名见 qbar_contract，wiring 未确认前渲染被锁死）。
+mechanisms:
+  intel:
+    spdmix:
+      human_name: 人话：速度泛化混合——参考动作播放速度从恒定 1.0 改为均匀采样 0.8-1.2 倍（base 的 speed_scale_range 行原位替换），其余与对照逐字同
+      base_replacements:
+        - old: task.motion.speed_scale_range=[1.0,1.0]
+          new: task.motion.speed_scale_range=[0.8,1.2]
+      temporal_overrides:
+        - task.rewards.action_rate_weight=-0.1
+        - ++task.rewards.processed_qdes_slew_hinge_weight=0.0
+        - ++task.rewards.processed_qdes_slew_hinge_margin=0.85
+        - ++task.rewards.processed_qdes_slew_hinge_recovery_start_s=0.2
+        - ++task.rewards.processed_qdes_slew_hinge_recovery_end_s=1.55
+      stability_overrides:
+        - ++task.rewards.post_swing_settle_debt_weight=0.0
+        - ++task.rewards.post_swing_settle_base_lin_margin_mps=0.3
+        - ++task.rewards.post_swing_settle_base_lin_scale_mps=0.2
+        - ++task.rewards.post_swing_settle_base_ang_margin_radps=0.5
+        - ++task.rewards.post_swing_settle_base_ang_scale_radps=0.3
+        - ++task.rewards.post_swing_settle_tilt_margin_rad=0.1
+        - ++task.rewards.post_swing_settle_tilt_scale_rad=0.1
+        - ++task.rewards.post_swing_settle_nominal_root_z_m=1.0684
+        - ++task.rewards.post_swing_settle_root_height_deadband_m=0.05
+        - ++task.rewards.post_swing_settle_root_height_scale_m=0.05
+        - ++task.rewards.post_swing_settle_foot_slip_margin_mps=0.05
+        - ++task.rewards.post_swing_settle_foot_slip_scale_mps=0.1
+        - ++task.rewards.post_swing_settle_recovery_start_s=0.2
+        - ++task.rewards.post_swing_settle_recovery_end_s=1.55
+        - ++task.rewards.lower_body_stability_bundle_weight=0.0
+        - ++task.rewards.lower_body_stability_min_stance_width_m=0.22
+        - ++task.rewards.lower_body_stability_stance_scale_m=0.05
+        - ++task.rewards.lower_body_stability_leg_velocity_margin_radps=1.0
+        - ++task.rewards.lower_body_stability_leg_velocity_scale_radps=0.5
+        - ++task.rewards.lower_body_stability_support_pre_s=0.3
+        - ++task.rewards.lower_body_stability_support_post_s=0.4
+        - ++task.rewards.lower_body_pose_imitation_weight=0.0
+        - ++task.rewards.lower_body_pose_imitation_std=0.35
+        - ++task.rewards.lower_body_pose_imitation_support_pre_s=0.3
+        - ++task.rewards.lower_body_pose_imitation_support_post_s=0.4
+      extra_overrides: []
+    hstrong:
+      human_name: 人话：强 q_des 平滑——去掉稠密 action_rate（0.0），恢复窗 q_des slew hinge 权重提到 -1.0（margin 0.85、窗 0.2-1.55 s 与矩阵 H 档逐字同；H 档 -0.25 可当剂量对照）
+      base_replacements: []
+      temporal_overrides:
+        - task.rewards.action_rate_weight=0.0
+        - ++task.rewards.processed_qdes_slew_hinge_weight=-1.0
+        - ++task.rewards.processed_qdes_slew_hinge_margin=0.85
+        - ++task.rewards.processed_qdes_slew_hinge_recovery_start_s=0.2
+        - ++task.rewards.processed_qdes_slew_hinge_recovery_end_s=1.55
+      stability_overrides:
+        - ++task.rewards.post_swing_settle_debt_weight=0.0
+        - ++task.rewards.post_swing_settle_base_lin_margin_mps=0.3
+        - ++task.rewards.post_swing_settle_base_lin_scale_mps=0.2
+        - ++task.rewards.post_swing_settle_base_ang_margin_radps=0.5
+        - ++task.rewards.post_swing_settle_base_ang_scale_radps=0.3
+        - ++task.rewards.post_swing_settle_tilt_margin_rad=0.1
+        - ++task.rewards.post_swing_settle_tilt_scale_rad=0.1
+        - ++task.rewards.post_swing_settle_nominal_root_z_m=1.0684
+        - ++task.rewards.post_swing_settle_root_height_deadband_m=0.05
+        - ++task.rewards.post_swing_settle_root_height_scale_m=0.05
+        - ++task.rewards.post_swing_settle_foot_slip_margin_mps=0.05
+        - ++task.rewards.post_swing_settle_foot_slip_scale_mps=0.1
+        - ++task.rewards.post_swing_settle_recovery_start_s=0.2
+        - ++task.rewards.post_swing_settle_recovery_end_s=1.55
+        - ++task.rewards.lower_body_stability_bundle_weight=0.0
+        - ++task.rewards.lower_body_stability_min_stance_width_m=0.22
+        - ++task.rewards.lower_body_stability_stance_scale_m=0.05
+        - ++task.rewards.lower_body_stability_leg_velocity_margin_radps=1.0
+        - ++task.rewards.lower_body_stability_leg_velocity_scale_radps=0.5
+        - ++task.rewards.lower_body_stability_support_pre_s=0.3
+        - ++task.rewards.lower_body_stability_support_post_s=0.4
+        - ++task.rewards.lower_body_pose_imitation_weight=0.0
+        - ++task.rewards.lower_body_pose_imitation_std=0.35
+        - ++task.rewards.lower_body_pose_imitation_support_pre_s=0.3
+        - ++task.rewards.lower_body_pose_imitation_support_post_s=0.4
+      extra_overrides: []
+    fullbody:
+      human_name: 人话：全身模仿加重——下肢姿态模仿权重从 0 开到 +2.0（std 0.35），支持窗放开到全程（pre/post 10.0 s ≈ 覆盖整个 episode 相位）＝静止击球下肢全程软模仿，即两阶段下肢方案的第一阶段；S3 的 +0.5 窄窗（0.3/0.4 s）可当剂量+窗宽对照，其余两稳定机制保持 0
+      base_replacements: []
+      temporal_overrides:
+        - task.rewards.action_rate_weight=-0.1
+        - ++task.rewards.processed_qdes_slew_hinge_weight=0.0
+        - ++task.rewards.processed_qdes_slew_hinge_margin=0.85
+        - ++task.rewards.processed_qdes_slew_hinge_recovery_start_s=0.2
+        - ++task.rewards.processed_qdes_slew_hinge_recovery_end_s=1.55
+      stability_overrides:
+        - ++task.rewards.post_swing_settle_debt_weight=0.0
+        - ++task.rewards.post_swing_settle_base_lin_margin_mps=0.3
+        - ++task.rewards.post_swing_settle_base_lin_scale_mps=0.2
+        - ++task.rewards.post_swing_settle_base_ang_margin_radps=0.5
+        - ++task.rewards.post_swing_settle_base_ang_scale_radps=0.3
+        - ++task.rewards.post_swing_settle_tilt_margin_rad=0.1
+        - ++task.rewards.post_swing_settle_tilt_scale_rad=0.1
+        - ++task.rewards.post_swing_settle_nominal_root_z_m=1.0684
+        - ++task.rewards.post_swing_settle_root_height_deadband_m=0.05
+        - ++task.rewards.post_swing_settle_root_height_scale_m=0.05
+        - ++task.rewards.post_swing_settle_foot_slip_margin_mps=0.05
+        - ++task.rewards.post_swing_settle_foot_slip_scale_mps=0.1
+        - ++task.rewards.post_swing_settle_recovery_start_s=0.2
+        - ++task.rewards.post_swing_settle_recovery_end_s=1.55
+        - ++task.rewards.lower_body_stability_bundle_weight=0.0
+        - ++task.rewards.lower_body_stability_min_stance_width_m=0.22
+        - ++task.rewards.lower_body_stability_stance_scale_m=0.05
+        - ++task.rewards.lower_body_stability_leg_velocity_margin_radps=1.0
+        - ++task.rewards.lower_body_stability_leg_velocity_scale_radps=0.5
+        - ++task.rewards.lower_body_stability_support_pre_s=0.3
+        - ++task.rewards.lower_body_stability_support_post_s=0.4
+        - ++task.rewards.lower_body_pose_imitation_weight=2.0
+        - ++task.rewards.lower_body_pose_imitation_std=0.35
+        - ++task.rewards.lower_body_pose_imitation_support_pre_s=10.0
+        - ++task.rewards.lower_body_pose_imitation_support_post_s=10.0
+      extra_overrides: []
+    qbar:
+      human_name: 人话：全关节 qdes 限位 barrier（Jiayi v14 去 top-k、逐关节 tail 求和不平均）——每个关节的 q_des 距限位不足 margin 0.08 rad 就罚，违规几个关节罚几份，weight -0.65；同时把 raw action_rate 去掉（-0.10→0，Franco："把别的去掉"），barrier 是本臂唯一 qdes 惩罚；wiring 未确认合入前本档两臂渲染被锁死
+      base_replacements: []
+      temporal_overrides:
+        - task.rewards.action_rate_weight=0.0
+        - ++task.rewards.processed_qdes_slew_hinge_weight=0.0
+        - ++task.rewards.processed_qdes_slew_hinge_margin=0.85
+        - ++task.rewards.processed_qdes_slew_hinge_recovery_start_s=0.2
+        - ++task.rewards.processed_qdes_slew_hinge_recovery_end_s=1.55
+      stability_overrides:
+        - ++task.rewards.post_swing_settle_debt_weight=0.0
+        - ++task.rewards.post_swing_settle_base_lin_margin_mps=0.3
+        - ++task.rewards.post_swing_settle_base_lin_scale_mps=0.2
+        - ++task.rewards.post_swing_settle_base_ang_margin_radps=0.5
+        - ++task.rewards.post_swing_settle_base_ang_scale_radps=0.3
+        - ++task.rewards.post_swing_settle_tilt_margin_rad=0.1
+        - ++task.rewards.post_swing_settle_tilt_scale_rad=0.1
+        - ++task.rewards.post_swing_settle_nominal_root_z_m=1.0684
+        - ++task.rewards.post_swing_settle_root_height_deadband_m=0.05
+        - ++task.rewards.post_swing_settle_root_height_scale_m=0.05
+        - ++task.rewards.post_swing_settle_foot_slip_margin_mps=0.05
+        - ++task.rewards.post_swing_settle_foot_slip_scale_mps=0.1
+        - ++task.rewards.post_swing_settle_recovery_start_s=0.2
+        - ++task.rewards.post_swing_settle_recovery_end_s=1.55
+        - ++task.rewards.lower_body_stability_bundle_weight=0.0
+        - ++task.rewards.lower_body_stability_min_stance_width_m=0.22
+        - ++task.rewards.lower_body_stability_stance_scale_m=0.05
+        - ++task.rewards.lower_body_stability_leg_velocity_margin_radps=1.0
+        - ++task.rewards.lower_body_stability_leg_velocity_scale_radps=0.5
+        - ++task.rewards.lower_body_stability_support_pre_s=0.3
+        - ++task.rewards.lower_body_stability_support_post_s=0.4
+        - ++task.rewards.lower_body_pose_imitation_weight=0.0
+        - ++task.rewards.lower_body_pose_imitation_std=0.35
+        - ++task.rewards.lower_body_pose_imitation_support_pre_s=0.3
+        - ++task.rewards.lower_body_pose_imitation_support_post_s=0.4
+      extra_overrides:
+        - ++task.rewards.qdes_limit_barrier_weight=-0.65
+        - ++task.rewards.qdes_limit_barrier_margin=0.08
+
+# 人话：qbar 渲染闸门。qbar 的 train.py wiring 是并行作业，本 yaml 冻结时本地
+# 工作树 grep 无 qdes_limit_barrier——键名按任务书写死如下。主控合并 wiring、
+# 逐字核对远端 train.py 白名单与 expected_cli_keys 一致、冻结新 40-hex commit
+# 后才把 qbar_wiring_confirmed 翻 true。false 时渲染器拒绝出任何 qbar 臂命令
+# （fail-closed），其余六臂不受影响。
+qbar_contract:
+  qbar_wiring_confirmed: false
+  expected_cli_keys:
+    - task.rewards.qdes_limit_barrier_weight
+    - task.rewards.qdes_limit_barrier_margin
+  wiring_note: >-
+    人话：全关节（31 关节全部、无 top-k 挑选）qdes 限位 barrier：q_des 距软限位
+    不足 margin（0.08 rad）时按有界 tail 罚，逐关节求和不平均（Franco：mean 是
+    稀释器；违规几个关节就罚几份，满违规单关节 tail≈1 → 每步约 -0.65×dt），
+    weight -0.65。语义按 Jiayi v14 的 top-k qdes barrier 去掉 top-k；本臂同时把
+    raw action_rate 归零，barrier 是唯一 qdes 惩罚。exact 语义以合入 main 的
+    实现+单测为机器真源，与本段人话不符时必须先修订预注册再渲染命令。caveat：
+    Jiayi 侧的训练分布自述还没调好，其 v14 证据只作方向参考。
+
+probe_contract:
+  # 人话：三个稳定机制的测量探针在 8 臂全开——每臂都显式写三个机制 weight
+  # （fullbody 的模仿 weight=2.0 同样显式），train.py 会因此强制对应
+  # probe.weight=1.0；slew 探针由每臂显式的 hinge 键全程记录。
+  post_swing_settle_debt: auto_forced_probe_weight_1p0_by_explicit_weight_key
+  lower_body_stability_bundle: auto_forced_probe_weight_1p0_by_explicit_weight_key
+  lower_body_pose_imitation: auto_forced_probe_weight_1p0_by_explicit_weight_key
+  processed_qdes_slew: auto_probe_by_explicit_hinge_keys_in_every_cell
+
+budgets:
+  probe:
+    num_envs: 4096
+    num_steps_per_env: 24
+    max_iterations: 2
+    save_interval: 1
+  science:
+    num_envs: 4096
+    num_steps_per_env: 24
+    max_iterations: 4001
+    save_interval: 100
+    milestone_offsets_from_parent: [200, 500, 1000, 2000, 4000]
+    absolute_milestones: [6900, 7200, 7700, 8700, 10700]
+
+# 人话：本波不写死 pod/gpu——空槽出现时按此顺序拉最前面还没发射的臂填入。
+# 顺序即价值排序：速度泛化（最高价值轴）→ 全身模仿 → 强 q_des 平滑 → qbar
+# （wiring 闸门未开时跳过 qbar 两臂、不阻塞）。渲染时用
+# --render-job <id> --pod <pod1|pod2> --gpu <0|1|2> 注入目标卡。
+launch_order:
+  - w_spdmix
+  - v_spdmix
+  - w_fullbody
+  - v_fullbody
+  - w_hstrong
+  - v_hstrong
+  - w_qbar
+  - v_qbar
+
+jobs:
+  - {id: w_spdmix, parent: W, intel: spdmix, run_name: p1iq_w_spdmix_seed3_20260721, run_dir: /workspace/codexschema/phase1_intel_wave_20260721/runs/w_spdmix}
+  - {id: w_hstrong, parent: W, intel: hstrong, run_name: p1iq_w_hstrong_seed3_20260721, run_dir: /workspace/codexschema/phase1_intel_wave_20260721/runs/w_hstrong}
+  - {id: w_fullbody, parent: W, intel: fullbody, run_name: p1iq_w_fullbody_seed3_20260721, run_dir: /workspace/codexschema/phase1_intel_wave_20260721/runs/w_fullbody}
+  - {id: w_qbar, parent: W, intel: qbar, run_name: p1iq_w_qbar_seed3_20260721, run_dir: /workspace/codexschema/phase1_intel_wave_20260721/runs/w_qbar}
+  - {id: v_spdmix, parent: V, intel: spdmix, run_name: p1iq_v_spdmix_seed3_20260721, run_dir: /workspace/codexschema/phase1_intel_wave_20260721/runs/v_spdmix}
+  - {id: v_hstrong, parent: V, intel: hstrong, run_name: p1iq_v_hstrong_seed3_20260721, run_dir: /workspace/codexschema/phase1_intel_wave_20260721/runs/v_hstrong}
+  - {id: v_fullbody, parent: V, intel: fullbody, run_name: p1iq_v_fullbody_seed3_20260721, run_dir: /workspace/codexschema/phase1_intel_wave_20260721/runs/v_fullbody}
+  - {id: v_qbar, parent: V, intel: qbar, run_name: p1iq_v_qbar_seed3_20260721, run_dir: /workspace/codexschema/phase1_intel_wave_20260721/runs/v_qbar}

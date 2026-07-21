@@ -1314,6 +1314,122 @@ def _processed_qdes_slew_hinge_reward_contract(
     }
 
 
+_QDES_LIMIT_BARRIER_FORMULA = (
+    "sum(1-exp(-square(relu(margin_frac-min(qdes-lo,hi-qdes)/(hi-lo))/margin_frac)))"
+)
+
+
+def _qdes_limit_barrier_reward_contract(env_cfg, runtime_facts: dict) -> dict | None:
+    """Conditionally bind the Wave-Q all-joint q_des position-limit barrier.
+
+    Jiayi V14 全关节 top-k qdes barrier 思想,去 top-k 重做(Franco 指示).  The default-off
+    declaration must not change historical hard-contract bytes: the subsection is absent until
+    the real term is enabled or train.py has raised the zero-valued probe for an explicitly
+    configured control/treatment arm.
+    """
+
+    rewards = getattr(env_cfg, "rewards", None)
+    term = None if rewards is None else getattr(rewards, "qdes_limit_barrier", None)
+    probe = None if rewards is None else getattr(
+        rewards, "qdes_limit_barrier_probe", None
+    )
+    if term is None and probe is None:
+        return None
+    if term is None or probe is None:
+        raise RuntimeError(
+            "qdes_limit_barrier and its activation probe must be declared together"
+        )
+
+    raw_weight = getattr(term, "weight", None)
+    raw_probe_weight = getattr(probe, "weight", None)
+    for label, value in (("weight", raw_weight), ("probe weight", raw_probe_weight)):
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+        ):
+            raise RuntimeError(
+                f"rewards.qdes_limit_barrier {label} must be finite and non-positive/zero-valued"
+            )
+    weight = float(raw_weight)
+    probe_weight = float(raw_probe_weight)
+    if weight > 0.0 or probe_weight not in (0.0, 1.0):
+        raise RuntimeError(
+            "rewards.qdes_limit_barrier weight must be <= 0 and probe weight must be 0 or 1"
+        )
+    if weight == 0.0 and probe_weight == 0.0:
+        return None
+    if probe_weight != 1.0:
+        raise RuntimeError(
+            "explicit qdes_limit_barrier requires its weight-independent probe"
+        )
+
+    params = getattr(term, "params", None)
+    probe_params = getattr(probe, "params", None)
+    if not isinstance(params, dict) or not isinstance(probe_params, dict):
+        raise RuntimeError("rewards.qdes_limit_barrier params must be mappings")
+    if params != probe_params:
+        raise RuntimeError(
+            "qdes_limit_barrier probe params must exactly match the real term"
+        )
+    if params.get("action_name") != "joint_pos":
+        raise RuntimeError(
+            "qdes_limit_barrier action_name must be exactly 'joint_pos'"
+        )
+    raw_margin = params.get("margin_frac")
+    if isinstance(raw_margin, bool) or not isinstance(raw_margin, (int, float)):
+        raise RuntimeError(
+            "qdes_limit_barrier margin_frac must be finite and in (0, 0.5)"
+        )
+    margin_frac = float(raw_margin)
+    if not math.isfinite(margin_frac) or not 0.0 < margin_frac < 0.5:
+        raise RuntimeError(
+            "qdes_limit_barrier margin_frac must be finite and in (0, 0.5)"
+        )
+
+    runtime_names = runtime_facts.get("joint_names")
+    articulation_names = runtime_facts.get("articulation_joint_names")
+    if (
+        not isinstance(runtime_names, list)
+        or len(runtime_names) != 31
+        or len(set(runtime_names)) != 31
+        or runtime_names != articulation_names
+    ):
+        raise RuntimeError(
+            "qdes_limit_barrier requires identity 31-joint A3 runtime order"
+        )
+    limits = runtime_facts.get("qdes_joint_pos_limits")
+    if not isinstance(limits, list) or len(limits) != 31:
+        raise RuntimeError(
+            "qdes_limit_barrier requires 31 runtime qdes_joint_pos_limits pairs"
+        )
+    for pair in limits:
+        if not isinstance(pair, (list, tuple)) or len(pair) != 2:
+            raise RuntimeError(
+                "qdes_limit_barrier requires finite [lo, hi] joint position limits with lo < hi"
+            )
+        lo, hi = float(pair[0]), float(pair[1])
+        if not (math.isfinite(lo) and math.isfinite(hi) and lo < hi):
+            raise RuntimeError(
+                "qdes_limit_barrier requires finite [lo, hi] joint position limits with lo < hi"
+            )
+
+    return {
+        "schema_version": 1,
+        "enabled": weight < 0.0,
+        "probe_enabled": True,
+        "activation_ledger": "weight_independent_control_step_counters",
+        "weight": weight,
+        "margin_frac": margin_frac,
+        "action_name": "joint_pos",
+        "joint_count": 31,
+        "joint_order": "runtime_articulation_identity",
+        "position_limit_source": "articulation.data.soft_joint_pos_limits",
+        "formula": _QDES_LIMIT_BARRIER_FORMULA,
+        "gate": "dense_every_control_step",
+    }
+
+
 _A3_LOWER_BODY_RUNTIME_JOINT_ORDER = (
     "waist_yaw_joint", "waist_roll_joint", "waist_pitch_joint",
     "head_yaw_joint", "head_pitch_joint",
@@ -1683,6 +1799,9 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
     processed_qdes_slew_contract = _processed_qdes_slew_hinge_reward_contract(
         env_cfg, runtime_facts
     )
+    qdes_limit_barrier_contract = _qdes_limit_barrier_reward_contract(
+        env_cfg, runtime_facts
+    )
     loaded_joint_reference = getattr(getattr(motion_cmd, "motion", None), "joint_pos", None)
     loaded_joint_reference_shape = tuple(getattr(loaded_joint_reference, "shape", ()))
     reference_joint_width = (
@@ -1945,6 +2064,11 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
             else {
                 "processed_qdes_slew_hinge_reward": processed_qdes_slew_contract
             }
+        ),
+        **(
+            {}
+            if qdes_limit_barrier_contract is None
+            else {"qdes_limit_barrier_reward": qdes_limit_barrier_contract}
         ),
         **(
             {}
@@ -2283,6 +2407,9 @@ _REWARD_KEYS = (
     "processed_qdes_slew_hinge_weight", "processed_qdes_slew_hinge_margin",
     "processed_qdes_slew_hinge_recovery_start_s",
     "processed_qdes_slew_hinge_recovery_end_s",
+    # Wave-Q qbar all-joint q_des position-limit barrier (Jiayi V14 idea, top-k removed).
+    # Any explicit key requires the weight; an explicit zero weight is a measured control.
+    "qdes_limit_barrier_weight", "qdes_limit_barrier_margin_frac",
     # Wave-B mutually-exclusive lower-body diagnostics. Explicit zero-valued controls still
     # activate their measurement probes and hard-contract identity.
     "lower_body_pose_imitation_weight", "lower_body_pose_imitation_std",
@@ -3053,6 +3180,95 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             applied.append(
                 "rewards.processed_qdes_slew_hinge_probe="
                 f"(margin={_resolved_margin},recovery={_resolved_start}..{_resolved_end},weight=1.0)"
+            )
+
+        # Wave-Q qbar: all-joint q_des position-limit barrier (default OFF).  Jiayi V14's
+        # 全关节 top-k qdes barrier idea with the top-k removed (Franco 2026-07-21): all 31
+        # deploy-space targets pay inside the margin band next to their position limits, on
+        # every control step (dense, no phase gate).  人话:目标角贴近限位就罚,全身关节全程
+        # 盯着;任何 qbar 键都必须明说 weight,配了就必带零权重探针记账。
+        _qbar_weight_raw = _get(rw, "qdes_limit_barrier_weight")
+        _qbar_margin_raw = _get(rw, "qdes_limit_barrier_margin_frac")
+        _qbar_requested = (
+            _qbar_weight_raw is not None or _qbar_margin_raw is not None
+        )
+        if _qbar_requested:
+            if _qbar_weight_raw is None:
+                raise _OverrideError(
+                    "qdes_limit_barrier_margin_frac requires "
+                    "qdes_limit_barrier_weight explicitly"
+                )
+            _require(
+                hasattr(R, "qdes_limit_barrier")
+                and R.qdes_limit_barrier is not None,
+                "rewards.qdes_limit_barrier",
+            )
+            _require(
+                hasattr(R, "qdes_limit_barrier_probe")
+                and R.qdes_limit_barrier_probe is not None,
+                "rewards.qdes_limit_barrier_probe",
+            )
+            _qbar_term = R.qdes_limit_barrier
+            _qbar_probe = R.qdes_limit_barrier_probe
+            _require(
+                isinstance(_qbar_term.params, dict)
+                and isinstance(_qbar_probe.params, dict),
+                "rewards.qdes_limit_barrier.params",
+            )
+            if isinstance(_qbar_weight_raw, bool):
+                raise _OverrideError(
+                    "rewards.qdes_limit_barrier.weight must be finite and <= 0"
+                )
+            try:
+                _qbar_weight = float(_qbar_weight_raw)
+            except (TypeError, ValueError) as exc:
+                raise _OverrideError(
+                    "rewards.qdes_limit_barrier.weight must be finite and <= 0"
+                ) from exc
+            if not math.isfinite(_qbar_weight) or _qbar_weight > 0.0:
+                raise _OverrideError(
+                    "rewards.qdes_limit_barrier.weight must be finite and <= 0"
+                )
+            _qbar_margin = None
+            if _qbar_margin_raw is not None:
+                if isinstance(_qbar_margin_raw, bool):
+                    raise _OverrideError(
+                        "rewards.qdes_limit_barrier.margin_frac must be finite "
+                        "and in (0, 0.5)"
+                    )
+                try:
+                    _qbar_margin = float(_qbar_margin_raw)
+                except (TypeError, ValueError) as exc:
+                    raise _OverrideError(
+                        "rewards.qdes_limit_barrier.margin_frac must be finite "
+                        "and in (0, 0.5)"
+                    ) from exc
+                if not math.isfinite(_qbar_margin) or not 0.0 < _qbar_margin < 0.5:
+                    raise _OverrideError(
+                        "rewards.qdes_limit_barrier.margin_frac must be finite "
+                        "and in (0, 0.5)"
+                    )
+                _require(
+                    "margin_frac" in _qbar_term.params,
+                    "rewards.qdes_limit_barrier.params['margin_frac']",
+                )
+            if _qbar_term.params.get("action_name") != "joint_pos":
+                raise _OverrideError(
+                    "rewards.qdes_limit_barrier.action_name must be exactly 'joint_pos'"
+                )
+            _qbar_term.weight = _qbar_weight
+            applied.append(f"rewards.qdes_limit_barrier.weight={_qbar_weight}")
+            if _qbar_margin is not None:
+                _qbar_term.params["margin_frac"] = _qbar_margin
+                applied.append(
+                    f"rewards.qdes_limit_barrier.params.margin_frac={_qbar_margin}"
+                )
+            _qbar_probe.weight = 1.0
+            _qbar_probe.params.clear()
+            _qbar_probe.params.update(_qbar_term.params)
+            applied.append(
+                "rewards.qdes_limit_barrier_probe="
+                f"(margin_frac={float(_qbar_term.params['margin_frac'])},weight=1.0)"
             )
 
         # Wave B: mutually-exclusive lower-body hypotheses with weight-independent probes.  B1

@@ -1629,6 +1629,73 @@ def _validate_post_swing_settle_debt_contract(contract: Mapping) -> None:
                 )
 
 
+def _validate_qdes_limit_barrier_contract(contract: Mapping) -> None:
+    """Wave-Q all-joint q_des position-limit barrier block (Jiayi V14 idea, top-k removed).
+
+    Absent block = mechanism untouched (legacy/default runs).  A present block must bind the
+    exact dense all-31-joint formula, the margin fraction, and the deploy-parity position-limit
+    source; no top-k and no joint subset are representable.
+    """
+
+    barrier = contract.get("qdes_limit_barrier_reward")
+    if barrier is None:
+        return
+    barrier = _require_exact_mapping_keys(
+        barrier,
+        frozenset(
+            {
+                "schema_version", "enabled", "probe_enabled", "activation_ledger",
+                "weight", "margin_frac", "action_name", "joint_count",
+                "joint_order", "position_limit_source", "formula", "gate",
+            }
+        ),
+        name="schema-3 qdes_limit_barrier_reward",
+    )
+    if type(barrier["schema_version"]) is not int or barrier["schema_version"] != 1:
+        raise ValueError("schema-3 qdes_limit_barrier_reward schema_version must be 1")
+    if not isinstance(barrier["enabled"], bool) or barrier["probe_enabled"] is not True:
+        raise ValueError("schema-3 qdes_limit_barrier_reward flags are invalid")
+    weight = _wave_finite(barrier["weight"], name="qdes_limit_barrier_reward.weight")
+    if weight > 0.0 or barrier["enabled"] != (weight < 0.0):
+        raise ValueError("schema-3 qdes_limit_barrier_reward weight/enabled is invalid")
+    margin_frac = _wave_finite(
+        barrier["margin_frac"], name="qdes_limit_barrier_reward.margin_frac"
+    )
+    if not 0.0 < margin_frac < 0.5:
+        raise ValueError(
+            "schema-3 qdes_limit_barrier_reward margin_frac must be in (0, 0.5)"
+        )
+    joint_names = contract.get("joint_names")
+    articulation_names = contract.get("articulation_joint_names")
+    if (
+        type(barrier["joint_count"]) is not int
+        or barrier["joint_count"] != 31
+        or not isinstance(joint_names, (list, tuple))
+        or len(joint_names) != 31
+        or not isinstance(articulation_names, (list, tuple))
+        or [str(value) for value in articulation_names]
+        != [str(value) for value in joint_names]
+    ):
+        raise ValueError(
+            "schema-3 qdes_limit_barrier_reward requires identity 31-joint order"
+        )
+    expected = {
+        "action_name": "joint_pos",
+        "activation_ledger": "weight_independent_control_step_counters",
+        "joint_order": "runtime_articulation_identity",
+        "position_limit_source": "articulation.data.soft_joint_pos_limits",
+        "formula": (
+            "sum(1-exp(-square(relu(margin_frac-min(qdes-lo,hi-qdes)/(hi-lo))/margin_frac)))"
+        ),
+        "gate": "dense_every_control_step",
+    }
+    for key, value in expected.items():
+        if barrier[key] != value:
+            raise ValueError(
+                f"schema-3 qdes_limit_barrier_reward {key} must be exactly {value!r}"
+            )
+
+
 def validate_schema3_contract_structure(contract: Mapping) -> None:
     """Validate a schema-3 sidecar without promoting it to a formal-exact lineage.
 
@@ -1908,6 +1975,7 @@ def validate_schema3_contract_structure(contract: Mapping) -> None:
         [str(value) for value in contract["articulation_joint_names"]],
     )
     _validate_post_swing_settle_debt_contract(contract)
+    _validate_qdes_limit_barrier_contract(contract)
     _validate_push_robot_event_contract(contract)
     _validate_force_push_event_contract(contract)
     if contract["joint_friction_backend"] != JOINT_FRICTION_BACKEND:
