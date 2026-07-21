@@ -982,6 +982,16 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
   结果；六格机制状态仍 inconclusive / not adopted。该条目只有进入 `origin/main` 后才构成运行
   authority。两波都不能替代
   `T0/T1/T2` 连续恢复卷。[Wave A 实验](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md)
+
+  2026-07-22 前瞻风险挂账(yikang 只读核对,不改配方——reward 塑形属 franco lane):qbar 两臂的
+  `qbar_contract.qbar_wiring_confirmed` 已在 `configs/phase1_intel_wave_20260721.yaml` 翻 `true`,
+  渲染闸门已开,两臂进入可发射状态(07-21 晚 Pod1 boot 锁队列中实见 `w_qbar_res1` 排队等发)。
+  但该合同 `wiring_note` 的人话仍写 margin "0.08 rad",而实现与 CLI 键是行程比例
+  `qdes_limit_barrier_margin_frac`(hope_rewards: `d=min(q−lo,hi−q)/(hi−lo)`;0.08 行程比在肩偏航
+  ≈26° 罚带、在腰侧倾≈3.2°,同一数字两种语义差一个量级)。main `5c23a3f6` 只修了键名漂移
+  (margin→margin_frac),rad vs 行程比例的语义裁定仍悬空;按 wiring_note 自己的条款"与本段人话
+  不符时必须先修订预注册再渲染命令",qbar 臂在读数/采信前应先由 franco 裁定 margin 语义并修订
+  预注册,否则两臂读数按"量尺语义未定"处理。
 - **[9｜P0] Hitter 实机 planner 时序与训练反应时间基线。** 责任人 yikang；执行者 Codex；分支
   `codex/hitter-lowerbody-mujoco-alignment`，基于 `hitter`。2026-07-16 用户将本轮顺序收敛为：
   先审计最新 `main`、`hitter` 与 frame0-wait-v2 已有实现，再补齐端到端球样本时间戳/短 TTS、
