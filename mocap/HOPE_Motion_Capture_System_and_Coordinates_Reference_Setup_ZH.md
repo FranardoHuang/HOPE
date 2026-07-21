@@ -240,7 +240,7 @@ OptiTrack Motive 与青瞳 CMTracker 现在均将乒乓球解算为具名的**�
 
 ### 5.1  球体准备与资产定义
 
-- 使用厂商认可的刚体球处理方案和标记图案/星座。不得根据已淘汰的单点方案自行推断可用的标记数量或布局。
+- 使用厂商认可的刚体球处理方案和标记图案/星座。**经验证的处理方式：在标准乒乓球上加贴回射标记点（marker dots），在 OptiTrack 与青瞳上均可实现稳定的 6 自由度刚体跟踪。** 不得根据已淘汰的单点方案自行推断可用的标记数量或布局。
 - 尽量减小对球体质量、质心、直径、表面摩擦和空气动力学的影响，并按竞赛规则验证处理后的球。
 - 图案应非对称，并在整个相机空间内与 `Table` 和机器人图案保持可区分。
 - 在 Motive 或 CMTracker 中设置稳定的刚体资产名称和 ID（建议逻辑名称：`Ball`）。话题名和发送方名称区分大小写。
@@ -445,9 +445,8 @@ HOPE 动作捕捉参考系统定义四个具名刚体资产；比赛期间仅流
 
 - Su, Z., Zhang, B., Rahmanian, N., Gao, Y., Liao, Q., Regan, C., Sreenath, K., & Sastry, S. S. (2025). HITTER: A HumanoId Table TEnnis Robot via Hierarchical Planning and Learning. *arXiv:2508.21043v2*.
 - HITTER 项目主页：https://humanoid-table-tennis.github.io/
-- motion_capture_tracking（仓库内 OptiTrack/NatNet 驱动；在 HOPE relay 前发布 `NamedPoseArray`）：https://github.com/IMRCLab/motion_capture_tracking
-- HOPE OptiTrack/NatNet 后端：[`docs/OPTITRACK.md`](../docs/OPTITRACK.md)
-- OptiTrack Motive Data Streaming / NatNet 设置：https://docs.optitrack.com/motive-ui-panes/settings/settings-streaming
+- motion_capture_tracking（已 vendored 进仓库，作为受支持的 OptiTrack/NatNet 后端——`hope_ws/src/motion_capture_tracking/`，精确 pin 与本地补丁见其 PIN.md；发布 `NamedPoseArray`，由 `optitrack_mct_relay` 桥接到 `/poses` 契约；上游：https://github.com/IMRCLab/motion_capture_tracking）
+- OptiTrack Motive VRPN Streaming Engine（仅限刚体；默认端口 3883）：https://docs.optitrack.com/motive-ui-panes/settings/settings-streaming
 - VRPN 协议：https://github.com/vrpn/vrpn
 - OptiTrack Motive 流式设置：https://docs.optitrack.com/v3.0/motive-ui-panes/settings/settings-streaming
 - 青瞳视觉（CHINGMU）动作捕捉：https://www.chingmu.com/ （英文：https://en.chingmu.com/）——VRPN/LiveStream 流式传输，C/C++/C#/Python/ROS SDK

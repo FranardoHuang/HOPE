@@ -6,8 +6,9 @@ usage() {
 Usage:
   with_fastdds_unicast.sh [options] -- COMMAND [ARG ...]
 
-Runs COMMAND with a generated Fast DDS profile that disables multicast
-discovery and talks to an explicit list of unicast peers — for venue Wi-Fi /
+Runs COMMAND with a generated Fast DDS profile that adds an explicit list of
+unicast peers (multicast discovery itself stays enabled at SUBNET range; set
+ROS_AUTOMATIC_DISCOVERY_RANGE=OFF yourself to fully disable it) — for venue Wi-Fi /
 segmented LANs where DDS multicast discovery does not work (a common setup
 when a laptop bridges the OptiTrack/Motive LAN to the robot's network).
 

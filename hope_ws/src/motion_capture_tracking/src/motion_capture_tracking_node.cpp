@@ -318,7 +318,11 @@ int main(int argc, char **argv)
       else
       {
         std::chrono::duration<double> elapsedSeconds = chrono_now - rigidBody.lastValidTime();
-        RCLCPP_WARN(node->get_logger(), "No updated pose for %s for %f s.", rigidBody.name().c_str(), elapsedSeconds.count());
+        // HOPE patch #7 (see PIN.md): throttled — an untracked tracker body is a
+        // normal state (e.g. object out of the volume between rallies); the
+        // unthrottled warn fired at camera rate (300-360 Hz).
+        RCLCPP_WARN_THROTTLE(node->get_logger(), *node->get_clock(), 2000,
+            "No updated pose for %s for %f s.", rigidBody.name().c_str(), elapsedSeconds.count());
       }
     }
 

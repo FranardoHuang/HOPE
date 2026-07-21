@@ -3,7 +3,9 @@
     # one of "optitrack", "optitrack_closed_source", "vicon", "qualisys", "nokov", "vrpn", "motionanalysis"
     type: "optitrack"
     # Specify the hostname or IP of the computer running the motion capture software
-    hostname: "130.149.82.37"
+    hostname: "MOCAP_PC_IP"  # HOPE patch #8: placeholder (upstream example had a lab IP).
+                             # HOPE bringup does NOT use this file — see
+                             # hope_bringup/config/optitrack_mct.yaml + optitrack_hope_bridge.launch.py.
 
     # The information will always be broadcasted via tf2
     # Specify additional settings for the /poses topic here

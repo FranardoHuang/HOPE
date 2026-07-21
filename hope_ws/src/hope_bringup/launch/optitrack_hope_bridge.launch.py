@@ -3,8 +3,7 @@
 Chain:  Motive (NatNet UDP, cmd port 1510)  -->  motion_capture_tracking_node
         (vendored, namespace /optitrack; poses/tf remapped to /optitrack/*)
         --> optitrack_mct_relay
-        --> /poses, /tf, /ball/point, /{P1,P2}/pose  --> hope_planner
-            (`/table/pose` is only produced in a separate calibration session)
+        --> /poses, /tf, /ball/point, /{table,P1,P2}/pose  --> hope_planner
 
 OptiTrack sibling of the VRPN path (``vrpn_mocap`` + ``pose_to_posearray``,
 wired by ``hope_bringup.launch.py``); both feed the identical ``/poses``
@@ -17,17 +16,17 @@ The remaps are LOAD-BEARING, not cosmetic:
   * the driver's `poses` topic is motion_capture_tracking_interfaces/
     NamedPoseArray -- on the bare /poses name it would collide with the HOPE
     /poses contract (geometry_msgs/PoseArray) as a DDS type mismatch;
-  * the driver broadcasts /tf with raw body names (P1/P2/...) which would
-    fight the relay's world->P1/P2 transforms and the hope_world statics.
+  * the driver broadcasts /tf with raw body names (P1/Table/...) which would
+    fight the relay's world->P1/Table transforms and the hope_world statics.
 
 Before running against a live rig (see docs/OPTITRACK.md):
   * hostname -> the Motive PC IP on the arena LAN.
-  * Motive streaming pane per the mocap reference doc §6.2 (Z-up, Rigid
-    Bodies ON, NatNet enabled; marker streaming per the ball MODE notes in
-    config/optitrack_mct.yaml).
-  * rigid-body names + ball tracker are set in config/optitrack_mct.yaml and
-    config/optitrack_relay.yaml (standardized competition assets: Ball/P1/P2;
-    Table is calibration-only).
+  * Motive streaming pane per the settings table in docs/OPTITRACK.md
+    ('Motive-side checklist': NatNet enabled, Up Axis = Z, Rigid Bodies ON,
+    Unicast preferred, ports 1510/1511).
+  * rigid-body names are set in config/optitrack_mct.yaml and
+    config/optitrack_relay.yaml (standardized: P1/P2/Table assets, ball 'Ball' —
+    a strict 6-DOF rigid body per the HOPE spec).
 """
 
 from pathlib import Path
@@ -85,7 +84,7 @@ def generate_launch_description():
 
         # Vendored NatNet driver: Motive -> /optitrack/poses (NamedPoseArray),
         # /optitrack/tf, /optitrack/pointCloud. Motive-native rigid bodies
-        # (P1/P2; Table only during calibration) and the librigidbodytracker single-marker ball ('Ball',
+        # (P1/P2/Table) and the librigidbodytracker single-marker ball ('Ball',
         # from optitrack_mct.yaml) arrive in the same NamedPoseArray.
         Node(
             package="motion_capture_tracking",
@@ -108,8 +107,7 @@ def generate_launch_description():
         ),
 
         # Relay: /optitrack/poses -> HOPE-standard topics (the relay is the
-        # only /tf authority for ball/P1/P2 during competition; Table is
-        # calibration-only).
+        # only /tf authority for ball/Table/P1/P2).
         Node(
             package="hope_bringup",
             executable="optitrack_mct_relay",

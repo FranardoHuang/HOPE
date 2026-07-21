@@ -68,6 +68,18 @@ License: MIT (upstream `LICENSE` kept in this directory).
 
 No other source-code (`.cpp/.hpp/.msg`) changes.
 
+7. **`src/motion_capture_tracking_node.cpp` warn throttle (2026-07-21, review
+   finding)**: the per-frame `RCLCPP_WARN` for an untracked tracker body
+   (line ~321) became `RCLCPP_WARN_THROTTLE(…, 2000 ms)` — an object out of
+   the volume is a normal state and the unthrottled warn fired at camera rate.
+
+8. **`config/cfg.yaml` placeholder hostname (2026-07-21)**: the upstream
+   example's lab IP (`130.149.82.37`) is replaced with the placeholder
+   `MOCAP_PC_IP` plus a pointer to the HOPE bringup config, so launching the
+   vendored `launch.py` directly cannot silently hang connecting to a foreign
+   host. No functional change for HOPE bringup, which passes its own
+   parameter file.
+
 ## Re-pin procedure
 
 ```bash

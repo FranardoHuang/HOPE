@@ -23,8 +23,7 @@ Motive (NatNet UDP)
 /optitrack/poses                             motion_capture_tracking_interfaces/NamedPoseArray
       |  optitrack_mct_relay (hope_bringup)  (one message per camera frame, objects by name)
       v
-/poses (ball at index 0), /ball/point, /P1/pose, /P2/pose, TF
-  (`/table/pose` only when a separate calibration session deliberately streams `Table`)
+/poses (ball at index 0), /ball/point, /table/pose, /P1/pose, /P2/pose, TF
       |  hope_planner
       v
 /racket/command
@@ -81,37 +80,38 @@ builds everything else unchanged.
 
 ## Motive-side checklist
 
-In Motive's Data Streaming pane (see the full table in the
-[mocap reference §6.2](../mocap/HOPE_Motion_Capture_System_and_Coordinates_Reference_Setup.md)):
+In Motive's Data Streaming pane:
 
-- NatNet **enabled**, Up Axis = **Z** (critical — REP 103 Z-up), Unicast
-  preferred; the driver queries the UDP command port 1510 and discovers the
-  server-selected data port from Motive's response.
-- Rigid Bodies **ON**; competition assets named exactly `Ball`, `P1`, and
-  `P2`. `Table` is setup/calibration-only (older notes call it `PPT`) and must
-  be disabled or omitted for competition. The driver streams Motive asset
-  names verbatim and the relay maps by name.
+| Setting | Required value | Notes |
+|---------|----------------|-------|
+| Enable NatNet | ✅ Enabled | This backend consumes NatNet (cmd port 1510) |
+| Up Axis | **Z Axis** | Critical — aligns with the HOPE REP 103 Z-up frame; the relay applies no frame conversion |
+| Transmission | Unicast preferred | Auto-negotiated from the server response; unicast keeps venue switches happy |
+| Rigid Bodies | **ON** | `Ball`, `P1` (+ `P2`; `Table` in calibration sessions only) |
+| Labeled/Unlabeled Markers | OFF (optional) | Not consumed — the ball is a rigid-body asset |
+| Skeletons | OFF | Not used |
+| Command/Data ports | 1510 / 1511 (defaults) | Must match firewall rules |
+- Rigid Bodies **ON**; assets named exactly `P1` (+ `Table`, `P2` if used —
+  the table asset is setup/calibration-only; older notes call it `PPT`) — the
+  driver streams Motive asset names verbatim and the relay maps by name.
   Assets created/renamed while the bridge runs self-heal in ~1–2 s (the
   vendored driver re-requests the model definition when an unnamed body
   streams, PIN.md patch #6); restart the bridge only as a fallback.
-- **Ball, MODE A — rigid-body asset:** the ball is a Motive rigid-body asset
-  named exactly `Ball` (≥3 markers). Set the asset **pivot to the sphere
-  center** (the planner's bounce geometry assumes ball-center positions).
-  Marker streaming is not consumed in this mode. Occlusion clears the asset's
-  tracking-valid bit and the driver drops it from the frame, so `/poses`
-  pauses exactly like the VRPN path; expect dropouts on fast/spinning balls if
-  fewer than 3 markers stay co-visible. The librigidbodytracker block in
-  [`optitrack_mct.yaml`](../hope_ws/src/hope_bringup/config/optitrack_mct.yaml)
-  must stay COMMENTED OUT (an enabled same-named tracker body would fight the
-  vendor body and grab stray points).
-- **Ball, MODE B — single unlabeled marker** (the
-  [mocap reference §5.1/5.2](../mocap/HOPE_Motion_Capture_System_and_Coordinates_Reference_Setup.md)
-  design): fully coated retroreflective ball = one point at the ball center.
-  Uncomment the tracker block in `optitrack_mct.yaml`; then Unlabeled Markers
-  **ON** and Labeled Markers **OFF** become load-bearing (the tracker
-  re-acquires by nearest-neighbour with an occlusion-growing search radius —
-  stray points WILL be grabbed), and place the ball near `initial_position`
-  when the driver starts.
+- **Ball — strict 6-DOF rigid-body asset (the only supported mode):** the
+  HOPE standard requires the ball to be tracked as a strict 6-DOF rigid body
+  ([mocap reference §1 minimum spec / §5.1](../mocap/HOPE_Motion_Capture_System_and_Coordinates_Reference_Setup.md)).
+  The verified preparation is **retroreflective marker dots added to a
+  standard ping-pong ball** — confirmed workable on both OptiTrack and
+  Chingmu. In Motive, define the ball as a rigid-body asset named exactly
+  `Ball` and set the asset **pivot to the sphere center** (the planner's
+  bounce geometry assumes ball-center positions). Occlusion clears the
+  asset's tracking-valid bit and the driver drops it from the frame, so
+  `/poses` pauses exactly like the VRPN path; validate high-speed tracking
+  and re-acquisition per the mocap reference §5.4 acceptance checks.
+  Single-marker / unlabeled-point ball tracking (the retired ≤ v0.4 design)
+  does **not** meet the spec and is not supported by this bringup — the
+  `librigidbodytracker` machinery in the vendored driver is deliberately left
+  unconfigured.
 - Units stream in **metres** → `position_scale:=1.0` (default). Sanity check:
   `/P1/pose` reading hundreds means a millimetre feed → `0.001`.
 
@@ -169,11 +169,12 @@ ros2 topic echo /poses
 
 A driver-level no-hardware test also exists: `mocap_type:=mock` on
 `optitrack_hope_bridge.launch.py` runs the real driver code with a static mock
-backend instead of NatNet. Caveat: mock streams only the rigid bodies defined
-in `optitrack_mct.yaml`'s `rigid_bodies` block, which the shipped (MODE A)
-config leaves commented out — with the default config mock emits empty frames.
-Uncomment the MODE B block first (mock uses only each body's
-`initial_position`), or just use `fake_optitrack_publisher` above.
+backend instead of NatNet. Caveat: mock streams only bodies defined in a
+`rigid_bodies` block, which the shipped config deliberately has none of (the
+ball is a Motive rigid-body asset, not a tracker body) — with the default
+config mock emits empty frames. For bench work just use
+`fake_optitrack_publisher` above, or add a throwaway `rigid_bodies` entry
+locally (mock uses only each body's `initial_position`).
 
 For bag replay, record `/optitrack/poses` at a live session
 (`ros2 bag record /optitrack/poses`) and replay it against
@@ -214,8 +215,8 @@ whitelist derived from the route to each peer) and sets
 
 | Symptom | Cause / fix |
 |---|---|
-| Driver starts but 0 Hz on `/optitrack/poses` | Wrong `hostname`, firewall blocking NatNet UDP (command port 1510 or the server-advertised data port), or not on the Motive LAN. `ping` the Motive PC first. |
-| Objects stream but nothing relayed | Motive asset names don't match `optitrack_relay.yaml` (`Ball`/`P1`/`P2`, case-sensitive; `Table` only for calibration). Check `ros2 topic echo --once /optitrack/poses`. |
+| Driver starts but 0 Hz on `/optitrack/poses` | Wrong `hostname`, firewall on UDP 1510/1511, or not on the Motive LAN. `ping` the Motive PC first. |
+| Objects stream but nothing relayed | Motive asset names don't match `optitrack_relay.yaml` (`P1`/`P2`/`Table`/`Ball`, case-sensitive). Check `ros2 topic echo --once /optitrack/poses`. |
 | Rigid bodies stream with empty names | Fixed by vendored patch #6 (self-heals in ~1–2 s); if persistent, restart the bridge. |
 | `/P1/pose` positions in the hundreds | Millimetre feed → `position_scale:=0.001`. |
 | `/poses` pauses while `/P1/pose` keeps updating | By design: the ball left the volume / lost tracking; the relay never re-emits a stale ball (protects the planner's velocity fit). |

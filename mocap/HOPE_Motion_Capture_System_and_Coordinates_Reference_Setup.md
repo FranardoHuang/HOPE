@@ -242,7 +242,7 @@ Both OptiTrack Motive and Chingmu CMTracker now solve the ping-pong ball as a na
 
 ### 5.1  Ball Preparation and Asset Definition
 
-- Use the vendor-qualified ball preparation and marker pattern/constellation for rigid-body tracking. Do not infer a working marker count or layout from the retired single-point setup.
+- Use the vendor-qualified ball preparation and marker pattern/constellation for rigid-body tracking. **Verified preparation: retroreflective marker dots added to a standard ping-pong ball achieve stable 6-DOF rigid-body tracking on both OptiTrack and Chingmu.** Do not infer a working marker count or layout from the retired single-point setup.
 - Minimize changes to the ball's mass, center of mass, diameter, surface friction, and aerodynamics, and validate the prepared ball against competition rules.
 - Make the pattern asymmetric and distinguishable from `Table` and robot patterns throughout the camera volume.
 - Define a stable rigid-body asset name and ID (recommended logical name: `Ball`) in Motive or CMTracker. Topic and sender names are case-sensitive.
@@ -468,9 +468,8 @@ The `base_link` definition varies by manufacturer (Section 4); each team declare
 
 - Su, Z., Zhang, B., Rahmanian, N., Gao, Y., Liao, Q., Regan, C., Sreenath, K., & Sastry, S. S. (2025). HITTER: A HumanoId Table TEnnis Robot via Hierarchical Planning and Learning. *arXiv:2508.21043v2*.
 - HITTER project page: https://humanoid-table-tennis.github.io/
-- motion_capture_tracking (the shipped OptiTrack/NatNet driver; publishes `NamedPoseArray` before the HOPE relay): https://github.com/IMRCLab/motion_capture_tracking
-- HOPE OptiTrack/NatNet backend: [`docs/OPTITRACK.md`](../docs/OPTITRACK.md)
-- OptiTrack Motive Data Streaming / NatNet settings: https://docs.optitrack.com/motive-ui-panes/settings/settings-streaming
+- motion_capture_tracking (vendored in-tree as the supported OptiTrack/NatNet backend — `hope_ws/src/motion_capture_tracking/`, exact pins and local patches in its PIN.md; publishes `NamedPoseArray`, bridged to the `/poses` contract by `optitrack_mct_relay`; upstream: https://github.com/IMRCLab/motion_capture_tracking)
+- OptiTrack Motive VRPN Streaming Engine (rigid bodies only; default port 3883): https://docs.optitrack.com/motive-ui-panes/settings/settings-streaming
 - VRPN protocol: https://github.com/vrpn/vrpn
 - 青瞳视觉 (CHINGMU) motion capture: https://www.chingmu.com/ (EN: https://en.chingmu.com/) — VRPN/LiveStream streaming, C/C++/C#/Python/ROS SDKs
 - ChingMuVrpnRos (official Chingmu ROS/VRPN reference): https://github.com/ChingMuVisionTech/ChingMuVrpnRos

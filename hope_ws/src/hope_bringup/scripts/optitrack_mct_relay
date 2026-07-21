@@ -8,10 +8,10 @@ per camera frame carrying every tracked object:
 
 * Motive-native rigid bodies (``P1``/``P2``/``Table``) under their Motive asset
   names, and
-* optionally the ping-pong ball tracked from the unlabeled-marker point cloud
-  by librigidbodytracker (single fully-coated retroreflective ball -> one
-  marker), under the name given in the node's ``rigid_bodies`` config
-  (``Ball``) — or the ball as a Motive rigid-body asset of the same name.
+* the ping-pong ball as a Motive rigid-body asset named ``Ball``. The HOPE
+  standard requires the ball to be tracked as a strict 6-DOF rigid body
+  (marker dots added to a standard ball — verified workable on both OptiTrack
+  and Chingmu); single-marker/point tracking does not meet the spec.
 
 This relay maps those named entries onto the HOPE-standard topics the planner
 consumes: ``/poses`` (geometry_msgs/PoseArray, ball at index 0 — the
@@ -23,9 +23,9 @@ and TF. Compared with the VRPN adapter:
   is a pure name lookup;
 * ``position_scale`` defaults to 1.0 (Motive streams metres; the parameter is
   kept because some venue feeds turn out to stream millimetres);
-* orientation sanitizing: before its first valid lock librigidbodytracker can
-  report a NaN quaternion for single-marker bodies -- non-finite orientations
-  are replaced with identity so NaN never reaches ``/poses`` or TF.
+* orientation sanitizing (defensive): a non-finite quaternion from the
+  driver is replaced with identity so NaN never reaches ``/poses`` or TF —
+  with the required rigid-body ball this should not occur in practice.
 
 ``/poses`` is published ONLY when the incoming frame contains the ball entry
 (occluded ball -> the driver omits it) so a stale ball position is never
@@ -71,10 +71,9 @@ class OptitrackMctRelay(Node):
         self.declare_parameter("table_object", "Table")
         self.declare_parameter("p1_object", "P1")
         self.declare_parameter("p2_object", "P2")
-        # Ball entry name = the Motive asset name (rigid-body ball) or the
-        # librigidbodytracker rigid-body name in the mct node config
-        # (config/optitrack_mct.yaml). STANDARDIZED: ball object is named
-        # 'Ball' (robots: P1/P2) — see mocap/README.md.
+        # Ball entry name = the Motive rigid-body asset name. STANDARDIZED:
+        # ball object is named 'Ball' (robots: P1/P2) — see mocap/README.md.
+        # The ball MUST be a strict 6-DOF rigid body (HOPE spec).
         self.declare_parameter("ball_object", "Ball")
         self.declare_parameter("world_frame", "world")
         self.declare_parameter("table_pose_topic", "/table/pose")
@@ -231,15 +230,16 @@ class OptitrackMctRelay(Node):
         if _finite_quat(pose.orientation):
             out.orientation = pose.orientation
         else:
-            # librigidbodytracker publishes NaN quaternions for single-marker
-            # bodies before orientation is available; identity keeps NaN out
-            # of /poses and TF. Position-only consumers are unaffected.
+            # Defensive: identity keeps a non-finite driver quaternion out
+            # of /poses and TF (should not occur with the required rigid-body
+            # ball). Position-only consumers are unaffected.
             out.orientation.w = 1.0
             if name not in self._sanitized_orientation_names:
                 self._sanitized_orientation_names.add(name)
                 self.get_logger().info(
-                    f"'{name}' has no orientation (single-marker body); "
-                    "publishing identity quaternion"
+                    f"'{name}' streamed a non-finite quaternion; "
+                    "publishing identity (check the rigid-body asset — the HOPE "
+                    "spec requires a strict 6-DOF ball)"
                 )
         normalized.pose = out
         return normalized
