@@ -11,8 +11,23 @@
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
 
+## 2026-07-21
+
+- Wave P push 鲁棒性波扩到 18 臂并上卡 12 条（速度 ±0.2/0.35/0.5/0.8、方向 yaw/ang、频率 fast、
+  同冲量力推 f035/f08 @ pelvis link 原点）；Franco 拍板 push 是平衡的希望、力推与速度推同冲量配对
+  比较。RunPod 两次重启 Pod1 容器（07-20 19:43Z、07-21 04:35Z），`hope-pods-watch` 值班 routine
+  自动完成里程碑收口（`w_h_s0`/`v_c_s0`/`v_p035`）、补位（`v_f035`/`v_p08`）与整机重建；
+  `v_h_s0` 由人工收口于 model_10900。详见 [push 实验](experiments/2026-07/EXP-P1-PUSH-ROBUSTNESS-20260721.md)。
+- 按 2026-07-21 情报预注册 Wave Q 四对臂（速度混合最优先/强 q_des 铰链/全身模仿加强/全关节
+  qdes barrier 去 top-k）；速度泛化定为最高价值泛化轴，拍面/引拍/脚步轴降级为评测工具。
+  三本账（NOW/INDEX/TIMELINE/PROGRESS）与两份实验记录运行态同步至当日实况。
+
 ## 2026-07-20
 
+- 24 格矩阵全部发射后按实测算力（同卡 SM 分时，4 条/卡 ≈15 s/iter）把筛选终点前移到 +4000，并按
+  Franco 授权动态清退：N 交互 6 格永久停、8 格暂停待续（台账 `scheduling_ledger_20260720.jsonl`）。
+  发射日修复 4 个真机 bug：BFS 关节序断言三层、inference-mode 计数器复位、每卡并发预检、
+  `kit_boot_lock.sh` flock 泄漏（子进程继承锁 fd 导致后续发射永久阻塞——两 pod 已打补丁）。
 - 预注册并实现 24 格平衡×时序广度矩阵 {W,V}×{N,C,H}×{S0,S1,S2,S3}：新增挥拍后安顿债务包
   `post_swing_settle_debt`（Jiayi V13 思想在 main 重做，77 单测）、24 格 lean 队列渲染器（63 单测，
   修正 v8/v9 的 180 s stale_timeout 死因）、动作语义唯一真源 `motion_role_catalog.json` + 校验器

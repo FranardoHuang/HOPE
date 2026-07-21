@@ -61,6 +61,8 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | ID | 简短状态 |
 | --- | --- |
 | [`EXP-P1-HALF-SECOND-SPRINT`](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md) | 已结束：U/V/W/X/Y 到 `+1000`，W/Y 为诊断候选；真实 plan/export 已通过结构与推理，但 exact-lineage=`0` 阻断 production/vendor |
+| [`EXP-P1-PUSH-ROBUSTNESS-20260721`](experiments/2026-07/EXP-P1-PUSH-ROBUSTNESS-20260721.md) | `running`：18 臂 push 鲁棒性波（速度大小/方向/频率 + 同冲量力推），C+S0 配方、对照复用矩阵格；值班 routine 自动收口/补位 |
+| `Wave Q 情报波（预注册中）` | 速度混合 [0.8,1.2] 最优先 / 强 q_des 铰链 -1.0 / 全身模仿 2.0 / 全关节 qdes barrier 去 top-k |
 | [`EXP-P1-BALANCE-TEMPORAL-MATRIX-20260720`](experiments/2026-07/EXP-P1-BALANCE-TEMPORAL-MATRIX-20260720.md) | `preregistered / E1`：{W,V}×{N,C,H}×{S0,S1,S2,S3} 24 格单 seed 广度矩阵（时序平滑 × 稳定机制），取代 Wave A probe10 科学位与 Wave B 六格队列；父本为诊断谱系 `model_6700`，续训 10001 updates |
 | [`EXP-P1-BALANCE-ACTION-SLEW-20260720`](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md) | v8 science attempt1=`infrastructure-only / non-science`：W-N 在 `sim.reset` 收口，余五格未发；科学位已被 24 格矩阵取代（superseded）；probe9 收据只作 mechanics 证据。不得绕过 `T0→T1→T2`；Wave B M0 moving teacher 继续拒绝 |
 | [`EXP-P1-TASK-REVISION-CUTOVER`](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md) | 旧 rolling 池已精确停止；同一物理球的原子 target/TTS revision、宽准备时间、相位 governor、0.5 秒卷与整数淘汰量尺处于 source 红队，full-scene/行为尚未通过 |

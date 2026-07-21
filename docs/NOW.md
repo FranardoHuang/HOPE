@@ -855,16 +855,33 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
   `main` 选择性重做，并先过 exact 动作、MuJoCo oracle 与冻结行为卷；不得整体 merge 旧分支。
 - **[4｜P0] 原生 MuJoCo 训练候选。** 责任人 franco；执行者 Codex；下一证据：修正四个源码缺口
   后复核，再测单环境核心、并行吞吐和一次限预算 PPO 更新。[实验](experiments/2026-07/EXP-MUJOCO-NATIVE-TRAINING.md)
-- **[11｜P0] 平衡×时序 24 格广度矩阵（吸收 Wave A/B）。** 责任人 franco；执行者 Claude；执行分支
-  `Franco_codex/balance-temporal-matrix-20260720`。人话：把"动作平滑怎么给"（N 无平滑 / C 现役全身
-  raw action-rate / H 恢复期腿腰执行目标铰链）和"稳定机制给哪种"（S0 无 / S1 挥拍后安顿债务包 /
-  S2 无参考支撑包 / S3 下肢软模仿）在 W、V 两个 `model_6700` 诊断父本上交叉成 24 格，单 seed 3、
-  每格续训 10001 updates，两 pod 六卡每卡 4 条。Wave A probe10 科学位与 Wave B 六格队列由本矩阵
+- **[11｜P0] 平衡×时序 24 格广度矩阵（吸收 Wave A/B）——已发射，收口进行中。** 责任人 franco；
+  执行者 Claude；执行分支 `Franco_codex/balance-temporal-matrix-20260720`（已并入 main）。人话：把
+  "动作平滑怎么给"（N 无平滑 / C 现役全身 raw action-rate / H 恢复期腿腰执行目标铰链）和"稳定机制
+  给哪种"（S0 无 / S1 挥拍后安顿债务包 / S2 无参考支撑包 / S3 下肢软模仿）在 W、V 两个 `model_6700`
+  诊断父本上交叉成 24 格，单 seed 3。**2026-07-20 全部 24 格发射；同日实测本任务代际同卡 SM 分时
+  （4 条/卡 ≈15 s/iter）后把筛选终点前移到 +4000（终档约 model_10700），并按 Franco 授权动态清退：
+  N 交互 6 格永久停（容量让位非科学负例）、8 格暂停待续，台账在两 pod 的
+  `scheduling_ledger_20260720.jsonl`。已到线收口：`w_h_s0`/`v_c_s0`/`v_p035`/`v_h_s0`（终档
+  model_10700–10900）。中期信号（非终判）：T 轴 C≫H——V 父本回球/拍 0.90 vs 0.54、fall 无差，
+  H 行淘汰待全格 +4000 终判；S 轴四档暂无分离。** Wave A probe10 科学位与 Wave B 六格队列由本矩阵
   取代（superseded），probe9 六份 receipt 只作 runtime mechanics 证据；父本谱系 mismatch 故后代
   formal-exact ineligible，胜者机制须另在 exact-lineage（qdot `model_1000` 族）重跑正名。机器真源：
   [矩阵实验](experiments/2026-07/EXP-P1-BALANCE-TEMPORAL-MATRIX-20260720.md)、
   [队列配置](../configs/phase1_balance_temporal_matrix_20260720.yaml)、
-  [操作页](operations/run_phase1_balance_temporal_matrix.md)。以下为并入的 Wave A/B 历史：Wave A 只比较同父本
+  [操作页](operations/run_phase1_balance_temporal_matrix.md)。
+- **[12｜P0] Wave P push 鲁棒性波（Franco：push 是平衡的希望）——进行中。** 责任人 franco；执行者
+  Claude。人话：现役配方从不推机器人（`push_robot=None` 对齐 HITTER），三篇对标论文全带 push；本波
+  在 C+S0 配方（对照=矩阵 `w_c_s0`/`v_c_s0`，不重复买）上测 18 臂——速度冲击大小 ±0.2/0.35/0.5/0.8
+  m/s、方向（+yaw / +全角速度）、频率（1–3 s 高频）、以及**同冲量力推**（68 N/155.4 N × 0.30 s @
+  pelvis link 原点，诚实标注非 COM）比较"瞬时速度注入练回正 vs 持续力练抵抗"。速度/力臂已上卡 12 条，
+  其余按空槽队列补发。RunPod 两次重启 Pod1 容器（19:43Z/04:35Z），值班 routine 自动整机重建。
+  [push 实验](experiments/2026-07/EXP-P1-PUSH-ROBUSTNESS-20260721.md)。
+- **[13｜P0] Wave Q 情报波（速度泛化优先）——预注册中。** 责任人 franco；执行者 Claude。人话：按
+  2026-07-21 情报定四对臂——①在线速度混合 `speed_scale_range=[0.8,1.2]`（速度泛化是最高价值泛化轴，
+  拍面/引拍/脚步轴降级为评测工具）；②强 q_des 铰链 `-1.0`（现役 penalty 可能太小）；③全身模仿加强
+  `lower_body_pose_imitation=2.0`（全身学习可能很有用）；④全关节 qdes 限位 barrier（Jiayi v14 思想
+  去 top-k，`-0.65`/margin `0.08`）。caveat：Jiayi 起始分布未调好，不做臂。预算按新标准 +4000。以下为并入的 Wave A/B 历史：Wave A 只比较同父本
   `phase1_balance_action_slew_20260720` 队列的
   W/V 的原 dense action-rate、无 action-rate 与腿/腰 processed-qdes slew hinge 六格，先过短合同 probe，
   再按 `+200/+500/+1000` 看 fall、completion、return 与姿态/目标突变尾部。所有子项因显式新 Reward
