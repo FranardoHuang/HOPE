@@ -23,7 +23,8 @@ Motive (NatNet UDP)
 /optitrack/poses                             motion_capture_tracking_interfaces/NamedPoseArray
       |  optitrack_mct_relay (hope_bringup)  (one message per camera frame, objects by name)
       v
-/poses (ball at index 0), /ball/point, /table/pose, /P1/pose, /P2/pose, TF
+/poses (ball at index 0), /ball/point, /P1/pose, /P2/pose, TF
+  (`/table/pose` only when a separate calibration session deliberately streams `Table`)
       |  hope_planner
       v
 /racket/command
@@ -81,13 +82,15 @@ builds everything else unchanged.
 ## Motive-side checklist
 
 In Motive's Data Streaming pane (see the full table in the
-[mocap reference §6.3](../mocap/HOPE_Motion_Capture_System_and_Coordinates_Reference_Setup.md)):
+[mocap reference §6.2](../mocap/HOPE_Motion_Capture_System_and_Coordinates_Reference_Setup.md)):
 
 - NatNet **enabled**, Up Axis = **Z** (critical — REP 103 Z-up), Unicast
-  preferred, command/data ports 1510/1511.
-- Rigid Bodies **ON**; assets named exactly `P1` (+ `Table`, `P2` if used —
-  the table asset is setup/calibration-only; older notes call it `PPT`) — the
-  driver streams Motive asset names verbatim and the relay maps by name.
+  preferred; the driver queries the UDP command port 1510 and discovers the
+  server-selected data port from Motive's response.
+- Rigid Bodies **ON**; competition assets named exactly `Ball`, `P1`, and
+  `P2`. `Table` is setup/calibration-only (older notes call it `PPT`) and must
+  be disabled or omitted for competition. The driver streams Motive asset
+  names verbatim and the relay maps by name.
   Assets created/renamed while the bridge runs self-heal in ~1–2 s (the
   vendored driver re-requests the model definition when an unnamed body
   streams, PIN.md patch #6); restart the bridge only as a fallback.
@@ -211,8 +214,8 @@ whitelist derived from the route to each peer) and sets
 
 | Symptom | Cause / fix |
 |---|---|
-| Driver starts but 0 Hz on `/optitrack/poses` | Wrong `hostname`, firewall on UDP 1510/1511, or not on the Motive LAN. `ping` the Motive PC first. |
-| Objects stream but nothing relayed | Motive asset names don't match `optitrack_relay.yaml` (`P1`/`P2`/`Table`/`Ball`, case-sensitive). Check `ros2 topic echo --once /optitrack/poses`. |
+| Driver starts but 0 Hz on `/optitrack/poses` | Wrong `hostname`, firewall blocking NatNet UDP (command port 1510 or the server-advertised data port), or not on the Motive LAN. `ping` the Motive PC first. |
+| Objects stream but nothing relayed | Motive asset names don't match `optitrack_relay.yaml` (`Ball`/`P1`/`P2`, case-sensitive; `Table` only for calibration). Check `ros2 topic echo --once /optitrack/poses`. |
 | Rigid bodies stream with empty names | Fixed by vendored patch #6 (self-heals in ~1–2 s); if persistent, restart the bridge. |
 | `/P1/pose` positions in the hundreds | Millimetre feed → `position_scale:=0.001`. |
 | `/poses` pauses while `/P1/pose` keeps updating | By design: the ball left the volume / lost tracking; the relay never re-emits a stale ball (protects the planner's velocity fit). |

@@ -5,7 +5,8 @@
 #
 # ---- BALL MODES (pick ONE, never both) --------------------------------------
 # MODE A — rigid-body ball: the ball is a Motive rigid-body ASSET named exactly
-#   `Ball` (>=3 markers), streamed like P1/Table. Nothing to configure here —
+#   `Ball` (>=3 markers), streamed like P1/P2. `Table` remains calibration-only.
+#   Nothing needs configuring here —
 #   keep the librigidbodytracker block below COMMENTED OUT (an enabled tracker
 #   body would fight the same-named vendor body and lock onto stray points).
 #   Motive: Rigid Bodies ON; Unlabeled Markers not needed (OFF is cleanest).
@@ -24,9 +25,9 @@
 # "mocap reference" =
 #   mocap/HOPE_Motion_Capture_System_and_Coordinates_Reference_Setup.md
 # -----------------------------------------------------------------------------
-# Other Motive-side requirements (both modes, mocap reference §6.3): NatNet
-# enabled, Up Axis = Z, Unicast preferred, rigid-body assets named exactly P1
-# (+ Table, P2 if used). Assets created/renamed in Motive while the bridge runs
+# Other Motive-side requirements (both modes, mocap reference §6.2): NatNet
+# enabled, Up Axis = Z, Unicast preferred, competition rigid-body assets named
+# exactly Ball/P1/P2 (`Table` is calibration-only). Assets created/renamed in Motive while the bridge runs
 # SELF-HEAL in ~1-2 s (vendored patch #6 re-requests the model definition when
 # an unnamed body streams); restart the bridge only as a fallback.
 /**:

@@ -65,7 +65,7 @@ install → train → export → evaluate → run loop, and
 
 | Document | Description | Version |
 |----------|-------------|---------|
-| [Motion Capture System Reference Setup](mocap/HOPE_Motion_Capture_System_and_Coordinates_Reference_Setup.md) | OptiTrack and Chingmu ROS 2 arena configuration, coordinate frames, competition rigid bodies (`Ball`, `P1`, `P2`; `Table` for calibration only), humanoid `base_link` marker setup, and streaming pipelines | v0.6 |
+| [Motion Capture System Reference Setup](mocap/HOPE_Motion_Capture_System_and_Coordinates_Reference_Setup.md) | OptiTrack/NatNet and Chingmu/VRPN ROS 2 arena configuration, coordinate frames, competition rigid bodies (`Ball`, `P1`, `P2`; `Table` for calibration only), humanoid `base_link` marker setup, and streaming pipelines | v0.7 |
 | [7DOF Racket Model-based Planner Reference Setup](HOPE_7DOF_Racket_Model_based_Planner_Reference_Setup.md) | Ball state estimation, trajectory prediction, and racket target planning (Stages 1–3 of the HITTER framework), reimplemented in the HOPE canonical frame | v0.1 |
 | [WBC Simulation Training Reference Setup](HOPE_WBC_Simulation_Training_Reference_Setup.md) | SMPL-X motion acquisition, GMR retargeting, BeyondMimic RL training pipeline for whole-body control (Stage 4), with dual-backend support for Isaac Lab and mjlab | v0.5 |
 | [Hardware Deployment Reference Setup](HOPE_Hardware_Deployment_Reference_Setup.md) | Platform-specific real-robot deployment paths (including `legged_control2` and AimRT): ONNX inference, ROS 2 node graph, PD gain tuning, safety procedures, and competition workflow | v0.2 |
@@ -104,21 +104,19 @@ The competition rulebooks ship at the repository root:
 ```
        ┌──────────────────────────────┐   ┌──────────────────────────────┐
        │ OptiTrack Motive             │   │ Chingmu CMTracker / MCServer │
-       │ (VRPN Streaming Engine)      │   │ (VRPN server)                │
-       │ 3 competition 6-DOF bodies:  │   │ 3 competition 6-DOF bodies:  │
+       │ NatNet UDP                   │   │ VRPN server                  │
        │ Ball / P1 / P2               │   │ Ball / P1 / P2               │
        └──────────────┬───────────────┘   └──────────────┬───────────────┘
-                      │            VRPN tracker           │
-                      │            reports                │
+                      │ NatNet                            │ VRPN
+                      ▼                                   ▼
+       ┌──────────────────────────────┐   ┌──────────────────────────────┐
+       │ motion_capture_tracking      │   │ vendored vrpn_mocap          │
+       │ /optitrack/poses             │   │ /vrpn_mocap/<name>/          │
+       │   (NamedPoseArray)           │   │   pose_id_<N> (PoseStamped)  │
+       └──────────────┬───────────────┘   └──────────────┬───────────────┘
+                      │ optitrack_mct_relay              │ pose_to_posearray
                       └──────────────────┬────────────────┘
                                          ▼
-                    ┌─────────────────────────────┐
-                    │  vendored vrpn_mocap         │
-                    │  /vrpn_mocap/<name>/         │
-                    │    pose_id_<N> (PoseStamped) │
-                    └──────────┬──────────────────┘
-                               │ pose_to_posearray
-                               ▼
                     ┌─────────────────────────────┐
                     │ /poses: full rigid-body pose │
                     │ xyz + quaternion (xyzw)      │
@@ -164,18 +162,18 @@ The competition rulebooks ship at the repository root:
 ```
 
 During competition the motion-capture stream carries the named rigid bodies `Ball`, `P1`, and
-`P2` (the shipped bringup aggregates only `Ball` into `/poses` by default); a `Table` asset is
-used for calibration only and appears only in training-data recordings. The ball pose includes position `(x, y, z)` and quaternion orientation
+`P2` (`Ball` is always first in `/poses`; the default VRPN bringup aggregates only the ball); a
+`Table` asset is used for calibration only and appears only in training-data recordings. The ball pose includes position `(x, y, z)` and quaternion orientation
 `(qx, qy, qz, qw)`; pitch/yaw/roll are derived display values. The shipped planner currently
 uses only the ball position, while the full pose is preserved for validation and future
 spin-aware estimation.
 
-> The diagram shows the **VRPN reference path** (both vendors stream VRPN into
-> the vendored `vrpn_mocap` client + `pose_to_posearray`, the default
-> `mocap_backend:=vrpn`). For OptiTrack rigs an alternative **NatNet backend**
-> (the vendored `motion_capture_tracking` driver + `optitrack_mct_relay`) is
-> selectable with `mocap_backend:=optitrack` and feeds the identical `/poses`
-> contract — everything below that hop is unchanged. See
+> The diagram shows both supported source paths: **Chingmu/VRPN** uses
+> `vrpn_mocap` + `pose_to_posearray` (the default `mocap_backend:=vrpn`),
+> while **OptiTrack/Motive uses NatNet** through the vendored
+> `motion_capture_tracking` driver plus `optitrack_mct_relay`
+> (`mocap_backend:=optitrack`). Both feed the identical `/poses` contract, so
+> everything below that hop is unchanged. See
 > [docs/OPTITRACK.md](docs/OPTITRACK.md).
 
 The same policy runner drives either the shipped MuJoCo simulation
@@ -221,7 +219,7 @@ Each piece has its own dependencies — install only what the step you are on ne
 - **Training / export**: NVIDIA Isaac Sim + Isaac Lab (with `rsl_rl`), Python 3.10, PyTorch, CUDA GPU
 - **MuJoCo evaluation / reference runner**: `mujoco`, `onnxruntime`, `numpy` (no GPU needed)
 - **Planner workspace**: ROS 2 Jazzy (`rclpy`), `numpy`, `pyyaml`
-- **Real arena**: OptiTrack Motive (VRPN Streaming Engine) or Chingmu CMTracker/MCServer — both stream **VRPN** into the vendored ROS 2 client; configure named 6-DOF rigid bodies `Ball`, `P1`, and `P2` — plus a calibration-only `Table` asset that is not streamed in competition (OptiTrack note: verify the VRPN stream's up-axis at table landmarks and apply the full-pose conversion described in the mocap docs only if it streams Y-up). OptiTrack rigs can alternatively stream **NatNet** via the vendored `motion_capture_tracking` driver (`mocap_backend:=optitrack`, see [docs/OPTITRACK.md](docs/OPTITRACK.md))
+- **Real arena**: OptiTrack Motive streams **NatNet** through the vendored `motion_capture_tracking` driver and `optitrack_mct_relay` (`mocap_backend:=optitrack`; set Motive **Up Axis = Z** and see [docs/OPTITRACK.md](docs/OPTITRACK.md)). Chingmu CMTracker/MCServer streams **VRPN** through `vrpn_mocap` and `pose_to_posearray` (`mocap_backend:=vrpn`). In either case configure the named 6-DOF competition rigid bodies `Ball`, `P1`, and `P2`; `Table` is calibration-only and is not streamed during competition.
 
 ## Related Repositories
 
@@ -265,3 +263,5 @@ Some starter materials are derived from or interoperate with third-party softwar
 ## Contact
 
 **Allen Yang**, Co-founder and CTO, Hitch Interactive (Intelligent Racing Inc.); Chair, AI Racing ROAR Platform, UC Berkeley; Founding Executive Director, VIVE AR Center, UC Berkeley
+
+**Development team:** Franco Huang (lead), Jeremy Wei, Yikang Yu, and Jiayi Zhu.

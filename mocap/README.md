@@ -2,7 +2,7 @@
 
 HOPE drives its planner from an external motion-capture system that streams rigid-body
 poses into ROS 2. During competition the arena streams the named rigid bodies `Ball`,
-`P1`, and `P2` (the shipped bringup aggregates only `Ball` into `/poses` by default). A
+`P1`, and `P2` (`Ball` is first in `/poses`; the default VRPN bringup aggregates only it). A
 `Table` asset is used for setup/calibration only and appears only in training-data
 recordings — it is not streamed during competition. This document defines the generic
 frame and topic contract
@@ -51,49 +51,72 @@ mocap base-yaw estimate as advisory unless a robot integration contract says oth
 
 | Topic | Type | Rate (typical) | Meaning |
 |-------|------|----------------|---------|
-| `/poses` | `geometry_msgs/PoseArray` | ~300 Hz | Full tracked pose(s) in the world frame. `Ball` first (the shipped bringup aggregates only `Ball`, a single-pose array); add `P1`, `P2` after it when aggregating robot bases. The planner reads `Ball` at `ball_pose_index` and currently consumes only its position. |
-| `/tf` (optional) | `tf2_msgs/TFMessage` | ~300 Hz | Named transforms for `world → Ball` (and `world → P1`, `world → P2` where streamed). The shipped VRPN path does **not** publish `/tf`; add a `tf2_ros` broadcaster if your deployment needs named transforms. |
+| `/poses` | `geometry_msgs/PoseArray` | ~300 Hz | Full tracked pose(s) in the world frame. `Ball` is always first; `P1` and `P2` may follow when the selected adapter is configured to aggregate robot bases. The planner reads `Ball` at `ball_pose_index` and currently consumes only its position. |
+| `/tf` (optional) | `tf2_msgs/TFMessage` | ~300 Hz | Named transforms for `world → Ball` (and `world → P1`, `world → P2` where streamed). The OptiTrack relay publishes these; the shipped Chingmu/VRPN path does **not**, so add a `tf2_ros` broadcaster if that deployment needs named transforms. |
 | `<robot_base_pose>` | `geometry_msgs/PoseStamped` | ~300 Hz (optional) | Full robot-base pose in the world frame, used for the fixed-station recentring term. Topic name is a launch parameter. |
 
 The planner consumes every incoming mocap sample for its estimator but runs its (more
-expensive) trajectory solve at **at most 50 Hz**. Source timestamps are propagated where the
-source provides them; the vendored VRPN path (both vendors) uses receipt time by default and
-requires `use_vrpn_timestamps: true` plus synchronized clocks (NTP/PTP) for server capture
-timestamps.
+expensive) trajectory solve at **at most 50 Hz**. The shipped Chingmu/VRPN client and the
+OptiTrack/NatNet driver both use ROS receipt time by default. For a VRPN capture timestamp,
+set `use_vrpn_timestamps: true` and synchronize server and ROS clocks (NTP/PTP). The NatNet
+driver can instead be configured with `topics.header_time: camera` only when the Motive and ROS
+clocks are similarly synchronized.
 
 ## Bringing up mocap
 
-Both vendors use the **same uniform path**: the vendor application solves the named
-rigid bodies and serves them as **VRPN** trackers; the vendored ROS 2 client
-(`hope_ws/src/vrpn_mocap`, MIT licensed) publishes
-`/vrpn_mocap/<sender>/pose_id_<sensor_id>` as `geometry_msgs/PoseStamped` (with
-`multi_sensor: true`); and the shipped `hope_bringup/pose_to_posearray` adapter copies the
-complete pose — including its quaternion — into `/poses`. Use the vendor-native rigid-body
-stream; do not reconstruct the ball from an unlabeled point cloud on the ROS host.
+HOPE ships two source-specific paths that converge at the identical planner interface:
 
-- **OptiTrack:** enable Motive's **VRPN Streaming Engine** (default port 3883; rigid bodies
-  only — markers/skeletons are not carried over VRPN). Two caveats: Motive's *Up Axis*
-  setting is not clearly documented as applying to the VRPN stream, whose frame can differ
-  by Motive version and installation (Y-up output is commonly observed) — verify the streamed
-  frame at surveyed table landmarks first, and only if it is Y-up apply a full-pose
-  (position + quaternion) Y-up → Z-up conversion on the ROS 2 side before `/poses`
-  (required engineering, not included in this repository; the preserved arena design
-  document, Section 6.2, specifies the transform and the validation);
-  and disable *Zero When Untracked* so occlusions surface as dropouts rather than
-  all-zero poses.
-- **Chingmu:** CMTracker/MCServer serves the named rigid bodies as VRPN trackers directly;
-  configure it to stream Z-up so no software frame conversion is needed.
+| Venue system | Vendor transport | Raw ROS 2 message | HOPE adapter |
+|---|---|---|---|
+| **OptiTrack Motive** | **NatNet UDP** (not VRPN) | `/optitrack/poses`, `motion_capture_tracking_interfaces/NamedPoseArray` | `optitrack_mct_relay` → `/poses` |
+| **Chingmu CMTracker/MCServer** | **VRPN** | `/vrpn_mocap/<sender>/pose_id_<sensor_id>`, `geometry_msgs/PoseStamped` | `pose_to_posearray` → `/poses` |
 
-Topic and sender names are case-sensitive. Configure them for the actual asset name shown
-by Motive or CMTracker instead of assuming that `Ball` and `ball` are interchangeable.
-A generic bringup that wires the VRPN path into the planner lives in
-`hope_ws/src/hope_bringup/`.
+### OptiTrack / Motive: NatNet
 
-For OptiTrack rigs the repository also vendors the IMRCLab `motion_capture_tracking`
-NatNet driver (`hope_ws/src/motion_capture_tracking/`, MIT licensed) plus an
-`optitrack_mct_relay` adapter that produces the exact same `/poses` contract — select it
-with `mocap_backend:=optitrack` on the bringup launch. See
-[`docs/OPTITRACK.md`](../docs/OPTITRACK.md).
+Use the `optitrack` backend for Motive. Enable NatNet, set **Up Axis = Z**, prefer unicast,
+and stream rigid bodies named exactly `Ball`, `P1`, and `P2`. NatNet uses the Motive command
+port (normally UDP 1510); the driver obtains the data-port and unicast/multicast details from
+the server response. Motive's legacy VRPN stream on port 3883 is **not used** by this backend.
+
+```text
+Motive NatNet → motion_capture_tracking_node (namespace /optitrack)
+             → /optitrack/poses (NamedPoseArray)
+             → optitrack_mct_relay → /poses (PoseArray, Ball at index 0)
+```
+
+`NamedPoseArray` carries one header plus entries of the form `{name, Pose}`. The relay maps
+the case-sensitive Motive asset names into the HOPE topics, preserves the position and
+quaternion, and only publishes `/poses` on a frame that contains `Ball`; it never repeats a
+stale ball pose during an occlusion. The raw topic is intentionally namespaced because its
+message type differs from the HOPE `/poses` `PoseArray` contract.
+
+Launch it with:
+
+```bash
+ros2 launch hope_bringup hope_bringup.launch.py \
+  mocap_backend:=optitrack mocap_server:=<MOTIVE_PC_IP>
+```
+
+The `Table` asset may be recorded through this relay during a separate setup/calibration
+session, but must be disabled or omitted from Motive's competition stream. Consequently no
+live `/table/pose`, table TF, or table entry reaches the competition `/poses` stream. See the
+full operational guide in [`docs/OPTITRACK.md`](../docs/OPTITRACK.md).
+
+### Chingmu / CMTracker: VRPN
+
+CMTracker/MCServer serves the named rigid bodies as VRPN trackers directly. Configure it to
+stream Z-up so no software frame conversion is needed. The vendored ROS 2 client
+(`hope_ws/src/vrpn_mocap`, MIT licensed) publishes one `PoseStamped` topic per tracker (with
+`multi_sensor: true`), and `hope_bringup/pose_to_posearray` copies the complete pose —
+including its quaternion — into `/poses`.
+
+```text
+CMTracker/MCServer VRPN → /vrpn_mocap/<sender>/pose_id_<sensor_id> (PoseStamped)
+                         → pose_to_posearray → /poses (PoseArray, Ball at index 0)
+```
+
+Topic and asset names are case-sensitive. Configure them for the actual name shown by Motive
+or CMTracker instead of assuming that `Ball` and `ball` are interchangeable.
 
 For testing without a physical rig, `hope_ws/src/hope_bringup/scripts/fake_ball_publisher`
 publishes synthetic `/poses` trajectories (`fake_optitrack_publisher` does the same at the
@@ -109,4 +132,4 @@ For a worked example of one such environment, see the preserved arena design doc
 [HOPE_Motion_Capture_System_and_Coordinates_Reference_Setup.md](HOPE_Motion_Capture_System_and_Coordinates_Reference_Setup.md) ([中文](HOPE_Motion_Capture_System_and_Coordinates_Reference_Setup_ZH.md)). It
 covers OptiTrack/Motive and Chingmu/CMTracker configuration, camera layout,
 tracked-object taxonomy, `base_link` marker placement, and 6-DOF ball tracking.
-It predates this stack, so treat the contract above as authoritative where the two differ.
+For the general frame and topic contract, treat this README as authoritative.

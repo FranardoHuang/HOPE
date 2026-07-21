@@ -30,7 +30,7 @@ NatNet driver + relay — the `/poses` hop and everything below it are identical
 /optitrack/poses                       motion_capture_tracking_interfaces/NamedPoseArray
         |  optitrack_mct_relay (hope_bringup)
         v
-/poses (+ /ball/point, /{table,P1,P2}/pose, TF)
+/poses (+ /ball/point, /P1/pose, /P2/pose, TF; `/table/pose` only in a calibration session)
 ```
 
 ## Topics
@@ -78,13 +78,15 @@ while keeping the `/poses` contract byte-identical. Operational guide:
 | `/optitrack/poses` | `motion_capture_tracking_interfaces/NamedPoseArray` | vendored `motion_capture_tracking` driver → `optitrack_mct_relay` | sensor-data (best-effort, volatile, keep-last 1) |
 | `/poses` | `geometry_msgs/PoseArray` | `optitrack_mct_relay` → `hope_planner` | best-effort, volatile, keep-last 1 |
 | `/ball/point` | `geometry_msgs/PointStamped` | `optitrack_mct_relay` → (debug / downstream consumers) | best-effort, volatile, keep-last 1 |
-| `/table/pose`, `/P1/pose`, `/P2/pose` | `geometry_msgs/PoseStamped` | `optitrack_mct_relay` → (debug / downstream consumers) | best-effort, volatile, keep-last 1 |
+| `/P1/pose`, `/P2/pose` | `geometry_msgs/PoseStamped` | `optitrack_mct_relay` → (debug / downstream consumers) | best-effort, volatile, keep-last 1 |
+| `/table/pose` | `geometry_msgs/PoseStamped` | `optitrack_mct_relay` → calibration consumers only | best-effort, volatile, keep-last 1 |
 
 Notes:
 
 - **`/optitrack/poses`** — ONE message per camera frame carrying every tracked
-  object by name (Motive rigid-body assets `P1`/`P2`/`Table` verbatim, plus the
-  ball entry `Ball` — either a Motive asset or a `librigidbodytracker`
+  object by name (competition Motive rigid-body assets `Ball`/`P1`/`P2`
+  verbatim; `Table` exists only in a separate calibration session). The ball may
+  also be a `librigidbodytracker`
   single-marker body, see
   [`optitrack_mct.yaml`](../../hope_ws/src/hope_bringup/config/optitrack_mct.yaml)).
   ⚠ deliberately remapped AWAY from the bare `/poses` name by
@@ -92,14 +94,17 @@ Notes:
   HOPE contract — an unremapped driver breaks the planner with a DDS type
   mismatch. The driver's raw TF is likewise remapped to `/optitrack/tf` /
   `/optitrack/tf_static` so the relay stays the only
-  `world → ball/Table/P1/P2` TF authority; `/optitrack/pointCloud` carries the
+  `world → ball/P1/P2` TF authority during competition; `/optitrack/pointCloud` carries the
   unlabeled-marker cloud (ball-tracker debugging).
 - **`/poses`** — published by the relay ONLY on frames that contain the ball
   entry (an occluded ball is omitted by the driver), so a stale ball position
   is never re-emitted at rigid-body timestamps — the same
   ball-triggered publishing the VRPN path gets from `pose_to_posearray`.
   Order is `["ball", "Table", "P1", "P2"]` (ball first, matching the planner's
-  default `ball_pose_index: 0`); absent objects are skipped.
+  default `ball_pose_index: 0`); absent objects are skipped. `Table` stays in
+  the relay configuration only to support a separate calibration recording;
+  because Motive must not stream it during competition, it is absent from the
+  competition `PoseArray`, topics, and TF stream.
 - **Rates** — OptiTrack rigs commonly stream 360 Hz (vs the 300 Hz VRPN
   default). The planner's `fit_window` is coupled to the rate
   (`round(31 × rate / 300)`, ≥ ~100 ms of samples — 360 Hz → 37); see
