@@ -1330,6 +1330,9 @@ class EvalPhaseGovernor:
         self.phase_rate = 0.0
         self.truth_tts = self.initial_tts
         self.desired_tts = self.initial_tts
+        # Training begin_planner_task sets speed_scale=0: the reveal starts from a STATIONARY
+        # reference, so the first actor obs sees zero reference joint velocity.
+        self.last_frame_delta = 0.0
         self.exact_fired = False
         self.active = True
 
@@ -1385,6 +1388,9 @@ class EvalPhaseGovernor:
         self.phase_rate = new_rate
         self.desired_tts = remaining_deadline
         self.time_step_f += frame_delta
+        # Training _update_command sets speed_scale=frame_delta: the reference joint velocities
+        # the actor observes at the NEW frame are the native clip velocities times this factor.
+        self.last_frame_delta = frame_delta
         return self.time_step
 
 
@@ -3812,6 +3818,14 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
 
     for step in range(n_steps):
         refs = refs_table[time_step]
+        if gov is not None:
+            # Training-obs parity (commands.py joint_pos/joint_vel with retiming_active): the
+            # governed clock plays the clip at last_frame_delta frames per control step, so the
+            # reference joint velocities the actor observes scale by that factor (0 at task
+            # begin — the reveal starts from a stationary reference; ~max_phase_rate*span*dt at
+            # the sprint). Positions/orientations are frame lookups and stay unscaled.
+            refs = dict(refs)
+            refs["joint_vel"] = refs["joint_vel"] * gov.last_frame_delta
         # --hold-ref stand: the multiswing pre-swing HOLD imitates READY STAND (joint refs =
         # default_q, ref vel = 0) — lockstep with the 2026-07-05+ training hold semantics
         # (commands.py), instead of the frozen windup-frame reference the pre-07-05 generations

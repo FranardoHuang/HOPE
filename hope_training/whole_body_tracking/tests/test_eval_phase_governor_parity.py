@@ -258,6 +258,8 @@ def test_frame_domain_trace_bitwise_matches_torch_commands_source(tts, seg_len, 
         assert float(shim._planner_phase_rate) == gov.phase_rate, tick
         assert float(shim._planner_truth_tts) == gov.truth_tts, tick
         assert int(shim.time_steps_f.round().long()) == gov.time_step, tick
+        # 训练 _update_command: speed_scale=frame_delta,actor 的参考 jv obs 按它缩放.
+        assert float(frame_delta) == gov.last_frame_delta, tick
         if gov.time_step_f >= seg_len - 1:
             break
     # 击球后原生跟随把帧推到剪辑末尾(wrap 条件可达),不是停在击球帧.
@@ -292,6 +294,10 @@ def test_begin_rearms_exact_latch_and_multi_clip_frames():
     )
     gov.begin(1)
     assert gov.time_step == 140
+    # begin = 静止参考揭题:第一帧 actor 看到的参考 jv 缩放因子为 0(训练 speed_scale=0).
+    assert gov.last_frame_delta == 0.0
+    gov.advance()
+    assert gov.last_frame_delta > 0.0
     assert gov.strike_step == 140 + int(round(0.338 * (135 - 1)))
     gov.exact_fired = True
     gov.begin(0)
