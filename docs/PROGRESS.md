@@ -49,7 +49,10 @@
   正手 11 臂全部活不到击球帧、反手能活到但打不准——疑似评估器未实现 task-revision 代际的
   揭题/hold 协议(7-13 老代际同链正常:~140 步/题、接触率 1.0)。取证已闭环:伪影坐实且方向反转——策略按 governor 节奏 0.1s 冲到 6 m/s,评估器参考 1x 慢放,
   ee_body_pos 守卫 100% 收题、零摔倒;本批 MuJoCo 分数作废,诊断档 B(松 reference 阈值)在跑,
-  正式修复 A(评估器补 phase-governor 协议,metadata 门控)已立案。全档见
+  正式修复 A(评估器补 phase-governor 协议)执行中。诊断档 B 已出:守卫伪影坐实(反手
+  活到击球帧 0→188/188),但抬守卫后**全臂 100% 物理摔倒、零接触**(V 臂 ~0.9s 倾倒、W 臂
+  ~1.15s 高度塌,W 比 V 稳 +0.25s)——老代际协议下的摔倒不能直接判"不会打",终审等 A 协议
+  重判;若仍全摔则升级为正式 sim-to-sim gap 证据。全档见
   [judge_results_20260722](experiments/2026-07/judge_results_20260722.md)。
   另:这批 checkpoint 的 lineage_exact 全为 0,判卷走 --allow-inexact-contract 诊断档。
 - pod 成果验收与复活(07-22 下午):账面核对完毕——25k 续训八格全部被重启杀停
