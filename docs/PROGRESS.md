@@ -37,6 +37,10 @@
   （c102b9e3/ca078850 家族改 hope_commands/commands 后 host stub 未同步：缺
   `planner_revision_enabled`/`_clip_names`/假 motion、MotionLoader 收 PosixPath、teacher 收据
   规范名漂移）——四类全是测试侧欠账，纯测试文件修复后 97 绿，源码零改动。
+- FINAL 11 段终表交付(07-23):t_hit 门原就绪 3/11、c/3 前置 8/11、**2c/3 前置 11/11 全过**
+  (0.22-0.38s);回位富余 ×3.7-10.8;binding 只剩肩(8)/肘(3)两堵墙;适用率短板在"面"不在时间
+  (grip/面标定+挡球快球卷+S0 高压卷是下一步)。全表见
+  [final_11_motion_table_20260723](research/final_11_motion_table_20260723.md)。
 - v12 补链+11 段全集总账终版(07-23):v12 两段原件在本机 ~/Downloads/v12/(pod 上 yikang
   keep_take4 是另一 take,哈希已分辨),影子 exact-batch 走通 GVHMR→GMR→落地修正→三门→grip→
   锚窗。**v12_bh_block 是惊喜**:近恒等 grip 96% 宽平台、快档 100%。**挡球家族规律实锤**:挡在
