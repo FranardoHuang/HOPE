@@ -43,7 +43,7 @@ source:
   # SSH 命令（--plan/--checklist 不受影响）。
   checkout: /workspace/codexschema/nohope_cgf_20260722
   identity_mode: clean_detached_exact_commit
-  commit: "PENDING_40HEX_AFTER_WIRING_MERGE"
+  commit: "b9c8fff2c10e65aed93fdc9ac2d96a64346aaef4"
   worktree_relative: hope_training/whole_body_tracking
   python: /workspace/hope_isaac_venv/bin/python
   setup_relative: setup_train_env.sh
@@ -326,7 +326,7 @@ mechanisms:
 # 才翻 wiring_confirmed=true。false 时渲染器拒绝出这四臂的任何命令（fail-closed），
 # 其余四臂不受影响。
 groundfoot_contract:
-  wiring_confirmed: false
+  wiring_confirmed: true
   expected_cli_keys:
     - task.plant.robot_material_static_friction_range
     - task.plant.robot_material_dynamic_friction_range

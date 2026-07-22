@@ -398,21 +398,28 @@ def test_rough_remote_body_omits_parent_files(tmp_path):
 # --------------------------------------------------------------------------------------------- #
 # gates: placeholder commit + groundfoot + kdpassive
 # --------------------------------------------------------------------------------------------- #
-def test_checked_in_commit_is_the_wiring_placeholder():
+def test_checked_in_commit_is_pinned_and_groundfoot_gate_open():
+    # 2026-07-22 合并 b9c8fff2 后钉 40-hex + groundfoot 闸门翻真(远端两 pod checkout
+    # 已按合同 grep 过 7 个白名单键);kdpassive 仍无源码 wiring,保持锁死。
     queue = M.load_queue(QUEUE_PATH)
-    assert queue["source"]["commit"] == "PENDING_40HEX_AFTER_WIRING_MERGE"
-    assert queue["groundfoot_contract"]["wiring_confirmed"] is False
+    assert queue["source"]["commit"] == "b9c8fff2c10e65aed93fdc9ac2d96a64346aaef4"
+    assert queue["groundfoot_contract"]["wiring_confirmed"] is True
     assert queue["kdpassive_contract"]["wiring_confirmed"] is False
 
 
-def test_placeholder_commit_accepted_for_plan_and_checklist():
-    queue = M.load_queue(QUEUE_PATH)
+def test_placeholder_commit_accepted_for_plan_and_checklist(tmp_path):
+    # 占位符行为回归(入库 YAML 已钉 40-hex,用临时副本回放占位态)
+    value = _raw()
+    value["source"]["commit"] = "PENDING_40HEX_AFTER_WIRING_MERGE"
+    queue = _load(tmp_path, value)
     assert "PENDING_40HEX_AFTER_WIRING_MERGE" in M.cmd_plan(queue)
     assert "0. [阻塞]" in M.cmd_checklist(queue)
 
 
 def test_placeholder_commit_refuses_render(tmp_path):
-    queue = M.load_queue(QUEUE_PATH)
+    value = _raw()
+    value["source"]["commit"] = "PENDING_40HEX_AFTER_WIRING_MERGE"
+    queue = _load(tmp_path, value)
     with pytest.raises(M.QueueError, match="placeholder"):
         M.render_command(queue, _job(queue, "ar02"), "science", "pod1", 0)
 
@@ -538,8 +545,9 @@ def test_cli_plan_and_checklist_succeed_with_placeholder():
         assert result.returncode == 0, result.stderr
 
 
-def test_cli_render_refused_with_placeholder():
-    result = subprocess.run(
+def test_cli_render_ar02_succeeds_and_kdpassive_refused():
+    # 钉 commit + groundfoot 开闸后:ar02 可出命令;kdpassive 仍被自己的闸门拒。
+    ok = subprocess.run(
         [
             sys.executable, str(MODULE_PATH), "--queue", str(QUEUE_PATH),
             "--render-stage", "science", "--render-job", "ar02",
@@ -547,8 +555,18 @@ def test_cli_render_refused_with_placeholder():
         ],
         capture_output=True, text=True, check=False,
     )
-    assert result.returncode == 2
-    assert "REFUSED" in result.stderr
+    assert ok.returncode == 0, ok.stderr
+    assert "b9c8fff2c10e65aed93fdc9ac2d96a64346aaef4" in ok.stdout
+    refused = subprocess.run(
+        [
+            sys.executable, str(MODULE_PATH), "--queue", str(QUEUE_PATH),
+            "--render-stage", "science", "--render-job", "kdpassive",
+            "--pod", "pod1", "--gpu", "0",
+        ],
+        capture_output=True, text=True, check=False,
+    )
+    assert refused.returncode == 2
+    assert "REFUSED" in refused.stderr
 
 
 def test_checklist_contains_wave_specific_guards():
@@ -564,9 +582,10 @@ def test_checklist_contains_wave_specific_guards():
 
 
 def test_plan_shows_gate_states_and_fresh_tag():
+    # 07-22 合并后:groundfoot 已解锁(grip/rough/footrw/penlight 可渲染),kdpassive 仍锁
     queue = M.load_queue(QUEUE_PATH)
     plan = M.cmd_plan(queue)
-    assert "groundfoot 渲染: 锁定" in plan
+    assert "groundfoot 渲染: 已解锁" in plan
     assert "kdpassive 渲染: 锁定" in plan
     assert "fresh-from-random" in plan
     assert plan.count("p1cgf_") >= 8
