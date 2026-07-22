@@ -6,8 +6,8 @@ purpose: >-
   机制 weight=0、探针全开），合体内容：action_rate -0.1→-0.2（实证依据＝jiayi V14
   关节抽动——现役 -0.1 太小的证据）+ 全程高摩擦（静 [1.0,1.6]/动 [0.8,1.2]，Franco：
   0.6 太低——摩擦当已知量拉高，失稳轴交给 push/凹凸）+ mjlab 档①三项全收（落地罚
-  -3e-3 @300 N、抬脚罚 -0.01 @0.15 m 只进凹凸臂、动作二阶平滑 -0.05——源码未接线，
-  action_acc 闸门锁死）+ qbar 全关节 qdes 限位 barrier（-0.65/margin_frac 0.08，
+  -3e-3 @300 N、抬脚罚 -0.01 @0.15 m 只进凹凸臂、动作二阶平滑 -0.05——2026-07-22
+  已接线合入 main 并重钉 commit，action_acc 闸门已开）+ qbar 全关节 qdes 限位 barrier（-0.65/margin_frac 0.08，
   我们 V14 验证档，落在外部经验"限位前 8-10% 就罚"带内；v_qbar 臂判卷反手 1.00
   佐证；与 action_rate 并存——intel 波是单变量才互斥）+ 随机速度推 ±0.35 m/s（push
   波 w_p035 键面逐字）+ 同冲量力推 68 N x 0.30 s（push 波 w_f035 键面逐字，两组事件
@@ -45,12 +45,13 @@ source:
   # 人话：地面摩擦/粗糙地形/落地罚/抬脚罚键（07-22 groundfoot 合并 b9c8fff2）、
   # task.push.*/task.force_push.*（07-21 push 波合并 4624c824）、qbar barrier 两键
   # （intel 波已远端核对）都已在 main——两个合并 commit 均已验证为 origin/main 祖先，
-  # train.py 白名单在钉住 commit 上逐字含上述全部键。唯一例外：action_acc_weight
-  # （mjlab 档①第三项）源码未接线——action_acc_contract 闸门锁死渲染，实现+单测合入
-  # main 后须重钉新 40-hex 再翻 true。source.commit = 预注册当日 origin/main HEAD。
+  # train.py 白名单在钉住 commit 上逐字含上述全部键。action_acc_weight（mjlab 档①
+  # 第三项）2026-07-22 已接线（e995b5d5 合入 main），source.commit 已重钉为该接线
+  # commit（= 重钉当日 origin/main HEAD），host 本地 grep 该 commit 的 train.py 白名单
+  # 确认键在——action_acc_contract 已翻 true，发射前仍须 grep 远端 checkout 复核。
   checkout: /workspace/codexschema/nohope_iu_20260723
   identity_mode: clean_detached_exact_commit
-  commit: "ad0110e88cf9c481247b0d554430d5585f13bcd2"
+  commit: "e995b5d58555614d0b9504023bdf157ffcc9989b"
   worktree_relative: hope_training/whole_body_tracking
   python: /workspace/hope_isaac_venv/bin/python
   setup_relative: setup_train_env.sh
@@ -60,9 +61,9 @@ source:
     人话：训练从干净的 detached 精确 commit 检出跑；W 与后代 hard contract 有意
     mismatch（grip/rough 键还会因 ground_plant 合同块 mismatch——这正是指纹在工作），
     所以整条谱系永远不算 formal-exact，胜者档位须另在 exact-lineage 重跑。渲染闸门：
-    groundfoot/push/force_push/qbar 四合同已确认（wiring 都在钉住 commit 上，发射前仍
-    须 grep 远端 checkout 复核）；action_acc_contract 锁全部三臂（源码未接线）；
-    franco_contract 锁 combo_franco（等 franco_pipeline_20260722 三交付）。combo_fresh
+    groundfoot/push/force_push/qbar/action_acc 五合同已确认（wiring 都在钉住 commit 上，
+    发射前仍须 grep 远端 checkout 复核）；franco_contract 锁 combo_franco（等
+    franco_pipeline_20260722 三交付）。combo_fresh
     另受 fresh_from_random 铁律（平地 checkpoint 禁止静默上粗糙地——ground_plant
     合同块会拒，本波直接不传 resume）。
 
@@ -212,7 +213,7 @@ common:
 #   grip 两键（全程高摩擦 [1.0,1.6]/[0.8,1.2]——Franco：0.6 太低；摩擦当已知量拉高，
 #     失稳轴交给 push/凹凸）
 #   + mjlab 档①三项（落地罚两键；抬脚罚两键只进 combo_fresh——凹凸地面就是为了逼抬腿，
-#     落地罚+抬脚罚成对；action_acc 一键=动作二阶平滑，源码未接线、闸门锁死）
+#     落地罚+抬脚罚成对；action_acc 一键=动作二阶平滑，07-22 已接线、闸门已开）
 #   + qbar barrier 两键（-0.65/margin_frac 0.08 我们 V14 验证档，落在外部经验"限位前
 #     8-10% 就罚"带内；v_qbar 判卷反手 1.00 佐证；与 action_rate=-0.2 并存——intel 波
 #     是单变量设计才互斥，本波合体）
@@ -306,8 +307,8 @@ mechanisms:
       extra_overrides: *extra_resume
 
 # 人话：groundfoot 渲染闸门（grip/rough/落地罚/抬脚罚七键）。wiring 已确认：07-22
-# groundfoot 合并 commit b9c8fff2 是本波钉住 commit（origin/main HEAD ad0110e8）的
-# 祖先，train.py 白名单在钉住 commit 上逐字含这七键（2026-07-23 host 只读 grep 核对）。
+# groundfoot 合并 commit b9c8fff2 是本波钉住 commit（action_acc 接线后重钉的
+# e995b5d5）的祖先，train.py 白名单在钉住 commit 上逐字含这七键（host 只读 grep 核对）。
 # 发射前仍须 grep 远端 checkout 复核一遍（核对单第 2 条）。false 时渲染器拒绝出任何
 # 臂的命令（三臂全都用 grip/落地罚键，fail-closed）。
 groundfoot_contract:
@@ -383,21 +384,25 @@ qbar_contract:
     已注明）。发射前仍须 grep 远端 train.py 复核两键在白名单。
 
 # 人话：action_acc 渲染闸门（mjlab 档①第三项：动作二阶平滑 action_acc_l2，
-# 建议键 task.rewards.action_acc_weight）。与 kdpassive 同类——【源码未接线】：钉住
-# commit 的 train.py 白名单 grep 无此键（2026-07-23 核对）。谁实现谁补单测（照
-# foot_soft_landing 先例：默认 weight=0 字节等价、探针纪律、量纲断言），合入 main 后
-# 重钉 source.commit 为新 40-hex、远端白名单核对一致，才翻 true。三臂全带此键，
-# false 时渲染器拒绝出任何臂的命令（fail-closed）。剂量 -0.05 = action_rate(-0.2) 的
-# 1/4，落在 mjlab 采纳文档"1/5~1/2 先小"带内（二阶差分量纲大于一阶，别按一阶惯用值抄）。
+# 键 task.rewards.action_acc_weight）。【已接线】2026-07-22：hope_rewards.action_acc_l2
+# （Σ(a_t - 2a_{t-1} + a_{t-2})² 核）+ ClampedJointPositionAction 自存 a_{t-2} 缓冲
+# （reset 清零+有效位=复位后前两步不计费）+ hope_env_cfg 默认 weight=0 字节等价 +
+# train.py 白名单 fail-loud（finite 且 <= 0，显式 0=对照），单测
+# test_action_acc_smoothing.py 17 绿（公式手算/reset/白名单往返/bool·NaN 拒收）。
+# 合入 main = e995b5d5，source.commit 已重钉该 40-hex，host 本地 grep 该 commit 的
+# train.py 白名单确认键在——故翻 true；发射前仍须 grep 远端 checkout 复核（核对单）。
+# 剂量 -0.05 = action_rate(-0.2) 的 1/4，落在 mjlab 采纳文档"1/5~1/2 先小"带内
+# （二阶差分量纲大于一阶，别按一阶惯用值抄）。
 action_acc_contract:
-  wiring_confirmed: false
+  wiring_confirmed: true
   expected_cli_keys:
     - task.rewards.action_acc_weight
   wiring_note: >-
     人话：action_rate 罚"步子迈多大"，action_acc 罚"方向掉头多猛"——高频抖恰恰是一阶小、
-    二阶大的信号，对抖动问题是正交新轴（mjlab 采纳文档档①第三项）。实现要求：
-    Σ(a_t - 2a_{t-1} + a_{t-2})² 核、默认 weight=0 = 字节等价、复位后前两步不计费。
-    实现+单测合入 main 并重钉 commit 前，本闸门锁死全部三臂。
+    二阶大的信号，对抖动问题是正交新轴（mjlab 采纳文档档①第三项）。实现已合入 main
+    （e995b5d5，本队列 source.commit 已重钉到它）：Σ(a_t - 2a_{t-1} + a_{t-2})² 核、
+    默认 weight=0 = 字节等价、复位后前两步不计费（a_{t-2} 自存缓冲带有效位）。
+    发射前仍须 grep 远端 checkout 在 exact commit 上的 train.py 复核键在白名单。
 
 # 人话：franco 渲染闸门（只锁 combo_franco）。franco_bh_loop_b 现状（07-22 动作资产
 # 看板）：151 帧 @50Hz、唯一三证（L0/vendor L1/整轨桌网）+ 六轴 phase-scan 100%
@@ -431,7 +436,7 @@ franco_contract:
 #     未被压制（w_c_s0 台账），本波剂量 = 现役 2 倍（jiayi V14 关节抽动 = -0.1 太小
 #     的证据）；
 #   [连续] action_acc -0.05 x Σ(a_t-2a_{t-1}+a_{t-2})²：二阶量纲大于一阶，起步取
-#     action_rate 的 1/4（mjlab 采纳文档"1/5~1/2 先小"带内）；源码未接线，闸门锁死；
+#     action_rate 的 1/4（mjlab 采纳文档"1/5~1/2 先小"带内）；07-22 已接线，闸门已开；
 #   [稀疏] foot_soft_landing -0.003 x 超阈倍数：单脚封顶 3、双脚合计 ≤6 → 每步最坏
 #     |-0.018|，且只在 first-contact 步计费（站立击球 first-contact 稀少）；
 #   [稀疏] foot_clearance -0.01 x |脚高-0.15|x水平脚速（只 combo_fresh）：只对腾空脚

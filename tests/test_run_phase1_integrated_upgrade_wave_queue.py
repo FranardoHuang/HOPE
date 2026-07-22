@@ -6,12 +6,14 @@ Pinned here（结构照 test_run_phase1_chatter_ground_foot_wave_queue.py，覆�
   （science 13301 -> 绝对里程碑到 20000；combo_fresh fresh 独立 20001）。
 * 3 条 combo 臂冻结（Franco 07-23 变更已并入）：action_rate 统一 -0.2；全程高摩擦
   静[1.0,1.6]/动[0.8,1.2]；落地罚 -3e-3 @300 N；抬脚罚 -0.01 @0.15 m 只进 combo_fresh；
-  二阶平滑 -0.05（源码未接线，action_acc 闸门锁全波）；qbar barrier -0.65/0.08 与
+  二阶平滑 -0.05（07-22 已接线 e995b5d5，commit 已重钉、action_acc 闸门已开）；
+  qbar barrier -0.65/0.08 与
   action_rate 并存；速度推 w_p035 + 力推 w_f035 两组事件并存、键面逐字。
 * reward 比值守卫：击球组 17/7/5/5/10 一动不动（strike_success/progress 禁 override）；
   软惩罚组全额不叠加（蹭滑/拖脚/挥拍前脚滑键一个不带）。
 * combo_fresh fresh 铁律：命令绝不带 checkpoint 键；预算走 science_fresh。
-* 闸门：groundfoot/push/force_push/qbar/action_acc 任一 false 锁全部三臂；
+* 闸门：groundfoot/push/force_push/qbar/action_acc 任一 false 锁全部三臂（五合同
+  checked-in 全 true；action_acc 改回 false 仍须锁全波——回归测试保留）；
   franco_contract（false 或资产占位符）只锁 combo_franco——combo_franco 换
   motion_file_2 = franco_bh_loop_b，另两臂必须用 v4rg 反手。
 * 渲染注入 pod/gpu 校验、shell 引号往返、kit_boot_lock 而非 locked launcher、
@@ -37,7 +39,9 @@ REPO = Path(__file__).resolve().parents[1]
 MODULE_PATH = REPO / "scripts/run_phase1_integrated_upgrade_wave_queue.py"
 QUEUE_PATH = REPO / "configs/phase1_integrated_upgrade_wave_20260723.yaml"
 
-PINNED_COMMIT = "ad0110e88cf9c481247b0d554430d5585f13bcd2"
+# 重钉后的 action_acc 接线合并 commit（feat: wire action_acc_l2 ...，origin/main HEAD
+# @ 2026-07-22 重钉时刻;原预注册钉 ad0110e8）。
+PINNED_COMMIT = "e995b5d58555614d0b9504023bdf157ffcc9989b"
 DELIVERED_FRANCO_NPZ = (
     "/workspace/codexschema/franco_pipeline_20260722/assets/"
     "franco_bh_loop_b_schema2_cal.npz"
@@ -69,9 +73,8 @@ def _load(tmp_path: Path, value: dict) -> dict:
 
 
 def _rendered() -> dict:
-    """渲染态队列：全部闸门开 + franco 资产已交付（只在内存里改）。"""
+    """渲染态队列：franco 闸门开 + 资产已交付（只在内存里改；action_acc 已入库为 true）。"""
     value = _raw()
-    value["action_acc_contract"]["wiring_confirmed"] = True
     value["franco_contract"]["wiring_confirmed"] = True
     value["assets"]["motion_backhand_franco"] = DELIVERED_FRANCO_NPZ
     return value
@@ -165,7 +168,7 @@ def test_parent_recipe_verbatim_frozen(tmp_path):
         _load(tmp_path, value)
 
 
-def test_commit_pinned_to_prereg_day_main_head():
+def test_commit_repinned_to_action_acc_wiring_main_head():
     queue = M.load_queue(QUEUE_PATH)
     assert queue["source"]["commit"] == PINNED_COMMIT
 
@@ -464,14 +467,17 @@ def test_checked_in_gate_states():
     assert queue["push_contract"]["wiring_confirmed"] is True
     assert queue["force_push_contract"]["wiring_confirmed"] is True
     assert queue["qbar_contract"]["wiring_confirmed"] is True
-    # mjlab 档①第三项源码未接线：checked-in 状态必须锁死
-    assert queue["action_acc_contract"]["wiring_confirmed"] is False
+    # mjlab 档①第三项 07-22 已接线（e995b5d5，commit 已重钉）：checked-in 状态已开
+    assert queue["action_acc_contract"]["wiring_confirmed"] is True
     assert queue["franco_contract"]["wiring_confirmed"] is False
     assert queue["assets"]["motion_backhand_franco"] == "PENDING_FRANCO_PIPELINE_DELIVERY"
 
 
-def test_action_acc_gate_locks_all_three_arms():
-    queue = M.load_queue(QUEUE_PATH)  # checked-in: action_acc false
+def test_action_acc_gate_locks_all_three_arms(tmp_path):
+    # 回归保留：闸门改回 false 仍须锁全部三臂（fail-closed 语义不因入库 true 而消失）
+    value = _rendered()
+    value["action_acc_contract"]["wiring_confirmed"] = False
+    queue = _load(tmp_path, value)
     for job_id in ("combo_fresh", "combo_resume", "combo_franco"):
         with pytest.raises(M.QueueError, match="action_acc_contract"):
             M.render_command(queue, _job(queue, job_id), "science", "pod1", 0)
@@ -635,9 +641,10 @@ def test_cli_plan_and_checklist_succeed():
         assert result.returncode == 0, result.stderr
 
 
-def test_cli_render_refused_while_action_acc_unwired():
-    # checked-in 状态：action_acc 闸门锁全部三臂——CLI 渲染必须 rc2 REFUSED。
-    refused = subprocess.run(
+def test_cli_render_succeeds_for_combo_resume_after_action_acc_wired():
+    # 07-22 接线+重钉后：五个全臂闸门 checked-in 全 true——combo_resume 可出命令
+    # （franco 闸门只锁 combo_franco，不影响本臂）。
+    result = subprocess.run(
         [
             sys.executable, str(MODULE_PATH), "--queue", str(QUEUE_PATH),
             "--render-stage", "science", "--render-job", "combo_resume",
@@ -645,15 +652,33 @@ def test_cli_render_refused_while_action_acc_unwired():
         ],
         capture_output=True, text=True, check=False,
     )
+    assert result.returncode == 0, result.stderr
+    assert "ssh" in result.stdout
+    assert "p1iu_combo_resume_seed3_20260723" in result.stdout
+    assert "task.rewards.action_acc_weight=-0.05" in result.stdout
+
+
+def test_cli_render_still_refused_for_combo_franco_while_franco_locked():
+    # franco 闸门仍锁：checked-in 状态渲染 combo_franco 必须 rc2 REFUSED。
+    refused = subprocess.run(
+        [
+            sys.executable, str(MODULE_PATH), "--queue", str(QUEUE_PATH),
+            "--render-stage", "science", "--render-job", "combo_franco",
+            "--pod", "pod1", "--gpu", "0",
+        ],
+        capture_output=True, text=True, check=False,
+    )
     assert refused.returncode == 2
     assert "REFUSED" in refused.stderr
-    assert "action_acc" in refused.stderr
+    assert "franco" in refused.stderr
 
 
 def test_checklist_contains_wave_specific_guards():
     queue = M.load_queue(QUEUE_PATH)
     checklist = M.cmd_checklist(queue)
-    assert "0. [阻塞]" in checklist and "action_acc" in checklist
+    # action_acc 已接线：阻塞第 0 条消失，但第 4 条远端 grep 复核仍在
+    assert "0. [阻塞]" not in checklist
+    assert "action_acc" in checklist
     assert "1/3" in checklist  # 比值守卫
     assert "17/7/5/5/10" in checklist
     assert "franco_pipeline_20260722" in checklist
@@ -669,7 +694,7 @@ def test_checklist_contains_wave_specific_guards():
 def test_plan_shows_gate_states_and_fresh_tag():
     queue = M.load_queue(QUEUE_PATH)
     plan = M.cmd_plan(queue)
-    assert "action_acc_contract: 锁定" in plan
+    assert "action_acc_contract: 已确认" in plan
     assert "franco_contract: 锁定" in plan
     assert "groundfoot_contract: 已确认" in plan
     assert "fresh-from-random" in plan

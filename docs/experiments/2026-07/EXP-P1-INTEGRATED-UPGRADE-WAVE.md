@@ -3,7 +3,7 @@
 > **发射冻结(Franco 2026-07-22 深夜拍板)**:动作修复(franco_pipeline 战役+锚/grip/morph)完成前本波不发射;届时现役 25k/intel 批先收尾,再统一重跑"超级升级"消融批。解除只认 Franco 本人明示。
 
 
-- 状态：`preregistered`（action_acc 闸门锁全波 + franco 闸门锁 combo_franco，未渲染任何命令）
+- 状态：`preregistered`（action_acc 闸门已开——07-22 接线合入 main e995b5d5、commit 已重钉；franco 闸门锁 combo_franco；发射冻结见顶部；未渲染任何命令）
 - 阶段/轴：Phase 1 / 集成合体波——把各单变量波里已证明有用/Franco 拍板值得合体的升级
   一次性合进一个配方 go for a try（**不做单项归因**，归因永远看各单变量波）
 - 集成小目标：回答一个问题——"全部升级合在一起，站立击球配方是变强还是互相打架？"
@@ -26,7 +26,7 @@
 | --- | --- | --- |
 | action_rate -0.1→-0.2 | 全臂 | jiayi V14 报告的关节抽动＝现役 -0.1 太小的实证；[站立异响 E1 复核 PDF](../../research/agibot_a3_standing_chatter_evidence_ranked_review_2026-07-22.pdf) 确认 action-rate 偏弱成立；CGF `ar02` 臂同档单变量在测。反向情报（jiayi V15 降到 -0.01 靠投影约束、mjlab 与我们同值 -0.1）照记 |
 | 全程高摩擦 静[1.0,1.6]/动[0.8,1.2] | 全臂 | CGF `grip` 臂假设（别的队加了摩擦+不平整后脚不搓地）；Franco 07-23 变更①：0.6 下界还是太低——摩擦当已知量拉高，失稳压力交给 push/凹凸轴 |
-| mjlab 档①三项全收 | 落地罚全臂；抬脚罚只 fresh；action_acc 全臂 | [mjlab 采纳审计](../../research/mjlab_reward_adoption_20260722.md) 档①【现在就要】：落地罚 -3e-3 @300 N（无量纲超阈倍数，mjlab -1e-5/N 等效剂量）；抬脚罚 -0.01 @0.15 m（凹凸地面就是为了逼抬腿——落地罚+抬脚罚成对，target 0.15 = hope_rewards"真要抬腿跨步"档）；action_acc -0.05（二阶平滑=抖动的正交新轴，剂量=action_rate 的 1/4，落在该文档"1/5~1/2 先小"带内；**源码未接线，闸门锁死**） |
+| mjlab 档①三项全收 | 落地罚全臂；抬脚罚只 fresh；action_acc 全臂 | [mjlab 采纳审计](../../research/mjlab_reward_adoption_20260722.md) 档①【现在就要】：落地罚 -3e-3 @300 N（无量纲超阈倍数，mjlab -1e-5/N 等效剂量）；抬脚罚 -0.01 @0.15 m（凹凸地面就是为了逼抬腿——落地罚+抬脚罚成对，target 0.15 = hope_rewards"真要抬腿跨步"档）；action_acc -0.05（二阶平滑=抖动的正交新轴，剂量=action_rate 的 1/4，落在该文档"1/5~1/2 先小"带内；**07-22 已接线（e995b5d5），闸门已开**） |
 | qbar 全关节 qdes 限位 barrier -0.65 / margin_frac 0.08 | 全臂 | 别人经验≈限位前 8-10% 就罚（有用）；我们 V14 验证档（margin_frac 是行程比例，07-22 语义裁定）；intel 波 `v_qbar` 臂判卷反手 1.00 佐证不压击球。与 action_rate=-0.2 并存——intel 波是单变量设计才互斥 |
 | 速度推 ±0.35 m/s 每 5-15 s | 全臂 | push 波 `w_p035` 臂键面逐字（PACE 与 BeyondMimic 之间档位；±0.5 在 W 父本上零摔的读数说明 0.35 是安全档） |
 | 同冲量力推 68 N x 0.30 s | 全臂 | push 波 `w_f035` 臂键面逐字（pelvis link 原点、Δv_equiv=0.35005 m/s @ 58.27723163 kg，与速度推同冲量对表）；Franco 07-23 变更②：两组事件并存 |
@@ -63,7 +63,7 @@ override＝源码默认）。
 | 新增负项 | 剂量 | 类型 | 每步量级（静态论证） |
 | --- | --- | --- | --- |
 | action_rate | -0.2 | 连续 | 现役 -0.1 已在 24 格矩阵全谱系全程跑过、击球未被压制（w_c_s0 台账）；本剂量=现役 2 倍（jiayi V14 关节抽动=偏弱证据） |
-| action_acc | -0.05 | 连续 | 二阶差分量纲大于一阶，故取 action_rate 的 1/4（mjlab 采纳文档"1/5~1/2 先小"带内）；源码未接线，实测待 probe |
+| action_acc | -0.05 | 连续 | 二阶差分量纲大于一阶，故取 action_rate 的 1/4（mjlab 采纳文档"1/5~1/2 先小"带内）；07-22 已接线（e995b5d5），实测待 probe |
 | foot_soft_landing | -0.003 @300 N | 稀疏（first-contact 步才计费） | 单脚封顶 3、双脚合计 ≤6 → 每步最坏 \|-0.018\|；站立击球 first-contact 稀少 |
 | foot_clearance（只 fresh） | -0.01 @0.15 m | 稀疏（腾空脚才计费） | \|脚高-0.15\|×水平脚速×2 脚，最坏量级 ≈0.006/步；站立支撑常态 0 |
 | qdes_limit_barrier | -0.65 / margin_frac 0.08 | 稀疏（贴限位才付费） | q_des 离限位 >8% 行程时恒 0；"贴限位才付费"，常态 0（v_qbar 判卷反手 1.00 佐证不压击球） |
@@ -83,23 +83,25 @@ foot_ori -0.3 / upright -1.0 全额不动，蹭滑/拖脚/挥拍前脚滑键一�
 | job | run_name | stage | pod/gpu | 发射时刻 | 终档 | 里程碑成绩 | 比值实测 | 处置 |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | combo_franco | p1iu_combo_franco_seed3_20260723 | — | — | — | — | — | — | 未发射（franco 闸门三前置未交付） |
-| combo_resume | p1iu_combo_resume_seed3_20260723 | — | — | — | — | — | — | 未发射（action_acc 闸门锁全波） |
+| combo_resume | p1iu_combo_resume_seed3_20260723 | — | — | — | — | — | — | 未发射（action_acc 闸门已开；发射冻结+等排位） |
 | combo_fresh | p1iu_combo_fresh_seed3_20260723（fresh） | — | — | — | — | — | — | 未发射（同上） |
 
 ## 依赖（全部满足前渲染器 fail-closed，不出任何 SSH 命令）
 
-1. **action_acc_contract.wiring_confirmed 翻真（锁全部三臂）**：mjlab 档①第三项
-   `task.rewards.action_acc_weight` 源码未接线（2026-07-23 grep 钉住 commit 的
-   train.py 白名单无此键）。谁实现谁补单测（照 foot_soft_landing 先例：默认 weight=0
-   字节等价、量纲断言、复位后前两步不计费），合入 main 后**重钉 source.commit 为新
-   40-hex**、远端白名单核对一致再翻 true。
+1. **action_acc_contract.wiring_confirmed 已翻真（2026-07-22 完成）**：mjlab 档①
+   第三项接线合入 main `e995b5d5`——hope_rewards.action_acc_l2
+   （Σ(a_t−2a_{t−1}+a_{t−2})² 核）+ ClampedJointPositionAction 自存 a_{t−2} 缓冲
+   （reset 清零+有效位＝复位后前两步不计费）+ hope_env_cfg 默认 weight=0 字节等价 +
+   train.py 白名单 fail-loud（finite 且 ≤0，显式 0=对照）；单测
+   test_action_acc_smoothing.py 17 绿。source.commit 已重钉为该 40-hex，host 本地
+   grep 该 commit 的 train.py 白名单确认键在；发射前仍须远端复核（核对单第 4 条）。
 2. **franco_contract.wiring_confirmed 翻真（只锁 combo_franco）**：
    franco_pipeline_20260722 战役交付三前置——grip 标定 bake（B 的 phase-scan 现为未
    标定拍面口径）+ 空挥视觉锚点入册（PROBE 件不得注册训练）+ 按族重绑题库（franco
    反手族替换 v4rg 反手绑定）。三者齐了把 `assets.motion_backhand_franco` 从占位符换
    成 pod 真实 npz 路径（sha256 入册）再翻 true。
-3. **groundfoot/push/force_push/qbar 四合同已确认**（wiring 全在钉住 commit
-   `ad0110e8` 上——groundfoot 合并 `b9c8fff2` 与 push 波合并 `4624c824` 均已验证为其
+3. **groundfoot/push/force_push/qbar 四合同已确认**（wiring 全在重钉后的 commit
+   `e995b5d5` 上——groundfoot 合并 `b9c8fff2` 与 push 波合并 `4624c824` 均为其
    祖先，host 已 grep 白名单）；发射前仍须 grep 远端 checkout 复核（核对单第 2-4 条）。
 4. **发射排位**：本波在全局队列排在 **franco_pipeline_20260722 战役完成且卡上有空槽
    之后**；空槽按 launch_order（combo_franco → combo_resume → combo_fresh，闸门未开

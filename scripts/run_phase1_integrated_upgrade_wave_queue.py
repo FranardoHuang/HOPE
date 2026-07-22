@@ -13,8 +13,8 @@ pod/gpu、run_name 重复、闸门未开渲染被锁臂，都直接拒绝。
 变更已并入；父本只用 W；对照不重复买＝矩阵 w_c_s0）：
 - combo_fresh：C+S0 + action_rate -0.2（jiayi V14 关节抽动=现役 -0.1 太小的证据）+
   全程高摩擦 静[1.0,1.6]/动[0.8,1.2] + 凹凸地形 2-6 cm + mjlab 档①三项（落地罚
-  -3e-3 @300 N、抬脚罚 -0.01 @0.15 m【凹凸逼抬腿,只此臂】、二阶平滑 -0.05【源码
-  未接线,action_acc 闸门锁死】）+ qbar barrier -0.65/margin_frac 0.08 + 速度推
+  -3e-3 @300 N、抬脚罚 -0.01 @0.15 m【凹凸逼抬腿,只此臂】、二阶平滑 -0.05【07-22
+  已接线 e995b5d5,action_acc 闸门已开】）+ qbar barrier -0.65/margin_frac 0.08 + 速度推
   ±0.35（w_p035 键面）+ 同冲量力推 68 N x 0.30 s（w_f035 键面，两组事件并存），
   fresh-from-random 从零 20001（rough 铁律）；
 - combo_resume：同 combo_fresh 去掉凹凸与抬脚罚（平地谱系），从 W model_6700 续训
@@ -142,8 +142,9 @@ FOOTRW_THRESHOLD = "++task.rewards.foot_soft_landing_force_threshold_n=300.0"
 # 落地罚+抬脚罚成对；target 0.15 m = hope_rewards 注释"真要它抬腿跨步"档）。
 FOOTCL_WEIGHT = "++task.rewards.foot_clearance_weight=-0.01"
 FOOTCL_TARGET = "++task.rewards.foot_clearance_target_m=0.15"
-# action_acc：mjlab 档①第三项（二阶平滑；源码未接线，action_acc_contract 闸门锁死；
-# 剂量 -0.05 = action_rate 的 1/4，落在采纳文档"1/5~1/2 先小"带内）。
+# action_acc：mjlab 档①第三项（二阶平滑；07-22 已接线合入 main e995b5d5，
+# action_acc_contract 闸门已开；剂量 -0.05 = action_rate 的 1/4，落在采纳文档
+# "1/5~1/2 先小"带内）。
 ACTION_ACC = "++task.rewards.action_acc_weight=-0.05"
 # qbar：全关节 q_des 限位 barrier（我们 V14 验证档；margin_frac 是行程比例不是 rad；
 # 稀疏项——贴限位才付费，常态 0；与 action_rate=-0.2 并存，intel 单变量互斥不适用）。
@@ -1345,7 +1346,7 @@ def cmd_plan(queue: Mapping[str, Any]) -> str:
         else:
             lines.append(
                 f"{gate}: 锁定——三臂全带对应键面，全部拒渲染"
-                + ("（action_acc 源码未接线，实现合入 main 后重钉 commit 再翻 true）"
+                + ("（action_acc 须实现合入 main 并重钉 commit 后再翻 true）"
                    if gate == "action_acc_contract" else "")
             )
     franco_gate = queue["franco_contract"]["wiring_confirmed"]
@@ -1378,15 +1379,15 @@ def cmd_checklist(queue: Mapping[str, Any]) -> str:
     if queue["action_acc_contract"]["wiring_confirmed"] is not True:
         lines.append(
             "0. [阻塞] action_acc_contract.wiring_confirmed=false：mjlab 档①第三项 "
-            "task.rewards.action_acc_weight 源码未接线（三臂全带此键，全部拒渲染）。"
+            "task.rewards.action_acc_weight 未确认接线（三臂全带此键，全部拒渲染）。"
             "谁实现谁补单测（照 foot_soft_landing 先例），合入 main 后重钉 "
             "source.commit 为新 40-hex、远端白名单核对一致再翻 true。"
         )
     lines += [
         f"1. 远端 checkout {queue['source']['checkout']} 存在、git status 干净、"
         f"HEAD == {queue['source']['commit']}（clean detached exact commit；本波钉的是 "
-        "预注册当日 origin/main HEAD，groundfoot b9c8fff2 与 push 4624c824 两次合并"
-        "均为其祖先——host 已验证，远端仍须复核；action_acc 合入后此行按重钉的新值核）。",
+        "action_acc 接线合并后重钉的 origin/main HEAD e995b5d5，groundfoot b9c8fff2 "
+        "与 push 4624c824 两次合并均为其祖先——host 已验证，远端仍须复核）。",
         "2. groundfoot 加检：grep 远端 checkout 在 exact commit 上的 train.py，确认"
         "白名单键逐字含 " + " / ".join(GROUNDFOOT_CLI_KEYS) + "。",
         "3. 推撞加检：grep 远端 train.py 确认 _PUSH_KEYS == (enable, interval_range_s, "
@@ -1394,9 +1395,11 @@ def cmd_checklist(queue: Mapping[str, Any]) -> str:
         "interval_range_s, force_n, duration_s)；本波两组事件并存，键面逐字 = push 波 "
         "w_p035（±0.35 m/s）+ w_f035（68 N x 0.30 s @ pelvis link 原点，同冲量对表）。"
         "速度推/力推都是事件不是 reward。",
-        "4. qbar 加检：grep 远端 train.py 确认 qdes_limit_barrier_weight / "
-        "qdes_limit_barrier_margin_frac 在白名单；margin_frac=0.08 是行程比例不是 rad"
-        "（07-22 语义裁定）；与 action_rate=-0.2 并存是本波设计（intel 单变量互斥不适用）。",
+        "4. qbar/action_acc 加检：grep 远端 train.py 确认 qdes_limit_barrier_weight / "
+        "qdes_limit_barrier_margin_frac / action_acc_weight 在白名单（action_acc 接线 "
+        "= 本波重钉 commit e995b5d5，host 已 grep，远端仍须复核）；margin_frac=0.08 是"
+        "行程比例不是 rad（07-22 语义裁定）；与 action_rate=-0.2 并存是本波设计"
+        "（intel 单变量互斥不适用）。",
         "5. combo_fresh 一臂铁律：fresh-from-random——命令绝不带 checkpoint_path（渲染器"
         "已断言）；平地 checkpoint 上粗糙地会被 schema-3 ground_plant 合同块拒绝，这是"
         "设计不是事故。combo_fresh 判读只看粗糙地绝对水平与失稳率，与 w_c_s0 对比只作"
