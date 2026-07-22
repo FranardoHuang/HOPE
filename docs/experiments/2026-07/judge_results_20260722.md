@@ -1,5 +1,8 @@
 # judge_results_20260722 — 已收口终档首批判卷(11 臂,诊断档,成绩暂不可解读)
 
+> **2026-07-22 终审更新:Round 6(governor 协议重判)已完成并取代本文件前几轮的全部
+> MuJoCo 数字 —— 见文末"Round 6"一节。** 上面的 round3 表保留仅作伪影档案。
+
 - 日期:2026-07-22;执行者:Claude(后台判卷 agent);裁决待 Franco
 - 性质:**诊断档,不是正式 BankExam 分**。两个原因:①这批 checkpoint 的
   `training_contract_lineage_exact` 全是 0(res1 续训/warm-start 出身),考卷走
@@ -101,3 +104,89 @@
    sim-to-sim gap 证据(需带 lineage-inexact caveat)。
 
 在裁决完成前,本文件的数字只证明"判卷链已修通、可以出报告",不证明任何臂的行为水平。
+
+## Round 6(正式修复 A:governor 揭题协议重判)—— 终审真分(07-22 晚)
+
+**一句话:评估器学会了 task-revision 代际的揭题协议后,11 臂全部出真分 —— 反手 11/11
+臂接触率 100%,V 臂反手回球率最高 100%;正手分裂成两种真实失败模式(V 爆发离包络、
+W 到帧但拍面反 102-144°),与 Isaac 训练侧"V摔但回球好 / W稳但不回球"完全吻合。**
+
+### 协议修复(选项 A)落地内容
+
+- main 提交:`9d22dc38`(协议主体,merge `3bacbfa1`)+ `a5dbfdfb`(参考 jv 缩放补丁);
+  分支 `Franco_codex/mujoco-eval-governor-protocol-20260722`。
+- 门控:ONNX metadata `planner_task_revision`(exporter 早已烘入,评估器现在消费)。
+  有 = 强制 governor 协议(双钥匙,同 C++ RequirePpPlannerTaskRevisionDoubleKey 语义);
+  无 = 老代际路径逐字节不变;畸形 = fail-closed 拒判,绝不静默回退老时钟。
+- 新代际行为(全部镜像训练态,host 三方对拍全绿):
+  - 参考时钟:开题 phase=0/rate=0,numpy 双精度 governor(镜像 commands.py
+    `_advance_planner_phase`)推帧,恰在确定性 initial_tts deadline 到点走到击球帧;
+    击球后按训练同款公式平滑接回原生跟随播放直到 clip 结束。
+  - actor 的 time_to_strike obs = 任务 deadline 倒数、跟随段钉 0(hope_commands.py
+    schema-4 语义);击球判分帧 = governor 到达帧 + 训练同款一次性 latch。
+  - 参考关节速度 obs 按 governed 帧速缩放(begin=0 静止揭题,冲刺 ~2.6x)——
+    第一轮 smoke 抓出的欠账:漏这一条时反手拍位差 0.157m,补上后 0.033m。
+  - legacy hold 时钟由 initial_tts 取代(题库 hold_steps 留账不睡);
+    `--planner-initial-tts` 旗标,缺省 0.5s = 训练混合的部署基线点质量,报告头如实印。
+- 对拍:C++ golden trace 向量(逐字校验自 test_pp_phase_governor.cpp,1e-12)、python
+  参考 planner_revision.advance_phase 逐 tick(1e-12)、torch 版 commands.py **真源码抽出**
+  float64 帧域逐位 ==;metadata 拒收矩阵;老代际不变结构锁
+  (tests/test_eval_phase_governor_parity.py,40 用例全绿)。
+
+### 重判拼法(11/11 rc=0)
+
+- 专用判卷 checkout `/workspace/codexschema/nohope_judge_20260722`(两 pod,本地 clone
+  提速 + fetch main detached;assets/agibot_a3 为 gitignored 工件,从钉死 checkout 拷入;
+  三个钉死 checkout 未动)。队列脚本 `/workspace/codexschema/judge_governor_pod{1,2}.sh`,
+  日志 `judge_governor_20260722_pod{1,2}.log`;round3 同款旗标(--exam-bank 同源考卷 +
+  --export-extra episode_length_s=16.0 + --allow-inexact-contract),串行 + nice +
+  JUDGE_LOCK_WAIT_S=10800。checkpoint 全部与 round3 目标一致(这些 run 已无更新档)。
+- 报告原件:各 run `judge/judge_report_model_*_20260722_13*.md`(报告头带
+  `planner governor` 行;governor 协议参数落 summary JSON `planner_governor` 块)。
+
+### 成绩表(接触率/回球率 = 全尝试分母;双噪声档 ns=0 / ns=0.05)
+
+| 臂(ckpt) | 正手到帧 | 反手到帧 | 反手接触/尝试 | 反手回球/尝试 | 反手拍位 | 反手拍面 | 正手拍面 | 存活步数 |
+|---|---|---|---|---|---|---|---|---|
+| v_qbar(10700) | 0/183 | 188/188 | 1.00, 1.00 | **1.00, 1.00** | 0.03m | 11° | –(0.1s被收) | ~26 |
+| v_c_s1(13100) | 0/183 | 188/188 | 1.00, 1.00 | **1.00, 1.00** | 0.04m | 14° | – | ~26 |
+| v_c_s2(13000) | 0/183 | 188/188 | 1.00, 1.00 | 0.30, 0.41 | 0.06m | 17° | – | ~26 |
+| v_c_s3(13100) | 0/183 | 188/188 | 1.00, 1.00 | 0.95, 0.95 | 0.06m | 15° | – | ~26 |
+| v_yaw_r2(13900) | 0/183 | 188/188 | 1.00, 1.00 | **1.00, 1.00** | 0.04m | 12° | – | ~25 |
+| v_p05(13000) | 0/183 | 188/188 | 1.00, 1.00 | **1.00, 1.00** | 0.02m | 11° | – | ~26 |
+| w_c_s0_res1_r5(13900) | **183/183** | 188/188 | 1.00, 1.00 | 0.86, 0.89 | 0.03m | 11° | 144° | ~45 |
+| w_c_s1_res1_r3(11200) | **183/183** | 188/188 | 1.00, 1.00 | 0.60, 0.61 | 0.02m | 16° | 136° | ~43 |
+| w_p08_res1_r2(12900) | **183/183** | 188/188 | 1.00, 0.99 | 0.93, 0.93 | 0.05m | 14° | 121° | ~40 |
+| w_yaw_res1_r2(12000) | **183/183** | 188/188 | 1.00, 1.00 | 0.95, 0.90 | 0.04m | 14° | 133° | ~43 |
+| w_p05_res1_r4(11800) | **183/183** | 188/188 | 1.00, 1.00 | 0.68, 0.68 | 0.04m | 12° | 102° | ~40 |
+
+- 正手接触率全臂 0(V:到不了帧;W:到帧但拍面反,contact 的 signed-face 门不放行)。
+- 物理摔倒率全臂 0、超时 0:收题 100% 是 ee 参考包络守卫(round5 已证明抬掉守卫放到底
+  就是物理摔——守卫只是把塌倒提前 ~0.3-0.7s 判掉)。存活步数 = 平均每题控制步
+  (V ~26 步 = 0.5s 击球 + 挥后塌;W ~40-45 步 = 击球 + 更长的跟随段跟得住)。
+
+### 与作废批(round3,老协议)对比
+
+| 量 | round3(协议错位) | round6(governor 协议) |
+|---|---|---|
+| 反手到帧(11 臂) | 0-188 参差(中位 ~131) | **11/11 全 188** |
+| 反手接触率 | 全 0 | **11/11 全 ~1.00** |
+| 反手回球率 | 全 0 | 0.30-1.00(V 四臂 1.00) |
+| 反手拍位 | 0.22-0.33 m | 0.02-0.06 m |
+| 反手拍面 | 15-58° | 11-17° |
+| 正手到帧 | 全 0 | V 全 0;**W 全 183** |
+
+### 解读(仍带 lineage-inexact + plant 差异双 caveat)
+
+1. **协议伪影结论终审坐实**:同一批 checkpoint、同一考卷,只换评估器协议,反手从全 0
+   到全 100% 接触——round3/4/5 的 0 分确系判分器欠账。
+2. **正手是真问题,且 V/W 失败模式不同**:V 臂开题 0.1s 内拍速冲到 6 m/s、腕部冲出参考
+   包络被收(挥后失衡同款爆发节奏);W 臂能全程贴着 governed 参考走到击球帧(拍位
+   0.06-0.10m)但拍面反 102-144° ≈ 180°−x,即用背面迎球。与 Isaac 训练侧
+   "V摔但回球好 / W稳但不回球"的臂间已知格局一致——这是行为/迁移问题,不再是协议问题。
+3. **机制候选(留给下一步)**:正手 W 拍面反 ≈ 单翻病家族(mount sign / face 约定)在
+   MuJoCo 侧的重现,值得从 exam CSV 的 signed_face_dot 分布 + Isaac 侧同题对照入手;
+   V 正手爆发离包络可用 --ready-state teacher-reference(RSI 到 windup 帧,训练 75% 开题
+   分布)做一格诊断,分离"冷 stand 起步转移"与"根本挥不了 2.6x 正手"。
+4. 成绩性质:仍为谱系诊断档(evaluation_contract_exact=false,lineage_exact=0 +
+   explicit-PD/零阻尼/零摩擦 plant 豁免),但**协议正确**,臂间排名与机制结论可用。

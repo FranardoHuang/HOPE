@@ -59,6 +59,15 @@
   重判;若仍全摔则升级为正式 sim-to-sim gap 证据。全档见
   [judge_results_20260722](experiments/2026-07/judge_results_20260722.md)。
   另:这批 checkpoint 的 lineage_exact 全为 0,判卷走 --allow-inexact-contract 诊断档。
+- **修复 A 落地 + 终审重判完成(07-22 晚,main `9d22dc38`+`a5dbfdfb`)**:MuJoCo 评估器按
+  ONNX metadata `planner_task_revision` 门控补齐 task-revision 揭题协议(numpy governor 推参考帧、
+  tts obs=任务 deadline 倒数、判分帧=governor 到达帧、参考 jv 按 governed 帧速缩放;老代际
+  逐字节不变;C++/python 参考/torch 真源码三方对拍全绿)。11 臂重判 11/11 rc=0:**反手全臂
+  接触率 100%**,V 臂反手回球率四臂 1.00(拍位 0.02-0.06m、拍面 11-17°);正手两种真实失败——
+  V 臂 0.1s 爆发离包络被收、W 臂 183/183 全到帧但拍面反 102-144°(用背面迎球),与 Isaac
+  "V摔但回球好/W稳但不回球"吻合。协议伪影结论终审坐实,成绩仍带 lineage-inexact+plant 双
+  caveat 但臂间排名可用。Round 6 全档见
+  [judge_results_20260722](experiments/2026-07/judge_results_20260722.md)。
 - pod 成果验收与复活(07-22 下午):账面核对完毕——25k 续训八格全部被重启杀停
   (w_c_s0@13900/s1@11800/s2@11500/s3@11900;v_c_s0@10700/s1@14300/s2@13700/s3@14000,总目标
   25001);push 波 12 臂到档待判(W 侧 10300-12900、V 侧 11400-13900);Wave Q 账实不符坐实:
