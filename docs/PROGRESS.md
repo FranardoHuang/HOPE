@@ -37,6 +37,12 @@
   （c102b9e3/ca078850 家族改 hope_commands/commands 后 host stub 未同步：缺
   `planner_revision_enabled`/`_clip_names`/假 motion、MotionLoader 收 PosixPath、teacher 收据
   规范名漂移）——四类全是测试侧欠账，纯测试文件修复后 97 绿，源码零改动。
+- 全动作库击球帧扫描矩阵执行完毕(07-22 晚):**反手死刑撤销**——钉根删 yaw 15.7° +
+  stationary 剖面吃掉 rally_yaw 40° ≈ 55.7° 正是死刑报告的 44-57° 拍面差;钉根复现件换 generic
+  剖面即回 100%(对照 134 帧全 0%)。**全库 16 条现役 clip 无第二个死刑候选**;观察名单
+  bh_v5rg(注册帧 38-42%,腿病)与三条窄 band 资产;投影资产锚帧须重选(最优窗前移 f40-43)。
+  投影工具修复(保 yaw+fail-loud)+ 重投影 + stationary 终审重扫进行中(执行 Claude)。
+  详见[分支修复审计](research/branch_fix_audit_20260722.md)。
 - 判卷链修通+首批 11 臂出报告(07-22 傍晚):两个炸点都是旗标级修复(--exam-bank 手传同源考卷;
   --export-extra 补 episode_length_s=16.0 对齐导出合同)。但成绩全 0 接触且**暂不可解读**:
   每题 ~26 步(~0.5 s)被评估器的 reference 相对终止收题(不是摔、不是 deadline guard),
