@@ -37,6 +37,11 @@
   （c102b9e3/ca078850 家族改 hope_commands/commands 后 host stub 未同步：缺
   `planner_revision_enabled`/`_clip_names`/假 motion、MotionLoader 收 PosixPath、teacher 收据
   规范名漂移）——四类全是测试侧欠账，纯测试文件修复后 97 绿，源码零改动。
+- t_recover/t_cycle 补全量尺(07-23):随挥改逐关节恒扭矩 bang-bang(acc=τ/M 逐点)后回位仅
+  0.16-0.25s——参考随挥 1.0-1.8s 比硬件需要长 5-9 倍,**回位不是瓶颈**;全周期 t_cycle(2c/3
+  前置)4/5 动作 <0.5s(fh_block 0.47/bh_block 0.42/bh_v4rg 0.40/fh_v4rg 0.48),仅 B 0.57s 且差在
+  hit 段右肩地板(与其题族 0/9 同根)。hit/recover 两段同墙=右肩 pitch,卸肩一处见效两处受益。
+  解析下界口径(忽略耦合),CoP 债照旧待回放验证。账在 pod2 boundary_cert TRECOVER_matrix.json。
 - Franco 全套管线战役收官(07-23 凌晨,pod2 franco_pipeline_20260722/,34M):canonical 五工具
   只认 B/C(拒收行已取证)→ 用影子管线(B 上逐位验证 max_abs_diff=0.0)推其余段全过几何三门。
   **grip 标定是最大杠杆**:反手拉 A/B/C 全部拉回 100% 锚窗(B 烤后六轴 100% 共窗 0.547-0.560,
