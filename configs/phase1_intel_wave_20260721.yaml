@@ -347,7 +347,7 @@ mechanisms:
         - ++task.rewards.lower_body_pose_imitation_support_post_s=10.0
       extra_overrides: []
     qbar:
-      human_name: 人话：全关节 qdes 限位 barrier（Jiayi v14 去 top-k、逐关节 tail 求和不平均）——每个关节的 q_des 距限位不足 margin 0.08 rad 就罚，违规几个关节罚几份，weight -0.65；同时把 raw action_rate 去掉（-0.10→0，Franco："把别的去掉"），barrier 是本臂唯一 qdes 惩罚；wiring 未确认合入前本档两臂渲染被锁死
+      human_name: 人话：全关节 qdes 限位 barrier（Jiayi v14 去 top-k、逐关节 tail 求和不平均）——每个关节的 q_des 距限位不足 margin 行程比例 8%（Jiayi v14 同语义：all_joint_qdes_barrier_safe_margin_fraction=0.08，HitterV11 V14 yaml:28） 就罚，违规几个关节罚几份，weight -0.65；同时把 raw action_rate 去掉（-0.10→0，Franco："把别的去掉"），barrier 是本臂唯一 qdes 惩罚；wiring 未确认合入前本档两臂渲染被锁死
       base_replacements: []
       temporal_overrides:
         - task.rewards.action_rate_weight=0.0
@@ -397,7 +397,7 @@ qbar_contract:
     - task.rewards.qdes_limit_barrier_margin_frac
   wiring_note: >-
     人话：全关节（31 关节全部、无 top-k 挑选）qdes 限位 barrier：q_des 距软限位
-    不足 margin（0.08 rad）时按有界 tail 罚，逐关节求和不平均（Franco：mean 是
+    不足 margin（行程比例 8%（Jiayi v14 同语义：all_joint_qdes_barrier_safe_margin_fraction=0.08，HitterV11 V14 yaml:28））时按有界 tail 罚，逐关节求和不平均（Franco：mean 是
     稀释器；违规几个关节就罚几份，满违规单关节 tail≈1 → 每步约 -0.65×dt），
     weight -0.65。语义按 Jiayi v14 的 top-k qdes barrier 去掉 top-k；本臂同时把
     raw action_rate 归零，barrier 是唯一 qdes 惩罚。exact 语义以合入 main 的

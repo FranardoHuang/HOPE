@@ -992,6 +992,10 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
   (margin→margin_frac),rad vs 行程比例的语义裁定仍悬空;按 wiring_note 自己的条款"与本段人话
   不符时必须先修订预注册再渲染命令",qbar 臂在读数/采信前应先由 franco 裁定 margin 语义并修订
   预注册,否则两臂读数按"量尺语义未定"处理。
+  2026-07-22 裁定（Claude 查 Jiayi 源码，证据确凿）：v14 的键名即
+  `all_joint_qdes_barrier_safe_margin_fraction: 0.08`（HitterV11 分支 V14 yaml 第 28 行）——**行程
+  比例**，与我们 `qdes_limit_barrier_margin_frac` 实现完全同语义；wiring_note 的"0.08 rad"是人话
+  笔误、已修订。qbar 两臂读数可采信；感谢 yikang 的只读挂账。
 - **[9｜P0] Hitter 实机 planner 时序与训练反应时间基线。** 责任人 yikang；执行者 Codex；分支
   `codex/hitter-lowerbody-mujoco-alignment`，基于 `hitter`。2026-07-16 用户将本轮顺序收敛为：
   先审计最新 `main`、`hitter` 与 frame0-wait-v2 已有实现，再补齐端到端球样本时间戳/短 TTS、
