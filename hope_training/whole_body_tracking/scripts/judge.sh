@@ -875,6 +875,8 @@ obsnorm_line = grab1(r"obs normalization")
 episode_line = grab1(r"episode timeout:")
 contract_line = grab1(r"evaluation_contract_exact=")
 clamp_line  = grab1(r"q_des clamp", required=False)
+# task-revision 代际(2026-07-22 协议修复):governor 行如实进报告头;老代际没有此行,不报错。
+governor_line = grab1(r"\[mj-sim2sim\] planner governor:", required=False)
 reset_line  = grab1(r"reset mode:")
 bank_line   = grab1(r"\[mj-sim2sim\]   bank: ")
 schedule_line = grab1(r"immutable_schedule: K=")
@@ -931,6 +933,8 @@ out.append("\`\`\`")
 out.append(flag_line)
 if clamp_line:
     out.append(clamp_line)
+if governor_line:
+    out.append(governor_line)
 out.append(phase_line)
 out.append(obsnorm_line)
 out.append(episode_line)
