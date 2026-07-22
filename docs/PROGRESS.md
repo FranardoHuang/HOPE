@@ -37,6 +37,14 @@
   （c102b9e3/ca078850 家族改 hope_commands/commands 后 host stub 未同步：缺
   `planner_revision_enabled`/`_clip_names`/假 motion、MotionLoader 收 PosixPath、teacher 收据
   规范名漂移）——四类全是测试侧欠账，纯测试文件修复后 97 绿，源码零改动。
+- Franco 全套管线战役收官(07-23 凌晨,pod2 franco_pipeline_20260722/,34M):canonical 五工具
+  只认 B/C(拒收行已取证)→ 用影子管线(B 上逐位验证 max_abs_diff=0.0)推其余段全过几何三门。
+  **grip 标定是最大杠杆**:反手拉 A/B/C 全部拉回 100% 锚窗(B 烤后六轴 100% 共窗 0.547-0.560,
+  拍面残差 0.01°);"B 上旋 0%"系探针读错 grip 的假报警(已记档)。fh_loop 原站位穿桌 10.3cm,
+  dx=-0.20 过桌网门但烤 grip 后 33-58% 未达线(需 station×grip 联合设计);bh_block 拍速锁死
+  (1.94 m/s),是题族问题并入 v12 挡球线;S0 影子三门全过+专属题族设计草案已出;TOPP 四段
+  window_locked 全库同病入 morph 队列不阻注册。注册表草案与 S0 题族草案在 pod drafts/ 待落库;
+  正式化第一断点=五工具的 B/C 窄绑定需泛化 prereg。M0 按令 blocked。
 - t_hit 终审矩阵收官(07-23 凌晨):硬件真源包络+击球链最小绑定(C3)下 **5/5 动作可行**,
   挡 0.42-0.50s、bh_v4rg 0.44s 原就绪即达标,B 加就绪前置 0.36s——旧"0/5"判决四分之三是尺子病
   (包络过保守 2-20 倍/×0.85 无依据/稳定器误绑)。唯一硬件墙=右肩 pitch 力矩惯量比;三笔债如实
