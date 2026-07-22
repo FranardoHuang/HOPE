@@ -37,6 +37,11 @@
   （c102b9e3/ca078850 家族改 hope_commands/commands 后 host stub 未同步：缺
   `planner_revision_enabled`/`_clip_names`/假 motion、MotionLoader 收 PosixPath、teacher 收据
   规范名漂移）——四类全是测试侧欠账，纯测试文件修复后 97 绿，源码零改动。
+- 全库四轴可行性认证收官(07-22 夜):**合法上桌 16/16 全过**(速度三档/方向/上旋);
+  **纯扭矩 16/16 全过**(τ 剂量最高 0.0166 vs 闸 0.02,没有一条被力气卡死;腕三关节全库饱和
+  是共性);统一预算 TOPP 只有 v4rg 家族 4 条 PASS,12 条卡锁窗包络/CoP(非扭矩);投影件
+  补跑全矩阵同过(快档 96% 略降如实记)。全表与边界见
+  [认证账本](research/motion_feasibility_certification_20260722.md)。
 - 投影修复终审通过(07-22 夜):root yaw 折进 waist_yaw + 剖面恢复 rally_yaw 后,反手
   stationary 扫描从 134 帧全 0% → f45 两速度档 100%,**死刑正式撤销**;被删 non-yaw 实测
   ~19-22°(源反手真实侧倾)另记债待裁决。分支 Franco_codex/stationary-projection-yaw-fix-20260722
