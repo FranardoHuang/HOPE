@@ -52,3 +52,15 @@
 
 ① 6 条快球锚帧换选,登记 train_phase_candidates;② 12 条 TOPP 失败按"锁窗 path morph vs
 CoP 腿病"分诊;③ 腕 effort 限全库饱和单独立案;④ 下旋/侧旋与"快且大角度"补扫描格。
+
+## 附:Franco 套对比认证(07-22 深夜;产物 pod2 /workspace/codexschema/franco_set_cert_20260722/)
+
+家底修正:证书只有 B 有(L0+L1+桌网);C 连 schema-2 都没跑(仅 SE2 pkl);S0/M0 无 schema-2。
+**B 实测:六轴 phase-scan 全 100%**(唯一 caveat:须 --grip off 未标定拍面口径,registry v5 grip
+下全 0%——grip 敏感度必须先标定 bake 钉死);**六轴共用同一锚窗 phase 0.593-0.613,快球窗几乎
+不漂移(基线 6 条快档锚漂移严重,B 反超)**;扭矩重放 B 存活 1.92s/C 2.02s(全场最久,基线
+bh_v4rg 0.86s),腕饱和全库同病不更糟;B 统一预算 TOPP 三剂量全过闸(τ0.0141/CoP0.0198/摩擦
+0.0028),FAIL 仅锁窗不可约(与基线 8 条同病)。M0 窄站姿在动力学复现(right_2 横向 0.166m),
+与 stance 0/4 reject 互证。
+**接棒差距**:B=grip 标定 bake→锚入注册表→(可选)锁窗 morph;C=先 schema-2 材料化+三证;
+S0=schema-2+高压专属题族;M0=先修 stance;全套训练证据为零。已测轴上 B 不弱于 v4rg。
