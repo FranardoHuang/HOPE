@@ -41,8 +41,10 @@
   --export-extra 补 episode_length_s=16.0 对齐导出合同)。但成绩全 0 接触且**暂不可解读**:
   每题 ~26 步(~0.5 s)被评估器的 reference 相对终止收题(不是摔、不是 deadline guard),
   正手 11 臂全部活不到击球帧、反手能活到但打不准——疑似评估器未实现 task-revision 代际的
-  揭题/hold 协议(7-13 老代际同链正常:~140 步/题、接触率 1.0)。裁决选项与全部数字见
-  [judge_results_20260722](experiments/2026-07/judge_results_20260722.md);裁决前不得用于排名。
+  揭题/hold 协议(7-13 老代际同链正常:~140 步/题、接触率 1.0)。取证已闭环:伪影坐实且方向反转——策略按 governor 节奏 0.1s 冲到 6 m/s,评估器参考 1x 慢放,
+  ee_body_pos 守卫 100% 收题、零摔倒;本批 MuJoCo 分数作废,诊断档 B(松 reference 阈值)在跑,
+  正式修复 A(评估器补 phase-governor 协议,metadata 门控)已立案。全档见
+  [judge_results_20260722](experiments/2026-07/judge_results_20260722.md)。
   另:这批 checkpoint 的 lineage_exact 全为 0,判卷走 --allow-inexact-contract 诊断档。
 - pod 成果验收与复活(07-22 下午):账面核对完毕——25k 续训八格全部被重启杀停
   (w_c_s0@13900/s1@11800/s2@11500/s3@11900;v_c_s0@10700/s1@14300/s2@13700/s3@14000,总目标
