@@ -109,6 +109,20 @@ qdes 限位、判分器与部署解码全部错位。exact 语义以合入 main 
    origin/yikang-stationary-v2-0722 开分支改投影工具+重投影+重扫,推新分支不动他的分支,
    投影约定变更知会 yikang;修复合入前,stationary-v2 家族所有"结构性排除"判决全部降级为存疑。
 
+### 投影修复终审(07-22 夜,已执行:修复成功,反手死刑正式撤销)
+
+分支 `Franco_codex/stationary-projection-yaw-fix-20260722`(基 yikang tip 6251ff33,commits
+b9855db2+3a651398 已推 origin;未合 main、未动他分支)。设计=Franco 改判方案:根钉死,
+源骨盆 yaw 逐帧折进 waist_yaw(实测 max +16.08°,f45=+15.7°,腰软限 ±135° 富余),
+stationary 剖面恢复注册表 rally_yaw(−40°)——机器人几何在 NPZ、对角线在题目几何,各转一次。
+**A/B:修复前 stationary 剖面 134 帧全 0% → 修复后 f45 两速度档均 100%(f43-48 全 100%),
+锚不用改。** 测试 host 131 + pod 81 全绿(fold/fail-loud/自检抓反号/合同往返/legacy 拒载)。
+两笔如实记债:①被删 non-yaw 实测 mean 14.6°/max 22.4°(此前"约 9°"是线性相减错觉)——
+源反手真实侧倾被 reset-root 合同结构性删除,本次以显式 `--max-removed-nonyaw-deg 25` 覆盖
+入合同留痕,长期需 yikang 裁决投影合同是否该保侧倾;②本投影件是 scan-only bootstrap
+(pod2 无 schema-3 stationary 合同),训练用须在 pod1 真合同重投影+重题库,旧 v1 投影件/
+旧 bank 已被工具 SHA+代际检查 fail-loud 拒载。
+
 ### 全库扫描矩阵执行结果(07-22 晚,已执行;日志 pod2 /workspace/codexschema/motion_scan_20260722/)
 
 **反手裁决:伪影坐实,死刑撤销。** 证据:①源 NPZ f45 骨盆相对单位姿态总转角 **24.7°**
