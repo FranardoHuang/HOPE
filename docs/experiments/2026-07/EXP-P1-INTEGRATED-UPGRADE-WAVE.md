@@ -1,5 +1,8 @@
 # EXP-P1-INTEGRATED-UPGRADE-WAVE — 集成升级波（3 臂，2026-07-23）
 
+> **发射冻结(Franco 2026-07-22 深夜拍板)**:动作修复(franco_pipeline 战役+锚/grip/morph)完成前本波不发射;届时现役 25k/intel 批先收尾,再统一重跑"超级升级"消融批。解除只认 Franco 本人明示。
+
+
 - 状态：`preregistered`（action_acc 闸门锁全波 + franco 闸门锁 combo_franco，未渲染任何命令）
 - 阶段/轴：Phase 1 / 集成合体波——把各单变量波里已证明有用/Franco 拍板值得合体的升级
   一次性合进一个配方 go for a try（**不做单项归因**，归因永远看各单变量波）

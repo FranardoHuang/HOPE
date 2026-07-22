@@ -1,5 +1,8 @@
 # EXP-P1-CHATTER-GROUND-FOOT-WAVE — 抖动-地面-脚部消融波（8 臂，2026-07-22）
 
+> **发射冻结(Franco 2026-07-22 深夜拍板)**:动作修复(franco_pipeline 战役+锚/grip/morph)完成前本波不发射;届时现役 25k/intel 批先收尾,再统一重跑"超级升级"消融批。解除只认 Franco 本人明示。
+
+
 - 状态：`preregistered`（两道 wiring 闸门未开 + source.commit 占位，未渲染任何命令）
 - 阶段/轴：Phase 1 / 抖动惩罚剂量 × 地面物理覆盖 × 脚部塑形 × 惩罚减负 各买单变量臂
 - 集成小目标：把"站立异响 E1 复核 PDF + Franco 2026-07-22 八条"里训练侧成立的欠账
