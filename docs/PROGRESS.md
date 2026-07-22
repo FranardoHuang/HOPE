@@ -37,6 +37,13 @@
   （c102b9e3/ca078850 家族改 hope_commands/commands 后 host stub 未同步：缺
   `planner_revision_enabled`/`_clip_names`/假 motion、MotionLoader 收 PosixPath、teacher 收据
   规范名漂移）——四类全是测试侧欠账，纯测试文件修复后 97 绿，源码零改动。
+- v12 补链+11 段全集总账终版(07-23):v12 两段原件在本机 ~/Downloads/v12/(pod 上 yikang
+  keep_take4 是另一 take,哈希已分辨),影子 exact-batch 走通 GVHMR→GMR→落地修正→三门→grip→
+  锚窗。**v12_bh_block 是惊喜**:近恒等 grip 96% 宽平台、快档 100%。**挡球家族规律实锤**:挡在
+  快球轴得分(fh_block 快轴 83% vs 泛用卷 29%)——泛用 default 考卷系统性低估挡球,需专属快球
+  题族;franco_bh_block 维持速度+拍面双锁死原判。注册草案升级:grip_session 一等公民+每段就绪
+  前置切片。正式化最短路四项列账(工具解绑/C activation/pkl 允许清单/v12 prereg)。11 段表的
+  t_hit 空格由 boundary_cert 终表任务补齐中。账:pod2 franco_pipeline HARVEST.md+drafts/。
 - t_recover/t_cycle 补全量尺(07-23):随挥改逐关节恒扭矩 bang-bang(acc=τ/M 逐点)后回位仅
   0.16-0.25s——参考随挥 1.0-1.8s 比硬件需要长 5-9 倍,**回位不是瓶颈**;全周期 t_cycle(2c/3
   前置)4/5 动作 <0.5s(fh_block 0.47/bh_block 0.42/bh_v4rg 0.40/fh_v4rg 0.48),仅 B 0.57s 且差在
