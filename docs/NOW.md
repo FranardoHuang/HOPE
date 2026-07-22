@@ -920,6 +920,18 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
   （47/40/38 项全绿）。下一证据：07-22 wiring 合并钉 40-hex + groundfoot 闸门翻真 → pod 恢复后
   一格 probe smoke 通过即按 launch_order 发全矩阵。
   [预注册](experiments/2026-07/EXP-P1-CHATTER-GROUND-FOOT-WAVE.md)
+- **[17｜P1] 集成升级波（Wave IU）——已预注册，双闸门锁定。** 责任人 franco；执行者
+  Claude。人话：把已证明有用的升级一次性合体 go for a try——AR-0.2（jiayi V14 关节抽动
+  ＝现役 -0.1 太小）+ 全程高摩擦（静[1.0,1.6]/动[0.8,1.2]）+ mjlab 档①三项（落地罚
+  -3e-3、抬脚罚 -0.01 只进凹凸臂、二阶平滑 -0.05【源码未接线，action_acc 闸门锁全波】）
+  + qbar barrier（-0.65/0.08，与 AR 并存）+ 速度推 w_p035 与同冲量力推 w_f035 两组事件
+  并存。三臂：combo_franco（反手换 franco_bh_loop_b，franco 闸门等 franco_pipeline
+  三交付，Franco 排最前）/ combo_resume（W model_6700+13301）/ combo_fresh（凹凸
+  2-6 cm，fresh 20001 铁律）。对照＝矩阵 `w_c_s0` 不重复买；击球组 17/7/5/5/10 不动，
+  新增负项每步合计 ≲ 击球收入 1/3（比值审计表+probe 实测核对）；不做单项归因。三件套+
+  55 项单测已落盘。下一证据：action_acc 实现合入重钉 commit + franco_pipeline 三交付 →
+  排位在该战役完成且卡上有空槽之后。
+  [预注册](experiments/2026-07/EXP-P1-INTEGRATED-UPGRADE-WAVE.md)
 - **[13｜P0] Wave Q 情报波（速度泛化优先）——预注册中。** 责任人 franco；执行者 Claude。人话：按
   2026-07-21 情报定四对臂——①在线速度混合 `speed_scale_range=[0.8,1.2]`（速度泛化是最高价值泛化轴，
   拍面/引拍/脚步轴降级为评测工具）；②强 q_des 铰链 `-1.0`（现役 penalty 可能太小）；③全身模仿加强

@@ -40,6 +40,7 @@ runtime/feature 细节，写进实验正文或“决定”列。全局 P0/P1 只
 
 | ID | 问题 | 人类负责人 | 执行者 | 状态 | 证据 | 决定 |
 | --- | --- | --- | --- | --- | --- | --- |
+| [EXP-P1-INTEGRATED-UPGRADE-WAVE](2026-07/EXP-P1-INTEGRATED-UPGRADE-WAVE.md) | 把已证明有用的升级（AR-0.2、高摩擦、mjlab 档①三项、qbar barrier、速度推+力推、凹凸、franco 反手）一次性合体，站立击球配方是变强还是互相打架？ | Franco | Claude | preregistered | E1 | 3 臂三件套+55 项单测已落盘；action_acc（源码未接线）闸门锁全波、franco 闸门锁 combo_franco；对照=矩阵 w_c_s0 不重复买；不做单项归因；发射排位=franco_pipeline 战役完成后 |
 | [EXP-P1-CHATTER-GROUND-FOOT-WAVE](2026-07/EXP-P1-CHATTER-GROUND-FOOT-WAVE.md) | action_rate 剂量、地面摩擦/不平整覆盖、脚部落地塑形、软惩罚减负——哪些能降抖动/失稳而不伤击球？ | Franco | Claude | preregistered | E1 | 8 臂三件套+单测已落盘；渲染被占位 commit + groundfoot/kdpassive 双闸门锁死；对照=矩阵 w_c_s0 不重复买；rough 臂 fresh-from-random 铁律 |
 | [EXP-P1-INTEL-WAVE-20260721](2026-07/EXP-P1-INTEL-WAVE-20260721.md) | 速度泛化混合/强 q_des 平滑/全身模仿/全关节 qdes barrier 四条情报哪条值得进正式配方？ | Franco | Claude | preregistered | E1 | （07-22 补索引）spdmix v2 烤入改造已落盘待钉 commit；qbar 闸门已开；对照=矩阵 w_c_s0/v_c_s0 |
 | [EXP-P1-PUSH-ROBUSTNESS-20260721](2026-07/EXP-P1-PUSH-ROBUSTNESS-20260721.md) | 随机推撞（速度推/同冲量力推）能否买到抗扰平衡？ | Franco | Codex | running | E3 | （07-22 补索引）18 臂扩容、12 条已上卡待判；pod 失联期间账面以 07-21 为准 |
