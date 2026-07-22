@@ -34,6 +34,16 @@
 # 环境变量(pod 缺省;别的机器可覆盖):
 #   JUDGE_ISAAC_ENV      isaac venv 激活脚本(缺省 /workspace/hope_isaac_venv/bin/activate)
 #   JUDGE_MJEVAL_ACT     mjeval venv activate(缺省 /workspace/hope_mjeval_venv/bin/activate)
+#   JUDGE_LOCK_WAIT_S    等 Kit boot 锁最多几秒(缺省 900;拿不到就 fail-loud,不无限等)
+#   JUDGE_EXPORT_WATCHDOG_S  导出看门狗秒数(缺省 900;超时 TERM 自家导出进程组+释放锁+落 .aborted)
+#   JUDGE_EXPORT_KILL_GRACE_S TERM 后宽限几秒再 KILL(缺省 15)
+#
+# task-revision 代际(planner_revision;2026-07-21 判卷欠账修复):
+#   env.yaml 里 planner_revision_enabled=true 的 run,导出会把训练时的同一套
+#   planner_revision(profile/initial_tts/mixture/4 个 std)从 env.yaml 原值整块回搬给
+#   play.py,并像训练队列一样锁零 legacy hold clocks(hold_steps_range/stand_start_min_hold/
+#   post_swing_min_hold)+ 回搬 clip_switch_prob。解析不全/两个 command 不一致/hard contract
+#   对不上,一律 fail-loud 拒判;老代际(无该旗标)导出命令逐字节不变。
 #
 # 铁律(都付过学费,见 docs/runbook.md「判卷链」):
 #   - 严禁 kill 训练进程:本脚本只杀自己 setsid 出来的 play.py 进程组,别的谁都不碰。
@@ -42,6 +52,7 @@
 #   - isaac venv 没有 onnxruntime,考卷必须走 mjeval venv;该 venv 同时需要 onnx(图检查)
 #     和 onnxruntime(推理),反之 sidecar 需要 torch 走 isaac venv。
 #   - 原型=pod /workspace/franco/s1_wave4/judge_final.sh(巡检班第 3 遍手搓,坑已踩平)。
+#   - Kit boot 锁绝不无限持有:拿锁带超时,导出带看门狗(2026-07-21 六小时占锁事故)。
 # =============================================================================
 set -u -o pipefail
 
@@ -51,6 +62,10 @@ WBT_DIR=$(dirname "$SCRIPT_DIR")
 JUDGE_ISAAC_ENV=${JUDGE_ISAAC_ENV:-/workspace/hope_isaac_venv/bin/activate}
 JUDGE_MJEVAL_ACT=${JUDGE_MJEVAL_ACT:-/workspace/hope_mjeval_venv/bin/activate}
 JUDGE_KIT_BOOT_LOCK=${JUDGE_KIT_BOOT_LOCK:-/workspace/.kit_boot.lock}
+# 人话:拿锁最多等 15 分钟,导出最多跑 15 分钟;都到点就 fail-loud,不再无限占锁。
+JUDGE_LOCK_WAIT_S=${JUDGE_LOCK_WAIT_S:-900}
+JUDGE_EXPORT_WATCHDOG_S=${JUDGE_EXPORT_WATCHDOG_S:-900}
+JUDGE_EXPORT_KILL_GRACE_S=${JUDGE_EXPORT_KILL_GRACE_S:-15}
 
 die() { echo "[judge][FATAL] $*" >&2; exit 1; }
 note() { echo "[judge] $*"; }
@@ -78,7 +93,7 @@ while [ $# -gt 0 ]; do
     --task)           TASK=${2:?}; shift 2 ;;
     --export-extra)   EXPORT_EXTRA=${2:?}; shift 2 ;;
     --exam-extra)     EXAM_EXTRA=${2:?}; shift 2 ;;
-    -h|--help)        sed -n '2,45p' "${BASH_SOURCE[0]}"; exit 0 ;;
+    -h|--help)        sed -n '2,56p' "${BASH_SOURCE[0]}"; exit 0 ;;
     -*)               die "未知选项 $1(--help 看用法)" ;;
     *)  if [ -z "$RUN_DIR" ]; then RUN_DIR=$1
         elif [ -z "$CKPT" ]; then CKPT=$1
@@ -163,6 +178,8 @@ plant_src = "legacy/no schema-3 hard contract (task default false)"
 hard_actor_contract = None
 allow_inexact_contract = True
 contract_src = "legacy/no schema-3 hard contract: diagnostic evaluator escape required"
+contract_schema = None
+contract_planner = None
 if os.path.isfile(training_contract_path):
     try:
         with open(training_contract_path, encoding="utf-8") as f:
@@ -177,6 +194,7 @@ if os.path.isfile(training_contract_path):
             fatal.append("hard contract schema_version 非法")
             contract_schema = 0
         if contract_schema == 3:
+            contract_planner = hard_contract.get("planner_task_revision")
             known_actor_dims = {
                 "full": 180,
                 "deploy_parity": 175,
@@ -297,6 +315,151 @@ else:
     actor_contract = None
     actor_src = "legacy non-face layout; play/export runtime inference"
 
+# --- task-revision 代际(planner_revision):导出必须按训练时同一配置重建 env ---
+# 人话:带 planner_revision 的 run,训练时是「基础任务 yaml + 队列覆盖」拼出来的;
+# 判卷导出必须把 env.yaml 里持久化的同一套 planner 配置整块搬回 play.py,并像训练队列
+# 一样锁零 legacy hold clocks(基础 yaml 的 [0,100] 会在 planner 块之后把清零改回去,
+# 这正是 2026-07-21 16:41Z 崩溃的机理)。解析不全/不一致一律 fail-loud,绝不猜。
+def _planner_flag(block, label):
+    value = block.get("planner_revision_enabled", False)
+    if not isinstance(value, bool):
+        fatal.append(f"env.yaml {label}.planner_revision_enabled 必须是 bool")
+        return False
+    return value
+
+planner_motion_on = _planner_flag(motion, "commands.motion")
+planner_racket_on = _planner_flag(rt, "commands.racket_target")
+if planner_motion_on != planner_racket_on:
+    fatal.append(
+        "env.yaml 两个 command 的 planner_revision_enabled 不一致"
+        f"(motion={planner_motion_on}, racket_target={planner_racket_on})—— "
+        "半开代际不存在,拒判"
+    )
+planner_enabled = planner_motion_on and planner_racket_on
+
+contract_planner_on = isinstance(contract_planner, dict) and contract_planner.get("enabled") is True
+if contract_planner_on and not planner_enabled:
+    fatal.append(
+        "hard contract 声明 planner_task_revision enabled 但 env.yaml 未启用 —— "
+        "代际标志互相矛盾,拒判"
+    )
+
+planner_export_block = None
+planner_clip_switch_prob = None
+if planner_enabled:
+    if contract_schema != 3 or not contract_planner_on:
+        fatal.append(
+            "env.yaml 启用 planner_revision 但 checkpoint 邻位 hard contract 不是 schema-3 "
+            "planner_task_revision enabled —— task-revision 代际必须有硬合同背书,拒判"
+        )
+
+    def _same(m_key, m_val, r_val):
+        if m_val != r_val:
+            fatal.append(
+                f"env.yaml motion/racket_target 的 {m_key} 不一致 —— planner_revision 是"
+                "一个原子块,拒判"
+            )
+        return r_val
+
+    profile = rt.get("planner_revision_profile")
+    if not isinstance(profile, dict) or not profile:
+        fatal.append("env.yaml 缺 commands.racket_target.planner_revision_profile(dict)")
+        profile = None
+    _same("planner_revision_profile", motion.get("planner_revision_profile"), profile)
+
+    def _as_range(value):
+        if isinstance(value, (list, tuple)) and len(value) == 2:
+            try:
+                lo, hi = float(value[0]), float(value[1])
+            except (TypeError, ValueError):
+                return None
+            if math.isfinite(lo) and math.isfinite(hi) and lo < hi:
+                return [lo, hi]
+        return None
+
+    tts_range = _as_range(rt.get("planner_revision_initial_tts_range_s"))
+    if tts_range is None:
+        fatal.append(
+            "env.yaml 缺/非法 commands.racket_target.planner_revision_initial_tts_range_s"
+            "(有限升序二元组)"
+        )
+    _same(
+        "planner_revision_initial_tts_range_s",
+        _as_range(motion.get("planner_revision_initial_tts_range_s")),
+        tts_range,
+    )
+
+    mixture = rt.get("planner_revision_initial_tts_mixture")
+    if not isinstance(mixture, dict) or not mixture:
+        fatal.append("env.yaml 缺 commands.racket_target.planner_revision_initial_tts_mixture(dict)")
+        mixture = None
+    _same(
+        "planner_revision_initial_tts_mixture",
+        motion.get("planner_revision_initial_tts_mixture"),
+        mixture,
+    )
+
+    stds = {}
+    for key in (
+        "planner_revision_position_std_m",
+        "planner_revision_velocity_std_mps",
+        "planner_revision_normal_std_rad",
+        "planner_revision_tts_std_s",
+    ):
+        value = rt.get(key)
+        if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                or not math.isfinite(float(value)) or float(value) < 0.0:
+            fatal.append(f"env.yaml 缺/非法 commands.racket_target.{key}(有限非负数)")
+        else:
+            stds[key] = float(value)
+
+    # 训练队列必传的单时钟三件套 + 任务同一性:env.yaml 里必须已是训练态(零/记录值),
+    # 否则说明这不是我们认识的 task-revision 代际,拒判而不是猜。
+    hold = motion.get("hold_steps_range")
+    if not (isinstance(hold, (list, tuple)) and list(hold) == [0, 0]):
+        fatal.append(
+            f"planner_revision run 的 env.yaml motion.hold_steps_range={hold!r} 非 [0,0] —— "
+            "训练态不可能,拒判"
+        )
+    for key in ("stand_start_min_hold", "post_swing_min_hold"):
+        if motion.get(key) != 0:
+            fatal.append(
+                f"planner_revision run 的 env.yaml motion.{key}={motion.get(key)!r} 非 0 —— "
+                "训练态不可能,拒判"
+            )
+    csp = motion.get("clip_switch_prob")
+    if isinstance(csp, bool) or not isinstance(csp, (int, float)) or not math.isfinite(float(csp)):
+        fatal.append("planner_revision run 的 env.yaml 缺/非法 motion.clip_switch_prob")
+    else:
+        planner_clip_switch_prob = float(csp)
+
+    # hard contract 与 env.yaml 逐值对账(profile 与初始 TTS 区间;不一致=工件被动过)
+    if contract_planner_on and profile is not None and tts_range is not None:
+        governor = contract_planner.get("governor")
+        contract_profile = governor.get("profile") if isinstance(governor, dict) else None
+        if contract_profile != profile:
+            fatal.append(
+                "hard contract 的 planner governor profile 与 env.yaml planner_revision_profile "
+                "不一致 —— 工件互相矛盾,拒判"
+            )
+        contract_tts = _as_range(contract_planner.get("initial_tts_range_s"))
+        if contract_tts != tts_range:
+            fatal.append(
+                "hard contract 的 planner initial_tts_range_s 与 env.yaml 不一致 —— 拒判"
+            )
+
+    if profile is not None and tts_range is not None and mixture is not None and len(stds) == 4:
+        planner_export_block = {
+            "enabled": True,
+            "profile": profile,
+            "initial_tts_range_s": tts_range,
+            "initial_tts_mixture": mixture,
+            "position_std_m": stds["planner_revision_position_std_m"],
+            "velocity_std_mps": stds["planner_revision_velocity_std_mps"],
+            "normal_std_rad": stds["planner_revision_normal_std_rad"],
+            "tts_std_s": stds["planner_revision_tts_std_s"],
+        }
+
 # --- 动作对(必须成对;单 clip 臂不是本考卷的形状) ---
 if cli_fh and cli_bh:
     fh, bh, mf_src = cli_fh, cli_bh, "CLI 手传"
@@ -398,6 +561,53 @@ if motion.get("allow_legacy_link_origin_velocity") is not None:
         "++task.motion.allow_legacy_link_origin_velocity="
         + fmt(motion["allow_legacy_link_origin_velocity"])
     )
+if planner_export_block is not None:
+    # task-revision 代际:把 env.yaml 持久化的 planner 配置序列化成一条 hydra dict 覆盖
+    # (与训练队列同一格式),外加训练队列必传的单时钟三件套 + clip_switch_prob 原值。
+    # 序列化只认简单标量/表,遇到怪东西直接炸——绝不静默降级。
+    import re as _re
+
+    def hydra_literal(value):
+        if isinstance(value, bool):
+            return "true" if value else "false"
+        if isinstance(value, int):
+            return str(value)
+        if isinstance(value, float):
+            if not math.isfinite(value):
+                raise SystemExit("[judge][FATAL] planner_revision 序列化遇到非有限 float")
+            text = repr(value)
+            # 指数形式补小数点(1e-06 -> 1.0e-06):hydra 和 YAML 1.1 都认的 float 写法
+            # (训练队列 16:41Z 实测通过的就是这个形状)。
+            if ("e" in text or "E" in text) and "." not in text.partition("e")[0]:
+                mantissa, _, exponent = text.replace("E", "e").partition("e")
+                text = f"{mantissa}.0e{exponent}"
+            return text
+        if isinstance(value, str):
+            if not _re.fullmatch(r"[A-Za-z0-9_.+-]+", value):
+                raise SystemExit(
+                    f"[judge][FATAL] planner_revision 字符串含不可安全序列化字符: {value!r}"
+                )
+            return f'"{value}"'
+        if isinstance(value, (list, tuple)):
+            return "[" + ", ".join(hydra_literal(item) for item in value) + "]"
+        if isinstance(value, dict):
+            items = []
+            for key, item in value.items():
+                if not isinstance(key, str) or not _re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", key):
+                    raise SystemExit(f"[judge][FATAL] planner_revision 键名不可序列化: {key!r}")
+                items.append(f"{key}: {hydra_literal(item)}")
+            return "{" + ", ".join(items) + "}"
+        raise SystemExit(
+            f"[judge][FATAL] planner_revision 序列化遇到不支持的类型: {type(value).__name__}"
+        )
+
+    planner_literal = hydra_literal(planner_export_block)
+    assert "'" not in planner_literal
+    ov.append(f"'++task.planner_revision={planner_literal}'")
+    ov.append("'task.motion.hold_steps_range=[0,0]'")
+    ov.append("task.motion.stand_start_min_hold=0")
+    ov.append("task.motion.post_swing_min_hold=0")
+    ov.append(f"task.motion.clip_switch_prob={fmt(planner_clip_switch_prob)}")
 if face_obs_flag:                        # 顶层旗标:+4 obs 维(175->179),导错=checkpoint 加载即死
     ov.append("++task.racket.face_command_obs=true")
 if station_obs_flag:                     # 顶层旗标:+2 obs 维(179->181,R10c 站位锚),导错同上即死
@@ -413,6 +623,12 @@ ov.append(
     "task.actor_obs_contract=" + (actor_contract if actor_contract is not None else "null")
 )
 
+planner_src = (
+    "task-revision 代际:env.yaml planner_revision 全套回搬 + legacy hold clocks 锁零"
+    if planner_export_block is not None
+    else "legacy/OFF 代际(未启用 planner revision;导出命令与旧代际逐字节一致)"
+)
+
 with open(out_path, "w") as f:
     def w(k, v):
         f.write(f"{k}={shlex.quote(str(v))}\n")
@@ -420,6 +636,7 @@ with open(out_path, "w") as f:
     w("PH0", repr(ph[0])); w("PH1", repr(ph[1]))
     w("EXAM_BANK", exam_bank); w("TRAIN_BANK", train_bank or "")
     w("SRC_MOTION", mf_src); w("SRC_PHASES", ph_src); w("SRC_BANK", bank_src)
+    w("SRC_PLANNER", planner_src)
     w("SRC_PLANT", plant_src)
     w("SRC_ACTOR", actor_src + (f": {actor_contract}" if actor_contract else ""))
     w("SRC_CONTRACT", contract_src)
@@ -478,6 +695,7 @@ note "exam 卷     = $EXAM_BANK($SRC_BANK)"
 note "plant       = $SRC_PLANT"
 note "actor       = $SRC_ACTOR"
 note "contract    = $SRC_CONTRACT"
+note "planner     = $SRC_PLANNER"
 note "旗标        = qdes_clamp=$([ "$QDES_CLAMP" = 1 ] && echo ON || echo OFF) hold_ref=$HOLD_REF steps_cap=$STEPS schedule_k=${SCHEDULE_K:-ALL} seed=$SEED ns=[$NOISE_SCALES]"
 
 if [ "$DRY_RUN" = 1 ]; then
@@ -517,11 +735,19 @@ mkdir -p "$JUDGE_DIR/exam"
 # ---------------------------------------------------------------- ② 原生导出 + sidecar(isaac venv)
 [ -f "$JUDGE_ISAAC_ENV" ] || die "isaac venv 入口不存在: $JUDGE_ISAAC_ENV(JUDGE_ISAAC_ENV 可覆盖)"
 command -v flock >/dev/null 2>&1 || die "缺 flock，无法与训练 Kit boot 共用全 Pod 启动锁"
+command -v setsid >/dev/null 2>&1 || die "缺 setsid，导出看门狗无法精确圈定自家进程组"
 exec 8>"$JUDGE_KIT_BOOT_LOCK"
-note "等待全 Pod Kit boot 锁: $JUDGE_KIT_BOOT_LOCK"
-flock -x 8
-note "② play.py 原生导出(isaac venv,gpu$GPU)…"
-(
+# 人话:拿锁带超时——谁挂死持锁,15 分钟后这里 fail-loud 报案,而不是无限排队。
+note "等待全 Pod Kit boot 锁(最多 ${JUDGE_LOCK_WAIT_S}s): $JUDGE_KIT_BOOT_LOCK"
+flock -w "$JUDGE_LOCK_WAIT_S" -x 8 \
+  || die "等 Kit boot 锁 ${JUDGE_LOCK_WAIT_S}s 超时: $JUDGE_KIT_BOOT_LOCK —— 有进程挂死持锁?fuser -v $JUDGE_KIT_BOOT_LOCK 查凶手;确认无训练 Kit 在 boot 后可删锁文件重试"
+note "② play.py 原生导出(isaac venv,gpu$GPU;看门狗 ${JUDGE_EXPORT_WATCHDOG_S}s)…"
+ABORT_LOG="$JUDGE_DIR/export_play.log.aborted"
+rm -f "$ABORT_LOG"
+# 导出放进自家 setsid 进程组(8>&- 不带锁 fd:挂死的 Kit 子进程绝不许继续占全 Pod 锁)。
+# 看门狗到点只 TERM/KILL 这一个进程组——铁律:训练进程一根汗毛都不许碰。
+export JUDGE_ISAAC_ENV WBT_DIR EXPORT_CMD
+setsid bash -c '
   # shellcheck disable=SC1090
   source "$JUDGE_ISAAC_ENV" >/dev/null 2>&1
   # shellcheck disable=SC1091
@@ -532,8 +758,37 @@ note "② play.py 原生导出(isaac venv,gpu$GPU)…"
   # Isaac shutdown can discard that line even though policy.onnx was written.
   export PYTHONUNBUFFERED=1
   export HYDRA_FULL_ERROR=1
-  eval "$EXPORT_CMD" > "$JUDGE_DIR/export_play.log" 2>&1
-) || { tail -30 "$JUDGE_DIR/export_play.log" >&2; die "play.py export-only 失败"; }
+  eval "$EXPORT_CMD"
+' 8>&- > "$JUDGE_DIR/export_play.log" 2>&1 &
+EXPORT_PID=$!
+export EXPORT_PID ABORT_LOG JUDGE_EXPORT_WATCHDOG_S JUDGE_EXPORT_KILL_GRACE_S
+setsid bash -c '
+  sleep "$JUDGE_EXPORT_WATCHDOG_S"
+  {
+    echo "[judge][WATCHDOG] export 超时 ${JUDGE_EXPORT_WATCHDOG_S}s @ $(date -u +%Y-%m-%dT%H:%M:%SZ)"
+    echo "[judge][WATCHDOG] TERM 自家导出进程组 -${EXPORT_PID}(setsid 圈定;不碰任何训练进程)"
+  } > "$ABORT_LOG"
+  kill -TERM -- "-$EXPORT_PID" 2>/dev/null
+  kill -TERM "$EXPORT_PID" 2>/dev/null
+  sleep "$JUDGE_EXPORT_KILL_GRACE_S"
+  if kill -0 "$EXPORT_PID" 2>/dev/null; then
+    echo "[judge][WATCHDOG] TERM ${JUDGE_EXPORT_KILL_GRACE_S}s 后仍存活,升级 KILL" >> "$ABORT_LOG"
+    kill -KILL -- "-$EXPORT_PID" 2>/dev/null
+    kill -KILL "$EXPORT_PID" 2>/dev/null
+  fi
+' 8>&- >/dev/null 2>&1 &
+WATCHDOG_PID=$!
+EXPORT_RC=0
+wait "$EXPORT_PID" || EXPORT_RC=$?
+kill -TERM -- "-$WATCHDOG_PID" 2>/dev/null
+kill -TERM "$WATCHDOG_PID" 2>/dev/null
+if [ -f "$ABORT_LOG" ]; then
+  flock -u 8 || true
+  cat "$ABORT_LOG" >&2
+  tail -30 "$JUDGE_DIR/export_play.log" >&2
+  die "导出看门狗超时(${JUDGE_EXPORT_WATCHDOG_S}s):已 TERM 自家导出进程组并释放 Kit boot 锁;详情 $ABORT_LOG"
+fi
+[ "$EXPORT_RC" = 0 ] || { tail -30 "$JUDGE_DIR/export_play.log" >&2; die "play.py export-only 失败(rc=$EXPORT_RC)"; }
 if ! grep -aq "Exported ONNX policy to:" "$JUDGE_DIR/export_play.log"; then
   echo "[judge][FATAL] 导出失败:没等到 'Exported ONNX policy to:' 成功行" >&2
   echo "----- export_play.log 异常摘要(WARN|Error|Traceback)-----" >&2

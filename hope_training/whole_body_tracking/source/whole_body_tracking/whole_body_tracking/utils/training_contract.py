@@ -1801,19 +1801,46 @@ def validate_schema3_contract_structure(contract: Mapping) -> None:
             raise ValueError("formal face179 schema-3 contract requires face_command_enabled=true")
         if contract.get("face_command_pairing") != "shared_plus_y":
             raise ValueError("formal face179 schema-3 contract requires shared_plus_y")
+        # 拍面符号表(spdmix 硬绑定三拆除)。两种判法,按合同里有没有家族表二选一:
+        # * 家族表缺席 = legacy 2-clip 臂:仍要求逐字 [+1,-1],报错文本一字不改。
+        # * 家族表在场(六 clip 变速烤入等):按族核对——每 clip 一个符号,正手族全 +1、
+        #   反手族全 -1(正手打红面/+Y,反手打黑面/−Y;变速变体不改变拍面)。
+        #   家族表本身已在上面整表校验过(取值/两族齐全/长度==clip 数),这里只对符号。
+        families = contract.get("motion_clip_family_per_clip")
         try:
             raw_face_signs = contract["mount_normal_sign_per_clip"]
             if any(isinstance(value, bool) for value in raw_face_signs):
                 raise ValueError
             face_signs = tuple(float(value) for value in raw_face_signs)
         except (KeyError, TypeError, ValueError) as exc:
+            if families is None:
+                raise ValueError(
+                    "formal face179 schema-3 contract requires mount_normal_sign_per_clip=[+1,-1]"
+                ) from exc
             raise ValueError(
-                "formal face179 schema-3 contract requires mount_normal_sign_per_clip=[+1,-1]"
+                "formal face179 schema-3 contract requires one numeric "
+                "mount_normal_sign_per_clip entry per clip"
             ) from exc
-        if face_signs != (1.0, -1.0):
-            raise ValueError(
-                "formal face179 schema-3 contract requires mount_normal_sign_per_clip=[+1,-1]"
+        if families is None:
+            if face_signs != (1.0, -1.0):
+                raise ValueError(
+                    "formal face179 schema-3 contract requires mount_normal_sign_per_clip=[+1,-1]"
+                )
+        else:
+            if len(face_signs) != len(families):
+                raise ValueError(
+                    "formal face179 schema-3 contract requires one mount_normal_sign_per_clip "
+                    f"entry per clip: got {len(face_signs)} signs for {len(families)} clips"
+                )
+            expected_face_signs = tuple(
+                1.0 if family == "forehand" else -1.0 for family in families
             )
+            if face_signs != expected_face_signs:
+                raise ValueError(
+                    "formal face179 schema-3 contract requires face sign +1 for every forehand "
+                    "clip and -1 for every backhand clip: got mount_normal_sign_per_clip="
+                    f"{list(face_signs)} for motion_clip_family_per_clip={list(families)}"
+                )
 
     joint_names = contract["joint_names"]
     if not isinstance(joint_names, (list, tuple)) or not joint_names:

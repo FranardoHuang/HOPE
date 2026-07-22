@@ -23,6 +23,9 @@ the REAL shipped commands.py / hope_commands.py. Covers:
   老 checkpoint resume 对账不受影响)。
 * training_contract 合同校验 roundtrip:合法表通过;类型错/缺一族/长度和 clip 数不一致 fail-loud;
   缺席键 = 结构校验照旧通过。
+* face179 拍面符号(spdmix 硬绑定三拆除):家族表缺席 = legacy 判法逐字 [+1,-1] 不变(含报错
+  文本逐字节一致);家族表在场 = 按族核对(正手全 +1、反手全 -1、长度==clip 数),六 clip 合法
+  向量通过,族符号错/长度错/非数值 fail-loud;非 face179 合同不碰符号表(判定只挂 face179)。
 
 Run:  python -m pytest hope_training/whole_body_tracking/tests/test_clip_family_per_clip.py -q
 """
@@ -344,6 +347,132 @@ def test_contract_rejects_missing_family_and_length_mismatch():
     contract["motion_clip_family_per_clip"] = ["forehand", "backhand", "backhand"]
     with pytest.raises(ValueError, match="one family per loaded"):
         TC.validate_schema3_contract_structure(contract)
+
+
+# --------------------------------------------------------------------------------------------- #
+# face179 拍面符号合同(spdmix 硬绑定三拆除):legacy 逐字判法不变,家族表在场按族核对
+# --------------------------------------------------------------------------------------------- #
+_LEGACY_FACE_SIGN_MSG = (
+    "formal face179 schema-3 contract requires mount_normal_sign_per_clip=[+1,-1]"
+)
+
+
+def _face179_contract(*, families=None, signs=(1.0, -1.0), clips=2):
+    """最小 face179 合同:基线 2 段,clips=6 时把段长/fps/运动学合同表复制到 6 段。"""
+    contract = _schema3_contract()
+    if clips != 2:
+        reps = clips // 2
+        contract["motion_segment_lengths"] = list(contract["motion_segment_lengths"]) * reps
+        contract["motion_clip_fps"] = list(contract["motion_clip_fps"]) * reps
+        contract["motion_kinematics_contracts"] = (
+            list(contract["motion_kinematics_contracts"]) * reps
+        )
+    contract["actor_obs_contract"] = "deploy_parity_face179"
+    contract["face_command_enabled"] = True
+    contract["face_command_pairing"] = "shared_plus_y"
+    contract["mount_normal_sign_per_clip"] = list(signs)
+    if families is not None:
+        contract["motion_clip_family_per_clip"] = list(families)
+    return contract
+
+
+def test_face179_legacy_exact_signs_still_pass():
+    """家族表缺席(现役 2-clip 臂):逐字 [+1,-1] 照旧通过,int 拼法也照旧被转成 float。"""
+    TC.validate_schema3_contract_structure(_face179_contract())
+    TC.validate_schema3_contract_structure(_face179_contract(signs=(1, -1)))
+
+
+def test_face179_legacy_wrong_signs_reject_with_bytewise_identical_message():
+    """家族表缺席 + 符号不是逐字 [+1,-1]:照旧拒绝,报错文本和改前逐字节一致。"""
+    for signs in ((-1.0, 1.0), (1.0, 1.0), (1.0, -1.0, -1.0), (1.0,)):
+        with pytest.raises(ValueError) as exc:
+            TC.validate_schema3_contract_structure(_face179_contract(signs=signs))
+        assert str(exc.value) == _LEGACY_FACE_SIGN_MSG, signs
+
+
+def test_face179_legacy_malformed_signs_reject_with_bytewise_identical_message():
+    """家族表缺席 + 缺键/布尔/非数值:照旧拒绝,报错文本逐字节一致。"""
+    missing = _face179_contract()
+    del missing["mount_normal_sign_per_clip"]
+    boolean = _face179_contract(signs=(True, False))
+    textual = _face179_contract(signs=("x", "-1"))
+    for contract in (missing, boolean, textual):
+        with pytest.raises(ValueError) as exc:
+            TC.validate_schema3_contract_structure(contract)
+        assert str(exc.value) == _LEGACY_FACE_SIGN_MSG
+
+
+def test_face179_six_clip_family_signs_pass():
+    """六 clip 变速烤入:正手三档全 +1、反手三档全 -1 —— 合法向量整体通过结构校验。"""
+    TC.validate_schema3_contract_structure(
+        _face179_contract(families=FAM6, signs=(1.0, 1.0, 1.0, -1.0, -1.0, -1.0), clips=6)
+    )
+
+
+def test_face179_family_order_is_honored_not_assumed():
+    """家族表顺序说了算:反手在前就要 [-1,+1];仍抄 legacy 的 [+1,-1] 被按族拒绝。"""
+    TC.validate_schema3_contract_structure(
+        _face179_contract(families=("backhand", "forehand"), signs=(-1.0, 1.0))
+    )
+    with pytest.raises(ValueError, match="forehand.*backhand"):
+        TC.validate_schema3_contract_structure(
+            _face179_contract(families=("backhand", "forehand"), signs=(1.0, -1.0))
+        )
+
+
+def test_face179_forehand_clip_given_minus_one_rejects():
+    """族符号错(正手变体给了 -1 = 用黑面打正手):fail-loud,不许悄悄换拍面。"""
+    with pytest.raises(ValueError, match="forehand.*backhand"):
+        TC.validate_schema3_contract_structure(
+            _face179_contract(families=FAM6, signs=(1.0, 1.0, -1.0, -1.0, -1.0, -1.0), clips=6)
+        )
+
+
+def test_face179_backhand_clip_given_plus_one_or_zero_rejects():
+    """反手族给 +1 或 0(非法拍面):同样按族拒绝。"""
+    for signs in (
+        (1.0, 1.0, 1.0, -1.0, 1.0, -1.0),
+        (1.0, 1.0, 1.0, -1.0, 0.0, -1.0),
+    ):
+        with pytest.raises(ValueError, match="forehand.*backhand"):
+            TC.validate_schema3_contract_structure(
+                _face179_contract(families=FAM6, signs=signs, clips=6)
+            )
+
+
+def test_face179_family_sign_length_mismatch_rejects():
+    """符号数 != clip 数:fail-loud,报错说清各有几个。"""
+    with pytest.raises(ValueError, match="2 signs for 6 clips"):
+        TC.validate_schema3_contract_structure(
+            _face179_contract(families=FAM6, signs=(1.0, -1.0), clips=6)
+        )
+
+
+def test_face179_family_malformed_signs_reject_with_family_message():
+    """家族表在场 + 缺键/布尔:走家族版报错(不再误报 [+1,-1]),同样 fail-loud。"""
+    missing = _face179_contract(families=FAM6, clips=6)
+    del missing["mount_normal_sign_per_clip"]
+    boolean = _face179_contract(
+        families=FAM6, signs=(True, True, True, False, False, False), clips=6
+    )
+    for contract in (missing, boolean):
+        with pytest.raises(ValueError, match="numeric.*entry per clip"):
+            TC.validate_schema3_contract_structure(contract)
+
+
+def test_non_face179_contract_leaves_sign_table_unjudged():
+    """判定只挂 face179:普通合同带家族表 + 任意符号向量,结构校验不碰符号表照旧通过。"""
+    contract = _face179_contract(families=FAM6, signs=(0.5, 2.0, -3.0, 0.0, 1.0, 1.0), clips=6)
+    contract["actor_obs_contract"] = "wide"
+    TC.validate_schema3_contract_structure(contract)
+
+
+def test_train_py_records_whole_sign_vector_verbatim_in_contract():
+    """合同块照实记录整个符号向量(train.py 不再有另一道 [+1,-1] 写死):
+    源码守卫——合同字段逐字段照抄 racket cfg,train.py 全文无 (1.0, -1.0) 拍面钉死。"""
+    src = open(os.path.join(SCRIPTS_DIR, "train.py"), encoding="utf-8").read()
+    assert '"mount_normal_sign_per_clip": attr(racket, "mount_normal_sign_per_clip")' in src
+    assert "(1.0, -1.0)" not in src and "[1.0, -1.0]" not in src
 
 
 if __name__ == "__main__":
