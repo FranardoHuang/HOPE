@@ -68,6 +68,8 @@ def _make_rally_cmd(n, clip_ids=None, multiseg=True):
         exact_success_decay=DECAY, exact_success_min_count=MIN_COUNT,
         rally_legacy_metrics=True, virtual_ball=True, vb_metrics_only=False)
     cmd._clip_names = {0: "forehand", 1: "backhand"}
+    # 族行号表(0=正手族,1=反手族):真 __init__ 会懒建;fake 直接预置 legacy 2-clip 同值表。
+    cmd._clip_family_rows_t = torch.tensor([0, 1], dtype=torch.long)
     # vb outcome ledgers (old / mixed-schedule)
     cmd._vb_exact_acc = 0.0
     cmd._vb_hit_acc = 0.0

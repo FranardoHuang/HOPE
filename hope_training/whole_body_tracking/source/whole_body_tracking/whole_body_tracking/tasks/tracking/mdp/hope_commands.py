@@ -361,6 +361,11 @@ class RacketTargetCommand(CommandTerm):
         # ``clips == 0`` = 正手,6-clip 变速列表里正手 1.0/1.2 变体会被误判成反手;现在全部按这张表取。
         # 缺席配置时表按"单 clip 正手 / 恰 2 clip = (正手, 反手)"推导,与写死判断逐字节同值。
         self._family_is_forehand_t = None
+        # 家族行号表([num_segments] long,0=正手族/1=反手族,懒构建自 _clip_family_is_forehand)。
+        # 所有"按族分桶"的下标(HER 缓存、per-族指标、每族一行的框表展开)单一来源。
+        self._clip_family_rows_t = None
+        # cfg per-clip 框表按加载 clip 数对齐后的缓存(键 = cfg 键名;见 _per_clip_range_rows)。
+        self._per_clip_range_rows_cache = {}
         # Per-clip reference paddle FACE NORMAL at the strike frame ([num_segments, 3], built lazily). In
         # uniform mode the target normal is set to the imitated swing's actual paddle normal (which the
         # policy can achieve) — NOT the racket-velocity direction, which is ~18-110 deg off the +Y blade
@@ -433,6 +438,8 @@ class RacketTargetCommand(CommandTerm):
         # shows each swing separately (the aggregate composite can hide one swing lagging). Same
         # sample-weighted EMA as the global accumulators above, but each clip's exact-strike samples are
         # accumulated separately (selected by the motion command's clip_id). Populated in multiseg only.
+        # 键 = 家族行号(_clip_family_rows:0=正手族, 1=反手族),不是 clip_id。legacy 2-clip
+        # 两者恒等;6-clip 变速列表下每族三档共享一个桶(指标/HER 缓存都按族分)。
         self._clip_names = {0: "forehand", 1: "backhand"}
         # Non-decayed, per-PPO-update eligibility ledger for sparse virtual-ball outcomes.  The
         # existing virtual_* rates are EMAs and deliberately suppress values before their
@@ -1340,6 +1347,57 @@ class RacketTargetCommand(CommandTerm):
             )
         return self._family_is_forehand_t
 
+    def _clip_family_rows(self) -> torch.Tensor:
+        """[num_segments] long 表:每个加载 clip 的家族行号(0=正手族, 1=反手族;懒构建缓存)。
+
+        人话(spdmix v2 硬绑定四配套):HER 缓存、per-族指标累计器、"每族一行"的框表全都按
+        家族分桶。legacy 2-clip 下行号恒等于 clip_id(正手=0、反手=1),所有消费点逐字节不变;
+        6-clip 变速列表里正手 0.8/1.0/1.2 三档同落 0 行、反手三档同落 1 行。单一来源 =
+        _clip_family_is_forehand()(boot 已整表校验;≥3 clip 缺族表在那里当场报人话错误)。
+        """
+        rows = getattr(self, "_clip_family_rows_t", None)
+        if rows is None:
+            rows = (~self._clip_family_is_forehand()).to(dtype=torch.long)
+            self._clip_family_rows_t = rows
+        return rows
+
+    def _per_clip_range_rows(self, table: torch.Tensor, cfg_key: str) -> torch.Tensor:
+        """把 cfg 的 per-clip 框表对齐成"每个加载 clip 一行"((num_segments, 3, 2),缓存)。
+
+        人话(spdmix v2 硬绑定四 = 六 clip boot 炸的真凶):racket_pos/vel_range_per_clip 只有
+        正/反手两行,六 clip 列表拿 clip_id(0..5)直接进 GPU gather,越界不当场报错,而是异步
+        CUDA device-side assert,尸体倒在下一个同步点(_strike_frame_for_clip 的 .item()),
+        traceback 指向无辜的 seg_start。这里在任何 gather 之前按行数核对:
+
+        * 行数 == 加载段数:按 clip 逐行用(legacy 2-clip 原张量原样返回,逐字节不变);
+        * 行数 == 2 且段数 != 2:按 clip_family_per_clip 族表把"每族一行"展开成"每 clip 一行"
+          (同族变速档共享该族的框;族表缺席时 _clip_family_is_forehand 自己报人话错误);
+        * 其他组合:当场 ValueError 报人话,绝不让越界下标进 GPU。
+        """
+        cache = getattr(self, "_per_clip_range_rows_cache", None)
+        if cache is None:
+            cache = {}
+            self._per_clip_range_rows_cache = cache
+        cached = cache.get(cfg_key)
+        if cached is not None:
+            return cached
+        nseg = int(self._motion().motion.num_segments)
+        rows = int(table.shape[0])
+        if rows == nseg:
+            expanded = table
+        elif rows == 2:
+            # 每族一行:按族表展开(0=正手行, 1=反手行)。族表缺席时下一行当场报人话错误。
+            expanded = table[self._clip_family_rows()]
+        else:
+            raise ValueError(
+                f"task.racket.{cfg_key} has {rows} row(s) but the loaded motion has {nseg} "
+                f"clip(s) — give one row per loaded clip (motion_file then motion_file_2 order), "
+                f"or exactly 2 rows (forehand, backhand) plus task.motion.clip_family_per_clip "
+                f"so each speed variant reuses its family's box"
+            )
+        cache[cfg_key] = expanded
+        return expanded
+
     def _qb_bank_family_table(self, motion, bank) -> torch.Tensor | None:
         """clip→题库族查表 ((nseg,) long;forehand 族=0 行, backhand 族=1 行),或 None。
 
@@ -1568,13 +1626,24 @@ class RacketTargetCommand(CommandTerm):
         return min(1.0, max(start, scale))
 
     def _ensure_ref_normal_per_clip(self):
-        """Cache the reference paddle face normal at each clip's strike frame ([num_segments, 3])."""
-        if self._ref_normal_per_clip is not None:
-            return
-        self._ensure_reference_strike_state()
-        if self._ref_racket_normal_w_per_clip is None:
-            raise RuntimeError("reference strike-state initialization produced no face normals")
-        self._ref_normal_per_clip = self._ref_racket_normal_w_per_clip
+        """Cache the reference paddle face normal at each clip's strike frame ([num_segments, 3]).
+
+        行数守卫(人话):这张表马上要被 motion.clip_id gather;行数和加载段数对不上就当场报
+        人话错误,而不是让 GPU 越界变成一句没人看得懂的 CUDA device-side assert。
+        """
+        if self._ref_normal_per_clip is None:
+            self._ensure_reference_strike_state()
+            if self._ref_racket_normal_w_per_clip is None:
+                raise RuntimeError("reference strike-state initialization produced no face normals")
+            self._ref_normal_per_clip = self._ref_racket_normal_w_per_clip
+        nseg = int(self._motion().motion.num_segments)
+        rows = int(self._ref_normal_per_clip.shape[0])
+        if rows != nseg:
+            raise RuntimeError(
+                f"per-clip reference face-normal cache has {rows} row(s) but the loaded motion "
+                f"has {nseg} clip(s) — the cache is stale for this motion list; it must be "
+                f"rebuilt with one row per loaded clip before any clip_id lookup"
+            )
 
     def _sample_targets_uniform(self, env_ids: Sequence[int], origins: torch.Tensor, n: int):
         """Independent box sampling (legacy mode). Ranges are PLACEHOLDERS not tied to the swing."""
@@ -1586,8 +1655,12 @@ class RacketTargetCommand(CommandTerm):
             # near-center backhand box is valid and does not go through the shared +/-|y| fallback). This
             # replaces the shared x-range + |y|-sign + z-range logic below and lets each clip track its own
             # reference strike point.
-            clip = motion.clip_id[env_ids]                      # (n,) long, 0=forehand / 1=backhand
-            rng_e = self._pos_range_per_clip_t[clip]            # (n, 3, 2): [env][x/y/z][lo/hi]
+            clip = motion.clip_id[env_ids]                      # (n,) long clip ids on the loaded list
+            # 行数先对齐再 gather(spdmix v2 硬绑定四):两行家族框 + 六 clip 直接下标会越界成
+            # 异步 CUDA assert;_per_clip_range_rows 先按族展开/当场报人话错误。
+            rng_e = self._per_clip_range_rows(
+                self._pos_range_per_clip_t, "racket_pos_range_per_clip"
+            )[clip]                                             # (n, 3, 2): [env][x/y/z][lo/hi]
             lo = rng_e[..., 0]                                  # (n, 3)
             hi = rng_e[..., 1]                                  # (n, 3)
             pos[:, :3] += lo + (hi - lo) * torch.rand(n, 3, device=self.device)
@@ -1614,8 +1687,10 @@ class RacketTargetCommand(CommandTerm):
             # PER-CLIP velocity (unified policy): each env samples from ITS clip's box, so the slower
             # backhand gets a lower target speed than the forehand instead of one shared box that
             # overshoots the backhand. Vectorized: gather each env's clip range, then uniform-sample.
-            clip = motion.clip_id[env_ids]                      # (n,) long, 0=forehand / 1=backhand
-            rng_e = self._vel_range_per_clip_t[clip]            # (n, 3, 2): [env][x/y/z][lo/hi]
+            clip = motion.clip_id[env_ids]                      # (n,) long clip ids on the loaded list
+            rng_e = self._per_clip_range_rows(
+                self._vel_range_per_clip_t, "racket_vel_range_per_clip"
+            )[clip]                                             # (n, 3, 2): [env][x/y/z][lo/hi]
             lo = rng_e[..., 0]                                  # (n, 3)
             hi = rng_e[..., 1]                                  # (n, 3)
             vel = lo + (hi - lo) * torch.rand(n, 3, device=self.device)
@@ -1647,6 +1722,9 @@ class RacketTargetCommand(CommandTerm):
         if self.cfg.achieved_target_mix_prob > 0.0 and self._question_bank is None and motion._multiseg:
             env_ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
             clip_all = motion.clip_id[env_ids_t]
+            # 按族分桶(spdmix v2 硬绑定四):缓存桶是正/反手两族;legacy 2-clip 下族行号==clip_id,
+            # 逐字节不变;6-clip 变速档按族共享缓存,不再有 clip 2..5 永远选不中桶的哑弹。
+            fam_all = self._clip_family_rows()[clip_all]
             replay = torch.rand(n, device=self.device) < float(self.cfg.achieved_target_mix_prob)
             self._resample_n_acc += float(n)
             infl = 1.0 + float(self.cfg.achieved_clamp_inflate)
@@ -1654,7 +1732,7 @@ class RacketTargetCommand(CommandTerm):
                 fill = self._ach_fill.get(c, 0)
                 if fill < int(self.cfg.achieved_min_fill):
                     continue
-                sel = replay & (clip_all == c)
+                sel = replay & (fam_all == c)
                 m = int(sel.sum())
                 if m == 0:
                     continue
@@ -1671,12 +1749,21 @@ class RacketTargetCommand(CommandTerm):
                 rvel = rvel_c + (torch.rand(m, 3, device=self.device) * 2.0 - 1.0) * float(
                     self.cfg.achieved_jitter_vel
                 )
-                if self._pos_range_per_clip_t is not None and c < self._pos_range_per_clip_t.shape[0]:
-                    lo, hi = self._pos_range_per_clip_t[c, :, 0], self._pos_range_per_clip_t[c, :, 1]
+                # 夹回各 env 自己 clip 的框(经 _per_clip_range_rows 对齐,行数保证够;
+                # legacy 2-clip 下行 == 族桶行,数值逐字节不变)。
+                clips_sel = clip_all[sel]
+                if self._pos_range_per_clip_t is not None:
+                    box = self._per_clip_range_rows(
+                        self._pos_range_per_clip_t, "racket_pos_range_per_clip"
+                    )[clips_sel]                                 # (m, 3, 2)
+                    lo, hi = box[..., 0], box[..., 1]
                     ctr, half = (lo + hi) * 0.5, (hi - lo) * 0.5 * infl
                     rpos = torch.min(torch.max(rpos, ctr - half), ctr + half)
-                if self._vel_range_per_clip_t is not None and c < self._vel_range_per_clip_t.shape[0]:
-                    lo, hi = self._vel_range_per_clip_t[c, :, 0], self._vel_range_per_clip_t[c, :, 1]
+                if self._vel_range_per_clip_t is not None:
+                    box = self._per_clip_range_rows(
+                        self._vel_range_per_clip_t, "racket_vel_range_per_clip"
+                    )[clips_sel]                                 # (m, 3, 2)
+                    lo, hi = box[..., 0], box[..., 1]
                     ctr, half = (lo + hi) * 0.5, (hi - lo) * 0.5 * infl
                     if motion.retiming_active:
                         # R14: clamp replayed velocities into the box scaled by THIS swing's playback
@@ -1758,9 +1845,19 @@ class RacketTargetCommand(CommandTerm):
         # 2) racket target: per-clip STATION-RELATIVE box (x = fixed plane, y = swing band), z above ground.
         if motion._multiseg:
             clip = motion.clip_id[env_ids]
+            # 行数先对齐再 gather(spdmix v2 硬绑定四;单 clip 分支 clip 恒 0,历史上就允许
+            # 两行表取第 0 行,不动)。
+            pos_tab = self._per_clip_range_rows(
+                self._pos_range_per_clip_t, "racket_pos_range_per_clip"
+            )
+            vel_tab = self._per_clip_range_rows(
+                self._vel_range_per_clip_t, "racket_vel_range_per_clip"
+            )
         else:
             clip = torch.zeros(n, dtype=torch.long, device=self.device)
-        rng_e = self._pos_range_per_clip_t[clip]                # (n, 3, 2): [env][x/y/z][lo/hi]
+            pos_tab = self._pos_range_per_clip_t
+            vel_tab = self._vel_range_per_clip_t
+        rng_e = pos_tab[clip]                                   # (n, 3, 2): [env][x/y/z][lo/hi]
         lo, hi = rng_e[..., 0], rng_e[..., 1]
         off = lo + (hi - lo) * torch.rand(n, 3, device=self.device)
         pos = origins.clone()
@@ -1770,7 +1867,7 @@ class RacketTargetCommand(CommandTerm):
         self.racket_target_pos_w[env_ids] = pos
 
         # 3) racket velocity (world) + face normal from normal_mode (paper: velocity direction).
-        rng_v = self._vel_range_per_clip_t[clip]
+        rng_v = vel_tab[clip]
         lo_v, hi_v = rng_v[..., 0], rng_v[..., 1]
         vel = lo_v + (hi_v - lo_v) * torch.rand(n, 3, device=self.device)
         self.racket_target_vel_w[env_ids] = vel
@@ -2222,6 +2319,18 @@ class RacketTargetCommand(CommandTerm):
                 anchor[:, 1] = (blend * contact[:, 1]).clamp(
                     -self.cfg.base_couple_max_offset, self.cfg.base_couple_max_offset
                 )
+        # 行数守卫(人话):两处调用端拿运行时 clip_id 直接下标这张表;题库锚点行数少于加载
+        # clip 数就当场报错(6-clip 变速列表必须配 clip_family_per_clip 族表把 2 族锚点展开),
+        # 而不是让 GPU gather 越界变成异步 CUDA device-side assert。单 clip 臂(段数 1、
+        # 表 2 行)历史上就取第 0 行,行数只要 >= 段数即合法,不动。
+        nseg = int(self._motion().motion.num_segments)
+        if int(anchor.shape[0]) < nseg:
+            raise ValueError(
+                f"question-bank ready-anchor table has {int(anchor.shape[0])} row(s) but the "
+                f"loaded motion has {nseg} clip(s) — a >2-clip speed-variant list needs "
+                f"task.motion.clip_family_per_clip so the two family anchors expand to one row "
+                f"per loaded clip"
+            )
         self._qb_base_anchor = anchor
         return anchor
 
@@ -3394,9 +3503,11 @@ class RacketTargetCommand(CommandTerm):
         self._swing_starts_acc += float(n)
         motion = self._motion()
         if motion._multiseg:
-            clips = motion.clip_id[env_ids]
+            # per-族累计(spdmix v2 硬绑定四):桶是正/反手两族。legacy 2-clip 族行号==clip_id
+            # 逐字节不变;6-clip 下正手 1.0/1.2 变体不再被记进"backhand"桶(clip==1 的老病)。
+            fams = self._clip_family_rows()[motion.clip_id[env_ids]]
             for c in self._clip_names:
-                self._swing_starts_acc_c[c] += float((clips == c).sum())
+                self._swing_starts_acc_c[c] += float((fams == c).sum())
         # --- per-swing SAME-LEDGER rally booking (metric-sync fix; see the rally block in __init__) --
         # The attempt that ENDS at this resample books its start and its returned-latch TOGETHER
         # (same call, same ledger, decayed together in _update_metrics) — returns can never outrun
@@ -3408,9 +3519,9 @@ class RacketTargetCommand(CommandTerm):
         self._rally_starts_acc += float(ended.sum())
         self._rally_returns_acc += float(returned.sum())
         if motion._multiseg:
-            ended_clips = self._prev_clip_id[env_ids_t]
+            ended_fams = self._clip_family_rows()[self._prev_clip_id[env_ids_t]]
             for c in self._clip_names:
-                _csel = ended_clips == c
+                _csel = ended_fams == c
                 self._rally_starts_acc_c[c] += float((ended & _csel).sum())
                 self._rally_returns_acc_c[c] += float((returned & _csel).sum())
         self._rally_active[env_ids_t] = True
@@ -3456,8 +3567,9 @@ class RacketTargetCommand(CommandTerm):
                 # _prev_clip_id snapshot (motion already resampled clip_id for the new episode);
                 # post-wrap-hold falls to the latched clip whose swing caused the recovery.
                 fall_clips = torch.where(recovering, rec, self._prev_clip_id[env_ids])
+                fall_fams = self._clip_family_rows()[fall_clips]
                 for c in self._clip_names:
-                    csel = fall_clips == c
+                    csel = fall_fams == c
                     self._prestrike_fall_acc_c[c] += float((true_pre & csel).sum())
                     self._poststrike_fall_acc_c[c] += float((post & csel).sum())
             # True reset: the new episode starts fresh (its stand-start/reset hold is genuine
@@ -3821,9 +3933,9 @@ class RacketTargetCommand(CommandTerm):
         _motion = self._motion()
         _is_multiseg = getattr(_motion, "_multiseg", False)
         if _is_multiseg:
-            _clip = _motion.clip_id
+            _fam = self._clip_family_rows()[_motion.clip_id]
             for _c, _cn in self._clip_names.items():
-                _sel = exact_strike & (_clip == _c)
+                _sel = exact_strike & (_fam == _c)
                 self._vb_exact_acc_c[_c] = decay * self._vb_exact_acc_c[_c] + float(_sel.sum())
                 self._vb_inb_acc_c[_c] = decay * self._vb_inb_acc_c[_c] + float((_legal & _sel).sum())
                 self._vb_hit_acc_c[_c] = decay * self._vb_hit_acc_c[_c] + float((gate & _sel).sum())
@@ -3936,9 +4048,9 @@ class RacketTargetCommand(CommandTerm):
 
         motion = self._motion()
         if getattr(motion, "_multiseg", False):
-            clip_id = motion.clip_id
-            for clip, family in self._clip_names.items():
-                selected = clip_id == clip
+            fam_id = self._clip_family_rows()[motion.clip_id]
+            for family_row, family in self._clip_names.items():
+                selected = fam_id == family_row
                 for name, mask in masks.items():
                     ledger[f"{name}_{family}"].add_(
                         (mask.detach() & selected).sum(dtype=torch.long)
@@ -4595,10 +4707,10 @@ class RacketTargetCommand(CommandTerm):
                 min(self._tracking_loss_acc / _s_denom, 1.0) if _s_enough else 0.0
             )
             if getattr(_em, "_multiseg", False):
-                _rclip = _em.clip_id
+                _rfam = self._clip_family_rows()[_em.clip_id]
                 for _c, _cn in self._clip_names.items():
                     self._tracking_loss_acc_c[_c] = decay * self._tracking_loss_acc_c[_c] + float(
-                        (_rising & (_rclip == _c)).sum()
+                        (_rising & (_rfam == _c)).sum()
                     )
                     _cd = max(self._swing_starts_acc_c[_c], 1e-6)
                     _ce = self._swing_starts_acc_c[_c] >= float(self.cfg.exact_success_min_count)
@@ -4629,9 +4741,11 @@ class RacketTargetCommand(CommandTerm):
         # (unified forehand+backhand) only; single-clip leaves these at 0.
         _motion = self._motion()
         if getattr(_motion, "_multiseg", False):
-            _clip = _motion.clip_id
+            # 按族分桶(legacy 2-clip 族行号==clip_id 逐字节不变;6-clip 下"forehand"桶=正手
+            # 三档合计,"backhand"桶=反手三档合计,不再把正手 1.0 档记成反手)。
+            _fam = self._clip_family_rows()[_motion.clip_id]
             for _c, _cn in self._clip_names.items():
-                _sel = exact_strike & (_clip == _c)
+                _sel = exact_strike & (_fam == _c)
                 _self_f = _sel.float()
                 self._exact_n_acc_c[_c] = decay * self._exact_n_acc_c[_c] + float(_sel.sum())
                 self._exact_pass_pos_acc_c[_c] = decay * self._exact_pass_pos_acc_c[_c] + float((pass_pos & _sel).sum())
@@ -4659,7 +4773,7 @@ class RacketTargetCommand(CommandTerm):
             # prob so the buffers cost nothing when replay is off.
             if self.cfg.achieved_target_mix_prob > 0.0:
                 for _c in self._clip_names:
-                    _bidx = torch.where(exact_strike & (_clip == _c))[0]
+                    _bidx = torch.where(exact_strike & (_fam == _c))[0]
                     _m = int(_bidx.numel())
                     if _m == 0:
                         continue

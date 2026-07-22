@@ -2164,6 +2164,8 @@ def test_sparse_virtual_reward_ledger_is_exact_per_action_and_resets_once():
         hope_commands_mod.RacketTargetCommand
     )
     command._clip_names = {0: "forehand", 1: "backhand"}
+    # 族行号表(0=正手族,1=反手族):真 __init__ 会懒建;fake 直接预置 legacy 2-clip 同值表。
+    command._clip_family_rows_t = torch.tensor([0, 1], dtype=torch.long)
     names = (
         "strike_opportunity_count",
         "virtual_capture_count",
