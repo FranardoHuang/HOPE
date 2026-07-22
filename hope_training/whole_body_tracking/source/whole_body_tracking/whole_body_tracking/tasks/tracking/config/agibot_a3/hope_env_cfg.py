@@ -1084,6 +1084,20 @@ class HOPEVirtualBallRewardsCfg(HOPEDeployParityRewardsCfg):
         },
     )
 
+    # mjlab 档①第三项 (DEFAULT OFF, 纯加法):action_acc_l2 动作二阶平滑。
+    # 人话:action_rate_l2 罚"步子迈多大"(一阶差分),这条罚"方向掉头多猛"(二阶差分)——
+    # 高频抖(chatter)恰恰是一阶小、二阶大的信号,平滑轴上的正交新轴。核
+    # ||a_t - 2a_{t-1} + a_{t-2}||²,raw 动作与 action_rate_l2 同源同量纲;a_{t-2} 由
+    # ClampedJointPositionAction 自存(isaaclab ActionManager 只有 prev_action),reset
+    # 清零 + 有效位保证复位后前两步不计费。CLI:task.rewards.action_acc_weight(必须 <= 0;
+    # 显式 0 是对照)。剂量:二阶量纲大于一阶,起步取 action_rate 档位的 1/5~1/2
+    # (mjlab 采纳文档 §4),别按一阶惯用值抄。
+    action_acc_l2 = RewTerm(
+        func=mdp.action_acc_l2,
+        weight=0.0,
+        params={"action_name": "joint_pos"},
+    )
+
     # Wave B (DEFAULT OFF): two mutually exclusive lower-body stability hypotheses.  B1 pays a
     # bounded pose kernel on the exact twelve leg joints from the current v4rg motion command.
     # B2 is reference-free: it combines an absolute anti-collapse stance-width hinge with only

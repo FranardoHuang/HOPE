@@ -2866,6 +2866,49 @@ def foot_clearance(
     return (swing * torch.abs(foot_z - target) * xy_speed).sum(dim=-1)
 
 
+# --- mjlab-ported action second-difference smoothing (action_acc_l2; DEFAULT OFF) -------------- #
+def action_acc_l2(env: ManagerBasedRLEnv, action_name: str = "joint_pos") -> torch.Tensor:
+    """动作二阶差分惩罚(mjlab action_acc_l2 思想):||a_t - 2·a_{t-1} + a_{t-2}||²。
+
+    人话:action_rate 罚"步子迈多大"(一阶差分),这条罚"方向掉头多猛"(二阶差分)——高频抖
+    (chatter)恰恰是一阶小、二阶大的信号,是平滑轴上的正交新轴。a 用 raw 动作(actor 归一化
+    输出,与 isaaclab action_rate_l2 同源同量纲);a_{t-2} isaaclab 不存,由
+    ClampedJointPositionAction 的自存缓冲提供——reset 清零且带有效位,复位后前两步历史不齐,
+    这两步不计费(episode 边界永远造不出虚构的"掉头"罚)。剂量注意:二阶差分量纲大于一阶,
+    起步取 action_rate 档位的 1/5~1/2(mjlab 采纳文档 §4),别按一阶惯用值抄。
+    Positive magnitude; RewTerm weight 用负数;默认 weight=0 = 项被 RewardManager 跳过,
+    字节等价。
+    """
+    term = env.action_manager.get_term(action_name)
+    current = getattr(term, "raw_actions", None)
+    previous = getattr(term, "prev_raw_actions", None)
+    before_previous = getattr(term, "prev_prev_raw_actions", None)
+    if (
+        not torch.is_tensor(current)
+        or current.ndim != 2
+        or not torch.is_tensor(previous)
+        or previous.shape != current.shape
+        or not torch.is_tensor(before_previous)
+        or before_previous.shape != current.shape
+    ):
+        raise RuntimeError(
+            "action_acc_l2 requires ClampedJointPositionAction raw-action history "
+            "(raw_actions / prev_raw_actions / prev_prev_raw_actions, same [env,joint] shape)"
+        )
+    valid = getattr(term, "raw_action_history_valid", None)
+    if (
+        not torch.is_tensor(valid)
+        or valid.dtype != torch.bool
+        or tuple(valid.shape) != (tuple(current.shape)[0],)
+    ):
+        raise RuntimeError(
+            "action_acc_l2 requires the per-env raw-action history validity mask "
+            "(reset-aware [env] bool; the first two post-reset steps must be free)"
+        )
+    second_diff = current - 2.0 * previous + before_previous
+    return torch.sum(torch.square(second_diff), dim=-1) * valid.float()
+
+
 def arm_overreach(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     """Anti-arm-only: penalize solving the target by maxing the arm out — fraction of ARM joints within
     10% of a position limit. Encourages using the body/legs to bring the target into a comfortable arm

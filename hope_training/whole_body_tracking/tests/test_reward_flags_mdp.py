@@ -167,6 +167,11 @@ def _install_isaaclab_stub():
             )
 
         @property
+        def raw_actions(self):
+            # real isaaclab JointAction exposes raw_actions; action_acc_l2 reads it
+            return self._raw_actions
+
+        @property
         def processed_actions(self):
             return self._processed_actions
 

@@ -51,11 +51,30 @@ class ClampedJointPositionAction(JointPositionAction):
         self._processed_qdes_valid = torch.zeros_like(
             self._previous_processed_qdes_valid
         )
+        # action_acc(mjlab 档①第三项)原料:raw 动作(actor 归一化输出)的两步历史。
+        # isaaclab ActionManager 只存 prev_action(a_{t-1});二阶差分
+        # ||a_t - 2a_{t-1} + a_{t-2}||² 还要 a_{t-2},只能在动作项里自存。有效位与上面
+        # previous_processed_qdes 同一套路:reset 后前两步没有真实历史,有效位=False ->
+        # action_acc_l2 那两步不计费,episode 边界永远造不出虚构的"掉头"罚。
+        self._prev_raw_actions = torch.zeros_like(self._raw_actions)
+        self._prev_prev_raw_actions = torch.zeros_like(self._raw_actions)
+        self._raw_actions_valid = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        self._prev_raw_actions_valid = torch.zeros_like(self._raw_actions_valid)
+        self._prev_prev_raw_actions_valid = torch.zeros_like(self._raw_actions_valid)
         if self._clamp_enabled:
             print("[hope_actions] q_des CLAMP ACTIVE: processed joint targets clamped to "
                   "joint limits (train==deploy, pp_joint_limits parity)", flush=True)
 
     def process_actions(self, actions: torch.Tensor):
+        # raw 动作历史左移一格(a_{t-2} <- a_{t-1} <- 当前 raw):super() 马上会把 raw
+        # 覆盖成新动作 a_t,所以搬运必须在 super() 之前。有效位跟着一起移——reset 后要
+        # 连续吃到两次真动作,历史才算齐(见 raw_action_history_valid)。
+        self._prev_prev_raw_actions.copy_(self._prev_raw_actions)
+        self._prev_prev_raw_actions_valid.copy_(self._prev_raw_actions_valid)
+        self._prev_raw_actions.copy_(self._raw_actions)
+        self._prev_raw_actions_valid.copy_(self._raw_actions_valid)
         # Snapshot the preceding deploy-space target before JointPositionAction overwrites it.
         # On the first action after reset the numeric snapshot is deliberately ignored by the
         # copied validity bit, so an episode boundary can never create a fictitious slew charge.
@@ -68,6 +87,7 @@ class ClampedJointPositionAction(JointPositionAction):
                 self._processed_actions, min=limits[..., 0], max=limits[..., 1]
             )
         self._processed_qdes_valid.fill_(True)
+        self._raw_actions_valid.fill_(True)
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
         """Invalidate deploy-space history for reset environments.
@@ -80,6 +100,13 @@ class ClampedJointPositionAction(JointPositionAction):
         ids = slice(None) if env_ids is None else env_ids
         self._processed_qdes_valid[ids] = False
         self._previous_processed_qdes_valid[ids] = False
+        # raw 动作历史清零 + 有效位清 False(清零对齐 ActionManager 对 action/prev_action
+        # 的 reset 语义;有效位保证清零值不会被 action_acc_l2 当成真历史计费)。
+        self._prev_raw_actions[ids] = 0.0
+        self._prev_prev_raw_actions[ids] = 0.0
+        self._raw_actions_valid[ids] = False
+        self._prev_raw_actions_valid[ids] = False
+        self._prev_prev_raw_actions_valid[ids] = False
 
     @property
     def previous_processed_qdes(self) -> torch.Tensor:
@@ -92,6 +119,25 @@ class ClampedJointPositionAction(JointPositionAction):
         """Per-environment validity of :attr:`previous_processed_qdes`."""
 
         return self._previous_processed_qdes_valid
+
+    @property
+    def prev_raw_actions(self) -> torch.Tensor:
+        """上一步 raw 动作 a_{t-1}(actor 归一化输出;与 ActionManager.prev_action 同值,
+        自存一份让 action_acc_l2 的三份原料同源、同一套 reset 语义)。"""
+
+        return self._prev_raw_actions
+
+    @property
+    def prev_prev_raw_actions(self) -> torch.Tensor:
+        """上上步 raw 动作 a_{t-2}(isaaclab 不存这一步,action_acc_l2 的自存缓冲)。"""
+
+        return self._prev_prev_raw_actions
+
+    @property
+    def raw_action_history_valid(self) -> torch.Tensor:
+        """Per-env bool:a_{t-1} 与 a_{t-2} 都是真历史才 True(reset 后前两步 False)。"""
+
+        return self._prev_raw_actions_valid & self._prev_prev_raw_actions_valid
 
 
 @configclass

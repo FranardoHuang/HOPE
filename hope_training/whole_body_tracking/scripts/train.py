@@ -2487,8 +2487,10 @@ _REWARD_KEYS = (
     "motion_body_lin_vel_weight", "motion_body_lin_vel_std",
     "motion_body_ang_vel_weight", "motion_body_ang_vel_std",
     "motion_scale", "motion_scale_in_window",
-    # penalties / regularization
-    "action_rate_weight", "joint_limit_weight", "undesired_contacts_weight",
+    # penalties / regularization。action_acc = mjlab 档①动作二阶平滑(action_rate 罚"步子
+    # 迈多大",它罚"方向掉头多猛";weight-only 键,finite 且 <= 0,显式 0 = 对照;剂量别抄
+    # 一阶惯用值,见 hope_env_cfg 注释)。
+    "action_rate_weight", "action_acc_weight", "joint_limit_weight", "undesired_contacts_weight",
     "pre_strike_foot_slip_weight", "prestrike_waist_twist_weight",
     "arm_torque_saturation_weight", "prestrike_upright_weight", "foot_orientation_weight",
     # proximity power-gate for the face/velocity channels (reward_staged_design §② C2a)
@@ -4361,6 +4363,35 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             R.action_rate_l2.weight = _action_rate_weight_value
             applied.append(
                 f"rewards.action_rate_l2.weight={_action_rate_weight_value}"
+            )
+        # mjlab 档①第三项:action_acc_l2 动作二阶差分罚(默认 weight=0 关断,字节等价)。
+        # 校验拼法照 action_rate:bool 拒收,必须 finite 且 <= 0(显式 0 = 对照臂)。
+        _action_acc_weight = _get(rw, "action_acc_weight")
+        if _action_acc_weight is not None:
+            if isinstance(_action_acc_weight, bool):
+                raise _OverrideError(
+                    "rewards.action_acc_l2.weight must be finite and <= 0"
+                )
+            try:
+                _action_acc_weight_value = float(_action_acc_weight)
+            except (TypeError, ValueError) as exc:
+                raise _OverrideError(
+                    "rewards.action_acc_l2.weight must be finite and <= 0"
+                ) from exc
+            if (
+                not math.isfinite(_action_acc_weight_value)
+                or _action_acc_weight_value > 0.0
+            ):
+                raise _OverrideError(
+                    "rewards.action_acc_l2.weight must be finite and <= 0"
+                )
+            _require(
+                hasattr(R, "action_acc_l2") and R.action_acc_l2 is not None,
+                "rewards.action_acc_l2",
+            )
+            R.action_acc_l2.weight = _action_acc_weight_value
+            applied.append(
+                f"rewards.action_acc_l2.weight={_action_acc_weight_value}"
             )
         for _name, _key in (
             ("joint_limit", "joint_limit_weight"),
