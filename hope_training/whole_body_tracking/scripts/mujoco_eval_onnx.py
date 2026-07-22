@@ -1149,6 +1149,245 @@ def post_step_time_to_strike(time_to_strike, step_dt, clock_advances):
     return tts - dt if bool(clock_advances) else tts
 
 
+_PLANNER_GOVERNOR_PROFILE_KEYS = (
+    "policy_dt_s", "min_tts_s", "max_tts_s", "max_phase_rate_per_s",
+    "max_phase_acceleration_per_s2", "max_deadline_revision_delta_s",
+    "max_position_revision_delta_m", "max_velocity_revision_delta_mps",
+    "max_normal_revision_delta_rad", "normal_unit_tolerance",
+    "early_deadline_tolerance_s", "contract_version", "schema_version",
+)
+
+
+def planner_governor_config_from_metadata(metadata):
+    """Parse the checkpoint-bound ``planner_task_revision`` ONNX metadata.
+
+    Absent key = legacy/OFF generation and returns ``None`` (the byte-identical old path).
+    A present key gates the task-revision reveal protocol: the reference clock is OWNED by the
+    phase governor (phase 0 at task begin, phase 1 exactly when the task deadline expires), so
+    running such a model against the legacy 1x native clip clock judges a different protocol
+    than the one it was trained on (the 2026-07-22 all-zero artifact). Any malformed spelling
+    fails closed instead of silently falling back to the legacy clock.
+    """
+    raw = str(metadata.get("planner_task_revision", "") or "").strip()
+    if not raw:
+        return None
+    try:
+        doc = json.loads(raw)
+    except json.JSONDecodeError as exc:
+        raise SystemExit(f"[FATAL] invalid planner_task_revision ONNX metadata JSON: {exc}")
+    if not isinstance(doc, dict) or doc.get("enabled") is not True:
+        raise SystemExit(
+            "[FATAL] planner_task_revision metadata must be an object with enabled=true"
+        )
+    if doc.get("revision_schema_version") != 1:
+        raise SystemExit(
+            "[FATAL] unsupported planner_task_revision.revision_schema_version "
+            f"{doc.get('revision_schema_version')!r} (evaluator implements 1)"
+        )
+    governor = doc.get("governor")
+    profile = governor.get("profile") if isinstance(governor, dict) else None
+    if not isinstance(profile, dict):
+        raise SystemExit("[FATAL] planner_task_revision metadata lacks governor.profile")
+    if (governor.get("contract_version") != "phase_governor_v1"
+            or profile.get("contract_version") != "phase_governor_v1"
+            or governor.get("schema_version") != 1 or profile.get("schema_version") != 1):
+        raise SystemExit(
+            "[FATAL] planner_task_revision governor is not phase_governor_v1 schema 1"
+        )
+    if sorted(profile) != sorted(_PLANNER_GOVERNOR_PROFILE_KEYS):
+        raise SystemExit(
+            "[FATAL] planner governor profile field set mismatch: "
+            f"got {sorted(profile)}"
+        )
+    numeric = {}
+    for key in _PLANNER_GOVERNOR_PROFILE_KEYS:
+        if key in ("contract_version", "schema_version"):
+            continue
+        value = profile[key]
+        if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                or not math.isfinite(float(value)):
+            raise SystemExit(f"[FATAL] planner governor profile {key} must be finite")
+        numeric[key] = float(value)
+    if not (0.0 < numeric["min_tts_s"] < numeric["max_tts_s"]):
+        raise SystemExit("[FATAL] planner governor profile TTS envelope is degenerate")
+    if numeric["policy_dt_s"] <= 0.0 or numeric["max_phase_rate_per_s"] <= 0.0 \
+            or numeric["max_phase_acceleration_per_s2"] <= 0.0:
+        raise SystemExit("[FATAL] planner governor profile rates must be positive")
+    # Re-verify the embedded profile SHA over the exporter's canonical byte spelling so a
+    # hand-edited/corrupted profile cannot masquerade as the checkpoint-bound envelope.
+    canonical = (json.dumps(profile, allow_nan=False, ensure_ascii=False,
+                            separators=(",", ":"), sort_keys=True) + "\n").encode("utf-8")
+    calculated = hashlib.sha256(canonical).hexdigest()
+    declared = str(governor.get("profile_sha256", ""))
+    if declared != calculated:
+        raise SystemExit(
+            "[FATAL] planner governor profile_sha256 does not bind the embedded profile: "
+            f"declared={declared} calculated={calculated}"
+        )
+    tts_range = doc.get("initial_tts_range_s")
+    if (not isinstance(tts_range, (list, tuple)) or len(tts_range) != 2
+            or any(isinstance(v, bool) or not isinstance(v, (int, float))
+                   or not math.isfinite(float(v)) for v in tts_range)
+            or not (numeric["min_tts_s"] <= float(tts_range[0]) < float(tts_range[1])
+                    <= numeric["max_tts_s"])):
+        raise SystemExit(
+            "[FATAL] planner_task_revision.initial_tts_range_s must be an ordered pair inside "
+            f"the governor TTS envelope; got {tts_range!r}"
+        )
+    return {
+        "profile": numeric,
+        "profile_sha256": declared,
+        "initial_tts_range_s": (float(tts_range[0]), float(tts_range[1])),
+    }
+
+
+class EvalPhaseGovernor:
+    """Single-env double-precision mirror of training's planner phase governor.
+
+    Mirrors ``MotionCommand._advance_planner_phase`` (mdp/commands.py) frame-domain arithmetic
+    with ``held=False`` and no same-task revisions: the judge feeds ONE deterministic initial
+    TTS per question and never revises the target tuple mid-swing, so ``truth == desired`` for
+    the whole task. The C++ deploy twin is ``PpPhaseGovernor::Advance`` (pp_phase_governor.hpp)
+    and the python reference is ``planner_revision.advance_phase``; the host parity test
+    (tests/test_eval_phase_governor_parity.py) pins all three against this implementation.
+    """
+
+    def __init__(self, cfg, seg_start, seg_len, step_dt):
+        profile = cfg["profile"]
+        self.dt = float(profile["policy_dt_s"])
+        require_contract(
+            abs(self.dt - float(step_dt)) < 1e-12,
+            f"planner governor policy_dt_s {self.dt} != evaluator control dt {step_dt}",
+        )
+        self.tol = float(profile["early_deadline_tolerance_s"])
+        self.min_tts = float(profile["min_tts_s"])
+        self.max_tts = float(profile["max_tts_s"])
+        self.max_rate = float(profile["max_phase_rate_per_s"])
+        self.max_accel = float(profile["max_phase_acceleration_per_s2"])
+        self.initial_tts = self._canonicalize_tts(float(cfg["initial_tts_s"]))
+        lo, hi = cfg["initial_tts_range_s"]
+        require_contract(
+            lo <= self.initial_tts <= hi,
+            f"initial_tts {self.initial_tts} outside the trained initial_tts_range_s "
+            f"[{lo}, {hi}]",
+        )
+        minimum = self.minimum_finish_time(1.0, 0.0, self.max_rate, self.max_accel)
+        require_contract(
+            self.initial_tts + self.tol >= minimum,
+            f"initial_tts {self.initial_tts} is outside the reachable phase envelope "
+            f"(minimum feasible {minimum:.6f}s for this profile)",
+        )
+        strike_phases = cfg["strike_phases"]
+        require_contract(
+            len(strike_phases) == len(seg_len),
+            "planner governor needs one strike phase per motion clip",
+        )
+        self.start_steps, self.strike_steps = [], []
+        for c in range(len(seg_len)):
+            start = float(int(seg_start[c]))
+            strike = start + float(int(round(float(strike_phases[c]) * (int(seg_len[c]) - 1))))
+            require_contract(
+                strike > start,
+                f"clip {c} strike frame must lie strictly after the windup frame",
+            )
+            self.start_steps.append(start)
+            self.strike_steps.append(strike)
+        self.active = False
+        self.exact_fired = False
+
+    def _canonicalize_tts(self, tts):
+        """Snap only the profile-bound edge bands (training _planner_canonicalize_tts)."""
+        require_contract(math.isfinite(tts) and tts > 0.0, f"initial_tts must be positive, got {tts}")
+        require_contract(
+            tts + self.tol >= self.min_tts and tts - self.tol <= self.max_tts,
+            f"initial_tts {tts} outside governor TTS envelope [{self.min_tts}, {self.max_tts}]",
+        )
+        if abs(tts - self.min_tts) <= self.tol:
+            return self.min_tts
+        if abs(tts - self.max_tts) <= self.tol:
+            return self.max_tts
+        return tts
+
+    @staticmethod
+    def minimum_finish_time(distance, initial_rate, maximum_rate, maximum_acceleration):
+        """Scalar twin of _planner_minimum_finish_time (same op order for bitwise parity)."""
+        rate = min(max(initial_rate, 0.0), maximum_rate)
+        accelerate_time = max(maximum_rate - rate, 0.0) / maximum_acceleration
+        accelerate_distance = (
+            rate * accelerate_time + 0.5 * maximum_acceleration * (accelerate_time * accelerate_time)
+        )
+        triangular = (
+            -rate + math.sqrt(rate * rate + 2.0 * maximum_acceleration * max(distance, 0.0))
+        ) / maximum_acceleration
+        trapezoidal = accelerate_time + max(distance - accelerate_distance, 0.0) / maximum_rate
+        return triangular if distance <= accelerate_distance else trapezoidal
+
+    def begin(self, clip):
+        """Install one new immutable task (training begin_planner_task, one env, rev 1)."""
+        self.start_step = self.start_steps[int(clip)]
+        self.strike_step = self.strike_steps[int(clip)]
+        self.time_step_f = self.start_step
+        self.phase_rate = 0.0
+        self.truth_tts = self.initial_tts
+        self.desired_tts = self.initial_tts
+        self.exact_fired = False
+        self.active = True
+
+    @property
+    def tts_obs(self):
+        """Actor/grading clock: the immutable task deadline, zero through follow-through."""
+        return max(self.truth_tts, 0.0)
+
+    @property
+    def time_step(self):
+        # round() is banker's rounding, matching torch .round() (half-to-even).
+        return int(round(self.time_step_f))
+
+    def advance(self):
+        """One post-physics command-manager tick (held=False); returns the new clip frame."""
+        require_contract(self.active, "planner governor advanced before any task began")
+        dt = self.dt
+        self.truth_tts = max(self.truth_tts - dt, 0.0)
+        remaining_deadline = max(self.desired_tts - dt, 0.0)
+        span = max(self.strike_step - self.start_step, 1.0e-6)
+        phase = min(max((self.time_step_f - self.start_step) / span, 0.0), 1.0)
+        prestrike = phase < 1.0
+        if remaining_deadline > self.tol:
+            requested = min(max((1.0 - phase) / max(remaining_deadline, dt), 0.0), self.max_rate)
+        else:
+            requested = self.max_rate
+        earliest = self.minimum_finish_time(
+            max(1.0 - phase, 0.0), self.phase_rate, self.max_rate, self.max_accel
+        )
+        if remaining_deadline <= earliest + dt:
+            requested = self.max_rate
+        max_delta = self.max_accel * dt
+        rate_delta = min(max(requested - self.phase_rate, -max_delta), max_delta)
+        if prestrike:
+            new_rate = min(max(self.phase_rate + rate_delta, 0.0), self.max_rate)
+        else:
+            # Post-contact: decelerate/accelerate smoothly toward the native one-frame clock.
+            native_rate = min(1.0 / (span * dt), self.max_rate)
+            post_delta = min(max(native_rate - self.phase_rate, -max_delta), max_delta)
+            new_rate = max(self.phase_rate + post_delta, 0.0)
+        frame_delta = 0.5 * (self.phase_rate + new_rate) * dt * span
+        remaining_frames = max(self.strike_step - self.time_step_f, 0.0)
+        if prestrike:
+            frame_delta = min(frame_delta, remaining_frames)
+            if remaining_deadline > self.tol:
+                # Keep one full actor interval in reserve pre-contact (training/C++ twin).
+                next_rate = min(self.max_rate, new_rate + max_delta)
+                reserved_phase_distance = 0.5 * (new_rate + next_rate) * dt
+                frame_delta = min(
+                    frame_delta, max(remaining_frames - reserved_phase_distance * span, 0.0)
+                )
+        frame_delta = max(frame_delta, 0.0)
+        self.phase_rate = new_rate
+        self.desired_tts = remaining_deadline
+        self.time_step_f += frame_delta
+        return self.time_step
+
+
 def reset_sampler_for_paired_rollout(sampler):
     """Reset counters and rewind an immutable BankExam paper for a paired rollout column."""
     if sampler is None:
@@ -1485,6 +1724,9 @@ class OnnxPolicy:
         self.out_names = list(output_meta)
         md = self.sess.get_modelmeta().custom_metadata_map
         self.metadata = dict(md)
+        # Task-revision generation flag (2026-07-22 protocol fix): present metadata makes the
+        # phase-governor reveal protocol MANDATORY; absence keeps the legacy clock byte-identical.
+        self.planner_task_revision = planner_governor_config_from_metadata(md)
         self.metadata_schema_version = str(md.get("hope_metadata_schema_version", "")).strip()
         try:
             self.metadata_schema_number = int(self.metadata_schema_version or "0")
@@ -3147,7 +3389,8 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                 virtual_return_scorer=None,
                 switch_stress=0.0, qdes_clamp=False, hold_ref="clip", hp_cfg=None,
                 action_noise_rng=None, bank_one_question_reset=False,
-                ready_state_contract=None, mjcf_sha256="", execution_contract_sha256=""):
+                ready_state_contract=None, mjcf_sha256="", execution_contract_sha256="",
+                planner_governor_cfg=None):
     if action_noise_rng is None:
         # Direct legacy callers retain deterministic behavior; main() always passes an independent
         # stream so action dithering cannot perturb target/question/hold scheduling.
@@ -3157,6 +3400,18 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                            pos_ranges_per_clip=pos_ranges_per_clip,
                            ref_reach_offset_xy=(policy.ref_reach_offset_xy if policy.hitter else None),
                            hp_cfg=hp_cfg)
+    # Task-revision reveal protocol (metadata-gated). gov=None keeps every legacy branch
+    # byte-identical. gov owns the reference clock AND the actor's time_to_strike semantics:
+    # phase 0 at question begin, governed to phase 1 exactly when the deterministic initial_tts
+    # deadline expires (the strike grading frame), native-speed follow-through afterwards.
+    gov = None
+    if planner_governor_cfg is not None:
+        require_contract(
+            df is None,
+            "planner phase governor + --deploy-faithful unsupported: the df scheduler owns its "
+            "own clip clock and predates the task-revision generation",
+        )
+        gov = EvalPhaseGovernor(planner_governor_cfg, seg_start, seg_len, step_dt)
     strike = {"all": StrikeAcc(), "forehand": StrikeAcc(), "backhand": StrikeAcc()}
     multiswing = (reset_mode == "multiswing") and (df is None)
     bank_schedule = bool(venue_sampler is not None and hasattr(venue_sampler, "schedule"))
@@ -3372,6 +3627,10 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
             cur_venue_strike[0] = vs
         attempt_start(c, vs)
         hp_start(c)
+        if gov is not None:
+            # Every armed target is one new immutable task: reference frozen at the windup
+            # frame (phase 0, rate 0), deadline = the deterministic per-question initial_tts.
+            gov.begin(c)
 
     def sample_hold():
         """Pre-swing HOLD length (multiswing only): training freezes the reference at the swing's
@@ -3382,7 +3641,14 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                 cur_venue_strike[0] is not None,
                 "BankExam hold requested before a schedule item was applied",
             )
+            if gov is not None:
+                # Task-revision generation trains with ALL legacy hold clocks forced to zero
+                # (commands.py: initial_tts_range_s owns preparation time). The bank's declared
+                # hold_steps stay in the attempt ledger as schedule provenance but are not slept.
+                return 0
             return int(cur_venue_strike[0].hold_steps)
+        if gov is not None:
+            return 0
         if not multiswing:
             return 0
         return int(rng.integers(int(hold_range[0]), int(hold_range[1]) + 1))
@@ -3432,13 +3698,24 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
             CONTINUOUS_READY_STATE_MODE, last_action_value
         )
 
+    def sync_strike_clock(c, ts):
+        """Refresh the actor-visible strike clock for frame ``ts``.
+
+        Legacy: clip-phase arithmetic (update_strike_timing). Governor generation: the actor's
+        time_to_strike is the immutable task deadline countdown (hope_commands.py:3089 —
+        ``motion._planner_truth_tts.clamp(min=0)``), independent of the reference frame index.
+        """
+        racket.update_strike_timing(c, ts)
+        if gov is not None:
+            racket.time_to_strike = gov.tts_obs
+
     def fresh_swing():
         """Sample a clip, install the declared ready state, and arm its target."""
         clip, vs = sample_swing()
         ts = int(seg_start[clip])
         reset_question_state(clip, ts)
         apply_target(clip, vs)
-        racket.update_strike_timing(clip, ts)
+        sync_strike_clock(clip, ts)
         return clip, ts
 
     # ---------------------------------------------------------------------------------------------
@@ -3586,9 +3863,17 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
         # actor-input tts here delayed exact-strike grading by one 20 ms control step.
         clock_advances = ((dfs["phase"] == "swing") if df is not None else
                           not (training_hold_protocol and hold_left > 0))
-        racket.time_to_strike = post_step_time_to_strike(
-            racket.time_to_strike, step_dt, clock_advances
-        )
+        if gov is not None:
+            # Training-order twin: the command manager advances the governed clocks after
+            # physics and grades the post-advance state. Frames move by the governed delta
+            # (consumed by the clock block below); the grading/actor tts is the immutable
+            # task deadline countdown, zero through follow-through.
+            gov.advance()
+            racket.time_to_strike = gov.tts_obs
+        else:
+            racket.time_to_strike = post_step_time_to_strike(
+                racket.time_to_strike, step_dt, clock_advances
+            )
 
         # --- viewer (visualization only; does not touch sim/obs/action) ---
         if viewer is not None:
@@ -3664,7 +3949,14 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
         if abs(racket.time_to_strike) <= STRIKE_WINDOW_S:
             racket_err = float(np.linalg.norm(robot.racket_pos() - racket.racket_target_pos_w))
             racket_err_acc += racket_err; racket_err_n += 1
-            if abs(racket.time_to_strike) <= exact_tol:   # exact strike frame (Isaac exact_strike mask)
+            # Governor generation: tts clamps at zero through follow-through, so the exact frame
+            # needs training's one-shot latch (hope_commands exact_strike & ~_exact_fired,
+            # re-armed at every new task). gov=None keeps the legacy signed-clock single fire.
+            exact_now = abs(racket.time_to_strike) <= exact_tol
+            if gov is not None and exact_now:
+                exact_now = not gov.exact_fired
+                gov.exact_fired = True
+            if exact_now:   # exact strike frame (Isaac exact_strike mask)
                 # All three error channels at the exact strike frame (same arithmetic as Isaac):
                 #   pos_err = ||racket_pos_w - target_pos_w||
                 #   vel_err = ||racket_lin_vel_w - target_vel_w||   (full 3-vec norm)
@@ -3865,7 +4157,9 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                 # time_to_strike stays pinned at its per-clip max. The robot keeps being simulated.
                 hold_left -= 1
             else:
-                time_step += 1
+                # Governor generation: the governed clock already advanced this step (grading
+                # block above); adopt its rounded frame. Legacy: native 1x, one frame per step.
+                time_step = gov.time_step if gov is not None else time_step + 1
                 seg_end = int(seg_start[clip]) + int(seg_len[clip])
                 if time_step >= seg_end:
                     # clip wrap mid-episode: sample the next swing + resample its target. Teleport
@@ -3948,7 +4242,7 @@ def run_rollout(policy, robot, refs_table, seg_start, seg_len, num_clips, step_d
                     # target to the live base for Δ=0; no-op for non-hitter contracts)
                     racket.base_target_pos_w = racket.station_pos_w.copy()
                     time_step += 1                                # first advancing frame after windup
-        racket.update_strike_timing(clip, time_step)
+        sync_strike_clock(clip, time_step)
 
     if attempt_cur.get("open", False):
         in_hold_now = ((dfs["phase"] != "swing") if df is not None else
@@ -4519,6 +4813,12 @@ def main():
                         "181-D face-obs model (the face lane is +Y/A-frame in training) — both "
                         "exit 2. Legit use: boxes/venue scoring of non-face models on flipped-"
                         "face clips.")
+    p.add_argument("--planner-initial-tts", type=float, default=None,
+                   help="task-revision 代际(ONNX metadata 带 planner_task_revision)每题的确定性"
+                        "准备时长秒数;缺省 0.5 = 训练混合里的部署基线点质量。governor 按训练态同款"
+                        "公式把参考从 windup 相位推到击球相位、恰好在该 deadline 到点,判分帧 = "
+                        "governor 到达帧。必须落在该 checkpoint 的 initial_tts_range_s 支持内。"
+                        "老代际 ONNX(无该 metadata)传本旗标直接报错,防止无效旋钮假装生效。")
     p.add_argument("--hold-ref", choices=["auto", "clip", "stand"], default="auto",
                    help="multiswing pre-swing HOLD reference semantics. 'auto' uses ONNX metadata "
                         "(legacy non-110 fallback: clip). 'clip' = "
@@ -5274,6 +5574,44 @@ def main():
               f"clip_seg_lengths {tuple(policy.clip_seg_lengths)} — these are probably NOT the "
               f"clips this model was trained/exported with.")
 
+    # --- task-revision generation gate (2026-07-22 protocol fix) --------------------------------
+    # planner_task_revision metadata is the model-side key of the double-keyed cutover
+    # (C++ RequirePpPlannerTaskRevisionDoubleKey): a revision-trained model must never be graded
+    # behind the legacy 1x reference clock, and a legacy model must never be fed the governor.
+    planner_governor_cfg = None
+    if policy.planner_task_revision is not None:
+        if args.deploy_faithful:
+            raise SystemExit(
+                "[FATAL] task-revision model + --deploy-faithful is unsupported: the df "
+                "scheduler's pinned windup clock contradicts the governed reveal protocol"
+            )
+        governor_initial_tts = 0.5 if args.planner_initial_tts is None else float(
+            args.planner_initial_tts
+        )
+        planner_governor_cfg = {
+            "profile": policy.planner_task_revision["profile"],
+            "profile_sha256": policy.planner_task_revision["profile_sha256"],
+            "initial_tts_range_s": policy.planner_task_revision["initial_tts_range_s"],
+            "initial_tts_s": governor_initial_tts,
+            "strike_phases": tuple(float(p) for p in STRIKE_PHASE_PER_CLIP[:num_clips]),
+        }
+        # Fail per-clip begin feasibility and TTS-envelope membership NOW, not mid-exam.
+        EvalPhaseGovernor(planner_governor_cfg, seg_start, seg_len, step_dt)
+        print(
+            "[mj-sim2sim] planner governor: task-revision generation detected "
+            f"(profile_sha256={planner_governor_cfg['profile_sha256'][:12]}…) — reference clock "
+            f"is GOVERNED: phase 0->1 over initial_tts={governor_initial_tts:g}s per question "
+            f"({'CLI' if args.planner_initial_tts is not None else 'default deployment baseline'}), "
+            "strike graded at the governor arrival frame; native-speed follow-through; legacy "
+            "hold clocks replaced by initial_tts (bank hold_steps recorded but not slept)"
+        )
+    elif args.planner_initial_tts is not None:
+        raise SystemExit(
+            "[FATAL] --planner-initial-tts was passed but the ONNX carries no "
+            "planner_task_revision metadata (legacy generation) — the knob would be a silent "
+            "no-op; drop it or re-export the intended task-revision checkpoint"
+        )
+
     robot = MujocoRobot(
         args.mjcf, policy.joint_names, policy.body_names, args.sim_dt,
         keep_native_damping=(passive_damping_mode == "mjcf"),
@@ -5939,7 +6277,8 @@ def main():
                           bank_one_question_reset=bank_one_question_reset,
                           ready_state_contract=ready_state_contract,
                           mjcf_sha256=mjcf_sha256,
-                          execution_contract_sha256=execution_contract["sha256"])
+                          execution_contract_sha256=execution_contract["sha256"],
+                          planner_governor_cfg=planner_governor_cfg)
         if args.target_source == "bank":
             current_order = tuple(res["exam_schedule"]["question_id_order"])
             if paired_bank_order is None:
@@ -6357,6 +6696,20 @@ def main():
             },
         },
     }
+    if planner_governor_cfg is not None:
+        summary["planner_governor"] = {
+            "enabled": True,
+            "source": "onnx_metadata planner_task_revision (checkpoint-bound schema-3 contract)",
+            "profile": dict(planner_governor_cfg["profile"]),
+            "profile_sha256": planner_governor_cfg["profile_sha256"],
+            "initial_tts_s": float(planner_governor_cfg["initial_tts_s"]),
+            "initial_tts_source": (
+                "cli" if args.planner_initial_tts is not None else "default_deployment_baseline"
+            ),
+            "initial_tts_range_s": list(planner_governor_cfg["initial_tts_range_s"]),
+            "strike_phases": list(planner_governor_cfg["strike_phases"]),
+            "bank_hold_steps_applied": False,
+        }
     if virtual_return_scorer_contract is not None:
         summary["virtual_return_scorer_contract"] = virtual_return_scorer_contract
         summary["virtual_return_scorer_contract_sha256"] = virtual_return_scorer_contract["sha256"]
