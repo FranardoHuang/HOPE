@@ -37,6 +37,13 @@
   （c102b9e3/ca078850 家族改 hope_commands/commands 后 host stub 未同步：缺
   `planner_revision_enabled`/`_clip_names`/假 motion、MotionLoader 收 PosixPath、teacher 收据
   规范名漂移）——四类全是测试侧欠账，纯测试文件修复后 97 绿，源码零改动。
+- 判卷链修通+首批 11 臂出报告(07-22 傍晚):两个炸点都是旗标级修复(--exam-bank 手传同源考卷;
+  --export-extra 补 episode_length_s=16.0 对齐导出合同)。但成绩全 0 接触且**暂不可解读**:
+  每题 ~26 步(~0.5 s)被评估器的 reference 相对终止收题(不是摔、不是 deadline guard),
+  正手 11 臂全部活不到击球帧、反手能活到但打不准——疑似评估器未实现 task-revision 代际的
+  揭题/hold 协议(7-13 老代际同链正常:~140 步/题、接触率 1.0)。裁决选项与全部数字见
+  [judge_results_20260722](experiments/2026-07/judge_results_20260722.md);裁决前不得用于排名。
+  另:这批 checkpoint 的 lineage_exact 全为 0,判卷走 --allow-inexact-contract 诊断档。
 - pod 成果验收与复活(07-22 下午):账面核对完毕——25k 续训八格全部被重启杀停
   (w_c_s0@13900/s1@11800/s2@11500/s3@11900;v_c_s0@10700/s1@14300/s2@13700/s3@14000,总目标
   25001);push 波 12 臂到档待判(W 侧 10300-12900、V 侧 11400-13900);Wave Q 账实不符坐实:
