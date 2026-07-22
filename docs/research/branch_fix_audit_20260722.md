@@ -81,9 +81,13 @@ qdes 限位、判分器与部署解码全部错位。exact 语义以合入 main 
 物理,不占训练 GPU):
 
 1. **先修根因,再全量重扫**(否则扫了也是废数据):
-   - 投影工具(yikang 分支 `project_stationary_upperbody_motion.py:709-724`)钉根时
-     **保留源骨盆 yaw**(或把 rally_yaw 语义带进 station anchor);投影合同必须记录
-     "被删根旋转角",超过阈值(建议 10°)fail-loud 拒绝静默投影。
+   - 投影工具(yikang 分支 `project_stationary_upperbody_motion.py:709-724`)修法
+     (07-22 夜 Franco 审查修正:root yaw 不能保留在根——锁腿部署下腿关节冻死,机器人
+     没有执行机构转 root,留在根=又一个不可达参考):根照旧钉死 identity,把被删的
+     root yaw **逐帧折进 waist_yaw**(源数据实测:root yaw f45=+15.7°、waist_yaw 自身
+     +12.6°,折后 ~28°,waist_yaw 限位 ±135° 富余;人打反手的转体本来就是一半髋一半腰,
+     锁腿投影的语义正确做法是把髋那一半交给腰);投影合同记录"折进腰的根 yaw 角",
+     non-yaw 被删部分(实测 ~9°)超过阈值(10°)fail-loud 拒绝静默投影。
    - stationary 剖面的 rally_yaw 处理与 clip 注册表归一化对齐(现在强制 =0,把反手
      -40° 对角线几何整个吃掉)。
    - 修好后所有投影动作**重投影**(照 r2/motions_r2 流程,投影工具 SHA 会变,合同
