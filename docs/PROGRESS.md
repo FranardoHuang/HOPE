@@ -11,6 +11,48 @@
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
 
+## 2026-07-22
+
+- 两 pod SSH 全失联（本机网络已排除＝停机/换端口），`hope-pods-watch` 暂停；账面以 07-21 为准。
+  最大欠账不变：已收口终档（model_10700-13300）一份判卷成绩都没有，pod 恢复后判卷第一优先。
+- 分支修复归账：jiayi YAML-null 删参（8ee2e82a）、yikang 归一化 2x2 预检（635be7cf）、jiayi
+  精确续训包（9f684ae5，长训刚需）三项搬进 main 血统并各配单测；tanh 合同只搬思想（写成"默认
+  姿态局部斜率=原 action scale"规范）；被动阻尼折 kd 转 kdpassive 消融臂；V15 反向情报
+  （action_rate 降到 -0.01/模仿翻倍）记录不搬。裁决表+三人分支看板
+  （scripts/branch_dashboard.py）见[分支修复审计](research/branch_fix_audit_20260722.md)。
+- yikang 反手"结构性死亡"（44-57°/门限 15°/134 帧 0%）经三路对抗复核改判**应复扫**：符号翻号
+  与题库复用被排除；伪影机制＝投影钉根删掉反手 ~40-60° 转体 + stationary 剖面取消 -40° 归一化，
+  仓库内有同 clip 100%→0% 的 A/B 反证；三步零改码复扫命令已写入审计文档。复扫前反手死刑不作决策输入。
+- plant 地面覆盖接线：task.plant 五新键（地面摩擦/机器人材质范围/随机凹凸地形，默认全=现状）+
+  schema-3 `ground_plant` 合同块指纹（平地谱系与改动 plant 互相拒绝静默续训）；mjlab 脚部
+  reward（落地冲击/抬脚高度,默认 0）+ 击球窗下肢模仿衰减键落盘。量纲要点：foot_soft_landing
+  输出是无量纲超阈倍数，mjlab 等效起步剂量 -3e-3（别抄 -1e-4/-0.1）。host 测试 396+47 全绿。
+- 预注册抖动-地面-脚部消融波 8 臂（ar02/ar05/ar10/grip/rough/footrw/penlight/kdpassive，父本
+  只用 W，对照=矩阵 w_c_s0，续训 13301 到 ~20001;rough fresh 20001）；渲染被占位 commit +
+  groundfoot/kdpassive 双闸门锁死。详见[波预注册](experiments/2026-07/EXP-P1-CHATTER-GROUND-FOOT-WAVE.md)。
+- 部署侧站立四欠账最小修复（只动 agi/，默认行为逐字节不变）：两条站立路径增益来源启动摘要 +
+  static handoff 时间戳事件 + obs/trace CSV 尾部增 31 列实测力矩（SDK 不暴露电流/温度）+
+  build git 指纹。macOS 无 vendor 栈未整体编译，待 Linux 构建机 portable Release 回归。
+- 发现并修复 main 既有欠账：`test_reward_flags_mdp.py` 在 origin/main 上单独跑就有 12 项失败
+  （c102b9e3/ca078850 家族改 hope_commands/commands 后 host stub 未同步：缺
+  `planner_revision_enabled`/`_clip_names`/假 motion、MotionLoader 收 PosixPath、teacher 收据
+  规范名漂移）——四类全是测试侧欠账，纯测试文件修复后 97 绿，源码零改动。
+- pod 成果验收与复活(07-22 下午):账面核对完毕——25k 续训八格全部被重启杀停
+  (w_c_s0@13900/s1@11800/s2@11500/s3@11900;v_c_s0@10700/s1@14300/s2@13700/s3@14000,总目标
+  25001);push 波 12 臂到档待判(W 侧 10300-12900、V 侧 11400-13900);Wave Q 账实不符坐实:
+  w/v_fullbody@9200、w_hstrong@9700、v_hstrong@9900、w_qbar@7200、v_spdmix/w_spdmix@7000 已
+  发射被杀,**v_qbar@10700 已到终档**;全部判卷成绩为零(07-21 唯一一次 w_c_s1 判卷 exam 目录
+  是空的——judge.sh 对 rebound 题库名推不出同源考卷,rc=1 静默欠账)。处置:两 pod 各起编排器,
+  11 条续训按"原 argv 逐字 + 重算剩余步数(总目标=原起点+原相对 max_iterations)"复活,8 条已
+  越过首迭代在训,3 条(w_c_s0/w_hstrong/v_c_s2)冻结在 Starting the simulation 等 1800s 裁决;
+  判卷修正队列(--exam-bank 手传 schema3_exam_882fea4_rebound)两 pod 串行在跑,首批 11 个终档;
+  hope-pods-watch 在新账号重建(每小时:停滞裁决/收口/按回填队列补位/判卷看护/WARN 摘要),
+  回填队列=w_fullbody/w_qbar(pod1)+v_hstrong/v_fullbody(pod2)。
+- 蹭滑/拖脚剂量键接线：`foot_slip_sq_weight`/`foot_drag_weight`（此前源码常开 -1.0/-0.5、CLI
+  够不着）进 train.py 白名单；penlight 减负臂扩到六项软惩罚（新增 -0.33/-0.17），随
+  groundfoot 闸门锁。pod 于 07-22 下午恢复（旧端口未变，重启过）：pod1 三卡=yikang 四条
+  训练（legfreeze ft6 + stationary-v2 x3），pod2 三卡全空；checkpoint 卷完好（W 父本在）。
+
 ## 2026-07-21
 
 - Wave P push 鲁棒性波扩到 18 臂并上卡 12 条（速度 ±0.2/0.35/0.5/0.8、方向 yaw/ang、频率 fast、

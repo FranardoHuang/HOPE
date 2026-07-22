@@ -646,6 +646,36 @@ set(A3_PINGPONG_EXECUTABLE_NAME a3_deploy_onnx_ref_pingpong)
 add_executable(${A3_PINGPONG_EXECUTABLE_NAME}
   ${CMAKE_CURRENT_SOURCE_DIR}/src/a3_deploy/a3_pingpong_main.cpp)
 target_sources(${A3_PINGPONG_EXECUTABLE_NAME} PRIVATE ${ROBOT_IO_SOURCES})
+# --- BUILD FINGERPRINT (2026-07-22 standing-noise audit) ---------------------
+# Bake the source identity into the deployed ping-pong binary so its first log
+# line always states which code built it (a3_pingpong_main.cpp prints
+# PP_BUILD_GIT_SHA / PP_BUILD_CONFIG_UTC at startup). Configure-time only:
+# re-run cmake to refresh. Building outside a git checkout (exported tarball)
+# yields "unknown" — the runner prints that honestly instead of failing. The
+# dirty check is scoped to the deploy tree (${PROJECT_SOURCE_DIR}) so unrelated
+# training-side edits in the monorepo do not mark this binary dirty.
+execute_process(
+  COMMAND git -C "${CMAKE_CURRENT_SOURCE_DIR}" rev-parse HEAD
+  OUTPUT_VARIABLE PP_BUILD_GIT_SHA
+  OUTPUT_STRIP_TRAILING_WHITESPACE
+  ERROR_QUIET)
+if(NOT PP_BUILD_GIT_SHA)
+  set(PP_BUILD_GIT_SHA "unknown")
+else()
+  execute_process(
+    COMMAND git -C "${PROJECT_SOURCE_DIR}" status --porcelain --untracked-files=no -- .
+    OUTPUT_VARIABLE PP_BUILD_GIT_STATUS
+    ERROR_QUIET)
+  if(PP_BUILD_GIT_STATUS)
+    set(PP_BUILD_GIT_SHA "${PP_BUILD_GIT_SHA}-dirty")
+  endif()
+endif()
+string(TIMESTAMP PP_BUILD_CONFIG_UTC "%Y-%m-%dT%H:%M:%SZ" UTC)
+message(STATUS "pingpong build fingerprint: git=${PP_BUILD_GIT_SHA} configured=${PP_BUILD_CONFIG_UTC}")
+target_compile_definitions(${A3_PINGPONG_EXECUTABLE_NAME} PRIVATE
+  PP_BUILD_GIT_SHA="${PP_BUILD_GIT_SHA}"
+  PP_BUILD_CONFIG_UTC="${PP_BUILD_CONFIG_UTC}")
+# ------------------------------------------------------------------------------
 target_include_directories(${A3_PINGPONG_EXECUTABLE_NAME}
   PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include/ ${PROJECT_SOURCE_DIR}/src)
 target_include_directories(${A3_PINGPONG_EXECUTABLE_NAME} BEFORE PRIVATE

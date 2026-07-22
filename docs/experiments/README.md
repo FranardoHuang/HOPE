@@ -40,6 +40,9 @@ runtime/feature 细节，写进实验正文或“决定”列。全局 P0/P1 只
 
 | ID | 问题 | 人类负责人 | 执行者 | 状态 | 证据 | 决定 |
 | --- | --- | --- | --- | --- | --- | --- |
+| [EXP-P1-CHATTER-GROUND-FOOT-WAVE](2026-07/EXP-P1-CHATTER-GROUND-FOOT-WAVE.md) | action_rate 剂量、地面摩擦/不平整覆盖、脚部落地塑形、软惩罚减负——哪些能降抖动/失稳而不伤击球？ | Franco | Claude | preregistered | E1 | 8 臂三件套+单测已落盘；渲染被占位 commit + groundfoot/kdpassive 双闸门锁死；对照=矩阵 w_c_s0 不重复买；rough 臂 fresh-from-random 铁律 |
+| [EXP-P1-INTEL-WAVE-20260721](2026-07/EXP-P1-INTEL-WAVE-20260721.md) | 速度泛化混合/强 q_des 平滑/全身模仿/全关节 qdes barrier 四条情报哪条值得进正式配方？ | Franco | Claude | preregistered | E1 | （07-22 补索引）spdmix v2 烤入改造已落盘待钉 commit；qbar 闸门已开；对照=矩阵 w_c_s0/v_c_s0 |
+| [EXP-P1-PUSH-ROBUSTNESS-20260721](2026-07/EXP-P1-PUSH-ROBUSTNESS-20260721.md) | 随机推撞（速度推/同冲量力推）能否买到抗扰平衡？ | Franco | Codex | running | E3 | （07-22 补索引）18 臂扩容、12 条已上卡待判；pod 失联期间账面以 07-21 为准 |
 | [EXP-P1-BALANCE-TEMPORAL-MATRIX-20260720](2026-07/EXP-P1-BALANCE-TEMPORAL-MATRIX-20260720.md) | 时序平滑（N/C/H）与稳定机制（S0 对照、S1 挥拍后安顿债务、S2 支撑包、S3 下肢软模仿）哪个组合能在高摔倒 parent 上降摔且不伤击球？ | Franco | Claude | running/closing | E3 | 24/24 已于 2026-07-20 发射；实测同卡算力分时后筛选终点前移到 +4000，收口进行中（S0/C 行 10 格已到终档）；动态清退（N 交互 6 格永久停、8 格暂停待续）以两 pod `scheduling_ledger_20260720.jsonl` 为准；取代 Wave A 科学位与 Wave B 六格 |
 | [EXP-P1-LOWER-BODY-STABILITY-20260720](2026-07/EXP-P1-LOWER-BODY-STABILITY-20260720.md) | 静态下肢软模仿还是无参考支撑/腿速约束更能改善稳定且不伤击球？ | Franco | Codex | superseded | E1 | B1/B2 机制以 S3/S2 档并入 24 格矩阵（EXP-P1-BALANCE-TEMPORAL-MATRIX）；六格队列不再单独发射 |
 | [EXP-MOTION-READY-TO-STRIKE-0P5](2026-07/EXP-MOTION-READY-TO-STRIKE-0P5.md) | 能否从动作第0帧零速准备态直接接入保真触球窗，得到真正可行的0.5秒动作？ | Franco | Codex | ready/source-only | E1 source | host候选生成器可用但训练授权关闭；必须过production FK、TOPP≤0.5、L0/L1/桌网/动力学与同卷行为 |

@@ -3,7 +3,11 @@ from __future__ import annotations
 import json
 import math
 import os
+import pathlib
+import random
+import signal
 
+import numpy as np
 import torch
 from rsl_rl.env import VecEnv
 from rsl_rl.runners.on_policy_runner import OnPolicyRunner
@@ -179,16 +183,15 @@ class MotionOnPolicyRunner(OnPolicyRunner):
 
     def save(self, path: str, infos=None):
         """Save the model and training information."""
-        if (
-            self.training_contract_sha256 is not None
-            or self.training_launch_claim_sha256 is not None
-        ):
-            if infos is None:
-                infos = {}
-            elif not isinstance(infos, dict):
-                raise TypeError("runner checkpoint infos must be a dict for contract binding")
-            else:
-                infos = dict(infos)
+        if infos is None:
+            infos = {}
+        elif not isinstance(infos, dict):
+            raise TypeError(
+                "runner checkpoint infos must be a dict (contract binding and exact-resume "
+                "state are embedded there)"
+            )
+        else:
+            infos = dict(infos)
         if self.training_contract_sha256 is not None:
             infos[CHECKPOINT_CONTRACT_SCHEMA_KEY] = int(
                 self.training_contract_schema_version
@@ -199,6 +202,15 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             )
         if self.training_launch_claim_sha256 is not None:
             infos[CHECKPOINT_LAUNCH_CLAIM_SHA_KEY] = self.training_launch_claim_sha256
+        # --- 精确续训状态(jiayi hitterobs 9f684ae5 按 main 语义移植)---------------------------
+        # 人话:环境的 common_step_counter 驱动所有"随步数渐进"的课程(扰动 ramp、自适应
+        # sigma、成功门控扩幅…),但 base rsl_rl 的存档只有权重/优化器/迭代号 —— 不把它和各
+        # 命令项的课程状态一起存进 PT,续训时全部课程静默回到第 0 步,对 2 万+ iter 的长训
+        # 是真炸弹。main 的既有惯例是把 checkpoint 元数据放进 infos(合同绑定键就在里面),
+        # 所以续训状态也走 infos,而不是像 hitterobs 那样整体复刻 base 的 save 再塞顶层键:
+        # 复刻会随 rsl_rl 升级悄悄漂移,而且 base save 写完盘才排队上传 W&B,走 infos 让云端
+        # 副本从第一份字节起就带状态。键名沿用 jiayi 的 hope_exact_resume_state 便于跨栈对账。
+        infos["hope_exact_resume_state"] = self._build_exact_resume_state()
         super().save(path, infos)
         if self.logger_type in ["wandb"]:
             import wandb
@@ -235,15 +247,325 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                         print(f"[MotionOnPolicyRunner] WARNING: use_artifact({registry_name!r}) failed: {e}")
                 self.registry_name = None
 
+    # ------------------------------------------------------------------
+    # 精确续训包(jiayi hitterobs 9f684ae5 按 main 语义移植)
+    # ------------------------------------------------------------------
+
+    # HER 已实现回放环(dict[clip_key -> tensor],RacketTargetCommand._ach_*):main 相对
+    # hitterobs 的新增课程宿主,按名字点名整环入档。
+    _RESUME_TENSOR_DICT_ATTRS = ("_ach_pos", "_ach_vel", "_ach_spd")
+    # 回放环的填充度/写指针(dict[clip_key -> int]):同样点名,不落在下面的后缀规则里。
+    _RESUME_SCALAR_DICT_ATTRS = ("_ach_fill", "_ach_ptr")
+
+    def _build_exact_resume_state(self) -> dict:
+        """打包"精确续训"所需的训练进度状态(jiayi hitterobs 布局的 main 版)。
+
+        人话:除了权重,续训还需要 (1) 下一个该跑的迭代号 —— base rsl_rl 完成第 N 个迭代后
+        存档且记 iter=N,直接续会静默重复一次 PPO 更新;(2) 环境课程主时钟 common_step_counter
+        和各命令项的课程状态;(3) RNG/W&B 等审计信息。RNG 与 W&B run 字段目前只存不恢复:
+        main 没有 jiayi 栈那种独立的 exact_resume 开关,共享的 load() 不能悄悄覆盖本次配置的
+        seed 或 W&B run;存下来是为了跨栈对账、以及将来加显式开关时不用改档案格式。
+        """
+        wandb_run_id = None
+        wandb_run_name = None
+        if self.logger_type == "wandb" and not self.disable_logs:
+            try:
+                import wandb
+
+                if wandb.run is not None:
+                    wandb_run_id = wandb.run.id
+                    wandb_run_name = wandb.run.name
+            except Exception:
+                pass
+        return {
+            "schema_version": 2,
+            # Base rsl_rl saves after completing iteration N but stores iter=N. Exact resume must
+            # begin at N+1, otherwise it silently performs one duplicate PPO update.
+            "next_learning_iteration": int(self.current_learning_iteration) + 1,
+            "target_learning_iterations": int(self.cfg.get("max_iterations", 0)),
+            "tot_timesteps": int(self.tot_timesteps),
+            "tot_time": float(self.tot_time),
+            "algorithm_learning_rate": float(self.alg.learning_rate),
+            "python_random_state": random.getstate(),
+            "numpy_random_state": np.random.get_state(),
+            "torch_random_state": torch.get_rng_state(),
+            "torch_cuda_random_states": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else [],
+            "log_dir": str(self.log_dir) if self.log_dir is not None else None,
+            "wandb_run_id": wandb_run_id,
+            "wandb_run_name": wandb_run_name,
+            "environment_resume_state": self._capture_environment_resume_state(),
+            **dict(getattr(self, "checkpoint_resume_context", {})),
+        }
+
+    @staticmethod
+    def _is_scalar_tree(value) -> bool:
+        """Return whether a value is cheap, device-independent command-manager state."""
+        if value is None or isinstance(value, (bool, int, float, str)):
+            return True
+        if isinstance(value, (list, tuple)):
+            return all(MotionOnPolicyRunner._is_scalar_tree(item) for item in value)
+        if isinstance(value, dict):
+            return all(
+                MotionOnPolicyRunner._is_scalar_tree(key)
+                and MotionOnPolicyRunner._is_scalar_tree(item)
+                for key, item in value.items()
+            )
+        return False
+
+    def _capture_environment_resume_state(self) -> dict:
+        """Capture schedule/curriculum state that affects the next rollout distribution."""
+        env = getattr(self.env, "unwrapped", self.env)
+        state = {
+            # 内层 schema:1 = jiayi/hitterobs 布局(scalars/tensors 两段);2 = main 追加
+            # tensor_dicts 段。读端(_restore_environment_resume_state)对未知段/未知键一律
+            # 容忍,只恢复认得上的 —— 多存无害,漏存有害。
+            "schema_version": 2,
+            "common_step_counter": int(getattr(env, "common_step_counter", 0)),
+            "command_terms": {},
+        }
+        manager = getattr(env, "command_manager", None)
+        if manager is None:
+            return state
+
+        for term_name in getattr(manager, "active_terms", ()):
+            term = manager.get_term(term_name)
+            term_state = {"scalars": {}, "tensors": {}, "tensor_dicts": {}}
+
+            # 标量类课程驱动:EMA 成功率/摔倒统计(*_acc / *_acc_c)、成功门控扰动幅度
+            # (_curr_perturb_scale)、自适应 sigma 及其误差 EMA(_adaptive_sigma_* /
+            # *_err_sum / *_err_sum_c,main 侧新增的两个后缀)。这些决定下一个 rollout 的
+            # 目标分布,但不属于策略权重。挑选规则宁多勿漏:多存一个标量无害(恢复端只
+            # setattr 认得的),漏存一个课程就悄悄回零。
+            for attr, value in vars(term).items():
+                is_resume_scalar = (
+                    attr == "_curr_perturb_scale"
+                    or attr.startswith("_adaptive_sigma_")
+                    or attr.endswith("_acc")
+                    or attr.endswith("_acc_c")
+                    or attr.endswith("_err_sum")
+                    or attr.endswith("_err_sum_c")
+                    or attr in self._RESUME_SCALAR_DICT_ATTRS
+                )
+                if is_resume_scalar and self._is_scalar_tree(value):
+                    term_state["scalars"][attr] = value
+
+            # RallyV14 samples 35% of true resets from a ring of completed follow-through states.
+            # Keeping that ring avoids silently dropping the recovery population after a restart.
+            # MotionCommand 的自适应失败分箱统计(bin_failed_count)同理。
+            for attr in (
+                "bin_failed_count",
+                "_current_bin_failed",
+                "_post_swing_root",
+                "_post_swing_joint_pos",
+                "_post_swing_joint_vel",
+            ):
+                value = getattr(term, attr, None)
+                if torch.is_tensor(value):
+                    term_state["tensors"][attr] = value.detach().cpu().clone()
+            for attr in ("_post_swing_ptr", "_post_swing_count"):
+                value = getattr(term, attr, None)
+                if isinstance(value, int):
+                    term_state["scalars"][attr] = value
+
+            # main 侧新增:HER 已实现回放环本体(dict[clip_key -> tensor])。不存它们,
+            # 续训后 achieved-target 回放要从零重新攒,等效于把 35%/HER 采样人口清空。
+            for attr in self._RESUME_TENSOR_DICT_ATTRS:
+                value = getattr(term, attr, None)
+                if isinstance(value, dict) and value and all(
+                    torch.is_tensor(item) for item in value.values()
+                ):
+                    term_state["tensor_dicts"][attr] = {
+                        key: item.detach().cpu().clone() for key, item in value.items()
+                    }
+
+            if term_state["scalars"] or term_state["tensors"] or term_state["tensor_dicts"]:
+                state["command_terms"][str(term_name)] = term_state
+        return state
+
+    def _restore_environment_resume_state(self, resume_state: dict) -> tuple[int, str]:
+        """Restore saved environment progress, with an iteration-derived fallback for old PTs."""
+        env = getattr(self.env, "unwrapped", self.env)
+        saved = resume_state.get("environment_resume_state")
+        if isinstance(saved, dict) and "common_step_counter" in saved:
+            common_step_counter = int(saved["common_step_counter"])
+            source = "checkpoint"
+        else:
+            # 老 checkpoint(状态未入档)仍有精确的"下一个迭代号":每完成一个 PPO 迭代,
+            # 每个 env 都走 num_steps_per_env 个控制步,所以课程主时钟可以由迭代号精确推算
+            # 出来,而不是回零(jiayi 对既有 V14 长跑档的回退推算,原样移植)。
+            common_step_counter = int(resume_state["next_learning_iteration"]) * int(
+                self.num_steps_per_env
+            )
+            source = "derived-from-iteration"
+        env.common_step_counter = common_step_counter
+
+        manager = getattr(env, "command_manager", None)
+        restored_terms = []
+        if isinstance(saved, dict) and manager is not None:
+            for term_name, term_state in saved.get("command_terms", {}).items():
+                try:
+                    term = manager.get_term(term_name)
+                except (KeyError, ValueError):
+                    # 档里多存的命令项(臂间配置差异):容忍跳过,其余项照常恢复。
+                    continue
+                restored = False
+                for attr, value in term_state.get("scalars", {}).items():
+                    if hasattr(term, attr):
+                        # 整体 setattr(dict 也整个换):若 clip 集合在续训时变了,后续代码
+                        # 按新 clip 取键会 KeyError —— fail-loud,好过静默混用两套课程统计。
+                        setattr(term, attr, value)
+                        restored = True
+                for attr, value in term_state.get("tensors", {}).items():
+                    if hasattr(term, attr) and torch.is_tensor(value):
+                        current = getattr(term, attr)
+                        device = current.device if torch.is_tensor(current) else term.device
+                        setattr(term, attr, value.to(device=device))
+                        restored = True
+                for attr, saved_entries in term_state.get("tensor_dicts", {}).items():
+                    current = getattr(term, attr, None)
+                    if not isinstance(current, dict) or not isinstance(saved_entries, dict):
+                        continue
+                    for key, value in saved_entries.items():
+                        # 只恢复当前配置也有的 clip 键:档里多出来的键容忍丢弃,新增 clip
+                        # 保持新鲜初始化(HER 回放环对新 clip 从零攒起是正确语义)。
+                        if key in current and torch.is_tensor(current[key]) and torch.is_tensor(value):
+                            current[key] = value.to(device=current[key].device)
+                            restored = True
+                if restored:
+                    restored_terms.append(str(term_name))
+        print(
+            "[MotionOnPolicyRunner] exact environment progress restored: "
+            f"common_step_counter={common_step_counter} ({source}), "
+            f"command_terms={restored_terms}",
+            flush=True,
+        )
+        return common_step_counter, source
+
+    def load(self, path: str, load_optimizer: bool = True, **kwargs):
+        """Load a checkpoint; on a training resume also restore curriculum progress.
+
+        人话:base 的 load 只拿回权重/优化器/迭代号,环境课程全部回到第 0 步。这里在训练
+        续跑(log_dir 不为 None)时把精确续训包里的课程主时钟和命令项状态一并恢复;老档没
+        有状态就按迭代号精确推算主时钟。评测器(isaac_bank_exam / play)也走 runner.load,
+        但它们 log_dir=None 且自带确定性调度 —— 那条路保持与移植前逐字节相同的行为。
+        """
+        loaded = torch.load(path, map_location="cpu", weights_only=False)
+        infos = super().load(path, load_optimizer=load_optimizer, **kwargs)
+        if self.log_dir is None:
+            return infos
+        state = None
+        if isinstance(loaded, dict):
+            checkpoint_infos = loaded.get("infos")
+            if isinstance(checkpoint_infos, dict):
+                state = checkpoint_infos.get("hope_exact_resume_state")
+            if state is None:
+                # 跨栈对账:jiayi/hitterobs 把同名状态放在 PT 顶层而不是 infos 里;两处都认,
+                # hitterobs 导出的档在 main 上续训也能拿到课程状态。
+                state = loaded.get("hope_exact_resume_state")
+        if state is not None:
+            if not isinstance(state, dict) or int(state.get("schema_version", 0)) not in (1, 2):
+                raise RuntimeError(
+                    "unsupported hope_exact_resume_state schema "
+                    f"{state.get('schema_version', None) if isinstance(state, dict) else type(state)}; "
+                    f"refusing to guess how to resume: {path}"
+                )
+            # 一致性铁律:状态包写入时恒有 next_learning_iteration == iter+1。checkpoint 外科
+            # 手术(make_hitter_warmstart / warm_start_realsensor 把 iter 归零但整份保留 infos)
+            # 会打破它 —— 那时状态是"上一世"的,拿来续课程等于劫持一次刻意的全新热启动。
+            # 响亮降级成"老档"语义:主时钟按本档 iter 推算,课程统计从头攒。
+            expected_next = int(self.current_learning_iteration) + 1
+            if int(state.get("next_learning_iteration", -1)) != expected_next:
+                print(
+                    "[MotionOnPolicyRunner] WARNING: hope_exact_resume_state is stale "
+                    f"(next_learning_iteration={state.get('next_learning_iteration')!r} vs "
+                    f"checkpoint iter+1={expected_next}); treating as a legacy warm-start "
+                    "checkpoint — curriculum statistics start fresh",
+                    flush=True,
+                )
+                state = None
+        if state is None:
+            # 老 checkpoint:课程细节无从恢复,但主时钟按迭代号精确推算(见 _restore_…)。
+            # 迭代号本身维持 base 语义(iter=N,会重复一次第 N 个更新)——没有状态包时不敢
+            # 替它做 N+1 的决定。
+            self._restore_environment_resume_state(
+                {"next_learning_iteration": int(self.current_learning_iteration) + 1}
+            )
+        else:
+            self.current_learning_iteration = int(state["next_learning_iteration"])
+            self.tot_timesteps = int(state.get("tot_timesteps", self.tot_timesteps))
+            self.tot_time = float(state.get("tot_time", self.tot_time))
+            if getattr(self.alg, "schedule", None) == "adaptive" and "algorithm_learning_rate" in state:
+                # 自适应 KL 调度下 lr 是"续"出来的运行状态:不恢复的话第一次 update 会从
+                # YAML 初值重新适应,平白抖一下。固定调度(fixed)不恢复 —— YAML 里改 lr
+                # 再续训必须生效;这是 main 共享 load() 与 jiayi 独立 exact 路径的取舍差异。
+                self.alg.learning_rate = float(state["algorithm_learning_rate"])
+                for param_group in self.alg.optimizer.param_groups:
+                    param_group["lr"] = self.alg.learning_rate
+            self._restore_environment_resume_state(state)
+        # The simulator itself is not serialized. Reset once after restoring the curriculum counter
+        # and command-manager globals so the first resumed rollout is sampled from the correct
+        # distribution instead of the constructor-time step-zero curriculum.
+        self.env.reset()
+        return infos
+
+    def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False) -> None:
+        """Defer SIGINT/SIGTERM to an iteration boundary and save that completed iteration.
+
+        人话:Ctrl-C 不再当场掐死训练(半个迭代的档没有存在价值),而是登记一个"想停"标记,
+        等当前 PPO 迭代完整跑完、log() 落账之后存一份带精确续训状态的档再退出。
+        """
+        pending_signal = None
+        previous_handlers = {}
+
+        def request_stop(signum, _frame):
+            nonlocal pending_signal
+            if pending_signal is None:
+                pending_signal = signum
+                print(
+                    "\n[MotionOnPolicyRunner] interrupt received; finishing the current PPO "
+                    "iteration before saving",
+                    flush=True,
+                )
+
+        try:
+            for signum in (signal.SIGINT, signal.SIGTERM):
+                previous_handlers[signum] = signal.getsignal(signum)
+                signal.signal(signum, request_stop)
+        except ValueError:
+            # signal.signal is restricted to the main thread. Training normally runs there; retain
+            # upstream behavior if an embedding invokes learn() from another thread.
+            previous_handlers.clear()
+
+        self._boundary_stop_requested = lambda: pending_signal is not None
+        try:
+            super().learn(
+                num_learning_iterations=num_learning_iterations,
+                init_at_random_ep_len=init_at_random_ep_len,
+            )
+        finally:
+            self._boundary_stop_requested = None
+            for signum, handler in previous_handlers.items():
+                signal.signal(signum, handler)
+
     def log(self, locs: dict, width: int = 80, pad: int = 35) -> None:
         super().log(locs, width=width, pad=pad)
         step = int(locs["it"])
         # Consume/print even when TensorBoard/W&B is disabled: this stdout JSON line is the exact
         # per-update receipt, while dashboard logging is optional presentation only.
         exact_behavior = self._consume_exact_behavior_updates(step)
-        if self.disable_logs or self.writer is None:
-            return
-        self._log_live_metrics(step, exact_behavior=exact_behavior)
+        if not self.disable_logs and self.writer is not None:
+            self._log_live_metrics(step, exact_behavior=exact_behavior)
+        # Ctrl-C 缓冲(见 learn()):恰好在一个 PPO 迭代完整结束、日志落账之后才真正存档退出。
+        stop_requested = getattr(self, "_boundary_stop_requested", None)
+        if callable(stop_requested) and stop_requested():
+            checkpoint = pathlib.Path(self.log_dir) / f"model_{self.current_learning_iteration}.pt"
+            self.save(str(checkpoint))
+            print(
+                "[MotionOnPolicyRunner] interrupt checkpoint saved at a completed PPO boundary: "
+                f"{checkpoint}",
+                flush=True,
+            )
+            raise KeyboardInterrupt
 
     def _consume_exact_behavior_updates(self, step: int) -> dict[str, dict]:
         """Consume the sole behavior ledger once and emit one canonical JSON line per PPO update."""

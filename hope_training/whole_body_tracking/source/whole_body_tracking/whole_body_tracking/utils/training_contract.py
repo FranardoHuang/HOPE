@@ -85,6 +85,34 @@ JOINT_FRICTION_SEMANTICS = "load_dependent_spatial_force_coefficient"
 JOINT_FRICTION_UNITS = "dimensionless"
 MOTION_BODY_LIN_VEL_POINTS = ("center_of_mass", "link_origin")
 
+# Ground/terrain plant identity (task.plant ground/terrain keys, 2026-07-22).  人话:地面材质
+# 摩擦、机器人 body 材质随机化范围、地形平/不平——这些都是"物理世界长什么样"的语义,变了就
+# 是另一套 plant,平地 checkpoint 不能静默续训到粗糙地/滑地上。历史字节默认(下表)必须用
+# 【整块缺席】拼写,让所有历史 checkpoint 在 _contract_diff 下逐字节兼容;任何显式偏离默认的
+# 值都会让合同长出 ground_plant 键 -> 对旧谱系 resume 直接 fail-loud。
+GROUND_PLANT_KEY = "ground_plant"
+GROUND_PLANT_TERRAIN_PLANE = "plane"
+GROUND_PLANT_TERRAIN_ROUGH = "random_rough_heightfield"
+GROUND_PLANT_DEFAULT = {
+    "ground_static_friction": 1.0,
+    "ground_dynamic_friction": 1.0,
+    "robot_material_static_friction_range": [0.3, 1.6],
+    "robot_material_dynamic_friction_range": [0.3, 1.2],
+    "terrain_type": GROUND_PLANT_TERRAIN_PLANE,
+    "terrain_rough_height_range_m": None,
+}
+_GROUND_PLANT_KEYS = frozenset(
+    {
+        "schema_version",
+        "ground_static_friction",
+        "ground_dynamic_friction",
+        "robot_material_static_friction_range",
+        "robot_material_dynamic_friction_range",
+        "terrain_type",
+        "terrain_rough_height_range_m",
+    }
+)
+
 RUNTIME_EXECUTION_KEYS = (
     "articulation_joint_names",
     "action_joint_ids",
@@ -1162,6 +1190,147 @@ _PUSH_ROBOT_EVENT_KEYS = frozenset(
 )
 
 
+def _ground_plant_range(value, *, name: str) -> list[float]:
+    if isinstance(value, (str, bytes)):
+        raise ValueError(f"{name} must be a [lo, hi] pair")
+    try:
+        items = list(value)
+    except TypeError as exc:
+        raise ValueError(f"{name} must be a [lo, hi] pair") from exc
+    if len(items) != 2:
+        raise ValueError(f"{name} must be a [lo, hi] pair")
+    lo = _wave_finite(items[0], name=f"{name}[0]", nonnegative=True)
+    hi = _wave_finite(items[1], name=f"{name}[1]", nonnegative=True)
+    if lo > hi:
+        raise ValueError(f"{name} must satisfy 0 <= lo <= hi")
+    return [lo, hi]
+
+
+def ground_plant_block(
+    *,
+    ground_static_friction,
+    ground_dynamic_friction,
+    robot_material_static_friction_range,
+    robot_material_dynamic_friction_range,
+    terrain_type,
+    terrain_rough_height_range_m,
+) -> dict | None:
+    """Canonical ground/terrain plant identity block.
+
+    人话:把"地面多滑、机器人身体材质随机到什么范围、地是平的还是随机凹凸"拼成一个规范块。
+    与历史字节默认(平地、地面 1.0/1.0、机器人材质 (0.3,1.6)/(0.3,1.2))完全相等时返回
+    ``None`` = 合同不写这个键,所有历史 checkpoint 逐字节兼容;任何偏离都返回完整块,resume
+    对账(_contract_diff)会把它当成另一套 plant 拒绝静默续训。This is the single
+    validation/assembly source shared by the train.py ``task.plant`` override path and the
+    schema-3 contract validator.
+    """
+
+    static = _wave_finite(
+        ground_static_friction, name="ground_plant.ground_static_friction", nonnegative=True
+    )
+    dynamic = _wave_finite(
+        ground_dynamic_friction, name="ground_plant.ground_dynamic_friction", nonnegative=True
+    )
+    if dynamic > static:
+        raise ValueError(
+            "ground_plant ground dynamic friction must not exceed static friction "
+            f"(got static={static}, dynamic={dynamic})"
+        )
+    static_range = _ground_plant_range(
+        robot_material_static_friction_range,
+        name="ground_plant.robot_material_static_friction_range",
+    )
+    dynamic_range = _ground_plant_range(
+        robot_material_dynamic_friction_range,
+        name="ground_plant.robot_material_dynamic_friction_range",
+    )
+    if terrain_type not in (GROUND_PLANT_TERRAIN_PLANE, GROUND_PLANT_TERRAIN_ROUGH):
+        raise ValueError(
+            "ground_plant terrain_type must be "
+            f"{GROUND_PLANT_TERRAIN_PLANE!r} or {GROUND_PLANT_TERRAIN_ROUGH!r}, "
+            f"got {terrain_type!r}"
+        )
+    if terrain_type == GROUND_PLANT_TERRAIN_PLANE:
+        if terrain_rough_height_range_m is not None:
+            raise ValueError(
+                "ground_plant plane terrain must not carry terrain_rough_height_range_m"
+            )
+        height = None
+    else:
+        height = _ground_plant_range(
+            terrain_rough_height_range_m, name="ground_plant.terrain_rough_height_range_m"
+        )
+        if height[1] <= 0.0:
+            raise ValueError(
+                "ground_plant rough terrain requires height hi > 0 (flat ground is spelled "
+                "terrain_type=plane with a null range)"
+            )
+        if height[1] > 0.5:
+            raise ValueError(
+                "ground_plant rough terrain height hi > 0.5 m is not a plausible arena floor"
+            )
+    block = {
+        "schema_version": 1,
+        "ground_static_friction": static,
+        "ground_dynamic_friction": dynamic,
+        "robot_material_static_friction_range": static_range,
+        "robot_material_dynamic_friction_range": dynamic_range,
+        "terrain_type": terrain_type,
+        "terrain_rough_height_range_m": height,
+    }
+    if {key: value for key, value in block.items() if key != "schema_version"} == (
+        GROUND_PLANT_DEFAULT
+    ):
+        return None
+    return block
+
+
+def _validate_ground_plant_contract(contract: Mapping) -> None:
+    """Optional ground/terrain plant block: absent = historical default plant (byte-identical).
+
+    A present block must be internally consistent with its own canonical re-assembly, and a
+    block that spells the historical default is refused — the default has exactly one spelling
+    (total absence) so resume diffs stay byte-exact across the whole lineage.
+    """
+
+    block = contract.get(GROUND_PLANT_KEY)
+    if block is None:
+        if GROUND_PLANT_KEY in contract:
+            raise ValueError(
+                "schema-3 ground_plant must be omitted when default, not null"
+            )
+        return
+    block = _require_exact_mapping_keys(
+        block, _GROUND_PLANT_KEYS, name="schema-3 ground_plant"
+    )
+    if type(block["schema_version"]) is not int or block["schema_version"] != 1:
+        raise ValueError("schema-3 ground_plant schema_version must be integer 1")
+    try:
+        expected = ground_plant_block(
+            ground_static_friction=block["ground_static_friction"],
+            ground_dynamic_friction=block["ground_dynamic_friction"],
+            robot_material_static_friction_range=block[
+                "robot_material_static_friction_range"
+            ],
+            robot_material_dynamic_friction_range=block[
+                "robot_material_dynamic_friction_range"
+            ],
+            terrain_type=block["terrain_type"],
+            terrain_rough_height_range_m=block["terrain_rough_height_range_m"],
+        )
+    except ValueError as exc:
+        raise ValueError(f"schema-3 ground_plant is invalid: {exc}") from exc
+    if expected is None:
+        raise ValueError(
+            "schema-3 ground_plant equal to the historical default must be spelled by "
+            "omitting the block"
+        )
+    if dict(block) != expected:
+        raise ValueError(
+            "schema-3 ground_plant does not equal its canonical re-assembly"
+        )
+
+
 def push_robot_event_block(
     *, enable, interval_range_s, vel_xy_mps, ang_vel_radps, ang_axes
 ):
@@ -2035,6 +2204,7 @@ def validate_schema3_contract_structure(contract: Mapping) -> None:
     _validate_qdes_limit_barrier_contract(contract)
     _validate_push_robot_event_contract(contract)
     _validate_force_push_event_contract(contract)
+    _validate_ground_plant_contract(contract)
     if contract["joint_friction_backend"] != JOINT_FRICTION_BACKEND:
         raise ValueError("schema-3 joint_friction_backend must be physx")
     if contract["joint_friction_semantics"] != JOINT_FRICTION_SEMANTICS:

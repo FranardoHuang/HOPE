@@ -682,6 +682,8 @@ def _timing_cmd(time_steps, pos_s=None, wide_s=None, window_s=0.12):
         retiming_active=False, time_steps=torch.tensor(time_steps))
     rt._motion = lambda: fake_motion
     rt._strike_phase_per_clip_t = None
+    # 真 __init__ 无条件设置(hope_commands.py:633);_compute_strike_timing 末尾会读。
+    rt.planner_revision_enabled = False
     rt._compute_strike_timing()
     return rt
 
@@ -709,6 +711,7 @@ def _timing_cmd_multiseg(spc):
     rt._env = types.SimpleNamespace(step_dt=0.02)
     rt.device = "cpu"
     rt._strike_phase_per_clip_t = None
+    rt.planner_revision_enabled = False  # 同 _timing_cmd:真 __init__ 无条件设置
     fake_ml = types.SimpleNamespace(
         num_segments=2, seg_start=torch.tensor([0, 20]), seg_len=torch.tensor([20, 15]))
     fake_motion = types.SimpleNamespace(
@@ -1117,6 +1120,11 @@ def _make_a1_cmd(
     cmd._delay_tts_mode = tts_mode
     cmd._delay_tts_active = tts_mode != "live"
     cmd.planner_revision_enabled = planner_revision
+    # 家族台账(c102b9e3 family-aware):真 __init__ 固定两族表(hope_commands.py:443),
+    # 稀疏奖励 eligibility ledger 懒初始化时会读它;family/timing-bucket 记账还会取
+    # _motion()——给单段假 motion(_multiseg=False、无 just_resampled → 零掩码路径)。
+    cmd._clip_names = {0: "forehand", 1: "backhand"}
+    cmd._motion = lambda: types.SimpleNamespace(_multiseg=False)
     cmd._atomic_tts_active = cmd._delay_tts_active or planner_revision
     cmd._delay_ptr = 0
     cmd._jitter_pos = 0.0
@@ -1514,6 +1522,9 @@ class _CmdRobot:
 
 
 def _make_motion_command(motion_files, num_envs=8, **cfg_overrides):
+    # 运行时 motion_file 只会是 str 或 str 列表(Hydra CLI);裸 PosixPath 是测试自造形态,
+    # 统一转 str 以继续走真实的标量/列表两条加载路径。
+    motion_files = [str(item) for item in motion_files]
     robot = _CmdRobot(num_envs)
     env = types.SimpleNamespace(
         num_envs=num_envs, device="cpu", step_dt=0.02,
@@ -1778,7 +1789,8 @@ def _write_post_swing_teacher_receipt(tmp_path, motion_files, *, count=4):
         encoding="utf-8",
     )
     receipt["attestation"]["capture_result_sha256"] = _sha256(capture_path)
-    receipt_path = tmp_path / "post_swing_teacher_receipt.json"
+    # a1b0b1b0 起 attestor 授权强制收据规范名:必须是 capture 目录下的 teacher_receipt.json。
+    receipt_path = tmp_path / "teacher_receipt.json"
     authorization = {
         "schema_version": 1,
         "artifact_kind": "hope_post_swing_teacher_attestor_retry_authorization",

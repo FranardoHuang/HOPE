@@ -17,6 +17,7 @@ The legacy `scripts/rsl_rl/train.py --task=... --registry_name=...` still works 
 from __future__ import annotations
 
 import hashlib
+import importlib.util
 import json
 import math
 import pathlib
@@ -1833,6 +1834,7 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
     )
     push_robot_contract = _push_robot_event_contract(env_cfg)
     force_push_contract = _force_push_event_contract(env_cfg, env)
+    ground_plant_contract = _ground_plant_contract(env_cfg)
     if (
         post_swing_settle_contract is not None
         and post_swing_settle_contract["enabled"]
@@ -2107,6 +2109,13 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
             {}
             if lateral_training is None
             else {"lateral_perturbation": lateral_training[1]}
+        ),
+        # 地面/地形 plant 指纹(2026-07-22):默认平地配方 = 不落键(历史 checkpoint 逐字节
+        # 兼容);任何摩擦/地形改动 = 落键,resume 对账把它当另一套 plant 拒绝静默续训。
+        **(
+            {}
+            if ground_plant_contract is None
+            else {"ground_plant": ground_plant_contract}
         ),
         "motion_clips": clips,
         "question_bank": question_bank,
@@ -2422,11 +2431,23 @@ _REWARD_KEYS = (
     # Wave-Q qbar all-joint q_des position-limit barrier (Jiayi V14 idea, top-k removed).
     # Any explicit key requires the weight; an explicit zero weight is a measured control.
     "qdes_limit_barrier_weight", "qdes_limit_barrier_margin_frac",
+    # mjlab-ported foot-contact shaping(默认全关):落地冲击(first-contact 法向峰值力超阈
+    # 有界惩罚)+ 摆动相抬脚高度(|脚高-目标高| x 水平速度)。参数键不带 weight 一律拒收,
+    # 显式 weight=0 是对照。人话:一个罚"落地砸太重",一个罚"腾空脚贴地扫"。
+    "foot_soft_landing_weight", "foot_soft_landing_force_threshold_n",
+    "foot_clearance_weight", "foot_clearance_target_m",
+    # 触地脚水平蹭滑(foot_slip_sq,默认 -1.0)与拖脚(foot_drag,默认 -0.5)的剂量键
+    # (2026-07-22 penlight 减负臂需要;此前这两项是源码常开、CLI 够不着的软惩罚)。
+    "foot_slip_sq_weight", "foot_drag_weight",
     # Wave-B mutually-exclusive lower-body diagnostics. Explicit zero-valued controls still
     # activate their measurement probes and hard-contract identity.
     "lower_body_pose_imitation_weight", "lower_body_pose_imitation_std",
     "lower_body_pose_imitation_support_pre_s",
     "lower_body_pose_imitation_support_post_s",
+    # 击球窗内下肢模仿衰减系数(默认 1.0 = 不衰减;上半身 motion_scale_in_window 的下肢版,
+    # 同一个 WIDE strike window)。人话:触球那一瞬让下肢模仿小声点,别把击球奖励淹了。
+    # 走 Wave-B 信封:配了它就必须显式给出 B1/B2 两个 weight(param-without-weight 拒收)。
+    "lower_body_imitation_scale_in_window",
     "lower_body_stability_bundle_weight",
     "lower_body_stability_min_stance_width_m",
     "lower_body_stability_stance_scale_m",
@@ -2476,6 +2497,108 @@ _REWARD_KEYS = (
     "racket_guidance_weight", "racket_face_guidance_weight", "racket_face_guidance_theta_max",
     "racket_face_conditional_guidance_weight",
 )
+
+# jiayi 的 YAML-null 删参修复(8ee2e82a,搬进 main 血统)。人话:task YAML 层层继承时,子任务
+# 想把父层 EnvCfg __post_init__ 传下来的某个 reward 参数"删掉"(典型:后继任务复用同名 reward
+# 项但换了函数/签名——RallyV13 的全关节 barrier 就是这么撞上的——旧参数塞给新函数直接炸),
+# 唯一的 YAML 写法是 `some_key: null`;可 _apply_task_overrides 的覆盖层对 None 一律当"没写"
+# 跳过,null 就永远删不掉。这张表列出每个"一键对一 params 项"的映射(YAML 键 -> (reward 项名,
+# params 键));进 rewards 块时先按表把显式 null 的参数 pop 掉并记进 applied,再走正常覆盖。
+# 不在表里的键 null 仍等价于"没写":weight/机制开关不是 params 项,face_gate_radius /
+# motion_scale_in_window 这类一键写多个 term 的参数只由覆盖层自己写入,EnvCfg 血统里根本不带,
+# 不存在"继承了删不掉"的问题。
+_REWARD_NULL_REMOVABLE_PARAMS = {
+    # _set_reward 家族:<term>_std 都写进 term.params["std"]
+    "racket_position_std": ("racket_position", "std"),
+    "racket_velocity_std": ("racket_velocity", "std"),
+    "racket_normal_std": ("racket_normal", "std"),
+    "base_position_std": ("base_position", "std"),
+    "hold_ready_std": ("hold_ready", "std"),
+    "post_strike_brake_std": ("post_strike_brake", "std"),
+    "hold_heading_std": ("hold_heading", "std"),
+    "base_decel_std": ("base_decel", "std"),
+    "motion_global_anchor_pos_std": ("motion_global_anchor_pos", "std"),
+    "motion_global_anchor_ori_std": ("motion_global_anchor_ori", "std"),
+    "motion_body_pos_std": ("motion_body_pos", "std"),
+    "motion_body_ori_std": ("motion_body_ori", "std"),
+    "motion_body_lin_vel_std": ("motion_body_lin_vel", "std"),
+    "motion_body_ang_vel_std": ("motion_body_ang_vel", "std"),
+    # 逐项 params 键(与下方各 ad-hoc setter 一一对应)
+    "hold_ready_reach": ("hold_ready", "reach"),
+    "hold_ready_reach_mode": ("hold_ready", "reach_mode"),
+    "foot_orientation_hold_gate": ("foot_orientation", "hold_gate"),
+    "base_decel_v_gain": ("base_decel", "v_gain"),
+    "base_decel_v_max": ("base_decel", "v_max"),
+    "joint_velocity_limit_hinge_margin": ("joint_velocity_limit_hinge", "margin"),
+    "processed_qdes_slew_hinge_margin": ("processed_qdes_slew_hinge", "margin"),
+    "processed_qdes_slew_hinge_recovery_start_s": (
+        "processed_qdes_slew_hinge", "recovery_start_s"),
+    "processed_qdes_slew_hinge_recovery_end_s": (
+        "processed_qdes_slew_hinge", "recovery_end_s"),
+    "qdes_limit_barrier_margin_frac": ("qdes_limit_barrier", "margin_frac"),
+    "foot_soft_landing_force_threshold_n": ("foot_soft_landing", "force_threshold_n"),
+    "foot_clearance_target_m": ("foot_clearance", "target_m"),
+    # lower_body_imitation_scale_in_window 不进此表:它和 motion_scale_in_window 一样只由
+    # 覆盖层写进 params,EnvCfg 血统里根本不带,不存在"继承了删不掉"的问题(见上方注释)。
+    "lower_body_pose_imitation_std": ("lower_body_pose_imitation", "std"),
+    "lower_body_pose_imitation_support_pre_s": (
+        "lower_body_pose_imitation", "support_pre_s"),
+    "lower_body_pose_imitation_support_post_s": (
+        "lower_body_pose_imitation", "support_post_s"),
+    "lower_body_stability_min_stance_width_m": (
+        "lower_body_stability_bundle", "min_stance_width_m"),
+    "lower_body_stability_stance_scale_m": (
+        "lower_body_stability_bundle", "stance_scale_m"),
+    "lower_body_stability_leg_velocity_margin_radps": (
+        "lower_body_stability_bundle", "leg_velocity_margin_radps"),
+    "lower_body_stability_leg_velocity_scale_radps": (
+        "lower_body_stability_bundle", "leg_velocity_scale_radps"),
+    "lower_body_stability_support_pre_s": (
+        "lower_body_stability_bundle", "support_pre_s"),
+    "lower_body_stability_support_post_s": (
+        "lower_body_stability_bundle", "support_post_s"),
+    "racket_face_guidance_theta_max": ("racket_face_guidance", "theta_max"),
+}
+# S1 settle-debt 的 13 个数值参数同样一键对一 params 项,直接从规格表生成,防手抄漂移。
+_REWARD_NULL_REMOVABLE_PARAMS.update({
+    f"post_swing_settle_{_name}": ("post_swing_settle_debt", _name)
+    for _name, _positive, _nonnegative in _POST_SWING_SETTLE_NUMERIC_SPECS
+})
+# 建表自检(import 时就炸):null-删参表里的每个键必须同时在 _REWARD_KEYS 白名单里,否则
+# _check_unknown_keys 会先把它拒掉,表项就成了永远走不到的死代码。
+_NULL_TABLE_STRAYS = sorted(set(_REWARD_NULL_REMOVABLE_PARAMS) - set(_REWARD_KEYS))
+if _NULL_TABLE_STRAYS:
+    raise RuntimeError(
+        "[train.py] _REWARD_NULL_REMOVABLE_PARAMS keys missing from _REWARD_KEYS: "
+        f"{_NULL_TABLE_STRAYS}"
+    )
+del _NULL_TABLE_STRAYS
+
+
+def _apply_reward_param_null_removals(rewards, rw, applied):
+    """task.rewards 里显式写 null 的参数键 -> 从对应 term.params 里删掉(记进 applied)。
+
+    人话:null 的意思是"确保这个继承来的参数不存在",所以是幂等的——term 在这个 cfg 血统里
+    本来就没有 / params 里本来就没这个键,都算已达成,静默跳过(与 jiayi 8ee2e82a 语义一致)。
+    probe 项不用单独删:每个激活块都会 probe.params.clear() + update(term.params) 整体跟随。
+    """
+    for yaml_name, (term_name, param_name) in _REWARD_NULL_REMOVABLE_PARAMS.items():
+        try:
+            explicitly_null = yaml_name in rw and _get(rw, yaml_name) is None
+        except (TypeError, AttributeError):
+            # rw 不是 mapping(异常形态)——这里不裁决,交给覆盖层其余检查 fail-loud。
+            explicitly_null = False
+        if not explicitly_null:
+            continue
+        term = getattr(rewards, term_name, None)
+        params = getattr(term, "params", None)
+        if params is None or param_name not in params:
+            continue  # 删除是幂等的:本来就不存在 = 已达成
+        params.pop(param_name)
+        applied.append(
+            f"rewards.{term_name}.params.{param_name}=<removed by YAML null>"
+        )
+
 
 # YAML keys under `terminations:` (R-b envelope-termination softening, reward_staged_design §⑥;
 # R9 lower-body-free ablation anchor_pos_off / ee_upper_only, franco 拍板 2026-07-08).
@@ -2624,6 +2747,260 @@ def _resolve_ref_vel_scale(rk, clip_name):
     return (None if rv is None else float(rv)), None
 
 
+# task.plant whitelist. zero_joint_friction is the legacy schema-v3 zero-friction opt-in; the
+# 2026-07-22 ground/terrain keys follow the same precedent: default ABSENT = byte-identical
+# current recipe (plane terrain, ground material 1.0/1.0, robot-body material randomization
+# (0.3,1.6)/(0.3,1.2)), any explicit value enters the schema-3 ground_plant contract block.
+_PLANT_KEYS = (
+    "zero_joint_friction",
+    "ground_static_friction",
+    "ground_dynamic_friction",
+    "robot_material_static_friction_range",
+    "robot_material_dynamic_friction_range",
+    "terrain_rough_height_range",
+)
+_GROUND_PLANT_TASK_KEYS = _PLANT_KEYS[1:]
+
+
+def _build_rough_terrain_generator_cfg(height_range):
+    """isaaclab random_rough 地形生成器 cfg(lazy import:Kit 起来后才 import 得动)。
+
+    人话:10x20 块 8mx8m 的随机凹凸高度场拼成大地板,每块的凹凸高度从 height_range(米)均匀
+    采样;horizontal_scale=0.1 m 网格、vertical_scale=5 mm 量化,参数对齐 isaaclab 自带的
+    ROUGH_TERRAINS_CFG 先例。use_cache=False:地形跟随 env seed 重建,不吃过期缓存。
+    """
+    from isaaclab.terrains import TerrainGeneratorCfg
+    from isaaclab.terrains.height_field import HfRandomUniformTerrainCfg
+
+    lo, hi = float(height_range[0]), float(height_range[1])
+    return TerrainGeneratorCfg(
+        size=(8.0, 8.0),
+        border_width=20.0,
+        num_rows=10,
+        num_cols=20,
+        horizontal_scale=0.1,
+        vertical_scale=0.005,
+        slope_threshold=0.75,
+        use_cache=False,
+        sub_terrains={
+            "random_rough": HfRandomUniformTerrainCfg(
+                proportion=1.0,
+                noise_range=(lo, hi),
+                noise_step=0.005,
+                border_width=0.25,
+            )
+        },
+    )
+
+
+def _apply_ground_plant_task_override(env_cfg, plant, applied):
+    """task.plant 地面摩擦 / 机器人材质随机化范围 / 随机凹凸地形(默认全缺席 = 字节等价)。
+
+    fail-loud 信封与 qbar/foot 先例一致:值先全部验完才动 cfg;显式 null 的
+    terrain_rough_height_range 等价于缺席(= 平地现状)。谱系保护不靠这里——靠 schema-3
+    ground_plant 合同块 + resume 时的 _contract_diff(平地 checkpoint 上粗糙地会被拒)。
+    """
+    raws = {key: _get(plant, key) for key in _GROUND_PLANT_TASK_KEYS}
+    if all(value is None for value in raws.values()):
+        return
+
+    def _plant_number(raw, label):
+        if isinstance(raw, bool):
+            raise _OverrideError(f"task.plant.{label} must be a finite number >= 0")
+        try:
+            value = float(raw)
+        except (TypeError, ValueError) as exc:
+            raise _OverrideError(
+                f"task.plant.{label} must be a finite number >= 0"
+            ) from exc
+        if not math.isfinite(value) or value < 0.0:
+            raise _OverrideError(f"task.plant.{label} must be a finite number >= 0")
+        return value
+
+    def _plant_range(raw, label):
+        if isinstance(raw, (str, bytes)) or not isinstance(raw, (list, tuple, ListConfig)):
+            raise _OverrideError(f"task.plant.{label} must be a [lo, hi] pair")
+        items = list(raw)
+        if len(items) != 2:
+            raise _OverrideError(f"task.plant.{label} must be a [lo, hi] pair")
+        lo = _plant_number(items[0], f"{label}[0]")
+        hi = _plant_number(items[1], f"{label}[1]")
+        if lo > hi:
+            raise _OverrideError(f"task.plant.{label} must satisfy 0 <= lo <= hi")
+        return lo, hi
+
+    scene = getattr(env_cfg, "scene", None)
+    terrain = None if scene is None else getattr(scene, "terrain", None)
+
+    # 1) 地面材质摩擦(scene.terrain.physics_material;现状 1.0/1.0)。动摩擦不得大于静摩擦
+    # ——用"显式值或现值"做交叉检查,单边覆盖也逃不过。
+    ground_static_raw = raws["ground_static_friction"]
+    ground_dynamic_raw = raws["ground_dynamic_friction"]
+    material = None if terrain is None else getattr(terrain, "physics_material", None)
+    if ground_static_raw is not None or ground_dynamic_raw is not None:
+        _require(
+            material is not None
+            and hasattr(material, "static_friction")
+            and hasattr(material, "dynamic_friction"),
+            "scene.terrain.physics_material (task.plant ground friction)",
+        )
+        static_value = (
+            _plant_number(ground_static_raw, "ground_static_friction")
+            if ground_static_raw is not None
+            else float(material.static_friction)
+        )
+        dynamic_value = (
+            _plant_number(ground_dynamic_raw, "ground_dynamic_friction")
+            if ground_dynamic_raw is not None
+            else float(material.dynamic_friction)
+        )
+        if dynamic_value > static_value:
+            raise _OverrideError(
+                "task.plant ground dynamic friction must not exceed static friction "
+                f"(effective static={static_value}, dynamic={dynamic_value})"
+            )
+        if ground_static_raw is not None:
+            material.static_friction = static_value
+            applied.append(
+                f"scene.terrain.physics_material.static_friction={static_value}"
+            )
+        if ground_dynamic_raw is not None:
+            material.dynamic_friction = dynamic_value
+            applied.append(
+                f"scene.terrain.physics_material.dynamic_friction={dynamic_value}"
+            )
+
+    # 2) 机器人 body 材质随机化范围(events.physics_material;现状 (0.3,1.6)/(0.3,1.2) ——
+    # 下界 0.3 等效"脚地很滑",grip 臂就是要把它抬高)。
+    for key, param in (
+        ("robot_material_static_friction_range", "static_friction_range"),
+        ("robot_material_dynamic_friction_range", "dynamic_friction_range"),
+    ):
+        raw = raws[key]
+        if raw is None:
+            continue
+        lo, hi = _plant_range(raw, key)
+        events = getattr(env_cfg, "events", None)
+        term = None if events is None else getattr(events, "physics_material", None)
+        params = None if term is None else getattr(term, "params", None)
+        _require(
+            isinstance(params, dict) and param in params,
+            f"events.physics_material.params['{param}'] (task.plant.{key})",
+        )
+        params[param] = (lo, hi)
+        applied.append(f"events.physics_material.params.{param}=({lo}, {hi})")
+
+    # 3) 随机凹凸地形(显式 null = 平地现状,零改动)。只允许从 plane 切过去——已经是
+    # generator 的 cfg 再叠一层说明配置血统不对,拒绝。
+    rough_raw = raws["terrain_rough_height_range"]
+    if rough_raw is not None:
+        lo, hi = _plant_range(rough_raw, "terrain_rough_height_range")
+        if hi <= 0.0:
+            raise _OverrideError(
+                "task.plant.terrain_rough_height_range requires hi > 0 meters "
+                "(explicit flat ground is spelled null/absent)"
+            )
+        if hi > 0.5:
+            raise _OverrideError(
+                "task.plant.terrain_rough_height_range hi > 0.5 m is not a plausible "
+                "arena floor"
+            )
+        _require(
+            terrain is not None and getattr(terrain, "terrain_type", None) == "plane",
+            "scene.terrain.terrain_type=='plane' (task.plant.terrain_rough_height_range)",
+        )
+        terrain.terrain_type = "generator"
+        terrain.terrain_generator = _build_rough_terrain_generator_cfg((lo, hi))
+        applied.append(
+            f"scene.terrain=generator/random_rough noise_range=({lo}, {hi}) m "
+            "(fresh-from-random only; ground_plant 合同块会拒绝平地谱系 resume)"
+        )
+
+
+def _ground_plant_contract(env_cfg) -> dict | None:
+    """POST-OVERRIDE ground/terrain plant identity for the schema-3 hard contract.
+
+    读的是实例化 env cfg 的实际状态(不是 YAML 回声):地形类型 + 地面材质摩擦 + 机器人材质
+    随机化范围。与历史字节默认完全相等 -> None(合同不落键,老 checkpoint resume 逐字节兼容);
+    任何偏离 -> 完整 ground_plant 块(rough/滑地 checkpoint 与平地谱系互相拒绝静默续训)。
+    按文件路径加载合同模块而不是 import whole_body_tracking 包(包 __init__ 连带注册 Isaac
+    任务,host-only 测试 import 不动;照 checkpoint_normalization_preflight 先例)。
+    """
+    tc = getattr(_ground_plant_contract, "_tc_module", None)
+    if tc is None:
+        _tc_path = (
+            pathlib.Path(__file__).resolve().parents[1]
+            / "source/whole_body_tracking/whole_body_tracking/utils/training_contract.py"
+        )
+        _tc_spec = importlib.util.spec_from_file_location(
+            "hope_training_contract_by_path", _tc_path
+        )
+        tc = importlib.util.module_from_spec(_tc_spec)
+        _tc_spec.loader.exec_module(tc)
+        _ground_plant_contract._tc_module = tc
+    GROUND_PLANT_TERRAIN_PLANE = tc.GROUND_PLANT_TERRAIN_PLANE
+    GROUND_PLANT_TERRAIN_ROUGH = tc.GROUND_PLANT_TERRAIN_ROUGH
+    ground_plant_block = tc.ground_plant_block
+
+    scene = getattr(env_cfg, "scene", None)
+    terrain = None if scene is None else getattr(scene, "terrain", None)
+    material = None if terrain is None else getattr(terrain, "physics_material", None)
+    if material is None:
+        raise RuntimeError(
+            "ground-plant contract requires scene.terrain.physics_material"
+        )
+    terrain_type_raw = getattr(terrain, "terrain_type", None)
+    if terrain_type_raw == "plane":
+        terrain_type = GROUND_PLANT_TERRAIN_PLANE
+        height = None
+    elif terrain_type_raw == "generator":
+        generator = getattr(terrain, "terrain_generator", None)
+        sub_terrains = getattr(generator, "sub_terrains", None)
+        if not isinstance(sub_terrains, dict) or set(sub_terrains) != {"random_rough"}:
+            raise RuntimeError(
+                "ground-plant contract requires generator terrain to be exactly the "
+                "single random_rough sub-terrain"
+            )
+        noise = getattr(sub_terrains["random_rough"], "noise_range", None)
+        try:
+            noise_pair = [float(noise[0]), float(noise[1])]
+        except (TypeError, ValueError, IndexError) as exc:
+            raise RuntimeError(
+                "ground-plant contract requires random_rough noise_range=[lo, hi]"
+            ) from exc
+        terrain_type = GROUND_PLANT_TERRAIN_ROUGH
+        height = noise_pair
+    else:
+        raise RuntimeError(
+            f"ground-plant contract cannot fingerprint terrain_type={terrain_type_raw!r}"
+        )
+    events = getattr(env_cfg, "events", None)
+    event_term = None if events is None else getattr(events, "physics_material", None)
+    params = None if event_term is None else getattr(event_term, "params", None)
+    if not isinstance(params, dict):
+        raise RuntimeError(
+            "ground-plant contract requires events.physics_material.params"
+        )
+    ranges = {}
+    for param in ("static_friction_range", "dynamic_friction_range"):
+        raw = params.get(param)
+        try:
+            ranges[param] = [float(raw[0]), float(raw[1])]
+        except (TypeError, ValueError, IndexError) as exc:
+            raise RuntimeError(
+                f"ground-plant contract requires events.physics_material.params"
+                f"['{param}']=[lo, hi]"
+            ) from exc
+    return ground_plant_block(
+        ground_static_friction=float(material.static_friction),
+        ground_dynamic_friction=float(material.dynamic_friction),
+        robot_material_static_friction_range=ranges["static_friction_range"],
+        robot_material_dynamic_friction_range=ranges["dynamic_friction_range"],
+        terrain_type=terrain_type,
+        terrain_rough_height_range_m=height,
+    )
+
+
 def _apply_task_overrides(env_cfg, task, clip_name=None):
     """Apply cfg/task/<name>.yaml overrides (incl. the composed base/ groups) onto the env cfg.
 
@@ -2647,7 +3024,7 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             raise _OverrideError(
                 f"[train.py] task.plant must be a mapping, got {plant!r}"
             ) from exc
-    _check_unknown_keys(plant, ("zero_joint_friction",), "task.plant")
+    _check_unknown_keys(plant, _PLANT_KEYS, "task.plant")
     zero_joint_friction = _get(plant, "zero_joint_friction")
     if zero_joint_friction is not None and _as_explicit_bool(
         zero_joint_friction, "task.plant.zero_joint_friction"
@@ -2670,6 +3047,12 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             "scene.robot.actuators[*].friction=0.0 "
             "(explicit schema-v3 zero-friction plant control)"
         )
+
+    # Ground/terrain plant keys (2026-07-22, chatter-ground-foot wave).  人话:地面材质摩擦、
+    # 机器人 body 材质随机化范围、随机凹凸地形——默认全缺席 = 现状平地配方逐字节不变;任何
+    # 显式值都会让 schema-3 合同长出 ground_plant 块,平地谱系 checkpoint 对着新 plant 续训
+    # 会被 _contract_diff 拒绝(rough 臂必须 fresh-from-random)。
+    _apply_ground_plant_task_override(env_cfg, plant, applied)
 
     # Recovery/hold-only random WORLD-Y torso-force training.  This deliberately is not an
     # EventManager term: the reviewed adapter must own every substep write, prove a complete zero
@@ -2934,6 +3317,9 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
     _check_unknown_keys(rw, _REWARD_KEYS, "task.rewards")
     if rw is not None:
         R = env_cfg.rewards
+        # YAML 显式 null 先删参(jiayi 8ee2e82a 的修复;人话注释见 _REWARD_NULL_REMOVABLE_PARAMS)。
+        # 必须在下面各 set/probe 逻辑之前跑:probe.params.update(term.params) 复制到的才是删完的状态。
+        _apply_reward_param_null_removals(R, rw, applied)
         _set_reward(R, "racket_position", _get(rw, "racket_position_weight"), _get(rw, "racket_position_std"), applied)
         # Ablation B: swap the racket-position term to the no-swing-through (static strike-point) variant.
         if _as_bool(_get(rw, "racket_position_static", False)) and _get(rw, "racket_position_static") is not None:
@@ -3288,6 +3674,78 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 f"(margin_frac={float(_qbar_term.params['margin_frac'])},weight=1.0)"
             )
 
+        # mjlab-ported foot-contact shaping (default OFF).  Same fail-loud envelope as the qbar
+        # precedent: a parameter key without its weight is refused (weight-less 参数会静默不生效,
+        # 必须明说), the weight must be a finite penalty (<= 0; explicit 0 = measured control),
+        # and nothing mutates until every value validates.  人话:foot_soft_landing 罚落地砸太
+        # 重(法向冲击超阈,有界),foot_clearance 罚腾空脚又低又快地扫(给"允许跨步"臂)。
+        def _foot_term_overrides(term_name, weight_key, param_name, param_key,
+                                 param_label, param_positive_msg):
+            _weight_raw = _get(rw, weight_key)
+            _param_raw = _get(rw, param_key)
+            if _weight_raw is None and _param_raw is None:
+                return
+            if _weight_raw is None:
+                raise _OverrideError(f"{param_key} requires {weight_key} explicitly")
+            _require(
+                hasattr(R, term_name) and getattr(R, term_name) is not None,
+                f"rewards.{term_name}",
+            )
+            _term = getattr(R, term_name)
+            _require(isinstance(_term.params, dict), f"rewards.{term_name}.params")
+            if isinstance(_weight_raw, bool):
+                raise _OverrideError(
+                    f"rewards.{term_name}.weight must be finite and <= 0"
+                )
+            try:
+                _weight = float(_weight_raw)
+            except (TypeError, ValueError) as exc:
+                raise _OverrideError(
+                    f"rewards.{term_name}.weight must be finite and <= 0"
+                ) from exc
+            if not math.isfinite(_weight) or _weight > 0.0:
+                raise _OverrideError(
+                    f"rewards.{term_name}.weight must be finite and <= 0"
+                )
+            _param = None
+            if _param_raw is not None:
+                if isinstance(_param_raw, bool):
+                    raise _OverrideError(param_positive_msg)
+                try:
+                    _param = float(_param_raw)
+                except (TypeError, ValueError) as exc:
+                    raise _OverrideError(param_positive_msg) from exc
+                if not math.isfinite(_param) or _param <= 0.0:
+                    raise _OverrideError(param_positive_msg)
+                _require(
+                    param_name in _term.params,
+                    f"rewards.{term_name}.params['{param_name}']",
+                )
+            _term.weight = _weight
+            applied.append(f"rewards.{term_name}.weight={_weight}")
+            if _param is not None:
+                _term.params[param_name] = _param
+                applied.append(
+                    f"rewards.{term_name}.params.{param_name}={_param} ({param_label})"
+                )
+
+        _foot_term_overrides(
+            "foot_soft_landing",
+            "foot_soft_landing_weight",
+            "force_threshold_n",
+            "foot_soft_landing_force_threshold_n",
+            "落地法向冲击力阈值,N",
+            "rewards.foot_soft_landing.force_threshold_n must be finite and > 0 (newton)",
+        )
+        _foot_term_overrides(
+            "foot_clearance",
+            "foot_clearance_weight",
+            "target_m",
+            "foot_clearance_target_m",
+            "摆动相 ankle_roll 原点目标高度,m",
+            "rewards.foot_clearance.target_m must be finite and > 0 (meters)",
+        )
+
         # Wave B: mutually-exclusive lower-body hypotheses with weight-independent probes.  B1
         # is a positive bounded pose kernel on the exact twelve v4rg leg joints.  B2 is one
         # reference-free negative bounded bundle (stance collapse + realized leg-qdot tail).
@@ -3315,8 +3773,14 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             ("support_post_s", "lower_body_pose_imitation_support_post_s", False, True),
         )
         _pose_weight_raw = _get(rw, "lower_body_pose_imitation_weight")
-        _pose_requested = _pose_weight_raw is not None or any(
-            _get(rw, key) is not None for _, key, _, _ in _pose_fields
+        # 击球窗内下肢模仿衰减(V2 motion_scale_in_window 的下肢版)。它和其他 pose 参数键
+        # 走同一个 Wave-B 信封(配了就必须显式给两个 weight),但 EnvCfg 血统里不带这个
+        # params 项——和 motion_scale_in_window 一样只由覆盖层写入,函数默认 1.0 = 字节等价。
+        _pose_scale_in_window_raw = _get(rw, "lower_body_imitation_scale_in_window")
+        _pose_requested = (
+            _pose_weight_raw is not None
+            or _pose_scale_in_window_raw is not None
+            or any(_get(rw, key) is not None for _, key, _, _ in _pose_fields)
         )
         _bundle_fields = (
             ("min_stance_width_m", "lower_body_stability_min_stance_width_m", True, False),
@@ -3386,6 +3850,14 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 )
                 _pose_param_values[_param] = _lower_body_number(
                     _raw, _key, positive=_positive, nonnegative=_nonnegative
+                )
+            if _pose_scale_in_window_raw is not None:
+                # 覆盖层专属参数(血统不带,故不做 "已在 params 里" 的检查);0 = 窗内全静音,
+                # 1 = 不衰减。>=0 即合法,和 motion_scale_in_window 同宽容度。
+                _pose_param_values["scale_in_window"] = _lower_body_number(
+                    _pose_scale_in_window_raw,
+                    "lower_body_imitation_scale_in_window",
+                    nonnegative=True,
                 )
             if (
                 _pose_term.params.get("racket_command_name") != "racket_target"
@@ -3894,6 +4366,10 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             ("joint_limit", "joint_limit_weight"),
             ("undesired_contacts", "undesired_contacts_weight"),
             ("pre_strike_foot_slip", "pre_strike_foot_slip_weight"),
+            # 触地脚蹭滑/拖脚(2026-07-22):此前源码常开 -1.0/-0.5 且 CLI 够不着,
+            # penlight 减负臂与将来消融都需要显式剂量。
+            ("foot_slip_sq", "foot_slip_sq_weight"),
+            ("foot_drag", "foot_drag_weight"),
             ("prestrike_waist_twist", "prestrike_waist_twist_weight"),
             # sim2real fine-tune (explicit-PD): torque-saturation penalty + pre-strike upright shaping.
             ("arm_torque_saturation", "arm_torque_saturation_weight"),
@@ -4806,6 +5282,46 @@ def main(cfg):
     OmegaConf.set_struct(cfg, False)
     _emit_lean_queue_phase(cfg, "hydra_resolved")
     kit_args, kit_carb_count, kit_tbb_count = _resolve_kit_thread_caps(cfg)
+
+    # 热启动/续训的"归一化 2x2 真值表"预检,必须在 Kit 启动前跑:checkpoint 里有没有
+    # obs_norm_state_dict,和本次解析出的 algo.runner.empirical_normalization 不一致时,老路径
+    # 要等 Kit 起完、_run 里 runner.load/ckpt_compat 才炸出费解的 KeyError,白烧几分钟 GPU 启动
+    # 费;这里在 CPU 上先加载先炸,并给出单条 CLI 修复命令。main 没有 exact-resume 一类"无视
+    # 本次 CLI runner 配置"的路径 —— strict resume 和 checkpoint_tolerant 热启动最终都吃 _run 里
+    # runner_kwargs 解析的同一份配置 —— 所以所有带 checkpoint_path 的启动一律预检,不设豁免。
+    if _get(cfg, "checkpoint_path") is not None:
+        # 刻意按文件路径加载模块而不是 import whole_body_tracking.utils.…:包 __init__.py 会连带
+        # 注册 Isaac 任务,而此刻 Kit 还没起。
+        _preflight_path = (
+            pathlib.Path(__file__).resolve().parents[1]
+            / "source/whole_body_tracking/whole_body_tracking/utils"
+            / "checkpoint_normalization_preflight.py"
+        )
+        _preflight_spec = importlib.util.spec_from_file_location(
+            "checkpoint_normalization_preflight", _preflight_path
+        )
+        _preflight = importlib.util.module_from_spec(_preflight_spec)
+        _preflight_spec.loader.exec_module(_preflight)
+        _runner_node = _get(_get(cfg, "algo"), "runner")
+        _empirical = _get(_runner_node, "empirical_normalization")
+        if _empirical is None:
+            # 与 _run 里 runner_kwargs 的 bool(r["empirical_normalization"]) 同源同语义:缺 key
+            # 现在就报错,不带默认值猜 —— 猜错了预检就成了假保证。
+            raise RuntimeError(
+                "[train.py] algo.runner.empirical_normalization is missing from the resolved "
+                "config; cannot preflight the checkpoint normalization truth table."
+            )
+        resolved_checkpoint = _preflight.preflight_checkpoint_normalization(
+            _get(cfg, "checkpoint_path"),
+            empirical_normalization=_as_explicit_bool(
+                _empirical, "algo.runner.empirical_normalization"
+            ),
+        )
+        if resolved_checkpoint is not None:
+            # 目录形式的 checkpoint_path 重绑到刚通过预检的精确 model_N.pt:防止并发训练继续往
+            # 同一目录写更新的 checkpoint,导致 Kit 起完后 _run 真正加载的字节和预检看过的不一致
+            # (竞态);顺带让 _run 里"必须是文件"的检查对目录输入也成立。
+            cfg.checkpoint_path = str(resolved_checkpoint)
 
     # Launch Isaac Sim BEFORE importing isaaclab modules. Clear argv so the kit app does not try to
     # parse Hydra's `task=...`/`algo=...` overrides.

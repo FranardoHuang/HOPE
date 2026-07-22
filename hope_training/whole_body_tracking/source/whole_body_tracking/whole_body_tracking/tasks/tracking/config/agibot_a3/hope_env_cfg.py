@@ -1058,6 +1058,32 @@ class HOPEVirtualBallRewardsCfg(HOPEDeployParityRewardsCfg):
         },
     )
 
+    # mjlab-ported foot-contact shaping (DEFAULT OFF, 纯加法):落地冲击 + 摆动相抬脚高度。
+    # 人话:foot_soft_landing 罚"落地砸太重"(first-contact 步法向峰值力超 300 N 的部分,
+    # 有界);foot_clearance 罚"腾空脚又低又快地扫"(|脚高-目标高| x 水平速度),给"允许
+    # 跨步"臂用。分工:近亲 foot_slip_sq/foot_drag 管触地脚的水平蹭滑,这两项一个管竖直
+    # 冲击、一个管腾空高度,互不重复;mjlab 的"速度指令门"(站立自动关)刻意不搬——常开。
+    # CLI:task.rewards.foot_soft_landing_weight / foot_soft_landing_force_threshold_n /
+    # foot_clearance_weight / foot_clearance_target_m(weight 必须 <= 0;显式 0 是对照)。
+    foot_soft_landing = RewTerm(
+        func=mdp.foot_soft_landing,
+        weight=0.0,
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=list(A3_FEET_BODIES)),
+            "force_threshold_n": 300.0,  # A3 整机 58.2 kg -> 静重约 571 N,单脚静态约 285 N
+        },
+    )
+    foot_clearance = RewTerm(
+        func=mdp.foot_clearance,
+        weight=0.0,
+        params={
+            # 接触状态查 sensor、脚位姿/速度查 articulation,两份名单必须同序同名(函数内硬校验)
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=list(A3_FEET_BODIES)),
+            "asset_cfg": SceneEntityCfg("robot", body_names=list(A3_FEET_BODIES)),
+            "target_m": 0.08,  # ankle_roll 原点目标高;站立贴地原点约 0.07 m,跨步臂建议往 0.15 调
+        },
+    )
+
     # Wave B (DEFAULT OFF): two mutually exclusive lower-body stability hypotheses.  B1 pays a
     # bounded pose kernel on the exact twelve leg joints from the current v4rg motion command.
     # B2 is reference-free: it combines an absolute anti-collapse stance-width hinge with only

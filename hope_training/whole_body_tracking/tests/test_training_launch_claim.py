@@ -35,7 +35,18 @@ def _module(name: str, **attributes):
 def _load_runner_module(monkeypatch, contract_module):
     class FakeOnPolicyRunner:
         def __init__(self, env, train_cfg, log_dir, device):
+            # 与真 rsl_rl OnPolicyRunner.__init__ 对齐的最小属性集:save() 现在会打包
+            # hope_exact_resume_state(迭代号/步数/lr/RNG/环境课程),这些字段都要在。
+            self.env = env
+            self.cfg = dict(train_cfg or {})
+            self.log_dir = log_dir
+            self.device = device
             self.logger_type = "tensorboard"
+            self.disable_logs = True
+            self.current_learning_iteration = 0
+            self.tot_timesteps = 0
+            self.tot_time = 0.0
+            self.alg = SimpleNamespace(learning_rate=1.0e-3)
             self.saved = []
 
         def save(self, path, infos=None):
@@ -65,7 +76,7 @@ def _load_runner_module(monkeypatch, contract_module):
         consume_base_decel_activation_counters=lambda env, command_name: {},
     )
     modules = {
-        "torch": _module("torch", Tensor=type("Tensor", (), {})),
+        # torch/numpy 用真的:save() 打包续训状态要真调 torch.get_rng_state/np.random.get_state。
         "rsl_rl": fake_rsl_rl,
         "rsl_rl.env": _module("rsl_rl.env", VecEnv=type("VecEnv", (), {})),
         "rsl_rl.runners": fake_runners,
@@ -117,6 +128,11 @@ def test_runner_embeds_exact_launch_claim_without_mutating_scientific_contract(m
     original_infos = {"keep": "value"}
     runner.save("model_1.pt", original_infos)
     _, saved_infos = runner.saved[-1]
+    saved_infos = dict(saved_infos)
+    # 精确续训状态永远伴随合同键一起进 infos(内容另有 test_exact_resume_state.py 专测)。
+    resume_state = saved_infos.pop("hope_exact_resume_state")
+    assert resume_state["schema_version"] == 2
+    assert resume_state["next_learning_iteration"] == 1
     assert saved_infos == {
         "keep": "value",
         contract.CHECKPOINT_CONTRACT_SCHEMA_KEY: 3,
@@ -144,7 +160,10 @@ def test_absent_claim_writes_no_launch_key_and_train_reads_only_top_level(monkey
     runner_module = _load_runner_module(monkeypatch, contract)
     runner = runner_module.MotionOnPolicyRunner(object(), {})
     runner.save("model_1.pt", {"keep": "value"})
-    assert runner.saved[-1][1] == {"keep": "value"}
+    saved_infos = dict(runner.saved[-1][1])
+    # 没有 launch claim 时不写任何合同键;精确续训状态则无条件伴随每次 save。
+    assert saved_infos.pop("hope_exact_resume_state")["schema_version"] == 2
+    assert saved_infos == {"keep": "value"}
 
     train_source = (ROOT / "scripts/train.py").read_text(encoding="utf-8")
     assert '_get(cfg, "training_launch_claim_sha256")' in train_source

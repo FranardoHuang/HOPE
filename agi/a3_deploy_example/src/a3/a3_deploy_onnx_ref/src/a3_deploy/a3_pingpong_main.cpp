@@ -43,6 +43,18 @@
 #include "a3_pingpong/pp_runtime_interlocks.hpp"
 #include "robot_io/a3_aimrt_backend.hpp"
 
+// BUILD FINGERPRINT (2026-07-22 standing-noise audit): the deployed binary must
+// identify its own source. PP_BUILD_GIT_SHA / PP_BUILD_CONFIG_UTC are injected at
+// CMake configure time (see the a3_deploy_onnx_ref_pingpong target); a build
+// outside the git checkout (exported tarball) falls back to "unknown" here rather
+// than failing, so the fingerprint line always prints something forensically honest.
+#ifndef PP_BUILD_GIT_SHA
+#define PP_BUILD_GIT_SHA "unknown"
+#endif
+#ifndef PP_BUILD_CONFIG_UTC
+#define PP_BUILD_CONFIG_UTC "unknown"
+#endif
+
 namespace {
 namespace fs = std::filesystem;
 
@@ -123,7 +135,8 @@ bool ValidateCommandLine(int argc, char** argv, std::string& error) {
       "--hold-recover", "--leg-gain-scale", "--leg-smooth-alpha", "--level", "--loc-mode", "--mode",
       "--model-path", "--motion-blend-sec", "--obs-csv", "--oracle-max-age",
       "--oracle-shm", "--ref-amplitude", "--ref-frequency", "--ref-gain-scale",
-      "--planner-side-hysteresis-y", "--planner-side-split-y", "--ref-group", "--ref-max-err",
+      "--planner-side-hysteresis-y", "--planner-side-split-y",
+      "--planner-static-gain-scale", "--ref-group", "--ref-max-err",
       "--ref-stale-ms", "--runtime-cfg",
       "--squat-guard-rad", "--stand-kd", "--stand-kp", "--start", "--swing-rest",
       "--swing-speed", "--tilt-guard", "--trace-csv", "--vel-gate-margin",
@@ -359,6 +372,10 @@ void PrintRefDiagBlock(const a3_pingpong::RefPlaybackDiagSnapshot& d) {
 
 int main(int argc, char** argv) {
   setvbuf(stdout, nullptr, _IOLBF, 0);  // line-buffer so status survives kill
+  // First line of every run, unconditionally: which source built this binary.
+  // (Forensic identity for deploy logs; "unknown" = built outside a git checkout.)
+  std::printf("[pingpong] build fingerprint: git=%s cmake_configure_utc=%s\n",
+              PP_BUILD_GIT_SHA, PP_BUILD_CONFIG_UTC);
   if (std::signal(SIGINT, OnSig) == SIG_ERR ||
       std::signal(SIGTERM, OnSig) == SIG_ERR) {
     std::cerr << "failed to install SIGINT/SIGTERM handlers\n";
@@ -391,7 +408,9 @@ int main(int argc, char** argv) {
                  " [--engage-min-tts S] [--cmd-timeout S] [--invalid-grace S]"
                  " [--planner-side-split-y Y] [--planner-side-hysteresis-y H]"
                  " [--hold-recover S] [--vel-gate-margin M]"
-                 " [--planner-task-revision])\n"
+                 " [--planner-task-revision]"
+                 " [--planner-static-gain-scale F] (audit-only downshift of the planner"
+                 " STATIC-stand official gains; (0,1], default 1.0 = official verbatim))\n"
                  "       [--loc-mode fabricated|perfect_tracking|oracle|external_base]"
                  " [--perfect-tracking] [--oracle-pelvis] [--no-imu-yaw]\n"
                  "       [--oracle-shm PATH] [--oracle-max-age S]"
@@ -473,6 +492,13 @@ int main(int argc, char** argv) {
       Has(argc, argv, "--planner-task-revision");
   if (planner_task_revision && !planner_mode) {
     std::cerr << "--planner-task-revision requires --planner\n";
+    return 2;
+  }
+  // Safety-relevant gain flag: refuse silently-ignored spellings (audit trail must
+  // never suggest a downshift that no code path consumed).
+  if (Has(argc, argv, "--planner-static-gain-scale") && !planner_mode) {
+    std::cerr << "--planner-static-gain-scale requires --planner (it only affects the "
+                 "planner STATIC-stand branch)\n";
     return 2;
   }
   if (first_tick_enabled && !planner_mode) {
@@ -668,6 +694,18 @@ int main(int argc, char** argv) {
     pcfg.planner_side_hysteresis_y =
         std::stod(Flag(argc, argv, "--planner-side-hysteresis-y", "0.04"));
     pcfg.hold_recover_s = std::stod(Flag(argc, argv, "--hold-recover", "2.5"));
+    // AUDIT-ONLY downshift of the planner STATIC-stand official gains (standing-noise
+    // forensics). Default 1.0 keeps the official gains verbatim (PpPolicy skips the
+    // multiply entirely at 1.0 — byte-identical default behavior); (0,1) scales the
+    // static-stand Kp AND Kd. Values above 1.0 (stiffer than the proven official
+    // ground stand) are forbidden.
+    pcfg.planner_static_gain_scale =
+        std::stod(Flag(argc, argv, "--planner-static-gain-scale", "1.0"));
+    if (!std::isfinite(pcfg.planner_static_gain_scale) ||
+        pcfg.planner_static_gain_scale <= 0.0 || pcfg.planner_static_gain_scale > 1.0) {
+      std::cerr << "--planner-static-gain-scale must be finite in (0,1]\n";
+      return 2;
+    }
     // 110-D per-clip trained-velocity-box gate slack (m/s per axis); see PpPolicyConfig.
     pcfg.gate_vel_margin = std::stod(Flag(argc, argv, "--vel-gate-margin", "0.30"));
     // Mid-swing target streaming: OFF unless the model trained midswing_resample_prob > 0
@@ -884,6 +922,15 @@ int main(int argc, char** argv) {
       for (const auto& n : nm) trace << ",qd_" << n;
       for (const auto& n : nm) trace << ",kp_" << n;
       for (const auto& n : nm) trace << ",kd_" << n;
+      // 2026-07-22 standing-noise audit: APPEND-ONLY columns (all preexisting columns
+      // keep their exact name and position). planner_static = the planner STATIC-stand
+      // latch (official-gain stand owns the command); tau_* = measured joint torque
+      // (vendor SDK State.msg 'effort' -> RobotState.tau_est). The SDK wire format
+      // exposes NO motor current or temperature (thirdparty/joint_msgs/msg/State.msg:
+      // name/sequence/position/velocity/effort only), so torque is the only measured
+      // effort channel available to log.
+      trace << ",planner_static";
+      for (const auto& n : nm) trace << ",tau_" << n;
       trace << "\n";
       std::cout << "[pingpong] trace CSV -> " << trace_path << "\n";
     } else {
@@ -900,6 +947,11 @@ int main(int argc, char** argv) {
       obscsv << "tick,ts,mode,loc_mode,oracle_fresh,oracle_age_s,sync_miss,legs_passive";
       for (int i = 0; i < pp->onnx().obs_dim(); ++i) obscsv << ",obs_" << i;
       for (int i = 0; i < a3_pingpong::kNumJoints; ++i) obscsv << ",act_" << i;
+      // 2026-07-22 standing-noise audit: APPEND-ONLY columns (see the trace CSV note):
+      // planner_static latch + measured joint torque tau_est (SDK 'effort'; the SDK
+      // exposes no current/temperature).
+      obscsv << ",planner_static";
+      for (int i = 0; i < a3_pingpong::kNumJoints; ++i) obscsv << ",tau_" << i;
       obscsv << "\n";
       std::cout << "[pingpong] obs CSV -> " << obs_csv_path
                 << " (loc_mode=" << pp->loc_mode_name() << ")\n";
@@ -1347,6 +1399,10 @@ int main(int argc, char** argv) {
           const auto& a = ppp->last_action();
           for (int i = 0; i < a3_pingpong::kNumJoints; ++i)
             o << ',' << (a.size() == a3_pingpong::kNumJoints ? a[i] : 0.0);
+          // append-only audit columns (must mirror the header order above)
+          o << ',' << (ppp->planner_static_active() ? 1 : 0);
+          const bool obs_has_tau = st.tau_est.size() == N;
+          for (int i = 0; i < N; ++i) o << ',' << (obs_has_tau ? st.tau_est[i] : 0.0);
           o << '\n';
           static int oc = 0; if (++oc % 25 == 0) o.flush();  // single RT writer
         }
@@ -1420,6 +1476,10 @@ int main(int argc, char** argv) {
       for (int i = 0; i < N; ++i) o << ',' << (has ? st.dq[i] : 0.0);
       for (int i = 0; i < N; ++i) o << ',' << (has ? cmd.kp[i] : 0.0);
       for (int i = 0; i < N; ++i) o << ',' << (has ? cmd.kd[i] : 0.0);
+      // append-only audit columns (must mirror the header order above)
+      o << ',' << (ppp->planner_static_active() ? 1 : 0);
+      const bool trace_has_tau = st.tau_est.size() == N;
+      for (int i = 0; i < N; ++i) o << ',' << (trace_has_tau ? st.tau_est[i] : 0.0);
       o << '\n';
       static int fc = 0; if (++fc % 25 == 0) o.flush();  // single RT writer
     }
@@ -1525,6 +1585,44 @@ int main(int argc, char** argv) {
       model_path.c_str(),
       trace_path.empty() ? "<none>" : trace_path.c_str(),
       obs_csv_path.empty() ? "<none>" : obs_csv_path.c_str());
+
+  // ---- STAND GAIN PROVENANCE (2026-07-22 standing-noise audit) ----
+  // The runner has TWO independent standing gain paths whose sources do NOT talk to
+  // each other; every deploy log must show both so an audit can tell which numbers
+  // could have reached the joints:
+  //   1) manual PD_STAND ('s' key / --start pd_stand): --stand-kp/--stand-kd flat PD
+  //      (default 60/4), or the official SDK gains when --official-stand is set;
+  //   2) planner STATIC stand (planner mode, pre-engage / post-swing recovery):
+  //      ALWAYS official_kp_sdk_/official_kd_sdk_ (a3_policy_parameters.hpp
+  //      a3_pd_stand_kps/kds; hip_pitch 1500, knee 2000) — --stand-kp/--stand-kd are
+  //      NOT consulted; only --planner-static-gain-scale (audit-only) can lower it.
+  {
+    const auto& okp = pp->official_stand_kp();
+    const auto& okd = pp->official_stand_kd();
+    std::printf(
+        "[pingpong] -------------- STAND GAIN SOURCES --------------\n"
+        "[pingpong]  manual PD_STAND path : %s\n"
+        "[pingpong]  planner STATIC path  : official_kp_sdk_/official_kd_sdk_ "
+        "(a3_policy_parameters.hpp a3_pd_stand_*); --stand-kp/--stand-kd DO NOT APPLY\n"
+        "[pingpong]      kp[SDK] waist_y=%.0f hip_p=%.0f knee=%.0f ankle_p=%.0f | "
+        "kd[SDK] waist_y=%.1f hip_p=%.1f knee=%.1f ankle_p=%.1f\n"
+        "[pingpong]      static_gain_scale=%.3f (%s)%s\n"
+        "[pingpong] -------------------------------------------------\n",
+        official_stand
+            ? "official_kp_sdk_/official_kd_sdk_ (--official-stand; same table as planner STATIC)"
+            : "flat PD from --stand-kp/--stand-kd",
+        okp[0], okp[19], okp[22], okp[23], okd[0], okd[19], okd[22], okd[23],
+        pcfg.planner_static_gain_scale,
+        pcfg.planner_static_gain_scale == 1.0
+            ? "official verbatim -- default"
+            : "AUDIT DOWNSHIFT via --planner-static-gain-scale",
+        planner_mode ? "" : "  [planner mode OFF: STATIC path unreachable this run]");
+    if (!official_stand)
+      std::printf(
+          "[pingpong]      manual PD_STAND kp=%.1f kd=%.1f (flat, all %d slots; "
+          "defaults 60/4)\n",
+          stand_kp, stand_kd, 31);
+  }
 
   // --- keyboard control (raw, non-blocking) ---
   std::cout << "[keys] p=PASSIVE(limp)  s=PD_STAND(hold, NO swing)  h=SHADOW(compute, no publish)"

@@ -113,6 +113,14 @@
 | `PhysicalBall Phase A / B` | 物理球仪器的实现层级，不是课程阶段：A 只让来球在引擎中飞行，禁用机器人碰撞且不施加拍面冲量；B 才加入受合同约束的球拍接触和碰后飞行。B 有源码材料不等于已有被接受的运行或训练成绩。 |
 | `readiness critic / critic-gate q50` | readiness critic 是估计“当前状态能否及时接住下一题”的模型。它必须用独立训练/校准数据且不能偷看未揭题信息；critic-gate q50 是在正式 Gate3B 之前单独封存的一次性 50 题/侧诚实考试。 |
 | `guard reset` | 判卷器因跟踪包络或其他保护条件提前结束，但未发生真实倾倒。“物理不摔”不能隐去 guard reset，更不能据此证明连续恢复。 |
+| <a id="wave-cgf"></a>`Wave CGF` / 抖动-地面-脚部消融波（`p1cgf_*`） | 2026-07-22 预注册的 8 臂单变量波：action_rate 剂量三档（ar02/ar05/ar10）、机器人材质摩擦抬高（grip）、随机凹凸地形（rough，fresh 铁律）、mjlab 落地冲击罚（footrw）、软惩罚减负（penlight）、被动阻尼折 kd（kdpassive，未接线锁死）。父本只用 W，对照＝矩阵 `w_c_s0`；谱系 diagnostic-only。 |
+| <a id="ground-plant"></a>`ground_plant` 合同块 | schema-3 合同的地面/地形 plant 指纹：地面材质摩擦、机器人材质随机化范围、平地/随机凹凸。默认配方＝整块缺席（历史 checkpoint 逐字节兼容）；任何偏离＝落键，resume 对账把它当另一套 plant 拒绝静默续训（平地 checkpoint 上不了粗糙地）。 |
+| `foot_soft_landing` / 落地冲击罚 | mjlab soft_landing 思想：first-contact 步的脚底法向峰值力超阈（默认 300 N）部分按阈值归一后惩罚，教"轻放脚别砸"。量纲要点：输出是无量纲超阈倍数（单脚封顶 3），不是牛顿——mjlab -1e-5/N 的等效剂量 = -3e-3。默认 weight=0 字节等价。 |
+| `foot_clearance` / 抬脚高度罚 | mjlab foot_clearance 思想：腾空脚 \|脚高-目标高\| × 水平速度，罚"贴地扫着走"。给允许跨步的臂用；站立击球默认不开（weight=0）。 |
+| `foot_slip_sq_weight` / `foot_drag_weight` | 触地脚水平蹭滑（源码常开 -1.0）与拖脚（-0.5）的剂量键，2026-07-22 新接 CLI（此前够不着）。penlight 减负臂降到 -0.33/-0.17。 |
+| `lower_body_imitation_scale_in_window` | 击球窗内下肢模仿衰减系数（上半身 motion_scale_in_window 的下肢版，同一个 WIDE 窗）：触球一瞬让下肢模仿小声点。默认 1.0＝字节等价；台账/探针记未衰减原值供对账。 |
+| `penlight` / 惩罚减负臂 | Franco 第 8 条的消融：六个软惩罚统一降约 1/3（脚朝向/挥拍前直立/拍面条件引导/挥拍前脚滑/触地蹭滑/拖脚），硬保护不动，看击球是否恢复。不是加大击球权重（击球组本来就远重于模仿）。 |
+| `branch_dashboard` / 三人分支看板 | `scripts/branch_dashboard.py`：只读打印 Franco/jiayi(dongc1)/yikang(Catrunaround) 各自远端分支领先/落后 main 的提交数。纪律：领先的每个提交要么搬进 main、要么在 branch_fix_audit 文档记"不搬+原因"，不允许失踪。 |
 
 ## 动作库术语
 
@@ -131,6 +139,8 @@
 | `Non-striking arm` / 非击球臂 | 当前右手 A3 动作库中的左臂。取消它的模仿 Reward 只表示允许左臂帮助平衡，不会关闭关节、力矩、自碰或安全停机约束。 |
 | `A0/A1 non-striking-arm pair` / A0/A1 非击球臂配对 | A0 是当前上半身模仿对照；A1 只从位置、姿态、线速度、角速度四条 body-imitation Reward 中删除左 shoulder/elbow/wrist，躯干、右击球臂、权重、题库、seed、预算和所有安全项不变。它不是恢复实验里的 A/B/C，也不是传感延迟 A1。 |
 | `SE(2)` / 平面刚体变换 | 在水平面内只做一次整体偏航旋转和 XY 平移；本项目的动作站位实体化把同一个 proper transform 原子地作用于整条 floating-root 轨迹，禁止镜像、Z、尺度、逐帧、关节或时间编辑。 |
+| <a id="projection-root-pin-artifact"></a>投影钉根伪影 / projection reset-root artifact | 把动作投影到"根钉死为 reset 单位姿态"约定时，源动作的骨盆旋转（反手 ~40-60° 转体）被整个删掉，世界拍面随之系统性转歪——可行性扫描会把好动作误判成"拍面差 44-57°、全帧 0%"的假死刑。2026-07-22 三路对抗复核在 yikang stationary-v2 反手判决上坐实此机制（符号翻号与题库复用被排除）；任何"投影后 0%"判决必须先做源几何 A/B 对照再定死刑。 |
+| 全库可行性复扫 / library-wide phase rescan | 对注册表全部 `_cal` clip 的"源几何 × 投影后 × 速度档"扫描矩阵（见分支修复审计 07-22 的复扫方案）：源几何高分而投影后 0% ⇒ 投影伪影，修投影约定；两边都低 ⇒ 动作真不可行，换参考动作。每 clip 一行落账，防"感觉不行"式死刑。 |
 
 ## 部署与全链路术语
 
@@ -145,6 +155,7 @@
 | `Gate3-D0` | 本项目的“第 0 版最短部署仿真闭环”：固定同卷、planner + policy + C++ runner + vendor runtime 的单拍演示；不冒充连续对打。它是项目内部标签，不是行业通用术语。 |
 | `Trainer-v0` | native MuJoCo 训练的首卷。因现役 vendor main sim loop 没有球/球台/网，目前只能练单拍平衡与击球状态，不是 physical return 结果，也不阻塞几天内 `Gate3-D0`。它是并行候选训练轨；产物若晋级，仍须独立通过 Gate3/Gate3B。旧草案曾把它也叫 `D0`，从现行文档起停止这种重名。 |
 | `Recovery-D0` | recovery A/B/C 预注册的第 0 步：只用现有 179-D checkpoint 做 A bridge 与 C previous-tuple 的 zero-shot 诊断，不选型、不晋级。原 config 字段仍叫 `D0`，文档必须写全 `Recovery-D0`，避免与 `Gate3-D0` 混淆。 |
+| `STAND GAIN SOURCES` 横幅 / `planner_static` 列 / `tau_*` 列 | 2026-07-22 部署侧取证三件：启动日志打印两条站立路径（人工 PD_STAND 的 --stand-kp/--stand-kd 与 planner static 的官方高增益表）各自 Kp/Kd 来源与数值；obs/trace CSV 尾部新增 planner static 闩锁列与 31 列实测力矩（vendor SDK 只暴露 effort，无电流/温度）；build git 指纹每次运行第一行打印。默认行为逐字节不变；`--planner-static-gain-scale`（默认 1.0）是唯一新旗标。 |
 
 ## 证据和文档术语
 

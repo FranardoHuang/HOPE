@@ -36,6 +36,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cmath>
 #include <cstdint>
 #include <cstdio>
@@ -215,6 +216,15 @@ struct PpPolicyConfig {
   // degrades at ~5-10 s) — never park on it.
   double hold_recover_s = 2.5;
   double hold_blend_s = 0.8;          // q_des ramp measured-pose -> nominal at the switch
+  // AUDIT-ONLY gain downshift for the planner STATIC-stand branch
+  // (--planner-static-gain-scale, 2026-07-22 standing-noise audit). The static stand
+  // publishes the official_kp_sdk_/official_kd_sdk_ ground gains (hip_pitch 1500 /
+  // knee 2000), a SECOND standing gain path that --stand-kp/--stand-kd cannot reach.
+  // 1.0 (default) publishes those official gains VERBATIM — the scale is not even
+  // multiplied in, so default behavior is byte-for-byte identical to before the flag.
+  // Values in (0,1) scale BOTH Kp and Kd of this branch only; the manual PD_STAND
+  // path and the policy gains are untouched.
+  double planner_static_gain_scale = 1.0;
   double external_base_max_age_s = 0.2;   // reject base-pose samples older than this (stale mocap)
   // Reachability gate (base-relative x,y + world z + speed); mirrors wbc_runner target_gate.
   bool target_gate_enable = true;
@@ -613,6 +623,11 @@ class PpPolicy {
   void SetRacketInput(std::shared_ptr<PpRacketTargetInput> r) { racket_in_ = std::move(r); }
   void SetBasePoseInput(std::shared_ptr<PpBasePoseInput> b) { base_in_ = std::move(b); }
   bool planner_mode() const { return cfg_.planner_mode; }
+  // DRIVER-THREAD-ONLY view of the planner STATIC-stand latch (true = the static
+  // official-gain stand owns the command). Read by the main runner's CSV writers,
+  // which run in the same policy callback that mutates the latch; NOT synchronized
+  // for other threads (the [status] thread must keep using the [pp EVENT] log).
+  bool planner_static_active() const { return planner_static_active_; }
   std::string planner_status() const {
     std::lock_guard<std::mutex> lk(planner_mu_);
     return planner_status_;
@@ -1321,6 +1336,21 @@ class PpPolicy {
           if (planner_have_hold_)
             std::fprintf(stderr,
                 "[pp] post-swing recovery done -> STATIC official stand until next engage\n");
+          // FORENSIC EVENT (2026-07-22 standing-noise audit): timestamped record of the
+          // moment command authority hands off from the POLICY hold to the STATIC stand
+          // with official_kp_sdk_/official_kd_sdk_ (hip_pitch 1500 / knee 2000) — the
+          // standing gain path --stand-kp does NOT control. Mirrored into the trace/obs
+          // CSVs via planner_static_active() (column planner_static).
+          const long long enter_wall_ns =
+              std::chrono::duration_cast<std::chrono::nanoseconds>(
+                  std::chrono::system_clock::now().time_since_epoch()).count();
+          std::fprintf(stderr,
+              "[pp EVENT] planner_static_handoff ENTER tick=%llu t=%.3fs wall_ns=%lld "
+              "reason=%s gains=official_sdk%s\n",
+              static_cast<unsigned long long>(tick_idx), tick_idx * cfg_.dt,
+              enter_wall_ns,
+              planner_have_hold_ ? "post_swing_recovery" : "pre_engage_no_hold",
+              cfg_.planner_static_gain_scale == 1.0 ? "(verbatim)" : "(scaled)");
         }
         const double a = std::min(1.0,
             (tick_idx - planner_static_start_tick_) * cfg_.dt /
@@ -1328,13 +1358,29 @@ class PpPolicy {
         cmd.q_des = (1.0 - a) * planner_static_q0_ + a * nominal_q_sdk_;
         cmd.dq_des = Eigen::VectorXd::Zero(kNumJoints);
         cmd.tau_ff = Eigen::VectorXd::Zero(kNumJoints);
-        cmd.kp = official_kp_sdk_;
-        cmd.kd = official_kd_sdk_;
+        if (cfg_.planner_static_gain_scale == 1.0) {  // default: official gains VERBATIM
+          cmd.kp = official_kp_sdk_;
+          cmd.kd = official_kd_sdk_;
+        } else {  // audit-only downshift (--planner-static-gain-scale < 1.0)
+          cmd.kp = cfg_.planner_static_gain_scale * official_kp_sdk_;
+          cmd.kd = cfg_.planner_static_gain_scale * official_kd_sdk_;
+        }
         return true;
       }
       // Reset the sticky latch only when a swing actually runs (engage exited the branch);
       // never mid-hold, or quiescence flapping chatters between policy and static commands.
-      if (level_.load() == 1) planner_static_active_ = false;
+      // (Guarding on the latch keeps semantics identical — clearing an already-clear latch
+      // was a no-op — while giving the forensic EXIT event a single, real edge.)
+      if (level_.load() == 1 && planner_static_active_) {
+        planner_static_active_ = false;
+        const long long exit_wall_ns =
+            std::chrono::duration_cast<std::chrono::nanoseconds>(
+                std::chrono::system_clock::now().time_since_epoch()).count();
+        std::fprintf(stderr,
+            "[pp EVENT] planner_static_handoff EXIT tick=%llu t=%.3fs wall_ns=%lld "
+            "reason=swing_engaged\n",
+            static_cast<unsigned long long>(tick_idx), tick_idx * cfg_.dt, exit_wall_ns);
+      }
     }
 
     // LIVE PLANNER target override (Path B): the swing clock already set tg.time_to_strike,

@@ -22,6 +22,8 @@ the new task.rewards fail-loud whitelist, at the TRANSLATION layer (_apply_task_
       ee_body_pos body list to the wrists (ankles freed); absolutes + anchor_ori stay; either
       flag combined with envelope_as_penalty raises; an unexpected body list raises.
 * default path: a DeployParity-like task node without any new key leaves every new attr untouched.
+* YAML-null 删参 (jiayi 8ee2e82a -> main) — rewards 下显式 `some_key: null` 把继承来的
+      term.params 项 pop 掉并记账;没写的键、表外键、已不存在的参数一律不动。
 
 train.py is imported directly (its top-level imports are hydra/omegaconf only — no Isaac); the
 env cfg is a plain-namespace fake, exactly the level _apply_task_overrides operates on.
@@ -1489,6 +1491,78 @@ def test_deployparity_like_task_without_new_flags_is_untouched():
     # sanity: the plain overrides did land
     assert R.racket_position.weight == 14.0 and R.racket_position.params["std"] == 0.20
     assert len(applied) > 0
+
+
+# --------------------------------------------------------------------------------------------- #
+# YAML 显式 null 删参 (jiayi 8ee2e82a -> main): `some_key: null` 把继承来的 reward 参数从
+# term.params 里删掉;没写的键一律不动。
+# --------------------------------------------------------------------------------------------- #
+def test_yaml_null_removes_inherited_reward_params_and_logs():
+    env_cfg, applied = _apply({"rewards": {
+        "hold_ready_reach": None,                    # ad-hoc setter 路径
+        "processed_qdes_slew_hinge_margin": None,    # "requested"-block 路径
+        "racket_position_std": None,                 # _set_reward std 路径
+    }})
+    hr = env_cfg.rewards.hold_ready.params
+    assert "reach" not in hr
+    assert hr["reach_mode"] == "station" and hr["std"] == 1.5  # 邻居参数不受影响
+    slew = env_cfg.rewards.processed_qdes_slew_hinge.params
+    assert "margin" not in slew
+    assert slew["recovery_start_s"] == 0.20 and slew["recovery_end_s"] == 1.55
+    # null 的 margin 不算 "requested":slew 探针保持休眠,不被激活块拉起
+    assert env_cfg.rewards.processed_qdes_slew_hinge_probe.weight == 0.0
+    assert "std" not in env_cfg.rewards.racket_position.params
+    assert env_cfg.rewards.racket_position.weight == 14.0  # weight 不是 params 项,不动
+    assert sorted(applied) == [
+        "rewards.hold_ready.params.reach=<removed by YAML null>",
+        "rewards.processed_qdes_slew_hinge.params.margin=<removed by YAML null>",
+        "rewards.racket_position.params.std=<removed by YAML null>",
+    ]
+
+
+def test_yaml_null_removal_is_idempotent_when_param_or_term_absent():
+    env_cfg = _make_env_cfg()
+    del env_cfg.rewards.hold_ready.params["reach"]  # 这个血统本来就没带 reach
+    env_cfg, applied = _apply(
+        {"rewards": {
+            "hold_ready_reach": None,                # params 里没有这个键
+            "qdes_limit_barrier_margin_frac": None,  # fake 血统根本没有这个 term
+        }},
+        env_cfg=env_cfg,
+    )
+    assert applied == []  # "确保不存在"已成立 -> 静默无记账
+    assert "reach" not in env_cfg.rewards.hold_ready.params
+
+
+def test_yaml_null_outside_removal_table_still_means_absent():
+    # weight/开关类键不在删参表里:null 仍等价于"没写",什么都不动(与 jiayi 语义一致)。
+    env_cfg, applied = _apply({"rewards": {"racket_position_weight": None}})
+    assert env_cfg.rewards.racket_position.weight == 14.0
+    assert env_cfg.rewards.racket_position.params["std"] == 0.2
+    assert applied == []
+
+
+def test_yaml_non_null_values_on_removable_keys_still_set_params_normally():
+    env_cfg, applied = _apply({"rewards": {"hold_ready_reach": 0.3}})
+    assert env_cfg.rewards.hold_ready.params["reach"] == 0.3
+    assert "rewards.hold_ready.params.reach=0.3" in applied
+
+
+def test_yaml_null_removal_works_on_omegaconf_nodes():
+    # 运行时 task 是 OmegaConf 节点而非 dict;"key in node" + null 值的判定必须同样成立。
+    from omegaconf import OmegaConf
+
+    task = OmegaConf.create({"rewards": {"hold_ready_reach": None}})
+    env_cfg, applied = _apply(task)
+    assert "reach" not in env_cfg.rewards.hold_ready.params
+    assert applied == ["rewards.hold_ready.params.reach=<removed by YAML null>"]
+
+
+def test_null_removal_table_is_inside_reward_whitelist():
+    # 表键必须都在 _REWARD_KEYS 里,否则 _check_unknown_keys 先拒掉,表项成死代码
+    # (train.py import 时也有同款自检,这里再守一道回归)。
+    strays = sorted(set(train_mod._REWARD_NULL_REMOVABLE_PARAMS) - set(train_mod._REWARD_KEYS))
+    assert strays == []
 
 
 if __name__ == "__main__":

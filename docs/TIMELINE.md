@@ -1,5 +1,25 @@
 # TIMELINE — main 上值得记住的重要变化
 
+## 2026-07-22 — 分支修复归账 + 地面/脚部 plant 覆盖接线 + 抖动-地面-脚部波预注册
+
+一次合入：三个源码搬运落盘（jiayi 8ee2e82a YAML-null 删参 → train.py 删参表；yikang 635be7cf
+checkpoint 归一化 2x2 预检 → Kit 前 CPU 预检新模块；jiayi 9f684ae5 精确续训包 → 课程计数器不
+归零 + Ctrl-C 安全存档，2万-2.5万 iter 长训刚需）；mjlab 脚部 reward 落地（foot_soft_landing/
+foot_clearance，默认 0 字节等价，量纲结论：输出是无量纲超阈倍数，mjlab 等效剂量 -3e-3 不是
+-1e-4）；地面摩擦/机器人材质范围/随机凹凸地形五个 task.plant 新键接线 + schema-3 `ground_plant`
+合同块指纹（默认缺席=历史 checkpoint 逐字节兼容，任何偏离=旧谱系 resume 被拒）；击球窗下肢模仿
+衰减键 `lower_body_imitation_scale_in_window`（台账记未衰减原值）。抖动-地面-脚部消融波 8 臂
+三件套预注册（占位 commit + groundfoot/kdpassive 双闸门锁死渲染）。部署侧站立四欠账最小修复
+（只动 agi/：增益来源摘要/static handoff 事件/tau 列/build 指纹，默认逐字节不变，待 Linux 编译
+回归）。分支修复审计裁决表 + 三人分支追踪看板（scripts/branch_dashboard.py）落盘；yikang 反手
+"结构性死亡"判决经三路对抗复核改判**应复扫**（伪影机制：投影钉根删 ~40-60° 转体 + stationary
+剖面取消 -40° 归一化；三步零改码复扫命令已写入审计文档）。同日两 pod SSH 上午一度全失联（网络已排除），下午以原端口恢复且 checkpoint 卷完好
+（pod1=yikang 四条训练，pod2 空）；判卷欠账仍是第一优先。host stub 测试 12 项 main 既有
+失败同日修复（纯测试侧）。host 测试 396+47 全绿。详见
+[分支修复审计](research/branch_fix_audit_20260722.md)、
+[波预注册](experiments/2026-07/EXP-P1-CHATTER-GROUND-FOOT-WAVE.md)、
+[mjlab 取舍](research/mjlab_reward_adoption_20260722.md)。
+
 ## 2026-07-20/21 — 平衡×时序矩阵与扰动波进入 main
 
 一次合入：24 格平衡×时序矩阵机器（T=N/C/H × S=S0..S3，lean 队列+63 单测）、S1 挥拍后安顿债务包

@@ -1719,7 +1719,13 @@ def lower_body_pose_imitation_probe(
     std: float = 0.35,
     support_pre_s: float = 0.30,
     support_post_s: float = 0.40,
+    scale_in_window: float = 1.0,
 ) -> torch.Tensor:
+    # 探针只记账、恒返回 0;台账记的是【未衰减】的 kernel 原值(scale_in_window 不进台账),
+    # 这样开了击球窗衰减的臂也能拿探针数字和 reward 曲线对账出衰减吃掉了多少。
+    scale_in_window = _finite_scalar(
+        scale_in_window, name="lower_body_pose_imitation scale_in_window", nonnegative=True
+    )
     values, eligible, joint_error, reference_motion = _lower_body_pose_values(
         env, racket_command_name, motion_command_name, std, support_pre_s, support_post_s
     )
@@ -1736,6 +1742,7 @@ def lower_body_pose_imitation_probe(
             float(std),
             float(support_pre_s),
             float(support_post_s),
+            float(scale_in_window),
         ),
     )
     return torch.zeros_like(values)
@@ -1748,9 +1755,19 @@ def lower_body_pose_imitation(
     std: float = 0.35,
     support_pre_s: float = 0.30,
     support_post_s: float = 0.40,
+    scale_in_window: float = 1.0,
 ) -> torch.Tensor:
-    """Positive v4rg 12-leg pose imitation only in the same swing's support window."""
+    """Positive v4rg 12-leg pose imitation only in the same swing's support window.
 
+    ``scale_in_window``(默认 1.0 = 字节等价):击球窗内把本项贡献乘以该系数——下肢模仿别在
+    触球那一瞬和击球奖励抢话筒(和上半身 motion_scale_in_window/V2 同一个思想、同一个窗:
+    racket 命令的 WIDE strike window,1c 拆窗时用 strike_window_wide,否则就是 strike_window)。
+    台账/探针记的仍是未衰减原值,见 probe 注释。
+    """
+
+    scale_in_window = _finite_scalar(
+        scale_in_window, name="lower_body_pose_imitation scale_in_window", nonnegative=True
+    )
     values, eligible, joint_error, reference_motion = _lower_body_pose_values(
         env, racket_command_name, motion_command_name, std, support_pre_s, support_post_s
     )
@@ -1767,9 +1784,22 @@ def lower_body_pose_imitation(
             float(std),
             float(support_pre_s),
             float(support_post_s),
+            float(scale_in_window),
         ),
     )
-    return values
+    if scale_in_window == 1.0:
+        return values
+    window = _window_wide(_cmd(env, racket_command_name))
+    if (
+        not torch.is_tensor(window)
+        or window.dtype != torch.bool
+        or tuple(window.shape) != tuple(values.shape)
+    ):
+        raise RuntimeError(
+            "lower_body_pose_imitation scale_in_window requires an aligned per-env bool "
+            "strike-window mask on the racket command"
+        )
+    return torch.where(window, values * scale_in_window, values)
 
 
 def _lower_body_stability_bundle_values(
@@ -2720,6 +2750,120 @@ def foot_drag(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     """Penalize foot dragging: lateral foot speed while the foot is near the ground (skimming instead of
     lifting cleanly to step). Positive magnitude; RewTerm weight is negative."""
     return _cmd(env, command_name).foot_drag
+
+
+# --- mjlab-ported foot-contact shaping (soft landing / swing clearance; DEFAULT OFF) ----------- #
+# 与上面近亲们的分工(同一只脚,四种坏行为各罚各的,不重复计费):
+#   * foot_slip_sq / foot_drag(常开):触地脚还在水平蹭/滑 —— 管切向速度;
+#   * strike_foot_vel(击球窗):击球瞬间脚在动 —— 管击球稳定;
+#   * foot_soft_landing(本组新增):落地那一步法向冲击力超标 —— 管"踩得多重",mjlab
+#     soft_landing 思想;唯一读接触力大小的项;
+#   * foot_clearance(本组新增):摆动相(不接触)脚又低又快地扫 —— 管"抬脚高度",mjlab
+#     foot_clearance 思想;唯一管腾空脚高度的项,给"允许跨步"臂用,站立击球默认不开。
+# mjlab 原版这两项都挂"速度指令门"(站立指令时自动关);我们的站立击球场景没有速度指令、
+# 落地/抬脚行为全程都要管,所以刻意【不搬那个门】——项本身常开,默认由 weight=0 关断。
+def foot_soft_landing(
+    env: ManagerBasedRLEnv, sensor_cfg, force_threshold_n: float = 300.0
+) -> torch.Tensor:
+    """落地冲击惩罚(mjlab soft_landing 思想):first-contact 步的法向峰值力超阈部分,有界。
+
+    人话:脚刚落地的那一个控制步,如果地面顶脚的竖直力比阈值大,超出多少罚多少(按阈值归一,
+    并封顶),教会它轻轻放脚而不是砸下去。只在 first-contact 步计费——之后站着的支撑力再大也
+    不管(那是体重,不是冲击)。A3 整机 58.2 kg(urdf mass.txt 求和)-> 静态重力约 571 N,双脚
+    分摊每脚约 285 N;默认阈值 300 N ≈ "单脚超过静态支撑就算砸"。RewTerm weight 用负数;
+    默认 weight=0 = 项被 RewardManager 跳过,字节等价。
+    """
+    threshold = _finite_scalar(
+        force_threshold_n, name="foot_soft_landing force_threshold_n", positive=True
+    )
+    sensor = env.scene.sensors[sensor_cfg.name]
+    body_ids = getattr(sensor_cfg, "body_ids", None)
+    if not isinstance(body_ids, (list, tuple)) or len(body_ids) != 2:
+        raise RuntimeError(
+            "foot_soft_landing requires sensor_cfg resolved to exactly the two A3 feet"
+        )
+    body_ids = list(body_ids)
+    first_contact_fn = getattr(sensor, "compute_first_contact", None)
+    if not callable(first_contact_fn):
+        raise RuntimeError(
+            "foot_soft_landing requires a ContactSensor with track_air_time=True "
+            "(compute_first_contact unavailable)"
+        )
+    # first_contact: 本控制步内"空中 -> 接触"的脚(需要 sensor cfg track_air_time=True,
+    # tracking_env_cfg 的 contact_forces 已开)。
+    first_contact = first_contact_fn(env.step_dt)[:, body_ids]
+    forces_hist = getattr(sensor.data, "net_forces_w_history", None)
+    if (
+        not torch.is_tensor(forces_hist)
+        or forces_hist.ndim != 4
+        or forces_hist.shape[-1] != 3
+    ):
+        raise RuntimeError(
+            "foot_soft_landing requires net_forces_w_history [env,hist,body,3] "
+            "(ContactSensorCfg.history_length >= 1)"
+        )
+    if first_contact.dtype != torch.bool or tuple(first_contact.shape) != (
+        forces_hist.shape[0],
+        2,
+    ):
+        raise RuntimeError("foot_soft_landing first-contact mask must be [env,2] bool")
+    # 法向 = 世界 z(平地场景);取 history 里的峰值——decimation 下冲击尖峰只存在于某个
+    # 物理子步,只看当前帧会漏掉真正的最大冲击。拉扯(负 z)不算冲击,先 clamp 到 0。
+    normal_peak = forces_hist[:, :, body_ids, 2].clamp(min=0.0).amax(dim=1)  # (E,2)
+    # 有界惩罚(clip 防爆):超阈部分按阈值归一,单脚封顶 3.0(默认阈值下即 >=1200 N,
+    # 约 2 倍整机重量,再大也同罚——一次暴力落地不该贡献天文数字梯度)。
+    excess_frac = ((normal_peak - threshold) / threshold).clamp(min=0.0, max=3.0)
+    return (excess_frac * first_contact.float()).sum(dim=-1)
+
+
+def foot_clearance(
+    env: ManagerBasedRLEnv, sensor_cfg, asset_cfg, target_m: float = 0.08
+) -> torch.Tensor:
+    """摆动相抬脚高度惩罚(mjlab foot_clearance 思想):非接触脚 |脚高-目标高| x 水平速度。
+
+    人话:脚在空中横着移动时,离"目标抬脚高度"越远、移动越快,罚得越多——快速迈步必须把脚
+    抬到目标高度附近,贴地扫着走(绊倒前兆)最贵;慢慢挪或已在目标高度附近则几乎免费。触地
+    的脚完全不管(那是 foot_slip_sq/foot_drag 的地盘)。注意"脚高"用的是 ankle_roll link
+    原点的世界 z:站立贴地时原点约 0.07 m(见 foot_drag 的 Phase A 注释),所以 target_m 是
+    "原点目标高度"——默认 0.08 m 即鞋底约 1 cm 的最低离地要求,真要它抬腿跨步应往 0.15 m 调。
+    RewTerm weight 用负数;默认 weight=0 = 项被跳过,字节等价。
+    """
+    target = _finite_scalar(target_m, name="foot_clearance target_m", positive=True)
+    sensor = env.scene.sensors[sensor_cfg.name]
+    asset = env.scene[asset_cfg.name]
+    sensor_ids = getattr(sensor_cfg, "body_ids", None)
+    asset_ids = getattr(asset_cfg, "body_ids", None)
+    sensor_names = list(getattr(sensor_cfg, "body_names", None) or ())
+    asset_names = list(getattr(asset_cfg, "body_names", None) or ())
+    # 接触状态(sensor 索引)和运动学(articulation 索引)必须逐脚配对:两份 cfg 解析出的
+    # body 名单必须一模一样(含顺序),否则左脚的接触配右脚的速度,静默算错。
+    if (
+        not isinstance(sensor_ids, (list, tuple))
+        or len(sensor_ids) != 2
+        or not isinstance(asset_ids, (list, tuple))
+        or len(asset_ids) != 2
+        or len(sensor_names) != 2
+        or sensor_names != asset_names
+    ):
+        raise RuntimeError(
+            "foot_clearance requires sensor_cfg/asset_cfg resolved to the SAME two feet "
+            "in the same order (per-foot contact state must pair with per-foot kinematics)"
+        )
+    sensor_ids = list(sensor_ids)
+    asset_ids = list(asset_ids)
+    forces = getattr(sensor.data, "net_forces_w", None)
+    pos = getattr(asset.data, "body_pos_w", None)
+    vel = getattr(asset.data, "body_lin_vel_w", None)
+    if not torch.is_tensor(forces) or not torch.is_tensor(pos) or not torch.is_tensor(vel):
+        raise RuntimeError(
+            "foot_clearance requires net contact forces and foot position/velocity tensors"
+        )
+    # 10 N = sensor 的 force_threshold,与 hope_commands 的 in_contact 判据一致。
+    in_contact = torch.norm(forces[:, sensor_ids, :], dim=-1) > 10.0  # (E,2)
+    foot_z = pos[:, asset_ids, 2]  # (E,2)
+    xy_speed = torch.norm(vel[:, asset_ids, :2], dim=-1)  # (E,2)
+    swing = (~in_contact).float()
+    return (swing * torch.abs(foot_z - target) * xy_speed).sum(dim=-1)
 
 
 def arm_overreach(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:

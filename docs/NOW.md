@@ -27,6 +27,15 @@
 
 ## 当下状态与团队 focus
 
+**2026-07-22 pod 状态：上午失联、下午原端口恢复。** 两 pod 上午全部 SSH 端点超时（本机网络
+已排除），下午实测以**原端口**恢复：pod1（开机 ~2 h，重启过）三卡全被 yikang 四条训练占用
+（v14_legfreeze ft6 + stationary-v2 formal/slow2fast x3，全 wandb，其中两条共挤一张卡）；
+pod2（开机 ~1 h）三卡全空。checkpoint 卷完好——W 父本 model_6700 与 codexschema 各命名空间
+均在，续训谱系断裂危机解除。07-22 下午验收后已处置：11 条被杀续训(25k 八格+intel 三臂)按原 argv 重算剩余步数复活,8 条在训
+3 条等停滞裁决;判卷修正队列(--exam-bank 手传)两 pod 串行清偿首批 11 个终档;v_qbar 已到终档
+10700。`hope-pods-watch` 已在新账号重建(每小时,含停滞裁决与回填队列)。三人分支追踪看板（防修复失踪）：`python scripts/branch_dashboard.py --min-ahead 1`，
+裁决账本见[分支修复审计 07-22](research/branch_fix_audit_20260722.md)。
+
 **2026-07-20 合入 `main` 后生效的候选覆盖：** 双 Pod 各三张 GPU 的 NVML compute process 与显存占用均为零；当前没有
 训练作业。这个快照不代表永久 GPU 归属，也不证明无 GPU 的旧 shell/ROS 进程不存在；每次发射仍须
 重新核验具体 PID/PGID、Kit lock 与卡位。半秒冲刺、Pod1 十二格 long-grid 及相邻长曲线都已经结束或
@@ -853,6 +862,22 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
   入口，并为 MDU HAL、SHADOW、真机 runner 提供互不自动串联的单命令脚本。下一证据：脚本
   静态/打包检查、HDU preflight，以及 `run_pingpong_end_to_end.md` 9.9 的可复现终端矩阵；不由
   Codex 执行真机 MOTION。
+- **[16｜P1] 全动作库可行性复扫 + 投影钉根约定修复。** 责任人 yikang（投影工具在其分支）；
+  执行者 Codex 可代跑扫描。人话：yikang 反手"结构性死亡"判决经 07-22 三路对抗复核改判
+  **应复扫**——伪影机制＝投影把骨盆根钉成 reset 单位姿态、删掉反手 ~40-60° 转体 +
+  stationary 剖面取消 -40° 归一化（仓库内有同 clip 100%→0% 的 A/B 反证）。Franco 拍板：
+  不止反手，注册表全部现役 `_cal` 族 + 全部投影变体都按"源几何 × 投影后 × 两速度档"矩阵
+  重扫，先修投影约定（钉根保留源骨盆 yaw + 被删根旋转角进合同 fail-loud）再全量重扫；
+  修复合入前 stationary-v2 家族所有"结构性排除"判决降级为存疑。下一证据：投影约定修复
+  合入 + 逐 clip 落账表（pod2 空卡跑，排位在判卷欠账之后）。
+  [扫描与修复方案](research/branch_fix_audit_20260722.md#全动作库扫描与修复方案franco-07-22-拍板不止反手全库都扫都要修好)
+- **[15｜P2] 部署侧站立异响四欠账——源码已修，待 Linux 编译回归。** 责任人 franco；执行者
+  Claude。人话：站立异响 PDF 排名 2/3/6 的三项取证欠账 07-22 已改（只动 agi/，默认行为逐字节
+  不变）：两条站立路径增益来源启动摘要 + static handoff 时间戳事件进 CSV/日志 + 可选审计降档
+  旗标；build 指纹（git SHA+脏标）每次运行第一行打印；obs/trace CSV 尾部纯增 31 列实测力矩
+  `tau_*`（SDK 不暴露电流/温度，已记档）。下一证据：Linux 构建机跑 portable Release +
+  run_tests 回归（macOS 无 vendor 栈，本机只做了改动块逐字 -Werror 编译+运行断言）。
+  [裁决与细节](research/branch_fix_audit_20260722.md#pdf-五缺陷对账部署侧四欠账-2026-07-22-已修)
 
 ### 训练引擎与机器人物理
 
@@ -885,6 +910,16 @@ exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimR
   pelvis link 原点，诚实标注非 COM）比较"瞬时速度注入练回正 vs 持续力练抵抗"。速度/力臂已上卡 12 条，
   其余按空槽队列补发。RunPod 两次重启 Pod1 容器（19:43Z/04:35Z），值班 routine 自动整机重建。
   [push 实验](experiments/2026-07/EXP-P1-PUSH-ROBUSTNESS-20260721.md)。
+- **[14｜P1] 抖动-地面-脚部消融波（Wave CGF）——已预注册，闸门锁定。** 责任人 franco；执行者
+  Codex。人话：站立异响 E1 复核 PDF + Franco 07-22 八条里训练侧成立的欠账各买一臂——action_rate
+  剂量曲线 `ar02/ar05/ar10`（-0.2/-0.5/-1.0）、机器人材质摩擦抬高 `grip`、随机凹凸地形 `rough`
+  （fresh-from-random 20001 updates，平地 checkpoint 禁止静默上粗糙地）、mjlab 落地冲击罚 `footrw`
+  （-3e-3，无量纲超阈倍数量纲）、软惩罚减负 `penlight`（六个软惩罚降 ~1/3，含 07-22 新接线的蹭滑/拖脚剂量键，Franco 第 8
+  条）、被动阻尼折 kd `kdpassive`（源码未接线，闸门锁死）。父本只用 W，对照＝矩阵 `w_c_s0`
+  不重复买；续训臂 13301 updates（到 ~20001，对齐 2万-2.5万 目标下沿）。三件套+单测已落盘
+  （47/40/38 项全绿）。下一证据：07-22 wiring 合并钉 40-hex + groundfoot 闸门翻真 → pod 恢复后
+  一格 probe smoke 通过即按 launch_order 发全矩阵。
+  [预注册](experiments/2026-07/EXP-P1-CHATTER-GROUND-FOOT-WAVE.md)
 - **[13｜P0] Wave Q 情报波（速度泛化优先）——预注册中。** 责任人 franco；执行者 Claude。人话：按
   2026-07-21 情报定四对臂——①在线速度混合 `speed_scale_range=[0.8,1.2]`（速度泛化是最高价值泛化轴，
   拍面/引拍/脚步轴降级为评测工具）；②强 q_des 铰链 `-1.0`（现役 penalty 可能太小）；③全身模仿加强
