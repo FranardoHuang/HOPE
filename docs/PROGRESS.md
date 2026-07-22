@@ -37,6 +37,10 @@
   （c102b9e3/ca078850 家族改 hope_commands/commands 后 host stub 未同步：缺
   `planner_revision_enabled`/`_clip_names`/假 motion、MotionLoader 收 PosixPath、teacher 收据
   规范名漂移）——四类全是测试侧欠账，纯测试文件修复后 97 绿，源码零改动。
+- 投影修复终审通过(07-22 夜):root yaw 折进 waist_yaw + 剖面恢复 rally_yaw 后,反手
+  stationary 扫描从 134 帧全 0% → f45 两速度档 100%,**死刑正式撤销**;被删 non-yaw 实测
+  ~19-22°(源反手真实侧倾)另记债待裁决。分支 Franco_codex/stationary-projection-yaw-fix-20260722
+  已推(未合 main);全库四轴可行性认证战役(球速/来向/旋转/扭矩)进行中。
 - 全动作库击球帧扫描矩阵执行完毕(07-22 晚):**反手死刑撤销**——钉根删 yaw 15.7° +
   stationary 剖面吃掉 rally_yaw 40° ≈ 55.7° 正是死刑报告的 44-57° 拍面差;钉根复现件换 generic
   剖面即回 100%(对照 134 帧全 0%)。**全库 16 条现役 clip 无第二个死刑候选**;观察名单
