@@ -37,6 +37,11 @@
   （c102b9e3/ca078850 家族改 hope_commands/commands 后 host stub 未同步：缺
   `planner_revision_enabled`/`_clip_names`/假 motion、MotionLoader 收 PosixPath、teacher 收据
   规范名漂移）——四类全是测试侧欠账，纯测试文件修复后 97 绿，源码零改动。
+- pod3 借用入档(07-23,Franco 提供):`ssh root@74.2.96.37 -p 14176 -i ~/.ssh/id_ed25519_runpod`
+  ——128 核/3×RTX 5090/基本空载;有 IsaacLab+hope_isaac_venv(一条安装中断日志,完整性待验),
+  无 mjeval venv 与 codexschema 资产,借用需先 bootstrap。用途:扫描/认证类 CPU 战役分流与
+  临时加速;**注意旧档"74.2.96.x 是已判死旧 pod2 别试"作废**——IP 被 RunPod 回收复用,本端口
+  是 Franco 亲自提供的新 pod3。训练发射仍限 pod1/pod2 现役队列纪律。
 - FINAL 11 段终表 **v2**(07-23 晚,解拍面口径):v1 适用率半张确系"钉帧法线"伪影——解拍面后
   11 段速度边界全推 5-8 m/s、反手拉三段+v12 反手挡方向 vy2.4 全 100%、窗宽回到运动直觉
   (v4rg 240-400ms;挡球的窗在快球侧 300-420ms,慢档才 0-20ms→挡球考卷应按快球定档);
