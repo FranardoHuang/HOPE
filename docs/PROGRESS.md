@@ -37,6 +37,9 @@
   （c102b9e3/ca078850 家族改 hope_commands/commands 后 host stub 未同步：缺
   `planner_revision_enabled`/`_clip_names`/假 motion、MotionLoader 收 PosixPath、teacher 收据
   规范名漂移）——四类全是测试侧欠账，纯测试文件修复后 97 绿，源码零改动。
+- 变体谱系终审拍板(07-23,Franco):**adv2c3 是主训练件**(模仿参考=各动作 2c/3 切片;
+  共同 ready→2c/3 起点的过渡不写死、不进时间账,RL 自动学);**loop 版废弃**(构造回位尾加时
+  太久);**原版只当对照**。主选已换 bh_loop_c。正式化按此谱系:每动作 2 件=adv2c3(主)+原版(对照)。
 - 设计 ready 验证+时间账重算(07-23,v6,替代作废的 v5):Franco 指正后数据验证成立——
   franco 六段起始单簇(L∞ 均值 16.6°)、正反手同一 ready、收尾闭环;canonical ready =
   bh_loop_c 帧 0(medoid)。从设计 ready 重算:取小口径 11/11 过 0.5s 门(承接口径单看
