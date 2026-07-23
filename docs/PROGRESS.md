@@ -37,6 +37,11 @@
   （c102b9e3/ca078850 家族改 hope_commands/commands 后 host stub 未同步：缺
   `planner_revision_enabled`/`_clip_names`/假 motion、MotionLoader 收 PosixPath、teacher 收据
   规范名漂移）——四类全是测试侧欠账，纯测试文件修复后 97 绿，源码零改动。
+- 设计 ready 验证+时间账重算(07-23,v6,替代作废的 v5):Franco 指正后数据验证成立——
+  franco 六段起始单簇(L∞ 均值 16.6°)、正反手同一 ready、收尾闭环;canonical ready =
+  bh_loop_c 帧 0(medoid)。从设计 ready 重算:取小口径 11/11 过 0.5s 门(承接口径单看
+  fh_loop/bh_loop_b 超门 +0.035/+0.011 须带限定);B"零税"论据失效,C 成时间最优
+  (0.422/0.109)且 ready 即其帧 0,建议主选换 C(待 Franco 终审)。双对抗复核 CONFIRMED。
 - 首帧穷举+主选终审包(07-23):注册首帧定帧——正手 fh_loop f40(唯一 ≤0.5 候选)/反手
   bh_loop_b f62(worst+mean 双冠);双站姿全库 0.280-0.474s。C 肩 roll 贴限裁决=有风险需
   morph 不必换件(钳位后 t_hit 不变)。B/A/C 真部署口径:C 仅快 B 0.023s 而窗宽差 2.2 倍,

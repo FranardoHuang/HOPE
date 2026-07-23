@@ -137,3 +137,48 @@ C 仅在 A/B 双卡且 morph+activation 完成时顶位。换将不动 ready 注
 > 2c/3 中段帧当成互相竞争的 ready 候选、还拆成正反手两个站姿。设计事实是:**Franco 组所有
 > 动作按同一个起始/收尾动作设计**,首帧不是选出来的,是设计里给定的那个共同姿态。fh_loop f40
 > / bh_loop_b f62 双站姿注册撤销;正确账(数据验证共同起始 + 从设计 ready 重算 t_hit)见 v6。
+
+---
+
+# v6(07-23):设计共同 ready 数据验证 + 从设计 ready 重算时间账(替代 v5)
+
+**设计事实成立(数据验证,双对抗复核 CONFIRMED)**:franco 六段核心动作起始帧聚成单簇
+(击球链两两 L∞ 均值 16.6°/最大 26.1°),**正反手无系统性分裂**(散布轴是肘:拉球段 vs
+挡/压段 ~20°,不是侧别);收尾闭环成立(多数 ≤9°,fh_loop 15.8°、bh_loop_b 22.9° 最弱)。
+对照段 v4rg/v12 偏离 37-49°/28-30°=明显另一套 ready,佐证 franco 家族确是同一设计。
+**canonical ready = bh_loop_c 帧 0**(medoid 真实帧,不做平均帧;严格说"设计 ready"在数据里
+是 ~16-26° 的散布带,medoid 是带内代表)。落盘:pod2 firstframe_20260723/designed_ready/
+canonical_ready_v1.npz。例外点名:fh_block_syn 起始腕 roll 整差 −180°(合成所致,预期内,
+不入 medoid);废件 fh_block 起始腕 roll 偏 22.4°(GMR 腕面缺陷佐证)。
+
+**从设计 ready 的 t_hit(两口径,门=取小 ≤0.5s)**:
+
+| 段 | 承接口径* | 直达口径** | 过门 | binding(t_hit 段) |
+|---|---|---|---|---|
+| fh_loop | 0.535⚠ | 0.186 | ✓ | sh_pitch |
+| bh_loop_a | 0.389 | 0.133 | ✓ | sh_pitch |
+| bh_loop_b | 0.511⚠ | 0.189 | ✓ | sh_pitch |
+| bh_loop_c | 0.422 | 0.109 | ✓ | sh_pitch |
+| bh_block | 0.314 | 0.120 | ✓ | sh_roll |
+| fh_block_syn | 0.420 | 0.210 | ✓ | wr_roll |
+| s0_highpress | 0.371 | 0.109 | ✓ | sh_pitch |
+| fh_v4rg / bh_v4rg | 0.421 / 0.317 | 0.137 / 0.111 | ✓ | sh_yaw / sh_pitch |
+| v12fh / v12bh | 0.432 / 0.404 | 0.132 / 0.118 | ✓ | sh_roll ×2 |
+
+*承接=ready→该段 2c/3 零速帧 bang-bang 转移+该帧起 t_hit(保守上界,与历史可比);
+**直达=ready→触球帧 bang-bang,终端腕双钉姿态+角速度(物理下界,无引拍/路径约束)。
+部署真值居两口径之间。**引用"11/11 全过门"必须带此限定**:承接口径单看 fh_loop 0.535、
+bh_loop_b 0.511 超门 +0.035/+0.011,救法=卸肩或 ready 带内加深。触球速度零超限。
+loop 闭环回位税最大 0.199s(fh_block_syn 腕 180° 回拧),其余 ≤0.101s,连拍无忧。
+
+**B/A/C 主选重审(v5 的"B 零税"论据随错误 ready 一并失效)**:从设计 ready,
+A 0.389/0.133、**B 0.511⚠/0.189(三者最慢,承接口径唯一超门)**、**C 0.422/0.109(最快)**。
+C 的肩 roll 贴限已裁决 morph 可修且 t_hit 不变;C 边界窗 100ms(=此前定的挑战者达标线);
+且 canonical ready 本身就是 C 的帧 0。**建议主选换 C**(条件:补 ch18 morph 条款+activation
+三证),B 降为窗宽备选(220ms 最宽、三证最全;若 C 复产窗缩 <100ms 或 morph 失败则回 B),
+A 仍挑战者。待 Franco 终审拍板。
+
+caveat:canonical ready 未过站立平衡认证(formalization 时补);t_hit 达标≠能回球,
+v3/v4 的适用率账是独立轴不变;fh_block_syn 自身 2c/3 t_hit=0.22 为本轮新跑 PROBE 级
+(与 bh_block 一致,无历史对照);shared_ready_prefix_thit.json 实际路径在
+franco_pipeline_20260722/facescan/。
