@@ -37,6 +37,14 @@
   （c102b9e3/ca078850 家族改 hope_commands/commands 后 host stub 未同步：缺
   `planner_revision_enabled`/`_clip_names`/假 motion、MotionLoader 收 PosixPath、teacher 收据
   规范名漂移）——四类全是测试侧欠账，纯测试文件修复后 97 绿，源码零改动。
+- 第四轮三格收官(07-23):①**部署真口径 t_hit**:正/反手两个共同前置站姿下全库 11 段
+  全 ≤0.5s(FH worst 0.474/BH worst 0.434);单一全集 ready 仅 B/fh_loop 超 0.035-0.039s。
+  ②**S0 高压理论证实**:高球带 × 1-8 m/s 全档 100%——"够高就能扣"成立,旧"边界 1-2.5"系
+  考卷伪影注废。③**bh→fh 挡合成成立**:单轴 wrist_roll −180° 平移(轨迹 [26,44]°→[−154,−136]°,
+  ±160° 限内零裁剪),同面 sign,fh_block_syn 三门全净、七轴 92-100%——正手挡位白得健康资产,
+  原 franco_fh_block 降级重定向修复案。canonical 正式化 prereg 草案入库
+  (research/PREREG_canonical_formalization_draft_20260723.md):五工具解绑/11+1 段三证重产/
+  三变体(原/adv2c3/loop)/40.3° 裁决项/挡族同面 sign 规范/两张新卷。pod3 已静默可归还。
 - FINAL 11 段终表 **v3** 定稿(07-23 晨,URDF 拍面口径):grip 自由度取消后 9/11 段全谱
   96-100%(速度边界全 5-8、方向 vy2.4);三个站位 yaw 修正(-147/-80/-72°)翻案 v2 的
   "fh_loop 弱/bh_block 锁死"伪影;仅剩两真病灶=fh_block GMR 腕轨迹拍面病(唯一全零,曾被
