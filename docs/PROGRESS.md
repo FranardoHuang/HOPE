@@ -37,6 +37,10 @@
   （c102b9e3/ca078850 家族改 hope_commands/commands 后 host stub 未同步：缺
   `planner_revision_enabled`/`_clip_names`/假 motion、MotionLoader 收 PosixPath、teacher 收据
   规范名漂移）——四类全是测试侧欠账，纯测试文件修复后 97 绿，源码零改动。
+- 首帧穷举+主选终审包(07-23):注册首帧定帧——正手 fh_loop f40(唯一 ≤0.5 候选)/反手
+  bh_loop_b f62(worst+mean 双冠);双站姿全库 0.280-0.474s。C 肩 roll 贴限裁决=有风险需
+  morph 不必换件(钳位后 t_hit 不变)。B/A/C 真部署口径:C 仅快 B 0.023s 而窗宽差 2.2 倍,
+  建议维持 B 主选,换将条件三条已列。正式化战役按 Franco 打断暂停,待其确认首帧+主选后重开。
 - 五动作合集定案+正式化开工(07-23):合集=fh_loop/bh_loop_b/fh_block_syn/bh_block/s0;
   bh_loop 终判 B 主选 A 挑战者 C 存档;分工路由(高球→压/近身→挡/远慢→拉/快→挡)阈值由
   扫描几何数据定;每段三变体(原/adv2c3/loop)canonical 三证重产后进 main 供直接训练。
