@@ -93,3 +93,22 @@ bang-bang 转移 + minimax 共同 ready(SET_ALL=bh_loop_b 的 ready,worst 0.86s)
 canonical 正式化时必须裁决;⑥B 的 URDF 锚更深(f94),原就绪 0.86s、2c/3 前置 0.42✓,
 清偿=前置或卸肩;⑦九段仍影子件禁注册训练;三个站位 yaw 修正应进 SE2 注册草案。
 母本+全部证据:pod2 franco_pipeline_20260722/drafts/FINAL_11_TABLE_v3.{md,json} + facescan/。
+
+---
+
+# v4 增补(07-23,第四轮收官)+ 五动作合集定案
+
+**部署真口径 t_hit(共同前置零速 ready,minimax)**:正手组 worst **0.474s** / 反手组 worst
+**0.434s**——**双站姿方案下全库 ≤0.5s 达标**;单一全集 ready 仅 B/fh_loop 超 0.035-0.039s。
+**S0 修正**:高球带专属卷 × 1-8 m/s **全档 100%**("够高就能扣"证实,旧边界 1-2.5 系考卷伪影)。
+**fh_block_syn**(自 bh_block 单轴 wrist_roll −180° 合成,同面 sign):三门全净、七轴 92-100%,
+顶替全零的 franco_fh_block(原件降级重定向修复案)。
+
+**bh_loop 终判**:B 主选(窗最宽 200/220ms、三证最全、反手组共同 ready=B 姿态零转移税);
+A 挑战者(动力学 2.46s 最好、t_hit 0.56/0.28 最快,但窗 100/40ms 窄、SE2 未做——正式化时
+补 SE2+三证同卷对照);C 存档(肩 roll 贴限)。
+
+**五动作合集(Franco 定)**:fh_loop / bh_loop_b / fh_block_syn / bh_block / s0_highpress。
+分工路由(阈值由扫描几何定):高球→高压(任意速度);近身→挡;远/有时间→拉;快球倾向挡。
+每段三变体进 main 训练:原版 / *_adv2c3(2c/3 前置起)/ *_loop(收尾帧=起始帧,恒扭矩回位闭环)。
+执行按 PREREG_canonical_formalization_draft_20260723.md,战役进行中。

@@ -37,6 +37,9 @@
   （c102b9e3/ca078850 家族改 hope_commands/commands 后 host stub 未同步：缺
   `planner_revision_enabled`/`_clip_names`/假 motion、MotionLoader 收 PosixPath、teacher 收据
   规范名漂移）——四类全是测试侧欠账，纯测试文件修复后 97 绿，源码零改动。
+- 五动作合集定案+正式化开工(07-23):合集=fh_loop/bh_loop_b/fh_block_syn/bh_block/s0;
+  bh_loop 终判 B 主选 A 挑战者 C 存档;分工路由(高球→压/近身→挡/远慢→拉/快→挡)阈值由
+  扫描几何数据定;每段三变体(原/adv2c3/loop)canonical 三证重产后进 main 供直接训练。
 - 第四轮三格收官(07-23):①**部署真口径 t_hit**:正/反手两个共同前置站姿下全库 11 段
   全 ≤0.5s(FH worst 0.474/BH worst 0.434);单一全集 ready 仅 B/fh_loop 超 0.035-0.039s。
   ②**S0 高压理论证实**:高球带 × 1-8 m/s 全档 100%——"够高就能扣"成立,旧"边界 1-2.5"系
