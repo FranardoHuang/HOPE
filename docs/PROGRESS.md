@@ -37,6 +37,11 @@
   （c102b9e3/ca078850 家族改 hope_commands/commands 后 host stub 未同步：缺
   `planner_revision_enabled`/`_clip_names`/假 motion、MotionLoader 收 PosixPath、teacher 收据
   规范名漂移）——四类全是测试侧欠账，纯测试文件修复后 97 绿，源码零改动。
+- v7 终表落账(07-23):11 段终审表齐(切片/直达 t_hit、t_recover、t_cycle、速度/方向边界、
+  窗宽、逐段管线距离,全人话列+2c/3 名词卡);主选 C 的 t_cycle 0.266 家族最快(直达 t_hit
+  与 s0 并列 0.109);syn 腕拧 0.212 含在 t_recover、正式版锥回后 ≈0.17;旋转轴未测入 caveat
+  (v1 阶梯随口径作废),s0 方向轴欠专卷。双对抗复核 CONFIRMED(时间偏差 ≤0.5ms)。
+  全身版 fb_adv2c3 七件战役在跑,产物与同款表格待落。
 - 变体谱系终审拍板(07-23,Franco):**adv2c3 是主训练件**(模仿参考=各动作 2c/3 切片;
   共同 ready→2c/3 起点的过渡不写死、不进时间账,RL 自动学);**loop 版废弃**(构造回位尾加时
   太久);**原版只当对照**。主选已换 bh_loop_c。正式化按此谱系:每动作 2 件=adv2c3(主)+原版(对照)。
