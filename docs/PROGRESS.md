@@ -37,6 +37,12 @@
   （c102b9e3/ca078850 家族改 hope_commands/commands 后 host stub 未同步：缺
   `planner_revision_enabled`/`_clip_names`/假 motion、MotionLoader 收 PosixPath、teacher 收据
   规范名漂移）——四类全是测试侧欠账，纯测试文件修复后 97 绿，源码零改动。
+- FINAL 11 段终表 **v3** 定稿(07-23 晨,URDF 拍面口径):grip 自由度取消后 9/11 段全谱
+  96-100%(速度边界全 5-8、方向 vy2.4);三个站位 yaw 修正(-147/-80/-72°)翻案 v2 的
+  "fh_loop 弱/bh_block 锁死"伪影;仅剩两真病灶=fh_block GMR 腕轨迹拍面病(唯一全零,曾被
+  解得 grip 掩盖)+ v12_fh_block 方向锥窄;s0 边界 1-2.5=慢高球分工正确;共享就绪税
+  0.07-0.16s;**在册 v4rg bake 拍面偏 URDF 40.3° 挂账待裁**;B URDF 锚复测 2c/3 0.42✓。
+  pod3 分流净赚 ~1.5h 已空载可归还。表见 final_11_motion_table_20260723.md v3 节。
 - pod3 借用入档(07-23,Franco 提供):`ssh root@74.2.96.37 -p 14176 -i ~/.ssh/id_ed25519_runpod`
   ——128 核/3×RTX 5090/基本空载;有 IsaacLab+hope_isaac_venv(一条安装中断日志,完整性待验),
   无 mjeval venv 与 codexschema 资产,借用需先 bootstrap。用途:扫描/认证类 CPU 战役分流与
