@@ -2657,9 +2657,9 @@ _REWARD_PACK_V2_KEYED = (
     ("foot_drag_weight", 0.0),           # 拖脚税下岗(v1 源码 -0.5)
     # L3 击球三通道(redesign §3.5:名义值,probe 校准后冻结 prereg)。用户显式键照旧赢:
     # 现役波 yaml 里的 17/7/5 显式键继续生效,包不碰。
-    ("racket_position_weight", 60.0),    # 窗口 dense 位置核(名义 60,W 偏位档)
-    ("racket_velocity_weight", 45.0),    # 窗口 dense 拍速核(名义 45)
-    ("racket_normal_weight", 35.0),      # 窗口 dense 拍面法向核(名义 35)
+    ("racket_position_weight", 393.4),   # 触点尖峰位置核(v4rg probe 冻结 07-26;k_eff 口径)
+    ("racket_velocity_weight", 295.1),   # 拍速核(v4rg 冻结)
+    ("racket_normal_weight", 229.5),     # 拍面核(v4rg 冻结)
 )
 # 今天没有 CLI 键的项:直接写 cfg 对象上的 weight(与 free_non_striking_arm_mimic 等
 # direct-cfg 改动同款,逐条记 applied,标 reward_pack=v2)。
@@ -2681,8 +2681,8 @@ _REWARD_PACK_V2_DIRECT = (
     # v2.2(Franco 07-25):上台组只留 landing 一项——"过网+落台"是先决条件(gate)
     # 而非单独给钱的项;pass_net 的过网高塑形随之下岗(先决条件由 gate 表达)。
     ("virtual_pass_net", 0.0),
-    ("virtual_landing", 3600.0),         # 唯一每拍大奖:legal 门内任意落点可观底薪+中心核
-                                         # 梯度,量级名义 ~3600:上台层 PSE≈20=2.5×质量层,Franco 07-26 终裁(probe 校准)
+    ("virtual_landing", 1648.8),         # 唯一每拍大奖(v4rg 冻结:18.46×46.3/(0.6×0.864))
+                                         # 阶梯 1:3:7.5 锚实测模仿收入(Franco 07-26 终裁);换动作谱系必须重 probe 重定
     ("virtual_spin", 0.0),               # 弧圈类动作自带旋转,minimize 先验打架动作身份;
                                          # 遥测保留;落点预测本就旋转感知(RK4 含 Magnus)
 )

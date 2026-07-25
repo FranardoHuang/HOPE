@@ -39,7 +39,11 @@ M1 = 2.0            # 击中层 vs 模仿层边际
 M2 = 1.5            # 质量层 vs 击中层边际
 F_PENALTY = 0.15    # 罚项预算占早期收入的分数
 RHO_I_MIN = 0.4     # 罚项预算用的早期模仿达成度下限
-QUALITY_SPLIT = (60.0, 45.0, 35.0)   # pos:vel:normal 名义比例(W 偏位;只用比例,绝对值重算)
+QUALITY_SPLIT = (60.0, 45.0, 35.0)   # pos:vel:normal 内部比例(W 偏位;只用比例,绝对值重算)
+# 07-26 probe 发现:质量核是"触点尖峰"不是窗内平铺(swing-through 基准+拍速目标在窗
+# 前后段天然远)——定权口径从 duty×ρ_Q 改为实测 k_eff(每拍有效满值步数):
+#   PSE_quality = Σ w_i·k_eff_i / T_c。阶梯按 Franco 07-26 终裁比例 1 : 3 : 7.5
+# (模仿:质量:上台),锚在实测模仿收入 PSE_mimic = I×ρ_I 上。
 # v2.1(Franco 07-25 裁定):strike_success/capture_bonus 两个人造 AND 代理删除;
 # 上台组(落点=物理正确的联合成绩单)扛"击中+打好"层,目标 PSE = 质量层 x 比例。
 TABLE_OVER_QUALITY = 2.5             # 上台层 PSE 目标 ≈20(Franco 07-26 终裁:2.5×质量层 8.1≈20.25;质量 60/45/35 一分不动)
@@ -47,7 +51,7 @@ TABLE_OVER_QUALITY = 2.5             # 上台层 PSE 目标 ≈20(Franco 07-26 �
 # pass_net 塑形下岗,legal 门内 base_frac 底薪 + 中心核梯度(hope_rewards legal_base 模式)。
 
 _REQUIRED = (
-    "I_weight_sum", "rho_I", "rho_Q", "p_capture_target",
+    "I_weight_sum", "rho_I", "k_eff_pos", "k_eff_vel", "k_eff_normal",
     "T_c_steps", "window_steps", "action_rate_sq_p95", "action_acc_sq_p95",
     # v2.2 上台定权输入:每拍合法(过网+落台)概率目标 与 legal 门内 landing 项期望值
     # (base+(1-base)×核,∈[base,1];probe 反推)
@@ -76,14 +80,13 @@ def calibrate(measured: dict) -> dict:
             raise ValueError(f"measured[{key!r}] must be a finite number, got {value!r}")
     I = float(measured["I_weight_sum"])
     rho_i = float(measured["rho_I"])
-    rho_q = float(measured["rho_Q"])
-    p_star = float(measured["p_capture_target"])
+    k_eff = tuple(float(measured[k]) for k in ("k_eff_pos", "k_eff_vel", "k_eff_normal"))
     t_c = float(measured["T_c_steps"])
     w_steps = float(measured["window_steps"])
-    if not 0.0 < rho_i <= 1.0 or not 0.0 < rho_q <= 1.0:
-        raise ValueError("rho_I / rho_Q must be in (0, 1]")
-    if not 0.0 < p_star <= 1.0:
-        raise ValueError("p_capture_target must be in (0, 1]")
+    if not 0.0 < rho_i <= 1.0:
+        raise ValueError("rho_I must be in (0, 1]")
+    if any(k <= 0 or k > w_steps for k in k_eff):
+        raise ValueError("k_eff_* must be in (0, window_steps](每拍有效满值步数)")
     if t_c <= 0 or w_steps <= 0 or I <= 0:
         raise ValueError("I_weight_sum / T_c_steps / window_steps must be positive")
     if w_steps >= t_c:
@@ -97,12 +100,11 @@ def calibrate(measured: dict) -> dict:
         raise ValueError("E_land_value_per_legal must be in (0, 1] (legal_base 值域)")
     # L1 模仿:每步等效收入(weight-units/步;×dt 才是真 reward,比例不变)
     pse_mimic = I * rho_i
-    # L2' 质量(窗口 dense,分开学):Σw·duty·rho_Q = m2·m1·PSE_mimic
+    # L2' 质量(触点尖峰,k_eff 口径):scale s 使 s·Σ(split_i·k_eff_i)/T_c = 3×PSE_mimic
     pse_quality = M2 * M1 * pse_mimic
-    duty = w_steps / t_c
-    quality_sum = pse_quality / (duty * rho_q)
-    split_total = sum(QUALITY_SPLIT)
-    w_pos, w_vel, w_norm = (quality_sum * s / split_total for s in QUALITY_SPLIT)
+    k_weighted = sum(sp * k for sp, k in zip(QUALITY_SPLIT, k_eff))
+    scale = pse_quality * t_c / k_weighted
+    w_pos, w_vel, w_norm = (scale * sp for sp in QUALITY_SPLIT)
     # L3' 上台(每拍一次性,唯一保留 landing;legal=先决条件):
     # PSE_table = w_land·E_land·p_legal*/T_c = TABLE_OVER_QUALITY × PSE_quality
     pse_table = TABLE_OVER_QUALITY * pse_quality

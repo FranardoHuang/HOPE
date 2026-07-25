@@ -21,11 +21,13 @@ from v2_weight_calibration import calibrate  # noqa: E402
 
 def _nominal(**over):
     base = {
+        # 07-26 起名义夹具 = v4rg probe 实测值(k_eff 口径)
         "I_weight_sum": 4.5,
-        "rho_I": 0.6,
-        "rho_Q": 0.5,
-        "p_capture_target": 0.7,
-        "T_c_steps": 100,
+        "rho_I": 0.547,
+        "k_eff_pos": 0.73,
+        "k_eff_vel": 0.057,
+        "k_eff_normal": 0.165,
+        "T_c_steps": 46.3,
         "window_steps": 13,
         "action_rate_sq_p95": 10.0,
         "action_acc_sq_p95": 40.0,
@@ -40,21 +42,19 @@ def _nominal(**over):
 def test_nominal_inputs_reproduce_the_blueprint_table():
     out = calibrate(_nominal())
     fr = out["frozen"]
-    # v2.2 终裁:上台 PSE≈20(2.5×)。w_land = 2.5×8.1×100/(0.7×0.8) ≈ 3616.1;pass_net 冻结 0
-    assert fr["virtual_landing_weight"] == pytest.approx(3616.1, abs=0.3)
+    # 阶梯 1:3:7.5 锚实测:PSE_mimic=2.4615, q=7.3845, table=18.461
+    # 质量 scale = 7.3845×46.3/(60×0.73+45×0.057+35×0.165=52.14) = 6.557 → 393.4/295.1/229.5
+    assert fr["racket_position_weight"] == pytest.approx(393.4, abs=0.5)
+    assert fr["racket_velocity_weight"] == pytest.approx(295.1, abs=0.5)
+    assert fr["racket_normal_weight"] == pytest.approx(229.5, abs=0.5)
+    # w_land = 18.461×46.3/(0.7×0.8) ≈ 1526.2(夹具 p_legal 0.7/E 0.8;正式表用实测 0.6/0.864)
+    assert fr["virtual_landing_weight"] == pytest.approx(1526.2, abs=0.5)
     assert fr["virtual_pass_net_weight"] == 0.0
     # 被删代理冻结为 0
     assert fr["racket_strike_success_weight"] == 0.0
     assert fr["strike_capture_bonus_weight"] == 0.0
     assert fr["virtual_spin_weight"] == 0.0
-    # 质量组 Σw = m2·m1·I·rho_I/(duty·rho_Q) = 1.5×2×2.7/(0.13×0.5) ≈ 124.6,按 60:45:35 分
-    total = (
-        fr["racket_position_weight"]
-        + fr["racket_velocity_weight"]
-        + fr["racket_normal_weight"]
-    )
-    assert total == pytest.approx(124.6, abs=0.3)
-    # 输出按 1 位小数取整,比例断言给 1% 容差(53.4/40.1=1.3317 vs 4/3)
+    # 内部比例 60:45:35 保持
     assert fr["racket_position_weight"] / fr["racket_velocity_weight"] == pytest.approx(60 / 45, rel=1e-2)
     assert fr["racket_velocity_weight"] / fr["racket_normal_weight"] == pytest.approx(45 / 35, rel=1e-2)
     assert out["accounting"]["ordering_ok"] is True
@@ -62,9 +62,9 @@ def test_nominal_inputs_reproduce_the_blueprint_table():
 
 def test_ordering_holds_across_measured_ranges():
     for rho_i in (0.3, 0.6, 0.9):
-        for rho_q in (0.2, 0.5, 0.9):
+        for _ in (1,):
             for p in (0.3, 0.7, 1.0):
-                acc = calibrate(_nominal(rho_I=rho_i, rho_Q=rho_q, p_capture_target=p))["accounting"]
+                acc = calibrate(_nominal(rho_I=rho_i, p_legal_target=p))["accounting"]
                 assert acc["ordering_ok"], (rho_i, rho_q, p)
                 assert acc["pse_mimic"] < acc["pse_quality_at_target"] < acc["pse_table_at_target"]
 
@@ -93,9 +93,11 @@ def test_fail_loud_surfaces():
     with pytest.raises(ValueError, match="finite number"):
         calibrate(_nominal(rho_I=float("nan")))
     with pytest.raises(ValueError, match="finite number"):
-        calibrate(_nominal(rho_Q=True))
+        calibrate(_nominal(k_eff_vel=True))
     with pytest.raises(ValueError, match=r"in \(0, 1\]"):
         calibrate(_nominal(rho_I=0.0))
+    with pytest.raises(ValueError, match="k_eff"):
+        calibrate(_nominal(k_eff_pos=0.0))
     with pytest.raises(ValueError, match="盖满整拍"):
         calibrate(_nominal(window_steps=100))
     with pytest.raises(ValueError, match="positive"):
@@ -106,7 +108,7 @@ def test_one_shot_prize_lives_only_in_the_table_group():
     # v2.1:唯一的每拍大额结算在上台组(物理组合),代理 one-shot 恒 0
     out = calibrate(_nominal())
     assert out["frozen"]["strike_capture_bonus_weight"] == 0.0
-    assert out["accounting"]["per_swing_table_prize"] == pytest.approx(2892.9, abs=1.0)
+    assert out["accounting"]["per_swing_table_prize"] == pytest.approx(1526.2*0.8, abs=1.5)
 
 
 def test_higher_measured_imitation_scales_everything_proportionally():

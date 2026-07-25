@@ -1,6 +1,6 @@
 # v2 Reward 详解(默认包)— 2026-07-25
 
-**地位**:v2 是默认(`reward_pack` 缺席即 v2;`reward_pack=v1` 显式兜底,老配方必须声明才能渲染)。数值为名义档(§2 公式代入),probe 校准后冻结 prereg。设计依据:[reward_redesign_20260725.md](reward_redesign_20260725.md)(蓝图+论文对照+定权公式),现状盘点:[reward_audit_20260725.md](reward_audit_20260725.md)。
+**地位**:v2 是默认(`reward_pack` 缺席即 v2;`reward_pack=v1` 显式兜底,老配方必须声明才能渲染)。**数值已按 v4rg probe 冻结(07-26)**:质量 393.4/295.1/229.5、landing 1648.8,阶梯 2.46:7.38:18.46=1:3:7.5;冻结依据与谱系约束见 [EXP-V2-REWARD-FREEZE-20260726](../experiments/2026-07/EXP-V2-REWARD-FREEZE-20260726.md)。§2 表中的"名义"档为设计推导过程记录;**probe 关键发现:质量核是触点尖峰(k_eff 口径),非窗内平铺**。设计依据:[reward_redesign_20260725.md](reward_redesign_20260725.md)(蓝图+论文对照+定权公式),现状盘点:[reward_audit_20260725.md](reward_audit_20260725.md)。
 
 **记账口径**:每步 reward = Σ_项 weight × value × dt,dt = 0.02 s(50 Hz 控制);weight=0 的项被整个跳过。one-shot 项在触发那一步一次记满。
 

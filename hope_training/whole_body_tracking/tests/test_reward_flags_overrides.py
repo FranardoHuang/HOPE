@@ -1765,15 +1765,15 @@ _PACK_V2_WEIGHTS = {
     "prestrike_waist_twist": 0.0,
     "foot_slip_sq": -0.1,
     "foot_drag": 0.0,
-    "racket_position": 60.0,
-    "racket_velocity": 45.0,
-    "racket_normal": 35.0,
+    "racket_position": 393.4,
+    "racket_velocity": 295.1,
+    "racket_normal": 229.5,
     # v2.1(Franco 07-25):两个人造 AND 代理删除,上台组扛大奖,spin 先验删除
     "racket_strike_success": 0.0,
     "strike_capture_bonus": 0.0,
     # v2.2:上台只留 landing(过网+落台=先决条件 gate,pass_net 塑形下岗)
     "virtual_pass_net": 0.0,
-    "virtual_landing": 3600.0,
+    "virtual_landing": 1648.8,
     "virtual_spin": 0.0,
 }
 
@@ -1825,16 +1825,16 @@ def test_reward_pack_defaults_to_v2_full_expansion():
     assert "racket_target.adaptive_sigma=True (reward_pack defaulted to v2)" in applied
     # 逐项走的仍是 v2 包机器:defaulted 标记之外,每条包改动照旧带 reward_pack=v2
     assert "rewards.hit_unstable_support.weight=-10.0 (reward_pack=v2)" in applied
-    assert "rewards.virtual_landing.weight=3600.0 (reward_pack=v2)" in applied
+    assert "rewards.virtual_landing.weight=1648.8 (reward_pack=v2)" in applied
     assert not any("strike_capture_bonus" in m for m in applied)  # v2.1:代理不进包
-    assert "rewards.racket_position.weight=60.0" in applied
+    assert "rewards.racket_position.weight=393.4" in applied
 
 
 def test_reward_pack_default_applies_when_rewards_node_is_absent_entirely():
     # 连 rewards 节点都没有的任务照样吃默认包(线上大量任务节点只配 racket/motion)。
     env_cfg, applied = _apply_default({"motion": {"hold_steps_range": [0, 100]}})
     assert env_cfg.rewards.upright_exp.weight == pytest.approx(1.0)
-    assert env_cfg.rewards.virtual_landing.weight == pytest.approx(3600.0)
+    assert env_cfg.rewards.virtual_landing.weight == pytest.approx(1648.8)
     assert env_cfg.rewards.virtual_landing.params["mode"] == "legal_base"
     assert env_cfg.rewards.strike_capture_bonus.weight == pytest.approx(0.0)
     assert _PACK_DEFAULTED_MARKER in applied
@@ -1857,7 +1857,7 @@ def test_reward_pack_default_explicit_keys_still_win():
     assert R.racket_normal.weight == pytest.approx(5.0)
     # 没被压过的包项照常落地
     assert R.hit_unstable_support.weight == pytest.approx(-10.0)
-    assert R.virtual_landing.weight == pytest.approx(3600.0)
+    assert R.virtual_landing.weight == pytest.approx(1648.8)
     assert R.strike_capture_bonus.weight == pytest.approx(0.0)  # v2.1:代理不进包
     assert len([m for m in applied if "user override wins" in m]) == 3
 
@@ -1908,9 +1908,9 @@ def test_reward_pack_v2_expands_every_blueprint_mutation_with_markers():
     # 键控注入的项同时会有覆写层自己的标准记账(证明真走了现有翻译层)
     assert "rewards.hold_ready.weight=0.0" in applied
     assert "rewards.foot_slip_sq.weight=-0.1" in applied
-    assert "rewards.racket_position.weight=60.0" in applied
-    assert "rewards.racket_velocity.weight=45.0" in applied
-    assert "rewards.racket_normal.weight=35.0" in applied
+    assert "rewards.racket_position.weight=393.4" in applied
+    assert "rewards.racket_velocity.weight=295.1" in applied
+    assert "rewards.racket_normal.weight=229.5" in applied
     assert len([m for m in applied if "full-body mimic" in m]) == 4
     # direct 项的标记逐条在
     assert "rewards.hit_unstable_support.weight=-10.0 (reward_pack=v2)" in applied
@@ -1959,7 +1959,7 @@ def test_reward_pack_v2_explicit_user_keys_win():
     assert env_cfg.commands.racket_target.adaptive_sigma_normal is False
     # 没被用户压过的包项照常落地
     assert R.hit_unstable_support.weight == pytest.approx(-10.0)
-    assert R.virtual_landing.weight == pytest.approx(3600.0)
+    assert R.virtual_landing.weight == pytest.approx(1648.8)
     assert R.strike_capture_bonus.weight == pytest.approx(0.0)
     assert R.foot_drag.weight == 0.0
     assert len([m for m in applied if "user override wins" in m]) == 7
