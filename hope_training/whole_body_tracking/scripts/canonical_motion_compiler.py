@@ -168,6 +168,21 @@ class CompilerOptions:
     # ladder.  Probe-grade only; the independent verifier rejects banks
     # built this way (like banded enumeration).
     probe_exact_pointwise_caps: bool = False
+    # Probe-only source smoothing: when set, each motion's scoped source
+    # coordinate array is smoothed once (per motion+scope) with iterative
+    # binomial [1,4,6,4,1]/16 passes before entry/exit enumeration and
+    # geometry construction, stopping before any coordinate's max-abs
+    # deviation from the raw source exceeds this tolerance.  It suppresses the
+    # phantom curvature spike a noisy quintic connector inherits at junctions
+    # (the spike collapses the local speed cap, which the no-early-brake law
+    # then propagates backward over the whole approach).  Frame indices are
+    # untouched, so markers stay valid; endpoints stay exactly raw.  For root
+    # position columns in full scope the tolerance is read in that
+    # coordinate's own unit (metres for root xyz, radians for joints and the
+    # ready-relative root rotation vector).  None (default) is the exact
+    # current behaviour byte-for-byte.  Probe-grade only; the independent
+    # verifier rejects banks built this way (like banded enumeration).
+    probe_source_smoothing_tolerance_rad: float | None = None
 
 
 @dataclass(frozen=True)

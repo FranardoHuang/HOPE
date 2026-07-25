@@ -1172,6 +1172,10 @@ class HOPEVirtualBallRewardsCfg(HOPEDeployParityRewardsCfg):
     # 归零它并启用本项,weight −0.2/clamp 9.0 来自冻结表)。默认 0 = 跳过,字节等价。
     action_rate_clamped = RewTerm(
         func=mdp.action_rate_l2_clamped, weight=0.0, params={"value_clamp": 9.0})
+    # 死亡罚(Franco 07-26:延付只拉长刷分周期没关死——摔死重生仍在"跳过等下一球"上
+    # 套利;罚值须比上台大奖大:weight −1800 = 每次死亡实际 −36 > 满分上台券 33)。
+    # is_terminated 只计真终止(摔倒/包络),timeout 截断不罚。默认 0 = 跳过,字节等价。
+    death_penalty = RewTerm(func=mdp.is_terminated, weight=0.0)
 
     # D6 source gate (2026-07-14, DEFAULT OFF): penalize only the normalized tail above 85% of
     # each *actual articulation* joint-speed limit.  This is not action-rate smoothing: it reads

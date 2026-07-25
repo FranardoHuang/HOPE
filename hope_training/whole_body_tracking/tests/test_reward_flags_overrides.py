@@ -228,6 +228,7 @@ def _make_env_cfg(anchor_pos_none=True):
         ),
         strike_capture_bonus=_Term(weight=0.0, params={"command_name": "racket_target"}),
         action_rate_clamped=_Term(weight=0.0, params={"value_clamp": 9.0}),
+        death_penalty=_Term(weight=0.0),
         action_acc_l2=_Term(weight=0.0, params={"action_name": "joint_pos"}),
         # v2.1(Franco 07-25 裁定):上台组扛"击中+打好"主奖;假 cfg 按 VirtualBall 谱系默认声明
         virtual_pass_net=_Term(weight=20.0, params={"command_name": "racket_target"}),
@@ -1781,6 +1782,7 @@ _PACK_V2_WEIGHTS = {
     "action_rate_l2": 0.0,
     "action_rate_clamped": -0.2,
     "action_acc_l2": -0.05,
+    "death_penalty": -1800.0,
 }
 
 _PACK_DEFAULTED_MARKER = (
@@ -1922,7 +1924,7 @@ def test_reward_pack_v2_expands_every_blueprint_mutation_with_markers():
     assert env_cfg.commands.racket_target.adaptive_sigma is True
     # 每条包改动的 applied 标记都带 reward_pack=v2:1 总标记 + 10 键控注入 + 10 direct + 1 racket
     pack_markers = [m for m in applied if "reward_pack=v2" in m]
-    assert len(pack_markers) == 29  # +acc weight/clamp 与封顶平滑两项
+    assert len(pack_markers) == 30  # +death_penalty
     # 键控注入的项同时会有覆写层自己的标准记账(证明真走了现有翻译层)
     assert "rewards.hold_ready.weight=0.0" in applied
     assert "rewards.foot_slip_sq.weight=-0.1" in applied

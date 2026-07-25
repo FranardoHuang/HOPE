@@ -20,7 +20,15 @@
 发放,死亡/重置/换题没收(settle_delay_s=0.24 进 v2 包;same_attempt 时钟复用 settle 系)。
 语义 = 上台且站得住才算数;不误伤学站阶段。工程约束:延付窗必须小于随挥 wrap 窗
 (planner 重定时下 ~21 步),relaunch 后盯 landing 实付率验证不被 wrap 误没收。
-事故臂 run 目录保留取证;relaunch 以 _r2 名义、待 Franco 确认修订后执行。
+事故臂 run 目录保留取证。
+
+**Franco 复核后加固(07-26)**:延付只把刷分周期拉长 12 步没关死——(奖26−0)/28步 vs 26/46步,
+摔死重生仍在"跳过等下一球"上套利。两刀补全:①**死亡罚 death_penalty −1800**(=每次死
+−36 实际 > 满分上台券 33,"比上台抽奖大一些";只计真终止不计 timeout;刷分账变
+(26−36)/28=−0.36/步严格负;PACE −1000×dt=−20 同量级先例);②**relaunch 起步改
+stand_start_prob=1.0**(去掉挥拍中段 RSI 空降——BeyondMimic 有 RSI 但 PACE 无、HITTER 连续
+挥拍不靠空降,内证:yikang r2 取证单 clip 随机相位仅 38.7% 到击球帧、canonical_ready_mode
+本就设计 frame-0 起步)。延付保留为纵深(领奖前 0.24s 摔=直接没收)。
 
 ## 1. 冻结表(scripts/v2_weight_calibration.py 输出,逐字)
 

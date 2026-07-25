@@ -2689,6 +2689,10 @@ _REWARD_PACK_V2_DIRECT = (
     # 值封顶平滑(fresh 自杀区间的解,冻结表档位):无封顶 action_rate_l2 归零,换封顶版。
     ("action_rate_l2", 0.0),
     ("action_rate_clamped", -0.2),
+    # 死亡罚(07-26 刷分事故的主修复;延付为纵深):−1800×dt=−36/次 > 满分上台 33。
+    # 刷分账:(26−36)/28 步 = 每步 −0.36 严格负;学站阶段死亡有价 → 梯度指向活久,
+    # 与自杀区间(死免费活扣钱)方向相反。PACE 先例 −1000×dt=−20 同量级。
+    ("death_penalty", -1800.0),
 )
 # v2.2 direct-params:landing 换 legal_base 语义(v1 climb 字节等价保留在函数默认)。
 _REWARD_PACK_V2_LANDING_PARAMS = {"mode": "legal_base", "base_frac": 0.6, "settle_delay_s": 0.24}
