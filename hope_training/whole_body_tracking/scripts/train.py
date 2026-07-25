@@ -2655,6 +2655,7 @@ _REWARD_PACK_V2_KEYED = (
     ("prestrike_waist_twist_weight", 0.0),  # 挥前拧腰税下岗
     ("foot_slip_sq_weight", -0.1),       # 触地脚蹭滑降到 mjlab 档位(v1 源码 -1.0)
     ("foot_drag_weight", 0.0),           # 拖脚税下岗(v1 源码 -0.5)
+    ("action_acc_weight", -0.05),        # 二阶平滑(mjlab 1/4 档;clamp 36.0 由 direct-params 落)
     # L3 击球三通道(redesign §3.5:名义值,probe 校准后冻结 prereg)。用户显式键照旧赢:
     # 现役波 yaml 里的 17/7/5 显式键继续生效,包不碰。
     ("racket_position_weight", 393.4),   # 触点尖峰位置核(v4rg probe 冻结 07-26;k_eff 口径)
@@ -2685,6 +2686,9 @@ _REWARD_PACK_V2_DIRECT = (
                                          # 阶梯 1:3:7.5 锚实测模仿收入(Franco 07-26 终裁);换动作谱系必须重 probe 重定
     ("virtual_spin", 0.0),               # 弧圈类动作自带旋转,minimize 先验打架动作身份;
                                          # 遥测保留;落点预测本就旋转感知(RK4 含 Magnus)
+    # 值封顶平滑(fresh 自杀区间的解,冻结表档位):无封顶 action_rate_l2 归零,换封顶版。
+    ("action_rate_l2", 0.0),
+    ("action_rate_clamped", -0.2),
 )
 # v2.2 direct-params:landing 换 legal_base 语义(v1 climb 字节等价保留在函数默认)。
 _REWARD_PACK_V2_LANDING_PARAMS = {"mode": "legal_base", "base_frac": 0.6}
@@ -2781,6 +2785,18 @@ def _expand_reward_pack(env_cfg, task, rw, applied):
     applied.append(
         f"rewards.virtual_landing.params+={_REWARD_PACK_V2_LANDING_PARAMS} (reward_pack=v2)"
     )
+    # v2 值封顶:action_acc 的 clamp 参数(weight 走 KEYED 的 action_acc_weight)。
+    _acc = getattr(R, "action_acc_l2", None)
+    _require(_acc is not None, "rewards.action_acc_l2 (reward_pack=v2 value clamp)")
+    _acc.params["value_clamp"] = 36.0
+    applied.append("rewards.action_acc_l2.params.value_clamp=36.0 (reward_pack=v2)")
+    # v2 定义禁止显式无封顶 action_rate_weight 与包并用(会双计费;legacy 配方请 reward_pack=v1)。
+    if _get(rw, "action_rate_weight") is not None:
+        raise _OverrideError(
+            "[train.py] reward_pack=v2 replaces action_rate_l2 with the value-clamped "
+            "action_rate_clamped; drop rewards.action_rate_weight (legacy recipes must "
+            "declare reward_pack=v1)."
+        )
     # racket 侧:拍面 sigma 第三通道。rewards 块在 racket 块【之前】跑,所以这里直接写
     # cfg 属性;用户显式的 task.racket.adaptive_sigma_normal 会在后面的 racket 翻译层
     # 覆写回去(后写后赢)。

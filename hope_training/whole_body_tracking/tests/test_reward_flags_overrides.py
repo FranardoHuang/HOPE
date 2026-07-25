@@ -227,6 +227,8 @@ def _make_env_cfg(anchor_pos_none=True):
             },
         ),
         strike_capture_bonus=_Term(weight=0.0, params={"command_name": "racket_target"}),
+        action_rate_clamped=_Term(weight=0.0, params={"value_clamp": 9.0}),
+        action_acc_l2=_Term(weight=0.0, params={"action_name": "joint_pos"}),
         # v2.1(Franco 07-25 裁定):上台组扛"击中+打好"主奖;假 cfg 按 VirtualBall 谱系默认声明
         virtual_pass_net=_Term(weight=20.0, params={"command_name": "racket_target"}),
         virtual_landing=_Term(weight=30.0, params={"command_name": "racket_target"}),
@@ -1775,6 +1777,10 @@ _PACK_V2_WEIGHTS = {
     "virtual_pass_net": 0.0,
     "virtual_landing": 1648.8,
     "virtual_spin": 0.0,
+    # 值封顶平滑(fresh 自杀区间解;冻结档位)
+    "action_rate_l2": 0.0,
+    "action_rate_clamped": -0.2,
+    "action_acc_l2": -0.05,
 }
 
 _PACK_DEFAULTED_MARKER = (
@@ -1862,6 +1868,12 @@ def test_reward_pack_default_explicit_keys_still_win():
     assert len([m for m in applied if "user override wins" in m]) == 3
 
 
+def test_reward_pack_v2_rejects_explicit_unclamped_action_rate():
+    # v2 用封顶版;显式 action_rate_weight 会双计费,拒收并指路 v1
+    with pytest.raises(train_mod._OverrideError, match="action_rate_clamped"):
+        _apply({"rewards": {"reward_pack": "v2", "action_rate_weight": -0.2}})
+
+
 def test_reward_pack_default_with_motion_scale_in_window_fails_loud():
     # (d) 默认包 + 显式 motion_scale_in_window = legacy 配方撞新默认:响亮失败,报错文案
     # 直接指路 reward_pack=v1(现役 wave yaml 全配了这个键——有意的响亮失败)。
@@ -1904,7 +1916,7 @@ def test_reward_pack_v2_expands_every_blueprint_mutation_with_markers():
     assert env_cfg.commands.racket_target.adaptive_sigma is True
     # 每条包改动的 applied 标记都带 reward_pack=v2:1 总标记 + 10 键控注入 + 10 direct + 1 racket
     pack_markers = [m for m in applied if "reward_pack=v2" in m]
-    assert len(pack_markers) == 25  # v2.2:+landing params 标记
+    assert len(pack_markers) == 29  # +acc weight/clamp 与封顶平滑两项
     # 键控注入的项同时会有覆写层自己的标准记账(证明真走了现有翻译层)
     assert "rewards.hold_ready.weight=0.0" in applied
     assert "rewards.foot_slip_sq.weight=-0.1" in applied

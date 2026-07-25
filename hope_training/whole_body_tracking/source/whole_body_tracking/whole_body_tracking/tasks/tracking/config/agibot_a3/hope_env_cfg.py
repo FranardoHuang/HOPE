@@ -1168,6 +1168,10 @@ class HOPEVirtualBallRewardsCfg(HOPEDeployParityRewardsCfg):
     #     prereg),reward_pack=v2 的翻译层直写这里的 weight。
     strike_capture_bonus = RewTerm(
         func=mdp.strike_capture_bonus, weight=0.0, params={"command_name": "racket_target"})
+    # v2 值封顶版一阶平滑罚(fresh 自杀区间的解;v1 无封顶 action_rate_l2 照旧,v2 包
+    # 归零它并启用本项,weight −0.2/clamp 9.0 来自冻结表)。默认 0 = 跳过,字节等价。
+    action_rate_clamped = RewTerm(
+        func=mdp.action_rate_l2_clamped, weight=0.0, params={"value_clamp": 9.0})
 
     # D6 source gate (2026-07-14, DEFAULT OFF): penalize only the normalized tail above 85% of
     # each *actual articulation* joint-speed limit.  This is not action-rate smoothing: it reads

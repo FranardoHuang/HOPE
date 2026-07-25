@@ -388,3 +388,19 @@ def test_legal_base_fail_loud_surfaces():
         hope_rewards_mod.virtual_landing(env, "racket_target", mode="legal_base", base_frac=1.5)
     with pytest.raises(ValueError, match="mode"):
         hope_rewards_mod.virtual_landing(env, "racket_target", mode="v3")
+
+
+# --------------------------------------------------------------------------------------------- #
+# action_rate_l2_clamped(v2 值封顶;fresh 自杀区间的解)— 手算
+# --------------------------------------------------------------------------------------------- #
+def test_action_rate_clamped_matches_builtin_below_and_caps_above():
+    mgr = types.SimpleNamespace(
+        action=torch.tensor([[1.0, 2.0], [10.0, 0.0]]),
+        prev_action=torch.tensor([[0.0, 0.0], [0.0, 0.0]]),
+    )
+    env = types.SimpleNamespace(action_manager=mgr)
+    v = hope_rewards_mod.action_rate_l2_clamped(env, value_clamp=9.0)
+    assert v[0].item() == pytest.approx(5.0, abs=1e-6)   # 1+4 < 9:同内置
+    assert v[1].item() == pytest.approx(9.0, abs=1e-6)   # 100 -> 封顶 9
+    with pytest.raises(ValueError, match="value_clamp"):
+        hope_rewards_mod.action_rate_l2_clamped(env, value_clamp=0.0)

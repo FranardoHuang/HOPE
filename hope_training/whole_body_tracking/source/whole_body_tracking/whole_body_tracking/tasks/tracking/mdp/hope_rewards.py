@@ -2711,6 +2711,25 @@ def tracking_envelope_violation(
 #   3. the pass_net CLEAR BONUS pays only for shots that also land legally (net-without-landing
 #      guard); its height KERNEL is deliberately ungated shaping — see virtual_pass_net docstring.
 # ============================================================================================== #
+def action_rate_l2_clamped(env: ManagerBasedRLEnv, value_clamp: float = 9.0) -> torch.Tensor:
+    """一阶动作平滑罚的值封顶版(v2,fresh 臂自杀区间的解)。
+
+    人话:与 isaaclab 内置 action_rate_l2 同式 ‖a_t−a_{t−1}‖²,但每 env 封顶 value_clamp。
+    fresh 随机策略一步能把 31 维动作甩出 ‖Δa‖²≈60+,×(−0.2) 就是每步 −12+——比模仿收入
+    上限大一个量级,早期净流为负 → 摔死最优。封顶后单帧最坏罚 = 0.2×9 = 1.8 ≈ 早期模仿
+    收入地板(定权计算器 B4 预算规则),clamp 内梯度原样、clamp 外为零(超大偏差是噪声,
+    不需要按比例更狠)。档位 9.0 来自冻结表(预算上限与实测 p95 取小)。RewTerm weight
+    用负数;默认 weight=0 = 项被跳过,字节等价。v1 的无封顶 action_rate_l2 照旧存在,
+    v2 包把它归零并启用本项——静态、value 平稳,不是 schedule。
+    """
+    clamp = float(value_clamp)
+    if not math.isfinite(clamp) or clamp <= 0.0:
+        raise ValueError("action_rate_l2_clamped value_clamp must be finite and positive")
+    mgr = env.action_manager
+    diff = mgr.action - mgr.prev_action
+    return torch.sum(torch.square(diff), dim=1).clamp(max=clamp)
+
+
 def strike_capture_bonus(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     """L2 击中层的一次性奖金(v2 记账 redesign §3.5):capture 门过的那一步付 1,其余恒 0。
 
@@ -2951,7 +2970,9 @@ def foot_clearance(
 
 
 # --- mjlab-ported action second-difference smoothing (action_acc_l2; DEFAULT OFF) -------------- #
-def action_acc_l2(env: ManagerBasedRLEnv, action_name: str = "joint_pos") -> torch.Tensor:
+def action_acc_l2(
+    env: ManagerBasedRLEnv, action_name: str = "joint_pos", value_clamp: float | None = None
+) -> torch.Tensor:
     """动作二阶差分惩罚(mjlab action_acc_l2 思想):||a_t - 2·a_{t-1} + a_{t-2}||²。
 
     人话:action_rate 罚"步子迈多大"(一阶差分),这条罚"方向掉头多猛"(二阶差分)——高频抖
@@ -2990,7 +3011,13 @@ def action_acc_l2(env: ManagerBasedRLEnv, action_name: str = "joint_pos") -> tor
             "(reset-aware [env] bool; the first two post-reset steps must be free)"
         )
     second_diff = current - 2.0 * previous + before_previous
-    return torch.sum(torch.square(second_diff), dim=-1) * valid.float()
+    out = torch.sum(torch.square(second_diff), dim=-1) * valid.float()
+    if value_clamp is not None:
+        clamp = float(value_clamp)
+        if not math.isfinite(clamp) or clamp <= 0.0:
+            raise ValueError("action_acc_l2 value_clamp must be finite and positive")
+        out = out.clamp(max=clamp)  # 值封顶(v2,fresh 自杀区间;同 action_rate_l2_clamped 理由)
+    return out
 
 
 def arm_overreach(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:

@@ -1933,9 +1933,12 @@ def _scalar_no_early_brake_diagnostic(
     if (
         policy.get("control_guard_enabled") is not True
         or policy.get("output_interval_policy")
-        != (
+        not in (
             "every_interval_starting_before_exact_marker_must_be_"
-            "nonnegative_including_the_straddling_interval"
+            "nonnegative_including_the_straddling_interval",
+            "every_interval_starting_at_or_after_from_marker_and_"
+            "before_exact_marker_must_be_nonnegative_including_the_"
+            "until_straddling_interval",
         )
     ):
         raise CanonicalMotionCompilerError(
@@ -1945,6 +1948,18 @@ def _scalar_no_early_brake_diagnostic(
 
     segment_start = np.arange(len(acceleration), dtype=np.float64)
     starts_before_end = segment_start < end_fractional - 1.0e-12
+    # When the retimer scoped the no-brake law to [from_marker, window_end]
+    # (Franco 2026-07-25 ruling: the approach may decelerate into the
+    # backswing reversal), the recheck covers the same scoped range instead
+    # of the whole prefix.
+    scoped_from = policy.get("from_marker")
+    if scoped_from is not None:
+        from_fractional = float(
+            retimed.markers[str(scoped_from)].output_fractional_frame
+        )
+        starts_before_end = starts_before_end & (
+            segment_start >= from_fractional - 1.0e-12
+        )
     overlaps_window = (segment_start < end_fractional - 1.0e-12) & (
         segment_start + 1.0 > start_fractional + 1.0e-12
     )
