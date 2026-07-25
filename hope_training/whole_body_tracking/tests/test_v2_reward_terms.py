@@ -325,3 +325,66 @@ if __name__ == "__main__":
     import sys
 
     sys.exit(pytest.main([__file__, "-q"]))
+
+
+# --------------------------------------------------------------------------------------------- #
+# virtual_landing legal_base(v2.2:上台组唯一保留项)— 手算
+# --------------------------------------------------------------------------------------------- #
+def _vb_env(n=2, sigma=1.0):
+    cmd = types.SimpleNamespace(
+        vb_landing_xy=torch.zeros(n, 2),
+        _vb_target_xy=torch.tensor([2.555, 0.0]),
+        vb_landing_valid=torch.zeros(n, dtype=torch.bool),
+        vb_net_clear=torch.zeros(n, dtype=torch.bool),
+        vb_on_opponent=torch.zeros(n, dtype=torch.bool),
+        vb_depth_ok=torch.zeros(n, dtype=torch.bool),
+        vb_fired=torch.zeros(n, dtype=torch.bool),
+        cfg=types.SimpleNamespace(vb_landing_sigma=sigma),
+    )
+    env = types.SimpleNamespace(
+        command_manager=types.SimpleNamespace(get_term=lambda name: cmd)
+    )
+    return env, cmd
+
+
+def test_legal_base_pays_floor_anywhere_on_table_and_kernel_at_center():
+    env, cmd = _vb_env(2)
+    for t_ in (cmd.vb_landing_valid, cmd.vb_net_clear, cmd.vb_on_opponent, cmd.vb_fired):
+        t_[:] = True
+    cmd.vb_landing_xy[0] = torch.tensor([2.555, 0.0])   # 正中 -> 1.0
+    cmd.vb_landing_xy[1] = torch.tensor([2.555, 1.0])   # 距台心 1.0(近台角) -> 0.6+0.4e^-1
+    v = hope_rewards_mod.virtual_landing(env, "racket_target", mode="legal_base")
+    assert v[0].item() == pytest.approx(1.0, abs=1e-6)
+    assert v[1].item() == pytest.approx(0.6 + 0.4 * math.exp(-1.0), abs=1e-6)
+
+
+def test_legal_base_gate_is_a_prerequisite_not_a_bonus():
+    env, cmd = _vb_env(1)
+    cmd.vb_landing_valid[:] = True
+    cmd.vb_on_opponent[:] = True
+    cmd.vb_fired[:] = True
+    cmd.vb_landing_xy[0] = torch.tensor([2.555, 0.0])
+    cmd.vb_net_clear[:] = False  # 没过网:落点再准也一分不发(先决条件语义)
+    v = hope_rewards_mod.virtual_landing(env, "racket_target", mode="legal_base")
+    assert v[0].item() == 0.0
+    cmd.vb_net_clear[:] = True
+    cmd.vb_fired[:] = False      # capture 没触发同样零
+    v = hope_rewards_mod.virtual_landing(env, "racket_target", mode="legal_base")
+    assert v[0].item() == 0.0
+
+
+def test_climb_mode_stays_byte_identical_v1():
+    env, cmd = _vb_env(1)
+    cmd.vb_landing_valid[:] = True
+    cmd.vb_fired[:] = True
+    cmd.vb_landing_xy[0] = torch.tensor([2.555, 1.0])  # kernel = e^-1,无奖金
+    v = hope_rewards_mod.virtual_landing(env, "racket_target")  # 默认 climb
+    assert v[0].item() == pytest.approx(math.exp(-1.0), abs=1e-6)
+
+
+def test_legal_base_fail_loud_surfaces():
+    env, _ = _vb_env(1)
+    with pytest.raises(ValueError, match="base_frac"):
+        hope_rewards_mod.virtual_landing(env, "racket_target", mode="legal_base", base_frac=1.5)
+    with pytest.raises(ValueError, match="mode"):
+        hope_rewards_mod.virtual_landing(env, "racket_target", mode="v3")
