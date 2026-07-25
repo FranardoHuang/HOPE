@@ -1197,6 +1197,15 @@ def _retime_uniform_prefix_comparator(
 ) -> RetimeResult:
     """Retime the selected geometry under the strict scalar-prefix comparator."""
 
+    if context.exact_pointwise_caps:
+        # Diagnostic-only receipt: under the exact-pointwise probe this
+        # comparator would run the interval-certified ladder for hours in the
+        # main process while certifying nothing the probe consumes.  Fail
+        # closed into the existing infeasible-comparator receipt path.
+        raise RetimeError(
+            "SKIPPED_EXACT_POINTWISE_PROBE_MODE: uniform-prefix comparator "
+            "is not evaluated under exact-pointwise probe caps"
+        )
     weighted = _weighted_arc_formal_path(
         geometry, context.coordinate_scale
     )

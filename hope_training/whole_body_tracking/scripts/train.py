@@ -2672,10 +2672,16 @@ _REWARD_PACK_V2_DIRECT = (
     ("upright", 0.0),                    # 税型站正(flat_orientation_l2)下岗……
     ("upright_exp", 1.0),                # ……换收入型站正(B1 已声明 weight=0 待命)
     ("arm_overreach", 0.0),              # 伸臂过远税下岗,交给全身模仿
-    # L2/L3.5 击中层(redesign §3.5:名义值,probe 校准后冻结 prereg)。
-    ("racket_strike_success", 30.0),     # L3.5 三核乘法加强层:5 -> 30(名义)
-    ("strike_capture_bonus", 850.0),     # L2 one-shot 击中大奖(vb_fired 捕获门,一拍一发;
-                                         # 名义 B~850 = m1*I*Tc*rho/p*,全栈唯一大额 one-shot)
+    # 击中/结果层(Franco 2026-07-25 v2.1 裁定:代理全删、分开学、上台扛大奖)。
+    # 三核乘积(strike_success)是"结果"的人造 AND 代理,capture_bonus 是它的二值化——
+    # 而落点核才是物理正确的 AND(落点=拍位x拍速x拍面经球物理联合决定,梯度经解析
+    # 接触模型自动分摊回三通道)。有物理组合项,两个代理都是重复,删。
+    ("racket_strike_success", 0.0),      # v1 谱系默认 5.0 -> v2 删(人造 AND 代理)
+    # strike_capture_bonus 不进包:cfg 默认 0 即"不存在"(capture 门保留原职=上台组闸门)
+    ("virtual_pass_net", 150.0),         # 上台组升为"击中+打好"主奖(名义;probe 校准)
+    ("virtual_landing", 1000.0),         # 落点核=物理组合的联合成绩单,单拍事件额 ~1300
+    ("virtual_spin", 0.0),               # 弧圈类动作自带旋转,minimize 先验打架动作身份;
+                                         # 旋转将来是题目的一部分(并进落点模型),遥测保留
 )
 # 建表自检(import 时就炸):键控注入表的键必须都在 _REWARD_KEYS 白名单里,否则
 # _check_unknown_keys 会把注入后的 mapping 当异常配置拒掉(虽然注入发生在检查之后,

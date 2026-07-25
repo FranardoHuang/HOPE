@@ -1,8 +1,8 @@
 """v2 定权计算器(scripts/v2_weight_calibration.py)— host-only 单测。
 
-钉死:①名义输入复现 redesign §3.5 的名义表(B≈771 @I=4.5、质量组 Σw≈138 及 60:45:35 分账);
-②定序 模仿<击中<质量 恒成立;③fail-loud 面(缺键/非有限/出 range/窗盖满整拍);
-④clamp 取"预算上限"与"实测 p95"的较小者。
+钉死(v2.1,Franco 07-25:代理全删、分开学、上台扛大奖):①名义输入复现名义表
+(质量组 Σw≈124.6 按 60:45:35;上台 w_land≈895.9/w_net≈134.4;被删代理冻结 0);
+②定序 模仿<质量<上台 恒成立;③fail-loud 面;④clamp 取"预算上限"与"实测 p95"较小者。
 
 Run:  python -m pytest tests/test_v2_weight_calibration.py -q
 """
@@ -29,6 +29,8 @@ def _nominal(**over):
         "window_steps": 13,
         "action_rate_sq_p95": 10.0,
         "action_acc_sq_p95": 40.0,
+        "E_net_per_fire": 1.0,
+        "E_land_per_fire": 1.4,
     }
     base.update(over)
     return base
@@ -37,8 +39,13 @@ def _nominal(**over):
 def test_nominal_inputs_reproduce_the_blueprint_table():
     out = calibrate(_nominal())
     fr = out["frozen"]
-    # B = m1·I·rho_I·T_c/p* = 2×4.5×0.6×100/0.7 ≈ 771.4(§3.5 脚注:850 是 I=5 历史口径)
-    assert fr["strike_capture_bonus_weight"] == pytest.approx(771.4, abs=0.1)
+    # v2.1:上台扛大奖。w_land = 1.2×8.1×100/(0.7×(0.15×1.0+1.4)) ≈ 895.9,w_net = 0.15×w_land
+    assert fr["virtual_landing_weight"] == pytest.approx(895.9, abs=0.2)
+    assert fr["virtual_pass_net_weight"] == pytest.approx(134.4, abs=0.2)
+    # 被删代理冻结为 0
+    assert fr["racket_strike_success_weight"] == 0.0
+    assert fr["strike_capture_bonus_weight"] == 0.0
+    assert fr["virtual_spin_weight"] == 0.0
     # 质量组 Σw = m2·m1·I·rho_I/(duty·rho_Q) = 1.5×2×2.7/(0.13×0.5) ≈ 124.6,按 60:45:35 分
     total = (
         fr["racket_position_weight"]
@@ -58,7 +65,7 @@ def test_ordering_holds_across_measured_ranges():
             for p in (0.3, 0.7, 1.0):
                 acc = calibrate(_nominal(rho_I=rho_i, rho_Q=rho_q, p_capture_target=p))["accounting"]
                 assert acc["ordering_ok"], (rho_i, rho_q, p)
-                assert acc["pse_mimic"] < acc["pse_hit_at_p_star"] < acc["pse_quality_at_target"]
+                assert acc["pse_mimic"] < acc["pse_quality_at_target"] < acc["pse_table_at_target"]
 
 
 def test_clamp_takes_min_of_budget_and_p95():
@@ -85,17 +92,17 @@ def test_fail_loud_surfaces():
         calibrate(_nominal(I_weight_sum=-1.0))
 
 
-def test_one_shot_variance_stays_single_source():
-    # B 是唯一 one-shot:质量组输出全是窗口 dense 权重,不该出现第二个 one-shot 字段
-    fr = calibrate(_nominal())["frozen"]
-    one_shots = [k for k in fr if "bonus" in k]
-    assert one_shots == ["strike_capture_bonus_weight"]
+def test_one_shot_prize_lives_only_in_the_table_group():
+    # v2.1:唯一的每拍大额结算在上台组(物理组合),代理 one-shot 恒 0
+    out = calibrate(_nominal())
+    assert out["frozen"]["strike_capture_bonus_weight"] == 0.0
+    assert out["accounting"]["per_swing_table_prize"] == pytest.approx(1388.7, abs=1.0)
 
 
 def test_higher_measured_imitation_scales_everything_proportionally():
     lo = calibrate(_nominal(rho_I=0.5))["frozen"]
     hi = calibrate(_nominal(rho_I=0.75))["frozen"]
-    ratio = hi["strike_capture_bonus_weight"] / lo["strike_capture_bonus_weight"]
+    ratio = hi["virtual_landing_weight"] / lo["virtual_landing_weight"]
     assert ratio == pytest.approx(1.5, rel=1e-3)
     ratio_q = hi["racket_position_weight"] / lo["racket_position_weight"]
     assert ratio_q == pytest.approx(1.5, rel=1e-3)

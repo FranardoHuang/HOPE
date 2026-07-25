@@ -99,10 +99,10 @@ HITTER 的答案最干净:**没有恢复专项 reward**。恢复=①参考 clip 
 | 层 | 项 | 权重(草案) | 每步等效收入 PSE(目标态) | 依据 |
 |---|---|---|---|---|
 | L1 模仿 | 六项 motion_*(全身,全程全额) | 0.5/0.5/1/1/1/1(=BeyondMimic 原版) | 5.0×0.6 = **3.0** | 基准层 |
-| L2 击中 | `strike_capture_bonus`(**已实现 2026-07-25**:绑 vb_fired capture 判据,每拍一次) | **B ≈ 850** | B·p*/T_c = **6.0** = m₁×L1 | B = m₁·I·T_c·ρ_I*/p*;文献带宽 PACE 150 ~ 羽毛球 4000;唯一 one-shot(方差论证 §2) |
+| ~~L2 击中~~ | ~~strike_capture_bonus~~ **v2.1 删除**(Franco 07-25:capture 指示器=人造代理的二值版;capture 门保留=上台组闸门) | 0 | — | 落点核才是物理正确的联合成绩单 |
 | L3 质量 | racket_position / velocity / normal(窗口 dense,σ 三通道自适应) | **60/45/35**(W 偏位;V 臂 45/60/35) | Σ138×0.13×0.5 = **9.0** = m₂×L2 | Σw = m₂m₁·PSE₁/(duty·ρ_Q*) |
-| L3.5 | strike_success(三核乘法,窗口) | 5 → **30** | 尖锐乘积,实付 ~0.3-1 | "全都到位"加强层 |
-| L4 上台 | virtual net/landing/spin | **维持 20/30/5** | 每拍验证层,量级小 | 真球阶段再升 |
+| ~~L3.5~~ | ~~strike_success~~ **v2.1 删除**(三核乘积=结果的人造 AND 代理,落点核物理正确) | 0 | — | — |
+| L4 上台(**v2.1 升为主奖层**) | virtual net/landing(spin 删:弧圈自带旋转,先验打架动作身份;遥测保留) | **150/1000/0**(名义;probe 校准 ~135/~900) | PSE_table = 1.2×质量层 ≈ 9.7;单拍事件额 ~1300 | 落点=拍位×拍速×拍面的物理组合,梯度经解析接触模型分摊回三通道 |
 | 平衡 | upright_exp(+,新) / hit_unstable_support(−,新) | **+1.0 / −10** | +0.9 站立收入(兼 alive bonus)/ 触发扣 | mjlab / PACE |
 | 安全 | qbar / joint_limit / soft_landing | −0.65 / −10 / −0.003 | 常态 0(站姿豁免后) | 不动 |
 | 平滑 | action_rate / action_acc | −0.2 / −0.05 + **值 clamp**(rate@10、acc 分位数待测) | 单帧最坏 PSE ≤ 2.0 | clamp 防 fresh 臂"自杀区间"(§2 B4),静态、value 平稳 |

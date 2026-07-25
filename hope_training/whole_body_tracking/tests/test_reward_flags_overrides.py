@@ -227,6 +227,10 @@ def _make_env_cfg(anchor_pos_none=True):
             },
         ),
         strike_capture_bonus=_Term(weight=0.0, params={"command_name": "racket_target"}),
+        # v2.1(Franco 07-25 裁定):上台组扛"击中+打好"主奖;假 cfg 按 VirtualBall 谱系默认声明
+        virtual_pass_net=_Term(weight=20.0, params={"command_name": "racket_target"}),
+        virtual_landing=_Term(weight=30.0, params={"command_name": "racket_target"}),
+        virtual_spin=_Term(weight=5.0, params={"command_name": "racket_target"}),
         motion_global_anchor_pos=None if anchor_pos_none else _Term(weight=0.5, params={"std": 0.3}),
         motion_global_anchor_ori=_Term(weight=0.5, params={"std": 0.4}),
         motion_body_pos=_Term(weight=1.0, params={"std": 0.3}, body_names=_UPPER),
@@ -1764,8 +1768,12 @@ _PACK_V2_WEIGHTS = {
     "racket_position": 60.0,
     "racket_velocity": 45.0,
     "racket_normal": 35.0,
-    "racket_strike_success": 30.0,
-    "strike_capture_bonus": 850.0,
+    # v2.1(Franco 07-25):两个人造 AND 代理删除,上台组扛大奖,spin 先验删除
+    "racket_strike_success": 0.0,
+    "strike_capture_bonus": 0.0,
+    "virtual_pass_net": 150.0,
+    "virtual_landing": 1000.0,
+    "virtual_spin": 0.0,
 }
 
 _PACK_DEFAULTED_MARKER = (
@@ -1816,7 +1824,8 @@ def test_reward_pack_defaults_to_v2_full_expansion():
     assert "racket_target.adaptive_sigma=True (reward_pack defaulted to v2)" in applied
     # 逐项走的仍是 v2 包机器:defaulted 标记之外,每条包改动照旧带 reward_pack=v2
     assert "rewards.hit_unstable_support.weight=-10.0 (reward_pack=v2)" in applied
-    assert "rewards.strike_capture_bonus.weight=850.0 (reward_pack=v2)" in applied
+    assert "rewards.virtual_landing.weight=1000.0 (reward_pack=v2)" in applied
+    assert not any("strike_capture_bonus" in m for m in applied)  # v2.1:代理不进包
     assert "rewards.racket_position.weight=60.0" in applied
 
 
@@ -1824,7 +1833,8 @@ def test_reward_pack_default_applies_when_rewards_node_is_absent_entirely():
     # 连 rewards 节点都没有的任务照样吃默认包(线上大量任务节点只配 racket/motion)。
     env_cfg, applied = _apply_default({"motion": {"hold_steps_range": [0, 100]}})
     assert env_cfg.rewards.upright_exp.weight == pytest.approx(1.0)
-    assert env_cfg.rewards.strike_capture_bonus.weight == pytest.approx(850.0)
+    assert env_cfg.rewards.virtual_landing.weight == pytest.approx(1000.0)
+    assert env_cfg.rewards.strike_capture_bonus.weight == pytest.approx(0.0)
     assert _PACK_DEFAULTED_MARKER in applied
 
 
@@ -1845,7 +1855,8 @@ def test_reward_pack_default_explicit_keys_still_win():
     assert R.racket_normal.weight == pytest.approx(5.0)
     # 没被压过的包项照常落地
     assert R.hit_unstable_support.weight == pytest.approx(-10.0)
-    assert R.strike_capture_bonus.weight == pytest.approx(850.0)
+    assert R.virtual_landing.weight == pytest.approx(1000.0)
+    assert R.strike_capture_bonus.weight == pytest.approx(0.0)  # v2.1:代理不进包
     assert len([m for m in applied if "user override wins" in m]) == 3
 
 
@@ -1891,7 +1902,7 @@ def test_reward_pack_v2_expands_every_blueprint_mutation_with_markers():
     assert env_cfg.commands.racket_target.adaptive_sigma is True
     # 每条包改动的 applied 标记都带 reward_pack=v2:1 总标记 + 10 键控注入 + 10 direct + 1 racket
     pack_markers = [m for m in applied if "reward_pack=v2" in m]
-    assert len(pack_markers) == 22
+    assert len(pack_markers) == 24  # v2.1:-capture +net/landing/spin
     # 键控注入的项同时会有覆写层自己的标准记账(证明真走了现有翻译层)
     assert "rewards.hold_ready.weight=0.0" in applied
     assert "rewards.foot_slip_sq.weight=-0.1" in applied
@@ -1902,8 +1913,9 @@ def test_reward_pack_v2_expands_every_blueprint_mutation_with_markers():
     # direct 项的标记逐条在
     assert "rewards.hit_unstable_support.weight=-10.0 (reward_pack=v2)" in applied
     assert "rewards.upright_exp.weight=1.0 (reward_pack=v2)" in applied
-    assert "rewards.racket_strike_success.weight=30.0 (reward_pack=v2)" in applied
-    assert "rewards.strike_capture_bonus.weight=850.0 (reward_pack=v2)" in applied
+    assert "rewards.racket_strike_success.weight=0.0 (reward_pack=v2)" in applied
+    assert "rewards.virtual_pass_net.weight=150.0 (reward_pack=v2)" in applied
+    assert "rewards.virtual_spin.weight=0.0 (reward_pack=v2)" in applied
     assert "racket_target.adaptive_sigma_normal=True (reward_pack=v2)" in applied
     # 显式 v2(非默认)绝不带 defaulted 标记
     assert _PACK_DEFAULTED_MARKER not in applied
@@ -1944,7 +1956,8 @@ def test_reward_pack_v2_explicit_user_keys_win():
     assert env_cfg.commands.racket_target.adaptive_sigma_normal is False
     # 没被用户压过的包项照常落地
     assert R.hit_unstable_support.weight == pytest.approx(-10.0)
-    assert R.strike_capture_bonus.weight == pytest.approx(850.0)
+    assert R.virtual_landing.weight == pytest.approx(1000.0)
+    assert R.strike_capture_bonus.weight == pytest.approx(0.0)
     assert R.foot_drag.weight == 0.0
     assert len([m for m in applied if "user override wins" in m]) == 7
 
@@ -1983,10 +1996,10 @@ def test_reward_pack_v2_fails_loud_when_lineage_lacks_a_v2_term():
     env_cfg.rewards.hit_unstable_support = None
     with pytest.raises(train_mod._OverrideError, match="hit_unstable_support"):
         _apply(_pack_v2_task(), env_cfg)
-    # 新击中层同理:非 VirtualBall 谱系(没有 strike_capture_bonus 声明)不许半套 v2。
+    # 上台主奖同理:非 VirtualBall 谱系(没有 virtual_landing 声明)不许半套 v2。
     env_cfg = _make_env_cfg()
-    env_cfg.rewards.strike_capture_bonus = None
-    with pytest.raises(train_mod._OverrideError, match="strike_capture_bonus"):
+    env_cfg.rewards.virtual_landing = None
+    with pytest.raises(train_mod._OverrideError, match="virtual_landing"):
         _apply(_pack_v2_task(), env_cfg)
 
 
