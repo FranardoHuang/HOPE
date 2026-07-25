@@ -72,6 +72,22 @@ def _load(tmp_path: Path, value: dict) -> dict:
     return M.load_queue(_write_yaml(tmp_path, value))
 
 
+def _test_only_open_launch_gate(queue: dict) -> dict:
+    """Exercise deeper render mechanics without weakening the checked-in freeze.
+
+    ``load_queue`` deliberately accepts only the checked-in
+    ``launch_authorized_by_default=false`` state.  A few unit tests still need
+    to inspect quoting, file checks, and subordinate wiring gates, so they flip
+    a deep-copied in-memory object only after validation.  No CLI/config path
+    can produce this state.
+    """
+
+    assert queue["launch_authorized_by_default"] is False
+    unlocked = copy.deepcopy(queue)
+    unlocked["launch_authorized_by_default"] = True
+    return unlocked
+
+
 def _rendered() -> dict:
     """渲染态队列：franco 闸门开 + 资产已交付（只在内存里改；action_acc 已入库为 true）。"""
     value = _raw()
@@ -82,7 +98,7 @@ def _rendered() -> dict:
 
 def _load_rendered() -> dict:
     with tempfile.TemporaryDirectory() as tmp:
-        return _load(Path(tmp), _rendered())
+        return _test_only_open_launch_gate(_load(Path(tmp), _rendered()))
 
 
 def _job(queue: dict, job_id: str) -> dict:
@@ -449,7 +465,7 @@ def test_fresh_flag_frozen_to_combo_fresh_only(tmp_path):
 
 
 def test_fresh_remote_body_omits_parent_files(tmp_path):
-    queue = _load(tmp_path, _rendered())
+    queue = _test_only_open_launch_gate(_load(tmp_path, _rendered()))
     body_fresh = M._remote_body(queue, _job(queue, "combo_fresh"), "science", 0)
     assert "model_6700.pt" not in body_fresh
     assert "training_contract.json" not in body_fresh
@@ -463,6 +479,7 @@ def test_fresh_remote_body_omits_parent_files(tmp_path):
 # --------------------------------------------------------------------------------------------- #
 def test_checked_in_gate_states():
     queue = M.load_queue(QUEUE_PATH)
+    assert queue["launch_authorized_by_default"] is False
     assert queue["groundfoot_contract"]["wiring_confirmed"] is True
     assert queue["push_contract"]["wiring_confirmed"] is True
     assert queue["force_push_contract"]["wiring_confirmed"] is True
@@ -477,7 +494,7 @@ def test_action_acc_gate_locks_all_three_arms(tmp_path):
     # 回归保留：闸门改回 false 仍须锁全部三臂（fail-closed 语义不因入库 true 而消失）
     value = _rendered()
     value["action_acc_contract"]["wiring_confirmed"] = False
-    queue = _load(tmp_path, value)
+    queue = _test_only_open_launch_gate(_load(tmp_path, value))
     for job_id in ("combo_fresh", "combo_resume", "combo_franco"):
         with pytest.raises(M.QueueError, match="action_acc_contract"):
             M.render_command(queue, _job(queue, job_id), "science", "pod1", 0)
@@ -486,7 +503,7 @@ def test_action_acc_gate_locks_all_three_arms(tmp_path):
 def test_groundfoot_gate_locks_all_three_arms(tmp_path):
     value = _rendered()
     value["groundfoot_contract"]["wiring_confirmed"] = False
-    queue = _load(tmp_path, value)
+    queue = _test_only_open_launch_gate(_load(tmp_path, value))
     for job_id in ("combo_fresh", "combo_resume", "combo_franco"):
         with pytest.raises(M.QueueError, match="groundfoot_contract"):
             M.render_command(queue, _job(queue, job_id), "science", "pod1", 0)
@@ -496,7 +513,7 @@ def test_push_and_force_push_gates_lock_all_arms(tmp_path):
     for gate in ("push_contract", "force_push_contract", "qbar_contract"):
         value = _rendered()
         value[gate]["wiring_confirmed"] = False
-        queue = _load(tmp_path, value)
+        queue = _test_only_open_launch_gate(_load(tmp_path, value))
         with pytest.raises(M.QueueError, match=gate):
             M.render_command(queue, _job(queue, "combo_resume"), "science", "pod1", 0)
 
@@ -504,7 +521,7 @@ def test_push_and_force_push_gates_lock_all_arms(tmp_path):
 def test_franco_gate_locks_only_combo_franco(tmp_path):
     value = _rendered()
     value["franco_contract"]["wiring_confirmed"] = False
-    queue = _load(tmp_path, value)
+    queue = _test_only_open_launch_gate(_load(tmp_path, value))
     with pytest.raises(M.QueueError, match="franco_pipeline_20260722"):
         M.render_command(queue, _job(queue, "combo_franco"), "science", "pod1", 0)
     for job_id in ("combo_fresh", "combo_resume"):
@@ -514,7 +531,7 @@ def test_franco_gate_locks_only_combo_franco(tmp_path):
 def test_franco_placeholder_asset_refuses_even_with_gate_open(tmp_path):
     value = _rendered()
     value["assets"]["motion_backhand_franco"] = "PENDING_FRANCO_PIPELINE_DELIVERY"
-    queue = _load(tmp_path, value)
+    queue = _test_only_open_launch_gate(_load(tmp_path, value))
     with pytest.raises(M.QueueError, match="placeholder"):
         M.render_command(queue, _job(queue, "combo_franco"), "science", "pod1", 0)
     # 另两臂不受影响
@@ -522,7 +539,7 @@ def test_franco_placeholder_asset_refuses_even_with_gate_open(tmp_path):
 
 
 def test_franco_arm_swaps_backhand_motion_only(tmp_path):
-    queue = _load(tmp_path, _rendered())
+    queue = _test_only_open_launch_gate(_load(tmp_path, _rendered()))
     franco = _compiled(queue, "combo_franco", "science")
     assert franco["motion_file_2"] == DELIVERED_FRANCO_NPZ
     assert franco["motion_file"].endswith("hope_forehand_v4rg_cal.npz")
@@ -570,8 +587,27 @@ def test_gate_boolean_must_be_bool(tmp_path):
 # --------------------------------------------------------------------------------------------- #
 # render mechanics（继承 CGF/intel wave 的护栏）
 # --------------------------------------------------------------------------------------------- #
+@pytest.mark.parametrize("stage", ("probe", "science"))
+@pytest.mark.parametrize(
+    "entrypoint",
+    ("_remote_body", "_ssh_argv", "render_command", "cmd_render"),
+)
+def test_checked_in_machine_freeze_blocks_every_command_entrypoint(stage, entrypoint):
+    queue = M.load_queue(QUEUE_PATH)
+    job = _job(queue, "combo_resume")
+    with pytest.raises(M.QueueError, match="launch_authorized_by_default=false"):
+        if entrypoint == "_remote_body":
+            M._remote_body(queue, job, stage, 0)
+        elif entrypoint == "_ssh_argv":
+            M._ssh_argv(queue, job, stage, "pod1", 0)
+        elif entrypoint == "render_command":
+            M.render_command(queue, job, stage, "pod1", 0)
+        else:
+            M.cmd_render(queue, stage, "combo_resume", "pod1", 0)
+
+
 def test_pod_gpu_injected_at_render_time(tmp_path):
-    queue = _load(tmp_path, _rendered())
+    queue = _test_only_open_launch_gate(_load(tmp_path, _rendered()))
     for pod, gpu in (("pod1", 0), ("pod2", 2)):
         command = M.render_command(queue, _job(queue, "combo_resume"), "science", pod, gpu)
         assert f"CUDA_VISIBLE_DEVICES={gpu}" in command
@@ -580,7 +616,7 @@ def test_pod_gpu_injected_at_render_time(tmp_path):
 
 
 def test_invalid_pod_or_gpu_rejected(tmp_path):
-    queue = _load(tmp_path, _rendered())
+    queue = _test_only_open_launch_gate(_load(tmp_path, _rendered()))
     with pytest.raises(M.QueueError, match="--pod"):
         M.render_command(queue, _job(queue, "combo_resume"), "science", "pod3", 0)
     with pytest.raises(M.QueueError, match="--gpu"):
@@ -599,7 +635,7 @@ def test_probe_and_science_namespaces_disjoint(tmp_path):
 
 
 def test_remote_body_uses_kit_boot_lock_and_no_clobber(tmp_path):
-    queue = _load(tmp_path, _rendered())
+    queue = _test_only_open_launch_gate(_load(tmp_path, _rendered()))
     body = M._remote_body(queue, _job(queue, "combo_resume"), "science", 1)
     assert M.KIT_BOOT_LOCK in body
     assert "launch_kit_training_locked.sh" not in body
@@ -611,7 +647,7 @@ def test_remote_body_uses_kit_boot_lock_and_no_clobber(tmp_path):
 
 
 def test_ssh_command_shell_quote_roundtrip(tmp_path):
-    queue = _load(tmp_path, _rendered())
+    queue = _test_only_open_launch_gate(_load(tmp_path, _rendered()))
     command = M.render_command(queue, _job(queue, "combo_fresh"), "science", "pod2", 1)
     argv = shlex.split(command)
     assert argv[0] == "ssh"
@@ -639,45 +675,41 @@ def test_cli_plan_and_checklist_succeed():
             capture_output=True, text=True, check=False,
         )
         assert result.returncode == 0, result.stderr
+        assert "ssh root@" not in result.stdout
+        if flag:
+            assert "[机器冻结]" in result.stdout
+        else:
+            assert "machine launch gate: LOCKED" in result.stdout
 
 
-def test_cli_render_succeeds_for_combo_resume_after_action_acc_wired():
-    # 07-22 接线+重钉后：五个全臂闸门 checked-in 全 true——combo_resume 可出命令
-    # （franco 闸门只锁 combo_franco，不影响本臂）。
+@pytest.mark.parametrize("stage", ("probe", "science"))
+@pytest.mark.parametrize(
+    "job_id",
+    ("combo_fresh", "combo_resume", "combo_franco"),
+)
+def test_cli_render_machine_freeze_refuses_every_checked_in_job(stage, job_id):
     result = subprocess.run(
         [
             sys.executable, str(MODULE_PATH), "--queue", str(QUEUE_PATH),
-            "--render-stage", "science", "--render-job", "combo_resume",
+            "--render-stage", stage, "--render-job", job_id,
             "--pod", "pod1", "--gpu", "0",
         ],
         capture_output=True, text=True, check=False,
     )
-    assert result.returncode == 0, result.stderr
-    assert "ssh" in result.stdout
-    assert "p1iu_combo_resume_seed3_20260723" in result.stdout
-    assert "task.rewards.action_acc_weight=-0.05" in result.stdout
-
-
-def test_cli_render_still_refused_for_combo_franco_while_franco_locked():
-    # franco 闸门仍锁：checked-in 状态渲染 combo_franco 必须 rc2 REFUSED。
-    refused = subprocess.run(
-        [
-            sys.executable, str(MODULE_PATH), "--queue", str(QUEUE_PATH),
-            "--render-stage", "science", "--render-job", "combo_franco",
-            "--pod", "pod1", "--gpu", "0",
-        ],
-        capture_output=True, text=True, check=False,
-    )
-    assert refused.returncode == 2
-    assert "REFUSED" in refused.stderr
-    assert "franco" in refused.stderr
+    assert result.returncode == 2
+    assert result.stdout == ""
+    assert "REFUSED" in result.stderr
+    assert "launch_authorized_by_default=false" in result.stderr
+    assert "ssh " not in result.stderr
 
 
 def test_checklist_contains_wave_specific_guards():
     queue = M.load_queue(QUEUE_PATH)
     checklist = M.cmd_checklist(queue)
-    # action_acc 已接线：阻塞第 0 条消失，但第 4 条远端 grep 复核仍在
+    # action_acc 已接线，所以旧 action_acc 阻塞消失；全波机器冻结必须显式留在首项。
     assert "0. [阻塞]" not in checklist
+    assert "0. [机器冻结]" in checklist
+    assert "launch_authorized_by_default=false" in checklist
     assert "action_acc" in checklist
     assert "1/3" in checklist  # 比值守卫
     assert "17/7/5/5/10" in checklist

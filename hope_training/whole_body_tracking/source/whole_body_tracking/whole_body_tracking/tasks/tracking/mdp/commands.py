@@ -70,6 +70,9 @@ if TYPE_CHECKING:
     from isaaclab.envs import ManagerBasedRLEnv
 
 
+_CANONICAL_REGISTRY_RUNTIME_MODULE = None
+
+
 class MotionLoader:
     """Loads one or more motion clips into a single concatenated time axis.
 
@@ -251,6 +254,7 @@ class MotionLoader:
         motion_file,
         body_indexes: Sequence[int],
         *,
+        motion_payloads: Sequence[bytes] | None = None,
         articulation_body_names: Sequence[str],
         selected_body_names: Sequence[str],
         device: str = "cpu",
@@ -259,6 +263,21 @@ class MotionLoader:
         files = [motion_file] if isinstance(motion_file, str) else list(motion_file)
         if not files:
             raise ValueError("MotionLoader needs at least one motion file")
+        if motion_payloads is None:
+            payloads: tuple[bytes | None, ...] = (None,) * len(files)
+        else:
+            try:
+                payloads = tuple(motion_payloads)
+            except TypeError as exc:
+                raise ValueError(
+                    "MotionLoader motion_payloads must be an ordered byte sequence"
+                ) from exc
+            if len(payloads) != len(files) or any(
+                type(payload) is not bytes for payload in payloads
+            ):
+                raise ValueError(
+                    "MotionLoader needs exactly one immutable bytes snapshot per motion file"
+                )
         articulation_names = tuple(str(name) for name in articulation_body_names)
         selected_names = tuple(str(name) for name in selected_body_names)
         if (not articulation_names or len(set(articulation_names)) != len(articulation_names)
@@ -285,37 +304,41 @@ class MotionLoader:
         seg_lens = []
         self.kinematics_contracts = []
         per_clip_fps = []
-        for f in files:
-            if not os.path.isfile(f):
-                raise FileNotFoundError(f"Invalid motion file path: {f}")
-            data = np.load(f)
-            fps = self._fps_scalar(data, f)
-            per_clip_fps.append(fps)
-            frame_count = self._validate_motion_array_shapes(
-                data, f, len(articulation_names)
-            )
-            _kin = self._kinematics_contract(
-                data,
-                f,
-                articulation_names,
-                allow_legacy_link_origin_velocity=allow_legacy_link_origin_velocity,
-            )
-            self.kinematics_contracts.append(_kin)
-            if not _kin["exact"]:
-                print(
-                    f"[MotionLoader WARN] {f}: legacy motion lacks a schema-2 bound body order; "
-                    "allowed for checkpoint compatibility but formal lineage is exact-ineligible. "
-                    "Migrate/re-export the clip with kinematics schema 2. "
-                    f"audit={_kin}",
-                    flush=True,
+        for f, payload in zip(files, payloads):
+            if payload is None:
+                if not os.path.isfile(f):
+                    raise FileNotFoundError(f"Invalid motion file path: {f}")
+                source = f
+            else:
+                source = io.BytesIO(payload)
+            with np.load(source, allow_pickle=False) as data:
+                fps = self._fps_scalar(data, f)
+                per_clip_fps.append(fps)
+                frame_count = self._validate_motion_array_shapes(
+                    data, f, len(articulation_names)
                 )
-            jp.append(torch.tensor(data["joint_pos"], dtype=torch.float32, device=device))
-            jv.append(torch.tensor(data["joint_vel"], dtype=torch.float32, device=device))
-            bp.append(torch.tensor(data["body_pos_w"], dtype=torch.float32, device=device))
-            bq.append(torch.tensor(data["body_quat_w"], dtype=torch.float32, device=device))
-            bl.append(torch.tensor(data["body_lin_vel_w"], dtype=torch.float32, device=device))
-            ba.append(torch.tensor(data["body_ang_vel_w"], dtype=torch.float32, device=device))
-            seg_lens.append(frame_count)
+                _kin = self._kinematics_contract(
+                    data,
+                    f,
+                    articulation_names,
+                    allow_legacy_link_origin_velocity=allow_legacy_link_origin_velocity,
+                )
+                self.kinematics_contracts.append(_kin)
+                if not _kin["exact"]:
+                    print(
+                        f"[MotionLoader WARN] {f}: legacy motion lacks a schema-2 bound body order; "
+                        "allowed for checkpoint compatibility but formal lineage is exact-ineligible. "
+                        "Migrate/re-export the clip with kinematics schema 2. "
+                        f"audit={_kin}",
+                        flush=True,
+                    )
+                jp.append(torch.tensor(data["joint_pos"], dtype=torch.float32, device=device))
+                jv.append(torch.tensor(data["joint_vel"], dtype=torch.float32, device=device))
+                bp.append(torch.tensor(data["body_pos_w"], dtype=torch.float32, device=device))
+                bq.append(torch.tensor(data["body_quat_w"], dtype=torch.float32, device=device))
+                bl.append(torch.tensor(data["body_lin_vel_w"], dtype=torch.float32, device=device))
+                ba.append(torch.tensor(data["body_ang_vel_w"], dtype=torch.float32, device=device))
+                seg_lens.append(frame_count)
         first_fps = per_clip_fps[0]
         if any(not math.isclose(value, first_fps, rel_tol=0.0, abs_tol=1.0e-12)
                for value in per_clip_fps[1:]):
@@ -358,6 +381,7 @@ class MotionLoader:
 CLIP_FAMILY_FOREHAND = "forehand"
 CLIP_FAMILY_BACKHAND = "backhand"
 _CLIP_FAMILIES = (CLIP_FAMILY_FOREHAND, CLIP_FAMILY_BACKHAND)
+_A3_CANONICAL_READY_JOINT_COUNT = 31
 
 
 def resolve_clip_family_is_forehand(clip_family_per_clip, num_segments: int) -> tuple[bool, ...]:
@@ -419,9 +443,28 @@ class MotionCommand(CommandTerm):
             self.robot.find_bodies(self.cfg.body_names, preserve_order=True)[0], dtype=torch.long, device=self.device
         )
 
+        canonical_ready_mode = getattr(self.cfg, "canonical_ready_mode", False)
+        if type(canonical_ready_mode) is not bool:
+            raise ValueError("canonical_ready_mode must be an exact boolean")
+        self.canonical_ready_mode = canonical_ready_mode
+        # Freeze Hydra/ListConfig/custom iterable input once.  Admission hashes
+        # and MotionLoader must consume the same ordered path identity.
+        self._motion_files = self._configured_motion_files(self.cfg.motion_file)
+        if self.canonical_ready_mode:
+            self._validate_canonical_ready_config()
+            self._canonical_registry_tables = (
+                self._load_and_validate_canonical_registry(env)
+            )
+            self._motion_payloads = self._snapshot_canonical_motion_bytes()
+        else:
+            (
+                self._motion_payloads,
+                self._legacy_motion_sha256,
+            ) = self._load_legacy_motion_admission()
         self.motion = MotionLoader(
-            self.cfg.motion_file,
+            self._motion_files,
             self.body_indexes,
+            motion_payloads=self._motion_payloads,
             articulation_body_names=self.robot.body_names,
             selected_body_names=self.cfg.body_names,
             device=self.device,
@@ -429,6 +472,11 @@ class MotionCommand(CommandTerm):
                 self.cfg.allow_legacy_link_origin_velocity
             ),
         )
+        if self.canonical_ready_mode:
+            self._validate_canonical_registry_motion_bytes()
+            self._validate_canonical_ready_clips()
+        else:
+            self._validate_legacy_motion_bytes()
         expected_fps = 1.0 / float(env.step_dt)
         if not math.isfinite(expected_fps) or not math.isclose(
             self.motion.fps, expected_fps, rel_tol=0.0, abs_tol=1.0e-9
@@ -586,6 +634,16 @@ class MotionCommand(CommandTerm):
             self._planner_desired_tts = torch.zeros(n, device=self.device)
             self._planner_begin_tts = torch.zeros(n, device=self.device)
             self._planner_truth_tts = torch.zeros(n, device=self.device)
+            # 带符号孪生时钟(2026-07-25):truth tts 是任务期限语义,触球后 clamp 钉 0
+            # (obs/critic 读它,合同如此)。但 |tts|<=0.12 的击球窗掩码若也读它,窗就从
+            # 触球一直开到 clip 收尾——随挥全程 ~50-100 步顶着 ±0.12 s 的设计语义,
+            # position/normal 触球后停拍可薅、站稳包/face 税全程计费、模仿被 0.25x 捂嘴。
+            # 窗掩码改读这条不截断的时钟:触球后照常转负,窗在 +0.12 s 如约关闭。
+            # 非 active(reset 后新任务未装)置大正哨兵 = 窗关闭(fail-closed;
+            # 旧行为是残留 0 → 空档期窗误开)。
+            self._planner_truth_tts_signed = torch.full(
+                (n,), 1.0e6, device=self.device
+            )
             # Immutable task-begin envelope baseline.  A latest-value transport may legitimately
             # skip active revisions, so envelope checks may not depend on whichever revision the
             # consumer happened to observe previously.
@@ -856,6 +914,520 @@ class MotionCommand(CommandTerm):
             self.metrics[f"reference_anchor_lin_vel_{axis}"] = torch.zeros(self.num_envs, device=self.device)
             self.metrics[f"robot_anchor_lin_vel_{axis}"] = torch.zeros(self.num_envs, device=self.device)
 
+    @staticmethod
+    def _range_is_exact_zero_pair(value) -> bool:
+        try:
+            pair = tuple(value)
+        except TypeError:
+            return False
+        return len(pair) == 2 and all(
+            type(item) in (int, float) and math.isfinite(float(item)) and float(item) == 0.0
+            for item in pair
+        )
+
+    @staticmethod
+    def _mapping_ranges_are_exact_zero(mapping) -> bool:
+        return isinstance(mapping, dict) and all(
+            MotionCommand._range_is_exact_zero_pair(value) for value in mapping.values()
+        )
+
+    @staticmethod
+    def _canonical_registry_module():
+        """Load the repository registry only for the explicitly enabled formal path."""
+
+        import importlib.util
+        import sys
+
+        global _CANONICAL_REGISTRY_RUNTIME_MODULE
+        module_name = "_hope_canonical_motion_registry_runtime"
+        script = (
+            Path(__file__).resolve().parents[6]
+            / "scripts"
+            / "canonical_motion_registry.py"
+        )
+        if _CANONICAL_REGISTRY_RUNTIME_MODULE is not None:
+            if (
+                Path(_CANONICAL_REGISTRY_RUNTIME_MODULE.__file__).resolve()
+                != script
+            ):
+                raise ValueError(
+                    "cached canonical registry module resolved to a different file"
+                )
+            return _CANONICAL_REGISTRY_RUNTIME_MODULE
+        if not script.is_file():
+            raise ValueError(f"canonical registry loader is missing: {script}")
+        spec = importlib.util.spec_from_file_location(module_name, script)
+        if spec is None or spec.loader is None:
+            raise ValueError(f"cannot create canonical registry loader spec for {script}")
+        module = importlib.util.module_from_spec(spec)
+        # Do not reuse a caller-preloaded sys.modules object, even when it
+        # spoofs __file__.  The first trusted load in this process always
+        # executes the exact repository bytes through the standard file loader.
+        sys.modules[module_name] = module
+        try:
+            spec.loader.exec_module(module)
+        except Exception:
+            sys.modules.pop(module_name, None)
+            raise
+        if Path(module.__file__).resolve() != script:
+            sys.modules.pop(module_name, None)
+            raise ValueError("canonical registry executed from a wrong file")
+        _CANONICAL_REGISTRY_RUNTIME_MODULE = module
+        return module
+
+    @staticmethod
+    def _exact_config_sha256(value, label: str) -> str:
+        if (
+            type(value) is not str
+            or len(value) != 64
+            or any(char not in "0123456789abcdef" for char in value)
+        ):
+            raise ValueError(
+                f"{label} must be one exact 64-character lowercase SHA-256"
+            )
+        return value
+
+    @staticmethod
+    def _configured_motion_files(value) -> tuple[str, ...]:
+        if isinstance(value, str):
+            files = (value,)
+        else:
+            try:
+                files = tuple(value)
+            except TypeError as exc:
+                raise ValueError(
+                    "canonical motion_file must be one path or an ordered path sequence"
+                ) from exc
+        if not files or any(type(path) is not str or not path for path in files):
+            raise ValueError(
+                "canonical motion_file entries must be non-empty path strings"
+            )
+        try:
+            return tuple(str(Path(path).expanduser().resolve(strict=True)) for path in files)
+        except OSError as exc:
+            raise ValueError(f"cannot resolve canonical motion_file: {exc}") from exc
+
+    @staticmethod
+    def _exact_numeric_tuple(value, label: str) -> tuple[float, ...]:
+        try:
+            raw = tuple(value)
+        except TypeError as exc:
+            raise ValueError(f"{label} must be an explicit ordered sequence") from exc
+        if any(
+            isinstance(item, bool)
+            or type(item) not in (int, float)
+            or not math.isfinite(float(item))
+            for item in raw
+        ):
+            raise ValueError(f"{label} must contain only finite real numbers")
+        return tuple(float(item) for item in raw)
+
+    def _load_and_validate_canonical_registry(self, env):
+        """Bind all five runtime columns to one pinned, training-authorized registry."""
+
+        registry_path = getattr(self.cfg, "canonical_registry_path", "")
+        if type(registry_path) is not str or not registry_path.strip():
+            raise ValueError(
+                "canonical_ready_mode requires canonical_registry_path"
+            )
+        expected_registry = self._exact_config_sha256(
+            getattr(self.cfg, "canonical_registry_sha256", ""),
+            "canonical_registry_sha256",
+        )
+        expected_alignment = self._exact_config_sha256(
+            getattr(self.cfg, "canonical_registry_alignment_sha256", ""),
+            "canonical_registry_alignment_sha256",
+        )
+        expected_ready = self._exact_config_sha256(
+            getattr(self.cfg, "canonical_ready_sha256", ""),
+            "canonical_ready_sha256",
+        )
+        expected_ready_fk = self._exact_config_sha256(
+            getattr(self.cfg, "canonical_ready_fk_sha256", ""),
+            "canonical_ready_fk_sha256",
+        )
+        promotion_certificate_path = getattr(
+            self.cfg, "canonical_promotion_certificate_path", ""
+        )
+        if (
+            type(promotion_certificate_path) is not str
+            or not promotion_certificate_path.strip()
+        ):
+            raise ValueError(
+                "canonical_ready_mode requires "
+                "canonical_promotion_certificate_path"
+            )
+        repo_root_value = getattr(self.cfg, "canonical_registry_repo_root", "")
+        if type(repo_root_value) is not str:
+            raise ValueError("canonical_registry_repo_root must be a path string")
+        repo_root = repo_root_value.strip() or None
+
+        registry_module = self._canonical_registry_module()
+        try:
+            registry = registry_module.load_canonical_motion_bank_registry(
+                registry_path,
+                repo_root=repo_root,
+                expected_registry_sha256=expected_registry,
+            )
+            admission = registry_module.verify_registry_promotion_certificate(
+                registry,
+                promotion_certificate_path,
+                authorization_purpose="training",
+            )
+            tables = registry_module.adapt_registry_for_runtime(
+                registry,
+                expected_alignment_sha256=expected_alignment,
+                expected_canonical_ready_sha256=expected_ready,
+                expected_canonical_ready_fk_sha256=expected_ready_fk,
+                authorization_purpose="training",
+                admission=admission,
+            )
+        except Exception as exc:
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
+            raise ValueError(f"invalid canonical motion registry: {exc}") from exc
+
+        if tables.canonical_ready_sha256 != expected_ready:
+            raise ValueError(
+                "canonical_ready_sha256 differs from the pinned registry ready: "
+                f"config={expected_ready} registry={tables.canonical_ready_sha256}"
+            )
+        if tables.canonical_ready_fk_sha256 != expected_ready_fk:
+            raise ValueError(
+                "canonical_ready_fk_sha256 differs from the pinned registry FK truth: "
+                f"config={expected_ready_fk} "
+                f"registry={tables.canonical_ready_fk_sha256}"
+            )
+        actual_files = self._motion_files
+        if actual_files != tuple(tables.motion_file):
+            raise ValueError(
+                "canonical motion_file order differs from registry motion_ids: "
+                f"ids={tables.motion_ids} config={actual_files} "
+                f"registry={tables.motion_file}"
+            )
+        families = getattr(self.cfg, "clip_family_per_clip", None)
+        if (
+            not isinstance(families, (tuple, list))
+            or tuple(families) != tuple(tables.clip_family_per_clip)
+        ):
+            raise ValueError(
+                "canonical clip_family_per_clip must exactly equal the registry table"
+            )
+
+        commands_cfg = getattr(getattr(env, "cfg", None), "commands", None)
+        racket_cfg = getattr(commands_cfg, "racket_target", None)
+        if racket_cfg is None:
+            raise ValueError(
+                "canonical_ready_mode requires env.cfg.commands.racket_target "
+                "for an atomic phase/face table check"
+            )
+        phases = self._exact_numeric_tuple(
+            getattr(racket_cfg, "strike_phase_per_clip", ()),
+            "racket_target.strike_phase_per_clip",
+        )
+        if phases != tuple(tables.strike_phase_per_clip):
+            raise ValueError(
+                "racket_target.strike_phase_per_clip differs from the registry table"
+            )
+        signs = self._exact_numeric_tuple(
+            getattr(racket_cfg, "mount_normal_sign_per_clip", ()),
+            "racket_target.mount_normal_sign_per_clip",
+        )
+        if signs != tuple(tables.mount_normal_sign_per_clip):
+            raise ValueError(
+                "racket_target.mount_normal_sign_per_clip differs from the registry table"
+            )
+
+        self.canonical_motion_ids = tuple(tables.motion_ids)
+        self.canonical_registry_sha256 = tables.registry_sha256
+        self.canonical_registry_alignment_sha256 = tables.alignment_sha256
+        self.canonical_ready_sha256 = tables.canonical_ready_sha256
+        self.canonical_ready_fk_sha256 = tables.canonical_ready_fk_sha256
+        self.canonical_contact_opportunity_frames = tuple(
+            tables.contact_opportunity_frames_per_clip
+        )
+        self.canonical_source_manifest_sha256_per_clip = tuple(
+            tables.source_manifest_sha256_per_clip
+        )
+        self.canonical_build_manifest_sha256_per_clip = tuple(
+            tables.build_manifest_sha256_per_clip
+        )
+        self.canonical_applicability_manifest_sha256_per_clip = tuple(
+            tables.applicability_manifest_sha256_per_clip
+        )
+        self.canonical_evidence_level_per_clip = tuple(
+            tables.evidence_level_per_clip
+        )
+        self.canonical_evidence_manifest_sha256_per_clip = tuple(
+            tables.evidence_manifest_sha256_per_clip
+        )
+        self.canonical_question_bank_sha256_per_clip = tuple(
+            tables.question_bank_sha256_per_clip
+        )
+        self.canonical_training_config_sha256_per_clip = tuple(
+            tables.training_config_sha256_per_clip
+        )
+        self.canonical_onnx_model_sha256_per_clip = tuple(
+            tables.onnx_model_sha256_per_clip
+        )
+        self.canonical_adoption_manifest_sha256_per_clip = tuple(
+            tables.adoption_manifest_sha256_per_clip
+        )
+        return tables
+
+    def _load_legacy_motion_admission(
+        self,
+    ) -> tuple[tuple[bytes, ...], tuple[str, ...]]:
+        """Admit and retain the exact raw bytes MotionLoader will consume."""
+
+        registry_module = self._canonical_registry_module()
+        try:
+            payloads, digests = (
+                registry_module.motion_admission.legacy_raw_motion_snapshots(
+                    self._motion_files
+                )
+            )
+            return tuple(payloads), tuple(digests)
+        except Exception as exc:
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
+            raise ValueError(
+                f"legacy raw motion admission rejected: {exc}"
+            ) from exc
+
+    def _validate_legacy_motion_bytes(self) -> None:
+        """Assert the immutable loader snapshots still match admission."""
+
+        actual = tuple(
+            hashlib.sha256(payload).hexdigest()
+            for payload in self._motion_payloads
+        )
+        if actual != tuple(self._legacy_motion_sha256):
+            raise ValueError(
+                "legacy raw motion snapshot differs from its admission digest"
+            )
+
+    def _snapshot_canonical_motion_bytes(self) -> tuple[bytes, ...]:
+        """Bind MotionLoader to the exact registry-authorized NPZ bytes."""
+
+        payloads: list[bytes] = []
+        digests: list[str] = []
+        for index, path in enumerate(self._motion_files):
+            try:
+                payload = Path(path).read_bytes()
+            except OSError as exc:
+                raise ValueError(
+                    f"cannot snapshot canonical motion_file[{index}]: {exc}"
+                ) from exc
+            payloads.append(payload)
+            digests.append(hashlib.sha256(payload).hexdigest())
+        expected = tuple(self._canonical_registry_tables.npz_sha256_per_clip)
+        if tuple(digests) != expected:
+            raise ValueError(
+                "canonical motion bytes changed after trusted registry admission"
+            )
+        return tuple(payloads)
+
+    def _validate_canonical_registry_motion_bytes(self) -> None:
+        """Check schema and the immutable snapshots used by MotionLoader."""
+
+        if not self.motion.kinematics_contract_exact:
+            raise ValueError(
+                "canonical_ready_mode requires every clip to use exact schema-2 kinematics "
+                "with the runtime body order bound"
+            )
+        tables = self._canonical_registry_tables
+        if int(self.motion.num_segments) != len(tables.motion_ids):
+            raise ValueError(
+                "canonical MotionLoader segment count differs from the five registry rows"
+            )
+        actual_hashes = tuple(
+            hashlib.sha256(payload).hexdigest()
+            for payload in self._motion_payloads
+        )
+        if actual_hashes != tuple(tables.npz_sha256_per_clip):
+            raise ValueError(
+                "canonical motion bytes changed between registry validation and MotionLoader adoption"
+            )
+
+    def _validate_canonical_ready_config(self) -> None:
+        """Reject reset curricula that would silently bypass the formal ready contract."""
+
+        conflicts: list[str] = []
+        if float(self.cfg.stand_start_prob) != 1.0:
+            conflicts.append("stand_start_prob must be 1.0")
+        if float(self.cfg.post_swing_start_prob) != 0.0:
+            conflicts.append("post_swing_start_prob must be 0.0")
+        if str(getattr(self.cfg, "post_swing_teacher_receipt", "") or "").strip():
+            conflicts.append("post_swing_teacher_receipt must be empty")
+        if any(
+            bool(getattr(self.cfg, name, False))
+            for name in (
+                "post_swing_require_ready_at_init",
+                "post_swing_fail_fast_first_reset",
+                "post_swing_first_reset_require_readback",
+            )
+        ):
+            conflicts.append("post-swing first-reset/replay gates must be disabled")
+        if bool(self.cfg.wrap_teleport):
+            conflicts.append("wrap_teleport must be false")
+        if float(self.cfg.clip_switch_prob) != 0.0:
+            conflicts.append("clip_switch_prob must be 0 (switch only at shared-ready wrap)")
+        if (
+            str(getattr(self.cfg, "event_timing_mode", EVENT_TIMING_MODE_DISABLED))
+            != EVENT_TIMING_MODE_DISABLED
+        ):
+            conflicts.append(
+                "event_timing_mode must be disabled (no mid-stroke ready-reference jump)"
+            )
+        if int(getattr(self.cfg, "rsi_skip_settle_frames", 0)) != 0:
+            conflicts.append("rsi_skip_settle_frames must be 0")
+        if not self._range_is_exact_zero_pair(self.cfg.joint_position_range):
+            conflicts.append("joint_position_range must be (0, 0)")
+        if not self._range_is_exact_zero_pair(self.cfg.stand_start_yaw_range):
+            conflicts.append("stand_start_yaw_range must be (0, 0)")
+        if not self._mapping_ranges_are_exact_zero(self.cfg.pose_range):
+            conflicts.append("all pose_range entries must be (0, 0)")
+        if not self._mapping_ranges_are_exact_zero(self.cfg.velocity_range):
+            conflicts.append("all velocity_range entries must be (0, 0)")
+        if conflicts:
+            raise ValueError(
+                "canonical_ready_mode is the formal all-true-reset ready-entry path and is "
+                "incompatible with RSI/post-swing/noised reset curricula: "
+                + "; ".join(conflicts)
+            )
+
+    @staticmethod
+    def _first_tensor_mismatch(reference: torch.Tensor, candidate: torch.Tensor) -> tuple[int, float]:
+        """Return mismatch count/max error for an exact runtime-float32 comparison."""
+
+        unequal = reference != candidate
+        count = int(torch.count_nonzero(unequal).item())
+        if count == 0:
+            return 0, 0.0
+        ref64 = reference.to(dtype=torch.float64)
+        cand64 = candidate.to(dtype=torch.float64)
+        max_abs = float(torch.max(torch.abs(ref64 - cand64)).item())
+        return count, max_abs
+
+    def _validate_canonical_ready_clips(self) -> None:
+        """Require one literal runtime-ready pose at every clip boundary.
+
+        ``MotionLoader`` intentionally converts references to the consumer's float32 dtype.
+        The gate is exact in that runtime dtype (no hidden tolerance): every clip start and end
+        must contain the same joint/body pose, including the same quaternion hemisphere.  All
+        six endpoint velocity channels must also be literal zero.
+        """
+
+        runtime_joint_count = int(self.robot.data.default_joint_pos.shape[-1])
+        motion_joint_count = int(self.motion.joint_pos.shape[-1])
+        if (
+            runtime_joint_count != _A3_CANONICAL_READY_JOINT_COUNT
+            or motion_joint_count != _A3_CANONICAL_READY_JOINT_COUNT
+        ):
+            raise ValueError(
+                "canonical_ready_mode is bound to the Agibot A3 31-joint articulation: "
+                f"runtime={runtime_joint_count}, motion={motion_joint_count}"
+            )
+        if int(self.body_indexes[0].item()) != 0:
+            raise ValueError(
+                "canonical_ready_mode requires body_names[0] to be the articulation root body "
+                "so one clip frame can atomically seed root and joint state"
+            )
+
+        starts = self.motion.seg_start
+        ends = starts + self.motion.seg_len - 1
+        reference_index = int(starts[0].item())
+        pose_channels = (
+            ("joint_pos", self.motion.joint_pos),
+            ("body_pos_w", self.motion._body_pos_w),
+            ("body_quat_w", self.motion._body_quat_w),
+        )
+        velocity_channels = (
+            ("joint_vel", self.motion.joint_vel),
+            ("body_lin_vel_w", self.motion._body_lin_vel_w),
+            ("body_ang_vel_w", self.motion._body_ang_vel_w),
+        )
+        for channel_name, channel in (*pose_channels, *velocity_channels):
+            endpoint_values = channel[torch.cat((starts, ends))]
+            if not bool(torch.isfinite(endpoint_values).all()):
+                raise ValueError(
+                    f"canonical_ready_mode found non-finite {channel_name} at a clip boundary"
+                )
+
+        for clip_index in range(int(self.motion.num_segments)):
+            for boundary_name, boundary_index in (
+                ("start", int(starts[clip_index].item())),
+                ("end", int(ends[clip_index].item())),
+            ):
+                for channel_name, channel in pose_channels:
+                    mismatch_count, max_abs = self._first_tensor_mismatch(
+                        channel[reference_index], channel[boundary_index]
+                    )
+                    if mismatch_count:
+                        raise ValueError(
+                            "canonical_ready_mode requires all clip starts/ends to share one "
+                            "exact runtime-float32 ready pose: "
+                            f"clip={clip_index} boundary={boundary_name} channel={channel_name} "
+                            f"mismatches={mismatch_count} max_abs={max_abs:.9g}"
+                        )
+                for channel_name, channel in velocity_channels:
+                    value = channel[boundary_index]
+                    if int(torch.count_nonzero(value).item()) != 0:
+                        max_abs = float(torch.max(torch.abs(value)).item())
+                        raise ValueError(
+                            "canonical_ready_mode requires literal zero endpoint velocities: "
+                            f"clip={clip_index} boundary={boundary_name} channel={channel_name} "
+                            f"max_abs={max_abs:.9g}"
+                        )
+
+    def _canonical_ready_steps(self, env_ids: torch.Tensor | None = None) -> torch.Tensor:
+        clips = self.clip_id if env_ids is None else self.clip_id[env_ids]
+        return self.motion.seg_start[clips]
+
+    def _require_canonical_ready_boundary(
+        self, env_ids: torch.Tensor, operation: str
+    ) -> None:
+        """Allow an in-episode clip retarget only at a proven zero-speed ready endpoint."""
+
+        if not self.canonical_ready_mode or len(env_ids) == 0:
+            return
+        clips = self.clip_id[env_ids]
+        starts = self.motion.seg_start[clips]
+        ends = starts + self.motion.seg_len[clips] - 1
+        steps = self.time_steps[env_ids]
+        at_ready_boundary = (steps == starts) | (steps == ends)
+        if not bool(torch.all(at_ready_boundary)):
+            bad = env_ids[~at_ready_boundary].detach().cpu().tolist()
+            raise ValueError(
+                f"{operation} cannot change canonical clip mid-stroke; "
+                f"envs {bad} are not at a shared zero-speed ready boundary"
+            )
+
+    def _pose_reference_steps(self) -> torch.Tensor:
+        if not self.canonical_ready_mode:
+            return self.time_steps
+        return torch.where(self.in_hold, self._canonical_ready_steps(), self.time_steps)
+
+    def _write_canonical_ready_state(self, env_ids: torch.Tensor) -> None:
+        """Write one clip-owned ready transaction: root + 31 joints, all velocities zero."""
+
+        ready_steps = self._canonical_ready_steps(env_ids)
+        root_pos = self.motion.body_pos_w[ready_steps, 0] + self._env.scene.env_origins[env_ids]
+        root_quat = self.motion.body_quat_w[ready_steps, 0]
+        root_velocity = torch.zeros(
+            len(env_ids), 6, dtype=root_pos.dtype, device=root_pos.device
+        )
+        root_state = torch.cat((root_pos, root_quat, root_velocity), dim=-1)
+        joint_pos = self.motion.joint_pos[ready_steps]
+        joint_vel = torch.zeros_like(joint_pos)
+
+        # Isaac exposes separate root/joint setters.  Keep both writes adjacent and derive both
+        # payloads before the first mutation so no default-stand/clip-ready mixed state can be
+        # constructed by this consumer.
+        self.robot.write_root_state_to_sim(root_state, env_ids=env_ids)
+        self.robot.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
+
     @property
     def command(self) -> torch.Tensor:  # TODO Consider again if this is the best observation
         return torch.cat([self.joint_pos, self.joint_vel], dim=1)
@@ -1091,6 +1663,7 @@ class MotionCommand(CommandTerm):
         self._planner_desired_tts[ids] = tts
         self._planner_begin_tts[ids] = tts
         self._planner_truth_tts[ids] = tts
+        self._planner_truth_tts_signed[ids] = tts
         self._planner_begin_target_pos[ids] = pos
         self._planner_begin_target_vel[ids] = vel
         self._planner_begin_target_normal[ids] = normal
@@ -1252,6 +1825,10 @@ class MotionCommand(CommandTerm):
         self._planner_truth_tts[active] = (
             self._planner_truth_tts[active] - dt
         ).clamp(min=0.0)
+        # 孪生时钟不截断:触球后转负,供击球窗掩码在 +window 处如约关闭。
+        self._planner_truth_tts_signed[active] = (
+            self._planner_truth_tts_signed[active] - dt
+        )
         remaining_deadline = (self._planner_desired_tts - dt).clamp(min=0.0)
         span = (self._planner_strike_step - self._planner_start_step).clamp(min=1.0e-6)
         phase = ((self.time_steps_f - self._planner_start_step) / span).clamp(0.0, 1.0)
@@ -1344,6 +1921,7 @@ class MotionCommand(CommandTerm):
         holds = step.install_hold_steps
         # Deliberately no _resample_command, adaptive sampling, simulator write, action write,
         # history reset, or teleport here.  The current robot state and last action continue.
+        self._require_canonical_ready_boundary(ids, "event motion install")
         self.clip_id[ids] = clips
         starts = self.motion.seg_start[clips]
         self.time_steps[ids] = starts
@@ -1363,6 +1941,8 @@ class MotionCommand(CommandTerm):
         # default stand pose; the release (stand -> windup) is exactly the trained
         # stand_start transition. C++ mirrors this (pp_policy: refs.joint_pos =
         # default_q at level 0) — keep them in lockstep.
+        if self.canonical_ready_mode:
+            return self.motion.joint_pos[self._pose_reference_steps()]
         jp = self.motion.joint_pos[self.time_steps]
         dq = self.robot.data.default_joint_pos
         return torch.where(self.in_hold[:, None], dq, jp)
@@ -1384,11 +1964,12 @@ class MotionCommand(CommandTerm):
 
     @property
     def body_pos_w(self) -> torch.Tensor:
-        return self.motion.body_pos_w[self.time_steps] + self._env.scene.env_origins[:, None, :]
+        steps = self._pose_reference_steps()
+        return self.motion.body_pos_w[steps] + self._env.scene.env_origins[:, None, :]
 
     @property
     def body_quat_w(self) -> torch.Tensor:
-        return self.motion.body_quat_w[self.time_steps]
+        return self.motion.body_quat_w[self._pose_reference_steps()]
 
     @property
     def body_lin_vel_w(self) -> torch.Tensor:
@@ -1409,21 +1990,32 @@ class MotionCommand(CommandTerm):
 
     @property
     def anchor_pos_w(self) -> torch.Tensor:
-        return self.motion.body_pos_w[self.time_steps, self.motion_anchor_body_index] + self._env.scene.env_origins
+        steps = self._pose_reference_steps()
+        return self.motion.body_pos_w[steps, self.motion_anchor_body_index] + self._env.scene.env_origins
 
     @property
     def anchor_quat_w(self) -> torch.Tensor:
-        return self.motion.body_quat_w[self.time_steps, self.motion_anchor_body_index]
+        return self.motion.body_quat_w[
+            self._pose_reference_steps(), self.motion_anchor_body_index
+        ]
 
     @property
     def anchor_lin_vel_w(self) -> torch.Tensor:
         alv = self.motion.body_lin_vel_w[self.time_steps, self.motion_anchor_body_index]
-        return alv * self.speed_scale[:, None] if self.retiming_active else alv
+        if self.retiming_active:
+            alv = alv * self.speed_scale[:, None]
+        if self.canonical_ready_mode:
+            alv = torch.where(self.in_hold[:, None], torch.zeros_like(alv), alv)
+        return alv
 
     @property
     def anchor_ang_vel_w(self) -> torch.Tensor:
         aav = self.motion.body_ang_vel_w[self.time_steps, self.motion_anchor_body_index]
-        return aav * self.speed_scale[:, None] if self.retiming_active else aav
+        if self.retiming_active:
+            aav = aav * self.speed_scale[:, None]
+        if self.canonical_ready_mode:
+            aav = torch.where(self.in_hold[:, None], torch.zeros_like(aav), aav)
+        return aav
 
     @property
     def robot_joint_pos(self) -> torch.Tensor:
@@ -2129,6 +2721,17 @@ class MotionCommand(CommandTerm):
             self.time_steps_f[env_ids_t] = starts.float()
             self.speed_scale[env_ids_t] = 0.0
             self._planner_active[env_ids_t] = False
+            # 孪生时钟回哨兵:新任务安装前窗保持关闭(fail-closed)。
+            self._planner_truth_tts_signed[env_ids_t] = 1.0e6
+
+        # A formal canonical-ready clip is self-contained: frame 0 is the shared waiting pose and
+        # the following frames are its already-integrated path toward contact.  Always re-base a
+        # newly selected clip on that frame; never serialize an extra ready->historical-frame-0
+        # bridge and never release from adaptive RSI halfway through the stroke.
+        if self.canonical_ready_mode:
+            ready_steps = self._canonical_ready_steps(env_ids_t)
+            self.time_steps[env_ids_t] = ready_steps
+            self.time_steps_f[env_ids_t] = ready_steps.float()
 
         # Pre-swing HOLD (Phase A): freeze the reference at the swing's first frame for a random
         # number of control steps ("the ball is not reaching yet"). Applies to resets AND wraps.
@@ -2158,6 +2761,20 @@ class MotionCommand(CommandTerm):
         # targets are anchor-relative, so the new reference re-anchors to the robot where it is.
         # Teleporting at a wrap (legacy RSI behavior) requires wrap_teleport=True.
         if self._resampling_from_wrap and not self.cfg.wrap_teleport:
+            return
+
+        if self.canonical_ready_mode:
+            # Every true episode reset belongs to the formal ready-entry distribution.  RSI and
+            # post-swing replay are rejected at boot rather than silently surviving as alternate
+            # reset routes.  The selected clip is immaterial to pose because startup validation
+            # proved every start/end shares the same literal runtime ready.
+            self._write_canonical_ready_state(env_ids_t)
+            self.hold_counter[env_ids_t] = torch.clamp(
+                self.hold_counter[env_ids_t], min=int(self.cfg.stand_start_min_hold)
+            )
+            self.metrics["in_hold"][env_ids_t] = (
+                self.hold_counter[env_ids_t] > 0
+            ).float()
             return
 
         # TRUE episode reset: three-way split — DEFAULT STAND (deploy entry) / POST-SWING buffer
@@ -2370,6 +2987,7 @@ class MotionCommand(CommandTerm):
                 "external BankExam currently requires native one-frame-per-step playback"
             )
 
+        self._require_canonical_ready_boundary(ids, "external BankExam install")
         self.clip_id[ids] = clips
         starts = self.motion.seg_start[clips]
         self.time_steps[ids] = starts
@@ -2585,6 +3203,25 @@ class MotionCommandCfg(CommandTermCfg):
     # Historical diagnostic replay only. Formal paths migrate these untagged finite-difference
     # link-origin velocities to the schema-2 COM-point contract instead of enabling this escape.
     allow_legacy_link_origin_velocity: bool = False
+    # Formal canonical-library consumer.  Default OFF preserves every historical hold/reset,
+    # reference value and RNG draw.  ON requires exact schema-2 clips whose starts and ends share
+    # one literal runtime-float32 ready pose with zero endpoint velocities.  Every hold reference
+    # (joint/body/anchor) and every true reset then comes from that same clip frame; RSI,
+    # post-swing replay, reset noise, yaw perturbation and wrap teleport are rejected instead of
+    # silently creating a second entry distribution.
+    canonical_ready_mode: bool = False
+    # Formal mode has no raw-file escape hatch: one exact registry must authorize and atomically
+    # bind the ordered five motion paths, family/phase/face tables, shared ready, and artifact
+    # hashes.  All strings remain inert while canonical_ready_mode is false.
+    canonical_registry_path: str = ""
+    canonical_registry_repo_root: str = ""
+    canonical_registry_sha256: str = ""
+    canonical_registry_alignment_sha256: str = ""
+    canonical_ready_sha256: str = ""
+    canonical_ready_fk_sha256: str = ""
+    # Path selection is configurable, authority is not: exact certificate bytes
+    # must hash to a digest in canonical_motion_admission.py's code-owned set.
+    canonical_promotion_certificate_path: str = ""
     anchor_body_name: str = MISSING
     body_names: list[str] = MISSING
 

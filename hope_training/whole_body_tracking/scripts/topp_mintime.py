@@ -49,6 +49,9 @@ ALGORITHM(外层缩放扫描 + 内层 oracle 在环修复)
 NEW PHASE 口径(同 v1/v2):触球行 = 源帧 c 在输出网格 k* 的逐位拷贝;
     phase_out = k*/(T_out−1);视频约定帧对本资产弃用 → 登记 phase_out。
 
+CANONICAL-V2 SAFETY:本工具的锁窗语义不是 canonical-v2 的现行语义。带 canonical
+sidecar 的输入默认拒收;仅显式 legacy comparator flag 可跑,且输出永久降级为历史对照。
+
 USAGE (pod, hope_mjeval_venv: numpy + mujoco)
     <venv>/bin/python hope_training/whole_body_tracking/scripts/topp_mintime.py \
         --input  .../v5_height_fix/hope_backhand_v5hLs_cal.npz --phase 0.391 \
@@ -75,7 +78,7 @@ import tempfile
 from dataclasses import dataclass, field as dc_field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import List, Optional
+from typing import Any, List, Mapping, Optional, Sequence
 
 import numpy as np
 
@@ -86,6 +89,55 @@ import synthesize_timing as v1        # noqa: E402  (numpy-only at import time)
 import synthesize_timing_v2 as v2     # noqa: E402  (numpy-only at import time)
 
 ISAAC_JOINT_NAMES = v1.ISAAC_JOINT_NAMES
+
+# canonical-v2 assets deliberately use a different time-law contract: the contact
+# opportunity is marker-only and acceleration may continue through its end.  This
+# legacy tool freezes the window, so canonical inputs are rejected unless the
+# caller explicitly asks for a historical comparator.  Keep the guard here so the
+# two sibling legacy tools can reuse the exact same classification logic.
+LEGACY_COMPARATOR_CLASS = "legacy_window_frozen_comparator_only"
+CANONICAL_V2_PUBLICATION_CLASSES = frozenset(
+    {
+        "compiler_candidate",
+        "training_adopted",
+        "deployment_adopted",
+        "hardware_adopted",
+    }
+)
+CANONICAL_V2_TOOL_IDS = frozenset({"canonical_schema2_builder_v1"})
+CANONICAL_V2_BUILD_VERDICTS = frozenset({"PASS_COMPILER_CANDIDATE_ONLY"})
+_CANONICAL_SIDECAR_SUFFIXES = (
+    ".manifest.json",
+    ".registry.json",
+    ".registry-bound.json",
+)
+_PUBLICATION_AUTHORIZATION = {
+    "compiler_candidate": {
+        "training_authorized": False,
+        "deployment_authorized": False,
+        "hardware_authorized": False,
+    },
+    "training_adopted": {
+        "training_authorized": True,
+        "deployment_authorized": False,
+        "hardware_authorized": False,
+    },
+    "deployment_adopted": {
+        "training_authorized": True,
+        "deployment_authorized": True,
+        "hardware_authorized": False,
+    },
+    "hardware_adopted": {
+        "training_authorized": True,
+        "deployment_authorized": True,
+        "hardware_authorized": True,
+    },
+    LEGACY_COMPARATOR_CLASS: {
+        "training_authorized": False,
+        "deployment_authorized": False,
+        "hardware_authorized": False,
+    },
+}
 
 # ---- 统一预算默认值:全部沿用 v2 的 oracle 校准口径(--dose-target 可收紧) ---------- #
 DEFAULT_COP_GATE = v2.DOSE_TARGET     # 0.10  CoP 剂量闸门(主旋钮;v2 的 loop stop 目标)
@@ -707,6 +759,12 @@ def report_md(rep: dict) -> str:
         "| γ | 可行 | 原因 | 内层轮数 | T_out | 时长 s | 到触球 s | CoP | fric | τ |",
         "|---|---|---|---|---|---|---|---|---|---|",
     ]
+    if rep.get("publication_class") == LEGACY_COMPARATOR_CLASS:
+        lines[2:2] = [
+            f"- **publication_class: `{LEGACY_COMPARATOR_CLASS}`**",
+            "- training_authorized: false | deployment_authorized: false | "
+            "hardware_authorized: false",
+        ]
     for r in rep["outer_trace"]:
         lines.append(
             f"| {r['gamma']:.3f} | {r['feasible']} | {r['reason']} | {r['iters']} | "
@@ -728,6 +786,251 @@ def _sha256_file(path: Path) -> str:
         for chunk in iter(lambda: stream.read(1024 * 1024), b""):
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _absolute_lexical_path(path_like: Any) -> Path:
+    """Expand a path without resolving its leaf.
+
+    Resolving a symlink before inspecting it would erase the evidence that the
+    caller supplied an ambiguous input/sidecar path.
+    """
+
+    return Path(os.path.abspath(os.fspath(Path(path_like).expanduser())))
+
+
+def _strict_json_object(path: Path, label: str) -> dict:
+    """Read a regular, non-symlink JSON object with duplicate/NaN rejection."""
+
+    try:
+        info = path.lstat()
+    except OSError as exc:
+        raise SystemExit(f"{label} 不可读: {path}: {exc}") from exc
+    if stat.S_ISLNK(info.st_mode):
+        raise SystemExit(f"{label} 禁止 symlink: {path}")
+    if not stat.S_ISREG(info.st_mode) or info.st_size <= 0:
+        raise SystemExit(f"{label} 必须是非空普通文件: {path}")
+
+    def no_duplicates(pairs):
+        result = {}
+        for key, value in pairs:
+            if key in result:
+                raise ValueError(f"duplicate key {key!r}")
+            result[key] = value
+        return result
+
+    def no_constants(value):
+        raise ValueError(f"non-finite JSON constant {value!r}")
+
+    try:
+        payload = json.loads(
+            path.read_text(encoding="utf-8"),
+            object_pairs_hook=no_duplicates,
+            parse_constant=no_constants,
+        )
+    except (OSError, UnicodeError, ValueError, json.JSONDecodeError) as exc:
+        raise SystemExit(f"{label} 不是 strict JSON: {path}: {exc}") from exc
+    if not isinstance(payload, dict):
+        raise SystemExit(f"{label} strict JSON 根必须是 object: {path}")
+    return payload
+
+
+def _sidecar_hashes(payload: Mapping[str, Any], label: str) -> set[str]:
+    hashes: list[Any] = []
+    for key in ("npz_sha256", "output_npz_sha256"):
+        if key in payload:
+            hashes.append(payload[key])
+    nested = payload.get("hashes")
+    if nested is not None:
+        if not isinstance(nested, dict):
+            raise SystemExit(f"{label}.hashes 必须是 object")
+        if "output_npz_sha256" in nested:
+            hashes.append(nested["output_npz_sha256"])
+    normalized: set[str] = set()
+    for value in hashes:
+        if (
+            not isinstance(value, str)
+            or len(value) != 64
+            or any(char not in "0123456789abcdefABCDEF" for char in value)
+        ):
+            raise SystemExit(f"{label} NPZ SHA-256 字段非法")
+        normalized.add(value.lower())
+    if len(normalized) > 1:
+        raise SystemExit(f"{label} NPZ SHA-256 字段互相矛盾")
+    return normalized
+
+
+def _canonical_sidecar_identity(
+    payload: Mapping[str, Any],
+    *,
+    sidecar: Path,
+    input_sha256: str,
+) -> Optional[dict]:
+    """Return a protected-lineage receipt, or ``None`` for a legacy sidecar.
+
+    A canonical identity is a semantic triple, never a filename guess.  A partial
+    or mixed triple is rejected even when comparator mode is requested.
+    """
+
+    label = f"canonical sidecar {sidecar}"
+    publication_class = payload.get("publication_class")
+    tool_id = payload.get("tool_id")
+    build_verdict = payload.get("build_verdict")
+    for key, value in (
+        ("publication_class", publication_class),
+        ("tool_id", tool_id),
+        ("build_verdict", build_verdict),
+    ):
+        if key in payload and not isinstance(value, str):
+            raise SystemExit(f"{label} {key} 必须是 string")
+    protected_publication = (
+        publication_class in CANONICAL_V2_PUBLICATION_CLASSES
+        or publication_class == LEGACY_COMPARATOR_CLASS
+    )
+    canonical_signal = (
+        protected_publication
+        or tool_id in CANONICAL_V2_TOOL_IDS
+        or build_verdict in CANONICAL_V2_BUILD_VERDICTS
+    )
+    if not canonical_signal:
+        return None
+
+    if publication_class == LEGACY_COMPARATOR_CLASS:
+        if tool_id in CANONICAL_V2_TOOL_IDS or build_verdict in CANONICAL_V2_BUILD_VERDICTS:
+            raise SystemExit(
+                f"{label} comparator publication 与 canonical compiler identity 矛盾"
+            )
+    else:
+        if publication_class not in CANONICAL_V2_PUBLICATION_CLASSES:
+            raise SystemExit(
+                f"{label} canonical identity 缺失或 publication_class 矛盾"
+            )
+        if tool_id not in CANONICAL_V2_TOOL_IDS:
+            raise SystemExit(f"{label} canonical tool_id 缺失或矛盾")
+        if build_verdict not in CANONICAL_V2_BUILD_VERDICTS:
+            raise SystemExit(f"{label} canonical build_verdict 缺失或矛盾")
+
+    expected_authorization = _PUBLICATION_AUTHORIZATION[publication_class]
+    for key, expected in expected_authorization.items():
+        if key not in payload:
+            continue
+        value = payload[key]
+        if not isinstance(value, bool) or value is not expected:
+            raise SystemExit(
+                f"{label} {publication_class}.{key}={value!r} 与状态机矛盾"
+            )
+
+    bound_hashes = _sidecar_hashes(payload, label)
+    if bound_hashes and bound_hashes != {input_sha256}:
+        raise SystemExit(
+            f"{label} 绑定的 NPZ SHA-256 与输入内容不一致"
+        )
+    return {
+        "path": str(sidecar),
+        "sha256": _sha256_file(sidecar),
+        "publication_class": publication_class,
+        "tool_id": tool_id,
+        "build_verdict": build_verdict,
+        "input_hash_bound": bool(bound_hashes),
+    }
+
+
+def _inspect_protected_motion_input(path_like: Any, label: str) -> dict:
+    """Inspect one NPZ and its exact sibling canonical sidecars."""
+
+    path = _absolute_lexical_path(path_like)
+    if os.path.lexists(path) and path.is_symlink():
+        raise SystemExit(f"{label} 禁止 symlink: {path}")
+    evidence = _file_evidence(path, label)
+    input_sha256 = evidence["sha256"]
+    sidecars = []
+    for suffix in _CANONICAL_SIDECAR_SUFFIXES:
+        sidecar = Path(str(path) + suffix)
+        if not os.path.lexists(sidecar):
+            continue
+        payload = _strict_json_object(sidecar, f"{label} sidecar")
+        identity = _canonical_sidecar_identity(
+            payload,
+            sidecar=sidecar,
+            input_sha256=input_sha256,
+        )
+        if identity is not None:
+            sidecars.append(identity)
+    return {
+        "label": label,
+        "input": evidence,
+        "protected_sidecars": sidecars,
+    }
+
+
+def _legacy_comparator_guard(
+    inputs: Sequence[tuple[str, Any]],
+    *,
+    allow_canonical_v2_legacy_comparator: bool,
+) -> Optional[dict]:
+    """Reject canonical-v2/comparator lineage unless the explicit escape hatch is set."""
+
+    inspections = [
+        _inspect_protected_motion_input(path, label)
+        for label, path in inputs
+    ]
+    protected = [
+        item for item in inspections if item["protected_sidecars"]
+    ]
+    if protected and not allow_canonical_v2_legacy_comparator:
+        paths = ", ".join(item["input"]["path"] for item in protected)
+        raise SystemExit(
+            "canonical-v2 candidate/adopted/comparator 输入默认拒收: "
+            f"{paths}; 旧工具冻结/恒速击球窗。仅历史比较可显式给 "
+            "--allow-canonical-v2-legacy-comparator"
+        )
+    if not protected:
+        return None
+    return {
+        "mode": LEGACY_COMPARATOR_CLASS,
+        "training_authorized": False,
+        "deployment_authorized": False,
+        "hardware_authorized": False,
+        "window_semantics": "legacy_strike_window_frozen_or_constant_speed",
+        "protected_inputs": protected,
+    }
+
+
+def _mark_legacy_comparator(document: dict, receipt: Optional[dict]) -> dict:
+    """Attach an unmistakable non-promotable classification to a JSON artifact."""
+
+    if receipt is None:
+        return document
+    document["publication_class"] = LEGACY_COMPARATOR_CLASS
+    document["legacy_semantics"] = LEGACY_COMPARATOR_CLASS
+    document["training_authorized"] = False
+    document["deployment_authorized"] = False
+    document["hardware_authorized"] = False
+    document["legacy_comparator"] = receipt
+    return document
+
+
+def _refuse_output_aliases_inputs(
+    input_paths: Sequence[Any],
+    output_paths: Sequence[Any],
+) -> None:
+    """Never let a legacy output name resolve to one of its inputs."""
+
+    inputs = [_absolute_lexical_path(path) for path in input_paths]
+    outputs = [_absolute_lexical_path(path) for path in output_paths]
+    for output in outputs:
+        for input_path in inputs:
+            aliases = False
+            if os.path.lexists(output) and os.path.lexists(input_path):
+                try:
+                    aliases = os.path.samefile(output, input_path)
+                except OSError:
+                    aliases = False
+            if not aliases:
+                aliases = output.resolve(strict=False) == input_path.resolve(strict=False)
+            if aliases:
+                raise SystemExit(
+                    f"legacy retimer 输出禁止覆盖/别名到输入: {output} == {input_path}"
+                )
 
 
 def _file_evidence(path_like, label: str) -> dict:
@@ -903,6 +1206,14 @@ def main(argv=None) -> int:
                     help="每轮判卷临时 npz 的目录(默认新 tmpdir)")
     ap.add_argument("--report", default=None, help="JSON 报告输出路径")
     ap.add_argument("--md", default=None, help="markdown 报告输出路径")
+    ap.add_argument(
+        "--allow-canonical-v2-legacy-comparator",
+        action="store_true",
+        help=(
+            "仅历史比较:允许 canonical-v2/comparator 输入进入冻结窗口旧语义;"
+            "输出强制标为 legacy_window_frozen_comparator_only"
+        ),
+    )
     args = ap.parse_args(argv)
 
     # CLI 发布的是 production certificate；interp 只能在纯 CPU 函数单测中使用。
@@ -910,6 +1221,22 @@ def main(argv=None) -> int:
         raise SystemExit("产线 TOPP 证书必须 --body-mode fk；interp 只允许单测")
     output_path, report_path, md_path, output_parent = _prepare_output_paths(
         args.output, args.report, args.md
+    )
+    _refuse_output_aliases_inputs(
+        [args.input, *args.budget_clips],
+        [output_path, report_path, md_path],
+    )
+    legacy_comparator = _legacy_comparator_guard(
+        [
+            ("input clip", args.input),
+            *[
+                (f"budget clip {index}", path)
+                for index, path in enumerate(args.budget_clips)
+            ],
+        ],
+        allow_canonical_v2_legacy_comparator=(
+            args.allow_canonical_v2_legacy_comparator
+        ),
     )
 
     if args.urdf is None:
@@ -962,6 +1289,7 @@ def main(argv=None) -> int:
         refine_steps=args.refine_steps, objective=args.objective)
 
     rep = build_report(data, res, law, meta, args.body_mode)
+    _mark_legacy_comparator(rep, legacy_comparator)
     dev = rep["fidelity"]["blade_speed_dev_frac"]
     if dev > 0.02:
         raise SystemExit(

@@ -3,9 +3,10 @@
 
 人话：这个程序只做三件事——(1) ``--plan`` 打印 3 臂计划表和推荐填充顺序；(2)
 ``--render-stage probe|science --render-job <id> --pod <pod1|pod2> --gpu <0|1|2>``
-输出单臂的逐字 SSH 命令给人工核对后执行（本波不写死 pod/gpu，空槽即填，目标卡
-在渲染时注入）；(3) ``--checklist`` 输出发射前依赖核对单。它自己绝不 SSH、绝不
-发信号、绝不写远端。所有校验 fail-closed：YAML 缺键、C+S0 配方漂移、combo 档漂移、
+原本用于输出单臂 SSH 命令，但 checked-in 旧队列的
+``launch_authorized_by_default=false`` 现在是全波机器冻结，probe/science 一律拒绝
+渲染；(3) ``--checklist`` 输出只读依赖核对单。它自己绝不 SSH、绝不发信号、绝不写
+远端。所有校验 fail-closed：全波发射冻结、YAML 缺键、C+S0 配方漂移、combo 档漂移、
 push/力推键面漂移或混入 base、击球组 17/7/5/5/10 被动、软惩罚被叠加/减负、非法
 pod/gpu、run_name 重复、闸门未开渲染被锁臂，都直接拒绝。
 
@@ -147,7 +148,12 @@ FOOTCL_TARGET = "++task.rewards.foot_clearance_target_m=0.15"
 # "1/5~1/2 先小"带内）。
 ACTION_ACC = "++task.rewards.action_acc_weight=-0.05"
 # qbar：全关节 q_des 限位 barrier（我们 V14 验证档；margin_frac 是行程比例不是 rad；
-# 稀疏项——贴限位才付费，常态 0；与 action_rate=-0.2 并存，intel 单变量互斥不适用）。
+# 稀疏项——贴限位才付费；与 action_rate=-0.2 并存，intel 单变量互斥不适用）。
+# 2026-07-25 更正+修复："常态 0" 曾是错的——双肩 roll 硬限位不对称（内收硬停 -5°），
+# 一刀切 0.08 罚带把 ready 外展 0.12 rad 圈在带内（d=0.0296），站姿常驻罚 0.656/步、
+# above_margin_joint_count 垫 2 的地板。hope_rewards 已加站姿豁免（罚带按关节收窄到
+# 默认站姿之外），修复后站姿归零、"常态 0" 恢复成立；合同 formula 串同步更换，旧串
+# sidecar 不可静默续训。
 QBAR_WEIGHT = "++task.rewards.qdes_limit_barrier_weight=-0.65"
 QBAR_MARGIN = "++task.rewards.qdes_limit_barrier_margin_frac=0.08"
 # 速度推：w_p035 臂键面逐字（configs/phase1_push_robustness_20260721.yaml push.p035）。
@@ -734,8 +740,29 @@ def _validate_reward_budget_contract(contract: dict[str, Any]) -> None:
         _text(contract[key], f"{label}.{key}")
 
 
+def _require_launch_authorized(queue: Mapping[str, Any]) -> None:
+    """Fail closed before constructing any remote/SSH launch command.
+
+    The checked-in P1IU preregistration is superseded and deliberately pins
+    ``launch_authorized_by_default=false``.  Keeping that field merely as a
+    validated documentation bit previously still allowed ``--render-stage`` to
+    print an executable SSH command.  Every command-producing entry point calls
+    this guard (directly or defensively twice) so neither probe nor science can
+    escape the machine freeze.
+    """
+
+    if queue.get("launch_authorized_by_default") is not True:
+        raise QueueError(
+            "launch_authorized_by_default=false: the checked-in P1IU queue is "
+            "machine-frozen/superseded; refusing to construct any probe or science "
+            "SSH launch command. Plan and checklist remain read-only."
+        )
+
+
 def _require_gates_open(queue: Mapping[str, Any], job: Mapping[str, Any]) -> None:
-    """渲染闸门：五个 wiring 合同锁全部臂；franco 闸门 + 资产占位符锁 combo_franco。"""
+    """渲染闸门：先锁全波发射，再检查 wiring/Franco 细门。"""
+
+    _require_launch_authorized(queue)
 
     for gate in ALL_ARM_GATES:
         if queue[gate]["wiring_confirmed"] is not True:
@@ -1236,6 +1263,7 @@ def _remote_body(
     queue: Mapping[str, Any], job: Mapping[str, Any], stage: str, gpu: int
 ) -> str:
     commit = queue["source"]["commit"]
+    _require_launch_authorized(queue)
     _require_gates_open(queue, job)
     source = queue["source"]
     checkout = source["checkout"]
@@ -1291,6 +1319,7 @@ printf 'launched %s %s launcher_pid=%s\\n' {shlex.quote(job['id'])} {shlex.quote
 def _ssh_argv(
     queue: Mapping[str, Any], job: Mapping[str, Any], stage: str, pod: str, gpu: Any
 ) -> list[str]:
+    _require_launch_authorized(queue)
     pod_name, gpu_index = _validate_target(queue, pod, gpu)
     endpoint = queue["pods"][pod_name]
     remote = _remote_body(queue, job, stage, gpu_index)
@@ -1305,6 +1334,7 @@ def _ssh_argv(
 def render_command(
     queue: Mapping[str, Any], job: Mapping[str, Any], stage: str, pod: str, gpu: Any
 ) -> str:
+    _require_launch_authorized(queue)
     return shlex.join(_ssh_argv(queue, job, stage, pod, gpu))
 
 
@@ -1330,6 +1360,12 @@ def cmd_plan(queue: Mapping[str, Any]) -> str:
         f"queue: {queue['queue_id']}  3 臂 = W x {{combo_fresh,combo_resume,"
         "combo_franco}（集成升级合体），基础配方固定 C+S0 + AR-0.2",
         f"commit: {queue['source']['commit']}",
+        "machine launch gate: "
+        + (
+            "OPEN"
+            if queue["launch_authorized_by_default"] is True
+            else "LOCKED（launch_authorized_by_default=false；只读 plan/checklist，拒绝 probe/science SSH）"
+        ),
         "budgets: probe 4096env x 24steps x 2it | science 4096env x 24steps x 13301it "
         "save100（combo_fresh fresh 独立 20001it）",
         "watchdog: boot 停滞 1800 s / 首迭代后停滞 900 s 才判死；重试只许逐字 _r2 一次",
@@ -1376,6 +1412,11 @@ def cmd_plan(queue: Mapping[str, Any]) -> str:
 def cmd_checklist(queue: Mapping[str, Any]) -> str:
     parents = queue["parents"]
     lines = ["发射前依赖核对单（全部人工执行，本程序不 SSH）", ""]
+    if queue["launch_authorized_by_default"] is not True:
+        lines.append(
+            "0. [机器冻结] launch_authorized_by_default=false：旧 P1IU 预注册已被审计覆盖，"
+            "probe/science SSH 命令均不得渲染；plan/checklist 仅供只读追溯。"
+        )
     if queue["action_acc_contract"]["wiring_confirmed"] is not True:
         lines.append(
             "0. [阻塞] action_acc_contract.wiring_confirmed=false：mjlab 档①第三项 "
@@ -1435,7 +1476,9 @@ def cmd_checklist(queue: Mapping[str, Any]) -> str:
         "(|action_rate| + |action_acc| + |foot_soft_landing| + |foot_clearance| + "
         "|qdes_limit_barrier|) / (racket_position + racket_velocity + racket_normal "
         "+ strike_success + progress) <= 1/3；超限该臂停发 science/停训裁决并记录读数。"
-        "注：barrier/落地罚/抬脚罚是稀疏项（贴限位/落地/腾空才付费，常态 0），若其"
+        "注：barrier/落地罚/抬脚罚是稀疏项（贴限位/落地/腾空才付费；barrier 的"
+        "'常态 0' 以 2026-07-25 站姿豁免修复为前提——修复前双肩 roll 站姿常驻在带内，"
+        "above_margin_joint_count 有 2 的结构地板，读旧 probe 台账要先扣掉），若其"
         "episode 均值异常大先查激活探针再谈停训。击球组 17/7/5/5/10 一动不动；"
         "软惩罚组全额不叠加。",
         "15. 发射节奏：两 pod 可并行；同 pod 内 boot 串行（kit_boot_lock 持锁），相邻两次 "
@@ -1459,6 +1502,7 @@ def cmd_checklist(queue: Mapping[str, Any]) -> str:
 def cmd_render(
     queue: Mapping[str, Any], stage: str, job_id: str, pod: str, gpu: Any
 ) -> str:
+    _require_launch_authorized(queue)
     if stage not in {"probe", "science"}:
         raise QueueError("--render-stage must be probe or science")
     job = _job_by_id(queue, job_id)

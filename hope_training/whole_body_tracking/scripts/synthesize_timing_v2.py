@@ -67,12 +67,47 @@ import numpy as np
 _HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, _HERE)
 import synthesize_timing as v1  # noqa: E402  (numpy-only at import time)
+from motion_kinematics_contract import (  # noqa: E402
+    BODY_LIN_VEL_POINT,
+    BODY_NAMES_KEY,
+    BODY_POS_POINT,
+    KINEMATICS_SCHEMA_VERSION,
+    LIN_VEL_POINT_KEY,
+    MIGRATION_SOURCE_POINT_KEY,
+    MIGRATION_SOURCE_SHA256_KEY,
+    MIGRATION_TOOL_KEY,
+    POS_POINT_KEY,
+    SCHEMA_KEY,
+    read_metadata,
+)
 
 # feasibility oracle lives at REPO_ROOT/scripts/ (different tree) ----------------------- #
 _REPO_ROOT = Path(__file__).resolve().parents[3]
 sys.path.insert(0, str(_REPO_ROOT / "scripts"))
 
 ISAAC_JOINT_NAMES = v1.ISAAC_JOINT_NAMES
+
+CORE_TIME_KEYS = (
+    "joint_pos",
+    "joint_vel",
+    "body_pos_w",
+    "body_quat_w",
+    "body_lin_vel_w",
+    "body_ang_vel_w",
+)
+ACTIVE_METADATA_KEYS = (
+    SCHEMA_KEY,
+    POS_POINT_KEY,
+    LIN_VEL_POINT_KEY,
+    BODY_NAMES_KEY,
+)
+MIGRATION_KEYS = (
+    MIGRATION_SOURCE_SHA256_KEY,
+    MIGRATION_SOURCE_POINT_KEY,
+    MIGRATION_TOOL_KEY,
+)
+BASE_KEYS = ("fps",) + CORE_TIME_KEYS + ACTIVE_METADATA_KEYS
+ALLOWED_KEYSETS = (frozenset(BASE_KEYS), frozenset(BASE_KEYS + MIGRATION_KEYS))
 
 # ---- TOPP-lite defaults (greedy; see module docstring) -------------------------------- #
 STRIKE_HALF_S = 0.10          # ±0.1 s lock window around contact (登记口径, phase±0.1s)
@@ -269,9 +304,76 @@ def warp_timeline(law: "v1.TimeLaw", field: StretchField, fps_out: float,
 # ====================================================================================== #
 # resample: source path sampled at s_out; joint_vel re-diff, body_* via MuJoCo FK         #
 # ====================================================================================== #
+def _exact_schema2_metadata(data: dict) -> tuple[dict, str]:
+    """Validate an exact 11/14-field schema-2 input and copy metadata bit-for-bit.
+
+    Migration provenance is an atomic lineage tuple: retaining only part of it would
+    create an output whose source history cannot be interpreted safely.  Unknown keys
+    are rejected even when prefixed with ``_``; a retimer must never guess whether an
+    unrecognised field is time-indexed.
+    """
+    migration_present = tuple(key in data for key in MIGRATION_KEYS)
+    if any(migration_present) and not all(migration_present):
+        raise SystemExit("migration provenance must be all-or-none")
+
+    keys = frozenset(data)
+    if keys not in ALLOWED_KEYSETS:
+        expected = [sorted(keyset) for keyset in ALLOWED_KEYSETS]
+        raise SystemExit(
+            f"source field set changed: got {sorted(keys)}; expected exact schema-2 "
+            f"11/14 fields {expected}"
+        )
+
+    try:
+        metadata = read_metadata(data)
+    except ValueError as exc:
+        raise SystemExit(f"motion metadata contract: {exc}") from None
+    schema2_bound = (
+        metadata.schema_version == KINEMATICS_SCHEMA_VERSION
+        and metadata.body_pos_point == BODY_POS_POINT
+        and metadata.body_lin_vel_point in (BODY_LIN_VEL_POINT, BODY_POS_POINT)
+        and metadata.body_names is not None
+        and len(metadata.body_names) > 0
+    )
+    if not schema2_bound:
+        raise SystemExit(
+            "source must be exact schema-2 "
+            f"({SCHEMA_KEY}={KINEMATICS_SCHEMA_VERSION}, "
+            f"{POS_POINT_KEY}={BODY_POS_POINT!r}, "
+            f"{LIN_VEL_POINT_KEY} in "
+            f"({BODY_LIN_VEL_POINT!r}, {BODY_POS_POINT!r}), bound body_names)"
+        )
+
+    metadata_keys = ACTIVE_METADATA_KEYS + (
+        MIGRATION_KEYS if all(migration_present) else ()
+    )
+    copies = {key: np.array(data[key], copy=True) for key in metadata_keys}
+    return copies, str(metadata.body_lin_vel_point)
+
+
+def _integrated_com_path(data: dict) -> np.ndarray:
+    """Recover a relative COM-position path from schema-2 COM velocities.
+
+    ``interp`` is diagnostic-only and has no MJCF inertial offsets, so it cannot obtain
+    absolute COM positions from link-origin poses.  A relative integral is sufficient:
+    differentiating its retimed path yields COM-point velocity without lying in metadata.
+    """
+    source_velocity = np.asarray(data["body_lin_vel_w"], dtype=np.float64)
+    fps_source = float(np.asarray(data["fps"]).reshape(-1)[0])
+    if not np.isfinite(fps_source) or fps_source <= 0.0:
+        raise SystemExit(f"fps must be finite and positive, got {fps_source!r}")
+    displacement = np.zeros_like(source_velocity, dtype=np.float64)
+    displacement[1:] = np.cumsum(
+        0.5 * (source_velocity[:-1] + source_velocity[1:]) / fps_source,
+        axis=0,
+    )
+    return displacement
+
+
 def resample_at_s(data: dict, s_out: np.ndarray, fps_out: float,
                   body_mode: str = "interp", fk_ctx=None) -> dict:
     """Same conventions as v1.resample but driven by an explicit s(t) (the warp)."""
+    metadata, source_velocity_point = _exact_schema2_metadata(data)
     q = np.asarray(data["joint_pos"])
     dt = 1.0 / fps_out
     jp = v1._interp_rows(q, s_out).astype(np.float32)
@@ -279,6 +381,11 @@ def resample_at_s(data: dict, s_out: np.ndarray, fps_out: float,
 
     if body_mode == "fk":
         fkm, cols, explicit_body_names = fk_ctx
+        if source_velocity_point != BODY_LIN_VEL_POINT:
+            raise SystemExit(
+                "fk retime rebuilds center-of-mass velocity, so its source metadata "
+                f"must declare {LIN_VEL_POINT_KEY}={BODY_LIN_VEL_POINT!r}"
+            )
         base_pos = v1._interp_rows(np.asarray(data["body_pos_w"], float)[:, 0], s_out)
         base_quat = v1._slerp_rows(np.asarray(data["body_quat_w"], float)[:, 0], s_out)
         pos_all, quat_all, com_all = v1.ctn.fk_series_with_com(
@@ -287,12 +394,14 @@ def resample_at_s(data: dict, s_out: np.ndarray, fps_out: float,
         bp = pos_all[:, cols].astype(np.float32)
         bq = quat_all[:, cols].astype(np.float32)
         velocity_path = com_all[:, cols].astype(np.float64)
-        velocity_point = "center_of_mass"
     elif body_mode == "interp":
         bp = v1._interp_rows(np.asarray(data["body_pos_w"], float), s_out).astype(np.float32)
         bq = v1._slerp_rows(np.asarray(data["body_quat_w"], float), s_out).astype(np.float32)
-        velocity_path = bp.astype(np.float64)
-        velocity_point = "link_origin"
+        velocity_path = (
+            v1._interp_rows(_integrated_com_path(data), s_out)
+            if source_velocity_point == BODY_LIN_VEL_POINT
+            else bp.astype(np.float64)
+        )
         explicit_body_names = None
     else:
         raise SystemExit(f"unknown --body-mode {body_mode!r}")
@@ -301,7 +410,7 @@ def resample_at_s(data: dict, s_out: np.ndarray, fps_out: float,
     ba = np.stack([v1.ctn.so3_derivative(bq[:, b].astype(np.float64), dt)
                    for b in range(bq.shape[1])], axis=1).astype(np.float32)
     try:
-        body_names = v1.resolve_body_names(
+        v1.resolve_body_names(
             data,
             explicit_body_names=explicit_body_names,
             expected_count=bp.shape[1],
@@ -312,9 +421,7 @@ def resample_at_s(data: dict, s_out: np.ndarray, fps_out: float,
     out = {"fps": np.array([int(round(fps_out))], dtype=np.int64),
            "joint_pos": jp, "joint_vel": jv, "body_pos_w": bp, "body_quat_w": bq,
            "body_lin_vel_w": bl, "body_ang_vel_w": ba}
-    out.update(v1.metadata_arrays(
-        body_names=body_names, body_lin_vel_point=velocity_point
-    ))
+    out.update(metadata)
     return out
 
 
@@ -391,10 +498,8 @@ def topp_lite(data: dict, phase: float, vlim: np.ndarray, acc_budget: np.ndarray
               dose_accept: float = DOSE_ACCEPT, dose_target: float = DOSE_TARGET
               ) -> Tuple[dict, ToppResult, "v1.TimeLaw", dict]:
     """Greedy oracle-guided time-law synthesis. Returns (out, ToppResult, law, meta)."""
+    _exact_schema2_metadata(data)
     q = np.asarray(data["joint_pos"], dtype=np.float64)
-    unknown = [k for k in data.keys() if k not in v1.KNOWN_KEYS and not k.startswith("_")]
-    if unknown:
-        raise SystemExit(f"unknown npz keys {unknown} — refusing to guess how to retime them")
     T_src, J = q.shape
     fps_src = float(np.asarray(data["fps"]).reshape(-1)[0])
     if fps_out is None:

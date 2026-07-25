@@ -22,6 +22,7 @@ from __future__ import annotations
 
 import importlib.util
 import sys
+from itertools import combinations
 from pathlib import Path
 
 import numpy as np
@@ -58,13 +59,30 @@ def make_clip(T=81, contact=48, blade_step=0.02, joint_amp=3.0):
             "body_ang_vel_w": ba}
     data.update(v1.metadata_arrays(
         body_names=[f"body_{index}" for index in range(NB)],
-        body_lin_vel_point="link_origin",
+        body_lin_vel_point="center_of_mass",
     ))
     return data, contact / (T - 1)
 
 
 LOOSE_VLIM = np.full(J, 100.0)
 LOOSE_BUDGET = np.full(J, 1000.0)
+MIGRATION_VALUES = {
+    "kinematics_migration_source_sha256": np.array("a" * 64),
+    "kinematics_migration_source_point": np.array("link_origin"),
+    "kinematics_migration_tool": np.array("migrate_motion_kinematics.py/v2"),
+}
+
+
+def assert_metadata_bitwise(source, output):
+    keys = v2.ACTIVE_METADATA_KEYS + tuple(
+        key for key in v2.MIGRATION_KEYS if key in source
+    )
+    for key in keys:
+        source_array = np.asarray(source[key])
+        output_array = np.asarray(output[key])
+        assert output_array.dtype == source_array.dtype, key
+        assert output_array.shape == source_array.shape, key
+        assert output_array.tobytes() == source_array.tobytes(), key
 
 
 def stub_oracle(vel_thresh: float):
@@ -144,6 +162,24 @@ def test_monotone_s_and_grid_snap():
     assert abs(s[res.warp.k_star] - meta["c"]) < 1e-9     # contact lands exactly on grid
 
 
+# ------------------------------------------- schema-2 metadata is lineage-stable ------- #
+def test_exact_schema2_11_field_metadata_is_preserved_bitwise():
+    data, phase = make_clip()
+    out, _, _, _ = run(data, phase, stub_oracle(vel_thresh=1e9))
+    assert set(out) == set(data)
+    assert len(out) == 11
+    assert_metadata_bitwise(data, out)
+
+
+def test_exact_schema2_14_field_migration_tuple_is_preserved_bitwise():
+    data, phase = make_clip()
+    data.update(MIGRATION_VALUES)
+    out, _, _, _ = run(data, phase, stub_oracle(vel_thresh=1e9))
+    assert set(out) == set(data)
+    assert len(out) == 14
+    assert_metadata_bitwise(data, out)
+
+
 # ------------------------------------------------- TOPP loop lowers the dose ---------- #
 def test_topp_lowers_dose_and_beats_threshold():
     data, phase = make_clip(joint_amp=3.0)
@@ -199,8 +235,48 @@ def test_blade_speed_never_lowered_under_tight_flags():
     assert rep["fidelity"]["blade_speed_dev_frac"] < 0.02
 
 
-def test_unknown_keys_refused():
+@pytest.mark.parametrize("unknown_key", ["mystery", "_private"])
+def test_unknown_keys_refused(unknown_key):
     data, phase = make_clip()
-    data["mystery"] = np.zeros((3, 2))
-    with pytest.raises(SystemExit):
+    data[unknown_key] = np.zeros((3, 2))
+    with pytest.raises(SystemExit, match="field set changed"):
+        run(data, phase, stub_oracle(1e9))
+
+
+_PARTIAL_MIGRATION_KEYSETS = [
+    subset
+    for size in (1, 2)
+    for subset in combinations(v2.MIGRATION_KEYS, size)
+]
+
+
+@pytest.mark.parametrize("present_keys", _PARTIAL_MIGRATION_KEYSETS)
+def test_partial_migration_tuple_is_refused(present_keys):
+    data, phase = make_clip()
+    for key in present_keys:
+        data[key] = np.array(MIGRATION_VALUES[key], copy=True)
+    with pytest.raises(SystemExit, match="migration provenance must be all-or-none"):
+        run(data, phase, stub_oracle(1e9))
+
+
+@pytest.mark.parametrize("missing_key", v2.ACTIVE_METADATA_KEYS)
+def test_partial_schema2_metadata_is_refused(missing_key):
+    data, phase = make_clip()
+    del data[missing_key]
+    with pytest.raises(SystemExit, match="field set changed"):
+        run(data, phase, stub_oracle(1e9))
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("kinematics_schema_version", np.array([1], dtype=np.int64)),
+        ("body_pos_point", np.array("center_of_mass")),
+        ("body_lin_vel_point", np.array("unsupported_point")),
+    ],
+)
+def test_nonexact_schema2_semantics_are_refused(key, value):
+    data, phase = make_clip()
+    data[key] = value
+    with pytest.raises(SystemExit, match="source must be exact schema-2"):
         run(data, phase, stub_oracle(1e9))

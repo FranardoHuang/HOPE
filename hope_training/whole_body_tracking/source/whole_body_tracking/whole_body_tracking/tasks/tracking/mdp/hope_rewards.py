@@ -564,7 +564,11 @@ def _joint_velocity_limit_hinge_values(
     be non-positive.  Unlike ``action_rate_l2``, this term measures the robot's *realized* joint
     velocity against the actual articulation limits, in the exact runtime articulation order::
 
-        mean_j(relu(abs(qd_j) / qd_limit_j - margin) ** 2)
+        sum_j(relu(abs(qd_j) / qd_limit_j - margin) ** 2)
+
+    SUM 聚合(Franco 2026-07-25 裁定,安全家族统一口径,同 qbar 的理由:mean 是稀释器,
+    单关节尖叫被 ÷31 摊平——安全项恰恰要它最响)。违规几个关节就罚几份;历史 mean 剂量
+    (-5.0/-2.5/-1.0)换算到 SUM 语义须 ÷31(单关节同深度违规同罚时等价),复活旧臂前重调。
 
     This source gate is deliberately A3-specific: all 31 runtime joints must be selected in
     identity order.  Missing/reordered joints and zero/non-finite limits fail closed rather than
@@ -657,8 +661,9 @@ def _joint_velocity_limit_hinge_values(
         torch._assert_async(limits_valid)
 
     normalized_excess = torch.relu(torch.abs(joint_vel) / limits - margin)
-    squared_mean = torch.mean(torch.square(normalized_excess), dim=-1)
-    return squared_mean, torch.any(normalized_excess > 0.0, dim=-1)
+    # SUM 不平均(2026-07-25):违规几个关节就罚几份,单关节尖叫不被 ÷31 稀释。
+    squared_sum = torch.sum(torch.square(normalized_excess), dim=-1)
+    return squared_sum, torch.any(normalized_excess > 0.0, dim=-1)
 
 
 def _qdot_activation_counter_state(
@@ -817,7 +822,10 @@ def _processed_qdes_slew_hinge_values(
 
         tail = 1 - exp(-square(relu(u - margin) / (1 - margin)))
 
-    The environment reward is the mean over the exact 15-joint waist/leg set.  Reset-invalid
+    The environment reward is the SUM over the exact 15-joint waist/leg set(Franco
+    2026-07-25 裁定,安全家族统一 SUM 口径:mean 把单关节猛拧 ÷15 稀释;违规几个关节
+    就罚几份,单关节 tail 有界 →1。历史 mean 剂量(-0.25/-1.0)换算 SUM 语义须 ÷15,
+    复活旧臂前重调)。Reset-invalid
     history and samples outside the same-attempt recovery window return exact zero.
     """
 
@@ -956,7 +964,8 @@ def _processed_qdes_slew_hinge_values(
     per_joint_tail = 1.0 - torch.exp(
         -torch.square(normalized_excess / (1.0 - margin))
     )
-    raw_value = torch.mean(per_joint_tail, dim=-1)
+    # SUM 不平均(2026-07-25):违规几个关节就罚几份;单关节 tail 有界,总值 ∈ [0, 15)。
+    raw_value = torch.sum(per_joint_tail, dim=-1)
 
     cmd = _cmd(env, command_name)
     clock = getattr(cmd, "post_strike_age_and_same_attempt", None)
@@ -1161,6 +1170,10 @@ def consume_processed_qdes_slew_hinge_activation_counters(
 # position limit.  人话:哪个关节的目标角贴到限位边上就罚哪个,全身 31 个关节全程盯着,
 # 不挑"最狠的几个"。
 _QDES_LIMIT_BARRIER_JOINT_COUNT = 31
+# 站姿豁免(2026-07-25)的两个归一化常量:有效罚带收窄到"默认站姿减 EPS 呼吸间隙"处,
+# 收窄后的带宽若连 FLOOR 都不到(站姿本身贴死软限位)= 建模错误,fail loud。
+_QDES_LIMIT_BARRIER_STANCE_EPS = 0.005
+_QDES_LIMIT_BARRIER_MARGIN_FLOOR = 0.005
 _QDES_LIMIT_BARRIER_ACTIVATION_ATTR = "_hope_qdes_limit_barrier_activation_counters"
 _QDES_LIMIT_BARRIER_OBSERVED_STEP_ATTR = "_hope_qdes_limit_barrier_observed_step"
 _QDES_LIMIT_BARRIER_ACTIVE_STEP_ATTR = "_hope_qdes_limit_barrier_active_step"
@@ -1183,7 +1196,8 @@ def _qdes_limit_barrier_values(
     For EVERY joint j of the 31-joint A3 articulation (no top-k, no subset)::
 
         d_j = min(q_des_j - lo_j, hi_j - q_des_j) / (hi_j - lo_j)     # normalized limit distance
-        t_j = relu(margin_frac - d_j) / margin_frac                    # intrusion depth in [0, 1+]
+        m_j = min(margin_frac, d_default_j - STANCE_EPS)               # stance-exempt margin (07-25)
+        t_j = relu(m_j - d_j) / m_j                                    # intrusion depth in [0, 1+]
         value = sum_j(1 - exp(-t_j^2))                                 # per-joint bounded tails, summed
 
     SUM aggregation (Franco 2026-07-21 裁定): mean 是稀释器——单关节违规被 ÷31,top-k 的
@@ -1192,6 +1206,14 @@ def _qdes_limit_barrier_values(
     Dense: charged on every control step in every phase (no strike/recovery gate) — 对标 Jiayi
     v14 的全程 barrier.  q_des is the SAME processed (affine + clamp) target the PD controller
     receives, and lo/hi are the SAME soft_joint_pos_limits the deploy-parity clamp uses.
+
+    站姿豁免 m_j(2026-07-25):肩 roll 这类硬限位不对称的关节(内收硬停只有 -5°、外展
+    +150°),0.9 软限位系数与 0.08 罚带都按全跨度等比缩放,会把设计站姿直接圈进罚带——
+    实测双肩 roll 在 ready 外展 0.12 rad 处 d=0.0296<0.08:常驻罚 0.656/步、梯度持续把
+    双肩往外推着跟模仿拔河、above_margin_joint_count 垫 2 的地板。收窄到站姿之外后:
+    站姿零罚零梯度,从站姿再向限位靠近照罚;d_default >= margin_frac + EPS 的关节
+    m_j == margin_frac,数学逐字节不变(31 关节里 29 个)。站姿距软限位近到连
+    MARGIN_FLOOR 的带宽都留不出 = 建模错误,fail loud 而不是静默豁免。
     """
 
     if action_name != "joint_pos":
@@ -1273,8 +1295,28 @@ def _qdes_limit_barrier_values(
     else:
         torch._assert_async(limits_valid)
 
+    default_q = getattr(data, "default_joint_pos", None)
+    if not torch.is_tensor(default_q):
+        raise RuntimeError(
+            "qdes_limit_barrier requires articulation default_joint_pos "
+            "(the stance-exempt margin needs the designed stance)"
+        )
+    d_default = torch.minimum(default_q - lower, upper - default_q) / span
+    margin_eff = torch.clamp(
+        d_default - _QDES_LIMIT_BARRIER_STANCE_EPS, max=margin_frac
+    )
+    stance_valid = torch.all(margin_eff.gt(_QDES_LIMIT_BARRIER_MARGIN_FLOOR))
+    if stance_valid.device.type == "cpu":
+        if not bool(stance_valid):
+            raise RuntimeError(
+                "qdes_limit_barrier: a default-stance joint sits within EPS+FLOOR of its "
+                "soft limit — fix the limits or the stance instead of silencing the barrier"
+            )
+    else:
+        torch._assert_async(stance_valid)
+
     distance = torch.minimum(processed - lower, upper - processed) / span
-    intrusion = torch.relu(margin_frac - distance) / margin_frac
+    intrusion = torch.relu(margin_eff - distance) / margin_eff
     value = torch.sum(1.0 - torch.exp(-torch.square(intrusion)), dim=-1)
     return value, intrusion
 
@@ -1393,6 +1435,8 @@ def qdes_limit_barrier(
     去 top-k 的正当性所在;满违规单关节 tail≈1 → 每步约 -0.65×dt).  Dense — charged on every
     control step in every phase, matching V14's whole-episode barrier.  人话:目标角贴到限位
     边缘就开始扣钱,越贴越狠,几个关节贴就扣几份,全身关节一视同仁,全程有效。
+    2026-07-25 站姿豁免:设计站姿本身贴限的关节(双肩 roll)罚带收窄到站姿之外——站着
+    不动零罚,往限位再靠才扣钱;详见 _qdes_limit_barrier_values。
     """
 
     values, intrusion = _qdes_limit_barrier_values(env, action_name, margin_frac)
@@ -2667,6 +2711,21 @@ def tracking_envelope_violation(
 #   3. the pass_net CLEAR BONUS pays only for shots that also land legally (net-without-landing
 #      guard); its height KERNEL is deliberately ungated shaping — see virtual_pass_net docstring.
 # ============================================================================================== #
+def strike_capture_bonus(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+    """L2 击中层的一次性奖金(v2 记账 redesign §3.5):capture 门过的那一步付 1,其余恒 0。
+
+    人话:每挥拍最多发一次的"击中大奖"——判据就是现成的 vb_fired 捕获门(exact-strike
+    一步 & 拍面正确半球 & 位置误差 < vb_capture_radius & 沿法向进拍速 > 下限;一拍锁存,
+    同一拍不会重复发)。"打没打上"语义上不可再分,所以它是全栈唯一的大额 one-shot
+    (方差论证 redesign §2 B5:质量类信号都走窗口 dense,唯独击中判据允许 one-shot)。
+    与 virtual_* 三项的区别:那三项还要 rollout 结果(过网/落台/旋转),本项只认"击中",
+    给采集期一个不依赖出球质量的里程碑。RewTerm weight 用正数;量级 B 按 §2 定权公式
+    (名义 ~850,probe 校准后冻结进 prereg);默认 weight=0 = 项被跳过,字节等价。
+    """
+    cmd = _cmd(env, command_name)
+    return cmd.vb_fired.float()
+
+
 def virtual_pass_net(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     """Net-height shaping at the virtual net-plane crossing + fully-gated clear bonus.
 
@@ -2819,14 +2878,19 @@ def foot_soft_landing(
 def foot_clearance(
     env: ManagerBasedRLEnv, sensor_cfg, asset_cfg, target_m: float = 0.08
 ) -> torch.Tensor:
-    """摆动相抬脚高度惩罚(mjlab foot_clearance 思想):非接触脚 |脚高-目标高| x 水平速度。
+    """摆动相抬脚不足惩罚(mjlab foot_clearance 思想,2026-07-25 起单侧):非接触脚
+    clamp(目标高-脚高, min=0) x 水平速度。
 
-    人话:脚在空中横着移动时,离"目标抬脚高度"越远、移动越快,罚得越多——快速迈步必须把脚
-    抬到目标高度附近,贴地扫着走(绊倒前兆)最贵;慢慢挪或已在目标高度附近则几乎免费。触地
-    的脚完全不管(那是 foot_slip_sq/foot_drag 的地盘)。注意"脚高"用的是 ankle_roll link
-    原点的世界 z:站立贴地时原点约 0.07 m(见 foot_drag 的 Phase A 注释),所以 target_m 是
-    "原点目标高度"——默认 0.08 m 即鞋底约 1 cm 的最低离地要求,真要它抬腿跨步应往 0.15 m 调。
-    RewTerm weight 用负数;默认 weight=0 = 项被跳过,字节等价。
+    人话:脚在空中横着移动时,抬得比"最低离地高度"低多少、移动越快,罚得越多——快速迈步
+    必须把脚抬够,贴地扫着走(绊倒前兆)最贵;抬得比目标高不罚。(2026-07-25 前是双侧
+    |脚高-目标高|:与本项自述的"最低离地要求"意图相反,还会在凸包顶上主动把脚往下按——
+    粗糙地形上恰好帮倒忙,combo_fresh 类 rough 臂首当其冲;单侧化后多抬永远免费。)
+    慢慢挪或已达标则几乎免费。触地的脚完全不管(那是 foot_slip_sq/foot_drag 的地盘)。
+    注意"脚高"用的是 ankle_roll link 原点的世界 z,不是相对脚下地面的净空:站立贴地时
+    原点约 0.07 m(见 foot_drag 的 Phase A 注释),默认 0.08 m 即鞋底约 1 cm 的最低离地
+    要求。粗糙地形(HfRandomUniform 是绝对抬升带 [lo,hi],不是 ±抖动)下高包处的有效
+    净空要求会缩水最多 hi,要保底应把 target_m 调到 hi + 0.07 + 期望鞋底净空;真要它
+    抬腿跨步应往 0.15 m 以上调。RewTerm weight 用负数;默认 weight=0 = 项被跳过,字节等价。
     """
     target = _finite_scalar(target_m, name="foot_clearance target_m", positive=True)
     sensor = env.scene.sensors[sensor_cfg.name]
@@ -2863,7 +2927,8 @@ def foot_clearance(
     foot_z = pos[:, asset_ids, 2]  # (E,2)
     xy_speed = torch.norm(vel[:, asset_ids, :2], dim=-1)  # (E,2)
     swing = (~in_contact).float()
-    return (swing * torch.abs(foot_z - target) * xy_speed).sum(dim=-1)
+    # 单侧:只罚抬脚不足(target - foot_z 的正部),多抬不罚——"最低离地要求"语义。
+    return (swing * (target - foot_z).clamp(min=0.0) * xy_speed).sum(dim=-1)
 
 
 # --- mjlab-ported action second-difference smoothing (action_acc_l2; DEFAULT OFF) -------------- #
@@ -2963,6 +3028,74 @@ def strike_vertical_bob(env: ManagerBasedRLEnv, command_name: str) -> torch.Tens
     """Penalize vertical base velocity (|base_lin_vel_z|) DURING the strike window — no bob at the hit."""
     cmd = _cmd(env, command_name)
     return cmd.vertical_speed * cmd.strike_window.float()
+
+
+# --- v2 收入型平衡 + PACE 单条击球稳定(reward_redesign_20260725 §1.4/§3;DEFAULT OFF) ------- #
+# 与近亲们的分工(替代关系,不是叠加关系;消融臂开新项时应同时把旧项关掉):
+#   * upright_exp:替代税型 upright 罚(罚倾斜的 L2)——mjlab 收入型,站得正每步发钱,
+#     有界 (0,1],顺带兼任 alive bonus(解 fresh 臂早期"活着净亏、摔死更划算");
+#   * hit_unstable_support:替代 v1 的 strike 四件套站稳包(strike_upright / strike_ang_vel /
+#     strike_foot_vel / strike_vbob)——PACE 只有这一条"击球窗内单脚/无支撑就罚",
+#     0/1 指示器,姿态细节交给全身模仿,不再逐项管倾斜/角速度/脚速/起伏。
+# 两条都是纯新增,本波不进任何 cfg;后续波次以 weight=0 声明(默认路径字节等价)。
+def upright_exp(env: ManagerBasedRLEnv, std: float = math.sqrt(0.2)) -> torch.Tensor:
+    """站正收入(mjlab 收入型 upright,v2 蓝图 §1.4):exp(-||projected_gravity_xy||² / std²)。
+
+    人话:站得越正每步发的钱越多——完全直立 = 1.0,越歪按指数掉钱但永远 > 0,dense 每步
+    都发。收入型替代税型 upright 罚:梯度方向一样,但收入侧天然为正,天然就是 alive bonus,
+    不用另加 alive 项。倾斜量 ||projected_gravity_xy|| = sin(倾角);默认 std=sqrt(0.2) 即
+    倾斜量 ~0.45(倾角 ~27°)时收入掉到 1/e。RewTerm weight 用【正数】。
+    """
+    std = _finite_scalar(std, name="upright_exp std", positive=True)
+    projected_gravity = getattr(env.scene["robot"].data, "projected_gravity_b", None)
+    if (
+        not torch.is_tensor(projected_gravity)
+        or projected_gravity.ndim != 2
+        or projected_gravity.shape[1] != 3
+    ):
+        raise RuntimeError(
+            "upright_exp requires robot.data.projected_gravity_b shaped [env,3]"
+        )
+    tilt_sq = torch.sum(torch.square(projected_gravity[:, :2]), dim=-1)
+    return torch.exp(-tilt_sq / (std * std))
+
+
+def hit_unstable_support(
+    env: ManagerBasedRLEnv, sensor_cfg, command_name: str = "racket_target"
+) -> torch.Tensor:
+    """击球窗内支撑不足惩罚(PACE hit_unstable_support 思想):
+    indicator(触地脚数 <= 1) x 击球窗,每 env 取值 {0.0, 1.0}。
+
+    人话:触球那一瞬必须双脚踩实——击球窗内单脚站或双脚腾空,这一步记 1;窗外、或窗内
+    双脚都触地,记 0。只管"支撑够不够"这一个事实,不管歪不歪/晃不晃(那些交给全身模仿
+    和 upright_exp)。触地判据 = 单脚接触力范数 > 10.0 N(与 sensor force_threshold /
+    foot_clearance / hope_commands in_contact 同判据同阈值)。RewTerm weight 用负数。
+    """
+    sensor = env.scene.sensors[sensor_cfg.name]
+    body_ids = getattr(sensor_cfg, "body_ids", None)
+    if not isinstance(body_ids, (list, tuple)) or len(body_ids) != 2:
+        raise RuntimeError(
+            "hit_unstable_support requires sensor_cfg resolved to exactly the two A3 feet"
+        )
+    body_ids = list(body_ids)
+    forces = getattr(sensor.data, "net_forces_w", None)
+    if not torch.is_tensor(forces) or forces.ndim != 3 or forces.shape[-1] != 3:
+        raise RuntimeError(
+            "hit_unstable_support requires sensor net_forces_w shaped [env,body,3]"
+        )
+    # 10 N = sensor 的 force_threshold,与 foot_clearance / hope_commands 的 in_contact 同判据。
+    in_contact = torch.norm(forces[:, body_ids, :], dim=-1) > 10.0  # (E,2)
+    unstable = (in_contact.sum(dim=-1) <= 1).float()  # 单脚或无支撑
+    window = getattr(_cmd(env, command_name), "strike_window", None)
+    if (
+        not torch.is_tensor(window)
+        or window.dtype != torch.bool
+        or tuple(window.shape) != (forces.shape[0],)
+    ):
+        raise RuntimeError(
+            "hit_unstable_support requires the command term's [env] bool strike_window mask"
+        )
+    return unstable * window.float()
 
 
 # ============================================================================================== #

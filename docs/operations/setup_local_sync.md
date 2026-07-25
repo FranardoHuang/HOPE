@@ -28,6 +28,10 @@ Small tracked runtime assets, such as the Purdue PACE table/net USD visual overl
 | `${HOME}/Downloads/{v12,static,motion}/*.mp4` | Seven private v12 block, backhand high-press and lateral-locomotion teacher recordings from 2026-07-13 | User recording; schema-2 content-addressed metadata only in `configs/motion_video_intake_20260713.json`; do not publish raw bytes | G05/G08 motion library, fifth-action and lateral composition studies |
 | RunPod `/workspace/codexschema/motion_video_intake_20260711/` | Private content-addressed copy, GVHMR outputs, logs and queue bindings for the same ten recordings | Manually copied from the exact local videos; ignored runtime evidence, not a durable artifact service | G05/G08 motion preprocessing |
 | RunPod `/workspace/codexschema/motion_video_intake_20260713_{s0,m0}/` | Accepted no-clobber runtime evidence for [S0/M0](../DEFINITIONS.md), including GVHMR, exact handoff, canonical-beta and exact-GMR v2 completions | Created on Pod1 on 2026-07-13/14. Copy each complete root, including `exact_gmr_v2/{outputs,logs,audits,bindings,completion_manifest.json}`; S0/M0 completion manifest SHA-256 is `a762d6df...d1a23` / `fdd60fcf...396e`. Preserve the five bound inputs, both handoffs, donor, runtime closure and GMR bundle together. These paths are not a durable artifact service and must never be reconstructed from the later Pod2 rc127 absence | G04/G08 offline motion preprocessing |
+| `vendor_assets/motion_finalize_20260724/` | canonical 五动作终审的当前本地 ignored 输入根：ready、四个 SHADOW 源、四个 GMR 源和 scope-specific 换面证据 | 从下列 Pod2 内容寻址路径恢复；逐文件哈希见本页恢复命令。它是 compiler candidate 输入/证据根，不是训练资产库 | G08 canonical motion compiler and audit |
+| Pod2 `/workspace/codexschema/firstframe_20260723/designed_ready/` | shared-ready 的 NPZ 与说明 JSON | `canonical_ready_v1.npz` SHA-256 `cb0a05ca9f7220686acfde1010c28ed04558fb2aa47ef2cfb2284d576ecd15b0`；JSON SHA-256 `95be5bc32150f7dea8a4eed41bf591acd95588624e2f6f3f508f39f2c6c9e227` | G08 ready lineage |
+| Pod2 `/workspace/codexschema/franco_pipeline_20260722/fk/SHADOW_{fh_loop_yaw147,franco_bh_loop_c,bh_block_yaw80,s0_yaw72}.npz` | 四个 50 Hz SHADOW 运动学源 | SHA-256 依次为 `faa8df8c...3dcc1`、`d5338168...c1fba`、`55870b98...a5fe0`、`2cd32da1...78c01`；均为 probe-grade source，不直接授权 registry/training | G08 source inputs |
+| Pod2 `/workspace/codexschema/franco_set_cert_20260722/inputs/` | 与四个 SHADOW 源绑定的 GMR PKL | 文件名与完整 SHA-256 固定在下列恢复命令；不得用同名重跑件替换 | G08 source lineage |
 | RunPod `/workspace/codexschema/motion_spatial_retarget_signed_a4bbbaa_v1/` | Full 640-cell signed spatial-retarget proposal result and launch evidence | Created on Pod1 on 2026-07-13; result is 225,920 bytes, SHA-256 `69c3db16fa78f526aef49f20eeafe0d7e5e3004c4ed27f5e2823bb3574e2465c`; tracked summary is `configs/motion_video_spatial_retarget_signed_results_20260713.json` | G08 B/C candidate materialization |
 | RunPod `/workspace/codexschema/motion_video_intake_20260711/gmr_spatial_retarget_primary_v1/` | Exact B/C rank-0 whole-motion SE(2) outputs and report-last receipts | Created on Pod1 CPU on 2026-07-14; restore exact paths/bytes/SHA from `configs/motion_backhand_loop_bc_se2_materialization_results_20260714.json`. Private PKLs are not tracked; do not rerun into an existing no-clobber root | G04/G08 B/C schema-2 preregistration |
 | RunPod `motion_video_intake_20260711/gmr_provenance/GMR_aabea2e.bundle` | Recovery bundle for the clean five-local-commit GMR diagnostic source used on 2026-07-11; 282,953,810 bytes, SHA-256 `5b94af15f4a367dff8d7dc6c1cf14d26be6a649a25df6e1c1046b0e6ab72e2de` | Copy from the exact Pod1 ignored evidence root or another verified backup; `git bundle verify` and require advertised commit `aabea2eee4be4bc16d4be17dac5ffa85e5a31539` | Reproducing the Franco/v6/v7 diagnostic GMR outputs |
@@ -49,6 +53,60 @@ Small tracked runtime assets, such as the Purdue PACE table/net USD visual overl
 | RunPod historical M3c/M2f `model_16999.pt` checkpoints | Warm starts for the four-arm face-pairing comparison; never fresh-formal inputs | Existing ignored run trees under `/workspace/franco/nohope/hope_training/whole_body_tracking/logs/rsl_rl/agibot_a3_hope_virtualball/` | G05/G06 legacy causal diagnosis |
 | `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` | Generated Isaac A3 ping-pong URDF asset | Rebuilt from tracked `agi/URDF/A3T2.5-URDF-std-pingpang/` using `scripts/prepare_a3_isaac_asset.py` | G04/G05 |
 | Generated policy artifacts such as `hope_training/policies/*.onnx` | Exported policies for local eval/deploy handoff | Produced by `scripts/play.py` or training/eval export; store metadata in G05/G07 | G05/G07 when a specific policy is accepted |
+
+## 2026-07-24 动作终审输入根恢复
+
+当前本地真路径是 `vendor_assets/motion_finalize_20260724/`。以下命令只恢复 Pod2 上的 ready、
+四个 SHADOW 源和四个 GMR 源；`evidence/face_scopes/` 是本轮换面求解审计在该输入根上生成的
+scope-specific 证据，不从旧 full-body/syn probe 目录继承。目录尚未进入正式制品系统，恢复时
+必须 no-clobber：
+
+```bash
+MOTION_SYNC_LOCAL=vendor_assets/motion_finalize_20260724
+POD2='root@162.43.172.181'
+POD2_SSH='ssh -p 13146 -i ~/.ssh/id_ed25519_runpod'
+
+test ! -e "$MOTION_SYNC_LOCAL"
+mkdir -p "$MOTION_SYNC_LOCAL/ready" \
+  "$MOTION_SYNC_LOCAL/sources" \
+  "$MOTION_SYNC_LOCAL/gmr_sources"
+
+rsync -a --rsync-path='nice -n 19 rsync' -e "$POD2_SSH" \
+  "$POD2:/workspace/codexschema/firstframe_20260723/designed_ready/canonical_ready_v1.npz" \
+  "$POD2:/workspace/codexschema/firstframe_20260723/designed_ready/canonical_ready_v1.json" \
+  "$MOTION_SYNC_LOCAL/ready/"
+
+rsync -a --rsync-path='nice -n 19 rsync' -e "$POD2_SSH" \
+  "$POD2:/workspace/codexschema/franco_pipeline_20260722/fk/SHADOW_fh_loop_yaw147.npz" \
+  "$POD2:/workspace/codexschema/franco_pipeline_20260722/fk/SHADOW_franco_bh_loop_c.npz" \
+  "$POD2:/workspace/codexschema/franco_pipeline_20260722/fk/SHADOW_bh_block_yaw80.npz" \
+  "$POD2:/workspace/codexschema/franco_pipeline_20260722/fk/SHADOW_s0_yaw72.npz" \
+  "$MOTION_SYNC_LOCAL/sources/"
+
+rsync -a --rsync-path='nice -n 19 rsync' -e "$POD2_SSH" \
+  "$POD2:/workspace/codexschema/franco_set_cert_20260722/inputs/franco_forehand_loop.diagnostic_cohort_median_betas.grounded.pkl" \
+  "$POD2:/workspace/codexschema/franco_set_cert_20260722/inputs/franco_backhand_loop_c.aa0c86fd3509.se2.gmr.pkl" \
+  "$POD2:/workspace/codexschema/franco_set_cert_20260722/inputs/franco_backhand_block.diagnostic_cohort_median_betas.grounded.pkl" \
+  "$POD2:/workspace/codexschema/franco_set_cert_20260722/inputs/static_backhand_high_press.exact_franco_donor_betas.gmr.pkl" \
+  "$MOTION_SYNC_LOCAL/gmr_sources/"
+
+(cd "$MOTION_SYNC_LOCAL" && shasum -a 256 -c <<'SHA256'
+cb0a05ca9f7220686acfde1010c28ed04558fb2aa47ef2cfb2284d576ecd15b0  ready/canonical_ready_v1.npz
+95be5bc32150f7dea8a4eed41bf591acd95588624e2f6f3f508f39f2c6c9e227  ready/canonical_ready_v1.json
+faa8df8c552e4bd99134cefe5457f86e646499ff12737db160fa43eec763dcc1  sources/SHADOW_fh_loop_yaw147.npz
+d5338168e692c8a2c19fbfac8aeb56653fa79a1f45cebc6803a460835fbc1fba  sources/SHADOW_franco_bh_loop_c.npz
+55870b981584a458bfd479171046445845cb74171618b71338fd9dc9f66a5fe0  sources/SHADOW_bh_block_yaw80.npz
+2cd32da1864fa686aff544d29a84e988b91911503ae7f7680601f93345378c01  sources/SHADOW_s0_yaw72.npz
+d75d8f17e7b7cad3f06a47fbf01bdec194116996a155c6ab61e9d3eb0d84f6c8  gmr_sources/franco_forehand_loop.diagnostic_cohort_median_betas.grounded.pkl
+0dd981a6d29c0c5321c905d1591a59fbb79763de6e43d92d4d76aefdc29ff48b  gmr_sources/franco_backhand_loop_c.aa0c86fd3509.se2.gmr.pkl
+a4d92b68b9d1fc1185d2cfc87a233bf5ef974538a2d2a3ee7faa58593aace9d4  gmr_sources/franco_backhand_block.diagnostic_cohort_median_betas.grounded.pkl
+2dbe61e80af7187e9524b63095887287d2fd6aa615cbe9b712f68ea4dfc70edc  gmr_sources/static_backhand_high_press.exact_franco_donor_betas.gmr.pkl
+SHA256
+)
+```
+
+恢复成功只证明输入字节一致，不证明十件 candidate 已构建或通过 Agibot MuJoCo、grounded
+torque/contact、行为、恢复和 registry 门。不得从该根直接启动训练。
 
 ## Manual Restore Checklist
 
@@ -787,22 +845,22 @@ LOCAL_ROOT='hope_training/whole_body_tracking/artifacts/phase1_fresh_20260711'
 
 mkdir -p "$LOCAL_ROOT/assets" "$LOCAL_ROOT/smokes" \
   "$LOCAL_ROOT/checkpoints/M3c" "$LOCAL_ROOT/checkpoints/M2f"
-rsync -a -e "$SSH" \
+rsync -a --rsync-path='nice -n 19 rsync' -e "$SSH" \
   "$REMOTE:/workspace/codexschema/phase1_fresh_20260711/assets/v4rg_runtime_order_v3/" \
   "$LOCAL_ROOT/assets/v4rg_runtime_order_v3/"
-rsync -a -e "$SSH" \
+rsync -a --rsync-path='nice -n 19 rsync' -e "$SSH" \
   "$REMOTE:/workspace/codexschema/phase1_fresh_20260711/assets/legacy/" \
   "$LOCAL_ROOT/assets/legacy/"
-rsync -a -e "$SSH" \
+rsync -a --rsync-path='nice -n 19 rsync' -e "$SSH" \
   "$REMOTE:/workspace/codexschema/phase1_fresh_20260711/smokes/runtime_order_v2_motion/" \
   "$LOCAL_ROOT/smokes/runtime_order_v2_motion/"
-rsync -a -e "$SSH" \
+rsync -a --rsync-path='nice -n 19 rsync' -e "$SSH" \
   "$REMOTE:/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/" \
   "$LOCAL_ROOT/checkpoint_curves/pod1/"
 
 REMOTE2='root@162.43.172.181'
 SSH2='ssh -p 13146 -i ~/.ssh/id_ed25519_runpod'
-rsync -a -e "$SSH2" \
+rsync -a --rsync-path='nice -n 19 rsync' -e "$SSH2" \
   "$REMOTE2:/workspace/codexschema/phase1_fresh_20260711/checkpoint_curves/" \
   "$LOCAL_ROOT/checkpoint_curves/pod2/"
 scp -P 18333 -i ~/.ssh/id_ed25519_runpod \

@@ -513,6 +513,11 @@ class MotionOnPolicyRunner(OnPolicyRunner):
 
         人话:Ctrl-C 不再当场掐死训练(半个迭代的档没有存在价值),而是登记一个"想停"标记,
         等当前 PPO 迭代完整跑完、log() 落账之后存一份带精确续训状态的档再退出。
+        第二次 Ctrl-C/SIGTERM = "别等了,立刻死"(2026-07-25):迭代若卡住(env 步进不返回、
+        logger 重试死循环),旧版会把后续信号全部静默吞掉,操作员只能另开 shell 找 PID 发
+        SIGKILL。现在第二次信号恢复 OS 默认处置并重新对自己投递——不存档,直接终止。
+        (老实说明:若主线程死死卡在 native Isaac/CUDA 调用里,Python 层任何 handler 都
+        不会被执行,第一次信号同样没反应,那种情况仍然只有 SIGKILL 能救。)
         """
         pending_signal = None
         previous_handlers = {}
@@ -526,6 +531,17 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                     "iteration before saving",
                     flush=True,
                 )
+            else:
+                # 第二次信号:升级为立即终止。先恢复该信号的 OS 默认动作再 os.kill 自投——
+                # 默认动作由内核执行,不依赖解释器回到字节码循环,比 raise KeyboardInterrupt
+                # 硬(后者在 finally/except 链里还可能被吞)。代价:不存档(与提示语一致)。
+                print(
+                    "\n[MotionOnPolicyRunner] second interrupt — exiting immediately, "
+                    "NO checkpoint",
+                    flush=True,
+                )
+                signal.signal(signum, signal.SIG_DFL)
+                os.kill(os.getpid(), signum)
 
         try:
             for signum in (signal.SIGINT, signal.SIGTERM):

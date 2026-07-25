@@ -1,4 +1,19 @@
-# FINAL 11 段终表 — t_hit / t_recover / 适用率极限(2026-07-23;母本 pod2 boundary_cert_20260722/FINAL_11_TABLE.md+.json,组表器 compose_final11.py 可复现)
+# FINAL 11 段研究表（v1–v7 历史推演；v8 尚未发布）
+
+2026-07-24 终审重开后，旧表中的固定 `adv2c3` 主件、ready→旧 frame 0 串行、单腕轴换面和
+窗口冻结语义均不再是现行方案。当前正在重建五动作 × upper/full 十件 direct shared-ready 候选；
+在十件通过 Agibot MuJoCo 播放和逐门检查前，不填写新的动作时长、窗口或适用域数字。
+
+现行口径、已完成实现和阻塞只看
+[canonical 动作库实验](../experiments/2026-07/EXP-MOTION-CANONICAL-LIBRARY-20260723.md)与
+[动作预处理合同](../interfaces/motion_preprocessing_contract.md)。下方 v1–v7 仅保留复算历史，
+不得作为当前训练资产表或 planner 路由表。
+
+<details>
+<summary>v1–v7 历史推演（保留复算路径，不再作为当前终表）</summary>
+
+原始母本：pod2 `boundary_cert_20260722/FINAL_11_TABLE.md+.json`，组表器
+`compose_final11.py`。
 
 合同 C3:绑定集=击球链右臂 7 关节;acc 包络=硬件真源 (τ_max−|bias|)/M_jj 逐点;vel=URDF×1.0
 (×0.85 减额无硬件依据已去);CoP/摩擦只报数(稳定器债)。**验收门 = t_hit ≤ 0.5s**。
@@ -233,3 +248,5 @@ fh_loop/bh_block=正式化三证重跑即可;v4rg×2=bake 拍面偏 URDF 40.3° 
 双对抗复核 CONFIRMED(11 段独立重算最大偏差 0.5ms,binding 11/11 全对;边界账三层母本
 逐格一致)。产物:pod2 firstframe_20260723/final_account/(FINAL_TIMING、FINAL_BOUNDARY、
 adversarial_recheck)。
+
+</details>

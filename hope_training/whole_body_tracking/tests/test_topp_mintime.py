@@ -19,6 +19,7 @@ Run:  python3 -m pytest hope_training/whole_body_tracking/tests/test_topp_mintim
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -64,6 +65,20 @@ def make_clip(T=81, contact=48, blade_step=0.02, joint_amp=3.0):
 
 LOOSE_VLIM = np.full(J, 100.0)
 LOOSE_BUDGET = np.full(J, 1000.0)
+
+
+def _write_canonical_sidecar(path: Path, **overrides) -> Path:
+    payload = {
+        "publication_class": "compiler_candidate",
+        "training_authorized": False,
+        "tool_id": "canonical_schema2_builder_v1",
+        "build_verdict": "PASS_COMPILER_CANDIDATE_ONLY",
+        "hashes": {"output_npz_sha256": v3._sha256_file(path)},
+    }
+    payload.update(overrides)
+    sidecar = Path(str(path) + ".manifest.json")
+    sidecar.write_text(json.dumps(payload), encoding="utf-8")
+    return sidecar
 
 
 def stub_oracle(vel_thresh: float):
@@ -302,6 +317,127 @@ def test_production_cli_refuses_interp_before_reading_inputs(tmp_path: Path):
                 "--md",
                 str(tmp_path / "report.md"),
             ]
+        )
+
+
+def test_canonical_v2_cli_requires_explicit_legacy_comparator_flag(tmp_path: Path):
+    data, phase = make_clip()
+    source = tmp_path / "source.npz"
+    budget = tmp_path / "budget.npz"
+    np.savez(source, **data)
+    np.savez(budget, **data)
+    _write_canonical_sidecar(source)
+    common = [
+        "--input",
+        str(source),
+        "--output",
+        str(tmp_path / "out.npz"),
+        "--phase",
+        str(phase),
+        "--budget-clips",
+        str(budget),
+        "--report",
+        str(tmp_path / "report.json"),
+        "--md",
+        str(tmp_path / "report.md"),
+    ]
+    with pytest.raises(SystemExit, match="canonical-v2 candidate/adopted/comparator"):
+        v3.main(common)
+    # The explicit escape hatch passes the lineage gate; this focused CLI test
+    # intentionally stops at the next production-only prerequisite.
+    with pytest.raises(SystemExit, match="--mjcf and --body-order"):
+        v3.main([*common, "--allow-canonical-v2-legacy-comparator"])
+    receipt = v3._legacy_comparator_guard(
+        [("source", source)],
+        allow_canonical_v2_legacy_comparator=True,
+    )
+    marked = v3._mark_legacy_comparator({}, receipt)
+    assert marked["publication_class"] == v3.LEGACY_COMPARATOR_CLASS
+    assert marked["legacy_semantics"] == v3.LEGACY_COMPARATOR_CLASS
+    assert marked["training_authorized"] is False
+    assert marked["hardware_authorized"] is False
+    _, result, law, meta = _run(data, phase, stub_oracle(1e9))
+    report = v3.build_report(data, result, law, meta, "interp")
+    v3._mark_legacy_comparator(report, receipt)
+    assert v3.LEGACY_COMPARATOR_CLASS in v3.report_md(report)
+
+
+def test_guard_is_strict_not_filename_based(tmp_path: Path):
+    filename_only = tmp_path / "looks_canonical_v2.npz"
+    filename_only.write_bytes(b"legacy")
+    assert (
+        v3._legacy_comparator_guard(
+            [("filename-only legacy", filename_only)],
+            allow_canonical_v2_legacy_comparator=False,
+        )
+        is None
+    )
+
+    duplicate = Path(str(filename_only) + ".manifest.json")
+    duplicate.write_text(
+        '{"publication_class":"compiler_candidate",'
+        '"publication_class":"compiler_candidate",'
+        '"tool_id":"canonical_schema2_builder_v1",'
+        '"build_verdict":"PASS_COMPILER_CANDIDATE_ONLY"}',
+        encoding="utf-8",
+    )
+    with pytest.raises(SystemExit, match="strict JSON"):
+        v3._legacy_comparator_guard(
+            [("duplicate sidecar", filename_only)],
+            allow_canonical_v2_legacy_comparator=True,
+        )
+
+    registry_bound = tmp_path / "registry-bound.npz"
+    registry_bound.write_bytes(b"canonical")
+    registry_payload = {
+        "publication_class": "training_adopted",
+        "training_authorized": True,
+        "deployment_authorized": False,
+        "hardware_authorized": False,
+        "tool_id": "canonical_schema2_builder_v1",
+        "build_verdict": "PASS_COMPILER_CANDIDATE_ONLY",
+        "npz_sha256": v3._sha256_file(registry_bound),
+    }
+    Path(str(registry_bound) + ".registry.json").write_text(
+        json.dumps(registry_payload),
+        encoding="utf-8",
+    )
+    with pytest.raises(SystemExit, match="canonical-v2 candidate/adopted/comparator"):
+        v3._legacy_comparator_guard(
+            [("registry-bound canonical", registry_bound)],
+            allow_canonical_v2_legacy_comparator=False,
+        )
+
+
+def test_guard_rejects_symlink_and_contradictory_canonical_state(tmp_path: Path):
+    target = tmp_path / "target.npz"
+    target.write_bytes(b"legacy")
+    link = tmp_path / "link.npz"
+    link.symlink_to(target)
+    with pytest.raises(SystemExit, match="禁止 symlink"):
+        v3._legacy_comparator_guard(
+            [("symlink input", link)],
+            allow_canonical_v2_legacy_comparator=True,
+        )
+
+    sidecar_link_input = tmp_path / "sidecar-link.npz"
+    sidecar_link_input.write_bytes(b"canonical")
+    sidecar_target = tmp_path / "sidecar-target.json"
+    sidecar_target.write_text("{}", encoding="utf-8")
+    Path(str(sidecar_link_input) + ".manifest.json").symlink_to(sidecar_target)
+    with pytest.raises(SystemExit, match="禁止 symlink"):
+        v3._legacy_comparator_guard(
+            [("symlink sidecar", sidecar_link_input)],
+            allow_canonical_v2_legacy_comparator=True,
+        )
+
+    conflict = tmp_path / "conflict.npz"
+    conflict.write_bytes(b"canonical")
+    _write_canonical_sidecar(conflict, training_authorized=True)
+    with pytest.raises(SystemExit, match="状态机矛盾"):
+        v3._legacy_comparator_guard(
+            [("conflicting canonical input", conflict)],
+            allow_canonical_v2_legacy_comparator=True,
         )
 
 

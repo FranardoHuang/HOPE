@@ -81,6 +81,19 @@ def _write_clip(path: Path, data: dict) -> None:
     np.savez(path, **data)
 
 
+def _write_canonical_sidecar(path: Path) -> Path:
+    payload = {
+        "publication_class": "compiler_candidate",
+        "training_authorized": False,
+        "tool_id": "canonical_schema2_builder_v1",
+        "build_verdict": "PASS_COMPILER_CANDIDATE_ONLY",
+        "hashes": {"output_npz_sha256": _sha(path)},
+    }
+    sidecar = Path(str(path) + ".manifest.json")
+    sidecar.write_text(json.dumps(payload), encoding="utf-8")
+    return sidecar
+
+
 def _loose_budget_npz(path: Path) -> None:
     """最小 budget clip:每关节 |Δq̇|·fps = 1000(宽松包络,全为正,无 floor)。"""
     jv = np.zeros((2, J), dtype=np.float32)
@@ -265,6 +278,69 @@ def test_cli_refuses_to_overwrite(tmp_path: Path):
                  "--out", str(out), "--manifest", str(tmp_path / "m.json"),
                  "--budget-clips", str(budget), "--body-mode", "interp"])
     assert out.read_bytes() == b"occupied"
+
+
+def test_cli_canonical_v2_requires_override_and_marks_comparator_manifest(
+    tmp_path: Path,
+):
+    clip = tmp_path / "clip.npz"
+    _write_clip(clip, make_clip())
+    _write_canonical_sidecar(clip)
+    budget = tmp_path / "budget.npz"
+    _loose_budget_npz(budget)
+
+    base = [
+        "--motion",
+        str(clip),
+        "--phase",
+        str(PHASE),
+        "--speed-ratio",
+        "1.0",
+        "--budget-clips",
+        str(budget),
+        "--body-mode",
+        "interp",
+    ]
+    refused_out = tmp_path / "refused.npz"
+    refused_manifest = tmp_path / "refused.json"
+    with pytest.raises(SystemExit, match="canonical-v2 candidate/adopted/comparator"):
+        bk.main(
+            [
+                *base,
+                "--out",
+                str(refused_out),
+                "--manifest",
+                str(refused_manifest),
+            ]
+        )
+    assert not refused_out.exists()
+    assert not refused_manifest.exists()
+
+    out = tmp_path / "comparator.npz"
+    manifest_path = tmp_path / "comparator.json"
+    assert (
+        bk.main(
+            [
+                *base,
+                "--out",
+                str(out),
+                "--manifest",
+                str(manifest_path),
+                "--allow-canonical-v2-legacy-comparator",
+            ]
+        )
+        == 0
+    )
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    assert manifest["publication_class"] == bk.v3.LEGACY_COMPARATOR_CLASS
+    assert manifest["legacy_semantics"] == bk.v3.LEGACY_COMPARATOR_CLASS
+    assert manifest["training_authorized"] is False
+    assert manifest["deployment_authorized"] is False
+    assert manifest["hardware_authorized"] is False
+    assert manifest["legacy_comparator"]["protected_inputs"][0][
+        "protected_sidecars"
+    ][0]["tool_id"] == "canonical_schema2_builder_v1"
+    assert out.is_file()
 
 
 # --------------------------------------------- ⑤ --envelope --------------------------- #

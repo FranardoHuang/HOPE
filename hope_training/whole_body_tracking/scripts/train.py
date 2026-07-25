@@ -1159,7 +1159,8 @@ def _joint_velocity_limit_hinge_reward_contract(env_cfg, runtime_facts: dict) ->
         "joint_count": 31,
         "joint_order": "runtime_articulation_identity",
         "velocity_limit_source": "runtime_execution_facts.joint_velocity_limits",
-        "formula": "mean(relu(abs(qd)/joint_velocity_limits-margin)^2)",
+        # 2026-07-25 SUM 裁定:与 validator 逐字节一致;旧 mean 串 sidecar fail-loud。
+        "formula": "sum(relu(abs(qd)/joint_velocity_limits-margin)^2)",
     }
 
 
@@ -1309,14 +1310,18 @@ def _processed_qdes_slew_hinge_reward_contract(
             "velocity_limit_source": "runtime_execution_facts.joint_velocity_limits",
             "age_source": "per_env_exact_strike_control_tick_latch",
             "formula": (
-            "mean(1-exp(-square(relu(abs(delta_processed_qdes)/(joint_velocity_limits*0.02)-margin)/(1-margin))))"
+            # 2026-07-25 SUM 裁定:与 validator 逐字节一致;旧 mean 串 sidecar fail-loud。
+            "sum(1-exp(-square(relu(abs(delta_processed_qdes)/(joint_velocity_limits*0.02)-margin)/(1-margin))))"
         ),
         "gate": "same_attempt_post_strike_age_s_inclusive",
     }
 
 
 _QDES_LIMIT_BARRIER_FORMULA = (
-    "sum(1-exp(-square(relu(margin_frac-min(qdes-lo,hi-qdes)/(hi-lo))/margin_frac)))"
+    # 2026-07-25 站姿豁免:m_eff 按关节收窄到默认站姿之外(0.005 = STANCE_EPS),
+    # 旧一刀切 margin_frac 公式的 sidecar 与新数学不可静默互续,合同串随数学一起换。
+    "sum(1-exp(-square(relu(m_eff-min(qdes-lo,hi-qdes)/(hi-lo))/m_eff)));"
+    "m_eff=min(margin_frac,min(default_q-lo,hi-default_q)/(hi-lo)-0.005)"
 )
 
 
@@ -2328,6 +2333,9 @@ _RACKET_KEYS = (
     "clean_reference_strike_velocity", "clean_strike_vel_window",
     "adaptive_sigma", "sigma_update_every", "sigma_ema_scale",
     "sigma_pos_min", "sigma_pos_max", "sigma_vel_min", "sigma_vel_max",
+    # 拍面 sigma 第三通道(A1 2026-07-25):racket_normal 的核宽也跟着 exact-strike 面角
+    # 误差自适应收紧(必须搭在 adaptive_sigma 上,单开在 hope_commands 构造期 fail-loud)。
+    "adaptive_sigma_normal",
     # HER-style achieved-target replay (mixture sampling from previously-achieved strike states).
     "achieved_target_mix_prob", "achieved_buffer_size", "achieved_min_fill",
     "achieved_jitter_pos", "achieved_jitter_vel", "achieved_clamp_inflate",
@@ -2478,6 +2486,10 @@ _REWARD_KEYS = (
     # narrow meaning: remove the three LEFT-arm links from all four body-imitation terms while
     # retaining torso + the complete right (racket) arm.  It does not touch any safety term.
     "free_non_striking_arm_mimic",
+    # 全身模仿开关(Franco 2026-07-25 裁定:下半身也应全局模仿,可开关)。true = 把
+    # pelvis + 六个腿部 link 加回四个 motion_body_* 名单(恢复 BeyondMimic 原始 13-body
+    # 集),与 free_wrist_*/free_non_striking 的摘除可叠加(腿加回,被摘的照旧不学)。
+    "full_body_mimic",
     "joint_torques_weight",
     # per-term overrides of the six imitation terms + the global/in-window scales
     "motion_global_anchor_pos_weight", "motion_global_anchor_pos_std",
@@ -2498,6 +2510,10 @@ _REWARD_KEYS = (
     # constant guidance penalty toward the racket target (reward_staged_design §② B2)
     "racket_guidance_weight", "racket_face_guidance_weight", "racket_face_guidance_theta_max",
     "racket_face_conditional_guidance_weight",
+    # v2 奖励包一键选择器(reward_redesign_20260725 §3;缺席 = v1 现状,逐字节不变;唯一合法值
+    # "v2")。人话:一个键把 v2 蓝图整套换装展开;包先展开、显式同名键后写后赢,见
+    # _expand_reward_pack。
+    "reward_pack",
 )
 
 # jiayi 的 YAML-null 删参修复(8ee2e82a,搬进 main 血统)。人话:task YAML 层层继承时,子任务
@@ -2600,6 +2616,212 @@ def _apply_reward_param_null_removals(rewards, rw, applied):
         applied.append(
             f"rewards.{term_name}.params.{param_name}=<removed by YAML null>"
         )
+
+
+# --------------------------------------------------------------------------------------------- #
+# v2 奖励包(docs/research/reward_redesign_20260725.md §3 蓝图)。task.rewards.reward_pack 是
+# "一键成套"选择器。2026-07-25 Franco 裁定【默认翻转】:缺席 = 按 "v2" 展开(applied 记
+# defaulted 标记);显式 "v1" = 兜底 flag,不展开、逐字节保留 legacy 现状(只记一条 v1 标记);
+# 别的值 fail-loud。老配方(配了 motion_scale_in_window / adaptive_sigma=false 的)在默认
+# 路径上会响亮失败——这是有意的:legacy 配方必须显式声明 reward_pack=v1 才能渲染。
+# v2 的人话:
+#   * 模仿全身全程全额 —— full_body_mimic=true(pelvis+6 腿回名单),窗内不再给模仿打折
+#     (motion_scale_in_window 在 v2 里被废除,与包同时显式配它属于矛盾配方,直接 raise);
+#   * 平衡从"税"改"工资" —— 收入型 upright_exp(+1.0)替代税型 upright(flat_orientation_l2
+#     清零);
+#   * 窗内站稳四件套(strike_upright/ang_vel/foot_vel/vbob)删掉,换 PACE 单条
+#     hit_unstable_support(-10.0,击球窗内单脚/无支撑记罚);
+#   * 反作弊小税清零交给全身模仿 —— foot_orientation / prestrike_upright /
+#     prestrike_waist_twist / arm_overreach / hold_ready 全部 0;
+#   * foot slip/drag 降到 mjlab 档位 —— foot_slip_sq -0.1、foot_drag 0;
+#   * 拍面 sigma 第三通道 —— racket.adaptive_sigma_normal=true(必须搭在 adaptive_sigma 上,
+#     半配组合在翻译层就拒;包【默认生效】且用户没显式表态 adaptive_sigma 时,默认包代为
+#     置 true 保持自洽——显式 v2 配方仍要求自己声明);
+#   * 击球三通道名义权重 —— racket_position/velocity/normal = 60/45/35(§3.5 L3;名义值,
+#     probe 校准后冻结 prereg);
+#   * 击中层 —— strike_capture_bonus 850(L2 one-shot,绑 vb_fired capture 门)、
+#     racket_strike_success 30(L3.5 三核乘法加强层);同为名义值,probe 校准后冻结 prereg。
+# 展开顺序:包【先】展开,再走正常覆写层 —— 显式 task.rewards.* / task.racket.* 同名键
+# "后写后赢"(包只填用户没写的键,直接写 cfg 的项今天没有 CLI 键,不存在冲突面)。
+# --------------------------------------------------------------------------------------------- #
+_REWARD_PACK_ALLOWED = ("v1", "v2")
+# 走【现有键控覆写层】的部分:注入 task.rewards 同名键(必须都在 _REWARD_KEYS 白名单里,
+# import 时自检),用户显式写了同名键 -> 包不填,用户赢。
+_REWARD_PACK_V2_KEYED = (
+    ("full_body_mimic", True),           # 全身模仿:pelvis+6 腿回四个 motion_body_* 名单
+    ("hold_ready_weight", 0.0),          # hold 工资清零(hold 场景现被 planner 禁;rally 课程回归时再全额)
+    ("foot_orientation_weight", 0.0),    # 脚姿税下岗,交给全身模仿
+    ("prestrike_upright_weight", 0.0),   # 挥前站正税下岗
+    ("prestrike_waist_twist_weight", 0.0),  # 挥前拧腰税下岗
+    ("foot_slip_sq_weight", -0.1),       # 触地脚蹭滑降到 mjlab 档位(v1 源码 -1.0)
+    ("foot_drag_weight", 0.0),           # 拖脚税下岗(v1 源码 -0.5)
+    # L3 击球三通道(redesign §3.5:名义值,probe 校准后冻结 prereg)。用户显式键照旧赢:
+    # 现役波 yaml 里的 17/7/5 显式键继续生效,包不碰。
+    ("racket_position_weight", 60.0),    # 窗口 dense 位置核(名义 60,W 偏位档)
+    ("racket_velocity_weight", 45.0),    # 窗口 dense 拍速核(名义 45)
+    ("racket_normal_weight", 35.0),      # 窗口 dense 拍面法向核(名义 35)
+)
+# 今天没有 CLI 键的项:直接写 cfg 对象上的 weight(与 free_non_striking_arm_mimic 等
+# direct-cfg 改动同款,逐条记 applied,标 reward_pack=v2)。
+_REWARD_PACK_V2_DIRECT = (
+    ("strike_upright", 0.0),             # 窗内站稳四件套下岗……
+    ("strike_ang_vel", 0.0),
+    ("strike_foot_vel", 0.0),
+    ("strike_vbob", 0.0),
+    ("hit_unstable_support", -10.0),     # ……换 PACE 单条(B1 已在 cfg 声明 weight=0 待命)
+    ("upright", 0.0),                    # 税型站正(flat_orientation_l2)下岗……
+    ("upright_exp", 1.0),                # ……换收入型站正(B1 已声明 weight=0 待命)
+    ("arm_overreach", 0.0),              # 伸臂过远税下岗,交给全身模仿
+    # L2/L3.5 击中层(redesign §3.5:名义值,probe 校准后冻结 prereg)。
+    ("racket_strike_success", 30.0),     # L3.5 三核乘法加强层:5 -> 30(名义)
+    ("strike_capture_bonus", 850.0),     # L2 one-shot 击中大奖(vb_fired 捕获门,一拍一发;
+                                         # 名义 B~850 = m1*I*Tc*rho/p*,全栈唯一大额 one-shot)
+)
+# 建表自检(import 时就炸):键控注入表的键必须都在 _REWARD_KEYS 白名单里,否则
+# _check_unknown_keys 会把注入后的 mapping 当异常配置拒掉(虽然注入发生在检查之后,
+# 表键漂移仍属于契约漂移,响亮报)。
+_PACK_TABLE_STRAYS = sorted(
+    {key for key, _ in _REWARD_PACK_V2_KEYED} - set(_REWARD_KEYS)
+)
+if _PACK_TABLE_STRAYS:
+    raise RuntimeError(
+        "[train.py] _REWARD_PACK_V2_KEYED keys missing from _REWARD_KEYS: "
+        f"{_PACK_TABLE_STRAYS}"
+    )
+del _PACK_TABLE_STRAYS
+
+
+def _expand_reward_pack(env_cfg, task, rw, applied):
+    """task.rewards.reward_pack 展开("v2" 展开成套;"v1" 兜底不展开)。返回 rewards 覆写 mapping。
+
+    2026-07-25 Franco 裁定默认翻转:键缺席 = 默认按 "v2" 展开(applied 记 defaulted 标记);
+    显式 "v1" = legacy 兜底,原 mapping 原样返回、逐字节不变(只记一条 v1 标记)。
+
+    人话:包不是绕开覆写层的后门 —— 有 CLI 键的项注入进 task.rewards mapping,由下面的
+    【现有翻译层】落地(_set_attr/_set_reward 照常记 applied、照常做类型/契约校验);没有
+    CLI 键的项直接写 cfg 对象并逐条记 applied。每条改动的 applied 标记都带 reward_pack=v2,
+    事后翻 run 记录能一眼看出哪些值是包写的、哪些是用户显式压过包的。
+    """
+    pack = _get(rw, "reward_pack")
+    defaulted = pack is None
+    if defaulted:
+        pack = "v2"  # 2026-07-25 Franco 裁定:缺席 = v2;要 legacy 基线请显式 reward_pack=v1
+    if not isinstance(pack, str) or pack not in _REWARD_PACK_ALLOWED:
+        raise _OverrideError(
+            f"[train.py] task.rewards.reward_pack must be one of {_REWARD_PACK_ALLOWED} "
+            f"(absent = v2 default, 2026-07-25 Franco ruling; v1 = explicit legacy baseline), "
+            f"got {pack!r} — unknown pack values never fall back silently."
+        )
+    if pack == "v1":
+        applied.append("rewards.reward_pack=v1 (legacy baseline)")
+        return rw  # 显式 v1 兜底:不展开,legacy 行为逐字节不变
+    # v2 的定义就是"窗内不给模仿打折":与生效的 v2 包(含默认)同时显式配
+    # motion_scale_in_window 属于矛盾配方,fail-loud 而不是静默裁决谁赢(显式 null 按覆写层
+    # 惯例等价于"没写",不算冲突)。默认翻转后老配方会在这里响亮失败——有意为之。
+    if _get(rw, "motion_scale_in_window") is not None:
+        raise _OverrideError(
+            "[train.py] rewards.reward_pack=v2 "
+            + ("(defaulted, 2026-07-25 Franco ruling) " if defaulted else "")
+            + "abolishes the in-window imitation discount, but rewards.motion_scale_in_window "
+            "is also explicitly set — contradictory recipe. Legacy recipes must declare "
+            "reward_pack=v1 to keep motion_scale_in_window; a v2 recipe must drop the key."
+        )
+    if defaulted:
+        applied.append(
+            "rewards.reward_pack defaulted to v2 (2026-07-25 Franco ruling; set "
+            "reward_pack=v1 for legacy baseline)"
+        )
+    else:
+        applied.append(
+            "rewards.reward_pack=v2 (reward_redesign_20260725 §3; pack expands FIRST, explicit "
+            "keys win)"
+        )
+    # 注入:把 rw 物化成普通 dict(dict / OmegaConf 节点都支持 keys()+get()),只填用户
+    # 没写的键;之后整个 rewards 覆写层读的就是这份合并视图。默认路径上 rewards 节点可能
+    # 根本不存在(rw is None),从空表起步。
+    merged = {} if rw is None else {str(key): _get(rw, key) for key in rw.keys()}
+    for key, value in _REWARD_PACK_V2_KEYED:
+        if merged.get(key) is not None:
+            applied.append(
+                f"rewards.{key} explicitly set — user override wins (reward_pack=v2 keeps "
+                "hands off)"
+            )
+            continue
+        merged[key] = value
+        applied.append(f"rewards.{key}={value!r} (reward_pack=v2)")
+    # direct-cfg 项:今天没有 CLI 键,直接写 weight;term 缺失/为 None 说明这个 cfg 血统
+    # 根本不长 v2 要动的项(例如非 DeployParity 谱系),fail-loud 而不是静默半套换装。
+    R = getattr(env_cfg, "rewards", None)
+    _require(R is not None, "rewards (reward_pack=v2)")
+    for name, weight in _REWARD_PACK_V2_DIRECT:
+        _require(
+            hasattr(R, name) and getattr(R, name) is not None,
+            f"rewards.{name} (reward_pack=v2)",
+        )
+        getattr(R, name).weight = float(weight)
+        applied.append(f"rewards.{name}.weight={float(weight)} (reward_pack=v2)")
+    # racket 侧:拍面 sigma 第三通道。rewards 块在 racket 块【之前】跑,所以这里直接写
+    # cfg 属性;用户显式的 task.racket.adaptive_sigma_normal 会在后面的 racket 翻译层
+    # 覆写回去(后写后赢)。
+    rk = _get(task, "racket")
+    _require(
+        hasattr(env_cfg, "commands") and hasattr(env_cfg.commands, "racket_target"),
+        "commands.racket_target (reward_pack=v2 -> racket.adaptive_sigma_normal)",
+    )
+    C = env_cfg.commands.racket_target
+    user_asn = _get(rk, "adaptive_sigma_normal")
+    if user_asn is not None:
+        effective_asn = _as_explicit_bool(user_asn, "task.racket.adaptive_sigma_normal")
+        applied.append(
+            "racket.adaptive_sigma_normal explicitly set — user override wins "
+            "(reward_pack=v2 keeps hands off)"
+        )
+    else:
+        effective_asn = True
+        _require(
+            hasattr(C, "adaptive_sigma_normal"),
+            "racket_target.adaptive_sigma_normal (reward_pack=v2)",
+        )
+        C.adaptive_sigma_normal = True
+        applied.append("racket_target.adaptive_sigma_normal=True (reward_pack=v2)")
+    # 半配组合当场拒:第三通道必须搭在 adaptive_sigma 上。hope_commands 构造期也有同款
+    # 校验,这里提前到翻译层,报错信息直接指向包配方该补哪个键。
+    user_as = _get(rk, "adaptive_sigma")
+    if (
+        defaulted
+        and effective_asn
+        and user_as is None
+        and not bool(getattr(C, "adaptive_sigma", False))
+    ):
+        # 默认包自洽:用户对 adaptive_sigma 没显式表态时,默认 v2 一并打开第三通道要骑的
+        # pos/vel 自适应 sigma 机器(显式 reward_pack=v2 的配方仍要求自己声明
+        # adaptive_sigma=true,配方自文档;显式 adaptive_sigma=false 走下面的响亮拒收)。
+        _require(
+            hasattr(C, "adaptive_sigma"),
+            "racket_target.adaptive_sigma (reward_pack defaulted to v2)",
+        )
+        C.adaptive_sigma = True
+        applied.append("racket_target.adaptive_sigma=True (reward_pack defaulted to v2)")
+    effective_as = (
+        _as_explicit_bool(user_as, "task.racket.adaptive_sigma")
+        if user_as is not None
+        else bool(getattr(C, "adaptive_sigma", False))
+    )
+    if effective_asn and not effective_as:
+        raise _OverrideError(
+            "[train.py] rewards.reward_pack=v2 "
+            + ("(defaulted, 2026-07-25 Franco ruling) " if defaulted else "")
+            + "turns on racket.adaptive_sigma_normal, which "
+            "requires racket.adaptive_sigma=true (the pos/vel adaptive-sigma machinery it "
+            "rides on). Set task.racket.adaptive_sigma=true, or explicitly set "
+            "task.racket.adaptive_sigma_normal=false to opt the third channel out."
+            + (
+                " Legacy recipes must declare reward_pack=v1 to keep the v1 baseline."
+                if defaulted
+                else ""
+            )
+        )
+    return merged
 
 
 # YAML keys under `terminations:` (R-b envelope-termination softening, reward_staged_design §⑥;
@@ -3003,6 +3225,120 @@ def _ground_plant_contract(env_cfg) -> dict | None:
     )
 
 
+def _venue_profile_module():
+    """按文件路径加载 utils/venue_profile.py(Wave-1 场地档案严格加载器)。
+
+    人话:不 import whole_body_tracking 包 —— 包 __init__ 连带注册 Isaac 任务,host-only
+    单测 import 不动;照 _ground_plant_contract 的 training_contract 先例按路径加载并缓存。
+    loader 本身纯标准库,host/pod/部署机都加载得动。
+    """
+    mod = getattr(_venue_profile_module, "_module", None)
+    if mod is None:
+        _vp_path = (
+            pathlib.Path(__file__).resolve().parents[1]
+            / "source/whole_body_tracking/whole_body_tracking/utils/venue_profile.py"
+        )
+        _vp_spec = importlib.util.spec_from_file_location(
+            "hope_venue_profile_by_path", _vp_path
+        )
+        mod = importlib.util.module_from_spec(_vp_spec)
+        _vp_spec.loader.exec_module(mod)
+        _venue_profile_module._module = mod
+    return mod
+
+
+# venue profile 的 physics section -> events 旋钮映射:(profile 键, 对应 task.plant 用户键)。
+# 用户键为 None 表示今天没有 CLI 通道(restitution/link mass),档案值直接落地。
+_VENUE_PROFILE_PHYSICS_MATERIAL_KEYS = (
+    ("static_friction_range", "robot_material_static_friction_range"),
+    ("dynamic_friction_range", "robot_material_dynamic_friction_range"),
+    ("restitution_range", None),
+)
+
+
+def _apply_venue_profile_task_override(env_cfg, task, applied):
+    """task.venue_profile=<裸名或 .json 路径> —— 场地/环境档案一键展开(顶层白名单键)。
+
+    人话:换场地、换动捕、换机器人时,"环境长什么样"的标定(动捕噪声/链路延迟丢帧/材质与
+    质量随机化区间)集中放在 configs/venue_profiles/<name>.json 一份档案里,训练用
+    ``task.venue_profile=<name>`` 一键导入,不再散抄进各个 yaml。加载与校验全部走 Wave-1
+    的严格 loader(utils/venue_profile.py,未知档案/坏 schema 当场 raise)。
+
+    展开顺序 = 档案先、显式键后(用户赢):
+
+    * mocap_noise + transport -> 这里【不】直接写 cfg,而是返回 task.racket 同名键注入表,
+      由下方 racket 覆写块的现有翻译层落地(_set_attr 记 applied、tts 非 live 换 actor 观测
+      func 等副作用一个不少);用户显式写了同名 racket 键 -> 不注入。
+    * physics -> events.physics_material / events.randomize_link_mass 的 params,这里直接写
+      (无翻译层副作用);摩擦区间若被 task.plant.robot_material_* 显式配了 -> 用户赢不写
+      (plant 覆写块在本函数之后跑,双保险)。
+
+    每条 applied 标记都带 ``venue_profile=<name>@<sha256 前 8 位>``,run 记录可逐字节对账。
+    返回 ``(racket 注入 dict, tag)`` 或 ``None``(键缺席 = 逐字节 no-op)。
+    """
+    raw = _get(task, "venue_profile")
+    if raw is None:
+        return None
+    vp = _venue_profile_module()
+    profile, meta = vp.load_venue_profile(raw)
+    tag = f"venue_profile={meta['name']}@{meta['sha256'][:8]}"
+    applied.append(f"{tag} loaded ({meta['path']})")
+
+    plant = _get(task, "plant")
+    events = getattr(env_cfg, "events", None)
+    material = None if events is None else getattr(events, "physics_material", None)
+    material_params = None if material is None else getattr(material, "params", None)
+    physics = profile["physics"]
+    for profile_key, plant_key in _VENUE_PROFILE_PHYSICS_MATERIAL_KEYS:
+        if plant_key is not None and _get(plant, plant_key) is not None:
+            applied.append(
+                f"events.physics_material.params.{profile_key}: task.plant.{plant_key} "
+                f"explicitly set — user override wins ({tag})"
+            )
+            continue
+        _require(
+            isinstance(material_params, dict) and profile_key in material_params,
+            f"events.physics_material.params['{profile_key}'] (task.venue_profile)",
+        )
+        value = tuple(physics[profile_key])
+        material_params[profile_key] = value
+        applied.append(f"events.physics_material.params.{profile_key}={value} ({tag})")
+    link_mass = None if events is None else getattr(events, "randomize_link_mass", None)
+    link_mass_params = None if link_mass is None else getattr(link_mass, "params", None)
+    _require(
+        isinstance(link_mass_params, dict) and "mass_distribution_params" in link_mass_params,
+        "events.randomize_link_mass.params['mass_distribution_params'] (task.venue_profile)",
+    )
+    mass_value = tuple(physics["mass_distribution_params"])
+    link_mass_params["mass_distribution_params"] = mass_value
+    applied.append(
+        f"events.randomize_link_mass.params.mass_distribution_params={mass_value} ({tag})"
+    )
+
+    inject = {}
+    inject.update(profile["mocap_noise"])
+    inject.update(profile["transport"])
+    return inject, tag
+
+
+def _inject_venue_racket_keys(rk, inject, tag, applied):
+    """把 venue profile 的 racket 同名键注入 task.racket mapping(用户显式键赢,不覆盖)。
+
+    人话:返回一份普通 dict 合并视图给 racket 翻译层消费 —— 注入的键和用户键走同一条
+    校验/记账/副作用路径,档案值不可能绕开翻译层留下半配状态。
+    """
+    merged = {} if rk is None else {str(key): _get(rk, key) for key in rk.keys()}
+    for key, value in inject.items():
+        if merged.get(key) is not None:
+            applied.append(
+                f"task.racket.{key} explicitly set — user override wins ({tag})"
+            )
+            continue
+        merged[key] = value
+        applied.append(f"task.racket.{key}={value!r} ({tag})")
+    return merged
+
+
 def _apply_task_overrides(env_cfg, task, clip_name=None):
     """Apply cfg/task/<name>.yaml overrides (incl. the composed base/ groups) onto the env cfg.
 
@@ -3011,6 +3347,10 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
     stale/shadowed cfg or a broken Hydra composition can never silently swallow an override).
     """
     applied = []
+
+    # 顶层 venue_profile 键(场地档案;缺席 = 逐字节 no-op)。必须在 plant/racket 覆写块
+    # 之前展开:档案先写、显式键后写后赢。racket 注入表在下方 racket 块入口合并。
+    _venue_racket = _apply_venue_profile_task_override(env_cfg, task, applied)
 
     # Plant contract control. The checked-in A3 actuator config intentionally preserves the
     # historical, uncalibrated PhysX joint-friction coefficients for legacy checkpoint lineage.
@@ -3317,6 +3657,10 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
 
     rw = _get(task, "rewards")
     _check_unknown_keys(rw, _REWARD_KEYS, "task.rewards")
+    # v2 奖励包:先展开(注入用户没写的键 + direct-cfg 改动),再走下面的正常覆写层,
+    # 显式同名键后写后赢。2026-07-25 默认翻转:缺席 = 按 v2 展开;显式 reward_pack=v1 =
+    # legacy 兜底,原 mapping 原样返回,逐字节不变。
+    rw = _expand_reward_pack(env_cfg, task, rw, applied)
     if rw is not None:
         R = env_cfg.rewards
         # YAML 显式 null 先删参(jiayi 8ee2e82a 的修复;人话注释见 _REWARD_NULL_REMOVABLE_PARAMS)。
@@ -4183,6 +4527,66 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                     f"rewards.{_tn}.body_names={_after} "
                     "(left non-striking arm imitation removed)"
                 )
+        # 全身模仿(Franco 2026-07-25):下半身回到全局模仿名单,flag 可开关。把 pelvis +
+        # 六个腿部 link 加回四个 motion_body_* 名单——恢复 BeyondMimic 原始 13-body 集。
+        # 顺序在 wrist/left-arm 摘除之后:被摘的照旧不学,腿加回。fail-loud 面:名单必须
+        # 是已审的上身合同变体(7-body 基线或摘 wrist/左臂后的 4/5/6-body),且不得已含
+        # 任何下身 link。注意核是 body-均值:加 7 件 = 同权重下核变难、模仿收益变低
+        # (F5 反向),预算表按人数换算。
+        _full_body = _get(rw, "full_body_mimic")
+        if _full_body is not None and _as_explicit_bool(
+            _full_body, "task.rewards.full_body_mimic"
+        ):
+            _LOWER_BODY = (
+                "pelvis_link",
+                "left_hip_roll_Link",
+                "left_knee_Link",
+                "left_ankle_roll_Link",
+                "right_hip_roll_Link",
+                "right_knee_Link",
+                "right_ankle_roll_Link",
+            )
+            _UPPER_CONTRACT_CORE = (
+                "torso_Link",
+                "left_shoulder_roll_Link",
+                "left_elbow_Link",
+                "left_wrist_yaw_Link",
+                "right_shoulder_roll_Link",
+                "right_elbow_Link",
+                "right_wrist_yaw_Link",
+            )
+            _FB_BODY_TERMS = (
+                "motion_body_pos",
+                "motion_body_ori",
+                "motion_body_lin_vel",
+                "motion_body_ang_vel",
+            )
+            for _tn in _FB_BODY_TERMS:
+                _require(hasattr(R, _tn), f"rewards.{_tn}")
+                _term = getattr(R, _tn)
+                _require(
+                    _term is not None and isinstance(_term.params.get("body_names"), (list, tuple)),
+                    f"rewards.{_tn}.params['body_names'] (full-body mimic needs an explicit body list)",
+                )
+                _before = tuple(str(name) for name in _term.params["body_names"])
+                _require(
+                    all(name not in _LOWER_BODY for name in _before),
+                    f"rewards.{_tn}.params.body_names must not already contain lower-body links",
+                )
+                # 下限 3 = 同时摘 wrist + 左臂后的最小合同(torso + right_shoulder + right_elbow)。
+                _require(
+                    all(name in _UPPER_CONTRACT_CORE for name in _before)
+                    and len(set(_before)) == len(_before)
+                    and len(_before) >= 3
+                    and "torso_Link" in _before,
+                    f"rewards.{_tn}.params.body_names equals a reviewed A3 upper contract variant",
+                )
+                _after = list(_LOWER_BODY) + list(_before)
+                _term.params["body_names"] = _after
+                applied.append(
+                    f"rewards.{_tn}.body_names={_after} "
+                    "(full-body mimic: pelvis + 6 leg links restored)"
+                )
         jt = _get(rw, "joint_torques_weight")
         if jt is not None:
             _require(hasattr(R, "joint_torques"), "rewards.joint_torques")
@@ -4428,6 +4832,10 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
 
     rk = _get(task, "racket")
     _check_unknown_keys(rk, _RACKET_KEYS, "task.racket")
+    if _venue_racket is not None:
+        # venue profile 的 mocap/transport 键并入 task.racket 视图(用户显式键赢),走下面
+        # 的现有翻译层落地 —— 记账/校验/副作用与手写 yaml 完全一致。
+        rk = _inject_venue_racket_keys(rk, _venue_racket[0], _venue_racket[1], applied)
     if rk is not None:
         # Only require the racket_target command when the YAML actually sets racket keys, so tasks
         # without a racket objective (e.g. TrackingFlat, which has no `racket:` block) never trip this.
@@ -4455,6 +4863,16 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_attr(C, "strike_success_pos_thresh", _get(rk, "strike_success_pos_thresh"), float, applied, "racket_target")
             # P2.3 adaptive tracking sigma (coarse-to-fine reward kernel widths)
             _set_attr(C, "adaptive_sigma", _get(rk, "adaptive_sigma"), _as_bool, applied, "racket_target")
+            # 拍面 sigma 第三通道(A1):必须搭在 adaptive_sigma 上,单开由 hope_commands
+            # 构造期 fail-loud;reward_pack=v2 也会写它(显式键在此处后写后赢)。
+            _set_attr(
+                C,
+                "adaptive_sigma_normal",
+                _get(rk, "adaptive_sigma_normal"),
+                lambda value: _as_explicit_bool(value, "task.racket.adaptive_sigma_normal"),
+                applied,
+                "racket_target",
+            )
             _set_attr(C, "sigma_update_every", _get(rk, "sigma_update_every"), int, applied, "racket_target")
             _set_attr(C, "sigma_ema_scale", _get(rk, "sigma_ema_scale"), float, applied, "racket_target")
             _set_attr(C, "sigma_pos_min", _get(rk, "sigma_pos_min"), float, applied, "racket_target")

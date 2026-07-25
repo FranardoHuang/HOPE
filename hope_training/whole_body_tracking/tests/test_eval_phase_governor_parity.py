@@ -230,6 +230,9 @@ def _torch_state(torch, shim_cls, profile_map, *, start, strike, tts):
     shim._planner_slow_only_next = torch.tensor([False])
     shim._planner_desired_tts = one(tts)
     shim._planner_truth_tts = one(tts)
+    # 带符号孪生时钟(2026-07-25 C1 修复):真源码的 advance 会对它做无 clamp 递减,
+    # shim 必须同步喂;它只喂击球窗掩码,不进 governor 输出,对拍语义不变。
+    shim._planner_truth_tts_signed = one(tts)
     shim.time_steps_f = one(start)
     return shim
 

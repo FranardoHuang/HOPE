@@ -11,6 +11,24 @@
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
 
+## 2026-07-24（承接 07-23 动作库终审）
+
+- 五动作 × upper/full 十件正在按 `shared ready → 击球 core/window → shared ready` 直接路径重建；
+  击球窗口允许持续加速，`adv2c3` 仅保留为历史比较项。十件当前都只是 compiler candidate，
+  grounded torque/contact、行为与恢复、registry adoption 等门尚未闭合，因此仍为 `0/10`
+  training-authorized；详见[终审实验](experiments/2026-07/EXP-MOTION-CANONICAL-LIBRARY-20260723.md)
+  和[预处理合同](interfaces/motion_preprocessing_contract.md)。
+- 晚间续建（Fable 接力）：把 Codex 断线时改到一半的 marker-authority v2 迁移续完（compiler/
+  bank gate/neutral CLI 统一从 v2 权威取 ge80 窗口 seed 与 nominal anchor，事件不混叠成窗口）；
+  排序补窗前零加速度平台票数、加 `t_hit<=0.5s` 编译筛门；实现 §5.1 受保护窗口摘要模块；
+  对全部近日产出跑了多代理独立审计（9 维度 + 逐条对抗复核）。审计确认一条**合并阻断**：
+  空信任集的 legacy motion admission 接进了默认训练路径，合 main 前必须先补 v4rg digest 或
+  限定作用域（详见 NOW 顶部合并警告）。ready v2 = 中立右臂挑战者 + G1 平足重解，pod2 求解中；
+  角度中立 vs 五动作可达时间对称、0.5s 门对拉球是否过紧，两问挂 Franco 裁决。
+
+<details>
+<summary>2026-07-22/23 的历史推演流水（保留证据，不与上方当前结论并列）</summary>
+
 ## 2026-07-22
 
 - 两 pod SSH 全失联（本机网络已排除＝停机/换端口），`hope-pods-watch` 暂停；账面以 07-21 为准。
@@ -163,6 +181,11 @@
   够不着）进 train.py 白名单；penlight 减负臂扩到六项软惩罚（新增 -0.33/-0.17），随
   groundfoot 闸门锁。pod 于 07-22 下午恢复（旧端口未变，重启过）：pod1 三卡=yikang 四条
   训练（legfreeze ft6 + stationary-v2 x3），pod2 三卡全空；checkpoint 卷完好（W 父本在）。
+
+</details>
+
+<details>
+<summary>2026-07-12 至 07-21 的历史进度（默认折叠；采用状态以顶部与 NOW 为准）</summary>
 
 ## 2026-07-21
 
@@ -1837,3 +1860,5 @@
   所以首卷只做单拍 balance/strike-state fine-tune；reward 用独立 replay oracle；warm start 只载 actor，
   critic/optimizer 全新。没有启动 backend、sim、Pod 或真机，详见
   [preflight](research/mujoco_training_v0_preflight_2026-07-12.md)。
+
+</details>

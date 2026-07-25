@@ -286,16 +286,38 @@ def test_training_revision_updates_actor_tuple_not_truth_or_question():
     assert "submit_planner_revision" in body
 
 
-def test_uncoupled_legacy_delay_ring_is_fail_closed_for_planner_revisions():
+def test_coupled_transport_replaces_the_uncoupled_delay_ring_no_launch_guard():
+    """2026-07-25:修订+延迟不再 NO-LAUNCH,改为耦合传输(提交侧在途环)。
+
+    钉死的新合同:'live' tts 模式仍 fail-loud(元组晚到、时钟即时是矛盾传输语义);
+    耦合模式 actor 端不叠观测延迟环(否则总延迟 2d);BEGIN 即时且作废旧球在途修订。
+    """
     source = (
         ROOT
         / "source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/hope_commands.py"
     ).read_text()
-    delay_setup = source.split("self._delay_steps =", 1)[1].split(
-        "self._delay_tts_mode =", 1
+    # 旧 NO-LAUNCH 守卫必须已拆除
+    assert "are not launchable" not in source
+    # 校验函数存在且对 'live' 模式 fail-loud
+    guard = source.split("def _coupled_transport_mode", 1)[1].split(
+        "def _target_delay_tts_mode", 1
     )[0]
-    assert "self.planner_revision_enabled and self._delay_steps > 0" in delay_setup
-    assert "phase governor and actor must consume one coupled transport tuple" in delay_setup
+    assert "planner_revision_enabled" in guard and "target_delay_steps" in guard
+    assert "source_timestamp_compensated" in guard and "uncompensated" in guard
+    assert "raise ValueError" in guard
+    # __init__ 走这条校验;耦合模式下 actor 观测环步数强制 0
+    assert "self._coupled_transport = _coupled_transport_mode(cfg)" in source
+    assert (
+        "self._actor_ring_steps = 0 if self._coupled_transport else self._delay_steps"
+        in source
+    )
+    # 提交侧在途环存在;BEGIN 不过环且作废旧球在途修订
+    assert "def _exchange_pending_planner_revision" in source
+    begin = source.split("def _begin_same_ball_planner_task", 1)[1].split(
+        "def _revise_same_ball_actor_tuple", 1
+    )[0]
+    assert "self._pend_valid[:, ids] = False" in begin
+    assert "_exchange_pending_planner_revision" not in begin
 
 
 def test_training_revision_envelopes_are_immutable_task_begin_not_visible_chain():
@@ -572,7 +594,8 @@ def test_phase_is_monotonic_and_rate_and_acceleration_are_bounded():
     assert phases == sorted(phases)
     assert phases[-1] == pytest.approx(1.0)
     assert all(0.0 <= rate <= profile.max_phase_rate_per_s for rate in rates)
-    for previous, current in zip([0.0, *rates[:-1]], rates, strict=True):
+    # Same length by construction; plain zip keeps the test runnable on Python 3.8.
+    for previous, current in zip([0.0, *rates[:-1]], rates):
         assert abs(current - previous) <= (
             profile.max_phase_acceleration_per_s2 * profile.policy_dt_s + 1e-12
         )

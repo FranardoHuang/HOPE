@@ -4,7 +4,8 @@ Status: Draft
 
 ## Canonical World Frame
 
-Use the HOPE `world` frame unless a gate explicitly says otherwise.
+Use the HOPE table `world` frame unless a gate explicitly names another frame. A frame with the same
+axis directions but a different origin is not `world`.
 
 - Origin: near-side left corner of the table surface.
 - X: toward opponent along table length.
@@ -31,6 +32,37 @@ Current config source:
 For `HOPE-TableTennis-AgibotA3-v0`, the Isaac environment-local world frame is intentionally the HOPE
 frame: the table surface is `z = 0`, the floor is `z = -0.76`, and table/net landmarks match the values
 above. Do not introduce a table-center origin in that task without updating this file and G04.
+
+<a id="canonical-motion-hope-world-bridge"></a>
+
+## Canonical Motion 与 HOPE `world` 的桥
+
+Canonical 五动作的 recipe 使用另一个明确 frame ID：
+
+| frame ID | 原点与用途 |
+| --- | --- |
+| `world` | HOPE 球台/ROS frame；P1 近端左桌面角为原点，桌面 `z=0` |
+| `a3_robot_origin_ground_z0` | schema-2/vendor-MJCF 动作 frame；机器人局部地面原点，地面 `z=0` |
+
+两者都是 `+X` 朝对手、`+Y` 朝机器人左侧、`+Z` 向上，但绝不是同一 frame。现行 canonical
+counterfactual station（机器人原点到近台边 `0.5 m`、对准桌宽中心）的唯一桥是无旋转纯平移：
+
+```text
+p_a3_robot_origin_ground_z0 = p_world + [0.5, 0.7625, 0.76]
+p_world = p_a3_robot_origin_ground_z0 + [-0.5, -0.7625, -0.76]
+R_a3_from_world = I
+```
+
+所以 `world` 的桌中心 `[1.37,-0.7625,0]` 映到 motion/MJCF 的
+`[1.87,0,0.76]`。位置使用上式；速度、角速度、法向和姿态只应用旋转（这里为恒等），不加 translation。
+compiler output 保持 `a3_robot_origin_ground_z0`，不能仅因轴相同就标成 `world`。桌网/planner verifier
+必须在 manifest 中写明 source/target frame ID、变换方向和 transform SHA，并从 exact bytes 复核。
+
+这座桥只定义固定 canonical counterfactual station，不是录制现场外参、mocap
+`world -> base_link` 标定或 locomotion 后的动态站位。locomotion 改变机器人站位后必须使用其内容绑定
+的 root/station transform，并重跑桌网、接触、动力学和行为门；不得继承上述固定平移的证书。vendor
+sim 的 `odom` 也不能凭名字视为这两个 frame 之一；其当前受限合同见下方
+[Vendor MuJoCo `SimReset` Base Twist](#vendor-mujoco-simreset-base-twist)。
 
 ## Mocap Runtime Contract (team contract, 2026-07)
 
@@ -87,9 +119,10 @@ time it must be inferred from:
 3. robot model FK
 4. fixed racket mount transform
 
-Current (non-final) racket mount, from `robots/agibot_a3.py` / `HOPEPingPong.yaml`:
+The canonical control point is the origin of MuJoCo site `right_racket` / URDF link
+`pingpang_red_Link`. Its fixed offset in `right_wrist_yaw_Link` is:
 
-- `A3_MOUNT_OFFSET = (0.210211399202899, 0.0320784994676765, 0.0320358706296689)` in the `right_wrist_yaw_Link` frame.
+- `RACKET_SITE_OFFSET_WRIST_M = (0.210210, 0.032078, 0.032036) m`.
 - Raw mount normal A = racket-local `+Y` (`mount_normal_axis = 1`, `mount_normal_sign = +1`). The
   train bank and 179-D actor face tail remain in this A convention.
 - Flat-wire schema 2 carries the physical opponent-facing striking face B in world/table frame.
@@ -98,7 +131,11 @@ Current (non-final) racket mount, from `robots/agibot_a3.py` / `HOPEPingPong.yam
   racket position or velocity. Consequently a valid backhand raw-A normal can have negative world
   x while its physical-B wire normal must have positive world x.
 
-These values are current but NOT final and are expected to change after calibration.
+This site offset is the canonical engineering control point, not a non-final approximation. Exact
+ball-centre contact, red/black face-centre offsets and the older `1.49 um`-different Python point are
+separate concerns whose single truth is
+[Racket Control Point And Contact Geometry](racket_contact_geometry.md); do not copy either older
+offset back into this page.
 
 ## Vendor MuJoCo `SimReset` Base Twist
 

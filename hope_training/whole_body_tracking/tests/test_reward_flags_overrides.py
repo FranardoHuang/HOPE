@@ -24,6 +24,15 @@ the new task.rewards fail-loud whitelist, at the TRANSLATION layer (_apply_task_
 * default path: a DeployParity-like task node without any new key leaves every new attr untouched.
 * YAML-null 删参 (jiayi 8ee2e82a -> main) — rewards 下显式 `some_key: null` 把继承来的
       term.params 项 pop 掉并记账;没写的键、表外键、已不存在的参数一律不动。
+* B2 rewards.reward_pack — v2 蓝图一键成套换装(reward_redesign_20260725 §3/§3.5):键控注入
+      走现有翻译层、direct-cfg 项逐条记账,包先展开显式键后写后赢;motion_scale_in_window
+      与包冲突、未知包值、缺 adaptive_sigma、血统缺项全部 fail-loud。2026-07-25 Franco 裁定
+      默认翻转:缺席 = 按 v2 展开(applied 记 defaulted 标记);显式 v1 = legacy 兜底 flag,
+      逐字节不变。本文件所有 legacy 翻译断言经 _apply 显式钉 v1 维持原语义;默认路径(v2
+      展开)在 JOB1 区块用 _apply_default 单独测。
+* B2 task.venue_profile — 场地档案一键展开(Wave-1 utils/venue_profile.py loader):
+      mocap/transport 注入 task.racket 走翻译层,physics 直写 events params;显式键赢;
+      applied 标记带档案名+sha 前缀;未知档案/缺 events 旋钮 fail-loud;缺席 = 逐字节 no-op。
 
 train.py is imported directly (its top-level imports are hydra/omegaconf only — no Isaac); the
 env cfg is a plain-namespace fake, exactly the level _apply_task_overrides operates on.
@@ -192,6 +201,32 @@ def _make_env_cfg(anchor_pos_none=True):
             },
         ),
         tracking_envelope=_Term(weight=0.0, params={"command_name": "motion", "threshold": 0.25}),
+        # v2 奖励包(reward_pack=v2)会动的 direct-cfg 项:窗内站稳四件套 + 反作弊小税 +
+        # 税型/收入型站正 + PACE 单条击球稳定(权重取真 cfg 的现役值,证明包真的改了它们)。
+        foot_slip_sq=_Term(weight=-1.0, params={"command_name": "racket_target"}),
+        foot_drag=_Term(weight=-0.5, params={"command_name": "racket_target"}),
+        arm_overreach=_Term(weight=-0.5, params={"command_name": "racket_target"}),
+        prestrike_waist_twist=_Term(weight=-1.0, params={"command_name": "racket_target"}),
+        prestrike_upright=_Term(weight=-1.0, params={"command_name": "racket_target"}),
+        strike_upright=_Term(weight=-2.0, params={"command_name": "racket_target"}),
+        strike_ang_vel=_Term(weight=-0.5, params={"command_name": "racket_target"}),
+        strike_foot_vel=_Term(weight=-0.5, params={"command_name": "racket_target"}),
+        strike_vbob=_Term(weight=-1.0, params={"command_name": "racket_target"}),
+        upright=_Term(weight=-1.0),
+        upright_exp=_Term(weight=0.0, params={"std": 0.4472135954999579}),
+        hit_unstable_support=_Term(weight=0.0, params={"command_name": "racket_target"}),
+        # v2 击中层 direct-cfg 项(§3.5):三核乘法加强层(真 cfg 现役 5.0)+ one-shot 击中
+        # 大奖(VirtualBall 谱系 weight=0 待命)。
+        racket_strike_success=_Term(
+            weight=5.0,
+            params={
+                "command_name": "racket_target",
+                "std_pos": 0.075,
+                "std_vel": 0.5,
+                "std_normal": 0.262,
+            },
+        ),
+        strike_capture_bonus=_Term(weight=0.0, params={"command_name": "racket_target"}),
         motion_global_anchor_pos=None if anchor_pos_none else _Term(weight=0.5, params={"std": 0.3}),
         motion_global_anchor_ori=_Term(weight=0.5, params={"std": 0.4}),
         motion_body_pos=_Term(weight=1.0, params={"std": 0.3}, body_names=_UPPER),
@@ -209,8 +244,14 @@ def _make_env_cfg(anchor_pos_none=True):
         strike_success_pos_thresh=0.075,
         track_envelope_violation=False,
         target_mode="uniform",
+        adaptive_sigma=False,
+        adaptive_sigma_normal=False,
         target_delay_steps=0,
         target_delay_tts_mode="live",
+        target_noise_white=0.0,
+        target_noise_ar1_sigma=0.0,
+        target_noise_ar1_rho=0.0,
+        target_dropout_prob=0.0,
         midswing_resample_prob=0.0,
         midswing_resample_tts_floor=0.3,
         question_bank="",
@@ -271,11 +312,25 @@ def _make_env_cfg(anchor_pos_none=True):
         "legs": _NS(friction={"hip": 1.2, "knee": 2.4}),
         "arms": _NS(friction=0.1),
     }
+    # venue_profile 物理 section 的落点(初值故意与 franco_rig 档案不同,证明档案真的落了地)。
+    events = _NS(
+        physics_material=_Term(
+            params={
+                "static_friction_range": (1.0, 1.0),
+                "dynamic_friction_range": (1.0, 1.0),
+                "restitution_range": (0.9, 0.9),
+            }
+        ),
+        randomize_link_mass=_Term(
+            params={"mass_distribution_params": (1.0, 1.0), "operation": "scale"}
+        ),
+    )
     return _NS(
         rewards=rewards,
         commands=_NS(motion=motion, racket_target=racket_target),
         observations=observations,
         terminations=terminations,
+        events=events,
         scene=_NS(env_spacing=2.5, robot=_NS(actuators=actuators)),
         episode_length_s=10.0,
         sim=_NS(dt=0.005),
@@ -284,7 +339,38 @@ def _make_env_cfg(anchor_pos_none=True):
     )
 
 
+# 2026-07-25 默认翻转(Franco 裁定):reward_pack 缺席 = v2 全套展开。本文件绝大多数用例测
+# 的是【翻译层 legacy 行为】,断言全部建立在"没写 = 不动"的 v1 基线上——所以 _apply 把没写
+# reward_pack 的任务节点显式钉成 v1(兜底 flag),再滤掉那一条 v1 记账行,原断言原样成立。
+# 默认路径(v2 展开)的语义由 JOB1 区块用 _apply_default 单独测。
+_V1_MARKER = "rewards.reward_pack=v1 (legacy baseline)"
+
+
+def _pin_reward_pack_v1(task):
+    """任务节点没写 reward_pack 就显式钉 v1;写了(v1/v2/非法值)原样放行。dict 与
+    OmegaConf 节点都支持这里的 __setitem__。"""
+    if train_mod._get(task, "rewards") is None:
+        task["rewards"] = {"reward_pack": "v1"}
+    elif train_mod._get(task["rewards"], "reward_pack") is None:
+        task["rewards"]["reward_pack"] = "v1"
+    return task
+
+
+def _apply_legacy_v1(env_cfg, task):
+    """邻居测试套件共用:钉 v1 + 滤 v1 记账行,返回 applied(legacy 断言零改动)。"""
+    task = _pin_reward_pack_v1(task)
+    applied = train_mod._apply_task_overrides(env_cfg, task, clip_name=None)
+    return [marker for marker in applied if marker != _V1_MARKER]
+
+
 def _apply(task, env_cfg=None):
+    env_cfg = env_cfg if env_cfg is not None else _make_env_cfg()
+    applied = _apply_legacy_v1(env_cfg, task)
+    return env_cfg, applied
+
+
+def _apply_default(task, env_cfg=None):
+    """默认路径入口:不钉 v1,reward_pack 缺席走真实默认(v2 全套展开)。"""
     env_cfg = env_cfg if env_cfg is not None else _make_env_cfg()
     applied = train_mod._apply_task_overrides(env_cfg, task, clip_name=None)
     return env_cfg, applied
@@ -992,6 +1078,95 @@ def test_a1_composes_with_current_free_racket_wrist_orientation_recipe():
         ]
 
 
+# --------------------------------------------------------------------------------------------- #
+# 全身模仿开关(Franco 2026-07-25 裁定:下半身也应全局模仿,flag 可开关)
+# --------------------------------------------------------------------------------------------- #
+_LOWER_BODY = [
+    "pelvis_link",
+    "left_hip_roll_Link",
+    "left_knee_Link",
+    "left_ankle_roll_Link",
+    "right_hip_roll_Link",
+    "right_knee_Link",
+    "right_ankle_roll_Link",
+]
+
+
+def test_full_body_mimic_restores_pelvis_and_legs_to_four_lists_only():
+    env_cfg = _make_env_cfg()
+    rewards_before = {
+        name: (term.weight, dict(term.params), term.func)
+        for name, term in vars(env_cfg.rewards).items()
+        if term is not None
+    }
+    env_cfg, applied = _apply({"rewards": {"full_body_mimic": True}}, env_cfg)
+    changed = {
+        "motion_body_pos",
+        "motion_body_ori",
+        "motion_body_lin_vel",
+        "motion_body_ang_vel",
+    }
+    expected = [*_LOWER_BODY, *_UPPER]
+    for name, term in vars(env_cfg.rewards).items():
+        if term is None:
+            continue
+        before_weight, before_params, before_func = rewards_before[name]
+        assert term.weight == before_weight
+        assert term.func == before_func
+        if name in changed:
+            assert term.params["body_names"] == expected
+        else:
+            assert term.params == before_params
+    assert len([m for m in applied if "full-body mimic" in m]) == 4
+
+
+def test_full_body_mimic_false_is_byte_preserving_noop():
+    env_cfg, applied = _apply({"rewards": {"full_body_mimic": False}})
+    for name in (
+        "motion_body_pos",
+        "motion_body_ori",
+        "motion_body_lin_vel",
+        "motion_body_ang_vel",
+    ):
+        assert getattr(env_cfg.rewards, name).params["body_names"] == _UPPER
+    assert applied == []
+
+
+def test_full_body_mimic_composes_with_wrist_and_left_arm_removals():
+    # 组合语义:腿加回,被摘的照旧不学(ori/ang_vel 只剩 torso+右肩+右肘 = 最小 3 件合同)
+    env_cfg, _ = _apply(
+        {
+            "rewards": {
+                "free_wrist_ori_mimic": True,
+                "free_non_striking_arm_mimic": True,
+                "full_body_mimic": True,
+            }
+        }
+    )
+    assert env_cfg.rewards.motion_body_pos.params["body_names"] == [
+        *_LOWER_BODY, "torso_Link", *_RIGHT_STRIKING
+    ]
+    for name in ("motion_body_ori", "motion_body_ang_vel"):
+        assert getattr(env_cfg.rewards, name).params["body_names"] == [
+            *_LOWER_BODY, "torso_Link", "right_shoulder_roll_Link", "right_elbow_Link"
+        ]
+
+
+def test_full_body_mimic_fails_closed_on_drift_or_double_apply():
+    env_cfg = _make_env_cfg()
+    env_cfg.rewards.motion_body_pos.params["body_names"] = [*_LOWER_BODY, *_UPPER]
+    with pytest.raises(train_mod._OverrideError, match="not already contain lower-body"):
+        _apply({"rewards": {"full_body_mimic": True}}, env_cfg)
+
+    env_cfg = _make_env_cfg()
+    env_cfg.rewards.motion_body_pos.params["body_names"] = ["mystery_Link", *_UPPER]
+    with pytest.raises(train_mod._OverrideError, match="reviewed A3 upper contract"):
+        _apply({"rewards": {"full_body_mimic": True}}, env_cfg)
+
+    with pytest.raises(train_mod._OverrideError, match="explicit boolean"):
+        _apply({"rewards": {"full_body_mimic": "ture"}})
+
+
 def test_a0_a1_post_override_masks_are_checkpoint_hard_contract_facts():
     a0, _ = _apply(
         {
@@ -1563,6 +1738,348 @@ def test_null_removal_table_is_inside_reward_whitelist():
     # (train.py import 时也有同款自检,这里再守一道回归)。
     strays = sorted(set(train_mod._REWARD_NULL_REMOVABLE_PARAMS) - set(train_mod._REWARD_KEYS))
     assert strays == []
+
+
+# --------------------------------------------------------------------------------------------- #
+# B2 JOB1 — task.rewards.reward_pack(reward_redesign_20260725 §3/§3.5 一键成套换装;
+# 2026-07-25 Franco 裁定:缺席 = 默认 v2,显式 v1 = legacy 兜底)
+# --------------------------------------------------------------------------------------------- #
+# v2 包展开后每一项的期望终值(蓝图钉死;与 train._REWARD_PACK_V2_* 表逐项对齐。
+# 击球三通道 60/45/35 与击中层 30/850 是 §3.5 名义值,probe 校准后冻结 prereg)。
+_PACK_V2_WEIGHTS = {
+    "strike_upright": 0.0,
+    "strike_ang_vel": 0.0,
+    "strike_foot_vel": 0.0,
+    "strike_vbob": 0.0,
+    "hit_unstable_support": -10.0,
+    "upright": 0.0,
+    "upright_exp": 1.0,
+    "arm_overreach": 0.0,
+    "hold_ready": 0.0,
+    "foot_orientation": 0.0,
+    "prestrike_upright": 0.0,
+    "prestrike_waist_twist": 0.0,
+    "foot_slip_sq": -0.1,
+    "foot_drag": 0.0,
+    "racket_position": 60.0,
+    "racket_velocity": 45.0,
+    "racket_normal": 35.0,
+    "racket_strike_success": 30.0,
+    "strike_capture_bonus": 850.0,
+}
+
+_PACK_DEFAULTED_MARKER = (
+    "rewards.reward_pack defaulted to v2 (2026-07-25 Franco ruling; set "
+    "reward_pack=v1 for legacy baseline)"
+)
+
+
+def _pack_v2_task(rewards_extra=None, racket_extra=None):
+    rewards = {"reward_pack": "v2"}
+    rewards.update(rewards_extra or {})
+    racket = {"adaptive_sigma": True}  # 第三通道必须搭在 adaptive_sigma 上(翻译层就校验)
+    racket.update(racket_extra or {})
+    return {"rewards": rewards, "racket": racket}
+
+
+def test_reward_pack_v1_is_byte_preserving_legacy_baseline():
+    # (b) 显式 reward_pack=v1 = legacy 兜底:所有 v2 会动的项保持 fake 初值,applied 只有
+    # 一条 v1 标记(用 _apply_default 走真实入口,不经 _apply 的钉 v1/滤标记)。
+    env_cfg, applied = _apply_default({"rewards": {"reward_pack": "v1"}})
+    fresh = _make_env_cfg()
+    for name in _PACK_V2_WEIGHTS:
+        assert getattr(env_cfg.rewards, name).weight == getattr(fresh.rewards, name).weight
+        assert getattr(env_cfg.rewards, name).params == getattr(fresh.rewards, name).params
+    for name in ("motion_body_pos", "motion_body_ori", "motion_body_lin_vel", "motion_body_ang_vel"):
+        assert getattr(env_cfg.rewards, name).params["body_names"] == _UPPER
+    assert env_cfg.commands.racket_target.adaptive_sigma is False
+    assert env_cfg.commands.racket_target.adaptive_sigma_normal is False
+    assert applied == [_V1_MARKER]
+
+
+def test_reward_pack_defaults_to_v2_full_expansion():
+    # (a) 默认路径:reward_pack 缺席 = §3.5 全套数值落地 + defaulted 标记。用户没显式表态
+    # adaptive_sigma 时默认包代为置 true(默认自洽)。
+    env_cfg, applied = _apply_default({})
+    R = env_cfg.rewards
+    for name, weight in _PACK_V2_WEIGHTS.items():
+        assert getattr(R, name).weight == pytest.approx(weight), name
+    # full_body_mimic 生效:pelvis+6 腿回四个名单;v2 废除窗内模仿折扣
+    for name in ("motion_body_pos", "motion_body_ori", "motion_body_lin_vel", "motion_body_ang_vel"):
+        assert getattr(R, name).params["body_names"] == [*_LOWER_BODY, *_UPPER]
+        assert "window_scale" not in getattr(R, name).params
+    assert "window_scale" not in R.motion_global_anchor_ori.params
+    # 拍面 sigma 第三通道 + 它骑的 pos/vel 机器一并开
+    assert env_cfg.commands.racket_target.adaptive_sigma_normal is True
+    assert env_cfg.commands.racket_target.adaptive_sigma is True
+    assert _PACK_DEFAULTED_MARKER in applied
+    assert "racket_target.adaptive_sigma=True (reward_pack defaulted to v2)" in applied
+    # 逐项走的仍是 v2 包机器:defaulted 标记之外,每条包改动照旧带 reward_pack=v2
+    assert "rewards.hit_unstable_support.weight=-10.0 (reward_pack=v2)" in applied
+    assert "rewards.strike_capture_bonus.weight=850.0 (reward_pack=v2)" in applied
+    assert "rewards.racket_position.weight=60.0" in applied
+
+
+def test_reward_pack_default_applies_when_rewards_node_is_absent_entirely():
+    # 连 rewards 节点都没有的任务照样吃默认包(线上大量任务节点只配 racket/motion)。
+    env_cfg, applied = _apply_default({"motion": {"hold_steps_range": [0, 100]}})
+    assert env_cfg.rewards.upright_exp.weight == pytest.approx(1.0)
+    assert env_cfg.rewards.strike_capture_bonus.weight == pytest.approx(850.0)
+    assert _PACK_DEFAULTED_MARKER in applied
+
+
+def test_reward_pack_default_explicit_keys_still_win():
+    # (c) 显式键仍压过默认包:现役波的 17/7/5 三通道显式键继续生效。
+    env_cfg, applied = _apply_default(
+        {
+            "rewards": {
+                "racket_position_weight": 17.0,
+                "racket_velocity_weight": 7.0,
+                "racket_normal_weight": 5.0,
+            }
+        }
+    )
+    R = env_cfg.rewards
+    assert R.racket_position.weight == pytest.approx(17.0)
+    assert R.racket_velocity.weight == pytest.approx(7.0)
+    assert R.racket_normal.weight == pytest.approx(5.0)
+    # 没被压过的包项照常落地
+    assert R.hit_unstable_support.weight == pytest.approx(-10.0)
+    assert R.strike_capture_bonus.weight == pytest.approx(850.0)
+    assert len([m for m in applied if "user override wins" in m]) == 3
+
+
+def test_reward_pack_default_with_motion_scale_in_window_fails_loud():
+    # (d) 默认包 + 显式 motion_scale_in_window = legacy 配方撞新默认:响亮失败,报错文案
+    # 直接指路 reward_pack=v1(现役 wave yaml 全配了这个键——有意的响亮失败)。
+    with pytest.raises(
+        train_mod._OverrideError, match=r"must declare\s+reward_pack=v1"
+    ):
+        _apply_default({"rewards": {"motion_scale_in_window": 0.25}})
+
+
+def test_reward_pack_default_with_explicit_adaptive_sigma_false_fails_loud():
+    # legacy 配方的另一撞点:显式 adaptive_sigma=false(现役 task yaml 都写了)+ 默认包的
+    # 第三通道 -> 半配组合,报错文案同样指路 reward_pack=v1。
+    with pytest.raises(train_mod._OverrideError, match="reward_pack=v1"):
+        _apply_default({"racket": {"adaptive_sigma": False}})
+
+
+def test_reward_pack_default_optout_normal_channel_keeps_sigma_machinery_off():
+    # 显式 adaptive_sigma_normal=false 退订第三通道:默认包不再碰 adaptive_sigma,其余照落。
+    env_cfg, applied = _apply_default({"racket": {"adaptive_sigma_normal": False}})
+    assert env_cfg.commands.racket_target.adaptive_sigma_normal is False
+    assert env_cfg.commands.racket_target.adaptive_sigma is False
+    assert env_cfg.rewards.upright_exp.weight == pytest.approx(1.0)
+    assert not any("racket_target.adaptive_sigma=True" in m for m in applied)
+
+
+def test_reward_pack_v2_expands_every_blueprint_mutation_with_markers():
+    # (b) 全套展开:权重/flag/参数逐项核对 + reward_pack=v2 标记条数钉死。
+    env_cfg, applied = _apply(_pack_v2_task())
+    R = env_cfg.rewards
+    for name, weight in _PACK_V2_WEIGHTS.items():
+        assert getattr(R, name).weight == pytest.approx(weight), name
+    # full_body_mimic=true:pelvis+6 腿回四个名单
+    for name in ("motion_body_pos", "motion_body_ori", "motion_body_lin_vel", "motion_body_ang_vel"):
+        assert getattr(R, name).params["body_names"] == [*_LOWER_BODY, *_UPPER]
+        # v2 废除窗内模仿折扣:六个 motion 项一律不带 window_scale 参数
+        assert "window_scale" not in getattr(R, name).params
+    assert "window_scale" not in R.motion_global_anchor_ori.params
+    # racket 侧:拍面 sigma 第三通道开,搭在显式 adaptive_sigma=true 上
+    assert env_cfg.commands.racket_target.adaptive_sigma_normal is True
+    assert env_cfg.commands.racket_target.adaptive_sigma is True
+    # 每条包改动的 applied 标记都带 reward_pack=v2:1 总标记 + 10 键控注入 + 10 direct + 1 racket
+    pack_markers = [m for m in applied if "reward_pack=v2" in m]
+    assert len(pack_markers) == 22
+    # 键控注入的项同时会有覆写层自己的标准记账(证明真走了现有翻译层)
+    assert "rewards.hold_ready.weight=0.0" in applied
+    assert "rewards.foot_slip_sq.weight=-0.1" in applied
+    assert "rewards.racket_position.weight=60.0" in applied
+    assert "rewards.racket_velocity.weight=45.0" in applied
+    assert "rewards.racket_normal.weight=35.0" in applied
+    assert len([m for m in applied if "full-body mimic" in m]) == 4
+    # direct 项的标记逐条在
+    assert "rewards.hit_unstable_support.weight=-10.0 (reward_pack=v2)" in applied
+    assert "rewards.upright_exp.weight=1.0 (reward_pack=v2)" in applied
+    assert "rewards.racket_strike_success.weight=30.0 (reward_pack=v2)" in applied
+    assert "rewards.strike_capture_bonus.weight=850.0 (reward_pack=v2)" in applied
+    assert "racket_target.adaptive_sigma_normal=True (reward_pack=v2)" in applied
+    # 显式 v2(非默认)绝不带 defaulted 标记
+    assert _PACK_DEFAULTED_MARKER not in applied
+
+
+def test_reward_pack_v2_works_on_omegaconf_nodes():
+    from omegaconf import OmegaConf
+
+    env_cfg, applied = _apply(OmegaConf.create(_pack_v2_task()))
+    assert env_cfg.rewards.hit_unstable_support.weight == pytest.approx(-10.0)
+    assert env_cfg.rewards.foot_slip_sq.weight == pytest.approx(-0.1)
+    assert env_cfg.commands.racket_target.adaptive_sigma_normal is True
+
+
+def test_reward_pack_v2_explicit_user_keys_win():
+    # (c) 包先展开,显式同名键后写后赢(rewards 键控项 + racket 第三通道都要赢;
+    # 现役波的 17/7/5 三通道显式键必须继续生效)。
+    env_cfg, applied = _apply(
+        _pack_v2_task(
+            rewards_extra={
+                "hold_ready_weight": 1.5,
+                "foot_slip_sq_weight": -0.3,
+                "full_body_mimic": False,
+                "racket_position_weight": 17.0,
+                "racket_velocity_weight": 7.0,
+                "racket_normal_weight": 5.0,
+            },
+            racket_extra={"adaptive_sigma_normal": False},
+        )
+    )
+    R = env_cfg.rewards
+    assert R.hold_ready.weight == pytest.approx(1.5)
+    assert R.foot_slip_sq.weight == pytest.approx(-0.3)
+    assert R.motion_body_pos.params["body_names"] == _UPPER  # 用户显式 false:腿不回名单
+    assert R.racket_position.weight == pytest.approx(17.0)
+    assert R.racket_velocity.weight == pytest.approx(7.0)
+    assert R.racket_normal.weight == pytest.approx(5.0)
+    assert env_cfg.commands.racket_target.adaptive_sigma_normal is False
+    # 没被用户压过的包项照常落地
+    assert R.hit_unstable_support.weight == pytest.approx(-10.0)
+    assert R.strike_capture_bonus.weight == pytest.approx(850.0)
+    assert R.foot_drag.weight == 0.0
+    assert len([m for m in applied if "user override wins" in m]) == 7
+
+
+def test_reward_pack_v2_optout_normal_channel_lifts_adaptive_sigma_requirement():
+    # 用户显式 adaptive_sigma_normal=false -> 第三通道不开,adaptive_sigma 也就不强制。
+    env_cfg, _ = _apply(
+        {"rewards": {"reward_pack": "v2"}, "racket": {"adaptive_sigma_normal": False}}
+    )
+    assert env_cfg.commands.racket_target.adaptive_sigma_normal is False
+    assert env_cfg.rewards.upright_exp.weight == pytest.approx(1.0)
+
+
+def test_reward_pack_v2_conflicting_motion_scale_in_window_fails_loud():
+    # (d) v2 的定义就是"窗内不打折":与包同时显式配 motion_scale_in_window 拒收。
+    with pytest.raises(train_mod._OverrideError, match="motion_scale_in_window"):
+        _apply(_pack_v2_task(rewards_extra={"motion_scale_in_window": 0.25}))
+
+
+@pytest.mark.parametrize("bad", ["V2", "V1", "v3", True, 2])
+def test_reward_pack_rejects_unknown_pack_values(bad):
+    # (e) 未知包值绝不静默兜底("v1" 自 2026-07-25 起是合法兜底 flag,不再在此列)。
+    with pytest.raises(train_mod._OverrideError, match="reward_pack"):
+        _apply({"rewards": {"reward_pack": bad}})
+
+
+def test_reward_pack_v2_without_adaptive_sigma_fails_loud():
+    # 半配组合:第三通道必须搭在 adaptive_sigma 上,翻译层当场拒(不等 hope_commands 构造期)。
+    with pytest.raises(train_mod._OverrideError, match="adaptive_sigma"):
+        _apply({"rewards": {"reward_pack": "v2"}})
+
+
+def test_reward_pack_v2_fails_loud_when_lineage_lacks_a_v2_term():
+    # cfg 血统缺 v2 要动的项(例如没有 hit_unstable_support 声明)-> 拒绝静默半套换装。
+    env_cfg = _make_env_cfg()
+    env_cfg.rewards.hit_unstable_support = None
+    with pytest.raises(train_mod._OverrideError, match="hit_unstable_support"):
+        _apply(_pack_v2_task(), env_cfg)
+    # 新击中层同理:非 VirtualBall 谱系(没有 strike_capture_bonus 声明)不许半套 v2。
+    env_cfg = _make_env_cfg()
+    env_cfg.rewards.strike_capture_bonus = None
+    with pytest.raises(train_mod._OverrideError, match="strike_capture_bonus"):
+        _apply(_pack_v2_task(), env_cfg)
+
+
+def test_reward_pack_keyed_table_is_inside_reward_whitelist():
+    # 键控注入表的键必须都在 _REWARD_KEYS 白名单里(train.py import 时也有同款自检)。
+    strays = sorted(
+        {key for key, _ in train_mod._REWARD_PACK_V2_KEYED} - set(train_mod._REWARD_KEYS)
+    )
+    assert strays == []
+    assert "reward_pack" in train_mod._REWARD_KEYS
+
+
+# --------------------------------------------------------------------------------------------- #
+# B2 JOB2 — task.venue_profile(场地档案一键展开,Wave-1 loader 消费)
+# --------------------------------------------------------------------------------------------- #
+_FRANCO_RIG = "franco_rig_20260725"
+
+
+def _franco_rig_sha8():
+    import hashlib
+
+    path = os.path.abspath(
+        os.path.join(HERE, "..", "..", "..", "configs", "venue_profiles", _FRANCO_RIG + ".json")
+    )
+    with open(path, "rb") as f:
+        return hashlib.sha256(f.read()).hexdigest()[:8]
+
+
+def test_venue_profile_absent_is_byte_preserving_noop():
+    env_cfg, applied = _apply({})
+    assert env_cfg.events.physics_material.params["static_friction_range"] == (1.0, 1.0)
+    assert env_cfg.events.randomize_link_mass.params["mass_distribution_params"] == (1.0, 1.0)
+    assert env_cfg.commands.racket_target.target_noise_white == 0.0
+    assert applied == []
+
+
+def test_venue_profile_franco_rig_lands_all_three_sections(monkeypatch):
+    fake_mdp = _stub_mdp_module(monkeypatch)
+    env_cfg, applied = _apply({"venue_profile": _FRANCO_RIG})
+    C = env_cfg.commands.racket_target
+    # mocap_noise
+    assert C.target_noise_white == pytest.approx(0.0019)
+    assert C.target_noise_ar1_sigma == pytest.approx(0.0052)
+    assert C.target_noise_ar1_rho == pytest.approx(0.717)
+    # transport(非 live tts 模式必须触发现有翻译层的 actor 观测 func 换装副作用)
+    assert C.target_delay_steps == 0
+    assert C.target_dropout_prob == 0.0
+    assert C.target_delay_tts_mode == "source_timestamp_compensated"
+    assert env_cfg.observations.policy.time_to_strike.func is fake_mdp.actor_time_to_strike
+    assert env_cfg.observations.critic.time_to_strike.func == "live_time_to_strike"
+    # physics
+    pm = env_cfg.events.physics_material.params
+    assert pm["static_friction_range"] == (0.3, 1.6)
+    assert pm["dynamic_friction_range"] == (0.3, 1.2)
+    assert pm["restitution_range"] == (0.0, 0.5)
+    assert env_cfg.events.randomize_link_mass.params["mass_distribution_params"] == (0.85, 1.15)
+    # applied 标记带档案名 + sha 前缀,注入键走翻译层留下标准记账
+    tag = f"venue_profile={_FRANCO_RIG}@{_franco_rig_sha8()}"
+    assert any(tag in m and "loaded" in m for m in applied)
+    assert all(tag in m for m in applied if "venue_profile=" in m)
+    assert f"task.racket.target_noise_white=0.0019 ({tag})" in applied
+    assert "racket_target.target_noise_white=0.0019" in applied
+    assert f"events.physics_material.params.restitution_range=(0.0, 0.5) ({tag})" in applied
+
+
+def test_venue_profile_explicit_user_keys_win(monkeypatch):
+    _stub_mdp_module(monkeypatch)
+    env_cfg, applied = _apply(
+        {
+            "venue_profile": _FRANCO_RIG,
+            "racket": {"target_noise_white": 0.005},
+            "plant": {"robot_material_static_friction_range": [0.5, 1.0]},
+        }
+    )
+    C = env_cfg.commands.racket_target
+    assert C.target_noise_white == pytest.approx(0.005)  # 显式 racket 键赢
+    assert C.target_noise_ar1_sigma == pytest.approx(0.0052)  # 没写的键档案照落
+    pm = env_cfg.events.physics_material.params
+    assert pm["static_friction_range"] == (0.5, 1.0)  # 显式 plant 键赢
+    assert pm["dynamic_friction_range"] == (0.3, 1.2)
+    assert len([m for m in applied if "user override wins" in m]) == 2
+
+
+def test_venue_profile_unknown_name_fails_loud():
+    with pytest.raises(ValueError, match="no_such_venue"):
+        _apply({"venue_profile": "no_such_venue_20990101"})
+
+
+def test_venue_profile_fails_loud_when_events_knob_missing():
+    env_cfg = _make_env_cfg()
+    del env_cfg.events.randomize_link_mass.params["mass_distribution_params"]
+    with pytest.raises(train_mod._OverrideError, match="mass_distribution_params"):
+        _apply({"venue_profile": _FRANCO_RIG}, env_cfg)
 
 
 if __name__ == "__main__":

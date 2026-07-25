@@ -15,6 +15,90 @@ The baseline exists as of 2026-07-02: the unified swing policy transferred to th
 are the evidence base: HITTER (`2508.21043`), PACE (`2509.21690`, the TTRL-ICRA2026 paper), SMASH
 (`2604.01158`), Sony Ace (`s41586-026-10338-5`).
 
+## 2026-07-24 当前动作库 Gate 摘要
+
+本节覆盖下方 2026-07-03 至 2026-07-20 的历史 ready/双动作/旧 TOPP 叙述；旧段落保留作推演证据，
+不再代表当前主选。现行详细真源：
+
+- [canonical 动作库正式化实验](../experiments/2026-07/EXP-MOTION-CANONICAL-LIBRARY-20260723.md)
+- [动作预处理与五动作库接口](../interfaces/motion_preprocessing_contract.md)
+- [动作换面编译操作](../operations/run_motion_face_shift.md)
+- [11 段研究数字表](../research/final_11_motion_table_20260723.md)
+
+当前状态为 `Partial / 0 of 10 main assets training-authorized`：
+
+- [`canonical ready`](../DEFINITIONS.md#canonical-ready) 的数值代表仍是 `bh_loop_c` source
+  frame 0；ready 文件 SHA 为 `cb0a05ca...ecd15b0`，donor source SHA 为
+  `d5338168...5fbc1fba`。runtime pose/zero-velocity digest、ready-FK 和
+  [`registry shared-ready digest`](../DEFINITIONS.md#registry-shared-ready-digest)仍待十件独立
+  verifier 闭合；一个 ready 文件 SHA 不能单独过门。更重要的是，exact FK 的
+  [`face-neutral ready audit`](../DEFINITIONS.md#face-neutral-ready-audit)已判 v1 失败：upper 到 scoped
+  反手 f44 / flipped 正手目标为 `33.4/146.6 deg`，full 为 `32.9/147.1 deg`，明显偏反手。v1 只读
+  保留为 donor baseline；下一候选要保留站姿/root/拍心目标、重解右臂并取得新 path/hash/identity，
+  再重跑十件，禁止覆盖或追认 v1。反手拉槽位保留 C。旧
+  [`adv2c3`](../DEFINITIONS.md#adv2c3)只作比较，不能再预定为主件。
+- 五动作 × upper/full 正按
+  `shared zero-speed ready → selected core/contact opportunity → shared ready` 全路径重建；
+  不先走 ready→旧 frame 0。窗口不冻结，运动学时间律把“窗口末前标量路径不提前刹车”作为硬约束。
+- 正手挡不是单腕 `±90°/180°`。upper/full 分别求右肩、肘、腕七关节的全窗口拍面流形；现有
+  residual 只证明 `diagnostic_face_core` 运动学构形存在，不含
+  [`canonical-ready contact bridge receipt`](../DEFINITIONS.md#canonical-ready-bridge-receipt)，
+  不证明它是候选或能回球。
+- strict compiler、schema-2 builder、Agibot MuJoCo 播放器、candidate bank registry 和
+  canonical-ready consumer 均已进入本功能分支的审查范围；在代码、十件字节和逐门证书合入前，
+  它们不改变当前运行态。
+- 每件 source/output 的击球机会必须各有一个
+  [`protected-window digest`](../DEFINITIONS.md#protected-window-digest)：六个 schema-2 时序通道、
+  `<f4` little-endian、完整 shape/index 和 transformation receipt 都要内容绑定；独立 verifier
+  必须拒绝动作/scope/build 间 cross-splice。当前没有被接受的十件 report。
+- candidate registry/consumer 的接口已收紧为
+  [`canonical runtime four-pin`](../DEFINITIONS.md#canonical-runtime-four-pin)、
+  [`motion publication state`](../DEFINITIONS.md#motion-publication-state)和
+  [`identity-only registry audit`](../DEFINITIONS.md#identity-only-registry-audit)：非 audit 消费必须
+  同时钉住 registry/alignment/ready/ready-FK，audit 不得导出 loader table，换件只允许在
+  [`shared zero-speed ready boundary`](../DEFINITIONS.md#shared-zero-speed-boundary)。这些仍是候选
+  接口闭环，不是 adopted 状态或训练结果。
+- `publication_class` 只允许 `compiler_candidate → training_adopted → deployment_adopted →
+  hardware_adopted` 单向逐级新建 immutable record。face diagnostic 在状态机外，不能改名进入首级；
+  链内也不能跳级、原地改 authorization 或倒退覆盖，撤销另记 quarantine/revoke。
+- E-level 必须由
+  [`motion evidence certificate chain`](../DEFINITIONS.md#motion-evidence-certificate-chain)逐级绑定，
+  question bank/config/ONNX 必须由
+  [`strict motion artifact parser`](../DEFINITIONS.md#strict-motion-artifact-parser)核验；缺官方 ONNX
+  parser 时 deployment/hardware 必须失败封闭。source/build/model/applicability/evidence/adoption
+  provenance 全部进入
+  [`motion alignment digest`](../DEFINITIONS.md#motion-alignment-digest)，不能只靠 row 自报或总文件名。
+- 2026-07-24 本功能分支候选验证为：host strict-registry `37 passed`；Pod2 使用 `nice -n 19`
+  纯 CPU 跑 canonical consumer 定向测试 `25 passed, 97 deselected`，再跑完整
+  `test_reward_flags_mdp.py` 得到 `122 passed`。这些是源码/反例合同证据，不生成十件资产，也不改变
+  `0/10 training-authorized`；它们也不等于新要求的整桥、成对窗口摘要或 registry shared-ready
+  verifier report 已存在。
+- 同日 probe2 的 headless FK 虽为 `10/10 PASS`，顶层 CLI 仍因 sidecar 白名单 bug `rc=2` 且无 run
+  receipt；`t_hit<=0.5 s` 仅 `2/10`，大量窗口前零加速度平台仍在。
+  `fh_loop full/bh_loop_c full/bh_block full/s0_highpress full/s0_highpress upper` 的 50 Hz 跨窗段
+  `no_negative_scalar_acceleration_inside_window=false`；dynamics gate 又因 producer/verifier 的
+  body-velocity 语义冲突入口拒收 `10/10`。这些都是当前失败证据，不是终表或部分晋级。
+- 站地自由根的 torque/contact 仍缺完整接触力分配，必须
+  `INCOMPLETE_FAIL_CLOSED`。旧 full S0 的 `7.37 cm` 地穿、旧正手挡线性件和旧 raw scans 都只作
+  反例，不能给新十件继承证书。
+
+Gate 进入 `Done` 前，每个 `<motion_id, scope, variant>` 必须分别具有可复现命令、构建 manifest、
+输入/输出 SHA、工件类别、ready 整桥、source/output protected-window digest + transformation
+receipt、独立 verifier report、已知限制，以及 schema/L0、vendor L1、桌网、grounded 动力学/平衡、
+paired behavior 的逐门结果。库级还必须同时通过：
+
+1. canonical-ready donor/SHA、runtime pose、三组 runtime velocity exact-zero digest、ready-FK 和
+   五件有序 start/end 六类 zero checks 共同导出的 registry shared-ready digest；
+2. strict registry 的单向 publication class、完整证书链、provenance alignment 和四重 pin；
+3. consumer 的 ready hold、true reset、同一 ready/零速边界换件、禁止 mid-clip switch/random
+   init/replay/noise/teleport；
+4. exact Agibot MuJoCo runtime FK 播放、registry-bound loader/exporter 和 training-adoption 反例测试；
+5. identity-only audit 不能授权或导出 loader table，严格 question-bank/config/ONNX parser 缺失时
+   失败封闭。
+
+上述是 `Done` 合同，不是当前结果；现在仍是 `Partial / 0 of 10`。任何相邻动作、上肢件、face
+diagnostic、旧扫描或 producer 自报都不能替它继承证书。
+
 ## Phase 2 Performance Roadmap (team, 2026-07)
 
 Each item lists the failure being targeted and the paper-backed mechanism to try first.

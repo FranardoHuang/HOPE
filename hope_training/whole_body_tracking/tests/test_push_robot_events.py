@@ -42,6 +42,7 @@ if SCRIPTS not in sys.path:
     sys.path.insert(0, SCRIPTS)
 
 import train as train_mod  # noqa: E402  (hydra/omegaconf only at import time)
+from test_reward_flags_overrides import _apply_legacy_v1  # noqa: E402  (v1 兜底钉扣,见下)
 
 _TC_PATH = (
     Path(HERE).resolve().parents[0]
@@ -143,8 +144,9 @@ def _stub_modules(monkeypatch):
 
 
 def _apply(task, env_cfg=None):
+    # 2026-07-25 默认翻转后本套件仍测 legacy 翻译行为:钉 v1 + 滤 v1 记账行,原断言原样成立。
     env_cfg = env_cfg if env_cfg is not None else _make_env_cfg()
-    applied = train_mod._apply_task_overrides(env_cfg, task, clip_name=None)
+    applied = _apply_legacy_v1(env_cfg, task)
     return env_cfg, applied
 
 

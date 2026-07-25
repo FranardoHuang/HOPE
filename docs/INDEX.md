@@ -17,22 +17,11 @@
 [术语与人话对照](DEFINITIONS.md)。每个 `run_name/flag` 第一次出现也必须带人话，
 不得要求读者去历史归档猜。
 
-当前一句话状态：仍在阶段 1 固定点训练。最接近正式目标的模型在四个独立初始化间极不稳定，
-拍面正负判分也未过诚实门；16 条 fresh 广度臂在 24/24 最近格的正手 signed composite 均为 0 后，
-已分两波全部保留证据并停止，这不是改写 q10 预注册阈值；现有成绩只是每题重置的
-Python BankExam 解析诊断，不是 `Gate3`。
-第 4000 次迭代后续卷已完成，四 seed 为 `50/88/98/0`，预注册稳定门全失败；且
-seed2/3 正手 parsed 高分与 signed composite `0/50` 直接矛盾；signed-face 源码/负控门已实现，
-但 fresh 训练 canary 与修正后同卷尚未运行，所以新尺仍未通过行为验收；
-原生 MuJoCo 训练仍只有不允许合入的预检候选；
-当前 planner-policy exact tuple 源码已通过 portable Release 与 latest-main 本地回归，但
-[半秒冲刺五臂](DEFINITIONS.md#half-second-sprint-arms)中的 W/Y 虽已通过真实零写入 plan、fresh `179→31`
-ONNX 结构检查与 CPU 推理，两份 checkpoint lineage 和导出 contract 都是 inexact，因此制品只能诊断；
-本分支对 [NOW 唯一队列](NOW.md#统一工作队列唯一优先级账本)的候选更新是先修 exact lineage，再实现同卷 vendor adapter。
-Wave A v8 科学长训 attempt1 只发 W-N 后在 `sim.reset` 收口、没有首个 iteration 或 Reward 结果；fresh
-v9/probe10 已预注册但尚未发射，六格仍 inconclusive / not adopted；
-ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、标定后机器人物理和新真机测试也都
-没有结果。
+动态状态不在 INDEX 复制。当前阶段、训练队列和采用 setting 只看
+[`origin/main` 上的 NOW](NOW.md)；本分支的动作库候选结论只看
+[canonical 五动作库实验](experiments/2026-07/EXP-MOTION-CANONICAL-LIBRARY-20260723.md)。
+截至 2026-07-24，十件主资产仍是 `0/10` 获训练授权，P1IU/CGF 发射冻结未解除；这两句是阅读路由，
+不是新的运行态权威。
 
 ## 按任务划分的最小阅读集
 
@@ -51,7 +40,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | 恢复/等待/连续对打 | [NOW 连续能力](NOW.md#22-连续能力每个课程阶段都要另考) → [Recovery A/B/C](experiments/2026-07/EXP-RECOVERY-TUPLE-ABC.md) → [横向平衡扰动 source gate](experiments/2026-07/EXP-P1-LATERAL-BALANCE-PERTURBATION.md) / [adapter 事务接口](interfaces/lateral_perturbation_adapter_contract.md) → [T1 接口](interfaces/t1_event_training_contract.md) → G05/G06 |
 | 下肢稳定 B0/B1/B2 消融 | [Wave-B 实验](experiments/2026-07/EXP-P1-LOWER-BODY-STABILITY-20260720.md) → [专用 NO-LAUNCH/probe/long 操作](operations/run_phase1_lower_body_stability_wave.md) → [G05](gates/G05_isaac_training_first_loop.md)；M0 当前 0/4，不进入队列 |
 | 借鉴 Jiayi V9 / Yikang 支线并核对泛化局限 | [选择性跨线审计](experiments/2026-07/EXP-V9-YIKANG-CROSS-LEARNING-20260715.md) → [G05](gates/G05_isaac_training_first_loop.md) / [G06](gates/G06_isaac_to_mujoco.md)；旧 `7/7` 只测挥拍/恢复周期，未测物理触球或落台 |
-| 新动作/动作库 | [空间重定向实验（含 B/C 主选 SE(2) 实体化）](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md) + [0.5秒短路径](experiments/2026-07/EXP-MOTION-READY-TO-STRIKE-0P5.md) + [Franco/高点拍压/横移老师设计](experiments/motion_v12_high_press_lateral_teacher_20260713.md) → [S0/M0 exact GVHMR](experiments/motion_video_gvhmr_prereg_franco_static_motion_20260713.md) → [post-GVHMR handoff](experiments/motion_post_gvhmr_s0_m0_handoff_20260713.md) → [canonical-beta](experiments/motion_canonical_beta_s0_m0_20260713.md) → [exact GMR/横移脚距](experiments/motion_exact_gmr_s0_m0_20260713.md) → [G08](gates/G08_blind_spot_improvements.md) → 动作操作文档 |
+| 新动作/动作库 | [canonical 五动作库终审](experiments/2026-07/EXP-MOTION-CANONICAL-LIBRARY-20260723.md) → [预处理与注册接口](interfaces/motion_preprocessing_contract.md) → [换面编译操作](operations/run_motion_face_shift.md) → [FINAL 11 历史推演/勘误](research/final_11_motion_table_20260723.md) → [G08](gates/G08_blind_spot_improvements.md)；早期 GVHMR/GMR/SE(2) 路线从终审实验的链接进入，不在本表展开 |
 | Planner 或 ROS runtime | [G04](gates/G04_sim_modeling_mujoco_isaac.md) / [G06](gates/G06_isaac_to_mujoco.md) → [`run_planner.md`](operations/run_planner.md) → 下方接口文档 |
 | 真机/部署 | [G07](gates/G07_mujoco_to_real.md) → [`run_deploy_dryrun.md`](operations/run_deploy_dryrun.md)；安全 gate 通过前不得下发真机命令 |
 | 恢复 ignored/local 资产 | [`setup_local_sync.md`](operations/setup_local_sync.md) + [`ASSET_POLICY.md`](ASSET_POLICY.md) |
@@ -60,9 +49,10 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 
 | ID | 简短状态 |
 | --- | --- |
+| [`EXP-MOTION-CANONICAL-LIBRARY-20260723`](experiments/2026-07/EXP-MOTION-CANONICAL-LIBRARY-20260723.md) | `in progress / 0 of 10 training-authorized`：C 保留反手拉槽位；五动作 upper/full 正由 direct shared-ready 编译器重建，`adv2c3` 只作比较；正手挡改为七关节拍面流形，grounded torque/contact、行为窗和正式 Gate 未闭合 |
 | [`EXP-P1-HALF-SECOND-SPRINT`](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md) | 已结束：U/V/W/X/Y 到 `+1000`，W/Y 为诊断候选；真实 plan/export 已通过结构与推理，但 exact-lineage=`0` 阻断 production/vendor |
 | [`EXP-P1-PUSH-ROBUSTNESS-20260721`](experiments/2026-07/EXP-P1-PUSH-ROBUSTNESS-20260721.md) | `running`：18 臂 push 鲁棒性波（速度大小/方向/频率 + 同冲量力推），C+S0 配方、对照复用矩阵格；值班 routine 自动收口/补位 |
-| `Wave Q 情报波（预注册中）` | 速度混合 [0.8,1.2] 最优先 / 强 q_des 铰链 -1.0 / 全身模仿 2.0 / 全关节 qdes barrier 去 top-k |
+| `Wave Q 情报波` | `diagnostic / inconclusive`：仅 v_qbar 到终点；旧 full-body `+2.0` 同时改权重和窗口，不能作全身学习因果结论；后续 matched 设计见 canonical 动作库实验 |
 | [`EXP-P1-BALANCE-TEMPORAL-MATRIX-20260720`](experiments/2026-07/EXP-P1-BALANCE-TEMPORAL-MATRIX-20260720.md) | `preregistered / E1`：{W,V}×{N,C,H}×{S0,S1,S2,S3} 24 格单 seed 广度矩阵（时序平滑 × 稳定机制），取代 Wave A probe10 科学位与 Wave B 六格队列；父本为诊断谱系 `model_6700`，续训 10001 updates |
 | [`EXP-P1-BALANCE-ACTION-SLEW-20260720`](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md) | v8 science attempt1=`infrastructure-only / non-science`：W-N 在 `sim.reset` 收口，余五格未发；科学位已被 24 格矩阵取代（superseded）；probe9 收据只作 mechanics 证据。不得绕过 `T0→T1→T2`；Wave B M0 moving teacher 继续拒绝 |
 | [`EXP-P1-TASK-REVISION-CUTOVER`](experiments/2026-07/EXP-P1-TASK-REVISION-CUTOVER.md) | 旧 rolling 池已精确停止；同一物理球的原子 target/TTS revision、宽准备时间、相位 governor、0.5 秒卷与整数淘汰量尺处于 source 红队，full-scene/行为尚未通过 |
@@ -83,7 +73,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | [`EXP-V9-YIKANG-CROSS-LEARNING-20260715`](experiments/2026-07/EXP-V9-YIKANG-CROSS-LEARNING-20260715.md) | 只读审计完成：保留定向恢复、vector settle、动作首帧准备态和随机长等待为候选；旧 `7/7` 无物理触球/落台，且固定正手区不能证明球路泛化 |
 | [`EXP-P1-LATERAL-BALANCE-PERTURBATION`](experiments/2026-07/EXP-P1-LATERAL-BALANCE-PERTURBATION.md) | E1 source gate：scheduler/显式 COM adapter/default-off trainer 与 hard contract 已接，`173 passed`；full-scene/solver-response/throughput/held-out paper pending，禁止 launch |
 | [`EXP-P1-LOWER-BODY-STABILITY-20260720`](experiments/2026-07/EXP-P1-LOWER-BODY-STABILITY-20260720.md) | `superseded`：B1/B2 机制以 S3/S2 档并入 24 格矩阵；本六格队列不再单独发射；M0 不进入本轮 |
-| [`EXP-MOTION-SPATIAL-RETARGET`](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md) | B 主选的 schema-2/FK 一次性 consume 已通过并解锁 L0；C 保持未消费后备，安全/动力学/RL 仍阻断 |
+| [`EXP-MOTION-SPATIAL-RETARGET`](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md) | 历史 B consume/L0 证据；其“B 主选、C 后备”采用性已被 canonical 动作库终审覆盖，不得反向改写当前 C 主选 |
 | [`EXP-GATE3-CURRENT179-D0`](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md) | 实验 blocked；`Gate3-D0` 严格模型 preflight 通过，当前行为尚未运行 |
 | [`EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD`](experiments/2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md) | 实验 completed；exact 源码通过 portable Release 与 latest-main 回归，runtime gates 保持 open |
 | [v12/高点拍压/横移视频登记](experiments/motion_video_intake_v12_static_motion_20260713.md) | 7 段私有视频逐字节登记完成；没有动作处理、安全或行为结论 |
@@ -141,6 +131,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | S0/M0 post-GVHMR exact 消费 | [`run_motion_post_gvhmr_exact.md`](operations/run_motion_post_gvhmr_exact.md) |
 | S0/M0 exact donor canonical-beta | [`run_motion_handoff_canonical_betas.md`](operations/run_motion_handoff_canonical_betas.md) |
 | S0/M0 exact GMR 与横移脚距 | [`run_motion_s0_m0_exact_gmr.md`](operations/run_motion_s0_m0_exact_gmr.md) |
+| 七关节拍面流形、五动作编译与 fail-closed 复核 | [`run_motion_face_shift.md`](operations/run_motion_face_shift.md) |
 | 本地/已忽略资产恢复 | [`setup_local_sync.md`](operations/setup_local_sync.md) |
 
 ## 接口索引
@@ -158,6 +149,7 @@ ROS/Jazzy/AimRT、backend first tick 和厂商行为仍未运行；`Gate3B`、�
 | q50 持久启动与只读复核 | [`q50_persistent_supervisor_contract.md`](interfaces/q50_persistent_supervisor_contract.md) |
 | 轻量训练 queue claim→真实日志→checkpoint 绑定 | [`lean_training_run_binding.md`](interfaces/lean_training_run_binding.md) |
 | 随挥结束教师状态 raw capture→attestation→首 reset | [`post_swing_teacher_artifact.md`](interfaces/post_swing_teacher_artifact.md) |
+| 动作预处理、canonical ready、五动作注册与证书链 | [`motion_preprocessing_contract.md`](interfaces/motion_preprocessing_contract.md) |
 | ROS topic | [`ros_topics.md`](interfaces/ros_topics.md) |
 
 ## 责任归属与更新规则

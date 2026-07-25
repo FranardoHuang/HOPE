@@ -1,6 +1,6 @@
 # NOW — 当前训练流程、课程阶段与下一步
 
-最近复核：2026-07-20 CST。本页说明现在到底在训什么、整套训练怎样连起来、每个课程阶段在解决
+最近复核：2026-07-24 CST。本页说明现在到底在训什么、整套训练怎样连起来、每个课程阶段在解决
 什么问题，以及下一项工作为什么值得做。实验过程放在[实验登记册](experiments/README.md)，
 复现命令和 Gate 结果放在对应 [Gate](gates/) 与操作文档。
 
@@ -24,8 +24,590 @@
 - 部署侧的 planner-policy exact tuple 源码已通过 portable Release 和 latest-main 本地回归；
   这解决了同 tick base/target 因果配对与源码可构建问题，但 ROS/Jazzy/AimRT、backend first tick、
   厂商 MuJoCo 行为和真机仍未运行。
+- 动作库的功能分支正在重建五动作 × upper/full 十件 direct shared-ready 候选：
+  `adv2c3` 只作比较，正手挡改用七关节拍面流形。它**没有改变当前
+  `v4rg_runtime_order_v3` 训练 setting**，目前仍是 `0/10` 获训练授权；细节只看
+  [正式化实验](experiments/2026-07/EXP-MOTION-CANONICAL-LIBRARY-20260723.md)，优先级只看下方
+  [统一工作队列](#统一工作队列唯一优先级账本)。P1IU/CGF 发射冻结未解除。
+  07-24 晚已续完中断的 marker-authority v2 迁移（窗口 seed=legacy ge80、名义空挥事件不再
+  混叠成窗口）、把击球优先排序补上窗前零加速度平台票数、加了每格 ready→anchor
+  `t_hit<=0.5s` 编译筛门，并实现了 §5.1 受保护窗口摘要模块。face-neutral ready v2 组合候选
+  （中立右臂挑战者 + G1 平足落地）已在 pod2 产出并发布为 diagnostic：静态几何与地面接触力
+  LP 双过；待 Franco 审两问（中立度按拍面角还是五动作可达时间对称；0.5s 门对拉球是否过紧）
+  后铸新 sidecar 身份、出 recipe v3、重编十件。
+- **合并警告（未解决前本分支不得合 main）**：分支把一个出厂为空的 legacy motion admission
+  信任集接进了默认（非 canonical）`MotionCommand` 路径——合入后现行 v4rg 训练重启会在
+  环境构造时直接失败封闭。合并前必须先把 v4rg bank 证书 digest 以受审源码改动加入信任集，
+  或把该门限定到 canonical 消费路径。
 
-## 当下状态与团队 focus
+
+## 1. 当前一套训练是怎样完整跑起来的
+
+动作、题目、观测、Reward、PPO 和判卷不是几根互不相关的配置轴。它们按下面的顺序组成一套
+完整训练配方（setting）；其中任何一层改变，都会产生一套新配方。
+
+1. **先出一道题。** 阶段 1 的题目规定用正手还是反手、来球速度，以及击球时球拍应达到的
+   位置、速度、拍面方向和时刻。训练题与正式考试题分开。
+2. **再给一段全身参考动作。** 当前正手和反手参考来自 `v4rg_runtime_order_v3` 动作对。它提供
+   全身姿态和时序参照，不直接等于这道球题的答案；现役 Reward 只模仿其中的上半身。
+3. **把“机器人现在怎样”和“本题要什么”一起给 policy。** 当前 179 维输入包括机器人状态、
+   上一步动作、参考动作、目标球拍位置/速度/拍面、距击球时刻还有多久，以及正反手类型。
+4. **policy 每 20 ms 输出一次动作。** 输出是 31 个目标关节位置，不是力矩或球拍轨迹；目标先过
+   关节范围保护，再由 Isaac 的关节控制器执行。
+5. **Isaac 同时推进 4096 个机器人。** 每个环境使用同一规则但不同采样；当前配方把 31 个关节
+   摩擦设为零，以便和现有独立考卷合同对账。这不是标定后的真机物理。
+6. **Reward 告诉 policy 哪种行为更好。** 一部分模仿上半身参考动作，另一部分分别检查击球时
+   球拍的位置、速度和拍面；下半身可以按题调整，脚步正则与硬保护限制明显坏姿态。
+7. **PPO 根据这些得分更新 policy。** 当前正式训练从随机初始化开始，步数目标 2 万–2.5 万次
+   迭代（Jiayi 最新版口径）；本页成绩卡考的是第 2000 次迭代保存的 checkpoint。
+8. **训练外再判卷。** checkpoint 先进入独立 Python BankExam。质量晋级必须先有可信判分和
+   跨初始化稳定性，再过厂商 `Gate3/Gate3B`；只检查运行链能否接通的 `Gate3-D0` 可并行推进，
+   但不产生质量晋级。
+
+一句话概括：**题目给出本拍答案，参考动作给出姿态和时序参照，179 维输入把两者交给 policy，
+policy 输出 31 个关节目标，PPO 根据 Reward 改进它，独立考卷再检查实际行为。**
+
+## 2. 课程、连续能力和部署验证是三条不同的线
+
+### 2.1 课程阶段：机器人正在多学会哪一种球技
+
+1. **阶段 1：固定点养成。** 固定站位、击球位置、目标落点和无旋条件，只改变来球速度。
+2. **阶段 2：虚拟球的不同到达状态。** 球到达击球区域时的位置、速度、方向和高度开始变化；
+   近球可以只用手臂，远球允许移动站位和脚步，也可调整整套动作的朝向、时序和拍面。
+3. **阶段 3：物理球进入训练。** 球在仿真中真正从对面发出、飞行、弹台并与球拍接触；先做
+   无旋或低旋，再加入旋转。旋转是否以后单列阶段 4，尚未决定。
+
+所以，**阶段 2 大体是“适应不同到达状态”，“动起来”是阶段 2 的一种解法；阶段 3 的关键变化
+是物理球真正进入训练。**
+
+### 2.2 连续能力：每个课程阶段都要另考
+
+阶段 1、2、3 都应分别报告单拍和连续成绩。连续能力必须在同一条不重置的序列中同时做到：
+
+1. 上一拍结束后吸收身体的角动量和失衡，不摔、不滑、不撞桌；
+2. 进入允许范围内的等待动作或准备姿态；
+3. 下一球在任意有效时刻出现时，能在截止时间前启动合适动作。
+
+组件消融只解释贡献。只收好上一拍、只模仿等待姿态，或只在固定时刻能启动下一拍，都不算完成。
+
+### 2.3 部署验证：不是课程阶段
+
+- Python BankExam 测的是 policy + Python 评估器 + BankExam 的 MuJoCo 机器人动力学配方，
+  不包含 planner、消息、生产 C++ runner 或完整厂商运行时。
+- `Gate3` 把 planner、消息、生产 C++ runner 和厂商 MuJoCo 串起来，先看整链能否稳定完成。
+- `Gate3B` 复用同一完整运行链，再正式记录击球、回球和连续质量。
+- 真机还要另过 [G07](gates/G07_mujoco_to_real.md) 的安全门。
+
+## 3. 共用前提：先保证尺子可信
+
+这不是课程阶段。所有阶段都依赖三个共同条件：
+
+- **文件和接口对得上。** 当前动作、训练/考试题、179 维排列、checkpoint 和导出合同已经做
+  内容绑定，不一致就拒绝继续；但合同一致只说明文件对上，不说明物理对上。
+- **判分不骗人。** 2k/4k 的正手原始拍面误差多在 165–174°，旧解析判分器又会
+  自动翻转法向；4k 已出现 parsed `48/50` 但 signed composite `0/50` 的同 checkpoint 反例。源码层
+  `n/-n` 负控和有符号误差已通过；行为通过条件仍要求 fresh canary 和同一考卷重跑。详见
+  [拍面判分复核](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)。
+- **机器人物理能外推。** 当前零关节摩擦只便于复现；历史非零摩擦数字存在单位/语义问题。
+  通过条件是从真实数据拟合共享动力学参数，再分别用 Isaac、MuJoCo 适配器和厂商运行时验证。
+
+当前只有第一项较完整；后两项未过。因此任何解析高分都不能直接称为物理回球或真机基线。
+
+## 4. 阶段 1：固定点单拍基线（当前阶段）
+
+### 4.1 目标和离理想还有多远
+
+机器人站在固定位置，用指定正手或反手，在固定击球位置把不同速度的无旋来球打向固定落点。
+它要在保持平衡的同时，让球拍在正确时刻达到正确位置、速度和朝向。
+
+- **研究推进最低线：** 有效同卷中每个动作的解析回球率至少 50%，只用于判断训练管线是否值得
+  继续扩题，不是部署质量线。
+- **正式候选质量目标：** 跨独立初始化稳定达到每动作约 80%，同时拍面误差 p90 小于 15°、
+  落点误差小于 0.3 m、零摔，并且判分尺可信。
+
+现有结果只在平均解析回球率上越过最低线；初始化稳定性、拍面、落点毕业指标和连续能力都未过。
+
+### 4.2 动作：身体应该怎样挥
+
+**问题：** 只给球拍终点，机器人可能用不安全或不可连续的身体动作碰到目标；死跟参考动作，
+又可能无法满足题目要求的拍面和拍速。
+
+**当前解法：** 使用经过关节/刚体顺序整理的正反手动作对
+（`v4rg_runtime_order_v3`）。触球时由题目给出的球拍目标主导，其余时段保留上半身动作模仿；
+下半身不再被参考动作锁死。
+
+**效果与差距：** 这套动作已进入当前训练和考卷合同，能产生可比较结果；但没有可信证据证明它
+优于其他动作。Franco/v6/v7 新动作只完成离线安全和重定位检查；V5 专业动作有历史训练与诊断，
+但没有在当前严格同卷下获胜。两类都未进入现行配方。
+
+### 4.3 观测与输出：policy 知道什么、控制什么
+
+**问题：** policy 看不到本题要求的拍面就无法按题调整；训练和部署的输入排列不同也无法迁移。
+
+**当前解法：** 179 维输入在旧 175 维部署输入后增加目标拍面法向 3 维，并预留旋转参数 1 维；
+输出固定为 31 个目标关节位置。严格导出器和加载器检查维度和来源。
+
+**效果与差距：** 当前模型文件及负例已通过严格装载检查，但厂商运行链还没有当前 179 维模型的
+首个有效控制周期；目标拍面通道的真实延迟/噪声也未与其他目标通道完全同处理。
+
+### 4.4 Reward：每一组分数在教什么
+
+**问题：** 只模仿动作可能“挥得像”却没达到题目要求；直接用旧解析回球分训练又可能鼓励 policy
+钻拍面判分漏洞。
+
+**当前解法：** 现役 Reward 分为四组：
+
+- **回答这道球题：** 球拍位置匹配 `14`（宽度 `0.20 m`）、速度匹配 `10`
+  （`1.0 m/s`）、拍面匹配 `5`（`0.3 rad`）；三个连续核的乘积另有击球奖金 `5`，不是三项
+  过阈值后的二值分；接近目标的进度奖励为 `10`。
+- **保持可用动作形态：** 只模仿上半身的参考位置、朝向和速度，各项权重 `1`；下半身模仿已解除，
+  让腿可以按题调整，球拍手腕的朝向模仿也按现行开关释放。
+- **等待和收拍：** 等待时接近准备状态的正奖励为 `2`，只在目标仍可原地够到时生效。
+- **压制坏动作：** 包括脚滑/拖脚/过快、过度伸臂、腰部扭转、击球窗倾斜/角速度/脚速度/上下
+  晃动、力矩饱和，以及直立、关节速度、动作变化、关节限位和异常接触等正则项；脚朝向惩罚由
+  当前发射配方设为 `-0.3`。
+
+此外，现役 `HOPEPingPongVirtualBall` 仍启用由**实际执行球拍状态**推演的解析 outcome Reward：
+解析过网 `20`、解析落点 `30`、解析旋转 `5`。`vb_metrics_only=true` 不会关闭这三个 task 自带项；
+它与本 task 已开启的 `virtual_ball=true` 是冗余 OR 条件。解析过网和落点都有完整合法回球前的稠密部分分，所以它们是训练
+shaping，不是独立物理裁判。`physical_ball=true` 的 Phase-A engine-integrated 来球诊断目前才是
+**只记指标、不进 Reward**：位置由 PhysX 积分，场馆 aero/table bounce 由代码驱动；它没有开启拍球冲量，
+球会穿过机器人。减速入位、额外拍面引导和额外球拍引导当前都关闭。
+目标关节范围裁剪和摔倒/跟踪终止另属硬保护，不靠其他 Reward 抵消。详见
+[Reward 真值审计](experiments/2026-07/EXP-P1-REWARD-PHYSICAL-TRUTH-AUDIT-20260715.md)。
+
+**效果与差距：** 有的独立初始化达到 100/100，另一个只有 20/100。结果属于整套配方，不能归因
+到某一个 Reward 项。拍面尺和稳定性解决前冻结 Reward；理想状态还需用单变量配对证明各项贡献，
+并验证融合后不伤平衡和连续恢复。解除左侧非击球臂模仿、让它参与平衡的单-seed A0/A1 配对已经
+完成 checkpoint/合同/lineage 配对闭环；但 signed K100 尚未判卷，因此不属于已采用 Reward，也不再
+写作运行中；见
+[非击球臂实验](experiments/non_striking_arm_imitation_ablation_20260713.md)。
+
+### 4.5 时序与连续：一拍结束后怎么办
+
+**问题：** 总从同一静止姿态开始，只会学到“摆好再挥”；动作结束就传送回起点，也学不会收拍。
+
+**当前解法：** 每局 10 秒；25% 从站立等待开始，25% 从历史收拍状态开始；挥拍前随机等待
+0–2 秒；动作循环时不传送机器人；目标有 2 个控制周期延迟，并加入白噪声和连续相关噪声。
+
+连续实验按三层推进：`T0` 只在完整挥拍周期结束后换题；`T1` 在事件时刻揭示下一题，不传送、
+不清历史且冻结 Reward；只有 `T1` 仍学不会时，`T2` 才增加平衡债和准备状态引导。
+
+**效果与差距：** 当前训练见过更多起始状态，也能在完整动作后保留机器人状态；但 BankExam 每题
+仍单独重置，没有连续成绩。旧机器预注册与上述次序不一致，在配置、校验器和操作文档同步前禁止
+启动。详见[等待/恢复实验](experiments/2026-07/EXP-RECOVERY-TUPLE-ABC.md)。
+
+### 4.6 训练方法和机器人动力学
+
+当前使用 `rsl_rl` 的 PPO、4096 个 Isaac 环境和 50 Hz 控制，从随机初始化训练。零关节摩擦只为
+当前执行合同对账；训练配置虽打开来球轨迹真值仪，现有 Reward 和成绩卡都没有采用真实
+球拍—球物理接触结果。Reward 中的过网/落台是 achieved 球拍状态驱动的解析推演，不能改名为物理结果。
+
+原生 MuJoCo 微调是减少 Isaac→MuJoCo 迁移损失的候选训练引擎，不是 Gate3。现有候选仍有动作
+保护、源码闭包、严格 JSON 和 MJCF 路径四个正确性缺口，没有可信训练环境、并行接口、PPO 冒烟
+或微调结果，当前禁止合入。详见
+[原生 MuJoCo 训练实验](experiments/2026-07/EXP-MUJOCO-NATIVE-TRAINING.md)。
+
+### 4.7 当前成绩：Python BankExam 单拍解析诊断（不是 Gate3）
+
+这张卡回答：**在每题重置的 Python MuJoCo 评估器中，机器人是否触发倾倒，以及击球时产生的
+实际球拍状态被当前解析模型判为接触/合法落台的比例。** 它不等于球拍位置、速度、拍面三项全部
+命中，也不回答完整部署链是否真的把球打回去。
+
+实际链路是：四个独立初始化的第 2000 次迭代 checkpoint → 同一张 100 题考卷（正手 50、
+反手 50，每题重置）→ Python 在 MuJoCo 中推进机器人 → 击球时读取球拍状态 → 解析模型推算球
+结果。它虽然加载同一份厂商 MJCF 源文件，但使用不同的 Python runner 和 BankExam 动力学配方；
+同一 XML 不等于 Gate3 运行时。
+
+- **解析接触判定：** 拍中心距题目接触点小于 9.5 cm，且自动定向后的接近速度大于 0.3 m/s。
+  自动定向正是当前拍面正负号风险所在。
+- **解析合法落台推算：** 解析接触成立后，用数学接触冲量和 RK4 飞行推算球过网，并首次落在
+  对面台内；全过程没有 MuJoCo 球碰撞。
+
+| 动作 | 单拍：MuJoCo 机器人未触发倾倒 | 单拍：解析接触判定 | 单拍：解析合法落台推算 | 连续：未倾倒 | 连续：解析接触 | 连续：解析合法落台 |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| 正手 | `200/200 = 100%` | `137/200 = 68.5%` | `133/200 = 66.5%` | **未测** | **未测** | **未测** |
+| 反手 | `200/200 = 100%` | `170/200 = 85.0%` | `170/200 = 85.0%` | **未测** | **未测** | **未测** |
+
+判读边界：
+
+- “未触发倾倒”只检查 MuJoCo 中机器人根高度和倾角，没有球物理，更不是真机不摔。
+- 四个初始化的解析合法落台数为 `83、100、100、20`；平均数掩盖最差初始化，稳定性结论为失败。
+- 所有尝试最后都经过非倾倒的跟踪保护结束，不能据此证明收拍或连续稳定。
+- 正手 66.5% 低于约 80% 的正式候选目标；反手平均 85% 也因最差初始化只有 40% 且拍面尺有问题
+  不能晋级。当前也没有可信的拍面 p90、毕业用落点误差或连续成绩。
+
+第 4000 次迭代的后续卷已完成：
+
+| Seed | 解析合法落台 | 正手 / 反手 | 正手 signed composite | 物理 root fall |
+| --- | ---: | ---: | ---: | ---: |
+| 1 | `50/100` | `0/50` / `50/50` | `0/50` | 0 |
+| 2 | `88/100` | `38/50` / `50/50` | `0/50` | 0 |
+| 3 | `98/100` | `48/50` / `50/50` | `0/50` | 0 |
+| 4 | `0/100` | `0/50` / `0/50` | 无正手 strike | 21 |
+
+稳定门的 median/worst/spread/worst-side 全失败；详见
+[稳定性实验](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md)。这张表同时说明为什么不能只看
+旧解析落台数选 seed。
+
+2026-07-13 的运行态是：16 条 fresh 广度臂已分两波全部按负责人运营决定停止。第二波前
+重验最新 checkpoint 的迭代、76 tensor/`1,762,715` 浮点值 finite、schema-3、fresh lineage 和
+相邻合同 SHA，且确认 24/24 最近 K20 格的正手 signed composite 都为 0。只向各自登记
+PGID 发信号，无 broad kill/judge/真机命令；两 Pod GPU 已空。该动作不构成 q10 阈值正式判死或
+setting 晋级；完整曲线、
+checkpoint SHA 与信号边界见
+[拍面×plant 广度矩阵](experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md)。
+
+## 5. 阶段 2：虚拟球的不同到达状态
+
+### 5.1 目标和实验结构
+
+阶段 2 用虚拟来球分布生成题目，使球到达击球区域时的位置、速度、方向和高度变化，但只出当前
+动作接口确实有可能完成的题。出题器和按题适配器是共同前置，不是一个实验臂。
+
+正式比较应在同一批中做四臂：不额外适配的对照、站位钉死只用手臂补偿、站位随球平移并使用
+脚步、整套动作绕击球锚点旋转。移动时序是正交消融，同批比较先移动后挥、边移动边挥和不规定
+结构三种方案，而不是把这些方案预先排成固定串行课程。
+
+### 5.2 动作与出题
+
+**问题：** 直接放大目标框会生成动作根本做不到的题，也会把手臂、脚步、转身和重新定时混在一起。
+
+**计划解法：** 用正向模拟生成不同来球的到达状态；每题先过动作接口可行性检查，再按题调整
+整身朝向、时序和拍面。
+
+**当前状态：** 整身旋转、时间律和动作静态安全筛已有部分工具。7 段私有新视频已精确登记；其中
+高点拍压第五动作和左右横移四候选已通过 GVHMR 结构门，v12 未执行。既有 Franco 反手拉 B/C 的
+signed 重定位产生 `19/3` 个 proposal，但还没有一个拿到 schema-2/L0/L1/桌网/动力学证书。
+正式出题器、按题拍面/路径适配、站位与挥拍联合训练和留出卷均未完成，没有阶段 2 行为成绩。
+详见[动作空间重定位实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)
+和[新动作组合设计](experiments/motion_v12_high_press_lateral_teacher_20260713.md)。
+
+### 5.3 观测
+
+当前 179 维输入已包含目标球拍位置、速度、拍面和击球倒计时，可以承接一部分变到达题。只有在
+实验确认必须显式给出目标站位时，才考虑 181 维扩展；它不是当前配方。
+
+### 5.4 Reward
+
+正式对照使用同一份变到达题表，并冻结阶段 1 Reward、机器人动力学、训练预算和其他输入；只改变
+预注册的手臂/站位/整身转向等动作补偿机制。减速入位只加入“站位随球移动”的对应臂；固定站位
+臂不应得到同一项 Reward。
+
+### 5.5 时序、连续和切真球条件
+
+每个单拍臂都要另做不重置连续卷，检查上一拍收尾、等待和下一拍就绪是否一起成立。目前没有结果。
+
+切到阶段 3 前，至少需要：训练内按全部挥拍机会计分的正反手解析回球率各 ≥50%、变到达状态
+留出卷 ≥50%、虚拟预测与物理球落点差 <0.1 m，并且 `Gate3B` 评分链已建好。这里的训练内
+回球率不是 `T1` 连续能力证据，两者必须分开报告。当前所有切换条件均未满足。
+
+## 6. 阶段 3：物理球进入训练
+
+### 6.1 目标
+
+阶段 3 才让球从对面真实发出，在仿真中飞行、弹台并碰球拍；击球位置、预警时间和是否需要移动
+由球的轨迹自然产生。阶段 2 先测清动作和站位边界，才能把阶段 3 的失败归因到球物理或接触。
+
+### 6.2 动作与观测
+
+动作适配和站位能力沿用阶段 2。179 维输入预留的旋转参数当前填零；先通过无旋物理球，再按
+低旋 → 场馆旋转逐级加入旋转信息和随旋调整拍面/切向拍速的能力。
+
+### 6.3 Reward 与物理成绩
+
+先建立真实碰拍、过网和落台的物理结果，再决定落点、旋转等 Reward；不能继续用解析回球列冒充
+物理训练信号。每个动作仍需分别报告单拍与连续的未倾倒、物理击球和物理上台。
+
+### 6.4 当前状态
+
+Isaac 的来球飞行真值仪和拍面接触源码已有材料，但拍面接触尚无被接受的 Pod 运行、训练结果、
+完整物理成绩卡或跨引擎四格对账；球旋转传递也未完成实测标定。阶段 3 的行为训练尚未开始。
+
+## 7. 部署验证线：当前卡在哪里
+
+当前 179 维模型已经通过严格装载和负例拒绝。planner 与 C++ policy 之间的 formal tuple 现已把
+shared epoch、command/base sequence、side、target 和最新 tick-start base 绑定到同一 actor gate；
+exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimRT，runner 没有执行，因此还没有
+最终 ROS/Jazzy/AimRT 集成、厂商 MuJoCo 首个有效控制周期或固定考卷行为记录。当前 `Gate3-D0`
+只要求先完成一份单拍全链演示，不冒充连续对打，详见
+[Gate3-D0 实验](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md)和
+[exact build 卷宗](experiments/2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md)。
+
+2026-07-11 的 `13 PASS / 7 FAIL` 来自旧 110 维模型：3 次发球只有 1 次合法回球，出现 1 次摔倒
+和明显漂移。它证明旧链曾执行，不是当前 179 维模型的 Gate3 结果。
+
+## 统一工作队列（唯一优先级账本）
+
+队列按主题组织，方括号内数字是全局执行顺序。人类责任人只能写人，Codex/Claude 只写执行者；
+详细现状和命令留在对应实验记录。
+
+### 动作主线
+
+- **[1｜P0] Franco canonical 五动作库正式化。** 责任人 Franco；执行者 Codex。
+  反手拉槽位保留 C；五动作 × upper/full 十件正按
+  `shared zero-speed ready → selected core/window → shared ready` 重建，`adv2c3` 只作比较，
+  正手挡由两套 scope-specific 七关节拍面流形生成。当前仍是 `0/10` 获训练授权；下一证据是十件
+  candidate-only 构建与 Agibot MuJoCo 播放报告，随后闭合 grounded torque/contact、碰撞/地面/桌网、
+  新窗口行为、strict registry/consumer。S0 full 的旧 `7.37 cm` 地穿必须由新件独立重验；M0 stance
+  `0/4` 仍不占 RL GPU。详细状态与停止条件只在
+  [正式化实验](experiments/2026-07/EXP-MOTION-CANONICAL-LIBRARY-20260723.md)维护。
+
+### 尺子与阶段 1
+
+- **[2｜P0] 拍面正反与解析判分。** 责任人 franco；执行者 Codex；C2 的真实非零 plant 已证伪旧配对，
+  D2 永久不发；C3/D3 显式零摩擦 L1 与 fresh paired receipt `bb3cd749...bbde` 已闭合，不得重跑。
+  真 blocker：这对 checkpoint 的 immutable K100 目前卡在一份 parity 合同上——Isaac（PhysX）会对
+  第 8 号关节做 velocity-limit 刹车，MuJoCo 没有等价语义，判卷器因此在第 0 题开始前就对 C3/D3
+  两侧 fail closed（`scheduled=50/side`、`asked=0`，没有任何 K100 成绩）；该 parity 合同修复前
+  paired exact judge 保持 NO-LAUNCH（见
+  [C3/D3 K100 v2 操作页](operations/run_phase1_signed_face_c3d3_k100_v2.md)）。
+  下一证据是用同一 immutable K100 判这对 checkpoint，再决定是否启动一个 seed 的“热启动/从零 ×
+  线性引导关/开”四个机制单元到相对 checkpoint
+  `+200/+500/+1000`。只有胜者连同匹配对照才解锁第二 seed，不再给已失败配方复制四 seed。
+  [量尺实验](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)；
+  [机制漏斗](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)
+
+### 部署验证
+
+- **[3｜P0] W/Y 179 维模型的 0.5 秒同卷 Gate3-D0 单拍全链。** 责任人 franco；执行者 Codex；
+  两份 `model_6700` 的唯一定位、finite、`179→31`、零写入 `--plan` 和 fresh ONNX 结构/推理检查均
+  已闭合，但 checkpoint 的 `training_contract_lineage_exact=0`，ONNX 的
+  `training_contract_exact=0`。当前最短 P0 是 exact-lineage remediation 与重新导出；过门后才实现
+  “同一 100 题 → 六元发球 →
+  同球 `task_revision` → owned 生产 planner → C++ runner → 同一厂商 MJCF/plant”的适配器，并逐题
+  输出 attempt/completion/hit/return/fall/deadline。exact lineage 与适配器通过前不启动行为、不使用
+  隔离中的旧连续演练脚本；W/Y 仍只是演示优先候选，U 是稳定备选。
+  [半秒卷宗](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)；
+  [Gate3-D0 实验](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md)
+- **[7｜P1] Gate3 历史谱系复核。** 责任人 yikang；执行者 Codex/direct；V9 force 分支未向
+  `set_external_force_and_torque` 传 `position_data`，所谓 pelvis-COM force 实际施于 link origin；旧
+  A/B_FORCE/AB_FORCE/AB_FORCE_FRESH 曲线只能保留为 mechanics/throughput，不得作平衡因果结论。
+  RallyV10 W&B `qpl08mug` 已终档 iteration `9999`，但没有 MuJoCo/Gate3；V11 fast/prestrike 分别停在
+  `2816/18274`，已有 stand/trajectory 代理也不是正式行为 Gate。下一证据是在当前 `main` 重做位置语义
+  正确的独立 physics/reference oracle，再走同运行链 vendor Gate3；旧分支不得整体合并。
+- **[OPS｜P1] RallyV10 真机单命令部署与板载 VRPN。** 责任人 dongc1；执行者 Codex；分支
+  `hitter`。把 CMTracker/VRPN、relay 与 planner 收敛到 HDU，Laptop 只保留完整 SSH/TTY
+  入口，并为 MDU HAL、SHADOW、真机 runner 提供互不自动串联的单命令脚本。下一证据：脚本
+  静态/打包检查、HDU preflight，以及 `run_pingpong_end_to_end.md` 9.9 的可复现终端矩阵；不由
+  Codex 执行真机 MOTION。
+- **[16｜P1] 全动作库可行性复扫 + 投影钉根约定修复。** 责任人 yikang（投影工具在其分支）；
+  执行者 Codex 可代跑扫描。人话：yikang 反手"结构性死亡"判决经 07-22 三路对抗复核改判
+  **应复扫**——伪影机制＝投影把骨盆根钉成 reset 单位姿态、删掉反手 ~40-60° 转体 +
+  stationary 剖面取消 -40° 归一化（仓库内有同 clip 100%→0% 的 A/B 反证）。Franco 拍板：
+  不止反手，注册表全部现役 `_cal` 族 + 全部投影变体都按"源几何 × 投影后 × 两速度档"矩阵
+  重扫，先修投影约定（钉根保留源骨盆 yaw + 被删根旋转角进合同 fail-loud）再全量重扫；
+  修复合入前 stationary-v2 家族所有"结构性排除"判决降级为存疑。下一证据：投影约定修复
+  合入 + 逐 clip 落账表（pod2 空卡跑，排位在判卷欠账之后）。
+  [扫描与修复方案](research/branch_fix_audit_20260722.md#全动作库扫描与修复方案franco-07-22-拍板不止反手全库都扫都要修好)
+- **[15｜P2] 部署侧站立异响四欠账——源码已修，待 Linux 编译回归。** 责任人 franco；执行者
+  Claude。人话：站立异响 PDF 排名 2/3/6 的三项取证欠账 07-22 已改（只动 agi/，默认行为逐字节
+  不变）：两条站立路径增益来源启动摘要 + static handoff 时间戳事件进 CSV/日志 + 可选审计降档
+  旗标；build 指纹（git SHA+脏标）每次运行第一行打印；obs/trace CSV 尾部纯增 31 列实测力矩
+  `tau_*`（SDK 不暴露电流/温度，已记档）。下一证据：Linux 构建机跑 portable Release +
+  run_tests 回归（macOS 无 vendor 栈，本机只做了改动块逐字 -Werror 编译+运行断言）。
+  [裁决与细节](research/branch_fix_audit_20260722.md#pdf-五缺陷对账部署侧四欠账-2026-07-22-已修)
+
+### 训练引擎与机器人物理
+
+- **[10｜P1] RallyV11 TOPP 加速动作证据复核。** 责任人 yikang；执行者 Codex；fast run 已停在
+  iteration `2816`，prestrike run 已停在 `18274`，当前无 live trainer。`model_6600` 的 stand-center
+  代理为 `0.8889` 且 `0/24` fall；后续 `model_11100` 代理反而下降到约 `0.714/0.730`。这些只说明
+  代理曲线未单调改善，没有 MuJoCo/Gate3 晋级结论。下一证据是把可保留的触球锁窗重定时思想在当前
+  `main` 选择性重做，并先过 exact 动作、MuJoCo oracle 与冻结行为卷；不得整体 merge 旧分支。
+- **[4｜P0] 原生 MuJoCo 训练候选。** 责任人 franco；执行者 Codex；下一证据：修正四个源码缺口
+  后复核，再测单环境核心、并行吞吐和一次限预算 PPO 更新。[实验](experiments/2026-07/EXP-MUJOCO-NATIVE-TRAINING.md)
+- **[11｜P0] 平衡×时序 24 格广度矩阵（吸收 Wave A/B）——已发射，收口进行中。** 责任人 franco；
+  执行者 Claude；执行分支 `Franco_codex/balance-temporal-matrix-20260720`（已并入 main）。人话：把
+  "动作平滑怎么给"（N 无平滑 / C 现役全身 raw action-rate / H 恢复期腿腰执行目标铰链）和"稳定机制
+  给哪种"（S0 无 / S1 挥拍后安顿债务包 / S2 无参考支撑包 / S3 下肢软模仿）在 W、V 两个 `model_6700`
+  诊断父本上交叉成 24 格，单 seed 3。**2026-07-20 全部 24 格发射；同日实测本任务代际同卡 SM 分时
+  （4 条/卡 ≈15 s/iter）后把筛选终点前移到 +4000（终档约 model_10700），并按 Franco 授权动态清退：
+  N 交互 6 格永久停（容量让位非科学负例）、8 格暂停待续，台账在两 pod 的
+  `scheduling_ledger_20260720.jsonl`。已到线收口：`w_h_s0`/`v_c_s0`/`v_p035`/`v_h_s0`（终档
+  model_10700–10900）。中期信号（非终判）：T 轴 C≫H——V 父本回球/拍 0.90 vs 0.54、fall 无差，
+  H 行淘汰待全格 +4000 终判；S 轴四档暂无分离。** Wave A probe10 科学位与 Wave B 六格队列由本矩阵
+  取代（superseded），probe9 六份 receipt 只作 runtime mechanics 证据；父本谱系 mismatch 故后代
+  formal-exact ineligible，胜者机制须另在 exact-lineage（qdot `model_1000` 族）重跑正名。机器真源：
+  [矩阵实验](experiments/2026-07/EXP-P1-BALANCE-TEMPORAL-MATRIX-20260720.md)、
+  [队列配置](../configs/phase1_balance_temporal_matrix_20260720.yaml)、
+  [操作页](operations/run_phase1_balance_temporal_matrix.md)。
+- **[12｜P0] Wave P push 鲁棒性波（Franco：push 是平衡的希望）——进行中。** 责任人 franco；执行者
+  Claude。人话：现役配方从不推机器人（`push_robot=None` 对齐 HITTER），三篇对标论文全带 push；本波
+  在 C+S0 配方（对照=矩阵 `w_c_s0`/`v_c_s0`，不重复买）上测 18 臂——速度冲击大小 ±0.2/0.35/0.5/0.8
+  m/s、方向（+yaw / +全角速度）、频率（1–3 s 高频）、以及**同冲量力推**（68 N/155.4 N × 0.30 s @
+  pelvis link 原点，诚实标注非 COM）比较"瞬时速度注入练回正 vs 持续力练抵抗"。速度/力臂已上卡 12 条，
+  其余按空槽队列补发。RunPod 两次重启 Pod1 容器（19:43Z/04:35Z），值班 routine 自动整机重建。
+  [push 实验](experiments/2026-07/EXP-P1-PUSH-ROBUSTNESS-20260721.md)。
+- **[14｜P1] 抖动-地面-脚部消融波（Wave CGF）——已预注册，闸门锁定。** 责任人 franco；执行者
+  Codex。人话：站立异响 E1 复核 PDF + Franco 07-22 八条里训练侧成立的欠账各买一臂——action_rate
+  剂量曲线 `ar02/ar05/ar10`（-0.2/-0.5/-1.0）、机器人材质摩擦抬高 `grip`、随机凹凸地形 `rough`
+  （fresh-from-random 20001 updates，平地 checkpoint 禁止静默上粗糙地）、mjlab 落地冲击罚 `footrw`
+  （-3e-3，无量纲超阈倍数量纲）、软惩罚减负 `penlight`（六个软惩罚降 ~1/3，含 07-22 新接线的蹭滑/拖脚剂量键，Franco 第 8
+  条）、被动阻尼折 kd `kdpassive`（源码未接线，闸门锁死）。父本只用 W，对照＝矩阵 `w_c_s0`
+  不重复买；续训臂 13301 updates（到 ~20001，对齐 2万-2.5万 目标下沿）。三件套+单测已落盘
+  （47/40/38 项全绿）。下一证据：07-22 wiring 合并钉 40-hex + groundfoot 闸门翻真 → pod 恢复后
+  一格 probe smoke 通过即按 launch_order 发全矩阵。
+  [预注册](experiments/2026-07/EXP-P1-CHATTER-GROUND-FOOT-WAVE.md)
+- **[17｜P1] 集成升级波（Wave IU）——冻结；只作兼容性压力测试候选。** 责任人 franco；执行者
+  Codex。2026-07-23 独立审计推翻“组件已分别证明有效”的表述：`action_acc` 已接线但没有行为证据，
+  qbar×action-rate、速度推×力推和摩擦/地形组合均未做可归因验证；CGF 也尚未运行。现有
+  `combo_franco` 仍绑定已淘汰的反手 B，runner 只替换第二条 motion、没有同步重绑击球相位，禁止按旧
+  命令发射。先完成五动作库和 matched full-body 消融；之后若 Franco 明示解除发射冻结，再把 IU 当作
+  “能否共存”的压力测试，而不是最终升级证明。
+  [预注册](experiments/2026-07/EXP-P1-INTEGRATED-UPGRADE-WAVE.md)
+- **[13｜P0] Wave Q 情报波——已有诊断，机制仍未定。** 责任人 franco；执行者 Codex。账面只有
+  `v_qbar` 到过终点，其余臂在 pod 重启时中断；没有同代、同卷、完整配对结果。所谓
+  `lower_body_pose_imitation=2.0` 同时把模仿窗从 `0.3/0.4` 放到 `10/10`，而 actor 无论开关都看见
+  31 关节参考，所以旧“全身有效”读数无法归因。动作库收口后首轮只做 matched 三格：
+  `U0`（upper 资产、腿模仿关）、`F0`（full 资产、腿模仿关）和 `F1`（与 F0 同一 full bytes、
+  只开 12 腿关节 position 模仿）；`U1` 静态 ready 腿教师延到第二阶段。首轮关闭 IU 升级包、
+  push、rough 和额外 locomotion，逐动作报告平衡与回球；旧队列不续发，发射冻结不变。
+  [动作库终审实验](experiments/2026-07/EXP-MOTION-CANONICAL-LIBRARY-20260723.md)
+
+<details>
+<summary>旧 Wave A/B/Q 发射与基础设施取证（历史，不是当前优先级账本）</summary>
+
+  Wave A 只比较同父本
+  `phase1_balance_action_slew_20260720` 队列的
+  W/V 的原 dense action-rate、无 action-rate 与腿/腰 processed-qdes slew hinge 六格，先过短合同 probe，
+  再按 `+200/+500/+1000` 看 fall、completion、return 与姿态/目标突变尾部。所有子项因显式新 Reward
+  合同而 formal-ineligible；结果只能筛机制，不能晋级 policy。Wave B 的 M0 moving teacher 已因 stance
+  `0/4` 拒绝；当前只设计 upper-only control 对静态 v4rg 下半身模仿或 non-demo constraint，其 exact
+  flags/矩阵必须先由源码/合同审计冻结，当前不猜。Wave A 的 probe2/3 verifier 缺口与 runtime 已保留；
+  probe4 W-C 在创建任何运行产物前因 Hydra key 错写 fail closed。probe5 已从 v4 no-clobber 根自然完成
+  W-C、V-C、W-N、V-N、V-H 五格并通过五份
+  [六格探针收据](DEFINITIONS.md#balance-probe-receipt-set)；W-H 在 trainer 启动前因为 supervisor 对
+  fork→exec 过渡期的 `/proc/<pid>/cmdline` 只采样一次而 fail closed。事后 exact PGID、child PID、
+  assigned GPU 与 Kit/cache locks 均为空，所以这是发射身份竞态，不是 processed-qdes 机制负例；五份
+  probe5 收据也不能与一次重试混成六格集合。probe6 改用 v5 no-clobber 根并加入同一 child 的有界
+  exact-identity wait，但 W-C 在 `2026-07-20T03:01:10Z` 于 trainer/probe supervisor 内、进入 trainer 前
+  fail closed：`_failure_audited_transaction_shell` 给 transaction 每行加两个空格，破坏了 shlex-quoted
+  multiline Python 参数，81 B `run.log` 只有 `IndentationError: unexpected indent`。locked launcher
+  无法绑定已快速退出的 child，且未发 signal；leader evidence、child evidence、binding、terminal、
+  checkpoint、receipt 与 RSL 均 absent。PID=PGID `2712318` 已双扫稳定 absent，Pod1 GPU0=`0 MiB / 0%`，
+  Kit/cache locks free；整批停止，其他五格未发。故 v5 是永久基础设施失败历史，不是 C/H/N 机制负例。
+  probe7 使用 v6 fresh root；W-C、V-C、V-N 均 natural exit=`0`、normal exit=`true`，两步各 `98304`
+  samples，并发布 exact receipt。W-N 于 `03:22:50Z` 到达 RSL/scene config 后冻结在
+  `Starting the simulation`，没有 Learning iteration、binding、terminal 或 receipt；180 s locked watchdog
+  对 exact 组依次 TERM/KILL，rc=`125`，事后进程组、GPU1 与 locks 全空。V-N 在该失败被确认前 6 s 已发，
+  后续自然完成且验证通过；W-H/V-H 未发。W-C/V-N 的成功和 exact argv 对比排除了 W parent、
+  `action_rate=0` 各自作为必要失败原因，因此只记 infrastructure transient，不改 Reward 结论或 timeout。
+  v6 immutable，三份收据不可与重试或新代混用。
+  [probe8 替换批](DEFINITIONS.md#balance-probe-generations) 使用
+  `/workspace/codexschema/phase1_balance_action_slew_v7_20260720` no-clobber 根与
+  `phase1_balance_slew_probe8_{w_c,w_n,w_h,v_c,v_n,v_h}_seed3_20260720`（第八版六格零训练合同探针，
+  不是行为成绩）。它绑定 [launch manifest](DEFINITIONS.md#balance-launch-manifest) 文件/内容 SHA-256
+  `887c0b9e097e50300d83eef27e587d112f70132958e6e8d9b68af74437fa7231` /
+  `13f92d5eda71e90abd6a14a1498c2afd98d3cb825cb26e2f5b74958b5a795f84`，config/runner SHA-256 为
+  `0c84613f05439237f6e36d37e0c9210984465d928b9c0cba50999bd8995145f9` /
+  `2bc9d59e21413a812a742529c6f3291f5710c384e0f4af7ee7098f33b25ba17d`。该批只发 W-N：它于
+  `2026-07-20T03:44:19.857Z–03:44:32.112Z` 在 Pod1 GPU1 的 `sim.reset` 阶段 SIGABRT，trainer
+  exit=`-6`、外层 rc=`134`，`run.log` 末行为 `malloc(): invalid size (unsorted)`；没有首个 Learning
+  iteration、binding、receipt 或 RSL run directory，其余五格未发。关键文件 SHA-256 为 claim
+  `8472ecf98edd269b50b03925be1ab778d5d195b816e2e8bcc8e0be29499ffa8b`、launch spec
+  `334ed262de0fbb4549087fcd4f5c216d3fe3c12f46954f45e545eafd4c71c23c`、run log
+  `b3437c878aa1b0d5d8e0646e01c6d3a3d1d822a042289411cdd0e79613c3f49c`、launch log
+  `edc4782f57d0c9e498351161fbe224f38a4db7a93f1fde588a681a5346e13ce8`、leader evidence
+  `b7f981c8d59cb92ef96b6d7851350386cf913212090df070105abd0fa27e8815`、terminal
+  `ad5c46a7755f9b684fa2acad94387e2ebfc08db4f9adc186336fe8e295356268`、child evidence
+  `c2d6c31bb231a30716bc5fc1c160f8f5855d9529102a2241ca1187c75a96226f`。事后 Pod1 v7 只有
+  `probes/w_n`，Pod2 v7 root 不存在；`03:49:31–03:49:33Z` 两轮 closure 均确认 exact PID/PGID、所有
+  probe8/v7 argv、六张 GPU compute context 与 Kit/cache lock holder 全空。故 probe8 是
+  **pre-RewardManager infrastructure** 失败，不是 C/N/H 机制结果；v7 immutable，禁止重试、补格或混收据。
+  [probe9 替换批](DEFINITIONS.md#balance-probe-generations) 使用 fresh no-clobber root
+  `/workspace/codexschema/phase1_balance_action_slew_v8_20260720`，六个
+  `run_name` 为 `phase1_balance_slew_probe9_{w_n,w_c,w_h,v_c,v_n,v_h}_seed3_20260720`（第九版六格零训练
+  合同探针）。config/runner SHA-256 为
+  `c7ec75a9917b8bdcf7976186633b021c69fb82e591898dad6b8d5c93cfdb37d5` /
+  `24b5f7831ad49c2b88266fed65c37e6e4bcdddaacab28ffa917fce66ef918db1`，manifest 内容/文件 SHA-256 为
+  `97c36e471fb8fc6b93fe212f20846de6697db518192e7a45c6618e5924947e28` /
+  `688599c2e01653bbb703553223a58e53656da1fe83d76aa7bcaa9f8a3ee75353`。该批已于
+  `2026-07-20T04:14:32Z–04:22:42Z` 严格按 W-N（Pod1 GPU0）→receipt+closure→W-C（Pod1
+  GPU1）→receipt+closure→W-H→V-C→V-N→V-H 逐格完成；每格都在下一格启动前 natural exit=`0`、
+  normal=`true`、first iteration=`true`、exact verifier passed，并完成进程/GPU/lock closure。六份 receipt
+  的 file/content SHA-256 分别为 W-N `ee8c5378…8c5ff` / `afce94d7…80f9`、W-C
+  `b948a4d8…18d5` / `e5daf19c…d3f0`、W-H `a80502c9…8111` / `32abf562…7e68`、V-C
+  `c3db6c38…edc1` / `ae30d1b5…3446`、V-N `06919a60…4bc7` / `bc99acd0…979c`、V-H
+  `b7a24015…1ec2` / `0905ad8f…32a7`；共同 verifier SHA-256 为 `d736a205…0ebc`。本地六收据集重验
+  succeeded，set SHA-256 为 `cc9ff5910992c46b9020654a78d8473ceb376bb5d9dc4adc984b90f454b3d9c8`。
+  当前两 Pod 六张 GPU、相关进程与 Kit/cache lock holder 全空。W-N GPU0 与 W-C GPU1 的成功只排除各自
+  在该卡必然失败，不证明 GPU 等价，也不覆盖 probe7/8 的 immutable 失败历史。
+  六格科学长训的 same-swapped mapping 已解锁命令生成。`origin/main=16263be5` 上曾渲染
+  `/tmp/phase1_balance_slew_train_commands.json`，SHA-256 为
+  `fc6f1ea38a5a823016d83675d56fc41b50b70dbde1bba60602b26d6c743802df`，但它从未执行 SSH；本 NOW
+  更新进入 `main` 后旧 commit/NOW authority 过期，禁止执行。发射前必须在最新 `origin/main`
+  重新 render 并审计。
+  current-main 命令制品 `be346f94cf6bf738da36804bf59f6a60bc5249f3c6bf5474abf617358db4b42a`
+  随后只发了 [v8 科学长训 attempt1](DEFINITIONS.md#balance-science-attempt-generations) 的 W-N（Pod1
+  GPU0）。它于 `2026-07-20T04:45:02Z–04:48:25.971Z` 停在 `sim.reset`，没有首个 Learning iteration、
+  Reward 指标或 checkpoint；locked launcher terminal rc=`125`，exact PID=PGID `2728928`、leader
+  starttime=`335835722`。外层 caller rc=`121` 不是另一种 trainer 错误，而是旧 post-failure audit 在
+  train stage 错误要求只有 probe supervisor 才会产生的 `trainer_child_evidence.json`。`04:49:40Z`、
+  `04:49:47Z`、`04:52:49Z`、`04:52:51Z` 四次闭包均确认 leader/PGID、GPU compute process 与
+  Kit/cache lock holder 全空；其余五格未发。结果 JSON 为
+  [`phase1_balance_action_slew_train_v8_attempt1_result_20260720.json`](../configs/phase1_balance_action_slew_train_v8_attempt1_result_20260720.json)，
+  SHA-256=`ac09b70a1df89a501165504f4c07158858687127172a8d9d5a6bdf1473e61a75`。v8 root immutable，
+  该次只算 infrastructure-only / non-science，不能给 C/N/H 机制结论。
+  fresh v9/probe10 候选继续保持 W-N Pod1 GPU0、W-C Pod1 GPU1 的 swap 与六格全局串行顺序；fresh
+  root 是 `/workspace/codexschema/phase1_balance_action_slew_v9_20260720`，config/runner SHA-256 为
+  `3bf5085ea8396513d162b9cce249dfb761b39b2827ec722959343c953683e59e` /
+  `0fff4515cbe7e62798e8c39f701851c46e68287c7321e7618161fa9dde4789ce`，manifest 内容/文件 SHA-256 为
+  `36ceb3c77dc056f4565378a92b03da58865378d86c5849085ba066631cea456c` /
+  `664375cb08263e6e7cdd82a3b8dd59e9e9ae6a9756333371677417ec4aa60c4a`。新 runner 的 failure audit
+  显式区分 probe/train：probe 仍严格要求 child evidence；train 要求不存在 probe-only child/identity
+  文件，并验证 launcher leader 组闭包。probe10 当前 **未发射**；必须先全局串行取得 fresh v9 同代
+  `6/6` receipt，才允许渲染任何科学 train 命令，禁止复用 probe9/v8 收据。probe receipt 不是科学
+  结果；六格机制状态仍 inconclusive / not adopted。该条目只有进入 `origin/main` 后才构成运行
+  authority。两波都不能替代
+  `T0/T1/T2` 连续恢复卷。[Wave A 实验](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md)
+
+  2026-07-22 前瞻风险挂账(yikang 只读核对,不改配方——reward 塑形属 franco lane):qbar 两臂的
+  `qbar_contract.qbar_wiring_confirmed` 已在 `configs/phase1_intel_wave_20260721.yaml` 翻 `true`,
+  渲染闸门已开,两臂进入可发射状态(07-21 晚 Pod1 boot 锁队列中实见 `w_qbar_res1` 排队等发)。
+  但该合同 `wiring_note` 的人话仍写 margin "0.08 rad",而实现与 CLI 键是行程比例
+  `qdes_limit_barrier_margin_frac`(hope_rewards: `d=min(q−lo,hi−q)/(hi−lo)`;0.08 行程比在肩偏航
+  ≈26° 罚带、在腰侧倾≈3.2°,同一数字两种语义差一个量级)。main `5c23a3f6` 只修了键名漂移
+  (margin→margin_frac),rad vs 行程比例的语义裁定仍悬空;按 wiring_note 自己的条款"与本段人话
+  不符时必须先修订预注册再渲染命令",qbar 臂在读数/采信前应先由 franco 裁定 margin 语义并修订
+  预注册,否则两臂读数按"量尺语义未定"处理。
+  2026-07-22 裁定（Claude 查 Jiayi 源码，证据确凿）：v14 的键名即
+  `all_joint_qdes_barrier_safe_margin_fraction: 0.08`（HitterV11 分支 V14 yaml 第 28 行）——**行程
+  比例**，与我们 `qdes_limit_barrier_margin_frac` 实现完全同语义；wiring_note 的"0.08 rad"是人话
+  笔误、已修订。qbar 两臂读数可采信；感谢 yikang 的只读挂账。
+
+</details>
+
+- **[9｜P0] Hitter 实机 planner 时序与训练反应时间基线。** 责任人 yikang；执行者 Codex；分支
+  `codex/hitter-lowerbody-mujoco-alignment`，基于 `hitter`。2026-07-16 用户将本轮顺序收敛为：
+  先审计最新 `main`、`hitter` 与 frame0-wait-v2 已有实现，再补齐端到端球样本时间戳/短 TTS、
+  planner 求解限频与回调阻塞隔离、逐球结构化可观测日志，以及训练来球时间分布与最大反应时间
+  监控。原下半身 Reward/接口对齐材料保留但暂缓扩展，其余连续挥拍、可行性、mid-swing/TOPP
+  等项进入后续 TODO。下一证据是可复现的 remote-reuse 台账、schema/runner/planner 单测、离线
+  timing replay 与训练指标测试；这些证据完成前不启动长跑 PPO、不执行真机 MOTION。
+
+### 连续能力与后续接口
+- **[5｜P1] 等待/恢复结构卷。** 责任人 franco；执行者 Codex；下一证据：同步机器合同后，用冻结
+  Reward 先跑 `T0`，再跑 `T1`；只有前两层仍失败才允许 `T2` 平衡 shaping。并行单拍 slew 诊断不改变
+  此顺序。[实验](experiments/2026-07/EXP-RECOVERY-TUPLE-ABC.md)
+- **[6｜P1] Hitter V3 规划器—policy 输入对齐。** 责任人 jiayi；执行者 direct；下一证据：旧观测
+  排列、训练第 24100 次迭代 checkpoint 归属和第 7 版击球平面三项来源对齐。
+- **[8｜P1] 110 维 RallyV10 左腕/恢复修复。** 责任人 dongc1；执行者 Codex；分支 `hitter`；
+  V10 fresh run 的训练曲线已显示击球精度成熟，但 yaw-rate 约 `0.46-0.52 rad/s`、左腕超差率约
+  `0.42-0.54`，尚未证明修复通过。当前工作：在不改 V10 基线的前提下增加独立
+  constrained-resume 任务，从当前 V10 checkpoint 严格续训，固定最终 planner/yaw 分布，对左腕
+  position+velocity 做全阶段独立模仿并收紧 yaw-rate。下一证据：host 合同门、Isaac mechanics
+  preflight 与用户手动发射的 resume run；Codex 不停止、不启动 PPO。
+
+队列排序与算力规则见[跑批作战手册](runbook.md#统一队列排序与算力纪律)。完整实验索引只在
+[实验登记册](experiments/README.md)维护；本页不再复制实验索引或最近测试流水。
+
+---
+
+<details>
+<summary>展开 2026-07-19 至 2026-07-22 的历史 Pod、probe 与实验流水（非当前队列）</summary>
+
+## 历史运行流水（非当前运行态）
 
 **2026-07-22 pod 状态：上午失联、下午原端口恢复。** 两 pod 上午全部 SSH 端点超时（本机网络
 已排除），下午实测以**原端口**恢复：pod1（开机 ~2 h，重启过）三卡全被 yikang 四条训练占用
@@ -508,561 +1090,4 @@ production/vendor 前。G05/G06 仍为 `Partial`，`Gate3-D0` 仍为 `Open`。
   checkpoint execution contract 和 main 账本；
   每通过一层就合 main，不把多个未验层绑成一个大任务。
 
-## 1. 当前一套训练是怎样完整跑起来的
-
-动作、题目、观测、Reward、PPO 和判卷不是几根互不相关的配置轴。它们按下面的顺序组成一套
-完整训练配方（setting）；其中任何一层改变，都会产生一套新配方。
-
-1. **先出一道题。** 阶段 1 的题目规定用正手还是反手、来球速度，以及击球时球拍应达到的
-   位置、速度、拍面方向和时刻。训练题与正式考试题分开。
-2. **再给一段全身参考动作。** 当前正手和反手参考来自 `v4rg_runtime_order_v3` 动作对。它提供
-   全身姿态和时序参照，不直接等于这道球题的答案；现役 Reward 只模仿其中的上半身。
-3. **把“机器人现在怎样”和“本题要什么”一起给 policy。** 当前 179 维输入包括机器人状态、
-   上一步动作、参考动作、目标球拍位置/速度/拍面、距击球时刻还有多久，以及正反手类型。
-4. **policy 每 20 ms 输出一次动作。** 输出是 31 个目标关节位置，不是力矩或球拍轨迹；目标先过
-   关节范围保护，再由 Isaac 的关节控制器执行。
-5. **Isaac 同时推进 4096 个机器人。** 每个环境使用同一规则但不同采样；当前配方把 31 个关节
-   摩擦设为零，以便和现有独立考卷合同对账。这不是标定后的真机物理。
-6. **Reward 告诉 policy 哪种行为更好。** 一部分模仿上半身参考动作，另一部分分别检查击球时
-   球拍的位置、速度和拍面；下半身可以按题调整，脚步正则与硬保护限制明显坏姿态。
-7. **PPO 根据这些得分更新 policy。** 当前正式训练从随机初始化开始，计划 17000 次迭代；本页
-   成绩卡考的是第 2000 次迭代保存的 checkpoint。
-8. **训练外再判卷。** checkpoint 先进入独立 Python BankExam。质量晋级必须先有可信判分和
-   跨初始化稳定性，再过厂商 `Gate3/Gate3B`；只检查运行链能否接通的 `Gate3-D0` 可并行推进，
-   但不产生质量晋级。
-
-一句话概括：**题目给出本拍答案，参考动作给出姿态和时序参照，179 维输入把两者交给 policy，
-policy 输出 31 个关节目标，PPO 根据 Reward 改进它，独立考卷再检查实际行为。**
-
-## 2. 课程、连续能力和部署验证是三条不同的线
-
-### 2.1 课程阶段：机器人正在多学会哪一种球技
-
-1. **阶段 1：固定点养成。** 固定站位、击球位置、目标落点和无旋条件，只改变来球速度。
-2. **阶段 2：虚拟球的不同到达状态。** 球到达击球区域时的位置、速度、方向和高度开始变化；
-   近球可以只用手臂，远球允许移动站位和脚步，也可调整整套动作的朝向、时序和拍面。
-3. **阶段 3：物理球进入训练。** 球在仿真中真正从对面发出、飞行、弹台并与球拍接触；先做
-   无旋或低旋，再加入旋转。旋转是否以后单列阶段 4，尚未决定。
-
-所以，**阶段 2 大体是“适应不同到达状态”，“动起来”是阶段 2 的一种解法；阶段 3 的关键变化
-是物理球真正进入训练。**
-
-### 2.2 连续能力：每个课程阶段都要另考
-
-阶段 1、2、3 都应分别报告单拍和连续成绩。连续能力必须在同一条不重置的序列中同时做到：
-
-1. 上一拍结束后吸收身体的角动量和失衡，不摔、不滑、不撞桌；
-2. 进入允许范围内的等待动作或准备姿态；
-3. 下一球在任意有效时刻出现时，能在截止时间前启动合适动作。
-
-组件消融只解释贡献。只收好上一拍、只模仿等待姿态，或只在固定时刻能启动下一拍，都不算完成。
-
-### 2.3 部署验证：不是课程阶段
-
-- Python BankExam 测的是 policy + Python 评估器 + BankExam 的 MuJoCo 机器人动力学配方，
-  不包含 planner、消息、生产 C++ runner 或完整厂商运行时。
-- `Gate3` 把 planner、消息、生产 C++ runner 和厂商 MuJoCo 串起来，先看整链能否稳定完成。
-- `Gate3B` 复用同一完整运行链，再正式记录击球、回球和连续质量。
-- 真机还要另过 [G07](gates/G07_mujoco_to_real.md) 的安全门。
-
-## 3. 共用前提：先保证尺子可信
-
-这不是课程阶段。所有阶段都依赖三个共同条件：
-
-- **文件和接口对得上。** 当前动作、训练/考试题、179 维排列、checkpoint 和导出合同已经做
-  内容绑定，不一致就拒绝继续；但合同一致只说明文件对上，不说明物理对上。
-- **判分不骗人。** 2k/4k 的正手原始拍面误差多在 165–174°，旧解析判分器又会
-  自动翻转法向；4k 已出现 parsed `48/50` 但 signed composite `0/50` 的同 checkpoint 反例。源码层
-  `n/-n` 负控和有符号误差已通过；行为通过条件仍要求 fresh canary 和同一考卷重跑。详见
-  [拍面判分复核](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)。
-- **机器人物理能外推。** 当前零关节摩擦只便于复现；历史非零摩擦数字存在单位/语义问题。
-  通过条件是从真实数据拟合共享动力学参数，再分别用 Isaac、MuJoCo 适配器和厂商运行时验证。
-
-当前只有第一项较完整；后两项未过。因此任何解析高分都不能直接称为物理回球或真机基线。
-
-## 4. 阶段 1：固定点单拍基线（当前阶段）
-
-### 4.1 目标和离理想还有多远
-
-机器人站在固定位置，用指定正手或反手，在固定击球位置把不同速度的无旋来球打向固定落点。
-它要在保持平衡的同时，让球拍在正确时刻达到正确位置、速度和朝向。
-
-- **研究推进最低线：** 有效同卷中每个动作的解析回球率至少 50%，只用于判断训练管线是否值得
-  继续扩题，不是部署质量线。
-- **正式候选质量目标：** 跨独立初始化稳定达到每动作约 80%，同时拍面误差 p90 小于 15°、
-  落点误差小于 0.3 m、零摔，并且判分尺可信。
-
-现有结果只在平均解析回球率上越过最低线；初始化稳定性、拍面、落点毕业指标和连续能力都未过。
-
-### 4.2 动作：身体应该怎样挥
-
-**问题：** 只给球拍终点，机器人可能用不安全或不可连续的身体动作碰到目标；死跟参考动作，
-又可能无法满足题目要求的拍面和拍速。
-
-**当前解法：** 使用经过关节/刚体顺序整理的正反手动作对
-（`v4rg_runtime_order_v3`）。触球时由题目给出的球拍目标主导，其余时段保留上半身动作模仿；
-下半身不再被参考动作锁死。
-
-**效果与差距：** 这套动作已进入当前训练和考卷合同，能产生可比较结果；但没有可信证据证明它
-优于其他动作。Franco/v6/v7 新动作只完成离线安全和重定位检查；V5 专业动作有历史训练与诊断，
-但没有在当前严格同卷下获胜。两类都未进入现行配方。
-
-### 4.3 观测与输出：policy 知道什么、控制什么
-
-**问题：** policy 看不到本题要求的拍面就无法按题调整；训练和部署的输入排列不同也无法迁移。
-
-**当前解法：** 179 维输入在旧 175 维部署输入后增加目标拍面法向 3 维，并预留旋转参数 1 维；
-输出固定为 31 个目标关节位置。严格导出器和加载器检查维度和来源。
-
-**效果与差距：** 当前模型文件及负例已通过严格装载检查，但厂商运行链还没有当前 179 维模型的
-首个有效控制周期；目标拍面通道的真实延迟/噪声也未与其他目标通道完全同处理。
-
-### 4.4 Reward：每一组分数在教什么
-
-**问题：** 只模仿动作可能“挥得像”却没达到题目要求；直接用旧解析回球分训练又可能鼓励 policy
-钻拍面判分漏洞。
-
-**当前解法：** 现役 Reward 分为四组：
-
-- **回答这道球题：** 球拍位置匹配 `14`（宽度 `0.20 m`）、速度匹配 `10`
-  （`1.0 m/s`）、拍面匹配 `5`（`0.3 rad`）；三个连续核的乘积另有击球奖金 `5`，不是三项
-  过阈值后的二值分；接近目标的进度奖励为 `10`。
-- **保持可用动作形态：** 只模仿上半身的参考位置、朝向和速度，各项权重 `1`；下半身模仿已解除，
-  让腿可以按题调整，球拍手腕的朝向模仿也按现行开关释放。
-- **等待和收拍：** 等待时接近准备状态的正奖励为 `2`，只在目标仍可原地够到时生效。
-- **压制坏动作：** 包括脚滑/拖脚/过快、过度伸臂、腰部扭转、击球窗倾斜/角速度/脚速度/上下
-  晃动、力矩饱和，以及直立、关节速度、动作变化、关节限位和异常接触等正则项；脚朝向惩罚由
-  当前发射配方设为 `-0.3`。
-
-此外，现役 `HOPEPingPongVirtualBall` 仍启用由**实际执行球拍状态**推演的解析 outcome Reward：
-解析过网 `20`、解析落点 `30`、解析旋转 `5`。`vb_metrics_only=true` 不会关闭这三个 task 自带项；
-它与本 task 已开启的 `virtual_ball=true` 是冗余 OR 条件。解析过网和落点都有完整合法回球前的稠密部分分，所以它们是训练
-shaping，不是独立物理裁判。`physical_ball=true` 的 Phase-A engine-integrated 来球诊断目前才是
-**只记指标、不进 Reward**：位置由 PhysX 积分，场馆 aero/table bounce 由代码驱动；它没有开启拍球冲量，
-球会穿过机器人。减速入位、额外拍面引导和额外球拍引导当前都关闭。
-目标关节范围裁剪和摔倒/跟踪终止另属硬保护，不靠其他 Reward 抵消。详见
-[Reward 真值审计](experiments/2026-07/EXP-P1-REWARD-PHYSICAL-TRUTH-AUDIT-20260715.md)。
-
-**效果与差距：** 有的独立初始化达到 100/100，另一个只有 20/100。结果属于整套配方，不能归因
-到某一个 Reward 项。拍面尺和稳定性解决前冻结 Reward；理想状态还需用单变量配对证明各项贡献，
-并验证融合后不伤平衡和连续恢复。解除左侧非击球臂模仿、让它参与平衡的单-seed A0/A1 配对已经
-完成 checkpoint/合同/lineage 配对闭环；但 signed K100 尚未判卷，因此不属于已采用 Reward，也不再
-写作运行中；见
-[非击球臂实验](experiments/non_striking_arm_imitation_ablation_20260713.md)。
-
-### 4.5 时序与连续：一拍结束后怎么办
-
-**问题：** 总从同一静止姿态开始，只会学到“摆好再挥”；动作结束就传送回起点，也学不会收拍。
-
-**当前解法：** 每局 10 秒；25% 从站立等待开始，25% 从历史收拍状态开始；挥拍前随机等待
-0–2 秒；动作循环时不传送机器人；目标有 2 个控制周期延迟，并加入白噪声和连续相关噪声。
-
-连续实验按三层推进：`T0` 只在完整挥拍周期结束后换题；`T1` 在事件时刻揭示下一题，不传送、
-不清历史且冻结 Reward；只有 `T1` 仍学不会时，`T2` 才增加平衡债和准备状态引导。
-
-**效果与差距：** 当前训练见过更多起始状态，也能在完整动作后保留机器人状态；但 BankExam 每题
-仍单独重置，没有连续成绩。旧机器预注册与上述次序不一致，在配置、校验器和操作文档同步前禁止
-启动。详见[等待/恢复实验](experiments/2026-07/EXP-RECOVERY-TUPLE-ABC.md)。
-
-### 4.6 训练方法和机器人动力学
-
-当前使用 `rsl_rl` 的 PPO、4096 个 Isaac 环境和 50 Hz 控制，从随机初始化训练。零关节摩擦只为
-当前执行合同对账；训练配置虽打开来球轨迹真值仪，现有 Reward 和成绩卡都没有采用真实
-球拍—球物理接触结果。Reward 中的过网/落台是 achieved 球拍状态驱动的解析推演，不能改名为物理结果。
-
-原生 MuJoCo 微调是减少 Isaac→MuJoCo 迁移损失的候选训练引擎，不是 Gate3。现有候选仍有动作
-保护、源码闭包、严格 JSON 和 MJCF 路径四个正确性缺口，没有可信训练环境、并行接口、PPO 冒烟
-或微调结果，当前禁止合入。详见
-[原生 MuJoCo 训练实验](experiments/2026-07/EXP-MUJOCO-NATIVE-TRAINING.md)。
-
-### 4.7 当前成绩：Python BankExam 单拍解析诊断（不是 Gate3）
-
-这张卡回答：**在每题重置的 Python MuJoCo 评估器中，机器人是否触发倾倒，以及击球时产生的
-实际球拍状态被当前解析模型判为接触/合法落台的比例。** 它不等于球拍位置、速度、拍面三项全部
-命中，也不回答完整部署链是否真的把球打回去。
-
-实际链路是：四个独立初始化的第 2000 次迭代 checkpoint → 同一张 100 题考卷（正手 50、
-反手 50，每题重置）→ Python 在 MuJoCo 中推进机器人 → 击球时读取球拍状态 → 解析模型推算球
-结果。它虽然加载同一份厂商 MJCF 源文件，但使用不同的 Python runner 和 BankExam 动力学配方；
-同一 XML 不等于 Gate3 运行时。
-
-- **解析接触判定：** 拍中心距题目接触点小于 9.5 cm，且自动定向后的接近速度大于 0.3 m/s。
-  自动定向正是当前拍面正负号风险所在。
-- **解析合法落台推算：** 解析接触成立后，用数学接触冲量和 RK4 飞行推算球过网，并首次落在
-  对面台内；全过程没有 MuJoCo 球碰撞。
-
-| 动作 | 单拍：MuJoCo 机器人未触发倾倒 | 单拍：解析接触判定 | 单拍：解析合法落台推算 | 连续：未倾倒 | 连续：解析接触 | 连续：解析合法落台 |
-| --- | ---: | ---: | ---: | ---: | ---: | ---: |
-| 正手 | `200/200 = 100%` | `137/200 = 68.5%` | `133/200 = 66.5%` | **未测** | **未测** | **未测** |
-| 反手 | `200/200 = 100%` | `170/200 = 85.0%` | `170/200 = 85.0%` | **未测** | **未测** | **未测** |
-
-判读边界：
-
-- “未触发倾倒”只检查 MuJoCo 中机器人根高度和倾角，没有球物理，更不是真机不摔。
-- 四个初始化的解析合法落台数为 `83、100、100、20`；平均数掩盖最差初始化，稳定性结论为失败。
-- 所有尝试最后都经过非倾倒的跟踪保护结束，不能据此证明收拍或连续稳定。
-- 正手 66.5% 低于约 80% 的正式候选目标；反手平均 85% 也因最差初始化只有 40% 且拍面尺有问题
-  不能晋级。当前也没有可信的拍面 p90、毕业用落点误差或连续成绩。
-
-第 4000 次迭代的后续卷已完成：
-
-| Seed | 解析合法落台 | 正手 / 反手 | 正手 signed composite | 物理 root fall |
-| --- | ---: | ---: | ---: | ---: |
-| 1 | `50/100` | `0/50` / `50/50` | `0/50` | 0 |
-| 2 | `88/100` | `38/50` / `50/50` | `0/50` | 0 |
-| 3 | `98/100` | `48/50` / `50/50` | `0/50` | 0 |
-| 4 | `0/100` | `0/50` / `0/50` | 无正手 strike | 21 |
-
-稳定门的 median/worst/spread/worst-side 全失败；详见
-[稳定性实验](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md)。这张表同时说明为什么不能只看
-旧解析落台数选 seed。
-
-2026-07-13 的运行态是：16 条 fresh 广度臂已分两波全部按负责人运营决定停止。第二波前
-重验最新 checkpoint 的迭代、76 tensor/`1,762,715` 浮点值 finite、schema-3、fresh lineage 和
-相邻合同 SHA，且确认 24/24 最近 K20 格的正手 signed composite 都为 0。只向各自登记
-PGID 发信号，无 broad kill/judge/真机命令；两 Pod GPU 已空。该动作不构成 q10 阈值正式判死或
-setting 晋级；完整曲线、
-checkpoint SHA 与信号边界见
-[拍面×plant 广度矩阵](experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md)。
-
-## 5. 阶段 2：虚拟球的不同到达状态
-
-### 5.1 目标和实验结构
-
-阶段 2 用虚拟来球分布生成题目，使球到达击球区域时的位置、速度、方向和高度变化，但只出当前
-动作接口确实有可能完成的题。出题器和按题适配器是共同前置，不是一个实验臂。
-
-正式比较应在同一批中做四臂：不额外适配的对照、站位钉死只用手臂补偿、站位随球平移并使用
-脚步、整套动作绕击球锚点旋转。移动时序是正交消融，同批比较先移动后挥、边移动边挥和不规定
-结构三种方案，而不是把这些方案预先排成固定串行课程。
-
-### 5.2 动作与出题
-
-**问题：** 直接放大目标框会生成动作根本做不到的题，也会把手臂、脚步、转身和重新定时混在一起。
-
-**计划解法：** 用正向模拟生成不同来球的到达状态；每题先过动作接口可行性检查，再按题调整
-整身朝向、时序和拍面。
-
-**当前状态：** 整身旋转、时间律和动作静态安全筛已有部分工具。7 段私有新视频已精确登记；其中
-高点拍压第五动作和左右横移四候选已通过 GVHMR 结构门，v12 未执行。既有 Franco 反手拉 B/C 的
-signed 重定位产生 `19/3` 个 proposal，但还没有一个拿到 schema-2/L0/L1/桌网/动力学证书。
-正式出题器、按题拍面/路径适配、站位与挥拍联合训练和留出卷均未完成，没有阶段 2 行为成绩。
-详见[动作空间重定位实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)
-和[新动作组合设计](experiments/motion_v12_high_press_lateral_teacher_20260713.md)。
-
-### 5.3 观测
-
-当前 179 维输入已包含目标球拍位置、速度、拍面和击球倒计时，可以承接一部分变到达题。只有在
-实验确认必须显式给出目标站位时，才考虑 181 维扩展；它不是当前配方。
-
-### 5.4 Reward
-
-正式对照使用同一份变到达题表，并冻结阶段 1 Reward、机器人动力学、训练预算和其他输入；只改变
-预注册的手臂/站位/整身转向等动作补偿机制。减速入位只加入“站位随球移动”的对应臂；固定站位
-臂不应得到同一项 Reward。
-
-### 5.5 时序、连续和切真球条件
-
-每个单拍臂都要另做不重置连续卷，检查上一拍收尾、等待和下一拍就绪是否一起成立。目前没有结果。
-
-切到阶段 3 前，至少需要：训练内按全部挥拍机会计分的正反手解析回球率各 ≥50%、变到达状态
-留出卷 ≥50%、虚拟预测与物理球落点差 <0.1 m，并且 `Gate3B` 评分链已建好。这里的训练内
-回球率不是 `T1` 连续能力证据，两者必须分开报告。当前所有切换条件均未满足。
-
-## 6. 阶段 3：物理球进入训练
-
-### 6.1 目标
-
-阶段 3 才让球从对面真实发出，在仿真中飞行、弹台并碰球拍；击球位置、预警时间和是否需要移动
-由球的轨迹自然产生。阶段 2 先测清动作和站位边界，才能把阶段 3 的失败归因到球物理或接触。
-
-### 6.2 动作与观测
-
-动作适配和站位能力沿用阶段 2。179 维输入预留的旋转参数当前填零；先通过无旋物理球，再按
-低旋 → 场馆旋转逐级加入旋转信息和随旋调整拍面/切向拍速的能力。
-
-### 6.3 Reward 与物理成绩
-
-先建立真实碰拍、过网和落台的物理结果，再决定落点、旋转等 Reward；不能继续用解析回球列冒充
-物理训练信号。每个动作仍需分别报告单拍与连续的未倾倒、物理击球和物理上台。
-
-### 6.4 当前状态
-
-Isaac 的来球飞行真值仪和拍面接触源码已有材料，但拍面接触尚无被接受的 Pod 运行、训练结果、
-完整物理成绩卡或跨引擎四格对账；球旋转传递也未完成实测标定。阶段 3 的行为训练尚未开始。
-
-## 7. 部署验证线：当前卡在哪里
-
-当前 179 维模型已经通过严格装载和负例拒绝。planner 与 C++ policy 之间的 formal tuple 现已把
-shared epoch、command/base sequence、side、target 和最新 tick-start base 绑定到同一 actor gate；
-exact 源码也已通过 portable Release。但这次构建明确关闭 ROS/AimRT，runner 没有执行，因此还没有
-最终 ROS/Jazzy/AimRT 集成、厂商 MuJoCo 首个有效控制周期或固定考卷行为记录。当前 `Gate3-D0`
-只要求先完成一份单拍全链演示，不冒充连续对打，详见
-[Gate3-D0 实验](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md)和
-[exact build 卷宗](experiments/2026-07/EXP-GATE3-PLANNER-POLICY-RELEASE-BUILD.md)。
-
-2026-07-11 的 `13 PASS / 7 FAIL` 来自旧 110 维模型：3 次发球只有 1 次合法回球，出现 1 次摔倒
-和明显漂移。它证明旧链曾执行，不是当前 179 维模型的 Gate3 结果。
-
-## 统一工作队列（唯一优先级账本）
-
-队列按主题组织，方括号内数字是全局执行顺序。人类责任人只能写人，Codex/Claude 只写执行者；
-详细现状和命令留在对应实验记录。
-
-### 动作主线
-
-- **[1｜P0] Franco 五动作 + 横移老师。** 责任人 franco；执行者 Codex；反手拉 B 已完成
-  schema-2/FK、L0、vendor L1 与整轨桌网证书，下一证据是 vendor 动力学/平衡门；C 保持未消费后备，
-  不重复 B 已通过的链。S0/M0 exact-GMR v2 都已完成结构诊断，但 formal/schema2/training/hardware 全
-  false：S0 先建独立高球拍压题族；M0 四条 stance `0/4`，先修成“保留横移且末态回自身初始 stance”，
-  不得占 RL GPU。修复后再分别进入 schema-2、L0/L1、桌网和动力学。挡、拉、高点拍压
-  各用自己的题族；先每个候选一个因果格，不把候选当
-  seed 重复。只有离线证书通过后才分配 RL GPU。
-  另：[EXP-P1-TASK-REVISION-READY-SUCCESSOR](experiments/2026-07/EXP-P1-TASK-REVISION-READY-SUCCESSOR.md)
-  目前是孤儿实验——既不在实验登记册索引、也不在本队列，其 activation 升级草稿
-  （queue/runner/test 三个文件）仍在 Franco 本地未提交；待 Franco 决定存档还是续作。
-  [旧动作实验](experiments/2026-07/EXP-MOTION-SPATIAL-RETARGET.md)；
-  [新动作设计](experiments/motion_v12_high_press_lateral_teacher_20260713.md)
-
-### 尺子与阶段 1
-
-- **[2｜P0] 拍面正反与解析判分。** 责任人 franco；执行者 Codex；C2 的真实非零 plant 已证伪旧配对，
-  D2 永久不发；C3/D3 显式零摩擦 L1 与 fresh paired receipt `bb3cd749...bbde` 已闭合，不得重跑。
-  真 blocker：这对 checkpoint 的 immutable K100 目前卡在一份 parity 合同上——Isaac（PhysX）会对
-  第 8 号关节做 velocity-limit 刹车，MuJoCo 没有等价语义，判卷器因此在第 0 题开始前就对 C3/D3
-  两侧 fail closed（`scheduled=50/side`、`asked=0`，没有任何 K100 成绩）；该 parity 合同修复前
-  paired exact judge 保持 NO-LAUNCH（见
-  [C3/D3 K100 v2 操作页](operations/run_phase1_signed_face_c3d3_k100_v2.md)）。
-  下一证据是用同一 immutable K100 判这对 checkpoint，再决定是否启动一个 seed 的“热启动/从零 ×
-  线性引导关/开”四个机制单元到相对 checkpoint
-  `+200/+500/+1000`。只有胜者连同匹配对照才解锁第二 seed，不再给已失败配方复制四 seed。
-  [量尺实验](experiments/2026-07/EXP-P1-FACE-SIGN-FORENSIC.md)；
-  [机制漏斗](experiments/2026-07/EXP-P1-SIGNED-FACE-RESCUE-FUNNEL.md)
-
-### 部署验证
-
-- **[3｜P0] W/Y 179 维模型的 0.5 秒同卷 Gate3-D0 单拍全链。** 责任人 franco；执行者 Codex；
-  两份 `model_6700` 的唯一定位、finite、`179→31`、零写入 `--plan` 和 fresh ONNX 结构/推理检查均
-  已闭合，但 checkpoint 的 `training_contract_lineage_exact=0`，ONNX 的
-  `training_contract_exact=0`。当前最短 P0 是 exact-lineage remediation 与重新导出；过门后才实现
-  “同一 100 题 → 六元发球 →
-  同球 `task_revision` → owned 生产 planner → C++ runner → 同一厂商 MJCF/plant”的适配器，并逐题
-  输出 attempt/completion/hit/return/fall/deadline。exact lineage 与适配器通过前不启动行为、不使用
-  隔离中的旧连续演练脚本；W/Y 仍只是演示优先候选，U 是稳定备选。
-  [半秒卷宗](experiments/2026-07/EXP-P1-HALF-SECOND-SPRINT.md)；
-  [Gate3-D0 实验](experiments/2026-07/EXP-GATE3-CURRENT179-D0.md)
-- **[7｜P1] Gate3 历史谱系复核。** 责任人 yikang；执行者 Codex/direct；V9 force 分支未向
-  `set_external_force_and_torque` 传 `position_data`，所谓 pelvis-COM force 实际施于 link origin；旧
-  A/B_FORCE/AB_FORCE/AB_FORCE_FRESH 曲线只能保留为 mechanics/throughput，不得作平衡因果结论。
-  RallyV10 W&B `qpl08mug` 已终档 iteration `9999`，但没有 MuJoCo/Gate3；V11 fast/prestrike 分别停在
-  `2816/18274`，已有 stand/trajectory 代理也不是正式行为 Gate。下一证据是在当前 `main` 重做位置语义
-  正确的独立 physics/reference oracle，再走同运行链 vendor Gate3；旧分支不得整体合并。
-- **[OPS｜P1] RallyV10 真机单命令部署与板载 VRPN。** 责任人 dongc1；执行者 Codex；分支
-  `hitter`。把 CMTracker/VRPN、relay 与 planner 收敛到 HDU，Laptop 只保留完整 SSH/TTY
-  入口，并为 MDU HAL、SHADOW、真机 runner 提供互不自动串联的单命令脚本。下一证据：脚本
-  静态/打包检查、HDU preflight，以及 `run_pingpong_end_to_end.md` 9.9 的可复现终端矩阵；不由
-  Codex 执行真机 MOTION。
-- **[16｜P1] 全动作库可行性复扫 + 投影钉根约定修复。** 责任人 yikang（投影工具在其分支）；
-  执行者 Codex 可代跑扫描。人话：yikang 反手"结构性死亡"判决经 07-22 三路对抗复核改判
-  **应复扫**——伪影机制＝投影把骨盆根钉成 reset 单位姿态、删掉反手 ~40-60° 转体 +
-  stationary 剖面取消 -40° 归一化（仓库内有同 clip 100%→0% 的 A/B 反证）。Franco 拍板：
-  不止反手，注册表全部现役 `_cal` 族 + 全部投影变体都按"源几何 × 投影后 × 两速度档"矩阵
-  重扫，先修投影约定（钉根保留源骨盆 yaw + 被删根旋转角进合同 fail-loud）再全量重扫；
-  修复合入前 stationary-v2 家族所有"结构性排除"判决降级为存疑。下一证据：投影约定修复
-  合入 + 逐 clip 落账表（pod2 空卡跑，排位在判卷欠账之后）。
-  [扫描与修复方案](research/branch_fix_audit_20260722.md#全动作库扫描与修复方案franco-07-22-拍板不止反手全库都扫都要修好)
-- **[15｜P2] 部署侧站立异响四欠账——源码已修，待 Linux 编译回归。** 责任人 franco；执行者
-  Claude。人话：站立异响 PDF 排名 2/3/6 的三项取证欠账 07-22 已改（只动 agi/，默认行为逐字节
-  不变）：两条站立路径增益来源启动摘要 + static handoff 时间戳事件进 CSV/日志 + 可选审计降档
-  旗标；build 指纹（git SHA+脏标）每次运行第一行打印；obs/trace CSV 尾部纯增 31 列实测力矩
-  `tau_*`（SDK 不暴露电流/温度，已记档）。下一证据：Linux 构建机跑 portable Release +
-  run_tests 回归（macOS 无 vendor 栈，本机只做了改动块逐字 -Werror 编译+运行断言）。
-  [裁决与细节](research/branch_fix_audit_20260722.md#pdf-五缺陷对账部署侧四欠账-2026-07-22-已修)
-
-### 训练引擎与机器人物理
-
-- **[10｜P1] RallyV11 TOPP 加速动作证据复核。** 责任人 yikang；执行者 Codex；fast run 已停在
-  iteration `2816`，prestrike run 已停在 `18274`，当前无 live trainer。`model_6600` 的 stand-center
-  代理为 `0.8889` 且 `0/24` fall；后续 `model_11100` 代理反而下降到约 `0.714/0.730`。这些只说明
-  代理曲线未单调改善，没有 MuJoCo/Gate3 晋级结论。下一证据是把可保留的触球锁窗重定时思想在当前
-  `main` 选择性重做，并先过 exact 动作、MuJoCo oracle 与冻结行为卷；不得整体 merge 旧分支。
-- **[4｜P0] 原生 MuJoCo 训练候选。** 责任人 franco；执行者 Codex；下一证据：修正四个源码缺口
-  后复核，再测单环境核心、并行吞吐和一次限预算 PPO 更新。[实验](experiments/2026-07/EXP-MUJOCO-NATIVE-TRAINING.md)
-- **[11｜P0] 平衡×时序 24 格广度矩阵（吸收 Wave A/B）——已发射，收口进行中。** 责任人 franco；
-  执行者 Claude；执行分支 `Franco_codex/balance-temporal-matrix-20260720`（已并入 main）。人话：把
-  "动作平滑怎么给"（N 无平滑 / C 现役全身 raw action-rate / H 恢复期腿腰执行目标铰链）和"稳定机制
-  给哪种"（S0 无 / S1 挥拍后安顿债务包 / S2 无参考支撑包 / S3 下肢软模仿）在 W、V 两个 `model_6700`
-  诊断父本上交叉成 24 格，单 seed 3。**2026-07-20 全部 24 格发射；同日实测本任务代际同卡 SM 分时
-  （4 条/卡 ≈15 s/iter）后把筛选终点前移到 +4000（终档约 model_10700），并按 Franco 授权动态清退：
-  N 交互 6 格永久停（容量让位非科学负例）、8 格暂停待续，台账在两 pod 的
-  `scheduling_ledger_20260720.jsonl`。已到线收口：`w_h_s0`/`v_c_s0`/`v_p035`/`v_h_s0`（终档
-  model_10700–10900）。中期信号（非终判）：T 轴 C≫H——V 父本回球/拍 0.90 vs 0.54、fall 无差，
-  H 行淘汰待全格 +4000 终判；S 轴四档暂无分离。** Wave A probe10 科学位与 Wave B 六格队列由本矩阵
-  取代（superseded），probe9 六份 receipt 只作 runtime mechanics 证据；父本谱系 mismatch 故后代
-  formal-exact ineligible，胜者机制须另在 exact-lineage（qdot `model_1000` 族）重跑正名。机器真源：
-  [矩阵实验](experiments/2026-07/EXP-P1-BALANCE-TEMPORAL-MATRIX-20260720.md)、
-  [队列配置](../configs/phase1_balance_temporal_matrix_20260720.yaml)、
-  [操作页](operations/run_phase1_balance_temporal_matrix.md)。
-- **[12｜P0] Wave P push 鲁棒性波（Franco：push 是平衡的希望）——进行中。** 责任人 franco；执行者
-  Claude。人话：现役配方从不推机器人（`push_robot=None` 对齐 HITTER），三篇对标论文全带 push；本波
-  在 C+S0 配方（对照=矩阵 `w_c_s0`/`v_c_s0`，不重复买）上测 18 臂——速度冲击大小 ±0.2/0.35/0.5/0.8
-  m/s、方向（+yaw / +全角速度）、频率（1–3 s 高频）、以及**同冲量力推**（68 N/155.4 N × 0.30 s @
-  pelvis link 原点，诚实标注非 COM）比较"瞬时速度注入练回正 vs 持续力练抵抗"。速度/力臂已上卡 12 条，
-  其余按空槽队列补发。RunPod 两次重启 Pod1 容器（19:43Z/04:35Z），值班 routine 自动整机重建。
-  [push 实验](experiments/2026-07/EXP-P1-PUSH-ROBUSTNESS-20260721.md)。
-- **[14｜P1] 抖动-地面-脚部消融波（Wave CGF）——已预注册，闸门锁定。** 责任人 franco；执行者
-  Codex。人话：站立异响 E1 复核 PDF + Franco 07-22 八条里训练侧成立的欠账各买一臂——action_rate
-  剂量曲线 `ar02/ar05/ar10`（-0.2/-0.5/-1.0）、机器人材质摩擦抬高 `grip`、随机凹凸地形 `rough`
-  （fresh-from-random 20001 updates，平地 checkpoint 禁止静默上粗糙地）、mjlab 落地冲击罚 `footrw`
-  （-3e-3，无量纲超阈倍数量纲）、软惩罚减负 `penlight`（六个软惩罚降 ~1/3，含 07-22 新接线的蹭滑/拖脚剂量键，Franco 第 8
-  条）、被动阻尼折 kd `kdpassive`（源码未接线，闸门锁死）。父本只用 W，对照＝矩阵 `w_c_s0`
-  不重复买；续训臂 13301 updates（到 ~20001，对齐 2万-2.5万 目标下沿）。三件套+单测已落盘
-  （47/40/38 项全绿）。下一证据：07-22 wiring 合并钉 40-hex + groundfoot 闸门翻真 → pod 恢复后
-  一格 probe smoke 通过即按 launch_order 发全矩阵。
-  [预注册](experiments/2026-07/EXP-P1-CHATTER-GROUND-FOOT-WAVE.md)
-- **[17｜P1] 集成升级波（Wave IU）——已预注册，双闸门锁定。** 责任人 franco；执行者
-  Claude。人话：把已证明有用的升级一次性合体 go for a try——AR-0.2（jiayi V14 关节抽动
-  ＝现役 -0.1 太小）+ 全程高摩擦（静[1.0,1.6]/动[0.8,1.2]）+ mjlab 档①三项（落地罚
-  -3e-3、抬脚罚 -0.01 只进凹凸臂、二阶平滑 -0.05【源码未接线，action_acc 闸门锁全波】）
-  + qbar barrier（-0.65/0.08，与 AR 并存）+ 速度推 w_p035 与同冲量力推 w_f035 两组事件
-  并存。三臂：combo_franco（反手换 franco_bh_loop_b，franco 闸门等 franco_pipeline
-  三交付，Franco 排最前）/ combo_resume（W model_6700+13301）/ combo_fresh（凹凸
-  2-6 cm，fresh 20001 铁律）。对照＝矩阵 `w_c_s0` 不重复买；击球组 17/7/5/5/10 不动，
-  新增负项每步合计 ≲ 击球收入 1/3（比值审计表+probe 实测核对）；不做单项归因。三件套+
-  55 项单测已落盘。下一证据：action_acc 实现合入重钉 commit + franco_pipeline 三交付 →
-  排位在该战役完成且卡上有空槽之后。
-  [预注册](experiments/2026-07/EXP-P1-INTEGRATED-UPGRADE-WAVE.md)
-- **[13｜P0] Wave Q 情报波（速度泛化优先）——预注册中。** 责任人 franco；执行者 Claude。人话：按
-  2026-07-21 情报定四对臂——①在线速度混合 `speed_scale_range=[0.8,1.2]`（速度泛化是最高价值泛化轴，
-  拍面/引拍/脚步轴降级为评测工具）；②强 q_des 铰链 `-1.0`（现役 penalty 可能太小）；③全身模仿加强
-  `lower_body_pose_imitation=2.0`（全身学习可能很有用）；④全关节 qdes 限位 barrier（Jiayi v14 思想
-  去 top-k，`-0.65`/margin `0.08`）。caveat：Jiayi 起始分布未调好，不做臂。预算按新标准 +4000。以下为并入的 Wave A/B 历史：Wave A 只比较同父本
-  `phase1_balance_action_slew_20260720` 队列的
-  W/V 的原 dense action-rate、无 action-rate 与腿/腰 processed-qdes slew hinge 六格，先过短合同 probe，
-  再按 `+200/+500/+1000` 看 fall、completion、return 与姿态/目标突变尾部。所有子项因显式新 Reward
-  合同而 formal-ineligible；结果只能筛机制，不能晋级 policy。Wave B 的 M0 moving teacher 已因 stance
-  `0/4` 拒绝；当前只设计 upper-only control 对静态 v4rg 下半身模仿或 non-demo constraint，其 exact
-  flags/矩阵必须先由源码/合同审计冻结，当前不猜。Wave A 的 probe2/3 verifier 缺口与 runtime 已保留；
-  probe4 W-C 在创建任何运行产物前因 Hydra key 错写 fail closed。probe5 已从 v4 no-clobber 根自然完成
-  W-C、V-C、W-N、V-N、V-H 五格并通过五份
-  [六格探针收据](DEFINITIONS.md#balance-probe-receipt-set)；W-H 在 trainer 启动前因为 supervisor 对
-  fork→exec 过渡期的 `/proc/<pid>/cmdline` 只采样一次而 fail closed。事后 exact PGID、child PID、
-  assigned GPU 与 Kit/cache locks 均为空，所以这是发射身份竞态，不是 processed-qdes 机制负例；五份
-  probe5 收据也不能与一次重试混成六格集合。probe6 改用 v5 no-clobber 根并加入同一 child 的有界
-  exact-identity wait，但 W-C 在 `2026-07-20T03:01:10Z` 于 trainer/probe supervisor 内、进入 trainer 前
-  fail closed：`_failure_audited_transaction_shell` 给 transaction 每行加两个空格，破坏了 shlex-quoted
-  multiline Python 参数，81 B `run.log` 只有 `IndentationError: unexpected indent`。locked launcher
-  无法绑定已快速退出的 child，且未发 signal；leader evidence、child evidence、binding、terminal、
-  checkpoint、receipt 与 RSL 均 absent。PID=PGID `2712318` 已双扫稳定 absent，Pod1 GPU0=`0 MiB / 0%`，
-  Kit/cache locks free；整批停止，其他五格未发。故 v5 是永久基础设施失败历史，不是 C/H/N 机制负例。
-  probe7 使用 v6 fresh root；W-C、V-C、V-N 均 natural exit=`0`、normal exit=`true`，两步各 `98304`
-  samples，并发布 exact receipt。W-N 于 `03:22:50Z` 到达 RSL/scene config 后冻结在
-  `Starting the simulation`，没有 Learning iteration、binding、terminal 或 receipt；180 s locked watchdog
-  对 exact 组依次 TERM/KILL，rc=`125`，事后进程组、GPU1 与 locks 全空。V-N 在该失败被确认前 6 s 已发，
-  后续自然完成且验证通过；W-H/V-H 未发。W-C/V-N 的成功和 exact argv 对比排除了 W parent、
-  `action_rate=0` 各自作为必要失败原因，因此只记 infrastructure transient，不改 Reward 结论或 timeout。
-  v6 immutable，三份收据不可与重试或新代混用。
-  [probe8 替换批](DEFINITIONS.md#balance-probe-generations) 使用
-  `/workspace/codexschema/phase1_balance_action_slew_v7_20260720` no-clobber 根与
-  `phase1_balance_slew_probe8_{w_c,w_n,w_h,v_c,v_n,v_h}_seed3_20260720`（第八版六格零训练合同探针，
-  不是行为成绩）。它绑定 [launch manifest](DEFINITIONS.md#balance-launch-manifest) 文件/内容 SHA-256
-  `887c0b9e097e50300d83eef27e587d112f70132958e6e8d9b68af74437fa7231` /
-  `13f92d5eda71e90abd6a14a1498c2afd98d3cb825cb26e2f5b74958b5a795f84`，config/runner SHA-256 为
-  `0c84613f05439237f6e36d37e0c9210984465d928b9c0cba50999bd8995145f9` /
-  `2bc9d59e21413a812a742529c6f3291f5710c384e0f4af7ee7098f33b25ba17d`。该批只发 W-N：它于
-  `2026-07-20T03:44:19.857Z–03:44:32.112Z` 在 Pod1 GPU1 的 `sim.reset` 阶段 SIGABRT，trainer
-  exit=`-6`、外层 rc=`134`，`run.log` 末行为 `malloc(): invalid size (unsorted)`；没有首个 Learning
-  iteration、binding、receipt 或 RSL run directory，其余五格未发。关键文件 SHA-256 为 claim
-  `8472ecf98edd269b50b03925be1ab778d5d195b816e2e8bcc8e0be29499ffa8b`、launch spec
-  `334ed262de0fbb4549087fcd4f5c216d3fe3c12f46954f45e545eafd4c71c23c`、run log
-  `b3437c878aa1b0d5d8e0646e01c6d3a3d1d822a042289411cdd0e79613c3f49c`、launch log
-  `edc4782f57d0c9e498351161fbe224f38a4db7a93f1fde588a681a5346e13ce8`、leader evidence
-  `b7f981c8d59cb92ef96b6d7851350386cf913212090df070105abd0fa27e8815`、terminal
-  `ad5c46a7755f9b684fa2acad94387e2ebfc08db4f9adc186336fe8e295356268`、child evidence
-  `c2d6c31bb231a30716bc5fc1c160f8f5855d9529102a2241ca1187c75a96226f`。事后 Pod1 v7 只有
-  `probes/w_n`，Pod2 v7 root 不存在；`03:49:31–03:49:33Z` 两轮 closure 均确认 exact PID/PGID、所有
-  probe8/v7 argv、六张 GPU compute context 与 Kit/cache lock holder 全空。故 probe8 是
-  **pre-RewardManager infrastructure** 失败，不是 C/N/H 机制结果；v7 immutable，禁止重试、补格或混收据。
-  [probe9 替换批](DEFINITIONS.md#balance-probe-generations) 使用 fresh no-clobber root
-  `/workspace/codexschema/phase1_balance_action_slew_v8_20260720`，六个
-  `run_name` 为 `phase1_balance_slew_probe9_{w_n,w_c,w_h,v_c,v_n,v_h}_seed3_20260720`（第九版六格零训练
-  合同探针）。config/runner SHA-256 为
-  `c7ec75a9917b8bdcf7976186633b021c69fb82e591898dad6b8d5c93cfdb37d5` /
-  `24b5f7831ad49c2b88266fed65c37e6e4bcdddaacab28ffa917fce66ef918db1`，manifest 内容/文件 SHA-256 为
-  `97c36e471fb8fc6b93fe212f20846de6697db518192e7a45c6618e5924947e28` /
-  `688599c2e01653bbb703553223a58e53656da1fe83d76aa7bcaa9f8a3ee75353`。该批已于
-  `2026-07-20T04:14:32Z–04:22:42Z` 严格按 W-N（Pod1 GPU0）→receipt+closure→W-C（Pod1
-  GPU1）→receipt+closure→W-H→V-C→V-N→V-H 逐格完成；每格都在下一格启动前 natural exit=`0`、
-  normal=`true`、first iteration=`true`、exact verifier passed，并完成进程/GPU/lock closure。六份 receipt
-  的 file/content SHA-256 分别为 W-N `ee8c5378…8c5ff` / `afce94d7…80f9`、W-C
-  `b948a4d8…18d5` / `e5daf19c…d3f0`、W-H `a80502c9…8111` / `32abf562…7e68`、V-C
-  `c3db6c38…edc1` / `ae30d1b5…3446`、V-N `06919a60…4bc7` / `bc99acd0…979c`、V-H
-  `b7a24015…1ec2` / `0905ad8f…32a7`；共同 verifier SHA-256 为 `d736a205…0ebc`。本地六收据集重验
-  succeeded，set SHA-256 为 `cc9ff5910992c46b9020654a78d8473ceb376bb5d9dc4adc984b90f454b3d9c8`。
-  当前两 Pod 六张 GPU、相关进程与 Kit/cache lock holder 全空。W-N GPU0 与 W-C GPU1 的成功只排除各自
-  在该卡必然失败，不证明 GPU 等价，也不覆盖 probe7/8 的 immutable 失败历史。
-  六格科学长训的 same-swapped mapping 已解锁命令生成。`origin/main=16263be5` 上曾渲染
-  `/tmp/phase1_balance_slew_train_commands.json`，SHA-256 为
-  `fc6f1ea38a5a823016d83675d56fc41b50b70dbde1bba60602b26d6c743802df`，但它从未执行 SSH；本 NOW
-  更新进入 `main` 后旧 commit/NOW authority 过期，禁止执行。发射前必须在最新 `origin/main`
-  重新 render 并审计。
-  current-main 命令制品 `be346f94cf6bf738da36804bf59f6a60bc5249f3c6bf5474abf617358db4b42a`
-  随后只发了 [v8 科学长训 attempt1](DEFINITIONS.md#balance-science-attempt-generations) 的 W-N（Pod1
-  GPU0）。它于 `2026-07-20T04:45:02Z–04:48:25.971Z` 停在 `sim.reset`，没有首个 Learning iteration、
-  Reward 指标或 checkpoint；locked launcher terminal rc=`125`，exact PID=PGID `2728928`、leader
-  starttime=`335835722`。外层 caller rc=`121` 不是另一种 trainer 错误，而是旧 post-failure audit 在
-  train stage 错误要求只有 probe supervisor 才会产生的 `trainer_child_evidence.json`。`04:49:40Z`、
-  `04:49:47Z`、`04:52:49Z`、`04:52:51Z` 四次闭包均确认 leader/PGID、GPU compute process 与
-  Kit/cache lock holder 全空；其余五格未发。结果 JSON 为
-  [`phase1_balance_action_slew_train_v8_attempt1_result_20260720.json`](../configs/phase1_balance_action_slew_train_v8_attempt1_result_20260720.json)，
-  SHA-256=`ac09b70a1df89a501165504f4c07158858687127172a8d9d5a6bdf1473e61a75`。v8 root immutable，
-  该次只算 infrastructure-only / non-science，不能给 C/N/H 机制结论。
-  fresh v9/probe10 候选继续保持 W-N Pod1 GPU0、W-C Pod1 GPU1 的 swap 与六格全局串行顺序；fresh
-  root 是 `/workspace/codexschema/phase1_balance_action_slew_v9_20260720`，config/runner SHA-256 为
-  `3bf5085ea8396513d162b9cce249dfb761b39b2827ec722959343c953683e59e` /
-  `0fff4515cbe7e62798e8c39f701851c46e68287c7321e7618161fa9dde4789ce`，manifest 内容/文件 SHA-256 为
-  `36ceb3c77dc056f4565378a92b03da58865378d86c5849085ba066631cea456c` /
-  `664375cb08263e6e7cdd82a3b8dd59e9e9ae6a9756333371677417ec4aa60c4a`。新 runner 的 failure audit
-  显式区分 probe/train：probe 仍严格要求 child evidence；train 要求不存在 probe-only child/identity
-  文件，并验证 launcher leader 组闭包。probe10 当前 **未发射**；必须先全局串行取得 fresh v9 同代
-  `6/6` receipt，才允许渲染任何科学 train 命令，禁止复用 probe9/v8 收据。probe receipt 不是科学
-  结果；六格机制状态仍 inconclusive / not adopted。该条目只有进入 `origin/main` 后才构成运行
-  authority。两波都不能替代
-  `T0/T1/T2` 连续恢复卷。[Wave A 实验](experiments/2026-07/EXP-P1-BALANCE-ACTION-SLEW-20260720.md)
-
-  2026-07-22 前瞻风险挂账(yikang 只读核对,不改配方——reward 塑形属 franco lane):qbar 两臂的
-  `qbar_contract.qbar_wiring_confirmed` 已在 `configs/phase1_intel_wave_20260721.yaml` 翻 `true`,
-  渲染闸门已开,两臂进入可发射状态(07-21 晚 Pod1 boot 锁队列中实见 `w_qbar_res1` 排队等发)。
-  但该合同 `wiring_note` 的人话仍写 margin "0.08 rad",而实现与 CLI 键是行程比例
-  `qdes_limit_barrier_margin_frac`(hope_rewards: `d=min(q−lo,hi−q)/(hi−lo)`;0.08 行程比在肩偏航
-  ≈26° 罚带、在腰侧倾≈3.2°,同一数字两种语义差一个量级)。main `5c23a3f6` 只修了键名漂移
-  (margin→margin_frac),rad vs 行程比例的语义裁定仍悬空;按 wiring_note 自己的条款"与本段人话
-  不符时必须先修订预注册再渲染命令",qbar 臂在读数/采信前应先由 franco 裁定 margin 语义并修订
-  预注册,否则两臂读数按"量尺语义未定"处理。
-  2026-07-22 裁定（Claude 查 Jiayi 源码，证据确凿）：v14 的键名即
-  `all_joint_qdes_barrier_safe_margin_fraction: 0.08`（HitterV11 分支 V14 yaml 第 28 行）——**行程
-  比例**，与我们 `qdes_limit_barrier_margin_frac` 实现完全同语义；wiring_note 的"0.08 rad"是人话
-  笔误、已修订。qbar 两臂读数可采信；感谢 yikang 的只读挂账。
-- **[9｜P0] Hitter 实机 planner 时序与训练反应时间基线。** 责任人 yikang；执行者 Codex；分支
-  `codex/hitter-lowerbody-mujoco-alignment`，基于 `hitter`。2026-07-16 用户将本轮顺序收敛为：
-  先审计最新 `main`、`hitter` 与 frame0-wait-v2 已有实现，再补齐端到端球样本时间戳/短 TTS、
-  planner 求解限频与回调阻塞隔离、逐球结构化可观测日志，以及训练来球时间分布与最大反应时间
-  监控。原下半身 Reward/接口对齐材料保留但暂缓扩展，其余连续挥拍、可行性、mid-swing/TOPP
-  等项进入后续 TODO。下一证据是可复现的 remote-reuse 台账、schema/runner/planner 单测、离线
-  timing replay 与训练指标测试；这些证据完成前不启动长跑 PPO、不执行真机 MOTION。
-
-### 连续能力与后续接口
-- **[5｜P1] 等待/恢复结构卷。** 责任人 franco；执行者 Codex；下一证据：同步机器合同后，用冻结
-  Reward 先跑 `T0`，再跑 `T1`；只有前两层仍失败才允许 `T2` 平衡 shaping。并行单拍 slew 诊断不改变
-  此顺序。[实验](experiments/2026-07/EXP-RECOVERY-TUPLE-ABC.md)
-- **[6｜P1] Hitter V3 规划器—policy 输入对齐。** 责任人 jiayi；执行者 direct；下一证据：旧观测
-  排列、训练第 24100 次迭代 checkpoint 归属和第 7 版击球平面三项来源对齐。
-- **[8｜P1] 110 维 RallyV10 左腕/恢复修复。** 责任人 dongc1；执行者 Codex；分支 `hitter`；
-  V10 fresh run 的训练曲线已显示击球精度成熟，但 yaw-rate 约 `0.46-0.52 rad/s`、左腕超差率约
-  `0.42-0.54`，尚未证明修复通过。当前工作：在不改 V10 基线的前提下增加独立
-  constrained-resume 任务，从当前 V10 checkpoint 严格续训，固定最终 planner/yaw 分布，对左腕
-  position+velocity 做全阶段独立模仿并收紧 yaw-rate。下一证据：host 合同门、Isaac mechanics
-  preflight 与用户手动发射的 resume run；Codex 不停止、不启动 PPO。
-
-队列排序与算力规则见[跑批作战手册](runbook.md#统一队列排序与算力纪律)。完整实验索引只在
-[实验登记册](experiments/README.md)维护；本页不再复制实验索引或最近测试流水。
+</details>

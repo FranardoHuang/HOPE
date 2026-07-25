@@ -418,8 +418,10 @@ def planner_task_revision_metadata(contract: Mapping) -> str | None:
         raise ValueError(
             "planner task revision requires one checkpoint-bound strike phase per motion segment"
         )
+    # Plain zip is safe here: the check above already rejected unequal lengths, and
+    # zip(strict=True) would not import on the Python 3.8 host interpreter.
     for index, (raw_length, raw_phase) in enumerate(
-        zip(segment_lengths, strike_phases, strict=True)
+        zip(segment_lengths, strike_phases)
     ):
         if isinstance(raw_length, bool) or type(raw_length) is not int or raw_length <= 0:
             raise ValueError(f"planner clip {index} segment length must be a positive integer")
@@ -1188,6 +1190,23 @@ _PUSH_ROBOT_EVENT_KEYS = frozenset(
         "vel_xy_mps", "ang_vel_radps", "ang_axes", "velocity_range",
     }
 )
+# 合并互斥推(Franco 2026-07-25:速度踢 + 持续力推合并成【一个】interval 事件,每次触发按
+# force_prob 抽签二选一,防两种随机推同帧叠加)。v1 flag 语义:legacy 块不带
+# combined_exclusive 键、拼写逐字节不变;合并块必须带全下面的键面(含力分支的同冲量记账
+# robot_mass_kg / delta_v_equiv_mps),缺一个/多一个都 fail-loud。
+PUSH_COMBINED_EVENT_FUNC = "push_combined_exclusive"
+_PUSH_COMBINED_ASSEMBLY_KEYS = frozenset(
+    {
+        "schema_version", "enabled", "combined_exclusive", "func", "mode",
+        "interval_range_s", "force_prob",
+        "vel_xy_mps", "ang_vel_radps", "ang_axes", "velocity_range",
+        "force_n", "duration_s", "duration_steps", "control_dt_s",
+        "body_name", "application_point",
+    }
+)
+_PUSH_COMBINED_EVENT_KEYS = _PUSH_COMBINED_ASSEMBLY_KEYS | {
+    "robot_mass_kg", "delta_v_equiv_mps",
+}
 
 
 def _ground_plant_range(value, *, name: str) -> list[float]:
@@ -1332,7 +1351,9 @@ def _validate_ground_plant_contract(contract: Mapping) -> None:
 
 
 def push_robot_event_block(
-    *, enable, interval_range_s, vel_xy_mps, ang_vel_radps, ang_axes
+    *, enable, interval_range_s, vel_xy_mps, ang_vel_radps, ang_axes,
+    combined_exclusive=False, force_prob=None, force_n=None, duration_s=None,
+    control_dt_s=None,
 ):
     """Translate the push flag group into the canonical ``push_robot_event`` contract block.
 
@@ -1341,11 +1362,41 @@ def push_robot_event_block(
     所有历史/在跑配置逐位不变),但此时任何非零幅度都是配置错误(fail-closed:关着的开关
     不许挂着上膛的参数)。This is the single validation/assembly source shared by the env cfg
     flag path, the train.py ``task.push`` override, and the schema-3 contract validator.
+
+    合并互斥模式(Franco 2026-07-25;默认 ``combined_exclusive=False`` = legacy 块逐字节不变):
+    ``combined_exclusive=True`` 时速度踢与持续力推合并成【一个】interval 事件,每次触发按
+    ``force_prob`` 抽签二选一(严格 0<p<1;0/1 等价单类型推,请直接用 legacy 单事件),力分支
+    参数(``force_n``/``duration_s``/``control_dt_s``)复用 :func:`force_push_event_block` 的同一套
+    校验(含"duration 必须整数个控制步"与同冲量 Δv_equiv = F·Δt/m 的记账键面)。combined 关着
+    时四个合并参数必须全 ``None``(关着的开关不许挂上膛参数),开着时缺一个都 fail-loud。
     """
 
     if not isinstance(enable, bool):
         raise ValueError("push_robot_event enable must be an explicit boolean")
+    if not isinstance(combined_exclusive, bool):
+        raise ValueError(
+            "push_robot_event combined_exclusive must be an explicit boolean"
+        )
+    combined_fields = (
+        ("force_prob", force_prob),
+        ("force_n", force_n),
+        ("duration_s", duration_s),
+        ("control_dt_s", control_dt_s),
+    )
+    if not combined_exclusive:
+        loaded = sorted(name for name, value in combined_fields if value is not None)
+        if loaded:
+            raise ValueError(
+                f"push_robot_event combined_exclusive=false may not carry merged-push "
+                f"fields {loaded} — delete them or set combined_exclusive=true"
+            )
     if not enable:
+        if combined_exclusive:
+            raise ValueError(
+                "push_robot_event combined_exclusive=true requires enable=true — "
+                "a disabled merged push must spell combined_exclusive=false "
+                "(关着的合并开关不许上膛)"
+            )
         for name, value in (
             ("vel_xy_mps", vel_xy_mps),
             ("ang_vel_radps", ang_vel_radps),
@@ -1411,16 +1462,56 @@ def push_robot_event_block(
         velocity_range["roll"] = [-ang, ang]
         velocity_range["pitch"] = [-ang, ang]
         velocity_range["yaw"] = [-ang, ang]
+    if not combined_exclusive:
+        return {
+            "schema_version": 1,
+            "enabled": True,
+            "func": PUSH_ROBOT_EVENT_FUNC,
+            "mode": PUSH_ROBOT_EVENT_MODE,
+            "interval_range_s": [interval_lo, interval_hi],
+            "vel_xy_mps": vel,
+            "ang_vel_radps": ang,
+            "ang_axes": ang_axes,
+            "velocity_range": velocity_range,
+        }
+    # --- 合并互斥模式:力分支复用 force_push_event_block 的同一套校验/装配(单一来源)。 ---
+    missing = sorted(name for name, value in combined_fields if value is None)
+    if missing:
+        raise ValueError(
+            f"push_robot_event combined_exclusive=true requires the complete merged "
+            f"recipe; missing {missing}"
+        )
+    force_block = force_push_event_block(
+        enable=True,
+        interval_range_s=[interval_lo, interval_hi],
+        force_n=force_n,
+        duration_s=duration_s,
+        control_dt_s=control_dt_s,
+    )
+    prob = _wave_finite(force_prob, name="push_robot_event.force_prob")
+    if not (0.0 < prob < 1.0):
+        raise ValueError(
+            f"push_robot_event force_prob must lie strictly inside (0, 1), got {prob!r} "
+            "— 0/1 就是单类型推,请直接用 legacy 单事件而不是合并模式"
+        )
     return {
         "schema_version": 1,
         "enabled": True,
-        "func": PUSH_ROBOT_EVENT_FUNC,
+        "combined_exclusive": True,
+        "func": PUSH_COMBINED_EVENT_FUNC,
         "mode": PUSH_ROBOT_EVENT_MODE,
         "interval_range_s": [interval_lo, interval_hi],
+        "force_prob": prob,
         "vel_xy_mps": vel,
         "ang_vel_radps": ang,
         "ang_axes": ang_axes,
         "velocity_range": velocity_range,
+        "force_n": force_block["force_n"],
+        "duration_s": force_block["duration_s"],
+        "duration_steps": force_block["duration_steps"],
+        "control_dt_s": force_block["control_dt_s"],
+        "body_name": force_block["body_name"],
+        "application_point": force_block["application_point"],
     }
 
 
@@ -1431,6 +1522,10 @@ def _validate_push_robot_event_contract(contract: Mapping) -> None:
     present block is always an ENABLED push and must be internally consistent: its stored
     velocity box must equal the canonical re-assembly from its own amplitudes/axes, so a
     hand-edited or drifted sidecar cannot smuggle a different push recipe past a resume.
+
+    v1 flag 语义(合并互斥推):legacy 块不带 ``combined_exclusive`` 键、按下面的原逻辑逐字节
+    校验;带 ``combined_exclusive`` 键的块按合并拼写走 :func:`_validate_push_combined_event_block`
+    (键面必须一个不多一个不少,含力分支同冲量记账)。两种拼写之外的键面一律 fail-loud。
     """
 
     block = contract.get(PUSH_ROBOT_EVENT_KEY)
@@ -1439,6 +1534,9 @@ def _validate_push_robot_event_contract(contract: Mapping) -> None:
             raise ValueError(
                 "schema-3 push_robot_event must be omitted when disabled, not null"
             )
+        return
+    if isinstance(block, Mapping) and "combined_exclusive" in block:
+        _validate_push_combined_event_block(block)
         return
     block = _require_exact_mapping_keys(
         block, _PUSH_ROBOT_EVENT_KEYS, name="schema-3 push_robot_event"
@@ -1491,6 +1589,109 @@ def _validate_push_robot_event_contract(contract: Mapping) -> None:
             "schema-3 push_robot_event is internally inconsistent: the stored "
             "velocity_range/interval does not equal the canonical assembly from "
             "vel_xy_mps/ang_vel_radps/ang_axes"
+        )
+
+
+def _validate_push_combined_event_block(block) -> None:
+    """merged-exclusive push 块(``combined_exclusive`` 键在场 = 按合并拼写校验)。
+
+    人话:合并互斥推的合同块必须与自己的 canonical 重装配逐位一致——速度箱、触发区间、
+    duration_steps、force_prob 有一个漂了就拒收;力分支的同冲量记账(robot_mass_kg /
+    delta_v_equiv_mps = F·Δt/m 重算)照 force_push_event 同款硬核对,手改 sidecar 走不过
+    resume。combined_exclusive=false 的合并块是非法拼写(合并关着 = legacy 块,不带这个键)。
+    """
+
+    block = _require_exact_mapping_keys(
+        block, _PUSH_COMBINED_EVENT_KEYS,
+        name="schema-3 push_robot_event (combined_exclusive spelling)",
+    )
+    if type(block["schema_version"]) is not int or block["schema_version"] != 1:
+        raise ValueError("schema-3 push_robot_event schema_version must be integer 1")
+    if block["enabled"] is not True:
+        raise ValueError(
+            "schema-3 push_robot_event enabled must be true "
+            "(a disabled push is spelled by omitting the block)"
+        )
+    if block["combined_exclusive"] is not True:
+        raise ValueError(
+            "schema-3 push_robot_event combined_exclusive must be true — a merged "
+            "block carries the key only when the merged sampler is ON (combined off "
+            "is spelled by the legacy block WITHOUT the key)"
+        )
+    if block["func"] != PUSH_COMBINED_EVENT_FUNC:
+        raise ValueError(
+            f"schema-3 combined push_robot_event func must be {PUSH_COMBINED_EVENT_FUNC!r}"
+        )
+    if block["mode"] != PUSH_ROBOT_EVENT_MODE:
+        raise ValueError(
+            f"schema-3 combined push_robot_event mode must be {PUSH_ROBOT_EVENT_MODE!r}"
+        )
+    if block["body_name"] != FORCE_PUSH_BODY_NAME:
+        raise ValueError(
+            f"schema-3 combined push_robot_event body_name must be {FORCE_PUSH_BODY_NAME!r}"
+        )
+    if block["application_point"] != FORCE_PUSH_APPLICATION_POINT:
+        raise ValueError(
+            "schema-3 combined push_robot_event application_point must be "
+            f"{FORCE_PUSH_APPLICATION_POINT!r} — the wrench lands on the pelvis LINK "
+            "ORIGIN, and labelling it as the COM is exactly the Yikang V9 mistake"
+        )
+    try:
+        expected = push_robot_event_block(
+            enable=True,
+            interval_range_s=block["interval_range_s"],
+            vel_xy_mps=block["vel_xy_mps"],
+            ang_vel_radps=block["ang_vel_radps"],
+            ang_axes=block["ang_axes"],
+            combined_exclusive=True,
+            force_prob=block["force_prob"],
+            force_n=block["force_n"],
+            duration_s=block["duration_s"],
+            control_dt_s=block["control_dt_s"],
+        )
+    except ValueError as exc:
+        raise ValueError(f"schema-3 push_robot_event is invalid: {exc}") from exc
+    stored_range = block["velocity_range"]
+    if not isinstance(stored_range, Mapping):
+        raise ValueError("schema-3 push_robot_event velocity_range must be an object")
+    normalized_range = {}
+    for axis, rng in stored_range.items():
+        if (
+            not isinstance(rng, (list, tuple))
+            or len(rng) != 2
+            or any(isinstance(v, bool) or not isinstance(v, (int, float)) for v in rng)
+        ):
+            raise ValueError(
+                f"schema-3 push_robot_event velocity_range.{axis} must be a [lo, hi] pair"
+            )
+        normalized_range[str(axis)] = [float(rng[0]), float(rng[1])]
+    stored_interval = [float(v) for v in block["interval_range_s"]]
+    if (
+        normalized_range != expected["velocity_range"]
+        or stored_interval != expected["interval_range_s"]
+        or type(block["duration_steps"]) is not int
+        or block["duration_steps"] != expected["duration_steps"]
+    ):
+        raise ValueError(
+            "schema-3 push_robot_event is internally inconsistent: the stored "
+            "velocity_range/interval/duration_steps does not equal the canonical "
+            "assembly from its own amplitudes/axes/duration_s/control_dt_s"
+        )
+    try:
+        expected_full = bind_force_push_runtime_mass(
+            expected, robot_mass_kg=block["robot_mass_kg"]
+        )
+    except ValueError as exc:
+        raise ValueError(f"schema-3 push_robot_event is invalid: {exc}") from exc
+    if (
+        isinstance(block["delta_v_equiv_mps"], bool)
+        or not isinstance(block["delta_v_equiv_mps"], (int, float))
+        or float(block["delta_v_equiv_mps"]) != expected_full["delta_v_equiv_mps"]
+    ):
+        raise ValueError(
+            "schema-3 push_robot_event is internally inconsistent: delta_v_equiv_mps "
+            "must equal force_n * duration_s / robot_mass_kg recomputed (力分支单次"
+            "冲量与速度推档位对表)"
         )
 
 
@@ -1595,11 +1796,17 @@ def bind_force_push_runtime_mass(block, *, robot_mass_kg):
 
     人话:合同必须记运行时真实读到的机器人总质量与换算出的 Δv_equiv = force_n × duration_s /
     m_robot,供与速度推档位(p02/p035/p05/p08)对表。装配块形状不对、质量非正,一律 raise。
+    合并互斥推的装配块(_PUSH_COMBINED_ASSEMBLY_KEYS)同样可绑——记的是【力分支单次】的
+    Δv_equiv(速度分支的 Δv 直接就是 vel_xy_mps,无需换算)。
     """
 
-    if not isinstance(block, Mapping) or set(block) != _FORCE_PUSH_ASSEMBLY_KEYS:
+    if not isinstance(block, Mapping) or (
+        set(block) != _FORCE_PUSH_ASSEMBLY_KEYS
+        and set(block) != _PUSH_COMBINED_ASSEMBLY_KEYS
+    ):
         raise ValueError(
-            "force_push_event runtime binding requires the exact canonical assembly block"
+            "force_push_event runtime binding requires the exact canonical assembly block "
+            "(legacy force_push or combined_exclusive push)"
         )
     if block.get("enabled") is not True:
         raise ValueError("force_push_event runtime binding requires an enabled block")
@@ -1854,7 +2061,10 @@ def _validate_qdes_limit_barrier_contract(contract: Mapping) -> None:
         "joint_order": "runtime_articulation_identity",
         "position_limit_source": "articulation.data.soft_joint_pos_limits",
         "formula": (
-            "sum(1-exp(-square(relu(margin_frac-min(qdes-lo,hi-qdes)/(hi-lo))/margin_frac)))"
+            # 2026-07-25 站姿豁免:与 train.py _QDES_LIMIT_BARRIER_FORMULA 逐字节一致;
+            # 旧公式的 sidecar 在此 fail loud —— 数学变了就不许静默续训。
+            "sum(1-exp(-square(relu(m_eff-min(qdes-lo,hi-qdes)/(hi-lo))/m_eff)));"
+            "m_eff=min(margin_frac,min(default_q-lo,hi-default_q)/(hi-lo)-0.005)"
         ),
         "gate": "dense_every_control_step",
     }
@@ -2109,7 +2319,8 @@ def validate_schema3_contract_structure(contract: Mapping) -> None:
             "asset_name": "robot",
             "joint_order": "runtime_articulation_identity",
             "velocity_limit_source": "runtime_execution_facts.joint_velocity_limits",
-            "formula": "mean(relu(abs(qd)/joint_velocity_limits-margin)^2)",
+            # 2026-07-25 SUM 裁定:与 train.py 逐字节一致;旧 mean 串 sidecar 在此 fail loud。
+            "formula": "sum(relu(abs(qd)/joint_velocity_limits-margin)^2)",
         }
         for key, expected in expected_fixed.items():
             if qdot_hinge.get(key) != expected:
@@ -2185,7 +2396,8 @@ def validate_schema3_contract_structure(contract: Mapping) -> None:
             "velocity_limit_source": "runtime_execution_facts.joint_velocity_limits",
             "age_source": "per_env_exact_strike_control_tick_latch",
             "formula": (
-                "mean(1-exp(-square(relu(abs(delta_processed_qdes)/(joint_velocity_limits*0.02)-margin)/(1-margin))))"
+                # 2026-07-25 SUM 裁定:与 train.py 逐字节一致;旧 mean 串 sidecar 在此 fail loud。
+                "sum(1-exp(-square(relu(abs(delta_processed_qdes)/(joint_velocity_limits*0.02)-margin)/(1-margin))))"
             ),
             "gate": "same_attempt_post_strike_age_s_inclusive",
         }

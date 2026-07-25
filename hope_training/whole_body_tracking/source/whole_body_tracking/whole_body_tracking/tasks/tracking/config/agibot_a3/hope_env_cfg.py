@@ -17,6 +17,8 @@ Default usage trains one unified forehand+backhand policy by passing two referen
 one policy can condition on which clip/target family it is currently imitating.
 """
 
+import math
+
 from isaaclab.managers import EventTermCfg as EventTerm
 from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
@@ -459,6 +461,11 @@ class HOPEEventCfg(EventCfg):
     # called per-step, so expiry needs its own high-frequency term or the force never clears.
     force_push = None
     force_push_sweep = None
+    # 合并互斥推事件对(default OFF = both None, byte-identical;见 HOPEPushRobotCfg.
+    # combined_exclusive)。单事件按 force_prob 抽签二选一(速度踢 / 持续力推),防两种随机推
+    # 同帧叠加;力分支写同一本到期账本,所以合并模式同样需要每控制步的清扫兜底事件。
+    combined_push = None
+    combined_push_sweep = None
 
     # link mass randomization (±10%) — HITTER prose randomizes link mass.
     randomize_link_mass = EventTerm(
@@ -513,6 +520,17 @@ class HOPEPushRobotCfg:
     vel_xy_mps: float = 0.0
     ang_vel_radps: float = 0.0
     ang_axes: str = "none"  # "none" | "yaw" | "rpy"
+    # --- 合并互斥模式(Franco 2026-07-25:两种随机推合并抽签,防同帧叠加)------------------
+    # True 时:速度推(本组幅度)与力推(force_push 组的 force_n/duration_s)合并成【一个】
+    # interval 事件,每次触发按 force_prob 逐 env 抽签二选一,同一次触发绝不两种都来。两组
+    # enable 都必须 =True(分支配方上膛),但两个 legacy 独立事件一个都不许再挂——合并 +
+    # legacy 独立事件同时在场就是回到"同帧叠加",apply_combined_push_event fail-loud。默认
+    # False = 两个 legacy 独立事件行为逐字节不变(各自独立时钟,可能同帧叠加——这正是合并
+    # 模式要消掉的历史行为)。
+    combined_exclusive: bool = False
+    # 抽签出"力推"分支的概率(严格 0<p<1;0/1 等价单类型推,请直接用 legacy 单事件)。
+    # combined_exclusive=False 时必须停在默认 0.5(关着的开关不许挂上膛参数)。
+    force_prob: float = 0.5
 
 
 def apply_push_robot_event(env_cfg) -> None:
@@ -526,6 +544,17 @@ def apply_push_robot_event(env_cfg) -> None:
 
     push = getattr(env_cfg, "push", None)
     if push is None or not push.enable:
+        return
+    if getattr(push, "combined_exclusive", False):
+        # 合并互斥模式:本组幅度归合并事件抽签分发,这里绝不再挂独立 push_robot 事件(否则
+        # 就是"合并 + legacy 独立事件同帧叠加"的回归)。合并事件必须已由
+        # apply_combined_push_event 装好(__post_init__ 先跑它);没装好 = 半配置,直接炸。
+        if getattr(env_cfg.events, "combined_push", None) is None:
+            raise ValueError(
+                "push.combined_exclusive=true but events.combined_push is not wired — "
+                "apply_combined_push_event must run first; the legacy independent "
+                "push_robot event is never built in combined mode"
+            )
         return
     from whole_body_tracking.utils.training_contract import push_robot_event_block
 
@@ -595,6 +624,17 @@ def apply_force_push_event(env_cfg) -> None:
     force_push = getattr(env_cfg, "force_push", None)
     if force_push is None or not force_push.enable:
         return
+    push = getattr(env_cfg, "push", None)
+    if push is not None and getattr(push, "combined_exclusive", False):
+        # 合并互斥模式:力分支归合并事件抽签分发,这里绝不再挂独立 force_push 事件对(理由
+        # 同 apply_push_robot_event 的合并让路守卫;清扫兜底由 combined_push_sweep 承担)。
+        if getattr(env_cfg.events, "combined_push", None) is None:
+            raise ValueError(
+                "push.combined_exclusive=true but events.combined_push is not wired — "
+                "apply_combined_push_event must run first; the legacy independent "
+                "force_push event pair is never built in combined mode"
+            )
+        return
     from whole_body_tracking.utils.training_contract import force_push_event_block
 
     control_dt_s = float(env_cfg.sim.dt) * int(env_cfg.decimation)
@@ -619,6 +659,119 @@ def apply_force_push_event(env_cfg) -> None:
         },
     )
     env_cfg.events.force_push_sweep = EventTerm(
+        func=mdp.sweep_expired_force_pushes,
+        mode="interval",
+        interval_range_s=(control_dt_s, control_dt_s),
+        params={},
+    )
+
+
+##
+# Merged EXCLUSIVE push (合并互斥推; default OFF — Franco 2026-07-25 两种随机推合并抽签).
+##
+
+
+def apply_combined_push_event(env_cfg) -> None:
+    """Consume the merged-exclusive spelling: build ONE sampling push event instead of the pair.
+
+    人话:``push.combined_exclusive=True`` 时,把速度推(push 组幅度)与力推(force_push 组
+    幅度)装配成【一个】interval 事件 ``events.combined_push``(每次触发按 force_prob 逐 env
+    抽签二选一,防两种随机推同帧叠加)+ 每控制步的到期清扫兜底 ``events.combined_push_sweep``。
+    两组 enable 都必须 =True(分支配方上膛),两个 legacy 独立事件必须全 None(合并 + 独立
+    事件同时在场 = 同帧叠加回归,fail-loud);两组 interval_range_s 必须逐字相同(合并事件
+    只有一个触发时钟,不许两种拼写)。默认 combined_exclusive=False 时本函数是严格 no-op
+    (但 force_prob 偏离默认 0.5 会炸——关着的开关不许挂上膛参数),两个 legacy 独立事件
+    行为逐字节不变。参数校验/装配走 ``training_contract.push_robot_event_block`` 的合并分支
+    (与 schema-3 合同校验同一单一来源)。⚠ train.py 尚无 task.combined_push 覆盖面:经
+    train.py 发射合并模式会在硬合同装配处因"半接线"fail-loud,属预期(后续波次接线)。
+    """
+
+    push = getattr(env_cfg, "push", None)
+    if push is None:
+        return
+    force_prob = getattr(push, "force_prob", 0.5)
+    if not getattr(push, "combined_exclusive", False):
+        # 关着的开关不许挂上膛参数:combined 关着时 force_prob 必须停在默认 0.5。
+        if float(force_prob) != 0.5:
+            raise ValueError(
+                "push.combined_exclusive=false may not carry a loaded force_prob "
+                f"({force_prob!r}) — delete it or set combined_exclusive=true"
+            )
+        return
+    force_push = getattr(env_cfg, "force_push", None)
+    if (
+        force_push is None
+        or not bool(getattr(push, "enable", False))
+        or not bool(getattr(force_push, "enable", False))
+    ):
+        raise ValueError(
+            "push.combined_exclusive=true requires BOTH branch recipes armed: "
+            "push.enable=true AND force_push.enable=true (合并事件抽签二选一,缺一个"
+            "分支就没得抽;只想要单类型推请关掉 combined_exclusive 用 legacy 单事件)"
+        )
+    events = getattr(env_cfg, "events", None)
+    if (
+        events is None
+        or not hasattr(events, "combined_push")
+        or not hasattr(events, "combined_push_sweep")
+    ):
+        raise ValueError(
+            "combined push requires the events cfg to DECLARE the combined_push/"
+            "combined_push_sweep slots (HOPEEventCfg does; an events cfg without the "
+            "declared attributes would silently hide the event from the EventManager)"
+        )
+    legacy_live = [
+        name
+        for name in ("push_robot", "force_push", "force_push_sweep")
+        if getattr(events, name, None) is not None
+    ]
+    if legacy_live:
+        raise ValueError(
+            "push.combined_exclusive=true forbids the legacy independent push events "
+            f"{legacy_live} — 合并模式就是为了防同帧叠加,独立事件必须保持 None"
+        )
+    push_interval = tuple(float(v) for v in push.interval_range_s)
+    force_interval = tuple(float(v) for v in force_push.interval_range_s)
+    if push_interval != force_interval:
+        raise ValueError(
+            "combined push has exactly ONE trigger clock: push.interval_range_s and "
+            "force_push.interval_range_s must be spelled identically, got "
+            f"{push_interval!r} vs {force_interval!r}"
+        )
+    from whole_body_tracking.utils.training_contract import push_robot_event_block
+
+    control_dt_s = float(env_cfg.sim.dt) * int(env_cfg.decimation)
+    block = push_robot_event_block(
+        enable=True,
+        interval_range_s=push_interval,
+        vel_xy_mps=float(push.vel_xy_mps),
+        ang_vel_radps=float(push.ang_vel_radps),
+        ang_axes=str(push.ang_axes),
+        combined_exclusive=True,
+        force_prob=float(force_prob),
+        force_n=float(force_push.force_n),
+        duration_s=float(force_push.duration_s),
+        control_dt_s=control_dt_s,
+    )
+    events.combined_push = EventTerm(
+        func=mdp.push_combined_exclusive,
+        mode="interval",
+        interval_range_s=(
+            float(block["interval_range_s"][0]),
+            float(block["interval_range_s"][1]),
+        ),
+        params={
+            "velocity_range": {
+                axis: (float(rng[0]), float(rng[1]))
+                for axis, rng in block["velocity_range"].items()
+            },
+            "force_n": float(block["force_n"]),
+            "duration_steps": int(block["duration_steps"]),
+            "force_prob": float(block["force_prob"]),
+            "body_name": str(block["body_name"]),
+        },
+    )
+    events.combined_push_sweep = EventTerm(
         func=mdp.sweep_expired_force_pushes,
         mode="interval",
         interval_range_s=(control_dt_s, control_dt_s),
@@ -779,6 +932,29 @@ class HOPEDeployParityRewardsCfg(HOPERewardsCfg):
     strike_foot_vel = RewTerm(func=mdp.strike_foot_velocity, weight=-0.5, params={"command_name": "racket_target"})
     strike_vbob = RewTerm(func=mdp.strike_vertical_bob, weight=-1.0, params={"command_name": "racket_target"})
 
+    # --- v2 蓝图替换候选(reward_redesign_20260725 §1.4/§3;DEFAULT weight=0.0 = IsaacLab 直接
+    #     跳过 = 默认路径逐字节等价,消融臂经 task.rewards.* 起零)。替代关系不是叠加关系:
+    #     臂里给这两条非零权重时,应同时把被替代的旧项关掉——
+    #     * upright_exp(mjlab 收入型站正,权重用【正数】):站得越正每步发钱越多,有界 (0,1],
+    #       顺带兼任 alive bonus;替代税型 upright 罚(flat_orientation_l2)。
+    #     * hit_unstable_support(PACE 单条击球稳定,权重用【负数】):击球窗内单脚/无支撑记 1,
+    #       只管"支撑够不够"这一个事实;替代上面的 strike 四件套
+    #       (strike_upright/strike_ang_vel/strike_foot_vel/strike_vbob)。
+    upright_exp = RewTerm(
+        func=mdp.upright_exp,
+        weight=0.0,
+        params={"std": math.sqrt(0.2)},
+    )
+    hit_unstable_support = RewTerm(
+        func=mdp.hit_unstable_support,
+        weight=0.0,
+        params={
+            # 与 foot_soft_landing/foot_clearance 同款两脚 sensor 名单
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=list(A3_FEET_BODIES)),
+            "command_name": "racket_target",
+        },
+    )
+
     # --- SIM2REAL FINE-TUNE (2026-07-02): survive AGI's EXPLICIT clipped-PD MuJoCo. ------------------
     # CHANGE 2 — torque-saturation penalty: penalize the mean over-limit fraction of the COMPUTED (pre-clip)
     # effort over the arm + waist joints so the policy stops demanding torque the explicit motor cannot
@@ -917,6 +1093,10 @@ class HOPEPingPongAgibotA3EnvCfg(AgibotA3FlatEnvCfg):
             self.physical_ball = True
             rt.physical_ball = True
             attach_physical_ball_scene(self)
+        # 合并互斥推 (defaults OFF = events.combined_push/_sweep stay None, byte-identical).
+        # MUST run BEFORE the two legacy appliers: in combined mode they only step aside when
+        # the merged event is already wired — reversed order fails loud (半配置绝不静默).
+        apply_combined_push_event(self)
         # Wave-P random base push (defaults OFF = events.push_robot stays None, byte-identical).
         # This consumes the cfg-flag spelling; train.py's task.push override runs AFTER this
         # __post_init__ and builds the term itself. Both share the same validator/assembly
@@ -979,6 +1159,15 @@ class HOPEVirtualBallRewardsCfg(HOPEDeployParityRewardsCfg):
         func=mdp.virtual_landing, weight=30.0, params={"command_name": "racket_target"})
     virtual_spin = RewTerm(
         func=mdp.virtual_spin, weight=5.0, params={"command_name": "racket_target"})
+
+    # --- v2 蓝图 L2 击中层(reward_redesign_20260725 §3.5;DEFAULT weight=0.0 = IsaacLab 直接
+    #     跳过 = 默认路径逐字节等价)。人话:每挥拍最多发一次的"击中大奖"one-shot——判据就是
+    #     现成的 vb_fired 捕获门(exact-strike 一步 & 拍面正确半球 & 位置/进拍速达标,一拍锁存
+    #     不重发),与 virtual_* 三项的区别是本项只认"打上了",不看出球质量。权重用【正数】;
+    #     量级 B 由 redesign §2 定权公式给出(B = m1*I*Tc*rho/p*,名义 ~850,probe 校准后冻结
+    #     prereg),reward_pack=v2 的翻译层直写这里的 weight。
+    strike_capture_bonus = RewTerm(
+        func=mdp.strike_capture_bonus, weight=0.0, params={"command_name": "racket_target"})
 
     # D6 source gate (2026-07-14, DEFAULT OFF): penalize only the normalized tail above 85% of
     # each *actual articulation* joint-speed limit.  This is not action-rate smoothing: it reads

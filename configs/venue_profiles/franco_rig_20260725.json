@@ -1,0 +1,20 @@
+{
+  "schema_version": "venue_profile_v1",
+  "_comment": "Franco rig 现役标定(2026-07-25)。mocap_noise 来自 2026-07-03 场地拟合 capture.position_noise(白噪声 0.0019 m,AR1 边缘 0.0052 m,rho/300Hz 帧 0.946 -> 0.946^6 = 0.717 每 50 Hz 策略步),与 configs/phase1_integrated_upgrade_wave_20260723.yaml 现役覆写逐字一致。transport.target_delay_steps=0 是 planner-revision guard 的历史遗留(hope_commands 拒绝 planner revision + delay>0 组合同时上);实测场地的保守上界是 2 步(40 ms;franco rig 实测 <10 ms 传输、<=20 ms 端到端,见 docs/research/mocap_timing_2026-07-05/mocap_random_delay.md)——换 venue 或关掉 planner revision 时应改用 2。physics 取现役 env cfg:摩擦/弹性区间来自 tracking_env_cfg.EventCfg.physics_material,质量 scale 区间来自 hope_env_cfg.HOPEEventCfg.randomize_link_mass。",
+  "mocap_noise": {
+    "target_noise_white": 0.0019,
+    "target_noise_ar1_sigma": 0.0052,
+    "target_noise_ar1_rho": 0.717
+  },
+  "transport": {
+    "target_delay_steps": 0,
+    "target_dropout_prob": 0.0,
+    "target_delay_tts_mode": "source_timestamp_compensated"
+  },
+  "physics": {
+    "static_friction_range": [0.3, 1.6],
+    "dynamic_friction_range": [0.3, 1.2],
+    "restitution_range": [0.0, 0.5],
+    "mass_distribution_params": [0.85, 1.15]
+  }
+}

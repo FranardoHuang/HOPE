@@ -668,7 +668,8 @@ def _qdot_hinge_schema3_contract():
         "joint_count": 31,
         "joint_order": "runtime_articulation_identity",
         "velocity_limit_source": "runtime_execution_facts.joint_velocity_limits",
-        "formula": "mean(relu(abs(qd)/joint_velocity_limits-margin)^2)",
+        # 2026-07-25 SUM 裁定:与 train.py/validator 同步;旧 mean 串 sidecar 应 fail loud
+        "formula": "sum(relu(abs(qd)/joint_velocity_limits-margin)^2)",
     }
     return contract
 

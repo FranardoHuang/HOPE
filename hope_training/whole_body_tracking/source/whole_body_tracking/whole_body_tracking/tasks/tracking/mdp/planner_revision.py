@@ -22,6 +22,7 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import sys
 from dataclasses import asdict, dataclass, replace
 from typing import Any, Mapping, Sequence
 
@@ -30,6 +31,38 @@ PHASE_GOVERNOR_CONTRACT_VERSION = "phase_governor_v1"
 PHASE_GOVERNOR_PROFILE_SCHEMA_VERSION = 1
 PLANNER_TASK_REVISION_SCHEMA_VERSION = 1
 INITIAL_TTS_MIXTURE_CONTRACT_VERSION = "initial_tts_mixture_v1"
+
+
+# Python 3.8 host backports.  Training pods run >= 3.10 and always take the stdlib
+# branch, so pod behavior is unchanged; the fallbacks only exist so the pure-python
+# suites can run on the 3.8 host interpreter.
+if sys.version_info >= (3, 10):
+
+    def _zip_strict(*sequences: Sequence[float]):
+        return zip(*sequences, strict=True)
+
+else:
+
+    def _zip_strict(*sequences: Sequence[float]):
+        if len({len(sequence) for sequence in sequences}) > 1:
+            raise ValueError("zip() arguments have unequal lengths")
+        return zip(*sequences)
+
+
+if hasattr(math, "ulp"):  # Python >= 3.9
+    _math_ulp = math.ulp
+else:
+
+    def _math_ulp(value: float) -> float:
+        if math.isnan(value):
+            return value
+        magnitude = abs(value)
+        if math.isinf(magnitude):
+            return magnitude
+        if magnitude == 0.0:
+            return 5e-324  # smallest subnormal, == math.ulp(0.0)
+        _, exponent = math.frexp(magnitude)
+        return max(math.ldexp(1.0, exponent - 53), 5e-324)
 
 
 def _plain_int(value: object, *, name: str, minimum: int = 0) -> int:
@@ -73,13 +106,13 @@ def _vector3(value: object, *, name: str) -> tuple[float, float, float]:
 
 
 def _distance(a: Sequence[float], b: Sequence[float]) -> float:
-    return math.sqrt(sum((left - right) ** 2 for left, right in zip(a, b, strict=True)))
+    return math.sqrt(sum((left - right) ** 2 for left, right in _zip_strict(a, b)))
 
 
 def _normal_angle(a: Sequence[float], b: Sequence[float]) -> float:
     norm_a = math.sqrt(sum(component * component for component in a))
     norm_b = math.sqrt(sum(component * component for component in b))
-    dot = sum(left * right for left, right in zip(a, b, strict=True)) / (norm_a * norm_b)
+    dot = sum(left * right for left, right in _zip_strict(a, b)) / (norm_a * norm_b)
     return math.acos(max(-1.0, min(1.0, dot)))
 
 
@@ -119,7 +152,7 @@ class InitialTtsMixtureComponent:
         hi = _finite_float(self.hi_s, name=f"{self.name}.hi_s", minimum=lo)
         if hi < lo:
             raise ValueError(f"{self.name}.hi_s must be >= lo_s")
-        _finite_float(self.weight, name=f"{self.name}.weight", minimum=math.ulp(0.0))
+        _finite_float(self.weight, name=f"{self.name}.weight", minimum=_math_ulp(0.0))
 
     @classmethod
     def from_mapping(cls, value: Mapping[str, object]) -> InitialTtsMixtureComponent:
@@ -251,20 +284,20 @@ class PhaseGovernorProfile:
                 f"unsupported phase governor profile schema {self.schema_version}; "
                 f"expected {PHASE_GOVERNOR_PROFILE_SCHEMA_VERSION}"
             )
-        _finite_float(self.policy_dt_s, name="policy_dt_s", minimum=math.ulp(0.0))
-        minimum_tts = _finite_float(self.min_tts_s, name="min_tts_s", minimum=math.ulp(0.0))
+        _finite_float(self.policy_dt_s, name="policy_dt_s", minimum=_math_ulp(0.0))
+        minimum_tts = _finite_float(self.min_tts_s, name="min_tts_s", minimum=_math_ulp(0.0))
         maximum_tts = _finite_float(self.max_tts_s, name="max_tts_s", minimum=minimum_tts)
         if maximum_tts <= minimum_tts:
             raise ValueError("max_tts_s must be greater than min_tts_s")
         _finite_float(
             self.max_phase_rate_per_s,
             name="max_phase_rate_per_s",
-            minimum=math.ulp(0.0),
+            minimum=_math_ulp(0.0),
         )
         _finite_float(
             self.max_phase_acceleration_per_s2,
             name="max_phase_acceleration_per_s2",
-            minimum=math.ulp(0.0),
+            minimum=_math_ulp(0.0),
         )
         _finite_float(
             self.max_deadline_revision_delta_s,
@@ -361,7 +394,7 @@ class LatentTaskTruth:
         _plain_int(self.control_epoch, name="control_epoch")
         _plain_int(self.task_id, name="task_id", minimum=1)
         _sha256(self.truth_sha256, name="truth_sha256")
-        _finite_float(self.strike_phase, name="strike_phase", minimum=math.ulp(0.0))
+        _finite_float(self.strike_phase, name="strike_phase", minimum=_math_ulp(0.0))
 
 
 @dataclass(frozen=True)
@@ -425,7 +458,7 @@ class PlannerTaskRevision:
             ),
             target_normal=_vector3(value["target_normal"], name="target_normal"),
             desired_tts_s=_finite_float(
-                value["desired_tts_s"], name="desired_tts_s", minimum=math.ulp(0.0)
+                value["desired_tts_s"], name="desired_tts_s", minimum=_math_ulp(0.0)
             ),
         )
 

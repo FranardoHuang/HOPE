@@ -36,6 +36,7 @@ USAGE(测试解释器即可,fk 需 mujoco;interp 只给 link_origin 测试 clip 
         --budget-clips ... --manifest bh_envelope.json
 
 退出码:0 成功;1 合同/参数错误(fail loud);3 physical-infeasible(manifest 已写,资产拒发)。
+带 canonical-v2 sidecar 的输入默认拒收;显式 comparator flag 只允许生成永久标记的历史对照。
 """
 from __future__ import annotations
 
@@ -538,6 +539,14 @@ def main(argv=None) -> int:
                     help="触球锁窗半宽秒数(恒速段;默认 0.10 = 登记口径)")
     ap.add_argument("--speed-tol", type=float, default=DEFAULT_SPEED_TOL,
                     help="实际 vs 目标拍速验收误差(默认 2%%)")
+    ap.add_argument(
+        "--allow-canonical-v2-legacy-comparator",
+        action="store_true",
+        help=(
+            "仅历史比较:允许 canonical-v2/comparator 输入进入恒速锁窗旧语义;"
+            "manifest 强制标为 legacy_window_frozen_comparator_only"
+        ),
+    )
     args = ap.parse_args(argv)
 
     if args.envelope:
@@ -557,6 +566,26 @@ def main(argv=None) -> int:
             raise SystemExit(f"拒绝覆盖已有资产: {out_path}")
         if out_path == manifest_path:
             raise SystemExit("--out 和 --manifest 必须是两个不同路径")
+
+    output_paths = [manifest_path]
+    if out_path is not None:
+        output_paths.append(out_path)
+    v3._refuse_output_aliases_inputs(
+        [args.motion, *args.budget_clips],
+        output_paths,
+    )
+    legacy_comparator = v3._legacy_comparator_guard(
+        [
+            ("source motion", args.motion),
+            *[
+                (f"budget clip {index}", path)
+                for index, path in enumerate(args.budget_clips)
+            ],
+        ],
+        allow_canonical_v2_legacy_comparator=(
+            args.allow_canonical_v2_legacy_comparator
+        ),
+    )
 
     if args.urdf is None:
         args.urdf = os.path.normpath(os.path.join(
@@ -607,6 +636,7 @@ def main(argv=None) -> int:
             frames=T, fps=fps, phase=args.phase, contact_frame=c,
             native_clean_speed_mps=round(v0, 4)))
         manifest = _base_manifest("envelope", args, src, limits_block)
+        v3._mark_legacy_comparator(manifest, legacy_comparator)
         manifest["envelope"] = envl
         _write_manifest(manifest_path, manifest)
         print(f"[envelope] {Path(args.motion).name}: max feasible r = "
@@ -623,6 +653,7 @@ def main(argv=None) -> int:
         frames=res.T, fps=res.fps, phase=res.phase, contact_frame=res.c,
         native_clean_speed_mps=round(res.v0_mps, 4)))
     manifest = _base_manifest("bake", args, src, limits_block)
+    v3._mark_legacy_comparator(manifest, legacy_comparator)
     manifest["speed"] = dict(
         ratio=res.ratio, bucket=bucket_of(res.ratio),
         target_mps=round(res.target_mps, 4),

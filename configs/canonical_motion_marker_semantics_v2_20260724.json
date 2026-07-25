@@ -1,0 +1,583 @@
+{
+  "schema_version": 2,
+  "authority_id": "canonical_motion_marker_semantics_v2_20260724",
+  "review_status": "REVIEWED_FOR_CONTENT_ADDRESSED_FRAME_MAPPING_AND_LEGACY_SEED_PROVENANCE",
+  "scope": "Bind nominal air-swing events to recipe-source indices without conflating them with legacy scan seeds, construction markers, preferred hints, or historical comparators.",
+  "supersedes": {
+    "path": "configs/canonical_motion_marker_semantics_v1_20260724.json",
+    "sha256": "186fa064c24ada5e7c36530e67096b6b8027b92159a7458f77d0517593e54252",
+    "role": "immutable_historical_provenance_only"
+  },
+  "authorization": {
+    "training_authorized": false,
+    "behavior_authorized": false,
+    "hardware_authorized": false,
+    "artifact_promotion_authorized": false
+  },
+  "semantic_contract": {
+    "nominal_event": "An authority-bound strike-like event in an air swing; never observed ball-contact truth.",
+    "frame_identity_receipt": "Proves only the exact classification recorded per ordinary motion; FH/C are temporal-index lineage only.",
+    "legacy_ge50_seed": "A 50 percent legacy stationary-scan seed, not a certified post-retime behavior window.",
+    "legacy_ge80_seed": "An 80 percent legacy stationary-scan seed used with an explicit halo for compiler eligibility, not behavior truth.",
+    "legacy_preferred_seed": "A legacy within-exam ranking hint; nullable and never an automatic build anchor.",
+    "construction_marker": "Geometry-solver annotation only; cannot create a synthetic behavior nominal or preferred event.",
+    "historical_adv2c3_comparator": "Explicit historical frame copied from v1; read directly and never recomputed.",
+    "contact_truth_observed": false,
+    "synthetic_behavior_from_donor_or_construction_forbidden": true,
+    "automatic_event_to_window_aliasing_forbidden": true,
+    "automatic_historical_adv2c3_recomputation_forbidden": true,
+    "legacy_seed_is_certified_post_retime_window": false,
+    "post_retime_behavior_rescan_required": true,
+    "behavior_promotion_gate": "post_retime_behavior_rescan_per_motion_scope",
+    "unresolved_or_mismatched_source_binding_policy": "fail_closed"
+  },
+  "shared_evidence": {
+    "frame_identity_receipts_summary": {
+      "path": "vendor_assets/motion_finalize_20260724/evidence/frame_maps/frame_identity_receipts_summary_v1.json",
+      "sha256": "dd6c2ba2a19b33dfd8562e8e2ae8100b0638bdd7eec6e4e770dd34d90ea4c747"
+    },
+    "legacy_timing_table": {
+      "remote_path": "pod2:/workspace/codexschema/firstframe_20260723/final_account/FINAL_TIMING.json",
+      "sha256": "3980e40ad9547315fc8b6012d70c0b114949d596448c832e901c13aaea03a3c9",
+      "legacy_label_warning": "The JSON field is named contact, but this authority reclassifies it as a nominal air-swing event."
+    },
+    "legacy_timing_generator": {
+      "remote_path": "pod2:/workspace/codexschema/firstframe_20260723/designed_ready/designed_ready_timing.py",
+      "sha256": "4c88548a7d81adfd104d24503f4cea2a64de9a4b4159faae4f05cab1b57bfa05"
+    },
+    "historical_adv2c3_builder": {
+      "remote_path": "pod2:/workspace/codexschema/fullbody_20260723/build_fb_adv2c3.py",
+      "sha256": "b6fdbd9fd1f884ef078a353806e23c6f8b854295cfb2c6177d1b052e4f3a7b6c"
+    },
+    "historical_adv2c3_manifest": {
+      "remote_path": "pod2:/workspace/codexschema/fullbody_20260723/clips/MANIFEST.json",
+      "sha256": "3e1d270f0d11f7f3143b929c61881b908de58448b45851b3a55461355054f09c"
+    },
+    "ordinary_scan_job_manifest": {
+      "remote_path": "pod2:/workspace/codexschema/franco_pipeline_20260722/logs/urdf_jobs.txt",
+      "sha256": "8e560d65103f295dece2b0e5a63e2944b01f9753cda7f0de267fc21f1d78efe9"
+    },
+    "s0_highpress_scan_job_manifest": {
+      "remote_path": "pod3:/workspace/codexschema/franco_pipeline_20260722/logs/s0h_jobs.txt",
+      "sha256": "d83a5e6e6941855af10972188a552930cebc7f445e9f5c08eee3f015b75c352a"
+    }
+  },
+  "motions": [
+    {
+      "motion_id": "fh_loop",
+      "bound_recipe_source": {
+        "path": "vendor_assets/motion_finalize_20260724/sources/SHADOW_fh_loop_yaw147.npz",
+        "sha256": "faa8df8c552e4bd99134cefe5457f86e646499ff12737db160fa43eec763dcc1"
+      },
+      "nominal_event": {
+        "frame": 61,
+        "semantic_kind": "air_swing_nominal_strike_event",
+        "contact_truth_observed": false,
+        "behavior_authorized": false,
+        "legacy_evidence_json_pointer": "/per_segment/fh_loop/contact",
+        "event_source_remote_path": "pod2:/workspace/codexschema/franco_pipeline_20260722/fk/franco_forehand_loop_dx20_shadowgrip_cal.npz",
+        "event_source_sha256": "f561721d38bec15839eb989476112d38dcde213bce565ee07af2cae899e2b579",
+        "mapping_to_bound_recipe_source": "TEMPORAL_INDEX_LINEAGE_ONLY_NOT_POSE_OR_EVENT_SEMANTIC_TRANSFER",
+        "frame_identity_receipt": {
+          "path": "vendor_assets/motion_finalize_20260724/evidence/frame_maps/fh_loop_frame_identity_v1.json",
+          "sha256": "5cff195bf45fc49dd41a6b64658c72dcf7f58f93466b7dd8d0f61ad565620d51",
+          "receipt_id": "fh_loop_frame_identity_v1",
+          "classification": "TEMPORAL_INDEX_LINEAGE_ONLY_NOT_POSE_OR_EVENT_SEMANTIC_TRANSFER",
+          "event_source_frame": 61,
+          "bound_source_frame": 61,
+          "event_source_sha256": "f561721d38bec15839eb989476112d38dcde213bce565ee07af2cae899e2b579",
+          "bound_source_sha256": "faa8df8c552e4bd99134cefe5457f86e646499ff12737db160fa43eec763dcc1",
+          "invariant_joint_count": 28,
+          "excluded_joint_indices": [
+            26,
+            28,
+            30
+          ],
+          "full_pose_identity_claimed": false,
+          "authority_v1_sha256": "186fa064c24ada5e7c36530e67096b6b8027b92159a7458f77d0517593e54252"
+        }
+      },
+      "legacy_scan_evidence": {
+        "remote_path": "pod2:/workspace/codexschema/franco_pipeline_20260722/facescan/U_fh_loop_sp2.json",
+        "sha256": "46ec78432e5d28966478b26fd96a87e13ab6ae4024bb55b225560632b3c6115c",
+        "input_source_remote_path": "pod2:/workspace/codexschema/franco_pipeline_20260722/fk/SHADOW_fh_loop_yaw147.npz",
+        "input_source_sha256": "faa8df8c552e4bd99134cefe5457f86e646499ff12737db160fa43eec763dcc1",
+        "job_manifest_ref": "ordinary_scan_job_manifest",
+        "job_id": "U_fh_loop_sp2",
+        "scan_contract": {
+          "stroke_side": "forehand",
+          "cli_overrides": [
+            "--grip",
+            "off"
+          ],
+          "model": "face-unlocked +-25 deg cone F=13; velocity cone 25deg/0.6-1.4x unchanged",
+          "span_rule": "longest_contiguous_run_at_or_above_score_threshold",
+          "default_ball_distribution": null
+        }
+      },
+      "legacy_ge50_seed": {
+        "span_inclusive": [
+          47,
+          55
+        ],
+        "threshold_fraction": 0.5,
+        "seed_role": "legacy_behavior_seed_requires_post_retime_rescan",
+        "source_scan_ref": "legacy_scan_evidence",
+        "legacy_stationary_scan_only": true,
+        "certified_post_retime_window": false
+      },
+      "legacy_ge80_seed": {
+        "span_inclusive": [
+          48,
+          55
+        ],
+        "threshold_fraction": 0.8,
+        "seed_role": "legacy_behavior_seed_requires_post_retime_rescan",
+        "source_scan_ref": "legacy_scan_evidence",
+        "legacy_stationary_scan_only": true,
+        "certified_post_retime_window": false
+      },
+      "legacy_preferred_seed": {
+        "frame": 49,
+        "basis": "source_scan.best_frame",
+        "source_scan_ref": "legacy_scan_evidence",
+        "behavior_authorized": false,
+        "automatic_build_anchor_authorized": false
+      },
+      "construction_marker": null,
+      "historical_adv2c3_comparator": {
+        "frame": 40,
+        "recorded_basis": "floor(2 * nominal_event.frame / 3)",
+        "source_authority_path": "configs/canonical_motion_marker_semantics_v1_20260724.json",
+        "source_authority_sha256": "186fa064c24ada5e7c36530e67096b6b8027b92159a7458f77d0517593e54252",
+        "source_json_pointer": "/motions/0/historical_adv2c3_start/frame",
+        "adopted": false,
+        "recompute_forbidden": true,
+        "role": "historical_comparator_only_not_default"
+      },
+      "post_retime_behavior_gate": {
+        "required": true,
+        "status": "PENDING_POST_RETIME_BEHAVIOR_RESCAN",
+        "required_scopes": [
+          "upper",
+          "full"
+        ],
+        "legacy_seed_is_certified_window": false,
+        "behavior_promotion_authorized": false
+      }
+    },
+    {
+      "motion_id": "bh_loop_c",
+      "bound_recipe_source": {
+        "path": "vendor_assets/motion_finalize_20260724/sources/SHADOW_franco_bh_loop_c.npz",
+        "sha256": "d5338168e692c8a2c19fbfac8aeb56653fa79a1f45cebc6803a460835fbc1fba"
+      },
+      "nominal_event": {
+        "frame": 84,
+        "semantic_kind": "air_swing_nominal_strike_event",
+        "contact_truth_observed": false,
+        "behavior_authorized": false,
+        "legacy_evidence_json_pointer": "/per_segment/bh_loop_c/contact",
+        "event_source_remote_path": "pod2:/workspace/codexschema/franco_pipeline_20260722/fk/franco_backhand_loop_c_shadowgrip_cal.npz",
+        "event_source_sha256": "b55eeb79df5a825158d4b1d30c4b6f778470d0783d151e7180a5fe000c7e69b5",
+        "mapping_to_bound_recipe_source": "TEMPORAL_INDEX_LINEAGE_ONLY_NOT_POSE_OR_EVENT_SEMANTIC_TRANSFER",
+        "frame_identity_receipt": {
+          "path": "vendor_assets/motion_finalize_20260724/evidence/frame_maps/bh_loop_c_frame_identity_v1.json",
+          "sha256": "e5b10cad233ee19c9432c83a0768e3bae9eb33d3d64af861f79661ec9a1c890c",
+          "receipt_id": "bh_loop_c_frame_identity_v1",
+          "classification": "TEMPORAL_INDEX_LINEAGE_ONLY_NOT_POSE_OR_EVENT_SEMANTIC_TRANSFER",
+          "event_source_frame": 84,
+          "bound_source_frame": 84,
+          "event_source_sha256": "b55eeb79df5a825158d4b1d30c4b6f778470d0783d151e7180a5fe000c7e69b5",
+          "bound_source_sha256": "d5338168e692c8a2c19fbfac8aeb56653fa79a1f45cebc6803a460835fbc1fba",
+          "invariant_joint_count": 28,
+          "excluded_joint_indices": [
+            26,
+            28,
+            30
+          ],
+          "full_pose_identity_claimed": false,
+          "authority_v1_sha256": "186fa064c24ada5e7c36530e67096b6b8027b92159a7458f77d0517593e54252"
+        }
+      },
+      "legacy_scan_evidence": {
+        "remote_path": "pod2:/workspace/codexschema/franco_pipeline_20260722/facescan/U_bh_loop_c_sp2.json",
+        "sha256": "985d4fcb63001b6f59543c1c808dc86e927bc88c9eb0f152fcc6f49dd92c735a",
+        "input_source_remote_path": "pod2:/workspace/codexschema/franco_pipeline_20260722/fk/SHADOW_franco_bh_loop_c.npz",
+        "input_source_sha256": "d5338168e692c8a2c19fbfac8aeb56653fa79a1f45cebc6803a460835fbc1fba",
+        "job_manifest_ref": "ordinary_scan_job_manifest",
+        "job_id": "U_bh_loop_c_sp2",
+        "scan_contract": {
+          "stroke_side": "backhand",
+          "cli_overrides": [
+            "--grip",
+            "off"
+          ],
+          "model": "face-unlocked +-25 deg cone F=13; velocity cone 25deg/0.6-1.4x unchanged",
+          "span_rule": "longest_contiguous_run_at_or_above_score_threshold",
+          "default_ball_distribution": null
+        }
+      },
+      "legacy_ge50_seed": {
+        "span_inclusive": [
+          88,
+          95
+        ],
+        "threshold_fraction": 0.5,
+        "seed_role": "legacy_behavior_seed_requires_post_retime_rescan",
+        "source_scan_ref": "legacy_scan_evidence",
+        "legacy_stationary_scan_only": true,
+        "certified_post_retime_window": false
+      },
+      "legacy_ge80_seed": {
+        "span_inclusive": [
+          88,
+          94
+        ],
+        "threshold_fraction": 0.8,
+        "seed_role": "legacy_behavior_seed_requires_post_retime_rescan",
+        "source_scan_ref": "legacy_scan_evidence",
+        "legacy_stationary_scan_only": true,
+        "certified_post_retime_window": false
+      },
+      "legacy_preferred_seed": {
+        "frame": 89,
+        "basis": "source_scan.best_frame",
+        "source_scan_ref": "legacy_scan_evidence",
+        "behavior_authorized": false,
+        "automatic_build_anchor_authorized": false
+      },
+      "construction_marker": null,
+      "historical_adv2c3_comparator": {
+        "frame": 56,
+        "recorded_basis": "floor(2 * nominal_event.frame / 3)",
+        "source_authority_path": "configs/canonical_motion_marker_semantics_v1_20260724.json",
+        "source_authority_sha256": "186fa064c24ada5e7c36530e67096b6b8027b92159a7458f77d0517593e54252",
+        "source_json_pointer": "/motions/1/historical_adv2c3_start/frame",
+        "adopted": false,
+        "recompute_forbidden": true,
+        "role": "historical_comparator_only_not_default"
+      },
+      "post_retime_behavior_gate": {
+        "required": true,
+        "status": "PENDING_POST_RETIME_BEHAVIOR_RESCAN",
+        "required_scopes": [
+          "upper",
+          "full"
+        ],
+        "legacy_seed_is_certified_window": false,
+        "behavior_promotion_authorized": false
+      }
+    },
+    {
+      "motion_id": "fh_block_syn",
+      "bound_recipe_source": {
+        "path": "vendor_assets/motion_finalize_20260724/sources/SHADOW_bh_block_yaw80.npz",
+        "sha256": "55870b981584a458bfd479171046445845cb74171618b71338fd9dc9f66a5fe0"
+      },
+      "nominal_event": null,
+      "legacy_scan_evidence": {
+        "remote_path": "pod2:/workspace/codexschema/franco_pipeline_20260722/facescan/U_bh_block_sp2.json",
+        "sha256": "8202ed69eb0a09fc96ad1af25a7552a7f6d88e857518079b71103a9c4f86746c",
+        "input_source_remote_path": "pod2:/workspace/codexschema/franco_pipeline_20260722/fk/SHADOW_bh_block_yaw80.npz",
+        "input_source_sha256": "55870b981584a458bfd479171046445845cb74171618b71338fd9dc9f66a5fe0",
+        "job_manifest_ref": "ordinary_scan_job_manifest",
+        "job_id": "U_bh_block_sp2",
+        "scan_contract": {
+          "stroke_side": "backhand",
+          "cli_overrides": [
+            "--grip",
+            "off"
+          ],
+          "model": "face-unlocked +-25 deg cone F=13; velocity cone 25deg/0.6-1.4x unchanged",
+          "span_rule": "longest_contiguous_run_at_or_above_score_threshold",
+          "transfer_to_synthetic_forehand_behavior": "forbidden"
+        }
+      },
+      "legacy_ge50_seed": {
+        "span_inclusive": [
+          39,
+          46
+        ],
+        "threshold_fraction": 0.5,
+        "seed_role": "BACKHAND_CONSTRUCTION_SEED_ONLY_MANDATORY_FOREHAND_RESCAN",
+        "source_scan_ref": "legacy_scan_evidence",
+        "legacy_stationary_scan_only": true,
+        "certified_post_retime_window": false
+      },
+      "legacy_ge80_seed": {
+        "span_inclusive": [
+          40,
+          45
+        ],
+        "threshold_fraction": 0.8,
+        "seed_role": "BACKHAND_CONSTRUCTION_SEED_ONLY_MANDATORY_FOREHAND_RESCAN",
+        "source_scan_ref": "legacy_scan_evidence",
+        "legacy_stationary_scan_only": true,
+        "certified_post_retime_window": false
+      },
+      "legacy_preferred_seed": {
+        "frame": null,
+        "basis": "UNRESOLVED_UNTIL_NEW_FOREHAND_FACE_MANIFOLD_BEHAVIOR_RESCAN",
+        "source_scan_ref": "legacy_scan_evidence",
+        "behavior_authorized": false,
+        "automatic_build_anchor_authorized": false
+      },
+      "construction_marker": {
+        "annotation_frame": 44,
+        "annotation_semantics": "solver alignment marker, not observed ball contact and not a behavior-optimal frame",
+        "donor_motion_id": "bh_block",
+        "donor_preferred_frame": 42,
+        "solve_span_inclusive": [
+          34,
+          48
+        ],
+        "upper_receipt": {
+          "path": "vendor_assets/motion_finalize_20260724/evidence/face_scopes/fh_block_syn_upper_receipt.json",
+          "sha256": "cf6ec7baf6425de2de72bff1c57d671d0409b3cd0c13182e446eec5ce6fafe7b"
+        },
+        "upper_scoped_window": {
+          "path": "vendor_assets/motion_finalize_20260724/evidence/face_scopes/fh_block_syn_upper_scoped_window.npz",
+          "sha256": "d88d61ceeb2ba948ad140a4993229727943af4ec9bc6a676602708869b08dd18"
+        },
+        "full_receipt": {
+          "path": "vendor_assets/motion_finalize_20260724/evidence/face_scopes/fh_block_syn_full_receipt.json",
+          "sha256": "cffdcb459f3fa28976a70e45c617cec73359602df50cf23d3c3e60c02bd8151c"
+        },
+        "full_scoped_window": {
+          "path": "vendor_assets/motion_finalize_20260724/evidence/face_scopes/fh_block_syn_full_scoped_window.npz",
+          "sha256": "1b174fc5376a227d83be3863d8569701abf5d50706d452ff4a2ec199b12b8e00"
+        },
+        "behavior_nominal_created": false,
+        "behavior_preferred_created": false,
+        "transfer_to_synthetic_forehand_behavior": "forbidden"
+      },
+      "historical_adv2c3_comparator": {
+        "frame": 29,
+        "recorded_basis": "floor(2 * donor nominal_event.frame / 3)",
+        "source_authority_path": "configs/canonical_motion_marker_semantics_v1_20260724.json",
+        "source_authority_sha256": "186fa064c24ada5e7c36530e67096b6b8027b92159a7458f77d0517593e54252",
+        "source_json_pointer": "/motions/2/historical_adv2c3_start/frame",
+        "adopted": false,
+        "recompute_forbidden": true,
+        "role": "historical_comparator_only_not_default"
+      },
+      "post_retime_behavior_gate": {
+        "required": true,
+        "status": "PENDING_NEW_FOREHAND_POST_RETIME_BEHAVIOR_RESCAN",
+        "required_scopes": [
+          "upper",
+          "full"
+        ],
+        "legacy_seed_is_certified_window": false,
+        "behavior_promotion_authorized": false
+      }
+    },
+    {
+      "motion_id": "bh_block",
+      "bound_recipe_source": {
+        "path": "vendor_assets/motion_finalize_20260724/sources/SHADOW_bh_block_yaw80.npz",
+        "sha256": "55870b981584a458bfd479171046445845cb74171618b71338fd9dc9f66a5fe0"
+      },
+      "nominal_event": {
+        "frame": 44,
+        "semantic_kind": "air_swing_nominal_racket_speed_peak_event",
+        "contact_truth_observed": false,
+        "behavior_authorized": false,
+        "legacy_evidence_json_pointer": "/per_segment/bh_block/contact",
+        "event_source_remote_path": "pod2:/workspace/codexschema/franco_pipeline_20260722/fk/SHADOW_franco_bh_block.npz",
+        "event_source_sha256": "feb6ca9bf6d758ea23df9eee2e005cad251a0bd3ec86ccc14bb80abe7a50a1a5",
+        "mapping_to_bound_recipe_source": "FULL_FRAME_IDENTITY_MODULO_DOCUMENTED_SE2",
+        "frame_identity_receipt": {
+          "path": "vendor_assets/motion_finalize_20260724/evidence/frame_maps/bh_block_frame_identity_v1.json",
+          "sha256": "557ad46582830a994270be7f017776b0ca3edcbd4f69c1a567a69bf4c4a0c51d",
+          "receipt_id": "bh_block_frame_identity_v1",
+          "classification": "FULL_FRAME_IDENTITY_MODULO_DOCUMENTED_SE2",
+          "event_source_frame": 44,
+          "bound_source_frame": 44,
+          "event_source_sha256": "feb6ca9bf6d758ea23df9eee2e005cad251a0bd3ec86ccc14bb80abe7a50a1a5",
+          "bound_source_sha256": "55870b981584a458bfd479171046445845cb74171618b71338fd9dc9f66a5fe0",
+          "invariant_joint_count": 31,
+          "excluded_joint_indices": [],
+          "full_pose_identity_claimed": true,
+          "authority_v1_sha256": "186fa064c24ada5e7c36530e67096b6b8027b92159a7458f77d0517593e54252"
+        }
+      },
+      "legacy_scan_evidence": {
+        "remote_path": "pod2:/workspace/codexschema/franco_pipeline_20260722/facescan/U_bh_block_sp2.json",
+        "sha256": "8202ed69eb0a09fc96ad1af25a7552a7f6d88e857518079b71103a9c4f86746c",
+        "input_source_remote_path": "pod2:/workspace/codexschema/franco_pipeline_20260722/fk/SHADOW_bh_block_yaw80.npz",
+        "input_source_sha256": "55870b981584a458bfd479171046445845cb74171618b71338fd9dc9f66a5fe0",
+        "job_manifest_ref": "ordinary_scan_job_manifest",
+        "job_id": "U_bh_block_sp2",
+        "scan_contract": {
+          "stroke_side": "backhand",
+          "cli_overrides": [
+            "--grip",
+            "off"
+          ],
+          "model": "face-unlocked +-25 deg cone F=13; velocity cone 25deg/0.6-1.4x unchanged",
+          "span_rule": "longest_contiguous_run_at_or_above_score_threshold",
+          "default_ball_distribution": null
+        }
+      },
+      "legacy_ge50_seed": {
+        "span_inclusive": [
+          39,
+          46
+        ],
+        "threshold_fraction": 0.5,
+        "seed_role": "legacy_behavior_seed_requires_post_retime_rescan",
+        "source_scan_ref": "legacy_scan_evidence",
+        "legacy_stationary_scan_only": true,
+        "certified_post_retime_window": false
+      },
+      "legacy_ge80_seed": {
+        "span_inclusive": [
+          40,
+          45
+        ],
+        "threshold_fraction": 0.8,
+        "seed_role": "legacy_behavior_seed_requires_post_retime_rescan",
+        "source_scan_ref": "legacy_scan_evidence",
+        "legacy_stationary_scan_only": true,
+        "certified_post_retime_window": false
+      },
+      "legacy_preferred_seed": {
+        "frame": 42,
+        "basis": "source_scan.best_frame",
+        "source_scan_ref": "legacy_scan_evidence",
+        "behavior_authorized": false,
+        "automatic_build_anchor_authorized": false
+      },
+      "construction_marker": null,
+      "historical_adv2c3_comparator": {
+        "frame": 29,
+        "recorded_basis": "floor(2 * nominal_event.frame / 3)",
+        "source_authority_path": "configs/canonical_motion_marker_semantics_v1_20260724.json",
+        "source_authority_sha256": "186fa064c24ada5e7c36530e67096b6b8027b92159a7458f77d0517593e54252",
+        "source_json_pointer": "/motions/3/historical_adv2c3_start/frame",
+        "adopted": false,
+        "recompute_forbidden": true,
+        "role": "historical_comparator_only_not_default"
+      },
+      "post_retime_behavior_gate": {
+        "required": true,
+        "status": "PENDING_POST_RETIME_BEHAVIOR_RESCAN",
+        "required_scopes": [
+          "upper",
+          "full"
+        ],
+        "legacy_seed_is_certified_window": false,
+        "behavior_promotion_authorized": false
+      }
+    },
+    {
+      "motion_id": "s0_highpress",
+      "bound_recipe_source": {
+        "path": "vendor_assets/motion_finalize_20260724/sources/SHADOW_s0_yaw72.npz",
+        "sha256": "2cd32da1864fa686aff544d29a84e988b91911503ae7f7680601f93345378c01"
+      },
+      "nominal_event": {
+        "frame": 58,
+        "semantic_kind": "air_swing_nominal_downward_press_event",
+        "contact_truth_observed": false,
+        "behavior_authorized": false,
+        "legacy_evidence_json_pointer": "/per_segment/s0_highpress/contact",
+        "event_source_remote_path": "pod2:/workspace/codexschema/franco_pipeline_20260722/fk/SHADOW_franco_s0_highpress.npz",
+        "event_source_sha256": "86171b2f1c107d0dc60700db4e1ba0cb921661426d33632104506cf50d961abe",
+        "mapping_to_bound_recipe_source": "FULL_FRAME_IDENTITY_MODULO_DOCUMENTED_SE2",
+        "frame_identity_receipt": {
+          "path": "vendor_assets/motion_finalize_20260724/evidence/frame_maps/s0_highpress_frame_identity_v1.json",
+          "sha256": "5d871b60633d5943e8e10fa8aa61af413ed9082d509c03772da2d098a7173ad7",
+          "receipt_id": "s0_highpress_frame_identity_v1",
+          "classification": "FULL_FRAME_IDENTITY_MODULO_DOCUMENTED_SE2",
+          "event_source_frame": 58,
+          "bound_source_frame": 58,
+          "event_source_sha256": "86171b2f1c107d0dc60700db4e1ba0cb921661426d33632104506cf50d961abe",
+          "bound_source_sha256": "2cd32da1864fa686aff544d29a84e988b91911503ae7f7680601f93345378c01",
+          "invariant_joint_count": 31,
+          "excluded_joint_indices": [],
+          "full_pose_identity_claimed": true,
+          "authority_v1_sha256": "186fa064c24ada5e7c36530e67096b6b8027b92159a7458f77d0517593e54252"
+        }
+      },
+      "legacy_scan_evidence": {
+        "remote_path": "pod3:/workspace/codexschema/franco_pipeline_20260722/facescan/S0H_sp2.json",
+        "sha256": "3fd3b09917b81d850fe5f8e9de6c6a6799773fbf35e4dcdc664f75c7c4eebdd5",
+        "input_source_remote_path": "pod3:/workspace/codexschema/franco_pipeline_20260722/fk/SHADOW_s0_yaw72.npz",
+        "input_source_sha256": "2cd32da1864fa686aff544d29a84e988b91911503ae7f7680601f93345378c01",
+        "job_manifest_ref": "s0_highpress_scan_job_manifest",
+        "job_id": "S0H_sp2",
+        "scan_contract": {
+          "stroke_side": "backhand_proxy",
+          "cli_overrides": [
+            "--speed-range",
+            "2.0",
+            "5.0",
+            "--vz-range",
+            "-3.5",
+            "-1.5",
+            "--cone-mag",
+            "0.6",
+            "4.0",
+            "--grip",
+            "off"
+          ],
+          "model": "face-unlocked +-25 deg cone F=13; velocity cone 25deg/0.6-1.4x unchanged",
+          "span_rule": "longest_contiguous_run_at_or_above_score_threshold"
+        }
+      },
+      "legacy_ge50_seed": {
+        "span_inclusive": [
+          52,
+          57
+        ],
+        "threshold_fraction": 0.5,
+        "seed_role": "legacy_specialized_high_ball_seed_requires_post_retime_direction_rescan",
+        "source_scan_ref": "legacy_scan_evidence",
+        "legacy_stationary_scan_only": true,
+        "certified_post_retime_window": false
+      },
+      "legacy_ge80_seed": {
+        "span_inclusive": [
+          53,
+          57
+        ],
+        "threshold_fraction": 0.8,
+        "seed_role": "legacy_specialized_high_ball_seed_requires_post_retime_direction_rescan",
+        "source_scan_ref": "legacy_scan_evidence",
+        "legacy_stationary_scan_only": true,
+        "certified_post_retime_window": false
+      },
+      "legacy_preferred_seed": {
+        "frame": 54,
+        "basis": "source_scan.best_frame",
+        "source_scan_ref": "legacy_scan_evidence",
+        "behavior_authorized": false,
+        "automatic_build_anchor_authorized": false
+      },
+      "construction_marker": null,
+      "historical_adv2c3_comparator": {
+        "frame": 38,
+        "recorded_basis": "floor(2 * nominal_event.frame / 3)",
+        "source_authority_path": "configs/canonical_motion_marker_semantics_v1_20260724.json",
+        "source_authority_sha256": "186fa064c24ada5e7c36530e67096b6b8027b92159a7458f77d0517593e54252",
+        "source_json_pointer": "/motions/4/historical_adv2c3_start/frame",
+        "adopted": false,
+        "recompute_forbidden": true,
+        "role": "historical_comparator_only_not_default"
+      },
+      "post_retime_behavior_gate": {
+        "required": true,
+        "status": "PENDING_POST_RETIME_BEHAVIOR_RESCAN",
+        "required_scopes": [
+          "upper",
+          "full"
+        ],
+        "legacy_seed_is_certified_window": false,
+        "behavior_promotion_authorized": false
+      }
+    }
+  ]
+}

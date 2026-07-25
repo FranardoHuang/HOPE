@@ -1,0 +1,350 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "canonical_motion_bank_registry_schema_v1",
+  "title": "Canonical A3 five-motion bank registry",
+  "description": "Schema shape only. The Python strict loader additionally checks exact motion order, the content-addressed ready file against every NPZ endpoint, file hashes, schema-2 contents, manifest bindings, and cross-field authorization implications.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "bank_id",
+    "scope",
+    "canonical_ready_path",
+    "canonical_ready_sha256",
+    "canonical_ready_fk_path",
+    "canonical_ready_fk_sha256",
+    "entries"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": 1
+    },
+    "bank_id": {
+      "$ref": "#/$defs/slug"
+    },
+    "scope": {
+      "enum": [
+        "upper",
+        "full"
+      ]
+    },
+    "canonical_ready_path": {
+      "$ref": "#/$defs/repo_path"
+    },
+    "canonical_ready_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "canonical_ready_fk_path": {
+      "$ref": "#/$defs/repo_path"
+    },
+    "canonical_ready_fk_sha256": {
+      "$ref": "#/$defs/sha256"
+    },
+    "entries": {
+      "type": "array",
+      "minItems": 5,
+      "maxItems": 5,
+      "items": {
+        "$ref": "#/$defs/entry"
+      }
+    }
+  },
+  "$defs": {
+    "slug": {
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "repo_path": {
+      "type": "string",
+      "minLength": 1,
+      "pattern": "^(?!/)(?!.*(?:^|/)\\.\\.?(?:/|$))(?!.*//)(?!.*\\\\).+[^/]$"
+    },
+    "entry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "motion_id",
+        "scope",
+        "variant",
+        "npz_path",
+        "npz_sha256",
+        "frames",
+        "fps",
+        "family",
+        "strike_marker_frame",
+        "contact_opportunity_frames",
+        "mount_normal_sign",
+        "canonical_ready_sha256",
+        "source_manifest_path",
+        "source_manifest_sha256",
+        "build_manifest_path",
+        "build_manifest_sha256",
+        "applicability_manifest_path",
+        "applicability_manifest_sha256",
+        "evidence_level",
+        "evidence_manifest_path",
+        "evidence_manifest_sha256",
+        "question_bank_path",
+        "question_bank_sha256",
+        "question_bank_schema_version",
+        "training_config_path",
+        "training_config_sha256",
+        "training_config_schema_version",
+        "onnx_model_path",
+        "onnx_model_sha256",
+        "onnx_model_schema_version",
+        "onnx_metadata_path",
+        "onnx_metadata_sha256",
+        "onnx_metadata_schema_version",
+        "adoption_manifest_path",
+        "adoption_manifest_sha256",
+        "publication_class",
+        "training_authorized",
+        "deployment_authorized",
+        "hardware_authorized"
+      ],
+      "properties": {
+        "motion_id": {
+          "enum": [
+            "fh_loop",
+            "bh_loop_c",
+            "fh_block_syn",
+            "bh_block",
+            "s0_highpress"
+          ]
+        },
+        "scope": {
+          "enum": [
+            "upper",
+            "full"
+          ]
+        },
+        "variant": {
+          "$ref": "#/$defs/slug"
+        },
+        "npz_path": {
+          "$ref": "#/$defs/repo_path"
+        },
+        "npz_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "frames": {
+          "type": "integer",
+          "minimum": 2
+        },
+        "fps": {
+          "type": "number",
+          "exclusiveMinimum": 0
+        },
+        "family": {
+          "enum": [
+            "forehand",
+            "backhand"
+          ]
+        },
+        "strike_marker_frame": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "contact_opportunity_frames": {
+          "type": "array",
+          "minItems": 2,
+          "maxItems": 2,
+          "items": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "mount_normal_sign": {
+          "type": "number",
+          "enum": [
+            1.0,
+            -1.0
+          ]
+        },
+        "canonical_ready_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "source_manifest_path": {
+          "$ref": "#/$defs/repo_path"
+        },
+        "source_manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "build_manifest_path": {
+          "$ref": "#/$defs/repo_path"
+        },
+        "build_manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "applicability_manifest_path": {
+          "$ref": "#/$defs/repo_path"
+        },
+        "applicability_manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "evidence_level": {
+          "enum": [
+            "E0",
+            "E1",
+            "E2",
+            "E3",
+            "E4",
+            "E5"
+          ]
+        },
+        "evidence_manifest_path": {
+          "$ref": "#/$defs/repo_path"
+        },
+        "evidence_manifest_sha256": {
+          "$ref": "#/$defs/sha256"
+        },
+        "question_bank_path": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/repo_path"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "question_bank_sha256": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "question_bank_schema_version": {
+          "enum": [
+            3,
+            null
+          ]
+        },
+        "training_config_path": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/repo_path"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "training_config_sha256": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "training_config_schema_version": {
+          "enum": [
+            1,
+            null
+          ]
+        },
+        "onnx_model_path": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/repo_path"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "onnx_model_sha256": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "onnx_model_schema_version": {
+          "enum": [
+            1,
+            null
+          ]
+        },
+        "onnx_metadata_path": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/repo_path"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "onnx_metadata_sha256": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "onnx_metadata_schema_version": {
+          "enum": [
+            2,
+            null
+          ]
+        },
+        "adoption_manifest_path": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/repo_path"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "adoption_manifest_sha256": {
+          "oneOf": [
+            {
+              "$ref": "#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "publication_class": {
+          "enum": [
+            "compiler_candidate",
+            "training_adopted",
+            "deployment_adopted",
+            "hardware_adopted"
+          ]
+        },
+        "training_authorized": {
+          "type": "boolean"
+        },
+        "deployment_authorized": {
+          "type": "boolean"
+        },
+        "hardware_authorized": {
+          "type": "boolean"
+        }
+      }
+    }
+  }
+}

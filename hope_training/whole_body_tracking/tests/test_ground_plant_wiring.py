@@ -25,7 +25,7 @@ from pathlib import Path
 
 import pytest
 
-from test_reward_flags_overrides import _NS, _Term, _make_env_cfg, train_mod
+from test_reward_flags_overrides import _NS, _Term, _apply_legacy_v1, _make_env_cfg, train_mod
 
 ROOT = Path(__file__).resolve().parents[1]
 TC_PATH = (
@@ -64,8 +64,9 @@ def _ground_env_cfg():
 
 
 def _apply_plant(plant, cfg=None):
+    # 2026-07-25 默认翻转后本套件仍测 legacy 翻译行为:钉 v1 + 滤 v1 记账行,原断言原样成立。
     cfg = cfg if cfg is not None else _ground_env_cfg()
-    applied = train_mod._apply_task_overrides(cfg, {"plant": plant}, clip_name=None)
+    applied = _apply_legacy_v1(cfg, {"plant": plant})
     return cfg, applied
 
 

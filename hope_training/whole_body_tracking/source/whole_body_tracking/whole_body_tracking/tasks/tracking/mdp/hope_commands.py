@@ -111,6 +111,51 @@ def _face_command_pairing(cfg: "RacketTargetCommandCfg") -> str:
     return pairing
 
 
+def _validate_adaptive_sigma_cfg(cfg: "RacketTargetCommandCfg") -> None:
+    """adaptive_sigma_normal(拍面第三通道)必须搭在 adaptive_sigma 上,单开 fail-loud。
+
+    人话:normal 通道复用 pos/vel 的同一路 exact-strike 误差 EMA 驱动与更新节拍
+    (sigma_update_every / exact_success_decay / sigma_ema_scale)。只开 normal 不开
+    adaptive_sigma 时那套驱动根本不跑——sigma 永远不更新,却看起来"配置了自适应",
+    这是典型的半配置静默失效,按 fail-loud 纪律在构造期就拒绝。
+    """
+    if getattr(cfg, "adaptive_sigma_normal", False) and not getattr(cfg, "adaptive_sigma", False):
+        raise ValueError(
+            "RacketTargetCommandCfg.adaptive_sigma_normal=True requires adaptive_sigma=True: "
+            "the normal channel rides the pos/vel exact-strike EMA driver and update cadence; "
+            "enabled alone it would silently never update. Enable adaptive_sigma or drop "
+            "adaptive_sigma_normal."
+        )
+
+
+def _coupled_transport_mode(cfg: "RacketTargetCommandCfg") -> bool:
+    """判定并校验"耦合传输"模式:planner 修订 + 目标延迟合并成一条 mocap→中继延迟流.
+
+    人话:planner_revision_enabled 且 target_delay_steps=d>0 时,不再走旧的
+    "只延迟 actor 观测"的 NO-LAUNCH 死路,而是把每步生成的修订元组(pos/vel/normal/tts,
+    原子)压进在途环,d 步后才提交给相位调度器——接受记账、调度器看到的 desired_tts、
+    actor 可见元组从此消费同一条延迟流(真实 mocap→relay 的语义)。
+
+    fail-loud 的半配置组合:
+    * ``target_delay_tts_mode='live'``——耦合传输里 tts 必须随元组一起延迟
+      (调度器消费的就是元组里的 desired_tts),"元组晚到、时钟即时"是矛盾的传输语义;
+      要么 source_timestamp_compensated(提交时按在途时长补偿,actor 时钟连续),
+      要么 uncompensated(显式陈旧 tts 阴性对照)。
+    d=0 时返回 False:一切走现役路径,逐字节不变。
+    """
+    coupled = bool(getattr(cfg, "planner_revision_enabled", False)) and (
+        max(int(getattr(cfg, "target_delay_steps", 0)), 0) > 0
+    )
+    if coupled and _target_delay_tts_mode(cfg) == "live":
+        raise ValueError(
+            "planner revisions with target_delay_steps > 0 form ONE coupled transport tuple; "
+            "target_delay_tts_mode='live' would deliver the tuple late but the clock instantly "
+            "— incoherent. Use 'source_timestamp_compensated' (age-compensated at submission, "
+            "continuous actor clock) or 'uncompensated' (explicit stale-TTS negative control)."
+        )
+    return coupled
+
+
 def _target_delay_tts_mode(cfg: "RacketTargetCommandCfg") -> str:
     """Return the actor-visible time-to-strike delay convention.
 
@@ -155,6 +200,7 @@ class RacketTargetCommand(CommandTerm):
         # construction instead of lying dormant until a later curriculum/override enables it.
         _face_command_pairing(cfg)
         _target_delay_tts_mode(cfg)
+        _validate_adaptive_sigma_cfg(cfg)
         super().__init__(cfg, env)
 
         self.robot: Articulation = env.scene[cfg.asset_name]
@@ -429,10 +475,16 @@ class RacketTargetCommand(CommandTerm):
         # (mean = sum / _exact_n_acc). Per-clip variants exist below; sigma needs one global signal.
         self._exact_pos_err_sum = 0.0
         self._exact_vel_err_sum = 0.0
+        # 拍面(normal)通道的全局衰减误差和(弧度)——与 pos/vel 完全平行的第三路驱动。
+        # 无条件累加(纯内部标量,不进任何输出),只有 adaptive_sigma_normal=True 时才被读。
+        self._exact_nrm_err_sum = 0.0
         # Live adaptive sigmas (start at the cfg maxima = the hand-tuned YAML stds; only applied to
         # the reward terms when cfg.adaptive_sigma is on).
         self._adaptive_sigma_pos = float(cfg.sigma_pos_max)
         self._adaptive_sigma_vel = float(cfg.sigma_vel_max)
+        # 第三通道(拍面法向)sigma:同样从 cfg 最大值起步(=YAML 手调 std 的 2x 验收宽度),
+        # 只有 adaptive_sigma_normal=True 时才会被更新/落到奖励项上。
+        self._adaptive_sigma_normal = float(getattr(cfg, "sigma_normal_max", 0.52))
 
         # Per-clip (forehand=clip 0 / backhand=clip 1) breakdown of the exact-strike metrics, so wandb
         # shows each swing separately (the aggregate composite can hide one swing lagging). Same
@@ -760,15 +812,32 @@ class RacketTargetCommand(CommandTerm):
         # RNG draw. Only the ACTOR-visible view is degraded — rewards, metrics, the privileged critic,
         # and the achieved-target-replay WRITE always use the TRUE live target.
         self._delay_steps = max(int(cfg.target_delay_steps), 0)
-        if self.planner_revision_enabled and self._delay_steps > 0:
-            raise ValueError(
-                "planner revisions with target_delay_steps > 0 are not launchable: "
-                "the phase governor and actor must consume one coupled transport tuple; "
-                "the current legacy delay ring delays only actor observations"
-            )
         self._delay_tts_mode = _target_delay_tts_mode(cfg)
+        # 耦合传输(2026-07-25,取代旧 NO-LAUNCH 守卫):planner 修订 + 延迟时,延迟发生在
+        # "提交"这道工序——每步生成的修订元组(pos/vel/normal/tts,原子)先进在途环压 d 步,
+        # d 步后才提交给相位调度器。接受记账、调度器看到的 desired_tts、actor 可见元组因此
+        # 消费同一条延迟流(mocap→relay 语义);actor 端不再叠观测延迟环(否则总延迟成 2d)。
+        # 任务安装(begin)不是 mocap 流,保持即时。d=0 = 耦合不激活 = 现役路径逐字节不变。
+        # 半配置组合(live tts 模式)在 _coupled_transport_mode 里 fail-loud;event timing 与
+        # 耦合传输的交互未定义,在 _revise_same_ball_actor_tuple 运行期 fail-loud(motion 术语
+        # 构造期还未解析,只能推迟到第一次使用)。
+        self._coupled_transport = _coupled_transport_mode(cfg)
         self._delay_tts_active = self._delay_tts_mode != "live"
         self._atomic_tts_active = self._delay_tts_active or self.planner_revision_enabled
+        # actor 观测端延迟环的步数:legacy 模式 = d(现役行为);耦合模式 = 0(提交已经晚了
+        # d 步,actor 直接读被接受的 planner_visible 流,调度器/actor 同拍看到同一元组)。
+        self._actor_ring_steps = 0 if self._coupled_transport else self._delay_steps
+        if self._coupled_transport:
+            # 在途环(长度 d,单指针):槽位 p 在第 t 步写入、第 t+d 步弹出提交。valid=False 的
+            # 槽(当步没生成 / 新任务安装时被作废)不提交——中继丢弃已结束任务的消息。
+            self._pend_ptr = 0
+            self._pend_valid = torch.zeros(
+                self._delay_steps, self.num_envs, dtype=torch.bool, device=self.device
+            )
+            self._pend_pos = torch.zeros(self._delay_steps, self.num_envs, 3, device=self.device)
+            self._pend_vel = torch.zeros(self._delay_steps, self.num_envs, 3, device=self.device)
+            self._pend_normal = torch.zeros(self._delay_steps, self.num_envs, 3, device=self.device)
+            self._pend_tts = torch.zeros(self._delay_steps, self.num_envs, device=self.device)
         self._jitter_pos = max(float(cfg.target_jitter_pos_per_s), 0.0)
         self._jitter_vel = max(float(cfg.target_jitter_vel_per_s), 0.0)
         # Calibrated MEASUREMENT noise (ball_physics_venue.yaml `capture:` block, 2026-07-03 fit):
@@ -823,10 +892,11 @@ class RacketTargetCommand(CommandTerm):
             or float(cfg.target_bias_per_swing) > 0.0
             or self._atomic_tts_active
         )
-        if self._delay_steps > 0:
+        if self._actor_ring_steps > 0:
             # Ring buffers (length delay+1) over the ACTOR-VISIBLE target quantities: the slot
             # written this step is read back `delay` pushes later (see _push_actor_target).
-            _L = self._delay_steps + 1
+            # 耦合传输模式下 _actor_ring_steps==0:观测环不建,延迟由提交侧在途环承担。
+            _L = self._actor_ring_steps + 1
             self._delay_buf_pos = torch.zeros(_L, self.num_envs, 3, device=self.device)
             self._delay_buf_vel = torch.zeros(_L, self.num_envs, 3, device=self.device)
             self._delay_buf_normal = torch.zeros(_L, self.num_envs, 3, device=self.device)
@@ -909,6 +979,11 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["racket_vel_error"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["adaptive_sigma_pos"] = torch.full((self.num_envs,), float(cfg.sigma_pos_max), device=self.device)
         self.metrics["adaptive_sigma_vel"] = torch.full((self.num_envs,), float(cfg.sigma_vel_max), device=self.device)
+        # 第三通道曲线只在旗标开启时注册:默认跑的 wandb 指标键集合逐字节不变。
+        if getattr(cfg, "adaptive_sigma_normal", False):
+            self.metrics["adaptive_sigma_normal"] = torch.full(
+                (self.num_envs,), float(cfg.sigma_normal_max), device=self.device
+            )
         self.metrics["racket_normal_error_deg"] = torch.zeros(self.num_envs, device=self.device)
         self.metrics["base_pos_error"] = torch.zeros(self.num_envs, device=self.device)
         # How far the (coupled) base target sits from spawn — i.e. how much repositioning is commanded.
@@ -2837,6 +2912,10 @@ class RacketTargetCommand(CommandTerm):
                 "half-configured planner revisions: racket/motion initial-TTS mixture mismatch"
             )
         ids = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+        if getattr(self, "_coupled_transport", False):
+            # 任务安装即时生效(任务安装不是 mocap 流,BEGIN 元组不过在途环)。上一颗球还
+            # 在途的修订全部作废:中继丢弃已结束任务的消息,绝不能把旧球的元组提交进新任务。
+            self._pend_valid[:, ids] = False
         if self._resample_is_wrap:
             self._planner_task_id[ids] += 1
         else:
@@ -2875,6 +2954,17 @@ class RacketTargetCommand(CommandTerm):
         profile = self._planner_revision_profile
         if profile is None:
             raise RuntimeError("planner revision profile is unavailable")
+        coupled = bool(getattr(self, "_coupled_transport", False))
+        if coupled and getattr(motion, "event_timing_enabled", False):
+            # 未定义交互,fail-loud:event timing 的 deadline 属于不可变考卷排程(不在 planner
+            # 元组里),把提交压 d 步无法对它保持一致语义(排程该不该也晚 d 步?)。想同时用,
+            # 先给事件时钟定义耦合传输合同再解锁。
+            raise RuntimeError(
+                "coupled transport delay + event timing is undefined: the event scheduler owns "
+                "deadlines outside the planner tuple, so delaying revision submission by d steps "
+                "has no coherent meaning for scheduled rows. Disable target_delay_steps or "
+                "event timing."
+            )
         # The runner can advance an accepted source timestamp locally between messages.  Mirror
         # that here so the actor clock never freezes inside the profile's no-new-revision cutoff.
         active = motion._planner_active
@@ -2889,7 +2979,8 @@ class RacketTargetCommand(CommandTerm):
             >= profile.min_tts_s
         )
         ids = torch.where(eligible)[0]
-        if len(ids) == 0:
+        if len(ids) == 0 and not coupled:
+            # 耦合模式不许在这早退:本步就算没新生成,也必须弹环提交 d 步前的在途修订。
             return
         # Estimate noise converges toward contact.  Every proposal is clamped against the
         # immutable task-begin tuple.  This is essential for latest-value transport: the runner may
@@ -2955,6 +3046,22 @@ class RacketTargetCommand(CommandTerm):
             )
             tts = tts + deadline_jitter
         tts = tts.clamp(profile.min_tts_s, profile.max_tts_s)
+        if coupled:
+            # 耦合传输:本步生成的元组只入在途环;真正提交的是 d 步前生成的那一份(原子出队,
+            # tts 已按源时间戳补偿/或按 uncompensated 原样)。记账与 last_precontact 改用
+            # "提交时刻"的 truth 时钟——与消息到达中继的真实时刻一致。
+            ids, pos, vel, normal, tts = self._exchange_pending_planner_revision(
+                ids, pos, vel, normal, tts
+            )
+            if len(ids) == 0:
+                self.metrics["planner_task_revision"] = (
+                    self._planner_task_revision.clamp(min=0).float()
+                )
+                self.metrics["planner_same_task_revision_active"] = eligible.float()
+                return
+            truth_tts = motion._planner_canonicalize_tts(
+                motion._planner_truth_tts[ids], profile
+            )
         revision = self._planner_task_revision[ids] + 1
         accepted = motion.submit_planner_revision(
             ids,
@@ -2986,6 +3093,52 @@ class RacketTargetCommand(CommandTerm):
             self._planner_visible_last_precontact[accepted_ids] = last_precontact[accepted]
         self.metrics["planner_task_revision"] = self._planner_task_revision.clamp(min=0).float()
         self.metrics["planner_same_task_revision_active"] = eligible.float()
+
+    def _exchange_pending_planner_revision(
+        self,
+        ids: torch.Tensor,
+        pos: torch.Tensor,
+        vel: torch.Tensor,
+        normal: torch.Tensor,
+        tts: torch.Tensor,
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+        """耦合传输在途环的一次"压入本步 / 弹出 d 步前"交换(每控制步恰好调用一次)。
+
+        单指针环(长度 d):先读槽 p(恰好是 d 步前写入的元组),再把本步生成的元组写进
+        同一个槽,指针前进——生成于 t 的修订恰在 t+d 提交,d=2 时效果整整晚 2 步。
+        出队的 tts 处理遵循 target_delay_tts_mode:
+        * source_timestamp_compensated——减去在途时长 d*dt(runner 的源时间戳补偿),
+          提交进调度器的 deadline ≈ 提交时刻的真实剩余时间,actor 时钟连续;
+        * uncompensated——原样提交(显式陈旧 tts 阴性对照;调度器可能因 deadline 超过
+          begin 包络而拒收,这正是该对照要暴露的行为)。
+        无效槽位不提交:当步没生成(env 不在 eligible 集),或新任务安装时被
+        _begin_same_ball_planner_task 作废(旧球消息不得进新任务)。补偿后过期的元组
+        交给 submit_planner_revision 的接受判据拒收(fail-safe 拒绝并记账,而非静默丢弃)。
+        """
+        if tts.dim() != 1 or pos.shape != (len(ids), 3) or vel.shape != (len(ids), 3) \
+                or normal.shape != (len(ids), 3) or len(tts) != len(ids):
+            raise ValueError(
+                "coupled transport exchange expects one atomic (pos, vel, normal, tts) tuple "
+                "per generating env"
+            )
+        p = self._pend_ptr
+        out_valid = self._pend_valid[p].clone()
+        out_pos = self._pend_pos[p].clone()
+        out_vel = self._pend_vel[p].clone()
+        out_normal = self._pend_normal[p].clone()
+        out_tts = self._pend_tts[p].clone()
+        self._pend_valid[p] = False
+        self._pend_valid[p, ids] = True
+        self._pend_pos[p, ids] = pos
+        self._pend_vel[p, ids] = vel
+        self._pend_normal[p, ids] = normal
+        self._pend_tts[p, ids] = tts
+        self._pend_ptr = (p + 1) % int(self._pend_valid.shape[0])
+        sub_ids = torch.where(out_valid)[0]
+        sub_tts = out_tts[sub_ids]
+        if self._delay_tts_mode == "source_timestamp_compensated":
+            sub_tts = sub_tts - self._delay_steps * float(self._env.step_dt)
+        return sub_ids, out_pos[sub_ids], out_vel[sub_ids], out_normal[sub_ids], sub_tts
 
     def _book_planner_revision_decisions(
         self,
@@ -3075,6 +3228,8 @@ class RacketTargetCommand(CommandTerm):
                 )
             else:
                 self.time_to_strike = (strike_step - motion.time_steps).float() * self._env.step_dt
+        # 窗掩码时钟:默认 = 上面算好的 legacy 有符号 clip 时钟(planner 关时天然 ±窗)。
+        tts_for_window = self.time_to_strike
         if self.planner_revision_enabled:
             if not motion.planner_revision_enabled:
                 raise RuntimeError(
@@ -3087,6 +3242,12 @@ class RacketTargetCommand(CommandTerm):
             # remains zero through follow-through.  Legacy clip-derived clocks
             # keep their historical signed post-strike values above.
             self.time_to_strike = motion._planner_truth_tts.clamp(min=0.0)
+            # 击球窗掩码改读带符号孪生时钟(2026-07-25):deadline 的钉 0 曾让
+            # |tts|<=0.12 的窗覆盖整个随挥段(~50-100 步)——position/normal 触球后
+            # 停拍可薅钱、站稳包/face 税全程计费、模仿在恢复段被 0.25x 捂嘴。
+            # 窗回到设计的 ±0.12 s;time_to_strike/pre_strike/exact_strike(自带
+            # 一拍锁存)语义不变,obs/critic 仍读钉 0 的任务期限。
+            tts_for_window = motion._planner_truth_tts_signed
         if getattr(motion, "event_timing_enabled", False):
             # For a successfully revealed T1 row, WHEN is owned by the immutable schedule rather
             # than by the clip phase.  The native clip/hold pair is only the feasible trajectory
@@ -3097,8 +3258,10 @@ class RacketTargetCommand(CommandTerm):
                 motion.event_deadline_ticks_remaining.float() * self._env.step_dt
             )
             self.time_to_strike = torch.where(event_mask, scheduled_tts, self.time_to_strike)
+            # event timing 现役全 disabled;若启用,T1 行的 deadline ticks 亦是截断时钟,
+            # 其窗关闭语义待事件时钟带符号化时再接(掩码暂沿用 tts_for_window)。
         self.pre_strike = self.time_to_strike > 0.0
-        _tts_abs = self.time_to_strike.abs()
+        _tts_abs = tts_for_window.abs()
         self.strike_window = _tts_abs <= self.cfg.strike_window_s
         # 1c split windows: POSITION gets the tight window, NORMAL/VELOCITY the wide one; None
         # (default) falls back to strike_window_s for that channel — numerically identical to the
@@ -3313,7 +3476,7 @@ class RacketTargetCommand(CommandTerm):
                 self._held_planner_task.copy_(planner_task)
                 self._held_planner_revision.copy_(planner_revision)
                 self._held_planner_last_precontact.copy_(planner_last_precontact)
-        if self._delay_steps > 0:
+        if self._actor_ring_steps > 0:
             # Write this step's (jittered) target into slot `w`; the next slot in the length-
             # (delay+1) ring was written exactly `delay` pushes ago — that is the actor's view.
             w = self._delay_ptr
@@ -3330,7 +3493,7 @@ class RacketTargetCommand(CommandTerm):
                 self._delay_buf_planner_last_precontact[w].copy_(
                     planner_last_precontact
                 )
-            r = (w + 1) % (self._delay_steps + 1)
+            r = (w + 1) % (self._actor_ring_steps + 1)
             self._delay_ptr = r
             self.delayed_racket_target_pos_w.copy_(self._delay_buf_pos[r])
             self.delayed_racket_target_vel_w.copy_(self._delay_buf_vel[r])
@@ -3339,7 +3502,7 @@ class RacketTargetCommand(CommandTerm):
             if self._atomic_tts_active:
                 delayed_tts = self._delay_buf_tts[r]
                 if self._delay_tts_mode == "source_timestamp_compensated":
-                    delayed_tts = delayed_tts - self._delay_steps * float(self._env.step_dt)
+                    delayed_tts = delayed_tts - self._actor_ring_steps * float(self._env.step_dt)
                 if self.planner_revision_enabled:
                     delayed_tts = delayed_tts.clamp(min=0.0)
                 self.delayed_time_to_strike.copy_(delayed_tts)
@@ -3461,7 +3624,7 @@ class RacketTargetCommand(CommandTerm):
                 self._held_planner_last_precontact[ids] = (
                     self._planner_visible_last_precontact[ids]
                 )
-        if self._delay_steps > 0:
+        if self._actor_ring_steps > 0:
             self._delay_buf_pos[:, ids] = source_pos[ids].unsqueeze(0)
             self._delay_buf_vel[:, ids] = source_vel[ids].unsqueeze(0)
             self._delay_buf_normal[:, ids] = source_normal[ids].unsqueeze(0)
@@ -4458,6 +4621,64 @@ class RacketTargetCommand(CommandTerm):
                     (self._rally_returns_acc_c[_c] / max(_cs, 1e-6)) if _cs >= _min_n else 0.0
                 )
 
+    def _update_adaptive_sigma(self, enough: bool, denom: float) -> None:
+        """P2.3 SMASH-style ADAPTIVE TRACKING SIGMA (coarse-to-fine) 的唯一落地处。
+
+        every sigma_update_every steps, set the racket position/velocity reward stds to the
+        clamped decayed MEAN exact-strike error, so the kernel always brackets the current
+        operating band instead of a hand-tuned constant (SMASH Table IV: removing this collapses
+        success 86.4 -> 22.6). Mutates the LIVE reward-term params in place (read per compute()
+        call); also keeps racket_strike_success's own std_pos/std_vel in lockstep so the
+        multiplicative bonus agrees with the additive terms.
+
+        第三通道(adaptive_sigma_normal,默认关):SMASH 是 pos/ori/vel 三路一起收紧的;我们
+        原先只收 pos/vel,拍面奖励的相对权重随 pos 收紧被静默弱化最多 ~7x。开启后
+        racket_normal.std 与 racket_strike_success.std_normal 按 exact-strike 面角误差
+        (弧度)的同一路衰减 EMA 锁步更新:clamp(sigma_ema_scale * mean_err_rad,
+        sigma_normal_min, sigma_normal_max)。锁步的理由与 pos/vel 相同——加法项和乘法
+        成功奖励必须在同一宽度上打分,否则两处梯度对不上。
+        """
+        if (
+            self.cfg.adaptive_sigma
+            and enough
+            and self._env.common_step_counter % int(self.cfg.sigma_update_every) == 0
+        ):
+            pos_mean = self._exact_pos_err_sum / denom
+            vel_mean = self._exact_vel_err_sum / denom
+            sigma_pos = min(max(float(self.cfg.sigma_ema_scale) * pos_mean, float(self.cfg.sigma_pos_min)),
+                            float(self.cfg.sigma_pos_max))
+            sigma_vel = min(max(float(self.cfg.sigma_ema_scale) * vel_mean, float(self.cfg.sigma_vel_min)),
+                            float(self.cfg.sigma_vel_max))
+            _normal_on = bool(getattr(self.cfg, "adaptive_sigma_normal", False))
+            if _normal_on:
+                nrm_mean = self._exact_nrm_err_sum / denom
+                sigma_normal = min(
+                    max(float(self.cfg.sigma_ema_scale) * nrm_mean, float(self.cfg.sigma_normal_min)),
+                    float(self.cfg.sigma_normal_max),
+                )
+            rm = self._env.reward_manager
+            try:
+                rm.get_term_cfg("racket_position").params["std"] = sigma_pos
+                rm.get_term_cfg("racket_velocity").params["std"] = sigma_vel
+                succ = rm.get_term_cfg("racket_strike_success").params
+                succ["std_pos"] = sigma_pos
+                succ["std_vel"] = sigma_vel
+                if _normal_on:
+                    # 锁步落地:两处必须同一个值(见 docstring),缺一处都算合同漂移。
+                    rm.get_term_cfg("racket_normal").params["std"] = sigma_normal
+                    succ["std_normal"] = sigma_normal
+            except ValueError:
+                pass  # a variant task without these terms: adaptive sigma is a no-op there
+            self._adaptive_sigma_pos = sigma_pos
+            self._adaptive_sigma_vel = sigma_vel
+            if _normal_on:
+                self._adaptive_sigma_normal = sigma_normal
+        if self.cfg.adaptive_sigma:
+            self.metrics["adaptive_sigma_pos"][:] = self._adaptive_sigma_pos
+            self.metrics["adaptive_sigma_vel"][:] = self._adaptive_sigma_vel
+            if getattr(self.cfg, "adaptive_sigma_normal", False):
+                self.metrics["adaptive_sigma_normal"][:] = self._adaptive_sigma_normal
+
     def _update_metrics(self):
         # CommandTerm.compute() runs _update_metrics() BEFORE _update_command(), so refresh the
         # actual racket FK AND the strike timing here (once per step) — metrics, rewards, and
@@ -4474,7 +4695,9 @@ class RacketTargetCommand(CommandTerm):
         vel_err = torch.norm(self.racket_lin_vel_w - self.racket_target_vel_w, dim=-1)
         measured_normal, target_normal = face_tracking_pair(self)
         cos_ang = torch.sum(measured_normal * target_normal, dim=-1).clamp(-1.0, 1.0)
-        normal_err_deg = torch.acos(cos_ang) * (180.0 / math.pi)
+        # 弧度值先算(adaptive sigma 第三通道的驱动量纲),度数只是它的展示换算——数值逐字节同旧式。
+        normal_err_rad = torch.acos(cos_ang)
+        normal_err_deg = normal_err_rad * (180.0 / math.pi)
         base_err = torch.norm(self.base_pos_w[:, :2] - self.base_target_pos_w, dim=-1)
         base_pos_rel = self.base_pos_w[:, :2] - origins[:, :2]
         base_err_xy = self.base_pos_w[:, :2] - self.base_target_pos_w
@@ -4608,6 +4831,8 @@ class RacketTargetCommand(CommandTerm):
         # counters above; per-clip variants exist further down but sigma needs one global signal.
         self._exact_pos_err_sum = decay * self._exact_pos_err_sum + float((pos_err * exact_strike).sum())
         self._exact_vel_err_sum = decay * self._exact_vel_err_sum + float((vel_err * exact_strike).sum())
+        # 拍面通道:同一 decay/掩码,累加 exact-strike 面角误差(弧度)。见 adaptive_sigma_normal。
+        self._exact_nrm_err_sum = decay * self._exact_nrm_err_sum + float((normal_err_rad * exact_strike).sum())
         # UNCONDITIONAL swing accounting: decay the start/fall accumulators at the SAME per-step
         # rate as the exact accumulators (increments happen in _count_swing_starts), then report
         #   swing_completion_rate = exact-strike arrivals / swing starts   (falls count against it)
@@ -4793,38 +5018,9 @@ class RacketTargetCommand(CommandTerm):
             self.metrics[f"racket_pos_error_{_ax}_exact_strike"] = torch.where(
                 exact_strike, _axis_err_exact[:, _ai], self.metrics[f"racket_pos_error_{_ax}_exact_strike"]
             )
-        # P2.3 SMASH-style ADAPTIVE TRACKING SIGMA (coarse-to-fine): every sigma_update_every steps,
-        # set the racket position/velocity reward stds to the clamped decayed MEAN exact-strike error,
-        # so the kernel always brackets the current operating band instead of a hand-tuned constant
-        # (SMASH Table IV: removing this collapses success 86.4 -> 22.6). Mutates the LIVE reward-term
-        # params in place (read per compute() call); also keeps racket_strike_success's own std_pos/
-        # std_vel in lockstep so the multiplicative bonus agrees with the additive terms. Same
-        # placement/pattern as the success-gated perturb curriculum below.
-        if (
-            self.cfg.adaptive_sigma
-            and enough
-            and self._env.common_step_counter % int(self.cfg.sigma_update_every) == 0
-        ):
-            pos_mean = self._exact_pos_err_sum / denom
-            vel_mean = self._exact_vel_err_sum / denom
-            sigma_pos = min(max(float(self.cfg.sigma_ema_scale) * pos_mean, float(self.cfg.sigma_pos_min)),
-                            float(self.cfg.sigma_pos_max))
-            sigma_vel = min(max(float(self.cfg.sigma_ema_scale) * vel_mean, float(self.cfg.sigma_vel_min)),
-                            float(self.cfg.sigma_vel_max))
-            rm = self._env.reward_manager
-            try:
-                rm.get_term_cfg("racket_position").params["std"] = sigma_pos
-                rm.get_term_cfg("racket_velocity").params["std"] = sigma_vel
-                succ = rm.get_term_cfg("racket_strike_success").params
-                succ["std_pos"] = sigma_pos
-                succ["std_vel"] = sigma_vel
-            except ValueError:
-                pass  # a variant task without these terms: adaptive sigma is a no-op there
-            self._adaptive_sigma_pos = sigma_pos
-            self._adaptive_sigma_vel = sigma_vel
-        if self.cfg.adaptive_sigma:
-            self.metrics["adaptive_sigma_pos"][:] = self._adaptive_sigma_pos
-            self.metrics["adaptive_sigma_vel"][:] = self._adaptive_sigma_vel
+        # P2.3 SMASH-style ADAPTIVE TRACKING SIGMA — 摘到 _update_adaptive_sigma(可 host 单测
+        # 直接驱动),此处仅按原节拍调用;行为与旧内联块逐字节一致。
+        self._update_adaptive_sigma(enough, denom)
         # A1 target latency diagnostic: constant broadcast, refreshed every step because
         # CommandTerm.reset() zeros metric entries of resetting envs before logging them.
         # (midswing_resample_count is written per step in _update_command while the feature is on.)
@@ -5237,6 +5433,15 @@ class RacketTargetCommandCfg(CommandTermCfg):
     sigma_pos_max: float = 0.20
     sigma_vel_min: float = 0.5
     sigma_vel_max: float = 1.0
+    # 第三通道:拍面法向 sigma(弧度)。SMASH 是 pos/ori/vel 三路一起自适应收紧的;只收
+    # pos/vel 会让拍面奖励随 pos 收紧被静默弱化最多 ~7x(reward_redesign_20260725 §2)。
+    # True 时 racket_normal.std 与 racket_strike_success.std_normal 一起按 exact-strike
+    # 面角误差(弧度)的同一路衰减 EMA 锁步更新:clamp(sigma_ema_scale * mean_err_rad,
+    # min, max)。min=0.262(15° 验收线),max=0.52(~2x 验收 = 起步宽度)。默认 False =
+    # 逐字节不变;单开(adaptive_sigma=False)在构造期 fail-loud(_validate_adaptive_sigma_cfg)。
+    adaptive_sigma_normal: bool = False
+    sigma_normal_min: float = 0.262
+    sigma_normal_max: float = 0.52
 
     # --- A1 target latency & time-variance (mocap->planner->runner realism; roadmap A1) -------------
     # MOTIVATION: training otherwise hands the actor a PERFECT, instantly-updated target, while the
@@ -5248,7 +5453,13 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # metrics/gates, the privileged critic, and the achieved-target-replay write use live values.
     # ALL defaults OFF => byte-identical baseline (delay==0 aliases the live target tensors;
     # target_delay_tts_mode="live" returns the live TTS tensor; jitter/prob==0 draw no RNG).
-    target_delay_steps: int = 0  # actor sees atomic pos/vel/face-command/swing_sign this many 50 Hz steps late
+    # actor sees atomic pos/vel/face-command/swing_sign this many 50 Hz steps late。
+    # planner_revision_enabled 时语义升级为"耦合传输"(2026-07-25,取代旧 NO-LAUNCH 守卫):
+    # 延迟改发生在修订"提交"侧——生成于 t 的修订元组(pos/vel/normal/tts,原子)t+d 才提交给
+    # 相位调度器,接受记账 / 调度器 desired_tts / actor 元组同吃一条延迟流(mocap→relay 语义);
+    # actor 端不再叠观测延迟环。BEGIN(任务安装)保持即时。要求 target_delay_tts_mode 为
+    # source_timestamp_compensated(或显式阴性对照 uncompensated);'live' fail-loud。
+    target_delay_steps: int = 0
     # Actor-visible TTS convention:
     #   live                         historical behavior; target fields can be delayed but TTS is live.
     #   source_timestamp_compensated TTS rides the same delayed tuple, then the runner-equivalent

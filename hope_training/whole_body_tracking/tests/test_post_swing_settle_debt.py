@@ -26,7 +26,7 @@ import pytest
 import torch
 
 from test_reward_flags_mdp import hope_rewards_mod
-from test_reward_flags_overrides import _Term, _make_env_cfg, train_mod
+from test_reward_flags_overrides import _Term, _apply_legacy_v1, _make_env_cfg, train_mod
 from test_training_contract_schema3 import TC, _qdot_hinge_schema3_contract
 
 
@@ -93,8 +93,9 @@ def _settle_env_cfg():
 
 
 def _apply_settle(task, cfg=None):
+    # 2026-07-25 默认翻转后本套件仍测 legacy 翻译行为:钉 v1 + 滤 v1 记账行,原断言原样成立。
     cfg = cfg if cfg is not None else _settle_env_cfg()
-    applied = train_mod._apply_task_overrides(cfg, task, clip_name=None)
+    applied = _apply_legacy_v1(cfg, task)
     return cfg, applied
 
 

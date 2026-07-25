@@ -52,6 +52,31 @@
 | `v4rg_runtime_order_v3` | 当前 formal fresh setting 实际绑定的 v4rg 版本：schema-2、50 Hz，已迁移到 runtime body order。只写“v4rg”时只表示资产族，不足以复现 formal setting。 |
 | `legacy v4rg` | 迁移到 `v4rg_runtime_order_v3` 之前的旧资产/顺序；可用于 causal 历史诊断，不得冒充当前 fresh exact 动作。 |
 | `schema-2 motion` | 动作资产的第 2 版数据合同，包含 runtime 所需的关节/刚体顺序与元数据。 |
+| <a id="canonical-ready"></a>`canonical ready` / 共同等待姿态 | 五类击球动作共用的零速等待状态。已登记的 `canonical_ready_v1` 只是 exact `bh_loop_c` source NPZ 第 0 帧的 donor baseline，不是最终或拍面中立 ready；“姿态相同”与“`joint_vel/body_lin_vel_w/body_ang_vel_w` 三组速度在 start/end 共六类 checks 为零”也是两个独立条件。该 baseline 尚未通过 face-neutrality、站立平衡、训练消费或部署认证，不能把普通 default stand 或某个 `adv2c3` 切片首帧悄悄当成它。 |
+| <a id="canonical-ready-sidecar"></a>`canonical-ready sidecar` / 共同 ready 单状态旁车 | 不是 schema-2 motion 的单状态 NPZ：它保存 31 关节姿态/零速度、floating root 位置/四元数和 donor 注释；完整 runtime ready 还必须由独立的 32-body FK 真值旁车补齐。路径或文件 SHA 不能替代 donor source SHA、donor frame、runtime-float32 pose digest 和 exact-zero velocity digest。该旁车不能冒充可播放 source/output clip。 |
+| <a id="face-neutral-ready-audit"></a>`face-neutral ready audit` / 拍面中立等待位审计 | 在同一 exact FK 模型和 scope 下，比较 ready 拍面法向到反手目标与翻面正手目标的球面角距离；“中立”要求两侧距离在预注册容差内相称，不等于把某个腕关节写成 `+90/-90`。当前 v1 的 upper 距离约 `33.4/146.6 deg`、full 约 `32.9/147.1 deg`，明确失败；下一候选须保留现有站姿/root/拍心设计目标并重解右臂，形成新路径/SHA，不能覆盖 v1。 |
+| <a id="adv2c3"></a>`adv2c3` / 三分之二前奏切片 | 从 `floor(2 × 登记触球帧 / 3)` 附近开始、保留原触球窗和随挥的历史紧凑切片。它没有搜索入口/出口，没有把共同 ready 融入整条路径，也没有完整重定时；因此现行五动作编译只把它记作 comparator（比较基线），不把它预定为主件、搜索 seed 或 tie-break。 |
+| <a id="motion-body-scope"></a>motion `upper/full body scope` / 上肢与全身动作范围 | 同一高层击球语义的两种数值参考：上肢版把人体髋部贡献按已登记规则折入机器人腰/躯干并维持站立下肢；全身版保留合法的 root、腰腿和足接触参考。两者共享动作 ID，不共享平衡、地面、动力学或行为证书。 |
+| <a id="motion-timing-envelope"></a>`motion timing envelope` / 动作时序必要包络 | 对最终绝对关节轨迹检查位置、URDF 速度和具名加速度上限的必要筛选。当前 `diagonal_timing_envelope_v1=(effort-|bias(q,qdot=0)|)/Mjj` 只是一阶对角下界，不是完整逆动力学、恒扭矩、平衡或真机证明；不得简称 `C3`，以免与 signed-face C3 实验臂混淆。 |
+| <a id="no-brake-time-law"></a>`no-brake time law` / 击球机会末前不提前刹车时间律 | 沿一条已选几何路径，把一维路径参数的加速度限制为在 exact `window_end` 前非负的运动学时间律；零加速度平台允许，窗口内也允许继续加速。它不是逐关节恒加速度、恒执行器扭矩、拍速单调或数学 `C3` 连续曲线；“bang-bang”只可描述某个受限求解器的切换结构，不能当这条合同或光滑度等级的名称。 |
+| <a id="canonical-t-hit"></a>canonical `t_hit` / 编译候选击球时刻 | 从 output frame 0 的共同零速 ready 到 nominal source-anchor marker 在新时间轴上的秒数。现行动作库把 `t_hit<=0.5 s` 当 compiler screening gate，并在可行候选中优先最小化到窗口/anchor 的时间；它仍只是运动学参考时刻，不证明 policy 会触球或把球回上台。 |
+| <a id="motion-artifact-class"></a>`motion artifact class` / 动作工件类别 | 先区分工件，再谈发布：`diagnostic_face_core` 只是一段 scope-specific 换面诊断核心，`canonical_compiler_output` 才是已经包含 direct canonical-ready→contact→ready bridge 的完整候选输出。诊断工件在 publication state machine 之外；改文件名、复制 bytes 或补一个 `publication_class` 字段都不能把它变成 `compiler_candidate`。 |
+| <a id="motion-build-manifest"></a>`motion build manifest` / 动作构建清单 | 内容绑定 source、工具、模型、参数和输出 SHA 的构建收据。它说明“哪些字节怎样生成”，不等于任何安全能力证书；拒绝请求可以只有 rejection manifest，不得同时留下看似成功的 NPZ。 |
+| <a id="canonical-ready-bridge-receipt"></a>`canonical-ready contact bridge receipt` / ready 到击球机会整桥收据 | 完整候选 manifest 的必需部分：绑定 ready/source、entry/exit、direct ready→core→ready 几何、时间律、source-marker→output-time 映射、首末共同 ready 和零速度摘要。face-core receipt 没有这座桥；缺桥或独立 verifier 不能从 exact bytes 重算时，工件只能保留 diagnostic 身份。 |
+| <a id="protected-window-digest"></a>`protected-window digest` / 受保护击球窗摘要 | 分别对 exact source window 与 compiled output window 的六个 schema-2 时序通道、明确 frame-index 集合、dtype/endianness、shape 和 C-order bytes 做域分离 SHA-256。source digest 与 output digest 不是彼此相等的承诺；二者必须由同一 transformation receipt 连同 source/output 整文件 SHA、marker 映射和允许变换绑定，防止把别件或别 scope 的窗口拼接进来。 |
+| <a id="mjb"></a>`MJB` / MuJoCo compiled model binary | MuJoCo 把顶层 MJCF、其 XML include、mesh 等资产解析后生成的二进制模型。动作构建同时绑定顶层 MJCF SHA 与 MJB SHA，避免“主 XML 没变、include/mesh 已漂移”的假 lineage；它仍不是碰撞、动力学或真机证书。 |
+| <a id="motion-source-registry"></a>`motion source registry` / 动作源注册表 | 把 exact `<motion_id, body_scope, variant>` 与源 NPZ、完整合成 recipe、canonical-ready 和模型哈希绑定的版本化信任根。临时 JSON 或只有自报名的 registry 不是项目采纳；固定仓库路径和内容 SHA 必须在同一审查中钉住。缺 trust root 的可行结果只能叫 `pre-registry diagnostic`，不能升格为 registered candidate。 |
+| <a id="motion-publication-state"></a>`motion publication state` / 动作发布状态机 | registry 行字段名统一为 `publication_class`，只允许逐级、单向、不可跳级地新建不可变记录：`compiler_candidate=(false,false,false)` → `training_adopted=(true,false,false)` → `deployment_adopted=(true,true,false)` → `hardware_adopted=(true,true,true)`；三个布尔值依次是 training/deployment/hardware authorization。每次晋级都要由独立 verifier 重读原件、完整证书链和必需工件后产生新 manifest/registry bytes，不能原地改名或手改布尔值。证据失效时另记 revoke/quarantine disposition，不把旧记录倒退改写成较低 class。 |
+| <a id="registry-shared-ready-digest"></a>`registry shared-ready digest` / 注册表共同 ready 摘要 | bank 级、不是单行自报的 SHA-256：域分离绑定 canonical-ready 文件 SHA、donor source SHA/frame、runtime-float32 joint/root/32-body pose digest、共同 ready 的 `joint_vel/body_lin_vel_w/body_ang_vel_w` 三组 exact-zero 数组、ready-FK SHA，以及五个有序 clip 的首末 endpoint digest。每件的三组速度在 start/end 各查一次，合称六类 endpoint zero checks。五行必须导出同一个值；任一 endpoint、donor、scope 或 body order 漂移都会改变它。 |
+| <a id="motion-alignment-digest"></a>`motion alignment digest` / 动作对齐摘要 | 对五个有序 registry row 的动作身份、路径/哈希、family、phase、击球机会、拍面符号、registry shared-ready digest，以及 source/build/model/applicability/evidence/adoption provenance 做确定性序列化后的 SHA-256。它防止运行时各列错位，不是 registry JSON SHA 的别名。 |
+| <a id="canonical-runtime-four-pin"></a>`canonical runtime four-pin` / canonical 运行时四重钉住 | 非 audit 的动作消费必须由配置同时给出并精确核对：registry JSON SHA、motion alignment digest、canonical-ready 文件 SHA、canonical-ready FK 真值 SHA。缺任意一项都失败封闭；运行时自己刚读出的 digest 不能冒充调用方预先钉住的期望值。 |
+| <a id="identity-only-registry-audit"></a>`identity-only registry audit` / 仅身份注册表审计 | `authorization_purpose=None` 的严格只读解析：可以核对 schema、内容哈希、共同 ready、provenance 和 alignment digest，但不授予 training/deployment/hardware 权限，也禁止导出可直接喂给动作 loader 的 runtime table。 |
+| <a id="motion-capability-certificate"></a>`motion capability certificate` / 动作逐门能力证书 | 对一个 exact `<asset, body scope, variant, timing>` 只解锁一层能力的不可覆盖证据，例如 schema/L0、vendor L1、桌网、动力学或行为；上游通过不能跨资产、跨 scope 或跨变体继承下游能力。 |
+| <a id="motion-evidence-certificate-chain"></a>`motion evidence certificate chain` / 动作证据证书链 | registry 声明 `E1–E5` 时，从 `E1` 到所声明等级每一级都必须恰有一份 passing certificate；manifest 和每份 certificate 都以路径与 SHA-256 内容寻址，并精确绑定同一 `<motion_id, scope, variant, NPZ SHA>`。只写 `evidence_level=E4`、复用别件证书或缺中间级都不能晋级。证书链只证明已登记证据的身份与连续性，不把未实际运行的 Gate 变成通过。 |
+| <a id="strict-motion-artifact-parser"></a>`strict motion artifact parser` / 动作工件严格解析器 | 不只看路径、哈希或自报版本，还解析并核对工件内部合同：schema-3 训练题库绑定动作 SHA/帧数/触球锚，training config 绑定动作 lineage，ONNX metadata 绑定题库/config/model/ready/timing，ONNX model 必须由官方 parser 与 full checker 通过。所需 parser 缺失或 bytes 虽有正确哈希但内容无效时必须失败封闭。 |
+| <a id="shared-zero-speed-boundary"></a>`shared zero-speed ready boundary` / 共同零速 ready 边界 | 五个动作的开始和结束都必须是同一个 runtime-float32 关节/root/32-body 姿态，且 `joint_vel/body_lin_vel_w/body_ang_vel_w` 三组 runtime 速度在 start/end 共六类 checks 均为字面零。episode 内只有处在该开始或结束边界时才允许换 `motion_id`；挥拍中途改槽必须拒绝。 |
+| <a id="fail-closed-motion-preprocessing"></a>`fail-closed motion preprocessing` / 失败封闭动作预处理 | 遇到缺字段、未知顺序、非有限值、越限、模型漂移、坏 provenance 或窗口泄漏时非零退出，且不发布候选 NPZ或成功证书；禁止静默裁剪、自动降速、换 profile 或覆盖旧输出。 |
+| <a id="motion-action-id"></a>`motion_id` / 五动作槽 | planner、题库、训练、ONNX 与 runtime 共同使用的版本化动作身份；至少区分正手拉、反手拉 C、正手挡合成、反手挡和高点拍压。它不同于正/反手 `swing_sign`，每条 clip 还需独立绑定物理拍面 sign。同一颗球选择后不可在挥拍中换槽；不可行时只能 abort/rearm。 |
 | <a id="motion-l0-static"></a>motion `L0 static audit` / 动作 L0 静态审计 | 对 exact schema-2 动作做的纯 CPU 离散静态门：核对字段/顺序/finite/形状/时间、四元数、vendor MJCF 关节范围、逐帧 FK 与 root-foot 接地，但不调用 `mj_step` 或推进动力学。source/static gate 通过只说明计划、validator 和合成反例闭环；必须另有 exact 资产的 runtime certificate 才能声称 L0 runtime 通过。它不包含 vendor L1 自碰/自打、桌网扫掠、动力学、RL、Gate3 或真机，也不是 signed-face 的 L1/L2/L3 或证据等级 E1/E2/E3。 |
 | <a id="motion-vendor-l1-safety"></a>motion `vendor L1 safety audit` / 动作厂商 L1 安全审计 | 在 exact vendor MuJoCo 碰撞模型中，把一条已通过动作 L0 的 schema-2 整轨做有限密集插值并逐样本检查机器人自碰、球拍/拍柄碰机器人及关键部位余隙。任一硬失败都会否决整条动作，不能由 reward 或其他好成绩补偿。当前 B 合同把 151 个 50 Hz 原帧按每段 8 个子步扫成 1201 个 400 Hz 样本；`<5 mm` 的 hard 判定直接使用 MuJoCo 饱和谓词，不用距离二分的近似 midpoint。关键组包含右肩三轴和右肘，仅右腕/手/球拍安装链从 proximity pair 排除。这仍是有限采样，不是数学连续时间扫掠证明，也不含桌网、动力学、训练、Gate3 或真机。它与训练阶段的 L1/L2/L3 不是同一层级。 |
 | <a id="float32-ulp"></a>float32 `ULP` / 相邻格宽 | `unit in the last place`：某个 float32 数附近相邻两个可表示数之间的距离。它随数值量级变化，不是固定物理容差；动作 L0 V2 用预注册的格数、近零 floor 和独立物理上限共同约束纯舍入差，不能用它掩盖关节、接地、支撑或安全失败。 |
@@ -126,6 +151,9 @@
 
 | 术语 | 人话 |
 | --- | --- |
+| `NPZ` / 动作归档 | NumPy 压缩归档文件：本项目所有正式动作参考（source 与 compiler output）的落盘格式，必须满足 exact schema-2 的 11/14 字段（fps、31 关节位置/速度、32 body 世界位姿/速度等）。文件存在或可读不等于动作可执行、可训练或已授权。 |
+| `MJCF` / MuJoCo 模型描述 | MuJoCo 的机器人/场景 XML 描述格式；本项目的唯一厂商真源是 `a3_pingpong.xml` 及其 mesh 闭包，用整文件 SHA 内容绑定。它决定 FK/碰撞/动力学口径，任何换文件或改字节都必须换身份。 |
+| `URDF` / 机器人描述 | Unified Robot Description Format：厂商 A3 的关节/连杆/限位描述文件，是关节速度与限位的硬件真源（拍面安装变换也从它读取）。与 MJCF 一样按 SHA 内容绑定，不许静默替换。 |
 | `GVHMR` | Global Video-based Human Motion Recovery：把单目人物视频恢复成 SMPL-X 人体动作的离线前处理器。结构输出通过只说明人体重建文件形状和有限数合法，不等于机器人动作、安全或击球有效。 |
 | `GMR` | General Motion Retargeting：把 GVHMR 的人体动作重定向到 Agibot A3 关节/刚体。GVHMR 结果不会自动授权 GMR；每一代输入、body shape、源代码和输出都要另做内容绑定。 |
 | `FK` / forward kinematics / 正向运动学 | 给定 floating root 和关节位置，用机器人模型计算每个 link/刚体的世界位置与姿态。本项目的离线 MuJoCo FK 不推进动力学时间，也不等于 simulator、碰撞安全或动作有效性通过。 |
@@ -155,9 +183,13 @@
 | `Gate3-D0` | 本项目的“第 0 版最短部署仿真闭环”：固定同卷、planner + policy + C++ runner + vendor runtime 的单拍演示；不冒充连续对打。它是项目内部标签，不是行业通用术语。 |
 | `Trainer-v0` | native MuJoCo 训练的首卷。因现役 vendor main sim loop 没有球/球台/网，目前只能练单拍平衡与击球状态，不是 physical return 结果，也不阻塞几天内 `Gate3-D0`。它是并行候选训练轨；产物若晋级，仍须独立通过 Gate3/Gate3B。旧草案曾把它也叫 `D0`，从现行文档起停止这种重名。 |
 | `Recovery-D0` | recovery A/B/C 预注册的第 0 步：只用现有 179-D checkpoint 做 A bridge 与 C previous-tuple 的 zero-shot 诊断，不选型、不晋级。原 config 字段仍叫 `D0`，文档必须写全 `Recovery-D0`，避免与 `Gate3-D0` 混淆。 |
-| `STAND GAIN SOURCES` 横幅 / `planner_static` 列 / `tau_*` 列 | 2026-07-22 部署侧取证三件：启动日志打印两条站立路径（人工 PD_STAND 的 --stand-kp/--stand-kd 与 planner static 的官方高增益表）各自 Kp/Kd 来源与数值；obs/trace CSV 尾部新增 planner static 闩锁列与 31 列实测力矩（vendor SDK 只暴露 effort，无电流/温度）；build git 指纹每次运行第一行打印。默认行为逐字节不变；`--planner-static-gain-scale`（默认 1.0）是唯一新旗标。 |
+| `STAND GAIN SOURCES` 横幅 / `planner_static` 列 / `tau_*` 列 | 2026-07-22 部署侧取证三件：启动日志打印两条站立路径（人工 PD_STAND 的 --stand-kp/--stand-kd 与 planner static 的官方高增益表）各自 Kp/Kd 来源与数值；obs/trace CSV 尾部新增 planner static 闩锁列与 31 列实测力矩（vendor SDK 只暴露 effort，无电流/温度）；build git 指纹每次运行第一行打印。默认行为逐字节不变；`--planner-static-gain-scale`（默认 1.0）是唯一新旗标。**2026-07-25 更正**：07-25 之前 runner 的分组增益块会在 PpPolicy 之后再改 STATIC 命令（--gain-scale 0.4 的既往实跑里腰/臂实发 0.4x 官方；held/--leg-stand-gains 配置又把腿/腰覆盖回 1.0x，审计旗标在这些关节上失效）——横幅"STATIC 恒为官方表、仅审计旗标可降"在当时是**不实**的，读旧日志须以 trace CSV 的最终 kp/kd 为准。07-25 起增益块以 `!planner_static_active()` 守卫，STATIC 命令原样直达，横幅自此为真；此变更待 Linux 编译回归后才可上真机。 |
 
 ## 证据和文档术语
+
+动作 registry 使用下列 E-level 时，必须同时满足
+[`motion evidence certificate chain`](#motion-evidence-certificate-chain)；裸 `evidence_level` 字段
+没有晋级效力。
 
 | 术语 | 人话 |
 | --- | --- |

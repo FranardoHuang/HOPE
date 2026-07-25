@@ -50,6 +50,7 @@ import re
 import sys
 import tempfile
 import types
+from pathlib import Path
 
 import numpy as np
 import pytest
@@ -1122,6 +1123,11 @@ def _make_a1_cmd(
     cmd.metrics = {"actor_time_to_strike_s": torch.zeros(1)}
     cmd._actor_view_active = True
     cmd._delay_steps = delay_steps
+    # 2026-07-25 耦合传输改造后,__init__ 会派生 _actor_ring_steps(耦合模式=0,legacy=d)。
+    # 本文件的 A1 用例钉的是 legacy 观测延迟环本身的原子性/记账,故按 legacy 口径造假体;
+    # 耦合模式(修订+延迟)的行为合同见 test_coupled_transport_delay.py。
+    cmd._coupled_transport = False
+    cmd._actor_ring_steps = delay_steps
     cmd._delay_tts_mode = tts_mode
     cmd._delay_tts_active = tts_mode != "live"
     cmd.planner_revision_enabled = planner_revision
@@ -1447,7 +1453,9 @@ def test_base_decel_observer_is_a_real_reward_term_not_a_command_stage_hook():
 # --------------------------------------------------------------------------------------------- #
 # R-c MotionCommand birth fixes (real MotionCommand on synthetic clips)
 # --------------------------------------------------------------------------------------------- #
-_BODY_NAMES = ["pelvis_link", "torso_Link"]
+_BODY_NAMES = list(
+    commands_mod.MotionCommand._canonical_registry_module().RUNTIME_BODY_NAMES
+)
 _N_JOINTS = 31
 _STAND_Z = 1.0684
 _CROUCH_Z = 0.78
@@ -1482,6 +1490,639 @@ def _write_motion_npz(
     return path
 
 
+def _write_canonical_ready_motion_npz(
+    path,
+    *,
+    interior_scale=1.0,
+    start_joint_offset=0.0,
+    end_joint_offset=0.0,
+    start_body_offset=0.0,
+    end_body_offset=0.0,
+    endpoint_joint_velocity=0.0,
+):
+    """Write a tiny schema-2 clip whose normal case starts/ends at one non-default ready."""
+
+    frames = 5
+    ready_joint = np.linspace(-0.3, 0.3, _N_JOINTS, dtype=np.float32)
+    joint_pos = np.repeat(ready_joint[None, :], frames, axis=0)
+    joint_pos[0, 0] += np.float32(start_joint_offset)
+    joint_pos[-1, 0] += np.float32(end_joint_offset)
+    joint_pos[1, 0] += np.float32(0.11 * interior_scale)
+    joint_pos[2, 1] -= np.float32(0.17 * interior_scale)
+    joint_pos[3, 2] += np.float32(0.09 * interior_scale)
+
+    joint_vel = np.zeros_like(joint_pos)
+    joint_vel[0, 0] = np.float32(endpoint_joint_velocity)
+    joint_vel[-1, 0] = np.float32(endpoint_joint_velocity)
+    joint_vel[1:-1, :3] = np.float32(0.25 * interior_scale)
+
+    ready_body_pos = np.zeros((len(_BODY_NAMES), 3), dtype=np.float32)
+    ready_body_pos[:, 2] = np.float32(0.93)
+    ready_body_pos[0] = np.array([0.08, -0.03, 0.93], dtype=np.float32)
+    ready_body_pos[_BODY_NAMES.index("torso_Link")] = np.array(
+        [0.09, -0.02, 1.24], dtype=np.float32
+    )
+    body_pos = np.repeat(ready_body_pos[None, :, :], frames, axis=0)
+    body_pos[0, 0, 0] += np.float32(start_body_offset)
+    body_pos[-1, 0, 0] += np.float32(end_body_offset)
+    body_pos[1, :, 0] += np.float32(0.04 * interior_scale)
+    body_pos[2, :, 1] -= np.float32(0.03 * interior_scale)
+
+    body_quat = np.zeros((frames, len(_BODY_NAMES), 4), dtype=np.float32)
+    body_quat[..., 0] = 1.0
+    half_yaw = np.float32(0.08 * interior_scale)
+    body_quat[1:-1, :, 0] = np.cos(half_yaw)
+    body_quat[1:-1, :, 3] = np.sin(half_yaw)
+
+    body_lin_vel = np.zeros((frames, len(_BODY_NAMES), 3), dtype=np.float32)
+    body_ang_vel = np.zeros_like(body_lin_vel)
+    body_lin_vel[1:-1, :, 0] = np.float32(0.4 * interior_scale)
+    body_ang_vel[1:-1, :, 2] = np.float32(0.6 * interior_scale)
+
+    np.savez(
+        path,
+        fps=np.array([50.0], dtype=np.float64),
+        joint_pos=joint_pos,
+        joint_vel=joint_vel,
+        body_pos_w=body_pos,
+        body_quat_w=body_quat,
+        body_lin_vel_w=body_lin_vel,
+        body_ang_vel_w=body_ang_vel,
+        kinematics_schema_version=np.array([2], dtype=np.int64),
+        body_pos_point=np.array("link_origin"),
+        body_lin_vel_point=np.array("center_of_mass"),
+        body_names=np.asarray(_BODY_NAMES),
+    )
+    return path
+
+
+_CANONICAL_MOTION_IDS = (
+    "fh_loop",
+    "bh_loop_c",
+    "fh_block_syn",
+    "bh_block",
+    "s0_highpress",
+)
+_CANONICAL_FAMILIES = (
+    "forehand",
+    "backhand",
+    "forehand",
+    "backhand",
+    "forehand",
+)
+_CANONICAL_FACE_SIGNS = (1.0, -1.0, 1.0, -1.0, 1.0)
+
+
+def _file_sha256(path):
+    with open(path, "rb") as stream:
+        return hashlib.sha256(stream.read()).hexdigest()
+
+
+def _write_registry_json(path, payload):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as stream:
+        json.dump(payload, stream, indent=2, sort_keys=True, allow_nan=False)
+        stream.write("\n")
+    return _file_sha256(path)
+
+
+def _write_runtime_receipt(repo_root: Path, relative: str, label: str):
+    path = repo_root / relative
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(f"fixture:{label}\n".encode("utf-8"))
+    return {
+        "path": relative,
+        "sha256": _file_sha256(path),
+    }
+
+
+def _complete_runtime_bank_gate_report(
+    binding,
+    repo_root: Path,
+    ready_path: Path,
+):
+    digest = lambda label: hashlib.sha256(label.encode("utf-8")).hexdigest()
+    manifest = _write_runtime_receipt(
+        repo_root, "canonical_registry_contract/bank/BUILD_MANIFEST.json", "manifest"
+    )
+    recipe = _write_runtime_receipt(
+        repo_root, "canonical_registry_contract/recipe.json", "recipe"
+    )
+    compiler = _write_runtime_receipt(
+        repo_root,
+        "hope_training/whole_body_tracking/scripts/"
+        "canonical_motion_compiler.py",
+        "compiler",
+    )
+    geometry = _write_runtime_receipt(
+        repo_root,
+        "hope_training/whole_body_tracking/scripts/"
+        "canonical_motion_geometry.py",
+        "geometry",
+    )
+    mjcf = _write_runtime_receipt(
+        repo_root, "canonical_registry_contract/a3.xml", "mjcf"
+    )
+    urdf = _write_runtime_receipt(
+        repo_root, "canonical_registry_contract/a3.urdf", "urdf"
+    )
+    body_order = _write_runtime_receipt(
+        repo_root,
+        "canonical_registry_contract/body_order.txt",
+        "body-order",
+    )
+    gate_tool = _write_runtime_receipt(
+        repo_root,
+        "hope_training/whole_body_tracking/scripts/"
+        "canonical_motion_bank_gate.py",
+        "gate",
+    )
+    player_tool = _write_runtime_receipt(
+        repo_root,
+        "hope_training/whole_body_tracking/scripts/mujoco_motion_player.py",
+        "player",
+    )
+    dynamics_tool = _write_runtime_receipt(
+        repo_root,
+        "hope_training/whole_body_tracking/scripts/"
+        "canonical_mujoco_dynamics_gate.py",
+        "dynamics",
+    )
+    schema2_tool = _write_runtime_receipt(
+        repo_root,
+        "hope_training/whole_body_tracking/scripts/"
+        "canonical_schema2_builder.py",
+        "schema2-builder",
+    )
+    ready_receipt = {
+        "path": ready_path.relative_to(repo_root).as_posix(),
+        "sha256": _file_sha256(ready_path),
+    }
+    endpoint_zero = {
+        "joint_start": True,
+        "joint_end": True,
+        "body_linear_start": True,
+        "body_linear_end": True,
+        "body_angular_start": True,
+        "body_angular_end": True,
+    }
+    by_motion = dict(zip(binding.motion_ids, binding.npz_sha256))
+    clips = [
+        {
+            "motion_id": motion_id,
+            "scope": scope,
+            "filename": f"{motion_id}_{scope}.npz",
+            "sha256": (
+                by_motion[motion_id]
+                if scope == binding.scope
+                else digest(f"{motion_id}:{scope}")
+            ),
+            "frames": 5,
+            "fps": 50.0,
+            "duration_s": 0.08,
+            "schema2_receipts": {
+                "input_sha256": digest(f"{motion_id}:{scope}:input"),
+                "builder_tool_sha256": schema2_tool["sha256"],
+                "manifest_sidecar": _write_runtime_receipt(
+                    repo_root,
+                    (
+                        "canonical_registry_contract/bank/"
+                        f"{motion_id}_{scope}.manifest.json"
+                    ),
+                    f"{motion_id}:{scope}:manifest",
+                ),
+                "report_sidecar": _write_runtime_receipt(
+                    repo_root,
+                    (
+                        "canonical_registry_contract/bank/"
+                        f"{motion_id}_{scope}.report.json"
+                    ),
+                    f"{motion_id}:{scope}:report",
+                ),
+            },
+            "strict_schema2_and_ready": {
+                "shared_joint_ready_exact": True,
+                "shared_32_body_ready_exact": True,
+                "six_velocity_classes_exact_zero": endpoint_zero,
+            },
+            "contact_opportunity": {
+                "acceleration_allowed_through_window_end": True
+            },
+            "mujoco_fk": {"pass": True},
+            "plant_specific_dynamics": {
+                "verdict": "PASS",
+                "screen_pass": True,
+                "non_torque_screens_pass": True,
+                "inverse_dynamics": {
+                    "torque_interpretation": {"valid": True}
+                },
+            },
+        }
+        for motion_id in binding.motion_ids
+        for scope in ("upper", "full")
+    ]
+    aggregate = {
+        key: 0
+        for key in commands_mod.MotionCommand._canonical_registry_module()
+        .motion_admission._BANK_GATE_AGGREGATE_KEYS
+    }
+    aggregate.update(
+        {
+            key: 10
+            for key in (
+                "clip_count",
+                "fk_pass_count",
+                "velocity_consistency_pass_count",
+                "joint_limit_pass_count",
+                "geometry_pass_count",
+                "non_torque_dynamics_pass_count",
+                "complete_dynamics_pass_count",
+                "torque_interpretation_valid_count",
+            )
+        }
+    )
+    return {
+        "schema_version": 1,
+        "verdict": "PASS",
+        "bank_gate_pass": True,
+        "candidate_integrity_pass": True,
+        "grounded_trace_status": "COMPLETE_PASS",
+        "publication_class": "post_build_diagnostic_only",
+        "training_authorized": False,
+        "hardware_authorized": False,
+        "library_id": binding.bank_id,
+        "manifest": manifest,
+        "bank_dir": "bank",
+        "bound_inputs": {
+            "recipe": recipe,
+            "compiler": compiler,
+            "geometry_tool": geometry,
+            "compiler_options_sha256": digest("options"),
+            "ready": ready_receipt,
+            "mjcf": mjcf,
+            "urdf": urdf,
+            "body_order": body_order,
+            "plant": {
+                "mjcf_sha256": mjcf["sha256"],
+                "urdf_sha256": urdf["sha256"],
+                "compiled_signature_sha256": digest("signature"),
+                "identity_bound": True,
+                "runtime_body_order": ["pelvis_link"],
+            },
+            "verifier_tools": {
+                "bank_gate": gate_tool,
+                "mujoco_motion_player": player_tool,
+                "canonical_mujoco_dynamics_gate": {
+                    **dynamics_tool,
+                    "report_schema_version": 1,
+                },
+            },
+        },
+        "contracts": {
+            "matrix": {
+                "motion_ids": list(binding.motion_ids),
+                "scopes": ["upper", "full"],
+                "count": 10,
+            },
+            "shared_ready": True,
+            "six_endpoint_velocity_classes_exact_zero": True,
+            "contact_opportunity_is_marker_only": True,
+            "acceleration_allowed_through_window_end": True,
+            "nonnegative_scalar_acceleration_through_window_end": True,
+            "adv2c3_role": "comparator_only_not_default",
+            "grounded_inverse_dynamics": "complete",
+            "grounded_trace_status": "COMPLETE_PASS",
+        },
+        "aggregate": aggregate,
+        "clips": clips,
+        "non_claims": [],
+    }
+
+
+def _canonical_registry_for_motion_files(motion_files):
+    files = [os.path.abspath(os.fspath(path)) for path in motion_files]
+    if len(files) == 1:
+        files = files * 5
+    elif len(files) == 2:
+        files = [files[0], files[1], files[0], files[1], files[0]]
+    elif len(files) != 5:
+        raise AssertionError("canonical test banks need one, two, or five source paths")
+    repo_root = os.path.commonpath([os.path.dirname(path) for path in files])
+    contract_dir = os.path.join(repo_root, "canonical_registry_contract")
+    os.makedirs(contract_dir, exist_ok=True)
+
+    with np.load(files[0], allow_pickle=False) as data:
+        ready_joint = np.asarray(data["joint_pos"][0], dtype=np.float64)
+        ready_root_pos = np.asarray(data["body_pos_w"][0, 0], dtype=np.float64)
+        ready_root_quat = np.asarray(data["body_quat_w"][0, 0], dtype=np.float64)
+        ready_body_pos = np.asarray(data["body_pos_w"][0], dtype=np.float32)
+        ready_body_quat = np.asarray(data["body_quat_w"][0], dtype=np.float32)
+    ready_path = os.path.join(contract_dir, "canonical_ready_v1.npz")
+    np.savez(
+        ready_path,
+        joint_pos=ready_joint,
+        joint_vel=np.zeros(31, dtype=np.float64),
+        root_pos_w=ready_root_pos,
+        root_quat_w=ready_root_quat,
+        source_segment=np.array("bh_loop_c"),
+        source_npz=np.array(os.path.basename(files[0])),
+        source_frame=np.array(0, dtype=np.int64),
+        striking_joint_ids=np.arange(7, dtype=np.int64),
+        note=np.array("canonical consumer unit-test ready"),
+    )
+    ready_sha = _file_sha256(ready_path)
+    ready_fk_path = os.path.join(contract_dir, "canonical_ready_fk_v1.npz")
+    np.savez(
+        ready_fk_path,
+        canonical_ready_sha256=np.array(ready_sha),
+        body_names=np.asarray(_BODY_NAMES),
+        body_pos_w=ready_body_pos,
+        body_quat_w=ready_body_quat,
+        kinematics_contract_version=np.array([1], dtype=np.int64),
+    )
+    ready_fk_sha = _file_sha256(ready_fk_path)
+
+    entries = []
+    strike_phases = []
+    for index, (motion_id, motion_path) in enumerate(
+        zip(_CANONICAL_MOTION_IDS, files)
+    ):
+        with np.load(motion_path, allow_pickle=False) as data:
+            frames = int(data["joint_pos"].shape[0])
+            fps = float(np.asarray(data["fps"]).reshape(-1)[0])
+        marker = frames // 2
+        opportunity = [max(0, marker - 1), min(frames - 1, marker + 1)]
+        strike_phases.append(float(marker) / float(frames - 1))
+        npz_sha = _file_sha256(motion_path)
+        source_path = os.path.join(contract_dir, f"{motion_id}.source.json")
+        source_sha = _write_registry_json(
+            source_path, {"motion_id": motion_id, "source": "unit-test"}
+        )
+        build_path = os.path.join(contract_dir, f"{motion_id}.build.json")
+        build_sha = _write_registry_json(
+            build_path,
+            {
+                "hashes": {
+                    "output_npz_sha256": npz_sha,
+                    "ready_sha256": ready_sha,
+                },
+                "publication_class": "training_adopted",
+                "training_authorized": True,
+            },
+        )
+        applicability_path = os.path.join(
+            contract_dir, f"{motion_id}.applicability.json"
+        )
+        applicability_sha = _write_registry_json(
+            applicability_path,
+            {
+                "schema_version": 1,
+                "motion_id": motion_id,
+                "scope": "upper",
+                "variant": "unit_test",
+                "npz_sha256": npz_sha,
+                "domain": "canonical-consumer-unit-test",
+            },
+        )
+        evidence_certificates = []
+        for evidence_level in ("E1", "E2"):
+            certificate_path = os.path.join(
+                contract_dir,
+                f"{motion_id}.{evidence_level.lower()}.certificate.json",
+            )
+            certificate_sha = _write_registry_json(
+                certificate_path,
+                {
+                    "schema_version": 1,
+                    "level": evidence_level,
+                    "motion_id": motion_id,
+                    "scope": "upper",
+                    "variant": "unit_test",
+                    "npz_sha256": npz_sha,
+                    "status": "pass",
+                },
+            )
+            evidence_certificates.append(
+                {
+                    "level": evidence_level,
+                    "path": os.path.relpath(certificate_path, repo_root),
+                    "sha256": certificate_sha,
+                    "status": "pass",
+                }
+            )
+        evidence_path = os.path.join(contract_dir, f"{motion_id}.evidence.json")
+        evidence_sha = _write_registry_json(
+            evidence_path,
+            {
+                "schema_version": 1,
+                "motion_id": motion_id,
+                "scope": "upper",
+                "variant": "unit_test",
+                "npz_sha256": npz_sha,
+                "highest_evidence_level": "E2",
+                "certificates": evidence_certificates,
+            },
+        )
+        question_bank_path = os.path.join(
+            contract_dir, f"{motion_id}.question_bank.npz"
+        )
+        question_meta = {
+            "schema_version": 3,
+            "split": "train",
+            "clip_order": [motion_id],
+            "clips": {
+                motion_id: {
+                    "motion_sha256": npz_sha,
+                    "n_frames": frames,
+                    "anchor_frame": marker,
+                }
+            },
+        }
+        question_vector = np.zeros((1, 3), dtype=np.float32)
+        np.savez(
+            question_bank_path,
+            meta_json=np.frombuffer(
+                json.dumps(
+                    question_meta,
+                    sort_keys=True,
+                    separators=(",", ":"),
+                    allow_nan=False,
+                ).encode("utf-8"),
+                dtype=np.uint8,
+            ),
+            **{
+                f"{motion_id}/contact_pos_env": np.zeros(3, dtype=np.float32),
+                f"{motion_id}/incoming_vel": question_vector,
+                f"{motion_id}/incoming_spin": question_vector,
+                f"{motion_id}/demanded_vel": question_vector,
+                f"{motion_id}/demanded_normal": question_vector,
+            },
+        )
+        training_config_path = os.path.join(
+            contract_dir, f"{motion_id}.training_config.json"
+        )
+        _write_registry_json(
+            training_config_path,
+            {
+                "schema_version": 1,
+                "contract": "canonical-motion-training-config-v1",
+                "motion_id": motion_id,
+                "scope": "upper",
+                "variant": "unit_test",
+                "npz_sha256": npz_sha,
+            },
+        )
+        question_bank_sha = _file_sha256(question_bank_path)
+        training_config_sha = _file_sha256(training_config_path)
+        adoption_path = os.path.join(contract_dir, f"{motion_id}.adoption.json")
+        adoption_sha = _write_registry_json(
+            adoption_path,
+            {
+                "schema_version": 1,
+                "motion_id": motion_id,
+                "scope": "upper",
+                "variant": "unit_test",
+                "npz_sha256": npz_sha,
+                "strike_marker_frame": marker,
+                "contact_opportunity_frames": opportunity,
+                "mount_normal_sign": _CANONICAL_FACE_SIGNS[index],
+                "canonical_ready_sha256": ready_sha,
+                "canonical_ready_fk_sha256": ready_fk_sha,
+                "artifacts": {
+                    "question_bank": {
+                        "sha256": question_bank_sha,
+                        "schema_version": 3,
+                    },
+                    "training_config": {
+                        "sha256": training_config_sha,
+                        "schema_version": 1,
+                    },
+                    "onnx_model": None,
+                    "onnx_metadata": None,
+                },
+            },
+        )
+        entries.append(
+            {
+                "motion_id": motion_id,
+                "scope": "upper",
+                "variant": "unit_test",
+                "npz_path": os.path.relpath(motion_path, repo_root),
+                "npz_sha256": npz_sha,
+                "frames": frames,
+                "fps": fps,
+                "family": _CANONICAL_FAMILIES[index],
+                "strike_marker_frame": marker,
+                "contact_opportunity_frames": opportunity,
+                "mount_normal_sign": _CANONICAL_FACE_SIGNS[index],
+                "canonical_ready_sha256": ready_sha,
+                "source_manifest_path": os.path.relpath(source_path, repo_root),
+                "source_manifest_sha256": source_sha,
+                "build_manifest_path": os.path.relpath(build_path, repo_root),
+                "build_manifest_sha256": build_sha,
+                "applicability_manifest_path": os.path.relpath(
+                    applicability_path, repo_root
+                ),
+                "applicability_manifest_sha256": applicability_sha,
+                "evidence_level": "E2",
+                "evidence_manifest_path": os.path.relpath(
+                    evidence_path, repo_root
+                ),
+                "evidence_manifest_sha256": evidence_sha,
+                "question_bank_path": os.path.relpath(
+                    question_bank_path, repo_root
+                ),
+                "question_bank_sha256": question_bank_sha,
+                "question_bank_schema_version": 3,
+                "training_config_path": os.path.relpath(
+                    training_config_path, repo_root
+                ),
+                "training_config_sha256": training_config_sha,
+                "training_config_schema_version": 1,
+                "onnx_model_path": None,
+                "onnx_model_sha256": None,
+                "onnx_model_schema_version": None,
+                "onnx_metadata_path": None,
+                "onnx_metadata_sha256": None,
+                "onnx_metadata_schema_version": None,
+                "adoption_manifest_path": os.path.relpath(
+                    adoption_path, repo_root
+                ),
+                "adoption_manifest_sha256": adoption_sha,
+                "publication_class": "training_adopted",
+                "training_authorized": True,
+                "deployment_authorized": False,
+                "hardware_authorized": False,
+            }
+        )
+    registry_path = os.path.join(contract_dir, "upper_bank.json")
+    registry_sha = _write_registry_json(
+        registry_path,
+        {
+            "schema_version": 1,
+            "bank_id": "canonical_upper_unit_test",
+            "scope": "upper",
+            "canonical_ready_path": os.path.relpath(ready_path, repo_root),
+            "canonical_ready_sha256": ready_sha,
+            "canonical_ready_fk_path": os.path.relpath(
+                ready_fk_path, repo_root
+            ),
+            "canonical_ready_fk_sha256": ready_fk_sha,
+            "entries": entries,
+        },
+    )
+    registry_module = commands_mod.MotionCommand._canonical_registry_module()
+    loaded = registry_module.load_canonical_motion_bank_registry(
+        registry_path,
+        repo_root=repo_root,
+        expected_registry_sha256=registry_sha,
+    )
+    tables = registry_module.adapt_registry_for_runtime(
+        loaded, authorization_purpose=None
+    )
+    admission_binding = registry_module.bank_promotion_binding(
+        loaded, authorization_purpose="training"
+    )
+    bank_gate_path = os.path.join(contract_dir, "upper_bank_gate.json")
+    bank_gate_sha = _write_registry_json(
+        bank_gate_path,
+        _complete_runtime_bank_gate_report(
+            admission_binding,
+            Path(repo_root),
+            Path(ready_path),
+        ),
+    )
+    promotion_path = os.path.join(contract_dir, "upper_bank_promotion.json")
+    promotion_sha = _write_registry_json(
+        promotion_path,
+        {
+            "schema_version": 1,
+            "certificate_type": "canonical-motion-bank-promotion-v1",
+            **registry_module.motion_admission._binding_document(
+                admission_binding
+            ),
+            "bank_gate_report": {
+                "path": os.path.relpath(bank_gate_path, repo_root),
+                "sha256": bank_gate_sha,
+            },
+        },
+    )
+    return {
+        "motion_files": files,
+        "repo_root": repo_root,
+        "registry_path": registry_path,
+        "registry_sha256": registry_sha,
+        "alignment_sha256": tables.alignment_sha256,
+        "ready_sha256": ready_sha,
+        "ready_fk_sha256": ready_fk_sha,
+        "promotion_certificate_path": promotion_path,
+        "promotion_certificate_sha256": promotion_sha,
+        "families": _CANONICAL_FAMILIES,
+        "strike_phases": tuple(strike_phases),
+        "face_signs": _CANONICAL_FACE_SIGNS,
+    }
+
+
 class _Scene:
     def __init__(self, robot, num_envs):
         self._robot = robot
@@ -1499,12 +2140,19 @@ class _CmdRobot:
         default_root = torch.zeros(num_envs, 13)
         default_root[:, 2] = _STAND_Z
         default_root[:, 3] = 1.0
+        body_pos = torch.zeros(num_envs, len(_BODY_NAMES), 3)
+        body_quat = torch.zeros(num_envs, len(_BODY_NAMES), 4)
+        body_quat[..., 0] = 1.0
         self.data = types.SimpleNamespace(
             joint_names=list(_A3_JOINTS),
             joint_pos=torch.zeros(num_envs, _N_JOINTS),
             joint_vel=torch.zeros(num_envs, _N_JOINTS),
             joint_vel_limits=torch.full((_N_JOINTS,), 5.0),
             root_state_w=default_root.clone(),
+            body_pos_w=body_pos,
+            body_quat_w=body_quat,
+            body_lin_vel_w=torch.zeros_like(body_pos),
+            body_ang_vel_w=torch.zeros_like(body_pos),
             default_joint_pos=torch.zeros(num_envs, _N_JOINTS),
             default_joint_vel=torch.zeros(num_envs, _N_JOINTS),
             default_root_state=default_root,
@@ -1530,11 +2178,32 @@ def _make_motion_command(motion_files, num_envs=8, **cfg_overrides):
     # 运行时 motion_file 只会是 str 或 str 列表(Hydra CLI);裸 PosixPath 是测试自造形态,
     # 统一转 str 以继续走真实的标量/列表两条加载路径。
     motion_files = [str(item) for item in motion_files]
+    skip_legacy_admission = bool(
+        cfg_overrides.pop("_test_skip_legacy_admission", False)
+    )
+    trusted_promotion_sha = cfg_overrides.pop(
+        "_test_trusted_promotion_sha", None
+    )
+    racket_strike_phases = cfg_overrides.pop(
+        "_racket_strike_phase_per_clip", ()
+    )
+    racket_face_signs = cfg_overrides.pop(
+        "_racket_mount_normal_sign_per_clip", ()
+    )
     robot = _CmdRobot(num_envs)
     env = types.SimpleNamespace(
         num_envs=num_envs, device="cpu", step_dt=0.02,
         scene=_Scene(robot, num_envs),
-        cfg=types.SimpleNamespace(decimation=4, sim=types.SimpleNamespace(dt=0.005)),
+        cfg=types.SimpleNamespace(
+            decimation=4,
+            sim=types.SimpleNamespace(dt=0.005),
+            commands=types.SimpleNamespace(
+                racket_target=types.SimpleNamespace(
+                    strike_phase_per_clip=racket_strike_phases,
+                    mount_normal_sign_per_clip=racket_face_signs,
+                )
+            ),
+        ),
         termination_manager=types.SimpleNamespace(terminated=torch.zeros(num_envs, dtype=torch.bool)),
     )
     cfg_kwargs = dict(
@@ -1548,7 +2217,70 @@ def _make_motion_command(motion_files, num_envs=8, **cfg_overrides):
     )
     cfg_kwargs.update(cfg_overrides)
     cfg = commands_mod.MotionCommandCfg(**cfg_kwargs)
-    return commands_mod.MotionCommand(cfg, env), robot
+    registry_module = commands_mod.MotionCommand._canonical_registry_module()
+    admission_module = registry_module.motion_admission
+    prior_raw_trust = admission_module.TRUSTED_LEGACY_RAW_MOTION_SHA256
+    prior_promotion_trust = (
+        admission_module.TRUSTED_BANK_PROMOTION_CERTIFICATE_SHA256
+    )
+    if (
+        not bool(getattr(cfg, "canonical_ready_mode", False))
+        and not skip_legacy_admission
+    ):
+        trusted = {
+            hashlib.sha256(Path(path).read_bytes()).hexdigest()
+            for path in motion_files
+        }
+        admission_module.TRUSTED_LEGACY_RAW_MOTION_SHA256 = (
+            prior_raw_trust | frozenset(trusted)
+        )
+    if trusted_promotion_sha is not None:
+        admission_module.TRUSTED_BANK_PROMOTION_CERTIFICATE_SHA256 = (
+            prior_promotion_trust | frozenset({trusted_promotion_sha})
+        )
+    try:
+        return commands_mod.MotionCommand(cfg, env), robot
+    finally:
+        admission_module.TRUSTED_LEGACY_RAW_MOTION_SHA256 = prior_raw_trust
+        admission_module.TRUSTED_BANK_PROMOTION_CERTIFICATE_SHA256 = (
+            prior_promotion_trust
+        )
+
+
+def _make_canonical_ready_command(motion_files, num_envs=8, **cfg_overrides):
+    binding = _canonical_registry_for_motion_files(motion_files)
+    canonical = dict(
+        canonical_ready_mode=True,
+        canonical_registry_path=binding["registry_path"],
+        canonical_registry_repo_root=binding["repo_root"],
+        canonical_registry_sha256=binding["registry_sha256"],
+        canonical_registry_alignment_sha256=binding["alignment_sha256"],
+        canonical_ready_sha256=binding["ready_sha256"],
+        canonical_ready_fk_sha256=binding["ready_fk_sha256"],
+        canonical_promotion_certificate_path=(
+            binding["promotion_certificate_path"]
+        ),
+        stand_start_prob=1.0,
+        post_swing_start_prob=0.0,
+        wrap_teleport=False,
+        rsi_skip_settle_frames=0,
+        pose_range={},
+        velocity_range={},
+        joint_position_range=(0.0, 0.0),
+        stand_start_yaw_range=(0.0, 0.0),
+        hold_steps_range=(2, 2),
+        stand_start_min_hold=2,
+        clip_family_per_clip=binding["families"],
+        _racket_strike_phase_per_clip=binding["strike_phases"],
+        _racket_mount_normal_sign_per_clip=binding["face_signs"],
+        _test_trusted_promotion_sha=(
+            binding["promotion_certificate_sha256"]
+        ),
+    )
+    canonical.update(cfg_overrides)
+    return _make_motion_command(
+        binding["motion_files"], num_envs=num_envs, **canonical
+    )
 
 
 @pytest.fixture(scope="module")
@@ -1590,6 +2322,368 @@ def test_motion_loader_rejects_non_scalar_or_nonfinite_fps(tmp_path):
     nonfinite = _write_motion_npz(tmp_path / "nonfinite_fps.npz", frames=12, fps=np.nan)
     with pytest.raises(ValueError, match="finite and positive"):
         _make_motion_command([nonfinite])
+
+
+def test_raw_motion_requires_code_owned_legacy_allowlist(tmp_path, monkeypatch):
+    clip = _write_motion_npz(tmp_path / "untrusted_raw.npz", frames=12)
+    registry_module = commands_mod.MotionCommand._canonical_registry_module()
+    monkeypatch.setattr(
+        registry_module.motion_admission,
+        "TRUSTED_LEGACY_RAW_MOTION_SHA256",
+        frozenset(),
+    )
+
+    with pytest.raises(
+        ValueError, match="legacy raw motion admission rejected"
+    ):
+        _make_motion_command(
+            [clip],
+            _test_skip_legacy_admission=True,
+        )
+
+
+def test_runtime_registry_loader_ignores_preloaded_file_spoof(
+    monkeypatch,
+):
+    script = (
+        Path(commands_mod.__file__).resolve().parents[6]
+        / "scripts"
+        / "canonical_motion_registry.py"
+    )
+    fake = types.ModuleType("_hope_canonical_motion_registry_runtime")
+    fake.__file__ = str(script)
+    monkeypatch.setattr(
+        commands_mod, "_CANONICAL_REGISTRY_RUNTIME_MODULE", None
+    )
+    monkeypatch.setitem(
+        sys.modules, "_hope_canonical_motion_registry_runtime", fake
+    )
+
+    loaded = commands_mod.MotionCommand._canonical_registry_module()
+
+    assert loaded is not fake
+    assert Path(loaded.__file__).resolve() == script
+
+
+def test_canonical_ready_mode_is_default_off_and_does_not_validate_legacy_endpoints(
+    tmp_path,
+):
+    mismatched = _write_canonical_ready_motion_npz(
+        tmp_path / "legacy_endpoint_mismatch.npz", end_joint_offset=0.02
+    )
+    cmd, robot = _make_motion_command([mismatched])
+
+    assert cmd.canonical_ready_mode is False
+    cmd.hold_counter[:] = 1
+    # Historical hold behavior remains default_joint_pos + clip-owned body pose.  Merely adding
+    # the new flag must not alter a legacy training command or make old endpoint shapes unloadable.
+    assert torch.equal(cmd.joint_pos, robot.data.default_joint_pos)
+    assert torch.equal(cmd.body_pos_w[:, 0, 2], torch.full((cmd.num_envs,), 0.93))
+
+
+def test_canonical_ready_mode_has_no_raw_motion_escape_hatch(tmp_path):
+    clip = _write_canonical_ready_motion_npz(tmp_path / "unregistered.npz")
+    with pytest.raises(ValueError, match="requires canonical_registry_path"):
+        _make_motion_command(
+            [clip],
+            canonical_ready_mode=True,
+            stand_start_prob=1.0,
+            wrap_teleport=False,
+            stand_start_yaw_range=(0.0, 0.0),
+        )
+
+
+def test_canonical_ready_mode_rejects_self_report_without_code_trust(
+    tmp_path, monkeypatch
+):
+    clips = [
+        _write_canonical_ready_motion_npz(
+            tmp_path / f"candidate_{index}.npz",
+            interior_scale=1.0 + 0.1 * index,
+        )
+        for index in range(5)
+    ]
+    binding = _canonical_registry_for_motion_files(clips)
+    registry_module = commands_mod.MotionCommand._canonical_registry_module()
+    monkeypatch.setattr(
+        registry_module.motion_admission,
+        "TRUSTED_BANK_PROMOTION_CERTIFICATE_SHA256",
+        frozenset(),
+    )
+
+    with pytest.raises(
+        ValueError, match="promotion certificate SHA-256 is absent"
+    ):
+        _make_motion_command(
+            binding["motion_files"],
+            canonical_ready_mode=True,
+            canonical_registry_path=binding["registry_path"],
+            canonical_registry_repo_root=binding["repo_root"],
+            canonical_registry_sha256=binding["registry_sha256"],
+            canonical_registry_alignment_sha256=binding["alignment_sha256"],
+            canonical_ready_sha256=binding["ready_sha256"],
+            canonical_ready_fk_sha256=binding["ready_fk_sha256"],
+            canonical_promotion_certificate_path=(
+                binding["promotion_certificate_path"]
+            ),
+            stand_start_prob=1.0,
+            post_swing_start_prob=0.0,
+            wrap_teleport=False,
+            rsi_skip_settle_frames=0,
+            pose_range={},
+            velocity_range={},
+            joint_position_range=(0.0, 0.0),
+            stand_start_yaw_range=(0.0, 0.0),
+            hold_steps_range=(2, 2),
+            stand_start_min_hold=2,
+            clip_family_per_clip=binding["families"],
+            _racket_strike_phase_per_clip=binding["strike_phases"],
+            _racket_mount_normal_sign_per_clip=binding["face_signs"],
+        )
+
+
+@pytest.mark.parametrize(
+    ("override_factory", "message"),
+    (
+        (
+            lambda binding: {"canonical_registry_sha256": "0" * 64},
+            "registry SHA-256 mismatch",
+        ),
+        (
+            lambda binding: {"canonical_registry_alignment_sha256": "0" * 64},
+            "alignment SHA-256 mismatch",
+        ),
+        (
+            lambda binding: {"canonical_ready_sha256": "0" * 64},
+            "canonical ready SHA-256 mismatch",
+        ),
+        (
+            lambda binding: {"canonical_ready_fk_sha256": "0" * 64},
+            "canonical ready FK SHA-256 mismatch",
+        ),
+        (
+            lambda binding: {"clip_family_per_clip": ("backhand",) * 5},
+            "clip_family_per_clip must exactly equal",
+        ),
+        (
+            lambda binding: {"_racket_strike_phase_per_clip": (0.1,) * 5},
+            "strike_phase_per_clip differs",
+        ),
+        (
+            lambda binding: {"_racket_mount_normal_sign_per_clip": (1.0,) * 5},
+            "mount_normal_sign_per_clip differs",
+        ),
+        (
+            lambda binding: {
+                "motion_file": (
+                    binding["motion_files"][1],
+                    binding["motion_files"][0],
+                    *binding["motion_files"][2:],
+                )
+            },
+            "motion_file order differs",
+        ),
+    ),
+)
+def test_canonical_ready_mode_rejects_any_atomic_registry_table_drift(
+    tmp_path, override_factory, message
+):
+    clips = [
+        _write_canonical_ready_motion_npz(
+            tmp_path / f"ready_{index}.npz", interior_scale=1.0 + 0.1 * index
+        )
+        for index in range(5)
+    ]
+    binding = _canonical_registry_for_motion_files(clips)
+    canonical = dict(
+        canonical_ready_mode=True,
+        canonical_registry_path=binding["registry_path"],
+        canonical_registry_repo_root=binding["repo_root"],
+        canonical_registry_sha256=binding["registry_sha256"],
+        canonical_registry_alignment_sha256=binding["alignment_sha256"],
+        canonical_ready_sha256=binding["ready_sha256"],
+        canonical_ready_fk_sha256=binding["ready_fk_sha256"],
+        canonical_promotion_certificate_path=(
+            binding["promotion_certificate_path"]
+        ),
+        stand_start_prob=1.0,
+        wrap_teleport=False,
+        stand_start_yaw_range=(0.0, 0.0),
+        clip_family_per_clip=binding["families"],
+        _racket_strike_phase_per_clip=binding["strike_phases"],
+        _racket_mount_normal_sign_per_clip=binding["face_signs"],
+        _test_trusted_promotion_sha=(
+            binding["promotion_certificate_sha256"]
+        ),
+    )
+    canonical.update(override_factory(binding))
+    with pytest.raises(ValueError, match=message):
+        _make_motion_command(binding["motion_files"], **canonical)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    (
+        ({"end_joint_offset": 2.0e-5}, "first/last joint pose"),
+        ({"start_body_offset": 2.0e-5}, "first/last body pose"),
+        ({"endpoint_joint_velocity": 1.0e-5}, "first/last frames must be exactly zero"),
+    ),
+)
+def test_canonical_ready_mode_rejects_any_mixed_or_moving_boundary(
+    tmp_path, kwargs, message
+):
+    good = _write_canonical_ready_motion_npz(tmp_path / "good.npz")
+    bad = _write_canonical_ready_motion_npz(tmp_path / "bad.npz", **kwargs)
+    with pytest.raises(ValueError, match=message):
+        _make_canonical_ready_command([good, bad])
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    (
+        {"stand_start_prob": 0.5},
+        {"post_swing_start_prob": 0.25},
+        {"joint_position_range": (-0.1, 0.1)},
+        {"pose_range": {"x": (-0.01, 0.01)}},
+        {"wrap_teleport": True},
+        {"rsi_skip_settle_frames": 1},
+        {"clip_switch_prob": 0.1},
+        {"event_timing_mode": "post_strike_t1"},
+    ),
+)
+def test_canonical_ready_mode_fails_closed_on_alternate_reset_curricula(
+    tmp_path, overrides
+):
+    clip = _write_canonical_ready_motion_npz(tmp_path / "ready.npz")
+    with pytest.raises(
+        ValueError, match="incompatible with RSI/post-swing/noised reset curricula"
+    ):
+        _make_canonical_ready_command([clip], **overrides)
+
+
+def test_canonical_ready_hold_uses_one_clip_frame_for_every_reference_channel(
+    tmp_path,
+):
+    clip_a = _write_canonical_ready_motion_npz(
+        tmp_path / "a.npz", interior_scale=1.0
+    )
+    clip_b = _write_canonical_ready_motion_npz(
+        tmp_path / "b.npz", interior_scale=1.7
+    )
+    cmd, robot = _make_canonical_ready_command(
+        [clip_a, clip_b], num_envs=2
+    )
+    cmd.clip_id[:] = torch.tensor([0, 1])
+    starts = cmd.motion.seg_start[cmd.clip_id]
+    # Attack the old mixed-reference seam: leave each held environment's clock on a moving
+    # interior frame.  The enabled contract must still source every pose from that clip's ready.
+    cmd.time_steps[:] = starts + 1
+    cmd.time_steps_f[:] = cmd.time_steps.float()
+    cmd.hold_counter[:] = 1
+    cmd.metrics["in_hold"].zero_()
+
+    assert torch.equal(cmd.joint_pos, cmd.motion.joint_pos[starts])
+    assert not torch.equal(cmd.joint_pos, robot.data.default_joint_pos)
+    assert torch.equal(
+        cmd.body_pos_w - cmd._env.scene.env_origins[:, None, :],
+        cmd.motion.body_pos_w[starts],
+    )
+    assert torch.equal(cmd.body_quat_w, cmd.motion.body_quat_w[starts])
+    assert torch.equal(
+        cmd.anchor_pos_w - cmd._env.scene.env_origins,
+        cmd.motion.body_pos_w[starts, cmd.motion_anchor_body_index],
+    )
+    assert torch.equal(
+        cmd.anchor_quat_w,
+        cmd.motion.body_quat_w[starts, cmd.motion_anchor_body_index],
+    )
+    for velocity in (
+        cmd.joint_vel,
+        cmd.body_lin_vel_w,
+        cmd.body_ang_vel_w,
+        cmd.anchor_lin_vel_w,
+        cmd.anchor_ang_vel_w,
+    ):
+        assert torch.count_nonzero(velocity).item() == 0
+
+
+def test_canonical_ready_true_reset_writes_root_and_31_joints_from_same_frame(
+    tmp_path,
+):
+    clip_a = _write_canonical_ready_motion_npz(tmp_path / "a.npz")
+    clip_b = _write_canonical_ready_motion_npz(
+        tmp_path / "b.npz", interior_scale=1.4
+    )
+    cmd, robot = _make_canonical_ready_command(
+        [clip_a, clip_b], num_envs=3
+    )
+    cmd._env.scene.env_origins[:] = torch.tensor(
+        [[1.0, 0.0, 0.0], [0.0, 2.0, 0.0], [-1.0, -2.0, 0.0]]
+    )
+    env_ids = torch.arange(3)
+    cmd._resample_command(env_ids)
+
+    assert [call[0] for call in robot.calls] == ["root", "joint"]
+    root_state = robot.calls[0][1]
+    joint_pos, joint_vel = robot.calls[1][1:3]
+    ready_steps = cmd.motion.seg_start[cmd.clip_id]
+    assert torch.equal(cmd.time_steps, ready_steps)
+    assert torch.equal(
+        root_state[:, :3],
+        cmd.motion.body_pos_w[ready_steps, 0] + cmd._env.scene.env_origins,
+    )
+    assert torch.equal(root_state[:, 3:7], cmd.motion.body_quat_w[ready_steps, 0])
+    assert torch.count_nonzero(root_state[:, 7:]).item() == 0
+    assert joint_pos.shape == (3, _N_JOINTS)
+    assert torch.equal(joint_pos, cmd.motion.joint_pos[ready_steps])
+    assert torch.count_nonzero(joint_vel).item() == 0
+    assert torch.equal(robot.data.root_state_w, root_state)
+    assert torch.equal(robot.data.joint_pos, joint_pos)
+    assert torch.count_nonzero(robot.data.joint_vel).item() == 0
+
+
+def test_canonical_ready_release_has_one_final_hold_step_then_advances_frame_one(
+    tmp_path,
+):
+    clip = _write_canonical_ready_motion_npz(tmp_path / "ready.npz")
+    cmd, _ = _make_canonical_ready_command(
+        [clip], num_envs=2, hold_steps_range=(1, 1), stand_start_min_hold=1
+    )
+    cmd._resample_command(torch.arange(2))
+    ready_step = cmd.motion.seg_start[cmd.clip_id]
+
+    cmd._update_command()
+    assert torch.equal(cmd.time_steps, ready_step)
+    assert torch.all(cmd.in_hold)
+    assert torch.equal(cmd.joint_pos, cmd.motion.joint_pos[ready_step])
+    assert torch.count_nonzero(cmd.joint_vel).item() == 0
+
+    cmd._update_command()
+    assert torch.equal(cmd.time_steps, ready_step + 1)
+    assert not torch.any(cmd.in_hold)
+    assert torch.equal(cmd.joint_pos, cmd.motion.joint_pos[ready_step + 1])
+    assert torch.count_nonzero(cmd.joint_vel).item() > 0
+
+
+def test_canonical_ready_runtime_clip_retarget_is_ready_boundary_only(tmp_path):
+    clip = _write_canonical_ready_motion_npz(tmp_path / "ready.npz")
+    cmd, _ = _make_canonical_ready_command([clip], num_envs=2)
+    start = int(cmd.motion.seg_start[0].item())
+    end = start + int(cmd.motion.seg_len[0].item()) - 1
+
+    cmd.time_steps[0] = start + 1
+    with pytest.raises(ValueError, match="cannot change canonical clip mid-stroke"):
+        cmd.install_external_exam_timing(
+            torch.tensor([0]), torch.tensor([1]), torch.tensor([2])
+        )
+
+    cmd.time_steps[0] = end
+    cmd.install_external_exam_timing(
+        torch.tensor([0]), torch.tensor([1]), torch.tensor([2])
+    )
+    assert int(cmd.clip_id[0].item()) == 1
+    assert int(cmd.time_steps[0].item()) == int(cmd.motion.seg_start[1].item())
+    assert int(cmd.hold_counter[0].item()) == 2
 
 
 def test_rc_skip_settle_frames_multiseg(clips):
@@ -2147,13 +3241,14 @@ def _qdot_limit_env(limits=None):
     return env, asset_cfg
 
 
-def test_qdot_limit_hinge_uses_actual_runtime_limits_and_normalized_mean():
+def test_qdot_limit_hinge_uses_actual_runtime_limits_and_normalized_sum():
+    # 2026-07-25 SUM 裁定:单关节违规不再被 ÷31 稀释,罚整份
     env, asset_cfg = _qdot_limit_env()
     result = hope_rewards_mod.joint_velocity_limit_hinge(
         env, asset_cfg, margin=0.85, expected_joint_count=31
     )
     assert result[0] == pytest.approx(0.0)
-    assert result[1] == pytest.approx((1.5 - 0.85) ** 2 / 31.0)
+    assert result[1] == pytest.approx((1.5 - 0.85) ** 2)
 
 
 def test_qdot_probe_and_hinge_share_one_observation_but_book_activation_separately():
@@ -2467,7 +3562,8 @@ def test_processed_qdes_slew_formula_gate_invalid_first_step_and_update_ledger()
     reward = hope_rewards_mod.processed_qdes_slew_hinge(env)
     expected_tail = 1.0 - math.exp(-1.0)
     assert torch.equal(probe, torch.zeros(4))
-    assert reward.tolist() == pytest.approx([0.0, expected_tail, 0.0, 0.0])
+    # 2026-07-25 SUM 裁定:15 关节全违规 = 15 份 tail(旧 mean 语义下是 1 份)
+    assert reward.tolist() == pytest.approx([0.0, 15.0 * expected_tail, 0.0, 0.0])
 
     counters = (
         hope_rewards_mod.consume_processed_qdes_slew_hinge_activation_counters(env)
@@ -2479,7 +3575,7 @@ def test_processed_qdes_slew_formula_gate_invalid_first_step_and_update_ledger()
     assert counters["reward_enabled_eligible_sample_count"].item() == 2
     assert counters["tail_active_sample_count"].item() == 1
     assert counters["above_margin_joint_count"].item() == 15
-    assert counters["gated_tail_value_sum"].item() == pytest.approx(expected_tail)
+    assert counters["gated_tail_value_sum"].item() == pytest.approx(15.0 * expected_tail)
     assert all(
         value.item() == 0
         for value in hope_rewards_mod.consume_processed_qdes_slew_hinge_activation_counters(
@@ -2999,6 +4095,8 @@ def test_training_governor_keeps_final_actor_interval_for_point_zero_two_revisio
     motion._planner_desired_tts = torch.zeros(1)
     motion._planner_begin_tts = torch.zeros(1)
     motion._planner_truth_tts = torch.zeros(1)
+    # 带符号孪生时钟(2026-07-25 C1):真源码与 truth tts 一起写,fake 必须同步喂
+    motion._planner_truth_tts_signed = torch.zeros(1)
     motion._planner_begin_target_pos = torch.zeros(1, 3)
     motion._planner_begin_target_vel = torch.zeros(1, 3)
     motion._planner_begin_target_normal = torch.zeros(1, 3)
@@ -3102,6 +4200,8 @@ def test_planner_revision_metrics_remain_full_env_after_eligible_set_shrinks():
     motion._planner_desired_tts = torch.full((num_envs,), 0.50)
     motion._planner_begin_tts = torch.full((num_envs,), 0.50)
     motion._planner_truth_tts = torch.full((num_envs,), 0.50)
+    # 带符号孪生时钟(2026-07-25 C1):真源码与 truth tts 一起写,fake 必须同步喂
+    motion._planner_truth_tts_signed = torch.full((num_envs,), 0.50)
     motion._planner_begin_target_pos = torch.zeros(num_envs, 3)
     motion._planner_begin_target_vel = torch.zeros(num_envs, 3)
     motion._planner_begin_target_normal = torch.zeros(num_envs, 3)

@@ -1,22 +1,42 @@
 # EXP-P1-INTEGRATED-UPGRADE-WAVE — 集成升级波（3 臂，2026-07-23）
 
-> **发射冻结(Franco 2026-07-22 深夜拍板)**:动作修复(franco_pipeline 战役+锚/grip/morph)完成前本波不发射;届时现役 25k/intel 批先收尾,再统一重跑"超级升级"消融批。解除只认 Franco 本人明示。
+> **发射冻结（Franco 2026-07-22 拍板）**：解除只认 Franco 本人明示。
 
-
-- 状态：`preregistered`（action_acc 闸门已开——07-22 接线合入 main e995b5d5、commit 已重钉；franco 闸门锁 combo_franco；发射冻结见顶部；未渲染任何命令）
-- 阶段/轴：Phase 1 / 集成合体波——把各单变量波里已证明有用/Franco 拍板值得合体的升级
-  一次性合进一个配方 go for a try（**不做单项归因**，归因永远看各单变量波）
-- 集成小目标：回答一个问题——"全部升级合在一起，站立击球配方是变强还是互相打架？"
-  三个谱系各买一臂：续训（可直接对 `w_c_s0`）、fresh 粗糙地（绝对水平）、Franco 动作
-  （换反手素材的可训性）
+- 状态：`blocked`
+- 阻塞含义：旧预注册已被本节审计覆盖；没有有效科学运行，也没有发射权限
+- 阶段/轴：Phase 1 / 集成兼容性压力测试候选，不是“全面升级已经有效”的证明
+- 集成小目标：动作库正式化和 matched 主效应消融之后，才回答各组件同时打开是否互相打架
 - 人类负责人：Franco（拍板与 07-23 审查五变更+两追加）
-- 执行者：Claude
+- 执行者：Codex
 - 复核/决策负责人：Franco
-- 最高证据等级：`E1`（prereg + 队列/渲染器/单测已落盘：三件套 55 项测试全绿 +
-  CGF/intel/push 三波回归 186 项全绿）。发射后升级路径同 CGF 波：逐臂 probe → `E3`
-  runtime mechanics；终档 K100 同卷 → 单 seed 机制诊断（谱系 inexact，永为
-  diagnostic）；正名须 exact-lineage 重跑。
-- 创建日期/最后复核日期：2026-07-23 / 2026-07-23
+- 最高证据等级：`E1`（仅证明旧配置/渲染器/测试存在；没有组件效果或组合行为结论）
+- 创建日期/最后复核日期：2026-07-23 / 2026-07-24
+
+## 2026-07-23 独立审计覆盖结论
+
+本节覆盖下方旧预注册中的“已证明有效”“闸门已开即可发射”和排位语言：
+
+- `action_acc` 已接线，只证明 reward 能被配置，不证明它能抑制抖动或不伤击球。
+- CGF 未运行；qbar×action-rate、速度推×力推、摩擦×地形也没有独立交互证据。
+- `combo_franco` 仍替换已淘汰的 `franco_bh_loop_b`；旧 runner 只改 `motion_file_2`，没有把
+  strike phase、题库、拍面符号和 ONNX metadata 一起绑定，不能消费新动作。
+- 第一轮先按[canonical 五动作库实验](EXP-MOTION-CANONICAL-LIBRARY-20260723.md#10-全身学习的配对消融)
+  做 `U0/F0/F1` 三格：upper 基线、同设置 full 资产但下肢显式模仿关闭、同一 full 字节且只打开
+  下肢显式模仿。所有集成升级项保持关闭；`U1` 静态腿教师延后，不混进第一个因果问题。
+- 当前可执行的所谓“全身模仿”只是 12 个腿关节的 position-pose kernel；它不模仿 root/pelvis、
+  足底接触、下肢 body pose，也不模仿腿或 root 速度。不得把 `F1` 的结果表述成完整的
+  root/contact/velocity mimic 结论。
+- 功能分支已把全局机器冻结接进旧 runner 的每个命令生成入口：
+  `launch_authorized_by_default=false` 时，probe/science、三条 arm 和内部 `_remote_body`/
+  `_ssh_argv` 均在生成 SSH 之前失败封闭；`plan/checklist` 只读保留。专项回归为 `68 passed`。
+  这只关闭旧队列误渲染，不构成解冻或任何训练授权。
+- 旧 YAML、runner、run name 和 launch order 全部禁止执行，连 probe/science 渲染也禁止。只有
+  十件资产正式化并进入 `training_adopted`、strict registry/consumer 合同闭合、现役批收口、
+  Franco 明示解除冻结后，才可用一份新预注册和新队列替代当前永远锁住的旧 runner；IU 只承担
+  之后的“升级能否共存”压力测试，不承担单项归因或最终配方证明。
+
+<details>
+<summary>旧三臂预注册（保留作推演记录，不构成运行权限）</summary>
 
 人话导言：CGF 波（抖动-地面-脚部消融）、push 波（推撞鲁棒性）、intel 波（qbar barrier）
 各自买了单变量臂，Franco 拍板不等全部读数收口，把其中"已证明有用/证据链最硬"的升级
@@ -123,3 +143,5 @@ foot_ori -0.3 / upright -1.0 全额不动，蹭滑/拖脚/挥拍前脚滑键一�
   `T0`（按周期换题）→ `T1`（事件驱动结构、reward 冻结）→ `T2`（learned shaping）；
   任何臂的胜出都不授权跳过 T0/T1 直接上 T2 或连续演练。
 - 本队列只做仿真（simulation_only），永不驱动真实机器人。
+
+</details>

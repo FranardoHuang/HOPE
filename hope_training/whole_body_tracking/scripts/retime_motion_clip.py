@@ -52,6 +52,7 @@ USAGE
         --report v5hLt_bh_retime.json --md v5hLt_bh_retime.md
 
 DEPENDENCIES: numpy always; mujoco only for --body-mode fk (import deferred).
+带 canonical-v2 sidecar 的输入默认拒收;显式 comparator flag 只允许生成永久标记的历史对照。
 """
 from __future__ import annotations
 
@@ -65,6 +66,7 @@ import numpy as np
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import csv_to_npz_mujoco as ctn  # noqa: E402  (numpy-only at import time)
+import topp_mintime as legacy_v3  # noqa: E402  shared canonical-v2 legacy guard
 from motion_kinematics_contract import (  # noqa: E402
     KINEMATICS_METADATA_KEYS,
     metadata_arrays,
@@ -548,10 +550,16 @@ def _md_report(rep: dict, inp: str, outp: str) -> str:
         f"/ max {rep['stretch_stats']['max']:.3f}; tail drop {d['tail_drop_ms']:.1f} ms",
         "",
     ]
+    if rep.get("publication_class") == legacy_v3.LEGACY_COMPARATOR_CLASS:
+        lines[2:2] = [
+            f"- **publication_class: `{legacy_v3.LEGACY_COMPARATOR_CLASS}`**",
+            "- training_authorized: false | deployment_authorized: false | "
+            "hardware_authorized: false",
+        ]
     return "\n".join(lines)
 
 
-def main() -> int:
+def main(argv=None) -> int:
     ap = argparse.ArgumentParser(description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--input", required=True)
@@ -576,20 +584,48 @@ def main() -> int:
     ap.add_argument("--body-order")
     ap.add_argument("--report", help="write the JSON report here")
     ap.add_argument("--md", help="write the markdown report here")
-    args = ap.parse_args()
+    ap.add_argument(
+        "--allow-canonical-v2-legacy-comparator",
+        action="store_true",
+        help=(
+            "仅历史比较:允许 canonical-v2/comparator 输入进入冻结窗口旧语义;"
+            "JSON report 强制标为 legacy_window_frozen_comparator_only"
+        ),
+    )
+    args = ap.parse_args(argv)
 
-    data = dict(np.load(args.input))
+    legacy_v3._refuse_output_aliases_inputs(
+        [args.input],
+        [
+            args.output,
+            *([args.report] if args.report else []),
+            *([args.md] if args.md else []),
+        ],
+    )
+    legacy_comparator = legacy_v3._legacy_comparator_guard(
+        [("input clip", args.input)],
+        allow_canonical_v2_legacy_comparator=(
+            args.allow_canonical_v2_legacy_comparator
+        ),
+    )
+    if legacy_comparator is not None and not args.report:
+        raise SystemExit(
+            "canonical-v2 legacy comparator 必须给 --report，禁止生成无机器降级标记的资产"
+        )
+
+    data = dict(np.load(args.input, allow_pickle=False))
     out, rep = retime_clip(
         data, phase=args.phase, window_s=args.window_s, s_min=args.s_min,
         s_max=args.s_max, smooth_frames=args.smooth_frames, ramp_frames=args.ramp_frames,
         body_mode=args.body_mode, mjcf=args.mjcf, body_order=args.body_order,
         budget=args.budget, target_mean_acc=args.target_mean_acc,
         target_peak_acc=args.target_peak_acc, stretch_max=args.stretch_max)
+    legacy_v3._mark_legacy_comparator(rep, legacy_comparator)
     rep["input"], rep["output"] = args.input, args.output
     np.savez(args.output, **out)
     if args.report:
         with open(args.report, "w") as fh:
-            json.dump(rep, fh, indent=2)
+            json.dump(rep, fh, indent=2, allow_nan=False)
     if args.md:
         with open(args.md, "w") as fh:
             fh.write(_md_report(rep, args.input, args.output))

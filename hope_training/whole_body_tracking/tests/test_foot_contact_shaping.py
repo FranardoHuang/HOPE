@@ -7,12 +7,15 @@ Pinned here (all CPU, isaaclab stubbed via test_reward_flags_mdp):
   输出是【无量纲超阈倍数】不是牛顿 —— mjlab -1e-5/N 的等效剂量 = -1e-5 x threshold(默认
   300 N -> -3e-3),波配置别抄 -0.1 也别抄 -1e-4。
 * foot_clearance math — 触地脚(>10 N,与 sensor force_threshold 同值)完全免费;摆动脚付
-  |脚高-目标高| x 水平速度;左右脚名单必须同序同名否则 fail-loud。
+  clamp(目标高-脚高, min=0) x 水平速度(2026-07-25 起单侧:只罚抬脚不足,多抬免费——旧双侧
+  |·| 会在凸包顶把脚往下按,粗糙地形上帮倒忙);左右脚名单必须同序同名否则 fail-loud。
 * 两个函数的 fail-loud 面:脚数不是 2、sensor 缺 compute_first_contact(track_air_time 没开)、
   history 形状不对、张量缺失、阈值/目标高非法。
 * train.py 覆盖层往返:foot_* 四键进 _REWARD_KEYS 白名单与 null-删参表;param-without-weight
-  拒收;weight 必须 finite 且 <= 0(显式 0 = 对照);参数必须 finite 且 > 0;默认路径(不写
-  任何键)对 cfg 零改动 = 字节等价。
+  拒收;weight 必须 finite 且 <= 0(显式 0 = 对照);参数必须 finite 且 > 0;v1 兜底路径
+  (reward_pack=v1、不写其他键)对 cfg 零改动 = 字节等价(2026-07-25 默认翻转后,真·默认
+  路径 = v2 展开,由 test_reward_flags_overrides JOB1 区块专测;本套件经 _apply_legacy_v1
+  钉 v1 维持 legacy 断言)。
 * lower_body_imitation_scale_in_window — Wave-B 信封(配了必须显式给 B1/B2 两个 weight);
   写进 term.params 且探针 params 跟随;函数级:默认 1.0 原样返回,k != 1 只把 WIDE 击球窗内
   的 env 乘 k,台账/签名记未衰减原值;窗口形状/dtype 不对 fail-loud。
@@ -32,7 +35,7 @@ import pytest
 import torch
 
 from test_reward_flags_mdp import hope_rewards_mod
-from test_reward_flags_overrides import _NS, _Term, _make_env_cfg, train_mod
+from test_reward_flags_overrides import _NS, _Term, _apply_legacy_v1, _make_env_cfg, train_mod
 
 ROOT = Path(__file__).resolve().parents[1]
 ENV_CFG_SRC = (
@@ -210,26 +213,27 @@ def test_clearance_charges_swing_feet_only():
     forces[0, 0, 2] = 50.0
     pos[0, 2, 2] = 0.50
     vel[0, 2, :2] = torch.tensor([2.0, 0.0])
-    # env0 foot1: 摆动、z=0.02、xy 速度 (0.6, 0.8) -> |0.02-0.08| x 1.0 = 0.06
+    # env0 foot1: 摆动、z=0.02、xy 速度 (0.6, 0.8) -> clamp(0.08-0.02) x 1.0 = 0.06
     pos[0, 5, 2] = 0.02
     vel[0, 5, :2] = torch.tensor([0.6, 0.8])
-    # env1 foot0: 摆动、z=0.30、xy 速度 (3,4)=5 -> |0.30-0.08| x 5 = 1.1(抬太高也罚)
+    # env1 foot0: 摆动、z=0.30 已高于目标、xy 速度 (3,4)=5 -> 单侧化后多抬免费(0.0;
+    # 2026-07-25 前双侧 |0.30-0.08| x 5 = 1.1 会把高处的脚往下按,粗糙地形上帮倒忙)
     pos[1, 2, 2] = 0.30
     vel[1, 2, :2] = torch.tensor([3.0, 4.0])
     # env1 foot1: 摆动但原地不动 -> 免费(慢慢挪几乎免费)
     pos[1, 5, 2] = 0.50
     value = hope_rewards_mod.foot_clearance(env, s_cfg, a_cfg, target_m=0.08)
-    assert value.tolist() == pytest.approx([0.06, 1.1], abs=1e-6)
+    assert value.tolist() == pytest.approx([0.06, 0.0], abs=1e-6)
 
 
 def test_clearance_contact_threshold_matches_sensor_10n():
     env, s_cfg, a_cfg, forces, pos, vel = _clearance_env()
-    pos[0, 2, 2] = 0.30
+    pos[0, 2, 2] = 0.02  # 低于目标 0.08 -> 摆动时欠 0.06
     vel[0, 2, :2] = torch.tensor([1.0, 0.0])
     forces[0, 0, 2] = 9.9  # < 10 N = 仍算摆动(与 sensor force_threshold / in_contact 同判据)
     assert hope_rewards_mod.foot_clearance(env, s_cfg, a_cfg, target_m=0.08)[
         0
-    ].item() == pytest.approx(0.22, abs=1e-6)
+    ].item() == pytest.approx(0.06, abs=1e-6)
     forces[0, 0, 2] = 10.1  # > 10 N = 触地,免费
     assert hope_rewards_mod.foot_clearance(env, s_cfg, a_cfg, target_m=0.08)[
         0
@@ -272,8 +276,10 @@ def _foot_env_cfg():
 
 
 def _apply_foot(task, cfg=None):
+    # 2026-07-25 默认翻转后本套件仍测 legacy 翻译行为:钉 v1 + 滤 v1 记账行,原断言原样成立
+    # (默认路径 = v2 展开,由 test_reward_flags_overrides JOB1 区块专测)。
     cfg = cfg if cfg is not None else _foot_env_cfg()
-    applied = train_mod._apply_task_overrides(cfg, task, clip_name=None)
+    applied = _apply_legacy_v1(cfg, task)
     return cfg, applied
 
 
@@ -349,7 +355,7 @@ def test_foot_params_must_be_finite_positive(bad):
         }})
 
 
-def test_foot_default_path_is_byte_identical():
+def test_foot_v1_baseline_path_is_byte_identical():
     cfg, _ = _apply_foot({"rewards": {"racket_position_weight": 14.0}})
     assert cfg.rewards.foot_soft_landing.weight == 0.0
     assert cfg.rewards.foot_soft_landing.params == _SOFT_PARAMS

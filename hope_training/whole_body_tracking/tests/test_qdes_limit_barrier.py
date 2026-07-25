@@ -34,7 +34,7 @@ import pytest
 import torch
 
 from test_reward_flags_mdp import hope_rewards_mod
-from test_reward_flags_overrides import _Term, _make_env_cfg, train_mod
+from test_reward_flags_overrides import _Term, _apply_legacy_v1, _make_env_cfg, train_mod
 from test_training_contract_schema3 import TC, _qdot_hinge_schema3_contract
 
 
@@ -65,6 +65,9 @@ def _barrier_env(n=2, *, limits=None, joint_names=None, joint_ids=slice(None)):
         data=types.SimpleNamespace(
             joint_names=names,
             soft_joint_pos_limits=limits,
+            # 站姿豁免(2026-07-25)需要设计站姿;默认放在限位正中(d=0.5),即全部关节
+            # margin_eff == margin_frac,既有手算期望逐字节不变。
+            default_joint_pos=torch.zeros(n, len(names)),
         )
     )
     action = types.SimpleNamespace(
@@ -88,8 +91,10 @@ def _barrier_env_cfg():
 
 
 def _apply_qbar(task, cfg=None):
+    # 2026-07-25 默认翻转后本套件仍测 legacy 翻译行为:钉 v1 + 滤 v1 记账行,原断言原样成立
+    # (默认路径 = v2 展开,由 test_reward_flags_overrides JOB1 区块专测)。
     cfg = cfg if cfg is not None else _barrier_env_cfg()
-    applied = train_mod._apply_task_overrides(cfg, task, clip_name=None)
+    applied = _apply_legacy_v1(cfg, task)
     return cfg, applied
 
 
@@ -115,6 +120,35 @@ def test_target_exactly_at_the_limit_pays_the_unit_tail():
     action.processed_actions[0, 5] = 1.0  # d = 0 -> t = 1
     value = hope_rewards_mod.qdes_limit_barrier(env)
     assert value.tolist() == pytest.approx([TAIL_1, 0.0], abs=1e-6)
+
+
+def test_stance_exempt_margin_zeroes_the_designed_stance():
+    """站姿豁免(2026-07-25):默认站姿贴限的关节(实机对应双肩 roll),站姿零罚零梯度;
+    从站姿再向限位靠近仍照罚(罚带 = 收窄后的 m_eff)。"""
+    env, action, data = _barrier_env(2)
+    # 仿双肩 roll 几何:默认站姿离下限只有 0.03 x 跨度(< margin 0.08)
+    data.default_joint_pos[:, 5] = -0.94  # d_default = (-0.94-(-1))/2 = 0.03
+    action.processed_actions[0, 5] = -0.94  # q_des == 站姿 -> 免费(旧一刀切数学要罚 0.328)
+    action.processed_actions[1, 5] = -0.985  # 更贴限位:d=0.0075 < m_eff=0.025 -> 照罚
+    value = hope_rewards_mod.qdes_limit_barrier(env)
+    assert value[0].item() == pytest.approx(0.0, abs=1e-7)
+    t = (0.025 - 0.0075) / 0.025
+    assert value[1].item() == pytest.approx(1.0 - math.exp(-(t**2)), abs=1e-6)
+
+
+def test_stance_on_the_limit_fails_loud_instead_of_silencing():
+    # 站姿本身贴死软限位 = 建模错误:宁可炸也不静默把 barrier 豁免成零带宽
+    env, _, data = _barrier_env(1)
+    data.default_joint_pos[0, 3] = -0.999  # d_default=0.0005 -> m_eff < MARGIN_FLOOR
+    with pytest.raises(RuntimeError, match="default-stance"):
+        hope_rewards_mod.qdes_limit_barrier(env)
+
+
+def test_missing_default_joint_pos_fails_loud():
+    env, _, data = _barrier_env(1)
+    del data.default_joint_pos
+    with pytest.raises(RuntimeError, match="default_joint_pos"):
+        hope_rewards_mod.qdes_limit_barrier(env)
 
 
 def test_half_depth_intrusion_hand_computed():
@@ -373,7 +407,7 @@ def test_env_cfg_declares_default_off_term_and_probe_with_explicit_params():
 # --------------------------------------------------------------------------------------------- #
 # train.py override translation
 # --------------------------------------------------------------------------------------------- #
-def test_default_task_leaves_barrier_terms_untouched():
+def test_v1_baseline_task_leaves_barrier_terms_untouched():
     cfg, applied = _apply_qbar({})
     assert cfg.rewards.qdes_limit_barrier.weight == 0.0
     assert cfg.rewards.qdes_limit_barrier_probe.weight == 0.0

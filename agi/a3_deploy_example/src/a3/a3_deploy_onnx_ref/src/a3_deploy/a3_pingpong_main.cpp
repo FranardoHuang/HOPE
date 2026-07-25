@@ -1353,7 +1353,18 @@ int main(int argc, char** argv) {
       // RELEASED (policy still drives the clamped q_des) so the knees don't sink under load.
       const bool leg_official = official_stand && (ppp->legs_passive() || leg_stand_gains);
       const bool waist_held_off = official_stand && ppp->waist_passive();
-      if (cmd.kp.size() == N && cmd.kd.size() == N) {
+      // planner STATIC stand passes through UNTOUCHED (2026-07-25): PpPolicy authors
+      // those gains itself (official table x --planner-static-gain-scale) and the
+      // [pp EVENT] handoff line + STAND GAIN SOURCES banner promise they reach the
+      // motors verbatim. Before this guard the block below re-shaped them: a
+      // --gain-scale 0.4 run sent 0.4x official on arms+waist during the static
+      // stand, and held/--leg-stand-gains configs overwrote legs/waist back to
+      // 1.0x, silently defeating a --planner-static-gain-scale audit downshift.
+      // Safe to key on the sticky latch: while it is set every command out of
+      // ComputeCommand is either the STATIC command or a zero-gain halt (scaling
+      // zeros is a no-op), and engage clears the latch before the first policy
+      // command of the swing.
+      if (!ppp->planner_static_active() && cmd.kp.size() == N && cmd.kd.size() == N) {
         for (int i = 0; i < N; ++i) {
           if (i == a3_pingpong::kHeadSlot0 || i == a3_pingpong::kHeadSlot1) continue;  // neck fixed PD
           const bool is_leg = (i >= a3_pingpong::kLegSlotStart &&
@@ -1596,6 +1607,11 @@ int main(int argc, char** argv) {
   //      ALWAYS official_kp_sdk_/official_kd_sdk_ (a3_policy_parameters.hpp
   //      a3_pd_stand_kps/kds; hip_pitch 1500, knee 2000) — --stand-kp/--stand-kd are
   //      NOT consulted; only --planner-static-gain-scale (audit-only) can lower it.
+  //      (Enforced 2026-07-25: the per-group gain block is now guarded on
+  //      !planner_static_active(), so --gain-scale/--leg-gain-scale/--ankle-gain-scale
+  //      and the held-leg official overwrite no longer re-shape the STATIC command.
+  //      Logs predating the guard misstate the sent gains: a --gain-scale 0.4 run
+  //      actually published 0.4x official on arms+waist during STATIC stands.)
   {
     const auto& okp = pp->official_stand_kp();
     const auto& okd = pp->official_stand_kd();

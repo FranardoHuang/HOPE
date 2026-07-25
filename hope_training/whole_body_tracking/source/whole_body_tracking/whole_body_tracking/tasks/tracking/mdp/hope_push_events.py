@@ -12,6 +12,9 @@
 * ``sweep_expired_force_pushes`` —— 高频小间隔的清扫事件。Isaac 的 interval 事件 **不是逐步
   调用** 的:施力事件下一次被调可能在十几秒后,单靠它自己力永远清不掉。清扫事件以
   interval=(control_dt, control_dt) 挂进 EventManager = 每个控制步都跑,到期立刻清零。
+* ``push_combined_exclusive`` —— 合并互斥推(Franco 2026-07-25):速度踢与力推合并成一个
+  interval 事件,每次触发按 force_prob 逐 env 抽签二选一,防两种随机推同帧叠加;力分支写
+  同一本账本,所以合并模式同样必须挂清扫事件。
 
 坐标系诚实说明(Isaac Lab 2.1):``Articulation.set_external_force_and_torque`` 的力在 **BODY
 系** 生效(见 shadow_ball.py / table_tennis_env.py 的同款注释),所以这里在触发瞬间用当前
@@ -219,6 +222,94 @@ def push_by_applying_wrench(
         state["applied_any"] = True
 
     _write_full_buffer(state, asset)
+
+
+def _sample_force_branch_mask(num: int, force_prob: float, device) -> torch.Tensor:
+    """合并互斥推的抽签器:True = 力推分支,False = 速度踢分支(Bernoulli(force_prob))。
+
+    人话:每个被触发的 env 独立掷一次硬币,决定这次挨哪种推。单独拆成函数是给单测打桩用
+    (mock 固定 mask 验证"同一次触发绝不两种都来")。
+    """
+    return torch.rand(num, device=device) < force_prob
+
+
+def _velocity_push_delegate():
+    """速度踢分支的唯一实现:isaaclab 的 ``push_by_setting_velocity``(惰性 import)。
+
+    人话:合并模式的速度分支不重写第二份采样代码,直接调 legacy 独立事件用的同一个 isaaclab
+    函数——分支行为与 legacy 逐字节同源,永不漂移。惰性 import 让本模块在无 Isaac 的机器上
+    仍可按文件路径单测(单测在此打桩)。
+    """
+    from isaaclab.envs.mdp import push_by_setting_velocity
+
+    return push_by_setting_velocity
+
+
+def push_combined_exclusive(
+    env: "ManagerBasedEnv",
+    env_ids: torch.Tensor | None,
+    velocity_range: dict,
+    force_n: float,
+    duration_steps: int,
+    force_prob: float,
+    body_name: str = FORCE_PUSH_BODY_NAME_DEFAULT,
+):
+    """Merged EXCLUSIVE push: per fire each chosen env gets EITHER a velocity kick OR a force push.
+
+    人话(Franco 2026-07-25 两种随机推合并抽签):legacy 配方里速度推(push_robot)与力推
+    (force_push)是两个独立时钟的 interval 事件,可能同一瞬间一起砸下来叠加;本事件把两种推
+    合并成【一个】interval 事件——每次触发,被抽中的每个 env 按 ``force_prob`` 掷硬币二选一:
+    力分支 = 调 :func:`push_by_applying_wrench`(水平随机方向恒力 ``force_n`` 牛,持续
+    ``duration_steps`` 步,登记同一本到期账本,仍需 ``sweep_expired_force_pushes`` 每控制步
+    兜底清扫);速度分支 = 调 isaaclab 的 ``push_by_setting_velocity``(±velocity_range 随机
+    改底座速度)。两个分支的 env 集合是同一张 mask 的正反两半,结构上互斥——同一次触发同一个
+    env 绝不可能两种都挨。``force_prob`` 必须严格落在 (0, 1)(0/1 等价单类型推,应直接用
+    legacy 单事件);参数非法一律 fail-closed raise,不静默。
+    """
+    if (
+        isinstance(force_prob, bool)
+        or not isinstance(force_prob, (int, float))
+        or not math.isfinite(float(force_prob))
+        or not (0.0 < float(force_prob) < 1.0)
+    ):
+        raise ValueError(
+            "combined push force_prob must be a finite number strictly inside (0, 1), "
+            f"got {force_prob!r}"
+        )
+    if not hasattr(velocity_range, "items") or not {"x", "y"} <= set(velocity_range):
+        raise ValueError(
+            "combined push velocity_range must be a mapping with at least the x and y "
+            f"axes, got {velocity_range!r}"
+        )
+
+    asset = env.scene["robot"]
+    if env_ids is None:
+        env_ids = torch.arange(int(env.num_envs), device=asset.device)
+    else:
+        env_ids = torch.as_tensor(env_ids, dtype=torch.long, device=asset.device)
+    if env_ids.numel() == 0:
+        return
+
+    mask = _sample_force_branch_mask(int(env_ids.numel()), float(force_prob), asset.device)
+    if (
+        not torch.is_tensor(mask)
+        or mask.dtype != torch.bool
+        or tuple(mask.shape) != (int(env_ids.numel()),)
+    ):
+        raise RuntimeError(
+            "combined push sampler must return a bool mask aligned with env_ids, got "
+            f"{mask!r}"
+        )
+    force_ids = env_ids[mask]
+    velocity_ids = env_ids[~mask]
+    # 互斥保证:force_ids / velocity_ids 是同一张 mask 的正反两半,交集恒空、并集恒全。
+    if force_ids.numel() > 0:
+        push_by_applying_wrench(
+            env, force_ids,
+            force_n=force_n, duration_steps=duration_steps, body_name=body_name,
+        )
+    if velocity_ids.numel() > 0:
+        _velocity_push_delegate()(env, velocity_ids, velocity_range=velocity_range)
 
 
 def sweep_expired_force_pushes(env: "ManagerBasedEnv", env_ids: torch.Tensor | None = None):

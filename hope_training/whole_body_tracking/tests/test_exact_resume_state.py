@@ -576,3 +576,36 @@ def test_sigterm_is_also_deferred(runner_module, tmp_path):
     assert runner.ran_iterations == [7]
     assert (tmp_path / "model_7.pt").is_file()
     assert signal.getsignal(signal.SIGTERM) is original_handler
+
+
+def test_second_sigint_escalates_to_immediate_default_action(
+    runner_module, tmp_path, monkeypatch, capsys
+):
+    """第二次 Ctrl-C = 立即死(2026-07-25):恢复 SIG_DFL 并对自己重投该信号,不再静默吞掉。
+
+    真升级会当场杀掉测试进程,所以把 os.kill 换成记录桩(monkeypatch 会还原);投递前两次
+    信号用真 kill 的保存引用。断言:升级时点上 SIGINT 的处置已经是 SIG_DFL(即使桩没真杀,
+    内核默认动作已就位),且提示了"不存档"。
+    """
+    runner, _, _, _ = _make_runner(
+        runner_module, log_dir=str(tmp_path), filled=True, iteration=0, counter=24
+    )
+    real_kill = os.kill
+    escalations = []
+
+    def _recording_kill(pid, signum):
+        escalations.append((pid, signum, signal.getsignal(signal.SIGINT)))
+
+    def _double_interrupt(it):
+        if it == 0:
+            real_kill(os.getpid(), signal.SIGINT)  # 第一次:登记"想停"
+            monkeypatch.setattr(os, "kill", _recording_kill)
+            real_kill(os.getpid(), signal.SIGINT)  # 第二次:应升级为立即终止
+
+    runner._test_mid_iteration_hook = _double_interrupt
+    with pytest.raises(KeyboardInterrupt):  # 桩没真杀,流程走到边界照旧收尾
+        runner.learn(num_learning_iterations=3)
+
+    assert escalations == [(os.getpid(), signal.SIGINT, signal.SIG_DFL)]
+    out = capsys.readouterr().out
+    assert "second interrupt" in out and "NO checkpoint" in out

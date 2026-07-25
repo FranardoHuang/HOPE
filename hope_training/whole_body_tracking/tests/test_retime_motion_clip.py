@@ -19,6 +19,7 @@ Run:  python3 -m pytest hope_training/whole_body_tracking/tests/test_retime_moti
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -76,6 +77,19 @@ def _synthetic_clip() -> dict:
         body_lin_vel_point="link_origin",
     ))
     return data
+
+
+def _write_canonical_sidecar(path: Path) -> Path:
+    payload = {
+        "publication_class": "compiler_candidate",
+        "training_authorized": False,
+        "tool_id": "canonical_schema2_builder_v1",
+        "build_verdict": "PASS_COMPILER_CANDIDATE_ONLY",
+        "hashes": {"output_npz_sha256": rt.legacy_v3._sha256_file(path)},
+    }
+    sidecar = Path(str(path) + ".manifest.json")
+    sidecar.write_text(json.dumps(payload), encoding="utf-8")
+    return sidecar
 
 
 def _retime(data, **kw):
@@ -185,3 +199,103 @@ def test_window_at_clip_head_is_supported():
     k0, k1 = rep["frames"]["window_out"]
     assert k0 == 0 and rep["frames"]["K_align"] == 0
     assert np.array_equal(out["joint_pos"][k0:k1 + 1], data["joint_pos"][0:k1 + 1])
+
+
+def test_cli_canonical_v2_requires_override_and_marks_report(tmp_path: Path):
+    source = tmp_path / "source.npz"
+    np.savez(source, **_synthetic_clip())
+    _write_canonical_sidecar(source)
+    source_before = source.read_bytes()
+    base = [
+        "--input",
+        str(source),
+        "--phase",
+        str(PHASE),
+        "--budget",
+        "1.0",
+        "--s-min",
+        "1.0",
+        "--body-mode",
+        "interp",
+    ]
+
+    with pytest.raises(SystemExit, match="canonical-v2 candidate/adopted/comparator"):
+        rt.main([*base, "--output", str(tmp_path / "refused.npz")])
+    assert not (tmp_path / "refused.npz").exists()
+
+    out = tmp_path / "comparator.npz"
+    report = tmp_path / "comparator.json"
+    markdown = tmp_path / "comparator.md"
+    assert (
+        rt.main(
+            [
+                *base,
+                "--output",
+                str(out),
+                "--report",
+                str(report),
+                "--md",
+                str(markdown),
+                "--allow-canonical-v2-legacy-comparator",
+            ]
+        )
+        == 0
+    )
+    persisted = json.loads(report.read_text(encoding="utf-8"))
+    assert persisted["publication_class"] == rt.legacy_v3.LEGACY_COMPARATOR_CLASS
+    assert persisted["legacy_semantics"] == rt.legacy_v3.LEGACY_COMPARATOR_CLASS
+    assert persisted["training_authorized"] is False
+    assert persisted["deployment_authorized"] is False
+    assert persisted["hardware_authorized"] is False
+    assert rt.legacy_v3.LEGACY_COMPARATOR_CLASS in markdown.read_text(
+        encoding="utf-8"
+    )
+    assert source.read_bytes() == source_before
+    assert out.is_file()
+
+
+def test_cli_never_overwrites_input_and_comparator_requires_json_report(
+    tmp_path: Path,
+):
+    source = tmp_path / "source.npz"
+    np.savez(source, **_synthetic_clip())
+    source_before = source.read_bytes()
+    with pytest.raises(SystemExit, match="禁止覆盖/别名到输入"):
+        rt.main(
+            [
+                "--input",
+                str(source),
+                "--output",
+                str(source),
+                "--phase",
+                str(PHASE),
+                "--budget",
+                "1.0",
+                "--s-min",
+                "1.0",
+                "--body-mode",
+                "interp",
+            ]
+        )
+    assert source.read_bytes() == source_before
+
+    _write_canonical_sidecar(source)
+    with pytest.raises(SystemExit, match="必须给 --report"):
+        rt.main(
+            [
+                "--input",
+                str(source),
+                "--output",
+                str(tmp_path / "unmarked.npz"),
+                "--phase",
+                str(PHASE),
+                "--budget",
+                "1.0",
+                "--s-min",
+                "1.0",
+                "--body-mode",
+                "interp",
+                "--allow-canonical-v2-legacy-comparator",
+            ]
+        )
+    assert not (tmp_path / "unmarked.npz").exists()
