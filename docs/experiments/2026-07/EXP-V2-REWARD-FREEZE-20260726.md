@@ -9,6 +9,12 @@
 - 后续臂仍需:各自 smoke 一格;canonical 谱系先重 probe 出自己的冻结表。
 - **r2 发射收据(07-26)**:smoke `v2smoke_..._r2` @ de888cb4 通过(2 迭代收据完整,stand_start=1.0 生效:ready 台账全采样、站位偏差均值 7.6cm、swing 完成率 84%);science **`v2sci_v4rg_ctrl_fresh_seed3_20260726_r2`** 发射——配方在冻结表之上加:death_penalty −1800、landing 延付 0.24s、stand_start_prob=1.0(废挥拍中段 RSI 空降)。首臂(farmed)目录留证。
 
+### 0.1 r2 卡死与消融双臂重建(07-26 深夜)
+
+- r2 臂再次 sim-init 卡死(15.5 核空转、日志冻于 "Starting the simulation",与首次 r2 前身同签名——该类卡死具独立复发性,已列值班 runbook 观察项;若三发再现,下一个排查变量 = kit 线程 16→8)。按 PGID 清场,目录留证。
+- defer0 首发 smoke 死于 Hydra compose:argv 模板取自 `ps`(丢 shell 引号,planner_revision mapping 被打碎)。教训入档:**argv 模板必须取自引号完好的命令文件,不得取自进程表**。
+- 重建(引号完好模板+严格串行:等前一发到首迭代再发下一发):**treatment `_r3`**(v2probe@de888cb4,延付 0.24,GPU0)已进训练;**defer0**(ablate@ab232018,延付 0,GPU1)smoke 通过后已发射。两臂 argv 逐字同(stand_start=1.0),唯一差异 = commit diff = 延付默认翻转,单变量成立。
+
 ## 0.5 首臂事故与修订(2026-07-26,3k 迭代止损)
 
 首个对照臂在 iter~3k 被抽查抓到**重生刷分**:RSI 每次重生出生在参考挥拍中段 → 借参考动量
