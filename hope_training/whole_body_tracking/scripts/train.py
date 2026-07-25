@@ -2790,12 +2790,15 @@ def _expand_reward_pack(env_cfg, task, rw, applied):
     _require(_acc is not None, "rewards.action_acc_l2 (reward_pack=v2 value clamp)")
     _acc.params["value_clamp"] = 36.0
     applied.append("rewards.action_acc_l2.params.value_clamp=36.0 (reward_pack=v2)")
-    # v2 定义禁止显式无封顶 action_rate_weight 与包并用(会双计费;legacy 配方请 reward_pack=v1)。
+    # v2 用封顶版平滑:任务 YAML 谱系基线普遍带 action_rate_weight(如 DeployParity -0.10),
+    # 包在此【剥离】该键并记账(防双计费;不 raise——基线键不是用户矛盾配方,legacy 语义
+    # 要保留请显式 reward_pack=v1)。剥离后 DIRECT 的 action_rate_l2=0 + action_rate_clamped
+    # 生效,封顶平滑单一计费。
     if _get(rw, "action_rate_weight") is not None:
-        raise _OverrideError(
-            "[train.py] reward_pack=v2 replaces action_rate_l2 with the value-clamped "
-            "action_rate_clamped; drop rewards.action_rate_weight (legacy recipes must "
-            "declare reward_pack=v1)."
+        dropped = merged.pop("action_rate_weight", None)
+        applied.append(
+            f"rewards.action_rate_weight={dropped!r} dropped (reward_pack=v2 uses "
+            "value-clamped action_rate_clamped; declare reward_pack=v1 for legacy)"
         )
     # racket 侧:拍面 sigma 第三通道。rewards 块在 racket 块【之前】跑,所以这里直接写
     # cfg 属性;用户显式的 task.racket.adaptive_sigma_normal 会在后面的 racket 翻译层
