@@ -30,11 +30,11 @@
   [正式化实验](experiments/2026-07/EXP-MOTION-CANONICAL-LIBRARY-20260723.md)，优先级只看下方
   [统一工作队列](#统一工作队列唯一优先级账本)。P1IU/CGF 发射冻结未解除。
   07-24 晚已续完中断的 marker-authority v2 迁移（窗口 seed=legacy ge80、名义空挥事件不再
-  混叠成窗口）、把击球优先排序补上窗前零加速度平台票数、加了每格 ready→anchor
-  `t_hit<=0.5s` 编译筛门，并实现了 §5.1 受保护窗口摘要模块。face-neutral ready v2 组合候选
-  （中立右臂挑战者 + G1 平足落地）已在 pod2 产出并发布为 diagnostic：静态几何与地面接触力
-  LP 双过；待 Franco 审两问（中立度按拍面角还是五动作可达时间对称；0.5s 门对拉球是否过紧）
-  后铸新 sidecar 身份、出 recipe v3、重编十件。
+  混叠成窗口）并实现 §5.1 受保护窗口摘要模块；`t_hit<=0.5s` 已按 Franco 07-25 裁定从硬筛门
+  降为参考值。face-neutral ready v2 组合候选（中立右臂挑战者 + G1 平足落地）已发布为
+  diagnostic。07-25/26 深夜：十件 probe 成品交付、冒烟训练 800 iter 跑完（管线 PASS、学习
+  信号待 5000 iter 延长冒烟裁决）、源平滑修活后正手窗开 1.33→0.69s（各件时间见实验 §7.3
+  逐件最优表）、probe 消融首波队列见实验 §10.1.1。
 - **合并警告（未解决前本分支不得合 main）**：分支把一个出厂为空的 legacy motion admission
   信任集接进了默认（非 canonical）`MotionCommand` 路径——合入后现行 v4rg 训练重启会在
   环境构造时直接失败封闭。合并前必须先把 v4rg bank 证书 digest 以受审源码改动加入信任集，

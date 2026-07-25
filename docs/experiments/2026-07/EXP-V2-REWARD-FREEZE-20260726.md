@@ -47,7 +47,7 @@ stand_start_prob=1.0**(去掉挥拍中段 RSI 空降——BeyondMimic 有 RSI �
 
 | # | 臂 | 单变量 | 键 | 状态 |
 |---|---|---|---|---|
-| 1 | table_r12 | 上台比例 2.5×→1.2× | virtual_landing_weight=791.9 | GPU2 首发 |
+| 1 | table_r12 | 上台比例 2.5×→1.2× | virtual_landing_weight=791.9 | **在跑**(GPU2,smoke 通过,checkout scale@6e8a9e6b;applied 双标记确认键压包) |
 | 2 | qual_x23 | 质量层 ×⅔ | racket_{pos,vel,norm}_weight=262.3/196.7/153.0 | 待槽 |
 | 3 | vsplit | pos:vel 互换(Σ不变) | 295.1/393.4/229.5 | 待槽 |
 | 4 | sigma_adapt | σ 静态→自适应 | adaptive_sigma[_normal]=true + std 0.2/1.0/0.3 | 待槽 |

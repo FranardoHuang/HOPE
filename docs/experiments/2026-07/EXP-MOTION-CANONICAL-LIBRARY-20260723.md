@@ -430,6 +430,28 @@ root/pelvis、足底接触、下肢 body position/orientation、腿速度或 roo
 “任意静态腿约束是否有用”，不是第一轮的 full-reference 问题；只有首轮有信号时才用
 `(U1-U0)` 对照 `(F1-F0)`。
 
+### 10.1.1 probe 级消融首波队列（2026-07-26 晨，Option-B 谱系）
+
+人话：这一波在**冒烟同款 motion_file 通道**上跑 probe 级 clip（Franco 效率裁定:对 RL 无关的
+工序从简），回答 U/F 与 reward scale 的方向性问题;§10.3 的正式发射门**只管正式采用**，不管
+这一波。绑定=4 条 clip（fh/bh × upper/full，形状安全档:fh 取 5 mrad,bh upper 取 raw,
+bh full 取 5 mrad），BINDINGS.json 见 pod2:`/workspace/codexschema/newmotion_matrix_20260726/`。
+
+**发射前置（全表共用）**:① 5000 iter 延长冒烟的 pre_strike_fall_rate 出现基线式翻转下降
+（fresh_c 基线 i136=1.0→i816≈0.08;若钉死 1.0 先修绑定再发全表）;② 绑定 FK+≤5° 对齐门全过;
+③ 每臂发射前 1 env×2 iter 热身。单 seed 广度,胜者才补 seed（精简治理）。
+
+| 槽 | 臂 | 配置 | 依赖 |
+| --- | --- | --- | --- |
+| pod2 GPU1 | `U0` | fh_upper+bh_upper,腿 pose reward off | 前置①② |
+| pod2 GPU2 | `F0` | fh_full+bh_full,腿 pose reward off | 前置①② |
+| pod1 GPU0 | `F1` | 同 F0 clip,`lower_body_pose_imitation_weight=0.5`（§10.2 冻结参数） | 前置①② |
+| pod1 GPU1 | `R-penlight` | U0 + 软限制减负档（对应"软罚压模仿"担忧） | U0 发射后空槽即发 |
+| 队列尾 | `R-imit-scale` | U0 + 模仿层权重 scale 档 | 首波有信号后 |
+| 队列尾 | `E-push`/`E-speedmix` | NOW 升级后仍要紧的 env 差异各一臂 | 首波有信号后 |
+
+GPU0(pod2) 被延长冒烟占用至其收官;收官后该卡回收进空槽轮转。每臂逐动作出数,禁止只报汇总。
+
 ### 10.2 冻结变量
 
 分别在[W、V 两个旧模型 parent](../../DEFINITIONS.md#当前训练与判卷术语)内做 matched 对比，禁止
