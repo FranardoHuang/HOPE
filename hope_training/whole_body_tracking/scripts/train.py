@@ -2809,67 +2809,31 @@ def _expand_reward_pack(env_cfg, task, rw, applied):
             f"rewards.action_rate_weight={dropped!r} dropped (reward_pack=v2 uses "
             "value-clamped action_rate_clamped; declare reward_pack=v1 for legacy)"
         )
-    # racket 侧:拍面 sigma 第三通道。rewards 块在 racket 块【之前】跑,所以这里直接写
-    # cfg 属性;用户显式的 task.racket.adaptive_sigma_normal 会在后面的 racket 翻译层
-    # 覆写回去(后写后赢)。
-    rk = _get(task, "racket")
+    # sigma 体系(07-26 Franco 裁决:adaptive sigma 在新体系退役)——早期采集不靠质量核
+    # (模仿+站正+progress+landing 是收入主链),晚期精度由 capture/legal 门与落点核管;
+    # σ 静态钉在验收档(cfg 默认 0.075/0.5/0.262,与 k_eff 校准口径一致,k_eff 就是在
+    # σ=验收档状态下实测的)。机制代码保留:显式 task.racket.adaptive_sigma[_normal]=true
+    # 仍可开(消融 flag;SMASH 的反向证据在别人的栈里,值得空槽时 A/B 一次)。包不再
+    # 触碰 racket cfg。
+    # motion 侧(07-26 Franco:"stand_start_prob=1.0 作为 default"):防"挥拍中段 RSI
+    # 空降→借参考动量刷分"是 v2 大奖结构的配套件,进包。用户显式 task.motion.* 键在
+    # 后面的 motion 翻译层覆写(后写后赢);canonical_ready_mode 谱系天然 frame-0 起步,
+    # 本设置无害。post_swing_start_prob 一并归零,避免与 stand=1.0 组成 sum>1 的抽签面。
     _require(
-        hasattr(env_cfg, "commands") and hasattr(env_cfg.commands, "racket_target"),
-        "commands.racket_target (reward_pack=v2 -> racket.adaptive_sigma_normal)",
+        hasattr(env_cfg, "commands") and hasattr(env_cfg.commands, "motion"),
+        "commands.motion (reward_pack=v2 -> stand starts)",
     )
-    C = env_cfg.commands.racket_target
-    user_asn = _get(rk, "adaptive_sigma_normal")
-    if user_asn is not None:
-        effective_asn = _as_explicit_bool(user_asn, "task.racket.adaptive_sigma_normal")
-        applied.append(
-            "racket.adaptive_sigma_normal explicitly set — user override wins "
-            "(reward_pack=v2 keeps hands off)"
-        )
-    else:
-        effective_asn = True
-        _require(
-            hasattr(C, "adaptive_sigma_normal"),
-            "racket_target.adaptive_sigma_normal (reward_pack=v2)",
-        )
-        C.adaptive_sigma_normal = True
-        applied.append("racket_target.adaptive_sigma_normal=True (reward_pack=v2)")
-    # 半配组合当场拒:第三通道必须搭在 adaptive_sigma 上。hope_commands 构造期也有同款
-    # 校验,这里提前到翻译层,报错信息直接指向包配方该补哪个键。
-    user_as = _get(rk, "adaptive_sigma")
-    if (
-        defaulted
-        and effective_asn
-        and user_as is None
-        and not bool(getattr(C, "adaptive_sigma", False))
-    ):
-        # 默认包自洽:用户对 adaptive_sigma 没显式表态时,默认 v2 一并打开第三通道要骑的
-        # pos/vel 自适应 sigma 机器(显式 reward_pack=v2 的配方仍要求自己声明
-        # adaptive_sigma=true,配方自文档;显式 adaptive_sigma=false 走下面的响亮拒收)。
-        _require(
-            hasattr(C, "adaptive_sigma"),
-            "racket_target.adaptive_sigma (reward_pack defaulted to v2)",
-        )
-        C.adaptive_sigma = True
-        applied.append("racket_target.adaptive_sigma=True (reward_pack defaulted to v2)")
-    effective_as = (
-        _as_explicit_bool(user_as, "task.racket.adaptive_sigma")
-        if user_as is not None
-        else bool(getattr(C, "adaptive_sigma", False))
-    )
-    if effective_asn and not effective_as:
-        raise _OverrideError(
-            "[train.py] rewards.reward_pack=v2 "
-            + ("(defaulted, 2026-07-25 Franco ruling) " if defaulted else "")
-            + "turns on racket.adaptive_sigma_normal, which "
-            "requires racket.adaptive_sigma=true (the pos/vel adaptive-sigma machinery it "
-            "rides on). Set task.racket.adaptive_sigma=true, or explicitly set "
-            "task.racket.adaptive_sigma_normal=false to opt the third channel out."
-            + (
-                " Legacy recipes must declare reward_pack=v1 to keep the v1 baseline."
-                if defaulted
-                else ""
+    M = env_cfg.commands.motion
+    mo = _get(task, "motion")
+    for attr, target in (("stand_start_prob", 1.0), ("post_swing_start_prob", 0.0)):
+        if _get(mo, attr) is not None:
+            applied.append(
+                f"motion.{attr} explicitly set — user override wins (reward_pack=v2 keeps hands off)"
             )
-        )
+            continue
+        _require(hasattr(M, attr), f"commands.motion.{attr} (reward_pack=v2)")
+        setattr(M, attr, float(target))
+        applied.append(f"motion.{attr}={float(target)} (reward_pack=v2 stand starts)")
     return merged
 
 

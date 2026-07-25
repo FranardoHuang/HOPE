@@ -317,11 +317,17 @@ vendor_assets/motion_finalize_20260724/probes/
   切片，集合随限值漂移;(b) exact-caps 的 4× 控制率后验守卫会在更松限值的更快侧写下毙掉
   节点间超限的候选。**因此 probe 表数字的语义是"带内最优上界"，不是全局最短**；限值继续
   放宽不保证数字变好。正式穷举+区间认证重建仍是终审路径。
-- 速度/扭矩余量成因（Franco 问"是不是太保守"）：编译用的关节加速度上限来自
-  `results/source_diagonal_acceleration_envelope.json`——**源动作自己做过的加速度包络，不是
-  电机极限**，加速度轴确实系统性保守；速度轴 55% 峰值利用率则是因为时间最优解几乎处处被
-  加速度/曲率约束卡住，只在个别触顶点碰速度限。所以"单独调高速度限"没用，"调高加速度
-  包络 + 源平滑"才有用；也因此 RL exploration 有真实的越过参考的空间（Franco 点 3 成立）。
+- 速度/扭矩余量成因（Franco 问"是不是太保守"）——**07-26 凌晨勘误**：此前误报"加速度上限
+  来自源动作包络"；查收据后确认 `results/source_diagonal_acceleration_envelope.json` 的
+  method = `(URDF effort − 静态 bias − 干摩擦)/Mjj`，**本来就是机器人 100% 扭矩的能力换算**
+  （"source"只指在源姿态集合上取最差）。对照计算
+  `results/robot_torque80_acceleration_envelope.json`（pod2）：80% 扭矩版逐关节 ≈ 旧值×0.8，
+  证实同源。所以"打八折上机器人极限"没有增量——我们已在 100%，且 gate 逆动力学代理显示
+  bh_block full 的 wrist_yaw 峰值已 113%（对角近似忽略耦合导致的过许可）。真实的剩余保守
+  在三处：①**最差姿态全局盒**——整条路径被最弱姿态的能力封顶，姿态相关扭矩限的 retimer
+  升级是正式解锁路径（排队）；②拼接假曲率（已证明的主导杠杆，fh 全身 0.77 vs 上肢 1.33
+  同帧）；③示范的温和体现在"形状"（行程长、引拍大），不在加速度上限——这正是 RL
+  exploration 可以越过参考的空间（Franco 点 3 依然成立）。速度上限一直是 URDF 100%。
 - 源平滑 probe 旋钮（拼接假曲率的根治，正手学到的手法对全部动作通用）实现中：
   `probe_source_smoothing_tolerance_rad`，几 mrad 容差内迭代平滑源路径、端点钉死、收据落账、
   bank gate 拒收（与探针带同待遇）。

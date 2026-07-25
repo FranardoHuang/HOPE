@@ -658,7 +658,8 @@ def _coordinates(
 
 _PROBE_SOURCE_SMOOTHING_MAX_PASSES = 256
 _PROBE_SOURCE_SMOOTHING_ALGORITHM = (
-    "iterative_binomial_1_4_6_4_1_over_16_edge_replicated_endpoints_pinned"
+    "tube_clamped_iterative_binomial_1_4_6_4_1_over_16_edge_replicated_"
+    "endpoints_pinned"
 )
 
 
@@ -681,13 +682,15 @@ def _binomial_smooth_once(values: np.ndarray) -> np.ndarray:
 def _smooth_source_coordinates(
     raw: np.ndarray, tolerance: float
 ) -> tuple[np.ndarray, int, float]:
-    """Iterative binomial smoothing capped by a per-coordinate deviation bound.
+    """Tube-clamped iterative binomial smoothing.
 
-    Returns ``(smoothed, passes_applied, max_abs_deviation_reached)``.  The
-    first and last frame stay exactly equal to ``raw``; the result is the last
-    iterate whose every-coordinate max-abs deviation from ``raw`` is within
-    ``tolerance``.  Binomial smoothing moves monotonically away from the raw
-    path, so the stop is the first pass that would exceed the bound.
+    Returns ``(smoothed, passes_applied, max_abs_deviation_reached)``.  Every
+    pass smooths and then clamps back into the ``raw +/- tolerance`` tube
+    (endpoints pinned exactly), so each iterate is compliant by construction:
+    features larger than the tolerance survive pressed against the tube wall
+    while sub-tolerance high-frequency noise is smoothed away entirely.  A
+    global stop-on-first-violation rule would instead abort at pass zero on
+    any real stroke, leaving the knob inert.
     """
 
     raw = np.ascontiguousarray(np.asarray(raw, dtype=np.float64))
@@ -698,16 +701,17 @@ def _smooth_source_coordinates(
         # No interior frame to smooth; pinned endpoints already equal raw.
         return current, passes, max_deviation
     for _ in range(_PROBE_SOURCE_SMOOTHING_MAX_PASSES):
-        candidate = _binomial_smooth_once(current)
+        # Clamp the deviation, not the values: |candidate - raw| <= tolerance
+        # holds exactly, with no float round-off from forming raw +/- tol.
+        candidate = raw + np.clip(
+            _binomial_smooth_once(current) - raw, -tolerance, tolerance
+        )
         candidate[0] = raw[0]
         candidate[-1] = raw[-1]
-        deviation = float(np.max(np.abs(candidate - raw)))
-        if deviation > tolerance:
-            break
         converged = np.array_equal(candidate, current)
         current = candidate
         passes += 1
-        max_deviation = deviation
+        max_deviation = float(np.max(np.abs(current - raw)))
         if converged:
             break
     return current, passes, max_deviation

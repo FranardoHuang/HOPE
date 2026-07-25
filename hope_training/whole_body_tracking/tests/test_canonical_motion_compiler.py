@@ -1280,9 +1280,13 @@ def test_probe_source_smoothing_respects_tolerance_and_pins_endpoints():
     # Endpoints stay exactly the raw source; only interior frames move.
     assert np.array_equal(smoothed[0], raw[0])
     assert np.array_equal(smoothed[-1], raw[-1])
-    # A stricter tolerance can never do more smoothing than a looser one.
-    _, fewer_passes, _ = cmc._smooth_source_coordinates(raw, tolerance / 4.0)
-    assert fewer_passes <= passes
+    # A stricter tolerance stays inside its own (tighter) tube.
+    strict, strict_passes, strict_deviation = cmc._smooth_source_coordinates(
+        raw, tolerance / 4.0
+    )
+    assert strict_passes >= 1
+    assert float(np.max(np.abs(strict - raw))) <= tolerance / 4.0
+    assert strict_deviation <= tolerance / 4.0
 
 
 def test_probe_source_smoothing_none_knob_is_byte_identical_noop():

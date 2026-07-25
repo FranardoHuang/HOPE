@@ -1811,6 +1811,7 @@ def test_reward_pack_v1_is_byte_preserving_legacy_baseline():
         assert getattr(env_cfg.rewards, name).params["body_names"] == _UPPER
     assert env_cfg.commands.racket_target.adaptive_sigma is False
     assert env_cfg.commands.racket_target.adaptive_sigma_normal is False
+    assert env_cfg.commands.motion.stand_start_prob == pytest.approx(0.25)  # v1 不动 motion
     assert applied == [_V1_MARKER]
 
 
@@ -1826,11 +1827,14 @@ def test_reward_pack_defaults_to_v2_full_expansion():
         assert getattr(R, name).params["body_names"] == [*_LOWER_BODY, *_UPPER]
         assert "window_scale" not in getattr(R, name).params
     assert "window_scale" not in R.motion_global_anchor_ori.params
-    # 拍面 sigma 第三通道 + 它骑的 pos/vel 机器一并开
-    assert env_cfg.commands.racket_target.adaptive_sigma_normal is True
-    assert env_cfg.commands.racket_target.adaptive_sigma is True
+    # 07-26:adaptive sigma 退役——包不再触碰 racket cfg(静态验收 σ;显式键仍可开=消融 flag)
+    assert env_cfg.commands.racket_target.adaptive_sigma is False
+    assert env_cfg.commands.racket_target.adaptive_sigma_normal is False
+    # 07-26:stand starts 进包(防挥拍中段 RSI 空降刷分)
+    assert env_cfg.commands.motion.stand_start_prob == pytest.approx(1.0)
+    assert env_cfg.commands.motion.post_swing_start_prob == pytest.approx(0.0)
+    assert "motion.stand_start_prob=1.0 (reward_pack=v2 stand starts)" in applied
     assert _PACK_DEFAULTED_MARKER in applied
-    assert "racket_target.adaptive_sigma=True (reward_pack defaulted to v2)" in applied
     # 逐项走的仍是 v2 包机器:defaulted 标记之外,每条包改动照旧带 reward_pack=v2
     assert "rewards.hit_unstable_support.weight=-10.0 (reward_pack=v2)" in applied
     assert "rewards.virtual_landing.weight=1648.8 (reward_pack=v2)" in applied
@@ -1905,11 +1909,14 @@ def test_reward_pack_default_with_motion_scale_in_window_fails_loud():
         _apply_default({"rewards": {"motion_scale_in_window": 0.25}})
 
 
-def test_reward_pack_default_with_explicit_adaptive_sigma_false_fails_loud():
-    # legacy 配方的另一撞点:显式 adaptive_sigma=false(现役 task yaml 都写了)+ 默认包的
-    # 第三通道 -> 半配组合,报错文案同样指路 reward_pack=v1。
-    with pytest.raises(train_mod._OverrideError, match="reward_pack=v1"):
-        _apply_default({"racket": {"adaptive_sigma": False}})
+def test_reward_pack_default_leaves_sigma_choices_to_the_recipe():
+    # 07-26 退役:显式 adaptive_sigma=false 不再与默认包相撞(σ 静态验收档=新常态);
+    # 显式 true 仍可开(消融 flag),包一概不动。
+    env_cfg, _ = _apply_default({"racket": {"adaptive_sigma": False}})
+    assert env_cfg.commands.racket_target.adaptive_sigma is False
+    env_cfg, _ = _apply_default({"racket": {"adaptive_sigma": True, "adaptive_sigma_normal": True}})
+    assert env_cfg.commands.racket_target.adaptive_sigma is True
+    assert env_cfg.commands.racket_target.adaptive_sigma_normal is True
 
 
 def test_reward_pack_default_optout_normal_channel_keeps_sigma_machinery_off():
@@ -1934,11 +1941,11 @@ def test_reward_pack_v2_expands_every_blueprint_mutation_with_markers():
         assert "window_scale" not in getattr(R, name).params
     assert "window_scale" not in R.motion_global_anchor_ori.params
     # racket 侧:拍面 sigma 第三通道开,搭在显式 adaptive_sigma=true 上
-    assert env_cfg.commands.racket_target.adaptive_sigma_normal is True
+    assert env_cfg.commands.racket_target.adaptive_sigma_normal is False  # 07-26 退役:包不动 sigma
     assert env_cfg.commands.racket_target.adaptive_sigma is True
     # 每条包改动的 applied 标记都带 reward_pack=v2:1 总标记 + 10 键控注入 + 10 direct + 1 racket
     pack_markers = [m for m in applied if "reward_pack=v2" in m]
-    assert len(pack_markers) == 30  # +death_penalty
+    assert len(pack_markers) == 31  # 07-26:-sigma +stand/post_swing(净 +1)
     # 键控注入的项同时会有覆写层自己的标准记账(证明真走了现有翻译层)
     assert "rewards.hold_ready.weight=0.0" in applied
     assert "rewards.foot_slip_sq.weight=-0.1" in applied
@@ -1953,7 +1960,8 @@ def test_reward_pack_v2_expands_every_blueprint_mutation_with_markers():
     assert "rewards.virtual_pass_net.weight=0.0 (reward_pack=v2)" in applied
     assert "rewards.virtual_spin.weight=0.0 (reward_pack=v2)" in applied
     assert any("virtual_landing.params" in m and "legal_base" in m for m in applied)
-    assert "racket_target.adaptive_sigma_normal=True (reward_pack=v2)" in applied
+    assert "motion.stand_start_prob=1.0 (reward_pack=v2 stand starts)" in applied
+    assert not any("adaptive_sigma" in m for m in applied)  # 07-26 退役:包不再动 sigma
     # 显式 v2(非默认)绝不带 defaulted 标记
     assert _PACK_DEFAULTED_MARKER not in applied
 
@@ -1964,7 +1972,7 @@ def test_reward_pack_v2_works_on_omegaconf_nodes():
     env_cfg, applied = _apply(OmegaConf.create(_pack_v2_task()))
     assert env_cfg.rewards.hit_unstable_support.weight == pytest.approx(-10.0)
     assert env_cfg.rewards.foot_slip_sq.weight == pytest.approx(-0.1)
-    assert env_cfg.commands.racket_target.adaptive_sigma_normal is True
+    assert env_cfg.commands.racket_target.adaptive_sigma_normal is False  # 07-26 退役:包不动 sigma
 
 
 def test_reward_pack_v2_explicit_user_keys_win():
@@ -1996,7 +2004,7 @@ def test_reward_pack_v2_explicit_user_keys_win():
     assert R.virtual_landing.weight == pytest.approx(1648.8)
     assert R.strike_capture_bonus.weight == pytest.approx(0.0)
     assert R.foot_drag.weight == 0.0
-    assert len([m for m in applied if "user override wins" in m]) == 7
+    assert len([m for m in applied if "user override wins" in m]) == 6  # 07-26:sigma user-win 标记随退役消失
 
 
 def test_reward_pack_v2_optout_normal_channel_lifts_adaptive_sigma_requirement():
@@ -2019,12 +2027,6 @@ def test_reward_pack_rejects_unknown_pack_values(bad):
     # (e) 未知包值绝不静默兜底("v1" 自 2026-07-25 起是合法兜底 flag,不再在此列)。
     with pytest.raises(train_mod._OverrideError, match="reward_pack"):
         _apply({"rewards": {"reward_pack": bad}})
-
-
-def test_reward_pack_v2_without_adaptive_sigma_fails_loud():
-    # 半配组合:第三通道必须搭在 adaptive_sigma 上,翻译层当场拒(不等 hope_commands 构造期)。
-    with pytest.raises(train_mod._OverrideError, match="adaptive_sigma"):
-        _apply({"rewards": {"reward_pack": "v2"}})
 
 
 def test_reward_pack_v2_fails_loud_when_lineage_lacks_a_v2_term():
