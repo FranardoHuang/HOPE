@@ -29,7 +29,17 @@ from typing import Any, Mapping, Sequence
 
 
 TRUSTED_BANK_PROMOTION_CERTIFICATE_SHA256: frozenset[str] = frozenset()
-TRUSTED_LEGACY_RAW_MOTION_SHA256: frozenset[str] = frozenset()
+TRUSTED_LEGACY_RAW_MOTION_SHA256: frozenset[str] = frozenset(
+    {
+        # 2026-07-25 Franco 授权(v2 reward probe,分支 Franco_codex/v2-reward-20260725):
+        # v4rg_runtime_order_v3 正/反手教师动作——现役全部波次的训练动作,canonical 库
+        # 0/10 训练授权期间的过渡准入。canonical 编译动作上位后按库治理收回。
+        # hope_forehand_v4rg_cal.npz
+        "f2cb2d9f5d27cefbcee0b790000fcd979abaf02894d4fcad061ebca27f141687",
+        # hope_backhand_v4rg_cal.npz
+        "1722553375cd28f9b2d567c01b1a5fc6bcd149fa12cadb20e5202a9153367534",
+    }
+)
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _MINT_TOKEN = object()

@@ -330,9 +330,17 @@ def _trusted_fixture(tmp_path: Path, monkeypatch, *, gate_pass=True):
     return binding, certificate_path, report_path
 
 
-def test_trust_sets_ship_empty_and_public_constructor_rejects_callers():
+def test_trust_sets_ship_with_only_the_authorized_entries():
     assert admission.TRUSTED_BANK_PROMOTION_CERTIFICATE_SHA256 == frozenset()
-    assert admission.TRUSTED_LEGACY_RAW_MOTION_SHA256 == frozenset()
+    # 2026-07-25 Franco 授权:v4rg 正/反手教师动作过渡准入(v2 probe 谱系,
+    # 分支 Franco_codex/v2-reward-20260725)。守卫语义不变:只许这两条,任何
+    # 新增/替换即漂移 fail-loud;canonical 库训练授权上位后收回并改回空集断言。
+    assert admission.TRUSTED_LEGACY_RAW_MOTION_SHA256 == frozenset(
+        {
+            "f2cb2d9f5d27cefbcee0b790000fcd979abaf02894d4fcad061ebca27f141687",
+            "1722553375cd28f9b2d567c01b1a5fc6bcd149fa12cadb20e5202a9153367534",
+        }
+    )
     with pytest.raises(TypeError, match="opaque"):
         admission.TrustedMotionAdmission()
 
