@@ -1870,7 +1870,10 @@ def test_reward_pack_default_explicit_keys_still_win():
 
 def test_reward_pack_v2_strips_unclamped_action_rate_with_marker():
     # v2 用封顶版;谱系基线普遍带 action_rate_weight → 包剥离+记账,不拒收(防双计费)
-    env_cfg, applied = _apply({"rewards": {"reward_pack": "v2", "action_rate_weight": -0.2}})
+    env_cfg, applied = _apply(
+        {"rewards": {"reward_pack": "v2", "action_rate_weight": -0.2},
+         "racket": {"adaptive_sigma": True}}
+    )
     assert env_cfg.rewards.action_rate_l2.weight == 0.0
     assert env_cfg.rewards.action_rate_clamped.weight == pytest.approx(-0.2)
     assert any("action_rate_weight" in m and "dropped" in m for m in applied)
