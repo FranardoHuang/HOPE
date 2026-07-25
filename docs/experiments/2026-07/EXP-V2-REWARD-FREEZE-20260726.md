@@ -25,6 +25,8 @@
 
 **延付降级为消融 flag(07-26 Franco 二次复核)**:"延付可以先不需要,或者变成 flag 今天消融"——death_penalty −1800 + stand_start 已双重关死刷分回路,延付边际价值改由单变量消融回答。落地:v2 包默认 settle_delay_s=0(立发),新 CLI 键 `rewards.virtual_landing_settle_delay_s` 臂级显式开。**消融设计**:r2 臂(延付 0.24,GPU0,在跑)= treatment;新发 `v2sci_v4rg_ctrl_fresh_defer0`(延付 0,GPU1,其余与 r2 逐字同含同 seed)= control。判读轴:回合长/摔倒率轨迹、landing 实付率、20k 终点 legal 率与落点质量。
 
+**默认面二次收敛(07-26,Franco)**:①`stand_start_prob=1.0`+`post_swing_start_prob=0` 进 v2 包默认(防挥拍中段 RSI 空降;用户显式 motion 键仍赢;canonical_ready_mode 谱系天然无感);②**adaptive sigma 从包中退役**——σ 静态钉验收档 0.075/0.5/0.262(=k_eff 校准时的实测状态,口径自洽),精度由 capture/legal 门与落点核管;机制保留为显式 flag(消融轴:static vs adaptive,SMASH 反向证据待本栈检验)。注意:旧配方模板里的 `racket_*_std=0.2/1.0/0.3` 三键在 adaptive 关闭后会变成【固定宽 σ】,新配方应删掉这三键取 cfg 验收档默认。
+
 **Franco 复核后加固(07-26)**:延付只把刷分周期拉长 12 步没关死——(奖26−0)/28步 vs 26/46步,
 摔死重生仍在"跳过等下一球"上套利。两刀补全:①**死亡罚 death_penalty −1800**(=每次死
 −36 实际 > 满分上台券 33,"比上台抽奖大一些";只计真终止不计 timeout;刷分账变
