@@ -1,6 +1,12 @@
 # v2.2 冻结权重表(v4rg 谱系)— prereg 草稿,2026-07-26
 
-**状态**:待 Franco 签发。签发后 = v4rg 谱系上任何 v2.2 science 臂的权重合同;发射前仍需一格 2-iter smoke。
+**状态**:Franco 2026-07-26 口头授权首臂("这个动作可以先发一个训,用来对照换动作")。
+
+## 0. 发射收据(对照臂)
+
+- smoke:`v2smoke_v4rg_ctrl_fresh_seed3_20260726` @ 7bd7c392 —— r1 被守卫误拦(action_rate 基线键,修为剥离+记账),**r2 通过**(迭代 0/2、1/2 零报错,剥离标记落账 ×1)。
+- science:**`v2sci_v4rg_ctrl_fresh_seed3_20260726`** @ pod1/GPU0,commit `7bd7c392`,fresh-from-random,20000 迭代 save100,4096 env,v2.2 冻结表全默认(质量 393.4/295.1/229.5、landing 1648.8 legal_base、clamp 9.0/36.0)。角色:**换动作对照臂**——canonical 动作臂将以同 seed/同题库/同权重发射,唯一变量=动作库。
+- 后续臂仍需:各自 smoke 一格;canonical 谱系先重 probe 出自己的冻结表。
 
 ## 1. 冻结表(scripts/v2_weight_calibration.py 输出,逐字)
 
