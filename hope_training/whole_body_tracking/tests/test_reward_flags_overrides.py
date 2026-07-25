@@ -1961,7 +1961,7 @@ def test_reward_pack_v2_expands_every_blueprint_mutation_with_markers():
     assert "rewards.virtual_spin.weight=0.0 (reward_pack=v2)" in applied
     assert any("virtual_landing.params" in m and "legal_base" in m for m in applied)
     assert "motion.stand_start_prob=1.0 (reward_pack=v2 stand starts)" in applied
-    assert not any("adaptive_sigma" in m for m in applied)  # 07-26 退役:包不再动 sigma
+    assert not any("adaptive_sigma" in m and "reward_pack" in m for m in applied)  # 07-26 退役:包署名的 sigma 标记不复存在(用户显式 racket 键的翻译标记不在此列)
     # 显式 v2(非默认)绝不带 defaulted 标记
     assert _PACK_DEFAULTED_MARKER not in applied
 

@@ -700,11 +700,13 @@ def _smooth_source_coordinates(
     if raw.shape[0] <= 2:
         # No interior frame to smooth; pinned endpoints already equal raw.
         return current, passes, max_deviation
+    # The tube wall sits fractionally inside the stated tolerance so that the
+    # raw + clipped-deviation round trip can never round to a value whose
+    # measured deviation exceeds the tolerance.
+    wall = tolerance * (1.0 - 1e-12)
     for _ in range(_PROBE_SOURCE_SMOOTHING_MAX_PASSES):
-        # Clamp the deviation, not the values: |candidate - raw| <= tolerance
-        # holds exactly, with no float round-off from forming raw +/- tol.
         candidate = raw + np.clip(
-            _binomial_smooth_once(current) - raw, -tolerance, tolerance
+            _binomial_smooth_once(current) - raw, -wall, wall
         )
         candidate[0] = raw[0]
         candidate[-1] = raw[-1]
