@@ -548,6 +548,8 @@ def _validate_compiler_options(
                 "probe_exit_band",
                 "probe_band_is_exhaustive_enumeration",
                 "probe_exact_pointwise_caps",
+                "probe_source_smoothing_tolerance_rad",
+                "probe_source_smoothing_is_identity",
             }
         ),
         "compiler_options geometry_and_grid",
@@ -563,6 +565,17 @@ def _validate_compiler_options(
     ):
         raise CanonicalMotionBankGateError(
             "banded probe enumeration is not verifiable; rebuild exhaustively"
+        )
+    # Source smoothing mutates the raw mocap-derived source coordinates before
+    # geometry construction; the independent verifier only accepts banks built
+    # from the raw source, so any active smoothing is probe-grade and rejected.
+    if (
+        grid["probe_source_smoothing_tolerance_rad"] is not None
+        or grid["probe_source_smoothing_is_identity"] is not True
+    ):
+        raise CanonicalMotionBankGateError(
+            "probe source smoothing is not verifiable; rebuild from the raw "
+            "source coordinates"
         )
     samples = _finite(
         grid["samples_per_scaled_unit"],

@@ -7,6 +7,7 @@
 - smoke:`v2smoke_v4rg_ctrl_fresh_seed3_20260726` @ 7bd7c392 —— r1 被守卫误拦(action_rate 基线键,修为剥离+记账),**r2 通过**(迭代 0/2、1/2 零报错,剥离标记落账 ×1)。
 - science:**`v2sci_v4rg_ctrl_fresh_seed3_20260726`** @ pod1/GPU0,commit `7bd7c392`,fresh-from-random,20000 迭代 save100,4096 env,v2.2 冻结表全默认(质量 393.4/295.1/229.5、landing 1648.8 legal_base、clamp 9.0/36.0)。角色:**换动作对照臂**——canonical 动作臂将以同 seed/同题库/同权重发射,唯一变量=动作库。
 - 后续臂仍需:各自 smoke 一格;canonical 谱系先重 probe 出自己的冻结表。
+- **r2 发射收据(07-26)**:smoke `v2smoke_..._r2` @ de888cb4 通过(2 迭代收据完整,stand_start=1.0 生效:ready 台账全采样、站位偏差均值 7.6cm、swing 完成率 84%);science **`v2sci_v4rg_ctrl_fresh_seed3_20260726_r2`** 发射——配方在冻结表之上加:death_penalty −1800、landing 延付 0.24s、stand_start_prob=1.0(废挥拍中段 RSI 空降)。首臂(farmed)目录留证。
 
 ## 0.5 首臂事故与修订(2026-07-26,3k 迭代止损)
 

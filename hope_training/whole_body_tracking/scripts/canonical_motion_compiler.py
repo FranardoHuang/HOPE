@@ -345,6 +345,23 @@ def _validate_options(options: CompilerOptions) -> tuple[np.ndarray, FullRootPat
         raise CanonicalMotionCompilerError(
             "samples_per_scaled_unit must be finite and positive"
         )
+    smoothing_tolerance = options.probe_source_smoothing_tolerance_rad
+    if smoothing_tolerance is not None:
+        if isinstance(smoothing_tolerance, bool) or not isinstance(
+            smoothing_tolerance, (int, float)
+        ):
+            raise CanonicalMotionCompilerError(
+                "probe_source_smoothing_tolerance_rad must be a positive "
+                "number or None"
+            )
+        if (
+            not math.isfinite(float(smoothing_tolerance))
+            or float(smoothing_tolerance) <= 0.0
+        ):
+            raise CanonicalMotionCompilerError(
+                "probe_source_smoothing_tolerance_rad must be finite and "
+                "strictly positive"
+            )
     for name in (
         "min_connector_intervals",
         "min_core_intervals",
@@ -637,6 +654,106 @@ def _coordinates(
         )
     )
     return source_coordinates, ready_coordinates, root_encoding.report
+
+
+_PROBE_SOURCE_SMOOTHING_MAX_PASSES = 256
+_PROBE_SOURCE_SMOOTHING_ALGORITHM = (
+    "iterative_binomial_1_4_6_4_1_over_16_edge_replicated_endpoints_pinned"
+)
+
+
+def _binomial_smooth_once(values: np.ndarray) -> np.ndarray:
+    """One [1,4,6,4,1]/16 pass along frames with edge replication.
+
+    Endpoints are not preserved by the pass itself; the caller re-pins them.
+    """
+
+    padded = np.pad(values, ((2, 2), (0, 0)), mode="edge")
+    return (
+        padded[:-4]
+        + 4.0 * padded[1:-3]
+        + 6.0 * padded[2:-2]
+        + 4.0 * padded[3:-1]
+        + padded[4:]
+    ) / 16.0
+
+
+def _smooth_source_coordinates(
+    raw: np.ndarray, tolerance: float
+) -> tuple[np.ndarray, int, float]:
+    """Iterative binomial smoothing capped by a per-coordinate deviation bound.
+
+    Returns ``(smoothed, passes_applied, max_abs_deviation_reached)``.  The
+    first and last frame stay exactly equal to ``raw``; the result is the last
+    iterate whose every-coordinate max-abs deviation from ``raw`` is within
+    ``tolerance``.  Binomial smoothing moves monotonically away from the raw
+    path, so the stop is the first pass that would exceed the bound.
+    """
+
+    raw = np.ascontiguousarray(np.asarray(raw, dtype=np.float64))
+    current = raw.copy()
+    passes = 0
+    max_deviation = 0.0
+    if raw.shape[0] <= 2:
+        # No interior frame to smooth; pinned endpoints already equal raw.
+        return current, passes, max_deviation
+    for _ in range(_PROBE_SOURCE_SMOOTHING_MAX_PASSES):
+        candidate = _binomial_smooth_once(current)
+        candidate[0] = raw[0]
+        candidate[-1] = raw[-1]
+        deviation = float(np.max(np.abs(candidate - raw)))
+        if deviation > tolerance:
+            break
+        converged = np.array_equal(candidate, current)
+        current = candidate
+        passes += 1
+        max_deviation = deviation
+        if converged:
+            break
+    return current, passes, max_deviation
+
+
+def _apply_probe_source_smoothing(
+    source_coordinates: np.ndarray,
+    options: CompilerOptions,
+) -> tuple[np.ndarray, Mapping[str, Any]]:
+    """Optionally smooth one motion+scope source array; else return it unchanged."""
+
+    tolerance = options.probe_source_smoothing_tolerance_rad
+    if tolerance is None:
+        # Exact current behaviour: the same array object flows downstream, so
+        # geometry inputs stay byte-for-byte identical to the unsmoothed path.
+        return source_coordinates, MappingProxyType(
+            {
+                "active": False,
+                "tolerance_rad": None,
+                "passes_applied": 0,
+                "max_abs_deviation_reached": 0.0,
+                "algorithm": _PROBE_SOURCE_SMOOTHING_ALGORITHM,
+                "probe_grade_not_verifiable": False,
+            }
+        )
+    smoothed, passes, max_deviation = _smooth_source_coordinates(
+        source_coordinates, float(tolerance)
+    )
+    return smoothed, MappingProxyType(
+        {
+            "active": True,
+            "tolerance_rad": float(tolerance),
+            "passes_applied": int(passes),
+            "max_abs_deviation_reached": float(max_deviation),
+            "endpoints_pinned_exact": True,
+            "hard_pass_cap": _PROBE_SOURCE_SMOOTHING_MAX_PASSES,
+            "algorithm": _PROBE_SOURCE_SMOOTHING_ALGORITHM,
+            # One scalar tolerance, read in each coordinate's own unit: metres
+            # for root xyz, radians for joints and the root rotation vector.
+            "tolerance_units": (
+                "per_coordinate_own_unit_m_for_root_xyz_rad_for_joints_and_"
+                "root_rotvec"
+            ),
+            "probe_grade_not_verifiable": True,
+        }
+    )
 
 
 def _authority_markers(
@@ -2210,6 +2327,12 @@ def _compile_motion_scope(
     source_coordinates, ready_coordinates, root_report = _coordinates(
         recipe, scoped, scope
     )
+    # Optional probe-only source smoothing runs once here, after body-scope
+    # preprocessing (and the synthetic face solve) and before any entry/exit
+    # enumeration or geometry construction, so frame indices stay valid.
+    source_coordinates, smoothing_report = _apply_probe_source_smoothing(
+        source_coordinates, options
+    )
     if np.any(
         source_coordinates
         < contract.position_lower[None, :] - _POSITION_TOLERANCE
@@ -2268,6 +2391,10 @@ def _compile_motion_scope(
     scope_report = dict(scoped.report)
     if root_report is not None:
         scope_report["root_coordinate_codec"] = dict(root_report)
+    # Per motion+scope provenance for the probe smoothing knob (value plus the
+    # passes and max deviation actually reached); the knob's global value lives
+    # in the compiler-options receipt alongside probe_entry_band et al.
+    scope_report["probe_source_smoothing"] = dict(smoothing_report)
     retime_report = dict(winner.retimed.report)
     retime_report["scalar_no_early_brake_proxy"] = dict(
         _scalar_no_early_brake_diagnostic(
@@ -2410,6 +2537,14 @@ def _compiler_options_receipt(
             ),
             "probe_exact_pointwise_caps": bool(
                 options.probe_exact_pointwise_caps
+            ),
+            "probe_source_smoothing_tolerance_rad": (
+                None
+                if options.probe_source_smoothing_tolerance_rad is None
+                else float(options.probe_source_smoothing_tolerance_rad)
+            ),
+            "probe_source_smoothing_is_identity": (
+                options.probe_source_smoothing_tolerance_rad is None
             ),
         },
         "face_manifold": {

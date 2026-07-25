@@ -297,6 +297,40 @@ vendor_assets/motion_finalize_20260724/probes/
   face/站立复核报告），出钉住该身份的 recipe v3，再重编十件。model/identity 度量收据在
   attempt2/attempt3 目录（MEASURED_GROUNDED_IDENTITY 等，均 MEASUREMENT_ONLY 待钉）。
 
+### 7.3 probe7：全身 root 限值放宽与"最短时间"语义修正（2026-07-25 深夜二）
+
+人话：把全身版躯干的占位限速放宽 3 倍重编后，正手/发球的全身版都反超了上肢版；反手拉的
+全身版仍更慢，而且这是合法的——因为我们的编译器是"跟踪器"（全身版必须跟完源动作的躯干
+轨迹，是多出来的任务，不是多出来的自由度）。正手上肢版 1.33s 的旧数字被证明是拼接处假
+曲率钉出来的伪瓶颈（同样的帧，全身版 0.77s 就能进窗）。
+
+- Franco 裁决落账：`t_hit<=0.5 s` **从编译硬筛门降为参考值**（`_STRIKE_TIME_REFERENCE_S`
+  仅记录、不筛掉候选）；表格汇报"实际最短需要多久"。§7.2 中"硬筛门"表述自此过时。
+- probe7a（pod1，root 限值 ×3：平移速度 [3,3,1.5] m/s、加速度 [30,30,15] m/s² 等，仍是
+  probe 占位、待按真实平衡能力标定）对比 probe6a（×1）：
+  - fh_loop full：win_start 1.214→**0.769 s**（t_hit 2.864→1.495 s），反超 upper 1.327 s。
+  - s0_highpress full：0.434→**0.317 s**，反超 upper 0.350 s。
+  - bh_loop_c full：1.955→**0.714 s**（t_hit 0.520 s），仍慢于 upper 0.447 s（源躯干行程
+    大，属"跟踪任务更重"的合法差距）。upper 三行与 probe6a 逐值复现（确定性对照通过）。
+- probe7c（bh_loop_c root ×10 诊断）反而更慢（win_start 1.105 s、入口从 84 漂到 77）：
+  排序元组确实 window_start 时间优先，但 (a) 8×8 探针带按"可行集合内最晚入口/最早出口"
+  切片，集合随限值漂移;(b) exact-caps 的 4× 控制率后验守卫会在更松限值的更快侧写下毙掉
+  节点间超限的候选。**因此 probe 表数字的语义是"带内最优上界"，不是全局最短**；限值继续
+  放宽不保证数字变好。正式穷举+区间认证重建仍是终审路径。
+- 速度/扭矩余量成因（Franco 问"是不是太保守"）：编译用的关节加速度上限来自
+  `results/source_diagonal_acceleration_envelope.json`——**源动作自己做过的加速度包络，不是
+  电机极限**，加速度轴确实系统性保守；速度轴 55% 峰值利用率则是因为时间最优解几乎处处被
+  加速度/曲率约束卡住，只在个别触顶点碰速度限。所以"单独调高速度限"没用，"调高加速度
+  包络 + 源平滑"才有用；也因此 RL exploration 有真实的越过参考的空间（Franco 点 3 成立）。
+- 源平滑 probe 旋钮（拼接假曲率的根治，正手学到的手法对全部动作通用）实现中：
+  `probe_source_smoothing_tolerance_rad`，几 mrad 容差内迭代平滑源路径、端点钉死、收据落账、
+  bank gate 拒收（与探针带同待遇）。
+- probe7b（两件 block，root ×3，pod2）在算，行落此处。
+- 冒烟训练（fh_loop+bh_loop_c upper 新 clip，800 iter，pod2）已跑完：管线级 PASS（跑满、
+  存 checkpoint、无崩）；学习级待定——iter800 时 pre_strike_fall_rate 0.28→1.0、episode
+  22 步，需与 v4rg 同 iter 基线对照才能区分"adaptive σ 收紧的正常早期形态"与"新 clip 绑定
+  问题"。
+
 ## 8. Agibot MuJoCo 与 runtime 消费
 
 `canonical_schema2_builder.py` 以具名 31 关节和 32 body 重建 exact schema-2，并要求共同 ready

@@ -1432,6 +1432,29 @@ def test_rejects_compiler_option_receipt_even_with_rehashed_top_level(
         fixture_bank.verify()
 
 
+def test_rejects_active_probe_source_smoothing(fixture_bank: BankFixture):
+    options = fixture_bank.manifest["compiler_options"]
+    grid = options["geometry_and_grid"]
+    # Sanity: the honest fixture receipt is the identity (no smoothing).
+    assert grid["probe_source_smoothing_tolerance_rad"] is None
+    assert grid["probe_source_smoothing_is_identity"] is True
+    grid["probe_source_smoothing_tolerance_rad"] = 0.02
+    grid["probe_source_smoothing_is_identity"] = False
+    payload = dict(options)
+    del payload["compiler_options_sha256"]
+    options["compiler_options_sha256"] = hashlib.sha256(
+        json.dumps(
+            payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+        ).encode("utf-8")
+    ).hexdigest()
+    fixture_bank.write_manifest()
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match="probe source smoothing is not verifiable",
+    ):
+        fixture_bank.verify()
+
+
 def test_rejects_noncanonical_compiler_or_geometry_tool(
     fixture_bank: BankFixture,
     tmp_path: Path,

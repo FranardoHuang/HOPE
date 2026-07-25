@@ -1256,6 +1256,136 @@ def test_scalar_no_early_brake_is_a_hard_gate_but_remains_proxy_only():
         )
 
 
+def _noisy_source_path(frames: int = 40) -> np.ndarray:
+    """Deterministic smooth base plus an alternating high-frequency jitter."""
+
+    t = np.linspace(0.0, 1.0, frames)
+    base = np.column_stack((np.sin(2.0 * np.pi * t), 0.3 * t))
+    spikes = np.zeros_like(base)
+    spikes[1:-1:2, 0] = 0.05
+    spikes[2:-1:2, 0] = -0.05
+    return base + spikes
+
+
+def test_probe_source_smoothing_respects_tolerance_and_pins_endpoints():
+    raw = _noisy_source_path()
+    tolerance = 0.02
+    smoothed, passes, deviation = cmc._smooth_source_coordinates(raw, tolerance)
+
+    assert passes >= 1
+    assert smoothed.shape == raw.shape
+    achieved = float(np.max(np.abs(smoothed - raw)))
+    assert achieved <= tolerance
+    assert deviation == pytest.approx(achieved)
+    # Endpoints stay exactly the raw source; only interior frames move.
+    assert np.array_equal(smoothed[0], raw[0])
+    assert np.array_equal(smoothed[-1], raw[-1])
+    # A stricter tolerance can never do more smoothing than a looser one.
+    _, fewer_passes, _ = cmc._smooth_source_coordinates(raw, tolerance / 4.0)
+    assert fewer_passes <= passes
+
+
+def test_probe_source_smoothing_none_knob_is_byte_identical_noop():
+    raw = _noisy_source_path()
+    options = _options()
+    assert options.probe_source_smoothing_tolerance_rad is None
+    out, receipt = cmc._apply_probe_source_smoothing(raw, options)
+    # The exact same array object flows into geometry construction untouched.
+    assert out is raw
+    assert out.tobytes(order="C") == raw.tobytes(order="C")
+    assert receipt["active"] is False
+    assert receipt["passes_applied"] == 0
+
+
+def test_probe_source_smoothing_reduces_discrete_curvature():
+    raw = _noisy_source_path()
+    smoothed, passes, _ = cmc._smooth_source_coordinates(raw, 0.02)
+    assert passes >= 1
+
+    def second_difference_norm(values: np.ndarray) -> float:
+        return float(np.sum(np.diff(values, n=2, axis=0) ** 2))
+
+    assert second_difference_norm(smoothed) < second_difference_norm(raw)
+
+
+def test_probe_source_smoothing_receipt_records_passes_and_deviation():
+    raw = _noisy_source_path()
+    options = replace(_options(), probe_source_smoothing_tolerance_rad=0.02)
+    out, receipt = cmc._apply_probe_source_smoothing(raw, options)
+    assert out is not raw
+    assert receipt["active"] is True
+    assert receipt["tolerance_rad"] == pytest.approx(0.02)
+    assert receipt["passes_applied"] >= 1
+    assert receipt["max_abs_deviation_reached"] <= 0.02
+    assert receipt["endpoints_pinned_exact"] is True
+    assert receipt["probe_grade_not_verifiable"] is True
+    # The passes/deviation in the receipt match a direct recomputation.
+    _, passes, deviation = cmc._smooth_source_coordinates(raw, 0.02)
+    assert receipt["passes_applied"] == passes
+    assert receipt["max_abs_deviation_reached"] == pytest.approx(deviation)
+
+
+def test_probe_source_smoothing_records_in_manifest_and_scope_receipts(
+    tmp_path, monkeypatch
+):
+    recipe = _make_recipe(tmp_path)
+    monkeypatch.setattr(
+        cmc,
+        "solve_face_flipped_window",
+        lambda source_joint_pos, *args, **kwargs: FakeFaceResult(
+            source_joint_pos, kwargs["frame_indices"]
+        ),
+    )
+    monkeypatch.setattr(cmc, "build_schema2_candidate", _fake_schema2_builder)
+    monkeypatch.setattr(
+        cmc, "build_canonical_geometry", _compiler_plumbing_geometry
+    )
+    monkeypatch.setattr(cmc, "retime_path", _fast_marker_only_retime)
+
+    library = cmc.compile_loaded_canonical_motion_library(
+        recipe,
+        options=replace(
+            _options(), probe_source_smoothing_tolerance_rad=0.5
+        ),
+        backend=FakePlantBackend(),
+    )
+
+    grid = library.manifest["compiler_options"]["geometry_and_grid"]
+    assert grid["probe_source_smoothing_tolerance_rad"] == pytest.approx(0.5)
+    assert grid["probe_source_smoothing_is_identity"] is False
+    for row in library.motions:
+        smoothing = row.scope_report["probe_source_smoothing"]
+        assert smoothing["active"] is True
+        assert smoothing["tolerance_rad"] == pytest.approx(0.5)
+        assert smoothing["passes_applied"] >= 1
+        assert smoothing["max_abs_deviation_reached"] <= 0.5
+
+    identity_library = cmc.compile_loaded_canonical_motion_library(
+        recipe,
+        options=_options(),
+        backend=FakePlantBackend(),
+    )
+    identity_grid = identity_library.manifest["compiler_options"][
+        "geometry_and_grid"
+    ]
+    assert identity_grid["probe_source_smoothing_tolerance_rad"] is None
+    assert identity_grid["probe_source_smoothing_is_identity"] is True
+    for row in identity_library.motions:
+        assert row.scope_report["probe_source_smoothing"]["active"] is False
+
+
+def test_probe_source_smoothing_rejects_nonpositive_tolerance(tmp_path):
+    recipe = _make_recipe(tmp_path)
+    bad = replace(_options(), probe_source_smoothing_tolerance_rad=0.0)
+    with pytest.raises(
+        cmc.CanonicalMotionCompilerError,
+        match="probe_source_smoothing_tolerance_rad",
+    ):
+        cmc.compile_loaded_canonical_motion_library(
+            recipe, options=bad, backend=FakePlantBackend()
+        )
+
+
 def test_fails_closed_without_explicit_full_root_or_s0_grounding(tmp_path):
     recipe = _make_recipe(tmp_path)
     bad_root = cmc.CompilerOptions(
