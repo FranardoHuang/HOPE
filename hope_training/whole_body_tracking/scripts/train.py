@@ -2678,11 +2678,16 @@ _REWARD_PACK_V2_DIRECT = (
     # 接触模型自动分摊回三通道)。有物理组合项,两个代理都是重复,删。
     ("racket_strike_success", 0.0),      # v1 谱系默认 5.0 -> v2 删(人造 AND 代理)
     # strike_capture_bonus 不进包:cfg 默认 0 即"不存在"(capture 门保留原职=上台组闸门)
-    ("virtual_pass_net", 150.0),         # 上台组升为"击中+打好"主奖(名义;probe 校准)
-    ("virtual_landing", 1000.0),         # 落点核=物理组合的联合成绩单,单拍事件额 ~1300
+    # v2.2(Franco 07-25):上台组只留 landing 一项——"过网+落台"是先决条件(gate)
+    # 而非单独给钱的项;pass_net 的过网高塑形随之下岗(先决条件由 gate 表达)。
+    ("virtual_pass_net", 0.0),
+    ("virtual_landing", 1750.0),         # 唯一每拍大奖:legal 门内任意落点可观底薪+中心核
+                                         # 梯度,量级名义 ~1750(probe 按 legal 率校准)
     ("virtual_spin", 0.0),               # 弧圈类动作自带旋转,minimize 先验打架动作身份;
-                                         # 旋转将来是题目的一部分(并进落点模型),遥测保留
+                                         # 遥测保留;落点预测本就旋转感知(RK4 含 Magnus)
 )
+# v2.2 direct-params:landing 换 legal_base 语义(v1 climb 字节等价保留在函数默认)。
+_REWARD_PACK_V2_LANDING_PARAMS = {"mode": "legal_base", "base_frac": 0.6}
 # 建表自检(import 时就炸):键控注入表的键必须都在 _REWARD_KEYS 白名单里,否则
 # _check_unknown_keys 会把注入后的 mapping 当异常配置拒掉(虽然注入发生在检查之后,
 # 表键漂移仍属于契约漂移,响亮报)。
@@ -2766,6 +2771,16 @@ def _expand_reward_pack(env_cfg, task, rw, applied):
         )
         getattr(R, name).weight = float(weight)
         applied.append(f"rewards.{name}.weight={float(weight)} (reward_pack=v2)")
+    # v2.2:landing 切 legal_base 语义(过网+落台=先决条件,门内底薪+中心核梯度)。
+    _landing = getattr(R, "virtual_landing")
+    _require(
+        isinstance(_landing.params, dict) and "command_name" in _landing.params,
+        "rewards.virtual_landing.params (reward_pack=v2 landing mode swap)",
+    )
+    _landing.params.update(_REWARD_PACK_V2_LANDING_PARAMS)
+    applied.append(
+        f"rewards.virtual_landing.params+={_REWARD_PACK_V2_LANDING_PARAMS} (reward_pack=v2)"
+    )
     # racket 侧:拍面 sigma 第三通道。rewards 块在 racket 块【之前】跑,所以这里直接写
     # cfg 属性;用户显式的 task.racket.adaptive_sigma_normal 会在后面的 racket 翻译层
     # 覆写回去(后写后赢)。

@@ -43,14 +43,15 @@ QUALITY_SPLIT = (60.0, 45.0, 35.0)   # pos:vel:normal 名义比例(W 偏位;只�
 # v2.1(Franco 07-25 裁定):strike_success/capture_bonus 两个人造 AND 代理删除;
 # 上台组(落点=物理正确的联合成绩单)扛"击中+打好"层,目标 PSE = 质量层 x 比例。
 TABLE_OVER_QUALITY = 1.2             # 上台层 vs 质量层的 PSE 比例(上台是大奖)
-NET_TO_LAND_WEIGHT_RATIO = 0.15      # w_net : w_land 固定比(过网是塑形,落点是主奖)
+# v2.2(Franco 07-25):上台组只留 landing——"过网+落台"是先决条件(gate)非独立项;
+# pass_net 塑形下岗,legal 门内 base_frac 底薪 + 中心核梯度(hope_rewards legal_base 模式)。
 
 _REQUIRED = (
     "I_weight_sum", "rho_I", "rho_Q", "p_capture_target",
     "T_c_steps", "window_steps", "action_rate_sq_p95", "action_acc_sq_p95",
-    # v2.1 上台定权输入:capture 触发那一步 net/landing 项的原始期望值(核+奖金,
-    # probe 从 tensorboard 的 Episode_Reward/virtual_* 均值 ÷ weight ÷ dt ÷ 触发频率反推)
-    "E_net_per_fire", "E_land_per_fire",
+    # v2.2 上台定权输入:每拍合法(过网+落台)概率目标 与 legal 门内 landing 项期望值
+    # (base+(1-base)×核,∈[base,1];probe 反推)
+    "p_legal_target", "E_land_value_per_legal",
 )
 
 
@@ -77,10 +78,12 @@ def calibrate(measured: dict) -> dict:
     if w_steps >= t_c:
         raise ValueError("window_steps must be < T_c_steps (窗不能盖满整拍)")
 
-    e_net = float(measured["E_net_per_fire"])
-    e_land = float(measured["E_land_per_fire"])
-    if e_net <= 0 or e_land <= 0:
-        raise ValueError("E_net_per_fire / E_land_per_fire must be positive")
+    p_legal = float(measured["p_legal_target"])
+    e_land = float(measured["E_land_value_per_legal"])
+    if not 0.0 < p_legal <= 1.0:
+        raise ValueError("p_legal_target must be in (0, 1]")
+    if not 0.0 < e_land <= 1.0:
+        raise ValueError("E_land_value_per_legal must be in (0, 1] (legal_base 值域)")
     # L1 模仿:每步等效收入(weight-units/步;×dt 才是真 reward,比例不变)
     pse_mimic = I * rho_i
     # L2' 质量(窗口 dense,分开学):Σw·duty·rho_Q = m2·m1·PSE_mimic
@@ -89,11 +92,10 @@ def calibrate(measured: dict) -> dict:
     quality_sum = pse_quality / (duty * rho_q)
     split_total = sum(QUALITY_SPLIT)
     w_pos, w_vel, w_norm = (quality_sum * s / split_total for s in QUALITY_SPLIT)
-    # L3' 上台(每拍一次性,物理组合的联合成绩单):
-    # PSE_table = (w_net·E_net + w_land·E_land)·p*/T_c = TABLE_OVER_QUALITY × PSE_quality
+    # L3' 上台(每拍一次性,唯一保留 landing;legal=先决条件):
+    # PSE_table = w_land·E_land·p_legal*/T_c = TABLE_OVER_QUALITY × PSE_quality
     pse_table = TABLE_OVER_QUALITY * pse_quality
-    w_land = pse_table * t_c / (p_star * (NET_TO_LAND_WEIGHT_RATIO * e_net + e_land))
-    w_net = NET_TO_LAND_WEIGHT_RATIO * w_land
+    w_land = pse_table * t_c / (p_legal * e_land)
     # 罚项预算:P <= f × 早期模仿收入;clamp 使单帧最坏罚 <= 早期收入量级
     early_income = RHO_I_MIN * I
     budget = F_PENALTY * early_income
@@ -111,7 +113,7 @@ def calibrate(measured: dict) -> dict:
             "racket_position_weight": round(w_pos, 1),
             "racket_velocity_weight": round(w_vel, 1),
             "racket_normal_weight": round(w_norm, 1),
-            "virtual_pass_net_weight": round(w_net, 1),
+            "virtual_pass_net_weight": 0.0,
             "virtual_landing_weight": round(w_land, 1),
             # v2.1 删除的代理与先验(冻结为 0,防旧值回流)
             "racket_strike_success_weight": 0.0,
@@ -124,7 +126,7 @@ def calibrate(measured: dict) -> dict:
             "pse_mimic": round(pse_mimic, 3),
             "pse_quality_at_target": round(pse_quality, 3),
             "pse_table_at_target": round(pse_table, 3),
-            "per_swing_table_prize": round(w_net * e_net + w_land * e_land, 1),
+            "per_swing_table_prize": round(w_land * e_land, 1),
             "penalty_budget_per_step": round(budget, 3),
             "early_income_floor": round(early_income, 3),
             "ordering_ok": pse_mimic < pse_quality < pse_table,

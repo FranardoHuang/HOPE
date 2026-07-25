@@ -1771,8 +1771,9 @@ _PACK_V2_WEIGHTS = {
     # v2.1(Franco 07-25):两个人造 AND 代理删除,上台组扛大奖,spin 先验删除
     "racket_strike_success": 0.0,
     "strike_capture_bonus": 0.0,
-    "virtual_pass_net": 150.0,
-    "virtual_landing": 1000.0,
+    # v2.2:上台只留 landing(过网+落台=先决条件 gate,pass_net 塑形下岗)
+    "virtual_pass_net": 0.0,
+    "virtual_landing": 1750.0,
     "virtual_spin": 0.0,
 }
 
@@ -1824,7 +1825,7 @@ def test_reward_pack_defaults_to_v2_full_expansion():
     assert "racket_target.adaptive_sigma=True (reward_pack defaulted to v2)" in applied
     # 逐项走的仍是 v2 包机器:defaulted 标记之外,每条包改动照旧带 reward_pack=v2
     assert "rewards.hit_unstable_support.weight=-10.0 (reward_pack=v2)" in applied
-    assert "rewards.virtual_landing.weight=1000.0 (reward_pack=v2)" in applied
+    assert "rewards.virtual_landing.weight=1750.0 (reward_pack=v2)" in applied
     assert not any("strike_capture_bonus" in m for m in applied)  # v2.1:代理不进包
     assert "rewards.racket_position.weight=60.0" in applied
 
@@ -1833,7 +1834,8 @@ def test_reward_pack_default_applies_when_rewards_node_is_absent_entirely():
     # 连 rewards 节点都没有的任务照样吃默认包(线上大量任务节点只配 racket/motion)。
     env_cfg, applied = _apply_default({"motion": {"hold_steps_range": [0, 100]}})
     assert env_cfg.rewards.upright_exp.weight == pytest.approx(1.0)
-    assert env_cfg.rewards.virtual_landing.weight == pytest.approx(1000.0)
+    assert env_cfg.rewards.virtual_landing.weight == pytest.approx(1750.0)
+    assert env_cfg.rewards.virtual_landing.params["mode"] == "legal_base"
     assert env_cfg.rewards.strike_capture_bonus.weight == pytest.approx(0.0)
     assert _PACK_DEFAULTED_MARKER in applied
 
@@ -1855,7 +1857,7 @@ def test_reward_pack_default_explicit_keys_still_win():
     assert R.racket_normal.weight == pytest.approx(5.0)
     # 没被压过的包项照常落地
     assert R.hit_unstable_support.weight == pytest.approx(-10.0)
-    assert R.virtual_landing.weight == pytest.approx(1000.0)
+    assert R.virtual_landing.weight == pytest.approx(1750.0)
     assert R.strike_capture_bonus.weight == pytest.approx(0.0)  # v2.1:代理不进包
     assert len([m for m in applied if "user override wins" in m]) == 3
 
@@ -1902,7 +1904,7 @@ def test_reward_pack_v2_expands_every_blueprint_mutation_with_markers():
     assert env_cfg.commands.racket_target.adaptive_sigma is True
     # 每条包改动的 applied 标记都带 reward_pack=v2:1 总标记 + 10 键控注入 + 10 direct + 1 racket
     pack_markers = [m for m in applied if "reward_pack=v2" in m]
-    assert len(pack_markers) == 24  # v2.1:-capture +net/landing/spin
+    assert len(pack_markers) == 25  # v2.2:+landing params 标记
     # 键控注入的项同时会有覆写层自己的标准记账(证明真走了现有翻译层)
     assert "rewards.hold_ready.weight=0.0" in applied
     assert "rewards.foot_slip_sq.weight=-0.1" in applied
@@ -1914,8 +1916,9 @@ def test_reward_pack_v2_expands_every_blueprint_mutation_with_markers():
     assert "rewards.hit_unstable_support.weight=-10.0 (reward_pack=v2)" in applied
     assert "rewards.upright_exp.weight=1.0 (reward_pack=v2)" in applied
     assert "rewards.racket_strike_success.weight=0.0 (reward_pack=v2)" in applied
-    assert "rewards.virtual_pass_net.weight=150.0 (reward_pack=v2)" in applied
+    assert "rewards.virtual_pass_net.weight=0.0 (reward_pack=v2)" in applied
     assert "rewards.virtual_spin.weight=0.0 (reward_pack=v2)" in applied
+    assert any("virtual_landing.params" in m and "legal_base" in m for m in applied)
     assert "racket_target.adaptive_sigma_normal=True (reward_pack=v2)" in applied
     # 显式 v2(非默认)绝不带 defaulted 标记
     assert _PACK_DEFAULTED_MARKER not in applied
@@ -1956,7 +1959,7 @@ def test_reward_pack_v2_explicit_user_keys_win():
     assert env_cfg.commands.racket_target.adaptive_sigma_normal is False
     # 没被用户压过的包项照常落地
     assert R.hit_unstable_support.weight == pytest.approx(-10.0)
-    assert R.virtual_landing.weight == pytest.approx(1000.0)
+    assert R.virtual_landing.weight == pytest.approx(1750.0)
     assert R.strike_capture_bonus.weight == pytest.approx(0.0)
     assert R.foot_drag.weight == 0.0
     assert len([m for m in applied if "user override wins" in m]) == 7

@@ -2748,7 +2748,9 @@ def virtual_pass_net(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     return raw * cmd.vb_fired.float()
 
 
-def virtual_landing(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
+def virtual_landing(
+    env: ManagerBasedRLEnv, command_name: str, mode: str = "climb", base_frac: float = 0.6
+) -> torch.Tensor:
     """Landing-accuracy kernel + fully-gated in-bounds bonus (v0 ``landing_in_opponent_half``).
 
     CLIMB-PHASE shape (2026-07-04): the Gaussian kernel on ||landing_xy - target_xy|| pays for any
@@ -2766,6 +2768,23 @@ def virtual_landing(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     cmd = _cmd(env, command_name)
     dist2 = torch.sum(torch.square(cmd.vb_landing_xy - cmd._vb_target_xy.unsqueeze(0)), dim=-1)
     kernel = torch.exp(-dist2 / float(cmd.cfg.vb_landing_sigma) ** 2)
+    if mode == "legal_base":
+        # v2.2(Franco 07-25 裁定):上台组唯一保留项。"过网+落在对面台"是【先决条件】
+        # (gate),不是单独给钱的项;门内任意落点都有可观底薪 base_frac,加 (1-base) 的
+        # 中心核当梯度(台角距台心 ~1.0 m,σ=1.0 下台内最低 ~base+0.4e⁻¹≈0.75)——
+        # "台上任意位置可观、梯度合理、量级有界 [0,1]"。旧 depth 奖金删除(底薪替代;
+        # 吸血小球落点离台心远,自动只拿底薪档)。07-03 饿死史的新缓解:质量三核已是
+        # 60/45/35+σ 自适应(不是当年 4/0.5/0.5),probe 必须盯 legal rate 起飞。
+        base = float(base_frac)
+        if not 0.0 < base < 1.0:
+            raise ValueError("virtual_landing base_frac must be in (0, 1)")
+        legal = cmd.vb_landing_valid & cmd.vb_net_clear & cmd.vb_on_opponent
+        raw = legal.float() * (base + (1.0 - base) * kernel)
+        return raw * cmd.vb_fired.float()
+    if mode != "climb":
+        raise ValueError(
+            "virtual_landing mode must be 'climb' (v1 byte-identical) or 'legal_base' (v2.2)"
+        )
     bonus = (cmd.vb_landing_valid & cmd.vb_net_clear & cmd.vb_on_opponent & cmd.vb_depth_ok).float()
     raw = kernel * cmd.vb_landing_valid.float() + bonus
     return raw * cmd.vb_fired.float()
