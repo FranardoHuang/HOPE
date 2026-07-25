@@ -56,7 +56,18 @@ _REQUIRED = (
 
 
 def calibrate(measured: dict) -> dict:
-    """按定权公式把实测量换算成冻结权重表。全程 fail-loud:缺键/非有限/出range 直接炸。"""
+    """按定权公式把实测量换算成冻结权重表。全程 fail-loud:缺键/非有限/出range 直接炸。
+
+    校准以【动作谱系】为单位(Franco 07-26):T_c/ρ/p/E_land/Δa 分位全是动作依赖量,
+    换动作库(如 v4rg → Franco canonical)必须按新谱系重跑 probe 再出表;公式与比例
+    常量全谱系共享。measured JSON 必须带 motion_lineage 字符串标签,冻结表按谱系归档
+    (canonical 注册表的 per-clip training_config 字段是天然归宿)。"""
+    lineage = measured.get("motion_lineage")
+    if not isinstance(lineage, str) or not lineage.strip():
+        raise ValueError(
+            "measured JSON must carry motion_lineage (e.g. 'v4rg_runtime_order_v3' / "
+            "'canonical_v2_20260724') — 校准表按动作谱系归档,不许无谱系出表"
+        )
     for key in _REQUIRED:
         if key not in measured:
             raise ValueError(f"measured JSON missing key: {key}")
@@ -107,6 +118,7 @@ def calibrate(measured: dict) -> dict:
     clamp_acc = min(clamp_acc, float(measured["action_acc_sq_p95"]))
 
     return {
+        "motion_lineage": lineage.strip(),
         "inputs": {k: float(measured[k]) for k in _REQUIRED},
         "constants": {"m1": M1, "m2": M2, "f_penalty": F_PENALTY, "rho_I_min": RHO_I_MIN},
         "frozen": {

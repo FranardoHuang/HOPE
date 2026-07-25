@@ -31,6 +31,7 @@ def _nominal(**over):
         "action_acc_sq_p95": 40.0,
         "p_legal_target": 0.7,
         "E_land_value_per_legal": 0.8,
+        "motion_lineage": "v4rg_runtime_order_v3",
     }
     base.update(over)
     return base
@@ -75,6 +76,15 @@ def test_clamp_takes_min_of_budget_and_p95():
     # p95 更小时取 p95
     fr2 = calibrate(_nominal(action_rate_sq_p95=4.0))["frozen"]
     assert fr2["action_rate_value_clamp"] == pytest.approx(4.0, abs=0.01)
+
+
+def test_lineage_tag_is_mandatory_and_passes_through():
+    out = calibrate(_nominal())
+    assert out["motion_lineage"] == "v4rg_runtime_order_v3"
+    with pytest.raises(ValueError, match="motion_lineage"):
+        calibrate({k: v for k, v in _nominal().items() if k != "motion_lineage"})
+    with pytest.raises(ValueError, match="motion_lineage"):
+        calibrate(_nominal(motion_lineage="  "))
 
 
 def test_fail_loud_surfaces():
