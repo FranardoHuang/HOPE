@@ -1876,6 +1876,21 @@ def test_reward_pack_default_explicit_keys_still_win():
     assert len([m for m in applied if "user override wins" in m]) == 3
 
 
+def test_landing_scale_keys_translate_and_win_over_pack():
+    # scale 消融键:显式 weight/base_frac 压过包冻结值;越界拒收
+    env_cfg, applied = _apply(
+        {"rewards": {"reward_pack": "v2", "virtual_landing_weight": 791.9,
+                     "virtual_landing_base_frac": 0.3}}
+    )
+    assert env_cfg.rewards.virtual_landing.weight == pytest.approx(791.9)
+    assert env_cfg.rewards.virtual_landing.params["base_frac"] == pytest.approx(0.3)
+    assert any("virtual_landing.weight=791.9" in m for m in applied)
+    with pytest.raises(train_mod._OverrideError, match="base_frac"):
+        _apply({"rewards": {"reward_pack": "v2", "virtual_landing_base_frac": 1.5}})
+    with pytest.raises(train_mod._OverrideError, match="virtual_landing_weight"):
+        _apply({"rewards": {"reward_pack": "v2", "virtual_landing_weight": -5.0}})
+
+
 def test_settle_delay_flag_translates_and_defaults_off():
     # 默认包 = 0(立发);显式 0.24 = 延付消融臂;负数/非法拒收
     env_cfg, applied = _apply(

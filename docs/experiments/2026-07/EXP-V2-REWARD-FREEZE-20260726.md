@@ -41,6 +41,20 @@ stand_start_prob=1.0**(去掉挥拍中段 RSI 空降——BeyondMimic 有 RSI �
 挥拍不靠空降,内证:yikang r2 取证单 clip 随机相位仅 38.7% 到击球帧、canonical_ready_mode
 本就设计 frame-0 起步)。延付保留为纵深(领奖前 0.24s 摔=直接没收)。
 
+## 0.9 pod1 reward-scale 消融队列(07-26 Franco 授权:"pod1 你看着来,着重 reward scale")
+
+单一队列纪律:空槽拉最前就绪臂;每臂 20k fresh、seed 3,除单变量外与 defer0(=基线)逐字同;pod2 留新动作不占。
+
+| # | 臂 | 单变量 | 键 | 状态 |
+|---|---|---|---|---|
+| 1 | table_r12 | 上台比例 2.5×→1.2× | virtual_landing_weight=791.9 | GPU2 首发 |
+| 2 | qual_x23 | 质量层 ×⅔ | racket_{pos,vel,norm}_weight=262.3/196.7/153.0 | 待槽 |
+| 3 | vsplit | pos:vel 互换(Σ不变) | 295.1/393.4/229.5 | 待槽 |
+| 4 | sigma_adapt | σ 静态→自适应 | adaptive_sigma[_normal]=true + std 0.2/1.0/0.3 | 待槽 |
+| 5 | base03 | landing 底薪 0.6→0.3 | virtual_landing_base_frac=0.3 | 待槽 |
+
+判读轴与延付消融同一套(回合长/摔倒率/legal 率/落点质量/各组每步收入轨迹),外加各臂的"阶梯实测 PSE 是否仍单调"。
+
 ## 1. 冻结表(scripts/v2_weight_calibration.py 输出,逐字)
 
 | 键 | 冻结值 |

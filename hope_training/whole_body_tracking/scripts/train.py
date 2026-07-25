@@ -2516,6 +2516,8 @@ _REWARD_KEYS = (
     "reward_pack",
     # landing 延付消融 flag(07-26 Franco:默认关;>0 = 大奖延付该秒数、同 attempt 存活才发)。
     "virtual_landing_settle_delay_s",
+    # scale 消融键(07-26 pod1 队列):臂级覆写上台大奖权重与底薪比例(显式键压过包值)。
+    "virtual_landing_weight", "virtual_landing_base_frac",
 )
 
 # jiayi 的 YAML-null 删参修复(8ee2e82a,搬进 main 血统)。人话:task YAML 层层继承时,子任务
@@ -4600,6 +4602,28 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                     f"rewards.{_tn}.body_names={_after} "
                     "(full-body mimic: pelvis + 6 leg links restored)"
                 )
+        _vlw = _get(rw, "virtual_landing_weight")
+        if _vlw is not None:
+            _vlw_f = float(_vlw)
+            _require(
+                math.isfinite(_vlw_f) and _vlw_f >= 0.0,
+                "rewards.virtual_landing_weight (finite, >= 0)",
+            )
+            _require(
+                hasattr(R, "virtual_landing") and R.virtual_landing is not None,
+                "rewards.virtual_landing (weight override)",
+            )
+            R.virtual_landing.weight = _vlw_f
+            applied.append(f"rewards.virtual_landing.weight={_vlw_f}")
+        _vlb = _get(rw, "virtual_landing_base_frac")
+        if _vlb is not None:
+            _vlb_f = float(_vlb)
+            _require(
+                math.isfinite(_vlb_f) and 0.0 < _vlb_f < 1.0,
+                "rewards.virtual_landing_base_frac (in (0, 1))",
+            )
+            R.virtual_landing.params["base_frac"] = _vlb_f
+            applied.append(f"rewards.virtual_landing.params.base_frac={_vlb_f}")
         _sds = _get(rw, "virtual_landing_settle_delay_s")
         if _sds is not None:
             _sds_f = float(_sds)
