@@ -1844,7 +1844,8 @@ def test_reward_pack_default_applies_when_rewards_node_is_absent_entirely():
     assert env_cfg.rewards.upright_exp.weight == pytest.approx(1.0)
     assert env_cfg.rewards.virtual_landing.weight == pytest.approx(1648.8)
     assert env_cfg.rewards.virtual_landing.params["mode"] == "legal_base"
-    assert env_cfg.rewards.virtual_landing.params["settle_delay_s"] == pytest.approx(0.24)
+    # 07-26 裁决:延付默认关(消融 flag);臂级显式键单测见 test_settle_delay_flag_*
+    assert env_cfg.rewards.virtual_landing.params["settle_delay_s"] == 0.0
     assert env_cfg.rewards.strike_capture_bonus.weight == pytest.approx(0.0)
     assert _PACK_DEFAULTED_MARKER in applied
 
@@ -1869,6 +1870,19 @@ def test_reward_pack_default_explicit_keys_still_win():
     assert R.virtual_landing.weight == pytest.approx(1648.8)
     assert R.strike_capture_bonus.weight == pytest.approx(0.0)  # v2.1:代理不进包
     assert len([m for m in applied if "user override wins" in m]) == 3
+
+
+def test_settle_delay_flag_translates_and_defaults_off():
+    # 默认包 = 0(立发);显式 0.24 = 延付消融臂;负数/非法拒收
+    env_cfg, applied = _apply(
+        {"rewards": {"reward_pack": "v2", "virtual_landing_settle_delay_s": 0.24},
+         "racket": {"adaptive_sigma": True}}
+    )
+    assert env_cfg.rewards.virtual_landing.params["settle_delay_s"] == pytest.approx(0.24)
+    assert any("settle_delay_s=0.24" in m for m in applied)
+    with pytest.raises(train_mod._OverrideError, match="settle_delay"):
+        _apply({"rewards": {"reward_pack": "v2", "virtual_landing_settle_delay_s": -1.0},
+                "racket": {"adaptive_sigma": True}})
 
 
 def test_reward_pack_v2_strips_unclamped_action_rate_with_marker():

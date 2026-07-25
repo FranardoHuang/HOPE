@@ -325,7 +325,13 @@ vendor_assets/motion_finalize_20260724/probes/
 - 源平滑 probe 旋钮（拼接假曲率的根治，正手学到的手法对全部动作通用）实现中：
   `probe_source_smoothing_tolerance_rad`，几 mrad 容差内迭代平滑源路径、端点钉死、收据落账、
   bank gate 拒收（与探针带同待遇）。
-- probe7b（两件 block，root ×3，pod2）在算，行落此处。
+- probe7b（两件 block，root ×3，pod2）：bh_block full 1.044→**0.573 s**，反超 upper 0.610 s；
+  fh_block_syn full 0.841→1.009 s **反而变差**（同一入口/出口 37/48）。机制已核实
+  （compiler L468-478）：全身加权弧长把 root 限速直接当坐标权重（scale=1/velocity），改限值
+  = 改度量 = 换路径几何（采样密度、拼接样条、尖刺位置全变），所以时间对 ROOT_SCALE **按构造
+  非单调**。工程债入队：把度量权重与硬限值解耦（权重钉住、只放宽 cap），解耦前全身表取
+  各 run 逐件最优：fh_loop 0.769（×3）、bh_loop_c 0.714（×3）、s0 0.317（×3）、
+  bh_block 0.573（×3）、fh_block_syn 0.841（×1）。upper 五行跨 run 逐值复现（确定性通过）。
 - 冒烟训练（fh_loop+bh_loop_c upper 新 clip，800 iter，pod2）已跑完：管线级 PASS（跑满、
   存 checkpoint、无崩）；学习级待定——iter800 时 pre_strike_fall_rate 0.28→1.0、episode
   22 步，需与 v4rg 同 iter 基线对照才能区分"adaptive σ 收紧的正常早期形态"与"新 clip 绑定

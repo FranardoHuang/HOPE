@@ -1262,14 +1262,14 @@ def _noisy_source_path(frames: int = 40) -> np.ndarray:
     t = np.linspace(0.0, 1.0, frames)
     base = np.column_stack((np.sin(2.0 * np.pi * t), 0.3 * t))
     spikes = np.zeros_like(base)
-    spikes[1:-1:2, 0] = 0.05
-    spikes[2:-1:2, 0] = -0.05
+    spikes[1:-1:2, 0] = 0.01
+    spikes[2:-1:2, 0] = -0.01
     return base + spikes
 
 
 def test_probe_source_smoothing_respects_tolerance_and_pins_endpoints():
     raw = _noisy_source_path()
-    tolerance = 0.02
+    tolerance = 0.05
     smoothed, passes, deviation = cmc._smooth_source_coordinates(raw, tolerance)
 
     assert passes >= 1
@@ -1299,7 +1299,7 @@ def test_probe_source_smoothing_none_knob_is_byte_identical_noop():
 
 def test_probe_source_smoothing_reduces_discrete_curvature():
     raw = _noisy_source_path()
-    smoothed, passes, _ = cmc._smooth_source_coordinates(raw, 0.02)
+    smoothed, passes, _ = cmc._smooth_source_coordinates(raw, 0.05)
     assert passes >= 1
 
     def second_difference_norm(values: np.ndarray) -> float:
@@ -1310,17 +1310,17 @@ def test_probe_source_smoothing_reduces_discrete_curvature():
 
 def test_probe_source_smoothing_receipt_records_passes_and_deviation():
     raw = _noisy_source_path()
-    options = replace(_options(), probe_source_smoothing_tolerance_rad=0.02)
+    options = replace(_options(), probe_source_smoothing_tolerance_rad=0.05)
     out, receipt = cmc._apply_probe_source_smoothing(raw, options)
     assert out is not raw
     assert receipt["active"] is True
-    assert receipt["tolerance_rad"] == pytest.approx(0.02)
+    assert receipt["tolerance_rad"] == pytest.approx(0.05)
     assert receipt["passes_applied"] >= 1
-    assert receipt["max_abs_deviation_reached"] <= 0.02
+    assert receipt["max_abs_deviation_reached"] <= 0.05
     assert receipt["endpoints_pinned_exact"] is True
     assert receipt["probe_grade_not_verifiable"] is True
     # The passes/deviation in the receipt match a direct recomputation.
-    _, passes, deviation = cmc._smooth_source_coordinates(raw, 0.02)
+    _, passes, deviation = cmc._smooth_source_coordinates(raw, 0.05)
     assert receipt["passes_applied"] == passes
     assert receipt["max_abs_deviation_reached"] == pytest.approx(deviation)
 

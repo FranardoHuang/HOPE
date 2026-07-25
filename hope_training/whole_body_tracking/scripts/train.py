@@ -2514,6 +2514,8 @@ _REWARD_KEYS = (
     # "v2")。人话:一个键把 v2 蓝图整套换装展开;包先展开、显式同名键后写后赢,见
     # _expand_reward_pack。
     "reward_pack",
+    # landing 延付消融 flag(07-26 Franco:默认关;>0 = 大奖延付该秒数、同 attempt 存活才发)。
+    "virtual_landing_settle_delay_s",
 )
 
 # jiayi 的 YAML-null 删参修复(8ee2e82a,搬进 main 血统)。人话:task YAML 层层继承时,子任务
@@ -2695,7 +2697,10 @@ _REWARD_PACK_V2_DIRECT = (
     ("death_penalty", -1800.0),
 )
 # v2.2 direct-params:landing 换 legal_base 语义(v1 climb 字节等价保留在函数默认)。
-_REWARD_PACK_V2_LANDING_PARAMS = {"mode": "legal_base", "base_frac": 0.6, "settle_delay_s": 0.24}
+# 延付(settle_delay_s)07-26 Franco 裁决:默认关、降级为消融 flag——death_penalty −1800
+# + stand_start 已双重关死刷分回路,延付的边际价值待消融检验(臂级用
+# rewards.virtual_landing_settle_delay_s 显式开)。
+_REWARD_PACK_V2_LANDING_PARAMS = {"mode": "legal_base", "base_frac": 0.6, "settle_delay_s": 0.0}
 # 建表自检(import 时就炸):键控注入表的键必须都在 _REWARD_KEYS 白名单里,否则
 # _check_unknown_keys 会把注入后的 mapping 当异常配置拒掉(虽然注入发生在检查之后,
 # 表键漂移仍属于契约漂移,响亮报)。
@@ -4631,6 +4636,19 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                     f"rewards.{_tn}.body_names={_after} "
                     "(full-body mimic: pelvis + 6 leg links restored)"
                 )
+        _sds = _get(rw, "virtual_landing_settle_delay_s")
+        if _sds is not None:
+            _sds_f = float(_sds)
+            _require(
+                math.isfinite(_sds_f) and _sds_f >= 0.0,
+                "rewards.virtual_landing_settle_delay_s (finite, >= 0)",
+            )
+            _require(
+                hasattr(R, "virtual_landing") and R.virtual_landing is not None,
+                "rewards.virtual_landing (settle_delay override)",
+            )
+            R.virtual_landing.params["settle_delay_s"] = _sds_f
+            applied.append(f"rewards.virtual_landing.params.settle_delay_s={_sds_f}")
         jt = _get(rw, "joint_torques_weight")
         if jt is not None:
             _require(hasattr(R, "joint_torques"), "rewards.joint_torques")
