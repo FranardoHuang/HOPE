@@ -2691,7 +2691,7 @@ _REWARD_PACK_V2_DIRECT = (
     ("action_rate_clamped", -0.2),
 )
 # v2.2 direct-params:landing 换 legal_base 语义(v1 climb 字节等价保留在函数默认)。
-_REWARD_PACK_V2_LANDING_PARAMS = {"mode": "legal_base", "base_frac": 0.6}
+_REWARD_PACK_V2_LANDING_PARAMS = {"mode": "legal_base", "base_frac": 0.6, "settle_delay_s": 0.24}
 # 建表自检(import 时就炸):键控注入表的键必须都在 _REWARD_KEYS 白名单里,否则
 # _check_unknown_keys 会把注入后的 mapping 当异常配置拒掉(虽然注入发生在检查之后,
 # 表键漂移仍属于契约漂移,响亮报)。

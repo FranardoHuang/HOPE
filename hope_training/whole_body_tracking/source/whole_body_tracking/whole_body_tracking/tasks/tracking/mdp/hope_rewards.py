@@ -2767,8 +2767,16 @@ def virtual_pass_net(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     return raw * cmd.vb_fired.float()
 
 
+_LANDING_PRIZE_PENDING_ATTR = "_hope_landing_prize_pending"
+_LANDING_PRIZE_ARMED_ATTR = "_hope_landing_prize_armed"
+
+
 def virtual_landing(
-    env: ManagerBasedRLEnv, command_name: str, mode: str = "climb", base_frac: float = 0.6
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    mode: str = "climb",
+    base_frac: float = 0.6,
+    settle_delay_s: float = 0.0,
 ) -> torch.Tensor:
     """Landing-accuracy kernel + fully-gated in-bounds bonus (v0 ``landing_in_opponent_half``).
 
@@ -2799,7 +2807,44 @@ def virtual_landing(
             raise ValueError("virtual_landing base_frac must be in (0, 1)")
         legal = cmd.vb_landing_valid & cmd.vb_net_clear & cmd.vb_on_opponent
         raw = legal.float() * (base + (1.0 - base) * kernel)
-        return raw * cmd.vb_fired.float()
+        delay = float(settle_delay_s)
+        if not math.isfinite(delay) or delay < 0.0:
+            raise ValueError("virtual_landing settle_delay_s must be finite and >= 0")
+        if delay == 0.0:
+            return raw * cmd.vb_fired.float()
+        # 延付制(2026-07-26,对照臂 3k 迭代实测抓到的重生刷分漏洞的解):大奖不在触球步
+        # 立发,而是【触球后 settle_delay_s 内同一 attempt 存活】才发;死亡/重置/换题没收。
+        # 人话:上台且站得住才算数——RSI 重生每次都出生在参考挥拍中段,立发制下"借参考
+        # 动量打一板→摔死→重生再打"的回合越短收益率越高(实测回合 18→7 步、摔倒×10);
+        # 延付把死亡从"结算加速器"变回"没收器",且不误伤学站阶段(没打上本就无奖可没收)。
+        # 工程约束:planner 重定时下随挥 ~21 步即 wrap(wrap 亦终结 attempt),delay 必须
+        # 显著小于该窗(默认包用 0.24 s = 12 步);probe 盯 landing 实付率验证不被 wrap 误没收。
+        clock = getattr(cmd, "post_strike_age_and_same_attempt", None)
+        if clock is None:
+            raise RuntimeError(
+                "virtual_landing settle_delay_s>0 requires the command term's "
+                "post_strike_age_and_same_attempt clock"
+            )
+        age_s, same_attempt = clock()
+        pending = getattr(env, _LANDING_PRIZE_PENDING_ATTR, None)
+        if pending is None:
+            pending = torch.zeros_like(raw)
+            armed = torch.zeros_like(cmd.vb_fired)
+            setattr(env, _LANDING_PRIZE_PENDING_ATTR, pending)
+            setattr(env, _LANDING_PRIZE_ARMED_ATTR, armed)
+        else:
+            armed = getattr(env, _LANDING_PRIZE_ARMED_ATTR)
+        # attempt 终结(死/重置/换题)→ 没收;新触球 → 覆盖挂账;到期且存活 → 发放并解挂
+        armed_new = armed & same_attempt
+        fired = cmd.vb_fired
+        pending_new = torch.where(fired, raw, pending)
+        armed_new = armed_new | fired
+        pay = armed_new & same_attempt & (age_s >= delay)
+        out = pending_new * pay.float()
+        armed_new = armed_new & ~pay
+        pending.copy_(pending_new)
+        armed.copy_(armed_new)
+        return out
     if mode != "climb":
         raise ValueError(
             "virtual_landing mode must be 'climb' (v1 byte-identical) or 'legal_base' (v2.2)"

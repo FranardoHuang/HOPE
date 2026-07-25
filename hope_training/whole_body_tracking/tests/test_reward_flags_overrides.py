@@ -1842,6 +1842,7 @@ def test_reward_pack_default_applies_when_rewards_node_is_absent_entirely():
     assert env_cfg.rewards.upright_exp.weight == pytest.approx(1.0)
     assert env_cfg.rewards.virtual_landing.weight == pytest.approx(1648.8)
     assert env_cfg.rewards.virtual_landing.params["mode"] == "legal_base"
+    assert env_cfg.rewards.virtual_landing.params["settle_delay_s"] == pytest.approx(0.24)
     assert env_cfg.rewards.strike_capture_bonus.weight == pytest.approx(0.0)
     assert _PACK_DEFAULTED_MARKER in applied
 

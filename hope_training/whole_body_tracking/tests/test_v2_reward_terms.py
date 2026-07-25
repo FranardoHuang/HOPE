@@ -404,3 +404,74 @@ def test_action_rate_clamped_matches_builtin_below_and_caps_above():
     assert v[1].item() == pytest.approx(9.0, abs=1e-6)   # 100 -> 封顶 9
     with pytest.raises(ValueError, match="value_clamp"):
         hope_rewards_mod.action_rate_l2_clamped(env, value_clamp=0.0)
+
+
+# --------------------------------------------------------------------------------------------- #
+# virtual_landing 延付制(v2.2 修订:重生刷分漏洞的解)— 逐步推演
+# --------------------------------------------------------------------------------------------- #
+def _vb_env_with_clock(n=1):
+    env, cmd = _vb_env(n)
+    cmd._age = torch.zeros(n)
+    cmd._same = torch.ones(n, dtype=torch.bool)
+    cmd.post_strike_age_and_same_attempt = lambda: (cmd._age, cmd._same)
+    return env, cmd
+
+
+def _step(env, cmd):
+    return hope_rewards_mod.virtual_landing(
+        env, "racket_target", mode="legal_base", settle_delay_s=0.24
+    )
+
+
+def test_deferred_prize_pays_only_after_surviving_the_delay():
+    env, cmd = _vb_env_with_clock()
+    for t_ in (cmd.vb_landing_valid, cmd.vb_net_clear, cmd.vb_on_opponent):
+        t_[:] = True
+    cmd.vb_landing_xy[0] = torch.tensor([2.555, 0.0])  # 满分落点
+    cmd.vb_fired[:] = True; cmd._age[:] = 0.0
+    assert _step(env, cmd)[0].item() == 0.0            # 触球步:挂账不发
+    cmd.vb_fired[:] = False; cmd._age[:] = 0.12
+    assert _step(env, cmd)[0].item() == 0.0            # 6 步:未到期
+    cmd._age[:] = 0.24
+    assert _step(env, cmd)[0].item() == pytest.approx(1.0, abs=1e-6)  # 到期存活:全额
+    cmd._age[:] = 0.26
+    assert _step(env, cmd)[0].item() == 0.0            # 只发一次
+
+
+def test_deferred_prize_is_forfeited_on_death():
+    env, cmd = _vb_env_with_clock()
+    for t_ in (cmd.vb_landing_valid, cmd.vb_net_clear, cmd.vb_on_opponent):
+        t_[:] = True
+    cmd.vb_landing_xy[0] = torch.tensor([2.555, 0.0])
+    cmd.vb_fired[:] = True; cmd._age[:] = 0.0
+    _step(env, cmd)
+    cmd.vb_fired[:] = False
+    cmd._same[:] = False                                # 摔死/重置:attempt 终结
+    assert _step(env, cmd)[0].item() == 0.0             # 没收
+    cmd._same[:] = True; cmd._age[:] = 0.02             # 重生新 attempt(未触球)
+    assert _step(env, cmd)[0].item() == 0.0             # 旧奖不复活
+    cmd._age[:] = 0.30
+    assert _step(env, cmd)[0].item() == 0.0
+
+
+def test_deferred_prize_new_fire_overwrites_pending():
+    env, cmd = _vb_env_with_clock()
+    for t_ in (cmd.vb_landing_valid, cmd.vb_net_clear, cmd.vb_on_opponent):
+        t_[:] = True
+    cmd.vb_landing_xy[0] = torch.tensor([2.555, 1.0])  # 第一板台角:0.6+0.4e^-1
+    cmd.vb_fired[:] = True; cmd._age[:] = 0.0
+    _step(env, cmd)
+    cmd.vb_landing_xy[0] = torch.tensor([2.555, 0.0])  # 第二板满分,覆盖挂账
+    cmd._age[:] = 0.0
+    _step(env, cmd)
+    cmd.vb_fired[:] = False; cmd._age[:] = 0.24
+    assert _step(env, cmd)[0].item() == pytest.approx(1.0, abs=1e-6)
+
+
+def test_zero_delay_keeps_instant_semantics():
+    env, cmd = _vb_env(1)
+    for t_ in (cmd.vb_landing_valid, cmd.vb_net_clear, cmd.vb_on_opponent, cmd.vb_fired):
+        t_[:] = True
+    cmd.vb_landing_xy[0] = torch.tensor([2.555, 0.0])
+    v = hope_rewards_mod.virtual_landing(env, "racket_target", mode="legal_base")
+    assert v[0].item() == pytest.approx(1.0, abs=1e-6)

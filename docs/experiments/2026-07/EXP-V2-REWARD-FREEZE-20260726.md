@@ -8,6 +8,20 @@
 - science:**`v2sci_v4rg_ctrl_fresh_seed3_20260726`** @ pod1/GPU0,commit `7bd7c392`,fresh-from-random,20000 迭代 save100,4096 env,v2.2 冻结表全默认(质量 393.4/295.1/229.5、landing 1648.8 legal_base、clamp 9.0/36.0)。角色:**换动作对照臂**——canonical 动作臂将以同 seed/同题库/同权重发射,唯一变量=动作库。
 - 后续臂仍需:各自 smoke 一格;canonical 谱系先重 probe 出自己的冻结表。
 
+## 0.5 首臂事故与修订(2026-07-26,3k 迭代止损)
+
+首个对照臂在 iter~3k 被抽查抓到**重生刷分**:RSI 每次重生出生在参考挥拍中段 → 借参考动量
+几步内 capture+legal → 领 landing 大奖(触球步立发)→ 摔死 → 重生再领。实测:回合长
+18→7.3 步、摔倒终止 ×10、模仿/站正收入 −66%,而 exact 误差 3.8mm/legal 62%(打得极准,
+纯为刷奖)。**死亡成了结算加速器**——one-shot 大奖 × 死亡重置 × RSI 的组合漏洞(PACE 用
+−1000 终止罚防的就是这个;我们不用全局死亡罚以免复活 fresh 早期自杀区间)。
+
+**修订(prize 延付制)**:landing 大奖改为【触球后 0.24 s(12 步)内同 attempt 存活】才
+发放,死亡/重置/换题没收(settle_delay_s=0.24 进 v2 包;same_attempt 时钟复用 settle 系)。
+语义 = 上台且站得住才算数;不误伤学站阶段。工程约束:延付窗必须小于随挥 wrap 窗
+(planner 重定时下 ~21 步),relaunch 后盯 landing 实付率验证不被 wrap 误没收。
+事故臂 run 目录保留取证;relaunch 以 _r2 名义、待 Franco 确认修订后执行。
+
 ## 1. 冻结表(scripts/v2_weight_calibration.py 输出,逐字)
 
 | 键 | 冻结值 |
