@@ -1,4 +1,8 @@
-# Reward 新一代设计(论文对照 + scale 推导 + v2 蓝图)— 2026-07-25
+# Reward 新一代设计(论文对照 + scale 推导)— 2026-07-25【部分归档】
+
+> **现行权威文档 = [reward_v2_explained_20260725.md](reward_v2_explained_20260725.md)(v2.2)。**
+> 本文档保留仍然有效的 §0 设计准绳、§1 五源论文对照、§2 scale 推导与 §4 验证记录;
+> §3/§3.5 的数值蓝图是 v2.0 草案历史,已被 v2.1/v2.2 裁决迭代取代,只作演化追溯,勿照抄。
 
 依据:Franco 2026-07-25 的 23 点裁决 + 五源论文/代码逐项提取(BeyondMimic arXiv:2508.08241 + 上游 repo、mjlab velocity 任务、HITTER arXiv:2508.21043、SMASH arXiv:2604.01158、PACE arXiv:2509.21690 + 开源代码)+ scale 课程文献(DeepMimic/AMP/KungfuBot/ASAP/羽毛球多阶段/PopArt)。
 配套:[reward_audit_20260725.md](reward_audit_20260725.md)(现状 74 项盘点)。

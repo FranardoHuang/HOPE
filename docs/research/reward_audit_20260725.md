@@ -1,4 +1,7 @@
-# Reward 全量盘点(按目的分组)— 2026-07-25
+# Reward 全量盘点(按目的分组)— 2026-07-25【历史快照:v1】
+
+> 本文是 v1(reward_pack=v1)时代的现状盘点,用于追溯与对照。**v2.2 已是默认包**,
+> 现行说明见 [reward_v2_explained_20260725.md](reward_v2_explained_20260725.md)。
 
 **范围**:main @6b43aa6b,现役训练谱系 = `HOPEPingPongVirtualBall`(0720–0723 全部波次都跑它)。74 项逐条读码盘点(3 个独立 agent 分域穷举 + 1 个交叉批判),行号证据在各项注明的源文件里。
 **记账口径**:IsaacLab RewardManager 每步计 `value × weight × dt`(dt=0.02 s @50 Hz);weight=0 的项被整个跳过(字节等价基线)。

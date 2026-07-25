@@ -2681,8 +2681,8 @@ _REWARD_PACK_V2_DIRECT = (
     # v2.2(Franco 07-25):上台组只留 landing 一项——"过网+落台"是先决条件(gate)
     # 而非单独给钱的项;pass_net 的过网高塑形随之下岗(先决条件由 gate 表达)。
     ("virtual_pass_net", 0.0),
-    ("virtual_landing", 1750.0),         # 唯一每拍大奖:legal 门内任意落点可观底薪+中心核
-                                         # 梯度,量级名义 ~1750(probe 按 legal 率校准)
+    ("virtual_landing", 2200.0),         # 唯一每拍大奖:legal 门内任意落点可观底薪+中心核
+                                         # 梯度,量级名义 ~2200=1.5×质量层(probe 按 legal 率校准)
     ("virtual_spin", 0.0),               # 弧圈类动作自带旋转,minimize 先验打架动作身份;
                                          # 遥测保留;落点预测本就旋转感知(RK4 含 Magnus)
 )
