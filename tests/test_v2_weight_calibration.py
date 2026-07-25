@@ -39,8 +39,8 @@ def _nominal(**over):
 def test_nominal_inputs_reproduce_the_blueprint_table():
     out = calibrate(_nominal())
     fr = out["frozen"]
-    # v2.2:landing 独扛,上台加码 1.5×。w_land = 1.5×8.1×100/(0.7×0.8) ≈ 2169.6;pass_net 冻结 0
-    assert fr["virtual_landing_weight"] == pytest.approx(2169.6, abs=0.3)
+    # v2.2 终裁:上台 PSE≈20(2.5×)。w_land = 2.5×8.1×100/(0.7×0.8) ≈ 3616.1;pass_net 冻结 0
+    assert fr["virtual_landing_weight"] == pytest.approx(3616.1, abs=0.3)
     assert fr["virtual_pass_net_weight"] == 0.0
     # 被删代理冻结为 0
     assert fr["racket_strike_success_weight"] == 0.0
@@ -96,7 +96,7 @@ def test_one_shot_prize_lives_only_in_the_table_group():
     # v2.1:唯一的每拍大额结算在上台组(物理组合),代理 one-shot 恒 0
     out = calibrate(_nominal())
     assert out["frozen"]["strike_capture_bonus_weight"] == 0.0
-    assert out["accounting"]["per_swing_table_prize"] == pytest.approx(1735.7, abs=1.0)
+    assert out["accounting"]["per_swing_table_prize"] == pytest.approx(2892.9, abs=1.0)
 
 
 def test_higher_measured_imitation_scales_everything_proportionally():

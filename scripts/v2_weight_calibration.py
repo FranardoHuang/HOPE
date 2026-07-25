@@ -42,7 +42,7 @@ RHO_I_MIN = 0.4     # 罚项预算用的早期模仿达成度下限
 QUALITY_SPLIT = (60.0, 45.0, 35.0)   # pos:vel:normal 名义比例(W 偏位;只用比例,绝对值重算)
 # v2.1(Franco 07-25 裁定):strike_success/capture_bonus 两个人造 AND 代理删除;
 # 上台组(落点=物理正确的联合成绩单)扛"击中+打好"层,目标 PSE = 质量层 x 比例。
-TABLE_OVER_QUALITY = 1.5             # 上台层 vs 质量层的 PSE 比例(Franco 07-25:上台加码,质量 60/45/35 一分不动)
+TABLE_OVER_QUALITY = 2.5             # 上台层 PSE 目标 ≈20(Franco 07-26 终裁:2.5×质量层 8.1≈20.25;质量 60/45/35 一分不动)
 # v2.2(Franco 07-25):上台组只留 landing——"过网+落台"是先决条件(gate)非独立项;
 # pass_net 塑形下岗,legal 门内 base_frac 底薪 + 中心核梯度(hope_rewards legal_base 模式)。
 
