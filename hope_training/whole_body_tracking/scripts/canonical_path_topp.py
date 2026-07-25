@@ -1410,16 +1410,19 @@ def _insert_exact_grid_node(
 def _greatest_nondecreasing_minorant_until(
     speed_sq: np.ndarray,
     marker_index: int,
+    from_index: int = 0,
 ) -> np.ndarray:
-    """Project a speed-squared profile to no scalar braking before a node.
+    """Project a speed-squared profile to no scalar braking on a node range.
 
-    For ``i <= marker_index`` the result is the suffix minimum
+    For ``from_index <= i <= marker_index`` the result is the suffix minimum
 
     ``result[i] = min(speed_sq[i:marker_index + 1])``.
 
     This is the pointwise greatest nondecreasing sequence dominated by the
-    ordinary profile on that prefix.  The marker node and every later node are
-    unchanged.
+    ordinary profile on ``[from_index, marker_index]``.  Every node strictly
+    before ``from_index`` is left free (deceleration allowed), and the marker
+    node and every later node are unchanged.  ``from_index=0`` reproduces the
+    original projection from the path start exactly.
     """
 
     profile = np.asarray(speed_sq, dtype=np.float64)
@@ -1432,10 +1435,19 @@ def _greatest_nondecreasing_minorant_until(
     marker_index = int(marker_index)
     if marker_index < 0 or marker_index >= len(profile):
         raise RetimeError("marker_index lies outside speed_sq")
+    if not isinstance(from_index, (int, np.integer)):
+        raise RetimeError("from_index must be an integer")
+    from_index = int(from_index)
+    if from_index < 0 or from_index > marker_index:
+        raise RetimeError(
+            "from_index must satisfy 0 <= from_index <= marker_index"
+        )
 
     projected = profile.copy()
-    prefix_reversed = projected[: marker_index + 1][::-1]
-    projected[: marker_index + 1] = np.minimum.accumulate(prefix_reversed)[::-1]
+    window_reversed = projected[from_index : marker_index + 1][::-1]
+    projected[from_index : marker_index + 1] = np.minimum.accumulate(
+        window_reversed
+    )[::-1]
     return projected
 
 
@@ -2512,6 +2524,7 @@ def _retime_path_impl(
     markers: Optional[Mapping[str, float]] = None,
     marker_min_duration_s: Optional[Mapping[Tuple[str, str], float]] = None,
     nonnegative_acceleration_until_marker: Optional[str] = None,
+    nonnegative_acceleration_from_marker: Optional[str] = None,
     uniform_scalar_path_acceleration_until_marker: Optional[str] = None,
     grid_subdivisions: int = 12,
     max_sweeps: int = 100,
@@ -2581,6 +2594,19 @@ def _retime_path_impl(
     marker under this conservative discrete kinematic model.  It does *not*
     guarantee strictly positive or uniform acceleration, increasing racket
     speed, uniform actuator torque, or torque/contact feasibility.
+
+    ``nonnegative_acceleration_from_marker`` optionally scopes the no-brake
+    enforcement so it begins at a second, earlier marker rather than at the path
+    start.  ``None`` keeps the fully backward-compatible from-path-start
+    behavior.  When set, every enforcement layer -- the continuous prefix
+    projection/check, the 50 Hz discrete per-interval check (including the
+    interval straddling the until marker), the control-guard recursion, and the
+    exact-pointwise probe path -- applies only on ``[from_marker, until_marker]``;
+    the profile before ``from_marker`` is left free so a normal rest-to-rest
+    approach may decelerate through a backswing reversal.  It requires
+    ``nonnegative_acceleration_until_marker`` to be set, and the named marker
+    must exist and strictly precede the until marker; otherwise the retimer
+    fails closed.
 
     ``uniform_scalar_path_acceleration_until_marker`` is an explicit-progress
     comparator only.  It constructs a strictly positive constant scalar
@@ -2840,6 +2866,7 @@ def _retime_path_impl(
             "nonnegative and uniform scalar-prefix policies are mutually exclusive"
         )
     acceleration_marker_name: Optional[str] = None
+    acceleration_from_marker_name: Optional[str] = None
     acceleration_policy_kind: Optional[str] = None
     if nonnegative_acceleration_until_marker is not None:
         if (
@@ -2857,6 +2884,36 @@ def _retime_path_impl(
             )
         acceleration_marker_name = nonnegative_acceleration_until_marker
         acceleration_policy_kind = "nonnegative_scalar_prefix"
+        if nonnegative_acceleration_from_marker is not None:
+            if (
+                not isinstance(nonnegative_acceleration_from_marker, str)
+                or not nonnegative_acceleration_from_marker
+            ):
+                raise RetimeError(
+                    "nonnegative_acceleration_from_marker must be a non-empty "
+                    "marker name or None"
+                )
+            if nonnegative_acceleration_from_marker not in marker_positions:
+                raise RetimeError(
+                    "nonnegative_acceleration_from_marker references an unknown "
+                    f"marker: {nonnegative_acceleration_from_marker!r}"
+                )
+            if (
+                marker_positions[nonnegative_acceleration_from_marker]
+                >= marker_positions[nonnegative_acceleration_until_marker]
+            ):
+                raise RetimeError(
+                    "nonnegative_acceleration_from_marker "
+                    f"{nonnegative_acceleration_from_marker!r} must strictly "
+                    "precede nonnegative_acceleration_until_marker "
+                    f"{nonnegative_acceleration_until_marker!r}"
+                )
+            acceleration_from_marker_name = nonnegative_acceleration_from_marker
+    elif nonnegative_acceleration_from_marker is not None:
+        raise RetimeError(
+            "nonnegative_acceleration_from_marker requires "
+            "nonnegative_acceleration_until_marker to be set"
+        )
     if uniform_scalar_path_acceleration_until_marker is not None:
         if (
             not isinstance(
@@ -3131,10 +3188,25 @@ def _retime_path_impl(
             )
     acceleration_marker_index: Optional[int] = None
     acceleration_marker_inserted = False
+    acceleration_from_index: Optional[int] = None
+    acceleration_from_inserted = False
     acceleration_guard_index: Optional[int] = None
     acceleration_guard_inserted = False
     acceleration_guard_position: Optional[float] = None
     if acceleration_marker_name is not None:
+        # Insert the from-marker node first.  The until marker and guard both
+        # lie at strictly greater path positions, so inserting them afterward
+        # never shifts the recorded from-index while every enforcement layer
+        # below reads exact, immutable grid indices.
+        if acceleration_from_marker_name is not None:
+            (
+                path_grid,
+                acceleration_from_index,
+                acceleration_from_inserted,
+            ) = _insert_exact_grid_node(
+                path_grid,
+                marker_positions[acceleration_from_marker_name],
+            )
         path_grid, acceleration_marker_index, acceleration_marker_inserted = (
             _insert_exact_grid_node(
                 path_grid,
@@ -3151,6 +3223,11 @@ def _retime_path_impl(
             acceleration_guard_index,
             acceleration_guard_inserted,
         ) = _insert_exact_grid_node(path_grid, acceleration_guard_position)
+    guard_prefix_start_index = (
+        int(acceleration_from_index)
+        if acceleration_from_index is not None
+        else 0
+    )
     path_mid = 0.5 * (path_grid[:-1] + path_grid[1:])
     q_grid_node, q_s_node, q_ss_node_selected = evaluate_path(path_grid)
     if weighted_arc_exact:
@@ -3238,6 +3315,7 @@ def _retime_path_impl(
             speed_sq = _greatest_nondecreasing_minorant_until(
                 ordinary_speed_sq,
                 acceleration_guard_index,
+                from_index=guard_prefix_start_index,
             )
             policy_name = "nonnegative-acceleration projection"
         elif acceleration_policy_kind == "uniform_scalar_prefix_comparator":
@@ -3304,7 +3382,9 @@ def _retime_path_impl(
         )
     time_knots, segment_accel = _profile_time_knots(path_grid, speed_sq)
     if acceleration_guard_index is not None:
-        prefix_accel = segment_accel[:acceleration_guard_index]
+        prefix_accel = segment_accel[
+            guard_prefix_start_index:acceleration_guard_index
+        ]
         if np.any(prefix_accel < -1e-12):
             raise RetimeError(
                 "scalar-prefix policy left a negative scalar "
@@ -3521,6 +3601,11 @@ def _retime_path_impl(
         acceleration_marker_time = (
             marker_time_base[acceleration_marker_name] * time_scale
         )
+        from_marker_time = (
+            marker_time_base[acceleration_from_marker_name] * time_scale
+            if acceleration_from_marker_name is not None
+            else None
+        )
         explicit_control_guard = path_progress is not None
         if explicit_control_guard:
             guard_boundary_frame = control_tick_at_or_after(
@@ -3584,6 +3669,12 @@ def _retime_path_impl(
                         == "nonnegative_scalar_prefix"
                         else None
                     ),
+                    nonnegative_acceleration_from_marker=(
+                        acceleration_from_marker_name
+                        if acceleration_policy_kind
+                        == "nonnegative_scalar_prefix"
+                        else None
+                    ),
                     uniform_scalar_path_acceleration_until_marker=(
                         acceleration_marker_name
                         if acceleration_policy_kind
@@ -3605,22 +3696,43 @@ def _retime_path_impl(
             output_intervals_checked = (
                 output_time[:-1] < acceleration_marker_time - 1e-12
             )
-            output_interval_policy = (
-                "every_interval_starting_before_exact_marker_must_be_"
-                "nonnegative_including_the_straddling_interval"
-            )
+            if from_marker_time is not None:
+                # Free the approach before the from-marker: only intervals
+                # whose start is at or after it are held to no-braking.  The
+                # interval straddling the from-marker starts earlier and is
+                # therefore excluded, while the until-straddling interval
+                # (start before the marker) remains checked.
+                output_intervals_checked = output_intervals_checked & (
+                    output_time[:-1] >= from_marker_time - 1e-12
+                )
+                output_interval_policy = (
+                    "every_interval_starting_at_or_after_from_marker_and_"
+                    "before_exact_marker_must_be_nonnegative_including_the_"
+                    "until_straddling_interval"
+                )
+            else:
+                output_interval_policy = (
+                    "every_interval_starting_before_exact_marker_must_be_"
+                    "nonnegative_including_the_straddling_interval"
+                )
         else:
             # Preserve the pre-existing dense-sample-index API exactly.
             output_intervals_checked = (
                 output_time[1:] <= acceleration_marker_time + 1e-12
             )
+            if from_marker_time is not None:
+                output_intervals_checked = output_intervals_checked & (
+                    output_time[:-1] >= from_marker_time - 1e-12
+                )
             guard_boundary_frame = None
             required_guard_position = float(
                 marker_positions[acceleration_marker_name]
             )
             current_guard_position = required_guard_position
             output_interval_policy = (
-                "legacy_only_intervals_ending_at_or_before_exact_marker"
+                "legacy_scoped_intervals_from_from_marker_to_exact_marker"
+                if from_marker_time is not None
+                else "legacy_only_intervals_ending_at_or_before_exact_marker"
             )
         output_acceleration_min = (
             float(
@@ -3641,7 +3753,9 @@ def _retime_path_impl(
                 "50 Hz validation found negative scalar acceleration before "
                 "or in a control interval overlapping the selected marker"
             )
-        prefix_accel = segment_accel[: int(acceleration_guard_index)]
+        prefix_accel = segment_accel[
+            guard_prefix_start_index : int(acceleration_guard_index)
+        ]
         output_acceleration_policy = {
             "enabled": True,
             "policy_kind": acceleration_policy_kind,
@@ -3658,6 +3772,41 @@ def _retime_path_impl(
                 path_grid[int(acceleration_marker_index)]
                 == marker_positions[acceleration_marker_name]
             ),
+            "nonnegative_range": (
+                "from_marker_to_marker"
+                if acceleration_from_marker_name is not None
+                else "path_start_to_marker"
+            ),
+            "from_marker": acceleration_from_marker_name,
+            "from_marker_source_index": (
+                float(
+                    marker_sample_positions[acceleration_from_marker_name]
+                )
+                if acceleration_from_marker_name is not None
+                else None
+            ),
+            "from_marker_path_progress": (
+                float(marker_positions[acceleration_from_marker_name])
+                if acceleration_from_marker_name is not None
+                else None
+            ),
+            "from_marker_grid_index": (
+                int(acceleration_from_index)
+                if acceleration_from_index is not None
+                else None
+            ),
+            "from_marker_was_inserted_into_grid": bool(
+                acceleration_from_inserted
+            ),
+            "grid_node_is_exact_from_marker": (
+                bool(
+                    path_grid[int(acceleration_from_index)]
+                    == marker_positions[acceleration_from_marker_name]
+                )
+                if acceleration_from_index is not None
+                else None
+            ),
+            "prefix_start_grid_index": int(guard_prefix_start_index),
             "control_guard_enabled": bool(explicit_control_guard),
             "control_guard_iteration": int(_control_guard_iteration),
             "control_guard_max_iterations": int(
@@ -4192,6 +4341,7 @@ def retime_path(
     markers: Optional[Mapping[str, float]] = None,
     marker_min_duration_s: Optional[Mapping[Tuple[str, str], float]] = None,
     nonnegative_acceleration_until_marker: Optional[str] = None,
+    nonnegative_acceleration_from_marker: Optional[str] = None,
     uniform_scalar_path_acceleration_until_marker: Optional[str] = None,
     grid_subdivisions: int = 12,
     max_sweeps: int = 100,
@@ -4226,6 +4376,9 @@ def retime_path(
         marker_min_duration_s=marker_min_duration_s,
         nonnegative_acceleration_until_marker=(
             nonnegative_acceleration_until_marker
+        ),
+        nonnegative_acceleration_from_marker=(
+            nonnegative_acceleration_from_marker
         ),
         uniform_scalar_path_acceleration_until_marker=(
             uniform_scalar_path_acceleration_until_marker

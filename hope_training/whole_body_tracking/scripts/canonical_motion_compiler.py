@@ -1177,6 +1177,9 @@ def _build_and_retime_exact(
             ("window_start", "window_end"): context.minimum_window_s
         },
         nonnegative_acceleration_until_marker="window_end",
+        nonnegative_acceleration_from_marker=(
+            "window_start" if context.exact_pointwise_caps else None
+        ),
         grid_subdivisions=context.grid_subdivisions,
         exact_pointwise_caps=context.exact_pointwise_caps,
         position_tolerance=_POSITION_TOLERANCE,

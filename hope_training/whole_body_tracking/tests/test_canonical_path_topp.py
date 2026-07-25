@@ -1077,6 +1077,166 @@ def test_nonnegative_policy_and_discrete_marker_duration_are_both_revalidated():
     assert max(result.report["max_ratio"].values()) <= 1.0 + 1e-6
 
 
+def _stroke_path(
+    samples: int = 41,
+    amplitude: float = 1.0,
+    sharpness: float = 0.015,
+    reversal: float = 0.62,
+) -> np.ndarray:
+    """A stroke-shaped 2-joint path.
+
+    Joint 0 advances monotonically; joint 1 traces a smooth, sharp near-zero
+    backswing reversal at ``reversal`` (a high-curvature notch).  A rest-to-rest
+    profile therefore swings out, decelerates hard into the reversal, then
+    accelerates back out through the later strike window.  The high curvature at
+    the notch is the sole scalar-speed bottleneck.
+    """
+
+    s = np.linspace(0.0, 1.0, samples)
+    return np.column_stack(
+        (s, amplitude * np.sqrt((s - reversal) ** 2 + sharpness ** 2))
+    )
+
+
+def _stroke_no_brake(nonnegative_acceleration_from_marker):
+    """Retime the stroke path with a high acceleration and binding velocity cap.
+
+    The reversal sits just before ``window_start``; the strike window is on the
+    accelerating recovery.  A generous acceleration limit keeps the reversal
+    notch narrow while the velocity limit binds on the straight approach, so the
+    from-path-start floor and the scoped floor differ dramatically.
+    """
+
+    path = _stroke_path()
+    samples = len(path)
+    markers = {
+        "window_start": 0.64 * (samples - 1),
+        "source_anchor": 0.70 * (samples - 1),
+        "window_end": 0.76 * (samples - 1),
+    }
+    return _MOD._retime_path_impl(
+        path,
+        np.full(2, 5.0),
+        np.full(2, 60.0),
+        position_lower_limits=np.full(2, -10.0),
+        position_upper_limits=np.full(2, 10.0),
+        path_progress=_arc_progress(path),
+        markers=markers,
+        nonnegative_acceleration_until_marker="window_end",
+        nonnegative_acceleration_from_marker=(
+            nonnegative_acceleration_from_marker
+        ),
+        grid_subdivisions=12,
+    )
+
+
+def test_from_scoped_no_brake_lifts_backswing_and_still_guards_window():
+    from_start = _stroke_no_brake(None)
+    scoped = _stroke_no_brake("window_start")
+
+    # (a) Scoping the no-brake floor to [window_start, window_end] frees the
+    # pre-window approach, so window_start is reached several-fold sooner than
+    # when the floor spans the backswing reversal from the path start.
+    from_start_arrival = from_start.markers["window_start"].time_s
+    scoped_arrival = scoped.markers["window_start"].time_s
+    assert scoped_arrival > 0.0
+    assert from_start_arrival > 3.0 * scoped_arrival
+
+    dt = 1.0 / 50.0
+    interval_start = np.arange(len(scoped.path_acceleration)) * dt
+    interval_end = interval_start + dt
+    ws_time = scoped.markers["window_start"].time_s
+    we_time = scoped.markers["window_end"].time_s
+
+    # (b) Inside [window_start, window_end] the scoped profile still has
+    # nonnegative discrete acceleration, including the interval straddling the
+    # exact window_end marker.
+    in_window = (interval_start >= ws_time - 1e-12) & (
+        interval_start < we_time - 1e-12
+    )
+    straddles_window_end = (interval_start < we_time - 1e-12) & (
+        interval_end > we_time + 1e-12
+    )
+    assert in_window.any()
+    assert straddles_window_end.any()
+    # The straddling interval is inside the checked set.
+    assert np.all(in_window[straddles_window_end])
+    assert np.min(scoped.path_acceleration[in_window]) >= -1e-9
+
+    # (c) The freed segment before window_start demonstrably decelerates
+    # (the backswing reversal), proving the constraint really lifted there.
+    free = interval_start < ws_time - 1e-12
+    assert free.any()
+    assert np.min(scoped.path_acceleration[free]) < 0.0
+    # Contrast: the from-path-start policy admits no braking anywhere before its
+    # marker, so that same reversal is floored out.
+    fs_start = np.arange(len(from_start.path_acceleration)) * dt
+    fs_before_end = fs_start < from_start.markers["window_end"].time_s - 1e-12
+    assert np.min(from_start.path_acceleration[fs_before_end]) >= -1e-9
+
+    # The receipt records the scoped range and the exact from-marker grid node.
+    policy = scoped.report["nonnegative_acceleration_until_marker"]
+    assert policy["from_marker"] == "window_start"
+    assert policy["nonnegative_range"] == "from_marker_to_marker"
+    assert policy["from_marker_grid_index"] == policy["prefix_start_grid_index"]
+    assert policy["grid_node_is_exact_from_marker"] is True
+    assert "until_straddling_interval" in policy["output_interval_policy"]
+    assert policy["prefix_scalar_acceleration_min_50hz"] >= -1e-9
+
+    # Default (from=None) keeps the original from-path-start receipt semantics.
+    baseline_policy = from_start.report[
+        "nonnegative_acceleration_until_marker"
+    ]
+    assert baseline_policy["from_marker"] is None
+    assert baseline_policy["nonnegative_range"] == "path_start_to_marker"
+    assert baseline_policy["prefix_start_grid_index"] == 0
+
+
+def test_from_scoped_no_brake_invalid_from_marker_fails_closed():
+    path = _stroke_path()
+    samples = len(path)
+    markers = {
+        "window_start": 0.64 * (samples - 1),
+        "window_end": 0.76 * (samples - 1),
+    }
+    base = dict(
+        position_lower_limits=np.full(2, -10.0),
+        position_upper_limits=np.full(2, 10.0),
+        path_progress=_arc_progress(path),
+        markers=markers,
+        grid_subdivisions=12,
+    )
+
+    def solve(until, from_marker):
+        return _MOD._retime_path_impl(
+            path,
+            np.full(2, 5.0),
+            np.full(2, 60.0),
+            nonnegative_acceleration_until_marker=until,
+            nonnegative_acceleration_from_marker=from_marker,
+            **base,
+        )
+
+    # Unknown from-marker.
+    with pytest.raises(RetimeError):
+        solve("window_end", "does_not_exist")
+    # from-marker at or after the until-marker.
+    with pytest.raises(RetimeError):
+        solve("window_start", "window_end")
+    with pytest.raises(RetimeError):
+        solve("window_end", "window_end")
+    # from-marker requested without an until-marker.
+    with pytest.raises(RetimeError):
+        solve(None, "window_start")
+
+    # Sanity: the valid scoped combination still solves and binds the range.
+    ok = solve("window_end", "window_start")
+    assert (
+        ok.report["nonnegative_acceleration_until_marker"]["from_marker"]
+        == "window_start"
+    )
+
+
 def test_uniform_scalar_prefix_matches_1d_recovery_bound_and_is_dominated():
     path = np.linspace(0.0, 1.0, 5)[:, None]
     common = dict(
