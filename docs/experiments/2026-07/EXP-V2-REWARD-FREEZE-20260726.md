@@ -48,12 +48,44 @@ stand_start_prob=1.0**(去掉挥拍中段 RSI 空降——BeyondMimic 有 RSI �
 | # | 臂 | 单变量 | 键 | 状态 |
 |---|---|---|---|---|
 | 1 | table_r12 | 上台比例 2.5×→1.2× | virtual_landing_weight=791.9 | **在跑**(GPU2,smoke 通过,checkout scale@6e8a9e6b;applied 双标记确认键压包) |
-| 2 | qual_x23 | 质量层 ×⅔ | racket_{pos,vel,norm}_weight=262.3/196.7/153.0 | 待槽 |
-| 3 | vsplit | pos:vel 互换(Σ不变) | 295.1/393.4/229.5 | 待槽 |
-| 4 | sigma_adapt | σ 静态→自适应 | adaptive_sigma[_normal]=true + std 0.2/1.0/0.3 | 待槽 |
-| 5 | base03 | landing 底薪 0.6→0.3 | virtual_landing_base_frac=0.3 | 待槽 |
+| 2 | face_rescue | 线性拍面引导 0→−0.08(正手死区逃生梯) | racket_face_guidance_weight=-0.08(theta_max=π 模板已有) | **插队至最前**(07-26:三臂正手 face 93–150° 零过网、反手正常;工具已证 [+1,−1] 符号无误 → 真死区,见 §0.11) |
+| 3 | qual_x23 | 质量层 ×⅔ | racket_{pos,vel,norm}_weight=262.3/196.7/153.0 | 待槽 |
+| 4 | vsplit | pos:vel 互换(Σ不变) | 295.1/393.4/229.5 | 待槽 |
+| 5 | sigma_static | σ 自适应→静态(**方向修正**:配方审计发现在跑基线仍带 adaptive_sigma=true,退役裁决尚未进模板;本臂删该键,验证 v2.3 静态默认) | 删 task.racket.adaptive_sigma=true | 待槽 |
+| 6 | base03 | landing 底薪 0.6→0.3 | virtual_landing_base_frac=0.3 | 待槽 |
+| 7 | delay2 | 感知延迟 0→2 步(40ms,Franco 裁决#1"延迟/白噪";白噪已在默认,延迟一直没开) | target_delay_steps=2(补偿模式键模板已有) | 候选,待 Franco 点头 |
+| 8 | death09 | 摔死罚 −1800→−900(defer0 vs r3 摔率 4× 差提示死亡定价是敏感轴) | death_penalty_weight=-900 | 候选,待 Franco 点头 |
+| 9 | ladder_flat | 收入阶梯斜率 1:3:7.5→1:2:4(阶梯要多陡才够) | quality/landing 同比重排(发射前用校准脚本出数) | 候选,待 Franco 点头 |
 
-判读轴与延付消融同一套(回合长/摔倒率/legal 率/落点质量/各组每步收入轨迹),外加各臂的"阶梯实测 PSE 是否仍单调"。
+判读轴与延付消融同一套(回合长/摔倒率/legal 率/落点质量/各组每步收入轨迹),外加各臂的"阶梯实测 PSE 是否仍单调"。所有队内臂继续用 r2 模板保单变量可比(known 缺口见 §0.10:无 push、落地冲击罚=0——全队一致,不影响臂间比较);v2.3 修正模板只给下一代(赢家确认跑 + pod2 新动作臂)。
+
+## 0.10 配方审计(07-26,Franco 触发:"随机推没开,是不是还漏了什么")
+
+对着 v2 蓝图逐键核对在跑三臂(defer0/treat_r3/table_r12)的真 argv(来源:引号完整的命令文件,非 ps),发现 5 处偏差:
+
+| # | 偏差 | 人话 | 处置 |
+|---|---|---|---|
+| 1 | `task.push`/`task.force_push` 整组缺失 | 训练全程没人推机器人,抗扰全靠球和自己摔——部署鲁棒性缺口 | 进 v2.3 模板(见下);在跑臂不重启 |
+| 2 | `foot_soft_landing` = 0 | 落地冲击罚(蓝图 §2.4 定 −0.003)既不在包里也不在 argv——包漏设 | **已修**:补进 `_REWARD_PACK_V2_KEYED`(marker 31→32,161 测试过);今后默认自带 |
+| 3 | `task.racket.adaptive_sigma=true` 滞留 | σ 退役裁决(改静态验收)只改了包不再"代置 true",但模板自己带的显式键还在——在跑基线其实是自适应 | 队列 sigma 臂方向修正(§0.9 #5);v2.3 模板删键 |
+| 4 | `target_delay_steps=0` | 裁决#1 要"延迟/白噪":白噪键在,感知延迟从来没开过 | 列 delay2 候选臂(§0.9 #7),待 Franco 裁 |
+| 5 | `racket_*_std` 三键冗余 | 与 cfg 默认逐字相同,纯噪音 | v2.3 模板删 |
+
+**为什么在跑三臂不重启**:三臂缺口逐字一致,臂间单变量比较(延付/上台比例)不受污染;重启烧掉 3×10+ GPU 时且答案不变。赢家出线后的确认跑改用 v2.3。
+
+**v2.3 修正模板**(下一代基线;pod2 新动作臂发射前必须采纳——隔壁 session 注意):
+- 基于 r2 模板,追加 push 双事件(合并抽签 CLI 未接线,B1 已知 TODO"后续波次接线";用双独立事件近似合并频率——每事件 interval [10,30]s,合成期望 ≈ 每 ~10s 一次、速度/力各半,IU 档位 vel ±0.35 m/s、力 68 N×0.3 s):
+  `++task.push.enable=true ++task.push.interval_range_s=[10.0,30.0] ++task.push.vel_xy_mps=0.35 ++task.push.ang_vel_radps=0.0 ++task.push.ang_axes=none ++task.force_push.enable=true ++task.force_push.interval_range_s=[10.0,30.0] ++task.force_push.force_n=68.0 ++task.force_push.duration_s=0.3`
+- 删 `task.racket.adaptive_sigma=true`(静态 σ = 默认);删 `racket_position_std/racket_velocity_std/racket_normal_std` 冗余键
+- `foot_soft_landing` 不用写——包默认已带 −0.003
+- delay2 若 Franco 点头则并入(否则保持 0)
+
+## 0.11 正手 face 150° 判读(07-26:"是不是正反标反了,其实是 30°?"——否)
+
+- **地面真值**:`suggest_face_sign.py` 打在 v4rg 两个 npz 的登记触球帧上——正手 cos(n,v)=+0.966(夹角 14.9°)→ 建议 **+1**;反手 cos=−0.912(155.8°)→ 建议 **−1**。与现配 `mount_normal_sign_per_clip=[1.0,-1.0]` 逐位一致,叉验通过。**符号没标反,150° 不是镜像出来的 30°。**
+- **真诊断:正手死区漂移**。三臂共同模式:反手 face 收敛正常、正手 93–150° 且随训练**上升**(r12:87°→101°)。机制:位置核(393)有梯度一路拉,face 核 σ=0.262 在 ~45° 外梯度归零、条件税 readiness 门(pos<9.5cm 等)不开也无梯度——正手 face 无人看管,被位置追逐带着漂;probe 谱系从不打正手,所以老收据从来测不到这条。
+- **解药**:线性 face 引导(`racket_face_guidance`,theta_max=π,全角域有斜率)= 当年为"反着的拍面"造的逃生梯,fresh 臂小额启用即可把死区兜住 → face_rescue 臂(§0.9 #2)。
+- **对隔壁 session 的警告**:canonical 新动作 fresh 臂大概率踩同一死区,建议同样带上小额线性 face 引导键。
 
 ## 1. 冻结表(scripts/v2_weight_calibration.py 输出,逐字)
 

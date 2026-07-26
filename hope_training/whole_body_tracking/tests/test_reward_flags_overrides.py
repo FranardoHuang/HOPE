@@ -205,6 +205,8 @@ def _make_env_cfg(anchor_pos_none=True):
         # 税型/收入型站正 + PACE 单条击球稳定(权重取真 cfg 的现役值,证明包真的改了它们)。
         foot_slip_sq=_Term(weight=-1.0, params={"command_name": "racket_target"}),
         foot_drag=_Term(weight=-0.5, params={"command_name": "racket_target"}),
+        # 真 cfg 默认 0(07-26 前包也不动它=科学臂静默跑丢);v2 包现在落 -0.003
+        foot_soft_landing=_Term(weight=0.0, params={"force_threshold_n": 300.0}),
         arm_overreach=_Term(weight=-0.5, params={"command_name": "racket_target"}),
         prestrike_waist_twist=_Term(weight=-1.0, params={"command_name": "racket_target"}),
         prestrike_upright=_Term(weight=-1.0, params={"command_name": "racket_target"}),
@@ -1768,6 +1770,8 @@ _PACK_V2_WEIGHTS = {
     "prestrike_waist_twist": 0.0,
     "foot_slip_sq": -0.1,
     "foot_drag": 0.0,
+    # 07-26 配方审计补漏:落地冲击罚此前既不在包里也不在臂 argv 里(=0 静默跑丢)
+    "foot_soft_landing": -0.003,
     "racket_position": 393.4,
     "racket_velocity": 295.1,
     "racket_normal": 229.5,
@@ -1960,7 +1964,7 @@ def test_reward_pack_v2_expands_every_blueprint_mutation_with_markers():
     assert env_cfg.commands.racket_target.adaptive_sigma is True
     # 每条包改动的 applied 标记都带 reward_pack=v2:1 总标记 + 10 键控注入 + 10 direct + 1 racket
     pack_markers = [m for m in applied if "reward_pack=v2" in m]
-    assert len(pack_markers) == 31  # 07-26:-sigma +stand/post_swing(净 +1)
+    assert len(pack_markers) == 32  # 07-26:-sigma +stand/post_swing +foot_soft_landing 补漏
     # 键控注入的项同时会有覆写层自己的标准记账(证明真走了现有翻译层)
     assert "rewards.hold_ready.weight=0.0" in applied
     assert "rewards.foot_slip_sq.weight=-0.1" in applied

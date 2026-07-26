@@ -2659,6 +2659,8 @@ _REWARD_PACK_V2_KEYED = (
     ("prestrike_waist_twist_weight", 0.0),  # 挥前拧腰税下岗
     ("foot_slip_sq_weight", -0.1),       # 触地脚蹭滑降到 mjlab 档位(v1 源码 -1.0)
     ("foot_drag_weight", 0.0),           # 拖脚税下岗(v1 源码 -0.5)
+    ("foot_soft_landing_weight", -0.003),  # 落地冲击罚(蓝图 §2.4 档位;07-26 配方审计补漏——
+                                           # 此前包漏设,三条在跑科学臂落地冲击罚=0)
     ("action_acc_weight", -0.05),        # 二阶平滑(mjlab 1/4 档;clamp 36.0 由 direct-params 落)
     # L3 击球三通道(redesign §3.5:名义值,probe 校准后冻结 prereg)。用户显式键照旧赢:
     # 现役波 yaml 里的 17/7/5 显式键继续生效,包不碰。
