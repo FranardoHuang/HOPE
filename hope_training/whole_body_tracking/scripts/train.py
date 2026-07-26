@@ -2518,6 +2518,8 @@ _REWARD_KEYS = (
     "virtual_landing_settle_delay_s",
     # scale 消融键(07-26 pod1 队列):臂级覆写上台大奖权重与底薪比例(显式键压过包值)。
     "virtual_landing_weight", "virtual_landing_base_frac",
+    # 摔死罚消融键(07-26 death09 臂;配方审计发现包 direct 写死 -1800 无 CLI 面)。
+    "death_penalty_weight",
 )
 
 # jiayi 的 YAML-null 删参修复(8ee2e82a,搬进 main 血统)。人话:task YAML 层层继承时,子任务
@@ -4639,6 +4641,20 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             )
             R.virtual_landing.params["settle_delay_s"] = _sds_f
             applied.append(f"rewards.virtual_landing.params.settle_delay_s={_sds_f}")
+        _dpw = _get(rw, "death_penalty_weight")
+        if _dpw is not None:
+            _dpw_f = float(_dpw)
+            # 摔死罚只许 <=0(0=消融关闭);包 direct 写 -1800 在前,用户键在此压包
+            _require(
+                math.isfinite(_dpw_f) and _dpw_f <= 0.0,
+                "rewards.death_penalty_weight (finite, <= 0)",
+            )
+            _require(
+                hasattr(R, "death_penalty") and R.death_penalty is not None,
+                "rewards.death_penalty (weight override)",
+            )
+            R.death_penalty.weight = _dpw_f
+            applied.append(f"rewards.death_penalty.weight={_dpw_f}")
         jt = _get(rw, "joint_torques_weight")
         if jt is not None:
             _require(hasattr(R, "joint_torques"), "rewards.joint_torques")

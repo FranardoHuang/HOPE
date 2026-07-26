@@ -1895,6 +1895,20 @@ def test_landing_scale_keys_translate_and_win_over_pack():
         _apply({"rewards": {"reward_pack": "v2", "virtual_landing_weight": -5.0}})
 
 
+def test_death_penalty_weight_key_translates_and_wins_over_pack():
+    # death09 消融键(07-26 审计:包 direct 写死 -1800 此前无 CLI 面):显式键压包;
+    # 只许 <=0(0=消融关闭),正数拒收
+    env_cfg, applied = _apply(
+        {"rewards": {"reward_pack": "v2", "death_penalty_weight": -900.0}}
+    )
+    assert env_cfg.rewards.death_penalty.weight == pytest.approx(-900.0)
+    assert any("death_penalty.weight=-900.0" in m for m in applied)
+    env_cfg, _ = _apply({"rewards": {"reward_pack": "v2", "death_penalty_weight": 0.0}})
+    assert env_cfg.rewards.death_penalty.weight == pytest.approx(0.0)
+    with pytest.raises(train_mod._OverrideError, match="death_penalty_weight"):
+        _apply({"rewards": {"reward_pack": "v2", "death_penalty_weight": 5.0}})
+
+
 def test_settle_delay_flag_translates_and_defaults_off():
     # 默认包 = 0(立发);显式 0.24 = 延付消融臂;负数/非法拒收
     env_cfg, applied = _apply(
