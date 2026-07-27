@@ -147,6 +147,21 @@ def test_identity_strings_must_be_trimmed_at_catalog_producer(field, value):
 
 
 @pytest.mark.parametrize(
+    "action_id",
+    (
+        "fore\u0000hand",
+        "fore\u200bhand",
+        "fore\u0301hand",
+    ),
+)
+def test_action_identity_rejects_control_format_and_non_nfc_text(action_id):
+    rows = _identity_rows(1)
+    rows[0]["action_id"] = action_id
+    with pytest.raises(ValueError):
+        ActionCatalog.build(rows)
+
+
+@pytest.mark.parametrize(
     "mutate",
     [
         lambda row: row.update({"unknown": 1}),

@@ -81,7 +81,7 @@ def _action(index):
         "position_half_extent_m": [0.25, 0.30, 0.15],
         "speed_delta_mps": 1.5,
         "face_cone_deg": 20.0,
-        "base_center_shift_xy_m": [-0.05, 0.0],
+        "station_center_shift_xy_m": [-0.05, 0.0],
         "base_half_extent_xy_m": [0.20, 0.15],
     }
 
@@ -407,3 +407,23 @@ def test_empty_duplicate_and_mismatched_action_banks_are_rejected(tmp_path):
     missing["actions"].pop()
     with pytest.raises(ValueError, match="same IDs and order"):
         M.load_task_first_manifest(_write(tmp_path, missing, name="missing.json"))
+
+
+@pytest.mark.parametrize(
+    "action_id",
+    (
+        "fore\u0000hand",
+        "fore\u200bhand",
+        "fore\u0301hand",
+    ),
+)
+def test_action_identity_rejects_control_format_and_non_nfc_text(
+    tmp_path, action_id
+):
+    document = _document()
+    document["action_order"][0] = action_id
+    document["actions"][0]["action_id"] = action_id
+    with pytest.raises(ValueError):
+        M.load_task_first_manifest(
+            _write(tmp_path, document, name="nonportable-action-id.json")
+        )

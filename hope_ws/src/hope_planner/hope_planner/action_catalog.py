@@ -16,6 +16,7 @@ from dataclasses import dataclass
 import hashlib
 import json
 import re
+import unicodedata
 from typing import Dict, Iterator, List, Mapping, Sequence, Tuple
 
 
@@ -62,6 +63,17 @@ def _require_exact_keys(
 def _require_string(value: object, *, name: str) -> str:
     if type(value) is not str or not value or value != value.strip():
         raise ValueError("{} must be a non-empty trimmed string".format(name))
+    if value != unicodedata.normalize("NFC", value):
+        raise ValueError("{} must use NFC Unicode normalization".format(name))
+    if any(
+        unicodedata.category(character) in ("Cc", "Cf", "Cs")
+        for character in value
+    ):
+        raise ValueError(
+            "{} must not contain control, format, or surrogate characters".format(
+                name
+            )
+        )
     return value
 
 

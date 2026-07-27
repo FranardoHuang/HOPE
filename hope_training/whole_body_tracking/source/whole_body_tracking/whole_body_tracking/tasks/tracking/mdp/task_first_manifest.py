@@ -25,6 +25,7 @@ import math
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 from typing import Dict, Mapping, Sequence, Tuple
+import unicodedata
 
 if __package__:
     from .task_first_curriculum import GateConfig
@@ -61,7 +62,7 @@ _ACTION_KEYS = frozenset(
         "position_half_extent_m",
         "speed_delta_mps",
         "face_cone_deg",
-        "base_center_shift_xy_m",
+        "station_center_shift_xy_m",
         "base_half_extent_xy_m",
     )
 )
@@ -111,6 +112,22 @@ def _require_string(
     if not allow_empty and (not value or value.strip() != value):
         raise ValueError(f"{name} must be a non-empty trimmed string")
     return value
+
+
+def _require_action_id(value: object, *, name: str) -> str:
+    """Validate a cross-language action identity, not free-form prose."""
+
+    result = _require_string(value, name=name)
+    if result != unicodedata.normalize("NFC", result):
+        raise ValueError(f"{name} must use NFC Unicode normalization")
+    if any(
+        unicodedata.category(character) in ("Cc", "Cf", "Cs")
+        for character in result
+    ):
+        raise ValueError(
+            f"{name} must not contain control, format, or surrogate characters"
+        )
+    return result
 
 
 def _require_int(
@@ -211,7 +228,7 @@ def derive_task_first_action_uid(
     motion bytes while retaining an old wire identity.
     """
 
-    action_id_value = _require_string(action_id, name="action_id")
+    action_id_value = _require_action_id(action_id, name="action_id")
     family_sign_value = _require_int(
         family_sign,
         name="family_sign",
@@ -266,7 +283,7 @@ class TaskFirstAction:
     position_half_extent_m: Tuple[float, float, float]
     speed_delta_mps: float
     face_cone_deg: float
-    base_center_shift_xy_m: Tuple[float, float]
+    station_center_shift_xy_m: Tuple[float, float]
     base_half_extent_xy_m: Tuple[float, float]
 
     @classmethod
@@ -287,7 +304,7 @@ class TaskFirstAction:
             raise ValueError("family_sign must be +1 or -1")
         if mount_normal_sign not in (-1, 1):
             raise ValueError("mount_normal_sign must be +1 or -1")
-        action_id = _require_string(row["action_id"], name="action_id")
+        action_id = _require_action_id(row["action_id"], name="action_id")
         action_uid = _require_int(
             row["action_uid"],
             name="action_uid",
@@ -337,9 +354,9 @@ class TaskFirstAction:
                 minimum=0.0,
                 maximum=90.0,
             ),
-            base_center_shift_xy_m=_require_vector(
-                row["base_center_shift_xy_m"],
-                name="base_center_shift_xy_m",
+            station_center_shift_xy_m=_require_vector(
+                row["station_center_shift_xy_m"],
+                name="station_center_shift_xy_m",
                 length=2,
             ),  # type: ignore[arg-type]
             base_half_extent_xy_m=_require_vector(
@@ -364,7 +381,7 @@ class TaskFirstAction:
             "position_half_extent_m": list(self.position_half_extent_m),
             "speed_delta_mps": self.speed_delta_mps,
             "face_cone_deg": self.face_cone_deg,
-            "base_center_shift_xy_m": list(self.base_center_shift_xy_m),
+            "station_center_shift_xy_m": list(self.station_center_shift_xy_m),
             "base_half_extent_xy_m": list(self.base_half_extent_xy_m),
         }
 
@@ -441,7 +458,7 @@ class TaskFirstManifest:
         ):
             raise ValueError("action_order must be an array")
         action_order = tuple(
-            _require_string(action_id, name=f"action_order[{index}]")
+            _require_action_id(action_id, name=f"action_order[{index}]")
             for index, action_id in enumerate(raw_order)
         )
         if not action_order:
