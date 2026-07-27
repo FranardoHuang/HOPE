@@ -4222,5 +4222,135 @@ def test_planner_revision_metrics_remain_full_env_after_eligible_set_shrinks():
         assert metric[reset_env_ids].shape[0] == len(reset_env_ids)
 
 
+@pytest.mark.parametrize("num_segments", [1, 5, 6, 93])
+def test_balanced_round_robin_sampler_is_exact_for_arbitrary_clip_counts(
+    num_segments,
+):
+    order = tuple(f"clip-{index}" for index in range(num_segments))
+    sampler = commands_mod._BalancedRoundRobinClipSampler(
+        num_segments, seed=20260727, clip_order=order, device="cpu"
+    )
+    cumulative = torch.zeros(num_segments, dtype=torch.long)
+    batches = (1, max(1, num_segments - 1), num_segments + 3, 2 * num_segments + 1)
+    for batch_size in batches:
+        sampled = sampler.sample(batch_size)
+        local = torch.bincount(sampled, minlength=num_segments)
+        cumulative += local
+        assert int(local.max() - local.min()) <= 1
+        assert int(cumulative.max() - cumulative.min()) <= 1
+
+
+def test_balanced_round_robin_is_deterministic_across_batching_and_seeded_shuffle():
+    order = tuple(f"clip-{index}" for index in range(93))
+    one_batch = commands_mod._BalancedRoundRobinClipSampler(
+        93, seed=17, clip_order=order, device="cpu"
+    )
+    split_batches = commands_mod._BalancedRoundRobinClipSampler(
+        93, seed=17, clip_order=order, device="cpu"
+    )
+    sizes = (5, 1, 97, 6, 181)
+    expected = one_batch.sample(sum(sizes))
+    actual = torch.cat([split_batches.sample(size) for size in sizes])
+    assert torch.equal(actual, expected)
+    assert not torch.equal(expected[:93], torch.arange(93))
+
+    repeated = commands_mod._BalancedRoundRobinClipSampler(
+        93, seed=17, clip_order=order, device="cpu"
+    )
+    other_seed = commands_mod._BalancedRoundRobinClipSampler(
+        93, seed=18, clip_order=order, device="cpu"
+    )
+    assert torch.equal(repeated.sample(200), expected[:200])
+    assert not torch.equal(other_seed.sample(93), expected[:93])
+
+
+def test_balanced_round_robin_state_round_trip_and_identity_checks():
+    order = tuple(f"clip-{index}" for index in range(6))
+    source = commands_mod._BalancedRoundRobinClipSampler(
+        6, seed=42, clip_order=order, device="cpu"
+    )
+    source.sample(17)
+    state = source.state_dict()
+
+    resumed = commands_mod._BalancedRoundRobinClipSampler(
+        6, seed=42, clip_order=order, device="cpu"
+    )
+    resumed.load_state_dict(state)
+    assert torch.equal(source.sample(250), resumed.sample(250))
+
+    wrong_count = commands_mod._BalancedRoundRobinClipSampler(
+        5, seed=42, clip_order=order[:5], device="cpu"
+    )
+    with pytest.raises(ValueError, match="num_segments"):
+        wrong_count.load_state_dict(state)
+    wrong_order = commands_mod._BalancedRoundRobinClipSampler(
+        6, seed=42, clip_order=tuple(reversed(order)), device="cpu"
+    )
+    with pytest.raises(ValueError, match="clip_order"):
+        wrong_order.load_state_dict(state)
+    wrong_seed = commands_mod._BalancedRoundRobinClipSampler(
+        6, seed=43, clip_order=order, device="cpu"
+    )
+    with pytest.raises(ValueError, match="seed"):
+        wrong_seed.load_state_dict(state)
+
+
+def test_motion_command_balanced_sampling_assigns_shuffled_env_ids_and_restores(clips):
+    motion_files = [clips[index % len(clips)] for index in range(6)]
+    cmd, _ = _make_motion_command(
+        motion_files,
+        num_envs=8,
+        balanced_clip_sampling=True,
+        balanced_clip_sampling_seed=123,
+    )
+    first_ids = torch.tensor([7, 2, 5, 0, 6])
+    first_expected = cmd._balanced_clip_sampler.permutation[: len(first_ids)].clone()
+    cmd._adaptive_sampling(first_ids)
+    assert torch.equal(cmd.clip_id[first_ids], first_expected)
+
+    state = cmd.balanced_clip_sampler_state_dict()
+    assert state["cursor"] == len(first_ids)
+    resumed, _ = _make_motion_command(
+        motion_files,
+        num_envs=8,
+        balanced_clip_sampling=True,
+        balanced_clip_sampling_seed=123,
+    )
+    resumed.load_balanced_clip_sampler_state_dict(state)
+    second_ids = torch.tensor([4, 1, 3])
+    cmd._adaptive_sampling(second_ids)
+    resumed._adaptive_sampling(second_ids)
+    assert torch.equal(cmd.clip_id[second_ids], resumed.clip_id[second_ids])
+    assert (
+        cmd.balanced_clip_sampler_state_dict()
+        == resumed.balanced_clip_sampler_state_dict()
+    )
+
+
+def test_motion_command_balanced_mode_does_not_consume_global_rng(clips):
+    cmd, _ = _make_motion_command(
+        [clips[0], clips[1]],
+        balanced_clip_sampling=True,
+        balanced_clip_sampling_seed=7,
+    )
+    torch.manual_seed(991)
+    expected_next = torch.rand(8)
+    torch.manual_seed(991)
+    cmd._adaptive_sampling(torch.arange(cmd.num_envs))
+    assert torch.equal(torch.rand(8), expected_next)
+
+
+def test_motion_command_default_keeps_legacy_torch_randint_path(clips):
+    cmd, _ = _make_motion_command([clips[0], clips[1]])
+    assert cmd.balanced_clip_sampler_state_dict() is None
+    torch.manual_seed(117)
+    expected = torch.randint(
+        0, cmd.motion.num_segments, (cmd.num_envs,), device=cmd.device
+    )
+    torch.manual_seed(117)
+    cmd._adaptive_sampling(torch.arange(cmd.num_envs))
+    assert torch.equal(cmd.clip_id, expected)
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))

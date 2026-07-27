@@ -441,6 +441,122 @@ def resolve_clip_family_is_forehand(clip_family_per_clip, num_segments: int) -> 
     return tuple(value == CLIP_FAMILY_FOREHAND for value in families)
 
 
+class _BalancedRoundRobinClipSampler:
+    """Deterministic, exactly balanced clip allocation without touching global RNG.
+
+    One seeded permutation defines a cyclic clip order. Every prefix of that
+    infinite cycle gives each clip either ``floor(k / N)`` or ``ceil(k / N)``
+    assignments, so the cumulative count spread is always at most one even
+    when callers use different batch sizes.
+    """
+
+    _STATE_SCHEMA_VERSION = 1
+
+    def __init__(
+        self,
+        num_segments: int,
+        seed: int,
+        clip_order: Sequence[str],
+        device,
+    ):
+        if type(num_segments) is not int or num_segments < 1:
+            raise ValueError(
+                "balanced clip sampler num_segments must be a positive integer, "
+                f"got {num_segments!r}"
+            )
+        if type(seed) is not int or not (0 <= seed < 2**63):
+            raise ValueError(
+                "balanced_clip_sampling_seed must be an integer in [0, 2**63)"
+            )
+        order = tuple(clip_order)
+        if len(order) != num_segments or any(
+            type(item) is not str for item in order
+        ):
+            raise ValueError(
+                "balanced clip sampler clip_order must contain one path string per segment"
+            )
+        generator = torch.Generator(device="cpu")
+        generator.manual_seed(seed)
+        self.num_segments = num_segments
+        self.seed = seed
+        self.clip_order = order
+        self.device = torch.device(device)
+        self.permutation = torch.randperm(
+            num_segments, generator=generator, dtype=torch.long
+        ).to(self.device)
+        self.cursor = 0
+
+    def sample(self, count: int) -> torch.Tensor:
+        if type(count) is not int or count < 0:
+            raise ValueError(
+                "balanced clip sample count must be a non-negative integer, "
+                f"got {count!r}"
+            )
+        if count == 0:
+            return torch.empty(0, dtype=torch.long, device=self.device)
+        positions = (
+            torch.arange(count, dtype=torch.long, device=self.device) + self.cursor
+        ) % self.num_segments
+        sampled = self.permutation[positions]
+        self.cursor = (self.cursor + count) % self.num_segments
+        return sampled
+
+    def state_dict(self) -> dict:
+        return {
+            "schema_version": self._STATE_SCHEMA_VERSION,
+            "num_segments": self.num_segments,
+            "seed": self.seed,
+            "clip_order": self.clip_order,
+            "permutation": tuple(
+                int(value) for value in self.permutation.cpu().tolist()
+            ),
+            "cursor": self.cursor,
+        }
+
+    def load_state_dict(self, state: dict):
+        if type(state) is not dict:
+            raise ValueError("balanced clip sampler state must be a dictionary")
+        if state.get("schema_version") != self._STATE_SCHEMA_VERSION:
+            raise ValueError(
+                "balanced clip sampler state has an unsupported schema_version"
+            )
+        if state.get("num_segments") != self.num_segments:
+            raise ValueError(
+                "balanced clip sampler state num_segments does not match the loaded motion"
+            )
+        if state.get("seed") != self.seed:
+            raise ValueError(
+                "balanced clip sampler state seed does not match the configured seed"
+            )
+        if tuple(state.get("clip_order", ())) != self.clip_order:
+            raise ValueError(
+                "balanced clip sampler state clip_order does not match the loaded motion order"
+            )
+        permutation = state.get("permutation")
+        if type(permutation) not in (tuple, list):
+            raise ValueError(
+                "balanced clip sampler state permutation must be an ordered sequence"
+            )
+        if (
+            any(type(value) is not int for value in permutation)
+            or sorted(permutation) != list(range(self.num_segments))
+        ):
+            raise ValueError(
+                "balanced clip sampler state permutation is not a bijection of clip ids"
+            )
+        cursor = state.get("cursor")
+        if type(cursor) is not int or not (0 <= cursor < self.num_segments):
+            raise ValueError(
+                "balanced clip sampler state cursor must be an integer inside the permutation"
+            )
+        # Restore saved bytes instead of regenerating, so exact resume survives
+        # a future torch release changing randperm internals.
+        self.permutation = torch.tensor(
+            permutation, dtype=torch.long, device=self.device
+        )
+        self.cursor = cursor
+
+
 class MotionCommand(CommandTerm):
     cfg: MotionCommandCfg
 
@@ -669,6 +785,24 @@ class MotionCommand(CommandTerm):
         # (swing type) the env is currently imitating.
         self._multiseg = self.motion.num_segments > 1
         self.clip_id = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        balanced_clip_sampling = getattr(self.cfg, "balanced_clip_sampling", False)
+        if type(balanced_clip_sampling) is not bool:
+            raise ValueError("balanced_clip_sampling must be an exact boolean")
+        self._balanced_clip_sampler: _BalancedRoundRobinClipSampler | None = None
+        if balanced_clip_sampling:
+            self._balanced_clip_sampler = _BalancedRoundRobinClipSampler(
+                num_segments=int(self.motion.num_segments),
+                seed=getattr(self.cfg, "balanced_clip_sampling_seed", 0),
+                clip_order=self._motion_files,
+                device=self.device,
+            )
+            print(
+                "[MotionCommand] balanced_clip_sampling ACTIVE: "
+                f"clips={self.motion.num_segments} "
+                f"seed={self._balanced_clip_sampler.seed} "
+                "(seeded round-robin clip allocation; exact count spread <= 1)",
+                flush=True,
+            )
         # 每 clip 的 forehand/backhand 家族表(spdmix v2 硬绑定一)。显式配置在这里整表校验
         # (boot fail-loud:长度==clip 数、值合法、正反手至少各一)并落成张量;None(默认,现役
         # 所有在跑臂)= 不建表、不打印、行为逐字节不变——查表方(clip_family_is_forehand)在第一次
@@ -2094,7 +2228,10 @@ class MotionCommand(CommandTerm):
             # curriculum is single-clip BeyondMimic machinery and is bypassed here.
             n = len(env_ids)
             if n > 0:
-                new_clip = torch.randint(0, self.motion.num_segments, (n,), device=self.device)
+                if self._balanced_clip_sampler is not None:
+                    new_clip = self._balanced_clip_sampler.sample(n)
+                else:
+                    new_clip = torch.randint(0, self.motion.num_segments, (n,), device=self.device)
                 self.clip_id[env_ids] = new_clip
                 # R-c(i) rsi_skip_settle_frames: enter every swing N frames past the clip start —
                 # the v5 clips carry a 3-4 frame IK cold-start transient at frame 0 (7.4-15.9 rad/s
@@ -2179,6 +2316,27 @@ class MotionCommand(CommandTerm):
         self.metrics["sampling_entropy"][:] = H_norm
         self.metrics["sampling_top1_prob"][:] = pmax
         self.metrics["sampling_top1_bin"][:] = imax.float() / self.bin_count
+
+    def balanced_clip_sampler_state_dict(self) -> dict | None:
+        """Return exact-resume state for the optional balanced clip sampler."""
+        if self._balanced_clip_sampler is None:
+            return None
+        return self._balanced_clip_sampler.state_dict()
+
+    def load_balanced_clip_sampler_state_dict(self, state: dict | None):
+        """Restore balanced clip allocation, rejecting incompatible clip identity/order."""
+        if self._balanced_clip_sampler is None:
+            if state is not None:
+                raise ValueError(
+                    "checkpoint contains balanced clip sampler state but "
+                    "balanced_clip_sampling is disabled"
+                )
+            return
+        if state is None:
+            raise ValueError(
+                "balanced_clip_sampling is enabled but checkpoint sampler state is missing"
+            )
+        self._balanced_clip_sampler.load_state_dict(state)
 
     def _capture_post_swing_states(self, env_ids: torch.Tensor):
         """A8: snapshot end-of-swing robot states (wrap envs only) into the ring buffer.
@@ -3272,6 +3430,13 @@ class MotionCommandCfg(CommandTermCfg):
     # Per-step per-env probability of an operator-style mid-swing clip switch (deploy parity —
     # see the venue-falls note in _update_command). 0.002 ~ one switch per ~3-4 swings. Default off.
     clip_switch_prob: float = 0.0
+    # Deterministic exactly balanced multi-clip allocation. OFF keeps the historical
+    # torch.randint call and global-RNG consumption byte-identical. ON cycles through one
+    # locally seeded permutation, so across any prefix (and across differently sized resample
+    # calls) every clip's cumulative assignment count differs by at most one. The cursor,
+    # permutation and resolved clip order are exposed by MotionCommand's explicit state hooks.
+    balanced_clip_sampling: bool = False
+    balanced_clip_sampling_seed: int = 0
     # T1 post-strike event timing.  Disabled is the byte-identical current scheduler.  The enabled
     # path requires a materialized immutable schedule whose exact UTF-8 JSON bytes match the
     # configured SHA-256; rows are assigned deterministically by env id and never repeat inside an
