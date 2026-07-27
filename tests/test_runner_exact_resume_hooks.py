@@ -1,6 +1,8 @@
 from __future__ import annotations
 
+import copy
 import importlib.util
+import io
 import random
 import sys
 import types
@@ -55,6 +57,11 @@ def _load_runner_module():
 
         def load(self, _path, load_optimizer=True, **_kwargs):
             del load_optimizer
+            self._base_load_source = _path
+            if getattr(self, "_base_reloads_checkpoint", False):
+                self._base_reloaded_checkpoint = torch.load(
+                    _path, map_location="cpu", weights_only=False
+                )
             self.current_learning_iteration = self._base_load_iteration
             self._test_events.append("base_load")
             return self._base_infos
@@ -332,6 +339,16 @@ def test_task_first_constructor_rejects_legacy_term_before_first_rollout(runner_
         runner_module.MotionOnPolicyRunner(env, {})
 
 
+def test_required_exact_resume_constructor_rejects_evaluation_path(runner_module):
+    with pytest.raises(ValueError, match="requires log_dir"):
+        runner_module.MotionOnPolicyRunner(
+            _Env(),
+            {},
+            log_dir=None,
+            require_exact_resume_state=True,
+        )
+
+
 def test_schema2_legacy_attribute_scan_remains_compatible(runner_module):
     class LegacyTerm:
         def __init__(self):
@@ -480,7 +497,62 @@ def _configure_load_runner(runner_module, events):
     runner.tot_time = 0.0
     runner.num_steps_per_env = 24
     runner.alg = SimpleNamespace(schedule="fixed", learning_rate=1e-3)
+    runner.training_contract_schema_version = 1
+    runner.training_contract_sha256 = "a" * 64
+    runner.training_contract_lineage_exact = True
+    runner._checkpoint_byte_snapshot = lambda _path: io.BytesIO(b"checkpoint")
     return runner
+
+
+def _complete_schema3_resume_state(*, next_iteration=5, environment_state=None):
+    if environment_state is None:
+        environment_state = {
+            "schema_version": 3,
+            "common_step_counter": 0,
+            "active_term_names": [],
+            "command_terms": {},
+        }
+    return {
+        "schema_version": 3,
+        "next_learning_iteration": next_iteration,
+        "tot_timesteps": 88,
+        "tot_time": 1.5,
+        "algorithm_learning_rate": 1.0e-3,
+        "python_random_state": random.getstate(),
+        "numpy_random_state": np.random.get_state(),
+        "torch_random_state": torch.get_rng_state(),
+        "torch_cuda_random_states": [],
+        "torch_cuda_device_count": 0,
+        "environment_resume_state": environment_state,
+    }
+
+
+def _install_fresh_adam_and_build_resumable_state(runner, *, amsgrad=False):
+    live_parameter = torch.nn.Parameter(torch.tensor([0.25, -0.5]))
+    runner.alg.optimizer = torch.optim.Adam(
+        [live_parameter], lr=1.0e-3, amsgrad=amsgrad
+    )
+
+    donor_parameter = torch.nn.Parameter(torch.tensor([0.25, -0.5]))
+    donor = torch.optim.Adam(
+        [donor_parameter], lr=1.0e-3, amsgrad=amsgrad
+    )
+    donor_parameter.square().sum().backward()
+    donor.step()
+    return donor.state_dict()
+
+
+def _complete_checkpoint(exact_state, optimizer_state, *, iteration=4):
+    return {
+        "iter": iteration,
+        "optimizer_state_dict": optimizer_state,
+        "infos": {
+            "hope_exact_resume_state": exact_state,
+            "schema": 1,
+            "sha": "a" * 64,
+            "lineage": 1,
+        },
+    }
 
 
 def test_load_restores_exact_rng_after_command_state_and_before_reset(
@@ -488,24 +560,15 @@ def test_load_restores_exact_rng_after_command_state_and_before_reset(
 ):
     events = []
     runner = _configure_load_runner(runner_module, events)
-    exact_state = {
-        "schema_version": 3,
-        "next_learning_iteration": 5,
-        "tot_timesteps": 88,
-        "tot_time": 1.5,
-        "environment_resume_state": {
-            "schema_version": 3,
-            "common_step_counter": 0,
-            "active_term_names": [],
-            "command_terms": {},
-        },
-    }
+    runner.require_exact_resume_state = True
+    optimizer_state = _install_fresh_adam_and_build_resumable_state(runner)
+    exact_state = _complete_schema3_resume_state()
     monkeypatch.setattr(
         runner_module.torch,
         "load",
-        lambda *_args, **_kwargs: {
-            "infos": {"hope_exact_resume_state": exact_state}
-        },
+        lambda *_args, **_kwargs: _complete_checkpoint(
+            exact_state, optimizer_state
+        ),
     )
     runner._restore_environment_resume_state = (
         lambda _state: events.append("command_state") or (0, "checkpoint")
@@ -515,6 +578,235 @@ def test_load_restores_exact_rng_after_command_state_and_before_reset(
     assert runner.load("checkpoint.pt") == {"base": "infos"}
     assert events == ["base_load", "command_state", "rng", "reset"]
     assert runner.current_learning_iteration == 5
+
+
+def test_required_exact_resume_rejects_actor_only_and_optimizerless_checkpoints(
+    runner_module, monkeypatch
+):
+    exact_state = _complete_schema3_resume_state()
+    for corruption, load_optimizer in (
+        ("none", False),
+        ("missing", True),
+        ("empty_state", True),
+        ("missing_params", True),
+        ("non_dict_group", True),
+        ("nan_lr", True),
+        ("bad_betas", True),
+        ("fractional_step", True),
+        ("negative_second_moment", True),
+        ("amsgrad_max_below_second_moment", True),
+    ):
+        events = []
+        runner = _configure_load_runner(runner_module, events)
+        runner.require_exact_resume_state = True
+        optimizer_state = _install_fresh_adam_and_build_resumable_state(
+            runner, amsgrad=corruption == "amsgrad_max_below_second_moment"
+        )
+        checkpoint = _complete_checkpoint(exact_state, optimizer_state)
+        if corruption == "missing":
+            checkpoint.pop("optimizer_state_dict")
+        elif corruption == "empty_state":
+            checkpoint["optimizer_state_dict"] = copy.deepcopy(optimizer_state)
+            checkpoint["optimizer_state_dict"]["state"] = {}
+        elif corruption == "missing_params":
+            checkpoint["optimizer_state_dict"] = copy.deepcopy(optimizer_state)
+            checkpoint["optimizer_state_dict"]["param_groups"][0].pop("params")
+        elif corruption == "non_dict_group":
+            checkpoint["optimizer_state_dict"] = copy.deepcopy(optimizer_state)
+            checkpoint["optimizer_state_dict"]["param_groups"] = [42]
+        elif corruption == "nan_lr":
+            checkpoint["optimizer_state_dict"] = copy.deepcopy(optimizer_state)
+            checkpoint["optimizer_state_dict"]["param_groups"][0]["lr"] = float("nan")
+        elif corruption == "bad_betas":
+            checkpoint["optimizer_state_dict"] = copy.deepcopy(optimizer_state)
+            checkpoint["optimizer_state_dict"]["param_groups"][0]["betas"] = "bad"
+        elif corruption == "fractional_step":
+            checkpoint["optimizer_state_dict"] = copy.deepcopy(optimizer_state)
+            entry = next(iter(checkpoint["optimizer_state_dict"]["state"].values()))
+            entry["step"] = torch.tensor(1.5)
+        elif corruption == "negative_second_moment":
+            checkpoint["optimizer_state_dict"] = copy.deepcopy(optimizer_state)
+            entry = next(iter(checkpoint["optimizer_state_dict"]["state"].values()))
+            entry["exp_avg_sq"].fill_(-1.0)
+        elif corruption == "amsgrad_max_below_second_moment":
+            checkpoint["optimizer_state_dict"] = copy.deepcopy(optimizer_state)
+            entry = next(iter(checkpoint["optimizer_state_dict"]["state"].values()))
+            entry["max_exp_avg_sq"].zero_()
+        monkeypatch.setattr(
+            runner_module.torch,
+            "load",
+            lambda *_args, _checkpoint=checkpoint, **_kwargs: _checkpoint,
+        )
+
+        with pytest.raises(RuntimeError, match="optimizer|actor-only"):
+            runner.load("checkpoint.pt", load_optimizer=load_optimizer)
+        # Strict envelope validation happens before policy/optimizer bytes are applied.
+        assert events == []
+
+
+def test_required_exact_resume_rejects_missing_legacy_incomplete_and_stale_state(
+    runner_module, monkeypatch
+):
+    schema2 = {
+        "schema_version": 2,
+        "next_learning_iteration": 5,
+        "environment_resume_state": {
+            "schema_version": 2,
+            "common_step_counter": 120,
+            "command_terms": {},
+        },
+    }
+    incomplete = _complete_schema3_resume_state()
+    incomplete.pop("torch_random_state")
+    invalid_lr = _complete_schema3_resume_state()
+    invalid_lr["algorithm_learning_rate"] = float("nan")
+    invalid_rng = _complete_schema3_resume_state()
+    invalid_rng["torch_random_state"] = torch.zeros(1, dtype=torch.uint8)
+    invalid_common_step_counter = _complete_schema3_resume_state()
+    invalid_common_step_counter["environment_resume_state"][
+        "common_step_counter"
+    ] = "-7"
+    cases = (
+        (None, "requires hope_exact_resume_state schema 3"),
+        (schema2, "requires hope_exact_resume_state schema 3"),
+        (incomplete, "schema-3 state is incomplete"),
+        (invalid_lr, "invalid algorithm_learning_rate"),
+        (invalid_rng, "shape/dtype mismatch"),
+        (invalid_common_step_counter, "common_step_counter"),
+        (
+            _complete_schema3_resume_state(next_iteration=99),
+            "stale next_learning_iteration",
+        ),
+    )
+    for state, error in cases:
+        events = []
+        runner = _configure_load_runner(runner_module, events)
+        runner.require_exact_resume_state = True
+        optimizer_state = _install_fresh_adam_and_build_resumable_state(runner)
+        checkpoint = _complete_checkpoint(
+            _complete_schema3_resume_state() if state is None else state,
+            optimizer_state,
+        )
+        if state is None:
+            checkpoint["infos"].pop("hope_exact_resume_state")
+        monkeypatch.setattr(
+            runner_module.torch,
+            "load",
+            lambda *_args, _checkpoint=checkpoint, **_kwargs: _checkpoint,
+        )
+
+        with pytest.raises(RuntimeError, match=error):
+            runner.load("checkpoint.pt")
+        assert events == []
+
+
+def test_required_exact_resume_rechecks_contract_on_consumed_snapshot(
+    runner_module, monkeypatch
+):
+    events = []
+    runner = _configure_load_runner(runner_module, events)
+    runner.require_exact_resume_state = True
+    optimizer_state = _install_fresh_adam_and_build_resumable_state(runner)
+    checkpoint = _complete_checkpoint(
+        _complete_schema3_resume_state(), optimizer_state
+    )
+    checkpoint["infos"]["sha"] = "b" * 64
+    monkeypatch.setattr(
+        runner_module.torch,
+        "load",
+        lambda *_args, **_kwargs: checkpoint,
+    )
+
+    with pytest.raises(RuntimeError, match="exact training contract"):
+        runner.load("checkpoint.pt")
+    assert events == []
+
+
+def test_required_exact_resume_rejects_unvalidated_rnd_state(
+    runner_module, monkeypatch
+):
+    events = []
+    runner = _configure_load_runner(runner_module, events)
+    runner.require_exact_resume_state = True
+    runner.alg.rnd = object()
+    optimizer_state = _install_fresh_adam_and_build_resumable_state(runner)
+    checkpoint = _complete_checkpoint(
+        _complete_schema3_resume_state(), optimizer_state
+    )
+    monkeypatch.setattr(
+        runner_module.torch,
+        "load",
+        lambda *_args, **_kwargs: checkpoint,
+    )
+
+    with pytest.raises(RuntimeError, match="exact RND resume"):
+        runner.load("checkpoint.pt")
+    assert events == []
+
+
+def test_required_exact_resume_propagates_strict_term_state_failure(
+    runner_module, monkeypatch
+):
+    class ExplicitTerm:
+        def exact_resume_state_dict(self):
+            return {"identity": "current"}
+
+        def load_exact_resume_state_dict(self, state, strict=True):
+            assert strict is True
+            if state != {"identity": "current"}:
+                raise ValueError("term state identity mismatch")
+
+    events = []
+    runner = _configure_load_runner(runner_module, events)
+    runner.env.command_manager = _Manager((("task", ExplicitTerm()),))
+    runner.require_exact_resume_state = True
+    optimizer_state = _install_fresh_adam_and_build_resumable_state(runner)
+    environment_state = runner._capture_environment_resume_state()
+    environment_state["command_terms"]["task"]["exact_state"]["identity"] = "other"
+    exact_state = _complete_schema3_resume_state(
+        environment_state=environment_state
+    )
+    monkeypatch.setattr(
+        runner_module.torch,
+        "load",
+        lambda *_args, **_kwargs: _complete_checkpoint(
+            exact_state, optimizer_state
+        ),
+    )
+
+    with pytest.raises(ValueError, match="term state identity mismatch"):
+        runner.load("checkpoint.pt")
+    assert events == ["base_load"]
+    assert "reset" not in events
+
+
+def test_required_exact_resume_uses_one_immutable_snapshot_for_base_load(
+    runner_module, monkeypatch
+):
+    events = []
+    runner = _configure_load_runner(runner_module, events)
+    runner.require_exact_resume_state = True
+    runner._base_reloads_checkpoint = True
+    optimizer_state = _install_fresh_adam_and_build_resumable_state(runner)
+    exact_state = _complete_schema3_resume_state()
+    checkpoint = _complete_checkpoint(exact_state, optimizer_state)
+    snapshot = io.BytesIO(b"one immutable checkpoint")
+    runner._checkpoint_byte_snapshot = lambda _path: snapshot
+    reads = []
+
+    def load_snapshot(source, *_args, **_kwargs):
+        assert source is snapshot
+        reads.append(source.read())
+        return checkpoint
+
+    monkeypatch.setattr(runner_module.torch, "load", load_snapshot)
+    runner._restore_exact_rng_state = lambda _state: None
+
+    runner.load("checkpoint.pt")
+
+    assert reads == [b"one immutable checkpoint", b"one immutable checkpoint"]
+    assert runner._base_load_source is snapshot
+    assert runner._base_reloaded_checkpoint is checkpoint
 
 
 def test_outer_schema3_refuses_missing_or_legacy_nested_environment_state(

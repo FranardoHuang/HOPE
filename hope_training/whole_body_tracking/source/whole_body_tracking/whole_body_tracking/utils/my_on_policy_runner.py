@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import io
 import json
 import math
 import os
@@ -228,7 +229,10 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         training_contract_sha256: str | None = None,
         training_contract_lineage_exact: bool = False,
         training_launch_claim_sha256: str | None = None,
+        require_exact_resume_state: bool = False,
     ):
+        if type(require_exact_resume_state) is not bool:
+            raise TypeError("require_exact_resume_state must be a bool")
         validated_launch_claim = None
         if training_launch_claim_sha256 is not None:
             validated_launch_claim = validate_training_launch_claim_sha256(
@@ -240,6 +244,13 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         self.training_contract_sha256 = training_contract_sha256
         self.training_contract_lineage_exact = bool(training_contract_lineage_exact)
         self.training_launch_claim_sha256 = validated_launch_claim
+        # This is a construction-time run contract, not a permissive load flag. Task-first
+        # training passes True; evaluation and legacy/warm-start runs retain the historical False.
+        self.require_exact_resume_state = require_exact_resume_state
+        if require_exact_resume_state and self.log_dir is None:
+            raise ValueError(
+                "require_exact_resume_state is a training-resume contract and requires log_dir"
+            )
         if (training_contract_schema_version is None) != (training_contract_sha256 is None):
             raise ValueError("training contract schema and SHA256 must be supplied together")
         if training_contract_schema_version is not None:
@@ -252,6 +263,13 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             if len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
                 raise ValueError("training_contract_sha256 must be 64 lowercase hex characters")
             self.training_contract_sha256 = digest
+        if require_exact_resume_state and (
+            self.training_contract_sha256 is None
+            or not self.training_contract_lineage_exact
+        ):
+            raise ValueError(
+                "require_exact_resume_state requires an exact-bound training contract"
+            )
         # Task-first checkpoints promise complete, strict command-state restoration.  Reject a
         # launch before its first rollout if even one active command term still relies on the
         # legacy heuristic attribute scanner.
@@ -550,9 +568,11 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         env = getattr(self.env, "unwrapped", self.env)
         saved = resume_state.get("environment_resume_state")
         if isinstance(saved, dict) and "common_step_counter" in saved:
-            common_step_counter = int(saved["common_step_counter"])
+            saved_common_step_counter = saved["common_step_counter"]
+            common_step_counter = int(saved_common_step_counter)
             source = "checkpoint"
         else:
+            saved_common_step_counter = None
             # 老 checkpoint(状态未入档)仍有精确的"下一个迭代号":每完成一个 PPO 迭代,
             # 每个 env 都走 num_steps_per_env 个控制步,所以课程主时钟可以由迭代号精确推算
             # 出来,而不是回零(jiayi 对既有 V14 长跑档的回退推算,原样移植)。
@@ -604,6 +624,14 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 }
 
             if environment_schema >= 3:
+                if (
+                    type(saved_common_step_counter) is not int
+                    or saved_common_step_counter < 0
+                ):
+                    raise RuntimeError(
+                        "schema-3 environment common_step_counter must be a "
+                        "nonnegative plain integer"
+                    )
                 expected_keys = {
                     "schema_version",
                     "common_step_counter",
@@ -757,8 +785,8 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             )
         return saved.detach().cpu()
 
-    def _restore_exact_rng_state(self, resume_state: dict) -> None:
-        """Restore every sampling RNG atomically after validation and before ``env.reset()``."""
+    def _validated_exact_rng_state(self, resume_state: dict):
+        """Validate all sampling RNG payloads without mutating any global generator."""
 
         required = (
             "python_random_state",
@@ -825,12 +853,408 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 zip(saved_cuda_states, current_cuda_states)
             )
         ]
+        return python_state, numpy_state, torch_state, cuda_states
+
+    def _restore_exact_rng_state(self, resume_state: dict) -> None:
+        """Restore every sampling RNG atomically after validation and before ``env.reset()``."""
+
+        python_state, numpy_state, torch_state, cuda_states = (
+            self._validated_exact_rng_state(resume_state)
+        )
 
         random.setstate(python_state)
         np.random.set_state(numpy_state)
         torch.set_rng_state(torch_state)
         if cuda_states:
             torch.cuda.set_rng_state_all(cuda_states)
+
+    @staticmethod
+    def _checkpoint_exact_resume_state(loaded):
+        """Return the canonical exact-resume payload from a loaded checkpoint, if present."""
+
+        if not isinstance(loaded, dict):
+            return None
+        checkpoint_infos = loaded.get("infos")
+        state = (
+            checkpoint_infos.get("hope_exact_resume_state")
+            if isinstance(checkpoint_infos, dict)
+            else None
+        )
+        if state is None:
+            # Cross-stack compatibility: jiayi/hitterobs stored the same payload at the PT top
+            # level. Strict mode accepts it only if the payload itself satisfies schema 3.
+            state = loaded.get("hope_exact_resume_state")
+        return state
+
+    @staticmethod
+    def _checkpoint_byte_snapshot(path) -> io.BytesIO:
+        """Read one immutable checkpoint snapshot for strict preflight and base loading."""
+
+        try:
+            filesystem_path = os.fspath(path)
+        except TypeError as exc:
+            raise TypeError(
+                "required exact resume needs a filesystem checkpoint path"
+            ) from exc
+        with open(filesystem_path, "rb") as stream:
+            return io.BytesIO(stream.read())
+
+    def _validate_required_adam_state(
+        self,
+        optimizer_state,
+        *,
+        prefix: str,
+        expected_learning_rate: float,
+    ) -> None:
+        """Validate a complete Adam continuation state against the live parameter layout."""
+
+        optimizer = getattr(getattr(self, "alg", None), "optimizer", None)
+        if not isinstance(optimizer, (torch.optim.Adam, torch.optim.AdamW)):
+            raise RuntimeError(
+                f"{prefix} cannot validate optimizer type "
+                f"{type(optimizer).__module__}.{type(optimizer).__qualname__}; "
+                "task-first exact resume currently requires Adam/AdamW"
+            )
+        if not isinstance(optimizer_state, dict) or set(optimizer_state) != {
+            "state",
+            "param_groups",
+        }:
+            raise RuntimeError(
+                f"{prefix} is missing a canonical optimizer_state_dict"
+            )
+        saved_state = optimizer_state["state"]
+        saved_groups = optimizer_state["param_groups"]
+        current_groups = optimizer.param_groups
+        if (
+            not isinstance(saved_state, dict)
+            or not isinstance(saved_groups, list)
+            or len(saved_groups) != len(current_groups)
+            or not saved_groups
+        ):
+            raise RuntimeError(
+                f"{prefix} optimizer state/group structure does not match the live Adam"
+            )
+
+        saved_ids = []
+        live_parameters = []
+        amsgrad_flags = []
+        for group_index, (saved_group, current_group) in enumerate(
+            zip(saved_groups, current_groups)
+        ):
+            if (
+                type(saved_group) is not dict
+                or set(saved_group) != set(current_group)
+                or type(saved_group.get("params")) is not list
+                or type(current_group.get("params")) is not list
+            ):
+                raise RuntimeError(
+                    f"{prefix} optimizer param group {group_index} is malformed"
+                )
+            group_ids = saved_group["params"]
+            group_parameters = current_group["params"]
+            if not group_ids or len(group_ids) != len(group_parameters):
+                raise RuntimeError(
+                    f"{prefix} optimizer param group {group_index} has the wrong size"
+                )
+            if any(type(param_id) is not int for param_id in group_ids):
+                raise RuntimeError(
+                    f"{prefix} optimizer param group {group_index} has non-integer IDs"
+                )
+            if any(not torch.is_tensor(parameter) for parameter in group_parameters):
+                raise RuntimeError(
+                    f"{prefix} live optimizer param group {group_index} is malformed"
+                )
+            saved_lr = saved_group.get("lr")
+            if (
+                type(saved_lr) not in (int, float)
+                or not math.isfinite(float(saved_lr))
+                or float(saved_lr) <= 0.0
+                or float(saved_lr) != float(expected_learning_rate)
+            ):
+                raise RuntimeError(
+                    f"{prefix} optimizer param group {group_index} has an invalid "
+                    "or inconsistent learning rate"
+                )
+            betas = saved_group.get("betas")
+            if (
+                type(betas) is not tuple
+                or len(betas) != 2
+                or any(
+                    type(value) not in (int, float)
+                    or not math.isfinite(float(value))
+                    or float(value) < 0.0
+                    or float(value) >= 1.0
+                    for value in betas
+                )
+            ):
+                raise RuntimeError(
+                    f"{prefix} optimizer param group {group_index} has invalid betas"
+                )
+            eps = saved_group.get("eps")
+            weight_decay = saved_group.get("weight_decay")
+            if (
+                type(eps) not in (int, float)
+                or not math.isfinite(float(eps))
+                or float(eps) <= 0.0
+                or type(weight_decay) not in (int, float)
+                or not math.isfinite(float(weight_decay))
+                or float(weight_decay) < 0.0
+            ):
+                raise RuntimeError(
+                    f"{prefix} optimizer param group {group_index} has invalid "
+                    "epsilon or weight decay"
+                )
+            for key in set(current_group) - {"params", "lr"}:
+                saved_value = saved_group[key]
+                current_value = current_group[key]
+                if torch.is_tensor(saved_value) or torch.is_tensor(current_value):
+                    equal = (
+                        torch.is_tensor(saved_value)
+                        and torch.is_tensor(current_value)
+                        and torch.equal(saved_value, current_value)
+                    )
+                else:
+                    equal = type(saved_value) is type(current_value) and saved_value == current_value
+                if not equal:
+                    raise RuntimeError(
+                        f"{prefix} optimizer param group {group_index} changed {key!r}"
+                    )
+            saved_ids.extend(group_ids)
+            live_parameters.extend(group_parameters)
+            amsgrad_flags.extend(
+                [bool(saved_group.get("amsgrad", False))] * len(group_ids)
+            )
+
+        if (
+            len(saved_ids) != len(set(saved_ids))
+            or any(type(param_id) is not int for param_id in saved_state)
+            or set(saved_state) != set(saved_ids)
+        ):
+            raise RuntimeError(
+                f"{prefix} optimizer state does not cover the exact parameter ID set"
+            )
+
+        for param_id, parameter, uses_amsgrad in zip(
+            saved_ids, live_parameters, amsgrad_flags
+        ):
+            entry = saved_state[param_id]
+            expected_entry_keys = {"step", "exp_avg", "exp_avg_sq"}
+            if uses_amsgrad:
+                expected_entry_keys.add("max_exp_avg_sq")
+            if type(entry) is not dict or set(entry) != expected_entry_keys:
+                raise RuntimeError(
+                    f"{prefix} optimizer state for parameter {param_id} lacks Adam moments"
+                )
+            if any(
+                not torch.is_tensor(entry[name])
+                or tuple(entry[name].shape) != tuple(parameter.shape)
+                or entry[name].dtype != parameter.dtype
+                or (
+                    torch.is_floating_point(entry[name])
+                    and not bool(torch.isfinite(entry[name]).all())
+                )
+                for name in ("exp_avg", "exp_avg_sq")
+            ):
+                raise RuntimeError(
+                    f"{prefix} optimizer moments for parameter {param_id} "
+                    "do not match the live parameter"
+                )
+            step = entry["step"]
+            if torch.is_tensor(step):
+                step_value = (
+                    float(step.detach().cpu().item())
+                    if step.numel() == 1
+                    and step.dtype != torch.bool
+                    and not torch.is_complex(step)
+                    else float("nan")
+                )
+                valid_step = (
+                    step.numel() == 1
+                    and step.dtype != torch.bool
+                    and not torch.is_complex(step)
+                    and bool(torch.isfinite(step).all())
+                    and step_value > 0.0
+                    and step_value.is_integer()
+                )
+            else:
+                step_value = (
+                    float(step) if type(step) in (int, float) else float("nan")
+                )
+                valid_step = (
+                    type(step) in (int, float)
+                    and math.isfinite(step_value)
+                    and step_value > 0.0
+                    and step_value.is_integer()
+                )
+            if not valid_step:
+                raise RuntimeError(
+                    f"{prefix} optimizer step for parameter {param_id} is invalid"
+                )
+            second_moment = entry["exp_avg_sq"]
+            if not torch.is_floating_point(second_moment) or bool(
+                (second_moment < 0.0).any()
+            ):
+                raise RuntimeError(
+                    f"{prefix} optimizer second moment for parameter {param_id} is invalid"
+                )
+            if uses_amsgrad:
+                maximum = entry.get("max_exp_avg_sq")
+                if (
+                    not torch.is_tensor(maximum)
+                    or tuple(maximum.shape) != tuple(parameter.shape)
+                    or maximum.dtype != parameter.dtype
+                    or (
+                        torch.is_floating_point(maximum)
+                        and not bool(torch.isfinite(maximum).all())
+                    )
+                    or not torch.is_floating_point(maximum)
+                    or bool((maximum < 0.0).any())
+                    or bool((maximum < second_moment).any())
+                ):
+                    raise RuntimeError(
+                        f"{prefix} optimizer AMSGrad state for parameter {param_id} "
+                        "does not match the live parameter"
+                    )
+
+    def _preflight_required_exact_resume_checkpoint(
+        self,
+        loaded,
+        *,
+        path: str,
+        load_optimizer: bool,
+    ) -> dict:
+        """Validate the non-negotiable task-first resume envelope before loading model bytes."""
+
+        prefix = f"required exact resume checkpoint {path!r}"
+        if not isinstance(loaded, dict):
+            raise RuntimeError(f"{prefix} must be a dictionary")
+        if self.log_dir is None:
+            raise RuntimeError(
+                f"{prefix} cannot use the evaluation load path without environment restore"
+            )
+        if load_optimizer is not True:
+            raise RuntimeError(
+                f"{prefix} refuses actor-only loading: load_optimizer must be True"
+            )
+        if getattr(getattr(self, "alg", None), "rnd", None) is not None:
+            # Upstream persists a second model/optimizer pair for RND. Until that pair has the
+            # same complete-state validator as the policy optimizer, accepting it here would make
+            # the "exact" construction contract false.
+            raise RuntimeError(
+                f"{prefix} does not yet support exact RND resume; disable RND or add "
+                "strict rnd_state_dict/rnd_optimizer_state_dict validation"
+            )
+        checkpoint_infos = loaded.get("infos")
+        checkpoint_contract_schema = (
+            checkpoint_infos.get(CHECKPOINT_CONTRACT_SCHEMA_KEY)
+            if isinstance(checkpoint_infos, dict)
+            else None
+        )
+        checkpoint_lineage_exact = (
+            checkpoint_infos.get(CHECKPOINT_CONTRACT_LINEAGE_EXACT_KEY)
+            if isinstance(checkpoint_infos, dict)
+            else None
+        )
+        if (
+            not isinstance(checkpoint_infos, dict)
+            or type(checkpoint_contract_schema) is not int
+            or checkpoint_contract_schema != self.training_contract_schema_version
+            or checkpoint_infos.get(CHECKPOINT_CONTRACT_SHA_KEY)
+            != self.training_contract_sha256
+            or type(checkpoint_lineage_exact) is not int
+            or checkpoint_lineage_exact != 1
+        ):
+            raise RuntimeError(
+                f"{prefix} is not bound to this exact training contract"
+            )
+
+        checkpoint_iteration = loaded.get("iter")
+        if type(checkpoint_iteration) is not int or checkpoint_iteration < 0:
+            raise RuntimeError(f"{prefix} has an invalid base iteration")
+
+        state = self._checkpoint_exact_resume_state(loaded)
+        if (
+            not isinstance(state, dict)
+            or type(state.get("schema_version")) is not int
+            or state["schema_version"] != _EXACT_RESUME_SCHEMA_VERSION
+        ):
+            raise RuntimeError(
+                f"{prefix} requires hope_exact_resume_state schema 3; "
+                "legacy warm-start fallback is forbidden"
+            )
+        required_fields = {
+            "next_learning_iteration",
+            "tot_timesteps",
+            "tot_time",
+            "algorithm_learning_rate",
+            "python_random_state",
+            "numpy_random_state",
+            "torch_random_state",
+            "torch_cuda_random_states",
+            "torch_cuda_device_count",
+            "environment_resume_state",
+        }
+        missing = sorted(required_fields - set(state))
+        if missing:
+            raise RuntimeError(
+                f"{prefix} schema-3 state is incomplete; missing={missing}"
+            )
+        tot_timesteps = state["tot_timesteps"]
+        tot_time = state["tot_time"]
+        learning_rate = state["algorithm_learning_rate"]
+        cuda_count = state["torch_cuda_device_count"]
+        if type(tot_timesteps) is not int or tot_timesteps < 0:
+            raise RuntimeError(f"{prefix} has invalid tot_timesteps")
+        if (
+            type(tot_time) not in (int, float)
+            or not math.isfinite(float(tot_time))
+            or float(tot_time) < 0.0
+        ):
+            raise RuntimeError(f"{prefix} has invalid tot_time")
+        if (
+            type(learning_rate) not in (int, float)
+            or not math.isfinite(float(learning_rate))
+            or float(learning_rate) <= 0.0
+        ):
+            raise RuntimeError(f"{prefix} has invalid algorithm_learning_rate")
+        if type(cuda_count) is not int or cuda_count < 0:
+            raise RuntimeError(f"{prefix} has invalid torch_cuda_device_count")
+        next_iteration = state["next_learning_iteration"]
+        if (
+            type(next_iteration) is not int
+            or next_iteration != checkpoint_iteration + 1
+        ):
+            raise RuntimeError(
+                f"{prefix} has stale next_learning_iteration: "
+                f"checkpoint={next_iteration!r}, expected={checkpoint_iteration + 1}"
+            )
+        nested = state["environment_resume_state"]
+        if (
+            not isinstance(nested, dict)
+            or type(nested.get("schema_version")) is not int
+            or nested["schema_version"] != _ENVIRONMENT_RESUME_SCHEMA_VERSION
+        ):
+            raise RuntimeError(
+                f"{prefix} requires a schema-3 environment_resume_state"
+            )
+        nested_common_step_counter = nested.get("common_step_counter")
+        if (
+            type(nested_common_step_counter) is not int
+            or nested_common_step_counter < 0
+        ):
+            raise RuntimeError(
+                f"{prefix} schema-3 environment common_step_counter must be a "
+                "nonnegative plain integer"
+            )
+        # Dry validation occurs before policy/optimizer bytes are applied. The same payload is
+        # validated once more and committed atomically immediately before the resumed env.reset().
+        self._validated_exact_rng_state(state)
+        self._validate_required_adam_state(
+            loaded.get("optimizer_state_dict"),
+            prefix=prefix,
+            expected_learning_rate=float(learning_rate),
+        )
+        return state
 
     def load(self, path: str, load_optimizer: bool = True, **kwargs):
         """Load a checkpoint; on a training resume also restore curriculum progress.
@@ -839,20 +1263,33 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         续跑(log_dir 不为 None)时把精确续训包里的课程主时钟和命令项状态一并恢复;老档没
         有状态就按迭代号精确推算主时钟。评测器(isaac_bank_exam / play)也走 runner.load,
         但它们 log_dir=None 且自带确定性调度 —— 那条路保持与移植前逐字节相同的行为。
+        ``require_exact_resume_state=True`` 是 task-first 训练的构造期铁律:optimizer、外层
+        schema 3、内层 schema 3、迭代连续性或命令项 strict state 任一缺失都拒绝,绝不把
+        actor-only checkpoint 静默解释成 warm start。
         """
-        loaded = torch.load(path, map_location="cpu", weights_only=False)
-        infos = super().load(path, load_optimizer=load_optimizer, **kwargs)
+        strict_resume = bool(getattr(self, "require_exact_resume_state", False))
+        snapshot = self._checkpoint_byte_snapshot(path) if strict_resume else None
+        load_source = snapshot if snapshot is not None else path
+        loaded = torch.load(load_source, map_location="cpu", weights_only=False)
+        required_state = None
+        if strict_resume:
+            required_state = self._preflight_required_exact_resume_checkpoint(
+                loaded,
+                path=path,
+                load_optimizer=load_optimizer,
+            )
+            # Upstream OnPolicyRunner.load performs its own torch.load. Rewind the exact same
+            # in-memory bytes so policy/optimizer and curriculum/RNG cannot come from two path
+            # reads of a concurrently replaced checkpoint.
+            snapshot.seek(0)
+        infos = super().load(load_source, load_optimizer=load_optimizer, **kwargs)
         if self.log_dir is None:
             return infos
-        state = None
-        if isinstance(loaded, dict):
-            checkpoint_infos = loaded.get("infos")
-            if isinstance(checkpoint_infos, dict):
-                state = checkpoint_infos.get("hope_exact_resume_state")
-            if state is None:
-                # 跨栈对账:jiayi/hitterobs 把同名状态放在 PT 顶层而不是 infos 里;两处都认,
-                # hitterobs 导出的档在 main 上续训也能拿到课程状态。
-                state = loaded.get("hope_exact_resume_state")
+        state = (
+            required_state
+            if required_state is not None
+            else self._checkpoint_exact_resume_state(loaded)
+        )
         if state is not None:
             if (
                 not isinstance(state, dict)
@@ -880,6 +1317,12 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             # 响亮降级成"老档"语义:主时钟按本档 iter 推算,课程统计从头攒。
             expected_next = int(self.current_learning_iteration) + 1
             if int(state.get("next_learning_iteration", -1)) != expected_next:
+                if getattr(self, "require_exact_resume_state", False):
+                    raise RuntimeError(
+                        "required exact resume checkpoint iteration changed during base load: "
+                        f"state next={state.get('next_learning_iteration')!r}, "
+                        f"base iter+1={expected_next}"
+                    )
                 print(
                     "[MotionOnPolicyRunner] WARNING: hope_exact_resume_state is stale "
                     f"(next_learning_iteration={state.get('next_learning_iteration')!r} vs "
@@ -889,6 +1332,11 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 )
                 state = None
         if state is None:
+            if getattr(self, "require_exact_resume_state", False):
+                # Defensive invariant: strict preflight above must either return schema 3 or raise.
+                raise RuntimeError(
+                    "required exact resume state disappeared before environment restore"
+                )
             # 老 checkpoint:课程细节无从恢复,但主时钟按迭代号精确推算(见 _restore_…)。
             # 迭代号本身维持 base 语义(iter=N,会重复一次第 N 个更新)——没有状态包时不敢
             # 替它做 N+1 的决定。
