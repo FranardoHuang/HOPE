@@ -2323,24 +2323,28 @@ class RacketTargetCommand(CommandTerm):
         # strike_composite (三合格) is a diagnostic only. Canonical bookkeeping stays MuJoCo.
         if cfg.virtual_ball or cfg.vb_metrics_only:
             for _vk in (
-                "virtual_return_rate", "virtual_return_rate_forehand", "virtual_return_rate_backhand",
-                "virtual_hit_rate_forehand", "virtual_hit_rate_backhand",
-                "virtual_return_rate_rally", "virtual_return_rate_rally_forehand",
-                "virtual_return_rate_rally_backhand",
+                "virtual_return_rate", "virtual_return_rate_rally",
                 "virtual_hit_rate", "virtual_net_clear_rate", "virtual_land_valid_rate",
                 "virtual_land_inbounds_rate", "virtual_land_err_m", "virtual_topspin_revs",
                 "virtual_approach_speed",
             ):
                 self.metrics[_vk] = torch.zeros(self.num_envs, device=self.device)
+            # Per-clip keys from the DECLARED clip names (default = forehand/backhand, so the
+            # registered key set is byte-identical for every existing arm). The writers
+            # (_vb_evaluate / _rally_report / legacy rally) iterate self._clip_names, so a
+            # whole-library clip list (chingmu101, 73 uids) needs its keys registered here too.
+            for _cname in self._clip_names.values():
+                for _vk in ("virtual_return_rate", "virtual_hit_rate", "virtual_return_rate_rally"):
+                    self.metrics[f"{_vk}_{_cname}"] = torch.zeros(self.num_envs, device=self.device)
             # Transition-period *_legacy rally curves: the OLD mixed-ledger readout (can spike >1
             # under synchronized reset queues — see the rally block in __init__) kept alongside the
             # fixed virtual_return_rate_rally* for new/old comparison. Drop by turning the cfg off.
             if cfg.rally_legacy_metrics:
-                for _vk in (
-                    "virtual_return_rate_rally_legacy", "virtual_return_rate_rally_forehand_legacy",
-                    "virtual_return_rate_rally_backhand_legacy",
-                ):
-                    self.metrics[_vk] = torch.zeros(self.num_envs, device=self.device)
+                self.metrics["virtual_return_rate_rally_legacy"] = torch.zeros(
+                    self.num_envs, device=self.device)
+                for _cname in self._clip_names.values():
+                    self.metrics[f"virtual_return_rate_rally_{_cname}_legacy"] = torch.zeros(
+                        self.num_envs, device=self.device)
         # UNCONDITIONAL swing accounting (Phase A): completion_rate = exact-strike arrivals / swing
         # STARTS (falls count against it, unlike the conditional composite above); fall rate before
         # the strike frame. Broadcast scalars like the pass rates.
