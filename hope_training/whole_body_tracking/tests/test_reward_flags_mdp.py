@@ -4355,10 +4355,21 @@ def test_motion_command_default_keeps_legacy_torch_randint_path(clips):
 def test_motion_command_exact_resume_schema_includes_disabled_sampler(clips):
     cmd, _ = _make_motion_command([clips[0], clips[1]])
     state = cmd.exact_resume_state_dict()
-    assert state == {
-        "state_kind": "whole_body_tracking.MotionCommand",
-        "schema_version": 1,
-        "balanced_clip_sampler": None,
+    assert state["state_kind"] == "whole_body_tracking.MotionCommand"
+    assert state["schema_version"] == 2
+    assert state["balanced_clip_sampler"] is None
+    assert set(state["adaptive_sampling"]) == {
+        "bin_failed_count",
+        "current_bin_failed",
+    }
+    assert state["adaptive_sampling"]["bin_failed_count"].device.type == "cpu"
+    assert state["post_swing_replay"] == {
+        "root": None,
+        "joint_pos": None,
+        "joint_vel": None,
+        "ptr": 0,
+        "count": 0,
+        "first_reset_checked": False,
     }
     cmd.load_exact_resume_state_dict(state)
     with pytest.raises(ValueError, match="strict=True"):
@@ -4391,6 +4402,138 @@ def test_motion_command_exact_resume_round_trip_and_identity_fail_loud(clips):
     with pytest.raises(ValueError, match="clip_order"):
         resumed.load_exact_resume_state_dict(wrong_order)
 
+    wrong_identity = copy.deepcopy(state)
+    wrong_identity["identity"]["motion"]["clip_order"] = tuple(
+        reversed(wrong_identity["identity"]["motion"]["clip_order"])
+    )
+    with pytest.raises(ValueError, match="identity"):
+        resumed.load_exact_resume_state_dict(wrong_identity)
+
+
+def test_motion_command_exact_resume_preserves_all_legacy_curriculum_state(clips):
+    cfg = {
+        "post_swing_start_prob": 0.25,
+        "post_swing_buffer_size": 4,
+        "post_swing_min_fill": 2,
+    }
+    source, source_robot = _make_motion_command([clips[2]], **cfg)
+    source.bin_failed_count.copy_(
+        torch.linspace(0.25, 1.25, source.bin_count)
+    )
+    source._current_bin_failed.copy_(
+        torch.arange(source.bin_count, dtype=source._current_bin_failed.dtype)
+    )
+    size = source.cfg.post_swing_buffer_size
+    joint_count = source.robot.data.joint_pos.shape[-1]
+    source._post_swing_root = torch.arange(
+        size * 13, dtype=source.robot.data.root_state_w.dtype
+    ).reshape(size, 13)
+    source._post_swing_joint_pos = torch.arange(
+        size * joint_count, dtype=source.robot.data.joint_pos.dtype
+    ).reshape(size, joint_count)
+    source._post_swing_joint_vel = -source._post_swing_joint_pos.clone()
+    source._post_swing_ptr = 3
+    source._post_swing_count = 3
+    source._post_swing_first_reset_checked = True
+    state = source.exact_resume_state_dict()
+
+    resumed, resumed_robot = _make_motion_command([clips[2]], **cfg)
+    resumed.load_exact_resume_state_dict(state)
+    assert torch.equal(resumed.bin_failed_count, source.bin_failed_count)
+    assert torch.equal(resumed._current_bin_failed, source._current_bin_failed)
+    assert torch.equal(resumed._post_swing_root, source._post_swing_root)
+    assert torch.equal(resumed._post_swing_joint_pos, source._post_swing_joint_pos)
+    assert torch.equal(resumed._post_swing_joint_vel, source._post_swing_joint_vel)
+    assert resumed._post_swing_ptr == 3
+    assert resumed._post_swing_count == 3
+    assert resumed._post_swing_first_reset_checked is True
+    assert resumed._post_swing_root.device == source._post_swing_root.device
+
+    # The restored adaptive sampler makes the same next-rollout draw.
+    ids = torch.arange(source.num_envs)
+    torch.manual_seed(90210)
+    source._adaptive_sampling(ids)
+    torch.manual_seed(90210)
+    resumed._adaptive_sampling(ids)
+    assert torch.equal(resumed.time_steps, source.time_steps)
+
+    # The restored replay population selects the same physical reset state.
+    replay_ids = torch.tensor([0, 3, 7])
+    torch.manual_seed(77)
+    source._write_post_swing_states(replay_ids)
+    torch.manual_seed(77)
+    resumed._write_post_swing_states(replay_ids)
+    assert torch.equal(
+        source_robot.data.root_state_w[replay_ids],
+        resumed_robot.data.root_state_w[replay_ids],
+    )
+    assert torch.equal(
+        source_robot.data.joint_pos[replay_ids],
+        resumed_robot.data.joint_pos[replay_ids],
+    )
+
+
+def test_motion_command_exact_resume_state_is_detached_cpu_snapshot(clips):
+    cmd, _ = _make_motion_command(
+        [clips[2]],
+        post_swing_start_prob=0.25,
+        post_swing_buffer_size=4,
+        post_swing_min_fill=2,
+    )
+    cmd.bin_failed_count.fill_(2.0)
+    cmd._post_swing_root = torch.ones(4, 13)
+    cmd._post_swing_joint_pos = torch.ones(4, _N_JOINTS)
+    cmd._post_swing_joint_vel = torch.ones(4, _N_JOINTS)
+    state = cmd.exact_resume_state_dict()
+    cmd.bin_failed_count.zero_()
+    cmd._post_swing_root.zero_()
+    assert torch.all(state["adaptive_sampling"]["bin_failed_count"] == 2.0)
+    assert torch.all(state["post_swing_replay"]["root"] == 1.0)
+    for section in ("adaptive_sampling", "post_swing_replay"):
+        for value in state[section].values():
+            if torch.is_tensor(value):
+                assert value.device.type == "cpu"
+
+
+def test_motion_command_exact_resume_rejects_config_shape_device_and_ring_drift(clips):
+    cfg = {
+        "post_swing_start_prob": 0.25,
+        "post_swing_buffer_size": 4,
+        "post_swing_min_fill": 2,
+    }
+    source, _ = _make_motion_command([clips[2]], **cfg)
+    state = source.exact_resume_state_dict()
+
+    different_cfg, _ = _make_motion_command(
+        [clips[2]], **dict(cfg, adaptive_alpha=0.5)
+    )
+    with pytest.raises(ValueError, match="identity"):
+        different_cfg.load_exact_resume_state_dict(state)
+
+    bad_shape = copy.deepcopy(state)
+    bad_shape["adaptive_sampling"]["bin_failed_count"] = torch.zeros(
+        source.bin_count + 1
+    )
+    with pytest.raises(ValueError, match="shape/dtype"):
+        source.load_exact_resume_state_dict(bad_shape)
+
+    bad_device = copy.deepcopy(state)
+    bad_device["adaptive_sampling"]["bin_failed_count"] = torch.empty(
+        source.bin_count, device="meta"
+    )
+    with pytest.raises(ValueError, match="serialized on the CPU"):
+        source.load_exact_resume_state_dict(bad_device)
+
+    partial_ring = copy.deepcopy(state)
+    partial_ring["post_swing_replay"]["root"] = torch.zeros(4, 13)
+    with pytest.raises(ValueError, match="partially serialized"):
+        source.load_exact_resume_state_dict(partial_ring)
+
+    bad_cursor = copy.deepcopy(state)
+    bad_cursor["post_swing_replay"]["ptr"] = 4
+    with pytest.raises(ValueError, match="outside the configured ring"):
+        source.load_exact_resume_state_dict(bad_cursor)
+
 
 @pytest.mark.parametrize(
     ("mutation", "match"),
@@ -4398,7 +4541,7 @@ def test_motion_command_exact_resume_round_trip_and_identity_fail_loud(clips):
         (lambda state: state.pop("balanced_clip_sampler"), "keys"),
         (lambda state: state.update(extra=True), "keys"),
         (lambda state: state.update(state_kind="other"), "state_kind"),
-        (lambda state: state.update(schema_version=2), "schema_version"),
+        (lambda state: state.update(schema_version=3), "schema_version"),
     ],
 )
 def test_motion_command_exact_resume_rejects_schema_drift(clips, mutation, match):

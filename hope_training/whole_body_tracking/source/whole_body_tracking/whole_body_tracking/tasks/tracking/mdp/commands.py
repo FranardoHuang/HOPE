@@ -560,7 +560,7 @@ class _BalancedRoundRobinClipSampler:
 class MotionCommand(CommandTerm):
     cfg: MotionCommandCfg
     _EXACT_RESUME_STATE_KIND = "whole_body_tracking.MotionCommand"
-    _EXACT_RESUME_STATE_SCHEMA_VERSION = 1
+    _EXACT_RESUME_STATE_SCHEMA_VERSION = 2
 
     def __init__(self, cfg: MotionCommandCfg, env: ManagerBasedRLEnv):
         super().__init__(cfg, env)
@@ -579,6 +579,12 @@ class MotionCommand(CommandTerm):
         # Freeze Hydra/ListConfig/custom iterable input once.  Admission hashes
         # and MotionLoader must consume the same ordered path identity.
         self._motion_files = self._configured_motion_files(self.cfg.motion_file)
+        # Bind the bytes actually admitted at construction, not whatever may happen to occupy
+        # the same paths at checkpoint time. Exact resume must never pour an old curriculum or
+        # replay ring into different clip content that reused the same filenames.
+        self._motion_file_sha256 = tuple(
+            sha256_file(path) for path in self._motion_files
+        )
         if self.canonical_ready_mode:
             self._validate_canonical_ready_config()
             self._canonical_registry_tables = (
@@ -2340,26 +2346,149 @@ class MotionCommand(CommandTerm):
             )
         self._balanced_clip_sampler.load_state_dict(state)
 
+    @staticmethod
+    def _exact_resume_cpu_tensor(value: torch.Tensor) -> torch.Tensor:
+        return value.detach().to(device="cpu").clone()
+
+    def _exact_resume_identity(self) -> dict:
+        teacher_contract = self._post_swing_teacher_hard_contract
+        teacher_contract_sha256 = (
+            None
+            if teacher_contract is None
+            else hashlib.sha256(_canonical_json_bytes(teacher_contract)).hexdigest()
+        )
+        return {
+            "motion": {
+                "num_segments": int(self.motion.num_segments),
+                "clip_order": tuple(self._motion_files),
+                "clip_sha256": tuple(self._motion_file_sha256),
+                "segment_lengths": tuple(
+                    int(value) for value in self.motion.seg_len.detach().cpu().tolist()
+                ),
+                "body_names": tuple(str(value) for value in self.cfg.body_names),
+                "joint_names": tuple(str(value) for value in self.robot.data.joint_names),
+            },
+            "adaptive_sampling_config": {
+                "bin_count": int(self.bin_count),
+                "adaptive_kernel_size": int(self.cfg.adaptive_kernel_size),
+                "adaptive_lambda": float(self.cfg.adaptive_lambda),
+                "adaptive_uniform_ratio": float(self.cfg.adaptive_uniform_ratio),
+                "adaptive_alpha": float(self.cfg.adaptive_alpha),
+            },
+            "post_swing_replay_config": {
+                "post_swing_start_prob": float(self.cfg.post_swing_start_prob),
+                "post_swing_buffer_size": int(self.cfg.post_swing_buffer_size),
+                "post_swing_min_fill": int(self.cfg.post_swing_min_fill),
+                "post_swing_min_hold": int(self.cfg.post_swing_min_hold),
+                "post_swing_teacher_hard_contract_sha256": teacher_contract_sha256,
+                "post_swing_fail_fast_first_reset": bool(
+                    self._post_swing_fail_fast_first_reset
+                ),
+                "post_swing_first_reset_min_adopted_count": int(
+                    self._post_swing_first_reset_min_adopted_count
+                ),
+                "post_swing_first_reset_min_adopted_fraction": float(
+                    self._post_swing_first_reset_min_adopted_fraction
+                ),
+                "post_swing_first_reset_selection_tolerance": float(
+                    self._post_swing_first_reset_selection_tolerance
+                ),
+                "post_swing_first_reset_require_readback": bool(
+                    self._post_swing_first_reset_require_readback
+                ),
+            },
+        }
+
     def exact_resume_state_dict(self) -> dict:
-        """Return the complete versioned state owned by this command term."""
+        """Return every persistent MotionCommand state that shapes the next rollout."""
+        # Per-env clip/hold/planner/event clocks are deliberately absent: the runner performs one
+        # full env reset after loading. The two stagger pending flags are also construction state,
+        # not curriculum state—the documented resume path must re-spread that freshly reset cohort.
+        # The fields below are the state that survives episode boundaries and changes later draws.
+        ring_values = (
+            self._post_swing_root,
+            self._post_swing_joint_pos,
+            self._post_swing_joint_vel,
+        )
+        if any(value is None for value in ring_values) and not all(
+            value is None for value in ring_values
+        ):
+            raise RuntimeError("post-swing replay ring is only partially allocated")
         return {
             "state_kind": self._EXACT_RESUME_STATE_KIND,
             "schema_version": self._EXACT_RESUME_STATE_SCHEMA_VERSION,
-            # Explicit null is part of the schema: disabled is state, not a missing key.
+            "identity": self._exact_resume_identity(),
+            "adaptive_sampling": {
+                "bin_failed_count": self._exact_resume_cpu_tensor(
+                    self.bin_failed_count
+                ),
+                "current_bin_failed": self._exact_resume_cpu_tensor(
+                    self._current_bin_failed
+                ),
+            },
+            "post_swing_replay": {
+                # Explicit null is part of the schema: an unallocated/disabled ring is state,
+                # not a missing key that a loader may silently reinterpret.
+                "root": (
+                    None
+                    if self._post_swing_root is None
+                    else self._exact_resume_cpu_tensor(self._post_swing_root)
+                ),
+                "joint_pos": (
+                    None
+                    if self._post_swing_joint_pos is None
+                    else self._exact_resume_cpu_tensor(self._post_swing_joint_pos)
+                ),
+                "joint_vel": (
+                    None
+                    if self._post_swing_joint_vel is None
+                    else self._exact_resume_cpu_tensor(self._post_swing_joint_vel)
+                ),
+                "ptr": int(self._post_swing_ptr),
+                "count": int(self._post_swing_count),
+                "first_reset_checked": bool(
+                    self._post_swing_first_reset_checked
+                ),
+            },
             "balanced_clip_sampler": self.balanced_clip_sampler_state_dict(),
         }
 
-    def load_exact_resume_state_dict(self, state: dict, strict: bool = True):
-        """Restore only an exact schema/identity match; no permissive mode exists."""
-        if strict is not True:
+    @staticmethod
+    def _validate_exact_resume_tensor(
+        value,
+        *,
+        name: str,
+        shape: tuple[int, ...],
+        dtype: torch.dtype,
+        nonnegative: bool = False,
+    ) -> torch.Tensor:
+        if not torch.is_tensor(value):
+            raise ValueError(f"{name} must be a torch.Tensor")
+        if value.device.type != "cpu":
+            raise ValueError(f"{name} must be serialized on the CPU")
+        if tuple(value.shape) != shape or value.dtype != dtype:
             raise ValueError(
-                "MotionCommand exact resume supports only strict=True"
+                f"{name} shape/dtype mismatch: checkpoint={tuple(value.shape)}/"
+                f"{value.dtype}, runtime={shape}/{dtype}"
             )
+        if torch.is_floating_point(value) and not bool(torch.isfinite(value).all()):
+            raise ValueError(f"{name} contains NaN or Inf")
+        if nonnegative and bool((value < 0).any()):
+            raise ValueError(f"{name} contains negative counts")
+        return value.detach().clone()
+
+    def load_exact_resume_state_dict(self, state: dict, strict: bool = True):
+        """Restore only an exact schema/config/clip identity match."""
+        if strict is not True:
+            raise ValueError("MotionCommand exact resume supports only strict=True")
         if type(state) is not dict:
             raise ValueError("MotionCommand exact resume state must be a dictionary")
         expected_keys = {
             "state_kind",
             "schema_version",
+            "identity",
+            "adaptive_sampling",
+            "post_swing_replay",
             "balanced_clip_sampler",
         }
         if set(state) != expected_keys:
@@ -2372,9 +2501,119 @@ class MotionCommand(CommandTerm):
             raise ValueError(
                 "MotionCommand exact resume schema_version is unsupported"
             )
+        if state["identity"] != self._exact_resume_identity():
+            raise ValueError(
+                "MotionCommand exact resume motion/config/clip identity does not match"
+            )
+
+        adaptive = state["adaptive_sampling"]
+        if type(adaptive) is not dict or set(adaptive) != {
+            "bin_failed_count",
+            "current_bin_failed",
+        }:
+            raise ValueError(
+                "MotionCommand adaptive_sampling state does not match the strict schema"
+            )
+        bin_shape = tuple(self.bin_failed_count.shape)
+        bin_failed_count = self._validate_exact_resume_tensor(
+            adaptive["bin_failed_count"],
+            name="bin_failed_count",
+            shape=bin_shape,
+            dtype=self.bin_failed_count.dtype,
+            nonnegative=True,
+        )
+        current_bin_failed = self._validate_exact_resume_tensor(
+            adaptive["current_bin_failed"],
+            name="current_bin_failed",
+            shape=tuple(self._current_bin_failed.shape),
+            dtype=self._current_bin_failed.dtype,
+            nonnegative=True,
+        )
+
+        replay = state["post_swing_replay"]
+        replay_keys = {
+            "root",
+            "joint_pos",
+            "joint_vel",
+            "ptr",
+            "count",
+            "first_reset_checked",
+        }
+        if type(replay) is not dict or set(replay) != replay_keys:
+            raise ValueError(
+                "MotionCommand post_swing_replay state does not match the strict schema"
+            )
+        ptr = replay["ptr"]
+        count = replay["count"]
+        first_reset_checked = replay["first_reset_checked"]
+        if (
+            type(ptr) is not int
+            or type(count) is not int
+            or type(first_reset_checked) is not bool
+        ):
+            raise ValueError(
+                "post-swing replay ptr/count/first_reset_checked have invalid types"
+            )
+        size = int(self.cfg.post_swing_buffer_size)
+        if not (0 <= ptr < size) or not (0 <= count <= size):
+            raise ValueError("post-swing replay ptr/count are outside the configured ring")
+        ring_values = (replay["root"], replay["joint_pos"], replay["joint_vel"])
+        ring_is_none = tuple(value is None for value in ring_values)
+        if any(ring_is_none) and not all(ring_is_none):
+            raise ValueError("post-swing replay ring is only partially serialized")
+        if all(ring_is_none):
+            if ptr != 0 or count != 0:
+                raise ValueError(
+                    "unallocated post-swing replay ring requires ptr=count=0"
+                )
+            if self._post_swing_teacher_hard_contract is not None:
+                raise ValueError(
+                    "configured post-swing teacher cannot restore an unallocated ring"
+                )
+            root = joint_pos = joint_vel = None
+        else:
+            joint_count = int(self.robot.data.joint_pos.shape[-1])
+            root = self._validate_exact_resume_tensor(
+                replay["root"],
+                name="post_swing_root",
+                shape=(size, 13),
+                dtype=self.robot.data.root_state_w.dtype,
+            )
+            joint_pos = self._validate_exact_resume_tensor(
+                replay["joint_pos"],
+                name="post_swing_joint_pos",
+                shape=(size, joint_count),
+                dtype=self.robot.data.joint_pos.dtype,
+            )
+            joint_vel = self._validate_exact_resume_tensor(
+                replay["joint_vel"],
+                name="post_swing_joint_vel",
+                shape=(size, joint_count),
+                dtype=self.robot.data.joint_vel.dtype,
+            )
+
+        # Validate the optional sampler before mutating any existing curriculum/ring state.
         self.load_balanced_clip_sampler_state_dict(
             state["balanced_clip_sampler"]
         )
+        self.bin_failed_count.copy_(
+            bin_failed_count.to(device=self.bin_failed_count.device)
+        )
+        self._current_bin_failed.copy_(
+            current_bin_failed.to(device=self._current_bin_failed.device)
+        )
+        self._post_swing_root = (
+            None if root is None else root.to(device=self.device)
+        )
+        self._post_swing_joint_pos = (
+            None if joint_pos is None else joint_pos.to(device=self.device)
+        )
+        self._post_swing_joint_vel = (
+            None if joint_vel is None else joint_vel.to(device=self.device)
+        )
+        self._post_swing_ptr = ptr
+        self._post_swing_count = count
+        self._post_swing_first_reset_checked = first_reset_checked
 
     def _capture_post_swing_states(self, env_ids: torch.Tensor):
         """A8: snapshot end-of-swing robot states (wrap envs only) into the ring buffer.
