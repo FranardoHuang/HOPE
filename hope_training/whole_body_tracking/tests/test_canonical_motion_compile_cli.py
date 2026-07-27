@@ -792,7 +792,8 @@ def test_wrong_root_vector_shape_is_rejected_by_parser(job_environment):
     del args[start + 5]
 
     with pytest.raises(
-        cli.CanonicalMotionCompileCliError, match="expected 6 arguments"
+        cli.CanonicalMotionCompileCliError,
+        match=r"argument --full-root-velocity",
     ):
         cli.run(args)
 
@@ -1533,7 +1534,7 @@ def test_writer_cleans_staging_when_termination_bypasses_exception(
     library = cli.cmc.CompiledLibrary(
         recipe=None,
         motions=tuple(motion for _ in range(10)),
-        manifest={},
+        manifest={"output_matrix": {"candidate_count": 10}},
     )
     output = tmp_path / "writer-interrupted"
 
