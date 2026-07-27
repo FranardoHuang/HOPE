@@ -12,7 +12,7 @@ from copy import deepcopy
 import importlib.util
 import json
 from pathlib import Path
-from types import SimpleNamespace
+from types import ModuleType, SimpleNamespace
 import sys
 
 import numpy as np
@@ -46,6 +46,30 @@ def _load_curriculum():
 
 
 C = _load_curriculum()
+
+
+def _install_dependency_light_task_first_package(monkeypatch):
+    """Expose only the pure task-first modules without executing package ``__init__`` files."""
+
+    package_root = ROOT / "source" / "whole_body_tracking" / "whole_body_tracking"
+    package_paths = {
+        "whole_body_tracking": package_root,
+        "whole_body_tracking.tasks": package_root / "tasks",
+        "whole_body_tracking.tasks.tracking": package_root / "tasks" / "tracking",
+        "whole_body_tracking.tasks.tracking.mdp": (
+            package_root / "tasks" / "tracking" / "mdp"
+        ),
+    }
+    for name, path in package_paths.items():
+        package = ModuleType(name)
+        package.__path__ = [str(path)]
+        monkeypatch.setitem(sys.modules, name, package)
+    for leaf in ("task_first_curriculum", "task_first_manifest"):
+        monkeypatch.delitem(
+            sys.modules,
+            f"whole_body_tracking.tasks.tracking.mdp.{leaf}",
+            raising=False,
+        )
 
 
 def _module_function(name, namespace):
@@ -704,7 +728,8 @@ def test_runtime_source_pins_hard_contract_positive_speed_and_legacy_resume():
     }
 
 
-def test_runtime_hard_contract_exactly_equals_train_builder():
+def test_runtime_hard_contract_exactly_equals_train_builder(monkeypatch):
+    _install_dependency_light_task_first_package(monkeypatch)
     train_path = ROOT / "scripts" / "train.py"
     train_tree = ast.parse(train_path.read_text(encoding="utf-8"), filename=str(train_path))
     train_node = next(
@@ -766,16 +791,50 @@ def test_runtime_hard_contract_exactly_equals_train_builder():
     motion_cfg = SimpleNamespace(
         balanced_clip_sampling=True,
         balanced_clip_sampling_seed=73,
+        clip_switch_prob=0.0,
+        speed_scale_range=(1.0, 1.0),
+        event_timing_mode="disabled",
     )
-    racket_cfg = SimpleNamespace(task_first_base_success_thresh_m=0.08)
+    racket_cfg = SimpleNamespace(
+        task_first_base_success_thresh_m=0.08,
+        strike_success_pos_thresh=0.075,
+        strike_success_vel_thresh=0.5,
+        strike_success_normal_thresh_deg=15.0,
+        clean_reference_strike_velocity=True,
+        clean_strike_vel_window=2,
+        wrist_body_name="right_wrist_yaw_Link",
+        mount_offset=(0.0, 0.13, 0.0),
+        mount_quat=(1.0, 0.0, 0.0, 0.0),
+        mount_normal_axis=1,
+        face_command_pairing="shared_plus_y",
+    )
+    env_cfg = SimpleNamespace(
+        table_obstacle=True,
+        table_obstacle_prim="{ENV_REGEX_NS}/TableObstacle",
+        terminations=SimpleNamespace(
+            robot_hit_table=SimpleNamespace(
+                func="whole_body_tracking.tasks.tracking.mdp.robot_hit_table",
+                params={
+                    "filtered_sensor_cfg": SimpleNamespace(
+                        name="racket_table_contact"
+                    ),
+                    "near_x": 0.78,
+                    "surface_z": 0.76,
+                    "force_threshold": 1.0,
+                    "margin": 0.02,
+                },
+            )
+        ),
+    )
     runtime._task_first_enabled = True
     runtime._task_first_loaded_manifest = loaded
     runtime._task_first_action_uids = (101, 202)
     runtime.cfg = racket_cfg
     runtime._motion = lambda: SimpleNamespace(cfg=motion_cfg)
+    runtime._env = SimpleNamespace(cfg=env_cfg)
     runtime_contract = runtime.task_first_hard_contract()
     train_namespace["_load_task_first_manifest_from_racket_cfg"] = lambda cfg: loaded
     train_contract = train_namespace["_task_first_manifest_contract"](
-        racket_cfg, motion_cfg
+        racket_cfg, motion_cfg, env_cfg
     )
     assert runtime_contract == train_contract

@@ -145,12 +145,19 @@ def test_env_cfg_hitter_pure_default_boxes_clear_the_table():
         assert float(z_range[0]) >= MIN_CONTACT_Z - 1e-9, f"clip {clip_id} box floor {z_range[0]}"
 
 
-def test_table_clearance_gate_is_wired_into_both_construction_paths():
+def test_table_clearance_gate_is_wired_into_all_construction_paths():
     """A gate nobody calls is the bug it was written to prevent."""
 
-    assert '"racket_pos_range_per_clip",' in CMD_SOURCE  # box half, in __init__
-    assert '"reference strike point",' in CMD_SOURCE     # reference half, after the motion resolves
-    assert CMD_SOURCE.count("self._assert_contact_clears_table(") == 2
+    expected_contexts = (
+        '"racket_pos_range_per_clip",',       # legacy box, in __init__
+        '"task-first full position envelope",',  # manifest envelope, after references resolve
+        '"reference strike point",',          # legacy reference point, after motion resolves
+    )
+    for context in expected_contexts:
+        assert context in CMD_SOURCE
+    assert CMD_SOURCE.count("self._assert_contact_clears_table(") == len(
+        expected_contexts
+    )
     assert "self._assert_target_velocity_points_forward()" in CMD_SOURCE
     assert "allow_non_forward_target_velocity" in CMD_SOURCE
 
