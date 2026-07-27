@@ -1,0 +1,137 @@
+{
+  "schema_version": 2,
+  "library_id": "canonical_motion_library_v3_20260727",
+  "publication_class": "compiler_candidate",
+  "training_authorized": false,
+  "hardware_authorized": false,
+  "purpose": "Build and compare canonical-ready upper/full stationary stroke candidates before independent behavior certification.  v3 differs from v2 in exactly one field: the fh_loop motion_spec source is repointed from the 2026-07-10 forehand take (SHADOW_fh_loop_yaw147.npz, 116 frames) to the 2026-07-27 re-recorded higher-contact take (SHADOW_fh_loop_high_yaw152.npz, 98 frames).  The library still holds exactly five motions; this is a replacement, not an addition.",
+  "frame_id": "a3_robot_origin_ground_z0",
+  "marker_authority": {
+    "path": "configs/canonical_motion_marker_semantics_v2_20260724.json",
+    "sha256": "0bf36c204162bf63e044db129bdb869129f36fb7a6d191a7c83effc4ba300929"
+  },
+  "canonical_ready": {
+    "path": "vendor_assets/motion_finalize_20260724/ready/canonical_ready_v1.npz",
+    "sha256": "cb0a05ca9f7220686acfde1010c28ed04558fb2aa47ef2cfb2284d576ecd15b0",
+    "donor_motion_id": "bh_loop_c",
+    "donor_source_frame": 0,
+    "donor_source_sha256": "d5338168e692c8a2c19fbfac8aeb56653fa79a1f45cebc6803a460835fbc1fba",
+    "endpoint_velocity_policy": "all_joint_root_body_velocities_exact_zero"
+  },
+  "model_contract": {
+    "mjcf_path": "agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml",
+    "mjcf_sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97",
+    "urdf_path": "agi/URDF/A3T2.5-URDF-std-pingpang/urdf/URDF-JOINT-LINK.urdf",
+    "urdf_sha256": "0d83529cf808e2e68036f8168bd8b7a1c9a97d9c536eb9a14981ea4105d6b9ae",
+    "body_order_path": "configs/a3_runtime_body_order.txt",
+    "body_order_sha256": "1cdae4ba7c8d604428ee69ed4a3059e67fb195b22e1d0e294d509c4325809a3a"
+  },
+  "scope_contract": {
+    "upper": {
+      "root": "fixed_canonical_ready",
+      "lower_and_head": "fixed_canonical_ready",
+      "pelvis_relative_rotation": "fold_complete_so3_into_waist_zxy",
+      "pelvis_translation": "removed_and_reported"
+    },
+    "full": {
+      "root": "one_atomic_se2_frame0_alignment_then_preserve_local_motion",
+      "joints": "preserve_full_source_before_ready_connectors"
+    }
+  },
+  "time_law": {
+    "fps": 50.0,
+    "joint_velocity_limit_fraction": 1.0,
+    "post_retime_behavior_opportunity_minimum_s": 0.08,
+    "legacy_seed_marker_policy": "search_and_retime_marker_only_never_output_behavior_window",
+    "kinematic_window_policy": "nonnegative_scalar_acceleration_through_exact_window_end",
+    "acceleration_policy": "grounded_torque_contact_screen_required_before_promotion_beyond_compiler_candidate",
+    "window_acceleration_allowed_through_end": true,
+    "window_acceleration_objective": "prefer_no_cruise_or_braking_before_window_end_unless_a_hard_limit_requires_it",
+    "torque_claim": "no_uniform_torque_or_dynamic_claim_until_inverse_dynamics_and_replay_pass"
+  },
+  "entry_exit_search": {
+    "mode": "enumerate_all_then_gate_and_rank",
+    "legacy_ge80_halo_source_frames": 2,
+    "candidate_eligibility": "retain_legacy_ge80_seed_plus_symmetric_halo",
+    "ranking_preference": [
+      "opportunity_start",
+      "ordinary_nominal_event_if_available",
+      "opportunity_end"
+    ],
+    "retained_source_prefix_required": false,
+    "retained_source_suffix_required": false,
+    "historical_adv2c3_role": "comparator_only_not_default"
+  },
+  "motion_specs": [
+    {
+      "motion_id": "fh_loop",
+      "human_role": "normal-distance forehand active loop",
+      "source_path": "vendor_assets/motion_finalize_20260724/sources/SHADOW_fh_loop_high_yaw152.npz",
+      "source_sha256": "7d045fcb036ffa668dede4607cfcc82e789a0db7ab86fd8df9dd52cfd5ac4153",
+      "scope_overrides": {}
+    },
+    {
+      "motion_id": "bh_loop_c",
+      "human_role": "normal-distance backhand active loop",
+      "source_path": "vendor_assets/motion_finalize_20260724/sources/SHADOW_franco_bh_loop_c.npz",
+      "source_sha256": "d5338168e692c8a2c19fbfac8aeb56653fa79a1f45cebc6803a460835fbc1fba",
+      "scope_overrides": {}
+    },
+    {
+      "motion_id": "fh_block_syn",
+      "human_role": "near-body fast-ball forehand block",
+      "source_path": "vendor_assets/motion_finalize_20260724/sources/SHADOW_bh_block_yaw80.npz",
+      "source_sha256": "55870b981584a458bfd479171046445845cb74171618b71338fd9dc9f66a5fe0",
+      "face_manifold": {
+        "mode": "signed_raw_plus_y_flip",
+        "active_joints": "right_arm_7",
+        "site_position": "preserve_per_source_frame",
+        "orientation": "normal_hard_inplane_free",
+        "single_axis_pi_overlay_forbidden": true
+      },
+      "scope_overrides": {}
+    },
+    {
+      "motion_id": "bh_block",
+      "human_role": "near-body fast-ball backhand block",
+      "source_path": "vendor_assets/motion_finalize_20260724/sources/SHADOW_bh_block_yaw80.npz",
+      "source_sha256": "55870b981584a458bfd479171046445845cb74171618b71338fd9dc9f66a5fe0",
+      "scope_overrides": {}
+    },
+    {
+      "motion_id": "s0_highpress",
+      "human_role": "high-ball downward press or smash",
+      "source_path": "vendor_assets/motion_finalize_20260724/sources/SHADOW_s0_yaw72.npz",
+      "source_sha256": "2cd32da1864fa686aff544d29a84e988b91911503ae7f7680601f93345378c01",
+      "scope_overrides": {
+        "full": {
+          "grounding_policy": "minimum_constant_z_offset_for_1mm_clearance",
+          "maximum_grounding_offset_m": 0.09
+        }
+      }
+    }
+  ],
+  "required_output_matrix": {
+    "motion_ids": [
+      "fh_loop",
+      "bh_loop_c",
+      "fh_block_syn",
+      "bh_block",
+      "s0_highpress"
+    ],
+    "scopes": [
+      "upper",
+      "full"
+    ],
+    "candidate_count": 10
+  },
+  "post_build_gates": [
+    "strict_schema2_and_shared_ready_digest",
+    "exact_vendor_mujoco_fk_playback",
+    "joint_position_velocity_and_plant_specific_torque_screen",
+    "self_collision_body_racket_ground_table_net_scan",
+    "post_retime_behavior_opportunity_rescan_per_scope",
+    "stationary_behavior_and_recovery_exam_per_motion",
+    "registry_consumer_export_deploy_contract"
+  ]
+}

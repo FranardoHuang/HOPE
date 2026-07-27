@@ -61,14 +61,18 @@ def _forward_landing(
     net_x: float,
     h: float,
     n_steps: int,
-) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
-    """q (N,5) -> (landing_xy (N,2), valid (N,), v_r (N,3), n (N,3))."""
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """q (N,5) -> (landing_xy (N,2), valid (N,), v_r (N,3), n (N,3), net_z (N,), net_valid (N,)).
+
+    人话:``coarse_landing`` 本来就顺手算了过网高度,以前这里丢掉了,于是自由解路径**一次都没
+    判过网**——而题库生成器是拒过网失败并单独计数的。现在把它带出来,判不判由调用方决定。
+    """
     n, b1, b2 = _face_from_angles(q[:, 0], q[:, 1])
     v_r = q[:, 2:3] * n + q[:, 3:4] * b1 + q[:, 4:5] * b2
     v_plus, w_plus = predict_paddle_contact(v_ball, v_r, n, w_ball, prm)
     land = coarse_landing(p_strike, v_plus, w_plus, prm, surface_z=surface_z, net_x=net_x,
                           h=h, n_steps=n_steps)
-    return land["land_xy"], land["land_valid"], v_r, n
+    return (land["land_xy"], land["land_valid"], v_r, n, land["net_z"], land["net_valid"])
 
 
 def _seed(
@@ -127,15 +131,18 @@ def solve_strike_specs(
     """Solve racket (normal, velocity) demands for a batch of balls. All args env-local.
 
     Returns dict: ``v_r`` (N,3), ``n`` (N,3, sign-matched to ``ref_normal`` when given),
-    ``landing_xy`` (N,2), ``resid_m`` (N,), ``ok`` (N,) — ok=False rows carry the best attempt
-    but failed tolerance/budget/landing; callers should resample those balls.
+    ``landing_xy`` (N,2), ``resid_m`` (N,), ``speed`` (N,), ``net_z`` (N,), ``net_valid`` (N,),
+    ``ok`` (N,) — ok=False rows carry the best attempt but failed tolerance/budget/landing;
+    callers should resample those balls. ``net_z``/``net_valid`` do NOT enter ``ok``: the net test
+    is the caller's (the bank generator rejects on it, the historical free-solve callers never did,
+    and ``ok`` must stay byte-identical for them).
     """
     N = p_strike.shape[0]
     dev, dt = p_strike.device, p_strike.dtype
     fwd = lambda qq: _forward_landing(qq, p_strike, v_ball, w_ball, prm, surface_z, net_x, h, n_steps)  # noqa: E731
 
     q = _seed(p_strike, v_ball, target_xy, prm, surface_z, delta_t_flight)
-    land_xy, valid, v_r, n = fwd(q)
+    land_xy, valid, v_r, n, net_z, net_valid = fwd(q)
 
     def residual(land_xy_, q_):
         return torch.cat([land_xy_ - target_xy, w_speed * q_[:, 2:5]], dim=-1)   # (N,5)
@@ -155,7 +162,7 @@ def solve_strike_specs(
         for j in range(5):
             qj = q.clone()
             qj[:, j] += hstep[j]
-            lx_j, valid_j, _, _ = fwd(qj)
+            lx_j, valid_j, _, _, _, _ = fwd(qj)
             rj = residual(lx_j, qj)
             col = (rj - r) / hstep[j]
             # a probe that leaves the landing manifold gives garbage — zero its column so the
@@ -174,7 +181,7 @@ def solve_strike_specs(
             except Exception:
                 dq = torch.linalg.lstsq(A, -g.unsqueeze(-1)).solution.squeeze(-1)
             q_new = q + torch.where(accepted_any.unsqueeze(-1), torch.zeros_like(dq), dq)
-            lx_new, valid_new, _, _ = fwd(q_new)
+            lx_new, valid_new, _, _, _, _ = fwd(q_new)
             r_new = residual(lx_new, q_new)
             cost_new = torch.where(valid_new, torch.sum(r_new * r_new, dim=-1), BIG)
             better = (cost_new < cost) & (~accepted_any)
@@ -187,7 +194,7 @@ def solve_strike_specs(
             if bool(accepted_any.all()):
                 break
 
-    land_xy, valid, v_r, n = fwd(q)
+    land_xy, valid, v_r, n, net_z, net_valid = fwd(q)
     resid = torch.linalg.norm(land_xy - target_xy, dim=-1)
     speed = torch.linalg.norm(v_r, dim=-1)
     ok = valid & (resid < tol_m) & (speed <= speed_budget + 1e-9)
@@ -196,4 +203,8 @@ def solve_strike_specs(
         flip = torch.sum(n * ref_normal, dim=-1, keepdim=True) < 0.0
         n = torch.where(flip, -n, n)         # ±n span the same face; match the clip-face sign
 
-    return {"v_r": v_r, "n": n, "landing_xy": land_xy, "resid_m": resid, "ok": ok}
+    # net_z / net_valid are PURE ADDITIONS (``ok`` is byte-identical to before): the free-solve
+    # acceptance still has no net test, so every existing caller and the numpy cross-check are
+    # unchanged. A caller that wants the bank generator's net rejection applies it itself.
+    return {"v_r": v_r, "n": n, "landing_xy": land_xy, "resid_m": resid, "ok": ok,
+            "speed": speed, "net_z": net_z, "net_valid": net_valid, "land_valid": valid}

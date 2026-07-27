@@ -183,6 +183,17 @@ class CompilerOptions:
     # current behaviour byte-for-byte.  Probe-grade only; the independent
     # verifier rejects banks built this way (like banded enumeration).
     probe_source_smoothing_tolerance_rad: float | None = None
+    # Probe-only: widen the synthetic face solve by (before, after) source
+    # frames around the marker authority's construction solve span, and gate
+    # entry/exit eligibility on the widened span the solver actually covered.
+    # The authority span is a SOLVER annotation; using it unchanged as the
+    # eligibility bound truncates the synthetic's retained core relative to its
+    # donor's and the retimer answers that with a 2-10x longer duration (every
+    # velocity scaled down by the same factor).  None (default) is the exact
+    # current behaviour byte-for-byte.  Probe-grade only; every widened frame
+    # is face-solved and receipted, and the independent verifier still rebinds
+    # the authority span.
+    synthetic_face_solve_span_extension: tuple[int, int] | None = None
 
 
 @dataclass(frozen=True)
@@ -384,6 +395,17 @@ def _validate_options(options: CompilerOptions) -> tuple[np.ndarray, FullRootPat
         raise CanonicalMotionCompilerError(
             "C2 quintic geometry requires at least five intervals per segment"
         )
+    extension = options.synthetic_face_solve_span_extension
+    if extension is not None:
+        values = tuple(extension)
+        if len(values) != 2 or any(
+            isinstance(value, bool) or not isinstance(value, int) or value < 0
+            for value in values
+        ):
+            raise CanonicalMotionCompilerError(
+                "synthetic_face_solve_span_extension must be a "
+                "(before, after) pair of non-negative integers or None"
+            )
     for index, seed in enumerate(options.face_active_candidate_seeds):
         _finite_vector(seed, 7, f"face_active_candidate_seeds[{index}]")
     normalized_root = FullRootPathLimits(
@@ -572,9 +594,9 @@ def _solve_synthetic_face(
     backend: RightRacketBackend,
     options: CompilerOptions,
     velocity_fraction: float,
-) -> tuple[BodyScopeResult, Mapping[str, Any] | None]:
+) -> tuple[BodyScopeResult, Mapping[str, Any] | None, tuple[int, int] | None]:
     if source.motion_id != "fh_block_syn":
-        return scoped, None
+        return scoped, None, None
     face = source.face_manifold
     if face is None:
         raise CanonicalMotionCompilerError(
@@ -585,11 +607,17 @@ def _solve_synthetic_face(
         raise CanonicalMotionCompilerError(
             "fh_block_syn is missing its marker-authority construction marker"
         )
-    solve_start, solve_end = (int(value) for value in construction.solve_span)
+    authority_span = tuple(int(value) for value in construction.solve_span)
+    solve_start, solve_end = authority_span
     if not 0 <= solve_start <= solve_end < len(scoped.joint_pos):
         raise CanonicalMotionCompilerError(
             "synthetic face solve span is outside the scoped source"
         )
+    extension = options.synthetic_face_solve_span_extension
+    if extension is not None:
+        before, after = (int(value) for value in extension)
+        solve_start = max(0, solve_start - before)
+        solve_end = min(len(scoped.joint_pos) - 1, solve_end + after)
     if face["orientation"] != "normal_hard_inplane_free":
         raise CanonicalMotionCompilerError(
             "compiler supports only the recipe's normal-hard/in-plane-free solve"
@@ -622,7 +650,19 @@ def _solve_synthetic_face(
             root_quat_w=scoped.root_quat_w,
             report=scoped.report,
         ),
-        MappingProxyType(result.summary()),
+        MappingProxyType(
+            {
+                **dict(result.summary()),
+                "authority_solve_span": [int(x) for x in authority_span],
+                "effective_solve_span": [int(solve_start), int(solve_end)],
+                "solve_span_extension": (
+                    None
+                    if extension is None
+                    else [int(value) for value in extension]
+                ),
+            }
+        ),
+        (int(solve_start), int(solve_end)),
     )
 
 
@@ -800,6 +840,8 @@ def _entry_exit_candidates(
     source_coordinates: np.ndarray,
     ready_coordinates: np.ndarray,
     contract: _PathContract,
+    *,
+    face_solved_span: tuple[int, int] | None = None,
 ) -> tuple[list[EntryExitCandidate], list[EntryExitCandidate], int]:
     search = recipe.raw["entry_exit_search"]
     halo = int(search["legacy_ge80_halo_source_frames"])
@@ -824,8 +866,19 @@ def _entry_exit_candidates(
     row = recipe.marker_semantics.row(source.motion_id)
     if row.construction_marker is not None:
         # Frames outside the face-solved construction span still carry the
-        # donor's unflipped face and may not enter a synthetic candidate.
-        solve_start, solve_end = row.construction_marker.solve_span
+        # donor's unflipped face and may not enter a synthetic candidate.  The
+        # gate is the span the face solver ACTUALLY covered, not the marker
+        # authority's annotation span: when the two differ the annotation span
+        # silently truncates the retained core (measured 2026-07-27: confining
+        # the block core to exit<=48 instead of the donor's 54 costs a factor
+        # 2-10 in retimed duration on the donor's own UNFLIPPED joints, i.e.
+        # the flipped arm chain is not the cause), and a truncated core is
+        # emitted as a half-speed clip with a PASS verdict.
+        solve_start, solve_end = (
+            row.construction_marker.solve_span
+            if face_solved_span is None
+            else face_solved_span
+        )
         eligible = [
             candidate
             for candidate in eligible
@@ -1596,9 +1649,15 @@ def _search_core(
     contract: _PathContract,
     *,
     options: CompilerOptions,
+    face_solved_span: tuple[int, int] | None = None,
 ) -> tuple[_SearchWinner, Mapping[str, Any]]:
     enumerated, eligible, halo = _entry_exit_candidates(
-        recipe, source, source_coordinates, ready_coordinates, contract
+        recipe,
+        source,
+        source_coordinates,
+        ready_coordinates,
+        contract,
+        face_solved_span=face_solved_span,
     )
     eligible = _apply_probe_band(eligible, options)
     minimum_window_s = float(
@@ -2320,7 +2379,7 @@ def _compile_motion_scope(
     contract: _PathContract,
 ) -> CompiledMotion:
     scoped = _preprocess_scope(recipe, source, scope, options)
-    scoped, face_report = _solve_synthetic_face(
+    scoped, face_report, face_solved_span = _solve_synthetic_face(
         recipe,
         source,
         scoped,
@@ -2356,6 +2415,7 @@ def _compile_motion_scope(
         ready_coordinates,
         contract,
         options=options,
+        face_solved_span=face_solved_span,
     )
     if winner.retimed.collocation_trace is None:
         raise CanonicalMotionCompilerError(
@@ -2552,6 +2612,17 @@ def _compiler_options_receipt(
             "probe_source_smoothing_is_identity": (
                 options.probe_source_smoothing_tolerance_rad is None
             ),
+            "synthetic_face_solve_span_extension": (
+                None
+                if options.synthetic_face_solve_span_extension is None
+                else [
+                    int(value)
+                    for value in options.synthetic_face_solve_span_extension
+                ]
+            ),
+            "synthetic_face_solve_span_is_authority_span": (
+                options.synthetic_face_solve_span_extension is None
+            ),
         },
         "face_manifold": {
             "effective_config": _json_safe(asdict(face_config)),
@@ -2718,6 +2789,97 @@ def _library_manifest(
     return MappingProxyType(_json_safe(manifest))
 
 
+
+# A synthetic construction and its donor are the SAME source bytes.  Anything that
+# systematically slows one relative to the other is a build defect, not a stroke.
+# Measured 2026-07-27: fh_block_syn shipped at 2.080 s / 104 frames against
+# bh_block's 1.080 s / 54 frames from one source file, blade peak 1.10 m/s vs
+# 2.42 m/s, median per-joint speed ratio 1.986 -- and every gate in the bank
+# passed.  The cause was the entry/exit eligibility bound (the marker authority's
+# face SOLVER annotation span truncating the retained core), reproduced on the
+# donor's own unflipped joints, so nothing about the flip could ever have been
+# blamed by a per-clip check.  Only a donor-relative check sees it.
+#
+# Tolerance calibration (same harness, upper scope, probe8h/0.02 options):
+#   donor bh_block, core [31,54] or [34,54]           0.800 s
+#   synthetic, face span [34,48], core [34,48]        4.160 s   <- the defect, 5.2x
+#   synthetic, face span [34,54], core [34,54]        1.140 s   <- fixed,      1.43x
+# The flipped right-arm chain genuinely costs ~1.4x (its scaled path total
+# variation is larger); 1.5 admits that and still fails the shipped defect,
+# whose published ratio was 2.080 s / 1.080 s = 1.93.
+_SYNTHETIC_DONOR_DURATION_TOLERANCE = 1.5
+
+
+def _synthetic_donor_motion_id(
+    recipe: CanonicalMotionRecipe, motion_id: str
+) -> str | None:
+    """The sibling motion that binds the exact same source bytes, if any."""
+
+    row = recipe.marker_semantics.row(motion_id)
+    if row.construction_marker is None:
+        return None
+    try:
+        own = next(
+            src for src in recipe.sources if src.motion_id == motion_id
+        )
+    except StopIteration:  # pragma: no cover - recipe loader invariant
+        raise CanonicalMotionCompilerError(
+            f"{motion_id} is not a recipe source"
+        ) from None
+    donors = [
+        src.motion_id
+        for src in recipe.sources
+        if src.motion_id != motion_id and src.sha256 == own.sha256
+    ]
+    if not donors:
+        # No byte-identical sibling, so there is nothing to compare against.
+        # The recipe loader already enforces that the shipped synthetic binds
+        # its donor's exact source bytes, so this branch is not a silent
+        # weakening of that invariant -- it only keeps this comparison gate
+        # inert on recipes that do not pair a synthetic with a donor.
+        return None
+    if len(donors) != 1:
+        raise CanonicalMotionCompilerError(
+            f"{motion_id} is a synthetic construction but binds "
+            f"{len(donors)} byte-identical donor sources; a synthetic must "
+            "have at most one donor to be comparable"
+        )
+    return donors[0]
+
+
+def _assert_synthetic_tracks_its_donor(
+    recipe: CanonicalMotionRecipe,
+    compiled: Sequence[CompiledMotion],
+) -> None:
+    """Fail the build when a synthetic is emitted slower than its own donor."""
+
+    durations = {(row.motion_id, row.scope): row.duration_s for row in compiled}
+    for row in compiled:
+        donor = _synthetic_donor_motion_id(recipe, row.motion_id)
+        if donor is None:
+            continue
+        donor_duration = durations.get((donor, row.scope))
+        if donor_duration is None:
+            raise CanonicalMotionCompilerError(
+                f"{row.motion_id} {row.scope} has no compiled donor "
+                f"{donor} {row.scope} to be compared against"
+            )
+        limit = _SYNTHETIC_DONOR_DURATION_TOLERANCE * float(donor_duration)
+        if float(row.duration_s) > limit:
+            raise CanonicalMotionCompilerError(
+                f"{row.motion_id} {row.scope} retimed to "
+                f"{float(row.duration_s):.4g} s against donor {donor}'s "
+                f"{float(donor_duration):.4g} s from the SAME source bytes "
+                f"(limit {limit:.4g} s = "
+                f"{_SYNTHETIC_DONOR_DURATION_TOLERANCE:g}x). Every joint "
+                "velocity is scaled down by that ratio, so the published clip "
+                "is the donor motion in slow motion, not a stroke. Check the "
+                "entry/exit eligibility bound: a synthetic whose retained core "
+                "is confined to the face-solve span while its donor keeps a "
+                "later exit pays this exact factor."
+            )
+
+
 def compile_loaded_canonical_motion_library(
     recipe: CanonicalMotionRecipe,
     *,
@@ -2807,6 +2969,7 @@ def compile_loaded_canonical_motion_library(
         raise CanonicalMotionCompilerError(
             f"required recipe output matrix changed: {actual}"
         )
+    _assert_synthetic_tracks_its_donor(recipe, compiled)
     manifest = _library_manifest(
         recipe,
         compiled,

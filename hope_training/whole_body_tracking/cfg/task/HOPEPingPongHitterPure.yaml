@@ -152,7 +152,7 @@ racket:
   # so the racket reaches the plane with the base AT the station (no lean). Single value = x-locked
   # single plane. Deploy: robot stands ~0.19 m CLOSER (station 0.33 -> ~0.52; ball plane 1.03 kept).
   pos_range_per_clip:
-    forehand: {x: [0.51, 0.51], y: [-0.65, -0.15], z: [0.67, 0.97]}
+    forehand: {x: [0.51, 0.51], y: [-0.65, -0.15], z: [0.78, 1.08]}
     backhand: {x: [0.51, 0.51], y: [-0.05,  0.45], z: [0.88, 1.18]}
   vel_range_per_clip:
     forehand: {x: [1.05, 2.05], y: [ 0.96, 1.96], z: [0.31, 1.11]}

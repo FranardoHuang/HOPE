@@ -373,9 +373,14 @@ racket:
   #   backhand @ phase 0.333 (frame 44):  blade pos (0.66,  0.13, 1.03)
   # PHASE-A STABILITY spans: pos +-(0.10, 0.20, 0.10) m per axis — conservative ON PURPOSE (learn a
   # stable strike at the reference blade point first; the wide footwork boxes come in later phases).
-  # +X=forward, -Y=forehand(right) side. Sanity: z >= 0.60, x <= 0.85 everywhere.
+  # +X=forward, -Y=forehand(right) side. Sanity rule (the ONLY one that is physical): any box whose
+  # x reaches past the near table edge (racket.vb_table_near_x = 0.5) must have
+  # z_lo >= vb_table_surface_z + ball radius = 0.76 + 0.02 = 0.78 — a lower box commands contact
+  # inside/below the table top, where no ball can ever be. The old "z >= 0.60" line PASSED the
+  # below-table forehand box that pinned virtual_return_rate_forehand at 0.0000.
+  # Enforced at env construction by RacketTargetCommand._assert_contact_clears_table (hope_commands.py).
   pos_range_per_clip:
-    forehand: {x: [0.58, 0.78], y: [-0.64, -0.24], z: [0.72, 0.92]}
+    forehand: {x: [0.58, 0.78], y: [-0.64, -0.24], z: [0.78, 0.98]}
     backhand: {x: [0.56, 0.76], y: [-0.07,  0.33], z: [0.93, 1.13]}
   # Racket target VELOCITY (HOPE world frame): return is +X-dominant (toward the opponent). BLADE
   # RE-PLANE 2026-07-02: old boxes were centered on the WRIST strike velocity (fore (+1.54,+1.17,+0.64) /

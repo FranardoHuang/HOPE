@@ -26,6 +26,14 @@ A3_CONTACT_EXCLUDE_REGEX = (
     r"(?!right_hand_pingpang_Link$)(?!pingpang_red_Link$)(?!pingpang_black_Link$)(?!pingbang_ball_Link$).+$"
 )
 
+# Every body EXCEPT the two feet — the selection the ``robot_hit_table`` termination watches.
+# Unlike A3_CONTACT_EXCLUDE_REGEX this KEEPS the wrists and the racket links: those are precisely
+# the bodies that strike the table, and the racket is not a separate PhysX body anyway (the URDF's
+# fixed massless pingpang_* links are merged into right_wrist_yaw_Link), so the wrist entry is
+# what carries a racket contact.  The feet are excluded because their contact channel is the
+# sanctioned floor contact used by foot_soft_landing / feet_contact_time.
+A3_NON_FOOT_BODY_REGEX = r"^(?!left_ankle_roll_Link$)(?!right_ankle_roll_Link$).+$"
+
 
 @configclass
 class AgibotA3FlatEnvCfg(TrackingEnvCfg):

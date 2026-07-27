@@ -38,7 +38,7 @@ from typing import Any, Mapping
 import numpy as np
 
 from canonical_motion_markers import (
-    MARKER_AUTHORITY_PATH,
+    MARKER_AUTHORITY_PROFILE_BY_PATH,
     MarkerSemantics,
     load_canonical_motion_markers,
 )
@@ -153,6 +153,12 @@ _FACE_KEYS = frozenset(
         "single_axis_pi_overlay_forbidden",
     }
 )
+#: The canonical five, in order.  A library must still START with exactly
+#: these, in exactly this order -- that is what stops an existing motion being
+#: swapped out or reordered.  It may APPEND further motions after them.  The
+#: old rule ("exactly five") conflated "do not touch the originals" with "this
+#: repository may never hold a sixth stroke"; only the first half was ever the
+#: point.
 _REQUIRED_MOTION_IDS = (
     "fh_loop",
     "bh_loop_c",
@@ -160,6 +166,21 @@ _REQUIRED_MOTION_IDS = (
     "bh_block",
     "s0_highpress",
 )
+
+
+def _ordered_prefix_error(actual: tuple[str, ...], label: str) -> str:
+    return (
+        f"{label} must begin with the canonical ordered five "
+        f"{list(_REQUIRED_MOTION_IDS)} and may only append after them; got "
+        f"{list(actual)}"
+    )
+
+
+def _check_ordered_prefix(actual: tuple[str, ...], label: str) -> None:
+    if actual[: len(_REQUIRED_MOTION_IDS)] != _REQUIRED_MOTION_IDS:
+        raise MotionRecipeError(_ordered_prefix_error(actual, label))
+    if len(set(actual)) != len(actual):
+        raise MotionRecipeError(f"{label} has duplicate motion ids: {list(actual)}")
 _POST_BUILD_GATES = (
     "strict_schema2_and_shared_ready_digest",
     "exact_vendor_mujoco_fk_playback",
@@ -545,14 +566,19 @@ def _validate_output_matrix(raw: Mapping[str, Any]) -> None:
     expected_keys = frozenset({"motion_ids", "scopes", "candidate_count"})
     matrix = _exact_keys(matrix, expected_keys, "required_output_matrix")
     motion_ids = matrix["motion_ids"]
-    if not isinstance(motion_ids, list) or tuple(motion_ids) != _REQUIRED_MOTION_IDS:
-        raise MotionRecipeError(
-            "required_output_matrix motion_ids must be the canonical ordered five"
-        )
+    if not isinstance(motion_ids, list) or any(
+        not isinstance(value, str) for value in motion_ids
+    ):
+        raise MotionRecipeError("required_output_matrix motion_ids must be strings")
+    _check_ordered_prefix(tuple(motion_ids), "required_output_matrix motion_ids")
     if matrix["scopes"] != ["upper", "full"]:
         raise MotionRecipeError("required_output_matrix scopes must be upper/full")
-    if matrix["candidate_count"] != 10:
-        raise MotionRecipeError("required_output_matrix candidate_count must be 10")
+    expected_candidates = len(motion_ids) * 2
+    if matrix["candidate_count"] != expected_candidates:
+        raise MotionRecipeError(
+            "required_output_matrix candidate_count must be "
+            f"{expected_candidates} (motions x scopes)"
+        )
 
 
 def load_canonical_motion_recipe(
@@ -594,24 +620,32 @@ def load_canonical_motion_recipe(
     marker_repo_path = _nonempty_string(
         marker_contract["path"], "marker_authority.path"
     )
-    if marker_repo_path != MARKER_AUTHORITY_PATH:
+    # The profile is chosen from the path the CALLER's recipe pins, and that
+    # path must be one of the registered authorities.  The authority document
+    # never gets to nominate its own validation regime.
+    marker_profile = MARKER_AUTHORITY_PROFILE_BY_PATH.get(marker_repo_path)
+    if marker_profile is None:
         raise MotionRecipeError(
-            f"marker_authority.path must equal {MARKER_AUTHORITY_PATH!r}"
+            "marker_authority.path must be a registered marker authority "
+            f"({sorted(MARKER_AUTHORITY_PROFILE_BY_PATH)}); got {marker_repo_path!r}"
         )
     marker_path, marker_sha = _check_bound_file(
         root,
         marker_repo_path,
         marker_contract["sha256"],
-        "marker authority v2",
+        f"marker authority {marker_profile}",
     )
     try:
         marker_semantics = load_canonical_motion_markers(
             marker_path,
             expected_authority_sha256=marker_sha,
             repo_root=root,
+            profile=marker_profile,
         )
     except ValueError as exc:
-        raise MotionRecipeError(f"marker authority v2 is invalid: {exc}") from exc
+        raise MotionRecipeError(
+            f"marker authority {marker_profile} is invalid: {exc}"
+        ) from exc
 
     ready_contract = _exact_keys(
         raw["canonical_ready"], _READY_RECIPE_KEYS, "canonical_ready"
@@ -639,8 +673,11 @@ def load_canonical_motion_recipe(
         model_hashes[name] = bound_sha
 
     specs = raw["motion_specs"]
-    if not isinstance(specs, list) or len(specs) != len(_REQUIRED_MOTION_IDS):
-        raise MotionRecipeError("motion_specs must contain exactly five motions")
+    if not isinstance(specs, list) or len(specs) < len(_REQUIRED_MOTION_IDS):
+        raise MotionRecipeError(
+            "motion_specs must contain at least the canonical five motions"
+        )
+    declared_matrix_ids = tuple(raw["required_output_matrix"]["motion_ids"])
     sources: list[MotionSource] = []
     seen: set[str] = set()
     for index, raw_spec in enumerate(specs):
@@ -676,26 +713,32 @@ def load_canonical_motion_recipe(
             raise MotionRecipeError(
                 f"{motion_id} source does not close against marker authority v2"
             )
-        marker_frames = [
-            *authority_row.ge50_seed,
-            *authority_row.ge80_seed,
-            authority_row.historical_adv2c3_start,
-        ]
-        if authority_row.nominal_event is not None:
-            marker_frames.append(authority_row.nominal_event)
-        if authority_row.preferred_seed is not None:
-            marker_frames.append(authority_row.preferred_seed)
-        if authority_row.construction_marker is not None:
-            marker_frames.extend(
-                (
-                    authority_row.construction_marker.annotation_frame,
-                    authority_row.construction_marker.donor_preferred_frame,
-                    *authority_row.construction_marker.solve_span,
-                )
+        # One place asks the authority which frames it asserts, so a new
+        # provenance kind cannot slip past the range check by living in a
+        # field this loop never learned to read.
+        marker_frames = authority_row.authority_frames()
+        if not marker_frames:
+            raise MotionRecipeError(
+                f"{motion_id} marker authority row asserts no source frame at all"
             )
         if any(frame >= clip.n_frames for frame in marker_frames):
             raise MotionRecipeError(
                 f"{motion_id} marker authority frame exceeds source frames"
+            )
+        anchor, anchor_basis = authority_row.contact_anchor()
+        if anchor is None:
+            raise MotionRecipeError(
+                f"{motion_id} marker authority row resolves no contact anchor"
+            )
+        window, window_basis = authority_row.search_window()
+        if window is None:
+            raise MotionRecipeError(
+                f"{motion_id} marker authority row resolves no search window "
+                f"(anchor basis {anchor_basis!r})"
+            )
+        if window[1] >= clip.n_frames:
+            raise MotionRecipeError(
+                f"{motion_id} {window_basis} exceeds source frames"
             )
         if not isinstance(spec["scope_overrides"], Mapping):
             raise MotionRecipeError(f"{motion_id} scope_overrides must be an object")
@@ -764,8 +807,13 @@ def load_canonical_motion_recipe(
             )
         )
 
-    if tuple(row.motion_id for row in sources) != _REQUIRED_MOTION_IDS:
-        raise MotionRecipeError("motion_specs order or membership changed")
+    spec_ids = tuple(row.motion_id for row in sources)
+    _check_ordered_prefix(spec_ids, "motion_specs")
+    if spec_ids != declared_matrix_ids:
+        raise MotionRecipeError(
+            "motion_specs and required_output_matrix.motion_ids disagree: "
+            f"{list(spec_ids)} vs {list(declared_matrix_ids)}"
+        )
 
     donor_id = _nonempty_string(
         ready_contract["donor_motion_id"], "ready donor_motion_id"

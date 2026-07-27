@@ -5,6 +5,8 @@ corner, X toward P2, Y left, Z up) and ITTF regulation table dimensions.
 See HOPE_7DOF_Racket_Model_based_Planner_Reference_Setup.md, Section 2.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, field
 
 import numpy as np

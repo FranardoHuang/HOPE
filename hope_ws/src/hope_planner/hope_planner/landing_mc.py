@@ -13,6 +13,8 @@ Pipeline per sample (the exact deploy chain, using hope_planner's venue-fitted p
      ball CENTER reaches z=radius (lower edge touches z=0 table) -> classify good / net /
      long / wide / short
 """
+
+from __future__ import annotations
 import numpy as np
 from hope_planner import BallPhysics, PlannerConfig, TableParams, RacketTargetPlanner
 from hope_planner import predict_paddle_contact

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import numpy as np
 
 from hope_planner.split_calibration_csv import _infer_scale, _normalize_chunk, _split_rows

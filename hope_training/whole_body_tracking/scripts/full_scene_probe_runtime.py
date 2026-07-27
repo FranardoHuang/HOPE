@@ -677,6 +677,10 @@ def _asset_hashes_and_contract_binding(
         if hard_clip.get("index") != index or hard_clip.get("sha256") != digest:
             raise FullSceneProbeError("hard contract motion asset binding mismatch")
         evidence.append({"kind": "motion", "argument": argument, "path": str(path), "sha256": digest})
+    # CONTINUOUS ARMS: a continuously-trained run's hard contract carries a
+    # ``continuous_questions`` block instead of ``question_bank``, so this binding raises and the
+    # probe cannot certify it. Kept as a HARD BLOCK on purpose — this check really does want npz
+    # bytes to hash, and a loud refusal beats a certificate that binds nothing.
     bank = queue_runtime._require_mapping(inputs.get("bank"), "probe bank input")
     bank_path = _canonical_absolute(bank.get("train_path"), "claimed train bank")
     bank_digest = hashlib.sha256(

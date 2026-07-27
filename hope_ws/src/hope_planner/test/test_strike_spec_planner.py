@@ -7,6 +7,8 @@ round-trip inversion, the report's tilt-sensitivity anchor, and graceful
 None returns for unreachable targets / blown speed budgets.
 """
 
+from __future__ import annotations
+
 import numpy as np
 
 from hope_planner.ball_contact import orient_normal, predict_paddle_contact

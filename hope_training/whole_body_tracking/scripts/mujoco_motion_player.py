@@ -26,6 +26,14 @@ contact, training, deployment, hardware, or real-robot certificate.  It calls
 
 The module intentionally imports MuJoCo only after CLI parsing/model loading so
 that schema and helper tests run on machines without MuJoCo.
+
+Table awareness (``--with-table``, OFF by default)
+--------------------------------------------------
+The vendor MJCF has no table in it.  With ``--with-table`` the ping-pong table is appended to an
+IN-MEMORY copy of the model as a colliding obstacle (the file on disk is byte-pinned and is never
+written), and every frame is scanned for robot-vs-table overlap; a clip that swings through the
+table then FAILS.  Without the flag nothing changes: same model, same numbers, same verdict.
+See ``scripts/mujoco_table_scene.py`` for the geometry and the no-legs decision.
 """
 
 from __future__ import annotations
@@ -48,6 +56,9 @@ import numpy as np
 _HERE = Path(__file__).resolve().parent
 _REPO_ROOT = _HERE.parents[2]
 sys.path.insert(0, str(_HERE))
+# After _HERE, never before it: the sibling contracts imported below must keep winning any
+# name clash with the repo-root scripts directory.
+sys.path.insert(1, str(_REPO_ROOT / "scripts"))
 
 from audit_motion_npz import ISAAC_JOINT_NAMES  # noqa: E402
 from motion_kinematics_contract import (  # noqa: E402
@@ -64,6 +75,8 @@ from motion_kinematics_contract import (  # noqa: E402
     read_metadata,
 )
 from racket_geometry_contract import RACKET_SITE_OFFSET_WRIST_M  # noqa: E402
+
+import mujoco_table_scene  # noqa: E402  (pure Python; imports MuJoCo nowhere)
 
 
 DEFAULT_MJCF = (
@@ -785,8 +798,14 @@ def smoke_check(
         DEFAULT_RACKET_ANGULAR_VELOCITY_TOL_RAD_S
     ),
     racket_jacobian_tol: float = DEFAULT_RACKET_JACOBIAN_TOL,
+    table_scene: Any | None = None,
 ) -> dict[str, Any]:
-    """Recompute body FK and the complete right-racket site trajectory."""
+    """Recompute body FK and the complete right-racket site trajectory.
+
+    ``table_scene`` is the opt-in from ``--with-table``.  When present, ``model``/``data`` were
+    compiled from the table-aware MJCF and every frame is additionally scanned for robot-vs-table
+    contacts.  When absent (the default) this function does exactly what it always did.
+    """
 
     for value, label in (
         (position_tol_m, "position_tol_m"),
@@ -853,6 +872,7 @@ def smoke_check(
     jac_lin_error = np.zeros(clip.n_frames, dtype=np.float64)
     jac_ang_error = np.zeros(clip.n_frames, dtype=np.float64)
     root_twist_error = np.zeros(clip.n_frames, dtype=np.float64)
+    table_contacts: list[Any] = []
 
     for frame in range(clip.n_frames):
         apply_frame(
@@ -890,6 +910,13 @@ def smoke_check(
             jac_lin_error[frame],
             jac_ang_error[frame],
         ) = racket_site_state(mujoco, model, data, binding)
+
+        if table_scene is not None:
+            # apply_frame_velocity ended in mj_forward, whose position stage runs collision
+            # detection, so data.contact is already the contact set for this exact pose.
+            table_contacts.extend(
+                mujoco_table_scene.frame_table_contacts(mujoco, table_scene, data, frame)
+            )
 
         body_column = binding.racket_site_body_column
         body_rotation = quaternion_wxyz_to_matrix(
@@ -972,6 +999,10 @@ def smoke_check(
             <= float(racket_angular_velocity_tol_rad_s)
         )
 
+    table_summary = mujoco_table_scene.summarize_contacts(table_contacts)
+    # Default OFF means default UNCHANGED: with no table_scene the clip cannot fail this gate.
+    table_pass = table_scene is None or not table_summary["strikes_table"]
+
     overall_pass = bool(
         pos_pass
         and ori_pass
@@ -981,6 +1012,7 @@ def smoke_check(
         and site_ang_pass
         and jacobian_pass
         and external_pass
+        and table_pass
     )
     racket_arrays = (
         ("site_pos_w", site_pos),
@@ -1091,6 +1123,32 @@ def smoke_check(
                 "root_twist_max_abs_error": float(
                     np.max(root_twist_error)
                 ),
+            },
+            "table_contact": {
+                "enabled": table_scene is not None,
+                "pass": bool(table_pass),
+                "obstacle_names": (
+                    None
+                    if table_scene is None
+                    else list(mujoco_table_scene.OBSTACLE_NAMES)
+                ),
+                "isaac_equivalent_obstacles": (
+                    None
+                    if table_scene is None
+                    else list(mujoco_table_scene.ISAAC_EQUIVALENT_OBSTACLES)
+                ),
+                "table_pose": (
+                    None
+                    if table_scene is None
+                    else {
+                        "near_x_m": table_scene.near_x,
+                        "surface_z_m": table_scene.surface_z,
+                    }
+                ),
+                "augmented_mjcf_sha256": (
+                    None if table_scene is None else table_scene.augmented_xml_sha256
+                ),
+                **table_summary,
             },
             "racket_external_reference": {
                 "enabled": racket_reference is not None,
@@ -1325,6 +1383,15 @@ def build_parser() -> argparse.ArgumentParser:
         help="max component error between mj_jacSite and mj_objectVelocity",
     )
     parser.add_argument(
+        "--with-table",
+        action="store_true",
+        help=(
+            "append the colliding ping-pong table to an IN-MEMORY copy of the MJCF (the file on "
+            "disk is never touched) and fail the clip if it strikes it. OFF by default so no "
+            "existing verdict changes; see scripts/mujoco_table_scene.py"
+        ),
+    )
+    parser.add_argument(
         "--report",
         help="optional JSON report; created no-clobber (the only file this tool writes)",
     )
@@ -1353,7 +1420,14 @@ def main(argv: Sequence[str] | None = None) -> int:
         if not mjcf_path.is_file():
             raise ValueError(f"MJCF not found: {mjcf_path}")
         mujoco = load_mujoco()
-        model = mujoco.MjModel.from_xml_path(str(mjcf_path))
+        table_scene = None
+        if args.with_table:
+            table_scene = mujoco_table_scene.load_table_scene(
+                mujoco, mjcf_path, collidable=True
+            )
+            model = table_scene.model
+        else:
+            model = mujoco.MjModel.from_xml_path(str(mjcf_path))
         data = mujoco.MjData(model)
         binding = bind_model(mujoco, model)
         report = smoke_check(
@@ -1374,6 +1448,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                 args.racket_angular_velocity_tol_rad_s
             ),
             racket_jacobian_tol=args.racket_jacobian_tol,
+            table_scene=table_scene,
         )
         report["artifacts"] = {
             "motion_sha256": sha256_file(clip.path),
@@ -1418,6 +1493,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             f"|w|max={racket_peaks['site_angular_speed_max_rad_s']:.6g} rad/s; "
             "mj_step_calls=0 (kinematic evidence only)"
         )
+        if args.with_table:
+            table = report["gates"]["table_contact"]
+            if table["strikes_table"]:
+                worst = table["worst"]
+                print(
+                    "[kinematic-player] TABLE: strikes the table on "
+                    f"{len(table['contact_frames'])} frame(s) "
+                    f"{table['contact_frames'][:12]}"
+                    f"{'...' if len(table['contact_frames']) > 12 else ''}; "
+                    f"max penetration {worst['depth_m'] * 1000.0:.1f} mm "
+                    f"({worst['robot_geom']} into {worst['obstacle']} at frame {worst['frame']})"
+                )
+            else:
+                print("[kinematic-player] TABLE: clear (no robot geom enters the table)")
         if args.viewer:
             play_viewer(
                 clip,

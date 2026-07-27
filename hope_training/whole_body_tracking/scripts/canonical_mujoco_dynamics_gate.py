@@ -81,7 +81,11 @@ from typing import Any, Dict, List, Mapping, Optional, Sequence, Tuple
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
+# After the sibling directory, never before it, so sibling contracts win any name clash.
+sys.path.insert(1, str(Path(__file__).resolve().parents[3] / "scripts"))
 from audit_motion_npz import ISAAC_JOINT_NAMES, parse_urdf_limits  # noqa: E402
+
+import mujoco_table_scene  # noqa: E402  (pure Python; imports MuJoCo nowhere)
 
 try:  # pure helpers and tests remain importable without MuJoCo
     import mujoco
@@ -242,6 +246,12 @@ class PlantModel:
     actuation_mapping_verified: bool
     identity_bound: bool
     identity_expectations: Mapping[str, Optional[str]]
+    #: Set only by ``--with-table``.  When present, ``contact_model`` is the in-memory
+    #: table-augmented model and the geometry check's existing ``other_world`` bucket picks up
+    #: robot-vs-table overlap on its own.  ``inverse_model`` is always the canonical model, and
+    #: ``compiled_signature_sha256`` is always the canonical signature, so the identity pin keeps
+    #: meaning exactly what it meant before.
+    table_scene: Any = None
 
     @property
     def nq(self) -> int:
@@ -400,8 +410,16 @@ def load_plant(
     urdf_path: Optional[os.PathLike[str] | str] = None,
     velocity_limits: Optional[Sequence[float]] = None,
     expected_effort_limits: Optional[Sequence[float]] = None,
+    with_table: bool = False,
 ) -> PlantModel:
-    """Load and validate the exact floating-base, direct-motor A3 plant."""
+    """Load and validate the exact floating-base, direct-motor A3 plant.
+
+    ``with_table`` (``--with-table``, OFF by default) appends the ping-pong table to an IN-MEMORY
+    copy of the MJCF as a colliding obstacle; the file on disk is byte-pinned and never written.
+    Only ``contact_model`` gains the table.  ``inverse_model`` has contacts disabled anyway, and
+    the compiled-signature identity receipt is taken from the CANONICAL model before the swap, so
+    a pinned ``--expected-compiled-signature`` still verifies the same thing it always verified.
+    """
 
     if mujoco is None:
         raise DynamicsGateError("mujoco is not installed")
@@ -420,7 +438,12 @@ def load_plant(
 
     contact_model = mujoco.MjModel.from_xml_path(str(path))
     inverse_model = mujoco.MjModel.from_xml_path(str(path))
+    # Identity receipt is taken from the canonical model, BEFORE any table is attached.
     signature = compiled_model_signature(contact_model)
+    table_scene = None
+    if with_table:
+        table_scene = mujoco_table_scene.load_table_scene(mujoco, path, collidable=True)
+        contact_model = table_scene.model
     if expected_compiled_signature is not None:
         expected_sig = str(expected_compiled_signature).lower()
         if len(expected_sig) != 64 or any(c not in "0123456789abcdef" for c in expected_sig):
@@ -683,6 +706,7 @@ def load_plant(
             "source_xml": expected_mjcf_sha256,
             "compiled_signature": expected_compiled_signature,
         },
+        table_scene=table_scene,
     )
 
 
@@ -1743,6 +1767,25 @@ def analyze_trajectory(
             "urdf_path": plant.urdf_path,
             "urdf_sha256": plant.urdf_sha256,
             "compiled_model_signature_sha256": plant.compiled_signature_sha256,
+            "table_obstacle": (
+                {"enabled": False}
+                if plant.table_scene is None
+                else {
+                    "enabled": True,
+                    "source": "in_memory_mjcf_augmentation_disk_file_untouched",
+                    "obstacle_names": list(mujoco_table_scene.OBSTACLE_NAMES),
+                    "isaac_equivalent_obstacles": list(
+                        mujoco_table_scene.ISAAC_EQUIVALENT_OBSTACLES
+                    ),
+                    "near_x_m": plant.table_scene.near_x,
+                    "surface_z_m": plant.table_scene.surface_z,
+                    "augmented_mjcf_sha256": plant.table_scene.augmented_xml_sha256,
+                    "note": (
+                        "table overlap is reported under checks.geometry."
+                        "other_world_penetration_violations"
+                    ),
+                }
+            ),
             "expected_identity": dict(plant.identity_expectations),
             "identity_bound": plant.identity_bound,
             "actuation_mapping_verified": plant.actuation_mapping_verified,
@@ -1846,6 +1889,16 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--expected-mjcf-sha256")
     parser.add_argument("--expected-compiled-signature")
+    parser.add_argument(
+        "--with-table",
+        action="store_true",
+        help=(
+            "append the colliding ping-pong table to an IN-MEMORY copy of the MJCF (the file on "
+            "disk is never touched). Table overlap then lands in the existing geometry check's "
+            "other_world bucket and can fail the clip. OFF by default so no existing verdict "
+            "changes; see scripts/mujoco_table_scene.py"
+        ),
+    )
     parser.add_argument("--out", help="optional JSON report path; stdout otherwise")
     return parser
 
@@ -1858,6 +1911,7 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
             expected_mjcf_sha256=args.expected_mjcf_sha256,
             expected_compiled_signature=args.expected_compiled_signature,
             urdf_path=args.urdf,
+            with_table=args.with_table,
         )
         trajectory = trajectory_from_schema2_npz(args.motion, plant)
         report = analyze_trajectory(plant, trajectory)

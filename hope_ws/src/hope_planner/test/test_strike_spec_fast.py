@@ -17,6 +17,8 @@ Guards the three productionized levers of the 2026-07-06 latency work:
    warm start, iter budget).
 """
 
+from __future__ import annotations
+
 import numpy as np
 
 from hope_planner.ball_trajectory_predictor import BallTrajectoryPredictor

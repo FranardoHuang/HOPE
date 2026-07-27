@@ -7,6 +7,8 @@ model, and return the predicted ball state at the virtual hitting plane.
 See HOPE_7DOF_Racket_Model_based_Planner_Reference_Setup.md, Section 4.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Optional, Tuple
 

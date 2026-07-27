@@ -173,11 +173,14 @@ def test_marker_authority_path_and_sha_are_explicit_and_fail_closed(tmp_path):
     with pytest.raises(MotionRecipeError, match="SHA-256 mismatch"):
         _write_and_load(tmp_path, raw)
 
+    # v1 is immutable historical provenance and is not a loadable authority.
+    # The recipe picks the validation profile from this path, so an unknown or
+    # non-registered path must fail closed rather than fall back to a default.
     raw = _raw()
     raw["marker_authority"][
         "path"
     ] = "configs/canonical_motion_marker_semantics_v1_20260724.json"
-    with pytest.raises(MotionRecipeError, match="must equal"):
+    with pytest.raises(MotionRecipeError, match="registered marker authority"):
         _write_and_load(tmp_path, raw)
 
 

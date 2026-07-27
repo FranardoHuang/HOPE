@@ -1289,7 +1289,8 @@ def _validate_job(args: argparse.Namespace) -> _ValidatedJob:
             "search parallel backend must be thread or process"
         )
     option_fields = getattr(cmc.CompilerOptions, "__dataclass_fields__", {})
-    expected_option_fields = frozenset(
+    # Fields this formal CLI maps from its own arguments.
+    mapped_option_fields = frozenset(
         {
             "joint_acceleration_limits_rad_s2",
             "full_root_limits",
@@ -1304,6 +1305,20 @@ def _validate_job(args: argparse.Namespace) -> _ValidatedJob:
             "face_active_candidate_seeds",
         }
     )
+    # Probe-grade knobs the formal CLI deliberately does NOT expose.  They stay
+    # at their dataclass defaults here, and that is asserted below rather than
+    # assumed: a probe knob silently reaching a formal build is exactly the
+    # class of error this contract check exists to stop.
+    probe_only_option_fields = frozenset(
+        {
+            "probe_entry_band",
+            "probe_exit_band",
+            "probe_exact_pointwise_caps",
+            "probe_source_smoothing_tolerance_rad",
+            "synthetic_face_solve_span_extension",
+        }
+    )
+    expected_option_fields = mapped_option_fields | probe_only_option_fields
     if frozenset(option_fields) != expected_option_fields:
         raise CanonicalMotionCompileCliError(
             "canonical_motion_compiler CompilerOptions contract changed; "
@@ -1331,6 +1346,13 @@ def _validate_job(args: argparse.Namespace) -> _ValidatedJob:
         face_config=None,
         face_active_candidate_seeds=(),
     )
+    for name in sorted(probe_only_option_fields):
+        default = cmc.CompilerOptions.__dataclass_fields__[name].default
+        if getattr(options, name) != default:
+            raise CanonicalMotionCompileCliError(
+                f"formal compile left probe-grade option {name!r} at "
+                f"{getattr(options, name)!r} instead of its default {default!r}"
+            )
     model_bindings = _model_bindings(recipe)
     normalized_args = {
         "recipe": str(recipe_path),

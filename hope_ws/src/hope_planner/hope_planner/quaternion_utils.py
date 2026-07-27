@@ -6,6 +6,8 @@ The constrain_up option aligns the paddle handle (local Y) with world -Z.
 See HOPE_7DOF_Racket_Model_based_Planner_Reference_Setup.md, Section 8.
 """
 
+from __future__ import annotations
+
 import numpy as np
 
 

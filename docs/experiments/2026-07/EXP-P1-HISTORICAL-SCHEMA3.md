@@ -15,4 +15,4 @@
 同题考卷中，M3 old/S1 在 Isaac 中均约为 `.99`，而 MuJoCo 给出 `.42/1.00`。
 该结果定位了跨引擎/仪器问题，但没有修复它。
 
-权威结果：[`PHASE1_SCHEMA3_RESULTS_2026-07-11.md`](../../PHASE1_SCHEMA3_RESULTS_2026-07-11.md)。
+权威结果：[`PHASE1_SCHEMA3_RESULTS_2026-07-11.md`](../../archive/PHASE1_SCHEMA3_RESULTS_2026-07-11.md)。

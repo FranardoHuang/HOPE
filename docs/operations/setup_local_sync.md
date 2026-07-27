@@ -926,7 +926,7 @@ banks must both report source-family SHA-256
 `b21c161a0240893a4a469136c2d5298c2ecfa9f2b4a8c6fb9493b679f3728ad5`, physics SHA-256
 `2e58221442665ddad7cc6dcc18d5c811dec1b0c47439b81c1c744b5148169a27`, physics-contract SHA-256
 `70242d798f5b97e1405df7dedfd22a5f81421c9c03127e71c254982236cfad35`, and disjoint train/exam
-content IDs. See [PHASE1_FRESH_LINEAGE_2026-07-11.md](../PHASE1_FRESH_LINEAGE_2026-07-11.md) for
+content IDs. See [PHASE1_FRESH_LINEAGE_2026-07-11.md](../archive/PHASE1_FRESH_LINEAGE_2026-07-11.md) for
 the incident record, smoke evidence, and exact-vs-diagnostic restrictions.
 
 The canonical tracked audit is

@@ -26,7 +26,15 @@ KNOWN_TERMS = (
     "ee_body_pos",
     "base_fell_tilt",
     "base_too_low",
+    # Added 2026-07-27 with the table obstacle.  It is listed here so a run that trains against a
+    # table can be extracted at all — an unlisted active term is a hard reject by design.  It is
+    # NOT in PHYSICAL_TERMS: striking the table is a foul, not a fall.
+    "robot_hit_table",
 )
+#: The six terms that existed before the table obstacle.  Contracts frozen from earlier runs carry
+#: exactly these keys, so the normalized-shape check accepts either set rather than invalidating
+#: every stored contract the day a seventh term was added.
+LEGACY_KNOWN_TERMS = tuple(name for name in KNOWN_TERMS if name != "robot_hit_table")
 TRACKING_TERMS = ("anchor_pos", "anchor_ori", "ee_body_pos")
 PHYSICAL_TERMS = ("base_fell_tilt", "base_too_low")
 FUNCTION_IDENTITIES = {
@@ -57,6 +65,10 @@ FUNCTION_IDENTITIES = {
     "bad_motion_body_pos_z_only_hold_aware": (
         "whole_body_tracking.tasks.tracking.mdp.hope_rewards:bad_motion_body_pos_z_only_hold_aware",
         "whole_body_tracking.tasks.tracking.mdp.hope_rewards.bad_motion_body_pos_z_only_hold_aware",
+    ),
+    "robot_hit_table": (
+        "whole_body_tracking.tasks.tracking.mdp.terminations:robot_hit_table",
+        "whole_body_tracking.tasks.tracking.mdp.terminations.robot_hit_table",
     ),
     "bad_orientation": (
         "isaaclab.envs.mdp.terminations:bad_orientation",
@@ -322,6 +334,25 @@ def _parse_terms(document: Mapping[str, Any]) -> dict[str, dict[str, Any]]:
                     params.get("minimum_height"), f"terminations.{name}.minimum_height"
                 ),
             }
+        elif name == "robot_hit_table":
+            _function_matches(raw.get("func"), "robot_hit_table", f"terminations.{name}")
+            params = _params(raw, f"terminations.{name}")
+            terms[name] = {
+                "active": True,
+                "function": "robot_hit_table",
+                "near_x": _finite_positive(
+                    params.get("near_x"), f"terminations.{name}.near_x"
+                ),
+                "surface_z": _finite_positive(
+                    params.get("surface_z"), f"terminations.{name}.surface_z"
+                ),
+                "force_threshold": _finite_positive(
+                    params.get("force_threshold"), f"terminations.{name}.force_threshold"
+                ),
+                "margin": _finite_positive(
+                    params.get("margin"), f"terminations.{name}.margin"
+                ),
+            }
     if not terms["time_out"]["active"]:
         raise TerminationContractError(
             "formal training-like scorecards require the frozen time_out termination to be active"
@@ -414,9 +445,12 @@ def _normalized_positive_float(value: Any, label: str) -> float:
 def _validate_normalized_terms(value: Any) -> None:
     if not isinstance(value, Mapping):
         raise TerminationContractError("termination contract terms must be an object")
-    if set(value) != set(KNOWN_TERMS):
+    # Either the current seven-term shape or the pre-table six.  A contract frozen before the
+    # table obstacle existed is still a valid contract; it simply cannot describe a table strike.
+    if set(value) not in (set(KNOWN_TERMS), set(LEGACY_KNOWN_TERMS)):
         raise TerminationContractError(
-            f"termination contract terms must be exactly {list(KNOWN_TERMS)}, got {sorted(value)}"
+            f"termination contract terms must be exactly {list(KNOWN_TERMS)} "
+            f"(or the pre-table {list(LEGACY_KNOWN_TERMS)}), got {sorted(value)}"
         )
     expected_functions = {
         "time_out": ("time_out",),
@@ -428,6 +462,7 @@ def _validate_normalized_terms(value: Any) -> None:
         ),
         "base_fell_tilt": ("bad_orientation",),
         "base_too_low": ("root_height_below_minimum",),
+        "robot_hit_table": ("robot_hit_table",),
     }
     value_fields = {
         "anchor_pos": "threshold",
@@ -435,8 +470,13 @@ def _validate_normalized_terms(value: Any) -> None:
         "ee_body_pos": "threshold",
         "base_fell_tilt": "limit_angle",
         "base_too_low": "minimum_height",
+        "robot_hit_table": "force_threshold",
     }
+    #: extra normalized fields a term carries beyond {active, function, value_fields[name]}
+    extra_fields = {"robot_hit_table": {"near_x", "surface_z", "margin"}}
     for name in KNOWN_TERMS:
+        if name not in value:
+            continue  # pre-table contract; the six-term shape was accepted above
         term = value[name]
         if not isinstance(term, Mapping) or type(term.get("active")) is not bool:
             raise TerminationContractError(f"termination contract term {name} is malformed")
@@ -454,7 +494,7 @@ def _validate_normalized_terms(value: Any) -> None:
                     "terms.time_out must have function='time_out' and time_out=true"
                 )
             continue
-        fields = {"active", "function", value_fields[name]}
+        fields = {"active", "function", value_fields[name]} | extra_fields.get(name, set())
         if name in TRACKING_TERMS:
             fields.add("ignore_hold")
         if name == "ee_body_pos":
@@ -473,6 +513,8 @@ def _validate_normalized_terms(value: Any) -> None:
                     f"function {term.get('function')!r}"
                 )
         _normalized_positive_float(term[value_fields[name]], f"terms.{name}.{value_fields[name]}")
+        for extra in sorted(extra_fields.get(name, ())):
+            _normalized_positive_float(term[extra], f"terms.{name}.{extra}")
         if name == "ee_body_pos":
             names = term["body_names"]
             if not isinstance(names, list) or not names \
@@ -713,7 +755,26 @@ def runtime_termination_settings(
             float(terms["base_too_low"]["minimum_height"])
             if terms["base_too_low"]["active"] else None
         ),
-        "active_terms": [name for name in KNOWN_TERMS if terms[name]["active"]],
+        # Table strike.  Emitted as the box the Isaac term uses, in the tracking env frame, so a
+        # MuJoCo-side reproduction reads the SAME numbers rather than re-deriving them.  None on a
+        # pre-table contract and on a run that trained with task.table_obstacle=false.
+        # NOTE (stated, not hidden): `tracking_reset_reasons` below does NOT evaluate this — it is
+        # a pure threshold function over tracking errors and has no body positions or contact
+        # forces to work with.  A MuJoCo formal eval that wants table strikes in its denominator
+        # must add the table geometry on its side; see the in-memory MJCF augmentation in
+        # scripts/audit_motion_schema2_table_net_clearance.py.
+        "table_hit": (
+            {
+                "near_x": float(terms["robot_hit_table"]["near_x"]),
+                "surface_z": float(terms["robot_hit_table"]["surface_z"]),
+                "force_threshold_n": float(terms["robot_hit_table"]["force_threshold"]),
+                "margin_m": float(terms["robot_hit_table"]["margin"]),
+            }
+            if terms.get("robot_hit_table", {}).get("active") else None
+        ),
+        "active_terms": [
+            name for name in KNOWN_TERMS if terms.get(name, {}).get("active")
+        ],
     }
 
 

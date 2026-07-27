@@ -9,6 +9,8 @@ A small CLI (`hope_calibrate`) loads recorded trajectories from CSV files
 (one file per trajectory: columns t,x,y,z) and prints the fitted parameters.
 """
 
+from __future__ import annotations
+
 import argparse
 import csv
 from typing import List

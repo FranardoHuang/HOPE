@@ -489,11 +489,16 @@ else:
 # --- 题库 -> 同源 exam 卷(train.npz -> exam.npz) ---
 if cli_bank:
     exam_bank, bank_src, train_bank = cli_bank, "CLI 手传", ""
+elif str(rt.get("exam_bank") or "").strip():
+    # 连续采样臂(target_mode=solved)没有训练题库,但它显式声明了考卷。先读这一条,操作者就不用
+    # 记得手传 --exam-bank —— "该开的变成 default,不是变成 recipe"。
+    exam_bank = str(rt.get("exam_bank"))
+    bank_src, train_bank = "env.yaml racket_target.exam_bank(连续臂显式考卷)", ""
 else:
     train_bank = rt.get("question_bank") or ""
     if not str(train_bank).strip():
-        fatal.append("env.yaml 里解析不到 commands.racket_target.question_bank(老代际臂?)—— "
-                     "用 --exam-bank <exam npz> 手传同源考卷")
+        fatal.append("env.yaml 里既无 commands.racket_target.exam_bank 也无 question_bank —— "
+                     "老代际臂,或连续采样臂忘了配 exam_bank。用 --exam-bank <exam npz> 手传同源考卷")
         exam_bank, bank_src = None, None
     else:
         train_bank = str(train_bank)

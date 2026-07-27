@@ -1,5 +1,7 @@
 """Ball-physics calibration tests (Planner_Reference_Setup.md Section 2.1)."""
 
+from __future__ import annotations
+
 import numpy as np
 
 from hope_planner.calibration import calibrate_ball_physics

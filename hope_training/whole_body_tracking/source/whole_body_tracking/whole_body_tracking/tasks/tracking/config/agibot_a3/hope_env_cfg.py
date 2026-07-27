@@ -29,7 +29,10 @@ from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
 import whole_body_tracking.tasks.tracking.mdp as mdp
 from whole_body_tracking.robots.agibot_a3 import A3_FEET_BODIES, A3_HAND_BODIES, A3_UPPER_TRACKED
-from whole_body_tracking.tasks.tracking.config.agibot_a3.flat_env_cfg import AgibotA3FlatEnvCfg
+from whole_body_tracking.tasks.tracking.config.agibot_a3.flat_env_cfg import (
+    A3_NON_FOOT_BODY_REGEX,
+    AgibotA3FlatEnvCfg,
+)
 from whole_body_tracking.tasks.tracking.tracking_env_cfg import (
     CommandsCfg,
     EventCfg,
@@ -76,6 +79,7 @@ def attach_shadow_ball_scene(env_cfg, *, shadow_table: bool) -> None:
     from isaaclab.assets import AssetBaseCfg, RigidObjectCfg
 
     from whole_body_tracking.tasks.table_tennis import geometry as tt_geom
+    from whole_body_tracking.tasks.table_tennis import table_frame as tt_frame
     from whole_body_tracking.tasks.table_tennis import table_tennis_env_cfg as tt_cfg
     from whole_body_tracking.tasks.tracking.mdp.virtual_ball import default_venue_yaml_path
 
@@ -116,14 +120,12 @@ def attach_shadow_ball_scene(env_cfg, *, shadow_table: bool) -> None:
     if shadow_table:
         # Static table-top collider at the virtual-table pose (top face at env-local surface_z),
         # same slab + multiplicative-restitution material as table_tennis.build_table_top_cfg.
+        # Pose comes from table_frame.table_top_center_env — the shared HOPE->env translation, not a
+        # locally re-derived expression (one source of truth for where the table is).
         env_cfg.scene.shadow_table = AssetBaseCfg(
             prim_path="{ENV_REGEX_NS}/ShadowTable",
             init_state=AssetBaseCfg.InitialStateCfg(
-                pos=(
-                    near_x + tt_geom.TABLE_LENGTH / 2.0,
-                    0.0,
-                    surface_z - tt_geom.TABLE_THICKNESS / 2.0,
-                )
+                pos=tt_frame.table_top_center_env(near_x, surface_z)
             ),
             spawn=sim_utils.CuboidCfg(
                 size=tt_geom.table_top_size(),
@@ -141,7 +143,7 @@ def attach_shadow_ball_scene(env_cfg, *, shadow_table: bool) -> None:
         env_cfg.scene.shadow_table_visual = AssetBaseCfg(
             prim_path="{ENV_REGEX_NS}/ShadowTableVisual",
             init_state=AssetBaseCfg.InitialStateCfg(
-                pos=(near_x + tt_geom.TABLE_LENGTH / 2.0, 0.0, surface_z - tt_geom.TABLE_HEIGHT),
+                pos=tt_frame.table_visual_origin_env(near_x, surface_z),
                 rot=(1.0, 0.0, 0.0, 0.0),
             ),
             spawn=sim_utils.UsdFileCfg(usd_path=tt_cfg._TABLE_USD_PATH),
@@ -193,6 +195,7 @@ def attach_physical_ball_scene(env_cfg) -> None:
     from isaaclab.assets import AssetBaseCfg, RigidObjectCfg
 
     from whole_body_tracking.tasks.table_tennis import geometry as tt_geom
+    from whole_body_tracking.tasks.table_tennis import table_frame as tt_frame
     from whole_body_tracking.tasks.table_tennis import table_tennis_env_cfg as tt_cfg
     from whole_body_tracking.tasks.tracking.mdp.virtual_ball import default_venue_yaml_path
 
@@ -239,11 +242,7 @@ def attach_physical_ball_scene(env_cfg) -> None:
     env_cfg.scene.pb_table = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/PhysicalTable",
         init_state=AssetBaseCfg.InitialStateCfg(
-            pos=(
-                near_x + tt_geom.TABLE_LENGTH / 2.0,
-                0.0,
-                surface_z - tt_geom.TABLE_THICKNESS / 2.0,
-            )
+            pos=tt_frame.table_top_center_env(near_x, surface_z)
         ),
         spawn=sim_utils.CuboidCfg(
             size=tt_geom.table_top_size(),
@@ -259,11 +258,200 @@ def attach_physical_ball_scene(env_cfg) -> None:
     env_cfg.scene.pb_table_visual = AssetBaseCfg(
         prim_path="{ENV_REGEX_NS}/PhysicalTableVisual",
         init_state=AssetBaseCfg.InitialStateCfg(
-            pos=(near_x + tt_geom.TABLE_LENGTH / 2.0, 0.0, surface_z - tt_geom.TABLE_HEIGHT),
+            pos=tt_frame.table_visual_origin_env(near_x, surface_z),
             rot=(1.0, 0.0, 0.0, 0.0),
         ),
         spawn=sim_utils.UsdFileCfg(usd_path=tt_cfg._TABLE_USD_PATH),
     )
+
+
+##
+# TABLE OBSTACLE — the table the ROBOT is not allowed to hit.  DEFAULT ON.
+##
+
+
+#: Prim name of the always-present table collider.  The ``robot_hit_table`` termination does not
+#: read it (see that function for why filtered contacts cannot be used here), but the name is part
+#: of the scene contract and is what a receipt/debug view looks for.
+TABLE_OBSTACLE_PRIM = "{ENV_REGEX_NS}/TableObstacle"
+
+
+def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
+    """Put the ping-pong table in the training scene as a solid obstacle.
+
+    人话:训练场里补上真桌子。以前机器人是在"桌子不存在"的世界里学挥拍——指令让它去
+    z≈0.65 m 抓球点,在仿真里那是空气,在现实里那是桌面下面。现在那里有实体,撞上就
+    像摔倒一样结束这一局并扣分。
+
+    WHAT THIS IS NOT.  The two other tables in this file (``shadow_table``, ``pb_table``) are
+    METRICS-ONLY truth instruments: they exist so a ball's bounce can be measured against engine
+    physics, they are flag-gated, and both are OFF in every training arm.  This one is a TASK
+    OBJECT.  It is on by default and the robot is scored against it.
+
+    GEOMETRY.  Reuses ``table_tennis.geometry`` verbatim — the ITTF slab
+    ``table_top_size()`` placed at ``table_top_center_env(near_x, surface_z)``, i.e. the HOPE
+    landmark translated by ``(near_x, +TABLE_WIDTH/2, surface_z)``.  No second geometry and no
+    second set of constants: if this table and the shadow/physical tables ever disagree, it is a
+    bug in ``geometry.py``, not a divergence between call sites.
+
+    NO NET COLLIDER, deliberately.  The net plane sits at ``near_x + NET_X = 1.87`` m; the robot
+    stands behind ``x = 0`` with a reach under a metre, so it cannot touch the net without first
+    going through the table.  Adding a net collider would buy nothing and would put a second
+    thin-slab contact pair in every env.
+
+    IDEMPOTENT, and it stands down for the truth instruments: when ``shadow_table`` or
+    ``pb_table`` is already attached, that collider IS the table (same slab, same pose) and a
+    second overlapping static box would only add PhysX pairs.  In that case this records the
+    existing prim on the env cfg instead of spawning a duplicate.
+    """
+    scene = env_cfg.scene
+    if getattr(scene, "table_obstacle", None) is not None:
+        return
+    for existing in ("shadow_table", "pb_table"):
+        if getattr(scene, existing, None) is not None:
+            env_cfg.table_obstacle_prim = "{ENV_REGEX_NS}/" + (
+                "ShadowTable" if existing == "shadow_table" else "PhysicalTable"
+            )
+            return
+
+    import isaaclab.sim as sim_utils
+    from isaaclab.assets import AssetBaseCfg
+
+    from whole_body_tracking.tasks.table_tennis import geometry as tt_geom
+    from whole_body_tracking.tasks.table_tennis import table_frame as tt_frame
+    from whole_body_tracking.tasks.table_tennis import table_tennis_env_cfg as tt_cfg
+
+    rt = env_cfg.commands.racket_target
+    near_x = float(rt.vb_table_near_x)
+    surface_z = float(rt.vb_table_surface_z)
+    mats = tt_geom.BounceMaterials()
+
+    scene.table_obstacle = AssetBaseCfg(
+        prim_path=TABLE_OBSTACLE_PRIM,
+        init_state=AssetBaseCfg.InitialStateCfg(
+            pos=tt_frame.table_top_center_env(near_x, surface_z)
+        ),
+        spawn=sim_utils.CuboidCfg(
+            size=tt_geom.table_top_size(),
+            # Invisible collider + the realistic USD mesh on top, the same split the shadow and
+            # physical tables use (the USD carries no PhysX colliders of its own).
+            visible=False,
+            collision_props=sim_utils.CollisionPropertiesCfg(collision_enabled=True),
+            physics_material=tt_cfg._surface_material(
+                mats.table_restitution, mats.table_static_friction, mats.table_dynamic_friction
+            ),
+            visual_material=sim_utils.PreviewSurfaceCfg(diffuse_color=(0.0, 0.32, 0.55), roughness=0.5),
+        ),
+    )
+    env_cfg.table_obstacle_prim = TABLE_OBSTACLE_PRIM
+    if visual:
+        scene.table_obstacle_visual = AssetBaseCfg(
+            prim_path="{ENV_REGEX_NS}/TableObstacleVisual",
+            init_state=AssetBaseCfg.InitialStateCfg(
+                pos=tt_frame.table_visual_origin_env(near_x, surface_z),
+                rot=(1.0, 0.0, 0.0, 0.0),
+            ),
+            spawn=sim_utils.UsdFileCfg(usd_path=tt_cfg._TABLE_USD_PATH),
+        )
+
+
+#: Contact force (N) above which a body inside the table box counts as having STRUCK it.  Low on
+#: purpose: the table is a thing you must not touch, not a thing you may lean on gently.  The
+#: existing ``undesired_contacts`` reward uses the same 1.0 N; the scene's ContactSensor
+#: ``force_threshold=10.0`` only affects air-time bookkeeping, not ``net_forces_w``.
+TABLE_HIT_FORCE_THRESHOLD_N = 1.0
+#: Inflation (m) of the table box used to accept a contact.  PhysX resolves a contact a fraction
+#: of a millimetre outside the surface; 2 cm is one racket-blade thickness of slack and is far
+#: below the 5 cm slab, so it cannot reach anything that is not touching the table.
+TABLE_HIT_MARGIN_M = 0.02
+
+
+def table_hit_done_term():
+    """The ``robot_hit_table`` termination.  ONE definition, used by every HOPE terminations cfg.
+
+    Bodies watched: EVERY robot body except the two feet.  Justification for the breadth — the
+    discriminator is the GEOMETRIC box (the body must be inside the table slab), not the body
+    identity, so naming extra bodies costs one boolean per body and buys the cases a racket-only
+    list would miss: a forearm that clips the near edge, a shoulder that swings through on a deep
+    reach, a torso that comes down onto the table.  The legs and pelvis are included on the same
+    argument — from a legal stance they cannot reach inside the slab (its near edge is 0.5 m in
+    front of the robot and its underside is 0.71 m up), so they contribute nothing false, and if
+    one of them IS in there the episode should end regardless of which body it was.  The feet are
+    the one exclusion: their contact channel is the sanctioned floor contact already consumed by
+    ``foot_soft_landing`` / ``feet_contact_time``.
+
+    The racket is deliberately NOT named: the URDF's fixed massless ``pingpang_*`` links are
+    merged into ``right_wrist_yaw_Link`` by PhysX, so the wrist body is what carries a racket
+    contact and a ``body_names=["pingpang_red_Link"]`` selection would not even resolve.
+
+    ``near_x``/``surface_z`` default to the ``RacketTargetCommandCfg`` defaults; every HOPE
+    ``__post_init__`` rewrites them from the live cfg, so a run that moves the virtual table moves
+    the collider and this box together.
+    """
+    return DoneTerm(
+        func=mdp.robot_hit_table,
+        params={
+            "sensor_cfg": SceneEntityCfg("contact_forces", body_names=[A3_NON_FOOT_BODY_REGEX]),
+            "asset_cfg": SceneEntityCfg("robot", body_names=[A3_NON_FOOT_BODY_REGEX]),
+            "near_x": 0.5,
+            "surface_z": 0.76,
+            "force_threshold": TABLE_HIT_FORCE_THRESHOLD_N,
+            "margin": TABLE_HIT_MARGIN_M,
+        },
+    )
+
+
+def table_hit_rew_term():
+    """The ``table_hit_penalty`` reward.  Price of one table strike; ``robot_hit_table`` is the rule.
+
+    Same family and same shape as ``death_penalty`` (``weight * dt`` charged once, on the terminal
+    step) but addressed to ONE termination reason, so it can be priced, ablated and read off
+    independently of falling.  DEFAULT weight 0.0 = IsaacLab skips the term entirely = the default
+    path stays byte-equivalent; ``reward_pack=v2`` sets the real number.
+    """
+    return RewTerm(
+        func=mdp.terminated_by_term, weight=0.0, params={"term_name": "robot_hit_table"}
+    )
+
+
+def apply_table_obstacle(env_cfg) -> None:
+    """Wire the table obstacle + its termination + its penalty, or take all three away.
+
+    Called from every HOPE ``__post_init__`` AFTER the shadow/physical attachments, so it can see
+    a truth-instrument table already in the scene and reuse that collider instead of stacking a
+    second identical static box on top of it.
+
+    The three pieces move together on purpose.  A table with no termination is a decoration; a
+    termination with no table is a channel that can never fire; a penalty naming a termination
+    that was removed raises at the first step.  So this either installs all three or removes all
+    three, and never leaves a half-configured scene.
+    """
+    T = env_cfg.terminations
+    R = getattr(env_cfg, "rewards", None)
+    if not getattr(env_cfg, "table_obstacle", False):
+        if getattr(T, "robot_hit_table", None) is not None:
+            T.robot_hit_table = None
+        if R is not None and getattr(R, "table_hit_penalty", None) is not None:
+            R.table_hit_penalty = None
+        # Take the collider back out too — ``__post_init__`` runs with the DEFAULT (on), so by the
+        # time a train.py ``task.table_obstacle=false`` override reaches here the slab is already
+        # attached. Leaving it would give a "no-table" control arm a table it is not scored
+        # against, which is worse than either honest option. Only the prims THIS function creates
+        # are removed: shadow_table / pb_table belong to the metrics instruments and are theirs.
+        for attr in ("table_obstacle", "table_obstacle_visual"):
+            if getattr(env_cfg.scene, attr, None) is not None:
+                setattr(env_cfg.scene, attr, None)
+        env_cfg.table_obstacle_prim = ""
+        return
+
+    attach_table_obstacle(env_cfg)
+    if getattr(T, "robot_hit_table", None) is None:
+        T.robot_hit_table = table_hit_done_term()
+    if R is not None and getattr(R, "table_hit_penalty", None) is None:
+        R.table_hit_penalty = table_hit_rew_term()
+    rt = env_cfg.commands.racket_target
+    T.robot_hit_table.params["near_x"] = float(rt.vb_table_near_x)
+    T.robot_hit_table.params["surface_z"] = float(rt.vb_table_surface_z)
 
 
 ##
@@ -1000,6 +1188,12 @@ class HOPEDeployParityTerminationsCfg(TerminationsCfg):
     base_fell_tilt = DoneTerm(func=mdp.bad_orientation, params={"limit_angle": 0.7})  # ~40 deg, absolute
     base_too_low = DoneTerm(func=mdp.root_height_below_minimum, params={"minimum_height": 0.5})
 
+    # HIT THE TABLE — terminal, in the same class as falling over.  人话:打到桌子 = 这局结束。
+    # Declared here so it reads alongside the other absolute guards; built by the shared factory
+    # so the base HOPE env (which inherits the plain TerminationsCfg) gets exactly the same term
+    # installed in __post_init__ rather than a second, drifting copy.
+    robot_hit_table = table_hit_done_term()
+
 
 @configclass
 class HOPEPingPongAgibotA3EnvCfg(AgibotA3FlatEnvCfg):
@@ -1025,6 +1219,16 @@ class HOPEPingPongAgibotA3EnvCfg(AgibotA3FlatEnvCfg):
     # task.physical_ball override runs AFTER __post_init__ (face_command_obs timing), so it calls
     # the (idempotent) attach itself. METRICS-ONLY — see physical_ball.py; racket impulse=Phase B.
     physical_ball: bool = False
+    # TABLE OBSTACLE — the real table, as a solid the robot must not hit. DEFAULT **ON**.
+    # 人话:桌子默认在场上。以前不在,机器人是在"桌子不存在"的世界里学挥拍,指令让它去
+    # 桌面下面(z≈0.65 m)也没人拦得住;现在那里是实体,撞上就终止 + 扣分,和摔倒同一档。
+    # 与 shadow_table / pb_table(两个 METRICS-ONLY 量球用的桌子,默认全关)不同:那两个是
+    # 量具,这个是任务物体。三者用同一份 table_tennis.geometry 尺寸与位姿,不存在第二张桌子;
+    # 若量具桌已挂,本项不再重复生成碰撞体,直接沿用它。
+    # 关掉它 = 回到旧世界(仅供做"有桌/无桌"消融对照)。
+    table_obstacle: bool = True
+    #: filled in by attach_table_obstacle — which prim actually carries the table collider.
+    table_obstacle_prim: str = ""
     # Wave-P random base push (DEFAULT OFF = events.push_robot stays None, the HITTER-aligned
     # historical recipe every running matrix cell trains with). 人话:训练时每隔几秒随机推
     # 机器人一把,练抗扰平衡;见 HOPEPushRobotCfg。train.py 的 task.push.* 覆盖在
@@ -1093,6 +1297,9 @@ class HOPEPingPongAgibotA3EnvCfg(AgibotA3FlatEnvCfg):
             self.physical_ball = True
             rt.physical_ball = True
             attach_physical_ball_scene(self)
+        # TABLE OBSTACLE — DEFAULT ON. Runs AFTER the two truth-instrument attachments so it can
+        # see their table and reuse it rather than spawning a duplicate slab in the same place.
+        apply_table_obstacle(self)
         # 合并互斥推 (defaults OFF = events.combined_push/_sweep stay None, byte-identical).
         # MUST run BEFORE the two legacy appliers: in combined mode they only step aside when
         # the merged event is already wired — reversed order fails loud (半配置绝不静默).
@@ -1176,6 +1383,9 @@ class HOPEVirtualBallRewardsCfg(HOPEDeployParityRewardsCfg):
     # 套利;罚值须比上台大奖大:weight −1800 = 每次死亡实际 −36 > 满分上台券 33)。
     # is_terminated 只计真终止(摔倒/包络),timeout 截断不罚。默认 0 = 跳过,字节等价。
     death_penalty = RewTerm(func=mdp.is_terminated, weight=0.0)
+    # 撞桌罚 table_hit_penalty 是 death_penalty 的同族窄版(只认 robot_hit_table 一个终止原因),
+    # 由 apply_table_obstacle() 在 __post_init__ 里随桌子一起装/一起撤 —— 见 table_hit_rew_term()。
+    # 不写死在这里,是因为桌子默认开但 terminations 类不止一个,装配点只能有一个。
 
     # D6 source gate (2026-07-14, DEFAULT OFF): penalize only the normalized tail above 85% of
     # each *actual articulation* joint-speed limit.  This is not action-rate smoothing: it reads
@@ -1785,8 +1995,13 @@ class HOPEPingPongHitterPureAgibotA3EnvCfg(HOPEPingPongAgibotA3EnvCfg):
         # 0.70 was 0.16-0.22 m TOO FAR vs the demo racket (pingpang_red_Link rel-station world x =
         # 0.484 fh / 0.542 bh), which forced the forward lunge/lean. 0.51 = demo midpoint so the
         # racket reaches the plane with the base AT the locked station.
+        # TABLE-CLEARANCE FIX (2026-07-26): forehand z (0.67, 0.97) -> (0.78, 1.08). The striking
+        # plane sits past the near table edge (vb_table_near_x 0.5), so the lowest commandable
+        # contact is vb_table_surface_z 0.76 + ball radius 0.02 = 0.78; the old floor asked for
+        # contact inside the table top. Span preserved (0.30 m). Enforced by
+        # RacketTargetCommand._assert_contact_clears_table.
         C.racket_pos_range_per_clip = (
-            ((0.51, 0.51), (-0.65, -0.15), (0.67, 0.97)),  # forehand
+            ((0.51, 0.51), (-0.65, -0.15), (0.78, 1.08)),  # forehand
             ((0.51, 0.51), (-0.05, 0.45), (0.88, 1.18)),   # backhand
         )
         # Blade-replaned per-clip velocity boxes (world frame, 2026-07-02 lineage).

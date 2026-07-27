@@ -47,10 +47,24 @@ video clips never show the paddle — the registry `grip:` block stores the SOLV
 (HUMAN blade = R_wrist @ Rz(alpha_z)Rx(beta_x) @ y_hat, franco's rally-prior inference) and each
 clip carries `rally_yaw_deg`, the rally diagonal it was actually filmed on. This generator:
   * applies the grip INSIDE analyze_strike_phase.analyze(grip_rot=...) — the ONE grip
-    application point. Bake detection is FAIL-CLOSED on the registry's face_normal_reliable
-    field (exactly `false` = raw, string 'true-calibrated...' = baked and NEVER re-rotated,
-    anything else refuses loudly) and runs regardless of --grip so a baked clip always reports
-    grip_applied=True; a *_cal stem whose registry entry lacks the bake marker also refuses;
+    application point. FACE-SOURCE resolution is FAIL-CLOSED on the registry's
+    face_normal_reliable field (see face_source(): exactly `false` = video proxy, a string
+    starting 'true-calibrated' = baked into the npz and NEVER re-rotated, a string starting
+    'true-rigid-mount' = defined by the robot's rigid URDF paddle mount so NO grip applies and
+    none may be fitted; a missing entry, a missing field, or anything else refuses loudly) and
+    runs BEFORE the --grip early return, so `--grip off` neither protects a clip nor changes
+    its verdict — the marker is the only authority. A *_cal stem whose registry entry lacks the
+    bake marker also refuses;
+RIGID-MOUNT FACES (owner ruling 2026-07-23, marker `true-rigid-mount`): clips compiled through
+the robot's own kinematics (canonical_schema2_builder FK from the MJCF/URDF) have a face that
+is already robot-solved — the paddle hangs off right_wrist_yaw_Link through
+right_hand_pingpang_joint and pingpang_red_joint, BOTH fixed with rpy="0 0 0", so the blade
+normal IS wrist +Y exactly (verified against the STL by racket_geometry_contract). Marking such
+a clip `false` right-multiplies the v5 HUMAN grip Rz(+5)Rx(+40) onto it and tilts the face by
+40.2 deg; marking it `true-calibrated` lies about a bake that never happened. The rigid-mount
+marker is the honest third answer: no rotation, grip_applied=True (the question is settled, not
+"a matrix was multiplied"), and clips[<name>].face_source == "rigid-mount" in the bank meta so
+the distinction survives in the artefact;
   * canonicalizes clip-derived strike VECTORS (blade velocity, face normal) to the registry's
     straight-line convention by rotating -rally_yaw_deg about the VERTICAL axis through the
     contact point (rally_canonicalize(), the ONE rotation path shared by bank mode and
@@ -177,38 +191,92 @@ def rally_canonicalize(vec_w, rally_yaw_deg):
     return np.asarray(vec_w, dtype=np.float64) @ R.T
 
 
-def _grip_is_baked(clip: str, ann) -> bool:
-    """FAIL-CLOSED bake detection (audit round 2). The only trusted marker is the registry's
-    ``face_normal_reliable`` field: exactly ``false`` (bool) = raw video proxy, NOT baked; a
-    string starting ``'true-calibrated'`` = csv_to_npz_mujoco --grip-rot regeneration (the grip
-    already lives in the npz wrist joints). ANY other value — including bool ``true`` — is
-    ambiguous about whether the npz carries the grip, and a wrong guess either double-rotates
-    or drops the face, so it refuses loudly instead of guessing. No annotation entry at all
-    -> not baked (there is no registry claim to consult)."""
+# ------------------------------------------------------------------ face source ---- #
+# THE registry marker vocabulary. ``face_normal_reliable`` answers exactly ONE question:
+# WHERE does this npz's blade face come from — and therefore what (if any) grip rotation may
+# be right-multiplied onto it. It is the SOLE authority: this resolution runs BEFORE the
+# ``--grip`` early return, so ``--grip off`` neither protects a clip nor changes the verdict.
+# Three legal markers, no fourth, no default:
+#   False                      -> video/GVHMR proxy face (wrist +Y is NOT the blade); the
+#                                 registry grip Rz(alpha_z)Rx(beta_x) is what makes it a face.
+#   'true-calibrated...'       -> csv_to_npz_mujoco --grip-rot BAKED the grip into the npz
+#                                 wrist joints; never re-rotate (it is already in there).
+#   'true-rigid-mount...'      -> the face is DEFINED by the robot's rigid paddle mount
+#                                 (URDF right_hand_pingpang_joint + pingpang_red_joint, both
+#                                 fixed with rpy="0 0 0", so blade normal == wrist +Y exactly).
+#                                 NO grip rotation applies and NONE MAY BE FITTED (owner
+#                                 ruling 2026-07-23). Right-multiplying the v5 HUMAN grip
+#                                 Rz(+5)Rx(+40) onto such a face tilts it by 40.2 deg.
+FACE_MARKER_BAKED_GRIP = "true-calibrated"
+FACE_MARKER_RIGID_MOUNT = "true-rigid-mount"
+FACE_SOURCE_VIDEO_PROXY = "video-proxy"
+FACE_SOURCE_BAKED_GRIP = "baked-grip"
+FACE_SOURCE_RIGID_MOUNT = "rigid-mount"
+FACE_SOURCE_BY_GRIP_MODE = {
+    "registry": FACE_SOURCE_VIDEO_PROXY,
+    "off": FACE_SOURCE_VIDEO_PROXY,
+    "baked": FACE_SOURCE_BAKED_GRIP,
+    "mount": FACE_SOURCE_RIGID_MOUNT,
+}
+_FACE_MARKER_HELP = (
+    "legal values: `false` (video proxy face — the registry grip must be applied), a string "
+    f"starting {FACE_MARKER_BAKED_GRIP!r} (grip already baked into the npz wrist joints), or a "
+    f"string starting {FACE_MARKER_RIGID_MOUNT!r} (face defined by the robot's rigid URDF "
+    "paddle mount; no grip rotation applies and none may be fitted)"
+)
+
+
+def face_source(clip: str, ann) -> str:
+    """FAIL-CLOSED face-provenance resolution from the registry ``face_normal_reliable`` marker.
+
+    Returns one of :data:`FACE_SOURCE_VIDEO_PROXY` / :data:`FACE_SOURCE_BAKED_GRIP` /
+    :data:`FACE_SOURCE_RIGID_MOUNT`. There is NO default and no "assume" branch: a missing
+    registry entry, a missing field, ``None``, bool ``True`` or any unrecognised string is an
+    unanswered question about whether a grip is already in the npz, and BOTH wrong answers
+    corrupt the face (a dropped grip on a video clip, a doubled grip on a baked one, a fitted
+    grip on a rigid-mount one). Every such case raises SystemExit instead of guessing.
+    """
     if ann is None:
-        return False
-    v = ann.get("face_normal_reliable")
+        raise SystemExit(
+            f"{clip}: no entry in strike_annotations.yaml — the face-source marker "
+            f"`face_normal_reliable` is the ONLY authority on whether a grip rotation may be "
+            f"applied to this clip, and there is no registry claim to consult. Add a registry "
+            f"row for {clip!r} ({_FACE_MARKER_HELP}) before generating. `--grip off` does NOT "
+            f"exempt a clip from this check")
+    if "face_normal_reliable" not in ann:
+        raise SystemExit(
+            f"{clip}: registry entry has no `face_normal_reliable` field — cannot decide where "
+            f"this clip's blade face comes from; {_FACE_MARKER_HELP}")
+    v = ann["face_normal_reliable"]
     if v is False:
-        return False
-    if isinstance(v, str) and v.startswith("true-calibrated"):
-        return True
+        return FACE_SOURCE_VIDEO_PROXY
+    if isinstance(v, str):
+        if v.startswith(FACE_MARKER_BAKED_GRIP):
+            return FACE_SOURCE_BAKED_GRIP
+        if v.startswith(FACE_MARKER_RIGID_MOUNT):
+            return FACE_SOURCE_RIGID_MOUNT
     raise SystemExit(
         f"{clip}: face_normal_reliable={v!r} in strike_annotations.yaml is not a recognized "
-        f"bake marker (must be exactly `false`, or a string starting 'true-calibrated') — "
-        f"cannot decide whether the npz already carries the grip; fix the registry entry "
-        f"before generating")
+        f"face-source marker — cannot decide where this clip's blade face comes from; "
+        f"{_FACE_MARKER_HELP}. Fix the registry entry before generating")
 
 
 def resolve_grip_and_yaw(asp, name: str, path: str, annotations: dict, grip_block: dict,
-                         grip_flag: str):
+                         grip_flag: str, allow_unregistered: bool = False):
     """Per-clip grip rotation + rally yaw from the registry (annotation looked up here, same
     key resolution as the analyzer).
 
     Returns (grip_rot 3x3 | None, grip_desc, rally_yaw_deg, grip_mode) with grip_mode in
-    {"registry", "baked", "off"}. grip_rot is None unless the registry rotation must be applied
-    NOW (mode "registry"). Bake detection runs BEFORE the --grip off early-return: the bake
-    lives in the npz wrist joints, so a baked clip is baked no matter what the flag says and
-    the bank meta must record grip_applied=True for it.
+    {"registry", "baked", "mount", "off", "unregistered"}. grip_rot is None unless the registry
+    rotation must be applied NOW (mode "registry"). Face-source resolution runs BEFORE the
+    --grip off early-return: the provenance lives in the npz, not in the flag, so a baked or
+    rigid-mount clip keeps its verdict no matter what --grip says and the bank meta records
+    grip_applied=True for it.
+
+    ``allow_unregistered`` is the ONLY escape hatch and is diagnostic-only: --phase-scan
+    combined with an explicit --grip off (the sole rotating path disabled) may look at a clip
+    that has no registry row yet. It yields grip_mode "unregistered", which can never satisfy
+    the schema-v3 grip_applied gate, so no bank can be written from it.
     """
     keys = asp._annotation_keys(name, path)
     ann = next((annotations[k] for k in keys if k in annotations), None)
@@ -217,14 +285,39 @@ def resolve_grip_and_yaw(asp, name: str, path: str, annotations: dict, grip_bloc
     rally = float(ann.get("rally_yaw_deg") or 0.0) if ann else 0.0
     if ann is not None and ann.get("rally_yaw_deg") is None:
         print(f"[{name}] NOTE: registry entry has no rally_yaw_deg — assuming 0 (straight-line clip)")
-    baked = _grip_is_baked(ann_key, ann)
-    if stem.endswith("_cal") and not baked:
+    if ann is None and allow_unregistered and grip_flag == "off":
+        print(f"[{name}] ** UNREGISTERED CLIP (diagnostic scan only): no strike_annotations.yaml "
+              f"row for any of {keys}; with --grip off no rotation path exists, so the raw npz "
+              f"face is used verbatim. This clip can NEVER ship a question bank — add a registry "
+              f"row with a face_normal_reliable marker first **")
+        return None, "UNREGISTERED (diagnostic --phase-scan --grip off; raw npz face)", rally, "unregistered"
+    source = face_source(ann_key, ann)
+    if stem.endswith("_cal") and source != FACE_SOURCE_BAKED_GRIP:
         raise SystemExit(
             f"{name}: clip stem {stem!r} names a grip-calibrated regeneration (*_cal) but its "
-            f"registry entry does not carry the bake marker (face_normal_reliable: "
-            f"true-calibrated) — filename and registry disagree about whether the grip is in "
-            f"the npz; fix strike_annotations.yaml before generating")
-    if baked:
+            f"registry entry carries face_normal_reliable={ann.get('face_normal_reliable')!r} "
+            f"(face source {source!r}), not the bake marker "
+            f"(face_normal_reliable: {FACE_MARKER_BAKED_GRIP}) — filename and registry disagree "
+            f"about whether the grip is in the npz; fix strike_annotations.yaml before generating")
+    if source == FACE_SOURCE_RIGID_MOUNT:
+        # OWNER RULING 2026-07-23: the URDF paddle mount is the sole source of blade
+        # orientation and fitting a grip is FORBIDDEN. No rotation is applied here under ANY
+        # --grip setting — not because the flag says so, but because the registry says the
+        # face is already the robot's own.
+        if ann.get("grip_session") is not None:
+            raise SystemExit(
+                f"{name}: registry entry marks the face as rigid-mount "
+                f"({FACE_MARKER_RIGID_MOUNT}) but also pins grip_session="
+                f"{ann['grip_session']!r} — a rigid-mount face admits NO grip rotation; remove "
+                f"the grip_session key or fix the marker")
+        if grip_flag == "registry":
+            print(f"[{name}] NOTE: --grip registry has NO effect on this clip — its face is "
+                  f"defined by the robot's rigid URDF paddle mount and no grip may be fitted")
+        return (None,
+                "RIGID MOUNT (URDF right_hand_pingpang_joint + pingpang_red_joint, both fixed "
+                "rpy=0 0 0 -> blade normal == wrist +Y exactly; NO grip applies, none may be "
+                "fitted; owner ruling 2026-07-23)", rally, "mount")
+    if source == FACE_SOURCE_BAKED_GRIP:
         return None, "BAKED into the npz (csv_to_npz_mujoco --grip-rot; NOT re-applied)", rally, "baked"
     if grip_flag == "off":
         return None, "OFF (--grip off: raw wrist+Y proxy face)", rally, "off"
@@ -596,8 +689,11 @@ def phase_scan(asp, name: str, path: str, annotations: dict, grip_block: dict, a
 
     keys = asp._annotation_keys(name, path)
     ann = next((annotations[k] for k in keys if k in annotations), None)
+    # --phase-scan writes no bank, so an unregistered clip may be LOOKED AT — but only with an
+    # explicit --grip off, i.e. with the single rotating path disabled. Everything else still
+    # fails closed on the face-source marker.
     grip_rot, grip_desc, rally_yaw, _grip_mode = resolve_grip_and_yaw(
-        asp, name, path, annotations, grip_block, args.grip)
+        asp, name, path, annotations, grip_block, args.grip, allow_unregistered=True)
     _print_grip_summary(name, grip_desc, grip_rot, rally_yaw)
     info = asp.analyze(name, path, use_blade=True, grip_rot=grip_rot)
     label_frame = None
@@ -696,11 +792,15 @@ def main() -> int:
     ap.add_argument("--grip", choices=("registry", "off"), default="registry",
                     help="apply the registry grip calibration (strike_annotations.yaml `grip:` "
                          "block: HUMAN blade = R_wrist @ Rz(alpha_z)Rx(beta_x) @ y_hat) to the "
-                         "clip face normal AND blade position/velocity FK; clips already baked "
-                         "by csv_to_npz_mujoco --grip-rot (face_normal_reliable: "
-                         "true-calibrated) are detected and never re-rotated. "
-                         "'off' = raw wrist+Y proxy (pre-0g behavior). rally_yaw "
-                         "canonicalization is independent and always applied")
+                         "clip face normal AND blade position/velocity FK. THIS FLAG IS NOT A "
+                         "SAFETY DEVICE: the registry's face_normal_reliable marker is resolved "
+                         "FIRST and decides everything — clips baked by csv_to_npz_mujoco "
+                         "--grip-rot (true-calibrated) are never re-rotated, and clips whose "
+                         "face comes from the robot's rigid URDF paddle mount "
+                         "(true-rigid-mount) are never rotated under EITHER setting. 'off' only "
+                         "removes the registry rotation from video-proxy clips, which then "
+                         "cannot ship a bank. rally_yaw canonicalization is independent and "
+                         "always applied")
     ap.add_argument("--anchor", choices=("annotated", "train-candidate"), default="annotated",
                     help="strike-frame anchor: 'annotated' = the registry `phase` (video "
                          "contact truth; current behavior); 'train-candidate' = the FIRST "
@@ -938,7 +1038,7 @@ def main() -> int:
         if len(kept):
             d_old = np.array(diffs_old)
             face_desc = {"registry": "calibrated+canonical", "baked": "baked+canonical",
-                         "off": "raw+canonical"}[grip_mode]
+                         "mount": "rigid-mount+canonical", "off": "raw+canonical"}[grip_mode]
             print(f"  difficulty (demanded face vs clip face): "
                   f"OLD raw-proxy med={np.median(d_old):.1f} deg p90={np.percentile(d_old, 90):.1f}"
                   f"  ->  NEW {face_desc} med={np.median(d):.1f} deg "
@@ -960,7 +1060,9 @@ def main() -> int:
         clip_sources[name] = dict(
             motion_basename=os.path.basename(path), motion_sha256=motion_sha,
         )
-        clip_meta[name] = dict(grip_mode=grip_mode, grip_desc=grip_desc,
+        clip_meta[name] = dict(grip_mode=grip_mode,
+                               face_source=FACE_SOURCE_BY_GRIP_MODE[grip_mode],
+                               grip_desc=grip_desc,
                                grip_rotation_matrix=(
                                    None if grip_rot is None else np.round(
                                        np.asarray(grip_rot, dtype=np.float64), 12
@@ -986,7 +1088,12 @@ def main() -> int:
                                    v_star_cap_mps=round(guard.v_star_cap, 3),
                                    over_budget=guard.over_budget_count,
                                    enforced=args.stroke_guard == "enforce")))
-        grip_applied_per_clip[name] = grip_mode in ("registry", "baked")
+        # grip_applied = "the face question is SETTLED for this clip", not "a matrix was
+        # multiplied": registry = rotation applied here, baked = rotation already in the npz,
+        # mount = the URDF rigid mount defines the face so NO rotation exists to apply. Only
+        # "off" (a raw video proxy left uncalibrated) is unsettled and may not ship. The
+        # distinction is not hidden behind the boolean — clips[<name>].face_source records it.
+        grip_applied_per_clip[name] = grip_mode in ("registry", "baked", "mount")
         rally_yaw_applied_per_clip[name] = True
 
     # --- torch virtual-ball closed-loop self-test (trainer-side venue physics) ----------
@@ -1081,6 +1188,7 @@ def main() -> int:
             anchor_frame=int(clip_meta[name]["anchor_frame"]),
             anchor_phase=float(clip_meta[name]["anchor_phase"]),
             grip_mode=clip_meta[name]["grip_mode"],
+            face_source=clip_meta[name]["face_source"],
             grip_rotation_matrix=clip_meta[name]["grip_rotation_matrix"],
             rally_yaw_deg=float(clip_meta[name]["rally_yaw_deg"]),
             contact_pos_env=clip_meta[name]["contact_pos_env"],

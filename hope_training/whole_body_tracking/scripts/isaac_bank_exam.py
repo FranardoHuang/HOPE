@@ -81,6 +81,10 @@ from isaac_timing_exam_adapter import (  # noqa: E402
 CLIP_NAMES = ("forehand", "backhand")
 PHYSICAL_TERMS = ("base_fell_tilt", "base_too_low")
 GUARD_TERMS = ("anchor_pos", "anchor_ori", "ee_body_pos")
+# Table strike (2026-07-27). Its own class on purpose: it is neither a fall (PHYSICAL_TERMS, which
+# feeds the physical_fall_rate the scorecard reports) nor a reference-envelope guard reset
+# (GUARD_TERMS). Folding it into either would silently move attempts between denominators.
+FOUL_TERMS = ("robot_hit_table",)
 TIMEOUT_TERM = "time_out"
 
 
@@ -952,12 +956,13 @@ def _run(cfg, simulation_app):
         raise IsaacBankExamError(
             f"formal evaluator requires {sorted(required_terms)}, active={sorted(active_names)}"
         )
-    unexpected = active_names.difference({*PHYSICAL_TERMS, *GUARD_TERMS, TIMEOUT_TERM})
+    unexpected = active_names.difference({*PHYSICAL_TERMS, *GUARD_TERMS, *FOUL_TERMS, TIMEOUT_TERM})
     if unexpected:
         raise IsaacBankExamError(
             f"formal evaluator cannot classify active termination terms {sorted(unexpected)}"
         )
-    observed_terms = tuple(name for name in (*PHYSICAL_TERMS, *GUARD_TERMS, TIMEOUT_TERM)
+    observed_terms = tuple(name for name in (*PHYSICAL_TERMS, *GUARD_TERMS, *FOUL_TERMS,
+                                             TIMEOUT_TERM)
                            if name in active_names)
 
     step = 0
@@ -1072,11 +1077,16 @@ def _run(cfg, simulation_app):
         wrapped = motion_cmd.just_resampled.detach().to("cpu").bool().tolist()
         for env_id in torch.where(active)[0].detach().to("cpu").tolist():
             physical = any(masks[name][env_id] for name in PHYSICAL_TERMS)
+            foul = any(masks[name][env_id] for name in FOUL_TERMS if name in masks)
             guards = any(masks[name][env_id] for name in GUARD_TERMS if name in masks)
             timeout = masks[TIMEOUT_TERM][env_id]
             reason = None
             if done_list[env_id]:
-                if physical:
+                if foul:
+                    # Checked BEFORE the fall: a swing that goes through the table usually also
+                    # tips the base, and the reason a reader needs is the one that caused it.
+                    reason = "table_hit"
+                elif physical:
                     reason = "physical_fall"
                 elif guards:
                     reason = "guard_reset"

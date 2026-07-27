@@ -51,7 +51,7 @@ updates。
    - **SMASH**：p.6 明说训练含外部扰动，但未给数值。
 4. **不稳定病像与"从未被推过"一致。** 四个独立初始化（seed 1/2/3/4）同卷回球
    `83/100、100/100、100/100、20/100`（零物理摔倒卷，脆性表现在回球质量全凭初始化运气；
-   见 [fresh lineage 四 seed 记录](../../PHASE1_FRESH_LINEAGE_2026-07-11.md#remaining-gates)）；
+   见 [fresh lineage 四 seed 记录](../../archive/PHASE1_FRESH_LINEAGE_2026-07-11.md#remaining-gates)）；
    矩阵运行态快照里 V 父本全部格子窗口摔倒计数 ~`380–440` 而 W 父本 `0–1`。策略只会一条
    窄走廊、姿态吸引盆没有被扰动拓宽过，与文献里"无 push 训练→脆"的病像一致。
 

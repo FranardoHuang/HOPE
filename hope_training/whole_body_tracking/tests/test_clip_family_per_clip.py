@@ -111,6 +111,22 @@ def test_explicit_missing_one_family_fails_loud():
         resolve(("backhand", "backhand", "backhand"), 3)
 
 
+def test_single_clip_may_declare_either_family():
+    """一条只有一个 clip 的臂必须说得出自己是哪一手。
+
+    both-families 规则保护的是统一策略的两条通道;单 clip 根本没有通道之分(swing_sign 对每个
+    env 都是同一个常数),规则在这里没有东西可保护,却会让反手独臂无法自述——只能落进 None 默认,
+    而那条默认把单 clip 硬编码成正手,于是逐侧指标恒为 0.0000 而总量在动。
+    """
+    assert resolve(("backhand",), 1) == (False,)
+    assert resolve(("forehand",), 1) == (True,)
+    # 缺席仍走老默认(现役在跑臂逐字节不变),显式声明才纠正它
+    assert resolve(None, 1) == (True,)
+    # ≥2 clip 的保护一字未动
+    with pytest.raises(ValueError, match="at least one forehand and one backhand"):
+        resolve(("backhand", "backhand"), 2)
+
+
 # --------------------------------------------------------------------------------------------- #
 # MotionCommand 开机校验 + 懒推导(真 MotionCommand,合成 npz clip)
 # --------------------------------------------------------------------------------------------- #

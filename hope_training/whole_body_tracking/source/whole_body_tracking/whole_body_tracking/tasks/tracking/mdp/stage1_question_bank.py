@@ -26,6 +26,18 @@ SCHEMA_VERSION = 3
 SPLIT_ALGORITHM = "blake2b64-round1e-4-f64le-v1"
 EXAM_FRAC = 0.2
 SOURCE_FAMILY_CONTRACT = "stage1-source-family-v2"
+
+# Grip modes a schema-v3 bank may ship, mapped to the face provenance each one asserts
+# (mirrors gen_stage1_questions.FACE_SOURCE_BY_GRIP_MODE for the shippable modes). "off" is
+# absent on purpose: a raw, uncalibrated video-proxy face is not a settled face and may not
+# ship. "mount" = the face is defined by the robot's rigid URDF paddle mount
+# (right_hand_pingpang_joint + pingpang_red_joint, both fixed rpy="0 0 0", so blade normal ==
+# wrist +Y exactly); no grip rotation applies and none may be fitted (owner ruling 2026-07-23).
+STRICT_GRIP_MODES = {
+    "registry": "video-proxy",
+    "baked": "baked-grip",
+    "mount": "rigid-mount",
+}
 PHYSICS_CONTRACT_FILES = (
     "configs/ball_physics_venue.yaml",
     "hope_ws/src/hope_planner/hope_planner/constants.py",
@@ -592,15 +604,36 @@ def load_question_bank(
                     f"{geometry_mismatch}"
                 )
             grip_rotation = clip_info.get("grip_rotation_matrix")
-            if clip_info.get("grip_mode") == "registry" and grip_rotation is None:
+            grip_mode = clip_info.get("grip_mode")
+            if grip_mode == "registry" and grip_rotation is None:
                 raise ValueError(
                     f"question bank {path!r} clip {name!r}: registry grip lacks its rotation"
                 )
-            if clip_info.get("grip_mode") not in ("registry", "baked"):
+            if grip_mode not in STRICT_GRIP_MODES:
                 raise ValueError(
                     f"question bank {path!r} clip {name!r}: unsupported strict grip mode "
-                    f"{clip_info.get('grip_mode')!r}"
+                    f"{grip_mode!r} (expected one of {sorted(STRICT_GRIP_MODES)})"
                 )
+            # RIGID MOUNT (owner ruling 2026-07-23): the face is defined by the robot's fixed
+            # URDF paddle mount, so no grip rotation exists. A bank claiming mode "mount" while
+            # carrying a rotation matrix has fitted a grip anyway — refuse it.
+            if grip_mode == "mount" and grip_rotation is not None:
+                raise ValueError(
+                    f"question bank {path!r} clip {name!r}: grip_mode='mount' means the face "
+                    f"comes from the robot's rigid URDF paddle mount and NO grip rotation may "
+                    f"be fitted, but the bank carries grip_rotation_matrix={grip_rotation!r}"
+                )
+            # face_source is OPTIONAL (banks generated before the marker existed omit it), but
+            # when present it must agree with grip_mode — the two must never drift apart.
+            recorded_face_source = clip_info.get("face_source")
+            if recorded_face_source is not None:
+                expected_face_source = STRICT_GRIP_MODES[grip_mode]
+                if recorded_face_source != expected_face_source:
+                    raise ValueError(
+                        f"question bank {path!r} clip {name!r}: face_source="
+                        f"{recorded_face_source!r} disagrees with grip_mode={grip_mode!r} "
+                        f"(expected {expected_face_source!r})"
+                    )
             if grip_rotation is not None:
                 grip_rotation_arr = np.asarray(grip_rotation, dtype=np.float64)
                 if (grip_rotation_arr.shape != (3, 3)

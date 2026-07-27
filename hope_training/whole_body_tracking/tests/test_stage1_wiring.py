@@ -16,9 +16,15 @@ gen_stage1_questions.py loading virtual_ball.py). Covers:
   the generator's single-application guard (SystemExit) catching a double rally rotation.
 * rally-yaw canonicalization: rotate by psi then -psi = identity; -psi-about-+Z convention;
   vertical vectors invariant.
-* fail-closed bake detection (audit round 2): corrupted face_normal_reliable markers, *_cal
-  stem/registry disagreement, _cal-sibling refusal, pinned-session mismatch, baked-under---grip
-  off reporting.
+* fail-closed FACE-SOURCE resolution: the registry ``face_normal_reliable`` marker has exactly
+  three legal values (``false`` = video proxy, ``true-calibrated...`` = grip baked into the npz,
+  ``true-rigid-mount...`` = face defined by the robot's rigid URDF paddle mount, owner ruling
+  2026-07-23). Unrecognised values, a missing field and a missing registry entry all refuse;
+  ``--grip off`` is not an exemption. Rigid-mount clips take the NO-ROTATION path under BOTH
+  --grip settings and their face stays the raw wrist +Y (the human grip Rz(+5)Rx(+40) would
+  tilt it 40.2 deg). Also: *_cal stem/registry disagreement, _cal-sibling refusal,
+  pinned-session mismatch, baked-under---grip off reporting, and the diagnostic-only
+  "unregistered" scan mode that can never ship a bank.
 * loader meta enforcement (audit round 2): banks without meta_json / non-JSON meta / flags not
   both true are refused with ValueError; allow_legacy=True is the explicit escape hatch.
 * --anchor train-candidate: strike frame anchored at the FIRST entry of the registry's
@@ -33,6 +39,7 @@ from __future__ import annotations
 import importlib.util
 import json
 import os
+import sys
 import tempfile
 
 import numpy as np
@@ -440,6 +447,65 @@ def test_schema3_runtime_motion_and_phase_binding(qb, tmpdir):
         qb.validate_runtime_motion_contract(meta, files, [11, 11], [0.5, 0.5])
 
 
+def _mount_meta(qb, face_source="rigid-mount", rotation=None):
+    """mutate_meta hook: retag both clips as rigid-mount and re-seal the family hash."""
+    def mutate(meta):
+        for name in ("forehand", "backhand"):
+            for block in (meta["clips"][name], meta["source_family_contract"]["clips"][name]):
+                block["grip_mode"] = "mount"
+                block["grip_rotation_matrix"] = rotation
+                if face_source is not None:
+                    block["face_source"] = face_source
+        meta["source_family_sha256"] = qb.canonical_sha256(meta["source_family_contract"])
+    return mutate
+
+
+def test_loader_rigid_mount_grip_mode(qb, tmpdir):
+    """Schema-v3 loader: 'mount' is shippable, carries NO rotation, and cannot lie about it."""
+    assert qb.STRICT_GRIP_MODES == {
+        "registry": "video-proxy", "baked": "baked-grip", "mount": "rigid-mount",
+    }, qb.STRICT_GRIP_MODES
+
+    # accepted: mount + no rotation + matching face_source
+    p = os.path.join(tmpdir, "mount_ok.npz")
+    _write_schema3_bank(p, qb, split="train", mutate_meta=_mount_meta(qb))
+    bank = qb.load_question_bank(p, expected_split="train")
+    assert bank.metadata["clips"]["backhand"]["grip_mode"] == "mount"
+    assert bank.metadata["clips"]["backhand"]["face_source"] == "rigid-mount"
+
+    # accepted: face_source absent (banks predating the marker stay loadable)
+    p_legacy = os.path.join(tmpdir, "mount_no_face_source.npz")
+    _write_schema3_bank(p_legacy, qb, split="train", mutate_meta=_mount_meta(qb, face_source=None))
+    assert qb.load_question_bank(p_legacy, expected_split="train").counts.tolist() == [3, 3]
+
+    # refused: mount mode that nevertheless carries a fitted grip rotation
+    p_rot = os.path.join(tmpdir, "mount_with_rotation.npz")
+    _write_schema3_bank(p_rot, qb, split="train",
+                        mutate_meta=_mount_meta(qb, rotation=np.eye(3).tolist()))
+    with pytest.raises(ValueError, match="NO grip rotation may"):
+        qb.load_question_bank(p_rot, expected_split="train")
+
+    # refused: face_source that disagrees with grip_mode
+    p_drift = os.path.join(tmpdir, "mount_face_source_drift.npz")
+    _write_schema3_bank(p_drift, qb, split="train",
+                        mutate_meta=_mount_meta(qb, face_source="baked-grip"))
+    with pytest.raises(ValueError, match="disagrees with grip_mode"):
+        qb.load_question_bank(p_drift, expected_split="train")
+
+    # still refused: 'off' (a raw uncalibrated proxy face is not a settled face)
+    def make_off(meta):
+        for name in ("forehand", "backhand"):
+            meta["clips"][name]["grip_mode"] = "off"
+            meta["source_family_contract"]["clips"][name]["grip_mode"] = "off"
+        meta["source_family_sha256"] = qb.canonical_sha256(meta["source_family_contract"])
+    p_off = os.path.join(tmpdir, "mode_off.npz")
+    _write_schema3_bank(p_off, qb, split="train", mutate_meta=make_off)
+    with pytest.raises(ValueError, match="unsupported strict grip mode"):
+        qb.load_question_bank(p_off, expected_split="train")
+    print("[ok] loader: grip_mode 'mount' ships without a rotation; fitted rotation, "
+          "face_source drift and mode 'off' all refuse")
+
+
 def test_face_command_obs_vector(qb):
     """Contract-day 179-D lane layout: [normal (3), rho placeholder (1) = 0]."""
     normal = torch.randn(7, 3)
@@ -455,8 +521,15 @@ def test_face_command_obs_vector(qb):
 
 def _load_script(fname, modname):
     """Load a scripts/*.py module by path (top-level imports are numpy-light; planner/torch
-    imports live inside main())."""
-    path = os.path.join(HERE, "..", "scripts", fname)
+    imports live inside main()).
+
+    scripts/ goes on sys.path first: analyze_strike_phase.py does a bare
+    ``from racket_geometry_contract import ...``, which resolves for free when the file is RUN
+    as a script (sys.path[0] = its own dir) but not when it is loaded by path from a test."""
+    scripts_dir = os.path.abspath(os.path.join(HERE, "..", "scripts"))
+    if scripts_dir not in sys.path:
+        sys.path.insert(0, scripts_dir)
+    path = os.path.join(scripts_dir, fname)
     spec = importlib.util.spec_from_file_location(modname, os.path.abspath(path))
     mod = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(mod)
@@ -571,24 +644,135 @@ def test_anchor_train_candidate(gen, asp, tmpdir):
     print("[ok] anchor: train-candidate uses FIRST registry candidate, absent field refuses")
 
 
-def test_bake_detection_fail_closed(gen, asp):
-    """_grip_is_baked + resolve_grip_and_yaw refuse ambiguous registry states (audit round 2)."""
-    def expect_exit(fn, *frags):
-        try:
-            fn()
-            raise AssertionError(f"expected SystemExit mentioning {frags}")
-        except SystemExit as exc:
-            for f in frags:
-                assert f in str(exc), f"{f!r} not in {exc}"
+def _expect_exit(fn, *frags):
+    try:
+        fn()
+    except SystemExit as exc:
+        for f in frags:
+            assert f in str(exc), f"{f!r} not in {exc}"
+        return
+    raise AssertionError(f"expected SystemExit mentioning {frags}")
 
-    # marker semantics: exactly False -> raw; 'true-calibrated...' -> baked; no entry -> raw
-    assert gen._grip_is_baked("c", {"face_normal_reliable": False}) is False
-    assert gen._grip_is_baked("c", {"face_normal_reliable": "true-calibrated"}) is True
-    assert gen._grip_is_baked("c", None) is False
-    # corrupted markers refuse loudly (fail-closed): bool True, strings, missing field
-    for bad in (True, "yes", "false", None):
-        expect_exit(lambda b=bad: gen._grip_is_baked("clipx", {"face_normal_reliable": b}),
-                    "clipx", "bake marker")
+
+def test_face_source_marker_vocabulary(gen):
+    """face_source(): THREE legal markers, no default, no guess (fail-closed face provenance).
+
+    `false`               -> video/GVHMR proxy face (the registry grip is what makes it a face)
+    'true-calibrated...'  -> csv_to_npz_mujoco --grip-rot baked the grip into the npz
+    'true-rigid-mount...' -> the robot's rigid URDF paddle mount defines the face; no grip
+                             applies and none may be fitted (owner ruling 2026-07-23)
+    Anything else — including a missing registry entry, a missing field, `None` and bool
+    `True` — is an unanswered question about whether a grip is already in the npz, and BOTH
+    wrong answers corrupt the face. Every such case must refuse.
+    """
+    assert gen.face_source("c", {"face_normal_reliable": False}) == gen.FACE_SOURCE_VIDEO_PROXY
+    assert gen.face_source("c", {"face_normal_reliable": "true-calibrated"}) == \
+        gen.FACE_SOURCE_BAKED_GRIP
+    assert gen.face_source("c", {"face_normal_reliable": "true-rigid-mount"}) == \
+        gen.FACE_SOURCE_RIGID_MOUNT
+    # both trusted markers accept a human explanation suffix (the registry style)
+    assert gen.face_source("c", {"face_normal_reliable": "true-calibrated (v5 grip 5/40)"}) == \
+        gen.FACE_SOURCE_BAKED_GRIP
+    assert gen.face_source(
+        "c", {"face_normal_reliable": "true-rigid-mount (URDF pingpang_red_joint rpy=0)"}
+    ) == gen.FACE_SOURCE_RIGID_MOUNT
+    # UNRECOGNISED value -> refuse (never warn-and-continue)
+    for bad in (True, "yes", "false", "true", None, 1, 0.0, [], "rigid-mount"):
+        _expect_exit(lambda b=bad: gen.face_source("clipx", {"face_normal_reliable": b}),
+                     "clipx", "face-source marker")
+    # MISSING field -> refuse
+    _expect_exit(lambda: gen.face_source("clipy", {"phase": 0.5}),
+                 "clipy", "no `face_normal_reliable` field")
+    # MISSING registry entry -> refuse, and say that --grip off is not an exemption
+    _expect_exit(lambda: gen.face_source("clipz", None),
+                 "clipz", "no entry in strike_annotations.yaml", "`--grip off` does NOT exempt")
+    # the marker strings are exactly these (a rename here is a registry migration, not a typo)
+    assert gen.FACE_MARKER_BAKED_GRIP == "true-calibrated"
+    assert gen.FACE_MARKER_RIGID_MOUNT == "true-rigid-mount"
+    print("[ok] face_source: 3 markers (false / true-calibrated / true-rigid-mount), "
+          "unrecognised + missing field + missing entry all fail closed")
+
+
+def test_rigid_mount_never_fits_a_grip(gen, asp, tmpdir):
+    """THE regression this marker exists for: a robot-solved face must not be re-rotated.
+
+    The canonical clips are compiled through the robot's own kinematics, so their blade face is
+    already the URDF mount face (right_hand_pingpang_joint + pingpang_red_joint, both fixed with
+    rpy="0 0 0" -> blade normal == wrist +Y exactly). Right-multiplying the v5 HUMAN grip
+    Rz(+5)Rx(+40) onto it tilts the face by 40.2 deg. Under the rigid-mount marker the generator
+    must take the NO-ROTATION path under BOTH --grip settings, and both must agree exactly.
+    """
+    grip_block = {"session_v5_oblique_hopex": {"alpha_z_deg": 5, "beta_x_deg": 40}}
+    mount = {"face_normal_reliable": "true-rigid-mount (URDF mount; owner ruling 2026-07-23)",
+             "phase": 0.5, "rally_yaw_deg": 0}
+    anns = {"mount_motion": dict(mount)}
+
+    # --grip registry AND --grip off both resolve to the same no-rotation mount mode
+    out = [gen.resolve_grip_and_yaw(asp, "bh", "/x/mount_motion.npz", anns, grip_block, flag)
+           for flag in ("registry", "off")]
+    for rot, _desc, yaw, mode in out:
+        assert rot is None, "a rigid-mount clip must never carry a grip rotation"
+        assert mode == "mount", mode
+        assert yaw == 0.0, yaw
+    assert out[0][1] == out[1][1], "--grip must not change a rigid-mount clip's face provenance"
+    assert "RIGID MOUNT" in out[0][1] and "none may be fitted" in out[0][1]
+    # the mode is shippable and declares its provenance honestly
+    assert gen.FACE_SOURCE_BY_GRIP_MODE["mount"] == gen.FACE_SOURCE_RIGID_MOUNT
+    assert "mount" in ("registry", "baked", "mount"), "mount must satisfy the grip_applied gate"
+
+    # ... and the resulting FACE is the raw wrist +Y, 40.2 deg away from the contaminated one.
+    s2 = np.sqrt(0.5)
+    R_wrist = np.array([[0.0, -1.0, 0.0], [1.0, 0.0, 0.0], [0.0, 0.0, 1.0]])
+    npz = os.path.join(tmpdir, "mount_motion.npz")
+    _write_motion_npz(npz, (s2, 0.0, 0.0, s2), T=11)
+    st = gen.strike_state_from_clip(asp, "bh", npz, anns, grip_rot=out[0][0],
+                                    rally_yaw_deg=out[0][2])
+    mount_face = R_wrist @ np.array([0.0, 1.0, 0.0])
+    assert np.allclose(st["clip_normal"], mount_face, atol=1e-12), \
+        f"rigid-mount face {st['clip_normal']} != wrist +Y {mount_face}"
+    contaminated = R_wrist @ asp.grip_rotation(5.0, 40.0) @ np.array([0.0, 1.0, 0.0])
+    tilt = np.degrees(np.arccos(np.clip(np.dot(mount_face, contaminated), -1.0, 1.0)))
+    assert 40.0 < tilt < 40.5, f"expected the known ~40.2 deg contamination, got {tilt:.2f}"
+    assert not np.allclose(st["clip_normal"], contaminated, atol=1e-3)
+
+    # a rigid-mount clip may not ALSO pin a grip session (the two claims contradict)
+    _expect_exit(lambda: gen.resolve_grip_and_yaw(
+        asp, "bh", "/x/mount_motion.npz",
+        {"mount_motion": dict(mount, grip_session="session_v5_oblique_hopex")},
+        grip_block, "registry"), "rigid-mount", "grip_session")
+    # a *_cal stem claims a BAKE specifically; rigid-mount is not a bake
+    _expect_exit(lambda: gen.resolve_grip_and_yaw(
+        asp, "bh", "/x/mounty_cal.npz", {"mounty_cal": dict(mount)}, grip_block, "registry"),
+        "mounty_cal", "true-calibrated")
+    print(f"[ok] rigid-mount: no rotation under either --grip, face == wrist +Y, "
+          f"{tilt:.1f} deg from the human-grip contamination, grip_session/_cal conflicts refuse")
+
+
+def test_unregistered_clip_is_diagnostic_only(gen, asp):
+    """No registry row = no bank, ever; --phase-scan may look only with --grip off."""
+    grip_block = {"sess": {"alpha_z_deg": 5, "beta_x_deg": 40}}
+    # bank path (allow_unregistered defaults False): refuses under BOTH --grip settings
+    for flag in ("registry", "off"):
+        _expect_exit(lambda f=flag: gen.resolve_grip_and_yaw(
+            asp, "fh", "/x/nobody.npz", {}, grip_block, f),
+            "nobody", "no entry in strike_annotations.yaml")
+    # scan path: --grip registry still refuses (the rotating path is live)
+    _expect_exit(lambda: gen.resolve_grip_and_yaw(
+        asp, "fh", "/x/nobody.npz", {}, grip_block, "registry", allow_unregistered=True),
+        "nobody", "no entry in strike_annotations.yaml")
+    # scan path + explicit --grip off: allowed, no rotation, and NOT shippable
+    rot, desc, yaw, mode = gen.resolve_grip_and_yaw(
+        asp, "fh", "/x/nobody.npz", {}, grip_block, "off", allow_unregistered=True)
+    assert rot is None and yaw == 0.0 and mode == "unregistered", (rot, yaw, mode)
+    assert "UNREGISTERED" in desc
+    assert mode not in ("registry", "baked", "mount"), \
+        "an unregistered clip must never satisfy the schema-v3 grip_applied gate"
+    print("[ok] unregistered: bank writes refuse always; diagnostic scan only with --grip off")
+
+
+def test_bake_detection_fail_closed(gen, asp):
+    """resolve_grip_and_yaw refuses ambiguous registry states (audit round 2)."""
+    expect_exit = _expect_exit
 
     grip_block = {"sess": {"alpha_z_deg": 5, "beta_x_deg": 40}}
     raw = {"face_normal_reliable": False, "rally_yaw_deg": 10}
@@ -596,7 +780,7 @@ def test_bake_detection_fail_closed(gen, asp):
     # *_cal stem whose registry entry lacks the bake marker -> refuse
     expect_exit(lambda: gen.resolve_grip_and_yaw(
         asp, "fh", "/x/foo_cal.npz", {"foo_cal": dict(raw)}, grip_block, "registry"),
-        "foo_cal", "bake marker")
+        "foo_cal", "true-calibrated")
     # raw clip with a *_cal sibling registered -> refuse (anchors must come from the _cal npz)
     expect_exit(lambda: gen.resolve_grip_and_yaw(
         asp, "fh", "/x/bar.npz", {"bar": dict(raw), "bar_cal": dict(baked)},

@@ -219,7 +219,10 @@ def _make_ref_cmd(signs):
     rt.cfg = types.SimpleNamespace(
         mount_normal_axis=1, mount_normal_sign=1.0, mount_normal_sign_per_clip=signs,
         strike_phase=0.5, strike_phase_per_clip=(), clean_strike_vel_window=2,
-        clean_reference_strike_velocity=True)
+        clean_reference_strike_velocity=True,
+        # 参考击球点的"桌面以下不合法"闸门要读虚拟球桌常数(这里的合成 body_pos 全 0,闸门空转)。
+        vb_table_near_x=0.5, vb_table_surface_z=0.76)
+    rt._vb_ball_r = 0.02
     rt._env = types.SimpleNamespace(step_dt=0.02)
     rt._racket_mode = "body"
     rt._racket_body_index = 1
@@ -682,8 +685,13 @@ def test_critic_face_pair_sees_the_same_random_command_without_resizing():
     assert "self.vb_vel_in_w[env_ids] = incoming_vel" in src_apply
     assert "self.vb_spin_in_w[env_ids] = incoming_spin" in src_apply
     src_resample = inspect.getsource(hope_commands_mod.RacketTargetCommand._resample_command)
-    assert "self._question_bank is None" in src_resample, (
-        "bank 来球在同一 resample 末尾又被随机 virtual-ball 采样覆盖")
+    # 原地不动的原因:这条守的是"解出来的来球别在同一 resample 末尾被随机 vb 采样盖掉"。判据从
+    # "有没有题库对象"改成"目标是不是解出来的"(题库行 或 连续缓冲行)之后,守卫必须跟着改绑到新
+    # 判据本体上,否则它只会因为改名变红,下一个人顺手删掉 = 守卫彻底退休。
+    assert "and not self._solved_targets_active)" in src_resample, (
+        "解出来的来球(题库/连续)在同一 resample 末尾又被随机 virtual-ball 采样覆盖")
+    assert "_solved_targets_active" in inspect.getsource(
+        hope_commands_mod.RacketTargetCommand), "判据属性 _solved_targets_active 本体不见了"
     ex_path = os.path.join(
         HERE, "..", "source", "whole_body_tracking", "whole_body_tracking", "utils", "exporter.py")
     ex = open(ex_path, encoding="utf-8").read()

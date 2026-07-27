@@ -5,6 +5,8 @@ forehand y<0, backhand y>0, x~0.40, strike phases 0.36/0.50, command field
 format, deterministic staging, safety clamps, and that level-0/estop stand.
 """
 
+from __future__ import annotations
+
 import math
 
 import numpy as np

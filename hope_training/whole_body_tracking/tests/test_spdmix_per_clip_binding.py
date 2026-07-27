@@ -87,7 +87,11 @@ def _make_strike_rt(mcmd):
         mount_normal_axis=1,
         clean_strike_vel_window=2,
         clean_reference_strike_velocity=True,
+        # 参考击球点的"桌面以下不合法"闸门要读虚拟球桌常数(合成 clip 的 x=0,在近桌边之后,闸门空转)。
+        vb_table_near_x=0.5,
+        vb_table_surface_z=0.76,
     )
+    rt._vb_ball_r = 0.02
     rt._motion = lambda: mcmd
     rt._env = types.SimpleNamespace(step_dt=0.02)
     rt._racket_mode = "body"
@@ -370,7 +374,11 @@ def test_source_guard_family_bucketing_everywhere():
     )
     for func in bucketed:
         src = inspect.getsource(func)
-        assert "_clip_family_rows" in src, func.__qualname__
+        # ``_metric_bucket_rows`` is the N-stroke successor: it RETURNS ``_clip_family_rows()``
+        # unless racket_target.clip_names_per_clip declares one name per clip, in which case the
+        # bucket is the clip id (so fh_loop and fh_block_syn stop sharing a bucket). Either name
+        # satisfies this guard's actual intent: no bare ``== c`` clip bucketing.
+        assert ("_clip_family_rows" in src or "_metric_bucket_rows" in src), func.__qualname__
         for stale in ("clips == c", "clip_all == c", "(_clip == _c)", "clip_id == clip"):
             assert stale not in src, (func.__qualname__, stale)
     for func in (RT._sample_targets_uniform, RT._sample_targets_hitter_pure):

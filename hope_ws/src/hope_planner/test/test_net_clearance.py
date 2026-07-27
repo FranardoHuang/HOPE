@@ -11,6 +11,8 @@ FAIL case is anchored to an INDEPENDENT hand-derived drag-parabola value, not to
 helper's own integrator — see the derivation in test_flat_trajectory_fails_net.
 """
 
+from __future__ import annotations
+
 import numpy as np
 
 from hope_planner.ball_trajectory_predictor import BallTrajectoryPredictor

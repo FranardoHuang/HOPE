@@ -1,15 +1,16 @@
 #!/usr/bin/env python3
-"""Code-rooted admission capabilities for motion-training consumers.
+"""Code-rooted admission capability for the canonical motion-bank consumer.
 
 Registry JSON, evidence labels, and adoption manifests are provenance records,
 not authority.  This module is the only place that turns a bank-promotion
 certificate into an opaque runtime capability.  A certificate is trusted only
 when the SHA-256 of the exact bytes parsed by this verifier is present in the
-code-owned trust set below.  Neither trust set is configurable through Hydra.
+code-owned trust set below.  The trust set is not configurable through Hydra.
 
-Both sets intentionally ship empty.  Adding a digest is a reviewed source-code
-change.  Until that happens, new canonical-bank and legacy raw-motion launches
-fail closed.
+It intentionally ships empty.  Adding a digest is a reviewed source-code
+change.  Until that happens, new canonical-bank launches fail closed.  The
+legacy/default ``motion_file`` training path is not gated here: it loads raw
+NPZ bytes directly, as it did before the canonical consumer existed.
 
 This is an operational configuration/provenance boundary, not a sandbox
 against arbitrary Python already executing in the process.  In-process code is
@@ -29,17 +30,6 @@ from typing import Any, Mapping, Sequence
 
 
 TRUSTED_BANK_PROMOTION_CERTIFICATE_SHA256: frozenset[str] = frozenset()
-TRUSTED_LEGACY_RAW_MOTION_SHA256: frozenset[str] = frozenset(
-    {
-        # 2026-07-25 Franco 授权(v2 reward probe,分支 Franco_codex/v2-reward-20260725):
-        # v4rg_runtime_order_v3 正/反手教师动作——现役全部波次的训练动作,canonical 库
-        # 0/10 训练授权期间的过渡准入。canonical 编译动作上位后按库治理收回。
-        # hope_forehand_v4rg_cal.npz
-        "f2cb2d9f5d27cefbcee0b790000fcd979abaf02894d4fcad061ebca27f141687",
-        # hope_backhand_v4rg_cal.npz
-        "1722553375cd28f9b2d567c01b1a5fc6bcd149fa12cadb20e5202a9153367534",
-    }
-)
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
 _MINT_TOKEN = object()
@@ -974,62 +964,10 @@ def require_matching_admission(
         )
 
 
-def legacy_raw_motion_hashes(
-    motion_files: str | os.PathLike[str] | Sequence[str | os.PathLike[str]],
-) -> tuple[str, ...]:
-    """Hash exact raw-motion bytes and require the code-owned legacy allowlist."""
-
-    _, digests = legacy_raw_motion_snapshots(motion_files)
-    return digests
-
-
-def legacy_raw_motion_snapshots(
-    motion_files: str | os.PathLike[str] | Sequence[str | os.PathLike[str]],
-) -> tuple[tuple[bytes, ...], tuple[str, ...]]:
-    """Return the exact admitted bytes so a consumer never reopens the paths."""
-
-    if isinstance(motion_files, (str, os.PathLike)):
-        values = (motion_files,)
-    else:
-        try:
-            values = tuple(motion_files)
-        except TypeError as exc:
-            raise MotionAdmissionError(
-                "legacy motion files must be one path or a path sequence"
-            ) from exc
-    if not values:
-        raise MotionAdmissionError("legacy motion file sequence may not be empty")
-    snapshots: list[bytes] = []
-    digests: list[str] = []
-    for index, value in enumerate(values):
-        path = Path(value).expanduser()
-        try:
-            path = path.resolve(strict=True)
-        except OSError as exc:
-            raise MotionAdmissionError(
-                f"cannot resolve legacy motion file[{index}]: {exc}"
-            ) from exc
-        if not path.is_file():
-            raise MotionAdmissionError(
-                f"legacy motion file[{index}] is not a regular file"
-            )
-        payload, digest = _snapshot(path, f"legacy motion file[{index}]")
-        if digest not in TRUSTED_LEGACY_RAW_MOTION_SHA256:
-            raise MotionAdmissionError(
-                f"legacy motion file[{index}] SHA-256 is absent from the "
-                "code trust set"
-            )
-        snapshots.append(payload)
-        digests.append(digest)
-    return tuple(snapshots), tuple(digests)
-
-
 __all__ = [
     "BankPromotionBinding",
     "MotionAdmissionError",
     "TrustedMotionAdmission",
-    "legacy_raw_motion_hashes",
-    "legacy_raw_motion_snapshots",
     "require_matching_admission",
     "verify_bank_promotion_certificate",
 ]

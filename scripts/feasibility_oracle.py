@@ -100,9 +100,12 @@ import sys
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional, Sequence, Tuple
+from typing import Any, Dict, List, Optional, Sequence, Tuple
 
 import numpy as np
+
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+import mujoco_table_scene  # noqa: E402  (pure Python; imports MuJoCo nowhere)
 
 try:  # imported lazily-ish so the pure-geometry helpers stay testable anywhere
     import mujoco
@@ -181,13 +184,15 @@ DEFAULT_MJCF = (
 )
 DEFAULT_ANNOTATIONS = "hope_training/whole_body_tracking/cfg/strike_annotations.yaml"
 
-CHECK_ORDER = ("torque", "fz", "cop", "friction", "flight")
+CHECK_ORDER = ("torque", "fz", "cop", "friction", "flight", "table")
 CHECK_LABEL = {
     "torque": "关节力矩 |τ|/τ_max",
     "fz": "立力 fz≥0",
     "cop": "CoP∈支撑面",
     "friction": "摩擦锥 |f_t|≤μ·fz",
     "flight": "腾空帧外力≈0",
+    # only present under --with-table
+    "table": "不穿桌 (球台实体)",
 }
 
 
@@ -337,6 +342,11 @@ class OracleModel:
     tau_max: np.ndarray            # (31,)
     foot_corners: Dict[str, np.ndarray]  # body-frame sole polygon corners (K,3)
     weight: float                  # total subtree weight [N]
+    # Set only by --with-table.  A SEPARATE, contact-ENABLED model carrying the in-memory table.
+    # It is deliberately not `model`: `model` has mjDSBL_CONTACT set (every Newton must be billed
+    # to actuators + root residual), so the table could never register there.  Keeping the two
+    # apart is what guarantees the torque / CoP / friction numbers are bit-identical either way.
+    table_scene: Any = None
 
     @property
     def nq(self) -> int:
@@ -388,7 +398,14 @@ def _foot_sole_corners(model: "mujoco.MjModel", body_name: str) -> np.ndarray:
     return np.column_stack([hull_xy, np.full(len(hull_xy), z)])
 
 
-def load_oracle_model(mjcf_path: str) -> OracleModel:
+def load_oracle_model(mjcf_path: str, with_table: bool = False) -> OracleModel:
+    """Load the inverse-dynamics plant, and optionally a second table-aware collision model.
+
+    ``with_table`` (``--with-table``, OFF by default) attaches the ping-pong table to an IN-MEMORY
+    copy of the MJCF; the file on disk is never written.  It cannot move a single existing number:
+    the inverse-dynamics model below has contacts disabled and the table lives on a separate
+    model used only for the geometric table check.
+    """
     if mujoco is None:
         raise RuntimeError("mujoco is not installed in this environment")
     model = mujoco.MjModel.from_xml_path(str(mjcf_path))
@@ -424,6 +441,11 @@ def load_oracle_model(mjcf_path: str) -> OracleModel:
         tau_max=np.array(tau_max),
         foot_corners=feet,
         weight=weight,
+        table_scene=(
+            mujoco_table_scene.load_table_scene(mujoco, mjcf_path, collidable=True)
+            if with_table
+            else None
+        ),
     )
 
 
@@ -533,6 +555,8 @@ class ClipReport:
     doses: Dict[str, float] = field(default_factory=dict)
     cop_peak_offset: Optional[Tuple[float, float]] = None  # world dx,dy from support centroid
     notes: List[str] = field(default_factory=list)
+    # populated only under --with-table
+    table_contacts: List[dict] = field(default_factory=list)
 
     def rel(self, f: int) -> str:
         if self.contact_frame is None:
@@ -598,6 +622,37 @@ def analyze_clip(
         d.qacc[:] = qacc[t]
         mujoco.mj_inverse(om.model, d)
         qfrc[t] = d.qfrc_inverse
+
+    # ---- optional check: does the swing go through the table? --------------
+    # Runs on the SEPARATE contact-enabled table model, so it cannot perturb anything above.
+    table_contacts: List[Any] = []
+    if om.table_scene is not None:
+        td = mujoco.MjData(om.table_scene.model)
+        for t in range(T):
+            td.qpos[:] = qpos[t]
+            mujoco.mj_forward(om.table_scene.model, td)
+            table_contacts.extend(
+                mujoco_table_scene.frame_table_contacts(mujoco, om.table_scene, td, t)
+            )
+        hit_frames = sorted({c.frame for c in table_contacts})
+        tab = CheckResult("table")
+        tab.fail_frames = len(hit_frames)
+        tab.fail_runs = runs_of(np.isin(np.arange(T), hit_frames))
+        if table_contacts:
+            worst = max(table_contacts, key=lambda c: c.depth_m)
+            tab.peak, tab.peak_frame = float(worst.depth_m), int(worst.frame)
+            tab.detail = f"{worst.robot_geom} into {worst.obstacle}"
+        rep.checks["table"] = tab
+        rep.table_contacts = [
+            {
+                "frame": c.frame,
+                "robot_geom": c.robot_geom,
+                "obstacle": c.obstacle,
+                "depth_m": c.depth_m,
+                "position_m": list(c.position_m),
+            }
+            for c in table_contacts
+        ]
 
     eval_mask = np.zeros(T, dtype=bool)
     eval_mask[1:-1] = True  # endpoints have no central difference
@@ -728,7 +783,10 @@ def analyze_clip(
     dose_fric = float(np.sum(np.nan_to_num(fric_ratio, nan=-np.inf) > FRICTION_FAIL)) / n_eval
     dose_tau = float(tq.fail_frames) / n_eval
     rep.doses = {"cop": dose_cop, "friction": dose_fric, "torque": dose_tau}
-    hard_fail = rep.checks["fz"].sustained or rep.checks["flight"].sustained
+    # Swinging through the table is a hard infeasibility: no controller can make the racket pass
+    # through a solid slab.  Only reachable under --with-table; absent it, `table` is never a key.
+    table_fail = "table" in rep.checks and rep.checks["table"].fail_frames > 0
+    hard_fail = rep.checks["fz"].sustained or rep.checks["flight"].sustained or table_fail
     if hard_fail or dose_cop >= DOSE_COP_FAIL or dose_tau >= DOSE_TAU_FAIL or dose_fric >= DOSE_FRIC_FAIL:
         rep.verdict = "FAIL"
     elif (
@@ -858,6 +916,7 @@ def report_json(rep: ClipReport) -> dict:
         "doses": rep.doses,
         "cop_peak_offset": rep.cop_peak_offset,
         "checks": {k: cr(v) for k, v in rep.checks.items()},
+        "table_contacts": rep.table_contacts,
         "top_joints": rep.top_joints,
         "binding_sequence": rep.binding_sequence[:40],
         "util_p95": float(np.percentile(rep.util[1:-1].max(axis=1), 95)) if rep.util is not None and rep.n_frames > 2 else None,
@@ -880,11 +939,22 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
     ap.add_argument("--body-order", default=None, help="body-name list/file for body_pos_w columns")
     ap.add_argument("--mu", type=float, default=DEFAULT_MU, help="friction coefficient (default 0.8)")
     ap.add_argument("--support-band", type=float, default=DEFAULT_SUPPORT_BAND)
+    ap.add_argument(
+        "--with-table",
+        action="store_true",
+        help=(
+            "append the colliding ping-pong table to an IN-MEMORY copy of the MJCF (the file "
+            "on disk is never touched) and add a hard-FAIL `table` check for clips whose "
+            "swing passes through it. OFF by default so no existing verdict changes; the "
+            "torque/CoP/friction numbers are unaffected either way because the "
+            "inverse-dynamics model has contacts disabled. See scripts/mujoco_table_scene.py"
+        ),
+    )
     ap.add_argument("--md", default=None, help="write a markdown report here")
     ap.add_argument("--json", dest="json_out", default=None, help="write full metrics json here")
     args = ap.parse_args(argv)
 
-    om = load_oracle_model(args.mjcf)
+    om = load_oracle_model(args.mjcf, with_table=args.with_table)
     annotations = load_annotations(args.annotations)
 
     reps: List[ClipReport] = []

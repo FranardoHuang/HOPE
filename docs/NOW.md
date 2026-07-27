@@ -35,10 +35,13 @@
   diagnostic。07-25/26 深夜：十件 probe 成品交付、冒烟训练 800 iter 跑完（管线 PASS、学习
   信号待 5000 iter 延长冒烟裁决）、源平滑修活后正手窗开 1.33→0.69s（各件时间见实验 §7.3
   逐件最优表）、probe 消融首波队列见实验 §10.1.1。
-- **合并警告（未解决前本分支不得合 main）**：分支把一个出厂为空的 legacy motion admission
-  信任集接进了默认（非 canonical）`MotionCommand` 路径——合入后现行 v4rg 训练重启会在
-  环境构造时直接失败封闭。合并前必须先把 v4rg bank 证书 digest 以受审源码改动加入信任集，
-  或把该门限定到 canonical 消费路径。
+- **合并警告 → 已在工作树修复（待审后即可合 main）**：分支曾把一个出厂为空的 legacy motion
+  admission 信任集接进了默认（非 canonical）`MotionCommand` 路径——合入后现行 v4rg 训练重启会在
+  环境构造时直接失败封闭。**07-26 修复（工作树，未提交）**：采纳"把该门限定到 canonical 消费路径"
+  一案——默认 `motion_file` 通道恢复分支前行为，直接读原始 NPZ 字节、不再过任何信任集，而
+  canonical 消费路径的证书门原样保留 fail-closed。改动：`commands.py` 默认路径去门、
+  `canonical_motion_admission.py` 删掉 legacy 信任集与两个 legacy 函数、对应测试改为"默认路径
+  无需信任集即可构造"的回归 + canonical 仍拒未授权证书。合并阻断已解除，待审。
 
 
 ## 1. 当前一套训练是怎样完整跑起来的

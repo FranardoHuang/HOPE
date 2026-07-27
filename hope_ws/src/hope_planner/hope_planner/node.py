@@ -10,6 +10,8 @@ humanoid must achieve the commanded racket state via its own forward
 kinematics. See HOPE_7DOF_Racket_Model_based_Planner_Reference_Setup.md.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 import time
 

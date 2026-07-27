@@ -7,6 +7,8 @@ opponent's half center, with a net-clearance check and flight-time fallback.
 See HOPE_7DOF_Racket_Model_based_Planner_Reference_Setup.md, Section 5.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Tuple
 

@@ -16,6 +16,31 @@
 #      a physical face direction. Mocap-retargeted clips with a rigid mount are
 #      the safer source for face-normal work.
 #
+# face_normal_reliable IS THE FACE-SOURCE MARKER (fail-closed; the SOLE authority
+# on whether a grip rotation may be applied). gen_stage1_questions.face_source()
+# accepts EXACTLY three answers and refuses everything else, including a missing
+# field and a missing entry - `--grip off` is NOT an exemption, because the marker
+# is resolved BEFORE the --grip early return:
+#
+#   false                  VIDEO PROXY. wrist +Y is not the blade. The registry
+#                          `grip:` rotation Rz(alpha_z)Rx(beta_x) is what turns it
+#                          into a face, and it is applied at generation time.
+#   true-calibrated...     BAKED. csv_to_npz_mujoco --grip-rot re-solved the wrist
+#                          joints so the grip already lives in the npz. NEVER
+#                          re-rotate (that would double-apply it).
+#   true-rigid-mount...    RIGID MOUNT. The face is defined by the ROBOT's paddle
+#                          mount: right_hand_pingpang_joint and pingpang_red_joint
+#                          are both `fixed` with rpy="0 0 0" (URDF-JOINT-LINK.urdf,
+#                          re-verified 2026-07-27), so the blade normal IS wrist +Y
+#                          exactly. NO grip rotation applies and NONE MAY BE FITTED
+#                          (franco ruling 2026-07-23). Banks record this as
+#                          grip_mode "mount" / face_source "rigid-mount".
+#
+# Getting this wrong is not cosmetic: writing `false` on a rigid-mount clip
+# right-multiplies the v5 HUMAN grip Rz(+5)Rx(+40) onto an already robot-solved
+# face and tilts it by 40.2 deg; writing `true-calibrated` claims a bake that never
+# happened. Both produce a bank whose "answers" are for the wrong paddle.
+#
 # Consumers:
 #   - scripts/analyze_strike_phase.py --annotations (default: this file). An
 #     annotated phase OVERRIDES the auto pick; a large disagreement prints the
@@ -707,6 +732,86 @@ clips:
   # 触球窗 right_shoulder_pitch 80% vel line — 源路径自带, 非本次引入).
   # ⚠ SYNTHESIZED TIMELINE (时间律合成, 视频约定帧弃用): phases below are OUTPUT-grid contact
   # rows from the synthesis reports, not video frame conventions.
+  # =========================================================================================
+  # CANONICAL v2 COMPILED CLIPS (robot-kinematics lineage — NOT video retargeting)
+  # -----------------------------------------------------------------------------------------
+  # Built by scripts/canonical_schema2_builder.py (tool_id canonical_schema2_builder_v1) doing
+  # MuJoCo FK on the official a3_pingpong MJCF, then re-aimed by a WHOLE-CLIP rotation. Two
+  # consequences that the fields below encode, and that every canonical clip added here shares:
+  #
+  #  * face_normal_reliable: true-rigid-mount. The clip's blade orientation comes out of the
+  #    robot's own kinematic chain. right_hand_pingpang_joint (right_wrist_yaw_Link ->
+  #    right_hand_pingpang_Link) and pingpang_red_joint (-> pingpang_red_Link) are BOTH `fixed`
+  #    with xyz offsets and rpy="0 0 0" (agi/URDF/A3T2.5-URDF-std-pingpang/urdf/
+  #    URDF-JOINT-LINK.urdf, re-verified 2026-07-27), so the blade frame is the wrist-yaw frame
+  #    translated by exactly [0.21021, 0.032078, 0.032036] m — the constant
+  #    racket_geometry_contract.RACKET_SITE_OFFSET_WRIST_M — and the blade normal IS wrist +Y.
+  #    No grip may be fitted (franco ruling 2026-07-23). The source sidecar agrees that none was
+  #    ever baked: vendor_assets/motion_finalize_20260724/sources/
+  #    SHADOW_franco_bh_loop_c.provenance.json records "grip_bake": null.
+  #
+  #  * rally_yaw_deg: 0, and it MUST stay 0. These clips were re-aimed by rotating the WHOLE
+  #    clip (hope_frame_utils.rotate_motion_to_hope_x about the frame-0 pelvis XY pivot), so the
+  #    residual pelvis yaw is already ~0 (-5.3e-07 deg measured). rally_canonicalize rotates
+  #    strike VECTORS only and would apply that same aiming a second time while leaving the
+  #    already-rotated contact POSITION alone — a silent frame mix.
+  #
+  # `phase` here is NOT video contact truth (these are air swings; no ball was ever observed —
+  # canonical_motion_marker_semantics_v2 calls the compiler's own window a "nominal air-swing
+  # event", contact_truth_observed: false). It is the RETURNABILITY-SCAN anchor that wave-1
+  # bound, written explicitly because a missing `phase` makes the tooling fall back to the
+  # blade-speed peak — exactly the trap this file exists to prevent.
+  # =========================================================================================
+  bh_loop_c_upper_wave1:
+    # motion sha256 97f5e8474f3d3ebfdf03436e137e3515ed0d3067717521ec64e8e6cced9554c8
+    #   (pod2:/workspace/codexschema/wave1_20260727/clips/bh_loop_c_upper_wave1.npz;
+    #    byte-identical to pod1:/workspace/codexschema/wave1_sweep_20260727/bh/bh_yaw+000.0.npz)
+    # T=71 @ 50 fps (1.42 s); scope = upper. NOTE the full-body scope of the same motion is a
+    # DIFFERENT clip and needs its own row + its own bank (a bank binds motion sha + frame count
+    # + anchor frame).
+    phase: 0.228571          # = frame 16 of 71 (16/70 = 0.2285714)
+    status: unverified
+    annotator: claude (wave-1 binding; NO human scrub and NO observed ball contact exists)
+    date: 2026-07-27
+    method: >-
+      returnability-scan argmax, NOT contact truth. gen_stage1_questions.py --phase-scan
+      --grip off, 48 balls, 25 deg/0.6-1.4x cone, headline speed range [2.0, 5.0] m/s -> frame
+      16 scores returnable 1.0000; the >50% band is frames 13-19. Recorded in
+      pod2:/workspace/codexschema/wave1_20260727/BINDINGS_WAVE1.json
+      (clips.clip_1_backhand.strike_phase / strike_phase_source /
+      returnable_fraction_at_bound_frame) and STEP3_BOXES.json.
+      ** DISAGREEMENT ON THE RECORD: the compiler's declared contact window is frames 22-37
+      (STEP1_ROTATION.json contact_window_frames) and does NOT overlap the returnable band
+      13-19. Wave-1's brief made the scan the authority; the compiler window is preserved here
+      so the conflict is not lost. **
+    source: >-
+      canonical-schema2-compiled (canonical_schema2_builder_v1 MuJoCo FK on
+      a3_pingpong.xml sha 2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97),
+      re-aimed by whole-clip rotation. Source build
+      pod1:/workspace/codexschema/canonical_v2_20260724/probe6a_pod1_heavy/candidates_shard/
+      bh_loop_c_upper_canonical_v2.npz sha
+      f6c89539d07ef98e0f78ad676d1a2938d92f5ccfbd12e2df260a124944bc3991;
+      GMR/recipe source SHADOW_franco_bh_loop_c (provenance sidecar "grip_bake" null)
+    face_normal_reliable: true-rigid-mount
+    rally_yaw_deg: 0    # already canonicalised IN THE CLIP: rotate_motion_to_hope_x applied
+      # theta = -72.5519 deg (pelvis_yaw0 72.5519, extra station yaw 0.0), leaving
+      # yaw_after = -5.3e-07 deg (STEP1_ROTATION.json bh_loop_c). Any non-zero value here
+      # would double-count that aiming on the strike vectors only.
+    train_phase_candidates: [0.228571, 0.242857, 0.257143]   # = frames 16, 17, 18 of 71.
+      # FIRST entry == the shipped `phase` above ON PURPOSE (--anchor train-candidate and
+      # --anchor annotated must not disagree for this clip). Scanned ON THIS EXACT NPZ
+      # (sha 97f5e847...) 2026-07-27 with gen_stage1_questions.py --phase-scan --grip off
+      # --scan-balls 48, at two ball regimes:
+      #   [2.0, 5.0] m/s (trainer headline): f16 100%, f17 94%, f15 83%; >50% band 0.21-0.26
+      #   [1.0, 2.5] m/s (venue-measured):   f17 100%, f18 100%, f16 100%; >50% band 0.23-0.27
+      # f16 is the only frame at 100% in BOTH regimes, which is why it is the anchor.
+      # ** DO NOT paste [0.429, 0.443, 0.471] (frames 30/31/33) here. ** That triple is real but
+      # it was scanned on a DIFFERENT npz — newmotion_matrix_20260726/aimed_20260726/
+      # clips_aimed_upper_safe/bh_loop_c_upper_canonical_v2.npz, sha
+      # c950a73e473cad84d0fafcd51c552ec4fef085580bbeaec0f4e96be2acd7e2fc (a different aiming
+      # rotation), log aimed_20260726/scan_aimed.log. Since the FIRST entry is what
+      # --anchor train-candidate binds, importing it would silently move the anchor to f30.
+
   hope_forehand_v5topp_cal:
     phase: 0.5761            # contact f53 of 93 (tool exact 0.576087)
     status: unverified

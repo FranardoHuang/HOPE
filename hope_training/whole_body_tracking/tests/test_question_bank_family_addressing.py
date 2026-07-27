@@ -742,8 +742,10 @@ def test_hope_commands_bank_consumption_is_family_aware():
     with open(HOPE_COMMANDS_PATH, encoding="utf-8") as fh:
         source = fh.read()
     assert "def _qb_bank_family_table(" in source
-    assert source.count("clip_families=(family_table.tolist() if family_table is not None else None)") == 2, \
-        "两处 validate_runtime_motion_contract 调用都必须传 clip_families"
+    # 三处:题库消费点、事件/考卷安装点、连续路径的开机锚定对账(_cq_boot_gate)。数字是"每一处
+    # runtime 对账都带族表"的代理;新增对账点时把数字加上去,别把断言删掉。
+    assert source.count("clip_families=(family_table.tolist() if family_table is not None else None)") == 3, \
+        "每处 validate_runtime_motion_contract 调用都必须传 clip_families"
     assert "self._question_bank, bank_clip, torch.rand(n, device=self.device)" in source, \
         "_apply_question_bank_targets 必须用族折算后的 bank_clip 选题"
     assert "bank.demanded_vel[bank_clips, rows]" in source, \

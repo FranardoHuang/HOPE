@@ -4,6 +4,8 @@ Pure-Python core (constants, estimator, predictor, target planner, pipeline,
 quaternion utils) with a thin ROS 2 node wrapper in node.py.
 """
 
+from __future__ import annotations
+
 from .ball_contact import orient_normal, predict_paddle_contact
 from .ball_kalman_estimator import BallKalmanEstimator
 from .ball_state_estimator import BallStateEstimator

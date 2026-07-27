@@ -27,6 +27,7 @@ HITTER alignment notes (see the project HITTER verification):
 
 from __future__ import annotations
 
+import json
 import math
 import torch
 from collections.abc import Sequence
@@ -190,10 +191,231 @@ def face_tracking_pair(command: "RacketTargetCommand") -> tuple[torch.Tensor, to
     return command.racket_normal_w, command.racket_target_normal_w
 
 
+def _peek_question_bank_clip_order(path) -> tuple:
+    """Read a bank npz's own ``clip_order`` without loading it. () when it carries none (legacy).
+
+    人话:题库自己知道它是按哪几个 clip 生成的。以前加载器把 clip 名默认写死成
+    ("forehand","backhand"),于是任何别的动作集生成的题库**结构上就装不进来**,唯一的绕法是把
+    一个反手 clip 改名叫 "forehand" —— 那会对下游每一个按家族分桶的消费者撒谎。所以这里先问题库。
+    """
+    try:
+        import numpy as _np
+        data = _np.load(str(path))
+        if "meta_json" not in data:
+            return ()
+        meta = json.loads(bytes(_np.asarray(data["meta_json"], dtype=_np.uint8)).decode("utf-8"))
+        return tuple(str(c) for c in (meta.get("clip_order") or ()))
+    except Exception:
+        return ()
+
+
+#: Knobs that STOP DOING ANYTHING once a bank / inline solve produces the target. A run that sets
+#: them looks like it is shaping the task while it is not, so setting one is a construction error.
+#: NOTE ``racket_pos_range_per_clip`` is deliberately NOT here: under a solved target it is the
+#: CONTINUOUS distribution the contact point (= the ball's arrival point) is drawn from, which is
+#: still very much alive. Only the VELOCITY box dies, because the velocity is solved.
+_DEAD_UNDER_SOLVED_TARGET = (
+    ("racket_vel_range_per_clip", None, "the commanded velocity is SOLVED, not a box sample"),
+    ("ref_vel_scale", 1.0, "the commanded velocity no longer comes from the reference clip"),
+)
+#: The reference-perturbation curriculum only has an effect in ``target_mode='reference_perturbed'``
+#: — its cfg defaults are non-zero, so flagging it unconditionally would fire on every legal run.
+_DEAD_UNDER_SOLVED_TARGET_IF_PERTURB_MODE = (
+    ("ref_perturb_pos", (0.0, 0.0, 0.0)),
+    ("ref_perturb_vel", (0.0, 0.0, 0.0)),
+    ("ref_perturb_normal", 0.0),
+    ("ref_perturb_curriculum_steps", 0),
+)
+
+
+def _assert_solved_target_recipe_is_coherent(cfg) -> None:
+    """Every 'must be turned on' item in the launch recipe, as a fail-closed check.
+
+    人话:一份必须靠人记住的发射清单本身就是缺陷。这里把清单里每一条变成"错组合当场炸,并且报错
+    里直接写该设成什么"——以后哪次会话什么都没读,也照样不可能配错。
+    """
+    solved = bool(str(getattr(cfg, "question_bank", "") or "").strip()) or \
+        str(getattr(cfg, "target_mode", "")) == "solved"
+    if not solved:
+        return
+
+    # 1. FACE. Without face_command the inverse-solved face is computed, stored — and graded
+    #    against by nothing, which is exactly how a system ends up lofting the ball upward
+    #    instead of returning it flat while the landing reward notices nothing.
+    if not bool(getattr(cfg, "face_command", False)):
+        raise ValueError(
+            "a solved/banked target computes a demanded racket FACE, but "
+            "racket_target.face_command=False means nothing ever grades it — the face becomes a "
+            "stored number with no consumer. Set racket.face_command: true (and, if you are "
+            "adding the actor lane, racket.face_command_obs: true BEFORE any other observation "
+            "term is attached — attaching it afterwards raises an override error that names the "
+            "wrong term)."
+        )
+    pairing = str(getattr(cfg, "face_command_pairing", "shared_plus_y"))
+    if pairing not in ("shared_plus_y", "legacy_signed_vs_A"):
+        raise ValueError(
+            f"racket_target.face_command_pairing={pairing!r} is not a known pairing; use "
+            f"'shared_plus_y' (the A-frame convention every bank is generated in)"
+        )
+
+    # 2. FACE SIGN. A wrong sign silently inverts which PHYSICAL face is judged to strike.
+    signs = tuple(getattr(cfg, "mount_normal_sign_per_clip", ()) or ())
+    if not signs:
+        raise ValueError(
+            "a solved/banked target grades a signed physical face, so "
+            "racket_target.mount_normal_sign_per_clip must be declared per clip (one +1/-1 per "
+            "loaded clip, in motion_file order). It is absent, so every clip would fall back to "
+            f"the scalar mount_normal_sign={getattr(cfg, 'mount_normal_sign', None)} — and a wrong "
+            "sign silently inverts which physical rubber face is judged to strike."
+        )
+    bad = [(i, float(s)) for i, s in enumerate(signs) if float(s) not in (1.0, -1.0)]
+    if bad:
+        raise ValueError(
+            f"racket_target.mount_normal_sign_per_clip entries must be +1 or -1, got {bad} as "
+            f"(clip index, value)"
+        )
+
+    # 3. DEAD KNOBS. Setting one looks like shaping the task; it is not.
+    checks = list(_DEAD_UNDER_SOLVED_TARGET)
+    if str(getattr(cfg, "target_mode", "")) == "reference_perturbed":
+        checks += [(n, v, "the reference-perturbation curriculum no longer shapes the target")
+                   for n, v in _DEAD_UNDER_SOLVED_TARGET_IF_PERTURB_MODE]
+    offenders = []
+    for name, inert, why in checks:
+        if not hasattr(cfg, name):
+            continue
+        value = getattr(cfg, name)
+        if inert is None:
+            live = value is not None
+        elif isinstance(inert, tuple):
+            live = tuple(float(v) for v in (value or inert)) != inert
+        else:
+            live = float(value) != float(inert)
+        if live:
+            offenders.append(f"{name}={value!r} ({why}; set it to {inert!r})")
+    if offenders:
+        raise ValueError(
+            "these racket_target knobs are DEAD once a bank / inline solve produces the target, "
+            "but this run sets them, so the yaml reads as if they were shaping the task:\n  - "
+            + "\n  - ".join(offenders)
+            + "\nRemove them (or set the inert value shown) so the config says what it does."
+        )
+
+    # 4. HER replay. The solved/banked override runs AFTER the HER block in _sample_targets_uniform,
+    #    so every replayed target is clobbered — burned RNG and compute plus a lying
+    #    achieved_replay_frac (the DeployParity yaml defaults the mix to 0.30).
+    if float(getattr(cfg, "achieved_target_mix_prob", 0.0)) > 0.0:
+        raise ValueError(
+            f"racket_target.achieved_target_mix_prob={cfg.achieved_target_mix_prob} is "
+            f"incompatible with a solved/banked target: the override runs AFTER the HER block in "
+            f"_sample_targets_uniform, so every replayed target is clobbered. Set "
+            f"racket.achieved_target_mix_prob: 0.0 in the task yaml."
+        )
+    if float(getattr(cfg, "midswing_resample_prob", 0.0)) > 0.0:
+        raise ValueError(
+            f"racket_target.midswing_resample_prob={cfg.midswing_resample_prob} is incompatible "
+            f"with a solved/banked target: the mid-swing refinement path re-enters the samplers "
+            f"(and therefore the solve seam) but never calls the shadow/physical ball's "
+            f"on_resample, so the question would be swapped while the ball is still flying to the "
+            f"old one. Set racket.midswing_resample_prob: 0.0."
+        )
+
+    # 5. CONTINUOUS-ONLY items. target_mode='solved' means the answer is produced INLINE from a
+    #    continuous draw. 人话:开关只有这一个,剩下的必须自洽,否则当场炸并写清该设成什么。
+    if str(getattr(cfg, "target_mode", "")) != "solved":
+        return
+    if str(getattr(cfg, "question_bank", "") or "").strip():
+        raise ValueError(
+            "racket_target.target_mode='solved' produces the target from a CONTINUOUS draw, but "
+            "racket_target.question_bank is also set. Two producers cannot both own the atomic "
+            "question/ball write. Pick one: drop question_bank (continuous training), or use "
+            "target_mode 'uniform'/'reference_perturbed' with the bank. To keep a bank as the "
+            "CONTRACT ANCHOR of a continuous run (validated, never trained on) put its path in "
+            "racket.cq_anchor_bank instead."
+        )
+    if getattr(cfg, "cq_vel_range_per_clip", None) is None:
+        raise ValueError(
+            "racket_target.target_mode='solved' needs racket.cq_vel_range_per_clip — the "
+            "INCOMING BALL's velocity box, one (x,y,z) lo/hi triple per loaded clip. That box IS "
+            "the run's declared distribution; there is no shared fallback on purpose (a silent "
+            "default would make every arm's task different from what its yaml says)."
+        )
+    if getattr(cfg, "racket_pos_range_per_clip", None) is None:
+        raise ValueError(
+            "racket_target.target_mode='solved' needs racket.racket_pos_range_per_clip — under a "
+            "solved target it is the CONTACT-POINT DRAW BOX (the ball's arrival point), and its "
+            "per-clip centre is also the pinned S2a base ready-anchor. It is not dead here; it is "
+            "the only thing that says where the ball arrives."
+        )
+    # 5b. INCOMING BOX SANITY. vb_vel_range_per_clip 有 _assert_incoming_ball_boxes_are_sane 把关,
+    #     但连续路径下那个框是死的、真正出球的是 cq_vel_range_per_clip —— 于是"球朝反方向飞"这个
+    #     构造期错误在连续臂上完全没人看。同一套规则原样搬过来:-x 才是冲着机器人来。
+    for clip_id, clip_rng in enumerate(tuple(cfg.cq_vel_range_per_clip)):
+        (x_lo, x_hi), (y_lo, y_hi), (z_lo, z_hi) = clip_rng
+        if float(x_hi) >= 0.0:
+            raise ValueError(
+                f"racket_target.cq_vel_range_per_clip: clip {clip_id} has x_hi={float(x_hi):.4f} "
+                f">= 0, but the incoming ball travels toward the robot (-x). A non-negative "
+                f"ceiling lets the draw launch a ball that flies AWAY, which no stroke can ever "
+                f"answer — the solver would just reject them and the accept rate would crater."
+            )
+        for name, (lo, hi) in (("x", (x_lo, x_hi)), ("y", (y_lo, y_hi)), ("z", (z_lo, z_hi))):
+            if float(lo) > float(hi):
+                raise ValueError(
+                    f"racket_target.cq_vel_range_per_clip: clip {clip_id} axis {name} has "
+                    f"lo={float(lo):.4f} > hi={float(hi):.4f} — an empty box"
+                )
+
+    aim = getattr(cfg, "cq_aim_xy", None)
+    if aim is not None and len(tuple(aim)) != 2:
+        raise ValueError(
+            f"racket_target.cq_aim_xy must be ONE (x, y) point, got {aim!r}. A per-env aim range "
+            f"is refused on purpose: hope_rewards.virtual_landing, virtual_land_err_m and the "
+            f"physical ball's return-flight target all grade against the single fixed "
+            f"vb_target_x/vb_target_y, so a varying aim would solve for A and score at B with "
+            f"nothing asserting. Make _vb_target_xy per-env first, then open this."
+        )
+    # 瞄点必须就是被打分的那个点。人话:解题时瞄 A、打分时按 B 量,中间只有 10 cm 的闭环回读兜底,
+    # 偏 9 cm 也照训不误 —— 那正是"解出来的目标最后被别的东西打分"。所以直接钉死相等。
+    if aim is not None:
+        graded = (float(cfg.vb_target_x), float(cfg.vb_target_y))
+        if tuple(float(v) for v in aim) != graded:
+            raise ValueError(
+                f"racket_target.cq_aim_xy={tuple(float(v) for v in aim)!r} is not the point this "
+                f"run is GRADED at, vb_target_x/vb_target_y={graded!r}. The landing reward, "
+                f"virtual_land_err_m and the physical ball's return flight all read vb_target_*, "
+                f"so the solver would answer one question and the reward would mark a different "
+                f"one. Either drop cq_aim_xy (it defaults to vb_target_*) or move vb_target_*."
+            )
+    # 契约锚题库:连续臂没有 npz 行可扫,于是 load_question_bank 的物理契约 SHA 和
+    # _check_question_bank_face_frame 里的 validate_runtime_motion_contract 两道开机对账全都不跑。
+    # 这正是老板说的"必须开的东西要变成默认"——所以它是必填项,不是可选项,不是一行 WARN。
+    if not str(getattr(cfg, "cq_anchor_bank", "") or "").strip():
+        raise ValueError(
+            "racket_target.target_mode='solved' requires racket.cq_anchor_bank — a schema-v3 npz "
+            "used ONLY as the contract anchor (never trained on, never installed as a target). "
+            "Without it a continuous arm boots with NO physics-contract SHA check, NO runtime "
+            "motion contract (motion SHA / seg_len / strike_phase) and NO on-machine "
+            "continuous-vs-bank parity gate — the three checks every bank arm gets for free. Set "
+            "racket.cq_anchor_bank: cfg/<your clip>_train.npz."
+        )
+    if float(getattr(cfg, "cq_overdraw", 1.0)) < 1.0:
+        raise ValueError("racket_target.cq_overdraw must be >= 1.0 (it is a first-pass margin)")
+    if int(getattr(cfg, "cq_buffer_rows", 0)) <= 0:
+        raise ValueError("racket_target.cq_buffer_rows must be > 0")
+
+
 class RacketTargetCommand(CommandTerm):
     """Samples desired racket/base targets and computes the actual racket state by FK."""
 
     cfg: RacketTargetCommandCfg
+
+    # 类级默认 = 连续题目关。人话:仓库里有一批源码级/纯张量单测用 __new__ 造对象、只塞它们关心
+    # 的那几个字段(以前的判据 _question_bank 就是这么塞的),不走 __init__。判据换成 _cq_enabled
+    # 之后,那些测试会在读属性时直接 AttributeError —— 门不是失效,是炸掉,而炸掉的门等于没门。
+    # 放一个类级 False 兜底,任何没经过 __init__ 的实例都读到"关",默认安全,且以后新增读点不必
+    # 逐个记得写 getattr。
+    _cq_enabled: bool = False
 
     def __init__(self, cfg: RacketTargetCommandCfg, env: ManagerBasedRLEnv):
         # Validate even when face_command is currently disabled: a typo must fail at environment
@@ -263,6 +485,20 @@ class RacketTargetCommand(CommandTerm):
         # unconditionally safe; it is only ever written when the bank is active.
         self.target_normal_cmd = torch.zeros(self.num_envs, 3, device=self.device)
         self._question_bank = None
+        # --- CONTINUOUS producer (target_mode: "solved") -------------------------------------
+        # 人话:这不是题库。这是一个生产者-消费者缓冲——一次批量解一大批题,游标**不放回**地发,
+        # 每道题只发一次、发完就丢,发空了再解一批。统计上和"每次 reset 现场解一次"完全等价,
+        # 没有任何一道题被重放;之所以批量,是因为求解成本按调用计(48 行要花 8192 行的 63%),
+        # 所以正确的省法是让调用变稀,不是让调用变小。
+        # 谁要是把它改成有放回抽取,它就退化成一张 8192 行的滚动题库 —— 也就是 owner 明确否掉的
+        # 那个东西 —— 而且没有任何断言会响。别改。
+        self._cq_enabled = str(getattr(cfg, "target_mode", "")) == "solved"
+        self._cq = None                 # 缓冲状态(懒建:参考拍面/venue 参数在 __init__ 还不存在)
+        self._cq_cfg = None
+        self._cq_gen = None
+        self._cq_anchor = None
+        self._cq_boot_gate_done = False
+        self._cq_last_exhausted_frac = 0.0
         # clip→题库族查表缓存((nseg,) long;forehand 族=0/backhand 族=1)。只有配了
         # cfg.motion.clip_family_per_clip(6-clip 变速列表)才会建;缺席 = None = 现役行为
         # 逐字节不变(clip_id 直接当题库下标)。见 _qb_bank_family_table。
@@ -270,12 +506,22 @@ class RacketTargetCommand(CommandTerm):
         # face_command without a bank would leave target_normal_cmd all-zero: the re-anchored
         # racket_normal reward reads cos = <n_fk, 0> = 0 -> a CONSTANT kernel, i.e. the face reward
         # silently dead while looking configured. Loud error instead.
-        if cfg.face_command and not cfg.question_bank:
+        # The predicate is "will target_normal_cmd actually be WRITTEN", not "is there an npz
+        # path". Those two used to be the same sentence, and the difference deadlocked the
+        # continuous path: this guard demanded a bank for face_command, while
+        # _assert_solved_target_recipe_is_coherent demanded face_command for a solved target, so
+        # target_mode='solved' with no npz was structurally unlaunchable.
+        if cfg.face_command and not (cfg.question_bank or self._cq_enabled):
             raise ValueError(
-                "RacketTargetCommandCfg.face_command=True requires question_bank (npz path): "
-                "without a bank target_normal_cmd stays zeros and the re-anchored racket_normal "
-                "reward is silently dead. Set racket.question_bank or drop face_command."
+                "RacketTargetCommandCfg.face_command=True requires a producer that WRITES "
+                "target_normal_cmd — either question_bank (npz path) or target_mode='solved' "
+                "(continuous inline solve). Without one, target_normal_cmd stays zeros and the "
+                "re-anchored racket_normal reward is silently dead. Set racket.question_bank, or "
+                "racket.target_mode: solved, or drop face_command."
             )
+        # (The continuous producer cannot collide with hitter_pure: both live in target_mode, so
+        # 'solved' and 'hitter_pure' are mutually exclusive by construction. The seam is also not
+        # called from _sample_targets_hitter_pure, which is why the bank is refused here.)
         if cfg.question_bank and cfg.target_mode == "hitter_pure":
             raise ValueError(
                 "RacketTargetCommandCfg.question_bank is incompatible with "
@@ -283,19 +529,68 @@ class RacketTargetCommand(CommandTerm):
                 "the Stage-1 bank defines a fixed contact point and an atomic incoming-ball/answer "
                 "row. Use target_mode='uniform' or 'reference_perturbed' for the bank."
             )
-        if cfg.question_bank and float(cfg.midswing_resample_prob) > 0.0:
+        if (cfg.question_bank or self._cq_enabled) and float(cfg.midswing_resample_prob) > 0.0:
             raise ValueError(
-                "RacketTargetCommandCfg.question_bank is incompatible with "
-                "midswing_resample_prob>0: a redraw would replace the incoming-ball/answer row "
-                "without rescheduling the physical/shadow ball. Disable mid-swing redraws for "
-                "bank experiments."
+                "a solved/banked racket target (question_bank, or target_mode='solved') is "
+                "incompatible with midswing_resample_prob>0: a redraw would replace the "
+                "incoming-ball/answer pair without rescheduling the physical/shadow ball (the "
+                "on_resample hooks only exist in _resample_command). Disable mid-swing redraws."
+            )
+        # GATE: every "you must remember to set this" item in the launch recipe.
+        # 人话:靠人记住的清单迟早会漏。凡是"必须打开才对"的开关,要么变成默认值,要么把错误的
+        # 组合当场拒掉并把该设什么写进报错里。下面这一坨就是把整张清单变成后者。
+        _assert_solved_target_recipe_is_coherent(cfg)
+        # GATE: landing/net rewards with NO solved answer behind the command.
+        # 人话:虚拟球的 landing/pass_net 奖励只有在"命令的速度确实能把球送上台"时才和回球率同向。
+        # 命令速度来自 uniform 球箱、又没有题库(逆解答案)时,两者是反的——实测 88% 的成功反手
+        # 击球没通过速度阈值,因为它们靠"违抗命令速度"才把球打回去。这不是超参,是任务构造错误,
+        # 所以当场拒绝,除非显式 allow_unbanked_landing_rewards=True(做对照臂时用)。
+        # 判据是"命令的速度是不是被逆解出来的",不是"有没有 npz 路径"。连续臂天然满足,所以它
+        # 不必征用 allow_unbanked_landing_rewards —— 那个旗标保住它原本"负对照臂"的含义。
+        if (
+            bool(cfg.virtual_ball)
+            and not str(cfg.question_bank or "").strip()
+            and not self._cq_enabled
+            and not bool(getattr(cfg, "allow_unbanked_landing_rewards", False))
+        ):
+            raise ValueError(
+                "racket_target.virtual_ball=True pays the landing/net reward terms "
+                "(hope_rewards.virtual_landing / virtual_pass_net) but no question_bank is "
+                "loaded, so the COMMANDED racket velocity is a uniform box sample that was never "
+                "solved to land the ball. That construction makes obeying the velocity command "
+                "anti-correlated with returning the ball. Load a question bank, or set "
+                "racket_target.target_mode: solved (continuous inline solve), or set "
+                "racket_target.allow_unbanked_landing_rewards=True to run it deliberately as a "
+                "control arm."
             )
         if cfg.question_bank:
-            # Loaded ONCE (numpy npz -> per-clip torch tensors on device); clip order matches
-            # _clip_names (0=forehand, 1=backhand). Loud error on a missing/empty clip.
+            # CLIP NAMES COME FROM THE BANK. The loader defaults clip_names to exactly
+            # ("forehand","backhand"), which makes a bank built over any other clip set
+            # STRUCTURALLY UNLOADABLE — and the only "workaround" is renaming a backhand clip to
+            # "forehand", which then lies to every family-scoped consumer downstream. So: read the
+            # bank's own clip_order, cross-check it against racket_target.clip_names_per_clip when
+            # that is declared, and index the per-clip name map from it.
+            _bank_order = _peek_question_bank_clip_order(cfg.question_bank)
+            _declared = tuple(str(n) for n in (getattr(cfg, "clip_names_per_clip", ()) or ()))
+            if _bank_order and _declared and tuple(_bank_order) != _declared:
+                raise ValueError(
+                    f"question bank {cfg.question_bank!r} was built over clips "
+                    f"{list(_bank_order)} but racket_target.clip_names_per_clip declares "
+                    f"{list(_declared)}. clip_index is positional — align them; do NOT rename a "
+                    f"clip to make the loader happy (that lies to every family-scoped consumer)"
+                )
+            _names = tuple(_bank_order) if _bank_order else (
+                _declared if _declared else ("forehand", "backhand"))
+            if not _declared and _bank_order:
+                # The bank is the authority when the YAML said nothing: adopt its clip order so
+                # per-clip metric buckets are named after the clips actually being trained.
+                self._metric_buckets_per_clip = len(_names) > 0
+                self._clip_names = {i: n for i, n in enumerate(_names)}
+                self._metric_bucket_rows_t = None
             self._question_bank = load_question_bank(
                 cfg.question_bank,
                 device=self.device,
+                clip_names=_names,
                 allow_legacy=bool(cfg.question_bank_allow_legacy),
                 expected_split=(None if cfg.question_bank_allow_legacy else "train"),
             )
@@ -314,13 +609,15 @@ class RacketTargetCommand(CommandTerm):
             # RNG/compute and a lying achieved_replay_frac (the DeployParity yaml defaults the mix
             # to 0.30). Forced off, once, loudly; the HER block is also hard-gated on the bank.
             if float(cfg.achieved_target_mix_prob) > 0.0:
-                print(
-                    f"[RacketTargetCommand] question_bank active -> achieved_target_mix_prob="
-                    f"{cfg.achieved_target_mix_prob} FORCED to 0.0 (HER replay targets would be "
-                    "clobbered by the bank override; S2b+ may revisit as a solver-verified variant)",
-                    flush=True,
+                raise ValueError(
+                    f"racket_target.achieved_target_mix_prob={cfg.achieved_target_mix_prob} is "
+                    f"incompatible with a question bank / solved target: the bank override runs "
+                    f"AFTER the HER block in _sample_targets_uniform, so every replayed target is "
+                    f"clobbered — burned RNG and compute plus a lying achieved_replay_frac. This "
+                    f"used to be force-zeroed with a print, which meant a shipped task yaml could "
+                    f"keep saying 0.30 forever. Set racket.achieved_target_mix_prob: 0.0 in the "
+                    f"task yaml."
                 )
-                cfg.achieved_target_mix_prob = 0.0
             # S2a base pin: per-clip ready-anchor XY offset, evaluated ONCE from the bank's FIXED
             # contact point through the same coupling as the per-question path (built lazily in
             # _qb_base_anchor_off_xy — the reference reach offset needs the motion term, which is
@@ -329,6 +626,29 @@ class RacketTargetCommand(CommandTerm):
             print(
                 f"[RacketTargetCommand] stage-1 question bank {cfg.question_bank}: "
                 f"questions per clip = {self._question_bank.counts.tolist()}",
+                flush=True,
+            )
+
+        if self._cq_enabled:
+            # Same metric buckets the bank path registers — question_difficulty_deg would otherwise
+            # freeze at its init value and the reset-mean "question difficulty mix" readout becomes
+            # a lie. The continuous path recomputes it as angle(demanded face, raw clip face), which
+            # is the SAME quantity the bank stores (reproduced to <= 3.5 deg on the shipped banks).
+            self.metrics["question_difficulty_deg"] = torch.zeros(self.num_envs, device=self.device)
+            self.metrics["question_exhausted_frac"] = torch.zeros(self.num_envs, device=self.device)
+            if cfg.face_command:
+                self.metrics["face_cmd_normal_error_deg"] = torch.zeros(
+                    self.num_envs, device=self.device)
+            self._qb_base_anchor = None
+            self._qb_face_frame_checked = True   # 连续路径没有 npz 行可扫,门在求解时就闭合了
+            print(
+                f"[RacketTargetCommand] CONTINUOUS questions ON (target_mode=solved): "
+                f"buffer {int(cfg.cq_buffer_rows)} rows/clip, overdraw {float(cfg.cq_overdraw)}, "
+                f"n_iters {int(cfg.cq_n_iters)}, tol {float(cfg.cq_tol_m)} m, "
+                f"speed_budget {float(cfg.cq_speed_budget)} m/s (deploy pp_policy gate; the shipped "
+                f"banks were generated at 4.0), spin_abs_max {float(cfg.cq_spin_abs_max)} rad/s, "
+                f"exam_holdout={bool(cfg.cq_exam_holdout)}, "
+                f"anchor_bank={cfg.cq_anchor_bank or '<none>'}",
                 flush=True,
             )
 
@@ -427,6 +747,7 @@ class RacketTargetCommand(CommandTerm):
                 dtype=torch.float32,
                 device=self.device,
             )
+            self._assert_target_velocity_points_forward()
         # Optional per-clip racket target-POSITION boxes (uniform mode). Same shape/semantics as the
         # velocity one above; None -> shared pos box (backward compatible). (num_clips, 3, 2): [clip][x/y/z][lo/hi].
         self._pos_range_per_clip_t = None
@@ -436,6 +757,36 @@ class RacketTargetCommand(CommandTerm):
                  for clip_rng in self.cfg.racket_pos_range_per_clip],
                 dtype=torch.float32,
                 device=self.device,
+            )
+            for _clip_id, _clip_rng in enumerate(self.cfg.racket_pos_range_per_clip):
+                self._assert_contact_clears_table(
+                    _clip_id,
+                    self._commanded_target_x_hi(float(_clip_rng[0][1])),
+                    float(_clip_rng[2][0]),
+                    "racket_pos_range_per_clip",
+                )
+        # PER-CLIP INCOMING-BALL regime (a block gets fast balls, a loop slow ones, same run). Same
+        # (num_clips, 3, 2) shape as the racket boxes; None -> the shared vb_vel_*_range box.
+        self._vb_vel_range_per_clip_t = None
+        if getattr(self.cfg, "vb_vel_range_per_clip", None) is not None:
+            self._vb_vel_range_per_clip_t = torch.tensor(
+                [[[float(lo), float(hi)] for (lo, hi) in clip_rng]
+                 for clip_rng in self.cfg.vb_vel_range_per_clip],
+                dtype=torch.float32,
+                device=self.device,
+            )
+            self._assert_incoming_ball_boxes_are_sane()
+        self._vb_spin_abs_max_per_clip_t = None
+        if getattr(self.cfg, "vb_spin_abs_max_per_clip", None) is not None:
+            _spin_rows = tuple(float(s) for s in self.cfg.vb_spin_abs_max_per_clip)
+            _bad_spin = [(i, s) for i, s in enumerate(_spin_rows) if not s >= 0.0]
+            if _bad_spin:
+                raise ValueError(
+                    f"vb_spin_abs_max_per_clip must be non-negative (rad/s); got {_bad_spin} as "
+                    f"(clip index, value)"
+                )
+            self._vb_spin_abs_max_per_clip_t = torch.tensor(
+                _spin_rows, dtype=torch.float32, device=self.device
             )
         self._ref_racket_pos_rel = torch.zeros(3, device=self.device)
         self._ref_racket_vel_w = torch.zeros(3, device=self.device)
@@ -490,9 +841,23 @@ class RacketTargetCommand(CommandTerm):
         # shows each swing separately (the aggregate composite can hide one swing lagging). Same
         # sample-weighted EMA as the global accumulators above, but each clip's exact-strike samples are
         # accumulated separately (selected by the motion command's clip_id). Populated in multiseg only.
-        # 键 = 家族行号(_clip_family_rows:0=正手族, 1=反手族),不是 clip_id。legacy 2-clip
-        # 两者恒等;6-clip 变速列表下每族三档共享一个桶(指标/HER 缓存都按族分)。
-        self._clip_names = {0: "forehand", 1: "backhand"}
+        # 键 = 指标桶行号(_metric_bucket_rows)。cfg.clip_names_per_clip 为空(现役所有在跑臂)
+        # 时桶 = 家族行号(0=正手族, 1=反手族),legacy 2-clip 下与 clip_id 恒等,逐字节不变;
+        # 配了 clip_names_per_clip 时桶 = clip_id,每个动作一个桶——否则 fh_loop 和 fh_block_syn
+        # 共用一个桶,挡球的失败会藏在拉球的数字里(正手回球率 0.0000 藏在 45% 合计里的老病)。
+        self._family_names = {0: "forehand", 1: "backhand"}
+        _names_cfg = tuple(str(n) for n in (getattr(cfg, "clip_names_per_clip", ()) or ()))
+        if _names_cfg and len(set(_names_cfg)) != len(_names_cfg):
+            raise ValueError(
+                f"racket_target.clip_names_per_clip has duplicate name(s) {_names_cfg} — the "
+                f"names key per-clip metric buckets, so two clips sharing a name would silently "
+                f"merge their return rates"
+            )
+        self._metric_buckets_per_clip = bool(_names_cfg)
+        self._clip_names = (
+            {i: n for i, n in enumerate(_names_cfg)} if _names_cfg else dict(self._family_names)
+        )
+        self._metric_bucket_rows_t = None
         # Non-decayed, per-PPO-update eligibility ledger for sparse virtual-ball outcomes.  The
         # existing virtual_* rates are EMAs and deliberately suppress values before their
         # denominators warm up; they therefore cannot tell a milestone classifier whether a zero
@@ -695,9 +1060,14 @@ class RacketTargetCommand(CommandTerm):
                 )
             self._planner_revision_profile = PhaseGovernorProfile.from_mapping(raw_profile)
             if not cfg.face_command or self._question_bank is None:
+                # DELIBERATE HARD BLOCK, continuous included. This one really does want npz ROWS
+                # to reconcile against, not merely "a solved target", so it is not switched to
+                # _solved_targets_active. 响亮的不可发射 >> 悄悄降级的可发射。
                 raise ValueError(
                     "planner revisions require the formal signed-face question-bank task; "
-                    "otherwise the atomic target normal has no defined contract"
+                    "otherwise the atomic target normal has no defined contract. This includes "
+                    "target_mode='solved': a continuously drawn ball has no bank row for the "
+                    "revision contract to address."
                 )
             if float(cfg.midswing_resample_prob) != 0.0:
                 raise ValueError(
@@ -1293,7 +1663,13 @@ class RacketTargetCommand(CommandTerm):
             return
         bank = self._question_bank
         if bank is None:
-            raise ValueError("post_strike_t1 requires a schema-v3 train question bank")
+            # Hard block for continuous too: the immutable event schedule is content-addressed by
+            # question_id(incoming_vel) against bank ROWS, and a continuously drawn ball has none.
+            raise ValueError(
+                "post_strike_t1 requires a schema-v3 train question bank; it is mutually "
+                "exclusive with target_mode='solved' (continuous draws have no bank row for the "
+                "immutable schedule to reconcile against)"
+            )
         metadata = getattr(bank, "metadata", None)
         if (
             not isinstance(metadata, dict)
@@ -1362,6 +1738,153 @@ class RacketTargetCommand(CommandTerm):
         motion.bind_event_native_strike_ticks(native_ticks)
         self._event_timing_bound = True
 
+    def _clip_label(self, clip_id: int) -> str:
+        """Human clip name for error text. Safe before ``_clip_names`` is assigned in ``__init__``."""
+        return getattr(self, "_clip_names", {}).get(int(clip_id), f"clip{clip_id}")
+
+    def _commanded_target_x_hi(self, box_x_hi: float) -> float:
+        """Farthest env-frame x a commanded racket target built from ``box_x_hi`` can reach.
+
+        ``hitter_pure`` position boxes are STATION-relative (see :meth:`_sample_targets_hitter_pure`),
+        so the commanded station's own forward span rides on top of the box; every other mode adds the
+        box straight to the env origin.
+        """
+        x_hi = float(box_x_hi)
+        if self.cfg.target_mode == "hitter_pure":
+            x_hi += float(max(self.cfg.base_target_x_range))
+        return x_hi
+
+    def _assert_contact_clears_table(
+        self, clip_id: int, x_hi: float, z_lo: float, source: str
+    ) -> None:
+        """Fail closed when a commanded contact point out over the table sits below the ball line.
+
+        Physical rule, from the SAME constants the virtual ball is integrated against
+        (``cfg.vb_table_surface_z`` + ``geometry.BALL_RADIUS``): a ball centre can never be lower than
+        the table surface plus one ball radius. A commanded strike point past the near table edge
+        (``cfg.vb_table_near_x``) with z under that line is unreachable BY CONSTRUCTION — its
+        signature is a per-side return rate pinned at exactly 0 with nothing else complaining, which
+        is why this is a construction-time error and not a warning.
+        人话:桌面以下没有球。目标框/参考击球点掉到桌面以下就当场报错,别再让某一侧的回球率
+        无声地钉在 0.0000。
+        """
+        if float(x_hi) <= float(self.cfg.vb_table_near_x):
+            return
+        z_min = float(self.cfg.vb_table_surface_z) + self._vb_ball_r
+        if float(z_lo) < z_min - 1e-9:
+            raise ValueError(
+                f"{source}: clip {self._clip_label(clip_id)} commands racket contact down to "
+                f"z={float(z_lo):.4f} m, below the minimum legal contact height {z_min:.4f} m "
+                f"(vb_table_surface_z={float(self.cfg.vb_table_surface_z):.4f} + ball radius "
+                f"{self._vb_ball_r:.4f}). The commanded point reaches x={float(x_hi):.4f} m, past the "
+                f"near table edge vb_table_near_x={float(self.cfg.vb_table_near_x):.4f} m, so it lies "
+                f"inside/below the table top where no ball can ever be — raise the z floor to "
+                f"{z_min:.2f} m"
+            )
+
+    def _assert_target_velocity_points_forward(self) -> None:
+        """Fail closed when a per-clip target-velocity box can demand a non-forward return.
+
+        +x is toward the opponent (geometry.py world frame), so ``x_lo <= 0`` lets the sampler command
+        a return that stalls or travels back at the robot — a shot that can never land on the far half
+        however well the policy tracks it.
+        """
+        if self.cfg.allow_non_forward_target_velocity:
+            return
+        for clip_id, clip_rng in enumerate(self.cfg.racket_vel_range_per_clip):
+            x_lo = float(clip_rng[0][0])
+            if x_lo <= 0.0:
+                raise ValueError(
+                    f"racket_vel_range_per_clip: clip {self._clip_label(clip_id)} has "
+                    f"x_lo={x_lo:.4f} <= 0, so the commanded return velocity can point away from the "
+                    f"opponent (+x is toward the opponent). Set "
+                    f"allow_non_forward_target_velocity=True to command this deliberately"
+                )
+
+    def _assert_incoming_ball_boxes_are_sane(self) -> None:
+        """Fail closed when a per-clip INCOMING-ball box cannot describe a ball coming at us.
+
+        人话:来球得朝机器人飞。``vb_vel_x_range`` 的 -x 是"冲着机器人来";per-clip 表里哪个 clip
+        写成了 x_hi >= 0,那个 clip 的球就可能永远不到拍子跟前,回球率会无声钉在 0——和目标框掉到
+        桌面以下同一类的构造期错误,所以当场报错,不 warning。
+        """
+        for clip_id, clip_rng in enumerate(self.cfg.vb_vel_range_per_clip):
+            (x_lo, x_hi), (y_lo, y_hi), (z_lo, z_hi) = clip_rng
+            if float(x_hi) >= 0.0:
+                raise ValueError(
+                    f"vb_vel_range_per_clip: clip {self._clip_label(clip_id)} has "
+                    f"x_hi={float(x_hi):.4f} >= 0, but the incoming ball travels toward the robot "
+                    f"(-x). A non-negative ceiling lets the sampler launch a ball that flies AWAY, "
+                    f"which no stroke can ever answer"
+                )
+            for name, (lo, hi) in (("x", (x_lo, x_hi)), ("y", (y_lo, y_hi)), ("z", (z_lo, z_hi))):
+                if float(lo) > float(hi):
+                    raise ValueError(
+                        f"vb_vel_range_per_clip: clip {self._clip_label(clip_id)} axis {name} has "
+                        f"lo={float(lo):.4f} > hi={float(hi):.4f} — an empty box"
+                    )
+
+    def _assert_reference_strike_can_return_its_own_regime(
+        self, clip_id: int, p_contact_w, v_racket_w, n_racket_w, face_sign: float = 1.0
+    ) -> None:
+        """Fail closed when a bound strike frame cannot return ANY ball from THAT clip's regime.
+
+        人话(最重要的一道闸):把这个 clip 自己的来球箱采一批球,用仓库自己的 NumPy 记分器
+        (virtual_return_scorer,和训练里评分用的是同一套接触+落点模型)算一下:这个 clip 绑定的
+        参考击球状态到底能不能把自己的球打回台上。一个都打不回就当场报错、点名是哪个 clip、
+        打回率多少——不要再让某一侧的回球率无声地钉在 0.0000。
+
+        Scored with the repo's OWN NumPy return scorer so the gate and the in-training metric cannot
+        disagree; the acceptance threshold is ``reference_return_gate_min_rate`` (0.0 = gate off).
+        """
+        min_rate = float(getattr(self.cfg, "reference_return_gate_min_rate", 0.0))
+        if min_rate <= 0.0:
+            return
+        try:
+            from reference_return_gate import score_reference_returns
+        except Exception as exc:                            # pragma: no cover - import path varies
+            raise ValueError(
+                "reference_return_gate_min_rate > 0 but the repo's NumPy return scorer wrapper "
+                "(scripts/reference_return_gate.py: score_reference_returns, built on "
+                f"scripts/virtual_return_scorer.py) could not be imported ({exc}). The gate must "
+                "not be silently skipped — put scripts/ on sys.path or set "
+                "reference_return_gate_min_rate=0.0 deliberately"
+            )
+        # 采哪个箱子必须跟着"谁在出球"走。连续路径下 vb_vel_range_per_clip 是死的(通用采样器被
+        # _solved_targets_active 关掉了),真正出球的是 cq_vel_range_per_clip;不改这里,闸门会拿一
+        # 个一颗球都不来自的分布判绿 —— 它不拒绝也不报警,它换了个问题回答,比失效更糟。
+        if self._cq_enabled:
+            box = self.cfg.cq_vel_range_per_clip[clip_id]
+            spin_max = float(self.cfg.cq_spin_abs_max)
+        else:
+            box = self.cfg.vb_vel_range_per_clip[clip_id] if (
+                getattr(self.cfg, "vb_vel_range_per_clip", None) is not None
+            ) else (self.cfg.vb_vel_x_range, self.cfg.vb_vel_y_range, self.cfg.vb_vel_z_range)
+            spin_max = (
+                float(self.cfg.vb_spin_abs_max_per_clip[clip_id])
+                if getattr(self.cfg, "vb_spin_abs_max_per_clip", None) is not None
+                else float(self.cfg.vb_spin_abs_max)
+            )
+        rate = float(score_reference_returns(
+            p_contact_w=p_contact_w, v_racket_w=v_racket_w, n_racket_w=n_racket_w,
+            vel_box=box, spin_abs_max=spin_max,
+            surface_z=float(self.cfg.vb_table_surface_z),
+            near_x=float(self.cfg.vb_table_near_x),
+            n_samples=int(getattr(self.cfg, "reference_return_gate_samples", 256)),
+            seed=int(getattr(self.cfg, "reference_return_gate_seed", 0)),
+            face_sign=float(face_sign),
+        ))
+        if rate < min_rate:
+            raise ValueError(
+                f"reference strike gate: clip {self._clip_label(clip_id)} returns only "
+                f"{rate:.4f} of the balls in its OWN incoming regime "
+                f"(vel box {tuple(tuple(float(v) for v in ax) for ax in box)}, |spin| <= "
+                f"{spin_max:.1f} rad/s), below reference_return_gate_min_rate={min_rate:.4f}. "
+                f"The bound strike frame cannot answer the balls this clip will be posed — fix the "
+                f"strike phase, the clip, or that clip's ball box; a 0.0000 per-clip return rate "
+                f"must never be discovered from a training curve"
+            )
+
     def _strike_phases_cfg(self, nseg: int) -> tuple:
         """cfg.strike_phase_per_clip validated against the loaded motion's segment count (fail-loud).
 
@@ -1376,6 +1899,16 @@ class RacketTargetCommand(CommandTerm):
                 f"strike_phase_per_clip has {len(spc)} entries but the loaded motion has {nseg} "
                 f"segment(s) — align it with the motion_file clip order, or set () to use "
                 f"strike_phase={self.cfg.strike_phase} for every clip"
+            )
+        # _strike_frame_for_clip adds round(p * (seg_len - 1)) to the segment start with NO clamp, so a
+        # phase outside [0, 1] silently reads a NEIGHBOURING clip's pose as this clip's strike frame.
+        # TODO: the stronger check — the phase must land inside the clip's compiled contact window —
+        # needs the binding manifest, which the plain motion_file path does not carry.
+        out_of_range = [(i, float(p)) for i, p in enumerate(spc) if not 0.0 <= float(p) <= 1.0]
+        if out_of_range:
+            raise ValueError(
+                f"strike_phase_per_clip entries must lie in [0, 1] (fraction along the clip); "
+                f"got {out_of_range} as (clip index, value)"
             )
         return spc
 
@@ -1436,6 +1969,34 @@ class RacketTargetCommand(CommandTerm):
             self._clip_family_rows_t = rows
         return rows
 
+    def _metric_bucket_rows(self) -> torch.Tensor:
+        """[num_segments] long:每个 clip 的**指标桶**行号(缓存)。
+
+        人话(硬绑定四的下一步):`cfg.clip_names_per_clip` 没配时,桶就是家族行号——现役所有在跑
+        臂逐字节不变。配了名字表,桶就是 clip_id 本身,每个动作一个桶。家族语义仍归
+        `_clip_family_rows()`:回放/框表按族展开/题库按族寻址都不动。
+        """
+        # getattr defaults, like _clip_family_rows: the older unit-test fakes build the command with
+        # __new__ and set only a handful of fields, and a metric bucket must never be the thing that
+        # explodes on them.
+        rows = getattr(self, "_metric_bucket_rows_t", None)
+        if rows is not None:
+            return rows
+        if not getattr(self, "_metric_buckets_per_clip", False):
+            rows = self._clip_family_rows()
+        else:
+            nseg = int(self._motion().motion.num_segments)
+            if nseg != len(self._clip_names):
+                raise ValueError(
+                    f"racket_target.clip_names_per_clip has {len(self._clip_names)} name(s) "
+                    f"{sorted(self._clip_names.values())} but the loaded motion has {nseg} "
+                    f"clip(s) — give one name per loaded clip, in motion_file order; a short "
+                    f"name table would put two clips in one metric bucket"
+                )
+            rows = torch.arange(nseg, dtype=torch.long, device=self.device)
+        self._metric_bucket_rows_t = rows
+        return rows
+
     def _per_clip_range_rows(self, table: torch.Tensor, cfg_key: str) -> torch.Tensor:
         """把 cfg 的 per-clip 框表对齐成"每个加载 clip 一行"((num_segments, 3, 2),缓存)。
 
@@ -1472,6 +2033,530 @@ class RacketTargetCommand(CommandTerm):
             )
         cache[cfg_key] = expanded
         return expanded
+
+    # ------------------------------------------------------------------ continuous questions ---
+    @property
+    def _solved_targets_active(self) -> bool:
+        """目标是不是"逆解出来的答案"(题库行 或 连续缓冲行)。
+
+        人话:仓库里有一批门,写的是"有没有题库",想问的其实是"目标是不是解出来的"。那批门必须
+        改问这个属性,否则连续路径下它们会**静默失效** —— 而一个静默失效的门,正是"解出来的目标
+        最后被什么都不打分"的走法。判据用 cfg 级的 ``_cq_enabled`` 而不是缓冲对象,因为缓冲是
+        懒建的:第一次 resample 之前它还是 None,而那些门在更早就要给出正确答案。
+        """
+        return self._question_bank is not None or self._cq_enabled
+
+    def _cq_prm(self):
+        """Venue ball params, shared with the scorer's own lazy load (one model, one object)."""
+        if self._vb_params is None:
+            from whole_body_tracking.tasks.tracking.mdp import virtual_ball as _vb
+            self._vb_params = _vb.load_venue_params()
+            print(
+                f"[RacketTargetCommand] virtual ball ON (continuous solve): venue constants from "
+                f"{self._vb_params.source_path}",
+                flush=True,
+            )
+        return self._vb_params
+
+    def _cq_planes(self) -> tuple[float, float, float]:
+        """(surface_z, net_x, net_top_z) — THE SAME NUMBERS THE SCORER USES, read from the same
+        fields, never re-derived.
+
+        人话:"你解的那个面,就是你被打分的那个面"是靠共用同一个属性保证的,不是靠两处各写一遍
+        同一个数字。表面用 surface + 球半径(球心过平面),和 _vb_evaluate 的 :4493 / 题库生成器
+        逐字一致;裸 0.76 会让求解落在离评分面 20 mm 的另一张桌子上。
+        """
+        prm = self._cq_prm()
+        return (
+            float(self.cfg.vb_table_surface_z) + float(prm.ball_radius),
+            float(self._vb_net_x),
+            float(self._vb_net_top_z) + float(self._vb_ball_r),
+        )
+
+    def _cq_ref_normals(self) -> torch.Tensor:
+        """(nseg, 3) RUNTIME raw +Y clip face — what the continuous answers are sign-aligned to.
+
+        题库是离线对齐到 npz 里烤死的 clip_normal、再由 _check_question_bank_face_frame 在运行时
+        核 dot>0;连续路径直接对齐到**运行时**这张 FK 面,所以那条 dot>0 卫兵在这里恒真,漂移
+        无从发生(没有可以对不上的第二份数)。
+        """
+        self._ensure_reference_strike_state()
+        ref = self._ref_racket_normal_raw_w_per_clip
+        if ref is None:
+            raise RuntimeError("reference strike-state initialization produced no raw face normals")
+        return ref
+
+    def _cq_build_cfg(self, nseg: int):
+        """Freeze the ContinuousQuestionCfg for this run (once). Every field comes from cfg."""
+        if self._cq_cfg is not None:
+            return self._cq_cfg
+        from .continuous_questions import ContinuousQuestionCfg
+
+        if self._pos_range_per_clip_t is None:
+            raise ValueError(
+                "target_mode='solved' needs racket.racket_pos_range_per_clip as the contact-point "
+                "draw box"
+            )
+        pos_rows = self._per_clip_range_rows(
+            self._pos_range_per_clip_t, "racket_pos_range_per_clip")
+        if self.cfg.cq_vel_range_per_clip is None:
+            raise ValueError("target_mode='solved' needs racket.cq_vel_range_per_clip")
+        vel_t = torch.tensor(
+            [[[float(lo), float(hi)] for (lo, hi) in clip_rng]
+             for clip_rng in self.cfg.cq_vel_range_per_clip],
+            dtype=torch.float32, device=self.device,
+        )
+        vel_rows = self._per_clip_range_rows(vel_t, "cq_vel_range_per_clip")
+        aim = self.cfg.cq_aim_xy
+        aim_x, aim_y = (
+            (float(self.cfg.vb_target_x), float(self.cfg.vb_target_y)) if aim is None
+            else (float(aim[0]), float(aim[1]))
+        )
+        self._cq_cfg = ContinuousQuestionCfg(
+            vel_range_per_clip=vel_rows,
+            pos_range_per_clip=pos_rows,
+            spin_abs_max=float(self.cfg.cq_spin_abs_max),
+            # DEGENERATE aim on purpose — the single point the landing reward / virtual_land_err_m /
+            # the physical ball's return flight all grade against (see cq_aim_xy's cfg comment).
+            aim_x_range=(aim_x, aim_x),
+            aim_y_range=(aim_y, aim_y),
+            tol_m=float(self.cfg.cq_tol_m),
+            n_iters=int(self.cfg.cq_n_iters),
+            speed_budget=float(self.cfg.cq_speed_budget),
+            max_redraw_rounds=int(self.cfg.cq_max_redraw_rounds),
+            fixed_direction=False,
+        )
+        del nseg
+        return self._cq_cfg
+
+    def _cq_bucket_of(self, v_in_x: torch.Tensor, clip_rows: torch.Tensor) -> torch.Tensor:
+        """Per-regime bucket index = |v_in_x| bin crossed with the clip. (Both axes are a CHOICE.)
+
+        人话:这是唯一能看见"重画循环把难的那条尾巴悄悄削掉"的仪表 —— 有 overdraw 之后
+        ``exhausted`` 会整轮读 0,而全局 reject 直方图看不出是哪一档球消失了。
+        """
+        nb = max(1, int(self.cfg.cq_accept_buckets))
+        lo = self._cq["vx_lo"][clip_rows]
+        hi = self._cq["vx_hi"][clip_rows]
+        u = ((v_in_x.abs() - lo) / (hi - lo).clamp(min=1e-6)).clamp(0.0, 1.0 - 1e-6)
+        return clip_rows * nb + (u * nb).long()
+
+    def _cq_note(self, name: str, amount) -> None:
+        ledger = self._ensure_exact_behavior_decision_counters()
+        if name in ledger:
+            ledger[name] += int(amount)
+
+    @torch.no_grad()
+    def _cq_refill(self) -> None:
+        """Solve ONE big batch and refill the buffer. Only ``ok=True`` rows are ever admitted.
+
+        人话:失败策略在代码里的落点只有这一条线 —— 缓冲只收解出来的行。生产者把无解行整行填
+        NaN,所以就算这条掩码哪天被删,装进去的也是 NaN 而不是一个看起来很像答案的东西;两层都
+        在,才叫结构性。
+        """
+        from .continuous_questions import generate
+
+        if self._cq is not None and "count" in self._cq:
+            # A refill throws away whatever the old buffer had left (a drought refill can happen
+            # before the cursor reaches the end). Book it, so "the reservoir is provably not a
+            # small bank" stays auditable from the hourly log rather than being assumed.
+            self._cq_note(
+                "continuous_question_rows_discarded_count",
+                int((self._cq["count"] - self._cq["cursor"]).clamp(min=0).sum()),
+            )
+        motion = self._motion()
+        nseg = int(motion.motion.num_segments)
+        cqcfg = self._cq_build_cfg(nseg)
+        prm = self._cq_prm()
+        surface_z, net_x, net_top_z = self._cq_planes()
+        ref_all = self._cq_ref_normals()[:nseg]                      # (nseg,3)
+        P = int(self.cfg.cq_buffer_rows)
+        per = int(math.ceil(P * float(self.cfg.cq_overdraw)))
+        clip_ids = torch.arange(nseg, device=self.device).repeat_interleave(per)
+        if self._cq_gen is None:
+            # Dedicated stream so the question draw is reproducible independently of every other
+            # sampler's consumption pattern (the resume path stores its state; see _cq_state_dict).
+            self._cq_gen = torch.Generator(device=self.device)
+            self._cq_gen.manual_seed(int(self.cfg.cq_seed))
+        res = generate(
+            clip_ids, prm, surface_z=surface_z, net_x=net_x, cfg=cqcfg,
+            ref_normal=ref_all[clip_ids], net_top_z=net_top_z, generator=self._cq_gen,
+            # ONE source for the rollout parameters: the scorer's. They happen to equal the
+            # solver's defaults today, which is exactly the kind of coincidence that rots.
+            h=float(self.cfg.vb_rollout_h), n_steps=int(self.cfg.vb_rollout_steps),
+        )
+        n_draw = int(clip_ids.shape[0])
+        self._cq_note("continuous_question_draw_count", n_draw)
+        self._cq_note("continuous_question_exhausted_count", int(res.exhausted))
+        self._cq_note("continuous_question_refill_count", 1)
+        self._cq_note("continuous_question_redraw_round_sum", int(res.rounds_used))
+        for name, cnt in (res.reason_counts or {}).items():
+            self._cq_note(f"continuous_question_reject_{name}_count", int(cnt))
+
+        keep = res.ok.clone()
+        # FACE CAP. After sign alignment dot>0 is tautological, so the residual risk is "same side
+        # but wildly off"; this is the knob that watches it. Shipped banks: p50 7.8-9.1, max 20.3.
+        ang = torch.rad2deg(torch.arccos(
+            torch.sum(torch.nan_to_num(res.n_racket) * ref_all[clip_ids], dim=-1).clamp(-1.0, 1.0)))
+        face_bad = keep & (ang > float(self.cfg.cq_max_face_deg))
+        self._cq_note("continuous_question_reject_face_deg_over_cap_count", int(face_bad.sum()))
+        keep = keep & ~face_bad
+        # EXAM HOLDOUT. Keep the repo invariant that no TRAINED question is an exam question, so a
+        # paired exam comparison is not grading the policy on balls it trained on.
+        if bool(self.cfg.cq_exam_holdout):
+            from .stage1_question_bank import question_split
+
+            v_np = torch.nan_to_num(res.v_ball_in).detach().cpu().numpy()
+            is_exam = torch.tensor(
+                [question_split(row) == "exam" for row in v_np],
+                dtype=torch.bool, device=self.device,
+            ) & keep
+            self._cq_note("continuous_question_reject_exam_holdout_count", int(is_exam.sum()))
+            keep = keep & ~is_exam
+
+        exh_frac = float(res.exhausted) / max(1, n_draw)
+        self._cq_last_exhausted_frac = exh_frac
+        if exh_frac > float(self.cfg.cq_abort_exhausted_frac):
+            raise RuntimeError(
+                f"continuous question refill: {res.exhausted}/{n_draw} drawn balls have NO legal "
+                f"answer after {res.rounds_used} redraw round(s) ({exh_frac * 100:.1f}% > "
+                f"{float(self.cfg.cq_abort_exhausted_frac) * 100:.0f}%). reasons={res.reason_counts}. "
+                f"This is a task-construction error (an incoming box that cannot be returned to the "
+                f"aim point within the speed budget), not a hyperparameter — fix "
+                f"racket.cq_vel_range_per_clip / racket_pos_range_per_clip / cq_speed_budget."
+            )
+        if exh_frac > float(self.cfg.cq_max_exhausted_frac):
+            print(
+                f"[RacketTargetCommand] WARN continuous refill: exhausted {res.exhausted}/{n_draw} "
+                f"({exh_frac * 100:.1f}%) reasons={res.reason_counts}",
+                flush=True,
+            )
+
+        # --- per-clip buffers, cursor at 0 ------------------------------------------------------
+        vel_rows = cqcfg.vel_range_per_clip
+        vx_lo = torch.minimum(vel_rows[:, 0, 0].abs(), vel_rows[:, 0, 1].abs())
+        vx_hi = torch.maximum(vel_rows[:, 0, 0].abs(), vel_rows[:, 0, 1].abs())
+        if self._cq is None:
+            self._cq = {"vx_lo": vx_lo, "vx_hi": vx_hi}
+        self._cq["vx_lo"], self._cq["vx_hi"] = vx_lo, vx_hi
+
+        nb = max(1, int(self.cfg.cq_accept_buckets))
+        asked_b = self._cq_bucket_of(torch.nan_to_num(res.attempted_v_ball_in)[:, 0], clip_ids)
+        asked = torch.bincount(asked_b, minlength=nseg * nb)
+        kept_b = self._cq_bucket_of(torch.nan_to_num(res.v_ball_in)[keep][:, 0], clip_ids[keep])
+        kept = torch.bincount(kept_b, minlength=nseg * nb)
+        for c in range(nseg):
+            for b in range(nb):
+                idx = c * nb + b
+                self._cq_note(f"continuous_question_bucket{c}_{b}_asked_count", int(asked[idx]))
+                self._cq_note(f"continuous_question_bucket{c}_{b}_kept_count", int(kept[idx]))
+                a_i, k_i = int(asked[idx]), int(kept[idx])
+                if a_i >= 2000 and k_i == 0:
+                    raise RuntimeError(
+                        f"continuous question refill: clip {self._clip_label(c)} |v_in_x| bucket "
+                        f"{b}/{nb} asked {a_i} balls and kept ZERO. The declared incoming box has "
+                        f"a regime with no legal answer at all, so the run's real distribution is "
+                        f"not the one its yaml declares. Narrow cq_vel_range_per_clip or raise "
+                        f"cq_speed_budget."
+                    )
+                if a_i >= 500 and k_i > 0 and (k_i / a_i) < float(self.cfg.cq_min_accept_rate):
+                    print(
+                        f"[RacketTargetCommand] WARN continuous accept: clip "
+                        f"{self._clip_label(c)} |v_in_x| bucket {b}/{nb} accept "
+                        f"{k_i}/{a_i} = {k_i / a_i:.3f} < {float(self.cfg.cq_min_accept_rate)} — "
+                        f"the hard tail of the declared box is being thinned out by the redraw "
+                        f"loop, and `exhausted` cannot show it",
+                        flush=True,
+                    )
+
+        buf_pos, buf_vin, buf_win, buf_vr, buf_nr, buf_diff, buf_cnt = [], [], [], [], [], [], []
+        discarded = 0
+        for c in range(nseg):
+            m = keep & (clip_ids == c)
+            idx = torch.nonzero(m, as_tuple=False).flatten()
+            if idx.numel() > P:
+                discarded += int(idx.numel() - P)
+                idx = idx[:P]
+            if idx.numel() == 0:
+                raise RuntimeError(
+                    f"continuous question refill produced ZERO usable rows for clip "
+                    f"{self._clip_label(c)} out of {per} draws — refusing to hand out a target "
+                    f"that was never solved. reasons={res.reason_counts}"
+                )
+            buf_pos.append(res.p_contact[idx])
+            buf_vin.append(res.v_ball_in[idx])
+            buf_win.append(res.w_ball_in[idx])
+            buf_vr.append(res.v_racket[idx])
+            buf_nr.append(res.n_racket[idx])
+            buf_diff.append(ang[idx])
+            buf_cnt.append(int(idx.numel()))
+        width = max(buf_cnt)
+
+        def _pad(rows_list, dim):
+            out = torch.zeros(nseg, width, dim, device=self.device) if dim > 1 else \
+                torch.zeros(nseg, width, device=self.device)
+            for c, rows in enumerate(rows_list):
+                out[c, : rows.shape[0]] = rows
+            return out
+
+        self._cq.update({
+            "pos": _pad(buf_pos, 3), "v_in": _pad(buf_vin, 3), "w_in": _pad(buf_win, 3),
+            "v_r": _pad(buf_vr, 3), "n_r": _pad(buf_nr, 3), "diff": _pad(buf_diff, 1),
+            "count": torch.tensor(buf_cnt, dtype=torch.long, device=self.device),
+            "cursor": torch.zeros(nseg, dtype=torch.long, device=self.device),
+        })
+        n_admit = int(sum(buf_cnt))
+        self._cq_note("continuous_question_admitted_count", n_admit)
+        self._cq_note("continuous_question_rows_discarded_count", discarded)
+        self._cq_note(
+            "continuous_question_resid_um_sum",
+            int((torch.nan_to_num(res.resid_m[keep], posinf=0.0) * 1e6).sum()),
+        )
+        self._cq_closed_loop_check()
+
+    @torch.no_grad()
+    def _cq_closed_loop_check(self) -> None:
+        """Re-roll a subsample of the ADMITTED rows through the SCORER's own call and hard-fail.
+
+        人话:题库是离线验一次(``validation.max_landing_error_m <= 0.10``,
+        stage1_question_bank.py:402-413);连续路径每换一批都验一次。诚实说明范围:求解器和评分器
+        今天用同一套 h/n_steps(下面 boot 时断言),所以这条检查抓的是**平面/帧/参数漂移**,不是
+        积分器分歧 —— 它是唯一能抓到"求解的那张桌子和打分的那张桌子不是同一张"的东西,而 resid_m
+        结构上抓不到(它是自评的)。
+        """
+        rows = int(self.cfg.cq_closed_loop_rows)
+        if rows <= 0 or self._cq is None:
+            return
+        from whole_body_tracking.tasks.tracking.mdp import virtual_ball as _vb
+
+        prm = self._cq_prm()
+        surface_z, net_x, _net_top = self._cq_planes()
+        pos = self._cq["pos"].reshape(-1, 3)
+        cnt_mask = torch.zeros(pos.shape[0], dtype=torch.bool, device=self.device)
+        width = int(self._cq["pos"].shape[1])
+        for c, k in enumerate(self._cq["count"].tolist()):
+            cnt_mask[c * width: c * width + int(k)] = True
+        idx = torch.nonzero(cnt_mask, as_tuple=False).flatten()
+        if idx.numel() == 0:
+            return
+        take = idx[torch.randperm(idx.numel(), device=self.device)[:rows]]
+        v_plus, w_plus = _vb.predict_paddle_contact(
+            self._cq["v_in"].reshape(-1, 3)[take], self._cq["v_r"].reshape(-1, 3)[take],
+            self._cq["n_r"].reshape(-1, 3)[take], self._cq["w_in"].reshape(-1, 3)[take], prm,
+        )
+        land = _vb.coarse_landing(
+            pos[take], v_plus, w_plus, prm, surface_z=surface_z, net_x=net_x,
+            h=float(self.cfg.vb_rollout_h), n_steps=int(self.cfg.vb_rollout_steps),
+        )
+        err = torch.linalg.norm(land["land_xy"] - self._vb_target_xy.unsqueeze(0), dim=-1)
+        err = torch.where(land["land_valid"], err, torch.full_like(err, float("inf")))
+        worst = float(err.max())
+        self._cq_note("continuous_question_closed_loop_um_sum",
+                      int((torch.nan_to_num(err, posinf=0.0) * 1e6).sum()))
+        self._cq_note("continuous_question_closed_loop_row_count", int(take.numel()))
+        bad = int((err > float(self.cfg.cq_closed_loop_max_err_m)).sum())
+        self._cq_note("continuous_question_closed_loop_fail_count", bad)
+        if bad:
+            raise RuntimeError(
+                f"continuous question refill failed its own closed-loop check: {bad}/"
+                f"{int(take.numel())} admitted answers land more than "
+                f"{float(self.cfg.cq_closed_loop_max_err_m)} m from the aim when re-rolled through "
+                f"the SCORER's call (worst {worst:.4f} m). The solver and the scorer are not "
+                f"looking at the same table/net/frame."
+            )
+
+    @torch.no_grad()
+    def _cq_take(self, clip_rows: torch.Tensor, n: int):
+        """Hand out ``n`` rows WITHOUT REPLACEMENT, same 6-tuple shape as ``select_questions``.
+
+        人话:每道题只发一次,发完就丢。这不是题库,是缓冲。改成有放回抽取 = 它立刻退化成一张
+        8192 行的滚动题库,也就是 owner 明确否掉的那个东西,而且没有任何断言会响。
+        """
+        if self._cq is None or "count" not in self._cq:
+            self._cq_refill()
+        nseg = int(self._cq["count"].shape[0])
+        need = torch.bincount(clip_rows, minlength=nseg)
+        left = self._cq["count"] - self._cq["cursor"]
+        if bool((need > left).any()):
+            # DROUGHT: refill synchronously for the shortfall. No branch reuses a row, reorders by
+            # resid, or substitutes — if the fresh batch is still short, that is a raise.
+            self._cq_note("continuous_question_pool_dry_count", 1)
+            self._cq_refill()
+            left = self._cq["count"] - self._cq["cursor"]
+            if bool((need > left).any()):
+                self._cq_note("continuous_question_pool_underflow_count", 1)
+                raise RuntimeError(
+                    f"continuous question buffer underflow after a fresh refill: need "
+                    f"{need.tolist()} rows per clip, have {left.tolist()}. Raise "
+                    f"racket.cq_buffer_rows / cq_overdraw. Nothing was reused or substituted."
+                )
+        out_pos = torch.zeros(n, 3, device=self.device)
+        out_vin = torch.zeros(n, 3, device=self.device)
+        out_win = torch.zeros(n, 3, device=self.device)
+        out_vr = torch.zeros(n, 3, device=self.device)
+        out_nr = torch.zeros(n, 3, device=self.device)
+        out_diff = torch.zeros(n, device=self.device)
+        for c in range(nseg):
+            sel = torch.nonzero(clip_rows == c, as_tuple=False).flatten()
+            k = int(sel.numel())
+            if k == 0:
+                continue
+            start = int(self._cq["cursor"][c])
+            rows = torch.arange(start, start + k, device=self.device)
+            out_pos[sel] = self._cq["pos"][c, rows]
+            out_vin[sel] = self._cq["v_in"][c, rows]
+            out_win[sel] = self._cq["w_in"][c, rows]
+            out_vr[sel] = self._cq["v_r"][c, rows]
+            out_nr[sel] = self._cq["n_r"][c, rows]
+            out_diff[sel] = self._cq["diff"][c, rows]
+            self._cq["cursor"][c] = start + k          # 游标只前进,行发过就永远不再出现
+        self._cq_note("continuous_question_install_count", n)
+        return out_pos, out_vin, out_win, out_vr, out_nr, out_diff
+
+    @torch.no_grad()
+    def _cq_boot_gate(self) -> None:
+        """Boot-time contract anchor + parity gate for the continuous path. Runs ONCE, lazily.
+
+        人话:连续训练把题库的四条溯源丢了两条,这里把它们拿回来 —— 用一份**同族的、完整校验过
+        的**题库当**契约锚**:加载它就跑物理契约(ball physics 改了 = 和 bank 臂一模一样的开机
+        报错,而不是训练分布悄悄变了)和运行时动作契约(motion SHA / 段长 / strike_phase)。它
+        **一行都不参与训练**,只做两件事:锁契约,和给下面这个 parity 断言当数据。
+
+        parity 用的是 pytest 里那**同一个函数**(continuous_questions.parity_report),所以"两条
+        路同物理"从一句离线 pytest 声明,变成这台机器、这个 commit 上的既成事实。
+        """
+        self._cq_boot_gate_done = True          # 先置位:失败要炸,不要变成每步重试
+        path = str(getattr(self.cfg, "cq_anchor_bank", "") or "").strip()
+        if not path:
+            # 到不了这里:_assert_solved_target_recipe_is_coherent 已经把空锚拦在构造期了。留着是
+            # 因为"必须开的东西"只该有一条政策 —— 不能上面报错、这里降级成一行 WARN。
+            raise ValueError(
+                "continuous questions cannot run WITHOUT a contract anchor "
+                "(racket.cq_anchor_bank is empty): no physics-contract SHA, no runtime motion "
+                "contract, and no boot parity gate. Point it at a same-family schema-v3 train "
+                "bank — it is never trained on."
+            )
+        from .continuous_questions import parity_report
+
+        motion = self._motion()
+        nseg = int(motion.motion.num_segments)
+        _order = _peek_question_bank_clip_order(path)
+        _names = tuple(_order) if _order else tuple(
+            str(x) for x in (getattr(self.cfg, "clip_names_per_clip", ()) or ())
+        ) or ("forehand", "backhand")
+        # The loader itself runs validate_runtime_physics_contract + the split check.
+        anchor = load_question_bank(path, device=self.device, clip_names=_names,
+                                    allow_legacy=False, expected_split="train")
+        family_table = self._qb_bank_family_table(motion, anchor)
+        if anchor.metadata:
+            files = ([motion.cfg.motion_file] if isinstance(motion.cfg.motion_file, str)
+                     else list(motion.cfg.motion_file))
+            phases_cfg = self._strike_phases_cfg(nseg)
+            phases = ([float(v) for v in phases_cfg] if phases_cfg
+                      else [float(self.cfg.strike_phase)] * nseg)
+            validate_runtime_motion_contract(
+                anchor.metadata, files,
+                [int(v) for v in motion.motion.seg_len.tolist()], phases,
+                clip_families=(family_table.tolist() if family_table is not None else None),
+            )
+        self._cq_anchor = anchor
+
+        prm = self._cq_prm()
+        surface_z, net_x, net_top_z = self._cq_planes()
+        ref_all = self._cq_ref_normals()[:nseg]
+        meta = anchor.metadata or {}
+        land = meta.get("landing_env") or [float(self.cfg.vb_target_x), float(self.cfg.vb_target_y)]
+        aim_pt = torch.tensor([float(land[0]), float(land[1])], device=self.device)
+        budget = float(meta.get("speed_budget") or 4.0)
+        K = 128
+        for c in range(nseg):
+            fam = c if family_table is None else int(family_table[c])
+            q = int(anchor.counts[fam])
+            if q <= 0:
+                continue
+            k = min(K, q)
+            rows = torch.arange(k, device=self.device)
+            p_c = anchor.contact_pos[fam].unsqueeze(0).expand(k, 3)
+            rep = parity_report(
+                p_c, anchor.incoming_vel[fam, rows], anchor.incoming_spin[fam, rows],
+                aim_pt.unsqueeze(0).expand(k, 2), ref_all[c].unsqueeze(0).expand(k, 3),
+                anchor.demanded_vel[fam, rows], anchor.demanded_normal[fam, rows],
+                prm, surface_z=surface_z, net_x=net_x, net_top_z=net_top_z,
+                speed_budget=budget, tol_m=0.005, n_iters=int(self.cfg.cq_n_iters),
+                h=float(self.cfg.vb_rollout_h), n_steps=int(self.cfg.vb_rollout_steps),
+            )
+            if rep["failures"]:
+                raise RuntimeError(
+                    f"continuous-vs-bank boot parity gate FAILED on anchor {path!r} clip "
+                    f"{self._clip_label(c)}:\n  - " + "\n  - ".join(rep["failures"])
+                    + f"\nstats={rep['stats']}"
+                )
+            print(
+                f"[RacketTargetCommand] continuous boot parity OK: clip {self._clip_label(c)} "
+                f"{k} anchor rows, {rep['stats']}",
+                flush=True,
+            )
+
+    def _cq_hard_contract(self) -> dict | None:
+        """What produced this run's targets, for the checkpoint hard contract. None when off.
+
+        人话:没有这一块,checkpoint 对"目标是怎么产生的"一个字都不记 —— 因为 bank_path_cfg 是
+        空的,现在的 question_bank 直接是 None,可复现性会掉到前题库时代以下。
+        """
+        if not self._cq_enabled:
+            return None
+        from .stage1_question_bank import (
+            canonical_sha256, runtime_physics_contract, sha256_file,
+        )
+
+        motion = self._motion()
+        nseg = int(motion.motion.num_segments)
+        cqcfg = self._cq_build_cfg(nseg)
+        surface_z, net_x, net_top_z = self._cq_planes()
+        declared = {
+            "pos_range_per_clip": cqcfg.pos_range_per_clip.tolist(),
+            "vel_range_per_clip": cqcfg.vel_range_per_clip.tolist(),
+            "spin_abs_max": float(cqcfg.spin_abs_max),
+            "aim_xy": [float(cqcfg.aim_x_range[0]), float(cqcfg.aim_y_range[0])],
+            "exam_holdout": bool(self.cfg.cq_exam_holdout),
+            "max_face_deg": float(self.cfg.cq_max_face_deg),
+            "seed": int(self.cfg.cq_seed),
+        }
+        anchor = self._cq_anchor
+        return {
+            "producer": "continuous_inline_solve_v1",
+            "cfg_sha256": canonical_sha256(declared),
+            "declared": declared,
+            "physics_contract_sha256": canonical_sha256(runtime_physics_contract()),
+            "solver": {
+                "n_iters": int(cqcfg.n_iters), "tol_m": float(cqcfg.tol_m),
+                "speed_budget": float(cqcfg.speed_budget),
+                "max_redraw_rounds": int(cqcfg.max_redraw_rounds),
+                "rollout_h": float(self.cfg.vb_rollout_h),
+                "rollout_steps": int(self.cfg.vb_rollout_steps),
+            },
+            # The three planes ACTUALLY handed to the solver, not the cfg values they came from.
+            "planes": {"surface_z": surface_z, "net_x": net_x, "net_top_z": net_top_z},
+            "ref_normal_source": "runtime_ref_racket_normal_raw_w_per_clip",
+            "anchor_bank": (None if anchor is None else {
+                "sha256": sha256_file(anchor.source_path),
+                "schema_version": int((anchor.metadata or {}).get("schema_version", 0)),
+                "split": (anchor.metadata or {}).get("split"),
+                "source_family_sha256": (anchor.metadata or {}).get("source_family_sha256"),
+                "trained_on": False,
+            }),
+        }
+
+    def _cq_state_dict(self) -> dict:
+        """Cursor/fill state for the exact-resume path (the buffer is run state, not derived)."""
+        if self._cq is None or "count" not in self._cq:
+            return {"filled": False}
+        return {
+            "filled": True,
+            "cursor": self._cq["cursor"].tolist(),
+            "count": self._cq["count"].tolist(),
+            "generator": (None if self._cq_gen is None else self._cq_gen.get_state()),
+        }
 
     def _qb_bank_family_table(self, motion, bank) -> torch.Tensor | None:
         """clip→题库族查表 ((nseg,) long;forehand 族=0 行, backhand 族=1 行),或 None。
@@ -1656,6 +2741,69 @@ class RacketTargetCommand(CommandTerm):
             + "\n".join(report_lines),
             flush=True,
         )
+        # Table-clearance gate, reference half. It has to live HERE and not in __init__: the motion term
+        # is unresolved at construction (see the _ref_strike_cached comment above), so this is the first
+        # moment the reference strike point — the target CENTRE in reference_perturbed mode — exists.
+        # Placed after the report so the operator sees every clip's numbers before the raise. The x is
+        # the reference point's own — no station term: reference_perturbed derives base_target FROM the
+        # racket target, so base_target_x_range moves the BASE, never the commanded contact point.
+        for clip_id in range(nseg):
+            self._assert_contact_clears_table(
+                clip_id,
+                float(pos_all[clip_id, 0]),
+                float(pos_all[clip_id, 2]),
+                "reference strike point",
+            )
+        # RETURN gate, same placement rationale: this is the first moment the bound strike state
+        # exists, so it is the first moment we can ask whether it returns THIS CLIP'S OWN balls.
+        # pos_all/vel_all are env-origin-relative / world; the scorer needs one consistent
+        # env-local frame with z above the FLOOR, which is exactly what pos_all already is.
+        # TIME LAW under a solved/banked target: the retiming scale is DEAD for the target (the
+        # answer is solved at the ball, not read off a retimed clip) but it still divides the
+        # time-to-strike the actor sees. Leaving it non-unity is therefore a silent inconsistency,
+        # not a variation. Checked here because the motion term is unresolved at __init__.
+        _solved = bool(str(getattr(self.cfg, "question_bank", "") or "").strip()) or \
+            str(getattr(self.cfg, "target_mode", "")) == "solved"
+        if _solved:
+            # KNOWN-DEAD FOR BANK ARMS, DELIBERATELY NOT REPAIRED HERE. ``motion`` was bound above
+            # as ``self._motion().motion`` — a MotionLoader, which stores no cfg — so this getattr
+            # always yields None and the guard has never once fired. Repairing it would refuse
+            # EVERY currently running arm at boot (all five run question_bank=... together with
+            # motion.speed_scale_range=[0.6,1.0], and the same code is in the pin they execute
+            # from). That is its own decision — "is the rule wrong or are the arms wrong?" — and it
+            # does not belong in a wiring change mid-wave.
+            # The NEW path does not get to ship with a guard that can never fire, so the continuous
+            # source reads the real MotionCommand cfg. No continuous arm exists yet, so nothing
+            # running can be refused by this scoping.
+            _mcfg = getattr(motion, "cfg", None)
+            if self._cq_enabled:
+                _mcfg = getattr(self._motion(), "cfg", None)
+            _rng = tuple(float(x) for x in (getattr(_mcfg, "speed_scale_range", (1.0, 1.0))
+                                            or (1.0, 1.0)))
+            if _rng != (1.0, 1.0):
+                raise ValueError(
+                    f"task.motion.speed_scale_range={_rng} with a solved/banked racket target: the "
+                    f"retiming scale no longer shapes the TARGET (it is solved at the ball) but it "
+                    f"still divides the actor's time-to-strike, so a non-unity range is a silent "
+                    f"inconsistency between the command and the clock. Set "
+                    f"motion.speed_scale_range: [1.0, 1.0]"
+                )
+            _spc = getattr(_mcfg, "speed_scale_per_clip", None)
+            if _spc is not None and any(float(s) != 1.0 for s in _spc):
+                raise ValueError(
+                    f"task.motion.speed_scale_per_clip={tuple(float(s) for s in _spc)} with a "
+                    f"solved/banked racket target — same inconsistency as speed_scale_range; set "
+                    f"every entry to 1.0"
+                )
+        _signs = self._mount_signs_cfg(nseg)
+        for clip_id in range(nseg):
+            self._assert_reference_strike_can_return_its_own_regime(
+                clip_id,
+                pos_all[clip_id].detach().cpu().numpy(),
+                vel_all[clip_id].detach().cpu().numpy(),
+                nrm_all[clip_id].detach().cpu().numpy(),
+                float(_signs[clip_id]) if _signs else float(self.cfg.mount_normal_sign),
+            )
 
     def _reference_body_state(self, motion, step: int, body_index: int, require_ang_vel: bool = False):
         """Return reference body state from MotionLoader's full-articulation private arrays.
@@ -1794,12 +2942,16 @@ class RacketTargetCommand(CommandTerm):
         # override below would clobber every replayed target, so the replay draw AND the
         # _resample_n_acc/_replay_n_acc accounting must never run — achieved_replay_frac would
         # otherwise report replays that no env ever trained on.
-        if self.cfg.achieved_target_mix_prob > 0.0 and self._question_bank is None and motion._multiseg:
+        # 判据是"目标是不是解出来的"。锁在 bank 对象上时,连续路径下这个块会真的跑、烧 RNG 和
+        # 算力、推高 _resample_n_acc/_replay_n_acc,然后被后面的连续覆盖清掉 —— 正好复现报错
+        # 文案里描述的"撒谎的 achieved_replay_frac"。
+        if (self.cfg.achieved_target_mix_prob > 0.0 and not self._solved_targets_active
+                and motion._multiseg):
             env_ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
             clip_all = motion.clip_id[env_ids_t]
             # 按族分桶(spdmix v2 硬绑定四):缓存桶是正/反手两族;legacy 2-clip 下族行号==clip_id,
             # 逐字节不变;6-clip 变速档按族共享缓存,不再有 clip 2..5 永远选不中桶的哑弹。
-            fam_all = self._clip_family_rows()[clip_all]
+            fam_all = self._metric_bucket_rows()[clip_all]
             replay = torch.rand(n, device=self.device) < float(self.cfg.achieved_target_mix_prob)
             self._resample_n_acc += float(n)
             infl = 1.0 + float(self.cfg.achieved_clamp_inflate)
@@ -2002,41 +3154,62 @@ class RacketTargetCommand(CommandTerm):
         self._apply_question_bank_targets(env_ids, origins, n)
 
     def _apply_question_bank_targets(self, env_ids: Sequence[int], origins: torch.Tensor, n: int):
-        """Stage-1 question bank: replace the sampled target with a per-env bank question.
+        """Install a SOLVED question: bank row (discrete) or continuous buffer row. One seam.
 
-        A question row is the inverse-solved ANSWER to a sampled incoming ball at the clip's FIXED
-        contact point (scripts/gen_stage1_questions.py): target pos := contact point (tracking-env
-        frame -> world by adding the env origin), target vel := demanded racket velocity, and
-        target_normal_cmd := demanded face normal. Runs at the END of BOTH sampling paths so every
-        resample route (reset / clip wrap / mid-swing refinement) sees a bank target, and the
-        downstream A1 delay/noise injectors act on it exactly like a box-sampled one.
-        ``racket_target_normal_w`` storage remains the clip-reference lane for provenance, while the
-        critic accessor, rewards and exact/composite metrics all use the shared face pair and see the
-        demanded A-frame normal when cfg.face_command is on.
+        A question is the inverse-solved ANSWER to an incoming ball: target pos := the ball's
+        arrival point (env-local -> world by adding the env origin), target vel := demanded racket
+        velocity, target_normal_cmd := demanded face normal, plus the incoming ball itself. Two
+        producers write it:
+
+        * DISCRETE — a pre-solved bank row (scripts/gen_stage1_questions.py) at the clip's FIXED
+          contact point. Exams and reproducibility.
+        * CONTINUOUS — ``target_mode='solved'``: the ball is drawn from a continuous per-clip box
+          and solved batched, handed out without replacement from a buffer (_cq_take). Training.
+
+        Runs at the END of BOTH sampling paths so every resample route (reset / clip wrap) sees a
+        solved target, and the downstream A1 delay/noise injectors act on it exactly like a
+        box-sampled one. ``racket_target_normal_w`` storage remains the clip-reference lane for
+        provenance, while the critic accessor, rewards and exact/composite metrics all use the
+        shared face pair and see the demanded A-frame normal when cfg.face_command is on.
         """
-        if self._question_bank is None:
+        if self._question_bank is None and not self._cq_enabled:
             return
-        if not self._qb_face_frame_checked:
-            self._check_question_bank_face_frame()
         motion = self._motion()
         if motion._multiseg:
             clip = motion.clip_id[env_ids]
         else:
             clip = torch.zeros(n, dtype=torch.long, device=self.device)
-        # 族寻址:clip → 题库族行(clip_family_per_clip 缺席 = None = clip_id 直接当下标,
-        # 现役行为逐字节不变;同族变速 clip 共享同一份题目/答案——烤入片段触球行逐位相同,
-        # 复用合法,见 validate_runtime_motion_contract 的族级 SHA 对账)。
-        family_table = self._qb_bank_family_table(motion, self._question_bank)
-        bank_clip = clip if family_table is None else family_table[clip]
-        pos, incoming_vel, incoming_spin, vel, nrm, diff = select_questions(
-            self._question_bank, bank_clip, torch.rand(n, device=self.device)
-        )
+        if self._cq_enabled:
+            # CONTINUOUS producer: same six values, drawn+solved instead of read off a row. The
+            # buffer is addressed by LOADED clip (its boxes and its ref face are per loaded clip),
+            # not by bank family. The +Y face guard has nothing to sweep here because the sign is
+            # closed at SOLVE time (ref_normal = the runtime raw +Y face), so there is no second
+            # copy of the face convention that could drift out of agreement.
+            if not self._cq_boot_gate_done:
+                self._cq_boot_gate()
+            pos, incoming_vel, incoming_spin, vel, nrm, diff = self._cq_take(clip, n)
+            self.metrics["question_exhausted_frac"][env_ids] = self._cq_last_exhausted_frac
+        else:
+            if not self._qb_face_frame_checked:
+                self._check_question_bank_face_frame()
+            # 族寻址:clip → 题库族行(clip_family_per_clip 缺席 = None = clip_id 直接当下标,
+            # 现役行为逐字节不变;同族变速 clip 共享同一份题目/答案——烤入片段触球行逐位相同,
+            # 复用合法,见 validate_runtime_motion_contract 的族级 SHA 对账)。
+            family_table = self._qb_bank_family_table(motion, self._question_bank)
+            bank_clip = clip if family_table is None else family_table[clip]
+            pos, incoming_vel, incoming_spin, vel, nrm, diff = select_questions(
+                self._question_bank, bank_clip, torch.rand(n, device=self.device)
+            )
+        # ---- BELOW THIS LINE THE TWO PRODUCERS SHARE ONE INSTALL, BYTE FOR BYTE ----------------
+        # 人话:两条路必须走同一段安装代码。哪天这六行难写成一段共享代码了,就是两条路已经分叉了
+        # ——tests/test_continuous_vs_bank_parity.py 的 seam 断言就是钉这件事的。
         self.racket_target_pos_w[env_ids] = origins + pos
         self.racket_target_vel_w[env_ids] = vel
         self.target_normal_cmd[env_ids] = nrm
         # The inverse-solved answer and its incoming ball are one atomic question. These writes
-        # happen from the same selected row; the generic virtual-ball sampler below is disabled
-        # while a bank is active so it cannot replace question A's ball with question B.
+        # happen from the same row; the generic virtual-ball sampler below is disabled whenever a
+        # SOLVED target is active (bank OR continuous — see _solved_targets_active) so it cannot
+        # replace question A's ball with question B.
         self.vb_vel_in_w[env_ids] = incoming_vel
         self.vb_spin_in_w[env_ids] = incoming_spin
         # Held per env until its next resample; reset-mean reports the question difficulty mix.
@@ -2334,7 +3507,8 @@ class RacketTargetCommand(CommandTerm):
             ref_raw = self._ref_racket_normal_raw_w_per_clip[c]
             d = torch.mv(rows, ref_raw)
             min_d = float(d.min())
-            cname = self._clip_names.get(fam, f"clip{fam}")
+            cname = getattr(self, "_family_names", {0: "forehand", 1: "backhand"}).get(
+                fam, f"family{fam}")
             if family_table is not None:
                 cname = f"{cname}[clip{c}]"
             if min_d <= 0.0:
@@ -2373,10 +3547,20 @@ class RacketTargetCommand(CommandTerm):
         """
         if self._qb_base_anchor is not None:
             return self._qb_base_anchor
-        contact = self._question_bank.contact_pos  # (C, 3), tracking-env frame
-        family_table = self._qb_bank_family_table(self._motion(), self._question_bank)
-        if family_table is not None:
-            contact = contact[family_table]  # (nseg, 3): one row per LOADED clip
+        if self._question_bank is not None:
+            contact = self._question_bank.contact_pos  # (C, 3), tracking-env frame
+            family_table = self._qb_bank_family_table(self._motion(), self._question_bank)
+            if family_table is not None:
+                contact = contact[family_table]  # (nseg, 3): one row per LOADED clip
+        else:
+            # CONTINUOUS: there is no fixed contact point by construction, so the per-clip CONSTANT
+            # that plays its role is the CENTRE of the contact draw box — exactly the use the
+            # dead-knob note above already records for racket_pos_range_per_clip under a solved
+            # target. One constant per clip, evaluated once: the S2a argument is unchanged word for
+            # word, and _assert_contact_clears_table already runs over this same table at __init__.
+            box = self._per_clip_range_rows(
+                self._pos_range_per_clip_t, "racket_pos_range_per_clip")     # (nseg, 3, 2)
+            contact = (box[..., 0] + box[..., 1]) * 0.5                      # (nseg, 3)
         if self.cfg.target_mode == "reference_perturbed":
             self._ensure_reference_strike_state()
             if self._ref_reach_offset_xy_per_clip is None:
@@ -2450,10 +3634,15 @@ class RacketTargetCommand(CommandTerm):
         # fixed per-clip ready anchor. The two modes are deliberately mutually exclusive here.
         if self.cfg.target_mode == "hitter_pure":
             pass
-        elif self._question_bank is not None:
+        elif self._solved_targets_active:
             # Stage-1/S2a BASE PIN: fixed per-clip ready anchor (the coupling evaluated ONCE with
-            # the bank's fixed contact point — see _qb_base_anchor_off_xy), never the per-question
-            # coupling below. Numerically identical while the question point is fixed (S1); becomes
+            # the bank's fixed contact point / the continuous draw box's CENTRE — see
+            # _qb_base_anchor_off_xy), never the per-question coupling below. Keying this on the
+            # bank OBJECT would drop a continuous arm straight into the per-question coupling,
+            # which re-derives base_xy from racket_target_pos_w every resample and therefore leaks
+            # each question's contact point into the base demand — the exact S2a stand-your-ground
+            # leak spelled out in _qb_base_anchor_off_xy. Continuous sampling makes the question
+            # point vary BY CONSTRUCTION, so that is not hypothetical. Numerically identical while the question point is fixed (S1); becomes
             # load-bearing the moment the point varies (S2a box). base_target_*_range jitter still
             # applies after, unchanged.
             if motion._multiseg:
@@ -2534,12 +3723,43 @@ class RacketTargetCommand(CommandTerm):
         # Tier-1 virtual incoming ball: one (v_in, omega_in) per swing. The ball's position at the
         # strike time is the racket target BY CONSTRUCTION (the sampler defines the ball to arrive
         # there), so only velocity + spin are sampled. Boxes stay inside the venue-fit envelope.
-        if (self.cfg.virtual_ball or self.cfg.vb_metrics_only) and self._question_bank is None:
-            self.vb_vel_in_w[env_ids, 0] = sample_uniform(*self.cfg.vb_vel_x_range, (n,), self.device)
-            self.vb_vel_in_w[env_ids, 1] = sample_uniform(*self.cfg.vb_vel_y_range, (n,), self.device)
-            self.vb_vel_in_w[env_ids, 2] = sample_uniform(*self.cfg.vb_vel_z_range, (n,), self.device)
-            _s = float(self.cfg.vb_spin_abs_max)
-            self.vb_spin_in_w[env_ids] = sample_uniform(-_s, _s, (n, 3), self.device)
+        # ATOMICITY, enforcement half. The samplers (where the solve seam lives) run FIRST and this
+        # runs AFTER; with the predicate keyed on the bank OBJECT a continuous arm would land here
+        # and overwrite vb_vel_in_w / vb_spin_in_w with a fresh uniform draw — the policy would be
+        # asked to answer a ball that is NOT the one its racket command was solved for. This single
+        # line is the most dangerous silent disengagement in the whole change.
+        if ((self.cfg.virtual_ball or self.cfg.vb_metrics_only)
+                and not self._solved_targets_active):
+            if self._vb_vel_range_per_clip_t is None:
+                self.vb_vel_in_w[env_ids, 0] = sample_uniform(*self.cfg.vb_vel_x_range, (n,), self.device)
+                self.vb_vel_in_w[env_ids, 1] = sample_uniform(*self.cfg.vb_vel_y_range, (n,), self.device)
+                self.vb_vel_in_w[env_ids, 2] = sample_uniform(*self.cfg.vb_vel_z_range, (n,), self.device)
+            else:
+                # PER-CLIP incoming-ball regime: a block is posed fast balls and a loop slow ones in
+                # the SAME run. Same gather discipline as the racket boxes (_per_clip_range_rows
+                # validates the row count BEFORE any GPU index, so a mis-sized table is a human-
+                # readable ValueError, not an async CUDA device-side assert).
+                _clip_e = self._motion().clip_id[
+                    torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+                ]
+                _vb_rng = self._per_clip_range_rows(
+                    self._vb_vel_range_per_clip_t, "vb_vel_range_per_clip"
+                )[_clip_e]                                        # (n, 3, 2)
+                _u = torch.rand(n, 3, device=self.device)
+                self.vb_vel_in_w[env_ids] = (
+                    _vb_rng[:, :, 0] + (_vb_rng[:, :, 1] - _vb_rng[:, :, 0]) * _u
+                )
+            if self._vb_spin_abs_max_per_clip_t is None:
+                _s = float(self.cfg.vb_spin_abs_max)
+                self.vb_spin_in_w[env_ids] = sample_uniform(-_s, _s, (n, 3), self.device)
+            else:
+                _clip_e = self._motion().clip_id[
+                    torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+                ]
+                _s_e = self._vb_spin_abs_max_per_clip_t[_clip_e].unsqueeze(-1)      # (n, 1)
+                self.vb_spin_in_w[env_ids] = (
+                    (torch.rand(n, 3, device=self.device) * 2.0 - 1.0) * _s_e
+                )
 
         # Rally drift accounting: base->NEW-station error at swing start (the recovery debt the
         # previous swing left). Wrap path only — at true resets base_pos_w still caches the
@@ -3668,7 +4888,7 @@ class RacketTargetCommand(CommandTerm):
         if motion._multiseg:
             # per-族累计(spdmix v2 硬绑定四):桶是正/反手两族。legacy 2-clip 族行号==clip_id
             # 逐字节不变;6-clip 下正手 1.0/1.2 变体不再被记进"backhand"桶(clip==1 的老病)。
-            fams = self._clip_family_rows()[motion.clip_id[env_ids]]
+            fams = self._metric_bucket_rows()[motion.clip_id[env_ids]]
             for c in self._clip_names:
                 self._swing_starts_acc_c[c] += float((fams == c).sum())
         # --- per-swing SAME-LEDGER rally booking (metric-sync fix; see the rally block in __init__) --
@@ -3682,7 +4902,7 @@ class RacketTargetCommand(CommandTerm):
         self._rally_starts_acc += float(ended.sum())
         self._rally_returns_acc += float(returned.sum())
         if motion._multiseg:
-            ended_fams = self._clip_family_rows()[self._prev_clip_id[env_ids_t]]
+            ended_fams = self._metric_bucket_rows()[self._prev_clip_id[env_ids_t]]
             for c in self._clip_names:
                 _csel = ended_fams == c
                 self._rally_starts_acc_c[c] += float((ended & _csel).sum())
@@ -3730,7 +4950,7 @@ class RacketTargetCommand(CommandTerm):
                 # _prev_clip_id snapshot (motion already resampled clip_id for the new episode);
                 # post-wrap-hold falls to the latched clip whose swing caused the recovery.
                 fall_clips = torch.where(recovering, rec, self._prev_clip_id[env_ids])
-                fall_fams = self._clip_family_rows()[fall_clips]
+                fall_fams = self._metric_bucket_rows()[fall_clips]
                 for c in self._clip_names:
                     csel = fall_fams == c
                     self._prestrike_fall_acc_c[c] += float((true_pre & csel).sum())
@@ -4096,7 +5316,7 @@ class RacketTargetCommand(CommandTerm):
         _motion = self._motion()
         _is_multiseg = getattr(_motion, "_multiseg", False)
         if _is_multiseg:
-            _fam = self._clip_family_rows()[_motion.clip_id]
+            _fam = self._metric_bucket_rows()[_motion.clip_id]
             for _c, _cn in self._clip_names.items():
                 _sel = exact_strike & (_fam == _c)
                 self._vb_exact_acc_c[_c] = decay * self._vb_exact_acc_c[_c] + float(_sel.sum())
@@ -4211,7 +5431,7 @@ class RacketTargetCommand(CommandTerm):
 
         motion = self._motion()
         if getattr(motion, "_multiseg", False):
-            fam_id = self._clip_family_rows()[motion.clip_id]
+            fam_id = self._metric_bucket_rows()[motion.clip_id]
             for family_row, family in self._clip_names.items():
                 selected = fam_id == family_row
                 for name, mask in masks.items():
@@ -4273,6 +5493,46 @@ class RacketTargetCommand(CommandTerm):
         ):
             if name not in ledger:
                 ledger[name] = torch.zeros((), dtype=torch.long, device=self.device)
+        if self._cq_enabled:  # 类级默认 False 兜底,不必再写 getattr
+            # CONTINUOUS question accounting. Goes into the SAME integer ledger the hourly monitor
+            # already parses (one HOPE_EXACT_BEHAVIOR_UPDATE_JSON line per PPO update), so a target
+            # drought is visible without touching a single line of the monitor.
+            # continuous_question_exhausted_rate > 0 is THE anomaly to catch.
+            for name in (
+                "continuous_question_draw_count",
+                "continuous_question_admitted_count",
+                "continuous_question_install_count",
+                "continuous_question_exhausted_count",
+                "continuous_question_refill_count",
+                "continuous_question_redraw_round_sum",
+                "continuous_question_resid_um_sum",
+                "continuous_question_rows_discarded_count",
+                "continuous_question_pool_dry_count",
+                "continuous_question_pool_underflow_count",
+                "continuous_question_reject_face_deg_over_cap_count",
+                "continuous_question_reject_exam_holdout_count",
+                "continuous_question_closed_loop_um_sum",
+                "continuous_question_closed_loop_row_count",
+                "continuous_question_closed_loop_fail_count",
+            ):
+                if name not in ledger:
+                    ledger[name] = torch.zeros((), dtype=torch.long, device=self.device)
+            # Reason names are stroke_adapt_torch.REASONS verbatim, so a training histogram and a
+            # deploy stroke_adapt log can be compared directly.
+            from .stroke_adapt_torch import REASONS as _CQ_REASONS
+
+            for _reason in _CQ_REASONS:
+                name = f"continuous_question_reject_{_reason}_count"
+                if name not in ledger:
+                    ledger[name] = torch.zeros((), dtype=torch.long, device=self.device)
+            _nb = max(1, int(self.cfg.cq_accept_buckets))
+            _nc = len(getattr(self, "_clip_names", {})) or 2
+            for _c in range(max(_nc, 8)):
+                for _b in range(_nb):
+                    for _kind in ("asked", "kept"):
+                        name = f"continuous_question_bucket{_c}_{_b}_{_kind}_count"
+                        if name not in ledger:
+                            ledger[name] = torch.zeros((), dtype=torch.long, device=self.device)
         if getattr(self, "planner_revision_enabled", False):
             for name in (
                 "planner_initial_tts_sample_count",
@@ -4932,7 +6192,7 @@ class RacketTargetCommand(CommandTerm):
                 min(self._tracking_loss_acc / _s_denom, 1.0) if _s_enough else 0.0
             )
             if getattr(_em, "_multiseg", False):
-                _rfam = self._clip_family_rows()[_em.clip_id]
+                _rfam = self._metric_bucket_rows()[_em.clip_id]
                 for _c, _cn in self._clip_names.items():
                     self._tracking_loss_acc_c[_c] = decay * self._tracking_loss_acc_c[_c] + float(
                         (_rising & (_rfam == _c)).sum()
@@ -4968,7 +6228,7 @@ class RacketTargetCommand(CommandTerm):
         if getattr(_motion, "_multiseg", False):
             # 按族分桶(legacy 2-clip 族行号==clip_id 逐字节不变;6-clip 下"forehand"桶=正手
             # 三档合计,"backhand"桶=反手三档合计,不再把正手 1.0 档记成反手)。
-            _fam = self._clip_family_rows()[_motion.clip_id]
+            _fam = self._metric_bucket_rows()[_motion.clip_id]
             for _c, _cn in self._clip_names.items():
                 _sel = exact_strike & (_fam == _c)
                 _self_f = _sel.float()
@@ -5527,9 +6787,32 @@ class RacketTargetCommandCfg(CommandTermCfg):
     vb_vel_x_range: tuple[float, float] = (-4.5, -2.0)
     vb_vel_y_range: tuple[float, float] = (-0.6, 0.6)
     vb_vel_z_range: tuple[float, float] = (-1.0, 0.5)
+    # OPTIONAL PER-CLIP incoming-ball velocity boxes, shaped exactly like racket_vel_range_per_clip:
+    # a tuple indexed by clip_id of ((x_lo,x_hi),(y_lo,y_hi),(z_lo,z_hi)). None -> the shared
+    # vb_vel_*_range box for every clip (BACKWARD COMPATIBLE, byte-identical to today).
+    # 人话:这是"给挡球喂快球、给拉球喂慢球"的开关。拍速和来球速度大约 1:1 互相替代(实测相关
+    # 系数 -0.61),所以每个动作有自己的最佳来球速度;一个全局球箱会把某些动作的峰值排除在外
+    # ——bh_loop_c 在自己速度下峰值 5.12 m/s、而球箱是 2.0-4.6,分数 0.150,就是这么来的。
+    # Length is checked against the loaded clip count at construction (fail-loud, like
+    # strike_phase_per_clip); two rows expand through clip_family_per_clip like the racket boxes.
+    vb_vel_range_per_clip: tuple | None = None
     # Incoming spin: per-axis uniform (rad/s). 50 rad/s ~ 8 rev/s per axis keeps |omega| inside the
     # quaternion-validated 0-15 rev/s envelope.
     vb_spin_abs_max: float = 50.0
+    # OPTIONAL PER-CLIP |spin| ceiling (rad/s), one per loaded clip. None -> the scalar above for
+    # every clip. A block answering heavy topspin and a loop answering a float serve are different
+    # regimes, and the ball box is what decides which one a stroke ever meets.
+    vb_spin_abs_max_per_clip: tuple | None = None
+    # REFERENCE-STRIKE RETURN GATE. > 0 -> at construction, each bound strike frame is scored with
+    # the repo's OWN NumPy return scorer (scripts/virtual_return_scorer.py, the same contact +
+    # landing contract the in-training metric uses) against balls drawn from THAT CLIP'S OWN
+    # incoming regime; a clip whose legal-return fraction falls below this raises, naming the clip
+    # and the rate. 0.0 = gate off (the default, byte-identical to today).
+    reference_return_gate_min_rate: float = 0.0
+    reference_return_gate_samples: int = 256
+    reference_return_gate_seed: int = 0
+    # Escape hatch for the "landing/net rewards need a solved answer" construction gate.
+    allow_unbanked_landing_rewards: bool = False
     # virtual_spin reward semantics: "topspin" = Ace-style outgoing-topspin generation (ball
     # quality); "minimize" = stage-1 placement-first mode (franco 2026-07-04) — reward CANCELING
     # the incoming spin, kernel exp(-|omega_out|^2 / vb_spin_min_sigma^2) on the outgoing spin
@@ -5619,6 +6902,10 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # Confirmed by the MuJoCo per-clip eval probe: lowering only the backhand target box raised backhand
     # composite 0.32->0.79 (deterministic) / 0.39->0.77 (dither) with forehand byte-identical.
     racket_vel_range_per_clip: tuple | None = None
+    # Escape hatch for the construction-time gate that requires every per-clip velocity box to have
+    # x_lo > 0 (+x is toward the opponent, so a non-positive floor lets the sampler command a return
+    # that never crosses the net). True = the box is deliberately non-forward (e.g. a block/drop study).
+    allow_non_forward_target_velocity: bool = False
 
     # OPTIONAL per-clip racket target-POSITION boxes (uniform mode, unified multi-clip policy). None ->
     # use the shared racket_pos_x_range + |y|-sign + racket_pos_z_range box for every clip (BACKWARD
@@ -5629,6 +6916,13 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # offset, so a shared box can make one clip's strike-frame position unreachable. Per-clip boxes let
     # each clip's target track its own reference strike point.
     racket_pos_range_per_clip: tuple | None = None
+
+    # ORDERED per-clip NAMES (clip_id -> human name), from train.py's ``racket.clip_names``. Empty
+    # -> the legacy two family names, and per-clip metric buckets stay FAMILY buckets, byte-identical.
+    # 人话:动作库不再只有"正手/反手"两个名字。给了这张表,每个 clip 就有自己的指标桶
+    # (virtual_return_rate_<name>),同族的两个动作(拉/挡)不会再共用一个桶——正手回球率
+    # 0.0000 藏在 45% 的合计里,就是共用桶造成的。
+    clip_names_per_clip: tuple = ()
 
     # --- HER-style achieved-target replay (uniform mode + unified multi-clip only) -------------------
     # On-policy-compatible hindsight relabeling (Ace/HER, adapted for PPO): true retroactive relabeling is
@@ -5677,6 +6971,54 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # Reward/critic/metric face pairing. ``shared_plus_y`` is the production A-frame convention;
     # ``legacy_signed_vs_A`` is an explicit diagnostic continuation of the pre-fix mismatch.
     face_command_pairing: str = "shared_plus_y"
+
+    # --- CONTINUOUS question production (owner ruling: 离散题库是考试用的,训练必须连续采样) ----
+    # ONE switch: ``target_mode: "solved"``. Everything else below is derived or fail-closed, so
+    # there is no second thing an agent has to remember to turn on. The producer is a
+    # PRODUCER-CONSUMER BUFFER, not a pool and not a small bank: one batched solve fills it, a
+    # cursor hands rows out WITHOUT REPLACEMENT, and a spent row is discarded forever. Statistically
+    # identical to solving at every reset; ~1.5% of iteration time instead of ~160% (the solver is
+    # kernel-launch bound, so the fix is to make the call RARE, not small).
+    cq_buffer_rows: int = 8192          # rows kept per clip; one refill measured at ~258 ms @8192
+    cq_overdraw: float = 1.45           # first-pass overdraw (a 2nd call costs full price; this is free)
+    cq_n_iters: int = 12                # 100% solve at 12; 4 halves the wall at a visible resid cost
+    cq_tol_m: float = 0.02
+    cq_speed_budget: float = 3.4        # pp_policy.hpp:234 gate_speed_max - margin (deploy's own number)
+    cq_max_redraw_rounds: int = 3
+    cq_max_face_deg: float = 35.0       # face-vs-clip-face cap (shipped banks: p50 7.8-9.1, max 20.3)
+    # DEFAULT 0.0, NOT the producer's own 50.0: every schema-v3 bank hard-asserts
+    # incoming_spin_mode=='zero', so a non-zero default would smuggle a spin regime no shipped
+    # calibration has ever covered in on a plumbing change. Opening spin is its own arm.
+    cq_spin_abs_max: float = 0.0
+    # Aim is a POINT, not a range. The landing reward (hope_rewards.virtual_landing), the
+    # virtual_land_err_m metric and the physical ball's return-flight target all read ONE fixed
+    # _vb_target_xy; a per-env aim would have the ball solved for A and graded at B with nothing
+    # asserting. None -> (vb_target_x, vb_target_y). Unlock by making _vb_target_xy per-env FIRST.
+    cq_aim_xy: tuple | None = None
+    # Incoming-ball velocity box, per LOADED clip, (num_clips, 3, 2). Required under "solved".
+    cq_vel_range_per_clip: tuple | None = None
+    # Hold the exam split OUT of training: reject drawn balls whose question_split(v_in) says
+    # "exam" (stage1_question_bank.EXAM_FRAC). Costs ~20% more draws and keeps the repo invariant
+    # that no trained question IS an exam question — without it a paired exam comparison can grade
+    # a policy on balls it trained on.
+    cq_exam_holdout: bool = True
+    # Dedicated RNG stream for the question draw, so it is reproducible independently of every
+    # other sampler's consumption pattern (generate() threads a torch.Generator all the way down).
+    cq_seed: int = 0x51501234
+    cq_accept_buckets: int = 4          # |v_in_x| bins for the per-regime accept ledger
+    cq_max_exhausted_frac: float = 0.10     # above this a refill WARNs with the full histogram
+    cq_abort_exhausted_frac: float = 0.50   # above this it raises
+    cq_min_accept_rate: float = 0.05    # a bucket below this with enough asks is a config error
+    cq_closed_loop_rows: int = 256      # rows re-rolled through the SCORER's own call per refill
+    cq_closed_loop_max_err_m: float = 0.10  # the schema's own bound (stage1_question_bank.py:402)
+    # CONTRACT ANCHOR: one same-family schema-v3 train bank, loaded and validated but NEVER trained
+    # on. It restores what a continuous arm otherwise loses — the physics contract SHA, the runtime
+    # motion contract (motion SHA / seg_len / strike_phase), clip-order authority — and it is the
+    # boot parity gate's data (K of its stored balls replayed through the live solver).
+    cq_anchor_bank: str = ""
+    # Exam paper for scripts/judge.sh. Read FIRST, before the legacy question_bank string-replace,
+    # so a continuous arm needs no operator memory and no --exam-bank.
+    exam_bank: str = ""
 
     # --- desired base XY target (offsets from the env origin, world frame, meters) ---
     base_target_x_range: tuple[float, float] = (-0.10, 0.10)

@@ -2178,9 +2178,6 @@ def _make_motion_command(motion_files, num_envs=8, **cfg_overrides):
     # 运行时 motion_file 只会是 str 或 str 列表(Hydra CLI);裸 PosixPath 是测试自造形态,
     # 统一转 str 以继续走真实的标量/列表两条加载路径。
     motion_files = [str(item) for item in motion_files]
-    skip_legacy_admission = bool(
-        cfg_overrides.pop("_test_skip_legacy_admission", False)
-    )
     trusted_promotion_sha = cfg_overrides.pop(
         "_test_trusted_promotion_sha", None
     )
@@ -2217,23 +2214,14 @@ def _make_motion_command(motion_files, num_envs=8, **cfg_overrides):
     )
     cfg_kwargs.update(cfg_overrides)
     cfg = commands_mod.MotionCommandCfg(**cfg_kwargs)
+    # Default (non-canonical) motion_file path takes no trust-set entry: it
+    # loads raw NPZ bytes directly. Only canonical_ready_mode needs the code
+    # trust set, so inject a promotion digest solely when one is supplied.
     registry_module = commands_mod.MotionCommand._canonical_registry_module()
     admission_module = registry_module.motion_admission
-    prior_raw_trust = admission_module.TRUSTED_LEGACY_RAW_MOTION_SHA256
     prior_promotion_trust = (
         admission_module.TRUSTED_BANK_PROMOTION_CERTIFICATE_SHA256
     )
-    if (
-        not bool(getattr(cfg, "canonical_ready_mode", False))
-        and not skip_legacy_admission
-    ):
-        trusted = {
-            hashlib.sha256(Path(path).read_bytes()).hexdigest()
-            for path in motion_files
-        }
-        admission_module.TRUSTED_LEGACY_RAW_MOTION_SHA256 = (
-            prior_raw_trust | frozenset(trusted)
-        )
     if trusted_promotion_sha is not None:
         admission_module.TRUSTED_BANK_PROMOTION_CERTIFICATE_SHA256 = (
             prior_promotion_trust | frozenset({trusted_promotion_sha})
@@ -2241,7 +2229,6 @@ def _make_motion_command(motion_files, num_envs=8, **cfg_overrides):
     try:
         return commands_mod.MotionCommand(cfg, env), robot
     finally:
-        admission_module.TRUSTED_LEGACY_RAW_MOTION_SHA256 = prior_raw_trust
         admission_module.TRUSTED_BANK_PROMOTION_CERTIFICATE_SHA256 = (
             prior_promotion_trust
         )
@@ -2324,22 +2311,20 @@ def test_motion_loader_rejects_non_scalar_or_nonfinite_fps(tmp_path):
         _make_motion_command([nonfinite])
 
 
-def test_raw_motion_requires_code_owned_legacy_allowlist(tmp_path, monkeypatch):
+def test_default_motion_file_path_needs_no_trust_set_entry(tmp_path):
+    # Regression: the default (non-canonical) motion_file channel loads a plain
+    # NPZ with no code-owned trust set. Admission is scoped to canonical mode,
+    # so a raw clip that is in neither trust set must still construct.
     clip = _write_motion_npz(tmp_path / "untrusted_raw.npz", frames=12)
     registry_module = commands_mod.MotionCommand._canonical_registry_module()
-    monkeypatch.setattr(
-        registry_module.motion_admission,
-        "TRUSTED_LEGACY_RAW_MOTION_SHA256",
-        frozenset(),
-    )
+    admission_module = registry_module.motion_admission
+    assert not hasattr(admission_module, "TRUSTED_LEGACY_RAW_MOTION_SHA256")
+    assert admission_module.TRUSTED_BANK_PROMOTION_CERTIFICATE_SHA256 == frozenset()
 
-    with pytest.raises(
-        ValueError, match="legacy raw motion admission rejected"
-    ):
-        _make_motion_command(
-            [clip],
-            _test_skip_legacy_admission=True,
-        )
+    cmd, _ = _make_motion_command([clip])
+
+    assert cmd.canonical_ready_mode is False
+    assert cmd.motion.time_step_total == 12
 
 
 def test_runtime_registry_loader_ignores_preloaded_file_spoof(

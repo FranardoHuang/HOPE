@@ -7,7 +7,7 @@ import json
 import sys
 from dataclasses import replace
 from pathlib import Path
-from types import MappingProxyType
+from types import MappingProxyType, SimpleNamespace
 
 import numpy as np
 import pytest
@@ -1436,3 +1436,80 @@ def test_fails_closed_without_explicit_full_root_or_s0_grounding(tmp_path):
             "full",
             no_grounding,
         )
+
+
+def _donor_gate_recipe():
+    """Minimal duck-typed recipe: one synthetic construction plus its byte-identical donor."""
+
+    class _Row:
+        def __init__(self, construction_marker):
+            self.construction_marker = construction_marker
+
+    class _Semantics:
+        def __init__(self, rows):
+            self._rows = rows
+
+        def row(self, motion_id):
+            return self._rows[motion_id]
+
+    construction = ConstructionMarker(
+        annotation_frame=44, donor_preferred_frame=42, solve_span=(34, 48)
+    )
+    return SimpleNamespace(
+        marker_semantics=_Semantics(
+            {
+                "fh_block_syn": _Row(construction),
+                "bh_block": _Row(None),
+                "fh_loop": _Row(None),
+            }
+        ),
+        sources=[
+            SimpleNamespace(motion_id="fh_block_syn", sha256="a" * 64),
+            SimpleNamespace(motion_id="bh_block", sha256="a" * 64),
+            SimpleNamespace(motion_id="fh_loop", sha256="b" * 64),
+        ],
+    )
+
+
+def _donor_gate_compiled(synthetic_duration_s, donor_duration_s):
+    return [
+        SimpleNamespace(
+            motion_id="fh_block_syn", scope="upper", duration_s=synthetic_duration_s
+        ),
+        SimpleNamespace(
+            motion_id="bh_block", scope="upper", duration_s=donor_duration_s
+        ),
+        SimpleNamespace(motion_id="fh_loop", scope="upper", duration_s=1.5),
+    ]
+
+
+def test_synthetic_slower_than_its_donor_fails_the_build():
+    """The 2026-07-27 defect: fh_block_syn shipped at 2.080 s against bh_block's 1.080 s
+    from ONE source file (blade peak 1.102 vs 2.420 m/s, median per-joint speed ratio
+    1.986) and every per-clip gate passed.  Only a donor-relative check sees it."""
+
+    with pytest.raises(cmc.CanonicalMotionCompilerError) as excinfo:
+        cmc._assert_synthetic_tracks_its_donor(
+            _donor_gate_recipe(), _donor_gate_compiled(2.080, 1.080)
+        )
+    assert "SAME source bytes" in str(excinfo.value)
+
+
+def test_synthetic_within_donor_tolerance_passes():
+    """The rebuilt clip (face solve span widened to the donor's exit) is 1.160 s against
+    1.080 s = 1.074x, and the flipped arm chain's own ~1.43x cost must stay admissible."""
+
+    recipe = _donor_gate_recipe()
+    cmc._assert_synthetic_tracks_its_donor(recipe, _donor_gate_compiled(1.160, 1.080))
+    cmc._assert_synthetic_tracks_its_donor(recipe, _donor_gate_compiled(1.140, 0.800))
+
+
+def test_synthetic_face_solve_span_extension_is_validated():
+    options = _options()
+    for bad in ((1,), (-1, 2), ("a", 1), (1, 2, 3)):
+        with pytest.raises(cmc.CanonicalMotionCompilerError):
+            cmc._validate_options(
+                replace(options, synthetic_face_solve_span_extension=bad)
+            )
+    cmc._validate_options(replace(options, synthetic_face_solve_span_extension=(0, 6)))
+    cmc._validate_options(replace(options, synthetic_face_solve_span_extension=None))

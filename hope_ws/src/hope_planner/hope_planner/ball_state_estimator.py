@@ -8,6 +8,8 @@ velocity jump so the polynomial never fits across a contact discontinuity.
 See HOPE_7DOF_Racket_Model_based_Planner_Reference_Setup.md, Section 3.
 """
 
+from __future__ import annotations
+
 from typing import List, Optional, Tuple
 
 import numpy as np

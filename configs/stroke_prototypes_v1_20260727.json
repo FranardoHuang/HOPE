@@ -1,0 +1,847 @@
+{
+  "contact_rule": {
+    "min_blade_vz_mps": -0.3,
+    "min_site_z_w_m": 0.88,
+    "name": "max_forward_blade_speed_in_compiled_window",
+    "note": "spec §2.4; the two thresholds are OPEN QUESTION 8.1 (owner's call)"
+  },
+  "derived_sha256": "74164873c6d0575fc129818b6b92465b419c976a5f2fdab89754b4bedd9401c6",
+  "prototype_set_id": "stroke_prototypes_v1_20260727",
+  "provenance": {
+    "accel_envelope_sha256": "a42949cd11e19cac11a03f2c623302728dbe90b7e96bbb92ed9301ba66cecb42",
+    "build_manifest_sha256": "5d1a51383fb2f1b106d4bcc7d31f8225f42b70f660de873f423209d29dc31465",
+    "clip_dir": "vendor_assets/motion_finalize_20260724/probes/candidates_v2_noearly_probe2",
+    "deploy_gate": {
+      "applied": false,
+      "headroom_mps": {
+        "full": {
+          "bh_block": 1.761945,
+          "bh_loop_c": 0.942293,
+          "fh_block_syn": 2.899423,
+          "fh_loop": 0.035499,
+          "s0_highpress": 1.89119
+        },
+        "upper": {
+          "bh_block": 1.551915,
+          "bh_loop_c": 1.274852,
+          "fh_block_syn": 2.769984,
+          "fh_loop": 0.207344,
+          "s0_highpress": 1.451431
+        }
+      },
+      "over_gate": [],
+      "source": "pp_policy.hpp:234 gate_speed_max (reject at pp_policy.hpp:2459)",
+      "speed_max_mps": 3.5
+    },
+    "library_sha256": "327d9f70dd674441308a6a03af6f4a21d20d5bf3d9010ffe2c7de0e8cc7e44fb",
+    "retime_s_min": 0.6,
+    "stroke_budget_scale": 1.5
+  },
+  "schema_version": 1,
+  "scopes": {
+    "full": [
+      {
+        "L_deep_m": 0.5434719218223346,
+        "band_b_x": [
+          0.4636766852873427,
+          0.7769811864905524
+        ],
+        "band_b_y": [
+          -0.5373362569976557,
+          -0.2576187651335855
+        ],
+        "band_z_w": [
+          0.6544753532201953,
+          1.0937423757097262
+        ],
+        "base_height_at_contact_m": 0.9117917418479919,
+        "clip_index": 0,
+        "contact_frame": 40,
+        "contact_window_frames": [
+          31,
+          46
+        ],
+        "cos_nv": -0.7668747052943065,
+        "cycle_s": 1.54,
+        "deep_frame": 25,
+        "elevation_deg": 43.84410696768375,
+        "enabled": true,
+        "face_sign": -1.0,
+        "family": "forehand",
+        "family_measured_side": "forehand",
+        "fps": 50.0,
+        "frames": 78,
+        "motion_id": "fh_loop",
+        "n_hat_b": [
+          -0.32433672021953774,
+          -0.9294648662827792,
+          -0.17578610372031234
+        ],
+        "npz_filename": "fh_loop_full_canonical_v2.npz",
+        "npz_sha256": "54a5b249c32980060c11659c6d07435c95023e8fd90f988696675d89053f231c",
+        "p_contact_b": [
+          0.6985050746683663,
+          -0.4036119582718908,
+          -0.030112501191805197
+        ],
+        "priority": 0,
+        "retime_binding": [
+          "right_shoulder_pitch_joint",
+          "acc"
+        ],
+        "retime_range": [
+          0.6,
+          1.4599713844018798
+        ],
+        "scope": "full",
+        "slack_b_xy_m": 0.15,
+        "slack_z_w_m": 0.1,
+        "source_sha256": "faa8df8c552e4bd99134cefe5457f86e646499ff12737db160fa43eec763dcc1",
+        "source_window_frames": [
+          46,
+          57
+        ],
+        "speed_max_mps": 3.464500876700699,
+        "speed_min_mps": 1.423795389573351,
+        "speed_nominal_mps": 2.3729923159555852,
+        "strike_phase": 0.5194805194805194,
+        "t_backswing_s": 0.3,
+        "t_prepare_max_s": 1.3333333333333335,
+        "t_prepare_min_s": 0.5479559452651489,
+        "t_prepare_s": 0.8,
+        "t_recover_s": 0.74,
+        "v_dir_tol_deg": 10.0,
+        "v_hat_b": [
+          0.5003075264680221,
+          0.5194815153194342,
+          0.692698588276946
+        ],
+        "v_star_cap_mps": 8.593684464514176,
+        "window_dir_cone_deg": 27.310817480926396,
+        "y_b_at_contact_m": -0.4036119582718908
+      },
+      {
+        "L_deep_m": 0.4810855446197942,
+        "band_b_x": [
+          0.6321156959770413,
+          0.694052182952126
+        ],
+        "band_b_y": [
+          -0.3170481892975491,
+          0.03174462113740162
+        ],
+        "band_z_w": [
+          1.1916752463431781,
+          1.540445768707884
+        ],
+        "base_height_at_contact_m": 0.9297370314598083,
+        "clip_index": 1,
+        "contact_frame": 29,
+        "contact_window_frames": [
+          29,
+          40
+        ],
+        "cos_nv": 0.9872449629346184,
+        "cycle_s": 1.28,
+        "deep_frame": 0,
+        "elevation_deg": 44.00585991998142,
+        "enabled": true,
+        "face_sign": -1.0,
+        "family": "backhand",
+        "family_measured_side": "backhand",
+        "fps": 50.0,
+        "frames": 65,
+        "motion_id": "bh_loop_c",
+        "n_hat_b": [
+          0.4020437385163335,
+          -0.6145966119750955,
+          0.6786986347905409
+        ],
+        "npz_filename": "bh_loop_c_full_canonical_v2.npz",
+        "npz_sha256": "a5719377d1e4efcb4f6186bb6cefd5181d53f2b3aee8f4fe4da5c1c95b85762a",
+        "p_contact_b": [
+          0.6701672715810881,
+          0.03174462113740162,
+          0.26193821488336977
+        ],
+        "priority": 0,
+        "retime_binding": [
+          "right_shoulder_pitch_joint",
+          "acc"
+        ],
+        "retime_range": [
+          0.6,
+          1.2201778216612682
+        ],
+        "scope": "full",
+        "slack_b_xy_m": 0.15,
+        "slack_z_w_m": 0.1,
+        "source_sha256": "d5338168e692c8a2c19fbfac8aeb56653fa79a1f45cebc6803a460835fbc1fba",
+        "source_window_frames": [
+          86,
+          96
+        ],
+        "speed_max_mps": 2.5577073291463543,
+        "speed_min_mps": 1.2577055329512763,
+        "speed_nominal_mps": 2.096175888252127,
+        "strike_phase": 0.453125,
+        "t_backswing_s": 0.58,
+        "t_prepare_max_s": 0.9666666666666667,
+        "t_prepare_min_s": 0.4753405525846485,
+        "t_prepare_s": 0.58,
+        "t_recover_s": 0.7,
+        "v_dir_tol_deg": 10.0,
+        "v_hat_b": [
+          0.2541954695575077,
+          -0.6728537721146197,
+          0.6947319372301562
+        ],
+        "v_star_cap_mps": 7.864582987000941,
+        "window_dir_cone_deg": 39.52253256480525,
+        "y_b_at_contact_m": 0.03174462113740162
+      },
+      {
+        "L_deep_m": 0.313831926943576,
+        "band_b_x": [
+          0.4747751535623551,
+          0.6421969313564415
+        ],
+        "band_b_y": [
+          -0.06538873150307112,
+          -0.056590879674717154
+        ],
+        "band_z_w": [
+          1.2360144657958267,
+          1.262032678977424
+        ],
+        "base_height_at_contact_m": 0.9372793436050415,
+        "clip_index": 2,
+        "contact_frame": 34,
+        "contact_window_frames": [
+          27,
+          36
+        ],
+        "cos_nv": 0.6360066139428805,
+        "cycle_s": 1.18,
+        "deep_frame": 0,
+        "elevation_deg": -11.88799441533425,
+        "enabled": true,
+        "face_sign": -1.0,
+        "family": "forehand",
+        "family_measured_side": "forehand",
+        "fps": 50.0,
+        "frames": 60,
+        "motion_id": "s0_highpress",
+        "n_hat_b": [
+          0.4702353565411269,
+          -0.8668851650391406,
+          -0.16549567997896836
+        ],
+        "npz_filename": "s0_highpress_full_canonical_v2.npz",
+        "npz_sha256": "3e0480167e319966bb9d44b7a39872afef017f3aee94d1d8d3730c1c7581e856",
+        "p_contact_b": [
+          0.5758479763858925,
+          -0.057381078287000814,
+          0.31347621740196674
+        ],
+        "priority": 1,
+        "retime_binding": [
+          "right_shoulder_pitch_joint",
+          "acc"
+        ],
+        "retime_range": [
+          0.6,
+          1.2155180207084693
+        ],
+        "scope": "full",
+        "slack_b_xy_m": 0.15,
+        "slack_z_w_m": 0.1,
+        "source_sha256": "2cd32da1864fa686aff544d29a84e988b91911503ae7f7680601f93345378c01",
+        "source_window_frames": [
+          50,
+          59
+        ],
+        "speed_max_mps": 1.6088098888992528,
+        "speed_min_mps": 0.7941354359986627,
+        "speed_nominal_mps": 1.3235590599977711,
+        "strike_phase": 0.576271186440678,
+        "t_backswing_s": 0.68,
+        "t_prepare_max_s": 1.1333333333333335,
+        "t_prepare_min_s": 0.5594322654333496,
+        "t_prepare_s": 0.68,
+        "t_recover_s": 0.5,
+        "v_dir_tol_deg": 10.0,
+        "v_hat_b": [
+          0.9633573593396607,
+          -0.17177587030685937,
+          -0.20599914705269273
+        ],
+        "v_star_cap_mps": 4.755332737155538,
+        "window_dir_cone_deg": 22.937810228598806,
+        "y_b_at_contact_m": -0.057381078287000814
+      },
+      {
+        "L_deep_m": 0.3328001780686296,
+        "band_b_x": [
+          0.5466321267743832,
+          0.7410523205667188
+        ],
+        "band_b_y": [
+          -0.11910779495005286,
+          -0.03788490297687736
+        ],
+        "band_z_w": [
+          1.1760472959699246,
+          1.1853254471758528
+        ],
+        "base_height_at_contact_m": 0.9308186173439026,
+        "clip_index": 3,
+        "contact_frame": 33,
+        "contact_window_frames": [
+          25,
+          35
+        ],
+        "cos_nv": 0.5663327143348593,
+        "cycle_s": 1.24,
+        "deep_frame": 0,
+        "elevation_deg": -4.72420917004558,
+        "enabled": true,
+        "face_sign": -1.0,
+        "family": "backhand",
+        "family_measured_side": "forehand",
+        "fps": 50.0,
+        "frames": 63,
+        "motion_id": "bh_block",
+        "n_hat_b": [
+          0.33909963405083604,
+          -0.8244055955873703,
+          0.453174196252194
+        ],
+        "npz_filename": "bh_block_full_canonical_v2.npz",
+        "npz_sha256": "251eed44f4075ab58da536762289f93d91f90a827ed5d10115abfe3a4bcb1226",
+        "p_contact_b": [
+          0.698127537227865,
+          -0.09013194590865774,
+          0.24905349314427982
+        ],
+        "priority": 2,
+        "retime_binding": [
+          "right_shoulder_pitch_joint",
+          "acc"
+        ],
+        "retime_range": [
+          0.6,
+          1.4330423298248434
+        ],
+        "scope": "full",
+        "slack_b_xy_m": 0.15,
+        "slack_z_w_m": 0.1,
+        "source_sha256": "55870b981584a458bfd479171046445845cb74171618b71338fd9dc9f66a5fe0",
+        "source_window_frames": [
+          38,
+          47
+        ],
+        "speed_max_mps": 1.7380551398695971,
+        "speed_min_mps": 0.7277057084902864,
+        "speed_nominal_mps": 1.2128428474838107,
+        "strike_phase": 0.532258064516129,
+        "t_backswing_s": 0.66,
+        "t_prepare_max_s": 1.1,
+        "t_prepare_min_s": 0.4605586215172513,
+        "t_prepare_s": 0.66,
+        "t_recover_s": 0.58,
+        "v_dir_tol_deg": 10.0,
+        "v_hat_b": [
+          0.9338229165211432,
+          -0.34812591857462133,
+          -0.08235961022565631
+        ],
+        "v_star_cap_mps": 4.123609641680922,
+        "window_dir_cone_deg": 31.55577080576093,
+        "y_b_at_contact_m": -0.09013194590865774
+      },
+      {
+        "L_deep_m": 0.42969225517235704,
+        "band_b_x": [
+          0.5496600966476682,
+          0.7404734842442708
+        ],
+        "band_b_y": [
+          -0.1190854245524865,
+          -0.03840623291564226
+        ],
+        "band_z_w": [
+          1.1742536730668862,
+          1.1871687306519203
+        ],
+        "base_height_at_contact_m": 0.9311092495918274,
+        "clip_index": 4,
+        "contact_frame": 113,
+        "contact_window_frames": [
+          73,
+          114
+        ],
+        "cos_nv": 0.7214739798055325,
+        "cycle_s": 2.92,
+        "deep_frame": 12,
+        "elevation_deg": 5.974467127146361,
+        "enabled": false,
+        "face_sign": 1.0,
+        "family": "forehand",
+        "family_measured_side": "forehand",
+        "fps": 50.0,
+        "frames": 147,
+        "motion_id": "fh_block_syn",
+        "n_hat_b": [
+          0.2762393766296091,
+          -0.8309112916130685,
+          0.48298885315003603
+        ],
+        "npz_filename": "fh_block_syn_full_canonical_v2.npz",
+        "npz_sha256": "b19f03a7a7fc8bf3acd4fe3459ca65e7107242de207ce219cb988c471c566f37",
+        "p_contact_b": [
+          0.7315017908692174,
+          -0.11106869050868147,
+          0.24439090756229453
+        ],
+        "priority": 2,
+        "retime_binding": [
+          "right_wrist_roll_joint",
+          "vel"
+        ],
+        "retime_range": [
+          0.6,
+          1.1969857611362273
+        ],
+        "scope": "full",
+        "slack_b_xy_m": 0.15,
+        "slack_z_w_m": 0.1,
+        "source_sha256": "55870b981584a458bfd479171046445845cb74171618b71338fd9dc9f66a5fe0",
+        "source_window_frames": [
+          34,
+          48
+        ],
+        "speed_max_mps": 0.6005772496965056,
+        "speed_min_mps": 0.30104480898406677,
+        "speed_nominal_mps": 0.501741348306778,
+        "strike_phase": 0.773972602739726,
+        "t_backswing_s": 2.02,
+        "t_prepare_max_s": 3.7666666666666666,
+        "t_prepare_min_s": 1.8880759265295823,
+        "t_prepare_s": 2.26,
+        "t_recover_s": 0.66,
+        "v_dir_tol_deg": 10.0,
+        "v_hat_b": [
+          0.8431702927480361,
+          -0.5274752276466282,
+          0.10408526142700915
+        ],
+        "v_star_cap_mps": 6.685853033671351,
+        "window_dir_cone_deg": 49.19393678569158,
+        "y_b_at_contact_m": -0.11106869050868147
+      }
+    ],
+    "upper": [
+      {
+        "L_deep_m": 0.5081570674857316,
+        "band_b_x": [
+          0.6579249287914084,
+          0.8122932328278245
+        ],
+        "band_b_y": [
+          -0.3015641435698844,
+          0.1221984462769653
+        ],
+        "band_z_w": [
+          0.6996242709861826,
+          1.1607484601858693
+        ],
+        "base_height_at_contact_m": 0.920682966709137,
+        "clip_index": 0,
+        "contact_frame": 45,
+        "contact_window_frames": [
+          38,
+          51
+        ],
+        "cos_nv": -0.7857679065169779,
+        "cycle_s": 1.58,
+        "deep_frame": 32,
+        "elevation_deg": 45.3781274495358,
+        "enabled": true,
+        "face_sign": -1.0,
+        "family": "forehand",
+        "family_measured_side": "forehand",
+        "fps": 50.0,
+        "frames": 80,
+        "motion_id": "fh_loop",
+        "n_hat_b": [
+          0.08733984361639459,
+          -0.9758118702886207,
+          -0.2004069497769178
+        ],
+        "npz_filename": "fh_loop_upper_canonical_v2.npz",
+        "npz_sha256": "99ef7b96d37ef04690cd586b81a670ec5213934449484e6207aa8d4423191785",
+        "p_contact_b": [
+          0.7983391511393283,
+          -0.08433267307156075,
+          -0.00806782532594097
+        ],
+        "priority": 0,
+        "retime_binding": [
+          "waist_roll_joint",
+          "acc"
+        ],
+        "retime_range": [
+          0.6,
+          1.2264883241594757
+        ],
+        "scope": "upper",
+        "slack_b_xy_m": 0.15,
+        "slack_z_w_m": 0.1,
+        "source_sha256": "faa8df8c552e4bd99134cefe5457f86e646499ff12737db160fa43eec763dcc1",
+        "source_window_frames": [
+          46,
+          57
+        ],
+        "speed_max_mps": 3.2926557819493003,
+        "speed_min_mps": 1.6107723410440726,
+        "speed_nominal_mps": 2.6846205684067876,
+        "strike_phase": 0.569620253164557,
+        "t_backswing_s": 0.26,
+        "t_prepare_max_s": 1.5,
+        "t_prepare_min_s": 0.7338023381647589,
+        "t_prepare_s": 0.9,
+        "t_recover_s": 0.68,
+        "v_dir_tol_deg": 10.0,
+        "v_hat_b": [
+          0.19044725680553307,
+          0.6761142396174349,
+          0.7117579485764701
+        ],
+        "v_star_cap_mps": 8.515864747380025,
+        "window_dir_cone_deg": 27.216507940907356,
+        "y_b_at_contact_m": -0.08433267307156075
+      },
+      {
+        "L_deep_m": 0.5087875069976789,
+        "band_b_x": [
+          0.6475919037654048,
+          0.702086680628357
+        ],
+        "band_b_y": [
+          -0.21675562893639805,
+          0.17190856436139165
+        ],
+        "band_z_w": [
+          1.1779105132706433,
+          1.518700948433847
+        ],
+        "base_height_at_contact_m": 0.920682966709137,
+        "clip_index": 1,
+        "contact_frame": 22,
+        "contact_window_frames": [
+          22,
+          35
+        ],
+        "cos_nv": 0.9829174539299994,
+        "cycle_s": 1.2,
+        "deep_frame": 0,
+        "elevation_deg": 43.97774888926287,
+        "enabled": true,
+        "face_sign": -1.0,
+        "family": "backhand",
+        "family_measured_side": "backhand",
+        "fps": 50.0,
+        "frames": 61,
+        "motion_id": "bh_loop_c",
+        "n_hat_b": [
+          0.5253898909113643,
+          -0.5137960405780421,
+          0.6782175839746944
+        ],
+        "npz_filename": "bh_loop_c_upper_canonical_v2.npz",
+        "npz_sha256": "d907416d10808fb36ddb15d8f51ad0a59744cd57178f80c03c60f2c8847323fc",
+        "p_contact_b": [
+          0.6475919037654048,
+          0.17190856436139165,
+          0.25722754656150637
+        ],
+        "priority": 0,
+        "retime_binding": [
+          "right_shoulder_pitch_joint",
+          "acc"
+        ],
+        "retime_range": [
+          0.6,
+          1.253717916756141
+        ],
+        "scope": "upper",
+        "slack_b_xy_m": 0.15,
+        "slack_z_w_m": 0.1,
+        "source_sha256": "d5338168e692c8a2c19fbfac8aeb56653fa79a1f45cebc6803a460835fbc1fba",
+        "source_window_frames": [
+          86,
+          96
+        ],
+        "speed_max_mps": 2.2251481263442776,
+        "speed_min_mps": 1.0649037219320945,
+        "speed_nominal_mps": 1.774839536553491,
+        "strike_phase": 0.36666666666666664,
+        "t_backswing_s": 0.44,
+        "t_prepare_max_s": 0.7333333333333334,
+        "t_prepare_min_s": 0.35095613943083165,
+        "t_prepare_s": 0.44,
+        "t_recover_s": 0.76,
+        "v_dir_tol_deg": 10.0,
+        "v_hat_b": [
+          0.37216243139456084,
+          -0.615900143104636,
+          0.6943789587697612
+        ],
+        "v_star_cap_mps": 8.616832112285552,
+        "window_dir_cone_deg": 43.1489601845201,
+        "y_b_at_contact_m": 0.17190856436139165
+      },
+      {
+        "L_deep_m": 0.4905455753916108,
+        "band_b_x": [
+          0.40702162671775516,
+          0.5776332551986935
+        ],
+        "band_b_y": [
+          -0.026445857942948806,
+          -0.010199127869783026
+        ],
+        "band_z_w": [
+          1.3301868711175318,
+          1.3391289265580466
+        ],
+        "base_height_at_contact_m": 0.920682966709137,
+        "clip_index": 2,
+        "contact_frame": 27,
+        "contact_window_frames": [
+          18,
+          27
+        ],
+        "cos_nv": 0.6228679847410301,
+        "cycle_s": 0.94,
+        "deep_frame": 0,
+        "elevation_deg": -0.7876056964634637,
+        "enabled": true,
+        "face_sign": -1.0,
+        "family": "forehand",
+        "family_measured_side": "forehand",
+        "fps": 50.0,
+        "frames": 48,
+        "motion_id": "s0_highpress",
+        "n_hat_b": [
+          0.49637742189765705,
+          -0.8593102240370653,
+          -0.12326959841584674
+        ],
+        "npz_filename": "s0_highpress_upper_canonical_v2.npz",
+        "npz_sha256": "34cd428a47d70394ed85ef975ff3d65c51bcabe6995fc43087bf1e6d6a762b70",
+        "p_contact_b": [
+          0.5776332551986935,
+          -0.013444457983938313,
+          0.4160664428330294
+        ],
+        "priority": 1,
+        "retime_binding": [
+          "right_shoulder_pitch_joint",
+          "acc"
+        ],
+        "retime_range": [
+          0.6,
+          1.2277137349405556
+        ],
+        "scope": "upper",
+        "slack_b_xy_m": 0.15,
+        "slack_z_w_m": 0.1,
+        "source_sha256": "2cd32da1864fa686aff544d29a84e988b91911503ae7f7680601f93345378c01",
+        "source_window_frames": [
+          50,
+          59
+        ],
+        "speed_max_mps": 2.048568722807945,
+        "speed_min_mps": 1.0011627293102496,
+        "speed_nominal_mps": 1.668604548850416,
+        "strike_phase": 0.574468085106383,
+        "t_backswing_s": 0.54,
+        "t_prepare_max_s": 0.9000000000000001,
+        "t_prepare_min_s": 0.43984194737883764,
+        "t_prepare_s": 0.54,
+        "t_recover_s": 0.4,
+        "v_dir_tol_deg": 10.0,
+        "v_hat_b": [
+          0.9882856758170008,
+          -0.1519949794116303,
+          -0.01374587969509161
+        ],
+        "v_star_cap_mps": 6.169773932668731,
+        "window_dir_cone_deg": 27.182043699864675,
+        "y_b_at_contact_m": -0.013444457983938313
+      },
+      {
+        "L_deep_m": 0.33790953195439355,
+        "band_b_x": [
+          0.5366074559895159,
+          0.7376736248522491
+        ],
+        "band_b_y": [
+          0.0888413715017479,
+          0.1286508128155454
+        ],
+        "band_z_w": [
+          1.1889584761752245,
+          1.1960244326264258
+        ],
+        "base_height_at_contact_m": 0.920682966709137,
+        "clip_index": 3,
+        "contact_frame": 21,
+        "contact_window_frames": [
+          16,
+          23
+        ],
+        "cos_nv": 0.49004864749189203,
+        "cycle_s": 0.84,
+        "deep_frame": 0,
+        "elevation_deg": -2.7441356952257747,
+        "enabled": true,
+        "face_sign": -1.0,
+        "family": "backhand",
+        "family_measured_side": "backhand",
+        "fps": 50.0,
+        "frames": 43,
+        "motion_id": "bh_block",
+        "n_hat_b": [
+          0.5785638518788999,
+          -0.6759972036616413,
+          0.45638980043236266
+        ],
+        "npz_filename": "bh_block_upper_canonical_v2.npz",
+        "npz_sha256": "b859adb6264fd0a8b049fdb3de188b470e3b2a5f753080a90f2ba28075361498",
+        "p_contact_b": [
+          0.6698158764313413,
+          0.12701829873773043,
+          0.27251031067842946
+        ],
+        "priority": 2,
+        "retime_binding": [
+          "waist_roll_joint",
+          "acc"
+        ],
+        "retime_range": [
+          0.6,
+          1.2031757069450335
+        ],
+        "scope": "upper",
+        "slack_b_xy_m": 0.15,
+        "slack_z_w_m": 0.1,
+        "source_sha256": "55870b981584a458bfd479171046445845cb74171618b71338fd9dc9f66a5fe0",
+        "source_window_frames": [
+          38,
+          47
+        ],
+        "speed_max_mps": 1.9480846899235194,
+        "speed_min_mps": 0.9714714211791428,
+        "speed_nominal_mps": 1.6191190352985714,
+        "strike_phase": 0.5,
+        "t_backswing_s": 0.42,
+        "t_prepare_max_s": 0.7,
+        "t_prepare_min_s": 0.3490761969142612,
+        "t_prepare_s": 0.42,
+        "t_recover_s": 0.42,
+        "v_dir_tol_deg": 10.0,
+        "v_hat_b": [
+          0.9944341855255093,
+          0.09385387239566109,
+          -0.047875894712853015
+        ],
+        "v_star_cap_mps": 4.7798793867322775,
+        "window_dir_cone_deg": 21.23316594746846,
+        "y_b_at_contact_m": 0.12701829873773043
+      },
+      {
+        "L_deep_m": 0.42884829048340917,
+        "band_b_x": [
+          0.533431515688814,
+          0.7276302310737425
+        ],
+        "band_b_y": [
+          0.08743236180150317,
+          0.12889720136692473
+        ],
+        "band_z_w": [
+          1.1884718750545042,
+          1.1973912061596246
+        ],
+        "base_height_at_contact_m": 0.920682966709137,
+        "clip_index": 4,
+        "contact_frame": 89,
+        "contact_window_frames": [
+          61,
+          90
+        ],
+        "cos_nv": 0.5259460993929732,
+        "cycle_s": 2.4,
+        "deep_frame": 12,
+        "elevation_deg": -1.7975253397093518,
+        "enabled": false,
+        "face_sign": 1.0,
+        "family": "forehand",
+        "family_measured_side": "backhand",
+        "fps": 50.0,
+        "frames": 121,
+        "motion_id": "fh_block_syn",
+        "n_hat_b": [
+          0.5191957721400208,
+          -0.6997655232782718,
+          0.49067704513357263
+        ],
+        "npz_filename": "fh_block_syn_upper_canonical_v2.npz",
+        "npz_sha256": "99f7cbc710248f218eb3b40f842f3791223927a232706581d6d5e0e0f51333cd",
+        "p_contact_b": [
+          0.7142347442675488,
+          0.12823331884964034,
+          0.2693764558155163
+        ],
+        "priority": 2,
+        "retime_binding": [
+          "right_wrist_roll_joint",
+          "vel"
+        ],
+        "retime_range": [
+          0.6,
+          1.1880621661411488
+        ],
+        "scope": "upper",
+        "slack_b_xy_m": 0.15,
+        "slack_z_w_m": 0.1,
+        "source_sha256": "55870b981584a458bfd479171046445845cb74171618b71338fd9dc9f66a5fe0",
+        "source_window_frames": [
+          34,
+          48
+        ],
+        "speed_max_mps": 0.7300158239816779,
+        "speed_min_mps": 0.3686755683935891,
+        "speed_nominal_mps": 0.6144592806559819,
+        "strike_phase": 0.7416666666666667,
+        "t_backswing_s": 1.54,
+        "t_prepare_max_s": 2.966666666666667,
+        "t_prepare_min_s": 1.498238097911558,
+        "t_prepare_s": 1.78,
+        "t_recover_s": 0.62,
+        "v_dir_tol_deg": 10.0,
+        "v_hat_b": [
+          0.9989827588735902,
+          -0.032396324006056014,
+          -0.031367589391040195
+        ],
+        "v_star_cap_mps": 7.046727948935451,
+        "window_dir_cone_deg": 28.405009515259163,
+        "y_b_at_contact_m": 0.12823331884964034
+      }
+    ]
+  }
+}

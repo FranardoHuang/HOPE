@@ -6,6 +6,8 @@ read .racket_command for the latest desired racket state.
 See HOPE_7DOF_Racket_Model_based_Planner_Reference_Setup.md, Section 6.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass, replace
 from typing import Optional
 

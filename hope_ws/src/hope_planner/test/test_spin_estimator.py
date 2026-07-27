@@ -2,6 +2,8 @@
 and no aliasing at venue-max spin (15 rev/s over a 100 ms window = 1.5 rev,
 which an endpoint finite difference would fold)."""
 
+from __future__ import annotations
+
 import numpy as np
 
 from hope_planner.spin_estimator import SpinFromQuats

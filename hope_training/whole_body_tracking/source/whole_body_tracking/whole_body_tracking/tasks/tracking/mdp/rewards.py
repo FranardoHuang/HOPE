@@ -141,6 +141,28 @@ def motion_global_body_angular_velocity_error_exp(
     )
 
 
+def terminated_by_term(env: ManagerBasedRLEnv, term_name: str) -> torch.Tensor:
+    """1.0 on the step ONE named termination fired, 0.0 otherwise.
+
+    The narrow sibling of IsaacLab's ``is_terminated`` (which charges for every terminal reason at
+    once, and is what ``death_penalty`` uses).  This one is addressed to a single term so its
+    penalty can be priced, ablated and read off independently — e.g. ``table_hit_penalty`` against
+    ``robot_hit_table``.  Time-outs are excluded exactly as ``is_terminated`` excludes them,
+    because ``TerminationManager.get_term`` reports the term's own mask and every non-``time_out``
+    term here has ``time_out=False``.
+
+    Fails loud on a missing term: a silently-zero penalty for a termination that is not actually
+    wired would look identical to "the robot never hits the table".
+    """
+    tm = env.termination_manager
+    if term_name not in tuple(tm.active_terms):
+        raise RuntimeError(
+            f"terminated_by_term({term_name!r}) but that termination is not active; "
+            f"active terms are {tuple(tm.active_terms)}"
+        )
+    return tm.get_term(term_name).float()
+
+
 def feet_contact_time(env: ManagerBasedRLEnv, sensor_cfg: SceneEntityCfg, threshold: float) -> torch.Tensor:
     contact_sensor: ContactSensor = env.scene.sensors[sensor_cfg.name]
     first_air = contact_sensor.compute_first_air(env.step_dt, env.physics_dt)[:, sensor_cfg.body_ids]

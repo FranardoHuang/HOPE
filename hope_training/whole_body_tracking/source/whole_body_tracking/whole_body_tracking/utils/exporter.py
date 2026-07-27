@@ -559,6 +559,13 @@ def attach_onnx_metadata(
 
         # Bind a bank-trained policy to the exact train-bank bytes and its schema-v3 source family.
         # The held-out exam can then prove it is the same family instead of trusting a filename.
+        # CONTINUOUS ARMS (racket.target_mode='solved') have no train bank, so none of the
+        # stage1_* provenance below is stamped and the FORMAL deploy_parity_face179 export refuses
+        # them outright — derive_stage1_normal_envelope re-reads the NPZ rows to build the
+        # deploy-side normal envelope gate, and there is no code path that derives that envelope
+        # from an inline solver. That is a KNOWN, DELIBERATE consequence recorded in the receipt,
+        # not an oversight: a loud refusal beats a formally-exported policy with no envelope gate.
+        # The fix (deriving the envelope analytically from the cq_* distribution) is separate work.
         question_bank_path = str(getattr(rt_cfg, "question_bank", "") or "").strip()
         trained_bank_contract = (
             training_contract.get("question_bank") if training_contract is not None else None

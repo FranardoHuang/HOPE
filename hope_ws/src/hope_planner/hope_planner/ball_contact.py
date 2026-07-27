@@ -18,6 +18,8 @@ configs/ball_physics_venue.yaml. Validity envelope: paddle u_n 1.4-7.2 m/s
 (the e(u_n) clamp keeps far-out contacts physical, not accurate).
 """
 
+from __future__ import annotations
+
 from typing import Tuple
 
 import numpy as np

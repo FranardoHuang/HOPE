@@ -26,6 +26,13 @@ face)、帧数、fps、触球帧号/相位全部保持,只重解时间律(哪一
 分桶约定(Franco 拍板,写死在每份 manifest 里):
     train 0.80/1.00/1.20;interpolation 0.90/1.10;OOD 0.65/1.35。
 
+减速档不再出资产(2026-07-27):r < 1 的档由**运行时慢放**交付(R14 分数时钟按
+    speed_scale 播放:位置逐帧不动、qd×s、qdd×s²),bake 模式默认拒绝 r<1,理由和
+    授权办法见拒绝信;真要历史对照用 --force-slowdown-bake。r ≥ 1 仍必须烤——
+    时钟只往下走,round() 在 s>1 会跳过资产帧(可能正好跳掉触球帧)。
+    每档交付方式由 canonical_playback_speed_gate.py 的证书判定,写进 --envelope
+    manifest 的 delivery_plan(无证书 = 一律未授权,fail closed)。
+
 USAGE(测试解释器即可,fk 需 mujoco;interp 只给 link_origin 测试 clip 用)
     python bake_topp_strike_speed.py \
         --motion hope_forehand_v4rg_cal.npz --phase 0.471 --speed-ratio 1.2 \
@@ -56,6 +63,7 @@ sys.path.insert(0, _HERE)
 import synthesize_timing as v1     # noqa: E402  路径/拍面/干净拍速/重采样口径
 import synthesize_timing_v2 as v2  # noqa: E402  resample_at_s + 锁窗常数
 import topp_mintime as v3          # noqa: E402  内容 SHA / O_EXCL 写盘 / 回读校验
+import canonical_playback_speed_gate as pbg  # noqa: E402  慢放门 + 离线交付计划
 
 ISAAC_JOINT_NAMES = v1.ISAAC_JOINT_NAMES
 
@@ -76,6 +84,11 @@ SOLVER_REL_TOL = 1e-4                 # ρ 二分收敛的相对拍速残差
 SOLVER_MAX_ITERS = 60
 FACE_DOT_GATE = 0.99                  # 全程拍面法向 vs 源(防镜像/翻面;同路径应≈1)
 EXIT_INFEASIBLE = 3
+
+#: r < 1 的减速档不再烤成独立资产:运行时 R14 分数时钟(mdp/commands.py)按
+#: speed_scale 均匀慢放,位置逐帧不动、qd×s、qdd×s²,与烤入的减速片段等价而且免费。
+#: 由 canonical_playback_speed_gate.py 验过才算数;越界照样是不可行,不打折交货。
+SLOWDOWN_BAKE_EPS = 1e-9
 
 
 def bucket_of(ratio: float) -> str:
@@ -539,6 +552,12 @@ def main(argv=None) -> int:
                     help="触球锁窗半宽秒数(恒速段;默认 0.10 = 登记口径)")
     ap.add_argument("--speed-tol", type=float, default=DEFAULT_SPEED_TOL,
                     help="实际 vs 目标拍速验收误差(默认 2%%)")
+    ap.add_argument("--playback-certificate", default=None,
+                    help="canonical_playback_speed_gate.py 的证书 JSON;交付计划据此"
+                         "判定哪几档由运行时慢放覆盖(缺席 = 一律未授权,fail closed)")
+    ap.add_argument("--force-slowdown-bake", action="store_true",
+                    help="强行烤 r<1 的减速档(历史对照/取证用;正常产线不需要——"
+                         "运行时慢放就是同一件事,而且不新增资产与 SHA 登记行)")
     ap.add_argument(
         "--allow-canonical-v2-legacy-comparator",
         action="store_true",
@@ -555,6 +574,26 @@ def main(argv=None) -> int:
     else:
         if args.speed_ratio is None or args.out is None:
             raise SystemExit("bake 模式必须给 --speed-ratio 和 --out")
+        if (float(args.speed_ratio) < 1.0 - SLOWDOWN_BAKE_EPS
+                and not args.force_slowdown_bake):
+            raise SystemExit(
+                f"refusing to bake a slowdown variant (r={args.speed_ratio} < 1): the "
+                f"runtime already plays the native clip back slowly (R14 fractional clock, "
+                f"speed_scale={args.speed_ratio} gives exactly q(t)->q({args.speed_ratio}t), "
+                f"qd*{args.speed_ratio}, qdd*{args.speed_ratio}^2), so this asset would be a "
+                f"duplicate that still costs an npz, a content SHA, and one allow-list row in "
+                f"every question-bank family.\n"
+                f"  authorise the ratio instead:  python canonical_playback_speed_gate.py "
+                f"--certify --clip {Path(args.motion).name} --ratio {args.speed_ratio} ...\n"
+                f"  if that gate REFUSES the ratio, a bake does not rescue it either — a "
+                f"retime keeps the same poses, so the s-independent gravity term c0(q) is "
+                f"identical; the source clip is the problem.\n"
+                f"  --force-slowdown-bake still produces it for historical comparators.")
+
+    playback_certificate = None
+    if args.playback_certificate is not None:
+        playback_certificate = json.loads(
+            Path(args.playback_certificate).expanduser().read_text(encoding="utf-8"))
 
     manifest_path = Path(args.manifest).expanduser().absolute()
     if manifest_path.exists() or manifest_path.is_symlink():
@@ -638,6 +677,9 @@ def main(argv=None) -> int:
         manifest = _base_manifest("envelope", args, src, limits_block)
         v3._mark_legacy_comparator(manifest, legacy_comparator)
         manifest["envelope"] = envl
+        plan = pbg.plan_offline_speed_ladder(
+            [row["ratio"] for row in envl["ladder"]], playback_certificate)
+        manifest["delivery_plan"] = plan
         _write_manifest(manifest_path, manifest)
         print(f"[envelope] {Path(args.motion).name}: max feasible r = "
               f"{envl['max_feasible_ratio']} (native v0 {v0:.3f} m/s)")
@@ -646,6 +688,9 @@ def main(argv=None) -> int:
                   f"{'FEASIBLE  ' if row['feasible'] else 'INFEASIBLE'} "
                   f"actual={row['actual_mps']} m/s vel_util={row['vel_util_max']} "
                   f"acc_util={row['acc_util_max']}")
+        print(f"[delivery] bakes required {plan['bakes_required']} of "
+              f"{plan['bakes_without_this_gate']} ladder variants; "
+              f"{plan['bakes_saved']} covered by runtime slow playback")
         return 0
 
     res = bake(data, args.phase, args.speed_ratio, vlim, env, **bake_kw)
@@ -670,6 +715,14 @@ def main(argv=None) -> int:
         offending=res.kin.get("offending", []),
         per_joint=res.kin.get("per_joint", []))
     manifest["contact"] = res.contact
+    manifest["delivery"] = dict(
+        kind=("forced_slowdown_bake" if res.ratio < 1.0 - SLOWDOWN_BAKE_EPS else "bake"),
+        runtime_playback_max_ratio=pbg.RUNTIME_PLAYBACK_MAX_RATIO,
+        rationale=("r<1 baked under --force-slowdown-bake; the runtime clock already "
+                   "delivers uniform slow playback, so this asset is a duplicate"
+                   if res.ratio < 1.0 - SLOWDOWN_BAKE_EPS else
+                   "r>=1: above native, the runtime clock cannot deliver it "
+                   "(round() would skip asset frames), so a bake is required"))
     if res.warp is not None:
         manifest["warp"] = dict(frames=res.T, window_half_frames=res.warp.w,
                                 pre_edge_rate=round(res.warp.m0, 4),

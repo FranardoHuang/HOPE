@@ -6,6 +6,8 @@ is exactly what the polyfit estimator cannot reject, so the RMSE comparison
 below is the KF's reason to exist.
 """
 
+from __future__ import annotations
+
 import numpy as np
 
 from hope_planner.ball_kalman_estimator import BallKalmanEstimator

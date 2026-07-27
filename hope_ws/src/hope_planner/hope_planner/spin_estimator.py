@@ -17,6 +17,8 @@ quaternion algebra mirrors quaternion_utils (which is xyzw; the mocap spin
 channel is wxyz, so the helpers here are wxyz).
 """
 
+from __future__ import annotations
+
 from typing import List, Optional, Tuple
 
 import numpy as np

@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import pytest
 
 from hope_planner.flat_command_wire import MAX_EXACT_FLOAT64_INTEGER

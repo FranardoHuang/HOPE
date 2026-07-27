@@ -62,7 +62,7 @@ Canonical ignored root on Pod 1:
 ```
 
 The tracked, reviewable source of truth is
-[`configs/phase1_fresh_v3_asset_manifest_20260711.json`](../configs/phase1_fresh_v3_asset_manifest_20260711.json),
+[`configs/phase1_fresh_v3_asset_manifest_20260711.json`](../../configs/phase1_fresh_v3_asset_manifest_20260711.json,
 SHA-256 `0c2a565d7b7040afdda97baecdaf2cea923beaf3cf9c45a574d218bb82386e46`. It binds the source motion
 hashes, frame counts, strike phases, body-order hash, bank counts, physics hashes, tool hashes, and
 validation results below. All four remote NPZ files (two motions and two banks) are mode `0444`.
@@ -151,7 +151,7 @@ Within each motion family, the only intended scientific variable is
 | M2-S1 | same M2f checkpoint | same legacy v4rg bank | `shared_plus_y` | Pod 2 PGID `162194`; run `00-53-31`; contract `7268eb38...28f2` |
 
 The M3c and M2f checkpoint paths are recorded in
-[setup_local_sync.md](operations/setup_local_sync.md). Each pair keeps its checkpoint, motion,
+[setup_local_sync.md](../operations/setup_local_sync.md. Each pair keeps its checkpoint, motion,
 train bank, seed (`1`), environment count (`4096`), additional iteration budget (`4000`), plant,
 timing, noise, target sampler, reward scales, and face-guidance value fixed. M3 keeps its inherited
 generic racket guidance `-0.95`; M2 keeps `0.0`. Both use the 179-D face-command actor contract and
@@ -225,7 +225,7 @@ Kit boots, and checkpoint exams during training. The target is therefore
 `4/4/4 + 4/4/4 = 24` live arms, not six.
 
 The pre-registered scale-out matrix is
-[`configs/phase1_scaleout_matrix_20260711.json`](../configs/phase1_scaleout_matrix_20260711.json).
+[`configs/phase1_scaleout_matrix_20260711.json`](../../configs/phase1_scaleout_matrix_20260711.json.
 It uses a second paired continuation seed for M3/M2 and a four-seed fresh 2x2 factorial over
 face pairing and plant friction. `SZ` (`shared_plus_y`, zero friction) is the formal target cell;
 the other fresh cells are causal diagnostics and cannot silently replace it. Guidance, N1, R8 and
@@ -251,7 +251,7 @@ Both Pods reproduced exactly four protected zero dimensions and rejected negativ
 One Isaac export runs per Pod at a time, shares the training Kit boot lock, and completed exports run
 MuJoCo BankExam on CPU with one BLAS/OpenMP thread. Worker state binds a clean evaluator commit,
 judge SHA, frozen training commit and checkpoint SHA. Full rationale, early-stop protection and peak-density rules are in
-[`phase1_ablation_acceleration_2026-07-11.md`](research/phase1_ablation_acceleration_2026-07-11.md).
+[`phase1_ablation_acceleration_2026-07-11.md`](../research/phase1_ablation_acceleration_2026-07-11.md.
 
 Two later preflights were also evaluator failures and are retained separately. The first reached
 MuJoCo only after ONNX and both sidecars succeeded, then found that
@@ -565,7 +565,7 @@ This is a contract boundary, not a reason to mutate the live 24-arm pool. A sepa
 timing/carry-state pair must compare complete-clip wrap against post-strike event-driven next-task
 installation, with a longer/opportunity-count episode and immutable interval schedule. The source
 SHA, reproducible filter, proposed contract fields and checkpoint metrics are in
-[`phase1_continuous_rally_timing_2026-07-11.md`](research/phase1_continuous_rally_timing_2026-07-11.md).
+[`phase1_continuous_rally_timing_2026-07-11.md`](../research/phase1_continuous_rally_timing_2026-07-11.md.
 The content-addressed preregistration uses a separate balanced engineering
 event grid rather than fitting that median. Its design-check passes and its
 launch-check intentionally fails on missing implementation/schedule/judge/
@@ -603,7 +603,7 @@ fresh lineage and hard-contract SHA. TERM did not exit those eight trainers; onl
 no live child or Kit-lock holder did the operator send KILL to the same recorded PGID. No broad
 pattern signal, worker/judge signal, checkout mutation or real-robot command occurred. Full PGID,
 checkpoint SHA and curve evidence is in
-[`EXP-P1-FACE-PLANT-SCALEOUT`](experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md).
+[`EXP-P1-FACE-PLANT-SCALEOUT`](../experiments/2026-07/EXP-P1-FACE-PLANT-SCALEOUT.md.
 
 Before the second wave, two no-clobber audits revalidated all eight current process groups, latest
 checkpoint filename/embedded iteration, 76 tensors with 1,762,715 finite floating elements,
@@ -656,7 +656,7 @@ forehand parsed return is `38/50` / `48/50`, but raw-A signed normal error is
 both. Seed1 is directionally identical (`164.86 deg`, signed `0/50`). Therefore neither high parsed
 seed is a baseline candidate; the next evidence is an `n/-n` negative control, signed scorer repair
 and same-paper rerun. Checked-in immutable results are linked from
-[`EXP-P1-FRESH-SZ-STABILITY`](experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md).
+[`EXP-P1-FRESH-SZ-STABILITY`](../experiments/2026-07/EXP-P1-FRESH-SZ-STABILITY.md.
 
 The aggregate's frozen `continue_all_arms_unmodified` field only proves that the q50 contract owns
 no signal surface. It does not overwrite the separate human-owner resource disposition recorded

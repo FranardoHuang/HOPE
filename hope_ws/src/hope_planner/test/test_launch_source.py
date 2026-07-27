@@ -1,7 +1,18 @@
 """Dependency-light guards for planner launch-file composition."""
 
+from __future__ import annotations
+
 import ast
+import sys
 from pathlib import Path
+
+import pytest
+
+# ``ast.unparse`` is 3.9+. The HOST test environment is python 3.8 while the pods are 3.10+, so
+# skip rather than fail there — the assertion is a source-shape guard, not a runtime behaviour.
+requires_unparse = pytest.mark.skipif(
+    not hasattr(ast, "unparse"), reason="ast.unparse requires python 3.9+ (host is 3.8)"
+)
 
 
 def _launch_tree() -> ast.Module:
@@ -27,6 +38,7 @@ def _keyword(call: ast.Call, name: str) -> ast.expr:
     return next(keyword.value for keyword in call.keywords if keyword.arg == name)
 
 
+@requires_unparse
 def test_task_revision_launch_is_explicit_opt_in_with_overlay_loaded_last():
     tree = _launch_tree()
 

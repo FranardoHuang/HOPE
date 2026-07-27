@@ -20,6 +20,8 @@ KeyValue) imports rclpy and is NOT testable here — left for pod colcon test /
 a live shadow session (see the branch notes).
 """
 
+from __future__ import annotations
+
 import csv
 import math
 import time

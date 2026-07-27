@@ -45,7 +45,7 @@ import numpy as np
 from .ball_contact import predict_paddle_contact
 from .constants import BallPhysics, PlannerConfig
 from .fastmath import cross3, cross_rows
-from .strike_spec_planner import StrikeSpec, StrikeSpecPlanner
+from .strike_spec_planner import StrikeSpec, StrikeSpecPlanner, compute_net_clearance
 
 
 def batch_integrate_to_table_plane(
@@ -268,6 +268,152 @@ class FastStrikeSpecPlanner(StrikeSpecPlanner):
                     omega_plus=fwd["omega_plus"], resid_m=resid,
                     iterations=iterations, q=q.copy(),
                     phi0=phi0, theta0=theta0)
+
+    def _forward_batch_fixed_dir(self, Q, d_hat, p_strike, v_ball, omega_ball):
+        """Batched twin of ``StrikeSpecPlanner._forward_fixed_dir`` (velocity = s * d_hat)."""
+        Mq = Q.shape[0]
+        Ns = np.zeros((Mq, 3))
+        Ds = np.zeros((Mq, 3))
+        Vr = np.zeros((Mq, 3))
+        Vp = np.zeros((Mq, 3))
+        Wp = np.zeros((Mq, 3))
+        wide = Q.shape[1] >= 5
+        for i in range(Mq):
+            ct = np.cos(Q[i, 0])
+            n = np.array([ct * np.cos(Q[i, 1]), ct * np.sin(Q[i, 1]), np.sin(Q[i, 0])])
+            d = self._dir_from_cone(d_hat, Q[i, 3], Q[i, 4]) if wide else d_hat
+            v_r = Q[i, 2] * d
+            v_plus, w_plus = predict_paddle_contact(
+                v_ball, v_r, n, omega_ball, self.physics, self.config)
+            Ns[i], Ds[i], Vr[i], Vp[i], Wp[i] = n, d, v_r, v_plus, w_plus
+        land, t_land = batch_integrate_to_table_plane(
+            p_strike, Vp, Wp, self.physics, self.config)
+        return land, t_land, Ns, Ds, Vr, Vp, Wp
+
+    def solve_fast_fixed_direction(
+        self,
+        p_ball: np.ndarray,
+        v_ball: np.ndarray,
+        omega_ball: Optional[np.ndarray],
+        landing_target_xy: np.ndarray,
+        d_hat_w: np.ndarray,
+        speed_min: float,
+        speed_max: float,
+        dir_cone_rad: float = 0.0,
+        s0: Optional[float] = None,
+        max_iter: Optional[int] = None,
+        tol_m: Optional[float] = None,
+        w_dir: float = 0.5,
+    ) -> Optional[dict]:
+        """Batched-probe twin of ``StrikeSpecPlanner.solve_fixed_direction``.
+
+        Same unknowns, seed, residual, damping schedule and return dict; the only difference is
+        that the per-iteration Jacobian probes are integrated as ONE batch and the flight uses the
+        adaptive 远粗近细 integrator, exactly as ``solve_fast`` does for the free solve. Keep the
+        two in sync when tuning LM constants.
+        """
+        max_iter = self.MAX_ITER if max_iter is None else int(max_iter)
+        tol = self.TOL_M if tol_m is None else float(tol_m)
+        p_ball = np.asarray(p_ball, float)
+        v_ball = np.asarray(v_ball, float)
+        omega_ball = np.zeros(3) if omega_ball is None else np.asarray(omega_ball, float)
+        target_xy = np.asarray(landing_target_xy, float)[:2]
+        d_hat = np.asarray(d_hat_w, float)
+        dn = float(np.linalg.norm(d_hat))
+        if dn < 1e-9:
+            return None
+        d_hat = d_hat / dn
+
+        phi0, theta0, v_n0 = self._initial_guess(p_ball, v_ball, target_xy)
+        n0 = self._normal_from_tilt(phi0, theta0, 0.0, 0.0)
+        if s0 is None:
+            s0 = v_n0 / max(float(np.dot(d_hat, n0)), 0.05)
+        cone = float(max(dir_cone_rad, 0.0))
+        nq = 3 if cone <= 0.0 else 5
+        q = np.zeros(nq)
+        q[0], q[1], q[2] = theta0, phi0, float(np.clip(s0, speed_min, speed_max))
+
+        def residual(land_xy, q_):
+            base = [land_xy - target_xy, np.array([self.W_SPEED * q_[2]])]
+            if q_.size >= 5:
+                base.append(w_dir * q_[3:5])
+            return np.concatenate(base)
+
+        def fwd_one(qq):
+            land, tl, Ns, Ds, Vr, Vp, Wp = self._forward_batch_fixed_dir(
+                qq[None], d_hat, p_ball, v_ball, omega_ball)
+            if np.isnan(land[0]).any():
+                return None
+            return dict(landing_xy=land[0], t_land=tl[0], n=Ns[0], d_hat=Ds[0], v_r=Vr[0],
+                        v_plus=Vp[0], omega_plus=Wp[0])
+
+        fwd = fwd_one(q)
+        if fwd is None:
+            return None
+        r = residual(fwd["landing_xy"], q)
+        cost = float(r @ r)
+        h = np.array([3.5e-3, 3.5e-3, 0.02, 3.5e-3, 3.5e-3])[:nq]
+        lam = 1e-3
+        iterations = 0
+
+        for _ in range(max_iter):
+            iterations += 1
+            if np.linalg.norm(fwd["landing_xy"] - target_xy) < tol:
+                break
+            Qp = np.repeat(q[None], nq, axis=0) + np.diag(h)      # nq probes, ONE batch
+            land_p, _, _, _, _, _, _ = self._forward_batch_fixed_dir(
+                Qp, d_hat, p_ball, v_ball, omega_ball)
+            if np.isnan(land_p).any():
+                lam *= 10.0
+                if lam > 1e6:
+                    return None
+                continue
+            J = np.zeros((r.size, nq))
+            for j in range(nq):
+                J[:, j] = (residual(land_p[j], Qp[j]) - r) / h[j]
+
+            JtJ = J.T @ J
+            g = J.T @ r
+            damp = np.diag(np.diag(JtJ)) + 1e-9 * np.eye(nq)
+            accepted = False
+            for _try in range(6):
+                try:
+                    dq = np.linalg.solve(JtJ + lam * damp, -g)
+                except np.linalg.LinAlgError:
+                    lam *= 10.0
+                    continue
+                q_new = q + dq
+                q_new[2] = float(np.clip(q_new[2], speed_min, speed_max))
+                if nq == 5:
+                    rad = float(np.hypot(q_new[3], q_new[4]))
+                    lim = float(np.tan(cone))
+                    if rad > lim > 0.0:
+                        q_new[3:5] *= lim / rad
+                fwd_new = fwd_one(q_new)
+                if fwd_new is not None:
+                    r_new = residual(fwd_new["landing_xy"], q_new)
+                    cost_new = float(r_new @ r_new)
+                    if cost_new < cost:
+                        q, fwd, r, cost = q_new, fwd_new, r_new, cost_new
+                        lam = max(lam * 0.3, 1e-8)
+                        accepted = True
+                        break
+                lam *= 10.0
+            if not accepted and lam > 1e6:
+                break
+
+        clears_net, net_z_margin_m = compute_net_clearance(
+            p_ball, fwd["v_plus"], fwd["omega_plus"], self.predictor
+        )
+        dev = float(np.degrees(np.arccos(np.clip(float(np.dot(fwd["d_hat"], d_hat)), -1.0, 1.0))))
+        return dict(
+            n=fwd["n"], v_r=fwd["v_r"], speed=float(q[2]), d_hat=fwd["d_hat"],
+            landing_xy=fwd["landing_xy"], t_land=float(fwd["t_land"]),
+            resid_m=float(np.linalg.norm(fwd["landing_xy"] - target_xy)),
+            dir_deviation_deg=dev, clears_net=clears_net, net_z_margin_m=net_z_margin_m,
+            v_plus=fwd["v_plus"], omega_plus=fwd["omega_plus"], iterations=iterations,
+            q=q.copy(),
+        )
 
     def solve_fast_spec(
         self,

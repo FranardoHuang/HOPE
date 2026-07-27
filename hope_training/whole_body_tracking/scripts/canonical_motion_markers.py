@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Strict loader for canonical motion marker authority v2.
+"""Strict loader for canonical motion marker authorities v2 and v3.
 
 The v2 authority keeps six concepts separate:
 
@@ -18,6 +18,30 @@ never create a nominal or preferred behavior marker.
 
 The v1 authority remains an immutable historical input.  Callers must
 externally pin the exact v2 authority SHA-256.
+
+Authority v3 (2026-07-27) exists for one reason: a recording made after
+2026-07-10 has no v1 record and can never acquire one, so it cannot carry a v1
+air-swing nominal event, and it must not pretend to.  v3 therefore adds
+
+* an ``event_provenance`` discriminated union per row, whose third arm,
+  ``derived_tool_scanned_contact``, records a frame a named tool scanned
+  directly on THE BYTES THIS ROW BINDS -- closed on
+  ``scan_artifact.input_source_sha256 == bound_recipe_source.sha256``, with no
+  frame-identity receipt, because nothing is being mapped across clips;
+* an optional ``derived_seed`` beside the legacy ge50/ge80 seeds; and
+* an appendable row list whose ORDERED FIRST FIVE rows must still be the
+  canonical five, byte-for-byte re-derivable from the v2 authority.
+
+Two rules make v3 an honest widening rather than a hole:
+
+* the profile is chosen by the CALLER, never by the document -- a file whose
+  own ``authority_id`` disagrees with the caller's profile is rejected; and
+* the fabrication guard (``_require_v1_content_agreement``): any row claiming
+  v1 air-swing lineage is checked against the v1 authority's own bytes, not
+  merely against the v1 SHA-256 string.  The v1 row must exist, its
+  ``bound_recipe_source.sha256`` must equal this row's, and its nominal event
+  frame must equal this row's.  Re-pointing a v1 receipt at different source
+  bytes, or minting a v1 lineage for a recording v1 never saw, now fails.
 """
 
 from __future__ import annotations
@@ -48,10 +72,40 @@ MARKER_AUTHORITY_PATH = "configs/canonical_motion_marker_semantics_v2_20260724.j
 MARKER_AUTHORITY_REVIEW_STATUS = (
     "REVIEWED_FOR_CONTENT_ADDRESSED_FRAME_MAPPING_AND_LEGACY_SEED_PROVENANCE"
 )
+MARKER_AUTHORITY_SHA256 = (
+    "0bf36c204162bf63e044db129bdb869129f36fb7a6d191a7c83effc4ba300929"
+)
+MARKER_AUTHORITY_V3_SCHEMA_VERSION = 3
+MARKER_AUTHORITY_V3_ID = "canonical_motion_marker_semantics_v3_20260727"
+MARKER_AUTHORITY_V3_PATH = "configs/canonical_motion_marker_semantics_v3_20260727.json"
+MARKER_AUTHORITY_V3_REVIEW_STATUS = (
+    "REVIEWED_FOR_VERBATIM_CANONICAL_PREFIX_AND_TOOL_DERIVED_CONTACT_PROVENANCE"
+)
 LEGACY_AUTHORITY_PATH = "configs/canonical_motion_marker_semantics_v1_20260724.json"
 LEGACY_AUTHORITY_SHA256 = (
     "186fa064c24ada5e7c36530e67096b6b8027b92159a7458f77d0517593e54252"
 )
+
+#: ``event_provenance.kind`` discriminants.  These are three DIFFERENT claims,
+#: not three spellings of one claim.
+EVENT_KIND_LEGACY_V1 = "legacy_v1_air_swing_event"
+EVENT_KIND_DONOR_CONSTRUCTION = "donor_construction_annotation"
+EVENT_KIND_DERIVED_CONTACT = "derived_tool_scanned_contact"
+
+_DERIVED_CONTACT_SEMANTIC_KIND = "derived_kinematic_carrier_speed_peak_frame"
+_DERIVED_FRAME_IDENTITY_REASON = (
+    "SCANNED_DIRECTLY_ON_BOUND_SOURCE_NO_CROSS_CLIP_MAPPING"
+)
+_DERIVED_V1_LINEAGE_REASON = "NO_V1_RECORD_EXISTS_FOR_THIS_RECORDING"
+_ALLOWED_DERIVED_RULE_IDS = frozenset(
+    {
+        # returnability / face-manifold scan lineage (the four legacy rows)
+        "longest_contiguous_run_at_or_above_score_threshold",
+        # kinematic carrier-speed scan run directly on the bound npz bytes
+        "max_carrier_speed_at_or_above_min_height",
+    }
+)
+_DERIVED_RETIMING_STAGES = frozenset({"source_timing", "post_retime_compiled_clip"})
 TEMPORAL_INDEX_CLASSIFICATION = (
     "TEMPORAL_INDEX_LINEAGE_ONLY_NOT_POSE_OR_EVENT_SEMANTIC_TRANSFER"
 )
@@ -245,6 +299,55 @@ _POST_RETIME_GATE_KEYS = frozenset(
         "behavior_promotion_authorized",
     }
 )
+#: v3 only.  ``rescan`` is the slot the authority's own gate always implied but
+#: never provided: somewhere to put the post-retime behavior rescan RESULT.  It
+#: is defined here and accepted only as ``null`` -- see ``_validate_gate_rescan``.
+_V3_POST_RETIME_GATE_KEYS = _POST_RETIME_GATE_KEYS | {"rescan"}
+_V3_ROW_KEYS = frozenset(
+    {
+        "motion_id",
+        "bound_recipe_source",
+        "event_provenance",
+        "legacy_ge50_seed",
+        "legacy_ge80_seed",
+        "legacy_preferred_seed",
+        "derived_seed",
+        "historical_adv2c3_comparator",
+        "post_retime_behavior_gate",
+    }
+)
+_V3_LEGACY_PROVENANCE_KEYS = frozenset(
+    {"kind", "nominal_event", "legacy_scan_evidence", "construction_marker"}
+)
+_V3_DERIVED_PROVENANCE_KEYS = frozenset({"kind", "derived_contact"})
+_DERIVED_CONTACT_KEYS = frozenset(
+    {
+        "frame",
+        "semantic_kind",
+        "contact_truth_observed",
+        "behavior_authorized",
+        "returnability_certified",
+        "retiming_stage",
+        "frame_identity",
+        "v1_lineage",
+        "derivation",
+        "scan_artifact",
+    }
+)
+_DERIVED_SEED_KEYS = frozenset(
+    {
+        "span_inclusive",
+        "argmax_frame",
+        "seed_role",
+        "retiming_stage",
+        "certified_post_retime_window",
+        "derivation",
+        "scan_artifact",
+    }
+)
+_DERIVATION_KEYS = frozenset({"tool", "tool_sha256", "cli_argv", "rule_id", "thresholds"})
+_SCAN_ARTIFACT_KEYS = frozenset({"path", "sha256", "input_source_sha256"})
+_NOT_CLAIMED_KEYS = frozenset({"claimed", "reason"})
 _SUMMARY_KEYS = frozenset(
     {
         "schema_version",
@@ -301,6 +404,88 @@ _EXPECTED_JOB_MANIFEST_REFS = {
 
 
 @dataclass(frozen=True)
+class AuthorityProfile:
+    """What the CALLER expects an authority file to be.
+
+    The profile is never read out of the document being validated.  A document
+    that declares an ``authority_id`` other than the one the caller asked for is
+    an error, not a request to switch validation regimes.
+    """
+
+    name: str
+    schema_version: int
+    authority_id: str
+    path: str
+    review_status: str
+    appendable_rows: bool
+
+
+MARKER_AUTHORITY_PROFILES: Mapping[str, AuthorityProfile] = MappingProxyType(
+    {
+        "v2": AuthorityProfile(
+            name="v2",
+            schema_version=MARKER_AUTHORITY_SCHEMA_VERSION,
+            authority_id=MARKER_AUTHORITY_ID,
+            path=MARKER_AUTHORITY_PATH,
+            review_status=MARKER_AUTHORITY_REVIEW_STATUS,
+            appendable_rows=False,
+        ),
+        "v3": AuthorityProfile(
+            name="v3",
+            schema_version=MARKER_AUTHORITY_V3_SCHEMA_VERSION,
+            authority_id=MARKER_AUTHORITY_V3_ID,
+            path=MARKER_AUTHORITY_V3_PATH,
+            review_status=MARKER_AUTHORITY_V3_REVIEW_STATUS,
+            appendable_rows=True,
+        ),
+    }
+)
+#: Reverse table used by callers (the recipe loader) that only know a path.
+MARKER_AUTHORITY_PROFILE_BY_PATH: Mapping[str, str] = MappingProxyType(
+    {profile.path: name for name, profile in MARKER_AUTHORITY_PROFILES.items()}
+)
+
+
+@dataclass(frozen=True)
+class DerivedProvenance:
+    """Who computed this, on which exact bytes, with which written-down rule."""
+
+    tool: str
+    tool_sha256: str
+    rule_id: str
+    cli_argv: tuple[str, ...]
+    scan_artifact_path: str
+    scan_artifact_sha256: str
+    scan_input_source_sha256: str
+    retiming_stage: str
+
+
+@dataclass(frozen=True)
+class DerivedContact:
+    """A contact-candidate frame scanned on the row's own bound source bytes.
+
+    Not observed ball contact, not returnability-certified, not a behavior
+    authorization, and explicitly not a v1 air-swing event.
+    """
+
+    frame: int
+    semantic_kind: str
+    returnability_certified: bool
+    provenance: DerivedProvenance
+
+
+@dataclass(frozen=True)
+class DerivedSeed:
+    """A tool-derived search window, the derived counterpart of ge50/ge80."""
+
+    span: tuple[int, int]
+    argmax_frame: int
+    seed_role: str
+    certified_post_retime_window: bool
+    provenance: DerivedProvenance
+
+
+@dataclass(frozen=True)
 class FrameIdentityBinding:
     path: str
     sha256: str
@@ -324,17 +509,98 @@ class MarkerSemanticsRow:
 
     motion_id: str
     nominal_event: int | None
-    ge50_seed: tuple[int, int]
-    ge80_seed: tuple[int, int]
+    ge50_seed: tuple[int, int] | None
+    ge80_seed: tuple[int, int] | None
     preferred_seed: int | None
     construction_marker: ConstructionMarker | None
-    historical_adv2c3_start: int
+    historical_adv2c3_start: int | None
     bound_recipe_source_path: str
     bound_recipe_source_sha256: str
-    source_scan_remote_path: str
-    source_scan_sha256: str
+    source_scan_remote_path: str | None
+    source_scan_sha256: str | None
     frame_identity: FrameIdentityBinding | None
     post_retime_behavior_gate_status: str
+    # v3 additions.  Every v2 row keeps the v2 defaults, so a v2 authority
+    # produces exactly the rows it produced before this field existed.
+    event_provenance_kind: str = EVENT_KIND_LEGACY_V1
+    derived_contact: DerivedContact | None = None
+    derived_seed: DerivedSeed | None = None
+    post_retime_rescan: None = None
+
+    # -- the single anchor/window resolution law -------------------------
+    # Both the compiler (_authority_markers) and the bank gate hand-wrote
+    # their own if/elif over nominal_event / construction_marker.  Two copies
+    # of a rule drift; this is the one copy.
+
+    def contact_anchor(self) -> tuple[int | None, str]:
+        """Return ``(frame, basis)`` for the row's contact anchor.
+
+        Priority, fixed and explicit:
+
+        1. a PROMOTED post-retime derived contact -- not reachable today, see
+           ``post_retime_rescan``;
+        2. a source-timing tool-derived contact;
+        3. a legacy v1 air-swing nominal event;
+        4. a donor construction annotation.
+
+        Promotion is a per-row explicit act, never "take the newest".  In
+        particular ``fh_loop``'s frame 61 does not move because this method
+        exists.
+        """
+
+        if (
+            self.derived_contact is not None
+            and self.derived_contact.provenance.retiming_stage
+            == "post_retime_compiled_clip"
+        ):
+            return self.derived_contact.frame, "promoted_post_retime_derived_contact"
+        if self.derived_contact is not None:
+            return self.derived_contact.frame, "derived_source_timing_contact"
+        if self.nominal_event is not None:
+            return self.nominal_event, EVENT_KIND_LEGACY_V1
+        if self.construction_marker is not None:
+            return (
+                self.construction_marker.annotation_frame,
+                EVENT_KIND_DONOR_CONSTRUCTION,
+            )
+        return None, "none"
+
+    def search_window(self) -> tuple[tuple[int, int] | None, str]:
+        """Return ``(span_inclusive, basis)`` for the compiler's search window."""
+
+        if self.derived_seed is not None:
+            return self.derived_seed.span, "derived_seed"
+        if self.ge80_seed is not None:
+            return self.ge80_seed, "legacy_ge80_seed"
+        return None, "none"
+
+    def authority_frames(self) -> tuple[int, ...]:
+        """Every source-frame index this row asserts, for range checking."""
+
+        frames: list[int] = []
+        for span in (self.ge50_seed, self.ge80_seed):
+            if span is not None:
+                frames.extend(span)
+        for scalar in (
+            self.historical_adv2c3_start,
+            self.nominal_event,
+            self.preferred_seed,
+        ):
+            if scalar is not None:
+                frames.append(scalar)
+        if self.construction_marker is not None:
+            frames.extend(
+                (
+                    self.construction_marker.annotation_frame,
+                    self.construction_marker.donor_preferred_frame,
+                    *self.construction_marker.solve_span,
+                )
+            )
+        if self.derived_contact is not None:
+            frames.append(self.derived_contact.frame)
+        if self.derived_seed is not None:
+            frames.extend((*self.derived_seed.span, self.derived_seed.argmax_frame))
+        return tuple(frames)
 
 
 @dataclass(frozen=True)
@@ -348,6 +614,10 @@ class MarkerSemantics:
     review_status: str
     legacy_authority_sha256: str
     rows: tuple[MarkerSemanticsRow, ...]
+    profile: str = "v2"
+    #: v3 only: the SHA-256 of the v2 authority whose five rows this file
+    #: reproduces verbatim.  Recomputed from bytes at load time, not trusted.
+    verbatim_prefix_authority_sha256: str | None = None
 
     def row(self, motion_id: str) -> MarkerSemanticsRow:
         matches = tuple(row for row in self.rows if row.motion_id == motion_id)
@@ -717,6 +987,88 @@ def _direct_legacy_historical_starts(
     return MappingProxyType(direct)
 
 
+def _legacy_rows_by_motion_id(
+    legacy_authority: Mapping[str, Any],
+) -> Mapping[str, Mapping[str, Any]]:
+    """Index the immutable v1 authority's own rows by motion id.
+
+    ``_direct_legacy_historical_starts`` has already proved the list is the
+    canonical five in canonical order, so this only has to key them.
+    """
+
+    motions = legacy_authority["motions"]
+    return MappingProxyType(
+        {
+            motion_id: motions[index]
+            for index, motion_id in enumerate(CANONICAL_MOTION_IDS)
+        }
+    )
+
+
+def _require_v1_content_agreement(
+    legacy_rows: Mapping[str, Mapping[str, Any]],
+    *,
+    motion_id: str,
+    bound_sha256: str,
+    nominal_frame: int | None,
+    label: str,
+) -> None:
+    """FABRICATION GUARD -- do not delete without reading this.
+
+    ``_validate_frame_receipt`` compares two 64-character strings against the
+    v1 authority SHA-256 and calls that "binding the immutable v1 authority".
+    It never opens v1.  That inverted the honesty incentive: a row could bind
+    ANY npz bytes, ship a freshly generated receipt and summary that agree with
+    each other about those bytes, keep the v1 SHA string, and pass -- which is
+    exactly how a 98-frame 2026-07-27 take could inherit a 116-frame
+    2026-07-10 take's frame-61 marker.
+
+    This function does what those string comparisons only pretended to do: it
+    reads v1's own content at the pinned SHA and requires this row to agree
+    with it on (a) existence, (b) the bound source bytes, and (c) the nominal
+    event frame.
+
+    Side effect, stated on the record: this permanently freezes the five
+    canonical rows to the npz files v1 recorded for them.  Re-aiming an
+    existing canonical source is no longer possible -- a new recording must
+    arrive as a NEW row with ``derived_tool_scanned_contact`` provenance.  That
+    is the intent, not an accident.
+    """
+
+    legacy_row = legacy_rows.get(motion_id)
+    if legacy_row is None:
+        raise MarkerSemanticsError(
+            f"{label} claims v1 air-swing lineage, but the immutable v1 authority "
+            f"has no record for {motion_id!r}.  v1 is frozen at 2026-07-10; a "
+            "recording it never saw cannot acquire a v1 lineage.  Use "
+            f"event_provenance.kind={EVENT_KIND_DERIVED_CONTACT!r} instead."
+        )
+    legacy_bound = legacy_row.get("bound_recipe_source")
+    if not isinstance(legacy_bound, Mapping):
+        raise MarkerSemanticsError(
+            f"{label} immutable v1 record has no bound_recipe_source"
+        )
+    if legacy_bound.get("sha256") != bound_sha256:
+        raise MarkerSemanticsError(
+            f"{label} bound_recipe_source bytes disagree with the immutable v1 "
+            f"record ({legacy_bound.get('sha256')!r} in v1, {bound_sha256!r} here). "
+            "A v1 frame-identity receipt may not be re-pointed at different "
+            "source bytes."
+        )
+    if nominal_frame is None:
+        return
+    legacy_event = legacy_row.get("nominal_event")
+    if not isinstance(legacy_event, Mapping):
+        raise MarkerSemanticsError(
+            f"{label} claims a v1 nominal event that the v1 record does not have"
+        )
+    if legacy_event.get("frame") != nominal_frame:
+        raise MarkerSemanticsError(
+            f"{label} nominal event frame disagrees with the immutable v1 record "
+            f"({legacy_event.get('frame')!r} in v1, {nominal_frame!r} here)"
+        )
+
+
 def _validate_scan(
     raw: Any,
     *,
@@ -958,6 +1310,7 @@ def _validate_row(
     repo_root: Path,
     summary_rows: Mapping[str, Mapping[str, Any]],
     legacy_historical_starts: Mapping[str, int],
+    legacy_rows: Mapping[str, Mapping[str, Any]],
 ) -> MarkerSemanticsRow:
     label = f"motions[{expected_motion_id}]"
     row = _exact_keys(raw, _ROW_KEYS, label)
@@ -1141,6 +1494,11 @@ def _validate_row(
             event["event_source_sha256"],
             f"{label}.nominal_event.event_source_sha256",
         )
+        if motion_id not in summary_rows:
+            raise MarkerSemanticsError(
+                f"{label} claims a v1 nominal event, but the frame-identity "
+                f"summary has no ordinary receipt for {motion_id!r}"
+            )
         summary_row = summary_rows[motion_id]
         frame_identity = _validate_frame_receipt(
             repo_root,
@@ -1156,6 +1514,17 @@ def _validate_row(
             frame_identity.classification,
             f"{label}.nominal_event.mapping_to_bound_recipe_source",
         )
+
+    # FABRICATION GUARD.  Runs for every legacy-lineage row, synthetic included
+    # (the synthetic row has no nominal event, so only the bound bytes are
+    # checked).  See _require_v1_content_agreement for why this exists.
+    _require_v1_content_agreement(
+        legacy_rows,
+        motion_id=motion_id,
+        bound_sha256=bound_sha,
+        nominal_frame=nominal_frame,
+        label=label,
+    )
 
     historical = _exact_keys(
         row["historical_adv2c3_comparator"],
@@ -1250,7 +1619,514 @@ def _validate_row(
         source_scan_sha256=scan_sha,
         frame_identity=frame_identity,
         post_retime_behavior_gate_status=expected_status,
+        event_provenance_kind=(
+            EVENT_KIND_DONOR_CONSTRUCTION
+            if construction is not None
+            else EVENT_KIND_LEGACY_V1
+        ),
     )
+
+
+def _validate_not_claimed(raw: Any, expected_reason: str, label: str) -> None:
+    value = _exact_keys(raw, _NOT_CLAIMED_KEYS, label)
+    _exact_bool(value["claimed"], False, f"{label}.claimed")
+    _exact_string(value["reason"], expected_reason, f"{label}.reason")
+
+
+def _validate_derivation(
+    repo_root: Path, raw: Any, label: str
+) -> tuple[str, str, str, tuple[str, ...]]:
+    value = _exact_keys(raw, _DERIVATION_KEYS, label)
+    tool_text, tool_path = _repo_file(repo_root, value["tool"], f"{label}.tool")
+    tool_sha = _sha256(value["tool_sha256"], f"{label}.tool_sha256")
+    actual_tool_sha = sha256_file(tool_path)
+    if actual_tool_sha != tool_sha:
+        raise MarkerSemanticsError(
+            f"{label}.tool_sha256 does not match the tool on disk: "
+            f"declared {tool_sha}, actual {actual_tool_sha}"
+        )
+    rule_id = _string(value["rule_id"], f"{label}.rule_id")
+    if rule_id not in _ALLOWED_DERIVED_RULE_IDS:
+        raise MarkerSemanticsError(
+            f"{label}.rule_id {rule_id!r} is not a registered derivation rule; "
+            f"registered={sorted(_ALLOWED_DERIVED_RULE_IDS)}"
+        )
+    argv = _string_tuple(value["cli_argv"], f"{label}.cli_argv")
+    if not isinstance(value["thresholds"], Mapping) or not value["thresholds"]:
+        raise MarkerSemanticsError(f"{label}.thresholds must be a non-empty object")
+    return tool_text, tool_sha, rule_id, argv
+
+
+def _validate_scan_artifact(
+    repo_root: Path,
+    raw: Any,
+    *,
+    bound_sha256: str,
+    label: str,
+) -> tuple[str, str, Mapping[str, Any]]:
+    """Bind the scan product and close it on the row's OWN bound bytes.
+
+    This is what replaces a fabricated v1 lineage.  A legacy row proves its
+    frame by pointing at an ancestor; a derived row proves its frame by
+    pointing at the very bytes it binds.  Both the authority's claim and the
+    artifact's own recorded input must equal ``bound_recipe_source.sha256``.
+    """
+
+    reference = _exact_keys(raw, _SCAN_ARTIFACT_KEYS, label)
+    declared_input = _sha256(
+        reference["input_source_sha256"], f"{label}.input_source_sha256"
+    )
+    if declared_input != bound_sha256:
+        raise MarkerSemanticsError(
+            f"{label}.input_source_sha256 must equal this row's "
+            f"bound_recipe_source.sha256 ({bound_sha256}); a derived contact is "
+            "only meaningful on the bytes it was scanned from"
+        )
+    path_text, artifact_sha, artifact = _read_bound_json(
+        repo_root,
+        {"path": reference["path"], "sha256": reference["sha256"]},
+        label,
+    )
+    source_block = artifact.get("input_source")
+    if (
+        not isinstance(source_block, Mapping)
+        or source_block.get("sha256") != bound_sha256
+    ):
+        raise MarkerSemanticsError(
+            f"{label} artifact was not produced from this row's bound source bytes"
+        )
+    if artifact.get("publication_class") != "evidence_only_not_artifact_authorization":
+        raise MarkerSemanticsError(f"{label} artifact publication class changed")
+    _validate_authorization(artifact.get("authorization"), f"{label}.authorization")
+    non_claims = artifact.get("non_claims")
+    if not isinstance(non_claims, Mapping):
+        raise MarkerSemanticsError(f"{label} artifact omitted non_claims")
+    for key in (
+        "observed_ball_contact",
+        "returnability_certified",
+        "post_retime_window",
+        "v1_authority_lineage",
+    ):
+        if non_claims.get(key) is not False:
+            raise MarkerSemanticsError(
+                f"{label} artifact non_claims.{key} must remain false"
+            )
+    return path_text, artifact_sha, artifact
+
+
+def _validate_derived_provenance(
+    repo_root: Path,
+    raw: Mapping[str, Any],
+    *,
+    bound_sha256: str,
+    label: str,
+    retiming_stage: str,
+) -> tuple[DerivedProvenance, Mapping[str, Any]]:
+    tool, tool_sha, rule_id, argv = _validate_derivation(
+        repo_root, raw["derivation"], f"{label}.derivation"
+    )
+    artifact_path, artifact_sha, artifact = _validate_scan_artifact(
+        repo_root,
+        raw["scan_artifact"],
+        bound_sha256=bound_sha256,
+        label=f"{label}.scan_artifact",
+    )
+    artifact_derivation = artifact.get("derivation")
+    if not isinstance(artifact_derivation, Mapping):
+        raise MarkerSemanticsError(f"{label} artifact omitted its own derivation")
+    if artifact_derivation.get("tool_sha256") != tool_sha:
+        raise MarkerSemanticsError(
+            f"{label} artifact was written by a different tool build than "
+            f"{label}.derivation.tool_sha256 declares"
+        )
+    if artifact_derivation.get("rule_id") != rule_id:
+        raise MarkerSemanticsError(
+            f"{label} artifact rule_id disagrees with the authority's claim"
+        )
+    if tuple(artifact_derivation.get("cli_argv") or ()) != argv:
+        raise MarkerSemanticsError(
+            f"{label} artifact cli_argv disagrees with the authority's claim"
+        )
+    if artifact_derivation.get("thresholds") != raw["derivation"]["thresholds"]:
+        raise MarkerSemanticsError(
+            f"{label} artifact thresholds disagree with the authority's claim"
+        )
+    return (
+        DerivedProvenance(
+            tool=tool,
+            tool_sha256=tool_sha,
+            rule_id=rule_id,
+            cli_argv=argv,
+            scan_artifact_path=artifact_path,
+            scan_artifact_sha256=artifact_sha,
+            scan_input_source_sha256=bound_sha256,
+            retiming_stage=retiming_stage,
+        ),
+        artifact,
+    )
+
+
+def _validate_derived_contact(
+    repo_root: Path, raw: Any, *, bound_sha256: str, label: str
+) -> DerivedContact:
+    value = _exact_keys(raw, _DERIVED_CONTACT_KEYS, label)
+    frame = _integer(value["frame"], f"{label}.frame")
+    _exact_string(
+        value["semantic_kind"],
+        _DERIVED_CONTACT_SEMANTIC_KIND,
+        f"{label}.semantic_kind",
+    )
+    # There is no ball in any of these recordings.  A derived contact is a
+    # kinematic candidate, never observed truth, and never behavior authority.
+    _exact_bool(
+        value["contact_truth_observed"], False, f"{label}.contact_truth_observed"
+    )
+    _exact_bool(value["behavior_authorized"], False, f"{label}.behavior_authorized")
+    _exact_bool(
+        value["returnability_certified"], False, f"{label}.returnability_certified"
+    )
+    stage = _string(value["retiming_stage"], f"{label}.retiming_stage")
+    if stage not in _DERIVED_RETIMING_STAGES:
+        raise MarkerSemanticsError(
+            f"{label}.retiming_stage must be one of {sorted(_DERIVED_RETIMING_STAGES)}"
+        )
+    if stage != "source_timing":
+        raise MarkerSemanticsError(
+            f"{label}.retiming_stage={stage!r} needs a compiled-clip binding and an "
+            "explicit per-row promotion; that path is defined but not implemented"
+        )
+    # No frame-identity receipt, on purpose: a receipt exists to carry an event
+    # measured on clip A over to clip B.  Nothing is being carried here.
+    _validate_not_claimed(
+        value["frame_identity"], _DERIVED_FRAME_IDENTITY_REASON, f"{label}.frame_identity"
+    )
+    _validate_not_claimed(
+        value["v1_lineage"], _DERIVED_V1_LINEAGE_REASON, f"{label}.v1_lineage"
+    )
+    provenance, artifact = _validate_derived_provenance(
+        repo_root,
+        value,
+        bound_sha256=bound_sha256,
+        label=label,
+        retiming_stage=stage,
+    )
+    result = artifact.get("result")
+    if not isinstance(result, Mapping) or result.get("anchor_frame") != frame:
+        raise MarkerSemanticsError(
+            f"{label}.frame is not the frame the bound scan artifact reports"
+        )
+    if artifact.get("semantic_kind") != _DERIVED_CONTACT_SEMANTIC_KIND:
+        raise MarkerSemanticsError(
+            f"{label} artifact semantic_kind disagrees with the authority"
+        )
+    return DerivedContact(
+        frame=frame,
+        semantic_kind=_DERIVED_CONTACT_SEMANTIC_KIND,
+        returnability_certified=False,
+        provenance=provenance,
+    )
+
+
+def _validate_derived_seed(
+    repo_root: Path, raw: Any, *, bound_sha256: str, label: str
+) -> DerivedSeed:
+    value = _exact_keys(raw, _DERIVED_SEED_KEYS, label)
+    span = _inclusive_span(value["span_inclusive"], f"{label}.span_inclusive")
+    argmax_frame = _integer(value["argmax_frame"], f"{label}.argmax_frame")
+    if not span[0] <= argmax_frame <= span[1]:
+        raise MarkerSemanticsError(f"{label}.argmax_frame lies outside its own span")
+    _string(value["seed_role"], f"{label}.seed_role")
+    stage = _string(value["retiming_stage"], f"{label}.retiming_stage")
+    if stage != "source_timing":
+        raise MarkerSemanticsError(
+            f"{label}.retiming_stage must be 'source_timing'; post-retime seeds "
+            "require an explicit promotion path that is not implemented"
+        )
+    _exact_bool(
+        value["certified_post_retime_window"],
+        False,
+        f"{label}.certified_post_retime_window",
+    )
+    provenance, artifact = _validate_derived_provenance(
+        repo_root,
+        value,
+        bound_sha256=bound_sha256,
+        label=label,
+        retiming_stage=stage,
+    )
+    result = artifact.get("result")
+    if not isinstance(result, Mapping):
+        raise MarkerSemanticsError(f"{label} artifact omitted its result block")
+    if tuple(result.get("span_inclusive") or ()) != span:
+        raise MarkerSemanticsError(
+            f"{label}.span_inclusive is not the span the bound scan artifact reports"
+        )
+    if result.get("anchor_frame") != argmax_frame:
+        raise MarkerSemanticsError(
+            f"{label}.argmax_frame is not the frame the bound scan artifact reports"
+        )
+    return DerivedSeed(
+        span=span,
+        argmax_frame=argmax_frame,
+        seed_role=str(value["seed_role"]),
+        certified_post_retime_window=False,
+        provenance=provenance,
+    )
+
+
+def _validate_gate_rescan(raw: Any, label: str) -> None:
+    """The reserved post-retime rescan RESULT slot.
+
+    The authority has always required a post-retime behavior rescan and has
+    never had anywhere to record its answer, which is why wave-1 results ended
+    up in ``cfg/strike_annotations.yaml`` instead.  The slot now exists.  It
+    accepts only ``null``: promoting a rescan into an anchor needs machinery
+    (compiled-clip binding, per-row promotion) that this change does not build,
+    and a half-built promotion path is exactly the kind of thing that quietly
+    moves ``fh_loop``'s anchor.
+    """
+
+    if raw is not None:
+        raise MarkerSemanticsError(
+            f"{label}.rescan must be null: the slot is reserved, and promoting a "
+            "post-retime rescan to an anchor is not implemented"
+        )
+
+
+def _validate_derived_row(
+    raw: Any,
+    *,
+    row_index: int,
+    repo_root: Path,
+) -> MarkerSemanticsRow:
+    """One appended v3 row whose contact frame came from a tool, not from v1."""
+
+    label = f"motions[{row_index}]"
+    row = _exact_keys(raw, _V3_ROW_KEYS, label)
+    motion_id = _string(row["motion_id"], f"{label}.motion_id")
+    label = f"motions[{motion_id}]"
+    if motion_id in CANONICAL_MOTION_IDS:
+        raise MarkerSemanticsError(
+            f"{label} reuses a canonical motion id outside the verbatim prefix"
+        )
+    bound = _exact_keys(
+        row["bound_recipe_source"], _BOUND_SOURCE_KEYS, f"{label}.bound_recipe_source"
+    )
+    bound_path, bound_sha = _validate_bound_file(
+        repo_root, bound, f"{label}.bound_recipe_source"
+    )
+    provenance = _exact_keys(
+        row["event_provenance"],
+        _V3_DERIVED_PROVENANCE_KEYS,
+        f"{label}.event_provenance",
+    )
+    _exact_string(
+        provenance["kind"],
+        EVENT_KIND_DERIVED_CONTACT,
+        f"{label}.event_provenance.kind",
+    )
+    derived_contact = _validate_derived_contact(
+        repo_root,
+        provenance["derived_contact"],
+        bound_sha256=bound_sha,
+        label=f"{label}.event_provenance.derived_contact",
+    )
+    for key in (
+        "legacy_ge50_seed",
+        "legacy_ge80_seed",
+        "legacy_preferred_seed",
+        "historical_adv2c3_comparator",
+    ):
+        if row[key] is not None:
+            raise MarkerSemanticsError(
+                f"{label}.{key} must be null on a derived row: legacy stationary "
+                "scans and the v1 adv2c3 record do not exist for this recording"
+            )
+    if row["derived_seed"] is None:
+        raise MarkerSemanticsError(
+            f"{label}.derived_seed is mandatory on a derived row; without it the "
+            "compiler has no search window at all"
+        )
+    derived_seed = _validate_derived_seed(
+        repo_root,
+        row["derived_seed"],
+        bound_sha256=bound_sha,
+        label=f"{label}.derived_seed",
+    )
+    gate = _exact_keys(
+        row["post_retime_behavior_gate"],
+        _V3_POST_RETIME_GATE_KEYS,
+        f"{label}.post_retime_behavior_gate",
+    )
+    _exact_bool(gate["required"], True, f"{label}.post_retime_behavior_gate.required")
+    expected_status = "PENDING_POST_RETIME_BEHAVIOR_RESCAN"
+    _exact_string(
+        gate["status"], expected_status, f"{label}.post_retime_behavior_gate.status"
+    )
+    if gate["required_scopes"] != ["upper", "full"]:
+        raise MarkerSemanticsError(
+            f"{label}.post_retime_behavior_gate requires upper/full"
+        )
+    _exact_bool(
+        gate["legacy_seed_is_certified_window"],
+        False,
+        f"{label}.post_retime_behavior_gate.legacy_seed_is_certified_window",
+    )
+    _exact_bool(
+        gate["behavior_promotion_authorized"],
+        False,
+        f"{label}.post_retime_behavior_gate.behavior_promotion_authorized",
+    )
+    _validate_gate_rescan(gate["rescan"], f"{label}.post_retime_behavior_gate")
+    if derived_contact.provenance.scan_artifact_sha256 != (
+        derived_seed.provenance.scan_artifact_sha256
+    ):
+        raise MarkerSemanticsError(
+            f"{label} anchor and seed must come from one scan pass"
+        )
+    return MarkerSemanticsRow(
+        motion_id=motion_id,
+        nominal_event=None,
+        ge50_seed=None,
+        ge80_seed=None,
+        preferred_seed=None,
+        construction_marker=None,
+        historical_adv2c3_start=None,
+        bound_recipe_source_path=bound_path,
+        bound_recipe_source_sha256=bound_sha,
+        source_scan_remote_path=None,
+        source_scan_sha256=None,
+        frame_identity=None,
+        post_retime_behavior_gate_status=expected_status,
+        event_provenance_kind=EVENT_KIND_DERIVED_CONTACT,
+        derived_contact=derived_contact,
+        derived_seed=derived_seed,
+    )
+
+
+def _unwrap_v3_prefix_row(raw: Any, *, row_index: int) -> tuple[dict[str, Any], str]:
+    """Rewrite one v3 canonical-prefix row into its exact v2 row shape.
+
+    The point of unwrapping instead of reimplementing is that the canonical
+    five then travel through ``_validate_row`` -- the same function, the same
+    order, the same errors -- so "v3 does not change the old rows" is true by
+    construction rather than by test coincidence.
+    """
+
+    label = f"motions[{row_index}]"
+    row = _exact_keys(raw, _V3_ROW_KEYS, label)
+    provenance = _exact_keys(
+        row["event_provenance"],
+        _V3_LEGACY_PROVENANCE_KEYS,
+        f"{label}.event_provenance",
+    )
+    kind = _string(provenance["kind"], f"{label}.event_provenance.kind")
+    if kind == EVENT_KIND_LEGACY_V1:
+        if provenance["nominal_event"] is None:
+            raise MarkerSemanticsError(
+                f"{label}.event_provenance kind {kind!r} requires a nominal_event"
+            )
+    elif kind == EVENT_KIND_DONOR_CONSTRUCTION:
+        if provenance["construction_marker"] is None:
+            raise MarkerSemanticsError(
+                f"{label}.event_provenance kind {kind!r} requires a construction_marker"
+            )
+    else:
+        raise MarkerSemanticsError(
+            f"{label}.event_provenance.kind {kind!r} is not permitted in the "
+            "canonical verbatim prefix"
+        )
+    if row["derived_seed"] is not None:
+        raise MarkerSemanticsError(
+            f"{label}.derived_seed must be null in the canonical verbatim prefix; "
+            "adding one would move an existing motion's search window"
+        )
+    gate = _exact_keys(
+        row["post_retime_behavior_gate"],
+        _V3_POST_RETIME_GATE_KEYS,
+        f"{label}.post_retime_behavior_gate",
+    )
+    _validate_gate_rescan(gate["rescan"], f"{label}.post_retime_behavior_gate")
+    return (
+        {
+            "motion_id": row["motion_id"],
+            "bound_recipe_source": row["bound_recipe_source"],
+            "nominal_event": provenance["nominal_event"],
+            "legacy_scan_evidence": provenance["legacy_scan_evidence"],
+            "legacy_ge50_seed": row["legacy_ge50_seed"],
+            "legacy_ge80_seed": row["legacy_ge80_seed"],
+            "legacy_preferred_seed": row["legacy_preferred_seed"],
+            "construction_marker": provenance["construction_marker"],
+            "historical_adv2c3_comparator": row["historical_adv2c3_comparator"],
+            "post_retime_behavior_gate": {
+                key: gate[key] for key in sorted(_POST_RETIME_GATE_KEYS)
+            },
+        },
+        kind,
+    )
+
+
+def _canonical_json(value: Any) -> str:
+    return json.dumps(value, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def _require_verbatim_prefix(
+    repo_root: Path, unwrapped: Sequence[Mapping[str, Any]]
+) -> str:
+    """Prove the canonical five were carried over, not retyped.
+
+    The v2 authority bytes are re-read here and its SHA-256 becomes a
+    load-bearing input to v3.  Any edit to an existing row -- a swapped source,
+    a moved seed, a reworded role -- shows up as a diff on this comparison
+    instead of as a silently different library.
+    """
+
+    path = (repo_root / MARKER_AUTHORITY_PATH).resolve()
+    if not path.is_file():
+        raise MarkerSemanticsError(
+            f"v3 requires the v2 authority on disk to verify its prefix: {path}"
+        )
+    payload = path.read_bytes()
+    actual = hashlib.sha256(payload).hexdigest()
+    if actual != MARKER_AUTHORITY_SHA256:
+        raise MarkerSemanticsError(
+            "the v2 authority bytes changed; v3's verbatim prefix cannot be verified"
+        )
+    v2 = _strict_json_bytes(payload, "v2 authority")
+    v2_motions = v2["motions"]
+    if not isinstance(v2_motions, list) or len(v2_motions) != len(
+        CANONICAL_MOTION_IDS
+    ):
+        raise MarkerSemanticsError("the v2 authority motion list is not the five rows")
+    for index, motion_id in enumerate(CANONICAL_MOTION_IDS):
+        if _canonical_json(unwrapped[index]) != _canonical_json(v2_motions[index]):
+            raise MarkerSemanticsError(
+                f"motions[{motion_id}] is not a verbatim carry-over of the v2 row; "
+                "v3 may append rows, never restate existing ones"
+            )
+    return actual
+
+
+def _validate_v3_supersedes(raw: Any, repo_root: Path) -> None:
+    chain = raw
+    if not isinstance(chain, list) or len(chain) != 2:
+        raise MarkerSemanticsError(
+            "authority.supersedes must be a two-link chain: v1 then v2"
+        )
+    expected = (
+        (LEGACY_AUTHORITY_PATH, LEGACY_AUTHORITY_SHA256, "immutable_historical_provenance_only"),
+        (MARKER_AUTHORITY_PATH, MARKER_AUTHORITY_SHA256, "superseded_row_source_verbatim"),
+    )
+    for index, (path_text, sha_text, role) in enumerate(expected):
+        link = _exact_keys(chain[index], _SUPERSEDES_KEYS, f"authority.supersedes[{index}]")
+        _exact_string(link["path"], path_text, f"authority.supersedes[{index}].path")
+        _exact_string(link["sha256"], sha_text, f"authority.supersedes[{index}].sha256")
+        _exact_string(link["role"], role, f"authority.supersedes[{index}].role")
+        _read_bound_json(
+            repo_root,
+            {"path": link["path"], "sha256": link["sha256"]},
+            f"authority.supersedes[{index}]",
+        )
 
 
 def load_canonical_motion_markers(
@@ -1258,9 +2134,21 @@ def load_canonical_motion_markers(
     *,
     expected_authority_sha256: str,
     repo_root: str | Path | None = None,
+    profile: str = "v2",
 ) -> MarkerSemantics:
-    """Load one exact v2 authority and all local content-addressed evidence."""
+    """Load one exact marker authority and all local content-addressed evidence.
 
+    ``profile`` is the CALLER's expectation ("v2" or "v3").  It is deliberately
+    not read from the document: a file whose entire purpose is content-addressed
+    authority must not get to pick which rules it is judged by.
+    """
+
+    if profile not in MARKER_AUTHORITY_PROFILES:
+        raise MarkerSemanticsError(
+            f"unknown marker authority profile {profile!r}; "
+            f"known={sorted(MARKER_AUTHORITY_PROFILES)}"
+        )
+    expected_profile = MARKER_AUTHORITY_PROFILES[profile]
     path = Path(authority_path).resolve()
     root = (
         Path(repo_root).resolve()
@@ -1286,41 +2174,53 @@ def load_canonical_motion_markers(
         "marker authority",
     )
     if _integer(raw["schema_version"], "authority.schema_version") != (
-        MARKER_AUTHORITY_SCHEMA_VERSION
+        expected_profile.schema_version
     ):
         raise MarkerSemanticsError(
-            f"authority.schema_version must equal {MARKER_AUTHORITY_SCHEMA_VERSION}"
+            f"authority.schema_version must equal {expected_profile.schema_version}"
         )
+    # The caller's profile decides; the document only gets to agree or fail.
     authority_id = _exact_string(
-        raw["authority_id"], MARKER_AUTHORITY_ID, "authority.authority_id"
+        raw["authority_id"], expected_profile.authority_id, "authority.authority_id"
     )
     review_status = _exact_string(
         raw["review_status"],
-        MARKER_AUTHORITY_REVIEW_STATUS,
+        expected_profile.review_status,
         "authority.review_status",
     )
     _string(raw["scope"], "authority.scope")
-    supersedes = _exact_keys(
-        raw["supersedes"], _SUPERSEDES_KEYS, "authority.supersedes"
-    )
-    _exact_string(
-        supersedes["path"],
-        LEGACY_AUTHORITY_PATH,
-        "authority.supersedes.path",
-    )
-    _exact_string(
-        supersedes["sha256"],
-        LEGACY_AUTHORITY_SHA256,
-        "authority.supersedes.sha256",
-    )
-    _exact_string(
-        supersedes["role"],
-        "immutable_historical_provenance_only",
-        "authority.supersedes.role",
-    )
+    if expected_profile.name == "v2":
+        supersedes = _exact_keys(
+            raw["supersedes"], _SUPERSEDES_KEYS, "authority.supersedes"
+        )
+        _exact_string(
+            supersedes["path"],
+            LEGACY_AUTHORITY_PATH,
+            "authority.supersedes.path",
+        )
+        _exact_string(
+            supersedes["sha256"],
+            LEGACY_AUTHORITY_SHA256,
+            "authority.supersedes.sha256",
+        )
+        _exact_string(
+            supersedes["role"],
+            "immutable_historical_provenance_only",
+            "authority.supersedes.role",
+        )
+        legacy_reference = {
+            "path": supersedes["path"],
+            "sha256": supersedes["sha256"],
+        }
+    else:
+        _validate_v3_supersedes(raw["supersedes"], root)
+        legacy_reference = {
+            "path": LEGACY_AUTHORITY_PATH,
+            "sha256": LEGACY_AUTHORITY_SHA256,
+        }
     legacy_path_text, legacy_sha, legacy_authority = _read_bound_json(
         root,
-        {"path": supersedes["path"], "sha256": supersedes["sha256"]},
+        legacy_reference,
         "authority.supersedes",
     )
     if (
@@ -1329,22 +2229,46 @@ def load_canonical_motion_markers(
     ):
         raise MarkerSemanticsError("immutable v1 authority bytes changed")
     legacy_historical_starts = _direct_legacy_historical_starts(legacy_authority)
+    legacy_rows = _legacy_rows_by_motion_id(legacy_authority)
     _validate_authorization(raw["authorization"], "authority.authorization")
     _validate_semantic_contract(raw["semantic_contract"])
     summary_rows = _validate_shared_evidence(raw["shared_evidence"], root)
 
     motions = raw["motions"]
-    if not isinstance(motions, list) or len(motions) != len(CANONICAL_MOTION_IDS):
+    if not isinstance(motions, list):
+        raise MarkerSemanticsError("authority.motions must be a JSON array")
+    if expected_profile.appendable_rows:
+        if len(motions) < len(CANONICAL_MOTION_IDS):
+            raise MarkerSemanticsError(
+                "authority.motions must begin with the canonical five rows"
+            )
+    elif len(motions) != len(CANONICAL_MOTION_IDS):
         raise MarkerSemanticsError("authority.motions must contain exactly five rows")
+    prefix = motions[: len(CANONICAL_MOTION_IDS)]
     actual_ids = tuple(
-        row.get("motion_id") if isinstance(row, Mapping) else None for row in motions
+        row.get("motion_id") if isinstance(row, Mapping) else None for row in prefix
     )
     if actual_ids != CANONICAL_MOTION_IDS:
         raise MarkerSemanticsError(
             "authority.motions canonical order changed; "
             f"expected={CANONICAL_MOTION_IDS!r}, got={actual_ids!r}"
         )
-    rows = tuple(
+
+    verbatim_sha: str | None = None
+    prefix_payloads: list[Mapping[str, Any]] = list(prefix)
+    prefix_kinds = [EVENT_KIND_LEGACY_V1] * len(CANONICAL_MOTION_IDS)
+    if expected_profile.name == "v3":
+        unwrapped: list[Mapping[str, Any]] = []
+        kinds: list[str] = []
+        for index, raw_row in enumerate(prefix):
+            payload, kind = _unwrap_v3_prefix_row(raw_row, row_index=index)
+            unwrapped.append(payload)
+            kinds.append(kind)
+        verbatim_sha = _require_verbatim_prefix(root, unwrapped)
+        prefix_payloads = unwrapped
+        prefix_kinds = kinds
+
+    rows = [
         _validate_row(
             raw_row,
             expected_motion_id=motion_id,
@@ -1352,9 +2276,34 @@ def load_canonical_motion_markers(
             repo_root=root,
             summary_rows=summary_rows,
             legacy_historical_starts=legacy_historical_starts,
+            legacy_rows=legacy_rows,
         )
-        for index, (raw_row, motion_id) in enumerate(zip(motions, CANONICAL_MOTION_IDS))
-    )
+        for index, (raw_row, motion_id) in enumerate(
+            zip(prefix_payloads, CANONICAL_MOTION_IDS)
+        )
+    ]
+    if expected_profile.name == "v3":
+        for row, declared in zip(rows, prefix_kinds):
+            if row.event_provenance_kind != declared:
+                raise MarkerSemanticsError(
+                    f"motions[{row.motion_id}].event_provenance.kind {declared!r} "
+                    f"disagrees with the row's actual content "
+                    f"({row.event_provenance_kind!r})"
+                )
+        seen = set(CANONICAL_MOTION_IDS)
+        for index, raw_row in enumerate(
+            motions[len(CANONICAL_MOTION_IDS) :], start=len(CANONICAL_MOTION_IDS)
+        ):
+            appended = _validate_derived_row(
+                raw_row, row_index=index, repo_root=root
+            )
+            if appended.motion_id in seen:
+                raise MarkerSemanticsError(
+                    f"authority.motions has duplicate motion_id "
+                    f"{appended.motion_id!r}"
+                )
+            seen.add(appended.motion_id)
+            rows.append(appended)
     return MarkerSemantics(
         path=path,
         repo_root=root,
@@ -1362,7 +2311,9 @@ def load_canonical_motion_markers(
         authority_id=authority_id,
         review_status=review_status,
         legacy_authority_sha256=LEGACY_AUTHORITY_SHA256,
-        rows=rows,
+        rows=tuple(rows),
+        profile=expected_profile.name,
+        verbatim_prefix_authority_sha256=verbatim_sha,
     )
 
 
@@ -1371,15 +2322,29 @@ load_marker_semantics = load_canonical_motion_markers
 
 __all__ = [
     "CANONICAL_MOTION_IDS",
+    "EVENT_KIND_DERIVED_CONTACT",
+    "EVENT_KIND_DONOR_CONSTRUCTION",
+    "EVENT_KIND_LEGACY_V1",
+    "AuthorityProfile",
     "ConstructionMarker",
+    "DerivedContact",
+    "DerivedProvenance",
+    "DerivedSeed",
     "FULL_FRAME_CLASSIFICATION",
     "FrameIdentityBinding",
     "LEGACY_AUTHORITY_PATH",
     "LEGACY_AUTHORITY_SHA256",
     "MARKER_AUTHORITY_ID",
     "MARKER_AUTHORITY_PATH",
+    "MARKER_AUTHORITY_PROFILES",
+    "MARKER_AUTHORITY_PROFILE_BY_PATH",
     "MARKER_AUTHORITY_REVIEW_STATUS",
     "MARKER_AUTHORITY_SCHEMA_VERSION",
+    "MARKER_AUTHORITY_SHA256",
+    "MARKER_AUTHORITY_V3_ID",
+    "MARKER_AUTHORITY_V3_PATH",
+    "MARKER_AUTHORITY_V3_REVIEW_STATUS",
+    "MARKER_AUTHORITY_V3_SCHEMA_VERSION",
     "MarkerSemantics",
     "MarkerSemanticsError",
     "MarkerSemanticsRow",

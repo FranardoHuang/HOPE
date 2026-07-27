@@ -4,6 +4,8 @@ Full run (the real numbers, ~15 min on a Mac):
   /opt/anaconda3/bin/python3 hope_ws/src/hope_planner/benchmarks/benchmark_planner_latency.py --n 200
 """
 
+from __future__ import annotations
+
 import os
 import sys
 

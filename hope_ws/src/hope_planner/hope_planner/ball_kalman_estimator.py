@@ -22,6 +22,8 @@ the state through v+ = diag(C_h, C_h, -C_v) v- and inflates the velocity
 covariance instead of clearing anything.
 """
 
+from __future__ import annotations
+
 from typing import List, Optional, Tuple
 
 import numpy as np

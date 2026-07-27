@@ -11,6 +11,21 @@
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
 
+## 2026-07-27（虚拟球 rollout 融合:45 ms → 0.067 ms,逐 bit 不变）
+
+- `virtual_ball.coarse_landing`(训练侧落点预测的 100 步 RK4)原来每步发 86 个 GPU kernel、
+  一次调用 8600 次发射、45 ms,且**与球数无关**(64 球和 16384 球一样贵),这是"连续画球 +
+  内联逆解"路线唯一的成本瓶颈。现在整段 rollout 融合进一个 Triton kernel(一次发射),
+  RTX 5090 上 0.067 ms/次,约 680 倍;逆解一次(n=4096, 12 迭代)从 13.7 s 降到 0.19 s。
+- 数值**逐 bit 相同**:120 万颗随机球(常规/出界/擦网擦线/地板以下/NaN-Inf)零 bit 差;
+  整条 12 迭代 Gauss-Newton 逆解与连续题生成器输出零 bit 差(对照 git HEAD 实现)。
+  运行时还有 per-configuration 逐 bit 闸门,不一致就自动退回 eager 参考实现并告警;
+  关闭开关 `HOPE_VIRTUAL_BALL_FAST=0`。回归测试:
+  `hope_training/whole_body_tracking/tests/test_virtual_ball_fused_rollout.py`。
+- **合并前必须处理**:`physics_contract_sha256` 是 `virtual_ball.py` 等文件的内容哈希,
+  文件一改哈希就变,`stage1_question_bank.load_question_bank` 会在启动时拒绝所有既有题库
+  (物理其实一个 bit 都没变)。离散考试题库需要走 rebind 流程重新绑定后才能合入。
+
 ## 2026-07-24（承接 07-23 动作库终审）
 
 - 五动作 × upper/full 十件正在按 `shared ready → 击球 core/window → shared ready` 直接路径重建；

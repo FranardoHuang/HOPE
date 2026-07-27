@@ -20,6 +20,8 @@ See imitate_presets.py for the frame convention and the staged bring-up levels,
 and PLANNER_IMITATE.md for the run recipes and the safe-first-test checklist.
 """
 
+from __future__ import annotations
+
 import csv
 import math
 import os

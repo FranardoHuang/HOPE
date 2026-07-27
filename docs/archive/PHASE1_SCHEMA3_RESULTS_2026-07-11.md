@@ -232,4 +232,4 @@ the physical serve/next-ball timeline identified in `NOW.md`; the independent
 one-environment-per-question adapter must not be relabeled continuous.
 
 Reproduction commands and exact/inexact boundaries are in
-[operations/run_training.md](operations/run_training.md#shared-schema-v3-bankexam-isaac--mujoco).
+[operations/run_training.md](../operations/run_training.md#shared-schema-v3-bankexam-isaac--mujoco.

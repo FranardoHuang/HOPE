@@ -36,6 +36,14 @@ _PLANNER_INITIAL_TTS_BUCKETS = (
     "gt_0p5_le_0p9",
     "gt_0p9",
 )
+# Action families the command term books per-side outcome counters for (hope_commands _clip_names).
+_STRIKE_FAMILIES = ("forehand", "backhand")
+# Cumulative per-family strike opportunities after which zero legal returns stops being a warm-up
+# artefact: a whole side that never once returns is a broken COMMAND (e.g. a target box under the
+# table surface), not a policy that needs more samples.  Four HOPE runs sat at exactly 0.0000 for
+# thousands of iterations behind a healthy aggregate before anyone looked.
+_ZERO_RETURN_ALARM_OPPORTUNITIES = 500
+_ZERO_RETURN_ABORT_OPPORTUNITIES = 5000
 
 
 def _ratio_or_none(counters: dict, numerator: str, denominator: str):
@@ -46,6 +54,13 @@ def _ratio_or_none(counters: dict, numerator: str, denominator: str):
         return None
     value = float(counters.get(numerator, 0)) / float(denom)
     return value if math.isfinite(value) else None
+
+
+def _scaled_ratio_or_none(counters: dict, numerator: str, denominator: str, scale: float):
+    """``_ratio_or_none`` times a unit conversion (the ledger is integer-only: um -> mm)."""
+
+    value = _ratio_or_none(counters, numerator, denominator)
+    return None if value is None else value * float(scale)
 
 
 def exact_behavior_decision_values(counters: dict) -> dict[str, float | None]:
@@ -97,6 +112,27 @@ def exact_behavior_decision_values(counters: dict) -> dict[str, float | None]:
             "ready_foot_slip_eligible_sample_count",
         ),
     }
+    # CONTINUOUS question production. A bank arm never draws, so `continuous_question_draw_count`
+    # is absent/zero there and _ratio_or_none makes every one of these read None — never a lying
+    # 0.0 that would look like a healthy continuous run.
+    values["continuous_question_exhausted_rate"] = _ratio_or_none(
+        counters, "continuous_question_exhausted_count", "continuous_question_draw_count"
+    )
+    values["continuous_question_admit_rate"] = _ratio_or_none(
+        counters, "continuous_question_admitted_count", "continuous_question_draw_count"
+    )
+    values["continuous_question_resid_mm_mean"] = _scaled_ratio_or_none(
+        counters, "continuous_question_resid_um_sum", "continuous_question_admitted_count", 1e-3
+    )
+    values["continuous_question_closed_loop_mm_mean"] = _scaled_ratio_or_none(
+        counters,
+        "continuous_question_closed_loop_um_sum",
+        "continuous_question_closed_loop_row_count",
+        1e-3,
+    )
+    values["continuous_question_redraw_rounds_mean"] = _ratio_or_none(
+        counters, "continuous_question_redraw_round_sum", "continuous_question_refill_count"
+    )
     for bucket_name in _PLANNER_INITIAL_TTS_BUCKETS:
         prefix = f"planner_initial_tts_{bucket_name}_"
         values[f"{prefix}swing_completion_rate"] = _ratio_or_none(
@@ -114,7 +150,40 @@ def exact_behavior_decision_values(counters: dict) -> dict[str, float | None]:
             f"{prefix}virtual_legal_return_count",
             f"{prefix}strike_opportunity_count",
         )
+    for family in _STRIKE_FAMILIES:
+        values[f"virtual_capture_per_strike_{family}"] = _ratio_or_none(
+            counters,
+            f"virtual_capture_count_{family}",
+            f"strike_opportunity_count_{family}",
+        )
+        values[f"virtual_legal_return_per_strike_{family}"] = _ratio_or_none(
+            counters,
+            f"virtual_legal_return_count_{family}",
+            f"strike_opportunity_count_{family}",
+        )
     return values
+
+
+def zero_return_alarm_levels(cumulative: dict) -> dict[str, str]:
+    """Families whose cumulative strike opportunities have produced exactly zero legal returns.
+
+    Returns {family: "alarm" | "abort"}; families that returned at least once, or that have not yet
+    accumulated enough opportunities, are absent.  This is the ONLY reading that separates "this side
+    is never eligible / never satisfiable" from "this side sometimes fails" — the aggregate rate
+    averages a dead side against a healthy one into a plausible-looking number.
+    """
+
+    levels: dict[str, str] = {}
+    for family in _STRIKE_FAMILIES:
+        opportunities = cumulative.get(f"strike_opportunity_count_{family}", 0) or 0
+        returns = cumulative.get(f"virtual_legal_return_count_{family}", 0) or 0
+        if float(returns) > 0.0:
+            continue
+        if float(opportunities) >= _ZERO_RETURN_ABORT_OPPORTUNITIES:
+            levels[family] = "abort"
+        elif float(opportunities) >= _ZERO_RETURN_ALARM_OPPORTUNITIES:
+            levels[family] = "alarm"
+    return levels
 
 
 class MyOnPolicyRunner(OnPolicyRunner):
@@ -627,6 +696,49 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         self._exact_behavior_consumed_records = records
         return records
 
+    def _check_zero_return_alarm(self, term_name: str, counters: dict, step: int) -> None:
+        """Accumulate the per-family strike ledger across updates and alarm on a pinned-at-zero side.
+
+        The per-update record is a window, so the decision needs a run-lifetime total; the counters are
+        non-decaying integers, so summing them is exact.
+        """
+
+        totals = getattr(self, "_zero_return_cumulative", None)
+        if totals is None:
+            totals = {}
+            self._zero_return_cumulative = totals
+        term_totals = totals.setdefault(term_name, {})
+        for family in _STRIKE_FAMILIES:
+            for key in (
+                f"strike_opportunity_count_{family}",
+                f"virtual_legal_return_count_{family}",
+            ):
+                if key in counters:
+                    term_totals[key] = term_totals.get(key, 0) + float(counters[key])
+        levels = zero_return_alarm_levels(term_totals)
+        for family in _STRIKE_FAMILIES:
+            opportunity_key = f"strike_opportunity_count_{family}"
+            if opportunity_key not in term_totals:
+                continue
+            level = levels.get(family)
+            self._log_scalar(
+                f"Live/{term_name}/zero_return_alarm_{family}",
+                1.0 if level else 0.0,
+                step,
+            )
+            if level is None:
+                continue
+            message = (
+                f"[HOPE ALARM] {term_name}: virtual_legal_return_count_{family} is still 0 after "
+                f"{term_totals[opportunity_key]:.0f} cumulative strike opportunities "
+                f"(ppo_update {int(step)}). A side that NEVER returns is a broken command, not a "
+                f"slow learner — check that the {family} racket target box clears the table "
+                f"(z_lo >= vb_table_surface_z + ball radius) before spending more GPU on this run."
+            )
+            print(message, flush=True)
+            if level == "abort":
+                raise RuntimeError(message)
+
     def _log_live_metrics(
         self, step: int, *, exact_behavior: dict[str, dict] | None = None
     ) -> None:
@@ -669,6 +781,9 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                             counter_value,
                             step,
                         )
+                    self._check_zero_return_alarm(
+                        str(term_name), exact_record["counters"], step
+                    )
                 else:
                     sparse_reward_consumer = getattr(
                         term, "consume_sparse_reward_eligibility_counters", None

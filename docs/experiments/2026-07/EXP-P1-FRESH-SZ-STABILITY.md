@@ -99,7 +99,7 @@ model-4000 结果后，seed3 最近方向卷也显示 4k→6k→8k parsed `1.00�
 - [Pod1 model-4000 result](../../../configs/phase1_fresh_SZ_model4000_seed_stability_q50_pod1_result_20260713.json)
 - [Pod2 model-4000 result](../../../configs/phase1_fresh_SZ_model4000_seed_stability_q50_pod2_result_20260713.json)
 - [Model-4000 aggregate](../../../configs/phase1_fresh_SZ_model4000_seed_stability_q50_aggregate_result_20260713.json)
-- [Fresh lineage](../../PHASE1_FRESH_LINEAGE_2026-07-11.md)
+- [Fresh lineage](../../archive/PHASE1_FRESH_LINEAGE_2026-07-11.md)
 - [Model-4000 操作](../../operations/run_phase1_fresh_sz_model4000_seed_stability_q50.md)
 - [持久启动执行子记录](../phase1_fresh_sz_model4000_q50_20260713.md)
 

@@ -22,6 +22,8 @@ seed normal so a spec reads as "open the face 3 deg more than the naive
 mirror" — human-readable and zero-centered for the optimizer.
 """
 
+from __future__ import annotations
+
 from dataclasses import dataclass
 from typing import Optional, Tuple
 
@@ -577,6 +579,204 @@ class StrikeSpecPlanner:
         return self._build_spec(
             q, fwd, phi0, theta0, p_ball, v_ball, omega_ball, residual_m, iterations
         )
+
+    # ------------------------------------------------------------------ #
+    # fixed-DIRECTION mode: the stroke adapter's inverse solve
+    # ------------------------------------------------------------------ #
+
+    @staticmethod
+    def _dir_from_cone(d_hat: np.ndarray, alpha: float, beta: float) -> np.ndarray:
+        """Rotate ``d_hat`` by (alpha, beta) about two axes perpendicular to it.
+
+        Small-angle-exact: builds the perturbed direction as ``normalize(d + alpha b1 + beta b2)``
+        with (b1, b2) an orthonormal basis of the plane perpendicular to d, then measures the
+        achieved deviation with an arccos — so the caller's cone bound is enforced on the ANGLE,
+        never on the parameters.
+        """
+        b1, b2 = StrikeSpecPlanner._face_basis(d_hat)
+        v = d_hat + alpha * b1 + beta * b2
+        n = float(np.linalg.norm(v))
+        return v / n if n > 1e-12 else d_hat.copy()
+
+    def _forward_fixed_dir(
+        self,
+        q: np.ndarray,
+        d_hat: np.ndarray,
+        p_strike: np.ndarray,
+        v_ball: np.ndarray,
+        omega_ball: np.ndarray,
+    ) -> Optional[dict]:
+        """q = (theta, phi, s[, alpha, beta]) -> contact + flight.
+
+        THE one structural difference from :meth:`_forward`: the racket velocity is
+        ``v_r = s * d_hat`` in the WORLD, so a face tilt no longer drags the velocity around with
+        it.  That coupling (``v_r = q[2] n + q[3] b1 + q[4] b2``, line 266) is exactly what makes
+        the free solver unable to honour "the stroke's velocity direction is its identity".
+        """
+        theta, phi, s = float(q[0]), float(q[1]), float(q[2])
+        ct = np.cos(theta)
+        n = np.array([ct * np.cos(phi), ct * np.sin(phi), np.sin(theta)])
+        d = d_hat if q.size < 5 else self._dir_from_cone(d_hat, float(q[3]), float(q[4]))
+        v_r = s * d
+        v_plus, omega_plus = predict_paddle_contact(
+            v_ball, v_r, n, omega_ball, self.physics, self.config
+        )
+        landing = self.predictor.integrate_to_table_plane(p_strike, v_plus, omega_plus)
+        if landing is None:
+            return None
+        landing_xy, t_land = landing
+        return {
+            "n": n, "d_hat": d, "v_r": v_r,
+            "v_plus": v_plus, "omega_plus": omega_plus,
+            "landing_xy": landing_xy, "t_land": t_land,
+        }
+
+    def solve_fixed_direction(
+        self,
+        p_ball: np.ndarray,
+        v_ball: np.ndarray,
+        omega_ball: Optional[np.ndarray],
+        landing_target_xy: np.ndarray,
+        d_hat_w: np.ndarray,
+        speed_min: float,
+        speed_max: float,
+        dir_cone_rad: float = 0.0,
+        s0: Optional[float] = None,
+        max_iter: Optional[int] = None,
+        tol_m: Optional[float] = None,
+        w_dir: float = 0.5,
+    ) -> Optional[dict]:
+        """Sibling of :meth:`solve_fixed_normal` with the roles swapped.
+
+        ``solve_fixed_normal`` pins the FACE and lets the velocity steer; this pins the velocity
+        DIRECTION (the stroke's identity) and lets the FACE steer.  Unknowns are
+        ``q = (theta, phi, s)`` — face elevation, face azimuth, racket speed — against two landing
+        residuals plus a least-effort speed regulariser: exactly determined.
+
+        ``dir_cone_rad > 0`` adds the stage-2 relaxation: two extra unknowns rotate ``d_hat_w``
+        inside a cone of that half-angle, with a ``w_dir`` penalty and a HARD angle bound.
+
+        Returns None when the LM never lands; otherwise a dict with ``n``, ``v_r``, ``speed``,
+        ``landing_xy``, ``resid_m``, ``dir_deviation_deg``, ``clears_net``, ``net_z_margin_m``,
+        ``v_plus``, ``omega_plus``, ``iterations``.  The SPEED BOUNDS ARE NOT ENFORCED HERE — the
+        caller (``stroke_adapt.fit_stroke_to_ball``) owns acceptance so that every rejection
+        carries a named reason instead of a bare ``None``; they are used only to seed and to
+        clamp the LM's search box.
+        """
+        max_iter = self.MAX_ITER if max_iter is None else int(max_iter)
+        tol = self.TOL_M if tol_m is None else float(tol_m)
+        p_ball = np.asarray(p_ball, dtype=float)
+        v_ball = np.asarray(v_ball, dtype=float)
+        omega_ball = np.zeros(3) if omega_ball is None else np.asarray(omega_ball, dtype=float)
+        target_xy = np.asarray(landing_target_xy, dtype=float)[:2]
+        d_hat = np.asarray(d_hat_w, dtype=float)
+        dn = float(np.linalg.norm(d_hat))
+        if dn < 1e-9:
+            return None
+        d_hat = d_hat / dn
+
+        # Seed: the mirror-law face + the e(u_n) normal-speed fixed point, projected on the
+        # PINNED direction — the same number the selector screened with.
+        phi0, theta0, v_n0 = self._initial_guess(p_ball, v_ball, target_xy)
+        n0 = self._normal_from_tilt(phi0, theta0, 0.0, 0.0)
+        if s0 is None:
+            s0 = v_n0 / max(float(np.dot(d_hat, n0)), 0.05)
+        s_seed = float(np.clip(s0, speed_min, speed_max))
+
+        cone = float(max(dir_cone_rad, 0.0))
+        nq = 3 if cone <= 0.0 else 5
+        q = np.zeros(nq)
+        q[0], q[1], q[2] = theta0, phi0, s_seed
+
+        def residual(fwd_, q_):
+            base = [fwd_["landing_xy"] - target_xy, np.array([self.W_SPEED * q_[2]])]
+            if q_.size >= 5:
+                base.append(w_dir * q_[3:5])
+            return np.concatenate(base)
+
+        fwd = self._forward_fixed_dir(q, d_hat, p_ball, v_ball, omega_ball)
+        if fwd is None:
+            return None
+        r = residual(fwd, q)
+        cost = float(r @ r)
+
+        # Jacobian steps at each variable's natural scale (rad / m/s / rad) — the same 0.2 deg
+        # and 0.02 m/s the free solver uses.
+        h = np.array([3.5e-3, 3.5e-3, 0.02, 3.5e-3, 3.5e-3])[:nq]
+        lam = 1e-3
+        iterations = 0
+
+        for _ in range(max_iter):
+            iterations += 1
+            if np.linalg.norm(fwd["landing_xy"] - target_xy) < tol:
+                break
+            J = np.zeros((r.size, nq))
+            failed = False
+            for j in range(nq):
+                q_j = q.copy()
+                q_j[j] += h[j]
+                fwd_j = self._forward_fixed_dir(q_j, d_hat, p_ball, v_ball, omega_ball)
+                if fwd_j is None:
+                    failed = True
+                    break
+                J[:, j] = (residual(fwd_j, q_j) - r) / h[j]
+            if failed:
+                lam *= 10.0
+                if lam > 1e6:
+                    return None
+                continue
+
+            JtJ = J.T @ J
+            g = J.T @ r
+            damp = np.diag(np.diag(JtJ)) + 1e-9 * np.eye(nq)
+            accepted = False
+            for _try in range(6):
+                try:
+                    dq = np.linalg.solve(JtJ + lam * damp, -g)
+                except np.linalg.LinAlgError:
+                    lam *= 10.0
+                    continue
+                q_new = q + dq
+                # search box: speed inside the stroke's own window, direction inside its cone.
+                q_new[2] = float(np.clip(q_new[2], speed_min, speed_max))
+                if nq == 5:
+                    rad = float(np.hypot(q_new[3], q_new[4]))
+                    lim = float(np.tan(cone))
+                    if rad > lim > 0.0:
+                        q_new[3:5] *= lim / rad
+                fwd_new = self._forward_fixed_dir(q_new, d_hat, p_ball, v_ball, omega_ball)
+                if fwd_new is not None:
+                    r_new = residual(fwd_new, q_new)
+                    cost_new = float(r_new @ r_new)
+                    if cost_new < cost:
+                        q, fwd, r, cost = q_new, fwd_new, r_new, cost_new
+                        lam = max(lam * 0.3, 1e-8)
+                        accepted = True
+                        break
+                lam *= 10.0
+            if not accepted and lam > 1e6:
+                break
+
+        clears_net, net_z_margin_m = compute_net_clearance(
+            p_ball, fwd["v_plus"], fwd["omega_plus"], self.predictor
+        )
+        dev = float(np.degrees(np.arccos(np.clip(float(np.dot(fwd["d_hat"], d_hat)), -1.0, 1.0))))
+        return {
+            "n": fwd["n"],
+            "v_r": fwd["v_r"],
+            "speed": float(q[2]),
+            "d_hat": fwd["d_hat"],
+            "landing_xy": fwd["landing_xy"],
+            "t_land": float(fwd["t_land"]),
+            "resid_m": float(np.linalg.norm(fwd["landing_xy"] - target_xy)),
+            "dir_deviation_deg": dev,
+            "clears_net": clears_net,
+            "net_z_margin_m": net_z_margin_m,
+            "v_plus": fwd["v_plus"],
+            "omega_plus": fwd["omega_plus"],
+            "iterations": iterations,
+            "q": q.copy(),
+        }
 
     # ------------------------------------------------------------------ #
     # sensitivities + spec assembly

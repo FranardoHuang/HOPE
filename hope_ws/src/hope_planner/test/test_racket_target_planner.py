@@ -1,5 +1,7 @@
 """Stage 3 unit tests (HOPE_7DOF...Planner_Reference_Setup.md Section 5 gates)."""
 
+from __future__ import annotations
+
 import numpy as np
 
 from hope_planner.ball_trajectory_predictor import StrikeTarget

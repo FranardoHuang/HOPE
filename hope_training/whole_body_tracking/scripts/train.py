@@ -103,6 +103,23 @@ def _get(node, key, default=None):
         return default
 
 
+def _explicitly_null(node, key) -> bool:
+    """True only when ``key`` is PRESENT and its value is null — not when it is absent.
+
+    ``_get`` collapses "absent" and "written as null" into the same None, which makes "clear this
+    knob" inexpressible for any setting whose cfg default is non-None.
+    """
+    try:
+        if key not in node:
+            return False
+    except Exception:
+        return False
+    return _get(node, key, _MISSING) is None
+
+
+_MISSING = object()
+
+
 def _publish_lean_queue_binding_if_requested(cfg, log_dir: str) -> None:
     """Publish the trainer-owned RSL directory binding for queue launches only."""
 
@@ -1930,6 +1947,16 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
                 "source_family_sha256": family_sha,
                 "exact": True,
             }
+    # CONTINUOUS producer: a continuous arm has an empty question_bank, so without this block the
+    # checkpoint would record NOTHING about how its targets were produced — no cfg hash, no solver
+    # version, no physics contract. That regresses reproducibility below the PRE-bank baseline.
+    continuous_questions = None
+    if hasattr(racket_cmd, "_cq_hard_contract"):
+        continuous_questions = racket_cmd._cq_hard_contract()
+    if question_bank is not None and continuous_questions is not None:
+        raise RuntimeError(
+            "a run cannot have both a training question bank and a continuous producer"
+        )
     post_swing_replay = motion_cmd.post_swing_replay_hard_contract()
     planner_runtime_contract = motion_cmd.planner_revision_hard_contract()
     planner_training_contract = motion_cmd.planner_revision_training_hard_contract()
@@ -1947,6 +1974,11 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
         "normal_mode": attr(racket, "normal_mode"),
         "racket_pos_range_per_clip": attr(racket, "racket_pos_range_per_clip"),
         "racket_vel_range_per_clip": attr(racket, "racket_vel_range_per_clip"),
+        # N-stroke addressing + the per-clip incoming-ball regime. Recorded so a run's per-clip
+        # metric bucket names and per-clip ball boxes are reconstructable from the contract alone.
+        "clip_names_per_clip": attr(racket, "clip_names_per_clip"),
+        "vb_vel_range_per_clip": attr(racket, "vb_vel_range_per_clip"),
+        "vb_spin_abs_max_per_clip": attr(racket, "vb_spin_abs_max_per_clip"),
         "base_target_x_range": attr(racket, "base_target_x_range"),
         "base_target_y_range": attr(racket, "base_target_y_range"),
         "mount_normal_axis": attr(racket, "mount_normal_axis"),
@@ -2124,6 +2156,10 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
         ),
         "motion_clips": clips,
         "question_bank": question_bank,
+        # Absent (not None) for every historical bank/no-bank run, so old checkpoints stay
+        # byte-identical under the resume contract diff.
+        **({} if continuous_questions is None
+           else {"continuous_questions": continuous_questions}),
     }
 
 
@@ -2322,6 +2358,13 @@ _RACKET_KEYS = (
     "strike_window_pos_s", "strike_window_wide_s",
     "pos_x_range", "pos_y_range", "pos_z_range", "racket_pos_y_abs_range", "pos_range_per_clip",
     "vel_x_range", "vel_y_range", "vel_z_range", "vel_range_per_clip",
+    # N-stroke addressing: the ORDERED per-clip key list every per-clip block above is keyed by
+    # (absent = the legacy two family names). Lifts the two-stroke ceiling.
+    "clip_names",
+    # per-clip INCOMING-ball regime (a block gets fast balls, a loop slow ones, same run)
+    "vb_vel_range_per_clip", "vb_spin_abs_max_per_clip",
+    # Escape hatch for the "commanded return velocity must point at the opponent" construction gate.
+    "allow_non_forward_target_velocity",
     "base_target_x_range", "base_target_y_range",
     "normal_mode", "forehand_on_negative_y", "mount_normal_axis", "mount_normal_sign",
     # 每 clip 击球面符号(正反手各用拍子固定的一面;空/缺省=标量 mount_normal_sign,现役行为不变)
@@ -2364,6 +2407,15 @@ _RACKET_KEYS = (
     # face-command reward re-anchor / +4 actor obs channel (normal + rho placeholder, 175->179).
     "question_bank", "question_bank_allow_legacy", "face_command", "face_command_pairing",
     "face_command_obs",
+    # CONTINUOUS question production (owner: 离散题库是考试用的,训练必须连续采样). ONE switch,
+    # racket.target_mode: solved — every cq_* below is either derived or fail-closed, so there is
+    # no second thing to remember. cq_anchor_bank is the validated CONTRACT ANCHOR (never trained
+    # on); exam_bank is what judge.sh reads so no operator has to pass --exam-bank.
+    "cq_vel_range_per_clip", "cq_aim_xy", "cq_spin_abs_max", "cq_buffer_rows", "cq_overdraw",
+    "cq_n_iters", "cq_tol_m", "cq_speed_budget", "cq_max_redraw_rounds", "cq_max_face_deg",
+    "cq_exam_holdout", "cq_seed", "cq_accept_buckets", "cq_max_exhausted_frac",
+    "cq_abort_exhausted_frac", "cq_min_accept_rate", "cq_closed_loop_rows",
+    "cq_closed_loop_max_err_m", "cq_anchor_bank", "exam_bank",
     # R10c 站位锚观测(+2 actor 尾维,179->181;franco 2026-07-09"planner 的 p_base 应该加进去")
     "station_obs", "station_anchor_offset_xy",
     # SHADOW physical ball + table (flag-gated, METRICS-ONLY engine-vs-analytic landing
@@ -2520,6 +2572,8 @@ _REWARD_KEYS = (
     "virtual_landing_weight", "virtual_landing_base_frac",
     # 摔死罚消融键(07-26 death09 臂;配方审计发现包 direct 写死 -1800 无 CLI 面)。
     "death_penalty_weight",
+    # 撞桌罚消融键(07-27 上桌障碍物;与 death_penalty_weight 同形,只认 robot_hit_table)。
+    "table_hit_penalty_weight",
 )
 
 # jiayi 的 YAML-null 删参修复(8ee2e82a,搬进 main 血统)。人话:task YAML 层层继承时,子任务
@@ -2702,6 +2756,16 @@ _REWARD_PACK_V2_DIRECT = (
     # 与自杀区间(死免费活扣钱)方向相反。PACE 先例 −1000×dt=−20 同量级。
     ("death_penalty", -1800.0),
 )
+# 包里的【可选】项:term 不存在时【跳过并记账】,不 fail-loud。
+# 与上面 DIRECT 的区别就是这一条,理由也只有一条:DIRECT 的 fail-loud 是在说"这个 cfg 血统根
+# 本不长 v2 要动的项",而可选项的缺席是一个【合法配置】——桌子被 task.table_obstacle=false
+# 关掉时 table_hit_penalty 会被 apply_table_obstacle 一并撤走,这不是配错,是无桌对照臂。
+_REWARD_PACK_V2_OPTIONAL = (
+    # 撞桌罚(07-27 上桌障碍物)。与摔死同价 −1800×dt=−36/次,并且**叠加**在 death_penalty
+    # 之上(撞桌是真终止,is_terminated 也会计),所以一次撞桌实际 −72,严格贵于摔一跤 −36。
+    # 这是有意的定序:真机上把拍子砸到台面比摔一跤更贵(球拍/腕关节),不该更便宜。
+    ("table_hit_penalty", -1800.0),
+)
 # v2.2 direct-params:landing 换 legal_base 语义(v1 climb 字节等价保留在函数默认)。
 # 延付(settle_delay_s)07-26 Franco 裁决:默认关、降级为消融 flag——death_penalty −1800
 # + stand_start 已双重关死刷分回路,延付的边际价值待消融检验(臂级用
@@ -2790,6 +2854,14 @@ def _expand_reward_pack(env_cfg, task, rw, applied):
         )
         getattr(R, name).weight = float(weight)
         applied.append(f"rewards.{name}.weight={float(weight)} (reward_pack=v2)")
+    for name, weight in _REWARD_PACK_V2_OPTIONAL:
+        if getattr(R, name, None) is None:
+            # 记账不是可选的:哪怕跳过也要在 applied log 里留一行,否则"这臂没有撞桌罚"就只能
+            # 靠猜。
+            applied.append(f"rewards.{name} ABSENT -> skipped (reward_pack=v2 optional)")
+            continue
+        getattr(R, name).weight = float(weight)
+        applied.append(f"rewards.{name}.weight={float(weight)} (reward_pack=v2 optional)")
     # v2.2:landing 切 legal_base 语义(过网+落台=先决条件,门内底薪+中心核梯度)。
     _landing = getattr(R, "virtual_landing")
     _require(
@@ -2893,78 +2965,190 @@ def _resolve_strike_phase(rk, clip_name):
     return (None if sp is None else float(sp)), None
 
 
-# YAML clip-name -> clip_id index. MUST match RacketTargetCommand._clip_names (0=forehand, 1=backhand).
-_CLIP_NAME_TO_ID = {"forehand": 0, "backhand": 1}
+# Legacy YAML clip names: the two FAMILIES, which for a 2-clip run are also the two clips.
+# The system is no longer限于两个动作: ``racket.clip_names`` declares an ORDERED per-clip key list
+# (e.g. [fh_loop, bh_loop_c, s0_highpress, bh_block, fh_block_syn]) and every per-clip YAML block
+# below is keyed by those names, in that order. Absent -> the legacy two names, byte-identical.
+_DEFAULT_CLIP_NAMES = ("forehand", "backhand")
+
+#: The physical-validity guards that must EXIST in the checkout a run is launched from.
+#: 人话:这三道闸是"目标点不能在桌面以下 / 命令速度必须朝对面 / 参考击球帧必须能把自己的球打
+#: 回去"。一个旧 checkout 照样 import 得动、照样跑,只是三道闸一道都不在——训练曲线不会告诉你。
+#: 所以发射时对着**真正被 import 的那个模块**核对,而不是对着操作员看的那个仓库。
+_REQUIRED_PHYSICAL_GUARDS = (
+    ("_assert_contact_clears_table",
+     "commanded contact point below the table surface + ball radius"),
+    ("_assert_target_velocity_points_forward",
+     "commanded return velocity that can point away from the opponent"),
+    ("_assert_reference_strike_can_return_its_own_regime",
+     "a bound strike frame that cannot return any ball from that clip's own regime"),
+)
 
 
-def _resolve_vel_range_per_clip(rk):
-    """Build the optional PER-CLIP racket target-velocity tuple from the YAML ``vel_range_per_clip`` block.
+def _assert_physical_validity_guards_present(racket_cfg):
+    """Fail closed when the imported command module predates the physical-validity guards."""
+    import inspect as _inspect
 
-    YAML (readable, keyed by swing name; each axis a [lo, hi] list)::
+    module = sys.modules.get(type(racket_cfg).__module__)
+    if module is None:
+        raise _OverrideError(
+            f"cannot resolve the module of {type(racket_cfg).__name__} to verify the "
+            f"physical-validity guards are present in this checkout")
+    command_cls = getattr(module, "RacketTargetCommand", None)
+    if command_cls is None:
+        raise _OverrideError(
+            f"{getattr(module, '__file__', module.__name__)} has no RacketTargetCommand — this "
+            f"checkout cannot carry the physical-validity guards")
+    missing = [(name, what) for name, what in _REQUIRED_PHYSICAL_GUARDS
+               if not hasattr(command_cls, name)]
+    if missing:
+        # Report the MODULE's file: that is the checkout artifact the operator has to update.
+        where = getattr(module, "__file__", None)
+        if not where:
+            try:
+                where = _inspect.getsourcefile(command_cls) or "<unknown>"
+            except TypeError:
+                where = "<unknown>"
+        detail = "; ".join(f"{name} (guards against: {what})" for name, what in missing)
+        raise _OverrideError(
+            f"launch source check: the checkout being trained from ({where}) is missing "
+            f"{len(missing)} of {len(_REQUIRED_PHYSICAL_GUARDS)} physical-validity guard(s): "
+            f"{detail}. It would import and train cleanly with those checks silently absent. "
+            f"Update the checkout on this machine before launching")
+
+
+def _resolve_clip_names(rk):
+    """The ORDERED per-clip key list every per-clip YAML block is addressed by.
+
+    人话:以前"每 clip 一行"的框表只认 forehand/backhand 两个名字,所以五个动作根本写不出来,
+    而且同一族的两个 clip 会撞成一行。现在在 racket 下写一行::
+
+        clip_names: [fh_loop, bh_loop_c, s0_highpress, bh_block, fh_block_syn]
+
+    顺序 = motion_file 的 clip 顺序 = clip_id。不写就还是老的两个名字,现役 YAML 逐字节不变。
+    """
+    raw = _get(rk, "clip_names")
+    if raw is None:
+        return _DEFAULT_CLIP_NAMES
+    names = tuple(str(n).strip().lower() for n in raw)
+    if not names:
+        raise _OverrideError("racket.clip_names: empty list — give one name per loaded clip")
+    if len(set(names)) != len(names):
+        dupes = sorted({n for n in names if names.count(n) > 1})
+        raise _OverrideError(
+            f"racket.clip_names: duplicate name(s) {dupes} — clip names index clip_id, so each "
+            f"must be unique (two clips of the same family need two DIFFERENT names, which is "
+            f"exactly the collision this list exists to remove)")
+    return names
+
+
+def _resolve_range_per_clip(rk, key, names):
+    """Shared parser for the per-clip 3-axis box blocks, keyed by ``names`` in order.
+
+    YAML (each axis a [lo, hi] list)::
 
         vel_range_per_clip:
-          forehand: {x: [1.5, 3.5], y: [-1.0, 1.0], z: [0.0, 1.5]}
-          backhand: {x: [1.2, 2.4], y: [-1.0, 1.0], z: [0.0, 1.2]}
+          fh_loop:   {x: [1.5, 3.5], y: [-1.0, 1.0], z: [0.0, 1.5]}
+          bh_block:  {x: [1.2, 2.4], y: [-1.0, 1.0], z: [0.0, 1.2]}
+          ...
 
-    Returns a tuple indexed by clip_id (0=forehand, 1=backhand) of ``((xlo,xhi),(ylo,yhi),(zlo,zhi))``,
-    or ``None`` when the key is absent (-> keep the shared ``vel_*_range`` box; backward compatible).
-    Forehand and backhand reference clips have different natural strike speeds, so a shared box overshoots
-    the slower backhand. Mirrors the per-clip ``strike_phase_per_clip`` / ``ref_vel_scale_by_motion`` style.
+    Returns a tuple indexed by clip_id of ``((xlo,xhi),(ylo,yhi),(zlo,zhi))``, or ``None`` when the
+    key is absent (-> keep the shared scalar box; backward compatible).
+
+    FAIL-CLOSED on length: the block must name EVERY clip in ``names`` exactly once. The old parser
+    built ``tuple(by_id[i] for i in range(len(by_id)))``, so a block that named only some clips
+    produced a SHORT table that then silently rode the two-row family expansion, or KeyError'd on
+    an unrelated index.
     """
-    block = _get(rk, "vel_range_per_clip")
+    block = _get(rk, key)
     if block is None:
         return None
+    index = {n: i for i, n in enumerate(names)}
     by_id = {}
     for name in block:
-        cid = _CLIP_NAME_TO_ID.get(str(name).lower())
+        cid = index.get(str(name).strip().lower())
         if cid is None:
             raise _OverrideError(
-                f"racket.vel_range_per_clip: unknown clip name {name!r} (expected forehand/backhand)")
+                f"racket.{key}: unknown clip name {name!r} — expected one of {list(names)} "
+                f"(set racket.clip_names to declare the per-clip key order)")
         axes = _get(block, name)
 
         def _r(ax):
             v = _get(axes, ax)
             if v is None:
-                raise _OverrideError(f"racket.vel_range_per_clip[{name}]: missing '{ax}' [lo,hi] range")
+                raise _OverrideError(f"racket.{key}[{name}]: missing '{ax}' [lo,hi] range")
             return (float(v[0]), float(v[1]))
 
         by_id[cid] = (_r("x"), _r("y"), _r("z"))
-    return tuple(by_id[i] for i in range(len(by_id)))
+    missing = [n for i, n in enumerate(names) if i not in by_id]
+    if missing:
+        raise _OverrideError(
+            f"racket.{key} has {len(by_id)} row(s) but racket.clip_names declares "
+            f"{len(names)} clip(s); missing {missing}. Give one row per clip — a short table "
+            f"would silently be re-used for the clips it does not mention")
+    return tuple(by_id[i] for i in range(len(names)))
 
 
-def _resolve_pos_range_per_clip(rk):
-    """Build the optional PER-CLIP racket target-POSITION tuple from the YAML ``pos_range_per_clip`` block.
+def _resolve_vel_range_per_clip(rk, names=_DEFAULT_CLIP_NAMES):
+    """PER-CLIP racket target-VELOCITY boxes. See :func:`_resolve_range_per_clip`.
 
-    YAML (readable, keyed by swing name; each axis a [lo, hi] list, ADDED to the env origin; y is SIGNED)::
-
-        pos_range_per_clip:
-          forehand: {x: [0.50, 0.62], y: [-0.45, -0.20], z: [0.72, 0.98]}
-          backhand: {x: [0.50, 0.62], y: [ 0.20,  0.45], z: [1.05, 1.30]}
-
-    Returns a tuple indexed by clip_id (0=forehand, 1=backhand) of ``((xlo,xhi),(ylo,yhi),(zlo,zhi))``,
-    or ``None`` when the key is absent (-> keep the shared ``pos_*_range`` box; backward compatible).
-    Mirrors ``vel_range_per_clip``: lets each clip's target track its own reference strike point (e.g. the
-    backhand sits higher/forward at strike_phase 0.50, so a shared z<=1.05 box makes it unreachable).
+    Each clip has its own natural strike speed, so a shared box overshoots the slower ones.
     """
-    block = _get(rk, "pos_range_per_clip")
+    return _resolve_range_per_clip(rk, "vel_range_per_clip", names)
+
+
+def _resolve_pos_range_per_clip(rk, names=_DEFAULT_CLIP_NAMES):
+    """PER-CLIP racket target-POSITION boxes (ADDED to the env origin; y is SIGNED).
+
+    Lets each clip's target track its own reference strike point (e.g. a backhand that sits higher
+    and further forward at its strike phase, which a shared z<=1.05 box makes unreachable).
+    """
+    return _resolve_range_per_clip(rk, "pos_range_per_clip", names)
+
+
+def _resolve_vb_vel_range_per_clip(rk, names=_DEFAULT_CLIP_NAMES):
+    """PER-CLIP INCOMING-BALL velocity boxes — the per-clip ball regime.
+
+    人话:这是"给挡球喂快球、给拉球喂慢球"的开关。以前来球速度只有一个全局框
+    (``vb_vel_x/y/z_range``),所有 clip 共用,于是一个动作的最佳来球速度落在框外就永远得低分,
+    而这恰恰是 bh_loop_c 在自己速度下峰值 5.12 m/s(框是 2.0-4.6)只有 0.150 分的机制。
+
+    Shaped exactly like ``vel_range_per_clip``; absent -> the shared ``vb_vel_*_range`` box,
+    byte-identical to today.
+    """
+    return _resolve_range_per_clip(rk, "vb_vel_range_per_clip", names)
+
+
+def _resolve_vb_spin_abs_max_per_clip(rk, names=_DEFAULT_CLIP_NAMES):
+    """PER-CLIP incoming-ball |spin| ceiling (rad/s), keyed like the boxes above.
+
+    A block answering a heavy topspin loop and a loop answering a float serve are different
+    regimes; absent -> the scalar ``vb_spin_abs_max`` for every clip, byte-identical.
+    """
+    block = _get(rk, "vb_spin_abs_max_per_clip")
     if block is None:
         return None
+    if isinstance(block, (list, tuple, ListConfig)):
+        vals = [float(v) for v in block]
+        if len(vals) != len(names):
+            raise _OverrideError(
+                f"racket.vb_spin_abs_max_per_clip has {len(vals)} entries but racket.clip_names "
+                f"declares {len(names)} clip(s) — give one per clip, in clip order")
+        return tuple(vals)
+    index = {n: i for i, n in enumerate(names)}
     by_id = {}
     for name in block:
-        cid = _CLIP_NAME_TO_ID.get(str(name).lower())
+        cid = index.get(str(name).strip().lower())
         if cid is None:
             raise _OverrideError(
-                f"racket.pos_range_per_clip: unknown clip name {name!r} (expected forehand/backhand)")
-        axes = _get(block, name)
-
-        def _r(ax):
-            v = _get(axes, ax)
-            if v is None:
-                raise _OverrideError(f"racket.pos_range_per_clip[{name}]: missing '{ax}' [lo,hi] range")
-            return (float(v[0]), float(v[1]))
-
-        by_id[cid] = (_r("x"), _r("y"), _r("z"))
-    return tuple(by_id[i] for i in range(len(by_id)))
+                f"racket.vb_spin_abs_max_per_clip: unknown clip name {name!r} — expected one of "
+                f"{list(names)}")
+        by_id[cid] = float(_get(block, name))
+    missing = [n for i, n in enumerate(names) if i not in by_id]
+    if missing:
+        raise _OverrideError(
+            f"racket.vb_spin_abs_max_per_clip is missing {missing} — give one value per clip")
+    return tuple(by_id[i] for i in range(len(names)))
 
 
 def _resolve_ref_vel_scale(rk, clip_name):
@@ -4655,6 +4839,23 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             )
             R.death_penalty.weight = _dpw_f
             applied.append(f"rewards.death_penalty.weight={_dpw_f}")
+
+        # 撞桌罚(07-27)。与 death_penalty_weight 同形:只许 <=0,0 = 消融关闭。
+        # 该项由 apply_table_obstacle 随桌子装上;桌子被关掉时它不存在,这时给非零权重是
+        # 配置错误(罚一个永远不会发生的事),直接报错而不是静默忽略。
+        _thw = _get(rw, "table_hit_penalty_weight")
+        if _thw is not None:
+            _thw_f = float(_thw)
+            _require(
+                math.isfinite(_thw_f) and _thw_f <= 0.0,
+                "rewards.table_hit_penalty_weight (finite, <= 0)",
+            )
+            _require(
+                hasattr(R, "table_hit_penalty") and R.table_hit_penalty is not None,
+                "rewards.table_hit_penalty (weight override; needs task.table_obstacle=true)",
+            )
+            R.table_hit_penalty.weight = _thw_f
+            applied.append(f"rewards.table_hit_penalty.weight={_thw_f}")
         jt = _get(rw, "joint_torques_weight")
         if jt is not None:
             _require(hasattr(R, "joint_torques"), "rewards.joint_torques")
@@ -4912,6 +5113,11 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _require(hasattr(env_cfg.commands, "racket_target"),
                      f"commands.racket_target (task YAML sets racket keys {provided})")
             C = env_cfg.commands.racket_target
+            # LAUNCH-SOURCE GATE: prove the checkout we are about to train FROM actually contains
+            # the physical-validity guards. A pod checkout that predates them imports cleanly and
+            # silently skips all three, so "the guard exists" must be asserted against the module
+            # that was really imported, not against the repo the operator is looking at.
+            _assert_physical_validity_guards_present(C)
             # strike_phase is PER-MOTION: the racket-tip contact frame differs per clip, so a single
             # global value is wrong when the trained motion changes (forehand 0.46 vs backhand 0.59).
             # `strike_phase_by_motion` (clip-name substring -> phase) wins when it matches `clip_name`;
@@ -4961,19 +5167,48 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _set_range(C, "racket_vel_z_range", _get(rk, "vel_z_range"), applied, "racket_target")
             # Optional PER-CLIP velocity boxes (unified policy): forehand=clip 0, backhand=clip 1. Absent ->
             # keep the shared vel_*_range above (backward compatible). The slower backhand needs a lower box.
-            _vpc = _resolve_vel_range_per_clip(rk)
+            _clip_names = _resolve_clip_names(rk)
+            if _clip_names != _DEFAULT_CLIP_NAMES:
+                _require(hasattr(C, "clip_names_per_clip"), "racket_target.clip_names_per_clip")
+                C.clip_names_per_clip = tuple(_clip_names)
+                applied.append(f"racket_target.clip_names_per_clip={C.clip_names_per_clip}")
+            _vpc = _resolve_vel_range_per_clip(rk, _clip_names)
             if _vpc is not None:
                 _require(hasattr(C, "racket_vel_range_per_clip"), "racket_target.racket_vel_range_per_clip")
                 C.racket_vel_range_per_clip = _vpc
                 applied.append(f"racket_target.racket_vel_range_per_clip={_vpc}")
+            elif _explicitly_null(rk, "vel_range_per_clip"):
+                # A banked/solved run has the velocity SOLVED, so this box is dead and
+                # _assert_solved_target_recipe_is_coherent refuses to launch while it is set. Its
+                # own error says "set it to None" — writing ``vel_range_per_clip: null`` is how a
+                # run says that, and without this branch the instruction is unfollowable because
+                # the box comes from a shipped cfg default, not from the yaml.
+                _require(hasattr(C, "racket_vel_range_per_clip"), "racket_target.racket_vel_range_per_clip")
+                C.racket_vel_range_per_clip = None
+                applied.append("racket_target.racket_vel_range_per_clip=None (explicit null)")
+            _set_attr(C, "allow_non_forward_target_velocity",
+                      _get(rk, "allow_non_forward_target_velocity"), _as_bool, applied, "racket_target")
             # Optional PER-CLIP position boxes (unified policy): forehand=clip 0, backhand=clip 1. Absent ->
             # keep the shared pos_*_range + |y|-sign box above (backward compatible). Lets each clip's target
             # track its own reference strike point (e.g. backhand z~1.2 at strike_phase 0.50).
-            _ppc = _resolve_pos_range_per_clip(rk)
+            _ppc = _resolve_pos_range_per_clip(rk, _clip_names)
             if _ppc is not None:
                 _require(hasattr(C, "racket_pos_range_per_clip"), "racket_target.racket_pos_range_per_clip")
                 C.racket_pos_range_per_clip = _ppc
                 applied.append(f"racket_target.racket_pos_range_per_clip={_ppc}")
+            # PER-CLIP INCOMING-BALL regime (TASK B): a block gets fast balls, a loop slow ones, in
+            # the SAME run. Absent -> the shared vb_vel_*_range box, byte-identical.
+            _vbpc = _resolve_vb_vel_range_per_clip(rk, _clip_names)
+            if _vbpc is not None:
+                _require(hasattr(C, "vb_vel_range_per_clip"), "racket_target.vb_vel_range_per_clip")
+                C.vb_vel_range_per_clip = _vbpc
+                applied.append(f"racket_target.vb_vel_range_per_clip={_vbpc}")
+            _vbspc = _resolve_vb_spin_abs_max_per_clip(rk, _clip_names)
+            if _vbspc is not None:
+                _require(hasattr(C, "vb_spin_abs_max_per_clip"),
+                         "racket_target.vb_spin_abs_max_per_clip")
+                C.vb_spin_abs_max_per_clip = _vbspc
+                applied.append(f"racket_target.vb_spin_abs_max_per_clip={_vbspc}")
             _set_range(C, "base_target_x_range", _get(rk, "base_target_x_range"), applied, "racket_target")
             _set_range(C, "base_target_y_range", _get(rk, "base_target_y_range"), applied, "racket_target")
             # weak base->racket coupling (uniform mode): fraction of the racket Y offset + clamp (meters)
@@ -5089,6 +5324,37 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             # path (gen_stage1_questions.py); face_command re-anchors the racket_normal reward onto
             # the demanded normal (target_normal_cmd).
             _set_attr(C, "question_bank", _get(rk, "question_bank"), str, applied, "racket_target")
+            # --- CONTINUOUS questions (racket.target_mode: solved) ---------------------------
+            _set_attr(C, "cq_anchor_bank", _get(rk, "cq_anchor_bank"), str, applied, "racket_target")
+            _set_attr(C, "exam_bank", _get(rk, "exam_bank"), str, applied, "racket_target")
+            _set_attr(C, "cq_spin_abs_max", _get(rk, "cq_spin_abs_max"), float, applied, "racket_target")
+            _set_attr(C, "cq_buffer_rows", _get(rk, "cq_buffer_rows"), int, applied, "racket_target")
+            _set_attr(C, "cq_overdraw", _get(rk, "cq_overdraw"), float, applied, "racket_target")
+            _set_attr(C, "cq_n_iters", _get(rk, "cq_n_iters"), int, applied, "racket_target")
+            _set_attr(C, "cq_tol_m", _get(rk, "cq_tol_m"), float, applied, "racket_target")
+            _set_attr(C, "cq_speed_budget", _get(rk, "cq_speed_budget"), float, applied, "racket_target")
+            _set_attr(C, "cq_max_redraw_rounds", _get(rk, "cq_max_redraw_rounds"), int, applied, "racket_target")
+            _set_attr(C, "cq_max_face_deg", _get(rk, "cq_max_face_deg"), float, applied, "racket_target")
+            _set_attr(C, "cq_exam_holdout", _get(rk, "cq_exam_holdout"), _as_bool, applied, "racket_target")
+            _set_attr(C, "cq_seed", _get(rk, "cq_seed"), int, applied, "racket_target")
+            _set_attr(C, "cq_accept_buckets", _get(rk, "cq_accept_buckets"), int, applied, "racket_target")
+            _set_attr(C, "cq_max_exhausted_frac", _get(rk, "cq_max_exhausted_frac"), float, applied, "racket_target")
+            _set_attr(C, "cq_abort_exhausted_frac", _get(rk, "cq_abort_exhausted_frac"), float, applied, "racket_target")
+            _set_attr(C, "cq_min_accept_rate", _get(rk, "cq_min_accept_rate"), float, applied, "racket_target")
+            _set_attr(C, "cq_closed_loop_rows", _get(rk, "cq_closed_loop_rows"), int, applied, "racket_target")
+            _set_attr(C, "cq_closed_loop_max_err_m", _get(rk, "cq_closed_loop_max_err_m"), float,
+                      applied, "racket_target")
+            _cqv = _get(rk, "cq_vel_range_per_clip")
+            if _cqv is not None:
+                # 每 clip 一行 ((x_lo,x_hi),(y_lo,y_hi),(z_lo,z_hi)) —— 这就是这条臂**声明的**
+                # 来球分布,没有共享兜底(静默兜底会让每条臂的真任务和它的 yaml 不是一回事)。
+                C.cq_vel_range_per_clip = tuple(
+                    tuple((float(lo), float(hi)) for (lo, hi) in clip_rng) for clip_rng in _cqv)
+                applied.append(f"racket_target.cq_vel_range_per_clip={C.cq_vel_range_per_clip}")
+            _cqa = _get(rk, "cq_aim_xy")
+            if _cqa is not None:
+                C.cq_aim_xy = tuple(float(v) for v in _cqa)
+                applied.append(f"racket_target.cq_aim_xy={C.cq_aim_xy}")
             _set_attr(C, "question_bank_allow_legacy", _get(rk, "question_bank_allow_legacy"),
                       _as_bool, applied, "racket_target")
             _set_attr(C, "face_command", _get(rk, "face_command"), _as_bool, applied, "racket_target")
@@ -5133,6 +5399,45 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                         "[train.py] racket.question_bank is incompatible with "
                         f"racket.midswing_resample_prob={_ms_prob}: a redraw would change the "
                         "question without rescheduling the same physical/shadow ball. Set it to 0.")
+            # Same rule, keyed on "is the target SOLVED" rather than "is there an npz path" — a
+            # continuous arm re-enters the same solve seam mid-swing and would swap the question
+            # while the ball is still flying to the old one.
+            if str(getattr(C, "target_mode", "")) == "solved":
+                _ms_prob = float(getattr(C, "midswing_resample_prob", 0.0))
+                if _ms_prob > 0.0:
+                    raise _OverrideError(
+                        "[train.py] racket.target_mode=solved (continuous questions) is "
+                        f"incompatible with racket.midswing_resample_prob={_ms_prob}: the "
+                        "mid-swing path re-enters the solve seam but never reschedules the "
+                        "physical/shadow ball. Set it to 0.")
+                if str(getattr(C, "question_bank", "") or "").strip():
+                    raise _OverrideError(
+                        "[train.py] racket.target_mode=solved produces the target from a "
+                        "continuous draw; racket.question_bank must be empty. To keep a bank as "
+                        "the validated CONTRACT ANCHOR (never trained on) use "
+                        "racket.cq_anchor_bank.")
+                # 时间律,提前到解析期。人话:同一条规则本来只有第一次 env reset 才炸 —— 也就是
+                # 整个 Isaac Sim 起完(实测 3 分 09 秒)才告诉你 yaml 写错了一行。规则不变,只是
+                # 让它在还没花钱之前就响。环境侧那条留着,它是最后一道。
+                _M = env_cfg.commands.motion
+                _ssr = tuple(float(x) for x in (getattr(_M, "speed_scale_range", (1.0, 1.0))
+                                                or (1.0, 1.0)))
+                if _ssr != (1.0, 1.0):
+                    raise _OverrideError(
+                        f"[train.py] racket.target_mode=solved with motion.speed_scale_range="
+                        f"{_ssr}: the retiming scale no longer shapes the TARGET (it is solved at "
+                        f"the ball) but it still divides the actor's time-to-strike, so a "
+                        f"non-unity range is a silent inconsistency between command and clock. "
+                        f"Set task.motion.speed_scale_range=[1.0, 1.0]. NOTE this is also why a "
+                        f"continuous-vs-bank A/B cannot be run at matched speed_scale_range: the "
+                        f"live bank arms run [0.6, 1.0] only because the same guard is dead for "
+                        f"them (MotionLoader carries no cfg).")
+                _sspc = getattr(_M, "speed_scale_per_clip", None)
+                if _sspc is not None and any(float(s) != 1.0 for s in _sspc):
+                    raise _OverrideError(
+                        f"[train.py] racket.target_mode=solved with motion.speed_scale_per_clip="
+                        f"{tuple(float(s) for s in _sspc)} — same inconsistency as "
+                        f"speed_scale_range; set every entry to 1.0.")
             # face_command_obs (+4 actor dims: demanded normal (3) + zero-filled rho placeholder (1),
             # the contract-day 175 -> 179 layout): the obs groups were finalized in __post_init__
             # BEFORE overrides run, so setting env_cfg.face_command_obs here would be a silent
@@ -5231,6 +5536,32 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             env_cfg.physical_ball = True  # keep the descriptive env-cfg field honest
         _attach_physical(env_cfg)
         applied.append("scene.pb_ball+pb_table attached (Phase A truth instrument; metrics-only)")
+
+    # TABLE OBSTACLE — TOP-LEVEL task key (task.table_obstacle), mirroring the env-cfg field
+    # HOPEPingPongAgibotA3EnvCfg.table_obstacle. DEFAULT ON in the cfg, so this key exists to turn
+    # it OFF for a deliberate no-table ablation (and to make "this arm trained without a table"
+    # a thing the applied log states rather than something you infer from the date).
+    # 人话:桌子默认在。这个键是给"故意不要桌子"的对照臂用的。
+    # __post_init__ already ran, so flipping the field here is not enough — apply_table_obstacle
+    # re-runs the whole install/remove (scene collider + termination + penalty) and is idempotent,
+    # so the cfg-flag and YAML/CLI paths compose. Consumed in this same block; there is no
+    # top-level unknown-key scan, so this comment is the whitelist (task.physical_ball precedent).
+    _tob = _get(task, "table_obstacle")
+    if _tob is not None:
+        from whole_body_tracking.tasks.tracking.config.agibot_a3.hope_env_cfg import (
+            apply_table_obstacle as _apply_table,
+        )
+
+        _require(hasattr(env_cfg, "table_obstacle"),
+                 "env_cfg.table_obstacle (task.table_obstacle)")
+        env_cfg.table_obstacle = _as_bool(_tob)
+        _apply_table(env_cfg)
+        applied.append(
+            f"task.table_obstacle={env_cfg.table_obstacle} "
+            f"(collider={env_cfg.table_obstacle_prim or 'NONE'}; "
+            f"terminations.robot_hit_table="
+            f"{'on' if getattr(env_cfg.terminations, 'robot_hit_table', None) is not None else 'off'})"
+        )
 
     # R-a actor leg-reference masking (reward_staged_design 2026-07-08 §⑥; HITTER critic-only
     # reference structure) — TOP-LEVEL task key (task.actor_leg_ref_mask), mirroring the

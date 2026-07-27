@@ -1,5 +1,7 @@
 """Quaternion utility tests (Planner_Reference_Setup.md Section 8 gate)."""
 
+from __future__ import annotations
+
 import numpy as np
 
 from hope_planner.quaternion_utils import _quat_to_matrix, normal_to_quaternion

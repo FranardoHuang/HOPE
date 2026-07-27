@@ -421,7 +421,18 @@ def resolve_clip_family_is_forehand(clip_family_per_clip, num_segments: int) -> 
         raise ValueError(
             f"clip_family_per_clip entries must be one of {_CLIP_FAMILIES}, got {unknown}"
         )
-    if CLIP_FAMILY_FOREHAND not in families or CLIP_FAMILY_BACKHAND not in families:
+    # The both-families rule is about the UNIFIED policy: with two or more clips, swing_sign, the
+    # swing-type observation and the target side are all keyed off the family split, so a one-sided
+    # table would train one lane and leave the other dead. A SINGLE-clip run has no split to key on
+    # — swing_sign is one constant for every env — so the rule has nothing to protect there, and
+    # applying it anyway leaves a single-clip arm no way to say which hand it is. It then falls into
+    # the ``None`` default, which hardcodes "single clip is a forehand": every backhand-only arm
+    # silently reports as a forehand and its per-side metrics read a structural 0.0000 while the
+    # aggregate moves. 人话:一条只有反手的臂本来连"我是反手"都说不出口,只能被默认当成正手,
+    # 于是逐侧指标恒为 0 —— 正是 07-26 把 45% 回球率读废的那个坑的镜像。
+    if nseg >= 2 and (
+        CLIP_FAMILY_FOREHAND not in families or CLIP_FAMILY_BACKHAND not in families
+    ):
         raise ValueError(
             "clip_family_per_clip must contain at least one forehand and one backhand clip, got "
             f"{families} — the unified policy keys swing_sign, the swing-type observation and the "
@@ -457,10 +468,10 @@ class MotionCommand(CommandTerm):
             )
             self._motion_payloads = self._snapshot_canonical_motion_bytes()
         else:
-            (
-                self._motion_payloads,
-                self._legacy_motion_sha256,
-            ) = self._load_legacy_motion_admission()
+            # Default (non-canonical) motion_file channel: pre-branch behavior —
+            # MotionLoader reads the raw NPZ paths directly, no code-owned trust
+            # set. Admission is scoped to the canonical registry consumer above.
+            self._motion_payloads = None
         self.motion = MotionLoader(
             self._motion_files,
             self.body_indexes,
@@ -475,8 +486,6 @@ class MotionCommand(CommandTerm):
         if self.canonical_ready_mode:
             self._validate_canonical_registry_motion_bytes()
             self._validate_canonical_ready_clips()
-        else:
-            self._validate_legacy_motion_bytes()
         expected_fps = 1.0 / float(env.step_dt)
         if not math.isfinite(expected_fps) or not math.isclose(
             self.motion.fps, expected_fps, rel_tol=0.0, abs_tol=1.0e-9
@@ -1174,38 +1183,6 @@ class MotionCommand(CommandTerm):
             tables.adoption_manifest_sha256_per_clip
         )
         return tables
-
-    def _load_legacy_motion_admission(
-        self,
-    ) -> tuple[tuple[bytes, ...], tuple[str, ...]]:
-        """Admit and retain the exact raw bytes MotionLoader will consume."""
-
-        registry_module = self._canonical_registry_module()
-        try:
-            payloads, digests = (
-                registry_module.motion_admission.legacy_raw_motion_snapshots(
-                    self._motion_files
-                )
-            )
-            return tuple(payloads), tuple(digests)
-        except Exception as exc:
-            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
-                raise
-            raise ValueError(
-                f"legacy raw motion admission rejected: {exc}"
-            ) from exc
-
-    def _validate_legacy_motion_bytes(self) -> None:
-        """Assert the immutable loader snapshots still match admission."""
-
-        actual = tuple(
-            hashlib.sha256(payload).hexdigest()
-            for payload in self._motion_payloads
-        )
-        if actual != tuple(self._legacy_motion_sha256):
-            raise ValueError(
-                "legacy raw motion snapshot differs from its admission digest"
-            )
 
     def _snapshot_canonical_motion_bytes(self) -> tuple[bytes, ...]:
         """Bind MotionLoader to the exact registry-authorized NPZ bytes."""

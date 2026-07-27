@@ -2146,7 +2146,15 @@ def validate_schema3_contract_structure(contract: Mapping) -> None:
                 "schema-3 motion_clip_family_per_clip must be a non-empty array of "
                 "'forehand'/'backhand' strings"
             )
-        if "forehand" not in families or "backhand" not in families:
+        # Both-families is a rule about the UNIFIED policy: with two or more clips every
+        # swing_sign/obs/target-side decision keys off the split, so a one-sided table trains one
+        # lane and leaves the other dead. A SINGLE-clip run has no split — one constant for every
+        # env — so the rule protects nothing there while denying that run any way to state which
+        # hand it is. 人话:按动作数量判,不是一刀切。单动作臂本来就没有两条通道可分,
+        # 却因为这条规则连"我是反手"都说不出口,只能落进默认被当成正手。
+        if len(families) >= 2 and (
+            "forehand" not in families or "backhand" not in families
+        ):
             raise ValueError(
                 "schema-3 motion_clip_family_per_clip must name at least one forehand and one "
                 "backhand clip"
