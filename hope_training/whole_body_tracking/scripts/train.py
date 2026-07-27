@@ -828,6 +828,502 @@ def _as_exact_float(x, name: str) -> float:
     return x
 
 
+_TASK_FIRST_LOADED_MANIFEST_ATTR = "_hope_task_first_loaded_manifest_v1"
+
+
+def _load_task_first_manifest_from_racket_cfg(racket_cfg):
+    """Load the byte-pinned task-first manifest from the composed command cfg."""
+
+    path = str(getattr(racket_cfg, "task_first_manifest_path", "") or "").strip()
+    expected_sha256 = str(
+        getattr(racket_cfg, "task_first_manifest_sha256", "") or ""
+    ).strip()
+    if not path:
+        raise _OverrideError(
+            "[train.py] racket.target_mode=task_first requires "
+            "racket.task_first_manifest_path"
+        )
+    if not expected_sha256:
+        raise _OverrideError(
+            "[train.py] racket.target_mode=task_first requires "
+            "racket.task_first_manifest_sha256"
+        )
+    from whole_body_tracking.tasks.tracking.mdp.task_first_manifest import (
+        load_task_first_manifest,
+    )
+
+    try:
+        loaded = load_task_first_manifest(
+            path,
+            expected_sha256=expected_sha256,
+            require_training_authorized=True,
+        )
+    except (OSError, ValueError) as exc:
+        raise _OverrideError(
+            f"[train.py] invalid task-first manifest {path!r}: {exc}"
+        ) from exc
+    setattr(racket_cfg, _TASK_FIRST_LOADED_MANIFEST_ATTR, loaded)
+    return loaded
+
+
+def _task_first_manifest_contract(racket_cfg, motion_cfg) -> dict:
+    """Return the immutable task/action/curriculum identity for checkpoints."""
+
+    loaded = getattr(racket_cfg, _TASK_FIRST_LOADED_MANIFEST_ATTR, None)
+    if loaded is None:
+        loaded = _load_task_first_manifest_from_racket_cfg(racket_cfg)
+    manifest = loaded.manifest
+    ranges = []
+    for action in manifest.actions:
+        ranges.append(
+            {
+                "action_id": action.action_id,
+                "action_uid": int(action.action_uid),
+                "position_half_extent_m": list(action.position_half_extent_m),
+                "speed_delta_mps": float(action.speed_delta_mps),
+                "face_cone_deg": float(action.face_cone_deg),
+                "station_center_shift_xy_m": list(
+                    action.station_center_shift_xy_m
+                ),
+                "base_half_extent_xy_m": list(action.base_half_extent_xy_m),
+            }
+        )
+    return {
+        "schema_version": 1,
+        "manifest_basename": loaded.source_path.name,
+        "manifest_file_sha256": loaded.file_sha256,
+        "manifest_canonical_sha256": loaded.canonical_sha256,
+        "manifest_id": manifest.manifest_id,
+        "action_ids": list(manifest.action_order),
+        "action_uids": [int(action.action_uid) for action in manifest.actions],
+        "curriculum_gate": manifest.gate.as_dict(),
+        "ranges": ranges,
+        "base_success_thresh_m": float(
+            getattr(racket_cfg, "task_first_base_success_thresh_m")
+        ),
+        "motion_balanced_clip_sampling": bool(
+            getattr(motion_cfg, "balanced_clip_sampling", False)
+        ),
+        "motion_balanced_clip_sampling_seed": int(
+            getattr(motion_cfg, "balanced_clip_sampling_seed", 0)
+        ),
+    }
+
+
+def _task_first_require_zero(value, name: str) -> None:
+    try:
+        numeric = float(value)
+    except (TypeError, ValueError) as exc:
+        raise _OverrideError(
+            f"[train.py] task-first requires {name}=0, got {value!r}"
+        ) from exc
+    if not math.isfinite(numeric) or numeric != 0.0:
+        raise _OverrideError(
+            f"[train.py] task-first requires {name}=0, got {value!r}"
+        )
+
+
+def _task_first_reward_terms(rewards):
+    """Yield composed reward terms without depending on Isaac configclass."""
+
+    if isinstance(rewards, dict):
+        names = set(rewards)
+        getter = rewards.get
+    else:
+        names = set(vars(rewards))
+        for cls in type(rewards).__mro__:
+            names.update(getattr(cls, "__annotations__", ()))
+        getter = lambda name: getattr(rewards, name, None)
+    for name in sorted(str(value) for value in names if not str(value).startswith("_")):
+        yield name, getter(name)
+
+
+def _task_first_reward_func_identity(term) -> str:
+    if isinstance(term, dict):
+        func = term.get("func")
+    else:
+        func = getattr(term, "func", None)
+    if isinstance(func, str):
+        return func.lower()
+    return (
+        f"{getattr(func, '__module__', '')}."
+        f"{getattr(func, '__qualname__', getattr(func, '__name__', ''))}"
+    ).lower()
+
+
+def _validate_task_first_reward_semantics(env_cfg) -> None:
+    """Reject reward terms whose truth source does not exist in task-first."""
+
+    rewards = getattr(env_cfg, "rewards", None)
+    if rewards is None:
+        raise _OverrideError(
+            "[train.py] task-first requires a composed rewards cfg for outcome "
+            "and absolute-anchor validation"
+        )
+    forbidden = []
+    for name, term in _task_first_reward_terms(rewards):
+        if term is None:
+            continue
+        lowered = name.lower()
+        identity = _task_first_reward_func_identity(term)
+        semantic = f"{lowered} {identity}"
+        ball_outcome = (
+            lowered.startswith("virtual_")
+            or lowered == "strike_capture_bonus"
+            or "incoming_ball" in semantic
+            or "pass_net" in semantic
+            or "virtual_return" in semantic
+            or "ball_outcome" in semantic
+            or "analytic_outcome" in semantic
+            or "return_outcome" in semantic
+            or ("landing" in semantic and not lowered.startswith("foot_"))
+        )
+        absolute_anchor_xy = (
+            "motion_global_anchor_pos" in semantic
+            or "motion_global_anchor_position" in semantic
+            or (
+                "anchor" in semantic
+                and "absolute" in semantic
+                and ("_xy" in semantic or "position" in semantic)
+            )
+            or (
+                "world_xy" in semantic
+                and ("imitation" in semantic or "anchor" in semantic)
+            )
+        )
+        if not (ball_outcome or absolute_anchor_xy):
+            continue
+        weight = term.get("weight") if isinstance(term, dict) else getattr(term, "weight", None)
+        if (
+            isinstance(weight, bool)
+            or not isinstance(weight, (int, float))
+            or not math.isfinite(float(weight))
+        ):
+            raise _OverrideError(
+                "[train.py] task-first forbidden reward term "
+                f"{name!r} must be None or carry an explicit finite zero weight; "
+                f"got weight={weight!r}"
+            )
+        if float(weight) != 0.0:
+            reason = (
+                "incoming-ball/landing/net/analytic outcome"
+                if ball_outcome
+                else "absolute world-XY anchor imitation"
+            )
+            forbidden.append(f"{name}(weight={float(weight)!r},{reason})")
+    if forbidden:
+        raise _OverrideError(
+            "[train.py] task-first has no ball outcome truth and moves the station "
+            "independently of the reference world XY; disable these reward terms "
+            "(set None or exact weight 0 so RewardManager will not execute them): "
+            + ", ".join(forbidden)
+        )
+
+
+def _finalize_task_first_training_cfg(env_cfg, task, applied) -> None:
+    """Fail closed and append the two task-first actor terms in canonical order.
+
+    This runs after every task override but before ``gym.make``.  In particular,
+    the generic face-observation branch deliberately defers its append in
+    task-first mode so this function can prove the Hitter-footwork prefix is
+    untouched and then append ``face(4), action(N)`` as one atomic layout.
+    """
+
+    commands = getattr(env_cfg, "commands", None)
+    racket_cfg = None if commands is None else getattr(commands, "racket_target", None)
+    if racket_cfg is None or str(getattr(racket_cfg, "target_mode", "")) != "task_first":
+        return
+
+    motion_cfg = getattr(commands, "motion", None)
+    if motion_cfg is None:
+        raise _OverrideError(
+            "[train.py] task-first requires commands.motion"
+        )
+    racket_node = _get(task, "racket")
+    raw_clip_names = _get(racket_node, "clip_names")
+    if raw_clip_names is None:
+        raise _OverrideError(
+            "[train.py] task-first requires an explicit non-empty racket.clip_names list"
+        )
+    clip_names = _resolve_clip_names(racket_node)
+    action_count = len(clip_names)
+    if action_count < 1:
+        raise _OverrideError("[train.py] task-first requires at least one action")
+
+    loaded = _load_task_first_manifest_from_racket_cfg(racket_cfg)
+    if tuple(loaded.manifest.action_order) != tuple(clip_names):
+        raise _OverrideError(
+            "[train.py] task-first racket.clip_names must exactly equal the manifest "
+            f"action_order: clip_names={tuple(clip_names)!r} "
+            f"manifest={tuple(loaded.manifest.action_order)!r}"
+        )
+
+    expected_actor_contract = f"task_first_n{action_count}"
+    configured_actor_contract = _get(task, "actor_obs_contract")
+    if str(configured_actor_contract or "") != expected_actor_contract:
+        raise _OverrideError(
+            "[train.py] task-first actor_obs_contract must be exactly "
+            f"{expected_actor_contract!r}; got {configured_actor_contract!r}. "
+            "hitter_footwork omits the demanded-face and per-action identity tail."
+        )
+    if str(getattr(env_cfg, "obs_mode", "")) != "hitter_footwork":
+        raise _OverrideError(
+            "[train.py] task-first requires obs_mode='hitter_footwork', got "
+            f"{getattr(env_cfg, 'obs_mode', None)!r}"
+        )
+    if not bool(getattr(racket_cfg, "face_command", False)):
+        raise _OverrideError("[train.py] task-first requires racket.face_command=true")
+    if not bool(getattr(env_cfg, "face_command_obs", False)):
+        raise _OverrideError("[train.py] task-first requires racket.face_command_obs=true")
+    if bool(getattr(env_cfg, "station_obs", False)):
+        raise _OverrideError(
+            "[train.py] task-first uses Hitter's native base_target_pos_b channel; "
+            "the legacy station_obs tail must be disabled"
+        )
+
+    _task_first_require_zero(
+        getattr(racket_cfg, "achieved_target_mix_prob", None),
+        "racket.achieved_target_mix_prob",
+    )
+    _task_first_require_zero(
+        getattr(racket_cfg, "midswing_resample_prob", None),
+        "racket.midswing_resample_prob",
+    )
+    for attr, label in (
+        ("target_delay_steps", "racket.target_delay_steps"),
+        ("target_jitter_pos_per_s", "racket.target_jitter_pos_per_s"),
+        ("target_jitter_vel_per_s", "racket.target_jitter_vel_per_s"),
+        ("target_noise_white", "racket.target_noise_white"),
+        ("target_noise_ar1_sigma", "racket.target_noise_ar1_sigma"),
+        ("target_dropout_prob", "racket.target_dropout_prob"),
+        ("target_post_strike_dropout_s", "racket.target_post_strike_dropout_s"),
+        ("target_bias_per_swing", "racket.target_bias_per_swing"),
+    ):
+        _task_first_require_zero(getattr(racket_cfg, attr, None), label)
+    if str(getattr(racket_cfg, "target_delay_tts_mode", "")) != "live":
+        raise _OverrideError(
+            "[train.py] task-first requires racket.target_delay_tts_mode='live'"
+        )
+
+    artifact_fields = {
+        name: str(getattr(racket_cfg, name, "") or "").strip()
+        for name in ("question_bank", "cq_anchor_bank", "exam_bank")
+    }
+    explicit_cq_keys = []
+    try:
+        racket_keys = list(racket_node.keys())
+    except Exception:
+        racket_keys = []
+    for raw_key in racket_keys:
+        key = str(raw_key)
+        value = _get(racket_node, raw_key)
+        if key.startswith("cq_") and value not in (None, ""):
+            explicit_cq_keys.append(key)
+    if (
+        any(artifact_fields.values())
+        or explicit_cq_keys
+        or bool(getattr(racket_cfg, "question_bank_allow_legacy", False))
+    ):
+        raise _OverrideError(
+            "[train.py] task-first owns task production and requires question/CQ "
+            "configuration empty, got "
+            f"artifacts={artifact_fields} explicit_cq_keys={sorted(explicit_cq_keys)} "
+            "question_bank_allow_legacy="
+            f"{bool(getattr(racket_cfg, 'question_bank_allow_legacy', False))}"
+        )
+    enabled_ball_paths = [
+        name
+        for name in (
+            "virtual_ball",
+            "vb_metrics_only",
+            "shadow_ball",
+            "shadow_table",
+            "physical_ball",
+        )
+        if bool(getattr(racket_cfg, name, False))
+    ]
+    if bool(getattr(env_cfg, "physical_ball", False)):
+        enabled_ball_paths.append("env.physical_ball")
+    if enabled_ball_paths:
+        raise _OverrideError(
+            "[train.py] task-first executor training is ball-free; disable "
+            + ", ".join(enabled_ball_paths)
+        )
+    _validate_task_first_reward_semantics(env_cfg)
+
+    if bool(getattr(racket_cfg, "planner_revision_enabled", False)) or bool(
+        getattr(motion_cfg, "planner_revision_enabled", False)
+    ):
+        raise _OverrideError(
+            "[train.py] task-first requires planner_revision disabled"
+        )
+    if bool(getattr(motion_cfg, "balanced_clip_sampling", False)) is not True:
+        raise _OverrideError(
+            "[train.py] task-first requires motion.balanced_clip_sampling=true"
+        )
+    balanced_seed = getattr(motion_cfg, "balanced_clip_sampling_seed", None)
+    if (
+        type(balanced_seed) is not int
+        or not 0 <= balanced_seed < (1 << 63)
+    ):
+        raise _OverrideError(
+            "[train.py] task-first requires "
+            "motion.balanced_clip_sampling_seed in [0,2**63)"
+        )
+    _task_first_require_zero(
+        getattr(motion_cfg, "clip_switch_prob", None),
+        "motion.clip_switch_prob",
+    )
+    speed_range = tuple(
+        float(value)
+        for value in (getattr(motion_cfg, "speed_scale_range", ()) or ())
+    )
+    if speed_range != (1.0, 1.0):
+        raise _OverrideError(
+            "[train.py] task-first requires motion.speed_scale_range=[1.0,1.0], "
+            f"got {speed_range!r}"
+        )
+    speed_per_clip = getattr(motion_cfg, "speed_scale_per_clip", None)
+    if speed_per_clip is not None and any(
+        float(value) != 1.0 for value in speed_per_clip
+    ):
+        raise _OverrideError(
+            "[train.py] task-first requires motion.speed_scale_per_clip absent or all 1.0"
+        )
+    if str(getattr(motion_cfg, "event_timing_mode", "")) != "disabled":
+        raise _OverrideError(
+            "[train.py] task-first requires motion.event_timing_mode='disabled'"
+        )
+    base_threshold = getattr(
+        racket_cfg, "task_first_base_success_thresh_m", None
+    )
+    if (
+        isinstance(base_threshold, bool)
+        or not isinstance(base_threshold, (int, float))
+        or not math.isfinite(float(base_threshold))
+        or float(base_threshold) <= 0.0
+    ):
+        raise _OverrideError(
+            "[train.py] task-first requires finite "
+            "racket.task_first_base_success_thresh_m > 0"
+        )
+
+    policy = getattr(getattr(env_cfg, "observations", None), "policy", None)
+    if policy is None:
+        raise _OverrideError("[train.py] task-first requires observations.policy")
+    occupied = [
+        name
+        for name in (
+            "racket_target_normal_cmd",
+            "action_one_hot",
+            "station_anchor_err_b",
+        )
+        if getattr(policy, name, None) is not None
+    ]
+    if occupied:
+        raise _OverrideError(
+            "[train.py] task-first requires a clean Hitter-footwork policy prefix; "
+            f"term(s) already attached: {occupied}"
+        )
+
+    from isaaclab.managers import ObservationTermCfg as _ObsTerm
+
+    from whole_body_tracking.tasks.tracking import mdp as _mdp
+
+    policy.racket_target_normal_cmd = _ObsTerm(
+        func=_mdp.racket_target_normal_cmd,
+        params={"command_name": "racket_target"},
+    )
+    policy.action_one_hot = _ObsTerm(
+        func=_mdp.action_one_hot,
+        params={
+            "command_name": "racket_target",
+            "expected_actions": action_count,
+        },
+    )
+    applied.append(
+        "observations.policy task-first tail="
+        f"racket_target_normal_cmd(+4),action_one_hot(+{action_count}) "
+        f"(actor_obs_contract={expected_actor_contract})"
+    )
+
+
+def _validate_task_first_motion_sources(env_cfg, motion_files) -> None:
+    """Bind the runtime motion files to the manifest's ordered action revisions."""
+
+    racket_cfg = getattr(getattr(env_cfg, "commands", None), "racket_target", None)
+    if racket_cfg is None or str(getattr(racket_cfg, "target_mode", "")) != "task_first":
+        return
+    loaded = getattr(racket_cfg, _TASK_FIRST_LOADED_MANIFEST_ATTR, None)
+    if loaded is None:
+        loaded = _load_task_first_manifest_from_racket_cfg(racket_cfg)
+    paths = [str(path) for path in motion_files]
+    if len(paths) != len(loaded.manifest.actions):
+        raise _OverrideError(
+            "[train.py] task-first motion source count does not match the manifest: "
+            f"files={len(paths)} actions={len(loaded.manifest.actions)}"
+        )
+    for index, (path, action) in enumerate(zip(paths, loaded.manifest.actions)):
+        actual_sha256 = _sha256_file(str(pathlib.Path(path).resolve()))
+        if actual_sha256 != action.motion_sha256:
+            raise _OverrideError(
+                "[train.py] task-first motion revision mismatch at local action slot "
+                f"{index} ({action.action_id!r}): manifest={action.motion_sha256} "
+                f"runtime={actual_sha256} path={path!r}"
+            )
+
+
+def _build_effective_reward_receipt_for_training(env_cfg, root_cfg):
+    """Hash the post-override reward terms and optionally enforce a root pin."""
+
+    from whole_body_tracking.utils.effective_reward_recipe import (
+        build_effective_reward_receipt,
+    )
+
+    expected = _get(root_cfg, "expected_effective_reward_recipe_sha256")
+    return build_effective_reward_receipt(
+        env_cfg,
+        expected_sha256=None if expected is None else str(expected),
+    )
+
+
+def _write_effective_reward_receipt(
+    path: str | pathlib.Path, receipt: dict, hard_contract: dict
+) -> None:
+    """Persist and read back the effective reward receipt, failing on drift."""
+
+    from whole_body_tracking.utils.effective_reward_recipe import (
+        canonical_effective_reward_recipe_json,
+    )
+
+    path = pathlib.Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as stream:
+        json.dump(receipt, stream, indent=2, sort_keys=True, allow_nan=False)
+        stream.write("\n")
+    with path.open(encoding="utf-8") as stream:
+        written = json.load(stream)
+    if written != receipt:
+        raise RuntimeError(
+            "effective_reward_recipe.json changed during write/readback"
+        )
+    payload = {
+        "schema_version": written.get("schema_version"),
+        "terms": written.get("terms"),
+    }
+    digest = hashlib.sha256(
+        canonical_effective_reward_recipe_json(payload).encode("utf-8")
+    ).hexdigest()
+    if written.get("sha256") != digest:
+        raise RuntimeError(
+            "effective_reward_recipe.json SHA-256 does not match its canonical payload"
+        )
+    if hard_contract.get("effective_reward_recipe") != written:
+        raise RuntimeError(
+            "effective_reward_recipe.json disagrees with the embedded hard contract"
+        )
+
+
 def _as_face_command_pairing(value) -> str:
     pairing = str(value)
     allowed = ("shared_plus_y", "legacy_signed_vs_A")
@@ -1795,21 +2291,37 @@ def _post_swing_settle_debt_reward_contract(env_cfg, runtime_facts: dict) -> dic
     }
 
 
-def _build_training_hard_contract(env, actor_contract) -> dict:
+def _build_training_hard_contract(
+    env, actor_contract, effective_reward_receipt=None
+) -> dict:
     """Immutable actor/task facts that must match across a checkpoint resume.
 
-    Reward weights, termination thresholds and optimizer settings are normally absent because
-    they are curriculum-mutable.  Narrow exceptions bind the post-override racket-guidance pair
-    and qdot-limit hinge: those values are causal identities of their registered ablations.
-    Geometry, command meaning, clip identity, action processing, and every field that can move a
-    strike/reveal/deadline or actor-visible target in time are also immutable.
+    The complete post-override effective reward recipe is content-addressed here
+    so a nominal reward-pack label cannot hide the weights/params that actually
+    reached Isaac.  Geometry, command meaning, clip identity, action
+    processing, and every field that can move a strike/reveal/deadline or
+    actor-visible target in time are also immutable.
     """
     from whole_body_tracking.utils.training_contract import (
         TRAINING_CONTRACT_SCHEMA_VERSION,
         runtime_execution_facts,
     )
 
+    from whole_body_tracking.utils.effective_reward_recipe import (
+        build_effective_reward_receipt,
+    )
+
     env_cfg = env.cfg
+    runtime_reward_receipt = build_effective_reward_receipt(env_cfg)
+    if (
+        effective_reward_receipt is not None
+        and effective_reward_receipt != runtime_reward_receipt
+    ):
+        raise RuntimeError(
+            "effective reward recipe changed between pre-gym composition and "
+            "runtime hard-contract capture"
+        )
+    effective_reward_receipt = runtime_reward_receipt
     motion_cmd = env.command_manager.get_term("motion")
     motion = motion_cmd.cfg
     try:
@@ -1817,6 +2329,21 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
     except KeyError:
         racket_cmd = None
     racket = None if racket_cmd is None else racket_cmd.cfg
+    task_first_contract = None
+    if racket is not None and str(getattr(racket, "target_mode", "")) == "task_first":
+        task_first_contract = _task_first_manifest_contract(
+            racket, motion_cmd.cfg
+        )
+        runtime_contract_fn = getattr(
+            racket_cmd, "task_first_hard_contract", None
+        )
+        if callable(runtime_contract_fn):
+            runtime_task_first = runtime_contract_fn()
+            if runtime_task_first != task_first_contract:
+                raise RuntimeError(
+                    "runtime task-first command hard contract disagrees with "
+                    "the byte-pinned manifest/config contract"
+                )
     runtime_facts = runtime_execution_facts(env, actor_contract)
     lateral_training = _resolve_lateral_training_runtime(env)
     processed_qdes_slew_contract = _processed_qdes_slew_hinge_reward_contract(
@@ -1969,6 +2496,7 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
     )
     return {
         "schema_version": TRAINING_CONTRACT_SCHEMA_VERSION,
+        "effective_reward_recipe": effective_reward_receipt,
         **runtime_facts,
         "target_mode": attr(racket, "target_mode"),
         "normal_mode": attr(racket, "normal_mode"),
@@ -2160,6 +2688,11 @@ def _build_training_hard_contract(env, actor_contract) -> dict:
         # byte-identical under the resume contract diff.
         **({} if continuous_questions is None
            else {"continuous_questions": continuous_questions}),
+        **(
+            {}
+            if task_first_contract is None
+            else {"task_first_training": task_first_contract}
+        ),
     }
 
 
@@ -2370,6 +2903,9 @@ _RACKET_KEYS = (
     # 每 clip 击球面符号(正反手各用拍子固定的一面;空/缺省=标量 mount_normal_sign,现役行为不变)
     "mount_normal_sign_per_clip",
     "target_mode", "ref_perturb_pos", "ref_perturb_vel", "ref_perturb_normal",
+    # Task-first: exact manifest bytes + same-attempt base success gate.
+    "task_first_manifest_path", "task_first_manifest_sha256",
+    "task_first_base_success_thresh_m",
     "ref_perturb_curriculum_steps", "ref_perturb_curriculum_start", "ref_perturb_success_gated",
     "ref_perturb_advance_threshold", "ref_perturb_advance_rate", "ref_vel_scale", "ref_vel_scale_by_motion",
     "debug_reward_logging",
@@ -2469,6 +3005,9 @@ _MOTION_KEYS = (
     # Diagnostic-only opt-in for old motion npz files whose body velocity lives at link origin.
     # Absent/false keeps the exact schema-v2 motion contract path unchanged.
     "allow_legacy_link_origin_velocity",
+    # Arbitrary-N task-first allocation.  The sampler state is checkpointed by
+    # MotionCommand's exact-resume hook; absent keeps historical RNG untouched.
+    "balanced_clip_sampling", "balanced_clip_sampling_seed",
 )
 
 # YAML keys under `rewards:` consumed by the rewards block of _apply_task_overrides below.
@@ -3907,6 +4446,26 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             # 推导,逐字节不变;值/长度/两族齐全在 MotionCommand 开机时整表校验(fail-loud)。
             _set_attr(M, "clip_family_per_clip", _get(mt, "clip_family_per_clip"),
                       lambda v: tuple(str(x) for x in v), applied, "commands.motion")
+            _set_attr(
+                M,
+                "balanced_clip_sampling",
+                _get(mt, "balanced_clip_sampling"),
+                lambda value: _as_explicit_bool(
+                    value, "task.motion.balanced_clip_sampling"
+                ),
+                applied,
+                "commands.motion",
+            )
+            _set_attr(
+                M,
+                "balanced_clip_sampling_seed",
+                _get(mt, "balanced_clip_sampling_seed"),
+                lambda value: _as_exact_int(
+                    value, "task.motion.balanced_clip_sampling_seed"
+                ),
+                applied,
+                "commands.motion",
+            )
             # R-c(i): every swing entry (RSI reset AND wrap) starts the reference N frames past the
             # clip start — the v5 clips carry a 3-4 frame IK cold-start transient at frame 0 (GMR
             # warm-up bug); N=6 is the design's stopgap until the source fix lands. Default 0 = off.
@@ -5310,6 +5869,30 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 applied.append(f"racket_target.mount_normal_sign_per_clip={C.mount_normal_sign_per_clip}")
             # reference_perturbed target sampling (rank 5): couple targets to the reference swing.
             _set_attr(C, "target_mode", _get(rk, "target_mode"), str, applied, "racket_target")
+            _set_attr(
+                C,
+                "task_first_manifest_path",
+                _get(rk, "task_first_manifest_path"),
+                str,
+                applied,
+                "racket_target",
+            )
+            _set_attr(
+                C,
+                "task_first_manifest_sha256",
+                _get(rk, "task_first_manifest_sha256"),
+                str,
+                applied,
+                "racket_target",
+            )
+            _set_attr(
+                C,
+                "task_first_base_success_thresh_m",
+                _get(rk, "task_first_base_success_thresh_m"),
+                float,
+                applied,
+                "racket_target",
+            )
             _set_vec3(C, "ref_perturb_pos", _get(rk, "ref_perturb_pos"), applied, "racket_target")
             _set_vec3(C, "ref_perturb_vel", _get(rk, "ref_perturb_vel"), applied, "racket_target")
             _set_attr(C, "ref_perturb_normal", _get(rk, "ref_perturb_normal"), float, applied, "racket_target")
@@ -5527,25 +6110,37 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             # validate_actor_observation_contract stays a loud error on the frozen 175-D value.
             _fc_obs = _get(rk, "face_command_obs")
             if _fc_obs is not None and _as_bool(_fc_obs):
-                # 尾部顺序守卫:站位通道必须在拍面通道之后(179 前缀不变才有纯尾部扩列热启)。
-                # 若站位已先挂上(如 cfg 旗标开了 station_obs、拍面却走 YAML 覆盖),此时再挂
-                # 拍面会得到 175+站位2+拍面4 的错序布局——loud error,别让它静默开训。
-                if getattr(env_cfg.observations.policy, "station_anchor_err_b", None) is not None:
-                    raise _OverrideError(
-                        "[train.py] racket.face_command_obs enabling AFTER station_anchor_err_b is "
-                        "already attached would put the station channel BEFORE the face channel "
-                        "(layout != 179+station tail). Enable both via the same path (racket.station_obs "
-                        "+ racket.face_command_obs in the task YAML/CLI), not mixed cfg-flag/override.")
-                from isaaclab.managers import ObservationTermCfg as _ObsTerm
+                if str(getattr(C, "target_mode", "")) == "task_first":
+                    # Task-first must append face(+4) and action(+N) atomically
+                    # onto the native 177-D Hitter-footwork prefix.  Defer both
+                    # terms to the post-override finalizer so a pre-attached or
+                    # wrongly ordered tail is rejected, not silently reused.
+                    if hasattr(env_cfg, "face_command_obs"):
+                        env_cfg.face_command_obs = True
+                    applied.append(
+                        "racket.face_command_obs=True "
+                        "(task-first face/action tail deferred for atomic append)"
+                    )
+                else:
+                    # 尾部顺序守卫:站位通道必须在拍面通道之后(179 前缀不变才有纯尾部扩列热启)。
+                    # 若站位已先挂上(如 cfg 旗标开了 station_obs、拍面却走 YAML 覆盖),此时再挂
+                    # 拍面会得到 175+站位2+拍面4 的错序布局——loud error,别让它静默开训。
+                    if getattr(env_cfg.observations.policy, "station_anchor_err_b", None) is not None:
+                        raise _OverrideError(
+                            "[train.py] racket.face_command_obs enabling AFTER station_anchor_err_b is "
+                            "already attached would put the station channel BEFORE the face channel "
+                            "(layout != 179+station tail). Enable both via the same path (racket.station_obs "
+                            "+ racket.face_command_obs in the task YAML/CLI), not mixed cfg-flag/override.")
+                    from isaaclab.managers import ObservationTermCfg as _ObsTerm
 
-                from whole_body_tracking.tasks.tracking import mdp as _mdp
+                    from whole_body_tracking.tasks.tracking import mdp as _mdp
 
-                env_cfg.observations.policy.racket_target_normal_cmd = _ObsTerm(
-                    func=_mdp.racket_target_normal_cmd, params={"command_name": "racket_target"})
-                if hasattr(env_cfg, "face_command_obs"):
-                    env_cfg.face_command_obs = True  # keep the descriptive cfg field honest
-                applied.append(
-                    "observations.policy.racket_target_normal_cmd(+4D face-command obs, 175->179)")
+                    env_cfg.observations.policy.racket_target_normal_cmd = _ObsTerm(
+                        func=_mdp.racket_target_normal_cmd, params={"command_name": "racket_target"})
+                    if hasattr(env_cfg, "face_command_obs"):
+                        env_cfg.face_command_obs = True  # keep the descriptive cfg field honest
+                    applied.append(
+                        "observations.policy.racket_target_normal_cmd(+4D face-command obs, 175->179)")
             # R10c station_obs (+2 actor 尾维:世界系站位锚误差 = 出生点常数 − 当前 base XY,旋进
             # base 系;franco 2026-07-09"就算不需要移动,它也是一个锚")。同 face_command_obs 时序:
             # __post_init__ 已跑完,这里直接挂 ObsTerm(同名同尾部位置)。要求拍面通道已开——
@@ -5777,6 +6372,10 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 E.randomize_pd_gains.params["damping_distribution_params"] = (float(pr[0]), float(pr[1]))
                 applied.append(f"events.randomize_pd_gains=({float(pr[0])}, {float(pr[1])})")
 
+    # This must be the final command/observation mutation: task-first validates
+    # the fully composed state and appends its canonical actor tail atomically.
+    _finalize_task_first_training_cfg(env_cfg, task, applied)
+
     return applied
 
 
@@ -5884,9 +6483,10 @@ def _run(cfg):
     # 3) reference motion clip(s), LOCAL-FIRST: motion_file=/motion_file_2= (or a local .npz path passed
     #    as registry_name/registry_name_2) skips WandB entirely (the documented no-WandB path — see
     #    run_training.md); otherwise the WandB registry is used.
-    #    ONE clip = single-swing-type policy. TWO clips (forehand + backhand) = unified HITTER policy:
-    #    MotionLoader concatenates them and clip_id selects which swing each env imitates. Order matters:
-    #    clip 0 = forehand, clip 1 = backhand; it must match racket.strike_phase_per_clip.
+    #    ONE clip = single-action policy. N clips = one arbitrary-N policy:
+    #    MotionLoader concatenates them and clip_id selects the reference action
+    #    each env imitates. Order must match every per-clip command table (and,
+    #    for task-first, the manifest action_order).
     def _local_motion(name):
         """If ``name`` is a local motion.npz (or a dir containing one), return that path, else None."""
         p = pathlib.Path(str(name).split(":")[0])  # tolerate a :version suffix
@@ -5922,8 +6522,14 @@ def _run(cfg):
         src = motion_registries[i] if i < len(motion_registries) else "LOCAL (no registry)"
         print(f"[train.py] motion clip {i}: {mf}  [{src}]", flush=True)
     if len(motion_files) > 1:
-        print(f"[train.py] UNIFIED multi-clip policy: clip0=forehand  clip1=backhand", flush=True)
+        print(
+            "[train.py] UNIFIED multi-clip policy: "
+            f"{len(motion_files)} ordered action clip(s); local slots="
+            f"{list(range(len(motion_files)))}",
+            flush=True,
+        )
     env_cfg.commands.motion.motion_file = motion_files if len(motion_files) > 1 else motion_files[0]
+    _validate_task_first_motion_sources(env_cfg, motion_files)
 
     # 4) logging dir (same layout as scripts/rsl_rl/train.py so export/eval are unchanged)
     log_root_path = os.path.abspath(os.path.join("logs", "rsl_rl", agent_cfg.experiment_name))
@@ -5939,6 +6545,18 @@ def _run(cfg):
     _publish_lean_queue_binding_if_requested(cfg, log_dir)
 
     # 5) build env, wrap, run
+    # Reward provenance is captured from the fully composed env cfg (including
+    # every task/Hydra override), never from the nominal reward-pack label.
+    # An optional root-level expected SHA makes a preregistered recipe fail
+    # before the expensive scene import.
+    effective_reward_receipt = _build_effective_reward_receipt_for_training(
+        env_cfg, cfg
+    )
+    print(
+        "[train.py] effective reward recipe SHA-256: "
+        f"{effective_reward_receipt['sha256']}",
+        flush=True,
+    )
     render_mode = "rgb_array" if cfg.video else None
     _emit_lean_queue_phase(cfg, "scene_import_start")
     env = gym.make(task_id, cfg=env_cfg, render_mode=render_mode)
@@ -5978,7 +6596,11 @@ def _run(cfg):
     else:
         actor_contract = infer_actor_observation_contract(env.unwrapped)
 
-    hard_contract = _build_training_hard_contract(env.unwrapped, actor_contract)
+    hard_contract = _build_training_hard_contract(
+        env.unwrapped,
+        actor_contract,
+        effective_reward_receipt=effective_reward_receipt,
+    )
     try:
         validate_schema3_contract_structure(hard_contract)
     except ValueError as exc:
@@ -6031,8 +6653,18 @@ def _run(cfg):
     with open(contract_path, "w", encoding="utf-8") as stream:
         json.dump(hard_contract, stream, indent=2, sort_keys=True)
         stream.write("\n")
+    reward_receipt_path = os.path.join(
+        log_dir, "params", "effective_reward_recipe.json"
+    )
+    _write_effective_reward_receipt(
+        reward_receipt_path, effective_reward_receipt, hard_contract
+    )
     hard_contract_sha256 = _sha256_file(contract_path)
     print(f"[train.py] hard training contract: {contract_path}", flush=True)
+    print(
+        f"[train.py] effective reward receipt: {reward_receipt_path}",
+        flush=True,
+    )
     _emit_lean_queue_phase(
         cfg,
         "hard_contract_written",
