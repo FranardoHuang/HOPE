@@ -473,6 +473,19 @@ def _evaluate(tmp_path, monkeypatch):
     return fixture, cert.certify_plan(fixture["plan"], base_dir=tmp_path)
 
 
+def _fail_collision(fixture, tmp_path, *, scope: str, station_index: int) -> None:
+    path = fixture["collisions"][scope][station_index]
+    collision = json.loads(path.read_text(encoding="utf-8"))
+    collision["verdict"] = "FAIL"
+    collision["checks"]["table_top_collision"]["pass"] = False
+    collision["checks"]["aggregate"]["pass"] = False
+    collision["clearance"]["minimum_table_net_clearance_m"] = -0.01
+    _write_json(path, collision)
+    fixture["plan"]["scopes"][scope]["collision_reports"][station_index] = _binding(
+        path, tmp_path
+    )
+
+
 def test_template_is_incomplete_and_uses_whole_station_center_translation():
     plan = cert.template_plan("fh_loop_high", "vendor_assets/source.npz", "a" * 64)
     assert plan["station_center_shift_candidates_xy_m"] == [
@@ -531,6 +544,50 @@ def test_cli_never_returns_success_for_untrusted_reference_receipts(
     assert report["hardware_authorized"] is False
 
 
+def test_scan_exception_receipt_closes_every_authorization_field(
+    tmp_path, monkeypatch
+):
+    def fail_scan(**_kwargs):
+        raise cert.CertificationError("fixture scan failure")
+
+    monkeypatch.setattr(cert, "scan_collisions", fail_scan)
+    output_path = tmp_path / "collision-failure.json"
+    rc = cert.main(
+        [
+            "scan-collisions",
+            "--action-id",
+            "fh_loop_high",
+            "--scope",
+            "upper",
+            "--station-center-shift-xy-m",
+            "0",
+            "0",
+            "--motion",
+            str(tmp_path / "motion.npz"),
+            "--expected-motion-sha256",
+            "a" * 64,
+            "--mjcf",
+            str(tmp_path / "model.xml"),
+            "--expected-mjcf-sha256",
+            "b" * 64,
+            "--urdf",
+            str(tmp_path / "model.urdf"),
+            "--expected-urdf-sha256",
+            "c" * 64,
+            "--expected-compiled-signature",
+            "d" * 64,
+            "--out",
+            str(output_path),
+        ]
+    )
+    report = json.loads(output_path.read_text(encoding="utf-8"))
+    assert rc == 2
+    assert report["diagnostic_smoke_authorized"] is False
+    assert report["training_authorized"] is False
+    assert report["deployment_authorized"] is False
+    assert report["hardware_authorized"] is False
+
+
 def test_handwritten_bank_pass_is_rejected_not_promoted(tmp_path, monkeypatch):
     fixture = _fixture(tmp_path, monkeypatch)
     bank = json.loads(fixture["bank"].read_text(encoding="utf-8"))
@@ -554,34 +611,50 @@ def test_comparison_never_auto_adopts_station_center(tmp_path, monkeypatch):
     assert "not_selected" in report["diagnostic_reference_blockers"][0]
 
 
+@pytest.mark.parametrize("selected_index", [1, 2])
+def test_farther_station_requires_every_nearer_station_to_fail_upper_or_full(
+    tmp_path, monkeypatch, selected_index
+):
+    fixture = _fixture(tmp_path, monkeypatch)
+    for nearer_index in range(selected_index):
+        _fail_collision(
+            fixture,
+            tmp_path,
+            scope="upper",
+            station_index=nearer_index,
+        )
+    selected = cert.STATION_CENTER_SHIFT_CANDIDATES_XY_M[selected_index]
+    fixture["plan"]["selected_station_center_shift_xy_m"] = list(selected)
+    monkeypatch.setattr(cert, "_reference_return_fraction", lambda **_: 0.75)
+    report = cert.certify_plan(fixture["plan"], base_dir=tmp_path)
+    assert report["selected_station_center_shift_xy_m"] == list(selected)
+    assert report["diagnostic_reference_checks_pass"] is True
+    assert report["diagnostic_smoke_authorized"] is False
+
+
 @pytest.mark.parametrize("selected_x", [-0.05, -0.10])
-def test_each_farther_station_center_can_be_explicitly_compared(
+def test_farther_station_is_rejected_when_a_nearer_station_common_passes(
     tmp_path, monkeypatch, selected_x
 ):
     fixture = _fixture(tmp_path, monkeypatch)
     fixture["plan"]["selected_station_center_shift_xy_m"] = [selected_x, 0.0]
     monkeypatch.setattr(cert, "_reference_return_fraction", lambda **_: 0.75)
-    report = cert.certify_plan(fixture["plan"], base_dir=tmp_path)
-    assert report["selected_station_center_shift_xy_m"] == [selected_x, 0.0]
-    assert report["diagnostic_reference_checks_pass"] is True
-    assert report["diagnostic_smoke_authorized"] is False
+    with pytest.raises(cert.CertificationError, match="nearest upper/full"):
+        cert.certify_plan(fixture["plan"], base_dir=tmp_path)
 
 
 def test_failed_selected_station_center_blocks_reference_checks(
     tmp_path, monkeypatch
 ):
     fixture = _fixture(tmp_path, monkeypatch)
-    fixture["plan"]["selected_station_center_shift_xy_m"] = [-0.05, 0.0]
-    path = fixture["collisions"]["upper"][1]
-    collision = json.loads(path.read_text(encoding="utf-8"))
-    collision["verdict"] = "FAIL"
-    collision["checks"]["table_top_collision"]["pass"] = False
-    collision["checks"]["aggregate"]["pass"] = False
-    collision["clearance"]["minimum_table_net_clearance_m"] = -0.01
-    _write_json(path, collision)
-    fixture["plan"]["scopes"]["upper"]["collision_reports"][1] = _binding(
-        path, tmp_path
-    )
+    fixture["plan"]["selected_station_center_shift_xy_m"] = [0.0, 0.0]
+    for station_index in range(len(cert.STATION_CENTER_SHIFT_CANDIDATES_XY_M)):
+        _fail_collision(
+            fixture,
+            tmp_path,
+            scope="upper",
+            station_index=station_index,
+        )
     monkeypatch.setattr(cert, "_reference_return_fraction", lambda **_: 0.75)
     report = cert.certify_plan(fixture["plan"], base_dir=tmp_path)
     assert report["diagnostic_reference_checks_pass"] is False
@@ -618,6 +691,61 @@ def test_low_reference_return_fraction_blocks_reference_checks(
     assert "full/reference_returnability" in report["diagnostic_reference_blockers"]
     assert report["diagnostic_smoke_authorized"] is False
     assert report["training_authorized"] is False
+
+
+@pytest.mark.parametrize("value", [float("nan"), -0.001, 1.001])
+def test_reference_scorer_fraction_must_be_finite_probability(
+    tmp_path, monkeypatch, value
+):
+    fixture = _fixture(tmp_path, monkeypatch)
+    monkeypatch.setattr(cert, "_reference_return_fraction", lambda **_: value)
+    with pytest.raises(cert.CertificationError, match="reference return fraction"):
+        cert.certify_plan(fixture["plan"], base_dir=tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("source_anchor_time_min_s", 0.0),
+        ("source_anchor_time_max_s", 4.0),
+        ("source_anchor_time_max_s", 0.50),
+        ("t_cycle_min_s", 0.0),
+        ("t_cycle_max_s", 6.0),
+        ("t_cycle_max_s", 2.0),
+        ("blade_site_speed_min_m_s", 0.0),
+        ("blade_site_speed_max_m_s", 21.0),
+        ("blade_site_speed_max_m_s", 12.0),
+        ("shared_ready_pose_tolerance", 0.01),
+        ("dense_collision_min_hz", 399.999),
+        ("minimum_table_net_clearance_m", 0.004999),
+    ],
+)
+def test_plan_cannot_relax_code_reviewed_certification_thresholds(
+    tmp_path, monkeypatch, field, value
+):
+    fixture = _fixture(tmp_path, monkeypatch)
+    fixture["plan"]["thresholds"][field] = value
+    with pytest.raises(cert.CertificationError, match="code-reviewed"):
+        cert.certify_plan(fixture["plan"], base_dir=tmp_path)
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("samples", 255),
+        ("capture_radius_m", 0.095001),
+        ("minimum_approach_speed_m_s", 0.299999),
+        ("minimum_legal_return_fraction", 0.499999),
+        ("minimum_legal_return_fraction", 0.0),
+    ],
+)
+def test_plan_cannot_relax_code_reviewed_returnability_thresholds(
+    tmp_path, monkeypatch, field, value
+):
+    fixture = _fixture(tmp_path, monkeypatch)
+    fixture["plan"]["task_distribution"][field] = value
+    with pytest.raises(cert.CertificationError, match="physical domains"):
+        cert.certify_plan(fixture["plan"], base_dir=tmp_path)
 
 
 def test_one_sample_collision_claim_is_rejected(tmp_path, monkeypatch):

@@ -85,6 +85,25 @@ DIAGNOSTIC_REFERENCE_GATES = (
     "reference_returnability",
 )
 
+# These are code-reviewed *admissibility* limits for a diagnostic plan, not
+# action-specific acceptance values.  The plan may choose a stricter interval
+# inside this envelope, but it may not make a weak reference look green by
+# choosing zero, effectively unbounded, or undersampled gates.  Action-specific
+# values remain content-bound in the plan and must be reviewed before use.
+SOURCE_ANCHOR_TIME_LIMITS_S = (0.01, 3.0)
+SOURCE_ANCHOR_MAX_WINDOW_S = 0.25
+T_CYCLE_LIMITS_S = (0.05, 5.0)
+T_CYCLE_MAX_WINDOW_S = 1.0
+BLADE_SITE_SPEED_LIMITS_M_S = (1.0, 20.0)
+BLADE_SITE_SPEED_MAX_WINDOW_M_S = 10.0
+SHARED_READY_POSE_TOLERANCE_MAX = 1.0e-3
+DENSE_COLLISION_MIN_HZ = 400.0
+MINIMUM_TABLE_NET_CLEARANCE_M = 0.005
+REFERENCE_RETURN_MIN_SAMPLES = 256
+REFERENCE_RETURN_MIN_FRACTION = 0.5
+REFERENCE_RETURN_MAX_CAPTURE_RADIUS_M = 0.095
+REFERENCE_RETURN_MIN_APPROACH_SPEED_M_S = 0.3
+
 
 class CertificationError(ValueError):
     """A malformed, unbound, contradictory, or incomplete certification input."""
@@ -1060,7 +1079,14 @@ def _validate_task_distribution(raw: Any) -> Mapping[str, Any]:
     capture = _finite(row["capture_radius_m"], "capture_radius_m")
     approach = _finite(row["minimum_approach_speed_m_s"], "minimum approach speed")
     minimum = _finite(row["minimum_legal_return_fraction"], "minimum return fraction")
-    if spin < 0.0 or capture <= 0.0 or approach < 0.0 or not 0.0 <= minimum <= 1.0:
+    if (
+        spin < 0.0
+        or capture <= 0.0
+        or capture > REFERENCE_RETURN_MAX_CAPTURE_RADIUS_M
+        or approach < REFERENCE_RETURN_MIN_APPROACH_SPEED_M_S
+        or samples < REFERENCE_RETURN_MIN_SAMPLES
+        or not REFERENCE_RETURN_MIN_FRACTION <= minimum <= 1.0
+    ):
         raise CertificationError("task distribution thresholds leave their physical domains")
     return {
         "incoming_velocity_box_m_s": checked_box,
@@ -1091,20 +1117,38 @@ def _validate_thresholds(raw: Any) -> Mapping[str, float]:
         "thresholds",
     )
     checked = {key: _finite(value, f"thresholds.{key}") for key, value in row.items()}
+    source_min = checked["source_anchor_time_min_s"]
+    source_max = checked["source_anchor_time_max_s"]
+    cycle_min = checked["t_cycle_min_s"]
+    cycle_max = checked["t_cycle_max_s"]
+    speed_min = checked["blade_site_speed_min_m_s"]
+    speed_max = checked["blade_site_speed_max_m_s"]
     if (
-        checked["source_anchor_time_min_s"] < 0.0
-        or checked["source_anchor_time_max_s"]
-        < checked["source_anchor_time_min_s"]
-        or checked["t_cycle_min_s"] <= 0.0
-        or checked["t_cycle_max_s"] < checked["t_cycle_min_s"]
-        or checked["blade_site_speed_min_m_s"] < 0.0
-        or checked["blade_site_speed_max_m_s"]
-        < checked["blade_site_speed_min_m_s"]
-        or checked["shared_ready_pose_tolerance"] < 0.0
-        or checked["dense_collision_min_hz"] <= 0.0
-        or checked["minimum_table_net_clearance_m"] <= 0.0
+        not SOURCE_ANCHOR_TIME_LIMITS_S[0]
+        <= source_min
+        <= source_max
+        <= SOURCE_ANCHOR_TIME_LIMITS_S[1]
+        or source_max - source_min > SOURCE_ANCHOR_MAX_WINDOW_S
+        or not T_CYCLE_LIMITS_S[0]
+        <= cycle_min
+        <= cycle_max
+        <= T_CYCLE_LIMITS_S[1]
+        or cycle_max - cycle_min > T_CYCLE_MAX_WINDOW_S
+        or not BLADE_SITE_SPEED_LIMITS_M_S[0]
+        <= speed_min
+        <= speed_max
+        <= BLADE_SITE_SPEED_LIMITS_M_S[1]
+        or speed_max - speed_min > BLADE_SITE_SPEED_MAX_WINDOW_M_S
+        or not 0.0
+        <= checked["shared_ready_pose_tolerance"]
+        <= SHARED_READY_POSE_TOLERANCE_MAX
+        or checked["dense_collision_min_hz"] < DENSE_COLLISION_MIN_HZ
+        or checked["minimum_table_net_clearance_m"]
+        < MINIMUM_TABLE_NET_CLEARANCE_M
     ):
-        raise CertificationError("certification thresholds are contradictory or non-physical")
+        raise CertificationError(
+            "certification thresholds leave the code-reviewed admissibility envelope"
+        )
     return checked
 
 
@@ -1481,11 +1525,18 @@ def certify_plan(plan: Mapping[str, Any], *, base_dir: Path) -> Mapping[str, Any
         )
         station_results: Dict[str, Any] = {}
         for shift in STATION_CENTER_SHIFT_CANDIDATES_XY_M:
-            return_fraction = _reference_return_fraction(
-                state=state,
-                station_center_shift_xy_m=shift,
-                task=task,
+            return_fraction = _finite(
+                _reference_return_fraction(
+                    state=state,
+                    station_center_shift_xy_m=shift,
+                    task=task,
+                ),
+                f"{scope} {shift} reference return fraction",
             )
+            if not 0.0 <= return_fraction <= 1.0:
+                raise CertificationError(
+                    f"{scope} {shift} reference return fraction must be in [0, 1]"
+                )
             gates = {
                 "canonical_candidate_integrity": bool(candidate_integrity),
                 "compiler_anchor_in_preregistered_range": anchor_time_gate,
@@ -1595,6 +1646,32 @@ def certify_plan(plan: Mapping[str, Any], *, base_dir: Path) -> Mapping[str, Any
             "station_center_shift_not_selected: comparison evidence never auto-adopts a stance"
         )
     else:
+        common_pass_candidates = []
+        for candidate in STATION_CENTER_SHIFT_CANDIDATES_XY_M:
+            candidate_key = f"{candidate[0]:.2f},{candidate[1]:.2f}"
+            common_pass_candidates.append(
+                all(
+                    scope_results[scope]["stations"][candidate_key]["gates"][gate]
+                    is True
+                    for scope in SCOPES
+                    for gate in DIAGNOSTIC_REFERENCE_GATES
+                )
+            )
+        passing_indices = [
+            index
+            for index, passed in enumerate(common_pass_candidates)
+            if passed
+        ]
+        if passing_indices:
+            nearest_passing = STATION_CENTER_SHIFT_CANDIDATES_XY_M[
+                passing_indices[0]
+            ]
+            if selected != nearest_passing:
+                raise CertificationError(
+                    "selected station center is not the nearest upper/full "
+                    "common-pass candidate: "
+                    f"selected={selected} nearest={nearest_passing}"
+                )
         key = f"{selected[0]:.2f},{selected[1]:.2f}"
         for scope in SCOPES:
             gates = scope_results[scope]["stations"][key]["gates"]
@@ -2154,7 +2231,10 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "schema_version": SCHEMA_VERSION,
                 "report_kind": COLLISION_REPORT_KIND,
                 "verdict": "FAIL",
+                "diagnostic_smoke_authorized": False,
                 "training_authorized": False,
+                "deployment_authorized": False,
+                "hardware_authorized": False,
                 "error": f"{type(exc).__name__}: {exc}",
             }
             _write_no_clobber(args.out, failure)
