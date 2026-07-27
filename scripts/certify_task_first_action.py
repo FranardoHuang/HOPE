@@ -18,9 +18,10 @@ The certifier consumes a SHA-256-bound plan and SHA-256-bound evidence.  It
 compares the required whole-action/task-center translations
 ``[[0, 0], [-0.05, 0], [-0.10, 0]]`` metres (negative X is farther from the
 table), but it never chooses one.  A passing reference bundle may authorize
-only a bounded diagnostic simulator smoke.  It cannot authorize task-first
-training while the canonical verifier lacks an exact grounded collocation
-trace.
+only an unauthorised reference-check verdict.  This version cannot authorize a
+diagnostic simulator smoke or task-first training: those require an in-process
+producer chain, and formal training additionally requires the canonical
+verifier's exact grounded collocation trace.
 
 No command in this file calls ``mj_step``, trains a policy, deploys, or issues
 hardware commands.  Outputs are no-clobber JSON receipts.
@@ -1622,8 +1623,7 @@ def certify_plan(plan: Mapping[str, Any], *, base_dir: Path) -> Mapping[str, Any
 
     # The current canonical verifier has no content-addressed exact
     # collocation trace and therefore cannot prove grounded dynamics.  Keep
-    # formal task-first training closed even when the reference is good enough
-    # to justify a bounded Isaac diagnostic smoke.
+    # formal task-first training closed even when the reference checks pass.
     training_blockers = list(diagnostic_smoke_blockers)
     training_blockers.append(
         "grounded_collocation_trace_missing: canonical bank gate is "
@@ -1678,7 +1678,7 @@ def certify_plan(plan: Mapping[str, Any], *, base_dir: Path) -> Mapping[str, Any
             "the reported source anchor and nearest runtime tick are not t_hit or observed ball contact",
             "shared-ready endpoint equality is kinematic reference evidence, not policy recovery",
             "reference certification is not deployment or hardware authorization",
-            "diagnostic smoke authorization permits only a bounded Isaac simulation check, not training",
+            "this report never authorizes a diagnostic simulator smoke or training",
             "external JSON receipts are untrusted diagnostics until playback and collision producers are recomputed in-process",
             "station_center_shift_xy_m translates the whole action/task center; it is not a base-only reward offset",
             "a trained policy may still hit the table even when the kinematic reference clears it; Isaac smoke remains mandatory",

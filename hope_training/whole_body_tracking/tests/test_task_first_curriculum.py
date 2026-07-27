@@ -283,7 +283,7 @@ def test_exit_dwell_rolls_back_exactly_one_level_including_prior_axis_frontier()
     assert at_center.level_indices("fh") == (0, 0, 0, 0)
 
 
-def test_neutral_and_single_bad_update_preserve_enter_evidence_but_reset_exit_dwell():
+def test_enter_and_exit_dwell_require_consecutive_gate_decisions():
     curriculum = _curriculum(
         enter_dwell_updates=3,
         exit_dwell_updates=2,
@@ -291,8 +291,11 @@ def test_neutral_and_single_bad_update_preserve_enter_evidence_but_reset_exit_dw
     )
     assert _advance_single(curriculum, GOOD).kind == "hold"
     assert _advance_single(curriculum, NEUTRAL).kind == "hold"
+    assert curriculum.state_dict()["progress"]["fh"]["enter_dwell"][0] == 0
     assert _advance_single(curriculum, BAD).kind == "hold"
     assert _advance_single(curriculum, NEUTRAL).kind == "hold"
+    assert curriculum.state_dict()["progress"]["fh"]["exit_dwell"][0] == 0
+    assert _advance_single(curriculum, GOOD).kind == "hold"
     assert _advance_single(curriculum, GOOD).kind == "hold"
     promoted = _advance_single(curriculum, GOOD)
     assert promoted.kind == "promote"

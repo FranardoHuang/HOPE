@@ -696,6 +696,13 @@ class TaskFirstCurriculum:
 
             if decision.enter_ok:
                 enter_dwell[action][active_index] += 1
+            else:
+                # Promotion is a stability claim, so its dwell must be
+                # consecutive.  Carrying an old good window through neutral or
+                # unsafe evidence would let sparse successes eventually widen
+                # the task domain even though competence never stayed above
+                # the entry gate.
+                enter_dwell[action][active_index] = 0
             if (
                 decision.enter_ok
                 and enter_dwell[action][active_index]
