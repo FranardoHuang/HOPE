@@ -68,6 +68,7 @@ class FakeOnPolicyRunner:
             learning_rate=1.0e-3,
             schedule="adaptive",
             optimizer=SimpleNamespace(param_groups=[{"lr": 1.0e-3}]),
+            update=lambda: None,
         )
         self.empirical_normalization = False
         self.obs_normalizer = None
@@ -92,10 +93,11 @@ class FakeOnPolicyRunner:
         start = int(self.current_learning_iteration)
         self.ran_iterations = []
         for it in range(start, start + int(num_learning_iterations)):
-            self.current_learning_iteration = it
             hook = getattr(self, "_test_mid_iteration_hook", None)
             if hook is not None:
                 hook(it)  # 模拟 rollout 进行中(Ctrl-C 会在这里到达)
+            self.alg.update()
+            self.current_learning_iteration = it
             self.ran_iterations.append(it)
             self.log({"it": it})
 

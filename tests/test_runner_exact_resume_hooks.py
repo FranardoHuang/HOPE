@@ -44,6 +44,15 @@ def _load_runner_module():
         pass
 
     class OnPolicyRunner:
+        def __init__(self, env, train_cfg, log_dir=None, device="cpu"):
+            self.env = env
+            self.cfg = dict(train_cfg or {})
+            self.log_dir = log_dir
+            self.device = device
+            self.disable_logs = True
+            self.current_learning_iteration = 0
+            self.alg = SimpleNamespace(update=lambda: None)
+
         def load(self, _path, load_optimizer=True, **_kwargs):
             del load_optimizer
             self.current_learning_iteration = self._base_load_iteration
@@ -53,6 +62,16 @@ def _load_runner_module():
         def log(self, locs, width=80, pad=35):
             del width, pad
             self._test_events.append(("base_log", int(locs["it"])))
+
+        def learn(self, num_learning_iterations, init_at_random_ep_len=False):
+            del init_at_random_ep_len
+            start = int(self.current_learning_iteration)
+            for it in range(start, start + int(num_learning_iterations)):
+                self.alg.update()
+                self.current_learning_iteration = it
+                # Mirror the installed RSL-RL contract: non-primary distributed ranks do not log.
+                if not self.disable_logs:
+                    self.log({"it": it})
 
     rsl_rl_env.VecEnv = VecEnv
     rsl_rl_on_policy.OnPolicyRunner = OnPolicyRunner
@@ -152,6 +171,7 @@ def test_explicit_command_state_takes_priority_and_restores_strictly(runner_modu
     captured = source._capture_environment_resume_state()
 
     assert captured["schema_version"] == 3
+    assert captured["active_term_names"] == ["task"]
     assert captured["command_terms"]["task"] == {
         "capture_mode": "explicit",
         "term_type": _term_type(source_term),
@@ -204,6 +224,114 @@ def test_explicit_hook_pair_and_identity_mismatches_fail_loud(runner_module):
         )
 
 
+def test_schema3_binds_complete_ordered_active_term_tuple(runner_module):
+    class ExplicitTerm:
+        def exact_resume_state_dict(self):
+            return {}
+
+        def load_exact_resume_state_dict(self, _state, strict=True):
+            assert strict is True
+
+    captured = _bare_runner(
+        runner_module,
+        terms=(("motion", ExplicitTerm()), ("racket", ExplicitTerm())),
+    )._capture_environment_resume_state()
+
+    reordered = _bare_runner(
+        runner_module,
+        terms=(("racket", ExplicitTerm()), ("motion", ExplicitTerm())),
+    )
+    with pytest.raises(RuntimeError, match="ordered command term identity mismatch"):
+        reordered._restore_environment_resume_state(
+            {"next_learning_iteration": 1, "environment_resume_state": captured}
+        )
+
+    missing = dict(captured)
+    missing["command_terms"] = dict(captured["command_terms"])
+    missing["command_terms"].pop("racket")
+    target = _bare_runner(
+        runner_module,
+        terms=(("motion", ExplicitTerm()), ("racket", ExplicitTerm())),
+    )
+    with pytest.raises(RuntimeError, match="every active term in exact order"):
+        target._restore_environment_resume_state(
+            {"next_learning_iteration": 1, "environment_resume_state": missing}
+        )
+
+
+def test_schema3_does_not_skip_active_tuple_validation_without_manager(runner_module):
+    class ExplicitTerm:
+        def exact_resume_state_dict(self):
+            return {}
+
+        def load_exact_resume_state_dict(self, _state, strict=True):
+            assert strict is True
+
+    captured = _bare_runner(
+        runner_module, terms=(("racket", ExplicitTerm()),)
+    )._capture_environment_resume_state()
+    target = _bare_runner(runner_module)
+    target.env.command_manager = None
+
+    with pytest.raises(RuntimeError, match="ordered command term identity mismatch"):
+        target._restore_environment_resume_state(
+            {"next_learning_iteration": 1, "environment_resume_state": captured}
+        )
+    # Strict structure/identity validation precedes all environment mutation.
+    assert target.env.common_step_counter == 0
+
+
+def test_task_first_requires_explicit_hooks_on_every_active_term(runner_module):
+    class ExplicitTerm:
+        def exact_resume_state_dict(self):
+            return {}
+
+        def load_exact_resume_state_dict(self, _state, strict=True):
+            assert strict is True
+
+    runner = _bare_runner(
+        runner_module,
+        terms=(("motion", ExplicitTerm()), ("racket", object())),
+    )
+    runner.env.cfg = SimpleNamespace(
+        commands=SimpleNamespace(
+            racket_target=SimpleNamespace(target_mode="task_first")
+        )
+    )
+    with pytest.raises(RuntimeError, match="missing=\\['racket'\\]"):
+        runner._capture_environment_resume_state()
+    with pytest.raises(RuntimeError, match="missing=\\['racket'\\]"):
+        runner._validate_task_first_exact_resume_terms()
+
+
+def test_task_first_capture_rechecks_manager_and_nonempty_active_tuple(runner_module):
+    for manager, error in (
+        (None, "requires a command manager"),
+        (_Manager(()), "requires active command terms"),
+    ):
+        runner = _bare_runner(runner_module)
+        runner.env.command_manager = manager
+        runner.env.cfg = SimpleNamespace(
+            commands=SimpleNamespace(
+                racket_target=SimpleNamespace(target_mode="task_first")
+            )
+        )
+        with pytest.raises(RuntimeError, match=error):
+            runner._capture_environment_resume_state()
+
+
+def test_task_first_constructor_rejects_legacy_term_before_first_rollout(runner_module):
+    env = _Env((("racket", object()),))
+    env.cfg = SimpleNamespace(
+        commands=SimpleNamespace(
+            racket_target=SimpleNamespace(target_mode="task_first")
+        )
+    )
+
+    with pytest.raises(RuntimeError, match="missing=\\['racket'\\]"):
+        runner_module.MotionOnPolicyRunner(env, {})
+
+
 def test_schema2_legacy_attribute_scan_remains_compatible(runner_module):
     class LegacyTerm:
         def __init__(self):
@@ -229,6 +357,52 @@ def test_schema2_legacy_attribute_scan_remains_compatible(runner_module):
     )
     assert runner.env.common_step_counter == 123
     assert term._curr_perturb_scale == pytest.approx(0.75)
+
+
+def test_schema1_scalar_and_tensor_restore_remains_compatible(runner_module):
+    class LegacyTerm:
+        def __init__(self):
+            self._curr_perturb_scale = 0.0
+            self.bin_failed_count = torch.zeros(2)
+
+    term = LegacyTerm()
+    runner = _bare_runner(runner_module, terms=(("legacy", term),))
+    runner._restore_environment_resume_state(
+        {
+            "next_learning_iteration": 2,
+            "environment_resume_state": {
+                "schema_version": 1,
+                "common_step_counter": 17,
+                "command_terms": {
+                    "legacy": {
+                        "scalars": {"_curr_perturb_scale": 0.5},
+                        "tensors": {"bin_failed_count": torch.tensor([2.0, 3.0])},
+                    }
+                },
+            },
+        }
+    )
+
+    assert runner.env.common_step_counter == 17
+    assert term._curr_perturb_scale == pytest.approx(0.5)
+    assert torch.equal(term.bin_failed_count, torch.tensor([2.0, 3.0]))
+
+
+def test_unknown_environment_schema_fails_even_without_command_manager(runner_module):
+    runner = _bare_runner(runner_module)
+    runner.env.command_manager = None
+
+    with pytest.raises(RuntimeError, match="unsupported environment exact-resume schema 0"):
+        runner._restore_environment_resume_state(
+            {
+                "next_learning_iteration": 2,
+                "environment_resume_state": {
+                    "schema_version": 0,
+                    "common_step_counter": 17,
+                },
+            }
+        )
+    assert runner.env.common_step_counter == 0
 
 
 def test_rng_round_trip_restores_python_numpy_and_torch(runner_module):
@@ -319,6 +493,12 @@ def test_load_restores_exact_rng_after_command_state_and_before_reset(
         "next_learning_iteration": 5,
         "tot_timesteps": 88,
         "tot_time": 1.5,
+        "environment_resume_state": {
+            "schema_version": 3,
+            "common_step_counter": 0,
+            "active_term_names": [],
+            "command_terms": {},
+        },
     }
     monkeypatch.setattr(
         runner_module.torch,
@@ -335,6 +515,47 @@ def test_load_restores_exact_rng_after_command_state_and_before_reset(
     assert runner.load("checkpoint.pt") == {"base": "infos"}
     assert events == ["base_load", "command_state", "rng", "reset"]
     assert runner.current_learning_iteration == 5
+
+
+def test_outer_schema3_refuses_missing_or_legacy_nested_environment_state(
+    runner_module, monkeypatch
+):
+    for nested, next_iteration in (
+        (None, 5),
+        (
+            {
+                "schema_version": 2,
+                "common_step_counter": 0,
+                "command_terms": {},
+            },
+            5,
+        ),
+        # Structural schema-3 validity is checked before the stale-state warm-start escape hatch.
+        (None, 999),
+    ):
+        events = []
+        runner = _configure_load_runner(runner_module, events)
+        state = {
+            "schema_version": 3,
+            "next_learning_iteration": next_iteration,
+            "python_random_state": random.getstate(),
+            "numpy_random_state": np.random.get_state(),
+            "torch_random_state": torch.get_rng_state(),
+            "torch_cuda_random_states": [],
+            "torch_cuda_device_count": 0,
+        }
+        if nested is not None:
+            state["environment_resume_state"] = nested
+        monkeypatch.setattr(
+            runner_module.torch,
+            "load",
+            lambda *_args, _state=state, **_kwargs: {
+                "infos": {"hope_exact_resume_state": _state}
+            },
+        )
+        with pytest.raises(RuntimeError, match="requires a schema-3"):
+            runner.load("checkpoint.pt")
+        assert events == ["base_load"]
 
 
 def test_legacy_load_does_not_guess_or_restore_rng(runner_module, monkeypatch):
@@ -387,7 +608,7 @@ def test_schema2_exact_state_restores_curriculum_but_not_rng(
     assert runner.current_learning_iteration == 5
 
 
-def test_rollout_end_hooks_are_exact_once_and_precede_all_receipts(runner_module):
+def test_rollout_end_hooks_are_exact_once_without_rank0_logging(runner_module):
     events = []
 
     class Term:
@@ -406,20 +627,50 @@ def test_rollout_end_hooks_are_exact_once_and_precede_all_receipts(runner_module
     )
     runner.disable_logs = True
     runner.writer = None
+    runner.current_learning_iteration = 7
+    runner.alg = SimpleNamespace(
+        update=lambda: events.append("update") or {"loss": 0.0}
+    )
+    original_update = runner.alg.update
+    runner.learn(num_learning_iterations=2)
+    assert events == [
+        "update",
+        ("a", 7),
+        ("b", 7),
+        "update",
+        ("a", 8),
+        ("b", 8),
+    ]
+    assert runner.alg.update is original_update
+
+
+def test_rollout_end_hooks_precede_receipts_without_double_invocation(runner_module):
+    events = []
+
+    class Term:
+        def on_rollout_end(self, step):
+            events.append(("hook", step))
+
+    runner = _bare_runner(
+        runner_module,
+        terms=(("task", Term()),),
+        events=events,
+    )
+    runner.disable_logs = False
+    runner.writer = None
+    runner.current_learning_iteration = 3
+    runner.alg = SimpleNamespace(update=lambda: events.append("update"))
     runner._consume_exact_behavior_updates = (
         lambda step: events.append(("consume", step)) or {}
     )
 
-    runner.log({"it": 7})
-    runner.log({"it": 7})
+    runner.learn(num_learning_iterations=1)
 
     assert events == [
-        ("a", 7),
-        ("b", 7),
-        ("base_log", 7),
-        ("consume", 7),
-        ("base_log", 7),
-        ("consume", 7),
+        "update",
+        ("hook", 3),
+        ("base_log", 3),
+        ("consume", 3),
     ]
 
 
@@ -438,7 +689,11 @@ def test_rollout_end_exception_propagates_before_logging(runner_module):
     )
     runner.disable_logs = True
     runner.writer = None
+    runner.current_learning_iteration = 8
+    runner.alg = SimpleNamespace(update=lambda: events.append("update"))
+    original_update = runner.alg.update
 
     with pytest.raises(LookupError, match="curriculum failure"):
-        runner.log({"it": 8})
-    assert events == ["hook"]
+        runner.learn(num_learning_iterations=1)
+    assert events == ["update", "hook"]
+    assert runner.alg.update is original_update

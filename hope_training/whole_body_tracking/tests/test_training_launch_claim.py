@@ -131,7 +131,7 @@ def test_runner_embeds_exact_launch_claim_without_mutating_scientific_contract(m
     saved_infos = dict(saved_infos)
     # 精确续训状态永远伴随合同键一起进 infos(内容另有 test_exact_resume_state.py 专测)。
     resume_state = saved_infos.pop("hope_exact_resume_state")
-    assert resume_state["schema_version"] == 2
+    assert resume_state["schema_version"] == 3
     assert resume_state["next_learning_iteration"] == 1
     assert saved_infos == {
         "keep": "value",
@@ -162,7 +162,7 @@ def test_absent_claim_writes_no_launch_key_and_train_reads_only_top_level(monkey
     runner.save("model_1.pt", {"keep": "value"})
     saved_infos = dict(runner.saved[-1][1])
     # 没有 launch claim 时不写任何合同键;精确续训状态则无条件伴随每次 save。
-    assert saved_infos.pop("hope_exact_resume_state")["schema_version"] == 2
+    assert saved_infos.pop("hope_exact_resume_state")["schema_version"] == 3
     assert saved_infos == {"keep": "value"}
 
     train_source = (ROOT / "scripts/train.py").read_text(encoding="utf-8")

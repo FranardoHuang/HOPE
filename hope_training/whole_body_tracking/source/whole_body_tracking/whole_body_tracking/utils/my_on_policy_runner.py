@@ -252,6 +252,10 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             if len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
                 raise ValueError("training_contract_sha256 must be 64 lowercase hex characters")
             self.training_contract_sha256 = digest
+        # Task-first checkpoints promise complete, strict command-state restoration.  Reject a
+        # launch before its first rollout if even one active command term still relies on the
+        # legacy heuristic attribute scanner.
+        self._validate_task_first_exact_resume_terms()
 
     def save(self, path: str, infos=None):
         """Save the model and training information."""
@@ -397,14 +401,26 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             # fail-loud 恢复,不允许换动作目录后静默套用旧课程。
             "schema_version": _ENVIRONMENT_RESUME_SCHEMA_VERSION,
             "common_step_counter": int(getattr(env, "common_step_counter", 0)),
+            "active_term_names": [],
             "command_terms": {},
         }
+        # Re-check the formal task-first contract at every save.  This catches runtime drift (for
+        # example, a manager or term disappearing after construction) instead of emitting a
+        # deceptively complete schema-3 checkpoint.
+        self._validate_task_first_exact_resume_terms()
         manager = getattr(env, "command_manager", None)
         if manager is None:
             return state
 
-        for term_name in getattr(manager, "active_terms", ()):
-            term = manager.get_term(term_name)
+        raw_term_names = tuple(getattr(manager, "active_terms", ()))
+        term_names = tuple(str(name) for name in raw_term_names)
+        if len(term_names) != len(set(term_names)):
+            raise RuntimeError("command manager active_terms contains duplicate names")
+        state["active_term_names"] = list(term_names)
+        task_first_exact = self._task_first_exact_resume_required()
+
+        for raw_term_name, term_name in zip(raw_term_names, term_names):
+            term = manager.get_term(raw_term_name)
             exact_state_getter = getattr(term, "exact_resume_state_dict", None)
             exact_state_loader = getattr(term, "load_exact_resume_state_dict", None)
             has_exact_state_getter = callable(exact_state_getter)
@@ -414,13 +430,18 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                     f"command term {term_name!r} must implement exact_resume_state_dict() "
                     "and load_exact_resume_state_dict(state, strict=True) as a pair"
                 )
+            if task_first_exact and not has_exact_state_getter:
+                raise RuntimeError(
+                    "task-first exact resume requires every active command term to implement "
+                    f"explicit hooks; missing on {term_name!r}"
+                )
             if has_exact_state_getter:
                 exact_state = exact_state_getter()
                 if not isinstance(exact_state, dict):
                     raise TypeError(
                         f"command term {term_name!r} exact_resume_state_dict() must return a dict"
                     )
-                state["command_terms"][str(term_name)] = {
+                state["command_terms"][term_name] = {
                     "capture_mode": "explicit",
                     "term_type": f"{type(term).__module__}.{type(term).__qualname__}",
                     "exact_state": exact_state,
@@ -478,9 +499,51 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                         key: item.detach().cpu().clone() for key, item in value.items()
                     }
 
-            if term_state["scalars"] or term_state["tensors"] or term_state["tensor_dicts"]:
-                state["command_terms"][str(term_name)] = term_state
+            # Schema 3 binds the complete ordered active-term tuple even when a legacy term has no
+            # recognized persistent attributes.  Omitting an empty term would make a later
+            # add/remove/reorder invisible to exact resume.
+            state["command_terms"][term_name] = term_state
         return state
+
+    def _task_first_exact_resume_required(self) -> bool:
+        """Return whether this runtime is the formal task-first command path."""
+
+        env = getattr(self.env, "unwrapped", self.env)
+        commands = getattr(getattr(env, "cfg", None), "commands", None)
+        racket = None if commands is None else getattr(commands, "racket_target", None)
+        return str(getattr(racket, "target_mode", "")) == "task_first"
+
+    def _validate_task_first_exact_resume_terms(self) -> None:
+        """Fail before rollout unless every task-first command term has paired explicit hooks."""
+
+        if not self._task_first_exact_resume_required():
+            return
+        env = getattr(self.env, "unwrapped", self.env)
+        manager = getattr(env, "command_manager", None)
+        if manager is None:
+            raise RuntimeError("task-first exact resume requires a command manager")
+        raw_names = tuple(getattr(manager, "active_terms", ()))
+        names = tuple(str(name) for name in raw_names)
+        if not names:
+            raise RuntimeError("task-first exact resume requires active command terms")
+        if len(names) != len(set(names)):
+            raise RuntimeError("command manager active_terms contains duplicate names")
+        missing = []
+        for raw_name, name in zip(raw_names, names):
+            term = manager.get_term(raw_name)
+            getter = getattr(term, "exact_resume_state_dict", None)
+            loader = getattr(term, "load_exact_resume_state_dict", None)
+            if callable(getter) != callable(loader):
+                raise RuntimeError(
+                    f"command term {name!r} must implement exact resume hooks as a pair"
+                )
+            if not callable(getter):
+                missing.append(name)
+        if missing:
+            raise RuntimeError(
+                "task-first exact resume requires explicit hooks on every active command term; "
+                f"missing={missing}"
+            )
 
     def _restore_environment_resume_state(self, resume_state: dict) -> tuple[int, str]:
         """Restore saved environment progress, with an iteration-derived fallback for old PTs."""
@@ -497,27 +560,80 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 self.num_steps_per_env
             )
             source = "derived-from-iteration"
-        env.common_step_counter = common_step_counter
 
         manager = getattr(env, "command_manager", None)
+        # As at capture time, enforce the current formal task-first runtime before considering any
+        # saved payload.  Schema 1/2 remain readable, but they cannot be loaded into a task-first
+        # environment whose current active tuple lacks explicit hooks.
+        self._validate_task_first_exact_resume_terms()
         restored_terms = []
-        if isinstance(saved, dict) and manager is not None:
+        saved_term_states = {}
+        active_terms = {}
+        if isinstance(saved, dict):
             environment_schema = int(saved.get("schema_version", 1))
-            if environment_schema not in (1, 2, _ENVIRONMENT_RESUME_SCHEMA_VERSION):
+            if environment_schema not in (
+                1,
+                2,
+                _ENVIRONMENT_RESUME_SCHEMA_VERSION,
+            ):
                 raise RuntimeError(
                     "unsupported environment exact-resume schema "
                     f"{environment_schema}; refusing to guess command state"
                 )
-            saved_term_states = saved.get("command_terms", {})
-            if not isinstance(saved_term_states, dict):
-                raise TypeError("environment exact-resume command_terms must be a dict")
+            # Legacy schema 1/2 deliberately retain their historical best-effort behavior when no
+            # command manager exists. Schema 3 is exact and must validate even in that case: a
+            # missing manager is an empty current tuple, never a reason to skip identity checks.
+            if manager is not None or environment_schema >= 3:
+                saved_term_states = saved.get("command_terms", {})
+                if not isinstance(saved_term_states, dict):
+                    raise TypeError("environment exact-resume command_terms must be a dict")
 
-            active_term_names = tuple(str(name) for name in getattr(manager, "active_terms", ()))
-            if len(active_term_names) != len(set(active_term_names)):
-                raise RuntimeError("command manager active_terms contains duplicate names")
-            active_terms = {name: manager.get_term(name) for name in active_term_names}
+                raw_active_term_names = (
+                    tuple(getattr(manager, "active_terms", ()))
+                    if manager is not None
+                    else ()
+                )
+                active_term_names = tuple(str(name) for name in raw_active_term_names)
+                if len(active_term_names) != len(set(active_term_names)):
+                    raise RuntimeError("command manager active_terms contains duplicate names")
+                active_terms = {
+                    name: manager.get_term(raw_name)
+                    for raw_name, name in zip(
+                        raw_active_term_names, active_term_names
+                    )
+                }
 
             if environment_schema >= 3:
+                expected_keys = {
+                    "schema_version",
+                    "common_step_counter",
+                    "active_term_names",
+                    "command_terms",
+                }
+                if set(saved) != expected_keys:
+                    raise RuntimeError(
+                        "schema-3 environment exact-resume keys do not match the strict schema"
+                    )
+                saved_active_names = saved.get("active_term_names")
+                if (
+                    type(saved_active_names) is not list
+                    or any(type(name) is not str for name in saved_active_names)
+                    or len(saved_active_names) != len(set(saved_active_names))
+                ):
+                    raise RuntimeError(
+                        "schema-3 environment active_term_names must be a unique string list"
+                    )
+                saved_active_names = tuple(saved_active_names)
+                if saved_active_names != active_term_names:
+                    raise RuntimeError(
+                        "exact-resume ordered command term identity mismatch: "
+                        f"checkpoint={saved_active_names}, current={active_term_names}"
+                    )
+                if tuple(saved_term_states) != active_term_names:
+                    raise RuntimeError(
+                        "schema-3 command_terms must contain every active term in exact order: "
+                        f"checkpoint={tuple(saved_term_states)}, current={active_term_names}"
+                    )
                 saved_explicit = {
                     str(name)
                     for name, term_state in saved_term_states.items()
@@ -542,7 +658,20 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                         f"checkpoint explicit terms={sorted(saved_explicit)}, "
                         f"current explicit terms={sorted(current_explicit)}"
                     )
+                if self._task_first_exact_resume_required() and current_explicit != set(
+                    active_term_names
+                ):
+                    raise RuntimeError(
+                        "task-first schema-3 restore requires explicit state for every active "
+                        f"command term; explicit={sorted(current_explicit)}, "
+                        f"active={list(active_term_names)}"
+                    )
 
+        # Do not mutate even the curriculum clock until schema-3 structure and active-term identity
+        # have passed. Explicit term loaders below remain responsible for their own atomicity.
+        env.common_step_counter = common_step_counter
+
+        if isinstance(saved, dict) and manager is not None:
             for term_name, term_state in saved_term_states.items():
                 term_name = str(term_name)
                 if not isinstance(term_state, dict):
@@ -734,6 +863,17 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                     f"{state.get('schema_version', None) if isinstance(state, dict) else type(state)}; "
                     f"refusing to guess how to resume: {path}"
                 )
+            if int(state["schema_version"]) >= 3:
+                nested = state.get("environment_resume_state")
+                if (
+                    not isinstance(nested, dict)
+                    or type(nested.get("schema_version")) is not int
+                    or nested["schema_version"] != _ENVIRONMENT_RESUME_SCHEMA_VERSION
+                ):
+                    raise RuntimeError(
+                        "schema-3 exact resume requires a schema-3 "
+                        "environment_resume_state; refusing a partial command restore"
+                    )
             # 一致性铁律:状态包写入时恒有 next_learning_iteration == iter+1。checkpoint 外科
             # 手术(make_hitter_warmstart / warm_start_realsensor 把 iter 归零但整份保留 infos)
             # 会打破它 —— 那时状态是"上一世"的,拿来续课程等于劫持一次刻意的全新热启动。
@@ -789,6 +929,13 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         (老实说明:若主线程死死卡在 native Isaac/CUDA 调用里,Python 层任何 handler 都
         不会被执行,第一次信号同样没反应,那种情况仍然只有 SIGKILL 能救。)
         """
+        original_update = getattr(self.alg, "update", None)
+        if not callable(original_update):
+            raise RuntimeError(
+                "MotionOnPolicyRunner requires a callable alg.update() for exact rollout boundaries"
+            )
+        if getattr(self, "_rollout_update_wrapper_active", False):
+            raise RuntimeError("MotionOnPolicyRunner.learn() cannot be entered recursively")
         pending_signal = None
         previous_handlers = {}
 
@@ -823,19 +970,35 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             previous_handlers.clear()
 
         self._boundary_stop_requested = lambda: pending_signal is not None
+        # Upstream RSL-RL calls ``log()`` only on rank 0.  Curriculum advancement is environment
+        # state, not presentation, so attach it to the algorithm's one update call per PPO loop.
+        # This executes on every rank even when ``disable_logs`` is true and preserves the upstream
+        # loop rather than copying a version-sensitive implementation here.
+        next_rollout_step = int(self.current_learning_iteration)
+
+        def update_with_rollout_boundary(*args, **kwargs):
+            nonlocal next_rollout_step
+            result = original_update(*args, **kwargs)
+            self._notify_command_terms_rollout_end(next_rollout_step)
+            next_rollout_step += 1
+            return result
+
+        self._rollout_update_wrapper_active = True
         try:
+            self.alg.update = update_with_rollout_boundary
             super().learn(
                 num_learning_iterations=num_learning_iterations,
                 init_at_random_ep_len=init_at_random_ep_len,
             )
         finally:
+            self.alg.update = original_update
+            self._rollout_update_wrapper_active = False
             self._boundary_stop_requested = None
             for signum, handler in previous_handlers.items():
                 signal.signal(signum, handler)
 
     def log(self, locs: dict, width: int = 80, pad: int = 35) -> None:
         step = int(locs["it"])
-        self._notify_command_terms_rollout_end(step)
         super().log(locs, width=width, pad=pad)
         # Consume/print even when TensorBoard/W&B is disabled: this stdout JSON line is the exact
         # per-update receipt, while dashboard logging is optional presentation only.
@@ -873,11 +1036,12 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         manager = getattr(env, "command_manager", None)
         if manager is None:
             return
-        term_names = tuple(str(name) for name in getattr(manager, "active_terms", ()))
+        raw_term_names = tuple(getattr(manager, "active_terms", ()))
+        term_names = tuple(str(name) for name in raw_term_names)
         if len(term_names) != len(set(term_names)):
             raise RuntimeError("command manager active_terms contains duplicate names")
-        for term_name in term_names:
-            term = manager.get_term(term_name)
+        for raw_term_name, term_name in zip(raw_term_names, term_names):
+            term = manager.get_term(raw_term_name)
             callback = getattr(term, "on_rollout_end", None)
             if callable(callback):
                 callback(step)
