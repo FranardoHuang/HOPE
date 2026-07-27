@@ -95,6 +95,7 @@ motion_admission = _load_local_motion_admission()
 
 
 REGISTRY_SCHEMA_VERSION = 1
+GENERIC_REGISTRY_SCHEMA_VERSION = 2
 CANONICAL_MOTION_IDS = (
     "fh_loop",
     "bh_loop_c",
@@ -142,6 +143,7 @@ _TOP_LEVEL_KEYS = frozenset(
         "entries",
     }
 )
+_TOP_LEVEL_KEYS_V2 = _TOP_LEVEL_KEYS | frozenset({"motion_ids"})
 _ENTRY_KEYS = frozenset(
     {
         "motion_id",
@@ -420,8 +422,9 @@ class MotionRegistryEntry:
 
 @dataclass(frozen=True)
 class CanonicalMotionBankRegistry:
-    """One validated ``upper`` or ``full`` five-motion bank."""
+    """One validated scoped legacy-v1 or arbitrary-N v2 motion bank."""
 
+    schema_version: int
     path: Path
     repo_root: Path
     registry_sha256: str
@@ -434,6 +437,7 @@ class CanonicalMotionBankRegistry:
     canonical_ready_fk_path: Path
     canonical_ready_fk_sha256: str
     registry_digest_pinned: bool
+    motion_ids: tuple[str, ...]
     entries: tuple[MotionRegistryEntry, ...]
 
     def entry(self, motion_id: str) -> MotionRegistryEntry:
@@ -1637,6 +1641,7 @@ def _parse_entry(
     *,
     index: int,
     expected_motion_id: str,
+    order_label: str,
     bank_scope: str,
     bank_ready_sha256: str,
     bank_ready: _ReadySummary,
@@ -1649,7 +1654,7 @@ def _parse_entry(
     motion_id = _slug(raw["motion_id"], f"{label}.motion_id")
     if motion_id != expected_motion_id:
         raise MotionRegistryError(
-            f"{label}.motion_id must preserve canonical order: "
+            f"{label}.motion_id must preserve {order_label}: "
             f"expected {expected_motion_id!r}, got {motion_id!r}"
         )
     scope = raw["scope"]
@@ -2092,14 +2097,43 @@ def load_canonical_motion_bank_registry(
                 "registry SHA-256 mismatch: "
                 f"expected={expected}, actual={registry_sha256}"
             )
-    raw = _exact_keys(_json_object(payload, "registry"), _TOP_LEVEL_KEYS, "registry")
-    if (
-        type(raw["schema_version"]) is not int
-        or raw["schema_version"] != REGISTRY_SCHEMA_VERSION
+    document = _json_object(payload, "registry")
+    schema_version = document.get("schema_version")
+    if type(schema_version) is not int or schema_version not in (
+        REGISTRY_SCHEMA_VERSION,
+        GENERIC_REGISTRY_SCHEMA_VERSION,
     ):
         raise MotionRegistryError(
-            f"registry.schema_version must be exact integer {REGISTRY_SCHEMA_VERSION}"
+            "registry.schema_version must be exact integer "
+            f"{REGISTRY_SCHEMA_VERSION} or {GENERIC_REGISTRY_SCHEMA_VERSION}"
         )
+    raw = _exact_keys(
+        document,
+        (
+            _TOP_LEVEL_KEYS
+            if schema_version == REGISTRY_SCHEMA_VERSION
+            else _TOP_LEVEL_KEYS_V2
+        ),
+        "registry",
+    )
+    if schema_version == REGISTRY_SCHEMA_VERSION:
+        motion_ids = CANONICAL_MOTION_IDS
+        order_label = "canonical order"
+    else:
+        raw_motion_ids = raw["motion_ids"]
+        if not isinstance(raw_motion_ids, list) or not raw_motion_ids:
+            raise MotionRegistryError(
+                "registry.motion_ids must be a non-empty ordered array"
+            )
+        motion_ids = tuple(
+            _slug(value, f"registry.motion_ids[{index}]")
+            for index, value in enumerate(raw_motion_ids)
+        )
+        if len(set(motion_ids)) != len(motion_ids):
+            raise MotionRegistryError(
+                "registry.motion_ids must contain unique values"
+            )
+        order_label = "ordered motion_ids"
     bank_id = _slug(raw["bank_id"], "registry.bank_id")
     scope = raw["scope"]
     if scope not in SCOPES:
@@ -2143,16 +2177,17 @@ def load_canonical_motion_bank_registry(
     )
     raw_entries = raw["entries"]
     if not isinstance(raw_entries, list) or len(raw_entries) != len(
-        CANONICAL_MOTION_IDS
+        motion_ids
     ):
         raise MotionRegistryError(
-            f"registry.entries must contain exactly {len(CANONICAL_MOTION_IDS)} rows"
+            f"registry.entries must contain exactly {len(motion_ids)} rows"
         )
     entries = tuple(
         _parse_entry(
             value,
             index=index,
-            expected_motion_id=CANONICAL_MOTION_IDS[index],
+            expected_motion_id=motion_ids[index],
+            order_label=order_label,
             bank_scope=str(scope),
             bank_ready_sha256=ready_sha256,
             bank_ready=ready,
@@ -2162,10 +2197,14 @@ def load_canonical_motion_bank_registry(
         )
         for index, value in enumerate(raw_entries)
     )
-    if tuple(row.motion_id for row in entries) != CANONICAL_MOTION_IDS:
-        raise MotionRegistryError("registry motion IDs are duplicated or out of order")
-    if len({row.motion_id for row in entries}) != len(CANONICAL_MOTION_IDS):
-        raise MotionRegistryError("registry must contain every motion ID exactly once")
+    if tuple(row.motion_id for row in entries) != motion_ids:
+        raise MotionRegistryError(
+            "registry entries differ from the ordered motion_ids"
+        )
+    if len({row.motion_id for row in entries}) != len(motion_ids):
+        raise MotionRegistryError(
+            "registry must contain every motion ID exactly once"
+        )
     if len({row.canonical_ready_sha256 for row in entries}) != 1:
         raise MotionRegistryError("registry entries do not share one canonical ready")
     if len({row.ready_runtime_sha256 for row in entries}) != 1:
@@ -2174,6 +2213,7 @@ def load_canonical_motion_bank_registry(
         )
 
     return CanonicalMotionBankRegistry(
+        schema_version=int(schema_version),
         path=registry_path,
         repo_root=root,
         registry_sha256=registry_sha256,
@@ -2186,6 +2226,7 @@ def load_canonical_motion_bank_registry(
         canonical_ready_fk_path=ready_fk_path,
         canonical_ready_fk_sha256=ready_fk_sha256,
         registry_digest_pinned=expected_registry_sha256 is not None,
+        motion_ids=motion_ids,
         entries=entries,
     )
 
@@ -2239,18 +2280,21 @@ def _alignment_sha256(registry: CanonicalMotionBankRegistry) -> str:
         }
         for row in registry.entries
     ]
+    document = {
+        "schema_version": registry.schema_version,
+        "registry_sha256": registry.registry_sha256,
+        "bank_id": registry.bank_id,
+        "scope": registry.scope,
+        "canonical_ready_path": registry.canonical_ready_path_text,
+        "canonical_ready_sha256": registry.canonical_ready_sha256,
+        "canonical_ready_fk_path": registry.canonical_ready_fk_path_text,
+        "canonical_ready_fk_sha256": registry.canonical_ready_fk_sha256,
+        "rows": rows,
+    }
+    if registry.schema_version == GENERIC_REGISTRY_SCHEMA_VERSION:
+        document["motion_ids"] = list(registry.motion_ids)
     payload = json.dumps(
-        {
-            "schema_version": REGISTRY_SCHEMA_VERSION,
-            "registry_sha256": registry.registry_sha256,
-            "bank_id": registry.bank_id,
-            "scope": registry.scope,
-            "canonical_ready_path": registry.canonical_ready_path_text,
-            "canonical_ready_sha256": registry.canonical_ready_sha256,
-            "canonical_ready_fk_path": registry.canonical_ready_fk_path_text,
-            "canonical_ready_fk_sha256": registry.canonical_ready_fk_sha256,
-            "rows": rows,
-        },
+        document,
         sort_keys=True,
         separators=(",", ":"),
         allow_nan=False,
@@ -2292,7 +2336,7 @@ def bank_promotion_binding(
     registry: CanonicalMotionBankRegistry,
     *,
     authorization_purpose: str,
-) -> motion_admission.BankPromotionBinding:
+) -> Any:
     """Derive the exact values an external code-rooted certificate must bind."""
 
     if authorization_purpose not in AUTHORIZATION_PURPOSES:
@@ -2303,7 +2347,12 @@ def bank_promotion_binding(
         raise MotionRegistryError(
             "bank promotion binding requires expected_registry_sha256"
         )
-    return motion_admission.BankPromotionBinding(
+    binding_type = (
+        motion_admission.BankPromotionBinding
+        if registry.schema_version == REGISTRY_SCHEMA_VERSION
+        else motion_admission.GenericBankPromotionBinding
+    )
+    return binding_type(
         purpose=authorization_purpose,
         bank_id=registry.bank_id,
         scope=registry.scope,
@@ -2623,9 +2672,12 @@ def adapt_registry_for_runtime(
         tables.hardware_authorized_per_clip,
         tables.npz_sha256_per_clip,
     )
-    if any(len(column) != len(CANONICAL_MOTION_IDS) for column in columns):
-        raise MotionRegistryError("runtime registry columns are not all length five")
-    if tables.motion_ids != CANONICAL_MOTION_IDS:
+    expected_count = len(registry.motion_ids)
+    if any(len(column) != expected_count for column in columns):
+        raise MotionRegistryError(
+            "runtime registry columns do not all match the ordered motion count"
+        )
+    if tables.motion_ids != registry.motion_ids:
         raise MotionRegistryError("runtime registry identity column changed order")
     if expected_alignment_sha256 is not None:
         expected = _sha256_text(
@@ -2665,3 +2717,56 @@ def load_runtime_tables(
         authorization_purpose=authorization_purpose,
         admission=admission,
     )
+
+
+def load_training_adopted_registry(
+    path: os.PathLike[str] | str,
+    promotion_certificate_path: os.PathLike[str] | str,
+    *,
+    repo_root: os.PathLike[str] | str | None,
+    expected_registry_sha256: str,
+    expected_alignment_sha256: str,
+    expected_canonical_ready_sha256: str,
+    expected_canonical_ready_fk_sha256: str,
+    expected_promotion_certificate_sha256: str,
+) -> tuple[CanonicalMotionBankRegistry, CanonicalRuntimeTables]:
+    """Load one fully pinned training bank through the code-rooted trust chain.
+
+    This is the narrow task-manifest-facing entry point.  It deliberately fixes
+    the purpose to ``training`` and requires every independent pin, including
+    the exact promotion-certificate bytes.  The returned registry preserves the
+    ordered row identity needed for per-action reconciliation; the tables are
+    independently reloaded and admission-checked by the runtime adapter.
+    """
+
+    expected_certificate = _sha256_text(
+        expected_promotion_certificate_sha256,
+        "expected_promotion_certificate_sha256",
+    )
+    registry = load_canonical_motion_bank_registry(
+        path,
+        repo_root=repo_root,
+        expected_registry_sha256=expected_registry_sha256,
+    )
+    admission = verify_registry_promotion_certificate(
+        registry,
+        promotion_certificate_path,
+        authorization_purpose="training",
+    )
+    if admission.certificate_sha256 != expected_certificate:
+        raise MotionRegistryError(
+            "promotion certificate SHA-256 mismatch: "
+            f"expected={expected_certificate}, "
+            f"actual={admission.certificate_sha256}"
+        )
+    tables = adapt_registry_for_runtime(
+        registry,
+        expected_alignment_sha256=expected_alignment_sha256,
+        expected_canonical_ready_sha256=expected_canonical_ready_sha256,
+        expected_canonical_ready_fk_sha256=(
+            expected_canonical_ready_fk_sha256
+        ),
+        authorization_purpose="training",
+        admission=admission,
+    )
+    return registry, tables

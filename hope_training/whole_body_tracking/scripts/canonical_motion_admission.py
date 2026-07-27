@@ -32,8 +32,11 @@ from typing import Any, Mapping, Sequence
 TRUSTED_BANK_PROMOTION_CERTIFICATE_SHA256: frozenset[str] = frozenset()
 
 _SHA256 = re.compile(r"^[0-9a-f]{64}$")
+_SLUG = re.compile(r"^[a-z0-9][a-z0-9._-]*$")
 _MINT_TOKEN = object()
 _PURPOSES = ("training", "deployment", "hardware")
+_SCOPES = ("upper", "full")
+_EVIDENCE_LEVELS = ("E0", "E1", "E2", "E3", "E4", "E5")
 _CERTIFICATE_KEYS = frozenset(
     {
         "schema_version",
@@ -76,6 +79,21 @@ _BANK_GATE_REPORT_KEYS = frozenset(
         "aggregate",
         "clips",
         "non_claims",
+    }
+)
+_BANK_GATE_REPORT_KEYS_V2 = _BANK_GATE_REPORT_KEYS | frozenset(
+    {"selected_registry_binding"}
+)
+_SELECTED_REGISTRY_BINDING_KEYS = frozenset(
+    {
+        "scope",
+        "registry_sha256",
+        "alignment_sha256",
+        "canonical_ready_sha256",
+        "canonical_ready_fk_sha256",
+        "motion_ids",
+        "npz_sha256",
+        "build_manifest_sha256",
     }
 )
 _BANK_GATE_BOUND_INPUT_KEYS = frozenset(
@@ -227,6 +245,140 @@ class BankPromotionBinding:
             for index, digest in enumerate(values):
                 _digest(digest, f"{label}[{index}]")
         for row, values in enumerate(self.evidence_certificate_sha256):
+            for column, digest in enumerate(values):
+                _digest(
+                    digest,
+                    f"evidence_certificate_sha256[{row}][{column}]",
+                )
+        for label, values in (
+            ("question_bank_sha256", self.question_bank_sha256),
+            ("training_config_sha256", self.training_config_sha256),
+            ("onnx_model_sha256", self.onnx_model_sha256),
+            ("onnx_metadata_sha256", self.onnx_metadata_sha256),
+            ("adoption_manifest_sha256", self.adoption_manifest_sha256),
+        ):
+            for index, digest in enumerate(values):
+                if digest is not None:
+                    _digest(digest, f"{label}[{index}]")
+
+
+@dataclass(frozen=True)
+class GenericBankPromotionBinding:
+    """Exact arbitrary-N registry values authorized by a v2 certificate."""
+
+    purpose: str
+    bank_id: str
+    scope: str
+    registry_sha256: str
+    alignment_sha256: str
+    motion_ids: tuple[str, ...]
+    npz_sha256: tuple[str, ...]
+    canonical_ready_sha256: str
+    canonical_ready_fk_sha256: str
+    build_manifest_sha256: tuple[str, ...]
+    evidence_levels: tuple[str, ...]
+    evidence_manifest_sha256: tuple[str, ...]
+    evidence_certificate_sha256: tuple[tuple[str, ...], ...]
+    question_bank_sha256: tuple[str | None, ...]
+    training_config_sha256: tuple[str | None, ...]
+    onnx_model_sha256: tuple[str | None, ...]
+    onnx_metadata_sha256: tuple[str | None, ...]
+    adoption_manifest_sha256: tuple[str | None, ...]
+
+    def __post_init__(self) -> None:
+        if self.purpose not in _PURPOSES:
+            raise MotionAdmissionError(
+                f"purpose must be one of {_PURPOSES}, got {self.purpose!r}"
+            )
+        if (
+            not isinstance(self.bank_id, str)
+            or _SLUG.fullmatch(self.bank_id) is None
+        ):
+            raise MotionAdmissionError(
+                "bank_id must be one lowercase normalized slug"
+            )
+        if self.scope not in _SCOPES:
+            raise MotionAdmissionError(
+                f"scope must select exactly one of {_SCOPES}, got {self.scope!r}"
+            )
+        if type(self.motion_ids) is not tuple:
+            raise MotionAdmissionError(
+                "generic bank promotion motion_ids must be an exact tuple"
+            )
+        count = len(self.motion_ids)
+        if count < 1:
+            raise MotionAdmissionError(
+                "generic bank promotion binding requires a non-empty ordered "
+                "motion id list"
+            )
+        for index, motion_id in enumerate(self.motion_ids):
+            if (
+                not isinstance(motion_id, str)
+                or _SLUG.fullmatch(motion_id) is None
+            ):
+                raise MotionAdmissionError(
+                    f"motion_ids[{index}] must be one lowercase normalized slug"
+                )
+        if len(set(self.motion_ids)) != count:
+            raise MotionAdmissionError(
+                "generic bank promotion binding requires unique ordered motion ids"
+            )
+        columns = (
+            self.npz_sha256,
+            self.build_manifest_sha256,
+            self.evidence_levels,
+            self.evidence_manifest_sha256,
+            self.evidence_certificate_sha256,
+            self.question_bank_sha256,
+            self.training_config_sha256,
+            self.onnx_model_sha256,
+            self.onnx_metadata_sha256,
+            self.adoption_manifest_sha256,
+        )
+        if any(type(column) is not tuple for column in columns):
+            raise MotionAdmissionError(
+                "generic bank promotion binding columns must be exact tuples"
+            )
+        if any(len(column) != count for column in columns):
+            raise MotionAdmissionError(
+                "generic bank promotion binding columns must all match "
+                "motion_ids length"
+            )
+        for label, digest in (
+            ("registry_sha256", self.registry_sha256),
+            ("alignment_sha256", self.alignment_sha256),
+            ("canonical_ready_sha256", self.canonical_ready_sha256),
+            ("canonical_ready_fk_sha256", self.canonical_ready_fk_sha256),
+        ):
+            _digest(digest, label)
+        for label, values in (
+            ("npz_sha256", self.npz_sha256),
+            ("build_manifest_sha256", self.build_manifest_sha256),
+            ("evidence_manifest_sha256", self.evidence_manifest_sha256),
+        ):
+            for index, digest in enumerate(values):
+                _digest(digest, f"{label}[{index}]")
+        for index, level in enumerate(self.evidence_levels):
+            if level not in _EVIDENCE_LEVELS:
+                raise MotionAdmissionError(
+                    f"evidence_levels[{index}] must be one of "
+                    f"{_EVIDENCE_LEVELS}"
+                )
+        for row, values in enumerate(self.evidence_certificate_sha256):
+            if type(values) is not tuple:
+                raise MotionAdmissionError(
+                    "generic bank promotion evidence certificate rows must "
+                    "be exact tuples"
+                )
+            expected_receipts = _EVIDENCE_LEVELS.index(
+                self.evidence_levels[row]
+            )
+            if len(values) != expected_receipts:
+                raise MotionAdmissionError(
+                    "generic bank promotion evidence certificate row "
+                    f"{row} must contain exactly {expected_receipts} receipts "
+                    f"for {self.evidence_levels[row]}"
+                )
             for column, digest in enumerate(values):
                 _digest(
                     digest,
@@ -426,7 +578,25 @@ def _receipt_file(
     return path
 
 
-def _binding_document(binding: BankPromotionBinding) -> Mapping[str, Any]:
+def _certificate_profile(binding: Any) -> tuple[int, str, int]:
+    """Return certificate/report schema and paired clip count for one binding."""
+
+    if type(binding) is BankPromotionBinding:
+        return 1, "canonical-motion-bank-promotion-v1", 10
+    if type(binding) is GenericBankPromotionBinding:
+        return (
+            2,
+            "canonical-motion-bank-promotion-v2",
+            2 * len(binding.motion_ids),
+        )
+    raise MotionAdmissionError(
+        "binding must be an exact BankPromotionBinding or "
+        "GenericBankPromotionBinding"
+    )
+
+
+def _binding_document(binding: Any) -> Mapping[str, Any]:
+    _certificate_profile(binding)
     return {
         "purpose": binding.purpose,
         "bank_id": binding.bank_id,
@@ -460,7 +630,7 @@ def _binding_document(binding: BankPromotionBinding) -> Mapping[str, Any]:
     }
 
 
-def _binding_sha256(binding: BankPromotionBinding) -> str:
+def _binding_sha256(binding: Any) -> str:
     payload = json.dumps(
         _binding_document(binding),
         sort_keys=True,
@@ -473,8 +643,10 @@ def _binding_sha256(binding: BankPromotionBinding) -> str:
 def _validate_bank_gate_report(
     binding_row: Mapping[str, Any],
     *,
-    binding: BankPromotionBinding,
+    binding: Any,
     repo_root: Path,
+    expected_report_schema_version: int = 1,
+    expected_clip_count: int = 10,
 ) -> None:
     row = _exact_keys(
         binding_row, _BANK_GATE_BINDING_KEYS, "bank_gate_report"
@@ -488,11 +660,16 @@ def _validate_bank_gate_report(
         )
     report = _exact_keys(
         _strict_json_bytes(payload, "bank gate report"),
-        _BANK_GATE_REPORT_KEYS,
+        (
+            _BANK_GATE_REPORT_KEYS
+            if expected_report_schema_version == 1
+            else _BANK_GATE_REPORT_KEYS_V2
+        ),
         "bank gate report",
     )
     if (
-        report["schema_version"] != 1
+        type(report["schema_version"]) is not int
+        or report["schema_version"] != expected_report_schema_version
         or report["verdict"] != "PASS"
         or report["bank_gate_pass"] is not True
         or report["candidate_integrity_pass"] is not True
@@ -511,6 +688,31 @@ def _validate_bank_gate_report(
         raise MotionAdmissionError(
             "bank gate library_id differs from the promoted bank_id"
         )
+    if expected_report_schema_version == 2:
+        selected = _exact_keys(
+            report["selected_registry_binding"],
+            _SELECTED_REGISTRY_BINDING_KEYS,
+            "bank gate selected_registry_binding",
+        )
+        expected_selected = {
+            "scope": binding.scope,
+            "registry_sha256": binding.registry_sha256,
+            "alignment_sha256": binding.alignment_sha256,
+            "canonical_ready_sha256": binding.canonical_ready_sha256,
+            "canonical_ready_fk_sha256": (
+                binding.canonical_ready_fk_sha256
+            ),
+            "motion_ids": list(binding.motion_ids),
+            "npz_sha256": list(binding.npz_sha256),
+            "build_manifest_sha256": list(
+                binding.build_manifest_sha256
+            ),
+        }
+        if selected != expected_selected:
+            raise MotionAdmissionError(
+                "bank gate selected registry lineage differs from the "
+                "promoted binding"
+            )
     grounded_claim = report.get("contracts", {}).get(
         "grounded_inverse_dynamics"
     )
@@ -645,9 +847,10 @@ def _validate_bank_gate_report(
                 ),
             }[name],
         )
-    if (
-        tools["canonical_mujoco_dynamics_gate"]["report_schema_version"] != 1
-    ):
+    dynamics_report_schema = tools["canonical_mujoco_dynamics_gate"][
+        "report_schema_version"
+    ]
+    if type(dynamics_report_schema) is not int or dynamics_report_schema != 1:
         raise MotionAdmissionError(
             "bank gate dynamics verifier report schema changed"
         )
@@ -665,7 +868,8 @@ def _validate_bank_gate_report(
     if (
         matrix["motion_ids"] != list(binding.motion_ids)
         or matrix["scopes"] != ["upper", "full"]
-        or matrix["count"] != 10
+        or type(matrix["count"]) is not int
+        or matrix["count"] != expected_clip_count
         or contracts["shared_ready"] is not True
         or contracts["six_endpoint_velocity_classes_exact_zero"] is not True
         or contracts["contact_opportunity_is_marker_only"] is not True
@@ -685,7 +889,7 @@ def _validate_bank_gate_report(
         _BANK_GATE_AGGREGATE_KEYS,
         "bank gate aggregate",
     )
-    exact_ten = (
+    exact_complete_counts = (
         "clip_count",
         "fk_pass_count",
         "velocity_consistency_pass_count",
@@ -695,19 +899,32 @@ def _validate_bank_gate_report(
         "complete_dynamics_pass_count",
         "torque_interpretation_valid_count",
     )
-    if (
-        any(aggregate[key] != 10 for key in exact_ten)
-        or aggregate["incomplete_fail_closed_count"] != 0
+    count_keys = tuple(
+        key
+        for key in _BANK_GATE_AGGREGATE_KEYS
+        if key == "clip_count" or key.endswith("_count")
+    )
+    if any(
+        type(aggregate[key]) is not int or aggregate[key] < 0
+        for key in count_keys
+    ) or any(
+        aggregate[key] != expected_clip_count
+        for key in exact_complete_counts
+    ) or (
+        aggregate["incomplete_fail_closed_count"] != 0
         or aggregate["failed_count"] != 0
     ):
         raise MotionAdmissionError(
-            "bank gate aggregate is not a complete ten-clip dynamics PASS"
+            "bank gate aggregate is not a complete paired-scope dynamics PASS"
         )
 
     clips = report.get("clips")
-    if not isinstance(clips, list) or len(clips) != 10:
+    if (
+        not isinstance(clips, list)
+        or len(clips) != expected_clip_count
+    ):
         raise MotionAdmissionError(
-            "bank gate report must contain the complete ten-clip matrix"
+            "bank gate report must contain the complete paired-scope matrix"
         )
     expected_matrix = tuple(
         (motion_id, scope)
@@ -831,14 +1048,14 @@ def _validate_bank_gate_report(
     expected = tuple(zip(binding.motion_ids, binding.npz_sha256))
     if observed != expected:
         raise MotionAdmissionError(
-            "bank gate report does not bind the ordered five scope NPZ hashes"
+            "bank gate report does not bind the ordered selected-scope NPZ hashes"
         )
 
 
 def _verify_bank_promotion_certificate_snapshot(
     certificate_path: os.PathLike[str] | str,
     *,
-    binding: BankPromotionBinding,
+    binding: Any,
     repo_root: os.PathLike[str] | str,
 ) -> tuple[Path, Path, str]:
     """Reopen and verify the complete certificate/report closure."""
@@ -862,10 +1079,15 @@ def _verify_bank_promotion_certificate_snapshot(
         _CERTIFICATE_KEYS,
         "promotion certificate",
     )
+    (
+        expected_schema_version,
+        expected_certificate_type,
+        expected_clip_count,
+    ) = _certificate_profile(binding)
     if (
-        certificate["schema_version"] != 1
-        or certificate["certificate_type"]
-        != "canonical-motion-bank-promotion-v1"
+        type(certificate["schema_version"]) is not int
+        or certificate["schema_version"] != expected_schema_version
+        or certificate["certificate_type"] != expected_certificate_type
     ):
         raise MotionAdmissionError(
             "promotion certificate schema/type is unsupported"
@@ -891,6 +1113,8 @@ def _verify_bank_promotion_certificate_snapshot(
         certificate["bank_gate_report"],
         binding=binding,
         repo_root=Path(repo_root),
+        expected_report_schema_version=expected_schema_version,
+        expected_clip_count=expected_clip_count,
     )
     try:
         resolved_root = Path(repo_root).resolve(strict=True)
@@ -904,7 +1128,7 @@ def _verify_bank_promotion_certificate_snapshot(
 def verify_bank_promotion_certificate(
     certificate_path: os.PathLike[str] | str,
     *,
-    binding: BankPromotionBinding,
+    binding: Any,
     repo_root: os.PathLike[str] | str,
 ) -> TrustedMotionAdmission:
     """Verify exact trusted bytes and mint one opaque bank capability."""
@@ -929,7 +1153,7 @@ def verify_bank_promotion_certificate(
 
 
 def require_matching_admission(
-    admission: Any, binding: BankPromotionBinding
+    admission: Any, binding: Any
 ) -> None:
     """Reject missing, fabricated, stale, or wrong-purpose capabilities."""
 
@@ -966,6 +1190,7 @@ def require_matching_admission(
 
 __all__ = [
     "BankPromotionBinding",
+    "GenericBankPromotionBinding",
     "MotionAdmissionError",
     "TrustedMotionAdmission",
     "require_matching_admission",

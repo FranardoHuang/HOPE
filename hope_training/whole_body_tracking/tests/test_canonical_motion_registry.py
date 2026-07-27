@@ -30,6 +30,10 @@ _FAMILIES = ("forehand", "backhand", "forehand", "backhand", "forehand")
 _SIGNS = (1.0, -1.0, 1.0, -1.0, 1.0)
 
 
+def _generic_motion_ids(count: int) -> tuple[str, ...]:
+    return tuple(f"action_{index:03d}" for index in range(count))
+
+
 def _sha256(path: Path) -> str:
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
@@ -196,7 +200,16 @@ def _write_evidence_bundle(
     return evidence_path, evidence_sha
 
 
-def _repo_fixture(tmp_path: Path, *, scope: str = "upper"):
+def _repo_fixture(
+    tmp_path: Path,
+    *,
+    scope: str = "upper",
+    schema_version: int = 1,
+    motion_ids=None,
+):
+    if motion_ids is None:
+        motion_ids = registry.CANONICAL_MOTION_IDS
+    motion_ids = tuple(motion_ids)
     repo = tmp_path / "repo"
     repo.mkdir(parents=True)
     ready_path = repo / "assets" / "ready" / "canonical_ready_v1.npz"
@@ -206,7 +219,7 @@ def _repo_fixture(tmp_path: Path, *, scope: str = "upper"):
         ready_fk_path, canonical_ready_sha256=ready_sha
     )
     entries = []
-    for index, motion_id in enumerate(registry.CANONICAL_MOTION_IDS):
+    for index, motion_id in enumerate(motion_ids):
         npz_path = repo / "assets" / scope / f"{motion_id}.npz"
         npz_sha = _write_npz(npz_path, seed=index)
         source_path = repo / "manifests" / scope / f"{motion_id}.source.json"
@@ -257,10 +270,10 @@ def _repo_fixture(tmp_path: Path, *, scope: str = "upper"):
                 "npz_sha256": npz_sha,
                 "frames": 5,
                 "fps": 50.0,
-                "family": _FAMILIES[index],
+                "family": "forehand" if index % 2 == 0 else "backhand",
                 "strike_marker_frame": 2,
                 "contact_opportunity_frames": [1, 3],
-                "mount_normal_sign": _SIGNS[index],
+                "mount_normal_sign": 1.0 if index % 2 == 0 else -1.0,
                 "canonical_ready_sha256": ready_sha,
                 "source_manifest_path": source_path.relative_to(repo).as_posix(),
                 "source_manifest_sha256": source_sha,
@@ -294,8 +307,8 @@ def _repo_fixture(tmp_path: Path, *, scope: str = "upper"):
             }
         )
     document = {
-        "schema_version": 1,
-        "bank_id": f"canonical_{scope}_v1",
+        "schema_version": schema_version,
+        "bank_id": f"canonical_{scope}_v{schema_version}",
         "scope": scope,
         "canonical_ready_path": ready_path.relative_to(repo).as_posix(),
         "canonical_ready_sha256": ready_sha,
@@ -303,6 +316,8 @@ def _repo_fixture(tmp_path: Path, *, scope: str = "upper"):
         "canonical_ready_fk_sha256": ready_fk_sha,
         "entries": entries,
     }
+    if schema_version == 2:
+        document["motion_ids"] = list(motion_ids)
     path = repo / "configs" / f"{scope}_bank.json"
     _write_json(path, document)
     return repo, path, document
@@ -496,6 +511,8 @@ def _complete_bank_gate_report(
     binding,
     repo: Path,
     ready_path: Path,
+    *,
+    report_schema_version: int = 1,
 ):
     digest = lambda label: hashlib.sha256(label.encode("utf-8")).hexdigest()
     manifest = _write_blob_receipt(
@@ -607,9 +624,10 @@ def _complete_bank_gate_report(
         key: 0
         for key in registry.motion_admission._BANK_GATE_AGGREGATE_KEYS
     }
+    expected_clip_count = 2 * len(binding.motion_ids)
     aggregate.update(
         {
-            key: 10
+            key: expected_clip_count
             for key in (
                 "clip_count",
                 "fk_pass_count",
@@ -622,8 +640,8 @@ def _complete_bank_gate_report(
             )
         }
     )
-    return {
-        "schema_version": 1,
+    report = {
+        "schema_version": report_schema_version,
         "verdict": "PASS",
         "bank_gate_pass": True,
         "candidate_integrity_pass": True,
@@ -663,7 +681,7 @@ def _complete_bank_gate_report(
             "matrix": {
                 "motion_ids": list(binding.motion_ids),
                 "scopes": ["upper", "full"],
-                "count": 10,
+                "count": expected_clip_count,
             },
             "shared_ready": True,
             "six_endpoint_velocity_classes_exact_zero": True,
@@ -678,9 +696,25 @@ def _complete_bank_gate_report(
         "clips": clips,
         "non_claims": [],
     }
+    if report_schema_version == 2:
+        report["selected_registry_binding"] = {
+            "scope": binding.scope,
+            "registry_sha256": binding.registry_sha256,
+            "alignment_sha256": binding.alignment_sha256,
+            "canonical_ready_sha256": binding.canonical_ready_sha256,
+            "canonical_ready_fk_sha256": (
+                binding.canonical_ready_fk_sha256
+            ),
+            "motion_ids": list(binding.motion_ids),
+            "npz_sha256": list(binding.npz_sha256),
+            "build_manifest_sha256": list(
+                binding.build_manifest_sha256
+            ),
+        }
+    return report
 
 
-def _trusted_training_admission(
+def _trusted_training_certificate(
     repo: Path,
     loaded: registry.CanonicalMotionBankRegistry,
     monkeypatch,
@@ -697,6 +731,7 @@ def _trusted_training_admission(
             binding,
             repo,
             loaded.canonical_ready_path,
+            report_schema_version=loaded.schema_version,
         ),
     )
     certificate_path = (
@@ -705,8 +740,10 @@ def _trusted_training_admission(
     certificate_sha = _write_json(
         certificate_path,
         {
-            "schema_version": 1,
-            "certificate_type": "canonical-motion-bank-promotion-v1",
+            "schema_version": loaded.schema_version,
+            "certificate_type": (
+                f"canonical-motion-bank-promotion-v{loaded.schema_version}"
+            ),
             **registry.motion_admission._binding_document(binding),
             "bank_gate_report": {
                 "path": gate_path.relative_to(repo).as_posix(),
@@ -718,6 +755,17 @@ def _trusted_training_admission(
         registry.motion_admission,
         "TRUSTED_BANK_PROMOTION_CERTIFICATE_SHA256",
         frozenset({certificate_sha}),
+    )
+    return certificate_path, certificate_sha
+
+
+def _trusted_training_admission(
+    repo: Path,
+    loaded: registry.CanonicalMotionBankRegistry,
+    monkeypatch,
+):
+    certificate_path, _ = _trusted_training_certificate(
+        repo, loaded, monkeypatch
     )
     return registry.verify_registry_promotion_certificate(
         loaded,
@@ -787,6 +835,127 @@ def test_upper_and_full_are_two_independent_banks_with_same_id_order(tmp_path: P
     assert upper.registry_sha256 != full.registry_sha256
     assert upper.alignment_sha256 != full.alignment_sha256
     assert upper.motion_file != full.motion_file
+
+
+@pytest.mark.parametrize("action_count", (1, 5, 6, 93))
+def test_schema_v2_supports_exact_arbitrary_nonempty_order(
+    tmp_path: Path, action_count: int
+):
+    motion_ids = _generic_motion_ids(action_count)
+    repo, path, _ = _repo_fixture(
+        tmp_path,
+        scope="upper",
+        schema_version=2,
+        motion_ids=motion_ids,
+    )
+
+    loaded = registry.load_canonical_motion_bank_registry(
+        path,
+        repo_root=repo,
+        expected_registry_sha256=_sha256(path),
+    )
+    tables = registry.adapt_registry_for_runtime(
+        loaded, authorization_purpose=None
+    )
+
+    assert loaded.schema_version == 2
+    assert loaded.motion_ids == motion_ids
+    assert tuple(row.motion_id for row in loaded.entries) == motion_ids
+    assert tables.motion_ids == motion_ids
+    assert len(tables.motion_file) == action_count
+    assert len(tables.npz_sha256_per_clip) == action_count
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    (
+        (lambda document: document.__setitem__("motion_ids", []), "non-empty"),
+        (
+            lambda document: document.__setitem__(
+                "motion_ids", ["action_000", "action_000"]
+            ),
+            "unique",
+        ),
+        (
+            lambda document: document.__setitem__(
+                "motion_ids", list(reversed(document["motion_ids"]))
+            ),
+            "ordered motion_ids",
+        ),
+    ),
+)
+def test_schema_v2_motion_identity_mutations_fail_closed(
+    tmp_path: Path, mutation, message: str
+):
+    repo, path, document = _repo_fixture(
+        tmp_path,
+        schema_version=2,
+        motion_ids=_generic_motion_ids(2),
+    )
+    mutation(document)
+    _rewrite_registry(path, document)
+
+    with pytest.raises(registry.MotionRegistryError, match=message):
+        registry.load_canonical_motion_bank_registry(path, repo_root=repo)
+
+
+def test_legacy_schema_v1_still_rejects_generic_motion_ids(tmp_path: Path):
+    repo, path, document = _repo_fixture(tmp_path)
+    document["motion_ids"] = list(registry.CANONICAL_MOTION_IDS)
+    _rewrite_registry(path, document)
+
+    with pytest.raises(registry.MotionRegistryError, match="keys changed"):
+        registry.load_canonical_motion_bank_registry(path, repo_root=repo)
+
+
+def test_schema_v2_strict_training_api_rechecks_certificate_and_all_four_pins(
+    tmp_path: Path, monkeypatch
+):
+    repo, path, document = _repo_fixture(
+        tmp_path,
+        schema_version=2,
+        motion_ids=_generic_motion_ids(1),
+    )
+    _adopt_document_for_training(repo, document)
+    _rewrite_registry(path, document)
+    registry_sha = _sha256(path)
+    audit = registry.load_canonical_motion_bank_registry(
+        path,
+        repo_root=repo,
+        expected_registry_sha256=registry_sha,
+    )
+    certificate_path, certificate_sha = _trusted_training_certificate(
+        repo, audit, monkeypatch
+    )
+
+    adopted, tables = registry.load_training_adopted_registry(
+        path,
+        certificate_path,
+        repo_root=repo,
+        expected_registry_sha256=registry_sha,
+        expected_alignment_sha256=registry._alignment_sha256(audit),
+        expected_canonical_ready_sha256=audit.canonical_ready_sha256,
+        expected_canonical_ready_fk_sha256=audit.canonical_ready_fk_sha256,
+        expected_promotion_certificate_sha256=certificate_sha,
+    )
+    assert adopted.motion_ids == ("action_000",)
+    assert tables.motion_ids == adopted.motion_ids
+    assert tables.authorization_purpose == "training"
+
+    with pytest.raises(
+        registry.MotionRegistryError,
+        match="promotion certificate SHA-256 mismatch",
+    ):
+        registry.load_training_adopted_registry(
+            path,
+            certificate_path,
+            repo_root=repo,
+            expected_registry_sha256=registry_sha,
+            expected_alignment_sha256=registry._alignment_sha256(audit),
+            expected_canonical_ready_sha256=audit.canonical_ready_sha256,
+            expected_canonical_ready_fk_sha256=audit.canonical_ready_fk_sha256,
+            expected_promotion_certificate_sha256="0" * 64,
+        )
 
 
 def test_runtime_adoption_is_pinned_and_training_authorized_by_default(
