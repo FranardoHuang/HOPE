@@ -1032,14 +1032,23 @@ class SamplingProfile:
                 upper_maximum=self.base_travel_std_upper_max_m[index],
                 name=f"base_travel.{axis}",
             )
+        # base_spawn 的 z 不是课程轴,但它承载该动作 canonical-ready 的 root Z(由
+        # runtime 传入 adapter),所以 center/min/max 必须是同一个常数、std 全零;
+        # 独立造 profile(z=0)仍然合法。base_travel 是平面位移,z 必须严格为零。
+        spawn_z = self.base_spawn_center_w_m[2]
+        if not math.isfinite(spawn_z):
+            raise ValueError("base_spawn_center_w_m z must be finite")
+        for name in ("base_spawn_min_w_m", "base_spawn_max_w_m"):
+            if getattr(self, name)[2] != spawn_z:
+                raise ValueError(
+                    f"{name} z must equal base_spawn_center_w_m z exactly "
+                    "(base spawn z is one constant, not a curriculum axis)"
+                )
         for name in (
-            "base_spawn_center_w_m",
             "base_spawn_std_lower_initial_m",
             "base_spawn_std_lower_max_m",
             "base_spawn_std_upper_initial_m",
             "base_spawn_std_upper_max_m",
-            "base_spawn_min_w_m",
-            "base_spawn_max_w_m",
             "base_travel_center_b_yaw_m",
             "base_travel_std_lower_initial_m",
             "base_travel_std_lower_max_m",

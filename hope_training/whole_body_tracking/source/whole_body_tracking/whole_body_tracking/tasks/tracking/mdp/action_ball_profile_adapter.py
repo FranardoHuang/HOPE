@@ -17,6 +17,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import math
 import json
 from typing import Dict, Tuple
 
@@ -56,13 +57,16 @@ def _xy_with_explicit_zero_z(
     value: Tuple[float, float],
     *,
     name: str,
+    z: float = 0.0,
 ) -> Tuple[float, float, float]:
     if not isinstance(value, tuple) or len(value) != 2:
         raise ValueError(f"{name} must be a validated length-2 tuple")
     x, y = value
     if type(x) is not float or type(y) is not float:
         raise ValueError(f"{name} must contain validated floats")
-    return (x, y, 0.0)
+    if type(z) is not float or not math.isfinite(z):
+        raise ValueError(f"{name} injected z must be a finite float")
+    return (x, y, z)
 
 
 def _validated_manifest(
@@ -84,6 +88,8 @@ def _validated_manifest(
 def _build_profile(
     manifest: ActionBallManifest,
     action: ActionBallAction,
+    *,
+    ready_root_z: float = 0.0,
 ) -> SamplingProfile:
     ball = action.ball_profile
     aim = manifest.landing_aim
@@ -220,6 +226,7 @@ def _build_profile(
         base_spawn_center_w_m=_xy_with_explicit_zero_z(
             ball.base_spawn_center_w_xy_m,
             name="base_spawn_center_w_xy_m",
+            z=ready_root_z,
         ),
         base_spawn_std_lower_initial_m=_xy_with_explicit_zero_z(
             ball.base_spawn_std_lower_initial_m,
@@ -240,10 +247,12 @@ def _build_profile(
         base_spawn_min_w_m=_xy_with_explicit_zero_z(
             ball.base_spawn_min_w_xy_m,
             name="base_spawn_min_w_xy_m",
+            z=ready_root_z,
         ),
         base_spawn_max_w_m=_xy_with_explicit_zero_z(
             ball.base_spawn_max_w_xy_m,
             name="base_spawn_max_w_xy_m",
+            z=ready_root_z,
         ),
         base_travel_center_b_yaw_m=_xy_with_explicit_zero_z(
             ball.base_travel_center_b_yaw_xy_m,
@@ -418,12 +427,31 @@ class AdaptedSamplingProfiles:
 
 def adapt_action_ball_manifest(
     manifest: ActionBallManifest,
+    *,
+    ready_root_z_by_slot: Tuple[float, ...] = (),
 ) -> AdaptedSamplingProfiles:
-    """Strictly convert one validated manifest in exact action order."""
+    """Strictly convert one validated manifest in exact action order.
+
+    ``ready_root_z_by_slot``:runtime 注入的逐动作 canonical-ready root Z(base_spawn
+    的 z 常数;非课程轴)。空元组 = 独立/离线用法,z 取 0.0。
+    """
 
     validated = _validated_manifest(manifest)
+    if ready_root_z_by_slot and len(ready_root_z_by_slot) != len(validated.actions):
+        raise ValueError(
+            "ready_root_z_by_slot must have exactly one z per manifest action"
+        )
     profiles = tuple(
-        _build_profile(validated, action) for action in validated.actions
+        _build_profile(
+            validated,
+            action,
+            ready_root_z=(
+                float(ready_root_z_by_slot[slot])
+                if ready_root_z_by_slot
+                else 0.0
+            ),
+        )
+        for slot, action in enumerate(validated.actions)
     )
     return AdaptedSamplingProfiles(
         manifest_canonical_sha256=canonical_manifest_sha256(validated),

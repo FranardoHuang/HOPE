@@ -3176,7 +3176,10 @@ class RacketTargetCommand(CommandTerm):
         if self._ref_racket_normal_raw_w_per_clip is None:
             raise RuntimeError("action-ball reference raw +Y face initialization is incomplete")
 
-        bundle = adapt_action_ball_manifest(manifest)
+        bundle = adapt_action_ball_manifest(
+            manifest,
+            ready_root_z_by_slot=tuple(float(value) for value in ready_z),
+        )
         policy_dt_s = float(self._env.step_dt)
         episode_steps = int(getattr(self._env, "max_episode_length", 0))
         if (

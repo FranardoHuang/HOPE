@@ -969,12 +969,21 @@ def test_tangent_direction_is_uniform_over_asymmetric_interval_and_inbound_gate(
 
 
 def test_base_z_is_not_a_curriculum_axis_and_stays_exactly_zero():
-    with pytest.raises(ValueError, match="z must be exactly zero"):
+    with pytest.raises(
+        ValueError, match="one constant, not a curriculum axis"
+    ):
         _profile(
             base_spawn_center_w_m=(-0.10, 0.05, 0.01),
             base_spawn_min_w_m=(-0.50, -0.40, 0.0),
             base_spawn_max_w_m=(0.30, 0.50, 0.02),
         )
+    # 常数非零 z(= canonical-ready root Z 由 runtime 注入)是合法的。
+    constant_z = _profile(
+        base_spawn_center_w_m=(-0.10, 0.05, 0.78),
+        base_spawn_min_w_m=(-0.50, -0.40, 0.78),
+        base_spawn_max_w_m=(0.30, 0.50, 0.78),
+    )
+    assert constant_z.base_spawn_center_w_m[2] == 0.78
     levels = _levels(
         base_spawn_x_lower=1.0,
         base_spawn_x_upper=1.0,
