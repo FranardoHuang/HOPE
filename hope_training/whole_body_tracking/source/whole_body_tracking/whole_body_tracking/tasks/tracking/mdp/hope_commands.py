@@ -27,11 +27,13 @@ HITTER alignment notes (see the project HITTER verification):
 
 from __future__ import annotations
 
+import hashlib
 import json
 import math
 import torch
 from collections.abc import Sequence
 from dataclasses import MISSING
+from pathlib import Path
 from typing import TYPE_CHECKING
 
 from isaaclab.assets import Articulation
@@ -95,6 +97,162 @@ _TIMING_BUCKET_SPARSE_EVENTS = (
     "virtual_capture_count",
     "virtual_legal_return_count",
 )
+
+_TASK_FIRST_STATE_SCHEMA_VERSION = 2
+_TASK_FIRST_STATE_KIND = "whole_body_tracking.RacketTargetCommand.task_first"
+_TASK_FIRST_OUTCOME_NAMES = ("attempts", "successes", "unsafe_failures")
+_TASK_FIRST_AXES = ("position", "speed", "face", "base")
+_TASK_FIRST_UNSAFE_TERMINATIONS = (
+    *_PHYSICAL_FALL_TERMINATION_TERMS,
+    "robot_hit_table",
+)
+
+
+def _assert_task_first_recipe_is_coherent(cfg) -> None:
+    """Fail closed on task producers and actor defects that would split one atomic task.
+
+    ``action_one_hot`` is currently the live local clip slot.  Until that identity rides in the
+    same delayed/noisy tuple as position, velocity, face and base, task-first refuses every actor
+    defect and planner-revision path.  Defaults remain untouched for every other target mode.
+    """
+
+    if str(getattr(cfg, "target_mode", "")) != "task_first":
+        return
+    failures = []
+
+    def _off(name, value, expected):
+        if value != expected:
+            failures.append(f"{name}={value!r} (required {expected!r})")
+
+    _off("question_bank", str(getattr(cfg, "question_bank", "") or ""), "")
+    _off(
+        "question_bank_allow_legacy",
+        bool(getattr(cfg, "question_bank_allow_legacy", False)),
+        False,
+    )
+    _off("cq_anchor_bank", str(getattr(cfg, "cq_anchor_bank", "") or ""), "")
+    _off("exam_bank", str(getattr(cfg, "exam_bank", "") or ""), "")
+    _off("achieved_target_mix_prob", float(getattr(cfg, "achieved_target_mix_prob", 0.0)), 0.0)
+    _off("midswing_resample_prob", float(getattr(cfg, "midswing_resample_prob", 0.0)), 0.0)
+    _off("virtual_ball", bool(getattr(cfg, "virtual_ball", False)), False)
+    _off("vb_metrics_only", bool(getattr(cfg, "vb_metrics_only", False)), False)
+    _off("physical_ball", bool(getattr(cfg, "physical_ball", False)), False)
+    _off("shadow_ball", bool(getattr(cfg, "shadow_ball", False)), False)
+    _off("shadow_table", bool(getattr(cfg, "shadow_table", False)), False)
+    _off("planner_revision_enabled", bool(getattr(cfg, "planner_revision_enabled", False)), False)
+    _off("target_delay_steps", int(getattr(cfg, "target_delay_steps", 0)), 0)
+    _off("target_delay_tts_mode", str(getattr(cfg, "target_delay_tts_mode", "live")), "live")
+    for name in (
+        "target_jitter_pos_per_s",
+        "target_jitter_vel_per_s",
+        "target_noise_white",
+        "target_noise_ar1_sigma",
+        "target_dropout_prob",
+        "target_post_strike_dropout_s",
+        "target_bias_per_swing",
+    ):
+        _off(name, float(getattr(cfg, name, 0.0)), 0.0)
+    if not bool(getattr(cfg, "face_command", False)):
+        failures.append("face_command=False (required True)")
+    if str(getattr(cfg, "face_command_pairing", "shared_plus_y")) != "shared_plus_y":
+        failures.append(
+            "face_command_pairing must be 'shared_plus_y' so demanded and measured faces share "
+            "the raw +Y/A frame"
+        )
+    names = tuple(str(name) for name in (getattr(cfg, "clip_names_per_clip", ()) or ()))
+    if not names:
+        failures.append("clip_names_per_clip is empty (task-first needs one ordered action per clip)")
+    manifest_path = str(getattr(cfg, "task_first_manifest_path", "") or "")
+    manifest_sha = str(getattr(cfg, "task_first_manifest_sha256", "") or "")
+    if not manifest_path:
+        failures.append("task_first_manifest_path is empty")
+    if (
+        len(manifest_sha) != 64
+        or manifest_sha != manifest_sha.lower()
+        or any(character not in "0123456789abcdef" for character in manifest_sha)
+    ):
+        failures.append(
+            "task_first_manifest_sha256 must be exactly 64 lowercase hexadecimal characters"
+        )
+    threshold = getattr(cfg, "task_first_base_success_thresh_m", 0.0)
+    if (
+        isinstance(threshold, bool)
+        or type(threshold) not in (int, float)
+        or not math.isfinite(float(threshold))
+        or float(threshold) <= 0.0
+    ):
+        failures.append("task_first_base_success_thresh_m must be a finite positive number")
+    if failures:
+        raise ValueError(
+            "target_mode='task_first' has an incoherent launch recipe:\n  - "
+            + "\n  - ".join(failures)
+        )
+
+
+def _task_first_face_cone_sample(
+    center: torch.Tensor,
+    half_angle_rad: torch.Tensor,
+    unit_draw: torch.Tensor,
+) -> torch.Tensor:
+    """Area-uniform samples in spherical cones around unit ``center`` vectors.
+
+    ``unit_draw`` is supplied by the caller so the sampler consumes exactly two random values per
+    task and is easy to test.  A zero cone returns the center exactly (up to the final unit
+    normalization), and the auxiliary axis switches near +Z to avoid a degenerate cross product.
+    """
+
+    if center.ndim != 2 or center.shape[-1] != 3:
+        raise ValueError("task-first face centers must have shape (N, 3)")
+    n = int(center.shape[0])
+    if half_angle_rad.shape != (n,):
+        raise ValueError("task-first cone angles must have shape (N,)")
+    if unit_draw.shape != (n, 2):
+        raise ValueError("task-first cone draws must have shape (N, 2)")
+    center_norm = torch.norm(center, dim=-1, keepdim=True)
+    if bool(torch.any(center_norm <= 1.0e-8)):
+        raise ValueError("task-first face centers must be non-zero")
+    center_u = center / center_norm
+    angle = half_angle_rad.clamp(min=0.0, max=0.5 * math.pi)
+    cos_max = torch.cos(angle)
+    cos_theta = 1.0 - unit_draw[:, 0] * (1.0 - cos_max)
+    sin_theta = torch.sqrt((1.0 - cos_theta * cos_theta).clamp(min=0.0))
+    azimuth = 2.0 * math.pi * unit_draw[:, 1]
+    z_axis = torch.zeros_like(center_u)
+    z_axis[:, 2] = 1.0
+    x_axis = torch.zeros_like(center_u)
+    x_axis[:, 0] = 1.0
+    helper = torch.where((torch.abs(center_u[:, 2]) < 0.9).unsqueeze(-1), z_axis, x_axis)
+    tangent_1 = torch.cross(helper, center_u, dim=-1)
+    tangent_1 = tangent_1 / torch.norm(tangent_1, dim=-1, keepdim=True).clamp(min=1.0e-8)
+    tangent_2 = torch.cross(center_u, tangent_1, dim=-1)
+    radial = (
+        torch.cos(azimuth).unsqueeze(-1) * tangent_1
+        + torch.sin(azimuth).unsqueeze(-1) * tangent_2
+    )
+    sampled = cos_theta.unsqueeze(-1) * center_u + sin_theta.unsqueeze(-1) * radial
+    return sampled / torch.norm(sampled, dim=-1, keepdim=True).clamp(min=1.0e-8)
+
+
+def _task_first_station_targets(
+    origins: torch.Tensor,
+    reference_racket: torch.Tensor,
+    reference_base_xy: torch.Tensor,
+    station_shift_xy: torch.Tensor,
+    delta_position: torch.Tensor,
+    delta_base_xy: torch.Tensor,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Apply the task-first station/root-relative translation contract."""
+
+    racket = origins + reference_racket + delta_position
+    racket[:, :2] += station_shift_xy
+    base = (
+        origins[:, :2]
+        + reference_base_xy
+        + station_shift_xy
+        + delta_position[:, :2]
+        + delta_base_xy
+    )
+    return racket, base
 
 
 def _face_command_pairing(cfg: "RacketTargetCommandCfg") -> str:
@@ -423,9 +581,11 @@ class RacketTargetCommand(CommandTerm):
         _face_command_pairing(cfg)
         _target_delay_tts_mode(cfg)
         _validate_adaptive_sigma_cfg(cfg)
+        _assert_task_first_recipe_is_coherent(cfg)
         super().__init__(cfg, env)
 
         self.robot: Articulation = env.scene[cfg.asset_name]
+        self._task_first_enabled = str(getattr(cfg, "target_mode", "")) == "task_first"
 
         # Resolve the racket FK source: prefer the racket body if it survived the physics import,
         # otherwise fall back to (wrist body pose) * (constant mount offset).
@@ -511,13 +671,14 @@ class RacketTargetCommand(CommandTerm):
         # continuous path: this guard demanded a bank for face_command, while
         # _assert_solved_target_recipe_is_coherent demanded face_command for a solved target, so
         # target_mode='solved' with no npz was structurally unlaunchable.
-        if cfg.face_command and not (cfg.question_bank or self._cq_enabled):
+        if cfg.face_command and not (
+            cfg.question_bank or self._cq_enabled or self._task_first_enabled
+        ):
             raise ValueError(
                 "RacketTargetCommandCfg.face_command=True requires a producer that WRITES "
-                "target_normal_cmd — either question_bank (npz path) or target_mode='solved' "
-                "(continuous inline solve). Without one, target_normal_cmd stays zeros and the "
-                "re-anchored racket_normal reward is silently dead. Set racket.question_bank, or "
-                "racket.target_mode: solved, or drop face_command."
+                "target_normal_cmd — question_bank (npz path), target_mode='solved' (continuous "
+                "inline solve), or target_mode='task_first'. Without one, target_normal_cmd stays "
+                "zeros and the re-anchored racket_normal reward is silently dead."
             )
         # (The continuous producer cannot collide with hitter_pure: both live in target_mode, so
         # 'solved' and 'hitter_pure' are mutually exclusive by construction. The seam is also not
@@ -700,12 +861,11 @@ class RacketTargetCommand(CommandTerm):
         self._vb_net_acc = 0.0
         self._vb_land_valid_acc = 0.0
         self._vb_inb_acc = 0.0
-        # Per-clip (forehand/backhand) accumulators for the PRIMARY in-training metric
-        # virtual_return_rate (franco 2026-07-06 "反手先行" needs the per-side number).
-        # Literal keys: self._clip_names ({0:"forehand",1:"backhand"}) is defined later in __init__.
-        self._vb_exact_acc_c = {0: 0.0, 1: 0.0}
-        self._vb_inb_acc_c = {0: 0.0, 1: 0.0}
-        self._vb_hit_acc_c = {0: 0.0, 1: 0.0}   # per-side 击球率 (franco 2026-07-08 报数格式)
+        # Per-action accumulators are initialized after ``_clip_names`` is resolved below.  The
+        # former literal ``{0, 1}`` crashed on the first exact strike of clip >=2.
+        self._vb_exact_acc_c = {}
+        self._vb_inb_acc_c = {}
+        self._vb_hit_acc_c = {}
 
         # Reference racket state at the strike frame (CONSTANT per clip): pos (env-origin relative),
         # world linear velocity, and face normal, computed by the SAME FK as the actual racket
@@ -857,6 +1017,9 @@ class RacketTargetCommand(CommandTerm):
         self._clip_names = (
             {i: n for i, n in enumerate(_names_cfg)} if _names_cfg else dict(self._family_names)
         )
+        self._vb_exact_acc_c = {c: 0.0 for c in self._clip_names}
+        self._vb_inb_acc_c = {c: 0.0 for c in self._clip_names}
+        self._vb_hit_acc_c = {c: 0.0 for c in self._clip_names}
         self._metric_bucket_rows_t = None
         # Non-decayed, per-PPO-update eligibility ledger for sparse virtual-ball outcomes.  The
         # existing virtual_* rates are EMAs and deliberately suppress values before their
@@ -1617,6 +1780,9 @@ class RacketTargetCommand(CommandTerm):
             ):
                 self.metrics[_k] = torch.zeros(self.num_envs, device=self.device)
 
+        if self._task_first_enabled:
+            self._initialize_task_first_runtime()
+
     # ------------------------------------------------------------------ #
     # CommandTerm API
     # ------------------------------------------------------------------ #
@@ -1653,6 +1819,334 @@ class RacketTargetCommand(CommandTerm):
         ):
             self._bind_event_timing_contract()
         return self._motion_term
+
+    @staticmethod
+    def _task_first_file_sha256(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for chunk in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    @staticmethod
+    def _task_first_repo_root(manifest_path: Path) -> Path:
+        """Resolve the repository authority without trusting process cwd alone."""
+
+        starts = (manifest_path.resolve().parent, Path(__file__).resolve().parent, Path.cwd().resolve())
+        candidates = []
+        for start in starts:
+            for parent in (start, *start.parents):
+                if (
+                    (parent / "docs" / "START_HERE.md").is_file()
+                    and (parent / "hope_training").is_dir()
+                ):
+                    candidates.append(parent.resolve())
+                    break
+        if not candidates:
+            raise RuntimeError(
+                "task-first runtime cannot locate the repository root containing "
+                "docs/START_HERE.md and hope_training"
+            )
+        root = candidates[0]
+        if any(candidate != root for candidate in candidates):
+            raise RuntimeError(
+                f"task-first runtime resolved conflicting repository roots: {candidates}"
+            )
+        return root
+
+    def _assert_task_first_translation_invariant_imitation(self) -> None:
+        """Ensure station shifts do not fight an absolute root-position imitation reward."""
+
+        env_cfg = getattr(self._env, "cfg", None)
+        rewards_cfg = getattr(env_cfg, "rewards", None)
+        if rewards_cfg is None:
+            raise RuntimeError(
+                "task-first cannot verify translation-invariant imitation: env.cfg.rewards is absent"
+            )
+        if getattr(rewards_cfg, "motion_global_anchor_pos", None) is not None:
+            raise ValueError(
+                "task-first station_center_shift_xy_m requires "
+                "rewards.motion_global_anchor_pos=None. Absolute reference-root position would pin "
+                "the robot at the unshifted motion while the racket/base task moves the whole "
+                "action. Body-shape imitation may remain enabled because MotionCommand anchors its "
+                "relative body target on the live robot XY."
+            )
+
+    def _initialize_task_first_runtime(self) -> None:
+        """Bind one authorized manifest to the exact live arbitrary-N motion library."""
+
+        from whole_body_tracking.tasks.tracking.mdp.task_first_curriculum import (
+            AXES,
+            OutcomeCounts,
+            TaskFirstCurriculum,
+        )
+        from whole_body_tracking.tasks.tracking.mdp.task_first_manifest import (
+            load_task_first_manifest,
+        )
+        if tuple(AXES) != _TASK_FIRST_AXES:
+            raise RuntimeError(
+                f"task-first runtime axis order {_TASK_FIRST_AXES} disagrees with curriculum {AXES}"
+            )
+
+        loaded = load_task_first_manifest(
+            self.cfg.task_first_manifest_path,
+            expected_sha256=self.cfg.task_first_manifest_sha256,
+            require_training_authorized=True,
+        )
+        manifest = loaded.manifest
+        action_order = tuple(manifest.action_order)
+        declared_order = tuple(
+            str(name) for name in (self.cfg.clip_names_per_clip or ())
+        )
+        if declared_order != action_order:
+            raise ValueError(
+                "task-first manifest action_order must exactly equal "
+                f"racket.clip_names_per_clip: manifest={action_order}, runtime={declared_order}"
+            )
+
+        motion_command = self._motion()
+        motion = motion_command.motion
+        runtime_files = tuple(
+            Path(path).expanduser().resolve(strict=True)
+            for path in getattr(motion_command, "_motion_files", ())
+        )
+        n_actions = len(action_order)
+        if (
+            len(runtime_files) != n_actions
+            or int(motion.num_segments) != n_actions
+            or len(self._clip_names) != n_actions
+        ):
+            raise ValueError(
+                "task-first requires exactly one runtime motion file and one loaded segment per "
+                f"action: actions={n_actions}, files={len(runtime_files)}, "
+                f"segments={int(motion.num_segments)}, metric slots={len(self._clip_names)}"
+            )
+        repo_root = self._task_first_repo_root(loaded.source_path)
+        for index, action in enumerate(manifest.actions):
+            candidate = (repo_root / action.motion_path).resolve(strict=True)
+            try:
+                candidate.relative_to(repo_root)
+            except ValueError as error:
+                raise ValueError(
+                    f"task-first action {action.action_id!r} motion_path resolves outside repo root"
+                ) from error
+            actual_sha = self._task_first_file_sha256(candidate)
+            if actual_sha != action.motion_sha256:
+                raise ValueError(
+                    f"task-first action {action.action_id!r} motion SHA-256 mismatch: "
+                    f"manifest={action.motion_sha256}, bytes={actual_sha}"
+                )
+            if candidate != runtime_files[index]:
+                raise ValueError(
+                    f"task-first action {action.action_id!r} motion path/order mismatch: "
+                    f"manifest={candidate}, runtime={runtime_files[index]}"
+                )
+        phases_cfg = self._strike_phases_cfg(n_actions)
+        phases = (
+            tuple(float(value) for value in phases_cfg)
+            if phases_cfg
+            else tuple(float(self.cfg.strike_phase) for _ in range(n_actions))
+        )
+        manifest_phases = tuple(float(action.strike_phase) for action in manifest.actions)
+        if phases != manifest_phases:
+            raise ValueError(
+                f"task-first strike phases differ: manifest={manifest_phases}, runtime={phases}"
+            )
+        signs_cfg = self._mount_signs_cfg(n_actions)
+        signs = (
+            tuple(int(value) for value in signs_cfg)
+            if signs_cfg
+            else tuple(int(self.cfg.mount_normal_sign) for _ in range(n_actions))
+        )
+        manifest_signs = tuple(int(action.mount_normal_sign) for action in manifest.actions)
+        if signs != manifest_signs:
+            raise ValueError(
+                f"task-first mount-normal signs differ: manifest={manifest_signs}, runtime={signs}"
+            )
+        family_signs = tuple(
+            1 if bool(value) else -1
+            for value in self._clip_family_is_forehand().detach().cpu().tolist()
+        )
+        manifest_families = tuple(int(action.family_sign) for action in manifest.actions)
+        if family_signs != manifest_families:
+            raise ValueError(
+                f"task-first family signs differ: manifest={manifest_families}, "
+                f"runtime={family_signs}"
+            )
+        if not bool(getattr(motion_command.cfg, "balanced_clip_sampling", False)):
+            raise ValueError(
+                "task-first requires motion.balanced_clip_sampling=True so arbitrary-N actions "
+                "receive balanced attempts"
+            )
+        balanced_seed = getattr(motion_command.cfg, "balanced_clip_sampling_seed", None)
+        if type(balanced_seed) is not int or not 0 <= balanced_seed < (1 << 63):
+            raise ValueError(
+                "task-first requires motion.balanced_clip_sampling_seed in [0,2**63)"
+            )
+        if float(getattr(motion_command.cfg, "clip_switch_prob", 0.0)) != 0.0:
+            raise ValueError(
+                "task-first forbids motion.clip_switch_prob: changing action inside one "
+                "latched task would corrupt prior-action outcome ownership"
+            )
+        speed_range = tuple(
+            float(value)
+            for value in (getattr(motion_command.cfg, "speed_scale_range", (1.0, 1.0)) or ())
+        )
+        speed_per_clip = getattr(motion_command.cfg, "speed_scale_per_clip", None)
+        if speed_range != (1.0, 1.0) or (
+            speed_per_clip is not None
+            and any(float(value) != 1.0 for value in speed_per_clip)
+        ):
+            raise ValueError(
+                "task-first v1 forbids motion retiming: speed_scale_range must be (1,1) and "
+                "speed_scale_per_clip absent or all 1"
+            )
+        if bool(getattr(motion_command, "event_timing_enabled", False)) or bool(
+            getattr(motion_command, "planner_revision_enabled", False)
+        ) or str(getattr(motion_command.cfg, "event_timing_mode", "disabled")) != "disabled":
+            raise ValueError(
+                "task-first v1 forbids event timing and planner phase governance; task identity, "
+                "t_hit and t_cycle must remain one interpretable native-motion contract"
+            )
+        env_cfg = getattr(self._env, "cfg", None)
+        terminations_cfg = getattr(env_cfg, "terminations", None)
+        if (
+            not bool(getattr(env_cfg, "table_obstacle", False))
+            or not str(getattr(env_cfg, "table_obstacle_prim", "") or "").strip()
+            or getattr(terminations_cfg, "robot_hit_table", None) is None
+        ):
+            raise ValueError(
+                "task-first requires the solid table obstacle and robot_hit_table termination. "
+                "Otherwise table safety is structurally unobservable and unsafe_failures would "
+                "report a false zero."
+            )
+        self._assert_task_first_translation_invariant_imitation()
+        self._ensure_reference_strike_state()
+        if (
+            self._ref_racket_vel_w_per_clip is None
+            or self._ref_racket_normal_raw_w_per_clip is None
+            or self._ref_racket_pos_rel_per_clip is None
+            or self._ref_base_pos_rel_per_clip is None
+        ):
+            raise RuntimeError("task-first reference strike-state initialization is incomplete")
+        ref_speeds = torch.norm(self._ref_racket_vel_w_per_clip, dim=-1)
+        for index, action in enumerate(manifest.actions):
+            ref_position = self._ref_racket_pos_rel_per_clip[index]
+            self._assert_contact_clears_table(
+                index,
+                float(ref_position[0])
+                + float(action.station_center_shift_xy_m[0])
+                + float(action.position_half_extent_m[0]),
+                float(ref_position[2]) - float(action.position_half_extent_m[2]),
+                "task-first full position envelope",
+            )
+            speed = float(ref_speeds[index])
+            if not math.isfinite(speed) or speed <= 1.0e-6:
+                raise ValueError(
+                    f"task-first action {action.action_id!r} has invalid reference strike "
+                    f"speed {speed}"
+                )
+            if float(action.speed_delta_mps) >= speed - 1.0e-6:
+                raise ValueError(
+                    f"task-first action {action.action_id!r} speed_delta_mps="
+                    f"{action.speed_delta_mps} reaches a non-positive full lower bound around "
+                    f"reference speed {speed}; reduce the declared scalar speed radius"
+                )
+
+        self._task_first_loaded_manifest = loaded
+        self._task_first_manifest = manifest
+        self._task_first_action_order = action_order
+        self._task_first_action_uids = tuple(int(action.action_uid) for action in manifest.actions)
+        self._task_first_curriculum = TaskFirstCurriculum(
+            manifest_sha256=loaded.file_sha256,
+            action_order=action_order,
+            gate_config=manifest.gate,
+        )
+        self._task_first_outcome_type = OutcomeCounts
+        self._task_first_window_counts = torch.zeros(
+            len(_TASK_FIRST_OUTCOME_NAMES),
+            n_actions,
+            dtype=torch.long,
+            device=self.device,
+        )
+        self._task_first_attempt_active = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        self._task_first_attempt_action = torch.full(
+            (self.num_envs,), -1, dtype=torch.long, device=self.device
+        )
+        self._task_first_attempt_success = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        # A wrap ends the swing but not its safety obligation: the just-finished action owns the
+        # complete post-wrap recovery hold.  Keep it out of the evidence window until that hold
+        # expires; the newly sampled action becomes active only after the recovery transaction
+        # commits.  This prevents a successful strike from being booked before a subsequent table
+        # hit/fall and prevents that unsafe event from contaminating the next action.
+        self._task_first_recovery_pending = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        self._task_first_recovery_action = torch.full(
+            (self.num_envs,), -1, dtype=torch.long, device=self.device
+        )
+        self._task_first_recovery_success = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        self._task_first_restored_attempt_discard = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        self._task_first_restored_recovery_discard = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        self._task_first_last_rollout_step = None
+
+        # Dynamic installation is deliberate: runner schema 3 sees explicit hooks only for
+        # task-first. Legacy modes therefore retain the existing heuristic exact-resume capture
+        # (achieved rings, adaptive sigmas and all historical accumulators).
+        self.exact_resume_state_dict = self._task_first_exact_resume_state_dict
+        self.load_exact_resume_state_dict = self._task_first_load_exact_resume_state_dict
+        self.on_rollout_end = self._task_first_on_rollout_end
+
+    def task_first_hard_contract(self) -> dict | None:
+        """Return exactly the task-first contract assembled by ``scripts/train.py``."""
+
+        if not self._task_first_enabled:
+            return None
+        loaded = self._task_first_loaded_manifest
+        manifest = loaded.manifest
+        return {
+            "schema_version": 1,
+            "manifest_basename": loaded.source_path.name,
+            "manifest_file_sha256": loaded.file_sha256,
+            "manifest_canonical_sha256": loaded.canonical_sha256,
+            "manifest_id": manifest.manifest_id,
+            "action_ids": list(manifest.action_order),
+            "action_uids": list(self._task_first_action_uids),
+            "curriculum_gate": manifest.gate.as_dict(),
+            "ranges": [
+                {
+                    "action_id": action.action_id,
+                    "action_uid": int(action.action_uid),
+                    "position_half_extent_m": list(action.position_half_extent_m),
+                    "speed_delta_mps": float(action.speed_delta_mps),
+                    "face_cone_deg": float(action.face_cone_deg),
+                    "station_center_shift_xy_m": list(
+                        action.station_center_shift_xy_m
+                    ),
+                    "base_half_extent_xy_m": list(action.base_half_extent_xy_m),
+                }
+                for action in manifest.actions
+            ],
+            "base_success_thresh_m": float(
+                self.cfg.task_first_base_success_thresh_m
+            ),
+            "motion_balanced_clip_sampling": bool(
+                getattr(self._motion().cfg, "balanced_clip_sampling", False)
+            ),
+            "motion_balanced_clip_sampling_seed": int(
+                getattr(self._motion().cfg, "balanced_clip_sampling_seed", 0)
+            ),
+        }
 
     def _bind_event_timing_contract(self) -> None:
         """Bind every immutable schedule row to this exact train bank and native clip timing."""
@@ -3153,6 +3647,126 @@ class RacketTargetCommand(CommandTerm):
         # Stage-1 question bank: overrides pos/vel + target_normal_cmd for these envs (no-op when off).
         self._apply_question_bank_targets(env_ids, origins, n)
 
+    def _sample_targets_task_first(
+        self,
+        env_ids: Sequence[int],
+        origins: torch.Tensor,
+        n: int,
+    ) -> None:
+        """Sample each action's task around its own reference strike, with no ball or solver.
+
+        Station semantics are intentionally coupled:
+
+        ``racket = ref_racket + [station_shift, 0] + delta_position``
+        ``base = ref_base + station_shift + delta_position_xy + delta_base``
+
+        Thus a negative-X station center moves the complete comfortable action away from the
+        table. Position curriculum translates racket and base together; only the later base axis
+        varies body placement relative to that demanded contact.
+        """
+
+        if not self._task_first_enabled:
+            raise RuntimeError("task-first sampler called while target_mode is not task_first")
+        self._ensure_reference_strike_state()
+        if (
+            self._ref_racket_pos_rel_per_clip is None
+            or self._ref_racket_vel_w_per_clip is None
+            or self._ref_racket_normal_raw_w_per_clip is None
+            or self._ref_base_pos_rel_per_clip is None
+        ):
+            raise RuntimeError("task-first reference strike-state initialization is incomplete")
+        ids = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+        motion = self._motion()
+        clip = (
+            motion.clip_id[ids]
+            if motion._multiseg
+            else torch.zeros(n, dtype=torch.long, device=self.device)
+        )
+        actions = self._task_first_manifest.actions
+        level_rows = torch.tensor(
+            [
+                [self._task_first_curriculum.axis_level(action.action_id, axis)
+                 for axis in _TASK_FIRST_AXES]
+                for action in actions
+            ],
+            dtype=torch.float32,
+            device=self.device,
+        )
+        levels = level_rows[clip]
+        position_level = levels[:, 0:1]
+        speed_level = levels[:, 1]
+        face_level = levels[:, 2]
+        base_level = levels[:, 3:4]
+
+        position_half = torch.tensor(
+            [action.position_half_extent_m for action in actions],
+            dtype=torch.float32,
+            device=self.device,
+        )[clip]
+        station_shift = torch.tensor(
+            [action.station_center_shift_xy_m for action in actions],
+            dtype=torch.float32,
+            device=self.device,
+        )[clip]
+        base_half = torch.tensor(
+            [action.base_half_extent_xy_m for action in actions],
+            dtype=torch.float32,
+            device=self.device,
+        )[clip]
+        speed_delta = torch.tensor(
+            [action.speed_delta_mps for action in actions],
+            dtype=torch.float32,
+            device=self.device,
+        )[clip]
+        face_cone_rad = torch.tensor(
+            [math.radians(action.face_cone_deg) for action in actions],
+            dtype=torch.float32,
+            device=self.device,
+        )[clip]
+
+        delta_position = (
+            (torch.rand(n, 3, device=self.device) * 2.0 - 1.0)
+            * position_half
+            * position_level
+        )
+        delta_base = (
+            (torch.rand(n, 2, device=self.device) * 2.0 - 1.0)
+            * base_half
+            * base_level
+        )
+        ref_pos = self._ref_racket_pos_rel_per_clip[clip]
+        ref_base = self._ref_base_pos_rel_per_clip[clip, :2]
+        position, base_target = _task_first_station_targets(
+            origins,
+            ref_pos,
+            ref_base,
+            station_shift,
+            delta_position,
+            delta_base,
+        )
+        self.racket_target_pos_w[ids] = position
+        self.base_target_pos_w[ids] = base_target
+
+        ref_velocity = self._ref_racket_vel_w_per_clip[clip]
+        ref_speed = torch.norm(ref_velocity, dim=-1)
+        direction = ref_velocity / ref_speed.unsqueeze(-1)
+        demanded_speed = ref_speed + (
+            torch.rand(n, device=self.device) * 2.0 - 1.0
+        ) * speed_delta * speed_level
+        if bool(torch.any(demanded_speed <= 1.0e-6)):
+            # Construction validates the full lower bound, so reaching this branch means state or
+            # manifest corruption rather than an admissible draw. Never clamp/flip silently.
+            raise RuntimeError("task-first sampled a non-positive demanded strike speed")
+        self.racket_target_vel_w[ids] = direction * demanded_speed.unsqueeze(-1)
+
+        face = _task_first_face_cone_sample(
+            self._ref_racket_normal_raw_w_per_clip[clip],
+            face_cone_rad * face_level,
+            torch.rand(n, 2, device=self.device),
+        )
+        self.racket_target_normal_w[ids] = face
+        self.target_normal_cmd[ids] = face
+
     def _apply_question_bank_targets(self, env_ids: Sequence[int], origins: torch.Tensor, n: int):
         """Install a SOLVED question: bank row (discrete) or continuous buffer row. One seam.
 
@@ -3618,7 +4232,9 @@ class RacketTargetCommand(CommandTerm):
         # Desired racket pos/vel/normal — independent box sampling (legacy uniform), coupled to the
         # reference swing's strike state (reference_perturbed), or HITTER-faithful station-first
         # sampling (hitter_pure: base station independent, racket plane fixed relative to the station).
-        if self.cfg.target_mode == "reference_perturbed":
+        if self.cfg.target_mode == "task_first":
+            self._sample_targets_task_first(env_ids, origins, n)
+        elif self.cfg.target_mode == "reference_perturbed":
             self._sample_targets_reference_perturbed(env_ids, origins, n)
         elif self.cfg.target_mode == "hitter_pure":
             self._sample_targets_hitter_pure(env_ids, origins, n)
@@ -3632,7 +4248,7 @@ class RacketTargetCommand(CommandTerm):
         # around the coupled point. Legacy "uniform" mode keeps the old origin-relative sampling.
         # hitter_pure sampled the station inside the sampler; question-bank tasks retain their
         # fixed per-clip ready anchor. The two modes are deliberately mutually exclusive here.
-        if self.cfg.target_mode == "hitter_pure":
+        if self.cfg.target_mode in ("hitter_pure", "task_first"):
             pass
         elif self._solved_targets_active:
             # Stage-1/S2a BASE PIN: fixed per-clip ready anchor (the coupling evaluated ONCE with
@@ -3689,7 +4305,7 @@ class RacketTargetCommand(CommandTerm):
                 base_xy[:, 1] += (blend * racket_y_off).clamp(
                     -self.cfg.base_couple_max_offset, self.cfg.base_couple_max_offset
                 )
-        if self.cfg.target_mode != "hitter_pure":
+        if self.cfg.target_mode not in ("hitter_pure", "task_first"):
             # hitter_pure sampled the station inside the sampler; base_target_*_range was the
             # station box there, NOT a jitter — adding it again would double-sample.
             base_xy[:, 0] += sample_uniform(*self.cfg.base_target_x_range, (n,), self.device)
@@ -4531,6 +5147,8 @@ class RacketTargetCommand(CommandTerm):
         # The recovery window ends when the post-wrap hold expires (the new swing's clock starts
         # advancing) — from then on falls are genuinely pre-strike of the new clip. in_hold is this
         # step's post-decrement hold state, so a zero-length hold clears the latch immediately.
+        if hasattr(motion, "in_hold") and self._task_first_enabled:
+            self._task_first_finish_recovery_holds(motion.in_hold)
         if motion._multiseg and hasattr(motion, "in_hold"):
             self._recover_from_clip[~motion.in_hold] = -1
         self._prev_motion_steps = motion.time_steps.clone()
@@ -4871,6 +5489,493 @@ class RacketTargetCommand(CommandTerm):
             self._planner_actor_task_id[ids] = self._planner_task_id[ids]
             self._planner_actor_task_revision[ids] = self._planner_task_revision[ids]
 
+    def _task_first_reset_outcome_masks(
+        self, ids: torch.Tensor
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Return ``(unsafe, terminal_or_timeout)`` for one true-reset transaction."""
+
+        manager = getattr(self._env, "termination_manager", None)
+        if manager is None:
+            raise RuntimeError("task-first true reset has no termination manager")
+        active_terms = set(str(name) for name in getattr(manager, "active_terms", ()))
+        if "robot_hit_table" not in active_terms:
+            raise RuntimeError(
+                "task-first requires active termination robot_hit_table; without it the "
+                "unsafe-failure gate would report a false zero"
+            )
+        terminated = self._selected_bool(
+            getattr(
+                manager,
+                "terminated",
+                torch.zeros((), dtype=torch.bool, device=self.device),
+            ),
+            ids,
+        )
+        timed_out = self._selected_bool(
+            getattr(
+                manager,
+                "time_outs",
+                torch.zeros((), dtype=torch.bool, device=self.device),
+            ),
+            ids,
+        )
+        unsafe = torch.zeros(len(ids), dtype=torch.bool, device=self.device)
+        get_term = getattr(manager, "get_term", None)
+        if not callable(get_term):
+            raise RuntimeError(
+                "task-first termination manager cannot expose robot_hit_table outcomes"
+            )
+        for term_name in _TASK_FIRST_UNSAFE_TERMINATIONS:
+            if term_name in active_terms:
+                unsafe |= self._selected_bool(get_term(term_name), ids)
+        unsafe &= terminated
+        return unsafe, terminated | timed_out
+
+    def _task_first_book_outcomes(
+        self,
+        action_slots: torch.Tensor,
+        ended: torch.Tensor,
+        passed_at_strike: torch.Tensor,
+        unsafe: torch.Tensor,
+        terminal_or_timeout: torch.Tensor,
+    ) -> None:
+        """Atomically add one disjoint raw-outcome transaction to the action window."""
+
+        count = len(self._task_first_action_order)
+        invalid = ended & ((action_slots < 0) | (action_slots >= count))
+        if bool(torch.any(invalid)):
+            raise RuntimeError("task-first ended attempt has an invalid prior action slot")
+        unsafe = unsafe & ended
+        successful = ended & passed_at_strike & ~unsafe & ~terminal_or_timeout
+        if bool(torch.any(successful & unsafe)):
+            raise RuntimeError("task-first success and unsafe outcome masks overlap")
+        slots = action_slots.clamp(min=0)
+        # Compute all three rows before mutating any of them.  A malformed slot therefore cannot
+        # leave a partially committed evidence transaction.
+        additions = (
+            torch.bincount(slots[ended], minlength=count),
+            torch.bincount(slots[successful], minlength=count),
+            torch.bincount(slots[unsafe], minlength=count),
+        )
+        for row, values in enumerate(additions):
+            self._task_first_window_counts[row].add_(values)
+
+    def _task_first_start_current_attempts(self, ids: torch.Tensor) -> None:
+        """Activate the already-selected motion/task after no old recovery remains."""
+
+        if bool(
+            torch.any(
+                self._task_first_attempt_active[ids]
+                | self._task_first_recovery_pending[ids]
+            )
+        ):
+            raise RuntimeError(
+                "task-first cannot start an action while another attempt/recovery owns the env"
+            )
+        motion = self._motion()
+        count = len(self._task_first_action_order)
+        new_slots = (
+            motion.clip_id[ids]
+            if motion._multiseg
+            else torch.zeros(len(ids), dtype=torch.long, device=self.device)
+        )
+        if bool(torch.any((new_slots < 0) | (new_slots >= count))):
+            raise RuntimeError("task-first new motion clip lies outside the action manifest")
+        self._task_first_attempt_active[ids] = True
+        self._task_first_attempt_action[ids] = new_slots
+        self._task_first_attempt_success[ids] = False
+
+    def _task_first_close_and_start_attempts(
+        self,
+        env_ids: torch.Tensor,
+        *,
+        true_reset: bool,
+    ) -> None:
+        """Move a wrap into recovery, or close reset outcomes and start the reset task.
+
+        MotionCommand has already selected the next clip when this seam runs.  On a wrap the
+        ending action is moved to a pending-recovery ledger and *nothing is booked yet*.  Its
+        strike pass becomes success only when the new clip's post-wrap hold expires safely.  A
+        true reset during that hold is therefore still charged to the old action, never the new
+        clip that happens to be displayed during recovery.
+        """
+
+        ids = torch.as_tensor(env_ids, dtype=torch.long, device=self.device).reshape(-1)
+        if len(ids) == 0:
+            return
+        active = self._task_first_attempt_active[ids]
+        recovering = self._task_first_recovery_pending[ids]
+        if bool(torch.any(active & recovering)):
+            raise RuntimeError(
+                "task-first attempt and pending recovery cannot own one env simultaneously"
+            )
+
+        if not true_reset:
+            if bool(torch.any(recovering)):
+                raise RuntimeError(
+                    "task-first encountered a second wrap before prior recovery completed"
+                )
+            if bool(torch.any(~active)):
+                raise RuntimeError("task-first wrap has no active prior attempt")
+            slots = self._task_first_attempt_action[ids]
+            count = len(self._task_first_action_order)
+            if bool(torch.any((slots < 0) | (slots >= count))):
+                raise RuntimeError("task-first active attempt has an invalid prior action slot")
+            self._task_first_recovery_pending[ids] = True
+            self._task_first_recovery_action[ids] = slots
+            self._task_first_recovery_success[ids] = (
+                self._task_first_attempt_success[ids]
+            )
+            self._task_first_attempt_active[ids] = False
+            self._task_first_attempt_action[ids] = -1
+            self._task_first_attempt_success[ids] = False
+            return
+
+        unsafe, terminal_or_timeout = self._task_first_reset_outcome_masks(ids)
+
+        # A reset in the post-wrap hold closes the OLD action's recovery.  The newly selected
+        # action has not started yet and contributes no attempt at all.
+        pending_ended = recovering & ~self._task_first_restored_recovery_discard[ids]
+        self._task_first_book_outcomes(
+            self._task_first_recovery_action[ids],
+            pending_ended,
+            self._task_first_recovery_success[ids],
+            unsafe,
+            terminal_or_timeout,
+        )
+        self._task_first_recovery_pending[ids] = False
+        self._task_first_recovery_action[ids] = -1
+        self._task_first_recovery_success[ids] = False
+        self._task_first_restored_recovery_discard[ids] = False
+
+        active_ended = active & ~self._task_first_restored_attempt_discard[ids]
+        self._task_first_book_outcomes(
+            self._task_first_attempt_action[ids],
+            active_ended,
+            self._task_first_attempt_success[ids],
+            unsafe,
+            terminal_or_timeout,
+        )
+        self._task_first_attempt_active[ids] = False
+        self._task_first_attempt_action[ids] = -1
+        self._task_first_attempt_success[ids] = False
+        self._task_first_restored_attempt_discard[ids] = False
+        self._task_first_start_current_attempts(ids)
+
+    def _task_first_finish_recovery_holds(self, in_hold: torch.Tensor) -> None:
+        """Commit safely completed recoveries and activate their waiting tasks."""
+
+        if tuple(in_hold.shape) != (self.num_envs,) or in_hold.dtype != torch.bool:
+            raise RuntimeError("task-first motion.in_hold must be a per-environment bool tensor")
+        finished = self._task_first_recovery_pending & ~in_hold
+        ids = torch.where(finished)[0]
+        if len(ids) == 0:
+            return
+        ended = finished[ids] & ~self._task_first_restored_recovery_discard[ids]
+        clear = torch.zeros(len(ids), dtype=torch.bool, device=self.device)
+        self._task_first_book_outcomes(
+            self._task_first_recovery_action[ids],
+            ended,
+            self._task_first_recovery_success[ids],
+            clear,
+            clear,
+        )
+        self._task_first_recovery_pending[ids] = False
+        self._task_first_recovery_action[ids] = -1
+        self._task_first_recovery_success[ids] = False
+        self._task_first_restored_recovery_discard[ids] = False
+        self._task_first_start_current_attempts(ids)
+
+    def _task_first_counts_payload(self) -> dict:
+        values = self._task_first_window_counts.detach().cpu().tolist()
+        return {
+            action: {
+                name: int(values[row][index])
+                for row, name in enumerate(_TASK_FIRST_OUTCOME_NAMES)
+            }
+            for index, action in enumerate(self._task_first_action_order)
+        }
+
+    def _task_first_on_rollout_end(self, step: int) -> None:
+        """Advance only when every action has one complete evidence window.
+
+        Arbitrary-N libraries often need several PPO rollouts before the least frequent action
+        reaches ``min_attempts``. Pending rollouts neither clear evidence nor advance stall/dwell.
+        Once ready, all actions advance atomically and every raw window is cleared together.
+        """
+
+        if type(step) is not int or step < 0:
+            raise ValueError("task-first rollout step must be a non-negative plain integer")
+        if self._task_first_last_rollout_step is not None and step <= self._task_first_last_rollout_step:
+            raise RuntimeError(
+                "task-first rollout callback must run exactly once in increasing step order"
+            )
+        counts_payload = self._task_first_counts_payload()
+        levels_before = {
+            action: self._task_first_curriculum.levels(action)
+            for action in self._task_first_action_order
+        }
+        minimum = int(self._task_first_manifest.gate.min_attempts)
+        ready = all(
+            counts_payload[action]["attempts"] >= minimum
+            for action in self._task_first_action_order
+        )
+        decisions_payload = []
+        status = "pending_evidence"
+        if ready:
+            evidence = {
+                action: self._task_first_outcome_type(**counts_payload[action])
+                for action in self._task_first_action_order
+            }
+            decisions = self._task_first_curriculum.advance(evidence)
+            for result in decisions:
+                decision = result.decision
+                decisions_payload.append(
+                    {
+                        "action": result.action,
+                        "axis": result.axis,
+                        "kind": result.kind,
+                        "from_level": result.from_level,
+                        "to_level": result.to_level,
+                        "gate": None
+                        if decision is None
+                        else {
+                            "enough_attempts": decision.enough_attempts,
+                            "success_lower": decision.success_lower,
+                            "success_upper": decision.success_upper,
+                            "unsafe_lower": decision.unsafe_lower,
+                            "unsafe_upper": decision.unsafe_upper,
+                            "enter_ok": decision.enter_ok,
+                            "exit_bad": decision.exit_bad,
+                            "enter_blockers": list(decision.enter_blockers),
+                            "exit_reasons": list(decision.exit_reasons),
+                        },
+                    }
+                )
+            self._task_first_window_counts.zero_()
+            status = "advanced"
+        levels_after = {
+            action: self._task_first_curriculum.levels(action)
+            for action in self._task_first_action_order
+        }
+        receipt = {
+            "event": "task_first_curriculum",
+            "schema_version": 1,
+            "step": step,
+            "manifest_sha256": self._task_first_loaded_manifest.file_sha256,
+            "action_order": list(self._task_first_action_order),
+            "status": status,
+            "min_attempts": minimum,
+            "counts": counts_payload,
+            "levels_before": levels_before,
+            "decisions": decisions_payload,
+            "levels_after": levels_after,
+        }
+        print(
+            json.dumps(
+                receipt,
+                sort_keys=True,
+                separators=(",", ":"),
+                ensure_ascii=False,
+                allow_nan=False,
+            ),
+            flush=True,
+        )
+        self._task_first_last_rollout_step = step
+
+    def _task_first_exact_resume_state_dict(self) -> dict:
+        counts = self._task_first_window_counts.detach().cpu().tolist()
+        return {
+            "schema_version": _TASK_FIRST_STATE_SCHEMA_VERSION,
+            "kind": _TASK_FIRST_STATE_KIND,
+            "manifest_sha256": self._task_first_loaded_manifest.file_sha256,
+            "action_order": list(self._task_first_action_order),
+            "action_uids": list(self._task_first_action_uids),
+            "num_envs": int(self.num_envs),
+            "curriculum": self._task_first_curriculum.state_dict(),
+            "window_counts": {
+                name: [int(value) for value in counts[row]]
+                for row, name in enumerate(_TASK_FIRST_OUTCOME_NAMES)
+            },
+            "attempt_latches": {
+                "active": [
+                    bool(value)
+                    for value in self._task_first_attempt_active.detach().cpu().tolist()
+                ],
+                "action_slot": [
+                    int(value)
+                    for value in self._task_first_attempt_action.detach().cpu().tolist()
+                ],
+                "success_at_exact_strike": [
+                    bool(value)
+                    for value in self._task_first_attempt_success.detach().cpu().tolist()
+                ],
+            },
+            "pending_recovery": {
+                "active": [
+                    bool(value)
+                    for value in self._task_first_recovery_pending.detach().cpu().tolist()
+                ],
+                "action_slot": [
+                    int(value)
+                    for value in self._task_first_recovery_action.detach().cpu().tolist()
+                ],
+                "success_at_exact_strike": [
+                    bool(value)
+                    for value in self._task_first_recovery_success.detach().cpu().tolist()
+                ],
+            },
+            "last_rollout_step": self._task_first_last_rollout_step,
+        }
+
+    def _task_first_load_exact_resume_state_dict(self, state: dict, strict: bool = True) -> None:
+        """Restore complete task-first state after validating identity, types and reachability."""
+
+        if strict is not True:
+            raise ValueError("task-first exact resume only supports strict=True")
+        expected = {
+            "schema_version",
+            "kind",
+            "manifest_sha256",
+            "action_order",
+            "action_uids",
+            "num_envs",
+            "curriculum",
+            "window_counts",
+            "attempt_latches",
+            "pending_recovery",
+            "last_rollout_step",
+        }
+        if not isinstance(state, dict) or set(state) != expected:
+            raise ValueError(
+                f"task-first exact-resume keys must be exactly {sorted(expected)}"
+            )
+        if type(state["schema_version"]) is not int or state["schema_version"] != _TASK_FIRST_STATE_SCHEMA_VERSION:
+            raise ValueError("task-first exact-resume schema_version mismatch")
+        if state["kind"] != _TASK_FIRST_STATE_KIND:
+            raise ValueError("task-first exact-resume kind mismatch")
+        if state["manifest_sha256"] != self._task_first_loaded_manifest.file_sha256:
+            raise ValueError("task-first exact-resume manifest SHA-256 mismatch")
+        if state["action_order"] != list(self._task_first_action_order):
+            raise ValueError("task-first exact-resume action order mismatch")
+        if state["action_uids"] != list(self._task_first_action_uids):
+            raise ValueError("task-first exact-resume action UID mismatch")
+        if type(state["num_envs"]) is not int or state["num_envs"] != self.num_envs:
+            raise ValueError("task-first exact-resume environment count mismatch")
+
+        count_state = state["window_counts"]
+        if not isinstance(count_state, dict) or set(count_state) != set(_TASK_FIRST_OUTCOME_NAMES):
+            raise ValueError("task-first window_counts has invalid keys")
+        n_actions = len(self._task_first_action_order)
+        count_rows = []
+        for name in _TASK_FIRST_OUTCOME_NAMES:
+            row = count_state[name]
+            if not isinstance(row, list) or len(row) != n_actions:
+                raise ValueError(f"task-first window_counts.{name} has invalid shape")
+            if any(type(value) is not int or value < 0 for value in row):
+                raise ValueError(f"task-first window_counts.{name} must contain non-negative ints")
+            count_rows.append(list(row))
+        for index in range(n_actions):
+            attempts, successes, unsafe = (row[index] for row in count_rows)
+            if successes + unsafe > attempts:
+                raise ValueError(
+                    "task-first window success and unsafe counts must be disjoint attempt subsets"
+                )
+
+        latch_state = state["attempt_latches"]
+        latch_keys = {"active", "action_slot", "success_at_exact_strike"}
+        if not isinstance(latch_state, dict) or set(latch_state) != latch_keys:
+            raise ValueError("task-first attempt_latches has invalid keys")
+        active = latch_state["active"]
+        slots = latch_state["action_slot"]
+        success = latch_state["success_at_exact_strike"]
+        if not all(isinstance(row, list) and len(row) == self.num_envs for row in (active, slots, success)):
+            raise ValueError("task-first attempt latch vectors must match num_envs")
+        if any(type(value) is not bool for value in active + success):
+            raise ValueError("task-first active/success latches must contain bools")
+        if any(type(value) is not int for value in slots):
+            raise ValueError("task-first action-slot latches must contain plain ints")
+        for index, (is_active, slot, did_succeed) in enumerate(zip(active, slots, success)):
+            if is_active:
+                if slot < 0 or slot >= n_actions:
+                    raise ValueError(f"task-first active attempt {index} has invalid action slot")
+            elif slot != -1 or did_succeed:
+                raise ValueError(
+                    f"task-first inactive attempt {index} must have slot=-1 and success=False"
+                )
+
+        recovery_state = state["pending_recovery"]
+        if not isinstance(recovery_state, dict) or set(recovery_state) != latch_keys:
+            raise ValueError("task-first pending_recovery has invalid keys")
+        recovery_active = recovery_state["active"]
+        recovery_slots = recovery_state["action_slot"]
+        recovery_success = recovery_state["success_at_exact_strike"]
+        if not all(
+            isinstance(row, list) and len(row) == self.num_envs
+            for row in (recovery_active, recovery_slots, recovery_success)
+        ):
+            raise ValueError("task-first pending-recovery vectors must match num_envs")
+        if any(
+            type(value) is not bool
+            for value in recovery_active + recovery_success
+        ):
+            raise ValueError("task-first pending-recovery active/success must contain bools")
+        if any(type(value) is not int for value in recovery_slots):
+            raise ValueError("task-first pending-recovery action slots must contain plain ints")
+        for index, (is_active, slot, did_succeed) in enumerate(
+            zip(recovery_active, recovery_slots, recovery_success)
+        ):
+            if is_active:
+                if active[index]:
+                    raise ValueError(
+                        f"task-first env {index} cannot own an attempt and recovery together"
+                    )
+                if slot < 0 or slot >= n_actions:
+                    raise ValueError(
+                        f"task-first pending recovery {index} has invalid action slot"
+                    )
+            elif slot != -1 or did_succeed:
+                raise ValueError(
+                    f"task-first inactive recovery {index} must have slot=-1 and success=False"
+                )
+        last_step = state["last_rollout_step"]
+        if last_step is not None and (type(last_step) is not int or last_step < 0):
+            raise ValueError("task-first last_rollout_step must be null or a non-negative int")
+        if not isinstance(state["curriculum"], dict):
+            raise ValueError("task-first curriculum state must be a dict")
+
+        # Curriculum validates atomically. It is deliberately loaded only after every other field
+        # passed, so a malformed latch cannot partially mutate the state machine.
+        self._task_first_curriculum.load_state_dict(state["curriculum"])
+        self._task_first_window_counts.copy_(
+            torch.tensor(count_rows, dtype=torch.long, device=self.device)
+        )
+        self._task_first_attempt_active.copy_(
+            torch.tensor(active, dtype=torch.bool, device=self.device)
+        )
+        self._task_first_attempt_action.copy_(
+            torch.tensor(slots, dtype=torch.long, device=self.device)
+        )
+        self._task_first_attempt_success.copy_(
+            torch.tensor(success, dtype=torch.bool, device=self.device)
+        )
+        self._task_first_recovery_pending.copy_(
+            torch.tensor(recovery_active, dtype=torch.bool, device=self.device)
+        )
+        self._task_first_recovery_action.copy_(
+            torch.tensor(recovery_slots, dtype=torch.long, device=self.device)
+        )
+        self._task_first_recovery_success.copy_(
+            torch.tensor(recovery_success, dtype=torch.bool, device=self.device)
+        )
+        self._task_first_restored_attempt_discard.copy_(
+            self._task_first_attempt_active
+        )
+        self._task_first_restored_recovery_discard.copy_(
+            self._task_first_recovery_pending
+        )
+        self._task_first_last_rollout_step = last_step
+
     def _count_swing_starts(self, env_ids, count_prestrike_falls: bool) -> None:
         """UNCONDITIONAL swing accounting (Phase A wandb fix). Increment-only here; the decay is
         applied once per step in _update_metrics next to the exact accumulators, so
@@ -4881,6 +5986,11 @@ class RacketTargetCommand(CommandTerm):
         if n == 0:
             return
         env_ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+        if self._task_first_enabled:
+            self._task_first_close_and_start_attempts(
+                env_ids_t,
+                true_reset=bool(count_prestrike_falls),
+            )
         exact_ledger = self._ensure_exact_behavior_decision_counters()
         exact_ledger["swing_start_count"].add_(n)
         self._swing_starts_acc += float(n)
@@ -6051,6 +7161,13 @@ class RacketTargetCommand(CommandTerm):
         pass_vel = (vel_err < self.cfg.strike_success_vel_thresh) & exact_strike
         pass_normal = (normal_err_deg < self.cfg.strike_success_normal_thresh_deg) & exact_strike
         pass_comp = pass_pos & pass_vel & pass_normal
+        if self._task_first_enabled:
+            task_success = (
+                pass_comp
+                & (base_err < float(self.cfg.task_first_base_success_thresh_m))
+                & self._task_first_attempt_active
+            )
+            self._task_first_attempt_success |= task_success
         decay = float(self.cfg.exact_success_decay)
         self._exact_n_acc = decay * self._exact_n_acc + float(exact_strike.sum())
         self._exact_pass_comp_acc = decay * self._exact_pass_comp_acc + float(pass_comp.sum())
@@ -6596,7 +7713,13 @@ class RacketTargetCommandCfg(CommandTermCfg):
     #   plane FIXED RELATIVE to the commanded station (racket_pos_range_per_clip = STATION-RELATIVE x/y
     #   offsets, z absolute); face-normal target from normal_mode ("velocity" = paper impact model) —
     #   NEVER the reference-clip normal. No HER, no reference_reach coupling, no curriculum.
+    # "task_first": choose an action/clip first, then sample position, scalar speed, raw +Y/A-frame
+    #   face and base task around THAT action's manifest-bound reference strike. Each action owns
+    #   independent position->speed->face->base levels and a prior-action outcome ledger.
     target_mode: str = "reference_perturbed"
+    task_first_manifest_path: str = ""
+    task_first_manifest_sha256: str = ""
+    task_first_base_success_thresh_m: float = 0.10
 
     # reference_perturbed perturbation (final half-extents; scaled 0->1 by the curriculum below).
     ref_perturb_pos: tuple[float, float, float] = (0.15, 0.20, 0.15)  # m, per-axis half-range
