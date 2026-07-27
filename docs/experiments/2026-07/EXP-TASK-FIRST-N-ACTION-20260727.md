@@ -1,6 +1,6 @@
 # EXP-TASK-FIRST-N-ACTION-20260727 — 每个动作能否先学会自己的局部 task，再逐轴泛化？
 
-- 状态：`blocked`
+- 状态：`superseded / ablation-only`
 - 阶段/轴：ball-free executor 训练 / 任意 N 动作 / 逐动作 task 泛化
 - 集成小目标：五个动作各自在安全、可解释的任务域内形成可供 planner 评估的能力面
 - 人类负责人：Franco
@@ -11,6 +11,10 @@
 
 共享缩写见[术语与人话对照](../../DEFINITIONS.md)，完整训练语义见
 [task-first 任意动作数合同](../../interfaces/task_first_n_action_contract.md)。
+
+> 2026-07-27 裁决：task 先于球无法保证存在匹配来球，本实验不再是候选 executor；只保留为因果
+> 消融。当前候选见
+> [按动作条件化 Ball-first 实验](EXP-ACTION-CONDITIONED-BALL-FIRST-20260727.md)。
 
 ## 问题与假设
 
@@ -148,17 +152,16 @@ tuple，而不是先归因算法。这个对照与三项质量权重的
 
 ## 决定
 
-- 决定：`inconclusive`
-- 理由：task-first/N-action source contract 方向成立，但新正手资产和 Pod runtime Gate 未闭合，
-  尚无训练行为。
+- 决定：`rejected as primary executor / retained as causal ablation`
+- 理由：task-first 不能天然保证来球与 task 物理一致；当前主线已改为逐动作
+  `ball/base/aim → fixed-action solve task`。已有 N-action source code 只保留为 matched causal
+  ablation，不再等待 Gate 后转成长训入口。
 - 是否已纳入当前 setting：`no`
-- 局限/下一个 gate：先完成新正手 upper/full + station 证书，再做 host union 与 Pod 两迭代
-  smoke；只有 receipt 全对才启动 fresh 小预算。
+- 局限/下一个 gate：如需重开该消融，必须新建预注册并与 action-ball 使用同 motion、Reward、
+  seed 和预算；本记录不再授权 task-first fresh run。
 
 ## 复现与证据
 
-操作入口：
-
-- [训练操作](../../operations/run_training.md#task-first-prelaunch)
-- [动作片到训练绑定](../../operations/run_motion_clip_to_training_binding.md#task-first-addendum)
-- [构建与测试](../../operations/build_and_test.md#task-first-and-capability-source-tests)
+历史启动工序已撤销；旧 anchor 不再作为可执行 launch checklist。保留的回归入口是
+[构建与测试](../../operations/build_and_test.md#task-first-and-capability-source-tests)；任何新消融
+必须另建实验记录与命令，不能沿用 action-ball anchor。

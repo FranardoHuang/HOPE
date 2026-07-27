@@ -13,39 +13,71 @@ The training scaffold exists under:
 - `hope_training/whole_body_tracking`
 
 <a id="task-first-prelaunch"></a>
+<a id="action-ball-prelaunch"></a>
 
-### Task-first prelaunch（2026-07-27，尚未授权）
+### Action-conditioned Ball-first prelaunch（2026-07-27，尚未授权）
 
-[`task-first`](../DEFINITIONS.md#task-first) executor 训练以每动作 task center 为输入，不读取 ball。
-当前只允许 source/preflight；新正手 `training_authorized=false`，Pod Isaac smoke 未跑，因此本节
-**故意不提供正式长训命令**。
+候选 executor 的顺序是
+`action → time-to-contact/incoming ball/base/aim → fixed-action task+teacher-rate solve → atomic install`，
+完整定义见[训练合同](../interfaces/action_conditioned_ball_first_contract.md)。训练期 selector 关闭；
+旧 `task-first` 只保留为历史消融。当前只允许 source/CPU/preflight；N5/N93 motion admission、新正手
+行为门和 Pod Isaac smoke 未闭合，因此本节**故意不提供正式长训命令**。
 
 compose 后必须同时满足：
 
-- `racket.target_mode=task_first`：人话是让 racket command 直接生成动作中心附近 task；完整定义见
-  [task-first 合同](../interfaces/task_first_n_action_contract.md)；
-- `racket.task_first_manifest_path`：exact 启动清单路径，以及
-  `racket.task_first_manifest_sha256`：操作者预先钉住的文件字节 SHA-256；二者缺一即拒绝；
-- `racket.clip_names` 与 manifest `action_order` 完全相同，motion 文件数、顺序与逐文件 SHA 完全相同；
-- `task.actor_obs_contract=task_first_n<N>`，其中 N 是 manifest 动作数；actor 为
+- `racket.target_mode=action_ball`；
+- `racket.action_ball_manifest_path` 与 `racket.action_ball_manifest_sha256`：操作者预先钉住 exact
+  启动清单路径和文件字节 SHA-256；二者缺一即拒绝；
+- `racket.action_ball_policy_contract_sha256`：观测/动作、runner、Reward 与 evaluator recipe 的固定
+  identity；它不是会随 PPO 更新的 checkpoint SHA；
+- `racket.action_ball_fixed_direction=true`；solver 不能改动作或在内部重采样；
+- 旧 CQ producer/distribution/buffer/seed 必须为空；只允许 fixed-action solver 的
+  `racket.cq_overdraw / cq_n_iters / cq_tol_m / cq_speed_budget / cq_max_redraw_rounds`，并由实际
+  solver payload SHA 认证。每个额外 proposal 都保留在 `P` 与 reject-reason ledger；
+- compose 输入 `racket.clip_names` 与 manifest `action_order` 完全相同；`train.py` 再由它派生
+  runtime `racket_target.clip_names_per_clip`。motion 文件数、顺序与逐文件 SHA 必须完全相同；
+- `task.actor_obs_contract=action_ball_n<N>`，其中 N 是 manifest 动作数；actor 为
   `hitter_footwork(177) + face/rho(4) + action_one_hot(N)`；
-- `motion.balanced_clip_sampling=true` 及内容绑定 seed，使任意前缀的逐动作样本数最多差一；
-- `racket.task_first_base_success_thresh_m` 是 base 平面成功阈值，必须 finite 且大于零，并进入 hard
-  contract；
-- level 0 四个 delta 全为零，只做 center warm-up；position `0→0.25` 后才开始第一次泛化。
+- `motion.balanced_clip_sampling=true` 及
+  `motion.balanced_clip_sampling_seed=<内容绑定的整数 seed>`，使任意前缀的逐动作样本数最多差一；
+- action manifest、sampler、solver profile、physics profile、motion admission、policy contract 和
+  effective Reward receipt 都进入 training hard contract；solver/physics SHA 必须由实际 runtime
+  canonical payload 重算，不能接受 cfg 或 manifest 自报；
+- 首轮 `mobility_mode=no_move`；birth receipt 只在 true reset 冻结 action/base spawn，per-swing task
+  receipt 再携带 base goal、`time_to_contact`、`teacher_rate`、scaled `t_hit/t_cycle` 和 ready wait。
+  WRAP 不写 root；
+- `level=0` 使用每动作、每侧 profile 的 non-zero initial std；exact arm catalog 总数为 32，
+  `no_move` 禁四个 base-travel arm 后有效 28 个。课程按 per-arm marginal → joint `rho` 扩张，
+  不把多个单臂 10% 直接做乘积分布；
+- `teacher_rate=required_racket_site_speed/reference_racket_site_speed` 必须在动作认证范围内且不得
+  clip。Motion 先保持 ready，再满足
+  `pre_swing_wait + scaled_t_hit == time_to_contact`；额外等待必须在 `[0,1] s`，且
+  `pre_swing_wait + scaled_t_cycle + policy_dt` 不得超出 episode horizon；其中额外一个
+  `policy_dt=sim.dt*decimation` tick 用于 attempt 闭合；
+- rolling-100 只选择下一个候选 arm 并强制防饥饿探索。256 个 frozen attempt 仅作 canary，
+  至少 768 个互斥 heldout 才能改变正式 frontier；
+- action-ball 的 `runner.learn(..., init_at_random_ep_len=False)` 是 hard contract；不得用随机首
+  episode 截短来做相位去同步。
+- action-ball formal resume 另需独立预钉的 resume receipt，绑定 raw checkpoint SHA、
+  shared action-ball state root、run/training contract 与 iteration；runner 禁止在同一次 load
+  现算 expected 值。缺 pin 时只允许 fresh launch/diagnostic load。
 
 下列残留会改变问题，必须在 `gym.make` 前失败：
 
-- question/CQ/exam bank、HER achieved-target mix；
-- virtual/shadow/physical ball 或 ball-derived Reward；
+- question/CQ/exam bank、HER achieved-target mix，以及任一第二 task producer；
+- shadow/physical ball driver；analytic virtual ball只允许消费 action-ball receipt 安装的同一球；
 - planner revision、mid-swing resample、clip switch；
 - target delay、jitter、white/AR(1) noise、dropout、per-swing bias；
-- motion retiming、per-clip speed scaling或 event timing；
-- 旧 station tail、缺 face observation 或没有 N-way action identity。
+- legacy/random motion retiming、per-clip speed scaling 或 event timing；唯一允许的时间律是 exact
+  task receipt 内、由动作认证 envelope 约束的 teacher rate 与 ready wait；
+- 旧 station tail、缺 face observation、没有 N-way action identity，或只有 metadata 没有
+  code-rooted motion admission。
 
-这里 `AR(1)` 是一阶自回归噪声；task-first 首轮将它关闭。训练只在
-[task-first 实验](../experiments/2026-07/EXP-TASK-FIRST-N-ACTION-20260727.md)把 exact manifest、
-五动作证书、host union、Pod 两迭代 smoke、WARN 摘要和 receipt 全部落账后开放。
+这里 `AR(1)` 是一阶自回归噪声；首轮将它关闭。在线 rollout 可累计训练 ledger，但 curriculum
+晋级只能消费 frozen evaluator 生成的 `policy_checkpoint_sha256 + policy_generation` 一次性窗口；
+缺 evaluator authority 时必须 hold，不能拿当前 actor 的自报 SHA 冒充。训练只在
+[action-ball 实验](../experiments/2026-07/EXP-ACTION-CONDITIONED-BALL-FIRST-20260727.md)把 exact
+manifest、动作证书、host union、Pod 两迭代 smoke、WARN 摘要和 receipt 全部落账后开放。
 
 <a id="effective-reward-truth"></a>
 

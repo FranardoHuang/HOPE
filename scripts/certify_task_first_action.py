@@ -17,11 +17,12 @@ return scorer:
 The certifier consumes a SHA-256-bound plan and SHA-256-bound evidence.  It
 compares the required whole-action/task-center translations
 ``[[0, 0], [-0.05, 0], [-0.10, 0]]`` metres (negative X is farther from the
-table), but it never chooses one.  A passing reference bundle may authorize
-only an unauthorised reference-check verdict.  This version cannot authorize a
-diagnostic simulator smoke or task-first training: those require an in-process
-producer chain, and formal training additionally requires the canonical
-verifier's exact grounded collocation trace.
+table), but it never chooses one.  Reference evidence can populate diagnostics,
+but this command always emits a blocked diagnostic: only the code-rooted generic
+registry/admission path may mint a runtime capability.  A simulator smoke still
+requires an in-process producer chain, and formal training additionally requires
+the canonical verifier's exact grounded collocation trace and a trusted promotion
+certificate.
 
 No command in this file calls ``mj_step``, trains a policy, deploys, or issues
 hardware commands.  Outputs are no-clobber JSON receipts.
@@ -43,10 +44,16 @@ from typing import Any, Dict, Iterable, List, Mapping, MutableMapping, Optional,
 import numpy as np
 
 
-SCHEMA_VERSION = 2
-PLAN_KIND = "task_first_action_certification_plan_v2"
-COLLISION_REPORT_KIND = "task_first_station_center_collision_v2"
-CERTIFICATE_KIND = "task_first_action_prerun_diagnostic_v2"
+SCHEMA_VERSION = 4
+PLAN_KIND = "task_first_action_certification_plan_v4"
+COLLISION_REPORT_KIND = "task_first_station_center_collision_v4"
+CERTIFICATE_KIND = "task_first_action_prerun_diagnostic_v4"
+BEHAVIOR_CONTACT_EVIDENCE_KIND = (
+    "task_first_action_behavior_contact_evidence_v1"
+)
+STATION_SELECTION_APPROVAL_KIND = (
+    "task_first_station_selection_approval_v1"
+)
 SCOPES = ("upper", "full")
 STATION_CENTER_SHIFT_CANDIDATES_XY_M = (
     (0.0, 0.0),
@@ -78,11 +85,15 @@ REQUIRED_GATES = (
 DIAGNOSTIC_REFERENCE_GATES = (
     "canonical_candidate_integrity",
     "compiler_anchor_in_preregistered_range",
+    "post_retime_t_hit",
     "post_retime_t_cycle",
     "physical_blade_site_speed",
     "dense_collision",
     "shared_ready_return",
     "reference_returnability",
+)
+STATION_COMPARISON_GATES = tuple(
+    gate for gate in DIAGNOSTIC_REFERENCE_GATES if gate != "post_retime_t_hit"
 )
 
 # These are code-reviewed *admissibility* limits for a diagnostic plan, not
@@ -90,19 +101,206 @@ DIAGNOSTIC_REFERENCE_GATES = (
 # inside this envelope, but it may not make a weak reference look green by
 # choosing zero, effectively unbounded, or undersampled gates.  Action-specific
 # values remain content-bound in the plan and must be reviewed before use.
-SOURCE_ANCHOR_TIME_LIMITS_S = (0.01, 3.0)
+SOURCE_ANCHOR_TIME_LIMITS_S = (0.01, 0.5)
 SOURCE_ANCHOR_MAX_WINDOW_S = 0.25
-T_CYCLE_LIMITS_S = (0.05, 5.0)
+# Franco's 2026-07-25 decision made 0.5 s a comparison reference, not a
+# universal acceptance threshold.  A formal t_hit gate must come from the
+# action-specific, code-rooted behavior/contact authority used by motion
+# admission.  This diagnostic certifier deliberately has no such authority.
+T_HIT_REFERENCE_S = 0.5
+T_CYCLE_LIMITS_S = (0.05, 3.0)
 T_CYCLE_MAX_WINDOW_S = 1.0
-BLADE_SITE_SPEED_LIMITS_M_S = (1.0, 20.0)
-BLADE_SITE_SPEED_MAX_WINDOW_M_S = 10.0
-SHARED_READY_POSE_TOLERANCE_MAX = 1.0e-3
+BLADE_SITE_SPEED_LIMITS_M_S = (1.0, 7.2)
+BLADE_SITE_SPEED_MAX_WINDOW_M_S = 6.2
+SHARED_READY_POSE_TOLERANCE_MAX = 1.0e-6
 DENSE_COLLISION_MIN_HZ = 400.0
 MINIMUM_TABLE_NET_CLEARANCE_M = 0.005
 REFERENCE_RETURN_MIN_SAMPLES = 256
 REFERENCE_RETURN_MIN_FRACTION = 0.5
 REFERENCE_RETURN_MAX_CAPTURE_RADIUS_M = 0.095
 REFERENCE_RETURN_MIN_APPROACH_SPEED_M_S = 0.3
+REFERENCE_RETURN_MIN_AXIS_SPAN_M_S = 0.01
+VENUE_BALL_SPEED_RANGE_M_S = (1.0, 7.0)
+VENUE_SPIN_MAGNITUDE_MAX_RAD_S = 15.0 * 2.0 * math.pi
+CODE_ROOTED_BALL_PHYSICS = Path("configs/ball_physics_venue.yaml")
+CODE_ROOTED_VENUE_PROFILE = Path(
+    "configs/venue_profiles/franco_rig_20260725.json"
+)
+
+# These are code-owned authorization roots, not Hydra/plan inputs.  They ship
+# empty deliberately.  Adding one exact receipt digest requires source review;
+# until then a plan cannot self-report behavior contact or approve a station
+# shift after seeing comparison results.
+TRUSTED_BEHAVIOR_CONTACT_EVIDENCE_SHA256: frozenset[str] = frozenset()
+TRUSTED_STATION_SELECTION_APPROVAL_SHA256: frozenset[str] = frozenset()
+
+_BEHAVIOR_CONTACT_AUTHORITY_CONTRACT = {
+    "schema_version": 1,
+    "kind": BEHAVIOR_CONTACT_EVIDENCE_KIND,
+    "action_specific_t_hit_range": True,
+    "ordered_scopes": list(SCOPES),
+    "motion_bytes_bound_per_scope": True,
+    "evidence_artifact_bytes_bound": True,
+    "plan_or_report_may_self_authorize": False,
+}
+BEHAVIOR_CONTACT_AUTHORITY_CONTRACT_SHA256 = hashlib.sha256(
+    json.dumps(
+        _BEHAVIOR_CONTACT_AUTHORITY_CONTRACT,
+        allow_nan=False,
+        ensure_ascii=True,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("ascii")
+).hexdigest()
+
+_BEHAVIOR_CONTACT_EVIDENCE_KEYS = frozenset(
+    {
+        "schema_version",
+        "kind",
+        "authority_contract_sha256",
+        "action_id",
+        "accepted_t_hit_range_s",
+        "measurements",
+        "evidence_artifact",
+        "non_claims",
+    }
+)
+_BEHAVIOR_CONTACT_MEASUREMENT_KEYS = frozenset(
+    {"scope", "motion_sha256", "t_hit_s"}
+)
+_STATION_SELECTION_APPROVAL_KEYS = frozenset(
+    {
+        "schema_version",
+        "kind",
+        "action_id",
+        "selected_station_center_shift_xy_m",
+        "comparison_input_sha256",
+        "approval_policy",
+        "non_claims",
+    }
+)
+
+_BANK_REPORT_KEYS = frozenset(
+    {
+        "schema_version",
+        "verdict",
+        "bank_gate_pass",
+        "candidate_integrity_pass",
+        "grounded_trace_status",
+        "publication_class",
+        "training_authorized",
+        "hardware_authorized",
+        "library_id",
+        "manifest",
+        "bank_dir",
+        "bound_inputs",
+        "contracts",
+        "aggregate",
+        "clips",
+        "non_claims",
+    }
+)
+_BANK_BOUND_INPUT_KEYS = frozenset(
+    {
+        "recipe",
+        "compiler",
+        "geometry_tool",
+        "compiler_options_sha256",
+        "ready",
+        "mjcf",
+        "urdf",
+        "body_order",
+        "plant",
+        "verifier_tools",
+    }
+)
+_BANK_CLIP_KEYS = frozenset(
+    {
+        "motion_id",
+        "scope",
+        "filename",
+        "sha256",
+        "frames",
+        "fps",
+        "duration_s",
+        "schema2_receipts",
+        "strict_schema2_and_ready",
+        "contact_opportunity",
+        "mujoco_fk",
+        "plant_specific_dynamics",
+    }
+)
+_BANK_CONTRACT_KEYS = frozenset(
+    {
+        "matrix",
+        "shared_ready",
+        "six_endpoint_velocity_classes_exact_zero",
+        "contact_opportunity_is_marker_only",
+        "acceleration_allowed_through_window_end",
+        "nonnegative_scalar_acceleration_through_window_end",
+        "adv2c3_role",
+        "grounded_inverse_dynamics",
+        "grounded_trace_status",
+    }
+)
+_BANK_AGGREGATE_KEYS = frozenset(
+    {
+        "clip_count",
+        "fk_pass_count",
+        "velocity_consistency_pass_count",
+        "joint_limit_pass_count",
+        "geometry_pass_count",
+        "non_torque_dynamics_pass_count",
+        "complete_dynamics_pass_count",
+        "incomplete_fail_closed_count",
+        "failed_count",
+        "torque_interpretation_valid_count",
+        "clips_with_contact_count",
+        "contact_frame_count",
+        "self_collision_violation_count",
+        "foot_floor_penetration_violation_count",
+        "nonfoot_floor_penetration_violation_count",
+        "other_world_penetration_violation_count",
+        "joint_effort_proxy_peak_utilization",
+        "actuator_force_proxy_peak_utilization",
+        "root_height_min_m",
+        "root_height_max_m",
+        "root_tilt_peak_rad",
+        "root_xy_displacement_peak_m",
+        "com_height_min_m",
+        "com_height_max_m",
+    }
+)
+_PLAYBACK_REPORT_KEYS = frozenset(
+    {
+        "verdict",
+        "evidence_boundary",
+        "authorization",
+        "contract",
+        "motion",
+        "gates",
+        "racket",
+        "per_body_max",
+        "artifacts",
+    }
+)
+_COLLISION_REPORT_KEYS = frozenset(
+    {
+        "schema_version",
+        "report_kind",
+        "action_id",
+        "scope",
+        "station_center_shift_xy_m",
+        "verdict",
+        "artifacts",
+        "sampling",
+        "model",
+        "checks",
+        "clearance",
+        "authorization",
+        "non_claims",
+    }
+)
 
 
 class CertificationError(ValueError):
@@ -202,9 +400,17 @@ def _reject_duplicate_pairs(pairs: Sequence[Tuple[str, Any]]) -> Dict[str, Any]:
     return result
 
 
+def _reject_nonfinite_json_constant(value: str) -> None:
+    raise CertificationError(f"non-finite JSON constant {value!r} is forbidden")
+
+
 def _parse_json(data: bytes, label: str) -> Mapping[str, Any]:
     try:
-        value = json.loads(data.decode("utf-8"), object_pairs_hook=_reject_duplicate_pairs)
+        value = json.loads(
+            data.decode("utf-8"),
+            object_pairs_hook=_reject_duplicate_pairs,
+            parse_constant=_reject_nonfinite_json_constant,
+        )
     except (UnicodeError, json.JSONDecodeError) as exc:
         raise CertificationError(f"cannot parse strict {label} JSON: {exc}") from exc
     if not isinstance(value, dict):
@@ -306,6 +512,25 @@ def read_recipe_bound_file(
     )
 
 
+def _require_code_rooted_bytes(
+    snapshot: Snapshot,
+    *,
+    repository_relative_path: Path,
+    label: str,
+) -> None:
+    """Require bytes identical to the reviewed repository physics/profile truth."""
+
+    expected_path = Path(__file__).resolve().parents[1] / repository_relative_path
+    if (
+        not expected_path.is_file()
+        or expected_path.is_symlink()
+        or snapshot.sha256 != _sha256_file(expected_path)
+    ):
+        raise CertificationError(
+            f"{label} must bind exact code-rooted {repository_relative_path.as_posix()}"
+        )
+
+
 def _same_float(lhs: float, rhs: float, tolerance: float = 1.0e-9) -> bool:
     return abs(float(lhs) - float(rhs)) <= tolerance
 
@@ -329,6 +554,248 @@ def _station_index(value: Any, label: str) -> int:
             f"{[list(row) for row in STATION_CENTER_SHIFT_CANDIDATES_XY_M]}, got {xy}"
         )
     return matches[0]
+
+
+def _canonical_document_sha256(value: Any, label: str) -> str:
+    try:
+        payload = json.dumps(
+            value,
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("ascii")
+    except (TypeError, ValueError) as exc:
+        raise CertificationError(
+            f"{label} must contain only finite canonical JSON data"
+        ) from exc
+    return _sha256_bytes(payload)
+
+
+def _validate_code_trust_set(value: Any, label: str) -> frozenset[str]:
+    if (
+        type(value) is not frozenset
+        or any(
+            type(digest) is not str
+            or len(digest) != 64
+            or any(
+                character not in "0123456789abcdef"
+                for character in digest
+            )
+            for digest in value
+        )
+    ):
+        raise CertificationError(f"{label} code trust set is malformed")
+    return value
+
+
+def _station_comparison_input_sha256(plan: Mapping[str, Any]) -> str:
+    """Bind every comparison input without circularly binding its approval."""
+
+    excluded = {
+        "selected_station_center_shift_xy_m",
+        "station_selection_approval",
+    }
+    comparison = {
+        key: value for key, value in plan.items() if key not in excluded
+    }
+    return _canonical_document_sha256(
+        comparison, "station comparison input"
+    )
+
+
+def _load_trusted_behavior_contact_evidence(
+    binding: Any,
+    *,
+    base_dir: Path,
+    action_id: str,
+) -> Optional[Mapping[str, Any]]:
+    """Load action-specific t_hit truth only through a code-pinned receipt."""
+
+    if binding is None:
+        return None
+    snapshot = read_bound_file(
+        binding, base_dir, "behavior/contact evidence receipt"
+    )
+    trusted = _validate_code_trust_set(
+        TRUSTED_BEHAVIOR_CONTACT_EVIDENCE_SHA256,
+        "behavior/contact evidence",
+    )
+    if not trusted:
+        raise CertificationError(
+            "behavior/contact evidence code trust set is empty"
+        )
+    if snapshot.sha256 not in trusted:
+        raise CertificationError(
+            "behavior/contact evidence receipt is not code-pinned"
+        )
+    receipt = _exact_keys(
+        _parse_json(snapshot.data, "behavior/contact evidence receipt"),
+        _BEHAVIOR_CONTACT_EVIDENCE_KEYS,
+        "behavior/contact evidence receipt",
+    )
+    if (
+        receipt["schema_version"] != 1
+        or receipt["kind"] != BEHAVIOR_CONTACT_EVIDENCE_KIND
+        or receipt["authority_contract_sha256"]
+        != BEHAVIOR_CONTACT_AUTHORITY_CONTRACT_SHA256
+        or receipt["action_id"] != action_id
+    ):
+        raise CertificationError(
+            "behavior/contact evidence identity/authority drifted"
+        )
+    accepted = _sequence(
+        receipt["accepted_t_hit_range_s"],
+        "behavior/contact accepted t_hit range",
+    )
+    if len(accepted) != 2:
+        raise CertificationError(
+            "behavior/contact accepted t_hit range must have two bounds"
+        )
+    accepted_lo = _finite(
+        accepted[0], "behavior/contact accepted t_hit lower"
+    )
+    accepted_hi = _finite(
+        accepted[1], "behavior/contact accepted t_hit upper"
+    )
+    if accepted_lo < 0.0 or accepted_lo > accepted_hi:
+        raise CertificationError(
+            "behavior/contact accepted t_hit range is malformed"
+        )
+    raw_measurements = _sequence(
+        receipt["measurements"], "behavior/contact measurements"
+    )
+    if len(raw_measurements) != len(SCOPES):
+        raise CertificationError(
+            "behavior/contact evidence must contain upper/full measurements"
+        )
+    measurements: Dict[str, Mapping[str, Any]] = {}
+    for index, raw in enumerate(raw_measurements):
+        row = _exact_keys(
+            raw,
+            _BEHAVIOR_CONTACT_MEASUREMENT_KEYS,
+            f"behavior/contact measurements[{index}]",
+        )
+        scope = row["scope"]
+        if scope != SCOPES[index]:
+            raise CertificationError(
+                "behavior/contact measurement scope order drifted"
+            )
+        motion_sha256 = _digest(
+            row["motion_sha256"],
+            f"behavior/contact {scope} motion SHA-256",
+        )
+        t_hit_s = _finite(
+            row["t_hit_s"], f"behavior/contact {scope} t_hit_s"
+        )
+        if not accepted_lo <= t_hit_s <= accepted_hi:
+            raise CertificationError(
+                f"behavior/contact {scope} t_hit lies outside its "
+                "code-pinned action-specific range"
+            )
+        measurements[scope] = {
+            "scope": scope,
+            "motion_sha256": motion_sha256,
+            "t_hit_s": t_hit_s,
+        }
+    artifact = read_bound_file(
+        receipt["evidence_artifact"],
+        snapshot.path.parent,
+        "behavior/contact evidence artifact",
+    )
+    non_claims = _sequence(
+        receipt["non_claims"], "behavior/contact evidence non_claims"
+    )
+    if (
+        not non_claims
+        or any(type(item) is not str or not item for item in non_claims)
+    ):
+        raise CertificationError(
+            "behavior/contact evidence non_claims must be non-empty strings"
+        )
+    return {
+        "receipt": snapshot.binding(),
+        "receipt_sha256": snapshot.sha256,
+        "authority_contract_sha256": (
+            BEHAVIOR_CONTACT_AUTHORITY_CONTRACT_SHA256
+        ),
+        "accepted_t_hit_range_s": [accepted_lo, accepted_hi],
+        "measurements": measurements,
+        "evidence_artifact": artifact.binding(),
+    }
+
+
+def _load_trusted_station_selection_approval(
+    binding: Any,
+    *,
+    base_dir: Path,
+    action_id: str,
+    selected: Optional[Tuple[float, float]],
+    comparison_input_sha256: str,
+) -> Optional[Mapping[str, Any]]:
+    """Require a separate code-reviewed receipt for any selected shift."""
+
+    if selected is None:
+        if binding is not None:
+            raise CertificationError(
+                "station selection approval is forbidden when no shift is "
+                "selected"
+            )
+        return None
+    if binding is None:
+        raise CertificationError(
+            "selected station center shift requires an independent "
+            "code-pinned approval receipt"
+        )
+    snapshot = read_bound_file(
+        binding, base_dir, "station selection approval receipt"
+    )
+    trusted = _validate_code_trust_set(
+        TRUSTED_STATION_SELECTION_APPROVAL_SHA256,
+        "station selection approval",
+    )
+    if not trusted:
+        raise CertificationError(
+            "station selection approval code trust set is empty"
+        )
+    if snapshot.sha256 not in trusted:
+        raise CertificationError(
+            "station selection approval receipt is not code-pinned"
+        )
+    receipt = _exact_keys(
+        _parse_json(snapshot.data, "station selection approval receipt"),
+        _STATION_SELECTION_APPROVAL_KEYS,
+        "station selection approval receipt",
+    )
+    approved_index = _station_index(
+        receipt["selected_station_center_shift_xy_m"],
+        "approved station center shift",
+    )
+    approved = STATION_CENTER_SHIFT_CANDIDATES_XY_M[approved_index]
+    non_claims = _sequence(
+        receipt["non_claims"], "station selection approval non_claims"
+    )
+    if (
+        receipt["schema_version"] != 1
+        or receipt["kind"] != STATION_SELECTION_APPROVAL_KIND
+        or receipt["action_id"] != action_id
+        or approved != selected
+        or receipt["comparison_input_sha256"]
+        != comparison_input_sha256
+        or receipt["approval_policy"]
+        != "independent_code_reviewed_station_selection_v1"
+        or not non_claims
+        or any(type(item) is not str or not item for item in non_claims)
+    ):
+        raise CertificationError(
+            "station selection approval identity/comparison binding drifted"
+        )
+    return {
+        "receipt": snapshot.binding(),
+        "receipt_sha256": snapshot.sha256,
+        "comparison_input_sha256": comparison_input_sha256,
+        "selected_station_center_shift_xy_m": list(selected),
+    }
 
 
 def _load_npz(snapshot: Snapshot) -> Mapping[str, np.ndarray]:
@@ -519,9 +986,95 @@ def _canonical_ready_state(snapshot: Snapshot) -> Mapping[str, np.ndarray]:
     }
 
 
+def _canonical_ready_fk_state(
+    snapshot: Snapshot,
+    *,
+    canonical_ready_sha256: str,
+    canonical_ready: Mapping[str, np.ndarray],
+) -> Mapping[str, np.ndarray]:
+    """Validate the content-addressed 32-body FK truth bound to canonical ready."""
+
+    payload = _load_npz(snapshot)
+    required = {
+        "canonical_ready_sha256",
+        "body_names",
+        "body_pos_w",
+        "body_quat_w",
+        "kinematics_contract_version",
+    }
+    if frozenset(payload) != frozenset(required):
+        raise CertificationError("canonical ready-FK NPZ field set changed")
+    if (
+        _text_scalar_array(
+            payload["canonical_ready_sha256"],
+            "ready-FK canonical_ready_sha256",
+        )
+        != canonical_ready_sha256
+    ):
+        raise CertificationError(
+            "canonical ready-FK does not bind the exact canonical-ready digest"
+        )
+    version = np.asarray(payload["kinematics_contract_version"])
+    if (
+        version.dtype != np.dtype(np.int64)
+        or version.shape != (1,)
+        or int(version[0]) != 1
+    ):
+        raise CertificationError(
+            "canonical ready-FK kinematics_contract_version must be exact int64 [1]"
+        )
+    body_order_path = (
+        Path(__file__).resolve().parents[1] / "configs/a3_runtime_body_order.txt"
+    )
+    expected_names = tuple(
+        line.strip()
+        for line in body_order_path.read_text(encoding="utf-8").splitlines()
+        if line.strip()
+    )
+    raw_names = np.asarray(payload["body_names"])
+    names = tuple(
+        item.decode("utf-8") if isinstance(item, bytes) else str(item)
+        for item in raw_names.reshape(-1).tolist()
+    )
+    body_pos = np.asarray(payload["body_pos_w"])
+    body_quat = np.asarray(payload["body_quat_w"])
+    if (
+        raw_names.shape != (32,)
+        or raw_names.dtype.kind not in ("U", "S")
+        or names != expected_names
+        or body_pos.dtype != np.dtype(np.float32)
+        or body_pos.shape != (32, 3)
+        or body_quat.dtype != np.dtype(np.float32)
+        or body_quat.shape != (32, 4)
+        or not np.isfinite(body_pos).all()
+        or not np.isfinite(body_quat).all()
+        or float(np.max(np.abs(np.linalg.norm(body_quat, axis=-1) - 1.0)))
+        > 2.0e-3
+    ):
+        raise CertificationError("canonical ready-FK body truth is malformed")
+    if (
+        not np.array_equal(
+            body_pos[0],
+            np.asarray(canonical_ready["root_pos"], dtype=np.float32),
+        )
+        or not np.array_equal(
+            body_quat[0],
+            np.asarray(canonical_ready["root_quat"], dtype=np.float32),
+        )
+    ):
+        raise CertificationError(
+            "canonical ready-FK root differs from the exact canonical-ready pose"
+        )
+    return {
+        "body_pos": body_pos.astype(np.float64),
+        "body_quat": body_quat.astype(np.float64),
+    }
+
+
 def _motion_ready_truth_gate(
     payload: Mapping[str, np.ndarray],
     ready: Mapping[str, np.ndarray],
+    ready_fk: Mapping[str, np.ndarray],
     *,
     tolerance: float,
 ) -> Mapping[str, Any]:
@@ -546,18 +1099,57 @@ def _motion_ready_truth_gate(
             _quat_angle_rad(body_quat[-1, 0], ready["root_quat"]),
         )
     )
+    body_position_error = float(
+        max(
+            np.max(
+                np.linalg.norm(
+                    body_pos[0] - np.asarray(ready_fk["body_pos"], np.float64),
+                    axis=1,
+                )
+            ),
+            np.max(
+                np.linalg.norm(
+                    body_pos[-1] - np.asarray(ready_fk["body_pos"], np.float64),
+                    axis=1,
+                )
+            ),
+        )
+    )
+    body_orientation_error = float(
+        max(
+            np.max(
+                _quat_angle_rad(
+                    body_quat[0],
+                    np.asarray(ready_fk["body_quat"], np.float64),
+                )
+            ),
+            np.max(
+                _quat_angle_rad(
+                    body_quat[-1],
+                    np.asarray(ready_fk["body_quat"], np.float64),
+                )
+            ),
+        )
+    )
     passed = bool(
         joint_error <= tolerance
         and root_position_error <= tolerance
         and root_orientation_error <= tolerance
+        and body_position_error <= tolerance
+        and body_orientation_error <= tolerance
     )
     return {
         "pass": passed,
         "joint_position_max_abs_error_rad": joint_error,
         "root_position_max_error_m": root_position_error,
         "root_orientation_max_error_rad": root_orientation_error,
+        "body_position_max_error_m": body_position_error,
+        "body_orientation_max_error_rad": body_orientation_error,
         "tolerance": tolerance,
-        "truth_source": snapshot_binding_label("canonical_ready"),
+        "truth_source": (
+            f"{snapshot_binding_label('canonical_ready')}+"
+            f"{snapshot_binding_label('canonical_ready_fk')}"
+        ),
     }
 
 
@@ -590,7 +1182,7 @@ def _bank_clip(
 ) -> Mapping[str, Any]:
     rows = _sequence(report.get("clips"), "canonical verifier clips")
     matches = [
-        _mapping(row, "canonical verifier clip")
+        _exact_keys(row, _BANK_CLIP_KEYS, "canonical verifier clip")
         for row in rows
         if isinstance(row, dict)
         and row.get("motion_id") == action_id
@@ -632,7 +1224,10 @@ def _validate_bank_contract(
     manifest_sha256: str,
     recipe_sha256: str,
     mjcf_sha256: str,
+    urdf_sha256: str,
+    ready_sha256: str,
 ) -> Mapping[str, bool]:
+    report = _exact_keys(report, _BANK_REPORT_KEYS, "canonical verifier report")
     if (
         report.get("schema_version") != 1
         or report.get("publication_class") != "post_build_diagnostic_only"
@@ -642,6 +1237,11 @@ def _validate_bank_contract(
         or report.get("hardware_authorized") is not False
     ):
         raise CertificationError("canonical verifier top-level contract is malformed")
+    _nonempty(report["library_id"], "canonical verifier library_id")
+    _nonempty(report["bank_dir"], "canonical verifier bank_dir")
+    non_claims = _sequence(report["non_claims"], "canonical verifier non_claims")
+    if any(not isinstance(item, str) or not item for item in non_claims):
+        raise CertificationError("canonical verifier non_claims must be non-empty strings")
     verdict = report.get("verdict")
     gate_pass = report["bank_gate_pass"]
     grounded_trace_status = report.get("grounded_trace_status")
@@ -656,12 +1256,64 @@ def _validate_bank_contract(
         or grounded_trace_status != "MISSING_INCOMPLETE_FAIL_CLOSED"
     ):
         raise CertificationError("canonical verifier verdict/bank_gate_pass contradict")
-    manifest = _mapping(report.get("manifest"), "canonical verifier manifest")
+    manifest = _exact_keys(
+        report.get("manifest"), ("path", "sha256"), "canonical verifier manifest"
+    )
+    _nonempty(manifest["path"], "canonical verifier manifest.path")
     if manifest.get("sha256") != manifest_sha256:
         raise CertificationError("canonical verifier manifest SHA differs from plan")
-    bound_inputs = _mapping(
-        report.get("bound_inputs"), "canonical verifier bound_inputs"
+    bound_inputs = _exact_keys(
+        report.get("bound_inputs"),
+        _BANK_BOUND_INPUT_KEYS,
+        "canonical verifier bound_inputs",
     )
+    for name, expected_sha in (
+        ("recipe", recipe_sha256),
+        ("ready", ready_sha256),
+        ("mjcf", mjcf_sha256),
+        ("urdf", urdf_sha256),
+    ):
+        receipt = _exact_keys(
+            bound_inputs[name],
+            ("path", "sha256"),
+            f"canonical verifier {name}",
+        )
+        _nonempty(receipt["path"], f"canonical verifier {name}.path")
+        if receipt["sha256"] != expected_sha:
+            raise CertificationError(
+                f"canonical verifier {name} binding differs from plan"
+            )
+    _digest(
+        bound_inputs["compiler_options_sha256"],
+        "canonical verifier compiler_options_sha256",
+    )
+    code_rooted_inputs = {
+        "compiler": Path(
+            "hope_training/whole_body_tracking/scripts/"
+            "canonical_motion_compiler.py"
+        ),
+        "geometry_tool": Path(
+            "hope_training/whole_body_tracking/scripts/"
+            "canonical_motion_geometry.py"
+        ),
+        "body_order": Path("configs/a3_runtime_body_order.txt"),
+    }
+    for name, relative_path in code_rooted_inputs.items():
+        receipt = _exact_keys(
+            bound_inputs[name],
+            ("path", "sha256"),
+            f"canonical verifier {name}",
+        )
+        expected = Path(__file__).resolve().parents[1] / relative_path
+        if (
+            Path(_nonempty(receipt["path"], f"canonical verifier {name}.path")).name
+            != expected.name
+            or not expected.is_file()
+            or receipt["sha256"] != _sha256_file(expected)
+        ):
+            raise CertificationError(
+                f"canonical verifier {name} is not exact code-rooted input"
+            )
     if (
         _mapping(bound_inputs.get("recipe"), "canonical verifier recipe").get("sha256")
         != recipe_sha256
@@ -669,8 +1321,37 @@ def _validate_bank_contract(
         != mjcf_sha256
     ):
         raise CertificationError("canonical verifier recipe/MJCF binding differs from plan")
-    tools = _mapping(
-        bound_inputs.get("verifier_tools"), "canonical verifier tools"
+    plant = _exact_keys(
+        bound_inputs["plant"],
+        (
+            "mjcf_sha256",
+            "urdf_sha256",
+            "compiled_signature_sha256",
+            "identity_bound",
+            "runtime_body_order",
+        ),
+        "canonical verifier plant",
+    )
+    if (
+        plant["mjcf_sha256"] != mjcf_sha256
+        or plant["urdf_sha256"] != urdf_sha256
+        or plant["identity_bound"] is not True
+        or not isinstance(plant["runtime_body_order"], list)
+        or len(plant["runtime_body_order"]) != 32
+    ):
+        raise CertificationError("canonical verifier plant identity is malformed")
+    _digest(
+        plant["compiled_signature_sha256"],
+        "canonical verifier compiled signature",
+    )
+    tools = _exact_keys(
+        bound_inputs.get("verifier_tools"),
+        (
+            "bank_gate",
+            "mujoco_motion_player",
+            "canonical_mujoco_dynamics_gate",
+        ),
+        "canonical verifier tools",
     )
     tool_paths = {
         "bank_gate": (
@@ -690,14 +1371,82 @@ def _validate_bank_contract(
         ),
     }
     for key, (label, local_tool) in tool_paths.items():
-        receipt = _mapping(tools.get(key), f"{label} tool binding")
+        expected_keys = (
+            ("path", "sha256", "report_schema_version")
+            if key == "canonical_mujoco_dynamics_gate"
+            else ("path", "sha256")
+        )
+        receipt = _exact_keys(
+            tools.get(key), expected_keys, f"{label} tool binding"
+        )
         if (
             not local_tool.is_file()
+            or Path(receipt["path"]).name != local_tool.name
             or receipt.get("sha256") != _sha256_file(local_tool)
+            or (
+                key == "canonical_mujoco_dynamics_gate"
+                and receipt["report_schema_version"] != 1
+            )
         ):
             raise CertificationError(
                 f"canonical verifier does not bind the exact local {label} source"
             )
+    contracts = _exact_keys(
+        report["contracts"], _BANK_CONTRACT_KEYS, "canonical verifier contracts"
+    )
+    if (
+        contracts.get("grounded_trace_status") != grounded_trace_status
+        or not isinstance(contracts.get("grounded_inverse_dynamics"), str)
+        or "incomplete" not in contracts["grounded_inverse_dynamics"].lower()
+    ):
+        raise CertificationError(
+            "canonical verifier grounded contract is not formally fail-closed"
+        )
+    matrix = _exact_keys(
+        contracts["matrix"],
+        ("motion_ids", "scopes", "count"),
+        "canonical verifier contracts.matrix",
+    )
+    if (
+        not isinstance(matrix["motion_ids"], list)
+        or not matrix["motion_ids"]
+        or matrix["scopes"] != list(SCOPES)
+        or type(matrix["count"]) is not int
+        or matrix["count"] < 2
+        or contracts["shared_ready"] is not True
+        or contracts["six_endpoint_velocity_classes_exact_zero"] is not True
+        or contracts["contact_opportunity_is_marker_only"] is not True
+        or contracts["acceleration_allowed_through_window_end"] is not True
+        or contracts["nonnegative_scalar_acceleration_through_window_end"]
+        is not True
+        or contracts["adv2c3_role"] != "comparator_only_not_default"
+    ):
+        raise CertificationError("canonical verifier contracts are malformed")
+    aggregate = _exact_keys(
+        report["aggregate"], _BANK_AGGREGATE_KEYS, "canonical verifier aggregate"
+    )
+    clips = _sequence(report["clips"], "canonical verifier clips")
+    if not clips:
+        raise CertificationError("canonical verifier clips must be non-empty")
+    for index, clip in enumerate(clips):
+        checked_clip = _exact_keys(
+            clip, _BANK_CLIP_KEYS, f"canonical verifier clips[{index}]"
+        )
+        _nonempty(checked_clip["motion_id"], f"canonical verifier clip {index} motion_id")
+        if checked_clip["scope"] not in SCOPES:
+            raise CertificationError("canonical verifier clip scope is invalid")
+    if matrix["count"] != len(clips):
+        raise CertificationError("canonical verifier matrix/clip count contradicts")
+    count_keys = tuple(
+        key
+        for key in _BANK_AGGREGATE_KEYS
+        if key == "clip_count" or key.endswith("_count")
+    )
+    if (
+        aggregate["clip_count"] != len(clips)
+        or any(type(aggregate[key]) is not int or aggregate[key] < 0 for key in count_keys)
+    ):
+        raise CertificationError("canonical verifier aggregate counts are malformed")
     return {
         "candidate_integrity_pass": bool(report["candidate_integrity_pass"]),
         "bank_gate_pass": False,
@@ -711,13 +1460,85 @@ def _playback_state_at(
     frames: int,
     output_frame: int,
 ) -> Mapping[str, Any]:
+    report = _exact_keys(report, _PLAYBACK_REPORT_KEYS, "MuJoCo playback report")
     if report.get("verdict") != "PASS":
         raise CertificationError("MuJoCo player report must have verdict PASS")
-    artifacts = _mapping(report.get("artifacts"), "playback.artifacts")
-    contract = _mapping(report.get("contract"), "playback.contract")
-    boundary = _mapping(report.get("evidence_boundary"), "playback.evidence_boundary")
+    artifacts = _exact_keys(
+        report.get("artifacts"),
+        (
+            "motion_sha256",
+            "mjcf_path",
+            "mjcf_sha256",
+            "racket_reference_path",
+            "racket_reference_sha256",
+        ),
+        "playback.artifacts",
+    )
+    _nonempty(artifacts["mjcf_path"], "playback.artifacts.mjcf_path")
+    _digest(artifacts["motion_sha256"], "playback motion SHA-256")
+    _digest(artifacts["mjcf_sha256"], "playback MJCF SHA-256")
     if (
-        contract.get("racket_site") != RACKET_SITE_NAME
+        artifacts["racket_reference_path"] is not None
+        or artifacts["racket_reference_sha256"] is not None
+    ):
+        raise CertificationError(
+            "playback external racket reference must remain disabled"
+        )
+    contract = _exact_keys(
+        report.get("contract"),
+        (
+            "schema",
+            "joint_columns",
+            "body_columns",
+            "joint_order",
+            "body_order",
+            "joint_mapping",
+            "body_mapping",
+            "racket_site",
+            "racket_site_body",
+            "racket_site_local_position_m",
+            "racket_normal_convention",
+        ),
+        "playback.contract",
+    )
+    boundary = _exact_keys(
+        report.get("evidence_boundary"),
+        (
+            "level",
+            "mj_forward_calls",
+            "mj_step_calls",
+            "dynamic_certificate",
+            "training_certificate",
+            "deployment_certificate",
+            "hardware_certificate",
+            "real_robot_certificate",
+            "racket_velocity_source",
+            "statement",
+        ),
+        "playback.evidence_boundary",
+    )
+    if (
+        contract.get("schema") != "exact schema-2 11/14 fields"
+        or contract.get("joint_columns") != 31
+        or contract.get("body_columns") != 32
+        or not isinstance(contract.get("joint_order"), list)
+        or len(contract["joint_order"]) != 31
+        or len(set(contract["joint_order"])) != 31
+        or not isinstance(contract.get("body_order"), list)
+        or tuple(contract["body_order"])
+        != tuple(
+            line.strip()
+            for line in (
+                Path(__file__).resolve().parents[1]
+                / "configs/a3_runtime_body_order.txt"
+            )
+            .read_text(encoding="utf-8")
+            .splitlines()
+            if line.strip()
+        )
+        or contract.get("joint_mapping") != "name_to_mjcf_qpos_address"
+        or contract.get("body_mapping") != "name_to_mjcf_body_id"
+        or contract.get("racket_site") != RACKET_SITE_NAME
         or contract.get("racket_site_body") != RACKET_SITE_BODY
         or tuple(contract.get("racket_site_local_position_m", ()))
         != RACKET_SITE_OFFSET_WRIST_M
@@ -730,12 +1551,57 @@ def _playback_state_at(
         boundary.get("level") != "kinematic_playback_only"
         or boundary.get("mj_forward_calls") != 2 * frames
         or boundary.get("mj_step_calls") != 0
+        or boundary.get("dynamic_certificate") is not False
         or boundary.get("training_certificate") is not False
+        or boundary.get("deployment_certificate") is not False
+        or boundary.get("hardware_certificate") is not False
+        or boundary.get("real_robot_certificate") is not False
+        or not isinstance(boundary.get("statement"), str)
+        or not boundary["statement"]
         or _mapping(report.get("authorization"), "playback.authorization")
         != {"training": False, "deployment": False, "hardware": False}
     ):
         raise CertificationError("playback evidence boundary/authorization is malformed")
-    gates = _mapping(report.get("gates"), "playback.gates")
+    motion = _exact_keys(
+        report["motion"],
+        (
+            "path",
+            "frames",
+            "fps",
+            "duration_s",
+            "migration_provenance",
+            "body_lin_vel_point",
+        ),
+        "playback.motion",
+    )
+    if (
+        not isinstance(motion["path"], str)
+        or not motion["path"]
+        or motion["frames"] != frames
+        or not _same_float(_finite(motion["fps"], "playback.motion.fps"), fps)
+        or not _same_float(
+            _finite(motion["duration_s"], "playback.motion.duration_s"),
+            (frames - 1) / fps,
+        )
+        or type(motion["migration_provenance"]) is not bool
+        or motion["body_lin_vel_point"] != "center_of_mass"
+    ):
+        raise CertificationError("playback motion identity/timing is malformed")
+    gates = _exact_keys(
+        report.get("gates"),
+        (
+            "position",
+            "orientation",
+            "racket_site_position_vs_schema",
+            "racket_site_normal_vs_schema",
+            "racket_site_linear_velocity_vs_schema",
+            "racket_site_angular_velocity_vs_schema",
+            "racket_site_jacobian_vs_object_velocity",
+            "table_contact",
+            "racket_external_reference",
+        ),
+        "playback.gates",
+    )
     required_pass_gates = (
         "position",
         "orientation",
@@ -750,17 +1616,170 @@ def _playback_state_at(
         for name in required_pass_gates
     ):
         raise CertificationError("playback has a failed FK/site/Jacobian gate")
-    table_gate = _mapping(gates.get("table_contact"), "playback table contact")
-    if table_gate.get("enabled") is not True or table_gate.get("pass") is not True:
+    expected_gate_keys = {
+        "position": {
+            "pass",
+            "threshold_m",
+            "max_error_m",
+            "worst_frame",
+            "worst_body",
+        },
+        "orientation": {
+            "pass",
+            "threshold_rad",
+            "max_error_rad",
+            "worst_frame",
+            "worst_body",
+        },
+        "racket_site_position_vs_schema": {
+            "pass",
+            "threshold",
+            "max_error_m",
+            "worst_frame",
+        },
+        "racket_site_normal_vs_schema": {
+            "pass",
+            "threshold",
+            "max_error_rad",
+            "worst_frame",
+        },
+        "racket_site_linear_velocity_vs_schema": {
+            "pass",
+            "threshold",
+            "max_error_m_s",
+            "worst_frame",
+        },
+        "racket_site_angular_velocity_vs_schema": {
+            "pass",
+            "threshold",
+            "max_error_rad_s",
+            "worst_frame",
+        },
+        "racket_site_jacobian_vs_object_velocity": {
+            "pass",
+            "threshold_max_abs",
+            "linear_max_abs_error",
+            "linear_worst_frame",
+            "angular_max_abs_error",
+            "angular_worst_frame",
+            "root_twist_max_abs_error",
+        },
+    }
+    for gate_name, keys in expected_gate_keys.items():
+        _exact_keys(gates[gate_name], keys, f"playback gate {gate_name}")
+    tolerance_fields = (
+        ("position", "threshold_m", 1.0e-4),
+        ("orientation", "threshold_rad", 1.0e-4),
+        ("racket_site_position_vs_schema", "threshold", 1.0e-4),
+        ("racket_site_normal_vs_schema", "threshold", 1.0e-4),
+        ("racket_site_linear_velocity_vs_schema", "threshold", 1.0e-3),
+        ("racket_site_angular_velocity_vs_schema", "threshold", 1.0e-3),
+        (
+            "racket_site_jacobian_vs_object_velocity",
+            "threshold_max_abs",
+            1.0e-9,
+        ),
+    )
+    for gate_name, threshold_key, maximum in tolerance_fields:
+        threshold = _finite(
+            _mapping(gates[gate_name], f"playback gate {gate_name}").get(
+                threshold_key
+            ),
+            f"playback gate {gate_name}.{threshold_key}",
+        )
+        if threshold < 0.0 or threshold > maximum:
+            raise CertificationError(
+                f"playback gate {gate_name} uses an oversized tolerance"
+            )
+    table_gate = _exact_keys(
+        gates.get("table_contact"),
+        (
+            "enabled",
+            "pass",
+            "obstacle_names",
+            "isaac_equivalent_obstacles",
+            "table_pose",
+            "augmented_mjcf_sha256",
+            "strikes_table",
+            "contact_frames",
+            "max_penetration_m",
+            "worst",
+            "per_obstacle",
+        ),
+        "playback table contact",
+    )
+    if (
+        table_gate.get("enabled") is not True
+        or table_gate.get("pass") is not True
+        or not isinstance(table_gate.get("augmented_mjcf_sha256"), str)
+        or len(table_gate["augmented_mjcf_sha256"]) != 64
+    ):
         raise CertificationError("playback must be generated with the table enabled")
+    external_gate = _exact_keys(
+        gates["racket_external_reference"],
+        ("enabled", "pass", "path", "max_errors"),
+        "playback racket external reference",
+    )
+    if (
+        external_gate.get("enabled") is not False
+        or external_gate.get("pass") is not True
+        or external_gate.get("path") is not None
+        or external_gate.get("max_errors") is not None
+    ):
+        raise CertificationError("playback external racket reference boundary changed")
     jacobian = _mapping(
         gates.get("racket_site_jacobian_vs_object_velocity"),
         "playback racket Jacobian gate",
     )
     if jacobian.get("pass") is not True:
         raise CertificationError("playback racket Jacobian cross-check did not pass")
+    racket = _exact_keys(
+        report.get("racket"),
+        ("array_receipts", "trajectory_sha256", "peaks", "per_frame"),
+        "playback.racket",
+    )
+    peaks = _exact_keys(
+        racket["peaks"],
+        (
+            "site_position_norm_max_m",
+            "site_normal_norm_error_max",
+            "site_linear_speed_max_m_s",
+            "site_linear_speed_peak_frame",
+            "site_angular_speed_max_rad_s",
+            "site_angular_speed_peak_frame",
+        ),
+        "playback.racket.peaks",
+    )
+    for key in (
+        "site_position_norm_max_m",
+        "site_normal_norm_error_max",
+        "site_linear_speed_max_m_s",
+        "site_angular_speed_max_rad_s",
+    ):
+        if _finite(peaks[key], f"playback racket peak {key}") < 0.0:
+            raise CertificationError("playback racket peaks must be non-negative")
+    for key in (
+        "site_linear_speed_peak_frame",
+        "site_angular_speed_peak_frame",
+    ):
+        frame = _integer(peaks[key], f"playback racket peak {key}")
+        if frame >= frames:
+            raise CertificationError("playback racket peak frame lies outside motion")
+    per_body = _mapping(report["per_body_max"], "playback.per_body_max")
+    if frozenset(per_body) != frozenset(contract["body_order"]):
+        raise CertificationError("playback per-body receipt names differ from contract")
+    for name, raw in per_body.items():
+        row = _exact_keys(
+            raw, ("position_m", "orientation_rad"), f"playback per-body {name}"
+        )
+        if (
+            _finite(row["position_m"], f"playback {name} position") < 0.0
+            or _finite(row["orientation_rad"], f"playback {name} orientation")
+            < 0.0
+        ):
+            raise CertificationError("playback per-body errors must be non-negative")
     per_frame = _sequence(
-        _mapping(report.get("racket"), "playback.racket").get("per_frame"),
+        racket.get("per_frame"),
         "playback.racket.per_frame",
     )
     if len(per_frame) != frames:
@@ -775,7 +1794,18 @@ def _playback_state_at(
     for receipt_name, row_key in vector_keys:
         values = np.asarray(
             [
-                _mapping(per_frame[index], f"playback frame {index}").get(row_key)
+                _exact_keys(
+                    per_frame[index],
+                    (
+                        "frame",
+                        "time_s",
+                        "site_pos_w_m",
+                        "site_local_plus_y_normal_w",
+                        "site_lin_vel_w_m_s",
+                        "site_ang_vel_w_rad_s",
+                    ),
+                    f"playback frame {index}",
+                ).get(row_key)
                 for index in range(frames)
             ],
             dtype="<f8",
@@ -783,10 +1813,9 @@ def _playback_state_at(
         if values.shape != (frames, 3) or not np.isfinite(values).all():
             raise CertificationError(f"playback {row_key} trajectory is malformed")
         trajectory_arrays[receipt_name] = values
-    receipts = _mapping(
-        _mapping(report.get("racket"), "playback.racket").get("array_receipts"),
-        "playback racket array receipts",
-    )
+    receipts = _mapping(racket.get("array_receipts"), "playback racket array receipts")
+    if frozenset(receipts) != frozenset(name for name, _key in vector_keys):
+        raise CertificationError("playback racket array receipt set changed")
 
     def array_digest(array: np.ndarray) -> str:
         value = np.ascontiguousarray(np.asarray(array, dtype="<f8"))
@@ -815,9 +1844,7 @@ def _playback_state_at(
         combined.update(digest.encode("ascii"))
         combined.update(b"\0")
     if (
-        _mapping(report.get("racket"), "playback.racket").get(
-            "trajectory_sha256"
-        )
+        racket.get("trajectory_sha256")
         != combined.hexdigest()
     ):
         raise CertificationError("playback combined racket trajectory digest contradicts rows")
@@ -842,6 +1869,11 @@ def _playback_state_at(
             raise CertificationError(f"playback frame {frame} {key} is not a finite vec3")
         if row.get("frame") != frame:
             raise CertificationError("playback per-frame indices are not exact and ordered")
+        if not _same_float(
+            _finite(row.get("time_s"), f"playback frame {frame} time_s"),
+            frame / fps,
+        ):
+            raise CertificationError("playback per-frame timestamps are not exact")
         return value
 
     v0 = vector(lo, "site_lin_vel_w_m_s")
@@ -893,6 +1925,7 @@ def _validate_collision_report(
     minimum_hz: float,
     minimum_clearance_m: float,
 ) -> Mapping[str, Any]:
+    report = _exact_keys(report, _COLLISION_REPORT_KEYS, "collision report")
     if (
         report.get("schema_version") != SCHEMA_VERSION
         or report.get("report_kind") != COLLISION_REPORT_KIND
@@ -907,7 +1940,17 @@ def _validate_collision_report(
         != station_center_shift_xy_m
     ):
         raise CertificationError("collision report identity/scope/station shift mismatch")
-    artifacts = _mapping(report.get("artifacts"), "collision.artifacts")
+    artifacts = _exact_keys(
+        report.get("artifacts"),
+        ("motion", "mjcf", "urdf", "compiled_model_signature_sha256", "tool"),
+        "collision.artifacts",
+    )
+    for name in ("motion", "mjcf", "urdf"):
+        receipt = _exact_keys(
+            artifacts[name], ("path", "sha256"), f"collision {name}"
+        )
+        _nonempty(receipt["path"], f"collision {name}.path")
+        _digest(receipt["sha256"], f"collision {name}.sha256")
     if (
         _mapping(artifacts.get("motion"), "collision motion").get("sha256")
         != motion_sha
@@ -919,12 +1962,31 @@ def _validate_collision_report(
         != compiled_signature
     ):
         raise CertificationError("collision report artifact SHA differs from plan")
-    tool = _mapping(artifacts.get("tool"), "collision tool binding")
-    if tool.get("sha256") != _sha256_file(Path(__file__).resolve()):
+    tool = _exact_keys(
+        artifacts.get("tool"), ("path", "sha256"), "collision tool binding"
+    )
+    if (
+        Path(_nonempty(tool["path"], "collision tool path")).name
+        != Path(__file__).name
+        or tool.get("sha256") != _sha256_file(Path(__file__).resolve())
+    ):
         raise CertificationError(
             "collision report was not produced by this exact certification source"
         )
-    sampling = _mapping(report.get("sampling"), "collision.sampling")
+    sampling = _exact_keys(
+        report.get("sampling"),
+        (
+            "source_fps",
+            "substeps_per_source_interval",
+            "sample_hz",
+            "sample_count",
+            "entire_cycle",
+            "interpolation",
+            "mj_forward_calls",
+            "mj_step_calls",
+        ),
+        "collision.sampling",
+    )
     sample_hz = _finite(sampling.get("sample_hz"), "collision sample_hz")
     substeps = _integer(
         sampling.get("substeps_per_source_interval"),
@@ -946,7 +2008,16 @@ def _validate_collision_report(
         or sampling.get("mj_step_calls") != 0
     ):
         raise CertificationError("collision report did not scan the entire cycle")
-    model = _mapping(report.get("model"), "collision.model")
+    model = _exact_keys(
+        report.get("model"),
+        (
+            "robot_collision_geom_count",
+            "racket_collision_geoms_included",
+            "obstacle_names",
+            "table_legs_present",
+        ),
+        "collision.model",
+    )
     if (
         _integer(model.get("robot_collision_geom_count"), "robot collision geom count", 1)
         < len(RACKET_COLLISION_GEOMS)
@@ -956,7 +2027,19 @@ def _validate_collision_report(
         or model.get("table_legs_present") is not False
     ):
         raise CertificationError("collision report omitted racket or table/net geometry")
-    checks = _mapping(report.get("checks"), "collision.checks")
+    checks = _exact_keys(
+        report.get("checks"),
+        (
+            "self_collision",
+            "foot_ground_penetration",
+            "nonfoot_ground_collision",
+            "table_top_collision",
+            "net_collision",
+            "net_post_collision",
+            "aggregate",
+        ),
+        "collision.checks",
+    )
     expected_checks = (
         "self_collision",
         "foot_ground_penetration",
@@ -968,11 +2051,51 @@ def _validate_collision_report(
     )
     if frozenset(checks) != frozenset(expected_checks):
         raise CertificationError("collision report check set changed")
+    component_rows: Dict[str, Mapping[str, Any]] = {}
+    for name in expected_checks[:-1]:
+        component = _exact_keys(
+            checks[name],
+            (
+                "pass",
+                "violation_sample_count",
+                "violation_contact_count",
+                "maximum_penetration_m",
+                "tolerance_m",
+            ),
+            f"collision {name}",
+        )
+        violation_samples = _integer(
+            component["violation_sample_count"],
+            f"collision {name}.violation_sample_count",
+        )
+        violation_contacts = _integer(
+            component["violation_contact_count"],
+            f"collision {name}.violation_contact_count",
+        )
+        maximum_penetration = _finite(
+            component["maximum_penetration_m"],
+            f"collision {name}.maximum_penetration_m",
+        )
+        tolerance = _finite(
+            component["tolerance_m"], f"collision {name}.tolerance_m"
+        )
+        if (
+            type(component["pass"]) is not bool
+            or component["pass"] is not (violation_contacts == 0)
+            or violation_samples > violation_contacts
+            or maximum_penetration < 0.0
+            or tolerance < 0.0
+        ):
+            raise CertificationError(
+                f"collision {name} evidence contradicts its pass flag"
+            )
+        component_rows[name] = component
     component_pass = all(
-        _mapping(checks[name], f"collision {name}").get("pass") is True
-        for name in expected_checks[:-1]
+        component_rows[name]["pass"] is True for name in expected_checks[:-1]
     )
-    aggregate = _mapping(checks["aggregate"], "collision aggregate")
+    aggregate = _exact_keys(
+        checks["aggregate"], ("pass",), "collision aggregate"
+    )
     expected_verdict = "PASS" if component_pass else "FAIL"
     if (
         aggregate.get("pass") is not component_pass
@@ -986,11 +2109,41 @@ def _validate_collision_report(
         "hardware_authorized": False,
     }:
         raise CertificationError("collision report authorization boundary changed")
-    clearance = _mapping(report.get("clearance"), "collision.clearance")
+    clearance = _exact_keys(
+        report.get("clearance"),
+        ("minimum_table_net_clearance_m", "distance_query_cap_m", "minimum"),
+        "collision.clearance",
+    )
     minimum_observed = _finite(
         clearance.get("minimum_table_net_clearance_m"),
         "minimum table/net clearance",
     )
+    if _finite(
+        clearance["distance_query_cap_m"], "collision distance query cap"
+    ) < minimum_observed:
+        raise CertificationError("collision clearance exceeds its distance-query cap")
+    minimum_row = _exact_keys(
+        clearance["minimum"],
+        ("sample", "time_s", "robot_geom", "obstacle", "distance_m"),
+        "collision clearance minimum",
+    )
+    if (
+        _integer(minimum_row["sample"], "collision minimum.sample")
+        >= expected_count
+        or _finite(minimum_row["time_s"], "collision minimum.time_s") < 0.0
+        or not _nonempty(
+            minimum_row["robot_geom"], "collision minimum.robot_geom"
+        )
+        or minimum_row["obstacle"] not in OBSTACLES
+        or not _same_float(
+            _finite(minimum_row["distance_m"], "collision minimum.distance_m"),
+            minimum_observed,
+        )
+    ):
+        raise CertificationError("collision minimum witness contradicts clearance")
+    non_claims = _sequence(report["non_claims"], "collision.non_claims")
+    if any(not isinstance(item, str) or not item for item in non_claims):
+        raise CertificationError("collision non_claims must be non-empty strings")
     passed = bool(
         component_pass
         and sample_hz >= minimum_hz
@@ -1069,6 +2222,10 @@ def _validate_task_distribution(raw: Any) -> Mapping[str, Any]:
         hi = _finite(bounds[1], f"velocity axis {axis} upper")
         if lo > hi:
             raise CertificationError("incoming velocity interval lower exceeds upper")
+        if hi - lo < REFERENCE_RETURN_MIN_AXIS_SPAN_M_S:
+            raise CertificationError(
+                "incoming velocity box cannot be a zero/single-point custom domain"
+            )
         checked_box.append([lo, hi])
     spin = _finite(row["spin_abs_max_rad_s"], "spin_abs_max_rad_s")
     samples = _integer(row["samples"], "task_distribution.samples", 1)
@@ -1079,8 +2236,29 @@ def _validate_task_distribution(raw: Any) -> Mapping[str, Any]:
     capture = _finite(row["capture_radius_m"], "capture_radius_m")
     approach = _finite(row["minimum_approach_speed_m_s"], "minimum approach speed")
     minimum = _finite(row["minimum_legal_return_fraction"], "minimum return fraction")
+    corner_speeds = [
+        math.sqrt(x * x + y * y + z * z)
+        for x in checked_box[0]
+        for y in checked_box[1]
+        for z in checked_box[2]
+    ]
+    minimum_speed = math.sqrt(
+        sum(
+            (
+                0.0
+                if lo <= 0.0 <= hi
+                else min(abs(lo), abs(hi))
+            )
+            ** 2
+            for lo, hi in checked_box
+        )
+    )
     if (
-        spin < 0.0
+        spin <= 0.0
+        or math.sqrt(3.0) * spin > VENUE_SPIN_MAGNITUDE_MAX_RAD_S
+        or checked_box[0][1] >= 0.0
+        or minimum_speed < VENUE_BALL_SPEED_RANGE_M_S[0]
+        or max(corner_speeds) > VENUE_BALL_SPEED_RANGE_M_S[1]
         or capture <= 0.0
         or capture > REFERENCE_RETURN_MAX_CAPTURE_RADIUS_M
         or approach < REFERENCE_RETURN_MIN_APPROACH_SPEED_M_S
@@ -1100,12 +2278,42 @@ def _validate_task_distribution(raw: Any) -> Mapping[str, Any]:
     }
 
 
+def _validate_code_rooted_venue_profile(snapshot: Snapshot) -> Mapping[str, Any]:
+    _require_code_rooted_bytes(
+        snapshot,
+        repository_relative_path=CODE_ROOTED_VENUE_PROFILE,
+        label="venue profile",
+    )
+    profile = _parse_json(snapshot.data, "venue profile")
+    if profile.get("schema_version") != "venue_profile_v1":
+        raise CertificationError("venue profile schema_version changed")
+    physics = _mapping(profile.get("physics"), "venue profile.physics")
+    required_ranges = (
+        "static_friction_range",
+        "dynamic_friction_range",
+        "restitution_range",
+        "mass_distribution_params",
+    )
+    for key in required_ranges:
+        interval = _sequence(physics.get(key), f"venue profile.physics.{key}")
+        if len(interval) != 2:
+            raise CertificationError(f"venue profile.physics.{key} must be a range")
+        lo = _finite(interval[0], f"venue profile.physics.{key}[0]")
+        hi = _finite(interval[1], f"venue profile.physics.{key}[1]")
+        if lo < 0.0 or hi <= lo:
+            raise CertificationError(
+                f"venue profile.physics.{key} cannot be zero or single-point"
+            )
+    return profile
+
+
 def _validate_thresholds(raw: Any) -> Mapping[str, float]:
     row = _exact_keys(
         raw,
         (
             "source_anchor_time_min_s",
             "source_anchor_time_max_s",
+            "t_hit_reference_s",
             "t_cycle_min_s",
             "t_cycle_max_s",
             "blade_site_speed_min_m_s",
@@ -1128,6 +2336,7 @@ def _validate_thresholds(raw: Any) -> Mapping[str, float]:
         <= source_min
         <= source_max
         <= SOURCE_ANCHOR_TIME_LIMITS_S[1]
+        or checked["t_hit_reference_s"] != T_HIT_REFERENCE_S
         or source_max - source_min > SOURCE_ANCHOR_MAX_WINDOW_S
         or not T_CYCLE_LIMITS_S[0]
         <= cycle_min
@@ -1165,6 +2374,8 @@ def certify_plan(plan: Mapping[str, Any], *, base_dir: Path) -> Mapping[str, Any
             "required_scopes",
             "station_center_shift_candidates_xy_m",
             "selected_station_center_shift_xy_m",
+            "station_selection_approval",
+            "behavior_contact_evidence",
             "thresholds",
             "task_distribution",
             "scopes",
@@ -1201,6 +2412,23 @@ def certify_plan(plan: Mapping[str, Any], *, base_dir: Path) -> Mapping[str, Any
                 "selected station center shift",
             )
         ]
+    behavior_contact_evidence = (
+        _load_trusted_behavior_contact_evidence(
+            plan["behavior_contact_evidence"],
+            base_dir=base_dir,
+            action_id=action_id,
+        )
+    )
+    comparison_input_sha256 = _station_comparison_input_sha256(plan)
+    station_selection_approval = (
+        _load_trusted_station_selection_approval(
+            plan["station_selection_approval"],
+            base_dir=base_dir,
+            action_id=action_id,
+            selected=selected,
+            comparison_input_sha256=comparison_input_sha256,
+        )
+    )
     if plan["authorization_intent"] != (
         "task_first_training_only_no_deployment_no_hardware"
     ):
@@ -1217,6 +2445,7 @@ def certify_plan(plan: Mapping[str, Any], *, base_dir: Path) -> Mapping[str, Any
             "canonical_verifier_report",
             "mjcf",
             "venue_yaml",
+            "venue_profile",
         ),
         "plan.bindings",
     )
@@ -1224,6 +2453,12 @@ def certify_plan(plan: Mapping[str, Any], *, base_dir: Path) -> Mapping[str, Any
         name: read_bound_file(binding_rows[name], base_dir, name)
         for name in binding_rows
     }
+    _require_code_rooted_bytes(
+        snapshots["venue_yaml"],
+        repository_relative_path=CODE_ROOTED_BALL_PHYSICS,
+        label="ball physics",
+    )
+    _validate_code_rooted_venue_profile(snapshots["venue_profile"])
     task = {**dict(task), "venue_yaml_path": str(snapshots["venue_yaml"].path)}
     recipe = _parse_json(snapshots["recipe"].data, "recipe")
     manifest = _parse_json(snapshots["build_manifest"].data, "build manifest")
@@ -1241,6 +2476,23 @@ def certify_plan(plan: Mapping[str, Any], *, base_dir: Path) -> Mapping[str, Any
     )
     snapshots["canonical_ready"] = ready_snapshot
     canonical_ready = _canonical_ready_state(ready_snapshot)
+    ready_fk_row = _mapping(
+        recipe.get("canonical_ready_fk"), "recipe.canonical_ready_fk"
+    )
+    ready_fk_snapshot = read_recipe_bound_file(
+        {
+            "path": ready_fk_row.get("path"),
+            "sha256": ready_fk_row.get("sha256"),
+        },
+        plan_base_dir=base_dir,
+        label="canonical ready-FK",
+    )
+    snapshots["canonical_ready_fk"] = ready_fk_snapshot
+    canonical_ready_fk = _canonical_ready_fk_state(
+        ready_fk_snapshot,
+        canonical_ready_sha256=ready_snapshot.sha256,
+        canonical_ready=canonical_ready,
+    )
     marker_ref = _mapping(recipe.get("marker_authority"), "recipe.marker_authority")
     marker_snapshot = read_recipe_bound_file(
         {
@@ -1290,6 +2542,8 @@ def certify_plan(plan: Mapping[str, Any], *, base_dir: Path) -> Mapping[str, Any
         manifest_sha256=snapshots["build_manifest"].sha256,
         recipe_sha256=snapshots["recipe"].sha256,
         mjcf_sha256=snapshots["mjcf"].sha256,
+        urdf_sha256=urdf_snapshot.sha256,
+        ready_sha256=ready_snapshot.sha256,
     )
     candidate_integrity = bank_contract["candidate_integrity_pass"]
     bank_gate_pass = bank_contract["bank_gate_pass"]
@@ -1336,6 +2590,7 @@ def certify_plan(plan: Mapping[str, Any], *, base_dir: Path) -> Mapping[str, Any
         ready_truth = _motion_ready_truth_gate(
             motion,
             canonical_ready,
+            canonical_ready_fk,
             tolerance=thresholds["shared_ready_pose_tolerance"],
         )
         cross_scope_ready[scope] = {
@@ -1421,25 +2676,75 @@ def certify_plan(plan: Mapping[str, Any], *, base_dir: Path) -> Mapping[str, Any
             or bank_clip.get("mujoco_fk", {}).get("pass") is not True
         ):
             raise CertificationError(f"{scope} canonical verifier clip binding/FK failed")
-        grounded = bool(
-            bank_gate_pass
-            and (
-            _mapping(
-                bank_clip.get("plant_specific_dynamics"),
-                f"{scope} plant-specific dynamics",
-            ).get("screen_pass")
-            is True
-            )
+        # A generic ``screen_pass`` is not a content-addressed grounded
+        # collocation trace.  This diagnostic has no trusted promotion
+        # certificate and therefore cannot turn it into grounded evidence.
+        _mapping(
+            bank_clip.get("plant_specific_dynamics"),
+            f"{scope} plant-specific dynamics",
         )
+        grounded = False
 
         playback = _parse_json(playback_snapshot.data, f"{scope} playback report")
-        state = _playback_state_at(
+        anchor_state = _playback_state_at(
             playback,
             source_anchor_time,
             float(motion_receipt["fps"]),
             int(motion_receipt["frames"]),
             output_frame,
         )
+        behavior_measurement = (
+            None
+            if behavior_contact_evidence is None
+            else behavior_contact_evidence["measurements"][scope]
+        )
+        if behavior_measurement is None:
+            behavior_t_hit_s = None
+            timing_hit_gate = False
+            state = anchor_state
+        else:
+            if (
+                behavior_measurement["motion_sha256"]
+                != motion_snapshot.sha256
+            ):
+                raise CertificationError(
+                    f"{scope} behavior/contact evidence binds different "
+                    "motion bytes"
+                )
+            behavior_t_hit_s = _finite(
+                behavior_measurement["t_hit_s"],
+                f"{scope} trusted behavior/contact t_hit_s",
+            )
+            if behavior_t_hit_s > cycle:
+                raise CertificationError(
+                    f"{scope} trusted behavior/contact t_hit lies outside "
+                    "the compiled cycle"
+                )
+            behavior_output_frame = int(
+                np.clip(
+                    np.rint(
+                        behavior_t_hit_s
+                        * float(motion_receipt["fps"])
+                    ),
+                    0,
+                    int(motion_receipt["frames"]) - 1,
+                )
+            )
+            state = _playback_state_at(
+                playback,
+                behavior_t_hit_s,
+                float(motion_receipt["fps"]),
+                int(motion_receipt["frames"]),
+                behavior_output_frame,
+            )
+            accepted_t_hit = behavior_contact_evidence[
+                "accepted_t_hit_range_s"
+            ]
+            timing_hit_gate = bool(
+                accepted_t_hit[0]
+                <= behavior_t_hit_s
+                <= accepted_t_hit[1]
+            )
         playback_artifacts = _mapping(state["artifacts"], f"{scope} playback artifacts")
         if (
             playback_artifacts.get("motion_sha256") != motion_snapshot.sha256
@@ -1503,17 +2808,15 @@ def certify_plan(plan: Mapping[str, Any], *, base_dir: Path) -> Mapping[str, Any
         if tuple(collision_by_shift) != STATION_CENTER_SHIFT_CANDIDATES_XY_M:
             raise CertificationError(f"{scope} collision reports omit a required station shift")
 
-        # `source_anchor_time_s` is a compiler marker, not observed contact.
-        # The v3 marker authority explicitly leaves the post-retime behavior
-        # rescan pending.  Report the anchor for scheduling diagnostics, but
-        # never promote it into a measured t_hit gate.
-        timing_hit_gate = False
+        # `source_anchor_time_s` remains a compiler marker.  It can never
+        # substitute for t_hit; only the separately code-pinned,
+        # action-specific behavior/contact receipt above can open this gate.
         anchor_time_gate = bool(
             thresholds["source_anchor_time_min_s"]
             <= source_anchor_time
             <= thresholds["source_anchor_time_max_s"]
             and thresholds["source_anchor_time_min_s"]
-            <= state["runtime_time_s"]
+            <= anchor_state["runtime_time_s"]
             <= thresholds["source_anchor_time_max_s"]
         )
         timing_cycle_gate = (
@@ -1563,14 +2866,48 @@ def certify_plan(plan: Mapping[str, Any], *, base_dir: Path) -> Mapping[str, Any
             "playback_report": playback_snapshot.binding(),
             "timing": {
                 "compiler_source_anchor_time_s": source_anchor_time,
-                "compiler_anchor_nearest_tick_time_s": state["runtime_time_s"],
-                "runtime_output_frame": state["runtime_output_frame"],
+                "compiler_anchor_nearest_tick_time_s": anchor_state[
+                    "runtime_time_s"
+                ],
+                "compiler_anchor_output_frame": anchor_state[
+                    "runtime_output_frame"
+                ],
                 "preregistered_compiler_anchor_range_s": [
                     thresholds["source_anchor_time_min_s"],
                     thresholds["source_anchor_time_max_s"],
                 ],
-                "historical_universal_0p5_gate_applied": False,
-                "post_retime_behavior_t_hit_measured": False,
+                "comparison_t_hit_reference_s": T_HIT_REFERENCE_S,
+                "t_hit_acceptance_authority": (
+                    "code_pinned_action_specific_behavior_contact_evidence"
+                ),
+                "accepted_action_specific_t_hit_range_s": (
+                    None
+                    if behavior_contact_evidence is None
+                    else behavior_contact_evidence[
+                        "accepted_t_hit_range_s"
+                    ]
+                ),
+                "post_retime_behavior_t_hit_s": behavior_t_hit_s,
+                "behavior_contact_evidence_receipt": (
+                    None
+                    if behavior_contact_evidence is None
+                    else behavior_contact_evidence["receipt"]
+                ),
+                "behavior_contact_evidence_artifact": (
+                    None
+                    if behavior_contact_evidence is None
+                    else behavior_contact_evidence["evidence_artifact"]
+                ),
+                "t_hit_gate_result": bool(timing_hit_gate),
+                "compiler_anchor_substituted_for_t_hit": False,
+                "post_retime_behavior_t_hit_measured": bool(
+                    behavior_measurement is not None
+                ),
+                "behavior_contact_output_frame": (
+                    None
+                    if behavior_measurement is None
+                    else state["runtime_output_frame"]
+                ),
                 "post_retime_behavior_gate_status": (
                     marker_row.post_retime_behavior_gate_status
                 ),
@@ -1654,7 +2991,7 @@ def certify_plan(plan: Mapping[str, Any], *, base_dir: Path) -> Mapping[str, Any
                     scope_results[scope]["stations"][candidate_key]["gates"][gate]
                     is True
                     for scope in SCOPES
-                    for gate in DIAGNOSTIC_REFERENCE_GATES
+                    for gate in STATION_COMPARISON_GATES
                 )
             )
         passing_indices = [
@@ -1691,12 +3028,13 @@ def certify_plan(plan: Mapping[str, Any], *, base_dir: Path) -> Mapping[str, Any
     # from the bound bytes in-process.
     diagnostic_smoke_authorized = False
     diagnostic_smoke_blockers = list(diagnostic_reference_blockers)
-    diagnostic_smoke_blockers.extend(
-        (
-            "external_playback_and_collision_json_are_untrusted_diagnostics_not_producer_provenance",
-            "post_retime_behavior_t_hit_rescan_pending",
-        )
+    diagnostic_smoke_blockers.append(
+        "external_playback_and_collision_json_are_untrusted_diagnostics_not_producer_provenance"
     )
+    if behavior_contact_evidence is None:
+        diagnostic_smoke_blockers.append(
+            "post_retime_behavior_t_hit_rescan_pending"
+        )
 
     # The current canonical verifier has no content-addressed exact
     # collocation trace and therefore cannot prove grounded dynamics.  Keep
@@ -1709,16 +3047,24 @@ def certify_plan(plan: Mapping[str, Any], *, base_dir: Path) -> Mapping[str, Any
     training_blockers.append(
         "downstream_task_manifest_not_bound_to_selected_station_center_shift_xy_m"
     )
+    training_blockers.append(
+        "training_adopted_registry_E2_evidence_and_four_pin_runtime_binding_missing"
+    )
+    training_blockers.append(
+        "trusted_generic_bank_promotion_capability_missing"
+    )
     training_authorized = False
 
     return {
         "schema_version": SCHEMA_VERSION,
         "report_kind": CERTIFICATE_KIND,
         "action_id": action_id,
-        "verdict": (
-            "REFERENCE_CHECKS_PASS_UNAUTHORIZED"
-            if diagnostic_reference_checks_pass
-            else "BLOCKED"
+        "verdict": "BLOCKED",
+        "publication_class": "diagnostic_only_blocked",
+        "admission_capability_minted": False,
+        "admission_authority": (
+            "code_rooted_canonical_motion_admission_only; "
+            "this diagnostic never mints a runtime capability"
         ),
         "diagnostic_reference_checks_pass": diagnostic_reference_checks_pass,
         "diagnostic_smoke_authorized": diagnostic_smoke_authorized,
@@ -1728,11 +3074,15 @@ def certify_plan(plan: Mapping[str, Any], *, base_dir: Path) -> Mapping[str, Any
         "selected_station_center_shift_xy_m": (
             None if selected is None else list(selected)
         ),
+        "station_comparison_input_sha256": comparison_input_sha256,
+        "station_selection_approval": station_selection_approval,
         "station_selection_policy": (
-            "explicit_content_bound_plan_selection_only; no automatic "
-            "best-shift adoption; translation applies to the whole action and "
-            "task center, never only to a base reward"
+            "independent_code_pinned_approval_of_exact_comparison_input; "
+            "the plan author cannot self-approve after observing results; "
+            "translation applies to the whole action and task center, never "
+            "only to a base reward"
         ),
+        "behavior_contact_authority": behavior_contact_evidence,
         "required_scopes": list(SCOPES),
         "required_gates": list(REQUIRED_GATES),
         "diagnostic_reference_gates": list(DIAGNOSTIC_REFERENCE_GATES),
@@ -2093,15 +3443,19 @@ def template_plan(action_id: str, source_path: str, source_sha256: str) -> Mappi
             },
             "mjcf": {"path": "FILL_ME", "sha256": "FILL_ME"},
             "venue_yaml": {"path": "FILL_ME", "sha256": "FILL_ME"},
+            "venue_profile": {"path": "FILL_ME", "sha256": "FILL_ME"},
         },
         "required_scopes": list(SCOPES),
         "station_center_shift_candidates_xy_m": [
             list(row) for row in STATION_CENTER_SHIFT_CANDIDATES_XY_M
         ],
         "selected_station_center_shift_xy_m": None,
+        "station_selection_approval": None,
+        "behavior_contact_evidence": None,
         "thresholds": {
             "source_anchor_time_min_s": None,
             "source_anchor_time_max_s": None,
+            "t_hit_reference_s": T_HIT_REFERENCE_S,
             "t_cycle_min_s": None,
             "t_cycle_max_s": None,
             "blade_site_speed_min_m_s": None,
@@ -2262,6 +3616,8 @@ def main(argv: Optional[Sequence[str]] = None) -> int:
                 "schema_version": SCHEMA_VERSION,
                 "report_kind": CERTIFICATE_KIND,
                 "verdict": "FAIL",
+                "publication_class": "diagnostic_only_blocked",
+                "admission_capability_minted": False,
                 "diagnostic_smoke_authorized": False,
                 "training_authorized": False,
                 "deployment_authorized": False,

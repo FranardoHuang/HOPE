@@ -18,8 +18,9 @@
 只在几乎并列时使用战术优先级？
 
 假设：若能力工件精确绑定 policy/task/Reward/heldout/model/calibration，候选由 planner 的 trusted
-producer 内容寻址，排序固定为“硬安全 → support/OOD → 成功率 LCB → delta tie 内 priority →
-abstain”，则动作库扩大到 N 条时不需要重写二动作 if/else，也不会让优先级盖过安全性。
+producer 内容寻址，排序固定为“硬安全 → support/OOD → 成功率 LCB → delta tie 内标准化
+quality/priority → abstain”，则动作库扩大到 N 条时不需要重写二动作 if/else，也不会让优先级盖过
+安全性。训练 Reward 不允许直接跨动作充当 quality。
 
 证伪条件：
 
@@ -35,8 +36,8 @@ abstain”，则动作库扩大到 N 条时不需要重写二动作 if/else，�
 | 字段 | 值/SHA |
 | --- | --- |
 | 训练/eval/main commit | 功能分支最终 commit 待整合后填写；未合入 `origin/main` |
-| 动作/action 集 | 任意 N catalog；首个行为卷计划用 task-first 五动作 view |
-| 观测/action 合同 | 训练见 `task_first_n5`；生产 wire 尚未冻结 |
+| 动作/action 集 | 任意 N catalog；首个行为卷计划用 action-ball 五动作 view |
+| 观测/action 合同 | 训练见 `action_ball_n5`；生产 wire 尚未冻结 |
 | Reward | capability artifact 绑定 composed effective Reward SHA |
 | Plant/engine | planner candidate 物理 Gate 与 heldout evaluator 各自内容绑定 |
 | 训练/考试 bank 或 schedule | 每动作 512 题建议卷；尚未生成 |
@@ -56,15 +57,17 @@ abstain”，则动作库扩大到 N 条时不需要重写二动作 if/else，�
   receipts、排序核心。
 - 集成小目标所需的其他组件：ball-conditioned heldout、逐动作 planner adapter、可信 query/candidate
   producer、独立 profile activation、任意 N wire/C++ runner。
-- 组件间的接口/交接：task-first checkpoint → heldout artifact → planner candidates → selector
+- 组件间的接口/交接：action-ball checkpoint → heldout artifact → planner candidates → selector
   decision → frozen action UID/task revision。
 - 组件消融后的联合完成规则：source attacks 全拒后，先离线 replay；再 ROS/Jazzy producer/consumer
   first tick；最后同卷 Gate3，不跳级。
 
 ## 预注册能力卷
 
-每动作 512 题：64 center，position/speed/face/base 四个单轴各 96，joint edge 64。每题进入
-all-attempt 分母。报告逐动作/逐轴 support、OOD、校准成功率 LCB、误差 p50/p90、table/fall/recovery。
+旧 512 题模板不足以覆盖 schema-v3 的 32-arm 能力，只保留为快速离线 canary。正式卷应从独立
+768+ heldout 按 action/profile 的 time-to-contact、position、incoming speed/direction、spin
+magnitude/direction、aim、base spawn/travel 及 joint edge 分层抽样。每题进入 all-attempt 分母。
+报告逐动作/逐 arm support、OOD、校准成功率 LCB、误差 p50/p90、table/fall/recovery。
 
 候选须同时满足 exact strike、位置 `<=7.5 cm`、速度误差 `<=0.5 m/s`、拍面 `<=15 deg`、
 base `<=10 cm`，并在 recovery 前无 table hit/physical fall。阈值改变即新 task/heldout SHA。
@@ -74,7 +77,7 @@ base `<=10 cm`，并在 recovery 前无 table hit/physical fall。阈值改变�
 | 运行（人话名 + `run_name`） | 状态 | Checkpoint/seed | 证据 | 结果产物 | 有效性说明 |
 | --- | --- | --- | --- | --- | --- |
 | selector pure-core host tests（无科学 `run_name`） | source candidate | 无 | E1 | pytest 日志待整合 | 不含 trusted producer/ROS |
-| 五动作 heldout 能力拟合 | blocked | 未产生 | 未测 | 未生成 | 依赖 task-first checkpoint |
+| 五动作 heldout 能力拟合 | blocked | 未产生 | 未测 | 未生成 | 依赖 action-ball checkpoint |
 | ROS/Jazzy + C++ 任意 N first tick | blocked | 未产生 | 未测 | 未生成 | 当前仍为二动作 schema 4 |
 
 ## 决定
@@ -83,7 +86,8 @@ base `<=10 cm`，并在 recovery 前无 table hit/physical fall。阈值改变�
 - 理由：排序原则与 fail-closed core 已可审，但 capability data、trusted producer、独立 profile
   authority、wire/C++ 和 Gate3 全缺。
 - 是否已纳入当前 setting：`no`
-- 局限/下一个 gate：先完成 task-first heldout；随后冻结 candidate producer 与 schema 5/UID
+- 局限/下一个 gate：先完成 action-ball heldout 与 query-conditioned normalized quality model；
+  随后冻结 candidate producer 与 schema 5/UID
   transport，再做 ROS/vendor runtime。
 
 ## 复现与证据

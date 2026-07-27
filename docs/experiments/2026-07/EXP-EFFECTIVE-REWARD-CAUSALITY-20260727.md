@@ -104,6 +104,51 @@ analytic legal 百分比为
 legal 从 1.8% 到 6.8%；它只有一个 seed，且没有到预注册 8k 决策点，只能作为“高 landing
 不一定更好”的方向线索。
 
+### 2026-07-27 exact run 复核
+
+Pod 保存的 composed `env.yaml` 进一步确认当前几条 banked run 真正使用：
+
+```text
+racket position / velocity / normal = 4.0 / 0.5 / 0.5
+virtual landing = 1648.8
+death penalty = -1800
+```
+
+名义 `393.4/295.1/229.5` 从未进入这些 run。`c_ep20s_seed0`（人话：声称把 episode 加到 20 秒）
+把 override 错写成 `++env.episode_length_s=20.0`，最终 saved config 与
+`c_base_bank_seed0` 都是 10 秒且 `env.yaml` SHA 同为
+`edb32d4beab8dcacc0361251719406e70dddd8da108f9758bfb791517548ea54`。两份 agent config 去掉
+`run_name` 后也相同，因此它是一次意外的同 seed 跨 GPU 复刻，不是 episode A/B。
+
+最后 100 个 exact behavior update 先累加分子/分母：
+
+| run（人话） | legal / strike | 聚合率 |
+| --- | ---: | ---: |
+| `c_ep20s_seed0`（实际仍 10 秒） | `16283 / 32743` | `49.73%` |
+| `c_base_bank_seed0`（同 setting 复刻） | `16245 / 32650` | `49.75%` |
+| `c_speedwide_seed0`（最终速度范围 `[0.5,1.2]`） | `10143 / 21655` | `46.84%` |
+| `c_base_bank_seed1`（同 setting，仅 seed 不同） | `0 / 28123` | `0%` |
+| 旧 unbanked seed0（有其他 source 混杂） | `0 / 25152` | `0%` |
+
+这证明 seed0 的约 50% 可复刻，也同时证明同配方 seed1 到约 17k 仍完全分叉。现象最支持“inverse
+solved bank 消除了球/task 冲突”，但高 `virtual_landing` Reward 与报表共用同一 analytic
+contact/landing oracle，仍有循环验证风险；当前目录未找到这些 run 的独立 exam/judge 结果。
+
+账本也不够精确：这些 run 都缺 `run_binding.json` 与 `params/effective_reward_recipe.json`；
+现有 `training_contract.json` 不完整绑定 Reward/table，甚至 table on/off 候选共享
+`16be6a4703dfd30914687218b40ed447db3278a6bfc69e6120f56c59e0989516`。所以这些结果只能作方向证据，
+不能追认为 matched A/B 或采用结论。
+
+在既有 solver A/B 之前，新增一个更直接的配对关系 canary：
+
+- `P-paired`：保持同 action/ball/base/aim 经 fixed solver 得到的原始 ball↔task 配对；
+- `P-shuffled`：保持完全相同的 ball 边际和 solved-task 边际，只在同速度/难度 stratum 内打乱
+  ball↔task 配对。
+
+它只改变物理配对关系，能直接检验“自洽是否是主因”。动态 curriculum 在该因果 A/B 期间关闭。
+鉴于当前 seed0≈50%、seed1=0，正式 Reward/solver 结论不能只用两个 seed；先以两个 paired seeds
+做 canary，采用至少补到四个 paired seeds或预注册 sequential CI。
+
 ## 判读
 
 每动作独立 heldout 512 题：64 center，四个单轴各 96，64 joint edges。成功要求 exact strike、

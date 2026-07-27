@@ -319,8 +319,8 @@ def test_action_order_uid_and_sha_identity_fail_closed(tmp_path):
         (
             "fh_loop_high",
             1,
-            "7d045fbe73b758f820992be9e52ce02cf0e3c392234910f4ac0493ccf45c4153",
-            6456190294707750,
+            "7d045fcb036ffa668dede4607cfcc82e789a0db7ab86fd8df9dd52cfd5ac4153",
+            3383780318617471,
         ),
         (
             "bh_loop_c",

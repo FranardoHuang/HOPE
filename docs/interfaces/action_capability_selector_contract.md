@@ -23,7 +23,10 @@ planner 为 catalog 中每个动作生成物理候选
 ```
 
 selector 不修复一个不安全的候选，也不从 action family 猜 motion slot。priority 只能在成功率近似
-并列时表达战术偏好，不能复活硬失败、低支持、OOD 或低于最低 LCB 的动作。
+并列时表达战术偏好，不能复活硬失败、低支持、OOD 或低于最低 LCB 的动作。训练 Reward 不能直接
+跨动作比较：动作的 imitation 尺度、课程难度和 reference 都不同。用户所说“谁回出的球质更好”
+必须先变成同一部署口径的 held-out quality/utility（例如落点误差、出球速度/旋转、恢复成本），
+再进入 selector。
 
 ## 2. Catalog 与身份
 
@@ -89,7 +92,9 @@ candidate 失效；不得让 NaN 比较穿透，也不得让一行坏数据把�
 3. **Calibrated LCB floor：** `lcb_success < min_lcb_success` 时拒绝，priority 不得复活。
 4. **Best-success set：** 取最高 LCB；只把与最高值 exact binary64 差值
    `<= delta_tie` 的 eligible 动作放入并列集合。
-5. **Priority：** 并列集合中较小整数 priority 优先；priority 相同时先取较高 LCB，再取较小
+5. **Quality/priority：** v1 pure core 只使用独立 profile 的整数 priority；它可以是人工战术偏好，
+   也可以由另外一份已校准、同尺度的 held-out quality model 预先产出，但不得直接填训练 Reward。
+   并列集合中较小整数 priority 优先；priority 相同时先取较高 LCB，再取较小
    stable action UID 作最终确定性决胜。dense slot 不参与最终 tie-break，避免 catalog reorder
    无故翻转同一组动作的选择。
 6. **Abstain：** 没有 eligible 动作时返回唯一空身份
@@ -119,6 +124,8 @@ JSON reload 和 receipt tamper 都必须重新做语义校验。
 - schema 4 exact22 没有 stable action UID；
 - C++ runner、ONNX metadata 和 reference clock 仍硬绑定二动作 sign table；
 - candidate SHA 目前由 caller 提供，独立 profile authority 尚未接入 activation。
+- 当前 capability artifact 只冻结 model/calibration identity，尚没有生产的 query-conditioned
+  quality model；因此 v1 priority 仍是静态 profile，不能声称已经按实际球质实时排序。
 
 任意 N 动作生产接入需另做一个 wire/runner 合同。候选设计是 schema 5 exact23，在 schema 4 的
 22 个 double 后以 `[22]` 传 stable `action_uid`，同一 task revision 内冻结 UID；C++ 再用

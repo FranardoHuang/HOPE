@@ -38,12 +38,13 @@ converged confidently on a target 3 m short with the net behind the robot.)
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass, field
 
 import torch
 
 from .strike_spec_torch import solve_strike_specs
-from .stroke_adapt_torch import REASONS, direction_world, solve_strike_specs_fixed_dir
+from .stroke_adapt_torch import REASONS, solve_strike_specs_fixed_dir
 from .virtual_ball import VirtualBallParams, coarse_landing, predict_paddle_contact
 
 _EPS = 1e-9
@@ -52,7 +53,17 @@ _EPS = 1e-9
 _R_NO_LANDING = 0
 _R_RESID = 1
 _R_SPEED_OVER = 2
+_R_SPEED_UNDER = 3
 _R_NET = 5
+_R_FACE = 6
+_R_CONTACT_ENVELOPE = 7
+_CONTINUOUS_REASONS = REASONS + ("contact_normal_speed_out_of_fit",)
+
+# The venue contact fit is not an extrapolation license.  A candidate whose
+# selected physical face is not approaching, or whose normal relative speed is
+# outside the fitted data range, is not installable.
+CONTACT_NORMAL_SPEED_MIN_MPS = 1.4
+CONTACT_NORMAL_SPEED_MAX_MPS = 7.2
 
 
 @dataclass
@@ -80,6 +91,37 @@ class ContinuousQuestionCfg:
 
 
 @dataclass
+class ProposalLedger:
+    """Flat, lossless accounting for every ball proposed across every redraw round.
+
+    ``QuestionDrawResult`` keeps only the admitted answer for each requested row (and the legacy
+    ``attempted_v_ball_in`` keeps only its last draw).  Curriculum control needs a different
+    object: every proposal, including a rejected hard draw that was later replaced by an easier
+    admitted draw.  All present tensors share the leading ``P == proposal_count`` dimension, so
+    a caller can mask by ``clip_id`` and bucket any position/velocity/spin axis without reverse
+    engineering a reason histogram.
+    """
+
+    request_index: torch.Tensor       # (P,) row in the requested clip_ids batch
+    clip_id: torch.Tensor             # (P,) action / motion index
+    round_index: torch.Tensor         # (P,) one-based redraw round
+    p_contact: torch.Tensor           # (P,3)
+    v_ball_in: torch.Tensor           # (P,3)
+    w_ball_in: torch.Tensor           # (P,3)
+    aim_xy: torch.Tensor              # (P,2)
+    reason_code: torch.Tensor         # (P,) -1 admitted, else index into REASONS
+    admitted: torch.Tensor            # (P,) bool
+    resid_m: torch.Tensor             # (P,) scorer-replayed residual for fixed-dir
+    # Exact external-proposal provenance.  Random generate() leaves these None because its base
+    # and reference provenance already live in the caller's run contract.
+    ref_normal: torch.Tensor | None = None   # (P,3) raw +Y face, before normalisation
+    base_quat: torch.Tensor | None = None    # (P,4) exact supplied wxyz
+
+    def __len__(self) -> int:
+        return int(self.clip_id.shape[0])
+
+
+@dataclass
 class QuestionDrawResult:
     """One batch of solved questions plus the accounting that makes failures visible.
 
@@ -102,6 +144,8 @@ class QuestionDrawResult:
     rounds_used: int = 0
     exhausted: int = 0                 # rows still unsolved after max_redraw_rounds
     reason_counts: dict = field(default_factory=dict)
+    proposal_count: int = 0
+    proposals: ProposalLedger | None = None
 
 
 def _rows(table, clip_ids, device, dtype):
@@ -113,6 +157,534 @@ def _uniform_box(box_rows, gen, device, dtype):
     """box_rows (N,3,2) -> (N,3) uniform draw. Continuous by construction: no case list."""
     u = torch.rand(box_rows.shape[0], 3, device=device, dtype=dtype, generator=gen)
     return box_rows[:, :, 0] + (box_rows[:, :, 1] - box_rows[:, :, 0]) * u
+
+
+def _selected_direction_world(v_hat_b, selected_clip_ids, yaw, device, dtype):
+    """Rotate only each row's selected action direction, without materialising ``(M,K,3)``.
+
+    The old adapter seam built every action direction for every proposal and selected one
+    afterwards.  That is tolerable for K=5 but becomes an avoidable O(M*K) allocation for K=93.
+    """
+    d_b = v_hat_b.to(device=device, dtype=dtype)[selected_clip_ids]
+    c, s = torch.cos(yaw), torch.sin(yaw)
+    d = torch.stack([
+        c * d_b[:, 0] - s * d_b[:, 1],
+        s * d_b[:, 0] + c * d_b[:, 1],
+        d_b[:, 2],
+    ], dim=-1)
+    return d / (torch.linalg.norm(d, dim=-1, keepdim=True) + _EPS)
+
+
+def _empty_proposal_ledger(device, dtype) -> ProposalLedger:
+    """Return a correctly typed/device-resident empty ledger (N=0 or zero redraw budget)."""
+    return ProposalLedger(
+        request_index=torch.empty((0,), dtype=torch.long, device=device),
+        clip_id=torch.empty((0,), dtype=torch.long, device=device),
+        round_index=torch.empty((0,), dtype=torch.long, device=device),
+        p_contact=torch.empty((0, 3), dtype=dtype, device=device),
+        v_ball_in=torch.empty((0, 3), dtype=dtype, device=device),
+        w_ball_in=torch.empty((0, 3), dtype=dtype, device=device),
+        aim_xy=torch.empty((0, 2), dtype=dtype, device=device),
+        reason_code=torch.empty((0,), dtype=torch.long, device=device),
+        admitted=torch.empty((0,), dtype=torch.bool, device=device),
+        resid_m=torch.empty((0,), dtype=dtype, device=device),
+    )
+
+
+def _fixed_direction_contract(
+    *,
+    N: int,
+    device,
+    dtype,
+    ref_normal: torch.Tensor | None,
+    net_top_z: float | None,
+    surface_z: float,
+    net_x: float,
+    tol_m: float,
+    h: float,
+    n_steps: int,
+    speed_budget: float,
+    protos,
+    base_quat,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Validate and normalize inputs that are mandatory for scorer-equivalent fixed-dir solves."""
+    if N <= 0:
+        raise ValueError("fixed-direction question generation needs at least one requested row")
+    if protos is None or base_quat is None:
+        raise ValueError(
+            "ContinuousQuestionCfg.fixed_direction=True needs the stroke prototypes and "
+            "the base orientation: the direction it holds fixed IS the stroke's identity"
+        )
+    if ref_normal is None:
+        raise ValueError(
+            "ContinuousQuestionCfg.fixed_direction=True needs ref_normal: fixed-dir answers must "
+            "be signed to the runtime raw +Y clip face, including backhands"
+        )
+    if net_top_z is None or not math.isfinite(float(net_top_z)):
+        raise ValueError(
+            "ContinuousQuestionCfg.fixed_direction=True needs a finite scorer net_top_z"
+        )
+    if not math.isfinite(float(surface_z)) or float(net_top_z) <= float(surface_z):
+        raise ValueError(
+            f"net_top_z must be above the scorer landing plane, got "
+            f"net_top_z={net_top_z!r}, surface_z={surface_z!r}"
+        )
+    if not math.isfinite(float(net_x)):
+        raise ValueError(f"net_x must be finite, got {net_x!r}")
+    if not math.isfinite(float(tol_m)) or float(tol_m) <= 0.0:
+        raise ValueError(f"tol_m must be finite and positive, got {tol_m!r}")
+    if not math.isfinite(float(h)) or float(h) <= 0.0:
+        raise ValueError(f"h must be a finite positive scorer step, got {h!r}")
+    if isinstance(n_steps, bool) or int(n_steps) != n_steps or int(n_steps) <= 0:
+        raise ValueError(f"n_steps must be a positive integer scorer horizon, got {n_steps!r}")
+    if (
+        isinstance(speed_budget, bool)
+        or not math.isfinite(float(speed_budget))
+        or float(speed_budget) <= 0.0
+    ):
+        raise ValueError(
+            f"speed_budget must be finite and positive, got {speed_budget!r}"
+        )
+    if (
+        isinstance(getattr(protos, "face_sign", None), bool)
+        or not hasattr(protos, "face_sign")
+    ):
+        raise ValueError(
+            "fixed-direction prototypes must declare per-action face_sign"
+        )
+    face_sign = torch.as_tensor(
+        protos.face_sign, dtype=dtype, device=device
+    )
+    if (
+        face_sign.ndim != 1
+        or not bool(torch.isfinite(face_sign).all())
+        or not bool(((face_sign == 1.0) | (face_sign == -1.0)).all())
+    ):
+        raise ValueError(
+            "fixed-direction prototype face_sign must be a finite 1-D +/-1 table"
+        )
+    if (
+        not math.isfinite(float(getattr(protos, "speed_min").min()))
+        or not math.isfinite(float(getattr(protos, "speed_max").max()))
+    ):
+        raise ValueError("fixed-direction prototype speed bounds must be finite")
+    if (
+        not math.isfinite(float(getattr(protos, "v_hat_b").min()))
+        or not math.isfinite(float(getattr(protos, "v_hat_b").max()))
+    ):
+        raise ValueError("fixed-direction prototype directions must be finite")
+
+    bq = torch.as_tensor(base_quat, dtype=dtype, device=device)
+    if bq.shape != (N, 4) or not bool(torch.isfinite(bq).all()):
+        raise ValueError(f"base_quat must be finite (N,4), got {tuple(bq.shape)}")
+    bq_norm = torch.linalg.norm(bq, dim=-1, keepdim=True)
+    good_bq = torch.isfinite(bq_norm.squeeze(-1)) & (bq_norm.squeeze(-1) > _EPS) \
+        & ((bq_norm.squeeze(-1) - 1.0).abs() <= 1.0e-3)
+    if not bool(good_bq.all()):
+        bad = torch.nonzero(~good_bq, as_tuple=False).flatten().tolist()
+        raise ValueError(
+            f"base_quat must contain unit wxyz orientations; bad rows={bad[:8]}")
+    rn = ref_normal.to(device=device, dtype=dtype)
+    if rn.shape != (N, 3):
+        raise ValueError(f"ref_normal must be (N,3) matching clip_ids, got {tuple(rn.shape)}")
+    rn_norm = torch.linalg.norm(rn, dim=-1, keepdim=True)
+    good_ref = torch.isfinite(rn).all(dim=-1) & torch.isfinite(rn_norm.squeeze(-1)) \
+        & (rn_norm.squeeze(-1) > _EPS)
+    if not bool(good_ref.all()):
+        bad = torch.nonzero(~good_ref, as_tuple=False).flatten().tolist()
+        raise ValueError(f"ref_normal must contain finite non-zero raw +Y faces; bad rows={bad[:8]}")
+    return rn / rn_norm, bq / bq_norm
+
+
+def _fixed_direction_replay(
+    *,
+    out: dict,
+    p_contact: torch.Tensor,
+    v_ball_in: torch.Tensor,
+    w_ball_in: torch.Tensor,
+    aim_xy: torch.Tensor,
+    ref_normal: torch.Tensor,
+    speed_min: torch.Tensor,
+    speed_max: torch.Tensor,
+    face_sign: torch.Tensor,
+    prm: VirtualBallParams,
+    surface_z: float,
+    net_x: float,
+    net_top_z: float,
+    tol_m: float,
+    h: float,
+    n_steps: int,
+) -> tuple[dict, torch.Tensor, torch.Tensor]:
+    """Replay a fixed-dir candidate through the scorer physics and return final acceptance.
+
+    The adapter historically rebuilt a net top from ``surface_z`` and then added the ball radius
+    again.  Runtime already passes ``net_top_z`` in the ball-centre convention.  This replay is the
+    authority: exactly one explicit threshold, and the same rollout step/horizon as grading.
+    """
+    raw_n = out["n"]
+    raw_n_norm = torch.linalg.norm(raw_n, dim=-1, keepdim=True)
+    n_unit = raw_n / (raw_n_norm + _EPS)
+    # ±n is the same collision plane, but NOT the same commanded raw +Y face.  Align only to the
+    # runtime clip face; do not impose +x, which would silently flip a legitimate backhand.
+    flip = torch.sum(n_unit * ref_normal, dim=-1, keepdim=True) < 0.0
+    n_signed = torch.where(flip, -n_unit, n_unit)
+    face_dot = torch.sum(n_signed * ref_normal, dim=-1)
+    face_ok = (
+        torch.isfinite(n_signed).all(dim=-1)
+        & torch.isfinite(face_dot)
+        & torch.isfinite(raw_n_norm.squeeze(-1))
+        & (raw_n_norm.squeeze(-1) > _EPS)
+        & (face_dot > 0.0)
+    )
+
+    physical_n = n_signed * face_sign[:, None]
+    normal_speed = -torch.sum(
+        (v_ball_in - out["v_r"]) * physical_n,
+        dim=-1,
+    )
+    contact_ok = (
+        torch.isfinite(normal_speed)
+        & (normal_speed >= CONTACT_NORMAL_SPEED_MIN_MPS)
+        & (normal_speed <= CONTACT_NORMAL_SPEED_MAX_MPS)
+    )
+
+    v_plus, w_plus = predict_paddle_contact(
+        v_ball_in, out["v_r"], physical_n, w_ball_in, prm)
+    land = coarse_landing(
+        p_contact, v_plus, w_plus, prm, surface_z=surface_z, net_x=net_x,
+        h=float(h), n_steps=int(n_steps),
+    )
+    resid_m = torch.linalg.norm(land["land_xy"] - aim_xy, dim=-1)
+    speed = torch.linalg.norm(out["v_r"], dim=-1)
+    land_ok = land["land_valid"] & torch.isfinite(land["land_xy"]).all(dim=-1)
+    resid_ok = torch.isfinite(resid_m) & (resid_m < float(tol_m))
+    speed_lo_ok = torch.isfinite(speed) & (speed >= speed_min - 1e-9)
+    speed_hi_ok = torch.isfinite(speed) & (speed <= speed_max + 1e-9)
+    # net_top_z is already the BALL-CENTRE clearance plane used by the runtime scorer.  No radius
+    # or margin is added here.
+    net_ok = (
+        land["net_valid"]
+        & torch.isfinite(land["net_z"])
+        & (land["net_z"] > float(net_top_z))
+    )
+    good = (
+        land_ok
+        & resid_ok
+        & speed_lo_ok
+        & speed_hi_ok
+        & net_ok
+        & face_ok
+        & contact_ok
+    )
+
+    reasons = torch.full_like(good, _R_NO_LANDING, dtype=torch.long)
+    reasons = torch.where(land_ok, torch.full_like(reasons, _R_RESID), reasons)
+    reasons = torch.where(
+        land_ok & resid_ok & ~speed_hi_ok, torch.full_like(reasons, _R_SPEED_OVER), reasons)
+    reasons = torch.where(
+        land_ok & resid_ok & speed_hi_ok & ~speed_lo_ok,
+        torch.full_like(reasons, _R_SPEED_UNDER), reasons)
+    reasons = torch.where(
+        land_ok & resid_ok & speed_lo_ok & speed_hi_ok & ~net_ok,
+        torch.full_like(reasons, _R_NET), reasons)
+    reasons = torch.where(
+        land_ok & resid_ok & speed_lo_ok & speed_hi_ok & net_ok & ~face_ok,
+        torch.full_like(reasons, _R_FACE), reasons)
+    reasons = torch.where(
+        land_ok
+        & resid_ok
+        & speed_lo_ok
+        & speed_hi_ok
+        & net_ok
+        & face_ok
+        & ~contact_ok,
+        torch.full_like(reasons, _R_CONTACT_ENVELOPE),
+        reasons,
+    )
+    reasons = torch.where(good, torch.full_like(reasons, -1), reasons)
+
+    replayed = dict(out)
+    replayed.update({
+        "n": n_signed,
+        "physical_n": physical_n,
+        "contact_normal_speed_mps": normal_speed,
+        "contact_envelope_ok": contact_ok,
+        "speed": speed,
+        "landing_xy": land["land_xy"],
+        "land_valid": land["land_valid"],
+        "resid_m": resid_m,
+        "net_z": land["net_z"],
+        "net_valid": land["net_valid"],
+        "clears_net": net_ok,
+        "ok": good,
+        "reason": reasons,
+    })
+    return replayed, good, reasons
+
+
+def _solve_fixed_direction_batch(
+    *,
+    clip_ids: torch.Tensor,
+    p_contact: torch.Tensor,
+    v_ball_in: torch.Tensor,
+    w_ball_in: torch.Tensor,
+    aim_xy: torch.Tensor,
+    ref_normal: torch.Tensor,
+    protos,
+    base_quat: torch.Tensor,
+    prm: VirtualBallParams,
+    surface_z: float,
+    net_x: float,
+    net_top_z: float,
+    cfg: ContinuousQuestionCfg,
+    h: float,
+    n_steps: int,
+) -> tuple[dict, torch.Tensor, torch.Tensor]:
+    """One fixed-action solve followed by the one authoritative scorer replay.
+
+    Both the random producer and :func:`solve_proposals` call this exact function.  Keeping the
+    adapter and replay here prevents an externally supplied curriculum proposal from acquiring a
+    subtly different net, face, tolerance, or rollout contract than an internally drawn proposal.
+    Inputs have already passed their caller's validation; this function neither samples nor
+    modifies them.
+    """
+    from .stroke_adapt_torch import base_yaw_of
+
+    device, dtype = p_contact.device, p_contact.dtype
+    yaw = base_yaw_of(base_quat)
+    d_m = _selected_direction_world(protos.v_hat_b, clip_ids, yaw, device, dtype)
+    speed_min_m = protos.speed_min.to(device, dtype)[clip_ids]
+    speed_max_m = torch.minimum(
+        protos.speed_max.to(device, dtype)[clip_ids],
+        torch.full_like(
+            speed_min_m,
+            float(cfg.speed_budget),
+        ),
+    )
+    if bool((speed_min_m > speed_max_m).any()):
+        bad = torch.nonzero(
+            speed_min_m > speed_max_m, as_tuple=False
+        ).flatten().tolist()
+        raise ValueError(
+            "fixed-direction global speed_budget is below the selected "
+            f"prototype minimum for rows {bad[:8]}"
+        )
+    face_sign_m = protos.face_sign.to(device, dtype)[clip_ids]
+    out = solve_strike_specs_fixed_dir(
+        p_contact, v_ball_in, w_ball_in, aim_xy, d_m,
+        speed_min_m, speed_max_m,
+        prm, surface_z=surface_z, net_x=net_x,
+        # Map the adapter's legacy reconstructed threshold onto the scorer's explicit ball-centre
+        # plane.  Its ok/reason are ignored; the replay below is the sole acceptance authority.
+        net_height=float(net_top_z) - float(surface_z),
+        net_margin_m=0.0, ball_radius=0.0,
+        n_iters=int(cfg.n_iters), tol_m=float(cfg.tol_m),
+        h=float(h), n_steps=int(n_steps),
+    )
+    return _fixed_direction_replay(
+        out=out, p_contact=p_contact, v_ball_in=v_ball_in, w_ball_in=w_ball_in,
+        aim_xy=aim_xy, ref_normal=ref_normal, speed_min=speed_min_m,
+        speed_max=speed_max_m, face_sign=face_sign_m, prm=prm,
+        surface_z=surface_z, net_x=net_x,
+        net_top_z=float(net_top_z), tol_m=float(cfg.tol_m), h=float(h),
+        n_steps=int(n_steps),
+    )
+
+
+def _validate_external_proposals(
+    *,
+    clip_ids,
+    p_contact,
+    v_ball_in,
+    w_ball_in,
+    aim_xy,
+    ref_normal,
+    protos,
+    base_quat,
+    prm,
+    surface_z,
+    net_x,
+    net_top_z,
+    cfg,
+    h,
+    n_steps,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """Fail closed before an exact external proposal reaches the fixed-action solver."""
+    if not isinstance(cfg, ContinuousQuestionCfg):
+        raise TypeError(f"cfg must be ContinuousQuestionCfg, got {type(cfg).__name__}")
+    if not cfg.fixed_direction:
+        raise ValueError(
+            "solve_proposals is fixed-direction only; free-direction proposals must use generate")
+    if not isinstance(clip_ids, torch.Tensor) or clip_ids.ndim != 1:
+        raise ValueError("clip_ids must be a rank-1 torch.Tensor")
+    if clip_ids.dtype != torch.long:
+        raise ValueError(f"clip_ids must have dtype torch.long, got {clip_ids.dtype}")
+    N = int(clip_ids.shape[0])
+    if N <= 0:
+        raise ValueError("solve_proposals needs at least one proposal row")
+
+    tensors = {
+        "p_contact": (p_contact, (N, 3)),
+        "v_ball_in": (v_ball_in, (N, 3)),
+        "w_ball_in": (w_ball_in, (N, 3)),
+        "aim_xy": (aim_xy, (N, 2)),
+        "ref_normal": (ref_normal, (N, 3)),
+        "base_quat": (base_quat, (N, 4)),
+    }
+    if not isinstance(p_contact, torch.Tensor) or not p_contact.dtype.is_floating_point:
+        raise ValueError("p_contact must be a floating-point torch.Tensor")
+    if p_contact.dtype not in (torch.float32, torch.float64):
+        raise ValueError(f"proposal dtype must be float32 or float64, got {p_contact.dtype}")
+    device, dtype = p_contact.device, p_contact.dtype
+    if clip_ids.device != device:
+        raise ValueError("clip_ids and proposal tensors must be on the same device")
+    for name, (value, shape) in tensors.items():
+        if not isinstance(value, torch.Tensor) or tuple(value.shape) != shape:
+            got = None if not isinstance(value, torch.Tensor) else tuple(value.shape)
+            raise ValueError(f"{name} must have shape {shape}, got {got}")
+        if value.device != device or value.dtype != dtype:
+            raise ValueError(
+                f"{name} must share p_contact device/dtype ({device}, {dtype}), "
+                f"got ({value.device}, {value.dtype})")
+        if not bool(torch.isfinite(value).all()):
+            raise ValueError(f"{name} must contain only finite values")
+
+    if protos is None:
+        raise ValueError("protos is required")
+    proto_fields = {
+        "v_hat_b": (getattr(protos, "v_hat_b", None), 2),
+        "speed_min": (getattr(protos, "speed_min", None), 1),
+        "speed_max": (getattr(protos, "speed_max", None), 1),
+    }
+    for name, (value, rank) in proto_fields.items():
+        if not isinstance(value, torch.Tensor) or value.ndim != rank:
+            raise ValueError(f"protos.{name} must be a rank-{rank} torch.Tensor")
+        if not value.dtype.is_floating_point:
+            raise ValueError(f"protos.{name} must be floating point")
+        if not bool(torch.isfinite(value).all()):
+            raise ValueError(f"protos.{name} must contain only finite values")
+    K = int(protos.v_hat_b.shape[0])
+    if tuple(protos.v_hat_b.shape) != (K, 3) \
+            or tuple(protos.speed_min.shape) != (K,) \
+            or tuple(protos.speed_max.shape) != (K,) or K <= 0:
+        raise ValueError("prototype direction/speed tables must have shapes (K,3), (K,), (K,)")
+    dir_norm = torch.linalg.norm(protos.v_hat_b, dim=-1)
+    if not bool((dir_norm > _EPS).all()):
+        raise ValueError("protos.v_hat_b contains a zero direction")
+    if not bool(((dir_norm - 1.0).abs() <= 1.0e-3).all()):
+        raise ValueError("protos.v_hat_b directions must be unit length")
+    if protos.speed_min.device != protos.speed_max.device \
+            or protos.speed_min.dtype != protos.speed_max.dtype:
+        raise ValueError("protos.speed_min and speed_max must share device/dtype")
+    if not bool((protos.speed_min > 0.0).all()) \
+            or not bool((protos.speed_max >= protos.speed_min).all()):
+        raise ValueError("prototype speed bounds must satisfy 0 < speed_min <= speed_max")
+    if bool((clip_ids < 0).any()) or bool((clip_ids >= K).any()):
+        lo, hi = int(clip_ids.min()), int(clip_ids.max())
+        raise ValueError(f"clip_ids out of range for K={K}: observed [{lo}, {hi}]")
+
+    if isinstance(cfg.n_iters, bool) or int(cfg.n_iters) != cfg.n_iters \
+            or int(cfg.n_iters) <= 0:
+        raise ValueError(f"cfg.n_iters must be a positive integer, got {cfg.n_iters!r}")
+    for name in (
+        "k_d", "k_m", "g", "ball_radius", "inertia_coeff", "paddle_a_t",
+        "paddle_b_t", "paddle_mu", "paddle_e_g1", "paddle_e_g2",
+    ):
+        if not hasattr(prm, name) or not math.isfinite(float(getattr(prm, name))):
+            raise ValueError(f"prm.{name} must be finite")
+
+    return _fixed_direction_contract(
+        N=N, device=device, dtype=dtype, ref_normal=ref_normal, net_top_z=net_top_z,
+        surface_z=surface_z, net_x=net_x, tol_m=cfg.tol_m, h=h, n_steps=n_steps,
+        speed_budget=cfg.speed_budget, protos=protos, base_quat=base_quat,
+    )
+
+
+@torch.no_grad()
+def solve_proposals(
+    clip_ids: torch.Tensor,
+    p_contact: torch.Tensor,
+    v_ball_in: torch.Tensor,
+    w_ball_in: torch.Tensor,
+    aim_xy: torch.Tensor,
+    ref_normal: torch.Tensor,
+    *,
+    protos,
+    base_quat: torch.Tensor,
+    prm: VirtualBallParams,
+    surface_z: float,
+    net_x: float,
+    net_top_z: float,
+    cfg: ContinuousQuestionCfg,
+    h: float = 0.01,
+    n_steps: int = 100,
+) -> QuestionDrawResult:
+    """Solve exact externally supplied ball proposals once, with no sampling or redraw.
+
+    ``P == N`` and each request row appears exactly once in ``proposals``.  Rejected inputs remain
+    visible there with their reason, but all installable geometric output fields for those rows are
+    NaN.  This is the curriculum bridge: an action-conditioned sampler owns the ball distribution;
+    this function only computes and certifies the matching task.
+    """
+    ref_unit, base_unit = _validate_external_proposals(
+        clip_ids=clip_ids, p_contact=p_contact, v_ball_in=v_ball_in,
+        w_ball_in=w_ball_in, aim_xy=aim_xy, ref_normal=ref_normal, protos=protos,
+        base_quat=base_quat, prm=prm, surface_z=surface_z, net_x=net_x,
+        net_top_z=net_top_z, cfg=cfg, h=h, n_steps=n_steps,
+    )
+    out, good, reasons = _solve_fixed_direction_batch(
+        clip_ids=clip_ids, p_contact=p_contact, v_ball_in=v_ball_in,
+        w_ball_in=w_ball_in, aim_xy=aim_xy, ref_normal=ref_unit, protos=protos,
+        base_quat=base_unit, prm=prm, surface_z=surface_z, net_x=net_x,
+        net_top_z=net_top_z, cfg=cfg, h=h, n_steps=n_steps,
+    )
+
+    N, device, dtype = int(clip_ids.shape[0]), p_contact.device, p_contact.dtype
+    nan = float("nan")
+    p_out = torch.full((N, 3), nan, device=device, dtype=dtype)
+    v_in_out = torch.full((N, 3), nan, device=device, dtype=dtype)
+    w_in_out = torch.full((N, 3), nan, device=device, dtype=dtype)
+    aim_out = torch.full((N, 2), nan, device=device, dtype=dtype)
+    v_r_out = torch.full((N, 3), nan, device=device, dtype=dtype)
+    n_r_out = torch.full((N, 3), nan, device=device, dtype=dtype)
+    p_out[good] = p_contact[good]
+    v_in_out[good] = v_ball_in[good]
+    w_in_out[good] = w_ball_in[good]
+    aim_out[good] = aim_xy[good]
+    v_r_out[good] = out["v_r"][good]
+    n_r_out[good] = out["n"][good]
+    resid = torch.nan_to_num(out["resid_m"], nan=float("inf")).clone()
+
+    ledger = ProposalLedger(
+        request_index=torch.arange(N, dtype=torch.long, device=device),
+        clip_id=clip_ids.clone(),
+        round_index=torch.ones(N, dtype=torch.long, device=device),
+        p_contact=p_contact.clone(),
+        v_ball_in=v_ball_in.clone(),
+        w_ball_in=w_ball_in.clone(),
+        aim_xy=aim_xy.clone(),
+        reason_code=reasons.clone(),
+        admitted=good.clone(),
+        resid_m=resid.clone(),
+        ref_normal=ref_normal.clone(),
+        base_quat=base_quat.clone(),
+    )
+    counts: dict = {}
+    for code in reasons[~good].tolist():
+        name = (
+            _CONTINUOUS_REASONS[code]
+            if 0 <= code < len(_CONTINUOUS_REASONS)
+            else "unsolved"
+        )
+        counts[name] = counts.get(name, 0) + 1
+
+    return QuestionDrawResult(
+        p_contact=p_out, v_racket=v_r_out, n_racket=n_r_out,
+        v_ball_in=v_in_out, w_ball_in=w_in_out, aim_xy=aim_out,
+        ok=good.clone(), resid_m=resid, attempted_v_ball_in=v_ball_in.clone(),
+        rounds_used=1, exhausted=int((~good).sum()), reason_counts=counts,
+        proposal_count=N, proposals=ledger,
+    )
 
 
 @torch.no_grad()
@@ -168,6 +740,13 @@ def generate(
         ref_normal = ref_normal.to(device=device, dtype=dtype)
         if ref_normal.shape != (N, 3):
             raise ValueError(f"ref_normal must be (N,3) matching clip_ids, got {tuple(ref_normal.shape)}")
+    fixed_base_quat = None
+    if cfg.fixed_direction:
+        ref_normal, fixed_base_quat = _fixed_direction_contract(
+            N=N, device=device, dtype=dtype, ref_normal=ref_normal, net_top_z=net_top_z,
+            surface_z=surface_z, net_x=net_x, tol_m=cfg.tol_m, h=h, n_steps=n_steps,
+            speed_budget=cfg.speed_budget, protos=protos, base_quat=base_quat,
+        )
 
     nan = float("nan")
     p = torch.full((N, 3), nan, device=device, dtype=dtype)
@@ -181,6 +760,11 @@ def generate(
     ok = torch.zeros(N, dtype=torch.bool, device=device)
     counts: dict = {}
     rounds_used = 0
+    proposal_parts = {
+        "request_index": [], "clip_id": [], "round_index": [], "p_contact": [],
+        "v_ball_in": [], "w_ball_in": [], "aim_xy": [], "reason_code": [],
+        "admitted": [], "resid_m": [],
+    }
 
     todo = torch.arange(N, device=device)
     for _round in range(1, int(cfg.max_redraw_rounds) + 1):
@@ -200,24 +784,13 @@ def generate(
         ], dim=-1)
 
         if cfg.fixed_direction:
-            if protos is None or base_quat is None:
-                raise ValueError(
-                    "ContinuousQuestionCfg.fixed_direction=True needs the stroke prototypes and "
-                    "the base orientation: the direction it holds fixed IS the stroke's identity"
-                )
-            from .stroke_adapt_torch import base_yaw_of
-            yaw = base_yaw_of(base_quat[todo])
-            d_all = direction_world(protos.v_hat_b.to(device, dtype), yaw)      # (m,K,3)
-            d_m = d_all[torch.arange(m, device=device), clip_ids[todo]]
-            out = solve_strike_specs_fixed_dir(
-                p_m, v_m, w_m, aim_m, d_m,
-                protos.speed_min.to(device, dtype)[clip_ids[todo]],
-                protos.speed_max.to(device, dtype)[clip_ids[todo]],
-                prm, surface_z=surface_z, net_x=net_x,
-                n_iters=int(cfg.n_iters), tol_m=float(cfg.tol_m),
+            out, good, reasons = _solve_fixed_direction_batch(
+                clip_ids=clip_ids[todo], p_contact=p_m, v_ball_in=v_m, w_ball_in=w_m,
+                aim_xy=aim_m, ref_normal=ref_normal[todo], protos=protos,
+                base_quat=fixed_base_quat[todo], prm=prm, surface_z=surface_z,
+                net_x=net_x, net_top_z=float(net_top_z), cfg=cfg, h=h,
+                n_steps=n_steps,
             )
-            good = out["ok"]
-            reasons = out["reason"]
         else:
             out = solve_strike_specs(
                 p_m, v_m, w_m, aim_m, prm, surface_z=surface_z, net_x=net_x,
@@ -248,6 +821,19 @@ def generate(
                                   torch.full_like(reasons, _R_NET), reasons)
             reasons = torch.where(good, torch.full_like(reasons, -1), reasons)
 
+        proposal_parts["request_index"].append(todo.clone())
+        proposal_parts["clip_id"].append(clip_ids[todo].clone())
+        proposal_parts["round_index"].append(
+            torch.full((m,), _round, dtype=torch.long, device=device))
+        proposal_parts["p_contact"].append(p_m.clone())
+        proposal_parts["v_ball_in"].append(v_m.clone())
+        proposal_parts["w_ball_in"].append(w_m.clone())
+        proposal_parts["aim_xy"].append(aim_m.clone())
+        proposal_parts["reason_code"].append(reasons.clone())
+        proposal_parts["admitted"].append(good.clone())
+        proposal_parts["resid_m"].append(
+            torch.nan_to_num(out["resid_m"], nan=float("inf")).clone())
+
         v_att[todo] = v_m
         sel = todo[good]
         p[sel], v_in[sel], w_in[sel], aim[sel] = p_m[good], v_m[good], w_m[good], aim_m[good]
@@ -260,15 +846,29 @@ def generate(
             # else — see the class docstring: not installable, structurally.
             resid[todo[bad]] = torch.nan_to_num(out["resid_m"][bad], nan=float("inf"))
             for code in reasons[bad].tolist():
-                name = REASONS[code] if 0 <= code < len(REASONS) else "unsolved"
+                name = (
+                    _CONTINUOUS_REASONS[code]
+                    if 0 <= code < len(_CONTINUOUS_REASONS)
+                    else "unsolved"
+                )
                 counts[name] = counts.get(name, 0) + 1
         todo = todo[bad]
+
+    if proposal_parts["clip_id"]:
+        proposal_ledger = ProposalLedger(**{
+            name: torch.cat(parts, dim=0) for name, parts in proposal_parts.items()
+        })
+    else:
+        proposal_ledger = _empty_proposal_ledger(device, dtype)
+    proposal_count = len(proposal_ledger)
 
     return QuestionDrawResult(
         p_contact=p, v_racket=v_r, n_racket=n_r, v_ball_in=v_in, w_ball_in=w_in, aim_xy=aim,
         ok=ok, resid_m=resid, attempted_v_ball_in=v_att, rounds_used=rounds_used,
         exhausted=int((~ok).sum()),
         reason_counts=counts,
+        proposal_count=proposal_count,
+        proposals=proposal_ledger,
     )
 
 

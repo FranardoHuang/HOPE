@@ -1,6 +1,6 @@
 # NOW — 当前训练流程、课程阶段与下一步
 
-最近复核：2026-07-24 CST。本页说明现在到底在训什么、整套训练怎样连起来、每个课程阶段在解决
+`origin/main` 最近复核：2026-07-24 CST；本功能分支提案日期：2026-07-27 CST。本页说明现在到底在训什么、整套训练怎样连起来、每个课程阶段在解决
 什么问题，以及下一项工作为什么值得做。实验过程放在[实验登记册](experiments/README.md)，
 复现命令和 Gate 结果放在对应 [Gate](gates/) 与操作文档。
 
@@ -12,23 +12,33 @@
 > 本节不改变下文已采用 setting、统一工作队列、优先级或人的责任归属；合入 `main` 前必须逐项
 > 与最新主板对账。它只记录本分支准备交审的训练边界。
 
-- executor 候选改回 [`task-first`](DEFINITIONS.md#task-first)：训练不从球开始，而从每个动作的
-  task 中心开始。level 0 是位置、速度、拍面、base 四轴都为零增量的中心 warm-up；之后才以
-  `0/.25/.5/.75/1` 独立扩展 position → scalar speed → face cone → base residual。完整合同见
-  [task-first 任意 N 动作](interfaces/task_first_n_action_contract.md)。
+- executor 候选改为
+  [按动作条件化的 `ball-first`](interfaces/action_conditioned_ball_first_contract.md)：训练日程先
+  均衡选定并冻结动作，再从该动作自己的到球时间、来球、base 与落点域采样，最后由
+  fixed-action solver 解出物理自洽 task 和认证 teacher rate。训练期不运行 selector；旧
+  `task-first` 只保留为历史消融。schema v3 把 lower/upper 与方向 tangent 正负侧拆成 32 个
+  curriculum arms（`no_move` 有效 28 个），每动作先做 center，再分别找 marginal frontier，
+  最后用 joint `rho` 把 safe closed policy failure 调到 10% 目标带。最近 100 次只安排下一个
+  候选方向，不能替代 frozen canary 与独立 heldout 晋级。
 - 候选五动作视图为 `bh_loop_c / fh_block_syn / bh_block / s0_highpress / fh_loop_high`；
   历史旧正手 bytes 不删除，但不再进入新训练 view。新正手尚未获得正式 `t_hit`、`t_cycle`、
   site strike speed、无桌碰和 Pod Isaac smoke 证据，故 manifest 必须保持
   `training_authorized=false`；站远只能通过整动作、task 与 base 一起沿负 X 平移后重验。
 - planner 候选改为读取逐动作 held-out capability artifact，对任意击球目标依次执行硬安全、
-  support/OOD、校准成功率下界、同 `delta_tie` 内 priority 与明确 abstain。当前生产仍是 schema-4
-  两侧路径，任意 N selector 尚未接线；详见
+  support/OOD、校准成功率下界、同 `delta_tie` 内球质/priority 与明确 abstain。训练 Reward 不能
+  直接跨动作比较；球质必须是同一部署 utility/calibration。当前生产仍是 schema-4 两侧路径，
+  任意 N selector 尚未接线；详见
   [动作能力 selector 合同](interfaces/action_capability_selector_contract.md)。
 - 当前训练效果好的原因仍未归因。运行时实际 Reward 主项是 `4.0/0.5/0.5`，不是旧设计表的
-  `393.4/295.1/229.5`；现象更符合“题目可行、自洽、低熵”的解释。必须分别做
-  [同 task 分布的 producer-order A/B](experiments/2026-07/EXP-TASK-FIRST-N-ACTION-20260727.md)
-  和[同 task 分布的 Reward A/B](experiments/2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md)，
-  不能把两种因果问题混在一臂。
+  `393.4/295.1/229.5`；现象更符合“球/task 自洽、问题熵较低”的解释，也可能混有 free solver
+  总挑容易方向的偏差。两条配置逐字相同的 seed0 banked run 最近 100 窗都约 49.7%，但同配置
+  seed1 为 0%；这证明好现象可复刻，却远未稳定。现有 landing Reward 与报表还共用 analytic
+  oracle，且 run 缺 effective-recipe/run-binding、table on/off 甚至共用旧 hard-contract SHA。
+  必须先做同边际的 paired-vs-shuffled ball/task 配对 canary，再做
+  [同 action/ball/base/aim proposal tape 的 free-vs-fixed solver A/B](experiments/2026-07/EXP-ACTION-CONDITIONED-BALL-FIRST-20260727.md)，
+  再在 fixed solved tape 上做
+  [Reward A/B](experiments/2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md)，不能把两种因果问题
+  混在一臂。
 
 ## 先看结论
 

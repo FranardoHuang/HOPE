@@ -1,7 +1,8 @@
 # Task-first 任意动作数训练合同
 
-Status: Draft / source candidate。本文定义训练语义；当前没有获授权的五动作 manifest，也没有
-Pod 上的 Isaac 冒烟，因此不授权正式训练、部署或真机。
+Status: Superseded / ablation-only。本文保留 task-first 历史语义，不再是候选 executor，也不授权
+正式训练、部署或真机。当前候选合同是
+[按动作条件化 Ball-first](action_conditioned_ball_first_contract.md)。
 
 共享术语见[术语与人话对照](../DEFINITIONS.md)：本文的
 [`task-first`](../DEFINITIONS.md#task-first)是“先定义动作应完成的球拍任务，再学该动作附近的任务

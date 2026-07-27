@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import copy
 import importlib.util
 import io
@@ -266,6 +267,107 @@ def test_schema3_binds_complete_ordered_active_term_tuple(runner_module):
         )
 
 
+def test_action_ball_restore_orders_racket_then_motion_then_finalize_only_on_resume(
+    runner_module,
+):
+    events = []
+
+    class RacketTerm:
+        def exact_resume_state_dict(self):
+            return {"owner": "racket"}
+
+        def load_exact_resume_state_dict(self, state, strict=True):
+            assert state == {"owner": "racket"}
+            assert strict is True
+            events.append("racket")
+
+    class MotionTerm:
+        def exact_resume_state_dict(self):
+            return {"owner": "motion"}
+
+        def load_exact_resume_state_dict(self, state, strict=True):
+            assert state == {"owner": "motion"}
+            assert strict is True
+            events.append("motion")
+
+        def finalize_action_ball_exact_resume(self):
+            events.append("finalize")
+
+    source = _bare_runner(
+        runner_module,
+        terms=(("motion", MotionTerm()), ("racket_target", RacketTerm())),
+    )
+    source.env.cfg = SimpleNamespace(
+        commands=SimpleNamespace(
+            racket_target=SimpleNamespace(target_mode="action_ball")
+        )
+    )
+    captured = source._capture_environment_resume_state()
+    # Capturing/fresh training must never finalize a resume handoff.
+    assert events == []
+
+    target = _bare_runner(
+        runner_module,
+        terms=(("motion", MotionTerm()), ("racket_target", RacketTerm())),
+    )
+    target.env.cfg = source.env.cfg
+    target._restore_environment_resume_state(
+        {
+            "next_learning_iteration": 1,
+            "environment_resume_state": captured,
+        }
+    )
+    assert events == ["racket", "motion", "finalize"]
+
+
+def test_action_ball_restore_requires_finalize_before_mutating_owner(
+    runner_module,
+):
+    events = []
+
+    class ExplicitTerm:
+        def exact_resume_state_dict(self):
+            return {}
+
+        def load_exact_resume_state_dict(self, _state, strict=True):
+            assert strict is True
+            events.append("loaded")
+
+    source_motion = ExplicitTerm()
+    source_motion.finalize_action_ball_exact_resume = lambda: None
+    source = _bare_runner(
+        runner_module,
+        terms=(
+            ("motion", source_motion),
+            ("racket_target", ExplicitTerm()),
+        ),
+    )
+    source.env.cfg = SimpleNamespace(
+        commands=SimpleNamespace(
+            racket_target=SimpleNamespace(target_mode="action_ball")
+        )
+    )
+    captured = source._capture_environment_resume_state()
+    events.clear()
+
+    target = _bare_runner(
+        runner_module,
+        terms=(
+            ("motion", ExplicitTerm()),
+            ("racket_target", ExplicitTerm()),
+        ),
+    )
+    target.env.cfg = source.env.cfg
+    with pytest.raises(RuntimeError, match="requires Motion.*finalize"):
+        target._restore_environment_resume_state(
+            {
+                "next_learning_iteration": 1,
+                "environment_resume_state": captured,
+            }
+        )
+    assert events == []
+
+
 def test_schema3_does_not_skip_active_tuple_validation_without_manager(runner_module):
     class ExplicitTerm:
         def exact_resume_state_dict(self):
@@ -308,6 +410,29 @@ def test_task_first_requires_explicit_hooks_on_every_active_term(runner_module):
     with pytest.raises(RuntimeError, match="missing=\\['racket'\\]"):
         runner._capture_environment_resume_state()
     with pytest.raises(RuntimeError, match="missing=\\['racket'\\]"):
+        runner._validate_task_first_exact_resume_terms()
+
+
+def test_action_ball_requires_explicit_hooks_on_every_active_term(runner_module):
+    class ExplicitTerm:
+        def exact_resume_state_dict(self):
+            return {}
+
+        def load_exact_resume_state_dict(self, _state, strict=True):
+            assert strict is True
+
+    runner = _bare_runner(
+        runner_module,
+        terms=(("motion", ExplicitTerm()), ("racket", object())),
+    )
+    runner.env.cfg = SimpleNamespace(
+        commands=SimpleNamespace(
+            racket_target=SimpleNamespace(target_mode="action_ball")
+        )
+    )
+    with pytest.raises(RuntimeError, match="action-ball.*missing=\\['racket'\\]"):
+        runner._capture_environment_resume_state()
+    with pytest.raises(RuntimeError, match="action-ball.*missing=\\['racket'\\]"):
         runner._validate_task_first_exact_resume_terms()
 
 
@@ -578,6 +703,55 @@ def test_load_restores_exact_rng_after_command_state_and_before_reset(
     assert runner.load("checkpoint.pt") == {"base": "infos"}
     assert events == ["base_load", "command_state", "rng", "reset"]
     assert runner.current_learning_iteration == 5
+
+
+def test_action_ball_load_is_data_only_and_defers_true_reset_to_learn(
+    runner_module, monkeypatch
+):
+    events = []
+    runner = _configure_load_runner(runner_module, events)
+    runner.env.cfg = SimpleNamespace(
+        commands=SimpleNamespace(
+            racket_target=SimpleNamespace(target_mode="action_ball")
+        )
+    )
+    runner.require_exact_resume_state = True
+    optimizer_state = _install_fresh_adam_and_build_resumable_state(runner)
+    exact_state = _complete_schema3_resume_state()
+    monkeypatch.setattr(
+        runner_module.torch,
+        "load",
+        lambda *_args, **_kwargs: _complete_checkpoint(
+            exact_state, optimizer_state
+        ),
+    )
+    runner._restore_environment_resume_state = (
+        lambda _state: events.append("command_state") or (0, "checkpoint")
+    )
+    runner._restore_exact_rng_state = lambda _state: events.append("rng")
+
+    runner.load("checkpoint.pt")
+    assert events == ["base_load", "command_state", "rng"]
+    assert runner._action_ball_resume_reset_pending is True
+
+    runner.disable_logs = True
+    runner.writer = None
+    runner.current_learning_iteration = 5
+    runner.alg.update = lambda: events.append("update")
+    runner.learn(num_learning_iterations=1)
+    assert events == [
+        "base_load",
+        "command_state",
+        "rng",
+        "reset",
+        "update",
+    ]
+    assert runner._action_ball_resume_reset_pending is False
+
+
+def test_runner_source_parses_as_python38():
+    source = RUNNER_PATH.read_text(encoding="utf-8")
+    ast.parse(source, filename=str(RUNNER_PATH), feature_version=(3, 8))
 
 
 def test_required_exact_resume_rejects_actor_only_and_optimizerless_checkpoints(

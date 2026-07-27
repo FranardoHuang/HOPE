@@ -15,9 +15,35 @@ cd ~/workspace/HOPE/hope_ws
 
 No `vendor_assets/` payload is required for planner tests or ROS package discovery.
 
+<a id="action-ball-source-tests"></a>
+
+## Action-conditioned Ball-first Source Tests
+
+这组 host tests 验证任意 N manifest/profile、逐动作随机 tape、fixed-action ball→task 物理门、
+true-reset birth/task receipt、动态课程 reducer 与 `action_ball_n<N>` 观测合同。它不启动
+Isaac、MuJoCo、ROS、Pod 或真机：
+
+```bash
+/Users/Franco/opt/anaconda3/envs/fast/bin/python -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_action_ball_sampling.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_manifest.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_profile_adapter.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_curriculum.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_evaluation.py \
+  hope_training/whole_body_tracking/tests/test_action_ball_runtime.py \
+  hope_training/whole_body_tracking/tests/test_action_conditioned_continuous_questions.py \
+  hope_training/whole_body_tracking/tests/test_task_first_observation_contract.py
+```
+
+2026-07-27 schema-v3 domain-core 中间结果（只运行 manifest/sampler/adapter/curriculum/evaluation）
+为 `202 passed in 5.94s`；sampler 的 N93/E4096 exact replay 最坏为生成耗时的 `1.95×`。旧
+`254 passed` 属于已废弃的对称 7-axis schema。上面包含 runtime 的完整命令必须等
+runtime/Motion/train v3 集成完成后重跑并在此替换最终数字；当前局部结果**尚未包含**
+train/runner/commands/Isaac union、新正手行为证书或 Pod smoke，不能据此授权训练。
+
 <a id="task-first-and-capability-source-tests"></a>
 
-## Task-first And Capability Source Tests
+## Historical Task-first And Capability Source Tests
 
 这组 host tests 不启动 Isaac、MuJoCo、ROS、Pod 或真机。它检查任意 N 身份、level-0 中心
 warm-up/逐轴课程、manifest、balanced sampler、effective Reward receipt、runner 持久状态、
@@ -48,10 +74,10 @@ python3 -m pytest -q \
 - checkpoint 恢复后的课程/采样器/RNG receipt（仿真 state 未序列化，不能声称逐物理 step bit-exact）；
 - ROS/Jazzy trusted candidate producer、任意 N wire/C++ first tick 和 Gate3。
 
-2026-07-27 本功能分支尚未把这组 union 与 Pod Isaac smoke 记为 accepted result；Pod1/Pod2 六卡占用
-只是一份资源快照，不是 runtime 失败。结果必须回填
-[G05](../gates/G05_isaac_training_first_loop.md)与
-[task-first 实验](../experiments/2026-07/EXP-TASK-FIRST-N-ACTION-20260727.md)，不能只写聊天摘要。
+旧 `task-first` 已被拒绝为主 executor；本节只保留回归和 matched ablation。当前 action-ball
+结果必须回填 [G05](../gates/G05_isaac_training_first_loop.md) 与
+[action-ball 实验](../experiments/2026-07/EXP-ACTION-CONDITIONED-BALL-FIRST-20260727.md)，
+不能只写聊天摘要。
 
 ## Planner Unit Tests
 

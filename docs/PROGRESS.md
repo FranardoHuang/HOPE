@@ -11,9 +11,36 @@
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
 
-## 2026-07-27（task-first / 任意 N 动作预开跑合同）
+## 2026-07-27（按动作条件化 Ball-first / 任意 N 动作预开跑）
 
-- 把 executor 训练边界改写成不依赖来球的
+- 裁定训练顺序为 `action → incoming ball/base/aim → fixed-action solve → atomic install`；训练期
+  selector 关闭。新增
+  [训练合同](interfaces/action_conditioned_ball_first_contract.md)与
+  [实验预注册](experiments/2026-07/EXP-ACTION-CONDITIONED-BALL-FIRST-20260727.md)。旧
+  task-first 只保留为消融。
+- 已形成 strict arbitrary-N manifest/adapter、逐动作 deterministic sampler、fixed-action proposal
+  solver、marginal→joint 课程、single-use birth/task broker 与 exact-resume host 候选。schema v3
+  新增到球时间，并把位置、速度/方向、旋转大小/方向、落点、base spawn/travel 的两侧拆成 exact
+  32-arm catalog；`no_move` 有效 28 arm。teacher rate 由 required/reference physical
+  racket-site speed 决定，额外 ready wait 上限 1 秒。课程把
+  solver/安装/启动/闭合、safe policy failure、table/fall/collision 和 infrastructure invalid 分账；
+  rolling-100 只排下一候选方向，frozen checkpoint generation 全局单调，正式扩域仍需互斥
+  canary/heldout。sampler+manifest+adapter v3 中间验收为 `184 passed`，加
+  curriculum/evaluation 后 domain-core 为 `210 passed in 8.35s`。N93/E4096 单轮 sampler
+  state 为 `160,906 B`，但 4096 个 birth/sample pair 已到 `6,070,936 B`，100 轮线性外推约
+  `607 MB`；因此跨 sampler/broker/pool/provider/Racket 的退休前缀 segment compaction 已升为
+  长跑硬门。runtime/Motion/train union 尚在收口，不能把局部数字当发射通过。
+- 首轮仅允许 `no_move`；新正手仍缺 upper/full、动作特定 `t_hit/t_cycle`、physical racket-site
+  speed、全周期无撞桌和 opaque motion admission。Pod1/2 GPU 占用快照下未启动新 trainer；N93
+  ordered bytes/certificate 也尚未闭合。只读复核 Pod3 后确认 exact `out_refined` 路径不存在，
+  但另一路径已有 74 组动作/球 sidecar 同名配对、108 个击球单元 metadata；没有 exact ordered
+  93 件集合，不能用 74/108 冒充 N93。G05/G08 状态不变。动作条件
+  Ball-first 守护已改为每小时一次；它只读检查并在全部 Gate 通过时发起新 namespace，不打扰现役
+  训练。
+
+## 2026-07-27（task-first / 任意 N 动作预开跑合同，已被上节取代）
+
+- 曾把 executor 训练边界改写成不依赖来球的
   [task-first 任意 N 动作合同](interfaces/task_first_n_action_contract.md)：每个动作先做零增量中心
   warm-up，再按位置、标量速度、拍面锥和 base residual 独立扩域；站位中心平移同时移动动作、
   球拍 task 和 base 中心。新五动作视图淘汰旧正手 `fh_loop`，但新正手仍缺正式 `t_hit`、
@@ -23,8 +50,7 @@
   [实际 Reward 配方](experiments/2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md)。selector
   顺序固定为硬安全 → support/OOD → 校准成功率下界 → 同带宽 priority → 明确 abstain；stable
   action UID 是身份，dense slot 只作本地索引。
-- 当前只形成 source-contract 候选与 host 测试入口；Pod1/2 六卡占用快照下未跑完整 Isaac
-  smoke，也没有正式训练或 selector 生产接线结果，G05/G08 继续 `Partial/Research`。
+- 该方案因 task 与来球可能无物理解而被取代；记录保留为历史消融，不再发射。
 
 ## 2026-07-27（虚拟球 rollout 融合:45 ms → 0.067 ms,逐 bit 不变）
 

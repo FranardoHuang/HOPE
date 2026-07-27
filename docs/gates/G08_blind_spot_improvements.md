@@ -101,15 +101,18 @@ paired behavior 的逐门结果。库级还必须同时通过：
 上述是 `Done` 合同，不是当前结果；现在仍是 `Partial / 0 of 10`。任何相邻动作、上肢件、face
 diagnostic、旧扫描或 producer 自报都不能替它继承证书。
 
-## 2026-07-27 task-first 与 capability selector 候选
+## 2026-07-27 action-conditioned ball-first 与 capability selector 候选
 
 本节是功能分支研究提案，不改变本 Gate 的 `Research track` 状态，也不改变
 [`origin/main` 的统一队列](../NOW.md#统一工作队列唯一优先级账本)。
 
-- executor 训练改为 ball-free [`task-first`](../DEFINITIONS.md#task-first)：每动作 level 0 只做中心
-  warm-up，再独立按 position → scalar speed magnitude → face cone → base residual 的
-  `0/.25/.5/.75/1` 五档扩域；成功率与 unsafe 率用 Wilson 置信界、最少分母、dwell 和滞回判定。
-- task-first 五动作 view 候选为
+- executor 训练由 balanced schedule 先冻结动作，再从该动作 profile 采 time-to-contact、
+  incoming ball/base/aim，fixed-action 解 task 与认证 teacher rate；训练期 selector 关闭。schema
+  v3 用 exact 32-arm catalog（`no_move` 有效 28 个）分别找两侧 marginal frontier，再用 joint
+  `rho` 控制联合 safe-policy failure。rolling-100 只调度下一个方向，正式 frontier 只由 frozen
+  canary + 独立 heldout 改变。完整语义见
+  [按动作条件化 Ball-first 合同](../interfaces/action_conditioned_ball_first_contract.md)。
+- action-ball 五动作 view 候选为
   `bh_loop_c, fh_block_syn, bh_block, s0_highpress, fh_loop_high`，旧 `fh_loop` 不再进入新训练
   view，但历史 bytes 不删除。新正手缺 upper/full、grounded trace、正式 `t_hit/t_cycle/site
   speed/no-table-collision` 证书，故 `training_authorized=false`。
@@ -119,13 +122,14 @@ diagnostic、旧扫描或 producer 自报都不能替它继承证书。
 - 训练后才用冻结 ball-conditioned heldout 形成 capability artifact。selector 固定按
   hard safety → support/OOD → calibrated success LCB → `delta_tie` 内 priority → abstain；
   priority 不能复活不安全或无证据动作。
-- 当前 arbitrary-N actor/manifest/curriculum 与 selector 只有 source/host 合同候选；生产 planner、
-  schema-4 wire、C++ runner 仍是二动作，Pod 六卡占用快照下也尚未运行 Isaac smoke。
+- 当前 arbitrary-N manifest/sampler/curriculum/single-use receipt broker 只有 source/host 合同候选；
+  motion trust set 仍不能授权该 N5/N93 view，生产 planner、schema-4 wire、C++ runner 仍是二动作，
+  Pod 六卡占用快照下也尚未运行 Isaac smoke。
 
 详细设计、反例和停止条件只看
-[task-first 实验](../experiments/2026-07/EXP-TASK-FIRST-N-ACTION-20260727.md)、
+[action-ball 实验](../experiments/2026-07/EXP-ACTION-CONDITIONED-BALL-FIRST-20260727.md)、
 [selector 实验](../experiments/2026-07/EXP-ACTION-CAPABILITY-SELECTOR-20260727.md)及其两份
-[训练合同](../interfaces/task_first_n_action_contract.md) /
+[训练合同](../interfaces/action_conditioned_ball_first_contract.md) /
 [选择合同](../interfaces/action_capability_selector_contract.md)。
 
 ## Phase 2 Performance Roadmap (team, 2026-07)

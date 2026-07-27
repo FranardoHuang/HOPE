@@ -5,6 +5,7 @@ import io
 import math
 import numpy as np
 import os
+import stat
 import torch
 from collections.abc import Sequence
 from dataclasses import MISSING
@@ -71,6 +72,7 @@ if TYPE_CHECKING:
 
 
 _CANONICAL_REGISTRY_RUNTIME_MODULE = None
+_ACTION_BALL_RUNTIME_MODULE = None
 
 
 class MotionLoader:
@@ -561,6 +563,8 @@ class MotionCommand(CommandTerm):
     cfg: MotionCommandCfg
     _EXACT_RESUME_STATE_KIND = "whole_body_tracking.MotionCommand"
     _EXACT_RESUME_STATE_SCHEMA_VERSION = 2
+    _ACTION_BALL_EXACT_RESUME_STATE_SCHEMA_VERSION = 4
+    _ACTION_BALL_INT64_MAX = (1 << 63) - 1
 
     def __init__(self, cfg: MotionCommandCfg, env: ManagerBasedRLEnv):
         super().__init__(cfg, env)
@@ -576,6 +580,10 @@ class MotionCommand(CommandTerm):
         if type(canonical_ready_mode) is not bool:
             raise ValueError("canonical_ready_mode must be an exact boolean")
         self.canonical_ready_mode = canonical_ready_mode
+        self._canonical_motion_registry = None
+        self._canonical_motion_admission = None
+        self._canonical_motion_promotion_binding = None
+        self._canonical_motion_registry_module = None
         # Freeze Hydra/ListConfig/custom iterable input once.  Admission hashes
         # and MotionLoader must consume the same ordered path identity.
         self._motion_files = self._configured_motion_files(self.cfg.motion_file)
@@ -793,6 +801,39 @@ class MotionCommand(CommandTerm):
         # (swing type) the env is currently imitating.
         self._multiseg = self.motion.num_segments > 1
         self.clip_id = torch.zeros(self.num_envs, dtype=torch.long, device=self.device)
+        # Action-conditioned ball-first is bound later by RacketTargetCommand, after both command
+        # terms have been constructed from one admitted manifest.  Keeping every field ``None``
+        # until that one-shot bind preserves the legacy reset path exactly, including its random
+        # draws.  The broker owns immutable birth receipts; MotionCommand remains the sole owner of
+        # articulation reset writes.
+        self._action_ball_birth_broker = None
+        self._action_ball_runtime_module_bound = None
+        self._action_ball_trusted_repo_root = None
+        self._action_ball_motion_admission_receipt_sha256 = None
+        # Racket owns the solved per-swing task graph.  Motion receives only two public,
+        # read-only callables: one frozen receipt accessor and one digest over Racket's complete
+        # exact-resume payload.  No sampler/curriculum/pool object is retained here.
+        self._action_ball_task_ref_for_env = None
+        self._action_ball_task_receipt_resolver = None
+        self._action_ball_shared_state_sha256_accessor = None
+        self._action_ball_expected_shared_racket_state_sha256 = None
+        self._action_ball_action_uids = None
+        self._action_ball_motion_sha256 = None
+        self._action_ball_ready_root_z = None
+        self._action_ball_ready_root_quat = None
+        self._action_ball_reset_generation = None
+        self._action_ball_swing_generation = None
+        self._action_ball_birth_receipt_sha256 = None
+        self._action_ball_seen_birth_receipts = None
+        self._action_ball_active_task_refs = None
+        self._action_ball_task_timing_active = None
+        self._action_ball_task_pending_elapsed_s = None
+        self._action_ball_task_age_s = None
+        self._action_ball_time_to_contact_s = None
+        self._action_ball_teacher_rate = None
+        self._action_ball_scaled_t_hit_s = None
+        self._action_ball_scaled_t_cycle_s = None
+        self._action_ball_pre_swing_wait_s = None
         balanced_clip_sampling = getattr(self.cfg, "balanced_clip_sampling", False)
         if type(balanced_clip_sampling) is not bool:
             raise ValueError("balanced_clip_sampling must be an exact boolean")
@@ -1225,6 +1266,13 @@ class MotionCommand(CommandTerm):
                 promotion_certificate_path,
                 authorization_purpose="training",
             )
+            promotion_binding = registry_module.bank_promotion_binding(
+                registry,
+                authorization_purpose="training",
+            )
+            registry_module.motion_admission.require_matching_admission(
+                admission, promotion_binding
+            )
             tables = registry_module.adapt_registry_for_runtime(
                 registry,
                 expected_alignment_sha256=expected_alignment,
@@ -1324,6 +1372,13 @@ class MotionCommand(CommandTerm):
         self.canonical_adoption_manifest_sha256_per_clip = tuple(
             tables.adoption_manifest_sha256_per_clip
         )
+        # Keep the actual opaque capability and the exact object it authorizes.  The action-ball
+        # manifest may repeat these hashes for identity, but it can never mint or replace this
+        # code-rooted training admission.
+        self._canonical_motion_registry = registry
+        self._canonical_motion_admission = admission
+        self._canonical_motion_promotion_binding = promotion_binding
+        self._canonical_motion_registry_module = registry_module
         return tables
 
     def _snapshot_canonical_motion_bytes(self) -> tuple[bytes, ...]:
@@ -1528,12 +1583,1535 @@ class MotionCommand(CommandTerm):
             return self.time_steps
         return torch.where(self.in_hold, self._canonical_ready_steps(), self.time_steps)
 
-    def _write_canonical_ready_state(self, env_ids: torch.Tensor) -> None:
-        """Write one clip-owned ready transaction: root + 31 joints, all velocities zero."""
+    @classmethod
+    def _action_ball_plain_int(
+        cls, value, *, name: str, minimum: int = 0
+    ) -> int:
+        if type(value) is not int or not minimum <= value <= cls._ACTION_BALL_INT64_MAX:
+            raise ValueError(
+                f"{name} must be a plain integer in "
+                f"[{minimum}, {cls._ACTION_BALL_INT64_MAX}]"
+            )
+        return value
+
+    @staticmethod
+    def _action_ball_sha256(value, *, name: str) -> str:
+        if (
+            type(value) is not str
+            or len(value) != 64
+            or any(character not in "0123456789abcdef" for character in value)
+        ):
+            raise ValueError(
+                f"{name} must be exactly 64 lowercase hexadecimal characters"
+            )
+        return value
+
+    @classmethod
+    def _action_ball_runtime_module(cls):
+        """Return the exact repository runtime module that minted the broker classes."""
+
+        import importlib
+        import importlib.util
+        import sys
+
+        global _ACTION_BALL_RUNTIME_MODULE
+        script = Path(__file__).resolve().with_name("action_ball_runtime.py")
+        module_name = (
+            "whole_body_tracking.tasks.tracking.mdp.action_ball_runtime"
+        )
+        if _ACTION_BALL_RUNTIME_MODULE is None:
+            module = sys.modules.get(module_name)
+            if module is None:
+                try:
+                    module = importlib.import_module(module_name)
+                except ModuleNotFoundError:
+                    # CPU unit tests load this package from file under a namespace-only stub.
+                    # Execute the same repository bytes under the canonical name so the classes
+                    # used by Motion and the test broker still have one exact identity.
+                    spec = importlib.util.spec_from_file_location(
+                        module_name, script
+                    )
+                    if spec is None or spec.loader is None:
+                        raise ValueError(
+                            "cannot create action-ball runtime module spec"
+                        )
+                    module = importlib.util.module_from_spec(spec)
+                    sys.modules[module_name] = module
+                    try:
+                        spec.loader.exec_module(module)
+                    except Exception:
+                        sys.modules.pop(module_name, None)
+                        raise
+            _ACTION_BALL_RUNTIME_MODULE = module
+        module = _ACTION_BALL_RUNTIME_MODULE
+        try:
+            module_file = Path(module.__file__).resolve(strict=True)
+        except (AttributeError, OSError) as exc:
+            raise ValueError(
+                "action-ball runtime module has no exact repository file"
+            ) from exc
+        if module_file != script:
+            raise ValueError(
+                "action-ball runtime module resolved to a different file"
+            )
+        if (
+            getattr(module, "BROKER_STATE_SCHEMA_VERSION", None) != 4
+            or getattr(module, "SCHEMA_VERSION", None) != 3
+            or getattr(module, "SAMPLER_SCHEMA_VERSION", None) != 3
+        ):
+            raise ValueError(
+                "unsupported action-ball runtime/broker/sampler schema"
+            )
+        cls._action_ball_sha256(
+            getattr(module, "ARM_CATALOG_SHA256", None),
+            name="action-ball runtime arm catalog SHA",
+        )
+        for name in (
+            "ActionBinding",
+            "ActionBirthBroker",
+            "ActionBirthReceipt",
+            "ActionBallTaskReceipt",
+            "ActionTaskReceiptRef",
+            "BirthReserveRequest",
+            "BirthCommitRequest",
+        ):
+            if not isinstance(getattr(module, name, None), type):
+                raise ValueError(
+                    f"action-ball runtime is missing exact {name}"
+                )
+        return module
+
+    @staticmethod
+    def _action_ball_vector(
+        value, *, name: str, length: int
+    ) -> tuple[float, ...]:
+        if (
+            isinstance(value, (str, bytes))
+            or not isinstance(value, (tuple, list))
+            or len(value) != length
+        ):
+            raise ValueError(f"{name} must be an exact length-{length} tuple/list")
+        result = []
+        for index, component in enumerate(value):
+            if (
+                isinstance(component, bool)
+                or type(component) not in (int, float)
+                or not math.isfinite(float(component))
+            ):
+                raise ValueError(f"{name}[{index}] must be a plain finite number")
+            result.append(float(component))
+        return tuple(result)
+
+    @staticmethod
+    def _action_ball_resolve_root(value) -> Path:
+        if isinstance(value, bool):
+            raise ValueError("trusted_repo_root must be one explicit absolute path")
+        try:
+            raw = Path(os.fspath(value))
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                "trusted_repo_root must be one explicit absolute path"
+            ) from exc
+        if not raw.is_absolute() or raw.is_symlink():
+            raise ValueError(
+                "trusted_repo_root must be absolute and must not be a symlink"
+            )
+        try:
+            resolved = raw.resolve(strict=True)
+        except OSError as exc:
+            raise ValueError("trusted_repo_root cannot be resolved") from exc
+        try:
+            mode = resolved.stat().st_mode
+        except OSError as exc:
+            raise ValueError("trusted_repo_root cannot be stat'ed") from exc
+        if not stat.S_ISDIR(mode):
+            raise ValueError("trusted_repo_root must be a regular directory")
+        return resolved
+
+    @staticmethod
+    def _action_ball_file_receipt(
+        repo_root: Path,
+        relative_path: str,
+        *,
+        name: str,
+        expected_sha256: str | None = None,
+    ) -> tuple[Path, str]:
+        """Resolve one normalized repo-relative regular file without following symlinks."""
+
+        if (
+            type(relative_path) is not str
+            or not relative_path
+            or relative_path.startswith("/")
+            or "\\" in relative_path
+        ):
+            raise ValueError(f"{name} must be one normalized repo-relative POSIX path")
+        parts = tuple(relative_path.split("/"))
+        if (
+            any(part in ("", ".", "..") for part in parts)
+            or Path(relative_path).is_absolute()
+        ):
+            raise ValueError(f"{name} must not escape the trusted repository root")
+        cursor = repo_root
+        for part in parts:
+            cursor = cursor / part
+            if cursor.is_symlink():
+                raise ValueError(f"{name} must not contain a symlink")
+        try:
+            resolved = cursor.resolve(strict=True)
+            resolved.relative_to(repo_root)
+            mode = resolved.stat().st_mode
+        except (OSError, ValueError) as exc:
+            raise ValueError(
+                f"{name} cannot be resolved inside trusted_repo_root"
+            ) from exc
+        if not stat.S_ISREG(mode):
+            raise ValueError(f"{name} must resolve to a regular file")
+        try:
+            payload = resolved.read_bytes()
+        except OSError as exc:
+            raise ValueError(f"{name} cannot be read") from exc
+        digest = hashlib.sha256(payload).hexdigest()
+        if expected_sha256 is not None:
+            expected = MotionCommand._action_ball_sha256(
+                expected_sha256, name=f"{name}.expected_sha256"
+            )
+            if digest != expected:
+                raise ValueError(f"{name} SHA-256 changed after admission")
+        return resolved, digest
+
+    @classmethod
+    def _action_ball_repo_file_receipt(
+        cls,
+        repo_root: Path,
+        path,
+        *,
+        name: str,
+        expected_sha256: str | None = None,
+    ) -> tuple[str, str]:
+        try:
+            resolved = Path(path).resolve(strict=True)
+            relative = resolved.relative_to(repo_root).as_posix()
+        except (OSError, ValueError) as exc:
+            raise ValueError(f"{name} escaped trusted_repo_root") from exc
+        checked, digest = cls._action_ball_file_receipt(
+            repo_root,
+            relative,
+            name=name,
+            expected_sha256=expected_sha256,
+        )
+        if checked != resolved:
+            raise ValueError(f"{name} changed during path admission")
+        return relative, digest
+
+    def _require_action_ball_motion_admission(
+        self, repo_root: Path
+    ) -> None:
+        registry = self._canonical_motion_registry
+        admission = self._canonical_motion_admission
+        binding = self._canonical_motion_promotion_binding
+        module = self._canonical_motion_registry_module
+        if (
+            registry is None
+            or admission is None
+            or binding is None
+            or module is None
+        ):
+            raise ValueError(
+                "action-ball requires the code-rooted opaque canonical motion admission"
+            )
+        if Path(registry.repo_root).resolve(strict=True) != repo_root:
+            raise ValueError(
+                "action-ball trusted_repo_root differs from canonical motion admission"
+            )
+        try:
+            module.motion_admission.require_matching_admission(
+                admission, binding
+            )
+        except Exception as exc:
+            if isinstance(exc, (KeyboardInterrupt, SystemExit)):
+                raise
+            raise ValueError(
+                "opaque canonical motion admission failed revalidation"
+            ) from exc
+
+    def bind_action_ball_birth_broker(
+        self, broker, *, trusted_repo_root
+    ) -> None:
+        """Bind one exact schema-v4 broker to already-admitted motion bytes.
+
+        ``trusted_repo_root`` is deliberately mandatory.  Runtime manifest paths are relative to
+        that explicit root and cannot depend on the process working directory.  The manifest only
+        supplies identity rows; authorization is re-proved from MotionCommand's retained opaque
+        promotion capability.
+        """
+
+        if self._action_ball_birth_broker is not None:
+            raise ValueError("action-ball birth broker may be bound exactly once")
+        if not self.canonical_ready_mode:
+            raise ValueError(
+                "action-ball birth requires canonical_ready_mode=true"
+            )
+        if bool(self.cfg.wrap_teleport):
+            raise ValueError("action-ball birth requires wrap_teleport=false")
+        runtime = self._action_ball_runtime_module()
+        if type(broker) is not runtime.ActionBirthBroker:
+            raise ValueError(
+                "action-ball birth broker must be the exact repository ActionBirthBroker"
+            )
+        repo_root = self._action_ball_resolve_root(trusted_repo_root)
+        self._require_action_ball_motion_admission(repo_root)
+        for method_name in (
+            "binding_for_slot",
+            "reserve_many_true_reset",
+            "pending_receipt",
+            "commit_many_true_reset",
+            "state_dict",
+            "load_state_dict",
+        ):
+            if not callable(getattr(broker, method_name, None)):
+                raise ValueError(
+                    f"action-ball schema-v4 broker must implement {method_name}()"
+                )
+        broker_state = broker.state_dict()
+        if (
+            type(broker_state) is not dict
+            or broker_state.get("schema_version")
+            != runtime.BROKER_STATE_SCHEMA_VERSION
+        ):
+            raise ValueError(
+                "action-ball broker/provider/domain authority are not fully bound"
+            )
+
+        action_count = self._action_ball_plain_int(
+            broker.action_count,
+            name="broker.action_count",
+            minimum=1,
+        )
+        if action_count != int(self.motion.num_segments):
+            raise ValueError(
+                "action-ball action count must equal the loaded motion segment count"
+            )
+        action_uids = tuple(
+            self._action_ball_plain_int(
+                uid, name=f"broker.ordered_action_uids[{slot}]", minimum=1
+            )
+            for slot, uid in enumerate(broker.ordered_action_uids)
+        )
+        if (
+            len(action_uids) != action_count
+            or len(set(action_uids)) != action_count
+        ):
+            raise ValueError(
+                "broker.ordered_action_uids must contain one unique UID per slot"
+            )
+
+        motion_sha256: list[str] = []
+        for slot in range(action_count):
+            binding = broker.binding_for_slot(slot)
+            if type(binding) is not runtime.ActionBinding:
+                raise ValueError(
+                    f"action-ball binding[{slot}] has a forged runtime type"
+                )
+            if (
+                binding.action_slot != slot
+                or binding.action_uid != action_uids[slot]
+            ):
+                raise ValueError(
+                    f"action-ball binding[{slot}] does not match its ordered slot/UID"
+                )
+            resolved, digest = self._action_ball_file_receipt(
+                repo_root,
+                binding.motion_path,
+                name=f"action-ball binding[{slot}].motion_path",
+                expected_sha256=binding.motion_sha256,
+            )
+            if (
+                str(resolved) != self._motion_files[slot]
+                or digest != self._motion_file_sha256[slot]
+                or digest
+                != hashlib.sha256(self._motion_payloads[slot]).hexdigest()
+            ):
+                raise ValueError(
+                    f"action-ball binding[{slot}] does not match the admitted loaded clip bytes"
+                )
+            motion_sha256.append(digest)
+
+        ready_steps = self.motion.seg_start.to(
+            device=self.motion.body_pos_w.device, dtype=torch.long
+        )
+        ready_root_z = tuple(
+            float(value)
+            for value in self.motion.body_pos_w[
+                ready_steps, 0, 2
+            ].detach().cpu().tolist()
+        )
+        ready_root_quat = tuple(
+            tuple(float(component) for component in row)
+            for row in self.motion.body_quat_w[
+                ready_steps, 0
+            ].detach().cpu().tolist()
+        )
+        # Publish only after every opaque admission and file/broker row has passed.  The hard
+        # receipt immediately reopens the capability and all implementation sources once more.
+        self._action_ball_birth_broker = broker
+        self._action_ball_runtime_module_bound = runtime
+        self._action_ball_trusted_repo_root = repo_root
+        self._action_ball_action_uids = action_uids
+        self._action_ball_motion_sha256 = tuple(motion_sha256)
+        self._action_ball_ready_root_z = ready_root_z
+        self._action_ball_ready_root_quat = ready_root_quat
+        self._action_ball_reset_generation = torch.zeros(
+            self.num_envs, dtype=torch.long, device=self.device
+        )
+        self._action_ball_swing_generation = torch.zeros(
+            self.num_envs, dtype=torch.long, device=self.device
+        )
+        self._action_ball_birth_receipt_sha256 = [None] * self.num_envs
+        self._action_ball_seen_birth_receipts = set()
+        self._action_ball_active_task_refs = [None] * self.num_envs
+        self._action_ball_task_timing_active = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        timing_shape = (self.num_envs,)
+        timing_options = {
+            "dtype": torch.float64,
+            "device": self.device,
+        }
+        self._action_ball_task_pending_elapsed_s = torch.zeros(
+            timing_shape, **timing_options
+        )
+        self._action_ball_task_age_s = torch.zeros(
+            timing_shape, **timing_options
+        )
+        self._action_ball_time_to_contact_s = torch.zeros(
+            timing_shape, **timing_options
+        )
+        self._action_ball_teacher_rate = torch.zeros(
+            timing_shape, **timing_options
+        )
+        self._action_ball_scaled_t_hit_s = torch.zeros(
+            timing_shape, **timing_options
+        )
+        self._action_ball_scaled_t_cycle_s = torch.zeros(
+            timing_shape, **timing_options
+        )
+        self._action_ball_pre_swing_wait_s = torch.zeros(
+            timing_shape, **timing_options
+        )
+        try:
+            receipt = self.action_ball_motion_admission_hard_contract()
+        except Exception:
+            self._action_ball_birth_broker = None
+            self._action_ball_runtime_module_bound = None
+            self._action_ball_trusted_repo_root = None
+            self._action_ball_action_uids = None
+            self._action_ball_motion_sha256 = None
+            self._action_ball_ready_root_z = None
+            self._action_ball_ready_root_quat = None
+            self._action_ball_reset_generation = None
+            self._action_ball_swing_generation = None
+            self._action_ball_birth_receipt_sha256 = None
+            self._action_ball_seen_birth_receipts = None
+            self._action_ball_active_task_refs = None
+            self._action_ball_task_timing_active = None
+            self._action_ball_task_pending_elapsed_s = None
+            self._action_ball_task_age_s = None
+            self._action_ball_time_to_contact_s = None
+            self._action_ball_teacher_rate = None
+            self._action_ball_scaled_t_hit_s = None
+            self._action_ball_scaled_t_cycle_s = None
+            self._action_ball_pre_swing_wait_s = None
+            raise
+        self._action_ball_motion_admission_receipt_sha256 = receipt[
+            "canonical_sha256"
+        ]
+
+    def bind_action_ball_task_authority(
+        self, *, task_ref_for_env, resolve_task_ref, shared_state_sha256
+    ) -> None:
+        """Bind Racket's opaque ref/resolve and shared-digest authority seams exactly once."""
+
+        if self._action_ball_birth_broker is None:
+            raise RuntimeError(
+                "action-ball task authority requires the birth broker first"
+            )
+        if (
+            self._action_ball_task_ref_for_env is not None
+            or self._action_ball_task_receipt_resolver is not None
+            or self._action_ball_shared_state_sha256_accessor is not None
+        ):
+            raise ValueError("action-ball task authority may be bound exactly once")
+        if (
+            not callable(task_ref_for_env)
+            or getattr(task_ref_for_env, "__name__", None)
+            != "action_ball_task_ref_for_env"
+            or not callable(resolve_task_ref)
+            or getattr(resolve_task_ref, "__name__", None)
+            != "action_ball_resolve_task_ref"
+            or not callable(shared_state_sha256)
+            or getattr(shared_state_sha256, "__name__", None)
+            != "action_ball_shared_state_sha256"
+        ):
+            raise ValueError(
+                "action-ball task authority requires the exact public Racket accessors"
+            )
+        ref_owner = getattr(task_ref_for_env, "__self__", None)
+        resolver_owner = getattr(resolve_task_ref, "__self__", None)
+        digest_owner = getattr(shared_state_sha256, "__self__", None)
+        if (
+            ref_owner is None
+            or ref_owner is not resolver_owner
+            or ref_owner is not digest_owner
+        ):
+            raise ValueError(
+                "action-ball task ref, resolver and shared digest must have one bound owner"
+            )
+        if self.planner_revision_enabled:
+            raise ValueError(
+                "action-ball receipt timing is the sole phase/deadline owner"
+            )
+        if self._speed_per_clip is not None or tuple(
+            float(value) for value in self.cfg.speed_scale_range
+        ) != (1.0, 1.0):
+            raise ValueError(
+                "action-ball teacher_rate requires native generic speed configuration"
+            )
+        if (
+            tuple(int(value) for value in self.cfg.hold_steps_range)
+            != (0, 0)
+            or int(self.cfg.stand_start_min_hold) != 0
+            or int(self.cfg.post_swing_min_hold) != 0
+            or bool(self.cfg.stagger_initial_clock)
+        ):
+            raise ValueError(
+                "action-ball task receipt owns preparation wait; legacy hold/stagger must be zero"
+            )
+        self._action_ball_sha256(
+            shared_state_sha256(),
+            name="Racket.action_ball_shared_state_sha256",
+        )
+        self._action_ball_task_ref_for_env = task_ref_for_env
+        self._action_ball_task_receipt_resolver = resolve_task_ref
+        self._action_ball_shared_state_sha256_accessor = shared_state_sha256
+        # Dynamic teacher rates use the existing audited velocity-scaling lane, but their values
+        # come only from the current immutable task receipt (never the generic speed sampler).
+        self.retiming_active = True
+        self._action_ball_expected_shared_racket_state_sha256 = None
+
+    @property
+    def action_ball_enabled(self) -> bool:
+        return self._action_ball_birth_broker is not None
+
+    @property
+    def action_ball_ordered_action_uids(self) -> tuple[int, ...]:
+        if self._action_ball_action_uids is None:
+            raise RuntimeError("action-ball birth broker is not bound")
+        return self._action_ball_action_uids
+
+    @property
+    def action_ball_reset_generation(self) -> torch.Tensor:
+        if self._action_ball_reset_generation is None:
+            raise RuntimeError("action-ball birth broker is not bound")
+        return self._action_ball_reset_generation
+
+    @property
+    def action_ball_episode_generation(self) -> torch.Tensor:
+        """Alias documenting that a reset generation identifies one physical episode."""
+
+        return self.action_ball_reset_generation
+
+    @property
+    def action_ball_swing_generation(self) -> torch.Tensor:
+        if self._action_ball_swing_generation is None:
+            raise RuntimeError("action-ball birth broker is not bound")
+        return self._action_ball_swing_generation
+
+    def action_ball_action_uid_for_envs(self, env_ids) -> torch.Tensor:
+        if self._action_ball_action_uids is None:
+            raise RuntimeError("action-ball birth broker is not bound")
+        ids = torch.as_tensor(
+            env_ids, dtype=torch.long, device=self.device
+        ).reshape(-1)
+        uid_table = torch.tensor(
+            self._action_ball_action_uids,
+            dtype=torch.long,
+            device=self.device,
+        )
+        return uid_table[self.clip_id[ids]]
+
+    def action_ball_birth_receipt_sha256(self, env_id: int) -> str:
+        env_id = self._action_ball_plain_int(
+            env_id, name="env_id", minimum=0
+        )
+        if env_id >= self.num_envs:
+            raise ValueError("env_id is outside the environment batch")
+        if self._action_ball_birth_receipt_sha256 is None:
+            raise RuntimeError("action-ball birth broker is not bound")
+        receipt = self._action_ball_birth_receipt_sha256[env_id]
+        if receipt is None:
+            raise RuntimeError("environment has no committed action-ball birth")
+        return receipt
+
+    def action_ball_motion_admission_hard_contract(self) -> dict:
+        """Reopen the opaque training admission and emit a content-addressed receipt."""
+
+        if (
+            self._action_ball_birth_broker is None
+            or self._action_ball_trusted_repo_root is None
+            or self._action_ball_runtime_module_bound is None
+        ):
+            raise RuntimeError("action-ball motion admission is not bound")
+        repo_root = self._action_ball_trusted_repo_root
+        self._require_action_ball_motion_admission(repo_root)
+        registry = self._canonical_motion_registry
+        admission = self._canonical_motion_admission
+        promotion_binding = self._canonical_motion_promotion_binding
+        registry_module = self._canonical_motion_registry_module
+        runtime = self._action_ball_runtime_module_bound
+
+        registry_path, registry_sha = self._action_ball_repo_file_receipt(
+            repo_root,
+            registry.path,
+            name="canonical registry",
+            expected_sha256=registry.registry_sha256,
+        )
+        ready_path, ready_sha = self._action_ball_repo_file_receipt(
+            repo_root,
+            registry.canonical_ready_path,
+            name="canonical ready",
+            expected_sha256=registry.canonical_ready_sha256,
+        )
+        ready_fk_path, ready_fk_sha = self._action_ball_repo_file_receipt(
+            repo_root,
+            registry.canonical_ready_fk_path,
+            name="canonical ready FK",
+            expected_sha256=registry.canonical_ready_fk_sha256,
+        )
+        certificate_path, certificate_sha = (
+            self._action_ball_repo_file_receipt(
+                repo_root,
+                getattr(admission, "_certificate_path", ""),
+                name="canonical promotion certificate",
+                expected_sha256=admission.certificate_sha256,
+            )
+        )
+        binding_sha = registry_module.motion_admission._binding_sha256(
+            promotion_binding
+        )
+
+        motion_rows = []
+        for slot, motion_id in enumerate(self.canonical_motion_ids):
+            binding = self._action_ball_birth_broker.binding_for_slot(slot)
+            resolved, digest = self._action_ball_file_receipt(
+                repo_root,
+                binding.motion_path,
+                name=f"canonical motion[{slot}]",
+                expected_sha256=binding.motion_sha256,
+            )
+            if (
+                str(resolved) != self._motion_files[slot]
+                or digest != self._motion_file_sha256[slot]
+            ):
+                raise RuntimeError(
+                    "action-ball motion bytes changed after opaque admission"
+                )
+            motion_rows.append(
+                {
+                    "motion_id": motion_id,
+                    "action_uid": binding.action_uid,
+                    "action_slot": binding.action_slot,
+                    "motion_path": binding.motion_path,
+                    "motion_sha256": digest,
+                    "profile_sha256": binding.profile_sha256,
+                }
+            )
+
+        source_paths = {
+            "commands": Path(__file__).resolve(strict=True),
+            "action_ball_runtime": Path(runtime.__file__).resolve(strict=True),
+            "canonical_motion_registry": Path(
+                registry_module.__file__
+            ).resolve(strict=True),
+            "canonical_motion_admission": Path(
+                registry_module.motion_admission.__file__
+            ).resolve(strict=True),
+        }
+        implementation_sources = {}
+        for name, path in source_paths.items():
+            relative, digest = self._action_ball_repo_file_receipt(
+                repo_root,
+                path,
+                name=f"implementation source {name}",
+            )
+            implementation_sources[name] = {
+                "path": relative,
+                "sha256": digest,
+            }
+
+        payload = {
+            "schema_version": 1,
+            "kind": (
+                "whole_body_tracking.MotionCommand."
+                "action_ball_motion_admission"
+            ),
+            "authorization_purpose": "training",
+            "trusted_repo_root": str(repo_root),
+            "opaque_capability": {
+                "capability_type": type(admission).__name__,
+                "purpose": admission.purpose,
+                "promotion_binding_sha256": binding_sha,
+                "certificate_path": certificate_path,
+                "certificate_sha256": certificate_sha,
+            },
+            "canonical_bank": {
+                "bank_id": registry.bank_id,
+                "scope": registry.scope,
+                "registry_path": registry_path,
+                "registry_sha256": registry_sha,
+                "alignment_sha256": (
+                    self.canonical_registry_alignment_sha256
+                ),
+                "canonical_ready_path": ready_path,
+                "canonical_ready_sha256": ready_sha,
+                "canonical_ready_fk_path": ready_fk_path,
+                "canonical_ready_fk_sha256": ready_fk_sha,
+                "motion_rows": motion_rows,
+            },
+            "runtime_binding": {
+                "runtime_contract_sha256": runtime.RUNTIME_CONTRACT_SHA256,
+                "broker_state_schema_version": (
+                    runtime.BROKER_STATE_SCHEMA_VERSION
+                ),
+                "broker_registry_sha256": (
+                    self._action_ball_birth_broker.registry_sha256
+                ),
+                "provider_state_owner_sha256": (
+                    self._action_ball_birth_broker.provider_state_owner_sha256
+                ),
+                "ordered_action_uids": list(
+                    self._action_ball_action_uids
+                ),
+                "manifest_rows_are_identity_only": True,
+            },
+            "implementation_sources": implementation_sources,
+        }
+        payload["canonical_sha256"] = hashlib.sha256(
+            _canonical_json_bytes(payload)
+        ).hexdigest()
+        return payload
+
+    def _validate_action_ball_birth_receipt(
+        self,
+        receipt,
+        *,
+        env_id: int,
+        reset_generation: int,
+        action_slot: int,
+        action_uid: int,
+    ) -> tuple[
+        str,
+        tuple[float, float, float],
+        tuple[float, float, float, float],
+    ]:
+        runtime = self._action_ball_runtime_module_bound
+        if type(receipt) is not runtime.ActionBirthReceipt:
+            raise ValueError("action-ball birth receipt has a forged runtime type")
+        if (
+            receipt.env_id != env_id
+            or receipt.reset_generation != reset_generation
+            or receipt.action_slot != action_slot
+            or receipt.action_uid != action_uid
+        ):
+            raise ValueError(
+                "action-ball birth does not match the batched reset request"
+            )
+        binding = self._action_ball_birth_broker.binding_for_slot(action_slot)
+        if (
+            receipt.registry_sha256
+            != self._action_ball_birth_broker.registry_sha256
+            or receipt.motion_sha256
+            != self._action_ball_motion_sha256[action_slot]
+            or receipt.profile_sha256 != binding.profile_sha256
+        ):
+            raise ValueError(
+                "action-ball birth does not match its broker motion/profile registry"
+            )
+        receipt_sha = self._action_ball_sha256(
+            receipt.canonical_sha256,
+            name="birth.canonical_sha256",
+        )
+        if receipt_sha in self._action_ball_seen_birth_receipts:
+            raise ValueError("action-ball birth receipt replay detected")
+        spawn = self._action_ball_vector(
+            receipt.base_spawn_w_m,
+            name="birth.base_spawn_w_m",
+            length=3,
+        )
+        quat = self._action_ball_vector(
+            receipt.base_quat_wxyz,
+            name="birth.base_quat_wxyz",
+            length=4,
+        )
+        ready_z = self._action_ball_ready_root_z[action_slot]
+        if not math.isclose(
+            spawn[2], ready_z, rel_tol=0.0, abs_tol=1.0e-7
+        ):
+            raise ValueError(
+                "action-ball birth Z differs from canonical-ready root Z"
+            )
+        ready_quat = self._action_ball_ready_root_quat[action_slot]
+        direct = max(abs(a - b) for a, b in zip(quat, ready_quat))
+        negated = max(abs(a + b) for a, b in zip(quat, ready_quat))
+        if min(direct, negated) > 1.0e-6:
+            raise ValueError(
+                "action-ball birth quaternion differs from canonical-ready root"
+            )
+        return receipt_sha, spawn, quat
+
+    def _rollback_action_ball_broker(
+        self, state: dict, *, original_error: BaseException
+    ) -> None:
+        try:
+            self._action_ball_birth_broker.load_state_dict(state)
+            if self._action_ball_birth_broker.state_dict() != state:
+                raise RuntimeError(
+                    "broker rollback did not restore exact state"
+                )
+        except Exception as rollback_error:
+            raise RuntimeError(
+                "action-ball batch failed and broker/provider/domain rollback failed"
+            ) from rollback_error
+
+    def _reserve_action_ball_true_reset(
+        self, env_ids: torch.Tensor
+    ) -> dict:
+        if self._action_ball_birth_broker is None:
+            raise RuntimeError("action-ball birth broker is not bound")
+        if env_ids.ndim != 1 or len(env_ids) == 0:
+            raise ValueError(
+                "action-ball reset batch requires unique non-empty env ids"
+            )
+        env_rows = tuple(
+            int(value) for value in env_ids.detach().cpu().tolist()
+        )
+        if len(set(env_rows)) != len(env_rows):
+            raise ValueError(
+                "action-ball reset batch requires unique non-empty env ids"
+            )
+        current = self._action_ball_reset_generation[env_ids]
+        if bool((current >= self._ACTION_BALL_INT64_MAX).any()):
+            raise OverflowError("action-ball reset generation exhausted")
+        next_generation = current + 1
+        runtime = self._action_ball_runtime_module_bound
+        action_slot_rows = tuple(
+            int(value)
+            for value in self.clip_id[env_ids].detach().cpu().tolist()
+        )
+        generation_rows = tuple(
+            int(value)
+            for value in next_generation.detach().cpu().tolist()
+        )
+        requests = []
+        request_rows = []
+        for env_id, action_slot, generation in zip(
+            env_rows, action_slot_rows, generation_rows
+        ):
+            action_uid = self._action_ball_action_uids[action_slot]
+            requests.append(
+                runtime.BirthReserveRequest(
+                    env_id=env_id,
+                    reset_generation=generation,
+                    action_uid=action_uid,
+                    action_slot=action_slot,
+                )
+            )
+            request_rows.append(
+                (env_id, generation, action_slot, action_uid)
+            )
+
+        broker_state_before = self._action_ball_birth_broker.state_dict()
+        try:
+            receipts = self._action_ball_birth_broker.reserve_many_true_reset(
+                tuple(requests), reset_kind="true_reset"
+            )
+            if (
+                type(receipts) is not tuple
+                or len(receipts) != len(requests)
+            ):
+                raise ValueError(
+                    "action-ball broker returned a partial reset batch"
+                )
+            receipt_sha256 = []
+            spawn_rows = []
+            quat_rows = []
+            for receipt, request_row in zip(receipts, request_rows):
+                env_id, generation, action_slot, action_uid = request_row
+                receipt_sha, spawn, quat = (
+                    self._validate_action_ball_birth_receipt(
+                        receipt,
+                        env_id=env_id,
+                        reset_generation=generation,
+                        action_slot=action_slot,
+                        action_uid=action_uid,
+                    )
+                )
+                pending = self._action_ball_birth_broker.pending_receipt(
+                    env_id=env_id,
+                    reset_generation=generation,
+                    action_uid=action_uid,
+                    action_slot=action_slot,
+                    reset_kind="true_reset",
+                )
+                if pending is not receipt:
+                    raise ValueError(
+                        "action-ball broker changed a reserved receipt object"
+                    )
+                receipt_sha256.append(receipt_sha)
+                spawn_rows.append(spawn)
+                quat_rows.append(quat)
+            if len(set(receipt_sha256)) != len(receipt_sha256):
+                raise ValueError(
+                    "action-ball broker replayed one birth within a reset batch"
+                )
+            spawn = torch.tensor(
+                spawn_rows,
+                dtype=self.motion.body_pos_w.dtype,
+                device=self.device,
+            )
+            quat = torch.tensor(
+                quat_rows,
+                dtype=self.motion.body_quat_w.dtype,
+                device=self.device,
+            )
+            if (
+                tuple(spawn.shape) != (len(env_ids), 3)
+                or tuple(quat.shape) != (len(env_ids), 4)
+                or not bool(torch.isfinite(spawn).all())
+                or not bool(torch.isfinite(quat).all())
+            ):
+                raise ValueError(
+                    "action-ball broker returned a malformed root batch"
+                )
+        except Exception as exc:
+            self._rollback_action_ball_broker(
+                broker_state_before, original_error=exc
+            )
+            raise
+        return {
+            "broker_state_before": broker_state_before,
+            "receipts": receipts,
+            "receipt_sha256": tuple(receipt_sha256),
+            "request_rows": tuple(request_rows),
+            "next_generation": next_generation,
+            "spawn": spawn,
+            "quat": quat,
+            "motion_reset_generation_before": current.clone(),
+            "motion_swing_generation_before": (
+                self._action_ball_swing_generation[env_ids].clone()
+            ),
+            "motion_birth_receipts_before": list(
+                self._action_ball_birth_receipt_sha256
+            ),
+            "motion_seen_receipts_before": set(
+                self._action_ball_seen_birth_receipts
+            ),
+        }
+
+    def _rollback_action_ball_true_reset(
+        self,
+        env_ids: torch.Tensor,
+        transaction: dict,
+        *,
+        original_error: BaseException,
+    ) -> None:
+        rollback_error = None
+        try:
+            self._rollback_action_ball_broker(
+                transaction["broker_state_before"],
+                original_error=original_error,
+            )
+        except Exception as exc:
+            rollback_error = exc
+        # Restore Motion's publication fields even when a broken callback prevents broker
+        # rollback, so no prefix of the batch is presented as a committed local episode.
+        self._action_ball_reset_generation[env_ids] = transaction[
+            "motion_reset_generation_before"
+        ]
+        self._action_ball_swing_generation[env_ids] = transaction[
+            "motion_swing_generation_before"
+        ]
+        self._action_ball_birth_receipt_sha256 = list(
+            transaction["motion_birth_receipts_before"]
+        )
+        self._action_ball_seen_birth_receipts = set(
+            transaction["motion_seen_receipts_before"]
+        )
+        if rollback_error is not None:
+            raise RuntimeError(
+                "action-ball reset failed and exact transaction rollback failed"
+            ) from rollback_error
+
+    def _commit_action_ball_true_reset(
+        self, env_ids: torch.Tensor, transaction: dict
+    ) -> None:
+        runtime = self._action_ball_runtime_module_bound
+        receipt_sha256 = transaction["receipt_sha256"]
+        next_generation = transaction["next_generation"]
+        request_rows = transaction["request_rows"]
+        if (
+            len(env_ids) != len(receipt_sha256)
+            or len(request_rows) != len(receipt_sha256)
+            or tuple(next_generation.shape) != (len(env_ids),)
+        ):
+            raise RuntimeError(
+                "action-ball commit batch is internally inconsistent"
+            )
+        requests = tuple(
+            runtime.BirthCommitRequest(
+                env_id=env_id,
+                reset_generation=generation,
+                receipt_sha256=receipt_sha256[index],
+            )
+            for index, (
+                env_id,
+                generation,
+                _action_slot,
+                _action_uid,
+            ) in enumerate(request_rows)
+        )
+        # Validate every pending identity before the simulator mutation is declared committed.
+        for index, (
+            env_id,
+            generation,
+            action_slot,
+            action_uid,
+        ) in enumerate(request_rows):
+            pending = self._action_ball_birth_broker.pending_receipt(
+                env_id=env_id,
+                reset_generation=generation,
+                action_uid=action_uid,
+                action_slot=action_slot,
+                reset_kind="true_reset",
+            )
+            if pending.canonical_sha256 != receipt_sha256[index]:
+                raise RuntimeError(
+                    "action-ball pending receipt drifted before atomic commit"
+                )
+        self._action_ball_birth_broker.commit_many_true_reset(
+            requests, reset_kind="true_reset"
+        )
+
+        updated_receipts = list(self._action_ball_birth_receipt_sha256)
+        updated_seen = set(self._action_ball_seen_birth_receipts)
+        for (env_id, _generation, _slot, _uid), receipt_sha in zip(
+            request_rows, receipt_sha256
+        ):
+            updated_receipts[env_id] = receipt_sha
+            updated_seen.add(receipt_sha)
+        self._action_ball_reset_generation[env_ids] = next_generation
+        self._action_ball_swing_generation[env_ids] = 0
+        self._action_ball_birth_receipt_sha256 = updated_receipts
+        self._action_ball_seen_birth_receipts = updated_seen
+
+    def _advance_action_ball_wrap_generation(
+        self, env_ids: torch.Tensor
+    ) -> None:
+        current = self._action_ball_swing_generation[env_ids]
+        if bool((current >= self._ACTION_BALL_INT64_MAX).any()):
+            raise OverflowError("action-ball swing generation exhausted")
+        self._action_ball_swing_generation[env_ids] = current + 1
+
+    def _begin_action_ball_task_pending(
+        self, env_ids: torch.Tensor, *, elapsed_s: float
+    ) -> None:
+        """Invalidate the prior swing locally until Racket publishes the new frozen receipt."""
+
+        if (
+            self._action_ball_task_ref_for_env is None
+            or self._action_ball_task_receipt_resolver is None
+        ):
+            raise RuntimeError(
+                "action-ball reset reached task timing before Racket authority was bound"
+            )
+        elapsed = float(elapsed_s)
+        if not math.isfinite(elapsed) or elapsed < 0.0:
+            raise ValueError(
+                "action-ball pending task elapsed time must be finite and non-negative"
+            )
+        env_rows = tuple(
+            int(value) for value in env_ids.detach().cpu().tolist()
+        )
+        for env_id in env_rows:
+            self._action_ball_active_task_refs[env_id] = None
+        self._action_ball_task_timing_active[env_ids] = False
+        self._action_ball_task_pending_elapsed_s[env_ids] = elapsed
+        self._action_ball_task_age_s[env_ids] = 0.0
+        self._action_ball_time_to_contact_s[env_ids] = 0.0
+        self._action_ball_teacher_rate[env_ids] = 0.0
+        self._action_ball_scaled_t_hit_s[env_ids] = 0.0
+        self._action_ball_scaled_t_cycle_s[env_ids] = 0.0
+        self._action_ball_pre_swing_wait_s[env_ids] = 0.0
+        # Until the exact task arrives the admitted canonical-ready pose is the only safe target.
+        self.time_steps[env_ids] = self.motion.seg_start[
+            self.clip_id[env_ids]
+        ]
+        self.time_steps_f[env_ids] = self.time_steps[env_ids].float()
+        self.speed_scale[env_ids] = 0.0
+        self.hold_counter[env_ids] = 1
+        self.metrics["in_hold"][env_ids] = 1.0
+
+    @staticmethod
+    def _action_ball_finite_float(
+        value, *, name: str, minimum: float | None = None
+    ) -> float:
+        if (
+            isinstance(value, bool)
+            or type(value) not in (int, float)
+            or not math.isfinite(float(value))
+        ):
+            raise ValueError(f"{name} must be a plain finite number")
+        result = float(value)
+        if minimum is not None and result < minimum:
+            raise ValueError(f"{name} must be >= {minimum}")
+        return result
+
+    @staticmethod
+    def _action_ball_close_float(
+        actual: float, expected: float, *, name: str
+    ) -> None:
+        if not math.isclose(
+            actual, expected, rel_tol=1.0e-12, abs_tol=1.0e-12
+        ):
+            raise ValueError(
+                f"{name} is inconsistent: actual={actual}, expected={expected}"
+            )
+
+    def _validate_action_ball_task_ref_and_receipt(
+        self, task_ref, receipt, *, env_id: int
+    ) -> dict:
+        """Validate one opaque ref resolution and every timing identity/algebra field."""
+
+        runtime = self._action_ball_runtime_module_bound
+        if type(task_ref) is not runtime.ActionTaskReceiptRef:
+            raise ValueError("action-ball task ref has a forged runtime type")
+        if type(receipt) is not runtime.ActionBallTaskReceipt:
+            raise ValueError("action-ball task receipt has a forged runtime type")
+        canonical_ref = receipt.task_ref()
+        if type(canonical_ref) is not runtime.ActionTaskReceiptRef:
+            raise ValueError(
+                "action-ball task receipt emitted a forged canonical ref"
+            )
+        if canonical_ref != task_ref:
+            raise ValueError(
+                "action-ball task resolver changed the requested immutable ref"
+            )
+        reset_generation = int(
+            self._action_ball_reset_generation[env_id].item()
+        )
+        swing_generation = int(
+            self._action_ball_swing_generation[env_id].item()
+        )
+        action_slot = int(self.clip_id[env_id].item())
+        action_uid = self._action_ball_action_uids[action_slot]
+        birth_sha256 = self.action_ball_birth_receipt_sha256(env_id)
+        if (
+            receipt.env_id != env_id
+            or receipt.reset_generation != reset_generation
+            or receipt.swing_generation != swing_generation
+            or receipt.action_slot != action_slot
+            or receipt.action_uid != action_uid
+            or receipt.birth_sha256 != birth_sha256
+            or receipt.motion_sha256
+            != self._action_ball_motion_sha256[action_slot]
+        ):
+            raise ValueError(
+                "action-ball task receipt disagrees with Motion birth/action generation"
+            )
+        binding = self._action_ball_birth_broker.binding_for_slot(
+            action_slot
+        )
+        if (
+            receipt.registry_sha256
+            != self._action_ball_birth_broker.registry_sha256
+            or receipt.profile_sha256 != binding.profile_sha256
+            or receipt.arm_catalog_sha256
+            != runtime.ARM_CATALOG_SHA256
+        ):
+            raise ValueError(
+                "action-ball task receipt disagrees with broker registry/profile/arm catalog"
+            )
+        self._action_ball_sha256(
+            receipt.sample_sha256, name="task.sample_sha256"
+        )
+        self._action_ball_sha256(
+            receipt.canonical_sha256, name="task.canonical_sha256"
+        )
+
+        time_to_contact = self._action_ball_finite_float(
+            receipt.time_to_contact_s,
+            name="task.time_to_contact_s",
+            minimum=0.0,
+        )
+        reference_t_hit = self._action_ball_finite_float(
+            receipt.reference_t_hit_s,
+            name="task.reference_t_hit_s",
+            minimum=0.0,
+        )
+        reference_t_cycle = self._action_ball_finite_float(
+            receipt.reference_t_cycle_s,
+            name="task.reference_t_cycle_s",
+            minimum=0.0,
+        )
+        reference_speed = self._action_ball_finite_float(
+            receipt.reference_racket_site_speed_mps,
+            name="task.reference_racket_site_speed_mps",
+            minimum=0.0,
+        )
+        required_speed = self._action_ball_finite_float(
+            receipt.required_racket_site_speed_mps,
+            name="task.required_racket_site_speed_mps",
+            minimum=0.0,
+        )
+        teacher_rate = self._action_ball_finite_float(
+            receipt.teacher_rate,
+            name="task.teacher_rate",
+            minimum=0.0,
+        )
+        teacher_rate_min = self._action_ball_finite_float(
+            receipt.teacher_rate_min,
+            name="task.teacher_rate_min",
+            minimum=0.0,
+        )
+        teacher_rate_max = self._action_ball_finite_float(
+            receipt.teacher_rate_max,
+            name="task.teacher_rate_max",
+            minimum=0.0,
+        )
+        scaled_t_hit = self._action_ball_finite_float(
+            receipt.scaled_t_hit_s,
+            name="task.scaled_t_hit_s",
+            minimum=0.0,
+        )
+        scaled_t_cycle = self._action_ball_finite_float(
+            receipt.scaled_t_cycle_s,
+            name="task.scaled_t_cycle_s",
+            minimum=0.0,
+        )
+        pre_swing_wait = self._action_ball_finite_float(
+            receipt.pre_swing_wait_s,
+            name="task.pre_swing_wait_s",
+            minimum=0.0,
+        )
+        reaction_margin = self._action_ball_finite_float(
+            receipt.reaction_margin_s,
+            name="task.reaction_margin_s",
+            minimum=0.0,
+        )
+        if (
+            time_to_contact <= 0.0
+            or reference_t_hit <= 0.0
+            or reference_t_cycle <= reference_t_hit
+            or reference_speed <= 0.0
+            or required_speed <= 0.0
+            or teacher_rate <= 0.0
+            or teacher_rate_min <= 0.0
+            or teacher_rate_max < teacher_rate_min
+            or scaled_t_hit <= 0.0
+            or scaled_t_cycle <= scaled_t_hit
+        ):
+            raise ValueError("action-ball task timing has a non-positive/order violation")
+        if not teacher_rate_min <= 1.0 <= teacher_rate_max:
+            raise ValueError(
+                "action-ball certified teacher-rate bounds must contain native rate 1"
+            )
+        if not teacher_rate_min <= teacher_rate <= teacher_rate_max:
+            # Deliberately reject rather than clipping.  Clipping would silently change both
+            # contact speed and the sampled ball deadline.
+            raise ValueError(
+                "action-ball teacher_rate is outside its certified range"
+            )
+        required_vector = self._action_ball_vector(
+            receipt.racket_velocity_w_mps,
+            name="task.racket_velocity_w_mps",
+            length=3,
+        )
+        self._action_ball_close_float(
+            required_speed,
+            math.sqrt(sum(value * value for value in required_vector)),
+            name="task required racket-site speed",
+        )
+        self._action_ball_close_float(
+            teacher_rate,
+            required_speed / reference_speed,
+            name="task teacher_rate=required/reference",
+        )
+        self._action_ball_close_float(
+            scaled_t_hit,
+            reference_t_hit / teacher_rate,
+            name="task scaled_t_hit_s",
+        )
+        self._action_ball_close_float(
+            scaled_t_cycle,
+            reference_t_cycle / teacher_rate,
+            name="task scaled_t_cycle_s",
+        )
+        self._action_ball_close_float(
+            pre_swing_wait,
+            time_to_contact - scaled_t_hit,
+            name="task pre_swing_wait_s",
+        )
+        if (
+            pre_swing_wait + 1.0e-12 < reaction_margin
+            or pre_swing_wait > 1.0 + 1.0e-12
+        ):
+            raise ValueError(
+                "action-ball pre-swing wait violates reaction/one-second bounds"
+            )
+        runtime_episode_length = (
+            int(self._env.max_episode_length) * float(self._env.step_dt)
+        )
+        if (
+            pre_swing_wait
+            + scaled_t_cycle
+            + float(self._env.step_dt)
+            > runtime_episode_length + 1.0e-12
+        ):
+            raise ValueError(
+                "action-ball task cycle plus close tick exceeds runtime episode horizon"
+            )
+        native_cycle = (
+            int(self.motion.seg_len[action_slot].item()) - 1
+        ) * float(self._env.step_dt)
+        self._action_ball_close_float(
+            reference_t_cycle,
+            native_cycle,
+            name="task reference_t_cycle_s vs admitted motion",
+        )
+        hit_frame = reference_t_hit / float(self._env.step_dt)
+        self._action_ball_close_float(
+            hit_frame,
+            float(round(hit_frame)),
+            name="task reference_t_hit_s policy-frame alignment",
+        )
+        if not 0 < round(hit_frame) < int(
+            self.motion.seg_len[action_slot].item()
+        ) - 1:
+            raise ValueError(
+                "action-ball task hit frame is outside the admitted motion interior"
+            )
+        pending_elapsed = float(
+            self._action_ball_task_pending_elapsed_s[env_id].item()
+        )
+        if pending_elapsed > pre_swing_wait + 1.0e-12:
+            raise RuntimeError(
+                "action-ball task arrived after its certified ready-wait ended"
+            )
+        return {
+            "time_to_contact_s": time_to_contact,
+            "teacher_rate": teacher_rate,
+            "scaled_t_hit_s": scaled_t_hit,
+            "scaled_t_cycle_s": scaled_t_cycle,
+            "pre_swing_wait_s": pre_swing_wait,
+            "pending_elapsed_s": pending_elapsed,
+        }
+
+    def _resolve_pending_action_ball_tasks(self) -> None:
+        if self._action_ball_task_ref_for_env is None:
+            raise RuntimeError("action-ball task ref authority is not bound")
+        pending_ids = torch.where(
+            (self._action_ball_reset_generation > 0)
+            & (~self._action_ball_task_timing_active)
+        )[0]
+        if len(pending_ids) == 0:
+            return
+        for env_id in (
+            int(value) for value in pending_ids.detach().cpu().tolist()
+        ):
+            task_ref = self._action_ball_task_ref_for_env(env_id)
+            if task_ref is None:
+                raise RuntimeError(
+                    "action-ball Racket authority did not publish the current task ref"
+                )
+            receipt = self._action_ball_task_receipt_resolver(task_ref)
+            timing = self._validate_action_ball_task_ref_and_receipt(
+                task_ref, receipt, env_id=env_id
+            )
+            self._action_ball_active_task_refs[env_id] = task_ref
+            self._action_ball_task_age_s[env_id] = timing[
+                "pending_elapsed_s"
+            ]
+            self._action_ball_time_to_contact_s[env_id] = timing[
+                "time_to_contact_s"
+            ]
+            self._action_ball_teacher_rate[env_id] = timing[
+                "teacher_rate"
+            ]
+            self._action_ball_scaled_t_hit_s[env_id] = timing[
+                "scaled_t_hit_s"
+            ]
+            self._action_ball_scaled_t_cycle_s[env_id] = timing[
+                "scaled_t_cycle_s"
+            ]
+            self._action_ball_pre_swing_wait_s[env_id] = timing[
+                "pre_swing_wait_s"
+            ]
+            self._action_ball_task_timing_active[env_id] = True
+
+    @property
+    def action_ball_task_timing_active(self) -> torch.Tensor:
+        if self._action_ball_task_timing_active is None:
+            raise RuntimeError("action-ball task timing is not bound")
+        return self._action_ball_task_timing_active
+
+    @property
+    def action_ball_time_to_contact_remaining_s(self) -> torch.Tensor:
+        """Signed task deadline; inactive rows use a large fail-closed positive sentinel."""
+
+        if self._action_ball_task_timing_active is None:
+            raise RuntimeError("action-ball task timing is not bound")
+        remaining = (
+            self._action_ball_time_to_contact_s
+            - self._action_ball_task_age_s
+        )
+        return torch.where(
+            self._action_ball_task_timing_active,
+            remaining,
+            torch.full_like(remaining, 1.0e6),
+        )
+
+    def _advance_action_ball_task_timing(
+        self,
+    ) -> tuple[torch.Tensor, torch.Tensor]:
+        """Advance receipt time analytically; return held and cycle-due-before masks."""
+
+        # A task resolved during this command-manager compute has not driven a
+        # physics tick yet.  Only rows that were already active on entry may
+        # consume this update's elapsed policy interval.  WRAP carries one dt
+        # in ``pending_elapsed_s`` because its replacement task is installed
+        # later in the previous compute and does drive the intervening tick.
+        active_before_resolve = self._action_ball_task_timing_active.clone()
+        self._resolve_pending_action_ball_tasks()
+        active = self._action_ball_task_timing_active
+        if bool(
+            ((self._action_ball_reset_generation > 0) & ~active).any()
+        ):
+            raise RuntimeError("action-ball task timing remained unresolved")
+        cycle_total = (
+            self._action_ball_pre_swing_wait_s
+            + self._action_ball_scaled_t_cycle_s
+        )
+        cycle_due_before = active & (
+            self._action_ball_task_age_s + 1.0e-12 >= cycle_total
+        )
+        advancing = active_before_resolve & ~cycle_due_before
+        self._action_ball_task_age_s[advancing] += float(
+            self._env.step_dt
+        )
+        active_motion_s = torch.clamp(
+            self._action_ball_task_age_s
+            - self._action_ball_pre_swing_wait_s,
+            min=0.0,
+        )
+        active_motion_s = torch.minimum(
+            active_motion_s, self._action_ball_scaled_t_cycle_s
+        )
+        clip_starts = self.motion.seg_start[self.clip_id].to(
+            dtype=torch.float64
+        )
+        phase_frames = (
+            active_motion_s
+            * self._action_ball_teacher_rate
+            / float(self._env.step_dt)
+        )
+        final_frames = (
+            self.motion.seg_len[self.clip_id] - 1
+        ).to(dtype=torch.float64)
+        phase_frames = torch.minimum(phase_frames, final_frames)
+        self.time_steps_f.copy_(
+            (clip_starts + phase_frames).to(self.time_steps_f.dtype)
+        )
+        rounded = self.time_steps_f.round().long()
+        final_steps = (
+            self.motion.seg_start[self.clip_id]
+            + self.motion.seg_len[self.clip_id]
+            - 1
+        )
+        self.time_steps.copy_(torch.minimum(rounded, final_steps))
+        self.speed_scale.copy_(
+            torch.where(
+                active,
+                self._action_ball_teacher_rate.to(self.speed_scale.dtype),
+                torch.zeros_like(self.speed_scale),
+            )
+        )
+        held = active & (active_motion_s <= 1.0e-12)
+        self.hold_counter.copy_(held.to(self.hold_counter.dtype))
+        self.metrics["in_hold"] = held.float()
+        self.metrics["playback_speed"] = self.speed_scale.clone()
+        self.metrics["action_ball_task_age_s"] = (
+            self._action_ball_task_age_s.to(self.speed_scale.dtype)
+        )
+        self.metrics["action_ball_time_to_contact_s"] = (
+            self.action_ball_time_to_contact_remaining_s.to(
+                self.speed_scale.dtype
+            )
+        )
+        self.metrics["action_ball_teacher_rate"] = (
+            self._action_ball_teacher_rate.to(self.speed_scale.dtype)
+        )
+        self.metrics["action_ball_pre_swing_wait_remaining_s"] = torch.clamp(
+            self._action_ball_pre_swing_wait_s
+            - self._action_ball_task_age_s,
+            min=0.0,
+        ).to(self.speed_scale.dtype)
+        return held, cycle_due_before
+
+    def _write_canonical_ready_state(
+        self,
+        env_ids: torch.Tensor,
+        *,
+        action_ball_base_spawn_w_m: torch.Tensor | None = None,
+        action_ball_base_quat_wxyz: torch.Tensor | None = None,
+    ) -> dict | None:
+        """Write one clip-owned ready transaction: root + 31 joints, all velocities zero.
+
+        In action-ball mode the complete root pose comes from the provider-issued birth:
+        environment-local XYZ plus its canonical-ready quaternion.  No task/base goal is accepted
+        here.  Joint pose still comes only from the opaque-admitted shared ready frame.
+        """
 
         ready_steps = self._canonical_ready_steps(env_ids)
         root_pos = self.motion.body_pos_w[ready_steps, 0] + self._env.scene.env_origins[env_ids]
         root_quat = self.motion.body_quat_w[ready_steps, 0]
+        action_ball_write = action_ball_base_spawn_w_m is not None
+        if action_ball_write != (action_ball_base_quat_wxyz is not None):
+            raise ValueError(
+                "action-ball root spawn and quaternion must be supplied together"
+            )
+        if action_ball_write:
+            spawn = action_ball_base_spawn_w_m
+            quat = action_ball_base_quat_wxyz
+            if (
+                not torch.is_tensor(spawn)
+                or tuple(spawn.shape) != (len(env_ids), 3)
+                or not bool(torch.isfinite(spawn).all())
+                or not torch.is_tensor(quat)
+                or tuple(quat.shape) != (len(env_ids), 4)
+                or not bool(torch.isfinite(quat).all())
+            ):
+                raise ValueError(
+                    "action-ball root must be finite [N,3] spawn + [N,4] quaternion tensors"
+                )
+            spawn = spawn.to(dtype=root_pos.dtype, device=root_pos.device)
+            quat = quat.to(dtype=root_quat.dtype, device=root_quat.device)
+            # ``base_spawn_w_m`` is an environment-local world-frame position, not an offset from
+            # the historical clip root.  Replacing all XYZ is what makes the birth receipt the
+            # sole physical reset truth.
+            root_pos = (
+                self._env.scene.env_origins[env_ids].to(root_pos.dtype)
+                + spawn
+            )
+            root_quat = quat
         root_velocity = torch.zeros(
             len(env_ids), 6, dtype=root_pos.dtype, device=root_pos.device
         )
@@ -1541,11 +3119,51 @@ class MotionCommand(CommandTerm):
         joint_pos = self.motion.joint_pos[ready_steps]
         joint_vel = torch.zeros_like(joint_pos)
 
-        # Isaac exposes separate root/joint setters.  Keep both writes adjacent and derive both
-        # payloads before the first mutation so no default-stand/clip-ready mixed state can be
-        # constructed by this consumer.
-        self.robot.write_root_state_to_sim(root_state, env_ids=env_ids)
-        self.robot.write_joint_state_to_sim(joint_pos, joint_vel, env_ids=env_ids)
+        rollback_state = None
+        if action_ball_write:
+            # Isaac exposes separate setters.  Snapshot only for rollback; these live tensors are
+            # never used to derive a birth.  All new payloads above came from admitted clip bytes
+            # and the provider-issued receipt before the first simulator mutation.
+            rollback_state = {
+                "root_state": self.robot.data.root_state_w[env_ids].clone(),
+                "joint_pos": self.robot.data.joint_pos[env_ids].clone(),
+                "joint_vel": self.robot.data.joint_vel[env_ids].clone(),
+            }
+        try:
+            self.robot.write_root_state_to_sim(root_state, env_ids=env_ids)
+            self.robot.write_joint_state_to_sim(
+                joint_pos, joint_vel, env_ids=env_ids
+            )
+        except Exception as exc:
+            if rollback_state is not None:
+                try:
+                    self._restore_action_ball_sim_state(
+                        env_ids, rollback_state
+                    )
+                except Exception as rollback_error:
+                    raise RuntimeError(
+                        "action-ball root write failed and simulator rollback failed"
+                    ) from rollback_error
+            raise
+        return rollback_state
+
+    def _restore_action_ball_sim_state(
+        self, env_ids: torch.Tensor, rollback_state: dict
+    ) -> None:
+        if type(rollback_state) is not dict or set(rollback_state) != {
+            "root_state",
+            "joint_pos",
+            "joint_vel",
+        }:
+            raise RuntimeError("action-ball simulator rollback state is malformed")
+        self.robot.write_root_state_to_sim(
+            rollback_state["root_state"], env_ids=env_ids
+        )
+        self.robot.write_joint_state_to_sim(
+            rollback_state["joint_pos"],
+            rollback_state["joint_vel"],
+            env_ids=env_ids,
+        )
 
     @property
     def command(self) -> torch.Tensor:  # TODO Consider again if this is the best observation
@@ -2229,7 +3847,72 @@ class MotionCommand(CommandTerm):
         else:
             self.metrics["motion_phase"] = self.time_steps.float() / max(self.motion.time_step_total - 1, 1)
 
+    def _action_ball_select_or_rewind_action(
+        self, env_ids: Sequence[int]
+    ) -> None:
+        """Select one episode action, or rewind the frozen action at a natural wrap."""
+
+        n = len(env_ids)
+        if n == 0:
+            return
+        ids = (
+            env_ids
+            if torch.is_tensor(env_ids)
+            else torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+        )
+        ids = ids.to(device=self.device, dtype=torch.long).reshape(-1)
+        if self._resampling_from_wrap:
+            # An action-ball episode has exactly one action identity.  A natural clip wrap starts
+            # a new ball/swing against the same birth; it is never a selector opportunity.
+            selected = self.clip_id[ids].clone()
+        elif int(self.motion.num_segments) == 1:
+            selected = torch.zeros(n, dtype=torch.long, device=self.device)
+            self.clip_id[ids] = selected
+        else:
+            if self._balanced_clip_sampler is not None:
+                selected = self._balanced_clip_sampler.sample(n)
+            else:
+                selected = torch.randint(
+                    0, int(self.motion.num_segments), (n,), device=self.device
+                )
+            self.clip_id[ids] = selected
+
+        starts = self.motion.seg_start[selected]
+        self.time_steps[ids] = starts
+        self.time_steps_f[ids] = starts.float()
+        if self._action_ball_task_ref_for_env is not None:
+            # The selected task receipt will install teacher_rate after Racket solves this swing.
+            # Do not consume generic retiming RNG, even when its configured range is [1, 1].
+            self.speed_scale[ids] = 0.0
+        elif self.retiming_active:
+            if self._speed_per_clip is not None:
+                self.speed_scale[ids] = self._speed_per_clip[selected]
+            else:
+                speed_lo, speed_hi = self.cfg.speed_scale_range
+                self.speed_scale[ids] = sample_uniform(
+                    float(speed_lo), float(speed_hi), (n,), device=self.device
+                )
+
+        counts = torch.bincount(
+            self.clip_id, minlength=int(self.motion.num_segments)
+        ).float()
+        probabilities = counts / counts.sum().clamp(min=1.0)
+        entropy = -(
+            probabilities * (probabilities + 1.0e-12).log()
+        ).sum()
+        self.metrics["sampling_entropy"][:] = entropy / math.log(
+            max(int(self.motion.num_segments), 2)
+        )
+        top_probability, top_index = probabilities.max(dim=0)
+        self.metrics["sampling_top1_prob"][:] = top_probability
+        self.metrics["sampling_top1_bin"][:] = (
+            top_index.float() / max(int(self.motion.num_segments), 1)
+        )
+
     def _adaptive_sampling(self, env_ids: Sequence[int]):
+        if self._action_ball_birth_broker is not None:
+            self._action_ball_select_or_rewind_action(env_ids)
+            return
         if self._multiseg:
             # HITTER unified policy: each new swing uniformly samples the swing TYPE (clip) and starts at
             # that clip's first frame (reference-state-init at the swing start). The adaptive failure-bin
@@ -2357,7 +4040,7 @@ class MotionCommand(CommandTerm):
             if teacher_contract is None
             else hashlib.sha256(_canonical_json_bytes(teacher_contract)).hexdigest()
         )
-        return {
+        identity = {
             "motion": {
                 "num_segments": int(self.motion.num_segments),
                 "clip_order": tuple(self._motion_files),
@@ -2398,6 +4081,188 @@ class MotionCommand(CommandTerm):
                 ),
             },
         }
+        if self._action_ball_birth_broker is not None:
+            admission_receipt = (
+                self.action_ball_motion_admission_hard_contract()
+            )
+            identity["action_ball"] = {
+                "runtime_contract_sha256": (
+                    self._action_ball_runtime_module_bound.RUNTIME_CONTRACT_SHA256
+                ),
+                "broker_state_schema_version": (
+                    self._action_ball_runtime_module_bound.BROKER_STATE_SCHEMA_VERSION
+                ),
+                "broker_registry_sha256": (
+                    self._action_ball_birth_broker.registry_sha256
+                ),
+                "ordered_action_uids": tuple(
+                    self._action_ball_action_uids
+                ),
+                "trusted_repo_root": str(
+                    self._action_ball_trusted_repo_root
+                ),
+                "motion_admission_receipt_sha256": (
+                    admission_receipt["canonical_sha256"]
+                ),
+                "timing_authority": "per_swing_task_receipt_v3",
+                "policy_dt_s": float(self._env.step_dt),
+                "episode_length_s": (
+                    int(self._env.max_episode_length)
+                    * float(self._env.step_dt)
+                ),
+            }
+        return identity
+
+    def _action_ball_exact_resume_state_dict(self) -> dict:
+        broker_state = self._action_ball_birth_broker.state_dict()
+        self._action_ball_sha256(
+            broker_state.get("integrity_sha256"),
+            name="broker.integrity_sha256",
+        )
+        pending = broker_state.get("pending")
+        if not isinstance(pending, list) or any(
+            not isinstance(row, dict) or row.get("status") != "committed"
+            for row in pending
+        ):
+            raise RuntimeError(
+                "action-ball exact resume cannot snapshot an in-flight reserve transaction"
+            )
+        transcript = {}
+        for row in broker_state.get("consumed_receipts", ()):
+            if type(row) is not dict:
+                raise RuntimeError("action-ball broker transcript is malformed")
+            transcript[(row["env_id"], row["reset_generation"])] = row[
+                "canonical_sha256"
+            ]
+        for pending_row in pending:
+            row = pending_row["receipt"]
+            transcript[(row["env_id"], row["reset_generation"])] = row[
+                "canonical_sha256"
+            ]
+        expected_seen = set(transcript.values())
+        if expected_seen != self._action_ball_seen_birth_receipts:
+            raise RuntimeError(
+                "Motion/broker committed birth transcript diverged"
+            )
+        last = {
+            int(env): int(generation)
+            for env, generation in broker_state.get("last_generations", ())
+        }
+        reset_generation = [
+            int(value)
+            for value in self._action_ball_reset_generation.detach()
+            .cpu()
+            .tolist()
+        ]
+        runtime = self._action_ball_runtime_module_bound
+        task_ref_rows = []
+        for env_id, generation in enumerate(reset_generation):
+            receipt_sha = self._action_ball_birth_receipt_sha256[env_id]
+            task_ref = self._action_ball_active_task_refs[env_id]
+            if generation == 0:
+                if (
+                    env_id in last
+                    or receipt_sha is not None
+                    or task_ref is not None
+                ):
+                    raise RuntimeError(
+                        "zero-generation env has broker/birth/task state"
+                    )
+                task_ref_rows.append(None)
+                continue
+            if (
+                last.get(env_id) != generation
+                or transcript.get((env_id, generation)) != receipt_sha
+            ):
+                raise RuntimeError(
+                    "Motion current generation/receipt differs from broker transcript"
+                )
+            if type(task_ref) is not runtime.ActionTaskReceiptRef:
+                raise RuntimeError(
+                    "positive-generation env lacks an exact active task ref"
+                )
+            live_ref = self._action_ball_task_ref_for_env(env_id)
+            if live_ref != task_ref:
+                raise RuntimeError(
+                    "Motion active task ref differs from Racket authority"
+                )
+            resolved = self._action_ball_task_receipt_resolver(task_ref)
+            self._validate_action_ball_task_ref_and_receipt(
+                task_ref, resolved, env_id=env_id
+            )
+            task_ref_rows.append(task_ref.to_dict())
+        admission_receipt = (
+            self.action_ball_motion_admission_hard_contract()
+        )
+        return {
+            "runtime_contract_sha256": (
+                self._action_ball_runtime_module_bound.RUNTIME_CONTRACT_SHA256
+            ),
+            "broker_registry_sha256": (
+                self._action_ball_birth_broker.registry_sha256
+            ),
+            "motion_admission_receipt_sha256": (
+                admission_receipt["canonical_sha256"]
+            ),
+            # Racket is the sole owner of sampler/provider/domain/broker/pool/task bytes.  Motion
+            # stores only its canonical full-state digest plus opaque per-env task references.
+            "shared_racket_state_sha256": (
+                self.action_ball_shared_racket_state_sha256()
+            ),
+            "reset_generation": self._exact_resume_cpu_tensor(
+                self._action_ball_reset_generation
+            ),
+            "swing_generation": self._exact_resume_cpu_tensor(
+                self._action_ball_swing_generation
+            ),
+            "birth_receipt_sha256": list(
+                self._action_ball_birth_receipt_sha256
+            ),
+            "seen_birth_receipts": sorted(
+                self._action_ball_seen_birth_receipts
+            ),
+            "active_task_refs": task_ref_rows,
+        }
+
+    def action_ball_shared_broker_state_sha256(self) -> str:
+        """Return the live Racket-owned broker snapshot digest for runner ordering checks."""
+
+        if self._action_ball_birth_broker is None:
+            raise RuntimeError("action-ball birth broker is not bound")
+        state = self._action_ball_birth_broker.state_dict()
+        return self._action_ball_sha256(
+            state.get("integrity_sha256"),
+            name="broker.integrity_sha256",
+        )
+
+    def action_ball_shared_racket_state_sha256(self) -> str:
+        """Return Racket's digest over every shared action-ball authority byte."""
+
+        if self._action_ball_shared_state_sha256_accessor is None:
+            raise RuntimeError("action-ball shared Racket digest is not bound")
+        return self._action_ball_sha256(
+            self._action_ball_shared_state_sha256_accessor(),
+            name="Racket.action_ball_shared_state_sha256",
+        )
+
+    def finalize_action_ball_exact_resume(self) -> None:
+        """Verify Racket-first shared restore against Motion's staged digest and refs."""
+
+        expected = self._action_ball_expected_shared_racket_state_sha256
+        if expected is None:
+            raise RuntimeError(
+                "Motion action-ball exact resume has no staged Racket digest"
+            )
+        if self.action_ball_shared_racket_state_sha256() != expected:
+            raise RuntimeError(
+                "live Racket state differs from Motion exact-resume handoff"
+            )
+        # Re-run broker transcript plus opaque task-ref resolution on the live Racket restore.
+        snapshot = self._action_ball_exact_resume_state_dict()
+        if snapshot["shared_racket_state_sha256"] != expected:
+            raise RuntimeError(
+                "live Racket task/birth refs differ after exact resume"
+            )
 
     def exact_resume_state_dict(self) -> dict:
         """Return every persistent MotionCommand state that shapes the next rollout."""
@@ -2414,9 +4279,13 @@ class MotionCommand(CommandTerm):
             value is None for value in ring_values
         ):
             raise RuntimeError("post-swing replay ring is only partially allocated")
-        return {
+        state = {
             "state_kind": self._EXACT_RESUME_STATE_KIND,
-            "schema_version": self._EXACT_RESUME_STATE_SCHEMA_VERSION,
+            "schema_version": (
+                self._ACTION_BALL_EXACT_RESUME_STATE_SCHEMA_VERSION
+                if self._action_ball_birth_broker is not None
+                else self._EXACT_RESUME_STATE_SCHEMA_VERSION
+            ),
             "identity": self._exact_resume_identity(),
             "adaptive_sampling": {
                 "bin_failed_count": self._exact_resume_cpu_tensor(
@@ -2452,6 +4321,11 @@ class MotionCommand(CommandTerm):
             },
             "balanced_clip_sampler": self.balanced_clip_sampler_state_dict(),
         }
+        if self._action_ball_birth_broker is not None:
+            state["action_ball_birth"] = (
+                self._action_ball_exact_resume_state_dict()
+            )
+        return state
 
     @staticmethod
     def _validate_exact_resume_tensor(
@@ -2477,6 +4351,151 @@ class MotionCommand(CommandTerm):
             raise ValueError(f"{name} contains negative counts")
         return value.detach().clone()
 
+    def _prepare_action_ball_exact_resume_state(
+        self, value
+    ) -> dict:
+        expected = {
+            "runtime_contract_sha256",
+            "broker_registry_sha256",
+            "motion_admission_receipt_sha256",
+            "shared_racket_state_sha256",
+            "reset_generation",
+            "swing_generation",
+            "birth_receipt_sha256",
+            "seen_birth_receipts",
+            "active_task_refs",
+        }
+        if type(value) is not dict or set(value) != expected:
+            raise ValueError(
+                "Motion action-ball exact-resume state keys do not match schema 4"
+            )
+        runtime = self._action_ball_runtime_module_bound
+        admission_receipt = (
+            self.action_ball_motion_admission_hard_contract()
+        )
+        if (
+            value["runtime_contract_sha256"]
+            != runtime.RUNTIME_CONTRACT_SHA256
+            or value["broker_registry_sha256"]
+            != self._action_ball_birth_broker.registry_sha256
+            or value["motion_admission_receipt_sha256"]
+            != admission_receipt["canonical_sha256"]
+        ):
+            raise ValueError(
+                "Motion action-ball exact-resume immutable identity differs"
+            )
+        shared_racket_state_sha256 = self._action_ball_sha256(
+            value["shared_racket_state_sha256"],
+            name="action_ball.shared_racket_state_sha256",
+        )
+        reset_generation = self._validate_exact_resume_tensor(
+            value["reset_generation"],
+            name="action_ball.reset_generation",
+            shape=(self.num_envs,),
+            dtype=self._action_ball_reset_generation.dtype,
+            nonnegative=True,
+        )
+        swing_generation = self._validate_exact_resume_tensor(
+            value["swing_generation"],
+            name="action_ball.swing_generation",
+            shape=(self.num_envs,),
+            dtype=self._action_ball_swing_generation.dtype,
+            nonnegative=True,
+        )
+        if (
+            bool((reset_generation > self._ACTION_BALL_INT64_MAX).any())
+            or bool((swing_generation > self._ACTION_BALL_INT64_MAX).any())
+        ):
+            raise ValueError("Motion action-ball generation exceeds int64")
+
+        current = value["birth_receipt_sha256"]
+        seen = value["seen_birth_receipts"]
+        task_ref_rows = value["active_task_refs"]
+        if (
+            type(current) is not list
+            or len(current) != self.num_envs
+            or type(seen) is not list
+            or type(task_ref_rows) is not list
+            or len(task_ref_rows) != self.num_envs
+        ):
+            raise ValueError(
+                "Motion action-ball receipt state has invalid container shape"
+            )
+        current_receipts = []
+        for index, digest in enumerate(current):
+            if digest is not None:
+                digest = self._action_ball_sha256(
+                    digest,
+                    name=f"action_ball.birth_receipt_sha256[{index}]",
+                )
+            current_receipts.append(digest)
+        seen_receipts = [
+            self._action_ball_sha256(
+                digest, name=f"action_ball.seen_birth_receipts[{index}]"
+            )
+            for index, digest in enumerate(seen)
+        ]
+        if (
+            seen_receipts != sorted(seen_receipts)
+            or len(set(seen_receipts)) != len(seen_receipts)
+        ):
+            raise ValueError(
+                "Motion action-ball seen receipt list must be sorted and unique"
+            )
+
+        reset_rows = [
+            int(item) for item in reset_generation.tolist()
+        ]
+        seen_receipt_set = set(seen_receipts)
+        task_refs = []
+        for env_id, generation in enumerate(reset_rows):
+            digest = current_receipts[env_id]
+            ref_row = task_ref_rows[env_id]
+            task_ref = (
+                None
+                if ref_row is None
+                else runtime.ActionTaskReceiptRef.from_dict(ref_row)
+            )
+            if generation == 0:
+                if digest is not None or task_ref is not None:
+                    raise ValueError(
+                        "zero-generation Motion env has a birth/task ref"
+                    )
+            else:
+                if digest is None or digest not in seen_receipt_set:
+                    raise ValueError(
+                        "positive-generation Motion env lacks a seen birth ref"
+                    )
+                if (
+                    type(task_ref) is not runtime.ActionTaskReceiptRef
+                    or task_ref.env_id != env_id
+                    or task_ref.reset_generation != generation
+                    or task_ref.swing_generation
+                    != int(swing_generation[env_id].item())
+                    or task_ref.birth_sha256 != digest
+                    or not (
+                        0
+                        <= task_ref.action_slot
+                        < len(self._action_ball_action_uids)
+                    )
+                    or task_ref.action_uid
+                    != self._action_ball_action_uids[
+                        task_ref.action_slot
+                    ]
+                ):
+                    raise ValueError(
+                        "positive-generation Motion env has a mismatched task ref"
+                    )
+            task_refs.append(task_ref)
+        return {
+            "shared_racket_state_sha256": shared_racket_state_sha256,
+            "reset_generation": reset_generation,
+            "swing_generation": swing_generation,
+            "birth_receipt_sha256": current_receipts,
+            "seen_birth_receipts": set(seen_receipts),
+            "active_task_refs": task_refs,
+        }
+
     def load_exact_resume_state_dict(self, state: dict, strict: bool = True):
         """Restore only an exact schema/config/clip identity match."""
         if strict is not True:
@@ -2491,13 +4510,21 @@ class MotionCommand(CommandTerm):
             "post_swing_replay",
             "balanced_clip_sampler",
         }
+        action_ball_bound = self._action_ball_birth_broker is not None
+        expected_schema = (
+            self._ACTION_BALL_EXACT_RESUME_STATE_SCHEMA_VERSION
+            if action_ball_bound
+            else self._EXACT_RESUME_STATE_SCHEMA_VERSION
+        )
+        if action_ball_bound:
+            expected_keys.add("action_ball_birth")
         if set(state) != expected_keys:
             raise ValueError(
                 "MotionCommand exact resume state keys do not match the strict schema"
             )
         if state["state_kind"] != self._EXACT_RESUME_STATE_KIND:
             raise ValueError("MotionCommand exact resume state_kind does not match")
-        if state["schema_version"] != self._EXACT_RESUME_STATE_SCHEMA_VERSION:
+        if state["schema_version"] != expected_schema:
             raise ValueError(
                 "MotionCommand exact resume schema_version is unsupported"
             )
@@ -2505,6 +4532,13 @@ class MotionCommand(CommandTerm):
             raise ValueError(
                 "MotionCommand exact resume motion/config/clip identity does not match"
             )
+        action_ball_state = (
+            self._prepare_action_ball_exact_resume_state(
+                state["action_ball_birth"]
+            )
+            if action_ball_bound
+            else None
+        )
 
         adaptive = state["adaptive_sampling"]
         if type(adaptive) is not dict or set(adaptive) != {
@@ -2592,28 +4626,166 @@ class MotionCommand(CommandTerm):
                 dtype=self.robot.data.joint_vel.dtype,
             )
 
-        # Validate the optional sampler before mutating any existing curriculum/ring state.
-        self.load_balanced_clip_sampler_state_dict(
-            state["balanced_clip_sampler"]
+        # Racket owns and restores the shared evaluator/curriculum/provider/domain/broker/pool/task
+        # graph before this local load.  Motion never restores those bytes; it stages their full
+        # digest plus opaque local refs for the runner's post-load finalize.
+        sampler_before = self.balanced_clip_sampler_state_dict()
+        bin_before = self.bin_failed_count.clone()
+        current_bin_before = self._current_bin_failed.clone()
+        replay_before = (
+            self._post_swing_root,
+            self._post_swing_joint_pos,
+            self._post_swing_joint_vel,
+            self._post_swing_ptr,
+            self._post_swing_count,
+            self._post_swing_first_reset_checked,
         )
-        self.bin_failed_count.copy_(
-            bin_failed_count.to(device=self.bin_failed_count.device)
-        )
-        self._current_bin_failed.copy_(
-            current_bin_failed.to(device=self._current_bin_failed.device)
-        )
-        self._post_swing_root = (
-            None if root is None else root.to(device=self.device)
-        )
-        self._post_swing_joint_pos = (
-            None if joint_pos is None else joint_pos.to(device=self.device)
-        )
-        self._post_swing_joint_vel = (
-            None if joint_vel is None else joint_vel.to(device=self.device)
-        )
-        self._post_swing_ptr = ptr
-        self._post_swing_count = count
-        self._post_swing_first_reset_checked = first_reset_checked
+        if action_ball_bound:
+            action_ball_before = (
+                self._action_ball_reset_generation.clone(),
+                self._action_ball_swing_generation.clone(),
+                list(self._action_ball_birth_receipt_sha256),
+                set(self._action_ball_seen_birth_receipts),
+                list(self._action_ball_active_task_refs),
+                self._action_ball_task_timing_active.clone(),
+                self._action_ball_task_pending_elapsed_s.clone(),
+                self._action_ball_task_age_s.clone(),
+                self._action_ball_time_to_contact_s.clone(),
+                self._action_ball_teacher_rate.clone(),
+                self._action_ball_scaled_t_hit_s.clone(),
+                self._action_ball_scaled_t_cycle_s.clone(),
+                self._action_ball_pre_swing_wait_s.clone(),
+                self._action_ball_expected_shared_racket_state_sha256,
+                self.clip_id.clone(),
+            )
+        else:
+            action_ball_before = None
+        try:
+            self.load_balanced_clip_sampler_state_dict(
+                state["balanced_clip_sampler"]
+            )
+            self.bin_failed_count.copy_(
+                bin_failed_count.to(device=self.bin_failed_count.device)
+            )
+            self._current_bin_failed.copy_(
+                current_bin_failed.to(
+                    device=self._current_bin_failed.device
+                )
+            )
+            self._post_swing_root = (
+                None if root is None else root.to(device=self.device)
+            )
+            self._post_swing_joint_pos = (
+                None if joint_pos is None else joint_pos.to(device=self.device)
+            )
+            self._post_swing_joint_vel = (
+                None if joint_vel is None else joint_vel.to(device=self.device)
+            )
+            self._post_swing_ptr = ptr
+            self._post_swing_count = count
+            self._post_swing_first_reset_checked = first_reset_checked
+            if action_ball_bound:
+                self._action_ball_reset_generation.copy_(
+                    action_ball_state["reset_generation"].to(
+                        device=self.device
+                    )
+                )
+                self._action_ball_swing_generation.copy_(
+                    action_ball_state["swing_generation"].to(
+                        device=self.device
+                    )
+                )
+                self._action_ball_birth_receipt_sha256 = list(
+                    action_ball_state["birth_receipt_sha256"]
+                )
+                self._action_ball_seen_birth_receipts = set(
+                    action_ball_state["seen_birth_receipts"]
+                )
+                self._action_ball_active_task_refs = list(
+                    action_ball_state["active_task_refs"]
+                )
+                # Positive-generation refs are Motion's checkpoint-local
+                # action authority.  Reconstruct clip_id from them before the
+                # post-load finalizer validates each live Racket receipt.
+                # This is local tensor state only: no RNG or simulator write.
+                for env_id, task_ref in enumerate(
+                    self._action_ball_active_task_refs
+                ):
+                    if task_ref is not None:
+                        self.clip_id[env_id] = task_ref.action_slot
+                # The documented resume path finalizes Racket's restored authority and then
+                # performs one full reset.  No pre-checkpoint task clock is replayed or allowed to
+                # touch the simulator between those operations.
+                self._action_ball_task_timing_active.zero_()
+                self._action_ball_task_pending_elapsed_s.zero_()
+                self._action_ball_task_age_s.zero_()
+                self._action_ball_time_to_contact_s.zero_()
+                self._action_ball_teacher_rate.zero_()
+                self._action_ball_scaled_t_hit_s.zero_()
+                self._action_ball_scaled_t_cycle_s.zero_()
+                self._action_ball_pre_swing_wait_s.zero_()
+                self._action_ball_expected_shared_racket_state_sha256 = (
+                    action_ball_state["shared_racket_state_sha256"]
+                )
+        except Exception:
+            # Restore live state without invoking reset/resample or any simulator setter.
+            self.load_balanced_clip_sampler_state_dict(sampler_before)
+            self.bin_failed_count.copy_(bin_before)
+            self._current_bin_failed.copy_(current_bin_before)
+            (
+                self._post_swing_root,
+                self._post_swing_joint_pos,
+                self._post_swing_joint_vel,
+                self._post_swing_ptr,
+                self._post_swing_count,
+                self._post_swing_first_reset_checked,
+            ) = replay_before
+            if action_ball_bound:
+                (
+                    reset_before,
+                    swing_before,
+                    receipt_before,
+                    seen_before,
+                    task_refs_before,
+                    timing_active_before,
+                    pending_elapsed_before,
+                    task_age_before,
+                    time_to_contact_before,
+                    teacher_rate_before,
+                    scaled_t_hit_before,
+                    scaled_t_cycle_before,
+                    pre_swing_wait_before,
+                    expected_racket_before,
+                    clip_id_before,
+                ) = action_ball_before
+                self._action_ball_reset_generation.copy_(reset_before)
+                self._action_ball_swing_generation.copy_(swing_before)
+                self._action_ball_birth_receipt_sha256 = receipt_before
+                self._action_ball_seen_birth_receipts = seen_before
+                self._action_ball_active_task_refs = task_refs_before
+                self._action_ball_task_timing_active.copy_(
+                    timing_active_before
+                )
+                self._action_ball_task_pending_elapsed_s.copy_(
+                    pending_elapsed_before
+                )
+                self._action_ball_task_age_s.copy_(task_age_before)
+                self._action_ball_time_to_contact_s.copy_(
+                    time_to_contact_before
+                )
+                self._action_ball_teacher_rate.copy_(teacher_rate_before)
+                self._action_ball_scaled_t_hit_s.copy_(scaled_t_hit_before)
+                self._action_ball_scaled_t_cycle_s.copy_(
+                    scaled_t_cycle_before
+                )
+                self._action_ball_pre_swing_wait_s.copy_(
+                    pre_swing_wait_before
+                )
+                self._action_ball_expected_shared_racket_state_sha256 = (
+                    expected_racket_before
+                )
+                self.clip_id.copy_(clip_id_before)
+            raise
 
     def _capture_post_swing_states(self, env_ids: torch.Tensor):
         """A8: snapshot end-of-swing robot states (wrap envs only) into the ring buffer.
@@ -3106,7 +5278,141 @@ class MotionCommand(CommandTerm):
                 "v2_quarter_scaled_strike_window_imitation_sample_count"
             ].add_(eligible_sample_count)
 
+    def _action_ball_reset_motion_snapshot(
+        self, env_ids: torch.Tensor
+    ) -> dict:
+        device = torch.device(self.device)
+        if device.type == "cuda":
+            rng_state = torch.cuda.get_rng_state(device)
+        else:
+            rng_state = torch.random.get_rng_state()
+        metric_names = (
+            "in_hold",
+            "sampling_entropy",
+            "sampling_top1_prob",
+            "sampling_top1_bin",
+        )
+        return {
+            "clip_id": self.clip_id[env_ids].clone(),
+            "time_steps": self.time_steps[env_ids].clone(),
+            "time_steps_f": self.time_steps_f[env_ids].clone(),
+            "speed_scale": self.speed_scale[env_ids].clone(),
+            "hold_counter": self.hold_counter[env_ids].clone(),
+            "metrics": {
+                name: self.metrics[name].clone()
+                for name in metric_names
+                if name in self.metrics
+            },
+            "balanced_sampler": self.balanced_clip_sampler_state_dict(),
+            "stagger_pending": (
+                None
+                if self._stagger_hold_pending is None
+                else self._stagger_hold_pending[env_ids].clone()
+            ),
+            "active_task_refs": list(self._action_ball_active_task_refs),
+            "task_timing_active": self._action_ball_task_timing_active[
+                env_ids
+            ].clone(),
+            "task_pending_elapsed_s": (
+                self._action_ball_task_pending_elapsed_s[env_ids].clone()
+            ),
+            "task_age_s": self._action_ball_task_age_s[env_ids].clone(),
+            "time_to_contact_s": self._action_ball_time_to_contact_s[
+                env_ids
+            ].clone(),
+            "teacher_rate": self._action_ball_teacher_rate[env_ids].clone(),
+            "scaled_t_hit_s": self._action_ball_scaled_t_hit_s[
+                env_ids
+            ].clone(),
+            "scaled_t_cycle_s": self._action_ball_scaled_t_cycle_s[
+                env_ids
+            ].clone(),
+            "pre_swing_wait_s": self._action_ball_pre_swing_wait_s[
+                env_ids
+            ].clone(),
+            "rng_state": rng_state,
+        }
+
+    def _restore_action_ball_reset_motion_snapshot(
+        self, env_ids: torch.Tensor, state: dict
+    ) -> None:
+        self.load_balanced_clip_sampler_state_dict(
+            state["balanced_sampler"]
+        )
+        device = torch.device(self.device)
+        if device.type == "cuda":
+            torch.cuda.set_rng_state(state["rng_state"], device)
+        else:
+            torch.random.set_rng_state(state["rng_state"])
+        self.clip_id[env_ids] = state["clip_id"]
+        self.time_steps[env_ids] = state["time_steps"]
+        self.time_steps_f[env_ids] = state["time_steps_f"]
+        self.speed_scale[env_ids] = state["speed_scale"]
+        self.hold_counter[env_ids] = state["hold_counter"]
+        self._action_ball_active_task_refs = list(
+            state["active_task_refs"]
+        )
+        self._action_ball_task_timing_active[env_ids] = state[
+            "task_timing_active"
+        ]
+        self._action_ball_task_pending_elapsed_s[env_ids] = state[
+            "task_pending_elapsed_s"
+        ]
+        self._action_ball_task_age_s[env_ids] = state["task_age_s"]
+        self._action_ball_time_to_contact_s[env_ids] = state[
+            "time_to_contact_s"
+        ]
+        self._action_ball_teacher_rate[env_ids] = state["teacher_rate"]
+        self._action_ball_scaled_t_hit_s[env_ids] = state[
+            "scaled_t_hit_s"
+        ]
+        self._action_ball_scaled_t_cycle_s[env_ids] = state[
+            "scaled_t_cycle_s"
+        ]
+        self._action_ball_pre_swing_wait_s[env_ids] = state[
+            "pre_swing_wait_s"
+        ]
+        for name, value in state["metrics"].items():
+            self.metrics[name].copy_(value)
+        if self._stagger_hold_pending is not None:
+            if state["stagger_pending"] is None:
+                raise RuntimeError(
+                    "action-ball reset snapshot lost stagger state"
+                )
+            self._stagger_hold_pending[env_ids] = state[
+                "stagger_pending"
+            ]
+
     def _resample_command(self, env_ids: Sequence[int]):
+        """Run one resample with all-or-nothing Motion state on action-ball true reset."""
+
+        if len(env_ids) == 0:
+            return
+        if (
+            self._action_ball_birth_broker is None
+            or self._resampling_from_wrap
+        ):
+            return self._resample_command_body(env_ids)
+        env_ids_t = (
+            env_ids
+            if torch.is_tensor(env_ids)
+            else torch.as_tensor(
+                env_ids, dtype=torch.long, device=self.device
+            )
+        )
+        env_ids_t = env_ids_t.to(
+            device=self.device, dtype=torch.long
+        ).reshape(-1)
+        snapshot = self._action_ball_reset_motion_snapshot(env_ids_t)
+        try:
+            return self._resample_command_body(env_ids_t)
+        except Exception:
+            self._restore_action_ball_reset_motion_snapshot(
+                env_ids_t, snapshot
+            )
+            raise
+
+    def _resample_command_body(self, env_ids: Sequence[int]):
         if len(env_ids) == 0:
             return
         # A true episode boundary starts the same immutable sequence from an unarmed ledger.  An
@@ -3118,6 +5424,13 @@ class MotionCommand(CommandTerm):
 
         env_ids_t = env_ids if torch.is_tensor(env_ids) else torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
         env_ids_t = env_ids_t.to(device=self.device, dtype=torch.long)
+        if (
+            self._action_ball_birth_broker is not None
+            and self._resampling_from_wrap
+        ):
+            # WRAP is a new swing against the same physical episode birth.  It freezes both the
+            # action and root spawn, performs no broker transaction and writes no simulator root.
+            self._advance_action_ball_wrap_generation(env_ids_t)
 
         if self.planner_revision_enabled:
             # A new ball starts from the action's explicit zero-rate entry frame.  Failure-adaptive
@@ -3147,8 +5460,19 @@ class MotionCommand(CommandTerm):
 
         # Pre-swing HOLD (Phase A): freeze the reference at the swing's first frame for a random
         # number of control steps ("the ball is not reaching yet"). Applies to resets AND wraps.
-        lo, hi = self.cfg.hold_steps_range
-        self.hold_counter[env_ids_t] = torch.randint(int(lo), int(hi) + 1, (len(env_ids_t),), device=self.device)
+        if self._action_ball_birth_broker is None:
+            lo, hi = self.cfg.hold_steps_range
+            self.hold_counter[env_ids_t] = torch.randint(
+                int(lo),
+                int(hi) + 1,
+                (len(env_ids_t),),
+                device=self.device,
+            )
+        else:
+            # The per-swing receipt is the sole wait owner.  Keep a one-step fail-closed ready
+            # sentinel until Racket's public accessor exposes the exact task later in this reset
+            # (or, for WRAP, later in this command-manager update).
+            self.hold_counter[env_ids_t] = 1
         # A wrap can resample a new hold late inside _update_command. Publish its state now so
         # downstream rewards/terminations on this same control step do not see the old swing mask.
         self.metrics["in_hold"][env_ids_t] = (self.hold_counter[env_ids_t] > 0).float()
@@ -3158,7 +5482,11 @@ class MotionCommand(CommandTerm):
         # wraps and every later reset draw the plain hold range, so steady-state behavior is
         # unchanged. The stand/post-swing min-hold clamps below are min= clamps — the bias
         # survives them. Default OFF (see cfg.stagger_initial_clock): no RNG draw, byte-identical.
-        if self._stagger_hold_pending is not None and not self._resampling_from_wrap:
+        if (
+            self._action_ball_birth_broker is None
+            and self._stagger_hold_pending is not None
+            and not self._resampling_from_wrap
+        ):
             _pend_ids = env_ids_t[self._stagger_hold_pending[env_ids_t]]
             if len(_pend_ids) > 0:
                 _mx = int(self.cfg.stagger_hold_max_steps)
@@ -3173,6 +5501,10 @@ class MotionCommand(CommandTerm):
         # targets are anchor-relative, so the new reference re-anchors to the robot where it is.
         # Teleporting at a wrap (legacy RSI behavior) requires wrap_teleport=True.
         if self._resampling_from_wrap and not self.cfg.wrap_teleport:
+            if self._action_ball_birth_broker is not None:
+                self._begin_action_ball_task_pending(
+                    env_ids_t, elapsed_s=float(self._env.step_dt)
+                )
             return
 
         if self.canonical_ready_mode:
@@ -3180,7 +5512,56 @@ class MotionCommand(CommandTerm):
             # post-swing replay are rejected at boot rather than silently surviving as alternate
             # reset routes.  The selected clip is immaterial to pose because startup validation
             # proved every start/end shares the same literal runtime ready.
-            self._write_canonical_ready_state(env_ids_t)
+            if self._action_ball_birth_broker is None:
+                self._write_canonical_ready_state(env_ids_t)
+            else:
+                transaction = self._reserve_action_ball_true_reset(env_ids_t)
+                sim_rollback_state = None
+                try:
+                    sim_rollback_state = self._write_canonical_ready_state(
+                        env_ids_t,
+                        action_ball_base_spawn_w_m=transaction["spawn"],
+                        action_ball_base_quat_wxyz=transaction["quat"],
+                    )
+                    self._commit_action_ball_true_reset(
+                        env_ids_t, transaction
+                    )
+                    self.hold_counter[env_ids_t] = torch.clamp(
+                        self.hold_counter[env_ids_t],
+                        min=int(self.cfg.stand_start_min_hold),
+                    )
+                    self.metrics["in_hold"][env_ids_t] = (
+                        self.hold_counter[env_ids_t] > 0
+                    ).float()
+                    self._begin_action_ball_task_pending(
+                        env_ids_t, elapsed_s=0.0
+                    )
+                except Exception as exc:
+                    # _write_canonical_ready_state already restores a failed setter.  A later
+                    # commit failure needs the same physical rollback before rewinding the exact
+                    # broker/provider/domain tape.
+                    if sim_rollback_state is not None:
+                        try:
+                            self._restore_action_ball_sim_state(
+                                env_ids_t, sim_rollback_state
+                            )
+                        except Exception as rollback_error:
+                            # Still restore the broker tape before surfacing the simulator failure.
+                            self._rollback_action_ball_true_reset(
+                                env_ids_t,
+                                transaction,
+                                original_error=exc,
+                            )
+                            raise RuntimeError(
+                                "action-ball commit failed and simulator rollback failed"
+                            ) from rollback_error
+                    self._rollback_action_ball_true_reset(
+                        env_ids_t,
+                        transaction,
+                        original_error=exc,
+                    )
+                    raise
+                return
             self.hold_counter[env_ids_t] = torch.clamp(
                 self.hold_counter[env_ids_t], min=int(self.cfg.stand_start_min_hold)
             )
@@ -3426,11 +5807,21 @@ class MotionCommand(CommandTerm):
             _max_len = int(getattr(self._env, "max_episode_length", 0) or 0)
             if _ep_buf is not None and _max_len > 1:
                 _ep_buf.add_(torch.randint(0, _max_len, (self.num_envs,), device=_ep_buf.device))
-        # Pre-swing HOLD: held envs keep the reference frozen at the swing's first frame
-        # ("waiting for the ball"); everyone else advances the clip clock.
-        held = self.hold_counter > 0
-        self.hold_counter = torch.clamp(self.hold_counter - 1, min=0)
-        self.metrics["in_hold"] = held.float()
+        # Pre-swing HOLD: action-ball owns a continuous receipt deadline (including a possible
+        # fractional first motion tick); legacy paths retain their integer random hold counter.
+        action_ball_cycle_due = torch.zeros(
+            self.num_envs, dtype=torch.bool, device=self.device
+        )
+        if self._action_ball_birth_broker is not None:
+            held, action_ball_cycle_due = (
+                self._advance_action_ball_task_timing()
+            )
+        else:
+            held = self.hold_counter > 0
+            self.hold_counter = torch.clamp(
+                self.hold_counter - 1, min=0
+            )
+            self.metrics["in_hold"] = held.float()
         if "clip_switch_count" not in self.metrics:
             self.metrics["clip_switch_count"] = torch.zeros(self.num_envs, device=self.device)
         if self.planner_revision_enabled:
@@ -3444,6 +5835,9 @@ class MotionCommand(CommandTerm):
             self.time_steps_f += self.speed_scale
             self.time_steps = self.time_steps_f.round().long()
             self.metrics["playback_speed"] = self.speed_scale.clone()
+        elif self._action_ball_birth_broker is not None:
+            # _advance_action_ball_task_timing analytically installed the current receipt phase.
+            pass
         elif self.retiming_active:
             # R14: fractional clock — advance s frames per unheld control step; the integer index is
             # derived by round(), mirroring the deploy clock's nearest-frame mapping (torch rounds
@@ -3495,7 +5889,16 @@ class MotionCommand(CommandTerm):
             if bool(clamp.any()):
                 self.time_steps[clamp] = seg_end[clamp] - 1
                 self.time_steps_f[clamp] = self.time_steps[clamp].float()
-            wrap_ids = torch.where((~event_owned) & (self.time_steps >= seg_end))[0]
+            if self._action_ball_birth_broker is not None:
+                if bool(event_owned.any()):
+                    raise RuntimeError(
+                        "action-ball receipt timing cannot share event deadline ownership"
+                    )
+                wrap_ids = torch.where(action_ball_cycle_due)[0]
+            else:
+                wrap_ids = torch.where(
+                    (~event_owned) & (self.time_steps >= seg_end)
+                )[0]
             # DEPLOY-PARITY CLIP SWITCH (venue falls 2026-07-04): the runner's reference clock flips
             # clip_id whenever the planner re-sides the target — at an ARBITRARY mid-swing moment —
             # and the reference jumps to the new clip's first frame (pp_reference_clock.hpp clamps
@@ -3504,7 +5907,10 @@ class MotionCommand(CommandTerm):
             # With per-step prob clip_switch_prob an env aborts its swing operator-style and routes
             # through the SAME wrap-resample path (uniform new clip, frame 0, hold, fresh target).
             # NOTE: aborted swings count as uncompleted starts (slight completion-rate deflation).
-            if float(self.cfg.clip_switch_prob) > 0.0:
+            if (
+                self._action_ball_birth_broker is None
+                and float(self.cfg.clip_switch_prob) > 0.0
+            ):
                 sw = torch.rand(self.num_envs, device=self.device) < float(self.cfg.clip_switch_prob)
                 sw[wrap_ids] = False
                 self.metrics["clip_switch_count"] = sw.float()
@@ -3517,9 +5923,17 @@ class MotionCommand(CommandTerm):
             if bool(clamp.any()):
                 self.time_steps[clamp] = int(self.motion.time_step_total) - 1
                 self.time_steps_f[clamp] = self.time_steps[clamp].float()
-            env_ids = torch.where(
-                (~event_owned) & (self.time_steps >= self.motion.time_step_total)
-            )[0]
+            if self._action_ball_birth_broker is not None:
+                if bool(event_owned.any()):
+                    raise RuntimeError(
+                        "action-ball receipt timing cannot share event deadline ownership"
+                    )
+                env_ids = torch.where(action_ball_cycle_due)[0]
+            else:
+                env_ids = torch.where(
+                    (~event_owned)
+                    & (self.time_steps >= self.motion.time_step_total)
+                )[0]
             wrap_ids = env_ids
         self.just_resampled = torch.zeros(self.num_envs, dtype=torch.bool, device=self.device)
         if len(env_ids) > 0:

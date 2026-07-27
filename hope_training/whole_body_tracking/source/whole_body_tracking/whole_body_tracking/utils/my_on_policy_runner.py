@@ -7,6 +7,7 @@ import os
 import pathlib
 import random
 import signal
+from typing import Dict, Optional, Tuple
 
 import numpy as np
 import torch
@@ -67,7 +68,9 @@ def _scaled_ratio_or_none(counters: dict, numerator: str, denominator: str, scal
     return None if value is None else value * float(scale)
 
 
-def exact_behavior_decision_values(counters: dict) -> dict[str, float | None]:
+def exact_behavior_decision_values(
+    counters: dict,
+) -> Dict[str, Optional[float]]:
     """Derive dashboard values from one record; windows must sum counters before calling this."""
 
     values = {
@@ -168,7 +171,7 @@ def exact_behavior_decision_values(counters: dict) -> dict[str, float | None]:
     return values
 
 
-def zero_return_alarm_levels(cumulative: dict) -> dict[str, str]:
+def zero_return_alarm_levels(cumulative: dict) -> Dict[str, str]:
     """Families whose cumulative strike opportunities have produced exactly zero legal returns.
 
     Returns {family: "alarm" | "abort"}; families that returned at least once, or that have not yet
@@ -177,7 +180,7 @@ def zero_return_alarm_levels(cumulative: dict) -> dict[str, str]:
     averages a dead side against a healthy one into a plausible-looking number.
     """
 
-    levels: dict[str, str] = {}
+    levels: Dict[str, str] = {}
     for family in _STRIKE_FAMILIES:
         opportunities = cumulative.get(f"strike_opportunity_count_{family}", 0) or 0
         returns = cumulative.get(f"virtual_legal_return_count_{family}", 0) or 0
@@ -221,14 +224,14 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         self,
         env: VecEnv,
         train_cfg: dict,
-        log_dir: str | None = None,
+        log_dir: Optional[str] = None,
         device="cpu",
         registry_name=None,
         *,
-        training_contract_schema_version: int | None = None,
-        training_contract_sha256: str | None = None,
+        training_contract_schema_version: Optional[int] = None,
+        training_contract_sha256: Optional[str] = None,
         training_contract_lineage_exact: bool = False,
-        training_launch_claim_sha256: str | None = None,
+        training_launch_claim_sha256: Optional[str] = None,
         require_exact_resume_state: bool = False,
     ):
         if type(require_exact_resume_state) is not bool:
@@ -270,9 +273,9 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             raise ValueError(
                 "require_exact_resume_state requires an exact-bound training contract"
             )
-        # Task-first checkpoints promise complete, strict command-state restoration.  Reject a
-        # launch before its first rollout if even one active command term still relies on the
-        # legacy heuristic attribute scanner.
+        # Formal task-first and action-ball checkpoints promise complete, strict command-state
+        # restoration. Reject a launch before its first rollout if even one active command term
+        # still relies on the legacy heuristic attribute scanner.
         self._validate_task_first_exact_resume_terms()
 
     def save(self, path: str, infos=None):
@@ -422,9 +425,9 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             "active_term_names": [],
             "command_terms": {},
         }
-        # Re-check the formal task-first contract at every save.  This catches runtime drift (for
-        # example, a manager or term disappearing after construction) instead of emitting a
-        # deceptively complete schema-3 checkpoint.
+        # Re-check the formal task-first/action-ball contract at every save. This catches runtime
+        # drift (for example, a manager or term disappearing after construction) instead of
+        # emitting a deceptively complete schema-3 checkpoint.
         self._validate_task_first_exact_resume_terms()
         manager = getattr(env, "command_manager", None)
         if manager is None:
@@ -435,7 +438,8 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         if len(term_names) != len(set(term_names)):
             raise RuntimeError("command manager active_terms contains duplicate names")
         state["active_term_names"] = list(term_names)
-        task_first_exact = self._task_first_exact_resume_required()
+        strict_command_state = self._task_first_exact_resume_required()
+        strict_mode = self._strict_exact_resume_target_mode()
 
         for raw_term_name, term_name in zip(raw_term_names, term_names):
             term = manager.get_term(raw_term_name)
@@ -448,9 +452,10 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                     f"command term {term_name!r} must implement exact_resume_state_dict() "
                     "and load_exact_resume_state_dict(state, strict=True) as a pair"
                 )
-            if task_first_exact and not has_exact_state_getter:
+            if strict_command_state and not has_exact_state_getter:
                 raise RuntimeError(
-                    "task-first exact resume requires every active command term to implement "
+                    f"{self._strict_exact_resume_label(strict_mode)} exact resume requires "
+                    "every active command term to implement "
                     f"explicit hooks; missing on {term_name!r}"
                 )
             if has_exact_state_getter:
@@ -523,27 +528,41 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             state["command_terms"][term_name] = term_state
         return state
 
-    def _task_first_exact_resume_required(self) -> bool:
-        """Return whether this runtime is the formal task-first command path."""
+    def _strict_exact_resume_target_mode(self) -> Optional[str]:
+        """Return the formal command mode that requires complete exact state, if any."""
 
         env = getattr(self.env, "unwrapped", self.env)
         commands = getattr(getattr(env, "cfg", None), "commands", None)
         racket = None if commands is None else getattr(commands, "racket_target", None)
-        return str(getattr(racket, "target_mode", "")) == "task_first"
+        mode = str(getattr(racket, "target_mode", ""))
+        return mode if mode in ("task_first", "action_ball") else None
+
+    @staticmethod
+    def _strict_exact_resume_label(mode: Optional[str]) -> str:
+        if mode == "action_ball":
+            return "action-ball"
+        return "task-first"
+
+    def _task_first_exact_resume_required(self) -> bool:
+        """Compatibility name for both formal task-first and action-ball paths."""
+
+        return self._strict_exact_resume_target_mode() is not None
 
     def _validate_task_first_exact_resume_terms(self) -> None:
-        """Fail before rollout unless every task-first command term has paired explicit hooks."""
+        """Fail unless every formal command term has paired explicit state hooks."""
 
-        if not self._task_first_exact_resume_required():
+        mode = self._strict_exact_resume_target_mode()
+        if mode is None:
             return
+        label = self._strict_exact_resume_label(mode)
         env = getattr(self.env, "unwrapped", self.env)
         manager = getattr(env, "command_manager", None)
         if manager is None:
-            raise RuntimeError("task-first exact resume requires a command manager")
+            raise RuntimeError(f"{label} exact resume requires a command manager")
         raw_names = tuple(getattr(manager, "active_terms", ()))
         names = tuple(str(name) for name in raw_names)
         if not names:
-            raise RuntimeError("task-first exact resume requires active command terms")
+            raise RuntimeError(f"{label} exact resume requires active command terms")
         if len(names) != len(set(names)):
             raise RuntimeError("command manager active_terms contains duplicate names")
         missing = []
@@ -559,11 +578,13 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 missing.append(name)
         if missing:
             raise RuntimeError(
-                "task-first exact resume requires explicit hooks on every active command term; "
+                f"{label} exact resume requires explicit hooks on every active command term; "
                 f"missing={missing}"
             )
 
-    def _restore_environment_resume_state(self, resume_state: dict) -> tuple[int, str]:
+    def _restore_environment_resume_state(
+        self, resume_state: dict
+    ) -> Tuple[int, str]:
         """Restore saved environment progress, with an iteration-derived fallback for old PTs."""
         env = getattr(self.env, "unwrapped", self.env)
         saved = resume_state.get("environment_resume_state")
@@ -582,13 +603,14 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             source = "derived-from-iteration"
 
         manager = getattr(env, "command_manager", None)
-        # As at capture time, enforce the current formal task-first runtime before considering any
-        # saved payload.  Schema 1/2 remain readable, but they cannot be loaded into a task-first
-        # environment whose current active tuple lacks explicit hooks.
+        # As at capture time, enforce the current formal runtime before considering any saved
+        # payload. Schema 1/2 remain readable, but they cannot be loaded into task-first/action-ball
+        # environments whose current active tuple lacks explicit hooks.
         self._validate_task_first_exact_resume_terms()
         restored_terms = []
         saved_term_states = {}
         active_terms = {}
+        environment_schema = 1
         if isinstance(saved, dict):
             environment_schema = int(saved.get("schema_version", 1))
             if environment_schema not in (
@@ -689,18 +711,63 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 if self._task_first_exact_resume_required() and current_explicit != set(
                     active_term_names
                 ):
+                    mode = self._strict_exact_resume_target_mode()
                     raise RuntimeError(
-                        "task-first schema-3 restore requires explicit state for every active "
+                        f"{self._strict_exact_resume_label(mode)} schema-3 restore requires "
+                        "explicit state for every active "
                         f"command term; explicit={sorted(current_explicit)}, "
                         f"active={list(active_term_names)}"
                     )
+                if self._strict_exact_resume_target_mode() == "action_ball":
+                    required_ordered_terms = ("racket_target", "motion")
+                    missing_dependency_terms = [
+                        name
+                        for name in required_ordered_terms
+                        if name not in active_terms
+                    ]
+                    if missing_dependency_terms:
+                        raise RuntimeError(
+                            "action-ball exact resume requires the Racket -> "
+                            "Motion dependency pair; missing="
+                            f"{missing_dependency_terms}"
+                        )
+                    motion_finalize = getattr(
+                        active_terms["motion"],
+                        "finalize_action_ball_exact_resume",
+                        None,
+                    )
+                    if not callable(motion_finalize):
+                        raise RuntimeError(
+                            "action-ball exact resume requires Motion."
+                            "finalize_action_ball_exact_resume()"
+                        )
 
         # Do not mutate even the curriculum clock until schema-3 structure and active-term identity
         # have passed. Explicit term loaders below remain responsible for their own atomicity.
         env.common_step_counter = common_step_counter
 
         if isinstance(saved, dict) and manager is not None:
-            for term_name, term_state in saved_term_states.items():
+            restore_rows = list(saved_term_states.items())
+            action_ball_ordered_restore = (
+                environment_schema >= 3
+                and self._strict_exact_resume_target_mode()
+                == "action_ball"
+            )
+            if action_ball_ordered_restore:
+                by_name = {
+                    str(term_name): (term_name, term_state)
+                    for term_name, term_state in restore_rows
+                }
+                restore_rows = [
+                    by_name["racket_target"],
+                    by_name["motion"],
+                    *[
+                        row
+                        for name, row in by_name.items()
+                        if name not in ("racket_target", "motion")
+                    ],
+                ]
+            for term_name, term_state in restore_rows:
                 term_name = str(term_name)
                 if not isinstance(term_state, dict):
                     raise TypeError(
@@ -733,6 +800,16 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                     # action order, tensor shapes and any other term identity checks must fail loud.
                     loader(exact_state, strict=True)
                     restored_terms.append(term_name)
+                    if action_ball_ordered_restore and term_name == "motion":
+                        # Racket is the sole owner of the shared
+                        # evaluator/curriculum/provider/domain/broker/pool graph.
+                        # Motion first loads only its local state and staged
+                        # shared digest; this finalizer then cross-checks the
+                        # live Racket-owned graph. Fresh training never enters
+                        # this checkpoint-only restore branch.
+                        active_terms[
+                            "motion"
+                        ].finalize_action_ball_exact_resume()
                     continue
                 try:
                     term = manager.get_term(term_name)
@@ -1263,9 +1340,10 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         续跑(log_dir 不为 None)时把精确续训包里的课程主时钟和命令项状态一并恢复;老档没
         有状态就按迭代号精确推算主时钟。评测器(isaac_bank_exam / play)也走 runner.load,
         但它们 log_dir=None 且自带确定性调度 —— 那条路保持与移植前逐字节相同的行为。
-        ``require_exact_resume_state=True`` 是 task-first 训练的构造期铁律:optimizer、外层
-        schema 3、内层 schema 3、迭代连续性或命令项 strict state 任一缺失都拒绝,绝不把
-        actor-only checkpoint 静默解释成 warm start。
+        ``require_exact_resume_state=True`` 是 task-first/action-ball 训练的构造期铁律:
+        optimizer、外层 schema 3、内层 schema 3、迭代连续性或命令项 strict state 任一缺失
+        都拒绝,绝不把 actor-only checkpoint 静默解释成 warm start。Action-ball 的 load
+        只恢复内存状态；首次 simulator true reset 延迟到 learn(),避免 load 本身采样。
         """
         strict_resume = bool(getattr(self, "require_exact_resume_state", False))
         snapshot = self._checkpoint_byte_snapshot(path) if strict_resume else None
@@ -1360,10 +1438,14 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 # restoring it any later lets env.reset() sample from the constructor seed. This is
                 # therefore deliberately the final operation before the first resumed reset.
                 self._restore_exact_rng_state(state)
-        # The simulator itself is not serialized. Reset once after restoring the curriculum counter
-        # and command-manager globals so the first resumed rollout is sampled from the correct
-        # distribution instead of the constructor-time step-zero curriculum.
-        self.env.reset()
+        # The simulator itself is not serialized. Historical/task-first paths retain their reset
+        # here. Action-ball has a stronger protocol: load_exact_resume_state_dict() is a pure data
+        # restore and load() must neither sample nor write the simulator. Defer its first true reset
+        # to the learn boundary, after the exact RNG and all broker/pool/curriculum state are live.
+        if self._strict_exact_resume_target_mode() == "action_ball":
+            self._action_ball_resume_reset_pending = True
+        else:
+            self.env.reset()
         return infos
 
     def learn(self, num_learning_iterations: int, init_at_random_ep_len: bool = False) -> None:
@@ -1377,6 +1459,12 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         (老实说明:若主线程死死卡在 native Isaac/CUDA 调用里,Python 层任何 handler 都
         不会被执行,第一次信号同样没反应,那种情况仍然只有 SIGKILL 能救。)
         """
+        if getattr(self, "_action_ball_resume_reset_pending", False):
+            # This is the first simulator mutation after an action-ball load. The flag is cleared
+            # first so a reset exception cannot be retried implicitly with a partly consumed tape.
+            self._action_ball_resume_reset_pending = False
+            self.env.reset()
+
         original_update = getattr(self.alg, "update", None)
         if not callable(original_update):
             raise RuntimeError(
@@ -1494,12 +1582,12 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             if callable(callback):
                 callback(step)
 
-    def _consume_exact_behavior_updates(self, step: int) -> dict[str, dict]:
+    def _consume_exact_behavior_updates(self, step: int) -> Dict[str, Dict]:
         """Consume the sole behavior ledger once and emit one canonical JSON line per PPO update."""
 
         if getattr(self, "_exact_behavior_consumed_step", None) == int(step):
             return getattr(self, "_exact_behavior_consumed_records", {})
-        records: dict[str, dict] = {}
+        records: Dict[str, Dict] = {}
         env = self.env.unwrapped
         if hasattr(env, "command_manager"):
             providers = []
@@ -1582,7 +1670,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 raise RuntimeError(message)
 
     def _log_live_metrics(
-        self, step: int, *, exact_behavior: dict[str, dict] | None = None
+        self, step: int, *, exact_behavior: Optional[Dict[str, Dict]] = None
     ) -> None:
         """Log current manager state means every PPO iteration for richer dashboards."""
         env = self.env.unwrapped

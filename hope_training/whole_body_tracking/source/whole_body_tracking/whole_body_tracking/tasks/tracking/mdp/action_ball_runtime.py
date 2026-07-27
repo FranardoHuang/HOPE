@@ -1,0 +1,7409 @@
+"""Dependency-light runtime contracts for action-conditioned ball-first training.
+
+This module is deliberately independent of Isaac, Torch, NumPy, and the
+question solver.  It owns two narrow seams:
+
+* a true-reset birth broker.  Motion selects an action, reserves an immutable
+  base-birth receipt, writes the canonical root from that receipt, commits the
+  reservation, and Racket consumes it exactly once;
+* a lazy per-action solved-task pool.  Only the action requested by the
+  runtime is refilled, so a 93-action registry does not allocate 93 dense
+  buffers up front.
+
+The provider and solver callbacks receive only immutable frozen contract
+objects whose fields are JSON-safe data (the dataclass wrapper itself is an
+in-process seam, not a wire encoding).  No simulator object or cached root
+pose is exposed here.  In
+particular, episode birth must never be derived from ``base_pos_w`` or another
+pre-reset simulation cache.
+"""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+import base64
+import hashlib
+import json
+import math
+from pathlib import PurePosixPath, PureWindowsPath
+import re
+from typing import Callable, Dict, Mapping, Protocol, Sequence, Tuple
+
+
+Vec2 = Tuple[float, float]
+Vec3 = Tuple[float, float, float]
+
+SCHEMA_VERSION = 3
+BROKER_STATE_SCHEMA_VERSION = 4
+POOL_STATE_SCHEMA_VERSION = 3
+MAX_ACTION_UID = (1 << 53) - 1
+MAX_COUNTER = (1 << 63) - 1
+SAMPLER_BIRTH_DRAW_COUNT = 3
+SAMPLER_SAMPLE_DRAW_COUNT = 18
+SAMPLER_SCHEMA_VERSION = 3
+UNIT_VECTOR_TOLERANCE = 1.0e-6
+MAX_PRE_SWING_WAIT_S = 1.0
+
+ARM_KEYS = (
+    "time_to_contact_lower",
+    "time_to_contact_upper",
+    "contact_x_lower",
+    "contact_x_upper",
+    "contact_y_lower",
+    "contact_y_upper",
+    "contact_z_lower",
+    "contact_z_upper",
+    "incoming_speed_lower",
+    "incoming_speed_upper",
+    "spin_magnitude_lower",
+    "spin_magnitude_upper",
+    "base_spawn_x_lower",
+    "base_spawn_x_upper",
+    "base_spawn_y_lower",
+    "base_spawn_y_upper",
+    "base_travel_x_lower",
+    "base_travel_x_upper",
+    "base_travel_y_lower",
+    "base_travel_y_upper",
+    "landing_aim_x_lower",
+    "landing_aim_x_upper",
+    "landing_aim_y_lower",
+    "landing_aim_y_upper",
+    "incoming_direction_u_neg",
+    "incoming_direction_u_pos",
+    "incoming_direction_v_neg",
+    "incoming_direction_v_pos",
+    "spin_direction_u_neg",
+    "spin_direction_u_pos",
+    "spin_direction_v_neg",
+    "spin_direction_v_pos",
+)
+ARM_CATALOG_SHA256 = (
+    "2cbc6673119e0a816b0ee5081b403e5f4598437e4e8bf2eaa1e8a3db88f91d1b"
+)
+
+_SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+_CONTRACT_DESCRIPTION = {
+    "schema_version": SCHEMA_VERSION,
+    "sampler_schema_version": SAMPLER_SCHEMA_VERSION,
+    "arm_catalog_sha256": ARM_CATALOG_SHA256,
+    "birth": (
+        "env/reset_generation/action_uid/action_slot/domain_epoch/mode/"
+        "levels/sampler_birth/draw_range/base_spawn/base_yaw and exact "
+        "runtime pins"
+    ),
+    "task": (
+        "birth/sample/ball/aim/solved racket target plus exact TTC-derived "
+        "teacher retiming proof/residual and the same exact runtime pins"
+    ),
+    "broker": (
+        "reserve true reset -> pure full-catalog domain/provider tape "
+        "authorities -> exact provider birth authority -> commit root write "
+        "-> consume once; retain contiguous full consumed history"
+    ),
+    "pool": (
+        "lazy per-action/per-birth FIFO with pure exact sampler and solved-"
+        "task authorities, per-action sample/task high-water authorities, "
+        "append-only active/retired birth lifecycle transcripts, atomic "
+        "vectorized refill/retire, and exact JSON state"
+    ),
+    "state_schemas": {
+        "broker": BROKER_STATE_SCHEMA_VERSION,
+        "pool": POOL_STATE_SCHEMA_VERSION,
+    },
+    "sampler": {
+        "birth_draws": SAMPLER_BIRTH_DRAW_COUNT,
+        "sample_draws": SAMPLER_SAMPLE_DRAW_COUNT,
+        "arm_catalog_sha256": ARM_CATALOG_SHA256,
+    },
+    "teacher_timing": (
+        "required=norm(racket_velocity); rate=required/reference_speed; "
+        "scaled_hit=reference_hit/rate; scaled_cycle=reference_cycle/rate; "
+        "wait=TTC-scaled_hit; no clipping; certified rate bounds and "
+        "reaction_margin<=wait<=1s"
+    ),
+    "resume_threat_model": (
+        "internal assignment/lifecycle/transcript authorities reject partial "
+        "drift, rollback, and wrong-birth replay; formal resume additionally "
+        "requires an independently pre-pinned raw checkpoint/shared-state "
+        "root and does not claim resistance to coordinated component re-sign"
+    ),
+}
+
+
+def _sha256_json(value: object) -> str:
+    encoded = json.dumps(
+        value,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=True,
+        allow_nan=False,
+    ).encode("ascii")
+    return hashlib.sha256(encoded).hexdigest()
+
+
+TASK_TRANSCRIPT_SCHEMA_VERSION = 1
+TASK_LIFECYCLE_SCHEMA_VERSION = 1
+_LIFECYCLE_REJECTED = 0
+_LIFECYCLE_PENDING = 1
+_LIFECYCLE_ISSUED = 2
+_LIFECYCLE_DISCARDED = 3
+
+
+def extend_task_transcript_sha256(
+    prior_sha256: str, task_sha256: str
+) -> str:
+    """Append one canonical task SHA to an existing transcript root."""
+
+    return _sha256_json(
+        {
+            "schema_version": TASK_TRANSCRIPT_SCHEMA_VERSION,
+            "prior_sha256": _sha256(
+                prior_sha256, name="task transcript prior_sha256"
+            ),
+            "task_sha256": _sha256(
+                task_sha256, name="task transcript task_sha256"
+            ),
+        }
+    )
+
+
+_task_transcript_extend = extend_task_transcript_sha256
+
+
+def task_transcript_sha256(
+    birth_sha256: str, ordered_task_sha256: Sequence[str]
+) -> str:
+    """Return the canonical append-only chain root for one birth's tasks."""
+
+    root = _sha256_json(
+        {
+            "schema_version": TASK_TRANSCRIPT_SCHEMA_VERSION,
+            "birth_sha256": _sha256(
+                birth_sha256, name="task transcript birth_sha256"
+            ),
+        }
+    )
+    if isinstance(ordered_task_sha256, (str, bytes)) or not isinstance(
+        ordered_task_sha256, Sequence
+    ):
+        raise ActionBallContractError(
+            "ordered_task_sha256 must be a sequence"
+        )
+    for digest in ordered_task_sha256:
+        root = extend_task_transcript_sha256(root, digest)
+    return root
+
+
+def _pack_lifecycle_2bit(statuses: Sequence[int]) -> str:
+    packed = bytearray((len(statuses) + 3) // 4)
+    for index, status in enumerate(statuses):
+        if type(status) is not int or not 0 <= status <= 3:
+            raise ActionBallContractError(
+                "task lifecycle status must be a 2-bit integer"
+            )
+        packed[index // 4] |= status << (2 * (index % 4))
+    return base64.b64encode(bytes(packed)).decode("ascii")
+
+
+def _unpack_lifecycle_2bit(value: object, *, count: int) -> list[int]:
+    if type(value) is not str:
+        raise ActionBallContractError(
+            "task lifecycle bitmap must be base64 text"
+        )
+    try:
+        raw = base64.b64decode(value.encode("ascii"), validate=True)
+    except (UnicodeEncodeError, ValueError) as exc:
+        raise ActionBallContractError(
+            "task lifecycle bitmap is not canonical base64"
+        ) from exc
+    if len(raw) != (count + 3) // 4:
+        raise ActionBallContractError(
+            "task lifecycle bitmap length disagrees with sample count"
+        )
+    statuses = [
+        (raw[index // 4] >> (2 * (index % 4))) & 0b11
+        for index in range(count)
+    ]
+    if count % 4 and raw:
+        unused_mask = ~((1 << (2 * (count % 4))) - 1) & 0xFF
+        if raw[-1] & unused_mask:
+            raise ActionBallContractError(
+                "task lifecycle bitmap has non-zero padding bits"
+            )
+    if _pack_lifecycle_2bit(statuses) != value:
+        raise ActionBallContractError(
+            "task lifecycle bitmap is not canonical"
+        )
+    return statuses
+
+
+def _task_lifecycle_sha256(
+    action_uid: int, statuses: Sequence[int]
+) -> str:
+    return _sha256_json(
+        {
+            "schema_version": TASK_LIFECYCLE_SCHEMA_VERSION,
+            "action_uid": action_uid,
+            "sample_count": len(statuses),
+            "lifecycle_2bit_base64": _pack_lifecycle_2bit(statuses),
+        }
+    )
+
+
+def _json_data(value: object, *, name: str) -> object:
+    """Return a detached JSON-safe copy or fail on opaque/non-finite state."""
+
+    try:
+        encoded = json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        )
+        return json.loads(encoded)
+    except (TypeError, ValueError) as exc:
+        raise ActionBallContractError(
+            f"{name} must contain only JSON-safe finite data"
+        ) from exc
+
+
+RUNTIME_CONTRACT_SHA256 = _sha256_json(_CONTRACT_DESCRIPTION)
+
+if ARM_CATALOG_SHA256 != _sha256_json(
+    {
+        "schema_version": SAMPLER_SCHEMA_VERSION,
+        "arm_keys": list(ARM_KEYS),
+    }
+):
+    raise RuntimeError("action-ball arm catalog constant drifted")
+
+
+class ActionBallContractError(ValueError):
+    """A receipt, binding, pin, or serialized state violates the contract."""
+
+
+class BirthProtocolError(RuntimeError):
+    """The true-reset reserve/commit/consume protocol was used incorrectly."""
+
+
+class PoolProtocolError(RuntimeError):
+    """The lazy solver pool could not safely fulfill a request."""
+
+
+_DOMAIN_LEVEL_NAMES = ARM_KEYS
+
+
+def _plain_int(
+    value: object,
+    *,
+    name: str,
+    minimum: int = 0,
+    maximum: int = MAX_COUNTER,
+) -> int:
+    if type(value) is not int:
+        raise ActionBallContractError(f"{name} must be a plain integer")
+    if value < minimum or value > maximum:
+        raise ActionBallContractError(
+            f"{name} must be in [{minimum}, {maximum}]"
+        )
+    return value
+
+
+def _finite(
+    value: object,
+    *,
+    name: str,
+    minimum: float | None = None,
+    maximum: float | None = None,
+) -> float:
+    if type(value) not in (int, float):
+        raise ActionBallContractError(
+            f"{name} must be a plain finite number"
+        )
+    result = float(value)
+    if not math.isfinite(result):
+        raise ActionBallContractError(f"{name} must be finite")
+    if minimum is not None and result < minimum:
+        raise ActionBallContractError(f"{name} must be >= {minimum}")
+    if maximum is not None and result > maximum:
+        raise ActionBallContractError(f"{name} must be <= {maximum}")
+    return result
+
+
+def _vec(
+    value: object,
+    *,
+    name: str,
+    length: int,
+) -> Tuple[float, ...]:
+    if (
+        isinstance(value, (str, bytes))
+        or not isinstance(value, (tuple, list))
+        or len(value) != length
+    ):
+        raise ActionBallContractError(
+            f"{name} must be a length-{length} tuple/list"
+        )
+    return tuple(
+        _finite(component, name=f"{name}[{index}]")
+        for index, component in enumerate(value)
+    )
+
+
+def _vec2(value: object, *, name: str) -> Vec2:
+    return _vec(value, name=name, length=2)  # type: ignore[return-value]
+
+
+def _vec3(value: object, *, name: str) -> Vec3:
+    return _vec(value, name=name, length=3)  # type: ignore[return-value]
+
+
+def _unit_vec3(value: object, *, name: str) -> Vec3:
+    result = _vec3(value, name=name)
+    norm = math.sqrt(sum(component * component for component in result))
+    if abs(norm - 1.0) > UNIT_VECTOR_TOLERANCE:
+        raise ActionBallContractError(
+            f"{name} must already be unit length within "
+            f"{UNIT_VECTOR_TOLERANCE}; got norm {norm}"
+        )
+    return result
+
+
+def _unit_quat_wxyz(value: object, *, name: str) -> Tuple[float, float, float, float]:
+    result = _vec(value, name=name, length=4)
+    norm = math.sqrt(sum(component * component for component in result))
+    if abs(norm - 1.0) > UNIT_VECTOR_TOLERANCE:
+        raise ActionBallContractError(
+            f"{name} must already be unit length within "
+            f"{UNIT_VECTOR_TOLERANCE}; got norm {norm}"
+        )
+    return result  # type: ignore[return-value]
+
+
+def _rotate_yaw(value: Vec3, yaw_rad: float) -> Vec3:
+    cosine = math.cos(yaw_rad)
+    sine = math.sin(yaw_rad)
+    return (
+        cosine * value[0] - sine * value[1],
+        sine * value[0] + cosine * value[1],
+        value[2],
+    )
+
+
+def _vec3_add(left: Vec3, right: Vec3) -> Vec3:
+    return (
+        left[0] + right[0],
+        left[1] + right[1],
+        left[2] + right[2],
+    )
+
+
+def _vec3_scale(value: Vec3, scale: float) -> Vec3:
+    return (value[0] * scale, value[1] * scale, value[2] * scale)
+
+
+def _vec3_close(left: Vec3, right: Vec3, *, tolerance: float = 1.0e-9) -> bool:
+    return all(
+        math.isclose(a, b, rel_tol=0.0, abs_tol=tolerance)
+        for a, b in zip(left, right)
+    )
+
+
+def _assert_yaw_quaternion(
+    yaw_rad: float,
+    quat_wxyz: Tuple[float, float, float, float],
+    *,
+    name: str,
+) -> None:
+    expected = (
+        math.cos(0.5 * yaw_rad),
+        0.0,
+        0.0,
+        math.sin(0.5 * yaw_rad),
+    )
+    direct = max(abs(a - b) for a, b in zip(quat_wxyz, expected))
+    negated = max(abs(a + b) for a, b in zip(quat_wxyz, expected))
+    if min(direct, negated) > UNIT_VECTOR_TOLERANCE:
+        raise ActionBallContractError(
+            f"{name} must be the yaw-only wxyz quaternion for base_yaw_rad"
+        )
+
+
+def _sha256(value: object, *, name: str) -> str:
+    if type(value) is not str or _SHA256_RE.fullmatch(value) is None:
+        raise ActionBallContractError(
+            f"{name} must be exactly 64 lowercase hexadecimal characters"
+        )
+    return value
+
+
+def _identity(value: object, *, name: str) -> str:
+    if (
+        type(value) is not str
+        or not value
+        or value.strip() != value
+        or any(ord(character) < 32 for character in value)
+    ):
+        raise ActionBallContractError(
+            f"{name} must be a non-empty trimmed identity string"
+        )
+    return value
+
+
+def _relative_path(value: object, *, name: str) -> str:
+    result = _identity(value, name=name)
+    if "\\" in result or "\x00" in result:
+        raise ActionBallContractError(
+            f"{name} must be a normalized relative POSIX path"
+        )
+    posix = PurePosixPath(result)
+    windows = PureWindowsPath(result)
+    if (
+        posix.is_absolute()
+        or windows.is_absolute()
+        or windows.drive
+        or ".." in posix.parts
+        or posix.as_posix() != result
+    ):
+        raise ActionBallContractError(
+            f"{name} must be a normalized relative POSIX path without '..'"
+        )
+    return result
+
+
+def _mode(value: object, *, name: str = "mobility_mode") -> str:
+    if value not in ("no_move", "move"):
+        raise ActionBallContractError(
+            f"{name} must be exactly 'no_move' or 'move'"
+        )
+    return str(value)
+
+
+def _exact_mapping(
+    value: object,
+    expected: Sequence[str],
+    *,
+    name: str,
+) -> Mapping[str, object]:
+    if not isinstance(value, Mapping):
+        raise ActionBallContractError(f"{name} must be a mapping")
+    actual = set(value)
+    wanted = set(expected)
+    if actual != wanted:
+        raise ActionBallContractError(
+            f"{name} has invalid keys "
+            f"(missing={sorted(wanted - actual)}, "
+            f"unknown={sorted(actual - wanted)})"
+        )
+    return value
+
+
+def _true_reset(reset_kind: object) -> None:
+    if reset_kind != "true_reset":
+        raise BirthProtocolError(
+            "birth receipts exist only at reset_kind='true_reset'; "
+            "wrap/midswing paths must not reserve, commit, or consume one"
+        )
+
+
+@dataclass(frozen=True)
+class ActionDomainLevels:
+    """Frozen normalized widths for the 32 asymmetric curriculum arms."""
+
+    time_to_contact_lower: float = 0.0
+    time_to_contact_upper: float = 0.0
+    contact_x_lower: float = 0.0
+    contact_x_upper: float = 0.0
+    contact_y_lower: float = 0.0
+    contact_y_upper: float = 0.0
+    contact_z_lower: float = 0.0
+    contact_z_upper: float = 0.0
+    incoming_speed_lower: float = 0.0
+    incoming_speed_upper: float = 0.0
+    spin_magnitude_lower: float = 0.0
+    spin_magnitude_upper: float = 0.0
+    base_spawn_x_lower: float = 0.0
+    base_spawn_x_upper: float = 0.0
+    base_spawn_y_lower: float = 0.0
+    base_spawn_y_upper: float = 0.0
+    base_travel_x_lower: float = 0.0
+    base_travel_x_upper: float = 0.0
+    base_travel_y_lower: float = 0.0
+    base_travel_y_upper: float = 0.0
+    landing_aim_x_lower: float = 0.0
+    landing_aim_x_upper: float = 0.0
+    landing_aim_y_lower: float = 0.0
+    landing_aim_y_upper: float = 0.0
+    incoming_direction_u_neg: float = 0.0
+    incoming_direction_u_pos: float = 0.0
+    incoming_direction_v_neg: float = 0.0
+    incoming_direction_v_pos: float = 0.0
+    spin_direction_u_neg: float = 0.0
+    spin_direction_u_pos: float = 0.0
+    spin_direction_v_neg: float = 0.0
+    spin_direction_v_pos: float = 0.0
+
+    def __post_init__(self) -> None:
+        for name in _DOMAIN_LEVEL_NAMES:
+            object.__setattr__(
+                self,
+                name,
+                _finite(
+                    getattr(self, name),
+                    name=f"domain_levels.{name}",
+                    minimum=0.0,
+                    maximum=1.0,
+                ),
+            )
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            name: getattr(self, name) for name in _DOMAIN_LEVEL_NAMES
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> "ActionDomainLevels":
+        row = _exact_mapping(
+            value, _DOMAIN_LEVEL_NAMES, name="action domain levels"
+        )
+        return cls(
+            **{name: row[name] for name in _DOMAIN_LEVEL_NAMES}
+        )  # type: ignore[arg-type]
+
+    @property
+    def canonical_sha256(self) -> str:
+        return _sha256_json(self.to_dict())
+
+
+@dataclass(frozen=True)
+class ActionDomainClaim:
+    """One authority-minted frozen domain snapshot for an action reset."""
+
+    authority_contract_sha256: str
+    arm_catalog_sha256: str
+    action_uid: int
+    domain_epoch: int
+    domain_levels: ActionDomainLevels
+    levels_sha256: str
+    profile_sha256: str
+    mobility_mode: str
+
+    def __post_init__(self) -> None:
+        for name in (
+            "authority_contract_sha256",
+            "arm_catalog_sha256",
+            "levels_sha256",
+            "profile_sha256",
+        ):
+            object.__setattr__(
+                self, name, _sha256(getattr(self, name), name=name)
+            )
+        object.__setattr__(
+            self,
+            "action_uid",
+            _plain_int(
+                self.action_uid,
+                name="action_uid",
+                minimum=1,
+                maximum=MAX_ACTION_UID,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "domain_epoch",
+            _plain_int(self.domain_epoch, name="domain_epoch"),
+        )
+        if not isinstance(self.domain_levels, ActionDomainLevels):
+            raise ActionBallContractError(
+                "domain claim levels must be ActionDomainLevels"
+            )
+        if self.levels_sha256 != self.domain_levels.canonical_sha256:
+            raise ActionBallContractError(
+                "domain claim levels SHA does not match its frozen payload"
+            )
+        if self.arm_catalog_sha256 != ARM_CATALOG_SHA256:
+            raise ActionBallContractError(
+                "domain claim arm catalog SHA mismatch"
+            )
+        object.__setattr__(
+            self, "mobility_mode", _mode(self.mobility_mode)
+        )
+
+    def payload_dict(self) -> Dict[str, object]:
+        return {
+            "authority_contract_sha256": self.authority_contract_sha256,
+            "arm_catalog_sha256": self.arm_catalog_sha256,
+            "action_uid": self.action_uid,
+            "domain_epoch": self.domain_epoch,
+            "domain_levels": self.domain_levels.to_dict(),
+            "levels_sha256": self.levels_sha256,
+            "profile_sha256": self.profile_sha256,
+            "mobility_mode": self.mobility_mode,
+        }
+
+    @property
+    def canonical_sha256(self) -> str:
+        return _sha256_json(self.payload_dict())
+
+
+@dataclass(frozen=True)
+class RuntimePins:
+    """Run-global exact identities shared by every action receipt."""
+
+    manifest_sha256: str
+    sampler_sha256: str
+    domain_authority_sha256: str
+    physics_sha256: str
+    solver_sha256: str
+
+    def __post_init__(self) -> None:
+        for name in (
+            "manifest_sha256",
+            "sampler_sha256",
+            "domain_authority_sha256",
+            "physics_sha256",
+            "solver_sha256",
+        ):
+            object.__setattr__(
+                self, name, _sha256(getattr(self, name), name=name)
+            )
+
+    def to_dict(self) -> Dict[str, str]:
+        return {
+            "manifest_sha256": self.manifest_sha256,
+            "sampler_sha256": self.sampler_sha256,
+            "domain_authority_sha256": self.domain_authority_sha256,
+            "physics_sha256": self.physics_sha256,
+            "solver_sha256": self.solver_sha256,
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> "RuntimePins":
+        row = _exact_mapping(
+            value,
+            (
+                "manifest_sha256",
+                "sampler_sha256",
+                "domain_authority_sha256",
+                "physics_sha256",
+                "solver_sha256",
+            ),
+            name="runtime pins",
+        )
+        return cls(**{name: row[name] for name in row})  # type: ignore[arg-type]
+
+    @property
+    def canonical_sha256(self) -> str:
+        return _sha256_json(self.to_dict())
+
+
+@dataclass(frozen=True)
+class ActionBinding:
+    """One manifest-ordered action and its exact motion/profile identities."""
+
+    action_uid: int
+    action_slot: int
+    motion_path: str
+    motion_sha256: str
+    profile_sha256: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "action_uid",
+            _plain_int(
+                self.action_uid,
+                name="action_uid",
+                minimum=1,
+                maximum=MAX_ACTION_UID,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "action_slot",
+            _plain_int(self.action_slot, name="action_slot"),
+        )
+        object.__setattr__(
+            self,
+            "motion_path",
+            _relative_path(self.motion_path, name="motion_path"),
+        )
+        object.__setattr__(
+            self,
+            "motion_sha256",
+            _sha256(self.motion_sha256, name="motion_sha256"),
+        )
+        object.__setattr__(
+            self,
+            "profile_sha256",
+            _sha256(self.profile_sha256, name="profile_sha256"),
+        )
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "action_uid": self.action_uid,
+            "action_slot": self.action_slot,
+            "motion_path": self.motion_path,
+            "motion_sha256": self.motion_sha256,
+            "profile_sha256": self.profile_sha256,
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> "ActionBinding":
+        row = _exact_mapping(
+            value,
+            (
+                "action_uid",
+                "action_slot",
+                "motion_path",
+                "motion_sha256",
+                "profile_sha256",
+            ),
+            name="action binding",
+        )
+        return cls(**{name: row[name] for name in row})  # type: ignore[arg-type]
+
+
+def _validate_bindings(
+    bindings: Sequence[ActionBinding],
+) -> Tuple[ActionBinding, ...]:
+    if isinstance(bindings, (str, bytes)) or not isinstance(
+        bindings, Sequence
+    ):
+        raise ActionBallContractError("bindings must be a non-empty sequence")
+    converted = tuple(bindings)
+    if not converted:
+        raise ActionBallContractError("bindings must be non-empty")
+    if any(not isinstance(binding, ActionBinding) for binding in converted):
+        raise ActionBallContractError(
+            "every binding must be an ActionBinding"
+        )
+    ordered = tuple(sorted(converted, key=lambda binding: binding.action_slot))
+    slots = tuple(binding.action_slot for binding in ordered)
+    if slots != tuple(range(len(ordered))):
+        raise ActionBallContractError(
+            "action slots must be unique and contiguous in [0, N)"
+        )
+    uids = tuple(binding.action_uid for binding in ordered)
+    if len(set(uids)) != len(uids):
+        raise ActionBallContractError("action_uid values must be unique")
+    return ordered
+
+
+def _registry_sha256(
+    bindings: Sequence[ActionBinding],
+    pins: RuntimePins,
+    mobility_mode: str,
+) -> str:
+    return _sha256_json(
+        {
+            "runtime_contract_sha256": RUNTIME_CONTRACT_SHA256,
+            "pins": pins.to_dict(),
+            "mobility_mode": mobility_mode,
+            "bindings": [binding.to_dict() for binding in bindings],
+        }
+    )
+
+
+@dataclass(frozen=True)
+class ActionBirthRequest:
+    """Pure provider input; deliberately contains no environment/sim object."""
+
+    env_id: int
+    reset_generation: int
+    action_uid: int
+    action_slot: int
+    domain_claim: ActionDomainClaim
+    registry_sha256: str
+    mobility_mode: str
+    binding: ActionBinding
+    pins: RuntimePins
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "env_id", _plain_int(self.env_id, name="env_id")
+        )
+        object.__setattr__(
+            self,
+            "reset_generation",
+            _plain_int(
+                self.reset_generation,
+                name="reset_generation",
+                minimum=1,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "action_uid",
+            _plain_int(
+                self.action_uid,
+                name="action_uid",
+                minimum=1,
+                maximum=MAX_ACTION_UID,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "action_slot",
+            _plain_int(self.action_slot, name="action_slot"),
+        )
+        if not isinstance(self.domain_claim, ActionDomainClaim):
+            raise ActionBallContractError(
+                "birth request requires an ActionDomainClaim"
+            )
+        object.__setattr__(
+            self,
+            "registry_sha256",
+            _sha256(self.registry_sha256, name="registry_sha256"),
+        )
+        object.__setattr__(
+            self,
+            "mobility_mode",
+            _mode(self.mobility_mode),
+        )
+        if not isinstance(self.binding, ActionBinding):
+            raise ActionBallContractError(
+                "birth request binding must be ActionBinding"
+            )
+        if not isinstance(self.pins, RuntimePins):
+            raise ActionBallContractError(
+                "birth request pins must be RuntimePins"
+            )
+        if (
+            self.binding.action_uid != self.action_uid
+            or self.binding.action_slot != self.action_slot
+            or self.domain_claim.action_uid != self.action_uid
+            or self.domain_claim.profile_sha256
+            != self.binding.profile_sha256
+            or self.domain_claim.mobility_mode != self.mobility_mode
+            or self.domain_claim.authority_contract_sha256
+            != self.pins.domain_authority_sha256
+        ):
+            raise ActionBallContractError(
+                "birth request action/domain claim does not match binding "
+                "or run pins"
+            )
+
+
+class ActionDomainClaimAuthority(Protocol):
+    domain_authority_contract_sha256: str
+    state_owner_sha256: str
+
+    def claim_for_action(self, action_uid: int) -> ActionDomainClaim:
+        """Mint the next frozen reset-barrier domain claim."""
+
+    def state_dict(self) -> Mapping[str, object]:
+        """Return all domain-schedule state as JSON data."""
+
+    def load_state_dict(self, state: object) -> None:
+        """Atomically restore the exact domain-schedule state."""
+
+    def domain_cursor_for(self, action_uid: int) -> int:
+        """Return the exact next-claim cursor for one action."""
+
+
+class ActionBirthProvider(Protocol):
+    sampler_contract_sha256: str
+    state_owner_sha256: str
+
+    def __call__(self, request: ActionBirthRequest) -> "ActionBirthReceipt":
+        """Create a receipt from pure contract data, never a sim cache."""
+
+    def state_dict(self) -> Mapping[str, object]:
+        """Return every behaviorally relevant provider counter as JSON data."""
+
+    def load_state_dict(self, state: object) -> None:
+        """Atomically restore an exact provider state."""
+
+    def assert_issued_birth(self, receipt: "ActionBirthReceipt") -> None:
+        """Fail unless this exact runtime birth belongs to provider state."""
+
+    def birth_highwater_for(
+        self, action_uid: int
+    ) -> Tuple[int, int]:
+        """Return exact ``(last_birth_index, last_birth_draw_end)``."""
+
+
+_BIRTH_PAYLOAD_KEYS = (
+    "schema_version",
+    "runtime_contract_sha256",
+    "registry_sha256",
+    "env_id",
+    "reset_generation",
+    "action_uid",
+    "action_slot",
+    "domain_epoch",
+    "domain_claim_sha256",
+    "domain_authority_sha256",
+    "domain_levels",
+    "arm_catalog_sha256",
+    "levels_sha256",
+    "sampler_birth_sha256",
+    "sampler_birth_index",
+    "sampler_draw_start",
+    "sampler_draw_end",
+    "mobility_mode",
+    "base_yaw_rad",
+    "base_quat_wxyz",
+    "base_spawn_w_m",
+    "manifest_sha256",
+    "sampler_sha256",
+    "profile_sha256",
+    "motion_sha256",
+    "physics_sha256",
+    "solver_sha256",
+)
+
+
+@dataclass(frozen=True)
+class ActionBirthReceipt:
+    """Immutable true-reset root/base contract for one env generation."""
+
+    env_id: int
+    reset_generation: int
+    action_uid: int
+    action_slot: int
+    domain_epoch: int
+    domain_claim_sha256: str
+    domain_authority_sha256: str
+    domain_levels: ActionDomainLevels
+    arm_catalog_sha256: str
+    levels_sha256: str
+    sampler_birth_sha256: str
+    sampler_birth_index: int
+    sampler_draw_start: int
+    sampler_draw_end: int
+    mobility_mode: str
+    base_yaw_rad: float
+    base_quat_wxyz: Tuple[float, float, float, float]
+    base_spawn_w_m: Vec3
+    manifest_sha256: str
+    sampler_sha256: str
+    profile_sha256: str
+    motion_sha256: str
+    physics_sha256: str
+    solver_sha256: str
+    registry_sha256: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "env_id", _plain_int(self.env_id, name="env_id")
+        )
+        object.__setattr__(
+            self,
+            "reset_generation",
+            _plain_int(
+                self.reset_generation,
+                name="reset_generation",
+                minimum=1,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "action_uid",
+            _plain_int(
+                self.action_uid,
+                name="action_uid",
+                minimum=1,
+                maximum=MAX_ACTION_UID,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "action_slot",
+            _plain_int(self.action_slot, name="action_slot"),
+        )
+        object.__setattr__(
+            self,
+            "domain_epoch",
+            _plain_int(self.domain_epoch, name="domain_epoch"),
+        )
+        for name in (
+            "domain_claim_sha256",
+            "domain_authority_sha256",
+            "arm_catalog_sha256",
+            "levels_sha256",
+            "sampler_birth_sha256",
+        ):
+            object.__setattr__(
+                self, name, _sha256(getattr(self, name), name=name)
+            )
+        if not isinstance(self.domain_levels, ActionDomainLevels):
+            raise ActionBallContractError(
+                "birth receipt domain_levels must be ActionDomainLevels"
+            )
+        if self.levels_sha256 != self.domain_levels.canonical_sha256:
+            raise ActionBallContractError(
+                "birth receipt levels SHA does not match its frozen payload"
+            )
+        if self.arm_catalog_sha256 != ARM_CATALOG_SHA256:
+            raise ActionBallContractError(
+                "birth receipt arm catalog SHA mismatch"
+            )
+        object.__setattr__(
+            self,
+            "sampler_birth_index",
+            _plain_int(
+                self.sampler_birth_index,
+                name="sampler_birth_index",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "sampler_draw_start",
+            _plain_int(
+                self.sampler_draw_start,
+                name="sampler_draw_start",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "sampler_draw_end",
+            _plain_int(
+                self.sampler_draw_end,
+                name="sampler_draw_end",
+                minimum=1,
+            ),
+        )
+        if (
+            self.sampler_draw_end - self.sampler_draw_start
+            != SAMPLER_BIRTH_DRAW_COUNT
+        ):
+            raise ActionBallContractError(
+                "sampler birth draw range must consume exactly "
+                f"{SAMPLER_BIRTH_DRAW_COUNT} draws"
+            )
+        object.__setattr__(
+            self, "mobility_mode", _mode(self.mobility_mode)
+        )
+        object.__setattr__(
+            self,
+            "base_yaw_rad",
+            _finite(self.base_yaw_rad, name="base_yaw_rad"),
+        )
+        object.__setattr__(
+            self,
+            "base_quat_wxyz",
+            _unit_quat_wxyz(
+                self.base_quat_wxyz, name="base_quat_wxyz"
+            ),
+        )
+        _assert_yaw_quaternion(
+            self.base_yaw_rad,
+            self.base_quat_wxyz,
+            name="base_quat_wxyz",
+        )
+        object.__setattr__(
+            self,
+            "base_spawn_w_m",
+            _vec3(self.base_spawn_w_m, name="base_spawn_w_m"),
+        )
+        for name in (
+            "registry_sha256",
+            "manifest_sha256",
+            "sampler_sha256",
+            "profile_sha256",
+            "motion_sha256",
+            "physics_sha256",
+            "solver_sha256",
+        ):
+            object.__setattr__(
+                self, name, _sha256(getattr(self, name), name=name)
+            )
+        domain_claim = ActionDomainClaim(
+            authority_contract_sha256=self.domain_authority_sha256,
+            arm_catalog_sha256=self.arm_catalog_sha256,
+            action_uid=self.action_uid,
+            domain_epoch=self.domain_epoch,
+            domain_levels=self.domain_levels,
+            levels_sha256=self.levels_sha256,
+            profile_sha256=self.profile_sha256,
+            mobility_mode=self.mobility_mode,
+        )
+        if domain_claim.canonical_sha256 != self.domain_claim_sha256:
+            raise ActionBallContractError(
+                "birth receipt domain claim SHA does not match its fields"
+            )
+        sampler_birth_identity = {
+            "schema_version": SAMPLER_SCHEMA_VERSION,
+            "kind": "base_birth",
+            "sampler_contract_sha256": self.sampler_sha256,
+            "arm_catalog_sha256": self.arm_catalog_sha256,
+            "action_uid": self.action_uid,
+            "domain_epoch": self.domain_epoch,
+            "levels_sha256": self.levels_sha256,
+            "profile_sha256": self.profile_sha256,
+            "birth_index": self.sampler_birth_index,
+            "draw_start": self.sampler_draw_start,
+            "draw_end": self.sampler_draw_end,
+            "mobility_mode": self.mobility_mode,
+            "base_yaw_rad": self.base_yaw_rad,
+            "base_start_w_m": self.base_spawn_w_m,
+        }
+        if _sha256_json(sampler_birth_identity) != self.sampler_birth_sha256:
+            raise ActionBallContractError(
+                "sampler birth SHA does not match its exact identity fields"
+            )
+
+    def payload_dict(self) -> Dict[str, object]:
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "runtime_contract_sha256": RUNTIME_CONTRACT_SHA256,
+            "registry_sha256": self.registry_sha256,
+            "env_id": self.env_id,
+            "reset_generation": self.reset_generation,
+            "action_uid": self.action_uid,
+            "action_slot": self.action_slot,
+            "domain_epoch": self.domain_epoch,
+            "domain_claim_sha256": self.domain_claim_sha256,
+            "domain_authority_sha256": self.domain_authority_sha256,
+            "domain_levels": self.domain_levels.to_dict(),
+            "arm_catalog_sha256": self.arm_catalog_sha256,
+            "levels_sha256": self.levels_sha256,
+            "sampler_birth_sha256": self.sampler_birth_sha256,
+            "sampler_birth_index": self.sampler_birth_index,
+            "sampler_draw_start": self.sampler_draw_start,
+            "sampler_draw_end": self.sampler_draw_end,
+            "mobility_mode": self.mobility_mode,
+            "base_yaw_rad": self.base_yaw_rad,
+            "base_quat_wxyz": list(self.base_quat_wxyz),
+            "base_spawn_w_m": list(self.base_spawn_w_m),
+            "manifest_sha256": self.manifest_sha256,
+            "sampler_sha256": self.sampler_sha256,
+            "profile_sha256": self.profile_sha256,
+            "motion_sha256": self.motion_sha256,
+            "physics_sha256": self.physics_sha256,
+            "solver_sha256": self.solver_sha256,
+        }
+
+    @property
+    def canonical_sha256(self) -> str:
+        return _sha256_json(self.payload_dict())
+
+    def to_dict(self) -> Dict[str, object]:
+        result = self.payload_dict()
+        result["canonical_sha256"] = self.canonical_sha256
+        return result
+
+    def sampler_identity_receipt(self) -> Dict[str, object]:
+        """Return the exact sampler birth identity without runtime wrappers."""
+
+        return {
+            "birth_id": self.sampler_birth_sha256,
+            "sampler_contract_sha256": self.sampler_sha256,
+            "arm_catalog_sha256": self.arm_catalog_sha256,
+            "action_uid": self.action_uid,
+            "domain_epoch": self.domain_epoch,
+            "domain_levels": self.domain_levels.to_dict(),
+            "profile_sha256": self.profile_sha256,
+            "levels_sha256": self.levels_sha256,
+            "birth_index": self.sampler_birth_index,
+            "draw_start": self.sampler_draw_start,
+            "draw_end": self.sampler_draw_end,
+            "mobility_mode": self.mobility_mode,
+            "base_yaw_rad": self.base_yaw_rad,
+            "base_start_w_m": list(self.base_spawn_w_m),
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> "ActionBirthReceipt":
+        row = _exact_mapping(
+            value,
+            (*_BIRTH_PAYLOAD_KEYS, "canonical_sha256"),
+            name="action birth receipt",
+        )
+        if row["schema_version"] != SCHEMA_VERSION:
+            raise ActionBallContractError(
+                "unsupported action birth receipt schema_version"
+            )
+        if row["runtime_contract_sha256"] != RUNTIME_CONTRACT_SHA256:
+            raise ActionBallContractError(
+                "action birth receipt runtime contract SHA mismatch"
+            )
+        fields = {
+            name: row[name]
+            for name in _BIRTH_PAYLOAD_KEYS
+            if name not in ("schema_version", "runtime_contract_sha256")
+        }
+        fields["domain_levels"] = ActionDomainLevels.from_dict(
+            row["domain_levels"]
+        )
+        receipt = cls(**fields)  # type: ignore[arg-type]
+        declared = _sha256(
+            row["canonical_sha256"], name="canonical_sha256"
+        )
+        if declared != receipt.canonical_sha256:
+            raise ActionBallContractError(
+                "action birth receipt canonical SHA mismatch"
+            )
+        return receipt
+
+    def assert_contract(
+        self,
+        *,
+        binding: ActionBinding,
+        pins: RuntimePins,
+        mobility_mode: str,
+        registry_sha256: str,
+    ) -> None:
+        if (
+            self.action_uid != binding.action_uid
+            or self.action_slot != binding.action_slot
+            or self.motion_sha256 != binding.motion_sha256
+            or self.profile_sha256 != binding.profile_sha256
+        ):
+            raise ActionBallContractError(
+                "birth receipt does not match its manifest action binding"
+            )
+        if (
+            self.manifest_sha256 != pins.manifest_sha256
+            or self.sampler_sha256 != pins.sampler_sha256
+            or self.domain_authority_sha256
+            != pins.domain_authority_sha256
+            or self.physics_sha256 != pins.physics_sha256
+            or self.solver_sha256 != pins.solver_sha256
+        ):
+            raise ActionBallContractError(
+                "birth receipt does not match run-global pins"
+            )
+        if self.mobility_mode != _mode(mobility_mode):
+            raise ActionBallContractError(
+                "birth receipt mobility mode differs from frozen run mode"
+            )
+        if self.registry_sha256 != _sha256(
+            registry_sha256, name="registry_sha256"
+        ):
+            raise ActionBallContractError(
+                "birth receipt registry SHA differs from the bound registry"
+            )
+
+
+@dataclass(frozen=True)
+class ActionTeacherTiming:
+    """Canonical unclipped teacher-retiming values for one solved swing."""
+
+    required_racket_site_speed_mps: float
+    teacher_rate: float
+    scaled_t_hit_s: float
+    scaled_t_cycle_s: float
+    pre_swing_wait_s: float
+
+
+def derive_action_teacher_timing(
+    *,
+    racket_velocity_w_mps: Sequence[float],
+    time_to_contact_s: float,
+    reference_t_hit_s: float,
+    reference_t_cycle_s: float,
+    reference_racket_site_speed_mps: float,
+    reaction_margin_s: float,
+    teacher_rate_min: float,
+    teacher_rate_max: float,
+) -> ActionTeacherTiming:
+    """Derive the exact no-clipping TTC/teacher timing contract."""
+
+    velocity = _vec3(
+        racket_velocity_w_mps, name="racket_velocity_w_mps"
+    )
+    ttc = _finite(
+        time_to_contact_s, name="time_to_contact_s", minimum=0.0
+    )
+    reference_hit = _finite(
+        reference_t_hit_s, name="reference_t_hit_s", minimum=0.0
+    )
+    reference_cycle = _finite(
+        reference_t_cycle_s, name="reference_t_cycle_s", minimum=0.0
+    )
+    reference_speed = _finite(
+        reference_racket_site_speed_mps,
+        name="reference_racket_site_speed_mps",
+        minimum=0.0,
+    )
+    reaction_margin = _finite(
+        reaction_margin_s, name="reaction_margin_s", minimum=0.0
+    )
+    rate_min = _finite(
+        teacher_rate_min, name="teacher_rate_min", minimum=0.0
+    )
+    rate_max = _finite(
+        teacher_rate_max, name="teacher_rate_max", minimum=0.0
+    )
+    if reference_hit <= 0.0 or reference_cycle <= reference_hit:
+        raise ActionBallContractError(
+            "reference timing requires 0 < reference_t_hit_s < "
+            "reference_t_cycle_s"
+        )
+    if reference_speed <= 0.0:
+        raise ActionBallContractError(
+            "reference_racket_site_speed_mps must be > 0"
+        )
+    if rate_min <= 0.0 or not rate_min <= 1.0 <= rate_max:
+        raise ActionBallContractError(
+            "teacher rate bounds must satisfy 0 < min <= 1 <= max"
+        )
+    required_speed = math.sqrt(
+        sum(component * component for component in velocity)
+    )
+    teacher_rate = required_speed / reference_speed
+    if not rate_min <= teacher_rate <= rate_max:
+        raise ActionBallContractError(
+            "required teacher rate lies outside certified bounds"
+        )
+    scaled_hit = reference_hit / teacher_rate
+    scaled_cycle = reference_cycle / teacher_rate
+    wait = ttc - scaled_hit
+    if not reaction_margin <= wait <= MAX_PRE_SWING_WAIT_S:
+        raise ActionBallContractError(
+            "pre-swing wait lies outside reaction-margin/1s bounds"
+        )
+    return ActionTeacherTiming(
+        required_racket_site_speed_mps=required_speed,
+        teacher_rate=teacher_rate,
+        scaled_t_hit_s=scaled_hit,
+        scaled_t_cycle_s=scaled_cycle,
+        pre_swing_wait_s=wait,
+    )
+
+
+_TASK_PAYLOAD_KEYS = (
+    "schema_version",
+    "runtime_contract_sha256",
+    "registry_sha256",
+    "birth_sha256",
+    "sample_sha256",
+    "env_id",
+    "reset_generation",
+    "swing_generation",
+    "action_uid",
+    "action_slot",
+    "domain_epoch",
+    "domain_claim_sha256",
+    "domain_authority_sha256",
+    "domain_levels",
+    "arm_catalog_sha256",
+    "levels_sha256",
+    "sampler_birth_sha256",
+    "mobility_mode",
+    "base_yaw_rad",
+    "base_quat_wxyz",
+    "base_spawn_w_m",
+    "base_goal_w_m",
+    "sample_index",
+    "sample_draw_start",
+    "sample_draw_end",
+    "base_spawn_latent_w_m",
+    "base_travel_latent_b_yaw_m",
+    "contact_offset_from_base_goal_b_yaw_m",
+    "ball_contact_w_m",
+    "time_to_contact_s",
+    "incoming_speed_mps",
+    "incoming_direction_b_yaw",
+    "incoming_velocity_w_mps",
+    "spin_magnitude_radps",
+    "spin_direction_b_yaw",
+    "incoming_spin_w_radps",
+    "landing_aim_w_xy_m",
+    "racket_velocity_w_mps",
+    "racket_normal_w",
+    "reference_t_hit_s",
+    "reference_t_cycle_s",
+    "reference_racket_site_speed_mps",
+    "required_racket_site_speed_mps",
+    "reaction_margin_s",
+    "teacher_rate_min",
+    "teacher_rate_max",
+    "teacher_rate",
+    "scaled_t_hit_s",
+    "scaled_t_cycle_s",
+    "pre_swing_wait_s",
+    "solver_residual_m",
+    "manifest_sha256",
+    "sampler_sha256",
+    "profile_sha256",
+    "motion_sha256",
+    "physics_sha256",
+    "solver_sha256",
+)
+
+
+@dataclass(frozen=True)
+class ActionTaskReceiptRef:
+    """Small immutable Motion↔Racket reference to one exact task receipt."""
+
+    env_id: int
+    reset_generation: int
+    swing_generation: int
+    action_uid: int
+    action_slot: int
+    birth_sha256: str
+    sample_sha256: str
+    task_sha256: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "env_id", _plain_int(self.env_id, name="ref.env_id")
+        )
+        object.__setattr__(
+            self,
+            "reset_generation",
+            _plain_int(
+                self.reset_generation,
+                name="ref.reset_generation",
+                minimum=1,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "swing_generation",
+            _plain_int(
+                self.swing_generation, name="ref.swing_generation"
+            ),
+        )
+        object.__setattr__(
+            self,
+            "action_uid",
+            _plain_int(
+                self.action_uid,
+                name="ref.action_uid",
+                minimum=1,
+                maximum=MAX_ACTION_UID,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "action_slot",
+            _plain_int(self.action_slot, name="ref.action_slot"),
+        )
+        for name in (
+            "birth_sha256",
+            "sample_sha256",
+            "task_sha256",
+        ):
+            object.__setattr__(
+                self,
+                name,
+                _sha256(getattr(self, name), name=f"ref.{name}"),
+            )
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "env_id": self.env_id,
+            "reset_generation": self.reset_generation,
+            "swing_generation": self.swing_generation,
+            "action_uid": self.action_uid,
+            "action_slot": self.action_slot,
+            "birth_sha256": self.birth_sha256,
+            "sample_sha256": self.sample_sha256,
+            "task_sha256": self.task_sha256,
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> "ActionTaskReceiptRef":
+        row = _exact_mapping(
+            value,
+            (
+                "env_id",
+                "reset_generation",
+                "swing_generation",
+                "action_uid",
+                "action_slot",
+                "birth_sha256",
+                "sample_sha256",
+                "task_sha256",
+            ),
+            name="action task receipt ref",
+        )
+        return cls(**{name: row[name] for name in row})  # type: ignore[arg-type]
+
+
+@dataclass(frozen=True)
+class ActionBallTaskReceipt:
+    """One admitted ball plus the solved racket task installed for it."""
+
+    birth_sha256: str
+    sample_sha256: str
+    env_id: int
+    reset_generation: int
+    swing_generation: int
+    action_uid: int
+    action_slot: int
+    domain_epoch: int
+    domain_claim_sha256: str
+    domain_authority_sha256: str
+    domain_levels: ActionDomainLevels
+    arm_catalog_sha256: str
+    levels_sha256: str
+    sampler_birth_sha256: str
+    mobility_mode: str
+    base_yaw_rad: float
+    base_quat_wxyz: Tuple[float, float, float, float]
+    base_spawn_w_m: Vec3
+    base_goal_w_m: Vec3
+    sample_index: int
+    sample_draw_start: int
+    sample_draw_end: int
+    base_spawn_latent_w_m: Vec3
+    base_travel_latent_b_yaw_m: Vec3
+    contact_offset_from_base_goal_b_yaw_m: Vec3
+    ball_contact_w_m: Vec3
+    time_to_contact_s: float
+    incoming_speed_mps: float
+    incoming_direction_b_yaw: Vec3
+    incoming_velocity_w_mps: Vec3
+    spin_magnitude_radps: float
+    spin_direction_b_yaw: Vec3
+    incoming_spin_w_radps: Vec3
+    landing_aim_w_xy_m: Vec2
+    racket_velocity_w_mps: Vec3
+    racket_normal_w: Vec3
+    reference_t_hit_s: float
+    reference_t_cycle_s: float
+    reference_racket_site_speed_mps: float
+    required_racket_site_speed_mps: float
+    reaction_margin_s: float
+    teacher_rate_min: float
+    teacher_rate_max: float
+    teacher_rate: float
+    scaled_t_hit_s: float
+    scaled_t_cycle_s: float
+    pre_swing_wait_s: float
+    solver_residual_m: float
+    manifest_sha256: str
+    sampler_sha256: str
+    profile_sha256: str
+    motion_sha256: str
+    physics_sha256: str
+    solver_sha256: str
+    registry_sha256: str
+
+    def __post_init__(self) -> None:
+        for name in (
+            "birth_sha256",
+            "sample_sha256",
+            "registry_sha256",
+            "domain_claim_sha256",
+            "domain_authority_sha256",
+            "arm_catalog_sha256",
+            "levels_sha256",
+            "sampler_birth_sha256",
+            "manifest_sha256",
+            "sampler_sha256",
+            "profile_sha256",
+            "motion_sha256",
+            "physics_sha256",
+            "solver_sha256",
+        ):
+            object.__setattr__(
+                self, name, _sha256(getattr(self, name), name=name)
+            )
+        object.__setattr__(
+            self, "env_id", _plain_int(self.env_id, name="env_id")
+        )
+        object.__setattr__(
+            self,
+            "reset_generation",
+            _plain_int(
+                self.reset_generation,
+                name="reset_generation",
+                minimum=1,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "swing_generation",
+            _plain_int(
+                self.swing_generation,
+                name="swing_generation",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "action_uid",
+            _plain_int(
+                self.action_uid,
+                name="action_uid",
+                minimum=1,
+                maximum=MAX_ACTION_UID,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "action_slot",
+            _plain_int(self.action_slot, name="action_slot"),
+        )
+        object.__setattr__(
+            self,
+            "domain_epoch",
+            _plain_int(self.domain_epoch, name="domain_epoch"),
+        )
+        if not isinstance(self.domain_levels, ActionDomainLevels):
+            raise ActionBallContractError(
+                "task receipt domain_levels must be ActionDomainLevels"
+            )
+        if self.levels_sha256 != self.domain_levels.canonical_sha256:
+            raise ActionBallContractError(
+                "task receipt levels SHA does not match its frozen payload"
+            )
+        if self.arm_catalog_sha256 != ARM_CATALOG_SHA256:
+            raise ActionBallContractError(
+                "task receipt arm catalog SHA mismatch"
+            )
+        object.__setattr__(
+            self, "mobility_mode", _mode(self.mobility_mode)
+        )
+        object.__setattr__(
+            self,
+            "base_yaw_rad",
+            _finite(self.base_yaw_rad, name="base_yaw_rad"),
+        )
+        object.__setattr__(
+            self,
+            "base_quat_wxyz",
+            _unit_quat_wxyz(
+                self.base_quat_wxyz, name="base_quat_wxyz"
+            ),
+        )
+        for name in (
+            "base_spawn_w_m",
+            "base_goal_w_m",
+            "base_spawn_latent_w_m",
+            "base_travel_latent_b_yaw_m",
+            "contact_offset_from_base_goal_b_yaw_m",
+            "ball_contact_w_m",
+            "incoming_velocity_w_mps",
+            "incoming_spin_w_radps",
+            "racket_velocity_w_mps",
+        ):
+            object.__setattr__(
+                self, name, _vec3(getattr(self, name), name=name)
+            )
+        object.__setattr__(
+            self,
+            "sample_index",
+            _plain_int(self.sample_index, name="sample_index"),
+        )
+        object.__setattr__(
+            self,
+            "sample_draw_start",
+            _plain_int(
+                self.sample_draw_start, name="sample_draw_start"
+            ),
+        )
+        object.__setattr__(
+            self,
+            "sample_draw_end",
+            _plain_int(
+                self.sample_draw_end,
+                name="sample_draw_end",
+                minimum=1,
+            ),
+        )
+        if (
+            self.sample_draw_end - self.sample_draw_start
+            != SAMPLER_SAMPLE_DRAW_COUNT
+        ):
+            raise ActionBallContractError(
+                "sampler sample draw range must consume exactly "
+                f"{SAMPLER_SAMPLE_DRAW_COUNT} draws"
+            )
+        object.__setattr__(
+            self,
+            "time_to_contact_s",
+            _finite(
+                self.time_to_contact_s,
+                name="time_to_contact_s",
+                minimum=0.0,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "incoming_speed_mps",
+            _finite(
+                self.incoming_speed_mps,
+                name="incoming_speed_mps",
+                minimum=0.0,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "incoming_direction_b_yaw",
+            _unit_vec3(
+                self.incoming_direction_b_yaw,
+                name="incoming_direction_b_yaw",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "spin_magnitude_radps",
+            _finite(
+                self.spin_magnitude_radps,
+                name="spin_magnitude_radps",
+                minimum=0.0,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "spin_direction_b_yaw",
+            _unit_vec3(
+                self.spin_direction_b_yaw,
+                name="spin_direction_b_yaw",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "landing_aim_w_xy_m",
+            _vec2(self.landing_aim_w_xy_m, name="landing_aim_w_xy_m"),
+        )
+        object.__setattr__(
+            self,
+            "racket_normal_w",
+            _unit_vec3(self.racket_normal_w, name="racket_normal_w"),
+        )
+        object.__setattr__(
+            self,
+            "solver_residual_m",
+            _finite(
+                self.solver_residual_m,
+                name="solver_residual_m",
+                minimum=0.0,
+            ),
+        )
+        for name in (
+            "reference_t_hit_s",
+            "reference_t_cycle_s",
+            "reference_racket_site_speed_mps",
+            "required_racket_site_speed_mps",
+            "reaction_margin_s",
+            "teacher_rate_min",
+            "teacher_rate_max",
+            "teacher_rate",
+            "scaled_t_hit_s",
+            "scaled_t_cycle_s",
+            "pre_swing_wait_s",
+        ):
+            object.__setattr__(
+                self,
+                name,
+                _finite(
+                    getattr(self, name),
+                    name=name,
+                    minimum=0.0,
+                ),
+            )
+        timing = derive_action_teacher_timing(
+            racket_velocity_w_mps=self.racket_velocity_w_mps,
+            time_to_contact_s=self.time_to_contact_s,
+            reference_t_hit_s=self.reference_t_hit_s,
+            reference_t_cycle_s=self.reference_t_cycle_s,
+            reference_racket_site_speed_mps=(
+                self.reference_racket_site_speed_mps
+            ),
+            reaction_margin_s=self.reaction_margin_s,
+            teacher_rate_min=self.teacher_rate_min,
+            teacher_rate_max=self.teacher_rate_max,
+        )
+        declared_timing = (
+            self.required_racket_site_speed_mps,
+            self.teacher_rate,
+            self.scaled_t_hit_s,
+            self.scaled_t_cycle_s,
+            self.pre_swing_wait_s,
+        )
+        expected_timing = (
+            timing.required_racket_site_speed_mps,
+            timing.teacher_rate,
+            timing.scaled_t_hit_s,
+            timing.scaled_t_cycle_s,
+            timing.pre_swing_wait_s,
+        )
+        if declared_timing != expected_timing:
+            raise ActionBallContractError(
+                "task teacher timing proof differs from exact unclipped "
+                "formula"
+            )
+        if (
+            self.mobility_mode == "no_move"
+            and self.base_goal_w_m != self.base_spawn_w_m
+        ):
+            raise ActionBallContractError(
+                "no_move task requires base_goal_w_m == base_spawn_w_m"
+            )
+        _assert_yaw_quaternion(
+            self.base_yaw_rad,
+            self.base_quat_wxyz,
+            name="base_quat_wxyz",
+        )
+        domain_claim = ActionDomainClaim(
+            authority_contract_sha256=self.domain_authority_sha256,
+            arm_catalog_sha256=self.arm_catalog_sha256,
+            action_uid=self.action_uid,
+            domain_epoch=self.domain_epoch,
+            domain_levels=self.domain_levels,
+            levels_sha256=self.levels_sha256,
+            profile_sha256=self.profile_sha256,
+            mobility_mode=self.mobility_mode,
+        )
+        if domain_claim.canonical_sha256 != self.domain_claim_sha256:
+            raise ActionBallContractError(
+                "task receipt domain claim SHA does not match its fields"
+            )
+        if self.mobility_mode == "move":
+            expected_goal = _vec3_add(
+                self.base_spawn_w_m,
+                _rotate_yaw(
+                    self.base_travel_latent_b_yaw_m,
+                    self.base_yaw_rad,
+                ),
+            )
+            if not _vec3_close(self.base_goal_w_m, expected_goal):
+                raise ActionBallContractError(
+                    "move task base goal disagrees with sampled travel"
+                )
+        expected_contact = _vec3_add(
+            self.base_goal_w_m,
+            _rotate_yaw(
+                self.contact_offset_from_base_goal_b_yaw_m,
+                self.base_yaw_rad,
+            ),
+        )
+        if not _vec3_close(self.ball_contact_w_m, expected_contact):
+            raise ActionBallContractError(
+                "task contact disagrees with sampled base-relative offset"
+            )
+        expected_velocity = _vec3_scale(
+            _rotate_yaw(
+                self.incoming_direction_b_yaw, self.base_yaw_rad
+            ),
+            self.incoming_speed_mps,
+        )
+        if not _vec3_close(
+            self.incoming_velocity_w_mps, expected_velocity
+        ):
+            raise ActionBallContractError(
+                "task incoming velocity disagrees with sampler identity"
+            )
+        expected_spin = _vec3_scale(
+            _rotate_yaw(
+                self.spin_direction_b_yaw, self.base_yaw_rad
+            ),
+            self.spin_magnitude_radps,
+        )
+        if not _vec3_close(self.incoming_spin_w_radps, expected_spin):
+            raise ActionBallContractError(
+                "task incoming spin disagrees with sampler identity"
+            )
+        sample_identity = self._sampler_identity_payload()
+        if _sha256_json(sample_identity) != self.sample_sha256:
+            raise ActionBallContractError(
+                "sampler sample SHA does not match exact ball/base payload"
+            )
+
+    def _sampler_identity_payload(self) -> Dict[str, object]:
+        return {
+            "schema_version": SAMPLER_SCHEMA_VERSION,
+            "kind": "swing_sample",
+            "sampler_contract_sha256": self.sampler_sha256,
+            "arm_catalog_sha256": self.arm_catalog_sha256,
+            "sample_index": self.sample_index,
+            "action_uid": self.action_uid,
+            "domain_epoch": self.domain_epoch,
+            "domain_levels": self.domain_levels.to_dict(),
+            "birth_id": self.sampler_birth_sha256,
+            "profile_sha256": self.profile_sha256,
+            "levels_sha256": self.levels_sha256,
+            "draw_start": self.sample_draw_start,
+            "draw_end": self.sample_draw_end,
+            "mobility_mode": self.mobility_mode,
+            "base_yaw_rad": self.base_yaw_rad,
+            "base_start_w_m": self.base_spawn_w_m,
+            "base_spawn_latent_w_m": self.base_spawn_latent_w_m,
+            "base_travel_latent_b_yaw_m": (
+                self.base_travel_latent_b_yaw_m
+            ),
+            "base_goal_w_m": self.base_goal_w_m,
+            "contact_offset_from_base_goal_b_yaw_m": (
+                self.contact_offset_from_base_goal_b_yaw_m
+            ),
+            "contact_w_m": self.ball_contact_w_m,
+            "time_to_contact_s": self.time_to_contact_s,
+            "incoming_speed_mps": self.incoming_speed_mps,
+            "incoming_direction_b_yaw": self.incoming_direction_b_yaw,
+            "incoming_direction_w": _rotate_yaw(
+                self.incoming_direction_b_yaw, self.base_yaw_rad
+            ),
+            "incoming_velocity_w_mps": self.incoming_velocity_w_mps,
+            "spin_magnitude_radps": self.spin_magnitude_radps,
+            "spin_direction_b_yaw": self.spin_direction_b_yaw,
+            "spin_direction_w": _rotate_yaw(
+                self.spin_direction_b_yaw, self.base_yaw_rad
+            ),
+            "spin_w_radps": self.incoming_spin_w_radps,
+            "landing_aim_w_xy_m": self.landing_aim_w_xy_m,
+        }
+
+    def sampler_identity_receipt(self) -> Dict[str, object]:
+        """Return the exact flat proof accepted by ActionBallSampler."""
+
+        return {
+            "sample_id": self.sample_sha256,
+            **self._sampler_identity_payload(),
+        }
+
+    @classmethod
+    def from_birth(
+        cls,
+        birth: ActionBirthReceipt,
+        *,
+        sample_sha256: str,
+        sample_index: int,
+        sample_draw_start: int,
+        sample_draw_end: int,
+        swing_generation: int,
+        base_goal_w_m: Sequence[float] | None = None,
+        base_spawn_latent_w_m: Sequence[float],
+        base_travel_latent_b_yaw_m: Sequence[float],
+        contact_offset_from_base_goal_b_yaw_m: Sequence[float],
+        ball_contact_w_m: Sequence[float],
+        time_to_contact_s: float,
+        incoming_speed_mps: float,
+        incoming_direction_b_yaw: Sequence[float],
+        incoming_velocity_w_mps: Sequence[float],
+        spin_magnitude_radps: float,
+        spin_direction_b_yaw: Sequence[float],
+        incoming_spin_w_radps: Sequence[float],
+        landing_aim_w_xy_m: Sequence[float],
+        racket_velocity_w_mps: Sequence[float],
+        racket_normal_w: Sequence[float],
+        reference_t_hit_s: float,
+        reference_t_cycle_s: float,
+        reference_racket_site_speed_mps: float,
+        required_racket_site_speed_mps: float,
+        reaction_margin_s: float,
+        teacher_rate_min: float,
+        teacher_rate_max: float,
+        teacher_rate: float,
+        scaled_t_hit_s: float,
+        scaled_t_cycle_s: float,
+        pre_swing_wait_s: float,
+        solver_residual_m: float,
+    ) -> "ActionBallTaskReceipt":
+        if not isinstance(birth, ActionBirthReceipt):
+            raise ActionBallContractError(
+                "from_birth requires an ActionBirthReceipt"
+            )
+        if birth.mobility_mode == "move" and base_goal_w_m is None:
+            raise ActionBallContractError(
+                "move task requires an explicit per-swing base_goal_w_m "
+                "from the sampled base travel"
+            )
+        return cls(
+            birth_sha256=birth.canonical_sha256,
+            registry_sha256=birth.registry_sha256,
+            sample_sha256=sample_sha256,
+            env_id=birth.env_id,
+            reset_generation=birth.reset_generation,
+            swing_generation=swing_generation,
+            action_uid=birth.action_uid,
+            action_slot=birth.action_slot,
+            domain_epoch=birth.domain_epoch,
+            domain_claim_sha256=birth.domain_claim_sha256,
+            domain_authority_sha256=birth.domain_authority_sha256,
+            domain_levels=birth.domain_levels,
+            arm_catalog_sha256=birth.arm_catalog_sha256,
+            levels_sha256=birth.levels_sha256,
+            sampler_birth_sha256=birth.sampler_birth_sha256,
+            mobility_mode=birth.mobility_mode,
+            base_yaw_rad=birth.base_yaw_rad,
+            base_quat_wxyz=birth.base_quat_wxyz,
+            base_spawn_w_m=birth.base_spawn_w_m,
+            base_goal_w_m=(
+                birth.base_spawn_w_m
+                if base_goal_w_m is None
+                else tuple(base_goal_w_m)
+            ),
+            sample_index=sample_index,
+            sample_draw_start=sample_draw_start,
+            sample_draw_end=sample_draw_end,
+            base_spawn_latent_w_m=tuple(base_spawn_latent_w_m),
+            base_travel_latent_b_yaw_m=tuple(
+                base_travel_latent_b_yaw_m
+            ),
+            contact_offset_from_base_goal_b_yaw_m=tuple(
+                contact_offset_from_base_goal_b_yaw_m
+            ),
+            ball_contact_w_m=tuple(ball_contact_w_m),
+            time_to_contact_s=time_to_contact_s,
+            incoming_speed_mps=incoming_speed_mps,
+            incoming_direction_b_yaw=tuple(
+                incoming_direction_b_yaw
+            ),
+            incoming_velocity_w_mps=tuple(incoming_velocity_w_mps),
+            spin_magnitude_radps=spin_magnitude_radps,
+            spin_direction_b_yaw=tuple(spin_direction_b_yaw),
+            incoming_spin_w_radps=tuple(incoming_spin_w_radps),
+            landing_aim_w_xy_m=tuple(landing_aim_w_xy_m),
+            racket_velocity_w_mps=tuple(racket_velocity_w_mps),
+            racket_normal_w=tuple(racket_normal_w),
+            reference_t_hit_s=reference_t_hit_s,
+            reference_t_cycle_s=reference_t_cycle_s,
+            reference_racket_site_speed_mps=(
+                reference_racket_site_speed_mps
+            ),
+            required_racket_site_speed_mps=(
+                required_racket_site_speed_mps
+            ),
+            reaction_margin_s=reaction_margin_s,
+            teacher_rate_min=teacher_rate_min,
+            teacher_rate_max=teacher_rate_max,
+            teacher_rate=teacher_rate,
+            scaled_t_hit_s=scaled_t_hit_s,
+            scaled_t_cycle_s=scaled_t_cycle_s,
+            pre_swing_wait_s=pre_swing_wait_s,
+            solver_residual_m=solver_residual_m,
+            manifest_sha256=birth.manifest_sha256,
+            sampler_sha256=birth.sampler_sha256,
+            profile_sha256=birth.profile_sha256,
+            motion_sha256=birth.motion_sha256,
+            physics_sha256=birth.physics_sha256,
+            solver_sha256=birth.solver_sha256,
+        )
+
+    def payload_dict(self) -> Dict[str, object]:
+        return {
+            "schema_version": SCHEMA_VERSION,
+            "runtime_contract_sha256": RUNTIME_CONTRACT_SHA256,
+            "registry_sha256": self.registry_sha256,
+            "birth_sha256": self.birth_sha256,
+            "sample_sha256": self.sample_sha256,
+            "env_id": self.env_id,
+            "reset_generation": self.reset_generation,
+            "swing_generation": self.swing_generation,
+            "action_uid": self.action_uid,
+            "action_slot": self.action_slot,
+            "domain_epoch": self.domain_epoch,
+            "domain_claim_sha256": self.domain_claim_sha256,
+            "domain_authority_sha256": self.domain_authority_sha256,
+            "domain_levels": self.domain_levels.to_dict(),
+            "arm_catalog_sha256": self.arm_catalog_sha256,
+            "levels_sha256": self.levels_sha256,
+            "sampler_birth_sha256": self.sampler_birth_sha256,
+            "mobility_mode": self.mobility_mode,
+            "base_yaw_rad": self.base_yaw_rad,
+            "base_quat_wxyz": list(self.base_quat_wxyz),
+            "base_spawn_w_m": list(self.base_spawn_w_m),
+            "base_goal_w_m": list(self.base_goal_w_m),
+            "sample_index": self.sample_index,
+            "sample_draw_start": self.sample_draw_start,
+            "sample_draw_end": self.sample_draw_end,
+            "base_spawn_latent_w_m": list(
+                self.base_spawn_latent_w_m
+            ),
+            "base_travel_latent_b_yaw_m": list(
+                self.base_travel_latent_b_yaw_m
+            ),
+            "contact_offset_from_base_goal_b_yaw_m": list(
+                self.contact_offset_from_base_goal_b_yaw_m
+            ),
+            "ball_contact_w_m": list(self.ball_contact_w_m),
+            "time_to_contact_s": self.time_to_contact_s,
+            "incoming_speed_mps": self.incoming_speed_mps,
+            "incoming_direction_b_yaw": list(
+                self.incoming_direction_b_yaw
+            ),
+            "incoming_velocity_w_mps": list(
+                self.incoming_velocity_w_mps
+            ),
+            "spin_magnitude_radps": self.spin_magnitude_radps,
+            "spin_direction_b_yaw": list(
+                self.spin_direction_b_yaw
+            ),
+            "incoming_spin_w_radps": list(self.incoming_spin_w_radps),
+            "landing_aim_w_xy_m": list(self.landing_aim_w_xy_m),
+            "racket_velocity_w_mps": list(self.racket_velocity_w_mps),
+            "racket_normal_w": list(self.racket_normal_w),
+            "reference_t_hit_s": self.reference_t_hit_s,
+            "reference_t_cycle_s": self.reference_t_cycle_s,
+            "reference_racket_site_speed_mps": (
+                self.reference_racket_site_speed_mps
+            ),
+            "required_racket_site_speed_mps": (
+                self.required_racket_site_speed_mps
+            ),
+            "reaction_margin_s": self.reaction_margin_s,
+            "teacher_rate_min": self.teacher_rate_min,
+            "teacher_rate_max": self.teacher_rate_max,
+            "teacher_rate": self.teacher_rate,
+            "scaled_t_hit_s": self.scaled_t_hit_s,
+            "scaled_t_cycle_s": self.scaled_t_cycle_s,
+            "pre_swing_wait_s": self.pre_swing_wait_s,
+            "solver_residual_m": self.solver_residual_m,
+            "manifest_sha256": self.manifest_sha256,
+            "sampler_sha256": self.sampler_sha256,
+            "profile_sha256": self.profile_sha256,
+            "motion_sha256": self.motion_sha256,
+            "physics_sha256": self.physics_sha256,
+            "solver_sha256": self.solver_sha256,
+        }
+
+    @property
+    def canonical_sha256(self) -> str:
+        return _sha256_json(self.payload_dict())
+
+    def task_ref(self) -> ActionTaskReceiptRef:
+        return ActionTaskReceiptRef(
+            env_id=self.env_id,
+            reset_generation=self.reset_generation,
+            swing_generation=self.swing_generation,
+            action_uid=self.action_uid,
+            action_slot=self.action_slot,
+            birth_sha256=self.birth_sha256,
+            sample_sha256=self.sample_sha256,
+            task_sha256=self.canonical_sha256,
+        )
+
+    def to_dict(self) -> Dict[str, object]:
+        result = self.payload_dict()
+        result["canonical_sha256"] = self.canonical_sha256
+        return result
+
+    @classmethod
+    def from_dict(cls, value: object) -> "ActionBallTaskReceipt":
+        row = _exact_mapping(
+            value,
+            (*_TASK_PAYLOAD_KEYS, "canonical_sha256"),
+            name="action-ball task receipt",
+        )
+        if row["schema_version"] != SCHEMA_VERSION:
+            raise ActionBallContractError(
+                "unsupported action-ball task receipt schema_version"
+            )
+        if row["runtime_contract_sha256"] != RUNTIME_CONTRACT_SHA256:
+            raise ActionBallContractError(
+                "action-ball task receipt runtime contract SHA mismatch"
+            )
+        fields = {
+            name: row[name]
+            for name in _TASK_PAYLOAD_KEYS
+            if name not in ("schema_version", "runtime_contract_sha256")
+        }
+        fields["domain_levels"] = ActionDomainLevels.from_dict(
+            row["domain_levels"]
+        )
+        receipt = cls(**fields)  # type: ignore[arg-type]
+        declared = _sha256(
+            row["canonical_sha256"], name="canonical_sha256"
+        )
+        if declared != receipt.canonical_sha256:
+            raise ActionBallContractError(
+                "action-ball task receipt canonical SHA mismatch"
+            )
+        return receipt
+
+    def assert_contract(
+        self,
+        *,
+        binding: ActionBinding,
+        pins: RuntimePins,
+        mobility_mode: str,
+        registry_sha256: str,
+    ) -> None:
+        if (
+            self.action_uid != binding.action_uid
+            or self.action_slot != binding.action_slot
+            or self.motion_sha256 != binding.motion_sha256
+            or self.profile_sha256 != binding.profile_sha256
+        ):
+            raise ActionBallContractError(
+                "task receipt does not match its manifest action binding"
+            )
+        if (
+            self.manifest_sha256 != pins.manifest_sha256
+            or self.sampler_sha256 != pins.sampler_sha256
+            or self.domain_authority_sha256
+            != pins.domain_authority_sha256
+            or self.physics_sha256 != pins.physics_sha256
+            or self.solver_sha256 != pins.solver_sha256
+        ):
+            raise ActionBallContractError(
+                "task receipt does not match run-global pins"
+            )
+        if self.mobility_mode != _mode(mobility_mode):
+            raise ActionBallContractError(
+                "task receipt mobility mode differs from frozen run mode"
+            )
+        if self.registry_sha256 != _sha256(
+            registry_sha256, name="registry_sha256"
+        ):
+            raise ActionBallContractError(
+                "task receipt registry SHA differs from the bound registry"
+            )
+
+    def assert_birth(self, birth: ActionBirthReceipt) -> None:
+        if not isinstance(birth, ActionBirthReceipt):
+            raise ActionBallContractError(
+                "task birth binding requires ActionBirthReceipt"
+            )
+        if self.birth_sha256 != birth.canonical_sha256:
+            raise ActionBallContractError("task receipt birth SHA mismatch")
+        expected = (
+            birth.env_id,
+            birth.reset_generation,
+            birth.action_uid,
+            birth.action_slot,
+            birth.domain_epoch,
+            birth.domain_claim_sha256,
+            birth.domain_authority_sha256,
+            birth.domain_levels,
+            birth.arm_catalog_sha256,
+            birth.levels_sha256,
+            birth.sampler_birth_sha256,
+            birth.mobility_mode,
+            birth.base_yaw_rad,
+            birth.base_quat_wxyz,
+            birth.base_spawn_w_m,
+            birth.manifest_sha256,
+            birth.sampler_sha256,
+            birth.profile_sha256,
+            birth.motion_sha256,
+            birth.physics_sha256,
+            birth.solver_sha256,
+            birth.registry_sha256,
+        )
+        actual = (
+            self.env_id,
+            self.reset_generation,
+            self.action_uid,
+            self.action_slot,
+            self.domain_epoch,
+            self.domain_claim_sha256,
+            self.domain_authority_sha256,
+            self.domain_levels,
+            self.arm_catalog_sha256,
+            self.levels_sha256,
+            self.sampler_birth_sha256,
+            self.mobility_mode,
+            self.base_yaw_rad,
+            self.base_quat_wxyz,
+            self.base_spawn_w_m,
+            self.manifest_sha256,
+            self.sampler_sha256,
+            self.profile_sha256,
+            self.motion_sha256,
+            self.physics_sha256,
+            self.solver_sha256,
+            self.registry_sha256,
+        )
+        if actual != expected:
+            raise ActionBallContractError(
+                "task receipt duplicates fields that disagree with birth"
+            )
+        if self.sample_draw_start < birth.sampler_draw_end:
+            raise ActionBallContractError(
+                "task sample draw range predates/overlaps its sampler birth"
+            )
+
+
+@dataclass(frozen=True)
+class _PendingBirth:
+    receipt: ActionBirthReceipt
+    status: str
+
+    def __post_init__(self) -> None:
+        if self.status not in ("reserved", "committed"):
+            raise ActionBallContractError(
+                "pending birth status must be reserved or committed"
+            )
+
+
+@dataclass(frozen=True)
+class BirthReserveRequest:
+    """One Motion-side birth reservation claim for an atomic env batch."""
+
+    env_id: int
+    reset_generation: int
+    action_uid: int
+    action_slot: int
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "env_id", _plain_int(self.env_id, name="env_id")
+        )
+        object.__setattr__(
+            self,
+            "reset_generation",
+            _plain_int(
+                self.reset_generation,
+                name="reset_generation",
+                minimum=1,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "action_uid",
+            _plain_int(
+                self.action_uid,
+                name="action_uid",
+                minimum=1,
+                maximum=MAX_ACTION_UID,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "action_slot",
+            _plain_int(self.action_slot, name="action_slot"),
+        )
+
+
+@dataclass(frozen=True)
+class BirthCommitRequest:
+    """One Motion-side post-root-write commit claim."""
+
+    env_id: int
+    reset_generation: int
+    receipt_sha256: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self, "env_id", _plain_int(self.env_id, name="env_id")
+        )
+        object.__setattr__(
+            self,
+            "reset_generation",
+            _plain_int(
+                self.reset_generation,
+                name="reset_generation",
+                minimum=1,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "receipt_sha256",
+            _sha256(self.receipt_sha256, name="receipt_sha256"),
+        )
+
+
+@dataclass(frozen=True)
+class BirthConsumeRequest:
+    """One Racket-side consume claim, suitable for atomic env batches."""
+
+    env_id: int
+    reset_generation: int
+    action_uid: int
+    action_slot: int
+    receipt_sha256: str
+
+    def __post_init__(self) -> None:
+        BirthReserveRequest(
+            env_id=self.env_id,
+            reset_generation=self.reset_generation,
+            action_uid=self.action_uid,
+            action_slot=self.action_slot,
+        )
+        object.__setattr__(
+            self, "env_id", _plain_int(self.env_id, name="env_id")
+        )
+        object.__setattr__(
+            self,
+            "reset_generation",
+            _plain_int(
+                self.reset_generation,
+                name="reset_generation",
+                minimum=1,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "action_uid",
+            _plain_int(
+                self.action_uid,
+                name="action_uid",
+                minimum=1,
+                maximum=MAX_ACTION_UID,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "action_slot",
+            _plain_int(self.action_slot, name="action_slot"),
+        )
+        object.__setattr__(
+            self,
+            "receipt_sha256",
+            _sha256(self.receipt_sha256, name="receipt_sha256"),
+        )
+
+
+class ActionBirthBroker:
+    """Per-env single-consumer broker for true-reset base births."""
+
+    _STATE_KEYS = (
+        "schema_version",
+        "runtime_contract_sha256",
+        "registry_sha256",
+        "pins",
+        "mobility_mode",
+        "bindings",
+        "domain_authority_contract_sha256",
+        "domain_authority_state_owner_sha256",
+        "domain_authority_state",
+        "domain_authority_state_sha256",
+        "provider_contract_sha256",
+        "provider_state_owner_sha256",
+        "provider_state",
+        "provider_state_sha256",
+        "domain_claim_counts",
+        "last_sampler_birth_indices",
+        "last_sampler_draw_ends",
+        "last_generations",
+        "consumed_generations",
+        "consumed_receipts",
+        "pending",
+        "integrity_sha256",
+    )
+
+    def __init__(
+        self,
+        bindings: Sequence[ActionBinding],
+        pins: RuntimePins,
+        mobility_mode: str,
+    ) -> None:
+        self._bindings = _validate_bindings(bindings)
+        if not isinstance(pins, RuntimePins):
+            raise ActionBallContractError("pins must be RuntimePins")
+        self._pins = pins
+        self._mobility_mode = _mode(mobility_mode)
+        self._by_uid = {
+            binding.action_uid: binding for binding in self._bindings
+        }
+        self._by_slot = {
+            binding.action_slot: binding for binding in self._bindings
+        }
+        self._registry_sha256 = _registry_sha256(
+            self._bindings, self._pins, self._mobility_mode
+        )
+        self._provider: Callable[
+            [ActionBirthRequest], ActionBirthReceipt
+        ] | None = None
+        self._domain_authority: ActionDomainClaimAuthority | None = None
+        self._last_sampler_birth_index: Dict[int, int] = {}
+        self._last_sampler_draw_end: Dict[int, int] = {}
+        self._domain_claim_count: Dict[int, int] = {}
+        self._last_generation: Dict[int, int] = {}
+        self._consumed_generation: Dict[int, int] = {}
+        self._consumed_receipts: Dict[
+            Tuple[int, int], ActionBirthReceipt
+        ] = {}
+        self._pending: Dict[int, _PendingBirth] = {}
+
+    @property
+    def ordered_action_uids(self) -> Tuple[int, ...]:
+        return tuple(binding.action_uid for binding in self._bindings)
+
+    @property
+    def action_count(self) -> int:
+        return len(self._bindings)
+
+    @property
+    def registry_sha256(self) -> str:
+        return self._registry_sha256
+
+    @property
+    def provider_state_owner_sha256(self) -> str:
+        return self._provider_state_owner_sha256()
+
+    def provider_state_snapshot(self) -> object:
+        return self._provider_state()
+
+    def binding_for_slot(self, action_slot: int) -> ActionBinding:
+        slot = _plain_int(action_slot, name="action_slot")
+        try:
+            return self._by_slot[slot]
+        except KeyError as exc:
+            raise ActionBallContractError(
+                f"unknown action_slot {slot}"
+            ) from exc
+
+    def binding_for_uid(self, action_uid: int) -> ActionBinding:
+        uid = _plain_int(
+            action_uid,
+            name="action_uid",
+            minimum=1,
+            maximum=MAX_ACTION_UID,
+        )
+        try:
+            return self._by_uid[uid]
+        except KeyError as exc:
+            raise ActionBallContractError(
+                f"unknown action_uid {uid}"
+            ) from exc
+
+    def _binding(self, action_uid: int, action_slot: int) -> ActionBinding:
+        by_uid = self.binding_for_uid(action_uid)
+        by_slot = self.binding_for_slot(action_slot)
+        if by_uid != by_slot:
+            raise ActionBallContractError(
+                f"action_uid {action_uid} is not bound to slot {action_slot}"
+            )
+        return by_uid
+
+    def bind_provider(self, provider: ActionBirthProvider) -> None:
+        if self._provider is not None:
+            raise BirthProtocolError("birth provider may be bound only once")
+        if not callable(provider):
+            raise ActionBallContractError("birth provider must be callable")
+        if (
+            _sha256(
+                getattr(provider, "sampler_contract_sha256", None),
+                name="provider.sampler_contract_sha256",
+            )
+            != self._pins.sampler_sha256
+        ):
+            raise ActionBallContractError(
+                "birth provider sampler contract differs from runtime pins"
+            )
+        _sha256(
+            getattr(provider, "state_owner_sha256", None),
+            name="provider.state_owner_sha256",
+        )
+        if (
+            not callable(getattr(provider, "state_dict", None))
+            or not callable(getattr(provider, "load_state_dict", None))
+            or not callable(
+                getattr(provider, "assert_issued_birth", None)
+            )
+            or not callable(
+                getattr(provider, "birth_highwater_for", None)
+            )
+        ):
+            raise ActionBallContractError(
+                "birth provider must implement atomic state_dict/"
+                "load_state_dict, exact assert_issued_birth, and "
+                "birth_highwater_for"
+            )
+        _json_data(provider.state_dict(), name="birth provider state")
+        self._provider = provider
+
+    def bind_domain_claim_authority(
+        self, authority: ActionDomainClaimAuthority
+    ) -> None:
+        if self._domain_authority is not None:
+            raise BirthProtocolError(
+                "domain claim authority may be bound only once"
+            )
+        if (
+            not callable(getattr(authority, "claim_for_action", None))
+            or not callable(
+                getattr(authority, "domain_cursor_for", None)
+            )
+        ):
+            raise ActionBallContractError(
+                "domain claim authority must implement claim_for_action() "
+                "and domain_cursor_for()"
+            )
+        if (
+            _sha256(
+                getattr(
+                    authority,
+                    "domain_authority_contract_sha256",
+                    None,
+                ),
+                name="authority.domain_authority_contract_sha256",
+            )
+            != self._pins.domain_authority_sha256
+        ):
+            raise ActionBallContractError(
+                "domain claim authority contract differs from runtime pins"
+            )
+        _sha256(
+            getattr(authority, "state_owner_sha256", None),
+            name="authority.state_owner_sha256",
+        )
+        if not callable(getattr(authority, "state_dict", None)) or not callable(
+            getattr(authority, "load_state_dict", None)
+        ):
+            raise ActionBallContractError(
+                "domain claim authority must implement atomic "
+                "state_dict/load_state_dict"
+            )
+        _json_data(
+            authority.state_dict(), name="domain claim authority state"
+        )
+        self._domain_authority = authority
+
+    def _provider_state(self) -> object:
+        if self._provider is None:
+            raise BirthProtocolError("birth provider is not bound")
+        return _json_data(
+            self._provider.state_dict(), name="birth provider state"
+        )
+
+    def _restore_provider_state(self, state: object) -> None:
+        if self._provider is None:
+            raise BirthProtocolError("birth provider is not bound")
+        detached = _json_data(state, name="birth provider state")
+        self._provider.load_state_dict(detached)
+        if self._provider_state() != detached:
+            raise ActionBallContractError(
+                "birth provider load_state_dict did not restore exact state"
+            )
+
+    def _domain_authority_state(self) -> object:
+        if self._domain_authority is None:
+            raise BirthProtocolError("domain claim authority is not bound")
+        return _json_data(
+            self._domain_authority.state_dict(),
+            name="domain claim authority state",
+        )
+
+    def _restore_domain_authority_state(self, state: object) -> None:
+        if self._domain_authority is None:
+            raise BirthProtocolError("domain claim authority is not bound")
+        detached = _json_data(
+            state, name="domain claim authority state"
+        )
+        self._domain_authority.load_state_dict(detached)
+        if self._domain_authority_state() != detached:
+            raise ActionBallContractError(
+                "domain claim authority load_state_dict did not restore "
+                "exact state"
+            )
+
+    def _provider_state_owner_sha256(self) -> str:
+        if self._provider is None:
+            raise BirthProtocolError("birth provider is not bound")
+        return _sha256(
+            getattr(self._provider, "state_owner_sha256", None),
+            name="provider.state_owner_sha256",
+        )
+
+    def _domain_authority_state_owner_sha256(self) -> str:
+        if self._domain_authority is None:
+            raise BirthProtocolError("domain claim authority is not bound")
+        return _sha256(
+            getattr(self._domain_authority, "state_owner_sha256", None),
+            name="authority.state_owner_sha256",
+        )
+
+    def _callback_states(self) -> Tuple[object, object]:
+        provider_state = self._provider_state()
+        authority_state = self._domain_authority_state()
+        if (
+            self._provider_state_owner_sha256()
+            == self._domain_authority_state_owner_sha256()
+            and provider_state != authority_state
+        ):
+            raise ActionBallContractError(
+                "callbacks sharing one state owner must expose byte-identical "
+                "JSON states"
+            )
+        return provider_state, authority_state
+
+    def _restore_callback_states(
+        self, provider_state: object, authority_state: object
+    ) -> None:
+        shared_owner = (
+            self._provider_state_owner_sha256()
+            == self._domain_authority_state_owner_sha256()
+        )
+        if shared_owner:
+            if provider_state != authority_state:
+                raise ActionBallContractError(
+                    "shared callback owner checkpoint states disagree"
+                )
+            self._restore_domain_authority_state(authority_state)
+            if self._provider_state() != provider_state:
+                raise ActionBallContractError(
+                    "shared callback owner restore is not visible through "
+                    "the provider"
+                )
+            return
+        provider_error = None
+        authority_error = None
+        try:
+            self._restore_provider_state(provider_state)
+        except Exception as exc:  # pragma: no cover - catastrophic adapter bug
+            provider_error = exc
+        try:
+            self._restore_domain_authority_state(authority_state)
+        except Exception as exc:  # pragma: no cover - catastrophic adapter bug
+            authority_error = exc
+        if provider_error is not None or authority_error is not None:
+            raise BirthProtocolError(
+                "provider/domain authority exact state restore failed"
+            ) from (provider_error or authority_error)
+
+    def _provider_birth_highwater(
+        self, action_uid: int
+    ) -> Tuple[int, int]:
+        if self._provider is None:
+            raise BirthProtocolError("birth provider is not bound")
+        uid = self.binding_for_uid(action_uid).action_uid
+        raw = self._provider.birth_highwater_for(uid)
+        if not isinstance(raw, (tuple, list)) or len(raw) != 2:
+            raise ActionBallContractError(
+                "provider birth high-water must be a length-2 tuple/list"
+            )
+        index, draw_end = raw
+        if type(index) is not int or type(draw_end) is not int:
+            raise ActionBallContractError(
+                "provider birth high-water values must be plain integers"
+            )
+        if index == -1 and draw_end == 0:
+            return (-1, 0)
+        if (
+            index < 0
+            or index > MAX_COUNTER
+            or draw_end < 1
+            or draw_end > MAX_COUNTER
+        ):
+            raise ActionBallContractError(
+                "provider birth high-water values are out of range"
+            )
+        return (index, draw_end)
+
+    def _domain_cursor(self, action_uid: int) -> int:
+        if self._domain_authority is None:
+            raise BirthProtocolError(
+                "domain claim authority is not bound"
+            )
+        uid = self.binding_for_uid(action_uid).action_uid
+        return _plain_int(
+            self._domain_authority.domain_cursor_for(uid),
+            name="domain authority cursor",
+        )
+
+    def _callback_highwaters(
+        self,
+    ) -> Tuple[Dict[int, Tuple[int, int]], Dict[int, int]]:
+        """Read every callback tape atomically and fail on hidden mutation."""
+
+        provider_state, authority_state = self._callback_states()
+        try:
+            provider = {
+                binding.action_uid: self._provider_birth_highwater(
+                    binding.action_uid
+                )
+                for binding in self._bindings
+            }
+            domain = {
+                binding.action_uid: self._domain_cursor(
+                    binding.action_uid
+                )
+                for binding in self._bindings
+            }
+            if self._callback_states() != (
+                provider_state,
+                authority_state,
+            ):
+                raise ActionBallContractError(
+                    "provider/domain high-water authorities must be pure"
+                )
+            return provider, domain
+        except Exception:
+            self._restore_callback_states(
+                provider_state, authority_state
+            )
+            raise
+
+    def _broker_callback_highwaters(
+        self,
+    ) -> Tuple[Dict[int, Tuple[int, int]], Dict[int, int]]:
+        provider = {
+            binding.action_uid: (
+                self._last_sampler_birth_index.get(
+                    binding.action_uid, -1
+                ),
+                self._last_sampler_draw_end.get(binding.action_uid, 0),
+            )
+            for binding in self._bindings
+        }
+        domain = {
+            binding.action_uid: self._domain_claim_count.get(
+                binding.action_uid, 0
+            )
+            for binding in self._bindings
+        }
+        return provider, domain
+
+    def _assert_complete_birth_transcript(
+        self,
+        receipts: Sequence[ActionBirthReceipt],
+        *,
+        sampler_birth_indices: Mapping[int, int],
+        sampler_draw_ends: Mapping[int, int],
+    ) -> None:
+        """Require broker receipts to exhaust every provider-issued birth.
+
+        A provider high-water proves only the last issued birth.  Without
+        this coverage check, a re-signed checkpoint could delete an older
+        env/generation receipt while retaining the provider state and final
+        high-water, then reuse the deleted generation after restore.
+        """
+
+        by_action: Dict[int, Dict[int, ActionBirthReceipt]] = {
+            binding.action_uid: {} for binding in self._bindings
+        }
+        sampler_sha256: set[str] = set()
+        for receipt in receipts:
+            if not isinstance(receipt, ActionBirthReceipt):
+                raise ActionBallContractError(
+                    "birth transcript requires ActionBirthReceipt rows"
+                )
+            try:
+                action_rows = by_action[receipt.action_uid]
+            except KeyError as exc:
+                raise ActionBallContractError(
+                    "birth transcript has an unknown action_uid"
+                ) from exc
+            if (
+                receipt.sampler_birth_sha256 in sampler_sha256
+                or receipt.sampler_birth_index in action_rows
+            ):
+                raise ActionBallContractError(
+                    "birth transcript replays one sampler birth"
+                )
+            sampler_sha256.add(receipt.sampler_birth_sha256)
+            action_rows[receipt.sampler_birth_index] = receipt
+
+        for binding in self._bindings:
+            action_uid = binding.action_uid
+            last_index = sampler_birth_indices.get(action_uid, -1)
+            last_draw_end = sampler_draw_ends.get(action_uid, 0)
+            action_rows = by_action[action_uid]
+            if last_index == -1:
+                if last_draw_end != 0 or action_rows:
+                    raise ActionBallContractError(
+                        "birth transcript disagrees with empty provider "
+                        "high-water"
+                    )
+                continue
+            if (
+                last_index < 0
+                or last_draw_end < SAMPLER_BIRTH_DRAW_COUNT
+                or len(action_rows) != last_index + 1
+                or min(action_rows, default=-1) != 0
+                or max(action_rows, default=-1) != last_index
+            ):
+                raise ActionBallContractError(
+                    "birth transcript does not exhaust provider-issued "
+                    "birth indices"
+                )
+            if (
+                action_rows[last_index].sampler_draw_end
+                != last_draw_end
+            ):
+                raise ActionBallContractError(
+                    "birth transcript final draw end differs from provider "
+                    "high-water"
+                )
+
+    def reserve_true_reset(
+        self,
+        *,
+        env_id: int,
+        reset_generation: int,
+        action_uid: int,
+        action_slot: int,
+        reset_kind: str = "true_reset",
+    ) -> ActionBirthReceipt:
+        request = BirthReserveRequest(
+            env_id=env_id,
+            reset_generation=reset_generation,
+            action_uid=action_uid,
+            action_slot=action_slot,
+        )
+        return self.reserve_many_true_reset(
+            (request,), reset_kind=reset_kind
+        )[0]
+
+    def reserve_many_true_reset(
+        self,
+        requests: Sequence[BirthReserveRequest],
+        *,
+        reset_kind: str = "true_reset",
+    ) -> Tuple[ActionBirthReceipt, ...]:
+        """Atomically reserve provider births for a reset env batch."""
+
+        _true_reset(reset_kind)
+        if self._provider is None:
+            raise BirthProtocolError("birth provider is not bound")
+        if self._domain_authority is None:
+            raise BirthProtocolError(
+                "domain claim authority is not bound"
+            )
+        if isinstance(requests, (str, bytes)) or not isinstance(
+            requests, Sequence
+        ):
+            raise ActionBallContractError(
+                "reserve requests must be a non-empty sequence"
+            )
+        converted = tuple(requests)
+        if not converted or any(
+            not isinstance(request, BirthReserveRequest)
+            for request in converted
+        ):
+            raise ActionBallContractError(
+                "reserve requests must be non-empty BirthReserveRequest "
+                "objects"
+            )
+        env_ids = [request.env_id for request in converted]
+        if len(set(env_ids)) != len(env_ids):
+            raise BirthProtocolError(
+                "reserve batch must not repeat an env_id"
+            )
+
+        validated_requests: list[
+            Tuple[BirthReserveRequest, ActionBinding]
+        ] = []
+        for request in converted:
+            env = request.env_id
+            binding = self._binding(
+                request.action_uid, request.action_slot
+            )
+            if env in self._pending:
+                raise BirthProtocolError(
+                    f"env {env} already has an unconsumed birth"
+                )
+            expected_generation = self._last_generation.get(env, 0) + 1
+            if request.reset_generation != expected_generation:
+                raise BirthProtocolError(
+                    f"env {env} reset generation must be exactly "
+                    f"{expected_generation}, got "
+                    f"{request.reset_generation}"
+                )
+            validated_requests.append((request, binding))
+
+        receipts: list[ActionBirthReceipt] = []
+        receipt_digests: set[str] = set()
+        sampler_birth_digests: set[str] = set()
+        projected_birth_indices = dict(self._last_sampler_birth_index)
+        projected_draw_ends = dict(self._last_sampler_draw_end)
+        projected_domain_counts = dict(self._domain_claim_count)
+        provider_state, authority_state = self._callback_states()
+        try:
+            if (
+                self._callback_highwaters()
+                != self._broker_callback_highwaters()
+            ):
+                raise ActionBallContractError(
+                    "broker callback high-water differs from provider/"
+                    "domain authority"
+                )
+            for request, binding in validated_requests:
+                domain_claim = self._domain_authority.claim_for_action(
+                    binding.action_uid
+                )
+                projected_domain_counts[binding.action_uid] = (
+                    projected_domain_counts.get(binding.action_uid, 0) + 1
+                )
+                if not isinstance(domain_claim, ActionDomainClaim):
+                    raise ActionBallContractError(
+                        "domain claim authority must return "
+                        "ActionDomainClaim"
+                    )
+                if (
+                    domain_claim.action_uid != binding.action_uid
+                    or domain_claim.profile_sha256
+                    != binding.profile_sha256
+                    or domain_claim.mobility_mode != self._mobility_mode
+                    or domain_claim.authority_contract_sha256
+                    != self._pins.domain_authority_sha256
+                ):
+                    raise ActionBallContractError(
+                        "domain claim does not match action binding/run pins"
+                    )
+                provider_request = ActionBirthRequest(
+                    env_id=request.env_id,
+                    reset_generation=request.reset_generation,
+                    action_uid=binding.action_uid,
+                    action_slot=binding.action_slot,
+                    domain_claim=domain_claim,
+                    registry_sha256=self._registry_sha256,
+                    mobility_mode=self._mobility_mode,
+                    binding=binding,
+                    pins=self._pins,
+                )
+                receipt = self._provider(provider_request)
+                if not isinstance(receipt, ActionBirthReceipt):
+                    raise ActionBallContractError(
+                        "birth provider must return ActionBirthReceipt"
+                    )
+                receipt.assert_contract(
+                    binding=binding,
+                    pins=self._pins,
+                    mobility_mode=self._mobility_mode,
+                    registry_sha256=self._registry_sha256,
+                )
+                if (
+                    receipt.env_id != request.env_id
+                    or receipt.reset_generation
+                    != request.reset_generation
+                    or receipt.domain_epoch != domain_claim.domain_epoch
+                    or receipt.domain_levels != domain_claim.domain_levels
+                    or receipt.levels_sha256
+                    != domain_claim.levels_sha256
+                    or receipt.domain_claim_sha256
+                    != domain_claim.canonical_sha256
+                    or receipt.registry_sha256 != self._registry_sha256
+                ):
+                    raise ActionBallContractError(
+                        "birth provider returned wrong env/reset/domain claim"
+                    )
+                if receipt.canonical_sha256 in receipt_digests:
+                    raise ActionBallContractError(
+                        "birth provider replayed a receipt within one batch"
+                    )
+                if (
+                    receipt.sampler_birth_sha256
+                    in sampler_birth_digests
+                ):
+                    raise ActionBallContractError(
+                        "birth provider replayed a sampler birth within one "
+                        "batch"
+                    )
+                expected_birth_index = (
+                    projected_birth_indices.get(binding.action_uid, -1) + 1
+                )
+                if receipt.sampler_birth_index != expected_birth_index:
+                    raise ActionBallContractError(
+                        "birth provider returned a non-contiguous sampler "
+                        "birth index"
+                    )
+                if receipt.sampler_draw_start < projected_draw_ends.get(
+                    binding.action_uid, 0
+                ):
+                    raise ActionBallContractError(
+                        "birth provider sampler draw range replayed/overlapped "
+                        "a prior birth"
+                    )
+                projected_birth_indices[
+                    binding.action_uid
+                ] = receipt.sampler_birth_index
+                projected_draw_ends[
+                    binding.action_uid
+                ] = receipt.sampler_draw_end
+                receipt_digests.add(receipt.canonical_sha256)
+                sampler_birth_digests.add(
+                    receipt.sampler_birth_sha256
+                )
+                receipts.append(receipt)
+            provider_state_after_issue, authority_state_after_issue = (
+                self._callback_states()
+            )
+            for receipt in receipts:
+                self._provider.assert_issued_birth(receipt)
+            if self._callback_states() != (
+                provider_state_after_issue,
+                authority_state_after_issue,
+            ):
+                raise ActionBallContractError(
+                    "birth provider authority assertion must be pure"
+                )
+            expected_highwaters = (
+                {
+                    binding.action_uid: (
+                        projected_birth_indices.get(
+                            binding.action_uid, -1
+                        ),
+                        projected_draw_ends.get(binding.action_uid, 0),
+                    )
+                    for binding in self._bindings
+                },
+                {
+                    binding.action_uid: projected_domain_counts.get(
+                        binding.action_uid, 0
+                    )
+                    for binding in self._bindings
+                },
+            )
+            if self._callback_highwaters() != expected_highwaters:
+                raise ActionBallContractError(
+                    "provider/domain authority advanced an unstaged action "
+                    "tape"
+                )
+        except Exception:
+            try:
+                self._restore_callback_states(
+                    provider_state, authority_state
+                )
+            except Exception as rollback_error:
+                raise BirthProtocolError(
+                    "birth provider failed and its exact state rollback failed"
+                ) from rollback_error
+            raise
+
+        # Broker state commits only after all provider outputs validate.
+        for (request, _binding), receipt in zip(
+            validated_requests, receipts
+        ):
+            self._pending[request.env_id] = _PendingBirth(
+                receipt, "reserved"
+            )
+            self._last_generation[
+                request.env_id
+            ] = request.reset_generation
+        self._last_sampler_birth_index = projected_birth_indices
+        self._last_sampler_draw_end = projected_draw_ends
+        self._domain_claim_count = projected_domain_counts
+        return tuple(receipts)
+
+    def pending_receipt(
+        self,
+        *,
+        env_id: int,
+        reset_generation: int,
+        action_uid: int,
+        action_slot: int,
+        reset_kind: str = "true_reset",
+    ) -> ActionBirthReceipt:
+        _true_reset(reset_kind)
+        env = _plain_int(env_id, name="env_id")
+        generation = _plain_int(
+            reset_generation, name="reset_generation", minimum=1
+        )
+        binding = self._binding(action_uid, action_slot)
+        pending = self._pending.get(env)
+        if pending is None:
+            raise BirthProtocolError(f"env {env} has no pending birth")
+        receipt = pending.receipt
+        if (
+            receipt.reset_generation != generation
+            or receipt.action_uid != binding.action_uid
+            or receipt.action_slot != binding.action_slot
+        ):
+            raise BirthProtocolError(
+                "pending birth generation/action identity mismatch"
+            )
+        return receipt
+
+    def commit_true_reset(
+        self,
+        *,
+        env_id: int,
+        reset_generation: int,
+        receipt_sha256: str,
+        reset_kind: str = "true_reset",
+    ) -> None:
+        request = BirthCommitRequest(
+            env_id=env_id,
+            reset_generation=reset_generation,
+            receipt_sha256=receipt_sha256,
+        )
+        self.commit_many_true_reset((request,), reset_kind=reset_kind)
+
+    def commit_many_true_reset(
+        self,
+        requests: Sequence[BirthCommitRequest],
+        *,
+        reset_kind: str = "true_reset",
+    ) -> None:
+        """Atomically mark a reset batch committed after one root write."""
+
+        _true_reset(reset_kind)
+        if isinstance(requests, (str, bytes)) or not isinstance(
+            requests, Sequence
+        ):
+            raise ActionBallContractError(
+                "commit requests must be a non-empty sequence"
+            )
+        converted = tuple(requests)
+        if not converted or any(
+            not isinstance(request, BirthCommitRequest)
+            for request in converted
+        ):
+            raise ActionBallContractError(
+                "commit requests must be non-empty BirthCommitRequest "
+                "objects"
+            )
+        env_ids = [request.env_id for request in converted]
+        if len(set(env_ids)) != len(env_ids):
+            raise BirthProtocolError(
+                "commit batch must not repeat an env_id"
+            )
+        validated: list[Tuple[int, _PendingBirth]] = []
+        for request in converted:
+            pending = self._pending.get(request.env_id)
+            if pending is None:
+                raise BirthProtocolError(
+                    f"env {request.env_id} has no pending birth"
+                )
+            if pending.status != "reserved":
+                raise BirthProtocolError(
+                    f"env {request.env_id} birth was already committed"
+                )
+            if (
+                pending.receipt.reset_generation
+                != request.reset_generation
+                or pending.receipt.canonical_sha256
+                != request.receipt_sha256
+            ):
+                raise BirthProtocolError(
+                    "commit generation/receipt SHA does not match "
+                    "reservation"
+                )
+            validated.append((request.env_id, pending))
+        for env, pending in validated:
+            self._pending[env] = _PendingBirth(
+                pending.receipt, "committed"
+            )
+
+    def consume_true_reset(
+        self,
+        *,
+        env_id: int,
+        reset_generation: int,
+        action_uid: int,
+        action_slot: int,
+        receipt_sha256: str,
+        reset_kind: str = "true_reset",
+    ) -> ActionBirthReceipt:
+        request = BirthConsumeRequest(
+            env_id=env_id,
+            reset_generation=reset_generation,
+            action_uid=action_uid,
+            action_slot=action_slot,
+            receipt_sha256=receipt_sha256,
+        )
+        return self.consume_many_true_reset(
+            (request,), reset_kind=reset_kind
+        )[0]
+
+    def consume_many_true_reset(
+        self,
+        requests: Sequence[BirthConsumeRequest],
+        *,
+        reset_kind: str = "true_reset",
+    ) -> Tuple[ActionBirthReceipt, ...]:
+        """Atomically consume one committed birth for every requested env.
+
+        All generation, action, slot, and digest claims are checked before any
+        pending receipt is removed.  Racket can therefore validate an
+        ``env_ids`` batch without partially consuming the prefix when a later
+        row is stale.
+        """
+
+        _true_reset(reset_kind)
+        if isinstance(requests, (str, bytes)) or not isinstance(
+            requests, Sequence
+        ):
+            raise ActionBallContractError(
+                "consume requests must be a non-empty sequence"
+            )
+        converted = tuple(requests)
+        if not converted:
+            raise ActionBallContractError(
+                "consume requests must be non-empty"
+            )
+        if any(
+            not isinstance(request, BirthConsumeRequest)
+            for request in converted
+        ):
+            raise ActionBallContractError(
+                "every consume request must be BirthConsumeRequest"
+            )
+        env_ids = [request.env_id for request in converted]
+        if len(set(env_ids)) != len(env_ids):
+            raise BirthProtocolError(
+                "consume batch must not repeat an env_id"
+            )
+
+        validated: list[Tuple[int, int, ActionBirthReceipt]] = []
+        for request in converted:
+            env = request.env_id
+            generation = request.reset_generation
+            binding = self._binding(
+                request.action_uid, request.action_slot
+            )
+            pending = self._pending.get(env)
+            if pending is None:
+                consumed = self._consumed_generation.get(env, 0)
+                if generation <= consumed:
+                    raise BirthProtocolError(
+                        f"env {env} generation {generation} birth was "
+                        "already consumed (replay/stale)"
+                    )
+                raise BirthProtocolError(
+                    f"env {env} has no pending birth"
+                )
+            receipt = pending.receipt
+            if pending.status != "committed":
+                raise BirthProtocolError(
+                    "Racket cannot consume birth before Motion commits "
+                    "root write"
+                )
+            if (
+                receipt.reset_generation != generation
+                or receipt.action_uid != binding.action_uid
+                or receipt.action_slot != binding.action_slot
+                or receipt.canonical_sha256
+                != request.receipt_sha256
+            ):
+                raise BirthProtocolError(
+                    "consume generation/action/receipt SHA mismatch"
+                )
+            validated.append((env, generation, receipt))
+
+        for env, generation, _receipt in validated:
+            del self._pending[env]
+            self._consumed_generation[env] = generation
+        for env, _generation, receipt in validated:
+            self._consumed_receipts[
+                (env, receipt.reset_generation)
+            ] = receipt
+        return tuple(receipt for _env, _generation, receipt in validated)
+
+    def assert_consumed_birth(
+        self, birth: ActionBirthReceipt
+    ) -> None:
+        """Fail unless Racket has consumed this exact committed birth."""
+
+        if not isinstance(birth, ActionBirthReceipt):
+            raise ActionBallContractError(
+                "consumed birth authority requires ActionBirthReceipt"
+            )
+        binding = self._binding(birth.action_uid, birth.action_slot)
+        birth.assert_contract(
+            binding=binding,
+            pins=self._pins,
+            mobility_mode=self._mobility_mode,
+            registry_sha256=self._registry_sha256,
+        )
+        if (
+            self._consumed_generation.get(birth.env_id, 0)
+            < birth.reset_generation
+            or self._consumed_receipts.get(
+                (birth.env_id, birth.reset_generation)
+            )
+            != birth
+        ):
+            raise BirthProtocolError(
+                "birth is not the env's exact consumed generation"
+            )
+
+    def assert_known_generation(
+        self, *, env_id: int, reset_generation: int
+    ) -> None:
+        """Fail unless the broker transcript has reached this generation.
+
+        This deliberately accepts an older already-consumed generation: pool
+        retirement can lag behind a subsequent true reset, but a checkpoint
+        must never invent retirement provenance for an env/generation the
+        broker has not issued.
+        """
+
+        env = _plain_int(env_id, name="env_id")
+        generation = _plain_int(
+            reset_generation, name="reset_generation", minimum=1
+        )
+        if self._last_generation.get(env, 0) < generation:
+            raise BirthProtocolError(
+                "generation is absent from the birth broker transcript"
+            )
+
+    def state_dict(self) -> Dict[str, object]:
+        provider_state, authority_state = self._callback_states()
+        transcript = (
+            *self._consumed_receipts.values(),
+            *(
+                pending.receipt
+                for pending in self._pending.values()
+            ),
+        )
+        try:
+            if self._provider is None:
+                raise BirthProtocolError("birth provider is not bound")
+            self._assert_complete_birth_transcript(
+                transcript,
+                sampler_birth_indices=(
+                    self._last_sampler_birth_index
+                ),
+                sampler_draw_ends=self._last_sampler_draw_end,
+            )
+            for receipt in transcript:
+                self._provider.assert_issued_birth(receipt)
+            if self._callback_states() != (
+                provider_state,
+                authority_state,
+            ):
+                raise ActionBallContractError(
+                    "birth provider authority assertion must be pure"
+                )
+            if (
+                self._callback_highwaters()
+                != self._broker_callback_highwaters()
+            ):
+                raise ActionBallContractError(
+                    "broker callback high-water differs from provider/domain "
+                    "authority"
+                )
+        except Exception:
+            self._restore_callback_states(
+                provider_state, authority_state
+            )
+            raise
+        payload: Dict[str, object] = {
+            "schema_version": BROKER_STATE_SCHEMA_VERSION,
+            "runtime_contract_sha256": RUNTIME_CONTRACT_SHA256,
+            "registry_sha256": self._registry_sha256,
+            "pins": self._pins.to_dict(),
+            "mobility_mode": self._mobility_mode,
+            "bindings": [
+                binding.to_dict() for binding in self._bindings
+            ],
+            "domain_authority_contract_sha256": (
+                self._pins.domain_authority_sha256
+            ),
+            "domain_authority_state_owner_sha256": (
+                self._domain_authority_state_owner_sha256()
+            ),
+            "domain_authority_state": authority_state,
+            "domain_authority_state_sha256": _sha256_json(
+                authority_state
+            ),
+            "provider_contract_sha256": self._pins.sampler_sha256,
+            "provider_state_owner_sha256": (
+                self._provider_state_owner_sha256()
+            ),
+            "provider_state": provider_state,
+            "provider_state_sha256": _sha256_json(provider_state),
+            "domain_claim_counts": [
+                [action_uid, count]
+                for action_uid, count in sorted(
+                    self._domain_claim_count.items()
+                )
+            ],
+            "last_sampler_birth_indices": [
+                [action_uid, birth_index]
+                for action_uid, birth_index in sorted(
+                    self._last_sampler_birth_index.items()
+                )
+            ],
+            "last_sampler_draw_ends": [
+                [action_uid, draw_end]
+                for action_uid, draw_end in sorted(
+                    self._last_sampler_draw_end.items()
+                )
+            ],
+            "last_generations": [
+                [env, generation]
+                for env, generation in sorted(self._last_generation.items())
+            ],
+            "consumed_generations": [
+                [env, generation]
+                for env, generation in sorted(
+                    self._consumed_generation.items()
+                )
+            ],
+            "consumed_receipts": [
+                receipt.to_dict()
+                for _key, receipt in sorted(
+                    self._consumed_receipts.items()
+                )
+            ],
+            "pending": [
+                {
+                    "env_id": env,
+                    "status": pending.status,
+                    "receipt": pending.receipt.to_dict(),
+                }
+                for env, pending in sorted(self._pending.items())
+            ],
+        }
+        payload["integrity_sha256"] = _sha256_json(payload)
+        return payload
+
+    @staticmethod
+    def _generation_rows(
+        value: object, *, name: str
+    ) -> Dict[int, int]:
+        if not isinstance(value, (tuple, list)):
+            raise ActionBallContractError(f"{name} must be a list")
+        result: Dict[int, int] = {}
+        for index, row in enumerate(value):
+            if (
+                not isinstance(row, (tuple, list))
+                or len(row) != 2
+            ):
+                raise ActionBallContractError(
+                    f"{name}[{index}] must be [env_id, generation]"
+                )
+            env = _plain_int(row[0], name=f"{name}[{index}].env_id")
+            generation = _plain_int(
+                row[1],
+                name=f"{name}[{index}].generation",
+                minimum=1,
+            )
+            if env in result:
+                raise ActionBallContractError(
+                    f"{name} repeats env_id {env}"
+                )
+            result[env] = generation
+        if list(result) != sorted(result):
+            raise ActionBallContractError(
+                f"{name} must be sorted by env_id"
+            )
+        return result
+
+    @staticmethod
+    def _action_counter_rows(
+        value: object, *, name: str
+    ) -> Dict[int, int]:
+        if not isinstance(value, (tuple, list)):
+            raise ActionBallContractError(f"{name} must be a list")
+        result: Dict[int, int] = {}
+        for index, row in enumerate(value):
+            if not isinstance(row, (tuple, list)) or len(row) != 2:
+                raise ActionBallContractError(
+                    f"{name}[{index}] must be [action_uid, counter]"
+                )
+            action_uid = _plain_int(
+                row[0],
+                name=f"{name}[{index}].action_uid",
+                minimum=1,
+                maximum=MAX_ACTION_UID,
+            )
+            counter = _plain_int(
+                row[1], name=f"{name}[{index}].counter"
+            )
+            if action_uid in result:
+                raise ActionBallContractError(
+                    f"{name} repeats action_uid {action_uid}"
+                )
+            result[action_uid] = counter
+        if list(result) != sorted(result):
+            raise ActionBallContractError(
+                f"{name} must be sorted by action_uid"
+            )
+        return result
+
+    def load_state_dict(self, state: object) -> None:
+        row = _exact_mapping(
+            state, self._STATE_KEYS, name="birth broker state"
+        )
+        if row["schema_version"] != BROKER_STATE_SCHEMA_VERSION:
+            raise ActionBallContractError(
+                "unsupported birth broker state schema_version"
+            )
+        if row["runtime_contract_sha256"] != RUNTIME_CONTRACT_SHA256:
+            raise ActionBallContractError(
+                "birth broker runtime contract SHA mismatch"
+            )
+        declared_integrity = _sha256(
+            row["integrity_sha256"], name="integrity_sha256"
+        )
+        payload = {
+            key: row[key]
+            for key in self._STATE_KEYS
+            if key != "integrity_sha256"
+        }
+        if _sha256_json(payload) != declared_integrity:
+            raise ActionBallContractError(
+                "birth broker state integrity mismatch"
+            )
+        pins = RuntimePins.from_dict(row["pins"])
+        mode = _mode(row["mobility_mode"])
+        if not isinstance(row["bindings"], (tuple, list)):
+            raise ActionBallContractError("bindings state must be a list")
+        bindings = _validate_bindings(
+            tuple(
+                ActionBinding.from_dict(binding)
+                for binding in row["bindings"]
+            )
+        )
+        registry_sha = _sha256(
+            row["registry_sha256"], name="registry_sha256"
+        )
+        if (
+            pins != self._pins
+            or mode != self._mobility_mode
+            or bindings != self._bindings
+            or registry_sha != self._registry_sha256
+            or registry_sha
+            != _registry_sha256(bindings, pins, mode)
+        ):
+            raise ActionBallContractError(
+                "birth broker state belongs to a different run registry"
+            )
+        authority_contract_sha = _sha256(
+            row["domain_authority_contract_sha256"],
+            name="domain_authority_contract_sha256",
+        )
+        if authority_contract_sha != self._pins.domain_authority_sha256:
+            raise ActionBallContractError(
+                "birth broker domain authority contract SHA mismatch"
+            )
+        authority_owner_sha = _sha256(
+            row["domain_authority_state_owner_sha256"],
+            name="domain_authority_state_owner_sha256",
+        )
+        if (
+            authority_owner_sha
+            != self._domain_authority_state_owner_sha256()
+        ):
+            raise ActionBallContractError(
+                "birth broker domain authority state owner mismatch"
+            )
+        authority_state = _json_data(
+            row["domain_authority_state"],
+            name="domain claim authority state",
+        )
+        if _sha256(
+            row["domain_authority_state_sha256"],
+            name="domain_authority_state_sha256",
+        ) != _sha256_json(authority_state):
+            raise ActionBallContractError(
+                "birth broker domain authority state SHA mismatch"
+            )
+        provider_contract_sha = _sha256(
+            row["provider_contract_sha256"],
+            name="provider_contract_sha256",
+        )
+        if provider_contract_sha != self._pins.sampler_sha256:
+            raise ActionBallContractError(
+                "birth broker provider contract SHA mismatch"
+            )
+        provider_owner_sha = _sha256(
+            row["provider_state_owner_sha256"],
+            name="provider_state_owner_sha256",
+        )
+        if provider_owner_sha != self._provider_state_owner_sha256():
+            raise ActionBallContractError(
+                "birth broker provider state owner mismatch"
+            )
+        provider_state = _json_data(
+            row["provider_state"], name="birth provider state"
+        )
+        if _sha256(
+            row["provider_state_sha256"],
+            name="provider_state_sha256",
+        ) != _sha256_json(provider_state):
+            raise ActionBallContractError(
+                "birth broker provider state SHA mismatch"
+            )
+        domain_claim_counts = self._action_counter_rows(
+            row["domain_claim_counts"],
+            name="domain_claim_counts",
+        )
+        sampler_birth_indices = self._action_counter_rows(
+            row["last_sampler_birth_indices"],
+            name="last_sampler_birth_indices",
+        )
+        sampler_draw_ends = self._action_counter_rows(
+            row["last_sampler_draw_ends"],
+            name="last_sampler_draw_ends",
+        )
+        if (
+            set(sampler_birth_indices) != set(sampler_draw_ends)
+            or set(sampler_birth_indices) != set(domain_claim_counts)
+            or any(
+                action_uid not in self._by_uid
+                for action_uid in sampler_birth_indices
+            )
+            or any(
+                domain_claim_counts[action_uid] != birth_index + 1
+                for action_uid, birth_index in sampler_birth_indices.items()
+            )
+            or any(draw_end < SAMPLER_BIRTH_DRAW_COUNT for draw_end in sampler_draw_ends.values())
+        ):
+            raise ActionBallContractError(
+                "birth broker sampler counters disagree with the action "
+                "registry"
+            )
+        last = self._generation_rows(
+            row["last_generations"], name="last_generations"
+        )
+        consumed = self._generation_rows(
+            row["consumed_generations"],
+            name="consumed_generations",
+        )
+        if not isinstance(row["consumed_receipts"], (tuple, list)):
+            raise ActionBallContractError(
+                "consumed_receipts must be a list"
+            )
+        consumed_receipts: Dict[
+            Tuple[int, int], ActionBirthReceipt
+        ] = {}
+        for index, raw_receipt in enumerate(row["consumed_receipts"]):
+            receipt = ActionBirthReceipt.from_dict(raw_receipt)
+            env = receipt.env_id
+            generation = receipt.reset_generation
+            key = (env, generation)
+            if key in consumed_receipts:
+                raise ActionBallContractError(
+                    "consumed_receipts repeats an env/generation"
+                )
+            if generation > consumed.get(env, 0):
+                raise ActionBallContractError(
+                    "consumed receipt exceeds generation ledger"
+                )
+            try:
+                binding = self._by_uid[receipt.action_uid]
+            except KeyError as exc:
+                raise ActionBallContractError(
+                    "consumed receipt has unknown action_uid"
+                ) from exc
+            receipt.assert_contract(
+                binding=binding,
+                pins=self._pins,
+                mobility_mode=self._mobility_mode,
+                registry_sha256=self._registry_sha256,
+            )
+            if receipt.action_slot != binding.action_slot:
+                raise ActionBallContractError(
+                    "consumed receipt action slot mismatch"
+                )
+            consumed_receipts[key] = receipt
+        if list(consumed_receipts) != sorted(consumed_receipts):
+            raise ActionBallContractError(
+                "consumed_receipts must be sorted by env/generation"
+            )
+        for env, generation in consumed.items():
+            if generation > last.get(env, 0):
+                raise ActionBallContractError(
+                    "consumed generation exceeds last generation"
+                )
+            if {
+                receipt_generation
+                for receipt_env, receipt_generation in consumed_receipts
+                if receipt_env == env
+            } != set(range(1, generation + 1)):
+                raise ActionBallContractError(
+                    "consumed receipt history must be contiguous"
+                )
+        if any(
+            env not in consumed for env, _generation in consumed_receipts
+        ):
+            raise ActionBallContractError(
+                "consumed receipt history has no generation ledger"
+            )
+        if not isinstance(row["pending"], (tuple, list)):
+            raise ActionBallContractError("pending state must be a list")
+        pending_result: Dict[int, _PendingBirth] = {}
+        pending_sampler_sha256: set[str] = set()
+        pending_sampler_indices: Dict[int, set[int]] = {}
+        pending_sampler_ranges: Dict[int, list[Tuple[int, int]]] = {}
+        for receipt in consumed_receipts.values():
+            indices = pending_sampler_indices.setdefault(
+                receipt.action_uid, set()
+            )
+            ranges = pending_sampler_ranges.setdefault(
+                receipt.action_uid, []
+            )
+            if (
+                receipt.sampler_birth_sha256 in pending_sampler_sha256
+                or receipt.sampler_birth_index in indices
+                or any(
+                    receipt.sampler_draw_start < prior_end
+                    and prior_start < receipt.sampler_draw_end
+                    for prior_start, prior_end in ranges
+                )
+            ):
+                raise ActionBallContractError(
+                    "consumed state replays one sampler birth"
+                )
+            if (
+                receipt.sampler_birth_index
+                > sampler_birth_indices.get(receipt.action_uid, -1)
+                or receipt.sampler_draw_end
+                > sampler_draw_ends.get(receipt.action_uid, 0)
+            ):
+                raise ActionBallContractError(
+                    "consumed sampler birth exceeds broker high-water"
+                )
+            pending_sampler_sha256.add(
+                receipt.sampler_birth_sha256
+            )
+            indices.add(receipt.sampler_birth_index)
+            ranges.append(
+                (
+                    receipt.sampler_draw_start,
+                    receipt.sampler_draw_end,
+                )
+            )
+        for index, raw_pending in enumerate(row["pending"]):
+            pending_row = _exact_mapping(
+                raw_pending,
+                ("env_id", "status", "receipt"),
+                name=f"pending[{index}]",
+            )
+            env = _plain_int(
+                pending_row["env_id"], name=f"pending[{index}].env_id"
+            )
+            if env in pending_result:
+                raise ActionBallContractError(
+                    f"pending repeats env_id {env}"
+                )
+            receipt = ActionBirthReceipt.from_dict(
+                pending_row["receipt"]
+            )
+            if receipt.env_id != env:
+                raise ActionBallContractError(
+                    "pending env_id disagrees with receipt"
+                )
+            try:
+                binding = self._by_uid[receipt.action_uid]
+            except KeyError as exc:
+                raise ActionBallContractError(
+                    "pending receipt has unknown action_uid"
+                ) from exc
+            receipt.assert_contract(
+                binding=binding,
+                pins=self._pins,
+                mobility_mode=self._mobility_mode,
+                registry_sha256=self._registry_sha256,
+            )
+            if receipt.action_slot != binding.action_slot:
+                raise ActionBallContractError(
+                    "pending receipt action slot mismatch"
+                )
+            if receipt.reset_generation != last.get(env):
+                raise ActionBallContractError(
+                    "pending receipt is not the env's last generation"
+                )
+            if receipt.reset_generation <= consumed.get(env, 0):
+                raise ActionBallContractError(
+                    "pending receipt generation was already consumed"
+                )
+            if (
+                receipt.sampler_birth_sha256 in pending_sampler_sha256
+                or receipt.sampler_birth_index
+                in pending_sampler_indices.setdefault(
+                    receipt.action_uid, set()
+                )
+            ):
+                raise ActionBallContractError(
+                    "pending state replays one sampler birth"
+                )
+            pending_sampler_sha256.add(receipt.sampler_birth_sha256)
+            pending_sampler_indices[receipt.action_uid].add(
+                receipt.sampler_birth_index
+            )
+            ranges = pending_sampler_ranges.setdefault(
+                receipt.action_uid, []
+            )
+            if any(
+                receipt.sampler_draw_start < prior_end
+                and prior_start < receipt.sampler_draw_end
+                for prior_start, prior_end in ranges
+            ):
+                raise ActionBallContractError(
+                    "pending sampler birth draw ranges overlap"
+                )
+            ranges.append(
+                (
+                    receipt.sampler_draw_start,
+                    receipt.sampler_draw_end,
+                )
+            )
+            if (
+                receipt.sampler_birth_index
+                > sampler_birth_indices.get(receipt.action_uid, -1)
+                or receipt.sampler_draw_end
+                > sampler_draw_ends.get(receipt.action_uid, 0)
+            ):
+                raise ActionBallContractError(
+                    "pending sampler birth exceeds broker high-water"
+                )
+            status = pending_row["status"]
+            if status not in ("reserved", "committed"):
+                raise ActionBallContractError(
+                    "pending status must be reserved or committed"
+                )
+            pending_result[env] = _PendingBirth(receipt, status)
+        if list(pending_result) != sorted(pending_result):
+            raise ActionBallContractError(
+                "pending state must be sorted by env_id"
+            )
+        transcript = (
+            *consumed_receipts.values(),
+            *(
+                pending.receipt
+                for pending in pending_result.values()
+            ),
+        )
+        self._assert_complete_birth_transcript(
+            transcript,
+            sampler_birth_indices=sampler_birth_indices,
+            sampler_draw_ends=sampler_draw_ends,
+        )
+        for env, generation in last.items():
+            if env in pending_result:
+                if consumed.get(env, 0) != generation - 1:
+                    raise ActionBallContractError(
+                        "pending generation must immediately follow the "
+                        "last consumed generation"
+                    )
+            elif consumed.get(env, 0) != generation:
+                raise ActionBallContractError(
+                    "an unconsumed last generation is missing its pending "
+                    "receipt"
+                )
+        if any(env not in last for env in consumed):
+            raise ActionBallContractError(
+                "consumed generation has no matching last generation"
+            )
+        previous_provider_state, previous_authority_state = (
+            self._callback_states()
+        )
+        try:
+            self._restore_callback_states(
+                provider_state, authority_state
+            )
+            if self._provider is None:
+                raise BirthProtocolError("birth provider is not bound")
+            for receipt in transcript:
+                self._provider.assert_issued_birth(receipt)
+            if self._callback_states() != (
+                provider_state,
+                authority_state,
+            ):
+                raise ActionBallContractError(
+                    "birth provider authority assertion must be pure"
+                )
+            expected_highwaters = (
+                {
+                    binding.action_uid: (
+                        sampler_birth_indices.get(
+                            binding.action_uid, -1
+                        ),
+                        sampler_draw_ends.get(binding.action_uid, 0),
+                    )
+                    for binding in self._bindings
+                },
+                {
+                    binding.action_uid: domain_claim_counts.get(
+                        binding.action_uid, 0
+                    )
+                    for binding in self._bindings
+                },
+            )
+            if self._callback_highwaters() != expected_highwaters:
+                raise ActionBallContractError(
+                    "broker callback high-water differs from restored "
+                    "provider/domain authority"
+                )
+        except Exception:
+            self._restore_callback_states(
+                previous_provider_state, previous_authority_state
+            )
+            raise
+        # Atomic commit: no broker field changes until every row and the
+        # bound stateful provider restore have validated.
+        self._last_generation = last
+        self._consumed_generation = consumed
+        self._consumed_receipts = consumed_receipts
+        self._pending = pending_result
+        self._last_sampler_birth_index = sampler_birth_indices
+        self._last_sampler_draw_end = sampler_draw_ends
+        self._domain_claim_count = domain_claim_counts
+
+
+@dataclass(frozen=True)
+class ActionPoolRefillRequest:
+    """Pure callback input for refilling exactly one selected action."""
+
+    action_uid: int
+    action_slot: int
+    refill_index: int
+    minimum_receipts: int
+    swing_generation_start: int
+    mobility_mode: str
+    registry_sha256: str
+    binding: ActionBinding
+    pins: RuntimePins
+    birth: ActionBirthReceipt
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "action_uid",
+            _plain_int(
+                self.action_uid,
+                name="action_uid",
+                minimum=1,
+                maximum=MAX_ACTION_UID,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "action_slot",
+            _plain_int(self.action_slot, name="action_slot"),
+        )
+        object.__setattr__(
+            self,
+            "refill_index",
+            _plain_int(
+                self.refill_index, name="refill_index", minimum=1
+            ),
+        )
+        object.__setattr__(
+            self,
+            "minimum_receipts",
+            _plain_int(
+                self.minimum_receipts,
+                name="minimum_receipts",
+                minimum=1,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "swing_generation_start",
+            _plain_int(
+                self.swing_generation_start,
+                name="swing_generation_start",
+            ),
+        )
+        object.__setattr__(
+            self, "mobility_mode", _mode(self.mobility_mode)
+        )
+        object.__setattr__(
+            self,
+            "registry_sha256",
+            _sha256(self.registry_sha256, name="registry_sha256"),
+        )
+        if (
+            not isinstance(self.binding, ActionBinding)
+            or self.binding.action_uid != self.action_uid
+            or self.binding.action_slot != self.action_slot
+        ):
+            raise ActionBallContractError(
+                "pool refill request action binding mismatch"
+            )
+        if not isinstance(self.pins, RuntimePins):
+            raise ActionBallContractError(
+                "pool refill request pins must be RuntimePins"
+            )
+        if not isinstance(self.birth, ActionBirthReceipt):
+            raise ActionBallContractError(
+                "pool refill request birth must be ActionBirthReceipt"
+            )
+        self.birth.assert_contract(
+            binding=self.binding,
+            pins=self.pins,
+            mobility_mode=self.mobility_mode,
+            registry_sha256=self.registry_sha256,
+        )
+
+
+@dataclass(frozen=True)
+class ActionPoolRefillBatch:
+    """Solver callback output, including rejected-proposal accounting."""
+
+    action_uid: int
+    proposed_count: int
+    proposal_sample_indices: Tuple[int, ...]
+    receipts: Tuple[ActionBallTaskReceipt, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "action_uid",
+            _plain_int(
+                self.action_uid,
+                name="action_uid",
+                minimum=1,
+                maximum=MAX_ACTION_UID,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "proposed_count",
+            _plain_int(self.proposed_count, name="proposed_count"),
+        )
+        if not isinstance(
+            self.proposal_sample_indices, (tuple, list)
+        ):
+            raise ActionBallContractError(
+                "proposal_sample_indices must be a tuple/list"
+            )
+        proposal_indices = tuple(
+            _plain_int(index, name="proposal_sample_index")
+            for index in self.proposal_sample_indices
+        )
+        object.__setattr__(
+            self, "proposal_sample_indices", proposal_indices
+        )
+        if (
+            len(proposal_indices) != self.proposed_count
+            or tuple(sorted(set(proposal_indices)))
+            != proposal_indices
+        ):
+            raise ActionBallContractError(
+                "proposal sample indices must be strictly increasing, "
+                "unique, and match proposed_count"
+            )
+        if not isinstance(self.receipts, (tuple, list)):
+            raise ActionBallContractError(
+                "refill receipts must be a tuple/list"
+            )
+        receipts = tuple(self.receipts)
+        if any(
+            not isinstance(receipt, ActionBallTaskReceipt)
+            for receipt in receipts
+        ):
+            raise ActionBallContractError(
+                "refill receipts must be ActionBallTaskReceipt objects"
+            )
+        object.__setattr__(self, "receipts", receipts)
+        if self.proposed_count < len(receipts):
+            raise ActionBallContractError(
+                "proposed_count must cover every admitted receipt"
+            )
+        if not {
+            receipt.sample_index for receipt in receipts
+        }.issubset(proposal_indices):
+            raise ActionBallContractError(
+                "every admitted receipt must belong to this refill's "
+                "proposal sample indices"
+            )
+
+
+@dataclass(frozen=True)
+class ActionSampleAssignment:
+    """Compact exact sample-index assignment for one birth refill."""
+
+    birth: ActionBirthReceipt
+    refill_index: int
+    proposal_sample_indices: Tuple[int, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.birth, ActionBirthReceipt):
+            raise ActionBallContractError(
+                "sample assignment birth must be ActionBirthReceipt"
+            )
+        object.__setattr__(
+            self,
+            "refill_index",
+            _plain_int(
+                self.refill_index,
+                name="sample assignment refill_index",
+                minimum=1,
+            ),
+        )
+        if not isinstance(
+            self.proposal_sample_indices, (tuple, list)
+        ):
+            raise ActionBallContractError(
+                "sample assignment indices must be a tuple/list"
+            )
+        indices = tuple(
+            _plain_int(index, name="sample assignment index")
+            for index in self.proposal_sample_indices
+        )
+        if not indices or tuple(sorted(set(indices))) != indices:
+            raise ActionBallContractError(
+                "sample assignment indices must be non-empty, strictly "
+                "increasing, and unique"
+            )
+        object.__setattr__(self, "proposal_sample_indices", indices)
+
+
+def _encode_sample_index_segments(
+    indices: Sequence[int],
+) -> list[list[int]]:
+    """Canonically run-length encode one sorted arithmetic index tape."""
+
+    converted = tuple(
+        _plain_int(index, name="proposal sample index")
+        for index in indices
+    )
+    if not converted or tuple(sorted(set(converted))) != converted:
+        raise ActionBallContractError(
+            "proposal sample indices must be non-empty, strictly "
+            "increasing, and unique"
+        )
+    result: list[list[int]] = []
+    cursor = 0
+    while cursor < len(converted):
+        start = converted[cursor]
+        if cursor + 1 == len(converted):
+            result.append([start, 1, 1])
+            break
+        step = converted[cursor + 1] - start
+        end = cursor + 2
+        while (
+            end < len(converted)
+            and converted[end] - converted[end - 1] == step
+        ):
+            end += 1
+        result.append([start, step, end - cursor])
+        cursor = end
+    return result
+
+
+def _decode_sample_index_segments(
+    value: object,
+    *,
+    name: str,
+) -> Tuple[int, ...]:
+    if not isinstance(value, (tuple, list)) or not value:
+        raise ActionBallContractError(
+            f"{name} must be a non-empty segment list"
+        )
+    raw_segments: list[list[int]] = []
+    indices: list[int] = []
+    for segment_index, raw_segment in enumerate(value):
+        if not isinstance(raw_segment, (tuple, list)) or len(
+            raw_segment
+        ) != 3:
+            raise ActionBallContractError(
+                f"{name}[{segment_index}] must be [start, step, count]"
+            )
+        start = _plain_int(
+            raw_segment[0],
+            name=f"{name}[{segment_index}].start",
+        )
+        step = _plain_int(
+            raw_segment[1],
+            name=f"{name}[{segment_index}].step",
+            minimum=1,
+        )
+        count = _plain_int(
+            raw_segment[2],
+            name=f"{name}[{segment_index}].count",
+            minimum=1,
+        )
+        raw_segments.append([start, step, count])
+        indices.extend(start + step * offset for offset in range(count))
+    converted = tuple(indices)
+    if (
+        tuple(sorted(set(converted))) != converted
+        or _encode_sample_index_segments(converted) != raw_segments
+    ):
+        raise ActionBallContractError(
+            f"{name} is not a canonical strictly increasing index tape"
+        )
+    return converted
+
+
+def _sample_assignment_rows(
+    assignments: Sequence[ActionSampleAssignment],
+) -> list[Dict[str, object]]:
+    return [
+        {
+            "refill_index": assignment.refill_index,
+            "proposal_index_segments": _encode_sample_index_segments(
+                assignment.proposal_sample_indices
+            ),
+        }
+        for assignment in assignments
+    ]
+
+
+def _sample_assignments_from_rows(
+    value: object,
+    *,
+    birth: ActionBirthReceipt,
+    name: str,
+) -> Tuple[ActionSampleAssignment, ...]:
+    if not isinstance(value, (tuple, list)):
+        raise ActionBallContractError(f"{name} must be a list")
+    result: list[ActionSampleAssignment] = []
+    for index, raw_assignment in enumerate(value):
+        row = _exact_mapping(
+            raw_assignment,
+            ("refill_index", "proposal_index_segments"),
+            name=f"{name}[{index}]",
+        )
+        result.append(
+            ActionSampleAssignment(
+                birth=birth,
+                refill_index=row["refill_index"],  # type: ignore[arg-type]
+                proposal_sample_indices=(
+                    _decode_sample_index_segments(
+                        row["proposal_index_segments"],
+                        name=(
+                            f"{name}[{index}]"
+                            ".proposal_index_segments"
+                        ),
+                    )
+                ),
+            )
+        )
+    return tuple(result)
+
+
+@dataclass(frozen=True)
+class ActionTaskIssueRequest:
+    """One exact birth/swing claim for scalar or vectorized pool issue."""
+
+    birth: ActionBirthReceipt
+    swing_generation: int
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.birth, ActionBirthReceipt):
+            raise ActionBallContractError(
+                "task issue birth must be ActionBirthReceipt"
+            )
+        object.__setattr__(
+            self,
+            "swing_generation",
+            _plain_int(
+                self.swing_generation, name="swing_generation"
+            ),
+        )
+
+
+@dataclass(frozen=True)
+class PoolLedger:
+    requests: int = 0
+    refill_calls: int = 0
+    proposed: int = 0
+    admitted: int = 0
+    issued: int = 0
+    discarded: int = 0
+
+    def __post_init__(self) -> None:
+        for name in (
+            "requests",
+            "refill_calls",
+            "proposed",
+            "admitted",
+            "issued",
+            "discarded",
+        ):
+            object.__setattr__(
+                self,
+                name,
+                _plain_int(getattr(self, name), name=f"ledger.{name}"),
+            )
+        if (
+            self.proposed < self.admitted
+            or self.admitted < self.issued + self.discarded
+        ):
+            raise ActionBallContractError(
+                "pool ledger requires proposed >= admitted >= "
+                "issued + discarded"
+            )
+        if self.requests != self.issued:
+            raise ActionBallContractError(
+                "pool ledger requires requests == issued"
+            )
+
+    def to_dict(self) -> Dict[str, int]:
+        return {
+            "requests": self.requests,
+            "refill_calls": self.refill_calls,
+            "proposed": self.proposed,
+            "admitted": self.admitted,
+            "issued": self.issued,
+            "discarded": self.discarded,
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> "PoolLedger":
+        row = _exact_mapping(
+            value,
+            (
+                "requests",
+                "refill_calls",
+                "proposed",
+                "admitted",
+                "issued",
+                "discarded",
+            ),
+            name="pool ledger",
+        )
+        return cls(**{name: row[name] for name in row})  # type: ignore[arg-type]
+
+
+@dataclass(frozen=True)
+class _RetiredPoolBirth:
+    """Compact append-only lifecycle evidence for one retired birth."""
+
+    birth: ActionBirthReceipt
+    refill_index: int
+    proposed_count: int
+    admitted_count: int
+    issued_count: int
+    discarded_count: int
+    task_transcript_sha256: str
+    sample_assignments: Tuple[ActionSampleAssignment, ...]
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.birth, ActionBirthReceipt):
+            raise ActionBallContractError(
+                "retired lifecycle birth must be ActionBirthReceipt"
+            )
+        object.__setattr__(
+            self,
+            "refill_index",
+            _plain_int(self.refill_index, name="retired.refill_index"),
+        )
+        object.__setattr__(
+            self,
+            "proposed_count",
+            _plain_int(
+                self.proposed_count, name="retired.proposed_count"
+            ),
+        )
+        for name in (
+            "admitted_count",
+            "issued_count",
+            "discarded_count",
+        ):
+            object.__setattr__(
+                self,
+                name,
+                _plain_int(
+                    getattr(self, name), name=f"retired.{name}"
+                ),
+            )
+        object.__setattr__(
+            self,
+            "task_transcript_sha256",
+            _sha256(
+                self.task_transcript_sha256,
+                name="retired.task_transcript_sha256",
+            ),
+        )
+        if not isinstance(self.sample_assignments, (tuple, list)):
+            raise ActionBallContractError(
+                "retired sample assignments must be a tuple/list"
+            )
+        assignments = tuple(self.sample_assignments)
+        if any(
+            not isinstance(assignment, ActionSampleAssignment)
+            or assignment.birth != self.birth
+            for assignment in assignments
+        ):
+            raise ActionBallContractError(
+                "retired sample assignments must bind the exact birth"
+            )
+        if [
+            assignment.refill_index for assignment in assignments
+        ] != list(range(1, self.refill_index + 1)):
+            raise ActionBallContractError(
+                "retired sample assignment refill indices are not "
+                "contiguous"
+            )
+        object.__setattr__(self, "sample_assignments", assignments)
+        if sum(
+            len(assignment.proposal_sample_indices)
+            for assignment in assignments
+        ) != self.proposed_count:
+            raise ActionBallContractError(
+                "retired proposal count differs from sample assignments"
+            )
+        if self.proposed_count < self.admitted_count:
+            raise ActionBallContractError(
+                "retired proposed_count must cover admitted receipts"
+            )
+        if (
+            self.admitted_count
+            != self.issued_count + self.discarded_count
+        ):
+            raise ActionBallContractError(
+                "retired admitted count must equal issued + discarded"
+            )
+        if self.admitted_count and self.refill_index == 0:
+            raise ActionBallContractError(
+                "retired admitted tasks require at least one refill"
+            )
+        if self.admitted_count == 0 and (
+            self.task_transcript_sha256
+            != task_transcript_sha256(
+                self.birth.canonical_sha256, ()
+            )
+        ):
+            raise ActionBallContractError(
+                "empty retired task transcript has the wrong root"
+            )
+
+
+class ActionTaskSolver(Protocol):
+    solver_contract_sha256: str
+    state_owner_sha256: str
+
+    def __call__(
+        self, request: ActionPoolRefillRequest
+    ) -> ActionPoolRefillBatch:
+        """Sample/solve one requested action and return admitted receipts."""
+
+    def state_dict(self) -> Mapping[str, object]:
+        """Return all sampler/solver mutable state as pure JSON data."""
+
+    def load_state_dict(self, state: object) -> None:
+        """Atomically validate and restore a prior pure-data state."""
+
+    def assert_emitted_sample(
+        self, receipt: ActionBallTaskReceipt
+    ) -> None:
+        """Fail unless this exact canonical sample was emitted by the sampler."""
+
+    def assert_emitted_tasks(
+        self, receipts: Sequence[ActionBallTaskReceipt]
+    ) -> None:
+        """Pure batch proof of exact pinned solver outputs."""
+
+    def emitted_task_count_for(self, action_uid: int) -> int:
+        """Return the exact admitted-task transcript count for one action."""
+
+    def task_transcript_for_birth(
+        self, birth_sha256: str
+    ) -> Tuple[int, str]:
+        """Return exact ``(task_count, ordered_task_chain_sha256)``."""
+
+    def assert_proposal_assignments(
+        self, assignments: Sequence[ActionSampleAssignment]
+    ) -> None:
+        """Pure batch proof that sample indices belong to exact births."""
+
+    def sample_highwater_for(
+        self, action_uid: int
+    ) -> Tuple[int, int]:
+        """Return exact ``(last_sample_index, last_sample_draw_end)``."""
+
+
+class LazyActionTaskPool:
+    """Exact-resume FIFO pools materialized only for requested action UIDs."""
+
+    _STATE_KEYS = (
+        "schema_version",
+        "runtime_contract_sha256",
+        "registry_sha256",
+        "pins",
+        "mobility_mode",
+        "refill_size",
+        "bindings",
+        "birth_authority_state_sha256",
+        "solver_contract_sha256",
+        "solver_state_owner_sha256",
+        "solver_state",
+        "solver_state_sha256",
+        "retired_generations",
+        "actions",
+        "integrity_sha256",
+    )
+
+    def __init__(
+        self,
+        bindings: Sequence[ActionBinding],
+        pins: RuntimePins,
+        mobility_mode: str,
+        *,
+        refill_size: int = 1,
+    ) -> None:
+        self._bindings = _validate_bindings(bindings)
+        if not isinstance(pins, RuntimePins):
+            raise ActionBallContractError("pins must be RuntimePins")
+        self._pins = pins
+        self._mobility_mode = _mode(mobility_mode)
+        self._refill_size = _plain_int(
+            refill_size, name="refill_size", minimum=1
+        )
+        self._by_uid = {
+            binding.action_uid: binding for binding in self._bindings
+        }
+        self._registry_sha256 = _registry_sha256(
+            self._bindings, self._pins, self._mobility_mode
+        )
+        self._solver: Callable[
+            [ActionPoolRefillRequest], ActionPoolRefillBatch
+        ] | None = None
+        self._birth_authority: object | None = None
+        # All of these maps are intentionally empty at construction, even N=93.
+        self._births: Dict[int, Dict[str, ActionBirthReceipt]] = {}
+        self._pending: Dict[
+            int, Dict[str, list[ActionBallTaskReceipt]]
+        ] = {}
+        self._issued_task_transcript_sha256: Dict[
+            int, Dict[str, str]
+        ] = {}
+        self._cursor: Dict[int, Dict[str, int]] = {}
+        self._refill_index: Dict[int, Dict[str, int]] = {}
+        self._proposed_by_birth: Dict[int, Dict[str, int]] = {}
+        self._sample_assignments: Dict[
+            int, Dict[str, list[ActionSampleAssignment]]
+        ] = {}
+        self._ledger: Dict[int, PoolLedger] = {}
+        self._seen_sha256: Dict[int, Dict[str, set[str]]] = {}
+        self._seen_sample_sha256: Dict[int, Dict[str, set[str]]] = {}
+        self._retired_births: Dict[
+            int, Dict[str, _RetiredPoolBirth]
+        ] = {}
+        self._task_lifecycle: Dict[int, list[int]] = {}
+        self._last_sample_index: Dict[int, int] = {}
+        self._last_sample_draw_end: Dict[int, int] = {}
+        self._retired_generation: Dict[int, int] = {}
+
+    @property
+    def materialized_action_uids(self) -> Tuple[int, ...]:
+        return tuple(sorted(self._births))
+
+    @property
+    def ordered_action_uids(self) -> Tuple[int, ...]:
+        return tuple(binding.action_uid for binding in self._bindings)
+
+    @property
+    def action_count(self) -> int:
+        return len(self._bindings)
+
+    def pending_count(
+        self,
+        action_uid: int,
+        *,
+        birth_sha256: str | None = None,
+    ) -> int:
+        binding = self._binding(action_uid)
+        uid = binding.action_uid
+        if birth_sha256 is None:
+            return sum(
+                len(queue)
+                for queue in self._pending.get(uid, {}).values()
+            )
+        digest = _sha256(birth_sha256, name="birth_sha256")
+        return len(self._pending.get(uid, {}).get(digest, ()))
+
+    def ledger(self, action_uid: int) -> PoolLedger:
+        binding = self._binding(action_uid)
+        return self._ledger.get(binding.action_uid, PoolLedger())
+
+    def _binding(self, action_uid: int) -> ActionBinding:
+        uid = _plain_int(
+            action_uid,
+            name="action_uid",
+            minimum=1,
+            maximum=MAX_ACTION_UID,
+        )
+        try:
+            return self._by_uid[uid]
+        except KeyError as exc:
+            raise ActionBallContractError(
+                f"unknown action_uid {uid}"
+            ) from exc
+
+    def bind_solver(self, solver: ActionTaskSolver) -> None:
+        if self._solver is not None:
+            raise PoolProtocolError("task solver may be bound only once")
+        if not callable(solver):
+            raise ActionBallContractError("task solver must be callable")
+        if (
+            _sha256(
+                getattr(solver, "solver_contract_sha256", None),
+                name="solver.solver_contract_sha256",
+            )
+            != self._pins.solver_sha256
+        ):
+            raise ActionBallContractError(
+                "task solver contract SHA differs from runtime pins"
+            )
+        _sha256(
+            getattr(solver, "state_owner_sha256", None),
+            name="solver.state_owner_sha256",
+        )
+        if not callable(getattr(solver, "state_dict", None)) or not callable(
+            getattr(solver, "load_state_dict", None)
+        ):
+            raise ActionBallContractError(
+                "task solver must implement atomic state_dict/load_state_dict"
+            )
+        if not callable(getattr(solver, "assert_emitted_sample", None)):
+            raise ActionBallContractError(
+                "task solver must implement assert_emitted_sample()"
+            )
+        if not callable(getattr(solver, "assert_emitted_tasks", None)):
+            raise ActionBallContractError(
+                "task solver must implement assert_emitted_tasks()"
+            )
+        if not callable(
+            getattr(solver, "emitted_task_count_for", None)
+        ):
+            raise ActionBallContractError(
+                "task solver must implement emitted_task_count_for()"
+            )
+        if not callable(
+            getattr(solver, "task_transcript_for_birth", None)
+        ):
+            raise ActionBallContractError(
+                "task solver must implement task_transcript_for_birth()"
+            )
+        if not callable(
+            getattr(solver, "assert_proposal_assignments", None)
+        ):
+            raise ActionBallContractError(
+                "task solver must implement assert_proposal_assignments()"
+            )
+        if not callable(getattr(solver, "sample_highwater_for", None)):
+            raise ActionBallContractError(
+                "task solver must implement sample_highwater_for()"
+            )
+        _json_data(solver.state_dict(), name="solver state")
+        self._solver = solver
+
+    def _solver_state(self) -> object:
+        if self._solver is None:
+            raise PoolProtocolError("task solver is not bound")
+        return _json_data(
+            self._solver.state_dict(), name="solver state"
+        )
+
+    def _solver_state_owner_sha256(self) -> str:
+        if self._solver is None:
+            raise PoolProtocolError("task solver is not bound")
+        return _sha256(
+            getattr(self._solver, "state_owner_sha256", None),
+            name="solver.state_owner_sha256",
+        )
+
+    def _solver_sample_highwater(
+        self, action_uid: int
+    ) -> Tuple[int, int]:
+        if self._solver is None:
+            raise PoolProtocolError("task solver is not bound")
+        uid = self._binding(action_uid).action_uid
+        raw = self._solver.sample_highwater_for(uid)
+        if not isinstance(raw, (tuple, list)) or len(raw) != 2:
+            raise ActionBallContractError(
+                "solver sample high-water must be a length-2 tuple/list"
+            )
+        index, draw_end = raw
+        if type(index) is not int or type(draw_end) is not int:
+            raise ActionBallContractError(
+                "solver sample high-water values must be plain integers"
+            )
+        if index == -1 and draw_end == 0:
+            return (-1, 0)
+        if index < 0 or index > MAX_COUNTER or draw_end < 1 or draw_end > MAX_COUNTER:
+            raise ActionBallContractError(
+                "solver sample high-water values are out of range"
+            )
+        return (index, draw_end)
+
+    def _solver_sample_highwaters(self) -> Dict[int, Tuple[int, int]]:
+        """Read every action tape atomically and enforce a pure authority."""
+
+        solver_state = self._solver_state()
+        try:
+            result = {
+                binding.action_uid: self._solver_sample_highwater(
+                    binding.action_uid
+                )
+                for binding in self._bindings
+            }
+            if self._solver_state() != solver_state:
+                raise ActionBallContractError(
+                    "solver sample high-water authority must be pure"
+                )
+            return result
+        except Exception:
+            self._restore_solver_state(solver_state)
+            raise
+
+    def _pool_sample_highwaters(self) -> Dict[int, Tuple[int, int]]:
+        return {
+            binding.action_uid: (
+                self._last_sample_index.get(binding.action_uid, -1),
+                self._last_sample_draw_end.get(binding.action_uid, 0),
+            )
+            for binding in self._bindings
+        }
+
+    def _solver_emitted_task_count(self, action_uid: int) -> int:
+        if self._solver is None:
+            raise PoolProtocolError("task solver is not bound")
+        uid = self._binding(action_uid).action_uid
+        return _plain_int(
+            self._solver.emitted_task_count_for(uid),
+            name="solver emitted task count",
+        )
+
+    def _solver_emitted_task_counts(self) -> Dict[int, int]:
+        """Read the full task authority catalog atomically and purely."""
+
+        solver_state = self._solver_state()
+        try:
+            result = {
+                binding.action_uid: self._solver_emitted_task_count(
+                    binding.action_uid
+                )
+                for binding in self._bindings
+            }
+            if self._solver_state() != solver_state:
+                raise ActionBallContractError(
+                    "solver emitted-task count authority must be pure"
+                )
+            return result
+        except Exception:
+            self._restore_solver_state(solver_state)
+            raise
+
+    def _all_task_receipts_by_action(
+        self,
+    ) -> Dict[int, Tuple[ActionBallTaskReceipt, ...]]:
+        """Return full receipts that must remain immediately issuable."""
+
+        result: Dict[int, Tuple[ActionBallTaskReceipt, ...]] = {}
+        for binding in self._bindings:
+            uid = binding.action_uid
+            receipts: list[ActionBallTaskReceipt] = []
+            for digest in sorted(self._births.get(uid, {})):
+                receipts.extend(self._pending[uid][digest])
+            result[uid] = tuple(receipts)
+        return result
+
+    def _pool_emitted_task_counts(self) -> Dict[int, int]:
+        result: Dict[int, int] = {}
+        for binding in self._bindings:
+            uid = binding.action_uid
+            active = sum(
+                self._cursor[uid][digest]
+                + len(self._pending[uid][digest])
+                for digest in self._births.get(uid, {})
+            )
+            retired = sum(
+                record.admitted_count
+                for record in self._retired_births.get(uid, {}).values()
+            )
+            result[uid] = active + retired
+        return result
+
+    def _solver_task_transcript_for_birth(
+        self, birth_sha256: str
+    ) -> Tuple[int, str]:
+        if self._solver is None:
+            raise PoolProtocolError("task solver is not bound")
+        digest = _sha256(birth_sha256, name="birth_sha256")
+        raw = self._solver.task_transcript_for_birth(digest)
+        if not isinstance(raw, (tuple, list)) or len(raw) != 2:
+            raise ActionBallContractError(
+                "solver birth task transcript must be a length-2 "
+                "tuple/list"
+            )
+        count = _plain_int(
+            raw[0], name="solver birth task transcript count"
+        )
+        root = _sha256(
+            raw[1], name="solver birth task transcript root"
+        )
+        return count, root
+
+    def _solver_task_transcript_for_birth_pure(
+        self, birth_sha256: str
+    ) -> Tuple[int, str]:
+        solver_state = self._solver_state()
+        try:
+            result = self._solver_task_transcript_for_birth(
+                birth_sha256
+            )
+            if self._solver_state() != solver_state:
+                raise ActionBallContractError(
+                    "solver birth task transcript authority must be pure"
+                )
+            return result
+        except Exception:
+            self._restore_solver_state(solver_state)
+            raise
+
+    def _expected_task_transcript_for_active_birth(
+        self, action_uid: int, birth_sha256: str
+    ) -> Tuple[int, str]:
+        uid = self._binding(action_uid).action_uid
+        digest = _sha256(birth_sha256, name="birth_sha256")
+        pending = self._pending[uid][digest]
+        root = self._issued_task_transcript_sha256[uid][digest]
+        for receipt in pending:
+            root = _task_transcript_extend(
+                root, receipt.canonical_sha256
+            )
+        return self._cursor[uid][digest] + len(pending), root
+
+    def _assert_all_task_transcripts_pure(self) -> None:
+        """Cross-check compact active/retired roots with solver authority."""
+
+        solver_state = self._solver_state()
+        try:
+            for binding in self._bindings:
+                uid = binding.action_uid
+                for digest in self._births.get(uid, {}):
+                    if (
+                        self._solver_task_transcript_for_birth(digest)
+                        != self._expected_task_transcript_for_active_birth(
+                            uid, digest
+                        )
+                    ):
+                        raise ActionBallContractError(
+                            "active birth task transcript differs from "
+                            "solver authority"
+                        )
+                for digest, retired in self._retired_births.get(
+                    uid, {}
+                ).items():
+                    if self._solver_task_transcript_for_birth(digest) != (
+                        retired.admitted_count,
+                        retired.task_transcript_sha256,
+                    ):
+                        raise ActionBallContractError(
+                            "retired birth task transcript differs from "
+                            "solver authority"
+                        )
+            if self._solver_state() != solver_state:
+                raise ActionBallContractError(
+                    "solver birth task transcript authority must be pure"
+                )
+        except Exception:
+            self._restore_solver_state(solver_state)
+            raise
+
+    def _validate_assignment_partition_for_action(
+        self,
+        *,
+        action_uid: int,
+        lifecycle: Sequence[int],
+        births: Mapping[str, ActionBirthReceipt],
+        pending: Mapping[str, Sequence[ActionBallTaskReceipt]],
+        cursor: Mapping[str, int],
+        refill_index: Mapping[str, int],
+        proposed_by_birth: Mapping[str, int],
+        sample_assignments: Mapping[
+            str, Sequence[ActionSampleAssignment]
+        ],
+        retired_births: Mapping[str, _RetiredPoolBirth],
+    ) -> None:
+        """Prove every sampler index belongs to exactly one birth/refill."""
+
+        uid = self._binding(action_uid).action_uid
+        active_keys = set(births)
+        if (
+            set(pending) != active_keys
+            or set(cursor) != active_keys
+            or set(refill_index) != active_keys
+            or set(proposed_by_birth) != active_keys
+            or set(sample_assignments) != active_keys
+        ):
+            raise ActionBallContractError(
+                "active birth lifecycle maps have different key sets"
+            )
+        if active_keys.intersection(retired_births):
+            raise ActionBallContractError(
+                "one birth cannot be both active and retired"
+            )
+
+        owner_by_index: Dict[int, str] = {}
+
+        def claim_indices(
+            birth_digest: str,
+            assignments: Sequence[ActionSampleAssignment],
+        ) -> Tuple[int, ...]:
+            flattened: list[int] = []
+            for assignment in assignments:
+                if (
+                    assignment.birth.canonical_sha256 != birth_digest
+                    or assignment.birth.action_uid != uid
+                ):
+                    raise ActionBallContractError(
+                        "sample assignment binds the wrong birth/action"
+                    )
+                flattened.extend(assignment.proposal_sample_indices)
+            if tuple(sorted(set(flattened))) != tuple(flattened):
+                raise ActionBallContractError(
+                    "one birth's refill assignment tape is not strictly "
+                    "increasing and unique"
+                )
+            for sample_index in flattened:
+                if sample_index >= len(lifecycle):
+                    raise ActionBallContractError(
+                        "sample assignment exceeds lifecycle high-water"
+                    )
+                if sample_index in owner_by_index:
+                    raise ActionBallContractError(
+                        "sample index is assigned to multiple births/refills"
+                    )
+                owner_by_index[sample_index] = birth_digest
+            return tuple(flattened)
+
+        for birth_digest, birth in births.items():
+            assignments = tuple(sample_assignments[birth_digest])
+            expected_refills = list(
+                range(1, refill_index[birth_digest] + 1)
+            )
+            if [
+                assignment.refill_index for assignment in assignments
+            ] != expected_refills:
+                raise ActionBallContractError(
+                    "active sample assignment refill indices are not "
+                    "contiguous"
+                )
+            if any(assignment.birth != birth for assignment in assignments):
+                raise ActionBallContractError(
+                    "active sample assignment birth payload mismatch"
+                )
+            indices = claim_indices(birth_digest, assignments)
+            if len(indices) != proposed_by_birth[birth_digest]:
+                raise ActionBallContractError(
+                    "active proposal count differs from sample assignments"
+                )
+            pending_indices = [
+                receipt.sample_index
+                for receipt in pending[birth_digest]
+            ]
+            if len(pending_indices) != len(set(pending_indices)):
+                raise ActionBallContractError(
+                    "active pending receipts repeat a sample index"
+                )
+            owned_pending = {
+                sample_index
+                for sample_index in indices
+                if lifecycle[sample_index] == _LIFECYCLE_PENDING
+            }
+            if owned_pending != set(pending_indices):
+                raise ActionBallContractError(
+                    "active pending lifecycle differs from receipt samples"
+                )
+            status_counts = {
+                status: sum(
+                    lifecycle[sample_index] == status
+                    for sample_index in indices
+                )
+                for status in range(4)
+            }
+            admitted = cursor[birth_digest] + len(
+                pending[birth_digest]
+            )
+            if (
+                status_counts[_LIFECYCLE_REJECTED]
+                != len(indices) - admitted
+                or status_counts[_LIFECYCLE_PENDING]
+                != len(pending[birth_digest])
+                or status_counts[_LIFECYCLE_ISSUED]
+                != cursor[birth_digest]
+                or status_counts[_LIFECYCLE_DISCARDED] != 0
+            ):
+                raise ActionBallContractError(
+                    "active birth assignment statuses disagree with "
+                    "cursor/pending/proposed counts"
+                )
+
+        for birth_digest, retired in retired_births.items():
+            indices = claim_indices(
+                birth_digest, retired.sample_assignments
+            )
+            status_counts = {
+                status: sum(
+                    lifecycle[sample_index] == status
+                    for sample_index in indices
+                )
+                for status in range(4)
+            }
+            if (
+                len(indices) != retired.proposed_count
+                or status_counts[_LIFECYCLE_REJECTED]
+                != retired.proposed_count - retired.admitted_count
+                or status_counts[_LIFECYCLE_PENDING] != 0
+                or status_counts[_LIFECYCLE_ISSUED]
+                != retired.issued_count
+                or status_counts[_LIFECYCLE_DISCARDED]
+                != retired.discarded_count
+            ):
+                raise ActionBallContractError(
+                    "retired birth assignment statuses disagree with "
+                    "compact lifecycle counts"
+                )
+
+        if set(owner_by_index) != set(range(len(lifecycle))):
+            raise ActionBallContractError(
+                "sample assignments must partition every lifecycle index"
+            )
+
+    def _assert_compact_lifecycle_invariants(self) -> None:
+        for binding in self._bindings:
+            uid = binding.action_uid
+            lifecycle = self._task_lifecycle.get(uid, [])
+            last_sample_index = self._last_sample_index.get(uid, -1)
+            if len(lifecycle) != last_sample_index + 1:
+                raise ActionBallContractError(
+                    "task lifecycle must cover sample indices "
+                    "0..high-water"
+                )
+            active_refills = sum(
+                self._refill_index[uid][digest]
+                for digest in self._births.get(uid, {})
+            )
+            active_proposed = sum(
+                self._proposed_by_birth[uid][digest]
+                for digest in self._births.get(uid, {})
+            )
+            active_admitted = sum(
+                self._cursor[uid][digest]
+                + len(self._pending[uid][digest])
+                for digest in self._births.get(uid, {})
+            )
+            active_issued = sum(
+                self._cursor[uid][digest]
+                for digest in self._births.get(uid, {})
+            )
+            retired_records = self._retired_births.get(uid, {}).values()
+            retired_refills = sum(
+                record.refill_index for record in retired_records
+            )
+            retired_records = self._retired_births.get(uid, {}).values()
+            retired_proposed = sum(
+                record.proposed_count for record in retired_records
+            )
+            retired_records = self._retired_births.get(uid, {}).values()
+            retired_admitted = sum(
+                record.admitted_count for record in retired_records
+            )
+            retired_records = self._retired_births.get(uid, {}).values()
+            retired_issued = sum(
+                record.issued_count for record in retired_records
+            )
+            retired_records = self._retired_births.get(uid, {}).values()
+            retired_discarded = sum(
+                record.discarded_count for record in retired_records
+            )
+            expected = PoolLedger(
+                requests=active_issued + retired_issued,
+                refill_calls=active_refills + retired_refills,
+                proposed=active_proposed + retired_proposed,
+                admitted=active_admitted + retired_admitted,
+                issued=active_issued + retired_issued,
+                discarded=retired_discarded,
+            )
+            actual = self._ledger.get(uid, PoolLedger())
+            if actual != expected or actual.proposed != len(lifecycle):
+                raise ActionBallContractError(
+                    "pool ledger differs from compact per-birth lifecycle"
+                )
+            status_counts = {
+                status: lifecycle.count(status)
+                for status in range(4)
+            }
+            active_pending = sum(
+                len(self._pending[uid][digest])
+                for digest in self._births.get(uid, {})
+            )
+            if (
+                status_counts[_LIFECYCLE_REJECTED]
+                != actual.proposed - actual.admitted
+                or status_counts[_LIFECYCLE_PENDING]
+                != active_pending
+                or status_counts[_LIFECYCLE_ISSUED] != actual.issued
+                or status_counts[_LIFECYCLE_DISCARDED]
+                != actual.discarded
+            ):
+                raise ActionBallContractError(
+                    "2-bit task lifecycle statuses disagree with ledger"
+                )
+            self._validate_assignment_partition_for_action(
+                action_uid=uid,
+                lifecycle=lifecycle,
+                births=self._births.get(uid, {}),
+                pending=self._pending.get(uid, {}),
+                cursor=self._cursor.get(uid, {}),
+                refill_index=self._refill_index.get(uid, {}),
+                proposed_by_birth=self._proposed_by_birth.get(uid, {}),
+                sample_assignments=self._sample_assignments.get(uid, {}),
+                retired_births=self._retired_births.get(uid, {}),
+            )
+
+    def _assert_emitted_tasks_pure(
+        self, receipts: Sequence[ActionBallTaskReceipt]
+    ) -> None:
+        if self._solver is None:
+            raise PoolProtocolError("task solver is not bound")
+        solver_state = self._solver_state()
+        try:
+            self._solver.assert_emitted_tasks(tuple(receipts))
+            if self._solver_state() != solver_state:
+                raise ActionBallContractError(
+                    "solver exact-task authority assertion must be pure"
+                )
+        except Exception:
+            self._restore_solver_state(solver_state)
+            raise
+
+    def _assert_proposal_assignments_pure(
+        self, assignments: Sequence[ActionSampleAssignment]
+    ) -> None:
+        if self._solver is None:
+            raise PoolProtocolError("task solver is not bound")
+        solver_state = self._solver_state()
+        try:
+            self._solver.assert_proposal_assignments(
+                tuple(assignments)
+            )
+            if self._solver_state() != solver_state:
+                raise ActionBallContractError(
+                    "solver proposal-assignment authority must be pure"
+                )
+        except Exception:
+            self._restore_solver_state(solver_state)
+            raise
+
+    def _restore_solver_state(self, state: object) -> None:
+        if self._solver is None:
+            raise PoolProtocolError("task solver is not bound")
+        detached = _json_data(state, name="solver state")
+        self._solver.load_state_dict(detached)
+        if self._solver_state() != detached:
+            raise ActionBallContractError(
+                "task solver load_state_dict did not restore exact state"
+            )
+
+    def bind_birth_authority(self, authority: object) -> None:
+        """Bind the broker that proves Motion committed and Racket consumed."""
+
+        if self._birth_authority is not None:
+            raise PoolProtocolError(
+                "birth authority may be bound only once"
+            )
+        if type(authority) is not ActionBirthBroker:
+            raise ActionBallContractError(
+                "birth authority must be the exact ActionBirthBroker type"
+            )
+        if getattr(authority, "registry_sha256", None) != self._registry_sha256:
+            raise ActionBallContractError(
+                "birth authority registry differs from task pool registry"
+            )
+        self._birth_authority = authority
+
+    def _birth_authority_state_sha256(self) -> str | None:
+        if self._birth_authority is None:
+            return None
+        return _sha256_json(self._birth_authority.state_dict())
+
+    def _validate_birth(
+        self, birth: ActionBirthReceipt
+    ) -> ActionBinding:
+        if not isinstance(birth, ActionBirthReceipt):
+            raise ActionBallContractError(
+                "task pool requests require ActionBirthReceipt"
+            )
+        binding = self._binding(birth.action_uid)
+        birth.assert_contract(
+            binding=binding,
+            pins=self._pins,
+            mobility_mode=self._mobility_mode,
+            registry_sha256=self._registry_sha256,
+        )
+        if self._birth_authority is None:
+            raise PoolProtocolError("birth authority is not bound")
+        self._birth_authority.assert_consumed_birth(birth)
+        return binding
+
+    def _ensure_birth(
+        self,
+        binding: ActionBinding,
+        birth: ActionBirthReceipt,
+    ) -> str:
+        uid = binding.action_uid
+        digest = birth.canonical_sha256
+        if birth.reset_generation <= self._retired_generation.get(
+            birth.env_id, 0
+        ):
+            raise PoolProtocolError(
+                "cannot reactivate a retired/stale birth generation"
+            )
+        existing = self._births.get(uid, {}).get(digest)
+        if existing is not None:
+            if existing != birth:
+                raise ActionBallContractError(
+                    "birth SHA collision in task pool"
+                )
+            return digest
+        # The broker guarantees one action per env/reset generation.  Preserve
+        # that invariant even if a caller accidentally presents two different
+        # birth payloads with the same logical identity.
+        for action_births in self._births.values():
+            for active in action_births.values():
+                if active.env_id == birth.env_id:
+                    raise ActionBallContractError(
+                        "task pool already has an active birth for this env; "
+                        "retire it before the next true reset"
+                    )
+        self._births.setdefault(uid, {})[digest] = birth
+        self._pending.setdefault(uid, {})[digest] = []
+        self._issued_task_transcript_sha256.setdefault(uid, {})[
+            digest
+        ] = task_transcript_sha256(digest, ())
+        self._cursor.setdefault(uid, {})[digest] = 0
+        self._refill_index.setdefault(uid, {})[digest] = 0
+        self._proposed_by_birth.setdefault(uid, {})[digest] = 0
+        self._sample_assignments.setdefault(uid, {})[digest] = []
+        self._seen_sha256.setdefault(uid, {})[digest] = set()
+        self._seen_sample_sha256.setdefault(uid, {})[digest] = set()
+        self._ledger.setdefault(uid, PoolLedger())
+        return digest
+
+    def _build_refill_request(
+        self,
+        binding: ActionBinding,
+        birth: ActionBirthReceipt,
+        birth_digest: str,
+    ) -> ActionPoolRefillRequest:
+        uid = binding.action_uid
+        next_refill = self._refill_index[uid][birth_digest] + 1
+        seen = self._seen_sha256[uid][birth_digest]
+        swing_generation_start = len(seen)
+        return ActionPoolRefillRequest(
+            action_uid=uid,
+            action_slot=binding.action_slot,
+            refill_index=next_refill,
+            minimum_receipts=self._refill_size,
+            swing_generation_start=swing_generation_start,
+            mobility_mode=self._mobility_mode,
+            binding=binding,
+            pins=self._pins,
+            birth=birth,
+            registry_sha256=self._registry_sha256,
+        )
+
+    def _validate_refill_batch(
+        self,
+        *,
+        binding: ActionBinding,
+        birth: ActionBirthReceipt,
+        birth_digest: str,
+        request: ActionPoolRefillRequest,
+        batch: ActionPoolRefillBatch,
+        unavailable_sample_sha256: set[str] | None = None,
+        sample_index_floor: int | None = None,
+        sample_draw_floor: int | None = None,
+        staged_sample_indices: set[int] | None = None,
+        staged_sample_draw_ranges: Sequence[Tuple[int, int]] = (),
+    ) -> Tuple[Tuple[str, ...], int, int]:
+        uid = binding.action_uid
+        if not isinstance(batch, ActionPoolRefillBatch):
+            raise ActionBallContractError(
+                "task solver must return ActionPoolRefillBatch"
+            )
+        if batch.action_uid != uid:
+            raise ActionBallContractError(
+                "task solver refilled a different action_uid"
+            )
+        if not batch.receipts:
+            raise PoolProtocolError(
+                f"task solver admitted no receipts for action_uid {uid}"
+            )
+        if len(batch.receipts) < request.minimum_receipts:
+            raise PoolProtocolError(
+                f"task solver admitted {len(batch.receipts)} receipts for "
+                f"action_uid {uid}, below requested minimum "
+                f"{request.minimum_receipts}"
+            )
+        seen = self._seen_sha256[uid][birth_digest]
+        seen_samples = self._seen_sample_sha256[uid][birth_digest]
+        unavailable_samples = (
+            {
+                sample_digest
+                for action_births in self._seen_sample_sha256.values()
+                for birth_samples in action_births.values()
+                for sample_digest in birth_samples
+            }
+            if unavailable_sample_sha256 is None
+            else unavailable_sample_sha256
+        )
+        new_digests: list[str] = []
+        new_sample_digests: list[str] = []
+        last_sample_index = self._last_sample_index.get(uid, -1)
+        last_sample_draw_end = self._last_sample_draw_end.get(uid, 0)
+        if sample_index_floor is not None:
+            last_sample_index = sample_index_floor
+        if sample_draw_floor is not None:
+            last_sample_draw_end = sample_draw_floor
+        floor_sample_index = last_sample_index
+        floor_sample_draw_end = last_sample_draw_end
+        batch_sample_index = last_sample_index
+        batch_sample_draw_end = last_sample_draw_end
+        staged_indices = (
+            set() if staged_sample_indices is None else staged_sample_indices
+        )
+        for offset, receipt in enumerate(batch.receipts):
+            receipt.assert_contract(
+                binding=binding,
+                pins=self._pins,
+                mobility_mode=self._mobility_mode,
+                registry_sha256=self._registry_sha256,
+            )
+            receipt.assert_birth(birth)
+            if self._solver is None:
+                raise PoolProtocolError("task solver is not bound")
+            self._solver.assert_emitted_sample(receipt)
+            if (
+                receipt.sample_index <= floor_sample_index
+                or receipt.sample_index <= batch_sample_index
+                or receipt.sample_index in staged_indices
+            ):
+                raise ActionBallContractError(
+                    "task solver sample index replayed/went backwards"
+                )
+            if (
+                receipt.sample_draw_start < floor_sample_draw_end
+                or receipt.sample_draw_start < batch_sample_draw_end
+                or any(
+                    receipt.sample_draw_start < prior_end
+                    and prior_start < receipt.sample_draw_end
+                    for prior_start, prior_end in staged_sample_draw_ranges
+                )
+            ):
+                raise ActionBallContractError(
+                    "task solver sample draw range replayed/overlapped"
+                )
+            batch_sample_index = receipt.sample_index
+            batch_sample_draw_end = receipt.sample_draw_end
+            last_sample_index = max(
+                last_sample_index, receipt.sample_index
+            )
+            last_sample_draw_end = max(
+                last_sample_draw_end, receipt.sample_draw_end
+            )
+            if (
+                receipt.swing_generation
+                != request.swing_generation_start + offset
+            ):
+                raise ActionBallContractError(
+                    "task solver returned non-contiguous/wrong swing "
+                    "generation"
+                )
+            digest = receipt.canonical_sha256
+            if digest in seen or digest in new_digests:
+                raise ActionBallContractError(
+                    "task solver returned a replayed/duplicate receipt"
+                )
+            new_digests.append(digest)
+            if (
+                receipt.sample_sha256 in seen_samples
+                or receipt.sample_sha256 in unavailable_samples
+                or receipt.sample_sha256 in new_sample_digests
+            ):
+                raise ActionBallContractError(
+                    "task solver reused one sampler sample receipt"
+                )
+            new_sample_digests.append(receipt.sample_sha256)
+        return (
+            tuple(new_digests),
+            last_sample_index,
+            last_sample_draw_end,
+        )
+
+    def _install_refill_batch(
+        self,
+        *,
+        binding: ActionBinding,
+        birth_digest: str,
+        request: ActionPoolRefillRequest,
+        batch: ActionPoolRefillBatch,
+        new_digests: Sequence[str],
+        last_sample_index: int,
+        last_sample_draw_end: int,
+    ) -> None:
+        uid = binding.action_uid
+        current = self._ledger.get(uid, PoolLedger())
+        updated = PoolLedger(
+            requests=current.requests,
+            refill_calls=current.refill_calls + 1,
+            proposed=current.proposed + batch.proposed_count,
+            admitted=current.admitted + len(batch.receipts),
+            issued=current.issued,
+            discarded=current.discarded,
+        )
+        self._pending[uid][birth_digest].extend(batch.receipts)
+        self._seen_sha256[uid][birth_digest].update(new_digests)
+        self._seen_sample_sha256[uid][birth_digest].update(
+            receipt.sample_sha256 for receipt in batch.receipts
+        )
+        self._refill_index[uid][
+            birth_digest
+        ] = request.refill_index
+        self._proposed_by_birth[uid][birth_digest] += (
+            batch.proposed_count
+        )
+        self._sample_assignments[uid][birth_digest].append(
+            ActionSampleAssignment(
+                birth=self._births[uid][birth_digest],
+                refill_index=request.refill_index,
+                proposal_sample_indices=batch.proposal_sample_indices,
+            )
+        )
+        self._ledger[uid] = updated
+        self._last_sample_index[uid] = last_sample_index
+        self._last_sample_draw_end[uid] = last_sample_draw_end
+
+    def _install_lifecycle_samples(
+        self,
+        *,
+        action_uid: int,
+        batches: Sequence[ActionPoolRefillBatch],
+        authority_sample_index: int,
+    ) -> None:
+        """Append every proposal once, then mark admitted samples pending."""
+
+        uid = self._binding(action_uid).action_uid
+        current = self._task_lifecycle.get(uid, [])
+        proposed = sum(batch.proposed_count for batch in batches)
+        expected_new = authority_sample_index + 1 - len(current)
+        if expected_new != proposed:
+            raise ActionBallContractError(
+                "solver proposed_count must exactly equal newly issued "
+                "sampler sample indices"
+            )
+        proposal_indices = [
+            sample_index
+            for batch in batches
+            for sample_index in batch.proposal_sample_indices
+        ]
+        expected_indices = list(
+            range(len(current), authority_sample_index + 1)
+        )
+        if sorted(proposal_indices) != expected_indices or len(
+            proposal_indices
+        ) != len(set(proposal_indices)):
+            raise ActionBallContractError(
+                "refill proposal sample indices must uniquely and "
+                "completely cover the new sampler tape"
+            )
+        lifecycle = [
+            *current,
+            *([_LIFECYCLE_REJECTED] * proposed),
+        ]
+        admitted_indices: set[int] = set()
+        for batch in batches:
+            for receipt in batch.receipts:
+                sample_index = receipt.sample_index
+                if (
+                    sample_index in admitted_indices
+                    or sample_index < 0
+                    or sample_index >= len(lifecycle)
+                    or lifecycle[sample_index] != _LIFECYCLE_REJECTED
+                ):
+                    raise ActionBallContractError(
+                        "admitted sample cannot be installed into lifecycle"
+                    )
+                admitted_indices.add(sample_index)
+                lifecycle[sample_index] = _LIFECYCLE_PENDING
+        self._task_lifecycle[uid] = lifecycle
+
+    def _refill(
+        self,
+        binding: ActionBinding,
+        birth: ActionBirthReceipt,
+        birth_digest: str,
+    ) -> None:
+        if self._solver is None:
+            raise PoolProtocolError("task solver is not bound")
+        request = self._build_refill_request(
+            binding, birth, birth_digest
+        )
+        solver_state = self._solver_state()
+        try:
+            previous_highwaters = self._solver_sample_highwaters()
+            if previous_highwaters != self._pool_sample_highwaters():
+                raise ActionBallContractError(
+                    "pool sample high-water differs from solver authority"
+                )
+            previous_task_counts = self._solver_emitted_task_counts()
+            if previous_task_counts != self._pool_emitted_task_counts():
+                raise ActionBallContractError(
+                    "pool admitted-task counts differ from solver authority"
+                )
+            batch = self._solver(request)
+            emitted_solver_state = self._solver_state()
+            authority_highwaters = self._solver_sample_highwaters()
+            authority_task_counts = self._solver_emitted_task_counts()
+            authority_highwater = authority_highwaters[
+                binding.action_uid
+            ]
+            if any(
+                authority_highwaters[uid] != prior
+                for uid, prior in previous_highwaters.items()
+                if uid != binding.action_uid
+            ):
+                raise ActionBallContractError(
+                    "solver advanced an unstaged action sample tape"
+                )
+            if any(
+                authority_task_counts[uid] != prior
+                for uid, prior in previous_task_counts.items()
+                if uid != binding.action_uid
+            ) or authority_task_counts[binding.action_uid] != (
+                previous_task_counts[binding.action_uid]
+                + len(batch.receipts)
+            ):
+                raise ActionBallContractError(
+                    "solver admitted-task transcript advanced outside the "
+                    "staged callback result"
+                )
+            (
+                new_digests,
+                last_sample_index,
+                last_sample_draw_end,
+            ) = self._validate_refill_batch(
+                binding=binding,
+                birth=birth,
+                birth_digest=birth_digest,
+                request=request,
+                batch=batch,
+            )
+            self._assert_emitted_tasks_pure(batch.receipts)
+            self._assert_proposal_assignments_pure(
+                (
+                    ActionSampleAssignment(
+                        birth=birth,
+                        refill_index=request.refill_index,
+                        proposal_sample_indices=(
+                            batch.proposal_sample_indices
+                        ),
+                    ),
+                )
+            )
+            expected_count, expected_root = (
+                self._expected_task_transcript_for_active_birth(
+                    binding.action_uid, birth_digest
+                )
+            )
+            for receipt in batch.receipts:
+                expected_root = _task_transcript_extend(
+                    expected_root, receipt.canonical_sha256
+                )
+            expected_count += len(batch.receipts)
+            if self._solver_task_transcript_for_birth_pure(
+                birth_digest
+            ) != (expected_count, expected_root):
+                raise ActionBallContractError(
+                    "solver birth task transcript differs from staged "
+                    "callback result"
+                )
+            previous_highwater = (
+                self._last_sample_index.get(binding.action_uid, -1),
+                self._last_sample_draw_end.get(binding.action_uid, 0),
+            )
+            if (
+                authority_highwater[0] < last_sample_index
+                or authority_highwater[1] < last_sample_draw_end
+                or authority_highwater[0] < previous_highwater[0]
+                or authority_highwater[1] < previous_highwater[1]
+            ):
+                raise ActionBallContractError(
+                    "solver sample high-water disagrees with emitted samples"
+                )
+            if self._solver_state() != emitted_solver_state:
+                raise ActionBallContractError(
+                    "solver sample authority assertion must be pure"
+                )
+            # Commit only after the whole callback result validates.
+            self._install_lifecycle_samples(
+                action_uid=binding.action_uid,
+                batches=(batch,),
+                authority_sample_index=authority_highwater[0],
+            )
+            self._install_refill_batch(
+                binding=binding,
+                birth_digest=birth_digest,
+                request=request,
+                batch=batch,
+                new_digests=new_digests,
+                last_sample_index=authority_highwater[0],
+                last_sample_draw_end=authority_highwater[1],
+            )
+        except Exception:
+            self._restore_solver_state(solver_state)
+            raise
+
+    def request(
+        self,
+        birth: ActionBirthReceipt,
+        *,
+        swing_generation: int,
+    ) -> ActionBallTaskReceipt:
+        """Issue the next task for one exact env/episode birth.
+
+        The top-level allocation remains lazy by action UID, while concurrent
+        environments using that action get independent birth-SHA subqueues.
+        """
+
+        return self.request_many(
+            (
+                ActionTaskIssueRequest(
+                    birth=birth,
+                    swing_generation=swing_generation,
+                ),
+            )
+        )[0]
+
+    def _rollback_empty_birth(
+        self, uid: int, birth_digest: str
+    ) -> None:
+        if (
+            self._cursor[uid][birth_digest] != 0
+            or self._refill_index[uid][birth_digest] != 0
+            or self._proposed_by_birth[uid][birth_digest] != 0
+            or self._sample_assignments[uid][birth_digest]
+            or self._pending[uid][birth_digest]
+            or self._issued_task_transcript_sha256[uid][birth_digest]
+            != task_transcript_sha256(birth_digest, ())
+            or self._seen_sha256[uid][birth_digest]
+            or self._seen_sample_sha256[uid][birth_digest]
+        ):
+            return
+        for table in (
+            self._births,
+            self._pending,
+            self._issued_task_transcript_sha256,
+            self._cursor,
+            self._refill_index,
+            self._proposed_by_birth,
+            self._sample_assignments,
+            self._seen_sha256,
+            self._seen_sample_sha256,
+        ):
+            del table[uid][birth_digest]
+            if not table[uid]:
+                del table[uid]
+        if self._ledger.get(uid) == PoolLedger():
+            del self._ledger[uid]
+
+    def request_many(
+        self,
+        requests: Sequence[ActionTaskIssueRequest],
+    ) -> Tuple[ActionBallTaskReceipt, ...]:
+        """Issue an env batch with at most one vectorized solver callback.
+
+        A solver used with more than one empty birth must implement
+        ``solve_many(tuple[ActionPoolRefillRequest, ...])``.  All callback
+        batches validate before any pool refill or issue commits.
+        """
+
+        if isinstance(requests, (str, bytes)) or not isinstance(
+            requests, Sequence
+        ):
+            raise ActionBallContractError(
+                "task issue requests must be a non-empty sequence"
+            )
+        converted = tuple(requests)
+        if not converted or any(
+            not isinstance(request, ActionTaskIssueRequest)
+            for request in converted
+        ):
+            raise ActionBallContractError(
+                "task issue requests must be non-empty "
+                "ActionTaskIssueRequest objects"
+            )
+        validated: list[
+            Tuple[
+                ActionTaskIssueRequest,
+                ActionBinding,
+                int,
+                str,
+            ]
+        ] = []
+        request_births: set[str] = set()
+        for request in converted:
+            binding = self._validate_birth(request.birth)
+            uid = binding.action_uid
+            digest = request.birth.canonical_sha256
+            if digest in request_births:
+                raise PoolProtocolError(
+                    "task issue batch repeats one birth"
+                )
+            request_births.add(digest)
+            expected_generation = self._cursor.get(uid, {}).get(
+                digest, 0
+            )
+            if request.swing_generation != expected_generation:
+                raise PoolProtocolError(
+                    f"birth task swing generation must be exactly "
+                    f"{expected_generation}, got "
+                    f"{request.swing_generation}"
+                )
+            validated.append((request, binding, uid, digest))
+
+        solver_state = self._solver_state()
+        registered: list[Tuple[int, str]] = []
+        try:
+            previous_highwaters = self._solver_sample_highwaters()
+            if previous_highwaters != self._pool_sample_highwaters():
+                raise ActionBallContractError(
+                    "pool sample high-water differs from solver authority"
+                )
+            previous_task_counts = self._solver_emitted_task_counts()
+            if previous_task_counts != self._pool_emitted_task_counts():
+                raise ActionBallContractError(
+                    "pool admitted-task counts differ from solver authority"
+                )
+            for request, binding, uid, _digest in validated:
+                before = request.birth.canonical_sha256 in self._births.get(
+                    uid, {}
+                )
+                digest = self._ensure_birth(binding, request.birth)
+                if not before:
+                    registered.append((uid, digest))
+
+            refills: list[
+                Tuple[
+                    ActionBinding,
+                    ActionBirthReceipt,
+                    str,
+                    ActionPoolRefillRequest,
+                ]
+            ] = []
+            for request, binding, uid, digest in validated:
+                if not self._pending[uid][digest]:
+                    refills.append(
+                        (
+                            binding,
+                            request.birth,
+                            digest,
+                            self._build_refill_request(
+                                binding, request.birth, digest
+                            ),
+                        )
+                    )
+            batches: Tuple[ActionPoolRefillBatch, ...]
+            if not refills:
+                batches = ()
+            elif len(refills) == 1:
+                if self._solver is None:
+                    raise PoolProtocolError("task solver is not bound")
+                batches = (self._solver(refills[0][3]),)
+            else:
+                solve_many = (
+                    None
+                    if self._solver is None
+                    else getattr(self._solver, "solve_many", None)
+                )
+                if not callable(solve_many):
+                    raise PoolProtocolError(
+                        "multi-birth request requires solver.solve_many()"
+                    )
+                raw_batches = solve_many(
+                    tuple(refill[3] for refill in refills)
+                )
+                if not isinstance(raw_batches, (tuple, list)):
+                    raise ActionBallContractError(
+                        "solver.solve_many() must return a tuple/list"
+                    )
+                batches = tuple(raw_batches)
+                if len(batches) != len(refills):
+                    raise ActionBallContractError(
+                        "solver.solve_many() returned wrong batch count"
+                    )
+            emitted_solver_state = self._solver_state()
+            authority_highwaters = self._solver_sample_highwaters()
+            authority_task_counts = self._solver_emitted_task_counts()
+            staged_uids = {
+                binding.action_uid
+                for binding, _birth, _digest, _request in refills
+            }
+            if any(
+                authority_highwaters[uid] != prior
+                for uid, prior in previous_highwaters.items()
+                if uid not in staged_uids
+            ):
+                raise ActionBallContractError(
+                    "solver advanced an unstaged action sample tape"
+                )
+
+            staged_refills = []
+            unavailable_samples = {
+                sample_digest
+                for action_births in self._seen_sample_sha256.values()
+                for birth_samples in action_births.values()
+                for sample_digest in birth_samples
+            }
+            projected_sample_highwater = {
+                uid: (
+                    self._last_sample_index.get(uid, -1),
+                    self._last_sample_draw_end.get(uid, 0),
+                )
+                for _request, _binding, uid, _digest in validated
+            }
+            staged_sample_indices_by_uid: Dict[int, set[int]] = {}
+            staged_sample_draw_ranges_by_uid: Dict[
+                int, list[Tuple[int, int]]
+            ] = {}
+            for refill, batch in zip(refills, batches):
+                binding, birth, digest, refill_request = refill
+                uid = binding.action_uid
+                sample_index_floor = self._last_sample_index.get(uid, -1)
+                sample_draw_floor = self._last_sample_draw_end.get(uid, 0)
+                staged_indices = staged_sample_indices_by_uid.setdefault(
+                    uid, set()
+                )
+                staged_ranges = (
+                    staged_sample_draw_ranges_by_uid.setdefault(uid, [])
+                )
+                (
+                    new_digests,
+                    last_sample_index,
+                    last_sample_draw_end,
+                ) = self._validate_refill_batch(
+                    binding=binding,
+                    birth=birth,
+                    birth_digest=digest,
+                    request=refill_request,
+                    batch=batch,
+                    unavailable_sample_sha256=unavailable_samples,
+                    sample_index_floor=sample_index_floor,
+                    sample_draw_floor=sample_draw_floor,
+                    staged_sample_indices=staged_indices,
+                    staged_sample_draw_ranges=staged_ranges,
+                )
+                old_index, old_draw_end = projected_sample_highwater[uid]
+                projected_sample_highwater[uid] = (
+                    max(old_index, last_sample_index),
+                    max(old_draw_end, last_sample_draw_end),
+                )
+                staged_indices.update(
+                    receipt.sample_index for receipt in batch.receipts
+                )
+                staged_ranges.extend(
+                    (
+                        receipt.sample_draw_start,
+                        receipt.sample_draw_end,
+                    )
+                    for receipt in batch.receipts
+                )
+                unavailable_samples.update(
+                    receipt.sample_sha256 for receipt in batch.receipts
+                )
+                staged_refills.append(
+                    (
+                        binding,
+                        digest,
+                        refill_request,
+                        batch,
+                        new_digests,
+                        last_sample_index,
+                        last_sample_draw_end,
+                    )
+                )
+            returned_task_counts: Dict[int, int] = {}
+            returned_receipts: list[ActionBallTaskReceipt] = []
+            for (
+                binding,
+                _digest,
+                _request,
+                batch,
+                _digests,
+                _sample_index,
+                _draw_end,
+            ) in staged_refills:
+                returned_task_counts[binding.action_uid] = (
+                    returned_task_counts.get(binding.action_uid, 0)
+                    + len(batch.receipts)
+                )
+                returned_receipts.extend(batch.receipts)
+            if any(
+                authority_task_counts[uid]
+                != previous_task_counts[uid]
+                + returned_task_counts.get(uid, 0)
+                for uid in previous_task_counts
+            ):
+                raise ActionBallContractError(
+                    "solver admitted-task transcript advanced outside the "
+                    "staged callback results"
+                )
+            self._assert_emitted_tasks_pure(returned_receipts)
+            self._assert_proposal_assignments_pure(
+                tuple(
+                    ActionSampleAssignment(
+                        birth=refill_request.birth,
+                        refill_index=refill_request.refill_index,
+                        proposal_sample_indices=(
+                            batch.proposal_sample_indices
+                        ),
+                    )
+                    for (
+                        _binding,
+                        _digest,
+                        refill_request,
+                        batch,
+                        _digests,
+                        _sample_index,
+                        _draw_end,
+                    ) in staged_refills
+                )
+            )
+            for (
+                binding,
+                digest,
+                _request,
+                batch,
+                _digests,
+                _sample_index,
+                _draw_end,
+            ) in staged_refills:
+                expected_count, expected_root = (
+                    self._expected_task_transcript_for_active_birth(
+                        binding.action_uid, digest
+                    )
+                )
+                for receipt in batch.receipts:
+                    expected_root = _task_transcript_extend(
+                        expected_root, receipt.canonical_sha256
+                    )
+                expected_count += len(batch.receipts)
+                if self._solver_task_transcript_for_birth_pure(
+                    digest
+                ) != (expected_count, expected_root):
+                    raise ActionBallContractError(
+                        "solver birth task transcript differs from staged "
+                        "callback result"
+                    )
+            for uid in staged_sample_indices_by_uid:
+                authority_highwater = authority_highwaters[uid]
+                emitted_highwater = projected_sample_highwater[uid]
+                previous_highwater = (
+                    self._last_sample_index.get(uid, -1),
+                    self._last_sample_draw_end.get(uid, 0),
+                )
+                if (
+                    authority_highwater[0] < emitted_highwater[0]
+                    or authority_highwater[1] < emitted_highwater[1]
+                    or authority_highwater[0] < previous_highwater[0]
+                    or authority_highwater[1] < previous_highwater[1]
+                ):
+                    raise ActionBallContractError(
+                        "solver sample high-water disagrees with emitted "
+                        "samples"
+                    )
+                projected_sample_highwater[uid] = (
+                    authority_highwater
+                )
+            if self._solver_state() != emitted_solver_state:
+                raise ActionBallContractError(
+                    "solver sample authority assertion must be pure"
+                )
+            projected: Dict[int, Tuple[int, int, int]] = {}
+            for (
+                binding,
+                _digest,
+                _request,
+                batch,
+                _digests,
+                _sample_index,
+                _draw_end,
+            ) in staged_refills:
+                calls, proposed, admitted = projected.get(
+                    binding.action_uid, (0, 0, 0)
+                )
+                projected[binding.action_uid] = (
+                    calls + 1,
+                    proposed + batch.proposed_count,
+                    admitted + len(batch.receipts),
+                )
+            for uid, (calls, proposed, admitted) in projected.items():
+                current = self._ledger.get(uid, PoolLedger())
+                PoolLedger(
+                    requests=current.requests,
+                    refill_calls=current.refill_calls + calls,
+                    proposed=current.proposed + proposed,
+                    admitted=current.admitted + admitted,
+                    issued=current.issued,
+                    discarded=current.discarded,
+                )
+            for uid in staged_sample_indices_by_uid:
+                uid_batches = tuple(
+                    batch
+                    for (
+                        binding,
+                        _digest,
+                        _request,
+                        batch,
+                        _digests,
+                        _sample_index,
+                        _draw_end,
+                    ) in staged_refills
+                    if binding.action_uid == uid
+                )
+                self._install_lifecycle_samples(
+                    action_uid=uid,
+                    batches=uid_batches,
+                    authority_sample_index=(
+                        projected_sample_highwater[uid][0]
+                    ),
+                )
+            for (
+                binding,
+                digest,
+                refill_request,
+                batch,
+                new_digests,
+                last_sample_index,
+                last_sample_draw_end,
+            ) in staged_refills:
+                self._install_refill_batch(
+                    binding=binding,
+                    birth_digest=digest,
+                    request=refill_request,
+                    batch=batch,
+                    new_digests=new_digests,
+                    last_sample_index=last_sample_index,
+                    last_sample_draw_end=last_sample_draw_end,
+                )
+            for uid, (
+                last_sample_index,
+                last_sample_draw_end,
+            ) in projected_sample_highwater.items():
+                if uid in staged_sample_indices_by_uid:
+                    self._last_sample_index[uid] = last_sample_index
+                    self._last_sample_draw_end[uid] = (
+                        last_sample_draw_end
+                    )
+        except Exception:
+            for uid, digest in reversed(registered):
+                if digest in self._births.get(uid, {}):
+                    self._rollback_empty_birth(uid, digest)
+            self._restore_solver_state(solver_state)
+            raise
+
+        issued: list[ActionBallTaskReceipt] = []
+        for request, _binding, uid, digest in validated:
+            receipt = self._pending[uid][digest][0]
+            if receipt.swing_generation != request.swing_generation:
+                raise ActionBallContractError(
+                    "pending task receipt swing generation disagrees with "
+                    "pool cursor"
+                )
+            if (
+                self._task_lifecycle[uid][receipt.sample_index]
+                != _LIFECYCLE_PENDING
+            ):
+                raise ActionBallContractError(
+                    "pending task receipt lifecycle is not pending"
+                )
+            issued.append(receipt)
+        for (
+            request,
+            _binding,
+            uid,
+            digest,
+        ), receipt in zip(validated, issued):
+            self._pending[uid][digest].pop(0)
+            self._task_lifecycle[uid][
+                receipt.sample_index
+            ] = _LIFECYCLE_ISSUED
+            self._issued_task_transcript_sha256[uid][digest] = (
+                _task_transcript_extend(
+                    self._issued_task_transcript_sha256[uid][digest],
+                    receipt.canonical_sha256,
+                )
+            )
+            current = self._ledger[uid]
+            self._cursor[uid][digest] += 1
+            self._ledger[uid] = PoolLedger(
+                requests=current.requests + 1,
+                refill_calls=current.refill_calls,
+                proposed=current.proposed,
+                admitted=current.admitted,
+                issued=current.issued + 1,
+                discarded=current.discarded,
+            )
+        return tuple(issued)
+
+    def retire_birth(
+        self,
+        birth: ActionBirthReceipt,
+    ) -> int:
+        """Retire one finished episode and count every unused solved task."""
+
+        return self.retire_many((birth,))[0]
+
+    def retire_many(
+        self,
+        births: Sequence[ActionBirthReceipt],
+    ) -> Tuple[int, ...]:
+        """Atomically retire a true-reset env batch.
+
+        Retirement validates the pool-owned active receipt, rather than the
+        broker's *latest* consumed generation.  A caller may therefore safely
+        retire generation N even if the broker has already consumed N+1,
+        without creating an unrecoverable active-birth deadlock.
+        """
+
+        if isinstance(births, (str, bytes)) or not isinstance(
+            births, Sequence
+        ):
+            raise ActionBallContractError(
+                "retire births must be a non-empty sequence"
+            )
+        converted = tuple(births)
+        if not converted or any(
+            not isinstance(birth, ActionBirthReceipt)
+            for birth in converted
+        ):
+            raise ActionBallContractError(
+                "retire births must be non-empty ActionBirthReceipt objects"
+            )
+        env_ids = [birth.env_id for birth in converted]
+        digests = [birth.canonical_sha256 for birth in converted]
+        if len(set(env_ids)) != len(env_ids) or len(set(digests)) != len(
+            digests
+        ):
+            raise PoolProtocolError(
+                "retire batch must not repeat an env or birth"
+            )
+
+        validated: list[
+            Tuple[
+                ActionBirthReceipt,
+                int,
+                str,
+                int,
+                _RetiredPoolBirth,
+            ]
+        ] = []
+        discarded_by_uid: Dict[int, int] = {}
+        for birth in converted:
+            binding = self._binding(birth.action_uid)
+            birth.assert_contract(
+                binding=binding,
+                pins=self._pins,
+                mobility_mode=self._mobility_mode,
+                registry_sha256=self._registry_sha256,
+            )
+            uid = binding.action_uid
+            digest = birth.canonical_sha256
+            active = self._births.get(uid, {}).get(digest)
+            if active is None or active != birth:
+                raise PoolProtocolError(
+                    "cannot retire an unknown or already retired birth"
+                )
+            if digest in self._retired_births.get(uid, {}):
+                raise PoolProtocolError(
+                    "retired birth transcript already exists"
+                )
+            previous_retired = self._retired_generation.get(
+                birth.env_id, 0
+            )
+            if birth.reset_generation <= previous_retired:
+                raise PoolProtocolError(
+                    "birth retirement generation is stale"
+                )
+            discarded = len(self._pending[uid][digest])
+            if any(
+                self._task_lifecycle[uid][receipt.sample_index]
+                != _LIFECYCLE_PENDING
+                for receipt in self._pending[uid][digest]
+            ):
+                raise ActionBallContractError(
+                    "discarded task lifecycle is not pending"
+                )
+            admitted_count, transcript_root = (
+                self._expected_task_transcript_for_active_birth(
+                    uid, digest
+                )
+            )
+            if self._solver_task_transcript_for_birth_pure(digest) != (
+                admitted_count,
+                transcript_root,
+            ):
+                raise ActionBallContractError(
+                    "retired birth task transcript differs from solver "
+                    "authority"
+                )
+            retired = _RetiredPoolBirth(
+                birth=birth,
+                refill_index=self._refill_index[uid][digest],
+                proposed_count=self._proposed_by_birth[uid][digest],
+                admitted_count=admitted_count,
+                issued_count=self._cursor[uid][digest],
+                discarded_count=discarded,
+                task_transcript_sha256=transcript_root,
+                sample_assignments=tuple(
+                    self._sample_assignments[uid][digest]
+                ),
+            )
+            discarded_by_uid[uid] = (
+                discarded_by_uid.get(uid, 0) + discarded
+            )
+            validated.append(
+                (birth, uid, digest, discarded, retired)
+            )
+
+        projected_ledgers: Dict[int, PoolLedger] = {}
+        for uid, discarded in discarded_by_uid.items():
+            current = self._ledger[uid]
+            projected_ledgers[uid] = PoolLedger(
+                requests=current.requests,
+                refill_calls=current.refill_calls,
+                proposed=current.proposed,
+                admitted=current.admitted,
+                issued=current.issued,
+                discarded=current.discarded + discarded,
+            )
+
+        for uid, ledger in projected_ledgers.items():
+            self._ledger[uid] = ledger
+        for birth, uid, digest, _discarded, retired in validated:
+            for receipt in self._pending[uid][digest]:
+                self._task_lifecycle[uid][
+                    receipt.sample_index
+                ] = _LIFECYCLE_DISCARDED
+            self._retired_births.setdefault(uid, {})[
+                digest
+            ] = retired
+            for table in (
+                self._births,
+                self._pending,
+                self._issued_task_transcript_sha256,
+                self._cursor,
+                self._refill_index,
+                self._proposed_by_birth,
+                self._sample_assignments,
+                self._seen_sha256,
+                self._seen_sample_sha256,
+            ):
+                del table[uid][digest]
+                if not table[uid]:
+                    del table[uid]
+            self._retired_generation[
+                birth.env_id
+            ] = birth.reset_generation
+        return tuple(row[3] for row in validated)
+
+    def state_dict(self) -> Dict[str, object]:
+        solver_state = self._solver_state()
+        try:
+            self._assert_compact_lifecycle_invariants()
+            for binding in self._bindings:
+                uid = binding.action_uid
+                expected = (
+                    self._last_sample_index.get(uid, -1),
+                    self._last_sample_draw_end.get(uid, 0),
+                )
+                if self._solver_sample_highwater(uid) != expected:
+                    raise ActionBallContractError(
+                        "pool sample high-water differs from solver "
+                        "authority"
+                    )
+            if (
+                self._solver_emitted_task_counts()
+                != self._pool_emitted_task_counts()
+            ):
+                raise ActionBallContractError(
+                    "pool admitted-task counts differ from solver authority"
+                )
+            pending_receipts = tuple(
+                receipt
+                for receipts in self._all_task_receipts_by_action().values()
+                for receipt in receipts
+            )
+            self._assert_emitted_tasks_pure(pending_receipts)
+            self._assert_proposal_assignments_pure(
+                tuple(
+                    assignment
+                    for action_assignments in (
+                        self._sample_assignments.values()
+                    )
+                    for birth_assignments in (
+                        action_assignments.values()
+                    )
+                    for assignment in birth_assignments
+                )
+                + tuple(
+                    assignment
+                    for action_retired in self._retired_births.values()
+                    for retired in action_retired.values()
+                    for assignment in retired.sample_assignments
+                )
+            )
+            self._assert_all_task_transcripts_pure()
+            if self._solver_state() != solver_state:
+                raise ActionBallContractError(
+                    "solver checkpoint authorities must be pure"
+                )
+        except Exception:
+            self._restore_solver_state(solver_state)
+            raise
+        if (
+            self._birth_authority is not None
+            and self._solver_state_owner_sha256()
+            == self._birth_authority.provider_state_owner_sha256
+            and solver_state
+            != self._birth_authority.provider_state_snapshot()
+        ):
+            raise ActionBallContractError(
+                "shared sampler owner must expose byte-identical provider "
+                "and solver states"
+            )
+        actions = []
+        for uid in sorted(self._ledger):
+            birth_rows = []
+            for birth_digest in sorted(self._births.get(uid, {})):
+                pending = self._pending[uid][birth_digest]
+                order = [
+                    receipt.canonical_sha256 for receipt in pending
+                ]
+                birth_rows.append(
+                    {
+                        "birth": self._births[uid][
+                            birth_digest
+                        ].to_dict(),
+                        "cursor": self._cursor[uid][birth_digest],
+                        "issued_task_transcript_sha256": (
+                            self._issued_task_transcript_sha256[uid][
+                                birth_digest
+                            ]
+                        ),
+                        "refill_index": self._refill_index[uid][
+                            birth_digest
+                        ],
+                        "proposed_count": self._proposed_by_birth[uid][
+                            birth_digest
+                        ],
+                        "sample_assignments": _sample_assignment_rows(
+                            self._sample_assignments[uid][birth_digest]
+                        ),
+                        "pending_order": order,
+                        "pending_receipts": [
+                            receipt.to_dict() for receipt in pending
+                        ],
+                        "seen_sha256": sorted(
+                            self._seen_sha256[uid][birth_digest]
+                        ),
+                        "seen_sample_sha256": sorted(
+                            self._seen_sample_sha256[uid][birth_digest]
+                        ),
+                    }
+                )
+            retired_rows = []
+            for birth_digest in sorted(
+                self._retired_births.get(uid, {})
+            ):
+                retired = self._retired_births[uid][birth_digest]
+                retired_rows.append(
+                    {
+                        "birth": retired.birth.to_dict(),
+                        "refill_index": retired.refill_index,
+                        "proposed_count": retired.proposed_count,
+                        "admitted_count": retired.admitted_count,
+                        "issued_count": retired.issued_count,
+                        "discarded_count": retired.discarded_count,
+                        "task_transcript_sha256": (
+                            retired.task_transcript_sha256
+                        ),
+                        "sample_assignments": _sample_assignment_rows(
+                            retired.sample_assignments
+                        ),
+                    }
+                )
+            lifecycle = self._task_lifecycle.get(uid, [])
+            actions.append(
+                {
+                    "action_uid": uid,
+                    "ledger": self._ledger[uid].to_dict(),
+                    "last_sample_index": self._last_sample_index.get(uid),
+                    "last_sample_draw_end": self._last_sample_draw_end.get(
+                        uid
+                    ),
+                    "lifecycle_sample_count": len(lifecycle),
+                    "lifecycle_2bit_base64": (
+                        _pack_lifecycle_2bit(lifecycle)
+                    ),
+                    "lifecycle_sha256": _task_lifecycle_sha256(
+                        uid, lifecycle
+                    ),
+                    "births": birth_rows,
+                    "retired_births": retired_rows,
+                }
+            )
+        payload: Dict[str, object] = {
+            "schema_version": POOL_STATE_SCHEMA_VERSION,
+            "runtime_contract_sha256": RUNTIME_CONTRACT_SHA256,
+            "registry_sha256": self._registry_sha256,
+            "pins": self._pins.to_dict(),
+            "mobility_mode": self._mobility_mode,
+            "refill_size": self._refill_size,
+            "bindings": [
+                binding.to_dict() for binding in self._bindings
+            ],
+            "birth_authority_state_sha256": (
+                self._birth_authority_state_sha256()
+            ),
+            "solver_contract_sha256": self._pins.solver_sha256,
+            "solver_state_owner_sha256": (
+                self._solver_state_owner_sha256()
+            ),
+            "solver_state": solver_state,
+            "solver_state_sha256": _sha256_json(solver_state),
+            "retired_generations": [
+                [env, generation]
+                for env, generation in sorted(
+                    self._retired_generation.items()
+                )
+            ],
+            "actions": actions,
+        }
+        payload["integrity_sha256"] = _sha256_json(payload)
+        return payload
+
+    def load_state_dict(self, state: object) -> None:
+        row = _exact_mapping(
+            state, self._STATE_KEYS, name="lazy action pool state"
+        )
+        if row["schema_version"] != POOL_STATE_SCHEMA_VERSION:
+            raise ActionBallContractError(
+                "unsupported lazy action pool state schema_version"
+            )
+        if row["runtime_contract_sha256"] != RUNTIME_CONTRACT_SHA256:
+            raise ActionBallContractError(
+                "lazy action pool runtime contract SHA mismatch"
+            )
+        declared_integrity = _sha256(
+            row["integrity_sha256"], name="integrity_sha256"
+        )
+        payload = {
+            key: row[key]
+            for key in self._STATE_KEYS
+            if key != "integrity_sha256"
+        }
+        if _sha256_json(payload) != declared_integrity:
+            raise ActionBallContractError(
+                "lazy action pool state integrity mismatch"
+            )
+        pins = RuntimePins.from_dict(row["pins"])
+        mode = _mode(row["mobility_mode"])
+        refill_size = _plain_int(
+            row["refill_size"], name="refill_size", minimum=1
+        )
+        if not isinstance(row["bindings"], (tuple, list)):
+            raise ActionBallContractError("bindings state must be a list")
+        bindings = _validate_bindings(
+            tuple(
+                ActionBinding.from_dict(binding)
+                for binding in row["bindings"]
+            )
+        )
+        registry_sha = _sha256(
+            row["registry_sha256"], name="registry_sha256"
+        )
+        if (
+            pins != self._pins
+            or mode != self._mobility_mode
+            or refill_size != self._refill_size
+            or bindings != self._bindings
+            or registry_sha != self._registry_sha256
+            or registry_sha
+            != _registry_sha256(bindings, pins, mode)
+        ):
+            raise ActionBallContractError(
+                "lazy action pool state belongs to a different run registry"
+            )
+        raw_authority_sha = row["birth_authority_state_sha256"]
+        if raw_authority_sha is None:
+            authority_state_sha = None
+        else:
+            authority_state_sha = _sha256(
+                raw_authority_sha,
+                name="birth_authority_state_sha256",
+            )
+        solver_contract_sha = _sha256(
+            row["solver_contract_sha256"],
+            name="solver_contract_sha256",
+        )
+        if solver_contract_sha != self._pins.solver_sha256:
+            raise ActionBallContractError(
+                "lazy action pool solver contract SHA mismatch"
+            )
+        solver_owner_sha = _sha256(
+            row["solver_state_owner_sha256"],
+            name="solver_state_owner_sha256",
+        )
+        if solver_owner_sha != self._solver_state_owner_sha256():
+            raise ActionBallContractError(
+                "lazy action pool solver state owner mismatch"
+            )
+        solver_state = _json_data(
+            row["solver_state"], name="solver state"
+        )
+        if _sha256(
+            row["solver_state_sha256"],
+            name="solver_state_sha256",
+        ) != _sha256_json(solver_state):
+            raise ActionBallContractError(
+                "lazy action pool solver state SHA mismatch"
+            )
+        if not isinstance(row["actions"], (tuple, list)):
+            raise ActionBallContractError("actions state must be a list")
+        retired_generations = ActionBirthBroker._generation_rows(
+            row["retired_generations"],
+            name="retired_generations",
+        )
+
+        births_result: Dict[int, Dict[str, ActionBirthReceipt]] = {}
+        pending_result: Dict[
+            int, Dict[str, list[ActionBallTaskReceipt]]
+        ] = {}
+        cursor_result: Dict[int, Dict[str, int]] = {}
+        issued_transcript_result: Dict[int, Dict[str, str]] = {}
+        refill_result: Dict[int, Dict[str, int]] = {}
+        proposed_result: Dict[int, Dict[str, int]] = {}
+        sample_assignments_result: Dict[
+            int, Dict[str, list[ActionSampleAssignment]]
+        ] = {}
+        retired_births_result: Dict[
+            int, Dict[str, _RetiredPoolBirth]
+        ] = {}
+        lifecycle_result: Dict[int, list[int]] = {}
+        ledger_result: Dict[int, PoolLedger] = {}
+        seen_result: Dict[int, Dict[str, set[str]]] = {}
+        sample_seen_result: Dict[int, Dict[str, set[str]]] = {}
+        last_sample_index_result: Dict[int, int] = {}
+        last_sample_draw_end_result: Dict[int, int] = {}
+        active_envs: set[int] = set()
+        active_generation_by_env: Dict[int, int] = {}
+        task_transcript_expectations: Dict[str, Tuple[int, str]] = {}
+        task_digests: set[str] = set()
+        sample_digests: set[str] = set()
+        for index, raw_action in enumerate(row["actions"]):
+            action_row = _exact_mapping(
+                raw_action,
+                (
+                    "action_uid",
+                    "ledger",
+                    "last_sample_index",
+                    "last_sample_draw_end",
+                    "lifecycle_sample_count",
+                    "lifecycle_2bit_base64",
+                    "lifecycle_sha256",
+                    "births",
+                    "retired_births",
+                ),
+                name=f"actions[{index}]",
+            )
+            binding = self._binding(action_row["action_uid"])  # type: ignore[arg-type]
+            uid = binding.action_uid
+            if uid in ledger_result:
+                raise ActionBallContractError(
+                    f"actions state repeats action_uid {uid}"
+                )
+            if not isinstance(action_row["births"], (tuple, list)):
+                raise ActionBallContractError(
+                    f"actions[{index}].births must be a list"
+                )
+            if not isinstance(
+                action_row["retired_births"], (tuple, list)
+            ):
+                raise ActionBallContractError(
+                    f"actions[{index}].retired_births must be a list"
+                )
+            action_births: Dict[str, ActionBirthReceipt] = {}
+            action_pending: Dict[
+                str, list[ActionBallTaskReceipt]
+            ] = {}
+            action_cursor: Dict[str, int] = {}
+            action_issued_transcript: Dict[str, str] = {}
+            action_refill: Dict[str, int] = {}
+            action_proposed: Dict[str, int] = {}
+            action_assignments: Dict[
+                str, list[ActionSampleAssignment]
+            ] = {}
+            action_seen: Dict[str, set[str]] = {}
+            action_sample_seen: Dict[str, set[str]] = {}
+            action_retired: Dict[str, _RetiredPoolBirth] = {}
+            active_admitted = 0
+            active_issued = 0
+            active_refills = 0
+            active_proposed = 0
+            retired_admitted = 0
+            retired_issued = 0
+            retired_discarded = 0
+            retired_refills = 0
+            retired_proposed = 0
+            for birth_index, raw_birth in enumerate(
+                action_row["births"]
+            ):
+                birth_row = _exact_mapping(
+                    raw_birth,
+                    (
+                        "birth",
+                        "cursor",
+                        "issued_task_transcript_sha256",
+                        "refill_index",
+                        "proposed_count",
+                        "sample_assignments",
+                        "pending_order",
+                        "pending_receipts",
+                        "seen_sha256",
+                        "seen_sample_sha256",
+                    ),
+                    name=f"actions[{index}].births[{birth_index}]",
+                )
+                birth = ActionBirthReceipt.from_dict(birth_row["birth"])
+                birth.assert_contract(
+                    binding=binding,
+                    pins=self._pins,
+                    mobility_mode=self._mobility_mode,
+                    registry_sha256=self._registry_sha256,
+                )
+                if (
+                    birth.action_uid != uid
+                    or birth.action_slot != binding.action_slot
+                ):
+                    raise ActionBallContractError(
+                        "active birth does not match action row"
+                    )
+                birth_digest = birth.canonical_sha256
+                if birth_digest in action_births:
+                    raise ActionBallContractError(
+                        "action repeats an active birth SHA"
+                    )
+                if birth.env_id in active_envs:
+                    raise ActionBallContractError(
+                        "two active births share an env_id"
+                    )
+                if birth.reset_generation <= retired_generations.get(
+                    birth.env_id, 0
+                ):
+                    raise ActionBallContractError(
+                        "active birth is not newer than retired generation"
+                    )
+                active_envs.add(birth.env_id)
+                active_generation_by_env[
+                    birth.env_id
+                ] = birth.reset_generation
+                cursor = _plain_int(
+                    birth_row["cursor"],
+                    name=(
+                        f"actions[{index}].births[{birth_index}].cursor"
+                    ),
+                )
+                issued_transcript = _sha256(
+                    birth_row["issued_task_transcript_sha256"],
+                    name=(
+                        f"actions[{index}].births[{birth_index}]"
+                        ".issued_task_transcript_sha256"
+                    ),
+                )
+                refill_index = _plain_int(
+                    birth_row["refill_index"],
+                    name=(
+                        f"actions[{index}].births[{birth_index}]"
+                        ".refill_index"
+                    ),
+                )
+                proposed_count = _plain_int(
+                    birth_row["proposed_count"],
+                    name=(
+                        f"actions[{index}].births[{birth_index}]"
+                        ".proposed_count"
+                    ),
+                )
+                assignments = _sample_assignments_from_rows(
+                    birth_row["sample_assignments"],
+                    birth=birth,
+                    name=(
+                        f"actions[{index}].births[{birth_index}]"
+                        ".sample_assignments"
+                    ),
+                )
+                if [
+                    assignment.refill_index
+                    for assignment in assignments
+                ] != list(range(1, refill_index + 1)):
+                    raise ActionBallContractError(
+                        "active sample assignment refill indices are not "
+                        "contiguous"
+                    )
+                if sum(
+                    len(assignment.proposal_sample_indices)
+                    for assignment in assignments
+                ) != proposed_count:
+                    raise ActionBallContractError(
+                        "active proposal count differs from sample "
+                        "assignments"
+                    )
+                if not isinstance(
+                    birth_row["pending_receipts"], (tuple, list)
+                ) or not isinstance(
+                    birth_row["pending_order"], (tuple, list)
+                ):
+                    raise ActionBallContractError(
+                        "pending receipts/order must be lists"
+                    )
+                receipts = [
+                    ActionBallTaskReceipt.from_dict(receipt)
+                    for receipt in birth_row["pending_receipts"]
+                ]
+                for receipt in receipts:
+                    receipt.assert_contract(
+                        binding=binding,
+                        pins=self._pins,
+                        mobility_mode=self._mobility_mode,
+                        registry_sha256=self._registry_sha256,
+                    )
+                    receipt.assert_birth(birth)
+                order = [
+                    _sha256(digest, name="pending_order digest")
+                    for digest in birth_row["pending_order"]
+                ]
+                actual_order = [
+                    receipt.canonical_sha256 for receipt in receipts
+                ]
+                if order != actual_order:
+                    raise ActionBallContractError(
+                        "pending_order does not match pending receipt order"
+                    )
+                expected_swing_generations = list(
+                    range(cursor, cursor + len(receipts))
+                )
+                if [
+                    receipt.swing_generation for receipt in receipts
+                ] != expected_swing_generations:
+                    raise ActionBallContractError(
+                        "pending task swing generations do not match cursor "
+                        "order"
+                    )
+                if not isinstance(
+                    birth_row["seen_sha256"], (tuple, list)
+                ):
+                    raise ActionBallContractError(
+                        "seen_sha256 must be a list"
+                    )
+                seen_list = [
+                    _sha256(digest, name="seen_sha256 digest")
+                    for digest in birth_row["seen_sha256"]
+                ]
+                if seen_list != sorted(set(seen_list)):
+                    raise ActionBallContractError(
+                        "seen_sha256 must be sorted and unique"
+                    )
+                seen = set(seen_list)
+                if task_digests.intersection(seen):
+                    raise ActionBallContractError(
+                        "task receipt SHA is replayed across active births"
+                    )
+                task_digests.update(seen)
+                if not set(order).issubset(seen):
+                    raise ActionBallContractError(
+                        "pending receipt is missing from seen_sha256"
+                    )
+                if len(seen) != cursor + len(receipts):
+                    raise ActionBallContractError(
+                        "birth cursor/pending/seen invariants disagree"
+                    )
+                expected_transcript = issued_transcript
+                for receipt in receipts:
+                    expected_transcript = _task_transcript_extend(
+                        expected_transcript,
+                        receipt.canonical_sha256,
+                    )
+                if proposed_count < len(seen):
+                    raise ActionBallContractError(
+                        "active birth proposed_count is below admitted "
+                        "task count"
+                    )
+                if cursor == 0 and issued_transcript != (
+                    task_transcript_sha256(birth_digest, ())
+                ):
+                    raise ActionBallContractError(
+                        "zero-cursor active birth has a non-empty issued "
+                        "task transcript"
+                    )
+                if birth_digest in task_transcript_expectations:
+                    raise ActionBallContractError(
+                        "pool lifecycle repeats one birth transcript"
+                    )
+                task_transcript_expectations[birth_digest] = (
+                    len(seen),
+                    expected_transcript,
+                )
+                if not isinstance(
+                    birth_row["seen_sample_sha256"], (tuple, list)
+                ):
+                    raise ActionBallContractError(
+                        "seen_sample_sha256 must be a list"
+                    )
+                sample_seen_list = [
+                    _sha256(
+                        digest,
+                        name="seen_sample_sha256 digest",
+                    )
+                    for digest in birth_row["seen_sample_sha256"]
+                ]
+                if sample_seen_list != sorted(set(sample_seen_list)):
+                    raise ActionBallContractError(
+                        "seen_sample_sha256 must be sorted and unique"
+                    )
+                sample_seen = set(sample_seen_list)
+                receipt_sample_digests = {
+                    receipt.sample_sha256 for receipt in receipts
+                }
+                if not receipt_sample_digests.issubset(sample_seen):
+                    raise ActionBallContractError(
+                        "pending receipt sample is missing from "
+                        "seen_sample_sha256"
+                    )
+                if len(sample_seen) != len(seen):
+                    raise ActionBallContractError(
+                        "seen task/sample SHA cardinalities disagree"
+                    )
+                if sample_digests.intersection(sample_seen):
+                    raise ActionBallContractError(
+                        "ball sample SHA is replayed across active births"
+                    )
+                sample_digests.update(sample_seen)
+                if refill_index == 0 and seen:
+                    raise ActionBallContractError(
+                        "birth has admitted tasks without a refill"
+                    )
+                if len(seen) < refill_index * self._refill_size:
+                    raise ActionBallContractError(
+                        "birth refill index exceeds admitted task history"
+                    )
+                action_births[birth_digest] = birth
+                action_pending[birth_digest] = receipts
+                action_cursor[birth_digest] = cursor
+                action_issued_transcript[
+                    birth_digest
+                ] = issued_transcript
+                action_refill[birth_digest] = refill_index
+                action_proposed[birth_digest] = proposed_count
+                action_assignments[birth_digest] = list(assignments)
+                action_seen[birth_digest] = seen
+                action_sample_seen[birth_digest] = sample_seen
+                active_admitted += len(seen)
+                active_issued += cursor
+                active_refills += refill_index
+                active_proposed += proposed_count
+            if list(action_births) != sorted(action_births):
+                raise ActionBallContractError(
+                    "birth rows must be sorted by canonical SHA"
+                )
+            for retired_index, raw_retired in enumerate(
+                action_row["retired_births"]
+            ):
+                retired_row = _exact_mapping(
+                    raw_retired,
+                    (
+                        "birth",
+                        "refill_index",
+                        "proposed_count",
+                        "admitted_count",
+                        "issued_count",
+                        "discarded_count",
+                        "task_transcript_sha256",
+                        "sample_assignments",
+                    ),
+                    name=(
+                        f"actions[{index}].retired_births"
+                        f"[{retired_index}]"
+                    ),
+                )
+                retired_birth = ActionBirthReceipt.from_dict(
+                    retired_row["birth"]
+                )
+                retired_birth.assert_contract(
+                    binding=binding,
+                    pins=self._pins,
+                    mobility_mode=self._mobility_mode,
+                    registry_sha256=self._registry_sha256,
+                )
+                if (
+                    retired_birth.action_uid != uid
+                    or retired_birth.action_slot
+                    != binding.action_slot
+                ):
+                    raise ActionBallContractError(
+                        "retired birth does not match action row"
+                    )
+                retired_digest = retired_birth.canonical_sha256
+                if (
+                    retired_digest in action_births
+                    or retired_digest in action_retired
+                    or retired_digest in task_transcript_expectations
+                ):
+                    raise ActionBallContractError(
+                        "pool lifecycle repeats one birth transcript"
+                    )
+                if (
+                    retired_birth.env_id in active_generation_by_env
+                    and active_generation_by_env[retired_birth.env_id]
+                    <= retired_birth.reset_generation
+                ):
+                    raise ActionBallContractError(
+                        "retired birth is not older than active env birth"
+                    )
+                if retired_birth.reset_generation > (
+                    retired_generations.get(retired_birth.env_id, 0)
+                ):
+                    raise ActionBallContractError(
+                        "retired birth exceeds retired generation ledger"
+                    )
+                retired = _RetiredPoolBirth(
+                    birth=retired_birth,
+                    refill_index=retired_row["refill_index"],
+                    proposed_count=retired_row["proposed_count"],
+                    admitted_count=retired_row["admitted_count"],
+                    issued_count=retired_row["issued_count"],
+                    discarded_count=retired_row["discarded_count"],
+                    task_transcript_sha256=retired_row[
+                        "task_transcript_sha256"
+                    ],
+                    sample_assignments=_sample_assignments_from_rows(
+                        retired_row["sample_assignments"],
+                        birth=retired_birth,
+                        name=(
+                            f"actions[{index}].retired_births"
+                            f"[{retired_index}].sample_assignments"
+                        ),
+                    ),
+                )
+                if (
+                    retired.refill_index
+                    > retired.admitted_count // self._refill_size
+                ):
+                    raise ActionBallContractError(
+                        "retired refill index exceeds admitted-task "
+                        "reachability"
+                    )
+                action_retired[retired_digest] = retired
+                task_transcript_expectations[retired_digest] = (
+                    retired.admitted_count,
+                    retired.task_transcript_sha256,
+                )
+                retired_admitted += retired.admitted_count
+                retired_issued += retired.issued_count
+                retired_discarded += retired.discarded_count
+                retired_refills += retired.refill_index
+                retired_proposed += retired.proposed_count
+            if list(action_retired) != sorted(action_retired):
+                raise ActionBallContractError(
+                    "retired birth rows must be sorted by canonical SHA"
+                )
+            ledger = PoolLedger.from_dict(action_row["ledger"])
+            if (
+                ledger.refill_calls
+                > ledger.admitted // self._refill_size
+            ):
+                raise ActionBallContractError(
+                    "pool ledger refill calls exceed admitted-task "
+                    "reachability"
+                )
+            if action_row["last_sample_index"] is None:
+                last_sample_index = None
+            else:
+                last_sample_index = _plain_int(
+                    action_row["last_sample_index"],
+                    name=f"actions[{index}].last_sample_index",
+                )
+            if action_row["last_sample_draw_end"] is None:
+                last_sample_draw_end = None
+            else:
+                last_sample_draw_end = _plain_int(
+                    action_row["last_sample_draw_end"],
+                    name=f"actions[{index}].last_sample_draw_end",
+                    minimum=1,
+                )
+            if (last_sample_index is None) != (
+                last_sample_draw_end is None
+            ):
+                raise ActionBallContractError(
+                    "sample index/draw high-water must both be null or set"
+                )
+            if ledger.admitted > 0 and last_sample_index is None:
+                raise ActionBallContractError(
+                    "admitted pool ledger requires sample high-water"
+                )
+            if ledger.admitted == 0 and last_sample_index is not None:
+                raise ActionBallContractError(
+                    "empty pool ledger cannot have sample high-water"
+                )
+            active_receipts = [
+                receipt
+                for receipts in action_pending.values()
+                for receipt in receipts
+            ]
+            if active_receipts and (
+                max(receipt.sample_index for receipt in active_receipts)
+                > last_sample_index  # type: ignore[operator]
+                or max(
+                    receipt.sample_draw_end for receipt in active_receipts
+                )
+                > last_sample_draw_end  # type: ignore[operator]
+            ):
+                raise ActionBallContractError(
+                    "active sample exceeds action sample high-water"
+                )
+            expected_ledger = PoolLedger(
+                requests=active_issued + retired_issued,
+                refill_calls=active_refills + retired_refills,
+                proposed=active_proposed + retired_proposed,
+                admitted=active_admitted + retired_admitted,
+                issued=active_issued + retired_issued,
+                discarded=retired_discarded,
+            )
+            if ledger != expected_ledger:
+                raise ActionBallContractError(
+                    "pool action ledger differs from compact per-birth "
+                    "lifecycle"
+                )
+            lifecycle_count = _plain_int(
+                action_row["lifecycle_sample_count"],
+                name=f"actions[{index}].lifecycle_sample_count",
+            )
+            if lifecycle_count != ledger.proposed or (
+                last_sample_index is None
+                and lifecycle_count != 0
+            ) or (
+                last_sample_index is not None
+                and lifecycle_count != last_sample_index + 1
+            ):
+                raise ActionBallContractError(
+                    "task lifecycle must cover every proposal sample index"
+                )
+            lifecycle = _unpack_lifecycle_2bit(
+                action_row["lifecycle_2bit_base64"],
+                count=lifecycle_count,
+            )
+            if _sha256(
+                action_row["lifecycle_sha256"],
+                name=f"actions[{index}].lifecycle_sha256",
+            ) != _task_lifecycle_sha256(uid, lifecycle):
+                raise ActionBallContractError(
+                    "task lifecycle SHA mismatch"
+                )
+            status_counts = {
+                status: lifecycle.count(status)
+                for status in range(4)
+            }
+            pending_count = sum(
+                len(receipts)
+                for receipts in action_pending.values()
+            )
+            if (
+                status_counts[_LIFECYCLE_REJECTED]
+                != ledger.proposed - ledger.admitted
+                or status_counts[_LIFECYCLE_PENDING] != pending_count
+                or status_counts[_LIFECYCLE_ISSUED] != ledger.issued
+                or status_counts[_LIFECYCLE_DISCARDED]
+                != ledger.discarded
+            ):
+                raise ActionBallContractError(
+                    "2-bit task lifecycle statuses disagree with ledger"
+                )
+            for receipt in active_receipts:
+                if (
+                    lifecycle[receipt.sample_index]
+                    != _LIFECYCLE_PENDING
+                ):
+                    raise ActionBallContractError(
+                        "pending receipt lifecycle status is not pending"
+                    )
+            self._validate_assignment_partition_for_action(
+                action_uid=uid,
+                lifecycle=lifecycle,
+                births=action_births,
+                pending=action_pending,
+                cursor=action_cursor,
+                refill_index=action_refill,
+                proposed_by_birth=action_proposed,
+                sample_assignments=action_assignments,
+                retired_births=action_retired,
+            )
+            if action_births:
+                births_result[uid] = action_births
+                pending_result[uid] = action_pending
+                cursor_result[uid] = action_cursor
+                issued_transcript_result[
+                    uid
+                ] = action_issued_transcript
+                refill_result[uid] = action_refill
+                proposed_result[uid] = action_proposed
+                sample_assignments_result[uid] = action_assignments
+                seen_result[uid] = action_seen
+                sample_seen_result[uid] = action_sample_seen
+            if action_retired:
+                retired_births_result[uid] = action_retired
+            lifecycle_result[uid] = lifecycle
+            ledger_result[uid] = ledger
+            if last_sample_index is not None:
+                last_sample_index_result[uid] = last_sample_index
+                last_sample_draw_end_result[uid] = last_sample_draw_end  # type: ignore[assignment]
+        if list(ledger_result) != sorted(ledger_result):
+            raise ActionBallContractError(
+                "actions state must be sorted by action_uid"
+            )
+        expected_retired_generations: Dict[int, int] = {}
+        for action_retired in retired_births_result.values():
+            for retired in action_retired.values():
+                expected_retired_generations[retired.birth.env_id] = max(
+                    expected_retired_generations.get(
+                        retired.birth.env_id, 0
+                    ),
+                    retired.birth.reset_generation,
+                )
+        if retired_generations != expected_retired_generations:
+            raise ActionBallContractError(
+                "retired generation ledger differs from compact retired "
+                "birth records"
+            )
+        if authority_state_sha is None:
+            if births_result or retired_births_result:
+                raise ActionBallContractError(
+                    "non-pristine pool state must pin a birth authority state"
+                )
+        else:
+            if self._birth_authority is None:
+                raise PoolProtocolError(
+                    "load the exact birth broker state and bind it before "
+                    "loading a non-pristine task pool"
+                )
+            if (
+                self._birth_authority_state_sha256()
+                != authority_state_sha
+            ):
+                raise ActionBallContractError(
+                    "task pool checkpoint birth authority state mismatch"
+                )
+            for action_births in births_result.values():
+                for birth in action_births.values():
+                    self._birth_authority.assert_consumed_birth(birth)
+            for action_retired in retired_births_result.values():
+                for retired in action_retired.values():
+                    self._birth_authority.assert_consumed_birth(
+                        retired.birth
+                    )
+            if (
+                solver_owner_sha
+                == self._birth_authority.provider_state_owner_sha256
+                and solver_state
+                != self._birth_authority.provider_state_snapshot()
+            ):
+                raise ActionBallContractError(
+                    "shared sampler owner checkpoint states disagree "
+                    "between broker and pool"
+                )
+        previous_solver_state = self._solver_state()
+        try:
+            self._restore_solver_state(solver_state)
+            if self._solver is None:
+                raise PoolProtocolError("task solver is not bound")
+            pending_task_receipts: list[
+                ActionBallTaskReceipt
+            ] = []
+            for action_pending in pending_result.values():
+                for receipts in action_pending.values():
+                    for receipt in receipts:
+                        self._solver.assert_emitted_sample(receipt)
+                        pending_task_receipts.append(receipt)
+            self._solver.assert_emitted_tasks(
+                tuple(pending_task_receipts)
+            )
+            self._solver.assert_proposal_assignments(
+                tuple(
+                    assignment
+                    for action_assignments in (
+                        sample_assignments_result.values()
+                    )
+                    for birth_assignments in (
+                        action_assignments.values()
+                    )
+                    for assignment in birth_assignments
+                )
+                + tuple(
+                    assignment
+                    for action_retired in retired_births_result.values()
+                    for retired in action_retired.values()
+                    for assignment in retired.sample_assignments
+                )
+            )
+            for binding in self._bindings:
+                uid = binding.action_uid
+                expected_count = ledger_result.get(
+                    uid, PoolLedger()
+                ).admitted
+                if (
+                    self._solver_emitted_task_count(uid)
+                    != expected_count
+                ):
+                    raise ActionBallContractError(
+                        "pool admitted-task count differs from solver "
+                        "authority"
+                    )
+            for birth_digest, expectation in (
+                task_transcript_expectations.items()
+            ):
+                if (
+                    self._solver_task_transcript_for_birth(
+                        birth_digest
+                    )
+                    != expectation
+                ):
+                    raise ActionBallContractError(
+                        "pool birth task transcript differs from solver "
+                        "authority"
+                    )
+            for binding in self._bindings:
+                uid = binding.action_uid
+                saved_highwater = (
+                    last_sample_index_result.get(uid, -1),
+                    last_sample_draw_end_result.get(uid, 0),
+                )
+                if (
+                    self._solver_sample_highwater(uid)
+                    != saved_highwater
+                ):
+                    raise ActionBallContractError(
+                        "pool sample high-water differs from solver "
+                        "authority"
+                    )
+            if self._solver_state() != solver_state:
+                raise ActionBallContractError(
+                    "solver sample authority assertion must be pure"
+                )
+        except Exception:
+            self._restore_solver_state(previous_solver_state)
+            raise
+        # Atomic commit.  The bound runtime solver deliberately stays bound.
+        self._births = births_result
+        self._pending = pending_result
+        self._cursor = cursor_result
+        self._issued_task_transcript_sha256 = (
+            issued_transcript_result
+        )
+        self._refill_index = refill_result
+        self._proposed_by_birth = proposed_result
+        self._sample_assignments = sample_assignments_result
+        self._retired_births = retired_births_result
+        self._task_lifecycle = lifecycle_result
+        self._ledger = ledger_result
+        self._seen_sha256 = seen_result
+        self._seen_sample_sha256 = sample_seen_result
+        self._last_sample_index = last_sample_index_result
+        self._last_sample_draw_end = last_sample_draw_end_result
+        self._retired_generation = retired_generations
+
+
+__all__ = [
+    "ActionBallContractError",
+    "BirthProtocolError",
+    "PoolProtocolError",
+    "RuntimePins",
+    "ActionBinding",
+    "ActionDomainLevels",
+    "ActionDomainClaim",
+    "ActionDomainClaimAuthority",
+    "ActionBirthProvider",
+    "ActionBirthRequest",
+    "ActionBirthReceipt",
+    "ActionBallTaskReceipt",
+    "ActionTaskReceiptRef",
+    "ActionTeacherTiming",
+    "derive_action_teacher_timing",
+    "BirthReserveRequest",
+    "BirthCommitRequest",
+    "BirthConsumeRequest",
+    "ActionBirthBroker",
+    "ActionPoolRefillRequest",
+    "ActionPoolRefillBatch",
+    "ActionSampleAssignment",
+    "ActionTaskIssueRequest",
+    "PoolLedger",
+    "ActionTaskSolver",
+    "LazyActionTaskPool",
+    "TASK_TRANSCRIPT_SCHEMA_VERSION",
+    "extend_task_transcript_sha256",
+    "task_transcript_sha256",
+    "ARM_KEYS",
+    "ARM_CATALOG_SHA256",
+    "SAMPLER_SCHEMA_VERSION",
+    "SAMPLER_BIRTH_DRAW_COUNT",
+    "SAMPLER_SAMPLE_DRAW_COUNT",
+    "MAX_PRE_SWING_WAIT_S",
+    "RUNTIME_CONTRACT_SHA256",
+]

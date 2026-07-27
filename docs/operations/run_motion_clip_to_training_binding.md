@@ -43,19 +43,22 @@
 | 16 | 一格 2-iter 冒烟 | `train.py`（波级工序见[发射工序](run_ablation_wave_launch.md)） | 2/2 零报错；WARN 全进摘要、Error/Traceback 零条；含 `q_des CLAMP ACTIVE` 行；config 回显与第 12 步收据一致。**⚠ `mean_episode_length` 恒为 1 = 出生位对不上，不是"学得慢"**——canonical probe 出生在旧站姿（拍 0.882 m）而参考第 0 帧在 1.229 m，差 0.347 m > `ee_body_pos` 阈值 0.25 m，**跑了 2500 迭代零学习** |
 
 <a id="task-first-addendum"></a>
+<a id="action-ball-addendum"></a>
 
-## Task-first 任意 N 动作附加门
+## Action-conditioned Ball-first 任意 N 动作附加门
 
 上述 16 步仍是每个 exact motion 的基础。把动作接进
-[`task-first`](../DEFINITIONS.md#task-first) 还要补以下 bank 级约束：
+[按动作条件化 Ball-first](../interfaces/action_conditioned_ball_first_contract.md) 还要补以下
+bank 级约束：
 
-1. manifest 逐行绑定 stable action UID、motion SHA、strike phase、family/face sign、完整
-   position/speed-magnitude/face/base 包络与 station center；action order 必须与 loader/one-hot 相同；
-2. level 0 只重复 center task，四个 curriculum delta 都为零；不能以“默认一点点泛化”跳过中心
-   warm-up；
+1. manifest 逐行绑定 stable action UID、motion SHA、strike phase、family/face sign，以及完整
+   incoming contact/speed/spin、base spawn/travel、landing-aim profile；action order 必须与
+   loader/one-hot 相同；
+2. level 0 使用 manifest 的 non-zero initial std；各轴先独立找 marginal frontier，再调 joint
+   `rho`。10% 只指 safe closed policy non-return，solver reject 与 unsafe 分账；
 3. 旧 `fh_loop` 不进入新 training view；旧 bytes 留档，不删除。`fh_loop_high` 必须产生新的
    upper/full 两件和各自证书，不能把 source NPZ 或旧正手证书直接塞进 manifest；
-4. 新正手的 `[0,0] / [-0.05,0] / [-0.10,0] m` 是整动作/task center 对照。负 X 远离桌，
+4. 新正手的 `[0,0] / [-0.05,0] / [-0.10,0] m` 是整动作/contact/base profile 对照。负 X 远离桌，
    取 upper/full 共同通过中最小后移；station 选择完成后才冻结 manifest；
 5. source anchor 只作 compiler diagnostic。正式 post-retime `t_hit` 用动作特定 behavior/contact
    authority；另报 `t_cycle`、physical `right_racket` site speed 和 ready→recovery 全轨无撞桌；
@@ -63,12 +66,13 @@
    内容寻址 reference checks，不替代 compiler/bank/dynamics/reference-return authority。当前输出
    `diagnostic_smoke_authorized=false` 与 `training_authorized=false`，不能据此启动 simulator 或
    trainer；
-7. 全 bank 的 manifest/file SHA、motion bytes、balanced sampling、actor `task_first_n<N>`、
-   curriculum Gate 与 effective Reward receipt 一起进入 checkpoint hard contract。
+7. 全 bank 的 manifest/file SHA、motion bytes、balanced sampling、actor `action_ball_n<N>`、
+   fixed-action solver/physics canonical payload、single-use birth/task receipt、curriculum Gate 与
+   effective Reward receipt 一起进入 checkpoint hard contract；manifest metadata 不得自授权。
 
 新正手缺 upper/full、grounded collocation trace 或任一时序/速度/撞桌 Gate 时，到此停止；
 不执行第 16 步 trainer smoke。完整前置见
-[task-first 实验](../experiments/2026-07/EXP-TASK-FIRST-N-ACTION-20260727.md)。
+[action-ball 实验](../experiments/2026-07/EXP-ACTION-CONDITIONED-BALL-FIRST-20260727.md)。
 
 ## 发射之后
 

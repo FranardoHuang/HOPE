@@ -1,5 +1,9 @@
 # 球优先目标契约（ball-first target contract）
 
+> 2026-07-27 扩展：本文保留事故根因与“球先于 task”的物理裁定。任意 N 动作训练的当前候选
+> 顺序、逐动作来球域、fixed-action solver、动态课程与 selector 分界，以
+> [按动作条件化 Ball-first 合同](action_conditioned_ball_first_contract.md)为详细真源。
+
 **人话**：先有球，再解出"回这颗球需要的拍面和拍速"，最后才处理老师动作去服务这个目标。
 反过来做——拿老师自己的速度当目标、再去问能不能回球——会造出**没有任何球能赢的任务**。
 
@@ -33,7 +37,12 @@ canonical 五动作波次把顺序做反了，代价是：
 3. **不可能的任务在构造时即被拒。** "没有任何球能产生的目标"和"配了不可达成目标的球",都必须
    在环境构造(而非训练几千迭代后)失败封闭。
 
-## 3. 现状与缺口
+## 3. 2026-07-26 题库路线快照（已被当前 executor 取代）
+
+> 本节及下一节记录事故发生时的 bank producer 方案，只用于解释根因和复现实验。2026-07-27
+> 当前候选已经改为逐动作在线 sampler：`action → ball/base/aim → fixed-action solve`。当前 launch
+> **不要求 question bank，且必须拒绝旧 CQ/bank 作为第二 producer**；现行字段与启动门只看
+> [按动作条件化 Ball-first 合同](action_conditioned_ball_first_contract.md)。
 
 | 环节 | 该由谁负责 | 现状 |
 | --- | --- | --- |
@@ -48,7 +57,7 @@ canonical 五动作波次把顺序做反了，代价是：
 (`mdp/stage1_question_bank.py: validate_runtime_motion_contract`)。所以 canonical 必须**自己生成**。
 "canonical 题库生成"此前挂在队列上当锦上添花——**按本裁定它是关键路径**。
 
-## 4. 系统化落点(每条都要能自动生效)
+## 4. 历史 bank 路线的系统化落点（不再是当前 launch checklist）
 
 - **题库生成进标准工序**:`run_motion_clip_to_training_binding.md` 增加"生成本谱系题库"一步,
   其输出是绑定的必填字段;没有题库的谱系不得进入评分波次。

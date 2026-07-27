@@ -168,6 +168,30 @@ def task_first_n_contract(action_count: int) -> ActorObservationContract:
         ),
     )
 
+
+def action_ball_n_contract(action_count: int) -> ActorObservationContract:
+    """Build the action-conditioned ball-first layout for an exact action-bank size.
+
+    The observation columns intentionally match ``task_first_n<N>`` so the two
+    training producers can share observation assembly.  Their contract names
+    remain distinct because producer semantics are part of checkpoint identity,
+    even when the tensor shape and ordered terms happen to be identical.
+    """
+
+    if type(action_count) is not int or not 1 <= action_count <= 1024:
+        raise ValueError(
+            "action-ball action_count must be a plain integer in [1,1024], "
+            f"got {action_count!r}"
+        )
+    layout = task_first_n_contract(action_count)
+    return ActorObservationContract(
+        name=f"action_ball_n{action_count}",
+        obs_mode=layout.obs_mode,
+        total_dim=layout.total_dim,
+        terms=layout.terms,
+    )
+
+
 # Stage-1 face-command contract (2026-07-06): deploy_parity + the +4D face-command channel
 # appended LAST — racket_target_normal_cmd = demanded face normal (3, world frame, from the
 # question bank / planner) + spin-rho placeholder (1, zero-filled until the S3 spin tier).
@@ -271,6 +295,14 @@ def resolve_actor_observation_contract(name: str | None) -> ActorObservationCont
     dynamic = re.fullmatch(r"task_first_n([1-9][0-9]*)", key)
     if dynamic is not None:
         return task_first_n_contract(int(dynamic.group(1)))
+    dynamic = re.fullmatch(r"action_ball_n([1-9][0-9]*)", key)
+    if dynamic is not None:
+        return action_ball_n_contract(int(dynamic.group(1)))
+    if key.startswith("action_ball_n"):
+        raise ValueError(
+            f"Invalid action-ball actor observation contract {name!r}; expected "
+            "action_ball_n<N> with a base-10 N in [1,1024] and no leading zeros"
+        )
     if key not in CONTRACTS:
         known = ", ".join(sorted(CONTRACTS))
         raise ValueError(
