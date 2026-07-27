@@ -879,7 +879,8 @@ def test_asymmetric_contact_arms_promote_lower_and_upper_independently():
         for _ in range(256)
     ]
     assert min(lower_values) < center
-    assert max(lower_values) == center
+    # 单次 uniform 覆盖整个区间(Franco 07-28:不选侧);上侧零宽 => 全部 <= center。
+    assert max(lower_values) <= center
 
     upper_levels = _levels(contact_y_upper=1.0)
     upper_sampler = S.ActionBallSampler([profile], seed=7001)
@@ -890,7 +891,7 @@ def test_asymmetric_contact_arms_promote_lower_and_upper_independently():
         ).contact_offset_from_base_goal_b_yaw_m[1]
         for _ in range(256)
     ]
-    assert min(upper_values) == center
+    assert min(upper_values) >= center
     assert max(upper_values) > center
 
 
@@ -909,7 +910,7 @@ def test_time_to_contact_is_asymmetric_bounded_and_identity_authoritative():
     values = [sample.time_to_contact_s for sample in samples]
     assert profile.time_to_contact_min_s <= min(values)
     assert min(values) < profile.time_to_contact_center_s
-    assert max(values) == profile.time_to_contact_center_s
+    assert max(values) <= profile.time_to_contact_center_s
     assert all(
         sample.to_receipt()["ball"]["time_to_contact_s"]
         == sample.time_to_contact_s
@@ -926,7 +927,7 @@ def test_time_to_contact_is_asymmetric_bounded_and_identity_authoritative():
         sampler.assert_issued_sample(forged)
 
 
-def test_tangent_direction_uses_fixed_half_side_probability_and_inbound_gate():
+def test_tangent_direction_is_uniform_over_asymmetric_interval_and_inbound_gate():
     profile = _profile(
         incoming_direction_tangent_u_neg_initial_deg=1.0,
         incoming_direction_tangent_u_neg_max_deg=1.0,
@@ -962,7 +963,8 @@ def test_tangent_direction_uses_fixed_half_side_probability_and_inbound_gate():
     negative_fraction = sum(value < 0.0 for value in signed_u) / len(
         signed_u
     )
-    assert 0.47 <= negative_fraction <= 0.53
+    # 单次 uniform 覆盖 [-1°, +10°](Franco 07-28:不选侧),负侧质量 ≈ 1/11。
+    assert 0.05 <= negative_fraction <= 0.14
     assert abs(min(signed_u)) < max(signed_u)
 
 

@@ -2123,24 +2123,21 @@ def _sample_asymmetric_truncated(
     uniform: float,
     name: str,
 ) -> float:
-    """Fixed-50/50-side UNIFORM draw; each side's width is its live support edge.
+    """Single UNIFORM draw over [center-lower_width, center+upper_width].
 
-    Franco 2026-07-28 裁定:分布用 uniform,不用截断高斯;`*_std` 字段语义 = 该侧当前
-    支撑半宽(随课程档位独立进退)。侧选择固定 50/50,与两侧宽度无关,所以一侧扩张
-    不会改变另一侧的采样概率;硬 bounds 仍然封顶。
+    Franco 2026-07-28 二次裁定:不选侧——就是一次均匀采样,区间两端由两侧当前支撑
+    半宽(`*_std` 字段,随课程档位独立进退)决定,硬 bounds 封顶。一侧扩张会按宽度
+    比例分走采样量,这是设计意图(区间即任务域,均匀覆盖)。
     """
 
     if not lower_bound <= center <= upper_bound:
         raise ValueError(f"{name} center lies outside bounds")
-    if uniform < 0.5:
-        width = min(lower_std, center - lower_bound)
-        if width < 0.0:
-            raise ValueError(f"{name}.lower has negative support width")
-        return center - (uniform * 2.0) * width
-    width = min(upper_std, upper_bound - center)
-    if width < 0.0:
-        raise ValueError(f"{name}.upper has negative support width")
-    return center + ((uniform - 0.5) * 2.0) * width
+    lower_width = min(lower_std, center - lower_bound)
+    upper_width = min(upper_std, upper_bound - center)
+    if lower_width < 0.0 or upper_width < 0.0:
+        raise ValueError(f"{name} has negative support width")
+    low = center - lower_width
+    return low + uniform * (lower_width + upper_width)
 
 
 def _sample_asymmetric_vector3(
@@ -2197,25 +2194,18 @@ def _sample_signed_tangent_angle_rad(
     positive_width_deg: float,
     uniform: float,
 ) -> float:
-    """Sample a fixed-side-probability tangent angle, uniform within the side width.
+    """Sample a tangent angle uniformly over [-negative_width, +positive_width].
 
-    Franco 2026-07-28 裁定:侧内 uniform(宽度=该侧当前支撑边界),符号仍严格 50/50、
-    与两侧宽度无关。
+    Franco 2026-07-28 二次裁定:不选侧,单次均匀采样覆盖整个不对称角区间;两侧宽度
+    随课程档位独立进退。
     """
 
     negative_width = math.radians(negative_width_deg)
     positive_width = math.radians(positive_width_deg)
-    if uniform < 0.5:
-        width = negative_width
-        sign = -1.0
-        quantile = uniform * 2.0
-    else:
-        width = positive_width
-        sign = 1.0
-        quantile = (uniform - 0.5) * 2.0
-    if width == 0.0:
+    total = negative_width + positive_width
+    if total == 0.0:
         return 0.0
-    return sign * quantile * width
+    return -negative_width + uniform * total
 
 
 def _direction_from_tangent_angles(
