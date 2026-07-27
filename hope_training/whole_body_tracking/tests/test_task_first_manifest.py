@@ -36,6 +36,15 @@ def _load_module(name, path):
 
 _load_module("task_first_curriculum", MODULE_DIR / "task_first_curriculum.py")
 M = _load_module("task_first_manifest_under_test", MODULE_DIR / "task_first_manifest.py")
+ACTION_CATALOG_PATH = (
+    ROOT.parent.parent
+    / "hope_ws"
+    / "src"
+    / "hope_planner"
+    / "hope_planner"
+    / "action_catalog.py"
+)
+A = _load_module("action_catalog_under_test", ACTION_CATALOG_PATH)
 
 
 def _gate():
@@ -54,13 +63,20 @@ def _gate():
 
 
 def _action(index):
+    action_id = f"action_{index:03d}"
+    motion_sha256 = hashlib.sha256(f"motion-{index}".encode()).hexdigest()
+    family_sign = 1 if index % 2 == 0 else -1
     return {
-        "action_id": f"action_{index:03d}",
-        "action_uid": index + 1,
+        "action_id": action_id,
+        "action_uid": M.derive_task_first_action_uid(
+            action_id,
+            family_sign,
+            motion_sha256,
+        ),
         "motion_path": f"motions/action_{index:03d}.npz",
-        "motion_sha256": hashlib.sha256(f"motion-{index}".encode()).hexdigest(),
+        "motion_sha256": motion_sha256,
         "strike_phase": 0.50,
-        "family_sign": 1 if index % 2 == 0 else -1,
+        "family_sign": family_sign,
         "mount_normal_sign": -1,
         "position_half_extent_m": [0.25, 0.30, 0.15],
         "speed_delta_mps": 1.5,
@@ -274,7 +290,7 @@ def test_action_order_uid_and_sha_identity_fail_closed(tmp_path):
 
     duplicate_uid = _document()
     duplicate_uid["actions"][1]["action_uid"] = duplicate_uid["actions"][0]["action_uid"]
-    with pytest.raises(ValueError, match="duplicate action_uid"):
+    with pytest.raises(ValueError, match="canonical action identity"):
         M.load_task_first_manifest(_write(tmp_path, duplicate_uid))
 
     for invalid_uid in (0, M.MAX_ACTION_UID + 1):
@@ -289,6 +305,65 @@ def test_action_order_uid_and_sha_identity_fail_closed(tmp_path):
     invalid_sha["actions"][0]["motion_sha256"] = "A" * 64
     with pytest.raises(ValueError, match="64 lowercase"):
         M.load_task_first_manifest(_write(tmp_path, invalid_sha, name="sha.json"))
+
+
+@pytest.mark.parametrize(
+    ("action_id", "family_sign", "motion_sha256", "expected_uid"),
+    [
+        (
+            "fh_loop_high",
+            1,
+            "7d045fbe73b758f820992be9e52ce02cf0e3c392234910f4ac0493ccf45c4153",
+            6456190294707750,
+        ),
+        (
+            "bh_loop_c",
+            -1,
+            "0d49cdd54c8aeffcc98cb9b4b22dff476535323251d8ea191205756542941617",
+            3539572639101871,
+        ),
+    ],
+)
+def test_uid_derivation_matches_action_catalog_for_forehand_and_backhand(
+    action_id, family_sign, motion_sha256, expected_uid
+):
+    family = "forehand" if family_sign == 1 else "backhand"
+    task_first_uid = M.derive_task_first_action_uid(
+        action_id, family_sign, motion_sha256
+    )
+    assert task_first_uid == expected_uid
+    assert task_first_uid == A.derive_action_uid(
+        action_id, family, motion_sha256
+    )
+    assert 1 <= task_first_uid <= M.MAX_ACTION_UID
+
+
+@pytest.mark.parametrize("drift", ["action_id", "motion_sha256", "family_sign"])
+def test_uid_binding_rejects_action_identity_drift(tmp_path, drift):
+    document = _document()
+    action = document["actions"][0]
+    if drift == "action_id":
+        action["action_id"] = "renamed_forehand"
+        document["action_order"][0] = action["action_id"]
+    elif drift == "motion_sha256":
+        action["motion_sha256"] = hashlib.sha256(b"replacement-motion").hexdigest()
+    else:
+        action["family_sign"] = -action["family_sign"]
+
+    with pytest.raises(ValueError, match="canonical action identity"):
+        M.load_task_first_manifest(_write(tmp_path, document))
+
+
+def test_uid_generator_rejects_ambiguous_identity_inputs():
+    sha = "a" * 64
+    with pytest.raises(ValueError, match="family_sign"):
+        M.derive_task_first_action_uid("action", 0, sha)
+    with pytest.raises(ValueError, match="plain integer"):
+        M.derive_task_first_action_uid("action", True, sha)
+    with pytest.raises(ValueError, match="64 lowercase"):
+        M.derive_task_first_action_uid("action", 1, "A" * 64)
+    with pytest.raises(ValueError, match="non-empty"):
+        M.derive_task_first_action_uid("", 1, sha)
 
 
 def test_action_envelope_and_holdout_bounds_are_strict(tmp_path):

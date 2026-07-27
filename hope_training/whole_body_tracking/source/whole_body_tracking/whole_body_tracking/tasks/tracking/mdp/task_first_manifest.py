@@ -196,6 +196,49 @@ def _require_motion_path(value: object) -> str:
     return path
 
 
+def derive_task_first_action_uid(
+    action_id: str,
+    family_sign: int,
+    motion_sha256: str,
+) -> int:
+    """Derive the action catalog's stable positive, float64-exact UID.
+
+    The identity payload is byte-for-byte compatible with
+    ``hope_planner.action_catalog.derive_action_uid``: task-first ``family_sign``
+    maps to the catalog family string (``+1 -> "forehand"``,
+    ``-1 -> "backhand"``), and ``motion_sha256`` is the catalog
+    ``content_sha256``.  A manifest therefore cannot silently relabel or replace
+    motion bytes while retaining an old wire identity.
+    """
+
+    action_id_value = _require_string(action_id, name="action_id")
+    family_sign_value = _require_int(
+        family_sign,
+        name="family_sign",
+        minimum=-1,
+        maximum=1,
+    )
+    if family_sign_value not in (-1, 1):
+        raise ValueError("family_sign must be +1 or -1")
+    motion_sha256_value = _require_sha256(
+        motion_sha256, name="motion_sha256"
+    )
+    identity = {
+        "action_id": action_id_value,
+        "content_sha256": motion_sha256_value,
+        "family": "forehand" if family_sign_value == 1 else "backhand",
+    }
+    canonical = json.dumps(
+        identity,
+        sort_keys=True,
+        separators=(",", ":"),
+        ensure_ascii=False,
+        allow_nan=False,
+    ).encode("utf-8")
+    digest = hashlib.sha256(canonical).digest()
+    return 1 + (int.from_bytes(digest, byteorder="big") % MAX_ACTION_UID)
+
+
 def _reject_json_constant(value: str) -> object:
     raise ValueError(f"JSON constant {value!r} is not allowed")
 
@@ -244,18 +287,31 @@ class TaskFirstAction:
             raise ValueError("family_sign must be +1 or -1")
         if mount_normal_sign not in (-1, 1):
             raise ValueError("mount_normal_sign must be +1 or -1")
+        action_id = _require_string(row["action_id"], name="action_id")
+        action_uid = _require_int(
+            row["action_uid"],
+            name="action_uid",
+            minimum=1,
+            maximum=MAX_ACTION_UID,
+        )
+        motion_sha256 = _require_sha256(
+            row["motion_sha256"], name="motion_sha256"
+        )
+        expected_uid = derive_task_first_action_uid(
+            action_id,
+            family_sign,
+            motion_sha256,
+        )
+        if action_uid != expected_uid:
+            raise ValueError(
+                f"action_uid {action_uid} does not match canonical action "
+                f"identity (expected {expected_uid})"
+            )
         return cls(
-            action_id=_require_string(row["action_id"], name="action_id"),
-            action_uid=_require_int(
-                row["action_uid"],
-                name="action_uid",
-                minimum=1,
-                maximum=MAX_ACTION_UID,
-            ),
+            action_id=action_id,
+            action_uid=action_uid,
             motion_path=_require_motion_path(row["motion_path"]),
-            motion_sha256=_require_sha256(
-                row["motion_sha256"], name="motion_sha256"
-            ),
+            motion_sha256=motion_sha256,
             strike_phase=_require_finite(
                 row["strike_phase"],
                 name="strike_phase",
