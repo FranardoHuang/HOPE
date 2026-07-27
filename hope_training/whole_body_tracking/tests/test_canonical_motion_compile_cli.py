@@ -121,9 +121,13 @@ def _schema2_receipts(
     return manifest, report
 
 
-def _candidate_manifest(recipe_sha256: str, compiler_sha256: str) -> dict:
+def _candidate_manifest(
+    recipe_sha256: str,
+    compiler_sha256: str,
+    motion_ids: tuple[str, ...] = _MOTION_IDS,
+) -> dict:
     outputs = []
-    for motion_id in _MOTION_IDS:
+    for motion_id in motion_ids:
         for scope in _SCOPES:
             filename = f"{motion_id}_{scope}_canonical_v2.npz"
             output_sha = hashlib.sha256(
@@ -158,9 +162,9 @@ def _candidate_manifest(recipe_sha256: str, compiler_sha256: str) -> dict:
             "sha256": compiler_sha256,
         },
         "output_matrix": {
-            "motion_ids": list(_MOTION_IDS),
+            "motion_ids": list(motion_ids),
             "scopes": list(_SCOPES),
-            "candidate_count": 10,
+            "candidate_count": 2 * len(motion_ids),
         },
         "outputs": outputs,
         "post_build_gates": [
@@ -172,6 +176,26 @@ def _candidate_manifest(recipe_sha256: str, compiler_sha256: str) -> dict:
 
 def _candidate_bytes(motion_id: str, scope: str) -> bytes:
     return f"candidate:{motion_id}:{scope}".encode("ascii")
+
+
+def _write_candidate_bundle(directory: Path, manifest: dict) -> Path:
+    directory.mkdir()
+    manifest_path = directory / cli.cmc.BUILD_MANIFEST_NAME
+    _write_json(manifest_path, manifest)
+    for row in manifest["outputs"]:
+        npz_path = directory / row["filename"]
+        npz_path.write_bytes(
+            _candidate_bytes(row["motion_id"], row["scope"])
+        )
+        _write_json(
+            npz_path.with_suffix(npz_path.suffix + ".manifest.json"),
+            row["schema2_manifest"],
+        )
+        _write_json(
+            npz_path.with_suffix(npz_path.suffix + ".report.json"),
+            row["schema2_report"],
+        )
+    return manifest_path
 
 
 @pytest.fixture
@@ -529,6 +553,163 @@ def test_dry_run_validates_but_does_not_compile_or_create_output(
     assert result["hardware_authorized"] is False
     assert not job_environment.output.exists()
     assert "portable_boundary" in result["termination_contract"]
+
+
+def test_append_recipe_without_exact_base_bundle_fails_before_compile(
+    job_environment, monkeypatch
+):
+    job_environment.fake_recipe.sources.append(
+        SimpleNamespace(motion_id="fh_loop_high")
+    )
+    compile_calls = []
+    monkeypatch.setattr(
+        cli.cmc,
+        "compile_loaded_canonical_motion_library",
+        lambda *args, **kwargs: compile_calls.append((args, kwargs)),
+    )
+
+    with pytest.raises(
+        cli.CanonicalMotionCompileCliError,
+        match="must bind all four append-base inputs",
+    ):
+        cli.run([*job_environment.args, "--dry-run"])
+
+    assert not compile_calls
+    assert not job_environment.output.exists()
+
+
+def test_append_only_build_reuses_exact_five_and_compiles_only_appended(
+    job_environment, monkeypatch
+):
+    repo = job_environment.repo
+    base_recipe_path = repo / "canonical_motion_library_v2.json"
+    base_recipe_path.write_text('{"recipe": "base-five"}\n', encoding="utf-8")
+    base_recipe_sha = _sha256(base_recipe_path)
+    main_recipe_sha = _sha256(job_environment.recipe_path)
+
+    def source(motion_id: str):
+        return SimpleNamespace(
+            motion_id=motion_id,
+            path=repo / f"{motion_id}.npz",
+            sha256=_digest_text(f"source:{motion_id}"),
+            human_role=f"role:{motion_id}",
+            face_manifold=None,
+            scope_overrides={},
+        )
+
+    base_sources = [source(motion_id) for motion_id in _MOTION_IDS]
+    appended_source = source("fh_loop_high")
+    marker_semantics = SimpleNamespace(
+        row=lambda motion_id: ("marker-row", motion_id)
+    )
+    ready = SimpleNamespace(sha256=_digest_text("ready"))
+    shared_raw = {
+        "frame_id": "test-frame",
+        "canonical_ready": {"sha256": ready.sha256},
+        "model_contract": dict(job_environment.fake_recipe.model_hashes),
+        "scope_contract": {"upper": "test", "full": "test"},
+        "time_law": {"test": True},
+        "entry_exit_search": {"test": True},
+        "post_build_gates": list(_POST_BUILD_GATES),
+    }
+    base_recipe = SimpleNamespace(
+        path=base_recipe_path,
+        model_paths=job_environment.fake_recipe.model_paths,
+        model_hashes=job_environment.fake_recipe.model_hashes,
+        sources=base_sources,
+        marker_semantics=marker_semantics,
+        ready=ready,
+        raw=dict(shared_raw),
+    )
+    main_recipe = SimpleNamespace(
+        path=job_environment.recipe_path,
+        model_paths=job_environment.fake_recipe.model_paths,
+        model_hashes=job_environment.fake_recipe.model_hashes,
+        sources=[*base_sources, appended_source],
+        marker_semantics=marker_semantics,
+        ready=ready,
+        raw=dict(shared_raw),
+    )
+
+    def load_recipe(path, **kwargs):
+        return (
+            base_recipe
+            if Path(path).resolve() == base_recipe_path.resolve()
+            else main_recipe
+        )
+
+    monkeypatch.setattr(cli, "load_canonical_motion_recipe", load_recipe)
+
+    compiler_sha = _sha256(Path(cli.cmc.__file__).resolve())
+    base_manifest = _candidate_manifest(base_recipe_sha, compiler_sha)
+    base_manifest_path = _write_candidate_bundle(
+        job_environment.output.parent / "base-five-output",
+        base_manifest,
+    )
+    base_manifest_sha = _sha256(base_manifest_path)
+    args = [
+        *job_environment.args,
+        "--append-base-recipe",
+        str(base_recipe_path),
+        "--append-base-recipe-sha256",
+        base_recipe_sha,
+        "--append-base-manifest",
+        str(base_manifest_path),
+        "--append-base-manifest-sha256",
+        base_manifest_sha,
+        "--station-center-shift-xy-m",
+        "-0.05",
+        "0.0",
+    ]
+    compile_ids = []
+
+    def compile_library(recipe, *, options):
+        ids = tuple(source.motion_id for source in recipe.sources)
+        compile_ids.append(ids)
+        manifest = _candidate_manifest(
+            main_recipe_sha,
+            compiler_sha,
+            motion_ids=ids,
+        )
+        return cli.cmc.CompiledLibrary(
+            recipe=recipe,
+            motions=(),
+            manifest=manifest,
+        )
+
+    def write_library(library, output_directory):
+        output = Path(output_directory)
+        _write_candidate_bundle(output, dict(library.manifest))
+        return output
+
+    monkeypatch.setattr(
+        cli.cmc, "compile_loaded_canonical_motion_library", compile_library
+    )
+    monkeypatch.setattr(
+        cli.cmc, "write_compiled_canonical_motion_library", write_library
+    )
+
+    result = cli.run(args)
+
+    assert compile_ids == [("fh_loop_high",)]
+    assert len(result["published_outputs"]) == 2
+    assert result["training_authorized"] is False
+    composition = result["append_only_composition"]
+    assert composition["base_outputs_rebuilt"] is False
+    assert composition["appended_motion_ids"] == ["fh_loop_high"]
+    assert composition["station_center_shift_xy_m"] == [-0.05, 0.0]
+    assert len(composition["base_outputs"]) == 10
+    manifest = json.loads(
+        (job_environment.output / cli.cmc.BUILD_MANIFEST_NAME).read_text(
+            encoding="utf-8"
+        )
+    )
+    assert manifest["output_matrix"] == {
+        "motion_ids": ["fh_loop_high"],
+        "scopes": ["upper", "full"],
+        "candidate_count": 2,
+    }
+    assert manifest["station_center_shift_xy_m"] == [-0.05, 0.0]
 
 
 def test_missing_acceleration_receipt_field_fails_closed(

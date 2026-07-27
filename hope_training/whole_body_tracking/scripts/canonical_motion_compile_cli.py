@@ -28,8 +28,9 @@ import stat
 import sys
 import time
 from contextlib import contextmanager
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from pathlib import Path
+from types import MappingProxyType
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -66,6 +67,7 @@ _ACCELERATION_RECEIPT_KEYS = frozenset(
         "minimum_effort_margin_nm",
     }
 )
+_CANONICAL_BASE_COUNT = 5
 
 
 class CanonicalMotionCompileCliError(RuntimeError):
@@ -98,6 +100,18 @@ class _AccelerationReceipt:
 
 
 @dataclass(frozen=True)
+class _AppendOnlyBase:
+    recipe_path: Path
+    recipe_sha256: str
+    recipe: CanonicalMotionRecipe
+    manifest_path: Path
+    manifest_sha256: str
+    manifest: Mapping[str, Any]
+    output_directory: Path
+    published_outputs: tuple[Mapping[str, Any], ...]
+
+
+@dataclass(frozen=True)
 class _ValidatedJob:
     recipe_path: Path
     repo_root: Path
@@ -109,6 +123,8 @@ class _ValidatedJob:
     normalized_args: Mapping[str, Any]
     model_bindings: Mapping[str, Mapping[str, str]]
     cli_sha256: str
+    append_only_base: _AppendOnlyBase | None
+    station_center_shift_xy_m: tuple[float, float] | None
 
 
 @dataclass
@@ -1122,6 +1138,33 @@ def _verify_unchanged_job_inputs(job: _ValidatedJob) -> None:
             raise CanonicalMotionCompileCliError(
                 f"{name} model changed after validation"
             )
+    if job.append_only_base is not None:
+        base = job.append_only_base
+        if _sha256_file(base.recipe_path) != base.recipe_sha256:
+            raise CanonicalMotionCompileCliError(
+                "append-base recipe changed after validation"
+            )
+        manifest, manifest_sha = _strict_json_regular_nofollow(
+            base.manifest_path, "append-base build manifest"
+        )
+        if (
+            manifest_sha != base.manifest_sha256
+            or manifest != base.manifest
+        ):
+            raise CanonicalMotionCompileCliError(
+                "append-base build manifest changed after validation"
+            )
+        current_outputs = tuple(
+            _validate_published_outputs(
+                base.output_directory,
+                manifest,
+                optional_names=frozenset({RUN_RECEIPT_NAME}),
+            )
+        )
+        if current_outputs != base.published_outputs:
+            raise CanonicalMotionCompileCliError(
+                "append-base output bundle changed after validation"
+            )
     cli_path = Path(__file__).resolve()
     if _sha256_file(cli_path) != job.cli_sha256:
         raise CanonicalMotionCompileCliError(
@@ -1132,12 +1175,24 @@ def _verify_unchanged_job_inputs(job: _ValidatedJob) -> None:
 def _parser() -> argparse.ArgumentParser:
     parser = _FailClosedArgumentParser(
         description=(
-            "Compile the canonical 5x2 motion matrix as candidate-only assets."
+            "Compile one canonical candidate matrix. Recipes that append after "
+            "the canonical five must bind an exact existing 5x2 base bundle; "
+            "only the appended motions are compiled."
         )
     )
     parser.add_argument("--recipe", required=True)
     parser.add_argument("--repo-root", required=True)
     parser.add_argument("--output", required=True)
+    parser.add_argument("--append-base-recipe")
+    parser.add_argument("--append-base-recipe-sha256")
+    parser.add_argument("--append-base-manifest")
+    parser.add_argument("--append-base-manifest-sha256")
+    parser.add_argument(
+        "--station-center-shift-xy-m",
+        type=float,
+        nargs=2,
+        metavar=("X", "Y"),
+    )
     parser.add_argument("--joint-acceleration-receipt", required=True)
     parser.add_argument(
         "--joint-acceleration-receipt-sha256", required=True
@@ -1195,6 +1250,178 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _append_base_values(args: argparse.Namespace) -> tuple[Any, ...]:
+    return (
+        args.append_base_recipe,
+        args.append_base_recipe_sha256,
+        args.append_base_manifest,
+        args.append_base_manifest_sha256,
+    )
+
+
+def _source_identity(source: Any) -> tuple[Any, ...]:
+    return (
+        source.motion_id,
+        _absolute_path(source.path),
+        source.sha256,
+        source.human_role,
+        source.face_manifold,
+        source.scope_overrides,
+    )
+
+
+def _load_append_only_base(
+    args: argparse.Namespace,
+    *,
+    recipe: CanonicalMotionRecipe,
+    repo_root: Path,
+) -> _AppendOnlyBase | None:
+    values = _append_base_values(args)
+    supplied = tuple(value is not None for value in values)
+    is_append = len(recipe.sources) > _CANONICAL_BASE_COUNT
+    if not is_append:
+        if any(supplied):
+            raise CanonicalMotionCompileCliError(
+                "append-base inputs are forbidden for a non-append recipe"
+            )
+        return None
+    if not all(supplied):
+        raise CanonicalMotionCompileCliError(
+            "an append recipe must bind all four append-base inputs: recipe "
+            "path/SHA-256 and BUILD_MANIFEST path/SHA-256"
+        )
+
+    base_recipe_path = _absolute_path(args.append_base_recipe)
+    expected_base_recipe_sha = _expected_sha256(
+        args.append_base_recipe_sha256,
+        "append-base recipe SHA-256",
+    )
+    actual_base_recipe_sha = _sha256_bytes(
+        _read_stable_regular_nofollow(
+            base_recipe_path, "append-base recipe"
+        )
+    )
+    if actual_base_recipe_sha != expected_base_recipe_sha:
+        raise CanonicalMotionCompileCliError(
+            "append-base recipe SHA-256 mismatch: expected "
+            f"{expected_base_recipe_sha}, got {actual_base_recipe_sha}"
+        )
+    try:
+        base_recipe = load_canonical_motion_recipe(
+            base_recipe_path, repo_root=repo_root
+        )
+    except Exception as exc:
+        raise CanonicalMotionCompileCliError(
+            f"append-base recipe validation failed: {exc}"
+        ) from exc
+    if _sha256_file(base_recipe_path) != actual_base_recipe_sha:
+        raise CanonicalMotionCompileCliError(
+            "append-base recipe changed during validation"
+        )
+    if len(base_recipe.sources) != _CANONICAL_BASE_COUNT:
+        raise CanonicalMotionCompileCliError(
+            "append-base recipe must contain exactly the canonical five"
+        )
+
+    base_identities = tuple(_source_identity(row) for row in base_recipe.sources)
+    append_prefix = tuple(
+        _source_identity(row)
+        for row in recipe.sources[:_CANONICAL_BASE_COUNT]
+    )
+    if append_prefix != base_identities:
+        raise CanonicalMotionCompileCliError(
+            "append recipe canonical-five source identities differ from the "
+            "bound base recipe"
+        )
+    for source in base_recipe.sources:
+        motion_id = str(source.motion_id)
+        if (
+            recipe.marker_semantics.row(motion_id)
+            != base_recipe.marker_semantics.row(motion_id)
+        ):
+            raise CanonicalMotionCompileCliError(
+                f"append recipe marker row {motion_id!r} differs from the "
+                "bound base recipe"
+            )
+    if (
+        recipe.ready.sha256 != base_recipe.ready.sha256
+        or dict(recipe.model_hashes) != dict(base_recipe.model_hashes)
+    ):
+        raise CanonicalMotionCompileCliError(
+            "append recipe ready/model identities differ from the bound base"
+        )
+    for key in (
+        "frame_id",
+        "canonical_ready",
+        "model_contract",
+        "scope_contract",
+        "time_law",
+        "entry_exit_search",
+        "post_build_gates",
+    ):
+        if recipe.raw.get(key) != base_recipe.raw.get(key):
+            raise CanonicalMotionCompileCliError(
+                f"append recipe shared compiler contract {key!r} differs "
+                "from the bound base recipe"
+            )
+
+    manifest_path = _absolute_path(args.append_base_manifest)
+    if manifest_path.name != cmc.BUILD_MANIFEST_NAME:
+        raise CanonicalMotionCompileCliError(
+            "append-base manifest must be named "
+            f"{cmc.BUILD_MANIFEST_NAME}"
+        )
+    manifest, actual_manifest_sha = _strict_json_regular_nofollow(
+        manifest_path, "append-base build manifest"
+    )
+    expected_manifest_sha = _expected_sha256(
+        args.append_base_manifest_sha256,
+        "append-base build manifest SHA-256",
+    )
+    if actual_manifest_sha != expected_manifest_sha:
+        raise CanonicalMotionCompileCliError(
+            "append-base build manifest SHA-256 mismatch: expected "
+            f"{expected_manifest_sha}, got {actual_manifest_sha}"
+        )
+    compiler = (
+        manifest.get("compiler")
+        if isinstance(manifest, Mapping)
+        else None
+    )
+    if not isinstance(compiler, Mapping):
+        raise CanonicalMotionCompileCliError(
+            "append-base build manifest is missing its compiler binding"
+        )
+    base_compiler_sha = _expected_sha256(
+        compiler.get("sha256"),
+        "append-base compiler SHA-256",
+    )
+    _validate_candidate_manifest(
+        manifest,
+        recipe=base_recipe,
+        recipe_sha256=actual_base_recipe_sha,
+        compiler_sha256=base_compiler_sha,
+    )
+    output_directory = manifest_path.parent
+    published_outputs = tuple(
+        _validate_published_outputs(
+            output_directory,
+            manifest,
+            optional_names=frozenset({RUN_RECEIPT_NAME}),
+        )
+    )
+    return _AppendOnlyBase(
+        recipe_path=base_recipe_path,
+        recipe_sha256=actual_base_recipe_sha,
+        recipe=base_recipe,
+        manifest_path=manifest_path,
+        manifest_sha256=actual_manifest_sha,
+        manifest=manifest,
+        output_directory=output_directory,
+        published_outputs=published_outputs,
+    )
+
+
 def _validate_job(args: argparse.Namespace) -> _ValidatedJob:
     recipe_path = _absolute_path(args.recipe)
     repo_root = _absolute_path(args.repo_root)
@@ -1229,6 +1456,28 @@ def _validate_job(args: argparse.Namespace) -> _ValidatedJob:
     if _sha256_file(recipe_path) != recipe_sha256:
         raise CanonicalMotionCompileCliError(
             "canonical motion recipe changed during validation"
+        )
+    append_only_base = _load_append_only_base(
+        args,
+        recipe=recipe,
+        repo_root=repo_root,
+    )
+    station_shift: tuple[float, float] | None = None
+    if args.station_center_shift_xy_m is not None:
+        station_raw = _finite_vector(
+            args.station_center_shift_xy_m,
+            2,
+            "station center shift xy",
+        )
+        station_shift = (float(station_raw[0]), float(station_raw[1]))
+    if append_only_base is not None and station_shift is None:
+        raise CanonicalMotionCompileCliError(
+            "an append-only compile must explicitly bind "
+            "--station-center-shift-xy-m"
+        )
+    if append_only_base is None and station_shift is not None:
+        raise CanonicalMotionCompileCliError(
+            "station center shift is only valid for an append-only compile"
         )
     acceleration_receipt = _load_acceleration_receipt(
         acceleration_path,
@@ -1358,6 +1607,29 @@ def _validate_job(args: argparse.Namespace) -> _ValidatedJob:
         "recipe": str(recipe_path),
         "repo_root": str(repo_root),
         "output": str(output),
+        "append_base_recipe": (
+            str(append_only_base.recipe_path)
+            if append_only_base is not None
+            else None
+        ),
+        "append_base_recipe_sha256": (
+            append_only_base.recipe_sha256
+            if append_only_base is not None
+            else None
+        ),
+        "append_base_manifest": (
+            str(append_only_base.manifest_path)
+            if append_only_base is not None
+            else None
+        ),
+        "append_base_manifest_sha256": (
+            append_only_base.manifest_sha256
+            if append_only_base is not None
+            else None
+        ),
+        "station_center_shift_xy_m": (
+            list(station_shift) if station_shift is not None else None
+        ),
         "joint_acceleration_receipt": str(acceleration_path),
         "joint_acceleration_receipt_sha256": (
             acceleration_receipt.sha256
@@ -1389,6 +1661,8 @@ def _validate_job(args: argparse.Namespace) -> _ValidatedJob:
         normalized_args=normalized_args,
         model_bindings=model_bindings,
         cli_sha256=_sha256_file(cli_path),
+        append_only_base=append_only_base,
+        station_center_shift_xy_m=station_shift,
     )
 
 
@@ -1558,16 +1832,18 @@ def _validate_candidate_manifest(
         for motion_id in expected_motion_ids
         for scope in expected_scopes
     )
+    expected_count = len(expected_pairs)
     if (
         not isinstance(matrix, Mapping)
         or tuple(matrix.get("motion_ids", ())) != expected_motion_ids
         or tuple(matrix.get("scopes", ())) != expected_scopes
-        or matrix.get("candidate_count") != 10
+        or matrix.get("candidate_count") != expected_count
         or not isinstance(outputs, list)
-        or len(outputs) != 10
+        or len(outputs) != expected_count
     ):
         raise CanonicalMotionCompileCliError(
-            "compiler build manifest must contain the complete 5x2 matrix"
+            "compiler build manifest must contain the complete declared "
+            f"{len(expected_motion_ids)}x2 matrix"
         )
     actual_pairs: list[tuple[str, str]] = []
     filenames: set[str] = set()
@@ -1604,7 +1880,7 @@ def _validate_candidate_manifest(
         )
     if tuple(actual_pairs) != expected_pairs:
         raise CanonicalMotionCompileCliError(
-            "compiler outputs are not the exact ordered 5x2 matrix: "
+            "compiler outputs are not the exact ordered declared matrix: "
             f"{actual_pairs}"
         )
     gates = manifest.get("post_build_gates")
@@ -1629,6 +1905,145 @@ def _validate_candidate_manifest(
     return manifest
 
 
+def _append_only_composition(
+    job: _ValidatedJob,
+) -> Mapping[str, Any] | None:
+    base = job.append_only_base
+    if base is None:
+        return None
+    appended_ids = [
+        str(source.motion_id)
+        for source in job.recipe.sources[_CANONICAL_BASE_COUNT:]
+    ]
+    base_outputs = [
+        {
+            "motion_id": row["motion_id"],
+            "scope": row["scope"],
+            "path": row["path"],
+            "sha256": row["sha256"],
+        }
+        for row in base.published_outputs
+    ]
+    return {
+        "mode": "reuse_exact_base_outputs_compile_appended_only",
+        "base_outputs_rebuilt": False,
+        "base_recipe": {
+            "path": str(base.recipe_path),
+            "sha256": base.recipe_sha256,
+        },
+        "base_build_manifest": {
+            "path": str(base.manifest_path),
+            "sha256": base.manifest_sha256,
+        },
+        "base_output_matrix": dict(base.manifest["output_matrix"]),
+        "base_outputs": base_outputs,
+        "appended_motion_ids": appended_ids,
+        "appended_scopes": ["upper", "full"],
+        "station_center_shift_xy_m": list(
+            job.station_center_shift_xy_m or ()
+        ),
+        "composed_candidate_count": (
+            len(base_outputs) + 2 * len(appended_ids)
+        ),
+    }
+
+
+def _compile_recipe_for_job(job: _ValidatedJob) -> CanonicalMotionRecipe:
+    if job.append_only_base is None:
+        return job.recipe
+    appended_sources = tuple(
+        job.recipe.sources[_CANONICAL_BASE_COUNT:]
+    )
+    if not appended_sources:
+        raise CanonicalMotionCompileCliError(
+            "append-only compile has no appended motions"
+        )
+    raw = dict(job.recipe.raw)
+    raw["required_output_matrix"] = {
+        "motion_ids": [
+            str(source.motion_id) for source in appended_sources
+        ],
+        "scopes": ["upper", "full"],
+        "candidate_count": 2 * len(appended_sources),
+    }
+    if isinstance(job.recipe, CanonicalMotionRecipe):
+        return replace(
+            job.recipe,
+            raw=MappingProxyType(raw),
+            sources=appended_sources,
+        )
+    # Test doubles used by this module's hermetic CLI tests deliberately avoid
+    # loading motion arrays. Production loader output is always the dataclass.
+    return type(job.recipe)(
+        **{
+            **vars(job.recipe),
+            "raw": MappingProxyType(raw),
+            "sources": appended_sources,
+        }
+    )
+
+
+def _attach_and_validate_composition(
+    library: cmc.CompiledLibrary,
+    *,
+    job: _ValidatedJob,
+    build_recipe: CanonicalMotionRecipe,
+) -> cmc.CompiledLibrary:
+    expected = _append_only_composition(job)
+    actual = library.manifest.get("append_only_composition")
+    if expected is None:
+        if actual is not None:
+            raise CanonicalMotionCompileCliError(
+                "non-append compiler manifest unexpectedly declares an "
+                "append-only composition"
+            )
+        return library
+    if actual is not None:
+        raise CanonicalMotionCompileCliError(
+            "compiler, rather than the strict CLI, injected an append-only "
+            "composition binding"
+        )
+    manifest = dict(library.manifest)
+    manifest["append_only_composition"] = dict(expected)
+    manifest["station_center_shift_xy_m"] = list(
+        job.station_center_shift_xy_m or ()
+    )
+    return cmc.CompiledLibrary(
+        recipe=build_recipe,
+        motions=tuple(library.motions),
+        manifest=MappingProxyType(manifest),
+    )
+
+
+def _validate_manifest_composition(
+    manifest: Mapping[str, Any],
+    *,
+    job: _ValidatedJob,
+) -> None:
+    expected = _append_only_composition(job)
+    actual = manifest.get("append_only_composition")
+    if expected is None:
+        if (
+            actual is not None
+            or manifest.get("station_center_shift_xy_m") is not None
+        ):
+            raise CanonicalMotionCompileCliError(
+                "non-append build manifest declares append-only composition"
+            )
+        return
+    if actual != expected:
+        raise CanonicalMotionCompileCliError(
+            "append-only build manifest does not bind the exact reused base "
+            "bundle and appended motion set"
+        )
+    if manifest.get("station_center_shift_xy_m") != list(
+        job.station_center_shift_xy_m or ()
+    ):
+        raise CanonicalMotionCompileCliError(
+            "append-only build manifest station_center_shift_xy_m changed"
+        )
+
+
 def _directory_identity(path: Path) -> tuple[int, int]:
     try:
         metadata = path.lstat()
@@ -1646,6 +2061,8 @@ def _directory_identity(path: Path) -> tuple[int, int]:
 def _validate_published_outputs(
     output_directory: Path,
     manifest: Mapping[str, Any],
+    *,
+    optional_names: frozenset[str] = frozenset(),
 ) -> list[Mapping[str, Any]]:
     outputs = manifest["outputs"]
     expected_names = {cmc.BUILD_MANIFEST_NAME}
@@ -1670,9 +2087,13 @@ def _validate_published_outputs(
             f"cannot enumerate published output directory: {exc}"
         ) from exc
     actual_names = [child.name for child in children]
+    actual_name_set = frozenset(actual_names)
     if (
-        len(actual_names) != len(expected_names)
-        or frozenset(actual_names) != frozenset(expected_names)
+        len(actual_names) != len(actual_name_set)
+        or not frozenset(expected_names).issubset(actual_name_set)
+        or not actual_name_set.issubset(
+            frozenset(expected_names) | optional_names
+        )
     ):
         raise CanonicalMotionCompileCliError(
             "published output directory contains missing, duplicate, or "
@@ -1834,7 +2255,7 @@ def _write_run_receipt_atomic(
 
 
 def _dry_run_receipt(job: _ValidatedJob) -> Mapping[str, Any]:
-    return {
+    payload = {
         "schema_version": 1,
         "status": "PASS_INPUT_VALIDATION_ONLY",
         "dry_run": True,
@@ -1855,23 +2276,34 @@ def _dry_run_receipt(job: _ValidatedJob) -> Mapping[str, Any]:
         "job_args": dict(job.normalized_args),
         "termination_contract": dict(_signal_contract()),
     }
+    composition = _append_only_composition(job)
+    if composition is not None:
+        payload["append_only_composition"] = dict(composition)
+    return payload
 
 
 def _run_build(job: _ValidatedJob) -> Mapping[str, Any]:
     compiler_path = Path(cmc.__file__).resolve()
     compiler_sha256 = _sha256_file(compiler_path)
     _verify_unchanged_job_inputs(job)
+    build_recipe = _compile_recipe_for_job(job)
     library = cmc.compile_loaded_canonical_motion_library(
-        job.recipe,
+        build_recipe,
         options=job.options,
+    )
+    library = _attach_and_validate_composition(
+        library,
+        job=job,
+        build_recipe=build_recipe,
     )
     _verify_unchanged_job_inputs(job)
     _validate_candidate_manifest(
         library.manifest,
-        recipe=job.recipe,
+        recipe=build_recipe,
         recipe_sha256=job.recipe_sha256,
         compiler_sha256=compiler_sha256,
     )
+    _validate_manifest_composition(library.manifest, job=job)
     _bind_termination_publication(
         job.output_directory,
         library.manifest,
@@ -1901,10 +2333,11 @@ def _run_build(job: _ValidatedJob) -> Mapping[str, Any]:
     _verify_unchanged_job_inputs(job)
     _validate_candidate_manifest(
         manifest,
-        recipe=job.recipe,
+        recipe=build_recipe,
         recipe_sha256=job.recipe_sha256,
         compiler_sha256=compiler_sha256,
     )
+    _validate_manifest_composition(manifest, job=job)
     if manifest != library.manifest:
         raise CanonicalMotionCompileCliError(
             "published build manifest differs from the in-memory manifest"
@@ -1947,6 +2380,9 @@ def _run_build(job: _ValidatedJob) -> Mapping[str, Any]:
         "published_outputs": published_outputs,
         "termination_contract": dict(_signal_contract()),
     }
+    composition = _append_only_composition(job)
+    if composition is not None:
+        payload["append_only_composition"] = dict(composition)
     canonical = json.dumps(
         payload,
         sort_keys=True,
