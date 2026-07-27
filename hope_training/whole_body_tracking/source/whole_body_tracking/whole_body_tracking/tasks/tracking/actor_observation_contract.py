@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import re
 from typing import Iterable
 
 
@@ -132,6 +133,41 @@ HITTER_FOOTWORK = ActorObservationContract(
     ),
 )
 
+
+def task_first_n_contract(action_count: int) -> ActorObservationContract:
+    """Build the task-first actor layout for one exact local action-bank size.
+
+    The four demanded-face dimensions and the N-way categorical action identity
+    are appended to ``hitter_footwork``.  Keeping the N in the contract name
+    makes a changed action bank a shape/contract change instead of a silent
+    reinterpretation of an existing checkpoint.
+    """
+
+    count = int(action_count)
+    if count <= 0 or count > 1024:
+        raise ValueError(f"task-first action_count must be in [1,1024], got {action_count!r}")
+    return ActorObservationContract(
+        name=f"task_first_n{count}",
+        obs_mode="hitter_footwork",
+        total_dim=HITTER_FOOTWORK.total_dim + 4 + count,
+        terms=HITTER_FOOTWORK.terms
+        + (
+            ActorObservationTerm(
+                "racket_target_normal_cmd",
+                4,
+                "planner",
+                "demanded racket face normal (world, 3) + reserved spin-rho scalar",
+            ),
+            ActorObservationTerm(
+                "action_one_hot",
+                count,
+                "action_catalog",
+                "categorical local action slot; stable action_uid is resolved through the "
+                "catalog and is never treated as a numeric observation",
+            ),
+        ),
+    )
+
 # Stage-1 face-command contract (2026-07-06): deploy_parity + the +4D face-command channel
 # appended LAST — racket_target_normal_cmd = demanded face normal (3, world frame, from the
 # question bank / planner) + spin-rho placeholder (1, zero-filled until the S3 spin tier).
@@ -232,9 +268,15 @@ def resolve_actor_observation_contract(name: str | None) -> ActorObservationCont
     key = str(name).strip()
     if not key:
         return None
+    dynamic = re.fullmatch(r"task_first_n([1-9][0-9]*)", key)
+    if dynamic is not None:
+        return task_first_n_contract(int(dynamic.group(1)))
     if key not in CONTRACTS:
         known = ", ".join(sorted(CONTRACTS))
-        raise ValueError(f"Unknown actor observation contract '{name}'. Known values: {known}")
+        raise ValueError(
+            f"Unknown actor observation contract '{name}'. Known values: {known}, "
+            "task_first_n<N>"
+        )
     return CONTRACTS[key]
 
 

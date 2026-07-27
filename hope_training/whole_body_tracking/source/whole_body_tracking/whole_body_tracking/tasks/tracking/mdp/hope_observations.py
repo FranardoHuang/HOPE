@@ -19,6 +19,7 @@ HOPE default trains separate policies and does not need it.
 from __future__ import annotations
 
 import torch
+import torch.nn.functional as F
 from typing import TYPE_CHECKING
 
 from isaaclab.utils.math import quat_rotate_inverse, yaw_quat
@@ -145,6 +146,48 @@ def swing_type(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     """Forehand (+1) / backhand (-1). Only needed for a unified (single) policy. A1: delayed with
     the target when latency is on (the flag rides the same planner->runner message as the target)."""
     return _cmd(env, command_name).actor_swing_sign().unsqueeze(-1)
+
+
+def action_one_hot(
+    env: ManagerBasedRLEnv,
+    command_name: str,
+    expected_actions: int,
+) -> torch.Tensor:
+    """Actor-visible local action identity for an arbitrary-size motion bank.
+
+    ``swing_type`` is only a forehand/backhand family feature.  Two forehand
+    motions therefore receive the same sign even though they have different
+    reference trajectories.  A task-first policy must be able to distinguish
+    those actions when the requested task is otherwise identical, so it gets a
+    categorical one-hot indexed by the *loaded motion bank's* local clip slot.
+
+    This is intentionally not the stable planner ``action_uid``.  A UID is an
+    opaque registry identity and feeding its numeric value to a neural network
+    would invent an ordinal relationship.  The action catalog maps UID to this
+    dense local slot before inference.
+    """
+
+    expected = int(expected_actions)
+    if expected <= 0:
+        raise ValueError(f"expected_actions must be positive, got {expected_actions!r}")
+    command = _cmd(env, command_name)
+    motion = command._motion()
+    actual = int(motion.motion.num_segments) if motion._multiseg else 1
+    if actual != expected:
+        raise RuntimeError(
+            "task-first action observation contract mismatch: "
+            f"expected {expected} loaded action(s), got {actual}"
+        )
+    if motion._multiseg:
+        clip = motion.clip_id
+    else:
+        clip = torch.zeros(command.num_envs, dtype=torch.long, device=command.device)
+    if bool(((clip < 0) | (clip >= actual)).any()):
+        raise RuntimeError(
+            f"motion clip_id is outside the loaded action bank [0,{actual}): "
+            f"min={int(clip.min())}, max={int(clip.max())}"
+        )
+    return F.one_hot(clip.to(dtype=torch.long), num_classes=actual).to(dtype=torch.float32)
 
 
 def racket_target_normal_cmd(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:

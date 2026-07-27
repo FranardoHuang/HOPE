@@ -2566,6 +2566,10 @@ _REWARD_KEYS = (
     # "v2")。人话:一个键把 v2 蓝图整套换装展开;包先展开、显式同名键后写后赢,见
     # _expand_reward_pack。
     "reward_pack",
+    # 冻结数保护开关(07-27;默认 false = 只响亮记账+WARNING,行为逐字节不变)。true =
+    # 任何显式键压过 _REWARD_PACK_V2_CALIBRATED 里的标定冻结数一律 fail-loud。人话:
+    # prereg 冻结臂打开它,"这条臂跑的就是冻结表"这句话才不可能再变成假话。
+    "reward_pack_strict",
     # landing 延付消融 flag(07-26 Franco:默认关;>0 = 大奖延付该秒数、同 attempt 存活才发)。
     "virtual_landing_settle_delay_s",
     # scale 消融键(07-26 pod1 队列):臂级覆写上台大奖权重与底薪比例(显式键压过包值)。
@@ -2718,12 +2722,36 @@ _REWARD_PACK_V2_KEYED = (
     ("foot_soft_landing_weight", -0.003),  # 落地冲击罚(蓝图 §2.4 档位;07-26 配方审计补漏——
                                            # 此前包漏设,三条在跑科学臂落地冲击罚=0)
     ("action_acc_weight", -0.05),        # 二阶平滑(mjlab 1/4 档;clamp 36.0 由 direct-params 落)
-    # L3 击球三通道(redesign §3.5:名义值,probe 校准后冻结 prereg)。用户显式键照旧赢:
-    # 现役波 yaml 里的 17/7/5 显式键继续生效,包不碰。
+    # L3 击球三通道(redesign §3.5:名义值,probe 校准后冻结 prereg)。用户显式键照旧赢——
+    # 但这三条是【标定过的冻结数】,压过它们必须响亮记账,见 _REWARD_PACK_V2_CALIBRATED。
     ("racket_position_weight", 393.4),   # 触点尖峰位置核(v4rg probe 冻结 07-26;k_eff 口径)
     ("racket_velocity_weight", 295.1),   # 拍速核(v4rg 冻结)
     ("racket_normal_weight", 229.5),     # 拍面核(v4rg 冻结)
 )
+# ------------------------------------------------------------------------------------------- #
+# 静默 no-op 防线(2026-07-27)。事故:上面三条冻结质量权重【从未在任何一条臂上生效】——
+# 每一个 cfg/task/*.yaml 都显式写了这三键(VirtualBall 4.0/0.5/0.5、Hitter 谱系 14/10/5),
+# 而包的规则是"显式键赢,包不碰",于是包在质量三通道上是死码。旧记账行
+#   "rewards.racket_position_weight explicitly set — user override wins"
+# 【不带数值】,所以三位作者读了 applied 日志仍没看出压过的是 4.0 vs 393.4(98×):
+#   - docs/experiments/2026-07/EXP-V2-REWARD-FREEZE-20260726.md:8   把对照臂写成"冻结表全默认"
+#   - 同文件 §0.11 把正手 face 死区归因于"位置核(393)"——在跑的其实是 4.0
+#   - docs/research/reward_v2_explained_20260725.md 把冻结值当默认路径生效值
+# 修法(不改任何在跑臂的行为,默认路径逐字节不变):
+#   ① 记账行带上【双值+倍率】,压过冻结数这件事在 applied 日志里可读、可 grep、可断言;
+#   ② 偏离超容差时【额外打 WARNING】——按发射工序纪律 WARN 必进摘要;
+#   ③ 想让冻结表不可被静默压过的臂,显式 rewards.reward_pack_strict=true → 直接 fail-loud。
+# 为什么不学 action_rate_weight 的"剥离+记账":剥离=让 393.4 生效=把每一条新发射的臂
+# 质量权重悄悄乘 ~100,比现在的缺陷更危险;为什么不无条件 raise:任务 yaml 全都带这三键,
+# 无条件 raise 会炸掉每一次 default-v2 boot(7263464b 已经踩过一次这个坑)。
+# key -> (冻结值, 人话)
+_REWARD_PACK_V2_CALIBRATED = {
+    "racket_position_weight": (393.4, "质量核·拍位(v4rg probe 冻结)"),
+    "racket_velocity_weight": (295.1, "质量核·拍速(v4rg probe 冻结)"),
+    "racket_normal_weight": (229.5, "质量核·拍面(v4rg probe 冻结)"),
+}
+# 相对偏差超过这个比例才算"压过冻结数"(同值/浮点噪声不报警)。
+_REWARD_PACK_CALIBRATED_TOL = 1e-6
 # 今天没有 CLI 键的项:直接写 cfg 对象上的 weight(与 free_non_striking_arm_mimic 等
 # direct-cfg 改动同款,逐条记 applied,标 reward_pack=v2)。
 _REWARD_PACK_V2_DIRECT = (
@@ -2785,6 +2813,55 @@ if _PACK_TABLE_STRAYS:
 del _PACK_TABLE_STRAYS
 
 
+def _calibrated_override_marker(key, override, *, strict):
+    """显式键压过 reward_pack=v2 时的记账行(冻结数额外带双值+WARNING/fail-loud)。
+
+    返回一条 applied 记账字符串。对 ``_REWARD_PACK_V2_CALIBRATED`` 里的【标定冻结数】:
+
+    * 记账行带上 ``<显式值> over frozen <包值> (ratio Nx)`` —— 旧行不带数值,正是三处
+      记录把"4.0 在跑"误写成"393.4 在跑"的原因;带了数值就能被日志审计和测试断言抓到。
+    * 偏离超容差时另打一条 ``[train.py] WARNING:`` 到 stdout(发射工序:WARN 必进摘要)。
+    * ``rewards.reward_pack_strict=true`` 时直接 fail-loud —— prereg 冻结臂用它保证
+      "冻结表在跑"这句话不可能再变成假话。
+
+    非冻结键(布尔/清零类)保持原语义与原措辞,一个字都不变。
+    """
+    calibrated = _REWARD_PACK_V2_CALIBRATED.get(key)
+    if calibrated is None:
+        return (
+            f"rewards.{key} explicitly set — user override wins (reward_pack=v2 keeps hands off)"
+        )
+    frozen, human = calibrated
+    try:
+        ratio = float(override) / float(frozen) if float(frozen) else float("inf")
+    except (TypeError, ValueError):
+        ratio = float("nan")
+    differs = not (ratio == ratio) or abs(ratio - 1.0) > _REWARD_PACK_CALIBRATED_TOL
+    detail = (
+        f"rewards.{key}={override!r} explicitly set — user override wins over reward_pack=v2 "
+        f"FROZEN {frozen!r} (ratio {ratio:.4g}x; {human})"
+    )
+    if not differs:
+        return detail + " [same value]"
+    if strict:
+        raise _OverrideError(
+            f"[train.py] rewards.{key}={override!r} would silently defeat the calibrated "
+            f"reward_pack=v2 frozen value {frozen!r} (ratio {ratio:.4g}x; {human}), and "
+            "rewards.reward_pack_strict=true forbids that. Either drop the key from the task "
+            "yaml / CLI so the frozen table applies, or set reward_pack_strict=false (default) "
+            "to keep the override with a loud WARNING."
+        )
+    print(
+        f"[train.py] WARNING: reward_pack=v2 FROZEN {key}={frozen!r} is DEFEATED by an explicit "
+        f"task.rewards value {override!r} ({ratio:.4g}x). {human}. Every cfg/task/*.yaml declares "
+        "this key, so the frozen quality table does NOT run unless you delete it there or pass a "
+        "deliberate CLI value; do not describe this run as 'frozen table defaults'. Set "
+        "rewards.reward_pack_strict=true to make this a hard error.",
+        flush=True,
+    )
+    return detail
+
+
 def _expand_reward_pack(env_cfg, task, rw, applied):
     """task.rewards.reward_pack 展开("v2" 展开成套;"v1" 兜底不展开)。返回 rewards 覆写 mapping。
 
@@ -2834,11 +2911,15 @@ def _expand_reward_pack(env_cfg, task, rw, applied):
     # 没写的键;之后整个 rewards 覆写层读的就是这份合并视图。默认路径上 rewards 节点可能
     # 根本不存在(rw is None),从空表起步。
     merged = {} if rw is None else {str(key): _get(rw, key) for key in rw.keys()}
+    strict = _get(rw, "reward_pack_strict")
+    strict = False if strict is None else _as_explicit_bool(strict, "task.rewards.reward_pack_strict")
+    if strict:
+        applied.append("rewards.reward_pack_strict=True (frozen pack values may not be overridden)")
     for key, value in _REWARD_PACK_V2_KEYED:
-        if merged.get(key) is not None:
+        override = merged.get(key)
+        if override is not None:
             applied.append(
-                f"rewards.{key} explicitly set — user override wins (reward_pack=v2 keeps "
-                "hands off)"
+                _calibrated_override_marker(key, override, strict=strict)
             )
             continue
         merged[key] = value

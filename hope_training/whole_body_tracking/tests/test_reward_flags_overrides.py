@@ -1999,6 +1999,99 @@ def test_reward_pack_v2_expands_every_blueprint_mutation_with_markers():
     assert _PACK_DEFAULTED_MARKER not in applied
 
 
+# --------------------------------------------------------------------------------------------- #
+# 07-27 静默 no-op 防线:冻结质量三键被 yaml 显式值压过时,必须【带数值】记账 + WARNING,
+# 且可用 reward_pack_strict=true 升级为 fail-loud。事故背景见 train.py
+# _REWARD_PACK_V2_CALIBRATED 的注释(三处记录把"4.0 在跑"误写成"393.4 在跑")。
+# --------------------------------------------------------------------------------------------- #
+_LIVE_QUALITY_YAML = {  # cfg/task/HOPEPingPongVirtualBall.yaml 现役值,逐字
+    "racket_position_weight": 4.0,
+    "racket_velocity_weight": 0.5,
+    "racket_normal_weight": 0.5,
+}
+
+
+def test_calibrated_override_marker_carries_both_values_and_ratio():
+    # 旧记账行不带数值 -> 读日志的人看不出压过的是 4.0 vs 393.4。新行必须两个数都在。
+    env_cfg, applied = _apply_default({"rewards": dict(_LIVE_QUALITY_YAML)})
+    assert env_cfg.rewards.racket_position.weight == pytest.approx(4.0)  # 行为不变:显式键仍赢
+    assert env_cfg.rewards.racket_velocity.weight == pytest.approx(0.5)
+    assert env_cfg.rewards.racket_normal.weight == pytest.approx(0.5)
+    marker = next(m for m in applied if m.startswith("rewards.racket_position_weight="))
+    assert "4.0" in marker and "393.4" in marker and "FROZEN" in marker
+    assert "0.01017x" in marker  # 4.0/393.4,倍率直接可读
+    # grep 兼容:现役日志审计仍按这句话找覆写行
+    assert "user override wins" in marker
+    assert len([m for m in applied if "user override wins" in m]) == 3
+
+
+def test_calibrated_override_prints_warning_to_stdout(capsys):
+    # 发射工序纪律:WARN 必进摘要。三条冻结键各打一条。
+    _apply_default({"rewards": dict(_LIVE_QUALITY_YAML)})
+    out = capsys.readouterr().out
+    warnings = [line for line in out.splitlines() if "WARNING" in line and "FROZEN" in line]
+    assert len(warnings) == 3
+    assert any("racket_position_weight" in w and "393.4" in w for w in warnings)
+
+
+def test_non_calibrated_pack_key_override_keeps_original_wording_and_is_quiet(capsys):
+    # 布尔/清零类包键不是标定数,措辞与静默度一个字不变(不误报警)。
+    _, applied = _apply_default({"rewards": {"hold_ready_weight": 3.0}})
+    assert (
+        "rewards.hold_ready_weight explicitly set — user override wins "
+        "(reward_pack=v2 keeps hands off)"
+    ) in applied
+    assert "FROZEN" not in capsys.readouterr().out
+
+
+def test_override_equal_to_frozen_value_is_not_flagged(capsys):
+    # 显式写成与冻结值相同 = 没有被打败,不报警(避免"狼来了"淹掉真事故)。
+    _, applied = _apply_default({"rewards": {"racket_position_weight": 393.4}})
+    marker = next(m for m in applied if m.startswith("rewards.racket_position_weight="))
+    assert "[same value]" in marker
+    assert "FROZEN" not in capsys.readouterr().out
+
+
+def test_reward_pack_strict_turns_a_defeated_frozen_value_into_fail_loud():
+    # prereg 冻结臂的护栏:开了 strict 就不可能再"以为在跑冻结表"。
+    with pytest.raises(train_mod._OverrideError, match=r"reward_pack_strict=true forbids"):
+        _apply_default(
+            {"rewards": {"reward_pack_strict": True, **_LIVE_QUALITY_YAML}}
+        )
+
+
+def test_reward_pack_strict_passes_when_nothing_defeats_the_frozen_table():
+    env_cfg, applied = _apply_default({"rewards": {"reward_pack_strict": True}})
+    assert env_cfg.rewards.racket_position.weight == pytest.approx(393.4)
+    assert env_cfg.rewards.racket_velocity.weight == pytest.approx(295.1)
+    assert env_cfg.rewards.racket_normal.weight == pytest.approx(229.5)
+    assert (
+        "rewards.reward_pack_strict=True (frozen pack values may not be overridden)" in applied
+    )
+
+
+def test_reward_pack_strict_default_off_keeps_default_boot_byte_identical():
+    # 7263464b 的教训:无条件 raise 会炸掉每一次 default-v2 boot。默认必须是"警告不拦"。
+    env_cfg, _ = _apply_default({"rewards": dict(_LIVE_QUALITY_YAML)})
+    assert env_cfg.rewards.racket_position.weight == pytest.approx(4.0)
+
+
+def test_every_task_yaml_declares_the_quality_keys_so_the_pack_is_dead_code_there():
+    # 这条测试就是缺陷本身的存档:七个 task yaml 全都显式写了这三键,所以包里的冻结
+    # 质量表在【任何】task 上都是死码。哪天有人把某个 yaml 的键删干净了,这里会失败,
+    # 那正是要人来复核"这条谱系现在真的跑冻结表了吗"的时刻。
+    import glob
+    import re
+
+    declaring = []
+    for path in sorted(glob.glob(os.path.join(CFG_TASK_DIR, "*.yaml"))):
+        text = open(path, encoding="utf-8").read()
+        if re.search(r"^\s*racket_position_weight\s*:", text, re.M):
+            declaring.append(os.path.basename(path))
+    assert "HOPEPingPongVirtualBall.yaml" in declaring
+    assert len(declaring) == 7, declaring
+
+
 def test_reward_pack_v2_works_on_omegaconf_nodes():
     from omegaconf import OmegaConf
 
