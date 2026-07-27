@@ -1952,6 +1952,24 @@ class RacketTargetCommand(CommandTerm):
             raise ValueError(
                 f"task-first strike phases differ: manifest={manifest_phases}, runtime={phases}"
             )
+        segment_lengths = tuple(
+            int(value) for value in motion.seg_len.tolist()
+        )
+        for index, (phase, segment_length) in enumerate(
+            zip(phases, segment_lengths)
+        ):
+            strike_offset = round(float(phase) * (segment_length - 1))
+            if (
+                segment_length < 3
+                or strike_offset <= 0
+                or strike_offset >= segment_length - 1
+            ):
+                raise ValueError(
+                    "task-first strike opportunity must resolve strictly inside "
+                    f"its motion segment: action={action_order[index]!r}, "
+                    f"phase={phase}, segment_length={segment_length}, "
+                    f"strike_offset={strike_offset}"
+                )
         signs_cfg = self._mount_signs_cfg(n_actions)
         signs = (
             tuple(int(value) for value in signs_cfg)
@@ -2112,41 +2130,16 @@ class RacketTargetCommand(CommandTerm):
 
         if not self._task_first_enabled:
             return None
-        loaded = self._task_first_loaded_manifest
-        manifest = loaded.manifest
-        return {
-            "schema_version": 1,
-            "manifest_basename": loaded.source_path.name,
-            "manifest_file_sha256": loaded.file_sha256,
-            "manifest_canonical_sha256": loaded.canonical_sha256,
-            "manifest_id": manifest.manifest_id,
-            "action_ids": list(manifest.action_order),
-            "action_uids": list(self._task_first_action_uids),
-            "curriculum_gate": manifest.gate.as_dict(),
-            "ranges": [
-                {
-                    "action_id": action.action_id,
-                    "action_uid": int(action.action_uid),
-                    "position_half_extent_m": list(action.position_half_extent_m),
-                    "speed_delta_mps": float(action.speed_delta_mps),
-                    "face_cone_deg": float(action.face_cone_deg),
-                    "station_center_shift_xy_m": list(
-                        action.station_center_shift_xy_m
-                    ),
-                    "base_half_extent_xy_m": list(action.base_half_extent_xy_m),
-                }
-                for action in manifest.actions
-            ],
-            "base_success_thresh_m": float(
-                self.cfg.task_first_base_success_thresh_m
-            ),
-            "motion_balanced_clip_sampling": bool(
-                getattr(self._motion().cfg, "balanced_clip_sampling", False)
-            ),
-            "motion_balanced_clip_sampling_seed": int(
-                getattr(self._motion().cfg, "balanced_clip_sampling_seed", 0)
-            ),
-        }
+        from whole_body_tracking.tasks.tracking.mdp.task_first_manifest import (
+            build_task_first_training_contract,
+        )
+
+        return build_task_first_training_contract(
+            self._task_first_loaded_manifest,
+            racket_cfg=self.cfg,
+            motion_cfg=self._motion().cfg,
+            env_cfg=self._env.cfg,
+        )
 
     def _bind_event_timing_contract(self) -> None:
         """Bind every immutable schedule row to this exact train bank and native clip timing."""
@@ -5498,10 +5491,14 @@ class RacketTargetCommand(CommandTerm):
         if manager is None:
             raise RuntimeError("task-first true reset has no termination manager")
         active_terms = set(str(name) for name in getattr(manager, "active_terms", ()))
-        if "robot_hit_table" not in active_terms:
+        missing_unsafe = sorted(
+            set(_TASK_FIRST_UNSAFE_TERMINATIONS) - active_terms
+        )
+        if missing_unsafe:
             raise RuntimeError(
-                "task-first requires active termination robot_hit_table; without it the "
-                "unsafe-failure gate would report a false zero"
+                "task-first requires every unsafe termination to be active; "
+                "otherwise the unsafe-failure gate would report a false zero. "
+                f"Missing: {missing_unsafe}"
             )
         terminated = self._selected_bool(
             getattr(

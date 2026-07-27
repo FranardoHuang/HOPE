@@ -7,6 +7,7 @@ import dataclasses
 import hashlib
 import importlib.util
 import inspect
+import math
 import pathlib
 import sys
 import types
@@ -27,6 +28,17 @@ REWARD_RECEIPT_PATH = (
     / "whole_body_tracking"
     / "utils"
     / "effective_reward_recipe.py"
+)
+TASK_FIRST_MDP_DIR = (
+    ROOT
+    / "hope_training"
+    / "whole_body_tracking"
+    / "source"
+    / "whole_body_tracking"
+    / "whole_body_tracking"
+    / "tasks"
+    / "tracking"
+    / "mdp"
 )
 
 
@@ -76,6 +88,10 @@ class FakeGate:
             "min_attempts": 128,
             "enter_success_lower_bound": 0.8,
         }
+
+
+def _robot_hit_table():
+    return None
 
 
 def _fake_action(action_id: str, uid: int, motion_sha256: str = "a" * 64):
@@ -140,6 +156,19 @@ def _task_first_env(action_ids=("a", "b")):
         shadow_table=False,
         physical_ball=False,
         planner_revision_enabled=False,
+        face_command_pairing="shared_plus_y",
+        racket_body_name="pingpang_red_Link",
+        wrist_body_name="right_wrist_yaw_Link",
+        mount_offset=(0.21021, 0.032078, 0.032036),
+        mount_quat=(1.0, 0.0, 0.0, 0.0),
+        mount_normal_axis=1,
+        vb_table_near_x=0.5,
+        vb_table_surface_z=0.76,
+        strike_success_pos_thresh=0.075,
+        strike_success_vel_thresh=0.5,
+        strike_success_normal_thresh_deg=15.0,
+        clean_reference_strike_velocity=True,
+        clean_strike_vel_window=2,
     )
     motion = NS(
         balanced_clip_sampling=True,
@@ -150,11 +179,62 @@ def _task_first_env(action_ids=("a", "b")):
         event_timing_mode="disabled",
         planner_revision_enabled=False,
     )
+    broad_regex = (
+        r"^(?!left_ankle_roll_Link$)(?!right_ankle_roll_Link$).+$"
+    )
+    broad_sensor = NS(
+        name="contact_forces", body_names=[broad_regex]
+    )
+    broad_asset = NS(name="robot", body_names=[broad_regex])
+    table_prim = "{ENV_REGEX_NS}/TableObstacle"
     return NS(
         obs_mode="hitter_footwork",
         face_command_obs=True,
         station_obs=False,
         physical_ball=False,
+        table_obstacle=True,
+        table_obstacle_prim=table_prim,
+        scene=NS(
+            racket_table_contact=NS(
+                prim_path=(
+                    "{ENV_REGEX_NS}/Robot/right_wrist_yaw_Link"
+                ),
+                filter_prim_paths_expr=[table_prim],
+            ),
+            table_obstacle=NS(
+                prim_path=table_prim,
+                init_state=NS(pos=(1.87, 0.0, 0.735)),
+                spawn=NS(
+                    size=(2.74, 1.525, 0.05),
+                    collision_props=NS(collision_enabled=True),
+                ),
+            ),
+        ),
+        terminations=NS(
+            base_fell_tilt=NS(
+                func="bad_orientation",
+                time_out=False,
+                params={"limit_angle": 0.7},
+            ),
+            base_too_low=NS(
+                func="root_height_below_minimum",
+                time_out=False,
+                params={"minimum_height": 0.5},
+            ),
+            robot_hit_table=NS(
+                func="robot_hit_table",
+                time_out=False,
+                params={
+                    "sensor_cfg": broad_sensor,
+                    "filtered_sensor_cfg": NS(name="racket_table_contact"),
+                    "asset_cfg": broad_asset,
+                    "near_x": 0.5,
+                    "surface_z": 0.76,
+                    "force_threshold": 1.0,
+                    "margin": 0.02,
+                },
+            ),
+        ),
         rewards=NS(),
         commands=NS(racket_target=racket, motion=motion),
         observations=NS(policy=NS()),
@@ -203,6 +283,35 @@ def _install_fake_manifest_loader(monkeypatch, train_mod, action_ids):
         lambda _cfg: loaded,
     )
     return loaded
+
+
+def _install_task_first_manifest_module(monkeypatch):
+    """Expose the dependency-light manifest module without importing Isaac packages."""
+
+    curriculum = _load_by_path(
+        "_task_first_train_curriculum_under_test",
+        TASK_FIRST_MDP_DIR / "task_first_curriculum.py",
+    )
+    monkeypatch.setitem(sys.modules, "task_first_curriculum", curriculum)
+    manifest = _load_by_path(
+        "_task_first_manifest_contract_under_test",
+        TASK_FIRST_MDP_DIR / "task_first_manifest.py",
+    )
+    for name in (
+        "whole_body_tracking",
+        "whole_body_tracking.tasks",
+        "whole_body_tracking.tasks.tracking",
+        "whole_body_tracking.tasks.tracking.mdp",
+    ):
+        package = types.ModuleType(name)
+        package.__path__ = []
+        monkeypatch.setitem(sys.modules, name, package)
+    monkeypatch.setitem(
+        sys.modules,
+        "whole_body_tracking.tasks.tracking.mdp.task_first_manifest",
+        manifest,
+    )
+    return manifest
 
 
 def test_new_yaml_keys_are_whitelisted_and_consumed(train_mod):
@@ -321,6 +430,76 @@ def test_non_task_first_mode_is_strict_noop(train_mod, monkeypatch):
             ),
             "planner_revision",
         ),
+        (
+            lambda env: setattr(env, "table_obstacle", False),
+            "table_obstacle=true",
+        ),
+        (
+            lambda env: setattr(
+                env.terminations, "robot_hit_table", None
+            ),
+            "robot_hit_table",
+        ),
+        (
+            lambda env: setattr(
+                env.commands.racket_target,
+                "strike_success_pos_thresh",
+                999.0,
+            ),
+            "strike_success_pos_thresh",
+        ),
+        (
+            lambda env: setattr(
+                env.commands.racket_target,
+                "clean_reference_strike_velocity",
+                False,
+            ),
+            "clean_reference_strike_velocity",
+        ),
+        (
+            lambda env: setattr(
+                env.terminations.base_fell_tilt,
+                "func",
+                "evil.noop_bad_orientation",
+            ),
+            "exact function",
+        ),
+        (
+            lambda env: setattr(
+                env.terminations.base_too_low, "time_out", True
+            ),
+            "time_out",
+        ),
+        (
+            lambda env: env.terminations.robot_hit_table.params.__setitem__(
+                "force_threshold", 1.0e9
+            ),
+            "force_threshold=1.0",
+        ),
+        (
+            lambda env: setattr(
+                env.scene.racket_table_contact,
+                "filter_prim_paths_expr",
+                ["{ENV_REGEX_NS}/WrongTable"],
+            ),
+            "must filter exactly",
+        ),
+        (
+            lambda env: setattr(
+                env.scene.table_obstacle.spawn.collision_props,
+                "collision_enabled",
+                False,
+            ),
+            "pose/size/collision",
+        ),
+        (
+            lambda env: setattr(
+                env.commands.racket_target,
+                "mount_offset",
+                (0.0, 0.0, 0.0),
+            ),
+            "physical paddle-site transform",
+        ),
     ),
 )
 def test_task_first_incompatible_modes_fail_before_term_append(
@@ -429,10 +608,10 @@ def test_manifest_order_and_motion_bytes_are_bound(
         files.append(str(path))
         digests.append(hashlib.sha256(path.read_bytes()).hexdigest())
     loaded = _fake_loaded(("a", "b"), digests)
-    setattr(
-        env_cfg.commands.racket_target,
-        train_mod._TASK_FIRST_LOADED_MANIFEST_ATTR,
-        loaded,
+    monkeypatch.setattr(
+        train_mod,
+        "_load_task_first_manifest_from_racket_cfg",
+        lambda _cfg: loaded,
     )
     train_mod._validate_task_first_motion_sources(env_cfg, files)
     files[1] = files[0]
@@ -440,27 +619,157 @@ def test_manifest_order_and_motion_bytes_are_bound(
         train_mod._validate_task_first_motion_sources(env_cfg, files)
 
 
-def test_task_first_hard_contract_binds_manifest_gate_ranges_and_balance(train_mod):
+def test_task_first_hard_contract_binds_manifest_gate_ranges_and_balance(
+    train_mod, monkeypatch
+):
+    _install_task_first_manifest_module(monkeypatch)
     env_cfg = _task_first_env()
     loaded = _fake_loaded(("a", "b"))
-    setattr(
-        env_cfg.commands.racket_target,
-        train_mod._TASK_FIRST_LOADED_MANIFEST_ATTR,
-        loaded,
+    monkeypatch.setattr(
+        train_mod,
+        "_load_task_first_manifest_from_racket_cfg",
+        lambda _cfg: loaded,
     )
     contract = train_mod._task_first_manifest_contract(
-        env_cfg.commands.racket_target, env_cfg.commands.motion
+        env_cfg.commands.racket_target,
+        env_cfg.commands.motion,
+        env_cfg,
     )
+    assert contract["schema_version"] == 2
     assert contract["manifest_basename"] == "task_first_manifest.json"
     assert contract["manifest_file_sha256"] == "b" * 64
     assert contract["manifest_id"] == "task-first-test"
     assert contract["action_ids"] == ["a", "b"]
     assert contract["action_uids"] == [1000, 1001]
-    assert contract["curriculum_gate"]["min_attempts"] == 128
+    assert contract["curriculum"]["gate"]["min_attempts"] == 128
     assert contract["ranges"][0]["position_half_extent_m"] == [0.1, 0.2, 0.3]
     assert contract["ranges"][0]["station_center_shift_xy_m"] == [-0.05, 0.0]
-    assert contract["motion_balanced_clip_sampling"] is True
-    assert contract["motion_balanced_clip_sampling_seed"] == 17
+    assert contract["success_thresholds"] == {
+        "position_m": 0.075,
+        "speed_mps": 0.5,
+        "face_deg": 15.0,
+        "base_m": 0.08,
+    }
+    assert contract["reference_strike_recipe"]["clean_strike_vel_window"] == 2
+    assert contract["motion_sampling"]["balanced_clip_sampling"] is True
+    assert contract["motion_sampling"]["balanced_clip_sampling_seed"] == 17
+    assert contract["unsafe_evidence"]["termination_terms"] == [
+        "base_fell_tilt",
+        "base_too_low",
+        "robot_hit_table",
+    ]
+
+
+def _agent_cfg(
+    *,
+    gamma=0.99,
+    num_steps_per_env=24,
+    max_iterations=1000,
+    logger="tensorboard",
+    algorithm_extra=None,
+):
+    algorithm = {
+        "class_name": "PPO",
+        "learning_rate": 0.001,
+        "schedule": "adaptive",
+        "desired_kl": 0.01,
+        "entropy_coef": 0.01,
+        "num_learning_epochs": 5,
+        "num_mini_batches": 4,
+        "gamma": gamma,
+        "lam": 0.95,
+        "clip_param": 0.2,
+        "value_loss_coef": 1.0,
+        "use_clipped_value_loss": True,
+        "max_grad_norm": 1.0,
+    }
+    algorithm.update(algorithm_extra or {})
+    payload = {
+        "num_steps_per_env": num_steps_per_env,
+        "max_iterations": max_iterations,
+        "save_interval": 100,
+        "logger": logger,
+        "empirical_normalization": True,
+        "policy": {
+            "class_name": "ActorCritic",
+            "actor_hidden_dims": [512, 256, 128],
+            "critic_hidden_dims": [512, 256, 128],
+            "activation": "elu",
+            "init_noise_std": 1.0,
+        },
+        "algorithm": algorithm,
+    }
+    return NS(to_dict=lambda: payload)
+
+
+def test_task_first_exact_resume_binds_learning_recipe_not_run_budget(train_mod):
+    baseline = train_mod._task_first_agent_recipe(_agent_cfg())
+    budget_only = train_mod._task_first_agent_recipe(
+        _agent_cfg(max_iterations=9999, logger="wandb")
+    )
+    changed_gamma = train_mod._task_first_agent_recipe(
+        _agent_cfg(gamma=0.98)
+    )
+    changed_rollout = train_mod._task_first_agent_recipe(
+        _agent_cfg(num_steps_per_env=48)
+    )
+
+    assert baseline == budget_only
+    assert baseline["sha256"] != changed_gamma["sha256"]
+    assert baseline["sha256"] != changed_rollout["sha256"]
+    assert baseline["recipe"]["runner"]["num_steps_per_env"] == 24
+    assert baseline["recipe"]["algorithm"]["gamma"] == 0.99
+    assert "max_iterations" not in baseline["recipe"]["runner"]
+    assert "logger" not in baseline["recipe"]["runner"]
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    (
+        (
+            lambda payload: payload.__setitem__(
+                "num_steps_per_env", True
+            ),
+            "positive plain integer",
+        ),
+        (
+            lambda payload: payload["algorithm"].__setitem__(
+                "gamma", math.nan
+            ),
+            "non-finite",
+        ),
+        (
+            lambda payload: payload["algorithm"].__setitem__(
+                "rnd_cfg", {"weight": 1.0}
+            ),
+            "does not yet validate state",
+        ),
+    ),
+)
+def test_task_first_learning_recipe_rejects_ambiguous_state(
+    train_mod, mutate, message
+):
+    cfg = _agent_cfg()
+    payload = cfg.to_dict()
+    mutate(payload)
+    with pytest.raises(RuntimeError, match=message):
+        train_mod._task_first_agent_recipe(cfg)
+
+
+def test_run_passes_resolved_agent_cfg_into_hard_contract():
+    source = TRAIN_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source)
+    calls = [
+        node
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "_build_training_hard_contract"
+    ]
+    assert len(calls) == 1
+    keywords = {keyword.arg: keyword.value for keyword in calls[0].keywords}
+    assert isinstance(keywords.get("agent_cfg"), ast.Name)
+    assert keywords["agent_cfg"].id == "agent_cfg"
 
 
 def _reward_func():
@@ -553,9 +862,19 @@ def test_effective_reward_expected_sha_and_persisted_contract_binding(
         env_cfg, {}
     )
     assert receipt["terms"][0]["weight"] == 4.0
+    with pytest.raises(
+        train_mod._OverrideError,
+        match=receipt["sha256"],
+    ):
+        train_mod._build_effective_reward_receipt_for_training(
+            env_cfg,
+            {},
+            require_expected_sha256=True,
+        )
     exact = train_mod._build_effective_reward_receipt_for_training(
         env_cfg,
         {"expected_effective_reward_recipe_sha256": receipt["sha256"]},
+        require_expected_sha256=True,
     )
     assert exact == receipt
     with pytest.raises(ValueError, match="mismatch"):
@@ -578,6 +897,7 @@ def test_effective_reward_expected_sha_and_persisted_contract_binding(
 def test_source_binds_receipt_and_has_no_two_clip_semantic_log(train_mod):
     hard_source = inspect.getsource(train_mod._build_training_hard_contract)
     run_source = inspect.getsource(train_mod._run)
+    module_source = TRAIN_PATH.read_text(encoding="utf-8")
     assert '"effective_reward_recipe": effective_reward_receipt' in hard_source
     assert '"task_first_training": task_first_contract' in hard_source
     assert run_source.index(
@@ -585,3 +905,4 @@ def test_source_binds_receipt_and_has_no_two_clip_semantic_log(train_mod):
     ) < run_source.index("gym.make")
     assert "clip0=forehand" not in run_source
     assert "clip1=backhand" not in run_source
+    assert "_TASK_FIRST_LOADED_MANIFEST_ATTR" not in module_source

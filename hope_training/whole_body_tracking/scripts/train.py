@@ -828,9 +828,6 @@ def _as_exact_float(x, name: str) -> float:
     return x
 
 
-_TASK_FIRST_LOADED_MANIFEST_ATTR = "_hope_task_first_loaded_manifest_v1"
-
-
 def _load_task_first_manifest_from_racket_cfg(racket_cfg):
     """Load the byte-pinned task-first manifest from the composed command cfg."""
 
@@ -862,52 +859,28 @@ def _load_task_first_manifest_from_racket_cfg(racket_cfg):
         raise _OverrideError(
             f"[train.py] invalid task-first manifest {path!r}: {exc}"
         ) from exc
-    setattr(racket_cfg, _TASK_FIRST_LOADED_MANIFEST_ATTR, loaded)
     return loaded
 
 
-def _task_first_manifest_contract(racket_cfg, motion_cfg) -> dict:
+def _task_first_manifest_contract(racket_cfg, motion_cfg, env_cfg) -> dict:
     """Return the immutable task/action/curriculum identity for checkpoints."""
 
-    loaded = getattr(racket_cfg, _TASK_FIRST_LOADED_MANIFEST_ATTR, None)
-    if loaded is None:
-        loaded = _load_task_first_manifest_from_racket_cfg(racket_cfg)
-    manifest = loaded.manifest
-    ranges = []
-    for action in manifest.actions:
-        ranges.append(
-            {
-                "action_id": action.action_id,
-                "action_uid": int(action.action_uid),
-                "position_half_extent_m": list(action.position_half_extent_m),
-                "speed_delta_mps": float(action.speed_delta_mps),
-                "face_cone_deg": float(action.face_cone_deg),
-                "station_center_shift_xy_m": list(
-                    action.station_center_shift_xy_m
-                ),
-                "base_half_extent_xy_m": list(action.base_half_extent_xy_m),
-            }
-        )
-    return {
-        "schema_version": 1,
-        "manifest_basename": loaded.source_path.name,
-        "manifest_file_sha256": loaded.file_sha256,
-        "manifest_canonical_sha256": loaded.canonical_sha256,
-        "manifest_id": manifest.manifest_id,
-        "action_ids": list(manifest.action_order),
-        "action_uids": [int(action.action_uid) for action in manifest.actions],
-        "curriculum_gate": manifest.gate.as_dict(),
-        "ranges": ranges,
-        "base_success_thresh_m": float(
-            getattr(racket_cfg, "task_first_base_success_thresh_m")
-        ),
-        "motion_balanced_clip_sampling": bool(
-            getattr(motion_cfg, "balanced_clip_sampling", False)
-        ),
-        "motion_balanced_clip_sampling_seed": int(
-            getattr(motion_cfg, "balanced_clip_sampling_seed", 0)
-        ),
-    }
+    # Do not cache ``LoadedTaskFirstManifest`` on an Isaac configclass.  It
+    # contains pathlib.Path and dataclass objects; Isaac's standard class-to-dict
+    # dump includes single-underscore attributes and would emit a Python-specific
+    # YAML object that cannot be read back with ``yaml.full_load``.  Reloading this
+    # small, byte-pinned JSON also rechecks that it did not change between gates.
+    loaded = _load_task_first_manifest_from_racket_cfg(racket_cfg)
+    from whole_body_tracking.tasks.tracking.mdp.task_first_manifest import (
+        build_task_first_training_contract,
+    )
+
+    return build_task_first_training_contract(
+        loaded,
+        racket_cfg=racket_cfg,
+        motion_cfg=motion_cfg,
+        env_cfg=env_cfg,
+    )
 
 
 def _task_first_require_zero(value, name: str) -> None:
@@ -949,6 +922,46 @@ def _task_first_reward_func_identity(term) -> str:
         f"{getattr(func, '__module__', '')}."
         f"{getattr(func, '__qualname__', getattr(func, '__name__', ''))}"
     ).lower()
+
+
+def _task_first_term_func(term):
+    if isinstance(term, dict):
+        return term.get("func")
+    return getattr(term, "func", None)
+
+
+def _task_first_term_time_out(term):
+    if isinstance(term, dict):
+        return term.get("time_out", False)
+    return getattr(term, "time_out", False)
+
+
+def _task_first_require_authoritative_func(
+    term, expected_name: str, term_name: str
+) -> None:
+    """Reject name-substring lookalikes while keeping host fixtures lightweight."""
+
+    actual = _task_first_term_func(term)
+    if isinstance(actual, str):
+        if actual != expected_name:
+            raise _OverrideError(
+                f"[train.py] task-first terminations.{term_name} must name "
+                f"exact function {expected_name!r}, got {actual!r}"
+            )
+        return
+    try:
+        from whole_body_tracking.tasks.tracking import mdp
+
+        expected = getattr(mdp, expected_name)
+    except (ImportError, AttributeError) as exc:
+        raise _OverrideError(
+            f"[train.py] cannot resolve authoritative termination {expected_name!r}"
+        ) from exc
+    if actual is not expected:
+        raise _OverrideError(
+            f"[train.py] task-first terminations.{term_name} must use the "
+            f"authoritative callable object mdp.{expected_name}"
+        )
 
 
 def _validate_task_first_reward_semantics(env_cfg) -> None:
@@ -1020,6 +1033,241 @@ def _validate_task_first_reward_semantics(env_cfg) -> None:
         )
 
 
+def _task_first_term_params(term):
+    if isinstance(term, dict):
+        return term.get("params")
+    return getattr(term, "params", None)
+
+
+def _task_first_scene_entity_name(value) -> str:
+    if isinstance(value, dict):
+        return str(value.get("name", "") or "")
+    return str(getattr(value, "name", "") or "")
+
+
+def _task_first_scene_entity_body_names(value) -> tuple[str, ...]:
+    if isinstance(value, dict):
+        names = value.get("body_names")
+    else:
+        names = getattr(value, "body_names", None)
+    if names is None:
+        return ()
+    if isinstance(names, str):
+        return (names,)
+    try:
+        return tuple(str(name) for name in names)
+    except TypeError:
+        return ()
+
+
+def _validate_task_first_safety_semantics(env_cfg) -> None:
+    """Require the three unsafe truth channels used by curriculum promotion."""
+
+    if type(getattr(env_cfg, "table_obstacle", None)) is not bool or not env_cfg.table_obstacle:
+        raise _OverrideError(
+            "[train.py] task-first requires table_obstacle=true; otherwise "
+            "table unsafe evidence is structurally pinned to zero"
+        )
+    table_prim = str(getattr(env_cfg, "table_obstacle_prim", "") or "").strip()
+    if not table_prim:
+        raise _OverrideError(
+            "[train.py] task-first requires a concrete table_obstacle_prim"
+        )
+    scene = getattr(env_cfg, "scene", None)
+    filtered_sensor = (
+        None if scene is None else getattr(scene, "racket_table_contact", None)
+    )
+    if filtered_sensor is None:
+        raise _OverrideError(
+            "[train.py] task-first requires the filtered racket_table_contact "
+            "sensor bound to the table collider"
+        )
+    if str(getattr(filtered_sensor, "prim_path", "") or "") != (
+        "{ENV_REGEX_NS}/Robot/right_wrist_yaw_Link"
+    ):
+        raise _OverrideError(
+            "[train.py] task-first racket_table_contact must watch the exact "
+            "right_wrist_yaw_Link that carries the merged paddle collider"
+        )
+    filter_prims = tuple(
+        str(value)
+        for value in (
+            getattr(filtered_sensor, "filter_prim_paths_expr", ()) or ()
+        )
+    )
+    if filter_prims != (table_prim,):
+        raise _OverrideError(
+            "[train.py] task-first racket_table_contact must filter exactly "
+            f"the configured table collider {table_prim!r}; got {filter_prims!r}"
+        )
+    table_asset = None if scene is None else getattr(scene, "table_obstacle", None)
+    if (
+        table_prim != "{ENV_REGEX_NS}/TableObstacle"
+        or table_asset is None
+        or str(getattr(table_asset, "prim_path", "") or "") != table_prim
+    ):
+        raise _OverrideError(
+            "[train.py] task-first requires the exact solid "
+            "{ENV_REGEX_NS}/TableObstacle asset"
+        )
+    terminations = getattr(env_cfg, "terminations", None)
+    if terminations is None:
+        raise _OverrideError("[train.py] task-first requires terminations")
+    missing = [
+        name
+        for name in ("base_fell_tilt", "base_too_low", "robot_hit_table")
+        if getattr(terminations, name, None) is None
+    ]
+    if missing:
+        raise _OverrideError(
+            "[train.py] task-first requires all unsafe termination terms active: "
+            + ", ".join(missing)
+        )
+    for term_name, expected_func, threshold_name, expected_threshold in (
+        ("base_fell_tilt", "bad_orientation", "limit_angle", 0.7),
+        (
+            "base_too_low",
+            "root_height_below_minimum",
+            "minimum_height",
+            0.5,
+        ),
+    ):
+        term = getattr(terminations, term_name)
+        _task_first_require_authoritative_func(
+            term, expected_func, term_name
+        )
+        if _task_first_term_time_out(term) is not False:
+            raise _OverrideError(
+                f"[train.py] task-first terminations.{term_name}.time_out "
+                "must be false so the event is counted as unsafe"
+            )
+        guard_params = _task_first_term_params(term)
+        if (
+            not isinstance(guard_params, dict)
+            or set(guard_params) != {threshold_name}
+            or isinstance(guard_params.get(threshold_name), bool)
+            or not isinstance(
+                guard_params.get(threshold_name), (int, float)
+            )
+            or not math.isfinite(float(guard_params[threshold_name]))
+            or float(guard_params[threshold_name]) != expected_threshold
+        ):
+            raise _OverrideError(
+                f"[train.py] task-first terminations.{term_name} requires "
+                f"{threshold_name}={expected_threshold}"
+            )
+    table_term = getattr(terminations, "robot_hit_table")
+    _task_first_require_authoritative_func(
+        table_term, "robot_hit_table", "robot_hit_table"
+    )
+    if _task_first_term_time_out(table_term) is not False:
+        raise _OverrideError(
+            "[train.py] task-first terminations.robot_hit_table.time_out "
+            "must be false so table strikes are counted as unsafe"
+        )
+    params = _task_first_term_params(table_term)
+    expected_table_param_keys = {
+        "sensor_cfg",
+        "filtered_sensor_cfg",
+        "asset_cfg",
+        "near_x",
+        "surface_z",
+        "force_threshold",
+        "margin",
+    }
+    if (
+        not isinstance(params, dict)
+        or set(params) != expected_table_param_keys
+    ):
+        raise _OverrideError(
+            "[train.py] task-first robot_hit_table term requires exactly "
+            f"{sorted(expected_table_param_keys)!r}"
+        )
+    if _task_first_scene_entity_name(
+        params.get("filtered_sensor_cfg")
+    ) != "racket_table_contact":
+        raise _OverrideError(
+            "[train.py] task-first robot_hit_table must consume the filtered "
+            "racket_table_contact sensor"
+        )
+    broad_regex = (
+        r"^(?!left_ankle_roll_Link$)(?!right_ankle_roll_Link$).+$"
+    )
+    if (
+        _task_first_scene_entity_name(params.get("sensor_cfg"))
+        != "contact_forces"
+        or _task_first_scene_entity_name(params.get("asset_cfg")) != "robot"
+        or _task_first_scene_entity_body_names(params.get("sensor_cfg"))
+        != (broad_regex,)
+        or _task_first_scene_entity_body_names(params.get("asset_cfg"))
+        != (broad_regex,)
+    ):
+        raise _OverrideError(
+            "[train.py] task-first robot_hit_table broad channel must align "
+            "the exact non-foot contact_forces and robot body selections"
+        )
+    for name in ("near_x", "surface_z", "force_threshold", "margin"):
+        value = params.get(name)
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+        ):
+            raise _OverrideError(
+                f"[train.py] task-first robot_hit_table.{name} must be finite"
+            )
+    racket_cfg = getattr(
+        getattr(env_cfg, "commands", None), "racket_target", None
+    )
+    expected_near_x = getattr(racket_cfg, "vb_table_near_x", None)
+    expected_surface_z = getattr(racket_cfg, "vb_table_surface_z", None)
+    if (
+        isinstance(expected_near_x, bool)
+        or not isinstance(expected_near_x, (int, float))
+        or isinstance(expected_surface_z, bool)
+        or not isinstance(expected_surface_z, (int, float))
+        or float(params["near_x"]) != float(expected_near_x)
+        or float(params["surface_z"]) != float(expected_surface_z)
+    ):
+        raise _OverrideError(
+            "[train.py] task-first robot_hit_table near_x/surface_z must "
+            "exactly match the live racket table geometry"
+        )
+    if (
+        float(params["force_threshold"]) != 1.0
+        or float(params["margin"]) != 0.02
+    ):
+        raise _OverrideError(
+            "[train.py] task-first robot_hit_table requires the reviewed "
+            "force_threshold=1.0 N and margin=0.02 m"
+        )
+    expected_center = (
+        float(expected_near_x) + 1.37,
+        0.0,
+        float(expected_surface_z) - 0.025,
+    )
+    init_state = getattr(table_asset, "init_state", None)
+    spawn = getattr(table_asset, "spawn", None)
+    collision_props = getattr(spawn, "collision_props", None)
+    try:
+        actual_center = tuple(
+            float(value) for value in getattr(init_state, "pos")
+        )
+        actual_size = tuple(float(value) for value in getattr(spawn, "size"))
+    except (TypeError, ValueError):
+        actual_center = ()
+        actual_size = ()
+    if (
+        actual_center != expected_center
+        or actual_size != (2.74, 1.525, 0.05)
+        or getattr(collision_props, "collision_enabled", None) is not True
+    ):
+        raise _OverrideError(
+            "[train.py] task-first table collider pose/size/collision flag "
+            "does not match the reviewed live table geometry"
+        )
+
+
 def _finalize_task_first_training_cfg(env_cfg, task, applied) -> None:
     """Fail closed and append the two task-first actor terms in canonical order.
 
@@ -1073,6 +1321,11 @@ def _finalize_task_first_training_cfg(env_cfg, task, applied) -> None:
         )
     if not bool(getattr(racket_cfg, "face_command", False)):
         raise _OverrideError("[train.py] task-first requires racket.face_command=true")
+    if str(getattr(racket_cfg, "face_command_pairing", "")) != "shared_plus_y":
+        raise _OverrideError(
+            "[train.py] task-first requires "
+            "racket.face_command_pairing='shared_plus_y'"
+        )
     if not bool(getattr(env_cfg, "face_command_obs", False)):
         raise _OverrideError("[train.py] task-first requires racket.face_command_obs=true")
     if bool(getattr(env_cfg, "station_obs", False)):
@@ -1149,6 +1402,7 @@ def _finalize_task_first_training_cfg(env_cfg, task, applied) -> None:
             "[train.py] task-first executor training is ball-free; disable "
             + ", ".join(enabled_ball_paths)
         )
+    _validate_task_first_safety_semantics(env_cfg)
     _validate_task_first_reward_semantics(env_cfg)
 
     if bool(getattr(racket_cfg, "planner_revision_enabled", False)) or bool(
@@ -1202,10 +1456,83 @@ def _finalize_task_first_training_cfg(env_cfg, task, applied) -> None:
         or not isinstance(base_threshold, (int, float))
         or not math.isfinite(float(base_threshold))
         or float(base_threshold) <= 0.0
+        or float(base_threshold) > 0.10
     ):
         raise _OverrideError(
             "[train.py] task-first requires finite "
-            "racket.task_first_base_success_thresh_m > 0"
+            "0 < racket.task_first_base_success_thresh_m <= 0.10"
+        )
+    for attr, maximum in (
+        ("strike_success_pos_thresh", 0.075),
+        ("strike_success_vel_thresh", 0.5),
+        ("strike_success_normal_thresh_deg", 15.0),
+    ):
+        value = getattr(racket_cfg, attr, None)
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+            or float(value) <= 0.0
+            or float(value) > maximum
+        ):
+            raise _OverrideError(
+                f"[train.py] task-first requires 0 < racket.{attr} <= {maximum}"
+            )
+    if getattr(racket_cfg, "clean_reference_strike_velocity", None) is not True:
+        raise _OverrideError(
+            "[train.py] task-first requires "
+            "racket.clean_reference_strike_velocity=true"
+        )
+    clean_window = getattr(racket_cfg, "clean_strike_vel_window", None)
+    if (
+        type(clean_window) is not int
+        or clean_window < 1
+        or clean_window > 10
+    ):
+        raise _OverrideError(
+            "[train.py] task-first requires integer "
+            "racket.clean_strike_vel_window in [1,10]"
+        )
+    if str(getattr(racket_cfg, "racket_body_name", "") or "") != (
+        "pingpang_red_Link"
+    ):
+        raise _OverrideError(
+            "[train.py] task-first requires "
+            "racket.racket_body_name='pingpang_red_Link'"
+        )
+    if str(getattr(racket_cfg, "wrist_body_name", "") or "") != (
+        "right_wrist_yaw_Link"
+    ):
+        raise _OverrideError(
+            "[train.py] task-first requires "
+            "racket.wrist_body_name='right_wrist_yaw_Link'"
+        )
+    for attr, expected in (
+        ("mount_offset", (0.21021, 0.032078, 0.032036)),
+        ("mount_quat", (1.0, 0.0, 0.0, 0.0)),
+    ):
+        value = getattr(racket_cfg, attr, None)
+        if (
+            isinstance(value, (str, bytes))
+            or not isinstance(value, (list, tuple))
+            or len(value) != len(expected)
+            or any(
+                isinstance(component, bool)
+                or not isinstance(component, (int, float))
+                or not math.isfinite(float(component))
+                for component in value
+            )
+            or tuple(float(component) for component in value) != expected
+        ):
+            raise _OverrideError(
+                f"[train.py] task-first racket.{attr} must equal the reviewed "
+                f"physical paddle-site transform {expected!r}"
+            )
+    mount_axis = getattr(racket_cfg, "mount_normal_axis", None)
+    if type(mount_axis) is not int or mount_axis != 1:
+        raise _OverrideError(
+            "[train.py] task-first racket.mount_normal_axis must be 1 "
+            "(physical paddle-local +Y)"
         )
 
     policy = getattr(getattr(env_cfg, "observations", None), "policy", None)
@@ -1254,9 +1581,7 @@ def _validate_task_first_motion_sources(env_cfg, motion_files) -> None:
     racket_cfg = getattr(getattr(env_cfg, "commands", None), "racket_target", None)
     if racket_cfg is None or str(getattr(racket_cfg, "target_mode", "")) != "task_first":
         return
-    loaded = getattr(racket_cfg, _TASK_FIRST_LOADED_MANIFEST_ATTR, None)
-    if loaded is None:
-        loaded = _load_task_first_manifest_from_racket_cfg(racket_cfg)
+    loaded = _load_task_first_manifest_from_racket_cfg(racket_cfg)
     paths = [str(path) for path in motion_files]
     if len(paths) != len(loaded.manifest.actions):
         raise _OverrideError(
@@ -1273,7 +1598,12 @@ def _validate_task_first_motion_sources(env_cfg, motion_files) -> None:
             )
 
 
-def _build_effective_reward_receipt_for_training(env_cfg, root_cfg):
+def _build_effective_reward_receipt_for_training(
+    env_cfg,
+    root_cfg,
+    *,
+    require_expected_sha256: bool = False,
+):
     """Hash the post-override reward terms and optionally enforce a root pin."""
 
     from whole_body_tracking.utils.effective_reward_recipe import (
@@ -1281,9 +1611,29 @@ def _build_effective_reward_receipt_for_training(env_cfg, root_cfg):
     )
 
     expected = _get(root_cfg, "expected_effective_reward_recipe_sha256")
+    if expected in (None, ""):
+        receipt = build_effective_reward_receipt(env_cfg)
+        if require_expected_sha256:
+            raise _OverrideError(
+                "[train.py] formal task-first requires "
+                "expected_effective_reward_recipe_sha256. The fully composed "
+                f"candidate SHA-256 is {receipt['sha256']}; review/preregister "
+                "that receipt, then relaunch with the exact pin."
+            )
+        return receipt
+    if (
+        type(expected) is not str
+        or len(expected) != 64
+        or expected != expected.lower()
+        or any(character not in "0123456789abcdef" for character in expected)
+    ):
+        raise _OverrideError(
+            "[train.py] expected_effective_reward_recipe_sha256 must be "
+            "exactly 64 lowercase hexadecimal characters"
+        )
     return build_effective_reward_receipt(
         env_cfg,
-        expected_sha256=None if expected is None else str(expected),
+        expected_sha256=expected,
     )
 
 
@@ -2291,8 +2641,97 @@ def _post_swing_settle_debt_reward_contract(env_cfg, runtime_facts: dict) -> dic
     }
 
 
+def _task_first_agent_recipe(agent_cfg) -> dict:
+    """Return the canonical learning recipe required for an exact resume.
+
+    Checkpoint tensors and optimizer moments are not sufficient to reproduce
+    the next PPO update: rollout length, GAE/PPO coefficients, minibatching,
+    normalization, and policy architecture also participate.  Operational
+    fields such as total budget, save cadence, log destination, and device are
+    intentionally excluded.
+    """
+
+    if agent_cfg is None or not callable(getattr(agent_cfg, "to_dict", None)):
+        raise RuntimeError(
+            "task-first exact resume requires an RSL runner cfg with to_dict()"
+        )
+    raw = agent_cfg.to_dict()
+    if not isinstance(raw, dict):
+        raise RuntimeError("RSL runner cfg to_dict() must return a mapping")
+
+    def canonical(value, *, path: str):
+        if value is None or type(value) in (str, bool, int):
+            return value
+        if type(value) is float:
+            if not math.isfinite(value):
+                raise RuntimeError(f"{path} must not contain non-finite numbers")
+            return value
+        if isinstance(value, dict):
+            if any(type(key) is not str for key in value):
+                raise RuntimeError(f"{path} must use string mapping keys")
+            return {
+                key: canonical(value[key], path=f"{path}.{key}")
+                for key in sorted(value)
+            }
+        if isinstance(value, (list, tuple, ListConfig)):
+            return [
+                canonical(item, path=f"{path}[{index}]")
+                for index, item in enumerate(value)
+            ]
+        raise RuntimeError(
+            f"{path} contains unsupported config value {type(value).__name__}"
+        )
+
+    steps = raw.get("num_steps_per_env")
+    if type(steps) is not int or steps <= 0:
+        raise RuntimeError(
+            "task-first PPO num_steps_per_env must be a positive plain integer"
+        )
+    empirical = raw.get("empirical_normalization")
+    if type(empirical) is not bool:
+        raise RuntimeError(
+            "task-first empirical_normalization must be a plain bool"
+        )
+    policy = canonical(raw.get("policy"), path="agent.policy")
+    algorithm = canonical(raw.get("algorithm"), path="agent.algorithm")
+    if not isinstance(policy, dict) or not policy:
+        raise RuntimeError("task-first policy recipe must be a non-empty mapping")
+    if not isinstance(algorithm, dict) or not algorithm:
+        raise RuntimeError(
+            "task-first algorithm recipe must be a non-empty mapping"
+        )
+    for optional_stateful_feature in ("rnd_cfg", "rnd", "symmetry_cfg"):
+        if algorithm.get(optional_stateful_feature) not in (None, False, {}):
+            raise RuntimeError(
+                "task-first exact resume does not yet validate state for "
+                f"algorithm.{optional_stateful_feature}"
+            )
+
+    recipe = {
+        "schema_version": 1,
+        "runner": {
+            "num_steps_per_env": steps,
+            "empirical_normalization": empirical,
+        },
+        "policy": policy,
+        "algorithm": algorithm,
+    }
+    encoded = json.dumps(
+        recipe,
+        allow_nan=False,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        sort_keys=True,
+    ).encode("utf-8")
+    return {
+        "schema_version": 1,
+        "sha256": hashlib.sha256(encoded).hexdigest(),
+        "recipe": recipe,
+    }
+
+
 def _build_training_hard_contract(
-    env, actor_contract, effective_reward_receipt=None
+    env, actor_contract, effective_reward_receipt=None, agent_cfg=None
 ) -> dict:
     """Immutable actor/task facts that must match across a checkpoint resume.
 
@@ -2331,19 +2770,95 @@ def _build_training_hard_contract(
     racket = None if racket_cmd is None else racket_cmd.cfg
     task_first_contract = None
     if racket is not None and str(getattr(racket, "target_mode", "")) == "task_first":
+        command_manager = getattr(env, "command_manager", None)
+        active_names = tuple(
+            str(name)
+            for name in getattr(command_manager, "active_terms", ())
+        )
+        if (
+            command_manager is None
+            or len(active_names) != len(set(active_names))
+            or not {"motion", "racket_target"}.issubset(set(active_names))
+        ):
+            raise RuntimeError(
+                "task-first requires unique active motion and racket_target "
+                f"command terms; got {active_names!r}"
+            )
+        non_explicit = []
+        for term_name in active_names:
+            term = command_manager.get_term(term_name)
+            getter = getattr(term, "exact_resume_state_dict", None)
+            loader = getattr(term, "load_exact_resume_state_dict", None)
+            if not callable(getter) or not callable(loader):
+                non_explicit.append(term_name)
+        if non_explicit:
+            raise RuntimeError(
+                "task-first requires explicit exact-resume hooks on every "
+                "active command term; missing "
+                + ", ".join(non_explicit)
+            )
+        termination_manager = getattr(
+            getattr(racket_cmd, "_env", env), "termination_manager", None
+        )
+        active_terminations = set(
+            str(name)
+            for name in getattr(
+                termination_manager, "active_terms", ()
+            )
+        )
+        required_terminations = {
+            "base_fell_tilt",
+            "base_too_low",
+            "robot_hit_table",
+        }
+        if (
+            termination_manager is None
+            or not required_terminations.issubset(active_terminations)
+        ):
+            raise RuntimeError(
+                "task-first instantiated termination manager is missing "
+                "unsafe truth channels: "
+                f"{sorted(required_terminations - active_terminations)}"
+            )
         task_first_contract = _task_first_manifest_contract(
-            racket, motion_cmd.cfg
+            racket, motion_cmd.cfg, env_cfg
         )
         runtime_contract_fn = getattr(
             racket_cmd, "task_first_hard_contract", None
         )
-        if callable(runtime_contract_fn):
-            runtime_task_first = runtime_contract_fn()
-            if runtime_task_first != task_first_contract:
-                raise RuntimeError(
-                    "runtime task-first command hard contract disagrees with "
-                    "the byte-pinned manifest/config contract"
-                )
+        if not callable(runtime_contract_fn):
+            raise RuntimeError(
+                "runtime task-first command is missing the mandatory "
+                "task_first_hard_contract() implementation"
+            )
+        runtime_task_first = runtime_contract_fn()
+        if runtime_task_first != task_first_contract:
+            raise RuntimeError(
+                "runtime task-first command hard contract disagrees with "
+                "the byte-pinned manifest/config contract"
+            )
+        racket_mode = str(getattr(racket_cmd, "_racket_mode", ""))
+        wrist_index = getattr(racket_cmd, "_wrist_body_index", None)
+        racket_index = getattr(racket_cmd, "_racket_body_index", None)
+        if (
+            racket_mode != "wrist_offset"
+            or type(wrist_index) is not int
+            or wrist_index < 0
+            or type(racket_index) is not int
+            or racket_index != -1
+        ):
+            raise RuntimeError(
+                "task-first v1 requires the reviewed wrist_offset physical "
+                "paddle-site resolution; the instantiated asset resolved "
+                f"mode={racket_mode!r}, wrist_index={wrist_index!r}, "
+                f"racket_index={racket_index!r}"
+            )
+        task_first_contract["resolved_racket_kinematics"] = {
+            "mode": racket_mode,
+            "source_body_name": str(racket.wrist_body_name),
+            "source_body_index": wrist_index,
+            "racket_body_index": racket_index,
+        }
     runtime_facts = runtime_execution_facts(env, actor_contract)
     lateral_training = _resolve_lateral_training_runtime(env)
     processed_qdes_slew_contract = _processed_qdes_slew_hinge_reward_contract(
@@ -2691,7 +3206,12 @@ def _build_training_hard_contract(
         **(
             {}
             if task_first_contract is None
-            else {"task_first_training": task_first_contract}
+            else {
+                "task_first_training": task_first_contract,
+                "task_first_ppo_runner_recipe": _task_first_agent_recipe(
+                    agent_cfg
+                ),
+            }
         ),
     }
 
@@ -6550,7 +7070,18 @@ def _run(cfg):
     # An optional root-level expected SHA makes a preregistered recipe fail
     # before the expensive scene import.
     effective_reward_receipt = _build_effective_reward_receipt_for_training(
-        env_cfg, cfg
+        env_cfg,
+        cfg,
+        require_expected_sha256=(
+            str(
+                getattr(
+                    getattr(env_cfg.commands, "racket_target", None),
+                    "target_mode",
+                    "",
+                )
+            )
+            == "task_first"
+        ),
     )
     print(
         "[train.py] effective reward recipe SHA-256: "
@@ -6600,7 +7131,9 @@ def _run(cfg):
         env.unwrapped,
         actor_contract,
         effective_reward_receipt=effective_reward_receipt,
+        agent_cfg=agent_cfg,
     )
+    task_first_training = "task_first_training" in hard_contract
     try:
         validate_schema3_contract_structure(hard_contract)
     except ValueError as exc:
@@ -6713,6 +7246,12 @@ def _run(cfg):
     ckpt = getattr(cfg, "checkpoint_path", None)
     source_checkpoint = None
     motion_kinematics_exact = bool(hard_contract["motion_kinematics_exact"])
+    if task_first_training and not motion_kinematics_exact:
+        raise RuntimeError(
+            "[train.py] task-first requires exact schema-2 motion kinematics "
+            "for every action; a velocity-center curriculum cannot use "
+            "ambiguous COM/link-origin motion semantics"
+        )
     contract_lineage_exact = ckpt is None and motion_kinematics_exact
     if not motion_kinematics_exact:
         print(
@@ -6725,7 +7264,24 @@ def _run(cfg):
         ckpt = os.path.abspath(str(ckpt))
         if not os.path.isfile(ckpt):
             raise FileNotFoundError(f"[train.py] checkpoint_path does not exist: {ckpt}")
+        if task_first_training and bool(
+            getattr(cfg, "checkpoint_tolerant", False)
+        ):
+            raise RuntimeError(
+                "[train.py] task-first forbids checkpoint_tolerant actor-only "
+                "warm starts; optimizer and exact curriculum state must resume "
+                "together, or the run must start a fresh lineage"
+            )
         source_checkpoint = torch.load(ckpt, map_location="cpu", weights_only=False)
+        if task_first_training and (
+            not isinstance(source_checkpoint, dict)
+            or "optimizer_state_dict" not in source_checkpoint
+        ):
+            raise RuntimeError(
+                "[train.py] task-first resume requires optimizer_state_dict; "
+                "actor-only or fresh-optimizer warm starts lose the exact PPO "
+                "and curriculum lineage"
+            )
         prior_contract_path = os.path.join(os.path.dirname(ckpt), "params", "training_contract.json")
         allow_missing = bool(getattr(cfg, "checkpoint_allow_missing_contract", False))
         allow_mismatch = bool(getattr(cfg, "checkpoint_allow_contract_mismatch", False))
@@ -6734,6 +7290,12 @@ def _run(cfg):
                 f"[train.py] checkpoint has no hard training contract: {prior_contract_path}. "
                 "Tensor shapes cannot detect a changed HitterPure strike plane/box/face convention."
             )
+            if task_first_training:
+                raise RuntimeError(
+                    message
+                    + " Task-first resumes never allow an unbound warm-start; "
+                    "start a fresh lineage instead."
+                )
             if getattr(actor_contract, "name", None) == "hitter_pure" and not allow_missing:
                 raise RuntimeError(
                     message + " For a deliberately audited legacy warm-start, pass "
@@ -6745,12 +7307,17 @@ def _run(cfg):
             with open(prior_contract_path, encoding="utf-8") as stream:
                 prior_contract = json.load(stream)
             diffs = _contract_diff(prior_contract, hard_contract)
-            if diffs and not allow_mismatch:
+            if diffs and (task_first_training or not allow_mismatch):
                 raise RuntimeError(
                     "[train.py] checkpoint hard-contract mismatch; refusing a contaminated resume:\n  - "
                     + "\n  - ".join(diffs)
-                    + "\nIf this is an intentional representation transfer rather than a resume, pass "
-                      "checkpoint_allow_contract_mismatch=true and use a new run name."
+                    + (
+                        "\nTask-first does not permit representation-transfer overrides; "
+                        "start a fresh lineage."
+                        if task_first_training
+                        else "\nIf this is an intentional representation transfer rather than a "
+                        "resume, pass checkpoint_allow_contract_mismatch=true and use a new run name."
+                    )
                 )
             if diffs:
                 print("[train.py] WARNING: explicit hard-contract mismatch override:\n  - "
@@ -6765,6 +7332,11 @@ def _run(cfg):
                         sha256=_sha256_file(prior_contract_path),
                     )
                 except ValueError as exc:
+                    if task_first_training:
+                        raise RuntimeError(
+                            "[train.py] task-first source checkpoint is not "
+                            "exact-bound to its schema-3 training contract"
+                        ) from exc
                     print(
                         "[train.py] WARNING: source checkpoint contract is not exact-bound; "
                         f"descendants remain formal-ineligible: {exc}",
@@ -6783,7 +7355,14 @@ def _run(cfg):
         training_contract_sha256=hard_contract_sha256,
         training_contract_lineage_exact=contract_lineage_exact,
         training_launch_claim_sha256=training_launch_claim_sha256,
+        require_exact_resume_state=task_first_training,
     )
+    if task_first_training and bool(getattr(runner, "is_distributed", False)):
+        raise RuntimeError(
+            "[train.py] task-first v1 is single-process only. Curriculum "
+            "evidence has no distributed all-reduce contract yet, so multi-GPU "
+            "ranks could promote different action domains."
+        )
     runner.add_git_repo_to_log(__file__)
 
     # Resume / curriculum hand-off: load weights+optimizer from a prior checkpoint and CONTINUE (the

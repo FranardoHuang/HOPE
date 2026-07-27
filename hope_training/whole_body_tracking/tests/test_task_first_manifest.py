@@ -162,11 +162,17 @@ def test_file_digest_is_startup_binding_and_canonical_digest_is_deterministic(tm
         M.load_task_first_manifest(compact, expected_sha256="A" * 64)
 
 
-def test_unauthorized_manifest_is_inspectable_metadata_but_not_launchable(tmp_path):
-    path = _write(tmp_path, _document(training_authorized=False))
+@pytest.mark.parametrize("claimed_authorized", [False, True])
+def test_schema_v1_self_authorization_is_inspectable_but_never_launchable(
+    tmp_path, claimed_authorized
+):
+    path = _write(
+        tmp_path,
+        _document(training_authorized=claimed_authorized),
+    )
     receipt = M.load_task_first_manifest(path)
-    assert receipt.manifest.training_authorized is False
-    with pytest.raises(ValueError, match="metadata-only"):
+    assert receipt.manifest.training_authorized is claimed_authorized
+    with pytest.raises(ValueError, match="not a code-rooted admission"):
         M.load_task_first_manifest(path, require_training_authorized=True)
     with pytest.raises(ValueError, match="must be a bool"):
         M.load_task_first_manifest(path, require_training_authorized=1)
@@ -369,6 +375,8 @@ def test_uid_generator_rejects_ambiguous_identity_inputs():
 def test_action_envelope_and_holdout_bounds_are_strict(tmp_path):
     cases = [
         (("actions", 0, "strike_phase"), 1.01, "strike_phase"),
+        (("actions", 0, "strike_phase"), 0.0, "strike_phase"),
+        (("actions", 0, "strike_phase"), 1.0, "strike_phase"),
         (("actions", 0, "family_sign"), 0, "family_sign"),
         (("actions", 0, "mount_normal_sign"), 0, "mount_normal_sign"),
         (("actions", 0, "position_half_extent_m", 0), -0.01, "position_half"),

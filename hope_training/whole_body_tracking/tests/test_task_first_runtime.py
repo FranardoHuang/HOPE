@@ -516,6 +516,7 @@ def test_wrap_defers_outcome_and_recovery_reset_charges_prior_action():
     runtime._motion = lambda: SimpleNamespace(_multiseg=True, clip_id=new_clip)
     masks = {
         "base_fell_tilt": _Tensor([True, False, False, False], dtype=np.bool_),
+        "base_too_low": _Tensor([False, False, False, False], dtype=np.bool_),
         "robot_hit_table": _Tensor([False, True, False, False], dtype=np.bool_),
     }
     runtime._env = SimpleNamespace(
@@ -667,7 +668,11 @@ def test_resume_mid_recovery_discards_transport_reset_without_evidence():
         manager = SimpleNamespace(
             terminated=_Tensor([True], dtype=np.bool_),
             time_outs=_Tensor([False], dtype=np.bool_),
-            active_terms=("robot_hit_table",),
+            active_terms=(
+                "base_fell_tilt",
+                "base_too_low",
+                "robot_hit_table",
+            ),
             get_term=lambda name: _Tensor([True], dtype=np.bool_),
         )
         runtime._env = SimpleNamespace(termination_manager=manager)
@@ -698,6 +703,8 @@ def test_runtime_source_pins_hard_contract_positive_speed_and_legacy_resume():
     assert "self.target_normal_cmd[ids] = face" in SOURCE
     assert "self.racket_target_normal_w[ids] = face" in SOURCE
     assert "self._task_first_attempt_action[ids]" in SOURCE
+    assert "task-first strike opportunity must resolve strictly inside" in SOURCE
+    assert "set(_TASK_FIRST_UNSAFE_TERMINATIONS) - active_terms" in SOURCE
     assert "self._task_first_window_counts.zero_()" in SOURCE
     assert "self.exact_resume_state_dict = self._task_first_exact_resume_state_dict" in SOURCE
     # Public callable hooks are dynamically installed only inside the task-first branch.  Legacy
@@ -802,8 +809,9 @@ def test_runtime_hard_contract_exactly_equals_train_builder(monkeypatch):
         strike_success_normal_thresh_deg=15.0,
         clean_reference_strike_velocity=True,
         clean_strike_vel_window=2,
+        racket_body_name="pingpang_red_Link",
         wrist_body_name="right_wrist_yaw_Link",
-        mount_offset=(0.0, 0.13, 0.0),
+        mount_offset=(0.21021, 0.032078, 0.032036),
         mount_quat=(1.0, 0.0, 0.0, 0.0),
         mount_normal_axis=1,
         face_command_pairing="shared_plus_y",
@@ -811,14 +819,57 @@ def test_runtime_hard_contract_exactly_equals_train_builder(monkeypatch):
     env_cfg = SimpleNamespace(
         table_obstacle=True,
         table_obstacle_prim="{ENV_REGEX_NS}/TableObstacle",
+        scene=SimpleNamespace(
+            racket_table_contact=SimpleNamespace(
+                prim_path=(
+                    "{ENV_REGEX_NS}/Robot/right_wrist_yaw_Link"
+                ),
+                filter_prim_paths_expr=[
+                    "{ENV_REGEX_NS}/TableObstacle"
+                ],
+            ),
+            table_obstacle=SimpleNamespace(
+                prim_path="{ENV_REGEX_NS}/TableObstacle",
+                init_state=SimpleNamespace(pos=(1.87, 0.0, 0.735)),
+                spawn=SimpleNamespace(
+                    size=(2.74, 1.525, 0.05),
+                    collision_props=SimpleNamespace(
+                        collision_enabled=True
+                    ),
+                ),
+            ),
+        ),
         terminations=SimpleNamespace(
+            base_fell_tilt=SimpleNamespace(
+                func="bad_orientation",
+                time_out=False,
+                params={"limit_angle": 0.7},
+            ),
+            base_too_low=SimpleNamespace(
+                func="root_height_below_minimum",
+                time_out=False,
+                params={"minimum_height": 0.5},
+            ),
             robot_hit_table=SimpleNamespace(
                 func="whole_body_tracking.tasks.tracking.mdp.robot_hit_table",
+                time_out=False,
                 params={
+                    "sensor_cfg": SimpleNamespace(
+                        name="contact_forces",
+                        body_names=[
+                            r"^(?!left_ankle_roll_Link$)(?!right_ankle_roll_Link$).+$"
+                        ],
+                    ),
                     "filtered_sensor_cfg": SimpleNamespace(
                         name="racket_table_contact"
                     ),
-                    "near_x": 0.78,
+                    "asset_cfg": SimpleNamespace(
+                        name="robot",
+                        body_names=[
+                            r"^(?!left_ankle_roll_Link$)(?!right_ankle_roll_Link$).+$"
+                        ],
+                    ),
+                    "near_x": 0.5,
                     "surface_z": 0.76,
                     "force_threshold": 1.0,
                     "margin": 0.02,

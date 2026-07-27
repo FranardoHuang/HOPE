@@ -45,6 +45,11 @@ checkpoint_tolerant: false
 # sidecar; opting in here is a deliberate, logged representation transfer—not an ordinary resume.
 checkpoint_allow_missing_contract: false
 checkpoint_allow_contract_mismatch: false
+# Formal task-first runs must pin the canonical receipt computed from the fully
+# composed post-override Reward cfg.  Leave null for legacy/non-task-first runs.
+# A task-first preflight with null fails before scene import and prints the
+# candidate SHA to review; the real launch must pass that exact lowercase hash.
+expected_effective_reward_recipe_sha256: null
 
 # logging
 logger: wandb           # wandb | tensorboard | neptune

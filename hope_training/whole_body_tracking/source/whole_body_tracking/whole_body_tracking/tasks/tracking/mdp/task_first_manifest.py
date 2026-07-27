@@ -1,4 +1,4 @@
-"""Strict schema-v1 contract for task-first training manifests.
+"""Strict schema-v1 metadata contract for task-first training manifests.
 
 The manifest binds an arbitrary ordered action bank to each action's full
 task-generalization envelope and to the curriculum evidence gate.  Parsing is
@@ -12,8 +12,11 @@ Two hashes intentionally have different jobs:
 * ``canonical_sha256`` is a formatting-independent content digest useful for
   review and comparison; it must not replace the byte hash at startup.
 
-This module is dependency-light and does not read any motion asset.  Runtime
-integration must independently verify each declared motion path and SHA-256.
+This module is dependency-light and does not read any motion asset.  Schema v1
+therefore cannot authorize training: its historical ``training_authorized``
+field is an untrusted claim retained only for exact-byte compatibility.  A
+formal launch must use a later schema that resolves every action through the
+code-trusted registry promotion and opaque-admission chain.
 """
 
 from __future__ import annotations
@@ -324,17 +327,23 @@ class TaskFirstAction:
                 f"action_uid {action_uid} does not match canonical action "
                 f"identity (expected {expected_uid})"
             )
+        strike_phase = _require_finite(
+            row["strike_phase"],
+            name="strike_phase",
+            minimum=0.0,
+            maximum=1.0,
+        )
+        if not 0.0 < strike_phase < 1.0:
+            raise ValueError(
+                "strike_phase must lie strictly inside (0, 1); a boundary "
+                "strike can be attributed to the adjacent action at wrap"
+            )
         return cls(
             action_id=action_id,
             action_uid=action_uid,
             motion_path=_require_motion_path(row["motion_path"]),
             motion_sha256=motion_sha256,
-            strike_phase=_require_finite(
-                row["strike_phase"],
-                name="strike_phase",
-                minimum=0.0,
-                maximum=1.0,
-            ),
+            strike_phase=strike_phase,
             family_sign=family_sign,
             mount_normal_sign=mount_normal_sign,
             position_half_extent_m=_require_vector(
@@ -549,6 +558,253 @@ class LoadedTaskFirstManifest:
     canonical_sha256: str
 
 
+def _cfg_value(value: object, name: str, default: object = None) -> object:
+    if isinstance(value, Mapping):
+        return value.get(name, default)
+    return getattr(value, name, default)
+
+
+def _callable_identity(value: object) -> str:
+    if isinstance(value, str):
+        return value
+    return (
+        f"{getattr(value, '__module__', '')}."
+        f"{getattr(value, '__qualname__', getattr(value, '__name__', ''))}"
+    )
+
+
+def _scene_entity_name(value: object) -> str:
+    return str(_cfg_value(value, "name", "") or "")
+
+
+def _string_sequence(value: object) -> list[str]:
+    if value is None:
+        return []
+    if isinstance(value, str):
+        return [value]
+    return [str(item) for item in value]
+
+
+def _term_params(term: object) -> Mapping[str, object]:
+    params = _cfg_value(term, "params", {})
+    return params if isinstance(params, Mapping) else {}
+
+
+def build_task_first_training_contract(
+    loaded: LoadedTaskFirstManifest,
+    *,
+    racket_cfg: object,
+    motion_cfg: object,
+    env_cfg: object,
+) -> Dict[str, object]:
+    """Build the sole JSON-safe task-first runtime/checkpoint contract.
+
+    Both the pre-gym launcher and the instantiated command term call this
+    function.  Keeping the builder here prevents the two launch boundaries from
+    silently binding different success, reference-center, or safety semantics.
+    Validation remains at those executable boundaries; this function only
+    normalizes already-validated values into one canonical structure.
+    """
+
+    manifest = loaded.manifest
+    terminations = _cfg_value(env_cfg, "terminations")
+    table_term = _cfg_value(terminations, "robot_hit_table")
+    table_params = _term_params(table_term)
+    table_func = _cfg_value(table_term, "func")
+    base_fell_term = _cfg_value(terminations, "base_fell_tilt")
+    base_low_term = _cfg_value(terminations, "base_too_low")
+    base_fell_params = _term_params(base_fell_term)
+    base_low_params = _term_params(base_low_term)
+    broad_sensor_cfg = table_params.get("sensor_cfg")
+    broad_asset_cfg = table_params.get("asset_cfg")
+    filtered_sensor_cfg = table_params.get("filtered_sensor_cfg")
+    scene = _cfg_value(env_cfg, "scene")
+    filtered_sensor = _cfg_value(scene, "racket_table_contact")
+    table_asset = _cfg_value(scene, "table_obstacle")
+    table_spawn = _cfg_value(table_asset, "spawn")
+    table_collision = _cfg_value(table_spawn, "collision_props")
+    table_init_state = _cfg_value(table_asset, "init_state")
+    return {
+        "schema_version": 2,
+        "producer": "task_first_v1",
+        "manifest_basename": loaded.source_path.name,
+        "manifest_file_sha256": loaded.file_sha256,
+        "manifest_canonical_sha256": loaded.canonical_sha256,
+        "manifest_id": manifest.manifest_id,
+        "action_ids": list(manifest.action_order),
+        "action_uids": [int(action.action_uid) for action in manifest.actions],
+        "curriculum": {
+            "axis_order": ["position", "speed", "face", "base"],
+            "levels": [0.0, 0.25, 0.5, 0.75, 1.0],
+            "gate": manifest.gate.as_dict(),
+        },
+        "ranges": [
+            {
+                "action_id": action.action_id,
+                "action_uid": int(action.action_uid),
+                "position_half_extent_m": list(action.position_half_extent_m),
+                "speed_delta_mps": float(action.speed_delta_mps),
+                "face_cone_deg": float(action.face_cone_deg),
+                "station_center_shift_xy_m": list(
+                    action.station_center_shift_xy_m
+                ),
+                "base_half_extent_xy_m": list(action.base_half_extent_xy_m),
+            }
+            for action in manifest.actions
+        ],
+        "success_thresholds": {
+            "position_m": float(
+                _cfg_value(racket_cfg, "strike_success_pos_thresh")
+            ),
+            "speed_mps": float(
+                _cfg_value(racket_cfg, "strike_success_vel_thresh")
+            ),
+            "face_deg": float(
+                _cfg_value(racket_cfg, "strike_success_normal_thresh_deg")
+            ),
+            "base_m": float(
+                _cfg_value(racket_cfg, "task_first_base_success_thresh_m")
+            ),
+        },
+        "reference_strike_recipe": {
+            "clean_reference_strike_velocity": bool(
+                _cfg_value(
+                    racket_cfg, "clean_reference_strike_velocity", False
+                )
+            ),
+            "clean_strike_vel_window": int(
+                _cfg_value(racket_cfg, "clean_strike_vel_window")
+            ),
+            "wrist_body_name": str(
+                _cfg_value(racket_cfg, "wrist_body_name")
+            ),
+            "racket_body_name": str(
+                _cfg_value(racket_cfg, "racket_body_name")
+            ),
+            "mount_offset_m": [
+                float(value)
+                for value in _cfg_value(racket_cfg, "mount_offset", ())
+            ],
+            "mount_quat_wxyz": [
+                float(value)
+                for value in _cfg_value(racket_cfg, "mount_quat", ())
+            ],
+            "mount_normal_axis": int(
+                _cfg_value(racket_cfg, "mount_normal_axis")
+            ),
+            "face_command_pairing": str(
+                _cfg_value(racket_cfg, "face_command_pairing")
+            ),
+        },
+        "motion_sampling": {
+            "balanced_clip_sampling": bool(
+                _cfg_value(motion_cfg, "balanced_clip_sampling", False)
+            ),
+            "balanced_clip_sampling_seed": int(
+                _cfg_value(motion_cfg, "balanced_clip_sampling_seed", 0)
+            ),
+            "clip_switch_prob": float(
+                _cfg_value(motion_cfg, "clip_switch_prob", 0.0)
+            ),
+            "speed_scale_range": [
+                float(value)
+                for value in _cfg_value(
+                    motion_cfg, "speed_scale_range", ()
+                )
+            ],
+            "event_timing_mode": str(
+                _cfg_value(motion_cfg, "event_timing_mode", "")
+            ),
+        },
+        "unsafe_evidence": {
+            "termination_terms": [
+                "base_fell_tilt",
+                "base_too_low",
+                "robot_hit_table",
+            ],
+            "table_obstacle": bool(
+                _cfg_value(env_cfg, "table_obstacle", False)
+            ),
+            "table_obstacle_prim": str(
+                _cfg_value(env_cfg, "table_obstacle_prim", "")
+            ),
+            "fall_guards": {
+                "base_fell_tilt": {
+                    "function": _callable_identity(
+                        _cfg_value(base_fell_term, "func")
+                    ),
+                    "time_out": bool(
+                        _cfg_value(base_fell_term, "time_out", False)
+                    ),
+                    "limit_angle_rad": float(
+                        base_fell_params.get("limit_angle")
+                    ),
+                },
+                "base_too_low": {
+                    "function": _callable_identity(
+                        _cfg_value(base_low_term, "func")
+                    ),
+                    "time_out": bool(
+                        _cfg_value(base_low_term, "time_out", False)
+                    ),
+                    "minimum_height_m": float(
+                        base_low_params.get("minimum_height")
+                    ),
+                },
+            },
+            "robot_hit_table": {
+                "function": _callable_identity(table_func),
+                "time_out": bool(
+                    _cfg_value(table_term, "time_out", False)
+                ),
+                "filtered_sensor_name": _scene_entity_name(
+                    filtered_sensor_cfg
+                ),
+                "filtered_sensor_prim_path": str(
+                    _cfg_value(filtered_sensor, "prim_path", "")
+                ),
+                "filtered_sensor_filter_prim_paths": _string_sequence(
+                    _cfg_value(
+                        filtered_sensor, "filter_prim_paths_expr", ()
+                    )
+                ),
+                "broad_sensor_name": _scene_entity_name(
+                    broad_sensor_cfg
+                ),
+                "broad_sensor_body_names": _string_sequence(
+                    _cfg_value(broad_sensor_cfg, "body_names")
+                ),
+                "broad_asset_name": _scene_entity_name(broad_asset_cfg),
+                "broad_asset_body_names": _string_sequence(
+                    _cfg_value(broad_asset_cfg, "body_names")
+                ),
+                "near_x_m": float(table_params.get("near_x")),
+                "surface_z_m": float(table_params.get("surface_z")),
+                "force_threshold_n": float(
+                    table_params.get("force_threshold")
+                ),
+                "margin_m": float(table_params.get("margin")),
+            },
+            "table_collider": {
+                "prim_path": str(_cfg_value(table_asset, "prim_path", "")),
+                "center_xyz_m": [
+                    float(value)
+                    for value in _cfg_value(table_init_state, "pos", ())
+                ],
+                "size_xyz_m": [
+                    float(value)
+                    for value in _cfg_value(table_spawn, "size", ())
+                ],
+                "collision_enabled": bool(
+                    _cfg_value(
+                        table_collision, "collision_enabled", False
+                    )
+                ),
+            },
+        },
+    }
+
+
 def load_task_first_manifest(
     path: str | Path,
     *,
@@ -558,9 +814,10 @@ def load_task_first_manifest(
     """Read, byte-bind, and strictly validate one task-first manifest.
 
     ``expected_sha256`` is matched against the original file bytes before JSON
-    parsing.  Set ``require_training_authorized`` at executable launch
-    boundaries; review tools may leave it false to inspect preregistered but
-    intentionally blocked manifests.
+    parsing.  Schema v1 remains review-only even when its legacy
+    ``training_authorized`` claim is true; executable launch boundaries must
+    set ``require_training_authorized`` and will fail closed until a
+    code-rooted admission schema is implemented.
     """
 
     if type(require_training_authorized) is not bool:
@@ -591,9 +848,11 @@ def load_task_first_manifest(
         raise ValueError("task-first manifest is not valid JSON") from error
 
     manifest = TaskFirstManifest.from_mapping(document)
-    if require_training_authorized and not manifest.training_authorized:
+    if require_training_authorized:
         raise ValueError(
-            "task-first manifest is metadata-only: training_authorized is false"
+            "task-first schema v1 is metadata-only: its self-reported "
+            "training_authorized field is not a code-rooted admission "
+            "capability"
         )
     return LoadedTaskFirstManifest(
         manifest=manifest,
