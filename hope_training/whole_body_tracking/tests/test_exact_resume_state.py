@@ -281,7 +281,7 @@ def test_save_embeds_state_and_load_round_trips(runner_module, tmp_path):
 
     loaded = torch.load(checkpoint, map_location="cpu", weights_only=False)
     state = loaded["infos"]["hope_exact_resume_state"]
-    assert state["schema_version"] == 2
+    assert state["schema_version"] == 3
     assert state["next_learning_iteration"] == 138
     assert state["target_learning_iterations"] == 25000
     assert state["tot_timesteps"] == 137 * 24 * 4

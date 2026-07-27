@@ -44,6 +44,9 @@ _STRIKE_FAMILIES = ("forehand", "backhand")
 # thousands of iterations behind a healthy aggregate before anyone looked.
 _ZERO_RETURN_ALARM_OPPORTUNITIES = 500
 _ZERO_RETURN_ABORT_OPPORTUNITIES = 5000
+_EXACT_RESUME_SCHEMA_VERSION = 3
+_ENVIRONMENT_RESUME_SCHEMA_VERSION = 3
+_SUPPORTED_EXACT_RESUME_SCHEMAS = (1, 2, _EXACT_RESUME_SCHEMA_VERSION)
 
 
 def _ratio_or_none(counters: dict, numerator: str, denominator: str):
@@ -331,9 +334,9 @@ class MotionOnPolicyRunner(OnPolicyRunner):
 
         人话:除了权重,续训还需要 (1) 下一个该跑的迭代号 —— base rsl_rl 完成第 N 个迭代后
         存档且记 iter=N,直接续会静默重复一次 PPO 更新;(2) 环境课程主时钟 common_step_counter
-        和各命令项的课程状态;(3) RNG/W&B 等审计信息。RNG 与 W&B run 字段目前只存不恢复:
-        main 没有 jiayi 栈那种独立的 exact_resume 开关,共享的 load() 不能悄悄覆盖本次配置的
-        seed 或 W&B run;存下来是为了跨栈对账、以及将来加显式开关时不用改档案格式。
+        和各命令项的课程状态;(3) 下一批采样所需的 RNG 状态。只要 checkpoint 带这份精确
+        续训包,load() 就会在第一次 env.reset() 前恢复 RNG;不带包的 legacy checkpoint
+        仍保留旧的 warm-start 语义,绝不根据 seed 或迭代号猜 RNG。
         """
         wandb_run_id = None
         wandb_run_name = None
@@ -347,7 +350,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             except Exception:
                 pass
         return {
-            "schema_version": 2,
+            "schema_version": _EXACT_RESUME_SCHEMA_VERSION,
             # Base rsl_rl saves after completing iteration N but stores iter=N. Exact resume must
             # begin at N+1, otherwise it silently performs one duplicate PPO update.
             "next_learning_iteration": int(self.current_learning_iteration) + 1,
@@ -359,6 +362,9 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             "numpy_random_state": np.random.get_state(),
             "torch_random_state": torch.get_rng_state(),
             "torch_cuda_random_states": torch.cuda.get_rng_state_all() if torch.cuda.is_available() else [],
+            "torch_cuda_device_count": int(torch.cuda.device_count())
+            if torch.cuda.is_available()
+            else 0,
             "log_dir": str(self.log_dir) if self.log_dir is not None else None,
             "wandb_run_id": wandb_run_id,
             "wandb_run_name": wandb_run_name,
@@ -386,9 +392,10 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         env = getattr(self.env, "unwrapped", self.env)
         state = {
             # 内层 schema:1 = jiayi/hitterobs 布局(scalars/tensors 两段);2 = main 追加
-            # tensor_dicts 段。读端(_restore_environment_resume_state)对未知段/未知键一律
-            # 容忍,只恢复认得上的 —— 多存无害,漏存有害。
-            "schema_version": 2,
+            # tensor_dicts 段;3 = command term 可用成对显式 hook 接管完整状态。旧 schema
+            # 仍走属性扫描兼容,新 schema 的显式状态则按 term 名、term 类型和 strict=True
+            # fail-loud 恢复,不允许换动作目录后静默套用旧课程。
+            "schema_version": _ENVIRONMENT_RESUME_SCHEMA_VERSION,
             "common_step_counter": int(getattr(env, "common_step_counter", 0)),
             "command_terms": {},
         }
@@ -398,6 +405,30 @@ class MotionOnPolicyRunner(OnPolicyRunner):
 
         for term_name in getattr(manager, "active_terms", ()):
             term = manager.get_term(term_name)
+            exact_state_getter = getattr(term, "exact_resume_state_dict", None)
+            exact_state_loader = getattr(term, "load_exact_resume_state_dict", None)
+            has_exact_state_getter = callable(exact_state_getter)
+            has_exact_state_loader = callable(exact_state_loader)
+            if has_exact_state_getter != has_exact_state_loader:
+                raise RuntimeError(
+                    f"command term {term_name!r} must implement exact_resume_state_dict() "
+                    "and load_exact_resume_state_dict(state, strict=True) as a pair"
+                )
+            if has_exact_state_getter:
+                exact_state = exact_state_getter()
+                if not isinstance(exact_state, dict):
+                    raise TypeError(
+                        f"command term {term_name!r} exact_resume_state_dict() must return a dict"
+                    )
+                state["command_terms"][str(term_name)] = {
+                    "capture_mode": "explicit",
+                    "term_type": f"{type(term).__module__}.{type(term).__qualname__}",
+                    "exact_state": exact_state,
+                }
+                # The explicit API owns the whole term state. Mixing it with the heuristic scanner
+                # would create two competing truths and could overwrite a strict restore.
+                continue
+
             term_state = {"scalars": {}, "tensors": {}, "tensor_dicts": {}}
 
             # 标量类课程驱动:EMA 成功率/摔倒统计(*_acc / *_acc_c)、成功门控扰动幅度
@@ -471,7 +502,81 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         manager = getattr(env, "command_manager", None)
         restored_terms = []
         if isinstance(saved, dict) and manager is not None:
-            for term_name, term_state in saved.get("command_terms", {}).items():
+            environment_schema = int(saved.get("schema_version", 1))
+            if environment_schema not in (1, 2, _ENVIRONMENT_RESUME_SCHEMA_VERSION):
+                raise RuntimeError(
+                    "unsupported environment exact-resume schema "
+                    f"{environment_schema}; refusing to guess command state"
+                )
+            saved_term_states = saved.get("command_terms", {})
+            if not isinstance(saved_term_states, dict):
+                raise TypeError("environment exact-resume command_terms must be a dict")
+
+            active_term_names = tuple(str(name) for name in getattr(manager, "active_terms", ()))
+            if len(active_term_names) != len(set(active_term_names)):
+                raise RuntimeError("command manager active_terms contains duplicate names")
+            active_terms = {name: manager.get_term(name) for name in active_term_names}
+
+            if environment_schema >= 3:
+                saved_explicit = {
+                    str(name)
+                    for name, term_state in saved_term_states.items()
+                    if isinstance(term_state, dict)
+                    and term_state.get("capture_mode") == "explicit"
+                }
+                current_explicit = set()
+                for term_name, term in active_terms.items():
+                    getter = getattr(term, "exact_resume_state_dict", None)
+                    loader = getattr(term, "load_exact_resume_state_dict", None)
+                    has_getter = callable(getter)
+                    has_loader = callable(loader)
+                    if has_getter != has_loader:
+                        raise RuntimeError(
+                            f"command term {term_name!r} must implement exact resume hooks as a pair"
+                        )
+                    if has_getter:
+                        current_explicit.add(term_name)
+                if saved_explicit != current_explicit:
+                    raise RuntimeError(
+                        "exact-resume command term identity mismatch: "
+                        f"checkpoint explicit terms={sorted(saved_explicit)}, "
+                        f"current explicit terms={sorted(current_explicit)}"
+                    )
+
+            for term_name, term_state in saved_term_states.items():
+                term_name = str(term_name)
+                if not isinstance(term_state, dict):
+                    raise TypeError(
+                        f"command term {term_name!r} exact-resume state must be a dict"
+                    )
+                if term_state.get("capture_mode") == "explicit":
+                    if term_name not in active_terms:
+                        raise RuntimeError(
+                            f"exact-resume command term {term_name!r} is absent from current config"
+                        )
+                    term = active_terms[term_name]
+                    current_term_type = f"{type(term).__module__}.{type(term).__qualname__}"
+                    saved_term_type = term_state.get("term_type")
+                    if saved_term_type != current_term_type:
+                        raise RuntimeError(
+                            f"exact-resume command term {term_name!r} type mismatch: "
+                            f"checkpoint={saved_term_type!r}, current={current_term_type!r}"
+                        )
+                    loader = getattr(term, "load_exact_resume_state_dict", None)
+                    if not callable(loader):
+                        raise RuntimeError(
+                            f"command term {term_name!r} cannot load explicit exact-resume state"
+                        )
+                    exact_state = term_state.get("exact_state")
+                    if not isinstance(exact_state, dict):
+                        raise TypeError(
+                            f"command term {term_name!r} explicit exact-resume state must be a dict"
+                        )
+                    # strict=True is an interface contract, not a best-effort hint: manifest SHA,
+                    # action order, tensor shapes and any other term identity checks must fail loud.
+                    loader(exact_state, strict=True)
+                    restored_terms.append(term_name)
+                    continue
                 try:
                     term = manager.get_term(term_name)
                 except (KeyError, ValueError):
@@ -510,6 +615,94 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         )
         return common_step_counter, source
 
+    @staticmethod
+    def _validate_rng_tensor(saved, current, *, name: str) -> torch.Tensor:
+        """Validate a serialized PyTorch RNG byte vector without mutating global RNG."""
+
+        if not torch.is_tensor(saved):
+            raise TypeError(f"{name} must be a torch.Tensor")
+        if saved.dtype != current.dtype or tuple(saved.shape) != tuple(current.shape):
+            raise RuntimeError(
+                f"{name} shape/dtype mismatch: checkpoint={tuple(saved.shape)}/{saved.dtype}, "
+                f"current={tuple(current.shape)}/{current.dtype}"
+            )
+        return saved.detach().cpu()
+
+    def _restore_exact_rng_state(self, resume_state: dict) -> None:
+        """Restore every sampling RNG atomically after validation and before ``env.reset()``."""
+
+        required = (
+            "python_random_state",
+            "numpy_random_state",
+            "torch_random_state",
+            "torch_cuda_random_states",
+        )
+        missing = [name for name in required if name not in resume_state]
+        if missing:
+            raise RuntimeError(
+                "exact-resume checkpoint is missing RNG state fields: " + ", ".join(missing)
+            )
+
+        python_state = resume_state["python_random_state"]
+        numpy_state = resume_state["numpy_random_state"]
+        # Validate Python and NumPy payloads on private generators so a malformed CUDA payload
+        # cannot leave the process half-restored.
+        python_probe = random.Random()
+        try:
+            python_probe.setstate(python_state)
+        except Exception as exc:
+            raise RuntimeError("invalid python_random_state in exact-resume checkpoint") from exc
+        numpy_probe = np.random.RandomState()
+        try:
+            numpy_probe.set_state(numpy_state)
+        except Exception as exc:
+            raise RuntimeError("invalid numpy_random_state in exact-resume checkpoint") from exc
+
+        torch_state = self._validate_rng_tensor(
+            resume_state["torch_random_state"],
+            torch.get_rng_state(),
+            name="torch_random_state",
+        )
+
+        saved_cuda_states = resume_state["torch_cuda_random_states"]
+        if not isinstance(saved_cuda_states, (list, tuple)):
+            raise TypeError("torch_cuda_random_states must be a list or tuple")
+        cuda_available = bool(torch.cuda.is_available())
+        current_cuda_count = int(torch.cuda.device_count()) if cuda_available else 0
+        if cuda_available and current_cuda_count <= 0:
+            raise RuntimeError("torch.cuda reports available but has no visible devices")
+        declared_cuda_count = int(
+            resume_state.get("torch_cuda_device_count", len(saved_cuda_states))
+        )
+        if declared_cuda_count != len(saved_cuda_states):
+            raise RuntimeError(
+                "checkpoint CUDA RNG count is internally inconsistent: "
+                f"declared={declared_cuda_count}, states={len(saved_cuda_states)}"
+            )
+        if declared_cuda_count != current_cuda_count:
+            raise RuntimeError(
+                "CUDA RNG device-count mismatch: "
+                f"checkpoint={declared_cuda_count}, current={current_cuda_count}"
+            )
+        current_cuda_states = torch.cuda.get_rng_state_all() if current_cuda_count else []
+        if len(current_cuda_states) != current_cuda_count:
+            raise RuntimeError(
+                "torch.cuda.get_rng_state_all() returned an unexpected number of states: "
+                f"{len(current_cuda_states)} vs {current_cuda_count} devices"
+            )
+        cuda_states = [
+            self._validate_rng_tensor(saved, current, name=f"torch_cuda_random_states[{idx}]")
+            for idx, (saved, current) in enumerate(
+                zip(saved_cuda_states, current_cuda_states)
+            )
+        ]
+
+        random.setstate(python_state)
+        np.random.set_state(numpy_state)
+        torch.set_rng_state(torch_state)
+        if cuda_states:
+            torch.cuda.set_rng_state_all(cuda_states)
+
     def load(self, path: str, load_optimizer: bool = True, **kwargs):
         """Load a checkpoint; on a training resume also restore curriculum progress.
 
@@ -532,7 +725,10 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 # hitterobs 导出的档在 main 上续训也能拿到课程状态。
                 state = loaded.get("hope_exact_resume_state")
         if state is not None:
-            if not isinstance(state, dict) or int(state.get("schema_version", 0)) not in (1, 2):
+            if (
+                not isinstance(state, dict)
+                or int(state.get("schema_version", 0)) not in _SUPPORTED_EXACT_RESUME_SCHEMAS
+            ):
                 raise RuntimeError(
                     "unsupported hope_exact_resume_state schema "
                     f"{state.get('schema_version', None) if isinstance(state, dict) else type(state)}; "
@@ -571,6 +767,11 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 for param_group in self.alg.optimizer.param_groups:
                     param_group["lr"] = self.alg.learning_rate
             self._restore_environment_resume_state(state)
+            if int(state["schema_version"]) >= 3:
+                # Restoring RNG any earlier lets command-state loading consume the resumed stream;
+                # restoring it any later lets env.reset() sample from the constructor seed. This is
+                # therefore deliberately the final operation before the first resumed reset.
+                self._restore_exact_rng_state(state)
         # The simulator itself is not serialized. Reset once after restoring the curriculum counter
         # and command-manager globals so the first resumed rollout is sampled from the correct
         # distribution instead of the constructor-time step-zero curriculum.
@@ -633,8 +834,9 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 signal.signal(signum, handler)
 
     def log(self, locs: dict, width: int = 80, pad: int = 35) -> None:
-        super().log(locs, width=width, pad=pad)
         step = int(locs["it"])
+        self._notify_command_terms_rollout_end(step)
+        super().log(locs, width=width, pad=pad)
         # Consume/print even when TensorBoard/W&B is disabled: this stdout JSON line is the exact
         # per-update receipt, while dashboard logging is optional presentation only.
         exact_behavior = self._consume_exact_behavior_updates(step)
@@ -651,6 +853,34 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 flush=True,
             )
             raise KeyboardInterrupt
+
+    def _notify_command_terms_rollout_end(self, step: int) -> None:
+        """Notify each active command term once, before any per-update ledger is consumed."""
+
+        step = int(step)
+        previous_step = getattr(self, "_rollout_end_notified_step", None)
+        if previous_step == step:
+            return
+        if previous_step is not None and step < int(previous_step):
+            raise RuntimeError(
+                f"PPO update moved backwards at rollout boundary: {step} < {previous_step}"
+            )
+        # Mark before invoking user code. An exception is fatal and propagates; this guard prevents
+        # an outer logger retry from double-advancing an already-mutated curriculum.
+        self._rollout_end_notified_step = step
+
+        env = getattr(self.env, "unwrapped", self.env)
+        manager = getattr(env, "command_manager", None)
+        if manager is None:
+            return
+        term_names = tuple(str(name) for name in getattr(manager, "active_terms", ()))
+        if len(term_names) != len(set(term_names)):
+            raise RuntimeError("command manager active_terms contains duplicate names")
+        for term_name in term_names:
+            term = manager.get_term(term_name)
+            callback = getattr(term, "on_rollout_end", None)
+            if callable(callback):
+                callback(step)
 
     def _consume_exact_behavior_updates(self, step: int) -> dict[str, dict]:
         """Consume the sole behavior ledger once and emit one canonical JSON line per PPO update."""
