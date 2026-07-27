@@ -396,9 +396,10 @@ def test_reachable_frozen_state_round_trips_but_impossible_frozen_state_fails():
         max_stall_updates=2,
         stall_policy="freeze",
     )
-    _advance_single(curriculum, INSUFFICIENT)
-    _advance_single(curriculum, INSUFFICIENT)
+    _advance_single(curriculum, BAD)
+    _advance_single(curriculum, BAD)
     state = curriculum.state_dict()
+    assert state["progress"]["a"]["exit_dwell"][0] == 2
     resumed = _curriculum(
         ("a",),
         max_stall_updates=2,
@@ -408,10 +409,76 @@ def test_reachable_frozen_state_round_trips_but_impossible_frozen_state_fails():
     assert resumed.state_dict() == state
 
     impossible = deepcopy(state)
+    impossible["progress"]["a"]["exit_dwell"][0] = 1
     impossible["progress"]["a"]["stall_updates"][0] = 1
     with pytest.raises(ValueError, match="frozen state"):
         resumed.load_state_dict(impossible)
     assert resumed.state_dict() == state
+
+
+def test_state_load_rejects_active_counter_thresholds_and_overlap_atomically():
+    curriculum = _curriculum(
+        ("a",),
+        enter_dwell_updates=3,
+        exit_dwell_updates=2,
+        max_stall_updates=5,
+    )
+    baseline = curriculum.state_dict()
+    candidates = []
+
+    promotion_already_due = deepcopy(baseline)
+    promotion_already_due["progress"]["a"]["enter_dwell"][0] = 3
+    promotion_already_due["progress"]["a"]["stall_updates"][0] = 3
+    candidates.append((promotion_already_due, "enter dwell"))
+
+    rollback_already_due = deepcopy(baseline)
+    rollback_already_due["progress"]["a"]["level_indices"][0] = 1
+    rollback_already_due["progress"]["a"]["exit_dwell"][0] = 2
+    rollback_already_due["progress"]["a"]["stall_updates"][0] = 2
+    candidates.append((rollback_already_due, "exit dwell"))
+
+    mutually_exclusive_evidence_overlap = deepcopy(baseline)
+    mutually_exclusive_evidence_overlap["progress"]["a"]["enter_dwell"][0] = 2
+    mutually_exclusive_evidence_overlap["progress"]["a"]["exit_dwell"][0] = 2
+    mutually_exclusive_evidence_overlap["progress"]["a"]["stall_updates"][0] = 3
+    candidates.append((mutually_exclusive_evidence_overlap, "stall clock"))
+
+    frozen_under_fail_policy = deepcopy(baseline)
+    frozen_under_fail_policy["progress"]["a"]["frozen"] = True
+    frozen_under_fail_policy["progress"]["a"]["stall_updates"][0] = 5
+    candidates.append((frozen_under_fail_policy, "frozen state"))
+
+    for candidate, match in candidates:
+        with pytest.raises(ValueError, match=match):
+            curriculum.load_state_dict(candidate)
+        assert curriculum.state_dict() == baseline
+
+
+def test_state_load_accepts_reachable_complete_dwell_and_rejects_impossible_complete():
+    curriculum = _curriculum(("a",), exit_dwell_updates=2)
+    for _ in range(len(C.AXES) * (len(C.LEVELS) - 1)):
+        _advance_single(curriculum, GOOD)
+    assert curriculum.is_complete("a") is True
+    assert _advance_single(curriculum, BAD).kind == "complete_hold"
+    complete_state = curriculum.state_dict()
+    assert complete_state["progress"]["a"]["exit_dwell"][3] == 1
+    assert complete_state["progress"]["a"]["stall_updates"][3] == 0
+
+    resumed = _curriculum(("a",), exit_dwell_updates=2)
+    resumed.load_state_dict(deepcopy(complete_state))
+    assert resumed.state_dict() == complete_state
+
+    rollback_already_due = deepcopy(complete_state)
+    rollback_already_due["progress"]["a"]["exit_dwell"][3] = 2
+    with pytest.raises(ValueError, match="exit dwell"):
+        resumed.load_state_dict(rollback_already_due)
+    assert resumed.state_dict() == complete_state
+
+    frozen_complete = deepcopy(complete_state)
+    frozen_complete["progress"]["a"]["frozen"] = True
+    with pytest.raises(ValueError, match="completed counters"):
+        resumed.load_state_dict(frozen_complete)
+    assert resumed.state_dict() == complete_state
 
 
 def test_curriculum_constructs_and_serializes_ninety_three_actions():

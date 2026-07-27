@@ -912,7 +912,7 @@ class TaskFirstCurriculum:
                         f"progress[{action!r}] has an unreachable exit dwell counter"
                     )
             else:
-                if active_enter > active_stall or active_exit > active_stall:
+                if active_enter + active_exit > active_stall:
                     raise ValueError(
                         f"progress[{action!r}] has counters ahead of its stall clock"
                     )
