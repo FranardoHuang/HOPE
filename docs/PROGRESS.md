@@ -11,6 +11,23 @@
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
 
+## 2026-07-28(Fable 接力 Codex 断粮现场)
+
+- **发射还账**:07-27 00:09 Codex 在两 pod 发射的题库化 bh_loop_c 六臂波此前无文档,现立账
+  [EXP-BANKED-CGROUP-BHLOOPC-20260727](experiments/2026-07/EXP-BANKED-CGROUP-BHLOOPC-20260727.md)。
+  核心读数:bank 基线 legal/strike **0.488** vs uniform 对照 **0.000**(同 seed);bank+seed1 也崩塌
+  (崩塌臂 reward 反而更高——"不打球"仍是收入最优,种子脆弱性是真风险);ep20 臂查实为 base 的
+  逐位重复(episode_length 覆盖未生效),白跑作废。v2 reward-scale 队列 4k 终读:上台 1.2× 全面
+  领先、延付有害,该档进下一代默认。
+- **现场恢复**:Codex 断粮时的未提交 action-conditioned ball-first 层(+14k 行:action_ball_*
+  课程/采样/manifest/runtime + hope_commands 接线 + 合同/实验文档)已从 task-first worktree
+  抢救为提交 `6b13e0ff`,新工作分支 `Franco_claude/ballfirst-curriculum-20260728` 已推 origin。
+  本地 v2-reward 工作树的过期拷贝收进 stash(`stale-worktree-copies-before-taskfirst-switch-20260728`)。
+- **101 动作库**:pod2 `/workspace/yikang/chingmu_retarget/chingmu_a3_units_v2` 实为 74 个
+  unit pkl(15 FH + 59 BH)+ 26 frozen take;`ball_ext/` 已含逐 unit 真球轨迹(击球前后各 1s,
+  覆盖率中位 100%)——**匹配球是实测的,不用反推**。已有 2 条验收样例(058FH/060BH,含
+  v_in 拟合与实测拍面),批量转换进行中。
+
 ## 2026-07-27（按动作条件化 Ball-first / 任意 N 动作预开跑）
 
 - 裁定训练顺序为 `action → incoming ball/base/aim → fixed-action solve → atomic install`；训练期
