@@ -2123,25 +2123,24 @@ def _sample_asymmetric_truncated(
     uniform: float,
     name: str,
 ) -> float:
-    """Fixed-50/50-side truncated Gaussian from one open uniform."""
+    """Fixed-50/50-side UNIFORM draw; each side's width is its live support edge.
 
+    Franco 2026-07-28 裁定:分布用 uniform,不用截断高斯;`*_std` 字段语义 = 该侧当前
+    支撑半宽(随课程档位独立进退)。侧选择固定 50/50,与两侧宽度无关,所以一侧扩张
+    不会改变另一侧的采样概率;硬 bounds 仍然封顶。
+    """
+
+    if not lower_bound <= center <= upper_bound:
+        raise ValueError(f"{name} center lies outside bounds")
     if uniform < 0.5:
-        return _sample_truncated_normal(
-            center=center,
-            std=lower_std,
-            lower=lower_bound,
-            upper=center,
-            uniform=uniform * 2.0,
-            name=f"{name}.lower",
-        )
-    return _sample_truncated_normal(
-        center=center,
-        std=upper_std,
-        lower=center,
-        upper=upper_bound,
-        uniform=(uniform - 0.5) * 2.0,
-        name=f"{name}.upper",
-    )
+        width = min(lower_std, center - lower_bound)
+        if width < 0.0:
+            raise ValueError(f"{name}.lower has negative support width")
+        return center - (uniform * 2.0) * width
+    width = min(upper_std, upper_bound - center)
+    if width < 0.0:
+        raise ValueError(f"{name}.upper has negative support width")
+    return center + ((uniform - 0.5) * 2.0) * width
 
 
 def _sample_asymmetric_vector3(
@@ -2198,7 +2197,11 @@ def _sample_signed_tangent_angle_rad(
     positive_width_deg: float,
     uniform: float,
 ) -> float:
-    """Sample a fixed-side-probability truncated half-normal tangent angle."""
+    """Sample a fixed-side-probability tangent angle, uniform within the side width.
+
+    Franco 2026-07-28 裁定:侧内 uniform(宽度=该侧当前支撑边界),符号仍严格 50/50、
+    与两侧宽度无关。
+    """
 
     negative_width = math.radians(negative_width_deg)
     positive_width = math.radians(positive_width_deg)
@@ -2212,18 +2215,7 @@ def _sample_signed_tangent_angle_rad(
         quantile = (uniform - 0.5) * 2.0
     if width == 0.0:
         return 0.0
-    # Width is both the scale and the hard one-sided envelope.  Conditioning a
-    # zero-mean normal on [0, width] gives a smooth half-normal while the sign
-    # remains exactly 50/50 independent of asymmetric widths.
-    magnitude = _sample_truncated_normal(
-        center=0.0,
-        std=width,
-        lower=0.0,
-        upper=width,
-        uniform=quantile,
-        name="tangent_angle",
-    )
-    return sign * magnitude
+    return sign * quantile * width
 
 
 def _direction_from_tangent_angles(
