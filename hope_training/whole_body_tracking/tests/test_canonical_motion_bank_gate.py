@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import copy
 import hashlib
 import io
 import json
@@ -18,10 +19,14 @@ REPO = Path(__file__).resolve().parents[3]
 SCRIPTS = REPO / "hope_training/whole_body_tracking/scripts"
 if str(SCRIPTS) not in sys.path:
     sys.path.insert(0, str(SCRIPTS))
+ROOT_SCRIPTS = REPO / "scripts"
+if str(ROOT_SCRIPTS) not in sys.path:
+    sys.path.insert(0, str(ROOT_SCRIPTS))
 
 import canonical_motion_bank_gate as gate  # noqa: E402
 import canonical_motion_compiler as compiler  # noqa: E402
 import canonical_motion_recipe as recipe_module  # noqa: E402
+import certify_task_first_action as certifier  # noqa: E402
 from canonical_path_topp import MarkerMapping, RetimeResult  # noqa: E402
 import canonical_schema2_builder as schema2_builder  # noqa: E402
 from mujoco_motion_player import load_motion  # noqa: E402
@@ -712,11 +717,12 @@ def _fixture_marker_semantics(
     ge80: tuple[int, int] = (1, 3),
     anchor: int = 2,
     solve_span: tuple[int, int] = (0, 4),
+    motion_ids: tuple[str, ...] = gate.MOTION_IDS,
 ):
     """Marker authority v2 rows matching the fixture window/anchor markers."""
 
     rows = {}
-    for motion_id in gate.MOTION_IDS:
+    for motion_id in motion_ids:
         synthetic = motion_id == "fh_block_syn"
         rows[motion_id] = SimpleNamespace(
             motion_id=motion_id,
@@ -1302,9 +1308,303 @@ class BankFixture:
         self.write_manifest()
 
 
+class AppendBankFixture:
+    """Strict one-motion append view over an unchanged BankFixture base."""
+
+    def __init__(self, base: BankFixture) -> None:
+        self.base = base
+        base_raw = copy.deepcopy(base.recipe.raw)
+        base_raw["required_output_matrix"] = {
+            "motion_ids": list(gate.MOTION_IDS),
+            "scopes": list(gate.SCOPES),
+            "candidate_count": 10,
+        }
+        base.recipe.raw = base_raw
+        base.recipe_path.write_text(
+            json.dumps(base_raw, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+        base.hashes["recipe"] = _sha(base.recipe_path)
+        base.manifest["recipe"] = {
+            "path": str(base.recipe_path.resolve()),
+            "sha256": base.hashes["recipe"],
+        }
+        self.bank = base.bank.parent / "append_bank"
+        self.bank.mkdir()
+        self.recipe_path = base.bank.parent / "append_recipe.json"
+        self.recipe_path.write_text(
+            '{"fixture":"strict-append-loader-injected"}\n',
+            encoding="utf-8",
+        )
+        self.source_path = base.bank.parent / "source_fh_loop_high.npz"
+        self.source_path.write_bytes(b"source:fh_loop_high")
+
+        raw = copy.deepcopy(base_raw)
+        raw["library_id"] = "fixture_append_bank"
+        raw["motion_specs"].append(
+            {"motion_id": "fh_loop_high", "scope_overrides": {}}
+        )
+        raw["required_output_matrix"] = {
+            "motion_ids": list(gate.COMPOSED_MOTION_IDS),
+            "scopes": list(gate.SCOPES),
+            "candidate_count": 12,
+        }
+        appended_source = SimpleNamespace(
+            motion_id="fh_loop_high",
+            path=self.source_path,
+            sha256=_sha(self.source_path),
+        )
+        self.recipe = SimpleNamespace(
+            path=self.recipe_path.resolve(),
+            raw=raw,
+            marker_semantics=_fixture_marker_semantics(
+                motion_ids=gate.COMPOSED_MOTION_IDS
+            ),
+            ready=base.recipe.ready,
+            model_paths=base.recipe.model_paths,
+            model_hashes=base.recipe.model_hashes,
+            sources=tuple(base.recipe.sources) + (appended_source,),
+        )
+
+        self.outputs = []
+        for scope in gate.SCOPES:
+            donor = next(
+                row
+                for row in base.outputs
+                if row["motion_id"] == "fh_loop" and row["scope"] == scope
+            )
+            row = copy.deepcopy(donor)
+            row["motion_id"] = "fh_loop_high"
+            row["filename"] = f"fh_loop_high_{scope}_canonical_v2.npz"
+            path = self.bank / row["filename"]
+            donor_path = base.bank / donor["filename"]
+            path.write_bytes(donor_path.read_bytes())
+            row["output_npz_sha256"] = _sha(path)
+            row["schema2_manifest"]["hashes"]["output_npz_sha256"] = _sha(
+                path
+            )
+            row["schema2_report"]["hashes"]["output_npz_sha256"] = _sha(path)
+            input_sha = gate._recompute_candidate_input_sha256(
+                row, path, self.recipe
+            )
+            row["schema2_manifest"]["hashes"]["input_sha256"] = input_sha
+            row["schema2_report"]["hashes"]["input_sha256"] = input_sha
+            path.with_suffix(path.suffix + ".manifest.json").write_text(
+                json.dumps(
+                    row["schema2_manifest"], indent=2, sort_keys=True
+                )
+                + "\n",
+                encoding="utf-8",
+            )
+            path.with_suffix(path.suffix + ".report.json").write_text(
+                json.dumps(row["schema2_report"], indent=2, sort_keys=True)
+                + "\n",
+                encoding="utf-8",
+            )
+            self.outputs.append(row)
+
+        # The base manifest is immutable input to the append receipt.
+        base.write_manifest()
+        self.manifest = copy.deepcopy(base.manifest)
+        self.manifest["library_id"] = "fixture_append_bank"
+        self.manifest["recipe"] = {
+            "path": str(self.recipe_path.resolve()),
+            "sha256": _sha(self.recipe_path),
+        }
+        self.manifest["output_matrix"] = {
+            "motion_ids": list(gate.APPENDED_MOTION_IDS),
+            "scopes": list(gate.SCOPES),
+            "candidate_count": 2,
+        }
+        self.manifest["outputs"] = self.outputs
+        shift = [-0.05, 0.0]
+        self.manifest["station_center_shift_xy_m"] = list(shift)
+        self.manifest["append_only_composition"] = {
+            "mode": "reuse_exact_base_outputs_compile_appended_only",
+            "base_outputs_rebuilt": False,
+            "base_recipe": {
+                "path": str(base.recipe_path.resolve()),
+                "sha256": _sha(base.recipe_path),
+            },
+            "base_build_manifest": {
+                "path": str(base.manifest_path.resolve()),
+                "sha256": _sha(base.manifest_path),
+            },
+            "base_output_matrix": copy.deepcopy(
+                base.manifest["output_matrix"]
+            ),
+            "base_outputs": [
+                {
+                    "motion_id": row["motion_id"],
+                    "scope": row["scope"],
+                    "path": str((base.bank / row["filename"]).resolve()),
+                    "sha256": _sha(base.bank / row["filename"]),
+                }
+                for row in base.outputs
+            ],
+            "appended_motion_ids": list(gate.APPENDED_MOTION_IDS),
+            "appended_scopes": list(gate.SCOPES),
+            "station_center_shift_xy_m": list(shift),
+            "composed_candidate_count": 12,
+        }
+        self.manifest_path = self.bank / gate.MANIFEST_NAME
+        self.write_manifest()
+
+    def write_manifest(self) -> None:
+        self.manifest_path.write_text(
+            json.dumps(self.manifest, indent=2, sort_keys=True) + "\n",
+            encoding="utf-8",
+        )
+
+    def recipe_loader(self, path: Path):
+        assert path.resolve() == self.recipe_path.resolve()
+        return self.recipe
+
+    def verify(self, *, dynamics_runner=None):
+        return gate.verify_canonical_motion_bank(
+            self.manifest_path,
+            self.bank,
+            mjcf_path=self.base.mjcf,
+            urdf_path=self.base.urdf,
+            body_order_path=self.base.body_order,
+            expected_compiled_signature=self.base.signature,
+            recipe_loader=self.recipe_loader,
+            plant_loader=self.base.plant_loader,
+            player_runner=lambda clip: _player_report(),
+            dynamics_runner=(
+                dynamics_runner
+                if dynamics_runner is not None
+                else lambda path, plant: _grounded_dynamics_report(
+                    plant, path
+                )
+            ),
+        )
+
+
 @pytest.fixture
 def fixture_bank(tmp_path: Path) -> BankFixture:
     return BankFixture(tmp_path)
+
+
+@pytest.fixture
+def append_bank(fixture_bank: BankFixture) -> AppendBankFixture:
+    return AppendBankFixture(fixture_bank)
+
+
+def test_append_only_verifies_two_new_outputs_and_binds_base_without_replay(
+    append_bank: AppendBankFixture,
+):
+    dynamics_paths: list[str] = []
+
+    def dynamics(path, plant):
+        dynamics_paths.append(path.name)
+        return _grounded_dynamics_report(plant, path)
+
+    report = append_bank.verify(dynamics_runner=dynamics)
+
+    assert report["verdict"] == "INCOMPLETE_FAIL_CLOSED"
+    assert report["candidate_integrity_pass"] is True
+    assert report["bank_gate_pass"] is False
+    assert report["training_authorized"] is False
+    assert report["hardware_authorized"] is False
+    assert report["contracts"]["matrix"] == {
+        "motion_ids": ["fh_loop_high"],
+        "scopes": ["upper", "full"],
+        "count": 2,
+    }
+    assert report["aggregate"]["clip_count"] == 2
+    assert [
+        (row["motion_id"], row["scope"]) for row in report["clips"]
+    ] == list(gate.APPEND_EXPECTED_MATRIX)
+    assert dynamics_paths == list(gate.APPEND_EXPECTED_FILENAMES)
+    composition = report["append_only_composition"]
+    assert composition["base_outputs_rebuilt"] is False
+    assert len(composition["base_outputs"]) == 10
+    assert report["append_only_base_validation_scope"] == (
+        "base_recipe_bytes_manifest_bytes_and_ten_output_npz_sha256_only"
+    )
+    assert report["station_center_shift_xy_m"] == [-0.05, 0.0]
+    assert certifier._validate_bank_contract(
+        report,
+        manifest_sha256=_sha(append_bank.manifest_path),
+        recipe_sha256=_sha(append_bank.recipe_path),
+        mjcf_sha256=_sha(append_bank.base.mjcf),
+    ) == {
+        "candidate_integrity_pass": True,
+        "bank_gate_pass": False,
+    }
+    for scope in certifier.SCOPES:
+        assert certifier._bank_clip(
+            report, "fh_loop_high", scope
+        )["scope"] == scope
+
+
+def test_append_only_rejects_base_manifest_sha_mismatch(
+    append_bank: AppendBankFixture,
+):
+    append_bank.manifest["append_only_composition"][
+        "base_build_manifest"
+    ]["sha256"] = "0" * 64
+    append_bank.write_manifest()
+
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match="append-only base build manifest SHA-256 mismatch",
+    ):
+        append_bank.verify()
+
+
+def test_append_only_rejects_unknown_composition_key(
+    append_bank: AppendBankFixture,
+):
+    append_bank.manifest["append_only_composition"]["unknown"] = False
+    append_bank.write_manifest()
+
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match="append_only_composition keys changed",
+    ):
+        append_bank.verify()
+
+
+def test_append_only_rejects_reused_output_sha_mismatch(
+    append_bank: AppendBankFixture,
+):
+    append_bank.manifest["append_only_composition"]["base_outputs"][0][
+        "sha256"
+    ] = "0" * 64
+    append_bank.write_manifest()
+
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match="append-only base output .* SHA-256 mismatch",
+    ):
+        append_bank.verify()
+
+
+def test_append_only_rejects_changed_base_prefix_in_full_recipe(
+    append_bank: AppendBankFixture,
+):
+    append_bank.recipe.raw["motion_specs"][0]["human_role"] = "changed"
+
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match="changed the canonical-five motion specs",
+    ):
+        append_bank.verify()
+
+
+def test_append_only_rejects_new_output_sha_mismatch(
+    append_bank: AppendBankFixture,
+):
+    append_bank.manifest["outputs"][0]["output_npz_sha256"] = "0" * 64
+    append_bank.write_manifest()
+
+    with pytest.raises(
+        gate.CanonicalMotionBankGateError,
+        match="fh_loop_high/upper NPZ SHA mismatch",
+    ):
+        append_bank.verify()
 
 
 def test_rejects_missing_and_extra_npz(fixture_bank: BankFixture):

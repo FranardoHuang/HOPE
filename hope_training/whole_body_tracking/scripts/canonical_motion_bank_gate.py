@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Independent post-build verifier for the canonical 5 x 2 motion bank.
+"""Independent post-build verifier for canonical motion compiler outputs.
 
 The compiler is intentionally not trusted to certify its own output.  This
 module reopens ``BUILD_MANIFEST.json`` and every published NPZ, recomputes all
@@ -18,6 +18,13 @@ grounded floating-base ``mj_inverse`` result remains
 exact qacc/geometric-tangent midpoint collocation trace.  This verifier never
 substitutes finite-difference qacc for that missing evidence, nor upgrades a
 compiler candidate to training or hardware authorization.
+
+The historical path remains the exact canonical 5 x 2 bank.  A second,
+strictly distinguished append-only path verifies exactly the two
+``fh_loop_high`` candidates emitted by the append compiler.  That path also
+content-binds the reused canonical-five recipe, manifest, and NPZ hashes while
+fully reopening the appended NPZs and sidecars; it never rebuilds, replays, or
+silently merges the base outputs.
 
 The CLI writes its report last, atomically, and without clobbering an existing
 path.  It never edits motion assets or steps a simulator.
@@ -64,6 +71,22 @@ EXPECTED_MATRIX = tuple((motion_id, scope) for motion_id in MOTION_IDS for scope
 EXPECTED_FILENAMES = tuple(
     f"{motion_id}_{scope}_canonical_v2.npz" for motion_id, scope in EXPECTED_MATRIX
 )
+APPENDED_MOTION_IDS = ("fh_loop_high",)
+APPEND_EXPECTED_MATRIX = tuple(
+    (motion_id, scope)
+    for motion_id in APPENDED_MOTION_IDS
+    for scope in SCOPES
+)
+APPEND_EXPECTED_FILENAMES = tuple(
+    f"{motion_id}_{scope}_canonical_v2.npz"
+    for motion_id, scope in APPEND_EXPECTED_MATRIX
+)
+COMPOSED_MOTION_IDS = MOTION_IDS + APPENDED_MOTION_IDS
+STATION_CENTER_SHIFT_CANDIDATES_XY_M = (
+    (0.0, 0.0),
+    (-0.05, 0.0),
+    (-0.10, 0.0),
+)
 
 _MANIFEST_KEYS = frozenset(
     {
@@ -87,6 +110,30 @@ _MANIFEST_KEYS = frozenset(
         "post_build_gates",
         "non_claims",
     }
+)
+_APPEND_MANIFEST_KEYS = _MANIFEST_KEYS | frozenset(
+    {"append_only_composition", "station_center_shift_xy_m"}
+)
+_APPEND_COMPOSITION_KEYS = frozenset(
+    {
+        "mode",
+        "base_outputs_rebuilt",
+        "base_recipe",
+        "base_build_manifest",
+        "base_output_matrix",
+        "base_outputs",
+        "appended_motion_ids",
+        "appended_scopes",
+        "station_center_shift_xy_m",
+        "composed_candidate_count",
+    }
+)
+_BOUND_PATH_HASH_KEYS = frozenset({"path", "sha256"})
+_COMPOSITION_OUTPUT_KEYS = frozenset(
+    {"motion_id", "scope", "path", "sha256"}
+)
+_OUTPUT_MATRIX_KEYS = frozenset(
+    {"motion_ids", "scopes", "candidate_count"}
 )
 _OUTPUT_KEYS = frozenset(
     {
@@ -170,6 +217,16 @@ class _ValidatedCompilerOptions:
     samples_per_scaled_unit: float
     min_connector_intervals: int
     min_core_intervals: int
+
+
+@dataclass(frozen=True)
+class _VerificationContract:
+    expected_matrix: tuple[tuple[str, str], ...]
+    expected_filenames: tuple[str, ...]
+    append_only_composition: Mapping[str, Any] | None
+    station_center_shift_xy_m: tuple[float, float] | None
+    base_recipe_path: Path | None
+    base_manifest_path: Path | None
 
 
 RecipeLoader = Callable[[Path], CanonicalMotionRecipe]
@@ -550,6 +607,8 @@ def _validate_compiler_options(
                 "probe_exact_pointwise_caps",
                 "probe_source_smoothing_tolerance_rad",
                 "probe_source_smoothing_is_identity",
+                "synthetic_face_solve_span_extension",
+                "synthetic_face_solve_span_is_authority_span",
             }
         ),
         "compiler_options geometry_and_grid",
@@ -576,6 +635,14 @@ def _validate_compiler_options(
         raise CanonicalMotionBankGateError(
             "probe source smoothing is not verifiable; rebuild from the raw "
             "source coordinates"
+        )
+    if (
+        grid["synthetic_face_solve_span_extension"] is not None
+        or grid["synthetic_face_solve_span_is_authority_span"] is not True
+    ):
+        raise CanonicalMotionBankGateError(
+            "synthetic face solve span extension is probe-grade; the formal "
+            "bank must use the marker authority span"
         )
     samples = _finite(
         grid["samples_per_scaled_unit"],
@@ -834,8 +901,20 @@ def _validate_compiler_options(
     )
 
 
-def _validate_top_contract(manifest: Mapping[str, Any]) -> None:
-    _exact_keys(manifest, _MANIFEST_KEYS, "build manifest")
+def _validate_top_contract(
+    manifest: Mapping[str, Any],
+    *,
+    manifest_path: Path | None = None,
+) -> _VerificationContract:
+    append_mode = (
+        "append_only_composition" in manifest
+        or "station_center_shift_xy_m" in manifest
+    )
+    _exact_keys(
+        manifest,
+        _APPEND_MANIFEST_KEYS if append_mode else _MANIFEST_KEYS,
+        "build manifest",
+    )
     if manifest["schema_version"] != 1:
         raise CanonicalMotionBankGateError("build manifest schema_version must be 1")
     _nonempty_string(manifest["library_id"], "library_id")
@@ -853,15 +932,29 @@ def _validate_top_contract(manifest: Mapping[str, Any]) -> None:
             "compiler manifest may not authorize training or hardware"
         )
 
-    matrix = _mapping(manifest["output_matrix"], "output_matrix")
-    if frozenset(matrix) != frozenset({"motion_ids", "scopes", "candidate_count"}):
-        raise CanonicalMotionBankGateError("output_matrix keys changed")
-    if tuple(_sequence(matrix["motion_ids"], "output_matrix.motion_ids")) != MOTION_IDS:
-        raise CanonicalMotionBankGateError("output_matrix must contain the exact five motions")
+    matrix = _exact_keys(
+        manifest["output_matrix"], _OUTPUT_MATRIX_KEYS, "output_matrix"
+    )
+    expected_motion_ids = APPENDED_MOTION_IDS if append_mode else MOTION_IDS
+    expected_matrix = APPEND_EXPECTED_MATRIX if append_mode else EXPECTED_MATRIX
+    expected_filenames = (
+        APPEND_EXPECTED_FILENAMES if append_mode else EXPECTED_FILENAMES
+    )
+    if (
+        tuple(_sequence(matrix["motion_ids"], "output_matrix.motion_ids"))
+        != expected_motion_ids
+    ):
+        label = "the exact append-only motion" if append_mode else "the exact five motions"
+        raise CanonicalMotionBankGateError(
+            f"output_matrix must contain {label}"
+        )
     if tuple(_sequence(matrix["scopes"], "output_matrix.scopes")) != SCOPES:
         raise CanonicalMotionBankGateError("output_matrix scopes must be upper then full")
-    if matrix["candidate_count"] != len(EXPECTED_MATRIX):
-        raise CanonicalMotionBankGateError("output_matrix candidate_count must be 10")
+    if matrix["candidate_count"] != len(expected_matrix):
+        raise CanonicalMotionBankGateError(
+            "output_matrix candidate_count must be "
+            f"{len(expected_matrix)}"
+        )
 
     search = _mapping(manifest["search_contract"], "search_contract")
     if search.get("entry_exit") != "enumerate_all_then_gate_and_rank":
@@ -919,6 +1012,394 @@ def _validate_top_contract(manifest: Mapping[str, Any]) -> None:
     ):
         if required not in non_claims:
             raise CanonicalMotionBankGateError(f"manifest non_claims lost {required!r}")
+    if not append_mode:
+        return _VerificationContract(
+            expected_matrix=EXPECTED_MATRIX,
+            expected_filenames=EXPECTED_FILENAMES,
+            append_only_composition=None,
+            station_center_shift_xy_m=None,
+            base_recipe_path=None,
+            base_manifest_path=None,
+        )
+    if manifest_path is None:
+        raise CanonicalMotionBankGateError(
+            "append-only validation requires the exact manifest path"
+        )
+    return _validate_append_only_composition(
+        manifest,
+        manifest_path=manifest_path,
+        expected_matrix=expected_matrix,
+        expected_filenames=expected_filenames,
+    )
+
+
+def _assert_authorization_flags_false(value: Any, label: str) -> None:
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if str(key).endswith("_authorized") and item is not False:
+                raise CanonicalMotionBankGateError(
+                    f"{label} authorization {key!r} must be false"
+                )
+            _assert_authorization_flags_false(item, f"{label}.{key}")
+    elif isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        for index, item in enumerate(value):
+            _assert_authorization_flags_false(
+                item, f"{label}[{index}]"
+            )
+
+
+def _station_center_shift(value: Any, label: str) -> tuple[float, float]:
+    raw = _sequence(value, label)
+    if len(raw) != 2:
+        raise CanonicalMotionBankGateError(
+            f"{label} must contain exactly two coordinates"
+        )
+    shift = (
+        _finite(raw[0], f"{label}[0]"),
+        _finite(raw[1], f"{label}[1]"),
+    )
+    if shift not in STATION_CENTER_SHIFT_CANDIDATES_XY_M:
+        raise CanonicalMotionBankGateError(
+            f"{label} must be one of "
+            f"{list(STATION_CENTER_SHIFT_CANDIDATES_XY_M)}"
+        )
+    return shift
+
+
+def _validate_append_only_composition(
+    manifest: Mapping[str, Any],
+    *,
+    manifest_path: Path,
+    expected_matrix: tuple[tuple[str, str], ...],
+    expected_filenames: tuple[str, ...],
+) -> _VerificationContract:
+    """Reopen the exact reused base bundle without replaying or promoting it."""
+
+    _assert_authorization_flags_false(manifest, "append build manifest")
+    composition = _exact_keys(
+        manifest["append_only_composition"],
+        _APPEND_COMPOSITION_KEYS,
+        "append_only_composition",
+    )
+    if composition["mode"] != "reuse_exact_base_outputs_compile_appended_only":
+        raise CanonicalMotionBankGateError(
+            "append_only_composition mode changed"
+        )
+    if _bool(
+        composition["base_outputs_rebuilt"],
+        "append_only_composition.base_outputs_rebuilt",
+    ) is not False:
+        raise CanonicalMotionBankGateError(
+            "append-only verification refuses rebuilt base outputs"
+        )
+    appended_ids = tuple(
+        _sequence(
+            composition["appended_motion_ids"],
+            "append_only_composition.appended_motion_ids",
+        )
+    )
+    appended_scopes = tuple(
+        _sequence(
+            composition["appended_scopes"],
+            "append_only_composition.appended_scopes",
+        )
+    )
+    if appended_ids != APPENDED_MOTION_IDS or appended_scopes != SCOPES:
+        raise CanonicalMotionBankGateError(
+            "append_only_composition must declare exactly fh_loop_high "
+            "upper/full"
+        )
+    if (
+        _integer(
+            composition["composed_candidate_count"],
+            "append_only_composition.composed_candidate_count",
+        )
+        != len(EXPECTED_MATRIX) + len(expected_matrix)
+    ):
+        raise CanonicalMotionBankGateError(
+            "append_only_composition composed candidate count changed"
+        )
+    shift = _station_center_shift(
+        manifest["station_center_shift_xy_m"],
+        "station_center_shift_xy_m",
+    )
+    nested_shift = _station_center_shift(
+        composition["station_center_shift_xy_m"],
+        "append_only_composition.station_center_shift_xy_m",
+    )
+    if nested_shift != shift:
+        raise CanonicalMotionBankGateError(
+            "append-only station center shift receipts disagree"
+        )
+
+    base_recipe_row = _exact_keys(
+        composition["base_recipe"],
+        _BOUND_PATH_HASH_KEYS,
+        "append_only_composition.base_recipe",
+    )
+    base_manifest_row = _exact_keys(
+        composition["base_build_manifest"],
+        _BOUND_PATH_HASH_KEYS,
+        "append_only_composition.base_build_manifest",
+    )
+    base_recipe_path = _resolve_bound_path(
+        base_recipe_row["path"],
+        manifest_path.parent,
+        "append-only base recipe",
+    )
+    base_recipe_sha = _same_hash(
+        base_recipe_path,
+        base_recipe_row["sha256"],
+        "append-only base recipe",
+    )
+    base_manifest_path = _resolve_bound_path(
+        base_manifest_row["path"],
+        manifest_path.parent,
+        "append-only base build manifest",
+    )
+    if base_manifest_path.name != MANIFEST_NAME:
+        raise CanonicalMotionBankGateError(
+            f"append-only base manifest must be named {MANIFEST_NAME}"
+        )
+    if base_manifest_path == manifest_path.resolve():
+        raise CanonicalMotionBankGateError(
+            "append build manifest cannot reuse itself as its base"
+        )
+    base_manifest_sha = _same_hash(
+        base_manifest_path,
+        base_manifest_row["sha256"],
+        "append-only base build manifest",
+    )
+    base_manifest = _strict_json(
+        base_manifest_path, "append-only base build manifest"
+    )
+    _same_hash(
+        base_manifest_path,
+        base_manifest_sha,
+        "append-only base build manifest after parse",
+    )
+    _exact_keys(
+        base_manifest,
+        _MANIFEST_KEYS,
+        "append-only base build manifest",
+    )
+    base_contract = _validate_top_contract(
+        base_manifest, manifest_path=base_manifest_path
+    )
+    if base_contract.append_only_composition is not None:
+        raise CanonicalMotionBankGateError(
+            "append-only base must be the canonical non-append 5x2 bundle"
+        )
+    _assert_authorization_flags_false(
+        base_manifest, "append-only base build manifest"
+    )
+    base_ready = _exact_keys(
+        base_manifest["ready"],
+        frozenset(
+            {
+                "path",
+                "sha256",
+                "direct_endpoint_for_every_motion",
+                "old_source_frame_zero_bridge_inserted",
+            }
+        ),
+        "append-only base manifest ready",
+    )
+    append_ready = _exact_keys(
+        manifest["ready"],
+        frozenset(
+            {
+                "path",
+                "sha256",
+                "direct_endpoint_for_every_motion",
+                "old_source_frame_zero_bridge_inserted",
+            }
+        ),
+        "append manifest ready",
+    )
+    base_ready_path = _resolve_bound_path(
+        base_ready["path"],
+        base_manifest_path.parent,
+        "append-only base canonical ready",
+    )
+    append_ready_path = _resolve_bound_path(
+        append_ready["path"],
+        manifest_path.parent,
+        "append canonical ready",
+    )
+    _same_path(
+        base_ready_path,
+        append_ready_path,
+        "append/base canonical ready",
+    )
+    if (
+        _digest(
+            base_ready["sha256"],
+            "append-only base canonical-ready SHA-256",
+        )
+        != _digest(
+            append_ready["sha256"],
+            "append canonical-ready SHA-256",
+        )
+    ):
+        raise CanonicalMotionBankGateError(
+            "append/base canonical-ready SHA-256 differs"
+        )
+    base_manifest_recipe = _exact_keys(
+        base_manifest["recipe"],
+        _BOUND_PATH_HASH_KEYS,
+        "append-only base manifest recipe",
+    )
+    base_manifest_recipe_path = _resolve_bound_path(
+        base_manifest_recipe["path"],
+        base_manifest_path.parent,
+        "append-only base manifest recipe",
+    )
+    _same_path(
+        base_manifest_recipe_path,
+        base_recipe_path,
+        "append-only base recipe",
+    )
+    if (
+        _digest(
+            base_manifest_recipe["sha256"],
+            "append-only base manifest recipe SHA-256",
+        )
+        != base_recipe_sha
+    ):
+        raise CanonicalMotionBankGateError(
+            "append-only base manifest binds a different recipe SHA-256"
+        )
+
+    base_matrix = _exact_keys(
+        composition["base_output_matrix"],
+        _OUTPUT_MATRIX_KEYS,
+        "append_only_composition.base_output_matrix",
+    )
+    if dict(base_matrix) != dict(base_manifest["output_matrix"]):
+        raise CanonicalMotionBankGateError(
+            "append-only base output matrix differs from its manifest"
+        )
+    base_outputs = _sequence(
+        composition["base_outputs"],
+        "append_only_composition.base_outputs",
+    )
+    if len(base_outputs) != len(EXPECTED_MATRIX):
+        raise CanonicalMotionBankGateError(
+            "append-only composition must bind exactly ten base outputs"
+        )
+    base_manifest_outputs = _sequence(
+        base_manifest["outputs"], "append-only base outputs"
+    )
+    if len(base_manifest_outputs) != len(EXPECTED_MATRIX):
+        raise CanonicalMotionBankGateError(
+            "append-only base manifest must contain exactly ten outputs"
+        )
+    normalized_outputs: list[Mapping[str, Any]] = []
+    for index, key in enumerate(EXPECTED_MATRIX):
+        base_manifest_output = _exact_keys(
+            base_manifest_outputs[index],
+            _OUTPUT_KEYS,
+            f"append-only base manifest outputs[{index}]",
+        )
+        base_manifest_key = (
+            _nonempty_string(
+                base_manifest_output["motion_id"],
+                f"append-only base manifest outputs[{index}].motion_id",
+            ),
+            _nonempty_string(
+                base_manifest_output["scope"],
+                f"append-only base manifest outputs[{index}].scope",
+            ),
+        )
+        expected_filename = f"{key[0]}_{key[1]}_canonical_v2.npz"
+        if (
+            base_manifest_key != key
+            or base_manifest_output["filename"] != expected_filename
+        ):
+            raise CanonicalMotionBankGateError(
+                "append-only base manifest output matrix changed"
+            )
+        row = _exact_keys(
+            base_outputs[index],
+            _COMPOSITION_OUTPUT_KEYS,
+            f"append_only_composition.base_outputs[{index}]",
+        )
+        actual_key = (
+            _nonempty_string(
+                row["motion_id"],
+                f"append_only_composition.base_outputs[{index}].motion_id",
+            ),
+            _nonempty_string(
+                row["scope"],
+                f"append_only_composition.base_outputs[{index}].scope",
+            ),
+        )
+        if actual_key != key:
+            raise CanonicalMotionBankGateError(
+                "append-only base outputs changed order or identity"
+            )
+        expected_path = base_manifest_path.parent / expected_filename
+        output_path = _resolve_bound_path(
+            row["path"],
+            base_manifest_path.parent,
+            f"append-only base output {key}",
+        )
+        _same_path(
+            output_path,
+            expected_path,
+            f"append-only base output {key}",
+        )
+        output_sha = _same_hash(
+            output_path,
+            row["sha256"],
+            f"append-only base output {key}",
+        )
+        if (
+            output_sha
+            != _digest(
+                base_manifest_output["output_npz_sha256"],
+                f"append-only base manifest output {key} SHA-256",
+            )
+        ):
+            raise CanonicalMotionBankGateError(
+                f"append-only base output {key} disagrees with its manifest"
+            )
+        normalized_outputs.append(
+            {
+                "motion_id": key[0],
+                "scope": key[1],
+                "path": str(output_path),
+                "sha256": output_sha,
+            }
+        )
+    normalized_composition = {
+        "mode": composition["mode"],
+        "base_outputs_rebuilt": False,
+        "base_recipe": {
+            "path": str(base_recipe_path),
+            "sha256": base_recipe_sha,
+        },
+        "base_build_manifest": {
+            "path": str(base_manifest_path),
+            "sha256": base_manifest_sha,
+        },
+        "base_output_matrix": dict(base_matrix),
+        "base_outputs": normalized_outputs,
+        "appended_motion_ids": list(APPENDED_MOTION_IDS),
+        "appended_scopes": list(SCOPES),
+        "station_center_shift_xy_m": list(shift),
+        "composed_candidate_count": len(EXPECTED_MATRIX)
+        + len(expected_matrix),
+    }
+    return _VerificationContract(
+        expected_matrix=expected_matrix,
+        expected_filenames=expected_filenames,
+        append_only_composition=normalized_composition,
+        station_center_shift_xy_m=shift,
+        base_recipe_path=base_recipe_path,
+        base_manifest_path=base_manifest_path,
+    )
 
 
 def _load_and_bind_files(
@@ -1084,41 +1565,56 @@ def _load_and_bind_files(
 
 
 def _validate_bank_file_set(
-    bank_dir: Path, outputs: Sequence[Mapping[str, Any]]
+    bank_dir: Path,
+    outputs: Sequence[Mapping[str, Any]],
+    *,
+    expected_matrix: tuple[tuple[str, str], ...] = EXPECTED_MATRIX,
+    expected_filenames: tuple[str, ...] = EXPECTED_FILENAMES,
+    label: str = "bank",
 ) -> dict[tuple[str, str], tuple[Mapping[str, Any], Path]]:
     if not bank_dir.is_dir() or bank_dir.is_symlink():
-        raise CanonicalMotionBankGateError(f"bank directory must be a real directory: {bank_dir}")
+        raise CanonicalMotionBankGateError(
+            f"{label} directory must be a real directory: {bank_dir}"
+        )
     actual_paths = list(bank_dir.glob("*.npz"))
     actual_names = sorted(path.name for path in actual_paths)
-    if actual_names != sorted(EXPECTED_FILENAMES):
-        missing = sorted(set(EXPECTED_FILENAMES) - set(actual_names))
-        extra = sorted(set(actual_names) - set(EXPECTED_FILENAMES))
+    if actual_names != sorted(expected_filenames):
+        missing = sorted(set(expected_filenames) - set(actual_names))
+        extra = sorted(set(actual_names) - set(expected_filenames))
         raise CanonicalMotionBankGateError(
-            f"bank NPZ set is not exactly 5x2; missing={missing}, extra={extra}"
+            f"{label} NPZ set is not the exact declared matrix; "
+            f"missing={missing}, extra={extra}"
         )
     if any(not path.is_file() or path.is_symlink() for path in actual_paths):
-        raise CanonicalMotionBankGateError("bank NPZ files must be regular non-symlinks")
+        raise CanonicalMotionBankGateError(
+            f"{label} NPZ files must be regular non-symlinks"
+        )
     expected_manifest_sidecars = sorted(
-        f"{filename}.manifest.json" for filename in EXPECTED_FILENAMES
+        f"{filename}.manifest.json" for filename in expected_filenames
     )
-    expected_report_sidecars = sorted(f"{filename}.report.json" for filename in EXPECTED_FILENAMES)
+    expected_report_sidecars = sorted(
+        f"{filename}.report.json" for filename in expected_filenames
+    )
     actual_manifest_sidecars = sorted(path.name for path in bank_dir.glob("*.npz.manifest.json"))
     actual_report_sidecars = sorted(path.name for path in bank_dir.glob("*.npz.report.json"))
     if actual_manifest_sidecars != expected_manifest_sidecars:
         raise CanonicalMotionBankGateError(
-            "schema2 manifest sidecar set is not exactly 5x2; "
+            f"{label} schema2 manifest sidecar set is not exact; "
             f"missing={sorted(set(expected_manifest_sidecars) - set(actual_manifest_sidecars))}, "
             f"extra={sorted(set(actual_manifest_sidecars) - set(expected_manifest_sidecars))}"
         )
     if actual_report_sidecars != expected_report_sidecars:
         raise CanonicalMotionBankGateError(
-            "schema2 report sidecar set is not exactly 5x2; "
+            f"{label} schema2 report sidecar set is not exact; "
             f"missing={sorted(set(expected_report_sidecars) - set(actual_report_sidecars))}, "
             f"extra={sorted(set(actual_report_sidecars) - set(expected_report_sidecars))}"
         )
 
-    if len(outputs) != len(EXPECTED_MATRIX):
-        raise CanonicalMotionBankGateError("manifest outputs must contain exactly 10 rows")
+    if len(outputs) != len(expected_matrix):
+        raise CanonicalMotionBankGateError(
+            f"{label} manifest outputs must contain exactly "
+            f"{len(expected_matrix)} rows"
+        )
     result: dict[tuple[str, str], tuple[Mapping[str, Any], Path]] = {}
     observed_order: list[tuple[str, str]] = []
     for index, raw in enumerate(outputs):
@@ -1137,9 +1633,9 @@ def _validate_bank_file_set(
                 f"output {key} filename must be {expected_filename!r}"
             )
         result[key] = (row, bank_dir / filename)
-    if tuple(observed_order) != EXPECTED_MATRIX:
+    if tuple(observed_order) != expected_matrix:
         raise CanonicalMotionBankGateError(
-            f"manifest output order/matrix changed: {observed_order}"
+            f"{label} manifest output order/matrix changed: {observed_order}"
         )
     return result
 
@@ -1169,6 +1665,155 @@ def _recipe_source(recipe: CanonicalMotionRecipe, motion_id: str) -> Any:
             f"{motion_id} recipe source bytes changed after recipe load"
         )
     return source
+
+
+def _recipe_declared_matrix(
+    recipe: CanonicalMotionRecipe,
+    *,
+    expected_motion_ids: tuple[str, ...],
+    label: str,
+) -> None:
+    raw = _mapping(getattr(recipe, "raw", None), f"{label}.raw")
+    matrix = _exact_keys(
+        raw.get("required_output_matrix"),
+        _OUTPUT_MATRIX_KEYS,
+        f"{label}.required_output_matrix",
+    )
+    if (
+        tuple(
+            _sequence(
+                matrix["motion_ids"],
+                f"{label}.required_output_matrix.motion_ids",
+            )
+        )
+        != expected_motion_ids
+        or tuple(
+            _sequence(
+                matrix["scopes"],
+                f"{label}.required_output_matrix.scopes",
+            )
+        )
+        != SCOPES
+        or matrix["candidate_count"] != 2 * len(expected_motion_ids)
+    ):
+        raise CanonicalMotionBankGateError(
+            f"{label} does not declare the exact expected motion matrix"
+        )
+
+
+def _validate_append_recipe_binding(
+    contract: _VerificationContract,
+    append_recipe: CanonicalMotionRecipe,
+) -> None:
+    """Confirm the loaded full recipe declares base-five plus one append.
+
+    The reused base recipe bytes, manifest, and ten output hashes are already
+    closed by :func:`_validate_append_only_composition`.  Deliberately do not
+    reload the base recipe's sources or replay its clips here.
+    """
+
+    if contract.append_only_composition is None:
+        return
+    if (
+        contract.base_recipe_path is None
+        or contract.base_manifest_path is None
+    ):
+        raise CanonicalMotionBankGateError(
+            "append-only contract lost its base recipe/manifest paths"
+        )
+    base_raw = _strict_json(
+        contract.base_recipe_path, "append-only base recipe"
+    )
+    _same_hash(
+        contract.base_recipe_path,
+        contract.append_only_composition["base_recipe"]["sha256"],
+        "append-only base recipe after parse",
+    )
+    base_manifest = _strict_json(
+        contract.base_manifest_path, "append-only base build manifest"
+    )
+    _same_hash(
+        contract.base_manifest_path,
+        contract.append_only_composition["base_build_manifest"]["sha256"],
+        "append-only base build manifest after recipe binding",
+    )
+    if (
+        base_raw.get("library_id") != base_manifest["library_id"]
+        or base_raw.get("publication_class") != "compiler_candidate"
+        or base_raw.get("training_authorized") is not False
+        or base_raw.get("hardware_authorized") is not False
+    ):
+        raise CanonicalMotionBankGateError(
+            "append-only base recipe identity or authorization changed"
+        )
+    base_matrix = _exact_keys(
+        base_raw.get("required_output_matrix"),
+        _OUTPUT_MATRIX_KEYS,
+        "append-only base recipe.required_output_matrix",
+    )
+    if (
+        tuple(
+            _sequence(
+                base_matrix["motion_ids"],
+                "append-only base recipe motion_ids",
+            )
+        )
+        != MOTION_IDS
+        or tuple(
+            _sequence(
+                base_matrix["scopes"],
+                "append-only base recipe scopes",
+            )
+        )
+        != SCOPES
+        or base_matrix["candidate_count"] != len(EXPECTED_MATRIX)
+    ):
+        raise CanonicalMotionBankGateError(
+            "append-only base recipe does not declare the exact 5x2 matrix"
+        )
+    _recipe_declared_matrix(
+        append_recipe,
+        expected_motion_ids=COMPOSED_MOTION_IDS,
+        label="append recipe",
+    )
+    base_specs = _sequence(
+        base_raw.get("motion_specs"),
+        "append-only base recipe.motion_specs",
+    )
+    append_specs = _sequence(
+        append_recipe.raw.get("motion_specs"),
+        "append recipe.motion_specs",
+    )
+    if (
+        len(base_specs) != len(MOTION_IDS)
+        or len(append_specs) != len(COMPOSED_MOTION_IDS)
+        or list(base_specs) != list(append_specs[: len(MOTION_IDS)])
+    ):
+        raise CanonicalMotionBankGateError(
+            "append recipe changed the canonical-five motion specs"
+        )
+    for key in (
+        "frame_id",
+        "canonical_ready",
+        "model_contract",
+        "scope_contract",
+        "time_law",
+        "entry_exit_search",
+        "post_build_gates",
+    ):
+        if base_raw.get(key) != append_recipe.raw.get(key):
+            raise CanonicalMotionBankGateError(
+                f"append recipe changed shared compiler contract {key!r}"
+            )
+    append_sources = tuple(getattr(append_recipe, "sources", ()))
+    if tuple(
+        getattr(source, "motion_id", None)
+        for source in append_sources
+    ) != COMPOSED_MOTION_IDS:
+        raise CanonicalMotionBankGateError(
+            "append recipe sources are not the exact base-five plus "
+            "fh_loop_high"
+        )
 
 
 def _recompute_candidate_input_sha256(
@@ -2656,7 +3301,9 @@ def verify_canonical_motion_bank(
     manifest_file = Path(os.path.abspath(os.fspath(Path(manifest_path).expanduser())))
     bank = Path(os.path.abspath(os.fspath(Path(bank_dir).expanduser())))
     manifest = _strict_json(manifest_file, "build manifest")
-    _validate_top_contract(manifest)
+    contract = _validate_top_contract(
+        manifest, manifest_path=manifest_file
+    )
     files, recipe = _load_and_bind_files(
         manifest_file,
         bank,
@@ -2667,11 +3314,20 @@ def verify_canonical_motion_bank(
         expected_compiled_signature=expected_compiled_signature,
         recipe_loader=recipe_loader,
     )
+    _validate_append_recipe_binding(
+        contract,
+        recipe,
+    )
     compiler_options = _validate_compiler_options(
         manifest["compiler_options"], recipe
     )
     output_rows = _sequence(manifest["outputs"], "outputs")
-    matrix = _validate_bank_file_set(bank, output_rows)
+    matrix = _validate_bank_file_set(
+        bank,
+        output_rows,
+        expected_matrix=contract.expected_matrix,
+        expected_filenames=contract.expected_filenames,
+    )
 
     try:
         plant = plant_loader(
@@ -2696,7 +3352,7 @@ def verify_canonical_motion_bank(
     canonical_body_pos: np.ndarray | None = None
     canonical_body_quat: np.ndarray | None = None
     clip_reports: list[Mapping[str, Any]] = []
-    for motion_id, scope in EXPECTED_MATRIX:
+    for motion_id, scope in contract.expected_matrix:
         row, path = matrix[(motion_id, scope)]
         expected_sha = _digest(row["output_npz_sha256"], f"{motion_id}/{scope} output_npz_sha256")
         actual_sha = _sha256_file(path)
@@ -2834,9 +3490,9 @@ def verify_canonical_motion_bank(
         return reducer(values) if values else None
 
     structural_pass = bool(
-        len(clip_reports) == 10
-        and fk_pass_count == 10
-        and non_torque_pass_count == 10
+        len(clip_reports) == len(contract.expected_matrix)
+        and fk_pass_count == len(contract.expected_matrix)
+        and non_torque_pass_count == len(contract.expected_matrix)
         and failed_count == 0
     )
     # Schema-2 does not publish exact qacc/geometric-tangent midpoint
@@ -2852,7 +3508,7 @@ def verify_canonical_motion_bank(
     else:
         verdict = "FAIL"
 
-    return {
+    report = {
         "schema_version": 1,
         "verdict": verdict,
         "bank_gate_pass": complete_pass,
@@ -2904,9 +3560,13 @@ def verify_canonical_motion_bank(
         },
         "contracts": {
             "matrix": {
-                "motion_ids": list(MOTION_IDS),
+                "motion_ids": list(
+                    APPENDED_MOTION_IDS
+                    if contract.append_only_composition is not None
+                    else MOTION_IDS
+                ),
                 "scopes": list(SCOPES),
-                "count": 10,
+                "count": len(contract.expected_matrix),
             },
             "shared_ready": True,
             "six_endpoint_velocity_classes_exact_zero": True,
@@ -2965,6 +3625,27 @@ def verify_canonical_motion_bank(
             "stationary motion-bank verification does not certify locomotion coverage",
         ],
     }
+    if contract.append_only_composition is not None:
+        report["contracts"]["verification_scope"] = (
+            "appended_outputs_plus_content_bound_base_identity"
+        )
+        report["append_only_composition"] = dict(
+            contract.append_only_composition
+        )
+        report["append_only_base_validation_scope"] = (
+            "base_recipe_bytes_manifest_bytes_and_ten_output_npz_sha256_only"
+        )
+        report["station_center_shift_xy_m"] = list(
+            contract.station_center_shift_xy_m or ()
+        )
+        report["non_claims"].extend(
+            [
+                "reused base outputs were content-bound but not replayed in this append verification",
+                "append-only candidate integrity does not recertify the reused base bank",
+                "station-center metadata is not downstream task-manifest authorization",
+            ]
+        )
+    return report
 
 
 def write_bank_report_no_clobber(
@@ -3043,7 +3724,14 @@ def _failure_report(exc: Exception) -> Mapping[str, Any]:
 def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--manifest", required=True, help="compiler BUILD_MANIFEST.json")
-    parser.add_argument("--bank-dir", required=True, help="directory containing exactly 10 NPZs")
+    parser.add_argument(
+        "--bank-dir",
+        required=True,
+        help=(
+            "directory containing the exact NPZ matrix declared by the "
+            "manifest (canonical 5x2 or strict fh_loop_high append 1x2)"
+        ),
+    )
     parser.add_argument("--mjcf", required=True, help="exact recipe-bound vendor MJCF")
     parser.add_argument("--urdf", required=True, help="exact recipe-bound vendor URDF")
     parser.add_argument(
