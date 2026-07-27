@@ -46,6 +46,28 @@ z_lo  >=  vb_table_surface_z + ball_radius  =  0.76 + 0.02  =  0.78 m
 后两条的确切检查与落点见
 [应当变成闸门的规则](../operations/rules_that_should_be_gates.md) P0 #1/#2/#4。
 
+## Task-first 站位与整轨撞桌
+
+目标点高于桌面只证明“要求的击球点存在”，不证明球拍从 ready 到击球再恢复的整条轨迹不撞桌。
+[`station_center_shift_xy_m`](../DEFINITIONS.md#station-center-shift)必须把动作、球拍 task center 与
+base center 一起平移；在本坐标约定里负 X 远离球台。不能只把 base Reward 往后移、却让 reference
+球拍轨迹留在原位。
+
+新正手只比较 `[0,0]`、`[-0.05,0]`、`[-0.10,0] m`，并取 upper/full 都通过时离原位最近的一档。
+每档必须分别检查：
+
+- exact motion 的连续/密集桌网扫掠；
+- 球拍和手柄，而不只是 wrist link origin；
+- 从 ready 到 post-strike recovery 的整个 `t_cycle`；
+- Isaac 的 `robot_hit_table` 终止是否由 broad robot geometry 或专用
+  `racket_table_contact` filtered wrist-vs-table sensor 触发；
+- missing/malformed/non-finite contact evidence 是否失败封闭。
+
+当前 source candidate 的 reference certifier 只产未授权检查，`diagnostic_smoke_authorized=false`；
+Isaac filtered contact sensor 尚未在 Pod 做 negative/positive runtime smoke。因此新正手当前仍是
+`training_authorized=false`，站远一点只是待证候选，不是已采用修复。完整任务合同见
+[task-first](task_first_n_action_contract.md#6-新正手与-station-选择)。
+
 ## 代价（2026-07-26）
 
 绑定的正手击球帧把拍子放在 `z = 0.694 m`，桌面在 `0.76 m`。

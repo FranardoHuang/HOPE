@@ -74,7 +74,9 @@ are the evidence base: HITTER (`2508.21043`), PACE (`2509.21690`, the TTRL-ICRA2
   `0/10 training-authorized`；它们也不等于新要求的整桥、成对窗口摘要或 registry shared-ready
   verifier report 已存在。
 - 同日 probe2 的 headless FK 虽为 `10/10 PASS`，顶层 CLI 仍因 sidecar 白名单 bug `rc=2` 且无 run
-  receipt；`t_hit<=0.5 s` 仅 `2/10`，大量窗口前零加速度平台仍在。
+  receipt；compiler diagnostic `t_hit` 只有 `2/10` 低于现已撤销的 `0.5 s` 通用参考线，大量
+  窗口前零加速度平台仍在。正式 post-retime `t_hit` 改由动作特定的 behavior/contact authority
+  判定，source anchor 不再充当硬门。
   `fh_loop full/bh_loop_c full/bh_block full/s0_highpress full/s0_highpress upper` 的 50 Hz 跨窗段
   `no_negative_scalar_acceleration_inside_window=false`；dynamics gate 又因 producer/verifier 的
   body-velocity 语义冲突入口拒收 `10/10`。这些都是当前失败证据，不是终表或部分晋级。
@@ -98,6 +100,33 @@ paired behavior 的逐门结果。库级还必须同时通过：
 
 上述是 `Done` 合同，不是当前结果；现在仍是 `Partial / 0 of 10`。任何相邻动作、上肢件、face
 diagnostic、旧扫描或 producer 自报都不能替它继承证书。
+
+## 2026-07-27 task-first 与 capability selector 候选
+
+本节是功能分支研究提案，不改变本 Gate 的 `Research track` 状态，也不改变
+[`origin/main` 的统一队列](../NOW.md#统一工作队列唯一优先级账本)。
+
+- executor 训练改为 ball-free [`task-first`](../DEFINITIONS.md#task-first)：每动作 level 0 只做中心
+  warm-up，再独立按 position → scalar speed magnitude → face cone → base residual 的
+  `0/.25/.5/.75/1` 五档扩域；成功率与 unsafe 率用 Wilson 置信界、最少分母、dwell 和滞回判定。
+- task-first 五动作 view 候选为
+  `bh_loop_c, fh_block_syn, bh_block, s0_highpress, fh_loop_high`，旧 `fh_loop` 不再进入新训练
+  view，但历史 bytes 不删除。新正手缺 upper/full、grounded trace、正式 `t_hit/t_cycle/site
+  speed/no-table-collision` 证书，故 `training_authorized=false`。
+- `station_center_shift_xy_m` 平移整段动作、球拍 task 与 base center；负 X 远离桌。新正手只比较
+  `0/-5/-10 cm` 三档，取 upper/full 同时通过中最小后移；当前 reference certifier 的
+  `diagnostic_smoke_authorized=false`，没有授权任何 simulator smoke。
+- 训练后才用冻结 ball-conditioned heldout 形成 capability artifact。selector 固定按
+  hard safety → support/OOD → calibrated success LCB → `delta_tie` 内 priority → abstain；
+  priority 不能复活不安全或无证据动作。
+- 当前 arbitrary-N actor/manifest/curriculum 与 selector 只有 source/host 合同候选；生产 planner、
+  schema-4 wire、C++ runner 仍是二动作，Pod 六卡占用快照下也尚未运行 Isaac smoke。
+
+详细设计、反例和停止条件只看
+[task-first 实验](../experiments/2026-07/EXP-TASK-FIRST-N-ACTION-20260727.md)、
+[selector 实验](../experiments/2026-07/EXP-ACTION-CAPABILITY-SELECTOR-20260727.md)及其两份
+[训练合同](../interfaces/task_first_n_action_contract.md) /
+[选择合同](../interfaces/action_capability_selector_contract.md)。
 
 ## Phase 2 Performance Roadmap (team, 2026-07)
 

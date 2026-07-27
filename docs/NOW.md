@@ -7,6 +7,29 @@
 `origin/main` 上的本页才是运行态权威。功能分支里的修改只是一份提案；合入前必须重新对账最新的
 `NOW/TIMELINE/PROGRESS`。缩写和机器代号的完整释义见[术语与人话对照](DEFINITIONS.md)。
 
+## 功能分支候选提案（2026-07-27，尚未进入 `origin/main`）
+
+> 本节不改变下文已采用 setting、统一工作队列、优先级或人的责任归属；合入 `main` 前必须逐项
+> 与最新主板对账。它只记录本分支准备交审的训练边界。
+
+- executor 候选改回 [`task-first`](DEFINITIONS.md#task-first)：训练不从球开始，而从每个动作的
+  task 中心开始。level 0 是位置、速度、拍面、base 四轴都为零增量的中心 warm-up；之后才以
+  `0/.25/.5/.75/1` 独立扩展 position → scalar speed → face cone → base residual。完整合同见
+  [task-first 任意 N 动作](interfaces/task_first_n_action_contract.md)。
+- 候选五动作视图为 `bh_loop_c / fh_block_syn / bh_block / s0_highpress / fh_loop_high`；
+  历史旧正手 bytes 不删除，但不再进入新训练 view。新正手尚未获得正式 `t_hit`、`t_cycle`、
+  site strike speed、无桌碰和 Pod Isaac smoke 证据，故 manifest 必须保持
+  `training_authorized=false`；站远只能通过整动作、task 与 base 一起沿负 X 平移后重验。
+- planner 候选改为读取逐动作 held-out capability artifact，对任意击球目标依次执行硬安全、
+  support/OOD、校准成功率下界、同 `delta_tie` 内 priority 与明确 abstain。当前生产仍是 schema-4
+  两侧路径，任意 N selector 尚未接线；详见
+  [动作能力 selector 合同](interfaces/action_capability_selector_contract.md)。
+- 当前训练效果好的原因仍未归因。运行时实际 Reward 主项是 `4.0/0.5/0.5`，不是旧设计表的
+  `393.4/295.1/229.5`；现象更符合“题目可行、自洽、低熵”的解释。必须分别做
+  [同 task 分布的 producer-order A/B](experiments/2026-07/EXP-TASK-FIRST-N-ACTION-20260727.md)
+  和[同 task 分布的 Reward A/B](experiments/2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md)，
+  不能把两种因果问题混在一臂。
+
 ## 先看结论
 
 - **当前仍在课程阶段 1：题目使用固定目标站位、固定击球位置和无旋正反手。** 来球速度会变化，

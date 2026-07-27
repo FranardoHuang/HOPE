@@ -5,6 +5,8 @@ flat-wire/C++ source path and opt-in same-ball task-revision source are implemen
 schema-4 path has not yet passed an Isaac full-scene run, ROS/Jazzy Release, vendor Gate 3 or
 hardware behavior. It therefore remains `Partial`, not the currently accepted deployment path.
 The 181 deploy wire remains intentionally blocked pending the station/order contract day.
+Dynamic `task_first_n<N>` is a training-only source candidate; it has not passed a Pod Isaac smoke
+and has no production arbitrary-N wire/C++ consumer.
 
 ## HITTER-Compatible Contract
 
@@ -109,6 +111,7 @@ same policy tick. Timestamp-compensation pairs with positive delay are `NO-LAUNC
 | 177 | `hitter_footwork` | 175 layout with `base_target_pos_b(2)` inserted after projected gravity; requires fresh external/oracle base localization. | Supported, but publication fails closed without fresh localization. |
 | 179 | `deploy_parity_face179` | Exact 175 prefix + tail `racket_target_normal_cmd(3), rho(1)`; actor tail is raw mount +Y/A after the runner converts the physical-B wire normal with the selected clip sign. | Legacy face-only input uses schema 2; the existing formal atomic transport uses schema 3. The opt-in live-revision path requires exact schema 4 plus matching `planner_task_revision` ONNX metadata and `--planner-task-revision`. One older envelope-bearing model passed strict Release preflight, but no task-revision model has passed a backend first tick or vendor Gate 3 behavior. |
 | 181 | `deploy_parity_station181` | Exact 179 prefix + tail `station_anchor_err_b(2)`. | Blocked: wire and the unique station/normal term order are not frozen. |
+| `181+N` | `task_first_n<N>` | Exact `hitter_footwork(177)` prefix + `racket_target_normal_cmd(4)` + `action_one_hot(N)`；manifest/action/motion order 必须逐项相同。 | Training-only source candidate；无 ball、无 production planner wire，Pod Isaac 未测。 |
 | 110 | `hitter_pure` | HITTER Table-I style: 99-D proprio prefix + base forward(2), station delta(2), racket target rel base(3), target velocity(3), tts(1); no reference command or swing flag. | Supported; requires fresh localization and metadata-bound per-side station geometry. |
 
 Do not infer a contract from width alone. Formal consumers require the registered name, mode,
@@ -145,6 +148,12 @@ out-of-envelope revision fails closed. Solver valid/invalid jitter does not crea
 Only a lifecycle-proven closure followed by a new inbound ball may allocate the next task. This
 separates “refresh the same strike” from “start another action” and closes the repeated-task bug at
 the same interface boundary.
+
+Schema 4 仍只传二动作 side/sign，不传
+[stable action UID](../DEFINITIONS.md#stable-action-uid)。任意 N 动作的候选生产接口是 schema 5
+exact23：在 exact22 后用 `[22]` 传 stable `action_uid`，并在同一
+`(control_epoch, task_id)` 内冻结；C++ 通过内容绑定 catalog 把 UID 映射到本地 slot。该 schema
+目前只是待冻结设计，Python selector core、right-width tensor 或文档本身都不能把它写成已实现。
 
 The formal flat row is published before the optional `hope_msgs/RacketCommand` mirror; mirror
 conversion/DDS failures are counted but cannot suppress a new formal row or revocation.
@@ -454,6 +463,11 @@ reward targets, and deploy compatibility here first.
   (position, velocity, face normal), and the long-run distribution widens
   through success-gated perturbations. Either mode changes target generation
   only, not the observation/action tensor contract.
+- `racket.target_mode: task_first` is the ball-free, manifest-bound arbitrary-N candidate. It
+  requires `task_first_n<N>`, balanced action sampling and the fixed per-action
+  position→scalar-speed→face→base curriculum. Level 0 is center warm-up, not a small default
+  perturbation. Full semantics and launch blockers are in
+  [task-first contract](task_first_n_action_contract.md); it is not an adopted default.
 - Face-command grading: `racket.face_command_pairing: shared_plus_y` is the production convention.
   The explicit `legacy_signed_vs_A` value exists only for controlled historical diagnosis. In both
   modes the actor's demanded normal, when present, remains the shared +Y/A-frame command; only the

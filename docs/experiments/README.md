@@ -40,6 +40,9 @@ runtime/feature 细节，写进实验正文或“决定”列。全局 P0/P1 只
 
 | ID | 问题 | 人类负责人 | 执行者 | 状态 | 证据 | 决定 |
 | --- | --- | --- | --- | --- | --- | --- |
+| [EXP-TASK-FIRST-N-ACTION-20260727](2026-07/EXP-TASK-FIRST-N-ACTION-20260727.md) | 每个动作能否从中心 task 开始，按位置→标量速度→拍面→base 独立泛化？ | Franco | Codex | blocked | E1 | 任意 N/source contract 已设计；当前五动作 view 排除旧正手并候选新 `fh_loop_high`，但新正手 upper/full、grounded trace 与 Pod Isaac smoke 未闭合，`training_authorized=false` |
+| [EXP-ACTION-CAPABILITY-SELECTOR-20260727](2026-07/EXP-ACTION-CAPABILITY-SELECTOR-20260727.md) | 任意击球目标能否先过安全与支持域，再按成功率 LCB 和并列优先级选动作？ | Franco | Codex | blocked | E1 | pure-core 排序/receipt 候选不等于生产接线；能力卷、trusted producer、任意 N wire/C++ 与 Gate3 均缺 |
+| [EXP-EFFECTIVE-REWARD-CAUSALITY-20260727](2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md) | 当前改善来自 task 自洽，还是名义高 Reward 权重？ | Franco | Codex | preregistered | E1 | 已证实实际 `4/0.5/0.5` 覆盖名义 `393.4/295.1/229.5`；task 自洽是当前最强解释，仍需同 task 分布的两 seed paired A/B |
 | [EXP-MOTION-CANONICAL-LIBRARY-20260723](2026-07/EXP-MOTION-CANONICAL-LIBRARY-20260723.md) | 五动作 × upper/full 十件主资产怎样正式化，Franco 动作和全身学习是否分别有效？ | UNASSIGNED | Codex | blocked | E1/E2 probe | 十件按 direct shared-ready 路径重建，窗口允许持续加速，`adv2c3` 仅作历史比较；grounded torque/contact、行为/恢复和 registry adoption 未闭合，仍为 `0/10` training-authorized |
 | [EXP-P1-INTEGRATED-UPGRADE-WAVE](2026-07/EXP-P1-INTEGRATED-UPGRADE-WAVE.md) | AR/action-acc/qbar/plant/push/脚部项的未测组合能否兼容工作，而不是哪一单项有效？ | Franco | Claude | blocked | E1 | action_acc 已接线但无行为证据；combo 仍绑定过时 B/strike phase，CGF 未发、交互未测；只认 Franco 明示解冻，不作单项归因 |
 | [EXP-P1-CHATTER-GROUND-FOOT-WAVE](2026-07/EXP-P1-CHATTER-GROUND-FOOT-WAVE.md) | action_rate 剂量、地面摩擦/不平整覆盖、脚部落地塑形、软惩罚减负——哪些能降抖动/失稳而不伤击球？ | Franco | Claude | preregistered | E1 | 8 臂三件套+单测已落盘；渲染被占位 commit + groundfoot/kdpassive 双闸门锁死；对照=矩阵 w_c_s0 不重复买；rough 臂 fresh-from-random 铁律 |

@@ -11,6 +11,21 @@
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
 
+## 2026-07-27（task-first / 任意 N 动作预开跑合同）
+
+- 把 executor 训练边界改写成不依赖来球的
+  [task-first 任意 N 动作合同](interfaces/task_first_n_action_contract.md)：每个动作先做零增量中心
+  warm-up，再按位置、标量速度、拍面锥和 base residual 独立扩域；站位中心平移同时移动动作、
+  球拍 task 和 base 中心。新五动作视图淘汰旧正手 `fh_loop`，但新正手仍缺正式 `t_hit`、
+  `t_cycle`、击球速度、无桌碰与 Pod Isaac 证据，所以保持 `training_authorized=false`。
+- 新建 [动作能力 selector 合同](interfaces/action_capability_selector_contract.md)与两份因果预注册：
+  [训练生产顺序 / task 泛化](experiments/2026-07/EXP-TASK-FIRST-N-ACTION-20260727.md)、
+  [实际 Reward 配方](experiments/2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md)。selector
+  顺序固定为硬安全 → support/OOD → 校准成功率下界 → 同带宽 priority → 明确 abstain；stable
+  action UID 是身份，dense slot 只作本地索引。
+- 当前只形成 source-contract 候选与 host 测试入口；Pod1/2 六卡占用快照下未跑完整 Isaac
+  smoke，也没有正式训练或 selector 生产接线结果，G05/G08 继续 `Partial/Research`。
+
 ## 2026-07-27（虚拟球 rollout 融合:45 ms → 0.067 ms,逐 bit 不变）
 
 - `virtual_ball.coarse_landing`(训练侧落点预测的 100 步 RK4)原来每步发 86 个 GPU kernel、

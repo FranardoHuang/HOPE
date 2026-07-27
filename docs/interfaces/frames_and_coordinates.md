@@ -64,6 +64,29 @@ compiler output 保持 `a3_robot_origin_ground_z0`，不能仅因轴相同就标
 sim 的 `odom` 也不能凭名字视为这两个 frame 之一；其当前受限合同见下方
 [Vendor MuJoCo `SimReset` Base Twist](#vendor-mujoco-simreset-base-twist)。
 
+<a id="task-first-station-center"></a>
+
+## Task-first station center
+
+[`station_center_shift_xy_m`](../DEFINITIONS.md#station-center-shift) 位于
+`a3_robot_origin_ground_z0` 的 XY 平面，并平移**整套动作/任务中心**，不是只改 base 的 offset。
+设动作 reference 拍点为 `p_ref`、base 中心为 `b_ref`、位置扰动为 `delta_p`、最后一轴的 base
+residual 为 `delta_b`：
+
+```text
+racket_target = p_ref + [station_x, station_y, 0] + delta_p
+base_target_xy = b_ref + [station_x, station_y] + delta_p_xy + delta_b
+```
+
+motion 和 HOPE table 两套 frame 都以 `+X` 朝对手/球台，所以 station X 为负表示机器人、动作和
+要求拍点一起远离近台边。新正手比较 `[0,0]`、`[-0.05,0]`、`[-0.10,0] m`，它们是三个
+候选中心，不是课程中同时采样的三个值；只有 upper/full 都通过桌网、身体、地面、动力学和行为门
+后，才取离原站位最近的一档。
+
+station center 属于 level-0 task identity。level 0 只做中心 warm-up，position perturbation 过门后
+才开始；base residual 是最后一轴。改变 station center 会改变 manifest/task identity，并使旧碰撞、
+能力与 selector 证据失效。
+
 ## Mocap Runtime Contract (team contract, 2026-07)
 
 The rig is ChingMu streaming over VRPN. The tracked-object set differs by phase:

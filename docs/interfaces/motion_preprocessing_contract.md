@@ -39,6 +39,18 @@
 training-authorized`。`bh_loop_b` 仍可做宽窗口挑战者，`bh_loop_a` 仍可做离线挑战者，但都不改变
 上述五个运行时槽位。
 
+2026-07-27 的 task-first 功能分支另提出一个**训练 view 候选**：
+
+```text
+bh_loop_c, fh_block_syn, bh_block, s0_highpress, fh_loop_high
+```
+
+它从新训练 view 排除旧 `fh_loop`，但不删除或改写旧 canonical registry bytes；旧动作保留作历史
+审计。新增 `fh_loop_high` source SHA-256 为
+`7d045fcb036ffa668dede4607cfcc82e789a0db7ab86fd8df9dd52cfd5ac4153`，当前没有 upper/full
+正式 compiler output、grounded trace 或逐门证书。因此这个 view 仍
+`training_authorized=false`，不能用“动作数还是五个”继承原五动作证书。
+
 工件类别与发布等级不能混写：
 
 - `diagnostic_face_core` 只允许保存 scope-specific 七关节换面窗口和诊断 receipt；它不是完整 motion，
@@ -121,14 +133,21 @@ recipe 中的 protected source span 只是旧行为扫描留下的 contact-oppor
 bang-bang 切换结构，但文档、manifest 和 registry 中统一只写“motion timing envelope”或
 “no-brake time law”，不能用 `C3` 冒充连续阶数或证据等级。
 
-### 3.1 候选选择必须击球优先
+<a id="behavior-timing-authority"></a>
 
-[`t_hit`](../DEFINITIONS.md#canonical-t-hit)严格定义为共同零速 ready 到重定时后 nominal
-source-anchor marker 的时间。现行 compiler screening gate 是每格 `t_hit<=0.5 s`；超过即该格失败，
-不能因为完整 cycle 更短、随挥更好或另一个 scope 通过而放行。通过所有硬门的 entry/exit/time-law
-候选必须按以下击球优先 tuple 排名，而不是先最小化总 cycle：
+### 3.1 候选选择击球优先；正式时序由 behavior/contact authority 给出
 
-1. 最早到达 contact-opportunity start，再最早到达 nominal anchor；
+compiler 可以记录“共同零速 ready 到重定时后 nominal source-anchor marker”的
+[`t_hit`](../DEFINITIONS.md#canonical-t-hit) diagnostic，用于 lineage、搜索与确定性排序；但 source
+anchor 不是击球 contact truth，尤其空挥 source 的 marker 可能落在回收段。通用
+`t_hit<=0.5 s` 硬门已撤销。正式 post-retime `t_hit` 必须由具名的 behavior/contact authority
+在 exact output 上测得，并与该动作预注册的有效范围比较；不同动作可以有不同范围。
+
+通过所有几何、时间律和安全硬门的 entry/exit 候选仍必须按以下击球优先 tuple 排名，而不是先
+最小化总 cycle：
+
+1. 最早到达 contact-opportunity start，再最早到达 nominal anchor（两者仍是 compiler
+   diagnostic，不自动变成正式 contact）；
 2. 窗口末前 50 Hz 离散段的零加速度平台总时长/段数更少；
 3. 完整恢复时间和总 cycle；
 4. scaled path variation、entry/exit 等确定性 tie-break。
@@ -136,6 +155,16 @@ source-anchor marker 的时间。现行 compiler screening gate 是每格 `t_hit
 零加速度平台不违反 `sddot>=0`，但会浪费准备时间，所以必须显式计数并排在 cycle 之前；只有具名
 硬速度/加速度/接触约束真正迫使平台时才可保留，并在 receipt 中写出限制项。不得用一次全局
 time-scale 让窗口后的限制拖慢 ready→hit 段，却仍称为击球优先。
+
+正式动作证书必须把四个量分开：
+
+1. behavior/contact authority 的 post-retime `t_hit`；
+2. [`t_cycle`](../DEFINITIONS.md#canonical-t-cycle) 与共同 ready/recovery；
+3. MuJoCo physical `right_racket` site 的 strike speed（含 `omega × offset`，不能报 wrist-COM
+   speed 代替）；
+4. ready→hit→recovery 整轨无球拍/机器人撞桌。
+
+任一项失败都不能由另三项较好抵消；更短 cycle 也不能把错误 source anchor 升格成 contact truth。
 
 连续路径证明之外还必须有 output 50 Hz 离散硬门：对每个左端时间
 `t_i < t_window_end` 的 sample interval（包括跨过 exact `window_end` 的那一段），重建的 scalar
@@ -149,8 +178,9 @@ CLI 因 sidecar 白名单 bug 以 `rc=2` 结束且没有 run receipt；十件按
 `fh_loop upper, fh_loop full, bh_loop_c upper, bh_loop_c full, fh_block_syn upper,
 fh_block_syn full, bh_block upper, bh_block full, s0_highpress upper, s0_highpress full` 顺序的
 `t_hit` 约为
-`[0.834,0.708,0.532,0.657,1.499,1.817,0.372,0.580,0.394,0.575] s`，只有 `2/10` 通过
-`0.5 s`；窗口前还存在大量零加速度平台。`fh_loop full`、`bh_loop_c full`、`bh_block full`、
+`[0.834,0.708,0.532,0.657,1.499,1.817,0.372,0.580,0.394,0.575] s`；其中 `2/10`
+低于已撤销的 `0.5 s` 参考线，只可比较 compiler diagnostic，不能据此判正式通过/失败。
+窗口前还存在大量零加速度平台。`fh_loop full`、`bh_loop_c full`、`bh_block full`、
 `s0_highpress full` 和 `s0_highpress upper` 的 50 Hz 跨窗段出现负加速度，manifest 字段
 `retiming.scalar_no_early_brake_proxy.no_negative_scalar_acceleration_inside_window=false`，违反本节
 离散硬门。dynamics gate 又因 producer/verifier 对 body velocity 语义冲突在

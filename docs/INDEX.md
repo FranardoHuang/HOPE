@@ -13,6 +13,9 @@
 | **发一波消融** | [消融波发射工序](operations/run_ablation_wave_launch.md) → [runbook 队列与算力](runbook.md#统一队列排序与算力纪律) |
 | **判卷 / 报数** | [结果判读与报数](operations/read_and_report_results.md) → [runbook 判卷链](runbook.md#判卷链北极星数字怎么产2026-07-06-全链踩通) |
 | 理解或修改训练 setting | [NOW 完整流程](NOW.md#1-当前一套训练是怎样完整跑起来的) → [G05](gates/G05_isaac_training_first_loop.md) → [`run_training.md`](operations/run_training.md) |
+| 训练任意 N 动作的 task 泛化 | [task-first 合同](interfaces/task_first_n_action_contract.md) → [task-first 实验](experiments/2026-07/EXP-TASK-FIRST-N-ACTION-20260727.md) → [训练前置](operations/run_training.md#task-first-prelaunch) |
+| 用成功率与优先级选择动作 | [capability selector 合同](interfaces/action_capability_selector_contract.md) → [selector 实验](experiments/2026-07/EXP-ACTION-CAPABILITY-SELECTOR-20260727.md) → [planner 边界](operations/run_planner.md#n-action-selector-boundary) |
+| 核对 trainer 真正使用的 Reward | [effective Reward 因果审计](experiments/2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md) → [发射前真值检查](operations/run_training.md#effective-reward-truth) |
 | 认领工作、排队、分算力 | [NOW 唯一队列](NOW.md#统一工作队列唯一优先级账本) → [runbook](runbook.md#统一队列排序与算力纪律) |
 | 新增实验 | [`experiments/README.md`](experiments/README.md) + [模板](experiments/TEMPLATE.md) |
 | 动作库 / 新动作 | [canonical 终审](experiments/2026-07/EXP-MOTION-CANONICAL-LIBRARY-20260723.md) → [预处理合同](interfaces/motion_preprocessing_contract.md) → [编译操作](operations/run_motion_face_shift.md) |
@@ -39,6 +42,8 @@
 ## 接口合同（改约定前必读对应那份）
 
 [Policy 观测/动作](interfaces/policy_observation_action.md) ·
+[Task-first 任意 N 动作](interfaces/task_first_n_action_contract.md) ·
+[动作能力 selector](interfaces/action_capability_selector_contract.md) ·
 [关节顺序](interfaces/joint_order_and_robot_state.md) ·
 [坐标系](interfaces/frames_and_coordinates.md) ·
 [球拍接触几何](interfaces/racket_contact_geometry.md) ·

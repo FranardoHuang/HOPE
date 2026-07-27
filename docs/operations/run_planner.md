@@ -99,6 +99,46 @@ Relevant source:
 - `hope_ws/src/hope_planner/hope_planner/node.py`
 - `hope_ws/src/hope_msgs/msg/RacketCommand.msg`
 
+<a id="n-action-selector-boundary"></a>
+## N-action capability selector boundary
+
+Status on 2026-07-27: **source-contract candidate only**. The production planner still publishes the
+schema-4 two-side command described above; it does not yet consume an arbitrary-N action catalog or
+a calibrated [`capability artifact`](../DEFINITIONS.md#capability-artifact). Do not infer runtime
+integration from the presence of host tests.
+
+The intended boundary for any requested racket task is:
+
+1. reject candidates that lack the exact motion/training lineage or any required hard-safety
+   certificate;
+2. reject candidates outside their measured support, including
+   [`OOD`](../DEFINITIONS.md#ood) queries;
+3. reject candidates below the preregistered calibrated
+   [`LCB`](../DEFINITIONS.md#selector-lcb) floor;
+4. rank by highest LCB; only within the preregistered `delta_tie` band may the lower integer
+   `priority` win, followed by higher LCB and the stable
+   [`action_uid`](../DEFINITIONS.md#stable-action-uid) as the deterministic final key;
+5. if no candidate remains, return explicit
+   [`abstain`](../DEFINITIONS.md#selector-abstain), never a default forehand/backhand.
+
+The local dense slot is only an array index and must not be a cross-process identity or tie-break.
+The selector contract, required artifact fields and failure cases are authoritative in
+[action capability selector contract](../interfaces/action_capability_selector_contract.md).
+Training-side curriculum statistics cannot be substituted for ball-conditioned held-out
+capability data.
+
+Host-only source checks for this candidate boundary are:
+
+```bash
+PYTHONPATH=hope_ws/src/hope_planner python3 -m pytest -q \
+  hope_ws/src/hope_planner/test/test_action_catalog.py \
+  hope_ws/src/hope_planner/test/test_stroke_capability.py
+```
+
+Passing them does not authorize a schema-5 producer, ONNX export, ROS/Jazzy run or hardware strike.
+Those remain blocked until the producer/runner wire contract, exact catalog digest and independent
+behavior evidence are integrated and recorded in G03/G05.
+
 ## Verification
 
 1. Start mocap or replay data.

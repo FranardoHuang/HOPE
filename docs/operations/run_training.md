@@ -12,6 +12,62 @@ The training scaffold exists under:
 
 - `hope_training/whole_body_tracking`
 
+<a id="task-first-prelaunch"></a>
+
+### Task-first prelaunch（2026-07-27，尚未授权）
+
+[`task-first`](../DEFINITIONS.md#task-first) executor 训练以每动作 task center 为输入，不读取 ball。
+当前只允许 source/preflight；新正手 `training_authorized=false`，Pod Isaac smoke 未跑，因此本节
+**故意不提供正式长训命令**。
+
+compose 后必须同时满足：
+
+- `racket.target_mode=task_first`：人话是让 racket command 直接生成动作中心附近 task；完整定义见
+  [task-first 合同](../interfaces/task_first_n_action_contract.md)；
+- `racket.task_first_manifest_path`：exact 启动清单路径，以及
+  `racket.task_first_manifest_sha256`：操作者预先钉住的文件字节 SHA-256；二者缺一即拒绝；
+- `racket.clip_names` 与 manifest `action_order` 完全相同，motion 文件数、顺序与逐文件 SHA 完全相同；
+- `task.actor_obs_contract=task_first_n<N>`，其中 N 是 manifest 动作数；actor 为
+  `hitter_footwork(177) + face/rho(4) + action_one_hot(N)`；
+- `motion.balanced_clip_sampling=true` 及内容绑定 seed，使任意前缀的逐动作样本数最多差一；
+- `racket.task_first_base_success_thresh_m` 是 base 平面成功阈值，必须 finite 且大于零，并进入 hard
+  contract；
+- level 0 四个 delta 全为零，只做 center warm-up；position `0→0.25` 后才开始第一次泛化。
+
+下列残留会改变问题，必须在 `gym.make` 前失败：
+
+- question/CQ/exam bank、HER achieved-target mix；
+- virtual/shadow/physical ball 或 ball-derived Reward；
+- planner revision、mid-swing resample、clip switch；
+- target delay、jitter、white/AR(1) noise、dropout、per-swing bias；
+- motion retiming、per-clip speed scaling或 event timing；
+- 旧 station tail、缺 face observation 或没有 N-way action identity。
+
+这里 `AR(1)` 是一阶自回归噪声；task-first 首轮将它关闭。训练只在
+[task-first 实验](../experiments/2026-07/EXP-TASK-FIRST-N-ACTION-20260727.md)把 exact manifest、
+五动作证书、host union、Pod 两迭代 smoke、WARN 摘要和 receipt 全部落账后开放。
+
+<a id="effective-reward-truth"></a>
+
+### Effective Reward truth（不要再按 pack 名字猜）
+
+现役 task YAML 的球拍位置/速度/拍面显式权重 `4/0.5/0.5` 会覆盖 v2 pack 名义
+`393.4/295.1/229.5`。所以日志里出现 `reward_pack=v2` 不证明名义表真的生效。源码现在应对每个
+冻结值覆写打印同时含“实际值、名义值、倍率”的 WARNING；发射摘要必须保留这三行。
+
+每个科学 run 都必须从已经 compose 的环境配置生成
+[`effective Reward recipe`](../DEFINITIONS.md#effective-reward-recipe)，内容覆盖所有 active
+callable、weight 和 params：
+
+1. 构造 simulator 前生成并与可选 expected SHA 对账；
+2. 环境实例化后从 runtime config 重算，必须与 pre-gym receipt 完全相同；
+3. 写入 `params/effective_reward_recipe.json`，并把同一 payload/SHA 嵌进 training hard contract；
+4. checkpoint resume、A/B、export 和 capability artifact 都按这个 SHA 拒绝配方漂移。
+
+预注册臂若声称“v2 名义冻结表”，还必须使用 strict compose guard，确保显式 task key 不能静默压包；
+普通历史兼容路径只能 WARN，不能据此追认旧 run。当前因果结论与 paired 设计见
+[effective Reward 审计](../experiments/2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md)。
+
 2026-07-01 update:
 
 - `HOPEPingPong` now defaults to unified forehand+backhand HITTER training: `registry_name_2` enabled, `target_mode: uniform`, per-clip 3-D blade-centered position and velocity target boxes (`pos_range_per_clip` / `vel_range_per_clip`; this supersedes the earlier fixed hit plane `x=0.4` with (y,z)-only sampling), actor `swing_type`, and no actor racket-normal observation.

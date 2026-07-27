@@ -329,8 +329,10 @@ nice -n 19 "$CANONICAL_PYTHON" \
   不改名晋级；
 - source/output window digest 或 transformation receipt 不匹配：按 cross-splice 硬失败处理，不从
   相邻动作、另一个 scope 或另一次 build 借窗口；
-- `t_hit>0.5 s` 或窗口前有可避免的零加速度平台：先修 strike-first 排名/分段 time law，不用更短
-  cycle 掩盖更晚击球；
+- source-anchor diagnostic 偏晚或窗口前有可避免的零加速度平台：先区分 source marker 与正式
+  behavior/contact 击球真值，再修 strike-first 排名/分段 time law。正式
+  [`t_hit`](../DEFINITIONS.md#canonical-t-hit) 只按动作特定范围判，不再使用通用 `0.5 s` 硬门；
+  也不能用更短 [`t_cycle`](../DEFINITIONS.md#canonical-t-cycle) 掩盖错误触球锚；
 - window 末前必须刹车，或跨 exact `window_end` 的 50 Hz segment 为负加速度：延长随挥、改 core
   或修离散时间律，不把窗口改成静止段；
 - kinematic retimer 失败：检查路径和显式 limits，不静默裁剪；

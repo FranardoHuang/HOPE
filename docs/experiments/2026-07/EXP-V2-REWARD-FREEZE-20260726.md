@@ -2,6 +2,14 @@
 
 **状态**:Franco 2026-07-26 口头授权首臂("这个动作可以先发一个训,用来对照换动作")。
 
+> **2026-07-27 配方真值纠错（不改写历史 run）**：本记录中的 `393.4/295.1/229.5` 是当时的
+> 名义设计表，不是当前 trainer compose 后实际生效的三项球拍 Reward。现有接线的
+> [`effective Reward recipe`](../../DEFINITIONS.md#effective-reward-recipe) 为
+> `racket_pos/racket_vel/racket_norm = 4.0/0.5/0.5`；因此下文所有既有行为读数只能说明该实际
+> 配方下发生了什么，不能作为名义三权重已经生效的证据。新的因果比较必须绑定 compose 后 receipt，
+> 并使用同一冻结 task 分布；见
+> [实际 Reward 因果预注册](EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md)。
+
 ## 0. 发射收据(对照臂)
 
 - smoke:`v2smoke_v4rg_ctrl_fresh_seed3_20260726` @ 7bd7c392 —— r1 被守卫误拦(action_rate 基线键,修为剥离+记账),**r2 通过**(迭代 0/2、1/2 零报错,剥离标记落账 ×1)。

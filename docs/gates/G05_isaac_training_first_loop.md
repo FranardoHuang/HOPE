@@ -57,6 +57,44 @@ Current-candidate promotion sub-gate (required before this Gate can close):
 
 ## Current State
 
+Follow-up note (2026-07-27, task-first/N-action prelaunch source candidate; Gate remains `Partial`):
+
+- 新候选把 executor 训练明确改为 ball-free
+  [`task-first`](../DEFINITIONS.md#task-first)：level 0 是每动作中心 warm-up，不是默认小泛化；之后
+  各动作独立按 position → scalar speed magnitude → face cone → base residual 的
+  `0/.25/.5/.75/1` 档扩域，并用成功率 Wilson 下界、unsafe 上界、最少 attempt、dwell 与滞回
+  晋级/回退。完整合同见
+  [task-first 任意动作数接口](../interfaces/task_first_n_action_contract.md)。
+- 动作身份不再只靠正反手 sign：动态 actor 合同为 `task_first_n<N>`，
+  `hitter_footwork(177) + face/rho(4) + action_one_hot(N)`，总维数 `181+N`。manifest 文件 SHA、
+  stable action UID、motion bytes/order、课程状态、balanced sampler、effective Reward receipt 与
+  checkpoint 恢复都必须精确对账。
+- 首轮五动作 training view 候选排除旧 `fh_loop`，使用
+  `bh_loop_c, fh_block_syn, bh_block, s0_highpress, fh_loop_high`。旧正手只退出新 view，历史
+  bytes 保留。新正手目前缺 upper/full 正式输出、grounded collocation trace、动作特定
+  `t_hit/t_cycle`、physical racket-site speed、无撞桌证书和 Isaac filtered-contact smoke；
+  `training_authorized=false`。
+- `station_center_shift_xy_m` 平移整套动作、球拍 task center 与 base center；负 X 是远离球台。
+  `0/-5/-10 cm` 只作 upper/full 对照，当前 certifier 只产未授权 reference checks，
+  `diagnostic_smoke_authorized=false`，不能授权 simulator 或训练。
+- Reward 审计证明名义 v2 quality 权重 `393.4/295.1/229.5` 没有进入现役 composed task；task YAML
+  的 `4/0.5/0.5` 后写覆盖。当前“学得好”的最强解释是 task 可行、自洽、低熵，而不是高权重调对；
+  必须把 producer-order A/B 与同 task 分布的 Reward A/B 分开。以后每个 run 用
+  [effective Reward recipe](../DEFINITIONS.md#effective-reward-recipe) receipt 绑定实际 callable/
+  weight/params。
+- 训练后的动作选择另属
+  [capability selector](../interfaces/action_capability_selector_contract.md)：hard safety →
+  support/OOD → calibrated LCB → `delta_tie` 内 priority → abstain。当前 production planner/
+  schema-4/C++ 仍是二动作；pure core 不能冒充接线完成。
+- 目前最高证据仍是 E1 source/host contract。2026-07-27 只读资源快照显示 Pod1/Pod2 六卡均占用，
+  本候选没有运行 GPU/Isaac smoke、没有 checkpoint，也没有新训练成绩；资源占用不是永久归属或
+  行为失败。G05 因而保持 `Partial`。
+
+详细假设与停止条件见
+[task-first 实验](../experiments/2026-07/EXP-TASK-FIRST-N-ACTION-20260727.md)、
+[Reward 因果审计](../experiments/2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md)和
+[selector 实验](../experiments/2026-07/EXP-ACTION-CAPABILITY-SELECTOR-20260727.md)。
+
 Follow-up note (2026-07-20, W/Y export mechanics pass but exact lineage blocks promotion; Gate remains `Partial`):
 
 - Both real W/Y zero-write `--plan` executions passed against exact `origin/main@a0c1284`: checkpoint iteration

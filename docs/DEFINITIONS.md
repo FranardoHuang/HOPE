@@ -21,6 +21,17 @@
 | 术语 | 人话 |
 | --- | --- |
 | `setting` | 一整套可复现配方：动作、观测、reward、题库、plant、训练方法和裁决尺必须一起指定。只换一项就是新 setting。 |
+| <a id="task-first"></a>`task-first` / 任务优先 executor 训练 | 先指定“某个动作应让球拍在击球时达到什么位置、标量速度、拍面和 base 关系”，再训练 policy 在这个动作中心附近泛化；训练 executor 时不读取来球、不发解析落台分。它不同于 `ball-first` 的“先采来球，再由 adapter 反解 task”，也不等于 planner 已会选动作。 |
+| <a id="task-first-manifest"></a>`task-first manifest` / 任务优先启动清单 | 以 exact 文件 SHA-256 绑定任意 N 动作顺序、stable UID、motion bytes、击球 phase、完整泛化包络、Wilson Gate、留出 split 和 `training_authorized` 的失败封闭 JSON。metadata 可审不等于可启动；`training_authorized=false` 时 trainer 必须拒绝。 |
+| <a id="task-first-curriculum"></a>逐动作 task curriculum / 任务泛化课程 | 每个动作从 level-0 中心 warm-up 开始（四个 delta 全为零，不是“小泛化”），再独立按 position → scalar speed magnitude → face cone → base residual，以 `0/.25/.5/.75/1` 五档扩大；动作间不汇总成功率。 |
+| <a id="station-center-shift"></a>`station_center_shift_xy_m` / 整动作站位中心平移 | 同时平移 reference action、球拍 task center 和 base center 的 XY 常量，不是只改 base Reward。HOPE 中 `+X` 朝球台/对手，所以负 X 表示整个人和整段任务远离球台；后续 base curriculum 只学相对这个中心的 residual。 |
+| <a id="wilson-confidence-bounds"></a>Wilson confidence bounds / Wilson 置信界 | 对有限 Bernoulli 样本给成功率区间的保守量尺。task curriculum 用成功率下置信界和 unsafe 率上置信界，加最少样本、dwell 与滞回决定晋级/回退；不能直接拿样本均值或跨动作平均。 |
+| <a id="stable-action-uid"></a>stable action UID / 稳定动作唯一号 | 由规范化 `action_id + family + motion/content SHA-256` 派生的正整数身份，范围 `1..2^53-1`，可精确穿过 JSON/double/C++；换 bytes 或 family 必须换号。dense action slot 只是某个 catalog 的本地 `0..N-1` 数组索引，重排可变；UID `0` 保留给 selector abstain。 |
+| <a id="capability-artifact"></a>`capability artifact` / 动作能力工件 | 用冻结 ball-conditioned 留出卷，对一个 exact catalog/policy/task/effective-Reward/model/calibration tuple 记录逐动作 support、OOD、校准成功率下界与 unsafe/误差的内容寻址工件。训练内 curriculum 成功率不能直接冒充它。 |
+| <a id="ood"></a>`OOD` / out of distribution / 分布外 | 当前 query/candidate 超出能力工件有足够支持的数据域。selector 必须先用预注册 score/threshold 拒绝 OOD，不能靠高 priority 或点估计成功率放行。 |
+| <a id="selector-lcb"></a>`LCB` / lower confidence bound / 成功率下置信界 | selector 对“该 exact 动作在该 task 邻域成功”的保守校准下界。先过最低 LCB floor，再按最高 LCB 排序；priority 只在与最高值相差不超过 `delta_tie` 的集合内生效。 |
+| <a id="selector-abstain"></a>`abstain` / selector 明确不出手 | 没有动作同时通过硬安全、support/OOD 和最低 LCB 时返回唯一空身份 `(action_uid=0, action_id="", slot=-1)`；不得偷偷回退到默认正手/反手。 |
+| <a id="effective-reward-recipe"></a>`effective Reward recipe` / 实际生效奖励配方 | 从已经 compose 完、所有 override 都落地的环境配置读取 active Reward callable、weight 和 params 后做 canonical JSON/SHA-256；它回答“Isaac 真吃到什么”，不是 `reward_pack` 标签或设计表。checkpoint、launch 与 A/B 必须绑定这个 receipt。 |
 | `arm` / 实验臂 | 一条具体训练或对照配置，不是机器人的手臂。每条臂必须说清与对照相比只改了什么。 |
 | `Wave-B` / 下肢稳定首轮 | W/V 两个旧 `model_6700` parent 内分别比较 B0/B1/B2 的六格 causal continuation；两种机制共用不看成功结果的挥拍前 `0.30 s` 与同 attempt 挥拍后 `0.40 s` inclusive gate。它不是课程 Stage，也不授权当前 0/4 stance 验收失败的 M0 横移老师。 |
 | `run` | 某条实验臂的一次实际执行。同一实验可以有多个 run。 |
@@ -65,7 +76,8 @@
 | <a id="motion-body-scope"></a>motion `upper/full body scope` / 上肢与全身动作范围 | 同一高层击球语义的两种数值参考：上肢版把人体髋部贡献按已登记规则折入机器人腰/躯干并维持站立下肢；全身版保留合法的 root、腰腿和足接触参考。两者共享动作 ID，不共享平衡、地面、动力学或行为证书。 |
 | <a id="motion-timing-envelope"></a>`motion timing envelope` / 动作时序必要包络 | 对最终绝对关节轨迹检查位置、URDF 速度和具名加速度上限的必要筛选。当前 `diagonal_timing_envelope_v1=(effort-|bias(q,qdot=0)|)/Mjj` 只是一阶对角下界，不是完整逆动力学、恒扭矩、平衡或真机证明；不得简称 `C3`，以免与 signed-face C3 实验臂混淆。 |
 | <a id="no-brake-time-law"></a>`no-brake time law` / 击球机会末前不提前刹车时间律 | 沿一条已选几何路径，把一维路径参数的加速度限制为在 exact `window_end` 前非负的运动学时间律；零加速度平台允许，窗口内也允许继续加速。它不是逐关节恒加速度、恒执行器扭矩、拍速单调或数学 `C3` 连续曲线；“bang-bang”只可描述某个受限求解器的切换结构，不能当这条合同或光滑度等级的名称。 |
-| <a id="canonical-t-hit"></a>canonical `t_hit` / 编译候选击球时刻 | 从 output frame 0 的共同零速 ready 到 nominal source-anchor marker 在新时间轴上的秒数。现行动作库把 `t_hit<=0.5 s` 当 compiler screening gate，并在可行候选中优先最小化到窗口/anchor 的时间；它仍只是运动学参考时刻，不证明 policy 会触球或把球回上台。 |
+| <a id="canonical-t-hit"></a>`t_hit` / 击球时刻 | compiler 可记录“共同零速 ready 到重定时后 source-anchor marker”的 diagnostic 时间，但 source anchor 只证明 lineage/排序，不能自封为正式触球真值。正式 post-retime `t_hit` 必须来自具名 behavior/contact authority，并使用动作特定可接受范围；通用 `t_hit<=0.5 s` 硬门已撤销。 |
+| <a id="canonical-t-cycle"></a>`t_cycle` / 完整动作周期 | 从共同 ready 出发，经击球机会和随挥，再回到同一 ready/恢复边界的完整时间。它必须与 `t_hit`、site strike speed、无桌碰和恢复分别报告；更短 cycle 不能掩盖错误触球锚或撞桌。 |
 | <a id="motion-artifact-class"></a>`motion artifact class` / 动作工件类别 | 先区分工件，再谈发布：`diagnostic_face_core` 只是一段 scope-specific 换面诊断核心，`canonical_compiler_output` 才是已经包含 direct canonical-ready→contact→ready bridge 的完整候选输出。诊断工件在 publication state machine 之外；改文件名、复制 bytes 或补一个 `publication_class` 字段都不能把它变成 `compiler_candidate`。 |
 | <a id="motion-build-manifest"></a>`motion build manifest` / 动作构建清单 | 内容绑定 source、工具、模型、参数和输出 SHA 的构建收据。它说明“哪些字节怎样生成”，不等于任何安全能力证书；拒绝请求可以只有 rejection manifest，不得同时留下看似成功的 NPZ。 |
 | <a id="canonical-ready-bridge-receipt"></a>`canonical-ready contact bridge receipt` / ready 到击球机会整桥收据 | 完整候选 manifest 的必需部分：绑定 ready/source、entry/exit、direct ready→core→ready 几何、时间律、source-marker→output-time 映射、首末共同 ready 和零速度摘要。face-core receipt 没有这座桥；缺桥或独立 verifier 不能从 exact bytes 重算时，工件只能保留 diagnostic 身份。 |

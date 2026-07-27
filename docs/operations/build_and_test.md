@@ -15,6 +15,44 @@ cd ~/workspace/HOPE/hope_ws
 
 No `vendor_assets/` payload is required for planner tests or ROS package discovery.
 
+<a id="task-first-and-capability-source-tests"></a>
+
+## Task-first And Capability Source Tests
+
+这组 host tests 不启动 Isaac、MuJoCo、ROS、Pod 或真机。它检查任意 N 身份、level-0 中心
+warm-up/逐轴课程、manifest、balanced sampler、effective Reward receipt、runner 持久状态、
+table-contact tensor kernel、新动作 reference certifier、训练接线与 selector core：
+
+```bash
+python3 -m pytest -q \
+  hope_training/whole_body_tracking/tests/test_task_first_curriculum.py \
+  hope_training/whole_body_tracking/tests/test_task_first_manifest.py \
+  hope_training/whole_body_tracking/tests/test_task_first_observation_contract.py \
+  hope_training/whole_body_tracking/tests/test_exact_resume_state.py \
+  hope_training/whole_body_tracking/tests/test_effective_reward_recipe.py \
+  hope_training/whole_body_tracking/tests/test_table_obstacle_geometry.py \
+  hope_training/whole_body_tracking/tests/test_table_obstacle_termination.py \
+  hope_ws/src/hope_planner/test/test_action_catalog.py \
+  hope_ws/src/hope_planner/test/test_stroke_capability.py \
+  tests/test_certify_task_first_action.py \
+  tests/test_runner_exact_resume_hooks.py \
+  tests/test_task_first_train_wiring.py
+```
+
+通过只代表 E1 source contract。以下必须另测且不能由上述 pass count 代替：
+
+- exact 新正手 upper/full 在厂商 MuJoCo 的 physical `right_racket` site speed、动作特定
+  `t_hit/t_cycle`、整轨撞桌和 grounded trace；
+- Isaac 场景真实创建、filtered wrist-vs-table contact sensor 的 positive/negative control；
+- 一次完整 N-action reset/wrap/attempt ledger 与两迭代 PPO smoke；
+- checkpoint 恢复后的课程/采样器/RNG receipt（仿真 state 未序列化，不能声称逐物理 step bit-exact）；
+- ROS/Jazzy trusted candidate producer、任意 N wire/C++ first tick 和 Gate3。
+
+2026-07-27 本功能分支尚未把这组 union 与 Pod Isaac smoke 记为 accepted result；Pod1/Pod2 六卡占用
+只是一份资源快照，不是 runtime 失败。结果必须回填
+[G05](../gates/G05_isaac_training_first_loop.md)与
+[task-first 实验](../experiments/2026-07/EXP-TASK-FIRST-N-ACTION-20260727.md)，不能只写聊天摘要。
+
 ## Planner Unit Tests
 
 Run from the package directory:
