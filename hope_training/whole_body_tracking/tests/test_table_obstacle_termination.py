@@ -16,6 +16,7 @@ collider actually EXISTS at this pose in a constructed env is
 
 from __future__ import annotations
 
+import ast
 import os
 import pathlib
 import sys
@@ -125,6 +126,17 @@ def test_kernel_threshold_is_a_strict_inequality(term_mod, frame):
             pos, force, torch.zeros(1, 3), lo_t, hi_t, 1.0)) is want
 
 
+def test_filtered_kernel_nonfinite_force_fails_safe(term_mod):
+    force_matrix = torch.tensor(
+        [
+            [[[0.0, 0.0, 0.0]]],
+            [[[float("nan"), 0.0, 0.0]]],
+        ],
+        dtype=torch.float32,
+    )
+    assert term_mod.filtered_contact_hit_mask(force_matrix, 1.0).tolist() == [False, True]
+
+
 def test_body_alignment_is_by_name_not_position(term_mod):
     """Sensor body order != articulation body order must not silently mis-pair."""
     sensor_names = ["torso_Link", "right_wrist_yaw_Link", "left_wrist_yaw_Link"]
@@ -139,15 +151,21 @@ def test_body_alignment_is_by_name_not_position(term_mod):
 
 # ------------------------------------------------------------------- the termination on an env - #
 class _Data:
-    def __init__(self, forces, pos):
+    def __init__(self, forces, pos, force_matrix=None):
         self.net_forces_w = forces
         self.body_pos_w = pos
+        self.force_matrix_w = force_matrix
 
 
 class _Sensor:
     def __init__(self, names, forces):
         self.body_names = names
         self.data = _Data(forces, None)
+
+
+class _FilteredSensor:
+    def __init__(self, force_matrix):
+        self.data = _Data(None, None, force_matrix)
 
 
 class _Asset:
@@ -157,8 +175,11 @@ class _Asset:
 
 
 class _Scene:
-    def __init__(self, sensor, asset, origins):
-        self.sensors = {"contact_forces": sensor}
+    def __init__(self, sensor, filtered_sensor, asset, origins):
+        self.sensors = {
+            "contact_forces": sensor,
+            "racket_table_contact": filtered_sensor,
+        }
         self._assets = {"robot": asset}
         self.env_origins = origins
 
@@ -181,15 +202,21 @@ BODIES = ["pelvis_link", "torso_Link", "right_wrist_yaw_Link", "left_ankle_roll_
 WATCHED = [0, 1, 2]  # everything but the foot
 
 
-def _env(pos, force):
+def _env(pos, force, filtered_force=None):
     sensor = _Sensor(BODIES, torch.tensor(force, dtype=torch.float32))
+    if filtered_force is None:
+        filtered_force = torch.zeros(len(pos), 1, 1, 3)
+    else:
+        filtered_force = torch.tensor(filtered_force, dtype=torch.float32)
+    filtered_sensor = _FilteredSensor(filtered_force)
     asset = _Asset(BODIES, torch.tensor(pos, dtype=torch.float32))
-    return _Env(_Scene(sensor, asset, torch.zeros(len(pos), 3)))
+    return _Env(_Scene(sensor, filtered_sensor, asset, torch.zeros(len(pos), 3)))
 
 
 def _call(term_mod, env):
     return term_mod.robot_hit_table(
-        env, _Cfg("contact_forces", WATCHED), _Cfg("robot", WATCHED),
+        env, _Cfg("contact_forces", WATCHED), _Cfg("racket_table_contact", [0]),
+        _Cfg("robot", WATCHED),
         near_x=NEAR_X, surface_z=SURFACE_Z, force_threshold=1.0, margin=MARGIN,
     )
 
@@ -202,6 +229,26 @@ def test_racket_inside_the_table_terminates(term_mod, frame):
     pos = [[standing, torso, racket_in_table, [0.0, 0.1, 0.05]]]
     force = [[[0, 0, 0], [0, 0, 0], [0.0, 0.0, 120.0], [0.0, 0.0, 400.0]]]
     assert bool(_call(term_mod, _env(pos, force))) is True
+
+
+def test_filtered_racket_contact_terminates_with_wrist_origin_outside_table(term_mod):
+    """The 21 cm racket offset may touch the near edge while the wrist origin is still outside."""
+    wrist_before_near_edge = [NEAR_X - 0.10, 0.10, SURFACE_Z]
+    pos = [[[0.0, 0.0, 1.0], [0.0, 0.0, 1.1], wrist_before_near_edge,
+            [0.0, 0.1, 0.05]]]
+    # The broad stream sees the same contact but cannot attribute it to the table, and its wrist
+    # origin correctly fails the table AABB.  The filtered pair supplies that missing identity.
+    broad_force = [[[0, 0, 0], [0, 0, 0], [0.0, 0.0, 120.0], [0, 0, 0]]]
+    filtered_force = [[[[0.0, 0.0, 120.0]]]]
+    assert bool(_call(term_mod, _env(pos, broad_force, filtered_force))) is True
+
+
+def test_wrist_origin_outside_without_filtered_contact_does_not_terminate(term_mod):
+    wrist_before_near_edge = [NEAR_X - 0.10, 0.10, SURFACE_Z]
+    pos = [[[0.0, 0.0, 1.0], [0.0, 0.0, 1.1], wrist_before_near_edge,
+            [0.0, 0.1, 0.05]]]
+    broad_force = [[[0, 0, 0], [0, 0, 0], [0.0, 0.0, 120.0], [0, 0, 0]]]
+    assert bool(_call(term_mod, _env(pos, broad_force))) is False
 
 
 def test_a_legal_swing_does_not_terminate(term_mod, frame):
@@ -235,6 +282,46 @@ def test_missing_force_stream_fails_loud(term_mod):
     env.scene.sensors["contact_forces"].data.net_forces_w = None
     with pytest.raises(RuntimeError, match="net_forces_w"):
         _call(term_mod, env)
+
+
+def test_missing_filtered_force_stream_fails_loud(term_mod):
+    env = _env([[[0.0, 0.0, 1.0]] * 4], [[[0, 0, 0]] * 4])
+    env.scene.sensors["racket_table_contact"].data.force_matrix_w = None
+    with pytest.raises(RuntimeError, match="force_matrix_w"):
+        _call(term_mod, env)
+
+
+def test_table_disabled_removes_filtered_sensor_with_other_table_parts():
+    """Execute the shipped off branch against a mock cfg; no stale sensor may survive the table."""
+    cfg_path = (REPO / "hope_training/whole_body_tracking/source/whole_body_tracking"
+                / "whole_body_tracking/tasks/tracking/config/agibot_a3/hope_env_cfg.py")
+    tree = ast.parse(cfg_path.read_text(encoding="utf-8"), filename=str(cfg_path))
+    fn = next(
+        node for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name == "apply_table_obstacle"
+    )
+    namespace = {"TABLE_CONTACT_SENSOR_NAME": "racket_table_contact"}
+    exec(compile(ast.Module(body=[fn], type_ignores=[]), str(cfg_path), "exec"), namespace)
+
+    scene = types.SimpleNamespace(
+        table_obstacle=object(),
+        table_obstacle_visual=object(),
+        racket_table_contact=object(),
+    )
+    env_cfg = types.SimpleNamespace(
+        table_obstacle=False,
+        table_obstacle_prim="{ENV_REGEX_NS}/TableObstacle",
+        scene=scene,
+        terminations=types.SimpleNamespace(robot_hit_table=object()),
+        rewards=types.SimpleNamespace(table_hit_penalty=object()),
+    )
+    namespace["apply_table_obstacle"](env_cfg)
+    assert scene.table_obstacle is None
+    assert scene.table_obstacle_visual is None
+    assert scene.racket_table_contact is None
+    assert env_cfg.terminations.robot_hit_table is None
+    assert env_cfg.rewards.table_hit_penalty is None
+    assert env_cfg.table_obstacle_prim == ""
 
 
 # ------------------------------------------------------------------------------ the penalty --- #

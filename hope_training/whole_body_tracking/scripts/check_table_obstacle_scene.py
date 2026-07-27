@@ -5,10 +5,10 @@
 
 Three checks, in increasing cost:
 
-1. ``--cfg-only`` — no simulator.  The env CFG carries a table collider, a ``robot_hit_table``
-   termination and a ``table_hit_penalty`` reward, and the collider's pose/extent equal the shared
-   ``table_tennis.table_frame`` derivation.  Cheap enough to run anywhere with the Isaac imports
-   available.
+1. ``--cfg-only`` — no simulator.  The env CFG carries a table collider, a wrist-vs-table filtered
+   sensor, a ``robot_hit_table`` termination and a ``table_hit_penalty`` reward, and the collider's
+   pose/extent equal the shared ``table_tennis.table_frame`` derivation.  Cheap enough to run
+   anywhere with the Isaac imports available.
 2. default — construct the env.  Read the SPAWNED prim's world transform back out of USD and
    compare it against the same derivation, so what is asserted is the thing PhysX actually has,
    not the thing the config asked for.  Also confirms the termination manager lists
@@ -81,7 +81,7 @@ def _close(got, want, label):
 
 
 def check_cfg(env_cfg):
-    """The cfg carries a collider, a termination and a penalty, all agreeing on one table."""
+    """The cfg carries collider, filtered sensor, termination and penalty for the same table."""
     rt = env_cfg.commands.racket_target
     near_x, surface_z = float(rt.vb_table_near_x), float(rt.vb_table_surface_z)
 
@@ -113,6 +113,17 @@ def check_cfg(env_cfg):
         if abs(float(done.params[key]) - want) > TOL:
             _fail(f"terminations.robot_hit_table.params.{key} "
                   f"{done.params[key]} != {want} (box would not match the collider)")
+    filtered_cfg = getattr(env_cfg.scene, "racket_table_contact", None)
+    if filtered_cfg is None:
+        _fail("scene.racket_table_contact is missing — offset racket contacts can be missed")
+    if filtered_cfg.prim_path != "{ENV_REGEX_NS}/Robot/right_wrist_yaw_Link":
+        _fail(f"scene.racket_table_contact.prim_path {filtered_cfg.prim_path!r} is not the A3 wrist")
+    if list(filtered_cfg.filter_prim_paths_expr) != [prim]:
+        _fail("scene.racket_table_contact filter does not match table_obstacle_prim: "
+              f"{list(filtered_cfg.filter_prim_paths_expr)!r} != {[prim]!r}")
+    done_filtered = done.params.get("filtered_sensor_cfg")
+    if done_filtered is None or done_filtered.name != "racket_table_contact":
+        _fail("terminations.robot_hit_table does not consume scene.racket_table_contact")
 
     rew = getattr(env_cfg.rewards, "table_hit_penalty", None)
     if rew is None:
@@ -129,9 +140,14 @@ def check_cfg(env_cfg):
         "near_x": near_x,
         "termination_params": {k: (float(v) if isinstance(v, (int, float)) else str(v))
                                for k, v in done.params.items()},
+        "filtered_contact_sensor": {
+            "name": "racket_table_contact",
+            "prim_path": filtered_cfg.prim_path,
+            "filter_prim_paths_expr": list(filtered_cfg.filter_prim_paths_expr),
+        },
         "table_hit_penalty_weight": float(rew.weight),
     }
-    print("ok cfg: collider + termination + penalty all present and mutually consistent")
+    print("ok cfg: collider + filtered sensor + termination + penalty all mutually consistent")
 
 
 def check_spawned(env, env_cfg):
@@ -172,12 +188,20 @@ def check_spawned(env, env_cfg):
     active = tuple(env.unwrapped.termination_manager.active_terms)
     if "robot_hit_table" not in active:
         _fail(f"robot_hit_table is not an active termination; active={active}")
+    filtered_sensor = env.unwrapped.scene.sensors.get("racket_table_contact")
+    if filtered_sensor is None:
+        _fail("spawned scene has no racket_table_contact sensor")
+    force_matrix = getattr(filtered_sensor.data, "force_matrix_w", None)
+    if force_matrix is None or force_matrix.ndim != 4 or force_matrix.shape[-1] != 3:
+        _fail("spawned racket_table_contact has no [env, body, filter, 3] force_matrix_w; got "
+              f"{None if force_matrix is None else tuple(force_matrix.shape)}")
     rew_active = tuple(env.unwrapped.reward_manager.active_terms)
     _results["spawned"] = {
         "prim_path": prim_path,
         "env_local_translation": list(local),
         "collider_prims": collider_paths,
         "collision_enabled": enabled,
+        "filtered_contact_force_matrix_shape": list(force_matrix.shape),
         "active_terminations": list(active),
         "table_hit_penalty_active": "table_hit_penalty" in rew_active,
         # These two names are the metrics channels the termination produces for free:
@@ -250,11 +274,12 @@ def main():
     if ARGS.table_obstacle == "off":
         # The no-table control arm: assert the removal is COMPLETE, not partial.
         for attr, where in (("table_obstacle", env_cfg.scene),
+                            ("racket_table_contact", env_cfg.scene),
                             ("robot_hit_table", env_cfg.terminations),
                             ("table_hit_penalty", env_cfg.rewards)):
             if getattr(where, attr, None) is not None:
                 _fail(f"--table-obstacle off left {attr} behind")
-        print("ok cfg: no-table control arm — collider, termination and penalty all removed")
+        print("ok cfg: no-table control arm — collider, sensor, termination and penalty all removed")
         _results["cfg"] = {"table_obstacle": False}
     else:
         check_cfg(env_cfg)

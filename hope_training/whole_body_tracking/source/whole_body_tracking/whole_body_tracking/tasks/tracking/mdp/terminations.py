@@ -118,9 +118,31 @@ def table_hit_mask(
     return torch.any(inside & pushing, dim=-1)
 
 
+def filtered_contact_hit_mask(
+    force_matrix_w: torch.Tensor,
+    force_threshold: float,
+) -> torch.Tensor:
+    """Reduce a filtered contact-force matrix to one table-hit bit per environment.
+
+    ``ContactSensorData.force_matrix_w`` is shaped ``[env, sensor body, filter body, xyz]``.
+    The dedicated table sensor has one body (the right wrist, which also carries the merged
+    racket collision geometry) and one filtered body (the table), but reducing both dimensions
+    keeps this kernel honest if the filter later expands.
+
+    Non-finite force data fails safe: it becomes an infinite force and ends the affected episode
+    instead of silently turning a broken contact stream into ``False``.
+    """
+    safe_force = torch.nan_to_num(
+        force_matrix_w, nan=float("inf"), posinf=float("inf"), neginf=float("-inf")
+    )
+    pushing = torch.norm(safe_force, dim=-1) > float(force_threshold)
+    return torch.any(pushing.flatten(start_dim=1), dim=1)
+
+
 def robot_hit_table(
     env: ManagerBasedRLEnv,
     sensor_cfg: SceneEntityCfg,
+    filtered_sensor_cfg: SceneEntityCfg,
     asset_cfg: SceneEntityCfg,
     near_x: float,
     surface_z: float,
@@ -131,21 +153,23 @@ def robot_hit_table(
 
     人话:机器人打到桌子了 —— 跟摔倒一样,这一局直接结束。
 
-    WHY IT IS A CONJUNCTION (contact AND geometry), not contact alone
-    ----------------------------------------------------------------
-    IsaacLab's ``ContactSensor`` can attribute a contact to a specific other prim
-    (``force_matrix_w``), but only ONE sensor body may be filtered per environment — the sensor
-    docstring is explicit that ``prim_path='{ENV_REGEX_NS}/Robot/.*'`` +
-    ``filter_prim_paths_expr=['{ENV_REGEX_NS}/Table']`` "will not work", you would need one sensor
-    per body.  So the un-filtered ``net_forces_w`` is all a whole-body sensor can give, and on its
-    own it cannot tell "hit the table" from "the arm hit the FLOOR while falling".
+    TWO COMPLEMENTARY CHANNELS
+    --------------------------
+    The broad channel watches every non-foot body using the existing whole-body
+    ``net_forces_w`` stream, then requires the corresponding rigid-body origin to lie in the
+    table slab AABB.  That discriminates table contact from a watched body hitting the floor and
+    catches forearm/torso/leg strikes.
 
-    The geometric half fixes exactly that: the contacting body must also be inside the table
-    slab's own axis-aligned box (inflated by ``margin`` so a contact resolved a few millimetres
-    outside the surface still counts).  The box comes from
-    ``table_tennis.table_frame.table_top_aabb_env`` — the SAME slab the collider is spawned from —
-    so the sensor and the collider cannot drift apart.  A body on the floor at x < near_x fails
-    the box test and is attributed to the fall guards, where it belongs.
+    The precise channel is a second, single-body ``ContactSensor`` on
+    ``right_wrist_yaw_Link``, filtered against the table prim.  Its ``force_matrix_w`` catches
+    racket-table contact directly.  This is necessary because the fixed racket collision meshes
+    are merged into the wrist PhysX body while their geometry is offset about 21 cm from the wrist
+    origin: the racket can touch the near edge while the origin is still outside the AABB.
+    Isaac Lab only supports filtered reporting when the sensor path resolves to one body, hence
+    the dedicated sensor rather than a filter on the broad whole-body sensor.
+
+    The result is ``broad_geometry_hit OR filtered_racket_hit``.  Missing or malformed sensor
+    streams raise instead of silently weakening this safety termination.
 
     KNOWN GAP, stated rather than hidden: the collider is the table TOP slab only (the real table
     is a slab on legs and the repo has no leg geometry anywhere).  A racket that arrives under
@@ -174,4 +198,27 @@ def robot_hit_table(
     dev, dt = f.device, f.dtype
     lo_t = torch.tensor(lo, device=dev, dtype=dt)
     hi_t = torch.tensor(hi, device=dev, dtype=dt)
-    return table_hit_mask(p, f, env.scene.env_origins, lo_t, hi_t, force_threshold)
+    broad_hit = table_hit_mask(p, f, env.scene.env_origins, lo_t, hi_t, force_threshold)
+
+    try:
+        filtered_sensor = env.scene.sensors[filtered_sensor_cfg.name]
+    except KeyError as exc:
+        raise RuntimeError(
+            "robot_hit_table requires the filtered wrist-vs-table contact sensor "
+            f"{filtered_sensor_cfg.name!r}"
+        ) from exc
+    force_matrix = getattr(filtered_sensor.data, "force_matrix_w", None)
+    if (
+        force_matrix is None
+        or force_matrix.ndim != 4
+        or force_matrix.shape[0] != broad_hit.shape[0]
+        or force_matrix.shape[1] < 1
+        or force_matrix.shape[2] < 1
+        or force_matrix.shape[3] != 3
+    ):
+        raise RuntimeError(
+            "robot_hit_table requires filtered force_matrix_w shaped [env, body, filter, 3]; got "
+            f"{None if force_matrix is None else tuple(force_matrix.shape)}"
+        )
+    filtered_hit = filtered_contact_hit_mask(force_matrix, force_threshold)
+    return broad_hit | filtered_hit

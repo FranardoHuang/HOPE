@@ -24,6 +24,7 @@ from isaaclab.managers import ObservationTermCfg as ObsTerm
 from isaaclab.managers import RewardTermCfg as RewTerm
 from isaaclab.managers import SceneEntityCfg
 from isaaclab.managers import TerminationTermCfg as DoneTerm
+from isaaclab.sensors import ContactSensorCfg
 from isaaclab.utils import configclass
 from isaaclab.utils.noise import AdditiveUniformNoiseCfg as Unoise
 
@@ -270,10 +271,13 @@ def attach_physical_ball_scene(env_cfg) -> None:
 ##
 
 
-#: Prim name of the always-present table collider.  The ``robot_hit_table`` termination does not
-#: read it (see that function for why filtered contacts cannot be used here), but the name is part
-#: of the scene contract and is what a receipt/debug view looks for.
+#: Prim name of the default table collider.  ``attach_table_obstacle`` may instead record the
+#: shadow/physical table prim when one of those truth instruments already supplies the same slab.
 TABLE_OBSTACLE_PRIM = "{ENV_REGEX_NS}/TableObstacle"
+#: One-body sensor used for precise racket-vs-table filtering.  The A3's fixed racket collision
+#: meshes are merged into this wrist body by PhysX.
+TABLE_CONTACT_SENSOR_NAME = "racket_table_contact"
+TABLE_CONTACT_SENSOR_PRIM = "{ENV_REGEX_NS}/Robot/right_wrist_yaw_Link"
 
 
 def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
@@ -355,6 +359,21 @@ def attach_table_obstacle(env_cfg, *, visual: bool = True) -> None:
         )
 
 
+def attach_table_contact_sensor(env_cfg) -> None:
+    """Attach the one-body wrist sensor filtered against the collider that supplies the table."""
+    filter_prim = getattr(env_cfg, "table_obstacle_prim", "")
+    if not filter_prim:
+        raise RuntimeError("table contact sensor cannot be attached without a table obstacle prim")
+    setattr(
+        env_cfg.scene,
+        TABLE_CONTACT_SENSOR_NAME,
+        ContactSensorCfg(
+            prim_path=TABLE_CONTACT_SENSOR_PRIM,
+            filter_prim_paths_expr=[filter_prim],
+        ),
+    )
+
+
 #: Contact force (N) above which a body inside the table box counts as having STRUCK it.  Low on
 #: purpose: the table is a thing you must not touch, not a thing you may lean on gently.  The
 #: existing ``undesired_contacts`` reward uses the same 1.0 N; the scene's ContactSensor
@@ -380,9 +399,10 @@ def table_hit_done_term():
     the one exclusion: their contact channel is the sanctioned floor contact already consumed by
     ``foot_soft_landing`` / ``feet_contact_time``.
 
-    The racket is deliberately NOT named: the URDF's fixed massless ``pingpang_*`` links are
-    merged into ``right_wrist_yaw_Link`` by PhysX, so the wrist body is what carries a racket
-    contact and a ``body_names=["pingpang_red_Link"]`` selection would not even resolve.
+    The broad channel deliberately names the wrist rather than the racket: the URDF's fixed
+    massless ``pingpang_*`` links are merged into ``right_wrist_yaw_Link`` by PhysX.  A dedicated
+    single-wrist sensor is also filtered against the table so its ``force_matrix_w`` catches a
+    blade contact even when the wrist origin (about 21 cm away) is outside the broad AABB.
 
     ``near_x``/``surface_z`` default to the ``RacketTargetCommandCfg`` defaults; every HOPE
     ``__post_init__`` rewrites them from the live cfg, so a run that moves the virtual table moves
@@ -392,6 +412,7 @@ def table_hit_done_term():
         func=mdp.robot_hit_table,
         params={
             "sensor_cfg": SceneEntityCfg("contact_forces", body_names=[A3_NON_FOOT_BODY_REGEX]),
+            "filtered_sensor_cfg": SceneEntityCfg(TABLE_CONTACT_SENSOR_NAME),
             "asset_cfg": SceneEntityCfg("robot", body_names=[A3_NON_FOOT_BODY_REGEX]),
             "near_x": 0.5,
             "surface_z": 0.76,
@@ -415,16 +436,16 @@ def table_hit_rew_term():
 
 
 def apply_table_obstacle(env_cfg) -> None:
-    """Wire the table obstacle + its termination + its penalty, or take all three away.
+    """Wire the table, filtered sensor, termination and penalty, or take all four away.
 
     Called from every HOPE ``__post_init__`` AFTER the shadow/physical attachments, so it can see
     a truth-instrument table already in the scene and reuse that collider instead of stacking a
     second identical static box on top of it.
 
-    The three pieces move together on purpose.  A table with no termination is a decoration; a
-    termination with no table is a channel that can never fire; a penalty naming a termination
-    that was removed raises at the first step.  So this either installs all three or removes all
-    three, and never leaves a half-configured scene.
+    The four pieces move together on purpose.  A table with no termination is a decoration; a
+    termination with no table/sensor can never report the full rule; a penalty naming a
+    termination that was removed raises at the first step.  So this either installs all four or
+    removes all four, and never leaves a half-configured scene.
     """
     T = env_cfg.terminations
     R = getattr(env_cfg, "rewards", None)
@@ -438,13 +459,14 @@ def apply_table_obstacle(env_cfg) -> None:
         # attached. Leaving it would give a "no-table" control arm a table it is not scored
         # against, which is worse than either honest option. Only the prims THIS function creates
         # are removed: shadow_table / pb_table belong to the metrics instruments and are theirs.
-        for attr in ("table_obstacle", "table_obstacle_visual"):
+        for attr in ("table_obstacle", "table_obstacle_visual", TABLE_CONTACT_SENSOR_NAME):
             if getattr(env_cfg.scene, attr, None) is not None:
                 setattr(env_cfg.scene, attr, None)
         env_cfg.table_obstacle_prim = ""
         return
 
     attach_table_obstacle(env_cfg)
+    attach_table_contact_sensor(env_cfg)
     if getattr(T, "robot_hit_table", None) is None:
         T.robot_hit_table = table_hit_done_term()
     if R is not None and getattr(R, "table_hit_penalty", None) is None:
