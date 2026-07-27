@@ -7739,6 +7739,18 @@ class RacketTargetCommand(CommandTerm):
                     "clips against (allow_legacy 题库不配变速族表)"
                 )
             order = list(metadata.get("clip_order") or [])
+            declared = [str(n) for n in (getattr(self.cfg, "clip_names_per_clip", ()) or ())]
+            _m = getattr(motion, "motion", motion)
+            _nseg = int(getattr(_m, "num_segments", 0) or 0)
+            if declared and order == declared and (_nseg == 0 or _nseg == len(order)):
+                # PER-CLIP bank (chingmu101 whole-library arm, 2026-07-28): the bank carries
+                # ONE row per loaded clip (clip_order == racket clip_names, 1:1), so clip_id
+                # IS the bank row. Return None = the identity addressing every
+                # family_table-None caller implements, and the exact contract
+                # validate_runtime_motion_contract(clip_families=None) verifies (per-clip
+                # SHA/n_frames/anchor). The (forehand, backhand) 2-row convention below only
+                # binds when a many-clip motion list shares a 2-family bank (spdmix 变速表).
+                return None
             if order != ["forehand", "backhand"]:
                 raise ValueError(
                     f"question bank clip_order {order!r} does not match the (forehand, "
