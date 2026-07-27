@@ -8,7 +8,7 @@ Run:
 from __future__ import annotations
 
 import hashlib
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import pytest
 
@@ -34,6 +34,7 @@ CURRENT = {
     "model_sha256": _sha("model"),
     "calibration_sha256": _sha("calibration"),
 }
+QUERY_SHA256 = _sha("query")
 
 
 @dataclass(frozen=True)
@@ -56,6 +57,11 @@ class _Catalog:
 
     def by_uid(self, uid):
         return self._by_uid[uid]
+
+
+class _ExplodingRepr:
+    def __repr__(self):
+        raise RuntimeError("repr must not be called by canonical hashing")
 
 
 def _real_catalog(count):
@@ -103,14 +109,56 @@ def _candidates(catalog, lcbs=None):
     )
 
 
-def _select(catalog, candidates, profile=None, artifact=None, **sha_overrides):
+def _candidate_receipt(action_uid, query_sha256=QUERY_SHA256):
+    return _sha("candidate:{}:{}".format(action_uid, query_sha256))
+
+
+def _select(
+    catalog,
+    candidates,
+    profile=None,
+    artifact=None,
+    query_sha256=QUERY_SHA256,
+    expected_profile_sha256=None,
+    **sha_overrides,
+):
     current = dict(CURRENT)
     current.update(sha_overrides)
+    current_artifact = artifact or _artifact(catalog)
+    current_profile = profile or _profile(catalog)
+    bound_candidates = tuple(
+        candidate
+        if candidate.evidence_sha256 is not None
+        else candidate.bind_receipts(
+            artifact_sha256=(
+                current_artifact.artifact_sha256
+                if candidate.artifact_sha256 is None
+                else candidate.artifact_sha256
+            ),
+            query_sha256=(
+                query_sha256
+                if candidate.query_sha256 is None
+                else candidate.query_sha256
+            ),
+            candidate_sha256=(
+                _candidate_receipt(candidate.action_uid, query_sha256)
+                if candidate.candidate_sha256 is None
+                else candidate.candidate_sha256
+            ),
+        )
+        for candidate in candidates
+    )
     return select_action(
         catalog,
-        artifact or _artifact(catalog),
-        profile or _profile(catalog),
-        candidates,
+        current_artifact,
+        current_profile,
+        bound_candidates,
+        query_sha256=query_sha256,
+        expected_profile_sha256=(
+            current_profile.profile_sha256
+            if expected_profile_sha256 is None
+            else expected_profile_sha256
+        ),
         **current,
     )
 
@@ -177,6 +225,29 @@ def test_artifact_rejects_catalog_sha_and_slot_identity_mismatch():
         _artifact(catalog).assert_compatible(catalog=other_uids, **CURRENT)
 
 
+def test_profile_hash_binds_all_thresholds_and_complete_priority_map():
+    catalog = _Catalog(2)
+    first = _profile(catalog)
+    reordered_priorities = {
+        action.action_uid: action.slot
+        for action in reversed(catalog.actions)
+    }
+    same_content = _profile(catalog, priority_by_uid=reordered_priorities)
+    changed_gate = _profile(catalog, min_support=21)
+    changed_priority = _profile(
+        catalog,
+        priority_by_uid={
+            catalog.actions[0].action_uid: 1,
+            catalog.actions[1].action_uid: 0,
+        },
+    )
+
+    assert first.profile_sha256 == same_content.profile_sha256
+    assert first.profile_sha256 != changed_gate.profile_sha256
+    assert first.profile_sha256 != changed_priority.profile_sha256
+    assert first.to_mapping()["schema_version"] == 1
+
+
 @pytest.mark.parametrize("count", [1, 2, 5, 6, 93])
 def test_selector_scales_by_catalog_not_a_hardcoded_action_count(count):
     catalog = _real_catalog(count)
@@ -194,6 +265,38 @@ def test_selector_scales_by_catalog_not_a_hardcoded_action_count(count):
     assert decision.selected_action_id == catalog.actions[-1].action_id
     assert decision.selected_slot == count - 1
     assert len(decision.assessments) == count
+
+
+def test_decision_carries_artifact_profile_query_and_candidate_receipts():
+    catalog = _Catalog(2)
+    artifact = _artifact(catalog)
+    profile = _profile(catalog)
+    decision = _select(
+        catalog,
+        _candidates(catalog),
+        artifact=artifact,
+        profile=profile,
+    )
+
+    assert decision.artifact_sha256 == artifact.artifact_sha256
+    assert decision.profile_sha256 == profile.profile_sha256
+    assert decision.query_sha256 == QUERY_SHA256
+    assert [row.candidate_sha256 for row in decision.assessments] == [
+        _candidate_receipt(action.action_uid)
+        for action in catalog.actions
+    ]
+    assert all(len(row.evidence_sha256) == 64 for row in decision.assessments)
+    assert len(decision.decision_sha256) == 64
+
+    changed_row = replace(
+        decision.assessments[0],
+        lcb_success=float(decision.assessments[0].lcb_success) + 0.01,
+    )
+    with pytest.raises(CapabilityContractError, match="evidence receipt"):
+        replace(
+            decision,
+            assessments=(changed_row,) + decision.assessments[1:],
+        )
 
 
 def test_unsafe_optimistic_top_priority_action_can_never_win():
@@ -431,6 +534,36 @@ def test_priority_may_break_tie_inside_bound_but_lcb_breaks_equal_priority():
     assert decision.selected_action_uid == statistical_winner.action_uid
 
 
+def test_priority_may_break_tie_at_exact_delta_boundary_only():
+    catalog = _Catalog(2)
+    statistical_winner, priority_winner = catalog.actions
+    profile = _profile(
+        catalog,
+        delta_tie=0.25,
+        priority_by_uid={
+            statistical_winner.action_uid: 99,
+            priority_winner.action_uid: 0,
+        },
+    )
+
+    boundary = _select(
+        catalog,
+        _candidates(catalog, [0.75, 0.50]),
+        profile=profile,
+    )
+    outside = _select(
+        catalog,
+        _candidates(
+            catalog,
+            [0.75, float.fromhex("0x1.fffffffffffffp-2")],
+        ),
+        profile=profile,
+    )
+
+    assert boundary.selected_action_uid == priority_winner.action_uid
+    assert outside.selected_action_uid == statistical_winner.action_uid
+
+
 def test_uid_is_the_final_stable_tie_breaker():
     catalog = _Catalog(2)
     profile = _profile(
@@ -516,6 +649,168 @@ def test_candidate_sequence_rejects_duplicate_unknown_reordered_and_missing():
 
     with pytest.raises(CapabilityContractError, match="exactly one row"):
         _select(catalog, good[:-1])
+
+
+def test_candidate_evidence_receipts_are_required_and_match_current_inputs():
+    catalog = _Catalog(2)
+    artifact = _artifact(catalog)
+    profile = _profile(catalog)
+    bare = _candidates(catalog)
+
+    with pytest.raises(CapabilityContractError, match=r"candidates\[0\]\.artifact_sha256"):
+        select_action(
+            catalog,
+            artifact,
+            profile,
+            bare,
+            query_sha256=QUERY_SHA256,
+            expected_profile_sha256=profile.profile_sha256,
+            **CURRENT,
+        )
+
+    stale_artifact = (
+        replace(bare[0], artifact_sha256=_sha("stale-artifact")),
+        bare[1],
+    )
+    with pytest.raises(CapabilityContractError, match="current capability artifact"):
+        _select(catalog, stale_artifact, artifact=artifact, profile=profile)
+
+    stale_query = (
+        replace(bare[0], query_sha256=_sha("stale-query")),
+        bare[1],
+    )
+    with pytest.raises(CapabilityContractError, match="current query"):
+        _select(catalog, stale_query, artifact=artifact, profile=profile)
+
+    duplicate_receipt = _sha("duplicate-candidate-receipt")
+    duplicates = tuple(
+        replace(candidate, candidate_sha256=duplicate_receipt)
+        for candidate in bare
+    )
+    with pytest.raises(CapabilityContractError, match="duplicate candidate_sha256"):
+        _select(catalog, duplicates, artifact=artifact, profile=profile)
+
+
+@pytest.mark.parametrize(
+    "tamper",
+    [
+        lambda row: replace(row, lcb_success=0.01),
+        lambda row: replace(row, hard_ok=False, hard_reason="unsafe"),
+    ],
+)
+def test_evidence_self_hash_rejects_score_or_hard_gate_tampering(tamper):
+    catalog = _Catalog(2)
+    artifact = _artifact(catalog)
+    first, second = _candidates(catalog)
+    bound = first.bind_receipts(
+        artifact_sha256=artifact.artifact_sha256,
+        query_sha256=QUERY_SHA256,
+        candidate_sha256=_candidate_receipt(first.action_uid),
+    )
+
+    with pytest.raises(CapabilityContractError, match="evidence_sha256"):
+        _select(
+            catalog,
+            (tamper(bound), second),
+            artifact=artifact,
+        )
+
+
+def test_unsupported_diagnostic_uses_stable_type_sentinel_not_repr():
+    catalog = _Catalog(2)
+    artifact = _artifact(catalog)
+    uid = catalog.actions[0].action_uid
+    first = CandidateEvidence(
+        uid,
+        hard_ok=False,
+        hard_reason="unsafe",
+        support_count=_ExplodingRepr(),
+    ).bind_receipts(
+        artifact_sha256=artifact.artifact_sha256,
+        query_sha256=QUERY_SHA256,
+        candidate_sha256=_candidate_receipt(uid),
+    )
+    second = CandidateEvidence(
+        uid,
+        hard_ok=False,
+        hard_reason="unsafe",
+        support_count=_ExplodingRepr(),
+    ).bind_receipts(
+        artifact_sha256=artifact.artifact_sha256,
+        query_sha256=QUERY_SHA256,
+        candidate_sha256=_candidate_receipt(uid),
+    )
+
+    assert first.evidence_sha256 == second.evidence_sha256
+    decision = _select(
+        catalog,
+        (first, _candidates(catalog)[1]),
+        artifact=artifact,
+    )
+    assert decision.selected_slot == 1
+
+
+def test_unauthorized_profile_hash_fails_before_selection():
+    catalog = _Catalog(2)
+    profile = _profile(catalog)
+    with pytest.raises(CapabilityContractError, match="authorized profile"):
+        _select(
+            catalog,
+            _candidates(catalog),
+            profile=profile,
+            expected_profile_sha256=_sha("different-profile"),
+        )
+
+
+def test_decision_identity_must_match_unique_selected_assessment():
+    catalog = _Catalog(2)
+    decision = _select(catalog, _candidates(catalog))
+    with pytest.raises(CapabilityContractError, match="selected decision identity"):
+        replace(
+            decision,
+            selected_action_uid=999_999,
+            selected_action_id="not_in_assessments",
+            selected_slot=99,
+        )
+
+    selected_index = decision.selected_slot
+    selected = decision.assessments[selected_index]
+    with pytest.raises(CapabilityContractError, match="empty hard_reason"):
+        replace(selected, hard_reason="table_collision")
+    with pytest.raises(CapabilityContractError, match="valid numeric evidence"):
+        replace(
+            selected,
+            support_count=-99,
+            ood_score=2.0,
+            lcb_success=-1.0,
+        )
+
+    forged = replace(
+        selected,
+        action_uid=999_999,
+        action_id="forged",
+    )
+    assessments = list(decision.assessments)
+    assessments[selected_index] = forged
+    with pytest.raises(CapabilityContractError, match="evidence receipt"):
+        replace(
+            decision,
+            selected_action_uid=forged.action_uid,
+            selected_action_id=forged.action_id,
+            assessments=tuple(assessments),
+        )
+
+    hard = tuple(
+        CandidateEvidence(
+            action.action_uid,
+            hard_ok=False,
+            hard_reason="unsafe",
+        )
+        for action in catalog.actions
+    )
+    abstention = _select(catalog, hard)
+    with pytest.raises(CapabilityContractError, match="abstention reason"):
+        replace(abstention, reason="abstain_all_ood")
 
 
 def test_select_action_checks_artifact_before_scoring():

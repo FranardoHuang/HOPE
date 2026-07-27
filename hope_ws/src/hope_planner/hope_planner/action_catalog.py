@@ -60,8 +60,8 @@ def _require_exact_keys(
 
 
 def _require_string(value: object, *, name: str) -> str:
-    if type(value) is not str or not value:
-        raise ValueError("{} must be a non-empty string".format(name))
+    if type(value) is not str or not value or value != value.strip():
+        raise ValueError("{} must be a non-empty trimmed string".format(name))
     return value
 
 

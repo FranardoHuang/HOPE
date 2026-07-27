@@ -12,6 +12,12 @@ selectable.
 
 Pure standard-library Python 3.8; this file is shared by ROS-side tests and training
 artifact tooling.
+
+Trust boundary: this module authenticates continuity and object integrity after
+the caller supplies content hashes.  Production integration must compute
+``query_sha256`` and ``candidate_sha256`` in the trusted planner/adapter producer,
+and must pin ``expected_profile_sha256`` from an independent activation manifest.
+This pure core does not authenticate an untrusted producer.
 """
 
 from __future__ import annotations
@@ -26,6 +32,9 @@ from typing import Any, Dict, Mapping, Optional, Sequence, Tuple
 
 
 CAPABILITY_SCHEMA_VERSION = 1
+SELECTOR_PROFILE_SCHEMA_VERSION = 1
+CANDIDATE_EVIDENCE_SCHEMA_VERSION = 1
+DECISION_SCHEMA_VERSION = 1
 _SHA256_HEX_LEN = 64
 # Exact integer range shared by the flat JSON/ROS/C++ action catalog.  Staying at
 # or below 2**53-1 preserves identity through IEEE-754 JSON consumers.
@@ -75,6 +84,51 @@ def _canonical_sha256(mapping: Mapping[str, object]) -> str:
         allow_nan=False,
     ).encode("utf-8")
     return hashlib.sha256(payload).hexdigest()
+
+
+def _evidence_scalar(value: object) -> Mapping[str, object]:
+    """Type-stable encoding for evidence values, including NaN diagnostics."""
+
+    if value is None:
+        return {"kind": "none"}
+    if type(value) is bool:
+        return {"kind": "bool", "value": value}
+    if type(value) is int:
+        return {"kind": "int", "value": str(value)}
+    if type(value) is float:
+        return {"kind": "float", "hex": value.hex()}
+    if type(value) is str:
+        return {"kind": "string", "value": value}
+    if isinstance(value, numbers.Real):
+        return {
+            "kind": "real",
+            "type": "{}.{}".format(
+                type(value).__module__,
+                type(value).__qualname__,
+            ),
+            "hex": float(value).hex(),
+        }
+    return {
+        "kind": "unsupported",
+        "type": "{}.{}".format(type(value).__module__, type(value).__qualname__),
+    }
+
+
+def _within_exact_float_delta(best: float, candidate: float, delta: float) -> bool:
+    """Compare ``best - candidate <= delta`` as exact binary64 rationals."""
+
+    best_numerator, best_denominator = best.as_integer_ratio()
+    candidate_numerator, candidate_denominator = candidate.as_integer_ratio()
+    delta_numerator, delta_denominator = delta.as_integer_ratio()
+    difference_numerator = (
+        best_numerator * candidate_denominator
+        - candidate_numerator * best_denominator
+    )
+    difference_denominator = best_denominator * candidate_denominator
+    return (
+        difference_numerator * delta_denominator
+        <= delta_numerator * difference_denominator
+    )
 
 
 def _catalog_rows(catalog: object) -> Tuple[object, ...]:
@@ -371,6 +425,29 @@ class SelectorProfile:
             raise CapabilityContractError("priority_by_uid must not be empty")
         object.__setattr__(self, "priority_by_uid", MappingProxyType(copied))
 
+    def to_mapping(self) -> Dict[str, object]:
+        """Return the canonical, JSON-safe runtime selector contract."""
+
+        return {
+            "schema_version": SELECTOR_PROFILE_SCHEMA_VERSION,
+            "min_support": self.min_support,
+            "max_ood_score": self.max_ood_score,
+            "min_lcb_success": self.min_lcb_success,
+            "delta_tie": self.delta_tie,
+            # JSON object keys are strings.  Sorting here makes the serialized
+            # contract independent of the caller's insertion order.
+            "priority_by_uid": {
+                str(uid): self.priority_by_uid[uid]
+                for uid in sorted(self.priority_by_uid)
+            },
+        }
+
+    @property
+    def profile_sha256(self) -> str:
+        """Content hash of every threshold and priority that can change a decision."""
+
+        return _canonical_sha256(self.to_mapping())
+
     def assert_for_catalog(self, catalog: object) -> None:
         wanted = set(_catalog_action_uids(catalog))
         got = set(self.priority_by_uid.keys())
@@ -389,6 +466,12 @@ class CandidateEvidence:
     diagnostics (including an optimistic finite score) without ever becoming eligible.
     Hard passes must provide all three learned-capability fields; malformed numeric
     values are intentionally handled per candidate by :func:`select_action`.
+
+    The optional SHA fields must be populated before selection.  Artifact/query
+    hashes bind the scorer context; ``candidate_sha256`` binds the complete
+    per-action adapter/physics/prototype/hard-gate candidate input; and
+    ``evidence_sha256`` is recomputed over all of those identities plus every
+    hard-gate and learned-capability value.
     """
 
     action_uid: int
@@ -397,6 +480,10 @@ class CandidateEvidence:
     support_count: Optional[int] = None
     ood_score: Optional[float] = None
     lcb_success: Optional[float] = None
+    artifact_sha256: Optional[str] = None
+    query_sha256: Optional[str] = None
+    candidate_sha256: Optional[str] = None
+    evidence_sha256: Optional[str] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -419,6 +506,70 @@ class CandidateEvidence:
                 "hard-fail candidate must provide a non-empty hard_reason"
             )
 
+    def _unsigned_evidence_mapping(self) -> Dict[str, object]:
+        return {
+            "schema_version": CANDIDATE_EVIDENCE_SCHEMA_VERSION,
+            "artifact_sha256": _require_sha256(
+                self.artifact_sha256, "candidate artifact_sha256"
+            ),
+            "query_sha256": _require_sha256(
+                self.query_sha256, "candidate query_sha256"
+            ),
+            "candidate_sha256": _require_sha256(
+                self.candidate_sha256, "candidate candidate_sha256"
+            ),
+            "action_uid": self.action_uid,
+            "hard_ok": self.hard_ok,
+            "hard_reason": self.hard_reason,
+            "support_count": _evidence_scalar(self.support_count),
+            "ood_score": _evidence_scalar(self.ood_score),
+            "lcb_success": _evidence_scalar(self.lcb_success),
+        }
+
+    def computed_evidence_sha256(self) -> str:
+        """Hash every field whose mutation could change admission or ranking."""
+
+        return _canonical_sha256(self._unsigned_evidence_mapping())
+
+    def bind_receipts(
+        self,
+        *,
+        artifact_sha256: str,
+        query_sha256: str,
+        candidate_sha256: str,
+    ) -> "CandidateEvidence":
+        """Return a self-authenticating scorer output for one exact candidate."""
+
+        bound = replace(
+            self,
+            artifact_sha256=_require_sha256(
+                artifact_sha256, "candidate artifact_sha256"
+            ),
+            query_sha256=_require_sha256(
+                query_sha256, "candidate query_sha256"
+            ),
+            candidate_sha256=_require_sha256(
+                candidate_sha256, "candidate candidate_sha256"
+            ),
+            evidence_sha256=None,
+        )
+        return replace(
+            bound,
+            evidence_sha256=bound.computed_evidence_sha256(),
+        )
+
+    def assert_receipt(self) -> str:
+        declared = _require_sha256(
+            self.evidence_sha256, "candidate evidence_sha256"
+        )
+        computed = self.computed_evidence_sha256()
+        if declared != computed:
+            raise CapabilityContractError(
+                "candidate evidence_sha256 does not match its canonical "
+                "artifact/query/candidate identity and scored evidence"
+            )
+        return declared
+
 
 @dataclass(frozen=True)
 class ActionAssessment:
@@ -434,6 +585,84 @@ class ActionAssessment:
     support_count: Optional[int]
     ood_score: Optional[float]
     lcb_success: Optional[float]
+    candidate_sha256: str
+    evidence_sha256: str
+
+    def __post_init__(self) -> None:
+        _require_action_uid(self.action_uid, "assessment action_uid")
+        if (
+            not isinstance(self.action_id, str)
+            or not self.action_id
+            or self.action_id != self.action_id.strip()
+        ):
+            raise CapabilityContractError(
+                "assessment action_id must be a non-empty trimmed string"
+            )
+        if not _is_exact_int(self.slot) or self.slot < 0:
+            raise CapabilityContractError("assessment slot must be an integer >= 0")
+        if not _is_exact_int(self.priority) or self.priority < 0:
+            raise CapabilityContractError(
+                "assessment priority must be an integer >= 0"
+            )
+        if not isinstance(self.eligible, bool):
+            raise CapabilityContractError("assessment eligible must be a bool")
+        if not isinstance(self.reason, str) or not self.reason:
+            raise CapabilityContractError(
+                "assessment reason must be a non-empty string"
+            )
+        if not isinstance(self.hard_reason, str):
+            raise CapabilityContractError("assessment hard_reason must be a string")
+        _require_sha256(self.candidate_sha256, "assessment candidate_sha256")
+        _require_sha256(self.evidence_sha256, "assessment evidence_sha256")
+        allowed_reasons = {
+            "hard_reject",
+            "invalid_evidence",
+            "low_support",
+            "ood",
+            "below_min_lcb",
+            "eligible",
+            "selected",
+            "eligible_not_selected",
+        }
+        if self.reason not in allowed_reasons:
+            raise CapabilityContractError(
+                f"assessment has unknown reason {self.reason!r}"
+            )
+        if self.reason == "hard_reject":
+            if self.eligible or not self.hard_reason.strip():
+                raise CapabilityContractError(
+                    "hard_reject assessment must be ineligible with a "
+                    "non-empty hard_reason"
+                )
+            return
+        if self.hard_reason:
+            raise CapabilityContractError(
+                "a non-hard-reject assessment must have an empty hard_reason"
+            )
+
+        eligible_reason = self.reason in {
+            "eligible",
+            "selected",
+            "eligible_not_selected",
+        }
+        if self.eligible != eligible_reason:
+            raise CapabilityContractError(
+                "assessment eligible flag and reason are inconsistent"
+            )
+        numeric_evidence_valid = (
+            _valid_support(self.support_count)
+            and _valid_unit_interval(self.ood_score)
+            and _valid_unit_interval(self.lcb_success)
+        )
+        if self.reason == "invalid_evidence":
+            if numeric_evidence_valid:
+                raise CapabilityContractError(
+                    "invalid_evidence assessment must contain invalid numeric evidence"
+                )
+        elif not numeric_evidence_valid:
+            raise CapabilityContractError(
+                f"{self.reason} assessment must contain valid numeric evidence"
+            )
 
 
 @dataclass(frozen=True)
@@ -450,8 +679,14 @@ class Decision:
     selected_slot: int
     reason: str
     assessments: Tuple[ActionAssessment, ...]
+    artifact_sha256: str
+    profile_sha256: str
+    query_sha256: str
 
     def __post_init__(self) -> None:
+        _require_sha256(self.artifact_sha256, "decision artifact_sha256")
+        _require_sha256(self.profile_sha256, "decision profile_sha256")
+        _require_sha256(self.query_sha256, "decision query_sha256")
         if not isinstance(self.reason, str) or not self.reason:
             raise CapabilityContractError("decision reason must be a non-empty string")
         if type(self.assessments) is not tuple:
@@ -460,10 +695,71 @@ class Decision:
             raise CapabilityContractError(
                 "decision assessments must contain only ActionAssessment rows"
             )
+        if not self.assessments:
+            raise CapabilityContractError("decision assessments must not be empty")
+        if tuple(row.slot for row in self.assessments) != tuple(
+            range(len(self.assessments))
+        ):
+            raise CapabilityContractError(
+                "decision assessments must be in exact dense slot order"
+            )
+        for field, values in (
+            ("action_uid", tuple(row.action_uid for row in self.assessments)),
+            ("action_id", tuple(row.action_id for row in self.assessments)),
+            (
+                "candidate_sha256",
+                tuple(row.candidate_sha256 for row in self.assessments),
+            ),
+            (
+                "evidence_sha256",
+                tuple(row.evidence_sha256 for row in self.assessments),
+            ),
+        ):
+            if len(set(values)) != len(values):
+                raise CapabilityContractError(
+                    f"decision assessments contain duplicate {field} values"
+                )
+        for index, row in enumerate(self.assessments):
+            reconstructed = CandidateEvidence(
+                action_uid=row.action_uid,
+                hard_ok=row.reason != "hard_reject",
+                hard_reason=row.hard_reason,
+                support_count=row.support_count,
+                ood_score=row.ood_score,
+                lcb_success=row.lcb_success,
+                artifact_sha256=self.artifact_sha256,
+                query_sha256=self.query_sha256,
+                candidate_sha256=row.candidate_sha256,
+                evidence_sha256=row.evidence_sha256,
+            )
+            try:
+                reconstructed.assert_receipt()
+            except CapabilityContractError as exc:
+                raise CapabilityContractError(
+                    f"decision assessments[{index}] does not match its "
+                    f"evidence receipt: {exc}"
+                ) from exc
+        selected_rows = tuple(
+            row for row in self.assessments if row.reason == "selected"
+        )
         if self.selected_action_uid == 0:
             if self.selected_action_id != "" or self.selected_slot != -1:
                 raise CapabilityContractError(
                     "abstention identity must be exactly action_uid=0, action_id='', slot=-1"
+                )
+            if self.reason == "selected" or selected_rows:
+                raise CapabilityContractError(
+                    "an abstention cannot contain a selected assessment"
+                )
+            if any(row.eligible for row in self.assessments):
+                raise CapabilityContractError(
+                    "an abstention cannot contain an eligible assessment"
+                )
+            expected_reason = _no_eligible_reason(self.assessments)
+            if self.reason != expected_reason:
+                raise CapabilityContractError(
+                    "abstention reason does not match its assessments: "
+                    f"got {self.reason!r}, expected {expected_reason!r}"
                 )
         else:
             _require_action_uid(self.selected_action_uid, "selected_action_uid")
@@ -475,6 +771,39 @@ class Decision:
                 raise CapabilityContractError(
                     "selected_slot must be an integer >= 0 for a selection"
                 )
+            if self.reason != "selected" or len(selected_rows) != 1:
+                raise CapabilityContractError(
+                    "a selection must contain exactly one selected assessment"
+                )
+            selected = selected_rows[0]
+            if not selected.eligible:
+                raise CapabilityContractError(
+                    "the selected assessment must be eligible"
+                )
+            if (
+                selected.action_uid != self.selected_action_uid
+                or selected.action_id != self.selected_action_id
+                or selected.slot != self.selected_slot
+            ):
+                raise CapabilityContractError(
+                    "selected decision identity must match its selected assessment"
+                )
+            for row in self.assessments:
+                if row.eligible and row.reason not in (
+                    "selected",
+                    "eligible_not_selected",
+                ):
+                    raise CapabilityContractError(
+                        "every eligible assessment must be selected or "
+                        "eligible_not_selected"
+                    )
+                if not row.eligible and row.reason in (
+                    "selected",
+                    "eligible_not_selected",
+                ):
+                    raise CapabilityContractError(
+                        "an ineligible assessment cannot carry an eligible reason"
+                    )
 
     @property
     def selected_uid(self) -> int:
@@ -488,6 +817,40 @@ class Decision:
     def abstained(self) -> bool:
         return self.selected_action_uid == 0
 
+    @property
+    def decision_sha256(self) -> str:
+        """Canonical receipt over identities, gates, and nested evidence receipts."""
+
+        return _canonical_sha256(
+            {
+                "schema_version": DECISION_SCHEMA_VERSION,
+                "selected_action_uid": self.selected_action_uid,
+                "selected_action_id": self.selected_action_id,
+                "selected_slot": self.selected_slot,
+                "reason": self.reason,
+                "artifact_sha256": self.artifact_sha256,
+                "profile_sha256": self.profile_sha256,
+                "query_sha256": self.query_sha256,
+                "assessments": [
+                    {
+                        "action_uid": row.action_uid,
+                        "action_id": row.action_id,
+                        "slot": row.slot,
+                        "priority": row.priority,
+                        "eligible": row.eligible,
+                        "reason": row.reason,
+                        "hard_reason": row.hard_reason,
+                        "support_count": _evidence_scalar(row.support_count),
+                        "ood_score": _evidence_scalar(row.ood_score),
+                        "lcb_success": _evidence_scalar(row.lcb_success),
+                        "candidate_sha256": row.candidate_sha256,
+                        "evidence_sha256": row.evidence_sha256,
+                    }
+                    for row in self.assessments
+                ],
+            }
+        )
+
 
 def _valid_support(value: object) -> bool:
     return _is_exact_int(value) and int(value) >= 0
@@ -500,13 +863,23 @@ def _valid_unit_interval(value: object) -> bool:
     return math.isfinite(number) and 0.0 <= number <= 1.0
 
 
-def _abstain(reason: str, rows: Sequence[ActionAssessment]) -> Decision:
+def _abstain(
+    reason: str,
+    rows: Sequence[ActionAssessment],
+    *,
+    artifact_sha256: str,
+    profile_sha256: str,
+    query_sha256: str,
+) -> Decision:
     return Decision(
         selected_action_uid=0,
         selected_action_id="",
         selected_slot=-1,
         reason=reason,
         assessments=tuple(rows),
+        artifact_sha256=artifact_sha256,
+        profile_sha256=profile_sha256,
+        query_sha256=query_sha256,
     )
 
 
@@ -531,6 +904,8 @@ def select_action(
     profile: SelectorProfile,
     candidates: Sequence[CandidateEvidence],
     *,
+    query_sha256: str,
+    expected_profile_sha256: str,
     policy_sha256: str,
     task_sha256: str,
     reward_sha256: str,
@@ -555,6 +930,16 @@ def select_action(
     )
     profile.assert_for_catalog(catalog)
     actions = _catalog_rows(catalog)
+    query_sha256 = _require_sha256(query_sha256, "query_sha256")
+    profile_sha256 = profile.profile_sha256
+    expected_profile_sha256 = _require_sha256(
+        expected_profile_sha256, "expected_profile_sha256"
+    )
+    if profile_sha256 != expected_profile_sha256:
+        raise CapabilityContractError(
+            "selector profile_sha256 does not match the authorized profile: "
+            f"profile={profile_sha256}, expected={expected_profile_sha256}"
+        )
 
     try:
         candidate_rows = tuple(candidates)
@@ -587,8 +972,48 @@ def select_action(
             f"got {candidate_uids}, expected {catalog_uids}"
         )
 
+    candidate_receipts = []
+    evidence_receipts = []
+    for index, candidate in enumerate(candidate_rows):
+        evidence_artifact_sha256 = _require_sha256(
+            candidate.artifact_sha256,
+            f"candidates[{index}].artifact_sha256",
+        )
+        evidence_query_sha256 = _require_sha256(
+            candidate.query_sha256,
+            f"candidates[{index}].query_sha256",
+        )
+        candidate_sha256 = _require_sha256(
+            candidate.candidate_sha256,
+            f"candidates[{index}].candidate_sha256",
+        )
+        if evidence_artifact_sha256 != artifact.artifact_sha256:
+            raise CapabilityContractError(
+                f"candidates[{index}].artifact_sha256 does not match the "
+                "current capability artifact"
+            )
+        if evidence_query_sha256 != query_sha256:
+            raise CapabilityContractError(
+                f"candidates[{index}].query_sha256 does not match the current query"
+            )
+        candidate_receipts.append(candidate_sha256)
+        try:
+            evidence_receipts.append(candidate.assert_receipt())
+        except CapabilityContractError as exc:
+            raise CapabilityContractError(
+                f"candidates[{index}] has an invalid evidence receipt: {exc}"
+            ) from exc
+    if len(set(candidate_receipts)) != len(candidate_receipts):
+        raise CapabilityContractError(
+            "candidate sequence contains duplicate candidate_sha256 receipt(s)"
+        )
+    if len(set(evidence_receipts)) != len(evidence_receipts):
+        raise CapabilityContractError(
+            "candidate sequence contains duplicate evidence_sha256 receipt(s)"
+        )
+
     assessments = []
-    for action, candidate in zip(actions, candidate_rows):
+    for index, (action, candidate) in enumerate(zip(actions, candidate_rows)):
         uid = int(action.action_uid)
         priority = profile.priority_by_uid[uid]
 
@@ -607,6 +1032,8 @@ def select_action(
                     support_count=candidate.support_count,
                     ood_score=candidate.ood_score,
                     lcb_success=candidate.lcb_success,
+                    candidate_sha256=candidate_receipts[index],
+                    evidence_sha256=evidence_receipts[index],
                 )
             )
             continue
@@ -628,6 +1055,8 @@ def select_action(
                     support_count=candidate.support_count,
                     ood_score=candidate.ood_score,
                     lcb_success=candidate.lcb_success,
+                    candidate_sha256=candidate_receipts[index],
+                    evidence_sha256=evidence_receipts[index],
                 )
             )
             continue
@@ -660,21 +1089,34 @@ def select_action(
                 eligible=eligible,
                 reason=reason,
                 hard_reason="",
-                support_count=support,
-                ood_score=ood,
-                lcb_success=lcb,
+                support_count=candidate.support_count,
+                ood_score=candidate.ood_score,
+                lcb_success=candidate.lcb_success,
+                candidate_sha256=candidate_receipts[index],
+                evidence_sha256=evidence_receipts[index],
             )
         )
 
     eligible_rows = [row for row in assessments if row.eligible]
     if not eligible_rows:
-        return _abstain(_no_eligible_reason(assessments), assessments)
+        return _abstain(
+            _no_eligible_reason(assessments),
+            assessments,
+            artifact_sha256=artifact.artifact_sha256,
+            profile_sha256=profile_sha256,
+            query_sha256=query_sha256,
+        )
 
     best_lcb = max(float(row.lcb_success) for row in eligible_rows)
 
-    tie_floor = best_lcb - profile.delta_tie
     tie_rows = [
-        row for row in eligible_rows if float(row.lcb_success) >= tie_floor
+        row
+        for row in eligible_rows
+        if _within_exact_float_delta(
+            best_lcb,
+            float(row.lcb_success),
+            profile.delta_tie,
+        )
     ]
     selected = min(
         tie_rows,
@@ -698,4 +1140,7 @@ def select_action(
         selected_slot=selected.slot,
         reason="selected",
         assessments=tuple(final_rows),
+        artifact_sha256=artifact.artifact_sha256,
+        profile_sha256=profile_sha256,
+        query_sha256=query_sha256,
     )

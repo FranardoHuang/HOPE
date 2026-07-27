@@ -131,6 +131,22 @@ def test_mapping_rows_must_be_in_dense_slot_order_and_nonempty():
 
 
 @pytest.mark.parametrize(
+    "field,value",
+    [
+        ("action_id", " action_000"),
+        ("action_id", "action_000 "),
+        ("family", " forehand"),
+        ("family", "forehand "),
+    ],
+)
+def test_identity_strings_must_be_trimmed_at_catalog_producer(field, value):
+    rows = _identity_rows(1)
+    rows[0][field] = value
+    with pytest.raises(ValueError, match="trimmed"):
+        ActionCatalog.build(rows)
+
+
+@pytest.mark.parametrize(
     "mutate",
     [
         lambda row: row.update({"unknown": 1}),
