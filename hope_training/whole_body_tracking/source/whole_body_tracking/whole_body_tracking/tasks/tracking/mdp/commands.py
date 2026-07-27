@@ -559,6 +559,8 @@ class _BalancedRoundRobinClipSampler:
 
 class MotionCommand(CommandTerm):
     cfg: MotionCommandCfg
+    _EXACT_RESUME_STATE_KIND = "whole_body_tracking.MotionCommand"
+    _EXACT_RESUME_STATE_SCHEMA_VERSION = 1
 
     def __init__(self, cfg: MotionCommandCfg, env: ManagerBasedRLEnv):
         super().__init__(cfg, env)
@@ -2337,6 +2339,42 @@ class MotionCommand(CommandTerm):
                 "balanced_clip_sampling is enabled but checkpoint sampler state is missing"
             )
         self._balanced_clip_sampler.load_state_dict(state)
+
+    def exact_resume_state_dict(self) -> dict:
+        """Return the complete versioned state owned by this command term."""
+        return {
+            "state_kind": self._EXACT_RESUME_STATE_KIND,
+            "schema_version": self._EXACT_RESUME_STATE_SCHEMA_VERSION,
+            # Explicit null is part of the schema: disabled is state, not a missing key.
+            "balanced_clip_sampler": self.balanced_clip_sampler_state_dict(),
+        }
+
+    def load_exact_resume_state_dict(self, state: dict, strict: bool = True):
+        """Restore only an exact schema/identity match; no permissive mode exists."""
+        if strict is not True:
+            raise ValueError(
+                "MotionCommand exact resume supports only strict=True"
+            )
+        if type(state) is not dict:
+            raise ValueError("MotionCommand exact resume state must be a dictionary")
+        expected_keys = {
+            "state_kind",
+            "schema_version",
+            "balanced_clip_sampler",
+        }
+        if set(state) != expected_keys:
+            raise ValueError(
+                "MotionCommand exact resume state keys do not match the strict schema"
+            )
+        if state["state_kind"] != self._EXACT_RESUME_STATE_KIND:
+            raise ValueError("MotionCommand exact resume state_kind does not match")
+        if state["schema_version"] != self._EXACT_RESUME_STATE_SCHEMA_VERSION:
+            raise ValueError(
+                "MotionCommand exact resume schema_version is unsupported"
+            )
+        self.load_balanced_clip_sampler_state_dict(
+            state["balanced_clip_sampler"]
+        )
 
     def _capture_post_swing_states(self, env_ids: torch.Tensor):
         """A8: snapshot end-of-swing robot states (wrap envs only) into the ring buffer.

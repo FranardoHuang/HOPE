@@ -4352,5 +4352,62 @@ def test_motion_command_default_keeps_legacy_torch_randint_path(clips):
     assert torch.equal(cmd.clip_id, expected)
 
 
+def test_motion_command_exact_resume_schema_includes_disabled_sampler(clips):
+    cmd, _ = _make_motion_command([clips[0], clips[1]])
+    state = cmd.exact_resume_state_dict()
+    assert state == {
+        "state_kind": "whole_body_tracking.MotionCommand",
+        "schema_version": 1,
+        "balanced_clip_sampler": None,
+    }
+    cmd.load_exact_resume_state_dict(state)
+    with pytest.raises(ValueError, match="strict=True"):
+        cmd.load_exact_resume_state_dict(state, strict=False)
+
+
+def test_motion_command_exact_resume_round_trip_and_identity_fail_loud(clips):
+    motion_files = [clips[index % len(clips)] for index in range(6)]
+    source, _ = _make_motion_command(
+        motion_files,
+        balanced_clip_sampling=True,
+        balanced_clip_sampling_seed=55,
+    )
+    source._adaptive_sampling(torch.arange(5))
+    state = source.exact_resume_state_dict()
+
+    resumed, _ = _make_motion_command(
+        motion_files,
+        balanced_clip_sampling=True,
+        balanced_clip_sampling_seed=55,
+    )
+    resumed.load_exact_resume_state_dict(state)
+    source._adaptive_sampling(torch.arange(source.num_envs))
+    resumed._adaptive_sampling(torch.arange(resumed.num_envs))
+    assert torch.equal(source.clip_id, resumed.clip_id)
+
+    wrong_order = copy.deepcopy(state)
+    sampler_state = wrong_order["balanced_clip_sampler"]
+    sampler_state["clip_order"] = tuple(reversed(sampler_state["clip_order"]))
+    with pytest.raises(ValueError, match="clip_order"):
+        resumed.load_exact_resume_state_dict(wrong_order)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "match"),
+    [
+        (lambda state: state.pop("balanced_clip_sampler"), "keys"),
+        (lambda state: state.update(extra=True), "keys"),
+        (lambda state: state.update(state_kind="other"), "state_kind"),
+        (lambda state: state.update(schema_version=2), "schema_version"),
+    ],
+)
+def test_motion_command_exact_resume_rejects_schema_drift(clips, mutation, match):
+    cmd, _ = _make_motion_command([clips[0], clips[1]])
+    state = cmd.exact_resume_state_dict()
+    mutation(state)
+    with pytest.raises(ValueError, match=match):
+        cmd.load_exact_resume_state_dict(state)
+
+
 if __name__ == "__main__":
     sys.exit(pytest.main([__file__, "-q"]))
