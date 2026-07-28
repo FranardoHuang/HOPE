@@ -5849,6 +5849,7 @@ _RACKET_KEYS = (
     "action_ball_evaluator_launch_receipt_path",
     "action_ball_evaluator_launch_receipt_file_sha256",
     "action_ball_diagnostic_unauthorized",
+    "virtual_ball",
     "ref_perturb_curriculum_steps", "ref_perturb_curriculum_start", "ref_perturb_success_gated",
     "ref_perturb_advance_threshold", "ref_perturb_advance_rate", "ref_vel_scale", "ref_vel_scale_by_motion",
     "debug_reward_logging",
@@ -8928,6 +8929,14 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 C,
                 "action_ball_diagnostic_unauthorized",
                 _get(rk, "action_ball_diagnostic_unauthorized"),
+                bool,
+                applied,
+                "racket_target",
+            )
+            _set_attr(
+                C,
+                "virtual_ball",
+                _get(rk, "virtual_ball"),
                 bool,
                 applied,
                 "racket_target",
