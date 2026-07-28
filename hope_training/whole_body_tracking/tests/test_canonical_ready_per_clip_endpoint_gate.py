@@ -229,11 +229,10 @@ def test_non_finite_boundary_fails():
 
 
 def test_cross_clip_clause_stays_removed_in_source():
-    assert "share one exact" not in COMMANDS
-    assert (
-        "requires each clip to start and end on one "
-        "exact runtime-float32 ready pose" in COMMANDS
-    )
+    assert "requires all clip starts/ends to share one" not in COMMANDS
+    # source text splits the message across literals; pin each piece
+    assert "requires each clip to start and end on one " in COMMANDS
+    assert "exact runtime-float32 ready pose" in COMMANDS
     assert "unit frame-0 root quaternion" in COMMANDS
     assert "must be yaw-only" not in COMMANDS
     # hope_commands stores the yaw PROJECTION of the ready root; the hard
