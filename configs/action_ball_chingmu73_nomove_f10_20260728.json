@@ -82,7 +82,7 @@
     "sha256": "5084c6411c55b76e73958335101f3a84cd4a246afd24d1ef3690eb0dc30bd7c9",
     "scope": "full"
   },
-  "solver_profile_sha256": "d0fa15d1584dd14faec36455aad1b86377e273e1f2b19ec690a6440e1dad9119",
+  "solver_profile_sha256": "07a5d446c7f2864b409397716459befcdac4b9a1cf5d2df92a95a2119e7b17e8",
   "physics_profile_sha256": "aa5c9085f9b48ca65b3a0ee2cbb35588a5e85a08e84dc3f2ce552d3ef4af85b7",
   "landing_aim": {
     "center_w_xy_m": [
