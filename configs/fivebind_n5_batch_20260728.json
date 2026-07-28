@@ -1,0 +1,178 @@
+{
+ "schema": "fivebind_n5_batch_table_v1 (chingmu_manifest_v1-compatible units)",
+ "source_bindings": "configs/fivebind_BINDINGS_20260727.json",
+ "source_bindings_sha256": "182cacc2b3d0a2dae6a4486b2417dbd0ce06f485210693f50c355d7317949272",
+ "v_in_json": "configs/fivebind_n5_anchor_inverse_solve_20260728.json",
+ "v_in_json_sha256": "6ce2f43394cc087181088c5cff00eab2899944e012daa4e7547ef78ec784e92d",
+ "frame_note": "fivebind clip world frame == training env W frame (table near edge x=0.5, centred y=0, surface z=0.76). hope frame here := env frame translated by (-0.5, -0.7625) in xy; contact z additionally -0.76 (above table surface). Vectors (v_in/v_out) are translation-invariant and identical in both frames.",
+ "units": [
+  {
+   "uid": "fh_loop",
+   "family": "FH",
+   "npz": "motions/fivebind_n5_20260728/fh_loop_upper_fivebind.npz",
+   "npz_sha256": "8d94dc55e8a157ad8d109c06f89c1362bb3f7ef58c3f953befa81683e63b2e9b",
+   "T": 88,
+   "fps": 50,
+   "hit_frame_50": 55,
+   "strike_phase": 0.632184,
+   "yaw_before_deg": -113.66081256291561,
+   "station_xy_hope_m": [
+    -0.34577465057373047,
+    -0.9420365065336227
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.4235,
+    -1.6728,
+    0.5861000000000001
+   ],
+   "v_in_fit_hope_ms": [
+    -3.7585,
+    -0.0391,
+    -0.6138
+   ],
+   "v_out_fit_hope_ms": [
+    4.8999,
+    2.1667,
+    2.261
+   ],
+   "w_out_nominal_radps": [
+    -19.2967,
+    50.3108,
+    19.5158
+   ],
+   "world_z0": "floor",
+   "station_provenance": "npz frame-0 pelvis xy (shared canonical-ready station; BINDINGS has no station field) minus the env->hope table translation (0.5, 0.7625)",
+   "v_in_provenance": "inverse-solved from anchor blade state: centroid of the venue incoming-ball distribution subset returned legally by the BINDINGS anchor blade state (strike_point/strike_velocity/signed_face_normal) under the venue contact law; see v_in_json provenance",
+   "anchor_exact_bindings": 0.6621,
+   "anchor_exact_inverse_solve_check": 0.6565,
+   "blade_speed_ctrl_point_mps": 2.8046,
+   "mount_normal_sign_bindings": 1.0
+  },
+  {
+   "uid": "bh_loop_c",
+   "family": "BH",
+   "npz": "motions/fivebind_n5_20260728/bh_loop_c_upper_fivebind.npz",
+   "npz_sha256": "c950a73e473cad84d0fafcd51c552ec4fef085580bbeaec0f4e96be2acd7e2fc",
+   "T": 71,
+   "fps": 50,
+   "hit_frame_50": 31,
+   "strike_phase": 0.442857,
+   "yaw_before_deg": 84.63384334348382,
+   "station_xy_hope_m": [
+    -0.34577465057373047,
+    -0.9420365065336227
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.24619999999999997,
+    -0.24609999999999999,
+    0.6326
+   ],
+   "v_in_fit_hope_ms": [
+    -3.3017,
+    0.0064,
+    -0.8316
+   ],
+   "v_out_fit_hope_ms": [
+    3.7252,
+    -0.2119,
+    3.1631
+   ],
+   "w_out_nominal_radps": [
+    -1.4046,
+    -32.3187,
+    0.705
+   ],
+   "world_z0": "floor",
+   "station_provenance": "npz frame-0 pelvis xy (shared canonical-ready station; BINDINGS has no station field) minus the env->hope table translation (0.5, 0.7625)",
+   "v_in_provenance": "inverse-solved from anchor blade state: centroid of the venue incoming-ball distribution subset returned legally by the BINDINGS anchor blade state (strike_point/strike_velocity/signed_face_normal) under the venue contact law; see v_in_json provenance",
+   "anchor_exact_bindings": 0.9746,
+   "anchor_exact_inverse_solve_check": 0.9776,
+   "blade_speed_ctrl_point_mps": 1.8144,
+   "mount_normal_sign_bindings": -1.0
+  },
+  {
+   "uid": "bh_block",
+   "family": "BH",
+   "npz": "motions/fivebind_n5_20260728/bh_block_upper_fivebind.npz",
+   "npz_sha256": "0cd94aa47bf8feb59bbe7cc7a0306abb57ee7ec8ebcec6443a80bbdc58894309",
+   "T": 54,
+   "fps": 50,
+   "hit_frame_50": 24,
+   "strike_phase": 0.45283,
+   "yaw_before_deg": 34.80941359675478,
+   "station_xy_hope_m": [
+    -0.34577465057373047,
+    -0.9420365065336227
+   ],
+   "ball_pos_hit_hope_m": [
+    0.08240000000000003,
+    -0.5022,
+    0.4445999999999999
+   ],
+   "v_in_fit_hope_ms": [
+    -4.1724,
+    0.0477,
+    -0.7395
+   ],
+   "v_out_fit_hope_ms": [
+    3.6015,
+    -0.5781,
+    1.9519
+   ],
+   "w_out_nominal_radps": [
+    20.722,
+    -51.7305,
+    -71.8801
+   ],
+   "world_z0": "floor",
+   "station_provenance": "npz frame-0 pelvis xy (shared canonical-ready station; BINDINGS has no station field) minus the env->hope table translation (0.5, 0.7625)",
+   "v_in_provenance": "inverse-solved from anchor blade state: centroid of the venue incoming-ball distribution subset returned legally by the BINDINGS anchor blade state (strike_point/strike_velocity/signed_face_normal) under the venue contact law; see v_in_json provenance",
+   "anchor_exact_bindings": 0.4502,
+   "anchor_exact_inverse_solve_check": 0.4445,
+   "blade_speed_ctrl_point_mps": 1.5782,
+   "mount_normal_sign_bindings": -1.0
+  },
+  {
+   "uid": "s0_highpress",
+   "family": "BH",
+   "npz": "motions/fivebind_n5_20260728/s0_highpress_upper_fivebind.npz",
+   "npz_sha256": "2bc5f6483644aa69fe3dfc42775461a6fbdf8cd1c407d0b0c8e593a86dfd8f50",
+   "T": 41,
+   "fps": 50,
+   "hit_frame_50": 10,
+   "strike_phase": 0.25,
+   "yaw_before_deg": 42.24435851404592,
+   "station_xy_hope_m": [
+    -0.34577465057373047,
+    -0.9420365065336227
+   ],
+   "ball_pos_hit_hope_m": [
+    -0.10749999999999998,
+    -0.6894,
+    0.5476000000000001
+   ],
+   "v_in_fit_hope_ms": [
+    -3.6152,
+    0.0122,
+    -0.7637
+   ],
+   "v_out_fit_hope_ms": [
+    4.0499,
+    -0.8817,
+    2.3282
+   ],
+   "w_out_nominal_radps": [
+    -8.3689,
+    3.9266,
+    21.8823
+   ],
+   "world_z0": "floor",
+   "station_provenance": "npz frame-0 pelvis xy (shared canonical-ready station; BINDINGS has no station field) minus the env->hope table translation (0.5, 0.7625)",
+   "v_in_provenance": "inverse-solved from anchor blade state: centroid of the venue incoming-ball distribution subset returned legally by the BINDINGS anchor blade state (strike_point/strike_velocity/signed_face_normal) under the venue contact law; see v_in_json provenance",
+   "anchor_exact_bindings": 0.8051,
+   "anchor_exact_inverse_solve_check": 0.8039,
+   "blade_speed_ctrl_point_mps": 1.9025,
+   "mount_normal_sign_bindings": -1.0
+  }
+ ]
+}

@@ -1,0 +1,186 @@
+{
+ "builder": "build_action_ball_manifest.py",
+ "batch_manifest": "/private/tmp/claude-501/-Users-Franco-Dropbox----nohope/d7496878-6d1f-4812-a394-53c2262361d9/scratchpad/n5wt/configs/fivebind_n5_batch_20260728.json",
+ "batch_manifest_sha256": "a119a6f04637c56136b5bf29e0a1735cefd5ce94be807b89b06a3d4e432be8e0",
+ "excluded_uids": [],
+ "n_actions": 4,
+ "out": "/private/tmp/claude-501/-Users-Franco-Dropbox----nohope/d7496878-6d1f-4812-a394-53c2262361d9/scratchpad/n5wt/configs/action_ball_n5_nomove_f10_20260728.json",
+ "file_sha256": "0b640f5d7b2d35895d1a4696635e3a256f2a32341778ad586d828d677317e2b7",
+ "canonical_sha256": "5c969e03ba2c3fb1566dde300033a5c99521e63db1934185832965ef08437f9e",
+ "racket_site_speed_mps": {
+  "min": 1.5781956911087036,
+  "median": 1.9024732112884521,
+  "max": 2.8045876026153564
+ },
+ "min_episode_length_s_needed": 3.186666666666667,
+ "teacher_rate_min_bumped_uids": [],
+ "inbound_min_cosine_relaxed_uids": [],
+ "mount_sign_family_mismatch_uids": [],
+ "mount_sign_ambiguous_uids": [],
+ "per_action": [
+  {
+   "uid": "fh_loop",
+   "action_id": "fh_loop",
+   "family": "forehand",
+   "t_hit_s": 1.1,
+   "t_cycle_s": 1.74,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.9333333333333336,
+    2.1
+   ],
+   "ttc_center_s": 2.0166666666666666,
+   "contact_offset_center_b_yaw_m": [
+    0.7005263819995847,
+    0.2220794935359675,
+    1.3461
+   ],
+   "incoming_speed_center_mps": 3.808490711554907,
+   "incoming_dir_angle_to_inbound_axis_deg": 9.293558490895416,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "env_neg_x_in_b_yaw",
+   "incoming_inbound_axis_b_yaw": [
+    0.40132141544184274,
+    -0.9159372912529307,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    0.15422534942626953,
+    -0.17953650653362274
+   ],
+   "racket_site_speed_mps": 2.8045876026153564,
+   "racket_site_speed_tool_f64_mps": 2.8045877962542174,
+   "racket_site_speed_tool_delta_mps": 1.9363886094581062e-07,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.7969612102473353,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "bh_loop_c",
+   "action_id": "bh_loop_c",
+   "family": "backhand",
+   "t_hit_s": 0.62,
+   "t_cycle_s": 1.4,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.1333333333333335,
+    1.62
+   ],
+   "ttc_center_s": 1.376666666666667,
+   "contact_offset_center_b_yaw_m": [
+    0.7021987255964391,
+    -0.03405410303972628,
+    1.3926
+   ],
+   "incoming_speed_center_mps": 3.4048234036437193,
+   "incoming_dir_angle_to_inbound_axis_deg": 14.13745484843477,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "env_neg_x_in_b_yaw",
+   "incoming_inbound_axis_b_yaw": [
+    -0.09352024061069589,
+    0.9956173786129477,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    0.15422534942626953,
+    -0.17953650653362274
+   ],
+   "racket_site_speed_mps": 1.8143666982650757,
+   "racket_site_speed_tool_f64_mps": 1.8143667571945847,
+   "racket_site_speed_tool_delta_mps": 5.8929509050287265e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.9883829967275299,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "bh_block",
+   "action_id": "bh_block",
+   "family": "backhand",
+   "t_hit_s": 0.48,
+   "t_cycle_s": 1.06,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.9,
+    1.48
+   ],
+   "ttc_center_s": 1.19,
+   "contact_offset_center_b_yaw_m": [
+    0.602635120472208,
+    0.11670730674248775,
+    1.2046
+   ],
+   "incoming_speed_center_mps": 4.2376948096813205,
+   "incoming_dir_angle_to_inbound_axis_deg": 10.070970914974387,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "env_neg_x_in_b_yaw",
+   "incoming_inbound_axis_b_yaw": [
+    -0.8210554308062207,
+    0.5708484733654031,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    0.15422534942626953,
+    -0.17953650653362274
+   ],
+   "racket_site_speed_mps": 1.5781956911087036,
+   "racket_site_speed_tool_f64_mps": 1.5781956839264661,
+   "racket_site_speed_tool_delta_mps": 7.1822374714258785e-09,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.6569378693035177,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "s0_highpress",
+   "action_id": "s0_highpress",
+   "family": "backhand",
+   "t_hit_s": 0.2,
+   "t_cycle_s": 0.8,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.43333333333333335,
+    1.2
+   ],
+   "ttc_center_s": 0.8166666666666667,
+   "contact_offset_center_b_yaw_m": [
+    0.3462369767228275,
+    0.026832247192189712,
+    1.3076
+   ],
+   "incoming_speed_center_mps": 3.6950044073045434,
+   "incoming_dir_angle_to_inbound_axis_deg": 11.929667971894139,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "inbound_axis_mode": "env_neg_x_in_b_yaw",
+   "incoming_inbound_axis_b_yaw": [
+    -0.7402843268184403,
+    0.6722939204447478,
+    0.0
+   ],
+   "base_spawn_center_w_xy_m": [
+    0.15422534942626953,
+    -0.17953650653362274
+   ],
+   "racket_site_speed_mps": 1.9024732112884521,
+   "racket_site_speed_tool_f64_mps": 1.9024731510670616,
+   "racket_site_speed_tool_delta_mps": 6.022139054095987e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8119782711788004,
+   "mount_sign_raw_agrees": true
+  }
+ ]
+}

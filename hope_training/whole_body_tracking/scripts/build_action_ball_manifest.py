@@ -252,7 +252,16 @@ def _build_action(unit, args, face_row, report_rows):
     incoming_center = _normalize3((dir_x, dir_y, d_hope[2]))
     incoming_u, incoming_v = _tangent_frame(incoming_center)
 
-    inbound_axis = (-1.0, 0.0, 0.0)
+    if args.inbound_axis_mode == "env_neg_x_in_b_yaw":
+        # The certified inbound support means "balls approach from the table side"
+        # (env -X).  For side-on ready stances (fivebind aim-rotated clips, frame-0
+        # pelvis yaw up to ~114 deg) env -X expressed in B_yaw is far from B_yaw -X,
+        # so the axis must be rotated per action; the fixed -X axis of the ChingMu
+        # batches is the yaw~0 special case of the same rule.
+        axis_x, axis_y = _rot_z(-yaw_rad, -1.0, 0.0)
+        inbound_axis = _normalize3((axis_x, axis_y, 0.0))
+    else:
+        inbound_axis = (-1.0, 0.0, 0.0)
     center_to_axis_deg = math.degrees(
         math.acos(max(-1.0, min(1.0, _dot(incoming_center, inbound_axis))))
     )
@@ -385,6 +394,8 @@ def _build_action(unit, args, face_row, report_rows):
             "incoming_dir_angle_to_inbound_axis_deg": center_to_axis_deg,
             "inbound_min_cosine": min_cosine,
             "inbound_min_cosine_relaxed": relaxed,
+            "inbound_axis_mode": args.inbound_axis_mode,
+            "incoming_inbound_axis_b_yaw": list(inbound_axis),
             "base_spawn_center_w_xy_m": list(spawn_center),
             "racket_site_speed_mps": racket_speed,
             "racket_site_speed_tool_f64_mps": tool_speed,
@@ -840,6 +851,11 @@ def main() -> int:
     b.add_argument("--spin-mag-lower-std-max", type=float, default=40.0)
     b.add_argument("--spin-mag-upper-std-initial", type=float, default=5.0)
     b.add_argument("--spin-mag-upper-std-max", type=float, default=40.0)
+    b.add_argument("--inbound-axis-mode", choices=["fixed_neg_x", "env_neg_x_in_b_yaw"],
+                   default="fixed_neg_x",
+                   help="certified inbound-support axis: fixed B_yaw -X (ChingMu batches, "
+                        "yaw~0 stations) or env -X rotated into B_yaw per action "
+                        "(aim-rotated side-on ready stances, e.g. fivebind)")
     b.add_argument("--inbound-min-cosine", type=float, default=0.20)
     b.add_argument("--inbound-safety-deg", type=float, default=0.5)
     b.add_argument("--near-x", type=float, default=0.5)

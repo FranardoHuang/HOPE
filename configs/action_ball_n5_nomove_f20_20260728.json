@@ -1,0 +1,793 @@
+{
+  "schema_version": 3,
+  "manifest_id": "action_ball_n5_nomove_f20_20260728",
+  "mobility_mode": "no_move",
+  "action_order": [
+    "fh_loop",
+    "bh_loop_c",
+    "bh_block",
+    "s0_highpress"
+  ],
+  "prototype": {
+    "path": "configs/stroke_prototypes_v1_20260727.json",
+    "sha256": "5084c6411c55b76e73958335101f3a84cd4a246afd24d1ef3690eb0dc30bd7c9",
+    "scope": "full"
+  },
+  "solver_profile_sha256": "6b2c7c669bfa8709186d2c98663ad908944936754c846ac98dff2f916a265c51",
+  "physics_profile_sha256": "aa5c9085f9b48ca65b3a0ee2cbb35588a5e85a08e84dc3f2ce552d3ef4af85b7",
+  "landing_aim": {
+    "center_w_xy_m": [
+      2.555,
+      0.0
+    ],
+    "std_lower_initial_m": [
+      0.01,
+      0.01
+    ],
+    "std_lower_max_m": [
+      0.25,
+      0.45
+    ],
+    "std_upper_initial_m": [
+      0.01,
+      0.01
+    ],
+    "std_upper_max_m": [
+      0.25,
+      0.45
+    ],
+    "min_w_xy_m": [
+      2.105,
+      -0.6
+    ],
+    "max_w_xy_m": [
+      3.0050000000000003,
+      0.6
+    ]
+  },
+  "actions": [
+    {
+      "action_id": "fh_loop",
+      "action_uid": 8892876431559218,
+      "motion_path": "motions/fivebind_n5_20260728/fh_loop_upper_fivebind.npz",
+      "motion_sha256": "8d94dc55e8a157ad8d109c06f89c1362bb3f7ef58c3f953befa81683e63b2e9b",
+      "strike_phase": 0.632184,
+      "reference_t_hit_s": 1.1,
+      "reference_t_cycle_s": 1.74,
+      "reference_racket_site_speed_mps": 2.8045876026153564,
+      "reaction_margin_s": 0.1,
+      "teacher_rate_min": 0.6,
+      "teacher_rate_max": 1.0,
+      "family": "forehand",
+      "mount_normal_sign": 1,
+      "ball_profile": {
+        "contact_offset_center_b_yaw_m": [
+          0.7005263819995847,
+          0.2220794935359675,
+          1.3461
+        ],
+        "contact_offset_std_lower_initial_m": [
+          0.03,
+          0.05,
+          0.05
+        ],
+        "contact_offset_std_lower_max_m": [
+          0.08,
+          0.2,
+          0.15
+        ],
+        "contact_offset_std_upper_initial_m": [
+          0.03,
+          0.05,
+          0.05
+        ],
+        "contact_offset_std_upper_max_m": [
+          0.08,
+          0.2,
+          0.15
+        ],
+        "contact_offset_min_b_yaw_m": [
+          0.6205263819995848,
+          0.022079493535967498,
+          1.1961000000000002
+        ],
+        "contact_offset_max_b_yaw_m": [
+          0.7805263819995847,
+          0.4220794935359675,
+          1.4961
+        ],
+        "time_to_contact_center_s": 2.0166666666666666,
+        "time_to_contact_std_lower_initial_s": 0.05,
+        "time_to_contact_std_lower_max_s": 0.08333333333333304,
+        "time_to_contact_std_upper_initial_s": 0.05,
+        "time_to_contact_std_upper_max_s": 0.08333333333333348,
+        "time_to_contact_min_s": 1.9333333333333336,
+        "time_to_contact_max_s": 2.1,
+        "incoming_direction_center_b_yaw": [
+          0.4054571233011377,
+          -0.8997944071212576,
+          -0.16116620637612153
+        ],
+        "incoming_direction_tangent_u_b_yaw": [
+          0.9117129765474812,
+          0.41082776001011906,
+          -0.0
+        ],
+        "incoming_direction_tangent_v_b_yaw": [
+          0.06621155155483059,
+          -0.14693732173403942,
+          0.9869272789432509
+        ],
+        "incoming_inbound_axis_b_yaw": [
+          0.40132141544184274,
+          -0.9159372912529307,
+          0.0
+        ],
+        "incoming_inbound_min_cosine": 0.2,
+        "incoming_speed_center_mps": 3.808490711554907,
+        "incoming_speed_std_lower_initial_mps": 0.15,
+        "incoming_speed_std_lower_max_mps": 2.285094426932944,
+        "incoming_speed_std_upper_initial_mps": 0.15,
+        "incoming_speed_std_upper_max_mps": 1.0,
+        "incoming_speed_min_mps": 1.5233962846219629,
+        "incoming_speed_max_mps": 4.8084907115549065,
+        "spin_direction_center_b_yaw": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "spin_direction_tangent_u_b_yaw": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "spin_direction_tangent_v_b_yaw": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "spin_magnitude_center_radps": 0.0,
+        "spin_magnitude_std_lower_initial_radps": 0.0,
+        "spin_magnitude_std_lower_max_radps": 0.0,
+        "spin_magnitude_std_upper_initial_radps": 5.0,
+        "spin_magnitude_std_upper_max_radps": 40.0,
+        "spin_magnitude_min_radps": 0.0,
+        "spin_magnitude_max_radps": 60.0,
+        "base_spawn_center_w_xy_m": [
+          0.15422534942626953,
+          -0.17953650653362274
+        ],
+        "base_spawn_std_lower_initial_m": [
+          0.01,
+          0.01
+        ],
+        "base_spawn_std_lower_max_m": [
+          0.15,
+          0.25
+        ],
+        "base_spawn_std_upper_initial_m": [
+          0.01,
+          0.01
+        ],
+        "base_spawn_std_upper_max_m": [
+          0.15,
+          0.25
+        ],
+        "base_spawn_min_w_xy_m": [
+          -0.14577465057373046,
+          -0.5795365065336228
+        ],
+        "base_spawn_max_w_xy_m": [
+          0.4542253494262695,
+          0.22046349346637728
+        ],
+        "base_travel_center_b_yaw_xy_m": [
+          0.0,
+          0.0
+        ],
+        "base_travel_std_lower_initial_m": [
+          0.0,
+          0.0
+        ],
+        "base_travel_std_lower_max_m": [
+          0.0,
+          0.0
+        ],
+        "base_travel_std_upper_initial_m": [
+          0.0,
+          0.0
+        ],
+        "base_travel_std_upper_max_m": [
+          0.0,
+          0.0
+        ],
+        "base_travel_min_b_yaw_xy_m": [
+          0.0,
+          0.0
+        ],
+        "base_travel_max_b_yaw_xy_m": [
+          0.0,
+          0.0
+        ],
+        "incoming_direction_tangent_u_neg_initial_deg": 3.0,
+        "incoming_direction_tangent_u_neg_max_deg": 15.0,
+        "incoming_direction_tangent_u_pos_initial_deg": 3.0,
+        "incoming_direction_tangent_u_pos_max_deg": 15.0,
+        "incoming_direction_tangent_v_neg_initial_deg": 3.0,
+        "incoming_direction_tangent_v_neg_max_deg": 15.0,
+        "incoming_direction_tangent_v_pos_initial_deg": 3.0,
+        "incoming_direction_tangent_v_pos_max_deg": 15.0,
+        "spin_direction_tangent_u_neg_initial_deg": 3.0,
+        "spin_direction_tangent_u_neg_max_deg": 15.0,
+        "spin_direction_tangent_u_pos_initial_deg": 3.0,
+        "spin_direction_tangent_u_pos_max_deg": 15.0,
+        "spin_direction_tangent_v_neg_initial_deg": 3.0,
+        "spin_direction_tangent_v_neg_max_deg": 15.0,
+        "spin_direction_tangent_v_pos_initial_deg": 3.0,
+        "spin_direction_tangent_v_pos_max_deg": 15.0
+      }
+    },
+    {
+      "action_id": "bh_loop_c",
+      "action_uid": 1722317591841513,
+      "motion_path": "motions/fivebind_n5_20260728/bh_loop_c_upper_fivebind.npz",
+      "motion_sha256": "c950a73e473cad84d0fafcd51c552ec4fef085580bbeaec0f4e96be2acd7e2fc",
+      "strike_phase": 0.442857,
+      "reference_t_hit_s": 0.62,
+      "reference_t_cycle_s": 1.4,
+      "reference_racket_site_speed_mps": 1.8143666982650757,
+      "reaction_margin_s": 0.1,
+      "teacher_rate_min": 0.6,
+      "teacher_rate_max": 1.0,
+      "family": "backhand",
+      "mount_normal_sign": -1,
+      "ball_profile": {
+        "contact_offset_center_b_yaw_m": [
+          0.7021987255964391,
+          -0.03405410303972628,
+          1.3926
+        ],
+        "contact_offset_std_lower_initial_m": [
+          0.03,
+          0.05,
+          0.05
+        ],
+        "contact_offset_std_lower_max_m": [
+          0.08,
+          0.2,
+          0.15
+        ],
+        "contact_offset_std_upper_initial_m": [
+          0.03,
+          0.05,
+          0.05
+        ],
+        "contact_offset_std_upper_max_m": [
+          0.08,
+          0.2,
+          0.15
+        ],
+        "contact_offset_min_b_yaw_m": [
+          0.6221987255964392,
+          -0.2340541030397263,
+          1.2426000000000001
+        ],
+        "contact_offset_max_b_yaw_m": [
+          0.7821987255964391,
+          0.16594589696027373,
+          1.5426
+        ],
+        "time_to_contact_center_s": 1.376666666666667,
+        "time_to_contact_std_lower_initial_s": 0.05,
+        "time_to_contact_std_lower_max_s": 0.2433333333333334,
+        "time_to_contact_std_upper_initial_s": 0.05,
+        "time_to_contact_std_upper_max_s": 0.24333333333333318,
+        "time_to_contact_min_s": 1.1333333333333335,
+        "time_to_contact_max_s": 1.62,
+        "incoming_direction_center_b_yaw": [
+          -0.08881630303574337,
+          0.9656384601291693,
+          -0.24424174220314976
+        ],
+        "incoming_direction_tangent_u_b_yaw": [
+          -0.9957967870245185,
+          -0.09159016842241204,
+          0.0
+        ],
+        "incoming_direction_tangent_v_b_yaw": [
+          -0.022370142304169827,
+          0.24321514214316725,
+          0.9697143761776301
+        ],
+        "incoming_inbound_axis_b_yaw": [
+          -0.09352024061069589,
+          0.9956173786129477,
+          0.0
+        ],
+        "incoming_inbound_min_cosine": 0.2,
+        "incoming_speed_center_mps": 3.4048234036437193,
+        "incoming_speed_std_lower_initial_mps": 0.15,
+        "incoming_speed_std_lower_max_mps": 2.0428940421862314,
+        "incoming_speed_std_upper_initial_mps": 0.15,
+        "incoming_speed_std_upper_max_mps": 1.0,
+        "incoming_speed_min_mps": 1.3619293614574879,
+        "incoming_speed_max_mps": 4.40482340364372,
+        "spin_direction_center_b_yaw": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "spin_direction_tangent_u_b_yaw": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "spin_direction_tangent_v_b_yaw": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "spin_magnitude_center_radps": 0.0,
+        "spin_magnitude_std_lower_initial_radps": 0.0,
+        "spin_magnitude_std_lower_max_radps": 0.0,
+        "spin_magnitude_std_upper_initial_radps": 5.0,
+        "spin_magnitude_std_upper_max_radps": 40.0,
+        "spin_magnitude_min_radps": 0.0,
+        "spin_magnitude_max_radps": 60.0,
+        "base_spawn_center_w_xy_m": [
+          0.15422534942626953,
+          -0.17953650653362274
+        ],
+        "base_spawn_std_lower_initial_m": [
+          0.01,
+          0.01
+        ],
+        "base_spawn_std_lower_max_m": [
+          0.15,
+          0.25
+        ],
+        "base_spawn_std_upper_initial_m": [
+          0.01,
+          0.01
+        ],
+        "base_spawn_std_upper_max_m": [
+          0.15,
+          0.25
+        ],
+        "base_spawn_min_w_xy_m": [
+          -0.14577465057373046,
+          -0.5795365065336228
+        ],
+        "base_spawn_max_w_xy_m": [
+          0.4542253494262695,
+          0.22046349346637728
+        ],
+        "base_travel_center_b_yaw_xy_m": [
+          0.0,
+          0.0
+        ],
+        "base_travel_std_lower_initial_m": [
+          0.0,
+          0.0
+        ],
+        "base_travel_std_lower_max_m": [
+          0.0,
+          0.0
+        ],
+        "base_travel_std_upper_initial_m": [
+          0.0,
+          0.0
+        ],
+        "base_travel_std_upper_max_m": [
+          0.0,
+          0.0
+        ],
+        "base_travel_min_b_yaw_xy_m": [
+          0.0,
+          0.0
+        ],
+        "base_travel_max_b_yaw_xy_m": [
+          0.0,
+          0.0
+        ],
+        "incoming_direction_tangent_u_neg_initial_deg": 3.0,
+        "incoming_direction_tangent_u_neg_max_deg": 15.0,
+        "incoming_direction_tangent_u_pos_initial_deg": 3.0,
+        "incoming_direction_tangent_u_pos_max_deg": 15.0,
+        "incoming_direction_tangent_v_neg_initial_deg": 3.0,
+        "incoming_direction_tangent_v_neg_max_deg": 15.0,
+        "incoming_direction_tangent_v_pos_initial_deg": 3.0,
+        "incoming_direction_tangent_v_pos_max_deg": 15.0,
+        "spin_direction_tangent_u_neg_initial_deg": 3.0,
+        "spin_direction_tangent_u_neg_max_deg": 15.0,
+        "spin_direction_tangent_u_pos_initial_deg": 3.0,
+        "spin_direction_tangent_u_pos_max_deg": 15.0,
+        "spin_direction_tangent_v_neg_initial_deg": 3.0,
+        "spin_direction_tangent_v_neg_max_deg": 15.0,
+        "spin_direction_tangent_v_pos_initial_deg": 3.0,
+        "spin_direction_tangent_v_pos_max_deg": 15.0
+      }
+    },
+    {
+      "action_id": "bh_block",
+      "action_uid": 1115176677418582,
+      "motion_path": "motions/fivebind_n5_20260728/bh_block_upper_fivebind.npz",
+      "motion_sha256": "0cd94aa47bf8feb59bbe7cc7a0306abb57ee7ec8ebcec6443a80bbdc58894309",
+      "strike_phase": 0.45283,
+      "reference_t_hit_s": 0.48,
+      "reference_t_cycle_s": 1.06,
+      "reference_racket_site_speed_mps": 1.5781956911087036,
+      "reaction_margin_s": 0.1,
+      "teacher_rate_min": 0.6,
+      "teacher_rate_max": 1.0,
+      "family": "backhand",
+      "mount_normal_sign": -1,
+      "ball_profile": {
+        "contact_offset_center_b_yaw_m": [
+          0.602635120472208,
+          0.11670730674248775,
+          1.2046
+        ],
+        "contact_offset_std_lower_initial_m": [
+          0.03,
+          0.05,
+          0.05
+        ],
+        "contact_offset_std_lower_max_m": [
+          0.08,
+          0.2,
+          0.15
+        ],
+        "contact_offset_std_upper_initial_m": [
+          0.03,
+          0.05,
+          0.05
+        ],
+        "contact_offset_std_upper_max_m": [
+          0.08,
+          0.2,
+          0.15
+        ],
+        "contact_offset_min_b_yaw_m": [
+          0.5226351204722081,
+          -0.08329269325751226,
+          1.0546
+        ],
+        "contact_offset_max_b_yaw_m": [
+          0.682635120472208,
+          0.31670730674248776,
+          1.3545999999999998
+        ],
+        "time_to_contact_center_s": 1.19,
+        "time_to_contact_std_lower_initial_s": 0.05,
+        "time_to_contact_std_lower_max_s": 0.2899999999999999,
+        "time_to_contact_std_upper_initial_s": 0.05,
+        "time_to_contact_std_upper_max_s": 0.29000000000000004,
+        "time_to_contact_min_s": 0.9,
+        "time_to_contact_max_s": 1.48,
+        "incoming_direction_center_b_yaw": [
+          -0.8019789909250025,
+          0.5712946833236735,
+          -0.17450525184365775
+        ],
+        "incoming_direction_tangent_u_b_yaw": [
+          -0.5801970863700889,
+          -0.8144761144242718,
+          0.0
+        ],
+        "incoming_direction_tangent_v_b_yaw": [
+          -0.14213035946825137,
+          0.10124743867596882,
+          0.9846562431016124
+        ],
+        "incoming_inbound_axis_b_yaw": [
+          -0.8210554308062207,
+          0.5708484733654031,
+          0.0
+        ],
+        "incoming_inbound_min_cosine": 0.2,
+        "incoming_speed_center_mps": 4.2376948096813205,
+        "incoming_speed_std_lower_initial_mps": 0.15,
+        "incoming_speed_std_lower_max_mps": 2.5426168858087923,
+        "incoming_speed_std_upper_initial_mps": 0.15,
+        "incoming_speed_std_upper_max_mps": 1.0,
+        "incoming_speed_min_mps": 1.6950779238725282,
+        "incoming_speed_max_mps": 5.2376948096813205,
+        "spin_direction_center_b_yaw": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "spin_direction_tangent_u_b_yaw": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "spin_direction_tangent_v_b_yaw": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "spin_magnitude_center_radps": 0.0,
+        "spin_magnitude_std_lower_initial_radps": 0.0,
+        "spin_magnitude_std_lower_max_radps": 0.0,
+        "spin_magnitude_std_upper_initial_radps": 5.0,
+        "spin_magnitude_std_upper_max_radps": 40.0,
+        "spin_magnitude_min_radps": 0.0,
+        "spin_magnitude_max_radps": 60.0,
+        "base_spawn_center_w_xy_m": [
+          0.15422534942626953,
+          -0.17953650653362274
+        ],
+        "base_spawn_std_lower_initial_m": [
+          0.01,
+          0.01
+        ],
+        "base_spawn_std_lower_max_m": [
+          0.15,
+          0.25
+        ],
+        "base_spawn_std_upper_initial_m": [
+          0.01,
+          0.01
+        ],
+        "base_spawn_std_upper_max_m": [
+          0.15,
+          0.25
+        ],
+        "base_spawn_min_w_xy_m": [
+          -0.14577465057373046,
+          -0.5795365065336228
+        ],
+        "base_spawn_max_w_xy_m": [
+          0.4542253494262695,
+          0.22046349346637728
+        ],
+        "base_travel_center_b_yaw_xy_m": [
+          0.0,
+          0.0
+        ],
+        "base_travel_std_lower_initial_m": [
+          0.0,
+          0.0
+        ],
+        "base_travel_std_lower_max_m": [
+          0.0,
+          0.0
+        ],
+        "base_travel_std_upper_initial_m": [
+          0.0,
+          0.0
+        ],
+        "base_travel_std_upper_max_m": [
+          0.0,
+          0.0
+        ],
+        "base_travel_min_b_yaw_xy_m": [
+          0.0,
+          0.0
+        ],
+        "base_travel_max_b_yaw_xy_m": [
+          0.0,
+          0.0
+        ],
+        "incoming_direction_tangent_u_neg_initial_deg": 3.0,
+        "incoming_direction_tangent_u_neg_max_deg": 15.0,
+        "incoming_direction_tangent_u_pos_initial_deg": 3.0,
+        "incoming_direction_tangent_u_pos_max_deg": 15.0,
+        "incoming_direction_tangent_v_neg_initial_deg": 3.0,
+        "incoming_direction_tangent_v_neg_max_deg": 15.0,
+        "incoming_direction_tangent_v_pos_initial_deg": 3.0,
+        "incoming_direction_tangent_v_pos_max_deg": 15.0,
+        "spin_direction_tangent_u_neg_initial_deg": 3.0,
+        "spin_direction_tangent_u_neg_max_deg": 15.0,
+        "spin_direction_tangent_u_pos_initial_deg": 3.0,
+        "spin_direction_tangent_u_pos_max_deg": 15.0,
+        "spin_direction_tangent_v_neg_initial_deg": 3.0,
+        "spin_direction_tangent_v_neg_max_deg": 15.0,
+        "spin_direction_tangent_v_pos_initial_deg": 3.0,
+        "spin_direction_tangent_v_pos_max_deg": 15.0
+      }
+    },
+    {
+      "action_id": "s0_highpress",
+      "action_uid": 6749145758784254,
+      "motion_path": "motions/fivebind_n5_20260728/s0_highpress_upper_fivebind.npz",
+      "motion_sha256": "2bc5f6483644aa69fe3dfc42775461a6fbdf8cd1c407d0b0c8e593a86dfd8f50",
+      "strike_phase": 0.25,
+      "reference_t_hit_s": 0.2,
+      "reference_t_cycle_s": 0.8,
+      "reference_racket_site_speed_mps": 1.9024732112884521,
+      "reaction_margin_s": 0.1,
+      "teacher_rate_min": 0.6,
+      "teacher_rate_max": 1.0,
+      "family": "backhand",
+      "mount_normal_sign": -1,
+      "ball_profile": {
+        "contact_offset_center_b_yaw_m": [
+          0.3462369767228275,
+          0.026832247192189712,
+          1.3076
+        ],
+        "contact_offset_std_lower_initial_m": [
+          0.03,
+          0.05,
+          0.05
+        ],
+        "contact_offset_std_lower_max_m": [
+          0.08,
+          0.2,
+          0.15
+        ],
+        "contact_offset_std_upper_initial_m": [
+          0.03,
+          0.05,
+          0.05
+        ],
+        "contact_offset_std_upper_max_m": [
+          0.08,
+          0.2,
+          0.15
+        ],
+        "contact_offset_min_b_yaw_m": [
+          0.2662369767228275,
+          -0.1731677528078103,
+          1.1576000000000002
+        ],
+        "contact_offset_max_b_yaw_m": [
+          0.4262369767228275,
+          0.22683224719218972,
+          1.4576
+        ],
+        "time_to_contact_center_s": 0.8166666666666667,
+        "time_to_contact_std_lower_initial_s": 0.05,
+        "time_to_contact_std_lower_max_s": 0.3833333333333333,
+        "time_to_contact_std_upper_initial_s": 0.05,
+        "time_to_contact_std_upper_max_s": 0.3833333333333333,
+        "time_to_contact_min_s": 0.43333333333333335,
+        "time_to_contact_max_s": 1.2,
+        "incoming_direction_center_b_yaw": [
+          -0.722075975663294,
+          0.660218008172452,
+          -0.2066844625381946
+        ],
+        "incoming_direction_tangent_u_b_yaw": [
+          -0.6747882715465819,
+          -0.7380113742911937,
+          0.0
+        ],
+        "incoming_direction_tangent_v_b_yaw": [
+          -0.15253548424244975,
+          0.1394682512316826,
+          0.978407651720538
+        ],
+        "incoming_inbound_axis_b_yaw": [
+          -0.7402843268184403,
+          0.6722939204447478,
+          0.0
+        ],
+        "incoming_inbound_min_cosine": 0.2,
+        "incoming_speed_center_mps": 3.6950044073045434,
+        "incoming_speed_std_lower_initial_mps": 0.15,
+        "incoming_speed_std_lower_max_mps": 2.2170026443827258,
+        "incoming_speed_std_upper_initial_mps": 0.15,
+        "incoming_speed_std_upper_max_mps": 1.0,
+        "incoming_speed_min_mps": 1.4780017629218174,
+        "incoming_speed_max_mps": 4.695004407304543,
+        "spin_direction_center_b_yaw": [
+          0.0,
+          1.0,
+          0.0
+        ],
+        "spin_direction_tangent_u_b_yaw": [
+          0.0,
+          0.0,
+          1.0
+        ],
+        "spin_direction_tangent_v_b_yaw": [
+          1.0,
+          0.0,
+          0.0
+        ],
+        "spin_magnitude_center_radps": 0.0,
+        "spin_magnitude_std_lower_initial_radps": 0.0,
+        "spin_magnitude_std_lower_max_radps": 0.0,
+        "spin_magnitude_std_upper_initial_radps": 5.0,
+        "spin_magnitude_std_upper_max_radps": 40.0,
+        "spin_magnitude_min_radps": 0.0,
+        "spin_magnitude_max_radps": 60.0,
+        "base_spawn_center_w_xy_m": [
+          0.15422534942626953,
+          -0.17953650653362274
+        ],
+        "base_spawn_std_lower_initial_m": [
+          0.01,
+          0.01
+        ],
+        "base_spawn_std_lower_max_m": [
+          0.15,
+          0.25
+        ],
+        "base_spawn_std_upper_initial_m": [
+          0.01,
+          0.01
+        ],
+        "base_spawn_std_upper_max_m": [
+          0.15,
+          0.25
+        ],
+        "base_spawn_min_w_xy_m": [
+          -0.14577465057373046,
+          -0.5795365065336228
+        ],
+        "base_spawn_max_w_xy_m": [
+          0.4542253494262695,
+          0.22046349346637728
+        ],
+        "base_travel_center_b_yaw_xy_m": [
+          0.0,
+          0.0
+        ],
+        "base_travel_std_lower_initial_m": [
+          0.0,
+          0.0
+        ],
+        "base_travel_std_lower_max_m": [
+          0.0,
+          0.0
+        ],
+        "base_travel_std_upper_initial_m": [
+          0.0,
+          0.0
+        ],
+        "base_travel_std_upper_max_m": [
+          0.0,
+          0.0
+        ],
+        "base_travel_min_b_yaw_xy_m": [
+          0.0,
+          0.0
+        ],
+        "base_travel_max_b_yaw_xy_m": [
+          0.0,
+          0.0
+        ],
+        "incoming_direction_tangent_u_neg_initial_deg": 3.0,
+        "incoming_direction_tangent_u_neg_max_deg": 15.0,
+        "incoming_direction_tangent_u_pos_initial_deg": 3.0,
+        "incoming_direction_tangent_u_pos_max_deg": 15.0,
+        "incoming_direction_tangent_v_neg_initial_deg": 3.0,
+        "incoming_direction_tangent_v_neg_max_deg": 15.0,
+        "incoming_direction_tangent_v_pos_initial_deg": 3.0,
+        "incoming_direction_tangent_v_pos_max_deg": 15.0,
+        "spin_direction_tangent_u_neg_initial_deg": 3.0,
+        "spin_direction_tangent_u_neg_max_deg": 15.0,
+        "spin_direction_tangent_u_pos_initial_deg": 3.0,
+        "spin_direction_tangent_u_pos_max_deg": 15.0,
+        "spin_direction_tangent_v_neg_initial_deg": 3.0,
+        "spin_direction_tangent_v_neg_max_deg": 15.0,
+        "spin_direction_tangent_v_pos_initial_deg": 3.0,
+        "spin_direction_tangent_v_pos_max_deg": 15.0
+      }
+    }
+  ],
+  "curriculum": {
+    "min_proposals": 256,
+    "min_safe_closed": 256,
+    "target_failure_rate": 0.2,
+    "failure_band_half_width": 0.025,
+    "min_solver_admit_rate": 0.95,
+    "min_install_rate": 0.95,
+    "min_start_rate": 0.95,
+    "min_close_rate": 0.95,
+    "max_other_unsafe_rate": 0.02,
+    "confidence_z": 1.96,
+    "max_center_failures": 8
+  },
+  "holdout": {
+    "seed": 20260728,
+    "samples_per_action": 512,
+    "split_id": "heldout_ball_fivebind_n5_v1"
+  },
+  "notes": "Built by build_action_ball_manifest.py from fivebind_n5_batch_20260728.json (sha256 a119a6f04637c56136b5bf29e0a1735cefd5ce94be807b89b06a3d4e432be8e0); motion_path and prototype path are relative to the training repo root. solver/physics profile pins were supplied by the caller (host-side computed from repository contract functions; runtime boot must confirm). Metadata only; grants no motion admission."
+}

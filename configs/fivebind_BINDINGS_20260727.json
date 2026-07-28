@@ -1,0 +1,3765 @@
+{
+ "generated_utc": "2026-07-27T07:22:10Z",
+ "set": "fivebind_20260727",
+ "pod": "built on pod2 (162.43.172.181); clips mirrored to pod1 (162.43.172.171)",
+ "base_dir": "/workspace/codexschema/fivebind_20260727",
+ "supersedes": "nothing. wave1_20260727/BINDINGS_WAVE1.json (single clip, pelvis rotation) and newmotion_matrix_20260726/aimed_20260726/BINDINGS_AIMED_* were read, not modified",
+ "conventions": {
+  "rotation": "hope_frame_utils.rotate_motion_to_hope_x(theta_deg=theta_total) applied ONCE to the ORIGINAL compiled artefact, about the frame-0 pelvis pivot (0.154225, -0.179537). theta_total = theta_pelvis + psi_aim. Pelvis yaw after is deliberately NOT zero -- zeroing it is the bug that made 4 of 5 motions unable to return a ball.",
+  "grip": "--grip off (identity mount). The registry's 40.26 deg human grip does NOT apply to these robot-space canonical clips; the marker is the only authority.",
+  "control_point": "mujoco site 'right_racket' via check_motion_target_alignment.racket_control_point_series; velocity = clean_point_velocity(+-2-frame centred FD), trainer parity.",
+  "boxes": "pos = min/max of the control point over the returnable frames backing the anchor, dilated by the env half-widths (0.10, 0.20, 0.10) m and floored at z = 0.78 (table 0.76 + ball radius 0.02). vel = anchor velocity +- (0.5, 0.5, 0.4) m/s, with the env's strictly-forward gate applied to vel.x.",
+  "anchor_rule": "joint optimum, not returnability argmax: a frame must satisfy ALL of {phase-scan returnable > 0.5 under the DEFAULT ball, forward dominance (vx > 0 and |vx| >= |vy|) on the trainer-parity control-point velocity, blade z >= 0.78, measured face sign == the sign the family demands} and is then ranked by ANCHOR-EXACT return rate (the clip's own velocity and face through the venue contact law, no cone, no box)."
+ },
+ "metric_glossary": {
+  "phase_scan_returnable": "gen_stage1_questions.py --phase-scan: fraction of sampled incoming balls for which SOME commanded velocity inside the 25 deg / cone_mag cone returns the ball. This is what a solved question bank searches -- solvability, not fidelity.",
+  "anchor_exact_return_rate": "the clip's OWN control-point velocity and face at the anchor, pushed through virtual_ball.predict_paddle_contact + coarse_landing over the venue incoming-ball distribution. This is fidelity: does the motion as recorded return the ball. The two numbers disagreeing by a lot means the bank will command something the reference motion does not do.",
+  "commanded_box_return_rate": "uniform sample of the commanded pos x vel box through the same law. Relevant only if a box sampler is used instead of a bank."
+ },
+ "clips": {
+  "fh_loop": {
+   "motion": "fh_loop",
+   "scope": "upper",
+   "family": "forehand",
+   "usable": true,
+   "build": "p8f (probe8f_pod1_fhloop_tube50mrad)",
+   "source_path": "/workspace/codexschema/newmotion_matrix_20260726/aimed_20260726/orig/p8f__fh_loop_upper_canonical_v2.npz",
+   "source_origin": "pod1:/workspace/codexschema/canonical_v2_20260724/probe8f_pod1_fhloop_tube50mrad/candidates_shard/fh_loop_upper_canonical_v2.npz",
+   "source_sha256": "e332c69aa9b7f948a44a001b21769bc45cc1f84af1dd4231f20cda98278c4fa8",
+   "rotation": {
+    "method": "hope_frame_utils.rotate_motion_to_hope_x(theta_deg=theta_total), applied ONCE to the ORIGINAL compiled artefact, about the frame-0 pelvis pivot",
+    "pelvis_yaw0_deg": 72.551863,
+    "theta_pelvis_deg_STEP1_METHOD": -72.551863,
+    "psi_aim_deg": -113.660809,
+    "theta_total_deg_APPLIED": -186.2126723368877,
+    "pivot_xy": [
+     0.15422534942626953,
+     -0.17953650653362274
+    ],
+    "pelvis_yaw_after_deg": -113.660813
+   },
+   "clip_path": "/workspace/codexschema/fivebind_20260727/clips/fh_loop_upper_fivebind.npz",
+   "clip_sha256": "8d94dc55e8a157ad8d109c06f89c1362bb3f7ef58c3f953befa81683e63b2e9b",
+   "clip_basename": "fh_loop_upper_fivebind.npz",
+   "T": 88,
+   "fps": 50.0,
+   "duration_s": 1.74,
+   "build_contact_window_frames": [
+    34,
+    50
+   ],
+   "strike_frame": 55,
+   "strike_phase": 0.632184,
+   "anchor_rationale": "f55 is the joint optimum: default-ball scan 1.000, slow-ball 1.000, anchor-exact 0.6620 (highest of its 6 legal frames), forward dominance passes (vx 1.592 >= |vy| 0.961), strongest face alignment in the band (cos +0.7970). The survey's f54 is the same lobe, one frame earlier, and scores 0.6380 anchor-exact.",
+   "mount_normal_sign": 1.0,
+   "cos_n_v": 0.797,
+   "verification": {
+    "strike_point_env_frame_m": [
+     0.0765,
+     -0.9103,
+     1.3461
+    ],
+    "strike_velocity_env_frame_mps": [
+     1.5923,
+     0.9608,
+     2.0993
+    ],
+    "blade_z_at_strike_m": 1.3461,
+    "table_surface_plus_ball_radius_m": 0.78,
+    "blade_clears_table": true,
+    "signed_face_normal": [
+     0.9348,
+     0.2682,
+     0.2329
+    ],
+    "cos_face_velocity": 0.797,
+    "measured_sign": 1.0,
+    "sign_matches_family": true,
+    "forward_blade_velocity_vx": 1.5923,
+    "forward_dominance_vx_ge_abs_vy": true,
+    "blade_speed_mps": 2.8046,
+    "phase_scan_returnable_at_anchor": 1.0,
+    "phase_scan_returnable_slowball": 1.0,
+    "phase_scan_frames_gt50": 7,
+    "anchor_exact_return_rate": 0.6621,
+    "anchor_exact_net_clear": 0.8347,
+    "commanded_box_return_rate": 0.4963,
+    "commanded_box_return_rate_speedscale_06_10": 0.2832,
+    "best_speed_scale": {
+     "scale": 1.3,
+     "rate": 0.92
+    },
+    "table_intrusion_bodies_mm": 0.0,
+    "table_intrusion_blade_mm": 0.0,
+    "all_gates": {
+     "blade_clears_table_at_strike": true,
+     "ctrl_clears_table_at_strike": true,
+     "forward_blade_velocity": true,
+     "forward_dominance": true,
+     "ctrl_forward_velocity": true,
+     "ctrl_forward_dominance": true,
+     "strike_phase_in_unit_interval": true,
+     "anchor_returnable_gt50": true,
+     "family_sign_consistent": true,
+     "shipped_box_z_clears_gate": true,
+     "shipped_vel_x_forward": true
+    }
+   },
+   "racket_pos_range": {
+    "x": [
+     -0.1385,
+     0.2426
+    ],
+    "y": [
+     -1.1476,
+     -0.6596
+    ],
+    "z": [
+     1.0847,
+     1.5357
+    ]
+   },
+   "racket_vel_range": {
+    "x": [
+     1.0923,
+     2.0923
+    ],
+    "y": [
+     0.4608,
+     1.4608
+    ],
+    "z": [
+     1.6993,
+     2.4993
+    ]
+   },
+   "racket_vel_range_before_forward_gate": {
+    "x": [
+     1.0923,
+     2.0923
+    ],
+    "y": [
+     0.4608,
+     1.4608
+    ],
+    "z": [
+     1.6993,
+     2.4993
+    ]
+   },
+   "racket_pos_range_prescription_intersect": {
+    "x": [
+     0.7,
+     0.2426
+    ],
+    "y": [
+     -0.689,
+     -0.6596
+    ],
+    "z": [
+     1.0847,
+     1.06
+    ]
+   },
+   "prescription_coverage": {
+    "x": {
+     "prescription": [
+      0.7,
+      0.9
+     ],
+     "servable": [
+      -0.1385,
+      0.2426
+     ],
+     "intersect": [
+      0.7,
+      0.2426
+     ],
+     "covered_frac": 0.0,
+     "empty": true
+    },
+    "y": {
+     "prescription": [
+      -0.689,
+      -0.18
+     ],
+     "servable": [
+      -1.1476,
+      -0.6596
+     ],
+     "intersect": [
+      -0.689,
+      -0.6596
+     ],
+     "covered_frac": 0.0577,
+     "empty": false
+    },
+    "z": {
+     "prescription": [
+      0.78,
+      1.06
+     ],
+     "servable": [
+      1.0847,
+      1.5357
+     ],
+     "intersect": [
+      1.0847,
+      1.06
+     ],
+     "covered_frac": 0.0,
+     "empty": true
+    }
+   },
+   "returnable_frames_backing_the_pos_box": [
+    51,
+    52,
+    53,
+    54,
+    55,
+    56,
+    57
+   ],
+   "scan": {
+    "ball_contract": "--speed-range 2.0 5.0",
+    "best_score": 1.0,
+    "best_frame": 54,
+    "score_at_anchor": 1.0,
+    "score_at_anchor_slowball": 1.0,
+    "frames_gt50_global": [
+     51,
+     52,
+     53,
+     54,
+     55,
+     56,
+     57
+    ],
+    "n_gt50_global": 7,
+    "anchor_lobe_gt50": [
+     51,
+     52,
+     53,
+     54,
+     55,
+     56,
+     57
+    ],
+    "anchor_lobe_nonzero": [
+     51,
+     52,
+     53,
+     54,
+     55,
+     56,
+     57,
+     58
+    ],
+    "returnable_frames_used_for_box": [
+     51,
+     52,
+     53,
+     54,
+     55,
+     56,
+     57
+    ],
+    "curve_primary": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.625,
+     0.8333,
+     0.9583,
+     1.0,
+     1.0,
+     1.0,
+     0.7083,
+     0.0833,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "curve_slowball": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.125,
+     0.375,
+     0.7083,
+     1.0,
+     1.0,
+     1.0,
+     0.7083,
+     0.2917,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  "bh_loop_c": {
+   "motion": "bh_loop_c",
+   "scope": "upper",
+   "family": "backhand",
+   "usable": true,
+   "build": "p6a (probe6a_pod1_heavy)",
+   "source_path": "/workspace/codexschema/newmotion_matrix_20260726/aimed_20260726/orig/p6a__bh_loop_c_upper_canonical_v2.npz",
+   "source_origin": "pod1:/workspace/codexschema/canonical_v2_20260724/probe6a_pod1_heavy/candidates_shard/bh_loop_c_upper_canonical_v2.npz",
+   "source_sha256": "f6c89539d07ef98e0f78ad676d1a2938d92f5ccfbd12e2df260a124944bc3991",
+   "rotation": {
+    "method": "hope_frame_utils.rotate_motion_to_hope_x(theta_deg=theta_total), applied ONCE to the ORIGINAL compiled artefact, about the frame-0 pelvis pivot",
+    "pelvis_yaw0_deg": 72.551863,
+    "theta_pelvis_deg_STEP1_METHOD": -72.551863,
+    "psi_aim_deg": 84.633842,
+    "theta_total_deg_APPLIED": 12.081979103011124,
+    "pivot_xy": [
+     0.15422534942626953,
+     -0.17953650653362274
+    ],
+    "pelvis_yaw_after_deg": 84.633843
+   },
+   "clip_path": "/workspace/codexschema/fivebind_20260727/clips/bh_loop_c_upper_fivebind.npz",
+   "clip_sha256": "c950a73e473cad84d0fafcd51c552ec4fef085580bbeaec0f4e96be2acd7e2fc",
+   "clip_basename": "bh_loop_c_upper_fivebind.npz",
+   "T": 71,
+   "fps": 50.0,
+   "duration_s": 1.4,
+   "build_contact_window_frames": [
+    22,
+    37
+   ],
+   "strike_frame": 31,
+   "strike_phase": 0.442857,
+   "anchor_rationale": "f31, not the survey's f30. Same lobe, same scan score (1.000), but anchor-exact 0.9745 vs 0.6641 -- this clip's own recorded motion returns the ball 97% of the time at f31. Highest anchor-exact number in the whole set.",
+   "mount_normal_sign": -1.0,
+   "cos_n_v": -0.9884,
+   "verification": {
+    "strike_point_env_frame_m": [
+     0.2538,
+     0.5164,
+     1.3926
+    ],
+    "strike_velocity_env_frame_mps": [
+     1.3699,
+     -0.1528,
+     1.1798
+    ],
+    "blade_z_at_strike_m": 1.3926,
+    "table_surface_plus_ball_radius_m": 0.78,
+    "blade_clears_table": true,
+    "signed_face_normal": [
+     -0.8415,
+     0.0248,
+     -0.5397
+    ],
+    "cos_face_velocity": -0.9884,
+    "measured_sign": -1.0,
+    "sign_matches_family": true,
+    "forward_blade_velocity_vx": 1.3699,
+    "forward_dominance_vx_ge_abs_vy": true,
+    "blade_speed_mps": 1.8144,
+    "phase_scan_returnable_at_anchor": 1.0,
+    "phase_scan_returnable_slowball": 1.0,
+    "phase_scan_frames_gt50": 8,
+    "anchor_exact_return_rate": 0.9746,
+    "anchor_exact_net_clear": 0.9991,
+    "commanded_box_return_rate": 0.6037,
+    "commanded_box_return_rate_speedscale_06_10": 0.5744,
+    "best_speed_scale": {
+     "scale": 1.0,
+     "rate": 0.973
+    },
+    "table_intrusion_bodies_mm": 0.0,
+    "table_intrusion_blade_mm": 0.0,
+    "all_gates": {
+     "blade_clears_table_at_strike": true,
+     "ctrl_clears_table_at_strike": true,
+     "forward_blade_velocity": true,
+     "forward_dominance": true,
+     "ctrl_forward_velocity": true,
+     "ctrl_forward_dominance": true,
+     "strike_phase_in_unit_interval": true,
+     "anchor_returnable_gt50": true,
+     "family_sign_consistent": true,
+     "shipped_box_z_clears_gate": true,
+     "shipped_vel_x_forward": true
+    }
+   },
+   "racket_pos_range": {
+    "x": [
+     0.1266,
+     0.5359
+    ],
+    "y": [
+     0.2695,
+     0.7188
+    ],
+    "z": [
+     1.2684,
+     1.6206
+    ]
+   },
+   "racket_vel_range": {
+    "x": [
+     0.8699,
+     1.8699
+    ],
+    "y": [
+     -0.6528,
+     0.3472
+    ],
+    "z": [
+     0.7798,
+     1.5798
+    ]
+   },
+   "racket_vel_range_before_forward_gate": {
+    "x": [
+     0.8699,
+     1.8699
+    ],
+    "y": [
+     -0.6528,
+     0.3472
+    ],
+    "z": [
+     0.7798,
+     1.5798
+    ]
+   },
+   "racket_pos_range_prescription_intersect": {
+    "x": [
+     0.525,
+     0.5359
+    ],
+    "y": [
+     0.2695,
+     0.42
+    ],
+    "z": [
+     1.2684,
+     1.13
+    ]
+   },
+   "prescription_coverage": {
+    "x": {
+     "prescription": [
+      0.525,
+      0.785
+     ],
+     "servable": [
+      0.1266,
+      0.5359
+     ],
+     "intersect": [
+      0.525,
+      0.5359
+     ],
+     "covered_frac": 0.042,
+     "empty": false
+    },
+    "y": {
+     "prescription": [
+      -0.18,
+      0.42
+     ],
+     "servable": [
+      0.2695,
+      0.7188
+     ],
+     "intersect": [
+      0.2695,
+      0.42
+     ],
+     "covered_frac": 0.2509,
+     "empty": false
+    },
+    "z": {
+     "prescription": [
+      0.83,
+      1.13
+     ],
+     "servable": [
+      1.2684,
+      1.6206
+     ],
+     "intersect": [
+      1.2684,
+      1.13
+     ],
+     "covered_frac": 0.0,
+     "empty": true
+    }
+   },
+   "returnable_frames_backing_the_pos_box": [
+    30,
+    31,
+    32,
+    33,
+    34,
+    35,
+    36,
+    37
+   ],
+   "scan": {
+    "ball_contract": "--speed-range 2.0 5.0",
+    "best_score": 1.0,
+    "best_frame": 30,
+    "score_at_anchor": 1.0,
+    "score_at_anchor_slowball": 1.0,
+    "frames_gt50_global": [
+     30,
+     31,
+     32,
+     33,
+     34,
+     35,
+     36,
+     37
+    ],
+    "n_gt50_global": 8,
+    "anchor_lobe_gt50": [
+     30,
+     31,
+     32,
+     33,
+     34,
+     35,
+     36,
+     37
+    ],
+    "anchor_lobe_nonzero": [
+     28,
+     29,
+     30,
+     31,
+     32,
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     40
+    ],
+    "returnable_frames_used_for_box": [
+     30,
+     31,
+     32,
+     33,
+     34,
+     35,
+     36,
+     37
+    ],
+    "curve_primary": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0417,
+     0.4167,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     0.75,
+     0.3333,
+     0.2083,
+     0.0833,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "curve_slowball": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.375,
+     0.8333,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     0.625,
+     0.1667,
+     0.0417,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  "bh_block": {
+   "motion": "bh_block",
+   "scope": "upper",
+   "family": "backhand",
+   "usable": true,
+   "build": "p8h05 (probe8h_pod2_blocks_tube0.05)",
+   "source_path": "/workspace/codexschema/newmotion_matrix_20260726/aimed_20260726/orig/p8h05__bh_block_upper_canonical_v2.npz",
+   "source_origin": "pod2:/workspace/codexschema/canonical_v2_20260724/probe8h_pod2_blocks_tube0.05/candidates_shard/bh_block_upper_canonical_v2.npz",
+   "source_sha256": "aeb3ea24d9e25c6ed8ae783b02d9643f35f1bd353fccab86d9391c9dd8464cf4",
+   "rotation": {
+    "method": "hope_frame_utils.rotate_motion_to_hope_x(theta_deg=theta_total), applied ONCE to the ORIGINAL compiled artefact, about the frame-0 pelvis pivot",
+    "pelvis_yaw0_deg": 72.551863,
+    "theta_pelvis_deg_STEP1_METHOD": -72.551863,
+    "psi_aim_deg": 34.809413,
+    "theta_total_deg_APPLIED": -37.74245056504333,
+    "pivot_xy": [
+     0.15422534942626953,
+     -0.17953650653362274
+    ],
+    "pelvis_yaw_after_deg": 34.809414
+   },
+   "clip_path": "/workspace/codexschema/fivebind_20260727/clips/bh_block_upper_fivebind.npz",
+   "clip_sha256": "0cd94aa47bf8feb59bbe7cc7a0306abb57ee7ec8ebcec6443a80bbdc58894309",
+   "clip_basename": "bh_block_upper_fivebind.npz",
+   "T": 54,
+   "fps": 50.0,
+   "duration_s": 1.06,
+   "build_contact_window_frames": [
+    22,
+    27
+   ],
+   "strike_frame": 24,
+   "strike_phase": 0.45283,
+   "anchor_rationale": "f24 = the joint optimum INSIDE the build's declared contact window [22,27]. f11 (phase 0.208) scores higher anchor-exact (0.5366 vs 0.4502) but sits in the backswing, outside the build window, so it is rejected on semantic grounds: anchoring the strike in the backswing would set the hitting target against the imitation target.",
+   "mount_normal_sign": -1.0,
+   "cos_n_v": -0.6569,
+   "verification": {
+    "strike_point_env_frame_m": [
+     0.5824,
+     0.2603,
+     1.2046
+    ],
+    "strike_velocity_env_frame_mps": [
+     1.2675,
+     0.9184,
+     0.2021
+    ],
+    "blade_z_at_strike_m": 1.2046,
+    "table_surface_plus_ball_radius_m": 0.78,
+    "blade_clears_table": true,
+    "signed_face_normal": [
+     -0.8959,
+     0.1954,
+     -0.3989
+    ],
+    "cos_face_velocity": -0.6569,
+    "measured_sign": -1.0,
+    "sign_matches_family": true,
+    "forward_blade_velocity_vx": 1.2675,
+    "forward_dominance_vx_ge_abs_vy": true,
+    "blade_speed_mps": 1.5782,
+    "phase_scan_returnable_at_anchor": 0.9583,
+    "phase_scan_returnable_slowball": 0.5,
+    "phase_scan_frames_gt50": 10,
+    "anchor_exact_return_rate": 0.4502,
+    "anchor_exact_net_clear": 0.6278,
+    "commanded_box_return_rate": 0.4467,
+    "commanded_box_return_rate_speedscale_06_10": 0.3098,
+    "best_speed_scale": {
+     "scale": 1.6,
+     "rate": 0.9285
+    },
+    "table_intrusion_bodies_mm": 0.0,
+    "table_intrusion_blade_mm": 0.0,
+    "all_gates": {
+     "blade_clears_table_at_strike": true,
+     "ctrl_clears_table_at_strike": true,
+     "forward_blade_velocity": true,
+     "forward_dominance": true,
+     "ctrl_forward_velocity": true,
+     "ctrl_forward_dominance": true,
+     "strike_phase_in_unit_interval": true,
+     "anchor_returnable_gt50": true,
+     "family_sign_consistent": true,
+     "shipped_box_z_clears_gate": true,
+     "shipped_vel_x_forward": true
+    }
+   },
+   "racket_pos_range": {
+    "x": [
+     0.4259,
+     0.7657
+    ],
+    "y": [
+     0.0014,
+     0.5102
+    ],
+    "z": [
+     1.0867,
+     1.3115
+    ]
+   },
+   "racket_vel_range": {
+    "x": [
+     0.7675,
+     1.7675
+    ],
+    "y": [
+     0.4184,
+     1.4184
+    ],
+    "z": [
+     -0.1979,
+     0.6021
+    ]
+   },
+   "racket_vel_range_before_forward_gate": {
+    "x": [
+     0.7675,
+     1.7675
+    ],
+    "y": [
+     0.4184,
+     1.4184
+    ],
+    "z": [
+     -0.1979,
+     0.6021
+    ]
+   },
+   "racket_pos_range_prescription_intersect": {
+    "x": [
+     0.525,
+     0.7657
+    ],
+    "y": [
+     0.0014,
+     0.42
+    ],
+    "z": [
+     1.0867,
+     1.13
+    ]
+   },
+   "prescription_coverage": {
+    "x": {
+     "prescription": [
+      0.525,
+      0.785
+     ],
+     "servable": [
+      0.4259,
+      0.7657
+     ],
+     "intersect": [
+      0.525,
+      0.7657
+     ],
+     "covered_frac": 0.9257,
+     "empty": false
+    },
+    "y": {
+     "prescription": [
+      -0.18,
+      0.42
+     ],
+     "servable": [
+      0.0014,
+      0.5102
+     ],
+     "intersect": [
+      0.0014,
+      0.42
+     ],
+     "covered_frac": 0.6977,
+     "empty": false
+    },
+    "z": {
+     "prescription": [
+      0.83,
+      1.13
+     ],
+     "servable": [
+      1.0867,
+      1.3115
+     ],
+     "intersect": [
+      1.0867,
+      1.13
+     ],
+     "covered_frac": 0.1445,
+     "empty": false
+    }
+   },
+   "returnable_frames_backing_the_pos_box": [
+    21,
+    22,
+    23,
+    24,
+    25,
+    26,
+    27
+   ],
+   "scan": {
+    "ball_contract": "--speed-range 2.0 5.0",
+    "best_score": 0.9583,
+    "best_frame": 24,
+    "score_at_anchor": 0.9583,
+    "score_at_anchor_slowball": 0.5,
+    "frames_gt50_global": [
+     10,
+     11,
+     12,
+     21,
+     22,
+     23,
+     24,
+     25,
+     26,
+     27
+    ],
+    "n_gt50_global": 10,
+    "anchor_lobe_gt50": [
+     21,
+     22,
+     23,
+     24,
+     25,
+     26,
+     27
+    ],
+    "anchor_lobe_nonzero": [
+     20,
+     21,
+     22,
+     23,
+     24,
+     25,
+     26,
+     27,
+     28,
+     29
+    ],
+    "returnable_frames_used_for_box": [
+     21,
+     22,
+     23,
+     24,
+     25,
+     26,
+     27
+    ],
+    "curve_primary": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.8333,
+     0.7917,
+     0.625,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.1667,
+     0.5833,
+     0.7083,
+     0.7917,
+     0.9583,
+     0.9583,
+     0.9583,
+     0.7917,
+     0.4167,
+     0.0417,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "curve_slowball": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.25,
+     0.2917,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0833,
+     0.25,
+     0.5,
+     0.5833,
+     0.625,
+     0.0833,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  "s0_highpress": {
+   "motion": "s0_highpress",
+   "scope": "upper",
+   "family": "backhand",
+   "usable": true,
+   "build": "p8g02 (probe8g_pod1_loops0_tube0.02)",
+   "source_path": "/workspace/codexschema/newmotion_matrix_20260726/aimed_20260726/orig/p8g02__s0_highpress_upper_canonical_v2.npz",
+   "source_origin": "pod1:/workspace/codexschema/canonical_v2_20260724/probe8g_pod1_loops0_tube0.02/candidates_shard/s0_highpress_upper_canonical_v2.npz",
+   "source_sha256": "04e28f760a6d00da4e32e7d2f4fe53bd120c3b5231d9a4fbd91c2d6b85899d50",
+   "rotation": {
+    "method": "hope_frame_utils.rotate_motion_to_hope_x(theta_deg=theta_total), applied ONCE to the ORIGINAL compiled artefact, about the frame-0 pelvis pivot",
+    "pelvis_yaw0_deg": 72.551863,
+    "theta_pelvis_deg_STEP1_METHOD": -72.551863,
+    "psi_aim_deg": 42.244361,
+    "theta_total_deg_APPLIED": -30.307501807683764,
+    "pivot_xy": [
+     0.15422534942626953,
+     -0.17953650653362274
+    ],
+    "pelvis_yaw_after_deg": 42.244359
+   },
+   "clip_path": "/workspace/codexschema/fivebind_20260727/clips/s0_highpress_upper_fivebind.npz",
+   "clip_sha256": "2bc5f6483644aa69fe3dfc42775461a6fbdf8cd1c407d0b0c8e593a86dfd8f50",
+   "clip_basename": "s0_highpress_upper_fivebind.npz",
+   "T": 41,
+   "fps": 50.0,
+   "duration_s": 0.8,
+   "build_contact_window_frames": [
+    16,
+    20
+   ],
+   "strike_frame": 10,
+   "strike_phase": 0.25,
+   "anchor_rationale": "f10, NOT the survey's f20. Three independent measurements move it: (a) at f20 the clip's own motion returns the ball 0.0000 of the time and needs a 4.0x blade-speed scale to reach 0.66; (b) at f20 the DEFAULT-ball scan scores 0.083, below the 50% bar every other anchor clears -- f20 is only returnable under the marker's own steep-descending-ball override; (c) f10 scores 1.000 under the default ball AND the slow ball, anchor-exact 0.8051, and passes forward dominance (vx 1.112 >= |vy| 0.950), which f7/f8/f9 do not. The survey correctly rejected f7/f8 for forward dominance but then jumped to lobe B; moving two frames later inside lobe A fixes it without leaving the shared ball regime. CAVEAT: f10 is outside the build's nominal contact window [16,20]. That window is weaker evidence here than for the other clips -- s0's marker nominal_event is an air-swing construction, not an observed ball contact.",
+   "mount_normal_sign": -1.0,
+   "cos_n_v": -0.812,
+   "verification": {
+    "strike_point_env_frame_m": [
+     0.3925,
+     0.0731,
+     1.3076
+    ],
+    "strike_velocity_env_frame_mps": [
+     1.1119,
+     -0.95,
+     1.2168
+    ],
+    "blade_z_at_strike_m": 1.3076,
+    "table_surface_plus_ball_radius_m": 0.78,
+    "blade_clears_table": true,
+    "signed_face_normal": [
+     -0.9275,
+     0.0701,
+     -0.3673
+    ],
+    "cos_face_velocity": -0.812,
+    "measured_sign": -1.0,
+    "sign_matches_family": true,
+    "forward_blade_velocity_vx": 1.1119,
+    "forward_dominance_vx_ge_abs_vy": true,
+    "blade_speed_mps": 1.9025,
+    "phase_scan_returnable_at_anchor": 1.0,
+    "phase_scan_returnable_slowball": 1.0,
+    "phase_scan_frames_gt50": 4,
+    "anchor_exact_return_rate": 0.8051,
+    "anchor_exact_net_clear": 0.9328,
+    "commanded_box_return_rate": 0.6127,
+    "commanded_box_return_rate_speedscale_06_10": 0.4698,
+    "best_speed_scale": {
+     "scale": 1.7,
+     "rate": 0.8103
+    },
+    "table_intrusion_bodies_mm": 0.0,
+    "table_intrusion_blade_mm": 0.0,
+    "all_gates": {
+     "blade_clears_table_at_strike": true,
+     "ctrl_clears_table_at_strike": true,
+     "forward_blade_velocity": true,
+     "forward_dominance": true,
+     "ctrl_forward_velocity": true,
+     "ctrl_forward_dominance": true,
+     "strike_phase_in_unit_interval": true,
+     "anchor_returnable_gt50": true,
+     "family_sign_consistent": true,
+     "shipped_box_z_clears_gate": true,
+     "shipped_vel_x_forward": true
+    }
+   },
+   "racket_pos_range": {
+    "x": [
+     0.2469,
+     0.5181
+    ],
+    "y": [
+     -0.1431,
+     0.3235
+    ],
+    "z": [
+     1.1324,
+     1.423
+    ]
+   },
+   "racket_vel_range": {
+    "x": [
+     0.6119,
+     1.6119
+    ],
+    "y": [
+     -1.45,
+     -0.45
+    ],
+    "z": [
+     0.8168,
+     1.6168
+    ]
+   },
+   "racket_vel_range_before_forward_gate": {
+    "x": [
+     0.6119,
+     1.6119
+    ],
+    "y": [
+     -1.45,
+     -0.45
+    ],
+    "z": [
+     0.8168,
+     1.6168
+    ]
+   },
+   "racket_pos_range_prescription_intersect": {
+    "x": [
+     0.525,
+     0.5181
+    ],
+    "y": [
+     -0.1431,
+     0.3235
+    ],
+    "z": [
+     1.1324,
+     1.13
+    ]
+   },
+   "prescription_coverage": {
+    "x": {
+     "prescription": [
+      0.525,
+      0.785
+     ],
+     "servable": [
+      0.2469,
+      0.5181
+     ],
+     "intersect": [
+      0.525,
+      0.5181
+     ],
+     "covered_frac": 0.0,
+     "empty": true
+    },
+    "y": {
+     "prescription": [
+      -0.18,
+      0.42
+     ],
+     "servable": [
+      -0.1431,
+      0.3235
+     ],
+     "intersect": [
+      -0.1431,
+      0.3235
+     ],
+     "covered_frac": 0.7777,
+     "empty": false
+    },
+    "z": {
+     "prescription": [
+      0.83,
+      1.13
+     ],
+     "servable": [
+      1.1324,
+      1.423
+     ],
+     "intersect": [
+      1.1324,
+      1.13
+     ],
+     "covered_frac": 0.0,
+     "empty": true
+    }
+   },
+   "returnable_frames_backing_the_pos_box": [
+    8,
+    9,
+    10,
+    11
+   ],
+   "scan": {
+    "ball_contract": "--speed-range 2.0 5.0",
+    "best_score": 1.0,
+    "best_frame": 9,
+    "score_at_anchor": 1.0,
+    "score_at_anchor_slowball": 1.0,
+    "frames_gt50_global": [
+     8,
+     9,
+     10,
+     11
+    ],
+    "n_gt50_global": 4,
+    "anchor_lobe_gt50": [
+     8,
+     9,
+     10,
+     11
+    ],
+    "anchor_lobe_nonzero": [
+     7,
+     8,
+     9,
+     10,
+     11
+    ],
+    "returnable_frames_used_for_box": [
+     8,
+     9,
+     10,
+     11
+    ],
+    "curve_primary": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0417,
+     0.875,
+     1.0,
+     1.0,
+     0.625,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.125,
+     0.1667,
+     0.1667,
+     0.0833,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "curve_slowball": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0417,
+     1.0,
+     1.0,
+     1.0,
+     0.0833,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  "fh_block_syn": {
+   "motion": "fh_block_syn",
+   "scope": "upper",
+   "family": "forehand",
+   "usable": false,
+   "build": "p8h02 (probe8h_pod2_blocks_tube0.02)",
+   "source_path": "/workspace/codexschema/newmotion_matrix_20260726/aimed_20260726/orig/p8h02__fh_block_syn_upper_canonical_v2.npz",
+   "source_origin": "pod2:/workspace/codexschema/canonical_v2_20260724/probe8h_pod2_blocks_tube0.02/candidates_shard/fh_block_syn_upper_canonical_v2.npz",
+   "source_sha256": "b42484a8e993cf05100c0c3c86bafc4d9ab0a250d7c97c7384adc623b59028d9",
+   "rotation": {
+    "method": "hope_frame_utils.rotate_motion_to_hope_x(theta_deg=theta_total), applied ONCE to the ORIGINAL compiled artefact, about the frame-0 pelvis pivot",
+    "pelvis_yaw0_deg": 72.551863,
+    "theta_pelvis_deg_STEP1_METHOD": -72.551863,
+    "psi_aim_deg": 47.143734,
+    "theta_total_deg_APPLIED": -25.40812872009016,
+    "pivot_xy": [
+     0.15422534942626953,
+     -0.17953650653362274
+    ],
+    "pelvis_yaw_after_deg": 47.143733
+   },
+   "clip_path": "/workspace/codexschema/fivebind_20260727/clips/fh_block_syn_upper_fivebind.npz",
+   "clip_sha256": "ec69e056087f52f1207b8fe6625e73ae235385983cd2e2449bf9109597ddb404",
+   "clip_basename": "fh_block_syn_upper_fivebind.npz",
+   "T": 104,
+   "fps": 50.0,
+   "duration_s": 2.06,
+   "build_contact_window_frames": [
+    51,
+    67
+   ],
+   "strike_frame": 66,
+   "strike_phase": 0.640777,
+   "anchor_rationale": "f66 is the argmax of a curve that never clears 50%. There is NO legal anchor: zero frames in the clip satisfy {default-ball scan >50%, forward dominance, blade above table, sign matches family} jointly. Recorded for completeness only.",
+   "mount_normal_sign": 1.0,
+   "cos_n_v": 0.5149,
+   "verification": {
+    "strike_point_env_frame_m": [
+     0.554,
+     0.4111,
+     1.1988
+    ],
+    "strike_velocity_env_frame_mps": [
+     0.6201,
+     0.5505,
+     -0.0983
+    ],
+    "blade_z_at_strike_m": 1.1988,
+    "table_surface_plus_ball_radius_m": 0.78,
+    "blade_clears_table": true,
+    "signed_face_normal": [
+     0.8749,
+     -0.1206,
+     0.4691
+    ],
+    "cos_face_velocity": 0.5149,
+    "measured_sign": 1.0,
+    "sign_matches_family": true,
+    "forward_blade_velocity_vx": 0.6201,
+    "forward_dominance_vx_ge_abs_vy": true,
+    "blade_speed_mps": 0.835,
+    "phase_scan_returnable_at_anchor": 0.4583,
+    "phase_scan_returnable_slowball": 0.0,
+    "phase_scan_frames_gt50": 0,
+    "anchor_exact_return_rate": 0.0,
+    "anchor_exact_net_clear": 0.1022,
+    "commanded_box_return_rate": 0.1117,
+    "commanded_box_return_rate_speedscale_06_10": 0.0595,
+    "best_speed_scale": {
+     "scale": 3.4,
+     "rate": 0.9093
+    },
+    "table_intrusion_bodies_mm": 0.0,
+    "table_intrusion_blade_mm": 0.0,
+    "all_gates": {
+     "blade_clears_table_at_strike": true,
+     "ctrl_clears_table_at_strike": true,
+     "forward_blade_velocity": true,
+     "forward_dominance": true,
+     "ctrl_forward_velocity": true,
+     "ctrl_forward_dominance": true,
+     "strike_phase_in_unit_interval": true,
+     "anchor_returnable_gt50": false,
+     "family_sign_consistent": true,
+     "shipped_box_z_clears_gate": true,
+     "shipped_vel_x_forward": true
+    }
+   },
+   "racket_pos_range": {
+    "x": [
+     0.4026,
+     0.6929
+    ],
+    "y": [
+     0.1544,
+     0.6392
+    ],
+    "z": [
+     1.0929,
+     1.3053
+    ]
+   },
+   "racket_vel_range": {
+    "x": [
+     0.1201,
+     1.1201
+    ],
+    "y": [
+     0.0505,
+     1.0505
+    ],
+    "z": [
+     -0.4983,
+     0.3017
+    ]
+   },
+   "racket_vel_range_before_forward_gate": {
+    "x": [
+     0.1201,
+     1.1201
+    ],
+    "y": [
+     0.0505,
+     1.0505
+    ],
+    "z": [
+     -0.4983,
+     0.3017
+    ]
+   },
+   "racket_pos_range_prescription_intersect": {
+    "x": [
+     0.7,
+     0.6929
+    ],
+    "y": [
+     0.1544,
+     -0.18
+    ],
+    "z": [
+     1.0929,
+     1.06
+    ]
+   },
+   "prescription_coverage": {
+    "x": {
+     "prescription": [
+      0.7,
+      0.9
+     ],
+     "servable": [
+      0.4026,
+      0.6929
+     ],
+     "intersect": [
+      0.7,
+      0.6929
+     ],
+     "covered_frac": 0.0,
+     "empty": true
+    },
+    "y": {
+     "prescription": [
+      -0.689,
+      -0.18
+     ],
+     "servable": [
+      0.1544,
+      0.6392
+     ],
+     "intersect": [
+      0.1544,
+      -0.18
+     ],
+     "covered_frac": 0.0,
+     "empty": true
+    },
+    "z": {
+     "prescription": [
+      0.78,
+      1.06
+     ],
+     "servable": [
+      1.0929,
+      1.3053
+     ],
+     "intersect": [
+      1.0929,
+      1.06
+     ],
+     "covered_frac": 0.0,
+     "empty": true
+    }
+   },
+   "returnable_frames_backing_the_pos_box": [
+    61,
+    62,
+    63,
+    64,
+    65,
+    66,
+    67,
+    68,
+    69
+   ],
+   "scan": {
+    "ball_contract": "--speed-range 2.0 5.0",
+    "best_score": 0.4583,
+    "best_frame": 66,
+    "score_at_anchor": 0.4583,
+    "score_at_anchor_slowball": 0.0,
+    "frames_gt50_global": [],
+    "n_gt50_global": 0,
+    "anchor_lobe_gt50": [],
+    "anchor_lobe_nonzero": [
+     61,
+     62,
+     63,
+     64,
+     65,
+     66,
+     67,
+     68,
+     69
+    ],
+    "returnable_frames_used_for_box": [
+     61,
+     62,
+     63,
+     64,
+     65,
+     66,
+     67,
+     68,
+     69
+    ],
+    "curve_primary": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0417,
+     0.2083,
+     0.25,
+     0.25,
+     0.375,
+     0.4583,
+     0.3333,
+     0.375,
+     0.2083,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "curve_slowball": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  },
+  "bh_loop_c_full": {
+   "motion": "bh_loop_c_full",
+   "scope": "full",
+   "family": "backhand",
+   "usable": true,
+   "build": "p8g005 (probe8g_pod2_loops0_tube0.005)",
+   "source_path": "/workspace/codexschema/newmotion_matrix_20260726/aimed_20260726/orig/p8g005__bh_loop_c_full_canonical_v2.npz",
+   "source_origin": "pod2:/workspace/codexschema/newmotion_matrix_20260726/aimed_20260726/orig/p8g005__bh_loop_c_full_canonical_v2.npz",
+   "source_sha256": "8938e658ba57abb60ea83a7e9eefeb70a5b64308163253261bda1654c1db53e7",
+   "rotation": {
+    "method": "hope_frame_utils.rotate_motion_to_hope_x(theta_deg=theta_total), applied ONCE to the ORIGINAL compiled artefact, about the frame-0 pelvis pivot",
+    "pelvis_yaw0_deg": 72.551863,
+    "theta_pelvis_deg_STEP1_METHOD": -72.551863,
+    "psi_aim_deg": 82.495664,
+    "theta_total_deg_APPLIED": 9.943801196401125,
+    "pivot_xy": [
+     0.15422534942626953,
+     -0.17953650653362274
+    ],
+    "pelvis_yaw_after_deg": 82.495661
+   },
+   "clip_path": "/workspace/codexschema/fivebind_20260727/clips/bh_loop_c_full_full_fivebind.npz",
+   "clip_sha256": "010740965573863c6dbcb48f4efa3318eea51d1d005da0e458824c837a43c8b0",
+   "clip_basename": "bh_loop_c_full_full_fivebind.npz",
+   "T": 81,
+   "fps": 50.0,
+   "duration_s": 1.6,
+   "build_contact_window_frames": [
+    29,
+    40
+   ],
+   "strike_frame": 38,
+   "strike_phase": 0.475,
+   "anchor_rationale": "f38, not the shipped f35. Same lobe, same scan score (1.000), anchor-exact 0.4938 vs 0.3766.",
+   "mount_normal_sign": -1.0,
+   "cos_n_v": -0.9828,
+   "verification": {
+    "strike_point_env_frame_m": [
+     0.3967,
+     0.4814,
+     1.4674
+    ],
+    "strike_velocity_env_frame_mps": [
+     1.8857,
+     -0.5336,
+     1.3726
+    ],
+    "blade_z_at_strike_m": 1.4674,
+    "table_surface_plus_ball_radius_m": 0.78,
+    "blade_clears_table": true,
+    "signed_face_normal": [
+     -0.8818,
+     0.2265,
+     -0.4136
+    ],
+    "cos_face_velocity": -0.9828,
+    "measured_sign": -1.0,
+    "sign_matches_family": true,
+    "forward_blade_velocity_vx": 1.8857,
+    "forward_dominance_vx_ge_abs_vy": true,
+    "blade_speed_mps": 2.3926,
+    "phase_scan_returnable_at_anchor": 1.0,
+    "phase_scan_returnable_slowball": 1.0,
+    "phase_scan_frames_gt50": 6,
+    "anchor_exact_return_rate": 0.4939,
+    "anchor_exact_net_clear": 1.0,
+    "commanded_box_return_rate": 0.4298,
+    "commanded_box_return_rate_speedscale_06_10": 0.5407,
+    "best_speed_scale": {
+     "scale": 0.7,
+     "rate": 0.8223
+    },
+    "table_intrusion_bodies_mm": 0.0,
+    "table_intrusion_blade_mm": 0.0,
+    "all_gates": {
+     "blade_clears_table_at_strike": true,
+     "ctrl_clears_table_at_strike": true,
+     "forward_blade_velocity": true,
+     "forward_dominance": true,
+     "ctrl_forward_velocity": true,
+     "ctrl_forward_dominance": true,
+     "strike_phase_in_unit_interval": true,
+     "anchor_returnable_gt50": true,
+     "family_sign_consistent": true,
+     "shipped_box_z_clears_gate": true,
+     "shipped_vel_x_forward": true
+    }
+   },
+   "racket_pos_range": {
+    "x": [
+     0.1843,
+     0.5722
+    ],
+    "y": [
+     0.2546,
+     0.7009
+    ],
+    "z": [
+     1.2784,
+     1.6189
+    ]
+   },
+   "racket_vel_range": {
+    "x": [
+     1.3857,
+     2.3857
+    ],
+    "y": [
+     -1.0336,
+     -0.0336
+    ],
+    "z": [
+     0.9726,
+     1.7726
+    ]
+   },
+   "racket_vel_range_before_forward_gate": {
+    "x": [
+     1.3857,
+     2.3857
+    ],
+    "y": [
+     -1.0336,
+     -0.0336
+    ],
+    "z": [
+     0.9726,
+     1.7726
+    ]
+   },
+   "racket_pos_range_prescription_intersect": {
+    "x": [
+     0.525,
+     0.5722
+    ],
+    "y": [
+     0.2546,
+     0.42
+    ],
+    "z": [
+     1.2784,
+     1.13
+    ]
+   },
+   "prescription_coverage": {
+    "x": {
+     "prescription": [
+      0.525,
+      0.785
+     ],
+     "servable": [
+      0.1843,
+      0.5722
+     ],
+     "intersect": [
+      0.525,
+      0.5722
+     ],
+     "covered_frac": 0.1817,
+     "empty": false
+    },
+    "y": {
+     "prescription": [
+      -0.18,
+      0.42
+     ],
+     "servable": [
+      0.2546,
+      0.7009
+     ],
+     "intersect": [
+      0.2546,
+      0.42
+     ],
+     "covered_frac": 0.2757,
+     "empty": false
+    },
+    "z": {
+     "prescription": [
+      0.83,
+      1.13
+     ],
+     "servable": [
+      1.2784,
+      1.6189
+     ],
+     "intersect": [
+      1.2784,
+      1.13
+     ],
+     "covered_frac": 0.0,
+     "empty": true
+    }
+   },
+   "returnable_frames_backing_the_pos_box": [
+    35,
+    36,
+    37,
+    38,
+    39,
+    40
+   ],
+   "scan": {
+    "ball_contract": "--speed-range 2.0 5.0",
+    "best_score": 1.0,
+    "best_frame": 35,
+    "score_at_anchor": 1.0,
+    "score_at_anchor_slowball": 1.0,
+    "frames_gt50_global": [
+     35,
+     36,
+     37,
+     38,
+     39,
+     40
+    ],
+    "n_gt50_global": 6,
+    "anchor_lobe_gt50": [
+     35,
+     36,
+     37,
+     38,
+     39,
+     40
+    ],
+    "anchor_lobe_nonzero": [
+     33,
+     34,
+     35,
+     36,
+     37,
+     38,
+     39,
+     40,
+     41,
+     42,
+     43
+    ],
+    "returnable_frames_used_for_box": [
+     35,
+     36,
+     37,
+     38,
+     39,
+     40
+    ],
+    "curve_primary": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0417,
+     0.5,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     0.9583,
+     0.5833,
+     0.4167,
+     0.2083,
+     0.125,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ],
+    "curve_slowball": [
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.2917,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     1.0,
+     0.6667,
+     0.1667,
+     0.0417,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0,
+     0.0
+    ]
+   }
+  }
+ },
+ "sets": {
+  "A_four_motion_RECOMMENDED": {
+   "motion_file_order": [
+    "fh_loop",
+    "bh_loop_c",
+    "bh_block",
+    "s0_highpress"
+   ],
+   "motion_file": [
+    "/workspace/codexschema/fivebind_20260727/clips/fh_loop_upper_fivebind.npz",
+    "/workspace/codexschema/fivebind_20260727/clips/bh_loop_c_upper_fivebind.npz",
+    "/workspace/codexschema/fivebind_20260727/clips/bh_block_upper_fivebind.npz",
+    "/workspace/codexschema/fivebind_20260727/clips/s0_highpress_upper_fivebind.npz"
+   ],
+   "clip_sha256": [
+    "8d94dc55e8a157ad8d109c06f89c1362bb3f7ef58c3f953befa81683e63b2e9b",
+    "c950a73e473cad84d0fafcd51c552ec4fef085580bbeaec0f4e96be2acd7e2fc",
+    "0cd94aa47bf8feb59bbe7cc7a0306abb57ee7ec8ebcec6443a80bbdc58894309",
+    "2bc5f6483644aa69fe3dfc42775461a6fbdf8cd1c407d0b0c8e593a86dfd8f50"
+   ],
+   "clip_family_per_clip": [
+    "forehand",
+    "backhand",
+    "backhand",
+    "backhand"
+   ],
+   "mount_normal_sign_per_clip": [
+    1.0,
+    -1.0,
+    -1.0,
+    -1.0
+   ],
+   "strike_phase_per_clip": [
+    0.632184,
+    0.442857,
+    0.45283,
+    0.25
+   ],
+   "racket_pos_range_per_clip": [
+    [
+     [
+      -0.1385,
+      0.2426
+     ],
+     [
+      -1.1476,
+      -0.6596
+     ],
+     [
+      1.0847,
+      1.5357
+     ]
+    ],
+    [
+     [
+      0.1266,
+      0.5359
+     ],
+     [
+      0.2695,
+      0.7188
+     ],
+     [
+      1.2684,
+      1.6206
+     ]
+    ],
+    [
+     [
+      0.4259,
+      0.7657
+     ],
+     [
+      0.0014,
+      0.5102
+     ],
+     [
+      1.0867,
+      1.3115
+     ]
+    ],
+    [
+     [
+      0.2469,
+      0.5181
+     ],
+     [
+      -0.1431,
+      0.3235
+     ],
+     [
+      1.1324,
+      1.423
+     ]
+    ]
+   ],
+   "racket_vel_range_per_clip": [
+    [
+     [
+      1.0923,
+      2.0923
+     ],
+     [
+      0.4608,
+      1.4608
+     ],
+     [
+      1.6993,
+      2.4993
+     ]
+    ],
+    [
+     [
+      0.8699,
+      1.8699
+     ],
+     [
+      -0.6528,
+      0.3472
+     ],
+     [
+      0.7798,
+      1.5798
+     ]
+    ],
+    [
+     [
+      0.7675,
+      1.7675
+     ],
+     [
+      0.4184,
+      1.4184
+     ],
+     [
+      -0.1979,
+      0.6021
+     ]
+    ],
+    [
+     [
+      0.6119,
+      1.6119
+     ],
+     [
+      -1.45,
+      -0.45
+     ],
+     [
+      0.8168,
+      1.6168
+     ]
+    ]
+   ],
+   "validator_errors": [],
+   "min_strike_phase_gap": 0.01,
+   "face_sign_conflicts_on_overlapping_pos_boxes": [],
+   "clips_failing_verification": [],
+   "pairwise": [
+    {
+     "pair": [
+      "fh_loop",
+      "bh_loop_c"
+     ],
+     "pos_box_overlap_m3": 0.0,
+     "frac_of_smaller": 0.0,
+     "overlap_spans": {
+      "x": [
+       0.1266,
+       0.2426
+      ],
+      "y": null,
+      "z": [
+       1.2684,
+       1.5357
+      ]
+     },
+     "signs": [
+      1.0,
+      -1.0
+     ],
+     "families": [
+      "forehand",
+      "backhand"
+     ],
+     "strike_phase_gap": 0.1893,
+     "FACE_SIGN_CONFLICT_ON_OVERLAP": false
+    },
+    {
+     "pair": [
+      "fh_loop",
+      "bh_block"
+     ],
+     "pos_box_overlap_m3": 0.0,
+     "frac_of_smaller": 0.0,
+     "overlap_spans": {
+      "x": null,
+      "y": null,
+      "z": [
+       1.0867,
+       1.3115
+      ]
+     },
+     "signs": [
+      1.0,
+      -1.0
+     ],
+     "families": [
+      "forehand",
+      "backhand"
+     ],
+     "strike_phase_gap": 0.1794,
+     "FACE_SIGN_CONFLICT_ON_OVERLAP": false
+    },
+    {
+     "pair": [
+      "fh_loop",
+      "s0_highpress"
+     ],
+     "pos_box_overlap_m3": 0.0,
+     "frac_of_smaller": 0.0,
+     "overlap_spans": {
+      "x": null,
+      "y": null,
+      "z": [
+       1.1324,
+       1.423
+      ]
+     },
+     "signs": [
+      1.0,
+      -1.0
+     ],
+     "families": [
+      "forehand",
+      "backhand"
+     ],
+     "strike_phase_gap": 0.3822,
+     "FACE_SIGN_CONFLICT_ON_OVERLAP": false
+    },
+    {
+     "pair": [
+      "bh_loop_c",
+      "bh_block"
+     ],
+     "pos_box_overlap_m3": 0.001141,
+     "frac_of_smaller": 0.0294,
+     "overlap_spans": {
+      "x": [
+       0.4259,
+       0.5359
+      ],
+      "y": [
+       0.2695,
+       0.5102
+      ],
+      "z": [
+       1.2684,
+       1.3115
+      ]
+     },
+     "signs": [
+      -1.0,
+      -1.0
+     ],
+     "families": [
+      "backhand",
+      "backhand"
+     ],
+     "strike_phase_gap": 0.01,
+     "FACE_SIGN_CONFLICT_ON_OVERLAP": false
+    },
+    {
+     "pair": [
+      "bh_loop_c",
+      "s0_highpress"
+     ],
+     "pos_box_overlap_m3": 0.002264,
+     "frac_of_smaller": 0.0616,
+     "overlap_spans": {
+      "x": [
+       0.2469,
+       0.5181
+      ],
+      "y": [
+       0.2695,
+       0.3235
+      ],
+      "z": [
+       1.2684,
+       1.423
+      ]
+     },
+     "signs": [
+      -1.0,
+      -1.0
+     ],
+     "families": [
+      "backhand",
+      "backhand"
+     ],
+     "strike_phase_gap": 0.1929,
+     "FACE_SIGN_CONFLICT_ON_OVERLAP": false
+    },
+    {
+     "pair": [
+      "bh_block",
+      "s0_highpress"
+     ],
+     "pos_box_overlap_m3": 0.005319,
+     "frac_of_smaller": 0.1446,
+     "overlap_spans": {
+      "x": [
+       0.4259,
+       0.5181
+      ],
+      "y": [
+       0.0014,
+       0.3235
+      ],
+      "z": [
+       1.1324,
+       1.3115
+      ]
+     },
+     "signs": [
+      -1.0,
+      -1.0
+     ],
+     "families": [
+      "backhand",
+      "backhand"
+     ],
+     "strike_phase_gap": 0.2028,
+     "FACE_SIGN_CONFLICT_ON_OVERLAP": false
+    }
+   ]
+  },
+  "B_five_canonical": {
+   "motion_file_order": [
+    "fh_loop",
+    "bh_loop_c",
+    "bh_block",
+    "s0_highpress",
+    "fh_block_syn"
+   ],
+   "motion_file": [
+    "/workspace/codexschema/fivebind_20260727/clips/fh_loop_upper_fivebind.npz",
+    "/workspace/codexschema/fivebind_20260727/clips/bh_loop_c_upper_fivebind.npz",
+    "/workspace/codexschema/fivebind_20260727/clips/bh_block_upper_fivebind.npz",
+    "/workspace/codexschema/fivebind_20260727/clips/s0_highpress_upper_fivebind.npz",
+    "/workspace/codexschema/fivebind_20260727/clips/fh_block_syn_upper_fivebind.npz"
+   ],
+   "clip_sha256": [
+    "8d94dc55e8a157ad8d109c06f89c1362bb3f7ef58c3f953befa81683e63b2e9b",
+    "c950a73e473cad84d0fafcd51c552ec4fef085580bbeaec0f4e96be2acd7e2fc",
+    "0cd94aa47bf8feb59bbe7cc7a0306abb57ee7ec8ebcec6443a80bbdc58894309",
+    "2bc5f6483644aa69fe3dfc42775461a6fbdf8cd1c407d0b0c8e593a86dfd8f50",
+    "ec69e056087f52f1207b8fe6625e73ae235385983cd2e2449bf9109597ddb404"
+   ],
+   "clip_family_per_clip": [
+    "forehand",
+    "backhand",
+    "backhand",
+    "backhand",
+    "forehand"
+   ],
+   "mount_normal_sign_per_clip": [
+    1.0,
+    -1.0,
+    -1.0,
+    -1.0,
+    1.0
+   ],
+   "strike_phase_per_clip": [
+    0.632184,
+    0.442857,
+    0.45283,
+    0.25,
+    0.640777
+   ],
+   "racket_pos_range_per_clip": [
+    [
+     [
+      -0.1385,
+      0.2426
+     ],
+     [
+      -1.1476,
+      -0.6596
+     ],
+     [
+      1.0847,
+      1.5357
+     ]
+    ],
+    [
+     [
+      0.1266,
+      0.5359
+     ],
+     [
+      0.2695,
+      0.7188
+     ],
+     [
+      1.2684,
+      1.6206
+     ]
+    ],
+    [
+     [
+      0.4259,
+      0.7657
+     ],
+     [
+      0.0014,
+      0.5102
+     ],
+     [
+      1.0867,
+      1.3115
+     ]
+    ],
+    [
+     [
+      0.2469,
+      0.5181
+     ],
+     [
+      -0.1431,
+      0.3235
+     ],
+     [
+      1.1324,
+      1.423
+     ]
+    ],
+    [
+     [
+      0.4026,
+      0.6929
+     ],
+     [
+      0.1544,
+      0.6392
+     ],
+     [
+      1.0929,
+      1.3053
+     ]
+    ]
+   ],
+   "racket_vel_range_per_clip": [
+    [
+     [
+      1.0923,
+      2.0923
+     ],
+     [
+      0.4608,
+      1.4608
+     ],
+     [
+      1.6993,
+      2.4993
+     ]
+    ],
+    [
+     [
+      0.8699,
+      1.8699
+     ],
+     [
+      -0.6528,
+      0.3472
+     ],
+     [
+      0.7798,
+      1.5798
+     ]
+    ],
+    [
+     [
+      0.7675,
+      1.7675
+     ],
+     [
+      0.4184,
+      1.4184
+     ],
+     [
+      -0.1979,
+      0.6021
+     ]
+    ],
+    [
+     [
+      0.6119,
+      1.6119
+     ],
+     [
+      -1.45,
+      -0.45
+     ],
+     [
+      0.8168,
+      1.6168
+     ]
+    ],
+    [
+     [
+      0.1201,
+      1.1201
+     ],
+     [
+      0.0505,
+      1.0505
+     ],
+     [
+      -0.4983,
+      0.3017
+     ]
+    ]
+   ],
+   "validator_errors": [],
+   "min_strike_phase_gap": 0.0086,
+   "face_sign_conflicts_on_overlapping_pos_boxes": [
+    [
+     "bh_loop_c",
+     "fh_block_syn"
+    ],
+    [
+     "bh_block",
+     "fh_block_syn"
+    ],
+    [
+     "s0_highpress",
+     "fh_block_syn"
+    ]
+   ],
+   "clips_failing_verification": [
+    "fh_block_syn"
+   ],
+   "pairwise": [
+    {
+     "pair": [
+      "fh_loop",
+      "bh_loop_c"
+     ],
+     "pos_box_overlap_m3": 0.0,
+     "frac_of_smaller": 0.0,
+     "overlap_spans": {
+      "x": [
+       0.1266,
+       0.2426
+      ],
+      "y": null,
+      "z": [
+       1.2684,
+       1.5357
+      ]
+     },
+     "signs": [
+      1.0,
+      -1.0
+     ],
+     "families": [
+      "forehand",
+      "backhand"
+     ],
+     "strike_phase_gap": 0.1893,
+     "FACE_SIGN_CONFLICT_ON_OVERLAP": false
+    },
+    {
+     "pair": [
+      "fh_loop",
+      "bh_block"
+     ],
+     "pos_box_overlap_m3": 0.0,
+     "frac_of_smaller": 0.0,
+     "overlap_spans": {
+      "x": null,
+      "y": null,
+      "z": [
+       1.0867,
+       1.3115
+      ]
+     },
+     "signs": [
+      1.0,
+      -1.0
+     ],
+     "families": [
+      "forehand",
+      "backhand"
+     ],
+     "strike_phase_gap": 0.1794,
+     "FACE_SIGN_CONFLICT_ON_OVERLAP": false
+    },
+    {
+     "pair": [
+      "fh_loop",
+      "s0_highpress"
+     ],
+     "pos_box_overlap_m3": 0.0,
+     "frac_of_smaller": 0.0,
+     "overlap_spans": {
+      "x": null,
+      "y": null,
+      "z": [
+       1.1324,
+       1.423
+      ]
+     },
+     "signs": [
+      1.0,
+      -1.0
+     ],
+     "families": [
+      "forehand",
+      "backhand"
+     ],
+     "strike_phase_gap": 0.3822,
+     "FACE_SIGN_CONFLICT_ON_OVERLAP": false
+    },
+    {
+     "pair": [
+      "fh_loop",
+      "fh_block_syn"
+     ],
+     "pos_box_overlap_m3": 0.0,
+     "frac_of_smaller": 0.0,
+     "overlap_spans": {
+      "x": null,
+      "y": null,
+      "z": [
+       1.0929,
+       1.3053
+      ]
+     },
+     "signs": [
+      1.0,
+      1.0
+     ],
+     "families": [
+      "forehand",
+      "forehand"
+     ],
+     "strike_phase_gap": 0.0086,
+     "FACE_SIGN_CONFLICT_ON_OVERLAP": false
+    },
+    {
+     "pair": [
+      "bh_loop_c",
+      "bh_block"
+     ],
+     "pos_box_overlap_m3": 0.001141,
+     "frac_of_smaller": 0.0294,
+     "overlap_spans": {
+      "x": [
+       0.4259,
+       0.5359
+      ],
+      "y": [
+       0.2695,
+       0.5102
+      ],
+      "z": [
+       1.2684,
+       1.3115
+      ]
+     },
+     "signs": [
+      -1.0,
+      -1.0
+     ],
+     "families": [
+      "backhand",
+      "backhand"
+     ],
+     "strike_phase_gap": 0.01,
+     "FACE_SIGN_CONFLICT_ON_OVERLAP": false
+    },
+    {
+     "pair": [
+      "bh_loop_c",
+      "s0_highpress"
+     ],
+     "pos_box_overlap_m3": 0.002264,
+     "frac_of_smaller": 0.0616,
+     "overlap_spans": {
+      "x": [
+       0.2469,
+       0.5181
+      ],
+      "y": [
+       0.2695,
+       0.3235
+      ],
+      "z": [
+       1.2684,
+       1.423
+      ]
+     },
+     "signs": [
+      -1.0,
+      -1.0
+     ],
+     "families": [
+      "backhand",
+      "backhand"
+     ],
+     "strike_phase_gap": 0.1929,
+     "FACE_SIGN_CONFLICT_ON_OVERLAP": false
+    },
+    {
+     "pair": [
+      "bh_loop_c",
+      "fh_block_syn"
+     ],
+     "pos_box_overlap_m3": 0.001818,
+     "frac_of_smaller": 0.0608,
+     "overlap_spans": {
+      "x": [
+       0.4026,
+       0.5359
+      ],
+      "y": [
+       0.2695,
+       0.6392
+      ],
+      "z": [
+       1.2684,
+       1.3053
+      ]
+     },
+     "signs": [
+      -1.0,
+      1.0
+     ],
+     "families": [
+      "backhand",
+      "forehand"
+     ],
+     "strike_phase_gap": 0.1979,
+     "FACE_SIGN_CONFLICT_ON_OVERLAP": true
+    },
+    {
+     "pair": [
+      "bh_block",
+      "s0_highpress"
+     ],
+     "pos_box_overlap_m3": 0.005319,
+     "frac_of_smaller": 0.1446,
+     "overlap_spans": {
+      "x": [
+       0.4259,
+       0.5181
+      ],
+      "y": [
+       0.0014,
+       0.3235
+      ],
+      "z": [
+       1.1324,
+       1.3115
+      ]
+     },
+     "signs": [
+      -1.0,
+      -1.0
+     ],
+     "families": [
+      "backhand",
+      "backhand"
+     ],
+     "strike_phase_gap": 0.2028,
+     "FACE_SIGN_CONFLICT_ON_OVERLAP": false
+    },
+    {
+     "pair": [
+      "bh_block",
+      "fh_block_syn"
+     ],
+     "pos_box_overlap_m3": 0.020178,
+     "frac_of_smaller": 0.675,
+     "overlap_spans": {
+      "x": [
+       0.4259,
+       0.6929
+      ],
+      "y": [
+       0.1544,
+       0.5102
+      ],
+      "z": [
+       1.0929,
+       1.3053
+      ]
+     },
+     "signs": [
+      -1.0,
+      1.0
+     ],
+     "families": [
+      "backhand",
+      "forehand"
+     ],
+     "strike_phase_gap": 0.1879,
+     "FACE_SIGN_CONFLICT_ON_OVERLAP": true
+    },
+    {
+     "pair": [
+      "s0_highpress",
+      "fh_block_syn"
+     ],
+     "pos_box_overlap_m3": 0.003377,
+     "frac_of_smaller": 0.113,
+     "overlap_spans": {
+      "x": [
+       0.4026,
+       0.5181
+      ],
+      "y": [
+       0.1544,
+       0.3235
+      ],
+      "z": [
+       1.1324,
+       1.3053
+      ]
+     },
+     "signs": [
+      -1.0,
+      1.0
+     ],
+     "families": [
+      "backhand",
+      "forehand"
+     ],
+     "strike_phase_gap": 0.3908,
+     "FACE_SIGN_CONFLICT_ON_OVERLAP": true
+    }
+   ]
+  },
+  "C_five_with_substitute": {
+   "motion_file_order": [
+    "fh_loop",
+    "bh_loop_c",
+    "bh_block",
+    "s0_highpress",
+    "bh_loop_c_full"
+   ],
+   "motion_file": [
+    "/workspace/codexschema/fivebind_20260727/clips/fh_loop_upper_fivebind.npz",
+    "/workspace/codexschema/fivebind_20260727/clips/bh_loop_c_upper_fivebind.npz",
+    "/workspace/codexschema/fivebind_20260727/clips/bh_block_upper_fivebind.npz",
+    "/workspace/codexschema/fivebind_20260727/clips/s0_highpress_upper_fivebind.npz",
+    "/workspace/codexschema/fivebind_20260727/clips/bh_loop_c_full_full_fivebind.npz"
+   ],
+   "clip_sha256": [
+    "8d94dc55e8a157ad8d109c06f89c1362bb3f7ef58c3f953befa81683e63b2e9b",
+    "c950a73e473cad84d0fafcd51c552ec4fef085580bbeaec0f4e96be2acd7e2fc",
+    "0cd94aa47bf8feb59bbe7cc7a0306abb57ee7ec8ebcec6443a80bbdc58894309",
+    "2bc5f6483644aa69fe3dfc42775461a6fbdf8cd1c407d0b0c8e593a86dfd8f50",
+    "010740965573863c6dbcb48f4efa3318eea51d1d005da0e458824c837a43c8b0"
+   ],
+   "clip_family_per_clip": [
+    "forehand",
+    "backhand",
+    "backhand",
+    "backhand",
+    "backhand"
+   ],
+   "mount_normal_sign_per_clip": [
+    1.0,
+    -1.0,
+    -1.0,
+    -1.0,
+    -1.0
+   ],
+   "strike_phase_per_clip": [
+    0.632184,
+    0.442857,
+    0.45283,
+    0.25,
+    0.475
+   ],
+   "racket_pos_range_per_clip": [
+    [
+     [
+      -0.1385,
+      0.2426
+     ],
+     [
+      -1.1476,
+      -0.6596
+     ],
+     [
+      1.0847,
+      1.5357
+     ]
+    ],
+    [
+     [
+      0.1266,
+      0.5359
+     ],
+     [
+      0.2695,
+      0.7188
+     ],
+     [
+      1.2684,
+      1.6206
+     ]
+    ],
+    [
+     [
+      0.4259,
+      0.7657
+     ],
+     [
+      0.0014,
+      0.5102
+     ],
+     [
+      1.0867,
+      1.3115
+     ]
+    ],
+    [
+     [
+      0.2469,
+      0.5181
+     ],
+     [
+      -0.1431,
+      0.3235
+     ],
+     [
+      1.1324,
+      1.423
+     ]
+    ],
+    [
+     [
+      0.1843,
+      0.5722
+     ],
+     [
+      0.2546,
+      0.7009
+     ],
+     [
+      1.2784,
+      1.6189
+     ]
+    ]
+   ],
+   "racket_vel_range_per_clip": [
+    [
+     [
+      1.0923,
+      2.0923
+     ],
+     [
+      0.4608,
+      1.4608
+     ],
+     [
+      1.6993,
+      2.4993
+     ]
+    ],
+    [
+     [
+      0.8699,
+      1.8699
+     ],
+     [
+      -0.6528,
+      0.3472
+     ],
+     [
+      0.7798,
+      1.5798
+     ]
+    ],
+    [
+     [
+      0.7675,
+      1.7675
+     ],
+     [
+      0.4184,
+      1.4184
+     ],
+     [
+      -0.1979,
+      0.6021
+     ]
+    ],
+    [
+     [
+      0.6119,
+      1.6119
+     ],
+     [
+      -1.45,
+      -0.45
+     ],
+     [
+      0.8168,
+      1.6168
+     ]
+    ],
+    [
+     [
+      1.3857,
+      2.3857
+     ],
+     [
+      -1.0336,
+      -0.0336
+     ],
+     [
+      0.9726,
+      1.7726
+     ]
+    ]
+   ],
+   "validator_errors": [],
+   "min_strike_phase_gap": 0.01,
+   "face_sign_conflicts_on_overlapping_pos_boxes": [],
+   "clips_failing_verification": [],
+   "pairwise": [
+    {
+     "pair": [
+      "fh_loop",
+      "bh_loop_c"
+     ],
+     "pos_box_overlap_m3": 0.0,
+     "frac_of_smaller": 0.0,
+     "overlap_spans": {
+      "x": [
+       0.1266,
+       0.2426
+      ],
+      "y": null,
+      "z": [
+       1.2684,
+       1.5357
+      ]
+     },
+     "signs": [
+      1.0,
+      -1.0
+     ],
+     "families": [
+      "forehand",
+      "backhand"
+     ],
+     "strike_phase_gap": 0.1893,
+     "FACE_SIGN_CONFLICT_ON_OVERLAP": false
+    },
+    {
+     "pair": [
+      "fh_loop",
+      "bh_block"
+     ],
+     "pos_box_overlap_m3": 0.0,
+     "frac_of_smaller": 0.0,
+     "overlap_spans": {
+      "x": null,
+      "y": null,
+      "z": [
+       1.0867,
+       1.3115
+      ]
+     },
+     "signs": [
+      1.0,
+      -1.0
+     ],
+     "families": [
+      "forehand",
+      "backhand"
+     ],
+     "strike_phase_gap": 0.1794,
+     "FACE_SIGN_CONFLICT_ON_OVERLAP": false
+    },
+    {
+     "pair": [
+      "fh_loop",
+      "s0_highpress"
+     ],
+     "pos_box_overlap_m3": 0.0,
+     "frac_of_smaller": 0.0,
+     "overlap_spans": {
+      "x": null,
+      "y": null,
+      "z": [
+       1.1324,
+       1.423
+      ]
+     },
+     "signs": [
+      1.0,
+      -1.0
+     ],
+     "families": [
+      "forehand",
+      "backhand"
+     ],
+     "strike_phase_gap": 0.3822,
+     "FACE_SIGN_CONFLICT_ON_OVERLAP": false
+    },
+    {
+     "pair": [
+      "fh_loop",
+      "bh_loop_c_full"
+     ],
+     "pos_box_overlap_m3": 0.0,
+     "frac_of_smaller": 0.0,
+     "overlap_spans": {
+      "x": [
+       0.1843,
+       0.2426
+      ],
+      "y": null,
+      "z": [
+       1.2784,
+       1.5357
+      ]
+     },
+     "signs": [
+      1.0,
+      -1.0
+     ],
+     "families": [
+      "forehand",
+      "backhand"
+     ],
+     "strike_phase_gap": 0.1572,
+     "FACE_SIGN_CONFLICT_ON_OVERLAP": false
+    },
+    {
+     "pair": [
+      "bh_loop_c",
+      "bh_block"
+     ],
+     "pos_box_overlap_m3": 0.001141,
+     "frac_of_smaller": 0.0294,
+     "overlap_spans": {
+      "x": [
+       0.4259,
+       0.5359
+      ],
+      "y": [
+       0.2695,
+       0.5102
+      ],
+      "z": [
+       1.2684,
+       1.3115
+      ]
+     },
+     "signs": [
+      -1.0,
+      -1.0
+     ],
+     "families": [
+      "backhand",
+      "backhand"
+     ],
+     "strike_phase_gap": 0.01,
+     "FACE_SIGN_CONFLICT_ON_OVERLAP": false
+    },
+    {
+     "pair": [
+      "bh_loop_c",
+      "s0_highpress"
+     ],
+     "pos_box_overlap_m3": 0.002264,
+     "frac_of_smaller": 0.0616,
+     "overlap_spans": {
+      "x": [
+       0.2469,
+       0.5181
+      ],
+      "y": [
+       0.2695,
+       0.3235
+      ],
+      "z": [
+       1.2684,
+       1.423
+      ]
+     },
+     "signs": [
+      -1.0,
+      -1.0
+     ],
+     "families": [
+      "backhand",
+      "backhand"
+     ],
+     "strike_phase_gap": 0.1929,
+     "FACE_SIGN_CONFLICT_ON_OVERLAP": false
+    },
+    {
+     "pair": [
+      "bh_loop_c",
+      "bh_loop_c_full"
+     ],
+     "pos_box_overlap_m3": 0.051647,
+     "frac_of_smaller": 0.8762,
+     "overlap_spans": {
+      "x": [
+       0.1843,
+       0.5359
+      ],
+      "y": [
+       0.2695,
+       0.7009
+      ],
+      "z": [
+       1.2784,
+       1.6189
+      ]
+     },
+     "signs": [
+      -1.0,
+      -1.0
+     ],
+     "families": [
+      "backhand",
+      "backhand"
+     ],
+     "strike_phase_gap": 0.0321,
+     "FACE_SIGN_CONFLICT_ON_OVERLAP": false
+    },
+    {
+     "pair": [
+      "bh_block",
+      "s0_highpress"
+     ],
+     "pos_box_overlap_m3": 0.005319,
+     "frac_of_smaller": 0.1446,
+     "overlap_spans": {
+      "x": [
+       0.4259,
+       0.5181
+      ],
+      "y": [
+       0.0014,
+       0.3235
+      ],
+      "z": [
+       1.1324,
+       1.3115
+      ]
+     },
+     "signs": [
+      -1.0,
+      -1.0
+     ],
+     "families": [
+      "backhand",
+      "backhand"
+     ],
+     "strike_phase_gap": 0.2028,
+     "FACE_SIGN_CONFLICT_ON_OVERLAP": false
+    },
+    {
+     "pair": [
+      "bh_block",
+      "bh_loop_c_full"
+     ],
+     "pos_box_overlap_m3": 0.001238,
+     "frac_of_smaller": 0.0319,
+     "overlap_spans": {
+      "x": [
+       0.4259,
+       0.5722
+      ],
+      "y": [
+       0.2546,
+       0.5102
+      ],
+      "z": [
+       1.2784,
+       1.3115
+      ]
+     },
+     "signs": [
+      -1.0,
+      -1.0
+     ],
+     "families": [
+      "backhand",
+      "backhand"
+     ],
+     "strike_phase_gap": 0.0222,
+     "FACE_SIGN_CONFLICT_ON_OVERLAP": false
+    },
+    {
+     "pair": [
+      "s0_highpress",
+      "bh_loop_c_full"
+     ],
+     "pos_box_overlap_m3": 0.002702,
+     "frac_of_smaller": 0.0735,
+     "overlap_spans": {
+      "x": [
+       0.2469,
+       0.5181
+      ],
+      "y": [
+       0.2546,
+       0.3235
+      ],
+      "z": [
+       1.2784,
+       1.423
+      ]
+     },
+     "signs": [
+      -1.0,
+      -1.0
+     ],
+     "families": [
+      "backhand",
+      "backhand"
+     ],
+     "strike_phase_gap": 0.225,
+     "FACE_SIGN_CONFLICT_ON_OVERLAP": false
+    }
+   ]
+  }
+ },
+ "station_dependency": {
+  "note": "if the concurrent standing-distance workflow moves the station, re-run ONLY these steps, in order",
+  "invalidated_and_must_be_regenerated": [
+   "1. per-clip aim yaw (theta_total) -- derive_aim / aim_lib.solve_aim",
+   "2. the rotated npz and its sha256 (bind_five.py)",
+   "3. the phase scan, the anchor, strike_phase_per_clip (anchor_sweep.py)",
+   "4. racket_pos_range_per_clip / racket_vel_range_per_clip",
+   "5. the question bank (the ~50 min job) -- LAST, it depends on 1-4",
+   "6. the table-intrusion certificate"
+  ],
+  "NOT_invalidated": [
+   "build selection and source_sha256",
+   "T / fps / duration",
+   "clip_family_per_clip",
+   "mount_normal_sign_per_clip -- cos(n,v) is invariant under a world-Z rotation because n and v rotate together (verified to 4 dp on every candidate)"
+  ],
+  "consequence": "pin clip_family_per_clip + mount_normal_sign_per_clip as a station-independent artefact; a station move is a rotate -> scan -> bank re-run, not a rebuild."
+ }
+}
