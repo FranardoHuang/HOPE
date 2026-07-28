@@ -65,8 +65,8 @@ EVIDENCE_ROLES = (
     "frozen_canary",
     "frozen_heldout",
 )
-STATE_SCHEMA_VERSION = 6
-EVIDENCE_SCHEMA_VERSION = 2
+STATE_SCHEMA_VERSION = 7
+EVIDENCE_SCHEMA_VERSION = 3
 INT64_MAX = (1 << 63) - 1
 CANARY_MIN = 256
 HELDOUT_MIN = 768
@@ -203,6 +203,8 @@ class BallOutcomeLedger:
     U_fall: int
     U_collision: int
     X: int
+    NB: int = 0
+    NB_F: int = 0
 
     def __post_init__(self) -> None:
         for field in self.as_dict():
@@ -223,6 +225,14 @@ class BallOutcomeLedger:
             )
         if self.X > self.P:
             raise ValueError("X must not exceed proposed attempts P")
+        if self.NB > self.L + self.F:
+            raise ValueError(
+                "new-band safe-closed NB cannot exceed safe closures L + F"
+            )
+        if self.NB_F > self.NB or self.NB_F > self.F:
+            raise ValueError(
+                "new-band failures NB_F cannot exceed NB or total failures F"
+            )
 
     @property
     def safe_closed(self) -> int:
@@ -251,6 +261,8 @@ class BallOutcomeLedger:
                 "U_fall",
                 "U_collision",
                 "X",
+                "NB",
+                "NB_F",
             )
         }
 
@@ -400,6 +412,7 @@ class ArmSchedulerConfig:
     min_history: int = 20
     forced_every: int = 5
     max_gap_factor: int = 2
+    new_band_ring_size: int = 30
 
     def __post_init__(self) -> None:
         rolling = _plain_int(
@@ -414,6 +427,19 @@ class ArmSchedulerConfig:
             raise ValueError("min_history cannot exceed rolling_window")
         _plain_int(self.forced_every, name="forced_every", minimum=1)
         _plain_int(self.max_gap_factor, name="max_gap_factor", minimum=1)
+        ring = _plain_int(
+            self.new_band_ring_size,
+            name="new_band_ring_size",
+            minimum=1,
+        )
+        if ring != 30:
+            raise ValueError(
+                "new_band_ring_size is contractually fixed at 30"
+            )
+        if ring > rolling:
+            raise ValueError(
+                "new_band_ring_size cannot exceed rolling_window"
+            )
 
     def as_dict(self) -> Dict[str, int]:
         return {
@@ -421,13 +447,14 @@ class ArmSchedulerConfig:
             "min_history": self.min_history,
             "forced_every": self.forced_every,
             "max_gap_factor": self.max_gap_factor,
+            "new_band_ring_size": self.new_band_ring_size,
         }
 
     @property
     def contract_sha256(self) -> str:
         return _canonical_sha256(
             {
-                "schema_version": 1,
+                "schema_version": 2,
                 "kind": "action_ball_arm_scheduler",
                 "arm_catalog_sha256": ARM_CATALOG_SHA256,
                 "config": self.as_dict(),
@@ -441,6 +468,29 @@ class ArmSchedulerConfig:
                     ),
                     "objective": "minimize Wilson UCB of F/(L+F)",
                     "window": "latest 100 matching arm-epoch rows only",
+                },
+                "new_band_ring": {
+                    # Franco 2026-07-28 ruling: the whole-window failure rate
+                    # over a widened uniform range dilutes the newly added
+                    # band; marginal promotion must therefore be judged on a
+                    # dedicated per-(arm, candidate-level) ring of attempts
+                    # actually drawn inside the new band.
+                    "ring_size": 30,
+                    "membership": (
+                        "attempt drawn value inside the candidate-minus-"
+                        "frontier new band, closed, safe terminal (L or F), "
+                        "not infrastructure-invalid; newest ring_size rows "
+                        "of the matching arm-epoch strata"
+                    ),
+                    "promotion": (
+                        "marginal frontier changes require a full ring; the "
+                        "new-range failure rate and its Wilson interval are "
+                        "computed from exactly these ring rows"
+                    ),
+                    "incomplete": (
+                        "a ring below ring_size keeps collecting and is "
+                        "never a promotion failure"
+                    ),
                 },
                 "forced": (
                     "warmup minimum, periodic oldest, hard max-gap, "
@@ -728,6 +778,7 @@ _ATTEMPT_FIELDS = (
     "closed",
     "terminal_outcome",
     "infrastructure_invalid",
+    "in_new_band",
 )
 _TERMINALS = (
     "legal_return",
@@ -736,6 +787,18 @@ _TERMINALS = (
     "fall",
     "collision",
 )
+_RING_SAFE_TERMINALS = ("legal_return", "safe_nonreturn")
+
+
+def _ring_eligible(row: Mapping[str, object]) -> bool:
+    """One new-band ring member: drawn in the new band and safely closed."""
+
+    return bool(
+        row["in_new_band"]
+        and row["closed"]
+        and not row["infrastructure_invalid"]
+        and row["terminal_outcome"] in _RING_SAFE_TERMINALS
+    )
 
 
 def _validated_attempt_row(value: object, *, name: str) -> Dict[str, object]:
@@ -755,6 +818,7 @@ def _validated_attempt_row(value: object, *, name: str) -> Dict[str, object]:
         "started",
         "closed",
         "infrastructure_invalid",
+        "in_new_band",
     ):
         if type(row[field]) is not bool:
             raise ValueError(f"{name}.{field} must be bool")
@@ -784,10 +848,16 @@ def _ledger_from_attempt_rows(
     attempts: Sequence[Mapping[str, object]],
 ) -> BallOutcomeLedger:
     terminals = {name: 0 for name in _TERMINALS}
+    new_band = 0
+    new_band_failures = 0
     for attempt in attempts:
         terminal = attempt["terminal_outcome"]
         if terminal is not None:
             terminals[terminal] += 1
+        if _ring_eligible(attempt):
+            new_band += 1
+            if terminal == "safe_nonreturn":
+                new_band_failures += 1
     return BallOutcomeLedger(
         P=len(attempts),
         A=sum(bool(item["solver_admitted"]) for item in attempts),
@@ -802,6 +872,8 @@ def _ledger_from_attempt_rows(
         X=sum(
             bool(item["infrastructure_invalid"]) for item in attempts
         ),
+        NB=new_band,
+        NB_F=new_band_failures,
     )
 
 
@@ -1408,6 +1480,36 @@ class ActionBallCurriculum:
         rows = rows[-self._scheduler_config.rolling_window :]
         return _ledger_from_attempt_rows(rows)
 
+    def _new_band_ring_rows(
+        self, progress: _Progress, arm_index: int
+    ) -> Tuple[Mapping[str, object], ...]:
+        """Newest ring-size new-band safe-closed rows for the arm candidate.
+
+        The ring is a pure function of the retained scheduler receipts, so it
+        rides the existing deterministic checkpoint replay: the persisted
+        attempt rows (which now declare ``in_new_band``) are the ring state,
+        and every contributing window is identified by its window SHA.
+        """
+
+        arm = ARM_KEYS[arm_index]
+        stratum = f"marginal:{arm}"
+        epoch = progress.arm_epochs[arm_index]
+        level = LEVELS[progress.arm_probe_indices[arm_index]]
+        rows = []
+        for receipt in progress.scheduler_receipts:
+            evidence = receipt.evidence
+            if (
+                evidence.stratum == stratum
+                and evidence.domain_epoch == epoch
+                and evidence.arm_levels[arm_index] == level
+            ):
+                for row in receipt.attempts:
+                    if _ring_eligible(row):
+                        rows.append(row)
+        return tuple(
+            rows[-self._scheduler_config.new_band_ring_size :]
+        )
+
     def _scheduler_eligible(
         self, ledger: BallOutcomeLedger
     ) -> bool:
@@ -1746,20 +1848,47 @@ class ActionBallCurriculum:
             probes = list(progress.arm_probe_indices)
             epochs = list(progress.arm_epochs)
             candidate = probes[index]
-            if quality_bad or too_hard:
+            # Franco 2026-07-28 ruling: the new-range verdict for one
+            # (arm, candidate-level) promotion is computed from the
+            # dedicated new-band ring, never from the diluted whole-window
+            # failure rate.  An unfilled ring keeps collecting and is not a
+            # promotion failure.
+            ring_rows = self._new_band_ring_rows(progress, index)
+            ring_size = self._scheduler_config.new_band_ring_size
+            if quality_bad:
                 statuses[index] = "decided"
                 kind = "bound_marginal"
+            elif len(ring_rows) < ring_size:
+                kind = "new_band_ring_incomplete"
             else:
-                certified = True
-                frontiers[index] = candidate
-                progress.last_certified = self._certificate(evidence)
-                if too_easy and candidate < len(LEVELS) - 1:
-                    probes[index] += 1
-                    epochs[index] += 1
-                    kind = "expand_marginal"
-                else:
+                ring_failures = sum(
+                    1
+                    for row in ring_rows
+                    if row["terminal_outcome"] == "safe_nonreturn"
+                )
+                ring_failure = wilson_interval(
+                    ring_failures,
+                    ring_size,
+                    z=self._config.confidence_z,
+                )
+                band_low, band_high = self._config.failure_band
+                if ring_failure.lower > band_high:
                     statuses[index] = "decided"
-                    kind = "lock_marginal"
+                    kind = "bound_marginal"
+                else:
+                    certified = True
+                    frontiers[index] = candidate
+                    progress.last_certified = self._certificate(evidence)
+                    if (
+                        ring_failure.upper < band_low
+                        and candidate < len(LEVELS) - 1
+                    ):
+                        probes[index] += 1
+                        epochs[index] += 1
+                        kind = "expand_marginal"
+                    else:
+                        statuses[index] = "decided"
+                        kind = "lock_marginal"
             progress.arm_frontier_indices = tuple(frontiers)
             progress.arm_status = tuple(statuses)
             progress.arm_probe_indices = tuple(probes)

@@ -55,7 +55,7 @@ def _key(action_uid=1, mobility="move", profile_char="f"):
     )
 
 
-def _system(keys=None, *, scheduler_config=None):
+def _system(keys=None, *, scheduler_config=None, config=None):
     keys = (_key(),) if keys is None else tuple(keys)
     scheduler_config = scheduler_config or C.ArmSchedulerConfig()
     launch = E.launch_receipt_document(
@@ -84,7 +84,7 @@ def _system(keys=None, *, scheduler_config=None):
         sampler_sha256=SAMPLER,
         solver_sha256=SOLVER,
         policy_contract_sha256=POLICY,
-        config=C.BallCurriculumConfig(),
+        config=config or C.BallCurriculumConfig(),
         scheduler_config=scheduler_config,
         evaluator_authority=authority,
     )
@@ -118,6 +118,7 @@ class EvidenceFactory:
         table_hits=0,
         other_unsafe=0,
         duplicate_birth=False,
+        new_band=0,
     ):
         if domain is None:
             if role == "scheduler":
@@ -170,6 +171,7 @@ class EvidenceFactory:
                     closed=admitted,
                     terminal_outcome=terminal,
                     infrastructure_invalid=False,
+                    in_new_band=index < new_band,
                 )
             )
         self.seq += 1
@@ -197,6 +199,58 @@ class EvidenceFactory:
             1 if duplicate_birth else count
         )
         return capability
+
+
+def _ring_len(curriculum, key, arm):
+    progress = curriculum._progress[key]
+    return len(
+        curriculum._new_band_ring_rows(progress, C.ARM_KEYS.index(arm))
+    )
+
+
+def _ring_failures(curriculum, key, arm):
+    progress = curriculum._progress[key]
+    rows = curriculum._new_band_ring_rows(
+        progress, C.ARM_KEYS.index(arm)
+    )
+    return sum(
+        1
+        for row in rows
+        if row["terminal_outcome"] == "safe_nonreturn"
+    )
+
+
+def _fill_ring(curriculum, authority, factory, key, *, ring_failures=0):
+    """Feed scheduler windows until the selected arm's ring is full with the
+    requested failure count.
+
+    Each window carries exactly ring-size new-band safe-closed rows, and the
+    ring keeps only the newest ring-size rows, so one window per arm decides
+    that arm's ring content; the loop ends when the currently selected arm
+    matches the request.
+    """
+
+    ring_size = curriculum.scheduler_config.new_band_ring_size
+    for _ in range(6 * len(C.ARM_KEYS)):
+        arm = curriculum.selected_arm(key)
+        assert arm
+        if (
+            _ring_len(curriculum, key, arm) >= ring_size
+            and _ring_failures(curriculum, key, arm) == ring_failures
+        ):
+            return arm
+        capability = factory.issue(
+            curriculum,
+            authority,
+            key,
+            role="scheduler",
+            count=ring_size,
+            stratum=f"marginal:{arm}",
+            failures=ring_failures,
+            new_band=ring_size,
+        )
+        curriculum.observe_scheduler({key: capability})
+    raise AssertionError("selected arm ring never filled")
 
 
 def _certify(
@@ -241,6 +295,13 @@ def _completed_no_move_state():
     factory = EvidenceFactory()
     _certify(curriculum, authority, factory, key)
     while curriculum.phase(key) == "marginal":
+        _fill_ring(
+            curriculum,
+            authority,
+            factory,
+            key,
+            ring_failures=3,
+        )
         _certify(
             curriculum,
             authority,
@@ -307,6 +368,17 @@ def _synthesize_completed_state(template_state, keys):
     progress_rows = []
     global_seq = 0
 
+    template_events = sorted(
+        [
+            ("formal", receipt)
+            for receipt in template_progress["formal_receipts"]
+        ]
+        + [
+            ("scheduler", receipt)
+            for receipt in template_progress["scheduler_receipts"]
+        ],
+        key=lambda item: item[1]["evidence"]["seq"],
+    )
     for key in keys:
         progress = deepcopy(template_progress)
         progress["key"] = key.as_dict()
@@ -315,7 +387,7 @@ def _synthesize_completed_state(template_state, keys):
         progress["pending_canary_window_sha256"] = None
         event_chain = "0" * 64
         last_certified = None
-        for template_receipt in template_progress["formal_receipts"]:
+        for event_kind, template_receipt in template_events:
             global_seq += 1
             template_evidence = template_receipt["evidence"]
             window_id = (
@@ -330,18 +402,32 @@ def _synthesize_completed_state(template_state, keys):
                 window_id=window_id,
             )
             evidence_document = evidence._hash_document()
-            progress["formal_receipts"].append(
-                {
-                    "evidence": deepcopy(evidence_document),
-                    "window_sha256": evidence.window_sha256,
-                    "certified": template_receipt["certified"],
-                }
-            )
+            if event_kind == "formal":
+                progress["formal_receipts"].append(
+                    {
+                        "evidence": deepcopy(evidence_document),
+                        "window_sha256": evidence.window_sha256,
+                        "certified": template_receipt["certified"],
+                    }
+                )
+                if template_receipt["certified"]:
+                    last_certified = curriculum._certificate(evidence)
+                attempt_storage = "formal_compact"
+                ordered_attempts = None
+            else:
+                attempts = deepcopy(template_receipt["attempts"])
+                progress["scheduler_receipts"].append(
+                    {
+                        "evidence": deepcopy(evidence_document),
+                        "window_sha256": evidence.window_sha256,
+                        "attempts": attempts,
+                    }
+                )
+                attempt_storage = "full"
+                ordered_attempts = deepcopy(attempts)
             event_chain = hashlib.sha256(
                 (event_chain + evidence.window_sha256).encode("ascii")
             ).hexdigest()
-            if template_receipt["certified"]:
-                last_certified = curriculum._certificate(evidence)
             capability_id = E._canonical_sha256(
                 {
                     "state_owner_sha256": state_owner,
@@ -360,8 +446,8 @@ def _synthesize_completed_state(template_state, keys):
                     "capability_id": capability_id,
                     "evidence": deepcopy(evidence_document),
                     "window_sha256": evidence.window_sha256,
-                    "attempt_storage": "formal_compact",
-                    "ordered_attempts": None,
+                    "attempt_storage": attempt_storage,
+                    "ordered_attempts": ordered_attempts,
                 }
             )
         progress["event_hash_chain_sha256"] = event_chain
@@ -442,6 +528,11 @@ def test_manifest_config_stays_separate_from_code_frozen_scheduler_and_heldout()
     assert C.ArmSchedulerConfig().rolling_window == 100
     with pytest.raises(ValueError, match="fixed at 100"):
         C.ArmSchedulerConfig(rolling_window=99)
+    scheduler = C.ArmSchedulerConfig()
+    assert scheduler.new_band_ring_size == 30
+    assert scheduler.as_dict()["new_band_ring_size"] == 30
+    with pytest.raises(ValueError, match="fixed at 30"):
+        C.ArmSchedulerConfig(new_band_ring_size=29)
 
 
 def test_public_evidence_is_diagnostic_and_canary_alone_cannot_advance():
@@ -557,31 +648,114 @@ def test_heldout_requires_matching_canary_and_fixed_256_768_floors():
 
 
 def test_center_then_signed_marginals_expand_independently():
+    # Band [0.15, 0.45]: a clean 30-row ring (UCB ~0.11) is provably easy,
+    # while 9/30 ring failures sit inside the band and lock the arm.
+    wide = C.BallCurriculumConfig(
+        target_failure_rate=0.3,
+        failure_band_half_width=0.15,
+    )
     key = _key()
-    curriculum, authority = _system((key,))
+    curriculum, authority = _system((key,), config=wide)
     factory = EvidenceFactory()
     _, center = _certify(curriculum, authority, factory, key)
     assert center.kind == "center_pass"
     assert curriculum.phase(key) == "marginal"
     assert curriculum.selected_arm(key) == "time_to_contact_lower"
 
+    lower_arm = _fill_ring(
+        curriculum, authority, factory, key, ring_failures=0
+    )
     canary, lower = _certify(curriculum, authority, factory, key)
     assert canary.kind == "canary_pass"
     assert lower.kind == "expand_marginal"
-    assert curriculum.frontiers(key)["time_to_contact_lower"] == 0.25
-    assert curriculum.frontiers(key)["time_to_contact_upper"] == 0.0
-    assert curriculum.selected_arm(key) == "time_to_contact_upper"
+    assert curriculum.frontiers(key)[lower_arm] == 0.25
 
+    upper_arm = _fill_ring(
+        curriculum, authority, factory, key, ring_failures=9
+    )
+    assert upper_arm != lower_arm or (
+        # An expanded arm re-probes at the next level with an empty ring.
+        curriculum.frontiers(key)[upper_arm] == 0.25
+    )
     _, upper = _certify(
         curriculum,
         authority,
         factory,
         key,
-        failures=77,
+        failures=230,
     )
     assert upper.kind == "lock_marginal"
-    assert curriculum.frontiers(key)["time_to_contact_upper"] == 0.25
-    assert curriculum.frontiers(key)["incoming_direction_u_neg"] == 0.0
+    assert curriculum.frontiers(key)[upper_arm] in (0.25, 0.5)
+
+
+def test_marginal_promotion_requires_full_new_band_ring():
+    key = _key()
+    curriculum, authority = _system((key,))
+    factory = EvidenceFactory()
+    _certify(curriculum, authority, factory, key)
+    assert curriculum.phase(key) == "marginal"
+    arm = curriculum.selected_arm(key)
+    before = curriculum.frontiers(key)
+
+    # 29 < 30 ring rows: the heldout must hold the arm open, not bound it.
+    capability = factory.issue(
+        curriculum,
+        authority,
+        key,
+        role="scheduler",
+        count=30,
+        stratum=f"marginal:{arm}",
+        failures=0,
+        new_band=29,
+    )
+    curriculum.observe_scheduler({key: capability})
+    for _ in range(4 * len(C.ARM_KEYS)):
+        if curriculum.selected_arm(key) == arm:
+            break
+        other = curriculum.selected_arm(key)
+        other_window = factory.issue(
+            curriculum,
+            authority,
+            key,
+            role="scheduler",
+            count=30,
+            stratum=f"marginal:{other}",
+            failures=0,
+            new_band=0,
+        )
+        curriculum.observe_scheduler({key: other_window})
+    assert curriculum.selected_arm(key) == arm
+    assert _ring_len(curriculum, key, arm) == 29
+    _, decision = _certify(curriculum, authority, factory, key)
+    assert decision.kind == "new_band_ring_incomplete"
+    assert curriculum.frontiers(key) == before
+    progress = curriculum._progress[key]
+    assert progress.arm_status[C.ARM_KEYS.index(arm)] == "probing"
+
+
+def test_marginal_ring_failure_rate_binds_and_uses_exactly_30_rows():
+    key = _key()
+    curriculum, authority = _system((key,))
+    factory = EvidenceFactory()
+    _certify(curriculum, authority, factory, key)
+    arm = _fill_ring(
+        curriculum, authority, factory, key, ring_failures=8
+    )
+    # 8/30 new-band failures: Wilson LCB > 0.125 at z=1.96 with the default
+    # [0.075, 0.125] band, so the candidate is provably too hard even though
+    # the heldout window failure rate (77/768 ~ 10%) sits inside the band.
+    ring_lcb = C.wilson_interval(8, 30, z=1.96).lower
+    assert ring_lcb > 0.125
+    before = curriculum.frontiers(key)
+    _, decision = _certify(
+        curriculum, authority, factory, key, failures=77
+    )
+    assert decision.kind == "bound_marginal"
+    assert curriculum.frontiers(key) == before
+    assert (
+        curriculum._progress[key].arm_status[C.ARM_KEYS.index(arm)]
+        == "decided"
+    )
 
 
 def test_no_move_never_schedules_or_certifies_base_travel():
@@ -607,7 +781,14 @@ def test_all_enabled_marginals_reach_joint_then_steady_without_shadow_axis():
     _certify(curriculum, authority, factory, key)
     visited = []
     while curriculum.phase(key) == "marginal":
-        arm = curriculum.selected_arm(key)
+        arm = _fill_ring(
+            curriculum,
+            authority,
+            factory,
+            key,
+            ring_failures=3,
+        )
+        assert arm == curriculum.selected_arm(key)
         assert arm and arm not in visited
         visited.append(arm)
         _certify(
@@ -617,7 +798,7 @@ def test_all_enabled_marginals_reach_joint_then_steady_without_shadow_axis():
             key,
             failures=77,
         )
-    assert tuple(visited) == key.enabled_arms
+    assert sorted(visited) == sorted(key.enabled_arms)
     assert curriculum.phase(key) == "joint"
     joint = curriculum.selected_formal_domain(key)
     assert joint is not None
@@ -867,15 +1048,27 @@ def test_compact_full_course_n1_and_n93_size_and_latency_gates():
         separators=(",", ":"),
     ).encode("ascii")
     consumed = template_state["evaluator_authority_state"]["consumed"]
-    assert len(consumed) == 60
-    assert all(
-        row["attempt_storage"] == "formal_compact"
-        and row["ordered_attempts"] is None
+    formal_rows = [
+        row
         for row in consumed
+        if row["attempt_storage"] == "formal_compact"
+    ]
+    scheduler_rows = [
+        row for row in consumed if row["attempt_storage"] == "full"
+    ]
+    assert len(formal_rows) == 60
+    assert all(
+        row["ordered_attempts"] is None for row in formal_rows
     )
-    assert len(template_raw) < 512 * 1024
+    # Franco 2026-07-28 new-band ring: scheduler windows retain their exact
+    # attempt rows (the ring state), one full 30-row window per enabled arm.
+    assert len(scheduler_rows) == 28
+    assert all(
+        len(row["ordered_attempts"]) == 30 for row in scheduler_rows
+    )
+    assert len(template_raw) < 2 * 1024 * 1024
     projected_n93_bytes = len(template_raw) * 93
-    assert projected_n93_bytes < 24 * 1024 * 1024
+    assert projected_n93_bytes < 128 * 1024 * 1024
 
     keys = tuple(
         _key(
@@ -893,7 +1086,7 @@ def test_compact_full_course_n1_and_n93_size_and_latency_gates():
         separators=(",", ":"),
     ).encode("ascii")
     encode_seconds = time.perf_counter() - encode_started
-    assert len(raw) < 24 * 1024 * 1024
+    assert len(raw) < 128 * 1024 * 1024
     assert len(raw) <= projected_n93_bytes
     assert encode_seconds < 5.0
 

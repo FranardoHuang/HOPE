@@ -81,6 +81,7 @@ def _attempts(
     birth_offset,
     duplicate_birth=False,
     failures=0,
+    new_band=0,
 ):
     return tuple(
         authority.record_attempt(
@@ -96,6 +97,7 @@ def _attempts(
             terminal_outcome=(
                 "safe_nonreturn" if index < failures else "legal_return"
             ),
+            in_new_band=index < new_band,
         )
         for index in range(count)
     )
@@ -112,6 +114,7 @@ def _issue(
     window_id="window-1",
     duplicate_birth=False,
     failures=0,
+    new_band=0,
 ):
     return authority.issue_window(
         key=KEY,
@@ -137,6 +140,7 @@ def _issue(
             birth_offset=birth_offset,
             duplicate_birth=duplicate_birth,
             failures=failures,
+            new_band=new_band,
         ),
     )
 
@@ -199,6 +203,7 @@ def test_diagnostic_authority_cannot_record_issue_or_bind():
             started=True,
             closed=True,
             terminal_outcome="legal_return",
+            in_new_band=False,
         )
     with pytest.raises(E.FrozenEvaluationAuthorityError, match="cannot issue"):
         authority.issue_window(
@@ -377,6 +382,7 @@ def test_same_action_receipts_ranges_and_frozen_births_are_disjoint():
             started=True,
             closed=True,
             terminal_outcome="legal_return",
+            in_new_band=False,
         )
         for index in range(768)
     )
@@ -516,3 +522,22 @@ def test_rehashed_attempt_tamper_and_legacy_state_fail_closed():
         match="unsupported",
     ):
         authority.load_state_dict(legacy)
+
+
+def test_ledger_conserves_new_band_ring_counts():
+    authority = _authority()
+    capability = _issue(authority, failures=26, new_band=40)
+    ledger = capability.ledger
+    assert ledger.NB == 40
+    assert ledger.NB_F == 26
+    rows = authority.attempt_rows_many({KEY: capability})[KEY]
+    assert all("in_new_band" in row for row in rows)
+    assert sum(bool(row["in_new_band"]) for row in rows) == 40
+    with pytest.raises(ValueError, match="NB cannot exceed"):
+        C.BallOutcomeLedger(
+            1, 1, 1, 1, 1, 1, 0, 0, 0, 0, 0, NB=2, NB_F=0
+        )
+    with pytest.raises(ValueError, match="NB_F cannot exceed"):
+        C.BallOutcomeLedger(
+            2, 2, 2, 2, 2, 1, 1, 0, 0, 0, 0, NB=0, NB_F=1
+        )

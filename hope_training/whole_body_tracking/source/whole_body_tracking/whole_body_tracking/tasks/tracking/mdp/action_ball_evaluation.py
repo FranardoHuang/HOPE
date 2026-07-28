@@ -34,7 +34,7 @@ except ImportError:  # Dependency-light direct-file tests.
 
 
 SCHEMA_VERSION = 3
-STATE_SCHEMA_VERSION = 3
+STATE_SCHEMA_VERSION = 4
 INT64_MAX = (1 << 63) - 1
 _MINT_SENTINEL = object()
 _FORMAL_SENTINEL = object()
@@ -189,6 +189,11 @@ _AUTHORITY_CONTRACT_DOCUMENT = {
         "completed formal windows retain canonical aggregate evidence and "
         "capability hash-chain events without duplicating attempt rows"
     ),
+    "new_band": (
+        "every attempt declares whether its drawn value fell inside the "
+        "candidate-minus-frontier new band; ledgers conserve the safe-closed "
+        "new-band count NB and its failures NB_F (Franco 2026-07-28 ring)"
+    ),
 }
 FROZEN_EVALUATOR_AUTHORITY_CONTRACT_SHA256 = _canonical_sha256(
     _AUTHORITY_CONTRACT_DOCUMENT
@@ -276,6 +281,7 @@ class _AttemptData:
     closed: bool
     terminal_outcome: str | None
     infrastructure_invalid: bool
+    in_new_band: bool
 
     def __post_init__(self) -> None:
         _sha256(self.sample_receipt_sha256, name="sample_receipt_sha256")
@@ -286,6 +292,7 @@ class _AttemptData:
             "started",
             "closed",
             "infrastructure_invalid",
+            "in_new_band",
         ):
             if type(getattr(self, field)) is not bool:
                 raise ValueError(f"{field} must be bool")
@@ -314,6 +321,7 @@ class _AttemptData:
             "closed": self.closed,
             "terminal_outcome": self.terminal_outcome,
             "infrastructure_invalid": self.infrastructure_invalid,
+            "in_new_band": self.in_new_band,
         }
 
 
@@ -353,9 +361,21 @@ def _ledger_from_attempts(
     attempts: Sequence[_AttemptData],
 ) -> BallOutcomeLedger:
     terminal = {name: 0 for name in TERMINAL_OUTCOMES}
+    new_band = 0
+    new_band_failures = 0
     for attempt in attempts:
         if attempt.terminal_outcome is not None:
             terminal[attempt.terminal_outcome] += 1
+        if (
+            attempt.in_new_band
+            and attempt.closed
+            and not attempt.infrastructure_invalid
+            and attempt.terminal_outcome
+            in ("legal_return", "safe_nonreturn")
+        ):
+            new_band += 1
+            if attempt.terminal_outcome == "safe_nonreturn":
+                new_band_failures += 1
     return BallOutcomeLedger(
         P=len(attempts),
         A=sum(item.solver_admitted for item in attempts),
@@ -368,6 +388,8 @@ def _ledger_from_attempts(
         U_fall=terminal["fall"],
         U_collision=terminal["collision"],
         X=sum(item.infrastructure_invalid for item in attempts),
+        NB=new_band,
+        NB_F=new_band_failures,
     )
 
 
@@ -752,6 +774,7 @@ class FrozenEvaluatorAuthority:
         started: bool,
         closed: bool,
         terminal_outcome: str | None,
+        in_new_band: bool,
         infrastructure_invalid: bool = False,
     ) -> FrozenAttemptReceipt:
         if not self._formal:
@@ -767,6 +790,7 @@ class FrozenEvaluatorAuthority:
             closed=closed,
             terminal_outcome=terminal_outcome,
             infrastructure_invalid=infrastructure_invalid,
+            in_new_band=in_new_band,
         )
         return FrozenAttemptReceipt(_MINT_SENTINEL, self, self._lifetime, data)
 
@@ -1366,6 +1390,8 @@ class FrozenEvaluatorAuthority:
                     "U_fall",
                     "U_collision",
                     "X",
+                    "NB",
+                    "NB_F",
                 ),
                 name=f"{name}[{index}].evidence.ledger",
             )
@@ -1454,6 +1480,7 @@ class FrozenEvaluatorAuthority:
                             "closed",
                             "terminal_outcome",
                             "infrastructure_invalid",
+                            "in_new_band",
                         ),
                         name=(
                             f"{name}[{index}].attempt[{attempt_index}]"
