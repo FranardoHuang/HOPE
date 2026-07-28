@@ -4312,6 +4312,8 @@ def _validate_action_ball_evaluator_launch_receipt(
             "authority_contract_sha256",
             "curriculum_contract_sha256",
             "profile_order",
+            "arm_catalog_sha256",
+            "scheduler_contract_sha256",
             "sampler_sha256",
             "solver_sha256",
             "policy_contract_sha256",
@@ -4321,16 +4323,24 @@ def _validate_action_ball_evaluator_launch_receipt(
         ),
         name="action-ball frozen evaluator launch receipt",
     )
-    if type(row["schema_version"]) is not int or row["schema_version"] != 1:
-        raise RuntimeError(
-            "action-ball frozen evaluator launch schema_version must be 1"
-        )
-    if row["kind"] != "action_ball_frozen_evaluator_launch":
-        raise RuntimeError("action-ball frozen evaluator launch kind drifted")
 
+    from whole_body_tracking.tasks.tracking.mdp import (
+        action_ball_curriculum as curriculum_module,
+    )
     from whole_body_tracking.tasks.tracking.mdp import (
         action_ball_evaluation as evaluator_module,
     )
+
+    if (
+        type(row["schema_version"]) is not int
+        or row["schema_version"] != evaluator_module.SCHEMA_VERSION
+    ):
+        raise RuntimeError(
+            "action-ball frozen evaluator launch schema_version must equal "
+            f"the executable evaluator schema {evaluator_module.SCHEMA_VERSION}"
+        )
+    if row["kind"] != "action_ball_frozen_evaluator_launch":
+        raise RuntimeError("action-ball frozen evaluator launch kind drifted")
 
     authority_sha256 = _action_ball_sha256(
         row["authority_contract_sha256"],
@@ -4371,6 +4381,10 @@ def _validate_action_ball_evaluator_launch_receipt(
 
     expected_pins = {
         "curriculum_contract_sha256": preflight["profile_adapter"]["sha256"],
+        "arm_catalog_sha256": curriculum_module.ARM_CATALOG_SHA256,
+        "scheduler_contract_sha256": (
+            curriculum_module.ArmSchedulerConfig().contract_sha256
+        ),
         "sampler_sha256": preflight["sampler"]["contract_sha256"],
         "solver_sha256": solver_sha256,
         "policy_contract_sha256": preflight["policy_contract_sha256"],

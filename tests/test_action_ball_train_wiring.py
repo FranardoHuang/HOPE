@@ -288,6 +288,7 @@ def _install_real_evaluator_module(monkeypatch):
     root.tasks = tasks
     tasks.tracking = tracking
     tracking.mdp = mdp
+    mdp.action_ball_curriculum = curriculum
     mdp.action_ball_evaluation = evaluator
     for name, module in (
         ("whole_body_tracking", root),
@@ -1159,6 +1160,10 @@ def _evaluator_launch_fixture(
     launch = evaluator.launch_receipt_document(
         curriculum_contract_sha256=preflight["profile_adapter"]["sha256"],
         profile_order=profiles,
+        arm_catalog_sha256=curriculum.ARM_CATALOG_SHA256,
+        scheduler_contract_sha256=(
+            curriculum.ArmSchedulerConfig().contract_sha256
+        ),
         sampler_sha256=preflight["sampler"]["contract_sha256"],
         solver_sha256=preflight["solver_profile_sha256"],
         policy_contract_sha256=preflight["policy_contract_sha256"],
