@@ -6418,6 +6418,13 @@ def _expand_reward_pack(env_cfg, task, rw, applied):
     R = getattr(env_cfg, "rewards", None)
     _require(R is not None, "rewards (reward_pack=v2)")
     for name, weight in _REWARD_PACK_V2_DIRECT:
+        if float(weight) == 0.0 and getattr(R, name, None) is None:
+            # 退役零标记:该谱系的 cfg 类根本不长这项(如 action_ball 无 virtual_pass_net)。
+            # 零权重的缺席不改变收入结构,记账跳过;非零项缺席仍在下方 fail-loud。
+            applied.append(
+                f"rewards.{name} ABSENT retired-zero -> skipped (reward_pack=v2)"
+            )
+            continue
         _require(
             hasattr(R, name) and getattr(R, name) is not None,
             f"rewards.{name} (reward_pack=v2)",
