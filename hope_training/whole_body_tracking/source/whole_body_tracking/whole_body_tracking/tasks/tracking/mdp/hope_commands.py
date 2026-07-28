@@ -852,6 +852,14 @@ def action_ball_solver_profile_contract(
                 "predicate": "finite_positive_x_crossing_and_ball_center_z_strictly_above_top",
                 "ball_center_net_top_z_m": float(net_top_z),
             },
+            "incoming_birth": {
+                "predicate": (
+                    "contact_x_w_plus_abs_v_in_x_times_ttc_linear_lower_"
+                    "bound_at_or_beyond_net_plane_plus_margin"
+                ),
+                "net_margin_m": 0.05,
+                "rejection_reason": "ball_birth_not_beyond_net",
+            },
             "solver_rejection_is_policy_attempt": False,
             "internal_sampling_or_redraw": False,
             "ordered_rejection_reason_schema": [
@@ -866,6 +874,7 @@ def action_ball_solver_profile_contract(
                 "teacher_rate_out_of_bounds",
                 "pre_swing_wait_out_of_bounds",
                 "cycle_exceeds_episode_horizon",
+                "ball_birth_not_beyond_net",
             ],
         },
     }
@@ -5067,6 +5076,8 @@ class RacketTargetCommand(CommandTerm):
             derive_action_teacher_timing,
         )
         from whole_body_tracking.tasks.tracking.mdp.continuous_questions import (
+            BALL_BIRTH_NET_MARGIN_M,
+            ball_birth_x_lower_bound_m,
             solve_proposals,
         )
 
@@ -5242,7 +5253,19 @@ class RacketTargetCommand(CommandTerm):
                     required_speed
                     / float(profile.reference_racket_site_speed_mps)
                 )
-                if not (
+                birth_x_lower_bound_m = ball_birth_x_lower_bound_m(
+                    float(flat_samples[index].contact_w_m[0]),
+                    float(
+                        flat_samples[index].incoming_velocity_w_mps[0]
+                    ),
+                    float(flat_samples[index].time_to_contact_s),
+                )
+                if birth_x_lower_bound_m < (
+                    net_x + BALL_BIRTH_NET_MARGIN_M
+                ):
+                    # 球出生在半路:反推出生点连网平面都过不了,不是对面来球。
+                    timing_reason = "ball_birth_not_beyond_net"
+                elif not (
                     float(profile.teacher_rate_min)
                     <= teacher_rate
                     <= float(profile.teacher_rate_max)

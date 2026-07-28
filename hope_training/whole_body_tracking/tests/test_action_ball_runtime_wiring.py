@@ -314,12 +314,21 @@ def test_solver_profile_hashes_executable_speed_face_and_contact_fit_contract():
         "maximum_mps_inclusive": 7.2,
         "rejection_reason": "contact_normal_speed_out_of_fit",
     }
-    assert acceptance["ordered_rejection_reason_schema"][-4:] == [
+    assert acceptance["ordered_rejection_reason_schema"][-5:] == [
         "contact_normal_speed_out_of_fit",
         "teacher_rate_out_of_bounds",
         "pre_swing_wait_out_of_bounds",
         "cycle_exceeds_episode_horizon",
+        "ball_birth_not_beyond_net",
     ]
+    assert acceptance["incoming_birth"] == {
+        "predicate": (
+            "contact_x_w_plus_abs_v_in_x_times_ttc_linear_lower_"
+            "bound_at_or_beyond_net_plane_plus_margin"
+        ),
+        "net_margin_m": 0.05,
+        "rejection_reason": "ball_birth_not_beyond_net",
+    }
     assert contract["payload"]["batch_semantics"] == {
         "row_separable": True,
         "required_parity": (
@@ -1167,10 +1176,11 @@ def test_proposal_assignment_replay_covers_rejected_rows_and_old_births(
 
 
 @pytest.mark.parametrize(
-    ("solver_speed", "receipts_per_birth", "timing_reason"),
+    ("solver_speed", "receipts_per_birth", "timing_reason", "sample_v_in_x"),
     (
-        (1.0, 1, None),
-        (2.0, 0, "teacher_rate_out_of_bounds"),
+        (1.0, 1, None, -5.0),
+        (2.0, 0, "teacher_rate_out_of_bounds", -5.0),
+        (1.0, 0, "ball_birth_not_beyond_net", -1.0),
     ),
 )
 def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
@@ -1178,6 +1188,7 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
     solver_speed,
     receipts_per_birth,
     timing_reason,
+    sample_v_in_x,
 ):
     refill_many = _method("_action_ball_refill_pool_many")
     namespace = {
@@ -1310,6 +1321,11 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
         )
 
     solver_module.solve_proposals = solve_proposals
+    solver_module.BALL_BIRTH_NET_MARGIN_M = 0.05
+    solver_module.ball_birth_x_lower_bound_m = (
+        lambda contact_x, v_in_x, ttc: float(contact_x)
+        + abs(float(v_in_x)) * float(ttc)
+    )
     monkeypatch.setitem(sys.modules, runtime_module.__name__, runtime_module)
     monkeypatch.setitem(sys.modules, solver_module.__name__, solver_module)
 
@@ -1333,7 +1349,7 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
                 time_to_contact_s=0.5,
                 incoming_speed_mps=1.0,
                 incoming_direction_b_yaw=(-1.0, 0.0, 0.0),
-                incoming_velocity_w_mps=(-1.0, 0.0, 0.0),
+                incoming_velocity_w_mps=(sample_v_in_x, 0.0, 0.0),
                 spin_magnitude_radps=0.0,
                 spin_direction_b_yaw=(1.0, 0.0, 0.0),
                 spin_w_radps=(0.0, 0.0, 0.0),
@@ -1368,6 +1384,7 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
                             "teacher_rate_out_of_bounds",
                             "pre_swing_wait_out_of_bounds",
                             "cycle_exceeds_episode_horizon",
+                            "ball_birth_not_beyond_net",
                         )
                 }
             }

@@ -59,6 +59,46 @@ _R_FACE = 6
 _R_CONTACT_ENVELOPE = 7
 _CONTINUOUS_REASONS = REASONS + ("contact_normal_speed_out_of_fit",)
 
+# --- incoming-ball birth-consistency gate (Franco 2026-07-28) ---------------
+# 人话:把来球"往回倒 ttc 秒",最少也得从这条线以外出发。低速球配短到球时间会把
+# 出生点反推到网这边("球出生在半路"),这种题物理上不是从对面打过来的球,必须
+# 具名拒绝。线性下界:真实来球在飞行中只会被阻力减速,出生点只会比这个下界更远,
+# 所以"连下界都过不了网"就足以判死,不需要整段反向积分。
+BALL_BIRTH_NET_MARGIN_M = 0.05
+BALL_BIRTH_REJECTION_REASON = "ball_birth_not_beyond_net"
+
+
+def ball_birth_x_lower_bound_m(
+    contact_x_w_m: float,
+    incoming_velocity_x_w_mps: float,
+    time_to_contact_s: float,
+) -> float:
+    """Linear lower bound on the incoming ball birth x (env ``W`` frame).
+
+    The incoming ball travels toward the robot (negative x), so integrating
+    backwards in time ADDS ``|v_x| * ttc`` to the contact x.  Drag can only
+    have decelerated the incoming ball, so the true birth x is at or beyond
+    this bound.
+    """
+    return (
+        float(contact_x_w_m)
+        + abs(float(incoming_velocity_x_w_mps)) * float(time_to_contact_s)
+    )
+
+
+def ball_birth_not_beyond_net(
+    contact_x_w_m: float,
+    incoming_velocity_x_w_mps: float,
+    time_to_contact_s: float,
+    *,
+    net_x_m: float,
+    margin_m: float = BALL_BIRTH_NET_MARGIN_M,
+) -> bool:
+    """True when even the optimistic birth-x bound cannot clear the net plane."""
+    return ball_birth_x_lower_bound_m(
+        contact_x_w_m, incoming_velocity_x_w_mps, time_to_contact_s
+    ) < float(net_x_m) + float(margin_m)
+
 # The venue contact fit is not an extrapolation license.  A candidate whose
 # selected physical face is not approaching, or whose normal relative speed is
 # outside the fitted data range, is not installable.
