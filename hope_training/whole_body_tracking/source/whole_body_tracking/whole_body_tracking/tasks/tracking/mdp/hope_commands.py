@@ -3172,15 +3172,15 @@ class RacketTargetCommand(CommandTerm):
                 0.0,
                 math.sin(0.5 * yaw),
             )
-            direct = max(abs(float(a) - b) for a, b in zip(root_quat, yaw_only))
-            negated = max(abs(float(a) + b) for a, b in zip(root_quat, yaw_only))
-            if min(direct, negated) > 1.0e-6:
-                raise ValueError(
-                    "action-ball canonical ready root quaternion must be yaw-only so the "
-                    "birth quaternion exactly equals the root Motion writes"
-                )
-            if direct > negated:
-                yaw_only = tuple(-value for value in yaw_only)
+            # The birth/receipt frame is the YAW PROJECTION of the canonical ready
+            # root, not the literal root quaternion Motion writes.  Real compiled
+            # ready stances carry roll/pitch (measured 2026-07-28: fivebind shared
+            # ready pitch ~-11.2 deg, ChingMu73 converts ~+8..12 deg), so demanding
+            # a yaw-only root rejected every curated clip.  The receipt schema
+            # (_assert_yaw_quaternion) binds base_quat_wxyz to R_z(base_yaw) and the
+            # pinned solver rotates prototypes in that yaw frame; both are exactly
+            # satisfied by the projection stored here (coordinator ruling 2026-07-28,
+            # same family as the per-clip canonical-ready endpoint gate).
             ready_yaw.append(yaw)
             ready_quat.append(tuple(float(value) for value in yaw_only))
             ready_z.append(float(root_pos[2]))

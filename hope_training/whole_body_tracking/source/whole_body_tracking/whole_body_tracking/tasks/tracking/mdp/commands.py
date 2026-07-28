@@ -1516,12 +1516,28 @@ class MotionCommand(CommandTerm):
         return count, max_abs
 
     def _validate_canonical_ready_clips(self) -> None:
-        """Require one literal runtime-ready pose at every clip boundary.
+        """Require one literal runtime-ready pose at each clip's own boundaries.
 
         ``MotionLoader`` intentionally converts references to the consumer's float32 dtype.
-        The gate is exact in that runtime dtype (no hidden tolerance): every clip start and end
-        must contain the same joint/body pose, including the same quaternion hemisphere.  All
-        six endpoint velocity channels must also be literal zero.
+        The gate is exact in that runtime dtype (no hidden tolerance): every clip must start
+        and end on one identical joint/body pose, including the same quaternion hemisphere;
+        all six endpoint velocity channels must be literal zero; every boundary value
+        (including the ready root Z) must be finite; and the frame-0 root quaternion must be
+        unit length (1e-6, the hope_commands convention).  Yaw-only roots are deliberately
+        NOT required: real compiled ready stances carry roll/pitch (fivebind shared ready
+        pitch ~-11.2 deg, ChingMu73 ~+8..12 deg measured 2026-07-28), and the per-slot
+        action-ball birth frame is the yaw PROJECTION of this root, not the root itself.
+
+        Scope is deliberately PER CLIP (coordinator ruling, 2026-07-28): the runtime's
+        per-slot ready machinery (``_action_ball_ready_yaw/quat/z`` captured from each
+        clip's own frame 0, B_yaw ball offsets anchored to that per-slot yaw, per-slot
+        ready-Z contract in the profile adapter) is the design; aim-rotated canonical
+        clips legitimately differ across clips in world orientation.  The former
+        cross-clip clause ("all clip starts/ends share one exact world-frame ready
+        pose") was a leftover of the single-shared-ready ideal, contradicted that
+        per-slot machinery, and is deliberately removed.  Raw capture segments
+        (ChingMu73-style units) are still rejected by the per-clip clauses: their own
+        endpoints match neither in pose nor in velocity.
         """
 
         runtime_joint_count = int(self.robot.data.default_joint_pos.shape[-1])
@@ -1542,7 +1558,6 @@ class MotionCommand(CommandTerm):
 
         starts = self.motion.seg_start
         ends = starts + self.motion.seg_len - 1
-        reference_index = int(starts[0].item())
         pose_channels = (
             ("joint_pos", self.motion.joint_pos),
             ("body_pos_w", self.motion._body_pos_w),
@@ -1561,21 +1576,23 @@ class MotionCommand(CommandTerm):
                 )
 
         for clip_index in range(int(self.motion.num_segments)):
-            for boundary_name, boundary_index in (
-                ("start", int(starts[clip_index].item())),
-                ("end", int(ends[clip_index].item())),
-            ):
-                for channel_name, channel in pose_channels:
-                    mismatch_count, max_abs = self._first_tensor_mismatch(
-                        channel[reference_index], channel[boundary_index]
+            start_index = int(starts[clip_index].item())
+            end_index = int(ends[clip_index].item())
+            for channel_name, channel in pose_channels:
+                mismatch_count, max_abs = self._first_tensor_mismatch(
+                    channel[start_index], channel[end_index]
+                )
+                if mismatch_count:
+                    raise ValueError(
+                        "canonical_ready_mode requires each clip to start and end on one "
+                        "exact runtime-float32 ready pose: "
+                        f"clip={clip_index} channel={channel_name} "
+                        f"mismatches={mismatch_count} max_abs={max_abs:.9g}"
                     )
-                    if mismatch_count:
-                        raise ValueError(
-                            "canonical_ready_mode requires all clip starts/ends to share one "
-                            "exact runtime-float32 ready pose: "
-                            f"clip={clip_index} boundary={boundary_name} channel={channel_name} "
-                            f"mismatches={mismatch_count} max_abs={max_abs:.9g}"
-                        )
+            for boundary_name, boundary_index in (
+                ("start", start_index),
+                ("end", end_index),
+            ):
                 for channel_name, channel in velocity_channels:
                     value = channel[boundary_index]
                     if int(torch.count_nonzero(value).item()) != 0:
@@ -1585,6 +1602,16 @@ class MotionCommand(CommandTerm):
                             f"clip={clip_index} boundary={boundary_name} channel={channel_name} "
                             f"max_abs={max_abs:.9g}"
                         )
+            root_quat = self.motion._body_quat_w[start_index, 0]
+            norm = math.sqrt(
+                sum(float(value) ** 2 for value in root_quat.tolist())
+            )
+            if not math.isfinite(norm) or abs(norm - 1.0) > 1.0e-6:
+                raise ValueError(
+                    "canonical_ready_mode requires a unit frame-0 root quaternion (the "
+                    "per-slot birth frame is its yaw projection): "
+                    f"clip={clip_index} norm={norm:.9g}"
+                )
 
     def _canonical_ready_steps(self, env_ids: torch.Tensor | None = None) -> torch.Tensor:
         clips = self.clip_id if env_ids is None else self.clip_id[env_ids]
