@@ -8925,6 +8925,14 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             )
             _set_attr(
                 C,
+                "action_ball_diagnostic_unauthorized",
+                _get(rk, "action_ball_diagnostic_unauthorized"),
+                bool,
+                applied,
+                "racket_target",
+            )
+            _set_attr(
+                C,
                 "action_ball_evaluator_launch_receipt_path",
                 _get(rk, "action_ball_evaluator_launch_receipt_path"),
                 str,
