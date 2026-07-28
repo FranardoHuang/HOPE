@@ -75,3 +75,9 @@ agi/a3_deploy_example/.github/
 *.deb
 *.so
 *.a
+
+# Franco 2026-07-28 ruling: the curated canonical TRAINING motion sets are tracked
+# (small, content-addressed, they ARE the runs' inputs). Everything else in assets/
+# stays ignored per ASSET_POLICY.
+!assets/motions/fivebind_20260727/**
+!assets/motions/chingmu73_20260728/**

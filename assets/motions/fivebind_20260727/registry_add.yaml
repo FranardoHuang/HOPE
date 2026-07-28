@@ -1,0 +1,148 @@
+
+  # ===========================================================================================
+  # FIVEBIND CANONICAL CLIPS (2026-07-27, bank build for the multi-motion arm)
+  #
+  # These six rows exist ONLY in the fivebank working tree
+  # (pod:/workspace/codexschema/fivebank_20260727/hope_training/whole_body_tracking/cfg/).
+  # They are NOT committed to the repo: they exist so gen_stage1_questions.py can anchor the
+  # question banks at the anchors that fivebind_20260727/BINDINGS.json measured and pinned.
+  #
+  # Every row shares the same three facts as bh_loop_c_upper_wave1 above:
+  #  * face_normal_reliable: true-rigid-mount — canonical schema-2 compiled clips; the blade
+  #    frame IS the wrist-yaw frame translated by the constant URDF mount offset and the blade
+  #    normal IS wrist +Y. No grip may be fitted (franco ruling 2026-07-23).
+  #  * rally_yaw_deg: 0, and it MUST stay 0. The aiming was applied to the WHOLE clip
+  #    (hope_frame_utils.rotate_motion_to_hope_x about the frame-0 pelvis XY pivot, theta_total
+  #    = theta_pelvis + psi_aim), so positions AND vectors are already rotated together.
+  #    rally_canonicalize would rotate the strike VECTORS a second time while leaving the
+  #    already-rotated contact POSITION alone — a silent frame mix. NOTE: unlike wave1, the
+  #    residual pelvis yaw here is deliberately NON-zero (the aim yaw); that is a property of
+  #    the clip, not a rally-yaw to re-apply.
+  #  * `phase` is NOT video contact truth (air swings, contact_truth_observed: false). It is
+  #    the fivebind anchor: the frame that satisfies ALL FOUR of {phase-scan returnable > 0.5
+  #    under the default ball, forward dominance vx>0 and |vx|>=|vy|, blade z >= 0.78,
+  #    measured face sign == the family's sign}, ranked by ANCHOR-EXACT return rate.
+  #    Evidence: fivebind_20260727/ANCHOR_SWEEP.json + BINDINGS.json.
+  # ===========================================================================================
+  fh_loop_upper_fivebind:
+    # sha256 8d94dc55e8a157ad8d109c06f89c1362bb3f7ef58c3f953befa81683e63b2e9b
+    # T=88 @ 50 fps (1.74 s); scope upper; family forehand; mount_normal_sign +1
+    phase: 0.632184          # = frame 55 of 88 (55/87)
+    status: unverified
+    annotator: claude (fivebind binding; no human scrub, no observed ball contact exists)
+    date: 2026-07-27
+    method: >-
+      fivebind four-gate anchor selection (see header). f55 anchor-exact return 0.6621,
+      phase-scan 1.0000 at both [2,5] and [1,2.5] m/s, cos(n,v) +0.7970.
+    source: >-
+      canonical-schema2-compiled probe8f_pod1_fhloop_tube50mrad fh_loop_upper_canonical_v2.npz
+      sha e332c69aa9b7f948a44a001b21769bc45cc1f84af1dd4231f20cda98278c4fa8, re-aimed by
+      whole-clip rotation theta_total = -186.212672 deg
+    face_normal_reliable: true-rigid-mount
+    rally_yaw_deg: 0
+    train_phase_candidates: [0.632184]
+
+  bh_loop_c_upper_fivebind:
+    # sha256 c950a73e473cad84d0fafcd51c552ec4fef085580bbeaec0f4e96be2acd7e2fc
+    # T=71 @ 50 fps (1.40 s); scope upper; family backhand; mount_normal_sign -1
+    phase: 0.442857          # = frame 31 of 71 (31/70)
+    status: unverified
+    annotator: claude (fivebind binding)
+    date: 2026-07-27
+    method: >-
+      fivebind four-gate anchor selection. f31 anchor-exact 0.9746 (best in the set),
+      phase-scan 1.0000/1.0000, cos(n,v) -0.9884.
+    source: >-
+      canonical-schema2-compiled probe6a_pod1_heavy bh_loop_c_upper_canonical_v2.npz
+      sha f6c89539d07ef98e0f78ad676d1a2938d92f5ccfbd12e2df260a124944bc3991, re-aimed by
+      whole-clip rotation theta_total = +12.081979 deg
+    face_normal_reliable: true-rigid-mount
+    rally_yaw_deg: 0
+    train_phase_candidates: [0.442857]
+
+  bh_block_upper_fivebind:
+    # sha256 0cd94aa47bf8feb59bbe7cc7a0306abb57ee7ec8ebcec6443a80bbdc58894309
+    # T=54 @ 50 fps (1.06 s); scope upper; family backhand; mount_normal_sign -1
+    phase: 0.452830          # = frame 24 of 54 (24/53)
+    status: unverified
+    annotator: claude (fivebind binding)
+    date: 2026-07-27
+    method: >-
+      fivebind four-gate anchor selection. f24 anchor-exact 0.4502, phase-scan 0.9583 at
+      [2,5] but only 0.5000 at [1,2.5] (thin slow-ball lane, expected for a block),
+      cos(n,v) -0.6569. f11 scores higher anchor-exact but lies outside the build's
+      declared contact window [22,27] and was rejected on semantic grounds.
+    source: >-
+      canonical-schema2-compiled probe8h_pod2_blocks_tube0.05 bh_block_upper_canonical_v2.npz
+      sha aeb3ea24d9e25c6ed8ae783b02d9643f35f1bd353fccab86d9391c9dd8464cf4, re-aimed by
+      whole-clip rotation theta_total = -37.742451 deg
+    face_normal_reliable: true-rigid-mount
+    rally_yaw_deg: 0
+    train_phase_candidates: [0.452830]
+
+  s0_highpress_upper_fivebind:
+    # sha256 2bc5f6483644aa69fe3dfc42775461a6fbdf8cd1c407d0b0c8e593a86dfd8f50
+    # T=41 @ 50 fps (0.80 s); scope upper; family backhand; mount_normal_sign -1
+    phase: 0.250000          # = frame 10 of 41 (10/40)
+    status: unverified
+    annotator: claude (fivebind binding)
+    date: 2026-07-27
+    method: >-
+      fivebind four-gate anchor selection. ** The anchor MOVED from the earlier survey's
+      f20/phase 0.50 to f10/phase 0.25. ** f20 has anchor-exact 0.0000 and is returnable only
+      under a steep-descending-ball override (a second ball distribution); f10 passes forward
+      dominance (vx 1.112 >= |vy| 0.950), scores 1.0000 under BOTH the default and the slow
+      ball, and has anchor-exact 0.8051. f9 scores higher on returnability and FAILS forward
+      dominance — do not re-derive from the returnability argmax alone.
+    source: >-
+      canonical-schema2-compiled probe8g_pod1_loops0_tube0.02 s0_highpress_upper_canonical_v2.npz
+      sha 04e28f760a6d00da4e32e7d2f4fe53bd120c3b5231d9a4fbd91c2d6b85899d50, re-aimed by
+      whole-clip rotation theta_total = -30.307502 deg
+    face_normal_reliable: true-rigid-mount
+    rally_yaw_deg: 0
+    train_phase_candidates: [0.250000]
+
+  fh_block_syn_upper_fivebind:
+    # sha256 ec69e056087f52f1207b8fe6625e73ae235385983cd2e2449bf9109597ddb404
+    # T=104 @ 50 fps (2.06 s); scope upper; family forehand; mount_normal_sign +1
+    # *** DIAGNOSTIC ONLY — fivebind_20260727 disqualified this clip four independent ways:
+    #     no frame clears the 50% phase-scan gate (peak 0.4583), anchor-exact return 0.0000,
+    #     its target box collides with all three backhands while demanding the opposite face
+    #     sign, and its source is byte-identical to bh_block's donor. The marker
+    #     configs/canonical_motion_marker_semantics_v2_20260724.json also sets
+    #     transfer_to_synthetic_forehand_behavior="forbidden". A bank row here exists so the
+    #     cone fraction can be MEASURED, not so the clip can ship. ***
+    phase: 0.640777          # = frame 66 of 104 (66/103); argmax of a curve that never clears 50%
+    status: unverified-disqualified
+    annotator: claude (fivebind binding; nominal anchor only)
+    date: 2026-07-27
+    method: >-
+      NOT a four-gate anchor — no frame in this clip satisfies the four gates jointly. f66 is
+      the argmax of the phase-scan curve (0.4583). Recorded so the diagnostic bank has an anchor.
+    source: >-
+      canonical-schema2-compiled probe8h_pod2_blocks_tube0.02 fh_block_syn_upper_canonical_v2.npz
+      sha b42484a8e993cf05100c0c3c86bafc4d9ab0a250d7c97c7384adc623b59028d9, re-aimed by
+      whole-clip rotation theta_total = -25.408129 deg
+    face_normal_reliable: true-rigid-mount
+    rally_yaw_deg: 0
+    train_phase_candidates: [0.640777]
+
+  bh_loop_c_full_full_fivebind:
+    # sha256 010740965573863c6dbcb48f4efa3318eea51d1d005da0e458824c837a43c8b0
+    # T=81 @ 50 fps (1.60 s); scope FULL body; family backhand; mount_normal_sign -1
+    # The documented SUBSTITUTE fifth clip (SET C): the same motion as bh_loop_c at full scope,
+    # honest as a scope entry, NOT as a fifth behaviour.
+    phase: 0.475000          # = frame 38 of 81 (38/80)
+    status: unverified
+    annotator: claude (fivebind binding)
+    date: 2026-07-27
+    method: >-
+      fivebind four-gate anchor selection. f38 anchor-exact 0.4938, net clear 1.0000 (highest
+      in the set), phase-scan 1.0000/1.0000, cos(n,v) -0.9828.
+    source: >-
+      canonical-schema2-compiled probe8g005 bh_loop_c_full_canonical_v2.npz
+      sha 8938e658ba57abb60ea83a7e9eefeb70a5b64308163253261bda1654c1db53e7, re-aimed by
+      whole-clip rotation theta_total = +9.943801 deg
+    face_normal_reliable: true-rigid-mount
+    rally_yaw_deg: 0
+    train_phase_candidates: [0.475000]
