@@ -5848,6 +5848,7 @@ _RACKET_KEYS = (
     "action_ball_pool_refill_rows", "action_ball_fixed_direction",
     "action_ball_evaluator_launch_receipt_path",
     "action_ball_evaluator_launch_receipt_file_sha256",
+    "action_ball_diagnostic_unauthorized",
     "ref_perturb_curriculum_steps", "ref_perturb_curriculum_start", "ref_perturb_success_gated",
     "ref_perturb_advance_threshold", "ref_perturb_advance_rate", "ref_vel_scale", "ref_vel_scale_by_motion",
     "debug_reward_logging",
