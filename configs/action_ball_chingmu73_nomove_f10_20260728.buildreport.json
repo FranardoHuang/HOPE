@@ -1,0 +1,2585 @@
+{
+ "builder": "build_action_ball_manifest.py",
+ "batch_manifest": "/workspace/codexschema/chingmu_batch_20260728/chingmu_manifest_v1.json",
+ "batch_manifest_sha256": "6a0f3e1c816ba2673953351cbbba54b28839e57c566c1c6ad97bbf271d065710",
+ "excluded_uids": [
+  "Take_085_unit00_FH"
+ ],
+ "n_actions": 73,
+ "out": "/workspace/codexschema/ballfirst_wip_20260728/configs/action_ball_chingmu73_nomove_f10_20260728.json",
+ "file_sha256": "0b9419d701cc09cb7f8ea47a9cbcc905f2d4156d64775a65b6261b0d4efcd8ac",
+ "canonical_sha256": "37d388cda00fa1a316aaada389cee35c61dca13cc2fbe50ab8f22147d19932d4",
+ "racket_site_speed_mps": {
+  "min": 1.0588737726211548,
+  "median": 1.9248180389404297,
+  "max": 4.876761436462402
+ },
+ "min_episode_length_s_needed": 4.52,
+ "teacher_rate_min_bumped_uids": [
+  "Take_060_unit11_BH",
+  "Take_062_unit11_BH"
+ ],
+ "inbound_min_cosine_relaxed_uids": [],
+ "mount_sign_family_mismatch_uids": [
+  "Take_061_unit10_BH",
+  "Take_064_unit07_FH"
+ ],
+ "mount_sign_ambiguous_uids": [],
+ "per_action": [
+  {
+   "uid": "Take_058_unit02_FH",
+   "action_id": "take_058_unit02_fh",
+   "family": "forehand",
+   "t_hit_s": 1.04,
+   "t_cycle_s": 1.9,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.8333333333333335,
+    2.04
+   ],
+   "ttc_center_s": 1.9366666666666668,
+   "contact_offset_center_b_yaw_m": [
+    0.7133717057292391,
+    -0.5222904046903777,
+    0.9863
+   ],
+   "incoming_speed_center_mps": 3.082151944664637,
+   "incoming_dir_angle_to_inbound_axis_deg": 38.09342427577788,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.11141562999999999,
+    -0.10052684
+   ],
+   "racket_site_speed_mps": 3.6922812461853027,
+   "racket_site_speed_tool_f64_mps": 3.6922811353083675,
+   "racket_site_speed_tool_delta_mps": 1.1087693518874175e-07,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.5062774139629431,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_058_unit03_FH",
+   "action_id": "take_058_unit03_fh",
+   "family": "forehand",
+   "t_hit_s": 0.76,
+   "t_cycle_s": 1.6,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.366666666666667,
+    1.76
+   ],
+   "ttc_center_s": 1.5633333333333335,
+   "contact_offset_center_b_yaw_m": [
+    0.5128975806819146,
+    -0.7870233413224421,
+    0.9642
+   ],
+   "incoming_speed_center_mps": 3.193834155055644,
+   "incoming_dir_angle_to_inbound_axis_deg": 32.543083273666866,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.03676805000000005,
+    0.04330498999999999
+   ],
+   "racket_site_speed_mps": 3.769683837890625,
+   "racket_site_speed_tool_f64_mps": 3.769683674857779,
+   "racket_site_speed_tool_delta_mps": 1.630328458901431e-07,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.6090922741365313,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_058_unit04_FH",
+   "action_id": "take_058_unit04_fh",
+   "family": "forehand",
+   "t_hit_s": 0.98,
+   "t_cycle_s": 1.8,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.7333333333333334,
+    1.98
+   ],
+   "ttc_center_s": 1.8566666666666667,
+   "contact_offset_center_b_yaw_m": [
+    0.30741446744802947,
+    -0.5690788357071613,
+    1.0496
+   ],
+   "incoming_speed_center_mps": 2.959269979234744,
+   "incoming_dir_angle_to_inbound_axis_deg": 30.694533491884343,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.07925510000000002,
+    -0.003686210000000134
+   ],
+   "racket_site_speed_mps": 4.301708221435547,
+   "racket_site_speed_tool_f64_mps": 4.301708490927114,
+   "racket_site_speed_tool_delta_mps": 2.6949156683997444e-07,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.5387205477047101,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_058_unit05_FH",
+   "action_id": "take_058_unit05_fh",
+   "family": "forehand",
+   "t_hit_s": 0.96,
+   "t_cycle_s": 1.78,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.7000000000000002,
+    1.96
+   ],
+   "ttc_center_s": 1.83,
+   "contact_offset_center_b_yaw_m": [
+    0.42414996245424286,
+    -0.801062643138605,
+    1.0469
+   ],
+   "incoming_speed_center_mps": 3.047577859546824,
+   "incoming_dir_angle_to_inbound_axis_deg": 33.966263042241835,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.10435647999999997,
+    0.035285230000000056
+   ],
+   "racket_site_speed_mps": 4.33652925491333,
+   "racket_site_speed_tool_f64_mps": 4.336528921159778,
+   "racket_site_speed_tool_delta_mps": 3.337535519065682e-07,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.5511538459257246,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_058_unit06_FH",
+   "action_id": "take_058_unit06_fh",
+   "family": "forehand",
+   "t_hit_s": 1.1,
+   "t_cycle_s": 1.92,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.9333333333333336,
+    2.1
+   ],
+   "ttc_center_s": 2.0166666666666666,
+   "contact_offset_center_b_yaw_m": [
+    0.40326325540069075,
+    -0.78465196421086,
+    1.0251000000000001
+   ],
+   "incoming_speed_center_mps": 2.9575549377822217,
+   "incoming_dir_angle_to_inbound_axis_deg": 39.21757532209661,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.10523203000000003,
+    0.00945594999999988
+   ],
+   "racket_site_speed_mps": 4.300959587097168,
+   "racket_site_speed_tool_f64_mps": 4.300959771197359,
+   "racket_site_speed_tool_delta_mps": 1.841001910918294e-07,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.4803851894777395,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_058_unit07_FH",
+   "action_id": "take_058_unit07_fh",
+   "family": "forehand",
+   "t_hit_s": 0.96,
+   "t_cycle_s": 1.82,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.7000000000000002,
+    1.96
+   ],
+   "ttc_center_s": 1.83,
+   "contact_offset_center_b_yaw_m": [
+    0.8800561527825923,
+    -0.477588609134296,
+    0.9546
+   ],
+   "incoming_speed_center_mps": 2.7383699914365116,
+   "incoming_dir_angle_to_inbound_axis_deg": 46.839153785583534,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.12619797,
+    -0.005559910000000112
+   ],
+   "racket_site_speed_mps": 3.3947110176086426,
+   "racket_site_speed_tool_f64_mps": 3.3947105272891402,
+   "racket_site_speed_tool_delta_mps": 4.903195023331364e-07,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.5306684931367085,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_058_unit08_FH",
+   "action_id": "take_058_unit08_fh",
+   "family": "forehand",
+   "t_hit_s": 0.72,
+   "t_cycle_s": 1.68,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.3,
+    1.72
+   ],
+   "ttc_center_s": 1.51,
+   "contact_offset_center_b_yaw_m": [
+    0.3221389659120394,
+    -0.5247675866194722,
+    1.0016
+   ],
+   "incoming_speed_center_mps": 3.034118654568407,
+   "incoming_dir_angle_to_inbound_axis_deg": 21.748922961695303,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.05405042999999998,
+    0.0311407199999999
+   ],
+   "racket_site_speed_mps": 3.7362728118896484,
+   "racket_site_speed_tool_f64_mps": 3.7362726259839873,
+   "racket_site_speed_tool_delta_mps": 1.859056610875598e-07,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.583436704946046,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_058_unit11_FH",
+   "action_id": "take_058_unit11_fh",
+   "family": "forehand",
+   "t_hit_s": 0.96,
+   "t_cycle_s": 1.72,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.7000000000000002,
+    1.96
+   ],
+   "ttc_center_s": 1.83,
+   "contact_offset_center_b_yaw_m": [
+    0.23905593446980822,
+    -0.6030938299940941,
+    0.9825
+   ],
+   "incoming_speed_center_mps": 2.683614802835906,
+   "incoming_dir_angle_to_inbound_axis_deg": 37.585672615337515,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.16668569,
+    -0.032168450000000126
+   ],
+   "racket_site_speed_mps": 4.876761436462402,
+   "racket_site_speed_tool_f64_mps": 4.8767610424662635,
+   "racket_site_speed_tool_delta_mps": 3.939961388255142e-07,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.5616085410145312,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_058_unit12_FH",
+   "action_id": "take_058_unit12_fh",
+   "family": "forehand",
+   "t_hit_s": 0.88,
+   "t_cycle_s": 1.82,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.5666666666666669,
+    1.88
+   ],
+   "ttc_center_s": 1.7233333333333334,
+   "contact_offset_center_b_yaw_m": [
+    0.1446874346594265,
+    -0.416360846609654,
+    1.0995
+   ],
+   "incoming_speed_center_mps": 2.693902153011501,
+   "incoming_dir_angle_to_inbound_axis_deg": 25.075039537124788,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.1641410000000001,
+    -0.002221560000000067
+   ],
+   "racket_site_speed_mps": 4.112505912780762,
+   "racket_site_speed_tool_f64_mps": 4.112505880218928,
+   "racket_site_speed_tool_delta_mps": 3.25618341179279e-08,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.6751015941734426,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_058_unit13_FH",
+   "action_id": "take_058_unit13_fh",
+   "family": "forehand",
+   "t_hit_s": 0.8,
+   "t_cycle_s": 1.6,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.4333333333333336,
+    1.8
+   ],
+   "ttc_center_s": 1.6166666666666667,
+   "contact_offset_center_b_yaw_m": [
+    0.6485682827228597,
+    -0.6413654618342024,
+    1.0045
+   ],
+   "incoming_speed_center_mps": 2.933431712176031,
+   "incoming_dir_angle_to_inbound_axis_deg": 37.78475445641345,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.26759742,
+    0.07728334999999997
+   ],
+   "racket_site_speed_mps": 4.450588226318359,
+   "racket_site_speed_tool_f64_mps": 4.4505884670232225,
+   "racket_site_speed_tool_delta_mps": 2.407048631525299e-07,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.5609135518094309,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_058_unit14_FH",
+   "action_id": "take_058_unit14_fh",
+   "family": "forehand",
+   "t_hit_s": 0.84,
+   "t_cycle_s": 1.7,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.5,
+    1.8399999999999999
+   ],
+   "ttc_center_s": 1.67,
+   "contact_offset_center_b_yaw_m": [
+    0.3631656362633263,
+    -0.6536569365002762,
+    1.0016
+   ],
+   "incoming_speed_center_mps": 3.1272675629053555,
+   "incoming_dir_angle_to_inbound_axis_deg": 29.558277808184624,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.14363605000000002,
+    0.061059479999999944
+   ],
+   "racket_site_speed_mps": 3.976809024810791,
+   "racket_site_speed_tool_f64_mps": 3.9768079050219183,
+   "racket_site_speed_tool_delta_mps": 1.1197888727387806e-06,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.5755959683723777,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_059_unit01_FH",
+   "action_id": "take_059_unit01_fh",
+   "family": "forehand",
+   "t_hit_s": 0.74,
+   "t_cycle_s": 1.64,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.3333333333333335,
+    1.74
+   ],
+   "ttc_center_s": 1.5366666666666666,
+   "contact_offset_center_b_yaw_m": [
+    0.21214989002414975,
+    -1.1767428239573499,
+    0.9567
+   ],
+   "incoming_speed_center_mps": 2.84901534042904,
+   "incoming_dir_angle_to_inbound_axis_deg": 29.159017677145606,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.04029327000000005,
+    0.26721220999999995
+   ],
+   "racket_site_speed_mps": 4.159697532653809,
+   "racket_site_speed_tool_f64_mps": 4.159697500868696,
+   "racket_site_speed_tool_delta_mps": 3.1785112319937525e-08,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.6094503984614567,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_059_unit03_FH",
+   "action_id": "take_059_unit03_fh",
+   "family": "forehand",
+   "t_hit_s": 0.9,
+   "t_cycle_s": 1.76,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.6,
+    1.9
+   ],
+   "ttc_center_s": 1.75,
+   "contact_offset_center_b_yaw_m": [
+    0.3301629443867538,
+    -0.4442229145337667,
+    0.9987
+   ],
+   "incoming_speed_center_mps": 2.880490550236192,
+   "incoming_dir_angle_to_inbound_axis_deg": 36.96714175359446,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.11774032000000001,
+    -0.15055695000000002
+   ],
+   "racket_site_speed_mps": 4.018892288208008,
+   "racket_site_speed_tool_f64_mps": 4.018891980670034,
+   "racket_site_speed_tool_delta_mps": 3.075379737538242e-07,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.5899020510462097,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_060_unit00_BH",
+   "action_id": "take_060_unit00_bh",
+   "family": "backhand",
+   "t_hit_s": 0.82,
+   "t_cycle_s": 1.44,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.4666666666666668,
+    1.8199999999999998
+   ],
+   "ttc_center_s": 1.6433333333333333,
+   "contact_offset_center_b_yaw_m": [
+    0.7823908660588068,
+    0.11303373570017414,
+    1.0483
+   ],
+   "incoming_speed_center_mps": 3.146901398201094,
+   "incoming_dir_angle_to_inbound_axis_deg": 18.154442266927177,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.24999942000000008,
+    0.13838549999999994
+   ],
+   "racket_site_speed_mps": 1.5502452850341797,
+   "racket_site_speed_tool_f64_mps": 1.5502455429815265,
+   "racket_site_speed_tool_delta_mps": 2.579473468156124e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8161300547220007,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_060_unit01_BH",
+   "action_id": "take_060_unit01_bh",
+   "family": "backhand",
+   "t_hit_s": 1.12,
+   "t_cycle_s": 1.7,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.966666666666667,
+    2.12
+   ],
+   "ttc_center_s": 2.0433333333333334,
+   "contact_offset_center_b_yaw_m": [
+    0.9555869913797385,
+    -0.057576697520928324,
+    0.8839
+   ],
+   "incoming_speed_center_mps": 1.5104994571333021,
+   "incoming_dir_angle_to_inbound_axis_deg": 27.044914803215796,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.21582312000000003,
+    0.20573567999999998
+   ],
+   "racket_site_speed_mps": 1.9248180389404297,
+   "racket_site_speed_tool_f64_mps": 1.9248176539333424,
+   "racket_site_speed_tool_delta_mps": 3.8500708732236433e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.9740882412481682,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_060_unit02_BH",
+   "action_id": "take_060_unit02_bh",
+   "family": "backhand",
+   "t_hit_s": 0.84,
+   "t_cycle_s": 1.48,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.5,
+    1.8399999999999999
+   ],
+   "ttc_center_s": 1.67,
+   "contact_offset_center_b_yaw_m": [
+    0.7636885745529634,
+    -0.08102957274004147,
+    0.9941
+   ],
+   "incoming_speed_center_mps": 3.271813138001619,
+   "incoming_dir_angle_to_inbound_axis_deg": 15.055337872267113,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.09792908,
+    0.26410578999999995
+   ],
+   "racket_site_speed_mps": 1.245445728302002,
+   "racket_site_speed_tool_f64_mps": 1.2454457917025943,
+   "racket_site_speed_tool_delta_mps": 6.340059233167494e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.810743194563211,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_060_unit04_BH",
+   "action_id": "take_060_unit04_bh",
+   "family": "backhand",
+   "t_hit_s": 0.28,
+   "t_cycle_s": 0.7,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.5666666666666668,
+    1.28
+   ],
+   "ttc_center_s": 0.9233333333333333,
+   "contact_offset_center_b_yaw_m": [
+    0.7685506324756552,
+    -0.060317545838274395,
+    1.0073
+   ],
+   "incoming_speed_center_mps": 3.2431781650103653,
+   "incoming_dir_angle_to_inbound_axis_deg": 7.996490411634052,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.20588207999999997,
+    0.22488334
+   ],
+   "racket_site_speed_mps": 1.603772521018982,
+   "racket_site_speed_tool_f64_mps": 1.6037729286054443,
+   "racket_site_speed_tool_delta_mps": 4.075864623587222e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7962568884411266,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_060_unit05_BH",
+   "action_id": "take_060_unit05_bh",
+   "family": "backhand",
+   "t_hit_s": 0.78,
+   "t_cycle_s": 1.04,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.4000000000000001,
+    1.78
+   ],
+   "ttc_center_s": 1.59,
+   "contact_offset_center_b_yaw_m": [
+    0.648045900287187,
+    -0.037182037897562886,
+    0.9947
+   ],
+   "incoming_speed_center_mps": 3.6794699917243516,
+   "incoming_dir_angle_to_inbound_axis_deg": 26.269550445411813,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.16347004999999992,
+    0.22414771
+   ],
+   "racket_site_speed_mps": 2.1731488704681396,
+   "racket_site_speed_tool_f64_mps": 2.173149123722143,
+   "racket_site_speed_tool_delta_mps": 2.532540035460329e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.6669920779541981,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_060_unit06_BH",
+   "action_id": "take_060_unit06_bh",
+   "family": "backhand",
+   "t_hit_s": 1.06,
+   "t_cycle_s": 1.22,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.866666666666667,
+    2.06
+   ],
+   "ttc_center_s": 1.9633333333333334,
+   "contact_offset_center_b_yaw_m": [
+    0.7241723060009295,
+    -0.27328283880901816,
+    1.055
+   ],
+   "incoming_speed_center_mps": 3.14631959756157,
+   "incoming_dir_angle_to_inbound_axis_deg": 25.137825854674166,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.17143964,
+    0.22432169999999996
+   ],
+   "racket_site_speed_mps": 1.680468201637268,
+   "racket_site_speed_tool_f64_mps": 1.6804673816551194,
+   "racket_site_speed_tool_delta_mps": 8.199821486254422e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7723312666184272,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_060_unit07_BH",
+   "action_id": "take_060_unit07_bh",
+   "family": "backhand",
+   "t_hit_s": 1.04,
+   "t_cycle_s": 1.2,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.8333333333333335,
+    2.04
+   ],
+   "ttc_center_s": 1.9366666666666668,
+   "contact_offset_center_b_yaw_m": [
+    0.7617004715988971,
+    -0.30753664306726525,
+    1.0133
+   ],
+   "incoming_speed_center_mps": 3.411850877456399,
+   "incoming_dir_angle_to_inbound_axis_deg": 27.703353171809706,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.1857975999999999,
+    0.19965493
+   ],
+   "racket_site_speed_mps": 1.6267852783203125,
+   "racket_site_speed_tool_f64_mps": 1.62678580529362,
+   "racket_site_speed_tool_delta_mps": 5.269733074353411e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8155167902397372,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_060_unit08_BH",
+   "action_id": "take_060_unit08_bh",
+   "family": "backhand",
+   "t_hit_s": 0.96,
+   "t_cycle_s": 1.38,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.7000000000000002,
+    1.96
+   ],
+   "ttc_center_s": 1.83,
+   "contact_offset_center_b_yaw_m": [
+    0.7052759467205154,
+    -0.24253635638383286,
+    0.9724
+   ],
+   "incoming_speed_center_mps": 4.053625515510776,
+   "incoming_dir_angle_to_inbound_axis_deg": 31.782948716357055,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.16239532,
+    0.19680725
+   ],
+   "racket_site_speed_mps": 1.9575031995773315,
+   "racket_site_speed_tool_f64_mps": 1.957503067583321,
+   "racket_site_speed_tool_delta_mps": 1.3199401061037008e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7014180376117749,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_060_unit09_BH",
+   "action_id": "take_060_unit09_bh",
+   "family": "backhand",
+   "t_hit_s": 0.72,
+   "t_cycle_s": 1.3,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.3,
+    1.72
+   ],
+   "ttc_center_s": 1.51,
+   "contact_offset_center_b_yaw_m": [
+    0.6089570408392989,
+    -0.20911423756920944,
+    0.9755
+   ],
+   "incoming_speed_center_mps": 3.89270232871716,
+   "incoming_dir_angle_to_inbound_axis_deg": 23.78000338121142,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.12500988000000002,
+    0.19644326999999995
+   ],
+   "racket_site_speed_mps": 2.26737642288208,
+   "racket_site_speed_tool_f64_mps": 2.267376261642702,
+   "racket_site_speed_tool_delta_mps": 1.6123937829348733e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.694833735089002,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_060_unit10_BH",
+   "action_id": "take_060_unit10_bh",
+   "family": "backhand",
+   "t_hit_s": 0.62,
+   "t_cycle_s": 1.5,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.1333333333333335,
+    1.62
+   ],
+   "ttc_center_s": 1.376666666666667,
+   "contact_offset_center_b_yaw_m": [
+    0.6718906887704147,
+    -0.04065496297833708,
+    0.981
+   ],
+   "incoming_speed_center_mps": 4.197863482773112,
+   "incoming_dir_angle_to_inbound_axis_deg": 18.21924275114199,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.10698448999999999,
+    0.21669839000000002
+   ],
+   "racket_site_speed_mps": 2.1768617630004883,
+   "racket_site_speed_tool_f64_mps": 2.1768620402912915,
+   "racket_site_speed_tool_delta_mps": 2.772908032078192e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7468553105207436,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_060_unit11_BH",
+   "action_id": "take_060_unit11_bh",
+   "family": "backhand",
+   "t_hit_s": 1.26,
+   "t_cycle_s": 1.54,
+   "teacher_rate_min": 0.6116504860485439,
+   "teacher_rate_min_bumped": true,
+   "ttc_window_s": [
+    2.1599999979399995,
+    2.26
+   ],
+   "ttc_center_s": 2.20999999897,
+   "contact_offset_center_b_yaw_m": [
+    0.6880941748146856,
+    -0.009071980315668235,
+    0.9811
+   ],
+   "incoming_speed_center_mps": 4.490897042908021,
+   "incoming_dir_angle_to_inbound_axis_deg": 19.22203324476416,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.15151269999999994,
+    0.21445897000000003
+   ],
+   "racket_site_speed_mps": 2.2167396545410156,
+   "racket_site_speed_tool_f64_mps": 2.216739121932993,
+   "racket_site_speed_tool_delta_mps": 5.326080225742658e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7695079441302628,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_060_unit12_BH",
+   "action_id": "take_060_unit12_bh",
+   "family": "backhand",
+   "t_hit_s": 0.78,
+   "t_cycle_s": 1.12,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.4000000000000001,
+    1.78
+   ],
+   "ttc_center_s": 1.59,
+   "contact_offset_center_b_yaw_m": [
+    0.6399506171378013,
+    -0.2741803318674122,
+    0.9853000000000001
+   ],
+   "incoming_speed_center_mps": 4.252702131586458,
+   "incoming_dir_angle_to_inbound_axis_deg": 19.634609421050207,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.11558213000000006,
+    0.20515919999999999
+   ],
+   "racket_site_speed_mps": 1.6669479608535767,
+   "racket_site_speed_tool_f64_mps": 1.6669475430458027,
+   "racket_site_speed_tool_delta_mps": 4.1780777393363167e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7646246279632409,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_060_unit13_BH",
+   "action_id": "take_060_unit13_bh",
+   "family": "backhand",
+   "t_hit_s": 0.78,
+   "t_cycle_s": 1.78,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.4000000000000001,
+    1.78
+   ],
+   "ttc_center_s": 1.59,
+   "contact_offset_center_b_yaw_m": [
+    0.5996375917303186,
+    -0.15009944500572947,
+    1.014
+   ],
+   "incoming_speed_center_mps": 3.5024047467418726,
+   "incoming_dir_angle_to_inbound_axis_deg": 19.366924851316472,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.12512431000000002,
+    0.1879489099999999
+   ],
+   "racket_site_speed_mps": 1.4706608057022095,
+   "racket_site_speed_tool_f64_mps": 1.470660724920794,
+   "racket_site_speed_tool_delta_mps": 8.078141555678542e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7898655443150289,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_061_unit00_BH",
+   "action_id": "take_061_unit00_bh",
+   "family": "backhand",
+   "t_hit_s": 0.76,
+   "t_cycle_s": 1.54,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.366666666666667,
+    1.76
+   ],
+   "ttc_center_s": 1.5633333333333335,
+   "contact_offset_center_b_yaw_m": [
+    0.7619961963300049,
+    0.22017198163096763,
+    0.9906
+   ],
+   "incoming_speed_center_mps": 3.2170124665596185,
+   "incoming_dir_angle_to_inbound_axis_deg": 16.360663029038538,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.24437748999999998,
+    0.13194244999999993
+   ],
+   "racket_site_speed_mps": 1.7432621717453003,
+   "racket_site_speed_tool_f64_mps": 1.7432628142918491,
+   "racket_site_speed_tool_delta_mps": 6.425465488568705e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.9046011652146804,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_061_unit02_BH",
+   "action_id": "take_061_unit02_bh",
+   "family": "backhand",
+   "t_hit_s": 0.3,
+   "t_cycle_s": 0.9,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.6,
+    1.3
+   ],
+   "ttc_center_s": 0.95,
+   "contact_offset_center_b_yaw_m": [
+    0.7973591956792714,
+    -0.05602745233192827,
+    1.0407
+   ],
+   "incoming_speed_center_mps": 3.02659003005032,
+   "incoming_dir_angle_to_inbound_axis_deg": 5.996951562576483,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.2384447799999999,
+    0.30645726999999995
+   ],
+   "racket_site_speed_mps": 1.497277021408081,
+   "racket_site_speed_tool_f64_mps": 1.4972771331938335,
+   "racket_site_speed_tool_delta_mps": 1.1178575243242506e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7767951703771722,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_061_unit04_BH",
+   "action_id": "take_061_unit04_bh",
+   "family": "backhand",
+   "t_hit_s": 0.96,
+   "t_cycle_s": 1.12,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.7000000000000002,
+    1.96
+   ],
+   "ttc_center_s": 1.83,
+   "contact_offset_center_b_yaw_m": [
+    0.7300636991410885,
+    -0.28673554113036287,
+    1.0516
+   ],
+   "incoming_speed_center_mps": 3.032258730715438,
+   "incoming_dir_angle_to_inbound_axis_deg": 20.83573578873021,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.19223234,
+    0.28527880999999994
+   ],
+   "racket_site_speed_mps": 1.5583014488220215,
+   "racket_site_speed_tool_f64_mps": 1.558301430657807,
+   "racket_site_speed_tool_delta_mps": 1.8164214576898985e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.6877057633674021,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_061_unit05_BH",
+   "action_id": "take_061_unit05_bh",
+   "family": "backhand",
+   "t_hit_s": 1.04,
+   "t_cycle_s": 1.26,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.8333333333333335,
+    2.04
+   ],
+   "ttc_center_s": 1.9366666666666668,
+   "contact_offset_center_b_yaw_m": [
+    0.7323820924363115,
+    -0.16386795281736813,
+    0.9893000000000001
+   ],
+   "incoming_speed_center_mps": 4.077382520686525,
+   "incoming_dir_angle_to_inbound_axis_deg": 35.2342668858127,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.20045703000000004,
+    0.25806829
+   ],
+   "racket_site_speed_mps": 1.9809367656707764,
+   "racket_site_speed_tool_f64_mps": 1.980936958363483,
+   "racket_site_speed_tool_delta_mps": 1.9269270667976457e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.6939855562367302,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_061_unit06_BH",
+   "action_id": "take_061_unit06_bh",
+   "family": "backhand",
+   "t_hit_s": 0.96,
+   "t_cycle_s": 1.84,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.7000000000000002,
+    1.96
+   ],
+   "ttc_center_s": 1.83,
+   "contact_offset_center_b_yaw_m": [
+    0.6489109352843746,
+    -0.29130433171467696,
+    1.0097
+   ],
+   "incoming_speed_center_mps": 3.923333483149247,
+   "incoming_dir_angle_to_inbound_axis_deg": 29.81837960051184,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.16554808,
+    0.3255537
+   ],
+   "racket_site_speed_mps": 1.845535159111023,
+   "racket_site_speed_tool_f64_mps": 1.8455351989026538,
+   "racket_site_speed_tool_delta_mps": 3.979163087919346e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7632818197304186,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_061_unit07_BH",
+   "action_id": "take_061_unit07_bh",
+   "family": "backhand",
+   "t_hit_s": 0.24,
+   "t_cycle_s": 0.68,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.5,
+    1.24
+   ],
+   "ttc_center_s": 0.87,
+   "contact_offset_center_b_yaw_m": [
+    0.7295214757705255,
+    -0.11253471790616718,
+    1.0083
+   ],
+   "incoming_speed_center_mps": 3.3587849305961823,
+   "incoming_dir_angle_to_inbound_axis_deg": 11.659063638566879,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.16812889999999991,
+    0.27209880999999997
+   ],
+   "racket_site_speed_mps": 1.942746639251709,
+   "racket_site_speed_tool_f64_mps": 1.9427471099034241,
+   "racket_site_speed_tool_delta_mps": 4.706517151564782e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7134782109489313,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_061_unit08_BH",
+   "action_id": "take_061_unit08_bh",
+   "family": "backhand",
+   "t_hit_s": 0.72,
+   "t_cycle_s": 1.12,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.3,
+    1.72
+   ],
+   "ttc_center_s": 1.51,
+   "contact_offset_center_b_yaw_m": [
+    0.7107233732588456,
+    -0.14326055037204874,
+    1.0434
+   ],
+   "incoming_speed_center_mps": 3.6289138609231273,
+   "incoming_dir_angle_to_inbound_axis_deg": 13.36738651403471,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.13323717999999996,
+    0.28495767999999994
+   ],
+   "racket_site_speed_mps": 1.7850170135498047,
+   "racket_site_speed_tool_f64_mps": 1.7850175328755657,
+   "racket_site_speed_tool_delta_mps": 5.193257610613955e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8108237464824047,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_061_unit09_BH",
+   "action_id": "take_061_unit09_bh",
+   "family": "backhand",
+   "t_hit_s": 0.7,
+   "t_cycle_s": 2.38,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.2666666666666668,
+    1.7
+   ],
+   "ttc_center_s": 1.4833333333333334,
+   "contact_offset_center_b_yaw_m": [
+    0.6295874834575762,
+    -0.17281435712488086,
+    0.9914000000000001
+   ],
+   "incoming_speed_center_mps": 3.888721154827124,
+   "incoming_dir_angle_to_inbound_axis_deg": 15.046048782687043,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.14814921000000003,
+    0.29245415999999996
+   ],
+   "racket_site_speed_mps": 2.0121593475341797,
+   "racket_site_speed_tool_f64_mps": 2.0121593230783983,
+   "racket_site_speed_tool_delta_mps": 2.445578139997906e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7696391053574403,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_061_unit10_BH",
+   "action_id": "take_061_unit10_bh",
+   "family": "backhand",
+   "t_hit_s": 0.28,
+   "t_cycle_s": 0.52,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.5666666666666668,
+    1.28
+   ],
+   "ttc_center_s": 0.9233333333333333,
+   "contact_offset_center_b_yaw_m": [
+    0.4831396884714645,
+    -0.41553020116432593,
+    1.0346
+   ],
+   "incoming_speed_center_mps": 1.6901888681446224,
+   "incoming_dir_angle_to_inbound_axis_deg": 55.5035784469355,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.007854529999999915,
+    0.22155808999999993
+   ],
+   "racket_site_speed_mps": 1.0588737726211548,
+   "racket_site_speed_tool_f64_mps": 1.0588738648799476,
+   "racket_site_speed_tool_delta_mps": 9.225879282759308e-08,
+   "mount_normal_sign": 1,
+   "mount_sign_matches_family": false,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": 0.4532963110525588,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_061_unit11_BH",
+   "action_id": "take_061_unit11_bh",
+   "family": "backhand",
+   "t_hit_s": 0.56,
+   "t_cycle_s": 1.18,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.0333333333333334,
+    1.56
+   ],
+   "ttc_center_s": 1.2966666666666669,
+   "contact_offset_center_b_yaw_m": [
+    0.6602343570262419,
+    0.025580501783506043,
+    1.0565
+   ],
+   "incoming_speed_center_mps": 3.7012773767984477,
+   "incoming_dir_angle_to_inbound_axis_deg": 9.839265871346585,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.10648022000000001,
+    0.31673855
+   ],
+   "racket_site_speed_mps": 1.9378782510757446,
+   "racket_site_speed_tool_f64_mps": 1.9378769858053548,
+   "racket_site_speed_tool_delta_mps": 1.265270389794182e-06,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.6488388092669602,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_061_unit12_BH",
+   "action_id": "take_061_unit12_bh",
+   "family": "backhand",
+   "t_hit_s": 0.54,
+   "t_cycle_s": 1.02,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.0000000000000002,
+    1.54
+   ],
+   "ttc_center_s": 1.27,
+   "contact_offset_center_b_yaw_m": [
+    0.5717830289770325,
+    -0.0541054246094403,
+    0.9597
+   ],
+   "incoming_speed_center_mps": 4.710142211228871,
+   "incoming_dir_angle_to_inbound_axis_deg": 22.113204733792756,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.15663207,
+    0.21884426999999995
+   ],
+   "racket_site_speed_mps": 2.2203330993652344,
+   "racket_site_speed_tool_f64_mps": 2.22033299394809,
+   "racket_site_speed_tool_delta_mps": 1.0541714434708638e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.6678929857841551,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_061_unit13_BH",
+   "action_id": "take_061_unit13_bh",
+   "family": "backhand",
+   "t_hit_s": 0.7,
+   "t_cycle_s": 0.96,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.2666666666666668,
+    1.7
+   ],
+   "ttc_center_s": 1.4833333333333334,
+   "contact_offset_center_b_yaw_m": [
+    0.7155902365751242,
+    -0.045188330733850174,
+    0.9714
+   ],
+   "incoming_speed_center_mps": 4.341493478055679,
+   "incoming_dir_angle_to_inbound_axis_deg": 17.147787620725882,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.19889328000000006,
+    0.27019133999999995
+   ],
+   "racket_site_speed_mps": 1.841426134109497,
+   "racket_site_speed_tool_f64_mps": 1.8414257216201815,
+   "racket_site_speed_tool_delta_mps": 4.124893155932341e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7782458350466577,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_061_unit14_BH",
+   "action_id": "take_061_unit14_bh",
+   "family": "backhand",
+   "t_hit_s": 0.94,
+   "t_cycle_s": 1.16,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.6666666666666667,
+    1.94
+   ],
+   "ttc_center_s": 1.8033333333333332,
+   "contact_offset_center_b_yaw_m": [
+    0.6538026745445666,
+    -0.15156543956167587,
+    1.0342
+   ],
+   "incoming_speed_center_mps": 3.8001668937034854,
+   "incoming_dir_angle_to_inbound_axis_deg": 28.467060108759433,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.19289270000000003,
+    0.27413431999999993
+   ],
+   "racket_site_speed_mps": 2.0106899738311768,
+   "racket_site_speed_tool_f64_mps": 2.0106909680426353,
+   "racket_site_speed_tool_delta_mps": 9.942114584937656e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8601833818619147,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_061_unit15_BH",
+   "action_id": "take_061_unit15_bh",
+   "family": "backhand",
+   "t_hit_s": 0.98,
+   "t_cycle_s": 1.9,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.7333333333333334,
+    1.98
+   ],
+   "ttc_center_s": 1.8566666666666667,
+   "contact_offset_center_b_yaw_m": [
+    0.7498779309957411,
+    -0.05179538073187184,
+    1.047
+   ],
+   "incoming_speed_center_mps": 4.075123951489083,
+   "incoming_dir_angle_to_inbound_axis_deg": 31.801794606629816,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.22161799000000004,
+    0.26176473
+   ],
+   "racket_site_speed_mps": 2.0911102294921875,
+   "racket_site_speed_tool_f64_mps": 2.091110030776678,
+   "racket_site_speed_tool_delta_mps": 1.9871550938077576e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8537355660399805,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_061_unit16_BH",
+   "action_id": "take_061_unit16_bh",
+   "family": "backhand",
+   "t_hit_s": 0.28,
+   "t_cycle_s": 1.16,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.5666666666666668,
+    1.28
+   ],
+   "ttc_center_s": 0.9233333333333333,
+   "contact_offset_center_b_yaw_m": [
+    0.674516565617395,
+    -0.21006061505486937,
+    1.0205
+   ],
+   "incoming_speed_center_mps": 3.197299268132403,
+   "incoming_dir_angle_to_inbound_axis_deg": 1.914238908927006,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.2075319,
+    0.25625915999999993
+   ],
+   "racket_site_speed_mps": 1.9392695426940918,
+   "racket_site_speed_tool_f64_mps": 1.9392700245601717,
+   "racket_site_speed_tool_delta_mps": 4.818660799266183e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.9024380055697095,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_061_unit17_BH",
+   "action_id": "take_061_unit17_bh",
+   "family": "backhand",
+   "t_hit_s": 0.22,
+   "t_cycle_s": 1.12,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.4666666666666667,
+    1.22
+   ],
+   "ttc_center_s": 0.8433333333333333,
+   "contact_offset_center_b_yaw_m": [
+    0.6693188699886723,
+    -0.08873549658606028,
+    0.9871
+   ],
+   "incoming_speed_center_mps": 3.8471896781936814,
+   "incoming_dir_angle_to_inbound_axis_deg": 15.6539250034648,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.21396243999999998,
+    0.25072688
+   ],
+   "racket_site_speed_mps": 2.1460657119750977,
+   "racket_site_speed_tool_f64_mps": 2.146066121734635,
+   "racket_site_speed_tool_delta_mps": 4.097595374119578e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7782524488312987,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_061_unit18_BH",
+   "action_id": "take_061_unit18_bh",
+   "family": "backhand",
+   "t_hit_s": 0.24,
+   "t_cycle_s": 0.64,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.5,
+    1.24
+   ],
+   "ttc_center_s": 0.87,
+   "contact_offset_center_b_yaw_m": [
+    0.7383697259658751,
+    -0.1088794888442761,
+    1.0296
+   ],
+   "incoming_speed_center_mps": 3.443920383806803,
+   "incoming_dir_angle_to_inbound_axis_deg": 12.270580570660101,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.23171769999999992,
+    0.25507784999999994
+   ],
+   "racket_site_speed_mps": 1.9983681440353394,
+   "racket_site_speed_tool_f64_mps": 1.9983681222273357,
+   "racket_site_speed_tool_delta_mps": 2.180800362516777e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7785718428652398,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_061_unit19_BH",
+   "action_id": "take_061_unit19_bh",
+   "family": "backhand",
+   "t_hit_s": 0.74,
+   "t_cycle_s": 0.96,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.3333333333333335,
+    1.74
+   ],
+   "ttc_center_s": 1.5366666666666666,
+   "contact_offset_center_b_yaw_m": [
+    0.7053563495940093,
+    -0.009133240319264796,
+    1.0032
+   ],
+   "incoming_speed_center_mps": 4.39191050113729,
+   "incoming_dir_angle_to_inbound_axis_deg": 24.411336073220323,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.18693391000000004,
+    0.2307567399999999
+   ],
+   "racket_site_speed_mps": 2.328889846801758,
+   "racket_site_speed_tool_f64_mps": 2.3288893609316306,
+   "racket_site_speed_tool_delta_mps": 4.858701272425492e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7664892207980897,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_061_unit20_BH",
+   "action_id": "take_061_unit20_bh",
+   "family": "backhand",
+   "t_hit_s": 0.88,
+   "t_cycle_s": 1.14,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.5666666666666669,
+    1.88
+   ],
+   "ttc_center_s": 1.7233333333333334,
+   "contact_offset_center_b_yaw_m": [
+    0.6148941201971209,
+    -0.11882877264558972,
+    0.9381
+   ],
+   "incoming_speed_center_mps": 4.5643073351824155,
+   "incoming_dir_angle_to_inbound_axis_deg": 25.53145021561764,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.18165814000000002,
+    0.23717416999999996
+   ],
+   "racket_site_speed_mps": 2.060080051422119,
+   "racket_site_speed_tool_f64_mps": 2.0600797700252023,
+   "racket_site_speed_tool_delta_mps": 2.813969168791175e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7691987104183835,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_061_unit21_BH",
+   "action_id": "take_061_unit21_bh",
+   "family": "backhand",
+   "t_hit_s": 0.9,
+   "t_cycle_s": 1.12,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.6,
+    1.9
+   ],
+   "ttc_center_s": 1.75,
+   "contact_offset_center_b_yaw_m": [
+    0.7313513864864669,
+    -0.09744345852176464,
+    1.0149
+   ],
+   "incoming_speed_center_mps": 3.988883856418986,
+   "incoming_dir_angle_to_inbound_axis_deg": 26.334858395085824,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.19341257,
+    0.24950666
+   ],
+   "racket_site_speed_mps": 1.937026023864746,
+   "racket_site_speed_tool_f64_mps": 1.9370261662292387,
+   "racket_site_speed_tool_delta_mps": 1.423644926390466e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8772199863032163,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_061_unit22_BH",
+   "action_id": "take_061_unit22_bh",
+   "family": "backhand",
+   "t_hit_s": 0.88,
+   "t_cycle_s": 1.56,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.5666666666666669,
+    1.88
+   ],
+   "ttc_center_s": 1.7233333333333334,
+   "contact_offset_center_b_yaw_m": [
+    0.5622175765982631,
+    -0.3112592760550874,
+    0.9878
+   ],
+   "incoming_speed_center_mps": 4.677455381935781,
+   "incoming_dir_angle_to_inbound_axis_deg": 30.910001203714415,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.18559769000000004,
+    0.27124307
+   ],
+   "racket_site_speed_mps": 2.2052419185638428,
+   "racket_site_speed_tool_f64_mps": 2.205242250660118,
+   "racket_site_speed_tool_delta_mps": 3.320962753683432e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7076640642118812,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_061_unit24_BH",
+   "action_id": "take_061_unit24_bh",
+   "family": "backhand",
+   "t_hit_s": 0.84,
+   "t_cycle_s": 1.78,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.5,
+    1.8399999999999999
+   ],
+   "ttc_center_s": 1.67,
+   "contact_offset_center_b_yaw_m": [
+    0.6129847667056729,
+    -0.16018293935089292,
+    1.004
+   ],
+   "incoming_speed_center_mps": 4.722291292370685,
+   "incoming_dir_angle_to_inbound_axis_deg": 32.43127047074457,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.2155031099999999,
+    0.28424658999999997
+   ],
+   "racket_site_speed_mps": 2.0889198780059814,
+   "racket_site_speed_tool_f64_mps": 2.0889197363482097,
+   "racket_site_speed_tool_delta_mps": 1.4165777173502647e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.6454959654810539,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_061_unit25_BH",
+   "action_id": "take_061_unit25_bh",
+   "family": "backhand",
+   "t_hit_s": 0.24,
+   "t_cycle_s": 0.78,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.5,
+    1.24
+   ],
+   "ttc_center_s": 0.87,
+   "contact_offset_center_b_yaw_m": [
+    0.670356151670661,
+    -0.24754033392255226,
+    0.995
+   ],
+   "incoming_speed_center_mps": 3.4739213879994457,
+   "incoming_dir_angle_to_inbound_axis_deg": 7.991493731790379,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.22070790000000007,
+    0.22946362999999992
+   ],
+   "racket_site_speed_mps": 1.6686193943023682,
+   "racket_site_speed_tool_f64_mps": 1.6686189503013857,
+   "racket_site_speed_tool_delta_mps": 4.440009824246971e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.848913721602755,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_062_unit00_BH",
+   "action_id": "take_062_unit00_bh",
+   "family": "backhand",
+   "t_hit_s": 0.8,
+   "t_cycle_s": 1.38,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.4333333333333336,
+    1.8
+   ],
+   "ttc_center_s": 1.6166666666666667,
+   "contact_offset_center_b_yaw_m": [
+    0.7053878376763311,
+    0.2474247643667045,
+    0.9865
+   ],
+   "incoming_speed_center_mps": 3.4764803494338925,
+   "incoming_dir_angle_to_inbound_axis_deg": 15.73986471929521,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.16498853000000002,
+    0.09063440999999994
+   ],
+   "racket_site_speed_mps": 1.788907527923584,
+   "racket_site_speed_tool_f64_mps": 1.7889080592141988,
+   "racket_site_speed_tool_delta_mps": 5.31290614835811e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8852085767336515,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_062_unit01_BH",
+   "action_id": "take_062_unit01_bh",
+   "family": "backhand",
+   "t_hit_s": 0.64,
+   "t_cycle_s": 1.36,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.1666666666666667,
+    1.6400000000000001
+   ],
+   "ttc_center_s": 1.4033333333333333,
+   "contact_offset_center_b_yaw_m": [
+    0.6774260201857809,
+    -0.08730273698449417,
+    1.038
+   ],
+   "incoming_speed_center_mps": 3.9318354772294324,
+   "incoming_dir_angle_to_inbound_axis_deg": 16.04001967442636,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.16867196000000007,
+    0.25012641
+   ],
+   "racket_site_speed_mps": 1.9074199199676514,
+   "racket_site_speed_tool_f64_mps": 1.9074196675073354,
+   "racket_site_speed_tool_delta_mps": 2.52460315985914e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7796375100086744,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_062_unit02_BH",
+   "action_id": "take_062_unit02_bh",
+   "family": "backhand",
+   "t_hit_s": 0.54,
+   "t_cycle_s": 1.06,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.0000000000000002,
+    1.54
+   ],
+   "ttc_center_s": 1.27,
+   "contact_offset_center_b_yaw_m": [
+    0.7029553098499682,
+    -0.005054427607666848,
+    0.9788
+   ],
+   "incoming_speed_center_mps": 3.860264371775591,
+   "incoming_dir_angle_to_inbound_axis_deg": 14.312981912679138,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.15057564,
+    0.24850658000000003
+   ],
+   "racket_site_speed_mps": 1.9135382175445557,
+   "racket_site_speed_tool_f64_mps": 1.9135380938946183,
+   "racket_site_speed_tool_delta_mps": 1.2364993740021646e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8827094383203611,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_062_unit04_BH",
+   "action_id": "take_062_unit04_bh",
+   "family": "backhand",
+   "t_hit_s": 0.94,
+   "t_cycle_s": 1.12,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.6666666666666667,
+    1.94
+   ],
+   "ttc_center_s": 1.8033333333333332,
+   "contact_offset_center_b_yaw_m": [
+    0.683187426110303,
+    -0.25274625253033656,
+    1.0256
+   ],
+   "incoming_speed_center_mps": 3.9319290710794874,
+   "incoming_dir_angle_to_inbound_axis_deg": 33.173119543747084,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.1656356200000001,
+    0.29568342999999997
+   ],
+   "racket_site_speed_mps": 2.047156572341919,
+   "racket_site_speed_tool_f64_mps": 2.04715663552406,
+   "racket_site_speed_tool_delta_mps": 6.318214085254681e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7809350935658448,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_062_unit05_BH",
+   "action_id": "take_062_unit05_bh",
+   "family": "backhand",
+   "t_hit_s": 1.0,
+   "t_cycle_s": 1.4,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.7666666666666668,
+    2.0
+   ],
+   "ttc_center_s": 1.8833333333333333,
+   "contact_offset_center_b_yaw_m": [
+    0.6640625121973966,
+    -0.31288023102980983,
+    0.9659
+   ],
+   "incoming_speed_center_mps": 3.827496547353113,
+   "incoming_dir_angle_to_inbound_axis_deg": 32.71558646126428,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.17141212999999988,
+    0.27687808999999997
+   ],
+   "racket_site_speed_mps": 1.649074673652649,
+   "racket_site_speed_tool_f64_mps": 1.649075211044156,
+   "racket_site_speed_tool_delta_mps": 5.373915070716606e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7237646232656048,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_062_unit06_BH",
+   "action_id": "take_062_unit06_bh",
+   "family": "backhand",
+   "t_hit_s": 0.76,
+   "t_cycle_s": 1.14,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.366666666666667,
+    1.76
+   ],
+   "ttc_center_s": 1.5633333333333335,
+   "contact_offset_center_b_yaw_m": [
+    0.6405515644936068,
+    -0.12683951698209026,
+    0.9908
+   ],
+   "incoming_speed_center_mps": 4.131471729299379,
+   "incoming_dir_angle_to_inbound_axis_deg": 24.17567249734187,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.12038493000000006,
+    0.25203717999999997
+   ],
+   "racket_site_speed_mps": 1.8330297470092773,
+   "racket_site_speed_tool_f64_mps": 1.8330300771435912,
+   "racket_site_speed_tool_delta_mps": 3.3013431388617676e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7267459535084027,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_062_unit07_BH",
+   "action_id": "take_062_unit07_bh",
+   "family": "backhand",
+   "t_hit_s": 0.76,
+   "t_cycle_s": 1.7,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.366666666666667,
+    1.76
+   ],
+   "ttc_center_s": 1.5633333333333335,
+   "contact_offset_center_b_yaw_m": [
+    0.7049807268659667,
+    -0.07319003813613326,
+    1.0301
+   ],
+   "incoming_speed_center_mps": 4.101257614439747,
+   "incoming_dir_angle_to_inbound_axis_deg": 28.09719214957556,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.13455635,
+    0.24389876999999993
+   ],
+   "racket_site_speed_mps": 1.7826586961746216,
+   "racket_site_speed_tool_f64_mps": 1.7826590716897361,
+   "racket_site_speed_tool_delta_mps": 3.7551511455902187e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7881419506943634,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_062_unit08_BH",
+   "action_id": "take_062_unit08_bh",
+   "family": "backhand",
+   "t_hit_s": 0.2,
+   "t_cycle_s": 0.56,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.43333333333333335,
+    1.2
+   ],
+   "ttc_center_s": 0.8166666666666667,
+   "contact_offset_center_b_yaw_m": [
+    0.681913909160783,
+    -0.19581852119480908,
+    0.9828
+   ],
+   "incoming_speed_center_mps": 3.277820742505605,
+   "incoming_dir_angle_to_inbound_axis_deg": 18.09955386124816,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.20997816000000002,
+    0.22856113
+   ],
+   "racket_site_speed_mps": 1.9896496534347534,
+   "racket_site_speed_tool_f64_mps": 1.9896504663602295,
+   "racket_site_speed_tool_delta_mps": 8.129254760458338e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.736672672759771,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_062_unit09_BH",
+   "action_id": "take_062_unit09_bh",
+   "family": "backhand",
+   "t_hit_s": 0.78,
+   "t_cycle_s": 1.16,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.4000000000000001,
+    1.78
+   ],
+   "ttc_center_s": 1.59,
+   "contact_offset_center_b_yaw_m": [
+    0.7163667913844651,
+    -0.10020009699866936,
+    0.9722
+   ],
+   "incoming_speed_center_mps": 4.076269326234468,
+   "incoming_dir_angle_to_inbound_axis_deg": 17.726820146107187,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.14684138000000002,
+    0.17866488999999997
+   ],
+   "racket_site_speed_mps": 1.7267879247665405,
+   "racket_site_speed_tool_f64_mps": 1.726788277864573,
+   "racket_site_speed_tool_delta_mps": 3.530980323684929e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7947820760257355,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_062_unit10_BH",
+   "action_id": "take_062_unit10_bh",
+   "family": "backhand",
+   "t_hit_s": 0.84,
+   "t_cycle_s": 1.88,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.5,
+    1.8399999999999999
+   ],
+   "ttc_center_s": 1.67,
+   "contact_offset_center_b_yaw_m": [
+    0.6264671819736671,
+    -0.1426527063737944,
+    1.0216
+   ],
+   "incoming_speed_center_mps": 3.932578829470555,
+   "incoming_dir_angle_to_inbound_axis_deg": 29.10738964501631,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.13029679000000005,
+    0.23015945999999998
+   ],
+   "racket_site_speed_mps": 1.9673781394958496,
+   "racket_site_speed_tool_f64_mps": 1.9673789338030252,
+   "racket_site_speed_tool_delta_mps": 7.943071755889264e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7688628849316395,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_062_unit11_BH",
+   "action_id": "take_062_unit11_bh",
+   "family": "backhand",
+   "t_hit_s": 1.48,
+   "t_cycle_s": 2.64,
+   "teacher_rate_min": 0.6491228076666667,
+   "teacher_rate_min_bumped": true,
+   "ttc_window_s": [
+    2.3799999977199997,
+    2.48
+   ],
+   "ttc_center_s": 2.4299999988599996,
+   "contact_offset_center_b_yaw_m": [
+    0.7436524728835676,
+    -0.1716091743670466,
+    1.0324
+   ],
+   "incoming_speed_center_mps": 3.4241083525496094,
+   "incoming_dir_angle_to_inbound_axis_deg": 17.343166394729426,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.17541537000000007,
+    0.24100073999999994
+   ],
+   "racket_site_speed_mps": 1.6931384801864624,
+   "racket_site_speed_tool_f64_mps": 1.6931383624899419,
+   "racket_site_speed_tool_delta_mps": 1.1769652052961987e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8866750618993472,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_063_unit00_BH",
+   "action_id": "take_063_unit00_bh",
+   "family": "backhand",
+   "t_hit_s": 0.56,
+   "t_cycle_s": 1.26,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.0333333333333334,
+    1.56
+   ],
+   "ttc_center_s": 1.2966666666666669,
+   "contact_offset_center_b_yaw_m": [
+    0.7628278879645841,
+    0.2436832264534389,
+    0.9765
+   ],
+   "incoming_speed_center_mps": 3.04644730957225,
+   "incoming_dir_angle_to_inbound_axis_deg": 9.556921119595705,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.20478932000000005,
+    0.22356493999999993
+   ],
+   "racket_site_speed_mps": 1.8504637479782104,
+   "racket_site_speed_tool_f64_mps": 1.850464236819664,
+   "racket_site_speed_tool_delta_mps": 4.888414535386687e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8852433728440638,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_063_unit01_BH",
+   "action_id": "take_063_unit01_bh",
+   "family": "backhand",
+   "t_hit_s": 0.54,
+   "t_cycle_s": 0.76,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.0000000000000002,
+    1.54
+   ],
+   "ttc_center_s": 1.27,
+   "contact_offset_center_b_yaw_m": [
+    0.6739240194779254,
+    -0.08402783147035289,
+    1.0151
+   ],
+   "incoming_speed_center_mps": 3.871923090661797,
+   "incoming_dir_angle_to_inbound_axis_deg": 10.275658686221389,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.18167944000000003,
+    0.2794278599999999
+   ],
+   "racket_site_speed_mps": 1.6879253387451172,
+   "racket_site_speed_tool_f64_mps": 1.6879252438336725,
+   "racket_site_speed_tool_delta_mps": 9.491144470352708e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7977482704756665,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_063_unit02_BH",
+   "action_id": "take_063_unit02_bh",
+   "family": "backhand",
+   "t_hit_s": 1.04,
+   "t_cycle_s": 1.5,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.8333333333333335,
+    2.04
+   ],
+   "ttc_center_s": 1.9366666666666668,
+   "contact_offset_center_b_yaw_m": [
+    0.6982131596438038,
+    -0.313274305827356,
+    0.976
+   ],
+   "incoming_speed_center_mps": 3.8643565078807103,
+   "incoming_dir_angle_to_inbound_axis_deg": 30.00345526043453,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.20591249,
+    0.24199634000000003
+   ],
+   "racket_site_speed_mps": 1.7570592164993286,
+   "racket_site_speed_tool_f64_mps": 1.7570589294006507,
+   "racket_site_speed_tool_delta_mps": 2.8709867794241006e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7124415869099784,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_063_unit03_BH",
+   "action_id": "take_063_unit03_bh",
+   "family": "backhand",
+   "t_hit_s": 0.7,
+   "t_cycle_s": 2.28,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.2666666666666668,
+    1.7
+   ],
+   "ttc_center_s": 1.4833333333333334,
+   "contact_offset_center_b_yaw_m": [
+    0.7040776302589267,
+    -0.14945838531684544,
+    1.0247
+   ],
+   "incoming_speed_center_mps": 3.7386995613448266,
+   "incoming_dir_angle_to_inbound_axis_deg": 12.568161155701418,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.13418600000000003,
+    0.20328462000000003
+   ],
+   "racket_site_speed_mps": 1.5815765857696533,
+   "racket_site_speed_tool_f64_mps": 1.5815761938555561,
+   "racket_site_speed_tool_delta_mps": 3.9191409717531656e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7416537150074406,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_063_unit04_BH",
+   "action_id": "take_063_unit04_bh",
+   "family": "backhand",
+   "t_hit_s": 0.7,
+   "t_cycle_s": 2.06,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.2666666666666668,
+    1.7
+   ],
+   "ttc_center_s": 1.4833333333333334,
+   "contact_offset_center_b_yaw_m": [
+    0.7329485891232476,
+    -0.08358031114017342,
+    1.018
+   ],
+   "incoming_speed_center_mps": 3.7587355081197185,
+   "incoming_dir_angle_to_inbound_axis_deg": 17.02178115239999,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.13615705,
+    0.20856892999999999
+   ],
+   "racket_site_speed_mps": 1.71268630027771,
+   "racket_site_speed_tool_f64_mps": 1.7126864723491562,
+   "racket_site_speed_tool_delta_mps": 1.720714462027928e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7429637148748676,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_063_unit05_BH",
+   "action_id": "take_063_unit05_bh",
+   "family": "backhand",
+   "t_hit_s": 0.92,
+   "t_cycle_s": 1.88,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.6333333333333335,
+    1.92
+   ],
+   "ttc_center_s": 1.7766666666666668,
+   "contact_offset_center_b_yaw_m": [
+    0.6179895153871026,
+    -0.14941215089824228,
+    1.0434
+   ],
+   "incoming_speed_center_mps": 3.1534889265700614,
+   "incoming_dir_angle_to_inbound_axis_deg": 22.821894257868827,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.15797034999999993,
+    0.20686304999999994
+   ],
+   "racket_site_speed_mps": 1.6583133935928345,
+   "racket_site_speed_tool_f64_mps": 1.6583132599742987,
+   "racket_site_speed_tool_delta_mps": 1.3361853579141325e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7620276078551137,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_064_unit00_BH",
+   "action_id": "take_064_unit00_bh",
+   "family": "backhand",
+   "t_hit_s": 0.5,
+   "t_cycle_s": 1.1,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.9333333333333333,
+    1.5
+   ],
+   "ttc_center_s": 1.2166666666666668,
+   "contact_offset_center_b_yaw_m": [
+    0.8289418465132155,
+    0.15880916539335146,
+    1.0110999999999999
+   ],
+   "incoming_speed_center_mps": 3.0677053655786435,
+   "incoming_dir_angle_to_inbound_axis_deg": 12.761833704394242,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.24654532000000007,
+    0.19083735999999996
+   ],
+   "racket_site_speed_mps": 1.9171910285949707,
+   "racket_site_speed_tool_f64_mps": 1.9171902145842887,
+   "racket_site_speed_tool_delta_mps": 8.140106819709558e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7931004666966417,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_064_unit02_BH",
+   "action_id": "take_064_unit02_bh",
+   "family": "backhand",
+   "t_hit_s": 0.22,
+   "t_cycle_s": 1.22,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.4666666666666667,
+    1.22
+   ],
+   "ttc_center_s": 0.8433333333333333,
+   "contact_offset_center_b_yaw_m": [
+    0.7434155193442198,
+    -0.1567818516218208,
+    1.0073
+   ],
+   "incoming_speed_center_mps": 3.543889194091711,
+   "incoming_dir_angle_to_inbound_axis_deg": 16.13429979209534,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.19631445000000003,
+    0.3283209999999999
+   ],
+   "racket_site_speed_mps": 1.7822470664978027,
+   "racket_site_speed_tool_f64_mps": 1.7822470408652802,
+   "racket_site_speed_tool_delta_mps": 2.5632522548946213e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7285305131900978,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_064_unit03_BH",
+   "action_id": "take_064_unit03_bh",
+   "family": "backhand",
+   "t_hit_s": 0.2,
+   "t_cycle_s": 0.76,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.43333333333333335,
+    1.2
+   ],
+   "ttc_center_s": 0.8166666666666667,
+   "contact_offset_center_b_yaw_m": [
+    0.6323932071401749,
+    -0.2754931421631114,
+    1.0247
+   ],
+   "incoming_speed_center_mps": 2.8795474314551583,
+   "incoming_dir_angle_to_inbound_axis_deg": 25.70759748148088,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.17582941000000007,
+    0.27726117999999994
+   ],
+   "racket_site_speed_mps": 1.809605598449707,
+   "racket_site_speed_tool_f64_mps": 1.809605332019598,
+   "racket_site_speed_tool_delta_mps": 2.664301090860022e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7386171531189558,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_064_unit04_BH",
+   "action_id": "take_064_unit04_bh",
+   "family": "backhand",
+   "t_hit_s": 0.64,
+   "t_cycle_s": 1.54,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.1666666666666667,
+    1.6400000000000001
+   ],
+   "ttc_center_s": 1.4033333333333333,
+   "contact_offset_center_b_yaw_m": [
+    0.7169787794319189,
+    -0.13017025000526924,
+    1.0197
+   ],
+   "incoming_speed_center_mps": 3.8733207471109337,
+   "incoming_dir_angle_to_inbound_axis_deg": 18.044871998835244,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.13635094999999997,
+    0.23787368999999992
+   ],
+   "racket_site_speed_mps": 1.7370660305023193,
+   "racket_site_speed_tool_f64_mps": 1.7370661720584886,
+   "racket_site_speed_tool_delta_mps": 1.415561692308387e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8676804931912006,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_064_unit05_BH",
+   "action_id": "take_064_unit05_bh",
+   "family": "backhand",
+   "t_hit_s": 0.28,
+   "t_cycle_s": 0.72,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    0.5666666666666668,
+    1.28
+   ],
+   "ttc_center_s": 0.9233333333333333,
+   "contact_offset_center_b_yaw_m": [
+    0.743397961053272,
+    -0.20813015218422432,
+    1.0006
+   ],
+   "incoming_speed_center_mps": 3.163832171591913,
+   "incoming_dir_angle_to_inbound_axis_deg": 16.155524517608946,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.14080936,
+    0.21672446999999995
+   ],
+   "racket_site_speed_mps": 1.576271891593933,
+   "racket_site_speed_tool_f64_mps": 1.5762718762719046,
+   "racket_site_speed_tool_delta_mps": 1.532202853482545e-08,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.7967902352038022,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_064_unit06_BH",
+   "action_id": "take_064_unit06_bh",
+   "family": "backhand",
+   "t_hit_s": 0.68,
+   "t_cycle_s": 1.1,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.2333333333333336,
+    1.6800000000000002
+   ],
+   "ttc_center_s": 1.456666666666667,
+   "contact_offset_center_b_yaw_m": [
+    0.6399296392773947,
+    -0.2096964362443451,
+    0.9657
+   ],
+   "incoming_speed_center_mps": 3.9028188812703055,
+   "incoming_dir_angle_to_inbound_axis_deg": 14.395680757532377,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.11645167999999995,
+    0.21664726999999995
+   ],
+   "racket_site_speed_mps": 1.6692255735397339,
+   "racket_site_speed_tool_f64_mps": 1.6692249477222754,
+   "racket_site_speed_tool_delta_mps": 6.258174585216381e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": true,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8387263133068286,
+   "mount_sign_raw_agrees": true
+  },
+  {
+   "uid": "Take_064_unit07_FH",
+   "action_id": "take_064_unit07_fh",
+   "family": "forehand",
+   "t_hit_s": 0.72,
+   "t_cycle_s": 1.12,
+   "teacher_rate_min": 0.6,
+   "teacher_rate_min_bumped": false,
+   "ttc_window_s": [
+    1.3,
+    1.72
+   ],
+   "ttc_center_s": 1.51,
+   "contact_offset_center_b_yaw_m": [
+    0.7528031759388992,
+    -0.17327506054326436,
+    1.0065
+   ],
+   "incoming_speed_center_mps": 3.5684749697875144,
+   "incoming_dir_angle_to_inbound_axis_deg": 9.446540840471055,
+   "inbound_min_cosine": 0.2,
+   "inbound_min_cosine_relaxed": false,
+   "base_spawn_center_w_xy_m": [
+    -0.12577664,
+    0.21088765999999992
+   ],
+   "racket_site_speed_mps": 1.5679641962051392,
+   "racket_site_speed_tool_f64_mps": 1.567963786916604,
+   "racket_site_speed_tool_delta_mps": 4.092885350637232e-07,
+   "mount_normal_sign": -1,
+   "mount_sign_matches_family": false,
+   "mount_sign_ambiguous": false,
+   "mount_sign_cos_clean": -0.8269719051028815,
+   "mount_sign_raw_agrees": true
+  }
+ ]
+}
