@@ -3399,20 +3399,66 @@ class RacketTargetCommand(CommandTerm):
         )
         curriculum_config = build_curriculum_config(manifest)
         scheduler_config = ArmSchedulerConfig()
-        evaluator_authority, evaluator_launch = (
-            _action_ball_load_evaluator_authority(
-                cfg=self.cfg,
-                repo_root=repo_root,
+        diagnostic_unauthorized = self.cfg.action_ball_diagnostic_unauthorized
+        if type(diagnostic_unauthorized) is not bool:
+            raise ValueError(
+                "racket_target.action_ball_diagnostic_unauthorized must be an "
+                "exact boolean"
+            )
+        self._action_ball_diagnostic_unauthorized = diagnostic_unauthorized
+        if diagnostic_unauthorized:
+            # Franco 2026-07-28 approved bypass: bind a DIAGNOSTIC authority
+            # (no code-pinned launch receipt).  It can never record or issue
+            # formal windows, so promotion/formal grading stays impossible;
+            # the brand below follows every artifact this run produces.
+            from whole_body_tracking.tasks.tracking.mdp import (
+                action_ball_evaluation as evaluation,
+            )
+
+            evaluator_authority = evaluation.FrozenEvaluatorAuthority(
                 curriculum_contract_sha256=bundle.contract_sha256,
                 profile_order=profile_keys,
                 arm_catalog_sha256=ARM_CATALOG_SHA256,
-                scheduler_contract_sha256=(
-                    scheduler_config.contract_sha256
-                ),
+                scheduler_contract_sha256=scheduler_config.contract_sha256,
                 sampler_sha256=sampler.sampler_contract_sha256,
                 solver_sha256=solver_contract["sha256"],
+                policy_contract_sha256=(
+                    self.cfg.action_ball_policy_contract_sha256
+                ),
             )
-        )
+            evaluator_launch = {
+                "diagnostic_unauthorized": True,
+                "path": "",
+                "file_sha256": "0" * 64,
+                "document": None,
+                "launch_receipt_canonical_sha256": "0" * 64,
+                "authority_binding": evaluator_authority.binding_document(),
+                "authority_state_owner_sha256": (
+                    evaluator_authority.state_owner_sha256
+                ),
+            }
+            print(
+                "[RacketTargetCommand] WARN action-ball DIAGNOSTIC "
+                "UNAUTHORIZED run: trust sets and certificate chain "
+                "bypassed; nothing this run produces can authorize "
+                "promotion, export, or formal grading",
+                flush=True,
+            )
+        else:
+            evaluator_authority, evaluator_launch = (
+                _action_ball_load_evaluator_authority(
+                    cfg=self.cfg,
+                    repo_root=repo_root,
+                    curriculum_contract_sha256=bundle.contract_sha256,
+                    profile_order=profile_keys,
+                    arm_catalog_sha256=ARM_CATALOG_SHA256,
+                    scheduler_contract_sha256=(
+                        scheduler_config.contract_sha256
+                    ),
+                    sampler_sha256=sampler.sampler_contract_sha256,
+                    solver_sha256=solver_contract["sha256"],
+                )
+            )
         curriculum = ActionBallCurriculum(
             contract_sha256=bundle.contract_sha256,
             profile_order=profile_keys,
@@ -3421,7 +3467,12 @@ class RacketTargetCommand(CommandTerm):
             policy_contract_sha256=self.cfg.action_ball_policy_contract_sha256,
             config=curriculum_config,
             scheduler_config=scheduler_config,
-            evaluator_authority=evaluator_authority,
+            # A diagnostic authority is deliberately NOT bound: the curriculum
+            # then refuses every formal observe/update fail-loud, which is the
+            # promotion-path enforcement of the diagnostic brand.
+            evaluator_authority=(
+                None if diagnostic_unauthorized else evaluator_authority
+            ),
         )
         domain_authority_contract = action_ball_domain_authority_contract(
             manifest_sha256=loaded.file_sha256,
@@ -3511,6 +3562,9 @@ class RacketTargetCommand(CommandTerm):
         }
         self._action_ball_birth_by_env = [None] * self.num_envs
         self._action_ball_task_by_env = [None] * self.num_envs
+        self._action_ball_reference_term_center_mask = (
+            self._action_ball_phase_center_mask_tensor()
+        )
         self._action_ball_ledger = torch.zeros(
             len(_ACTION_BALL_LEDGER_NAMES),
             n_actions,
@@ -3804,6 +3858,24 @@ class RacketTargetCommand(CommandTerm):
                 motion.action_ball_motion_admission_hard_contract()
             ),
         }
+        if self._action_ball_diagnostic_unauthorized:
+            # Brand the hard contract and replace the formal authority claim.
+            # Default-off runs build the payload above byte-identically.
+            payload["diagnostic_unauthorized"] = True
+            payload["evaluator_authority"] = {
+                "diagnostic_unauthorized": True,
+                "formal_authority_available": False,
+                "formal_launch_requires_code_pinned_receipt": True,
+                "runtime_or_manifest_may_self_authorize": False,
+                "authority_binding": (
+                    self._action_ball_evaluator_launch["authority_binding"]
+                ),
+                "authority_state_owner_sha256": (
+                    self._action_ball_evaluator_launch[
+                        "authority_state_owner_sha256"
+                    ]
+                ),
+            }
         payload["canonical_sha256"] = _action_ball_canonical_sha256(payload)
         return payload
 
@@ -4504,6 +4576,42 @@ class RacketTargetCommand(CommandTerm):
                 )
             )
         self._action_ball_reject_counts = rejection_rows
+
+    def _action_ball_phase_center_mask_tensor(self) -> torch.Tensor:
+        """(n_actions,) bool — True while the action's curriculum phase is center.
+
+        Franco 2026-07-28 third ruling (sole default behavior): envs whose
+        action has expanded past center (phase >= marginal) stop being
+        terminated by the reference-consistency envelopes anchor_pos /
+        anchor_ori / ee_body_pos; the absolute fall/table/joint guards are
+        separate terms and always stay on.  Curriculum phase only moves
+        through exact-resume evidence, so this mask refreshes at
+        construction and at load_state_dict — never mid-rollout.
+        """
+
+        return torch.tensor(
+            [
+                self._action_ball_curriculum.phase(key) == "center"
+                for key in self._action_ball_profile_keys
+            ],
+            dtype=torch.bool,
+            device=self.device,
+        )
+
+    def action_ball_reference_terminations_enabled(
+        self,
+    ) -> torch.Tensor | None:
+        """Per-env gate consumed by the hold-aware reference terminations.
+
+        Returns ``None`` outside action-ball mode (old verdicts everywhere
+        else); otherwise a (num_envs,) bool tensor selected by each env's
+        current clip (clip order == action order is enforced at launch).
+        """
+
+        if getattr(self, "_action_ball_curriculum", None) is None:
+            return None
+        clip_id = self._motion().clip_id
+        return self._action_ball_reference_term_center_mask[clip_id]
 
     def _action_ball_claim_domain(self, action_uid: int):
         """Mint the next frozen curriculum domain only at the broker reset barrier."""
@@ -6091,6 +6199,10 @@ class RacketTargetCommand(CommandTerm):
                 for key in self._action_ball_profile_keys
             },
         }
+        if self._action_ball_diagnostic_unauthorized:
+            # Brand every receipt this run emits; default-off runs stay
+            # byte-identical.
+            receipt["diagnostic_unauthorized"] = True
         print(
             json.dumps(
                 receipt,
@@ -6804,6 +6916,12 @@ class RacketTargetCommand(CommandTerm):
 
         # Atomic live commit after all nested structures, cross-links and X accounting validate.
         self._action_ball_curriculum.load_state_dict(state["curriculum"])
+        # Restored curriculum phases re-derive the per-action reference-
+        # termination gate (Franco 2026-07-28: phase >= marginal drops the
+        # teacher-consistency terminations for that action's envs).
+        self._action_ball_reference_term_center_mask = (
+            self._action_ball_phase_center_mask_tensor()
+        )
         self._action_ball_broker.load_state_dict(state["broker"])
         self._action_ball_pool.load_state_dict(state["pool"])
         self._action_ball_provider_births = provider_births
@@ -12502,6 +12620,14 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # action_ball_evaluation.py's immutable trust set.
     action_ball_evaluator_launch_receipt_path: str = ""
     action_ball_evaluator_launch_receipt_file_sha256: str = ""
+    # Franco 2026-07-28 approved DIAGNOSTIC bypass.  True skips the two code
+    # trust sets and the certificate chain (canonical motion admission +
+    # code-pinned evaluator launch receipt) and binds a diagnostic evaluator
+    # authority instead; every artifact the run leaves (hard contract, stdout
+    # receipts, exact-resume state, run name) is branded
+    # diagnostic_unauthorized=true, and formal/export paths reject the brand
+    # fail-loud.  Default false = byte-identical formal behavior.
+    action_ball_diagnostic_unauthorized: bool = False
     action_ball_seed: int = 0
     action_ball_pool_refill_rows: int = 16
     action_ball_fixed_direction: bool = True

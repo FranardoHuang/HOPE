@@ -1977,33 +1977,42 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
         raise _OverrideError(
             "[train.py] action-ball requires motion.canonical_ready_mode=true"
         )
-    for attr in (
-        "canonical_registry_path",
-        "canonical_promotion_certificate_path",
-    ):
-        if not str(getattr(motion_cfg, attr, "") or "").strip():
-            raise _OverrideError(
-                f"[train.py] action-ball requires motion.{attr}"
-            )
-    for attr in (
-        "canonical_registry_sha256",
-        "canonical_registry_alignment_sha256",
-        "canonical_ready_sha256",
-        "canonical_ready_fk_sha256",
-    ):
-        digest = str(getattr(motion_cfg, attr, "") or "")
-        if (
-            len(digest) != 64
-            or digest != digest.lower()
-            or any(
-                character not in "0123456789abcdef"
-                for character in digest
-            )
+    diagnostic_unauthorized = getattr(
+        racket_cfg, "action_ball_diagnostic_unauthorized", False
+    )
+    if type(diagnostic_unauthorized) is not bool:
+        raise _OverrideError(
+            "[train.py] racket.action_ball_diagnostic_unauthorized must be "
+            "an exact boolean"
+        )
+    if not diagnostic_unauthorized:
+        for attr in (
+            "canonical_registry_path",
+            "canonical_promotion_certificate_path",
         ):
-            raise _OverrideError(
-                f"[train.py] action-ball motion.{attr} must be exactly "
-                "64 lowercase hexadecimal characters"
-            )
+            if not str(getattr(motion_cfg, attr, "") or "").strip():
+                raise _OverrideError(
+                    f"[train.py] action-ball requires motion.{attr}"
+                )
+        for attr in (
+            "canonical_registry_sha256",
+            "canonical_registry_alignment_sha256",
+            "canonical_ready_sha256",
+            "canonical_ready_fk_sha256",
+        ):
+            digest = str(getattr(motion_cfg, attr, "") or "")
+            if (
+                len(digest) != 64
+                or digest != digest.lower()
+                or any(
+                    character not in "0123456789abcdef"
+                    for character in digest
+                )
+            ):
+                raise _OverrideError(
+                    f"[train.py] action-ball motion.{attr} must be exactly "
+                    "64 lowercase hexadecimal characters"
+                )
     if getattr(motion_cfg, "wrap_teleport", None) is not False:
         raise _OverrideError(
             "[train.py] action-ball requires motion.wrap_teleport=false"
@@ -2198,21 +2207,41 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
     # Load/adapter construction is also a cheap pre-gym validation of every
     # profile and curriculum field.  It deliberately does not sample.
     preflight = _action_ball_preflight_contract(racket_cfg, motion_cfg)
-    try:
-        motion_admission = _validate_action_ball_static_motion_admission(
-            preflight,
-            motion_cfg=motion_cfg,
+    if diagnostic_unauthorized:
+        # Franco 2026-07-28 approved bypass: no trust-set or certificate
+        # chain is consulted; the applied receipt below and every runtime
+        # artifact carry the diagnostic_unauthorized brand instead, and the
+        # formal/export paths reject that brand fail-loud.
+        print(
+            "[train.py] WARN action-ball DIAGNOSTIC UNAUTHORIZED: skipping "
+            "canonical motion admission and evaluator launch receipt "
+            "validation; this run cannot authorize promotion or export",
+            flush=True,
         )
-    except RuntimeError as exc:
-        raise _OverrideError(
-            "[train.py] action-ball canonical motion admission is not "
-            f"authorized before Gym construction: {exc}"
-        ) from exc
-    evaluator_launch = _load_action_ball_evaluator_launch_from_cfg(
-        racket_cfg,
-        motion_cfg,
-        preflight=preflight,
-    )
+        motion_admission = {
+            "diagnostic_unauthorized": True,
+            "certificate_sha256": "0" * 64,
+        }
+        evaluator_launch = {
+            "diagnostic_unauthorized": True,
+            "launch_receipt_canonical_sha256": "0" * 64,
+        }
+    else:
+        try:
+            motion_admission = _validate_action_ball_static_motion_admission(
+                preflight,
+                motion_cfg=motion_cfg,
+            )
+        except RuntimeError as exc:
+            raise _OverrideError(
+                "[train.py] action-ball canonical motion admission is not "
+                f"authorized before Gym construction: {exc}"
+            ) from exc
+        evaluator_launch = _load_action_ball_evaluator_launch_from_cfg(
+            racket_cfg,
+            motion_cfg,
+            preflight=preflight,
+        )
     policy = getattr(getattr(env_cfg, "observations", None), "policy", None)
     if policy is None:
         raise _OverrideError(
@@ -2254,7 +2283,13 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
         "motion_admission_certificate_sha256="
         f"{motion_admission['certificate_sha256']}; "
         "evaluator_launch_sha256="
-        f"{evaluator_launch['launch_receipt_canonical_sha256']})"
+        f"{evaluator_launch['launch_receipt_canonical_sha256']}"
+        + (
+            "; diagnostic_unauthorized=true"
+            if diagnostic_unauthorized
+            else ""
+        )
+        + ")"
     )
 
 
@@ -5150,13 +5185,31 @@ def _build_training_hard_contract(
             RUNTIME_CONTRACT_SHA256,
         )
 
-        runtime_action_ball = _validate_action_ball_runtime_hard_contract(
-            runtime_action_ball,
-            preflight=preflight,
-            racket_cfg=racket,
-            motion_cfg=motion_cmd.cfg,
-            expected_runtime_contract_sha256=RUNTIME_CONTRACT_SHA256,
-        )
+        if getattr(
+            racket, "action_ball_diagnostic_unauthorized", False
+        ) is True:
+            # Franco 2026-07-28 diagnostic bypass: the formal cross-check
+            # cannot bind without an admission/receipt chain; require the
+            # brand on the runtime hard contract instead so the bypass can
+            # never be silent.
+            if runtime_action_ball.get("diagnostic_unauthorized") is not True:
+                raise RuntimeError(
+                    "diagnostic action-ball run produced an unbranded "
+                    "runtime hard contract"
+                )
+            print(
+                "[train.py] WARN diagnostic_unauthorized runtime hard "
+                "contract accepted without the formal cross-check",
+                flush=True,
+            )
+        else:
+            runtime_action_ball = _validate_action_ball_runtime_hard_contract(
+                runtime_action_ball,
+                preflight=preflight,
+                racket_cfg=racket,
+                motion_cfg=motion_cmd.cfg,
+                expected_runtime_contract_sha256=RUNTIME_CONTRACT_SHA256,
+            )
 
         admission_fn = getattr(
             motion_cmd, "action_ball_motion_admission_hard_contract", None
@@ -9498,6 +9551,26 @@ def _run(cfg):
         agent_cfg.max_iterations = int(cfg.max_iterations)
     if cfg.run_name is not None:
         agent_cfg.run_name = str(cfg.run_name)
+    _diag_racket_cfg = getattr(
+        getattr(env_cfg, "commands", None), "racket_target", None
+    )
+    if getattr(
+        _diag_racket_cfg, "action_ball_diagnostic_unauthorized", False
+    ) is True:
+        # Franco 2026-07-28: the run name itself carries the brand so no
+        # logger/dashboard can present a bypassed run as formal evidence.
+        _diag_suffix = "DIAGNOSTIC_UNAUTHORIZED"
+        if _diag_suffix not in str(agent_cfg.run_name or ""):
+            agent_cfg.run_name = (
+                f"{agent_cfg.run_name}-{_diag_suffix}"
+                if agent_cfg.run_name
+                else _diag_suffix
+            )
+        print(
+            "[train.py] WARN action-ball DIAGNOSTIC UNAUTHORIZED run: "
+            f"run_name={agent_cfg.run_name}",
+            flush=True,
+        )
     if cfg.logger is not None:
         agent_cfg.logger = str(cfg.logger)
     if agent_cfg.logger in {"wandb", "neptune"} and cfg.log_project_name:

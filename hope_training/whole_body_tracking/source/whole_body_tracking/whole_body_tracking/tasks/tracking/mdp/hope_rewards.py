@@ -3337,14 +3337,54 @@ def _ignore_hold(command, value: torch.Tensor, ignore_hold: bool) -> torch.Tenso
     return value & ~command.in_hold.bool()
 
 
+def _action_ball_reference_terminations_mask(env) -> torch.Tensor | None:
+    """Per-env curriculum gate for the reference-consistency terminations.
+
+    Franco 2026-07-28 third ruling (sole default behavior in curriculum
+    mode): once an env's action has expanded past the center phase
+    (phase >= marginal), the teacher-consistency envelopes anchor_pos /
+    anchor_ori / ee_body_pos stop terminating that env; the absolute
+    fall / table / joint guards are separate terms and always stay on.
+    Outside action-ball runs the racket term does not expose the gate and
+    every other task keeps the exact old verdicts.
+    """
+
+    manager = getattr(env, "command_manager", None)
+    get_term = getattr(manager, "get_term", None)
+    if not callable(get_term):
+        return None
+    try:
+        racket = get_term("racket_target")
+    except Exception:
+        return None
+    getter = getattr(
+        racket, "action_ball_reference_terminations_enabled", None
+    )
+    if getter is None:
+        return None
+    return getter()
+
+
+def _gate_reference_termination(env, verdict: torch.Tensor) -> torch.Tensor:
+    mask = _action_ball_reference_terminations_mask(env)
+    if mask is None:
+        return verdict
+    return verdict & mask
+
+
 def bad_anchor_pos_z_only_hold_aware(
     env, command_name: str, threshold: float, ignore_hold: bool = False
 ) -> torch.Tensor:
     """Reference torso-height envelope with an explicit held-RSI exclusion."""
     from .terminations import bad_anchor_pos_z_only
     command = env.command_manager.get_term(command_name)
-    return _ignore_hold(
-        command, bad_anchor_pos_z_only(env, command_name, threshold), ignore_hold
+    return _gate_reference_termination(
+        env,
+        _ignore_hold(
+            command,
+            bad_anchor_pos_z_only(env, command_name, threshold),
+            ignore_hold,
+        ),
     )
 
 
@@ -3354,10 +3394,13 @@ def bad_anchor_ori_hold_aware(
     """Reference orientation envelope with an explicit held-RSI exclusion."""
     from .terminations import bad_anchor_ori
     command = env.command_manager.get_term(command_name)
-    return _ignore_hold(
-        command,
-        bad_anchor_ori(env, asset_cfg, command_name, threshold),
-        ignore_hold,
+    return _gate_reference_termination(
+        env,
+        _ignore_hold(
+            command,
+            bad_anchor_ori(env, asset_cfg, command_name, threshold),
+            ignore_hold,
+        ),
     )
 
 
@@ -3368,10 +3411,13 @@ def bad_motion_body_pos_z_only_hold_aware(
     """Reference body-height envelope with an explicit held-RSI exclusion."""
     from .terminations import bad_motion_body_pos_z_only
     command = env.command_manager.get_term(command_name)
-    return _ignore_hold(
-        command,
-        bad_motion_body_pos_z_only(env, command_name, threshold, body_names),
-        ignore_hold,
+    return _gate_reference_termination(
+        env,
+        _ignore_hold(
+            command,
+            bad_motion_body_pos_z_only(env, command_name, threshold, body_names),
+            ignore_hold,
+        ),
     )
 
 def foot_orientation_discipline(env, command_name: str, asset_cfg, hold_gate: bool = False):

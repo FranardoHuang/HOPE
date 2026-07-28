@@ -593,7 +593,37 @@ class MotionCommand(CommandTerm):
         self._motion_file_sha256 = tuple(
             sha256_file(path) for path in self._motion_files
         )
-        if self.canonical_ready_mode:
+        racket_cfg_for_diag = getattr(
+            getattr(getattr(env, "cfg", None), "commands", None),
+            "racket_target",
+            None,
+        )
+        diagnostic_unauthorized = getattr(
+            racket_cfg_for_diag,
+            "action_ball_diagnostic_unauthorized",
+            False,
+        )
+        if type(diagnostic_unauthorized) is not bool:
+            raise ValueError(
+                "action_ball_diagnostic_unauthorized must be an exact boolean"
+            )
+        self._canonical_diagnostic_unauthorized = diagnostic_unauthorized
+        if self.canonical_ready_mode and diagnostic_unauthorized:
+            # Franco 2026-07-28 approved DIAGNOSTIC bypass: skip the registry
+            # trust chain only.  The physical canonical-ready clip contract
+            # (_validate_canonical_ready_clips) and the reset-curricula guard
+            # below stay fully enforced — a bypassed run may not corrupt the
+            # ready-entry geometry, it may only skip authorization.
+            print(
+                "[MotionCommand] WARN canonical_ready_mode DIAGNOSTIC "
+                "UNAUTHORIZED: registry/certificate admission bypassed; "
+                "clip ready-entry contract still enforced",
+                flush=True,
+            )
+            self._validate_canonical_ready_config()
+            self._canonical_registry_tables = None
+            self._motion_payloads = None
+        elif self.canonical_ready_mode:
             self._validate_canonical_ready_config()
             self._canonical_registry_tables = (
                 self._load_and_validate_canonical_registry(env)
@@ -616,7 +646,8 @@ class MotionCommand(CommandTerm):
             ),
         )
         if self.canonical_ready_mode:
-            self._validate_canonical_registry_motion_bytes()
+            if not self._canonical_diagnostic_unauthorized:
+                self._validate_canonical_registry_motion_bytes()
             self._validate_canonical_ready_clips()
         expected_fps = 1.0 / float(env.step_dt)
         if not math.isfinite(expected_fps) or not math.isclose(
@@ -1859,7 +1890,14 @@ class MotionCommand(CommandTerm):
                 "action-ball birth broker must be the exact repository ActionBirthBroker"
             )
         repo_root = self._action_ball_resolve_root(trusted_repo_root)
-        self._require_action_ball_motion_admission(repo_root)
+        if self._canonical_diagnostic_unauthorized:
+            print(
+                "[MotionCommand] WARN action-ball birth broker bound WITHOUT "
+                "canonical motion admission (diagnostic_unauthorized=true)",
+                flush=True,
+            )
+        else:
+            self._require_action_ball_motion_admission(repo_root)
         for method_name in (
             "binding_for_slot",
             "reserve_many_true_reset",
@@ -2161,6 +2199,13 @@ class MotionCommand(CommandTerm):
             or self._action_ball_runtime_module_bound is None
         ):
             raise RuntimeError("action-ball motion admission is not bound")
+        if self._canonical_diagnostic_unauthorized:
+            # No admission exists to reopen; the brand is the receipt.
+            return {
+                "diagnostic_unauthorized": True,
+                "motion_file_sha256": list(self._motion_file_sha256),
+                "training_authorized": False,
+            }
         repo_root = self._action_ball_trusted_repo_root
         self._require_action_ball_motion_admission(repo_root)
         registry = self._canonical_motion_registry

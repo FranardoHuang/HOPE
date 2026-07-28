@@ -484,8 +484,10 @@ class ArmSchedulerConfig:
                     ),
                     "promotion": (
                         "marginal frontier changes require a full ring; the "
-                        "new-range failure rate and its Wilson interval are "
-                        "computed from exactly these ring rows"
+                        "new-range verdict is a direct failure count over "
+                        "exactly these ring rows: <=floor(band_lower*ring) "
+                        "too easy, >floor(band_upper*ring) too hard, "
+                        "otherwise in band"
                     ),
                     "incomplete": (
                         "a ring below ring_size keeps collecting and is "
@@ -1866,13 +1868,19 @@ class ActionBallCurriculum:
                     for row in ring_rows
                     if row["terminal_outcome"] == "safe_nonreturn"
                 )
-                ring_failure = wilson_interval(
-                    ring_failures,
-                    ring_size,
-                    z=self._config.confidence_z,
-                )
+                # Franco 2026-07-28 second ruling: the ring verdict is a
+                # DIRECT COUNT against the band edges scaled by the ring
+                # length, not a Wilson interval.  For the f10 band
+                # [0.075, 0.125] with ring 30 this reads: <=2 too easy,
+                # exactly 3 in band (lock), >=4 too hard; f20 derives its
+                # own thresholds from the same formula.  The 1e-9 guards a
+                # downward float error on exact-integer band edges only.
                 band_low, band_high = self._config.failure_band
-                if ring_failure.lower > band_high:
+                easy_max = math.floor(band_low * ring_size + 1.0e-9)
+                hard_min = (
+                    math.floor(band_high * ring_size + 1.0e-9) + 1
+                )
+                if ring_failures >= hard_min:
                     statuses[index] = "decided"
                     kind = "bound_marginal"
                 else:
@@ -1880,7 +1888,7 @@ class ActionBallCurriculum:
                     frontiers[index] = candidate
                     progress.last_certified = self._certificate(evidence)
                     if (
-                        ring_failure.upper < band_low
+                        ring_failures <= easy_max
                         and candidate < len(LEVELS) - 1
                     ):
                         probes[index] += 1
