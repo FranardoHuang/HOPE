@@ -542,7 +542,7 @@ def test_pending_task_age_counts_only_completed_physics_ticks():
     advance = MOTION_SOURCE[advance_begin:advance_end]
     assert "active_before" in advance
     assert (
-        "advancing = active_before & ~cycle_due_before"
+        "advancing = active_before_resolve & ~cycle_due_before"
         in " ".join(advance.split())
     )
 
