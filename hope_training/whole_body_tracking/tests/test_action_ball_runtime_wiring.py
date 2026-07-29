@@ -400,6 +400,14 @@ def test_diagnostic_motion_binding_emits_unauthorized_canonical_receipt():
     ]
 
 
+def test_action_ball_sample_revalidates_registry_on_birth_and_task():
+    source = _method_source("_sample_targets_action_ball")
+    registry_argument = (
+        "registry_sha256=self._action_ball_broker.registry_sha256"
+    )
+    assert source.count(registry_argument) == 2
+
+
 def test_training_builds_deferred_action_ball_contract_before_hook_audit():
     train_source = (
         ROOT / "scripts" / "train.py"

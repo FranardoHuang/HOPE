@@ -8043,6 +8043,7 @@ class RacketTargetCommand(CommandTerm):
                 binding=binding,
                 pins=self._action_ball_pins,
                 mobility_mode=self._action_ball_manifest.mobility_mode,
+                registry_sha256=self._action_ball_broker.registry_sha256,
             )
             if (
                 birth.env_id != int(ids[batch_index].item())
@@ -8074,6 +8075,7 @@ class RacketTargetCommand(CommandTerm):
                 binding=binding,
                 pins=self._action_ball_pins,
                 mobility_mode=self._action_ball_manifest.mobility_mode,
+                registry_sha256=self._action_ball_broker.registry_sha256,
             )
             receipt.assert_birth(birth)
             if (
