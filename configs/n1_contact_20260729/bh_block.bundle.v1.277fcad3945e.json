@@ -1,0 +1,57 @@
+{
+  "action_id": "bh_block",
+  "action_uid": 1115176677418582,
+  "artifact_type": "n1_contact_training_bundle_v1",
+  "claims": {
+    "action_identity_frozen_before_ball_sampling": true,
+    "baseline_crossing_claim": false,
+    "contact_alignment_claim": true,
+    "deployment_claim": false,
+    "landing_claim": false,
+    "post_bounce_claim": false,
+    "selector_executed": false
+  },
+  "contact_alignment": {
+    "path": "configs/n1_contact_20260729/bh_block.contact_alignment.v1.11f80b430552.json",
+    "schema_version": 1,
+    "sha256": "11f80b4305522c3ad836c6dc2f35d5bbbda03d8d34425b437f52937a08b410c2",
+    "status": "PASS"
+  },
+  "geometry": {
+    "kind": "exact_face_contact_v2",
+    "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/racket_contact_geometry.py",
+    "payload_sha256": "5e1c751a8805a520b1573c5281e38c28ccabea2c26494072cd826baee4b7e198",
+    "sha256": "b70f5fb6c54976bf4a35c1a89ae35fd3d70573b91e0268d618d2d82b04127cd8"
+  },
+  "manifest": {
+    "action_order": [
+      "bh_block"
+    ],
+    "path": "configs/n1_contact_20260729/bh_block.manifest.v3.4448ddc55e17.json",
+    "schema_version": 3,
+    "sha256": "4448ddc55e174c7816b278fe2c37e2506bf04a237f0fe4228f342f59f3b1237a"
+  },
+  "motion": {
+    "path": "motions/fivebind_n5_20260728/bh_block_upper_fivebind.npz",
+    "sha256": "0cd94aa47bf8feb59bbe7cc7a0306abb57ee7ec8ebcec6443a80bbdc58894309"
+  },
+  "profile_pins": {
+    "geometry_payload_sha256": "5e1c751a8805a520b1573c5281e38c28ccabea2c26494072cd826baee4b7e198",
+    "path": "configs/n1_contact_20260729/action_ball_profile_pins.v1.a8272817.json",
+    "physics_profile_sha256": "aa5c9085f9b48ca65b3a0ee2cbb35588a5e85a08e84dc3f2ce552d3ef4af85b7",
+    "sha256": "a82728171fcf6eb5d8e6faec6e9445d9135d261b2d14062dcbb918574f7395f4",
+    "solver_profile_sha256": "668acf6529339e9c91a28070295a7ce1e4e4bf8ac27484a001ac322e79aae6fb"
+  },
+  "prototype": {
+    "path": "configs/n1_contact_20260729/bh_block.upper.prototype.v2.ee29ea4aa140.json",
+    "schema_version": 2,
+    "scope": "upper",
+    "sha256": "ee29ea4aa1409b7ecec4969752b6ee1ec8bd086da66b04c9c46e730264ed806d"
+  },
+  "schema_version": 1,
+  "scope": "upper",
+  "source_manifest": {
+    "path": "configs/action_ball_n5_nomove_f10_20260728.json",
+    "sha256": "0b640f5d7b2d35895d1a4696635e3a256f2a32341778ad586d828d677317e2b7"
+  }
+}
