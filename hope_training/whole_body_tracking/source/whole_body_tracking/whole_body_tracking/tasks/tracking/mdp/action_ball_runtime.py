@@ -29,7 +29,9 @@ import math
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import sys
+import threading
 from typing import Callable, Dict, Mapping, Protocol, Sequence, Tuple
+import weakref
 
 try:
     from . import racket_contact_geometry as _contact_geometry
@@ -175,6 +177,69 @@ def _sha256_json(value: object) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
+class _WeakIdentityCachedCanonicalSha256:
+    """Cache a frozen receipt digest without mutating the receipt.
+
+    ``functools.cached_property`` writes into the instance ``__dict__`` on
+    first access.  That would make ``vars()``, pickle, deepcopy, and any
+    future exact-resume fingerprint depend on access history.  This
+    descriptor instead keys a weak external cache by object identity.  The
+    id check protects against reuse, and the weakref callback drops entries
+    as soon as the immutable receipt leaves its owner's lifecycle.
+    """
+
+    def __init__(self, function: Callable[[object], str]) -> None:
+        self._function = function
+        self.__doc__ = function.__doc__
+        self._entries: Dict[int, Tuple[object, str]] = {}
+        self._lock = threading.RLock()
+
+    def __get__(self, instance: object, owner: object = None) -> object:
+        if instance is None:
+            return self
+        key = id(instance)
+        with self._lock:
+            cached = self._entries.get(key)
+            if cached is not None and cached[0]() is instance:
+                return cached[1]
+            digest = self._function(instance)
+            descriptor_ref = weakref.ref(self)
+
+            def discard(
+                receipt_ref: object,
+                *,
+                identity: int = key,
+                owner_ref: object = descriptor_ref,
+            ) -> None:
+                descriptor = owner_ref()
+                if descriptor is None:
+                    return
+                with descriptor._lock:
+                    current = descriptor._entries.get(identity)
+                    if (
+                        current is not None
+                        and current[0] is receipt_ref
+                    ):
+                        descriptor._entries.pop(identity, None)
+
+            receipt_ref = weakref.ref(instance, discard)
+            self._entries[key] = (receipt_ref, digest)
+            return digest
+
+    def __set__(self, instance: object, value: object) -> None:
+        # Match the former read-only ``property`` data-descriptor contract.  In particular,
+        # ``object.__setattr__`` and an accidental same-name instance attribute must never shadow
+        # the canonical digest lookup.
+        raise AttributeError("canonical_sha256 is read-only")
+
+    def __delete__(self, instance: object) -> None:
+        raise AttributeError("canonical_sha256 is read-only")
+
+
+# ``canonical_sha256`` is cached only on deeply immutable frozen dataclasses.
+# The descriptor above is deliberately external to dataclass state, equality,
+# repr, deepcopy, pickle, and the explicit JSON wire payloads.  A contract
+# test rejects adding a mutable child to any cached class.
 TASK_TRANSCRIPT_SCHEMA_VERSION = 1
 TASK_LIFECYCLE_SCHEMA_VERSION = 1
 _LIFECYCLE_REJECTED = 0
@@ -615,7 +680,7 @@ class CounterRallyTaskIdentity:
             ),
         }
 
-    @property
+    @_WeakIdentityCachedCanonicalSha256
     def canonical_sha256(self) -> str:
         return _sha256_json(self.payload_dict())
 
@@ -723,7 +788,7 @@ class ActionDomainLevels:
             **{name: row[name] for name in _DOMAIN_LEVEL_NAMES}
         )  # type: ignore[arg-type]
 
-    @property
+    @_WeakIdentityCachedCanonicalSha256
     def canonical_sha256(self) -> str:
         return _sha256_json(self.to_dict())
 
@@ -1539,7 +1604,7 @@ class ActionDomainClaim:
             "mobility_mode": self.mobility_mode,
         }
 
-    @property
+    @_WeakIdentityCachedCanonicalSha256
     def canonical_sha256(self) -> str:
         return _sha256_json(self.payload_dict())
 
@@ -1616,7 +1681,7 @@ class RuntimePins:
         )
         return cls(**{name: row[name] for name in row})  # type: ignore[arg-type]
 
-    @property
+    @_WeakIdentityCachedCanonicalSha256
     def canonical_sha256(self) -> str:
         return _sha256_json(self.to_dict())
 
@@ -2197,7 +2262,7 @@ class ActionBirthReceipt:
             )
         return result
 
-    @property
+    @_WeakIdentityCachedCanonicalSha256
     def canonical_sha256(self) -> str:
         return _sha256_json(self.payload_dict())
 
@@ -2423,7 +2488,7 @@ class BasePreparationContract:
             "settle_margin_s": self.settle_margin_s,
         }
 
-    @property
+    @_WeakIdentityCachedCanonicalSha256
     def canonical_sha256(self) -> str:
         return _sha256_json(self.payload_dict())
 
@@ -2723,7 +2788,7 @@ class BasePreparationReceipt:
             ),
         }
 
-    @property
+    @_WeakIdentityCachedCanonicalSha256
     def canonical_sha256(self) -> str:
         return _sha256_json(self.payload_dict())
 
@@ -4397,7 +4462,7 @@ class ActionBallTaskReceipt:
             "time_to_contact_tick": self.time_to_contact_tick,
         }
 
-    @property
+    @_WeakIdentityCachedCanonicalSha256
     def canonical_sha256(self) -> str:
         return _sha256_json(self.payload_dict())
 

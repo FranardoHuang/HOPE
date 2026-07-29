@@ -70,6 +70,51 @@ plan/argv/identity、fresh no-clobber namespace，并用 Kit boot lock 串行启
 construction 或 PhysX start 停止前进，保留日志后按 exact PGID 关闭，不循环重试。`4ff48b21`
 的 task-strong direct 就在 PhysX start 活锁，故未算作活跃 Reward 臂。
 
+### ActionBall A3 upper q/qd 修复与 hot-path 快线
+
+`eaf55fba` 已把 recoverable 2%-inner occupancy 从 Done 中拆出，但 Pod1 4096-env 前五轮仍有
+`2.5k--4.2k/update` 的 raw-hard terminal，且 q_des projection/nonfinite 为零、episode 未到
+`t_hit`。当前禁止继续靠放宽 actual hard edge、加 env 或改 Reward 掩盖该反例。旧
+`canonical_ready_v1` 的零脚接触只描述 donor 本身，不能外推现役 upper：实际 upper 的 12 个
+腿 qpos 已等于 exact AgiBot A3 grounded-ready candidate，A3 MuJoCo frame 0 双脚 `3+3`
+接触；缺陷是恒定腿 qpos 对应的腿 qvel 非零。`candidate_id=G1` 只是 A3 候选代号，不是机器人
+型号。
+
+发射顺序：
+
+1. upper 快线若不走完整 compiler，只能保持所有 qpos/root/timing 不变，把 12 个恒定腿 qpos
+   对应的 stale qvel 归零，并重算 body FK/velocity。必须由产物 receipt 证明：
+   - 双脚接触、joint/collision/support/static dynamics PASS；
+   - 所有 joint qpos、root、frame count、strike frame 不变；
+   - 每帧 `right_racket` site position/orientation/linear/angular velocity 不变；
+   - 首末 joint/root/body velocity exact zero；
+   - 输出目录 no-clobber、report last、三类 authorization false。
+   只替换 frame 0 或只改 spawn 一律拒绝。
+2. full scope 不允许此快线；必须完整重编
+   `grounded ready → selected core/window → grounded ready`，再重跑 aim/phase/physical-strike
+   binding。旧 fivebind 的 SHA、帧号、旋转和证书不能跨 bytes 继承。
+3. 新 upper bundle 先自然跑 `1 env × 2 update`；通过后 fresh 4096-env 只跑五轮定位。必须记录
+   mean episode、strike opportunity、raw-hard/table/fall/nonfinite、q_des projection、
+   collection seconds、environment-steps/s 和 finite checkpoint。episode 未越过 `t_hit` 或
+   strike 仍为零时不得发 long。
+4. q/qd 一致性修复无需 old/new 学习 A/B；它的验收是上面不变量与行为门。若修复后仍有
+   mass raw-hard，才允许一条 birth-only、substep-only、policy-step 末已恢复的 diagnostic
+   canary；task phase/current-post edge/nonfinite 继续 Done。
+
+以下性能改动若 Pod focused parity 通过，可直接进入 replacement，不另开学习 A/B：
+
+- immutable frozen receipt 的 external SHA cache，不得改变 dataclass/pickle/wire/exact-resume；
+- 同一 manager policy step 的 `_compute_strike_timing` 正常路径只算一次，direct/reset 仍重算；
+- global + per-action error reduction 保持，`N<=8192` 的布尔 count 改为可精确表示的
+  float32 后合成一次
+  [device-to-host transfer（D2H，设备到主机传输）](../DEFINITIONS.md#device-to-host-transfer)，逐 step Python EMA、adaptive sigma 和
+  reference perturb 逐值不变；
+- `fired_valid` 空集保持旧 metric 的 device mask；`exact_strike` no-strike 早退暂不动。
+
+这些补丁仍须在 Pod 跑 focused pytest、fixed-tape parity 和 profiler；“数学等价”免的是学习
+A/B，不是回归。只有 4096-env healthy baseline 达到至少 `15k environment-steps/s` 且出现
+strike 数据后，才启动 Reward/reference/curriculum 剂量比较。
+
 ### ActionBall finite q_des / reference-reset 切换
 
 本段是 `curr-launch-fix` 功能分支候选；`origin/main/docs/NOW.md` 仍是运行态权威。旧 run 使用

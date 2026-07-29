@@ -34,6 +34,7 @@ Run:  python -m pytest hope_training/whole_body_tracking/tests/test_metric_sync_
 
 from __future__ import annotations
 
+import inspect
 import os
 import sys
 import tempfile
@@ -432,6 +433,78 @@ def test_e2e_wrap_boundary_strike_no_cross_rally_leak(two_clips):
     assert cmd._rally_starts_acc_c == exp_starts
     assert cmd._rally_returns_acc_c == exp_returns  # every ended backhand attempt kept its return
     assert cmd._rally_returns_acc == exp_starts[1]
+
+
+# --------------------------------------------------------------------------------------------- #
+# strike-timing hotpath handoff: metrics computes once, ordered update consumes once
+# --------------------------------------------------------------------------------------------- #
+def _make_strike_timing_handoff_rig(token=17):
+    RT = hope_commands_mod.RacketTargetCommand
+    cmd = RT.__new__(RT)
+    cmd._env = types.SimpleNamespace(common_step_counter=token)
+    calls = []
+
+    def _compute(_self):
+        calls.append(_self._env.common_step_counter)
+
+    cmd._compute_strike_timing = types.MethodType(_compute, cmd)
+    cmd._strike_timing_metrics_step_token = None
+    cmd._strike_timing_metrics_handoff_pending = False
+    return cmd, calls
+
+
+def test_strike_timing_handoff_skips_only_ordered_same_step_update():
+    cmd, calls = _make_strike_timing_handoff_rig()
+
+    cmd._refresh_strike_timing_for_policy_step(metrics_pass=True)
+    cmd._refresh_strike_timing_for_policy_step(metrics_pass=False)
+    assert calls == [17]
+
+    # The handoff is one-shot: a direct/repeated update at the same host token must refresh.
+    cmd._refresh_strike_timing_for_policy_step(metrics_pass=False)
+    assert calls == [17, 17]
+
+
+def test_strike_timing_handoff_recomputes_on_token_change_or_invalidation():
+    cmd, calls = _make_strike_timing_handoff_rig()
+
+    cmd._refresh_strike_timing_for_policy_step(metrics_pass=True)
+    cmd._env.common_step_counter = 18
+    cmd._refresh_strike_timing_for_policy_step(metrics_pass=False)
+    assert calls == [17, 18]
+
+    cmd._refresh_strike_timing_for_policy_step(metrics_pass=True)
+    cmd._invalidate_strike_timing_metrics_handoff()
+    cmd._refresh_strike_timing_for_policy_step(metrics_pass=False)
+    assert calls == [17, 18, 18, 18]
+
+
+def test_strike_timing_handoff_without_host_integer_token_never_skips():
+    cmd, calls = _make_strike_timing_handoff_rig(token=None)
+
+    cmd._refresh_strike_timing_for_policy_step(metrics_pass=True)
+    cmd._refresh_strike_timing_for_policy_step(metrics_pass=False)
+    assert calls == [None, None]
+    assert cmd._strike_timing_metrics_step_token is None
+    assert cmd._strike_timing_metrics_handoff_pending is False
+
+
+def test_strike_timing_handoff_wiring_and_resample_invalidation_are_explicit():
+    RT = hope_commands_mod.RacketTargetCommand
+    helper_source = inspect.getsource(
+        RT._refresh_strike_timing_for_policy_step
+    )
+    metrics_source = inspect.getsource(RT._update_metrics)
+    update_source = inspect.getsource(RT._update_command)
+    resample_source = inspect.getsource(RT._resample_command)
+
+    # The optimization may key only on the host manager token; CUDA scalar reads would defeat it.
+    assert ".item(" not in helper_source
+    assert ".cpu(" not in helper_source
+    assert "bool(" not in helper_source
+    assert "_refresh_strike_timing_for_policy_step(metrics_pass=True)" in metrics_source
+    assert "_refresh_strike_timing_for_policy_step(metrics_pass=False)" in update_source
+    assert "_invalidate_strike_timing_metrics_handoff()" in resample_source
 
 
 # --------------------------------------------------------------------------------------------- #

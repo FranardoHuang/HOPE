@@ -71,6 +71,12 @@ EVIDENCE_SCHEMA_VERSION = 4
 INT64_MAX = (1 << 63) - 1
 CANARY_MIN = 256
 HELDOUT_MIN = 768
+# Schema-4 formal heldout windows reserve 20% of 960 proposals for the
+# selected action-axis-side frontier.  Requiring ceil(20% * 768) safe-closed
+# frontier rows preserves the same 80% completion floor inside that causal
+# slice instead of allowing the 80% center/interior mass to hide an empty
+# frontier.
+HELDOUT_NEW_BAND_MIN = 154
 _ZERO_SHA = "0" * 64
 _DRAIN_RESET_MINT_SENTINEL = object()
 
@@ -616,6 +622,12 @@ class BallCurriculumConfig:
         return HELDOUT_MIN
 
     @property
+    def heldout_min_new_band(self) -> int:
+        """Code-frozen action-axis-side heldout new-band floor."""
+
+        return HELDOUT_NEW_BAND_MIN
+
+    @property
     def failure_band(self) -> Tuple[float, float]:
         return (
             self.target_failure_rate - self.failure_band_half_width,
@@ -708,7 +720,7 @@ class ArmSchedulerConfig:
     def contract_sha256(self) -> str:
         return _canonical_sha256(
             {
-                "schema_version": 3,
+                "schema_version": 4,
                 "kind": "action_ball_arm_scheduler",
                 "arm_catalog_sha256": ARM_CATALOG_SHA256,
                 "config": self.as_dict(),
@@ -744,6 +756,26 @@ class ArmSchedulerConfig:
                         "scheduler-only candidate ranking telemetry; never "
                         "authorizes, blocks, bounds, locks, or expands a "
                         "formal frontier"
+                    ),
+                },
+                "formal_new_band_gate": {
+                    "scope": (
+                        "frozen heldout rows for exactly the selected "
+                        "action-axis-side frontier arm"
+                    ),
+                    "minimum_safe_closed": HELDOUT_NEW_BAND_MIN,
+                    "verdict": (
+                        "Wilson interval of NB_F/NB against the configured "
+                        "policy-failure band; never the diluted whole-domain "
+                        "F/(L+F)"
+                    ),
+                    "whole_domain_gates": (
+                        "solver admission, install, start, close, other "
+                        "unsafe, table, joint-limit, and attribution blockers"
+                    ),
+                    "scheduler_authority": (
+                        "the recent-100 and rolling-30 streams only schedule "
+                        "candidate collection and never release a frontier"
                     ),
                 },
                 "forced": (
@@ -4592,6 +4624,25 @@ class ActionBallCurriculum:
         ):
             raise ValueError("frozen heldout is below 768-row gates")
 
+        if progress.phase == "marginal":
+            # The selected formal domain already binds one action and one
+            # signed axis-side arm.  Only its heldout frontier rows measure the
+            # causal effect of adding that band; the center/interior rows must
+            # not dilute the expand/lock/bound verdict.  Admission and every
+            # safety blocker above intentionally remain whole-domain gates.
+            failure = wilson_interval(
+                evidence.ledger.NB_F,
+                evidence.ledger.NB,
+                z=self._config.confidence_z,
+            )
+            too_hard = failure.lower > self._config.failure_band[1]
+            too_easy = failure.upper < self._config.failure_band[0]
+            if evidence.ledger.NB < self._config.heldout_min_new_band:
+                blockers = blockers + (
+                    "new_band_safe_closed_below_gate",
+                )
+                quality_bad = True
+
         published = progress
         progress = progress.clone()
         progress.pending_canary = None
@@ -4626,8 +4677,8 @@ class ActionBallCurriculum:
             # The rolling scheduler stream only chooses which candidate arm
             # to explore.  It is adaptive training data and therefore has no
             # release authority.  This frontier transition is decided solely
-            # by the mutually exclusive >=768-row frozen heldout window:
-            # failure LCB above the band bounds, failure UCB below the band
+            # by the selected action-axis-side new-band slice of the frozen
+            # heldout: NB_F/NB LCB above the band bounds, UCB below the band
             # expands, and an overlapping/in-band interval locks.
             if quality_bad or too_hard:
                 statuses[index] = "decided"

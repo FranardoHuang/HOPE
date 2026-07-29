@@ -13,6 +13,31 @@
 
 ## 2026-07-29（N1 ActionBall 真实 smoke 与 physical-crossing 拆账）
 
+- `eaf55fba` 已在 Pod1 排除“2%-inner soft-band Done 仍是全部根因”：recoverable inner
+  occupancy 不再 reset 后，4096-env updates 0--4 仍有
+  `2,549/3,986/4,225/4,188/4,162` 次 raw-hard terminal，episode 约
+  `22--24<t_hit`、strike 为零，而 q_des projection/penalty/nonfinite 全零。进一步的 A3
+  资产对账推翻了“现役 upper qpos 未接地”的初判：两条 upper 的 12 个腿关节位置已全片恒定并
+  等于 A3 grounded-ready candidate（其中 `candidate_id=G1` 只是候选代号，不是 G1
+  机器人），exact A3 MuJoCo frame 0 均为双脚 `3+3` 接触；真实不一致是这些恒定腿位置仍携带
+  非零腿 `joint_vel`。Pod 原型将 12 列腿速度归零并重建 schema-2 后，每帧
+  `right_racket` 位姿、线/角速度和 strike identity 均 bitwise 不变。下一步先把该 q/qd
+  合同修复做成内容寻址资产，再跑 1-env/4096 smoke；raw-hard/table/fall/nonfinite 终止保持。
+  full compiler 的 ready/face 证据链另行补齐，不阻塞 upper 首发。详见
+  [Reward 因果实验](experiments/2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md)、
+  [G05](gates/G05_isaac_training_first_loop.md)和
+  [设计/加速审计独立裁定](research/design_audit_and_speedup_20260729.md#6-codex-独立裁定与执行顺序2026-07-29)。
+- 第一批不改学习问题的 hot-path 候选已收拢：immutable receipt SHA 外部缓存、manager 同一步
+  strike timing 去重、global+per-action `10+8×N` 标量
+  [device-to-host transfer（D2H，设备到主机传输）](DEFINITIONS.md#device-to-host-transfer) 合成一次、以及
+  `fired_valid` device mask。它们不做学习 A/B，但必须在 Pod 通过数值/状态/exact-resume
+  parity 与 profiler 后才进入 grounded-ready replacement；Reward、reference/CaT、
+  death/entropy/sigma/RSI、8192 env 仍留健康 baseline 后做单变量 canary。
+- curriculum 审计也更正了 CC 报告的一个事实前提：recent-100/rolling-30 只负责候选调度，
+  不是 formal 晋级门；schema-4 已经产出 action×axis×side 的 `NB/NB_F` 新增带计数，但
+  marginal formal consumer 仍错误读取全域 `F/(L+F)`。候选修复直接把 marginal 判定接到
+  `NB_F/NB` Wilson 区间并保留全域 admission/unsafe blockers；这是统计合同修复，不做学习
+  A/B，须在 Pod 跑反例回归。
 - `8d2a1bcd` 的 diagnostic-only joint×side 计数已在 Pod1 真实 Isaac 闭合。1-env 两轮都在
   age `17/19` 由 `left_ankle_pitch_joint` 下侧 inner band 触发；4096-env updates 0--2 的
   actual event 为 `3,187/4,457/5,087`，其中左脚踝 pitch 下侧

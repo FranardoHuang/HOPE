@@ -673,6 +673,7 @@ def _certify(
     *,
     failures=0,
     table_hits=0,
+    new_band=None,
     commit=True,
 ):
     domain = curriculum.selected_formal_domain(key)
@@ -690,6 +691,10 @@ def _certify(
     canary_decision = curriculum._stage_legacy_capabilities_for_test(
         {key: canary}
     )[0]
+    if new_band is None:
+        heldout_new_band = 768 if domain.selected_arm_key else 0
+    else:
+        heldout_new_band = new_band
     heldout = factory.issue(
         curriculum,
         authority,
@@ -699,6 +704,7 @@ def _certify(
         domain=domain,
         failures=failures,
         table_hits=table_hits,
+        new_band=heldout_new_band,
     )
     heldout_decision = curriculum._stage_legacy_capabilities_for_test(
         {key: heldout}
@@ -954,6 +960,7 @@ def test_manifest_config_stays_separate_from_code_frozen_scheduler_and_heldout()
     assert config.min_proposals == 256
     assert config.heldout_min_proposals == 768
     assert config.heldout_min_safe_closed == 768
+    assert config.heldout_min_new_band == 154
     with pytest.raises(ValueError, match="cannot be below 256"):
         C.BallCurriculumConfig(min_proposals=255)
     assert C.ArmSchedulerConfig().rolling_window == 100
@@ -1694,7 +1701,8 @@ def test_frozen_heldout_decides_marginal_expand_lock_or_bound(
     expected_kind,
     frontier,
 ):
-    # At n=768 under the default f10 band, zero failures has UCB below
+    # These synthetic legacy windows mark all 768 heldout rows as belonging to
+    # the selected action-axis-side new band.  Zero failures has UCB below
     # 7.5%, 77 failures overlaps the band, and 768 failures has LCB above
     # 12.5%.  In particular, 768/768 may never expand.
     key = _key()
@@ -1716,6 +1724,78 @@ def test_frozen_heldout_decides_marginal_expand_lock_or_bound(
             curriculum._progress[key].arm_status[C.ARM_KEYS.index(arm)]
             == "decided"
         )
+
+
+def test_marginal_uses_new_band_when_whole_domain_would_expand():
+    # The 35 failures are only 4.6% of the full 768-row heldout, whose Wilson
+    # UCB lies below the 7.5% lower edge and would incorrectly expand.  They
+    # are 18.2% of this action-axis-side's 192-row new band, whose Wilson LCB
+    # lies above the 12.5% upper edge and must bound the candidate.
+    key = _key()
+    curriculum, authority = _system((key,))
+    factory = EvidenceFactory()
+    _certify(curriculum, authority, factory, key)
+    arm = curriculum.selected_arm(key)
+
+    _, decision = _certify(
+        curriculum,
+        authority,
+        factory,
+        key,
+        failures=35,
+        new_band=192,
+    )
+
+    whole_domain = C.wilson_interval(
+        35,
+        768,
+        z=curriculum.config.confidence_z,
+    )
+    new_band = C.wilson_interval(
+        35,
+        192,
+        z=curriculum.config.confidence_z,
+    )
+    assert whole_domain.upper < curriculum.config.failure_band[0]
+    assert new_band.lower > curriculum.config.failure_band[1]
+    assert decision.policy_failure == new_band
+    assert decision.kind == "bound_marginal"
+    assert curriculum.frontiers(key)[arm] == 0.0
+
+
+@pytest.mark.parametrize(
+    ("new_band", "expected_kind", "expected_frontier", "blocked"),
+    (
+        (153, "bound_marginal", 0.0, True),
+        (154, "expand_marginal", 0.25, False),
+    ),
+)
+def test_marginal_requires_minimum_frozen_heldout_new_band_rows(
+    new_band,
+    expected_kind,
+    expected_frontier,
+    blocked,
+):
+    key = _key()
+    curriculum, authority = _system((key,))
+    factory = EvidenceFactory()
+    _certify(curriculum, authority, factory, key)
+    arm = curriculum.selected_arm(key)
+
+    _, decision = _certify(
+        curriculum,
+        authority,
+        factory,
+        key,
+        new_band=new_band,
+    )
+
+    assert curriculum.config.heldout_min_new_band == 154
+    assert decision.kind == expected_kind
+    assert (
+        "new_band_safe_closed_below_gate" in decision.blockers
+    ) is blocked
+    assert curriculum.frontiers(key)[arm] == expected_frontier
 
 
 def test_scheduler_ring_is_retained_for_candidate_scheduling_only():

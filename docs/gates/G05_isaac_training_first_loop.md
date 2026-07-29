@@ -57,6 +57,50 @@ Current-candidate promotion sub-gate (required before this Gate can close):
 
 ## Current State
 
+Follow-up note (2026-07-29, `eaf55fba` raw-hard counterexample and A3 upper q/qd root cause;
+Gate remains `Partial`):
+
+- Pod1 exact `eaf55fba5e201d76153162ab2f7f482bb66b3f22` has already separated recoverable
+  2%-inner occupancy from `joint_actual_forbidden`: only nonfinite/current raw mechanical edge or a
+  physics-substep raw-hard latch remains terminal. Its fresh 4096-env upper `bh_loop_c` diagnostic
+  completed updates 0--4, but actual hard terminal counts were
+  `2,549/3,986/4,225/4,188/4,162`; mean episode age stayed about `22--24<t_hit≈31` and strike
+  opportunity stayed zero. q_des projection count, projection penalty and nonfinite count were all
+  zero. This invalidates “soft-band Done is still the whole reset storm” and leaves the run
+  ineligible for Reward/curriculum comparison.
+- Those events happen before useful PPO learning and are concentrated on the left ankle pitch lower
+  edge, waist pitch upper edge and right ankle roll upper edge. The reference clip and
+  `q+20 ms*qdot` remain away from the hard boundary, and the fresh actor is exact-ready bias plus
+  `0.02` exploration. Therefore reward tuning, q_des margin and PPO optimization are not the next
+  lever.
+- The initial “current upper qpos is ungrounded” diagnosis was too broad. `canonical_ready_v1`
+  itself is an uncertified donor with an old zero-foot-contact result, but the actual two upper
+  fivebind NPZs already carry constant 12-leg positions equal to the existing AgiBot A3
+  grounded-ready candidate. That candidate has SHA-256
+  `585bbd7d643857abd08108eac7b4dd997b228d0df1a9921334ca845cd931d71e`, receipt file SHA-256
+  `ee7dea1aec81169e1d002bbe0b2cfa75c793a97a3f89e1e740d0064dc8be7c46` and binds exact model
+  `A3T2.5_pingpong_0519`; `candidate_id=G1` is only the A3 construction-candidate label, not a G1
+  robot. Exact A3 MuJoCo replay of both upper frame-0 states yields two feet / six contact points,
+  zero unsupported/self collision and feasible static-ground dynamics.
+- The actual schema defect is narrower: all 12 leg `joint_pos` columns are constant, while their
+  `joint_vel` columns contain stale nonzero samples. A Pod qvel-only prototype zeroed those columns
+  and rebuilt schema-2 body FK/velocity; all-frame `right_racket` position/orientation/linear/angular
+  velocity stayed bitwise identical, as did frame count and strike frame. The next artifact repair
+  must therefore leave every qpos/root/timing byte unchanged and only fix the inconsistent leg qd
+  plus derived schema-2 channels. Full-body clips still require a complete `ready→core→ready`
+  recompile.
+- This is an A3 motion-schema correctness repair, so it does not require a scientific old/new learning
+  A/B. It does require a no-clobber Pod `1 env × 2 update` construction smoke and a fresh 4096-env
+  five-update behavior test. Promotion requires episode length to cross `t_hit`, nonzero strike
+  opportunity, finite exact checkpoint, and no increase in raw-hard/table/fall/nonfinite rates.
+- Independently, behavior-equivalent hot-path changes may be accepted by numerical/state parity and
+  profiler rather than learning A/B: immutable receipt SHA cache external to dataclass state,
+  one-shot same-step strike-timing handoff, batched `10+8×N` scalar
+  [device-to-host transfer (D2H)](../DEFINITIONS.md#device-to-host-transfer) with unchanged error
+  reductions, exact float32 counts for supported `N<=8192`, unchanged per-step Python EMA and
+  historic accumulator-update order, and removal of the state-preserving `fired_valid.any()` host branch. No result
+  is claimed until focused Pod tests and a fixed-workload timing sample pass.
+
 Follow-up note (2026-07-29, ActionBall actual-joint reset follow-up; Gate remains `Partial`):
 
 - `8d2a1bcd` 已在 Pod1 真实 Isaac 把旧 scalar actual reason 拆到 joint×side。1-env 两轮均为

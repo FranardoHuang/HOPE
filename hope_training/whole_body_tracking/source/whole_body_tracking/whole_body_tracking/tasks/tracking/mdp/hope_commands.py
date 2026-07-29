@@ -170,6 +170,33 @@ _ACTION_BALL_CONTACT_REJECTION_COUNTERS = (
 _ACTION_BALL_DIAGNOSTIC_MAX_EXTERNAL_PROPOSAL_ROUNDS = 64
 
 
+def _batched_host_scalar_values(values: Sequence[torch.Tensor]) -> tuple[float, ...]:
+    """Read an ordered group of device scalars through one host transfer.
+
+    Each input reduction has already run in a common dtype.  Stacking before ``cpu()`` replaces one
+    stream-draining read per scalar with one ordered batch read, without launching one cast kernel
+    per scalar.  Callers deliberately keep their Python-float EMA arithmetic unchanged.
+    """
+
+    if not values:
+        return ()
+    first = values[0]
+    if not torch.is_tensor(first) or first.numel() != 1:
+        raise ValueError("batched host scalar read requires scalar tensors")
+    scalars = []
+    first_dtype = first.dtype
+    first_device = first.device
+    for value in values:
+        if not torch.is_tensor(value) or value.numel() != 1:
+            raise ValueError("batched host scalar read requires scalar tensors")
+        if value.dtype != first_dtype or value.device != first_device:
+            raise ValueError(
+                "batched host scalar read requires one common dtype and device"
+            )
+        scalars.append(value.detach().reshape(()))
+    return tuple(float(value) for value in torch.stack(scalars).cpu().tolist())
+
+
 class _ActionBallPoolSolverAdapter:
     """Stateful protocol adapter required by ``LazyActionTaskPool``.
 
@@ -3201,6 +3228,14 @@ class RacketTargetCommand(CommandTerm):
             self.num_envs, dtype=torch.bool, device=self.device
         )
         self._post_strike_elapsed_last_step = -1
+        # One-shot host-side handoff between CommandTerm's ordered metrics/update passes.
+        # ``common_step_counter`` is an ordinary Python int, so this cache never reads a CUDA
+        # scalar or introduces a device synchronization.  It is deliberately NOT a general
+        # memoization of Motion timing: only the immediately following _update_command may consume
+        # the metrics result.  Direct update calls, reset/resample, a changed token, and every
+        # direct _compute_strike_timing call all recompute.
+        self._strike_timing_metrics_step_token: int | None = None
+        self._strike_timing_metrics_handoff_pending = False
         # 1c split windows: refreshed alongside strike_window in _compute_strike_timing. With the
         # cfg fields at their None defaults these are recomputed from strike_window_s each step,
         # i.e. numerically identical to strike_window (byte-identical default path).
@@ -14088,6 +14123,9 @@ class RacketTargetCommand(CommandTerm):
     def _resample_command(self, env_ids: Sequence[int]):
         if len(env_ids) == 0:
             return
+        # A true reset or wrap can install new action-ball timing under the same manager step
+        # token.  Never let the following update consume a pre-resample metrics handoff.
+        self._invalidate_strike_timing_metrics_handoff()
         self._ensure_action_ball_runtime_initialized()
         n = len(env_ids)
         env_ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
@@ -15041,6 +15079,50 @@ class RacketTargetCommand(CommandTerm):
             (last_tick & decisions).sum(dtype=torch.long)
         )
 
+    def _invalidate_strike_timing_metrics_handoff(self) -> None:
+        """Invalidate the one-shot metrics -> update timing handoff.
+
+        This only mutates two Python scalars.  In particular, it never inspects a CUDA tensor.
+        ``getattr``-tolerant consumers constructed through ``__new__`` therefore keep the historic
+        direct-call behavior even if they did not run the full initializer.
+        """
+
+        self._strike_timing_metrics_step_token = None
+        self._strike_timing_metrics_handoff_pending = False
+
+    def _refresh_strike_timing_for_policy_step(self, *, metrics_pass: bool) -> None:
+        """Refresh timing, skipping only CommandTerm's same-step duplicate update call.
+
+        Isaac Lab calls this term's ``_update_metrics`` and then ``_update_command`` with the same
+        host ``common_step_counter``.  The metrics pass owns the phase-aligned refresh; the ordered
+        update pass may consume that result exactly once.  Any direct update, missing/non-integer
+        token, token change, reset/resample, or intervening direct timing refresh recomputes.
+        """
+
+        if type(metrics_pass) is not bool:
+            raise TypeError("strike timing cache metrics_pass must be boolean")
+        token = getattr(self._env, "common_step_counter", None)
+        if (
+            not metrics_pass
+            and type(token) is int
+            and getattr(
+                self, "_strike_timing_metrics_handoff_pending", False
+            )
+            and getattr(self, "_strike_timing_metrics_step_token", None)
+            == token
+        ):
+            # One-shot consumption is what preserves direct _update_command semantics when a caller
+            # invokes it again without an intervening metrics pass.
+            self._invalidate_strike_timing_metrics_handoff()
+            return
+
+        self._compute_strike_timing()
+        if metrics_pass and type(token) is int:
+            self._strike_timing_metrics_step_token = token
+            self._strike_timing_metrics_handoff_pending = True
+        else:
+            self._invalidate_strike_timing_metrics_handoff()
+
     def _compute_strike_timing(self):
         """Refresh time_to_strike / pre_strike / strike_window from the CURRENT motion phase.
 
@@ -15054,6 +15136,9 @@ class RacketTargetCommand(CommandTerm):
         (exact-strike pos<7.5cm read ~11% instead of the true ~68%) while barely moving velocity (flat
         near the peak). That made strike_composite_success_exact ~6x pessimistic vs the honest probe.
         """
+        # This public/internal seam is also used directly by reset-time evaluators and source tests.
+        # A direct refresh must make any earlier metrics handoff unconsumable.
+        self._invalidate_strike_timing_metrics_handoff()
         motion = self._motion()
         ml = motion.motion
         # Legacy/unit consumers construct a minimal command around this timing
@@ -15186,10 +15271,9 @@ class RacketTargetCommand(CommandTerm):
     def _update_command(self):
         self._ensure_action_ball_runtime_initialized()
         motion = self._motion()
-        # Timing is refreshed in _update_metrics (aligned with the FK); recompute here too so a direct
-        # _update_command call outside the compute() path stays correct. Idempotent within a step
-        # (motion.time_steps is unchanged between the two calls).
-        self._compute_strike_timing()
+        # Normal CommandTerm order consumes the phase-aligned metrics refresh exactly once.  A direct
+        # _update_command call, reset/resample, or token mismatch recomputes through the same helper.
+        self._refresh_strike_timing_for_policy_step(metrics_pass=False)
 
         # Re-sample the target at each new swing. Use the motion command's robust just_resampled signal
         # (set this same step when it wrapped a swing) instead of a time_steps<prev heuristic — the latter
@@ -16985,12 +17069,39 @@ class RacketTargetCommand(CommandTerm):
             self.metrics["virtual_approach_speed"],
         )
         fired_valid = gate & land["land_valid"]
-        if bool(fired_valid.any()):
-            derr = torch.linalg.norm(
-                land["land_xy"] - self._vb_target_xy_per_env, dim=-1
-            )
-            self.metrics["virtual_land_err_m"][:] = derr[fired_valid].mean()
-            self.metrics["virtual_topspin_revs"][:] = (topspin[fired_valid] / (2.0 * math.pi)).mean()
+        # Keep this hot path entirely on device.  The former ``bool(any())`` branch forced one
+        # CUDA -> host synchronization on every strike-carrying control step.  Mask before the
+        # reductions (instead of multiplying by 0) so a rejected row containing NaN/Inf cannot
+        # contaminate an otherwise finite selected mean.  With no valid fired row, ``where`` keeps
+        # both held metrics exactly as the old branch did.
+        fired_valid_count = fired_valid.sum()
+        fired_valid_denom = fired_valid_count.clamp_min(1).to(
+            dtype=land["land_xy"].dtype
+        )
+        derr = torch.linalg.norm(
+            land["land_xy"] - self._vb_target_xy_per_env, dim=-1
+        )
+        fired_land_err_mean = torch.where(
+            fired_valid,
+            derr,
+            torch.zeros_like(derr),
+        ).sum() / fired_valid_denom
+        fired_topspin_revs_mean = torch.where(
+            fired_valid,
+            topspin / (2.0 * math.pi),
+            torch.zeros_like(topspin),
+        ).sum() / fired_valid_denom
+        has_fired_valid = fired_valid_count > 0
+        self.metrics["virtual_land_err_m"][:] = torch.where(
+            has_fired_valid,
+            fired_land_err_mean,
+            self.metrics["virtual_land_err_m"],
+        )
+        self.metrics["virtual_topspin_revs"][:] = torch.where(
+            has_fired_valid,
+            fired_topspin_revs_mean,
+            self.metrics["virtual_topspin_revs"],
+        )
         if current_angular_velocity is not None:
             self._action_ball_store_virtual_contact_history(
                 current_angular_velocity,
@@ -17750,7 +17861,7 @@ class RacketTargetCommand(CommandTerm):
         # exact_strike / strike_window gating below (see its docstring: the old stale read measured
         # the strike one control frame too late).
         self._compute_racket_state()
-        self._compute_strike_timing()
+        self._refresh_strike_timing_for_policy_step(metrics_pass=True)
         origins = self._env.scene.env_origins
         # commanded base repositioning = distance of the base target from spawn (0 if coupling disabled).
         self.metrics["base_target_offset_norm"] = torch.norm(self.base_target_pos_w - origins[:, :2], dim=-1)
@@ -17862,16 +17973,9 @@ class RacketTargetCommand(CommandTerm):
             )
             self._task_first_attempt_success |= task_success
         decay = float(self.cfg.exact_success_decay)
-        self._exact_n_acc = decay * self._exact_n_acc + float(exact_strike.sum())
-        self._exact_pass_comp_acc = decay * self._exact_pass_comp_acc + float(pass_comp.sum())
-        self._exact_pass_pos_acc = decay * self._exact_pass_pos_acc + float(pass_pos.sum())
-        self._exact_pass_vel_acc = decay * self._exact_pass_vel_acc + float(pass_vel.sum())
         # 5/10 cm position buckets on the exact-strike sample (NOT the window-exit frame).
         _pass_5cm = (pos_err < 0.05) & exact_strike
         _pass_10cm = (pos_err < 0.10) & exact_strike
-        self._exact_pass_5cm_acc = decay * self._exact_pass_5cm_acc + float(_pass_5cm.sum())
-        self._exact_pass_10cm_acc = decay * self._exact_pass_10cm_acc + float(_pass_10cm.sum())
-        self._exact_pass_normal_acc = decay * self._exact_pass_normal_acc + float(pass_normal.sum())
         # Reuse the existing exact sparse strike denominator for unconditional swing completion.
         # Virtual-ball evaluation below adds only its downstream outcomes, so a strike is booked
         # exactly once whether virtual rewards are enabled or not.
@@ -17897,12 +18001,87 @@ class RacketTargetCommand(CommandTerm):
         # serve scheduling, exact-strike serve-accuracy measurement, park drive. Off = no-op branch.
         if self._physical is not None:
             self._physical.update(exact_strike)
+        # Keep every reduction and the Python-float EMA recurrence unchanged, but transfer all
+        # global + per-bucket scalar results to the host together.  The old form called
+        # ``float(cuda_reduce)`` 10 + 8*N times per control step, draining the CUDA stream after
+        # every scalar even when the exact-strike mask was empty.
+        _exact_metric_tensors = [
+            # Counts are reduced directly in the error dtype so the entire ordered batch can be
+            # stacked and copied once.  At the supported environment counts (<=8192), sums of
+            # boolean 0/1 values are exact in float32 (well below 2**24), so this exposes exactly
+            # the same Python float as the former int64 ``float(sum())``.
+            exact_strike.sum(dtype=pos_err.dtype),
+            pass_comp.sum(dtype=pos_err.dtype),
+            pass_pos.sum(dtype=pos_err.dtype),
+            pass_vel.sum(dtype=pos_err.dtype),
+            _pass_5cm.sum(dtype=pos_err.dtype),
+            _pass_10cm.sum(dtype=pos_err.dtype),
+            pass_normal.sum(dtype=pos_err.dtype),
+            (pos_err * exact_strike).sum(),
+            (vel_err * exact_strike).sum(),
+            (normal_err_rad * exact_strike).sum(),
+        ]
+        _exact_metric_bucket_order = ()
+        if getattr(motion, "_multiseg", False):
+            _exact_metric_bucket_order = tuple(self._clip_names)
+            _exact_metric_families = self._metric_bucket_rows()[motion.clip_id]
+            for _c in _exact_metric_bucket_order:
+                _sel = exact_strike & (_exact_metric_families == _c)
+                _sel_f = _sel.float()
+                _exact_metric_tensors.extend(
+                    (
+                        _sel.sum(dtype=pos_err.dtype),
+                        (pass_pos & _sel).sum(dtype=pos_err.dtype),
+                        (pass_vel & _sel).sum(dtype=pos_err.dtype),
+                        (pass_normal & _sel).sum(dtype=pos_err.dtype),
+                        (pass_comp & _sel).sum(dtype=pos_err.dtype),
+                        (pos_err * _sel_f).sum(),
+                        (vel_err * _sel_f).sum(),
+                        (normal_err_deg * _sel_f).sum(),
+                    )
+                )
+        _exact_metric_values = iter(
+            _batched_host_scalar_values(_exact_metric_tensors)
+        )
+        self._exact_n_acc = decay * self._exact_n_acc + next(_exact_metric_values)
+        self._exact_pass_comp_acc = (
+            decay * self._exact_pass_comp_acc + next(_exact_metric_values)
+        )
+        self._exact_pass_pos_acc = (
+            decay * self._exact_pass_pos_acc + next(_exact_metric_values)
+        )
+        self._exact_pass_vel_acc = (
+            decay * self._exact_pass_vel_acc + next(_exact_metric_values)
+        )
+        self._exact_pass_5cm_acc = (
+            decay * self._exact_pass_5cm_acc + next(_exact_metric_values)
+        )
+        self._exact_pass_10cm_acc = (
+            decay * self._exact_pass_10cm_acc + next(_exact_metric_values)
+        )
+        self._exact_pass_normal_acc = (
+            decay * self._exact_pass_normal_acc + next(_exact_metric_values)
+        )
         # GLOBAL error-magnitude EMAs (P2.3 adaptive sigma driver) — same decay/mask as the pass
         # counters above; per-clip variants exist further down but sigma needs one global signal.
-        self._exact_pos_err_sum = decay * self._exact_pos_err_sum + float((pos_err * exact_strike).sum())
-        self._exact_vel_err_sum = decay * self._exact_vel_err_sum + float((vel_err * exact_strike).sum())
+        self._exact_pos_err_sum = (
+            decay * self._exact_pos_err_sum + next(_exact_metric_values)
+        )
+        self._exact_vel_err_sum = (
+            decay * self._exact_vel_err_sum + next(_exact_metric_values)
+        )
         # 拍面通道:同一 decay/掩码,累加 exact-strike 面角误差(弧度)。见 adaptive_sigma_normal。
-        self._exact_nrm_err_sum = decay * self._exact_nrm_err_sum + float((normal_err_rad * exact_strike).sum())
+        self._exact_nrm_err_sum = (
+            decay * self._exact_nrm_err_sum + next(_exact_metric_values)
+        )
+        # Preserve the historic update order: per-clip swing-completion metrics below intentionally
+        # read the previous-step exact accumulators, while the per-clip exact-quality report later in
+        # this method first applies this step's eight values.  Batching the host read must not move
+        # that state transition earlier.
+        _exact_metric_bucket_values = {
+            _c: tuple(next(_exact_metric_values) for _ in range(8))
+            for _c in _exact_metric_bucket_order
+        }
         # UNCONDITIONAL swing accounting: decay the start/fall accumulators at the SAME per-step
         # rate as the exact accumulators (increments happen in _count_swing_starts), then report
         #   swing_completion_rate = exact-strike arrivals / swing starts   (falls count against it)
@@ -18040,16 +18219,41 @@ class RacketTargetCommand(CommandTerm):
             # 三档合计,"backhand"桶=反手三档合计,不再把正手 1.0 档记成反手)。
             _fam = self._metric_bucket_rows()[_motion.clip_id]
             for _c, _cn in self._clip_names.items():
-                _sel = exact_strike & (_fam == _c)
-                _self_f = _sel.float()
-                self._exact_n_acc_c[_c] = decay * self._exact_n_acc_c[_c] + float(_sel.sum())
-                self._exact_pass_pos_acc_c[_c] = decay * self._exact_pass_pos_acc_c[_c] + float((pass_pos & _sel).sum())
-                self._exact_pass_vel_acc_c[_c] = decay * self._exact_pass_vel_acc_c[_c] + float((pass_vel & _sel).sum())
-                self._exact_pass_normal_acc_c[_c] = decay * self._exact_pass_normal_acc_c[_c] + float((pass_normal & _sel).sum())
-                self._exact_pass_comp_acc_c[_c] = decay * self._exact_pass_comp_acc_c[_c] + float((pass_comp & _sel).sum())
-                self._exact_pos_err_sum_c[_c] = decay * self._exact_pos_err_sum_c[_c] + float((pos_err * _self_f).sum())
-                self._exact_vel_err_sum_c[_c] = decay * self._exact_vel_err_sum_c[_c] + float((vel_err * _self_f).sum())
-                self._exact_nrm_err_sum_c[_c] = decay * self._exact_nrm_err_sum_c[_c] + float((normal_err_deg * _self_f).sum())
+                (
+                    _bucket_n,
+                    _bucket_pass_pos,
+                    _bucket_pass_vel,
+                    _bucket_pass_normal,
+                    _bucket_pass_comp,
+                    _bucket_pos_err,
+                    _bucket_vel_err,
+                    _bucket_nrm_err,
+                ) = _exact_metric_bucket_values[_c]
+                self._exact_n_acc_c[_c] = (
+                    decay * self._exact_n_acc_c[_c] + _bucket_n
+                )
+                self._exact_pass_pos_acc_c[_c] = (
+                    decay * self._exact_pass_pos_acc_c[_c] + _bucket_pass_pos
+                )
+                self._exact_pass_vel_acc_c[_c] = (
+                    decay * self._exact_pass_vel_acc_c[_c] + _bucket_pass_vel
+                )
+                self._exact_pass_normal_acc_c[_c] = (
+                    decay * self._exact_pass_normal_acc_c[_c]
+                    + _bucket_pass_normal
+                )
+                self._exact_pass_comp_acc_c[_c] = (
+                    decay * self._exact_pass_comp_acc_c[_c] + _bucket_pass_comp
+                )
+                self._exact_pos_err_sum_c[_c] = (
+                    decay * self._exact_pos_err_sum_c[_c] + _bucket_pos_err
+                )
+                self._exact_vel_err_sum_c[_c] = (
+                    decay * self._exact_vel_err_sum_c[_c] + _bucket_vel_err
+                )
+                self._exact_nrm_err_sum_c[_c] = (
+                    decay * self._exact_nrm_err_sum_c[_c] + _bucket_nrm_err
+                )
                 _n = self._exact_n_acc_c[_c]
                 # rate = acc / n once enough decayed samples accumulated (else 0). errors = decayed mean
                 # error over THIS clip's exact-strike samples. _scale folds in the "enough" gate.

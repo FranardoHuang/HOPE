@@ -597,7 +597,9 @@ latch 合成一个 env bit；diagnostic run 又故意不走 formal joint-safety 
 2. 将 command EMA/计数留在 device、每 update 同步一次，并去掉逐步
    `float(reduce)` / `bool(any)`；
 3. 每 policy step 的 `_compute_strike_timing()` 只计算一次；
-4. immutable receipt SHA 缓存，reset 批次一次 D2H，禁止 per-env `.item()` / JSON / SHA；
+4. immutable receipt SHA 缓存，reset 批次一次
+   [device-to-host transfer（D2H，设备到主机传输）](../../DEFINITIONS.md#device-to-host-transfer)，
+   禁止 per-env `.item()` / JSON / SHA；
 5. formal joint ledger 改为预分配聚合，只有 terminal/unsafe env 保留完整 transcript；
 6. 最后才做 2048/4096/8192 env A/B。
 
@@ -690,3 +692,52 @@ physics-substep 的 q/qdot 预测与 brake 保持为滚动 `20 ms` policy/contro
 Done、2% safety band 和 nominal safe target 均不变，安全行要求 bitwise 不变。host
 joint-safety focused suite `81 passed`，与 ActionBall runtime wiring 的联合回归为
 `125 passed`。该候选尚无 Pod A/B，不得写成已提速或已解决。
+
+### 2026-07-29：`eaf55fba` 排除 soft-band Done；upper 根因收敛为 q/qd 自相矛盾
+
+`eaf55fba5e201d76153162ab2f7f482bb66b3f22` 已将 recoverable 2%-inner occupancy 留给
+actual-q barrier/遥测，只有 nonfinite、当前 raw mechanical edge 或 physics-substep raw-hard
+latch 继续 Done。Pod1 fresh 4096-env upper `bh_loop_c` updates 0--4 的 hard terminal 仍为
+`2,549/3,986/4,225/4,188/4,162`，episode age 约 `22--24<t_hit≈31`，strike opportunity
+恒为零；q_des projection、projection penalty 和 nonfinite 恒为零。这是对上一节“先等 early
+policy 学会避开”的反例：事件在有效 PPO 学习前已经大规模发生，继续调 Reward、q_des margin
+或 PPO 不能产生击球数据。
+
+老师全片、20-ms ballistic prediction 和 fresh exact-ready actor bias 均不贴 hard edge。第一轮
+只检查 ready donor 的旧证据，曾误判为现役 upper qpos 未接地；随后在 Pod 对**实际训练 NPZ**
+逐列和 exact A3 MuJoCo 复核，得到更强的相反证据：
+
+- `canonical_ready_v1` 本身确实只是 donor，旧 exact MuJoCo 证据为
+  `active_contact_count=0`；但这不能外推到后续 fivebind upper 的实际下肢；
+- 两条现役 upper 的 12 个腿关节 `joint_pos` 已全片恒定，并逐位等于 content-bound A3
+  grounded-ready candidate；其 SHA-256 为
+  `585bbd7d643857abd08108eac7b4dd997b228d0df1a9921334ca845cd931d71e`，receipt file SHA-256
+  为 `ee7dea1aec81169e1d002bbe0b2cfa75c793a97a3f89e1e740d0064dc8be7c46`；
+- 这里的 `candidate_id=G1` 是 A3 grounded-ready 构造候选的代号，exact model 为
+  `A3T2.5_pingpong_0519` 和 A3 31-joint order，绝不是 Unitree G1 机器人；
+- 两条 actual upper 在 exact A3 MuJoCo frame 0 都为双脚 `3+3` 接触，sole 约
+  `-0.000498 m`，joint/collision/support/static-ground LP PASS；
+- 真正的 schema 不一致是腿 `joint_pos` 每帧恒定，但相同 12 列 `joint_vel` 在中间帧非零。
+  Pod qvel-only 原型把腿速度归零、用 `canonical_schema2_builder` 重建 body FK/velocity 后，
+  两条动作每帧 `right_racket` site position/orientation/linear/angular velocity 的最大差均为
+  exact zero，frame count/strike frame 不变。
+
+因此首个 successor 改为 A3 upper q/qd 一致性资产修复，保留
+raw-hard/table/fall/nonfinite Done。这是数学/运动学合同修复，不做 Reward 学习 A/B：
+
+1. upper 快线不得再改 qpos/root/retime，只把 12 个恒定腿位置对应的 stale `joint_vel` 归零，
+   并重算 body FK/velocity；
+2. 每帧 right-racket site position/orientation/linear/angular velocity、frame count、strike frame
+   和既有球题必须保持不变，才能复用原 N1 contact binding；
+3. full 不能用该 qvel-only 变换，必须完整重编 `grounded ready→core→grounded ready`，随后重绑
+   aim/strike/contact；
+4. fresh `1 env × 2 update` 后跑 4096-env 五轮；primary 是 episode 越过 `t_hit`、strike
+   opportunity 非零和 environment-steps/s，raw-hard/table/fall/nonfinite 不得上升。
+
+与此同时只合入可证明等价的 hot-path 优化：immutable receipt SHA 外部缓存、正常同一步
+strike-timing 一次计算、global+per-action 原 error reduction 与可精确表示的 float32 count
+的一次 batched
+[device-to-host transfer（D2H，设备到主机传输）](../../DEFINITIONS.md#device-to-host-transfer)、以及空集保持旧
+metric 的 `fired_valid` device mask。它们只需 Pod parity/exact-resume/profiler，不开启学习
+A/B。Reward 权重、reference termination/CaT、death/entropy/sigma/RSI、8192 env 与 actual
+hard-edge 放宽继续作为健康 baseline 之后的单变量 canary。

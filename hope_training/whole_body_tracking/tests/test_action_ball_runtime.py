@@ -1,11 +1,19 @@
 from copy import deepcopy
-from dataclasses import FrozenInstanceError, replace
+from dataclasses import (
+    FrozenInstanceError,
+    fields as dataclass_fields,
+    is_dataclass,
+    replace,
+)
+import gc
 import hashlib
 import importlib.util
 import json
 import math
 from pathlib import Path
+import pickle
 import sys
+import weakref
 
 import pytest
 
@@ -1159,6 +1167,172 @@ def test_receipts_are_immutable_canonical_strict_and_no_move_is_physical():
         match="contact|exact-face geometry|canonical SHA",
     ):
         R.ActionBallTaskReceipt.from_dict(tampered)
+
+
+def test_frozen_canonical_sha_is_cached_without_changing_contract(
+    monkeypatch,
+):
+    broker, provider = _broker(1)
+    birth = _reserve(broker)
+    claim = provider.requests[-1].domain_claim
+    contract = R.BasePreparationContract(
+        max_planar_speed_mps=1.0,
+        max_planar_acceleration_mps2=4.0,
+        settle_margin_s=0.05,
+    )
+    preparation = R.BasePreparationReceipt.evaluate(
+        proposal_sample_sha256=_digest("cached-preparation"),
+        proposal_sample_index=0,
+        mobility_mode="move",
+        base_travel_b_yaw_m=(0.08, 0.0, 0.0),
+        reaction_margin_s=0.05,
+        available_preparation_s=0.70,
+        contract=contract,
+    )
+    templates = (
+        _counter_rally_task_identity(_digest("cached-counter-rally")),
+        _levels(),
+        claim,
+        _pins(),
+        birth,
+        contract,
+        preparation,
+        _task(birth, 0),
+    )
+
+    def assert_deeply_immutable(value):
+        if value is None or isinstance(
+            value, (bool, int, float, str, bytes)
+        ):
+            return
+        if isinstance(value, tuple):
+            for item in value:
+                assert_deeply_immutable(item)
+            return
+        assert is_dataclass(value)
+        assert value.__dataclass_params__.frozen
+        for dataclass_field in dataclass_fields(value):
+            assert_deeply_immutable(
+                getattr(value, dataclass_field.name)
+            )
+
+    original_sha256_json = R._sha256_json
+    hashed_payloads = []
+
+    def counted_sha256_json(value):
+        hashed_payloads.append(value)
+        return original_sha256_json(value)
+
+    monkeypatch.setattr(R, "_sha256_json", counted_sha256_json)
+    for template in templates:
+        # replace() copies only declared dataclass fields, never an entry
+        # from the weak external cache.
+        instance = replace(template)
+        hashed_payloads.clear()
+        payload_method = getattr(instance, "payload_dict", None)
+        payload_before = (
+            payload_method()
+            if payload_method is not None
+            else instance.to_dict()
+        )
+        expected_sha256 = original_sha256_json(payload_before)
+        twin = replace(instance)
+        repr_before = repr(instance)
+        vars_before = dict(vars(instance))
+        pickle_before = pickle.dumps(
+            instance, protocol=pickle.HIGHEST_PROTOCOL
+        )
+        deepcopy_before = deepcopy(instance)
+        field_names = tuple(
+            dataclass_field.name
+            for dataclass_field in dataclass_fields(instance)
+        )
+        for dataclass_field in dataclass_fields(instance):
+            assert_deeply_immutable(
+                getattr(instance, dataclass_field.name)
+            )
+
+        # Construction of the equality twin may validate nested canonical
+        # identities; only accesses on this instance belong to the cache
+        # assertion below.
+        hashed_payloads.clear()
+        assert instance.canonical_sha256 == expected_sha256
+        assert instance.canonical_sha256 == expected_sha256
+        assert len(hashed_payloads) == 1
+        assert "canonical_sha256" not in field_names
+        with pytest.raises(AttributeError, match="read-only"):
+            object.__setattr__(
+                instance, "canonical_sha256", _digest("shadow-attempt")
+            )
+        # A data descriptor also wins over a hostile same-name ``__dict__`` entry, matching the
+        # precedence of the former property.  Remove the synthetic entry before wire/pickle checks.
+        vars(instance)["canonical_sha256"] = _digest("dict-shadow-attempt")
+        assert instance.canonical_sha256 == expected_sha256
+        vars(instance).pop("canonical_sha256")
+        assert instance == twin
+        assert repr(instance) == repr_before
+        assert vars(instance) == vars_before
+        assert pickle.dumps(
+            instance, protocol=pickle.HIGHEST_PROTOCOL
+        ) == pickle_before
+        restored = pickle.loads(pickle_before)
+        assert restored == instance
+        assert vars(restored) == vars_before
+        assert deepcopy(instance) == deepcopy_before
+        assert vars(deepcopy(instance)) == vars_before
+        payload_after = (
+            payload_method()
+            if payload_method is not None
+            else instance.to_dict()
+        )
+        assert payload_after == payload_before
+
+        to_dict = getattr(instance, "to_dict", None)
+        if to_dict is None:
+            wire_after = payload_after
+            expected_wire = payload_before
+        else:
+            wire_after = to_dict()
+            if set(wire_after) == set(payload_before) | {
+                "canonical_sha256"
+            }:
+                expected_wire = {
+                    **payload_before,
+                    "canonical_sha256": expected_sha256,
+                }
+            else:
+                expected_wire = payload_before
+        assert json.dumps(
+            wire_after,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ) == json.dumps(
+            expected_wire,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        )
+
+
+def test_frozen_canonical_sha_cache_releases_dead_receipts():
+    descriptor = vars(R.ActionDomainLevels)["canonical_sha256"]
+    receipt = R.ActionDomainLevels()
+    receipt_id = id(receipt)
+    receipt_ref = weakref.ref(receipt)
+    entries_before = len(descriptor._entries)
+
+    assert len(receipt.canonical_sha256) == 64
+    assert receipt_id in descriptor._entries
+    assert len(descriptor._entries) == entries_before + 1
+
+    del receipt
+    gc.collect()
+    assert receipt_ref() is None
+    assert receipt_id not in descriptor._entries
+    assert len(descriptor._entries) == entries_before
 
 
 def test_counter_rally_task_identity_is_optional_strict_and_sha_bound():
