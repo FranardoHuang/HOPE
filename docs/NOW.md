@@ -68,13 +68,34 @@
   diagnostic。07-25/26 深夜：十件 probe 成品交付、冒烟训练 800 iter 跑完（管线 PASS、学习
   信号待 5000 iter 延长冒烟裁决）、源平滑修活后正手窗开 1.33→0.69s（各件时间见实验 §7.3
   逐件最优表）、probe 消融首波队列见实验 §10.1.1。
-- **合并警告 → 已在工作树修复（待审后即可合 main）**：分支曾把一个出厂为空的 legacy motion
-  admission 信任集接进了默认（非 canonical）`MotionCommand` 路径——合入后现行 v4rg 训练重启会在
-  环境构造时直接失败封闭。**07-26 修复（工作树，未提交）**：采纳"把该门限定到 canonical 消费路径"
-  一案——默认 `motion_file` 通道恢复分支前行为，直接读原始 NPZ 字节、不再过任何信任集，而
-  canonical 消费路径的证书门原样保留 fail-closed。改动：`commands.py` 默认路径去门、
-  `canonical_motion_admission.py` 删掉 legacy 信任集与两个 legacy 函数、对应测试改为"默认路径
-  无需信任集即可构造"的回归 + canonical 仍拒未授权证书。合并阻断已解除，待审。
+- **合并警告 → 已解除并合 main(Franco 2026-07-28 裁定)**:legacy 空信任集问题由
+  admission v2(`7805b2c8`)按"门限定到 canonical 消费路径"一案落地——默认 `motion_file`
+  通道直读 NPZ 字节不过信任集,canonical/action_ball 正式路径的证书门保持 fail-closed
+  (两个 action_ball 信任集仍为空 = 课程正式发射的现行阻断,见下方 07-28 运行态更新)。
+  14 条现役臂全部在该代码上正常构造与训练,行为证据成立。
+
+## 2026-07-28 运行态更新(Fable 值守,Franco 全程裁定)
+
+- **Ball-first banked 舰队 14 臂在训**,代码谱系统一(pod1 `fivebank2` @`8ba15f38`,pod2
+  `chingmu101` 分支含同两笔多 clip 修复;逐进程 cwd 已核)。矩阵:两组(五动作 4-clip upper /
+  ChingMu 73 件全库)×{move 旗舰、nomove、qhigh(冻结质量表 393/295/229 首次真正生效,≈98×)、
+  combo(landing 791.9+face 引导 −0.08)} + 五动作 full(单 clip)/加速 [0.5,1.2]/qmid(40/15/10)/
+  penlight + 101 land04(landing 剂量 1648.8/791.9/400 三档)。**淘汰制**:每臂 +5000 iter 按
+  legal/strike 与摔率裁尾腾卡。`table_hit_penalty=-1800` 与 `death_penalty=-1800` 是当前默认
+  (撞桌=死亡级重罚+reset,Franco 07-28 确认)。动作集入库:`assets/motions/`(fivebind 六件 +
+  ChingMu 73+1 件含实测 v_in 的 manifest)。
+- **早期读数(单窗,≈6k iter)**:f5_upper legal/strike 0.075(反手挡 18%、反手拉 9% 扛旗,
+  正手拉 0——疑 07-26 拍面死区,combo 臂将确诊;s0 解多在老师挥速锥外=通用速度带与动作
+  不匹配,匹配带 v2 题库已排队)。昨日终档对照:单 clip banked 基线 25k 收官 legal/strike
+  ~0.5,uniform 对照 0.0,bank+seed1 崩塌("不打球"收入更优)——题库必要不充分。
+- **动态课程(默认候选)**:代码全绿 462 测试——单段 uniform 采样(Franco 两次裁定)、
+  球出生具名拒绝门、新增带 rolling-30 环、base_spawn z 合同修复、receipt 校验对齐、可执行
+  pin 工具 + f10/f20 manifest 逐字节可复现。**发射阻断在信任根**:A 路线也无法正门签发——
+  晋级证书链缺五类构建器且 73 件 npz 不合 canonical-ready 端点合同(要重过编译链),评测
+  receipt 三字段全仓无定义;两信任集保持空集,未手编(停点全录于解锁线报告)。
+  另:环 n=30 + z=1.96 下 f10(10%±2.5pp)的 expand 统计上不可达(0 失败的 Wilson UCB
+  ≈0.114>0.075),环长或判据待 Franco 裁定。reference 一致性终止(anchor/ee)按 Franco 裁定
+  将在课程扩张阶段起默认关闭(安全终止保留)——随信任根解锁波一起落地并重钉 pin。
 
 
 ## 1. 当前一套训练是怎样完整跑起来的

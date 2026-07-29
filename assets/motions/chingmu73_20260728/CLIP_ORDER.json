@@ -1,0 +1,1519 @@
+{
+ "generated": "2026-07-28",
+ "n_clips": 73,
+ "order_note": "clip_id = index = motion_file order = clip_names order = bank clip_order",
+ "excluded": [
+  "Take_085_unit00_FH"
+ ],
+ "clips": [
+  {
+   "clip_id": 0,
+   "name": "take058_unit02_fh",
+   "uid": "Take_058_unit02_FH",
+   "npz": "clips/take058_unit02_fh.npz",
+   "sha256": "edf25948bb13c6a8c37c788321054b8448dd8b8eb5c7afa083df6014a59fdbb1",
+   "T": 96,
+   "hit_frame_50": 52,
+   "phase": 0.547368421,
+   "family": "FH",
+   "mount_normal_sign": 1,
+   "rally_yaw_deg": 20.92,
+   "station_xy_hope_m": [
+    -0.61141563,
+    -0.86302684
+   ],
+   "yaw_norm_deg": -5.42,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 1,
+   "name": "take058_unit03_fh",
+   "uid": "Take_058_unit03_FH",
+   "npz": "clips/take058_unit03_fh.npz",
+   "sha256": "8ae9c9548e36ba16f3cea3d3f5f74027e9bfccd5adf9ee426de125bf75d61ad3",
+   "T": 81,
+   "hit_frame_50": 38,
+   "phase": 0.475,
+   "family": "FH",
+   "mount_normal_sign": 1,
+   "rally_yaw_deg": 20.89,
+   "station_xy_hope_m": [
+    -0.53676805,
+    -0.71919501
+   ],
+   "yaw_norm_deg": -3.165,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 2,
+   "name": "take058_unit04_fh",
+   "uid": "Take_058_unit04_FH",
+   "npz": "clips/take058_unit04_fh.npz",
+   "sha256": "6b60255f0530e50b9d37f863d3f9c1b68bd25d35c8dd6bfc54a52bd045a89a7d",
+   "T": 91,
+   "hit_frame_50": 49,
+   "phase": 0.544444444,
+   "family": "FH",
+   "mount_normal_sign": 1,
+   "rally_yaw_deg": 18.68,
+   "station_xy_hope_m": [
+    -0.5792551,
+    -0.7661862100000001
+   ],
+   "yaw_norm_deg": -2.863,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 3,
+   "name": "take058_unit05_fh",
+   "uid": "Take_058_unit05_FH",
+   "npz": "clips/take058_unit05_fh.npz",
+   "sha256": "016e4c680bbcdeccea76fe9bcac31af1c42427c4d19be9261dbed0c9a5610978",
+   "T": 90,
+   "hit_frame_50": 48,
+   "phase": 0.539325843,
+   "family": "FH",
+   "mount_normal_sign": 1,
+   "rally_yaw_deg": 26.09,
+   "station_xy_hope_m": [
+    -0.60435648,
+    -0.7272147699999999
+   ],
+   "yaw_norm_deg": -1.884,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 4,
+   "name": "take058_unit06_fh",
+   "uid": "Take_058_unit06_FH",
+   "npz": "clips/take058_unit06_fh.npz",
+   "sha256": "6bcd2a9792be236d3b3f911e3b7dbcfdb84b588232b5bf76368fa5e9fe6ac67a",
+   "T": 97,
+   "hit_frame_50": 55,
+   "phase": 0.572916667,
+   "family": "FH",
+   "mount_normal_sign": 1,
+   "rally_yaw_deg": 23.27,
+   "station_xy_hope_m": [
+    -0.60523203,
+    -0.7530440500000001
+   ],
+   "yaw_norm_deg": -6.23,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 5,
+   "name": "take058_unit07_fh",
+   "uid": "Take_058_unit07_FH",
+   "npz": "clips/take058_unit07_fh.npz",
+   "sha256": "6490159ac633803559390edab893bacfcd5af9be8a25a7318aa60bf769ea227f",
+   "T": 92,
+   "hit_frame_50": 48,
+   "phase": 0.527472527,
+   "family": "FH",
+   "mount_normal_sign": 1,
+   "rally_yaw_deg": 16.65,
+   "station_xy_hope_m": [
+    -0.62619797,
+    -0.7680599100000001
+   ],
+   "yaw_norm_deg": -4.852,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 6,
+   "name": "take058_unit08_fh",
+   "uid": "Take_058_unit08_FH",
+   "npz": "clips/take058_unit08_fh.npz",
+   "sha256": "266e582ebabc49f824f8591bfa6d8333a02756fa3f16f4169c06dd3cde4af8c0",
+   "T": 85,
+   "hit_frame_50": 36,
+   "phase": 0.428571429,
+   "family": "FH",
+   "mount_normal_sign": 1,
+   "rally_yaw_deg": 14.88,
+   "station_xy_hope_m": [
+    -0.55405043,
+    -0.7313592800000001
+   ],
+   "yaw_norm_deg": -7.881,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 7,
+   "name": "take058_unit11_fh",
+   "uid": "Take_058_unit11_FH",
+   "npz": "clips/take058_unit11_fh.npz",
+   "sha256": "fef66ef3f2f54b9e9341738ad0aa65523676bbf573cfc3cabbcf3cd4444a5ef8",
+   "T": 87,
+   "hit_frame_50": 48,
+   "phase": 0.558139535,
+   "family": "FH",
+   "mount_normal_sign": 1,
+   "rally_yaw_deg": 14.19,
+   "station_xy_hope_m": [
+    -0.66668569,
+    -0.7946684500000001
+   ],
+   "yaw_norm_deg": -10.649,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 8,
+   "name": "take058_unit12_fh",
+   "uid": "Take_058_unit12_FH",
+   "npz": "clips/take058_unit12_fh.npz",
+   "sha256": "380ae334309dea99e2cf38b36d2e164f3dd9cfee5cd84d50ebf8f3ee3e176e9b",
+   "T": 92,
+   "hit_frame_50": 44,
+   "phase": 0.483516484,
+   "family": "FH",
+   "mount_normal_sign": 1,
+   "rally_yaw_deg": 8.23,
+   "station_xy_hope_m": [
+    -0.6641410000000001,
+    -0.76472156
+   ],
+   "yaw_norm_deg": -6.176,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 9,
+   "name": "take058_unit13_fh",
+   "uid": "Take_058_unit13_FH",
+   "npz": "clips/take058_unit13_fh.npz",
+   "sha256": "37cd308ed771037b5c006290a3a17c4c026faa39af95e04aa62b780e0da3c56a",
+   "T": 81,
+   "hit_frame_50": 40,
+   "phase": 0.5,
+   "family": "FH",
+   "mount_normal_sign": 1,
+   "rally_yaw_deg": 28.87,
+   "station_xy_hope_m": [
+    -0.76759742,
+    -0.68521665
+   ],
+   "yaw_norm_deg": 4.761,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 10,
+   "name": "take058_unit14_fh",
+   "uid": "Take_058_unit14_FH",
+   "npz": "clips/take058_unit14_fh.npz",
+   "sha256": "947a7d0d6f60f0cce0f01ffc2ee00b4d50a292e308fcc810751657a02f39dbcf",
+   "T": 86,
+   "hit_frame_50": 42,
+   "phase": 0.494117647,
+   "family": "FH",
+   "mount_normal_sign": 1,
+   "rally_yaw_deg": 16.8,
+   "station_xy_hope_m": [
+    -0.64363605,
+    -0.70144052
+   ],
+   "yaw_norm_deg": -5.267,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 11,
+   "name": "take059_unit01_fh",
+   "uid": "Take_059_unit01_FH",
+   "npz": "clips/take059_unit01_fh.npz",
+   "sha256": "aba21d2e0fca0ff77ffef9477bd9e81d10b01f295887c671fe4ac7f440391842",
+   "T": 83,
+   "hit_frame_50": 37,
+   "phase": 0.451219512,
+   "family": "FH",
+   "mount_normal_sign": 1,
+   "rally_yaw_deg": 14.21,
+   "station_xy_hope_m": [
+    -0.54029327,
+    -0.49528779
+   ],
+   "yaw_norm_deg": -17.009,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 12,
+   "name": "take059_unit03_fh",
+   "uid": "Take_059_unit03_FH",
+   "npz": "clips/take059_unit03_fh.npz",
+   "sha256": "2b1641217a03dd93f8f4fa931f66c2ea22bdfcd6a4f3ba9c1ba6dde7b7704c60",
+   "T": 89,
+   "hit_frame_50": 45,
+   "phase": 0.511363636,
+   "family": "FH",
+   "mount_normal_sign": 1,
+   "rally_yaw_deg": 13.09,
+   "station_xy_hope_m": [
+    -0.61774032,
+    -0.91305695
+   ],
+   "yaw_norm_deg": -9.528,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 13,
+   "name": "take060_unit00_bh",
+   "uid": "Take_060_unit00_BH",
+   "npz": "clips/take060_unit00_bh.npz",
+   "sha256": "9e529212d1151e08d8863b4b7b04039233f4485bf66cc40bf834dee585841479",
+   "T": 73,
+   "hit_frame_50": 41,
+   "phase": 0.569444444,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -12.01,
+   "station_xy_hope_m": [
+    -0.7499994200000001,
+    -0.6241145
+   ],
+   "yaw_norm_deg": -10.041,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 14,
+   "name": "take060_unit01_bh",
+   "uid": "Take_060_unit01_BH",
+   "npz": "clips/take060_unit01_bh.npz",
+   "sha256": "54745c5b6533cc33cbf3394d25c183718e4191233d79b2903f8e16ecf1ddfc37",
+   "T": 86,
+   "hit_frame_50": 56,
+   "phase": 0.658823529,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -14.34,
+   "station_xy_hope_m": [
+    -0.71582312,
+    -0.55676432
+   ],
+   "yaw_norm_deg": -10.671,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 15,
+   "name": "take060_unit02_bh",
+   "uid": "Take_060_unit02_BH",
+   "npz": "clips/take060_unit02_bh.npz",
+   "sha256": "9480afb62b006e42a10d71fe3740eda7af0dc95307abefdf1b09895e25db119f",
+   "T": 75,
+   "hit_frame_50": 42,
+   "phase": 0.567567568,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -13.47,
+   "station_xy_hope_m": [
+    -0.59792908,
+    -0.49839421
+   ],
+   "yaw_norm_deg": -12.013,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 16,
+   "name": "take060_unit04_bh",
+   "uid": "Take_060_unit04_BH",
+   "npz": "clips/take060_unit04_bh.npz",
+   "sha256": "7e104a7021747d0b2f6602cc6becad0b3398eac14ddf38a2952642d9ce75efc4",
+   "T": 36,
+   "hit_frame_50": 14,
+   "phase": 0.4,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -6.9,
+   "station_xy_hope_m": [
+    -0.70588208,
+    -0.53761666
+   ],
+   "yaw_norm_deg": -9.4,
+   "warnings": [
+    "duration 0.70s outside [0.8, 4.0]"
+   ],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 17,
+   "name": "take060_unit05_bh",
+   "uid": "Take_060_unit05_BH",
+   "npz": "clips/take060_unit05_bh.npz",
+   "sha256": "795fdf8e30f4cc106a9ee4f196c28b18a40b5ac2516f42ac6d6fb357c39f3140",
+   "T": 53,
+   "hit_frame_50": 39,
+   "phase": 0.75,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -16.47,
+   "station_xy_hope_m": [
+    -0.6634700499999999,
+    -0.53835229
+   ],
+   "yaw_norm_deg": -15.518,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 18,
+   "name": "take060_unit06_bh",
+   "uid": "Take_060_unit06_BH",
+   "npz": "clips/take060_unit06_bh.npz",
+   "sha256": "995f83d8d0798acb202294cb0e411fde787eb53476876c7a8f4f7067a32e3396",
+   "T": 62,
+   "hit_frame_50": 53,
+   "phase": 0.868852459,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -21.55,
+   "station_xy_hope_m": [
+    -0.67143964,
+    -0.5381783
+   ],
+   "yaw_norm_deg": -23.08,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 19,
+   "name": "take060_unit07_bh",
+   "uid": "Take_060_unit07_BH",
+   "npz": "clips/take060_unit07_bh.npz",
+   "sha256": "362ecaa53dbe13a02e7eca81707085b25a7b19b748e86976324f3c767bcb984c",
+   "T": 61,
+   "hit_frame_50": 52,
+   "phase": 0.866666667,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -22.48,
+   "station_xy_hope_m": [
+    -0.6857975999999999,
+    -0.56284507
+   ],
+   "yaw_norm_deg": -25.612,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 20,
+   "name": "take060_unit08_bh",
+   "uid": "Take_060_unit08_BH",
+   "npz": "clips/take060_unit08_bh.npz",
+   "sha256": "a208811fb2be5aaeec7fb1b6a5b98d5c8a6139e57f48d48429e6c7a407c33094",
+   "T": 70,
+   "hit_frame_50": 48,
+   "phase": 0.695652174,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -26.3,
+   "station_xy_hope_m": [
+    -0.66239532,
+    -0.56569275
+   ],
+   "yaw_norm_deg": -27.847,
+   "warnings": [
+    "real-ball unit coverage 99%"
+   ],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 21,
+   "name": "take060_unit09_bh",
+   "uid": "Take_060_unit09_BH",
+   "npz": "clips/take060_unit09_bh.npz",
+   "sha256": "6d6ff7621267a2bbcb20aeeedba719a10a6b6e6a49eeee9586f78031762073f1",
+   "T": 66,
+   "hit_frame_50": 36,
+   "phase": 0.553846154,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -19.03,
+   "station_xy_hope_m": [
+    -0.62500988,
+    -0.56605673
+   ],
+   "yaw_norm_deg": -21.53,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 22,
+   "name": "take060_unit10_bh",
+   "uid": "Take_060_unit10_BH",
+   "npz": "clips/take060_unit10_bh.npz",
+   "sha256": "2f384320b78acb3f8057062d7cd5266eaaf49ff1ebaa271113d11a0cee2037b3",
+   "T": 76,
+   "hit_frame_50": 31,
+   "phase": 0.413333333,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -9.15,
+   "station_xy_hope_m": [
+    -0.60698449,
+    -0.5458016099999999
+   ],
+   "yaw_norm_deg": -12.756,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 23,
+   "name": "take060_unit11_bh",
+   "uid": "Take_060_unit11_BH",
+   "npz": "clips/take060_unit11_bh.npz",
+   "sha256": "eb3cd68755d07cbd361b8a8d96dcb85676cc29e5d14b8bfd74a195b638b95022",
+   "T": 78,
+   "hit_frame_50": 63,
+   "phase": 0.818181818,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -3.36,
+   "station_xy_hope_m": [
+    -0.6515127,
+    -0.5480410299999999
+   ],
+   "yaw_norm_deg": -7.485,
+   "warnings": [
+    "real-ball unit coverage 99%"
+   ],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 24,
+   "name": "take060_unit12_bh",
+   "uid": "Take_060_unit12_BH",
+   "npz": "clips/take060_unit12_bh.npz",
+   "sha256": "1f67b376468d163c3b33da2beb552f88e5518360a818169a2daf903f453d55d6",
+   "T": 57,
+   "hit_frame_50": 39,
+   "phase": 0.696428571,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -22.31,
+   "station_xy_hope_m": [
+    -0.6155821300000001,
+    -0.5573408
+   ],
+   "yaw_norm_deg": -24.957,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 25,
+   "name": "take060_unit13_bh",
+   "uid": "Take_060_unit13_BH",
+   "npz": "clips/take060_unit13_bh.npz",
+   "sha256": "ab5802b169197b686a675f9bc6e1e7e1435144d5b16190d20951ff340ef6de39",
+   "T": 90,
+   "hit_frame_50": 39,
+   "phase": 0.438202247,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -20.35,
+   "station_xy_hope_m": [
+    -0.62512431,
+    -0.57455109
+   ],
+   "yaw_norm_deg": -19.619,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 26,
+   "name": "take061_unit00_bh",
+   "uid": "Take_061_unit00_BH",
+   "npz": "clips/take061_unit00_bh.npz",
+   "sha256": "0e70f41d52e496b0797b464cdf7f9f1b3db6e4edeb324573e476f3131cbe818b",
+   "T": 78,
+   "hit_frame_50": 38,
+   "phase": 0.493506494,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -6.78,
+   "station_xy_hope_m": [
+    -0.74437749,
+    -0.63055755
+   ],
+   "yaw_norm_deg": -7.619,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 27,
+   "name": "take061_unit02_bh",
+   "uid": "Take_061_unit02_BH",
+   "npz": "clips/take061_unit02_bh.npz",
+   "sha256": "eddf4881ea3173c741467c6f7aba454b9a7e48c786dcb55cc2b37a462cb43839",
+   "T": 46,
+   "hit_frame_50": 15,
+   "phase": 0.333333333,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -10.51,
+   "station_xy_hope_m": [
+    -0.7384447799999999,
+    -0.45604273
+   ],
+   "yaw_norm_deg": -9.212,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 28,
+   "name": "take061_unit04_bh",
+   "uid": "Take_061_unit04_BH",
+   "npz": "clips/take061_unit04_bh.npz",
+   "sha256": "b604c69301f55990e042ad85d85f0221b9271b6f446d736d2fbe7b51bb75b4ff",
+   "T": 57,
+   "hit_frame_50": 48,
+   "phase": 0.857142857,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -25.64,
+   "station_xy_hope_m": [
+    -0.69223234,
+    -0.47722119
+   ],
+   "yaw_norm_deg": -22.803,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 29,
+   "name": "take061_unit05_bh",
+   "uid": "Take_061_unit05_BH",
+   "npz": "clips/take061_unit05_bh.npz",
+   "sha256": "34aae3986792dc4a98224415e9cd4181ce4dcb4f01b58c0245fd6635b3c2b856",
+   "T": 64,
+   "hit_frame_50": 52,
+   "phase": 0.825396825,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -25.0,
+   "station_xy_hope_m": [
+    -0.70045703,
+    -0.50443171
+   ],
+   "yaw_norm_deg": -23.63,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 30,
+   "name": "take061_unit06_bh",
+   "uid": "Take_061_unit06_BH",
+   "npz": "clips/take061_unit06_bh.npz",
+   "sha256": "0d7081d80046775aa593a30ee0646d5289d8c81382c84863520523f9a5fea2ee",
+   "T": 93,
+   "hit_frame_50": 48,
+   "phase": 0.52173913,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -21.44,
+   "station_xy_hope_m": [
+    -0.66554808,
+    -0.43694629999999995
+   ],
+   "yaw_norm_deg": -23.503,
+   "warnings": [
+    "real-ball unit coverage 99%"
+   ],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 31,
+   "name": "take061_unit07_bh",
+   "uid": "Take_061_unit07_BH",
+   "npz": "clips/take061_unit07_bh.npz",
+   "sha256": "2f35bce9929ac5d89505f67a7f878240a9224e257882913d742c46cf8ad2e915",
+   "T": 35,
+   "hit_frame_50": 12,
+   "phase": 0.352941176,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -5.02,
+   "station_xy_hope_m": [
+    -0.6681288999999999,
+    -0.49040119
+   ],
+   "yaw_norm_deg": -9.204,
+   "warnings": [
+    "duration 0.68s outside [0.8, 4.0]"
+   ],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 32,
+   "name": "take061_unit08_bh",
+   "uid": "Take_061_unit08_BH",
+   "npz": "clips/take061_unit08_bh.npz",
+   "sha256": "e0040af8827d86c5d4dcd7e143dce13bbb68db8826c7081d103880fb49dab3db",
+   "T": 57,
+   "hit_frame_50": 36,
+   "phase": 0.642857143,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -11.36,
+   "station_xy_hope_m": [
+    -0.63323718,
+    -0.47754232
+   ],
+   "yaw_norm_deg": -14.056,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 33,
+   "name": "take061_unit09_bh",
+   "uid": "Take_061_unit09_BH",
+   "npz": "clips/take061_unit09_bh.npz",
+   "sha256": "249d6b05aef403024adb9af643384867f24700237aee649413c1e078405bb9a0",
+   "T": 120,
+   "hit_frame_50": 35,
+   "phase": 0.294117647,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -9.75,
+   "station_xy_hope_m": [
+    -0.64814921,
+    -0.47004584
+   ],
+   "yaw_norm_deg": -14.844,
+   "warnings": [
+    "2 hits in extended window; using first in-unit hit"
+   ],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 34,
+   "name": "take061_unit10_bh",
+   "uid": "Take_061_unit10_BH",
+   "npz": "clips/take061_unit10_bh.npz",
+   "sha256": "9181dd0f106c0f824b958131488227510c529169b42281202514a63324e3630a",
+   "T": 27,
+   "hit_frame_50": 14,
+   "phase": 0.538461538,
+   "family": "BH",
+   "mount_normal_sign": 1,
+   "rally_yaw_deg": -34.62,
+   "station_xy_hope_m": [
+    -0.5078545299999999,
+    -0.54094191
+   ],
+   "yaw_norm_deg": -37.832,
+   "warnings": [
+    "real-ball unit coverage 96%",
+    "duration 0.52s outside [0.8, 4.0]"
+   ],
+   "mount_normal_sign_source": "fk-measured-override-20260728"
+  },
+  {
+   "clip_id": 35,
+   "name": "take061_unit11_bh",
+   "uid": "Take_061_unit11_BH",
+   "npz": "clips/take061_unit11_bh.npz",
+   "sha256": "2d68bdbc4694456c90bb2fcb82ca0bef2174f7e2a329313de977d0f307df67e3",
+   "T": 60,
+   "hit_frame_50": 28,
+   "phase": 0.474576271,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -4.84,
+   "station_xy_hope_m": [
+    -0.60648022,
+    -0.44576144999999995
+   ],
+   "yaw_norm_deg": -3.197,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 36,
+   "name": "take061_unit12_bh",
+   "uid": "Take_061_unit12_BH",
+   "npz": "clips/take061_unit12_bh.npz",
+   "sha256": "a989a4e0f14a25338ccde0db8f856eda9754355f0ca538a8a503d5dad85d0ea5",
+   "T": 52,
+   "hit_frame_50": 27,
+   "phase": 0.529411765,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -10.41,
+   "station_xy_hope_m": [
+    -0.65663207,
+    -0.54365573
+   ],
+   "yaw_norm_deg": -14.74,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 37,
+   "name": "take061_unit13_bh",
+   "uid": "Take_061_unit13_BH",
+   "npz": "clips/take061_unit13_bh.npz",
+   "sha256": "af440cbe2d5899299fd576ee38dce7bd2a132323e2105630a28cb64e187704c9",
+   "T": 49,
+   "hit_frame_50": 35,
+   "phase": 0.729166667,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -12.78,
+   "station_xy_hope_m": [
+    -0.6988932800000001,
+    -0.49230866
+   ],
+   "yaw_norm_deg": -16.123,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 38,
+   "name": "take061_unit14_bh",
+   "uid": "Take_061_unit14_BH",
+   "npz": "clips/take061_unit14_bh.npz",
+   "sha256": "a1c8d7be9043249b7af1afb953b8eebaaa18dcf088bb058ed8bd04bd02702861",
+   "T": 59,
+   "hit_frame_50": 47,
+   "phase": 0.810344828,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -24.06,
+   "station_xy_hope_m": [
+    -0.6928927,
+    -0.48836568
+   ],
+   "yaw_norm_deg": -23.696,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 39,
+   "name": "take061_unit15_bh",
+   "uid": "Take_061_unit15_BH",
+   "npz": "clips/take061_unit15_bh.npz",
+   "sha256": "476db8cabb9d00c300f88f7b2e2e7846d4802a126fac98a1da499a4762fdeebf",
+   "T": 96,
+   "hit_frame_50": 49,
+   "phase": 0.515789474,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -26.13,
+   "station_xy_hope_m": [
+    -0.72161799,
+    -0.50073527
+   ],
+   "yaw_norm_deg": -24.785,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 40,
+   "name": "take061_unit16_bh",
+   "uid": "Take_061_unit16_BH",
+   "npz": "clips/take061_unit16_bh.npz",
+   "sha256": "9d656e968c3ba9969107d81efbfa4a89818265c851943a45e427837c420537a6",
+   "T": 59,
+   "hit_frame_50": 14,
+   "phase": 0.24137931,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -5.82,
+   "station_xy_hope_m": [
+    -0.7075319,
+    -0.50624084
+   ],
+   "yaw_norm_deg": -10.946,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 41,
+   "name": "take061_unit17_bh",
+   "uid": "Take_061_unit17_BH",
+   "npz": "clips/take061_unit17_bh.npz",
+   "sha256": "717f52201ce30757d1fe3a6b2e7a18f5e628022d5f366a5682e440c135c62d8c",
+   "T": 57,
+   "hit_frame_50": 11,
+   "phase": 0.196428571,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -9.16,
+   "station_xy_hope_m": [
+    -0.71396244,
+    -0.51177312
+   ],
+   "yaw_norm_deg": -12.086,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 42,
+   "name": "take061_unit18_bh",
+   "uid": "Take_061_unit18_BH",
+   "npz": "clips/take061_unit18_bh.npz",
+   "sha256": "70840fed42db02cf209113b753a839f4fa2f7a48ea9fe2c1e341621aab7541cf",
+   "T": 33,
+   "hit_frame_50": 12,
+   "phase": 0.375,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -7.27,
+   "station_xy_hope_m": [
+    -0.7317176999999999,
+    -0.50742215
+   ],
+   "yaw_norm_deg": -10.348,
+   "warnings": [
+    "duration 0.64s outside [0.8, 4.0]"
+   ],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 43,
+   "name": "take061_unit19_bh",
+   "uid": "Take_061_unit19_BH",
+   "npz": "clips/take061_unit19_bh.npz",
+   "sha256": "559387de9e852d35c9bcf74ccc7a4baa132a595847cf1d5fa453eb9d118ddd90",
+   "T": 49,
+   "hit_frame_50": 37,
+   "phase": 0.770833333,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -11.92,
+   "station_xy_hope_m": [
+    -0.68693391,
+    -0.53174326
+   ],
+   "yaw_norm_deg": -15.756,
+   "warnings": [
+    "real-ball unit coverage 98%"
+   ],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 44,
+   "name": "take061_unit20_bh",
+   "uid": "Take_061_unit20_BH",
+   "npz": "clips/take061_unit20_bh.npz",
+   "sha256": "736d0d39d063da07b1df4319aef02e477d8581ad67bb562a6828400e2dd64039",
+   "T": 58,
+   "hit_frame_50": 44,
+   "phase": 0.771929825,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -21.97,
+   "station_xy_hope_m": [
+    -0.68165814,
+    -0.52532583
+   ],
+   "yaw_norm_deg": -26.586,
+   "warnings": [
+    "real-ball unit coverage 98%"
+   ],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 45,
+   "name": "take061_unit21_bh",
+   "uid": "Take_061_unit21_BH",
+   "npz": "clips/take061_unit21_bh.npz",
+   "sha256": "b72c8e8a2353f355ea8094684a7509686c9bf508b98ff465981e56d72057e125",
+   "T": 57,
+   "hit_frame_50": 45,
+   "phase": 0.803571429,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -25.88,
+   "station_xy_hope_m": [
+    -0.69341257,
+    -0.51299334
+   ],
+   "yaw_norm_deg": -26.851,
+   "warnings": [
+    "real-ball unit coverage 98%"
+   ],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 46,
+   "name": "take061_unit22_bh",
+   "uid": "Take_061_unit22_BH",
+   "npz": "clips/take061_unit22_bh.npz",
+   "sha256": "532d0287926527a9e64276e87259f65c31b90dbc9bca558562e35706bc6fcced",
+   "T": 79,
+   "hit_frame_50": 44,
+   "phase": 0.564102564,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -24.38,
+   "station_xy_hope_m": [
+    -0.68559769,
+    -0.49125693
+   ],
+   "yaw_norm_deg": -29.528,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 47,
+   "name": "take061_unit24_bh",
+   "uid": "Take_061_unit24_BH",
+   "npz": "clips/take061_unit24_bh.npz",
+   "sha256": "897a1d2fc61f2a2c5b154d91410b43c97d1d970d699ba80bce9e08ecdab83eae",
+   "T": 90,
+   "hit_frame_50": 42,
+   "phase": 0.471910112,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -25.12,
+   "station_xy_hope_m": [
+    -0.7155031099999999,
+    -0.47825341
+   ],
+   "yaw_norm_deg": -28.587,
+   "warnings": [
+    "real-ball unit coverage 99%"
+   ],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 48,
+   "name": "take061_unit25_bh",
+   "uid": "Take_061_unit25_BH",
+   "npz": "clips/take061_unit25_bh.npz",
+   "sha256": "dbc85abaee49f1302f86be38c8534a7ab04070b3f1910577a33443c0724f0760",
+   "T": 40,
+   "hit_frame_50": 12,
+   "phase": 0.307692308,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -10.46,
+   "station_xy_hope_m": [
+    -0.7207079000000001,
+    -0.53303637
+   ],
+   "yaw_norm_deg": -14.52,
+   "warnings": [
+    "duration 0.78s outside [0.8, 4.0]"
+   ],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 49,
+   "name": "take062_unit00_bh",
+   "uid": "Take_062_unit00_BH",
+   "npz": "clips/take062_unit00_bh.npz",
+   "sha256": "fd36bc7dc8cf80064e39d69e5342d760b599a79a383b420e61d5ee0500764a43",
+   "T": 70,
+   "hit_frame_50": 40,
+   "phase": 0.579710145,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -7.33,
+   "station_xy_hope_m": [
+    -0.66498853,
+    -0.67186559
+   ],
+   "yaw_norm_deg": -8.595,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 50,
+   "name": "take062_unit01_bh",
+   "uid": "Take_062_unit01_BH",
+   "npz": "clips/take062_unit01_bh.npz",
+   "sha256": "8f94e7b272819a05bd025f489a1d01ef715d4df3d309775efe50c1294b57b80b",
+   "T": 69,
+   "hit_frame_50": 32,
+   "phase": 0.470588235,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -13.02,
+   "station_xy_hope_m": [
+    -0.6686719600000001,
+    -0.5123735899999999
+   ],
+   "yaw_norm_deg": -12.002,
+   "warnings": [
+    "local vs venue v_in delta 1.09 m/s"
+   ],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 51,
+   "name": "take062_unit02_bh",
+   "uid": "Take_062_unit02_BH",
+   "npz": "clips/take062_unit02_bh.npz",
+   "sha256": "c39b6d157db6bb2aa14160029b8c80761bd68e39b9d230fb1ae28cccef6ccd96",
+   "T": 54,
+   "hit_frame_50": 27,
+   "phase": 0.509433962,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -2.38,
+   "station_xy_hope_m": [
+    -0.65057564,
+    -0.5139934199999999
+   ],
+   "yaw_norm_deg": -9.117,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 52,
+   "name": "take062_unit04_bh",
+   "uid": "Take_062_unit04_BH",
+   "npz": "clips/take062_unit04_bh.npz",
+   "sha256": "296f695fe32b2b05d4e5a741cac69be42026046b6517ed5627e765a32f0efa5d",
+   "T": 57,
+   "hit_frame_50": 47,
+   "phase": 0.839285714,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -31.17,
+   "station_xy_hope_m": [
+    -0.6656356200000001,
+    -0.46681657
+   ],
+   "yaw_norm_deg": -31.352,
+   "warnings": [
+    "real-ball unit coverage 98%"
+   ],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 53,
+   "name": "take062_unit05_bh",
+   "uid": "Take_062_unit05_BH",
+   "npz": "clips/take062_unit05_bh.npz",
+   "sha256": "0e56c9febef90e5e8a09dc577647ac83e276638727cbd5e4320954dd7f1bf517",
+   "T": 71,
+   "hit_frame_50": 50,
+   "phase": 0.714285714,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -26.98,
+   "station_xy_hope_m": [
+    -0.6714121299999999,
+    -0.48562191
+   ],
+   "yaw_norm_deg": -30.294,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 54,
+   "name": "take062_unit06_bh",
+   "uid": "Take_062_unit06_BH",
+   "npz": "clips/take062_unit06_bh.npz",
+   "sha256": "d01a4bbb147249d3ba0b05402246f890631d4b68f3ee051ac37aefd962c28c51",
+   "T": 58,
+   "hit_frame_50": 38,
+   "phase": 0.666666667,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -15.34,
+   "station_xy_hope_m": [
+    -0.6203849300000001,
+    -0.51046282
+   ],
+   "yaw_norm_deg": -17.934,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 55,
+   "name": "take062_unit07_bh",
+   "uid": "Take_062_unit07_BH",
+   "npz": "clips/take062_unit07_bh.npz",
+   "sha256": "9fa586e123b6582c5662947e9d839c9d8947da2026e11925afd8aaf5f966bb1c",
+   "T": 86,
+   "hit_frame_50": 38,
+   "phase": 0.447058824,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -20.33,
+   "station_xy_hope_m": [
+    -0.63455635,
+    -0.51860123
+   ],
+   "yaw_norm_deg": -20.08,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 56,
+   "name": "take062_unit08_bh",
+   "uid": "Take_062_unit08_BH",
+   "npz": "clips/take062_unit08_bh.npz",
+   "sha256": "ab05600bb84cf3f74d00c6f742c89ac657ec8fbf51081c3726f5dd6b5b6895de",
+   "T": 29,
+   "hit_frame_50": 10,
+   "phase": 0.357142857,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -6.81,
+   "station_xy_hope_m": [
+    -0.70997816,
+    -0.53393887
+   ],
+   "yaw_norm_deg": -12.429,
+   "warnings": [
+    "duration 0.56s outside [0.8, 4.0]"
+   ],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 57,
+   "name": "take062_unit09_bh",
+   "uid": "Take_062_unit09_BH",
+   "npz": "clips/take062_unit09_bh.npz",
+   "sha256": "1148fa1458b2c90ce8cac7a2c25d01bba40afd5336677d14217a51d6a377d27f",
+   "T": 59,
+   "hit_frame_50": 39,
+   "phase": 0.672413793,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -17.6,
+   "station_xy_hope_m": [
+    -0.64684138,
+    -0.58383511
+   ],
+   "yaw_norm_deg": -18.883,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 58,
+   "name": "take062_unit10_bh",
+   "uid": "Take_062_unit10_BH",
+   "npz": "clips/take062_unit10_bh.npz",
+   "sha256": "e58a65f34d8604dc7536bbf17c9e7104539ebc4df7d19f6a8b73a80f36d0d68a",
+   "T": 95,
+   "hit_frame_50": 42,
+   "phase": 0.446808511,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -15.88,
+   "station_xy_hope_m": [
+    -0.63029679,
+    -0.53234054
+   ],
+   "yaw_norm_deg": -20.335,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 59,
+   "name": "take062_unit11_bh",
+   "uid": "Take_062_unit11_BH",
+   "npz": "clips/take062_unit11_bh.npz",
+   "sha256": "fd4d4dbeb7236cdc767e576ed7d4bbb6428d9f581557d054485d5158b9b3fd3f",
+   "T": 133,
+   "hit_frame_50": 74,
+   "phase": 0.560606061,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -18.17,
+   "station_xy_hope_m": [
+    -0.6754153700000001,
+    -0.52149926
+   ],
+   "yaw_norm_deg": -16.683,
+   "warnings": [
+    "real-ball unit coverage 88%"
+   ],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 60,
+   "name": "take063_unit00_bh",
+   "uid": "Take_063_unit00_BH",
+   "npz": "clips/take063_unit00_bh.npz",
+   "sha256": "4cb44d8828410183dc31d4008dee1d8201ff3a3aa5b29e881339ac71dddf7071",
+   "T": 64,
+   "hit_frame_50": 28,
+   "phase": 0.444444444,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -6.81,
+   "station_xy_hope_m": [
+    -0.70478932,
+    -0.53893506
+   ],
+   "yaw_norm_deg": -6.717,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 61,
+   "name": "take063_unit01_bh",
+   "uid": "Take_063_unit01_BH",
+   "npz": "clips/take063_unit01_bh.npz",
+   "sha256": "b46fbf2d020cb1c3ff7e99bcd3df561bddb3a39f9293e5f11f5772edb6b19f1f",
+   "T": 39,
+   "hit_frame_50": 27,
+   "phase": 0.710526316,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -8.93,
+   "station_xy_hope_m": [
+    -0.68167944,
+    -0.48307214000000004
+   ],
+   "yaw_norm_deg": -8.362,
+   "warnings": [
+    "real-ball unit coverage 98%",
+    "duration 0.76s outside [0.8, 4.0]"
+   ],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 62,
+   "name": "take063_unit02_bh",
+   "uid": "Take_063_unit02_BH",
+   "npz": "clips/take063_unit02_bh.npz",
+   "sha256": "fa76e7645baabced9d6029fe8073f482c549f36afdfeb17148401458e488ce36",
+   "T": 76,
+   "hit_frame_50": 52,
+   "phase": 0.693333333,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -22.06,
+   "station_xy_hope_m": [
+    -0.70591249,
+    -0.5205036599999999
+   ],
+   "yaw_norm_deg": -26.719,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 63,
+   "name": "take063_unit03_bh",
+   "uid": "Take_063_unit03_BH",
+   "npz": "clips/take063_unit03_bh.npz",
+   "sha256": "0d4d200e32fcb99779394a2b65af897e54067dbe22d8e6ec3132bea2c230e61d",
+   "T": 115,
+   "hit_frame_50": 35,
+   "phase": 0.307017544,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -14.05,
+   "station_xy_hope_m": [
+    -0.634186,
+    -0.5592153799999999
+   ],
+   "yaw_norm_deg": -17.287,
+   "warnings": [
+    "real-ball unit coverage 99%"
+   ],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 64,
+   "name": "take063_unit04_bh",
+   "uid": "Take_063_unit04_BH",
+   "npz": "clips/take063_unit04_bh.npz",
+   "sha256": "53f42f40eb98966b9ca0baee90a7c0db452a6d7ee2ffcbd0703f1ba13f915fd6",
+   "T": 104,
+   "hit_frame_50": 35,
+   "phase": 0.339805825,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -14.39,
+   "station_xy_hope_m": [
+    -0.63615705,
+    -0.55393107
+   ],
+   "yaw_norm_deg": -18.018,
+   "warnings": [
+    "real-ball unit coverage 99%"
+   ],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 65,
+   "name": "take063_unit05_bh",
+   "uid": "Take_063_unit05_BH",
+   "npz": "clips/take063_unit05_bh.npz",
+   "sha256": "91c66f85857cf4e8d0be01ae8821ff944f863bb83ab467633938d2b11a75db7e",
+   "T": 95,
+   "hit_frame_50": 46,
+   "phase": 0.489361702,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -27.72,
+   "station_xy_hope_m": [
+    -0.6579703499999999,
+    -0.55563695
+   ],
+   "yaw_norm_deg": -24.612,
+   "warnings": [
+    "real-ball unit coverage 92%"
+   ],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 66,
+   "name": "take064_unit00_bh",
+   "uid": "Take_064_unit00_BH",
+   "npz": "clips/take064_unit00_bh.npz",
+   "sha256": "e9b5d78f15c3e46493b73ef242dc534970ccad24e114c91c4925c1398adb9fcc",
+   "T": 56,
+   "hit_frame_50": 25,
+   "phase": 0.454545455,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -10.42,
+   "station_xy_hope_m": [
+    -0.7465453200000001,
+    -0.57166264
+   ],
+   "yaw_norm_deg": -9.248,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 67,
+   "name": "take064_unit02_bh",
+   "uid": "Take_064_unit02_BH",
+   "npz": "clips/take064_unit02_bh.npz",
+   "sha256": "ec1208125f99891779ac8bef1f2ba5c1abe848135bc021905be8cd406b2244ae",
+   "T": 62,
+   "hit_frame_50": 11,
+   "phase": 0.180327869,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -8.78,
+   "station_xy_hope_m": [
+    -0.69631445,
+    -0.43417900000000004
+   ],
+   "yaw_norm_deg": -10.429,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 68,
+   "name": "take064_unit03_bh",
+   "uid": "Take_064_unit03_BH",
+   "npz": "clips/take064_unit03_bh.npz",
+   "sha256": "f968f6bcdd93ec32dfab47dfd1e870002c870077cb0cd5b7831e628bfb688f22",
+   "T": 39,
+   "hit_frame_50": 10,
+   "phase": 0.263157895,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -8.61,
+   "station_xy_hope_m": [
+    -0.6758294100000001,
+    -0.48523882
+   ],
+   "yaw_norm_deg": -12.942,
+   "warnings": [
+    "duration 0.76s outside [0.8, 4.0]"
+   ],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 69,
+   "name": "take064_unit04_bh",
+   "uid": "Take_064_unit04_BH",
+   "npz": "clips/take064_unit04_bh.npz",
+   "sha256": "cb451265d56a767bfe303c98cf5b1c9361db82ad28813f4f665e7f1d8f4005c6",
+   "T": 78,
+   "hit_frame_50": 32,
+   "phase": 0.415584416,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -18.65,
+   "station_xy_hope_m": [
+    -0.63635095,
+    -0.52462631
+   ],
+   "yaw_norm_deg": -18.434,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 70,
+   "name": "take064_unit05_bh",
+   "uid": "Take_064_unit05_BH",
+   "npz": "clips/take064_unit05_bh.npz",
+   "sha256": "b446f7fa4f546f26b9b553664c125d80f49877d83996d14e9e6229a4d66fde19",
+   "T": 37,
+   "hit_frame_50": 14,
+   "phase": 0.388888889,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -13.57,
+   "station_xy_hope_m": [
+    -0.64080936,
+    -0.54577553
+   ],
+   "yaw_norm_deg": -17.168,
+   "warnings": [
+    "duration 0.72s outside [0.8, 4.0]"
+   ],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 71,
+   "name": "take064_unit06_bh",
+   "uid": "Take_064_unit06_BH",
+   "npz": "clips/take064_unit06_bh.npz",
+   "sha256": "04a673f9bd7c34e80ac89e94767cd0d789f6e05c9c3c8240ed83743e4f584055",
+   "T": 56,
+   "hit_frame_50": 34,
+   "phase": 0.618181818,
+   "family": "BH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -13.44,
+   "station_xy_hope_m": [
+    -0.61645168,
+    -0.54585273
+   ],
+   "yaw_norm_deg": -17.382,
+   "warnings": [],
+   "mount_normal_sign_source": "family-default"
+  },
+  {
+   "clip_id": 72,
+   "name": "take064_unit07_fh",
+   "uid": "Take_064_unit07_FH",
+   "npz": "clips/take064_unit07_fh.npz",
+   "sha256": "9a1fc12021bc6790e5f2312adaaf7ddd0650fb9d09a1dae5fa026c0eac966502",
+   "T": 57,
+   "hit_frame_50": 36,
+   "phase": 0.642857143,
+   "family": "FH",
+   "mount_normal_sign": -1,
+   "rally_yaw_deg": -8.15,
+   "station_xy_hope_m": [
+    -0.62577664,
+    -0.55161234
+   ],
+   "yaw_norm_deg": -12.659,
+   "warnings": [],
+   "mount_normal_sign_source": "fk-measured-override-20260728"
+  }
+ ],
+ "sign_override_note": "mount_normal_sign: family default FH=+1/BH=-1 except FK-measured overrides take061_unit10_bh=+1, take064_unit07_fh=-1 (coordinator 2026-07-28)"
+}

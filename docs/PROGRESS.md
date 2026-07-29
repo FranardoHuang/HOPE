@@ -75,7 +75,18 @@
   `80 passed`。exact spec、证据与后续 replacement 见
   [Reward 因果实验](experiments/2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md)和
   [G05](gates/G05_isaac_training_first_loop.md)。
+## 2026-07-28 深夜(舰队满编与合 main)
 
+- **合 main(Franco 裁定)**:ballfirst 谱系快进合入(62 提交),动作集入库 `assets/motions/`。
+  旧合并阻断由 admission v2 解除(门限定到 canonical 消费路径)。
+- **14 臂 ball-first banked 矩阵在训**(五动作组 8 + 101 全库组 6,+5000 淘汰制),
+  table/death −1800 双默认;pod2 曾遭一次横扫误停(00:44Z 六臂同灭),已 fresh 重建并给巡检
+  加了名册对账。逐动作读数首次可用(clip_names 桶):反手挡/拉在学,正手拉 0(待 combo 臂
+  确诊拍面死区),s0 解在挥速锥外 → 匹配带 v2 题库排队。
+- **动态课程代码全绿未发射**:uniform 采样两次裁定、球出生门、新增带 rolling-30 环、pin 工具
+  全落地(462 测试);A 路线在信任根触发诚实停点(五类构建器缺失 + 73 件不合 ready 端点合同 +
+  receipt 三字段无定义),两信任集保持空集待 Franco 深层裁定;环 n=30 使 f10 的 expand 统计
+  不可达,环长待裁。
 ## 2026-07-28(Fable 接力 Codex 断粮现场)
 
 - **桌碰 no-touch 合同补全**：ActionBall 从 broad/body-origin + 单腕 filter 改为 exact 32 个

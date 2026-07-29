@@ -180,3 +180,11 @@ For TTRL-only reference work, a fresh clone becomes current after `scripts/sync_
 ## Branch Integration Rule
 
 When merging feature/training branches into `main`, keep source, config, tests, and docs tracked, but remove generated/debug artifacts from the index. Current examples are `.codex-tmp/`, `.vscode/`, `.hitter_align_backup/`, ad hoc comparison scripts, training logs, WandB caches, checkpoints, and generated `*.onnx` policy files. If a generated artifact is needed to reproduce a gate result, record the restore path and metadata in [operations/setup_local_sync.md](operations/setup_local_sync.md) and the relevant gate doc instead of committing it directly.
+
+## Exception: curated training motion sets (Franco 2026-07-28)
+
+`assets/motions/fivebind_20260727/`(五动作 fivebind 编译件 + 注册行)和
+`assets/motions/chingmu73_20260728/`(ChingMu 真动捕 73+1 件 50Hz npz + 逐件 manifest +
+CLIP_ORDER)**入库跟踪**:它们是现役训练臂的直接输入,小体积、内容寻址(manifest 带逐件
+sha256),丢失即无法复现任何在跑 run。题库(bank npz)仍不入库——由
+`gen_stage1_questions.py` 按注册行可再生。
