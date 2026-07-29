@@ -272,6 +272,26 @@ def test_action_ball_runtime_waits_for_command_manager_construction():
         )
 
 
+def test_training_builds_deferred_action_ball_contract_before_hook_audit():
+    train_source = (
+        ROOT / "scripts" / "train.py"
+    ).read_text(encoding="utf-8")
+    action_branch = train_source[
+        train_source.index(
+            'str(getattr(racket, "target_mode", "")) == "action_ball"'
+        ) :
+        train_source.index(
+            "from whole_body_tracking.tasks.tracking.mdp.action_ball_runtime import",
+            train_source.index(
+                'str(getattr(racket, "target_mode", "")) == "action_ball"'
+            ),
+        )
+    ]
+    assert action_branch.index(
+        "runtime_action_ball = runtime_contract_fn()"
+    ) < action_branch.index("non_explicit = []")
+
+
 def test_action_ball_live_racket_site_geometry_is_fail_closed():
     (check,) = _module_functions(
         ("_assert_action_ball_racket_site_contract",),

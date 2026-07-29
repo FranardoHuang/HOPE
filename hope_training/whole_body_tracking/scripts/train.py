@@ -6768,6 +6768,22 @@ def _build_training_hard_contract(
                 "action-ball requires unique active motion and racket_target "
                 f"command terms; got {active_names!r}"
             )
+        runtime_contract_fn = getattr(
+            racket_cmd, "action_ball_hard_contract", None
+        )
+        if not callable(runtime_contract_fn):
+            raise RuntimeError(
+                "runtime action-ball command is missing the mandatory "
+                "action_ball_hard_contract() implementation"
+            )
+        # This call performs the deferred cross-command binding now that
+        # Isaac has attached the completed CommandManager.  That binding
+        # installs the exact-resume hooks checked immediately below.
+        runtime_action_ball = runtime_contract_fn()
+        if runtime_action_ball is None:
+            raise RuntimeError(
+                "runtime action-ball command returned no hard contract"
+            )
         non_explicit = []
         for term_name in active_names:
             term = command_manager.get_term(term_name)
@@ -6808,19 +6824,6 @@ def _build_training_hard_contract(
             motion_cmd.cfg,
             policy_dt_s=float(env.step_dt),
         )
-        runtime_contract_fn = getattr(
-            racket_cmd, "action_ball_hard_contract", None
-        )
-        if not callable(runtime_contract_fn):
-            raise RuntimeError(
-                "runtime action-ball command is missing the mandatory "
-                "action_ball_hard_contract() implementation"
-            )
-        runtime_action_ball = runtime_contract_fn()
-        if runtime_action_ball is None:
-            raise RuntimeError(
-                "runtime action-ball command returned no hard contract"
-            )
         from whole_body_tracking.tasks.tracking.mdp.action_ball_runtime import (
             RUNTIME_CONTRACT_SHA256,
         )
