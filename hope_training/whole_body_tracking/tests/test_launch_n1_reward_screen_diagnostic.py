@@ -424,7 +424,7 @@ def test_plan_binds_exact_three_reward_profiles_and_no_override_seam(
     assert "algo.policy.init_noise_std=0.15" in argv
     assert "algo.policy.init_noise_std=1.0" not in argv
     assert "task.rewards.full_body_mimic=false" in argv
-    assert f"task.rewards.motion_scale={expected[3]}" in argv
+    assert f"+task.rewards.motion_scale={expected[3]}" in argv
     assert f"task.rewards.racket_position_weight={expected[0]}" in argv
     assert f"task.rewards.racket_velocity_weight={expected[1]}" in argv
     assert f"task.rewards.racket_normal_weight={expected[2]}" in argv

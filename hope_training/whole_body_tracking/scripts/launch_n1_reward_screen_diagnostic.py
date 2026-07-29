@@ -1084,7 +1084,7 @@ def _build_training_argv(
             "task.rewards.full_body_mimic="
             f"{'true' if spec['scope'] == 'full' else 'false'}"
         ),
-        f"task.rewards.motion_scale={weights['motion_scale']}",
+        f"+task.rewards.motion_scale={weights['motion_scale']}",
         (
             "task.rewards.racket_position_weight="
             f"{weights['racket_position_weight']}"
