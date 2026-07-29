@@ -1,0 +1,316 @@
+# =============================================================================
+# HOPE ping-pong ball physics — OPTITRACK SESSION FIT 2026-07-30
+#   Motive C3D export, 360 Hz nominal / ~317 Hz effective, meters, 5 takes:
+#   331 s of rally play (Tui / zhengchang / zhengchang2 / xuan) + 20.5 s of
+#   pure bounces (chuntan). Competition table (team-confirmed).
+#
+# Schema is key-for-key compatible with configs/ball_physics_venue.yaml so it
+# can be selected with $HOPE_BALL_PHYSICS_YAML without any code change:
+#   export HOPE_BALL_PHYSICS_YAML=<repo>/configs/ball_physics_optitrack_20260730.yaml
+# covers Isaac params.py, the tracking-task virtual ball, virtual_return_scorer
+# and reference_oracle. MuJoCo: pass the model-dir copy of this file to
+# BallPhysics::Init(m, d, config_path).
+#
+# DELIBERATELY NOT APPLIED to configs/ball_physics_venue.yaml or to
+# hope_ws/.../hope_planner/constants.py: both are byte-pinned by the Stage-1
+# question-bank physics contract, and editing them would invalidate the existing
+# bank. The DEPLOY PLANNER therefore still carries the venue constants.
+#
+# Pipeline: hope_training/ball_physics_fit/ — the same estimators as the venue
+#   fit. New for this session: optitrack/ot_extract_full.py (reader),
+#   optitrack/ball_orientation.py (spin), a racket-aware contact detector in
+#   ballcore, and optitrack/adjudicate_table_e.py. Artifacts under
+#   mocap/data/analysis/. Report: docs/ball_physics_optitrack_20260730.md
+#
+# STATUS OF EACH BLOCK
+#   MEASURED HERE : k_d, k_m, table a_t, paddle e_eff + e(u_n) law, paddle a_t
+#   ADJUDICATED   : table e_eff — this session's own rally estimate (0.9443) was
+#                   proven biased +0.044 by the pure-bounce take, so the VENUE
+#                   value 0.9215 ships. See the note on that key.
+#   INHERITED     : ball mass, mu_safety, the Magnus-saturation form
+#   CONFIRMS VENUE: k_d 0.1253 vs 0.1261 (0.6%) · k_m 0.00404 vs 0.00444 (venue
+#                   inside this fit's per-arc IQR) · paddle e_eff 0.646 vs 0.654
+#                   (1.2%) · omega constant in flight (half-arc ratio 0.90-1.16)
+#                   — two independent mocap systems, different sessions.
+#   STILL OPEN    : paddle e(u_n) decay, -0.0703 here vs -0.0441 venue (the gap
+#                   HALVED once measured spin was included, so it may close
+#                   entirely with better spin coverage) · table grip a_t, 0.275
+#                   here vs 0.369 venue, and only a_t + b_t*cos(theta) is ever
+#                   identified.
+#
+# VALIDITY ENVELOPE (do NOT extrapolate silently):
+#   ball speed 1.7–6.4 m/s (arc p10–p90) · table v_n 1.2–4.1 m/s ·
+#   paddle u_n 2.2–8.8 m/s · spin 0.8–9 rev/s median by take, p90 ~19 rev/s,
+#   SR 0.08–2.36. SPIN ABOVE ~23 rev/s IS ALIASED, not measured — that is the
+#   orientation-tracking limit at 360 Hz for this marker layout, and observed
+#   maxima sit right at it (20.4–22.7 rev/s), so faster spin may be folding
+#   down. Amateur rally play only; no serves, no smashes.
+# =============================================================================
+
+ball:
+  mass: 0.0034            # kg — INHERITED, not measured here. Assumed to be the same coated
+                          # MATCH ball as the venue capture (retro-reflective coating, ~0.7 g
+                          # over the clean 2.7 g ITTF ball). No session metadata recorded the
+                          # ball; if this session used a different ball, k_d below does not
+                          # transfer. The k_d agreement with the venue (0.6%) is indirect
+                          # evidence that it IS the same ball.
+  mass_clean: 0.0027
+  radius: 0.020           # physical ball radius. NOTE the mocap reconstruction points sit on
+                          # an effective sphere of 18.7 mm (free-radius fit, n=6000 frames) —
+                          # that is a marker/blob artifact, not the ball. The extractor fixes
+                          # R = 0.020 for the centre solve; using 18.7 changes the per-frame
+                          # sphere residual by 0.04 mm (2.94 -> 2.90) and is common-mode.
+  inertia_coeff: 0.6666666666666666
+
+air:
+  rho: 1.20
+
+# Flight: a = g - k_d|v|v + k_m (omega x v)
+flight:
+  k_d: 0.1253             # 1/m — MEASURED over ALL ballistic arcs, deliberately NOT spin-gated.
+                          # METHOD NOTE: the venue gates arcs to < 3 rev/s so Magnus cannot leak
+                          # into k_d. Doing that here gives 0.1208, and it is WORSE, because on
+                          # this session "low spin" and "low speed" are the same arcs (the
+                          # pure-bounce drops neither spin nor move fast): the 40 gated arcs have
+                          # median speed 2.49 m/s and 24 of them are under 3 m/s, where per-arc
+                          # k_d reads 0.287 — drag is simply not identifiable there. Gating on
+                          # spin therefore also gates on speed and destroys the estimator. The
+                          # speed-resolved per-arc medians are 0.287 (<3 m/s) / 0.135 (3-4.5) /
+                          # 0.127 (>4.5), i.e. the informative arcs agree with the value below.
+                          # 100 longest ballistic arcs, joint RK4 shooting
+                          # (Huber), g frozen at 9.81, shooting rms 12.6 mm.
+                          # Robustness (2026-07-30): 274 ballistic arcs split by speed give
+                          # k_d = 0.1266 (all) / 0.1266 (mid third) / 0.1261 (fast third) /
+                          # 0.1253 (arcs >= 0.35 s); fitting g jointly instead of freezing it
+                          # moves k_d by < 0.2%. The slow third reads 0.1446 — drag is weakly
+                          # identified below ~3 m/s (v^2 term small), do not use that subset.
+                          # VENUE CROSS-CHECK: 0.1261 on a different mocap system. Agreement
+                          # to 0.6% is the strongest single validation in this fit.
+                          # CAVEAT vs the venue fit: the venue gated arcs to < 3 rev/s using
+                          # its quaternion spin channel. This rig has none, so k_d is fitted
+                          # over a SPIN-MIXED set and relies on Magnus averaging to zero.
+  k_m: 0.00404            # MEASURED HERE (45 sidespin arcs, spin axis vertical, k_d frozen,
+                          # rms 9.8 mm). Per-arc median 0.00414, IQR [0.00263, 0.00546] — the
+                          # venue's 0.00444 lies INSIDE that IQR, so the two rigs agree on the
+                          # Magnus coefficient to ~9%. Spin-ratio coverage SR 0.08-2.36 here vs
+                          # <=1.6 at the venue, so this fit reaches further into the regime where
+                          # Magnus saturation would show up.
+  g: 9.81                 # frozen, and this is a MEASUREMENT-BACKED choice, not a default:
+                          # fitting |g| freely on this data returns 9.70 / 9.90 / 10.45 m/s^2
+                          # for the slow / middle / fast thirds of the arc set. A clock or
+                          # scale error would be speed-INDEPENDENT; a monotone rise with ball
+                          # speed is the Magnus term being absorbed into gravity (fast shots
+                          # carry topspin, slow pushes carry backspin). Spatial scale is
+                          # independently confirmed to 0.3% by the table geometry and to
+                          # 0.4 mm by the net height, so 9.81 stands.
+  rk4_h: 5.0e-4
+  # Magnus saturation: NO information from this session (spin unmeasured). Values inherited.
+  magnus_saturating_form: "C_L(SR) = cl_slope*SR / (1 + cl_slope*SR/cl_max)"
+  cl_slope: 0.87
+  cl_max: 0.55
+
+contact:
+  table:
+    e_eff: 0.9215         # ADJUDICATED — this is the VENUE value, deliberately kept after this
+                          # session's own rally-take estimate (0.9443) was shown to be BIASED HIGH.
+                          # The pure-bounce take (chuntan, 20.5 s) admits an estimator that the
+                          # rally takes cannot support: for consecutive table bounces with nothing
+                          # touching the ball, e = T_{k+1}/T_k from BOUNCE TIMES ALONE, so a common
+                          # error in the contact instant t_c cancels to first order and no velocity
+                          # extrapolation is involved. (Rally takes give 0 usable triples: of 155
+                          # bounce intervals 86 have a strike between and 52 span a tracking gap.)
+                          #   pure-bounce, drag-corrected : e = 0.9102, CI95 [0.8825, 0.9311], n=20
+                          #   at matched v_n 1.0-2.5 m/s  : e = 0.9151 (n=15)
+                          #   rally stage-1, SAME v_n bin  : e = 0.9589 (n=54)  -> +0.044 BIAS
+                          # 0.9102 sits INSIDE the ITTF band 0.876-0.931 and its CI CONTAINS the
+                          # venue's 0.9215; the rally figure sits outside both. Mechanism checks
+                          # out: solving e_est = (e*V - g*dt)/(V + g*dt) for a +0.044 offset at
+                          # V = 1.8 m/s gives dt = -4.1 ms, i.e. stage-1's meeting-point t_c runs
+                          # ~4 ms EARLY on this rig - consistent with the measured +3.2 mm
+                          # contact-height offset. Note the venue hit the opposite problem (its
+                          # plane-anchored t_c ran LATE and it moved to the meeting point to fix a
+                          # +0.010 bias); the meeting point is not universally unbiased.
+                          # Superseded rally-take numbers, for the record:
+                          # 0.9443 over 147 gated bounces (of 159 detected), median estimator,
+                          # bootstrap CI95 [0.9379, 0.9538]. Robust to the quality gate: the
+                          # cleanest quartile (n=37) gives 0.9421, i.e. the gate is not
+                          # carrying the result. v_n coverage 1.18–4.13 m/s.
+                          # *** CONFLICTS WITH THE VENUE FIT (0.9215) BY 2.4%, well outside
+                          # both CIs, and implies e = 0.953 at the ITTF 30 cm drop speed
+                          # (2.43 m/s) against the ITTF band 0.876–0.931. Candidate causes,
+                          # NOT resolved: (a) genuinely a different/bouncier table — this
+                          # session's table measures 2.757 x 1.529 m vs the venue's
+                          # 2.745 x 1.523 m and was re-levelled between takes (tilt 0.744 deg
+                          # -> 0.561 deg); (b) a residual early-t_c bias — contact height sits
+                          # +3.2 mm above geometric and e rises with that offset across
+                          # terciles (0.938 / 0.944 / 0.966), worth ~ -0.01.
+                          # ADJUDICATOR: a 30 cm drop test on the competition table, minutes
+                          # of work. Do that before trusting either number for match play. ***
+    e_lin_a: 1.0058       # e(v_n) = e_lin_a - e_lin_b * v_n, valid v_n 1.18–4.13 m/s
+    e_lin_b: 0.0219       # slope CI95 [0.0100, 0.0368] — excludes zero, and the SIGN matches
+                          # the venue's optional form (0.948 - 0.011*v_n) and the 8194-bounce
+                          # literature (-0.017..-0.021/m/s). Magnitude is 2x the venue's.
+    a_t: 0.275            # MEASURED HERE (60 spin-complete bounces, e frozen, dv_rms 0.41 m/s).
+    b_t: 0.0              # (a_t, b_t) are COLLINEAR: only a_t + b_t*cos(theta) is identified, and
+    mu_safety: 2.0        # the raw pair flips sign with sample size (n=23 gave 0.422/-0.465, n=60
+                          # gave -0.127/+0.548) while the combination stays put. At the observed
+                          # median incidence (|u_t|/|u_n| = 0.927 -> cos = 0.733) that combination
+                          # is 0.275, and 0.275 with b_t = 0 reproduces it. Venue ships 0.369, so
+                          # this rig reads ~25% lower grip. Spin-change residual dw_rms = 3.9 rev/s
+                          # against a 7.4 rev/s median incoming spin, so treat the grip block as
+                          # order-of-magnitude, not precise.
+  paddle:
+    e_eff: 0.6460         # MEASURED WITH REAL SPIN (24 spin-complete strikes, joint contact fit).
+                          # Venue: 0.654 -> 1.2% agreement. The spin channel matters a lot here:
+                          # the same fit with w_in forced to zero gave 0.6174 and a contact
+                          # residual of dv_rms 1.80 m/s; with measured spin dv_rms falls to
+                          # 1.11 m/s (-38%). That improvement is the cleanest single check that
+                          # the recovered spin is physical.
+                          # Superseded velocity-channel-only value, for the record: 0.6174,
+                          # robust (Huber) constant over 80 strikes, rms 0.1226.
+                          # Per-strike median 0.6096, IQR [0.553, 0.697], u_n 2.2–8.8 m/s.
+                          # VENUE CROSS-CHECK: at the median strike speed (u_n = 5.1 m/s) this
+                          # session reads 0.610 and the venue curve reads 0.606 — 0.7%.
+                          # PREFER the e(u_n) law below; constant-e is the worse model here
+                          # (rms 0.1226 vs 0.0986/0.0994 for linear/exponential), which
+                          # independently REPRODUCES the venue's F4 "kill constant-e" verdict
+                          # on a different rig.
+    a_t: 0.637            # MEASURED WITH REAL SPIN (24 strikes): the raw fit gives
+    b_t: 0.0              # a_t = 0.925, b_t = -0.302, and at the observed near-normal incidence
+    mu_safety: 0.5        # (cos(theta) median 0.955) the identified combination
+                          # a_t + b_t*cos(theta) = 0.637, which 0.637 with b_t = 0 reproduces.
+                          # Venue ships 0.52. a_t and b_t remain COLLINEAR here exactly as at the
+                          # venue — only the combination is identified, never the split.
+    # e(u_n): MEASURED. Robust Huber fits over 80 strikes.
+    e_lin_a: 0.8546       # e(u_n) = e_lin_a - e_lin_b * |u_n|, refit WITH spin (24 strikes)
+    e_lin_b: 0.04691
+    e_exp_g1: 0.8636      # RECOMMENDED: e(u_n) = g1 * exp(g2 * |u_n|), refit WITH spin
+    e_exp_g2: -0.07033    # Including measured spin moved this toward the venue: the spin-blind
+                          # fit over 80 strikes gave g1 0.9948 / g2 -0.09418 with bootstrap CI95
+                          # g2 [-0.1157, -0.0670]; with spin it is g2 -0.0703, and the venue reads
+                          # -0.0441. So the earlier "2x steeper than the venue" gap HALVED once
+                          # spin was accounted for, which suggests the remainder may also be a
+                          # spin-coverage effect rather than a real rubber difference.
+                          # Superseded spin-blind values: e_lin 0.9230/0.05954, e_exp 0.9948/-0.09418.
+                          # *** The venue's g2 = -0.0441 is OUTSIDE this CI: both rigs agree
+                          # e falls with impact speed, but this session's decay is ~2x steeper.
+                          # The two curves cross near u_n = 5 m/s (where they agree to 0.7%)
+                          # and diverge at the ends: at u_n = 3.0 this reads 0.750 vs the
+                          # venue's 0.665; at u_n = 7.5, 0.491 vs 0.545.
+                          # NOT an artifact: the slope is stable across every quality subset
+                          # (clean-racket-extrapolation g2 = -0.1035, clean racket-fit
+                          # g2 = -0.0878, short-gap g2 = -0.0980) and across both paddles
+                          # (p1 -0.0806 n=27, p2 -0.1032 n=53), and corr(e, u_n) = -0.60
+                          # dwarfs corr(e, any quality metric) = -0.07..-0.28.
+                          # Most likely a genuine rubber/paddle difference between sessions. ***
+    # Per-paddle binned medians (this session), for reference:
+    #   u_n 2.0-4.0 : e = 0.697 (n=19)      u_n 5.5-7.0 : e = 0.597 (n=26)
+    #   u_n 4.0-5.5 : e = 0.625 (n=31)      u_n 7.0+    : e = 0.473 (n=5)
+    #   p1 e_med = 0.6245 (n=27) vs p2 0.5983 (n=54) at matched u_n -> no paddle split.
+
+# =============================================================================
+# §spin — RETRACTED AND CORRECTED (2026-07-30, later the same day)
+# =============================================================================
+# AN EARLIER VERSION OF THIS FILE CLAIMED THIS SESSION HAS NO SPIN CHANNEL.
+# THAT WAS WRONG. The ball IS a rigid marker constellation and its rotation is
+# measurable. Two tests said otherwise and both were invalid:
+#
+#   1. Pairwise-distance scatter indexed BY COLUMN read 6.2-6.9 mm. Invalid:
+#      Motive relabels markers on a small spinning ball, so column i is not the
+#      same physical marker from frame to frame.
+#   2. The permutation-invariant SORTED-DISTANCE SPECTRUM read 2.2-2.8 mm
+#      against a wandering-points Monte-Carlo null of 2.48 mm -> "random".
+#      Also invalid: this constellation's 28 pairwise distances span 11-40 mm,
+#      so adjacent sorted ranks differ by ~1 mm, comparable to the noise. Noise
+#      SWAPS RANKS, and rank swapping inflates per-rank std regardless of
+#      rigidity. That test is biased toward "non-rigid" whenever the distance
+#      spectrum is dense relative to the noise.
+#
+# The valid test is CONSECUTIVE-FRAME alignment: 2.8 ms apart the ball has
+# barely rotated, so the correspondence is unambiguous.
+#      take          match rms      controls
+#      chuntan        0.91 mm       rigid + 1.5 mm noise :  3.13 mm
+#      Tui            2.31 mm       WANDERING null       : 10.37 mm
+#      zhengchang     3.01 mm
+#      zhengchang2    1.36 mm
+#      xuan           0.33 mm
+# All five sit far below the wandering null. The cleanest single frame puts all
+# 8 markers on one sphere of radius 18.6 mm with a radial spread of 0.77 mm,
+# and the markers are spread over the WHOLE ball (angular separations
+# 45.7-152.5 deg), i.e. a genuine marker ball.
+#
+# Orientation is recovered by hope_training/ball_physics_fit/optitrack/
+# ball_orientation.py (solve_orientation_chained): match consecutive clouds,
+# chain the rotations. Proof it is physical rather than fitted noise: the
+# per-frame angular velocity is temporally COHERENT, consecutive-omega
+# correlation 0.26-0.82 per axis (white noise would be ~0), and the pure-bounce
+# take reads 1.6 rev/s against 5.1 rev/s for rally play, which is the right
+# ordering. ALIASING LIMIT ~22.9 deg/frame = ~22.9 rev/s at 360 Hz (set by the
+# smallest marker separation); faster spin needs the tracking prediction and is
+# flagged.
+#
+# STATUS OF THE SPIN-DEPENDENT CONSTANTS BELOW: k_m, both a_t/b_t blocks and the
+# spin-transfer model are STILL the inherited venue values in this file, because
+# the re-fit with the recovered spin channel had not completed when this file was
+# written. They are now FITTABLE on this session and should be refitted.
+#
+# SUPERSEDED, kept for the record: before the orientation channel was recovered,
+# spin was attacked indirectly (spin_recovery.py) by fitting per-arc Magnus
+# curvature M = k_m*omega and calibrating k_m from the spin jump implied by the
+# tangential velocity change at table bounces. That route genuinely does NOT
+# work at this rig's ~10 mm arc-fit noise floor - split-half repeatability
+# 2.66 /s against a 0.56 /s signal, 31% of the k_m estimates negative, and a
+# synthetic detection limit showing spin under ~10 rev/s invisible. Those
+# numbers stand; they are a statement about inferring spin from ARC CURVATURE,
+# not about this dataset, which carries spin directly in the marker geometry.
+# The aggregate Magnus signal is separately visible as apparent |g| rising from
+# 9.70 to 10.45 m/s^2 across arc-speed terciles.
+# =============================================================================
+
+# =============================================================================
+# CAPTURE-RIG ERROR MODEL — OptiTrack/Motive, 2026-07-30
+# =============================================================================
+capture:
+  rate_hz: 360.0
+  effective_rate_hz: 317.0  # ~11.5% of frames are written EMPTY by the exporter: ball, both
+                            # rackets AND the bolted-down table markers all vanish together on
+                            # the same frames (99.3% co-occurrence), roughly every 11th frame
+                            # with a drifting phase. These are export blanks, not occlusion.
+                            # The extractor repairs holes <= 3 frames by local quadratic fit
+                            # through 6 real samples per side and MARKS them
+                            # (`ball_interpolated`, `frame_blank_in_export`); without the
+                            # repair, contiguous tracked runs never reach 15 frames and arc
+                            # extraction yields nothing. Effect on restitution is small and
+                            # measured: bounces with a filled frame within +-4 of contact read
+                            # e = 0.950 vs 0.944 for clean ones.
+  blank_frame_pct: 11.5
+  position_noise:
+    sphere_fit_resid_mm: 2.9   # per-frame residual of the fixed-radius (20 mm) sphere solve
+                               # through the visible wandering points (4-8 per frame)
+    long_arc_rms_mm: 10.4      # 3D RK4 shooting-fit rms over ballistic arcs. Venue Avatar-Pro
+                               # reference: 9.1 mm. Old discrete-marker OptiTrack rig: 0.4 mm.
+                               # The coated ball, not the cameras, sets this floor.
+    contact_window_rms_mm: 10.9  # stage-1 window fits at contacts (venue: ~5 mm) — this is why
+                               # the venue's 5/8/15 mm quality gates reject 100% of these
+                               # bounces and had to be re-scaled per rig (--rms-gate-*).
+  spin_noise:
+    available: false           # NO orientation channel at all. See §spin.
+  timing:
+    same_clock: true           # ball, both rackets and table in ONE C3D stream
+    frame_quantization_ms: 1.39  # +- half frame @360 Hz
+    bounce_gap_ms_median: 19.4   # ball untracked through the bounce (~7 frames); both sides
+                                 # are extrapolated to a two-sided meeting point
+    strike_gap_ms_median: 19.4
+
+# =============================================================================
+# TABLE / FRAME GEOMETRY measured this session (independent QA of the rig)
+# =============================================================================
+table_geometry:
+  length_marker_span_m: 2.7570   # ITTF 2.740 (corner markers sit ~9 mm outside the surface edge)
+  width_marker_span_m: 1.5310    # ITTF 1.525
+  corner_plane_rms_mm: 0.47      # the 4 corners are coplanar to half a millimetre
+  net_x_in_table_frame_m: -0.0015  # net posts land at the table centre -> frame is correct
+  net_post_above_corner_plane_m: 0.1521  # ITTF net height 0.1525 -> 0.4 mm vertical scale check
+  surface_z_in_table_frame_m: -0.0084    # from bounce minima; corner MARKER CENTRES sit ~6 mm
+                                         # above the playing surface (OptiTrack reports centres)
+  table_tilt_vs_mocap_world_deg: 0.744   # takes 1-2; 0.561/0.602 after the table was re-levelled
