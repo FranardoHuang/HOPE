@@ -82,8 +82,9 @@ policy/runtime hard contract 和 canonical argv 中同时回读：
    首发 weight=`-5`；`-20` 只允许命名清楚的消融臂；
 3. [`reference_guard_mode=metrics_only`](../DEFINITIONS.md#reference-metrics-only)：anchor/body/ee
    只记 counter，不 reset、不额外给 Reward；
-4. nonfinite raw q_des、实际关节 hard-limit、ballistic/substep crossing、table hit 和 fall 仍各自
-   hard reset，不能被 reference mode 或 projection 开关屏蔽。
+4. nonfinite raw q_des、实际/physics-substep hard edge、table hit 和 fall 仍各自 hard reset，
+   不能被 reference mode 或 projection 开关屏蔽；仅 predicted ballistic crossing 必须生成有限
+   brake target 而不 reset，最终或子步真实越界由 `joint_actual_forbidden` 的 sticky 证据终止。
 
 N=1 launcher 的 canonical Hydra argv 必须逐字包含
 `+task.racket.reference_guard_mode=metrics_only`。该键不在 task YAML 中，少写 `+` 会在 compose

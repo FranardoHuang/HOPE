@@ -550,7 +550,7 @@ def test_action_ball_finite_qdes_projection_is_dense_shaping_not_reset():
     )
 
 
-def test_action_ball_projection_keeps_nonfinite_and_physical_events_terminal():
+def test_action_ball_projection_only_qdes_nonfinite_is_terminal_and_actual_owns_limit():
     action, env, asset = _action_and_env(
         num_envs=3,
         joint_count=2,
@@ -566,17 +566,21 @@ def test_action_ball_projection_keeps_nonfinite_and_physical_events_terminal():
     _finish_guarded_policy_step(action, asset)
 
     # env0 is a non-finite actor output; env1 predicts a ballistic hard-inner crossing; env2 is
-    # already inside the two-percent physical forbidden band.  Projection mode relaxes none of
-    # these plant/non-finite events.
+    # already inside the two-percent physical forbidden band.  Both physical rows still receive a
+    # finite brake target, but the q_des term owns only the non-finite request.  The actual term
+    # independently owns env2's realized limit event.
     assert action.physical_hard_safety_latch.tolist() == [False, True, True]
     assert torch.all(torch.isfinite(action.processed_actions))
+    assert action.processed_actions[:, 0].tolist() == pytest.approx(
+        [0.0, 0.65, 1.0]
+    )
     assert terminations_mod.pre_clamp_qdes_forbidden_zone(
         env,
         "joint_pos",
         "joint_pos_limits",
         0.0,
         0.02,
-    ).tolist() == [True, True, True]
+    ).tolist() == [True, False, False]
     asset_cfg = types.SimpleNamespace(name="robot", joint_ids=slice(None))
     assert terminations_mod.actual_joint_position_forbidden_zone(
         env,
@@ -818,8 +822,13 @@ def test_physics_substep_ledger_records_exact_decimation_and_fresh_timestamps():
     assert action.joint_safety_ledger_snapshot()["q"][0, 0, 0].item() == 0.0
 
 
-def test_physics_substep_ledger_catches_crossing_and_bounced_actual_hard_edge():
-    action, env, asset = _action_and_env(guard=True)
+@pytest.mark.parametrize("project_finite_qdes", [False, True])
+def test_physics_substep_ledger_catches_crossing_and_bounced_actual_hard_edge(
+    project_finite_qdes,
+):
+    action, env, asset = _action_and_env(
+        guard=True, project_finite_qdes=project_finite_qdes
+    )
     base = hope_actions_mod.JointPositionAction
     if not hasattr(base, "apply_actions"):
         base.apply_actions = lambda self: None
@@ -865,7 +874,9 @@ def test_physics_substep_ledger_catches_crossing_and_bounced_actual_hard_edge():
         0.0,
     )
     assert actual.tolist() == [True, False]  # sticky substep edge survives the safe bounce
-    assert qdes.tolist() == [True, False]  # combined safety latch is visible pre-reset
+    assert qdes.tolist() == (
+        [False, False] if project_finite_qdes else [True, False]
+    )
     snapshot = action.joint_safety_ledger_snapshot()
     assert snapshot["complete"] is True
     assert snapshot["hard_crossing"][0, 0, 0].item()

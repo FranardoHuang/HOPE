@@ -11,6 +11,19 @@
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
 
+## 2026-07-29（N1 ActionBall 真实 smoke 与 physical-crossing 拆账）
+
+- `curr-launch-fix@7a14b0b9` 已在 Pod1 自然完成反手拉 upper 的
+  `1 env × 2 update`：两轮 `2.85/2.02 s`，`model_0/model_1` 共审计
+  `1,775,488` 个 tensor 元素且全部 finite。随后 4096-env 诊断首轮真实跑出
+  `28.36/39.82 s`，有限 q_des 投影、nonfinite 与投影罚均为零，但旧名
+  `joint_qdes_forbidden` 实际混入 q/qdot 预测 crossing；实际 hard-limit 也单独触发，仍造成
+  reset storm。候选修复保留有限 brake target，只让 q_des term 终止 nonfinite，预测 crossing
+  不再重复 reset，真实/substep hard edge 仍由 actual term 终止；Pod host 联合测试
+  `80 passed`。exact spec、证据与后续 replacement 见
+  [Reward 因果实验](experiments/2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md)和
+  [G05](gates/G05_isaac_training_first_loop.md)。
+
 ## 2026-07-28(Fable 接力 Codex 断粮现场)
 
 - **桌碰 no-touch 合同补全**：ActionBall 从 broad/body-origin + 单腕 filter 改为 exact 32 个

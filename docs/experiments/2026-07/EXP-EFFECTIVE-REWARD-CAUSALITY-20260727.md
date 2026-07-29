@@ -447,8 +447,9 @@ reset。为了避免 clipped-action aliasing，新增
 
 安全边界没有一起放宽：
 
-- raw q_des 非有限、实际关节 hard-limit、有限目标在一个 physics step 内产生的 ballistic/substep
-  crossing、table hit 和 fall 仍 hard reset；
+- raw q_des 非有限、实际/physics-substep 关节 hard edge、table hit 和 fall 仍 hard reset；
+- 仅由当前 q/qdot 预测出来的 ballistic crossing 继续选择有限 brake target，但不再在实际越界前
+  reset；最终/子步真实越界仍由独立 actual term 的 sticky 证据终止；
 - reference anchor/body/ee 谓词改为
   [`reference_guard_mode=metrics_only`](../../DEFINITIONS.md#reference-metrics-only)，继续计数但不
   reset、不额外给 Reward；
@@ -501,3 +502,32 @@ collection/reset 账。
 `init_noise_std=0.02`、shared-ready bootstrap 和 metrics-only 接入 formal N5 launcher，并把这三项
 列入 launcher-owned keys；full N1 launcher 新增 prototype 内 solver preflight PASS 门，旧的无
 provenance bundle 不再可能进入 birth。两套 launcher 联合回归为 `80 passed`。
+
+### 2026-07-29：`7a14b0b9` 真实 smoke、4096 反例与 crossing 所有权修正
+
+Pod1 clean checkout 已按
+[本地资产恢复合同](../../operations/setup_local_sync.md) no-clobber 恢复相同 A3 生成树；
+`model.urdf` SHA-256 为
+`79655f05d204c24f028778425aa971410773d1f8bbbd214de6fdb8f8ae75d1cc`，checkout 的 tracked
+状态仍 clean。upper loop/block 真实 Isaac policy contract SHA 分别为
+`8e07609d...0f4d`、`a35f0c72...9a07`，共同的 composed Reward SHA 为
+`c2f13419...6c11`。
+
+反手拉 upper 的 exact
+[`smoke spec`](../../../configs/n1_contact_20260729/smoke_loop_upper_gpu1_7a14b0b9.json)
+自然完成 `1 env × 2 update`；两轮 iteration 为 `2.85/2.02 s`，两个 checkpoint 各
+`7,122,931 B`，共 `80` 个 tensor / `1,775,488` 个元素且 nonfinite=`0`。同 source 的
+[`4096-env spec`](../../../configs/n1_contact_20260729/long_loop_upper_gpu1_7a14b0b9_r1.json)
+随后进入真实 PPO；最初两轮为 `28.36/39.82 s`，而不是预期的健康基线。到 update 6：
+
+- projection sample/nonfinite/penalty 均为 `0`，证明 finite raw q_des reset wall 已移除；
+- live `joint_qdes_forbidden=0.05249/env-step`，但该旧名包含 q/qdot 预测 crossing 与 actual/substep
+  hard latch；
+- live `joint_actual_forbidden=0.02490/env-step`，说明未训练 policy/implicit plant 的实际动量
+  仍会进 hard band；老师轨迹离线重算本身为零 crossing。
+
+因此不能把 `7a14b0b9` 长跑当健康训练。最小 successor 保留 action term 的 finite brake 与
+actual sticky hard-edge 终止，只把 projection 模式的 q_des DoneTerm 收窄为 nonfinite raw request；
+predicted-only crossing 不再重复 reset。legacy 模式不变。Pod host joint-safety suite 为
+`80 passed`；必须由 fresh namespace 的 4096 replacement 验证吞吐和 actual-hard 比率下降后，
+才能继续比较 Reward。

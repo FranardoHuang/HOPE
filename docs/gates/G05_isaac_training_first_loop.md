@@ -3530,8 +3530,9 @@ weight=`-5` 的
 [`qdes_projection_penalty`](../DEFINITIONS.md#qdes-projection-penalty)读取**投影前**归一化超出量；
 `-20` 只允许作为明确消融。reference anchor/body/ee guard 使用
 [`metrics_only`](../DEFINITIONS.md#reference-metrics-only)，保留逐步指标但不 reset。raw q_des
-nonfinite、实际关节 hard-limit、ballistic/substep crossing、table hit 和 fall 仍是 hard reset，
-所以这不是关闭物理安全。
+nonfinite、实际/physics-substep hard edge、table hit 和 fall 仍是 hard reset。仅由当前 q/qdot
+预测出来的 crossing 继续触发 finite brake，但不在实际越界前 reset；真实 hard edge 仍由
+`joint_actual_forbidden` 的 sticky substep 证据终止，所以这不是关闭物理安全。
 
 老师贴限也不是 block 风暴的解释：loop/block upper/full 四件动作的 hard/soft/2%-inner crossing
 均为 `0`；block 全片 normalized hard/soft margin 为 `0.115081/0.072312`，不小于 loop upper
@@ -3566,3 +3567,25 @@ bundle SHA 分别为 `29adc3cf...c85c4`、`fb1ed6ee...b6c5a`；full loop/block �
 Pod 第一次真实 compose 还发现 N1 reference override 少了 Hydra `+`；follow-up 已修正，并把
 bootstrap/std/reference 三项补入 N5 formal launcher、把 full solver-preflight PASS 变成 N1
 launcher 硬门。launcher 联合回归 `80 passed`，但尚未重跑 Pod smoke，所以证据等级不变。
+
+#### 2026-07-29 `7a14b0b9` live smoke / 4096 反例
+
+Pod1 clean checkout 已恢复与旧训练相同且 Git-ignored 的 A3 46-file 生成树，tracked 状态保持
+clean。反手拉 upper 的 policy contract SHA 为 `8e07609d...0f4d`，effective Reward SHA 为
+`c2f13419...6c11`。exact
+[`smoke spec`](../../configs/n1_contact_20260729/smoke_loop_upper_gpu1_7a14b0b9.json)
+自然完成 `1 env × 2 update`：iteration `2.85/2.02 s`，`model_0/model_1` 共
+`1,775,488` 个 tensor 元素全部 finite，零 Traceback/OOM。
+
+同 source 的
+[`4096-env diagnostic spec`](../../configs/n1_contact_20260729/long_loop_upper_gpu1_7a14b0b9_r1.json)
+进入真实 PPO，但首两轮为 `28.36/39.82 s`。update 6 的投影 sample、nonfinite 与投影罚均为零，
+而 live 旧名 `joint_qdes_forbidden=0.05249/env-step`、actual hard
+`joint_actual_forbidden=0.02490/env-step`。代码/teacher 复核证明前者混入 predicted/physical
+crossing，且老师全片和 `q+qdot×5/20 ms` 都没有 2%-inner crossing；这是未训练 plant 动量和
+重复 termination 所致，不是 finite proposal 或老师贴限。
+
+successor 候选在 projection mode 令 q_des DoneTerm 只拥有 nonfinite raw request，predicted
+crossing 仍生成 finite brake target 但不 reset，实际/子步 hard edge 仍由 actual DoneTerm 终止；
+legacy 行为不变。Pod host joint-safety suite `80 passed`。fresh 4096 replacement 仍须证明
+actual-hard 比率和 update wall time 可接受；G05 继续 `Partial`。

@@ -233,9 +233,12 @@ def pre_clamp_qdes_forbidden_zone(
     This reads :class:`ClampedJointPositionAction`'s current *pre-clamp* deploy-space target, so
     the deploy clamp cannot hide an extreme request.  Legacy mode terminates a finite forbidden
     request.  In the explicit ActionBall projection mode, a finite request is constrained to the
-    target envelope and shaped by projection distance instead; NaN/Inf and realized/predicted
-    plant crossings remain terminal.  Invalid rows immediately after reset return ``False`` until
-    the first real action is processed.  ``limit_source`` and both margins are required.
+    target envelope and shaped by projection distance instead; only NaN/Inf remains owned by this
+    q_des term.  Predicted crossings still activate the action term's finite brake target without
+    resetting the episode, while realized or substep hard-edge events remain terminal through
+    :func:`actual_joint_position_forbidden_zone`.  Invalid rows immediately after reset return
+    ``False`` until the first real action is processed.  ``limit_source`` and both margins are
+    required.
     """
 
     context = "pre_clamp_qdes_forbidden_zone"
@@ -309,21 +312,12 @@ def pre_clamp_qdes_forbidden_zone(
         # In the ActionBall constrained-action mode, a finite affine request is never allowed to
         # reach the drive outside the already-validated target envelope.  Treating that proposal as
         # terminal would throw away the transition that carries its projection-distance penalty and
-        # recreate the one-step reset wall.  Non-finite policy output is still terminal, and every
-        # realized/predicted plant-state hard event remains terminal through the physical latch.
-        physical_latch = getattr(action, "physical_hard_safety_latch", None)
-        if (
-            not torch.is_tensor(physical_latch)
-            or physical_latch.dtype != torch.bool
-            or tuple(physical_latch.shape) != (expected_shape[0],)
-            or physical_latch.device != qdes.device
-        ):
-            raise RuntimeError(
-                f"{context} requires a same-device bool physical hard-safety latch "
-                f"shaped [num_envs]={expected_shape[0]}"
-            )
+        # recreate the one-step reset wall.  A predicted crossing already selects the finite brake
+        # target in the action term; resetting here defeats that recovery path.  Non-finite policy
+        # output is still terminal.  Realized/substep hard-edge events are independently owned by
+        # actual_joint_position_forbidden_zone, including sticky evidence after a safe bounce.
         nonfinite_request = torch.any(~torch.isfinite(qdes), dim=1)
-        return valid & (nonfinite_request | physical_latch)
+        return valid & nonfinite_request
     return valid & (violation | pre_apply_latch)
 
 
