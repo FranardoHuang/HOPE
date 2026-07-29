@@ -381,3 +381,47 @@ warm-resume 的旧两动作 run，恢复后约第 2--12 update 才跨击球窗�
 历史日志。因此五轮足以发现当前 raw-hard/sample-starvation 并拒绝直接 long，却不能证明 fresh
 policy 永远无法自救。stable-ready 的 4096×5 健康后，下一判别应是 fresh 100--300 update
 recovery；strike 出现且 raw-hard 下降才续 20k。
+
+### 6.6 stable-upper v2 真实 probe 与 recovery（2026-07-30）
+
+stable-upper v2 的真实 Pod 结果否决了“静态 LP 可保持即可直接 long”，但没有把五轮结果外推成
+“fresh policy 永远学不会”：
+
+- loop `1 env × 2 update` 自然完成，iteration 为 `4.72/3.07 s`；block 为
+  `4.63/3.04 s`。两者 update 1 的 mean episode length 均为 `29`，q_des/table/fall/nonfinite
+  为零，但各出现一次 actual raw-hard，主要仍在腰部；
+- loop exact `4096 env × 5 update` 自然完成，iteration 为
+  `26.73/42.63/33.41/34.01/33.96 s`，mean episode length 为
+  `24.00/24.20/22.17/21.01/21.43`，每轮 actual raw-hard 为
+  `3741/3979/4167/4654/4635`，strike opportunity 恒零。以
+  `98,304` environment steps/update 计算，吞吐约 `2.3--3.7k steps/s`；
+- block 的 exact 4096 probe 在 URDF/scene 构造阶段持续约 900 秒、约 40 CPU cores 满载而
+  GPU 约 1%，尚未出现 `Learning iteration` 即由 launcher 自己的
+  `KIT_BOOT_STALE_TIMEOUT_S=900` fail-closed 停止。它没有 PPO 结果，不能与 loop probe
+  混写；但证明当前 4096 构造路径存在非线性 CPU/receipt 初始化成本；
+- 为区分“五轮样本饥饿”与“fresh policy 可在较长线自救”，同一 block setting 已按预注册
+  启动 `1024 env × 100 update` recovery
+  `n1_stable_v2_canary_e8f1b8e5_block_gpu1_r1`。截至 update 22，iteration 通常约
+  `9.7--11.3 s`（一次 `17.47 s`），mean episode 仍约 `21--22`，strike 为零，
+  actual raw-hard 约 `47--49` episode events/rollout，q_des/table/nonfinite 为零、fall
+  极少；`model_20.pt` 已在 Pod 载入验证 `25` 个 tensor 全 finite。该固定 100-update
+  recovery 继续自然运行，未到终点前不调超参。
+
+静态 motion 审计排除了“老师动作自己贴腰限位”的解释。stable v2 teacher 的 runtime
+`waist_roll` 与 `waist_pitch` 分别位于约 `[-0.046,0.014]`、`[0,0.141] rad`（loop）以及
+`[0,0.077]`、`[0,0.098] rad`（block），与 A3 hard limits 有显著余量；q_des projection
+也持续为零。结合 official A3 waist PD（yaw `85/3`、roll/pitch `50/2`），当前首因更像
+official low-gain plant 在重力、接触和全身耦合下不能从该出生/qdes 合同闭环保持到击球窗，
+而不是 Reward、solver、teacher limit 或有限 q_des。
+
+因此下一直接修仍是统一的 **dynamic-ready contract**，不做 Reward A/B：physical spawn、
+initial qdes bias、actor observation、teacher reference 与 motion frame 0 必须描述同一姿态；
+出生后增加明确 preparation window，incoming-ball TTC 下界绑定
+`preparation + validated t_hit + margin`；先用 nominal plant hold 证明可保持到该时刻，再跑
+`1 env×2` 与规模 probe。不能以提高 Reward、放宽 actual hard edge、CaT 或增加 env 数掩盖
+动态不可保持的出生状态。
+
+性能工单同时收窄为测量优先：现有 ball→task 已是 reset-time GPU batch，且 episode 内缓存，
+在 update 分段 profiler 证明 solver 占主导前不重写算法。优先量化 physics rollout、
+metrics/D2H、termination、safety archive、reset birth/retire、sampling/solve、state write 与
+PPO；随后先移除 reset 风暴下的逐环境 Python/完整 archive 税。PPO 约 `0.1 s`，不在关键路径。

@@ -254,7 +254,11 @@ reference 动作无需因本切换重做：upper/full loop/block 四件老师的
 
 12. **首迭代判定**：必须看到 `Learning iteration` **且**绑定的 PID/PGID/starttime/cmdline
     仍是同一活进程。**只有 resume 行不算首迭代**——它会让监视器误报。
-13. **stale 门**：首个 `Learning iteration` 之前容忍 `1800 s` 无推进；之后收紧到 `900 s`。
+13. **boot/stale 双门**：首个 `Learning iteration` 的总 boot timeout 是 `1800 s`，但日志
+    连续没有任何推进时，launcher 的 `KIT_BOOT_STALE_TIMEOUT_S=900` 会更早 fail-closed。
+    因此“进程仍在高 CPU 构造”不等于可静默等满 1800 秒；若大型 env 构造需更久，必须先量化
+    startup phase 并显式修改、记录该合同，不能把 launcher 的 900 秒自然停止写成 PPO 失败。
+    出现首个 `Learning iteration` 后仍以 900 秒无推进为 stale。
 14. **里程碑算术**：fresh 要写出 `model_1000.pt` 必须传 `max_iterations=1001`（0 起数）；
     热启动把相对偏移加到父迭代号。**终版存档名是 `model_13599` 不是 `13600`**——
     等 13600 会永远等。

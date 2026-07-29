@@ -809,3 +809,21 @@ loop/block bundle SHA 为 `85c7a276…` / `09d0dea3…`，materialize PASS。
 `model_13000`+optimizer warm-resume，并在恢复后第 2--12 update 出现 strike。故前五轮只用于
 拒绝当前 long 资格和定位 sample starvation，不作“长线永不可学习”结论。stable probe 通过后
 预注册 fresh 100--300 update recovery，再决定是否续 long。
+
+### 2026-07-30：stable v2 仍在击球前 raw-hard，Reward 比较继续冻结
+
+loop stable v2 的 exact `4096 env × 5 update` 已自然完成：iteration
+`26.73/42.63/33.41/34.01/33.96 s`，mean episode
+`24.00/24.20/22.17/21.01/21.43`，strike 恒零，actual raw-hard
+`3741/3979/4167/4654/4635`。block 4096 构造在首个 PPO update 前由 launcher 900 秒
+静默 stale 门停止，没有训练结果。
+
+同一 block setting 的 `1024 env × 100 update` recovery 正在 Pod1 自然运行。截至 update 22，
+mean episode 仍约 `21--22`、strike 为零，actual raw-hard 约 `47--49` events/rollout；
+q_des/table/nonfinite 为零，fall 极少，`model_20.pt` finite。该 recovery 只回答 fresh policy
+是否能在 100 updates 内跨过击球窗，不是 Reward arm。
+
+由于 teacher 腰部轨迹离 A3 hard limits 有显著余量、q_des projection 也持续为零，当前证据
+指向 nominal A3 plant 与出生/qdes/preparation 合同，而不是 tracking、击球或 landing Reward
+剂量。所有 Reward/negative penalty/reference guard/full-body 比较继续冻结；先完成动态可保持
+ready 并取得 strike baseline，否则 realized income 和因果 worsening 都没有可解释的击球分母。

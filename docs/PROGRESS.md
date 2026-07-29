@@ -13,6 +13,12 @@
 
 ## 2026-07-30（A3 stable-upper successor）
 
+- stable-upper v2 loop 的 4096×5 probe 仍在击球前由 actual raw-hard 大量 reset：
+  mean episode `21.01--24.20`、strike=`0`、吞吐约 `2.3--3.7k environment-steps/s`。
+  block 4096 构造在 PPO 前由 launcher 的 900 秒静默 stale 门自然停止；其 1024×100 recovery
+  已到 update 22，`model_20.pt` finite，但 episode 仍约 `21--22`、strike=`0`。老师腰轨迹
+  远离 hard limits 且 q_des 未越界，下一直接修转为 unified A3 dynamic-ready/qdes/preparation
+  合同；Reward、CaT、full-body 与 curriculum 剂量比较继续等待健康 strike baseline。
 - stable-upper loop/block `1 env×2` smoke 均自然完成，4 个 checkpoint finite，q_des projection、
   table、fall、nonfinite 与腿/踝 hard 均为零；但两动作都在 episode age `16--17` 唯一触发
   `waist_pitch_joint` 上侧 raw mechanical edge，mean episode 仍仅 `16--17`、strike 为零。
