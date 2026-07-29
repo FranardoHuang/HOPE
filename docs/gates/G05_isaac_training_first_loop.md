@@ -80,6 +80,11 @@ Follow-up note (2026-07-30, qvel-fixed 4096 probe rejected; Gate remains `Partia
   新 face center 后再进入 smoke。该重绑已 materialize PASS，loop/block bundle SHA 为
   `054be7f2…` / `6973f1a3…`；Isaac scene 物化的 policy contract 为
   `80c70eb3…` / `359d4e97…`，stable lower normalized bias 全零。尚未获得 PPO smoke 行为证据。
+- launcher contact receipt gate 现按 exact alignment keyset 区分 legacy upper corrected-Z 与
+  stable-upper retargeted-center；后者必须绑定
+  `a3_stable_upper_selected_rubber_face_center_at_pinned_strike_frame`、明确不保留旧 center，
+  且 world-Z 与 ready-root + B-yaw task-Z 闭合。该兼容修复不改变训练 setting；Pod focused
+  regression 和两动作 PPO smoke 仍是下一证据。
 
 Follow-up note (2026-07-29, `eaf55fba` raw-hard counterexample and A3 upper q/qd root cause;
 Gate remains `Partial`):

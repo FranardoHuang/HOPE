@@ -237,6 +237,7 @@ _FULL_ALIGNMENT_KEYS = (
     "center_gate_distance_m",
     "center_within_threshold",
 )
+_UPPER_RETARGETED_ALIGNMENT_KEYS = _FULL_ALIGNMENT_KEYS
 
 
 class LaunchRefused(RuntimeError):
@@ -604,11 +605,21 @@ def _validate_contact_receipt(
         )
 
     scope = bundle["scope"]
-    alignment_keys = (
-        _FULL_ALIGNMENT_KEYS if scope == "full" else _UPPER_ALIGNMENT_KEYS
-    )
+    raw_alignment = row["alignment"]
+    if scope == "full":
+        alignment_keys = _FULL_ALIGNMENT_KEYS
+        alignment_mode = "full_retargeted"
+    elif (
+        isinstance(raw_alignment, dict)
+        and set(raw_alignment) == set(_UPPER_RETARGETED_ALIGNMENT_KEYS)
+    ):
+        alignment_keys = _UPPER_RETARGETED_ALIGNMENT_KEYS
+        alignment_mode = "stable_upper_retargeted"
+    else:
+        alignment_keys = _UPPER_ALIGNMENT_KEYS
+        alignment_mode = "legacy_upper_corrected_z"
     alignment = _exact_dict(
-        row["alignment"], alignment_keys, name="contact.alignment"
+        raw_alignment, alignment_keys, name="contact.alignment"
     )
     threshold = _finite(
         alignment["threshold_m"], name="contact.alignment.threshold_m"
@@ -635,7 +646,7 @@ def _validate_contact_receipt(
         action["ball_profile"]["contact_offset_center_b_yaw_m"],
         name="manifest contact center",
     )
-    if scope == "upper":
+    if alignment_mode == "legacy_upper_corrected_z":
         legacy_z = _finite(
             alignment["legacy_absolute_contact_z_w_m"],
             name="contact.alignment.legacy_absolute_contact_z_w_m",
@@ -657,21 +668,26 @@ def _validate_contact_receipt(
             alignment["retargeted_contact_center_z_w_m"],
             name="contact.alignment.retargeted_contact_center_z_w_m",
         )
-        if (
-            alignment["contact_center_authority"]
-            != "full_motion_selected_rubber_face_center_at_explicit_strike_frame"
-        ):
+        expected_authority = (
+            "full_motion_selected_rubber_face_center_at_explicit_strike_frame"
+            if alignment_mode == "full_retargeted"
+            else (
+                "a3_stable_upper_selected_rubber_face_center_at_pinned_"
+                "strike_frame"
+            )
+        )
+        if alignment["contact_center_authority"] != expected_authority:
             raise LaunchRefused(
-                "full contact center authority must be the selected rubber "
-                "face at the explicit strike frame"
+                "retargeted contact center authority does not match its "
+                "full/stable-upper scope"
             )
         if alignment["upper_contact_center_preserved"] is not False:
             raise LaunchRefused(
-                "full contact center must not preserve the upper center"
+                "retargeted contact center must not preserve the old upper center"
             )
         if abs((retargeted_z - ready_z) - task[2]) > 1.0e-9:
             raise LaunchRefused(
-                "full retargeted contact z is not ready root z plus task z"
+                "retargeted contact z is not ready root z plus task z"
             )
     if _distance(task, manifest_center) > 1.0e-9:
         raise LaunchRefused("contact task center differs from N1 manifest")

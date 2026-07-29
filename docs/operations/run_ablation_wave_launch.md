@@ -110,6 +110,11 @@ construction 或 PhysX start 停止前进，保留日志后按 exact PGID 关闭
    不变量与行为门。若修复后仍有
    mass raw-hard，才允许一条 birth-only、substep-only、policy-step 末已恢复的 diagnostic
    canary；task phase/current-post edge/nonfinite 继续 Done。
+6. upper contact receipt 有两个互斥 schema：历史资产使用 corrected-Z alignment；
+   stable-upper 使用整块 contact box retargeted alignment。后者的 authority 必须是
+   `a3_stable_upper_selected_rubber_face_center_at_pinned_strike_frame`，必须声明不保留旧
+   upper center，并闭合 `retargeted_world_z = ready_root_z + task_z`。不要把 full-motion
+   authority 或 legacy 两个 Z 字段混入 stable-upper receipt。
 
 以下性能改动若 Pod focused parity 通过，可直接进入 replacement，不另开学习 A/B：
 

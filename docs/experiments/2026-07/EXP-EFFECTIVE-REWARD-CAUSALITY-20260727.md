@@ -784,3 +784,10 @@ SHA 为 `4343a85e…` / `08aeafaf…`，两者 exact A3 static audit 均为双�
 LP `feasible=true`；击球帧拍速保持到数值精度。root 修复让 selected face world position
 最多变化 `0.138/0.064 m`，因此旧题明确作废；N1 producer 保留原 profile 各轴宽度，只把
 完整 contact min/center/max 共同平移到新 face center。
+
+发射器随后补齐 stable-upper receipt 的等价读取路径：仅当 upper alignment 的 exact keyset
+等于 retargeted schema 时才进入该分支，并要求 authority 为 pinned strike-frame selected
+rubber-face center、`upper_contact_center_preserved=false`、world-Z 与
+`ready_root_z + task_z` 闭合。legacy upper corrected-Z 与 full retargeted 两条路径保持不变。
+这是 artifact schema 兼容修复，不构成 Reward/学习 A/B；下一步是 Pod focused regression 后
+串行跑两动作 `1 env×2` smoke。

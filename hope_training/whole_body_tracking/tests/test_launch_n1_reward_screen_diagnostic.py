@@ -691,6 +691,42 @@ def test_semantic_gate_rejects_landing_claim(exact_repo):
         )
 
 
+def test_semantic_gate_accepts_stable_upper_retargeted_contact(exact_repo):
+    contact = copy.deepcopy(exact_repo["contact_document"])
+    alignment = contact["alignment"]
+    alignment.pop("legacy_absolute_contact_z_w_m")
+    alignment.pop("corrected_contact_offset_z_b_yaw_m")
+    alignment.update(
+        {
+            "contact_center_authority": (
+                "a3_stable_upper_selected_rubber_face_center_at_pinned_"
+                "strike_frame"
+            ),
+            "retargeted_contact_center_z_w_m": (
+                alignment["ready_root_z_w_m"]
+                + alignment["task_contact_offset_center_b_yaw_m"][2]
+            ),
+            "upper_contact_center_preserved": False,
+        }
+    )
+    result = L._validate_contact_receipt(
+        contact,
+        bundle=exact_repo["bundle_document"],
+        manifest=exact_repo["manifest_document"],
+    )
+    assert result["status"] == "PASS"
+
+    alignment["contact_center_authority"] = (
+        "full_motion_selected_rubber_face_center_at_explicit_strike_frame"
+    )
+    with pytest.raises(L.LaunchRefused, match="authority"):
+        L._validate_contact_receipt(
+            contact,
+            bundle=exact_repo["bundle_document"],
+            manifest=exact_repo["manifest_document"],
+        )
+
+
 def test_rejects_absolute_world_contact_disguised_as_relative(exact_repo):
     spec, _path = exact_repo["make_spec"]()
     # Rebuild the exact artifact chain and commit the malicious alternative so

@@ -13,6 +13,11 @@
 
 ## 2026-07-30（A3 stable-upper successor）
 
+- N1 launcher 的 contact receipt validator 已扩展为同时接受两种 upper 合同：历史
+  corrected-Z receipt，以及 stable-upper 把整块 contact box 重绑到 pinned strike-frame
+  selected rubber-face center 的 retargeted receipt。两条路径按互斥 exact keyset 和 authority
+  校验；这只是让发射器理解已验证的新工件，不改变球题、Reward、PPO 或训练语义。待 Pod focused
+  test 后串行发 loop/block `1 env×2` smoke。
 - qvel-fixed 反手拉/挡已完成 exact `4096 env × 5 update`，但两者 mean episode 仅约
   `23/12` 步、strike 恒零，actual raw-hard 分别约 `2.5k--4.2k/update` 与末轮
   `7.7k/update`，吞吐约 `2--3k environment-steps/s`。finite checkpoint 正常且
