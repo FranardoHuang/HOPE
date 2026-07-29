@@ -207,11 +207,26 @@ _FRAME_KEYS = (
     "teacher_reference_frame",
     "world_z_origin",
 )
-_ALIGNMENT_KEYS = (
+_UPPER_ALIGNMENT_KEYS = (
     "threshold_m",
     "ready_root_z_w_m",
     "legacy_absolute_contact_z_w_m",
     "corrected_contact_offset_z_b_yaw_m",
+    "task_contact_offset_center_b_yaw_m",
+    "teacher_racket_site_b_yaw_m",
+    "teacher_selected_face_center_b_yaw_m",
+    "task_to_teacher_site_distance_m",
+    "task_to_teacher_face_center_distance_m",
+    "center_gate_point",
+    "center_gate_distance_m",
+    "center_within_threshold",
+)
+_FULL_ALIGNMENT_KEYS = (
+    "threshold_m",
+    "ready_root_z_w_m",
+    "retargeted_contact_center_z_w_m",
+    "contact_center_authority",
+    "upper_contact_center_preserved",
     "task_contact_offset_center_b_yaw_m",
     "teacher_racket_site_b_yaw_m",
     "teacher_selected_face_center_b_yaw_m",
@@ -587,8 +602,12 @@ def _validate_contact_receipt(
             "contact frame contract is not base-relative task / frame0 teacher / floor-z"
         )
 
+    scope = bundle["scope"]
+    alignment_keys = (
+        _FULL_ALIGNMENT_KEYS if scope == "full" else _UPPER_ALIGNMENT_KEYS
+    )
     alignment = _exact_dict(
-        row["alignment"], _ALIGNMENT_KEYS, name="contact.alignment"
+        row["alignment"], alignment_keys, name="contact.alignment"
     )
     threshold = _finite(
         alignment["threshold_m"], name="contact.alignment.threshold_m"
@@ -599,18 +618,6 @@ def _validate_contact_receipt(
         alignment["ready_root_z_w_m"],
         name="contact.alignment.ready_root_z_w_m",
     )
-    legacy_z = _finite(
-        alignment["legacy_absolute_contact_z_w_m"],
-        name="contact.alignment.legacy_absolute_contact_z_w_m",
-    )
-    corrected_z = _finite(
-        alignment["corrected_contact_offset_z_b_yaw_m"],
-        name="contact.alignment.corrected_contact_offset_z_b_yaw_m",
-    )
-    if abs((legacy_z - ready_z) - corrected_z) > 1.0e-9:
-        raise LaunchRefused(
-            "contact corrected z is not legacy world z minus ready root z"
-        )
     task = _vec3(
         alignment["task_contact_offset_center_b_yaw_m"],
         name="contact.alignment.task_contact_offset_center_b_yaw_m",
@@ -627,10 +634,46 @@ def _validate_contact_receipt(
         action["ball_profile"]["contact_offset_center_b_yaw_m"],
         name="manifest contact center",
     )
+    if scope == "upper":
+        legacy_z = _finite(
+            alignment["legacy_absolute_contact_z_w_m"],
+            name="contact.alignment.legacy_absolute_contact_z_w_m",
+        )
+        corrected_z = _finite(
+            alignment["corrected_contact_offset_z_b_yaw_m"],
+            name="contact.alignment.corrected_contact_offset_z_b_yaw_m",
+        )
+        if abs((legacy_z - ready_z) - corrected_z) > 1.0e-9:
+            raise LaunchRefused(
+                "contact corrected z is not legacy world z minus ready root z"
+            )
+        if abs(task[2] - corrected_z) > 1.0e-9:
+            raise LaunchRefused(
+                "contact task z is not the corrected base-relative z"
+            )
+    else:
+        retargeted_z = _finite(
+            alignment["retargeted_contact_center_z_w_m"],
+            name="contact.alignment.retargeted_contact_center_z_w_m",
+        )
+        if (
+            alignment["contact_center_authority"]
+            != "full_motion_selected_rubber_face_center_at_explicit_strike_frame"
+        ):
+            raise LaunchRefused(
+                "full contact center authority must be the selected rubber "
+                "face at the explicit strike frame"
+            )
+        if alignment["upper_contact_center_preserved"] is not False:
+            raise LaunchRefused(
+                "full contact center must not preserve the upper center"
+            )
+        if abs((retargeted_z - ready_z) - task[2]) > 1.0e-9:
+            raise LaunchRefused(
+                "full retargeted contact z is not ready root z plus task z"
+            )
     if _distance(task, manifest_center) > 1.0e-9:
         raise LaunchRefused("contact task center differs from N1 manifest")
-    if abs(task[2] - corrected_z) > 1.0e-9:
-        raise LaunchRefused("contact task z is not the corrected base-relative z")
     site_distance = _finite(
         alignment["task_to_teacher_site_distance_m"],
         name="contact.alignment.task_to_teacher_site_distance_m",

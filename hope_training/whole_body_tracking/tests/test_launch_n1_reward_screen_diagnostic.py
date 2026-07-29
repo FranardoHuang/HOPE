@@ -380,6 +380,21 @@ def _convert_fixture_to_full(exact_repo, spec: dict) -> Path:
     contact = json.loads(contact_path.read_text())
     contact["scope"] = "full"
     contact["claims"] = full_claims
+    alignment = contact["alignment"]
+    alignment.pop("legacy_absolute_contact_z_w_m")
+    alignment.pop("corrected_contact_offset_z_b_yaw_m")
+    alignment.update(
+        {
+            "contact_center_authority": (
+                "full_motion_selected_rubber_face_center_at_explicit_strike_frame"
+            ),
+            "retargeted_contact_center_z_w_m": (
+                alignment["ready_root_z_w_m"]
+                + alignment["task_contact_offset_center_b_yaw_m"][2]
+            ),
+            "upper_contact_center_preserved": False,
+        }
+    )
     contact_path.write_bytes(_canonical(contact))
     bundle["contact_alignment"]["sha256"] = hashlib.sha256(
         contact_path.read_bytes()
