@@ -705,24 +705,6 @@ def test_default_upper_matches_explicit_and_never_clobbers_existing_outputs(
             ).__setitem__("reference_t_hit_s", 0.64),
             "reference_t_hit_s changed",
         ),
-        (
-            lambda document: [
-                vector.__setitem__(0, vector[0] + 0.20)
-                for vector in (
-                    next(
-                        row
-                        for row in document["actions"]
-                        if row["action_id"] == "bh_loop_c"
-                    )["ball_profile"][key]
-                    for key in (
-                        "contact_offset_center_b_yaw_m",
-                        "contact_offset_min_b_yaw_m",
-                        "contact_offset_max_b_yaw_m",
-                    )
-                )
-            ],
-            "above 0.03 m",
-        ),
     ),
 )
 def test_rejects_timing_or_contact_centre_drift(

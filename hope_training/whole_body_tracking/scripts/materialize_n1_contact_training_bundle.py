@@ -99,6 +99,7 @@ SUPPORTED_ACTIONS = {
         ),
         "reference_t_hit_s": 0.62,
         "reference_t_cycle_s": 1.4,
+        "reference_racket_site_speed_mps": 1.8143678674451433,
         "priority": 0,
     },
     "bh_block": {
@@ -113,6 +114,7 @@ SUPPORTED_ACTIONS = {
         ),
         "reference_t_hit_s": 0.48,
         "reference_t_cycle_s": 1.06,
+        "reference_racket_site_speed_mps": 1.5781960074353882,
         "priority": 2,
     },
 }
@@ -1931,6 +1933,7 @@ def materialize_n1_contact_bundle(
         "motion_sha256",
         "reference_t_hit_s",
         "reference_t_cycle_s",
+        "reference_racket_site_speed_mps",
     ):
         scoped_action[key] = facts[key]
     motion_path, motion_relative = _resolve_repo_file(
@@ -2019,6 +2022,7 @@ def materialize_n1_contact_bundle(
             "motion_sha256",
             "reference_t_hit_s",
             "reference_t_cycle_s",
+            "reference_racket_site_speed_mps",
         ):
             expected_source_action[key] = facts[key]
         expected_source_action["action_uid"] = (
