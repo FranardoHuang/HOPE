@@ -1969,8 +1969,9 @@
   diagnostic motion payload 生命周期处失败，未进入 PPO；失败目录与 exact 进程证据保留。修复
   diagnostic bytes snapshot、unauthorized receipt、hard-contract formal/diagnostic 分支和
   Motion↔Racket 初始化后 digest probe，host 相关可运行回归 `236 passed`。因 solver source
-  改变，已重物化 profile pins `dd609422...f6925` 以及反手拉/挡 N=1 bundle
-  `90b88645...bc6a` / `fa03627f...4bc2`；待 fresh `_r2` Pod smoke。
+  改变，已重物化 profile pins。`_r2` 又穿透到 hard contract/Reward receipt，随后在首 true reset
+  捕获 birth/task receipt 漏传 broker registry SHA；修复后最终 pins 为 `26eb1ff2...6804d`，
+  反手拉/挡 N=1 bundle 为 `c2399571...05d0` / `c53d1669...41a2`；待 fresh `_r3` Pod smoke。
 - 新增 ActionBall 1-env formal Reward 因果发射门：真实 post-Hydra/live RewardManager exact
   recipe 对账后，逐 active objective 用权威 tensor 做单轴 worsening，按四组报告 signed
   per-step/per-event 剂量；unknown term、方向错误、clean/HEAD producer/identity 漂移均 fail

@@ -257,3 +257,10 @@ host 可运行联合回归为 `236 passed`；Torch 行为套件需在 Pod exact 
 `dd609422...f6925`，solver profile 为 `8fbb8bbd...bd0b7`；两动作的新 contact bundle 分别为
 `90b88645...bc6a` 与 `fa03627f...4bc2`。下一次只能用 fresh `_r2` namespace，先自然完成
 1 env / 2 update，再铺 upper Reward 矩阵；当前仍没有科学结果或采用结论。
+
+`_r2` 已在 Pod2 通过 Torch birth/exact-resume `10 passed`，两动作也都成功写出 hard training
+contract 与 effective Reward receipt；随后在首个 true reset 发现 runtime receipt API 漏接新增的
+`registry_sha256` 必填参数。birth 与 task 两处调用已统一绑定 broker registry SHA，host 相关回归
+`60 passed`。因此 solver pins 再更新为 `26eb1ff2...6804d`、solver profile
+`cfba7f28...9349f`；反手拉/挡 bundle 更新为 `c2399571...05d0` /
+`c53d1669...41a2`。`_r2` 仍是构造失败而非科学结果，下一次使用 fresh `_r3`。

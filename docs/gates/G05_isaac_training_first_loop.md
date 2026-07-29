@@ -3445,3 +3445,8 @@ Motion↔Racket 初始化后 shared-state probe 合成一个无重入生命周�
 `hope_commands.py` 重新物化。下一门是 fresh `_r2` 自然跑完两次 update、零 Python
 Traceback、checkpoint finite、episode length 非恒 1，并回读 exact Reward/motion/manifest；
 因此 G05 状态仍为 `Partial`。
+
+`_r2` 两动作进一步通过 runtime bind、hard contract 与 effective Reward receipt，在首个 true reset
+因 birth/task receipt 调用未传新必填的 broker registry SHA 同因停止；仍未出现
+`Learning iteration`。调用点与 API 已对齐并重新物化 pins/bundle，下一门改为 fresh `_r3`，G05
+仍为 `Partial`。
