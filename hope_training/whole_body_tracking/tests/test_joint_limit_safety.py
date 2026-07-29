@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import math
 import sys
 import time
 import tracemalloc
@@ -22,7 +23,7 @@ import types
 import pytest
 import torch
 
-from test_reward_flags_mdp import hope_actions_mod, terminations_mod
+from test_reward_flags_mdp import hope_actions_mod, hope_rewards_mod, terminations_mod
 from test_training_launch_claim import _load_contract_module, _load_runner_module
 
 
@@ -43,6 +44,7 @@ def _action_and_env(
     guard_policy_dt_s: float | None = 0.1,
     guard_margin_rad: float | None = 0.0,
     guard_margin_fraction: float | None = 0.0,
+    project_finite_qdes: bool = False,
     runtime_step_dt: float = 0.1,
     decimation: int = 4,
     runtime_physics_dt: float | None = None,
@@ -85,6 +87,7 @@ def _action_and_env(
         pre_apply_guard_margin_fraction=guard_margin_fraction,
         pre_apply_guard_expected_decimation=expected_decimation,
         pre_apply_guard_terminal_archive_capacity=terminal_archive_capacity,
+        project_finite_preclamp_qdes_without_termination=project_finite_qdes,
     )
     env = types.SimpleNamespace(
         scene={"robot": asset},
@@ -108,6 +111,7 @@ def _action_and_env(
             ),
         ),
         episode_length_buf=torch.zeros(num_envs, dtype=torch.long),
+        common_step_counter=0,
     )
     action = hope_actions_mod.ClampedJointPositionAction(cfg, env)
     env.action_manager = types.SimpleNamespace(
@@ -418,7 +422,7 @@ def test_pre_apply_guard_triggers_on_outward_but_not_inward_ballistic_velocity()
 
 
 def test_pre_apply_guard_latches_raw_qdes_and_never_sends_boundary_request():
-    action, _, asset = _action_and_env(guard=True)
+    action, env, asset = _action_and_env(guard=True)
     asset.data.joint_pos.zero_()
     asset.data.joint_vel.zero_()
     action.process_actions(torch.tensor([[1.20, 0.0], [0.25, 0.0]]))
@@ -432,6 +436,184 @@ def test_pre_apply_guard_latches_raw_qdes_and_never_sends_boundary_request():
     # The violating joint gets the derived stationary brake target q=0, not the soft edge.
     assert action.processed_actions[:, 0].tolist() == pytest.approx([0.0, 0.25])
     assert torch.all(torch.isfinite(action.processed_actions))
+    _finish_guarded_policy_step(action, asset)
+    # Legacy/default tasks retain their historical finite-q_des termination behavior.
+    assert action.finite_preclamp_qdes_projection_enabled is False
+    assert terminations_mod.pre_clamp_qdes_forbidden_zone(
+        env,
+        "joint_pos",
+        "joint_pos_limits",
+        0.0,
+        0.0,
+    ).tolist() == [True, False]
+
+
+def test_action_ball_finite_qdes_projection_is_dense_shaping_not_reset():
+    action, env, asset = _action_and_env(
+        num_envs=2,
+        joint_count=31,
+        guard=True,
+        guard_margin_fraction=0.02,
+        project_finite_qdes=True,
+    )
+    proposals = torch.zeros(2, 31)
+    proposals[:, 0] = torch.tensor([-1.20, 2.00])
+    action.process_actions(proposals)
+
+    # Both finite requests cross the physical hard-inner edge, but the drive sees the nearest
+    # existing soft-envelope projection rather than the state-derived brake target.
+    # A finite saturation is not copied into the formal hard-safety ledger; otherwise that
+    # ledger would demand a terminal archive and fence PPO despite the deliberate no-reset path.
+    assert action.pre_apply_qdes_violation_latch.tolist() == [False, False]
+    assert action.pre_apply_qdes_violation_joint_count.sum().item() == 0
+    assert action.processed_actions[:, 0].tolist() == pytest.approx([-1.0, 1.0])
+    assert action.nominal_projected_qdes[:, 0].tolist() == pytest.approx(
+        [-1.0, 1.0]
+    )
+    assert torch.all(torch.isfinite(action.processed_actions))
+    _finish_guarded_policy_step(action, asset)
+    assert terminations_mod.pre_clamp_qdes_forbidden_zone(
+        env,
+        "joint_pos",
+        "joint_pos_limits",
+        0.0,
+        0.02,
+    ).tolist() == [False, False]
+
+    values = hope_rewards_mod.qdes_projection_penalty(
+        env, action_name="joint_pos", shape_rate=4.0
+    )
+    assert values[0].item() > 0.0
+    assert values[1].item() > values[0].item()
+    expected = 1.0 - torch.exp(torch.tensor([-0.4, -2.0]))
+    assert values.tolist() == pytest.approx(expected.tolist())
+
+    counters = getattr(
+        env, hope_rewards_mod._QDES_PROJECTION_ACTIVATION_ATTR
+    )
+    assert counters["observed_sample_count"].item() == 2
+    assert counters["projection_sample_count"].item() == 2
+    assert counters["nonfinite_sample_count"].item() == 0
+    assert counters["projection_joint_count"][0].item() == 2
+    assert counters["projection_joint_count"][1:].sum().item() == 0
+    assert counters["lower_projection_joint_count"][0].item() == 1
+    assert counters["upper_projection_joint_count"][0].item() == 1
+    assert counters["normalized_projection_distance_sum"][0].item() == pytest.approx(
+        0.6
+    )
+    assert counters["normalized_projection_distance_max"][0].item() == pytest.approx(
+        0.5
+    )
+    assert counters["max_normalized_projection_distance"].item() == pytest.approx(
+        0.5
+    )
+
+    # The existing once-per-update q_des ledger consumer also exports scalar per-joint side/count,
+    # mean and max telemetry, so the runner need not learn a second logging protocol.
+    hope_rewards_mod._soft_limit_barrier_v2_counter_state(
+        env,
+        hope_rewards_mod._QDES_LIMIT_BARRIER_V2_ACTIVATION_ATTR,
+        values,
+    )
+    hope_rewards_mod._soft_limit_barrier_v2_counter_state(
+        env,
+        hope_rewards_mod._ACTUAL_LIMIT_BARRIER_V2_ACTIVATION_ATTR,
+        values,
+    )
+    snapshot = hope_rewards_mod.consume_qdes_limit_barrier_activation_counters(
+        env
+    )
+    assert snapshot["projection_joint_00_trigger_count"].item() == 2
+    assert snapshot[
+        "projection_joint_00_saturation_env_step_count"
+    ].item() == 2
+    assert snapshot[
+        "projection_joint_00_saturation_env_step_ratio"
+    ].item() == pytest.approx(1.0)
+    assert snapshot[
+        "projection_joint_00_lower_saturation_env_step_count"
+    ].item() == 1
+    assert snapshot[
+        "projection_joint_00_upper_saturation_env_step_count"
+    ].item() == 1
+    assert snapshot[
+        "projection_joint_00_mean_normalized_excess"
+    ].item() == pytest.approx(0.3)
+    assert snapshot[
+        "projection_joint_00_max_normalized_excess"
+    ].item() == pytest.approx(0.5)
+    assert snapshot[
+        "projection_mean_normalized_projection_distance"
+    ].item() == pytest.approx(0.3)
+    assert snapshot["projection_saturation_sample_step_ratio"].item() == pytest.approx(
+        1.0
+    )
+
+
+def test_action_ball_projection_keeps_nonfinite_and_physical_events_terminal():
+    action, env, asset = _action_and_env(
+        num_envs=3,
+        joint_count=2,
+        guard=True,
+        guard_margin_fraction=0.02,
+        project_finite_qdes=True,
+    )
+    asset.data.joint_pos[:, 0] = torch.tensor([0.0, 0.95, 1.16])
+    asset.data.joint_vel[:, 0] = torch.tensor([0.0, 3.0, 0.0])
+    proposals = torch.zeros(3, 2)
+    proposals[0, 0] = float("nan")
+    action.process_actions(proposals)
+    _finish_guarded_policy_step(action, asset)
+
+    # env0 is a non-finite actor output; env1 predicts a ballistic hard-inner crossing; env2 is
+    # already inside the two-percent physical forbidden band.  Projection mode relaxes none of
+    # these plant/non-finite events.
+    assert action.physical_hard_safety_latch.tolist() == [False, True, True]
+    assert torch.all(torch.isfinite(action.processed_actions))
+    assert terminations_mod.pre_clamp_qdes_forbidden_zone(
+        env,
+        "joint_pos",
+        "joint_pos_limits",
+        0.0,
+        0.02,
+    ).tolist() == [True, True, True]
+    asset_cfg = types.SimpleNamespace(name="robot", joint_ids=slice(None))
+    assert terminations_mod.actual_joint_position_forbidden_zone(
+        env,
+        asset_cfg,
+        "joint_pos_limits",
+        0.0,
+        0.02,
+    ).tolist() == [False, False, True]
+
+
+def test_action_ball_nonfinite_request_has_finite_projection_reward_before_reset():
+    action, env, asset = _action_and_env(
+        num_envs=1,
+        joint_count=31,
+        guard=True,
+        guard_margin_fraction=0.02,
+        project_finite_qdes=True,
+    )
+    asset.data.joint_pos.zero_()
+    asset.data.joint_vel.zero_()
+    proposal = torch.zeros(1, 31)
+    proposal[0, 0] = float("nan")
+    action.process_actions(proposal)
+
+    assert torch.all(torch.isfinite(action.processed_actions))
+    assert torch.all(torch.isfinite(action.nominal_projected_qdes))
+    value = hope_rewards_mod.qdes_projection_penalty(
+        env, action_name="joint_pos", shape_rate=4.0
+    )
+    assert torch.isfinite(value).all()
+    assert value.item() == pytest.approx(1.0 - math.exp(-4.0))
+    counters = getattr(
+        env, hope_rewards_mod._QDES_PROJECTION_ACTIVATION_ATTR
+    )
+    assert counters["nonfinite_sample_count"].item() == 1
+    assert counters["projection_joint_count"][0].item() == 1
+    assert counters["projection_joint_count"][1:].sum().item() == 0
 
 
 def test_pre_apply_guard_soft_only_qdes_intrusion_clamps_but_does_not_terminate():
@@ -1139,13 +1321,62 @@ def test_learn_consumes_joint_safety_before_command_rollout_callback(
             pass
 
         def prepare_update(self, step, **_kwargs):
+            activation = {
+                "recipe_sha256": "a" * 64,
+                "step_dt_s": 0.02,
+                "num_envs": 2,
+                "environment_step_count": 2,
+                "ppo_update": step,
+            }
             return {
-                "activation": {"ppo_update": step},
-                "per_action": None,
-                "safety": None,
+                "ppo_update": step,
+                "activation": activation,
+                "per_action": {},
+                "safety": {},
+                "action_ball_conservation": {
+                    "event": "hope_reward_episode_segmented_closure_update",
+                    "schema_version": 1,
+                    "status": "PASS",
+                    "evidence_source": "live_isaac_reward_manager",
+                    "capture_mode": "reward_manager_reset_pre_clear_hook",
+                    "task_kind": "action_ball",
+                    "ppo_update": step,
+                    "recipe_sha256": activation["recipe_sha256"],
+                    "step_dt_s": activation["step_dt_s"],
+                    "num_envs": activation["num_envs"],
+                    "segment_key_fields": ["env_id", "reset_generation"],
+                    "all_reward_manager_term_names": ["death_penalty"],
+                    "completed_episode_count": 0,
+                    "completed_episode_segments": [],
+                    "reset_batches": [],
+                    "open_episode_count": 2,
+                    "open_episode_segments": [
+                        {"env_id": 0},
+                        {"env_id": 1},
+                    ],
+                    "dashboard_normalization": {
+                        "status": "NOT_OBSERVED_NO_RESET",
+                        "reset_batch_count": 0,
+                    },
+                    "e2_eligible": False,
+                    "checks": {
+                        "status": "PASS",
+                        "environment_step_count": activation[
+                            "environment_step_count"
+                        ],
+                        "all_step_reward_buf_equals_all_term_sums": "PASS",
+                        "all_episode_sums_equal_captured_term_sums": "PASS",
+                        "all_reset_episode_sums_cleared": "PASS",
+                        "exact_environment_step_coverage": "PASS",
+                    },
+                },
+                "status": "frozen_validated_before_optimizer",
             }
 
         def acknowledge_update(self, _prepared):
+            pass
+
+        def close(self):
             pass
 
     effective_reward_module.EffectiveRewardActivationLedger = FakeRewardLedger
@@ -1180,6 +1411,10 @@ def test_learn_consumes_joint_safety_before_command_rollout_callback(
     runner._effective_reward_activation_task_kind = lambda: "action_ball"
     runner._action_ball_resume_reset_pending = False
     runner._rollout_update_wrapper_active = False
+    # This focused test owns only the joint-safety/Reward/curriculum ordering.
+    # Frozen evaluation has an independent owner-contract suite and is disabled
+    # here so the deliberately tiny fake CommandManager need not impersonate it.
+    runner._service_action_ball_frozen_evaluation = lambda _step: False
     original_prepare = runner._prepare_joint_safety_update
     original_commit_marker = runner._persist_joint_safety_optimizer_commit
     original_directory_fsync = runner._joint_safety_fsync_directory

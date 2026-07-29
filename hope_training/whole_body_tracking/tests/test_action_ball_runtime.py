@@ -887,6 +887,33 @@ class MutatingHighwaterSolver(Solver):
         return self.highwater_by_uid.get(action_uid, (-1, 0))
 
 
+class TranscriptProbeSolver(Solver):
+    """Count snapshots and optionally corrupt a mid-batch transcript read."""
+
+    def __init__(self):
+        super().__init__()
+        self.state_calls = 0
+        self.transcript_calls = 0
+        self.transcript_fault_at = None
+        self.raise_after_transcript_mutation = False
+
+    def state_dict(self):
+        self.state_calls += 1
+        return super().state_dict()
+
+    def reset_state_calls(self):
+        self.state_calls = 0
+
+    def task_transcript_for_birth(self, birth_sha256):
+        result = super().task_transcript_for_birth(birth_sha256)
+        self.transcript_calls += 1
+        if self.transcript_calls == self.transcript_fault_at:
+            self.sequence += 1
+            if self.raise_after_transcript_mutation:
+                raise RuntimeError("mid-batch transcript read failed")
+        return result
+
+
 class CrossActionMutationSolver(Solver):
     def __init__(self, untouched_uid):
         super().__init__()
@@ -1060,6 +1087,25 @@ def _reserve_claim(broker, *, env_id, generation=1, slot=0):
         action_uid=broker.ordered_action_uids[slot],
         action_slot=slot,
     )
+
+
+def _formal_pool_batch(count, solver=None):
+    broker, _provider = _broker(1)
+    births = tuple(
+        _reserve(broker, env_id=env_id) for env_id in range(count)
+    )
+    for birth in births:
+        _commit(broker, birth)
+    broker.consume_many_true_reset(
+        tuple(_claim(birth) for birth in births)
+    )
+    pool = R.LazyActionTaskPool(
+        _bindings(1), _pins(), "no_move", refill_size=1
+    )
+    bound_solver = TranscriptProbeSolver() if solver is None else solver
+    pool.bind_solver(bound_solver)
+    pool.bind_birth_authority(broker)
+    return pool, bound_solver, births
 
 
 def _integrity(payload):
@@ -2389,6 +2435,87 @@ def test_request_many_uses_one_vectorized_callback_for_n93_births():
         sorted(birth.action_uid for birth in births)
     )
     assert all(task.swing_generation == 0 for task in tasks)
+
+
+def test_formal_batch_solver_snapshots_do_not_scale_with_birth_count():
+    request_state_calls = []
+    retire_state_calls = []
+    for birth_count in (1, 8, 32):
+        pool, solver, births = _formal_pool_batch(birth_count)
+        solver.reset_state_calls()
+        tasks = pool.request_many(
+            tuple(
+                R.ActionTaskIssueRequest(birth, 0)
+                for birth in births
+            )
+        )
+        assert len(tasks) == birth_count
+        request_state_calls.append(solver.state_calls)
+
+        solver.reset_state_calls()
+        assert pool.retire_many(births) == (0,) * birth_count
+        retire_state_calls.append(solver.state_calls)
+
+    assert len(set(request_state_calls)) == 1
+    assert request_state_calls[0] > 0
+    assert retire_state_calls == [2, 2, 2]
+
+
+@pytest.mark.parametrize("raise_after_mutation", [False, True])
+def test_request_many_rolls_back_mid_batch_transcript_fault(
+    raise_after_mutation,
+):
+    pool, solver, births = _formal_pool_batch(4)
+    before_solver = deepcopy(solver.state_dict())
+    solver.transcript_fault_at = 2
+    solver.raise_after_transcript_mutation = raise_after_mutation
+    expected_error = (
+        RuntimeError
+        if raise_after_mutation
+        else R.ActionBallContractError
+    )
+
+    with pytest.raises(expected_error):
+        pool.request_many(
+            tuple(
+                R.ActionTaskIssueRequest(birth, 0)
+                for birth in births
+            )
+        )
+
+    solver.transcript_fault_at = None
+    assert solver.state_dict() == before_solver
+    assert pool.materialized_action_uids == ()
+    assert pool.state_dict()["actions"] == []
+
+
+@pytest.mark.parametrize("raise_after_mutation", [False, True])
+def test_retire_many_rolls_back_mid_batch_transcript_fault(
+    raise_after_mutation,
+):
+    pool, solver, births = _formal_pool_batch(4)
+    pool.request_many(
+        tuple(
+            R.ActionTaskIssueRequest(birth, 0)
+            for birth in births
+        )
+    )
+    before_pool = deepcopy(pool.state_dict())
+    before_solver = deepcopy(solver.state_dict())
+    solver.transcript_fault_at = solver.transcript_calls + 2
+    solver.raise_after_transcript_mutation = raise_after_mutation
+    expected_error = (
+        RuntimeError
+        if raise_after_mutation
+        else R.ActionBallContractError
+    )
+
+    with pytest.raises(expected_error):
+        pool.retire_many(births)
+
+    solver.transcript_fault_at = None
+    assert solver.state_dict() == before_solver
+    assert pool.state_dict() == before_pool
 
 
 def test_diagnostic_broker_skips_formal_state_and_replay_hooks():

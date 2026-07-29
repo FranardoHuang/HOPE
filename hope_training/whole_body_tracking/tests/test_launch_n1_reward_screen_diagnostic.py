@@ -435,8 +435,11 @@ def test_plan_binds_exact_three_reward_profiles_and_no_override_seam(
     assert payload["formal_evidence_prohibited"] is True
     assert payload["curriculum_promotion_prohibited"] is True
     assert "task.racket.action_ball_diagnostic_unauthorized=true" in argv
+    assert "task.racket.reference_guard_mode=metrics_only" in argv
     assert "task.actor_obs_contract=action_ball_n1" in argv
-    assert "algo.policy.init_noise_std=0.15" in argv
+    assert "algo.policy.init_noise_std=0.02" in argv
+    assert "action_ball_shared_ready_bootstrap=true" in argv
+    assert "algo.policy.init_noise_std=0.15" not in argv
     assert "algo.policy.init_noise_std=1.0" not in argv
     assert "task.rewards.full_body_mimic=false" in argv
     assert f"+task.rewards.motion_scale={expected[3]}" in argv

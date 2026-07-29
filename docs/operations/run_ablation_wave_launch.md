@@ -25,6 +25,81 @@
    - **绝不抢占在跑的格**。快照会过期，每次发射前重查。
    - ⚠ 旧的"每卡零 compute 进程"口径已被推翻——它导致每卡第一格上卡后其余三格被拒。
 
+### 未变配方的诊断续跑快线
+
+下面六项逐字不变时，fresh diagnostic/canary 续跑不重复做 repin、动作 bundle 物化或 host
+大联合回归：
+
+1. exact source commit；
+2. launcher 路径与 bytes SHA；
+3. ordered action bundle 路径与 bytes SHA；
+4. effective Reward recipe SHA；
+5. PPO/policy contract SHA；
+6. diagnostic/formal 与 fixed/dynamic curriculum 模式。
+
+续跑只做四件事：回读 GPU owner/UUID、创建 fresh no-clobber namespace、渲染并保存 canonical
+plan/argv、用 `/workspace/bin/kit_boot_lock.sh` 串行启动。任一身份字段改变，只重做受影响的
+物化和专项检查，不把无关 host 套件重新跑一遍。
+
+这条快线只购买“能否优化并产出 policy”的诊断证据；它不能把
+`training_authorized=false`、关闭 formal evidence fence 或冻结课程的运行写成正式 Gate/curriculum
+晋级证据。NaN/Inf、真实 hard limit、table hit、fall 和动作/Reward/PPO 身份漂移仍是硬停止条件，
+不得借快线关闭。
+
+小时巡检不能只看一次 NVML 利用率或 `run.log` 修改时间。对每个绑定 namespace，必须从所有新增的
+完整 RSL-RL iteration block 记录：
+
+- update、collection、learning 墙钟；
+- [`collection_vector_step_wall_s`](../DEFINITIONS.md#collection-vector-step-wall-s)：
+  `collection_wall_s / num_steps_per_env`；
+- [`amortized_e2e_vector_step_wall_s`](../DEFINITIONS.md#amortized-e2e-vector-step-wall-s)：
+  `iteration_wall_s / num_steps_per_env`；
+- [`collection_environment_step_us`](../DEFINITIONS.md#collection-environment-step-us)：
+  `collection_wall_s × 10^6 / (num_envs × num_steps_per_env)`；
+- [`collection_environment_steps_per_s`](../DEFINITIONS.md#collection-environment-steps-per-s)：
+  `(num_envs × num_steps_per_env) / collection_wall_s`；
+- terminal、qdes/actual hard-limit、reference、table/fall 和 strike opportunity。
+
+`num_steps_per_env` 必须从该 run 的 contract/agent receipt 读取，不能在巡检脚本里静默假设 24。
+reason mask 可重叠，禁止相加冒充 terminal。已绑定 namespace 没有匹配活进程时必须报
+`MISSING/EXITED`，不能因为 `ps` 没列出就从报告中消失。当前任务只允许显式 Pod1 target；
+no-argument 巡检不得自动读取过期 wave 文件或连接 Pod2。
+
+同卡第二条 operator-direct 诊断只用于 breadth，不是 canonical/formal 发射。它仍须保存 exact
+plan/argv/identity、fresh no-clobber namespace，并用 Kit boot lock 串行启动；一旦在 scene
+construction 或 PhysX start 停止前进，保留日志后按 exact PGID 关闭，不循环重试。`4ff48b21`
+的 task-strong direct 就在 PhysX start 活锁，故未算作活跃 Reward 臂。
+
+### ActionBall finite q_des / reference-reset 切换
+
+本段是 `curr-launch-fix` 功能分支候选；`origin/main/docs/NOW.md` 仍是运行态权威。旧 run 使用
+“finite q_des 越包络即 reset”合同，不能 exact resume 成新合同。发射前必须在 effective Reward、
+policy/runtime hard contract 和 canonical argv 中同时回读：
+
+1. [`finite q_des execution projection`](../DEFINITIONS.md#finite-qdes-execution-projection)：
+   包络内 `executed_qdes == raw_qdes`，有限越界时执行最近合法值，raw action/log-prob 不改；
+2. [`qdes_projection_penalty`](../DEFINITIONS.md#qdes-projection-penalty)读取投影**前**的归一化超出量，
+   首发 weight=`-5`；`-20` 只允许命名清楚的消融臂；
+3. [`reference_guard_mode=metrics_only`](../DEFINITIONS.md#reference-metrics-only)：anchor/body/ee
+   只记 counter，不 reset、不额外给 Reward；
+4. nonfinite raw q_des、实际关节 hard-limit、ballistic/substep crossing、table hit 和 fall 仍各自
+   hard reset，不能被 reference mode 或 projection 开关屏蔽。
+
+每轮同时记录 per-joint projection trigger、正负侧、投影前 mean/max excess 和执行值恰好贴边的
+saturation fraction。触发率下降只能说明候选趋势；冻结 policy、把 projection penalty 置零后复测
+仍低，才说明 policy 自己学会了限位。CaT 连续违规调制和 PPO policy-mean bound loss 会改变训练
+目标/runner，本轮不临时叠加。
+
+性能判断使用健康对照：旧 `6.4 s collection/update` 来自 mean episode length=`1`、
+`98,304 reset/update` 的失败 probe；同代码修正 stand hold 后代表值约 `4.49 s`。旧 v2 也曾把
+早期 `1,690–2,301 ee_body_pos reset/update` 学到后期 `1–7/update`。当前旧语义 ActionBall
+loop/block 约为 `27/48 s per update`，分别由 ee/qdes 主导；finite-qdes 切换对 block 预计省
+`14–17 s/update`，但只有 fresh run 的上面四个 timing 字段能验收该预计。
+
+reference 动作无需因本切换重做：upper/full loop/block 四件老师的 hard/soft/2%-inner crossing
+均为 `0`，block 全片 normalized hard/soft margin `0.115081/0.072312` 不小于 loop。该证据只排除
+“block 老师贴限”根因，不替代 fresh rollout、table/fall 或实际关节安全检查。
+
 ## 冒烟
 
 7. **一格 2-iter smoke**（旧代口径：`4096 env × 24 step × 2 update` full-scene probe，
@@ -33,7 +108,8 @@
    - **通过条件**：`grep -nE 'WARN|Error|Traceback'` 的 WARN 行**全部**进摘要、
      Error/Traceback **零条**；且 `grep -Fc 'q_des CLAMP ACTIVE' > 0`
      （限位剪切 2026-07-06 起默认开，缺这行 = 有人显式关了，只允许出现在老配方复现对照臂上）；
-     且 `mean_episode_length` 不恒为 1（恒为 1 = 出生位对不上，不是"学得慢"）。
+     且 `mean_episode_length` 不恒为 1；若恒为 1，必须按 reason ledger 区分 qdes/reference、
+     actual/nonfinite/table/fall 与出生错位，不能再一律写成出生位问题。
    - 一格通过即可发全矩阵（精简治理，不设多层仪式）；高风险波才逐臂解锁。
 
 ## 发射

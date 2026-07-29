@@ -1965,6 +1965,55 @@
 </details>
 ## 2026-07-29
 
+- `curr-launch-fix` 功能分支完成 ActionBall reset/吞吐复盘，并形成下一 fresh wave 候选；这不改变
+  `origin/main` 的 `docs/NOW.md` 权威状态。旧 v2 也曾在早期由 `ee_body_pos` 产生
+  `1,690–2,301 reset/update`，但后期学到只剩 `1–7/update`，说明“早期 reset 多”不是新现象。
+  被引用的 `6.4 s collection/update` 来自 mean episode length=`1`、恰好
+  `98,304 reset/update` 的失败 probe；同代码修正 stand hold 后代表值为 `4.49 s`，不能把
+  `6.4 s` 当健康基线。当前 ActionBall 稳态快照约为反手拉 `27 s/update`（主要
+  `ee_body_pos`）和反手挡 `48 s/update`（主要有限 `q_des` 请求终止）；取消后者的有限请求
+  reset 预计可省 `14–17 s/update`，仍须 fresh 实测确认。
+  候选语义是[有限 q_des 投影执行](DEFINITIONS.md#finite-qdes-execution-projection) +
+  [投影前超出量惩罚](DEFINITIONS.md#qdes-projection-penalty)，首发 weight=`-5`、`-20` 只消融；
+  reference guard 改为[只记指标](DEFINITIONS.md#reference-metrics-only)，而 nonfinite/实际越限/
+  子步 crossing/table/fall 仍 hard reset。四件老师轨迹的全片 hard/soft/2%-inner crossing 都为
+  `0`；block 的 normalized hard/soft margin（upper `0.115081/0.072312`、full
+  `0.115081/0.072312`）不小于 loop（upper `0.111954/0.068838`、full
+  `0.113493/0.070548`），排除“block 老师贴限”作为两动作 qdes 差 180 倍的根因。小时巡检新增
+  [`collection_vector_step_wall_s`](DEFINITIONS.md#collection-vector-step-wall-s)、
+  [`amortized_e2e_vector_step_wall_s`](DEFINITIONS.md#amortized-e2e-vector-step-wall-s)、
+  [`collection_environment_step_us`](DEFINITIONS.md#collection-environment-step-us) 和
+  [`collection_environment_steps_per_s`](DEFINITIONS.md#collection-environment-steps-per-s)；
+  CaT 连续约束终止与 PPO bound loss 留作后续，不阻塞今晚发射。完整证据见
+  [Reward 因果实验记录](experiments/2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md)。
+- Pod1 已在 exact `4ff48b21` 上保留三条 `4096 env` N=1 upper 长跑：反手拉
+  `current_low`（现行低拍位/拍速/拍面权重）、反手拉 `mimic_x2`（动作模仿两倍）和反手挡
+  `current_low`。每个 PPO update 固定含 24 个
+  [`vector policy steps`](DEFINITIONS.md#vector-policy-step)，即 `98,304`
+  [`environment steps`](DEFINITIONS.md#environment-step-throughput)。11:20 UTC 快照分别为
+  `61.69/149.60/271.99 s per update`，PPO learning 仅约 `0.1 s`，其余几乎全是 collection；
+  第一批五轮的 q_des hard-limit reason 分别为 `148267/148651/221278`，三臂击球机会均为零。
+  11:31 UTC 的最后完整 update 已改善到 `25.38/31.69/136.90 s`，即每个 vector policy step
+  `1.0575/1.3204/5.7042 s`；三者仍无 exact strike，故这只是重置风暴逐步减弱后的吞吐改善，
+  不是动作质量晋级。
+  `mimic_x2` 的三项 raw mimic Reward 已约精确翻倍，但重置行为没有分离，证明该 Reward 不是
+  “假接线”，而是在当前死亡/重置尺度下太小。full 反手拉已越过 Isaac 导入后暴露 solver
+  admission 下界错配，task-strong direct 则在 PhysX start 活锁后按 exact PGID 留证停止；均未
+  伪装成有效 run。逐 run 身份、失败和 step 时序见
+  [`n1_live_wave_4ff48b21.v1.json`](../configs/n1_contact_20260729/n1_live_wave_4ff48b21.v1.json)。
+  下一 fresh wave 改为显式 opt-in 的 shared-ready actor 初始化（末层零权重、ready bias、
+  `init_noise_std=0.02`），仍保留软/硬限位与 table/fall 保护；N=73 不得被该常量 bias 路径误伤。
+- N=1 fresh `_r8` 已把“先产 policy”与 formal 证明层拆开：exact `e469d85b` 的
+  `training_authorized=false` diagnostic 保留实际 Reward、q_des clamp、软/硬限位惩罚与
+  hard-limit/table/fall termination，但冻结 level-0 curriculum 并跳过 formal Reward/joint
+  receipt 和 rollout-end advancement。Pod1 反手拉与 Pod2 反手挡均自然完成 `1 env × 2 update`、
+  零 Traceback、`model_0/1` finite，现已各启动 1024-env upper `current_low` canary；x2/x4
+  Reward 臂按同 Pod 首 iteration 后串行 boot。Pod1 smoke 的 episode length 约 1，24/24 policy
+  steps 为 `joint_qdes_forbidden`，因此前 20–50 updates 重点看是否学会脱离硬限位请求。exact
+  六臂历史尝试已由当前
+  [`4ff48b21` 运行记录](../configs/n1_contact_20260729/n1_live_wave_4ff48b21.v1.json)
+  接管；复跑规则见[消融发射工序](operations/run_ablation_wave_launch.md#未变配方的诊断续跑快线)。
+  这些运行不主张 formal curriculum/Gate 证据。
 - N=1 `_r4` 两动作已越过 quaternion receipt seam，但固定 mixture 第 4 个 birth 进入 frontier
   时，level-0 `current width == initial center width` 被旧 sampler 误判成无合法 arm；两条仍是
   `0 iteration / 0 checkpoint`。现改为优先 promoted frontier、否则采当前非零 support 的 outer

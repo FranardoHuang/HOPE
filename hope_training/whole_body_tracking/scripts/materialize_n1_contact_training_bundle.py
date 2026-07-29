@@ -25,8 +25,10 @@ landing, post-bounce, opponent-baseline, deployment, or hardware claim.
 
 All output filenames are content addressed.  Every output is preflighted and
 opened with exclusive creation; reruns never overwrite an existing byte.
-The module depends only on the Python standard library plus NumPy and never
-imports Torch, Isaac, or MuJoCo.
+Upper-only materialization depends only on the Python standard library plus
+NumPy.  Full-body materialization additionally imports Torch lazily for the
+same fixed-action solver preflight used by training; it never imports Isaac or
+MuJoCo.
 """
 
 from __future__ import annotations
@@ -43,6 +45,7 @@ import re
 import stat
 import subprocess
 import sys
+import types
 from typing import Any, Mapping, Sequence
 
 import numpy as np
@@ -69,6 +72,14 @@ REFERENCE_SPEED_ABS_TOLERANCE_MPS = 1.0e-6
 ROOT_STATIONARY_TOLERANCE_M = 1.0e-6
 ROOT_YAW_TOLERANCE_RAD = 1.0e-6
 WINDOW_HALF_FRAMES = 2
+FULL_PREFLIGHT_SEED = 0
+FULL_PREFLIGHT_PROPOSAL_COUNT = 512
+FULL_PREFLIGHT_CONTACT_TIME_STEP_S = 0.02
+FULL_PREFLIGHT_DIAGNOSTIC_MIN_ADMIT_RATE = 0.50
+FULL_PREFLIGHT_REFILL_ROWS = 64
+FULL_PREFLIGHT_ENV_COUNT = 4096
+FULL_PREFLIGHT_DEFAULT_EPISODE_LENGTH_S = 10.0
+FULL_PREFLIGHT_DEFAULT_ATTEMPT_CLOSE_MARGIN_S = 0.02
 SHA256_PATTERN = re.compile(r"^[0-9a-f]{64}$")
 SLUG_PATTERN = re.compile(r"^[a-z0-9][a-z0-9_-]*$")
 
@@ -288,6 +299,53 @@ def _load_module(name: str, path: Path) -> Any:
         sys.modules.pop(unique, None)
         raise
     return module
+
+
+def _load_preflight_mdp_package(repo_root: Path) -> dict[str, Any]:
+    """Load the production solver graph without importing the Isaac package."""
+
+    mdp_dir = repo_root / MDP_RELATIVE_DIR
+    package_name = (
+        "_n1_materialize_preflight_"
+        + _sha256_bytes(str(repo_root).encode("utf-8"))[:16]
+    )
+    package = sys.modules.get(package_name)
+    if package is None:
+        package = types.ModuleType(package_name)
+        package.__path__ = [str(mdp_dir)]
+        package.__package__ = package_name
+        sys.modules[package_name] = package
+    modules: dict[str, Any] = {}
+    for name in (
+        "counter_rally",
+        "action_ball_curriculum",
+        "action_ball_sampling",
+        "action_ball_manifest",
+        "action_ball_profile_adapter",
+        "racket_contact_geometry",
+        "virtual_ball",
+        "strike_spec_torch",
+        "stroke_adapt_torch",
+        "continuous_questions",
+    ):
+        full_name = f"{package_name}.{name}"
+        module = sys.modules.get(full_name)
+        if module is None:
+            path = mdp_dir / f"{name}.py"
+            spec = importlib.util.spec_from_file_location(full_name, path)
+            if spec is None or spec.loader is None:
+                raise N1ContactBundleError(
+                    f"cannot load full-solver preflight module {path}"
+                )
+            module = importlib.util.module_from_spec(spec)
+            sys.modules[full_name] = module
+            try:
+                spec.loader.exec_module(module)
+            except Exception:
+                sys.modules.pop(full_name, None)
+                raise
+        modules[name] = module
+    return modules
 
 
 def _require_git_tracked(root: Path, relative: str) -> None:
@@ -799,6 +857,12 @@ def _motion_state(
         "face_center_w_m": face_center_w[contact_frame],
         "face_center_b_yaw_m": face_center_b[contact_frame],
         "reference_site_speed_mps": reference_site_speed,
+        "reference_racket_quat_wxyz": quaternions[
+            contact_frame, wrist_index
+        ],
+        "reference_racket_angular_velocity_w_radps": angular_velocity[
+            contact_frame, wrist_index
+        ],
         "face_velocity_hat_b": face_velocity_hat_b,
         "face_speed_mps": face_speed,
         "face_direction_cone_deg": direction_cone,
@@ -952,6 +1016,519 @@ def _retime_ball_profile(
     return retimed
 
 
+def _float32_ceil(value: float) -> float:
+    """Return the smallest positive float32 that is not below ``value``."""
+
+    finite = _require_finite(value, label="float32 ceiling input")
+    if finite <= 0.0:
+        raise N1ContactBundleError("float32 ceiling input must be positive")
+    rounded = np.float32(finite)
+    if float(rounded) < finite:
+        rounded = np.nextafter(
+            rounded, np.float32(np.inf), dtype=np.float32
+        )
+    return float(rounded)
+
+
+def _full_official_site_speed_floor(
+    *,
+    action: Mapping[str, Any],
+    state: Mapping[str, Any],
+    geometry: Any,
+) -> tuple[float, dict[str, object]]:
+    """Map a site-rate lower bound to a safe face-centre speed floor."""
+
+    rate_min = float(action["teacher_rate_min"])
+    rate_max = float(action["teacher_rate_max"])
+    nominal = float(state["face_speed_mps"])
+    reference_site_speed = float(state["reference_site_speed_mps"])
+    reference_quat = np.asarray(
+        state["reference_racket_quat_wxyz"], dtype=np.float64
+    )
+    reference_omega = np.asarray(
+        state["reference_racket_angular_velocity_w_radps"],
+        dtype=np.float64,
+    )
+    face_offset_local = np.asarray(
+        geometry.face_center_from_site_local(
+            int(action["mount_normal_sign"])
+        ),
+        dtype=np.float64,
+    )
+    face_offset_w = _quat_to_rotation(reference_quat) @ face_offset_local
+    angular_point_speed = float(
+        np.linalg.norm(np.cross(reference_omega, face_offset_w))
+    )
+    # Exact geometry obeys rate*V = ||s*u-rate*a||.  The reverse triangle
+    # inequality gives rate >= s/(V+||a||) for every solved face orientation.
+    analytical = rate_min * (
+        reference_site_speed + angular_point_speed
+    )
+    selected = _float32_ceil(analytical)
+    maximum = nominal * rate_max
+    if selected > maximum:
+        raise N1ContactBundleError(
+            "official-site teacher-rate lower bound requires a face-centre "
+            "speed above the prototype maximum"
+        )
+    legacy = nominal * rate_min
+    return selected, {
+        "schema_version": 1,
+        "kind": "official_site_rate_to_face_speed_lower_bound_v1",
+        "formula": (
+            "speed_min=ceil_float32(teacher_rate_min*"
+            "(reference_site_speed+norm(reference_omega_cross_"
+            "reference_face_offset)))"
+        ),
+        "teacher_rate_min": rate_min,
+        "teacher_rate_max": rate_max,
+        "reference_site_speed_mps": reference_site_speed,
+        "reference_angular_face_point_speed_mps": angular_point_speed,
+        "face_speed_nominal_mps": nominal,
+        "legacy_face_scaled_floor_mps": legacy,
+        "analytical_floor_mps": analytical,
+        "selected_float32_floor_mps": selected,
+        "selected_floor_to_nominal_ratio": selected / nominal,
+        "added_mapping_margin_mps": selected - legacy,
+    }
+
+
+def _yaw_quaternion(yaw_rad: float) -> tuple[float, float, float, float]:
+    half = 0.5 * float(yaw_rad)
+    return (math.cos(half), 0.0, 0.0, math.sin(half))
+
+
+def _full_solver_admission_preflight(
+    *,
+    repo_root: Path,
+    manifest_mapping: Mapping[str, Any],
+    profile_pins_document: Mapping[str, Any],
+    state: Mapping[str, Any],
+    face_speed_min_mps: float,
+    speed_floor_proof: Mapping[str, object],
+    episode_length_s: float,
+    attempt_close_margin_s: float,
+) -> dict[str, object]:
+    """Run fixed seed/512 ordinary-solver plus exact-geometry admission."""
+
+    try:
+        import torch
+    except ImportError as error:
+        raise N1ContactBundleError(
+            "full-scope exact solver preflight requires Torch"
+        ) from error
+    modules = _load_preflight_mdp_package(repo_root)
+    manifest_module = modules["action_ball_manifest"]
+    adapter_module = modules["action_ball_profile_adapter"]
+    sampling_module = modules["action_ball_sampling"]
+    counter_module = modules["counter_rally"]
+    continuous = modules["continuous_questions"]
+    contact_geometry = modules["racket_contact_geometry"]
+    virtual_ball = modules["virtual_ball"]
+
+    validated = manifest_module.ActionBallManifest.from_mapping(
+        dict(manifest_mapping)
+    )
+    adapted = adapter_module.adapt_action_ball_manifest(
+        validated,
+        ready_root_z_by_slot=(
+            float(np.asarray(state["ready_root_w_m"])[2]),
+        ),
+    )
+    profile = adapted.profiles[0]
+    episode_length = _require_finite(
+        episode_length_s, label="full preflight episode length"
+    )
+    close_margin = _require_finite(
+        attempt_close_margin_s,
+        label="full preflight attempt close margin",
+    )
+    if episode_length <= 0.0 or close_margin <= 0.0:
+        raise N1ContactBundleError(
+            "full preflight episode length/close margin must be positive"
+        )
+    action_uid = int(profile.action_uid)
+    base_yaw = float(state["ready_yaw_rad"])
+    levels = sampling_module.DomainLevels()
+    sampler = sampling_module.ActionBallSampler(
+        adapted.profiles,
+        seed=FULL_PREFLIGHT_SEED,
+        sampling_mixture=sampling_module.SamplingMixture(),
+        contact_time_step_s=FULL_PREFLIGHT_CONTACT_TIME_STEP_S,
+        diagnostic_unauthorized=True,
+    )
+    births = tuple(
+        sampler.reserve_birth(
+            action_uid=action_uid,
+            domain_epoch=0,
+            levels=levels,
+            base_yaw_rad=base_yaw,
+        )
+        for _ in range(FULL_PREFLIGHT_PROPOSAL_COUNT)
+    )
+    samples = tuple(
+        sampler.sample(
+            birth=birth,
+            action_uid=action_uid,
+            domain_epoch=0,
+            levels=levels,
+            base_yaw_rad=base_yaw,
+        )
+        for birth in births
+    )
+    proposal_corpus_sha256 = _canonical_sha256(
+        [sample.sample_id for sample in samples]
+    )
+
+    rejection_reasons: dict[str, int] = {}
+    dispositions = [False] * FULL_PREFLIGHT_PROPOSAL_COUNT
+
+    def reject(reason: str) -> None:
+        rejection_reasons[reason] = (
+            rejection_reasons.get(reason, 0) + 1
+        )
+
+    if validated.counter_rally_objective is None:
+        raise N1ContactBundleError(
+            "full-solver preflight requires counter-rally objective"
+        )
+    # action_ball_manifest deliberately loads its stdlib objective under a
+    # private top-level name.  Reconstruct the byte-identical profile with
+    # this synthetic package's class before calling its strict isinstance
+    # precheck.
+    objective = counter_module.CounterRallyObjectiveProfile.from_mapping(
+        manifest_mapping["counter_rally_objective"]
+    )
+    eligible_samples = []
+    eligible_indices = []
+    for index, sample in enumerate(samples):
+        precheck = counter_module.precheck_counter_rally_fixed_solver_proposal(
+            frozen_action_uid=action_uid,
+            solver_action_uid=action_uid,
+            expected_objective_profile_sha256=objective.sha256,
+            base_goal_env_xy_m=sample.base_goal_w_m[:2],
+            base_yaw_env_rad=base_yaw,
+            contact_offset_b_yaw_m=(
+                sample.contact_offset_from_base_goal_b_yaw_m
+            ),
+            incoming_direction_b_yaw=(
+                sample.incoming_direction_b_yaw[:2]
+            ),
+            incoming_ball_speed_at_contact_mps=float(
+                sample.incoming_speed_mps
+            ),
+            landing_depth_env_x_m=float(
+                sample.landing_aim_w_xy_m[0]
+            ),
+            profile=objective,
+        )
+        if not precheck.eligible_for_solver:
+            reject(str(precheck.rejection_reason))
+            continue
+        eligible_samples.append(sample)
+        eligible_indices.append(index)
+    if not eligible_samples:
+        raise N1ContactBundleError(
+            "full-solver preflight counter-rally rejected all proposals"
+        )
+
+    pins_cfg = profile_pins_document["cfg"]
+    planes = profile_pins_document["planes"]
+    venue_source = profile_pins_document["physics_payload"][
+        "venue_source"
+    ]
+    venue_path, _ = _resolve_repo_file(
+        repo_root,
+        venue_source["path"],
+        label="full-solver preflight venue",
+    )
+    venue_params = virtual_ball.load_venue_params(str(venue_path))
+    solver_cfg = continuous.ContinuousQuestionCfg(
+        fixed_direction=True,
+        n_iters=int(pins_cfg["cq_n_iters"]),
+        tol_m=float(pins_cfg["cq_tol_m"]),
+        speed_budget=float(pins_cfg["cq_speed_budget"]),
+    )
+    dtype = torch.float32
+    count = len(eligible_samples)
+    action = manifest_mapping["actions"][0]
+    prototype_tensors = types.SimpleNamespace(
+        v_hat_b=torch.tensor(
+            np.asarray(
+                [state["face_velocity_hat_b"]], dtype=np.float32
+            ),
+            dtype=dtype,
+        ),
+        speed_min=torch.tensor([face_speed_min_mps], dtype=dtype),
+        speed_max=torch.tensor(
+            [
+                float(state["face_speed_mps"])
+                * float(profile.teacher_rate_max)
+            ],
+            dtype=dtype,
+        ),
+        face_sign=torch.tensor(
+            [int(action["mount_normal_sign"])], dtype=dtype
+        ),
+    )
+    clip_ids = torch.zeros(count, dtype=torch.long)
+    contact = torch.tensor(
+        [sample.contact_w_m for sample in eligible_samples],
+        dtype=dtype,
+    )
+    incoming = torch.tensor(
+        [
+            sample.incoming_velocity_w_mps
+            for sample in eligible_samples
+        ],
+        dtype=dtype,
+    )
+    spin = torch.tensor(
+        [sample.spin_w_radps for sample in eligible_samples],
+        dtype=dtype,
+    )
+    aim = torch.tensor(
+        [sample.landing_aim_w_xy_m for sample in eligible_samples],
+        dtype=dtype,
+    )
+    reference_quat = np.asarray(
+        state["reference_racket_quat_wxyz"], dtype=np.float64
+    )
+    reference_normal = (
+        _quat_to_rotation(reference_quat)
+        @ np.asarray((0.0, 1.0, 0.0), dtype=np.float64)
+    )
+    ref_normal = torch.tensor(
+        np.repeat(reference_normal[None, :], count, axis=0),
+        dtype=dtype,
+    )
+    base_quat = torch.tensor(
+        [_yaw_quaternion(base_yaw)] * count, dtype=dtype
+    )
+    torch_threads = torch.get_num_threads()
+    solved = continuous.solve_proposals(
+        clip_ids,
+        contact,
+        incoming,
+        spin,
+        aim,
+        ref_normal,
+        protos=prototype_tensors,
+        base_quat=base_quat,
+        prm=venue_params,
+        surface_z=float(planes["surface_z"]),
+        net_x=float(planes["net_x"]),
+        net_top_z=float(planes["net_top_z"]),
+        cfg=solver_cfg,
+        h=float(pins_cfg["vb_rollout_h"]),
+        n_steps=int(pins_cfg["vb_rollout_steps"]),
+    )
+
+    admitted_rows = solved.ok.detach().cpu().tolist()
+    reason_codes = solved.proposals.reason_code.detach().cpu().tolist()
+    velocity_rows = solved.v_racket.detach().cpu().tolist()
+    normal_rows = solved.n_racket.detach().cpu().tolist()
+    reason_schema = tuple(continuous._CONTINUOUS_REASONS)
+    reference_omega = tuple(
+        float(value)
+        for value in state["reference_racket_angular_velocity_w_radps"]
+    )
+    reference_quat_tuple = tuple(
+        float(value) for value in reference_quat
+    )
+    for row, (sample, original_index) in enumerate(
+        zip(eligible_samples, eligible_indices)
+    ):
+        if not bool(admitted_rows[row]):
+            code = int(reason_codes[row])
+            reject(
+                reason_schema[code]
+                if 0 <= code < len(reason_schema)
+                else "ordinary_solver_unknown"
+            )
+            continue
+        birth_x = continuous.ball_birth_x_lower_bound_m(
+            float(sample.contact_w_m[0]),
+            float(sample.incoming_velocity_w_mps[0]),
+            float(sample.time_to_contact_s),
+        )
+        if birth_x < (
+            float(planes["net_x"])
+            + float(continuous.BALL_BIRTH_NET_MARGIN_M)
+        ):
+            reject("ball_birth_not_beyond_net")
+            continue
+        geometry_kwargs = {
+            "ball_contact_w_m": tuple(
+                float(value) for value in sample.contact_w_m
+            ),
+            "racket_face_center_velocity_w_mps": tuple(
+                float(value) for value in velocity_rows[row]
+            ),
+            "solved_raw_a_normal_w": tuple(
+                float(value) for value in normal_rows[row]
+            ),
+            "mount_normal_sign": int(action["mount_normal_sign"]),
+            "reference_racket_quat_wxyz": reference_quat_tuple,
+            "reference_racket_angular_velocity_w_radps": reference_omega,
+            "reference_racket_site_speed_mps": float(
+                profile.reference_racket_site_speed_mps
+            ),
+        }
+        try:
+            geometry_solution = contact_geometry.solve_exact_face_contact(
+                **geometry_kwargs,
+                teacher_rate_min=float(profile.teacher_rate_min),
+                teacher_rate_max=float(profile.teacher_rate_max),
+            )
+        except contact_geometry.ExactFaceContactGeometryError as error:
+            reason = str(error.reason)
+            if reason == "teacher_rate_out_of_bounds":
+                try:
+                    unrestricted = (
+                        contact_geometry.solve_exact_face_contact(
+                            **geometry_kwargs,
+                            teacher_rate_min=1.0e-9,
+                            teacher_rate_max=1.0e9,
+                        )
+                    )
+                except contact_geometry.ExactFaceContactGeometryError:
+                    reason = "teacher_site_rate_geometry_unsolved"
+                else:
+                    reason = (
+                        "teacher_rate_below_min"
+                        if unrestricted.teacher_rate
+                        < float(profile.teacher_rate_min)
+                        else "teacher_rate_above_max"
+                    )
+            reject(reason)
+            continue
+        pre_swing_wait = (
+            float(sample.time_to_contact_s)
+            - float(profile.reference_t_hit_s)
+            / float(geometry_solution.teacher_rate)
+        )
+        if pre_swing_wait < float(profile.reaction_margin_s):
+            reject("pre_swing_wait_below_reaction_margin")
+            continue
+        if pre_swing_wait > 1.0:
+            reject("pre_swing_wait_above_one_second")
+            continue
+        scaled_cycle = (
+            float(profile.reference_t_cycle_s)
+            / float(geometry_solution.teacher_rate)
+        )
+        if (
+            pre_swing_wait + scaled_cycle + close_margin
+            > episode_length + 1.0e-12
+        ):
+            reject("cycle_exceeds_episode_horizon")
+            continue
+        dispositions[original_index] = True
+
+    admitted_count = sum(dispositions)
+    rejected_count = sum(rejection_reasons.values())
+    if admitted_count + rejected_count != FULL_PREFLIGHT_PROPOSAL_COUNT:
+        raise AssertionError(
+            "full-solver preflight does not conserve proposals"
+        )
+    admit_rate = admitted_count / FULL_PREFLIGHT_PROPOSAL_COUNT
+    group_counts = [
+        sum(
+            dispositions[start : start + FULL_PREFLIGHT_REFILL_ROWS]
+        )
+        for start in range(
+            0,
+            FULL_PREFLIGHT_PROPOSAL_COUNT,
+            FULL_PREFLIGHT_REFILL_ROWS,
+        )
+    ]
+    zero_receipt_groups = sum(count == 0 for count in group_counts)
+    diagnostic_pass = (
+        admit_rate >= FULL_PREFLIGHT_DIAGNOSTIC_MIN_ADMIT_RATE
+        and zero_receipt_groups == 0
+    )
+    formal_min_rate = float(
+        validated.curriculum.min_solver_admit_rate
+    )
+    formal_pass = admit_rate >= formal_min_rate
+    zero_receipt_union_bound = min(
+        1.0,
+        FULL_PREFLIGHT_ENV_COUNT
+        * (1.0 - admit_rate) ** FULL_PREFLIGHT_REFILL_ROWS,
+    )
+    result = {
+        "schema_version": 1,
+        "kind": "full_fixed_action_exact_solver_admission_preflight_v1",
+        "execution": {
+            "torch_version": str(torch.__version__),
+            "numpy_version": str(np.__version__),
+            "python_version": sys.version.split()[0],
+            "device": "cpu",
+            "dtype": "float32",
+            "torch_threads": int(torch_threads),
+            "proposal_corpus_sha256": proposal_corpus_sha256,
+            "implementation_source_sha256": {
+                name: _sha256_file(
+                    repo_root / MDP_RELATIVE_DIR / f"{name}.py"
+                )
+                for name in sorted(modules)
+            },
+        },
+        "seed": FULL_PREFLIGHT_SEED,
+        "proposal_count": FULL_PREFLIGHT_PROPOSAL_COUNT,
+        "contact_time_step_s": FULL_PREFLIGHT_CONTACT_TIME_STEP_S,
+        "admitted_count": admitted_count,
+        "admit_rate": admit_rate,
+        "rejected_count": rejected_count,
+        "rejection_reasons": dict(sorted(rejection_reasons.items())),
+        "diagnostic_gate": {
+            "minimum_admit_rate": (
+                FULL_PREFLIGHT_DIAGNOSTIC_MIN_ADMIT_RATE
+            ),
+            "refill_rows": FULL_PREFLIGHT_REFILL_ROWS,
+            "environment_count": FULL_PREFLIGHT_ENV_COUNT,
+            "cross_birth_canary_group_admitted_counts": group_counts,
+            "zero_admission_canary_group_count": zero_receipt_groups,
+            "independent_rate_zero_receipt_union_bound": (
+                zero_receipt_union_bound
+            ),
+            "runtime_per_birth_redraw_replay": False,
+            "claim": (
+                "cross_birth_rate_stability_canary_not_exact_runtime_"
+                "per_birth_redraw_replay"
+            ),
+            "status": "PASS" if diagnostic_pass else "FAIL",
+        },
+        "formal_rate_threshold": {
+            "minimum_admit_rate": formal_min_rate,
+            "threshold_status": (
+                "CANARY_THRESHOLD_PASS"
+                if formal_pass
+                else "CANARY_THRESHOLD_FAIL"
+            ),
+            "formal_evidence_status": "NOT_EVALUATED",
+            "claim": (
+                "fixed_seed_512_canary_only_not_formal_heldout_evidence"
+            ),
+        },
+        "episode_horizon": {
+            "checked": True,
+            "episode_length_s": episode_length,
+            "attempt_close_margin_s": close_margin,
+        },
+        "speed_floor_proof": dict(speed_floor_proof),
+    }
+    if not diagnostic_pass:
+        raise N1ContactBundleError(
+            "full fixed-action exact solver preflight failed diagnostic "
+            f"gate: admitted {admitted_count}/"
+            f"{FULL_PREFLIGHT_PROPOSAL_COUNT}, "
+            f"reasons={rejection_reasons}"
+        )
+    return result
+
+
 def _prototype_document(
     *,
     action_id: str,
@@ -964,12 +1541,26 @@ def _prototype_document(
     geometry_path: Path,
     repo_root: Path,
     scope: str = SCOPE,
+    face_speed_min_mps: float | None = None,
+    full_solver_preflight: Mapping[str, object] | None = None,
 ) -> dict[str, Any]:
     face_speed = float(state["face_speed_mps"])
     teacher_rate_min = float(action["teacher_rate_min"])
     teacher_rate_max = float(action["teacher_rate_max"])
     velocity_hat = np.asarray(state["face_velocity_hat_b"])
     normal = np.asarray(state["physical_normal_b"])
+    speed_min = (
+        face_speed * teacher_rate_min
+        if face_speed_min_mps is None
+        else _require_finite(
+            face_speed_min_mps,
+            label="racket face-centre speed floor",
+        )
+    )
+    if not 0.0 < speed_min <= face_speed * teacher_rate_max:
+        raise N1ContactBundleError(
+            "racket face-centre speed floor lies outside prototype bounds"
+        )
     row = {
         "motion_id": action_id,
         "scope": scope,
@@ -1018,9 +1609,7 @@ def _prototype_document(
         "racket_face_center_speed_max_mps": (
             face_speed * teacher_rate_max
         ),
-        "racket_face_center_speed_min_mps": (
-            face_speed * teacher_rate_min
-        ),
+        "racket_face_center_speed_min_mps": speed_min,
         "racket_face_center_v_star_cap_mps": (
             face_speed * teacher_rate_max
         ),
@@ -1081,6 +1670,10 @@ def _prototype_document(
         "scopes": scopes,
         "derived_sha256": _canonical_sha256(scopes),
     }
+    if full_solver_preflight is not None:
+        document["provenance"]["full_solver_admission_preflight"] = dict(
+            full_solver_preflight
+        )
     return document
 
 
@@ -1222,6 +1815,12 @@ def materialize_n1_contact_bundle(
     require_git_tracked_motion: bool = True,
     scope: str = SCOPE,
     strike_frame: int | None = None,
+    full_episode_length_s: float = (
+        FULL_PREFLIGHT_DEFAULT_EPISODE_LENGTH_S
+    ),
+    full_attempt_close_margin_s: float = (
+        FULL_PREFLIGHT_DEFAULT_ATTEMPT_CLOSE_MARGIN_S
+    ),
 ) -> dict[str, object]:
     """Validate all inputs, then exclusively create one content-addressed bundle."""
 
@@ -1250,6 +1849,15 @@ def materialize_n1_contact_bundle(
         )
     if type(require_git_tracked_motion) is not bool:
         raise TypeError("require_git_tracked_motion must be bool")
+    if scope != SCOPE:
+        _require_finite(
+            full_episode_length_s,
+            label="full_episode_length_s",
+        )
+        _require_finite(
+            full_attempt_close_margin_s,
+            label="full_attempt_close_margin_s",
+        )
     source_path = Path(source_manifest).resolve(strict=True)
     source_relative = _repo_relative(
         source_path, root, label="source manifest"
@@ -1334,6 +1942,11 @@ def materialize_n1_contact_bundle(
         geometry=geometry,
         objective_sha256=objective_sha,
     )
+    profile_pins_document = (
+        _read_json(profile_path, label="profile pins")
+        if scope != SCOPE
+        else None
+    )
     state = _motion_state(
         motion_path=motion_path,
         action=scoped_action,
@@ -1379,6 +1992,48 @@ def materialize_n1_contact_bundle(
         "path": motion_relative,
         "sha256": motion_sha,
     }
+    face_speed_min_mps = None
+    full_solver_preflight = None
+    if scope != SCOPE:
+        face_speed_min_mps, speed_floor_proof = (
+            _full_official_site_speed_floor(
+                action=corrected_action,
+                state=state,
+                geometry=geometry,
+            )
+        )
+        preflight_manifest = deepcopy(source_document)
+        preflight_manifest["manifest_id"] = (
+            f"action_ball_n1_{action_id}_{scope}_preflight_v1"
+        )
+        preflight_manifest["action_order"] = [action_id]
+        preflight_manifest["actions"] = [corrected_action]
+        preflight_manifest["solver_profile_sha256"] = profile_pin[
+            "solver_profile_sha256"
+        ]
+        preflight_manifest["physics_profile_sha256"] = profile_pin[
+            "physics_profile_sha256"
+        ]
+        preflight_manifest["counter_rally_objective"] = objective_mapping
+        preflight_holdout = deepcopy(preflight_manifest.get("holdout"))
+        if type(preflight_holdout) is not dict:
+            raise N1ContactBundleError("source manifest lacks holdout")
+        preflight_holdout["samples_per_action"] = max(
+            HOLDOUT_SAMPLES_PER_ACTION,
+            int(preflight_holdout.get("samples_per_action", 0)),
+        )
+        preflight_manifest["holdout"] = preflight_holdout
+        assert profile_pins_document is not None
+        full_solver_preflight = _full_solver_admission_preflight(
+            repo_root=root,
+            manifest_mapping=preflight_manifest,
+            profile_pins_document=profile_pins_document,
+            state=state,
+            face_speed_min_mps=face_speed_min_mps,
+            speed_floor_proof=speed_floor_proof,
+            episode_length_s=full_episode_length_s,
+            attempt_close_margin_s=full_attempt_close_margin_s,
+        )
     prototype = _prototype_document(
         action_id=action_id,
         action=corrected_action,
@@ -1390,6 +2045,8 @@ def materialize_n1_contact_bundle(
         geometry_path=geometry_path,
         repo_root=root,
         scope=scope,
+        face_speed_min_mps=face_speed_min_mps,
+        full_solver_preflight=full_solver_preflight,
     )
     prototype_bytes = _json_bytes(prototype)
     prototype_sha = _sha256_bytes(prototype_bytes)
@@ -1590,7 +2247,7 @@ def materialize_n1_contact_bundle(
             "outputs are retained for forensic inspection and never "
             "overwritten"
         ) from error
-    return {
+    result = {
         "status": "PASS",
         "action_id": action_id,
         "bundle_path": bundle_relative,
@@ -1606,6 +2263,22 @@ def materialize_n1_contact_bundle(
         "counter_rally_objective_profile_sha256": objective_sha,
         "landing_claim": False,
     }
+    if full_solver_preflight is not None:
+        result["full_solver_admission_preflight"] = {
+            "admitted_count": full_solver_preflight["admitted_count"],
+            "proposal_count": full_solver_preflight["proposal_count"],
+            "admit_rate": full_solver_preflight["admit_rate"],
+            "rejection_reasons": full_solver_preflight[
+                "rejection_reasons"
+            ],
+            "diagnostic_status": full_solver_preflight[
+                "diagnostic_gate"
+            ]["status"],
+            "formal_rate_threshold_status": full_solver_preflight[
+                "formal_rate_threshold"
+            ]["threshold_status"],
+        }
+    return result
 
 
 def _build_parser() -> argparse.ArgumentParser:
@@ -1633,6 +2306,24 @@ def _build_parser() -> argparse.ArgumentParser:
         type=int,
         help=(
             "explicit interior selected-face contact frame for --scope full"
+        ),
+    )
+    parser.add_argument(
+        "--full-episode-length-s",
+        type=float,
+        default=FULL_PREFLIGHT_DEFAULT_EPISODE_LENGTH_S,
+        help=(
+            "full-scope runtime episode horizon bound into the exact "
+            "post-solver timing preflight"
+        ),
+    )
+    parser.add_argument(
+        "--full-attempt-close-margin-s",
+        type=float,
+        default=FULL_PREFLIGHT_DEFAULT_ATTEMPT_CLOSE_MARGIN_S,
+        help=(
+            "full-scope policy-step close margin bound into the exact "
+            "post-solver timing preflight"
         ),
     )
     parser.add_argument(
@@ -1678,6 +2369,10 @@ def main(argv: Sequence[str] | None = None) -> int:
         require_git_tracked_motion=True,
         scope=arguments.scope,
         strike_frame=arguments.strike_frame,
+        full_episode_length_s=arguments.full_episode_length_s,
+        full_attempt_close_margin_s=(
+            arguments.full_attempt_close_margin_s
+        ),
     )
     print(
         json.dumps(

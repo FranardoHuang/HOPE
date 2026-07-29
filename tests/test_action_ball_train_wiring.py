@@ -30,6 +30,42 @@ MDP_PATH = (
     / "tracking"
     / "mdp"
 )
+TABLE_TENNIS_PATH = MDP_PATH.parents[1] / "table_tennis"
+_ACTION_BALL_TABLE_FILTER_PRIMS = (
+    "{ENV_REGEX_NS}/TableObstacle",
+    "{ENV_REGEX_NS}/TableRobotKeepout",
+    "{ENV_REGEX_NS}/TableNet",
+    "{ENV_REGEX_NS}/TableNetPostLeft",
+    "{ENV_REGEX_NS}/TableNetPostRight",
+)
+
+
+def _action_ball_table_contact_rows():
+    cfg_path = (
+        MDP_PATH.parent
+        / "config"
+        / "agibot_a3"
+        / "hope_env_cfg.py"
+    )
+    tree = ast.parse(cfg_path.read_text(encoding="utf-8"))
+    body_names = next(
+        tuple(ast.literal_eval(node.value))
+        for node in tree.body
+        if isinstance(node, ast.Assign)
+        and any(
+            isinstance(target, ast.Name)
+            and target.id == "TABLE_CONTACT_BODY_NAMES"
+            for target in node.targets
+        )
+    )
+    sensor_names = tuple(
+        "racket_table_contact"
+        if body_name == "right_wrist_yaw_Link"
+        else f"robot_table_contact_{index:02d}"
+        for index, body_name in enumerate(body_names)
+    )
+    assert len(body_names) == len(sensor_names) == 32
+    return body_names, sensor_names
 
 
 class NS(types.SimpleNamespace):
@@ -100,6 +136,7 @@ def _fake_loaded(action_ids, *, paths=None, digests=None):
             action_order=action_ids,
             actions=actions,
             mobility_mode="move",
+            prototype=NS(scope="upper"),
         ),
     )
 
@@ -177,26 +214,83 @@ def _action_ball_env(action_ids):
         r"^(?!left_ankle_roll_Link$)(?!right_ankle_roll_Link$).+$"
     )
     table_prim = "{ENV_REGEX_NS}/TableObstacle"
+    table_filter_prims = _ACTION_BALL_TABLE_FILTER_PRIMS
+    table_body_names, table_sensor_names = (
+        _action_ball_table_contact_rows()
+    )
+
+    def table_asset(prim_path, pos, size):
+        return NS(
+            prim_path=prim_path,
+            init_state=NS(pos=pos),
+            spawn=NS(
+                size=size,
+                collision_props=NS(collision_enabled=True),
+            ),
+        )
+
+    scene = NS(
+        table_obstacle=table_asset(
+            table_filter_prims[0],
+            (1.87, 0.0, 0.735),
+            (2.74, 1.525, 0.05),
+        ),
+        table_robot_keepout=table_asset(
+            table_filter_prims[1],
+            (1.87, 0.0, 0.355),
+            (2.74, 1.525, 0.71),
+        ),
+        table_net=table_asset(
+            table_filter_prims[2],
+            (1.87, 0.0, 0.83625),
+            (0.01, 1.825, 0.1525),
+        ),
+        table_net_post_left=table_asset(
+            table_filter_prims[3],
+            (1.87, 0.9125, 0.84625),
+            (0.02, 0.02, 0.1725),
+        ),
+        table_net_post_right=table_asset(
+            table_filter_prims[4],
+            (1.87, -0.9125, 0.84625),
+            (0.02, 0.02, 0.1725),
+        ),
+    )
+    for sensor_name, body_name in zip(
+        table_sensor_names, table_body_names
+    ):
+        setattr(
+            scene,
+            sensor_name,
+            NS(
+                prim_path=f"{{ENV_REGEX_NS}}/Robot/{body_name}",
+                filter_prim_paths_expr=list(table_filter_prims),
+                update_period=0.0,
+            ),
+        )
+
+    filtered_sensor_cfgs = [
+        NS(name=sensor_name) for sensor_name in table_sensor_names
+    ]
     return NS(
         obs_mode="hitter_footwork",
         face_command_obs=True,
         station_obs=False,
+        sim=NS(dt=0.005),
+        decimation=4,
         physical_ball=False,
         table_obstacle=True,
         table_obstacle_prim=table_prim,
-        scene=NS(
-            racket_table_contact=NS(
-                prim_path="{ENV_REGEX_NS}/Robot/right_wrist_yaw_Link",
-                filter_prim_paths_expr=[table_prim],
-            ),
-            table_obstacle=NS(
-                prim_path=table_prim,
-                init_state=NS(pos=(1.87, 0.0, 0.735)),
-                spawn=NS(
-                    size=(2.74, 1.525, 0.05),
-                    collision_props=NS(collision_enabled=True),
-                ),
-            ),
+        table_robot_keepout=True,
+        table_obstacle_prims=table_filter_prims,
+        table_pair_contact_sensor_names=table_sensor_names,
+        scene=scene,
+        actions=NS(
+            joint_pos=NS(
+                table_contact_substep_guard=True,
+                table_contact_guard_termination_term="robot_hit_table",
+                table_contact_guard_expected_decimation=4,
+            )
         ),
         terminations=NS(
             base_fell_tilt=NS(
@@ -219,19 +313,39 @@ def _action_ball_env(action_ids):
                     "filtered_sensor_cfg": NS(
                         name="racket_table_contact"
                     ),
+                    "all_body_filtered_sensor_cfgs": (
+                        filtered_sensor_cfgs
+                    ),
+                    "expected_full_table_filter_prim_paths": (
+                        table_filter_prims
+                    ),
                     "asset_cfg": NS(
                         name="robot", body_names=[broad_regex]
                     ),
                     "near_x": 0.5,
                     "surface_z": 0.76,
-                    "force_threshold": 1.0,
+                    "force_threshold": 1.0e-6,
                     "margin": 0.02,
+                    "full_table_assembly": True,
+                    "keepout_floor_z": 0.0,
+                    "action_name": "joint_pos",
+                    "require_substep_latch": True,
                 },
             ),
         ),
         commands=NS(racket_target=racket, motion=motion),
         observations=NS(policy=NS()),
-        rewards=NS(motion_global_anchor_pos=None),
+        rewards=NS(
+            motion_global_anchor_pos=None,
+            motion_body_pos=NS(params={"body_names": ["torso_link"]}),
+            motion_body_ori=NS(params={"body_names": ["torso_link"]}),
+            motion_body_lin_vel=NS(
+                params={"body_names": ["torso_link"]}
+            ),
+            motion_body_ang_vel=NS(
+                params={"body_names": ["torso_link"]}
+            ),
+        ),
     )
 
 
@@ -239,6 +353,7 @@ def _task(action_ids):
     return {
         "actor_obs_contract": f"action_ball_n{len(action_ids)}",
         "racket": {"clip_names": list(action_ids)},
+        "rewards": {"full_body_mimic": False},
     }
 
 
@@ -256,6 +371,18 @@ def _stub_obs_imports(monkeypatch):
     tasks.tracking = tracking
     root = types.ModuleType("whole_body_tracking")
     root.tasks = tasks
+    table_tennis = types.ModuleType(
+        "whole_body_tracking.tasks.table_tennis"
+    )
+    tasks.table_tennis = table_tennis
+    config = types.ModuleType(
+        "whole_body_tracking.tasks.tracking.config"
+    )
+    agibot_a3 = types.ModuleType(
+        "whole_body_tracking.tasks.tracking.config.agibot_a3"
+    )
+    config.agibot_a3 = agibot_a3
+    tracking.config = config
     for name, module in (
         ("isaaclab", isaaclab),
         ("isaaclab.managers", managers),
@@ -263,19 +390,84 @@ def _stub_obs_imports(monkeypatch):
         ("whole_body_tracking.tasks", tasks),
         ("whole_body_tracking.tasks.tracking", tracking),
         ("whole_body_tracking.tasks.tracking.mdp", mdp),
+        ("whole_body_tracking.tasks.table_tennis", table_tennis),
+        ("whole_body_tracking.tasks.tracking.config", config),
+        (
+            "whole_body_tracking.tasks.tracking.config.agibot_a3",
+            agibot_a3,
+        ),
     ):
         monkeypatch.setitem(sys.modules, name, module)
+
+    geometry = _load_by_path(
+        f"_table_geometry_{id(monkeypatch)}",
+        TABLE_TENNIS_PATH / "geometry.py",
+    )
+    table_tennis.geometry = geometry
+    monkeypatch.setitem(
+        sys.modules,
+        "whole_body_tracking.tasks.table_tennis.geometry",
+        geometry,
+    )
+    table_frame = _load_by_path(
+        f"_table_frame_{id(monkeypatch)}",
+        TABLE_TENNIS_PATH / "table_frame.py",
+    )
+    table_tennis.table_frame = table_frame
+    monkeypatch.setitem(
+        sys.modules,
+        "whole_body_tracking.tasks.table_tennis.table_frame",
+        table_frame,
+    )
+    table_cfg = types.ModuleType(
+        "whole_body_tracking.tasks.table_tennis.table_tennis_env_cfg"
+    )
+    table_cfg.NET_POST_HEIGHT = table_frame.NET_POST_HEIGHT
+    table_cfg.net_post_size = table_frame.net_post_size
+    table_tennis.table_tennis_env_cfg = table_cfg
+    monkeypatch.setitem(
+        sys.modules,
+        (
+            "whole_body_tracking.tasks.table_tennis."
+            "table_tennis_env_cfg"
+        ),
+        table_cfg,
+    )
+    body_names, sensor_names = _action_ball_table_contact_rows()
+    hope_cfg = types.ModuleType(
+        (
+            "whole_body_tracking.tasks.tracking.config.agibot_a3."
+            "hope_env_cfg"
+        )
+    )
+    hope_cfg.TABLE_CONTACT_BODY_NAMES = body_names
+    hope_cfg.TABLE_ALL_BODY_CONTACT_SENSOR_NAMES = sensor_names
+    agibot_a3.hope_env_cfg = hope_cfg
+    monkeypatch.setitem(
+        sys.modules,
+        (
+            "whole_body_tracking.tasks.tracking.config.agibot_a3."
+            "hope_env_cfg"
+        ),
+        hope_cfg,
+    )
     return mdp
 
 
 def _install_real_evaluator_module(monkeypatch):
     """Expose dependency-light evaluator code under its production import path."""
 
+    runtime = types.ModuleType("action_ball_runtime")
+    monkeypatch.setitem(sys.modules, "action_ball_runtime", runtime)
     curriculum = _load_by_path(
         f"_action_ball_curriculum_{id(monkeypatch)}",
         MDP_PATH / "action_ball_curriculum.py",
     )
     monkeypatch.setitem(sys.modules, "action_ball_curriculum", curriculum)
+    inbox = _load_by_path(
+        f"_action_ball_evaluation_inbox_{id(monkeypatch)}",
+        MDP_PATH / "action_ball_evaluation_inbox.py",
+    )
     evaluator = _load_by_path(
         f"_action_ball_evaluation_{id(monkeypatch)}",
         MDP_PATH / "action_ball_evaluation.py",
@@ -290,6 +482,7 @@ def _install_real_evaluator_module(monkeypatch):
     tracking.mdp = mdp
     mdp.action_ball_curriculum = curriculum
     mdp.action_ball_evaluation = evaluator
+    mdp.action_ball_evaluation_inbox = inbox
     for name, module in (
         ("whole_body_tracking", root),
         ("whole_body_tracking.tasks", tasks),
@@ -297,7 +490,7 @@ def _install_real_evaluator_module(monkeypatch):
         ("whole_body_tracking.tasks.tracking.mdp", mdp),
     ):
         monkeypatch.setitem(sys.modules, name, module)
-    return curriculum, evaluator
+    return curriculum, evaluator, inbox, runtime
 
 
 def _stub_preflight(monkeypatch, train_mod, action_ids):
@@ -310,7 +503,7 @@ def _stub_preflight(monkeypatch, train_mod, action_ids):
     monkeypatch.setattr(
         train_mod,
         "_action_ball_preflight_contract",
-        lambda *_args: {"sha256": "d" * 64},
+        lambda *_args, **_kwargs: {"sha256": "d" * 64},
     )
     monkeypatch.setattr(
         train_mod,
@@ -329,13 +522,21 @@ def _stub_preflight(monkeypatch, train_mod, action_ids):
     return loaded
 
 
-def _runtime_contract_fixture(train_mod):
+def _runtime_contract_fixture(train_mod, monkeypatch=None):
     action_ids = ("a", "b")
     motion_sha = ("1" * 64, "2" * 64)
     profile_sha = ("3" * 64, "4" * 64)
     sampler_sha = "5" * 64
     adapter_sha = "6" * 64
     runtime_sha = "7" * 64
+    arm_catalog_sha = hashlib.sha256(b"arm-catalog").hexdigest()
+    evaluator_authority_sha = hashlib.sha256(
+        b"evaluator-authority"
+    ).hexdigest()
+    evaluator_launch_sha = hashlib.sha256(
+        b"evaluator-launch"
+    ).hexdigest()
+    evaluator_file_sha = hashlib.sha256(b"evaluator-file").hexdigest()
     physics_payload = {
         "schema_version": 1,
         "kind": "test.physics",
@@ -360,6 +561,7 @@ def _runtime_contract_fixture(train_mod):
         "mobility_mode": "move",
         "action_order": list(action_ids),
         "action_uids": [101, 102],
+        "ready_root_z_by_slot_m": [0.91, 0.92],
         "action_bindings": [
             {
                 "action_id": name,
@@ -385,6 +587,7 @@ def _runtime_contract_fixture(train_mod):
         },
         "sampler": {
             "contract_sha256": sampler_sha,
+            "arm_catalog_sha256": arm_catalog_sha,
             "seed": 11,
             "pool_refill_rows": 32,
         },
@@ -401,6 +604,10 @@ def _runtime_contract_fixture(train_mod):
         "fixed_direction": True,
         "initial_episode_length_randomization": False,
         "policy_contract_sha256": "c" * 64,
+        "evaluator_launch": {
+            "path": "configs/evaluator.json",
+            "file_sha256": evaluator_file_sha,
+        },
     }
     preflight["sha256"] = train_mod._canonical_contract_sha256(preflight)
     bindings = [
@@ -413,12 +620,81 @@ def _runtime_contract_fixture(train_mod):
         }
         for row in preflight["action_bindings"]
     ]
+    motion_cfg = NS(
+        balanced_clip_sampling=True,
+        balanced_clip_sampling_seed=19,
+        hold_steps_range=(0, 0),
+        stand_start_min_hold=0,
+        post_swing_min_hold=0,
+        stagger_initial_clock=False,
+        speed_scale_range=(1.0, 1.0),
+        speed_scale_per_clip=None,
+        planner_revision_enabled=False,
+        canonical_registry_repo_root=str(ROOT),
+        canonical_registry_sha256="e" * 64,
+        canonical_registry_alignment_sha256="f" * 64,
+        canonical_ready_sha256="0" * 64,
+        canonical_ready_fk_sha256="1" * 64,
+    )
+    racket_cfg = NS(
+        cq_overdraw=1.5,
+        cq_max_redraw_rounds=4,
+        action_ball_frozen_eval_interval_updates=25,
+        reference_guard_mode="metrics_only",
+    )
+    domain_sources = {
+        name: hashlib.sha256(name.encode("ascii")).hexdigest()
+        for name in (
+            "hope_commands.py",
+            "action_ball_curriculum.py",
+            "action_ball_runtime.py",
+        )
+    }
+    domain_payload = {
+        "schema_version": 1,
+        "kind": "whole_body_tracking.action_ball.domain_claim_authority",
+        "implementation_source_sha256": domain_sources,
+        "manifest_sha256": preflight["manifest"]["file_sha256"],
+        "adapter_contract_sha256": adapter_sha,
+        "action_uids": [101, 102],
+        "profile_sha256": list(profile_sha),
+        "mobility_mode": "move",
+        "curriculum_config": copy.deepcopy(
+            preflight["curriculum"]["config"]
+        ),
+        "policy_contract_sha256": "c" * 64,
+        "schedule": {
+            "claim_barrier": "true_reset_only",
+            "domain_source": (
+                "frozen_ActionBallCurriculum.expected_domains"
+            ),
+            "selection": "per_action_round_robin",
+            "training_selector": False,
+            "live_rollout_updates_curriculum": False,
+        },
+    }
+    domain_sha = train_mod._canonical_contract_sha256(domain_payload)
+    state_schema = 6
+    state_owner_sha = train_mod._canonical_contract_sha256(
+        {
+            "schema_version": state_schema,
+            "kind": (
+                "whole_body_tracking.RacketTargetCommand."
+                "action_ball_mutable_state_owner"
+            ),
+            "action_uids": [101, 102],
+            "sampler_contract_sha256": sampler_sha,
+            "domain_authority_contract_sha256": domain_sha,
+            "solver_contract_sha256": solver_sha,
+        }
+    )
     registry_sha = train_mod._canonical_contract_sha256(
         {
             "runtime_contract_sha256": runtime_sha,
             "pins": {
                 "manifest_sha256": preflight["manifest"]["file_sha256"],
                 "sampler_sha256": sampler_sha,
+                "domain_authority_sha256": domain_sha,
                 "physics_sha256": physics_sha,
                 "solver_sha256": solver_sha,
             },
@@ -426,25 +702,60 @@ def _runtime_contract_fixture(train_mod):
             "bindings": bindings,
         }
     )
-    motion_cfg = NS(
-        balanced_clip_sampling=True,
-        balanced_clip_sampling_seed=19,
-        canonical_registry_sha256="e" * 64,
-        canonical_registry_alignment_sha256="f" * 64,
-        canonical_ready_sha256="0" * 64,
-        canonical_ready_fk_sha256="1" * 64,
-    )
-    racket_cfg = NS(cq_overdraw=1.5, cq_max_redraw_rounds=4)
-    sha_columns = {
-        name: ["2" * 64, "3" * 64]
+    runtime_sources = {
+        name: hashlib.sha256(
+            f"runtime-{name}".encode("ascii")
+        ).hexdigest()
         for name in (
-            "canonical_source_manifest_sha256_per_clip",
-            "canonical_build_manifest_sha256_per_clip",
-            "canonical_applicability_manifest_sha256_per_clip",
-            "canonical_evidence_manifest_sha256_per_clip",
-            "canonical_training_config_sha256_per_clip",
-            "canonical_adoption_manifest_sha256_per_clip",
+            "hope_commands.py",
+            "action_ball_curriculum.py",
+            "action_ball_evaluation.py",
+            "action_ball_manifest.py",
+            "action_ball_profile_adapter.py",
+            "action_ball_reference_guard.py",
+            "action_ball_runtime.py",
+            "action_ball_sampling.py",
+            "continuous_questions.py",
+            "racket_contact_geometry.py",
+            "stroke_adapt_torch.py",
+            "virtual_ball.py",
         )
+    }
+    evaluator_verified = {
+        "path": "configs/evaluator.json",
+        "file_sha256": evaluator_file_sha,
+        "launch_receipt": {"kind": "frozen-evaluator-v4"},
+        "launch_receipt_canonical_sha256": evaluator_launch_sha,
+        "authority_binding": {"binding": "exact"},
+        "authority_state_owner_sha256": hashlib.sha256(
+            b"evaluator-state-owner"
+        ).hexdigest(),
+        "attempt_source_state_owner_sha256": hashlib.sha256(
+            b"attempt-source-state-owner"
+        ).hexdigest(),
+        "coordinator_state_owner_sha256": hashlib.sha256(
+            b"coordinator-state-owner"
+        ).hexdigest(),
+        "inbox_root": "/tmp/action-ball-inbox",
+        "inbox_owner_id": "owner",
+        "inbox_run_id": "run",
+        "sidecar_launch_receipt_path": "configs/sidecar.json",
+        "sidecar_launch_receipt_file_sha256": hashlib.sha256(
+            b"sidecar-file"
+        ).hexdigest(),
+        "sidecar_launch_receipt_content_sha256": hashlib.sha256(
+            b"sidecar-content"
+        ).hexdigest(),
+        "sidecar_code_path": (
+            "scripts/action_ball_frozen_eval_sidecar.py"
+        ),
+        "sidecar_code_sha256": hashlib.sha256(
+            b"sidecar-code"
+        ).hexdigest(),
+        "drain_reset_launch": {
+            "kind": "frozen-evaluator-drain-reset",
+            "sha256": hashlib.sha256(b"drain-reset").hexdigest(),
+        },
     }
     unsigned = {
         "schema_version": 1,
@@ -461,6 +772,7 @@ def _runtime_contract_fixture(train_mod):
         "profiles": {
             "adapter_contract_sha256": adapter_sha,
             "profile_sha256": list(profile_sha),
+            "arm_catalog_sha256": arm_catalog_sha,
             "sampler_contract_sha256": sampler_sha,
         },
         "sampling": {
@@ -471,33 +783,192 @@ def _runtime_contract_fixture(train_mod):
             "external_overdraw_multiplier": 1.5,
             "maximum_external_proposal_rounds": 4,
         },
+        "timing": {
+            "authority": (
+                "per_swing_task_receipt_v5_exact_face_contact"
+            ),
+            "policy_dt_s": 0.02,
+            "attempt_close_margin_s": 0.02,
+            "episode_length_s": 10.0,
+            "time_to_strike_source": (
+                "MotionCommand.action_ball_time_to_contact_remaining_s"
+            ),
+            "legacy_motion_time_owners": {
+                "hold_steps_range": [0, 0],
+                "stand_start_min_hold": 0,
+                "post_swing_min_hold": 0,
+                "stagger_initial_clock": False,
+                "speed_scale_range": [1.0, 1.0],
+                "speed_scale_per_clip": None,
+                "planner_revision_enabled": False,
+            },
+        },
+        "reference_guard": None,
         "solver": {"payload": solver_payload, "sha256": solver_sha},
         "physics": {"payload": physics_payload, "sha256": physics_sha},
+        "domain_authority": {
+            "payload": domain_payload,
+            "sha256": domain_sha,
+        },
+        "mutable_state_owner": {
+            "schema_version": state_schema,
+            "state_owner_sha256": state_owner_sha,
+            "protocol_views": [
+                "domain_claim_authority",
+                "birth_provider",
+                "task_solver",
+            ],
+            "checkpoint_state_is_mutable": True,
+            "mutable_state_sha256_is_not_a_hard_contract_pin": True,
+        },
         "curriculum": {
             "config": copy.deepcopy(preflight["curriculum"]["config"]),
             "policy_contract_sha256": "c" * 64,
             "frozen_checkpoint_evidence_required": True,
             "live_rollout_advances_curriculum": False,
         },
+        "evaluator_authority": {
+            "authority_contract_sha256": evaluator_authority_sha,
+            "trusted_launch_receipt_sha256": [evaluator_launch_sha],
+            "evaluator_launch_receipt_path": evaluator_verified["path"],
+            "evaluator_launch_receipt_file_sha256": evaluator_file_sha,
+            "evaluator_launch_receipt": evaluator_verified[
+                "launch_receipt"
+            ],
+            "launch_receipt_canonical_sha256": evaluator_launch_sha,
+            "authority_binding": evaluator_verified[
+                "authority_binding"
+            ],
+            "authority_state_owner_sha256": evaluator_verified[
+                "authority_state_owner_sha256"
+            ],
+            "attempt_source_state_owner_sha256": evaluator_verified[
+                "attempt_source_state_owner_sha256"
+            ],
+            "coordinator_state_owner_sha256": evaluator_verified[
+                "coordinator_state_owner_sha256"
+            ],
+            "inbox_root": evaluator_verified["inbox_root"],
+            "inbox_owner_id": evaluator_verified["inbox_owner_id"],
+            "inbox_run_id": evaluator_verified["inbox_run_id"],
+            "sidecar_launch_receipt_path": evaluator_verified[
+                "sidecar_launch_receipt_path"
+            ],
+            "sidecar_launch_receipt_file_sha256": evaluator_verified[
+                "sidecar_launch_receipt_file_sha256"
+            ],
+            "sidecar_launch_receipt_content_sha256": evaluator_verified[
+                "sidecar_launch_receipt_content_sha256"
+            ],
+            "sidecar_code_path": evaluator_verified[
+                "sidecar_code_path"
+            ],
+            "sidecar_code_sha256": evaluator_verified[
+                "sidecar_code_sha256"
+            ],
+            "drain_reset": evaluator_verified["drain_reset_launch"],
+            "evaluation_interval_updates": 25,
+            "formal_authority_available": True,
+            "formal_launch_requires_code_pinned_receipt": True,
+            "runtime_or_manifest_may_self_authorize": False,
+        },
         "runtime": {
             "runtime_contract_sha256": runtime_sha,
             "registry_sha256": registry_sha,
+            "implementation_source_sha256": runtime_sources,
             "fixed_direction": True,
             "wrap_teleport": False,
         },
-        "motion_admission": {
-            "canonical_registry_sha256": "e" * 64,
-            "canonical_registry_alignment_sha256": "f" * 64,
-            "canonical_ready_sha256": "0" * 64,
-            "canonical_ready_fk_sha256": "1" * 64,
-            **sha_columns,
-            "canonical_evidence_level_per_clip": ["E2", "E2"],
-        },
+        "motion_admission": {"opaque": "identity"},
     }
     contract = copy.deepcopy(unsigned)
     contract["canonical_sha256"] = train_mod._canonical_contract_sha256(
         unsigned
     )
+    if monkeypatch is not None:
+        packages = {}
+        for name in (
+            "whole_body_tracking",
+            "whole_body_tracking.tasks",
+            "whole_body_tracking.tasks.tracking",
+            "whole_body_tracking.tasks.tracking.mdp",
+        ):
+            module = types.ModuleType(name)
+            module.__path__ = []
+            packages[name] = module
+            monkeypatch.setitem(sys.modules, name, module)
+        reference_guard = _load_by_path(
+            (
+                "whole_body_tracking.tasks.tracking.mdp."
+                "action_ball_reference_guard"
+            ),
+            MDP_PATH / "action_ball_reference_guard.py",
+        )
+        unsigned["reference_guard"] = {
+            "mode": "metrics_only",
+            "contract_payload": (
+                reference_guard.REFERENCE_GUARD_CONTRACT_PAYLOAD
+            ),
+            "contract_sha256": (
+                reference_guard.REFERENCE_GUARD_CONTRACT_SHA256
+            ),
+        }
+        contract["reference_guard"] = copy.deepcopy(
+            unsigned["reference_guard"]
+        )
+        _rehash_runtime_contract(train_mod, contract)
+        sampling = types.ModuleType(
+            (
+                "whole_body_tracking.tasks.tracking.mdp."
+                "action_ball_sampling"
+            )
+        )
+        sampling.ARM_CATALOG_SHA256 = arm_catalog_sha
+        evaluator = types.ModuleType(
+            (
+                "whole_body_tracking.tasks.tracking.mdp."
+                "action_ball_evaluation"
+            )
+        )
+        evaluator.FROZEN_EVALUATOR_V4_AUTHORITY_CONTRACT_SHA256 = (
+            evaluator_authority_sha
+        )
+        evaluator.TRUSTED_FROZEN_EVALUATOR_V4_LAUNCH_RECEIPT_SHA256 = (
+            frozenset({evaluator_launch_sha})
+        )
+        runtime = types.ModuleType(
+            (
+                "whole_body_tracking.tasks.tracking.mdp."
+                "action_ball_runtime"
+            )
+        )
+        runtime.BROKER_STATE_SCHEMA_VERSION = 4
+        runtime.TASK_RECEIPT_TIMING_AUTHORITY = (
+            "per_swing_task_receipt_v5_exact_face_contact"
+        )
+        for module in (sampling, evaluator, runtime, reference_guard):
+            monkeypatch.setitem(sys.modules, module.__name__, module)
+        mdp_package = packages[
+            "whole_body_tracking.tasks.tracking.mdp"
+        ]
+        mdp_package.action_ball_evaluation = evaluator
+        mdp_package.action_ball_reference_guard = reference_guard
+        mdp_package.action_ball_runtime = runtime
+        monkeypatch.setattr(
+            train_mod,
+            "_validate_action_ball_mdp_source_map",
+            lambda value, **_kwargs: value,
+        )
+        monkeypatch.setattr(
+            train_mod,
+            "_validate_action_ball_motion_admission_receipt",
+            lambda value, **_kwargs: value,
+        )
+        monkeypatch.setattr(
+            train_mod,
+            "_load_action_ball_evaluator_launch_from_cfg",
+            lambda *_args, **_kwargs: evaluator_verified,
+        )
     return contract, preflight, racket_cfg, motion_cfg, runtime_sha
 
 
@@ -1119,9 +1590,11 @@ def test_action_ball_resolved_motion_path_and_bytes_are_exact(
         )
 
 
-def test_action_ball_runtime_hard_contract_accepts_exact_payload(train_mod):
+def test_action_ball_runtime_hard_contract_accepts_exact_payload(
+    train_mod, monkeypatch
+):
     contract, preflight, racket_cfg, motion_cfg, runtime_sha = (
-        _runtime_contract_fixture(train_mod)
+        _runtime_contract_fixture(train_mod, monkeypatch)
     )
     assert (
         train_mod._validate_action_ball_runtime_hard_contract(
@@ -1141,14 +1614,28 @@ def _evaluator_launch_fixture(
     _contract, preflight, _racket, _motion, _runtime_sha = (
         _runtime_contract_fixture(train_mod)
     )
-    curriculum, evaluator = _install_real_evaluator_module(monkeypatch)
+    curriculum, evaluator, inbox, runtime = (
+        _install_real_evaluator_module(monkeypatch)
+    )
     relative_source = pathlib.PurePosixPath(
-        "hope_training/whole_body_tracking/closed_attempt_source.py"
+        inbox.FROZEN_EVALUATION_INBOX_ATTEMPT_SOURCE_PATH
     )
     source = tmp_path.joinpath(*relative_source.parts)
     source.parent.mkdir(parents=True)
-    source.write_bytes(b"reviewed closed-attempt source\n")
+    source.write_bytes(
+        (MDP_PATH / "action_ball_evaluation_inbox.py").read_bytes()
+    )
     source_sha = hashlib.sha256(source.read_bytes()).hexdigest()
+    attempt_source = inbox.FrozenSidecarInboxAttemptSource(
+        inbox=inbox.EvaluationInbox(tmp_path / "evaluation-inbox"),
+        owner_id="review-owner",
+        run_id="review-run",
+        runtime_module=runtime,
+    )
+    assert attempt_source.source_contract_sha256 == (
+        inbox.FROZEN_EVALUATION_INBOX_ATTEMPT_SOURCE_CONTRACT_SHA256
+    )
+    assert attempt_source.source_code_sha256 == source_sha
     profiles = tuple(
         curriculum.ActionProfileKey(
             action_uid=row["action_uid"],
@@ -1157,7 +1644,7 @@ def _evaluator_launch_fixture(
         )
         for row in preflight["action_bindings"]
     )
-    launch = evaluator.launch_receipt_document(
+    launch = evaluator.launch_receipt_document_v4(
         curriculum_contract_sha256=preflight["profile_adapter"]["sha256"],
         profile_order=profiles,
         arm_catalog_sha256=curriculum.ARM_CATALOG_SHA256,
@@ -1167,150 +1654,293 @@ def _evaluator_launch_fixture(
         sampler_sha256=preflight["sampler"]["contract_sha256"],
         solver_sha256=preflight["solver_profile_sha256"],
         policy_contract_sha256=preflight["policy_contract_sha256"],
-        attempt_source_contract_sha256="d" * 64,
+        attempt_source_contract_sha256=(
+            attempt_source.source_contract_sha256
+        ),
         attempt_source_path=relative_source.as_posix(),
         attempt_source_sha256=source_sha,
     )
     launch_sha = train_mod._canonical_contract_sha256(launch)
-    evaluator.TRUSTED_FROZEN_EVALUATOR_LAUNCH_RECEIPT_SHA256 = (
+    evaluator.TRUSTED_FROZEN_EVALUATOR_V4_LAUNCH_RECEIPT_SHA256 = (
         frozenset({launch_sha}) if trust else frozenset()
     )
-    return evaluator, launch, launch_sha, preflight, source
+    return NS(
+        curriculum=curriculum,
+        evaluator=evaluator,
+        inbox=inbox,
+        runtime=runtime,
+        launch=launch,
+        launch_sha=launch_sha,
+        preflight=preflight,
+        source=source,
+        attempt_source=attempt_source,
+    )
+
+
+def _evaluator_loader_racket_cfg(
+    tmp_path,
+    *,
+    receipt_path="",
+    receipt_file_sha256="",
+    sidecar_path="",
+    sidecar_file_sha256="",
+    drain_path="",
+    drain_file_sha256="",
+):
+    return NS(
+        action_ball_evaluator_launch_receipt_path=receipt_path,
+        action_ball_evaluator_launch_receipt_file_sha256=(
+            receipt_file_sha256
+        ),
+        action_ball_evaluation_inbox_root=str(
+            (tmp_path / "formal-evaluation-inbox").resolve()
+        ),
+        action_ball_evaluation_owner_id="review-owner",
+        action_ball_evaluation_run_id="review-run",
+        action_ball_frozen_eval_interval_updates=10,
+        action_ball_sidecar_launch_receipt_path=sidecar_path,
+        action_ball_sidecar_launch_receipt_file_sha256=(
+            sidecar_file_sha256
+        ),
+        action_ball_drain_reset_launch_receipt_path=drain_path,
+        action_ball_drain_reset_launch_receipt_file_sha256=(
+            drain_file_sha256
+        ),
+    )
 
 
 def test_action_ball_evaluator_launch_is_code_pinned_and_reopens_source(
     train_mod, monkeypatch, tmp_path
 ):
-    _evaluator, launch, launch_sha, preflight, _source = (
-        _evaluator_launch_fixture(
-            train_mod, monkeypatch, tmp_path, trust=True
-        )
+    fixture = _evaluator_launch_fixture(
+        train_mod, monkeypatch, tmp_path, trust=True
     )
     result = train_mod._validate_action_ball_evaluator_launch_receipt(
-        launch,
-        declared_launch_sha256=launch_sha,
-        preflight=preflight,
-        solver_sha256=preflight["solver_profile_sha256"],
+        fixture.launch,
+        declared_launch_sha256=fixture.launch_sha,
+        preflight=fixture.preflight,
+        solver_sha256=fixture.preflight["solver_profile_sha256"],
         repo_root=tmp_path,
+        attempt_source=fixture.attempt_source,
     )
-    assert result["launch_receipt_canonical_sha256"] == launch_sha
+    assert result["launch_receipt_canonical_sha256"] == fixture.launch_sha
     assert (
         result["authority_binding"]["launch_receipt_sha256"]
-        == launch_sha
+        == fixture.launch_sha
+    )
+    assert result["authority_binding"]["source_state_owner_sha256"] == (
+        fixture.attempt_source.state_owner_sha256
     )
 
 
 def test_action_ball_evaluator_launch_rejects_empty_trust_and_source_drift(
     train_mod, monkeypatch, tmp_path
 ):
-    _evaluator, launch, launch_sha, preflight, source = (
-        _evaluator_launch_fixture(
-            train_mod, monkeypatch, tmp_path, trust=False
-        )
+    fixture = _evaluator_launch_fixture(
+        train_mod, monkeypatch, tmp_path, trust=False
     )
     with pytest.raises(RuntimeError, match="not code-pinned"):
         train_mod._validate_action_ball_evaluator_launch_receipt(
-            launch,
-            declared_launch_sha256=launch_sha,
-            preflight=preflight,
-            solver_sha256=preflight["solver_profile_sha256"],
+            fixture.launch,
+            declared_launch_sha256=fixture.launch_sha,
+            preflight=fixture.preflight,
+            solver_sha256=fixture.preflight[
+                "solver_profile_sha256"
+            ],
             repo_root=tmp_path,
+            attempt_source=fixture.attempt_source,
         )
 
-    evaluator, launch, launch_sha, preflight, source = (
-        _evaluator_launch_fixture(
-            train_mod, monkeypatch, tmp_path / "drift", trust=True
-        )
+    drift_fixture = _evaluator_launch_fixture(
+        train_mod, monkeypatch, tmp_path / "drift", trust=True
     )
-    del evaluator
-    source.write_bytes(b"changed after launch receipt\n")
+    drift_fixture.source.write_bytes(b"changed after launch receipt\n")
     with pytest.raises(RuntimeError, match="source bytes drifted"):
         train_mod._validate_action_ball_evaluator_launch_receipt(
-            launch,
-            declared_launch_sha256=launch_sha,
-            preflight=preflight,
-            solver_sha256=preflight["solver_profile_sha256"],
+            drift_fixture.launch,
+            declared_launch_sha256=drift_fixture.launch_sha,
+            preflight=drift_fixture.preflight,
+            solver_sha256=drift_fixture.preflight[
+                "solver_profile_sha256"
+            ],
             repo_root=tmp_path / "drift",
+            attempt_source=drift_fixture.attempt_source,
         )
 
 
 def test_action_ball_evaluator_launch_rejects_profile_or_pin_drift(
     train_mod, monkeypatch, tmp_path
 ):
-    _evaluator, launch, launch_sha, preflight, _source = (
-        _evaluator_launch_fixture(
-            train_mod, monkeypatch, tmp_path, trust=True
-        )
+    fixture = _evaluator_launch_fixture(
+        train_mod, monkeypatch, tmp_path, trust=True
     )
-    reordered = copy.deepcopy(launch)
+    reordered = copy.deepcopy(fixture.launch)
     reordered["profile_order"].reverse()
     with pytest.raises(RuntimeError, match="profile_order"):
         train_mod._validate_action_ball_evaluator_launch_receipt(
             reordered,
-            declared_launch_sha256=launch_sha,
-            preflight=preflight,
-            solver_sha256=preflight["solver_profile_sha256"],
+            declared_launch_sha256=fixture.launch_sha,
+            preflight=fixture.preflight,
+            solver_sha256=fixture.preflight[
+                "solver_profile_sha256"
+            ],
             repo_root=tmp_path,
+            attempt_source=fixture.attempt_source,
         )
     with pytest.raises(RuntimeError, match="receipt SHA mismatch"):
         train_mod._validate_action_ball_evaluator_launch_receipt(
-            launch,
+            fixture.launch,
             declared_launch_sha256="f" * 64,
-            preflight=preflight,
-            solver_sha256=preflight["solver_profile_sha256"],
+            preflight=fixture.preflight,
+            solver_sha256=fixture.preflight[
+                "solver_profile_sha256"
+            ],
             repo_root=tmp_path,
+            attempt_source=fixture.attempt_source,
         )
 
 
 def test_action_ball_evaluator_receipt_is_loaded_before_gym_from_exact_file(
     train_mod, monkeypatch, tmp_path
 ):
-    _evaluator, launch, launch_sha, preflight, _source = (
-        _evaluator_launch_fixture(
-            train_mod, monkeypatch, tmp_path, trust=True
-        )
+    fixture = _evaluator_launch_fixture(
+        train_mod, monkeypatch, tmp_path, trust=True
     )
     relative = pathlib.PurePosixPath("configs/evaluator_launch.json")
     receipt_file = tmp_path.joinpath(*relative.parts)
     receipt_file.parent.mkdir(parents=True)
     receipt_file.write_text(
-        json.dumps(launch, indent=2, sort_keys=True) + "\n",
+        json.dumps(fixture.launch, indent=2, sort_keys=True) + "\n",
         encoding="utf-8",
     )
     file_sha = hashlib.sha256(receipt_file.read_bytes()).hexdigest()
-    racket_cfg = NS(
-        action_ball_evaluator_launch_receipt_path=relative.as_posix(),
-        action_ball_evaluator_launch_receipt_file_sha256=file_sha,
+    sidecar_relative = pathlib.PurePosixPath(
+        "configs/evaluator_sidecar_launch.json"
+    )
+    sidecar_file = tmp_path.joinpath(*sidecar_relative.parts)
+    sidecar_document = {
+        "content": {"kind": "test-sidecar"},
+        "content_sha256": "5" * 64,
+    }
+    sidecar_file.write_text(
+        json.dumps(sidecar_document, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    sidecar_file_sha = hashlib.sha256(
+        sidecar_file.read_bytes()
+    ).hexdigest()
+    drain_relative = pathlib.PurePosixPath(
+        "configs/evaluator_drain_launch.json"
+    )
+    drain_file = tmp_path.joinpath(*drain_relative.parts)
+    drain_document = {
+        "runtime_source_contract_sha256": "6" * 64,
+        "runtime_source_path": "runtime.py",
+        "runtime_source_sha256": "7" * 64,
+        "broker_contract_sha256": "8" * 64,
+        "attempt_pool_contract_sha256": "9" * 64,
+        "task_receipt_pool_contract_sha256": "a" * 64,
+        "env_reset_contract_sha256": "b" * 64,
+    }
+    drain_file.write_text(
+        json.dumps(drain_document, sort_keys=True) + "\n",
+        encoding="utf-8",
+    )
+    drain_file_sha = hashlib.sha256(
+        drain_file.read_bytes()
+    ).hexdigest()
+
+    for relative_source in (
+        (
+            "hope_training/whole_body_tracking/scripts/"
+            "action_ball_frozen_eval_sidecar.py"
+        ),
+        (
+            "hope_training/whole_body_tracking/source/"
+            "whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/"
+            "hope_commands.py"
+        ),
+    ):
+        destination = tmp_path.joinpath(
+            *pathlib.PurePosixPath(relative_source).parts
+        )
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        destination.write_bytes((ROOT / relative_source).read_bytes())
+
+    monkeypatch.setattr(
+        fixture.inbox,
+        "validate_sidecar_launch_document",
+        lambda *_args, **_kwargs: None,
+    )
+
+    class FakeCoordinator:
+        def __init__(self, **_kwargs):
+            self.state_owner_sha256 = "c" * 64
+
+    monkeypatch.setattr(
+        fixture.inbox,
+        "FrozenEvaluationInboxCoordinator",
+        FakeCoordinator,
+    )
+
+    class FakeDrainAuthority:
+        state_owner_sha256 = "d" * 64
+
+        @classmethod
+        def from_trusted_launch_receipt(
+            cls, _receipt, *, runtime_source
+        ):
+            assert runtime_source.binding_document() == drain_document
+            return cls()
+
+        def assert_binding(self, **_kwargs):
+            return None
+
+    monkeypatch.setattr(
+        fixture.curriculum,
+        "DrainResetAuthority",
+        FakeDrainAuthority,
+        raising=False,
+    )
+    racket_cfg = _evaluator_loader_racket_cfg(
+        tmp_path,
+        receipt_path=relative.as_posix(),
+        receipt_file_sha256=file_sha,
+        sidecar_path=sidecar_relative.as_posix(),
+        sidecar_file_sha256=sidecar_file_sha,
+        drain_path=drain_relative.as_posix(),
+        drain_file_sha256=drain_file_sha,
     )
     result = train_mod._load_action_ball_evaluator_launch_from_cfg(
         racket_cfg,
         NS(canonical_registry_repo_root=str(tmp_path)),
-        preflight=preflight,
+        preflight=fixture.preflight,
     )
     assert result["file_sha256"] == file_sha
-    assert result["launch_receipt_canonical_sha256"] == launch_sha
-    assert result["launch_receipt"] == launch
+    assert (
+        result["launch_receipt_canonical_sha256"]
+        == fixture.launch_sha
+    )
+    assert result["launch_receipt"] == fixture.launch
+    assert result["attempt_source_state_owner_sha256"]
+    assert result["inbox_owner_id"] == "review-owner"
+    assert result["inbox_run_id"] == "review-run"
 
 
 def test_action_ball_evaluator_receipt_pre_gym_rejects_missing_duplicate_or_symlink(
     train_mod, monkeypatch, tmp_path
 ):
-    _evaluator, launch, _launch_sha, preflight, _source = (
-        _evaluator_launch_fixture(
-            train_mod, monkeypatch, tmp_path, trust=True
-        )
+    fixture = _evaluator_launch_fixture(
+        train_mod, monkeypatch, tmp_path, trust=True
     )
     motion_cfg = NS(canonical_registry_repo_root=str(tmp_path))
     with pytest.raises(
         train_mod._OverrideError, match="requires.*receipt_path"
     ):
         train_mod._load_action_ball_evaluator_launch_from_cfg(
-            NS(
-                action_ball_evaluator_launch_receipt_path="",
-                action_ball_evaluator_launch_receipt_file_sha256="",
-            ),
+            _evaluator_loader_racket_cfg(tmp_path),
             motion_cfg,
-            preflight=preflight,
+            preflight=fixture.preflight,
         )
 
     duplicate = tmp_path / "duplicate.json"
@@ -1322,12 +1952,13 @@ def test_action_ball_evaluator_receipt_pre_gym_rejects_missing_duplicate_or_syml
         train_mod._OverrideError, match="duplicate JSON key"
     ):
         train_mod._load_action_ball_evaluator_launch_from_cfg(
-            NS(
-                action_ball_evaluator_launch_receipt_path="duplicate.json",
-                action_ball_evaluator_launch_receipt_file_sha256=duplicate_sha,
+            _evaluator_loader_racket_cfg(
+                tmp_path,
+                receipt_path="duplicate.json",
+                receipt_file_sha256=duplicate_sha,
             ),
             motion_cfg,
-            preflight=preflight,
+            preflight=fixture.preflight,
         )
 
     nonfinite = tmp_path / "nonfinite.json"
@@ -1335,35 +1966,41 @@ def test_action_ball_evaluator_receipt_pre_gym_rejects_missing_duplicate_or_syml
     nonfinite_sha = hashlib.sha256(nonfinite.read_bytes()).hexdigest()
     with pytest.raises(train_mod._OverrideError, match="non-finite JSON"):
         train_mod._load_action_ball_evaluator_launch_from_cfg(
-            NS(
-                action_ball_evaluator_launch_receipt_path="nonfinite.json",
-                action_ball_evaluator_launch_receipt_file_sha256=(
-                    nonfinite_sha
-                ),
+            _evaluator_loader_racket_cfg(
+                tmp_path,
+                receipt_path="nonfinite.json",
+                receipt_file_sha256=nonfinite_sha,
             ),
             motion_cfg,
-            preflight=preflight,
+            preflight=fixture.preflight,
         )
 
     target = tmp_path / "target.json"
-    target.write_text(json.dumps(launch), encoding="utf-8")
+    target.write_text(json.dumps(fixture.launch), encoding="utf-8")
     link = tmp_path / "linked.json"
     link.symlink_to(target)
     target_sha = hashlib.sha256(target.read_bytes()).hexdigest()
     with pytest.raises(train_mod._OverrideError, match="symbolic link"):
         train_mod._load_action_ball_evaluator_launch_from_cfg(
-            NS(
-                action_ball_evaluator_launch_receipt_path="linked.json",
-                action_ball_evaluator_launch_receipt_file_sha256=target_sha,
+            _evaluator_loader_racket_cfg(
+                tmp_path,
+                receipt_path="linked.json",
+                receipt_file_sha256=target_sha,
             ),
             motion_cfg,
-            preflight=preflight,
+            preflight=fixture.preflight,
         )
 
 
 @pytest.mark.parametrize(
     ("mutate", "message"),
     (
+        (
+            lambda contract: contract["reference_guard"].__setitem__(
+                "mode", "phase_gated"
+            ),
+            "mode mismatch",
+        ),
         (
             lambda contract: contract.pop("sampling"),
             "invalid keys",
@@ -1393,10 +2030,10 @@ def test_action_ball_evaluator_receipt_pre_gym_rejects_missing_duplicate_or_syml
     ),
 )
 def test_action_ball_runtime_hard_contract_rejects_drift(
-    train_mod, mutate, message
+    train_mod, monkeypatch, mutate, message
 ):
     contract, preflight, racket_cfg, motion_cfg, runtime_sha = (
-        _runtime_contract_fixture(train_mod)
+        _runtime_contract_fixture(train_mod, monkeypatch)
     )
     mutate(contract)
     _rehash_runtime_contract(train_mod, contract)
@@ -1438,6 +2075,33 @@ def test_action_ball_policy_sha_binds_exact_ppo_recipe(train_mod):
     with pytest.raises(RuntimeError, match="policy contract SHA"):
         train_mod._validate_action_ball_policy_recipe(
             preflight, agent_cfg
+        )
+
+
+def test_action_ball_build_requires_true_projection_runtime_fact(train_mod):
+    key = train_mod._ACTION_BALL_FINITE_QDES_PROJECTION_FACT
+
+    train_mod._require_action_ball_finite_qdes_projection_fact(
+        {key: True},
+        action_ball_enabled=True,
+    )
+    for drift in ({}, {key: False}, {key: 1}, {key: "true"}):
+        with pytest.raises(RuntimeError, match="exact true"):
+            train_mod._require_action_ball_finite_qdes_projection_fact(
+                drift,
+                action_ball_enabled=True,
+            )
+
+    # Legacy/default tasks encode OFF as total absence, preserving their existing hard-contract
+    # bytes and action behavior.  An accidental opt-in outside ActionBall fails closed.
+    train_mod._require_action_ball_finite_qdes_projection_fact(
+        {},
+        action_ball_enabled=False,
+    )
+    with pytest.raises(RuntimeError, match="ActionBall-only"):
+        train_mod._require_action_ball_finite_qdes_projection_fact(
+            {key: True},
+            action_ball_enabled=False,
         )
 
 

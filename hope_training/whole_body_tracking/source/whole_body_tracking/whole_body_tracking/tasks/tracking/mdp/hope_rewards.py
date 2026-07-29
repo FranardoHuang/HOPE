@@ -1474,6 +1474,29 @@ _SOFT_LIMIT_BARRIER_V2_MAX_INTRUSION = "max_intrusion_depth_frac"
 _SOFT_LIMIT_BARRIER_V2_VALUE_SUM = "barrier_value_sum"
 _SOFT_LIMIT_BARRIER_V2_ACTIVE_COUNT = "reward_enabled_sample_count"
 
+# ActionBall finite-q_des projection ---------------------------------------------------------- #
+#
+# PPO still samples and stores its ordinary unbounded Gaussian action.  The action term maps the
+# resulting affine q_des to the nearest point in the already-validated drive target envelope.
+# This separate term charges the distance between those two points; it must not be folded into the
+# processed-q_des soft barrier above because a plant-state brake can replace ``processed_actions``
+# after the nominal projection has been computed.
+_QDES_PROJECTION_SCHEMA_VERSION = 1
+_QDES_PROJECTION_DEFAULT_SHAPE_RATE = 4.0
+_QDES_PROJECTION_ACTIVATION_ATTR = "_hope_qdes_projection_activation_counters"
+_QDES_PROJECTION_OBSERVED_STEP_ATTR = "_hope_qdes_projection_observed_step"
+_QDES_PROJECTION_SIGNATURE_ATTR = "_hope_qdes_projection_signature"
+_QDES_PROJECTION_OBSERVED_COUNT = "observed_sample_count"
+_QDES_PROJECTION_SAMPLE_COUNT = "projection_sample_count"
+_QDES_PROJECTION_NONFINITE_SAMPLE_COUNT = "nonfinite_sample_count"
+_QDES_PROJECTION_JOINT_COUNT = "projection_joint_count"
+_QDES_PROJECTION_LOWER_JOINT_COUNT = "lower_projection_joint_count"
+_QDES_PROJECTION_UPPER_JOINT_COUNT = "upper_projection_joint_count"
+_QDES_PROJECTION_DISTANCE_SUM = "normalized_projection_distance_sum"
+_QDES_PROJECTION_DISTANCE_MAX = "normalized_projection_distance_max"
+_QDES_PROJECTION_VALUE_SUM = "penalty_value_sum"
+_QDES_PROJECTION_MAX_DISTANCE = "max_normalized_projection_distance"
+
 
 def _validate_soft_limit_barrier_v2_scalars(
     margin_frac: float,
@@ -1864,6 +1887,343 @@ def qdes_limit_barrier_v2(
     return values
 
 
+def _validate_qdes_projection_shape_rate(shape_rate: float) -> float:
+    if isinstance(shape_rate, bool):
+        raise ValueError("qdes_projection_penalty shape_rate must be finite and > 0")
+    try:
+        shape_rate = float(shape_rate)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(
+            "qdes_projection_penalty shape_rate must be finite and > 0"
+        ) from exc
+    if not math.isfinite(shape_rate) or shape_rate <= 0.0:
+        raise ValueError("qdes_projection_penalty shape_rate must be finite and > 0")
+    return shape_rate
+
+
+def _qdes_projection_penalty_values(
+    env: ManagerBasedRLEnv,
+    action_name: str = "joint_pos",
+    shape_rate: float = _QDES_PROJECTION_DEFAULT_SHAPE_RATE,
+) -> tuple[
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+    torch.Tensor,
+]:
+    """Return bounded projection cost and its per-joint causal evidence.
+
+    For each joint, ``d = abs(pre_clamp_qdes - nominal_projection) / envelope_span`` and
+    ``cost = 1 - exp(-shape_rate * d)``.  Thus an in-envelope request is exactly zero, every
+    finite additional overshoot is strictly more expensive, and an arbitrarily large proposal
+    stays bounded below one per joint.  Non-finite proposals receive a finite near-maximal cost
+    here and remain terminal in the DoneTerm.
+    """
+
+    if action_name != "joint_pos":
+        raise ValueError(
+            "qdes_projection_penalty action_name must be exactly 'joint_pos'"
+        )
+    shape_rate = _validate_qdes_projection_shape_rate(shape_rate)
+    action = env.action_manager.get_term(action_name)
+    projection_enabled = getattr(
+        action, "finite_preclamp_qdes_projection_enabled", False
+    )
+    if type(projection_enabled) is not bool or not projection_enabled:
+        raise RuntimeError(
+            "qdes_projection_penalty requires the ActionBall finite-q_des projection mode"
+        )
+
+    pre_qdes = getattr(action, "pre_clamp_qdes", None)
+    projected = getattr(action, "nominal_projected_qdes", None)
+    span = getattr(action, "nominal_projection_span", None)
+    pre_valid = getattr(action, "pre_clamp_qdes_valid", None)
+    projected_valid = getattr(action, "nominal_projected_qdes_valid", None)
+    expected_shape = (int(env.num_envs), _QDES_LIMIT_BARRIER_JOINT_COUNT)
+    for name, tensor in (
+        ("pre_clamp_qdes", pre_qdes),
+        ("nominal_projected_qdes", projected),
+        ("nominal_projection_span", span),
+    ):
+        if (
+            not torch.is_tensor(tensor)
+            or tuple(tensor.shape) != expected_shape
+            or tensor.dtype not in (torch.float32, torch.float64)
+        ):
+            raise RuntimeError(
+                f"qdes_projection_penalty requires {name} shaped "
+                f"[num_envs, {_QDES_LIMIT_BARRIER_JOINT_COUNT}] in floating point"
+            )
+    if pre_qdes.device != projected.device or pre_qdes.device != span.device:
+        raise RuntimeError(
+            "qdes_projection_penalty requires request, projection and span on one device"
+        )
+    if pre_qdes.dtype != projected.dtype or pre_qdes.dtype != span.dtype:
+        raise RuntimeError(
+            "qdes_projection_penalty requires request, projection and span in one dtype"
+        )
+    for name, valid in (
+        ("pre_clamp_qdes_valid", pre_valid),
+        ("nominal_projected_qdes_valid", projected_valid),
+    ):
+        if (
+            not torch.is_tensor(valid)
+            or valid.dtype != torch.bool
+            or tuple(valid.shape) != (expected_shape[0],)
+            or valid.device != pre_qdes.device
+        ):
+            raise RuntimeError(
+                f"qdes_projection_penalty requires {name} as same-device bool [num_envs]"
+            )
+
+    valid = pre_valid & projected_valid
+    structural_valid = torch.all(
+        torch.isfinite(projected) & torch.isfinite(span) & span.gt(0.0), dim=1
+    )
+    invalid_active = torch.any(valid & ~structural_valid)
+    if invalid_active.device.type == "cpu":
+        if bool(invalid_active):
+            raise RuntimeError(
+                "qdes_projection_penalty received a valid row with invalid projection/span"
+            )
+    else:
+        torch._assert_async(~invalid_active)
+
+    # Invalid/reset rows are exact zero.  A non-finite raw proposal uses one full envelope span as
+    # a finite surrogate distance; its true safety consequence is independently preserved by the
+    # terminal term.
+    safe_projected = torch.where(
+        structural_valid.unsqueeze(-1), projected, torch.zeros_like(projected)
+    )
+    safe_span = torch.where(
+        structural_valid.unsqueeze(-1), span, torch.ones_like(span)
+    )
+    nonfinite_joint = ~torch.isfinite(pre_qdes)
+    safe_pre_qdes = torch.where(
+        nonfinite_joint, safe_projected + safe_span, pre_qdes
+    )
+    distance = torch.abs(safe_pre_qdes - safe_projected) / safe_span
+    per_joint = -torch.expm1(-shape_rate * distance)
+    valid_joint = valid.unsqueeze(-1)
+    per_joint = torch.where(valid_joint, per_joint, torch.zeros_like(per_joint))
+    distance = torch.where(valid_joint, distance, torch.zeros_like(distance))
+    projected_joint = valid_joint & (nonfinite_joint | distance.gt(0.0))
+    finite_joint = valid_joint & ~nonfinite_joint
+    lower_projected_joint = projected_joint & finite_joint & pre_qdes.lt(projected)
+    upper_projected_joint = projected_joint & finite_joint & pre_qdes.gt(projected)
+    values = torch.sum(per_joint, dim=-1)
+    nonfinite_sample = valid & torch.any(nonfinite_joint, dim=-1)
+    return (
+        values,
+        per_joint,
+        distance,
+        projected_joint,
+        lower_projected_joint,
+        upper_projected_joint,
+        nonfinite_sample,
+    )
+
+
+def _qdes_projection_counter_state(
+    env: ManagerBasedRLEnv,
+    template: torch.Tensor,
+) -> dict[str, torch.Tensor]:
+    expected_names = {
+        _QDES_PROJECTION_OBSERVED_COUNT,
+        _QDES_PROJECTION_SAMPLE_COUNT,
+        _QDES_PROJECTION_NONFINITE_SAMPLE_COUNT,
+        _QDES_PROJECTION_JOINT_COUNT,
+        _QDES_PROJECTION_LOWER_JOINT_COUNT,
+        _QDES_PROJECTION_UPPER_JOINT_COUNT,
+        _QDES_PROJECTION_DISTANCE_SUM,
+        _QDES_PROJECTION_DISTANCE_MAX,
+        _QDES_PROJECTION_VALUE_SUM,
+        _QDES_PROJECTION_MAX_DISTANCE,
+    }
+    count_names = {
+        _QDES_PROJECTION_OBSERVED_COUNT,
+        _QDES_PROJECTION_SAMPLE_COUNT,
+        _QDES_PROJECTION_NONFINITE_SAMPLE_COUNT,
+    }
+    vector_count_names = {
+        _QDES_PROJECTION_JOINT_COUNT,
+        _QDES_PROJECTION_LOWER_JOINT_COUNT,
+        _QDES_PROJECTION_UPPER_JOINT_COUNT,
+    }
+    vector_float_names = {
+        _QDES_PROJECTION_DISTANCE_SUM,
+        _QDES_PROJECTION_DISTANCE_MAX,
+    }
+    state = getattr(env, _QDES_PROJECTION_ACTIVATION_ATTR, None)
+    if state is None:
+        state = {
+            _QDES_PROJECTION_OBSERVED_COUNT: torch.zeros(
+                (), dtype=torch.long, device=template.device
+            ),
+            _QDES_PROJECTION_SAMPLE_COUNT: torch.zeros(
+                (), dtype=torch.long, device=template.device
+            ),
+            _QDES_PROJECTION_NONFINITE_SAMPLE_COUNT: torch.zeros(
+                (), dtype=torch.long, device=template.device
+            ),
+            _QDES_PROJECTION_JOINT_COUNT: torch.zeros(
+                (_QDES_LIMIT_BARRIER_JOINT_COUNT,),
+                dtype=torch.long,
+                device=template.device,
+            ),
+            _QDES_PROJECTION_LOWER_JOINT_COUNT: torch.zeros(
+                (_QDES_LIMIT_BARRIER_JOINT_COUNT,),
+                dtype=torch.long,
+                device=template.device,
+            ),
+            _QDES_PROJECTION_UPPER_JOINT_COUNT: torch.zeros(
+                (_QDES_LIMIT_BARRIER_JOINT_COUNT,),
+                dtype=torch.long,
+                device=template.device,
+            ),
+            _QDES_PROJECTION_DISTANCE_SUM: torch.zeros(
+                (_QDES_LIMIT_BARRIER_JOINT_COUNT,),
+                dtype=template.dtype,
+                device=template.device,
+            ),
+            _QDES_PROJECTION_DISTANCE_MAX: torch.zeros(
+                (_QDES_LIMIT_BARRIER_JOINT_COUNT,),
+                dtype=template.dtype,
+                device=template.device,
+            ),
+            _QDES_PROJECTION_VALUE_SUM: torch.zeros(
+                (), dtype=template.dtype, device=template.device
+            ),
+            _QDES_PROJECTION_MAX_DISTANCE: torch.zeros(
+                (), dtype=template.dtype, device=template.device
+            ),
+        }
+        setattr(env, _QDES_PROJECTION_ACTIVATION_ATTR, state)
+    if not isinstance(state, dict) or set(state) != expected_names:
+        raise RuntimeError("qdes projection activation state has a schema mismatch")
+    for name, value in state.items():
+        expected_dtype = (
+            torch.long
+            if name in count_names or name in vector_count_names
+            else template.dtype
+        )
+        expected_shape = (
+            (_QDES_LIMIT_BARRIER_JOINT_COUNT,)
+            if name in vector_count_names or name in vector_float_names
+            else ()
+        )
+        if (
+            not torch.is_tensor(value)
+            or tuple(value.shape) != expected_shape
+            or value.device != template.device
+            or value.dtype != expected_dtype
+        ):
+            raise RuntimeError(
+                "qdes projection activation state has a dtype/device/shape mismatch"
+            )
+    return state
+
+
+def _record_qdes_projection_activation(
+    env: ManagerBasedRLEnv,
+    values: torch.Tensor,
+    distance: torch.Tensor,
+    projected_joint: torch.Tensor,
+    lower_projected_joint: torch.Tensor,
+    upper_projected_joint: torch.Tensor,
+    nonfinite_sample: torch.Tensor,
+    *,
+    signature: tuple,
+) -> None:
+    token = getattr(env, "common_step_counter", None)
+    if type(token) is not int or token < 0:
+        raise RuntimeError(
+            "qdes projection activation requires a nonnegative plain common_step_counter"
+        )
+    state = _qdes_projection_counter_state(env, values)
+    if getattr(env, _QDES_PROJECTION_OBSERVED_STEP_ATTR, None) == token:
+        if getattr(env, _QDES_PROJECTION_SIGNATURE_ATTR, None) != signature:
+            raise RuntimeError(
+                "qdes projection RewardTerm used different parameters in one step"
+            )
+        return
+
+    active_sample = torch.any(projected_joint.detach(), dim=-1)
+    state[_QDES_PROJECTION_OBSERVED_COUNT].add_(values.numel())
+    state[_QDES_PROJECTION_SAMPLE_COUNT].add_(
+        active_sample.sum(dtype=torch.long)
+    )
+    state[_QDES_PROJECTION_NONFINITE_SAMPLE_COUNT].add_(
+        nonfinite_sample.detach().sum(dtype=torch.long)
+    )
+    state[_QDES_PROJECTION_JOINT_COUNT].add_(
+        projected_joint.detach().sum(dim=0, dtype=torch.long)
+    )
+    state[_QDES_PROJECTION_LOWER_JOINT_COUNT].add_(
+        lower_projected_joint.detach().sum(dim=0, dtype=torch.long)
+    )
+    state[_QDES_PROJECTION_UPPER_JOINT_COUNT].add_(
+        upper_projected_joint.detach().sum(dim=0, dtype=torch.long)
+    )
+    state[_QDES_PROJECTION_DISTANCE_SUM].add_(
+        torch.where(
+            projected_joint.detach(),
+            distance.detach(),
+            torch.zeros_like(distance),
+        ).sum(dim=0)
+    )
+    state[_QDES_PROJECTION_DISTANCE_MAX].copy_(
+        torch.maximum(
+            state[_QDES_PROJECTION_DISTANCE_MAX],
+            distance.detach().max(dim=0).values,
+        )
+    )
+    state[_QDES_PROJECTION_VALUE_SUM].add_(values.detach().sum())
+    state[_QDES_PROJECTION_MAX_DISTANCE].copy_(
+        torch.maximum(
+            state[_QDES_PROJECTION_MAX_DISTANCE],
+            distance.detach().max(),
+        )
+    )
+    setattr(env, _QDES_PROJECTION_OBSERVED_STEP_ATTR, token)
+    setattr(env, _QDES_PROJECTION_SIGNATURE_ATTR, signature)
+
+
+def qdes_projection_penalty(
+    env: ManagerBasedRLEnv,
+    action_name: str = "joint_pos",
+    shape_rate: float = _QDES_PROJECTION_DEFAULT_SHAPE_RATE,
+) -> torch.Tensor:
+    """Penalize finite constrained-action projection distance without terminating the sample."""
+
+    shape_rate = _validate_qdes_projection_shape_rate(shape_rate)
+    (
+        values,
+        _,
+        distance,
+        projected_joint,
+        lower_projected_joint,
+        upper_projected_joint,
+        nonfinite_sample,
+    ) = (
+        _qdes_projection_penalty_values(env, action_name, shape_rate)
+    )
+    _record_qdes_projection_activation(
+        env,
+        values,
+        distance,
+        projected_joint,
+        lower_projected_joint,
+        upper_projected_joint,
+        nonfinite_sample,
+        signature=(action_name, shape_rate),
+    )
+    return values
+
+
 def actual_joint_limit_barrier_v2_probe(
     env: ManagerBasedRLEnv,
     asset_cfg,
@@ -1954,9 +2314,67 @@ def consume_qdes_limit_barrier_activation_counters(
             for prefix, state in v2_states
             for name, value in state.items()
         }
+        projection_state = getattr(env, _QDES_PROJECTION_ACTIVATION_ATTR, None)
+        if projection_state is not None:
+            projection_state = _qdes_projection_counter_state(
+                env, template
+            )
+            joint_counts = projection_state[_QDES_PROJECTION_JOINT_COUNT]
+            distance_sums = projection_state[_QDES_PROJECTION_DISTANCE_SUM]
+            distance_maxima = projection_state[_QDES_PROJECTION_DISTANCE_MAX]
+            observed_count = projection_state[_QDES_PROJECTION_OBSERVED_COUNT]
+            for name, value in projection_state.items():
+                if value.ndim == 0:
+                    snapshot[f"projection_{name}"] = value.detach().clone()
+            snapshot["projection_saturation_sample_step_ratio"] = torch.where(
+                observed_count.gt(0),
+                projection_state[_QDES_PROJECTION_SAMPLE_COUNT]
+                / torch.clamp(observed_count, min=1),
+                torch.zeros_like(distance_sums.sum()),
+            ).detach().clone()
+            total_count = joint_counts.sum()
+            snapshot["projection_mean_normalized_projection_distance"] = (
+                torch.where(
+                    total_count.gt(0),
+                    distance_sums.sum() / torch.clamp(total_count, min=1),
+                    torch.zeros_like(distance_sums.sum()),
+                ).detach().clone()
+            )
+            for joint_index in range(_QDES_LIMIT_BARRIER_JOINT_COUNT):
+                count = joint_counts[joint_index]
+                prefix = f"projection_joint_{joint_index:02d}"
+                snapshot[f"{prefix}_trigger_count"] = count.detach().clone()
+                # "Saturation" means the nominal projected q_des is exactly on the corresponding
+                # lower/upper target-envelope clamp edge.  Counts are environment-policy-steps;
+                # dividing by observed samples makes the launch target (for example 0.5%) direct.
+                snapshot[
+                    f"{prefix}_saturation_env_step_count"
+                ] = count.detach().clone()
+                snapshot[f"{prefix}_saturation_env_step_ratio"] = torch.where(
+                    observed_count.gt(0),
+                    count / torch.clamp(observed_count, min=1),
+                    torch.zeros_like(distance_sums[joint_index]),
+                ).detach().clone()
+                snapshot[f"{prefix}_lower_saturation_env_step_count"] = projection_state[
+                    _QDES_PROJECTION_LOWER_JOINT_COUNT
+                ][joint_index].detach().clone()
+                snapshot[f"{prefix}_upper_saturation_env_step_count"] = projection_state[
+                    _QDES_PROJECTION_UPPER_JOINT_COUNT
+                ][joint_index].detach().clone()
+                snapshot[f"{prefix}_mean_normalized_excess"] = torch.where(
+                    count.gt(0),
+                    distance_sums[joint_index] / torch.clamp(count, min=1),
+                    torch.zeros_like(distance_sums[joint_index]),
+                ).detach().clone()
+                snapshot[f"{prefix}_max_normalized_excess"] = distance_maxima[
+                    joint_index
+                ].detach().clone()
         with torch.inference_mode():
             for _, state in v2_states:
                 for value in state.values():
+                    value.zero_()
+            if projection_state is not None:
+                for value in projection_state.values():
                     value.zero_()
         return snapshot
 
@@ -3997,7 +4415,12 @@ def _ignore_hold(command, value: torch.Tensor, ignore_hold: bool) -> torch.Tenso
     return value & ~command.in_hold.bool()
 
 
-def _action_ball_reference_terminations_mask(env) -> torch.Tensor | None:
+def _action_ball_reference_terminations_mask(
+    env,
+    *,
+    reason: str | None = None,
+    raw_verdict: torch.Tensor | None = None,
+) -> torch.Tensor | None:
     """Per-env curriculum gate for the reference-consistency terminations.
 
     Franco 2026-07-28 third ruling (sole default behavior in curriculum
@@ -4022,11 +4445,42 @@ def _action_ball_reference_terminations_mask(env) -> torch.Tensor | None:
     )
     if getter is None:
         return None
+    # Default ``phase_gated`` takes the historical hot path: no recorder call,
+    # no counters, and no new tensor work.  The explicit treatment reuses this
+    # already-resolved command term to publish the raw mask before gating.
+    if (
+        reason is not None
+        and getattr(
+            getattr(racket, "cfg", None),
+            "reference_guard_mode",
+            "phase_gated",
+        )
+        == "metrics_only"
+    ):
+        if raw_verdict is None:
+            raise RuntimeError(
+                "metrics-only reference guard requires the raw verdict"
+            )
+        recorder = getattr(
+            racket, "action_ball_record_reference_guard_raw", None
+        )
+        if not callable(recorder):
+            raise RuntimeError(
+                "metrics-only reference guard has no raw recorder"
+            )
+        recorder(reason, raw_verdict)
     return getter()
 
 
-def _gate_reference_termination(env, verdict: torch.Tensor) -> torch.Tensor:
-    mask = _action_ball_reference_terminations_mask(env)
+def _gate_reference_termination(
+    env,
+    verdict: torch.Tensor,
+    *,
+    reason: str | None = None,
+) -> torch.Tensor:
+    mask = _action_ball_reference_terminations_mask(
+        env, reason=reason, raw_verdict=verdict
+    )
     if mask is None:
         return verdict
     return verdict & mask
@@ -4045,6 +4499,7 @@ def bad_anchor_pos_z_only_hold_aware(
             bad_anchor_pos_z_only(env, command_name, threshold),
             ignore_hold,
         ),
+        reason="anchor_pos",
     )
 
 
@@ -4061,6 +4516,7 @@ def bad_anchor_ori_hold_aware(
             bad_anchor_ori(env, asset_cfg, command_name, threshold),
             ignore_hold,
         ),
+        reason="anchor_ori",
     )
 
 
@@ -4078,6 +4534,7 @@ def bad_motion_body_pos_z_only_hold_aware(
             bad_motion_body_pos_z_only(env, command_name, threshold, body_names),
             ignore_hold,
         ),
+        reason="ee_body_pos",
     )
 
 def foot_orientation_discipline(env, command_name: str, asset_cfg, hold_gate: bool = False):

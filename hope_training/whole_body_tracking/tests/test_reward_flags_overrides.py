@@ -397,6 +397,34 @@ def test_empty_task_applies_nothing():
     assert not hasattr(env_cfg, train_mod._LATERAL_TRAINING_SPEC_ATTR)
 
 
+def test_arm_torque_request_is_not_claimed_applied_before_backend_resolution():
+    env_cfg = _make_env_cfg()
+    env_cfg.rewards.arm_torque_saturation = _Term(weight=0.0)
+    env_cfg, applied = _apply(
+        {"rewards": {"arm_torque_saturation_weight": -0.5}},
+        env_cfg=env_cfg,
+    )
+
+    assert env_cfg.rewards.arm_torque_saturation.weight == -0.5
+    assert not any("arm_torque_saturation" in marker for marker in applied)
+    line = train_mod._reward_backend_compatibility_log_line(
+        {
+            "name": "arm_torque_saturation",
+            "requested_weight": -0.5,
+            "effective_weight": 0.0,
+            "status": "disabled_incompatible_actuator_backend",
+            "reason_code": (
+                "implicit_actuator_has_no_proven_explicit_preclip_demand"
+            ),
+        }
+    )
+    assert "requested_weight=-0.5" in line
+    assert "effective_weight=0.0" in line
+    assert "status=disabled_incompatible_actuator_backend" in line
+    assert ".weight=-0.5" not in line
+    assert "applied" not in line
+
+
 def test_lateral_trainer_default_off_is_historical_no_hook_path():
     env_cfg, applied = _apply({"lateral_perturbation": {"enabled": False}})
     assert not hasattr(env_cfg, train_mod._LATERAL_TRAINING_SPEC_ATTR)

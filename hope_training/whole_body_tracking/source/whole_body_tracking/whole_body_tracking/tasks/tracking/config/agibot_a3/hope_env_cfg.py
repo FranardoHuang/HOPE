@@ -2124,6 +2124,23 @@ class HOPEActionBallRewardsCfg(HOPEVirtualBallRewardsCfg):
             "penalty_floor": 0.25,
         },
     )
+    # A finite Gaussian proposal outside the drive's target envelope is projected rather than
+    # reset.  This independent cost teaches the actor to keep its mean/noise inside that envelope;
+    # the existing q_des barrier above still shapes the *executed* target near its soft edge.
+    #
+    # With shape_rate 4, a 10%-of-envelope projection costs 0.330 before weighting.  At
+    # policy_dt=0.02 and the adopted weight -5 that is -0.033 per affected joint-step; the
+    # asymptotic maximum is -0.10 per joint-step.  Since all 31 joints are summed, -5 is the
+    # conservative main-run dose that cannot easily swamp early imitation/hit income.  A -20
+    # strong-dose comparison may be preregistered separately; it is not tonight's default.
+    qdes_projection_penalty = RewTerm(
+        func=mdp.qdes_projection_penalty,
+        weight=-5.0,
+        params={
+            "action_name": "joint_pos",
+            "shape_rate": 4.0,
+        },
+    )
     # Override Isaac Lab's inherited ``joint_pos_limits`` tail: that legacy term is exactly zero
     # until actual q has already crossed the soft limit, so it cannot prevent "grazing" the band.
     joint_limit = RewTerm(
@@ -2220,6 +2237,11 @@ class HOPEPingPongActionBallAgibotA3EnvCfg(HOPEPingPongHitterAgibotA3EnvCfg):
         self.actions.joint_pos.pre_apply_guard_terminal_archive_capacity = 4096
         self.actions.joint_pos.pre_apply_guard_margin_rad = 0.0
         self.actions.joint_pos.pre_apply_guard_margin_fraction = 0.02
+        # Finite actor proposals outside the physical hard-inner envelope are ordinary
+        # constrained actions: execute the same nearest safe target projection used by deploy
+        # parity and preserve the transition for the dense projection-distance penalty.  NaN/Inf
+        # and actual/predicted physical crossings remain brake-and-terminate.
+        self.actions.joint_pos.project_finite_preclamp_qdes_without_termination = True
         # Observe the same resolved robot_hit_table term at every physics substep.  The action term
         # records substeps 1..3 before the next write; the DoneTerm finalizes substep 4.
         self.actions.joint_pos.table_contact_substep_guard = True

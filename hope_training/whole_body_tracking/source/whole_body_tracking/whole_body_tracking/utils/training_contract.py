@@ -29,9 +29,15 @@ CHECKPOINT_CONTRACT_SHA_KEY = "training_contract_sha256"
 CHECKPOINT_CONTRACT_LINEAGE_EXACT_KEY = "training_contract_lineage_exact"
 CHECKPOINT_LAUNCH_CLAIM_SHA_KEY = "training_launch_claim_sha256"
 ACTION_BALL_TRAINING_KEY = "action_ball_training"
+FINITE_PRECLAMP_QDES_PROJECTION_KEY = (
+    "finite_preclamp_qdes_projection_enabled"
+)
 ACTION_BALL_ACTION_SET_IDENTITY_KEY = "action_set_identity"
 ACTION_BALL_DIAGNOSTIC_METADATA_KEY = "action_ball_diagnostic_unauthorized"
 FORMAL_EVIDENCE_BOOKABLE_METADATA_KEY = "formal_evidence_bookable"
+ACTION_BALL_POLICY_BOOTSTRAP_KIND = (
+    "action_ball_shared_ready_actor_bootstrap_v1"
+)
 ACTION_BALL_ACTION_SET_SOURCE_PATH = (
     "hope_training/whole_body_tracking/scripts/"
     "action_ball_action_set_contract.py"
@@ -97,6 +103,62 @@ _ACTION_BALL_AUTHORIZATION_KEYS = frozenset(
         "curriculum_promotion_prohibited",
         "exact_export_prohibited",
         "formal_judge_prohibited",
+    }
+)
+_ACTION_BALL_POLICY_BOOTSTRAP_KEYS = frozenset(
+    {
+        "schema_version",
+        "kind",
+        "action_count",
+        "action_order",
+        "joint_names",
+        "ready_source",
+        "decoder",
+        "initialization",
+        "hard_inner_guard",
+    }
+)
+_ACTION_BALL_POLICY_BOOTSTRAP_READY_KEYS = frozenset(
+    {
+        "semantics",
+        "canonical_ready_sha256",
+        "canonical_ready_fk_sha256",
+        "motion_sha256_per_action",
+        "shared_ready_joint_pos",
+        "shared_ready_joint_pos_sha256",
+    }
+)
+_ACTION_BALL_POLICY_BOOTSTRAP_DECODER_KEYS = frozenset(
+    {
+        "semantics",
+        "use_default_offset",
+        "default_joint_pos",
+        "action_scale",
+        "normalized_bias",
+        "startup_offset_delta_source",
+        "startup_offset_delta_lower",
+        "startup_offset_delta_upper",
+    }
+)
+_ACTION_BALL_POLICY_BOOTSTRAP_INITIALIZATION_KEYS = frozenset(
+    {
+        "fresh_only",
+        "resume_overwrite_prohibited",
+        "output_layer_weight",
+        "output_layer_bias",
+        "init_noise_std",
+        "sigma_envelope",
+    }
+)
+_ACTION_BALL_POLICY_BOOTSTRAP_GUARD_KEYS = frozenset(
+    {
+        "limit_source",
+        "margin_rad",
+        "margin_fraction",
+        "hard_lower",
+        "hard_upper",
+        "hard_inner_lower",
+        "hard_inner_upper",
     }
 )
 SCHEMA3_TASK_KEYS = (
@@ -1679,6 +1741,41 @@ def runtime_execution_facts(
     qdes_clamp = bool(
         getattr(action, "_clamp_enabled", getattr(env.cfg.actions.joint_pos, "clamp", False))
     )
+    # OFF is encoded by total absence so every legacy/default schema-3 contract stays
+    # byte-identical.  ON must be proved twice: by the composed action config and by the
+    # instantiated action term's exact runtime property.  Falling back from a true config to the
+    # config value would let a stale action implementation falsely claim constrained-action
+    # projection support.
+    projection_cfg = getattr(
+        action_cfg,
+        "project_finite_preclamp_qdes_without_termination",
+        False,
+    )
+    if type(projection_cfg) is not bool:
+        raise RuntimeError(
+            "project_finite_preclamp_qdes_without_termination must be an exact boolean"
+        )
+    projection_missing = object()
+    projection_runtime = getattr(
+        action,
+        FINITE_PRECLAMP_QDES_PROJECTION_KEY,
+        projection_missing,
+    )
+    if projection_runtime is projection_missing:
+        if projection_cfg:
+            raise RuntimeError(
+                "finite q_des projection is enabled in config but the instantiated "
+                "action term exposes no runtime projection property"
+            )
+        projection_runtime = False
+    if type(projection_runtime) is not bool:
+        raise RuntimeError(
+            f"{FINITE_PRECLAMP_QDES_PROJECTION_KEY} must be an exact boolean"
+        )
+    if projection_runtime is not projection_cfg:
+        raise RuntimeError(
+            "finite q_des projection config/runtime facts disagree"
+        )
     # R-a masking leaves the 62-D layout unchanged, so both the true-only mask bit and an always
     # present provenance epoch are needed: only epoch=1 + absent mask proves unmasked. Detection
     # unwraps only structurally empty partials and accepts only the two canonical callables.  Bound
@@ -1715,6 +1812,11 @@ def runtime_execution_facts(
         "qdes_joint_pos_limits": limits,
         "action_use_default_offset": use_default_offset,
         "qdes_clamp": qdes_clamp,
+        **(
+            {FINITE_PRECLAMP_QDES_PROJECTION_KEY: True}
+            if projection_runtime
+            else {}
+        ),
         "physics_step_dt_s": physics_dt,
         "policy_step_dt_s": policy_dt,
         "control_decimation": decimation,
@@ -3039,6 +3141,359 @@ def _optional_exact_bool(mapping: Mapping, key: str, *, name: str) -> bool:
     return value
 
 
+def _action_ball_bootstrap_sha256(value: object, *, name: str) -> str:
+    if (
+        type(value) is not str
+        or len(value) != 64
+        or any(character not in "0123456789abcdef" for character in value)
+    ):
+        raise ValueError(f"{name} must be exactly 64 lowercase hexadecimal characters")
+    return value
+
+
+def _action_ball_bootstrap_float_vector(
+    value: object, *, name: str, expected: int
+) -> list[float]:
+    if (
+        not isinstance(value, (list, tuple))
+        or isinstance(value, (str, bytes))
+        or len(value) != expected
+    ):
+        raise ValueError(f"{name} must contain exactly {expected} numbers")
+    result: list[float] = []
+    for index, item in enumerate(value):
+        if type(item) not in (int, float) or not math.isfinite(float(item)):
+            raise ValueError(f"{name}[{index}] must be a finite number")
+        result.append(float(item))
+    return result
+
+
+def action_ball_shared_ready_sha256(
+    *,
+    action_order: list[str] | tuple[str, ...],
+    joint_names: list[str] | tuple[str, ...],
+    shared_ready_joint_pos: list[float] | tuple[float, ...],
+) -> str:
+    """Hash the exact action order, joint order and shared ready vector.
+
+    This digest is deliberately independent of filesystem locations. The
+    enclosing training contract separately binds every motion byte and the
+    canonical-ready registry digests.
+    """
+
+    document = {
+        "schema_version": 1,
+        "semantics": "motion.joint_pos[motion.seg_start[action_slot]]",
+        "action_order": list(action_order),
+        "joint_names": list(joint_names),
+        "shared_ready_joint_pos": list(shared_ready_joint_pos),
+    }
+    try:
+        encoded = json.dumps(
+            document,
+            allow_nan=False,
+            ensure_ascii=True,
+            separators=(",", ":"),
+            sort_keys=True,
+        ).encode("utf-8")
+    except (TypeError, ValueError) as exc:
+        raise ValueError("shared-ready digest input is not finite JSON") from exc
+    return hashlib.sha256(encoded).hexdigest()
+
+
+def validate_action_ball_policy_bootstrap(
+    value: object, *, expected_action_count: int | None = None
+) -> dict:
+    """Validate the fresh-only shared-ready actor initialization contract.
+
+    The bootstrap does not change the deployed action decoder. It initializes
+    a fresh actor's last linear layer to emit the normalized residual from the
+    robot default pose to one shared action-ready pose, with a small Gaussian
+    exploration scale. A resumed policy must never be overwritten.
+    """
+
+    block = _require_exact_mapping_keys(
+        value,
+        _ACTION_BALL_POLICY_BOOTSTRAP_KEYS,
+        name="action-ball policy bootstrap",
+    )
+    if (
+        type(block["schema_version"]) is not int
+        or block["schema_version"] != 1
+        or block["kind"] != ACTION_BALL_POLICY_BOOTSTRAP_KIND
+    ):
+        raise ValueError(
+            "action-ball policy bootstrap must use shared-ready schema 1"
+        )
+    action_count = block["action_count"]
+    if type(action_count) is not int or action_count not in (1, 5):
+        raise ValueError(
+            "shared-ready actor bootstrap supports only exact N=1 or N=5; "
+            "a differing-ready bank requires action-conditioned bootstrap"
+        )
+    if (
+        expected_action_count is not None
+        and action_count != expected_action_count
+    ):
+        raise ValueError(
+            "action-ball policy bootstrap action_count disagrees with actor contract"
+        )
+    action_order = block["action_order"]
+    if (
+        not isinstance(action_order, (list, tuple))
+        or len(action_order) != action_count
+        or any(type(item) is not str or not item for item in action_order)
+        or len(set(action_order)) != action_count
+    ):
+        raise ValueError(
+            "action-ball policy bootstrap requires one unique action id per slot"
+        )
+    joint_names = block["joint_names"]
+    if (
+        not isinstance(joint_names, (list, tuple))
+        or len(joint_names) != 31
+        or any(type(item) is not str or not item for item in joint_names)
+        or len(set(joint_names)) != 31
+    ):
+        raise ValueError(
+            "action-ball policy bootstrap is bound to 31 unique A3 joints"
+        )
+
+    ready = _require_exact_mapping_keys(
+        block["ready_source"],
+        _ACTION_BALL_POLICY_BOOTSTRAP_READY_KEYS,
+        name="action-ball policy bootstrap ready_source",
+    )
+    if (
+        ready["semantics"]
+        != "motion.joint_pos[motion.seg_start[action_slot]]"
+    ):
+        raise ValueError("action-ball bootstrap ready source semantics changed")
+    for key in ("canonical_ready_sha256", "canonical_ready_fk_sha256"):
+        raw = ready[key]
+        if raw != "":
+            _action_ball_bootstrap_sha256(
+                raw, name=f"action-ball policy bootstrap ready_source.{key}"
+            )
+    motion_digests = ready["motion_sha256_per_action"]
+    if (
+        not isinstance(motion_digests, (list, tuple))
+        or len(motion_digests) != action_count
+    ):
+        raise ValueError(
+            "action-ball policy bootstrap requires one motion SHA per action"
+        )
+    for index, digest in enumerate(motion_digests):
+        _action_ball_bootstrap_sha256(
+            digest,
+            name=(
+                "action-ball policy bootstrap "
+                f"ready_source.motion_sha256_per_action[{index}]"
+            ),
+        )
+    ready_q = _action_ball_bootstrap_float_vector(
+        ready["shared_ready_joint_pos"],
+        name="action-ball policy bootstrap shared_ready_joint_pos",
+        expected=31,
+    )
+    expected_ready_sha = action_ball_shared_ready_sha256(
+        action_order=list(action_order),
+        joint_names=list(joint_names),
+        shared_ready_joint_pos=ready_q,
+    )
+    if (
+        _action_ball_bootstrap_sha256(
+            ready["shared_ready_joint_pos_sha256"],
+            name="action-ball policy bootstrap shared_ready_joint_pos_sha256",
+        )
+        != expected_ready_sha
+    ):
+        raise ValueError(
+            "action-ball policy bootstrap shared-ready SHA is not reproducible"
+        )
+
+    decoder = _require_exact_mapping_keys(
+        block["decoder"],
+        _ACTION_BALL_POLICY_BOOTSTRAP_DECODER_KEYS,
+        name="action-ball policy bootstrap decoder",
+    )
+    if (
+        decoder["semantics"] != "q_des=default_joint_pos+action_scale*action"
+        or decoder["use_default_offset"] is not True
+    ):
+        raise ValueError(
+            "action-ball policy bootstrap may not change the default-offset decoder"
+        )
+    default_q = _action_ball_bootstrap_float_vector(
+        decoder["default_joint_pos"],
+        name="action-ball policy bootstrap default_joint_pos",
+        expected=31,
+    )
+    scale = _action_ball_bootstrap_float_vector(
+        decoder["action_scale"],
+        name="action-ball policy bootstrap action_scale",
+        expected=31,
+    )
+    bias = _action_ball_bootstrap_float_vector(
+        decoder["normalized_bias"],
+        name="action-ball policy bootstrap normalized_bias",
+        expected=31,
+    )
+    if (
+        decoder["startup_offset_delta_source"]
+        != "events.add_joint_default_pos.uniform_add"
+    ):
+        raise ValueError(
+            "action-ball policy bootstrap startup offset source changed"
+        )
+    startup_delta_lower = _action_ball_bootstrap_float_vector(
+        decoder["startup_offset_delta_lower"],
+        name="action-ball policy bootstrap startup_offset_delta_lower",
+        expected=31,
+    )
+    startup_delta_upper = _action_ball_bootstrap_float_vector(
+        decoder["startup_offset_delta_upper"],
+        name="action-ball policy bootstrap startup_offset_delta_upper",
+        expected=31,
+    )
+    if any(
+        lower > upper
+        for lower, upper in zip(startup_delta_lower, startup_delta_upper)
+    ):
+        raise ValueError(
+            "action-ball policy bootstrap startup offset envelope is invalid"
+        )
+    if any(item <= 0.0 for item in scale):
+        raise ValueError("action-ball policy bootstrap action_scale must be positive")
+    for index, (default, gain, normalized, target) in enumerate(
+        zip(default_q, scale, bias, ready_q)
+    ):
+        reconstructed = default + gain * normalized
+        if not math.isclose(
+            reconstructed, target, rel_tol=0.0, abs_tol=2.0e-7
+        ):
+            raise ValueError(
+                "action-ball policy bootstrap normalized bias does not decode "
+                f"to shared ready at joint {index}"
+            )
+
+    initialization = _require_exact_mapping_keys(
+        block["initialization"],
+        _ACTION_BALL_POLICY_BOOTSTRAP_INITIALIZATION_KEYS,
+        name="action-ball policy bootstrap initialization",
+    )
+    if (
+        initialization["fresh_only"] is not True
+        or initialization["resume_overwrite_prohibited"] is not True
+        or initialization["output_layer_weight"] != "zeros"
+        or initialization["output_layer_bias"] != "decoder.normalized_bias"
+    ):
+        raise ValueError(
+            "action-ball actor bootstrap must be a fresh-only zero-weight/bias initialization"
+        )
+    noise_std = initialization["init_noise_std"]
+    sigma = initialization["sigma_envelope"]
+    if (
+        type(noise_std) not in (int, float)
+        or not math.isfinite(float(noise_std))
+        or float(noise_std) != 0.02
+        or type(sigma) not in (int, float)
+        or float(sigma) != 4.0
+    ):
+        raise ValueError(
+            "action-ball shared-ready bootstrap requires init_noise_std=0.02 "
+            "and a 4-sigma envelope"
+        )
+
+    guard = _require_exact_mapping_keys(
+        block["hard_inner_guard"],
+        _ACTION_BALL_POLICY_BOOTSTRAP_GUARD_KEYS,
+        name="action-ball policy bootstrap hard_inner_guard",
+    )
+    margin_rad = guard["margin_rad"]
+    margin_fraction = guard["margin_fraction"]
+    if (
+        guard["limit_source"] != "articulation.data.joint_pos_limits"
+        or type(margin_rad) not in (int, float)
+        or float(margin_rad) != 0.0
+        or type(margin_fraction) not in (int, float)
+        or float(margin_fraction) != 0.02
+    ):
+        raise ValueError(
+            "action-ball bootstrap hard-inner guard must match the existing "
+            "two-percent physical-limit termination"
+        )
+    hard_lower = _action_ball_bootstrap_float_vector(
+        guard["hard_lower"],
+        name="action-ball policy bootstrap hard_lower",
+        expected=31,
+    )
+    hard_upper = _action_ball_bootstrap_float_vector(
+        guard["hard_upper"],
+        name="action-ball policy bootstrap hard_upper",
+        expected=31,
+    )
+    inner_lower = _action_ball_bootstrap_float_vector(
+        guard["hard_inner_lower"],
+        name="action-ball policy bootstrap hard_inner_lower",
+        expected=31,
+    )
+    inner_upper = _action_ball_bootstrap_float_vector(
+        guard["hard_inner_upper"],
+        name="action-ball policy bootstrap hard_inner_upper",
+        expected=31,
+    )
+    for index, (
+        lo,
+        hi,
+        inner_lo,
+        inner_hi,
+        target,
+        gain,
+        offset_lo,
+        offset_hi,
+    ) in enumerate(
+        zip(
+            hard_lower,
+            hard_upper,
+            inner_lower,
+            inner_upper,
+            ready_q,
+            scale,
+            startup_delta_lower,
+            startup_delta_upper,
+        )
+    ):
+        if not lo < hi:
+            raise ValueError(
+                f"action-ball policy bootstrap hard limits are invalid at joint {index}"
+            )
+        expected_inner_lo = lo + 0.02 * (hi - lo)
+        expected_inner_hi = hi - 0.02 * (hi - lo)
+        if (
+            not math.isclose(
+                inner_lo, expected_inner_lo, rel_tol=0.0, abs_tol=2.0e-7
+            )
+            or not math.isclose(
+                inner_hi, expected_inner_hi, rel_tol=0.0, abs_tol=2.0e-7
+            )
+        ):
+            raise ValueError(
+                "action-ball policy bootstrap hard-inner envelope is not "
+                f"reproducible at joint {index}"
+            )
+        radius = 4.0 * 0.02 * gain
+        if not (
+            inner_lo < target + offset_lo - radius
+            and target + offset_hi + radius < inner_hi
+        ):
+            raise ValueError(
+                "action-ball policy bootstrap 4-sigma plus startup-offset "
+                f"q_des envelope reaches the hard forbidden band at joint {index}"
+            )
+    return dict(block)
+
+
 def validate_action_ball_training_authorization(contract: Mapping) -> bool:
     """Validate and return the action-ball diagnostic authorization brand.
 
@@ -3057,10 +3512,23 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
         and actor_contract.startswith("action_ball_n")
     )
     block_present = ACTION_BALL_TRAINING_KEY in contract
+    projection_present = FINITE_PRECLAMP_QDES_PROJECTION_KEY in contract
+    if (
+        projection_present
+        and contract[FINITE_PRECLAMP_QDES_PROJECTION_KEY] is not True
+    ):
+        raise ValueError(
+            "schema-3 finite_preclamp_qdes_projection_enabled must be the "
+            "exact boolean true when present"
+        )
     action_ball_intent = (
         target_mode == "action_ball" or actor_prefixed or block_present
     )
     if not action_ball_intent:
+        if projection_present:
+            raise ValueError(
+                "schema-3 finite q_des projection is ActionBall-only"
+            )
         return False
     if target_mode != "action_ball":
         raise ValueError(
@@ -3089,6 +3557,11 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
             "schema-3 action-ball contract is missing the mandatory "
             "action_ball_training authorization block"
         )
+    if not projection_present:
+        raise ValueError(
+            "schema-3 action-ball contract is missing the immutable finite "
+            "pre-clamp q_des projection runtime fact"
+        )
     if (
         type(contract.get("schema_version")) is not int
         or contract["schema_version"] != TRAINING_CONTRACT_SCHEMA_VERSION
@@ -3104,6 +3577,11 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
     if type(action_ball_schema) is not int or action_ball_schema != 1:
         raise ValueError(
             "schema-3 action_ball_training.schema_version must be integer 1"
+        )
+    policy_bootstrap = action_ball.get("policy_bootstrap")
+    if policy_bootstrap is not None:
+        validate_action_ball_policy_bootstrap(
+            policy_bootstrap, expected_action_count=actor_count
         )
     authorization = _require_exact_mapping_keys(
         action_ball.get("authorization"),

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import dataclasses
+import hashlib
 import importlib.util
 import json
 from collections import OrderedDict
@@ -51,6 +52,30 @@ class Selector:
     name: str
     body_names: list
     body_ids: slice = dataclasses.field(default_factory=lambda: slice(None))
+
+
+class ImplicitActuatorCfg:
+    pass
+
+
+class IdealPDActuatorCfg:
+    pass
+
+
+@dataclasses.dataclass
+class RobotCfg:
+    actuators: dict
+
+
+@dataclasses.dataclass
+class SceneCfg:
+    robot: RobotCfg
+
+
+@dataclasses.dataclass
+class EnvironmentCfg:
+    rewards: dict
+    scene: SceneCfg
 
 
 def _quality_cfg(weights):
@@ -145,6 +170,148 @@ def test_inactive_none_and_zero_weight_terms_are_omitted():
     }
     receipt = RECIPE.build_effective_reward_receipt(cfg)
     assert [term["name"] for term in receipt["terms"]] == ["active_term"]
+
+
+def _backend_cfg(actuator_type):
+    return EnvironmentCfg(
+        rewards={
+            "arm_torque_saturation": Term(
+                racket_velocity_reward,
+                -0.5,
+                {"command_name": "racket_target"},
+            ),
+            "active_term": Term(racket_position_reward, 4.0),
+        },
+        scene=SceneCfg(
+            robot=RobotCfg(
+                actuators={
+                    "arms": actuator_type(),
+                    "waist": actuator_type(),
+                }
+            )
+        ),
+    )
+
+
+def test_implicit_arm_torque_request_has_explicit_disabled_receipt():
+    cfg = _backend_cfg(ImplicitActuatorCfg)
+
+    compatibility = RECIPE.build_reward_backend_compatibility_receipt(cfg)
+    assert set(compatibility) == {
+        "schema_version",
+        "kind",
+        "effective_reward_recipe_sha256",
+        "decisions",
+        "sha256",
+    }
+    assert compatibility["schema_version"] == 1
+    assert (
+        compatibility["kind"]
+        == "whole_body_tracking.reward_backend_compatibility"
+    )
+    assert compatibility["decisions"] == [
+        {
+            "name": "arm_torque_saturation",
+            "status": "disabled_incompatible_actuator_backend",
+            "requested_weight": -0.5,
+            "effective_weight": 0.0,
+            "reason_code": (
+                "implicit_actuator_has_no_proven_explicit_preclip_demand"
+            ),
+            "reason": (
+                "ImplicitActuator does not expose a proven explicit "
+                "pre-clip demand through computed_torque"
+            ),
+            "actuator_backends": {
+                "arms": "implicit",
+                "waist": "implicit",
+            },
+        }
+    ]
+    payload = {
+        "schema_version": compatibility["schema_version"],
+        "kind": compatibility["kind"],
+        "effective_reward_recipe_sha256": compatibility[
+            "effective_reward_recipe_sha256"
+        ],
+        "decisions": compatibility["decisions"],
+    }
+    assert compatibility["sha256"] == hashlib.sha256(
+        RECIPE.canonical_reward_backend_compatibility_json(payload).encode(
+            "utf-8"
+        )
+    ).hexdigest()
+    assert cfg.rewards["arm_torque_saturation"].weight == 0.0
+
+    # The active recipe and activation identity remain truthful: the disabled
+    # request is evidence in the compatibility receipt, not an active term.
+    effective = RECIPE.build_effective_reward_receipt(cfg)
+    assert (
+        compatibility["effective_reward_recipe_sha256"]
+        == effective["sha256"]
+    )
+    assert [term["name"] for term in effective["terms"]] == ["active_term"]
+    baseline = _backend_cfg(ImplicitActuatorCfg)
+    baseline.rewards["arm_torque_saturation"].weight = 0.0
+    assert effective["sha256"] == RECIPE.effective_reward_recipe_sha256(
+        baseline
+    )
+
+
+def test_mapping_backed_implicit_arm_torque_request_is_disabled_truthfully():
+    cfg = {
+        "rewards": {
+            "arm_torque_saturation": {
+                "func": racket_velocity_reward,
+                "weight": -0.5,
+                "params": {"command_name": "racket_target"},
+            },
+            "active_term": Term(racket_position_reward, 4.0),
+        },
+        "scene": {
+            "robot": {
+                "actuators": {
+                    "arms": ImplicitActuatorCfg(),
+                    "waist": ImplicitActuatorCfg(),
+                }
+            }
+        },
+    }
+
+    compatibility = RECIPE.build_reward_backend_compatibility_receipt(cfg)
+
+    assert compatibility["decisions"][0]["requested_weight"] == -0.5
+    assert compatibility["decisions"][0]["effective_weight"] == 0.0
+    assert cfg["rewards"]["arm_torque_saturation"]["weight"] == 0.0
+    assert [
+        term["name"]
+        for term in RECIPE.build_effective_reward_receipt(cfg)["terms"]
+    ] == ["active_term"]
+
+
+def test_explicit_arm_torque_request_remains_effective_and_is_not_disabled():
+    cfg = _backend_cfg(IdealPDActuatorCfg)
+
+    compatibility = RECIPE.build_reward_backend_compatibility_receipt(cfg)
+    assert compatibility["decisions"][0] == {
+        "name": "arm_torque_saturation",
+        "status": "enabled_compatible_actuator_backend",
+        "requested_weight": -0.5,
+        "effective_weight": -0.5,
+        "reason_code": "explicit_actuator_preclip_demand_available",
+        "reason": (
+            "explicit actuator backend exposes the pre-clip demand required "
+            "by arm_torque_saturation"
+        ),
+        "actuator_backends": {
+            "arms": "explicit",
+            "waist": "explicit",
+        },
+    }
+    effective = RECIPE.build_effective_reward_receipt(cfg)
+    assert {
+        term["name"]: term["weight"] for term in effective["terms"]
+    }["arm_torque_saturation"] == -0.5
 
 
 def test_expected_sha_passes_exactly_and_mismatch_is_rejected():

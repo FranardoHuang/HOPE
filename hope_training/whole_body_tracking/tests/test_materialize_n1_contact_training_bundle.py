@@ -52,9 +52,14 @@ def _make_repo(tmp_path: Path, action_id: str) -> dict[str, object]:
         "continuous_questions.py",
         "racket_contact_geometry.py",
         "stroke_adapt_torch.py",
+        "strike_spec_torch.py",
+        "stroke_prototypes_torch.py",
         "virtual_ball.py",
         "counter_rally.py",
         "counter_rally_torch.py",
+        "action_ball_curriculum.py",
+        "action_ball_sampling.py",
+        "action_ball_profile_adapter.py",
     )
     for name in (*source_names, "action_ball_manifest.py"):
         _copy(mdp_source / name, mdp_target / name)
@@ -504,10 +509,29 @@ def test_full_scope_requires_matching_explicit_strike_frame(
 
 
 @pytest.mark.parametrize(
-    "action_id,strike_frame,t_hit_s,t_cycle_s",
     (
-        ("bh_loop_c", 38, 0.76, 1.6),
-        ("bh_block", 26, 0.52, 1.08),
+        "action_id,strike_frame,t_hit_s,t_cycle_s,"
+        "expected_floor_mps,expected_admitted,expected_formal"
+    ),
+    (
+        (
+            "bh_loop_c",
+            38,
+            0.76,
+            1.6,
+            1.4711791276931763,
+            511,
+            "CANARY_THRESHOLD_PASS",
+        ),
+        (
+            "bh_block",
+            26,
+            0.52,
+            1.08,
+            0.8788235783576965,
+            443,
+            "CANARY_THRESHOLD_FAIL",
+        ),
     ),
 )
 def test_full_exact_asset_when_available(
@@ -516,6 +540,9 @@ def test_full_exact_asset_when_available(
     strike_frame: int,
     t_hit_s: float,
     t_cycle_s: float,
+    expected_floor_mps: float,
+    expected_admitted: int,
+    expected_formal: str,
 ):
     facts = B.FULL_SUPPORTED_ACTIONS[action_id]
     source_motion = REPO_ROOT / facts["motion_path"]
@@ -538,6 +565,7 @@ def test_full_exact_asset_when_available(
     )
     root = Path(fixture["root"])
     manifest = json.loads((root / result["manifest_path"]).read_text())
+    prototype = json.loads((root / result["prototype_path"]).read_text())
     receipt = json.loads(
         (root / result["contact_alignment_path"]).read_text()
     )
@@ -551,6 +579,55 @@ def test_full_exact_asset_when_available(
     assert action["mount_normal_sign"] == -1
     assert receipt["timing"]["contact_frame"] == strike_frame
     assert receipt["alignment"]["center_gate_distance_m"] <= 1.0e-12
+    row = prototype["scopes"]["full"][0]
+    preflight = prototype["provenance"][
+        "full_solver_admission_preflight"
+    ]
+    floor = preflight["speed_floor_proof"]
+    assert row["racket_face_center_speed_min_mps"] == pytest.approx(
+        expected_floor_mps, abs=1.0e-12
+    )
+    assert floor["selected_float32_floor_mps"] == pytest.approx(
+        expected_floor_mps, abs=1.0e-12
+    )
+    assert floor["selected_float32_floor_mps"] >= floor[
+        "analytical_floor_mps"
+    ]
+    assert floor["added_mapping_margin_mps"] > 0.0
+    assert preflight["proposal_count"] == 512
+    assert preflight["admitted_count"] == expected_admitted
+    assert (
+        sum(preflight["rejection_reasons"].values())
+        + preflight["admitted_count"]
+        == preflight["proposal_count"]
+    )
+    assert preflight["rejection_reasons"] == {
+        "resid_gt_tol": 512 - expected_admitted
+    }
+    assert preflight["diagnostic_gate"]["status"] == "PASS"
+    assert (
+        preflight["diagnostic_gate"][
+            "zero_admission_canary_group_count"
+        ]
+        == 0
+    )
+    assert (
+        preflight["formal_rate_threshold"]["threshold_status"]
+        == expected_formal
+    )
+    assert (
+        preflight["formal_rate_threshold"]["formal_evidence_status"]
+        == "NOT_EVALUATED"
+    )
+    assert (
+        preflight["formal_rate_threshold"]["claim"]
+        == "fixed_seed_512_canary_only_not_formal_heldout_evidence"
+    )
+    assert preflight["episode_horizon"] == {
+        "checked": True,
+        "episode_length_s": 10.0,
+        "attempt_close_margin_s": 0.02,
+    }
 
 
 def test_default_upper_matches_explicit_and_never_clobbers_existing_outputs(

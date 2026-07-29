@@ -50,6 +50,16 @@ checkpoint_allow_contract_mismatch: false
 # A task-first preflight with null fails before scene import and prints the
 # candidate SHA to review; the real launch must pass that exact lowercase hash.
 expected_effective_reward_recipe_sha256: null
+# Fresh ActionBall policies normally keep the historical random actor
+# initialization.  The N=1/N=5 diagnostic launcher opts into a reviewed
+# shared-ready last-layer bootstrap explicitly; arbitrary-N banks stay on the
+# historical path until they have an action-conditioned initializer.
+action_ball_shared_ready_bootstrap: false
+# Materialization-only escape hatch for producing the exact bootstrap-bound
+# PPO recipe before a no-clobber launch.  It requires the explicit bootstrap,
+# one environment, diagnostic ActionBall, and an unused absolute output path;
+# the process closes the environment without constructing a PPO runner.
+action_ball_policy_recipe_output_path: null
 
 # logging
 logger: wandb           # wandb | tensorboard | neptune

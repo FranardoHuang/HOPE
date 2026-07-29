@@ -675,12 +675,30 @@ class ClampedJointPositionAction(JointPositionAction):
         self._pre_clamp_qdes_valid = torch.zeros_like(
             self._previous_processed_qdes_valid
         )
+        # Nearest-point projection of the current affine request into the exact target envelope
+        # that may be sent to the drive.  This remains separate from ``processed_actions`` because
+        # the pre-apply guard may replace the nominal projection with a state-derived brake target.
+        # A dense projection reward therefore needs both tensors to distinguish "the actor asked
+        # outside the envelope" from "the guard braked an already-dangerous plant state".
+        self._nominal_projected_qdes = torch.zeros_like(self._processed_actions)
+        self._nominal_projection_span = torch.zeros_like(self._processed_actions)
+        self._nominal_projected_qdes_valid = torch.zeros_like(
+            self._previous_processed_qdes_valid
+        )
         # Optional pre-physics, one-policy-step guard.  It is opt-in so every legacy finite-action
         # path remains numerically unchanged; safety task leaves must bind all parameters
         # explicitly and pin the declared policy horizon to env.step_dt.
         self._pre_apply_limit_guard_enabled = bool(
             getattr(cfg, "pre_apply_limit_guard", False)
         )
+        finite_projection = getattr(
+            cfg, "project_finite_preclamp_qdes_without_termination", False
+        )
+        if type(finite_projection) is not bool:
+            raise ValueError(
+                "project_finite_preclamp_qdes_without_termination must be an exact boolean"
+            )
+        self._project_finite_preclamp_qdes_without_termination = finite_projection
         self._pre_apply_guard_policy_dt_s = None
         self._pre_apply_guard_margin_rad = None
         self._pre_apply_guard_margin_fraction = None
@@ -857,6 +875,14 @@ class ClampedJointPositionAction(JointPositionAction):
                     "positive integer"
                 )
             self._joint_safety_terminal_archive_capacity = archive_capacity
+        if (
+            self._project_finite_preclamp_qdes_without_termination
+            and not self._pre_apply_limit_guard_enabled
+        ):
+            raise ValueError(
+                "project_finite_preclamp_qdes_without_termination requires the "
+                "pre-apply limit guard and deploy-parity q_des clamp"
+            )
         self._pre_apply_qdes_violation_latch = torch.zeros_like(
             self._previous_processed_qdes_valid
         )
@@ -3040,8 +3066,9 @@ class ClampedJointPositionAction(JointPositionAction):
                 )
 
                 pre_qdes = self._pre_clamp_qdes
-                qdes_violation = (
-                    ~torch.isfinite(pre_qdes)
+                qdes_nonfinite = ~torch.isfinite(pre_qdes)
+                qdes_forbidden_request = (
+                    qdes_nonfinite
                     | pre_qdes.le(hard_inner_lower)
                     | pre_qdes.ge(hard_inner_upper)
                 )
@@ -3081,21 +3108,36 @@ class ClampedJointPositionAction(JointPositionAction):
                     | ballistic_next.le(hard_inner_lower)
                     | ballistic_next.ge(hard_inner_upper)
                 )
-                per_joint_guard = qdes_violation | crossing_violation
+                # Legacy tasks preserve the historical behavior: any affine request outside the
+                # hard-inner envelope is replaced by a brake target and terminates later.  The
+                # ActionBall projection mode treats a *finite* request as an ordinary constrained
+                # action instead: execute its nearest safe projection and teach the policy through
+                # the bounded projection penalty.  Non-finite requests and dangerous plant
+                # state/crossing predictions remain brake-and-terminate events.
+                qdes_safety_violation = (
+                    qdes_nonfinite
+                    if self._project_finite_preclamp_qdes_without_termination
+                    else qdes_forbidden_request
+                )
+                per_joint_guard = qdes_safety_violation | crossing_violation
+                # These latches feed the formal hard-safety transcript, whose nonzero rows must
+                # have a terminal archive before PPO.  A finite constrained-action saturation is
+                # not a hard event in projection mode; its separate Reward ledger below preserves
+                # side/count/distance evidence without falsely fencing the optimizer.
                 self._pre_apply_qdes_violation_joint_latch.logical_or_(
-                    qdes_violation
+                    qdes_safety_violation
                 )
                 self._pre_apply_crossing_violation_joint_latch.logical_or_(
                     crossing_violation
                 )
                 self._pre_apply_qdes_violation_joint_count.add_(
-                    qdes_violation.to(dtype=torch.long)
+                    qdes_safety_violation.to(dtype=torch.long)
                 )
                 self._pre_apply_crossing_violation_joint_count.add_(
                     crossing_violation.to(dtype=torch.long)
                 )
                 self._pre_apply_qdes_violation_latch.logical_or_(
-                    torch.any(qdes_violation, dim=1)
+                    torch.any(qdes_safety_violation, dim=1)
                 )
                 self._pre_apply_crossing_violation_latch.logical_or_(
                     torch.any(crossing_violation, dim=1)
@@ -3110,10 +3152,24 @@ class ClampedJointPositionAction(JointPositionAction):
                     min=target_lower,
                     max=target_upper,
                 )
-                nominal_target = torch.clamp(
+                # Keep the nominal projection finite even when the actor emitted NaN/Inf.
+                # The request remains terminal, while RewardManager may still evaluate the
+                # projection-distance term before the reset is applied.  Reuse the already
+                # validated finite brake target only as the projection anchor; the reward maps
+                # the non-finite raw request to one full envelope span independently.
+                nominal_source = torch.where(
+                    qdes_nonfinite,
+                    brake_target,
                     self._processed_actions,
+                )
+                nominal_target = torch.clamp(
+                    nominal_source,
                     min=target_lower,
                     max=target_upper,
+                )
+                self._nominal_projected_qdes.copy_(nominal_target)
+                self._nominal_projection_span.copy_(
+                    target_upper - target_lower
                 )
                 self._processed_actions = torch.where(
                     per_joint_guard, brake_target, nominal_target
@@ -3122,6 +3178,8 @@ class ClampedJointPositionAction(JointPositionAction):
                 self._processed_actions = torch.clamp(
                     self._processed_actions, min=lower, max=upper
                 )
+                self._nominal_projected_qdes.copy_(self._processed_actions)
+                self._nominal_projection_span.copy_(upper - lower)
 
             processed_safe = torch.all(
                 torch.isfinite(self._processed_actions)
@@ -3137,6 +3195,7 @@ class ClampedJointPositionAction(JointPositionAction):
             else:
                 torch._assert_async(processed_safe)
         self._processed_qdes_valid.fill_(True)
+        self._nominal_projected_qdes_valid.fill_(bool(self._clamp_enabled))
         self._raw_actions_valid.fill_(True)
 
     def reset(self, env_ids: Sequence[int] | None = None) -> None:
@@ -3167,6 +3226,9 @@ class ClampedJointPositionAction(JointPositionAction):
         self._previous_processed_qdes_valid[ids] = False
         self._pre_clamp_qdes[ids] = 0.0
         self._pre_clamp_qdes_valid[ids] = False
+        self._nominal_projected_qdes[ids] = 0.0
+        self._nominal_projection_span[ids] = 0.0
+        self._nominal_projected_qdes_valid[ids] = False
         self._pre_apply_qdes_violation_latch[ids] = False
         self._pre_apply_crossing_violation_latch[ids] = False
         self._pre_apply_qdes_violation_joint_latch[ids] = False
@@ -3228,6 +3290,30 @@ class ClampedJointPositionAction(JointPositionAction):
         return self._pre_clamp_qdes_valid
 
     @property
+    def nominal_projected_qdes(self) -> torch.Tensor:
+        """Nearest safe target-envelope projection before any plant-state brake override."""
+
+        return self._nominal_projected_qdes
+
+    @property
+    def nominal_projection_span(self) -> torch.Tensor:
+        """Per-environment target-envelope width used to normalize projection distance."""
+
+        return self._nominal_projection_span
+
+    @property
+    def nominal_projected_qdes_valid(self) -> torch.Tensor:
+        """Per-environment validity of the current nominal projection and span."""
+
+        return self._nominal_projected_qdes_valid
+
+    @property
+    def finite_preclamp_qdes_projection_enabled(self) -> bool:
+        """Whether finite raw affine requests are projected and shaped instead of terminal."""
+
+        return self._project_finite_preclamp_qdes_without_termination
+
+    @property
     def pre_apply_joint_safety_latch(self) -> torch.Tensor:
         """Sticky per-env pre-physics q_des/state-crossing violation; reset clears it."""
 
@@ -3239,8 +3325,22 @@ class ClampedJointPositionAction(JointPositionAction):
         )
 
     @property
+    def physical_hard_safety_latch(self) -> torch.Tensor:
+        """Plant-state/crossing hard-safety union, excluding a finite projected request."""
+
+        return (
+            self._pre_apply_crossing_violation_latch
+            | self._substep_hard_crossing_latch
+            | self._substep_actual_hard_edge_latch
+        )
+
+    @property
     def pre_apply_qdes_violation_latch(self) -> torch.Tensor:
-        """Sticky per-env raw affine-q_des/non-finite envelope violation."""
+        """Sticky terminal q_des latch.
+
+        Legacy mode includes finite hard-inner requests.  ActionBall projection mode records only
+        non-finite requests here; finite saturation has its own non-terminal Reward ledger.
+        """
 
         return self._pre_apply_qdes_violation_latch
 
@@ -3336,6 +3436,11 @@ class ClampedJointPositionActionCfg(JointPositionActionCfg):
     pre_apply_guard_margin_rad: float | None = None
     pre_apply_guard_margin_fraction: float | None = None
     pre_apply_guard_expected_decimation: int | None = None
+    # ActionBall-only constrained-action mode.  The raw Gaussian action and PPO log-probability are
+    # untouched; finite affine q_des requests outside the hard-inner envelope are projected into the
+    # existing safe target envelope and receive a dense projection penalty instead of terminating.
+    # Legacy/default tasks retain the historical terminal behavior.
+    project_finite_preclamp_qdes_without_termination: bool = False
     # Explicit finite queue bound for terminal/unsafe full transcripts.  ``None`` is deliberately
     # invalid when the guard is enabled; overflow is sticky and raises before evidence is replaced.
     pre_apply_guard_terminal_archive_capacity: int | None = None

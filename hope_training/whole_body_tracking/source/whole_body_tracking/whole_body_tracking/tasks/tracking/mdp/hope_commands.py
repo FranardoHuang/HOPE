@@ -77,12 +77,35 @@ _RECOVERY_START_YAW_THRESHOLD = 0.30
 # Absolute, reference-independent balance guards from HOPEDeployParityTerminationsCfg.  A reset
 # caused only by anchor/body tracking envelopes is a guard reset, not evidence that the robot fell.
 _PHYSICAL_FALL_TERMINATION_TERMS = ("base_fell_tilt", "base_too_low")
+_ACTION_BALL_HARD_TERMINATION_TERMS = (
+    *_PHYSICAL_FALL_TERMINATION_TERMS,
+    "robot_hit_table",
+    "joint_qdes_forbidden",
+    "joint_actual_forbidden",
+)
 
 # Reference-consistency envelopes are policy/imitation failures, not physical
 # safety events.  They may end an attempt while the center curriculum is
 # active, but must never be relabelled as a collision or removed from the
 # difficulty-failure denominator.
 _REFERENCE_TERMINATION_TERMS = ("anchor_pos", "anchor_ori", "ee_body_pos")
+_REFERENCE_GUARD_PHASE_GATED = "phase_gated"
+_REFERENCE_GUARD_METRICS_ONLY = "metrics_only"
+_REFERENCE_GUARD_MODES = (
+    _REFERENCE_GUARD_PHASE_GATED,
+    _REFERENCE_GUARD_METRICS_ONLY,
+)
+
+
+def _reference_guard_mode(value: object) -> str:
+    """Validate the local cfg seam without importing optional ActionBall runtime."""
+
+    if type(value) is not str or value not in _REFERENCE_GUARD_MODES:
+        raise ValueError(
+            "reference_guard_mode must be exactly one of "
+            f"{_REFERENCE_GUARD_MODES}; got {value!r}"
+        )
+    return value
 
 _FACE_COMMAND_PAIRINGS = ("shared_plus_y", "legacy_signed_vs_A")
 
@@ -376,7 +399,25 @@ def _assert_action_ball_recipe_is_coherent(cfg) -> None:
     solve mode and may use the same virtual ball that was installed with its solved task.
     """
 
-    if str(getattr(cfg, "target_mode", "")) != "action_ball":
+    target_mode = str(getattr(cfg, "target_mode", ""))
+    reference_guard_mode = getattr(
+        cfg, "reference_guard_mode", "phase_gated"
+    )
+    if type(reference_guard_mode) is not str or reference_guard_mode not in (
+        "phase_gated",
+        "metrics_only",
+    ):
+        raise ValueError(
+            "reference_guard_mode must be exactly one of "
+            "('phase_gated', 'metrics_only'); "
+            f"got {reference_guard_mode!r}"
+        )
+    if target_mode != "action_ball":
+        if reference_guard_mode != "phase_gated":
+            raise ValueError(
+                "reference_guard_mode='metrics_only' is ActionBall-only; "
+                f"target_mode={target_mode!r}"
+            )
         return
     failures = []
 
@@ -4380,6 +4421,7 @@ class RacketTargetCommand(CommandTerm):
             "action_ball_evaluation.py",
             "action_ball_manifest.py",
             "action_ball_profile_adapter.py",
+            "action_ball_reference_guard.py",
             "action_ball_runtime.py",
             "action_ball_sampling.py",
             "continuous_questions.py",
@@ -4518,6 +4560,38 @@ class RacketTargetCommand(CommandTerm):
                 "exact boolean"
             )
         self._action_ball_diagnostic_unauthorized = diagnostic_unauthorized
+        self._action_ball_reference_guard_mode = _reference_guard_mode(
+            self.cfg.reference_guard_mode
+        )
+        from whole_body_tracking.tasks.tracking.mdp.action_ball_reference_guard import (
+            ActionBallReferenceGuardMetrics,
+            REFERENCE_GUARD_HARD_REASONS,
+        )
+        if (
+            tuple(REFERENCE_GUARD_HARD_REASONS)
+            != _ACTION_BALL_HARD_TERMINATION_TERMS
+        ):
+            raise RuntimeError(
+                "ActionBall reference metrics hard-reason contract drifted"
+            )
+
+        self._action_ball_reference_guard_metrics = (
+            ActionBallReferenceGuardMetrics(
+                num_envs=self.num_envs,
+                device=self.device,
+            )
+            if self._action_ball_reference_guard_mode
+            == _REFERENCE_GUARD_METRICS_ONLY
+            else None
+        )
+        self._action_ball_reference_term_disabled_mask = (
+            torch.zeros(
+                self.num_envs, dtype=torch.bool, device=self.device
+            )
+            if self._action_ball_reference_guard_mode
+            == _REFERENCE_GUARD_METRICS_ONLY
+            else None
+        )
         if diagnostic_unauthorized:
             # Franco 2026-07-28 approved bypass: bind a DIAGNOSTIC authority
             # (no code-pinned launch receipt).  It can never record or issue
@@ -4943,6 +5017,16 @@ class RacketTargetCommand(CommandTerm):
             f"solver={solver_contract['sha256']}, physics={physics_contract['sha256']}",
             flush=True,
         )
+        if (
+            self._action_ball_reference_guard_mode
+            == _REFERENCE_GUARD_METRICS_ONLY
+        ):
+            print(
+                "[RacketTargetCommand] reference_guard_mode=metrics_only: "
+                "anchor_pos/anchor_ori/ee_body_pos are metrics-only; "
+                "base/table/q_des/actual-joint hard guards remain terminal",
+                flush=True,
+            )
 
     def action_ball_hard_contract(self) -> dict | None:
         """Return the complete preflight identity without exposing mutable private objects."""
@@ -5060,6 +5144,11 @@ class RacketTargetCommand(CommandTerm):
                 "formal_launch_requires_code_pinned_receipt": True,
                 "runtime_or_manifest_may_self_authorize": False,
             }
+        from whole_body_tracking.tasks.tracking.mdp.action_ball_reference_guard import (
+            REFERENCE_GUARD_CONTRACT_PAYLOAD,
+            REFERENCE_GUARD_CONTRACT_SHA256,
+        )
+
         payload = {
             "schema_version": 1,
             "kind": "whole_body_tracking.RacketTargetCommand.action_ball_hard_contract",
@@ -5157,6 +5246,18 @@ class RacketTargetCommand(CommandTerm):
                         motion.planner_revision_enabled
                     ),
                 },
+            },
+            "reference_guard": {
+                "mode": self._action_ball_reference_guard_mode,
+                "contract_payload": json.loads(
+                    json.dumps(
+                        REFERENCE_GUARD_CONTRACT_PAYLOAD,
+                        allow_nan=False,
+                        separators=(",", ":"),
+                        sort_keys=True,
+                    )
+                ),
+                "contract_sha256": REFERENCE_GUARD_CONTRACT_SHA256,
             },
             "solver": self._action_ball_solver_contract,
             "physics": self._action_ball_physics_contract,
@@ -5989,9 +6090,71 @@ class RacketTargetCommand(CommandTerm):
         change termination semantics underneath an installed attempt.
         """
 
+        if not self._action_ball_enabled:
+            return None
+        mode = _reference_guard_mode(self.cfg.reference_guard_mode)
+        if mode == _REFERENCE_GUARD_METRICS_ONLY:
+            # The raw predicates are still evaluated and recorded by
+            # ``action_ball_record_reference_guard_raw``.  Only their
+            # termination verdict is disabled.  The mask is allocated once
+            # with the treatment runtime; do not allocate 3 x N booleans on
+            # every control step.
+            disabled = getattr(
+                self, "_action_ball_reference_term_disabled_mask", None
+            )
+            if disabled is None:
+                self._ensure_action_ball_runtime_initialized()
+                disabled = getattr(
+                    self,
+                    "_action_ball_reference_term_disabled_mask",
+                    None,
+                )
+            if disabled is None:
+                raise RuntimeError(
+                    "metrics-only ActionBall has no disabled reference mask"
+                )
+            return disabled
         if getattr(self, "_action_ball_curriculum", None) is None:
             return None
         return self._action_ball_reference_term_center_latch
+
+    def action_ball_record_reference_guard_raw(
+        self,
+        reason: str,
+        raw_mask: torch.Tensor,
+    ) -> None:
+        """Book one raw reference predicate only for explicit metrics-only ActionBall."""
+
+        if (
+            not self._action_ball_enabled
+            or _reference_guard_mode(self.cfg.reference_guard_mode)
+            != _REFERENCE_GUARD_METRICS_ONLY
+        ):
+            return
+        self._ensure_action_ball_runtime_initialized()
+        tracker = self._action_ball_reference_guard_metrics
+        if tracker is None:
+            raise RuntimeError(
+                "metrics-only ActionBall has no reference-guard tracker"
+            )
+        token = getattr(self._env, "common_step_counter", None)
+        ledger = getattr(
+            self, "_exact_behavior_decision_counters", None
+        )
+        if (
+            ledger is None
+            or "reference_guard_sample_count" not in ledger
+        ):
+            ledger = self._ensure_exact_behavior_decision_counters()
+        tracker.record(
+            reason=reason,
+            raw_mask=raw_mask,
+            step_token=token,
+            pre_strike=self.pre_strike,
+            strike_window=self.strike_window,
+            center_phase=self._action_ball_reference_term_center_latch,
+            ledger=ledger,
+        )
 
     def _action_ball_claim_domain(self, action_uid: int):
         """Mint the next frozen curriculum domain only at the broker reset barrier."""
@@ -8297,6 +8460,13 @@ class RacketTargetCommand(CommandTerm):
             # Brand every receipt this run emits; default-off runs stay
             # byte-identical.
             receipt["diagnostic_unauthorized"] = True
+        if (
+            self._action_ball_reference_guard_mode
+            == _REFERENCE_GUARD_METRICS_ONLY
+        ):
+            receipt["reference_guard_mode"] = (
+                _REFERENCE_GUARD_METRICS_ONLY
+            )
         print(
             json.dumps(
                 receipt,
@@ -17052,6 +17222,26 @@ class RacketTargetCommand(CommandTerm):
         ):
             if name not in ledger:
                 ledger[name] = torch.zeros((), dtype=torch.long, device=self.device)
+        if (
+            getattr(self, "_action_ball_enabled", False)
+            and _reference_guard_mode(
+                getattr(
+                    self.cfg,
+                    "reference_guard_mode",
+                    _REFERENCE_GUARD_PHASE_GATED,
+                )
+            )
+            == _REFERENCE_GUARD_METRICS_ONLY
+        ):
+            from whole_body_tracking.tasks.tracking.mdp.action_ball_reference_guard import (
+                REFERENCE_GUARD_COUNTER_NAMES,
+            )
+
+            for name in REFERENCE_GUARD_COUNTER_NAMES:
+                if name not in ledger:
+                    ledger[name] = torch.zeros(
+                        (), dtype=torch.long, device=self.device
+                    )
         if self._cq_enabled:  # 类级默认 False 兜底,不必再写 getattr
             # CONTINUOUS question accounting. Goes into the SAME integer ledger the hourly monitor
             # already parses (one HOPE_EXACT_BEHAVIOR_UPDATE_JSON line per PPO update), so a target
@@ -17220,6 +17410,39 @@ class RacketTargetCommand(CommandTerm):
         for term_name in _PHYSICAL_FALL_TERMINATION_TERMS:
             physical |= reason_masks.get(term_name, torch.zeros_like(terminated))
         physical &= terminated
+        hard = torch.zeros_like(terminated)
+        for term_name in _ACTION_BALL_HARD_TERMINATION_TERMS:
+            hard |= reason_masks.get(
+                term_name, torch.zeros_like(terminated)
+            )
+        hard &= terminated
+        if (
+            getattr(self, "_action_ball_enabled", False)
+            and _reference_guard_mode(
+                getattr(
+                    self.cfg,
+                    "reference_guard_mode",
+                    _REFERENCE_GUARD_PHASE_GATED,
+                )
+            )
+            == _REFERENCE_GUARD_METRICS_ONLY
+        ):
+            tracker = getattr(
+                self, "_action_ball_reference_guard_metrics", None
+            )
+            if tracker is None:
+                raise RuntimeError(
+                    "metrics-only ActionBall hard reset has no "
+                    "reference-guard tracker"
+                )
+            tracker.adjust_hard_overlap(
+                env_ids=env_ids,
+                hard_mask=hard,
+                step_token=getattr(
+                    self._env, "common_step_counter", None
+                ),
+                ledger=ledger,
+            )
         true_pre = physical & pre_strike & ~recovering
         post = physical & (~pre_strike | recovering)
         ledger["physical_fall_count"].add_(physical.sum(dtype=torch.long))
@@ -17362,6 +17585,26 @@ class RacketTargetCommand(CommandTerm):
         """Consume one update's behavior and existing sparse-outcome ledgers as one transaction."""
 
         ledger = self._ensure_exact_behavior_decision_counters()
+        if (
+            getattr(self, "_action_ball_enabled", False)
+            and _reference_guard_mode(
+                getattr(
+                    self.cfg,
+                    "reference_guard_mode",
+                    _REFERENCE_GUARD_PHASE_GATED,
+                )
+            )
+            == _REFERENCE_GUARD_METRICS_ONLY
+        ):
+            tracker = getattr(
+                self, "_action_ball_reference_guard_metrics", None
+            )
+            if tracker is None:
+                raise RuntimeError(
+                    "metrics-only ActionBall behavior ledger has no "
+                    "reference-guard tracker"
+                )
+            tracker.validate_conservation(ledger)
         snapshot = {name: value.detach().clone() for name, value in ledger.items()}
         with torch.inference_mode():
             for value in ledger.values():
@@ -18204,6 +18447,14 @@ class RacketTargetCommandCfg(CommandTermCfg):
     # diagnostic_unauthorized=true, and formal/export paths reject the brand
     # fail-loud.  Default false = byte-identical formal behavior.
     action_ball_diagnostic_unauthorized: bool = False
+    # ActionBall-only reference envelope policy. ``phase_gated`` is the exact
+    # historical behavior: anchor_pos / anchor_ori / ee_body_pos terminate
+    # center-phase episodes and are disabled after center. ``metrics_only``
+    # keeps all three raw predicates and their per-step evidence ledger alive
+    # but returns False to the TerminationManager for those three terms. It
+    # never alters base/table/q_des/actual-joint hard safety. Non-ActionBall
+    # tasks may only use the default.
+    reference_guard_mode: str = _REFERENCE_GUARD_PHASE_GATED
     action_ball_seed: int = 0
     action_ball_pool_refill_rows: int = 16
     action_ball_fixed_direction: bool = True

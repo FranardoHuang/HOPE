@@ -52,6 +52,10 @@ def qdes_limit_barrier_v2():
     pass
 
 
+def qdes_projection_penalty():
+    pass
+
+
 def actual_joint_limit_barrier_v2():
     pass
 
@@ -695,6 +699,28 @@ def test_action_bound_taxonomy_rejects_unmapped_active_term():
         match="has no authoritative taxonomy",
     ):
         _action_bound_ledger(env, identity_state, termination_state)
+
+
+def test_qdes_projection_penalty_has_independent_immutable_safety_axis():
+    taxonomy = RECIPE.build_action_ball_reward_group_taxonomy(
+        [
+            {
+                "name": "qdes_projection_penalty",
+                "callable": f"{__name__}.qdes_projection_penalty",
+                "weight": -5.0,
+                "params": {
+                    "action_name": "joint_pos",
+                    "shape_rate": 4.0,
+                },
+            }
+        ]
+    )
+    assert len(taxonomy["active_terms"]) == 1
+    term = taxonomy["active_terms"][0]
+    assert term["group"] == RECIPE.ACTION_BALL_REWARD_GROUP_IMMUTABLE_SAFETY
+    assert term["expected_weight_sign"] == "negative"
+    assert term["adjustability"] == "immutable_safety"
+    assert term["causal_axis"] == "qdes_projection_distance"
 
 
 @pytest.mark.parametrize(

@@ -3465,3 +3465,84 @@ frontier 时，旧 sampler 把 `current width == initial center width` 误判成
 改采当前非零合法 support 的 outer band，并保留 stratum/arm/quota/receipt/exact replay；全零 scope
 仍在 draw 前原子拒绝。联合回归 `171 passed, 14 skipped`，pins/bundle 内容不变。fresh `_r5`
 仍须自然完成两次 update 和 finite checkpoint，G05 保持 `Partial`。
+
+fresh `_r5` 又证明两边能完成 rollout，但 formal fingerprint 对 inference tensor 读取不可用的
+`_version`，在 optimizer 前停止；修复只区分普通 tensor 与 inference tensor 的证据路径。`_r6`
+的 Pod1 被 formal Reward terminal-edge conservation 审计挡在 optimizer 前；`_r7` 的 Pod1 已完成
+一次 optimizer，却被 rollout-end curriculum receipt 的旧字段挡在打印/checkpoint 前。它们都是
+新增证明层的失败，不是 PPO、动作或 Isaac 本体不能运行。
+
+为尽快得到可判读 policy，exact
+`e469d85b5c9f493e5c1fbb6861eefe84b0926a32` 只对
+`training_authorized=false` 的 N=1 diagnostic 路径关闭 formal Reward/joint evidence fence，并
+冻结 level-0 curriculum、跳过 rollout-end advancement；真实 Reward、`q_des` clamp、
+soft/hard-limit penalty 和 hard-limit/table/fall termination 保持开启。由此产生的 run 只具有
+diagnostic Reward-screen 权限，不能晋级正式 curriculum 或 Gate。
+
+该 commit 的 fresh `_r8` 已在 Pod1 反手拉、Pod2 反手挡各自然完成 `1 env × 2 update`，零
+Traceback，并产出 finite `model_0.pt/model_1.pt`，因此“能进入真实 PPO 并保存 checkpoint”的
+smoke 门已过。Pod1 mean episode length 仍约 `1.0`，第二个 rollout 24/24 policy steps 为
+`joint_qdes_forbidden`，故当前仅解锁固定 level-0 的 1024-env Reward canary；前 20–50 updates
+必须观察 episode length 与逐关节 hard-limit 请求是否改善。G05 仍为 `Partial`，因为动态课程、
+formal receipt、held-out 晋级、MuJoCo 与真机均未由这些 diagnostic run 证明。
+
+#### 2026-07-29 `4ff48b21` 4096-env 运行证据
+
+Pod1 当前保留三条固定 level-0、formal-ineligible 的 N=1 upper 诊断长跑；exact 身份与动态快照见
+[`n1_live_wave_4ff48b21.v1.json`](../../configs/n1_contact_20260729/n1_live_wave_4ff48b21.v1.json)。
+每个 PPO update 固定是 `4096 × 24 = 98,304` 个环境步。11:20 UTC 的 update 墙钟为：
+
+- 反手拉现行 Reward：`61.69 s`，即每个
+  [`vector policy step`](../DEFINITIONS.md#vector-policy-step) `2.57 s`；
+- 反手挡现行 Reward：`271.99 s`，即 `11.33 s`；
+- 反手拉两倍动作模仿：`149.60 s`，即 `6.23 s`。
+
+每轮 PPO learning 仅约 `0.1 s`，瓶颈是 collection 中的大量提前安全 reset。三臂最初五轮均无
+strike opportunity；`mimic_x2` 的 raw mimic 项约精确翻倍，但 terminal/qdes 与同动作 control
+没有分离，故“接线生效”已证明，“能改变早期行为”尚未证明。
+
+反手拉 control 的 qdes reason 从 update 2 的 `48,681` 降到 update 35 的 `909`，mean episode
+已接近/越过动作击球帧，说明 trainer 在学习避开限位；但截至该快照 strike 仍为零。下一 fresh
+lineage 使用显式 opt-in 的 shared-ready actor 初始化与 `init_noise_std=0.02`，不改变 decoder，
+不放宽 soft/hard-limit、table 或 fall 安全。该 bootstrap 只允许 exact N=1/N=5 shared-ready
+动作；N=73/N=93 必须保持未启用，不能因常量 bias 实现而回归为不可启动。
+
+full 反手拉的 scene/Reward 构造已过，但 runtime solver 在 face-center 到 official-site 的
+teacher-rate 映射后存在低于 `0.6` 的接纳缝，导致至少一个 birth 零 receipt、未到 update 0。
+这是物化器下界和缺少 post-solver admission 预飞的问题；修复必须保持 runtime
+`teacher_rate_min=0.6`，重物化 full bundle 后重新 smoke。task-strong upper direct 又在 PhysX
+simulation start 活锁，已按 exact process identity 留证停止且未重试。以上都不能计入 Gate
+通过；G05 继续为 `Partial`。
+
+#### 2026-07-29 finite q_des / reference-reset 候选切换
+
+这是 `curr-launch-fix` 功能分支候选；只有合入 `main` 后才可能改变运行态，当前
+`origin/main/docs/NOW.md` 仍是唯一主板。旧 v2 早期也有 `ee_body_pos=1,690–2,301
+reset/update`，到 update 4181–4187 已学到 `1–7/update`。被当作旧性能基线的 `6.4 s`
+collection 实际来自 mean episode length=`1`、`98,304 reset/update` 的失败 probe；同代码修正
+stand hold 后代表值为 `4.49 s`。当前 ActionBall 反手拉约 `27 s/update`、主要受
+`ee_body_pos` reset 影响；反手挡约 `48 s/update`、主要受 finite q_des reset 影响。后者切换后
+预计节省 `14–17 s/update`，但这只是预算，不能代替 fresh 4096-env 证据。
+
+候选合同将有限请求改为
+[`finite q_des execution projection`](../DEFINITIONS.md#finite-qdes-execution-projection)，并以
+weight=`-5` 的
+[`qdes_projection_penalty`](../DEFINITIONS.md#qdes-projection-penalty)读取**投影前**归一化超出量；
+`-20` 只允许作为明确消融。reference anchor/body/ee guard 使用
+[`metrics_only`](../DEFINITIONS.md#reference-metrics-only)，保留逐步指标但不 reset。raw q_des
+nonfinite、实际关节 hard-limit、ballistic/substep crossing、table hit 和 fall 仍是 hard reset，
+所以这不是关闭物理安全。
+
+老师贴限也不是 block 风暴的解释：loop/block upper/full 四件动作的 hard/soft/2%-inner crossing
+均为 `0`；block 全片 normalized hard/soft margin 为 `0.115081/0.072312`，不小于 loop upper
+`0.111954/0.068838` 或 loop full `0.113493/0.070548`。fresh smoke/长跑必须逐关节记录投影前
+超出量、触发率、正负侧与贴边饱和占比，并同时记录：
+
+- [`collection_vector_step_wall_s`](../DEFINITIONS.md#collection-vector-step-wall-s)；
+- [`amortized_e2e_vector_step_wall_s`](../DEFINITIONS.md#amortized-e2e-vector-step-wall-s)；
+- [`collection_environment_step_us`](../DEFINITIONS.md#collection-environment-step-us)；
+- [`collection_environment_steps_per_s`](../DEFINITIONS.md#collection-environment-steps-per-s)。
+
+在新合同下自然完成 smoke、finite checkpoint，并取得 4096-env reset/吞吐与 Reward ledger 前，
+不能把预计提速或“policy 已学会限位”写成 Gate PASS。CaT 或 PPO bound loss 留给后续单变量候选，
+不作为本轮 G05 前置；G05 保持 `Partial`。

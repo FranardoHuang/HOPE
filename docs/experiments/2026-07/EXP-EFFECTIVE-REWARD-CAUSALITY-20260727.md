@@ -294,3 +294,174 @@ PID/PGID/start ticks 后只处理该 run，最终无残余。
 采 frontier；只有该 scope 所有物理宽度真为零才在 draw 前原子拒绝。birth 与 swing 共用同一规则，
 不改 manifest、action identity、schema、Reward 或 PPO。sampling/runtime/receipt/launcher 联合回归
 `171 passed, 14 skipped`；profile pins 与两动作 bundle 内容 SHA 不变。下一次使用 fresh `_r5`。
+
+### 2026-07-29：把“先产 policy”与 formal 证明层拆开
+
+fresh `_r5` 的两个 Pod 都完成了真实 rollout，却在 optimizer 前被 tensor fingerprint 读取
+`torch.inference_mode()` tensor 的 `_version` 拒绝。该属性在 inference tensor 上本来就不可读；
+修复改为对可读 version 与不可读 inference tensor 分型取证，不改变 tensor、Reward、PPO 或物理。
+
+fresh `_r6` 的 Pod1 继续完成 rollout，随后由 formal Reward activation 的 terminal-edge
+conservation 审计停止；fresh `_r7` 已完成一次真实 optimizer step，又在 rollout-end curriculum
+证明回调读取旧 `ExpectedDomain.levels` 字段时停止，尚未来得及打印下一 iteration 或保存
+checkpoint。Pod2 同代的一次失败是远端动作资产恢复失败，不是 Reward/动作科学结果。
+
+这些失败说明原路径把两种目的错误串成一条：
+
+- diagnostic/canary 的目的，是尽快证明同一动作、球题、Reward、PPO 能产生可学习 policy；
+- formal evidence/curriculum 的目的，是为 Gate 晋级提供严格 receipt 与 held-out 证明。
+
+因此 exact `e469d85b5c9f493e5c1fbb6861eefe84b0926a32` 明确把 N=1
+`training_authorized=false` diagnostic 运行冻结在 level-0 domain，并跳过 formal Reward/joint
+evidence fence 与 rollout-end curriculum advancement。**实际环境 Reward 没有关闭**；
+`q_des` clamp、soft/hard-limit penalty、hard-limit/table/fall termination 也没有关闭。这样的
+checkpoint 只能参加 Reward screen，不能冒充正式 curriculum promotion 或 Gate 证据。
+
+该 exact commit 的 fresh `_r8` smoke 已在两台 Pod 各自然完成 `1 env × 2 update`，零
+Traceback，且 `model_0.pt/model_1.pt` 全部 tensor finite：
+
+- Pod1 `bh_loop_c_upper_current_low_smoke_s0_r8_e469d85b`；
+- Pod2 `bh_block_upper_current_low_smoke_s0_r8_e469d85b`。
+
+Pod1 两次 mean episode length 为 `1.04/1.02`；第二个 rollout 的 24/24 policy steps 以
+`joint_qdes_forbidden` 结束，table/fall 为零。这不是发射基础设施失败，但说明随机初始 policy
+正在请求物理 hard-limit 内缩边界之外的目标，必须在首批 20–50 updates 观察它是否学会避开；若
+长期不恢复，应先查 default pose、动作 affine mapping 与逐关节请求，而不是降低 hard-limit
+penalty。
+
+这批六条 upper Reward canary 是后续 `4ff48b21` 波的历史前身；当前可复算身份与运行状态统一看
+[`n1_live_wave_4ff48b21.v1.json`](../../../configs/n1_contact_20260729/n1_live_wave_4ff48b21.v1.json)。
+同配方续跑按[未变配方诊断快线](../../operations/run_ablation_wave_launch.md#未变配方的诊断续跑快线)
+执行，不再重复 repin、物化与无关 host 大回归。
+
+### 2026-07-29：`4ff48b21` 4096-env 长跑与每 step 实测
+
+这一代不再用启动瞬间的 NVML 利用率判断训练是否工作，而是绑定 RSL-RL 完整 iteration block。
+每个 update 是 `4096 × 24 = 98,304` 个环境控制步；一个
+[`vector policy step`](../../DEFINITIONS.md#vector-policy-step) 是 4096 个环境一起前进一步，
+墙钟为 `iteration_time / 24`。逐 run 的 exact namespace、PID、合同和快照真源是
+[`n1_live_wave_4ff48b21.v1.json`](../../../configs/n1_contact_20260729/n1_live_wave_4ff48b21.v1.json)。
+
+11:20 UTC 的三条活跃 upper 诊断如下；`current_low` 是现行低任务权重，
+`mimic_x2` 只把动作模仿尺度乘二：
+
+| action / Reward | update | update 墙钟 | vector step 墙钟 | 环境步吞吐 | terminal / qdes / actual / ee | strike |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `bh_loop_c / current_low` | 35 | 61.69 s | 2.57 s | 1,594 step/s | 3,058 / 909 / 539 / 2,246 | 0 |
+| `bh_block / current_low` | 7 | 271.99 s | 11.33 s | 361 step/s | 31,505 / 30,730 / 75 / 778 | 0 |
+| `bh_loop_c / mimic_x2` | 10 | 149.60 s | 6.23 s | 657 step/s | 15,393 / 13,850 / 311 / 1,577 | 0 |
+
+reason mask 会重叠，不能把后三项相加当 terminal。PPO learning 每轮只有约 `0.07–0.20 s`；
+主要墙钟都在 collection 和提前 reset，所以“GPU 瞬时利用率低”不是 optimizer 没跑。小时巡检应
+连续记录完整 iteration 的 `collection/learning/update/vector-step/environment-steps/s`，并与
+qdes/reference reset 同报。
+
+#### Reward 因果结论
+
+同动作 `bh_loop_c` 的前五轮里：
+
+- `current_low`：总墙钟 `863.83 s`，terminal `150,846`，qdes reason `148,267`；
+- `mimic_x2`：总墙钟 `844.45 s`，terminal `151,201`，qdes reason `148,651`。
+
+两边 strike 都是零，行为几乎没有分离；但 `mimic_x2` 的 raw motion
+anchor-orientation、linear-velocity、angular-velocity 项从约
+`0.0098/0.0137/0.0060` 变成 `0.0195/0.0275/0.0120`，约精确两倍。因此动作模仿 Reward
+**实际生效**，只是其早期 `O(1e-2)` 信号相对终止/死亡尺度太小，不能挽救随机 policy 的
+hard-limit reset 风暴。下一轮首先修初始化，而不是继续把 mimic 权重盲目放大。
+
+#### 下一 fresh wave
+
+根因是默认 action offset 把左右 shoulder-roll 放在 hard-inner 边界附近，`0.15` 初始策略噪声
+使大量随机 q_des 越界。候选修复保持 deploy decoder
+`q_des = default + scale × action` 不变，只对 fresh N=1/N=5 显式启用：
+
+1. actor 最后一层 weight 清零；
+2. bias 设为 `(shared_ready - default) / scale`；
+3. 初始 policy std 固定 `0.02`；
+4. 把真实启动 calibration 扰动和四倍标准差一起证明仍在现役 2% hard-inner 边界内；
+5. resume 永不覆盖；N=73/N=93 不启用常量 bias，继续原路径，直到有 action-conditioned
+   bootstrap。
+
+当前 `bh_loop_c` 已从 update 2 的 48,681 个 qdes reason 降到 update 35 的 909 个，说明旧 run
+确实在学“先活下来”，所以不打断它；新初始化的价值是省掉这段昂贵、无击球机会的自救期。
+
+full-body 反手拉的第二次启动已完成 Isaac scene 和 Reward receipt，但首 reset 某 birth 的 solver
+零接纳。离线精确复算显示普通 solver 的 512 个 proposal 有 506 个可解，经过 face-center 到
+official-site teacher-rate 映射后仅 93 个接纳：中心样本约 `0.5976 < 0.6`。这不是 full-body
+launcher 或 PPO 失败，而是物化器把 `face_speed_min = nominal × teacher_rate_min` 错当成严格等价
+的 site-rate 下界；必须重物化并加 exact post-solver admission 预飞，不能降低 runtime 的
+`teacher_rate_min=0.6`。
+
+### 2026-07-29：reset 历史对照与有限 q_des 候选切换
+
+本节是 `curr-launch-fix` 功能分支候选，不改变 `origin/main` 上 `docs/NOW.md` 的运行态权威；
+下述“预计”也不是修复后实测结果。
+
+#### 健康基线不能取自 reset 风暴
+
+旧 v2 并非从来没有 reset storm：早期 update 1–9 的 `ee_body_pos` 为
+`1,690–2,301 reset/update`、mean episode length `44–50`，collection 为
+`4.61–10.34 s`（均值 `6.78 s`）；同一 run 到 update 4181–4187 已学到 mean episode length
+`770–795`、`ee_body_pos=1–7/update`，collection 稳在 `4.58–4.71 s`。因此它支持“策略可以学掉
+一部分 reference 偏差”，不支持继续用 reference reset 消耗采集时间。
+
+另一个被反复引用的 `6.4 s collection/update` 来自失败 probe：mean episode length 恒为 `1`，
+每轮 `4096×24=98,304` 个环境步全部 reset。相同代码只修正 stand start hold 后为
+`4.41–4.65 s`，代表值约 `4.49 s`。所以 `6.4 s` 不是健康 ActionBall 的性能目标，修复后的首要
+比较尺应是 `4.49 s + ActionBall birth/solver/receipt 的真实增量`。
+
+当前旧语义 ActionBall 稳态快照约为：
+
+| action | collection/update | 主 reset reason | 判读 |
+| --- | ---: | --- | --- |
+| `bh_loop_c` | 约 `27 s` | `ee_body_pos` | 有限 q_des 已基本学掉，reference reset 仍主导 |
+| `bh_block` | 约 `48 s` | `joint_qdes_forbidden` | 有限目标请求 reset 仍主导 |
+
+按同一 update 的 reason/time 对账，移除 **finite q_des request** reset 对 block 预计节省
+`14–17 s/update`；这是发射预算估计，必须由 fresh 4096-env run 的
+[`collection_vector_step_wall_s`](../../DEFINITIONS.md#collection-vector-step-wall-s) 实测复核。
+
+#### “老师贴限”反例被排除
+
+对 exact upper/full 反手拉与反手挡老师做逐帧、逐关节限位余量审计：
+
+| clip | 全片 normalized hard margin min | 全片 normalized soft margin min | 击球窗 hard margin min |
+| --- | ---: | ---: | ---: |
+| loop upper | `0.111954` | `0.068838` | `0.149400` |
+| block upper | `0.115081` | `0.072312` | `0.136338` |
+| loop full | `0.113493` | `0.070548` | `0.152600` |
+| block full | `0.115081` | `0.072312` | `0.136573` |
+
+四件动作的 hard、soft 与 2% hard-inner crossing 均为 `0`；block 全片余量还略大于 loop。
+因此 block 的 q_des reason 比 loop 高约 180 倍，不能归因于“模仿老师必然越限”。下一层根因应查
+policy 输出分布、block 对应观测/目标与 episode reset 后状态，而不是删老师关节或降低安全代价。
+
+#### 候选语义与 Reward
+
+有限 q_des 的新候选采用
+[`finite q_des execution projection`](../../DEFINITIONS.md#finite-qdes-execution-projection)：
+包络内严格恒等，包络外执行最近合法目标；raw policy sample 和 PPO log-prob 不改，也不因有限请求
+reset。为了避免 clipped-action aliasing，新增
+[`qdes_projection_penalty`](../../DEFINITIONS.md#qdes-projection-penalty)，只吃投影前归一化超出量。
+首发 weight=`-5`，`-20` 只作预注册消融，不能在观察收入账前直接成为主导负项。
+
+安全边界没有一起放宽：
+
+- raw q_des 非有限、实际关节 hard-limit、有限目标在一个 physics step 内产生的 ballistic/substep
+  crossing、table hit 和 fall 仍 hard reset；
+- reference anchor/body/ee 谓词改为
+  [`reference_guard_mode=metrics_only`](../../DEFINITIONS.md#reference-metrics-only)，继续计数但不
+  reset、不额外给 Reward；
+- 每关节必须报告投影触发率、投影前平均/最大超出量、正负侧与执行值恰贴投影边界的饱和占比；
+  只有冻结策略、零该罚分复测仍低，才可说 policy 学会限位，而不能只说执行器兜住了。
+
+小时巡检固定输出四个互不混淆的 step timing：
+
+1. [`collection_vector_step_wall_s`](../../DEFINITIONS.md#collection-vector-step-wall-s)；
+2. [`amortized_e2e_vector_step_wall_s`](../../DEFINITIONS.md#amortized-e2e-vector-step-wall-s)；
+3. [`collection_environment_step_us`](../../DEFINITIONS.md#collection-environment-step-us)；
+4. [`collection_environment_steps_per_s`](../../DEFINITIONS.md#collection-environment-steps-per-s)。
+
+CaT（连续违规量调制 Reward/termination、仿真不中断）和 PPO policy-mean bound loss 都是合理后续；
+它们会改变训练目标或 runner，今晚先不叠加。先用 execution projection + raw excess Reward 验证
+block reset/吞吐与任务学习，再据饱和遥测决定是否购买下一层机制。

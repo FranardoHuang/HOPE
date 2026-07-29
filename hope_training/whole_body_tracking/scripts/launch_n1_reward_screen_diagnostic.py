@@ -1107,7 +1107,8 @@ def _build_training_argv(
         str(wbt / "scripts/train.py"),
         "task=HOPEPingPongActionBall",
         "algo=ppo",
-        "algo.policy.init_noise_std=0.15",
+        "algo.policy.init_noise_std=0.02",
+        "action_ball_shared_ready_bootstrap=true",
         "headless=true",
         "logger=tensorboard",
         "video=false",
@@ -1153,6 +1154,7 @@ def _build_training_argv(
             f"{spec['policy_contract_sha256']}"
         ),
         "task.racket.action_ball_diagnostic_unauthorized=true",
+        "task.racket.reference_guard_mode=metrics_only",
         f"task.racket.action_ball_seed={spec['seed']}",
         "task.racket.question_bank=",
         "task.racket.question_bank_allow_legacy=false",

@@ -7268,10 +7268,32 @@ class LazyActionTaskPool:
     def _solver_task_transcript_for_birth_pure(
         self, birth_sha256: str
     ) -> Tuple[int, str]:
+        return self._solver_task_transcripts_for_births_pure(
+            (birth_sha256,)
+        )[0]
+
+    def _solver_task_transcripts_for_births_pure(
+        self, birth_sha256s: Sequence[str]
+    ) -> Tuple[Tuple[int, str], ...]:
+        """Read a birth batch under one solver purity envelope.
+
+        ``state_dict()`` contains the complete sampler/task authority and can
+        grow with the number of live births.  Taking that snapshot around
+        every individual transcript therefore makes an otherwise vectorized
+        request/retirement batch quadratic.  One pre/post snapshot enforces
+        batch-net purity and rollback: persistent mutation and exceptions are
+        rejected, while a transient mutation restored inside the same batch is
+        outside this cheaper contract.  Per-row transcript count/root checks
+        still bind every returned authority value.
+        """
+
+        if not birth_sha256s:
+            return ()
         solver_state = self._solver_state()
         try:
-            result = self._solver_task_transcript_for_birth(
-                birth_sha256
+            result = tuple(
+                self._solver_task_transcript_for_birth(birth_sha256)
+                for birth_sha256 in birth_sha256s
             )
             if self._solver_state() != solver_state:
                 raise ActionBallContractError(
@@ -8687,15 +8709,34 @@ class LazyActionTaskPool:
                     ) in staged_refills
                 )
             )
+            authority_transcripts = (
+                self._solver_task_transcripts_for_births_pure(
+                    tuple(
+                        digest
+                        for (
+                            _binding,
+                            digest,
+                            _request,
+                            _batch,
+                            _digests,
+                            _sample_index,
+                            _draw_end,
+                        ) in staged_refills
+                    )
+                )
+            )
             for (
-                binding,
-                digest,
-                _request,
-                batch,
-                _digests,
-                _sample_index,
-                _draw_end,
-            ) in staged_refills:
+                (
+                    binding,
+                    digest,
+                    _request,
+                    batch,
+                    _digests,
+                    _sample_index,
+                    _draw_end,
+                ),
+                authority_transcript,
+            ) in zip(staged_refills, authority_transcripts):
                 expected_count, expected_root = (
                     self._expected_task_transcript_for_active_birth(
                         binding.action_uid, digest
@@ -8706,9 +8747,10 @@ class LazyActionTaskPool:
                         expected_root, receipt.canonical_sha256
                     )
                 expected_count += len(batch.receipts)
-                if self._solver_task_transcript_for_birth_pure(
-                    digest
-                ) != (expected_count, expected_root):
+                if authority_transcript != (
+                    expected_count,
+                    expected_root,
+                ):
                     raise ActionBallContractError(
                         "solver birth task transcript differs from staged "
                         "callback result"
@@ -9032,14 +9074,6 @@ class LazyActionTaskPool:
                     uid, digest
                 )
             )
-            if self._solver_task_transcript_for_birth_pure(digest) != (
-                admitted_count,
-                transcript_root,
-            ):
-                raise ActionBallContractError(
-                    "retired birth task transcript differs from solver "
-                    "authority"
-                )
             retired = _RetiredPoolBirth(
                 birth=birth,
                 refill_index=self._refill_index[uid][digest],
@@ -9058,6 +9092,24 @@ class LazyActionTaskPool:
             validated.append(
                 (birth, uid, digest, discarded, retired)
             )
+
+        authority_transcripts = (
+            self._solver_task_transcripts_for_births_pure(
+                tuple(row[2] for row in validated)
+            )
+        )
+        for row, authority_transcript in zip(
+            validated, authority_transcripts
+        ):
+            retired = row[4]
+            if authority_transcript != (
+                retired.admitted_count,
+                retired.task_transcript_sha256,
+            ):
+                raise ActionBallContractError(
+                    "retired birth task transcript differs from solver "
+                    "authority"
+                )
 
         projected_ledgers: Dict[int, PoolLedger] = {}
         for uid, discarded in discarded_by_uid.items():

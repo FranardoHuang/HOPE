@@ -37,6 +37,10 @@ from collections.abc import Mapping, Sequence
 
 EFFECTIVE_REWARD_RECIPE_SCHEMA_VERSION = 1
 EFFECTIVE_REWARD_ACTIVATION_SCHEMA_VERSION = 1
+REWARD_BACKEND_COMPATIBILITY_SCHEMA_VERSION = 1
+REWARD_BACKEND_COMPATIBILITY_KIND = (
+    "whole_body_tracking.reward_backend_compatibility"
+)
 REWARD_TERM_ROLE_OBJECTIVE = "objective"
 REWARD_TERM_ROLE_DIAGNOSTIC_PROBE = "diagnostic_probe"
 ACTION_BALL_ADOPTED_STEP_DT_S = 0.02
@@ -258,6 +262,11 @@ _ACTION_BALL_REWARD_TERM_TAXONOMY.update(
             ("joint_limit", "HOPE soft safety", "actual_joint_soft_limit"),
             ("qdes_limit_barrier", "HOPE soft safety", "qdes_joint_soft_limit"),
             (
+                "qdes_projection_penalty",
+                "HOPE constrained-action safety",
+                "qdes_projection_distance",
+            ),
+            (
                 "joint_velocity_limit_hinge",
                 "HOPE soft safety",
                 "actual_joint_velocity_soft_limit",
@@ -462,11 +471,25 @@ def disable_incompatible_backend_reward_terms(cfg):
             f"{backends!r}"
         )
     if any(value == "implicit" for value in backends.values()):
-        term.weight = 0.0
+        try:
+            if isinstance(term, Mapping):
+                term["weight"] = 0.0
+            else:
+                term.weight = 0.0
+        except (AttributeError, KeyError, TypeError) as exc:
+            raise RewardRecipeError(
+                "arm_torque_saturation weight cannot be disabled on the "
+                "composed Reward term"
+            ) from exc
         return (
             {
                 "name": "arm_torque_saturation",
-                "status": "disabled_not_in_active_recipe",
+                "status": "disabled_incompatible_actuator_backend",
+                "requested_weight": float(weight),
+                "effective_weight": 0.0,
+                "reason_code": (
+                    "implicit_actuator_has_no_proven_explicit_preclip_demand"
+                ),
                 "reason": (
                     "ImplicitActuator does not expose a proven explicit "
                     "pre-clip demand through computed_torque"
@@ -478,7 +501,75 @@ def disable_incompatible_backend_reward_terms(cfg):
         raise RewardRecipeError(
             f"arm_torque_saturation backend mix is unsupported: {backends!r}"
         )
-    return ()
+    return (
+        {
+            "name": "arm_torque_saturation",
+            "status": "enabled_compatible_actuator_backend",
+            "requested_weight": float(weight),
+            "effective_weight": float(weight),
+            "reason_code": "explicit_actuator_preclip_demand_available",
+            "reason": (
+                "explicit actuator backend exposes the pre-clip demand "
+                "required by arm_torque_saturation"
+            ),
+            "actuator_backends": dict(sorted(backends.items())),
+        },
+    )
+
+
+def canonical_reward_backend_compatibility_json(payload):
+    """Encode the backend compatibility payload used by its receipt hash."""
+
+    if not isinstance(payload, Mapping):
+        raise RewardRecipeError(
+            "reward backend compatibility payload must be a mapping"
+        )
+    if set(payload) != {
+        "schema_version",
+        "kind",
+        "effective_reward_recipe_sha256",
+        "decisions",
+    }:
+        raise RewardRecipeError(
+            "reward backend compatibility payload must contain exactly "
+            "schema_version, kind, effective_reward_recipe_sha256 and decisions"
+        )
+    try:
+        return json.dumps(
+            payload,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+    except (TypeError, ValueError) as exc:
+        raise RewardRecipeError(
+            "reward backend compatibility payload is not canonical JSON data"
+        ) from exc
+
+
+def build_reward_backend_compatibility_receipt(cfg):
+    """Resolve backend-only Reward terms and record requested versus effective.
+
+    This receipt is deliberately separate from the effective Reward recipe:
+    disabled terms must not enter that recipe's active-term hash or runtime
+    activation ledger.  The receipt makes the otherwise silent zeroing
+    decision auditable without pretending that the requested weight ran.
+    """
+
+    decisions = list(disable_incompatible_backend_reward_terms(cfg))
+    decisions.sort(key=lambda item: item["name"])
+    effective_sha256 = effective_reward_recipe_sha256(cfg)
+    payload = {
+        "schema_version": REWARD_BACKEND_COMPATIBILITY_SCHEMA_VERSION,
+        "kind": REWARD_BACKEND_COMPATIBILITY_KIND,
+        "effective_reward_recipe_sha256": effective_sha256,
+        "decisions": decisions,
+    }
+    digest = hashlib.sha256(
+        canonical_reward_backend_compatibility_json(payload).encode("utf-8")
+    ).hexdigest()
+    return {**payload, "sha256": digest}
 
 
 def _object_items(value, *, context):

@@ -53,7 +53,14 @@ class _Manager:
         return self._terms[name]
 
 
-def _env(*, joints=3, num_envs=2, action_ids=slice(None), policy_dt=0.02):
+def _env(
+    *,
+    joints=3,
+    num_envs=2,
+    action_ids=slice(None),
+    policy_dt=0.02,
+    finite_qdes_projection=False,
+):
     joint_names = [f"j{i}" for i in range(joints)]
     body_names = ["pelvis", "torso", "wrist", "unused"]
     data = SimpleNamespace(
@@ -83,12 +90,18 @@ def _env(*, joints=3, num_envs=2, action_ids=slice(None), policy_dt=0.02):
             )
         },
     )
-    action_cfg = SimpleNamespace(use_default_offset=True)
+    action_cfg = SimpleNamespace(
+        use_default_offset=True,
+        project_finite_preclamp_qdes_without_termination=(
+            finite_qdes_projection
+        ),
+    )
     action = SimpleNamespace(
         _joint_ids=action_ids,
         _scale=np.tile(np.linspace(0.1, 0.3, joints), (num_envs, 1)),
         _clamp_enabled=True,
         cfg=action_cfg,
+        finite_preclamp_qdes_projection_enabled=finite_qdes_projection,
     )
     motion_cfg = SimpleNamespace(
         body_names=["pelvis", "torso", "wrist"], anchor_body_name="torso"
@@ -120,7 +133,13 @@ def _env(*, joints=3, num_envs=2, action_ids=slice(None), policy_dt=0.02):
         group_obs_dim={"policy": (3,)},
         cfg=SimpleNamespace(policy=_PolicyCfg()),
     )
-    joint_pos_cfg = SimpleNamespace(use_default_offset=True, clamp=True)
+    joint_pos_cfg = SimpleNamespace(
+        use_default_offset=True,
+        clamp=True,
+        project_finite_preclamp_qdes_without_termination=(
+            finite_qdes_projection
+        ),
+    )
     cfg = SimpleNamespace(
         decimation=4,
         actions=SimpleNamespace(joint_pos=joint_pos_cfg),
@@ -296,6 +315,7 @@ def test_actor_leg_ref_mask_metadata_is_checkpoint_authoritative_and_only_when_t
 def test_runtime_contract_extracts_actual_execution_values():
     facts = TC.runtime_execution_facts(_env(), _ActorContract())
     assert tuple(facts) == TC.RUNTIME_EXECUTION_KEYS
+    assert TC.FINITE_PRECLAMP_QDES_PROJECTION_KEY not in facts
     assert facts["action_joint_ids"] == [0, 1, 2]
     assert facts["joint_names"] == ["j0", "j1", "j2"]
     assert facts["default_joint_pos"] == pytest.approx([-0.1, 0.0, 0.1])
@@ -318,6 +338,37 @@ def test_runtime_contract_extracts_actual_execution_values():
     assert facts["anchor_body_index"] == 1
     assert facts["motion_segment_lengths"] == [11, 13]
     assert facts["motion_clip_fps"] == [50.0, 50.0]
+
+
+def test_runtime_projection_fact_is_true_only_and_runtime_verified():
+    enabled = _env(finite_qdes_projection=True)
+    facts = TC.runtime_execution_facts(enabled, _ActorContract())
+    assert facts[TC.FINITE_PRECLAMP_QDES_PROJECTION_KEY] is True
+    assert tuple(
+        key
+        for key in facts
+        if key != TC.FINITE_PRECLAMP_QDES_PROJECTION_KEY
+    ) == TC.RUNTIME_EXECUTION_KEYS
+
+    enabled.action_manager.get_term(
+        "joint_pos"
+    ).finite_preclamp_qdes_projection_enabled = False
+    with pytest.raises(RuntimeError, match="config/runtime facts disagree"):
+        TC.runtime_execution_facts(enabled, _ActorContract())
+
+    missing_runtime = _env(finite_qdes_projection=True)
+    del missing_runtime.action_manager.get_term(
+        "joint_pos"
+    ).finite_preclamp_qdes_projection_enabled
+    with pytest.raises(RuntimeError, match="exposes no runtime projection property"):
+        TC.runtime_execution_facts(missing_runtime, _ActorContract())
+
+    non_boolean = _env(finite_qdes_projection=True)
+    non_boolean.action_manager.get_term(
+        "joint_pos"
+    ).finite_preclamp_qdes_projection_enabled = 1
+    with pytest.raises(RuntimeError, match="must be an exact boolean"):
+        TC.runtime_execution_facts(non_boolean, _ActorContract())
 
 
 def test_motion_fps_and_body_order_are_formal_runtime_guards():
@@ -833,6 +884,7 @@ def _diagnostic_schema3_contract():
 
 def _action_ball_diagnostic_schema3_contract():
     contract = _schema3_contract()
+    contract[TC.FINITE_PRECLAMP_QDES_PROJECTION_KEY] = True
     contract["target_mode"] = "action_ball"
     contract["actor_obs_contract"] = "action_ball_n2"
     contract["actor_obs_mode"] = "deploy_parity"
@@ -1042,6 +1094,25 @@ def test_action_ball_diagnostic_authorization_is_structural_but_never_formal():
         match="formal validation rejects diagnostic_unauthorized",
     ):
         TC.validate_schema3_contract(contract)
+
+
+def test_action_ball_requires_true_immutable_projection_fact():
+    contract = _action_ball_diagnostic_schema3_contract()
+    contract.pop(TC.FINITE_PRECLAMP_QDES_PROJECTION_KEY)
+    with pytest.raises(
+        ValueError,
+        match="missing the immutable finite pre-clamp q_des projection",
+    ):
+        TC.validate_schema3_contract_structure(contract)
+
+    contract[TC.FINITE_PRECLAMP_QDES_PROJECTION_KEY] = False
+    with pytest.raises(ValueError, match="exact boolean true"):
+        TC.validate_schema3_contract_structure(contract)
+
+    legacy = _schema3_contract()
+    legacy[TC.FINITE_PRECLAMP_QDES_PROJECTION_KEY] = True
+    with pytest.raises(ValueError, match="ActionBall-only"):
+        TC.validate_schema3_contract_structure(legacy)
 
 
 def test_action_ball_formal_authorization_still_passes_formal_validation():

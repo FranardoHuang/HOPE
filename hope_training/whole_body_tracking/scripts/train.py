@@ -20,6 +20,7 @@ import hashlib
 import importlib.util
 import json
 import math
+import os
 import pathlib
 import sys
 import time
@@ -2951,6 +2952,78 @@ def _write_effective_reward_receipt(
         )
 
 
+def _write_reward_backend_compatibility_receipt(
+    path: str | pathlib.Path,
+    receipt: dict,
+    effective_reward_receipt: dict,
+) -> None:
+    """Persist the backend decision without adding disabled terms to Reward."""
+
+    from whole_body_tracking.utils.effective_reward_recipe import (
+        canonical_reward_backend_compatibility_json,
+    )
+
+    path = pathlib.Path(path)
+    expected_keys = {
+        "schema_version",
+        "kind",
+        "effective_reward_recipe_sha256",
+        "decisions",
+        "sha256",
+    }
+    if set(receipt) != expected_keys:
+        raise RuntimeError(
+            "reward backend compatibility receipt has invalid keys"
+        )
+    if (
+        receipt["effective_reward_recipe_sha256"]
+        != effective_reward_receipt.get("sha256")
+    ):
+        raise RuntimeError(
+            "reward backend compatibility receipt does not bind the effective "
+            "Reward recipe"
+        )
+    payload = {
+        key: receipt[key]
+        for key in (
+            "schema_version",
+            "kind",
+            "effective_reward_recipe_sha256",
+            "decisions",
+        )
+    }
+    digest = hashlib.sha256(
+        canonical_reward_backend_compatibility_json(payload).encode("utf-8")
+    ).hexdigest()
+    if receipt["sha256"] != digest:
+        raise RuntimeError(
+            "reward backend compatibility receipt SHA-256 does not match "
+            "its canonical payload"
+        )
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with path.open("w", encoding="utf-8") as stream:
+        json.dump(receipt, stream, indent=2, sort_keys=True, allow_nan=False)
+        stream.write("\n")
+    with path.open(encoding="utf-8") as stream:
+        written = json.load(stream)
+    if written != receipt:
+        raise RuntimeError(
+            "reward_backend_compatibility.json changed during write/readback"
+        )
+
+
+def _reward_backend_compatibility_log_line(decision: dict) -> str:
+    """Render a decision without claiming that its requested weight ran."""
+
+    return (
+        "reward backend compatibility: "
+        f"{decision['name']} requested_weight="
+        f"{decision['requested_weight']} effective_weight="
+        f"{decision['effective_weight']} status={decision['status']} "
+        f"reason_code={decision['reason_code']}"
+    )
+
+
 def _as_face_command_pairing(value) -> str:
     pairing = str(value)
     allowed = ("shared_plus_y", "legacy_signed_vs_A")
@@ -4395,12 +4468,16 @@ def _action_ball_contract_lineage_exact(
     )
 
 
-def _action_ball_agent_recipe(agent_cfg) -> dict:
+def _action_ball_agent_recipe(
+    agent_cfg, policy_bootstrap: dict | None = None
+) -> dict:
     """Extend the exact PPO recipe with the action-ball first-reset rule."""
 
     base = _task_first_agent_recipe(agent_cfg)
     recipe = {
-        "schema_version": base["recipe"]["schema_version"],
+        "schema_version": (
+            2 if policy_bootstrap is not None else base["recipe"]["schema_version"]
+        ),
         "runner": {
             **base["recipe"]["runner"],
             # A randomized initial episode length can close an attempt before
@@ -4410,6 +4487,11 @@ def _action_ball_agent_recipe(agent_cfg) -> dict:
         },
         "policy": base["recipe"]["policy"],
         "algorithm": base["recipe"]["algorithm"],
+        **(
+            {}
+            if policy_bootstrap is None
+            else {"policy_initialization": policy_bootstrap}
+        ),
     }
     encoded = json.dumps(
         recipe,
@@ -4423,6 +4505,434 @@ def _action_ball_agent_recipe(agent_cfg) -> dict:
         "sha256": hashlib.sha256(encoded).hexdigest(),
         "recipe": recipe,
     }
+
+
+def _resolve_action_ball_shared_ready_bootstrap_request(
+    cfg, *, action_ball_launch_requested: bool
+) -> tuple[bool, str | None]:
+    """Resolve the explicit N1/N5 bootstrap and materialization-only mode."""
+
+    raw = _get(cfg, "action_ball_shared_ready_bootstrap")
+    requested = False if raw is None else _as_explicit_bool(
+        raw, "action_ball_shared_ready_bootstrap"
+    )
+    output = _get(cfg, "action_ball_policy_recipe_output_path")
+    if output is not None:
+        if type(output) is not str or not output.strip():
+            raise RuntimeError(
+                "action_ball_policy_recipe_output_path must be null or a "
+                "non-empty absolute path"
+            )
+        output = output.strip()
+        if not os.path.isabs(output):
+            raise RuntimeError(
+                "action_ball_policy_recipe_output_path must be absolute"
+            )
+    if requested and not action_ball_launch_requested:
+        raise RuntimeError(
+            "action_ball_shared_ready_bootstrap is ActionBall-only"
+        )
+    if output is not None and not requested:
+        raise RuntimeError(
+            "action_ball_policy_recipe_output_path requires "
+            "action_ball_shared_ready_bootstrap=true"
+        )
+    return requested, output
+
+
+def _materialize_action_ball_policy_recipe(
+    output_path: str,
+    *,
+    policy_recipe: dict,
+    policy_bootstrap: dict,
+) -> dict:
+    """Write one no-clobber bootstrap-bound PPO recipe artifact."""
+
+    path = pathlib.Path(output_path)
+    parent = path.parent
+    if not parent.is_dir():
+        raise RuntimeError(
+            "action-ball policy recipe output parent must already exist"
+        )
+    document = {
+        "schema_version": 1,
+        "kind": (
+            "action_ball_shared_ready_policy_recipe_materialization_v1"
+        ),
+        "action_count": int(policy_bootstrap["action_count"]),
+        "action_order": list(policy_bootstrap["action_order"]),
+        "policy_contract_sha256": str(policy_recipe["sha256"]),
+        "action_ball_ppo_runner_recipe": policy_recipe,
+        "policy_bootstrap": policy_bootstrap,
+    }
+    encoded = (
+        json.dumps(
+            document,
+            allow_nan=False,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            sort_keys=True,
+        )
+        + "\n"
+    ).encode("utf-8")
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags, 0o600)
+    except OSError as exc:
+        raise RuntimeError(
+            "action-ball policy recipe output must be a fresh no-clobber file"
+        ) from exc
+    try:
+        with os.fdopen(descriptor, "wb") as stream:
+            stream.write(encoded)
+            stream.flush()
+            os.fsync(stream.fileno())
+    except BaseException:
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        raise
+    return document
+
+
+def _action_ball_policy_bootstrap_contract(
+    env, actor_contract, agent_cfg
+) -> dict:
+    """Build the N1/N5 fresh-policy shared-ready initialization contract."""
+
+    import torch
+
+    from whole_body_tracking.utils.training_contract import (
+        ACTION_BALL_POLICY_BOOTSTRAP_KIND,
+        action_ball_shared_ready_sha256,
+        runtime_execution_facts,
+        validate_action_ball_policy_bootstrap,
+    )
+
+    racket_cmd = env.command_manager.get_term("racket_target")
+    racket_cfg = racket_cmd.cfg
+    if str(getattr(racket_cfg, "target_mode", "")) != "action_ball":
+        raise RuntimeError(
+            "shared-ready policy bootstrap is only valid for action-ball"
+        )
+    motion_cmd = env.command_manager.get_term("motion")
+    motion = motion_cmd.motion
+    action_order = tuple(
+        str(value)
+        for value in (
+            getattr(racket_cfg, "clip_names_per_clip", ()) or ()
+        )
+    )
+    action_count = int(getattr(motion, "num_segments", 0))
+    if (
+        action_count not in (1, 5)
+        or len(action_order) != action_count
+        or len(set(action_order)) != action_count
+    ):
+        raise RuntimeError(
+            "shared-ready actor bootstrap supports only exact N=1 or N=5 "
+            "with one unique action id per loaded motion; differing-ready "
+            "banks such as N=73 require action-conditioned supervised bootstrap"
+        )
+
+    starts = getattr(motion, "seg_start", None)
+    joint_pos = getattr(motion, "joint_pos", None)
+    if (
+        not torch.is_tensor(starts)
+        or starts.ndim != 1
+        or tuple(starts.shape) != (action_count,)
+        or starts.dtype != torch.long
+        or not torch.is_tensor(joint_pos)
+        or joint_pos.ndim != 2
+        or int(joint_pos.shape[1]) != 31
+    ):
+        raise RuntimeError(
+            "shared-ready actor bootstrap cannot identify the exact 31-joint "
+            "MotionLoader segment starts"
+        )
+    ready_per_action = joint_pos.index_select(
+        0, starts.to(device=joint_pos.device)
+    )
+    shared_ready = ready_per_action[0]
+    for slot in range(1, action_count):
+        if not torch.equal(ready_per_action[slot], shared_ready):
+            mismatch = ready_per_action[slot] != shared_ready
+            mismatch_count = int(torch.count_nonzero(mismatch).item())
+            max_abs = float(
+                torch.max(
+                    torch.abs(
+                        ready_per_action[slot].to(dtype=torch.float64)
+                        - shared_ready.to(dtype=torch.float64)
+                    )
+                ).item()
+            )
+            raise RuntimeError(
+                "N=5 constant actor bias requires one exact shared ready "
+                f"joint pose; slot={slot} mismatches={mismatch_count} "
+                f"max_abs={max_abs:.9g}. Use action-conditioned bootstrap."
+            )
+
+    runtime_facts = runtime_execution_facts(env, actor_contract)
+    joint_names = list(runtime_facts["joint_names"])
+    default_q = list(runtime_facts["default_joint_pos"])
+    action_scale = list(runtime_facts["action_scale"])
+    if len(joint_names) != 31:
+        raise RuntimeError(
+            "shared-ready actor bootstrap is bound to the 31-joint A3 action order"
+        )
+    ready_q = [
+        float(value)
+        for value in shared_ready.detach().cpu().to(dtype=torch.float64).tolist()
+    ]
+    normalized_bias = [
+        (ready - default) / scale
+        for ready, default, scale in zip(
+            ready_q, default_q, action_scale
+        )
+    ]
+    startup_event = getattr(
+        getattr(env.cfg, "events", None), "add_joint_default_pos", None
+    )
+    startup_params = (
+        None if startup_event is None else getattr(startup_event, "params", None)
+    )
+    startup_func = (
+        None if startup_event is None else getattr(startup_event, "func", None)
+    )
+    try:
+        startup_range = tuple(
+            float(value)
+            for value in startup_params["pos_distribution_params"]
+        )
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "shared-ready actor bootstrap requires the explicit startup "
+            "joint-default calibration range"
+        ) from exc
+    if (
+        len(startup_range) != 2
+        or not all(math.isfinite(value) for value in startup_range)
+        or startup_range[0] > startup_range[1]
+        or startup_params.get("operation") != "add"
+        or startup_params.get("distribution", "uniform") != "uniform"
+        or getattr(startup_func, "__name__", "")
+        != "randomize_joint_default_pos"
+    ):
+        raise RuntimeError(
+            "shared-ready actor bootstrap requires uniform additive startup "
+            "joint-default calibration randomization"
+        )
+    startup_delta_lower = [startup_range[0]] * 31
+    startup_delta_upper = [startup_range[1]] * 31
+
+    motion_cfg = motion_cmd.cfg
+    motion_files = _configured_items(
+        getattr(motion_cfg, "motion_file", None)
+    )
+    if len(motion_files) != action_count:
+        raise RuntimeError(
+            "shared-ready actor bootstrap requires one motion file per action"
+        )
+    motion_sha256 = []
+    for index, path in enumerate(motion_files):
+        absolute = pathlib.Path(str(path)).expanduser().resolve()
+        if not absolute.is_file():
+            raise RuntimeError(
+                "shared-ready actor bootstrap motion file is missing: "
+                f"slot={index} path={absolute}"
+            )
+        motion_sha256.append(_sha256_file(str(absolute)))
+
+    agent = agent_cfg.to_dict()
+    try:
+        init_noise_std = float(agent["policy"]["init_noise_std"])
+    except (KeyError, TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "shared-ready actor bootstrap requires an explicit PPO init_noise_std"
+        ) from exc
+    if not math.isfinite(init_noise_std) or init_noise_std != 0.02:
+        raise RuntimeError(
+            "shared-ready actor bootstrap requires "
+            f"algo.policy.init_noise_std=0.02, got {init_noise_std!r}"
+        )
+
+    termination = getattr(
+        getattr(env.cfg, "terminations", None),
+        "joint_qdes_forbidden",
+        None,
+    )
+    params = None if termination is None else getattr(termination, "params", None)
+    if (
+        not isinstance(params, dict)
+        or params.get("action_name") != "joint_pos"
+        or params.get("limit_source") != "joint_pos_limits"
+        or float(params.get("margin_rad", float("nan"))) != 0.0
+        or float(params.get("margin_fraction", float("nan"))) != 0.02
+    ):
+        raise RuntimeError(
+            "shared-ready actor bootstrap requires the existing exact "
+            "joint_qdes_forbidden two-percent physical-limit guard"
+        )
+    hard_limits = env.scene["robot"].data.joint_pos_limits
+    if not torch.is_tensor(hard_limits):
+        raise RuntimeError(
+            "shared-ready actor bootstrap requires articulation hard joint limits"
+        )
+    if hard_limits.ndim == 3:
+        hard_limits = hard_limits[0]
+    if tuple(hard_limits.shape) != (31, 2):
+        raise RuntimeError(
+            "shared-ready actor bootstrap hard joint limits must be [31,2]"
+        )
+    hard_limits = hard_limits.detach().cpu().to(dtype=torch.float64)
+    hard_lower = [float(value) for value in hard_limits[:, 0].tolist()]
+    hard_upper = [float(value) for value in hard_limits[:, 1].tolist()]
+    hard_inner_lower = [
+        lower + 0.02 * (upper - lower)
+        for lower, upper in zip(hard_lower, hard_upper)
+    ]
+    hard_inner_upper = [
+        upper - 0.02 * (upper - lower)
+        for lower, upper in zip(hard_lower, hard_upper)
+    ]
+    shared_ready_sha = action_ball_shared_ready_sha256(
+        action_order=list(action_order),
+        joint_names=joint_names,
+        shared_ready_joint_pos=ready_q,
+    )
+    contract = {
+        "schema_version": 1,
+        "kind": ACTION_BALL_POLICY_BOOTSTRAP_KIND,
+        "action_count": action_count,
+        "action_order": list(action_order),
+        "joint_names": joint_names,
+        "ready_source": {
+            "semantics": (
+                "motion.joint_pos[motion.seg_start[action_slot]]"
+            ),
+            "canonical_ready_sha256": str(
+                getattr(motion_cfg, "canonical_ready_sha256", "") or ""
+            ),
+            "canonical_ready_fk_sha256": str(
+                getattr(motion_cfg, "canonical_ready_fk_sha256", "") or ""
+            ),
+            "motion_sha256_per_action": motion_sha256,
+            "shared_ready_joint_pos": ready_q,
+            "shared_ready_joint_pos_sha256": shared_ready_sha,
+        },
+        "decoder": {
+            "semantics": "q_des=default_joint_pos+action_scale*action",
+            "use_default_offset": True,
+            "default_joint_pos": default_q,
+            "action_scale": action_scale,
+            "normalized_bias": normalized_bias,
+            "startup_offset_delta_source": (
+                "events.add_joint_default_pos.uniform_add"
+            ),
+            "startup_offset_delta_lower": startup_delta_lower,
+            "startup_offset_delta_upper": startup_delta_upper,
+        },
+        "initialization": {
+            "fresh_only": True,
+            "resume_overwrite_prohibited": True,
+            "output_layer_weight": "zeros",
+            "output_layer_bias": "decoder.normalized_bias",
+            "init_noise_std": init_noise_std,
+            "sigma_envelope": 4.0,
+        },
+        "hard_inner_guard": {
+            "limit_source": "articulation.data.joint_pos_limits",
+            "margin_rad": 0.0,
+            "margin_fraction": 0.02,
+            "hard_lower": hard_lower,
+            "hard_upper": hard_upper,
+            "hard_inner_lower": hard_inner_lower,
+            "hard_inner_upper": hard_inner_upper,
+        },
+    }
+    try:
+        validate_action_ball_policy_bootstrap(
+            contract, expected_action_count=action_count
+        )
+    except ValueError as exc:
+        raise RuntimeError(
+            "shared-ready actor bootstrap failed the 4-sigma hard-inner gate"
+        ) from exc
+    return contract
+
+
+def _apply_action_ball_fresh_policy_bootstrap(
+    runner, policy_bootstrap: dict, *, checkpoint_path
+) -> bool:
+    """Apply the reviewed initialization once, and never across a resume."""
+
+    import torch
+
+    from whole_body_tracking.utils.training_contract import (
+        validate_action_ball_policy_bootstrap,
+    )
+
+    try:
+        contract = validate_action_ball_policy_bootstrap(policy_bootstrap)
+    except ValueError as exc:
+        raise RuntimeError(
+            "refusing to apply an invalid ActionBall policy bootstrap"
+        ) from exc
+    if checkpoint_path is not None:
+        return False
+    policy = getattr(getattr(runner, "alg", None), "policy", None)
+    actor = getattr(policy, "actor", None)
+    if not isinstance(actor, torch.nn.Sequential):
+        raise RuntimeError(
+            "ActionBall bootstrap requires the reviewed RSL actor Sequential"
+        )
+    children = list(actor.children())
+    if not children or not isinstance(children[-1], torch.nn.Linear):
+        raise RuntimeError(
+            "ActionBall bootstrap cannot safely identify the actor output Linear"
+        )
+    output = children[-1]
+    bias_values = contract["decoder"]["normalized_bias"]
+    if (
+        output.out_features != len(bias_values)
+        or output.bias is None
+        or tuple(output.weight.shape)[0] != len(bias_values)
+    ):
+        raise RuntimeError(
+            "ActionBall bootstrap actor output does not match the 31-joint contract"
+        )
+    expected_bias = torch.tensor(
+        bias_values, device=output.bias.device, dtype=output.bias.dtype
+    )
+    with torch.no_grad():
+        output.weight.zero_()
+        output.bias.copy_(expected_bias)
+    if (
+        int(torch.count_nonzero(output.weight).item()) != 0
+        or not torch.equal(output.bias, expected_bias)
+    ):
+        raise RuntimeError(
+            "ActionBall actor output bootstrap did not apply exactly"
+        )
+    actual_std = getattr(policy, "std", None)
+    if not torch.is_tensor(actual_std):
+        raise RuntimeError(
+            "ActionBall bootstrap cannot verify the RSL policy exploration std"
+        )
+    expected_std = torch.full_like(
+        actual_std,
+        float(contract["initialization"]["init_noise_std"]),
+    )
+    if not torch.allclose(
+        actual_std, expected_std, rtol=0.0, atol=1.0e-8
+    ):
+        raise RuntimeError(
+            "ActionBall runtime policy std disagrees with the bootstrap contract"
+        )
+    return True
 
 
 def _action_ball_sha256(value, *, name: str) -> str:
@@ -5209,6 +5719,46 @@ def _validate_action_ball_mdp_source_map(
                 f"declared={declared}, actual={actual}"
             )
     return source_map
+
+
+def _validate_action_ball_reference_guard_contract(value, *, racket_cfg) -> dict:
+    """Bind the active reference-envelope behavior and its counter schema."""
+
+    from whole_body_tracking.tasks.tracking.mdp.action_ball_reference_guard import (
+        REFERENCE_GUARD_CONTRACT_PAYLOAD,
+        REFERENCE_GUARD_CONTRACT_SHA256,
+        validate_reference_guard_mode,
+    )
+
+    row = _action_ball_exact_dict(
+        value,
+        ("mode", "contract_payload", "contract_sha256"),
+        name="action-ball reference guard",
+    )
+    mode = validate_reference_guard_mode(row["mode"])
+    configured_mode = validate_reference_guard_mode(
+        getattr(racket_cfg, "reference_guard_mode", None)
+    )
+    if mode != configured_mode:
+        raise RuntimeError(
+            "action-ball reference-guard runtime/config mode mismatch: "
+            f"runtime={mode!r}, configured={configured_mode!r}"
+        )
+    _action_ball_assert_json_equal(
+        row["contract_payload"],
+        REFERENCE_GUARD_CONTRACT_PAYLOAD,
+        name="action-ball reference-guard contract payload",
+    )
+    declared = _action_ball_sha256(
+        row["contract_sha256"],
+        name="action-ball reference-guard contract SHA-256",
+    )
+    if declared != REFERENCE_GUARD_CONTRACT_SHA256:
+        raise RuntimeError(
+            "action-ball reference-guard contract SHA-256 drifted: "
+            f"runtime={declared}, executable={REFERENCE_GUARD_CONTRACT_SHA256}"
+        )
+    return row
 
 
 def _validate_action_ball_evaluator_launch_receipt(
@@ -6026,6 +6576,7 @@ def _validate_action_ball_runtime_hard_contract(
             "profiles",
             "sampling",
             "timing",
+            "reference_guard",
             "solver",
             "physics",
             "domain_authority",
@@ -6061,6 +6612,10 @@ def _validate_action_ball_runtime_hard_contract(
             "action-ball runtime hard contract canonical_sha256 mismatch: "
             f"declared={declared}, actual={computed}"
         )
+    _validate_action_ball_reference_guard_contract(
+        contract["reference_guard"],
+        racket_cfg=racket_cfg,
+    )
 
     _action_ball_assert_json_equal(
         contract["manifest"],
@@ -6555,6 +7110,7 @@ def _validate_action_ball_runtime_hard_contract(
             "action_ball_evaluation.py",
             "action_ball_manifest.py",
             "action_ball_profile_adapter.py",
+            "action_ball_reference_guard.py",
             "action_ball_runtime.py",
             "action_ball_sampling.py",
             "continuous_questions.py",
@@ -6597,10 +7153,14 @@ def _validate_action_ball_runtime_hard_contract(
     return contract
 
 
-def _validate_action_ball_policy_recipe(preflight: dict, agent_cfg) -> dict:
+def _validate_action_ball_policy_recipe(
+    preflight: dict, agent_cfg, policy_bootstrap: dict | None = None
+) -> dict:
     """Bind the manifest policy identity to the exact composed PPO recipe."""
 
-    recipe = _action_ball_agent_recipe(agent_cfg)
+    recipe = _action_ball_agent_recipe(
+        agent_cfg, policy_bootstrap=policy_bootstrap
+    )
     configured = _action_ball_sha256(
         preflight["policy_contract_sha256"],
         name="action-ball policy contract SHA",
@@ -6614,12 +7174,39 @@ def _validate_action_ball_policy_recipe(preflight: dict, agent_cfg) -> dict:
     return recipe
 
 
+_ACTION_BALL_FINITE_QDES_PROJECTION_FACT = (
+    "finite_preclamp_qdes_projection_enabled"
+)
+
+
+def _require_action_ball_finite_qdes_projection_fact(
+    runtime_facts: dict, *, action_ball_enabled: bool
+) -> None:
+    """Keep constrained-action semantics inside the immutable run identity."""
+
+    if type(action_ball_enabled) is not bool:
+        raise RuntimeError("action_ball_enabled must be an exact boolean")
+    value_present = _ACTION_BALL_FINITE_QDES_PROJECTION_FACT in runtime_facts
+    value = runtime_facts.get(_ACTION_BALL_FINITE_QDES_PROJECTION_FACT)
+    if action_ball_enabled:
+        if value is not True:
+            raise RuntimeError(
+                "ActionBall requires the instantiated finite pre-clamp q_des "
+                "projection runtime fact to be exact true"
+            )
+    elif value_present:
+        raise RuntimeError(
+            "finite pre-clamp q_des projection is ActionBall-only"
+        )
+
+
 def _build_training_hard_contract(
     env,
     actor_contract,
     effective_reward_receipt=None,
     agent_cfg=None,
     action_set_identity=None,
+    action_ball_policy_bootstrap=None,
 ) -> dict:
     """Immutable actor/task facts that must match across a checkpoint resume.
 
@@ -6784,6 +7371,14 @@ def _build_training_hard_contract(
             raise RuntimeError(
                 "runtime action-ball command returned no hard contract"
             )
+        if type(runtime_action_ball) is not dict:
+            raise RuntimeError(
+                "runtime action-ball hard contract must be a plain mapping"
+            )
+        _validate_action_ball_reference_guard_contract(
+            runtime_action_ball.get("reference_guard"),
+            racket_cfg=racket,
+        )
         non_explicit = []
         for term_name in active_names:
             term = command_manager.get_term(term_name)
@@ -6805,9 +7400,14 @@ def _build_training_hard_contract(
             for name in getattr(termination_manager, "active_terms", ())
         )
         required_terminations = {
+            "anchor_pos",
+            "anchor_ori",
+            "ee_body_pos",
             "base_fell_tilt",
             "base_too_low",
             "robot_hit_table",
+            "joint_qdes_forbidden",
+            "joint_actual_forbidden",
         }
         if (
             termination_manager is None
@@ -6882,7 +7482,9 @@ def _build_training_hard_contract(
         )
 
         action_ball_ppo_recipe = _validate_action_ball_policy_recipe(
-            preflight, agent_cfg
+            preflight,
+            agent_cfg,
+            policy_bootstrap=action_ball_policy_bootstrap,
         )
 
         diagnostic_action_ball = (
@@ -6957,6 +7559,11 @@ def _build_training_hard_contract(
             "motion_admission": motion_admission_receipt,
             **(
                 {}
+                if action_ball_policy_bootstrap is None
+                else {"policy_bootstrap": action_ball_policy_bootstrap}
+            ),
+            **(
+                {}
                 if action_set_identity is None
                 else {"action_set_identity": action_set_identity}
             ),
@@ -6986,6 +7593,10 @@ def _build_training_hard_contract(
             "target_mode=action_ball"
         )
     runtime_facts = runtime_execution_facts(env, actor_contract)
+    _require_action_ball_finite_qdes_projection_fact(
+        runtime_facts,
+        action_ball_enabled=action_ball_contract is not None,
+    )
     lateral_training = _resolve_lateral_training_runtime(env)
     processed_qdes_slew_contract = _processed_qdes_slew_hinge_reward_contract(
         env_cfg, runtime_facts
@@ -7592,6 +8203,7 @@ _RACKET_KEYS = (
     "action_ball_evaluation_run_id",
     "action_ball_frozen_eval_interval_updates",
     "action_ball_diagnostic_unauthorized",
+    "reference_guard_mode",
     "virtual_ball",
     "ref_perturb_curriculum_steps", "ref_perturb_curriculum_start", "ref_perturb_success_gated",
     "ref_perturb_advance_threshold", "ref_perturb_advance_rate", "ref_vel_scale", "ref_vel_scale_by_motion",
@@ -10552,7 +11164,8 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             if _w is not None:
                 _require(hasattr(R, _name), f"rewards.{_name}")
                 getattr(R, _name).weight = float(_w)
-                applied.append(f"rewards.{_name}.weight={float(_w)}")
+                if _name != "arm_torque_saturation":
+                    applied.append(f"rewards.{_name}.weight={float(_w)}")
 
     # actions: deploy-faithful action-processing switches (train==deploy parity knobs).
     ac = _get(task, "actions")
@@ -10746,6 +11359,14 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                     value,
                     "task.racket.action_ball_diagnostic_unauthorized",
                 ),
+                applied,
+                "racket_target",
+            )
+            _set_attr(
+                C,
+                "reference_guard_mode",
+                _get(rk, "reference_guard_mode"),
+                str,
                 applied,
                 "racket_target",
             )
@@ -11375,6 +11996,19 @@ def _run(cfg):
     _cfg_mod = sys.modules.get(type(env_cfg).__module__)
     print(f"[train.py] env cfg source: {type(env_cfg).__name__} <- {getattr(_cfg_mod, '__file__', '?')}", flush=True)
     applied = _apply_task_overrides(env_cfg, cfg.task, _registry_clip_name(cfg))
+    from whole_body_tracking.utils.effective_reward_recipe import (
+        build_reward_backend_compatibility_receipt,
+    )
+
+    reward_backend_compatibility_receipt = (
+        build_reward_backend_compatibility_receipt(env_cfg)
+    )
+    for decision in reward_backend_compatibility_receipt["decisions"]:
+        print(
+            "[train.py] "
+            + _reward_backend_compatibility_log_line(decision),
+            flush=True,
+        )
     _launch_racket_cfg = getattr(
         getattr(env_cfg, "commands", None), "racket_target", None
     )
@@ -11538,6 +12172,7 @@ def _run(cfg):
         str(getattr(_launch_racket_cfg, "target_mode", ""))
         == "action_ball"
     )
+    diagnostic_launch = False
     if training_launch_claim_path is not None and action_ball_launch_requested:
         try:
             action_set_identity = (
@@ -11582,6 +12217,22 @@ def _run(cfg):
                 "training_launch_claim_path/SHA and a verified code-owned "
                 "action-set identity before scene construction"
             )
+    (
+        action_ball_shared_ready_bootstrap_requested,
+        action_ball_policy_recipe_output_path,
+    ) = _resolve_action_ball_shared_ready_bootstrap_request(
+        cfg, action_ball_launch_requested=action_ball_launch_requested
+    )
+    if action_ball_policy_recipe_output_path is not None:
+        if (
+            not diagnostic_launch
+            or num_envs != 1
+            or _get(cfg, "checkpoint_path") is not None
+        ):
+            raise RuntimeError(
+                "action-ball policy recipe materialization requires a fresh "
+                "diagnostic ActionBall run with exactly one environment"
+            )
     _publish_lean_queue_binding_if_requested(cfg, log_dir)
 
     # 5) build env, wrap, run
@@ -11608,6 +12259,16 @@ def _run(cfg):
         f"{effective_reward_receipt['sha256']}",
         flush=True,
     )
+    if (
+        reward_backend_compatibility_receipt[
+            "effective_reward_recipe_sha256"
+        ]
+        != effective_reward_receipt["sha256"]
+    ):
+        raise RuntimeError(
+            "Reward configuration changed after backend compatibility "
+            "resolution"
+        )
     render_mode = "rgb_array" if cfg.video else None
     _emit_lean_queue_phase(cfg, "scene_import_start")
     env = gym.make(task_id, cfg=env_cfg, render_mode=render_mode)
@@ -11647,12 +12308,57 @@ def _run(cfg):
     else:
         actor_contract = infer_actor_observation_contract(env.unwrapped)
 
+    action_ball_policy_bootstrap = None
+    if action_ball_shared_ready_bootstrap_requested:
+        action_ball_policy_bootstrap = (
+            _action_ball_policy_bootstrap_contract(
+                env.unwrapped, actor_contract, agent_cfg
+            )
+        )
+        print(
+            "[train.py] ActionBall shared-ready policy bootstrap validated: "
+            f"N={action_ball_policy_bootstrap['action_count']} "
+            "noise_std="
+            f"{action_ball_policy_bootstrap['initialization']['init_noise_std']} "
+            "ready_sha256="
+            f"{action_ball_policy_bootstrap['ready_source']['shared_ready_joint_pos_sha256']}",
+            flush=True,
+        )
+    if action_ball_policy_recipe_output_path is not None:
+        materialized_recipe = _action_ball_agent_recipe(
+            agent_cfg, policy_bootstrap=action_ball_policy_bootstrap
+        )
+        env.close()
+        document = _materialize_action_ball_policy_recipe(
+            action_ball_policy_recipe_output_path,
+            policy_recipe=materialized_recipe,
+            policy_bootstrap=action_ball_policy_bootstrap,
+        )
+        print(
+            "[train.py] ACTION_BALL_POLICY_RECIPE_MATERIALIZED "
+            + json.dumps(
+                {
+                    "output_path": action_ball_policy_recipe_output_path,
+                    "policy_contract_sha256": document[
+                        "policy_contract_sha256"
+                    ],
+                    "action_order": document["action_order"],
+                },
+                allow_nan=False,
+                separators=(",", ":"),
+                sort_keys=True,
+            ),
+            flush=True,
+        )
+        return
+
     hard_contract = _build_training_hard_contract(
         env.unwrapped,
         actor_contract,
         effective_reward_receipt=effective_reward_receipt,
         agent_cfg=agent_cfg,
         action_set_identity=action_set_identity,
+        action_ball_policy_bootstrap=action_ball_policy_bootstrap,
     )
     task_first_training = "task_first_training" in hard_contract
     action_ball_training = "action_ball_training" in hard_contract
@@ -11730,10 +12436,23 @@ def _run(cfg):
     _write_effective_reward_receipt(
         reward_receipt_path, effective_reward_receipt, hard_contract
     )
+    backend_compatibility_path = os.path.join(
+        log_dir, "params", "reward_backend_compatibility.json"
+    )
+    _write_reward_backend_compatibility_receipt(
+        backend_compatibility_path,
+        reward_backend_compatibility_receipt,
+        effective_reward_receipt,
+    )
     hard_contract_sha256 = _sha256_file(contract_path)
     print(f"[train.py] hard training contract: {contract_path}", flush=True)
     print(
         f"[train.py] effective reward receipt: {reward_receipt_path}",
+        flush=True,
+    )
+    print(
+        "[train.py] reward backend compatibility receipt: "
+        f"{backend_compatibility_path}",
         flush=True,
     )
     _emit_lean_queue_phase(
@@ -11937,6 +12656,17 @@ def _run(cfg):
         training_launch_claim_sha256=training_launch_claim_sha256,
         require_exact_resume_state=strict_exact_training,
     )
+    if action_ball_policy_bootstrap is not None:
+        bootstrap_applied = _apply_action_ball_fresh_policy_bootstrap(
+            runner,
+            action_ball_policy_bootstrap,
+            checkpoint_path=ckpt,
+        )
+        print(
+            "[train.py] ActionBall policy bootstrap: "
+            f"{'APPLIED_FRESH' if bootstrap_applied else 'SKIPPED_RESUME'}",
+            flush=True,
+        )
     if strict_exact_training and bool(getattr(runner, "is_distributed", False)):
         raise RuntimeError(
             f"[train.py] {strict_training_label} is single-process only. "
