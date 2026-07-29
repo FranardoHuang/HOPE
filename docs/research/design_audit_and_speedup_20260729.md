@@ -371,6 +371,10 @@ v2 N1 producer 的 Pod focused regression 为 `11 passed, 2 deselected`；loop/b
 SHA-256 为 `85c7a27607b6afa74276653a76cc3fdfd843b5a18b91bebd9e041fe5f3f93627` /
 `09d0dea31f5e220cdd917f5f0863da5c9d5b5974d1863d6bbd0da1d91c88afdd`，均
 materialize PASS。
+真实 Isaac scene 物化的 policy contract SHA-256 为
+`03f833e11e75a4c2583fadd9fabee20e3fa418e07cfaf573d6e4c4956fb14227` /
+`3442881f50a6e1b38ae094b5d6078ebe025372bd88ee63f56ed79c801f7f4627`；
+lower 与 waist 的 normalized bias 均为零。
 
 历史审计同时收窄了五轮 probe 的解释：保留的 `s1w4_M2_v4rg` 是从 `model_13000` 连 optimizer
 warm-resume 的旧两动作 run，恢复后约第 2--12 update 才跨击球窗；没有 fresh 0--300 update

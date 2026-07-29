@@ -72,6 +72,10 @@ Follow-up note (2026-07-30, qvel-fixed 4096 probe rejected; Gate remains `Partia
   Pod focused regression 为 `11 passed, 2 deselected`；v2 loop/block bundle SHA 为
   `85c7a276…` / `09d0dea3…` 且 materialize PASS。policy receipt 尚未物化，故当前仍不可发
   probe/long。
+- 真实 Isaac scene 已物化 v2 loop/block policy contract `03f833e1…` / `3442881f…`；
+  lower+waist normalized bias 全零。recipe-only 子进程在写出工件后退出且未产生
+  `Learning iteration` marker，boot wrapper 因而报告 rc=1；这不是 PPO 失败，下一步由正式
+  launcher 绑定 recipe 进行 smoke。
 - 历史最接近的“早期能恢复”run 是 warm-resumed `s1w4_M2_v4rg`，不是 fresh N1：它从
   `model_13000` 恢复 optimizer，约第 2--12 update 才出现 strike。保留日志没有 fresh
   0--300 update。因此五轮 probe 的结论严格限定为“当前发射不具备 long 资格/存在击球前样本

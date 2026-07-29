@@ -802,6 +802,8 @@ v2 producer 已在 Pod focused test `2 passed`；loop/block motion SHA 为 `0fa4
 `1.8181/1.6422 m/s`，所以 v1 contact/bundle/policy recipe 均不得复用。
 v2 N1 contact producer 的 Pod focused regression 为 `11 passed, 2 deselected`；
 loop/block bundle SHA 为 `85c7a276…` / `09d0dea3…`，materialize PASS。
+真实 Isaac scene 物化的 loop/block policy contract 为 `03f833e1…` / `3442881f…`，12 腿与
+三腰 normalized bias 全零；两份 recipe-only run 在工件写出后退出，不构成 PPO 行为证据。
 
 保留历史日志未提供 fresh 0--300 update 对照；唯一近邻 `s1w4_M2_v4rg` 是
 `model_13000`+optimizer warm-resume，并在恢复后第 2--12 update 出现 strike。故前五轮只用于

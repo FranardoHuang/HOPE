@@ -24,6 +24,10 @@
   N1 contact producer 已切到 v2 exact bytes，并把 runtime-site finite-difference 速度更新为
   `1.8083/1.5947 m/s`。Pod N1 focused regression `11 passed, 2 deselected`；v2 loop/block
   bundle SHA 为 `85c7a276…` / `09d0dea3…`，均 materialize PASS。
+  真实 Isaac scene 物化的 loop/block policy contract 为 `03f833e1…` / `3442881f…`；
+  12 腿与三腰 normalized bias 全零。materialization 在写出 exact recipe 后因无
+  `Learning iteration` marker 被 boot wrapper 记 rc=1，但两份 no-clobber recipe 完整存在；
+  下一步生成绑定该 contract 的 fresh smoke spec。
 - 历史早期恢复审计没有找到 fresh 0--300 update 对照；唯一近邻 `s1w4_M2_v4rg` 是从
   `model_13000` 连 optimizer warm-resume，恢复后第 2--12 update 才跨击球窗。故 `4096×5`
   只否决当前 setting 直接 long 的资格，不证明 fresh policy 长线永不可恢复。stable-ready
