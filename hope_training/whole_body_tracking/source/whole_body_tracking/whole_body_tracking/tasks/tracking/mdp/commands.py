@@ -613,7 +613,11 @@ class MotionCommand(CommandTerm):
             # trust chain only.  The physical canonical-ready clip contract
             # (_validate_canonical_ready_clips) and the reset-curricula guard
             # below stay fully enforced — a bypassed run may not corrupt the
-            # ready-entry geometry, it may only skip authorization.
+            # ready-entry geometry, it may only skip authorization.  Retain an
+            # immutable snapshot even in diagnostic mode so MotionLoader and
+            # the later action-ball broker bind the same bytes.  This snapshot
+            # proves identity/TOCTOU closure only; it does not mint canonical
+            # admission.
             print(
                 "[MotionCommand] WARN canonical_ready_mode DIAGNOSTIC "
                 "UNAUTHORIZED: registry/certificate admission bypassed; "
@@ -622,7 +626,9 @@ class MotionCommand(CommandTerm):
             )
             self._validate_canonical_ready_config()
             self._canonical_registry_tables = None
-            self._motion_payloads = None
+            self._motion_payloads = (
+                self._snapshot_diagnostic_motion_bytes()
+            )
         elif self.canonical_ready_mode:
             self._validate_canonical_ready_config()
             self._canonical_registry_tables = (
@@ -1430,6 +1436,27 @@ class MotionCommand(CommandTerm):
         if tuple(digests) != expected:
             raise ValueError(
                 "canonical motion bytes changed after trusted registry admission"
+            )
+        return tuple(payloads)
+
+    def _snapshot_diagnostic_motion_bytes(self) -> tuple[bytes, ...]:
+        """Bind an unauthorized diagnostic to the exact bytes its loader adopts."""
+
+        payloads: list[bytes] = []
+        digests: list[str] = []
+        for index, path in enumerate(self._motion_files):
+            try:
+                payload = Path(path).read_bytes()
+            except OSError as exc:
+                raise ValueError(
+                    f"cannot snapshot diagnostic motion_file[{index}]: {exc}"
+                ) from exc
+            payloads.append(payload)
+            digests.append(hashlib.sha256(payload).hexdigest())
+        if tuple(digests) != tuple(self._motion_file_sha256):
+            raise ValueError(
+                "diagnostic motion bytes changed between initial hashing and "
+                "MotionLoader adoption"
             )
         return tuple(payloads)
 

@@ -272,6 +272,64 @@ def test_action_ball_runtime_waits_for_command_manager_construction():
         )
 
 
+def test_diagnostic_motion_payload_is_snapshotted_before_runtime_binding(
+    tmp_path,
+):
+    motion_tree = ast.parse(MOTION_SOURCE, filename=str(MOTION_COMMAND_PATH))
+    motion_class = next(
+        node
+        for node in motion_tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "MotionCommand"
+    )
+    snapshot_method = next(
+        node
+        for node in motion_class.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_snapshot_diagnostic_motion_bytes"
+    )
+    module = ast.Module(body=[snapshot_method], type_ignores=[])
+    ast.fix_missing_locations(module)
+    namespace = {"Path": Path, "hashlib": hashlib}
+    exec(compile(module, str(MOTION_COMMAND_PATH), "exec"), namespace)
+    snapshot = namespace["_snapshot_diagnostic_motion_bytes"]
+
+    motion_path = tmp_path / "motion.npz"
+    payload = b"diagnostic-motion-bytes"
+    motion_path.write_bytes(payload)
+    command = SimpleNamespace(
+        _motion_files=(str(motion_path),),
+        _motion_file_sha256=(hashlib.sha256(payload).hexdigest(),),
+    )
+    assert snapshot(command) == (payload,)
+
+    command._motion_file_sha256 = ("0" * 64,)
+    with pytest.raises(
+        ValueError,
+        match="changed between initial hashing and MotionLoader adoption",
+    ):
+        snapshot(command)
+
+    init_method = next(
+        node
+        for node in motion_class.body
+        if isinstance(node, ast.FunctionDef) and node.name == "__init__"
+    )
+    init_source = ast.get_source_segment(MOTION_SOURCE, init_method)
+    diagnostic_branch = init_source[
+        init_source.index(
+            "if self.canonical_ready_mode and diagnostic_unauthorized:"
+        ):
+        init_source.index(
+            "elif self.canonical_ready_mode:"
+        )
+    ]
+    assert (
+        "self._snapshot_diagnostic_motion_bytes()"
+        in diagnostic_branch
+    )
+    assert "self._motion_payloads = None" not in diagnostic_branch
+
+
 def test_training_builds_deferred_action_ball_contract_before_hook_audit():
     train_source = (
         ROOT / "scripts" / "train.py"
