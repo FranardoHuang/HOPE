@@ -357,12 +357,13 @@ def actual_joint_position_forbidden_zone(
         expected_shape=expected_shape,
         context=context,
     )
-    current_violation = joint_position_forbidden_zone_mask(
+    current_violation_per_joint = joint_position_forbidden_zone_per_joint(
         joint_pos,
         limits,
         margin_rad=margin_rad,
         margin_fraction=margin_fraction,
     )
+    current_violation = torch.any(current_violation_per_joint, dim=1)
     substep_actual_latch = getattr(
         action, "physics_substep_actual_hard_edge_latch", None
     )
@@ -376,7 +377,57 @@ def actual_joint_position_forbidden_zone(
             f"{context} requires a same-device bool substep actual-hard-edge latch "
             f"shaped [num_envs]={expected_shape[0]}"
         )
-    return current_violation | substep_actual_latch
+    terminal = current_violation | substep_actual_latch
+    diagnostic_enabled = getattr(
+        action, "actual_joint_forbidden_diagnostic_enabled", False
+    )
+    if type(diagnostic_enabled) is not bool:
+        raise RuntimeError(
+            f"{context} requires an exact boolean diagnostic-enabled flag"
+        )
+    if diagnostic_enabled:
+        diagnostic_recorder = getattr(
+            action, "record_actual_joint_forbidden_diagnostic", None
+        )
+        if not callable(diagnostic_recorder):
+            raise RuntimeError(
+                f"{context} diagnostic mode requires an attribution recorder"
+            )
+        absolute, fraction = _validate_forbidden_zone_margins(
+            margin_rad, margin_fraction
+        )
+        lower = limits[..., 0]
+        upper = limits[..., 1]
+        travel = upper - lower
+        inset = absolute + fraction * travel
+        inner_lower = lower + inset
+        inner_upper = upper - inset
+        finite = (
+            torch.isfinite(joint_pos)
+            & torch.isfinite(lower)
+            & torch.isfinite(upper)
+            & torch.isfinite(inset)
+        )
+        valid_interval = (travel > 0.0) & (inner_lower < inner_upper)
+        comparable = finite & valid_interval
+        diagnostic_recorder(
+            current_lower=(
+                current_violation_per_joint
+                & comparable
+                & joint_pos.le(inner_lower)
+            ),
+            current_upper=(
+                current_violation_per_joint
+                & comparable
+                & joint_pos.ge(inner_upper)
+            ),
+            current_nonfinite_or_invalid=(
+                current_violation_per_joint & ~comparable
+            ),
+            terminal=terminal,
+            episode_age=env.episode_length_buf,
+        )
+    return terminal
 
 
 def bad_anchor_pos(env: ManagerBasedRLEnv, command_name: str, threshold: float) -> torch.Tensor:

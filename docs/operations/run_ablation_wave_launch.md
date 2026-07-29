@@ -101,6 +101,20 @@ log-prob、Done、actual hard `2%` 安全带和 Reward 权重均不改。该比�
 与 schema-3 training contract 回读；缺字段、config/runtime 不等或旧 checkpoint resume 均拒绝。
 必须先用 Pod 1-env smoke，再做 4096 同 seed；source tests 不能代替 Isaac 结果。
 
+`478f485b` 也已给出反例：q_des termination/projection penalty 均为零，但 4096-env updates
+0--6 仍约 `4.7k actual-joint reset/update`，mean episode `19--24<t_hit` 且 strike 为零。
+不要再增加 q_des inset 或直接放宽 actual band。下一 short diagnostic 必须在每个 PPO update
+检查一条 `HOPE_ACTUAL_JOINT_DIAGNOSTIC_UPDATE_JSON`，至少含：
+
+- exact articulation `joint_order`；
+- episode age `<=1` / `>1` 的 terminal 分母、mean/max age；
+- 每个非零 joint 的 current lower/upper/nonfinite-or-invalid、substep actual-hard、
+  pre-apply nonfinite q_des 和 predicted-crossing overlap。
+
+这些计数只用于定位，不能晋级 checkpoint。计数器必须在 device 上累加；rollout hot path
+不得 host sync，update boundary 才允许一次小批量 D2H。逐桶 terminal 总数必须与同一 update
+的 `joint_actual_forbidden` raw count 对账；若不同，先停在诊断，不改训练 setting。
+
 N=1 launcher 的 canonical Hydra argv 必须逐字包含
 `+task.racket.reference_guard_mode=metrics_only`。该键不在 task YAML 中，少写 `+` 会在 compose
 阶段失败；不能把 source-level argv 测试当作真实 Hydra 通过。full scope 还必须从 prototype

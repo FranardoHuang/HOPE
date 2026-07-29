@@ -546,6 +546,66 @@ loop/block × upper/full 老师轨迹均无 crossing，最小剩余余量约 `0.
 actual hard band、Reward 和非 ActionBall 路径不变。该结论目前只到 source-level，Pod smoke 和
 4096 同 seed 才是行为验收。
 
+### 2026-07-29：`478f485b` 反例、逐关节定位与吞吐拆解
+
+Pod1 exact `478f485b119f48807892870621a5350842ecd733` 的额外 `5%` finite-q_des reserve
+没有解掉实际关节 reset：
+
+| evidence | result |
+| --- | --- |
+| 1-env × 2-update smoke | 自然完成；mean episode `19/18`；fresh bootstrap=`APPLIED_FRESH` |
+| 4096-env updates 0--6 | `27.11--41.66 s/update`；mean episode `18.67--23.74` |
+| actual-joint reset | update 1--6 为 `4,457/5,087/4,664/4,815/4,813/4,791` |
+| q_des / projection | q_des termination=`0`；projection penalty/contribution=`0` |
+| task progress | strike opportunity=`0`；table=`0`；fall 仅零星 |
+| stop artifact | 完整 PPO boundary 的 finite `model_6.pt`；随后停止 |
+
+这否定了“只要让有限 q_des target 再远离包络就会恢复训练”的单变量假设。用
+`configs/a3_runtime_articulation_joint_order.txt` 解码 teacher 后，31 个关节全片都不进入
+实际 hard-limit 内缩 `2%`，`q+0.02*qdot` 也为零 crossing；frame-0 最近的是
+`right_ankle_roll_joint`，但仍有约 `0.137 rad` 到 inner edge，不能仅凭静态余量点名根因。
+physical reset 会写老师 frame-0 + zero qdot，policy 日志又证明 shared-ready fresh bootstrap
+已应用，所以剩余高概率分支是 ground/contact/implicit-PD transient 或某个实际关节在 rollout
+中漂入 inner band。
+
+当前 `joint_actual_forbidden` 把当前 q 的 2%-inner 下侧/上侧、非有限状态和 substep raw-hard
+latch 合成一个 env bit；diagnostic run 又故意不走 formal joint-safety receipt，所以日志没有
+逐关节证据。下一 source 候选只加以下非晋级遥测：
+
+- 每个 terminal env 记录 exact articulation order 下的 lower/upper/nonfinite/current-inner、
+  substep actual-hard、pre-apply nonfinite q_des 与 predicted crossing overlap；
+- 以 episode age `<=1` 和 `>1` 分桶，保留 terminal 分母与 mean/max age；
+- 所有计数留在 GPU，只有 PPO update 边界一次小批量同步和 canonical JSON；不改 action、
+  Reward、Done、physics、solver 或 curriculum。
+
+墙钟数据也说明 reset 不是“不可避免的 Isaac 固有速度”：同一 run 中 reset 增加约
+`629--1,270/update` 时，update 额外增加约 `3.9--10.6 s`；按该局部关系外推，无 mass reset
+时约为 `4--6 s/update`，与仓库旧健康跑一致。这只是定位依据，不作为未来吞吐承诺。性能修复顺序
+冻结为：
+
+公开实现只支持方向判断，不能直接拿现代 GPU 数字要求当前 V100/contact-heavy 场景：
+[Isaac Lab 官方 benchmark](https://isaac-sim.github.io/IsaacLab/main/source/overview/reinforcement-learning/performance_benchmarks.html)
+明确把 env-only、inference 与 training FPS 分开；[IsaacGymEnvs Humanoid](https://github.com/isaac-sim/IsaacGymEnvs/blob/main/isaacgymenvs/tasks/humanoid.py)
+和 [legged_gym](https://github.com/leggedrobotics/legged_gym/blob/master/legged_gym/envs/base/legged_robot.py)
+的 reset 核心都是按 `env_ids` 的 tensor 索引批量写回，不含逐 env JSON/SHA 收据。
+[PyTorch 官方 tuning guide](https://docs.pytorch.org/tutorials/recipes/recipes/tuning_guide.html#avoid-unnecessary-cpu-gpu-synchronization)
+又明确把 `.item()`、`.cpu()` 与依赖 CUDA tensor 的 Python control flow 列为会同步 CPU/GPU
+的模式。因此外部证据支持“批量化并延后同步”，但本项目最终目标仍以同 Pod 旧跑和 fresh A/B
+为准。
+
+1. 先消除错误语义造成的 mass reset，不用更多 env 掩盖 CPU 瓶颈；
+2. 将 command EMA/计数留在 device、每 update 同步一次，并去掉逐步
+   `float(reduce)` / `bool(any)`；
+3. 每 policy step 的 `_compute_strike_timing()` 只计算一次；
+4. immutable receipt SHA 缓存，reset 批次一次 D2H，禁止 per-env `.item()` / JSON / SHA；
+5. formal joint ledger 改为预分配聚合，只有 terminal/unsafe env 保留完整 transcript；
+6. 最后才做 2048/4096/8192 env A/B。
+
+首阶段验收是相同 physics/Reward/seed 下达到
+[`collection_environment_steps_per_s`](../../DEFINITIONS.md#collection-environment-steps-per-s)
+`>=15k`、collection GPU utilization `>60%`，同时 reset reason、task/solver counters 与
+checkpoint exact-resume 不变。
+
 ### 2026-07-29：`7a14b0b9` 真实 smoke、4096 反例与 crossing 所有权修正
 
 Pod1 clean checkout 已按

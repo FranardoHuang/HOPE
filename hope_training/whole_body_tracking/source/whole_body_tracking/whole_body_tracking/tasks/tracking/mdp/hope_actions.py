@@ -653,6 +653,75 @@ class ClampedJointPositionAction(JointPositionAction):
             getattr(racket_cfg, "target_mode", None) == "action_ball"
             and diagnostic_unauthorized
         )
+        # The fixed-domain ActionBall screen intentionally bypasses the heavyweight formal
+        # joint-safety receipt transaction.  Keep one small device-side diagnostic instead so a
+        # reset storm can still be attributed to an exact joint, side, and episode-age bucket.
+        # This state is never cleared by per-environment reset and is copied to the host only once
+        # at the PPO update boundary by ``consume_actual_joint_forbidden_diagnostic``.
+        self._actual_joint_forbidden_diagnostic_enabled = (
+            self._joint_safety_diagnostic_latest_archive
+        )
+        diagnostic_all_joint_names = tuple(
+            str(name) for name in self._asset.joint_names
+        )
+        if isinstance(self._joint_ids, slice):
+            diagnostic_joint_ids = tuple(
+                range(len(diagnostic_all_joint_names))
+            )[self._joint_ids]
+        else:
+            diagnostic_joint_ids = self._joint_ids
+            if torch.is_tensor(diagnostic_joint_ids):
+                diagnostic_joint_ids = diagnostic_joint_ids.detach().to(
+                    device="cpu"
+                ).tolist()
+            diagnostic_joint_ids = tuple(
+                int(joint_id) for joint_id in diagnostic_joint_ids
+            )
+        if (
+            self._actual_joint_forbidden_diagnostic_enabled
+            and tuple(diagnostic_joint_ids)
+            != tuple(range(len(diagnostic_all_joint_names)))
+        ):
+            raise ValueError(
+                "actual-joint diagnostic requires full articulation identity joint order"
+            )
+        diagnostic_joint_names = tuple(
+            diagnostic_all_joint_names[joint_id]
+            for joint_id in diagnostic_joint_ids
+        )
+        if len(diagnostic_joint_names) != int(self._processed_actions.shape[1]):
+            raise ValueError(
+                "actual-joint diagnostic joint names must match the protected action order"
+            )
+        self._actual_joint_forbidden_diagnostic_joint_names = (
+            diagnostic_joint_names
+        )
+        self._actual_joint_forbidden_diagnostic_categories = (
+            "current_lower",
+            "current_upper",
+            "current_nonfinite_or_invalid",
+            "substep_actual_hard_edge",
+            "pre_apply_nonfinite_qdes",
+            "pre_apply_predicted_crossing",
+        )
+        self._actual_joint_forbidden_diagnostic_counts = torch.zeros(
+            (
+                2,
+                len(self._actual_joint_forbidden_diagnostic_categories),
+                self._processed_actions.shape[1],
+            ),
+            dtype=torch.long,
+            device=self._processed_actions.device,
+        )
+        self._actual_joint_forbidden_diagnostic_terminal_count = torch.zeros(
+            2, dtype=torch.long, device=self._processed_actions.device
+        )
+        self._actual_joint_forbidden_diagnostic_age_sum = torch.zeros_like(
+            self._actual_joint_forbidden_diagnostic_terminal_count
+        )
+        self._actual_joint_forbidden_diagnostic_age_max = torch.full_like(
+            self._actual_joint_forbidden_diagnostic_terminal_count, -1
+        )
         # Keep deploy-space q_des history next to the action term that owns the affine transform
         # and safety clamp.  ActionManager.prev_action is the previous *normalized actor output*;
         # it cannot attest the target the PD controller actually received after offset/scale/clamp.
@@ -2768,6 +2837,171 @@ class ClampedJointPositionAction(JointPositionAction):
         )
         self._accumulate_joint_safety_live(slice(None))
         self._publish_joint_safety_policy_step_summary()
+
+    def record_actual_joint_forbidden_diagnostic(
+        self,
+        *,
+        current_lower: torch.Tensor,
+        current_upper: torch.Tensor,
+        current_nonfinite_or_invalid: torch.Tensor,
+        terminal: torch.Tensor,
+        episode_age: torch.Tensor,
+    ) -> None:
+        """Accumulate a diagnostic-only terminal attribution without a rollout host sync."""
+
+        if not self._actual_joint_forbidden_diagnostic_enabled:
+            return
+        expected_joint_shape = tuple(self._processed_actions.shape)
+        for name, value in (
+            ("current_lower", current_lower),
+            ("current_upper", current_upper),
+            ("current_nonfinite_or_invalid", current_nonfinite_or_invalid),
+        ):
+            if (
+                not torch.is_tensor(value)
+                or value.dtype != torch.bool
+                or tuple(value.shape) != expected_joint_shape
+                or value.device != self._processed_actions.device
+            ):
+                raise RuntimeError(
+                    f"actual-joint diagnostic {name} must be a same-device bool tensor "
+                    f"shaped {expected_joint_shape}"
+                )
+        if (
+            not torch.is_tensor(terminal)
+            or terminal.dtype != torch.bool
+            or tuple(terminal.shape) != (self.num_envs,)
+            or terminal.device != self._processed_actions.device
+        ):
+            raise RuntimeError(
+                "actual-joint diagnostic terminal must be a same-device bool tensor "
+                f"shaped [{self.num_envs}]"
+            )
+        if (
+            not torch.is_tensor(episode_age)
+            or episode_age.dtype == torch.bool
+            or torch.is_floating_point(episode_age)
+            or tuple(episode_age.shape) != (self.num_envs,)
+            or episode_age.device != self._processed_actions.device
+        ):
+            raise RuntimeError(
+                "actual-joint diagnostic episode_age must be a same-device integer tensor "
+                f"shaped [{self.num_envs}]"
+            )
+        substep_actual = self._substep_actual_hard_edge_joint_latch
+        qdes_request = self._pre_apply_qdes_violation_joint_latch
+        predicted_crossing = self._pre_apply_crossing_violation_joint_latch
+        categories = torch.stack(
+            (
+                current_lower,
+                current_upper,
+                current_nonfinite_or_invalid,
+                substep_actual,
+                qdes_request,
+                predicted_crossing,
+            ),
+            dim=0,
+        )
+        categories = categories & terminal.view(1, self.num_envs, 1)
+        initial = episode_age <= 1
+        age_masks = torch.stack((initial, ~initial), dim=0) & terminal.unsqueeze(0)
+        self._actual_joint_forbidden_diagnostic_counts.add_(
+            (
+                categories.unsqueeze(0)
+                & age_masks.view(2, 1, self.num_envs, 1)
+            ).sum(dim=2)
+        )
+        self._actual_joint_forbidden_diagnostic_terminal_count.add_(
+            age_masks.sum(dim=1)
+        )
+        age_long = episode_age.to(dtype=torch.long)
+        self._actual_joint_forbidden_diagnostic_age_sum.add_(
+            (age_masks * age_long.unsqueeze(0)).sum(dim=1)
+        )
+        self._actual_joint_forbidden_diagnostic_age_max.copy_(
+            torch.maximum(
+                self._actual_joint_forbidden_diagnostic_age_max,
+                torch.where(
+                    age_masks,
+                    age_long.unsqueeze(0),
+                    torch.full_like(age_masks, -1, dtype=torch.long),
+                ).amax(dim=1),
+            )
+        )
+
+    @property
+    def actual_joint_forbidden_diagnostic_enabled(self) -> bool:
+        """Whether the non-promotable update-boundary attribution is active."""
+
+        return self._actual_joint_forbidden_diagnostic_enabled
+
+    def consume_actual_joint_forbidden_diagnostic(self) -> dict[str, Any]:
+        """Copy and clear the small diagnostic aggregate at one PPO update boundary."""
+
+        if not self._actual_joint_forbidden_diagnostic_enabled:
+            return {"enabled": False}
+        packed = torch.cat(
+            (
+                self._actual_joint_forbidden_diagnostic_counts.reshape(-1),
+                self._actual_joint_forbidden_diagnostic_terminal_count,
+                self._actual_joint_forbidden_diagnostic_age_sum,
+                self._actual_joint_forbidden_diagnostic_age_max,
+            )
+        ).detach().to(device="cpu")
+        packed_values = [int(value) for value in packed.tolist()]
+        count_size = self._actual_joint_forbidden_diagnostic_counts.numel()
+        counts = torch.tensor(
+            packed_values[:count_size], dtype=torch.long
+        ).reshape(self._actual_joint_forbidden_diagnostic_counts.shape)
+        offset = count_size
+        terminal_count = packed_values[offset : offset + 2]
+        age_sum = packed_values[offset + 2 : offset + 4]
+        age_max = packed_values[offset + 4 : offset + 6]
+        age_bucket_names = ("episode_age_le_1", "episode_age_gt_1")
+        buckets: dict[str, Any] = {}
+        for bucket_index, bucket_name in enumerate(age_bucket_names):
+            by_joint = []
+            for joint_index, joint_name in enumerate(
+                self._actual_joint_forbidden_diagnostic_joint_names
+            ):
+                category_counts = {
+                    category: int(counts[bucket_index, category_index, joint_index])
+                    for category_index, category in enumerate(
+                        self._actual_joint_forbidden_diagnostic_categories
+                    )
+                }
+                if any(category_counts.values()):
+                    by_joint.append(
+                        {"joint": joint_name, "counts": category_counts}
+                    )
+            count = terminal_count[bucket_index]
+            buckets[bucket_name] = {
+                "terminal_count": count,
+                "mean_episode_age": (
+                    float(age_sum[bucket_index]) / float(count)
+                    if count > 0
+                    else None
+                ),
+                "max_episode_age": (
+                    age_max[bucket_index] if age_max[bucket_index] >= 0 else None
+                ),
+                "by_joint": by_joint,
+            }
+        self._actual_joint_forbidden_diagnostic_counts.zero_()
+        self._actual_joint_forbidden_diagnostic_terminal_count.zero_()
+        self._actual_joint_forbidden_diagnostic_age_sum.zero_()
+        self._actual_joint_forbidden_diagnostic_age_max.fill_(-1)
+        return {
+            "enabled": True,
+            "joint_order": list(
+                self._actual_joint_forbidden_diagnostic_joint_names
+            ),
+            "categories": list(
+                self._actual_joint_forbidden_diagnostic_categories
+            ),
+            "age_buckets": buckets,
+            "total_terminal_count": int(sum(terminal_count)),
+        }
 
     def joint_safety_ledger_snapshot(self) -> dict[str, Any]:
         """Read-only live + since-consume + terminal archive export for monitoring."""

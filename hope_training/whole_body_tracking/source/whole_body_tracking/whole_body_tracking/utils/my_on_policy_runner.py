@@ -3949,6 +3949,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
     def log(self, locs: dict, width: int = 80, pad: int = 35) -> None:
         step = int(locs["it"])
         super().log(locs, width=width, pad=pad)
+        self._consume_actual_joint_forbidden_diagnostic(step)
         # Consume/print even when TensorBoard/W&B is disabled: this stdout JSON line is the exact
         # per-update receipt, while dashboard logging is optional presentation only.
         exact_behavior = self._consume_exact_behavior_updates(step)
@@ -3965,6 +3966,54 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 flush=True,
             )
             raise KeyboardInterrupt
+
+    def _consume_actual_joint_forbidden_diagnostic(
+        self, step: int
+    ) -> Optional[dict]:
+        """Emit the non-promotable ActionBall reset attribution once per PPO update."""
+
+        if not self._action_ball_diagnostic_unauthorized():
+            return None
+        if getattr(
+            self, "_actual_joint_forbidden_diagnostic_consumed_step", None
+        ) == int(step):
+            return getattr(
+                self, "_actual_joint_forbidden_diagnostic_consumed_record", None
+            )
+        env = getattr(self.env, "unwrapped", self.env)
+        manager = getattr(env, "action_manager", None)
+        getter = None if manager is None else getattr(manager, "get_term", None)
+        if not callable(getter):
+            raise RuntimeError(
+                "ActionBall diagnostic requires action_manager.get_term()"
+            )
+        action = getter("joint_pos")
+        consumer = getattr(
+            action, "consume_actual_joint_forbidden_diagnostic", None
+        )
+        if not callable(consumer):
+            raise RuntimeError(
+                "ActionBall diagnostic joint action lacks actual-limit attribution"
+            )
+        payload = consumer()
+        if payload.get("enabled") is not True:
+            raise RuntimeError(
+                "ActionBall diagnostic actual-limit attribution is not enabled"
+            )
+        record = {
+            "event": "action_ball_actual_joint_forbidden_diagnostic_update",
+            "schema_version": 1,
+            "ppo_update": int(step),
+            **payload,
+        }
+        print(
+            "HOPE_ACTUAL_JOINT_DIAGNOSTIC_UPDATE_JSON="
+            + json.dumps(record, sort_keys=True, separators=(",", ":")),
+            flush=True,
+        )
+        self._actual_joint_forbidden_diagnostic_consumed_step = int(step)
+        self._actual_joint_forbidden_diagnostic_consumed_record = record
+        return record
 
     def _notify_command_terms_rollout_end(self, step: int) -> None:
         """Notify each active command term once, before any per-update ledger is consumed."""

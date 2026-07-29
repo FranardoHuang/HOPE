@@ -59,6 +59,21 @@ Current-candidate promotion sub-gate (required before this Gate can close):
 
 Follow-up note (2026-07-29, ActionBall actual-joint reset follow-up; Gate remains `Partial`):
 
+- `478f485b` 的 finite executed q_des 额外内缩 `5%` 也没有降低 mass reset。Pod1
+  1-env × 2-update smoke 自然完成；4096-env updates 0--6 的
+  `joint_actual_forbidden=3,187--5,087/update`、mean episode `18.67--23.74`，strike
+  opportunity 始终为零，而 q_des termination、nonfinite 和 projection penalty 均为零。
+  graceful boundary checkpoint 为 `model_6.pt`，run 随后停止，不能当作训练结果。
+- 用 `configs/a3_runtime_articulation_joint_order.txt` 的真实 articulation order 重算后，
+  `bh_loop_c_upper_fivebind` 老师全片以及 `q+0.02*qdot` 都没有进入当前 hard-limit 内缩
+  `2%` 带；frame 0 也合法。故“老师 bytes 本身贴限”已被排除，但当前日志把 31 个关节和上下侧
+  OR 成一个 bit，尚不能区分 shared-ready/ground transient、PD/接触动态或某个关节的 inner-band
+  漂移。
+- 下一次短诊断只增加 device-side joint×side×episode-age 计数；rollout 内不得 `.item()`、
+  `.cpu()` 或 JSON，PPO update 边界只允许一次小批量 D2H 并输出
+  `HOPE_ACTUAL_JOINT_DIAGNOSTIC_UPDATE_JSON`。它不是新的发射门，也不改变 Reward、Done、
+  action、physics 或 curriculum。先用 1-env smoke 验证构造，再用 fresh 4096-env 一轮定位；
+  在此之前不得继续改 safety-band 宽度或把 actual-limit Done 删除。
 - `5e94f21b` 的 20 ms receding-horizon brake 已在 Pod1 跑到 4096-env update 16。相对同 seed
   `5dbb`，actual-joint reset 没降（`4,791.6` vs `4,728.8/update`），mean episode 仍只有
   `20.19` steps、短于约 31-step 的击球帧，strike opportunity 合计仅 `2`；最近十窗吞吐反而约慢

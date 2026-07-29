@@ -13,6 +13,16 @@
 
 ## 2026-07-29（N1 ActionBall 真实 smoke 与 physical-crossing 拆账）
 
+- `478f485b` 的额外 `5%` finite-q_des 内缩已在 Pod1 给出反例：1-env 两轮自然完成，
+  但 4096-env updates 0--6 仍为 `33.98--41.66 s/update`（首轮 `27.11 s`）、
+  episode 约 `19--24` steps、`4,664--5,087 joint_actual_forbidden/update` 且 strike
+  opportunity 始终为零；q_des termination/projection penalty 均为零。该 run 已在完整 PPO
+  boundary 保存 `model_6.pt` 后停止，候选不晋级。正确 runtime joint order 下，老师全片和
+  `q+0.02*qdot` 都没有越过实际 hard-limit 内缩 `2%`，因此下一步只加 diagnostic-only 的
+  joint×side×episode-age GPU 计数，在 update 边界一次同步，先分清地面/初态 plant drift、
+  当前 q inner-band 与真实 substep hard edge；不再靠改 Reward 或继续猜 margin。详见
+  [Reward 因果实验](experiments/2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md)和
+  [G05](gates/G05_isaac_training_first_loop.md)。
 - `5dbb4e58` 的 Pod1 反手拉 1-env smoke 自然完成，但 4096-env update 0--17 仍约
   `4.7k joint_actual_forbidden/update`、episode length `19--24<t_hit≈31`，fall 仅
   `0--23/update`，说明慢速主因不是倒地或 q_des clamp 失效，而是真实关节进入 hard-limit
