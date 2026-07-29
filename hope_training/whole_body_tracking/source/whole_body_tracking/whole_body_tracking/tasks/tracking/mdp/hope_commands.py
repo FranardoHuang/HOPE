@@ -4276,6 +4276,9 @@ class RacketTargetCommand(CommandTerm):
             # (20/60/20); constructor defaults are not launch authority.
             sampling_mixture=SamplingMixture(),
             contact_time_step_s=policy_dt_s,
+            diagnostic_unauthorized=(
+                self.cfg.action_ball_diagnostic_unauthorized
+            ),
         )
         prm = self._cq_prm()
         surface_z, net_x, net_top_z = self._cq_planes()
@@ -7726,8 +7729,8 @@ class RacketTargetCommand(CommandTerm):
                 raise RuntimeError(
                     "retired action-ball birth belongs to another environment"
                 )
-            rows.append((env_id, birth))
-        births = tuple(birth for _env_id, birth in rows)
+            rows.append((env_id, birth, provider["sampler_birth"]))
+        births = tuple(birth for _env_id, birth, _sampler_birth in rows)
         if not births:
             return
         # The pool performs one validate-all/commit-all retirement.  Provider
@@ -7741,7 +7744,14 @@ class RacketTargetCommand(CommandTerm):
             raise AssertionError(
                 "action-ball pool returned an invalid batch discard receipt"
             )
-        for env_id, birth in rows:
+        if self._action_ball_diagnostic_unauthorized:
+            self._action_ball_sampler.forget_diagnostic_births(
+                tuple(
+                    sampler_birth
+                    for _env_id, _birth, sampler_birth in rows
+                )
+            )
+        for env_id, birth, _sampler_birth in rows:
             del self._action_ball_provider_births[birth.canonical_sha256]
             if self._action_ball_diagnostic_unauthorized:
                 self._action_ball_provider_history.pop(

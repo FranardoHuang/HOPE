@@ -4462,6 +4462,7 @@ class ActionBallSampler:
         seed: int,
         sampling_mixture: Optional[SamplingMixture] = None,
         contact_time_step_s: Optional[float] = None,
+        diagnostic_unauthorized: bool = False,
     ) -> None:
         if not isinstance(profiles, (tuple, list)) or not profiles:
             raise ValueError("profiles must be a non-empty tuple/list")
@@ -4478,6 +4479,13 @@ class ActionBallSampler:
             ordered[profile.action_uid] = profile
         self._profiles = dict(sorted(ordered.items()))
         self._seed = _plain_int(seed, name="seed")
+        if type(diagnostic_unauthorized) is not bool:
+            raise TypeError(
+                "diagnostic_unauthorized must be an exact boolean"
+            )
+        # Runtime bookkeeping only: deliberately excluded from the sampler
+        # identity so the same seed/request tape emits byte-identical samples.
+        self._diagnostic_fast_path = diagnostic_unauthorized
         if (
             sampling_mixture is not None
             and not isinstance(sampling_mixture, SamplingMixture)
@@ -4521,6 +4529,12 @@ class ActionBallSampler:
             uid: 0 for uid in self.action_uids
         }
         self._sample_count_by_action = {
+            uid: 0 for uid in self.action_uids
+        }
+        self._diagnostic_last_birth_draw_end_by_action = {
+            uid: 0 for uid in self.action_uids
+        }
+        self._diagnostic_last_sample_draw_end_by_action = {
             uid: 0 for uid in self.action_uids
         }
         # Compact active sample authority: one birth_index integer for each
@@ -4705,6 +4719,11 @@ class ActionBallSampler:
         if count == 0:
             return (-1, 0)
         last_index = count - 1
+        if self._diagnostic_fast_path:
+            return (
+                last_index,
+                self._diagnostic_last_birth_draw_end_by_action[action_uid],
+            )
         receipt = self._issued_births_by_action[action_uid].get(
             last_index
         )
@@ -4737,6 +4756,11 @@ class ActionBallSampler:
         if count == 0:
             return (-1, 0)
         last_index = count - 1
+        if self._diagnostic_fast_path:
+            return (
+                last_index,
+                self._diagnostic_last_sample_draw_end_by_action[action_uid],
+            )
         if last_index < self._retired_sample_count_by_action[action_uid]:
             return (
                 last_index,
@@ -5018,6 +5042,10 @@ class ActionBallSampler:
             birth_index
         ] = receipt
         self._birth_count_by_action[action_uid] = birth_index + 1
+        if self._diagnostic_fast_path:
+            self._diagnostic_last_birth_draw_end_by_action[
+                action_uid
+            ] = draw_end
         return receipt
 
     def _validate_birth(
@@ -5187,8 +5215,10 @@ class ActionBallSampler:
         retained_sample_start = (
             self._retired_sample_count_by_action[action_uid]
         )
-        if len(sample_birth_indices) != (
-            sample_index - retained_sample_start
+        if (
+            not self._diagnostic_fast_path
+            and len(sample_birth_indices)
+            != (sample_index - retained_sample_start)
         ):
             raise RuntimeError(
                 "sample authority ledger is inconsistent with sample_count"
@@ -5650,19 +5680,70 @@ class ActionBallSampler:
             sample_id=_sha256_json(candidate.identity_payload()),
         )
         completed.verify_sample_id()
-        sample_birth_indices.append(birth.birth_index)
-        self._assignment_head_by_action[action_uid] = (
-            self._assignment_step_sha256(
-                action_uid=action_uid,
-                previous_head_sha256=(
-                    self._assignment_head_by_action[action_uid]
-                ),
-                sample_index=sample_index,
-                birth_index=birth.birth_index,
+        if self._diagnostic_fast_path:
+            self._diagnostic_last_sample_draw_end_by_action[
+                action_uid
+            ] = draw_end
+        else:
+            sample_birth_indices.append(birth.birth_index)
+            self._assignment_head_by_action[action_uid] = (
+                self._assignment_step_sha256(
+                    action_uid=action_uid,
+                    previous_head_sha256=(
+                        self._assignment_head_by_action[action_uid]
+                    ),
+                    sample_index=sample_index,
+                    birth_index=birth.birth_index,
+                )
             )
-        )
         self._sample_count_by_action[action_uid] = sample_index + 1
         return completed
+
+    def forget_diagnostic_births(
+        self,
+        births: Sequence[BaseBirthReceipt],
+    ) -> None:
+        """Forget exact retired births without touching RNG/high-water state.
+
+        Diagnostic runs do not claim replay or exact sampler resume.  Their
+        live authority is therefore bounded by active episode births instead
+        of retaining an append-only transcript.  Validation is atomic and the
+        operation is O(k) in the number of retired environments.
+        """
+
+        if not self._diagnostic_fast_path:
+            raise RuntimeError(
+                "forget_diagnostic_births requires diagnostic_unauthorized"
+            )
+        if (
+            isinstance(births, (str, bytes))
+            or not isinstance(births, Sequence)
+        ):
+            raise TypeError("births must be a non-string sequence")
+        validated = []
+        seen = set()
+        for index, birth in enumerate(births):
+            if not isinstance(birth, BaseBirthReceipt):
+                raise TypeError(
+                    f"births[{index}] must be a BaseBirthReceipt"
+                )
+            action_uid = self._validated_action_uid(birth.action_uid)
+            key = (action_uid, birth.birth_index)
+            if key in seen:
+                raise ValueError("diagnostic retirement repeated one birth")
+            seen.add(key)
+            if (
+                self._issued_births_by_action[action_uid].get(
+                    birth.birth_index
+                )
+                != birth
+            ):
+                raise ValueError(
+                    "diagnostic retirement birth is not live sampler authority"
+                )
+            validated.append((action_uid, birth.birth_index))
+        for action_uid, birth_index in validated:
+            del self._issued_births_by_action[action_uid][birth_index]
 
     def _verify_sampling_membership(
         self,
@@ -6195,6 +6276,7 @@ class ActionBallSampler:
         replay = object.__new__(ActionBallSampler)
         replay._profiles = {action_uid: profile}
         replay._seed = self._seed
+        replay._diagnostic_fast_path = False
         replay._sampling_mixture = self._sampling_mixture
         replay._contact_time_step_s = self._contact_time_step_s
         replay._contact_time_grid_by_action = {

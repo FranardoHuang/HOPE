@@ -362,6 +362,76 @@ def test_same_seed_birth_and_sample_are_bit_exact_and_task_is_unresolved():
         replace(left_sample, sample_index=1).verify_sample_id()
 
 
+def test_diagnostic_retirement_is_bounded_and_preserves_exact_random_tape():
+    profile = _profile()
+    formal = S.ActionBallSampler([profile], seed=20260730)
+    diagnostic = S.ActionBallSampler(
+        [profile],
+        seed=20260730,
+        diagnostic_unauthorized=True,
+    )
+    for epoch in range(8):
+        formal_birth = _birth(formal, epoch=epoch)
+        diagnostic_birth = _birth(diagnostic, epoch=epoch)
+        assert diagnostic_birth == formal_birth
+        assert (
+            _sample(diagnostic, diagnostic_birth, epoch=epoch)
+            == _sample(formal, formal_birth, epoch=epoch)
+        )
+        diagnostic.forget_diagnostic_births((diagnostic_birth,))
+        assert diagnostic.birth_highwater_for(101) == (
+            formal.birth_highwater_for(101)
+        )
+        assert diagnostic.sample_highwater_for(101) == (
+            formal.sample_highwater_for(101)
+        )
+        assert diagnostic.draw_count_for(101) == formal.draw_count_for(101)
+    assert diagnostic._issued_births_by_action[101] == {}
+    assert diagnostic._issued_sample_birth_indices_by_action[101] == []
+    with pytest.raises(
+        RuntimeError,
+        match="requires diagnostic_unauthorized",
+    ):
+        formal.forget_diagnostic_births(())
+
+    live_count = 4096
+    sampler = S.ActionBallSampler(
+        [profile],
+        seed=20260731,
+        diagnostic_unauthorized=True,
+    )
+    live = {}
+    for env_id in range(live_count):
+        birth = _birth(sampler, epoch=1)
+        _sample(sampler, birth, epoch=1)
+        live[env_id] = birth
+    previous_birth_highwater = sampler.birth_highwater_for(101)
+    previous_sample_highwater = sampler.sample_highwater_for(101)
+
+    # Repeated asynchronous reset subsets must replace, not accumulate,
+    # sampler authority.  The batch size is deliberately not a divisor of
+    # 4096 so each round touches a different live subset.
+    for generation in range(2, 6):
+        env_ids = tuple(
+            (generation * 263 + offset) % live_count
+            for offset in range(257)
+        )
+        sampler.forget_diagnostic_births(
+            tuple(live[env_id] for env_id in env_ids)
+        )
+        for env_id in env_ids:
+            birth = _birth(sampler, epoch=generation)
+            _sample(sampler, birth, epoch=generation)
+            live[env_id] = birth
+        assert len(sampler._issued_births_by_action[101]) == live_count
+        assert sampler._issued_sample_birth_indices_by_action[101] == []
+        assert sampler._compaction_segments_by_action[101] == []
+        assert sampler.birth_highwater_for(101) > previous_birth_highwater
+        assert sampler.sample_highwater_for(101) > previous_sample_highwater
+        previous_birth_highwater = sampler.birth_highwater_for(101)
+        previous_sample_highwater = sampler.sample_highwater_for(101)
+
+
 def test_counter_rally_reserves_draw_17_and_derives_landing_y_from_reverse_ray():
     profile = _profile(
         counter_rally_objective=CR.CounterRallyObjectiveProfile()
