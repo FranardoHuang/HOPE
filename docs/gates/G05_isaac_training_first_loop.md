@@ -3776,11 +3776,16 @@ nonfinite 均为零，fall 仅偶发。它不能通过 `t_hit`/strike 门，因�
 
 block exact 4096 probe 没有进入 PPO：URDF/scene 构造在 CPU 高占用、GPU 约 1% 下静默约
 900 秒，由 launcher 自身 `KIT_BOOT_STALE_TIMEOUT_S=900` 自然停止；该 run 只能作为启动性能
-反证，不能写作训练失败。相同 motion/Reward/solver 的 `1024 env × 100 update` recovery 已进入
-真实 PPO。截至 update 22，iteration 通常 `9.7--11.3 s`，mean episode 约 `21--22`，strike
-仍为零，actual raw-hard 约 `47--49` events/rollout；`model_20.pt` 逐 tensor finite。
+反证，不能写作训练失败。相同 motion/Reward/solver 的 `1024 env × 100 update` recovery 运行到
+update 77：iteration 通常 `10--18 s`，mean episode 始终约 `21--22`，strike 始终为零，
+actual raw-hard 始终约 `47--49` events/rollout；`model_20/40/60.pt` 已写出且
+`model_20.pt` 逐 tensor finite。这足以否定当前 ready 在 100 updates 内自然跨过击球窗。
+run 随后命中 producer/consumer 不一致的 teacher-rate float32 边界检查而 Traceback；该 run
+按预登记停止，不能把 77--100 写成训练结果。
 
 老师腰部轨迹远离 A3 hard limits，q_des projection 也为零，故当前不授权调整 Reward、CaT 或
 真实 hard-edge 终止。下一门改为 nominal A3 plant 的 unified dynamic-ready/initial-qdes/
-observation/reference/preparation-window hold diagnostic；必须稳定跨过
+observation/reference/preparation-window hold diagnostic。Pod MuJoCo 动态 replay 又显示
+block/loop teacher 约在 `1.24/1.26 s` 后失衡，说明 static LP 不等于动态 hold；旧 receipt
+没有保存 LP actuator solution。必须先物化 action-specific hold qdes并稳定跨过
 `preparation + t_hit + margin` 后再重跑规模 probe。G05 保持 `Partial`。

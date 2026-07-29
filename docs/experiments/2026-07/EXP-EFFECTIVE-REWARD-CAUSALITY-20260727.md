@@ -818,12 +818,17 @@ loop stable v2 的 exact `4096 env × 5 update` 已自然完成：iteration
 `3741/3979/4167/4654/4635`。block 4096 构造在首个 PPO update 前由 launcher 900 秒
 静默 stale 门停止，没有训练结果。
 
-同一 block setting 的 `1024 env × 100 update` recovery 正在 Pod1 自然运行。截至 update 22，
-mean episode 仍约 `21--22`、strike 为零，actual raw-hard 约 `47--49` events/rollout；
-q_des/table/nonfinite 为零，fall 极少，`model_20.pt` finite。该 recovery 只回答 fresh policy
-是否能在 100 updates 内跨过击球窗，不是 Reward arm。
+同一 block setting 的 `1024 env × 100 update` recovery 在 Pod1 运行到 update 77：
+mean episode 始终约 `21--22`、strike 始终为零，actual raw-hard 始终约
+`47--49` events/rollout；q_des/table/nonfinite 为零，fall 极少，
+`model_20/40/60.pt` 已写出且 `model_20.pt` finite。它随后因 teacher-rate 的 producer/consumer
+float32 边界复验不一致而 Traceback，按规则停止。前 77 update 已足以否定“当前 ready 会在
+100 updates 内自救”，但这不是 Reward arm，也不能外推到修复后的 dynamic ready。
 
 由于 teacher 腰部轨迹离 A3 hard limits 有显著余量、q_des projection 也持续为零，当前证据
 指向 nominal A3 plant 与出生/qdes/preparation 合同，而不是 tracking、击球或 landing Reward
 剂量。所有 Reward/negative penalty/reference guard/full-body 比较继续冻结；先完成动态可保持
 ready 并取得 strike baseline，否则 realized income 和因果 worsening 都没有可解释的击球分母。
+Pod MuJoCo replay 进一步显示 block/loop teacher 分别约在 `1.24/1.26 s` 后失衡；static LP
+receipt 未保存 actuator solution，不能直接当作 hold qdes。下一动作是先物化 action-specific
+nominal hold，再在 Isaac 做无 PPO hold diagnostic；单纯延长 preparation window 暂不采用。

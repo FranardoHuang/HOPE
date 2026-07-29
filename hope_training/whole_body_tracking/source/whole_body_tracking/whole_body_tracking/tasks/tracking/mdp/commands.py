@@ -2997,12 +2997,34 @@ class MotionCommand(CommandTerm):
             raise ValueError(
                 "action-ball certified teacher-rate bounds must contain native rate 1"
             )
-        if not teacher_rate_min <= teacher_rate <= teacher_rate_max:
-            # Deliberately reject rather than clipping.  Clipping would silently change both
-            # contact speed and the sampled ball deadline.
+        try:
+            contact_geometry = runtime._contact_geometry
+            contact_geometry.canonical_teacher_rate_from_site_speed(
+                teacher_rate,
+                1.0,
+                teacher_rate_min,
+                teacher_rate_max,
+            )
+            canonical_teacher_rate = (
+                contact_geometry.canonical_teacher_rate_from_site_speed(
+                required_speed,
+                reference_speed,
+                teacher_rate_min,
+                teacher_rate_max,
+                )
+            )
+        except contact_geometry.ExactFaceContactGeometryError as exc:
+            # Keep the consumer on the producer's one SHA-bound float32 seam.
+            # This remains fail-closed outside the canonical 5e-7 boundary
+            # tolerance and never clips or retimes the task.
             raise ValueError(
                 "action-ball teacher_rate is outside its certified range"
-            )
+            ) from exc
+        self._action_ball_close_float(
+            teacher_rate,
+            canonical_teacher_rate,
+            name="task canonical teacher_rate",
+        )
         required_vector = self._action_ball_vector(
             receipt.racket_site_velocity_w_mps,
             name="task.racket_site_velocity_w_mps",

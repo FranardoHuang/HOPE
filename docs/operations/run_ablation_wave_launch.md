@@ -259,6 +259,10 @@ reference 动作无需因本切换重做：upper/full loop/block 四件老师的
     因此“进程仍在高 CPU 构造”不等于可静默等满 1800 秒；若大型 env 构造需更久，必须先量化
     startup phase 并显式修改、记录该合同，不能把 launcher 的 900 秒自然停止写成 PPO 失败。
     出现首个 `Learning iteration` 后仍以 900 秒无推进为 stale。
+    task teacher-rate 的边界只有一个真源：
+    `canonical_teacher_rate_from_site_speed`。producer 与 Motion consumer 都必须调用它；其
+    `5e-7` 绝对容差只吸收 GPU float32 接缝，不会 clip、重定时或放宽 action support。consumer
+    不得另写严格区间复验，否则合法边界题会在长跑中随机 Traceback。
 14. **里程碑算术**：fresh 要写出 `model_1000.pt` 必须传 `max_iterations=1001`（0 起数）；
     热启动把相对偏移加到父迭代号。**终版存档名是 `model_13599` 不是 `13600`**——
     等 13600 会永远等。

@@ -1244,6 +1244,42 @@ def test_motion_rejects_mutated_exact_receipt_instead_of_clipping_rate():
     assert float(command.speed_scale[0]) == 0.0
 
 
+def test_motion_accepts_canonical_float32_teacher_rate_boundary_seam():
+    command, runtime, broker, _provider, _domain = _motion_harness(1)
+    task_authority = _bind_task_authority(command, runtime, broker)
+    env_ids = torch.tensor([0], dtype=torch.long)
+    transaction, _rollback = _reserve_write_commit(command, env_ids)
+    consumed = _consume_committed(
+        runtime, broker, transaction["receipts"]
+    )
+    task = _task_receipt(runtime, consumed[0], swing_generation=0)
+
+    rate = float(task.teacher_rate_min) - 2.0e-7
+    required_speed = float(task.reference_racket_site_speed_mps) * rate
+    scaled_t_hit = float(task.reference_t_hit_s) / rate
+    scaled_t_cycle = float(task.reference_t_cycle_s) / rate
+    object.__setattr__(task, "teacher_rate", rate)
+    object.__setattr__(task, "required_racket_site_speed_mps", required_speed)
+    object.__setattr__(
+        task, "racket_site_velocity_w_mps", (required_speed, 0.0, 0.0)
+    )
+    object.__setattr__(task, "scaled_t_hit_s", scaled_t_hit)
+    object.__setattr__(task, "scaled_t_cycle_s", scaled_t_cycle)
+    object.__setattr__(
+        task,
+        "pre_swing_wait_s",
+        float(task.time_to_contact_s) - scaled_t_hit,
+    )
+    task_authority.install((task,))
+    command._begin_action_ball_task_pending(env_ids, elapsed_s=0.0)
+
+    command._resolve_pending_action_ball_tasks()
+    assert bool(command.action_ball_task_timing_active[0])
+    assert math.isclose(
+        float(command._action_ball_teacher_rate[0]), rate, abs_tol=1.0e-7
+    )
+
+
 def test_schema4_exact_resume_handoff_restores_local_refs_without_shared_io():
     command, runtime, broker, provider, authority = _motion_harness(8)
     task_authority = _bind_task_authority(command, runtime, broker)

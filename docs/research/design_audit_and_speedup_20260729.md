@@ -399,13 +399,24 @@ stable-upper v2 的真实 Pod 结果否决了“静态 LP 可保持即可直接 
   GPU 约 1%，尚未出现 `Learning iteration` 即由 launcher 自己的
   `KIT_BOOT_STALE_TIMEOUT_S=900` fail-closed 停止。它没有 PPO 结果，不能与 loop probe
   混写；但证明当前 4096 构造路径存在非线性 CPU/receipt 初始化成本；
-- 为区分“五轮样本饥饿”与“fresh policy 可在较长线自救”，同一 block setting 已按预注册
-  启动 `1024 env × 100 update` recovery
-  `n1_stable_v2_canary_e8f1b8e5_block_gpu1_r1`。截至 update 22，iteration 通常约
-  `9.7--11.3 s`（一次 `17.47 s`），mean episode 仍约 `21--22`，strike 为零，
-  actual raw-hard 约 `47--49` episode events/rollout，q_des/table/nonfinite 为零、fall
-  极少；`model_20.pt` 已在 Pod 载入验证 `25` 个 tensor 全 finite。该固定 100-update
-  recovery 继续自然运行，未到终点前不调超参。
+- 为区分“五轮样本饥饿”与“fresh policy 可在较长线自救”，同一 block setting 按预注册
+  启动了 `1024 env × 100 update` recovery
+  `n1_stable_v2_canary_e8f1b8e5_block_gpu1_r1`。它运行到 update 77；iteration 通常约
+  `10--18 s`，mean episode 始终约 `21--22`，strike 始终为零，actual raw-hard 始终约
+  `47--49` episode events/rollout，q_des/table/nonfinite 为零、fall 极少。
+  `model_20/40/60.pt` 均已写出，`model_20.pt` 在 Pod 逐 tensor 验证 finite。该证据已经否定
+  “当前出生合同可在 100 updates 内自然恢复到击球窗”，但不外推成任何稳定 ready 都不可学；
+- update 77 后新题首次命中 producer 已允许的 float32 rate 边界，Motion consumer 却用严格
+  `min <= rate <= max` 再验一次，触发
+  `ValueError: action-ball teacher_rate is outside its certified range`。这是 producer/consumer
+  数值接缝不一致，不是物理失败；修复必须复用同一 canonical `5e-7` 边界容差且继续禁止 clipping，
+  不做学习 A/B。
+
+另在 Pod 用 exact A3 MuJoCo 动态 replay 复核 stable-v2 teacher。block/loop 分别在约
+`1.24/1.26 s` 后因 tilt 超门失败，COM support margin 约 `-0.375/-0.391 m`；两脚仍接地且
+slip 很小。这说明 static contact LP 只证明“存在一组瞬时平衡力”，不证明 `qdes=q` 或整段 teacher
+在 official low-gain plant 下动态稳定。当前 receipt 又只保存 residual/effort ratio，没有保存
+LP 的 31 维 actuator solution；因此不能直接从旧 receipt 派生 hold qdes。
 
 静态 motion 审计排除了“老师动作自己贴腰限位”的解释。stable v2 teacher 的 runtime
 `waist_roll` 与 `waist_pitch` 分别位于约 `[-0.046,0.014]`、`[0,0.141] rad`（loop）以及
@@ -415,11 +426,11 @@ official low-gain plant 在重力、接触和全身耦合下不能从该出生/q
 而不是 Reward、solver、teacher limit 或有限 q_des。
 
 因此下一直接修仍是统一的 **dynamic-ready contract**，不做 Reward A/B：physical spawn、
-initial qdes bias、actor observation、teacher reference 与 motion frame 0 必须描述同一姿态；
-出生后增加明确 preparation window，incoming-ball TTC 下界绑定
-`preparation + validated t_hit + margin`；先用 nominal plant hold 证明可保持到该时刻，再跑
-`1 env×2` 与规模 probe。不能以提高 Reward、放宽 actual hard edge、CaT 或增加 env 数掩盖
-动态不可保持的出生状态。
+initial qdes bias、actor observation、teacher reference 与 motion frame 0 必须描述同一姿态。
+但执行顺序必须是先求并绑定 action-specific nominal hold qdes，证明 nominal plant 能稳定保持，
+再增加 preparation window；没有 hold compensation 时单纯延长等待反而会增加击球前死亡。
+incoming-ball TTC 下界随后绑定 `preparation + validated t_hit + margin`，再跑 `1 env×2` 与规模
+probe。不能以提高 Reward、放宽 actual hard edge、CaT 或增加 env 数掩盖动态不可保持的出生状态。
 
 性能工单同时收窄为测量优先：现有 ball→task 已是 reset-time GPU batch，且 episode 内缓存，
 在 update 分段 profiler 证明 solver 占主导前不重写算法。优先量化 physics rollout、
