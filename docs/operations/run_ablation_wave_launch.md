@@ -118,6 +118,9 @@ construction 或 PhysX start 停止前进，保留日志后按 exact PGID 关闭
    `a3_stable_upper_selected_rubber_face_center_at_pinned_strike_frame`，必须声明不保留旧
    upper center，并闭合 `retargeted_world_z = ready_root_z + task_z`。不要把 full-motion
    authority 或 legacy 两个 Z 字段混入 stable-upper receipt。
+7. N1 producer 的 `SUPPORTED_ACTIONS` 必须指向 stable-upper v2 exact motion bytes，并使用
+   与其 `_runtime_site_velocity` 相同的 finite-difference strike speed；不得拿 MuJoCo site
+   trace 的近似速度或 v1 bundle 跨 bytes 复用。
 
 以下性能改动若 Pod focused parity 通过，可直接进入 replacement，不另开学习 A/B：
 

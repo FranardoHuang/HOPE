@@ -67,6 +67,9 @@ Follow-up note (2026-07-30, qvel-fixed 4096 probe rejected; Gate remains `Partia
   这是同一 A3 birth/reference 修复的补全，不做学习 A/B。Pod producer focused test
   `2 passed`；loop/block 新 motion SHA 为 `0fa46ad6…` / `cc9bbccd…`，双脚 `3+3`、
   static LP `feasible=true`，重建 contact 后重新 smoke。
+- N1 contact producer 已钉到 stable-upper v2 exact bytes；声明的 runtime-site
+  finite-difference strike speed 为 loop `1.8083184461 m/s`、block `1.5911427062 m/s`。
+  v2 bundle/policy receipt 尚未物化，故当前仍不可发 probe/long。
 - Pod1 已完成 `bh_loop_c` 与 `bh_block` 的 exact `4096 env × 5 update × save1`。两者 mean
   episode 约 `23/12` 步、strike opportunity 均为零；actual raw-hard 分别约
   `2.5k--4.2k/update` 与末轮约 `7.7k`。checkpoint 均 finite，q_des

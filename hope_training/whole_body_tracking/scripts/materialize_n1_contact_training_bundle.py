@@ -92,14 +92,14 @@ SUPPORTED_ACTIONS = {
         "family": "backhand",
         "motion_path": (
             "assets/motions/fivebind_20260727/"
-            "bh_loop_c_upper_stable_v1.npz"
+            "bh_loop_c_upper_stable_v2.npz"
         ),
         "motion_sha256": (
-            "4343a85e227de02f634d99d27499df2a4fa63b93df069ea2edb44524dca075ff"
+            "0fa46ad66d57edd006b0a70a7de0542d8d53945ee3ae9802fdbd937555a0c85b"
         ),
         "reference_t_hit_s": 0.62,
         "reference_t_cycle_s": 1.4,
-        "reference_racket_site_speed_mps": 1.8143678674451433,
+        "reference_racket_site_speed_mps": 1.8083184460907227,
         "priority": 0,
     },
     "bh_block": {
@@ -107,22 +107,22 @@ SUPPORTED_ACTIONS = {
         "family": "backhand",
         "motion_path": (
             "assets/motions/fivebind_20260727/"
-            "bh_block_upper_stable_v1.npz"
+            "bh_block_upper_stable_v2.npz"
         ),
         "motion_sha256": (
-            "08aeafaff2a14b62c4d9d37c77855c2ca5a9f9cb2ffde7f97b748676b681df01"
+            "cc9bbccd1b5b6207a0ce9677944ba27fa4a062a1eaa61886d802c9d21830caa0"
         ),
         "reference_t_hit_s": 0.48,
         "reference_t_cycle_s": 1.06,
-        "reference_racket_site_speed_mps": 1.5781960074353882,
+        "reference_racket_site_speed_mps": 1.5911427061902983,
         "priority": 2,
     },
 }
 
 # The frozen N=5 source manifest still names the predecessor upper bytes.  Keep
 # that identity separate from ``SUPPORTED_ACTIONS``: the former proves which
-# task row we inherited, while the latter pins the qvel-only A3 replacement
-# consumed by the newly materialized N=1 bundle.
+# task row we inherited, while the latter pins the A3 stable-upper v2
+# replacement consumed by the newly materialized N=1 bundle.
 SOURCE_SUPPORTED_ACTIONS = {
     "bh_loop_c": {
         "action_uid": 1722317591841513,
