@@ -144,6 +144,7 @@ _ACTION_BALL_CONTACT_REJECTION_COUNTERS = (
     "virtual_contact_u_n_below_fit_reject_count",
     "virtual_contact_u_n_above_fit_reject_count",
 )
+_ACTION_BALL_DIAGNOSTIC_MAX_EXTERNAL_PROPOSAL_ROUNDS = 64
 
 
 class _ActionBallPoolSolverAdapter:
@@ -4663,6 +4664,11 @@ class RacketTargetCommand(CommandTerm):
             if diagnostic_unauthorized
             else float(self.cfg.cq_overdraw)
         )
+        effective_cq_max_redraw_rounds = (
+            _ACTION_BALL_DIAGNOSTIC_MAX_EXTERNAL_PROPOSAL_ROUNDS
+            if diagnostic_unauthorized
+            else int(self.cfg.cq_max_redraw_rounds)
+        )
         broker = ActionBirthBroker(
             bindings,
             pins,
@@ -4694,6 +4700,9 @@ class RacketTargetCommand(CommandTerm):
             effective_pool_refill_rows
         )
         self._action_ball_effective_cq_overdraw = effective_cq_overdraw
+        self._action_ball_effective_cq_max_redraw_rounds = (
+            effective_cq_max_redraw_rounds
+        )
         self._action_ball_broker = broker
         self._action_ball_pool = pool
         self._action_ball_prototypes = prototypes
@@ -5105,6 +5114,9 @@ class RacketTargetCommand(CommandTerm):
                     self._action_ball_effective_cq_overdraw
                 ),
                 "maximum_external_proposal_rounds": int(
+                    self._action_ball_effective_cq_max_redraw_rounds
+                ),
+                "configured_maximum_external_proposal_rounds": int(
                     self.cfg.cq_max_redraw_rounds
                 ),
             },
@@ -6714,7 +6726,15 @@ class RacketTargetCommand(CommandTerm):
         requests = tuple(requests)
         if not requests:
             raise RuntimeError("action-ball refill batch must be non-empty")
-        maximum_rounds = int(self.cfg.cq_max_redraw_rounds)
+        if hasattr(
+            self,
+            "_action_ball_effective_cq_max_redraw_rounds",
+        ):
+            maximum_rounds = int(
+                self._action_ball_effective_cq_max_redraw_rounds
+            )
+        else:
+            maximum_rounds = int(self.cfg.cq_max_redraw_rounds)
         if hasattr(self, "_action_ball_effective_cq_overdraw"):
             effective_cq_overdraw = float(
                 self._action_ball_effective_cq_overdraw
@@ -10842,6 +10862,9 @@ class RacketTargetCommand(CommandTerm):
                 ),
                 "effective_cq_overdraw": (
                     self._action_ball_effective_cq_overdraw
+                ),
+                "effective_cq_max_redraw_rounds": (
+                    self._action_ball_effective_cq_max_redraw_rounds
                 ),
             }
             payload["integrity_sha256"] = (

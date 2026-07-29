@@ -48,6 +48,7 @@ def _action_and_env(
     runtime_physics_dt: float | None = None,
     expected_decimation: int | None = 4,
     terminal_archive_capacity: int | None = 16,
+    action_ball_diagnostic_unauthorized: bool = False,
 ):
     names = [f"j{index}" for index in range(joint_count)]
     offset = (
@@ -95,7 +96,17 @@ def _action_and_env(
             if runtime_physics_dt is None
             else runtime_physics_dt
         ),
-        cfg=types.SimpleNamespace(decimation=decimation),
+        cfg=types.SimpleNamespace(
+            decimation=decimation,
+            commands=types.SimpleNamespace(
+                racket_target=types.SimpleNamespace(
+                    target_mode="action_ball",
+                    action_ball_diagnostic_unauthorized=(
+                        action_ball_diagnostic_unauthorized
+                    ),
+                )
+            ),
+        ),
         episode_length_buf=torch.zeros(num_envs, dtype=torch.long),
     )
     action = hope_actions_mod.ClampedJointPositionAction(cfg, env)
@@ -899,6 +910,56 @@ def test_terminal_archive_overflow_is_sticky_and_never_overwrites():
     assert after["terminal_archive_overflow_count"] == 1
     with pytest.raises(RuntimeError, match="overflow is sticky"):
         action.process_actions(torch.zeros(2, 2))
+
+
+def test_diagnostic_terminal_archive_keeps_latest_proof_per_env_at_4096():
+    num_envs = 4096
+    action, _, asset = _action_and_env(
+        num_envs=num_envs,
+        joint_count=1,
+        guard=True,
+        terminal_archive_capacity=num_envs,
+        action_ball_diagnostic_unauthorized=True,
+    )
+    all_envs = torch.arange(num_envs)
+
+    action.process_actions(torch.zeros(num_envs, 1))
+    _finish_guarded_policy_step(action, asset)
+    action.reset(env_ids=all_envs)
+    first = action.joint_safety_ledger_snapshot()
+    assert first["terminal_archive_used"] == num_envs
+    assert first["terminal_archive_overflow_latch"] is False
+    assert {
+        entry["policy_step_sequence"]
+        for entry in first["terminal_archives"]
+    } == {0}
+
+    latest_sequence = torch.zeros(num_envs, dtype=torch.long)
+    for env_ids in (
+        torch.arange(0, num_envs, 2),
+        torch.arange(1, num_envs, 2),
+        torch.arange(0, num_envs, 3),
+    ):
+        action.process_actions(torch.zeros(num_envs, 1))
+        _finish_guarded_policy_step(action, asset)
+        action.reset(env_ids=env_ids)
+        latest_sequence[env_ids] = (
+            action._joint_safety_ledger._policy_step_sequence
+        )
+
+    snapshot = action.joint_safety_ledger_snapshot()
+    assert snapshot["terminal_archive_used"] == num_envs
+    assert snapshot["terminal_archive_overflow_latch"] is False
+    assert snapshot["terminal_archive_overflow_count"] == 0
+    by_env = {
+        entry["env_id"]: entry
+        for entry in snapshot["terminal_archives"]
+    }
+    assert len(by_env) == num_envs
+    for env_id in range(num_envs):
+        assert by_env[env_id]["policy_step_sequence"] == int(
+            latest_sequence[env_id].item()
+        )
 
 
 def test_one_shot_consume_fails_closed_even_when_guard_is_disabled():

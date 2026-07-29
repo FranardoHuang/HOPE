@@ -248,10 +248,18 @@ def test_diagnostic_fast_path_keeps_functional_solver_and_forces_one_row():
         "            else float(self.cfg.cq_overdraw)"
         in initialize
     )
+    assert (
+        "_ACTION_BALL_DIAGNOSTIC_MAX_EXTERNAL_PROPOSAL_ROUNDS"
+        in initialize
+    )
     assert "diagnostic_unauthorized=diagnostic_unauthorized" in initialize
     assert "self._action_ball_sampler.sample(" in refill
     assert "result = solve_proposals(" in refill
     assert "self._action_ball_effective_cq_overdraw" in refill
+    assert (
+        "self._action_ball_effective_cq_max_redraw_rounds"
+        in refill
+    )
     assert "racket_velocity_rows = (" in refill
     assert "racket_normal_rows = (" in refill
     assert "residual_rows = result.resid_m.detach().cpu().tolist()" in refill
@@ -1762,11 +1770,27 @@ def test_proposal_assignment_replay_covers_rejected_rows_and_old_births(
 
 
 @pytest.mark.parametrize(
-    ("solver_speed", "receipts_per_birth", "timing_reason", "sample_v_in_x"),
     (
-        (1.0, 1, None, -5.0),
-        (2.0, 0, "teacher_rate_out_of_bounds", -5.0),
-        (1.0, 0, "ball_birth_not_beyond_net", -1.0),
+        "solver_speed",
+        "receipts_per_birth",
+        "timing_reason",
+        "sample_v_in_x",
+        "solver_admit_counts",
+        "effective_rounds",
+    ),
+    (
+        (1.0, 1, None, -5.0, None, 1),
+        (2.0, 0, "teacher_rate_out_of_bounds", -5.0, None, 1),
+        (1.0, 0, "ball_birth_not_beyond_net", -1.0, None, 1),
+        (
+            1.0,
+            1,
+            None,
+            -5.0,
+            (2048, 1024, 512, 256, 256),
+            64,
+        ),
+        (1.0, 0, None, -5.0, (0, 0, 0, 0, 0), 5),
     ),
 )
 def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
@@ -1775,6 +1799,8 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
     receipts_per_birth,
     timing_reason,
     sample_v_in_x,
+    solver_admit_counts,
+    effective_rounds,
 ):
     refill_many = _method("_action_ball_refill_pool_many")
     namespace = {
@@ -1894,19 +1920,36 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
                 ref_normal,
             )
         }
-        assert sizes == {4096}
-        solver_calls.append(4096)
+        assert len(sizes) == 1
+        row_count = sizes.pop()
+        call_index = len(solver_calls)
+        solver_calls.append(row_count)
+        admitted_count = (
+            row_count
+            if solver_admit_counts is None
+            else solver_admit_counts[call_index]
+        )
+        rejected_count = row_count - admitted_count
         return SimpleNamespace(
-            ok=_FakeTensor([True] * 4096),
-            reason_counts={},
+            ok=_FakeTensor(
+                [True] * admitted_count
+                + [False] * rejected_count
+            ),
+            reason_counts=(
+                {}
+                if rejected_count == 0
+                else {"no_landing": rejected_count}
+            ),
             proposals=SimpleNamespace(
-                reason_code=_FakeTensor([0] * 4096)
+                reason_code=_FakeTensor([0] * row_count)
             ),
             v_racket=_FakeTensor(
-                [(solver_speed, 0.0, 0.0)] * 4096
+                [(solver_speed, 0.0, 0.0)] * row_count
             ),
-            n_racket=_FakeTensor([(0.0, 1.0, 0.0)] * 4096),
-            resid_m=_FakeTensor([0.0] * 4096),
+            n_racket=_FakeTensor(
+                [(0.0, 1.0, 0.0)] * row_count
+            ),
+            resid_m=_FakeTensor([0.0] * row_count),
         )
 
     solver_module.solve_proposals = solve_proposals
@@ -2077,6 +2120,8 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
         _action_ball_provider_history={},
         _action_ball_task_transcript_by_birth={},
         _action_ball_emitted_task_count_by_uid={7: 0},
+        _action_ball_effective_cq_max_redraw_rounds=effective_rounds,
+        _action_ball_effective_cq_overdraw=1.0,
     )
     providers = {}
     requests = []
@@ -2112,24 +2157,45 @@ def test_refill_many_flattens_4096_births_and_rejects_timing_pre_issue(
     batches = namespace["_action_ball_refill_pool_many"](
         command, tuple(requests)
     )
-    assert solver_calls == [4096]
-    assert sampler.calls == 4096
+    if solver_admit_counts is None:
+        expected_solver_calls = [4096]
+    else:
+        unresolved = 4096
+        expected_solver_calls = []
+        for admitted_count in solver_admit_counts:
+            expected_solver_calls.append(unresolved)
+            unresolved -= admitted_count
+    assert solver_calls == expected_solver_calls
+    assert sampler.calls == sum(expected_solver_calls)
     assert len(batches) == 4096
-    assert all(batch.proposed_count == 1 for batch in batches)
-    assert batches[0].proposal_sample_indices == (0,)
-    assert batches[-1].proposal_sample_indices == (4095,)
+    assert batches[0].proposal_sample_indices[0] == 0
+    if solver_admit_counts is None:
+        assert all(batch.proposed_count == 1 for batch in batches)
+        assert batches[-1].proposal_sample_indices == (4095,)
+    else:
+        assert sum(
+            batch.proposed_count for batch in batches
+        ) == sum(expected_solver_calls)
     assert all(
         len(batch.receipts) == receipts_per_birth
         for batch in batches
     )
     assert notes == {
-        "P": 4096,
+        "P": sum(expected_solver_calls),
         "A": 4096 * receipts_per_birth,
     }
     assert command._action_ball_emitted_task_count_by_uid[7] == (
         4096 * receipts_per_birth
     )
-    if timing_reason is None:
+    if solver_admit_counts is not None:
+        expected_rejections = (
+            sum(expected_solver_calls)
+            - sum(solver_admit_counts)
+        )
+        assert command._action_ball_reject_counts == {
+            7: {"no_landing": expected_rejections}
+        }
+    elif timing_reason is None:
         assert command._action_ball_reject_counts == {7: {}}
     else:
         assert command._action_ball_reject_counts == {

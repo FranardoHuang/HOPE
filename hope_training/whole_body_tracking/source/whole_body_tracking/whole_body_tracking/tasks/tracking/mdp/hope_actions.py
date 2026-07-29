@@ -635,6 +635,24 @@ class ClampedJointPositionAction(JointPositionAction):
         super().__init__(cfg, env)
         self._safety_env = env
         self._clamp_enabled = bool(getattr(cfg, "clamp", False))
+        # Diagnostic ActionBall runs are explicitly non-promotable, but they still keep the
+        # physical q_des clamp, hard-limit termination and all per-environment safety counters.
+        # The command flag is launch-owned and already present on the resolved environment config
+        # before ActionManager constructs this term, so read that exact source instead of relying
+        # on CommandManager construction order.
+        commands_cfg = getattr(getattr(env, "cfg", None), "commands", None)
+        racket_cfg = getattr(commands_cfg, "racket_target", None)
+        diagnostic_unauthorized = getattr(
+            racket_cfg, "action_ball_diagnostic_unauthorized", False
+        )
+        if type(diagnostic_unauthorized) is not bool:
+            raise ValueError(
+                "racket_target.action_ball_diagnostic_unauthorized must be an exact boolean"
+            )
+        self._joint_safety_diagnostic_latest_archive = bool(
+            getattr(racket_cfg, "target_mode", None) == "action_ball"
+            and diagnostic_unauthorized
+        )
         # Keep deploy-space q_des history next to the action term that owns the affine transform
         # and safety clamp.  ActionManager.prev_action is the previous *normalized actor output*;
         # it cannot attest the target the PD controller actually received after offset/scale/clamp.
@@ -997,6 +1015,11 @@ class ClampedJointPositionAction(JointPositionAction):
         self._joint_safety_terminal_archives: list[dict[str, Any]] = []
         self._joint_safety_terminal_archive_index: dict[
             tuple[int, int], int
+        ] = {}
+        # Diagnostic-only bounded view: one latest terminal proof per live environment.  Formal
+        # runs never consult this index and retain every (policy_step, env) proof fail-closed.
+        self._joint_safety_diagnostic_terminal_archive_env_index: dict[
+            int, int
         ] = {}
         self._joint_safety_next_archive_sequence = 0
         self._joint_safety_terminal_archive_bytes = 0
@@ -1792,8 +1815,19 @@ class ClampedJointPositionAction(JointPositionAction):
             (ledger._policy_step_sequence, env_id)
             for env_id in env_id_list
         ]
+        replacement_slots: dict[tuple[int, int], int] = {}
+        if self._joint_safety_diagnostic_latest_archive:
+            for env_id, key in zip(env_id_list, keys):
+                if key in self._joint_safety_terminal_archive_index:
+                    continue
+                slot = self._joint_safety_diagnostic_terminal_archive_env_index.get(
+                    env_id
+                )
+                if slot is not None:
+                    replacement_slots[key] = slot
         new_count = sum(
             key not in self._joint_safety_terminal_archive_index
+            and key not in replacement_slots
             for key in keys
         )
         assert self._joint_safety_terminal_archive_capacity is not None
@@ -2042,11 +2076,30 @@ class ClampedJointPositionAction(JointPositionAction):
             }
             payload_bytes = self._joint_safety_payload_bytes(entry)
             entry["payload_bytes"] = payload_bytes
-            self._joint_safety_terminal_archive_index[key] = len(
-                self._joint_safety_terminal_archives
-            )
-            self._joint_safety_terminal_archives.append(entry)
-            self._joint_safety_terminal_archive_bytes += payload_bytes
+            replacement_slot = replacement_slots.get(key)
+            if replacement_slot is None:
+                archive_slot = len(self._joint_safety_terminal_archives)
+                self._joint_safety_terminal_archives.append(entry)
+                self._joint_safety_terminal_archive_bytes += payload_bytes
+            else:
+                previous = self._joint_safety_terminal_archives[
+                    replacement_slot
+                ]
+                previous_key = (
+                    int(previous["policy_step_sequence"]),
+                    int(previous["env_id"]),
+                )
+                del self._joint_safety_terminal_archive_index[previous_key]
+                self._joint_safety_terminal_archive_bytes += (
+                    payload_bytes - int(previous["payload_bytes"])
+                )
+                self._joint_safety_terminal_archives[replacement_slot] = entry
+                archive_slot = replacement_slot
+            self._joint_safety_terminal_archive_index[key] = archive_slot
+            if self._joint_safety_diagnostic_latest_archive:
+                self._joint_safety_diagnostic_terminal_archive_env_index[
+                    env_id
+                ] = archive_slot
             self._joint_safety_next_archive_sequence += 1
 
     def _joint_safety_accumulator_snapshot(self) -> dict[str, Any]:
@@ -2224,6 +2277,7 @@ class ClampedJointPositionAction(JointPositionAction):
         self._joint_safety_accumulator_min_hard_upper_gap.fill_(float("inf"))
         self._joint_safety_terminal_archives.clear()
         self._joint_safety_terminal_archive_index.clear()
+        self._joint_safety_diagnostic_terminal_archive_env_index.clear()
         self._joint_safety_terminal_archive_bytes = 0
         self._joint_safety_policy_step_summaries.clear()
         self._joint_safety_policy_step_summary_bytes = 0

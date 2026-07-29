@@ -2570,6 +2570,39 @@ def test_diagnostic_pool_still_rejects_invalid_task_receipt():
     assert pool._diagnostic_birth_by_env == {}
 
 
+def test_diagnostic_pool_fails_after_zero_support_redraw_cap():
+    class ZeroSupportSolver(Solver):
+        def __call__(self, request):
+            return R.ActionPoolRefillBatch(
+                action_uid=request.action_uid,
+                proposed_count=64,
+                proposal_sample_indices=tuple(range(64)),
+                receipts=(),
+            )
+
+    broker, _provider = _broker(
+        1, diagnostic_unauthorized=True
+    )
+    birth = _reserve(broker)
+    _consume(broker, birth)
+    pool = R.LazyActionTaskPool(
+        _bindings(1),
+        _pins(),
+        "no_move",
+        refill_size=1,
+        diagnostic_unauthorized=True,
+    )
+    pool.bind_solver(ZeroSupportSolver())
+    pool.bind_birth_authority(broker)
+
+    with pytest.raises(
+        R.PoolProtocolError,
+        match="admitted no receipts",
+    ):
+        pool.request(birth, swing_generation=0)
+    assert pool.materialized_action_uids == ()
+
+
 def test_diagnostic_pool_requires_single_row_refill_and_matching_broker():
     with pytest.raises(
         R.ActionBallContractError,
