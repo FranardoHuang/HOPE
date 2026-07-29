@@ -114,7 +114,7 @@ SUPPORTED_ACTIONS = {
         ),
         "reference_t_hit_s": 0.48,
         "reference_t_cycle_s": 1.06,
-        "reference_racket_site_speed_mps": 1.5911427061902983,
+        "reference_racket_site_speed_mps": 1.5947043195363686,
         "priority": 2,
     },
 }
