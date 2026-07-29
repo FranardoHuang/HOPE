@@ -437,3 +437,33 @@ probe。不能以提高 Reward、放宽 actual hard edge、CaT 或增加 env 数
 在 update 分段 profiler 证明 solver 占主导前不重写算法。优先量化 physics rollout、
 metrics/D2H、termination、safety archive、reset birth/retire、sampling/solve、state write 与
 PPO；随后先移除 reset 风暴下的逐环境 Python/完整 archive 税。PPO 约 `0.1 s`，不在关键路径。
+
+### 6.7 reset 语义复核与 dynamic-ready 实现状态（2026-07-30）
+
+Jiayi 补充的设计意图是“先从站姿学会击球，达到约 35% 后再把歪掉/失败状态混入 reset”。
+这不是当前 stable-v2 失败的解释：现役 ActionBall 启动时强制
+`canonical_ready_mode=true`、`stand_start_prob=1.0`、`post_swing_start_prob=0.0`，
+并在 canonical 分支返回后才会到 legacy stand/post-swing/RSI 三选一。每次 true reset
+实际写入所选动作 motion frame 0（零速度），不是 post-swing buffer。block stable-v2 的
+12 个下肢关节与 A3 default stand 逐位相等、root z=`1.0684 m`；19 个上身关节仍是动作专属
+ready。当前代码也没有“strike 35% 后启用失败 reset”的门；这是未来可实现的 curriculum，
+不是已经提前触发的机制。若以后接入，它会改变出生分布，必须等健康 strike baseline 后做
+小 canary，不能混入本次修复。
+
+当前直接修正在两层收口：
+
+1. ground-contact LP 保留历史 feasibility 默认字节/目标不变，新增显式 opt-in 的
+   `hold_minimax_normalized_available_torque`，按每关节正负可执行力矩分别最小化最大利用率；
+2. 新的 `materialize_a3_dynamic_ready_contract.py` 从 exact stable-v2 frame 0、运行时
+   training contract 和 exact A3 MJCF 生成动作专属 hold-qdes 候选。它明确相交
+   projected-soft 与 hard-inner qdes 包络，并修正了一个独立审查发现的关键顺序问题：
+   MuJoCo LP 的 post-root actuator row 与 A3 runtime joint order 不同，边界必须
+   runtime→MuJoCo scatter，求解力矩再 MuJoCo→runtime gather，之后才能做
+   `qdes=q+tau/Kp`。
+
+这两层只是候选生成，不授权训练。下一证据仍是 Pod 的 exact LP regression、两动作候选物化，
+以及 Isaac `env.reset()` 后第 `0/1/10/final` 帧截图与无 PPO closed-loop hold。只有姿态在
+`t_hit+margin` 前不触发 actual-hard/table/fall，才把 hold qdes 接入 actor bias/last-action/
+observation/reference，并重跑 `1 env×2`。旧 `4ff48b21` 两条 long 到 update 169 仍为
+strike=`0`，且其旧 reference reset 语义不代表 dynamic-ready successor，继续保留但不作为
+新配方证据。

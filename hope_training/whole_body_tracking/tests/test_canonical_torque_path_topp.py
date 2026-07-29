@@ -23,6 +23,8 @@ _SPEC.loader.exec_module(_MOD)
 DirectActuatorContract = _MOD.DirectActuatorContract
 GroundContactConfig = _MOD.GroundContactConfig
 GroundContactLPSolution = _MOD.GroundContactLPSolution
+GROUND_LP_OBJECTIVE_FEASIBILITY = _MOD.GROUND_LP_OBJECTIVE_FEASIBILITY
+GROUND_LP_OBJECTIVE_HOLD_MINIMAX = _MOD.GROUND_LP_OBJECTIVE_HOLD_MINIMAX
 IncompleteTorqueCertificate = _MOD.IncompleteTorqueCertificate
 MujocoGroundContactLPSolver = _MOD.MujocoGroundContactLPSolver
 MujocoSmoothInverseDynamics = _MOD.MujocoSmoothInverseDynamics
@@ -376,6 +378,142 @@ def test_ground_lp_balances_free_root_and_actuator_rows_with_both_feet_loaded():
     assert np.sum(solution.point_force_floor[:, 2]) == pytest.approx(100.0)
     assert solution.point_force_floor[:, 2] == pytest.approx([50.0, 50.0])
     assert solution.root_residual < 1e-8
+
+
+@pytest.mark.skipif(
+    not _SCIPY_HIGHS_TESTABLE,
+    reason="old local SciPy HiGHS can deadlock; exact test runs in A3 CPU env",
+)
+def test_ground_lp_default_remains_the_explicit_feasibility_solve():
+    force_map, feet = _two_point_ground_map()
+    arguments = (
+        np.array([0.0, 0.0, 100.0, 0.0, 0.0, 0.0, 1.0, -1.0]),
+        force_map,
+        feet,
+        np.array([6, 7]),
+        np.array([-2.0, -2.0]),
+        np.array([2.0, 2.0]),
+    )
+    keywords = {
+        "friction_coefficient": 0.5,
+        "minimum_normal_force_per_foot_n": 1.0,
+        "residual_tolerance": 1e-9,
+        "solver_name": "scipy.optimize.linprog:highs",
+    }
+    implicit = _solve_ground_contact_force_lp(*arguments, **keywords)
+    explicit = _solve_ground_contact_force_lp(
+        *arguments,
+        **keywords,
+        lp_objective=GROUND_LP_OBJECTIVE_FEASIBILITY,
+    )
+    assert implicit.feasible
+    assert explicit.feasible
+    assert implicit.actuator_generalized_force == pytest.approx(
+        explicit.actuator_generalized_force
+    )
+    assert implicit.point_force_floor == pytest.approx(explicit.point_force_floor)
+    assert implicit.report == explicit.report
+    assert implicit.report["variables"] == 8
+    assert "lp_objective" not in implicit.report
+
+
+def _load_sharing_ground_map() -> tuple[np.ndarray, np.ndarray]:
+    """Toy floating plant whose foot-load split can unload one actuator."""
+
+    mapping = np.zeros((7, 6), np.float64)
+    mapping[:3, :3] = np.eye(3)
+    mapping[:3, 3:] = np.eye(3)
+    mapping[6, 2] = 1.0
+    mapping[6, 5] = -1.0
+    return mapping, np.array([0, 1], np.int64)
+
+
+@pytest.mark.skipif(
+    not _SCIPY_HIGHS_TESTABLE,
+    reason="old local SciPy HiGHS can deadlock; exact test runs in A3 CPU env",
+)
+def test_ground_lp_hold_minimax_is_bounded_and_not_worse_than_feasibility():
+    force_map, feet = _load_sharing_ground_map()
+    arguments = (
+        np.array([0.0, 0.0, 100.0, 0.0, 0.0, 0.0, 120.0]),
+        force_map,
+        feet,
+        np.array([6]),
+        np.array([-50.0]),
+        np.array([150.0]),
+    )
+    keywords = {
+        "friction_coefficient": 0.5,
+        "minimum_normal_force_per_foot_n": 10.0,
+        "residual_tolerance": 1e-9,
+        "solver_name": "scipy.optimize.linprog:highs",
+    }
+    feasibility = _solve_ground_contact_force_lp(*arguments, **keywords)
+    minimax = _solve_ground_contact_force_lp(
+        *arguments,
+        **keywords,
+        lp_objective=GROUND_LP_OBJECTIVE_HOLD_MINIMAX,
+    )
+    assert feasibility.feasible
+    assert minimax.feasible
+    assert minimax.equality_residual < 1e-8
+    assert minimax.root_residual < 1e-8
+    # The asymmetric executable interval has center 50, but physical-ready
+    # hold torque is zero.  The contact constraints make 40 the closest
+    # attainable torque to zero; a center-based objective would choose 50.
+    assert minimax.actuator_generalized_force == pytest.approx([40.0], abs=1e-8)
+    assert minimax.point_force_floor[:, 2] == pytest.approx(
+        [90.0, 10.0], abs=1e-8
+    )
+    assert np.all(minimax.actuator_generalized_force >= -50.0 - 1e-8)
+    assert np.all(minimax.actuator_generalized_force <= 150.0 + 1e-8)
+    assert minimax.report["max_inequality_violation"] < 1e-8
+    assert minimax.report["bound_violation"] < 1e-8
+    feasibility_hold_ratio = float(
+        np.max(
+            np.maximum(
+                np.maximum(feasibility.actuator_generalized_force, 0.0)
+                / np.array([150.0]),
+                np.maximum(-feasibility.actuator_generalized_force, 0.0)
+                / np.array([50.0]),
+            )
+        )
+    )
+    assert (
+        minimax.report["max_normalized_available_hold_torque"]
+        <= feasibility_hold_ratio + 1e-10
+    )
+    assert minimax.report["minimax_objective_value"] == pytest.approx(
+        40.0 / 150.0, abs=1e-9
+    )
+    assert minimax.report["objective_mode"] == GROUND_LP_OBJECTIVE_HOLD_MINIMAX
+    assert minimax.report["objective_effort_lower"] == pytest.approx([-50.0])
+    assert minimax.report["objective_effort_upper"] == pytest.approx([150.0])
+    assert minimax.report["negative_available_hold_torque"] == pytest.approx(
+        [50.0]
+    )
+    assert minimax.report["positive_available_hold_torque"] == pytest.approx(
+        [150.0]
+    )
+    assert minimax.report[
+        "optimum_max_normalized_available_hold_torque"
+    ] == pytest.approx(
+        minimax.report["minimax_objective_value"]
+    )
+    assert minimax.report[
+        "max_normalized_available_hold_torque"
+    ] == pytest.approx(minimax.report["minimax_objective_value"], abs=1e-9)
+    with pytest.raises(TorqueRetimeError, match="strictly contain zero"):
+        _solve_ground_contact_force_lp(
+            arguments[0],
+            arguments[1],
+            arguments[2],
+            arguments[3],
+            np.array([0.0]),
+            arguments[5],
+            **keywords,
+            lp_objective=GROUND_LP_OBJECTIVE_HOLD_MINIMAX,
+        )
 
 
 @pytest.mark.skipif(

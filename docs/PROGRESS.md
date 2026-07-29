@@ -13,6 +13,13 @@
 
 ## 2026-07-30（A3 stable-upper successor）
 
+- reset 审计排除 failure-buffer 提前启用：ActionBall canonical path 固定
+  `stand=1/post-swing=0` 并写动作 frame 0；当前没有“35% strike 后混入失败姿态”的实现。
+  source 已加入 action-specific static-hold minimax 和 dynamic-ready candidate producer；
+  独立复核发现并修正 MuJoCo actuator row 与 A3 runtime joint order 的非恒等排列。
+  下一步只在 Pod 跑 focused regression、物化 loop/block 候选，并截取真实 Isaac reset 后
+  `0/1/10/final` 帧与 hold telemetry；尚未授权 trainer/long。详见
+  [设计/加速审计 §6.7](research/design_audit_and_speedup_20260729.md#67-reset-语义复核与-dynamic-ready-实现状态2026-07-30)。
 - block stable-v2 的 1024×100 recovery 在 update 77 前始终 mean episode `21--22`、
   strike=`0`、actual raw-hard `47--49 events/rollout`，否定当前 ready 可在 100 updates 内
   自救；`model_20/40/60.pt` 已写出。update 77 后暴露 teacher-rate producer/consumer 的 float32

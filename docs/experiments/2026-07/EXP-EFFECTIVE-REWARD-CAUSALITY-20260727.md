@@ -833,3 +833,17 @@ ready 并取得 strike baseline，否则 realized income 和因果 worsening 都
 Pod MuJoCo replay 进一步显示 block/loop teacher 分别约在 `1.24/1.26 s` 后失衡；static LP
 receipt 未保存 actuator solution，不能直接当作 hold qdes。下一动作是先物化 action-specific
 nominal hold，再在 Isaac 做无 PPO hold diagnostic；单纯延长 preparation window 暂不采用。
+
+### 2026-07-30：reset 不是 failure replay；Reward screen 继续等 dynamic-ready
+
+现役 ActionBall canonical reset 在 generic stand/post-swing/RSI 分支前返回：
+`stand_start_prob=1`、`post_swing_start_prob=0`，物理出生为动作 stable-v2 frame 0 且速度为零。
+所以 Jiayi 描述的“击球率达到 35% 后才混入歪姿态”没有提前触发；事实上该 success gate 当前
+尚未接入此路径。block frame 0 的下肢与 A3 default stand exact 相同，动作差异只在上身。
+
+为避免把静态 LP 任意可行极点误当控制目标，source 新增显式 hold-minimax objective，并从
+exact runtime qdes/PD 包络生成 action-specific hold qdes 候选。独立复核抓到 MuJoCo actuator
+row 与 runtime joint order 不同，现已加入双向 permutation 后再做 `qdes=q+tau/Kp`。
+这仍是 source candidate，尚无 Pod/Isaac receipt；因此所有 Reward 权重、negative dose、
+reference guard、full-body 与 curriculum failure-rate 比较继续冻结。先用真实 reset 截图和
+闭环 hold 判定姿态，再取得 strike 分母。

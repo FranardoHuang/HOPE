@@ -78,6 +78,11 @@ class IncompleteTorqueCertificate(TorqueRetimeError):
 
 InverseDynamics = Callable[[np.ndarray, np.ndarray, np.ndarray], np.ndarray]
 
+GROUND_LP_OBJECTIVE_FEASIBILITY = "feasibility"
+GROUND_LP_OBJECTIVE_HOLD_MINIMAX = (
+    "hold_minimax_normalized_available_torque"
+)
+
 
 @dataclass(frozen=True)
 class DirectActuatorContract:
@@ -2093,9 +2098,24 @@ def _solve_ground_contact_force_lp(
     minimum_normal_force_per_foot_n: float,
     residual_tolerance: float,
     solver_name: str,
+    lp_objective: str = GROUND_LP_OBJECTIVE_FEASIBILITY,
 ) -> GroundContactLPSolution:
-    """Solve ``M qdd+h = S' tau + J' f`` at one sampled state."""
+    """Solve ``M qdd+h = S' tau + J' f`` at one sampled state.
 
+    The default ``feasibility`` objective deliberately retains the historical
+    zero-cost LP exactly.  ``hold_minimax_normalized_available_torque`` is an
+    explicit opt-in for selecting a low-utilization static-hold decomposition
+    from the same physical feasible set.
+    """
+
+    if lp_objective not in (
+        GROUND_LP_OBJECTIVE_FEASIBILITY,
+        GROUND_LP_OBJECTIVE_HOLD_MINIMAX,
+    ):
+        raise TorqueRetimeError(
+            "ground LP objective must be 'feasibility' or "
+            "'hold_minimax_normalized_available_torque'"
+        )
     if solver_name != "scipy.optimize.linprog:highs":
         raise IncompleteTorqueCertificate(
             "the requested fixed CPU LP solver is not the audited solver",
@@ -2150,10 +2170,12 @@ def _solve_ground_contact_force_lp(
         raise TorqueRetimeError("friction_coefficient must be finite and positive")
 
     na = len(actuated)
-    variables = na + 3 * points
+    hold_minimax = lp_objective == GROUND_LP_OBJECTIVE_HOLD_MINIMAX
+    variables = na + 3 * points + int(hold_minimax)
+    minimax_index = variables - 1 if hold_minimax else None
     equality = np.zeros((nv, variables), np.float64)
     equality[actuated, np.arange(na)] = 1.0
-    equality[:, na:] = force_map
+    equality[:, na : na + 3 * points] = force_map
 
     inequalities: list[np.ndarray] = []
     inequality_rhs: list[float] = []
@@ -2175,12 +2197,40 @@ def _solve_ground_contact_force_lp(
         inequalities.append(row)
         inequality_rhs.append(-float(minimum_normal_force_per_foot_n))
 
+    if hold_minimax:
+        assert minimax_index is not None
+        if np.any(tau_lo >= 0.0) or np.any(tau_hi <= 0.0):
+            raise TorqueRetimeError(
+                "hold minimax effort intervals must strictly contain zero"
+            )
+        # Physical ready corresponds to zero hold torque.  Normalize each sign
+        # by its own executable headroom because runtime-qdes projection can
+        # produce asymmetric lower/upper torque availability.
+        for actuator in range(na):
+            positive = np.zeros(variables, np.float64)
+            positive[actuator] = 1.0
+            positive[minimax_index] = -float(tau_hi[actuator])
+            inequalities.append(positive)
+            inequality_rhs.append(0.0)
+
+            negative = np.zeros(variables, np.float64)
+            negative[actuator] = -1.0
+            negative[minimax_index] = float(tau_lo[actuator])
+            inequalities.append(negative)
+            inequality_rhs.append(0.0)
+
     bounds: list[tuple[Optional[float], Optional[float]]] = [
         (float(lo), float(hi)) for lo, hi in zip(tau_lo, tau_hi)
     ]
     bounds.extend([(None, None), (None, None), (0.0, None)] * points)
+    if hold_minimax:
+        bounds.append((0.0, 1.0))
+    objective = np.zeros(variables, np.float64)
+    if hold_minimax:
+        assert minimax_index is not None
+        objective[minimax_index] = 1.0
     result = linprog(
-        np.zeros(variables, np.float64),
+        objective,
         A_ub=np.asarray(inequalities, np.float64),
         b_ub=np.asarray(inequality_rhs, np.float64),
         A_eq=equality,
@@ -2205,6 +2255,23 @@ def _solve_ground_contact_force_lp(
             minimum_normal_force_per_foot_n
         ),
     }
+    if hold_minimax:
+        base_report.update(
+            {
+                "objective_mode": lp_objective,
+                "lp_objective": (
+                    "MINIMIZE_MAX_NORMALIZED_AVAILABLE_HOLD_TORQUE"
+                ),
+                "lp_objective_expression": (
+                    "min rho subject to tau<=rho*tau_hi and "
+                    "-tau<=rho*(-tau_lo)"
+                ),
+                "objective_effort_lower": tau_lo.tolist(),
+                "objective_effort_upper": tau_hi.tolist(),
+                "negative_available_hold_torque": (-tau_lo).tolist(),
+                "positive_available_hold_torque": tau_hi.tolist(),
+            }
+        )
     if int(result.status) == 2:
         return GroundContactLPSolution(
             feasible=False,
@@ -2244,7 +2311,7 @@ def _solve_ground_contact_force_lp(
     )
     max_inequality_violation = max(0.0, float(np.max(inequality_error)))
     tau = vector[:na]
-    forces = vector[na:].reshape(points, 3)
+    forces = vector[na : na + 3 * points].reshape(points, 3)
     bound_violation = max(
         0.0,
         float(np.max(tau_lo - tau)),
@@ -2272,6 +2339,52 @@ def _solve_ground_contact_force_lp(
     half_width = 0.5 * (tau_hi - tau_lo)
     center = 0.5 * (tau_hi + tau_lo)
     effort_ratio = float(np.max(np.abs(tau - center) / half_width))
+    objective_report: dict = {}
+    if hold_minimax:
+        assert minimax_index is not None
+        minimax_value = float(vector[minimax_index])
+        normalized_hold_torque = float(
+            np.max(
+                np.maximum(
+                    np.maximum(tau, 0.0) / tau_hi,
+                    np.maximum(-tau, 0.0) / (-tau_lo),
+                )
+            )
+        )
+        normalized_allowed = max(
+            float(residual_tolerance),
+            allowed
+            / float(np.min(np.minimum(tau_hi, -tau_lo))),
+        )
+        if (
+            not math.isfinite(minimax_value)
+            or minimax_value < -normalized_allowed
+            or minimax_value > 1.0 + normalized_allowed
+            or normalized_hold_torque > minimax_value + normalized_allowed
+        ):
+            raise IncompleteTorqueCertificate(
+                "ground contact minimax LP returned an invalid objective witness",
+                missing=["valid normalized available-hold-torque minimax witness"],
+                details={
+                    **base_report,
+                    "minimax_objective_value": minimax_value,
+                    "max_effort_interval_ratio": effort_ratio,
+                    "max_normalized_available_hold_torque": (
+                        normalized_hold_torque
+                    ),
+                    "allowed_residual": allowed,
+                    "normalized_allowed_residual": normalized_allowed,
+                },
+            )
+        objective_report = {
+            "minimax_objective_value": minimax_value,
+            "minimax_objective_solver_fun": float(result.fun),
+            "max_normalized_available_hold_torque": (
+                normalized_hold_torque
+            ),
+            "optimum_max_normalized_available_hold_torque": minimax_value,
+            "minimax_normalized_allowed_residual": normalized_allowed,
+        }
     return GroundContactLPSolution(
         feasible=True,
         actuator_generalized_force=tau.copy(),
@@ -2287,6 +2400,7 @@ def _solve_ground_contact_force_lp(
             "max_inequality_violation": max_inequality_violation,
             "bound_violation": bound_violation,
             "max_effort_interval_ratio": effort_ratio,
+            **objective_report,
         },
     )
 
@@ -2992,12 +3106,26 @@ class MujocoGroundContactLPSolver:
         *,
         expected_generalized_force: Optional[np.ndarray] = None,
         path_tangent: Optional[np.ndarray] = None,
+        lp_objective: str = GROUND_LP_OBJECTIVE_FEASIBILITY,
     ) -> GroundContactLPSolution:
-        """Solve and independently validate one grounded sampled state."""
+        """Solve and independently validate one grounded sampled state.
+
+        ``lp_objective`` is per-call and cache-bound; retiming callers retain
+        the historical feasibility solve unless they explicitly request the
+        hold minimax objective.
+        """
 
         q = _real_array("ground qpos", qpos, ndim=1)
         qd = _real_array("ground qvel", qvel, ndim=1)
         qdd = _real_array("ground qacc", qacc, ndim=1)
+        if lp_objective not in (
+            GROUND_LP_OBJECTIVE_FEASIBILITY,
+            GROUND_LP_OBJECTIVE_HOLD_MINIMAX,
+        ):
+            raise TorqueRetimeError(
+                "ground LP objective must be 'feasibility' or "
+                "'hold_minimax_normalized_available_torque'"
+            )
         model = self._inverse_model
         if q.shape != (int(model.nq),):
             raise TorqueRetimeError("ground qpos shape does not match model.nq")
@@ -3020,15 +3148,44 @@ class MujocoGroundContactLPSolver:
                     "actual": actuated.tolist(),
                 },
             )
-        if (
-            tau_lower.shape != self._effort_lower.shape
-            or tau_upper.shape != self._effort_upper.shape
-            or not np.array_equal(tau_lower, self._effort_lower)
-            or not np.array_equal(tau_upper, self._effort_upper)
+        effort_shape_matches = (
+            tau_lower.shape == self._effort_lower.shape
+            and tau_upper.shape == self._effort_upper.shape
+        )
+        if not effort_shape_matches:
+            raise IncompleteTorqueCertificate(
+                "caller effort intervals do not cover the exact A3 actuator rows",
+                missing=["one effort interval per exact A3 actuator row"],
+            )
+        if lp_objective == GROUND_LP_OBJECTIVE_FEASIBILITY:
+            if not np.array_equal(
+                tau_lower, self._effort_lower
+            ) or not np.array_equal(tau_upper, self._effort_upper):
+                raise IncompleteTorqueCertificate(
+                    "caller effort intervals do not equal the bound MuJoCo "
+                    "actuator contract",
+                    missing=["exact model-derived actuator effort bounds"],
+                )
+        elif (
+            np.any(tau_lower < self._effort_lower)
+            or np.any(tau_upper > self._effort_upper)
+            or np.any(tau_lower >= tau_upper)
+            or np.any(tau_lower >= 0.0)
+            or np.any(tau_upper <= 0.0)
         ):
             raise IncompleteTorqueCertificate(
-                "caller effort intervals do not equal the bound MuJoCo actuator contract",
-                missing=["exact model-derived actuator effort bounds"],
+                "hold minimax effort intervals are not zero-containing, "
+                "non-empty subsets of the bound MuJoCo actuator contract",
+                missing=[
+                    "runtime-qdes-derived effort interval intersected with "
+                    "exact model effort bounds"
+                ],
+                details={
+                    "bound_effort_lower": self._effort_lower.tolist(),
+                    "bound_effort_upper": self._effort_upper.tolist(),
+                    "caller_effort_lower": tau_lower.tolist(),
+                    "caller_effort_upper": tau_upper.tolist(),
+                },
             )
         velocity_excess = np.abs(qd) - velocity
         if np.any(velocity_excess > float(self.config.velocity_tolerance)):
@@ -3194,6 +3351,9 @@ class MujocoGroundContactLPSolver:
             cache_digest.update(str(value.dtype).encode("ascii"))
             cache_digest.update(np.asarray(value.shape, np.int64).tobytes())
             cache_digest.update(value.tobytes())
+        if lp_objective != GROUND_LP_OBJECTIVE_FEASIBILITY:
+            cache_digest.update(b"lp_objective")
+            cache_digest.update(str(lp_objective).encode("ascii"))
         cache_key = cache_digest.digest()
         solution = self._lp_cache.get(cache_key)
         lp_cache_hit = solution is not None
@@ -3213,6 +3373,7 @@ class MujocoGroundContactLPSolver:
                     self.config.equality_residual_tolerance
                 ),
                 solver_name=self.config.solver,
+                lp_objective=lp_objective,
             )
             # Cache only a completed physical feasible/infeasible solve.
             # Solver-unavailable/numerical exceptions never reach this line.

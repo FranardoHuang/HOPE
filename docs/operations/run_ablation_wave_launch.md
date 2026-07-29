@@ -122,6 +122,31 @@ construction 或 PhysX start 停止前进，保留日志后按 exact PGID 关闭
    与其 `_runtime_site_velocity` 相同的 finite-difference strike speed；不得拿 MuJoCo site
    trace 的近似速度或 v1 bundle 跨 bytes 复用。
 
+stable-upper v2 仍不能用 `qdes=physical_q` 保持到击球窗。动作专属 hold 候选必须在 Pod 的
+`hope_isaac_venv` 里生成（系统 Python 没有 exact MuJoCo/HiGHS 环境）：
+
+```bash
+/workspace/hope_isaac_venv/bin/python \
+  hope_training/whole_body_tracking/scripts/materialize_a3_dynamic_ready_contract.py \
+  --action-id <bh_loop_c|bh_block> \
+  --motion <absolute-stable-v2.npz> \
+  --expected-motion-sha256 <sha256> \
+  --stable-receipt <absolute-stable-v2.receipt.json> \
+  --expected-stable-receipt-sha256 <sha256> \
+  --runtime-contract <absolute-training_contract.json> \
+  --expected-runtime-contract-sha256 <sha256> \
+  --mjcf <absolute-a3_pingpong.xml> \
+  --expected-mjcf-sha256 <sha256> \
+  --output <fresh-no-clobber-candidate.json>
+```
+
+该工具保留历史 ground-LP feasibility 默认，只为 hold 显式选择按正负可执行力矩归一化的
+minimax 目标；它还必须按 exact mapping 在 A3 runtime joint order 与 MuJoCo post-root
+actuator order 间 scatter/gather。产物三类 authorization 均为 false。随后用 Isaac
+nominal-hold 模式在 `env.reset()` 后截取 ready、step 1、step 10 和 final/pre-terminal，
+并持续送同一 hold qdes 到至少 `t_hit+margin`；截图、actual-hard/table/fall 与 root/foot
+遥测一起判定“出生就怪”还是“出生正常但 plant 随后漂移”。通过前不得把候选接进 trainer。
+
 以下性能改动若 Pod focused parity 通过，可直接进入 replacement，不另开学习 A/B：
 
 - immutable frozen receipt 的 external SHA cache，不得改变 dataclass/pickle/wire/exact-resume；

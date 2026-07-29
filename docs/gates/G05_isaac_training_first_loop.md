@@ -3790,3 +3790,16 @@ observation/reference/preparation-window hold diagnostic。Pod MuJoCo 动态 rep
 block/loop teacher 约在 `1.24/1.26 s` 后失衡，说明 static LP 不等于动态 hold；旧 receipt
 没有保存 LP actuator solution。必须先物化 action-specific hold qdes并稳定跨过
 `preparation + t_hit + margin` 后再重跑规模 probe。G05 保持 `Partial`。
+
+#### 2026-07-30 dynamic-ready 候选生成器（待 Pod）
+
+reset 路径复核确认 stable-v2 从未抽取 post-swing/failure buffer：canonical ActionBall 强制
+`stand_start_prob=1`、`post_swing_start_prob=0`，true reset 写动作 frame 0 后提前返回。
+因此 Jiayi 描述的“35% 后混入失败姿态”不是当前击球前死亡原因；该门也尚未接入现役代码。
+
+source 已新增 opt-in static-hold minimax LP 与动作专属 dynamic-ready candidate producer。
+独立复核发现并已修正 MuJoCo actuator row 与 A3 runtime joint order 的非恒等排列；所有
+runtime qdes/PD 边界先 scatter 到 LP order，求解力矩再 gather 回 runtime order。
+dependency-light 回归已写但按约定未在本地运行。下一证据是 clean Pod focused pytest、
+loop/block 两份 exact 候选、Isaac reset 后 `0/1/10/final` 截图与闭环 hold telemetry。
+这些通过前不接 trainer、不发 long，G05 继续 `Partial`。
