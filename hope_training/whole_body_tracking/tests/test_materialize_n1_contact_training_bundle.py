@@ -236,9 +236,22 @@ def test_materializes_strict_contact_only_bundle(tmp_path: Path, action_id: str)
         result["counter_rally_objective_profile_sha256"]
         == fixture["objective_sha"]
     )
-    assert action["action_uid"] == source_action["action_uid"]
-    assert action["motion_path"] == source_action["motion_path"]
-    assert action["motion_sha256"] == source_action["motion_sha256"]
+    replacement = B.SUPPORTED_ACTIONS[action_id]
+    assert action["action_uid"] == (
+        B._load_module(
+            "uid_contract_for_test",
+            root
+            / B.MDP_RELATIVE_DIR
+            / "action_ball_manifest.py",
+        ).derive_action_ball_action_uid(
+            action_id,
+            action["family"],
+            replacement["motion_sha256"],
+        )
+    )
+    assert action["action_uid"] != source_action["action_uid"]
+    assert action["motion_path"] == replacement["motion_path"]
+    assert action["motion_sha256"] == replacement["motion_sha256"]
     assert action["reference_t_hit_s"] == source_action["reference_t_hit_s"]
     assert (
         action["reference_t_cycle_s"]
