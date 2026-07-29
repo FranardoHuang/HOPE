@@ -57,6 +57,23 @@ Current-candidate promotion sub-gate (required before this Gate can close):
 
 ## Current State
 
+Follow-up note (2026-07-29, ActionBall actual-joint reset follow-up; Gate remains `Partial`):
+
+- `5e94f21b` 的 20 ms receding-horizon brake 已在 Pod1 跑到 4096-env update 16。相对同 seed
+  `5dbb`，actual-joint reset 没降（`4,791.6` vs `4,728.8/update`），mean episode 仍只有
+  `20.19` steps、短于约 31-step 的击球帧，strike opportunity 合计仅 `2`；最近十窗吞吐反而约慢
+  `4%`。它是行为反例，不晋级。
+- 同窗 reference-only breach 约 `43.3/98,304=0.044%` transitions/update，只相当于当前
+  reset 数的约 `0.9%`。所以 `reference_guard_mode=metrics_only` 不是本轮 reset storm 的解释；
+  但官方 BeyondMimic/DeepMimic 也不支持把它未经 A/B 设为最终默认。reference error 不可像
+  q_des 一样投影；后续只比较 hard/metrics/hybrid termination，物理 fall/table/actual-limit
+  始终 hard。
+- 下一候选将 finite ActionBall execution envelope 在现有 soft limits 内每侧额外保留
+  [`5%`](../DEFINITIONS.md#finite-projection-soft-inset)，raw action/log-prob、actual hard
+  `2%` termination band、Reward 权重和非 ActionBall 路径不变。四条 N1 teacher 轨迹均在新包络
+  内，最小余量约 `0.046 rad`；比例已进入 runtime/schema-3 training contract。当前仍只有
+  source-level 证据，必须 fresh clean Pod smoke/canary 后才能判断 reset 是否下降。
+
 Follow-up note (2026-07-29, ground-plant handoff; Gate remains `Partial`):
 
 - 旧 `TerrainImporterCfg(terrain_type="generator")` 会把 `env_origins` 移到 terrain tile，

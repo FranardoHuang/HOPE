@@ -93,6 +93,14 @@ length 长期短于 `t_hit`，先做单变量的滚动刹车 A/B：每个 fresh 
 单个 physics tick（当前 `5 ms`）。不得同时改 Reward、Done 或 safety-band margin；只有
 1-env smoke 后的 fresh 4096 run 让 episode 越过 `t_hit` 且出现持续 strike，才可替换长跑。
 
+`5e94f21b` 已按上述判据给出反例：updates 1–16 的 actual-joint reset 为
+`4,791.6/update`、mean episode `20.19` steps，最近十窗没有相对 `5dbb` 的吞吐提升。下一单变量
+改为 [`finite_projection_soft_envelope_inset_fraction=0.05`](../DEFINITIONS.md#finite-projection-soft-inset)：
+只在 ActionBall finite projection 模式把 soft q_des 包络上下侧各内缩 `5%`；raw action、
+log-prob、Done、actual hard `2%` 安全带和 Reward 权重均不改。该比例必须同时从 action runtime
+与 schema-3 training contract 回读；缺字段、config/runtime 不等或旧 checkpoint resume 均拒绝。
+必须先用 Pod 1-env smoke，再做 4096 同 seed；source tests 不能代替 Isaac 结果。
+
 N=1 launcher 的 canonical Hydra argv 必须逐字包含
 `+task.racket.reference_guard_mode=metrics_only`。该键不在 task YAML 中，少写 `+` 会在 compose
 阶段失败；不能把 source-level argv 测试当作真实 Hydra 通过。full scope 还必须从 prototype

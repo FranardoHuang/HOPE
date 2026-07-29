@@ -60,6 +60,7 @@ def _env(
     action_ids=slice(None),
     policy_dt=0.02,
     finite_qdes_projection=False,
+    finite_projection_inset=0.05,
 ):
     joint_names = [f"j{i}" for i in range(joints)]
     body_names = ["pelvis", "torso", "wrist", "unused"]
@@ -95,6 +96,9 @@ def _env(
         project_finite_preclamp_qdes_without_termination=(
             finite_qdes_projection
         ),
+        finite_projection_soft_envelope_inset_fraction=(
+            finite_projection_inset
+        ),
     )
     action = SimpleNamespace(
         _joint_ids=action_ids,
@@ -102,6 +106,9 @@ def _env(
         _clamp_enabled=True,
         cfg=action_cfg,
         finite_preclamp_qdes_projection_enabled=finite_qdes_projection,
+        finite_projection_soft_envelope_inset_fraction=(
+            finite_projection_inset if finite_qdes_projection else 0.0
+        ),
     )
     motion_cfg = SimpleNamespace(
         body_names=["pelvis", "torso", "wrist"], anchor_body_name="torso"
@@ -138,6 +145,9 @@ def _env(
         clamp=True,
         project_finite_preclamp_qdes_without_termination=(
             finite_qdes_projection
+        ),
+        finite_projection_soft_envelope_inset_fraction=(
+            finite_projection_inset
         ),
     )
     cfg = SimpleNamespace(
@@ -344,10 +354,18 @@ def test_runtime_projection_fact_is_true_only_and_runtime_verified():
     enabled = _env(finite_qdes_projection=True)
     facts = TC.runtime_execution_facts(enabled, _ActorContract())
     assert facts[TC.FINITE_PRECLAMP_QDES_PROJECTION_KEY] is True
+    assert (
+        facts[TC.FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY]
+        == 0.05
+    )
     assert tuple(
         key
         for key in facts
-        if key != TC.FINITE_PRECLAMP_QDES_PROJECTION_KEY
+        if key
+        not in (
+            TC.FINITE_PRECLAMP_QDES_PROJECTION_KEY,
+            TC.FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY,
+        )
     ) == TC.RUNTIME_EXECUTION_KEYS
 
     enabled.action_manager.get_term(
@@ -369,6 +387,13 @@ def test_runtime_projection_fact_is_true_only_and_runtime_verified():
     ).finite_preclamp_qdes_projection_enabled = 1
     with pytest.raises(RuntimeError, match="must be an exact boolean"):
         TC.runtime_execution_facts(non_boolean, _ActorContract())
+
+    mismatched_inset = _env(finite_qdes_projection=True)
+    mismatched_inset.action_manager.get_term(
+        "joint_pos"
+    ).finite_projection_soft_envelope_inset_fraction = 0.04
+    with pytest.raises(RuntimeError, match="inset config/runtime facts disagree"):
+        TC.runtime_execution_facts(mismatched_inset, _ActorContract())
 
 
 def test_motion_fps_and_body_order_are_formal_runtime_guards():
@@ -885,6 +910,7 @@ def _diagnostic_schema3_contract():
 def _action_ball_diagnostic_schema3_contract():
     contract = _schema3_contract()
     contract[TC.FINITE_PRECLAMP_QDES_PROJECTION_KEY] = True
+    contract[TC.FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY] = 0.05
     contract["target_mode"] = "action_ball"
     contract["actor_obs_contract"] = "action_ball_n2"
     contract["actor_obs_mode"] = "deploy_parity"
@@ -1107,6 +1133,11 @@ def test_action_ball_requires_true_immutable_projection_fact():
 
     contract[TC.FINITE_PRECLAMP_QDES_PROJECTION_KEY] = False
     with pytest.raises(ValueError, match="exact boolean true"):
+        TC.validate_schema3_contract_structure(contract)
+
+    contract = _action_ball_diagnostic_schema3_contract()
+    contract.pop(TC.FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY)
+    with pytest.raises(ValueError, match="soft-envelope inset fact"):
         TC.validate_schema3_contract_structure(contract)
 
     legacy = _schema3_contract()

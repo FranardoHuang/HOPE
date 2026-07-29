@@ -699,6 +699,28 @@ class ClampedJointPositionAction(JointPositionAction):
                 "project_finite_preclamp_qdes_without_termination must be an exact boolean"
             )
         self._project_finite_preclamp_qdes_without_termination = finite_projection
+        projection_soft_inset_fraction = getattr(
+            cfg, "finite_projection_soft_envelope_inset_fraction", 0.05
+        )
+        if finite_projection:
+            if (
+                isinstance(projection_soft_inset_fraction, bool)
+                or not isinstance(projection_soft_inset_fraction, (int, float))
+                or not math.isfinite(float(projection_soft_inset_fraction))
+                or float(projection_soft_inset_fraction) < 0.0
+                or float(projection_soft_inset_fraction) >= 0.5
+            ):
+                raise ValueError(
+                    "finite_projection_soft_envelope_inset_fraction must be finite "
+                    "and lie in [0, 0.5)"
+                )
+            self._finite_projection_soft_envelope_inset_fraction = float(
+                projection_soft_inset_fraction
+            )
+        else:
+            # Keep every non-ActionBall clamp target byte-identical.  The candidate inset is owned
+            # exclusively by the explicit finite-projection mode.
+            self._finite_projection_soft_envelope_inset_fraction = 0.0
         self._pre_apply_guard_policy_dt_s = None
         self._pre_apply_guard_margin_rad = None
         self._pre_apply_guard_margin_fraction = None
@@ -3052,6 +3074,20 @@ class ClampedJointPositionAction(JointPositionAction):
                 # configured hard guard inset is narrower still, use the intersection.
                 target_lower = torch.maximum(lower, hard_inner_lower)
                 target_upper = torch.minimum(upper, hard_inner_upper)
+                if self._project_finite_preclamp_qdes_without_termination:
+                    # ActionBall keeps the raw Gaussian proposal and PPO log-probability untouched,
+                    # but executes a nearest-point projection with five percent of the existing
+                    # soft span reserved on each side.  Intersect with the physical guard envelope
+                    # rather than replacing it, so this can only increase safety.
+                    projection_inset = (
+                        self._finite_projection_soft_envelope_inset_fraction * travel
+                    )
+                    target_lower = torch.maximum(
+                        target_lower, lower + projection_inset
+                    )
+                    target_upper = torch.minimum(
+                        target_upper, upper - projection_inset
+                    )
                 target_envelope_valid = torch.all(target_lower.lt(target_upper))
                 if target_envelope_valid.device.type == "cpu":
                     if not bool(target_envelope_valid):
@@ -3322,6 +3358,12 @@ class ClampedJointPositionAction(JointPositionAction):
         return self._project_finite_preclamp_qdes_without_termination
 
     @property
+    def finite_projection_soft_envelope_inset_fraction(self) -> float:
+        """Per-side soft-span reserve used by the finite ActionBall projection."""
+
+        return self._finite_projection_soft_envelope_inset_fraction
+
+    @property
     def pre_apply_joint_safety_latch(self) -> torch.Tensor:
         """Sticky per-env pre-physics q_des/state-crossing violation; reset clears it."""
 
@@ -3449,6 +3491,11 @@ class ClampedJointPositionActionCfg(JointPositionActionCfg):
     # existing safe target envelope and receive a dense projection penalty instead of terminating.
     # Legacy/default tasks retain the historical terminal behavior.
     project_finite_preclamp_qdes_without_termination: bool = False
+    # Per-side reserve inside the existing soft q_des envelope for the ActionBall finite-projection
+    # mode.  Five percent of the soft span leaves the current four N1 teacher trajectories inside
+    # the executable envelope while adding plant-state overshoot room.  Ignored when projection mode
+    # is off, preserving every non-ActionBall target byte-for-byte.
+    finite_projection_soft_envelope_inset_fraction: float = 0.05
     # Explicit finite queue bound for terminal/unsafe full transcripts.  ``None`` is deliberately
     # invalid when the guard is enabled; overflow is sticky and raises before evidence is replaced.
     pre_apply_guard_terminal_archive_capacity: int | None = None

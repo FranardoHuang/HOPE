@@ -32,6 +32,9 @@ ACTION_BALL_TRAINING_KEY = "action_ball_training"
 FINITE_PRECLAMP_QDES_PROJECTION_KEY = (
     "finite_preclamp_qdes_projection_enabled"
 )
+FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY = (
+    "finite_projection_soft_envelope_inset_fraction"
+)
 ACTION_BALL_ACTION_SET_IDENTITY_KEY = "action_set_identity"
 ACTION_BALL_DIAGNOSTIC_METADATA_KEY = "action_ball_diagnostic_unauthorized"
 FORMAL_EVIDENCE_BOOKABLE_METADATA_KEY = "formal_evidence_bookable"
@@ -1776,6 +1779,44 @@ def runtime_execution_facts(
         raise RuntimeError(
             "finite q_des projection config/runtime facts disagree"
         )
+    projection_inset = None
+    if projection_runtime:
+        projection_inset_cfg = getattr(
+            action_cfg,
+            FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY,
+            None,
+        )
+        if (
+            isinstance(projection_inset_cfg, bool)
+            or not isinstance(projection_inset_cfg, (int, float))
+            or not math.isfinite(float(projection_inset_cfg))
+            or not 0.0 <= float(projection_inset_cfg) < 0.5
+        ):
+            raise RuntimeError(
+                "finite_projection_soft_envelope_inset_fraction must be "
+                "finite and lie in [0, 0.5)"
+            )
+        projection_inset_runtime = getattr(
+            action,
+            FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY,
+            projection_missing,
+        )
+        if projection_inset_runtime is projection_missing:
+            raise RuntimeError(
+                "finite q_des projection is enabled in config but the "
+                "instantiated action term exposes no runtime soft-envelope inset"
+            )
+        if (
+            isinstance(projection_inset_runtime, bool)
+            or not isinstance(projection_inset_runtime, (int, float))
+            or not math.isfinite(float(projection_inset_runtime))
+            or float(projection_inset_runtime) != float(projection_inset_cfg)
+        ):
+            raise RuntimeError(
+                "finite q_des projection soft-envelope inset config/runtime "
+                "facts disagree"
+            )
+        projection_inset = float(projection_inset_runtime)
     # R-a masking leaves the 62-D layout unchanged, so both the true-only mask bit and an always
     # present provenance epoch are needed: only epoch=1 + absent mask proves unmasked. Detection
     # unwraps only structurally empty partials and accepts only the two canonical callables.  Bound
@@ -1813,7 +1854,12 @@ def runtime_execution_facts(
         "action_use_default_offset": use_default_offset,
         "qdes_clamp": qdes_clamp,
         **(
-            {FINITE_PRECLAMP_QDES_PROJECTION_KEY: True}
+            {
+                FINITE_PRECLAMP_QDES_PROJECTION_KEY: True,
+                FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY: (
+                    projection_inset
+                ),
+            }
             if projection_runtime
             else {}
         ),
@@ -3513,6 +3559,9 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
     )
     block_present = ACTION_BALL_TRAINING_KEY in contract
     projection_present = FINITE_PRECLAMP_QDES_PROJECTION_KEY in contract
+    projection_inset_present = (
+        FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY in contract
+    )
     if (
         projection_present
         and contract[FINITE_PRECLAMP_QDES_PROJECTION_KEY] is not True
@@ -3521,11 +3570,23 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
             "schema-3 finite_preclamp_qdes_projection_enabled must be the "
             "exact boolean true when present"
         )
+    if projection_inset_present:
+        inset = contract[FINITE_PROJECTION_SOFT_ENVELOPE_INSET_FRACTION_KEY]
+        if (
+            isinstance(inset, bool)
+            or not isinstance(inset, (int, float))
+            or not math.isfinite(float(inset))
+            or not 0.0 <= float(inset) < 0.5
+        ):
+            raise ValueError(
+                "schema-3 finite projection soft-envelope inset must be "
+                "finite and lie in [0, 0.5)"
+            )
     action_ball_intent = (
         target_mode == "action_ball" or actor_prefixed or block_present
     )
     if not action_ball_intent:
-        if projection_present:
+        if projection_present or projection_inset_present:
             raise ValueError(
                 "schema-3 finite q_des projection is ActionBall-only"
             )
@@ -3561,6 +3622,11 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
         raise ValueError(
             "schema-3 action-ball contract is missing the immutable finite "
             "pre-clamp q_des projection runtime fact"
+        )
+    if not projection_inset_present:
+        raise ValueError(
+            "schema-3 action-ball contract is missing the immutable finite "
+            "q_des projection soft-envelope inset fact"
         )
     if (
         type(contract.get("schema_version")) is not int

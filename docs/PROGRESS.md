@@ -1986,6 +1986,21 @@
 </details>
 ## 2026-07-29
 
+- Pod1 对 `5e94f21b` 滚动 20 ms 预测刹车做了 4096-env 同 seed 反例：updates
+  `1–16` 平均 `36.48 s/update`、episode `20.19` steps、actual-joint
+  `4,791.6 reset/update`，只有 `2` 次 strike opportunity；相对 `5dbb` 既未降低 actual
+  reset，最近十窗还约慢 `4%`，故该单变量不再解释为修复。reference-only shadow breach 仅
+  `43.3/98,304=0.044%` transitions/update，也排除 reference mode 是当前 mass-reset 主因。
+  下一 fresh 候选只把 ActionBall finite executed q_des 在 soft limits 内每侧再留 `5%`，
+  四条 loop/block × upper/full 老师均未越出，最小剩余余量约 `0.046 rad`；新增比例已绑定
+  runtime/schema-3 training contract，旧 checkpoint 不得 exact resume。source-level 检查不作
+  Isaac 证据；下一证据只认 clean Pod `1 env × 2 update` 与 4096 同 seed。
+- Reference termination 原文复核否定了“像 q_des 一样 clamp reference error”的说法。
+  BeyondMimic 保留 reference hard ET 并以失败段采样；DeepMimic 动态技能的 no-ET 消融明显
+  退化；PHC/Stubborn 的改进是选择性/概率化终止并另建恢复/采样机制，不是截断 reference
+  error。当前 `metrics_only` 仅为 N1 diagnostic：现役 ActionBall broker 已绕过 BeyondMimic
+  failed-bin sampler，且本轮 raw breach 极低，所以暂不热改；最终默认必须在 actual-joint
+  主因清除后做 fixed-seed `phase_gated` / `metrics_only` / hybrid A/B。
 - `curr-launch-fix` 已把 finite q_des 投影、投影前超出量 Reward（主线 weight=`-5`）、
   reference metrics-only、shared-ready fresh actor bootstrap 与 full-scope post-solver
   预飞合成 exact `b1d299e1` 并推送；590 项整合回归只暴露一个测试 import 笔误，修正后的相关

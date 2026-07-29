@@ -45,12 +45,14 @@ def _action_and_env(
     guard_margin_rad: float | None = 0.0,
     guard_margin_fraction: float | None = 0.0,
     project_finite_qdes: bool = False,
+    projection_soft_inset_fraction: float = 0.05,
     runtime_step_dt: float = 0.1,
     decimation: int = 4,
     runtime_physics_dt: float | None = None,
     expected_decimation: int | None = 4,
     terminal_archive_capacity: int | None = 16,
     action_ball_diagnostic_unauthorized: bool = False,
+    target_mode: str = "action_ball",
 ):
     names = [f"j{index}" for index in range(joint_count)]
     offset = (
@@ -88,6 +90,9 @@ def _action_and_env(
         pre_apply_guard_expected_decimation=expected_decimation,
         pre_apply_guard_terminal_archive_capacity=terminal_archive_capacity,
         project_finite_preclamp_qdes_without_termination=project_finite_qdes,
+        finite_projection_soft_envelope_inset_fraction=(
+            projection_soft_inset_fraction
+        ),
     )
     env = types.SimpleNamespace(
         scene={"robot": asset},
@@ -103,7 +108,7 @@ def _action_and_env(
             decimation=decimation,
             commands=types.SimpleNamespace(
                 racket_target=types.SimpleNamespace(
-                    target_mode="action_ball",
+                    target_mode=target_mode,
                     action_ball_diagnostic_unauthorized=(
                         action_ball_diagnostic_unauthorized
                     ),
@@ -461,14 +466,17 @@ def test_action_ball_finite_qdes_projection_is_dense_shaping_not_reset():
     action.process_actions(proposals)
 
     # Both finite requests cross the physical hard-inner edge, but the drive sees the nearest
-    # existing soft-envelope projection rather than the state-derived brake target.
+    # ActionBall execution-envelope projection rather than the state-derived brake target.
     # A finite saturation is not copied into the formal hard-safety ledger; otherwise that
     # ledger would demand a terminal archive and fence PPO despite the deliberate no-reset path.
     assert action.pre_apply_qdes_violation_latch.tolist() == [False, False]
     assert action.pre_apply_qdes_violation_joint_count.sum().item() == 0
-    assert action.processed_actions[:, 0].tolist() == pytest.approx([-1.0, 1.0])
+    assert action.processed_actions[:, 0].tolist() == pytest.approx([-0.9, 0.9])
     assert action.nominal_projected_qdes[:, 0].tolist() == pytest.approx(
-        [-1.0, 1.0]
+        [-0.9, 0.9]
+    )
+    assert action.nominal_projection_span[:, 0].tolist() == pytest.approx(
+        [1.8, 1.8]
     )
     assert torch.all(torch.isfinite(action.processed_actions))
     _finish_guarded_policy_step(action, asset)
@@ -485,7 +493,9 @@ def test_action_ball_finite_qdes_projection_is_dense_shaping_not_reset():
     )
     assert values[0].item() > 0.0
     assert values[1].item() > values[0].item()
-    expected = 1.0 - torch.exp(torch.tensor([-0.4, -2.0]))
+    expected = 1.0 - torch.exp(
+        -4.0 * torch.tensor([0.3 / 1.8, 1.1 / 1.8])
+    )
     assert values.tolist() == pytest.approx(expected.tolist())
 
     counters = getattr(
@@ -499,13 +509,13 @@ def test_action_ball_finite_qdes_projection_is_dense_shaping_not_reset():
     assert counters["lower_projection_joint_count"][0].item() == 1
     assert counters["upper_projection_joint_count"][0].item() == 1
     assert counters["normalized_projection_distance_sum"][0].item() == pytest.approx(
-        0.6
+        0.3 / 1.8 + 1.1 / 1.8
     )
     assert counters["normalized_projection_distance_max"][0].item() == pytest.approx(
-        0.5
+        1.1 / 1.8
     )
     assert counters["max_normalized_projection_distance"].item() == pytest.approx(
-        0.5
+        1.1 / 1.8
     )
 
     # The existing once-per-update q_des ledger consumer also exports scalar per-joint side/count,
@@ -538,15 +548,60 @@ def test_action_ball_finite_qdes_projection_is_dense_shaping_not_reset():
     ].item() == 1
     assert snapshot[
         "projection_joint_00_mean_normalized_excess"
-    ].item() == pytest.approx(0.3)
+    ].item() == pytest.approx((0.3 / 1.8 + 1.1 / 1.8) / 2.0)
     assert snapshot[
         "projection_joint_00_max_normalized_excess"
-    ].item() == pytest.approx(0.5)
+    ].item() == pytest.approx(1.1 / 1.8)
     assert snapshot[
         "projection_mean_normalized_projection_distance"
-    ].item() == pytest.approx(0.3)
+    ].item() == pytest.approx((0.3 / 1.8 + 1.1 / 1.8) / 2.0)
     assert snapshot["projection_saturation_sample_step_ratio"].item() == pytest.approx(
         1.0
+    )
+
+
+def test_action_ball_projection_inset_is_identity_inside_and_legacy_is_unchanged():
+    action, _, _ = _action_and_env(
+        num_envs=3,
+        joint_count=2,
+        guard=True,
+        project_finite_qdes=True,
+    )
+    proposals = torch.tensor(
+        [
+            [0.85, -0.85],  # strictly inside the inset execution envelope
+            [0.95, -0.95],  # inside soft limits, outside the execution envelope
+            [0.90, -0.90],  # exact execution-envelope edges remain executable
+        ]
+    )
+    action.process_actions(proposals)
+
+    assert torch.equal(action.raw_actions, proposals)
+    assert torch.equal(action.pre_clamp_qdes, proposals)
+    assert torch.equal(action.processed_actions[0], proposals[0])
+    assert action.processed_actions[1].tolist() == pytest.approx([0.9, -0.9])
+    assert action.processed_actions[2].tolist() == pytest.approx([0.9, -0.9])
+    assert torch.equal(action.nominal_projected_qdes, action.processed_actions)
+    assert torch.allclose(
+        action.nominal_projection_span,
+        torch.full_like(action.nominal_projection_span, 1.8),
+    )
+
+    legacy, _, _ = _action_and_env(
+        num_envs=1,
+        joint_count=2,
+        guard=True,
+        project_finite_qdes=False,
+        target_mode="hitter",
+    )
+    legacy_proposal = torch.tensor([[0.95, -0.95]])
+    legacy.process_actions(legacy_proposal)
+    assert torch.equal(legacy.raw_actions, legacy_proposal)
+    assert torch.equal(legacy.pre_clamp_qdes, legacy_proposal)
+    assert torch.equal(legacy.processed_actions, legacy_proposal)
+    assert torch.equal(
+        legacy.nominal_projection_span,
+        torch.full_like(legacy.nominal_projection_span, 2.0),
     )
 
 
@@ -572,7 +627,7 @@ def test_action_ball_projection_only_qdes_nonfinite_is_terminal_and_actual_owns_
     assert action.physical_hard_safety_latch.tolist() == [False, True, True]
     assert torch.all(torch.isfinite(action.processed_actions))
     assert action.processed_actions[:, 0].tolist() == pytest.approx(
-        [0.0, 0.65, 1.0]
+        [0.0, 0.65, 0.9]
     )
     assert terminations_mod.pre_clamp_qdes_forbidden_zone(
         env,

@@ -503,6 +503,49 @@ collection/reset 账。
 列入 launcher-owned keys；full N1 launcher 新增 prototype 内 solver preflight PASS 门，旧的无
 provenance bundle 不再可能进入 birth。两套 launcher 联合回归为 `80 passed`。
 
+### 2026-07-29：reference ET 研究裁定与 `5e94f21b` 反例
+
+Reference tracking error 不能类比 q_des 做 clamp：它是实际状态与老师的结果误差，没有一个可把
+机器人无损投影回去的动作可行集。clamp error 会隐藏偏离，clamp state 等于瞬移，clamp reference
+等于改老师。原始证据边界如下：
+
+- [BeyondMimic](https://arxiv.org/html/2508.08241) 对 anchor/end-effector 高度和 anchor
+  orientation 使用 hard early termination，并把 terminated phase 喂给困难段采样；
+- [DeepMimic Table 5](https://xbpeng.github.io/projects/DeepMimic/DeepMimic_2018.pdf)
+  中 RSI+ET 对比 RSI-only，backflip/sideflip/spinkick 为
+  `0.791/0.823/0.848` 对 `0.379/0.355/0.358`；walk 基本不变；
+- [PHC](https://arxiv.org/pdf/2305.06456) 只选择性放宽 ankle/toe 的 ET，并另训 recovery
+  primitive；[Stubborn](https://arxiv.org/html/2606.12814) 用概率终止和 tracking-error-driven
+  sampling。两者都不是 blanket metrics-only 或 reference clamp。
+
+本仓库 ActionBall 又有一个关键差异：birth broker 已绕过 BeyondMimic 单 clip failed-bin sampler；
+当前 `metrics_only` raw counter 只记日志，不推进 live curriculum。因此论文不能直接证明
+ActionBall hard ET 必胜，也不能证明全关无害。最终需 fixed seed 比较：
+
+1. `phase_gated` hard reference ET；
+2. `metrics_only`，只作诊断；
+3. 击球窗放宽、窗外持久/概率终止的 hybrid。
+
+三臂同时看 strike/return、teacher error、reference breach dwell、fall/table/actual-limit、episode
+长度和吞吐；actual-joint storm 清除前不做该因果判断。
+
+Pod1 的 receding-horizon 候选 `5e94f21b` 已完成 updates 1–16：
+
+| candidate | s/update | mean episode | actual-joint reset/update | reference-only/update | strike total |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| `5e94f21b` | `36.48` | `20.19` | `4,791.6` | `43.3` | `2` |
+| `5dbb` 同窗 | `38.35` | `20.68` | `4,728.8` | `41.9` | `1` |
+
+最近十窗 `5e94f21b` 反而约慢 `4%`，actual reset 没降，故 20 ms receding horizon 不晋级。
+reference-only occupancy 仅 `0.044%` transitions/update，也不能解释 mass reset。
+
+下一候选只将 ActionBall finite executed q_des 在 soft limits 内上下侧各额外保留 `5%`。四条
+loop/block × upper/full 老师轨迹均无 crossing，最小剩余余量约 `0.046 rad`。新增
+[`finite_projection_soft_envelope_inset_fraction`](../../DEFINITIONS.md#finite-projection-soft-inset)
+同时进入 config、runtime property 与 schema-3 training contract；raw proposal、PPO log-prob、
+actual hard band、Reward 和非 ActionBall 路径不变。该结论目前只到 source-level，Pod smoke 和
+4096 同 seed 才是行为验收。
+
 ### 2026-07-29：`7a14b0b9` 真实 smoke、4096 反例与 crossing 所有权修正
 
 Pod1 clean checkout 已按
