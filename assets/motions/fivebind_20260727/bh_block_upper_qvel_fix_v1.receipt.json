@@ -1,0 +1,313 @@
+{
+  "artifact_class": "diagnostic_grounded_upper_qvel_consistency_repair",
+  "authorization": {
+    "deployment_authorized": false,
+    "hardware_authorized": false,
+    "training_authorized": false
+  },
+  "inputs": {
+    "body_order": {
+      "path": "/workspace/franco/n1rs_1b44a065/configs/a3_runtime_body_order.txt",
+      "sha256": "1cdae4ba7c8d604428ee69ed4a3059e67fb195b22e1d0e294d509c4325809a3a"
+    },
+    "canonical_ready_v1": {
+      "path": "/workspace/codexschema/nohope/vendor_assets/motion_finalize_20260724/ready/canonical_ready_v1.npz",
+      "sha256": "cb0a05ca9f7220686acfde1010c28ed04558fb2aa47ef2cfb2284d576ecd15b0"
+    },
+    "exact_model": {
+      "backend_type": "canonical_grounded_ready.MujocoGroundedReadyBackend",
+      "compiled_model_sha256": "70b3c8783fd52f4e535933ac651cd14ed48aaae26285e0911cb5258f92b85123",
+      "exact_mujoco_backend": true,
+      "ground_model_binding_sha256": "99c07a8c3a21b00997790d45a53002430ce1cab47ba8d89484e1295fd61d5322",
+      "joint_order": [
+        "left_hip_pitch_joint",
+        "right_hip_pitch_joint",
+        "waist_yaw_joint",
+        "left_hip_roll_joint",
+        "right_hip_roll_joint",
+        "waist_roll_joint",
+        "left_hip_yaw_joint",
+        "right_hip_yaw_joint",
+        "waist_pitch_joint",
+        "left_knee_joint",
+        "right_knee_joint",
+        "head_yaw_joint",
+        "left_shoulder_pitch_joint",
+        "right_shoulder_pitch_joint",
+        "left_ankle_pitch_joint",
+        "right_ankle_pitch_joint",
+        "head_pitch_joint",
+        "left_shoulder_roll_joint",
+        "right_shoulder_roll_joint",
+        "left_ankle_roll_joint",
+        "right_ankle_roll_joint",
+        "left_shoulder_yaw_joint",
+        "right_shoulder_yaw_joint",
+        "left_elbow_joint",
+        "right_elbow_joint",
+        "left_wrist_roll_joint",
+        "right_wrist_roll_joint",
+        "left_wrist_pitch_joint",
+        "right_wrist_pitch_joint",
+        "left_wrist_yaw_joint",
+        "right_wrist_yaw_joint"
+      ],
+      "joint_position_lower_sha256": "79939e8a557b61403f9e7c843309a6e22f565b7b8c640604a58d79a2641481b3",
+      "joint_position_upper_sha256": "e32b6a1fde9395d13d9a2cfffb8b327f3c6d115b8898adcc80eb80492416ee49",
+      "mjcf_path": "/workspace/codexschema/nohope/agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml",
+      "mjcf_sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97",
+      "path_model_binding_sha256": "e447c20ef157b61cd4f955dabc054241433eb591c9a7f4bd3717ffe969cce645",
+      "status": "PASS_EXACT_MUJOCO",
+      "xml_model_name": "A3T2.5_pingpong_0519"
+    },
+    "grounded_reference_candidate": {
+      "path": "/workspace/codexschema/canonical_v2_20260724/ready_v2_g1_attempt3/published_g1_neutral_arm/grounded_ready_candidate_v1.npz",
+      "sha256": "585bbd7d643857abd08108eac7b4dd997b228d0df1a9921334ca845cd931d71e"
+    },
+    "grounded_reference_receipt": {
+      "path": "/workspace/tmp/face_report_test_20260730_001/vendor_assets/motion_finalize_20260724/ready_v2_g1_neutral_arm/RECEIPT.json",
+      "sha256": "ee7dea1aec81169e1d002bbe0b2cfa75c793a97a3f89e1e740d0064dc8be7c46"
+    },
+    "motion": {
+      "path": "/workspace/franco/n1rs_1b44a065/assets/motions/fivebind_20260727/bh_block_upper_fivebind.npz",
+      "sha256": "0cd94aa47bf8feb59bbe7cc7a0306abb57ee7ec8ebcec6443a80bbdc58894309"
+    }
+  },
+  "invariants": {
+    "body_angular_velocity_first_last_exact_zero": true,
+    "body_linear_velocity_first_last_exact_zero": true,
+    "fps_after": 50.0,
+    "fps_before": 50.0,
+    "frame_count_after": 54,
+    "frame_count_before": 54,
+    "joint_pos_all_frames_bitwise_equal": true,
+    "joint_velocity_first_last_exact_zero": true,
+    "nonleg_joint_vel_all_frames_bitwise_equal": true,
+    "right_racket_site_all_frames": {
+      "angular_velocity_w": {
+        "after_sha256": "9293bdf9a84739ffec421d1847a1726f4923226ebd6eebdbe287b67d17f0a304",
+        "before_sha256": "9293bdf9a84739ffec421d1847a1726f4923226ebd6eebdbe287b67d17f0a304",
+        "bitwise_equal": true,
+        "dtype": "float64",
+        "maximum_abs_delta": 0.0,
+        "shape": [
+          54,
+          3
+        ],
+        "unit": "rad/s"
+      },
+      "linear_velocity_w": {
+        "after_sha256": "e4c2b668ad3e941d4c10011b8437c3a862fce1657feb7f29464381152cb6e112",
+        "before_sha256": "e4c2b668ad3e941d4c10011b8437c3a862fce1657feb7f29464381152cb6e112",
+        "bitwise_equal": true,
+        "dtype": "float64",
+        "maximum_abs_delta": 0.0,
+        "shape": [
+          54,
+          3
+        ],
+        "unit": "m/s"
+      },
+      "position_w": {
+        "after_sha256": "977a26760bc7524d7449cc82aee6cadcc2adb5f6febcb59d0c9bcedcfde4b453",
+        "before_sha256": "977a26760bc7524d7449cc82aee6cadcc2adb5f6febcb59d0c9bcedcfde4b453",
+        "bitwise_equal": true,
+        "dtype": "float64",
+        "maximum_abs_delta": 0.0,
+        "shape": [
+          54,
+          3
+        ],
+        "unit": "m"
+      },
+      "rotation_w": {
+        "after_sha256": "65ae9a7af2aeb138b6616463be0f0f56a274c97ccfe00767b0eec6d5bc3a3ca9",
+        "before_sha256": "65ae9a7af2aeb138b6616463be0f0f56a274c97ccfe00767b0eec6d5bc3a3ca9",
+        "bitwise_equal": true,
+        "dtype": "float64",
+        "maximum_abs_delta": 0.0,
+        "shape": [
+          54,
+          9
+        ],
+        "unit": "matrix"
+      }
+    },
+    "right_racket_site_speed_at_strike_after_mps": 1.6183056627003785,
+    "right_racket_site_speed_at_strike_before_mps": 1.6183056627003785,
+    "root_pose_all_frames_bitwise_equal": true,
+    "strike_frame_after": 26,
+    "strike_frame_before": 26
+  },
+  "non_claims": [
+    "no joint-position transplant was needed or performed",
+    "not a compiler-bank or behavior certificate",
+    "not a table-contact or physical-ball certificate",
+    "not a policy-quality or curriculum certificate",
+    "not deployment or hardware authorization"
+  ],
+  "outputs": {
+    "completion_semantics": "exclusive_directory_receipt_written_last",
+    "motion_filename": "bh_block_upper_fivebind.grounded_upper_qvel_fix_v1.npz",
+    "motion_sha256": "a228e5695a70d19e0153317fd2124d8c6db1c800f3d00ca9bb3c5ee3eb944e0b",
+    "receipt_filename": "RECEIPT.json",
+    "schema2_manifest_filename": "SCHEMA2_MANIFEST.json",
+    "schema2_manifest_sha256": "0fbaf655a749eac8ec6ae2dbe279b0f6f75ab8d0acebfa9cb3fe8b398583336e",
+    "schema2_report_filename": "SCHEMA2_REPORT.json",
+    "schema2_report_sha256": "972b0290703e7f914f4fd04fe174e6c0970bbe482df33024abdbcb33058118b2"
+  },
+  "producer": {
+    "grounded_ready_tool_path": "/workspace/franco/n1rs_1b44a065/hope_training/whole_body_tracking/scripts/canonical_grounded_ready.py",
+    "grounded_ready_tool_sha256": "005ea131f684980988d45aa004dcdc7db2180afae436a04585bfc6c006874158",
+    "schema2_tool_path": "/workspace/franco/n1rs_1b44a065/hope_training/whole_body_tracking/scripts/canonical_schema2_builder.py",
+    "schema2_tool_sha256": "49e45c01f88a1bbacc9728180eb0cd5fe816b2b0f02d3ea9989081c3f449fc6b",
+    "tool_path": "/workspace/franco/n1rs_1b44a065/hope_training/whole_body_tracking/scripts/materialize_grounded_upper_motion.py",
+    "tool_sha256": "66cb8d437d61faf9a37518349ff7baf5c09358a802592fcd64f786e8aed39e28"
+  },
+  "receipt_payload_sha256": "5f7c177cc5415e0695689fd1094b1d68c1e86a493d55f80de066318e863227ab",
+  "repair": {
+    "input_pose_exact_a3_grounding_audit": {
+      "collision_safe": true,
+      "double_support_passed": true,
+      "foot_contact_count": [
+        3,
+        3
+      ],
+      "joint_limits_passed": true,
+      "maximum_foot_penetration_m": 0.0004986834715647662,
+      "self_collision_pairs": [],
+      "sole_gap_passed": true,
+      "sole_minimum_distance_m": [
+        -0.0004986834715647176,
+        -0.0004970551679051166
+      ],
+      "static_ground_dynamics": {
+        "feasible": null,
+        "reason": "missing CPU dependency: No module named 'scipy'",
+        "status": "INCOMPLETE_FAIL_CLOSED"
+      },
+      "static_ground_dynamics_gating": false,
+      "static_ground_dynamics_passed": false,
+      "unsupported_contacts": [],
+      "worst_joint_limit_excess_rad": 0.0
+    },
+    "joint_pos_changed": false,
+    "leg_joint_indices": [
+      0,
+      3,
+      6,
+      9,
+      14,
+      19,
+      1,
+      4,
+      7,
+      10,
+      15,
+      20
+    ],
+    "leg_joint_names": [
+      "left_hip_pitch_joint",
+      "left_hip_roll_joint",
+      "left_hip_yaw_joint",
+      "left_knee_joint",
+      "left_ankle_pitch_joint",
+      "left_ankle_roll_joint",
+      "right_hip_pitch_joint",
+      "right_hip_roll_joint",
+      "right_hip_yaw_joint",
+      "right_knee_joint",
+      "right_ankle_pitch_joint",
+      "right_ankle_roll_joint"
+    ],
+    "leg_joint_velocity_zeroed": true,
+    "leg_velocity_after_nonzero_samples": 0,
+    "leg_velocity_before": [
+      {
+        "index": 0,
+        "maximum_abs_radps": 2.713297198868352e-16,
+        "name": "left_hip_pitch_joint",
+        "nonzero_samples": 15
+      },
+      {
+        "index": 3,
+        "maximum_abs_radps": 1.356648599434176e-16,
+        "name": "left_hip_roll_joint",
+        "nonzero_samples": 15
+      },
+      {
+        "index": 6,
+        "maximum_abs_radps": 0.0,
+        "name": "left_hip_yaw_joint",
+        "nonzero_samples": 0
+      },
+      {
+        "index": 9,
+        "maximum_abs_radps": 1.0853188795473408e-15,
+        "name": "left_knee_joint",
+        "nonzero_samples": 15
+      },
+      {
+        "index": 14,
+        "maximum_abs_radps": 5.426594397736704e-16,
+        "name": "left_ankle_pitch_joint",
+        "nonzero_samples": 15
+      },
+      {
+        "index": 19,
+        "maximum_abs_radps": 1.356648599434176e-16,
+        "name": "left_ankle_roll_joint",
+        "nonzero_samples": 15
+      },
+      {
+        "index": 1,
+        "maximum_abs_radps": 2.713297198868352e-16,
+        "name": "right_hip_pitch_joint",
+        "nonzero_samples": 15
+      },
+      {
+        "index": 4,
+        "maximum_abs_radps": 0.0,
+        "name": "right_hip_roll_joint",
+        "nonzero_samples": 0
+      },
+      {
+        "index": 7,
+        "maximum_abs_radps": 1.356648599434176e-16,
+        "name": "right_hip_yaw_joint",
+        "nonzero_samples": 15
+      },
+      {
+        "index": 10,
+        "maximum_abs_radps": 0.0,
+        "name": "right_knee_joint",
+        "nonzero_samples": 0
+      },
+      {
+        "index": 15,
+        "maximum_abs_radps": 0.0,
+        "name": "right_ankle_pitch_joint",
+        "nonzero_samples": 0
+      },
+      {
+        "index": 20,
+        "maximum_abs_radps": 0.0,
+        "name": "right_ankle_roll_joint",
+        "nonzero_samples": 0
+      }
+    ],
+    "nonleg_joint_velocity_changed": false,
+    "ready_yaw_rotation_from_v1_rad": -0.6587300310965185,
+    "root_pose_changed": false,
+    "semantics": "input already had constant leg qpos from the published AgiBot A3 grounded-ready candidate (candidate_id=G1); repair only zeroed stale nonzero leg joint_vel and rebuilt schema-2 body FK/velocity metadata"
+  },
+  "robot": {
+    "candidate_id_semantics": "G1 names an A3 grounded-ready construction candidate; it is not a robot model",
+    "exact_xml_model_name": "A3T2.5_pingpong_0519",
+    "family": "AgiBot A3",
+    "grounded_ready_candidate_id": "G1"
+  },
+  "schema_version": 1,
+  "tool_id": "grounded_upper_qvel_consistency_materializer_v1",
+  "verdict": "PASS_DIAGNOSTIC_QVEL_CONSISTENCY_REPAIR"
+}

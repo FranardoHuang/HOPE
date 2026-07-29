@@ -91,11 +91,11 @@ SUPPORTED_ACTIONS = {
         "action_uid": 1722317591841513,
         "family": "backhand",
         "motion_path": (
-            "motions/fivebind_n5_20260728/"
-            "bh_loop_c_upper_fivebind.npz"
+            "assets/motions/fivebind_20260727/"
+            "bh_loop_c_upper_qvel_fix_v1.npz"
         ),
         "motion_sha256": (
-            "c950a73e473cad84d0fafcd51c552ec4fef085580bbeaec0f4e96be2acd7e2fc"
+            "3b7cabdec864db09cf3124557b0f79e9f81b4e5cdb28b67a019df11471d307e0"
         ),
         "reference_t_hit_s": 0.62,
         "reference_t_cycle_s": 1.4,
@@ -105,11 +105,11 @@ SUPPORTED_ACTIONS = {
         "action_uid": 1115176677418582,
         "family": "backhand",
         "motion_path": (
-            "motions/fivebind_n5_20260728/"
-            "bh_block_upper_fivebind.npz"
+            "assets/motions/fivebind_20260727/"
+            "bh_block_upper_qvel_fix_v1.npz"
         ),
         "motion_sha256": (
-            "0cd94aa47bf8feb59bbe7cc7a0306abb57ee7ec8ebcec6443a80bbdc58894309"
+            "a228e5695a70d19e0153317fd2124d8c6db1c800f3d00ca9bb3c5ee3eb944e0b"
         ),
         "reference_t_hit_s": 0.48,
         "reference_t_cycle_s": 1.06,
@@ -1885,14 +1885,13 @@ def materialize_n1_contact_bundle(
         }
     )
     scoped_action = deepcopy(source_action)
-    if scope != SCOPE:
-        for key in (
-            "motion_path",
-            "motion_sha256",
-            "reference_t_hit_s",
-            "reference_t_cycle_s",
-        ):
-            scoped_action[key] = facts[key]
+    for key in (
+        "motion_path",
+        "motion_sha256",
+        "reference_t_hit_s",
+        "reference_t_cycle_s",
+    ):
+        scoped_action[key] = facts[key]
     motion_path, motion_relative = _resolve_repo_file(
         root, facts["motion_path"], label=f"{action_id} {scope} motion"
     )
@@ -1922,14 +1921,13 @@ def materialize_n1_contact_bundle(
     manifest_module = _load_module(
         "n1_action_ball_manifest", manifest_module_path
     )
-    if scope != SCOPE:
-        scoped_action["action_uid"] = (
-            manifest_module.derive_action_ball_action_uid(
-                action_id,
-                scoped_action["family"],
-                scoped_action["motion_sha256"],
-            )
+    scoped_action["action_uid"] = (
+        manifest_module.derive_action_ball_action_uid(
+            action_id,
+            scoped_action["family"],
+            scoped_action["motion_sha256"],
         )
+    )
     profile_type = manifest_module._counter_rally_objective_profile_type()
     objective = profile_type()
     objective_mapping = dict(objective.to_mapping())
@@ -1970,9 +1968,27 @@ def materialize_n1_contact_bundle(
         ),
     )
     if scope == SCOPE:
-        # Only the three coordinate Z values may differ from the source row.
+        # The qvel-only A3 replacement changes motion bytes/UID but preserves
+        # every qpos/root/timing/racket-site sample; beyond those pinned
+        # identity fields, only the three coordinate Z values may differ from
+        # the source row.
+        expected_source_action = deepcopy(source_action)
+        for key in (
+            "motion_path",
+            "motion_sha256",
+            "reference_t_hit_s",
+            "reference_t_cycle_s",
+        ):
+            expected_source_action[key] = facts[key]
+        expected_source_action["action_uid"] = (
+            manifest_module.derive_action_ball_action_uid(
+                action_id,
+                expected_source_action["family"],
+                expected_source_action["motion_sha256"],
+            )
+        )
         expected_corrected = _correct_contact_z(
-            source_action,
+            expected_source_action,
             ready_root_z_w_m=float(
                 np.asarray(state["ready_root_w_m"])[2]
             ),

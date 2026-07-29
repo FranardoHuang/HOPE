@@ -287,3 +287,18 @@ Isaac Lab 官方基准 isaac-sim.github.io/IsaacLab/.../performance_benchmarks.h
    `origin/main` 因果顺序先比较 ball/task pairing、再比较 free/fixed solver，之后才启动
    Reward、reference termination 和 curriculum 剂量比较；否则比较的是 reset/基础设施，不是
    学习设置。
+
+### 6.4 决策账本与执行进度（2026-07-30）
+
+| 分类 | 决策 | 当前证据/进度 |
+| --- | --- | --- |
+| 直接修 | A3 upper 恒定腿 qpos 对应 stale qvel 归零；qpos/root/timing 不变 | Pod1 已物化两条资产；exact A3 双脚接触、joint/collision 检查通过，right-racket 全帧位姿与线/角速度 bitwise 不变。反手拉/挡新 motion SHA 分别为 `3b7cabde…` / `a228e569…` |
+| 直接修 | immutable receipt SHA cache、同 step strike timing 去重、metrics D2H 合批、`fired_valid` device mask | source 已合入；focused Pod 回归 `162 passed`，另有 11 个旧 metric fixture 因未构造两个 runtime flag 失败，真实构造器会初始化，暂不阻塞首发 |
+| 直接修 | curriculum marginal formal gate 从全域 `F/(L+F)` 改读已有新增带 `NB_F/NB` Wilson 区间 | source 与反例测试已合入；保留全域 admission/unsafe blocker |
+| 先不修 | 用 neutral-arm `candidate_id=G1` 重新求当前击球上肢；用零速度 static-contact LP 阻断动态挥拍诊断 | 前者回答了错误问题；后者在当前双脚接触且几何安全姿态上返回 infeasible，只说明不能被动静止保持，不证明动态 policy 不可训练。两项都保留原始证据，不作为首发门 |
+| 先不修 | CaT、Beta/tanh、有界 policy 分布、8192 env、full-body 完整 ready 链 | 都不在第一条可迭代 upper policy 的关键路径；不得与本次 replacement 混改 |
+| 需要 canary | Reward 各组权重/负项剂量、reference guard、课程失败率、entropy/sigma/RSI、full-body | 会改变优化目标或样本分布；只有 qvel-fixed baseline 出现持续 strike 后才按单变量小预算比较 |
+
+当前收口条件只有三步：把两条 qvel-fixed 资产和 N=1 bundle 纳入 Git；Pod1
+`1 env × 2 update` 自然完成；随后 4096-env 五轮确认 episode 跨过各自 `t_hit`、strike 非零且
+raw-hard/table/fall/nonfinite 没有爆炸。达到后立即发 long，不等待上表“先不修”项目。

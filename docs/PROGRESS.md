@@ -11,6 +11,19 @@
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
 
+## 2026-07-30（A3 upper qvel-only 资产物化）
+
+- Pod1 用 exact `A3T2.5_pingpong_0519` 模型完成两条 upper 的 qvel-only
+  no-clobber 物化。反手拉/挡 motion SHA-256 分别为
+  `3b7cabdec864db09cf3124557b0f79e9f81b4e5cdb28b67a019df11471d307e0` 与
+  `a228e5695a70d19e0153317fd2124d8c6db1c800f3d00ca9bb3c5ee3eb944e0`；
+  只把 12 个恒定腿 qpos 对应的 stale qvel 归零，所有 qpos/root/timing/strike 以及
+  `right_racket` 全帧位姿、线/角速度 bitwise 不变。输入姿态双脚接触、joint/collision
+  检查通过；零速度 static-contact LP 不可行被保留为遥测，因为它不是动态挥拍 feasibility
+  证明。资产正纳入 Git/N1 bundle，下一步 Pod1 `1 env × 2 update → 4096 env × 5 update`。
+  决策账本见
+  [设计/加速审计 §6.4](research/design_audit_and_speedup_20260729.md#64-决策账本与执行进度2026-07-30)。
+
 ## 2026-07-29（N1 ActionBall 真实 smoke 与 physical-crossing 拆账）
 
 - `eaf55fba` 已在 Pod1 排除“2%-inner soft-band Done 仍是全部根因”：recoverable inner

@@ -188,3 +188,8 @@ When merging feature/training branches into `main`, keep source, config, tests, 
 CLIP_ORDER)**入库跟踪**:它们是现役训练臂的直接输入,小体积、内容寻址(manifest 带逐件
 sha256),丢失即无法复现任何在跑 run。题库(bank npz)仍不入库——由
 `gen_stage1_questions.py` 按注册行可再生。
+
+同目录中的 `bh_loop_c_upper_qvel_fix_v1.npz`、
+`bh_block_upper_qvel_fix_v1.npz` 及各自 `*.receipt.json` 也属于该例外：它们是 exact A3
+上对 two upper 动作做的 qvel-only 一致性修复，体积小且直接作为 N=1 训练输入；receipt
+固定输入、A3 模型与输出 SHA，不能只保留在 Pod 临时目录。

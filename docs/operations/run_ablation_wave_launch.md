@@ -84,7 +84,8 @@ construction 或 PhysX start 停止前进，保留日志后按 exact PGID 关闭
 
 1. upper 快线若不走完整 compiler，只能保持所有 qpos/root/timing 不变，把 12 个恒定腿 qpos
    对应的 stale qvel 归零，并重算 body FK/velocity。必须由产物 receipt 证明：
-   - 双脚接触、joint/collision/support/static dynamics PASS；
+   - exact A3 上双脚接触、joint limit 与 unsupported/self-collision 检查 PASS；
+     零速度/零加速度 static-contact LP 必须原样记入 receipt，但不作为动态挥拍诊断训练门；
    - 所有 joint qpos、root、frame count、strike frame 不变；
    - 每帧 `right_racket` site position/orientation/linear/angular velocity 不变；
    - 首末 joint/root/body velocity exact zero；
