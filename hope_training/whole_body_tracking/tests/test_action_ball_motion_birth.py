@@ -730,6 +730,9 @@ def _bind_task_authority(command, runtime, broker):
         resolve_task_ref=authority.action_ball_resolve_task_ref,
         shared_state_sha256=authority.action_ball_shared_state_sha256,
     )
+    assert authority.digest_calls == 0
+    command.validate_action_ball_task_authority_binding()
+    assert authority.digest_calls == 1
     return authority
 
 

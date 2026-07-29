@@ -2178,10 +2178,6 @@ class MotionCommand(CommandTerm):
             raise ValueError(
                 "action-ball task receipt owns preparation wait; legacy hold/stagger must be zero"
             )
-        self._action_ball_sha256(
-            shared_state_sha256(),
-            name="Racket.action_ball_shared_state_sha256",
-        )
         self._action_ball_task_ref_for_env = task_ref_for_env
         self._action_ball_task_receipt_resolver = resolve_task_ref
         self._action_ball_shared_state_sha256_accessor = shared_state_sha256
@@ -2189,6 +2185,16 @@ class MotionCommand(CommandTerm):
         # come only from the current immutable task receipt (never the generic speed sampler).
         self.retiming_active = True
         self._action_ball_expected_shared_racket_state_sha256 = None
+
+    def validate_action_ball_task_authority_binding(self) -> None:
+        """Probe the shared Racket digest after both runtime owners are published."""
+
+        if self._action_ball_shared_state_sha256_accessor is None:
+            raise RuntimeError("action-ball task authority is not bound")
+        self._action_ball_sha256(
+            self._action_ball_shared_state_sha256_accessor(),
+            name="Racket.action_ball_shared_state_sha256",
+        )
 
     @property
     def action_ball_enabled(self) -> bool:
@@ -2254,12 +2260,24 @@ class MotionCommand(CommandTerm):
         ):
             raise RuntimeError("action-ball motion admission is not bound")
         if self._canonical_diagnostic_unauthorized:
-            # No admission exists to reopen; the brand is the receipt.
-            return {
+            # No admission exists to reopen.  Emit a content-addressed
+            # unauthorized binding receipt so exact-resume and hard-contract
+            # identities can still pin the immutable bytes without mistaking
+            # them for a training capability.
+            payload = {
+                "schema_version": 1,
+                "kind": (
+                    "whole_body_tracking.MotionCommand."
+                    "action_ball_motion_diagnostic_binding"
+                ),
                 "diagnostic_unauthorized": True,
                 "motion_file_sha256": list(self._motion_file_sha256),
                 "training_authorized": False,
             }
+            payload["canonical_sha256"] = hashlib.sha256(
+                _canonical_json_bytes(payload)
+            ).hexdigest()
+            return payload
         repo_root = self._action_ball_trusted_repo_root
         self._require_action_ball_motion_admission(repo_root)
         registry = self._canonical_motion_registry

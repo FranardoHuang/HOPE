@@ -3511,6 +3511,11 @@ class RacketTargetCommand(CommandTerm):
             raise
         else:
             self._action_ball_runtime_initialized = True
+            try:
+                self._motion().validate_action_ball_task_authority_binding()
+            except BaseException:
+                self._action_ball_runtime_initialized = False
+                raise
         finally:
             self._action_ball_runtime_initializing = False
 
@@ -4925,6 +4930,107 @@ class RacketTargetCommand(CommandTerm):
             raise RuntimeError(
                 "action-ball manifest escaped the trusted repository root after admission"
             ) from error
+        if self._action_ball_diagnostic_unauthorized:
+            evaluator_authority_contract = {
+                "diagnostic_unauthorized": True,
+                "formal_authority_available": False,
+                "formal_launch_requires_code_pinned_receipt": True,
+                "runtime_or_manifest_may_self_authorize": False,
+                "authority_binding": (
+                    self._action_ball_evaluator_launch["authority_binding"]
+                ),
+                "authority_state_owner_sha256": (
+                    self._action_ball_evaluator_launch[
+                        "authority_state_owner_sha256"
+                    ]
+                ),
+            }
+        else:
+            evaluator_authority_contract = {
+                "authority_contract_sha256": __import__(
+                    "whole_body_tracking.tasks.tracking.mdp.action_ball_evaluation",
+                    fromlist=[
+                        "FROZEN_EVALUATOR_V4_AUTHORITY_CONTRACT_SHA256"
+                    ],
+                ).FROZEN_EVALUATOR_V4_AUTHORITY_CONTRACT_SHA256,
+                "trusted_launch_receipt_sha256": sorted(
+                    __import__(
+                        "whole_body_tracking.tasks.tracking.mdp.action_ball_evaluation",
+                        fromlist=[
+                            "TRUSTED_FROZEN_EVALUATOR_V4_LAUNCH_RECEIPT_SHA256"
+                        ],
+                    ).TRUSTED_FROZEN_EVALUATOR_V4_LAUNCH_RECEIPT_SHA256
+                ),
+                "evaluator_launch_receipt_path": (
+                    self._action_ball_evaluator_launch["path"]
+                ),
+                "evaluator_launch_receipt_file_sha256": (
+                    self._action_ball_evaluator_launch["file_sha256"]
+                ),
+                "evaluator_launch_receipt": (
+                    self._action_ball_evaluator_launch["document"]
+                ),
+                "launch_receipt_canonical_sha256": (
+                    self._action_ball_evaluator_launch[
+                        "launch_receipt_canonical_sha256"
+                    ]
+                ),
+                "authority_binding": (
+                    self._action_ball_evaluator_launch["authority_binding"]
+                ),
+                "authority_state_owner_sha256": (
+                    self._action_ball_evaluator_launch[
+                        "authority_state_owner_sha256"
+                    ]
+                ),
+                "attempt_source_state_owner_sha256": (
+                    self._action_ball_evaluator_launch[
+                        "attempt_source_state_owner_sha256"
+                    ]
+                ),
+                "coordinator_state_owner_sha256": (
+                    self._action_ball_evaluator_launch[
+                        "coordinator_state_owner_sha256"
+                    ]
+                ),
+                "inbox_root": self._action_ball_evaluator_launch[
+                    "inbox_root"
+                ],
+                "inbox_owner_id": self._action_ball_evaluator_launch[
+                    "inbox_owner_id"
+                ],
+                "inbox_run_id": self._action_ball_evaluator_launch[
+                    "inbox_run_id"
+                ],
+                "sidecar_launch_receipt_path": (
+                    self._action_ball_evaluator_launch[
+                        "sidecar_launch_receipt_path"
+                    ]
+                ),
+                "sidecar_launch_receipt_file_sha256": (
+                    self._action_ball_evaluator_launch[
+                        "sidecar_launch_receipt_file_sha256"
+                    ]
+                ),
+                "sidecar_launch_receipt_content_sha256": (
+                    self._action_ball_evaluator_launch[
+                        "sidecar_launch_receipt_content_sha256"
+                    ]
+                ),
+                "sidecar_code_path": self._action_ball_evaluator_launch[
+                    "sidecar_code_path"
+                ],
+                "sidecar_code_sha256": self._action_ball_evaluator_launch[
+                    "sidecar_code_sha256"
+                ],
+                "drain_reset": self._action_ball_drain_reset_launch,
+                "evaluation_interval_updates": int(
+                    self.cfg.action_ball_frozen_eval_interval_updates
+                ),
+                "formal_authority_available": True,
+                "formal_launch_requires_code_pinned_receipt": True,
+                "runtime_or_manifest_may_self_authorize": False,
+            }
         payload = {
             "schema_version": 1,
             "kind": "whole_body_tracking.RacketTargetCommand.action_ball_hard_contract",
@@ -5038,91 +5144,7 @@ class RacketTargetCommand(CommandTerm):
                 "frozen_checkpoint_evidence_required": True,
                 "live_rollout_advances_curriculum": False,
             },
-            "evaluator_authority": {
-                "authority_contract_sha256": __import__(
-                    "whole_body_tracking.tasks.tracking.mdp.action_ball_evaluation",
-                    fromlist=[
-                        "FROZEN_EVALUATOR_V4_AUTHORITY_CONTRACT_SHA256"
-                    ],
-                ).FROZEN_EVALUATOR_V4_AUTHORITY_CONTRACT_SHA256,
-                "trusted_launch_receipt_sha256": sorted(
-                    __import__(
-                        "whole_body_tracking.tasks.tracking.mdp.action_ball_evaluation",
-                        fromlist=[
-                            "TRUSTED_FROZEN_EVALUATOR_V4_LAUNCH_RECEIPT_SHA256"
-                        ],
-                    ).TRUSTED_FROZEN_EVALUATOR_V4_LAUNCH_RECEIPT_SHA256
-                ),
-                "evaluator_launch_receipt_path": (
-                    self._action_ball_evaluator_launch["path"]
-                ),
-                "evaluator_launch_receipt_file_sha256": (
-                    self._action_ball_evaluator_launch["file_sha256"]
-                ),
-                "evaluator_launch_receipt": (
-                    self._action_ball_evaluator_launch["document"]
-                ),
-                "launch_receipt_canonical_sha256": (
-                    self._action_ball_evaluator_launch[
-                        "launch_receipt_canonical_sha256"
-                    ]
-                ),
-                "authority_binding": (
-                    self._action_ball_evaluator_launch["authority_binding"]
-                ),
-                "authority_state_owner_sha256": (
-                    self._action_ball_evaluator_launch[
-                        "authority_state_owner_sha256"
-                    ]
-                ),
-                "attempt_source_state_owner_sha256": (
-                    self._action_ball_evaluator_launch[
-                        "attempt_source_state_owner_sha256"
-                    ]
-                ),
-                "coordinator_state_owner_sha256": (
-                    self._action_ball_evaluator_launch[
-                        "coordinator_state_owner_sha256"
-                    ]
-                ),
-                "inbox_root": self._action_ball_evaluator_launch[
-                    "inbox_root"
-                ],
-                "inbox_owner_id": self._action_ball_evaluator_launch[
-                    "inbox_owner_id"
-                ],
-                "inbox_run_id": self._action_ball_evaluator_launch[
-                    "inbox_run_id"
-                ],
-                "sidecar_launch_receipt_path": (
-                    self._action_ball_evaluator_launch[
-                        "sidecar_launch_receipt_path"
-                    ]
-                ),
-                "sidecar_launch_receipt_file_sha256": (
-                    self._action_ball_evaluator_launch[
-                        "sidecar_launch_receipt_file_sha256"
-                    ]
-                ),
-                "sidecar_launch_receipt_content_sha256": (
-                    self._action_ball_evaluator_launch[
-                        "sidecar_launch_receipt_content_sha256"
-                    ]
-                ),
-                "sidecar_code_path": self._action_ball_evaluator_launch[
-                    "sidecar_code_path"
-                ],
-                "sidecar_code_sha256": self._action_ball_evaluator_launch[
-                    "sidecar_code_sha256"
-                ],
-                "drain_reset": self._action_ball_drain_reset_launch,
-                "evaluation_interval_updates": int(
-                    self.cfg.action_ball_frozen_eval_interval_updates
-                ),
-                "formal_authority_available": True,
-                "formal_launch_requires_code_pinned_receipt": True,
-                "runtime_or_manifest_may_self_authorize": False,
-            },
+            "evaluator_authority": evaluator_authority_contract,
             "runtime": {
                 "runtime_contract_sha256": __import__(
                     "whole_body_tracking.tasks.tracking.mdp.action_ball_runtime",
@@ -5158,23 +5180,10 @@ class RacketTargetCommand(CommandTerm):
                 "actual_policy_fitted_rollout_required": True,
             }
         if self._action_ball_diagnostic_unauthorized:
-            # Brand the hard contract and replace the formal authority claim.
-            # Default-off runs build the payload above byte-identically.
+            # Brand the hard contract.  The evaluator subtree was built
+            # diagnostically before payload construction, so no absent formal
+            # receipt field is ever read.
             payload["diagnostic_unauthorized"] = True
-            payload["evaluator_authority"] = {
-                "diagnostic_unauthorized": True,
-                "formal_authority_available": False,
-                "formal_launch_requires_code_pinned_receipt": True,
-                "runtime_or_manifest_may_self_authorize": False,
-                "authority_binding": (
-                    self._action_ball_evaluator_launch["authority_binding"]
-                ),
-                "authority_state_owner_sha256": (
-                    self._action_ball_evaluator_launch[
-                        "authority_state_owner_sha256"
-                    ]
-                ),
-            }
         payload["canonical_sha256"] = _action_ball_canonical_sha256(payload)
         return payload
 

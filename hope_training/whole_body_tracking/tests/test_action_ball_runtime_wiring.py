@@ -240,23 +240,35 @@ def test_action_ball_runtime_waits_for_command_manager_construction():
     ensure = namespace["_ensure_action_ball_runtime_initialized"]
 
     calls = []
+    command = None
+
+    def validate_binding():
+        calls.append("validated")
+        # The real validator asks Racket for its shared exact-state digest,
+        # which re-enters action_ball_hard_contract().  Publication of the
+        # initialized flag must make that nested ensure a no-op.
+        ensure(command)
+
     command = SimpleNamespace(
         _action_ball_enabled=True,
         _action_ball_runtime_initialized=False,
         _action_ball_runtime_initializing=False,
         _env=SimpleNamespace(),
         _initialize_action_ball_runtime=lambda: calls.append("initialized"),
+        _motion=lambda: SimpleNamespace(
+            validate_action_ball_task_authority_binding=validate_binding
+        ),
     )
     with pytest.raises(RuntimeError, match="CommandManager construction"):
         ensure(command)
     assert calls == []
     command._env.command_manager = object()
     ensure(command)
-    assert calls == ["initialized"]
+    assert calls == ["initialized", "validated"]
     assert command._action_ball_runtime_initialized is True
     assert command._action_ball_runtime_initializing is False
     ensure(command)
-    assert calls == ["initialized"]
+    assert calls == ["initialized", "validated"]
 
     init_source = _method_source("__init__")
     assert "self._action_ball_runtime_initialized = False" in init_source
@@ -328,6 +340,64 @@ def test_diagnostic_motion_payload_is_snapshotted_before_runtime_binding(
         in diagnostic_branch
     )
     assert "self._motion_payloads = None" not in diagnostic_branch
+
+
+def test_diagnostic_motion_binding_emits_unauthorized_canonical_receipt():
+    motion_tree = ast.parse(MOTION_SOURCE, filename=str(MOTION_COMMAND_PATH))
+    motion_class = next(
+        node
+        for node in motion_tree.body
+        if isinstance(node, ast.ClassDef) and node.name == "MotionCommand"
+    )
+    contract_method = next(
+        node
+        for node in motion_class.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "action_ball_motion_admission_hard_contract"
+    )
+    module = ast.Module(body=[contract_method], type_ignores=[])
+    ast.fix_missing_locations(module)
+    namespace = {
+        "hashlib": hashlib,
+        "_canonical_json_bytes": lambda value: json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        ).encode("utf-8"),
+    }
+    exec(compile(module, str(MOTION_COMMAND_PATH), "exec"), namespace)
+    contract = namespace[
+        "action_ball_motion_admission_hard_contract"
+    ]
+
+    command = SimpleNamespace(
+        _action_ball_birth_broker=object(),
+        _action_ball_trusted_repo_root=Path("/repo"),
+        _action_ball_runtime_module_bound=object(),
+        _canonical_diagnostic_unauthorized=True,
+        _motion_file_sha256=("1" * 64,),
+    )
+    first = contract(command)
+    second = contract(command)
+    assert first == second
+    assert first["diagnostic_unauthorized"] is True
+    assert first["training_authorized"] is False
+    assert first["motion_file_sha256"] == ["1" * 64]
+    assert first["canonical_sha256"] == hashlib.sha256(
+        namespace["_canonical_json_bytes"](
+            {
+                key: value
+                for key, value in first.items()
+                if key != "canonical_sha256"
+            }
+        )
+    ).hexdigest()
+
+    command._motion_file_sha256 = ("2" * 64,)
+    assert contract(command)["canonical_sha256"] != first[
+        "canonical_sha256"
+    ]
 
 
 def test_training_builds_deferred_action_ball_contract_before_hook_audit():
