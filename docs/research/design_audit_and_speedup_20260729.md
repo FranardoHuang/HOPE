@@ -361,4 +361,8 @@ v1 的两动作 `1 env×2` smoke 随后给出同一反例：每轮都只在 age 
 4 个 checkpoint finite。原因是 v1 虽替换 lower/root，却保留了旧深蹲动作 frame-0
 `waist_pitch=+0.103 rad`；A3 runtime stand 的三腰 ready 实为零。v2 因而按上述合同把三腰
 整条 q 轨迹做常量平移、保持动作增量与 qd，再重算 FK/contact。这是 v1 漏项的直接修复，不需要
-更长线或学习 A/B。
+更长线或学习 A/B。Pod focused test 为 `2 passed`；v2 loop/block motion SHA-256 为
+`0fa46ad66d57edd006b0a70a7de0542d8d53945ee3ae9802fdbd937555a0c85b` /
+`cc9bbccd1b5b6207a0ce9677944ba27fa4a062a1eaa61886d802c9d21830caa0`，均为双脚
+`3+3` 接触且 static LP `feasible=true`。击球帧 site speed 为 `1.8181/1.6422 m/s`，
+因此仍须重绑 task，不能复用 v1 bundle。

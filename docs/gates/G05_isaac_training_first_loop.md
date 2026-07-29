@@ -64,7 +64,9 @@ Follow-up note (2026-07-30, qvel-fixed 4096 probe rejected; Gate remains `Partia
   nonfinite 和腿/踝 hard 均为零。两动作相同事件证明 lower/root replacement 生效，但 v1
   错把旧深蹲动作 frame-0 `waist_pitch=+0.103 rad` 当成 A3 stable ready。v2 直接把三腰
   q 轨迹按 frame-0 常量平移到 `AGIBOT_A3_CFG.init_state` 的零位，保持每帧相对增量和 qd；
-  这是同一 A3 birth/reference 修复的补全，不做学习 A/B，重建 FK/contact 后重新 smoke。
+  这是同一 A3 birth/reference 修复的补全，不做学习 A/B。Pod producer focused test
+  `2 passed`；loop/block 新 motion SHA 为 `0fa46ad6…` / `cc9bbccd…`，双脚 `3+3`、
+  static LP `feasible=true`，重建 contact 后重新 smoke。
 - Pod1 已完成 `bh_loop_c` 与 `bh_block` 的 exact `4096 env × 5 update × save1`。两者 mean
   episode 约 `23/12` 步、strike opportunity 均为零；actual raw-hard 分别约
   `2.5k--4.2k/update` 与末轮约 `7.7k`。checkpoint 均 finite，q_des

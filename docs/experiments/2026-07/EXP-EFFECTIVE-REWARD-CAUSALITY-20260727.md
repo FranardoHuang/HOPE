@@ -797,3 +797,6 @@ rubber-face center、`upper_contact_center_preserved=false`、world-Z 与
 nonfinite 全为零。共同事件把 stable-upper v1 的剩余缺口缩到 frame-0 腰 ready：旧 motion 为
 `+0.103 rad`，A3 runtime default 为零。下一资产将三腰 q 轨迹整体平移到 runtime ready，逐帧
 保持相对 frame-0 增量与 qd，重建 FK/contact 后重跑同 smoke；此项不改变 Reward 或学习问题。
+v2 producer 已在 Pod focused test `2 passed`；loop/block motion SHA 为 `0fa46ad6…` /
+`cc9bbccd…`，双脚 `3+3` 且 static LP `feasible=true`。击球帧拍速改为
+`1.8181/1.6422 m/s`，所以 v1 contact/bundle/policy recipe 均不得复用。

@@ -18,7 +18,9 @@
   `waist_pitch_joint` 上侧 raw mechanical edge，mean episode 仍仅 `16--17`、strike 为零。
   两动作同位同龄反例定位到 successor 漏项：A3 官方 stand 的腰 ready 为零，而 v1 保留了旧
   深蹲动作 frame-0 `waist_pitch=+0.103 rad` 绝对偏置。v2 将三腰轨迹整体重基准到 runtime
-  ready 零位，同时逐帧保持相对 frame-0 增量和 qd；需重算 FK/contact 后重跑 smoke。
+  ready 零位，同时逐帧保持相对 frame-0 增量和 qd。Pod focused test `2 passed`；新
+  loop/block motion SHA 为 `0fa46ad6…` / `cc9bbccd…`，双脚 `3+3`、static LP
+  `feasible=true`，击球帧拍速为 `1.8181/1.6422 m/s`。需重绑 contact 后重跑 smoke。
 - N1 launcher 的 contact receipt validator 已扩展为同时接受两种 upper 合同：历史
   corrected-Z receipt，以及 stable-upper 把整块 contact box 重绑到 pinned strike-frame
   selected rubber-face center 的 retargeted receipt。两条路径按互斥 exact keyset 和 authority
