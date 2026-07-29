@@ -2270,6 +2270,29 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         """Return the two task leaves with a verified RewardManager ledger adapter."""
 
         if self._strict_exact_resume_target_mode() == "action_ball":
+            env = getattr(self.env, "unwrapped", self.env)
+            commands = getattr(
+                getattr(env, "cfg", None), "commands", None
+            )
+            racket = (
+                None
+                if commands is None
+                else getattr(commands, "racket_target", None)
+            )
+            diagnostic = getattr(
+                racket, "action_ball_diagnostic_unauthorized", False
+            )
+            if type(diagnostic) is not bool:
+                raise RuntimeError(
+                    "action_ball_diagnostic_unauthorized must be an exact boolean"
+                )
+            if diagnostic:
+                # Diagnostic reward screens deliberately cannot mint formal
+                # evidence or promotion authority.  Keep the real Reward,
+                # clamp, limit/table/fall penalties and terminations in the
+                # environment, but do not fence PPO on the formal activation
+                # ledger's proof transaction.
+                return None
             return "action_ball"
         env = getattr(self.env, "unwrapped", self.env)
         cfg = getattr(env, "cfg", None)
@@ -3672,8 +3695,9 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         original_env_step = None
         reward_activation_task_kind = self._effective_reward_activation_task_kind()
         if reward_activation_task_kind is not None:
-            # Import lazily so evaluator/legacy runners retain their dependency-light construction
-            # path. ActionBall and UpperSafe, however, fail before their first rollout if the exact
+            # Import lazily so evaluator/legacy/diagnostic runners retain
+            # their dependency-light construction path. Formal ActionBall
+            # and UpperSafe fail before their first rollout if the exact
             # RewardManager cache contract is unavailable.
             from whole_body_tracking.utils.effective_reward_recipe import (
                 ActionBoundRewardEvidenceLedger,

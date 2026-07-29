@@ -1005,13 +1005,20 @@ def test_protected_task_detection_covers_action_ball_and_upper_safe(monkeypatch)
     )
     action_ball_cfg = types.SimpleNamespace(
         commands=types.SimpleNamespace(
-            racket_target=types.SimpleNamespace(target_mode="action_ball")
+            racket_target=types.SimpleNamespace(
+                target_mode="action_ball",
+                action_ball_diagnostic_unauthorized=False,
+            )
         )
     )
     runner.env = types.SimpleNamespace(
         unwrapped=types.SimpleNamespace(cfg=action_ball_cfg)
     )
     assert runner._effective_reward_activation_task_kind() == "action_ball"
+    action_ball_cfg.commands.racket_target.action_ball_diagnostic_unauthorized = (
+        True
+    )
+    assert runner._effective_reward_activation_task_kind() is None
 
     upper_cfg_type = type("HOPEPingPongUpperSafeAgibotA3EnvCfg", (), {})
     upper_cfg = upper_cfg_type()
