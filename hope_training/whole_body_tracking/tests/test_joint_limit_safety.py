@@ -12,6 +12,7 @@ articulation timestamps ``t + [0, .005, .010, .015]`` and one DoneTerm post-step
 
 from __future__ import annotations
 
+import hashlib
 import json
 import sys
 import time
@@ -1373,6 +1374,30 @@ def test_two_phase_ack_rejects_private_evidence_mutation_without_clearing():
     assert action.joint_safety_ledger_snapshot()["since_last_consume"][
         "has_data"
     ] is True
+
+
+def test_joint_safety_fingerprint_tracks_normal_and_inference_tensors():
+    def fingerprint(value):
+        hasher = hashlib.sha256()
+        hope_actions_mod.ClampedJointPositionAction._joint_safety_fingerprint_value(
+            hasher, value
+        )
+        return hasher.hexdigest()
+
+    normal = torch.zeros(3)
+    normal_before = fingerprint(normal)
+    normal.add_(1.0)
+    assert fingerprint(normal) != normal_before
+
+    with torch.inference_mode():
+        inference = torch.arange(3.0)
+        replacement = inference.clone()
+    inference_before = fingerprint(inference)
+    assert fingerprint(inference) == inference_before
+    assert fingerprint(replacement) != inference_before
+    with torch.inference_mode():
+        inference.resize_(4)
+    assert fingerprint(inference) != inference_before
 
 
 def test_prepare_returns_borrowed_view_without_recursive_export_clone(

@@ -1098,13 +1098,28 @@ class ClampedJointPositionAction(JointPositionAction):
         """
 
         if torch.is_tensor(value):
+            is_inference = bool(torch.is_inference(value))
+            if is_inference:
+                # Tensors created under ``torch.inference_mode`` deliberately have no version
+                # counter.  They are common in rollout-side policy-step summaries, so absence of
+                # ``_version`` is a tensor property, not evidence corruption.  Public mutations
+                # remain covered by ``_joint_safety_evidence_revision``; identity, storage and
+                # metadata below still make replacement/resize/storage drift fail closed.
+                tensor_version = None
+            else:
+                tensor_version = int(value._version)
             descriptor = (
                 "tensor",
                 id(value),
-                int(getattr(value, "_version", -1)),
+                is_inference,
+                tensor_version,
                 tuple(value.shape),
                 str(value.dtype),
                 str(value.device),
+                str(value.layout),
+                tuple(value.stride()),
+                int(value.storage_offset()),
+                int(value.data_ptr()),
             )
             hasher.update(repr(descriptor).encode("utf-8"))
             return
