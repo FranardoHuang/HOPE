@@ -606,6 +606,37 @@ latch 合成一个 env bit；diagnostic run 又故意不走 formal joint-safety 
 `>=15k`、collection GPU utilization `>60%`，同时 reset reason、task/solver counters 与
 checkpoint exact-resume 不变。
 
+#### `8d2a1bcd` Pod 逐关节结果与软/硬限位裁定
+
+diagnostic source `8d2a1bcd5194e1a70490b7a73bb5228e3fe610d9` 没有改 action、Reward、Done 或
+physics，只在 device 端按 joint×side×episode-age 累计旧 actual reason，并在 PPO update
+边界一次 D2H。Pod1 结果：
+
+| update | old actual reason / event denominator | left ankle pitch lower | waist pitch upper | right ankle roll upper | waist roll current side(s) | mean event age |
+| ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 0 | `3,187` | `2,304` | `628` | `276` | `13` | `17.91` |
+| 1 | `4,457` | `2,416` | `843` | `930` | `345` | `20.84` |
+| 2 | `5,087` | `3,112` | `875` | `821` | `340` | `20.27` |
+
+关节计数可重叠，不能相加冒充分母。三轮 age<=1 都为零，nonfinite q_des 为零。substep raw-hard
+overlap 远小于 current-inner 计数；例如 update 0 的四个主要关节 raw-hard overlap 仅
+`8/139/1/32`。1-env 两轮也都由左脚踝 pitch 下侧在 age `19/17` 触发，分别有/无 predicted
+crossing overlap。该 run 在 update 2 完整边界保存 finite checkpoint 后停止。
+
+因此采用以下第一性原理拆分：
+
+- **软约束**：实际 q 进入 hard limit 内侧 `2%` 是危险但可恢复的状态。现役 actual-q barrier
+  已从 soft envelope 内侧 `8%` 开始、weight=`-40`、floor=`0.25` 收费；2%-inner 继续记
+  joint/side/dwell，但不 reset，让 policy 得到恢复 transition。
+- **硬约束**：nonfinite/invalid state、当前 raw mechanical edge、任一 physics substep raw
+  hard edge 仍令 `joint_actual_forbidden` Done；table/fall 完全不动。
+- **新对账**：diagnostic schema v2 同时输出 `total_safety_event_count` 和
+  `total_hard_terminal_count`；只有后者应与 termination reason 相等。
+
+这不是 CaT，也不是放宽机械边界；只是把已有强连续 penalty 和不可恢复 Done 放回各自正确层级。
+下一 fresh Pod A/B 的 primary 是 episode 是否越过 `t_hit≈31`、strike 是否出现和 steps/s；
+hard/table/fall/nonfinite 不得上升。source tests 不算行为结果。
+
 ### 2026-07-29：`7a14b0b9` 真实 smoke、4096 反例与 crossing 所有权修正
 
 Pod1 clean checkout 已按

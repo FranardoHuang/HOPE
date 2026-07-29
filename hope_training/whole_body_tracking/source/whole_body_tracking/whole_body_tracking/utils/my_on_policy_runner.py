@@ -4002,7 +4002,7 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             )
         record = {
             "event": "action_ball_actual_joint_forbidden_diagnostic_update",
-            "schema_version": 1,
+            "schema_version": 2,
             "ppo_update": int(step),
             **payload,
         }

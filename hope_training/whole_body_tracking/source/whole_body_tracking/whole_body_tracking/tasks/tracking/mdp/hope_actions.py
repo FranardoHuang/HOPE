@@ -662,7 +662,12 @@ class ClampedJointPositionAction(JointPositionAction):
             self._joint_safety_diagnostic_latest_archive
         )
         diagnostic_all_joint_names = tuple(
-            str(name) for name in self._asset.joint_names
+            str(name)
+            for name in getattr(
+                self._asset,
+                "joint_names",
+                getattr(self._asset.data, "joint_names", ()),
+            )
         )
         if isinstance(self._joint_ids, slice):
             diagnostic_joint_ids = tuple(
@@ -713,14 +718,19 @@ class ClampedJointPositionAction(JointPositionAction):
             dtype=torch.long,
             device=self._processed_actions.device,
         )
-        self._actual_joint_forbidden_diagnostic_terminal_count = torch.zeros(
+        self._actual_joint_forbidden_diagnostic_event_count = torch.zeros(
             2, dtype=torch.long, device=self._processed_actions.device
         )
+        self._actual_joint_forbidden_diagnostic_hard_terminal_count = (
+            torch.zeros_like(
+                self._actual_joint_forbidden_diagnostic_event_count
+            )
+        )
         self._actual_joint_forbidden_diagnostic_age_sum = torch.zeros_like(
-            self._actual_joint_forbidden_diagnostic_terminal_count
+            self._actual_joint_forbidden_diagnostic_event_count
         )
         self._actual_joint_forbidden_diagnostic_age_max = torch.full_like(
-            self._actual_joint_forbidden_diagnostic_terminal_count, -1
+            self._actual_joint_forbidden_diagnostic_event_count, -1
         )
         # Keep deploy-space q_des history next to the action term that owns the affine transform
         # and safety clamp.  ActionManager.prev_action is the previous *normalized actor output*;
@@ -2844,10 +2854,11 @@ class ClampedJointPositionAction(JointPositionAction):
         current_lower: torch.Tensor,
         current_upper: torch.Tensor,
         current_nonfinite_or_invalid: torch.Tensor,
-        terminal: torch.Tensor,
+        observed_event: torch.Tensor,
+        hard_terminal: torch.Tensor,
         episode_age: torch.Tensor,
     ) -> None:
-        """Accumulate a diagnostic-only terminal attribution without a rollout host sync."""
+        """Accumulate soft-band events and hard terminals without a rollout host sync."""
 
         if not self._actual_joint_forbidden_diagnostic_enabled:
             return
@@ -2867,16 +2878,28 @@ class ClampedJointPositionAction(JointPositionAction):
                     f"actual-joint diagnostic {name} must be a same-device bool tensor "
                     f"shaped {expected_joint_shape}"
                 )
-        if (
-            not torch.is_tensor(terminal)
-            or terminal.dtype != torch.bool
-            or tuple(terminal.shape) != (self.num_envs,)
-            or terminal.device != self._processed_actions.device
+        for name, value in (
+            ("observed_event", observed_event),
+            ("hard_terminal", hard_terminal),
         ):
-            raise RuntimeError(
-                "actual-joint diagnostic terminal must be a same-device bool tensor "
-                f"shaped [{self.num_envs}]"
-            )
+            if (
+                not torch.is_tensor(value)
+                or value.dtype != torch.bool
+                or tuple(value.shape) != (self.num_envs,)
+                or value.device != self._processed_actions.device
+            ):
+                raise RuntimeError(
+                    f"actual-joint diagnostic {name} must be a same-device bool tensor "
+                    f"shaped [{self.num_envs}]"
+                )
+        hard_subset = torch.all(~hard_terminal | observed_event)
+        if hard_subset.device.type == "cpu":
+            if not bool(hard_subset):
+                raise RuntimeError(
+                    "actual-joint diagnostic hard_terminal must be a subset of observed_event"
+                )
+        else:
+            torch._assert_async(hard_subset)
         if (
             not torch.is_tensor(episode_age)
             or episode_age.dtype == torch.bool
@@ -2889,8 +2912,12 @@ class ClampedJointPositionAction(JointPositionAction):
                 f"shaped [{self.num_envs}]"
             )
         substep_actual = self._substep_actual_hard_edge_joint_latch
-        qdes_request = self._pre_apply_qdes_violation_joint_latch
-        predicted_crossing = self._pre_apply_crossing_violation_joint_latch
+        qdes_delta, crossing_delta = self._joint_safety_step_count_deltas()
+        # Use this policy step's deltas, not the episode-sticky latches.  Predicted crossing is a
+        # recoverable brake event and no longer terminates, so a sticky bit would otherwise be
+        # charged again on every later inner-band observation in the same episode.
+        qdes_request = qdes_delta.gt(0)
+        predicted_crossing = crossing_delta.gt(0)
         categories = torch.stack(
             (
                 current_lower,
@@ -2902,17 +2929,27 @@ class ClampedJointPositionAction(JointPositionAction):
             ),
             dim=0,
         )
-        categories = categories & terminal.view(1, self.num_envs, 1)
+        categories = categories & observed_event.view(1, self.num_envs, 1)
         initial = episode_age <= 1
-        age_masks = torch.stack((initial, ~initial), dim=0) & terminal.unsqueeze(0)
+        age_masks = (
+            torch.stack((initial, ~initial), dim=0)
+            & observed_event.unsqueeze(0)
+        )
+        hard_terminal_age_masks = (
+            torch.stack((initial, ~initial), dim=0)
+            & hard_terminal.unsqueeze(0)
+        )
         self._actual_joint_forbidden_diagnostic_counts.add_(
             (
                 categories.unsqueeze(0)
                 & age_masks.view(2, 1, self.num_envs, 1)
             ).sum(dim=2)
         )
-        self._actual_joint_forbidden_diagnostic_terminal_count.add_(
+        self._actual_joint_forbidden_diagnostic_event_count.add_(
             age_masks.sum(dim=1)
+        )
+        self._actual_joint_forbidden_diagnostic_hard_terminal_count.add_(
+            hard_terminal_age_masks.sum(dim=1)
         )
         age_long = episode_age.to(dtype=torch.long)
         self._actual_joint_forbidden_diagnostic_age_sum.add_(
@@ -2943,7 +2980,8 @@ class ClampedJointPositionAction(JointPositionAction):
         packed = torch.cat(
             (
                 self._actual_joint_forbidden_diagnostic_counts.reshape(-1),
-                self._actual_joint_forbidden_diagnostic_terminal_count,
+                self._actual_joint_forbidden_diagnostic_event_count,
+                self._actual_joint_forbidden_diagnostic_hard_terminal_count,
                 self._actual_joint_forbidden_diagnostic_age_sum,
                 self._actual_joint_forbidden_diagnostic_age_max,
             )
@@ -2954,9 +2992,10 @@ class ClampedJointPositionAction(JointPositionAction):
             packed_values[:count_size], dtype=torch.long
         ).reshape(self._actual_joint_forbidden_diagnostic_counts.shape)
         offset = count_size
-        terminal_count = packed_values[offset : offset + 2]
-        age_sum = packed_values[offset + 2 : offset + 4]
-        age_max = packed_values[offset + 4 : offset + 6]
+        event_count = packed_values[offset : offset + 2]
+        hard_terminal_count = packed_values[offset + 2 : offset + 4]
+        age_sum = packed_values[offset + 4 : offset + 6]
+        age_max = packed_values[offset + 6 : offset + 8]
         age_bucket_names = ("episode_age_le_1", "episode_age_gt_1")
         buckets: dict[str, Any] = {}
         for bucket_index, bucket_name in enumerate(age_bucket_names):
@@ -2974,21 +3013,23 @@ class ClampedJointPositionAction(JointPositionAction):
                     by_joint.append(
                         {"joint": joint_name, "counts": category_counts}
                     )
-            count = terminal_count[bucket_index]
+            count = event_count[bucket_index]
             buckets[bucket_name] = {
-                "terminal_count": count,
-                "mean_episode_age": (
+                "safety_event_count": count,
+                "hard_terminal_count": hard_terminal_count[bucket_index],
+                "mean_safety_event_episode_age": (
                     float(age_sum[bucket_index]) / float(count)
                     if count > 0
                     else None
                 ),
-                "max_episode_age": (
+                "max_safety_event_episode_age": (
                     age_max[bucket_index] if age_max[bucket_index] >= 0 else None
                 ),
                 "by_joint": by_joint,
             }
         self._actual_joint_forbidden_diagnostic_counts.zero_()
-        self._actual_joint_forbidden_diagnostic_terminal_count.zero_()
+        self._actual_joint_forbidden_diagnostic_event_count.zero_()
+        self._actual_joint_forbidden_diagnostic_hard_terminal_count.zero_()
         self._actual_joint_forbidden_diagnostic_age_sum.zero_()
         self._actual_joint_forbidden_diagnostic_age_max.fill_(-1)
         return {
@@ -3000,7 +3041,8 @@ class ClampedJointPositionAction(JointPositionAction):
                 self._actual_joint_forbidden_diagnostic_categories
             ),
             "age_buckets": buckets,
-            "total_terminal_count": int(sum(terminal_count)),
+            "total_safety_event_count": int(sum(event_count)),
+            "total_hard_terminal_count": int(sum(hard_terminal_count)),
         }
 
     def joint_safety_ledger_snapshot(self) -> dict[str, Any]:

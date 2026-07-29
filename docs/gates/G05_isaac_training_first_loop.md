@@ -59,6 +59,20 @@ Current-candidate promotion sub-gate (required before this Gate can close):
 
 Follow-up note (2026-07-29, ActionBall actual-joint reset follow-up; Gate remains `Partial`):
 
+- `8d2a1bcd` 已在 Pod1 真实 Isaac 把旧 scalar actual reason 拆到 joint×side。1-env 两轮均为
+  `left_ankle_pitch_joint` 下侧、episode age `17/19`；4096-env updates 0--2 的 exact event
+  分母为 `3,187/4,457/5,087`，与旧 `joint_actual_forbidden` reason 对账。左脚踝 pitch 下侧
+  分别占 `2,304/2,416/3,112`，其余主要是腰 pitch 上侧与右脚踝 roll 上侧；没有 age<=1
+  事件。只有少数行带 substep raw-hard overlap，多数只是当前 q 进入 2%-inner band。
+- 因此旧 DoneTerm 的语义反了：recoverable soft-band occupancy 被立刻 reset，PPO 看不到恢复
+  transition；而现役 actual-q barrier 已从 soft envelope 内侧 `8%` 开始以 weight=`-40`
+  持续收费。下一候选让 2%-inner 继续进入 barrier 和 diagnostic，但不 Done；nonfinite、
+  current/substep raw mechanical hard edge 仍 hard reset，table/fall 与 q_des projection
+  不变。这符合“软限位不能蹭、硬限位仍终止”，不是删除关节安全。
+- telemetry schema v2 将 `total_safety_event_count` 与
+  `total_hard_terminal_count` 分开；后者必须与 fresh run 的
+  `joint_actual_forbidden` reason 对账。当前只有 source candidate，尚未取得该新语义的 Pod
+  smoke/4096 结果，Gate 继续 `Partial`。
 - `478f485b` 的 finite executed q_des 额外内缩 `5%` 也没有降低 mass reset。Pod1
   1-env × 2-update smoke 自然完成；4096-env updates 0--6 的
   `joint_actual_forbidden=3,187--5,087/update`、mean episode `18.67--23.74`，strike
@@ -69,7 +83,7 @@ Follow-up note (2026-07-29, ActionBall actual-joint reset follow-up; Gate remain
   `2%` 带；frame 0 也合法。故“老师 bytes 本身贴限”已被排除，但当前日志把 31 个关节和上下侧
   OR 成一个 bit，尚不能区分 shared-ready/ground transient、PD/接触动态或某个关节的 inner-band
   漂移。
-- 下一次短诊断只增加 device-side joint×side×episode-age 计数；rollout 内不得 `.item()`、
+- 该次短诊断只增加 device-side joint×side×episode-age 计数；rollout 内不得 `.item()`、
   `.cpu()` 或 JSON，PPO update 边界只允许一次小批量 D2H 并输出
   `HOPE_ACTUAL_JOINT_DIAGNOSTIC_UPDATE_JSON`。它不是新的发射门，也不改变 Reward、Done、
   action、physics 或 curriculum。先用 1-env smoke 验证构造，再用 fresh 4096-env 一轮定位；

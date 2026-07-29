@@ -621,9 +621,10 @@ def test_action_ball_projection_only_qdes_nonfinite_is_terminal_and_actual_owns_
     _finish_guarded_policy_step(action, asset)
 
     # env0 is a non-finite actor output; env1 predicts a ballistic hard-inner crossing; env2 is
-    # already inside the two-percent physical forbidden band.  Both physical rows still receive a
-    # finite brake target, but the q_des term owns only the non-finite request.  The actual term
-    # independently owns env2's realized limit event.
+    # already inside the two-percent physical inner band.  Both physical rows still receive a
+    # finite brake target, but the q_des term owns only the non-finite request.  The recoverable
+    # env2 inner-band state is trained by the actual-q barrier rather than reset; only a raw
+    # mechanical hard edge belongs to the actual Done term.
     assert action.physical_hard_safety_latch.tolist() == [False, True, True]
     assert torch.all(torch.isfinite(action.processed_actions))
     assert action.processed_actions[:, 0].tolist() == pytest.approx(
@@ -643,7 +644,45 @@ def test_action_ball_projection_only_qdes_nonfinite_is_terminal_and_actual_owns_
         "joint_pos_limits",
         0.0,
         0.02,
-    ).tolist() == [False, False, True]
+    ).tolist() == [False, False, False]
+
+
+def test_action_ball_actual_diagnostic_separates_inner_event_from_raw_hard_terminal():
+    action, env, asset = _action_and_env(
+        num_envs=2,
+        joint_count=2,
+        guard=True,
+        guard_margin_fraction=0.02,
+        project_finite_qdes=True,
+        action_ball_diagnostic_unauthorized=True,
+    )
+    env.episode_length_buf[:] = torch.tensor([17, 18])
+    asset.data.joint_pos[:, 0] = torch.tensor([-1.16, -1.21])
+    asset.data.joint_vel.zero_()
+    action.process_actions(torch.zeros(2, 2))
+    _finish_guarded_policy_step(action, asset)
+
+    asset_cfg = types.SimpleNamespace(name="robot", joint_ids=slice(None))
+    assert terminations_mod.actual_joint_position_forbidden_zone(
+        env,
+        asset_cfg,
+        "joint_pos_limits",
+        0.0,
+        0.02,
+    ).tolist() == [False, True]
+
+    payload = action.consume_actual_joint_forbidden_diagnostic()
+    assert payload["total_safety_event_count"] == 2
+    assert payload["total_hard_terminal_count"] == 1
+    later = payload["age_buckets"]["episode_age_gt_1"]
+    assert later["safety_event_count"] == 2
+    assert later["hard_terminal_count"] == 1
+    assert later["mean_safety_event_episode_age"] == pytest.approx(17.5)
+    assert later["by_joint"][0]["joint"] == "j0"
+    assert later["by_joint"][0]["counts"]["current_lower"] == 2
+    assert (
+        later["by_joint"][0]["counts"]["substep_actual_hard_edge"] == 1
+    )
 
 
 def test_action_ball_nonfinite_request_has_finite_projection_reward_before_reset():
@@ -2256,9 +2295,10 @@ def test_physics_substep_contract_pins_decimation_times_physics_dt():
         )
 
 
-def test_actual_joint_position_uses_explicit_soft_envelope_and_travel_margin():
+def test_actual_joint_position_inner_margin_is_nonterminal_but_raw_edge_is_terminal():
     _, env, asset = _action_and_env()
-    # On [-1, 1], 10% of full travel is 0.2 rad per side.  Exact +/-0.8 is forbidden.
+    # On [-1, 1], the 10%-of-travel inner edge is +/-0.8.  Crossing that recoverable
+    # diagnostic/Reward band is not a Done; reaching the raw mechanical edge is.
     asset.data.joint_pos[:] = torch.tensor([[0.7999, 0.0], [-0.8, 0.0]])
     asset_cfg = types.SimpleNamespace(name="robot", joint_ids=slice(None))
     result = terminations_mod.actual_joint_position_forbidden_zone(
@@ -2268,8 +2308,16 @@ def test_actual_joint_position_uses_explicit_soft_envelope_and_travel_margin():
         0.0,
         0.1,
     )
-    assert result.tolist() == [False, True]
+    assert result.tolist() == [False, False]
 
+    asset.data.joint_pos[1, 0] = -1.0
+    assert terminations_mod.actual_joint_position_forbidden_zone(
+        env,
+        asset_cfg,
+        "soft_joint_pos_limits",
+        0.0,
+        0.1,
+    ).tolist() == [False, True]
     asset.data.joint_pos[0, 0] = float("nan")
     assert terminations_mod.actual_joint_position_forbidden_zone(
         env,

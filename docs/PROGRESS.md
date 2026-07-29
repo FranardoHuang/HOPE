@@ -13,6 +13,15 @@
 
 ## 2026-07-29（N1 ActionBall 真实 smoke 与 physical-crossing 拆账）
 
+- `8d2a1bcd` 的 diagnostic-only joint×side 计数已在 Pod1 真实 Isaac 闭合。1-env 两轮都在
+  age `17/19` 由 `left_ankle_pitch_joint` 下侧 inner band 触发；4096-env updates 0--2 的
+  actual event 为 `3,187/4,457/5,087`，其中左脚踝 pitch 下侧
+  `2,304/2,416/3,112` 次，另有腰 pitch 上侧、右脚踝 roll 上侧和少量腰 roll。绝大多数只是
+  进入 hard limit 内侧 `2%`，不是 raw mechanical hard edge；没有首步事件，计数分母与旧
+  `joint_actual_forbidden` 完全对账。run 在完整 PPO boundary 保存 `model_2.pt` 后停止。
+  这证明旧 Done 把可恢复软约束和硬碰限混在一起。下一候选按既定设计让 2%-inner 只进强
+  actual-q barrier/遥测，只有 nonfinite/current-or-substep raw hard edge 才 reset；table/fall
+  不变。source 已改，尚待 fresh Pod smoke/4096 行为验收。
 - `478f485b` 的额外 `5%` finite-q_des 内缩已在 Pod1 给出反例：1-env 两轮自然完成，
   但 4096-env updates 0--6 仍为 `33.98--41.66 s/update`（首轮 `27.11 s`）、
   episode 约 `19--24` steps、`4,664--5,087 joint_actual_forbidden/update` 且 strike

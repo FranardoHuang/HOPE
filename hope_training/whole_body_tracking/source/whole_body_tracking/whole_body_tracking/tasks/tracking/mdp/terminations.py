@@ -328,7 +328,14 @@ def actual_joint_position_forbidden_zone(
     margin_rad: float,
     margin_fraction: float,
 ) -> torch.Tensor:
-    """Terminate when realized articulation q reaches the explicitly inset limit envelope."""
+    """Terminate only at the physical hard edge; retain the inset band as diagnostic evidence.
+
+    The continuous actual-q barrier owns recoverable proximity to a limit.  Turning the
+    two-percent inner band into an immediate reset starves PPO of the transition that can teach
+    recovery, and conflates a soft constraint with a mechanical hard-edge violation.  This term
+    still requires the inset margins so diagnostic runs can report the exact joint/side occupancy,
+    but the Done bit is reserved for non-finite/invalid state or a current/substep raw hard edge.
+    """
 
     context = "actual_joint_position_forbidden_zone"
     action = env.action_manager.get_term("joint_pos")
@@ -377,7 +384,23 @@ def actual_joint_position_forbidden_zone(
             f"{context} requires a same-device bool substep actual-hard-edge latch "
             f"shaped [num_envs]={expected_shape[0]}"
         )
-    terminal = current_violation | substep_actual_latch
+    lower = limits[..., 0]
+    upper = limits[..., 1]
+    hard_comparable = (
+        torch.isfinite(joint_pos)
+        & torch.isfinite(lower)
+        & torch.isfinite(upper)
+        & upper.gt(lower)
+    )
+    current_hard_per_joint = (
+        ~hard_comparable
+        | joint_pos.le(lower)
+        | joint_pos.ge(upper)
+    )
+    hard_terminal = (
+        torch.any(current_hard_per_joint, dim=1) | substep_actual_latch
+    )
+    observed_event = current_violation | hard_terminal
     diagnostic_enabled = getattr(
         action, "actual_joint_forbidden_diagnostic_enabled", False
     )
@@ -396,8 +419,6 @@ def actual_joint_position_forbidden_zone(
         absolute, fraction = _validate_forbidden_zone_margins(
             margin_rad, margin_fraction
         )
-        lower = limits[..., 0]
-        upper = limits[..., 1]
         travel = upper - lower
         inset = absolute + fraction * travel
         inner_lower = lower + inset
@@ -424,10 +445,11 @@ def actual_joint_position_forbidden_zone(
             current_nonfinite_or_invalid=(
                 current_violation_per_joint & ~comparable
             ),
-            terminal=terminal,
+            observed_event=observed_event,
+            hard_terminal=hard_terminal,
             episode_age=env.episode_length_buf,
         )
-    return terminal
+    return hard_terminal
 
 
 def bad_anchor_pos(env: ManagerBasedRLEnv, command_name: str, threshold: float) -> torch.Tensor:

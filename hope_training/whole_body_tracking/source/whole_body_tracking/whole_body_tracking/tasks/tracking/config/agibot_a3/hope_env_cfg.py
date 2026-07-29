@@ -2169,11 +2169,12 @@ class HOPEActionBallRewardsCfg(HOPEVirtualBallRewardsCfg):
 class HOPEActionBallTerminationsCfg(HOPEDeployParityTerminationsCfg):
     """Action-ball hard joint-safety masks in addition to fall/table termination.
 
-    Both terminal guards use the physical ``joint_pos_limits`` with a two-percent-per-side inset.
-    Entering that physical-hard forbidden band is unsafe (the helper uses an open allowed
-    interval).  Soft-limit behavior is a separate continuous layer: deploy-parity clamps q_des to
-    ``soft_joint_pos_limits`` and the q_des barrier / actual-q joint-limit terms provide earlier
-    prevention.
+    The q_des guard uses the physical ``joint_pos_limits`` with a two-percent-per-side inset to
+    select a finite brake target, while finite ActionBall proposals are projected and trained by
+    the projection/barrier costs.  The actual-q Done term reserves reset for a non-finite state or
+    a current/substep raw mechanical hard edge.  Recoverable occupancy of the two-percent inner
+    band stays observable but is taught by the strong actual-q barrier instead of discarding the
+    transition.  Fall and table contact remain independent hard terminations.
     """
 
     joint_qdes_forbidden = DoneTerm(

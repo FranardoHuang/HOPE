@@ -82,10 +82,11 @@ policy/runtime hard contract 和 canonical argv 中同时回读：
    首发 weight=`-5`；`-20` 只允许命名清楚的消融臂；
 3. [`reference_guard_mode=metrics_only`](../DEFINITIONS.md#reference-metrics-only)：anchor/body/ee
    只记 counter，不 reset、不额外给 Reward；
-4. nonfinite raw q_des、实际关节进入 hard-limit 内缩 `2%` 安全带、physics-substep 真实 hard
-   edge、table hit 和 fall 仍各自 hard reset，不能被 reference mode 或 projection 开关屏蔽；
-   仅 predicted ballistic crossing 必须生成有限 brake target 而不 reset。注意 q_des clamp
-   只约束 drive target；真实 q 仍可能因隐式 PD、重力、接触和惯性进入安全带。
+4. nonfinite raw q_des、实际关节 current/substep raw mechanical hard edge、table hit 和 fall
+   仍各自 hard reset，不能被 reference mode 或 projection 开关屏蔽；仅 predicted ballistic
+   crossing 必须生成有限 brake target 而不 reset。实际 q 进入 hard edge 内侧 `2%` 只记
+   joint/side/dwell 并由 actual-q barrier 持续收费，不再 reset；q_des clamp 只约束 drive
+   target，真实 q 仍可能因隐式 PD、重力、接触和惯性进入该软带。
 
 若 q_des projection/nonfinite 为零、fall 很低，而 `joint_actual_forbidden` 仍让 mean episode
 length 长期短于 `t_hit`，先做单变量的滚动刹车 A/B：每个 fresh physics-substep 仍重新读 q/qdot，
@@ -112,8 +113,20 @@ log-prob、Done、actual hard `2%` 安全带和 Reward 权重均不改。该比�
   pre-apply nonfinite q_des 和 predicted-crossing overlap。
 
 这些计数只用于定位，不能晋级 checkpoint。计数器必须在 device 上累加；rollout hot path
-不得 host sync，update boundary 才允许一次小批量 D2H。逐桶 terminal 总数必须与同一 update
-的 `joint_actual_forbidden` raw count 对账；若不同，先停在诊断，不改训练 setting。
+不得 host sync，update boundary 才允许一次小批量 D2H。schema v1 旧跑的 terminal 总数与同一
+update 的旧 `joint_actual_forbidden` raw count 对账；切换软/硬语义后的 schema v2 必须分别报
+`total_safety_event_count` 与 `total_hard_terminal_count`，只有后者与新 termination reason
+对账。若不同，先停在诊断，不改训练 setting。
+
+`8d2a1bcd` 已完成旧语义定位：三轮 4096-env 的 event 分母为
+`3,187/4,457/5,087`，主因是 left ankle pitch lower，且绝大多数没有 raw-hard overlap。
+后继 source 必须先 1-env×2-update smoke，再 fresh 4096 跑至少 3 个完整 update；晋级要求：
+
+- mean episode 的 trailing window 越过 `t_hit≈31`，且 strike opportunity 不再恒零；
+- `total_hard_terminal_count == joint_actual_forbidden reason`；
+- 2%-inner safety event 可以存在，但 actual-q barrier contribution 必须非零并分账；
+- raw hard/table/fall/nonfinite 不得相对 `8d2a1bcd` 增加；
+- 报告每 update wall time 和 environment-steps/s，不用更多 env 掩盖 reset。
 
 N=1 launcher 的 canonical Hydra argv 必须逐字包含
 `+task.racket.reference_guard_mode=metrics_only`。该键不在 task YAML 中，少写 `+` 会在 compose
