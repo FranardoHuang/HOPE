@@ -16,10 +16,11 @@ the root, or change any joint position.  It:
    grounded-ready candidate (``candidate_id=G1``), exact A3 MJCF, and runtime
    body order by SHA-256;
 2. proves that the input root and all twelve leg positions are constant;
-3. reruns ``canonical_grounded_ready.solve_g1_donor_root`` on the exact A3
-   model and requires the solved grounded-ready candidate
-   (``candidate_id=G1``) leg positions to quantize bitwise to the already stored
-   input leg positions;
+3. directly audits the input motion's own frame-0 pose on the exact A3 model
+   (double-foot contact, no unsupported/self collision, bounded penetration,
+   and feasible static ground dynamics), and requires its constant leg
+   positions to quantize bitwise to the published grounded-ready candidate
+   (``candidate_id=G1``);
 4. changes only the twelve leg ``joint_vel`` columns to exact zero;
 5. rebuilds every schema-2 body FK/velocity channel with
    ``canonical_schema2_builder``;
@@ -256,6 +257,78 @@ def _scalar_string(value: Any, label: str) -> str:
     if not result:
         raise GroundedUpperMaterializationError(f"{label} must be non-empty")
     return result
+
+
+def _audit_input_grounded_state(
+    backend: grounded.MujocoGroundedReadyBackend,
+    state: grounded.ReadyState,
+) -> dict[str, Any]:
+    """Audit the actual upper-motion pose, not a different neutral-arm donor.
+
+    ``candidate_id=G1`` identifies the published source of the twelve constant
+    leg coordinates.  It is not a promise that an upper-body strike pose has
+    the same root yaw, waist, head, or arm coordinates as that neutral-arm
+    candidate.  Re-solving the strike pose as a new G1 candidate therefore
+    answers the wrong question and can reject a physically grounded input.
+    """
+
+    cfg = grounded.GroundedReadyConfig()
+    q = np.asarray(state.joint_pos, dtype=np.float64)
+    lower = np.asarray(backend.position_lower, dtype=np.float64)
+    upper = np.asarray(backend.position_upper, dtype=np.float64)
+    worst_limit_excess = float(
+        max(0.0, np.max(np.maximum(lower - q, q - upper)))
+    )
+    if worst_limit_excess > cfg.joint_limit_tolerance_rad:
+        raise GroundedUpperMaterializationError(
+            "input upper pose exceeds exact A3 joint limits"
+        )
+
+    scene = backend.static_scene(
+        state,
+        contact_gap_tolerance_m=cfg.floor_gap_tolerance_m,
+        penetration_tolerance_m=cfg.penetration_tolerance_m,
+    )
+    double_support = bool(
+        scene.foot_contact_count[0] > 0 and scene.foot_contact_count[1] > 0
+    )
+    sole_gap = bool(
+        np.max(np.abs(scene.sole_minimum_distance_m))
+        <= cfg.floor_gap_tolerance_m
+    )
+    collision_safe = bool(
+        not scene.unsupported_contacts
+        and not scene.self_collision_pairs
+        and scene.maximum_foot_penetration_m <= cfg.penetration_tolerance_m
+    )
+    dynamics = dict(
+        backend.static_ground_dynamics(
+            state,
+            contact_gap_tolerance_m=cfg.floor_gap_tolerance_m,
+            penetration_tolerance_m=cfg.penetration_tolerance_m,
+        )
+    )
+    if not double_support or not sole_gap or not collision_safe:
+        raise GroundedUpperMaterializationError(
+            "input upper pose is not a collision-safe exact-A3 double-support pose"
+        )
+    if dynamics.get("feasible") is not True:
+        raise GroundedUpperMaterializationError(
+            "input upper pose does not have feasible exact-A3 static ground dynamics"
+        )
+    return {
+        "joint_limits_passed": True,
+        "worst_joint_limit_excess_rad": worst_limit_excess,
+        "double_support_passed": True,
+        "foot_contact_count": list(scene.foot_contact_count),
+        "sole_gap_passed": True,
+        "sole_minimum_distance_m": scene.sole_minimum_distance_m.tolist(),
+        "collision_safe": True,
+        "maximum_foot_penetration_m": scene.maximum_foot_penetration_m,
+        "unsupported_contacts": [],
+        "self_collision_pairs": [],
+        "static_ground_dynamics": _jsonable(dynamics),
+    }
 
 
 def _read_json(path: Path, label: str) -> dict[str, Any]:
@@ -1122,23 +1195,13 @@ def materialize(args: argparse.Namespace) -> PublishedBundle:
         np.asarray(motion["body_pos_w"][0, 0], dtype=np.float64),
         root_quat,
     )
-    solved = grounded.solve_g1_donor_root(
-        donor,
-        backend=backend,
-        expected_model_identity=exact_identity,
-        config=grounded.GroundedReadyConfig(),
-    )
-    if not solved.geometry_passed or solved.ground_dynamics_passed is not True:
-        raise GroundedUpperMaterializationError(
-            "exact A3 grounded re-solve tagged candidate_id=G1 did not pass "
-            "static geometry and ground dynamics"
-        )
+    input_grounding_audit = _audit_input_grounded_state(backend, donor)
     leg = np.asarray(LEG_JOINT_INDICES, dtype=np.int64)
     input_q = np.asarray(motion["joint_pos"])
     q_out, qd_out = _repair_constant_grounded_leg_velocity(
         input_q,
         np.asarray(motion["joint_vel"]),
-        np.asarray(solved.state.joint_pos),
+        np.asarray(reference_arrays["joint_pos"]),
         np.asarray(reference_arrays["joint_pos"]),
     )
     nonleg = np.asarray(
@@ -1159,9 +1222,10 @@ def materialize(args: argparse.Namespace) -> PublishedBundle:
         fps=float(motion["fps"]),
         mjcf_path=exact_identity.mjcf_path,
         input_sha256=input_sha,
-        # This is the exact re-solved ready audit identity, not a claim that a
-        # different qpos was installed.
-        ready_sha256=solved.receipt_sha256,
+        # The published A3 grounded candidate is the pinned source of the
+        # constant leg coordinates; the actual input strike pose was audited
+        # directly above instead of being rewritten into that neutral-arm pose.
+        ready_sha256=reference_candidate_sha,
         body_order_path=body_order_path,
         migration_provenance=_migration_provenance(input_arrays),
     )
@@ -1280,8 +1344,7 @@ def materialize(args: argparse.Namespace) -> PublishedBundle:
             "leg_velocity_before": motion["leg_velocity_before"],
             "leg_velocity_after_nonzero_samples": 0,
             "ready_yaw_rotation_from_v1_rad": motion["ready_yaw_rotation_rad"],
-            "a3_candidate_g1_resolve_receipt_sha256": solved.receipt_sha256,
-            "a3_candidate_g1_resolve_receipt": _jsonable(solved.receipt),
+            "input_pose_exact_a3_grounding_audit": input_grounding_audit,
         },
         "invariants": {
             "frame_count_before": int(motion["frames"]),
