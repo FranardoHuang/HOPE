@@ -1010,10 +1010,10 @@ def _contact_receipt(
         "profile_pins": dict(profile_pin),
         "motion": dict(motion_pin),
         "geometry": {
-            "source_path": _repo_relative(
+            "path": _repo_relative(
                 geometry_path, repo_root, label="geometry source"
             ),
-            "source_file_sha256": _sha256_file(geometry_path),
+            "sha256": _sha256_file(geometry_path),
             "payload_sha256": geometry.GEOMETRY_SOURCE_SHA256,
             "kind": geometry.EXACT_FACE_CONTACT_KIND,
         },
@@ -1293,10 +1293,10 @@ def materialize_n1_contact_bundle(
         PurePosixPath(output_relative_dir) / receipt_name
     ).as_posix()
     geometry_pin = {
-        "source_path": _repo_relative(
+        "path": _repo_relative(
             geometry_path, root, label="geometry source"
         ),
-        "source_file_sha256": _sha256_file(geometry_path),
+        "sha256": _sha256_file(geometry_path),
         "payload_sha256": geometry.GEOMETRY_SOURCE_SHA256,
         "kind": geometry.EXACT_FACE_CONTACT_KIND,
     }

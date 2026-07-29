@@ -14,7 +14,7 @@ in the same AST, so a knob change in code changes the pin automatically; a
 launch that overrides any of these knobs in YAML must re-run this script with
 ``--override key=value``.
 
-``--source-rev`` hashes the five solver implementation sources from a git
+``--source-rev`` hashes the seven solver implementation sources from a git
 revision instead of the working tree.  Only that mode emits the formal
 external-commit authority required by the launch gates.  Omitting it remains
 useful for local diagnostics, but the resulting document carries an explicit
@@ -24,7 +24,7 @@ The commit itself is deliberately not embedded in the JSON.  A profile-pins
 file is normally committed after the executable sources it describes, so a
 top-level ``source_rev`` would either be stale or create an impossible
 self-reference.  Formal launch binds the exact commit externally and reopens
-these five blob digests from that commit.
+these seven blob digests from that commit.
 """
 from __future__ import annotations
 
@@ -58,6 +58,11 @@ SOLVER_SOURCES = (
     "racket_contact_geometry.py",
     "stroke_adapt_torch.py",
     "virtual_ball.py",
+    "counter_rally.py",
+    "counter_rally_torch.py",
+)
+COUNTER_RALLY_MODULE = (
+    "whole_body_tracking.tasks.tracking.mdp.counter_rally"
 )
 PROFILE_PINS_SCHEMA_VERSION = 1
 PROFILE_PINS_KIND = "whole_body_tracking.action_ball.profile_pins"
@@ -271,6 +276,82 @@ def _load_contact_geometry_contract(
     }
 
 
+def _load_counter_rally_contract(
+    repo_root: Path,
+    source_rev: str | None,
+    *,
+    venue_yaml: Path,
+) -> dict:
+    """Execute the exact pure-CPU N=1 objective and venue-physics contract.
+
+    The solver-contract function imports the ordered counter-rally rejection
+    schema lazily.  Loading this module from the same git blob that is hashed
+    below prevents a dirty worktree module from silently defining a formal
+    historical profile.
+    """
+
+    relative = f"{MDP_REL}/counter_rally.py"
+    source_path = repo_root / relative
+    raw = (
+        _git_blob_bytes(repo_root, source_rev, relative)
+        if source_rev
+        else source_path.read_bytes()
+    )
+    module = types.ModuleType(COUNTER_RALLY_MODULE)
+    module.__file__ = (
+        f"{source_rev}:{relative}" if source_rev else str(source_path)
+    )
+    previous = sys.modules.get(COUNTER_RALLY_MODULE)
+    sys.modules[COUNTER_RALLY_MODULE] = module
+    try:
+        exec(compile(raw, module.__file__, "exec"), module.__dict__)
+        objective = module.CounterRallyObjectiveProfile()
+        venue_physics = module.VenueBallPhysics.from_venue_yaml(venue_yaml)
+    finally:
+        if previous is None:
+            sys.modules.pop(COUNTER_RALLY_MODULE, None)
+        else:
+            sys.modules[COUNTER_RALLY_MODULE] = previous
+
+    objective_payload = dict(objective.to_mapping())
+    venue_payload = dict(venue_physics.to_mapping())
+    objective_sha256 = hashlib.sha256(
+        json.dumps(
+            objective_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")
+    ).hexdigest()
+    venue_sha256 = hashlib.sha256(
+        json.dumps(
+            venue_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=True,
+            allow_nan=False,
+        ).encode("ascii")
+    ).hexdigest()
+    if objective.sha256 != objective_sha256:
+        raise SystemExit(
+            "CounterRallyObjectiveProfile.sha256 does not seal its canonical "
+            "mapping"
+        )
+    if venue_physics.sha256 != venue_sha256:
+        raise SystemExit(
+            "VenueBallPhysics.sha256 does not seal its canonical mapping"
+        )
+    return {
+        "module": module,
+        "objective_payload": objective_payload,
+        "objective_sha256": objective_sha256,
+        "venue_physics_payload": venue_payload,
+        "venue_physics_sha256": venue_sha256,
+        "source_sha256": hashlib.sha256(raw).hexdigest(),
+    }
+
+
 def _load_venue_params(path: Path) -> SimpleNamespace:
     """Mirror virtual_ball.load_venue_params without importing torch."""
 
@@ -468,6 +549,12 @@ def main() -> int:
         opponent_far_x=opponent_far_x,
         table_half_width=table_half_width,
     )
+
+    counter_rally = _load_counter_rally_contract(
+        repo_root,
+        source_rev,
+        venue_yaml=venue_yaml,
+    )
     if temporary_venue is not None:
         temporary_venue.cleanup()
 
@@ -495,17 +582,38 @@ def main() -> int:
         raise SystemExit(
             "racket contact geometry bytes changed while profile was pinned"
         )
+    if (
+        source_sha256["counter_rally.py"]
+        != counter_rally["source_sha256"]
+    ):
+        raise SystemExit(
+            "counter-rally source bytes changed while profile was pinned"
+        )
 
-    solver = namespace["action_ball_solver_profile_contract"](
-        cfg,
-        physics_profile_sha256=physics["sha256"],
-        source_sha256=source_sha256,
-        contact_geometry_contract={
-            "payload": contact_geometry["payload"],
-            "sha256": contact_geometry["sha256"],
-        },
-        net_top_z=net_top_z,
-    )
+    previous_counter_module = sys.modules.get(COUNTER_RALLY_MODULE)
+    sys.modules[COUNTER_RALLY_MODULE] = counter_rally["module"]
+    try:
+        solver = namespace["action_ball_solver_profile_contract"](
+            cfg,
+            physics_profile_sha256=physics["sha256"],
+            source_sha256=source_sha256,
+            contact_geometry_contract={
+                "payload": contact_geometry["payload"],
+                "sha256": contact_geometry["sha256"],
+            },
+            net_top_z=net_top_z,
+            counter_rally_objective_profile_sha256=(
+                counter_rally["objective_sha256"]
+            ),
+            counter_rally_venue_physics_sha256=(
+                counter_rally["venue_physics_sha256"]
+            ),
+        )
+    finally:
+        if previous_counter_module is None:
+            sys.modules.pop(COUNTER_RALLY_MODULE, None)
+        else:
+            sys.modules[COUNTER_RALLY_MODULE] = previous_counter_module
 
     report = {
         "schema_version": PROFILE_PINS_SCHEMA_VERSION,
@@ -529,6 +637,12 @@ def main() -> int:
         "contact_geometry": {
             "payload": contact_geometry["payload"],
             "sha256": contact_geometry["sha256"],
+        },
+        "counter_rally": {
+            "objective_profile": counter_rally["objective_payload"],
+            "objective_profile_sha256": counter_rally["objective_sha256"],
+            "venue_physics": counter_rally["venue_physics_payload"],
+            "venue_physics_sha256": counter_rally["venue_physics_sha256"],
         },
         "physics_profile_sha256": physics["sha256"],
         "solver_profile_sha256": solver["sha256"],

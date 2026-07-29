@@ -70,6 +70,20 @@ KIT_LAUNCHER_SOURCE = (
     "launch_kit_training_locked.sh"
 )
 WBT_RELATIVE = Path("hope_training/whole_body_tracking")
+MDP_RELATIVE = (
+    "hope_training/whole_body_tracking/source/whole_body_tracking/"
+    "whole_body_tracking/tasks/tracking/mdp"
+)
+CONTACT_GEOMETRY_SOURCE = f"{MDP_RELATIVE}/racket_contact_geometry.py"
+SOLVER_IMPLEMENTATION_SOURCES = (
+    "hope_commands.py",
+    "continuous_questions.py",
+    "racket_contact_geometry.py",
+    "stroke_adapt_torch.py",
+    "virtual_ball.py",
+    "counter_rally.py",
+    "counter_rally_torch.py",
+)
 
 # Only these three task-tracking weights vary.  Outcome, imitation,
 # regularization, soft/hard-limit, table and fall terms stay byte-identical.
@@ -492,8 +506,10 @@ def _validate_contact_receipt(
     for field in ("action_id", "action_uid", "scope"):
         if row[field] != bundle[field]:
             raise LaunchRefused(f"contact receipt {field} differs from bundle")
-    for field in ("source_manifest", "motion", "geometry"):
+    for field in ("source_manifest", "motion"):
         _same_pin(row[field], bundle[field], name=f"contact.{field}")
+    if row["geometry"] != bundle["geometry"]:
+        raise LaunchRefused("contact geometry pin differs from the bundle")
     if row["profile_pins"] != bundle["profile_pins"]:
         raise LaunchRefused(
             "contact profile_pins differ from the bundle"
@@ -694,9 +710,17 @@ def _validate_bundle(
     motion_pin, _motion_path = _verify_tracked_file(
         checkout, commit_sha, bundle["motion"], name="N1 bundle motion"
     )
-    geometry_pin, _geometry = _load_tracked_json(
-        checkout, commit_sha, bundle["geometry"], name="N1 bundle geometry"
+    geometry_pin, _geometry_path = _verify_tracked_file(
+        checkout,
+        commit_sha,
+        bundle["geometry"],
+        name="N1 bundle geometry",
+        extra_keys=("payload_sha256", "kind"),
     )
+    if geometry_pin["path"] != CONTACT_GEOMETRY_SOURCE:
+        raise LaunchRefused(
+            "N1 bundle geometry must pin the runtime racket_contact_geometry.py"
+        )
     profile_pin, profile_document = _load_tracked_json(
         checkout,
         commit_sha,
@@ -716,7 +740,6 @@ def _validate_bundle(
     for payload_name, digest_field in (
         ("solver_payload", "solver_profile_sha256"),
         ("physics_payload", "physics_profile_sha256"),
-        ("geometry", "geometry_payload_sha256"),
     ):
         payload_value = profile_document.get(payload_name)
         if payload_value is None:
@@ -728,6 +751,72 @@ def _validate_bundle(
                 f"N1 profile {payload_name} canonical SHA differs from "
                 f"{digest_field}"
             )
+    contact_geometry = _exact_dict(
+        profile_document.get("contact_geometry"),
+        ("payload", "sha256"),
+        name="N1 profile contact_geometry",
+    )
+    contact_geometry_sha = _sha256(
+        contact_geometry["sha256"],
+        name="N1 profile contact_geometry.sha256",
+    )
+    if canonical_sha256(contact_geometry["payload"]) != contact_geometry_sha:
+        raise LaunchRefused(
+            "N1 profile contact_geometry SHA does not seal its payload"
+        )
+    if (
+        contact_geometry_sha != profile_pin["geometry_payload_sha256"]
+        or geometry_pin["payload_sha256"] != contact_geometry_sha
+    ):
+        raise LaunchRefused(
+            "N1 contact-geometry payload SHA differs across profile and source pin"
+        )
+    contact_kind = (
+        contact_geometry["payload"].get("kind")
+        if type(contact_geometry["payload"]) is dict
+        else None
+    )
+    if geometry_pin["kind"] != contact_kind:
+        raise LaunchRefused(
+            "N1 contact-geometry kind differs across payload and source pin"
+        )
+    solver_payload = profile_document["solver_payload"]
+    if solver_payload.get("contact_geometry") != contact_geometry:
+        raise LaunchRefused(
+            "N1 solver payload does not bind the exact contact geometry"
+        )
+    source_hashes = profile_document.get(
+        "solver_implementation_source_sha256"
+    )
+    if (
+        type(source_hashes) is not dict
+        or set(source_hashes) != set(SOLVER_IMPLEMENTATION_SOURCES)
+        or solver_payload.get("implementation_source_sha256") != source_hashes
+    ):
+        raise LaunchRefused(
+            "N1 profile must bind the exact seven solver implementation sources"
+        )
+    for filename in SOLVER_IMPLEMENTATION_SOURCES:
+        source_sha = _sha256(
+            source_hashes[filename],
+            name=f"N1 profile source {filename}",
+        )
+        _verify_tracked_file(
+            checkout,
+            commit_sha,
+            {
+                "path": f"{MDP_RELATIVE}/{filename}",
+                "sha256": source_sha,
+            },
+            name=f"N1 solver implementation {filename}",
+        )
+    if (
+        source_hashes["racket_contact_geometry.py"]
+        != geometry_pin["sha256"]
+    ):
+        raise LaunchRefused(
+            "N1 geometry source SHA differs from solver implementation pin"
+        )
     prototype_pin, prototype = _load_tracked_json(
         checkout,
         commit_sha,

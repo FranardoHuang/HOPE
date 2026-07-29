@@ -26,6 +26,8 @@ SOLVER_SOURCES = (
     "racket_contact_geometry.py",
     "stroke_adapt_torch.py",
     "virtual_ball.py",
+    "counter_rally.py",
+    "counter_rally_torch.py",
 )
 
 
@@ -68,7 +70,7 @@ def _run(
     )
 
 
-def test_real_cli_pins_exact_face_payload_and_all_five_sources(tmp_path):
+def test_real_cli_pins_exact_face_payload_and_all_seven_sources(tmp_path):
     root = _copy_minimal_repo(tmp_path)
     result = _run(root)
     assert result.returncode == 0, result.stderr

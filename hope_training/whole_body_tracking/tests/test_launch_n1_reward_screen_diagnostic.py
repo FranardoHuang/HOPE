@@ -81,18 +81,48 @@ def exact_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     source_manifest = add_json(
         "configs/source_n5.json", {"schema_version": 3, "source": "fixture"}
     )
-    geometry = add_json(
-        "configs/racket_geometry.json",
-        {"schema_version": 1, "geometry": "fixture"},
-    )
+    source_hashes = {}
+    for filename in L.SOLVER_IMPLEMENTATION_SOURCES:
+        relative = f"{L.MDP_RELATIVE}/{filename}"
+        path = repo / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        raw = f"# exact fixture source: {filename}\n".encode("utf-8")
+        path.write_bytes(raw)
+        source_hashes[filename] = hashlib.sha256(raw).hexdigest()
     motion_relative = "motions/bh_loop_c_upper.npz"
     motion_path = repo / motion_relative
     motion = _write(motion_path, b"exact-schema2-motion")
     motion["path"] = motion_relative
 
-    solver_payload = {"solver": "fixture"}
+    contact_geometry_payload = {
+        "schema_version": 2,
+        "kind": "exact_face_contact_v2",
+        "fixture": True,
+    }
+    contact_geometry_sha = hashlib.sha256(
+        json.dumps(
+            contact_geometry_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+        ).encode()
+    ).hexdigest()
+    contact_geometry = {
+        "payload": contact_geometry_payload,
+        "sha256": contact_geometry_sha,
+    }
+    geometry = {
+        "path": L.CONTACT_GEOMETRY_SOURCE,
+        "sha256": source_hashes["racket_contact_geometry.py"],
+        "payload_sha256": contact_geometry_sha,
+        "kind": "exact_face_contact_v2",
+    }
+    solver_payload = {
+        "solver": "fixture",
+        "implementation_source_sha256": source_hashes,
+        "contact_geometry": contact_geometry,
+    }
     physics_payload = {"physics": "fixture"}
-    geometry_payload = {"geometry": "fixture"}
+    table_geometry_payload = {"geometry": "fixture"}
     solver_profile_sha = hashlib.sha256(
         json.dumps(
             solver_payload, sort_keys=True, separators=(",", ":")
@@ -103,16 +133,13 @@ def exact_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             physics_payload, sort_keys=True, separators=(",", ":")
         ).encode()
     ).hexdigest()
-    geometry_payload_sha = hashlib.sha256(
-        json.dumps(
-            geometry_payload, sort_keys=True, separators=(",", ":")
-        ).encode()
-    ).hexdigest()
     profile_document = {
         "schema_version": 1,
         "solver_payload": solver_payload,
         "physics_payload": physics_payload,
-        "geometry": geometry_payload,
+        "geometry": table_geometry_payload,
+        "contact_geometry": contact_geometry,
+        "solver_implementation_source_sha256": source_hashes,
         "solver_profile_sha256": solver_profile_sha,
         "physics_profile_sha256": physics_profile_sha,
     }
@@ -121,7 +148,7 @@ def exact_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         {
             "solver_profile_sha256": solver_profile_sha,
             "physics_profile_sha256": physics_profile_sha,
-            "geometry_payload_sha256": geometry_payload_sha,
+            "geometry_payload_sha256": contact_geometry_sha,
         }
     )
     prototype_document = {

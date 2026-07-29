@@ -8,6 +8,7 @@ import importlib.util
 import json
 from pathlib import Path
 import shutil
+import subprocess
 import sys
 
 import pytest
@@ -16,6 +17,11 @@ import pytest
 WBT_ROOT = Path(__file__).resolve().parents[1]
 REPO_ROOT = WBT_ROOT.parents[1]
 SCRIPT = WBT_ROOT / "scripts" / "materialize_n1_contact_training_bundle.py"
+PINNER = WBT_ROOT / "scripts" / "pin_action_ball_profile_contracts.py"
+TABLE_GEOMETRY_RELATIVE = Path(
+    "hope_training/whole_body_tracking/source/whole_body_tracking/"
+    "whole_body_tracking/tasks/table_tennis/geometry.py"
+)
 SPEC = importlib.util.spec_from_file_location(
     "materialize_n1_contact_training_bundle_under_test", SCRIPT
 )
@@ -61,63 +67,35 @@ def _make_repo(tmp_path: Path, action_id: str) -> dict[str, object]:
     _copy(REPO_ROOT / motion_relative, root / motion_relative)
     venue_relative = Path("configs/ball_physics_venue.yaml")
     _copy(REPO_ROOT / venue_relative, root / venue_relative)
-
-    geometry = B._load_module(
-        f"fixture_geometry_{action_id}",
-        mdp_target / "racket_contact_geometry.py",
+    _copy(
+        REPO_ROOT / TABLE_GEOMETRY_RELATIVE,
+        root / TABLE_GEOMETRY_RELATIVE,
     )
+
     counter = B._load_module(
         f"fixture_counter_{action_id}",
         mdp_target / "counter_rally.py",
     )
     objective_sha = counter.CounterRallyObjectiveProfile().sha256
-    source_hashes = {
-        name: B._sha256_file(mdp_target / name)
-        for name in source_names
-    }
-    venue_sha = B._sha256_file(root / venue_relative)
-    physics_payload = {
-        "schema_version": 1,
-        "kind": "fixture.action_ball.physics",
-        "venue_source": {
-            "path": venue_relative.as_posix(),
-            "file_sha256": venue_sha,
-        },
-    }
-    physics_sha = B._canonical_sha256(physics_payload)
-    geometry_contract = {
-        "payload": geometry.GEOMETRY_SOURCE_PAYLOAD,
-        "sha256": geometry.GEOMETRY_SOURCE_SHA256,
-    }
-    solver_payload = {
-        "schema_version": 1,
-        "kind": "fixture.action_ball.counter_rally_solver",
-        "implementation_source_sha256": source_hashes,
-        "physics_profile_sha256": physics_sha,
-        "contact_geometry": geometry_contract,
-        "counter_rally": {
-            "mode": "exact_n1_fixed_action_reverse_ray",
-            "objective_profile_sha256": objective_sha,
-            "venue_physics_sha256": B._canonical_sha256(
-                {"kind": "fixture.counter_rally.venue_physics"}
-            ),
-            "precheck_before_ordinary_solver": True,
-            "selector_or_action_switching": False,
-        },
-    }
-    solver_sha = B._canonical_sha256(solver_payload)
-    pins = {
-        "schema_version": 1,
-        "kind": "fixture.action_ball.profile_pins",
-        "solver_implementation_source_sha256": source_hashes,
-        "contact_geometry": geometry_contract,
-        "physics_payload": physics_payload,
-        "physics_profile_sha256": physics_sha,
-        "solver_payload": solver_payload,
-        "solver_profile_sha256": solver_sha,
-    }
     pins_path = root / "configs/profile_pins_counter_n1.json"
-    pins_sha = _write_json(pins_path, pins)
+    pin_result = subprocess.run(
+        [
+            sys.executable,
+            str(PINNER),
+            "--repo-root",
+            str(root),
+            "--out",
+            str(pins_path),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+    )
+    assert pin_result.returncode == 0, pin_result.stderr
+    pins = json.loads(pins_path.read_text())
+    pins_sha = B._sha256_file(pins_path)
+    solver_sha = pins["solver_profile_sha256"]
+    physics_sha = pins["physics_profile_sha256"]
     source_path = root / B.SOURCE_MANIFEST_RELATIVE_PATH
     return {
         "root": root,
@@ -178,6 +156,16 @@ def test_materializes_strict_contact_only_bundle(tmp_path: Path, action_id: str)
         "claims",
     }
     assert bundle["artifact_type"] == "n1_contact_training_bundle_v1"
+    assert bundle["geometry"] == receipt["geometry"]
+    assert set(bundle["geometry"]) == {
+        "path",
+        "sha256",
+        "payload_sha256",
+        "kind",
+    }
+    assert bundle["geometry"]["path"].endswith(
+        "/racket_contact_geometry.py"
+    )
     assert bundle["claims"] == B.CLAIMS
     assert bundle["claims"]["landing_claim"] is False
     assert bundle["claims"]["post_bounce_claim"] is False
