@@ -116,6 +116,17 @@ construction 或 PhysX start 停止前进，保留日志后按 exact PGID 关闭
 A/B，不是回归。只有 4096-env healthy baseline 达到至少 `15k environment-steps/s` 且出现
 strike 数据后，才启动 Reward/reference/curriculum 剂量比较。
 
+N1 diagnostic launcher 的 budget 名称固定为：
+
+- `smoke`：`1 env × 2 update × save1`；
+- `probe`：`4096 env × 5 update × save1`；
+- `canary`：`16--1024 env` 的有界 Reward screen；
+- `long`：`4096 env` 的 reviewed 长跑预算。
+
+`probe` 只能使用 exact 三元组，不能借 `canary` 或 `long` 填任意值。它仅验收同一 setting 在真实
+并行规模下的构造、吞吐、reset 分账和 finite checkpoint，不产生 Reward 胜负或 curriculum
+promotion 结论。
+
 ### ActionBall finite q_des / reference-reset 切换
 
 本段是 `curr-launch-fix` 功能分支候选；`origin/main/docs/NOW.md` 仍是运行态权威。旧 run 使用

@@ -13,6 +13,12 @@
 
 ## 2026-07-30（A3 upper qvel-only 资产物化）
 
+- Pod1 已让 qvel-fixed 反手拉/挡分别自然完成 `1 env × 2 update`；iteration 为
+  `4.65/3.18 s` 与 `4.67/2.92 s`，四个 `model_0/1.pt` 均可载入且逐 tensor finite。
+  q_des/table/fall terminal 为零，但 N=1 已见踝关节 actual raw-hard，故不据小样本调
+  Reward。launcher 新增唯一 fixed `4096 env × 5 update × save1` 的 `probe` stage，
+  下一步用同 setting 验证吞吐、episode 是否跨过 `t_hit`、strike 与 hard/table/fall 分账。
+  详见[设计/加速审计 §6.4](research/design_audit_and_speedup_20260729.md#64-决策账本与执行进度2026-07-30)。
 - Pod1 用 exact `A3T2.5_pingpong_0519` 模型完成两条 upper 的 qvel-only
   no-clobber 物化。反手拉/挡 motion SHA-256 分别为
   `3b7cabdec864db09cf3124557b0f79e9f81b4e5cdb28b67a019df11471d307e0` 与
@@ -20,7 +26,7 @@
   只把 12 个恒定腿 qpos 对应的 stale qvel 归零，所有 qpos/root/timing/strike 以及
   `right_racket` 全帧位姿、线/角速度 bitwise 不变。输入姿态双脚接触、joint/collision
   检查通过；零速度 static-contact LP 不可行被保留为遥测，因为它不是动态挥拍 feasibility
-  证明。资产正纳入 Git/N1 bundle，下一步 Pod1 `1 env × 2 update → 4096 env × 5 update`。
+  证明。资产与 N1 bundle 已纳入 Git。
   决策账本见
   [设计/加速审计 §6.4](research/design_audit_and_speedup_20260729.md#64-决策账本与执行进度2026-07-30)。
 

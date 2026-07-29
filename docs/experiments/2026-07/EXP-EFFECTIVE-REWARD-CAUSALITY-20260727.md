@@ -741,3 +741,16 @@ strike-timing 一次计算、global+per-action 原 error reduction 与可精确�
 metric 的 `fired_valid` device mask。它们只需 Pod parity/exact-resume/profiler，不开启学习
 A/B。Reward 权重、reference termination/CaT、death/entropy/sigma/RSI、8192 env 与 actual
 hard-edge 放宽继续作为健康 baseline 之后的单变量 canary。
+
+### 2026-07-30：qvel-fixed upper 已完成最短 smoke
+
+Pod1 串行完成反手拉 `n1_qvelfix_smoke_5ecf0e06_loop_gpu1_r3` 和反手挡
+`n1_qvelfix_smoke_5ecf0e06_block_gpu1_r4` 的 `1 env × 2 update`。实际 iteration 时间分别为
+`4.65/3.18 s` 与 `4.67/2.92 s`，四个 `model_0/1.pt` 均已在 Pod 载入并逐 tensor 验证 finite。
+两条均无 q_des、table 或 fall termination；N=1 actual raw-hard 主要来自踝关节，loop 第二轮
+`2` 次、block 每轮 `1` 次。由于分母极小，禁止据此调负 Reward 或终止语义。
+
+下一步不是 Reward A/B，而是同 setting 的 exact `4096 env × 5 update × save1` probe。其
+primary evidence 为 episode 是否越过各动作 `t_hit`、strike opportunity 是否非零、
+environment-steps/s，以及 actual hard/table/fall/nonfinite 的独立分账。只有该 probe 健康后，
+才启动本记录中 tracking/mimic/negative Reward 的单变量 screen。

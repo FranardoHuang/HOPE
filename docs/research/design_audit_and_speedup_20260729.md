@@ -298,7 +298,14 @@ Isaac Lab 官方基准 isaac-sim.github.io/IsaacLab/.../performance_benchmarks.h
 | 先不修 | 用 neutral-arm `candidate_id=G1` 重新求当前击球上肢；用零速度 static-contact LP 阻断动态挥拍诊断 | 前者回答了错误问题；后者在当前双脚接触且几何安全姿态上返回 infeasible，只说明不能被动静止保持，不证明动态 policy 不可训练。两项都保留原始证据，不作为首发门 |
 | 先不修 | CaT、Beta/tanh、有界 policy 分布、8192 env、full-body 完整 ready 链 | 都不在第一条可迭代 upper policy 的关键路径；不得与本次 replacement 混改 |
 | 需要 canary | Reward 各组权重/负项剂量、reference guard、课程失败率、entropy/sigma/RSI、full-body | 会改变优化目标或样本分布；只有 qvel-fixed baseline 出现持续 strike 后才按单变量小预算比较 |
+| 运行验收 | exact `4096 env × 5 update × save1` probe | launcher 增加唯一固定 `probe` budget；这是把同一 setting 放大到真实并行规模，不是学习 A/B |
 
-当前收口条件只有三步：把两条 qvel-fixed 资产和 N=1 bundle 纳入 Git；Pod1
-`1 env × 2 update` 自然完成；随后 4096-env 五轮确认 episode 跨过各自 `t_hit`、strike 非零且
-raw-hard/table/fall/nonfinite 没有爆炸。达到后立即发 long，不等待上表“先不修”项目。
+两条 qvel-fixed 资产和 N=1 bundle 已纳入 Git。Pod1 的反手拉
+`n1_qvelfix_smoke_5ecf0e06_loop_gpu1_r3` 与反手挡
+`n1_qvelfix_smoke_5ecf0e06_block_gpu1_r4` 均自然完成 `1 env × 2 update`，iteration 分别为
+`4.65/3.18 s` 与 `4.67/2.92 s`；四个 checkpoint 均已在 Pod 载入并逐 tensor 验证 finite。
+两条都没有 q_des、table 或 fall terminal，但 N=1 小样本已经看到 actual raw-hard：
+loop 第二轮 `2` 次，block 每轮 `1` 次，主要为踝关节。该比例不能用来调 Reward，也不能伪装成
+健康；下一唯一收口门是 fixed `4096 env × 5 update` probe，确认 episode 能跨过各自
+`t_hit`、strike 非零，且 raw-hard/table/fall/nonfinite 没有爆炸。达到后立即发 long，不等待
+上表“先不修”项目。

@@ -3,10 +3,11 @@
 
 This is deliberately a *diagnostic* launcher.  It does not consume or mint a
 formal action-set identity, evaluator authority, promotion receipt, exact
-resume claim, export authority, or judge authority.  Its three public
+resume claim, export authority, or judge authority.  Its four public
 stages are:
 
 * ``smoke``: exactly one environment and two PPO updates; and
+* ``probe``: exactly 4096 environments and five PPO updates; and
 * ``canary``: a bounded first reward-screen budget; and
 * ``long``: the single reviewed 4096-environment long-run budget.
 
@@ -52,7 +53,7 @@ BUNDLE_KIND = "n1_contact_training_bundle_v1"
 CONTACT_KIND = "n1_contact_alignment_receipt_v1"
 EXPERIMENT_NAME = "agibot_a3_hope_action_ball_n1_reward_screen_diagnostic"
 ALLOWED_ACTIONS = frozenset(("bh_loop_c", "bh_block"))
-ALLOWED_STAGES = frozenset(("smoke", "canary", "long"))
+ALLOWED_STAGES = frozenset(("smoke", "probe", "canary", "long"))
 ALLOWED_SCOPES = frozenset(("upper", "full"))
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -1152,7 +1153,9 @@ def _validate_budget(
     stage: Any, num_envs: Any, max_iterations: Any, save_interval: Any
 ) -> dict[str, Any]:
     if type(stage) is not str or stage not in ALLOWED_STAGES:
-        raise LaunchRefused("stage must be smoke, canary, or exact long")
+        raise LaunchRefused(
+            "stage must be smoke, exact probe, canary, or exact long"
+        )
     envs = _plain_int(num_envs, name="num_envs", minimum=1)
     iterations = _plain_int(
         max_iterations, name="max_iterations", minimum=1
@@ -1162,6 +1165,11 @@ def _validate_budget(
         if (envs, iterations, save) != (1, 2, 1):
             raise LaunchRefused(
                 "smoke is exactly 1 env / 2 updates / save interval 1"
+            )
+    elif stage == "probe":
+        if (envs, iterations, save) != (4096, 5, 1):
+            raise LaunchRefused(
+                "probe is exactly 4096 envs / 5 updates / save interval 1"
             )
     elif stage == "canary":
         if not (16 <= envs <= 1024):

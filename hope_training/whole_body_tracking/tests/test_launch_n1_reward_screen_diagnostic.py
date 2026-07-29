@@ -302,6 +302,8 @@ def exact_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         namespace = run_root / f"bh-loop-{profile_name}-{stage}"
         if stage == "smoke":
             num_envs, iterations, save = 1, 2, 1
+        elif stage == "probe":
+            num_envs, iterations, save = 4096, 5, 1
         elif stage == "long":
             num_envs, iterations, save = 4096, 300_000_000_000, 100
         else:
@@ -607,6 +609,39 @@ def test_accepts_only_the_exact_long_budget(exact_repo):
     assert payload["spec"]["save_interval"] == 100
 
 
+def test_accepts_only_the_exact_probe_budget(exact_repo):
+    spec, path = exact_repo["make_spec"](stage="probe")
+    payload = L.build_plan(path)["canonical_payload"]
+    assert payload["long_stage_prohibited"] is True
+    assert payload["formal_evidence_prohibited"] is True
+    assert payload["curriculum_promotion_prohibited"] is True
+    assert payload["diagnostic_unauthorized"] is True
+    assert payload["spec"]["num_envs"] == 4096
+    assert payload["spec"]["max_iterations"] == 5
+    assert payload["spec"]["save_interval"] == 1
+    assert "num_envs=4096" in payload["training_argv"]
+    assert "max_iterations=5" in payload["training_argv"]
+    assert "algo.runner.save_interval=1" in payload["training_argv"]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("num_envs", 1024),
+        ("num_envs", 4095),
+        ("max_iterations", 4),
+        ("max_iterations", 6),
+        ("save_interval", 2),
+    ],
+)
+def test_rejects_any_probe_budget_drift(exact_repo, field, value):
+    spec, path = exact_repo["make_spec"](stage="probe")
+    spec[field] = value
+    path.write_bytes(_canonical(spec))
+    with pytest.raises(L.LaunchRefused, match="probe is exactly"):
+        L.build_plan(path)
+
+
 @pytest.mark.parametrize(
     ("field", "value"),
     [
@@ -693,4 +728,6 @@ def test_source_contains_lifetime_lock_double_gpu_check_and_no_shell():
     assert "shell=True" not in source
     assert "subprocess.Popen" not in source
     assert "long_stage_prohibited" in source
-    assert L.ALLOWED_STAGES == frozenset(("smoke", "canary", "long"))
+    assert L.ALLOWED_STAGES == frozenset(
+        ("smoke", "probe", "canary", "long")
+    )

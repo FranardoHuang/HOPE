@@ -3699,3 +3699,18 @@ fresh 5-ms substep readback 继续用完整 20-ms policy/control horizon 做滚�
 brake；安全行 target 要求 bitwise 不变。host joint-safety focused suite `81 passed`，与
 ActionBall runtime wiring 联合回归为 `125 passed`。尚未产生 Pod A/B，所以 G05 保持
 `Partial`。
+
+#### 2026-07-30 A3 qvel-fixed upper 双动作 smoke
+
+tracked qvel-fixed motion、动作专属 bundle/manifest 和实际 composed Reward/PPO receipt 已在
+Pod1 串行穿过完整 Isaac scene/runtime。反手拉
+`n1_qvelfix_smoke_5ecf0e06_loop_gpu1_r3` 与反手挡
+`n1_qvelfix_smoke_5ecf0e06_block_gpu1_r4` 均自然完成 `1 env × 2 update`，iteration 分别为
+`4.65/3.18 s` 与 `4.67/2.92 s`；四个 checkpoint 均可载入且逐 tensor finite。
+
+两条 run 的 q_des/table/fall termination 为零。N=1 小样本仍观察到 actual raw-hard：
+loop 第二轮 `2` 次，block 每轮 `1` 次，主要为左右踝。该证据既不授权调 Reward，也不证明
+4096-env 会形成 mass reset。launcher 因此增加唯一 exact
+`probe = 4096 env × 5 update × save1` 的运行验收 budget；它不改变 setting、不产生科学 A/B
+结论。G05 继续 `Partial`，直到同 source 的 probe 报告吞吐、episode 是否跨过 `t_hit`、
+strike opportunity、hard/table/fall/nonfinite 分账及 finite checkpoint。
