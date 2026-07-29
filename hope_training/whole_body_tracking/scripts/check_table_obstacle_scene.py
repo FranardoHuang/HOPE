@@ -1214,7 +1214,7 @@ def _validate_cli_mode(args) -> None:
         invalid_shape = (
             args.task != ACTION_BALL_TASK_ID
             or args.num_envs != 1
-            or args.device != "cuda:0"
+            or re.fullmatch(r"cuda:(0|[1-9][0-9]*)", str(args.device)) is None
             or args.cfg_only
             or args.bench
             or args.contact_smoke
@@ -1224,7 +1224,7 @@ def _validate_cli_mode(args) -> None:
         )
         if invalid_shape:
             raise TableSmokeReceiptError(
-                "nominal hold requires the cuda:0 one-env ActionBall table scene "
+                "nominal hold requires one explicit cuda:N ActionBall table scene "
                 "without formal, cfg, bench, contact-smoke or motion overrides"
             )
         if (

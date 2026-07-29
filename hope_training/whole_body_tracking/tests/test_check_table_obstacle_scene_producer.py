@@ -456,6 +456,8 @@ def test_nominal_hold_cli_is_opt_in_one_env_and_pinned():
         [
             "--num-envs",
             "1",
+            "--device",
+            "cuda:1",
             "--nominal-hold",
             "/tmp/ready.json",
             "--nominal-hold-sha256",
@@ -465,7 +467,7 @@ def test_nominal_hold_cli_is_opt_in_one_env_and_pinned():
         ]
     )
     P._validate_cli_mode(args)
-    with pytest.raises(P.TableSmokeReceiptError, match="requires the cuda:0"):
+    with pytest.raises(P.TableSmokeReceiptError, match="requires one explicit cuda:N"):
         P._validate_cli_mode(
             P._parse(
                 [
