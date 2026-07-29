@@ -77,7 +77,8 @@ Follow-up note (2026-07-30, qvel-fixed 4096 probe rejected; Gate remains `Partia
   `4343a85e…` / `08aeafaf…`，exact A3 均为双脚 `3+3` 接触且 static-ground LP
   `feasible=true`。击球帧拍速保持，但 selected face world position 改变最多
   `0.138/0.064 m`，故旧 contact task 作废；新 N1 bundle 必须把原 profile 宽度整体平移到
-  新 face center 后再进入 smoke。
+  新 face center 后再进入 smoke。该重绑已 materialize PASS，loop/block bundle SHA 为
+  `054be7f2…` / `6973f1a3…`；尚未获得 Isaac smoke 行为证据。
 
 Follow-up note (2026-07-29, `eaf55fba` raw-hard counterexample and A3 upper q/qd root cause;
 Gate remains `Partial`):

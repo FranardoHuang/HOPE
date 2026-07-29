@@ -24,7 +24,8 @@
   ball/task。稳定 stand 配置与 no-clobber materializer 已在 Pod `12 passed`；两条新 motion
   SHA 为 `4343a85e…` / `08aeafaf…`，exact A3 双脚 `3+3` 接触且 static-ground LP
   `feasible=true`。击球帧拍速保持，世界拍位变化后 N1 contact box 正在整体重绑；仍待
-  `1 env×2` 与 `4096×5`。详见
+  `1 env×2` 与 `4096×5`。两动作 stable N1 bundle 已物化 PASS，SHA 分别为
+  `054be7f2…` / `6973f1a3…`；旧 qvel bundle 不得跨 motion bytes 复用。详见
   [设计/加速审计 §6.5](research/design_audit_and_speedup_20260729.md#65-4096-probe-反证与-a3-stable-upper-successor2026-07-30)。
 
 ## 2026-07-30（A3 upper qvel-only 资产物化）
