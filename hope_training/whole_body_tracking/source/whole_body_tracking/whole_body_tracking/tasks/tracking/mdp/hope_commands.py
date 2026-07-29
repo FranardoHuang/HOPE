@@ -3462,7 +3462,12 @@ class RacketTargetCommand(CommandTerm):
         if self._task_first_enabled:
             self._initialize_task_first_runtime()
         elif self._action_ball_enabled:
-            self._initialize_action_ball_runtime()
+            # CommandManager constructs every term before assigning itself to
+            # ``env.command_manager``.  ActionBall needs the already-built
+            # motion term, so its cross-term binding must wait until the first
+            # post-construction reset/update (or hard-contract query).
+            self._action_ball_runtime_initialized = False
+            self._action_ball_runtime_initializing = False
 
     # ------------------------------------------------------------------ #
     # CommandTerm API
@@ -3489,6 +3494,25 @@ class RacketTargetCommand(CommandTerm):
     @property
     def base_quat_w(self) -> torch.Tensor:
         return self.robot.data.root_quat_w
+
+    def _ensure_action_ball_runtime_initialized(self) -> None:
+        if not self._action_ball_enabled or self._action_ball_runtime_initialized:
+            return
+        if self._action_ball_runtime_initializing:
+            raise RuntimeError("re-entrant action-ball runtime initialization")
+        if not hasattr(self._env, "command_manager"):
+            raise RuntimeError(
+                "action-ball runtime requested before CommandManager construction completed"
+            )
+        self._action_ball_runtime_initializing = True
+        try:
+            self._initialize_action_ball_runtime()
+        except BaseException:
+            raise
+        else:
+            self._action_ball_runtime_initialized = True
+        finally:
+            self._action_ball_runtime_initializing = False
 
     def _motion(self) -> MotionCommand:
         if self._motion_term is None:
@@ -4889,10 +4913,9 @@ class RacketTargetCommand(CommandTerm):
     def action_ball_hard_contract(self) -> dict | None:
         """Return the complete preflight identity without exposing mutable private objects."""
 
-        if not self._action_ball_enabled or not hasattr(
-            self, "_action_ball_loaded_manifest"
-        ):
+        if not self._action_ball_enabled:
             return None
+        self._ensure_action_ball_runtime_initialized()
         motion = self._motion()
         try:
             manifest_relative_path = self._action_ball_loaded_manifest.source_path.resolve(
@@ -13735,6 +13758,7 @@ class RacketTargetCommand(CommandTerm):
     def _resample_command(self, env_ids: Sequence[int]):
         if len(env_ids) == 0:
             return
+        self._ensure_action_ball_runtime_initialized()
         n = len(env_ids)
         env_ids_t = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
         self._post_strike_elapsed_s[env_ids_t] = 0.0
@@ -14830,6 +14854,7 @@ class RacketTargetCommand(CommandTerm):
         self.strike_window_wide = self.strike_window if _wide_s is None else (_tts_abs <= float(_wide_s))
 
     def _update_command(self):
+        self._ensure_action_ball_runtime_initialized()
         motion = self._motion()
         # Timing is refreshed in _update_metrics (aligned with the FK); recompute here too so a direct
         # _update_command call outside the compute() path stays correct. Idempotent within a step
@@ -17314,6 +17339,7 @@ class RacketTargetCommand(CommandTerm):
                 self.metrics["adaptive_sigma_normal"][:] = self._adaptive_sigma_normal
 
     def _update_metrics(self):
+        self._ensure_action_ball_runtime_initialized()
         # CommandTerm.compute() runs _update_metrics() BEFORE _update_command(), so refresh the
         # actual racket FK AND the strike timing here (once per step) — metrics, rewards, and
         # observations then all read the same fresh, phase-aligned buffers (rewards/obs read them

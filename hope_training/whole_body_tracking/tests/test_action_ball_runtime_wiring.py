@@ -231,6 +231,47 @@ def test_diagnostic_action_ball_omits_formal_evaluator_stack_only():
         )
 
 
+def test_action_ball_runtime_waits_for_command_manager_construction():
+    method = _method("_ensure_action_ball_runtime_initialized")
+    module = ast.Module(body=[method], type_ignores=[])
+    ast.fix_missing_locations(module)
+    namespace = {}
+    exec(compile(module, str(COMMAND_PATH), "exec"), namespace)
+    ensure = namespace["_ensure_action_ball_runtime_initialized"]
+
+    calls = []
+    command = SimpleNamespace(
+        _action_ball_enabled=True,
+        _action_ball_runtime_initialized=False,
+        _action_ball_runtime_initializing=False,
+        _env=SimpleNamespace(),
+        _initialize_action_ball_runtime=lambda: calls.append("initialized"),
+    )
+    with pytest.raises(RuntimeError, match="CommandManager construction"):
+        ensure(command)
+    assert calls == []
+    command._env.command_manager = object()
+    ensure(command)
+    assert calls == ["initialized"]
+    assert command._action_ball_runtime_initialized is True
+    assert command._action_ball_runtime_initializing is False
+    ensure(command)
+    assert calls == ["initialized"]
+
+    init_source = _method_source("__init__")
+    assert "self._action_ball_runtime_initialized = False" in init_source
+    for caller in (
+        "action_ball_hard_contract",
+        "_resample_command",
+        "_update_command",
+        "_update_metrics",
+    ):
+        assert (
+            "self._ensure_action_ball_runtime_initialized()"
+            in _method_source(caller)
+        )
+
+
 def test_action_ball_live_racket_site_geometry_is_fail_closed():
     (check,) = _module_functions(
         ("_assert_action_ball_racket_site_contract",),
