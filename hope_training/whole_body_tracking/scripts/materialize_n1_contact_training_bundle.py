@@ -117,6 +117,39 @@ SUPPORTED_ACTIONS = {
     },
 }
 
+# The frozen N=5 source manifest still names the predecessor upper bytes.  Keep
+# that identity separate from ``SUPPORTED_ACTIONS``: the former proves which
+# task row we inherited, while the latter pins the qvel-only A3 replacement
+# consumed by the newly materialized N=1 bundle.
+SOURCE_SUPPORTED_ACTIONS = {
+    "bh_loop_c": {
+        "action_uid": 1722317591841513,
+        "family": "backhand",
+        "motion_path": (
+            "motions/fivebind_n5_20260728/"
+            "bh_loop_c_upper_fivebind.npz"
+        ),
+        "motion_sha256": (
+            "c950a73e473cad84d0fafcd51c552ec4fef085580bbeaec0f4e96be2acd7e2fc"
+        ),
+        "reference_t_hit_s": 0.62,
+        "reference_t_cycle_s": 1.4,
+    },
+    "bh_block": {
+        "action_uid": 1115176677418582,
+        "family": "backhand",
+        "motion_path": (
+            "motions/fivebind_n5_20260728/"
+            "bh_block_upper_fivebind.npz"
+        ),
+        "motion_sha256": (
+            "0cd94aa47bf8feb59bbe7cc7a0306abb57ee7ec8ebcec6443a80bbdc58894309"
+        ),
+        "reference_t_hit_s": 0.48,
+        "reference_t_cycle_s": 1.06,
+    },
+}
+
 FULL_SUPPORTED_ACTIONS = {
     "bh_loop_c": {
         "motion_path": (
@@ -903,7 +936,7 @@ def _selected_source_action(
             f"source manifest must contain exactly one {action_id!r}"
         )
     action = deepcopy(matches[0])
-    facts = SUPPORTED_ACTIONS[action_id]
+    facts = SOURCE_SUPPORTED_ACTIONS[action_id]
     exact = {
         "action_uid": facts["action_uid"],
         "family": facts["family"],
