@@ -282,3 +282,15 @@ birth→task roundtrip 已进入回归；核心联合测试为 `119 passed, 14 s
 `0d3c80f437bb842515fa74e9adf4aea823c90e728ac4e9d87cf4ce1a3d8692ab`。下一步只用 fresh `_r4`
 完成两动作各 `1 env / 2 update`；通过后立即发 upper Reward canary，不以 full-body 或最大课程
 support 的后续形式化工作阻塞首批 policy。
+
+`_r4` 两动作都穿过上述 receipt seam，但在首个 reset 的第 4 个 per-action birth、首个 PPO
+update 前同因停止：固定 `1/3/1` mixture 排到 frontier，而 level-0 的 current physical width 与
+center initial width 相同，旧 eligible 条件错误地把“尚未 promotion”当作“没有合法 support”。
+两条均为 `0 iteration / 0 checkpoint`；Pod1 的 Isaac traceback 后 cleanup 挂住，核对 exact
+PID/PGID/start ticks 后只处理该 run，最终无残余。
+
+修复保留 mixture、stratum、frontier arm、固定覆盖、proposal 计数和 exact replay：优先选择已经
+扩张到 center/interior 之外的 arm；若尚无 promoted arm，则在当前非零物理 support 的 outer band
+采 frontier；只有该 scope 所有物理宽度真为零才在 draw 前原子拒绝。birth 与 swing 共用同一规则，
+不改 manifest、action identity、schema、Reward 或 PPO。sampling/runtime/receipt/launcher 联合回归
+`171 passed, 14 skipped`；profile pins 与两动作 bundle 内容 SHA 不变。下一次使用 fresh `_r5`。

@@ -3458,3 +3458,10 @@ canonicalization 幂等，非单位归一化、符号规则和全部物理/安�
 `119 passed, 14 skipped`，新 pins 与反手拉/挡 bundle 分别为 `52000401...f465`、
 `baad5b95...acbf` / `0d3c80f4...92ab`。fresh `_r4` 仍须自然完成两次 update、产出 finite
 checkpoint 且无 Python Traceback 才能解锁 canary；当前 G05 仍为 `Partial`。
+
+`_r4` 两动作已证明 quaternion receipt seam 消失，但固定 mixture 在 level-0 第 4 个 birth 进入
+frontier 时，旧 sampler 把 `current width == initial center width` 误判成没有合法 arm；两边均在
+首个 update 前停止，`0 iteration / 0 checkpoint`。修复仍优先真正 promoted frontier；尚未扩张时
+改采当前非零合法 support 的 outer band，并保留 stratum/arm/quota/receipt/exact replay；全零 scope
+仍在 draw 前原子拒绝。联合回归 `171 passed, 14 skipped`，pins/bundle 内容不变。fresh `_r5`
+仍须自然完成两次 update 和 finite checkpoint，G05 保持 `Partial`。

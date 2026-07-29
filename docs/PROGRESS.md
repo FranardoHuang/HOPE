@@ -1965,6 +1965,11 @@
 </details>
 ## 2026-07-29
 
+- N=1 `_r4` 两动作已越过 quaternion receipt seam，但固定 mixture 第 4 个 birth 进入 frontier
+  时，level-0 `current width == initial center width` 被旧 sampler 误判成无合法 arm；两条仍是
+  `0 iteration / 0 checkpoint`。现改为优先 promoted frontier、否则采当前非零 support 的 outer
+  band，并保留 stratum/arm/quota/receipt/exact replay；全零仍原子拒绝。联合回归
+  `171 passed, 14 skipped`，pins/bundle 内容不变，下一步 fresh `_r5`。
 - N=1 `_r3` 反手拉在真实 Pod 穿透 scene/runtime/Reward/obs/q_des clamp 后，首个 PPO update 前
   暴露 receipt 四元数二次归一化造成约 `1e-16` canonical SHA 漂移；Pod2 未重复执行同一确定性
   失败。修复保留已是单位四元数的 binary64 tuple，非单位输入和符号规则不变；核心回归
