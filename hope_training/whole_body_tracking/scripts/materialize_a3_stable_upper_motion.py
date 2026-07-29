@@ -6,9 +6,11 @@ physical birth uses a deeply crouched, pitched lower-body pose that is not a
 closed-loop hold state for the AgiBot A3 training plant.  This producer makes
 the smallest coherent replacement:
 
-* preserve every non-leg joint position and velocity;
+* preserve every head/arm joint position and velocity;
 * replace the twelve leg joint positions with the exact runtime default stand
   and set their velocities to zero;
+* rebase each waist trajectory from its source frame-0 offset onto the exact
+  runtime ready value, preserving every within-clip delta and velocity;
 * preserve root X/Y and source yaw, while using the runtime stand height and an
   upright root;
 * rebuild all schema-2 body kinematics with the exact pinned A3 MJCF;
@@ -39,19 +41,35 @@ import canonical_schema2_builder as schema2
 import materialize_grounded_upper_motion as base
 
 
-TOOL_ID = "a3_stable_upper_motion_materializer_v1"
-ARTIFACT_CLASS = "diagnostic_a3_stable_upper_motion"
-VERDICT = "PASS_DIAGNOSTIC_A3_STABLE_UPPER_REBUILD"
+TOOL_ID = "a3_stable_upper_motion_materializer_v2"
+ARTIFACT_CLASS = "diagnostic_a3_stable_upper_motion_v2"
+VERDICT = "PASS_DIAGNOSTIC_A3_STABLE_UPPER_WAIST_REBASED_REBUILD"
 
 LEG_JOINT_NAMES = tuple(base.LEG_JOINT_NAMES)
 LEG_JOINT_INDICES = tuple(base.LEG_JOINT_INDICES)
 RUNTIME_JOINT_NAMES = tuple(base.RUNTIME_JOINT_NAMES)
-NONLEG_JOINT_INDICES = tuple(
-    index for index in range(31) if index not in set(LEG_JOINT_INDICES)
+WAIST_JOINT_NAMES = (
+    "waist_yaw_joint",
+    "waist_roll_joint",
+    "waist_pitch_joint",
+)
+WAIST_JOINT_INDICES = tuple(
+    RUNTIME_JOINT_NAMES.index(name) for name in WAIST_JOINT_NAMES
+)
+PRESERVED_JOINT_INDICES = tuple(
+    index
+    for index in range(31)
+    if index not in set(LEG_JOINT_INDICES) | set(WAIST_JOINT_INDICES)
 )
 
 _STABLE_CONTRACT_KEYS = frozenset(
-    {"schema_version", "root_height_m", "lower_joint_pos_rad", "provenance"}
+    {
+        "schema_version",
+        "root_height_m",
+        "lower_joint_pos_rad",
+        "waist_ready_pos_rad",
+        "provenance",
+    }
 )
 
 
@@ -77,9 +95,9 @@ def _load_stable_contract(path: Path) -> dict[str, Any]:
         raise StableUpperMaterializationError(
             "A3 stable-stand contract keyset mismatch"
         )
-    if payload["schema_version"] != 1:
+    if payload["schema_version"] != 2:
         raise StableUpperMaterializationError(
-            "A3 stable-stand contract schema_version must equal 1"
+            "A3 stable-stand contract schema_version must equal 2"
         )
     root_height = payload["root_height_m"]
     if (
@@ -109,6 +127,24 @@ def _load_stable_contract(path: Path) -> dict[str, Any]:
                 f"A3 stable-stand {name} must be finite"
             )
         values[name] = float(value)
+    waist = payload["waist_ready_pos_rad"]
+    if not isinstance(waist, Mapping) or set(waist) != set(WAIST_JOINT_NAMES):
+        raise StableUpperMaterializationError(
+            "A3 stable-stand waist_ready_pos_rad must contain exactly the "
+            "three runtime waist joints"
+        )
+    waist_values: dict[str, float] = {}
+    for name in WAIST_JOINT_NAMES:
+        value = waist[name]
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, (int, float))
+            or not math.isfinite(float(value))
+        ):
+            raise StableUpperMaterializationError(
+                f"A3 stable-stand {name} ready value must be finite"
+            )
+        waist_values[name] = float(value)
     provenance = payload["provenance"]
     if not isinstance(provenance, Mapping) or not provenance:
         raise StableUpperMaterializationError(
@@ -117,6 +153,7 @@ def _load_stable_contract(path: Path) -> dict[str, Any]:
     return {
         "root_height_m": float(root_height),
         "lower_joint_pos_rad": values,
+        "waist_ready_pos_rad": waist_values,
         "provenance": dict(provenance),
     }
 
@@ -258,6 +295,11 @@ def _replace_with_stable_stand(
             stable_contract["lower_joint_pos_rad"][name], dtype=q_out.dtype
         )
         qd_out[:, index] = np.asarray(0.0, dtype=qd_out.dtype)
+    for name, index in zip(WAIST_JOINT_NAMES, WAIST_JOINT_INDICES):
+        ready = np.asarray(
+            stable_contract["waist_ready_pos_rad"][name], dtype=q_out.dtype
+        )
+        q_out[:, index] = (q[:, index] - q[0, index]) + ready
     root_pos_out = np.array(root_pos, copy=True)
     root_pos_out[:, 2] = np.asarray(
         stable_contract["root_height_m"], dtype=root_pos_out.dtype
@@ -268,11 +310,22 @@ def _replace_with_stable_stand(
     root_quat_out = np.broadcast_to(
         yaw_quat.astype(root_quat.dtype), root_quat.shape
     ).copy()
-    nonleg = np.asarray(NONLEG_JOINT_INDICES, dtype=np.int64)
-    if not np.array_equal(q_out[:, nonleg], q[:, nonleg]):
-        raise AssertionError("stable replacement changed a non-leg joint position")
-    if not np.array_equal(qd_out[:, nonleg], qd[:, nonleg]):
-        raise AssertionError("stable replacement changed a non-leg joint velocity")
+    preserved = np.asarray(PRESERVED_JOINT_INDICES, dtype=np.int64)
+    if not np.array_equal(q_out[:, preserved], q[:, preserved]):
+        raise AssertionError(
+            "stable replacement changed a preserved head/arm joint position"
+        )
+    if not np.array_equal(qd_out[:, preserved], qd[:, preserved]):
+        raise AssertionError(
+            "stable replacement changed a preserved head/arm joint velocity"
+        )
+    waist = np.asarray(WAIST_JOINT_INDICES, dtype=np.int64)
+    source_waist_delta = q[:, waist] - q[[0], waist]
+    output_waist_delta = q_out[:, waist] - q_out[[0], waist]
+    if not np.array_equal(output_waist_delta, source_waist_delta):
+        raise AssertionError("stable replacement changed a waist trajectory delta")
+    if not np.array_equal(qd_out[:, waist], qd[:, waist]):
+        raise AssertionError("stable replacement changed a waist joint velocity")
     if not np.array_equal(root_pos_out[:, :2], root_pos[:, :2]):
         raise AssertionError("stable replacement changed root X/Y")
     return q_out, qd_out, root_pos_out, root_quat_out, yaw
@@ -380,15 +433,36 @@ def materialize(args: argparse.Namespace) -> base.PublishedBundle:
         migration_provenance=base._migration_provenance(input_arrays),
     )
     output = candidate.arrays
-    nonleg = np.asarray(NONLEG_JOINT_INDICES, dtype=np.int64)
+    preserved = np.asarray(PRESERVED_JOINT_INDICES, dtype=np.int64)
+    waist = np.asarray(WAIST_JOINT_INDICES, dtype=np.int64)
     leg = np.asarray(LEG_JOINT_INDICES, dtype=np.int64)
-    if not np.array_equal(output["joint_pos"][:, nonleg], input_arrays["joint_pos"][:, nonleg]):
+    if not np.array_equal(
+        output["joint_pos"][:, preserved],
+        input_arrays["joint_pos"][:, preserved],
+    ):
         raise StableUpperMaterializationError(
-            "schema-2 rebuild changed non-leg joint positions"
+            "schema-2 rebuild changed preserved head/arm joint positions"
         )
-    if not np.array_equal(output["joint_vel"][:, nonleg], input_arrays["joint_vel"][:, nonleg]):
+    if not np.array_equal(
+        output["joint_vel"][:, preserved],
+        input_arrays["joint_vel"][:, preserved],
+    ):
         raise StableUpperMaterializationError(
-            "schema-2 rebuild changed non-leg joint velocities"
+            "schema-2 rebuild changed preserved head/arm joint velocities"
+        )
+    if not np.array_equal(
+        output["joint_pos"][:, waist] - output["joint_pos"][[0], waist],
+        input_arrays["joint_pos"][:, waist]
+        - input_arrays["joint_pos"][[0], waist],
+    ):
+        raise StableUpperMaterializationError(
+            "schema-2 rebuild changed waist trajectory deltas"
+        )
+    if not np.array_equal(
+        output["joint_vel"][:, waist], input_arrays["joint_vel"][:, waist]
+    ):
+        raise StableUpperMaterializationError(
+            "schema-2 rebuild changed waist joint velocities"
         )
     if np.count_nonzero(output["joint_vel"][:, leg]) != 0:
         raise StableUpperMaterializationError(
@@ -422,11 +496,11 @@ def materialize(args: argparse.Namespace) -> base.PublishedBundle:
     )
     site_change = _site_delta(before_trace, after_trace)
     strike = int(motion["strike_frame"])
-    motion_filename = input_path.stem + ".a3_stable_upper_v1.npz"
+    motion_filename = input_path.stem + ".a3_stable_upper_v2.npz"
     manifest_payload = base._pretty_json_bytes(candidate.manifest)
     report_payload = base._pretty_json_bytes(candidate.report)
     receipt = {
-        "schema_version": 1,
+        "schema_version": 2,
         "tool_id": TOOL_ID,
         "artifact_class": ARTIFACT_CLASS,
         "verdict": VERDICT,
@@ -461,15 +535,26 @@ def materialize(args: argparse.Namespace) -> base.PublishedBundle:
         },
         "replacement": {
             "semantics": (
-                "preserve waist/head/arm motion; replace lower-body birth and "
-                "reference with the AgiBot A3 runtime default stand; preserve "
-                "source yaw while making the root upright"
+                "preserve head/arm motion and waist trajectory deltas; rebase "
+                "waist frame-0 onto the AgiBot A3 runtime ready values; replace "
+                "lower-body birth/reference with the runtime default stand; "
+                "preserve source yaw while making the root upright"
             ),
             "source_root_z_m": float(motion["body_pos_w"][0, 0, 2]),
             "replacement_root_z_m": float(root_pos_out[0, 2]),
             "source_yaw_rad": source_yaw,
             "leg_joint_names": list(LEG_JOINT_NAMES),
             "leg_joint_indices": list(LEG_JOINT_INDICES),
+            "waist_joint_names": list(WAIST_JOINT_NAMES),
+            "waist_joint_indices": list(WAIST_JOINT_INDICES),
+            "source_waist_ready_pos_rad": [
+                float(value)
+                for value in motion["joint_pos"][0, WAIST_JOINT_INDICES]
+            ],
+            "replacement_waist_ready_pos_rad": [
+                float(value)
+                for value in output["joint_pos"][0, WAIST_JOINT_INDICES]
+            ],
             "stable_contract": base._jsonable(stable),
             "exact_a3_static_geometry_audit": grounding_audit,
         },
@@ -480,8 +565,10 @@ def materialize(args: argparse.Namespace) -> base.PublishedBundle:
             "fps_after": float(np.asarray(output["fps"]).reshape(-1)[0]),
             "strike_frame_before": strike,
             "strike_frame_after": strike,
-            "nonleg_joint_pos_all_frames_bitwise_equal": True,
-            "nonleg_joint_vel_all_frames_bitwise_equal": True,
+            "head_arm_joint_pos_all_frames_bitwise_equal": True,
+            "head_arm_joint_vel_all_frames_bitwise_equal": True,
+            "waist_joint_delta_from_frame0_all_frames_bitwise_equal": True,
+            "waist_joint_vel_all_frames_bitwise_equal": True,
             "root_xy_all_frames_bitwise_equal": True,
             "leg_joint_velocity_exact_zero": True,
             "right_racket_site_change_requires_task_rebind": site_change,

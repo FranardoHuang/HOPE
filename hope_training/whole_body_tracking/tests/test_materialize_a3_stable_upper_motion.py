@@ -1,8 +1,10 @@
 """Contract tests for the A3 stable-upper replacement producer.
 
 Exact MuJoCo and Isaac integration remains Pod-only.  These tests protect the
-pure replacement contract: only the lower twelve joints and root Z/roll/pitch
-may change, while source yaw and every non-leg joint remain intact.
+pure replacement contract: the lower twelve joints and root Z/roll/pitch move
+onto the A3 stable stand, waist trajectories are rebased onto the runtime ready
+zero while preserving their deltas, and source yaw plus head/arm motion remain
+intact.
 """
 
 from __future__ import annotations
@@ -35,11 +37,14 @@ def _stable_contract() -> dict[str, object]:
             name: 0.01 * (index + 1)
             for index, name in enumerate(materializer.LEG_JOINT_NAMES)
         },
+        "waist_ready_pos_rad": {
+            name: 0.0 for name in materializer.WAIST_JOINT_NAMES
+        },
         "provenance": {"source": "fixture"},
     }
 
 
-def test_stable_replacement_preserves_nonleg_and_source_yaw() -> None:
+def test_stable_replacement_rebases_waist_and_preserves_upper_motion() -> None:
     frames = 4
     q = np.arange(frames * 31, dtype=np.float32).reshape(frames, 31) / 100.0
     qd = -q.copy()
@@ -75,10 +80,19 @@ def test_stable_replacement_preserves_nonleg_and_source_yaw() -> None:
         )
     )
 
-    nonleg = np.asarray(materializer.NONLEG_JOINT_INDICES, dtype=np.int64)
+    preserved = np.asarray(
+        materializer.PRESERVED_JOINT_INDICES, dtype=np.int64
+    )
+    waist = np.asarray(materializer.WAIST_JOINT_INDICES, dtype=np.int64)
     leg = np.asarray(materializer.LEG_JOINT_INDICES, dtype=np.int64)
-    assert np.array_equal(q_out[:, nonleg], q[:, nonleg])
-    assert np.array_equal(qd_out[:, nonleg], qd[:, nonleg])
+    assert np.array_equal(q_out[:, preserved], q[:, preserved])
+    assert np.array_equal(qd_out[:, preserved], qd[:, preserved])
+    assert np.array_equal(q_out[0, waist], np.zeros(len(waist), dtype=np.float32))
+    assert np.array_equal(
+        q_out[:, waist] - q_out[[0], waist],
+        q[:, waist] - q[[0], waist],
+    )
+    assert np.array_equal(qd_out[:, waist], qd[:, waist])
     assert np.count_nonzero(qd_out[:, leg]) == 0
     assert np.array_equal(pos_out[:, :2], root_pos[:, :2])
     assert np.all(pos_out[:, 2] == np.float32(1.0684))
@@ -93,10 +107,13 @@ def test_stable_replacement_preserves_nonleg_and_source_yaw() -> None:
 
 def test_stable_contract_rejects_missing_leg(tmp_path: Path) -> None:
     payload = {
-        "schema_version": 1,
+        "schema_version": 2,
         "root_height_m": 1.0684,
         "lower_joint_pos_rad": {
             name: 0.0 for name in materializer.LEG_JOINT_NAMES[1:]
+        },
+        "waist_ready_pos_rad": {
+            name: 0.0 for name in materializer.WAIST_JOINT_NAMES
         },
         "provenance": {"source": "fixture"},
     }

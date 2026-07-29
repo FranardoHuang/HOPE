@@ -84,9 +84,12 @@ construction 或 PhysX start 停止前进，保留日志后按 exact PGID 关闭
 发射顺序：
 
 1. qvel-only 是已完成但被行为 probe 否决的 schema 清理，不再作为 long 输入。upper successor
-   必须保留所有非腿 q/qd、frame count/timing/strike，改用
-   `configs/a3_upper_stable_stand_v1.json`：
+   必须保留 head/arm q/qd、三腰相对 frame-0 的轨迹增量与 qd、frame
+   count/timing/strike，改用
+   `configs/a3_upper_stable_stand_v2.json`：
    - 12 个腿 qpos 使用 `AGIBOT_A3_CFG.init_state` runtime stand，腿 qd exact zero；
+   - 三腰 q 轨迹按各自 frame-0 做常量平移，使 ready 等于 runtime default 零位，但保留
+     动作增量和 qd；
    - root X/Y 和 source yaw 不变，root upright、`z=1.0684 m`；
    - exact A3 重算 body FK/velocity；racket world pose 允许随正确 root 改变，故旧 ball/task
      binding 必须全部重物化；

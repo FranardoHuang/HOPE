@@ -791,3 +791,9 @@ rubber-face center、`upper_contact_center_preserved=false`、world-Z 与
 `ready_root_z + task_z` 闭合。legacy upper corrected-Z 与 full retargeted 两条路径保持不变。
 这是 artifact schema 兼容修复，不构成 Reward/学习 A/B；下一步是 Pod focused regression 后
 串行跑两动作 `1 env×2` smoke。
+
+两条 smoke 都自然完成并产出 finite `model_0/1.pt`，但每轮都在 episode age `16--17` 由
+`waist_pitch_joint` 上侧 raw mechanical edge reset；腿/踝、q_des projection、table、fall、
+nonfinite 全为零。共同事件把 stable-upper v1 的剩余缺口缩到 frame-0 腰 ready：旧 motion 为
+`+0.103 rad`，A3 runtime default 为零。下一资产将三腰 q 轨迹整体平移到 runtime ready，逐帧
+保持相对 frame-0 增量与 qd，重建 FK/contact 后重跑同 smoke；此项不改变 Reward 或学习问题。

@@ -333,7 +333,8 @@ loop 第二轮 `2` 次，block 每轮 `1` 次，主要为踝关节。该比例�
 
 直接 successor 是 `A3 stable-upper` 合同修复，不做学习 A/B：
 
-1. 腰/head/arms 的 q/qd、frame count、timing 与 strike frame 保持；
+1. head/arms 的 q/qd、三腰相对 frame-0 的轨迹增量与 qd、frame count、timing 与 strike
+   frame 保持；三腰 frame-0 常量重基准到 A3 runtime ready 零位；
 2. 12 个腿关节改成 `AGIBOT_A3_CFG.init_state` 的官方 runtime stand，腿 qd 为零；
 3. root X/Y 与 source yaw 保持，root 改为 upright、`z=1.0684 m`；
 4. exact A3 重建全部 schema-2 FK/velocity；由于 racket world pose 会改变，旧 ball/task
@@ -342,7 +343,8 @@ loop 第二轮 `2` 次，block 每轮 `1` 次，主要为踝关节。该比例�
    越过 `t_hit`、strike 非零、raw-hard/table/fall/nonfinite 不爆炸且 checkpoint finite，才发
    finite long。
 
-`configs/a3_upper_stable_stand_v1.json` 与
+历史 v1 由 `configs/a3_upper_stable_stand_v1.json` 保留；腰部补全后的
+`configs/a3_upper_stable_stand_v2.json` 与
 `scripts/materialize_a3_stable_upper_motion.py` 已实现并在 Pod focused regression
 `12 passed`。反手拉/挡 stable-upper motion SHA-256 分别为
 `4343a85e227de02f634d99d27499df2a4fa63b93df069ea2edb44524dca075ff` 与
@@ -353,3 +355,10 @@ materializer 已改为保留来球 profile 宽度、把完整 contact box 平移
 center。两动作新 N1 bundle 均 materialize PASS，SHA-256 为 `054be7f2…` / `6973f1a3…`。
 CaT、真实 hard-edge 放宽、Beta/tanh、Reward 剂量、8192 env、full-body 与 N5/N73 均不混入
 该 successor。
+
+v1 的两动作 `1 env×2` smoke 随后给出同一反例：每轮都只在 age `16--17` 触发
+`waist_pitch_joint` 上侧 raw mechanical edge，腿/踝、q_des、table、fall 与 nonfinite 均为零，
+4 个 checkpoint finite。原因是 v1 虽替换 lower/root，却保留了旧深蹲动作 frame-0
+`waist_pitch=+0.103 rad`；A3 runtime stand 的三腰 ready 实为零。v2 因而按上述合同把三腰
+整条 q 轨迹做常量平移、保持动作增量与 qd，再重算 FK/contact。这是 v1 漏项的直接修复，不需要
+更长线或学习 A/B。

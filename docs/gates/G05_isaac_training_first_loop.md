@@ -59,6 +59,12 @@ Current-candidate promotion sub-gate (required before this Gate can close):
 
 Follow-up note (2026-07-30, qvel-fixed 4096 probe rejected; Gate remains `Partial`):
 
+- stable-upper v1 loop/block 的 Pod `1 env×2` 都自然完成且 checkpoint finite，但每轮都在
+  age `16--17` 唯一由 `waist_pitch_joint` 上侧 raw mechanical edge reset；q_des/table/fall/
+  nonfinite 和腿/踝 hard 均为零。两动作相同事件证明 lower/root replacement 生效，但 v1
+  错把旧深蹲动作 frame-0 `waist_pitch=+0.103 rad` 当成 A3 stable ready。v2 直接把三腰
+  q 轨迹按 frame-0 常量平移到 `AGIBOT_A3_CFG.init_state` 的零位，保持每帧相对增量和 qd；
+  这是同一 A3 birth/reference 修复的补全，不做学习 A/B，重建 FK/contact 后重新 smoke。
 - Pod1 已完成 `bh_loop_c` 与 `bh_block` 的 exact `4096 env × 5 update × save1`。两者 mean
   episode 约 `23/12` 步、strike opportunity 均为零；actual raw-hard 分别约
   `2.5k--4.2k/update` 与末轮约 `7.7k`。checkpoint 均 finite，q_des
@@ -68,7 +74,8 @@ Follow-up note (2026-07-30, qvel-fixed 4096 probe rejected; Gate remains `Partia
   双脚几何接触，但不是训练 implicit-PD plant 的闭环 stable hold；tracked static-ground
   receipt 此前为 `feasible=null / missing scipy`，不得写成 PASS。qvel-only 只修了 schema，
   已被行为 probe 证明不是 reset 风暴根因。
-- successor 固定为 stable-upper：非腿 q/qd、frame/timing/strike 不变；12 腿改 runtime
+- successor 固定为 stable-upper：head/arm q/qd、腰轨迹增量/qd、frame/timing/strike 不变；
+  三腰 frame-0 改 runtime ready 零位，12 腿改 runtime
   default stand，root 保 X/Y/source yaw 并改 upright、`z=1.0684 m`；exact A3 重建 FK 后
   重新物化 ball/task binding。它是正确性修复，不做学习 A/B，但仍须 Pod deterministic
   hold、`1 env×2` 与 `4096×5` 行为门。Gate 在 episode 跨过 `t_hit`、strike 非零、

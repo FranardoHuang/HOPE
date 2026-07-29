@@ -1,0 +1,29 @@
+{
+  "lower_joint_pos_rad": {
+    "left_ankle_pitch_joint": -0.1204,
+    "left_ankle_roll_joint": -0.0078,
+    "left_hip_pitch_joint": -0.1311,
+    "left_hip_roll_joint": 0.0056,
+    "left_hip_yaw_joint": -0.0348,
+    "left_knee_joint": 0.2468,
+    "right_ankle_pitch_joint": -0.1204,
+    "right_ankle_roll_joint": 0.0078,
+    "right_hip_pitch_joint": -0.1311,
+    "right_hip_roll_joint": -0.0056,
+    "right_hip_yaw_joint": 0.0348,
+    "right_knee_joint": 0.2468
+  },
+  "provenance": {
+    "model": "AgiBot A3",
+    "root_orientation": "upright with source world-Z yaw preserved",
+    "source": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/robots/agibot_a3.py::AGIBOT_A3_CFG.init_state",
+    "usage": "upper-motion physical birth and actor bootstrap; waist trajectories are rebased from their source frame-0 offsets onto the runtime ready values"
+  },
+  "root_height_m": 1.0684,
+  "schema_version": 2,
+  "waist_ready_pos_rad": {
+    "waist_pitch_joint": 0.0,
+    "waist_roll_joint": 0.0,
+    "waist_yaw_joint": 0.0
+  }
+}

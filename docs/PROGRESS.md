@@ -13,6 +13,12 @@
 
 ## 2026-07-30（A3 stable-upper successor）
 
+- stable-upper loop/block `1 env×2` smoke 均自然完成，4 个 checkpoint finite，q_des projection、
+  table、fall、nonfinite 与腿/踝 hard 均为零；但两动作都在 episode age `16--17` 唯一触发
+  `waist_pitch_joint` 上侧 raw mechanical edge，mean episode 仍仅 `16--17`、strike 为零。
+  两动作同位同龄反例定位到 successor 漏项：A3 官方 stand 的腰 ready 为零，而 v1 保留了旧
+  深蹲动作 frame-0 `waist_pitch=+0.103 rad` 绝对偏置。v2 将三腰轨迹整体重基准到 runtime
+  ready 零位，同时逐帧保持相对 frame-0 增量和 qd；需重算 FK/contact 后重跑 smoke。
 - N1 launcher 的 contact receipt validator 已扩展为同时接受两种 upper 合同：历史
   corrected-Z receipt，以及 stable-upper 把整块 contact box 重绑到 pinned strike-frame
   selected rubber-face center 的 retargeted receipt。两条路径按互斥 exact keyset 和 authority
@@ -25,7 +31,8 @@
   掩盖 plant birth。
 - exact A3 复核定位到 upper 出生合同：两动作共享 root `z=0.920683 m`、pitch
   `-11.19°` 与深蹲腿位；几何接触不等于 implicit-PD 闭环可保持。下一资产保留腰以上动作，
-  将 12 腿与 root 改到 runtime default stand（upright、`z=1.0684 m`），重建 FK 并重绑
+  将 12 腿、三腰 frame-0 ready 与 root 改到 runtime default stand（upright、`z=1.0684 m`），
+  三腰只做常量重基准而保留动作增量/速度，重建 FK 并重绑
   ball/task。稳定 stand 配置与 no-clobber materializer 已在 Pod `12 passed`；两条新 motion
   SHA 为 `4343a85e…` / `08aeafaf…`，exact A3 双脚 `3+3` 接触且 static-ground LP
   `feasible=true`。击球帧拍速保持，世界拍位变化后 N1 contact box 正在整体重绑；仍待
