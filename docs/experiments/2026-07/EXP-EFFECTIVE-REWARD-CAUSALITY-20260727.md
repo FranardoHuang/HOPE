@@ -754,3 +754,27 @@ Pod1 串行完成反手拉 `n1_qvelfix_smoke_5ecf0e06_loop_gpu1_r3` 和反手挡
 primary evidence 为 episode 是否越过各动作 `t_hit`、strike opportunity 是否非零、
 environment-steps/s，以及 actual hard/table/fall/nonfinite 的独立分账。只有该 probe 健康后，
 才启动本记录中 tracking/mimic/negative Reward 的单变量 screen。
+
+### 2026-07-30：qvel-fixed 4096 双动作反证与 stable-upper 决策
+
+Pod1 的 exact `4096 env × 5 update × save1` 已完成：
+
+| 动作 | iteration time | mean episode | actual raw-hard | strike |
+| --- | --- | --- | --- | --- |
+| `bh_loop_c` | `30.51/40.39/40.78/35.47/35.82 s` | 约 `23` steps | 约 `2.5k--4.2k/update` | `0` |
+| `bh_block` | `38.35/50.39/43.55/43.14/54.73 s` | 约 `12` steps | 末轮约 `7.7k` | `0` |
+
+两条都有逐轮 finite checkpoint；q_des projection/nonfinite 为零、table 为零、fall 很低。
+因此失败不是 Reward 还没学够，也不是 qdes clamp 失效。当前约 `2--3k
+environment-steps/s` 来自 episode 在击球帧前被 actual raw-hard reset；继续跑 long 不产生
+有意义 strike 样本。
+
+新的 A3 事实链是：两条 upper frame 0 共享深蹲腿位、root `z=0.920683 m` 与 pitch
+`-11.19°`；actor bootstrap 已正确给出该 ready，age<=1 hard 为零。故根因不是坐标跳变，而是
+“几何双脚接触的 canonical pose”被错误当成“现役 implicit-PD 闭环 stable ready”。下一唯一
+replacement 将 lower/root 改到 `AGIBOT_A3_CFG.init_state` 的 runtime stand，保留腰以上 q/qd
+并重建 exact A3 schema-2 FK；racket world pose 变化后重新物化 contact/task bundle。
+
+这是正确性 replacement，不做学习 A/B。验收顺序为 Pod source regression → deterministic
+closed-loop hold → `1 env×2` → `4096×5`；通过后立即发 finite long。Reward、reference、
+curriculum 10%、full-body 和 8192 env 的科学 canary 继续等 healthy strike baseline。

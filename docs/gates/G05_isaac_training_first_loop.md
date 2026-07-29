@@ -57,6 +57,23 @@ Current-candidate promotion sub-gate (required before this Gate can close):
 
 ## Current State
 
+Follow-up note (2026-07-30, qvel-fixed 4096 probe rejected; Gate remains `Partial`):
+
+- Pod1 已完成 `bh_loop_c` 与 `bh_block` 的 exact `4096 env × 5 update × save1`。两者 mean
+  episode 约 `23/12` 步、strike opportunity 均为零；actual raw-hard 分别约
+  `2.5k--4.2k/update` 与末轮约 `7.7k`。checkpoint 均 finite，q_des
+  projection/nonfinite 与 table 不是主因。当前约 `2--3k environment-steps/s`，故不授权
+  qvel-fixed long。
+- actual A3 birth 是 root `z=0.920683 m`、pitch `-11.19°` 加深蹲腿位。它虽有 exact MuJoCo
+  双脚几何接触，但不是训练 implicit-PD plant 的闭环 stable hold；tracked static-ground
+  receipt 此前为 `feasible=null / missing scipy`，不得写成 PASS。qvel-only 只修了 schema，
+  已被行为 probe 证明不是 reset 风暴根因。
+- successor 固定为 stable-upper：非腿 q/qd、frame/timing/strike 不变；12 腿改 runtime
+  default stand，root 保 X/Y/source yaw 并改 upright、`z=1.0684 m`；exact A3 重建 FK 后
+  重新物化 ball/task binding。它是正确性修复，不做学习 A/B，但仍须 Pod deterministic
+  hold、`1 env×2` 与 `4096×5` 行为门。Gate 在 episode 跨过 `t_hit`、strike 非零、
+  raw-hard/table/fall/nonfinite 不爆炸和 finite checkpoint 全齐前保持 `Partial`。
+
 Follow-up note (2026-07-29, `eaf55fba` raw-hard counterexample and A3 upper q/qd root cause;
 Gate remains `Partial`):
 

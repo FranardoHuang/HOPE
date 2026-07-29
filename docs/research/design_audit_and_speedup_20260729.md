@@ -309,3 +309,39 @@ loop 第二轮 `2` 次，block 每轮 `1` 次，主要为踝关节。该比例�
 健康；下一唯一收口门是 fixed `4096 env × 5 update` probe，确认 episode 能跨过各自
 `t_hit`、strike 非零，且 raw-hard/table/fall/nonfinite 没有爆炸。达到后立即发 long，不等待
 上表“先不修”项目。
+
+### 6.5 4096 probe 反证与 A3 stable-upper successor（2026-07-30）
+
+上节的 4096 门已经完成，而且**否决**了 qvel-fixed long：
+
+- 反手拉五轮 iteration 为 `30.51/40.39/40.78/35.47/35.82 s`，mean episode
+  约 `23` 步；反手挡为 `38.35/50.39/43.55/43.14/54.73 s`，mean episode
+  约 `12` 步。两者都短于 `t_hit≈31/24` 的有效击球窗口，strike opportunity 恒零；
+- q_des projection/nonfinite、table hit 基本为零，finite checkpoint 连续产出；失败主因是
+  actual raw mechanical edge。反手拉每轮约 `2.5k--4.2k` 次，反手挡末轮约 `7.7k` 次，
+  集中在左 ankle pitch 下侧、waist pitch 上侧与右 ankle roll 上侧；
+- `4096×24=98,304` environment steps/update，当前约 `2--3k steps/s`。因此不能靠
+  Reward、更多 env 或更多 GPU 掩盖 plant birth 问题，也没有必要跑更长才裁决。
+
+进一步对 exact AgiBot A3 合同的复核推翻了“grounded candidate 等于闭环稳定 ready”的假设。
+两条 upper 的 frame 0 共享深蹲下肢（knee 约 `1.17--1.20 rad`）、root
+`z=0.920683 m` 且 pitch `-11.19°`。该姿态虽然几何双脚接触，却不是现役 implicit-PD plant
+的稳定 hold：fresh actor qdes 已正确约等于该 motion ready，age<=1 hard 为零，但重力/接触后
+在 `0.24--0.48 s` 漂到真实硬边界。tracked receipt 的 static-ground 字段此前实际上是
+`feasible=null / missing scipy`，不能写成 PASS；后来得到的 infeasible 结果也不应再被忽略成
+与出生稳定性无关的纯 telemetry。
+
+直接 successor 是 `A3 stable-upper` 合同修复，不做学习 A/B：
+
+1. 腰/head/arms 的 q/qd、frame count、timing 与 strike frame 保持；
+2. 12 个腿关节改成 `AGIBOT_A3_CFG.init_state` 的官方 runtime stand，腿 qd 为零；
+3. root X/Y 与 source yaw 保持，root 改为 upright、`z=1.0684 m`；
+4. exact A3 重建全部 schema-2 FK/velocity；由于 racket world pose 会改变，旧 ball/task
+   binding 必须重新物化，禁止跨 bytes 复用；
+5. 先做 deterministic closed-loop hold，再串行跑 `1 env×2` 与 `4096×5`。只有 episode
+   越过 `t_hit`、strike 非零、raw-hard/table/fall/nonfinite 不爆炸且 checkpoint finite，才发
+   finite long。
+
+`configs/a3_upper_stable_stand_v1.json` 与
+`scripts/materialize_a3_stable_upper_motion.py` 已开始实现。CaT、真实 hard-edge 放宽、
+Beta/tanh、Reward 剂量、8192 env、full-body 与 N5/N73 均不混入该 successor。

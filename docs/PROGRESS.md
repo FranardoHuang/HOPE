@@ -11,6 +11,20 @@
 旧 1700 行记录完整保存在
 [历史 PROGRESS](experiments/archive/PROGRESS_legacy_through_2026-07-12.md)。
 
+## 2026-07-30（A3 stable-upper successor）
+
+- qvel-fixed 反手拉/挡已完成 exact `4096 env × 5 update`，但两者 mean episode 仅约
+  `23/12` 步、strike 恒零，actual raw-hard 分别约 `2.5k--4.2k/update` 与末轮
+  `7.7k/update`，吞吐约 `2--3k environment-steps/s`。finite checkpoint 正常且
+  q_des/table/fall 不是主因，故短 probe 已足够否决当前 long，不再用 Reward 或更多 env
+  掩盖 plant birth。
+- exact A3 复核定位到 upper 出生合同：两动作共享 root `z=0.920683 m`、pitch
+  `-11.19°` 与深蹲腿位；几何接触不等于 implicit-PD 闭环可保持。下一资产保留腰以上动作，
+  将 12 腿与 root 改到 runtime default stand（upright、`z=1.0684 m`），重建 FK 并重绑
+  ball/task。稳定 stand 配置与 no-clobber materializer 已进入 source，待 Pod focused
+  regression、资产物化、`1 env×2` 与 `4096×5`。详见
+  [设计/加速审计 §6.5](research/design_audit_and_speedup_20260729.md#65-4096-probe-反证与-a3-stable-upper-successor2026-07-30)。
+
 ## 2026-07-30（A3 upper qvel-only 资产物化）
 
 - Pod1 已让 qvel-fixed 反手拉/挡分别自然完成 `1 env × 2 update`；iteration 为

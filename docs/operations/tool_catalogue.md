@@ -63,6 +63,7 @@
 | 工具 | 干什么 | 退出码 | 调用 |
 | --- | --- | --- | --- |
 | `canonical_motion_compile_cli.py` | 编译入口。**过了它不授权训练/部署/硬件** | 2 | 工序 |
+| `materialize_a3_stable_upper_motion.py` | A3 upper 保留腰以上动作，把 lower/root 重建到 runtime stable stand；**拍位变化后必须重绑球题** | 2 | [工序](run_ablation_wave_launch.md#actionball-a3-upper-qqd-修复与-hot-path-快线) |
 | `canonical_motion_bank_gate.py` | **独立复核器**——编译器不许给自己发证，必须从 exact bytes 重算 | 2 | 工序 |
 | `canonical_mujoco_dynamics_gate.py` | 逆动力学筛查。浮动基 fail-closed：λ 未定则 τ 未定，那 31 行只叫 `joint_effort_proxy` | 2 | 工序 |
 | `canonical_face_manifold.py` | 七关节有符号拍面流形，保持 site 世界位置 | 2 | 工序 |

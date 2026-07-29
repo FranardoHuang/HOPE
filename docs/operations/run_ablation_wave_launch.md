@@ -75,30 +75,39 @@ construction 或 PhysX start 停止前进，保留日志后按 exact PGID 关闭
 `eaf55fba` 已把 recoverable 2%-inner occupancy 从 Done 中拆出，但 Pod1 4096-env 前五轮仍有
 `2.5k--4.2k/update` 的 raw-hard terminal，且 q_des projection/nonfinite 为零、episode 未到
 `t_hit`。当前禁止继续靠放宽 actual hard edge、加 env 或改 Reward 掩盖该反例。旧
-`canonical_ready_v1` 的零脚接触只描述 donor 本身，不能外推现役 upper：实际 upper 的 12 个
-腿 qpos 已等于 exact AgiBot A3 grounded-ready candidate，A3 MuJoCo frame 0 双脚 `3+3`
-接触；缺陷是恒定腿 qpos 对应的腿 qvel 非零。`candidate_id=G1` 只是 A3 候选代号，不是机器人
-型号。
+`canonical_ready_v1` 的零脚接触只描述 donor 本身，不能外推现役 upper。qvel-only successor
+虽修正了恒定腿 qpos 与 stale qvel 的 schema 矛盾，但后续双动作 4096×5 已证明它不是 reset
+根因：loop/block episode 约 `23/12` 步、strike 恒零，actual raw-hard 仍爆炸。真正合同缺陷是
+该几何双脚接触的深蹲前倾 pose 不是 exact A3 runtime implicit-PD 的闭环 stable hold。
+`candidate_id=G1` 只是 A3 候选代号，不是机器人型号。
 
 发射顺序：
 
-1. upper 快线若不走完整 compiler，只能保持所有 qpos/root/timing 不变，把 12 个恒定腿 qpos
-   对应的 stale qvel 归零，并重算 body FK/velocity。必须由产物 receipt 证明：
+1. qvel-only 是已完成但被行为 probe 否决的 schema 清理，不再作为 long 输入。upper successor
+   必须保留所有非腿 q/qd、frame count/timing/strike，改用
+   `configs/a3_upper_stable_stand_v1.json`：
+   - 12 个腿 qpos 使用 `AGIBOT_A3_CFG.init_state` runtime stand，腿 qd exact zero；
+   - root X/Y 和 source yaw 不变，root upright、`z=1.0684 m`；
+   - exact A3 重算 body FK/velocity；racket world pose 允许随正确 root 改变，故旧 ball/task
+     binding 必须全部重物化；
+   - 输出目录 no-clobber、receipt last、三类 authorization false。
+   Pod deterministic hold 与训练 smoke 必须证明该 plant birth 至少稳定跨过 `t_hit+margin`。
+2. 历史 qvel-only receipt 仍须诚实保留以下已验证事实，但不得再外推成稳定性证书：
    - exact A3 上双脚接触、joint limit 与 unsupported/self-collision 检查 PASS；
-     零速度/零加速度 static-contact LP 必须原样记入 receipt，但不作为动态挥拍诊断训练门；
+     static-contact LP 必须原样记入 receipt；`feasible=null/missing scipy` 不得写成 PASS；
    - 所有 joint qpos、root、frame count、strike frame 不变；
    - 每帧 `right_racket` site position/orientation/linear/angular velocity 不变；
    - 首末 joint/root/body velocity exact zero；
    - 输出目录 no-clobber、report last、三类 authorization false。
-   只替换 frame 0 或只改 spawn 一律拒绝。
-2. full scope 不允许此快线；必须完整重编
+3. full scope 不允许此 upper replacement；必须完整重编
    `grounded ready → selected core/window → grounded ready`，再重跑 aim/phase/physical-strike
    binding。旧 fivebind 的 SHA、帧号、旋转和证书不能跨 bytes 继承。
-3. 新 upper bundle 先自然跑 `1 env × 2 update`；通过后 fresh 4096-env 只跑五轮定位。必须记录
+4. 新 upper bundle 先自然跑 `1 env × 2 update`；通过后 fresh 4096-env 只跑五轮定位。必须记录
    mean episode、strike opportunity、raw-hard/table/fall/nonfinite、q_des projection、
    collection seconds、environment-steps/s 和 finite checkpoint。episode 未越过 `t_hit` 或
    strike 仍为零时不得发 long。
-4. q/qd 一致性修复无需 old/new 学习 A/B；它的验收是上面不变量与行为门。若修复后仍有
+5. stable-upper 是 birth/reference/actor 合同修复，无需 old/new 学习 A/B；它的验收是上面
+   不变量与行为门。若修复后仍有
    mass raw-hard，才允许一条 birth-only、substep-only、policy-step 末已恢复的 diagnostic
    canary；task phase/current-post edge/nonfinite 继续 Done。
 
