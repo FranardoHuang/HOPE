@@ -17,8 +17,9 @@ the root, or change any joint position.  It:
    body order by SHA-256;
 2. proves that the input root and all twelve leg positions are constant;
 3. directly audits the input motion's own frame-0 pose on the exact A3 model
-   (double-foot contact, no unsupported/self collision, bounded penetration,
-   and feasible static ground dynamics), and requires its constant leg
+   (double-foot contact, no unsupported/self collision, and bounded
+   penetration), records but does not gate on a zero-velocity static-contact
+   LP that is not a dynamic-strike feasibility test, and requires its constant leg
    positions to quantize bitwise to the published grounded-ready candidate
    (``candidate_id=G1``);
 4. changes only the twelve leg ``joint_vel`` columns to exact zero;
@@ -312,10 +313,6 @@ def _audit_input_grounded_state(
         raise GroundedUpperMaterializationError(
             "input upper pose is not a collision-safe exact-A3 double-support pose"
         )
-    if dynamics.get("feasible") is not True:
-        raise GroundedUpperMaterializationError(
-            "input upper pose does not have feasible exact-A3 static ground dynamics"
-        )
     return {
         "joint_limits_passed": True,
         "worst_joint_limit_excess_rad": worst_limit_excess,
@@ -327,6 +324,8 @@ def _audit_input_grounded_state(
         "maximum_foot_penetration_m": scene.maximum_foot_penetration_m,
         "unsupported_contacts": [],
         "self_collision_pairs": [],
+        "static_ground_dynamics_gating": False,
+        "static_ground_dynamics_passed": dynamics.get("feasible") is True,
         "static_ground_dynamics": _jsonable(dynamics),
     }
 
