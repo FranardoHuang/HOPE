@@ -22,7 +22,12 @@
   loop/block motion SHA 为 `0fa46ad6…` / `cc9bbccd…`，双脚 `3+3`、static LP
   `feasible=true`，击球帧拍速为 `1.8181/1.6422 m/s`。需重绑 contact 后重跑 smoke。
   N1 contact producer 已切到 v2 exact bytes，并把 runtime-site finite-difference 速度更新为
-  `1.8083/1.5947 m/s`；下一步在 Pod 物化新的 content-addressed bundle。
+  `1.8083/1.5947 m/s`。Pod N1 focused regression `11 passed, 2 deselected`；v2 loop/block
+  bundle SHA 为 `85c7a276…` / `09d0dea3…`，均 materialize PASS。
+- 历史早期恢复审计没有找到 fresh 0--300 update 对照；唯一近邻 `s1w4_M2_v4rg` 是从
+  `model_13000` 连 optimizer warm-resume，恢复后第 2--12 update 才跨击球窗。故 `4096×5`
+  只否决当前 setting 直接 long 的资格，不证明 fresh policy 长线永不可恢复。stable-ready
+  probe 健康后先跑 `100--300` update fresh recovery，再据 strike/raw-hard 趋势续 long。
 - N1 launcher 的 contact receipt validator 已扩展为同时接受两种 upper 合同：历史
   corrected-Z receipt，以及 stable-upper 把整块 contact box 重绑到 pinned strike-frame
   selected rubber-face center 的 retargeted receipt。两条路径按互斥 exact keyset 和 authority

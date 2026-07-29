@@ -366,3 +366,14 @@ v1 的两动作 `1 env×2` smoke 随后给出同一反例：每轮都只在 age 
 `cc9bbccd1b5b6207a0ce9677944ba27fa4a062a1eaa61886d802c9d21830caa0`，均为双脚
 `3+3` 接触且 static LP `feasible=true`。击球帧 site speed 为 `1.8181/1.6422 m/s`，
 因此仍须重绑 task，不能复用 v1 bundle。
+
+v2 N1 producer 的 Pod focused regression 为 `11 passed, 2 deselected`；loop/block bundle
+SHA-256 为 `85c7a27607b6afa74276653a76cc3fdfd843b5a18b91bebd9e041fe5f3f93627` /
+`09d0dea31f5e220cdd917f5f0863da5c9d5b5974d1863d6bbd0da1d91c88afdd`，均
+materialize PASS。
+
+历史审计同时收窄了五轮 probe 的解释：保留的 `s1w4_M2_v4rg` 是从 `model_13000` 连 optimizer
+warm-resume 的旧两动作 run，恢复后约第 2--12 update 才跨击球窗；没有 fresh 0--300 update
+历史日志。因此五轮足以发现当前 raw-hard/sample-starvation 并拒绝直接 long，却不能证明 fresh
+policy 永远无法自救。stable-ready 的 4096×5 健康后，下一判别应是 fresh 100--300 update
+recovery；strike 出现且 raw-hard 下降才续 20k。

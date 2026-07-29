@@ -800,3 +800,10 @@ nonfinite 全为零。共同事件把 stable-upper v1 的剩余缺口缩到 fram
 v2 producer 已在 Pod focused test `2 passed`；loop/block motion SHA 为 `0fa46ad6…` /
 `cc9bbccd…`，双脚 `3+3` 且 static LP `feasible=true`。击球帧拍速改为
 `1.8181/1.6422 m/s`，所以 v1 contact/bundle/policy recipe 均不得复用。
+v2 N1 contact producer 的 Pod focused regression 为 `11 passed, 2 deselected`；
+loop/block bundle SHA 为 `85c7a276…` / `09d0dea3…`，materialize PASS。
+
+保留历史日志未提供 fresh 0--300 update 对照；唯一近邻 `s1w4_M2_v4rg` 是
+`model_13000`+optimizer warm-resume，并在恢复后第 2--12 update 出现 strike。故前五轮只用于
+拒绝当前 long 资格和定位 sample starvation，不作“长线永不可学习”结论。stable probe 通过后
+预注册 fresh 100--300 update recovery，再决定是否续 long。

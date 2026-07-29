@@ -69,7 +69,14 @@ Follow-up note (2026-07-30, qvel-fixed 4096 probe rejected; Gate remains `Partia
   static LP `feasible=true`，重建 contact 后重新 smoke。
 - N1 contact producer 已钉到 stable-upper v2 exact bytes；声明的 runtime-site
   finite-difference task-contact speed 为 loop `1.8083184461 m/s`、block `1.5947043195 m/s`。
-  v2 bundle/policy receipt 尚未物化，故当前仍不可发 probe/long。
+  Pod focused regression 为 `11 passed, 2 deselected`；v2 loop/block bundle SHA 为
+  `85c7a276…` / `09d0dea3…` 且 materialize PASS。policy receipt 尚未物化，故当前仍不可发
+  probe/long。
+- 历史最接近的“早期能恢复”run 是 warm-resumed `s1w4_M2_v4rg`，不是 fresh N1：它从
+  `model_13000` 恢复 optimizer，约第 2--12 update 才出现 strike。保留日志没有 fresh
+  0--300 update。因此五轮 probe 的结论严格限定为“当前发射不具备 long 资格/存在击球前样本
+  饥饿”，不得写成“policy 永远学不会”；stable probe 通过后用 fresh 100--300 update recovery
+  决定是否续 long。
 - Pod1 已完成 `bh_loop_c` 与 `bh_block` 的 exact `4096 env × 5 update × save1`。两者 mean
   episode 约 `23/12` 步、strike opportunity 均为零；actual raw-hard 分别约
   `2.5k--4.2k/update` 与末轮约 `7.7k`。checkpoint 均 finite，q_des
