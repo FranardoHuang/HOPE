@@ -1200,6 +1200,12 @@ def test_v3_plan_binds_exact_commit_runtime_recipe_and_claim(
     )
     assert "task.rewards.full_body_mimic=false" in training_argv
     assert "task.rewards.full_body_mimic" in M._OWNED_OVERRIDE_KEYS
+    assert "algo.policy.init_noise_std=0.02" in training_argv
+    assert "action_ball_shared_ready_bootstrap=true" in training_argv
+    assert "+task.racket.reference_guard_mode=metrics_only" in training_argv
+    assert "algo.policy.init_noise_std" in M._OWNED_OVERRIDE_KEYS
+    assert "action_ball_shared_ready_bootstrap" in M._OWNED_OVERRIDE_KEYS
+    assert "task.racket.reference_guard_mode" in M._OWNED_OVERRIDE_KEYS
     assert (
         "expected_effective_reward_recipe_sha256="
         + launch_fixture.reward_sha

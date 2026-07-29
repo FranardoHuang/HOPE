@@ -358,6 +358,22 @@ def _convert_fixture_to_full(exact_repo, spec: dict) -> Path:
     prototype_path = repo / bundle["prototype"]["path"]
     prototype = json.loads(prototype_path.read_text())
     prototype["scopes"] = {"full": prototype["scopes"].pop("upper")}
+    prototype["provenance"] = {
+        "full_solver_admission_preflight": {
+            "schema_version": 1,
+            "kind": "full_fixed_action_exact_solver_admission_preflight_v1",
+            "proposal_count": 512,
+            "admitted_count": 511,
+            "rejected_count": 1,
+            "admit_rate": 511 / 512,
+            "diagnostic_gate": {
+                "status": "PASS",
+                "environment_count": 4096,
+                "runtime_per_birth_redraw_replay": False,
+                "zero_admission_canary_group_count": 0,
+            },
+        }
+    }
     prototype_path.write_bytes(_canonical(prototype))
     prototype_sha = hashlib.sha256(prototype_path.read_bytes()).hexdigest()
     bundle["prototype"]["scope"] = "full"
@@ -435,7 +451,7 @@ def test_plan_binds_exact_three_reward_profiles_and_no_override_seam(
     assert payload["formal_evidence_prohibited"] is True
     assert payload["curriculum_promotion_prohibited"] is True
     assert "task.racket.action_ball_diagnostic_unauthorized=true" in argv
-    assert "task.racket.reference_guard_mode=metrics_only" in argv
+    assert "+task.racket.reference_guard_mode=metrics_only" in argv
     assert "task.actor_obs_contract=action_ball_n1" in argv
     assert "algo.policy.init_noise_std=0.02" in argv
     assert "action_ball_shared_ready_bootstrap=true" in argv
@@ -471,6 +487,15 @@ def test_full_scope_is_diagnostic_only_and_enables_full_body_mimic(exact_repo):
     assert payload["diagnostic_unauthorized"] is True
     assert payload["formal_evidence_prohibited"] is True
     assert payload["bundle"]["contact_alignment"]["status"] == "PASS"
+    assert payload["bundle"]["full_solver_admission_preflight"] == {
+        "schema_version": 1,
+        "kind": "full_fixed_action_exact_solver_admission_preflight_v1",
+        "proposal_count": 512,
+        "admitted_count": 511,
+        "rejected_count": 1,
+        "admit_rate": 511 / 512,
+        "diagnostic_status": "PASS",
+    }
     assert "task.rewards.full_body_mimic=true" in payload["training_argv"]
     assert "task.rewards.full_body_mimic=false" not in payload["training_argv"]
 
@@ -484,6 +509,8 @@ def test_full_scope_is_diagnostic_only_and_enables_full_body_mimic(exact_repo):
         ("contact_scope", "contact receipt scope differs"),
         ("diagnostic_only", "frozen-action contact alignment only"),
         ("training_authorized", "frozen-action contact alignment only"),
+        ("preflight_missing", "missing exact solver admission provenance"),
+        ("preflight_status", "diagnostic gate is not PASS"),
     ],
 )
 def test_full_scope_rejects_scope_or_diagnostic_claim_drift(
@@ -514,6 +541,25 @@ def test_full_scope_rejects_scope_or_diagnostic_claim_drift(
         artifact_path.write_bytes(_canonical(artifact))
         bundle["contact_alignment"]["sha256"] = hashlib.sha256(
             artifact_path.read_bytes()
+        ).hexdigest()
+    elif tamper in {"preflight_missing", "preflight_status"}:
+        artifact_path = repo / bundle["prototype"]["path"]
+        artifact = json.loads(artifact_path.read_text())
+        if tamper == "preflight_missing":
+            artifact.pop("provenance")
+        else:
+            artifact["provenance"]["full_solver_admission_preflight"][
+                "diagnostic_gate"
+            ]["status"] = "FAIL"
+        artifact_path.write_bytes(_canonical(artifact))
+        prototype_sha = hashlib.sha256(artifact_path.read_bytes()).hexdigest()
+        bundle["prototype"]["sha256"] = prototype_sha
+        manifest_path = repo / bundle["manifest"]["path"]
+        manifest = json.loads(manifest_path.read_text())
+        manifest["prototype"]["sha256"] = prototype_sha
+        manifest_path.write_bytes(_canonical(manifest))
+        bundle["manifest"]["sha256"] = hashlib.sha256(
+            manifest_path.read_bytes()
         ).hexdigest()
     else:
         bundle["claims"][tamper] = tamper != "diagnostic_only"

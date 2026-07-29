@@ -1971,7 +1971,10 @@
   107 项全过。随后从该 commit 生成 profile pins（文件 SHA-256
   `47a00a6a...30488`）和 loop/block 的 upper/full 四份 N=1 bundle。upper 均 PASS；full
   loop 为 `511/512=99.80%`，full block 为 `443/512=86.52%`（diagnostic PASS、formal
-  canary 阈值未过）。这些只解锁 Pod 真实 smoke，不是训练效果或 Gate 晋级结论；精确工件与边界见
+  canary 阈值未过）。Pod 首次真实 compose 随即抓到 N1 launcher 对未声明键少写 Hydra `+`；
+  已修成 `+task.racket.reference_guard_mode=metrics_only`，同时把 bootstrap/std/reference 三项
+  接入 N5 formal launcher，并让 full launcher 拒绝无 solver preflight PASS 的旧 bundle，相关
+  launcher 回归 `80 passed`。这些只解锁 Pod 真实 smoke，不是训练效果或 Gate 晋级结论；精确工件与边界见
   [Reward 因果实验记录](experiments/2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md)。
 - `curr-launch-fix` 功能分支完成 ActionBall reset/吞吐复盘，并形成下一 fresh wave 候选；这不改变
   `origin/main` 的 `docs/NOW.md` 权威状态。旧 v2 也曾在早期由 `ee_body_pos` 产生

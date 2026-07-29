@@ -267,6 +267,8 @@ _OWNED_OVERRIDE_KEYS = frozenset(
         "training_launch_claim_path",
         "training_launch_claim_sha256",
         "expected_effective_reward_recipe_sha256",
+        "action_ball_shared_ready_bootstrap",
+        "algo.policy.init_noise_std",
         "algo.runner.save_interval",
         "task.experiment_name",
         "task.actor_obs_contract",
@@ -291,6 +293,7 @@ _OWNED_OVERRIDE_KEYS = frozenset(
         "task.racket.action_ball_evaluation_run_id",
         "task.racket.action_ball_frozen_eval_interval_updates",
         "task.racket.action_ball_diagnostic_unauthorized",
+        "task.racket.reference_guard_mode",
         "task.racket.action_ball_seed",
         "task.motion.canonical_registry_path",
         "task.motion.canonical_registry_repo_root",
@@ -3790,6 +3793,8 @@ def _build_train_argv(
         "--",
         "task=HOPEPingPongActionBall",
         "algo=ppo",
+        "algo.policy.init_noise_std=0.02",
+        "action_ball_shared_ready_bootstrap=true",
         "headless=true",
         "video=false",
         # CUDA_VISIBLE_DEVICES is rebuilt from the physical index by the
@@ -3863,6 +3868,7 @@ def _build_train_argv(
             f"{stage_row['frozen_eval_interval_updates']}"
         ),
         "task.racket.action_ball_diagnostic_unauthorized=false",
+        "+task.racket.reference_guard_mode=metrics_only",
         f"task.racket.action_ball_seed={seed}",
         f"task.motion.canonical_registry_path={registry_relative}",
         f"task.motion.canonical_registry_repo_root={checkout}",

@@ -494,3 +494,10 @@ full post-solver 固定 512 proposal 预飞分别为 loop `511/512=99.80%`（1 �
 候选，不能冒充 formal curriculum/admission 证据。下一证据必须来自 clean Pod exact checkout 的
 真实 effective Reward/PPO receipt、`1 env × 2 update` finite checkpoint 和 4096-env
 collection/reset 账。
+
+第一次 Pod 真实 Hydra compose 在 Kit 前发现 N1 launcher 将未在 task YAML 声明的
+`reference_guard_mode` 写成普通 override；正确 canonical token 是
+`+task.racket.reference_guard_mode=metrics_only`。follow-up 同时把
+`init_noise_std=0.02`、shared-ready bootstrap 和 metrics-only 接入 formal N5 launcher，并把这三项
+列入 launcher-owned keys；full N1 launcher 新增 prototype 内 solver preflight PASS 门，旧的无
+provenance bundle 不再可能进入 birth。两套 launcher 联合回归为 `80 passed`。

@@ -3562,3 +3562,7 @@ bundle SHA 分别为 `29adc3cf...c85c4`、`fb1ed6ee...b6c5a`；full loop/block �
 
 这些仍是 E1 source/config 证据。尚未取得 clean Pod 的 live Reward/PPO/hard-contract receipt、
 真实两 update checkpoint 或 4096-env reset/吞吐，因此 G05 继续 `Partial`。
+
+Pod 第一次真实 compose 还发现 N1 reference override 少了 Hydra `+`；follow-up 已修正，并把
+bootstrap/std/reference 三项补入 N5 formal launcher、把 full solver-preflight PASS 变成 N1
+launcher 硬门。launcher 联合回归 `80 passed`，但尚未重跑 Pod smoke，所以证据等级不变。

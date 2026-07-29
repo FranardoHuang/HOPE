@@ -85,6 +85,12 @@ policy/runtime hard contract 和 canonical argv 中同时回读：
 4. nonfinite raw q_des、实际关节 hard-limit、ballistic/substep crossing、table hit 和 fall 仍各自
    hard reset，不能被 reference mode 或 projection 开关屏蔽。
 
+N=1 launcher 的 canonical Hydra argv 必须逐字包含
+`+task.racket.reference_guard_mode=metrics_only`。该键不在 task YAML 中，少写 `+` 会在 compose
+阶段失败；不能把 source-level argv 测试当作真实 Hydra 通过。full scope 还必须从 prototype
+回读 `full_solver_admission_preflight.diagnostic_gate.status=PASS`，缺该 provenance 的旧 bundle
+一律拒绝。
+
 每轮同时记录 per-joint projection trigger、正负侧、投影前 mean/max excess 和执行值恰好贴边的
 saturation fraction。触发率下降只能说明候选趋势；冻结 policy、把 projection penalty 置零后复测
 仍低，才说明 policy 自己学会了限位。CaT 连续违规调制和 PPO policy-mean bound loss 会改变训练

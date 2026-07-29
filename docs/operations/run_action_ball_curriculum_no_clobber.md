@@ -30,6 +30,18 @@ filtered-contact table smoke、motion admission、prelaunch safety attestation�
 因此本页记录的是 **schema V3 的发射合同与命令**，不是“已跑”。只有本页列出的输入和阶段门
 闭合后，才允许按 `smoke → canary → long` 顺序推进。
 
+formal N5 trainer argv 还固定拥有三项 fresh 语义，caller 不能从 `extra_overrides` 改写：
+
+```text
+algo.policy.init_noise_std=0.02
+action_ball_shared_ready_bootstrap=true
++task.racket.reference_guard_mode=metrics_only
+```
+
+第三项必须带 Hydra 的 `+`，因为 task YAML 不预声明该键；写成普通 override 会在 Kit 前的
+Hydra compose 直接失败。shared-ready bootstrap 仅适用于这里的 exact N=5 共用 ready 动作集，
+不是 N=73/N=93 的默认。
+
 ## 唯一动作身份
 
 正式顺序逐字固定为：

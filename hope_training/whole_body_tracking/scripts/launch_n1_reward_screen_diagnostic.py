@@ -915,6 +915,95 @@ def _validate_bundle(
         raise LaunchRefused(
             "N1 prototype document must contain exactly the spec scope"
         )
+    full_solver_preflight = None
+    if expected_scope == "full":
+        provenance = prototype.get("provenance")
+        if type(provenance) is not dict:
+            raise LaunchRefused(
+                "full N1 prototype is missing exact solver admission provenance"
+            )
+        preflight = provenance.get("full_solver_admission_preflight")
+        if type(preflight) is not dict:
+            raise LaunchRefused(
+                "full N1 prototype is missing full_solver_admission_preflight"
+            )
+        if (
+            preflight.get("schema_version") != 1
+            or preflight.get("kind")
+            != "full_fixed_action_exact_solver_admission_preflight_v1"
+        ):
+            raise LaunchRefused(
+                "full N1 solver admission preflight has an unknown schema/kind"
+            )
+        proposal_count = _plain_int(
+            preflight.get("proposal_count"),
+            name="full solver preflight proposal_count",
+            minimum=1,
+        )
+        admitted_count = _plain_int(
+            preflight.get("admitted_count"),
+            name="full solver preflight admitted_count",
+            minimum=1,
+            maximum=proposal_count,
+        )
+        rejected_count = _plain_int(
+            preflight.get("rejected_count"),
+            name="full solver preflight rejected_count",
+            minimum=0,
+            maximum=proposal_count,
+        )
+        if admitted_count + rejected_count != proposal_count:
+            raise LaunchRefused(
+                "full N1 solver admission counts do not conserve proposals"
+            )
+        admit_rate = preflight.get("admit_rate")
+        if (
+            isinstance(admit_rate, bool)
+            or not isinstance(admit_rate, (int, float))
+            or not math.isfinite(float(admit_rate))
+            or not math.isclose(
+                float(admit_rate),
+                admitted_count / proposal_count,
+                rel_tol=0.0,
+                abs_tol=1.0e-15,
+            )
+        ):
+            raise LaunchRefused(
+                "full N1 solver admission rate differs from exact counts"
+            )
+        diagnostic_gate = preflight.get("diagnostic_gate")
+        if type(diagnostic_gate) is not dict:
+            raise LaunchRefused(
+                "full N1 solver admission diagnostic gate is missing"
+            )
+        if (
+            diagnostic_gate.get("status") != "PASS"
+            or diagnostic_gate.get("runtime_per_birth_redraw_replay") is not False
+            or _plain_int(
+                diagnostic_gate.get("environment_count"),
+                name="full solver preflight diagnostic environment_count",
+                minimum=1,
+            )
+            != 4096
+            or _plain_int(
+                diagnostic_gate.get("zero_admission_canary_group_count"),
+                name="full solver preflight zero-admission group count",
+                minimum=0,
+            )
+            != 0
+        ):
+            raise LaunchRefused(
+                "full N1 solver admission diagnostic gate is not PASS"
+            )
+        full_solver_preflight = {
+            "schema_version": 1,
+            "kind": preflight["kind"],
+            "proposal_count": proposal_count,
+            "admitted_count": admitted_count,
+            "rejected_count": rejected_count,
+            "admit_rate": float(admit_rate),
+            "diagnostic_status": "PASS",
+        }
     manifest_pin, manifest = _load_tracked_json(
         checkout,
         commit_sha,
@@ -1009,6 +1098,13 @@ def _validate_bundle(
         "manifest": manifest_pin,
         "contact_alignment": contact_pin,
         "contact_summary": contact_summary,
+        **(
+            {}
+            if full_solver_preflight is None
+            else {
+                "full_solver_admission_preflight": full_solver_preflight
+            }
+        ),
     }
 
 
@@ -1154,7 +1250,7 @@ def _build_training_argv(
             f"{spec['policy_contract_sha256']}"
         ),
         "task.racket.action_ball_diagnostic_unauthorized=true",
-        "task.racket.reference_guard_mode=metrics_only",
+        "+task.racket.reference_guard_mode=metrics_only",
         f"task.racket.action_ball_seed={spec['seed']}",
         "task.racket.question_bank=",
         "task.racket.question_bank_allow_legacy=false",
