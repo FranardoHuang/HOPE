@@ -1,0 +1,59 @@
+{
+  "action_id": "bh_block",
+  "action_uid": 1076176358149218,
+  "artifact_type": "n1_contact_training_bundle_v1",
+  "claims": {
+    "action_identity_frozen_before_ball_sampling": true,
+    "baseline_crossing_claim": false,
+    "contact_alignment_claim": true,
+    "deployment_claim": false,
+    "diagnostic_only": true,
+    "landing_claim": false,
+    "post_bounce_claim": false,
+    "selector_executed": false,
+    "training_authorized": false
+  },
+  "contact_alignment": {
+    "path": "configs/n1_contact_20260729/bh_block.full.contact_alignment.v1.0b7aa90e0c4a.json",
+    "schema_version": 1,
+    "sha256": "0b7aa90e0c4afe2868e23e7a3e025e75c37222ab182f0975eabd04640c2a0e62",
+    "status": "PASS"
+  },
+  "geometry": {
+    "kind": "exact_face_contact_v2",
+    "path": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/tracking/mdp/racket_contact_geometry.py",
+    "payload_sha256": "3e91be97fcf9c23be1e34b8fd3d6916e8cd1d66ea48e13ea35cedb6d8c839e29",
+    "sha256": "fcaf64acdfe197b872596c871927bec6a30321a2f162f71c84af35ef5ebbdea9"
+  },
+  "manifest": {
+    "action_order": [
+      "bh_block"
+    ],
+    "path": "configs/n1_contact_20260729/bh_block.full.manifest.v3.da78b8407b2a.json",
+    "schema_version": 3,
+    "sha256": "da78b8407b2afb33923a3957dbaadb6f0ec69e30eae83cf347a394867560729b"
+  },
+  "motion": {
+    "path": "motions/fivebind_n5_20260728/bh_block_full_full_fivebind.npz",
+    "sha256": "12a6c5b7914dc2d023bbd0447fab41ccc80de7d1be0bb4a8018a98e453dceefa"
+  },
+  "profile_pins": {
+    "geometry_payload_sha256": "3e91be97fcf9c23be1e34b8fd3d6916e8cd1d66ea48e13ea35cedb6d8c839e29",
+    "path": "configs/n1_contact_20260729/action_ball_profile_pins.v1.b1d299e1.json",
+    "physics_profile_sha256": "aa5c9085f9b48ca65b3a0ee2cbb35588a5e85a08e84dc3f2ce552d3ef4af85b7",
+    "sha256": "47a00a6a35ea4709603634deeb062febc3a6e7bb2b9f57aab5c573781d330488",
+    "solver_profile_sha256": "33500a54d020d5a264536e2feac3a90a13e80c88e38cdd0fe468b3d5a54e457e"
+  },
+  "prototype": {
+    "path": "configs/n1_contact_20260729/bh_block.full.prototype.v2.78197997baf2.json",
+    "schema_version": 2,
+    "scope": "full",
+    "sha256": "78197997baf2dcc2d1dfc6a0a1dde0863e26bfc847f84bc9ac8153fe16634c93"
+  },
+  "schema_version": 1,
+  "scope": "full",
+  "source_manifest": {
+    "path": "configs/action_ball_n5_nomove_f10_20260728.json",
+    "sha256": "0b640f5d7b2d35895d1a4696635e3a256f2a32341778ad586d828d677317e2b7"
+  }
+}

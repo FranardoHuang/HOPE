@@ -465,3 +465,32 @@ reset。为了避免 clipped-action aliasing，新增
 CaT（连续违规量调制 Reward/termination、仿真不中断）和 PPO policy-mean bound loss 都是合理后续；
 它们会改变训练目标或 runner，今晚先不叠加。先用 execution projection + raw excess Reward 验证
 block reset/吞吐与任务学习，再据饱和遥测决定是否购买下一层机制。
+
+### 2026-07-29：`b1d299e1` 发射工件
+
+候选实现已固定为 exact
+`b1d299e1e57bd0909aa402ca2701b3901975337b` 并推送到 `curr-launch-fix`。除上一节语义外，
+immutable schema-3 hard contract 现在只允许 ActionBall runtime fact
+`finite_preclamp_qdes_projection_enabled=true`；配置/runtime 漂移、缺字段、非布尔值或 resume
+切回旧语义都会 fail closed。nonfinite raw q_des 仍终止，但其名义投影会先锚到有限 brake target，
+因此 RewardManager 在 reset 应用前读取投影距离也不会传播 NaN。
+
+host 整合回归为 `589 passed, 1 failed`；唯一失败是新增测试漏 `import math`，修正后包含该测试与
+完整 schema-3 合同的 `107 passed`，另有 `py_compile` 与 `git diff --check` PASS。物化使用：
+
+- profile pins：
+  [`action_ball_profile_pins.v1.b1d299e1.json`](../../../configs/n1_contact_20260729/action_ball_profile_pins.v1.b1d299e1.json)，
+  文件 SHA-256 `47a00a6a35ea4709603634deeb062febc3a6e7bb2b9f57aab5c573781d330488`；
+- upper loop/block bundle：
+  [`29adc3cf...c85c4`](../../../configs/n1_contact_20260729/bh_loop_c.bundle.v1.29adc3cf69f9.json) /
+  [`fb1ed6ee...b6c5a`](../../../configs/n1_contact_20260729/bh_block.bundle.v1.fb1ed6ee4371.json)；
+- full loop/block bundle：
+  [`d94c7f0a...223a2`](../../../configs/n1_contact_20260729/bh_loop_c.full.bundle.v1.d94c7f0a79f0.json) /
+  [`ca13d958...2f0f`](../../../configs/n1_contact_20260729/bh_block.full.bundle.v1.ca13d9583ef5.json)。
+
+full post-solver 固定 512 proposal 预飞分别为 loop `511/512=99.80%`（1 个
+`resid_gt_tol`）与 block `443/512=86.52%`（69 个 `resid_gt_tol`）。两者 diagnostic status
+均 PASS；block 的 formal rate threshold 为 FAIL，所以本轮最多作为固定 level-0 diagnostic
+候选，不能冒充 formal curriculum/admission 证据。下一证据必须来自 clean Pod exact checkout 的
+真实 effective Reward/PPO receipt、`1 env × 2 update` finite checkpoint 和 4096-env
+collection/reset 账。

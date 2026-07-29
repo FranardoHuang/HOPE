@@ -1965,6 +1965,14 @@
 </details>
 ## 2026-07-29
 
+- `curr-launch-fix` 已把 finite q_des 投影、投影前超出量 Reward（主线 weight=`-5`）、
+  reference metrics-only、shared-ready fresh actor bootstrap 与 full-scope post-solver
+  预飞合成 exact `b1d299e1` 并推送；590 项整合回归只暴露一个测试 import 笔误，修正后的相关
+  107 项全过。随后从该 commit 生成 profile pins（文件 SHA-256
+  `47a00a6a...30488`）和 loop/block 的 upper/full 四份 N=1 bundle。upper 均 PASS；full
+  loop 为 `511/512=99.80%`，full block 为 `443/512=86.52%`（diagnostic PASS、formal
+  canary 阈值未过）。这些只解锁 Pod 真实 smoke，不是训练效果或 Gate 晋级结论；精确工件与边界见
+  [Reward 因果实验记录](experiments/2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md)。
 - `curr-launch-fix` 功能分支完成 ActionBall reset/吞吐复盘，并形成下一 fresh wave 候选；这不改变
   `origin/main` 的 `docs/NOW.md` 权威状态。旧 v2 也曾在早期由 `ee_body_pos` 产生
   `1,690–2,301 reset/update`，但后期学到只剩 `1–7/update`，说明“早期 reset 多”不是新现象。

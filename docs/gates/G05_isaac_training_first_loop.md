@@ -3546,3 +3546,19 @@ nonfinite、实际关节 hard-limit、ballistic/substep crossing、table hit 和
 在新合同下自然完成 smoke、finite checkpoint，并取得 4096-env reset/吞吐与 Reward ledger 前，
 不能把预计提速或“policy 已学会限位”写成 Gate PASS。CaT 或 PPO bound loss 留给后续单变量候选，
 不作为本轮 G05 前置；G05 保持 `Partial`。
+
+#### 2026-07-29 `b1d299e1` source/config 证据
+
+finite q_des、reference metrics-only、shared-ready bootstrap 与 full-scope solver preflight 已固定
+为 exact `b1d299e1e57bd0909aa402ca2701b3901975337b`。ActionBall schema-3 hard contract 现强制
+运行时投影 fact 为 exact `true`；legacy `false` 仍编码为字段缺席，保持旧合同字节。host
+整合验证在修正一个测试 import 后为相关 `107 passed`，语法与 diff 检查 PASS。
+
+该 commit 的 profile-pins 文件 SHA-256 为
+`47a00a6a35ea4709603634deeb062febc3a6e7bb2b9f57aab5c573781d330488`。upper loop/block
+bundle SHA 分别为 `29adc3cf...c85c4`、`fb1ed6ee...b6c5a`；full loop/block 为
+`d94c7f0a...223a2`、`ca13d958...2f0f`。full 512-proposal solver preflight 分别接纳
+`511/512` 与 `443/512`；后者只过 diagnostic 门，未过 formal canary rate 门。
+
+这些仍是 E1 source/config 证据。尚未取得 clean Pod 的 live Reward/PPO/hard-contract receipt、
+真实两 update checkpoint 或 4096-env reset/吞吐，因此 G05 继续 `Partial`。
