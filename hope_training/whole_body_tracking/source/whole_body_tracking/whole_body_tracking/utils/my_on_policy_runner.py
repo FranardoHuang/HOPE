@@ -2266,27 +2266,32 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         mode = str(getattr(racket, "target_mode", ""))
         return mode if mode in ("task_first", "action_ball") else None
 
+    def _action_ball_diagnostic_unauthorized(self) -> bool:
+        """Return whether this is the fixed-domain, non-promotable N1 screen."""
+
+        if self._strict_exact_resume_target_mode() != "action_ball":
+            return False
+        env = getattr(self.env, "unwrapped", self.env)
+        commands = getattr(getattr(env, "cfg", None), "commands", None)
+        racket = (
+            None
+            if commands is None
+            else getattr(commands, "racket_target", None)
+        )
+        diagnostic = getattr(
+            racket, "action_ball_diagnostic_unauthorized", False
+        )
+        if type(diagnostic) is not bool:
+            raise RuntimeError(
+                "action_ball_diagnostic_unauthorized must be an exact boolean"
+            )
+        return diagnostic
+
     def _effective_reward_activation_task_kind(self) -> Optional[str]:
         """Return the two task leaves with a verified RewardManager ledger adapter."""
 
         if self._strict_exact_resume_target_mode() == "action_ball":
-            env = getattr(self.env, "unwrapped", self.env)
-            commands = getattr(
-                getattr(env, "cfg", None), "commands", None
-            )
-            racket = (
-                None
-                if commands is None
-                else getattr(commands, "racket_target", None)
-            )
-            diagnostic = getattr(
-                racket, "action_ball_diagnostic_unauthorized", False
-            )
-            if type(diagnostic) is not bool:
-                raise RuntimeError(
-                    "action_ball_diagnostic_unauthorized must be an exact boolean"
-                )
-            if diagnostic:
+            if self._action_ball_diagnostic_unauthorized():
                 # Diagnostic reward screens deliberately cannot mint formal
                 # evidence or promotion authority.  Keep the real Reward,
                 # clamp, limit/table/fall penalties and terminations in the
@@ -3964,6 +3969,11 @@ class MotionOnPolicyRunner(OnPolicyRunner):
     def _notify_command_terms_rollout_end(self, step: int) -> None:
         """Notify each active command term once, before any per-update ledger is consumed."""
 
+        if self._action_ball_diagnostic_unauthorized():
+            # Reward-screen checkpoints are intentionally fixed-domain and
+            # cannot promote curriculum state.  Keep their PPO/checkpoint
+            # path independent of the formal rollout-end receipt transaction.
+            return
         step = int(step)
         previous_step = getattr(self, "_rollout_end_notified_step", None)
         if previous_step == step:

@@ -1019,6 +1019,15 @@ def test_protected_task_detection_covers_action_ball_and_upper_safe(monkeypatch)
         True
     )
     assert runner._effective_reward_activation_task_kind() is None
+    callback_calls = []
+    runner.env.unwrapped.command_manager = types.SimpleNamespace(
+        active_terms=("racket_target",),
+        get_term=lambda _name: types.SimpleNamespace(
+            on_rollout_end=lambda step: callback_calls.append(step)
+        ),
+    )
+    runner._notify_command_terms_rollout_end(7)
+    assert callback_calls == []
 
     upper_cfg_type = type("HOPEPingPongUpperSafeAgibotA3EnvCfg", (), {})
     upper_cfg = upper_cfg_type()
