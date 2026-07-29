@@ -4153,16 +4153,19 @@ def _eligible_frontier_arms(
     active_arms: Sequence[str],
     contact_time_tick_grid: Optional[_ContactTimeTickGrid] = None,
 ) -> Tuple[str, ...]:
-    """Filter arms whose frontier lies outside center/interior support.
+    """Choose promoted frontiers, or the current support's outer band.
 
     Level-zero support is physical support, not a point.  An arm is therefore
-    not a valid frontier probe until its promoted width is large enough that
-    the selected outer band begins at or beyond both center and joint-interior
-    support.  This removes the old silent overlap caused by scaling only the
-    normalized level.
+    a promoted frontier only when its selected outer band begins beyond both
+    center and joint-interior support.  When no arm is promoted (notably at
+    level zero), the frontier stratum still has a valid meaning: the outer band
+    of any non-zero side in the current physical support.  Preserve that
+    stratum and its arm accounting instead of rejecting a legal initial
+    domain.  A truly zero-width domain still fails closed.
     """
 
-    eligible = []
+    promoted = []
+    current_support = []
     interior = _rho_scaled_levels(
         profile,
         levels,
@@ -4180,15 +4183,37 @@ def _eligible_frontier_arms(
             lower_ticks, upper_ticks = (
                 contact_time_tick_grid.width_ticks(levels)
             )
+            center_lower_ticks, center_upper_ticks = (
+                contact_time_tick_grid.width_ticks(center)
+            )
+            interior_lower_ticks, interior_upper_ticks = (
+                contact_time_tick_grid.width_ticks(interior)
+            )
             side_ticks = (
                 lower_ticks
                 if arm.endswith("_lower")
                 else upper_ticks
             )
             if side_ticks >= 1:
-                eligible.append(arm)
+                current_support.append(arm)
+            center_side_ticks = (
+                center_lower_ticks
+                if arm.endswith("_lower")
+                else center_upper_ticks
+            )
+            interior_side_ticks = (
+                interior_lower_ticks
+                if arm.endswith("_lower")
+                else interior_upper_ticks
+            )
+            if side_ticks > max(
+                center_side_ticks, interior_side_ticks
+            ):
+                promoted.append(arm)
             continue
         full_width = _arm_physical_width(profile, levels, arm)
+        if full_width > tolerance:
+            current_support.append(arm)
         center_width = _arm_physical_width(profile, center, arm)
         interior_width = _arm_physical_width(
             profile, interior, arm
@@ -4199,8 +4224,8 @@ def _eligible_frontier_arms(
             and center_width <= frontier_start + tolerance
             and interior_width <= frontier_start + tolerance
         ):
-            eligible.append(arm)
-    return tuple(eligible)
+            promoted.append(arm)
+    return tuple(promoted if promoted else current_support)
 
 
 def _frontier_band_uniform(

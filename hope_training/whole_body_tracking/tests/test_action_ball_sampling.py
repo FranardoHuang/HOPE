@@ -1663,6 +1663,62 @@ def test_zero_width_frontier_fails_before_rng_or_receipt_state_mutates():
     assert sampler.state_dict() == before
 
 
+def test_level_zero_frontier_uses_initial_birth_and_swing_outer_bands():
+    profile = _profile()
+    mixture = S.SamplingMixture()
+    levels = S.DomainLevels()
+    sampler = S.ActionBallSampler(
+        [profile],
+        seed=7108,
+        sampling_mixture=mixture,
+        contact_time_step_s=0.02,
+    )
+
+    births = [_birth(sampler, levels=levels) for _ in range(4)]
+    frontier_birth = births[-1]
+    assert frontier_birth.sampling_stratum == "frontier"
+    assert frontier_birth.frontier_arm == "base_spawn_x_lower"
+    assert frontier_birth.sampling_levels == levels
+    assert frontier_birth.base_start_w_m[0] <= (
+        profile.base_spawn_center_w_m[0]
+        - (1.0 - mixture.frontier_band_fraction)
+        * profile.base_spawn_std_lower_initial_m[0]
+    )
+    sampler.verify_birth_sampling_membership(frontier_birth)
+
+    samples = [
+        _sample(sampler, frontier_birth, levels=levels)
+        for _ in range(4)
+    ]
+    frontier_sample = samples[-1]
+    assert frontier_sample.sampling_stratum == "frontier"
+    assert frontier_sample.frontier_arm == "time_to_contact_lower"
+    assert frontier_sample.sampling_levels == levels
+    grid = sampler._contact_time_grid_by_action[profile.action_uid]
+    assert (
+        frontier_sample.time_to_contact_tick
+        < grid.center_tick
+    )
+    sampler.verify_sampling_membership(frontier_sample)
+    assert sampler.birth_count == 4
+    assert sampler.sample_count == 4
+
+
+def test_promoted_frontier_preempts_initial_support_fallback():
+    profile = _profile()
+    mixture = S.SamplingMixture()
+
+    birth_levels = _levels(base_spawn_x_lower=1.0)
+    assert S._eligible_birth_frontier_arms(
+        profile, birth_levels, mixture
+    ) == ("base_spawn_x_lower",)
+
+    swing_levels = _levels(contact_x_lower=1.0)
+    assert S._eligible_swing_frontier_arms(
+        profile, swing_levels, mixture
+    ) == ("contact_x_lower",)
+
+
 def test_legacy_sampler_remains_opt_in_free_and_marks_domain_receipt():
     levels = _levels(position=0.5)
     sampler = S.ActionBallSampler([_profile()], seed=7104)
