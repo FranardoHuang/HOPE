@@ -29,11 +29,12 @@ solver must fill the task; this module never guesses or authorizes a task.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, fields, replace
+from dataclasses import dataclass, field, fields, replace
 import hashlib
 import json
 import math
 from statistics import NormalDist
+import sys
 from typing import (
     Dict,
     Iterable,
@@ -142,6 +143,14 @@ _BIRTH_STATE_KEYS = (
     "base_yaw_rad",
     "base_start_w_m",
 )
+_MIXTURE_BIRTH_STATE_KEYS = (
+    *_BIRTH_STATE_KEYS[:6],
+    "sampling_mixture",
+    "sampling_stratum",
+    "sampling_levels",
+    "frontier_arm",
+    *_BIRTH_STATE_KEYS[6:],
+)
 _SAMPLE_IDENTITY_KEYS = (
     "schema_version",
     "kind",
@@ -175,6 +184,20 @@ _SAMPLE_IDENTITY_KEYS = (
     "spin_w_radps",
     "landing_aim_w_xy_m",
 )
+_MIXTURE_SAMPLE_IDENTITY_KEYS = (
+    *_SAMPLE_IDENTITY_KEYS[:8],
+    "birth_index",
+    "birth_sampling_stratum",
+    "birth_sampling_levels",
+    "birth_frontier_arm",
+    "sampling_mixture",
+    "sampling_stratum",
+    "sampling_levels",
+    "frontier_arm",
+    *_SAMPLE_IDENTITY_KEYS[8:],
+    "contact_time_step_s",
+    "time_to_contact_tick",
+)
 _COMPACTION_SEGMENT_KEYS = (
     "action_uid",
     "sampler_contract_sha256",
@@ -196,6 +219,38 @@ _COMPACTION_SEGMENT_KEYS = (
     "segment_sha256",
     "segment_head_sha256",
 )
+
+_FROZEN_EVALUATION_PROPOSAL_SAMPLER_SEMANTICS = {
+    "schema_version": 1,
+    "kind": "action_ball_frozen_evaluation_proposal_sampler",
+    "random_access": (
+        "one external allocation seed owns exactly one independent "
+        "birth-plus-swing 3+18 draw tape"
+    ),
+    "training_state_isolation": (
+        "never reads, advances, restores, or compacts the training sampler "
+        "tape"
+    ),
+    "sampling_core": (
+        "ActionBallSampler reserve_birth/sample geometry with an explicit "
+        "authority-owned center/interior/frontier plan"
+    ),
+    "mixture": "exact repeating SamplingMixture 1/3/1 quota",
+    "frontier": (
+        "the requested signed arm alone receives its candidate domain "
+        "level; every other arm in both birth and ball-task components is "
+        "held at center level zero"
+    ),
+    "component_strata": (
+        "outer evaluation stratum is distinct from birth and ball-task "
+        "component strata; a frontier belongs to exactly one component and "
+        "the other component is center"
+    ),
+    "proposal_accounting": (
+        "one call returns one birth receipt, one sample receipt, and one "
+        "self-hashed proposal receipt; no redraw exists"
+    ),
+}
 
 
 def _plain_int(
@@ -353,6 +408,36 @@ def _sha256_json(value: object) -> str:
     return hashlib.sha256(raw).hexdigest()
 
 
+def frozen_evaluation_proposal_sampler_contract() -> Dict[str, object]:
+    """Return the code-pinned stateless evaluator sampler contract.
+
+    The whole source file is hashed deliberately: the formal evaluator shares
+    the training sampler's private geometry helpers, so changing any of those
+    helpers must invalidate a pending evaluator request even when the small
+    public wrapper below did not change text.
+    """
+
+    try:
+        with open(__file__, "rb") as stream:
+            source_sha256 = hashlib.sha256(stream.read()).hexdigest()
+    except (OSError, TypeError) as exc:
+        raise RuntimeError(
+            "cannot bind frozen-evaluation sampler to its source bytes"
+        ) from exc
+    payload = {
+        **_FROZEN_EVALUATION_PROPOSAL_SAMPLER_SEMANTICS,
+        "sampling_schema_version": SCHEMA_VERSION,
+        "arm_catalog_sha256": ARM_CATALOG_SHA256,
+        "draws_per_birth": DRAWS_PER_BIRTH,
+        "draws_per_sample": DRAWS_PER_SAMPLE,
+        "implementation_source_sha256": source_sha256,
+    }
+    return {
+        "payload": payload,
+        "sha256": _sha256_json(payload),
+    }
+
+
 ARM_CATALOG_SHA256 = _sha256_json(
     {
         "schema_version": SCHEMA_VERSION,
@@ -457,6 +542,167 @@ def _rotate_yaw(value: Vec3, yaw_rad: float) -> Vec3:
         sine * x + cosine * y,
         z,
     )
+
+
+def _counter_rally_geometry_helper(objective: object):
+    """Resolve the helper from the exact module that created the objective."""
+
+    module = sys.modules.get(type(objective).__module__)
+    helper = getattr(module, "counter_rally_reverse_ray_geometry", None)
+    if not callable(helper):
+        raise ValueError(
+            "counter-rally objective module is missing the shared "
+            "reverse-ray helper"
+        )
+    return helper
+
+
+def _counter_rally_reverse_ray_geometry(
+    *,
+    contact_w_m: Vec3,
+    incoming_direction_w: Vec3,
+    landing_x_w_m: float,
+    objective: object,
+) -> Tuple[Vec2, Optional[str]]:
+    """Call the canonical helper without suppressing the proposal receipt.
+
+    The objective's defining module is already present because the strict
+    manifest/profile loader created that exact object.  Resolving the pure
+    helper from that module avoids both a copied formula and Python class
+    identity problems in dependency-light spec-loader tests.
+    """
+
+    return _counter_rally_geometry_helper(objective)(
+        contact_env_m=contact_w_m,
+        return_direction_env_xy=(
+            -incoming_direction_w[0],
+            -incoming_direction_w[1],
+        ),
+        landing_depth_env_x_m=landing_x_w_m,
+        profile=objective,
+    )
+
+
+def _validate_counter_rally_profile_support(
+    profile: object,
+    *,
+    base_yaw_rad: Optional[float],
+) -> None:
+    """Validate static support and, when known, its actual-yaw cone."""
+
+    objective = getattr(profile, "counter_rally_objective", None)
+    if objective is None:
+        return
+    _counter_rally_geometry_helper(objective)
+    if base_yaw_rad is not None:
+        yaw = _finite(base_yaw_rad, name="base_yaw_rad")
+        center_w = _rotate_yaw(
+            getattr(profile, "incoming_direction_center_b_yaw"), yaw
+        )
+        center_horizontal_norm = math.hypot(center_w[0], center_w[1])
+        if center_horizontal_norm <= 1.0e-12:
+            raise ValueError(
+                "counter-rally incoming center has no horizontal ray"
+            )
+        center_return_x = -center_w[0] / center_horizontal_norm
+        center_error_deg = math.degrees(
+            math.acos(max(-1.0, min(1.0, center_return_x)))
+        )
+        support_radius_deg = math.hypot(
+            max(
+                getattr(
+                    profile,
+                    "incoming_direction_tangent_u_neg_max_deg",
+                ),
+                getattr(
+                    profile,
+                    "incoming_direction_tangent_u_pos_max_deg",
+                ),
+            ),
+            max(
+                getattr(
+                    profile,
+                    "incoming_direction_tangent_v_neg_max_deg",
+                ),
+                getattr(
+                    profile,
+                    "incoming_direction_tangent_v_pos_max_deg",
+                ),
+            ),
+        )
+        cone_half_angle_deg = math.degrees(
+            math.acos(
+                _finite(
+                    getattr(
+                        objective, "minimum_opponent_x_component"
+                    ),
+                    name="counter_rally.minimum_opponent_x_component",
+                    minimum=0.0,
+                    maximum=1.0,
+                )
+            )
+        )
+        if (
+            center_error_deg + support_radius_deg
+            > cone_half_angle_deg + UNIT_VECTOR_TOLERANCE
+        ):
+            raise ValueError(
+                "counter-rally incoming-direction support leaves the "
+                "opponent cone"
+            )
+
+    table_near_x = _finite(
+        getattr(objective, "table_near_x_env_m"),
+        name="counter_rally.table_near_x_env_m",
+    )
+    table_length = _finite(
+        getattr(objective, "table_length_m"),
+        name="counter_rally.table_length_m",
+        minimum=0.0,
+    )
+    edge_margin = _finite(
+        getattr(objective, "table_edge_margin_m"),
+        name="counter_rally.table_edge_margin_m",
+        minimum=0.0,
+    )
+    opponent_baseline_x = _finite(
+        getattr(objective, "opponent_baseline_x_env_m"),
+        name="counter_rally.opponent_baseline_x_env_m",
+    )
+    support_lo = getattr(profile, "landing_aim_min_w_xy_m")[0]
+    support_hi = getattr(profile, "landing_aim_max_w_xy_m")[0]
+    net_x = table_near_x + 0.5 * table_length
+    if not (
+        support_lo > net_x
+        and support_hi <= opponent_baseline_x - edge_margin
+    ):
+        raise ValueError(
+            "counter-rally landing-x support must lie on the bounded "
+            "opponent half"
+        )
+    incoming_speed_lo = getattr(profile, "incoming_speed_min_mps")
+    incoming_speed_hi = getattr(profile, "incoming_speed_max_mps")
+    venue_speed_lo = getattr(
+        objective, "minimum_supported_ball_speed_mps"
+    )
+    venue_speed_hi = getattr(
+        objective, "maximum_supported_ball_speed_mps"
+    )
+    speed_ratio = getattr(objective, "target_baseline_speed_ratio")
+    if not (
+        venue_speed_lo
+        <= incoming_speed_lo
+        <= incoming_speed_hi
+        <= venue_speed_hi
+        and venue_speed_lo
+        <= speed_ratio * incoming_speed_lo
+        <= speed_ratio * incoming_speed_hi
+        <= venue_speed_hi
+    ):
+        raise ValueError(
+            "counter-rally incoming/target speed support leaves venue "
+            "bounds"
+        )
 
 
 def _cross(a: Vec3, b: Vec3) -> Vec3:
@@ -615,6 +861,174 @@ class DomainLevels:
 
 
 @dataclass(frozen=True)
+class SamplingMixture:
+    """Deterministic center/interior/frontier sampling recipe.
+
+    The integer slots form an exact repeating quota rather than an IID
+    categorical draw.  The default ``1/3/1`` recipe is therefore exactly
+    ``20/60/20`` in every complete five-sample block and gives every stratum a
+    finite starvation bound.  ``interior_level_scale`` is joint ``rho`` over
+    the complete physical support width (including initial width), not a
+    multiplier on the normalized curriculum level.  The center stratum always
+    uses the profile's non-degenerate level-zero support.
+
+    This object is opt-in at :class:`ActionBallSampler` construction so older
+    center/marginal callers do not silently change distribution.  A joint
+    curriculum launch must pass ``SamplingMixture()`` explicitly.
+    """
+
+    center_slots: int = 1
+    interior_slots: int = 3
+    frontier_slots: int = 1
+    interior_level_scale: float = 0.8
+    frontier_band_fraction: float = 0.2
+
+    def __post_init__(self) -> None:
+        for name in (
+            "center_slots",
+            "interior_slots",
+            "frontier_slots",
+        ):
+            value = _plain_int(
+                getattr(self, name),
+                name=f"sampling_mixture.{name}",
+                minimum=1,
+                maximum=1000,
+            )
+            object.__setattr__(self, name, value)
+        object.__setattr__(
+            self,
+            "interior_level_scale",
+            _finite(
+                self.interior_level_scale,
+                name="sampling_mixture.interior_level_scale",
+                minimum=0.0,
+                maximum=1.0,
+            ),
+        )
+        band = _finite(
+            self.frontier_band_fraction,
+            name="sampling_mixture.frontier_band_fraction",
+            minimum=0.0,
+            maximum=1.0,
+        )
+        if band <= 0.0 or band >= 1.0:
+            raise ValueError(
+                "sampling_mixture.frontier_band_fraction must be in "
+                "(0, 1)"
+            )
+        if self.interior_level_scale > 1.0 - band + 1.0e-15:
+            raise ValueError(
+                "sampling_mixture.interior_level_scale must be <= "
+                "1 - frontier_band_fraction so interior support cannot "
+                "overlap the frontier band"
+            )
+        object.__setattr__(self, "frontier_band_fraction", band)
+
+    @property
+    def cycle_length(self) -> int:
+        return (
+            self.center_slots
+            + self.interior_slots
+            + self.frontier_slots
+        )
+
+    @property
+    def schedule(self) -> Tuple[str, ...]:
+        """Return a deterministic, evenly interleaved quota cycle."""
+
+        weights = (
+            self.center_slots,
+            self.interior_slots,
+            self.frontier_slots,
+        )
+        names = ("center", "interior", "frontier")
+        current = [0, 0, 0]
+        schedule = []
+        for _ in range(self.cycle_length):
+            for index, weight in enumerate(weights):
+                current[index] += weight
+            chosen = max(
+                range(len(names)),
+                key=lambda index: (current[index], -index),
+            )
+            schedule.append(names[chosen])
+            current[chosen] -= self.cycle_length
+        result = tuple(schedule)
+        if tuple(result.count(name) for name in names) != weights:
+            raise AssertionError("sampling mixture schedule lost a quota")
+        return result
+
+    def stratum_for(self, proposal_index: int) -> str:
+        """Return the quota stratum for one independent proposal cursor.
+
+        Birth and swing cursors both use this schedule, but each action owns
+        separate ``birth_count`` and ``sample_count`` cursors.  In particular,
+        rejected birth proposals still advance only the birth cursor.
+        """
+
+        proposal_index = _plain_int(
+            proposal_index, name="proposal_index"
+        )
+        return self.schedule[proposal_index % self.cycle_length]
+
+    def frontier_ordinal_before(self, proposal_index: int) -> int:
+        """Count frontier slots preceding one proposal cursor exactly."""
+
+        proposal_index = _plain_int(
+            proposal_index, name="proposal_index"
+        )
+        cycles, offset = divmod(proposal_index, self.cycle_length)
+        return (
+            cycles * self.frontier_slots
+            + self.schedule[:offset].count("frontier")
+        )
+
+    def as_dict(self) -> Dict[str, object]:
+        return {
+            "center_slots": self.center_slots,
+            "interior_slots": self.interior_slots,
+            "frontier_slots": self.frontier_slots,
+            "interior_level_scale": self.interior_level_scale,
+            "frontier_band_fraction": self.frontier_band_fraction,
+            "schedule": list(self.schedule),
+        }
+
+    @classmethod
+    def from_mapping(cls, value: object) -> "SamplingMixture":
+        row = _exact_mapping(
+            value,
+            (
+                "center_slots",
+                "interior_slots",
+                "frontier_slots",
+                "interior_level_scale",
+                "frontier_band_fraction",
+                "schedule",
+            ),
+            name="sampling mixture",
+        )
+        result = cls(
+            center_slots=row["center_slots"],
+            interior_slots=row["interior_slots"],
+            frontier_slots=row["frontier_slots"],
+            interior_level_scale=row["interior_level_scale"],
+            frontier_band_fraction=row["frontier_band_fraction"],
+        )
+        declared_schedule = row["schedule"]
+        if (
+            not isinstance(declared_schedule, (tuple, list))
+            or tuple(declared_schedule) != result.schedule
+        ):
+            raise ValueError("sampling mixture schedule mismatch")
+        return result
+
+    @property
+    def sha256(self) -> str:
+        return _sha256_json(self.as_dict())
+
+
+@dataclass(frozen=True)
 class SamplingProfile:
     """Strict internal profile; a manifest adapter may construct this later."""
 
@@ -708,6 +1122,7 @@ class SamplingProfile:
     teacher_rate_max: float
 
     mobility_mode: str = "no_move"
+    counter_rally_objective: Optional[object] = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -1102,11 +1517,29 @@ class SamplingProfile:
             raise ValueError("maximum pre_swing_wait must be <= 1.0 s")
         if self.mobility_mode not in ("no_move", "move"):
             raise ValueError("mobility_mode must be 'no_move' or 'move'")
+        if self.counter_rally_objective is not None:
+            objective = self.counter_rally_objective
+            if (
+                getattr(objective, "mode", None) != "counter_rally_v1"
+                or not isinstance(getattr(objective, "sha256", None), str)
+                or len(objective.sha256) != 64
+            ):
+                raise ValueError(
+                    "counter_rally_objective must be a validated "
+                    "CounterRallyObjectiveProfile"
+                )
+            _validate_counter_rally_profile_support(
+                self, base_yaw_rad=None
+            )
 
     def as_dict(self) -> Dict[str, object]:
         result: Dict[str, object] = {}
         for field in fields(self):
             value = getattr(self, field.name)
+            if field.name == "counter_rally_objective":
+                if value is not None:
+                    result[field.name] = value.to_mapping()
+                continue
             result[field.name] = list(value) if isinstance(value, tuple) else value
         return result
 
@@ -1133,11 +1566,15 @@ class BaseBirthReceipt:
     mobility_mode: str
     base_yaw_rad: float
     base_start_w_m: Vec3
+    sampling_mixture: Optional[SamplingMixture] = None
+    sampling_stratum: str = "domain"
+    sampling_levels: DomainLevels = field(default_factory=DomainLevels)
+    frontier_arm: Optional[str] = None
 
     def to_state_dict(self) -> Dict[str, object]:
         """Canonical flat checkpoint row used by deterministic replay."""
 
-        return {
+        payload = {
             "birth_id": self.birth_id,
             "sampler_contract_sha256": self.sampler_contract_sha256,
             "arm_catalog_sha256": self.arm_catalog_sha256,
@@ -1153,6 +1590,22 @@ class BaseBirthReceipt:
             "base_yaw_rad": self.base_yaw_rad,
             "base_start_w_m": list(self.base_start_w_m),
         }
+        if self.sampling_mixture is None:
+            return payload
+        return {
+            **{
+                key: payload[key]
+                for key in _BIRTH_STATE_KEYS[:6]
+            },
+            "sampling_mixture": self.sampling_mixture.as_dict(),
+            "sampling_stratum": self.sampling_stratum,
+            "sampling_levels": self.sampling_levels.as_dict(),
+            "frontier_arm": self.frontier_arm,
+            **{
+                key: payload[key]
+                for key in _BIRTH_STATE_KEYS[6:]
+            },
+        }
 
     def to_identity_receipt(self) -> Dict[str, object]:
         """Flat strict receipt accepted by ``assert_issued_birth``."""
@@ -1164,9 +1617,16 @@ class BaseBirthReceipt:
         cls,
         value: object,
     ) -> "BaseBirthReceipt":
+        if not isinstance(value, Mapping):
+            raise ValueError("birth identity receipt must be a mapping")
+        has_mixture = "sampling_mixture" in value
         row = _exact_mapping(
             value,
-            _BIRTH_STATE_KEYS,
+            (
+                _MIXTURE_BIRTH_STATE_KEYS
+                if has_mixture
+                else _BIRTH_STATE_KEYS
+            ),
             name="birth identity receipt",
         )
         levels = DomainLevels.from_mapping(row["domain_levels"])
@@ -1180,6 +1640,40 @@ class BaseBirthReceipt:
             raise ValueError(
                 "birth.mobility_mode must be 'no_move' or 'move'"
             )
+        if has_mixture:
+            mixture = SamplingMixture.from_mapping(
+                row["sampling_mixture"]
+            )
+            stratum = row["sampling_stratum"]
+            if stratum not in ("center", "interior", "frontier"):
+                raise ValueError("birth.sampling_stratum is invalid")
+            sampling_levels = DomainLevels.from_mapping(
+                row["sampling_levels"]
+            )
+            raw_frontier_arm = row["frontier_arm"]
+            if raw_frontier_arm is not None and (
+                type(raw_frontier_arm) is not str
+                or raw_frontier_arm
+                not in (
+                    "base_spawn_x_lower",
+                    "base_spawn_x_upper",
+                    "base_spawn_y_lower",
+                    "base_spawn_y_upper",
+                )
+            ):
+                raise ValueError("birth.frontier_arm is invalid")
+            if (stratum == "frontier") != (
+                raw_frontier_arm is not None
+            ):
+                raise ValueError(
+                    "birth.frontier_arm must be present exactly for "
+                    "frontier"
+                )
+        else:
+            mixture = None
+            stratum = "domain"
+            sampling_levels = DomainLevels()
+            raw_frontier_arm = None
         result = cls(
             birth_id=_sha256_hex(
                 row["birth_id"], name="birth.birth_id"
@@ -1219,11 +1713,34 @@ class BaseBirthReceipt:
             base_start_w_m=_vec3(
                 row["base_start_w_m"], name="birth.base_start_w_m"
             ),
+            sampling_mixture=mixture,
+            sampling_stratum=stratum,
+            sampling_levels=sampling_levels,
+            frontier_arm=raw_frontier_arm,
         )
         if result.draw_end - result.draw_start != DRAWS_PER_BIRTH:
             raise ValueError("birth receipt has invalid draw range")
         if result.arm_catalog_sha256 != ARM_CATALOG_SHA256:
             raise ValueError("birth arm catalog hash mismatch")
+        if (
+            result.sampling_mixture is not None
+            and result.sampling_stratum
+            != result.sampling_mixture.stratum_for(result.birth_index)
+        ):
+            raise ValueError(
+                "birth sampling_stratum disagrees with mixture schedule"
+            )
+        if result.sampling_mixture is not None:
+            for arm in ARM_KEYS:
+                effective = getattr(result.sampling_levels, arm)
+                if arm not in _BASE_SPAWN_ARMS and effective != 0.0:
+                    raise ValueError(
+                        "birth sampling_levels contain a swing-only arm"
+                    )
+                if effective > getattr(result.domain_levels, arm) + 1.0e-15:
+                    raise ValueError(
+                        "birth sampling_levels exceed domain levels"
+                    )
         payload = _birth_identity_payload(
             sampler_contract_sha256=result.sampler_contract_sha256,
             arm_catalog_sha256=result.arm_catalog_sha256,
@@ -1237,13 +1754,17 @@ class BaseBirthReceipt:
             mobility_mode=result.mobility_mode,
             base_yaw_rad=result.base_yaw_rad,
             base_start_w_m=result.base_start_w_m,
+            sampling_mixture=result.sampling_mixture,
+            sampling_stratum=result.sampling_stratum,
+            sampling_levels=result.sampling_levels,
+            frontier_arm=result.frontier_arm,
         )
         if result.birth_id != _sha256_json(payload):
             raise ValueError("birth_id does not match canonical identity")
         return result
 
     def to_receipt(self) -> Dict[str, object]:
-        return {
+        receipt = {
             "schema_version": SCHEMA_VERSION,
             "birth_id": self.birth_id,
             "sampler_contract_sha256": self.sampler_contract_sha256,
@@ -1263,6 +1784,14 @@ class BaseBirthReceipt:
             "base_yaw_rad": self.base_yaw_rad,
             "base_start_w_m": list(self.base_start_w_m),
         }
+        if self.sampling_mixture is not None:
+            receipt["sampling"] = {
+                "mixture": self.sampling_mixture.as_dict(),
+                "stratum": self.sampling_stratum,
+                "effective_levels": self.sampling_levels.as_dict(),
+                "frontier_arm": self.frontier_arm,
+            }
+        return receipt
 
 
 # Public semantic name used by compact runtime ledgers.  Keep the historical
@@ -1683,6 +2212,14 @@ class BallBaseSample:
     action_uid: int
     domain_epoch: int
     domain_levels: DomainLevels
+    birth_index: int
+    birth_sampling_stratum: str
+    birth_sampling_levels: DomainLevels
+    birth_frontier_arm: Optional[str]
+    sampling_mixture: Optional[SamplingMixture]
+    sampling_stratum: str
+    sampling_levels: DomainLevels
+    frontier_arm: Optional[str]
     sample_index: int
     birth_id: str
     profile_sha256: str
@@ -1698,6 +2235,8 @@ class BallBaseSample:
     contact_offset_from_base_goal_b_yaw_m: Vec3
     contact_w_m: Vec3
     time_to_contact_s: float
+    contact_time_step_s: Optional[float]
+    time_to_contact_tick: Optional[int]
     incoming_speed_mps: float
     incoming_direction_b_yaw: Vec3
     incoming_direction_w: Vec3
@@ -1711,7 +2250,7 @@ class BallBaseSample:
     def identity_payload(self) -> Dict[str, object]:
         """Return every immutable field covered by ``sample_id``."""
 
-        return {
+        payload = {
             "schema_version": SCHEMA_VERSION,
             "kind": "swing_sample",
             "sampler_contract_sha256": self.sampler_contract_sha256,
@@ -1748,6 +2287,36 @@ class BallBaseSample:
             "spin_w_radps": self.spin_w_radps,
             "landing_aim_w_xy_m": self.landing_aim_w_xy_m,
         }
+        if self.sampling_mixture is None:
+            # Preserve the exact pre-mixture sample SHA for legacy
+            # center/marginal/runtime consumers.  The opt-in joint mixture is
+            # a distinct sampler contract and extends the identity below.
+            return payload
+        ordered = {}
+        for key in _MIXTURE_SAMPLE_IDENTITY_KEYS:
+            if key == "birth_index":
+                ordered[key] = self.birth_index
+            elif key == "birth_sampling_stratum":
+                ordered[key] = self.birth_sampling_stratum
+            elif key == "birth_sampling_levels":
+                ordered[key] = self.birth_sampling_levels.as_dict()
+            elif key == "birth_frontier_arm":
+                ordered[key] = self.birth_frontier_arm
+            elif key == "sampling_mixture":
+                ordered[key] = self.sampling_mixture.as_dict()
+            elif key == "sampling_stratum":
+                ordered[key] = self.sampling_stratum
+            elif key == "sampling_levels":
+                ordered[key] = self.sampling_levels.as_dict()
+            elif key == "frontier_arm":
+                ordered[key] = self.frontier_arm
+            elif key == "contact_time_step_s":
+                ordered[key] = self.contact_time_step_s
+            elif key == "time_to_contact_tick":
+                ordered[key] = self.time_to_contact_tick
+            else:
+                ordered[key] = payload[key]
+        return ordered
 
     def verify_sample_id(self) -> None:
         """Fail closed if any identity field no longer matches ``sample_id``."""
@@ -1757,6 +2326,23 @@ class BallBaseSample:
             or self.sample_id != _sha256_json(self.identity_payload())
         ):
             raise ValueError("sample_id does not match canonical identity")
+
+    @property
+    def executed_planar_base_travel_distance_m(self) -> float:
+        """Return actual planar travel without extending sample identity.
+
+        ``no_move`` deliberately records a latent travel draw for exact RNG
+        parity, but does not execute it.  Keeping this as a derived property
+        lets the move-preparation admission proof consume the right distance
+        while preserving every legacy sample payload and SHA byte-for-byte.
+        """
+
+        if self.mobility_mode == "no_move":
+            return 0.0
+        return math.hypot(
+            self.base_travel_latent_b_yaw_m[0],
+            self.base_travel_latent_b_yaw_m[1],
+        )
 
     def to_identity_receipt(self) -> Dict[str, object]:
         """Return the strict flat receipt accepted by provenance assertions."""
@@ -1771,9 +2357,19 @@ class BallBaseSample:
         cls,
         value: object,
     ) -> "BallBaseSample":
+        if not isinstance(value, Mapping):
+            raise ValueError("sample identity receipt must be a mapping")
+        has_mixture = "sampling_mixture" in value
         row = _exact_mapping(
             value,
-            ("sample_id", *_SAMPLE_IDENTITY_KEYS),
+            (
+                "sample_id",
+                *(
+                    _MIXTURE_SAMPLE_IDENTITY_KEYS
+                    if has_mixture
+                    else _SAMPLE_IDENTITY_KEYS
+                ),
+            ),
             name="sample identity receipt",
         )
         if (
@@ -1793,11 +2389,170 @@ class BallBaseSample:
         )
         if levels_sha256 != levels.sha256:
             raise ValueError("sample levels hash mismatch")
+        if has_mixture:
+            mixture = SamplingMixture.from_mapping(
+                row["sampling_mixture"]
+            )
+            birth_index = _plain_int(
+                row["birth_index"], name="sample.birth_index"
+            )
+            birth_stratum = row["birth_sampling_stratum"]
+            if birth_stratum not in (
+                "center",
+                "interior",
+                "frontier",
+            ):
+                raise ValueError(
+                    "sample.birth_sampling_stratum is invalid"
+                )
+            if birth_stratum != mixture.stratum_for(birth_index):
+                raise ValueError(
+                    "sample birth_sampling_stratum disagrees with "
+                    "mixture birth schedule"
+                )
+            birth_sampling_levels = DomainLevels.from_mapping(
+                row["birth_sampling_levels"]
+            )
+            raw_birth_frontier_arm = row["birth_frontier_arm"]
+            if raw_birth_frontier_arm is not None and (
+                type(raw_birth_frontier_arm) is not str
+                or raw_birth_frontier_arm not in _BASE_SPAWN_ARMS
+            ):
+                raise ValueError(
+                    "sample.birth_frontier_arm is invalid"
+                )
+            if (birth_stratum == "frontier") != (
+                raw_birth_frontier_arm is not None
+            ):
+                raise ValueError(
+                    "sample.birth_frontier_arm must be present exactly "
+                    "for frontier"
+                )
+            stratum = row["sampling_stratum"]
+            if stratum not in ("center", "interior", "frontier"):
+                raise ValueError("sample.sampling_stratum is invalid")
+            sampling_levels = DomainLevels.from_mapping(
+                row["sampling_levels"]
+            )
+            raw_frontier_arm = row["frontier_arm"]
+            if raw_frontier_arm is not None and (
+                type(raw_frontier_arm) is not str
+                or raw_frontier_arm not in ARM_KEYS
+            ):
+                raise ValueError("sample.frontier_arm is invalid")
+            if (stratum == "frontier") != (
+                raw_frontier_arm is not None
+            ):
+                raise ValueError(
+                    "sample.frontier_arm must be present exactly for "
+                    "frontier"
+                )
+            expected_stratum = mixture.stratum_for(
+                _plain_int(
+                    row["sample_index"],
+                    name="sample.sample_index",
+                )
+            )
+            if stratum != expected_stratum:
+                raise ValueError(
+                    "sample sampling_stratum disagrees with mixture schedule"
+                )
+            # Exact physical-rho inversion requires the sampler's pinned
+            # profile.  Public coercion can still reject impossible level
+            # escalation; ``assert_issued_sample`` later recomputes the exact
+            # profile-aware plan and deterministic draw.
+            for arm in ARM_KEYS:
+                if getattr(sampling_levels, arm) > (
+                    getattr(levels, arm) + 1.0e-15
+                ):
+                    raise ValueError(
+                        "sample sampling_levels exceed domain levels"
+                    )
+            raw_contact_step = row["contact_time_step_s"]
+            raw_contact_tick = row["time_to_contact_tick"]
+            if raw_contact_step is None:
+                if raw_contact_tick is not None:
+                    raise ValueError(
+                        "sample time_to_contact_tick requires "
+                        "contact_time_step_s"
+                    )
+                contact_time_step_s = None
+                time_to_contact_tick = None
+            else:
+                contact_time_step_s = _finite(
+                    raw_contact_step,
+                    name="sample.contact_time_step_s",
+                    minimum=0.0,
+                )
+                if contact_time_step_s <= 0.0:
+                    raise ValueError(
+                        "sample.contact_time_step_s must be > 0"
+                    )
+                time_to_contact_tick = _plain_int(
+                    raw_contact_tick,
+                    name="sample.time_to_contact_tick",
+                    minimum=1,
+                )
+        else:
+            mixture = None
+            birth_index = -1
+            birth_stratum = "domain"
+            birth_sampling_levels = levels
+            raw_birth_frontier_arm = None
+            stratum = "domain"
+            sampling_levels = levels
+            raw_frontier_arm = None
+            contact_time_step_s = None
+            time_to_contact_tick = None
         mode = row["mobility_mode"]
         if mode not in ("no_move", "move"):
             raise ValueError(
                 "sample.mobility_mode must be 'no_move' or 'move'"
             )
+        if has_mixture:
+            for arm in ARM_KEYS:
+                birth_effective = getattr(
+                    birth_sampling_levels, arm
+                )
+                if (
+                    arm not in _BASE_SPAWN_ARMS
+                    and birth_effective != 0.0
+                ):
+                    raise ValueError(
+                        "sample birth_sampling_levels contain a "
+                        "swing-only arm"
+                    )
+                if birth_effective > getattr(levels, arm) + 1.0e-15:
+                    raise ValueError(
+                        "sample birth_sampling_levels exceed domain "
+                        "levels"
+                    )
+            if any(
+                getattr(sampling_levels, arm) != 0.0
+                for arm in _BASE_SPAWN_ARMS
+            ):
+                raise ValueError(
+                    "sample sampling_levels contain a base-birth arm"
+                )
+            if (
+                mode == "no_move"
+                and any(
+                    getattr(sampling_levels, arm) != 0.0
+                    for arm in (
+                        "base_travel_x_lower",
+                        "base_travel_x_upper",
+                        "base_travel_y_lower",
+                        "base_travel_y_upper",
+                    )
+                )
+            ):
+                raise ValueError(
+                    "no_move sample sampling_levels contain base travel"
+                )
+            if raw_frontier_arm in _BASE_SPAWN_ARMS:
+                raise ValueError(
+                    "sample frontier_arm cannot be a base-birth arm"
+                )
         result = cls(
             sample_id=_sha256_hex(
                 row["sample_id"], name="sample.sample_id"
@@ -1819,6 +2574,14 @@ class BallBaseSample:
                 row["domain_epoch"], name="sample.domain_epoch"
             ),
             domain_levels=levels,
+            birth_index=birth_index,
+            birth_sampling_stratum=birth_stratum,
+            birth_sampling_levels=birth_sampling_levels,
+            birth_frontier_arm=raw_birth_frontier_arm,
+            sampling_mixture=mixture,
+            sampling_stratum=stratum,
+            sampling_levels=sampling_levels,
+            frontier_arm=raw_frontier_arm,
             sample_index=_plain_int(
                 row["sample_index"], name="sample.sample_index"
             ),
@@ -1867,6 +2630,8 @@ class BallBaseSample:
                 name="sample.time_to_contact_s",
                 minimum=0.0,
             ),
+            contact_time_step_s=contact_time_step_s,
+            time_to_contact_tick=time_to_contact_tick,
             incoming_speed_mps=_finite(
                 row["incoming_speed_mps"],
                 name="sample.incoming_speed_mps",
@@ -1909,6 +2674,14 @@ class BallBaseSample:
             raise ValueError("sample receipt has invalid draw range")
         if result.arm_catalog_sha256 != ARM_CATALOG_SHA256:
             raise ValueError("sample arm catalog hash mismatch")
+        if (
+            result.contact_time_step_s is not None
+            and result.time_to_contact_s
+            != result.time_to_contact_tick * result.contact_time_step_s
+        ):
+            raise ValueError(
+                "sample time_to_contact_s is not its exact policy tick"
+            )
         result.verify_sample_id()
         return result
 
@@ -1924,6 +2697,28 @@ class BallBaseSample:
             "action_uid": self.action_uid,
             "domain_epoch": self.domain_epoch,
             "domain_levels": self.domain_levels.as_dict(),
+            **(
+                {
+                    "sampling": {
+                        "mixture": self.sampling_mixture.as_dict(),
+                        "stratum": self.sampling_stratum,
+                        "effective_levels": (
+                            self.sampling_levels.as_dict()
+                        ),
+                        "frontier_arm": self.frontier_arm,
+                        "birth": {
+                            "birth_index": self.birth_index,
+                            "stratum": self.birth_sampling_stratum,
+                            "effective_levels": (
+                                self.birth_sampling_levels.as_dict()
+                            ),
+                            "frontier_arm": self.birth_frontier_arm,
+                        },
+                    }
+                }
+                if self.sampling_mixture is not None
+                else {}
+            ),
             "sample_index": self.sample_index,
             "profile_sha256": self.profile_sha256,
             "levels_sha256": self.levels_sha256,
@@ -1953,6 +2748,18 @@ class BallBaseSample:
                 ),
                 "contact_w_m": list(self.contact_w_m),
                 "time_to_contact_s": self.time_to_contact_s,
+                **(
+                    {
+                        "contact_time_step_s": (
+                            self.contact_time_step_s
+                        ),
+                        "time_to_contact_tick": (
+                            self.time_to_contact_tick
+                        ),
+                    }
+                    if self.sampling_mixture is not None
+                    else {}
+                ),
                 "incoming_speed_mps": self.incoming_speed_mps,
                 "incoming_direction_b_yaw": list(
                     self.incoming_direction_b_yaw
@@ -1977,6 +2784,293 @@ class BallBaseSample:
         }
 
 
+@dataclass(frozen=True)
+class FrozenEvaluationProposal:
+    """One stateless, authority-indexed birth and incoming-ball proposal."""
+
+    proposal_sampler_contract_sha256: str
+    proposal_receipt_sha256: str
+    evaluation_seed: int
+    external_sample_index: int
+    external_birth_index: int
+    action_uid: int
+    profile_sha256: str
+    domain_epoch: int
+    domain_levels: DomainLevels
+    rho: float
+    sampling_stratum: str
+    selected_arm: Optional[str]
+    birth_component_stratum: str
+    ball_task_component_stratum: str
+    base_yaw_rad: float
+    policy_dt_s: float
+    birth: BaseBirthReceipt
+    sample: BallBaseSample
+
+    def receipt_payload(self) -> Dict[str, object]:
+        return {
+            "schema_version": 1,
+            "kind": "action_ball_frozen_evaluation_proposal",
+            "proposal_sampler_contract_sha256": (
+                self.proposal_sampler_contract_sha256
+            ),
+            "evaluation_seed": self.evaluation_seed,
+            "external_sample_index": self.external_sample_index,
+            "external_birth_index": self.external_birth_index,
+            "action_uid": self.action_uid,
+            "profile_sha256": self.profile_sha256,
+            "domain_epoch": self.domain_epoch,
+            "domain_levels": self.domain_levels.as_dict(),
+            "rho": self.rho,
+            "sampling_stratum": self.sampling_stratum,
+            "selected_arm": self.selected_arm,
+            "component_strata": {
+                "birth": self.birth_component_stratum,
+                "ball_task": self.ball_task_component_stratum,
+            },
+            "base_yaw_rad": self.base_yaw_rad,
+            "policy_dt_s": self.policy_dt_s,
+            "birth_receipt_sha256": self.birth.birth_id,
+            "sample_receipt_sha256": self.sample.sample_id,
+        }
+
+    def verify(self) -> None:
+        contract = frozen_evaluation_proposal_sampler_contract()
+        if (
+            self.proposal_sampler_contract_sha256
+            != contract["sha256"]
+        ):
+            raise ValueError(
+                "frozen proposal sampler contract differs from live code"
+            )
+        _plain_int(self.evaluation_seed, name="evaluation_seed")
+        _plain_int(
+            self.external_sample_index, name="external_sample_index"
+        )
+        _plain_int(
+            self.external_birth_index, name="external_birth_index"
+        )
+        if self.action_uid != self.sample.action_uid:
+            raise ValueError("frozen proposal sample changed action identity")
+        if self.action_uid != self.birth.action_uid:
+            raise ValueError("frozen proposal birth changed action identity")
+        if self.profile_sha256 != self.sample.profile_sha256:
+            raise ValueError("frozen proposal sample changed profile")
+        if self.profile_sha256 != self.birth.profile_sha256:
+            raise ValueError("frozen proposal birth changed profile")
+        if (
+            self.external_sample_index != self.sample.sample_index
+            or self.external_birth_index != self.birth.birth_index
+        ):
+            raise ValueError(
+                "frozen proposal receipts changed authority indices"
+            )
+        if (
+            self.domain_epoch != self.sample.domain_epoch
+            or self.domain_epoch != self.birth.domain_epoch
+            or self.domain_levels != self.sample.domain_levels
+            or self.domain_levels != self.birth.domain_levels
+        ):
+            raise ValueError(
+                "frozen proposal receipts changed the frozen domain"
+            )
+        if (
+            self.sample.birth_id != self.birth.birth_id
+            or self.sample.base_start_w_m != self.birth.base_start_w_m
+        ):
+            raise ValueError(
+                "frozen proposal sample is detached from its birth"
+            )
+        if self.sampling_stratum not in (
+            "center",
+            "interior",
+            "frontier",
+        ):
+            raise ValueError("frozen proposal sampling stratum is invalid")
+        if (self.sampling_stratum == "frontier") != (
+            self.selected_arm is not None
+        ):
+            raise ValueError(
+                "frozen proposal frontier arm/stratum mismatch"
+            )
+        if (
+            self.selected_arm is not None
+            and self.selected_arm not in ARM_KEYS
+        ):
+            raise ValueError("frozen proposal selected arm is unknown")
+        if (
+            self.birth_component_stratum
+            != self.birth.sampling_stratum
+            or self.ball_task_component_stratum
+            != self.sample.sampling_stratum
+        ):
+            raise ValueError(
+                "frozen proposal component strata differ from receipts"
+            )
+        if self.sampling_stratum == "frontier":
+            selected_is_birth = self.selected_arm in _BASE_SPAWN_ARMS
+            expected = (
+                ("frontier", "center")
+                if selected_is_birth
+                else ("center", "frontier")
+            )
+            if (
+                self.birth_component_stratum,
+                self.ball_task_component_stratum,
+            ) != expected:
+                raise ValueError(
+                    "frozen frontier must belong to exactly one component"
+                )
+            for arm in ARM_KEYS:
+                expected_level = (
+                    getattr(self.domain_levels, arm)
+                    if arm == self.selected_arm
+                    else 0.0
+                )
+                actual_level = (
+                    getattr(self.birth.sampling_levels, arm)
+                    if arm in _BASE_SPAWN_ARMS
+                    else getattr(self.sample.sampling_levels, arm)
+                )
+                if actual_level != expected_level:
+                    raise ValueError(
+                        "frozen frontier changed an unselected arm"
+                    )
+        else:
+            if (
+                self.birth_component_stratum,
+                self.ball_task_component_stratum,
+            ) != (self.sampling_stratum, self.sampling_stratum):
+                raise ValueError(
+                    "non-frontier component strata must equal outer stratum"
+                )
+        _finite(self.rho, name="rho", minimum=0.0, maximum=1.0)
+        step = _finite(
+            self.policy_dt_s, name="policy_dt_s", minimum=0.0
+        )
+        if step <= 0.0:
+            raise ValueError("policy_dt_s must be > 0")
+        self.sample.verify_sample_id()
+        if (
+            type(self.proposal_receipt_sha256) is not str
+            or self.proposal_receipt_sha256
+            != _sha256_json(self.receipt_payload())
+        ):
+            raise ValueError(
+                "frozen proposal receipt SHA does not match identity"
+            )
+
+
+def _direction_tangent_coordinates(
+    direction: Vec3,
+    *,
+    center: Vec3,
+    tangent_u: Vec3,
+    tangent_v: Vec3,
+) -> Tuple[float, float]:
+    """Invert ``_direction_from_tangent_angles`` on its certified support."""
+
+    cosine = max(-1.0, min(1.0, _dot(direction, center)))
+    radius = math.acos(cosine)
+    if radius <= 1.0e-15:
+        return (0.0, 0.0)
+    sine = math.sin(radius)
+    if abs(sine) <= 1.0e-15:
+        raise ValueError(
+            "sampled direction is singular in the tangent chart"
+        )
+    scale = radius / sine
+    return (
+        _dot(direction, tangent_u) * scale,
+        _dot(direction, tangent_v) * scale,
+    )
+
+
+def _frontier_coordinate_delta(
+    sample: BallBaseSample,
+    profile: SamplingProfile,
+    arm: str,
+) -> float:
+    """Recover the selected signed coordinate from receipt-visible values."""
+
+    if arm.startswith("time_to_contact_"):
+        return (
+            sample.time_to_contact_s
+            - profile.time_to_contact_center_s
+        )
+    if arm.startswith("contact_"):
+        _, axis, _ = arm.split("_")
+        index = {"x": 0, "y": 1, "z": 2}[axis]
+        return (
+            sample.contact_offset_from_base_goal_b_yaw_m[index]
+            - profile.contact_offset_center_b_yaw_m[index]
+        )
+    if arm.startswith("incoming_speed_"):
+        return (
+            sample.incoming_speed_mps
+            - profile.incoming_speed_center_mps
+        )
+    if arm.startswith("spin_magnitude_"):
+        return (
+            sample.spin_magnitude_radps
+            - profile.spin_magnitude_center_radps
+        )
+    if arm.startswith("base_travel_"):
+        _, _, axis, _ = arm.split("_")
+        index = {"x": 0, "y": 1}[axis]
+        return (
+            sample.base_travel_latent_b_yaw_m[index]
+            - profile.base_travel_center_b_yaw_m[index]
+        )
+    if arm.startswith("landing_aim_"):
+        _, _, axis, _ = arm.split("_")
+        index = {"x": 0, "y": 1}[axis]
+        return (
+            sample.landing_aim_w_xy_m[index]
+            - profile.landing_aim_center_w_xy_m[index]
+        )
+    if arm.startswith("incoming_direction_"):
+        _, _, axis, _ = arm.split("_")
+        coordinates = _direction_tangent_coordinates(
+            sample.incoming_direction_b_yaw,
+            center=profile.incoming_direction_center_b_yaw,
+            tangent_u=profile.incoming_direction_tangent_u_b_yaw,
+            tangent_v=profile.incoming_direction_tangent_v_b_yaw,
+        )
+        return coordinates[0 if axis == "u" else 1]
+    if arm.startswith("spin_direction_"):
+        _, _, axis, _ = arm.split("_")
+        coordinates = _direction_tangent_coordinates(
+            sample.spin_direction_b_yaw,
+            center=profile.spin_direction_center_b_yaw,
+            tangent_u=profile.spin_direction_tangent_u_b_yaw,
+            tangent_v=profile.spin_direction_tangent_v_b_yaw,
+        )
+        return coordinates[0 if axis == "u" else 1]
+    raise ValueError(
+        f"{arm!r} is not a receipt-visible per-swing frontier arm"
+    )
+
+
+def _birth_frontier_coordinate_delta(
+    birth: BaseBirthReceipt,
+    profile: SamplingProfile,
+    arm: str,
+) -> float:
+    """Recover one base-spawn axis from an issued birth receipt."""
+
+    if arm not in _BASE_SPAWN_ARMS:
+        raise ValueError(
+            f"{arm!r} is not a base-birth frontier arm"
+        )
+    _, _, axis, _ = arm.split("_")
+    index = {"x": 0, "y": 1}[axis]
+    return (
+        birth.base_start_w_m[index]
+        - profile.base_spawn_center_w_m[index]
+    )
+
+
 def _birth_identity_payload(
     *,
     sampler_contract_sha256: str,
@@ -1991,8 +3085,12 @@ def _birth_identity_payload(
     mobility_mode: str,
     base_yaw_rad: float,
     base_start_w_m: Vec3,
+    sampling_mixture: Optional[SamplingMixture] = None,
+    sampling_stratum: str = "domain",
+    sampling_levels: Optional[DomainLevels] = None,
+    frontier_arm: Optional[str] = None,
 ) -> Dict[str, object]:
-    return {
+    payload = {
         "schema_version": SCHEMA_VERSION,
         "kind": "base_birth",
         "sampler_contract_sha256": sampler_contract_sha256,
@@ -2008,6 +3106,20 @@ def _birth_identity_payload(
         "base_yaw_rad": base_yaw_rad,
         "base_start_w_m": base_start_w_m,
     }
+    if sampling_mixture is not None:
+        if sampling_levels is None:
+            raise ValueError(
+                "mixture birth identity requires sampling_levels"
+            )
+        payload.update(
+            {
+                "sampling_mixture": sampling_mixture.as_dict(),
+                "sampling_stratum": sampling_stratum,
+                "sampling_levels": sampling_levels.as_dict(),
+                "frontier_arm": frontier_arm,
+            }
+        )
+    return payload
 
 
 class _CounterRng:
@@ -2197,6 +3309,261 @@ def _sample_asymmetric_vector2(
     )  # type: ignore[return-value]
 
 
+@dataclass(frozen=True)
+class _ContactTimeTickGrid:
+    """Native integer policy-tick support for one action profile."""
+
+    step_s: float
+    center_tick: int
+    minimum_tick: int
+    maximum_tick: int
+    lower_initial_ticks: int
+    lower_maximum_ticks: int
+    upper_initial_ticks: int
+    upper_maximum_ticks: int
+
+    def width_ticks(
+        self, levels: DomainLevels
+    ) -> Tuple[int, int]:
+        def _width(initial: int, maximum: int, level: float) -> int:
+            promoted = initial + level * (maximum - initial)
+            return min(
+                maximum,
+                max(initial, math.floor(promoted + 0.5)),
+            )
+
+        return (
+            _width(
+                self.lower_initial_ticks,
+                self.lower_maximum_ticks,
+                levels.time_to_contact_lower,
+            ),
+            _width(
+                self.upper_initial_ticks,
+                self.upper_maximum_ticks,
+                levels.time_to_contact_upper,
+            ),
+        )
+
+    def sample_tick(
+        self,
+        *,
+        uniform: float,
+        levels: DomainLevels,
+        frontier_side: Optional[str],
+        frontier_band_fraction: Optional[float],
+    ) -> int:
+        first, last = self.tick_bounds(
+            levels=levels,
+            frontier_side=frontier_side,
+            frontier_band_fraction=frontier_band_fraction,
+        )
+        if first > last:
+            raise ValueError(
+                "time-to-contact frontier contains no policy tick"
+            )
+        count = last - first + 1
+        offset = min(count - 1, math.floor(uniform * count))
+        tick = first + offset
+        if not self.minimum_tick <= tick <= self.maximum_tick:
+            raise AssertionError(
+                "time-to-contact integer sampler escaped certified bounds"
+            )
+        return tick
+
+    def tick_bounds(
+        self,
+        *,
+        levels: DomainLevels,
+        frontier_side: Optional[str],
+        frontier_band_fraction: Optional[float],
+    ) -> Tuple[int, int]:
+        """Return the closed native-tick set for one TTC stratum request."""
+
+        lower, upper = self.width_ticks(levels)
+        if frontier_side is None:
+            return (
+                self.center_tick - lower,
+                self.center_tick + upper,
+            )
+        band = _finite(
+            frontier_band_fraction,
+            name="time_to_contact.frontier_band_fraction",
+            minimum=0.0,
+            maximum=1.0,
+        )
+        if not 0.0 < band < 1.0:
+            raise ValueError(
+                "time-to-contact frontier band must lie in (0, 1)"
+            )
+        if frontier_side == "negative":
+            outer_start = max(
+                1, math.floor((1.0 - band) * lower) + 1
+            )
+            return (
+                self.center_tick - lower,
+                self.center_tick - outer_start,
+            )
+        if frontier_side == "positive":
+            outer_start = max(
+                1, math.floor((1.0 - band) * upper) + 1
+            )
+            return (
+                self.center_tick + outer_start,
+                self.center_tick + upper,
+            )
+        raise ValueError(
+            "time-to-contact frontier side must be negative or positive"
+        )
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "schema_version": 1,
+            "center_quantization": "nearest_tick_ties_up_then_clamp",
+            "width_quantization": "ceil_seconds_minimum_one_tick",
+            "step_s": self.step_s,
+            "center_tick": self.center_tick,
+            "center_s": self.center_tick * self.step_s,
+            "minimum_tick": self.minimum_tick,
+            "maximum_tick": self.maximum_tick,
+            "lower_initial_ticks": self.lower_initial_ticks,
+            "lower_maximum_ticks": self.lower_maximum_ticks,
+            "upper_initial_ticks": self.upper_initial_ticks,
+            "upper_maximum_ticks": self.upper_maximum_ticks,
+        }
+
+
+def _contact_time_tick_grid(
+    profile: SamplingProfile,
+    *,
+    step_s: float,
+    frontier_band_fraction: float,
+) -> _ContactTimeTickGrid:
+    """Quantize one profile once; no per-proposal continuous TTC exists."""
+
+    step = _finite(
+        step_s, name="contact_time_step_s", minimum=0.0
+    )
+    if step <= 0.0:
+        raise ValueError("contact_time_step_s must be > 0")
+    frontier_band = _finite(
+        frontier_band_fraction,
+        name="time_to_contact.frontier_band_fraction",
+        minimum=0.0,
+        maximum=1.0,
+    )
+    if not 0.0 < frontier_band < 1.0:
+        raise ValueError(
+            "time-to-contact frontier band must lie in (0, 1)"
+        )
+    epsilon = 1.0e-12
+    strict_reaction_floor_s = (
+        profile.reference_t_hit_s / profile.teacher_rate_min
+        + profile.reaction_margin_s
+    )
+    minimum_tick = max(
+        math.ceil(profile.time_to_contact_min_s / step - epsilon),
+        math.floor(strict_reaction_floor_s / step + epsilon) + 1,
+    )
+    maximum_wait_s = (
+        profile.reference_t_hit_s / profile.teacher_rate_max + 1.0
+    )
+    maximum_tick = min(
+        math.floor(profile.time_to_contact_max_s / step + epsilon),
+        math.floor(maximum_wait_s / step + epsilon),
+    )
+    if minimum_tick > maximum_tick:
+        raise ValueError(
+            "time-to-contact profile has no tick satisfying strict "
+            "reaction and one-second wait bounds"
+        )
+    center_tick = math.floor(
+        profile.time_to_contact_center_s / step + 0.5
+    )
+    center_tick = min(max(center_tick, minimum_tick), maximum_tick)
+    lower_capacity = center_tick - minimum_tick
+    upper_capacity = maximum_tick - center_tick
+    if lower_capacity < 1 or upper_capacity < 1:
+        raise ValueError(
+            "time-to-contact profile must admit at least one policy tick "
+            "on each side of its quantized center"
+        )
+
+    def _tick_widths(
+        initial_s: float,
+        maximum_s: float,
+        capacity: int,
+        *,
+        side: str,
+    ) -> Tuple[int, int]:
+        initial = min(
+            capacity,
+            max(1, math.ceil(initial_s / step - epsilon)),
+        )
+        maximum = min(
+            capacity,
+            max(initial, math.ceil(maximum_s / step - epsilon)),
+        )
+        if not 1 <= initial <= maximum <= capacity:
+            raise ValueError(
+                f"time-to-contact {side} tick widths are invalid"
+            )
+        return initial, maximum
+
+    lower_initial, lower_maximum = _tick_widths(
+        profile.time_to_contact_std_lower_initial_s,
+        profile.time_to_contact_std_lower_max_s,
+        lower_capacity,
+        side="lower",
+    )
+    upper_initial, upper_maximum = _tick_widths(
+        profile.time_to_contact_std_upper_initial_s,
+        profile.time_to_contact_std_upper_max_s,
+        upper_capacity,
+        side="upper",
+    )
+    result = _ContactTimeTickGrid(
+        step_s=step,
+        center_tick=center_tick,
+        minimum_tick=minimum_tick,
+        maximum_tick=maximum_tick,
+        lower_initial_ticks=lower_initial,
+        lower_maximum_ticks=lower_maximum,
+        upper_initial_ticks=upper_initial,
+        upper_maximum_ticks=upper_maximum,
+    )
+    # Exhaust every curriculum level and both sides at construction.  This
+    # proves center/interior/frontier are non-empty before a random tape can
+    # advance; the actual proposal path merely indexes these certified sets.
+    for level in (0.0, 0.25, 0.5, 0.75, 1.0):
+        levels = DomainLevels(
+            time_to_contact_lower=level,
+            time_to_contact_upper=level,
+        )
+        lower, upper = result.width_ticks(levels)
+        if lower < 1 or upper < 1:
+            raise AssertionError(
+                "time-to-contact reachable level lost one side"
+            )
+        for side in ("negative", "positive"):
+            result.sample_tick(
+                uniform=0.5,
+                levels=levels,
+                frontier_side=side,
+                frontier_band_fraction=frontier_band,
+            )
+    if not (
+        result.minimum_tick * step > strict_reaction_floor_s
+        and result.maximum_tick * step
+        - profile.reference_t_hit_s / profile.teacher_rate_max
+        <= 1.0 + 1.0e-12
+    ):
+        raise AssertionError(
+            "time-to-contact tick grid violated certified timing bounds"
+        )
+    return result
+
+
 def _sample_signed_tangent_angle_rad(
     *,
     negative_width_deg: float,
@@ -2269,6 +3636,755 @@ def _sample_asymmetric_direction(
     )
 
 
+_BASE_SPAWN_ARMS = (
+    "base_spawn_x_lower",
+    "base_spawn_x_upper",
+    "base_spawn_y_lower",
+    "base_spawn_y_upper",
+)
+
+
+def _arm_support_parameters(
+    profile: SamplingProfile,
+    arm: str,
+) -> Tuple[float, float, float]:
+    """Return selected-side ``(initial, maximum, hard_cap)`` widths.
+
+    ``DomainLevels`` parameterize promotion between the first two values.
+    Sampling clips the resulting physical support at ``hard_cap``.  Keeping
+    these three quantities separate is necessary for joint ``rho``: scaling a
+    normalized level scales only the promoted increment and can accidentally
+    push the interior distribution into the outer frontier band whenever the
+    initial support is non-zero.
+    """
+
+    if arm not in ARM_KEYS:
+        raise ValueError(f"unknown support arm {arm!r}")
+    axis_index = {"x": 0, "y": 1, "z": 2}
+    aim_axis_index = {"x": 0, "y": 1}
+
+    if arm.startswith("time_to_contact_"):
+        if arm.endswith("_lower"):
+            return (
+                profile.time_to_contact_std_lower_initial_s,
+                profile.time_to_contact_std_lower_max_s,
+                profile.time_to_contact_center_s
+                - profile.time_to_contact_min_s,
+            )
+        return (
+            profile.time_to_contact_std_upper_initial_s,
+            profile.time_to_contact_std_upper_max_s,
+            profile.time_to_contact_max_s
+            - profile.time_to_contact_center_s,
+        )
+    if arm.startswith("contact_"):
+        _, axis, side = arm.split("_")
+        index = axis_index[axis]
+        if side == "lower":
+            return (
+                profile.contact_offset_std_lower_initial_m[index],
+                profile.contact_offset_std_lower_max_m[index],
+                profile.contact_offset_center_b_yaw_m[index]
+                - profile.contact_offset_min_b_yaw_m[index],
+            )
+        return (
+            profile.contact_offset_std_upper_initial_m[index],
+            profile.contact_offset_std_upper_max_m[index],
+            profile.contact_offset_max_b_yaw_m[index]
+            - profile.contact_offset_center_b_yaw_m[index],
+        )
+    if arm.startswith("incoming_speed_"):
+        if arm.endswith("_lower"):
+            return (
+                profile.incoming_speed_std_lower_initial_mps,
+                profile.incoming_speed_std_lower_max_mps,
+                profile.incoming_speed_center_mps
+                - profile.incoming_speed_min_mps,
+            )
+        return (
+            profile.incoming_speed_std_upper_initial_mps,
+            profile.incoming_speed_std_upper_max_mps,
+            profile.incoming_speed_max_mps
+            - profile.incoming_speed_center_mps,
+        )
+    if arm.startswith("spin_magnitude_"):
+        if arm.endswith("_lower"):
+            return (
+                profile.spin_magnitude_std_lower_initial_radps,
+                profile.spin_magnitude_std_lower_max_radps,
+                profile.spin_magnitude_center_radps
+                - profile.spin_magnitude_min_radps,
+            )
+        return (
+            profile.spin_magnitude_std_upper_initial_radps,
+            profile.spin_magnitude_std_upper_max_radps,
+            profile.spin_magnitude_max_radps
+            - profile.spin_magnitude_center_radps,
+        )
+    for prefix in ("base_spawn", "base_travel"):
+        if arm.startswith(prefix + "_"):
+            _, _, axis, side = arm.split("_")
+            index = axis_index[axis]
+            if prefix == "base_spawn":
+                center = profile.base_spawn_center_w_m
+                lower_bound = profile.base_spawn_min_w_m
+                upper_bound = profile.base_spawn_max_w_m
+            else:
+                center = profile.base_travel_center_b_yaw_m
+                lower_bound = profile.base_travel_min_b_yaw_m
+                upper_bound = profile.base_travel_max_b_yaw_m
+            if side == "lower":
+                return (
+                    getattr(
+                        profile, f"{prefix}_std_lower_initial_m"
+                    )[index],
+                    getattr(profile, f"{prefix}_std_lower_max_m")[
+                        index
+                    ],
+                    center[index] - lower_bound[index],
+                )
+            return (
+                getattr(profile, f"{prefix}_std_upper_initial_m")[
+                    index
+                ],
+                getattr(profile, f"{prefix}_std_upper_max_m")[index],
+                upper_bound[index] - center[index],
+            )
+    if arm.startswith("landing_aim_"):
+        _, _, axis, side = arm.split("_")
+        index = aim_axis_index[axis]
+        if side == "lower":
+            return (
+                profile.landing_aim_std_lower_initial_m[index],
+                profile.landing_aim_std_lower_max_m[index],
+                profile.landing_aim_center_w_xy_m[index]
+                - profile.landing_aim_min_w_xy_m[index],
+            )
+        return (
+            profile.landing_aim_std_upper_initial_m[index],
+            profile.landing_aim_std_upper_max_m[index],
+            profile.landing_aim_max_w_xy_m[index]
+            - profile.landing_aim_center_w_xy_m[index],
+        )
+    for prefix in ("incoming_direction", "spin_direction"):
+        if arm.startswith(prefix + "_"):
+            _, _, axis, side = arm.split("_")
+            suffix = "neg" if side == "neg" else "pos"
+            initial = math.radians(
+                getattr(
+                    profile,
+                    f"{prefix}_tangent_{axis}_{suffix}_initial_deg",
+                )
+            )
+            maximum = math.radians(
+                getattr(
+                    profile,
+                    f"{prefix}_tangent_{axis}_{suffix}_max_deg",
+                )
+            )
+            return (initial, maximum, maximum)
+    raise AssertionError(f"unhandled support arm {arm!r}")
+
+
+def _arm_physical_width(
+    profile: SamplingProfile,
+    levels: DomainLevels,
+    arm: str,
+) -> float:
+    initial, maximum, hard_cap = _arm_support_parameters(
+        profile, arm
+    )
+    return min(
+        _lerp(initial, maximum, getattr(levels, arm)),
+        hard_cap,
+    )
+
+
+def _rho_scaled_levels(
+    profile: SamplingProfile,
+    levels: DomainLevels,
+    rho: float,
+    *,
+    active_arms: Sequence[str],
+    full_width_arm: Optional[str] = None,
+) -> DomainLevels:
+    """Scale complete physical support widths, including level-zero width.
+
+    A profile cannot represent support narrower than its initial width, so
+    ``max(initial_width, rho * current_width)`` is used.  Inverting that
+    physical target back to a normalized level keeps downstream samplers
+    unchanged while making the mixture's ``rho`` interpretation exact.
+    Inactive axes are zeroed so a swing receipt cannot claim a base-birth arm.
+    """
+
+    rho = _finite(rho, name="rho", minimum=0.0, maximum=1.0)
+    active = tuple(active_arms)
+    if len(set(active)) != len(active) or any(
+        arm not in ARM_KEYS for arm in active
+    ):
+        raise ValueError("active_arms must be unique known arms")
+    if full_width_arm is not None and full_width_arm not in active:
+        raise ValueError("full_width_arm must be active")
+    values = {arm: 0.0 for arm in ARM_KEYS}
+    for arm in active:
+        source_level = getattr(levels, arm)
+        if arm == full_width_arm or rho == 1.0:
+            values[arm] = source_level
+            continue
+        initial, maximum, hard_cap = _arm_support_parameters(
+            profile, arm
+        )
+        initial_width = min(initial, hard_cap)
+        current_width = min(
+            _lerp(initial, maximum, source_level),
+            hard_cap,
+        )
+        target_width = max(initial_width, rho * current_width)
+        if (
+            target_width <= initial_width
+            or maximum <= initial
+            or hard_cap <= initial
+        ):
+            values[arm] = 0.0
+            continue
+        effective_level = (
+            (target_width - initial) / (maximum - initial)
+        )
+        values[arm] = min(
+            source_level, max(0.0, effective_level)
+        )
+    return DomainLevels(**values)
+
+
+def _frontier_width_pair(
+    profile: SamplingProfile,
+    levels: DomainLevels,
+    arm: str,
+) -> Tuple[float, float, str, int]:
+    """Return negative/positive widths, selected side, and draw index.
+
+    Widths are the exact support half-widths consumed by the sampler, not a
+    caller-provided new-band boolean.  The returned draw index identifies the
+    already-budgeted open uniform that can be remapped into the selected outer
+    band without changing :data:`DRAWS_PER_SAMPLE`.
+    """
+
+    if arm not in ARM_KEYS:
+        raise ValueError(f"unknown frontier arm {arm!r}")
+    axis_index = {"x": 0, "y": 1, "z": 2}
+    aim_axis_index = {"x": 0, "y": 1}
+
+    if arm.startswith("time_to_contact_"):
+        negative = _lerp(
+            profile.time_to_contact_std_lower_initial_s,
+            profile.time_to_contact_std_lower_max_s,
+            levels.time_to_contact_lower,
+        )
+        positive = _lerp(
+            profile.time_to_contact_std_upper_initial_s,
+            profile.time_to_contact_std_upper_max_s,
+            levels.time_to_contact_upper,
+        )
+        negative = min(
+            negative,
+            profile.time_to_contact_center_s
+            - profile.time_to_contact_min_s,
+        )
+        positive = min(
+            positive,
+            profile.time_to_contact_max_s
+            - profile.time_to_contact_center_s,
+        )
+        return (
+            negative,
+            positive,
+            "negative" if arm.endswith("_lower") else "positive",
+            9,
+        )
+
+    if arm.startswith("contact_"):
+        _, axis, side = arm.split("_")
+        index = axis_index[axis]
+        negative = _lerp(
+            profile.contact_offset_std_lower_initial_m[index],
+            profile.contact_offset_std_lower_max_m[index],
+            getattr(levels, f"contact_{axis}_lower"),
+        )
+        positive = _lerp(
+            profile.contact_offset_std_upper_initial_m[index],
+            profile.contact_offset_std_upper_max_m[index],
+            getattr(levels, f"contact_{axis}_upper"),
+        )
+        negative = min(
+            negative,
+            profile.contact_offset_center_b_yaw_m[index]
+            - profile.contact_offset_min_b_yaw_m[index],
+        )
+        positive = min(
+            positive,
+            profile.contact_offset_max_b_yaw_m[index]
+            - profile.contact_offset_center_b_yaw_m[index],
+        )
+        return (
+            negative,
+            positive,
+            "negative" if side == "lower" else "positive",
+            6 + index,
+        )
+
+    if arm.startswith("incoming_speed_"):
+        negative = _lerp(
+            profile.incoming_speed_std_lower_initial_mps,
+            profile.incoming_speed_std_lower_max_mps,
+            levels.incoming_speed_lower,
+        )
+        positive = _lerp(
+            profile.incoming_speed_std_upper_initial_mps,
+            profile.incoming_speed_std_upper_max_mps,
+            levels.incoming_speed_upper,
+        )
+        negative = min(
+            negative,
+            profile.incoming_speed_center_mps
+            - profile.incoming_speed_min_mps,
+        )
+        positive = min(
+            positive,
+            profile.incoming_speed_max_mps
+            - profile.incoming_speed_center_mps,
+        )
+        return (
+            negative,
+            positive,
+            "negative" if arm.endswith("_lower") else "positive",
+            10,
+        )
+
+    if arm.startswith("spin_magnitude_"):
+        negative = _lerp(
+            profile.spin_magnitude_std_lower_initial_radps,
+            profile.spin_magnitude_std_lower_max_radps,
+            levels.spin_magnitude_lower,
+        )
+        positive = _lerp(
+            profile.spin_magnitude_std_upper_initial_radps,
+            profile.spin_magnitude_std_upper_max_radps,
+            levels.spin_magnitude_upper,
+        )
+        negative = min(
+            negative,
+            profile.spin_magnitude_center_radps
+            - profile.spin_magnitude_min_radps,
+        )
+        positive = min(
+            positive,
+            profile.spin_magnitude_max_radps
+            - profile.spin_magnitude_center_radps,
+        )
+        return (
+            negative,
+            positive,
+            "negative" if arm.endswith("_lower") else "positive",
+            13,
+        )
+
+    for prefix, draw_start in (
+        ("base_spawn", 0),
+        ("base_travel", 3),
+    ):
+        marker = prefix + "_"
+        if arm.startswith(marker):
+            _, _, axis, side = arm.split("_")
+            index = axis_index[axis]
+            center = getattr(profile, f"{prefix}_center_w_m", None)
+            if prefix == "base_travel":
+                center = profile.base_travel_center_b_yaw_m
+                lower_bound = profile.base_travel_min_b_yaw_m
+                upper_bound = profile.base_travel_max_b_yaw_m
+            else:
+                center = profile.base_spawn_center_w_m
+                lower_bound = profile.base_spawn_min_w_m
+                upper_bound = profile.base_spawn_max_w_m
+            negative = _lerp(
+                getattr(profile, f"{prefix}_std_lower_initial_m")[index],
+                getattr(profile, f"{prefix}_std_lower_max_m")[index],
+                getattr(levels, f"{prefix}_{axis}_lower"),
+            )
+            positive = _lerp(
+                getattr(profile, f"{prefix}_std_upper_initial_m")[index],
+                getattr(profile, f"{prefix}_std_upper_max_m")[index],
+                getattr(levels, f"{prefix}_{axis}_upper"),
+            )
+            negative = min(negative, center[index] - lower_bound[index])
+            positive = min(positive, upper_bound[index] - center[index])
+            return (
+                negative,
+                positive,
+                "negative" if side == "lower" else "positive",
+                draw_start + index,
+            )
+
+    if arm.startswith("landing_aim_"):
+        _, _, axis, side = arm.split("_")
+        index = aim_axis_index[axis]
+        negative = _lerp(
+            profile.landing_aim_std_lower_initial_m[index],
+            profile.landing_aim_std_lower_max_m[index],
+            getattr(levels, f"landing_aim_{axis}_lower"),
+        )
+        positive = _lerp(
+            profile.landing_aim_std_upper_initial_m[index],
+            profile.landing_aim_std_upper_max_m[index],
+            getattr(levels, f"landing_aim_{axis}_upper"),
+        )
+        negative = min(
+            negative,
+            profile.landing_aim_center_w_xy_m[index]
+            - profile.landing_aim_min_w_xy_m[index],
+        )
+        positive = min(
+            positive,
+            profile.landing_aim_max_w_xy_m[index]
+            - profile.landing_aim_center_w_xy_m[index],
+        )
+        return (
+            negative,
+            positive,
+            "negative" if side == "lower" else "positive",
+            16 + index,
+        )
+
+    for prefix, draw_start in (
+        ("incoming_direction", 11),
+        ("spin_direction", 14),
+    ):
+        marker = prefix + "_"
+        if arm.startswith(marker):
+            _, _, axis, side = arm.split("_")
+            negative = math.radians(
+                _lerp(
+                    getattr(
+                        profile,
+                        f"{prefix}_tangent_{axis}_neg_initial_deg",
+                    ),
+                    getattr(
+                        profile,
+                        f"{prefix}_tangent_{axis}_neg_max_deg",
+                    ),
+                    getattr(levels, f"{prefix}_{axis}_neg"),
+                )
+            )
+            positive = math.radians(
+                _lerp(
+                    getattr(
+                        profile,
+                        f"{prefix}_tangent_{axis}_pos_initial_deg",
+                    ),
+                    getattr(
+                        profile,
+                        f"{prefix}_tangent_{axis}_pos_max_deg",
+                    ),
+                    getattr(levels, f"{prefix}_{axis}_pos"),
+                )
+            )
+            return (
+                negative,
+                positive,
+                "negative" if side == "neg" else "positive",
+                draw_start + (0 if axis == "u" else 1),
+            )
+
+    raise AssertionError(f"unhandled frontier arm {arm!r}")
+
+
+def _eligible_swing_frontier_arms(
+    profile: SamplingProfile,
+    levels: DomainLevels,
+    mixture: Optional[SamplingMixture] = None,
+    contact_time_tick_grid: Optional[_ContactTimeTickGrid] = None,
+) -> Tuple[str, ...]:
+    """Return physically distinct per-swing frontier arms."""
+
+    active = tuple(
+        arm
+        for arm in ARM_KEYS
+        if not arm.startswith("base_spawn_")
+        and not (
+            profile.counter_rally_objective is not None
+            and arm
+            in profile.counter_rally_objective.inactive_curriculum_arms
+        )
+        and not (
+            profile.mobility_mode == "no_move"
+            and arm.startswith("base_travel_")
+        )
+    )
+    if mixture is None:
+        mixture = SamplingMixture()
+    return _eligible_frontier_arms(
+        profile=profile,
+        levels=levels,
+        mixture=mixture,
+        active_arms=active,
+        contact_time_tick_grid=contact_time_tick_grid,
+    )
+
+
+def _eligible_birth_frontier_arms(
+    profile: SamplingProfile,
+    levels: DomainLevels,
+    mixture: SamplingMixture,
+) -> Tuple[str, ...]:
+    """Return base-spawn axis/side arms with a distinct outer band."""
+
+    return _eligible_frontier_arms(
+        profile=profile,
+        levels=levels,
+        mixture=mixture,
+        active_arms=_BASE_SPAWN_ARMS,
+    )
+
+
+def _eligible_frontier_arms(
+    *,
+    profile: SamplingProfile,
+    levels: DomainLevels,
+    mixture: SamplingMixture,
+    active_arms: Sequence[str],
+    contact_time_tick_grid: Optional[_ContactTimeTickGrid] = None,
+) -> Tuple[str, ...]:
+    """Filter arms whose frontier lies outside center/interior support.
+
+    Level-zero support is physical support, not a point.  An arm is therefore
+    not a valid frontier probe until its promoted width is large enough that
+    the selected outer band begins at or beyond both center and joint-interior
+    support.  This removes the old silent overlap caused by scaling only the
+    normalized level.
+    """
+
+    eligible = []
+    interior = _rho_scaled_levels(
+        profile,
+        levels,
+        mixture.interior_level_scale,
+        active_arms=active_arms,
+    )
+    center = DomainLevels()
+    frontier_start_scale = 1.0 - mixture.frontier_band_fraction
+    tolerance = 1.0e-12
+    for arm in active_arms:
+        if (
+            contact_time_tick_grid is not None
+            and arm.startswith("time_to_contact_")
+        ):
+            lower_ticks, upper_ticks = (
+                contact_time_tick_grid.width_ticks(levels)
+            )
+            side_ticks = (
+                lower_ticks
+                if arm.endswith("_lower")
+                else upper_ticks
+            )
+            if side_ticks >= 1:
+                eligible.append(arm)
+            continue
+        full_width = _arm_physical_width(profile, levels, arm)
+        center_width = _arm_physical_width(profile, center, arm)
+        interior_width = _arm_physical_width(
+            profile, interior, arm
+        )
+        frontier_start = frontier_start_scale * full_width
+        if (
+            full_width > center_width + tolerance
+            and center_width <= frontier_start + tolerance
+            and interior_width <= frontier_start + tolerance
+        ):
+            eligible.append(arm)
+    return tuple(eligible)
+
+
+def _frontier_band_uniform(
+    uniform: float,
+    *,
+    negative_width: float,
+    positive_width: float,
+    side: str,
+    band_fraction: float,
+) -> float:
+    """Remap one open uniform into an exact asymmetric outer-side band."""
+
+    total = negative_width + positive_width
+    if total <= 0.0:
+        raise ValueError("frontier coordinate has zero total support")
+    if side == "negative":
+        if negative_width <= 0.0:
+            raise ValueError("negative frontier arm has zero support")
+        return uniform * band_fraction * negative_width / total
+    if side == "positive":
+        if positive_width <= 0.0:
+            raise ValueError("positive frontier arm has zero support")
+        return (
+            negative_width
+            + (1.0 - band_fraction) * positive_width
+            + uniform * band_fraction * positive_width
+        ) / total
+    raise ValueError("frontier side must be negative or positive")
+
+
+def _sampling_plan(
+    *,
+    profile: SamplingProfile,
+    levels: DomainLevels,
+    mixture: Optional[SamplingMixture],
+    proposal_index: int,
+    scope: str,
+    contact_time_tick_grid: Optional[_ContactTimeTickGrid] = None,
+) -> Tuple[str, DomainLevels, Optional[str]]:
+    if mixture is None:
+        return ("domain", levels, None)
+    if scope == "birth":
+        active_arms = _BASE_SPAWN_ARMS
+        eligible = _eligible_birth_frontier_arms(
+            profile, levels, mixture
+        )
+    elif scope == "swing":
+        active_arms = tuple(
+            arm
+            for arm in ARM_KEYS
+            if not arm.startswith("base_spawn_")
+            and not (
+                profile.counter_rally_objective is not None
+                and arm
+                in profile.counter_rally_objective.inactive_curriculum_arms
+            )
+            and not (
+                profile.mobility_mode == "no_move"
+                and arm.startswith("base_travel_")
+            )
+        )
+        eligible = _eligible_swing_frontier_arms(
+            profile,
+            levels,
+            mixture,
+            contact_time_tick_grid,
+        )
+    else:
+        raise ValueError("sampling scope must be 'birth' or 'swing'")
+    stratum = mixture.stratum_for(proposal_index)
+    if stratum == "center":
+        return (
+            "center",
+            _rho_scaled_levels(
+                profile,
+                levels,
+                0.0,
+                active_arms=active_arms,
+            ),
+            None,
+        )
+    if stratum == "interior":
+        return (
+            "interior",
+            _rho_scaled_levels(
+                profile,
+                levels,
+                mixture.interior_level_scale,
+                active_arms=active_arms,
+            ),
+            None,
+        )
+    if stratum != "frontier":
+        raise AssertionError(f"unknown sampling stratum {stratum!r}")
+    if not eligible:
+        if scope == "swing":
+            raise ValueError(
+                "frontier stratum has no non-zero per-swing arm "
+                "distinct from center/interior at the current physical "
+                "support widths"
+            )
+        raise ValueError(
+            "frontier stratum has no distinct base-birth arm at the "
+            "current physical support widths"
+        )
+    ordinal = mixture.frontier_ordinal_before(proposal_index)
+    arm = eligible[ordinal % len(eligible)]
+    return (
+        "frontier",
+        _rho_scaled_levels(
+            profile,
+            levels,
+            mixture.interior_level_scale,
+            active_arms=active_arms,
+            full_width_arm=arm,
+        ),
+        arm,
+    )
+
+
+def _validated_sampling_plan_override(
+    *,
+    profile: SamplingProfile,
+    domain_levels: DomainLevels,
+    mixture: Optional[SamplingMixture],
+    scope: str,
+    plan: Tuple[str, DomainLevels, Optional[str]],
+) -> Tuple[str, DomainLevels, Optional[str]]:
+    """Validate one evaluator-owned plan before any counter draw."""
+
+    if mixture is None:
+        raise ValueError(
+            "sampling plan override requires the production mixture"
+        )
+    if (
+        not isinstance(plan, tuple)
+        or len(plan) != 3
+        or plan[0] not in ("center", "interior", "frontier")
+        or not isinstance(plan[1], DomainLevels)
+    ):
+        raise ValueError("sampling plan override is malformed")
+    stratum, effective, arm = plan
+    for name in ARM_KEYS:
+        if getattr(effective, name) > (
+            getattr(domain_levels, name) + 1.0e-15
+        ):
+            raise ValueError(
+                "sampling plan override exceeds the frozen domain"
+            )
+    if scope == "birth":
+        active = set(_BASE_SPAWN_ARMS)
+    elif scope == "swing":
+        active = {
+            name
+            for name in ARM_KEYS
+            if name not in _BASE_SPAWN_ARMS
+            and not (
+                profile.mobility_mode == "no_move"
+                and name.startswith("base_travel_")
+            )
+        }
+    else:
+        raise ValueError("sampling scope must be 'birth' or 'swing'")
+    for name in ARM_KEYS:
+        if name not in active and getattr(effective, name) != 0.0:
+            raise ValueError(
+                "sampling plan override activates an out-of-scope arm"
+            )
+    if stratum == "frontier":
+        if arm not in active:
+            raise ValueError(
+                "frontier sampling override names an out-of-scope arm"
+            )
+        if _arm_physical_width(profile, effective, arm) <= 0.0:
+            raise ValueError(
+                "frontier sampling override has zero physical width"
+            )
+    elif arm is not None:
+        raise ValueError(
+            "non-frontier sampling override cannot name an arm"
+        )
+    return plan
+
+
 def _sample_direction_cone(
     center: Vec3,
     cone_deg: float,
@@ -2319,6 +4435,8 @@ class ActionBallSampler:
         profiles: Sequence[SamplingProfile],
         *,
         seed: int,
+        sampling_mixture: Optional[SamplingMixture] = None,
+        contact_time_step_s: Optional[float] = None,
     ) -> None:
         if not isinstance(profiles, (tuple, list)) or not profiles:
             raise ValueError("profiles must be a non-empty tuple/list")
@@ -2335,6 +4453,42 @@ class ActionBallSampler:
             ordered[profile.action_uid] = profile
         self._profiles = dict(sorted(ordered.items()))
         self._seed = _plain_int(seed, name="seed")
+        if (
+            sampling_mixture is not None
+            and not isinstance(sampling_mixture, SamplingMixture)
+        ):
+            raise TypeError(
+                "sampling_mixture must be SamplingMixture or None"
+            )
+        self._sampling_mixture = sampling_mixture
+        if contact_time_step_s is None:
+            self._contact_time_step_s = None
+            self._contact_time_grid_by_action: Dict[
+                int, _ContactTimeTickGrid
+            ] = {}
+        else:
+            if sampling_mixture is None:
+                raise ValueError(
+                    "contact_time_step_s is a production-mixture contract"
+                )
+            step = _finite(
+                contact_time_step_s,
+                name="contact_time_step_s",
+                minimum=0.0,
+            )
+            if step <= 0.0:
+                raise ValueError("contact_time_step_s must be > 0")
+            self._contact_time_step_s = step
+            self._contact_time_grid_by_action = {
+                uid: _contact_time_tick_grid(
+                    self._profiles[uid],
+                    step_s=step,
+                    frontier_band_fraction=(
+                        sampling_mixture.frontier_band_fraction
+                    ),
+                )
+                for uid in self.action_uids
+            }
         self._rng_by_action = {
             uid: _CounterRng(self._seed) for uid in self.action_uids
         }
@@ -2362,19 +4516,33 @@ class ActionBallSampler:
         ] = {
             uid: {} for uid in self.action_uids
         }
-        self._contract_sha256 = _sha256_json(
-            {
-                "schema_version": SCHEMA_VERSION,
-                "state_schema_version": STATE_SCHEMA_VERSION,
-                "arm_catalog_sha256": ARM_CATALOG_SHA256,
-                "seed": self._seed,
-                "draws_per_birth": DRAWS_PER_BIRTH,
-                "draws_per_sample": DRAWS_PER_SAMPLE,
-                "profiles": [
-                    self._profiles[uid].as_dict() for uid in self.action_uids
-                ],
-            }
-        )
+        contract_payload = {
+            "schema_version": SCHEMA_VERSION,
+            "state_schema_version": STATE_SCHEMA_VERSION,
+            "arm_catalog_sha256": ARM_CATALOG_SHA256,
+            "seed": self._seed,
+            "draws_per_birth": DRAWS_PER_BIRTH,
+            "draws_per_sample": DRAWS_PER_SAMPLE,
+            "profiles": [
+                self._profiles[uid].as_dict() for uid in self.action_uids
+            ],
+        }
+        if self._sampling_mixture is not None:
+            contract_payload["sampling_mixture"] = (
+                self._sampling_mixture.as_dict()
+            )
+            contract_payload["contact_time_step_s"] = (
+                self._contact_time_step_s
+            )
+            if self._contact_time_step_s is not None:
+                contract_payload["contact_time_tick_grids"] = [
+                    {
+                        "action_uid": uid,
+                        **self._contact_time_grid_by_action[uid].to_dict(),
+                    }
+                    for uid in self.action_uids
+                ]
+        self._contract_sha256 = _sha256_json(contract_payload)
         self._retired_birth_count_by_action = {
             uid: 0 for uid in self.action_uids
         }
@@ -2407,6 +4575,14 @@ class ActionBallSampler:
     @property
     def sampler_contract_sha256(self) -> str:
         return self._contract_sha256
+
+    @property
+    def sampling_mixture(self) -> Optional[SamplingMixture]:
+        return self._sampling_mixture
+
+    @property
+    def contact_time_step_s(self) -> Optional[float]:
+        return self._contact_time_step_s
 
     @property
     def draw_count(self) -> int:
@@ -2657,6 +4833,9 @@ class ActionBallSampler:
         domain_epoch: int,
         levels: Union[DomainLevels, Mapping[str, object]],
         base_yaw_rad: float = 0.0,
+        _sampling_plan_override: Optional[
+            Tuple[str, DomainLevels, Optional[str]]
+        ] = None,
     ) -> BaseBirthReceipt:
         """Sample the true-reset base spawn once for a new episode."""
 
@@ -2665,6 +4844,9 @@ class ActionBallSampler:
         levels = self._validated_levels(levels)
         base_yaw_rad = _finite(base_yaw_rad, name="base_yaw_rad")
         profile = self._profiles[action_uid]
+        _validate_counter_rally_profile_support(
+            profile, base_yaw_rad=base_yaw_rad
+        )
         rng = self._rng_by_action[action_uid]
         birth_index = self._birth_count_by_action[action_uid]
         if (
@@ -2673,6 +4855,33 @@ class ActionBallSampler:
         ):
             raise OverflowError("action birth tape exhausted")
 
+        # The episode-base mixture owns an independent per-action proposal
+        # cursor.  Freeze its plan before consuming the random tape so an
+        # invalid frontier leaves counters/transcripts byte-identical.
+        if _sampling_plan_override is None:
+            (
+                sampling_stratum,
+                sampling_levels,
+                frontier_arm,
+            ) = _sampling_plan(
+                profile=profile,
+                levels=levels,
+                mixture=self._sampling_mixture,
+                proposal_index=birth_index,
+                scope="birth",
+            )
+        else:
+            (
+                sampling_stratum,
+                sampling_levels,
+                frontier_arm,
+            ) = _validated_sampling_plan_override(
+                profile=profile,
+                domain_levels=levels,
+                mixture=self._sampling_mixture,
+                scope="birth",
+                plan=_sampling_plan_override,
+            )
         draw_start = rng.draw_count
         request_digest = self._request_digest(
             kind="base_birth",
@@ -2684,14 +4893,36 @@ class ActionBallSampler:
             rng.uniform_open(request_digest)
             for _ in range(DRAWS_PER_BIRTH)
         ]
+        if frontier_arm is not None:
+            (
+                negative_width,
+                positive_width,
+                frontier_side,
+                frontier_draw_index,
+            ) = _frontier_width_pair(
+                profile, sampling_levels, frontier_arm
+            )
+            if frontier_draw_index >= DRAWS_PER_BIRTH:
+                raise AssertionError(
+                    "base-birth frontier selected a swing-only draw"
+                )
+            uniforms[frontier_draw_index] = _frontier_band_uniform(
+                uniforms[frontier_draw_index],
+                negative_width=negative_width,
+                positive_width=positive_width,
+                side=frontier_side,
+                band_fraction=(
+                    self._sampling_mixture.frontier_band_fraction
+                ),
+            )
         base_start_w_m = _sample_asymmetric_vector3(
             center=profile.base_spawn_center_w_m,
             lower_std=_vec3_lerp_levels(
                 profile.base_spawn_std_lower_initial_m,
                 profile.base_spawn_std_lower_max_m,
                 (
-                    levels.base_spawn_x_lower,
-                    levels.base_spawn_y_lower,
+                    sampling_levels.base_spawn_x_lower,
+                    sampling_levels.base_spawn_y_lower,
                     0.0,
                 ),
             ),
@@ -2699,8 +4930,8 @@ class ActionBallSampler:
                 profile.base_spawn_std_upper_initial_m,
                 profile.base_spawn_std_upper_max_m,
                 (
-                    levels.base_spawn_x_upper,
-                    levels.base_spawn_y_upper,
+                    sampling_levels.base_spawn_x_upper,
+                    sampling_levels.base_spawn_y_upper,
                     0.0,
                 ),
             ),
@@ -2725,6 +4956,14 @@ class ActionBallSampler:
             mobility_mode=profile.mobility_mode,
             base_yaw_rad=base_yaw_rad,
             base_start_w_m=base_start_w_m,
+            sampling_mixture=self._sampling_mixture,
+            sampling_stratum=sampling_stratum,
+            sampling_levels=(
+                sampling_levels
+                if self._sampling_mixture is not None
+                else DomainLevels()
+            ),
+            frontier_arm=frontier_arm,
         )
         receipt = BaseBirthReceipt(
             birth_id=_sha256_json(payload),
@@ -2741,6 +4980,14 @@ class ActionBallSampler:
             mobility_mode=profile.mobility_mode,
             base_yaw_rad=base_yaw_rad,
             base_start_w_m=base_start_w_m,
+            sampling_mixture=self._sampling_mixture,
+            sampling_stratum=sampling_stratum,
+            sampling_levels=(
+                sampling_levels
+                if self._sampling_mixture is not None
+                else DomainLevels()
+            ),
+            frontier_arm=frontier_arm,
         )
         self._issued_births_by_action[action_uid][
             birth_index
@@ -2756,12 +5003,39 @@ class ActionBallSampler:
         domain_epoch: int,
         levels: DomainLevels,
         base_yaw_rad: float,
+        sampling_plan_override: Optional[
+            Tuple[str, DomainLevels, Optional[str]]
+        ] = None,
     ) -> SamplingProfile:
         if not isinstance(birth, BaseBirthReceipt):
             raise TypeError("birth must be a BaseBirthReceipt")
         profile = self._profiles[action_uid]
+        if sampling_plan_override is None:
+            (
+                expected_birth_stratum,
+                expected_birth_levels,
+                expected_birth_frontier,
+            ) = _sampling_plan(
+                profile=profile,
+                levels=levels,
+                mixture=self._sampling_mixture,
+                proposal_index=birth.birth_index,
+                scope="birth",
+            )
+        else:
+            (
+                expected_birth_stratum,
+                expected_birth_levels,
+                expected_birth_frontier,
+            ) = _validated_sampling_plan_override(
+                profile=profile,
+                domain_levels=levels,
+                mixture=self._sampling_mixture,
+                scope="birth",
+                plan=sampling_plan_override,
+            )
         mismatches = []
-        expected_fields = (
+        expected_fields = [
             ("sampler_contract_sha256", self._contract_sha256),
             ("arm_catalog_sha256", ARM_CATALOG_SHA256),
             ("action_uid", action_uid),
@@ -2771,7 +5045,16 @@ class ActionBallSampler:
             ("levels_sha256", levels.sha256),
             ("mobility_mode", profile.mobility_mode),
             ("base_yaw_rad", base_yaw_rad),
-        )
+        ]
+        if self._sampling_mixture is not None:
+            expected_fields.extend(
+                (
+                    ("sampling_mixture", self._sampling_mixture),
+                    ("sampling_stratum", expected_birth_stratum),
+                    ("sampling_levels", expected_birth_levels),
+                    ("frontier_arm", expected_birth_frontier),
+                )
+            )
         for name, expected in expected_fields:
             if getattr(birth, name) != expected:
                 mismatches.append(name)
@@ -2828,6 +5111,10 @@ class ActionBallSampler:
             mobility_mode=birth.mobility_mode,
             base_yaw_rad=birth.base_yaw_rad,
             base_start_w_m=base_start,
+            sampling_mixture=birth.sampling_mixture,
+            sampling_stratum=birth.sampling_stratum,
+            sampling_levels=birth.sampling_levels,
+            frontier_arm=birth.frontier_arm,
         )
         if type(birth.birth_id) is not str or birth.birth_id != _sha256_json(
             payload
@@ -2843,6 +5130,12 @@ class ActionBallSampler:
         domain_epoch: int,
         levels: Union[DomainLevels, Mapping[str, object]],
         base_yaw_rad: float = 0.0,
+        _birth_sampling_plan_override: Optional[
+            Tuple[str, DomainLevels, Optional[str]]
+        ] = None,
+        _sampling_plan_override: Optional[
+            Tuple[str, DomainLevels, Optional[str]]
+        ] = None,
     ) -> BallBaseSample:
         """Sample a new ball/aim against a verified episode birth."""
 
@@ -2856,6 +5149,10 @@ class ActionBallSampler:
             domain_epoch=domain_epoch,
             levels=levels,
             base_yaw_rad=base_yaw_rad,
+            sampling_plan_override=_birth_sampling_plan_override,
+        )
+        _validate_counter_rally_profile_support(
+            profile, base_yaw_rad=base_yaw_rad
         )
         rng = self._rng_by_action[action_uid]
         sample_index = self._sample_count_by_action[action_uid]
@@ -2877,6 +5174,36 @@ class ActionBallSampler:
         ):
             raise OverflowError("action swing tape exhausted")
 
+        # Validate and freeze the stratum before consuming the counter tape.
+        # In particular, a malformed/zero-width frontier request must leave
+        # RNG, assignment, and sample counters byte-identical for retry.
+        if _sampling_plan_override is None:
+            (
+                sampling_stratum,
+                sampling_levels,
+                frontier_arm,
+            ) = _sampling_plan(
+                profile=profile,
+                levels=levels,
+                mixture=self._sampling_mixture,
+                proposal_index=sample_index,
+                scope="swing",
+                contact_time_tick_grid=(
+                    self._contact_time_grid_by_action.get(action_uid)
+                ),
+            )
+        else:
+            (
+                sampling_stratum,
+                sampling_levels,
+                frontier_arm,
+            ) = _validated_sampling_plan_override(
+                profile=profile,
+                domain_levels=levels,
+                mixture=self._sampling_mixture,
+                scope="swing",
+                plan=_sampling_plan_override,
+            )
         draw_start = rng.draw_count
         request_digest = self._request_digest(
             kind="swing_sample",
@@ -2891,39 +5218,74 @@ class ActionBallSampler:
             rng.uniform_open(request_digest)
             for _ in range(DRAWS_PER_SAMPLE)
         ]
-        base_spawn_latent_w_m = _sample_asymmetric_vector3(
-            center=profile.base_spawn_center_w_m,
-            lower_std=_vec3_lerp_levels(
-                profile.base_spawn_std_lower_initial_m,
-                profile.base_spawn_std_lower_max_m,
-                (
-                    levels.base_spawn_x_lower,
-                    levels.base_spawn_y_lower,
-                    0.0,
-                ),
-            ),
-            upper_std=_vec3_lerp_levels(
-                profile.base_spawn_std_upper_initial_m,
-                profile.base_spawn_std_upper_max_m,
-                (
-                    levels.base_spawn_x_upper,
-                    levels.base_spawn_y_upper,
-                    0.0,
-                ),
-            ),
-            lower_bound=profile.base_spawn_min_w_m,
-            upper_bound=profile.base_spawn_max_w_m,
-            uniforms=uniforms[0:3],
-            name="base_spawn_latent",
+        native_ttc_grid = self._contact_time_grid_by_action.get(
+            action_uid
         )
+        if (
+            frontier_arm is not None
+            and not (
+                native_ttc_grid is not None
+                and frontier_arm.startswith("time_to_contact_")
+            )
+        ):
+            (
+                negative_width,
+                positive_width,
+                frontier_side,
+                frontier_draw_index,
+            ) = _frontier_width_pair(
+                profile, sampling_levels, frontier_arm
+            )
+            uniforms[frontier_draw_index] = _frontier_band_uniform(
+                uniforms[frontier_draw_index],
+                negative_width=negative_width,
+                positive_width=positive_width,
+                side=frontier_side,
+                band_fraction=(
+                    self._sampling_mixture.frontier_band_fraction
+                ),
+            )
+        if self._sampling_mixture is None:
+            # Legacy receipts retain their historical, explicitly unused
+            # per-swing latent spawn bytes.
+            base_spawn_latent_w_m = _sample_asymmetric_vector3(
+                center=profile.base_spawn_center_w_m,
+                lower_std=_vec3_lerp_levels(
+                    profile.base_spawn_std_lower_initial_m,
+                    profile.base_spawn_std_lower_max_m,
+                    (
+                        sampling_levels.base_spawn_x_lower,
+                        sampling_levels.base_spawn_y_lower,
+                        0.0,
+                    ),
+                ),
+                upper_std=_vec3_lerp_levels(
+                    profile.base_spawn_std_upper_initial_m,
+                    profile.base_spawn_std_upper_max_m,
+                    (
+                        sampling_levels.base_spawn_x_upper,
+                        sampling_levels.base_spawn_y_upper,
+                        0.0,
+                    ),
+                ),
+                lower_bound=profile.base_spawn_min_w_m,
+                upper_bound=profile.base_spawn_max_w_m,
+                uniforms=uniforms[0:3],
+                name="base_spawn_latent",
+            )
+        else:
+            # Base spawn is a birth proposal, never a swing arm.  Keep the
+            # fixed draw budget but bind the receipt-visible value to the
+            # actual birth instead of exposing an unused latent as capability.
+            base_spawn_latent_w_m = birth.base_start_w_m
         base_travel_latent_b_yaw_m = _sample_asymmetric_vector3(
             center=profile.base_travel_center_b_yaw_m,
             lower_std=_vec3_lerp_levels(
                 profile.base_travel_std_lower_initial_m,
                 profile.base_travel_std_lower_max_m,
                 (
-                    levels.base_travel_x_lower,
-                    levels.base_travel_y_lower,
+                    sampling_levels.base_travel_x_lower,
+                    sampling_levels.base_travel_y_lower,
                     0.0,
                 ),
             ),
@@ -2931,8 +5293,8 @@ class ActionBallSampler:
                 profile.base_travel_std_upper_initial_m,
                 profile.base_travel_std_upper_max_m,
                 (
-                    levels.base_travel_x_upper,
-                    levels.base_travel_y_upper,
+                    sampling_levels.base_travel_x_upper,
+                    sampling_levels.base_travel_y_upper,
                     0.0,
                 ),
             ),
@@ -2956,18 +5318,18 @@ class ActionBallSampler:
                 profile.contact_offset_std_lower_initial_m,
                 profile.contact_offset_std_lower_max_m,
                 (
-                    levels.contact_x_lower,
-                    levels.contact_y_lower,
-                    levels.contact_z_lower,
+                    sampling_levels.contact_x_lower,
+                    sampling_levels.contact_y_lower,
+                    sampling_levels.contact_z_lower,
                 ),
             ),
             upper_std=_vec3_lerp_levels(
                 profile.contact_offset_std_upper_initial_m,
                 profile.contact_offset_std_upper_max_m,
                 (
-                    levels.contact_x_upper,
-                    levels.contact_y_upper,
-                    levels.contact_z_upper,
+                    sampling_levels.contact_x_upper,
+                    sampling_levels.contact_y_upper,
+                    sampling_levels.contact_z_upper,
                 ),
             ),
             lower_bound=profile.contact_offset_min_b_yaw_m,
@@ -2980,34 +5342,64 @@ class ActionBallSampler:
             _rotate_yaw(contact_offset_b_yaw_m, base_yaw_rad),
         )
 
-        time_to_contact_s = _sample_asymmetric_truncated(
-            center=profile.time_to_contact_center_s,
-            lower_std=_lerp(
-                profile.time_to_contact_std_lower_initial_s,
-                profile.time_to_contact_std_lower_max_s,
-                levels.time_to_contact_lower,
-            ),
-            upper_std=_lerp(
-                profile.time_to_contact_std_upper_initial_s,
-                profile.time_to_contact_std_upper_max_s,
-                levels.time_to_contact_upper,
-            ),
-            lower_bound=profile.time_to_contact_min_s,
-            upper_bound=profile.time_to_contact_max_s,
-            uniform=uniforms[9],
-            name="time_to_contact",
-        )
+        if native_ttc_grid is None:
+            time_to_contact_tick = None
+            time_to_contact_s = _sample_asymmetric_truncated(
+                center=profile.time_to_contact_center_s,
+                lower_std=_lerp(
+                    profile.time_to_contact_std_lower_initial_s,
+                    profile.time_to_contact_std_lower_max_s,
+                    sampling_levels.time_to_contact_lower,
+                ),
+                upper_std=_lerp(
+                    profile.time_to_contact_std_upper_initial_s,
+                    profile.time_to_contact_std_upper_max_s,
+                    sampling_levels.time_to_contact_upper,
+                ),
+                lower_bound=profile.time_to_contact_min_s,
+                upper_bound=profile.time_to_contact_max_s,
+                uniform=uniforms[9],
+                name="time_to_contact",
+            )
+        else:
+            ttc_frontier_side = None
+            ttc_frontier_band = None
+            if (
+                frontier_arm is not None
+                and frontier_arm.startswith("time_to_contact_")
+            ):
+                ttc_frontier_side = (
+                    "negative"
+                    if frontier_arm.endswith("_lower")
+                    else "positive"
+                )
+                if self._sampling_mixture is None:
+                    raise AssertionError(
+                        "TTC frontier arm has no sampling mixture"
+                    )
+                ttc_frontier_band = (
+                    self._sampling_mixture.frontier_band_fraction
+                )
+            time_to_contact_tick = native_ttc_grid.sample_tick(
+                uniform=uniforms[9],
+                levels=sampling_levels,
+                frontier_side=ttc_frontier_side,
+                frontier_band_fraction=ttc_frontier_band,
+            )
+            time_to_contact_s = (
+                time_to_contact_tick * native_ttc_grid.step_s
+            )
         speed_mps = _sample_asymmetric_truncated(
             center=profile.incoming_speed_center_mps,
             lower_std=_lerp(
                 profile.incoming_speed_std_lower_initial_mps,
                 profile.incoming_speed_std_lower_max_mps,
-                levels.incoming_speed_lower,
+                sampling_levels.incoming_speed_lower,
             ),
             upper_std=_lerp(
                 profile.incoming_speed_std_upper_initial_mps,
                 profile.incoming_speed_std_upper_max_mps,
-                levels.incoming_speed_upper,
+                sampling_levels.incoming_speed_upper,
             ),
             lower_bound=profile.incoming_speed_min_mps,
             upper_bound=profile.incoming_speed_max_mps,
@@ -3021,22 +5413,22 @@ class ActionBallSampler:
             u_negative_width_deg=_lerp(
                 profile.incoming_direction_tangent_u_neg_initial_deg,
                 profile.incoming_direction_tangent_u_neg_max_deg,
-                levels.incoming_direction_u_neg,
+                sampling_levels.incoming_direction_u_neg,
             ),
             u_positive_width_deg=_lerp(
                 profile.incoming_direction_tangent_u_pos_initial_deg,
                 profile.incoming_direction_tangent_u_pos_max_deg,
-                levels.incoming_direction_u_pos,
+                sampling_levels.incoming_direction_u_pos,
             ),
             v_negative_width_deg=_lerp(
                 profile.incoming_direction_tangent_v_neg_initial_deg,
                 profile.incoming_direction_tangent_v_neg_max_deg,
-                levels.incoming_direction_v_neg,
+                sampling_levels.incoming_direction_v_neg,
             ),
             v_positive_width_deg=_lerp(
                 profile.incoming_direction_tangent_v_pos_initial_deg,
                 profile.incoming_direction_tangent_v_pos_max_deg,
-                levels.incoming_direction_v_pos,
+                sampling_levels.incoming_direction_v_pos,
             ),
             uniforms=uniforms[11:13],
         )
@@ -3063,12 +5455,12 @@ class ActionBallSampler:
             lower_std=_lerp(
                 profile.spin_magnitude_std_lower_initial_radps,
                 profile.spin_magnitude_std_lower_max_radps,
-                levels.spin_magnitude_lower,
+                sampling_levels.spin_magnitude_lower,
             ),
             upper_std=_lerp(
                 profile.spin_magnitude_std_upper_initial_radps,
                 profile.spin_magnitude_std_upper_max_radps,
-                levels.spin_magnitude_upper,
+                sampling_levels.spin_magnitude_upper,
             ),
             lower_bound=profile.spin_magnitude_min_radps,
             upper_bound=profile.spin_magnitude_max_radps,
@@ -3082,22 +5474,22 @@ class ActionBallSampler:
             u_negative_width_deg=_lerp(
                 profile.spin_direction_tangent_u_neg_initial_deg,
                 profile.spin_direction_tangent_u_neg_max_deg,
-                levels.spin_direction_u_neg,
+                sampling_levels.spin_direction_u_neg,
             ),
             u_positive_width_deg=_lerp(
                 profile.spin_direction_tangent_u_pos_initial_deg,
                 profile.spin_direction_tangent_u_pos_max_deg,
-                levels.spin_direction_u_pos,
+                sampling_levels.spin_direction_u_pos,
             ),
             v_negative_width_deg=_lerp(
                 profile.spin_direction_tangent_v_neg_initial_deg,
                 profile.spin_direction_tangent_v_neg_max_deg,
-                levels.spin_direction_v_neg,
+                sampling_levels.spin_direction_v_neg,
             ),
             v_positive_width_deg=_lerp(
                 profile.spin_direction_tangent_v_pos_initial_deg,
                 profile.spin_direction_tangent_v_pos_max_deg,
-                levels.spin_direction_v_pos,
+                sampling_levels.spin_direction_v_pos,
             ),
             uniforms=uniforms[14:16],
         )
@@ -3107,29 +5499,65 @@ class ActionBallSampler:
         spin_w_radps = _scale(
             spin_direction_w, spin_magnitude_radps
         )
-        landing_aim_w_xy_m = _sample_asymmetric_vector2(
-            center=profile.landing_aim_center_w_xy_m,
-            lower_std=_vec2_lerp_levels(
-                profile.landing_aim_std_lower_initial_m,
-                profile.landing_aim_std_lower_max_m,
-                (
-                    levels.landing_aim_x_lower,
-                    levels.landing_aim_y_lower,
+        if profile.counter_rally_objective is None:
+            landing_aim_w_xy_m = _sample_asymmetric_vector2(
+                center=profile.landing_aim_center_w_xy_m,
+                lower_std=_vec2_lerp_levels(
+                    profile.landing_aim_std_lower_initial_m,
+                    profile.landing_aim_std_lower_max_m,
+                    (
+                        sampling_levels.landing_aim_x_lower,
+                        sampling_levels.landing_aim_y_lower,
+                    ),
                 ),
-            ),
-            upper_std=_vec2_lerp_levels(
-                profile.landing_aim_std_upper_initial_m,
-                profile.landing_aim_std_upper_max_m,
-                (
-                    levels.landing_aim_x_upper,
-                    levels.landing_aim_y_upper,
+                upper_std=_vec2_lerp_levels(
+                    profile.landing_aim_std_upper_initial_m,
+                    profile.landing_aim_std_upper_max_m,
+                    (
+                        sampling_levels.landing_aim_x_upper,
+                        sampling_levels.landing_aim_y_upper,
+                    ),
                 ),
-            ),
-            lower_bound=profile.landing_aim_min_w_xy_m,
-            upper_bound=profile.landing_aim_max_w_xy_m,
-            uniforms=uniforms[16:18],
-            name="landing_aim",
-        )
+                lower_bound=profile.landing_aim_min_w_xy_m,
+                upper_bound=profile.landing_aim_max_w_xy_m,
+                uniforms=uniforms[16:18],
+                name="landing_aim",
+            )
+        else:
+            # Draw 17 remains deliberately reserved.  It is consumed by the
+            # fixed 18-draw tape and therefore covered by draw_start/draw_end,
+            # but it cannot independently perturb landing y: counter-rally y
+            # is a deterministic consequence of the reverse incoming ray.
+            _reserved_landing_y_draw = uniforms[17]
+            landing_x = _sample_asymmetric_truncated(
+                center=profile.landing_aim_center_w_xy_m[0],
+                lower_std=_lerp(
+                    profile.landing_aim_std_lower_initial_m[0],
+                    profile.landing_aim_std_lower_max_m[0],
+                    sampling_levels.landing_aim_x_lower,
+                ),
+                upper_std=_lerp(
+                    profile.landing_aim_std_upper_initial_m[0],
+                    profile.landing_aim_std_upper_max_m[0],
+                    sampling_levels.landing_aim_x_upper,
+                ),
+                lower_bound=profile.landing_aim_min_w_xy_m[0],
+                upper_bound=profile.landing_aim_max_w_xy_m[0],
+                uniform=uniforms[16],
+                name="landing_aim.x",
+            )
+            (
+                landing_aim_w_xy_m,
+                _counter_rally_proposal_rejection_reason,
+            ) = _counter_rally_reverse_ray_geometry(
+                contact_w_m=contact_w_m,
+                incoming_direction_w=incoming_direction_w,
+                landing_x_w_m=landing_x,
+                objective=profile.counter_rally_objective,
+            )
+            # A per-proposal miss remains a proposal.  The fixed-action solver
+            # calls the same helper and owns named rejection accounting; the
+            # sampler never loses this row or its fixed draw transcript.
 
         draw_end = rng.draw_count
         if draw_end - draw_start != DRAWS_PER_SAMPLE:
@@ -3141,6 +5569,30 @@ class ActionBallSampler:
             action_uid=action_uid,
             domain_epoch=domain_epoch,
             domain_levels=levels,
+            birth_index=(
+                birth.birth_index
+                if self._sampling_mixture is not None
+                else -1
+            ),
+            birth_sampling_stratum=(
+                birth.sampling_stratum
+                if self._sampling_mixture is not None
+                else "domain"
+            ),
+            birth_sampling_levels=(
+                birth.sampling_levels
+                if self._sampling_mixture is not None
+                else levels
+            ),
+            birth_frontier_arm=(
+                birth.frontier_arm
+                if self._sampling_mixture is not None
+                else None
+            ),
+            sampling_mixture=self._sampling_mixture,
+            sampling_stratum=sampling_stratum,
+            sampling_levels=sampling_levels,
+            frontier_arm=frontier_arm,
             sample_index=sample_index,
             birth_id=birth.birth_id,
             profile_sha256=profile.sha256,
@@ -3156,6 +5608,8 @@ class ActionBallSampler:
             contact_offset_from_base_goal_b_yaw_m=contact_offset_b_yaw_m,
             contact_w_m=contact_w_m,
             time_to_contact_s=time_to_contact_s,
+            contact_time_step_s=self._contact_time_step_s,
+            time_to_contact_tick=time_to_contact_tick,
             incoming_speed_mps=speed_mps,
             incoming_direction_b_yaw=incoming_direction_b_yaw,
             incoming_direction_w=incoming_direction_w,
@@ -3185,6 +5639,161 @@ class ActionBallSampler:
         self._sample_count_by_action[action_uid] = sample_index + 1
         return completed
 
+    def _verify_sampling_membership(
+        self,
+        sample: BallBaseSample,
+    ) -> None:
+        """Recompute stratum/frontier geometry after identity coercion."""
+
+        sample.verify_sample_id()
+        action_uid = self._validated_action_uid(sample.action_uid)
+        profile = self._profiles[action_uid]
+        if sample.sampler_contract_sha256 != self._contract_sha256:
+            raise ValueError("sample sampler contract mismatch")
+        if sample.profile_sha256 != profile.sha256:
+            raise ValueError("sample profile mismatch")
+        if sample.arm_catalog_sha256 != ARM_CATALOG_SHA256:
+            raise ValueError("sample arm catalog mismatch")
+        if sample.contact_time_step_s != self._contact_time_step_s:
+            raise ValueError(
+                "sample contact-time lattice differs from sampler contract"
+            )
+        if self._contact_time_step_s is None:
+            if sample.time_to_contact_tick is not None:
+                raise ValueError(
+                    "continuous-time sampler received a contact tick"
+                )
+        else:
+            tick = _plain_int(
+                sample.time_to_contact_tick,
+                name="sample.time_to_contact_tick",
+                minimum=1,
+            )
+            if sample.time_to_contact_s != (
+                tick * self._contact_time_step_s
+            ):
+                raise ValueError(
+                    "sample TTC is not exactly its policy-step tick"
+                )
+        expected = _sampling_plan(
+            profile=profile,
+            levels=sample.domain_levels,
+            mixture=self._sampling_mixture,
+            proposal_index=sample.sample_index,
+            scope="swing",
+            contact_time_tick_grid=(
+                self._contact_time_grid_by_action.get(action_uid)
+            ),
+        )
+        actual = (
+            sample.sampling_stratum,
+            sample.sampling_levels,
+            sample.frontier_arm,
+        )
+        if actual != expected:
+            raise ValueError(
+                "sample sampling metadata disagrees with deterministic plan"
+            )
+        if self._sampling_mixture is not None:
+            birth = self._issued_births_by_action[action_uid].get(
+                sample.birth_index
+            )
+            if birth is None:
+                raise ValueError(
+                    "sample references an unavailable birth transcript"
+                )
+            bound_birth = (
+                sample.birth_id,
+                sample.birth_sampling_stratum,
+                sample.birth_sampling_levels,
+                sample.birth_frontier_arm,
+            )
+            expected_birth = (
+                birth.birth_id,
+                birth.sampling_stratum,
+                birth.sampling_levels,
+                birth.frontier_arm,
+            )
+            if bound_birth != expected_birth:
+                raise ValueError(
+                    "sample birth sampling metadata disagrees with "
+                    "the issued birth"
+                )
+        if sample.frontier_arm is None:
+            return
+        mixture = self._sampling_mixture
+        if mixture is None:
+            raise ValueError("frontier sample has no sampler mixture")
+        native_ttc_grid = self._contact_time_grid_by_action.get(
+            action_uid
+        )
+        if (
+            native_ttc_grid is not None
+            and sample.frontier_arm.startswith("time_to_contact_")
+        ):
+            side = (
+                "negative"
+                if sample.frontier_arm.endswith("_lower")
+                else "positive"
+            )
+            first, last = native_ttc_grid.tick_bounds(
+                levels=sample.sampling_levels,
+                frontier_side=side,
+                frontier_band_fraction=(
+                    mixture.frontier_band_fraction
+                ),
+            )
+            tick = _plain_int(
+                sample.time_to_contact_tick,
+                name="sample.time_to_contact_tick",
+                minimum=1,
+            )
+            if not first <= tick <= last:
+                raise ValueError(
+                    "sample TTC tick does not lie in its native frontier set"
+                )
+            return
+        negative, positive, side, _ = _frontier_width_pair(
+            profile, sample.sampling_levels, sample.frontier_arm
+        )
+        delta = _frontier_coordinate_delta(
+            sample, profile, sample.frontier_arm
+        )
+        if side == "negative":
+            width = negative
+            normalized = -delta / width if width > 0.0 else -1.0
+        else:
+            width = positive
+            normalized = delta / width if width > 0.0 else -1.0
+        lower = 1.0 - mixture.frontier_band_fraction
+        tolerance = 1.0e-10
+        if (
+            width <= 0.0
+            or normalized + tolerance < lower
+            or normalized > 1.0 + tolerance
+        ):
+            raise ValueError(
+                "sample does not lie in its recomputed frontier band"
+            )
+
+    def verify_sampling_membership(
+        self,
+        sample_or_receipt: Union[
+            BallBaseSample, Mapping[str, object]
+        ],
+    ) -> None:
+        """Verify exact issuance, then recompute frontier membership.
+
+        A self-consistent public sample hash is not sampling authority.  This
+        method intentionally requires the receipt to match this sampler's
+        exact issued action-tape row before its stratum is accepted.  The
+        replay path then calls :meth:`_verify_sampling_membership`, which
+        derives the selected outer band from profile, levels, and sample
+        coordinates; no caller-provided ``in_new_band`` boolean exists.
+        """
+
+        self.assert_issued_sample(sample_or_receipt)
+
     def assert_issued_birth(
         self,
         birth_or_receipt: Union[BaseBirthReceipt, Mapping[str, object]],
@@ -3208,6 +5817,53 @@ class ActionBallSampler:
             levels=birth.domain_levels,
             base_yaw_rad=birth.base_yaw_rad,
         )
+
+    def verify_birth_sampling_membership(
+        self,
+        birth_or_receipt: Union[
+            BaseBirthReceipt, Mapping[str, object]
+        ],
+    ) -> None:
+        """Verify issuance and recompute a base-spawn frontier band."""
+
+        if isinstance(birth_or_receipt, BaseBirthReceipt):
+            birth = birth_or_receipt
+        elif isinstance(birth_or_receipt, Mapping):
+            birth = BaseBirthReceipt.from_identity_receipt(
+                birth_or_receipt
+            )
+        else:
+            raise TypeError(
+                "birth_or_receipt must be BaseBirthReceipt or mapping"
+            )
+        self.assert_issued_birth(birth)
+        if birth.frontier_arm is None:
+            return
+        mixture = self._sampling_mixture
+        if mixture is None:
+            raise ValueError("frontier birth has no sampler mixture")
+        profile = self._profiles[birth.action_uid]
+        negative, positive, side, _ = _frontier_width_pair(
+            profile, birth.sampling_levels, birth.frontier_arm
+        )
+        delta = _birth_frontier_coordinate_delta(
+            birth, profile, birth.frontier_arm
+        )
+        if side == "negative":
+            width = negative
+            normalized = -delta / width if width > 0.0 else -1.0
+        else:
+            width = positive
+            normalized = delta / width if width > 0.0 else -1.0
+        lower = 1.0 - mixture.frontier_band_fraction
+        if (
+            width <= 0.0
+            or normalized + 1.0e-10 < lower
+            or normalized > 1.0 + 1.0e-10
+        ):
+            raise ValueError(
+                "birth does not lie in its recomputed frontier band"
+            )
 
     def _sample_draw_start_for_index(
         self,
@@ -3461,6 +6117,7 @@ class ActionBallSampler:
             raise ValueError("sample levels hash mismatch")
         if sample.mobility_mode != profile.mobility_mode:
             raise ValueError("sample mobility mismatch")
+        self._verify_sampling_membership(sample)
 
         matching_births = [
             birth
@@ -3513,6 +6170,11 @@ class ActionBallSampler:
         replay = object.__new__(ActionBallSampler)
         replay._profiles = {action_uid: profile}
         replay._seed = self._seed
+        replay._sampling_mixture = self._sampling_mixture
+        replay._contact_time_step_s = self._contact_time_step_s
+        replay._contact_time_grid_by_action = {
+            action_uid: self._contact_time_grid_by_action[action_uid]
+        } if action_uid in self._contact_time_grid_by_action else {}
         replay._contract_sha256 = self._contract_sha256
         replay._rng_by_action = {
             action_uid: _CounterRng(self._seed, draw_start)
@@ -4490,7 +7152,11 @@ class ActionBallSampler:
                 index = retired_birth_count + offset
                 birth_row = _exact_mapping(
                     raw_birth,
-                    _BIRTH_STATE_KEYS,
+                    (
+                        _MIXTURE_BIRTH_STATE_KEYS
+                        if self._sampling_mixture is not None
+                        else _BIRTH_STATE_KEYS
+                    ),
                     name=f"issued_births[{uid}][{index}]",
                 )
                 birth_id = birth_row["birth_id"]
@@ -4553,6 +7219,37 @@ class ActionBallSampler:
                     raise ValueError(
                         f"issued_births[{uid}][{index}] profile mismatch"
                     )
+                (
+                    sampling_stratum,
+                    sampling_levels,
+                    frontier_arm,
+                ) = _sampling_plan(
+                    profile=profile,
+                    levels=levels,
+                    mixture=self._sampling_mixture,
+                    proposal_index=index,
+                    scope="birth",
+                )
+                if self._sampling_mixture is not None:
+                    declared_mixture = SamplingMixture.from_mapping(
+                        birth_row["sampling_mixture"]
+                    )
+                    declared_sampling_levels = (
+                        DomainLevels.from_mapping(
+                            birth_row["sampling_levels"]
+                        )
+                    )
+                    if (
+                        declared_mixture != self._sampling_mixture
+                        or birth_row["sampling_stratum"]
+                        != sampling_stratum
+                        or declared_sampling_levels != sampling_levels
+                        or birth_row["frontier_arm"] != frontier_arm
+                    ):
+                        raise ValueError(
+                            f"issued_births[{uid}][{index}] sampling "
+                            "plan mismatch"
+                        )
                 if (
                     _plain_int(
                         birth_row["birth_index"],
@@ -4624,14 +7321,40 @@ class ActionBallSampler:
                     replay_rng.uniform_open(request_digest)
                     for _ in range(DRAWS_PER_BIRTH)
                 ]
+                if frontier_arm is not None:
+                    (
+                        negative_width,
+                        positive_width,
+                        frontier_side,
+                        frontier_draw_index,
+                    ) = _frontier_width_pair(
+                        profile, sampling_levels, frontier_arm
+                    )
+                    if frontier_draw_index >= DRAWS_PER_BIRTH:
+                        raise ValueError(
+                            f"issued_births[{uid}][{index}] frontier "
+                            "uses a swing-only draw"
+                        )
+                    replay_uniforms[frontier_draw_index] = (
+                        _frontier_band_uniform(
+                            replay_uniforms[frontier_draw_index],
+                            negative_width=negative_width,
+                            positive_width=positive_width,
+                            side=frontier_side,
+                            band_fraction=(
+                                self._sampling_mixture
+                                .frontier_band_fraction
+                            ),
+                        )
+                    )
                 replayed_base_start = _sample_asymmetric_vector3(
                     center=profile.base_spawn_center_w_m,
                     lower_std=_vec3_lerp_levels(
                         profile.base_spawn_std_lower_initial_m,
                         profile.base_spawn_std_lower_max_m,
                         (
-                            levels.base_spawn_x_lower,
-                            levels.base_spawn_y_lower,
+                            sampling_levels.base_spawn_x_lower,
+                            sampling_levels.base_spawn_y_lower,
                             0.0,
                         ),
                     ),
@@ -4639,8 +7362,8 @@ class ActionBallSampler:
                         profile.base_spawn_std_upper_initial_m,
                         profile.base_spawn_std_upper_max_m,
                         (
-                            levels.base_spawn_x_upper,
-                            levels.base_spawn_y_upper,
+                            sampling_levels.base_spawn_x_upper,
+                            sampling_levels.base_spawn_y_upper,
                             0.0,
                         ),
                     ),
@@ -4670,6 +7393,14 @@ class ActionBallSampler:
                     mobility_mode=profile.mobility_mode,
                     base_yaw_rad=base_yaw_rad,
                     base_start_w_m=base_start_w_m,
+                    sampling_mixture=self._sampling_mixture,
+                    sampling_stratum=sampling_stratum,
+                    sampling_levels=(
+                        sampling_levels
+                        if self._sampling_mixture is not None
+                        else DomainLevels()
+                    ),
+                    frontier_arm=frontier_arm,
                 )
                 if birth_id != _sha256_json(identity_payload):
                     raise ValueError(
@@ -4690,6 +7421,14 @@ class ActionBallSampler:
                     mobility_mode=profile.mobility_mode,
                     base_yaw_rad=base_yaw_rad,
                     base_start_w_m=base_start_w_m,
+                    sampling_mixture=self._sampling_mixture,
+                    sampling_stratum=sampling_stratum,
+                    sampling_levels=(
+                        sampling_levels
+                        if self._sampling_mixture is not None
+                        else DomainLevels()
+                    ),
+                    frontier_arm=frontier_arm,
                 )
             tail_gap = restored_counts[uid][2] - previous_draw_end
             if (
@@ -4881,6 +7620,220 @@ class ActionBallSampler:
         )
 
 
+def sample_frozen_evaluation_proposal(
+    profile: SamplingProfile,
+    *,
+    evaluation_seed: int,
+    external_sample_index: int,
+    external_birth_index: int,
+    domain_epoch: int,
+    domain_levels: Union[DomainLevels, Mapping[str, object]],
+    rho: float,
+    sampling_stratum: str,
+    selected_arm: Optional[str],
+    base_yaw_rad: float,
+    policy_dt_s: float,
+) -> FrozenEvaluationProposal:
+    """Random-access one formal proposal without touching training state.
+
+    ``evaluation_seed`` is allocated independently for every proposal.  The
+    temporary sampler therefore starts at draw zero, uses draws ``[0, 3)`` for
+    that proposal's birth and ``[3, 21)`` for its swing, and is discarded.
+    External sample/birth indices are receipt identity, not a request to burn
+    all preceding rows.
+    """
+
+    if not isinstance(profile, SamplingProfile):
+        raise TypeError("profile must be SamplingProfile")
+    evaluation_seed = _plain_int(
+        evaluation_seed, name="evaluation_seed"
+    )
+    external_sample_index = _plain_int(
+        external_sample_index, name="external_sample_index"
+    )
+    external_birth_index = _plain_int(
+        external_birth_index, name="external_birth_index"
+    )
+    domain_epoch = _plain_int(domain_epoch, name="domain_epoch")
+    levels = (
+        domain_levels
+        if isinstance(domain_levels, DomainLevels)
+        else DomainLevels.from_mapping(domain_levels)
+    )
+    rho = _finite(rho, name="rho", minimum=0.0, maximum=1.0)
+    base_yaw_rad = _finite(base_yaw_rad, name="base_yaw_rad")
+    policy_dt_s = _finite(
+        policy_dt_s, name="policy_dt_s", minimum=0.0
+    )
+    if policy_dt_s <= 0.0:
+        raise ValueError("policy_dt_s must be > 0")
+    if sampling_stratum not in (
+        "center",
+        "interior",
+        "frontier",
+    ):
+        raise ValueError("sampling_stratum is invalid")
+    if (sampling_stratum == "frontier") != (
+        selected_arm is not None
+    ):
+        raise ValueError(
+            "selected_arm must be present exactly for frontier"
+        )
+    if selected_arm is not None and selected_arm not in ARM_KEYS:
+        raise ValueError("selected_arm is outside ARM_KEYS")
+
+    mixture = SamplingMixture()
+    expected_sample_stratum = mixture.stratum_for(
+        external_sample_index
+    )
+    expected_birth_stratum = mixture.stratum_for(
+        external_birth_index
+    )
+    if (
+        sampling_stratum != expected_sample_stratum
+        or sampling_stratum != expected_birth_stratum
+    ):
+        raise ValueError(
+            "authority stratum disagrees with the exact 1/3/1 allocation "
+            "schedule"
+        )
+
+    birth_arms = tuple(_BASE_SPAWN_ARMS)
+    swing_arms = tuple(
+        arm
+        for arm in ARM_KEYS
+        if arm not in _BASE_SPAWN_ARMS
+        and not (
+            profile.mobility_mode == "no_move"
+            and arm.startswith("base_travel_")
+        )
+    )
+    if (
+        selected_arm is not None
+        and selected_arm not in birth_arms
+        and selected_arm not in swing_arms
+    ):
+        raise ValueError(
+            "selected_arm is inactive for this mobility mode"
+        )
+    def _scope_plan(
+        active_arms: Tuple[str, ...],
+    ) -> Tuple[str, DomainLevels, Optional[str]]:
+        owns_frontier = (
+            sampling_stratum == "frontier"
+            and selected_arm in active_arms
+        )
+        if owns_frontier:
+            selected_only = DomainLevels(
+                **{
+                    arm: (
+                        getattr(levels, arm)
+                        if arm == selected_arm
+                        else 0.0
+                    )
+                    for arm in ARM_KEYS
+                }
+            )
+            return ("frontier", selected_only, selected_arm)
+        if sampling_stratum in ("center", "frontier"):
+            # For a one-arm frontier the non-owning component is held at
+            # center too; this is the isolation proof that prevents a hidden
+            # base-spawn plus swing double-frontier proposal.
+            return ("center", DomainLevels(), None)
+        return (
+            "interior",
+            _rho_scaled_levels(
+                profile,
+                levels,
+                rho,
+                active_arms=active_arms,
+            ),
+            None,
+        )
+
+    birth_plan = _scope_plan(birth_arms)
+    swing_plan = _scope_plan(swing_arms)
+    sampler = ActionBallSampler(
+        (profile,),
+        seed=evaluation_seed,
+        sampling_mixture=mixture,
+        contact_time_step_s=policy_dt_s,
+    )
+    uid = profile.action_uid
+    # Random access: external indices are installed directly as receipt
+    # cursors, while this proposal's independent seed starts at draw zero.
+    sampler._birth_count_by_action[uid] = external_birth_index
+    sampler._retired_birth_count_by_action[uid] = external_birth_index
+    sampler._sample_count_by_action[uid] = external_sample_index
+    sampler._retired_sample_count_by_action[uid] = (
+        external_sample_index
+    )
+    sampler._rng_by_action[uid] = _CounterRng(evaluation_seed, 0)
+    birth = sampler.reserve_birth(
+        action_uid=uid,
+        domain_epoch=domain_epoch,
+        levels=levels,
+        base_yaw_rad=base_yaw_rad,
+        _sampling_plan_override=birth_plan,
+    )
+    sample = sampler.sample(
+        birth=birth,
+        action_uid=uid,
+        domain_epoch=domain_epoch,
+        levels=levels,
+        base_yaw_rad=base_yaw_rad,
+        _birth_sampling_plan_override=birth_plan,
+        _sampling_plan_override=swing_plan,
+    )
+    if birth.draw_start != 0 or birth.draw_end != DRAWS_PER_BIRTH:
+        raise AssertionError(
+            "frozen proposal birth did not own exact local draws [0,3)"
+        )
+    if (
+        sample.draw_start != DRAWS_PER_BIRTH
+        or sample.draw_end != DRAWS_PER_BIRTH + DRAWS_PER_SAMPLE
+    ):
+        raise AssertionError(
+            "frozen proposal swing did not own exact local draws [3,21)"
+        )
+    contract_sha256 = (
+        frozen_evaluation_proposal_sampler_contract()["sha256"]
+    )
+    candidate = FrozenEvaluationProposal(
+        proposal_sampler_contract_sha256=contract_sha256,
+        proposal_receipt_sha256="",
+        evaluation_seed=evaluation_seed,
+        external_sample_index=external_sample_index,
+        external_birth_index=external_birth_index,
+        action_uid=uid,
+        profile_sha256=profile.sha256,
+        domain_epoch=domain_epoch,
+        domain_levels=levels,
+        rho=rho,
+        sampling_stratum=sampling_stratum,
+        selected_arm=selected_arm,
+        birth_component_stratum=birth_plan[0],
+        ball_task_component_stratum=swing_plan[0],
+        base_yaw_rad=base_yaw_rad,
+        policy_dt_s=policy_dt_s,
+        birth=birth,
+        sample=sample,
+    )
+    result = replace(
+        candidate,
+        proposal_receipt_sha256=_sha256_json(
+            candidate.receipt_payload()
+        ),
+    )
+    result.verify()
+    return result
+
+
+FROZEN_EVALUATION_PROPOSAL_SAMPLER_CONTRACT_SHA256 = (
+    frozen_evaluation_proposal_sampler_contract()["sha256"]
+)
+
+
 __all__ = [
     "ARM_CATALOG_SHA256",
     "ARM_KEYS",
@@ -4892,7 +7845,12 @@ __all__ = [
     "DRAWS_PER_SAMPLE",
     "DomainLevels",
     "EpisodeBirthReceipt",
+    "FROZEN_EVALUATION_PROPOSAL_SAMPLER_CONTRACT_SHA256",
+    "FrozenEvaluationProposal",
     "SamplerCompactionReceipt",
     "SamplerRetirePrefixBarrier",
+    "SamplingMixture",
     "SamplingProfile",
+    "frozen_evaluation_proposal_sampler_contract",
+    "sample_frozen_evaluation_proposal",
 ]

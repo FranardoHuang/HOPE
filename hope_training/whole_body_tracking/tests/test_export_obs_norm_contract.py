@@ -91,6 +91,74 @@ def test_mask_provenance_is_checkpoint_bound_before_any_exact_promotion():
     )
 
 
+def test_action_ball_diagnostic_brand_precedes_every_exact_promotion():
+    native = _source(EXPORTER).split(
+        "def attach_onnx_metadata(", 1
+    )[1]
+    standalone = _source(
+        ROOT / "scripts/standalone_onnx_export.py"
+    ).split("def main() -> int:", 1)[1]
+
+    native_lineage = native.index(
+        "training_contract_lineage_exact = "
+        "checkpoint_contract_lineage_exact(checkpoint)"
+    )
+    native_brand = native.index(
+        "training_contract_diagnostic = "
+        "bind_action_ball_diagnostic_metadata("
+    )
+    native_formal = native.index(
+        "validate_schema3_contract(training_contract)",
+        native_brand,
+    )
+    native_exact = native.rindex('metadata["training_contract_exact"] = "1"')
+    assert native_lineage < native_brand < native_formal < native_exact
+    assert (
+        "lineage_exact=training_contract_lineage_exact,"
+        in native[native_brand:native_formal]
+    )
+
+    standalone_lineage = standalone.index(
+        "training_contract_lineage_exact = "
+        "checkpoint_contract_lineage_exact(ckpt)"
+    )
+    standalone_brand = standalone.index(
+        "training_contract_diagnostic = "
+        "bind_action_ball_diagnostic_metadata("
+    )
+    standalone_exact = standalone.index(
+        '"training_contract_exact": "1" '
+        'if training_contract_lineage_exact else "0"',
+        standalone_brand,
+    )
+    assert standalone_lineage < standalone_brand < standalone_exact
+    assert (
+        "lineage_exact=training_contract_lineage_exact,"
+        in standalone[standalone_brand:standalone_exact]
+    )
+
+
+def test_action_ball_export_identity_is_checkpoint_bound_and_live_env_checked():
+    native = _source(EXPORTER)
+    standalone = _source(ROOT / "scripts/standalone_onnx_export.py")
+    assert "bind_action_ball_action_set_metadata(" in native
+    assert "checkpoint_action_set_identity = action_ball_action_set_identity(" in native
+    assert "runtime_identity_getter = getattr(" in native
+    assert '"action_ball_hard_contract", None' in native
+    assert "validate_action_ball_action_set_runtime_identity(" in native
+    assert (
+        native.index("checkpoint_action_set_identity = action_ball_action_set_identity(")
+        < native.index("validate_action_ball_action_set_runtime_identity(")
+    )
+    # Standalone export has no live Isaac env, so it may only replace donor
+    # labels from the adjacent checkpoint-bound contract.
+    assert "bind_action_ball_action_set_metadata(" in standalone
+    assert standalone.index("bind_action_ball_action_set_metadata(") > standalone.index(
+        "training_contract_lineage_exact = "
+        "checkpoint_contract_lineage_exact(ckpt)"
+    )
+
+
 def test_mujoco_consumer_implements_normalization_truth_table():
     source = _source(ROOT / "scripts/mujoco_eval_onnx.py")
     assert "self.obs_norm_baked and self.empirical_normalization is False" in source

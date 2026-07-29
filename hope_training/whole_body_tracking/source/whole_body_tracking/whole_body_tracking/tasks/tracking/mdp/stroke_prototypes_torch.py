@@ -18,16 +18,58 @@ from dataclasses import dataclass
 
 import torch
 
-SCHEMA_VERSION = 1
+try:
+    from .racket_contact_geometry import GEOMETRY_SOURCE_SHA256
+except ImportError:  # dependency-light by-path test/CLI import
+    from racket_contact_geometry import GEOMETRY_SOURCE_SHA256
+
+
+SCHEMA_VERSION = 2
+LEGACY_SITE_VELOCITY_SCHEMA_VERSION = 1
+FACE_CENTER_VELOCITY_POINT = "selected_rubber_face_center"
 
 #: Fields the loader refuses to default. A missing one is a build error.
-_REQUIRED = (
-    "motion_id", "scope", "family", "clip_index", "v_hat_b", "elevation_deg",
-    "speed_nominal_mps", "speed_max_mps", "speed_min_mps", "v_star_cap_mps", "v_dir_tol_deg",
+_REQUIRED_COMMON = (
+    "motion_id", "scope", "family", "clip_index", "npz_sha256",
     "t_prepare_s", "t_prepare_min_s", "t_prepare_max_s",
     "band_b_x", "band_b_y", "band_z_w", "slack_b_xy_m", "slack_z_w_m",
     "p_contact_b", "n_hat_b", "face_sign", "priority", "enabled", "strike_phase",
     "contact_frame", "contact_window_frames",
+)
+_REQUIRED_V2 = (
+    *_REQUIRED_COMMON,
+    "racket_face_center_velocity_hat_b",
+    "racket_face_center_elevation_deg",
+    "racket_face_center_window_dir_cone_deg",
+    "racket_face_center_speed_nominal_mps",
+    "racket_face_center_speed_max_mps",
+    "racket_face_center_speed_min_mps",
+    "racket_face_center_v_star_cap_mps",
+    "racket_face_center_v_dir_tol_deg",
+    "racket_face_center_cos_normal_velocity",
+)
+_REQUIRED_V1 = (
+    *_REQUIRED_COMMON,
+    "v_hat_b",
+    "elevation_deg",
+    "speed_nominal_mps",
+    "speed_max_mps",
+    "speed_min_mps",
+    "v_star_cap_mps",
+    "v_dir_tol_deg",
+)
+_LEGACY_AMBIGUOUS_VELOCITY_FIELDS = frozenset(
+    (
+        "v_hat_b",
+        "elevation_deg",
+        "window_dir_cone_deg",
+        "speed_nominal_mps",
+        "speed_max_mps",
+        "speed_min_mps",
+        "v_star_cap_mps",
+        "v_dir_tol_deg",
+        "cos_nv",
+    )
 )
 
 
@@ -79,6 +121,7 @@ class StrokePrototypeTensors:
     derived_sha256: str = ""
     scope: str = ""
     path: str = ""
+    velocity_point_semantics: str = ""
 
     def __len__(self) -> int:
         return int(self.v_hat_b.shape[0])
@@ -90,12 +133,16 @@ def load_stroke_prototype_tensors(
     device="cpu",
     expected_sha256=None,
     expected_motion_ids=None,
+    expected_motion_sha256=None,
+    allow_legacy_site_velocity: bool = False,
 ) -> StrokePrototypeTensors:
     """Read the shared prototype JSON for one scope into aligned tensors, fail-closed.
 
-    ``expected_motion_ids`` pins the row order against the loaded motion clips: ``clip_index`` is a
-    POSITIONAL index into the trainer's clip list, so a prototype file that no longer lines up with
-    the clips is a construction error, not a silently wrong stroke.
+    ``expected_motion_ids`` and ``expected_motion_sha256`` pin every row
+    against the loaded motion clips.  Schema v1 encoded official racket-site
+    velocity in ambiguous generic fields; it is rejected unless an explicitly
+    legacy caller opts in.  ActionBall must use schema v2 selected-rubber
+    face-centre velocity.
     """
     path = str(path)
     actual = sha256_file(path)
@@ -106,7 +153,64 @@ def load_stroke_prototype_tensors(
         )
     with open(path, "r", encoding="utf-8") as fh:
         doc = json.load(fh)
-    if int(doc.get("schema_version", -1)) != SCHEMA_VERSION:
+    schema_version = int(doc.get("schema_version", -1))
+    if schema_version == LEGACY_SITE_VELOCITY_SCHEMA_VERSION:
+        if type(allow_legacy_site_velocity) is not bool:
+            raise ValueError("allow_legacy_site_velocity must be bool")
+        if not allow_legacy_site_velocity:
+            raise ValueError(
+                f"{path}: stroke prototype schema v1 contains legacy "
+                "official-racket-site velocity; ActionBall exact-face "
+                "contact requires schema v2 selected-rubber face-centre "
+                "velocity"
+            )
+        required = _REQUIRED_V1
+        direction_key = "v_hat_b"
+        elevation_key = "elevation_deg"
+        speed_nominal_key = "speed_nominal_mps"
+        speed_min_key = "speed_min_mps"
+        speed_max_key = "speed_max_mps"
+        v_star_key = "v_star_cap_mps"
+        direction_tolerance_key = "v_dir_tol_deg"
+        velocity_point_semantics = "official_racket_site_legacy"
+    elif schema_version == SCHEMA_VERSION:
+        contract = doc.get("velocity_contract")
+        expected_contract = {
+            "direction_and_speed_point": FACE_CENTER_VELOCITY_POINT,
+            "policy_control_point": "official_racket_site",
+            "mapping": (
+                "v_face_center=v_site+omega_world_cross_"
+                "r_face_center_from_site_world"
+            ),
+            "site_velocity_authority": (
+                "centered_position_fd_half_window_2_clamped_per_clip"
+            ),
+            "angular_velocity_authority": (
+                "npz_body_ang_vel_w_at_right_wrist_yaw_Link"
+            ),
+            "direction_frame_authority": (
+                "canonical_ready_root_yaw_at_frame_0"
+            ),
+            "geometry_source_sha256": GEOMETRY_SOURCE_SHA256,
+        }
+        if contract != expected_contract:
+            raise ValueError(
+                f"{path}: schema v2 velocity_contract must exactly bind "
+                "selected-rubber face-centre velocity and the current "
+                "exact-face geometry source"
+            )
+        required = _REQUIRED_V2
+        direction_key = "racket_face_center_velocity_hat_b"
+        elevation_key = "racket_face_center_elevation_deg"
+        speed_nominal_key = "racket_face_center_speed_nominal_mps"
+        speed_min_key = "racket_face_center_speed_min_mps"
+        speed_max_key = "racket_face_center_speed_max_mps"
+        v_star_key = "racket_face_center_v_star_cap_mps"
+        direction_tolerance_key = (
+            "racket_face_center_v_dir_tol_deg"
+        )
+        velocity_point_semantics = FACE_CENTER_VELOCITY_POINT
+    else:
         raise ValueError(
             f"{path}: stroke prototype schema_version {doc.get('schema_version')!r} != "
             f"{SCHEMA_VERSION}"
@@ -128,7 +232,7 @@ def load_stroke_prototype_tensors(
     if not rows:
         raise ValueError(f"{path}: prototype scope {scope!r} is empty")
     for i, r in enumerate(rows):
-        missing = [k for k in _REQUIRED if k not in r]
+        missing = [k for k in required if k not in r]
         if missing:
             raise ValueError(
                 f"{path}: scope {scope!r} record {i} ({r.get('motion_id', '?')!r}) is missing "
@@ -139,16 +243,25 @@ def load_stroke_prototype_tensors(
                 f"{path}: scope {scope!r} record {i} ({r['motion_id']!r}) declares "
                 f"clip_index={r['clip_index']} but sits at position {i}; clip_index IS the clip id"
             )
-        if float(r["v_hat_b"][0]) <= 0.0:
+        if (
+            schema_version == SCHEMA_VERSION
+            and _LEGACY_AMBIGUOUS_VELOCITY_FIELDS.intersection(r)
+        ):
             raise ValueError(
-                f"{path}: {r['motion_id']}/{scope} v_hat_b points at x={float(r['v_hat_b'][0]):+.4f}"
-                f" <= 0, away from the opponent — a stroke whose blade travels backwards at contact"
-                f" can never return a ball"
+                f"{path}: schema v2 record {i} mixes legacy ambiguous "
+                "site-velocity field names into the face-centre contract"
             )
-        if float(r["speed_min_mps"]) > float(r["speed_max_mps"]):
+        direction = tuple(float(value) for value in r[direction_key])
+        direction_norm = sum(value * value for value in direction) ** 0.5
+        if abs(direction_norm - 1.0) > 1.0e-6:
+            raise ValueError(
+                f"{path}: {r['motion_id']}/{scope} face-centre direction "
+                f"must be unit length; got norm {direction_norm:.12g}"
+            )
+        if float(r[speed_min_key]) > float(r[speed_max_key]):
             raise ValueError(
                 f"{path}: {r['motion_id']}/{scope} speed window "
-                f"[{r['speed_min_mps']}, {r['speed_max_mps']}] is empty"
+                f"[{r[speed_min_key]}, {r[speed_max_key]}] is empty"
             )
     ids = tuple(str(r["motion_id"]) for r in rows)
     if expected_motion_ids is not None:
@@ -157,6 +270,18 @@ def load_stroke_prototype_tensors(
             raise ValueError(
                 f"{path}: prototype scope {scope!r} lists clips {list(ids)} but the loaded motion "
                 f"clip order is {list(want)} — align the prototype file with the motion_file order"
+            )
+    if expected_motion_sha256 is not None:
+        expected_motion_sha256 = tuple(
+            str(value) for value in expected_motion_sha256
+        )
+        observed_motion_sha256 = tuple(
+            str(row["npz_sha256"]) for row in rows
+        )
+        if observed_motion_sha256 != expected_motion_sha256:
+            raise ValueError(
+                f"{path}: prototype scope {scope!r} NPZ SHA order "
+                "differs from the loaded motion bytes"
             )
 
     def _t(key, dtype=torch.float32):
@@ -168,13 +293,13 @@ def load_stroke_prototype_tensors(
         family_sign=torch.tensor(
             [1.0 if str(r["family"]) == "forehand" else -1.0 for r in rows],
             dtype=torch.float32, device=device),
-        v_hat_b=_t("v_hat_b"),
-        elevation_deg=_t("elevation_deg"),
-        speed_nominal=_t("speed_nominal_mps"),
-        speed_min=_t("speed_min_mps"),
-        speed_max=_t("speed_max_mps"),
-        v_star_cap=_t("v_star_cap_mps"),
-        v_dir_tol_deg=_t("v_dir_tol_deg"),
+        v_hat_b=_t(direction_key),
+        elevation_deg=_t(elevation_key),
+        speed_nominal=_t(speed_nominal_key),
+        speed_min=_t(speed_min_key),
+        speed_max=_t(speed_max_key),
+        v_star_cap=_t(v_star_key),
+        v_dir_tol_deg=_t(direction_tolerance_key),
         t_prepare=_t("t_prepare_s"),
         t_prepare_min=_t("t_prepare_min_s"),
         t_prepare_max=_t("t_prepare_max_s"),
@@ -195,4 +320,5 @@ def load_stroke_prototype_tensors(
         derived_sha256=derived,
         scope=scope,
         path=path,
+        velocity_point_semantics=velocity_point_semantics,
     )

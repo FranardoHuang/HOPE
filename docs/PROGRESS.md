@@ -13,6 +13,34 @@
 
 ## 2026-07-28(Fable 接力 Codex 断粮现场)
 
+- **桌碰 no-touch 合同补全**：ActionBall 从 broad/body-origin + 单腕 filter 改为 exact 32 个
+  articulation body × 五件桌体的逐体 pair-filter（含双脚；拍面/拍柄归右腕），四个 physics
+  substep 全部做 freshness + sticky latch，接触阈值收紧到 `1e-6 N` 数值零容差。host focused
+  `83 passed in 2.19s`；构造门与 Pod smoke 已同步要求 32 个 `[env,1,5,3]` live tensors，并将
+  4096-env throughput/memory 与整周期 `>=5 mm` continuous teacher clearance 保持为开跑前硬门。
+  复现见 [G05](gates/G05_isaac_training_first_loop.md) 与
+  [桌体安全工序](operations/run_action_ball_table_safety_smoke.md)。
+- **ActionBall 桌体安全链 E1 初版（已被上条 32-body no-touch 合同取代）**：初版建立五件桌体、
+  四子步 latch 与 Pod actor-contact 工序，但只覆盖 broad/body-origin + 单腕 filter，故其
+  `74 passed` 不能作为当前 admission 证据。G05 继续 `Partial`，不授权训练/真机。
+- **physical-hard joint 账接入 runner**：ActionBall/UpperSafe 现采用 zero-copy
+  `prepare → device-side validate/sparsify → durable prepared sidecar → optimizer →
+  durable commit marker → exact-token ack`。保护任务的旧 one-shot destructive consume 已禁用；
+  actual hard edge/non-finite q 会先落 fatal sidecar、阻止 optimizer 并保留账本。缺 4+1 readback、
+  identity/transcript 漂移、磁盘/parent-directory fsync、容量/预算失败均 fail closed。host focused
+  `70 passed`；4096×24×31 safe-case prepare `0.0443 s`、Python peak `15,183 B`、完整边界
+  `0.3649 s`、sidecar `956,704 B`。尚无 Pod Isaac 真实 4×0.005 s readback、两次 update 或
+  Pod filesystem fsync 证据，因此不授权长跑/真机。详见
+  [实验](experiments/2026-07/EXP-UPPER-N3-BACKHAND-SAFE-WARMSTART-20260728.md)与
+  [工序](operations/run_upper_n3_backhand_safe.md)。
+- **三反手 upper 专卡候选**：旧 N4 upper 在完整 PPO boundary 收口到 finite
+  `model_10809`；N3 确定性题库只保留 `bh_loop_c/bh_block/s0_highpress`，并新增 175D
+  `HOPEPingPongUpperSafe` 叶子、physical-hard 双 joint termination、pre-physics guard、统一
+  terminal 罚与 GPU1-exclusive smoke-only launcher。当前 E1 为 `14 passed, 1 skipped`，旧 source
+  probe 在 Hydra/Kit 前拒绝；clean commit、substep hard readback、Pod 两次 update 与 canary
+  未过，故没有长跑。详见
+  [实验](experiments/2026-07/EXP-UPPER-N3-BACKHAND-SAFE-WARMSTART-20260728.md)与
+  [工序](operations/run_upper_n3_backhand_safe.md)。
 - **发射还账**:07-27 00:09 Codex 在两 pod 发射的题库化 bh_loop_c 六臂波此前无文档,现立账
   [EXP-BANKED-CGROUP-BHLOOPC-20260727](experiments/2026-07/EXP-BANKED-CGROUP-BHLOOPC-20260727.md)。
   核心读数:bank 基线 legal/strike **0.488** vs uniform 对照 **0.000**(同 seed);bank+seed1 也崩塌
@@ -1935,3 +1963,17 @@
   [preflight](research/mujoco_training_v0_preflight_2026-07-12.md)。
 
 </details>
+## 2026-07-29
+
+- 新增 ActionBall 1-env formal Reward 因果发射门：真实 post-Hydra/live RewardManager exact
+  recipe 对账后，逐 active objective 用权威 tensor 做单轴 worsening，按四组报告 signed
+  per-step/per-event 剂量；unknown term、方向错误、clean/HEAD producer/identity 漂移均 fail
+  closed。host focused `15 passed`、Reward 相关联合回归 `433 passed`；尚无 clean Pod Isaac
+  receipt，仍是 E1。详见
+  [实验](experiments/2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md)与
+  [工序](operations/run_action_ball_reward_causal_prelaunch.md)。
+- 接管 CC 的 Isaac ground-plant 修复：旧 generator 会改写 env origins、让机器人和克隆桌子错位，
+  现改为每环境零均值地垫并提供显式 `robot_material_make_consistent=true`。Python 3.8 联合回归
+  `379 passed`；同时纠正文档中会把有效摩擦额外乘 1.5 的错误 CLI。证据仍为 E1，未跑 Pod
+  Isaac/4096-env，故 fresh N5 首轮冻结为平地 upper/no-move，rough/move 保持 blocked。详见
+  [rough ground 实验](experiments/2026-07/EXP-ROUGH-GROUND-FRICTION-FIX-20260729.md)。

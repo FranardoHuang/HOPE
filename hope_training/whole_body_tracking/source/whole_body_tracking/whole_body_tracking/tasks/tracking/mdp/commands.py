@@ -2431,12 +2431,29 @@ class MotionCommand(CommandTerm):
             raise ValueError(
                 "action-ball birth Z differs from canonical-ready root Z"
             )
-        ready_quat = self._action_ball_ready_root_quat[action_slot]
-        direct = max(abs(a - b) for a, b in zip(quat, ready_quat))
-        negated = max(abs(a + b) for a, b in zip(quat, ready_quat))
+        # ``base_quat_wxyz`` is the yaw-only B_yaw frame used by the sampler
+        # and solver.  The physical floating-base reset keeps the admitted
+        # clip's complete ready quaternion (including real roll/pitch), so
+        # compare the receipt with that quaternion's yaw projection here.
+        # Conflating these two frames strips the ready pitch and moves the
+        # paddle/feet by centimetres even though the joint vector is exact.
+        ready_root_quat = self._action_ball_ready_root_quat[action_slot]
+        rw, rx, ry, rz = ready_root_quat
+        ready_yaw = math.atan2(
+            2.0 * (rw * rz + rx * ry),
+            1.0 - 2.0 * (ry * ry + rz * rz),
+        )
+        ready_frame_quat = (
+            math.cos(0.5 * ready_yaw),
+            0.0,
+            0.0,
+            math.sin(0.5 * ready_yaw),
+        )
+        direct = max(abs(a - b) for a, b in zip(quat, ready_frame_quat))
+        negated = max(abs(a + b) for a, b in zip(quat, ready_frame_quat))
         if min(direct, negated) > 1.0e-6:
             raise ValueError(
-                "action-ball birth quaternion differs from canonical-ready root"
+                "action-ball birth yaw frame differs from canonical-ready root yaw"
             )
         return receipt_sha, spawn, quat
 
@@ -2903,8 +2920,8 @@ class MotionCommand(CommandTerm):
                 "action-ball teacher_rate is outside its certified range"
             )
         required_vector = self._action_ball_vector(
-            receipt.racket_velocity_w_mps,
-            name="task.racket_velocity_w_mps",
+            receipt.racket_site_velocity_w_mps,
+            name="task.racket_site_velocity_w_mps",
             length=3,
         )
         self._action_ball_close_float(
@@ -3147,9 +3164,11 @@ class MotionCommand(CommandTerm):
     ) -> dict | None:
         """Write one clip-owned ready transaction: root + 31 joints, all velocities zero.
 
-        In action-ball mode the complete root pose comes from the provider-issued birth:
-        environment-local XYZ plus its canonical-ready quaternion.  No task/base goal is accepted
-        here.  Joint pose still comes only from the opaque-admitted shared ready frame.
+        In action-ball mode the provider-issued birth owns the environment-local
+        XYZ and supplies a yaw-only B_yaw frame for validation.  The physical
+        root quaternion and joint pose both remain the selected opaque-admitted
+        clip's literal ready state; a horizontal solver frame must never erase
+        its real roll/pitch.  No task/base goal is accepted here.
         """
 
         ready_steps = self._canonical_ready_steps(env_ids)
@@ -3162,28 +3181,34 @@ class MotionCommand(CommandTerm):
             )
         if action_ball_write:
             spawn = action_ball_base_spawn_w_m
-            quat = action_ball_base_quat_wxyz
+            frame_quat = action_ball_base_quat_wxyz
             if (
                 not torch.is_tensor(spawn)
                 or tuple(spawn.shape) != (len(env_ids), 3)
                 or not bool(torch.isfinite(spawn).all())
-                or not torch.is_tensor(quat)
-                or tuple(quat.shape) != (len(env_ids), 4)
-                or not bool(torch.isfinite(quat).all())
+                or not torch.is_tensor(frame_quat)
+                or tuple(frame_quat.shape) != (len(env_ids), 4)
+                or not bool(torch.isfinite(frame_quat).all())
             ):
                 raise ValueError(
-                    "action-ball root must be finite [N,3] spawn + [N,4] quaternion tensors"
+                    "action-ball root must be finite [N,3] spawn + [N,4] yaw-frame tensors"
                 )
             spawn = spawn.to(dtype=root_pos.dtype, device=root_pos.device)
-            quat = quat.to(dtype=root_quat.dtype, device=root_quat.device)
+            # The yaw-frame tensor was already checked against the selected
+            # clip by _validate_action_ball_birth_receipt.  Convert here only
+            # to fail on an incompatible device/dtype before mutating PhysX;
+            # it is deliberately not the physical root quaternion.
+            frame_quat = frame_quat.to(
+                dtype=root_quat.dtype, device=root_quat.device
+            )
             # ``base_spawn_w_m`` is an environment-local world-frame position, not an offset from
             # the historical clip root.  Replacing all XYZ is what makes the birth receipt the
-            # sole physical reset truth.
+            # sole physical translation truth.  Orientation stays literal to
+            # the admitted per-action ready frame.
             root_pos = (
                 self._env.scene.env_origins[env_ids].to(root_pos.dtype)
                 + spawn
             )
-            root_quat = quat
         root_velocity = torch.zeros(
             len(env_ids), 6, dtype=root_pos.dtype, device=root_pos.device
         )
@@ -4176,7 +4201,10 @@ class MotionCommand(CommandTerm):
                 "motion_admission_receipt_sha256": (
                     admission_receipt["canonical_sha256"]
                 ),
-                "timing_authority": "per_swing_task_receipt_v3",
+                "timing_authority": (
+                    self._action_ball_runtime_module_bound
+                    .TASK_RECEIPT_TIMING_AUTHORITY
+                ),
                 "policy_dt_s": float(self._env.step_dt),
                 "episode_length_s": (
                     int(self._env.max_episode_length)

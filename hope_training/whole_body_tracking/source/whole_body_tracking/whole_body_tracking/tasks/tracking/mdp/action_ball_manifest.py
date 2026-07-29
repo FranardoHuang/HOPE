@@ -26,12 +26,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import hashlib
+import importlib.util
 import json
 import math
 import os
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 import stat
+import sys
 from typing import Dict, Mapping, Optional, Sequence, Tuple
 import unicodedata
 
@@ -47,6 +49,74 @@ MAX_CONTACT_X_STD_M = 0.10
 UNIT_VECTOR_TOLERANCE = 1.0e-6
 
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
+FORMAL_HOLDOUT_SAMPLES_PER_ACTION_MIN = 768
+ACTION_BALL_PROTOTYPE_SCHEMA_VERSION = 2
+ACTION_BALL_PROTOTYPE_VELOCITY_POINT = (
+    "selected_rubber_face_center"
+)
+_PROTOTYPE_V2_TOP_LEVEL_KEYS = frozenset(
+    (
+        "schema_version",
+        "prototype_set_id",
+        "velocity_contract",
+        "contact_rule",
+        "provenance",
+        "scopes",
+        "derived_sha256",
+    )
+)
+_PROTOTYPE_V2_FACE_VELOCITY_FIELDS = frozenset(
+    (
+        "racket_face_center_velocity_hat_b",
+        "racket_face_center_elevation_deg",
+        "racket_face_center_window_dir_cone_deg",
+        "racket_face_center_speed_nominal_mps",
+        "racket_face_center_speed_max_mps",
+        "racket_face_center_speed_min_mps",
+        "racket_face_center_v_star_cap_mps",
+        "racket_face_center_v_dir_tol_deg",
+        "racket_face_center_cos_normal_velocity",
+    )
+)
+_PROTOTYPE_V2_COMMON_FIELDS = frozenset(
+    (
+        "motion_id",
+        "scope",
+        "family",
+        "clip_index",
+        "npz_sha256",
+        "frames",
+        "t_prepare_s",
+        "t_prepare_min_s",
+        "t_prepare_max_s",
+        "band_b_x",
+        "band_b_y",
+        "band_z_w",
+        "slack_b_xy_m",
+        "slack_z_w_m",
+        "p_contact_b",
+        "n_hat_b",
+        "face_sign",
+        "priority",
+        "enabled",
+        "strike_phase",
+        "contact_frame",
+        "contact_window_frames",
+    )
+)
+_PROTOTYPE_LEGACY_AMBIGUOUS_FIELDS = frozenset(
+    (
+        "v_hat_b",
+        "elevation_deg",
+        "window_dir_cone_deg",
+        "speed_nominal_mps",
+        "speed_max_mps",
+        "speed_min_mps",
+        "v_star_cap_mps",
+        "v_dir_tol_deg",
+        "cos_nv",
+    )
+)
 _TOP_LEVEL_KEYS = frozenset(
     (
         "schema_version",
@@ -62,6 +132,9 @@ _TOP_LEVEL_KEYS = frozenset(
         "holdout",
         "notes",
     )
+)
+_COUNTER_RALLY_TOP_LEVEL_KEYS = frozenset(
+    (*_TOP_LEVEL_KEYS, "counter_rally_objective")
 )
 _PROTOTYPE_KEYS = frozenset(("path", "sha256", "scope"))
 _LANDING_AIM_KEYS = frozenset(
@@ -1659,7 +1732,12 @@ class ActionBallCurriculumConfig:
 
 @dataclass(frozen=True)
 class HoldoutConfig:
-    """Deterministic held-out ball split evaluated for every action."""
+    """Deterministic formal held-out ball split evaluated for every action.
+
+    A smaller canary/diagnostic split is a separate evaluator artifact; it
+    cannot occupy this manifest field and thereby look like formal promotion
+    evidence.
+    """
 
     seed: int
     samples_per_action: int
@@ -1695,6 +1773,25 @@ class HoldoutConfig:
         }
 
 
+def _counter_rally_objective_profile_type() -> type:
+    """Load the sibling stdlib-only objective without package side effects."""
+
+    module_name = "_action_ball_manifest_counter_rally"
+    module = sys.modules.get(module_name)
+    if module is None:
+        source = Path(__file__).resolve().with_name("counter_rally.py")
+        spec = importlib.util.spec_from_file_location(module_name, source)
+        if spec is None or spec.loader is None:
+            raise ValueError("cannot load counter-rally objective source")
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+    profile_type = getattr(module, "CounterRallyObjectiveProfile", None)
+    if not isinstance(profile_type, type):
+        raise ValueError("counter-rally objective profile type is missing")
+    return profile_type
+
+
 @dataclass(frozen=True)
 class ActionBallManifest:
     """Validated immutable action-conditioned ball-first declaration."""
@@ -1711,12 +1808,23 @@ class ActionBallManifest:
     curriculum: ActionBallCurriculumConfig
     holdout: HoldoutConfig
     notes: str
+    counter_rally_objective: Optional[object] = None
 
     @classmethod
     def from_mapping(cls, value: object) -> "ActionBallManifest":
+        if not isinstance(value, Mapping):
+            raise ValueError(
+                "action-conditioned ball-first manifest must be an object"
+            )
+        raw_keys = frozenset(value)
+        expected_keys = (
+            _COUNTER_RALLY_TOP_LEVEL_KEYS
+            if "counter_rally_objective" in raw_keys
+            else _TOP_LEVEL_KEYS
+        )
         document = _require_exact_keys(
             value,
-            _TOP_LEVEL_KEYS,
+            expected_keys,
             name="action-conditioned ball-first manifest",
         )
         schema_version = _require_int(
@@ -1772,19 +1880,32 @@ class ActionBallManifest:
             raise ValueError(
                 "actions must not contain duplicate action_uid values"
             )
+        counter_rally_objective = None
+        if "counter_rally_objective" in document:
+            if len(action_order) != 1:
+                raise ValueError(
+                    "counter_rally_objective is an exact N=1 objective"
+                )
+            counter_rally_objective = (
+                _counter_rally_objective_profile_type().from_mapping(
+                    document["counter_rally_objective"]
+                )
+            )
 
         curriculum = ActionBallCurriculumConfig.from_mapping(
             document["curriculum"]
         )
         holdout = HoldoutConfig.from_mapping(document["holdout"])
         required_holdout = max(
+            FORMAL_HOLDOUT_SAMPLES_PER_ACTION_MIN,
             curriculum.min_proposals,
             curriculum.min_safe_closed,
         )
         if holdout.samples_per_action < required_holdout:
             raise ValueError(
-                "holdout.samples_per_action must cover the manifest "
-                "curriculum decision window: "
+                "holdout.samples_per_action must cover the formal per-action "
+                "heldout window (smaller canary/diagnostic splits are not "
+                "formal manifest heldout): "
                 f"need at least {required_holdout}, got "
                 f"{holdout.samples_per_action}"
             )
@@ -1816,10 +1937,11 @@ class ActionBallManifest:
             notes=_require_string(
                 document["notes"], name="notes", allow_empty=True
             ),
+            counter_rally_objective=counter_rally_objective,
         )
 
     def to_mapping(self) -> Dict[str, object]:
-        return {
+        result = {
             "schema_version": self.schema_version,
             "manifest_id": self.manifest_id,
             "mobility_mode": self.mobility_mode,
@@ -1833,6 +1955,17 @@ class ActionBallManifest:
             "holdout": self.holdout.to_mapping(),
             "notes": self.notes,
         }
+        if self.counter_rally_objective is not None:
+            profile_type = _counter_rally_objective_profile_type()
+            if not isinstance(self.counter_rally_objective, profile_type):
+                raise TypeError(
+                    "counter_rally_objective must be "
+                    "CounterRallyObjectiveProfile"
+                )
+            result["counter_rally_objective"] = (
+                self.counter_rally_objective.to_mapping()
+            )
+        return result
 
 
 def canonical_manifest_bytes(manifest: ActionBallManifest) -> bytes:
@@ -1948,6 +2081,266 @@ def _verified_referenced_asset(
     )
 
 
+def _exact_face_geometry_source_sha256() -> str:
+    """Load the stdlib-only executable geometry beside this module."""
+
+    module_name = "_action_ball_manifest_racket_contact_geometry"
+    module = sys.modules.get(module_name)
+    if module is None:
+        source = Path(__file__).resolve().with_name(
+            "racket_contact_geometry.py"
+        )
+        spec = importlib.util.spec_from_file_location(
+            module_name, source
+        )
+        if spec is None or spec.loader is None:
+            raise ValueError(
+                "cannot load executable exact-face geometry source"
+            )
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[module_name] = module
+        spec.loader.exec_module(module)
+    return _require_sha256(
+        getattr(module, "GEOMETRY_SOURCE_SHA256", None),
+        name="racket_contact_geometry.GEOMETRY_SOURCE_SHA256",
+    )
+
+
+def _prototype_canonical_sha256(value: object) -> str:
+    return hashlib.sha256(
+        json.dumps(
+            value,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+
+
+def _verify_prototype_motion_crossbinding(
+    manifest: ActionBallManifest,
+    prototype: VerifiedReferencedAsset,
+) -> None:
+    """Bind explicit FACE-CENTRE prototype rows to exact motion bytes.
+
+    A prototype file hash alone is insufficient: a newly signed manifest can
+    otherwise pair current NPZ bytes with stale direction/speed metadata.
+    Schema v1 used ambiguous generic names for official racket-site velocity;
+    exact-face ActionBall rejects it rather than silently reinterpreting those
+    numbers as selected-rubber face-centre velocity.
+    """
+
+    raw = prototype.resolved_path.read_bytes()
+    if hashlib.sha256(raw).hexdigest() != prototype.sha256:
+        raise ValueError(
+            "prototype changed after referenced-asset verification"
+        )
+    try:
+        document = json.loads(
+            raw.decode("utf-8"),
+            parse_constant=_reject_json_constant,
+            object_pairs_hook=_strict_json_object,
+        )
+    except UnicodeDecodeError as error:
+        raise ValueError(
+            "prototype must be UTF-8 JSON"
+        ) from error
+    except json.JSONDecodeError as error:
+        raise ValueError("prototype is not valid JSON") from error
+    document = _require_exact_keys(
+        document,
+        _PROTOTYPE_V2_TOP_LEVEL_KEYS,
+        name="prototype document",
+    )
+    if document["schema_version"] != ACTION_BALL_PROTOTYPE_SCHEMA_VERSION:
+        raise ValueError(
+            "ActionBall prototype must use schema v2 explicit "
+            "selected-rubber face-centre velocity; legacy site-velocity "
+            "prototype rows are not admissible"
+        )
+    expected_velocity_contract = {
+        "direction_and_speed_point": (
+            ACTION_BALL_PROTOTYPE_VELOCITY_POINT
+        ),
+        "policy_control_point": "official_racket_site",
+        "mapping": (
+            "v_face_center=v_site+omega_world_cross_"
+            "r_face_center_from_site_world"
+        ),
+        "site_velocity_authority": (
+            "centered_position_fd_half_window_2_clamped_per_clip"
+        ),
+        "angular_velocity_authority": (
+            "npz_body_ang_vel_w_at_right_wrist_yaw_Link"
+        ),
+        "direction_frame_authority": (
+            "canonical_ready_root_yaw_at_frame_0"
+        ),
+        "geometry_source_sha256": (
+            _exact_face_geometry_source_sha256()
+        ),
+    }
+    if document["velocity_contract"] != expected_velocity_contract:
+        raise ValueError(
+            "prototype velocity_contract does not exactly bind the "
+            "current selected-rubber face-centre geometry"
+        )
+    scopes = document["scopes"]
+    if not isinstance(scopes, Mapping):
+        raise ValueError("prototype.scopes must be a mapping")
+    if _prototype_canonical_sha256(scopes) != _require_sha256(
+        document["derived_sha256"],
+        name="prototype.derived_sha256",
+    ):
+        raise ValueError(
+            "prototype.derived_sha256 does not match prototype.scopes"
+        )
+    rows = scopes.get(manifest.prototype.scope)
+    if (
+        isinstance(rows, (str, bytes))
+        or not isinstance(rows, Sequence)
+        or len(rows) != len(manifest.actions)
+    ):
+        raise ValueError(
+            "prototype selected scope must contain exactly one row per "
+            "manifest action"
+        )
+    for index, (raw_row, action) in enumerate(
+        zip(rows, manifest.actions)
+    ):
+        if not isinstance(raw_row, Mapping):
+            raise ValueError(
+                f"prototype row {index} must be a mapping"
+            )
+        missing = (
+            _PROTOTYPE_V2_COMMON_FIELDS
+            | _PROTOTYPE_V2_FACE_VELOCITY_FIELDS
+        ).difference(raw_row)
+        if missing:
+            raise ValueError(
+                f"prototype row {index} is missing explicit face-centre "
+                f"fields {sorted(missing)}"
+            )
+        ambiguous = _PROTOTYPE_LEGACY_AMBIGUOUS_FIELDS.intersection(
+            raw_row
+        )
+        if ambiguous:
+            raise ValueError(
+                f"prototype row {index} contains legacy ambiguous "
+                f"site-velocity fields {sorted(ambiguous)}"
+            )
+        if (
+            raw_row["motion_id"] != action.action_id
+            or raw_row["scope"] != manifest.prototype.scope
+            or raw_row["clip_index"] != index
+            or raw_row["family"] != action.family
+        ):
+            raise ValueError(
+                f"prototype row {index} identity/order differs from "
+                "manifest action_order"
+            )
+        face_sign = _require_finite(
+            raw_row["face_sign"],
+            name=f"prototype row {index}.face_sign",
+        )
+        strike_phase = _require_finite(
+            raw_row["strike_phase"],
+            name=f"prototype row {index}.strike_phase",
+            minimum=0.0,
+            maximum=1.0,
+        )
+        if face_sign != float(action.mount_normal_sign):
+            raise ValueError(
+                f"prototype row {index} face_sign differs from manifest "
+                "mount_normal_sign"
+            )
+        frame_count = _require_int(
+            raw_row["frames"],
+            name=f"prototype row {index}.frames",
+            minimum=3,
+        )
+        contact_frame = _require_int(
+            raw_row["contact_frame"],
+            name=f"prototype row {index}.contact_frame",
+            minimum=1,
+            maximum=frame_count - 2,
+        )
+        if not math.isclose(
+            strike_phase,
+            contact_frame / (frame_count - 1),
+            rel_tol=0.0,
+            abs_tol=1.0e-12,
+        ):
+            raise ValueError(
+                f"prototype row {index} strike_phase is inconsistent with "
+                "its integer contact_frame/frame count"
+            )
+        if round(action.strike_phase * (frame_count - 1)) != contact_frame:
+            raise ValueError(
+                f"prototype row {index} contact_frame differs from the "
+                "manifest strike phase after frame resolution"
+            )
+        _require_unit_vector(
+            raw_row["racket_face_center_velocity_hat_b"],
+            name=(
+                f"prototype row {index}."
+                "racket_face_center_velocity_hat_b"
+            ),
+        )
+        _require_unit_vector(
+            raw_row["n_hat_b"],
+            name=f"prototype row {index}.n_hat_b",
+        )
+        if type(raw_row["enabled"]) is not bool:
+            raise ValueError(
+                f"prototype row {index}.enabled must be bool"
+            )
+        _require_int(
+            raw_row["priority"],
+            name=f"prototype row {index}.priority",
+            minimum=0,
+        )
+        speed_min = _require_finite(
+            raw_row["racket_face_center_speed_min_mps"],
+            name=(
+                f"prototype row {index}."
+                "racket_face_center_speed_min_mps"
+            ),
+            minimum=0.0,
+        )
+        speed_nominal = _require_finite(
+            raw_row["racket_face_center_speed_nominal_mps"],
+            name=(
+                f"prototype row {index}."
+                "racket_face_center_speed_nominal_mps"
+            ),
+            minimum=0.0,
+        )
+        speed_max = _require_finite(
+            raw_row["racket_face_center_speed_max_mps"],
+            name=(
+                f"prototype row {index}."
+                "racket_face_center_speed_max_mps"
+            ),
+            minimum=0.0,
+        )
+        if not 0.0 < speed_min <= speed_nominal <= speed_max:
+            raise ValueError(
+                f"prototype row {index} face-centre speed window must "
+                "contain a positive nominal speed"
+            )
+        row_motion_sha = _require_sha256(
+            raw_row["npz_sha256"],
+            name=f"prototype row {index}.npz_sha256",
+        )
+        if row_motion_sha != action.motion_sha256:
+            raise ValueError(
+                f"prototype row {index} NPZ SHA differs from manifest "
+                f"motion_sha256 for {action.action_id!r}"
+            )
+
+
 def verify_action_ball_referenced_assets(
     manifest: ActionBallManifest,
     *,
@@ -1988,6 +2381,7 @@ def verify_action_ball_referenced_assets(
         )
         for action in manifest.actions
     )
+    _verify_prototype_motion_crossbinding(manifest, prototype)
     return VerifiedActionBallAssets(
         repo_root=root,
         prototype=prototype,
@@ -2089,3 +2483,192 @@ def load_action_ball_manifest(
         canonical_sha256=canonical_manifest_sha256(manifest),
         referenced_assets=assets,
     )
+
+
+COUNTER_RALLY_N1_ACTION_IDS = frozenset(("bh_loop_c", "bh_block"))
+
+
+def build_counter_rally_n1_subset(
+    source: LoadedActionBallManifest,
+    *,
+    expected_source_file_sha256: str,
+    action_id: str,
+    counter_rally_objective: object,
+) -> ActionBallManifest:
+    """Purely derive one strict N=1 manifest from a pinned N=5 manifest.
+
+    The selected action row is reused byte-for-byte at the mapping level, so
+    its motion SHA and complete incoming-ball centre/support remain inherited
+    from the reviewed N=5 source.  Only the ordered action set, manifest ID,
+    notes and explicit N=1 objective are rebuilt.
+    """
+
+    if not isinstance(source, LoadedActionBallManifest):
+        raise TypeError("source must be LoadedActionBallManifest")
+    expected = _require_sha256(
+        expected_source_file_sha256,
+        name="expected_source_file_sha256",
+    )
+    if source.file_sha256 != expected:
+        raise ValueError(
+            "source N=5 manifest exact-byte SHA-256 mismatch"
+        )
+    if (
+        len(source.manifest.action_order) != 5
+        or len(source.manifest.actions) != 5
+    ):
+        raise ValueError("counter-rally subset source must be exact N=5")
+    if source.manifest.counter_rally_objective is not None:
+        raise ValueError(
+            "counter-rally subset source must be the ordinary N=5 manifest"
+        )
+    selected_id = _require_identity_text(action_id, name="action_id")
+    if selected_id not in COUNTER_RALLY_N1_ACTION_IDS:
+        raise ValueError(
+            "counter-rally N=1 action_id must be bh_loop_c or bh_block"
+        )
+    matching = tuple(
+        action
+        for action in source.manifest.actions
+        if action.action_id == selected_id
+    )
+    if len(matching) != 1:
+        raise ValueError(
+            f"source N=5 manifest contains {len(matching)} rows for "
+            f"{selected_id!r}, expected exactly one"
+        )
+    profile_type = _counter_rally_objective_profile_type()
+    if not isinstance(counter_rally_objective, profile_type):
+        raise TypeError(
+            "counter_rally_objective must be CounterRallyObjectiveProfile"
+        )
+    objective_mapping = counter_rally_objective.to_mapping()
+    inactive = objective_mapping.get("inactive_curriculum_arms")
+    if inactive != ["landing_aim_y_lower", "landing_aim_y_upper"]:
+        raise ValueError("counter-rally active-arm mask is not canonical")
+
+    document = source.manifest.to_mapping()
+    original_action_mapping = matching[0].to_mapping()
+    document["manifest_id"] = (
+        f"{source.manifest.manifest_id}__{selected_id}"
+        "__counter_rally_v1"
+    )
+    document["action_order"] = [selected_id]
+    document["actions"] = [original_action_mapping]
+    document["counter_rally_objective"] = objective_mapping
+    source_note = source.manifest.notes.strip()
+    suffix = (
+        "Pure N=1 counter-rally subset derived from exact source file "
+        f"SHA-256 {source.file_sha256}; action row, motion bytes pin and "
+        "ball centre/support are inherited without editing."
+    )
+    document["notes"] = f"{source_note} {suffix}".strip()
+    result = ActionBallManifest.from_mapping(document)
+    if result.actions[0].to_mapping() != original_action_mapping:
+        raise AssertionError("N=1 subset changed the selected action row")
+    return result
+
+
+def write_counter_rally_n1_subset_no_clobber(
+    source_path: object,
+    *,
+    expected_source_file_sha256: str,
+    action_id: str,
+    counter_rally_objective: object,
+    output_path: object,
+    repo_root: Optional[object] = None,
+) -> LoadedActionBallManifest:
+    """Verify, derive and atomically create one separate canonical JSON file."""
+
+    source = load_action_ball_manifest(
+        source_path,
+        expected_sha256=expected_source_file_sha256,
+        verify_referenced_assets=repo_root is not None,
+        repo_root=repo_root,
+    )
+    manifest = build_counter_rally_n1_subset(
+        source,
+        expected_source_file_sha256=expected_source_file_sha256,
+        action_id=action_id,
+        counter_rally_objective=counter_rally_objective,
+    )
+    destination = Path(output_path)
+    if destination.resolve(strict=False) == source.source_path.resolve(
+        strict=True
+    ):
+        raise ValueError("output_path must not overwrite the source manifest")
+    payload = canonical_manifest_bytes(manifest)
+    # Exclusive creation is the no-clobber authority.  There is no unlink or
+    # overwrite fallback; a retry must choose a new namespace.
+    with destination.open("xb") as stream:
+        stream.write(payload)
+        stream.flush()
+        os.fsync(stream.fileno())
+    output_sha256 = hashlib.sha256(payload).hexdigest()
+    loaded = load_action_ball_manifest(
+        destination,
+        expected_sha256=output_sha256,
+    )
+    if loaded.canonical_sha256 != canonical_manifest_sha256(manifest):
+        raise AssertionError("written N=1 manifest failed canonical roundtrip")
+    return loaded
+
+
+def _counter_rally_subset_cli(argv: Optional[Sequence[str]] = None) -> int:
+    import argparse
+
+    parser = argparse.ArgumentParser(
+        description=(
+            "Create one no-clobber bh_loop_c or bh_block N=1 "
+            "counter-rally manifest from an exact N=5 manifest."
+        )
+    )
+    parser.add_argument("--source", required=True)
+    parser.add_argument("--source-sha256", required=True)
+    parser.add_argument(
+        "--action-id",
+        required=True,
+        choices=sorted(COUNTER_RALLY_N1_ACTION_IDS),
+    )
+    parser.add_argument("--output", required=True)
+    parser.add_argument(
+        "--repo-root",
+        help=(
+            "When provided, also verify the N=5 prototype and all five "
+            "motion files before deriving the subset."
+        ),
+    )
+    arguments = parser.parse_args(argv)
+    profile_type = _counter_rally_objective_profile_type()
+    result = write_counter_rally_n1_subset_no_clobber(
+        arguments.source,
+        expected_source_file_sha256=arguments.source_sha256,
+        action_id=arguments.action_id,
+        counter_rally_objective=profile_type(),
+        output_path=arguments.output,
+        repo_root=arguments.repo_root,
+    )
+    print(
+        json.dumps(
+            {
+                "output_path": str(result.source_path),
+                "file_sha256": result.file_sha256,
+                "canonical_sha256": result.canonical_sha256,
+                "action_order": list(result.manifest.action_order),
+                "objective_profile_sha256": (
+                    result.manifest.counter_rally_objective.sha256
+                ),
+                "inactive_curriculum_arms": list(
+                    result.manifest.counter_rally_objective
+                    .inactive_curriculum_arms
+                ),
+            },
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(_counter_rally_subset_cli())

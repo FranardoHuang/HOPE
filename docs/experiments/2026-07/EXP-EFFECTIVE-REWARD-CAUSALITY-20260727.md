@@ -185,3 +185,44 @@ contact/landing oracle，仍有循环验证风险；当前目录未找到这些 
 Source tests 与 receipt 入口见
 [构建与测试](../../operations/build_and_test.md#task-first-and-capability-source-tests)；
 训练前检查见[run_training](../../operations/run_training.md#effective-reward-truth)。
+
+### 2026-07-29：负向 Reward 激活门（源码级完成，Pod 行为证据未生成）
+
+`audit_reward_run.py` 现在只接受 adopted ActionBall 安全配方：
+
+- `policy_dt=0.02 s`，唯一 generic `death_penalty=-3600`，每个 hard-limit、table-hit 或 fall
+  terminal transition 必须逐事件闭合为恰好一次 `-72`；
+- `table_hit_penalty` / `terminated_by_term` 不得出现在 active effective recipe，因而 table
+  不能再叠加第二份 terminal charge；
+- `qdes_limit_barrier` 与 actual-q 的 `joint_limit` 必须分别是 v2 callable、`weight=-40`、
+  `margin_frac=0.08`、`penalty_floor=0.25`。每条必须同时看到至少一个内区零输出、至少一个
+  非终止非零输出；正 intrusion 的 raw sum 不能低于 `0.25 × active_sample_count`，所以不能以
+  趋近零的费用蹭软限位；
+- hard-limit、table-hit、fall 都必须至少有一条独立单原因 transition。零触发或只与其他原因
+  同时发生，只能是 `FAIL_CLOSED`，不能写作 activated。
+
+Host Python 3.8 focused 回归为 `59 passed`。这仍是 E1 source/schema 证据；测试 fixture 和离线
+JSON 不能冒充 Isaac 行为。正式 E2 必须来自 clean Pod 真实 rollout 的
+`effective_reward_recipe.json`、RewardManager activation、action-bound safety transition、
+ActionBall outcome ledger 和 joint-safety sidecar 全闭合；当前没有生成这样的 PASS receipt。
+
+### 2026-07-29：四组 Reward 的 live 单轴因果发射门
+
+新增 [1-env ActionBall Reward 因果审计工序](../../operations/run_action_ball_reward_causal_prelaunch.md)。
+它在与训练相同的 post-Hydra compose、motion identity 和 physical-validity source guard 后创建真实
+Isaac 环境，再从 live `RewardManager` 重建 effective recipe；term 集合、callable、weight 或 params
+与发射 receipt 任一不等即拒绝。每个 active objective 必须用权威输入 tensor 构造 controlled
+baseline/worsening，调用生产 Reward callable，并证明 `weight × raw × policy_dt` 严格下降。
+unsupported/probe error 会保留逐 term coverage 并令总结果 fail closed，不能用自然 nonzero 代替。
+
+receipt 分开报告 MJLab 平衡稳定、BeyondMimic 模仿、HOPE 击球/上台和 immutable safety 四组的
+dense 每控制步与 one-shot 每拍/每终止剂量，同时只列出 A（实际 compose）和 B（仅三项 racket
+tracking ×4）候选，绝不自动改训练权重。正式 receipt 还要求 checkout 包括 untracked 在内完全
+clean、producer 必须由 HEAD 跟踪且 blob 字节一致，并绑定 motion/manifest/policy contract/config/
+effective-recipe SHA。
+
+当前 host focused 为 `15 passed`，Reward 相关联合回归为 `433 passed`；覆盖
+no-clobber/content binding、untracked/隐藏 producer
+漂移、root authoritative-state→production-getter 读回、advanced-index tensor 写入、live recipe
+不等和未知 objective fail-closed。这仍是 E1；尚未从 clean commit 在 Pod 生成真实 Isaac PASS，
+因此实验最高证据等级与采用结论不变。

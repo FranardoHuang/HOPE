@@ -10,6 +10,22 @@ These files and folders are not provided by `git clone`, `git pull`, or normal b
 
 Small tracked runtime assets, such as the Purdue PACE table/net USD visual overlay under `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/tasks/table_tennis/table_usd/`, do not need a manual restore step; they should appear after a normal clone or pull.
 
+`vendor_assets/` 必须是当前 checkout 内的真实 ignored 目录，不是仓库跟踪项，也不能是绝对、
+跨 checkout 或自指 symlink。新 checkout 先做：
+
+```bash
+test ! -e vendor_assets
+mkdir vendor_assets
+test -d vendor_assets
+test ! -L vendor_assets
+git check-ignore -q vendor_assets
+```
+
+如果这个路径已存在，先只读核对 `lstat`、内容来源和使用者；不要删除、替换或跟随未知 symlink。
+恢复某个子树时应先复制到 checkout 外的新 staging 目录，核对逐文件清单后，仅在目标子树完全
+不存在时用同一文件系统的 rename 发布。不得用 `rsync --delete` 清理一个共享
+`vendor_assets/` 根，也不得恢复进正在训练的 checkout。
+
 ## Current Local Assets
 
 | Path | Purpose | Source | Required By |

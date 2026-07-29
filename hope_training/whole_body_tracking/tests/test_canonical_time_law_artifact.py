@@ -762,11 +762,52 @@ def test_builder_rejects_nonzero_endpoint_speed():
         _build(trace=replace(trace, x_node=x_node))
 
 
-def test_builder_rejects_marker_order_and_early_brake_overlap():
-    with pytest.raises(artifact_module.TimeLawArtifactError, match="not ordered"):
+@pytest.mark.parametrize("source_anchor", [0.125, 0.5, 0.875])
+def test_builder_preserves_source_anchor_before_inside_or_after_window(
+    source_anchor,
+):
+    artifact = _build(
+        marker_path_s={
+            "window_start": 0.25,
+            "source_anchor": source_anchor,
+            "window_end": 0.75,
+        }
+    )
+    assert artifact.manifest["markers"]["source_anchor"]["path_s"] == (
+        source_anchor
+    )
+    assert artifact.manifest["window"]["window_start_s"] == 0.25
+    assert artifact.manifest["window"]["window_end_s"] == 0.75
+    assert (
+        artifact.manifest["semantics"]["source_anchor_role"]
+        == "lineage_and_ranking_reference_may_precede_or_follow_the_"
+        "protected_window_not_contact_truth"
+    )
+
+
+@pytest.mark.parametrize("source_anchor", [-0.01, 1.01])
+def test_builder_rejects_source_anchor_outside_solved_path(source_anchor):
+    with pytest.raises(
+        artifact_module.TimeLawArtifactError,
+        match="leave the solved path",
+    ):
         _build(
             marker_path_s={
-                "window_start": 0.6,
+                "window_start": 0.25,
+                "source_anchor": source_anchor,
+                "window_end": 0.75,
+            }
+        )
+
+
+def test_builder_rejects_reversed_window_and_early_brake_overlap():
+    with pytest.raises(
+        artifact_module.TimeLawArtifactError,
+        match="window_start <= window_end",
+    ):
+        _build(
+            marker_path_s={
+                "window_start": 0.8,
                 "source_anchor": 0.5,
                 "window_end": 0.75,
             }
@@ -890,6 +931,35 @@ def test_reader_rejects_bool_masquerading_as_schema_integer(tmp_path: Path):
         match="schema_version",
     ):
         artifact_module.read_time_law_artifact(output, manifest_path=manifest)
+
+
+@pytest.mark.parametrize(
+    ("field", "legacy_value"),
+    [
+        ("schema_version", 1),
+        ("artifact_type", "canonical_time_law_collocation_v1"),
+    ],
+)
+def test_reader_rejects_legacy_v1_identity(
+    tmp_path: Path, field: str, legacy_value: object
+):
+    artifact = _build()
+
+    def mutate(manifest):
+        manifest[field] = legacy_value
+
+    output, manifest = _write_malicious_pair(
+        tmp_path,
+        artifact,
+        mutate_manifest=mutate,
+    )
+    with pytest.raises(
+        artifact_module.TimeLawArtifactError,
+        match="identity/version/publication contract changed",
+    ):
+        artifact_module.read_time_law_artifact(
+            output, manifest_path=manifest
+        )
 
 
 def test_reader_rejects_noncanonical_json_bytes(tmp_path: Path):

@@ -134,6 +134,91 @@ def test_the_box_covers_the_z_range_the_investigation_flagged(frame):
     assert not (lo[2] <= 0.95 <= hi[2])
 
 
+def test_full_robot_table_assembly_has_exact_nonoverlapping_shared_boxes(frame):
+    """ActionBall's robot-only proxy + top/net/posts are one exact shared assembly."""
+
+    geom, tf = frame
+    bounds = tf.table_assembly_aabbs_env(
+        NEAR_X, SURFACE_Z, keepout_floor_z=0.0, margin=0.0
+    )
+    assert len(bounds) == 5
+    top, keepout, net, left, right = bounds
+    assert tf.TABLE_ASSEMBLY_ROLES == (
+        "top",
+        "keepout",
+        "net",
+        "post_left",
+        "post_right",
+    )
+
+    _close(keepout[0], (NEAR_X, -geom.TABLE_WIDTH / 2.0, 0.0))
+    _close(
+        keepout[1],
+        (
+            NEAR_X + geom.TABLE_LENGTH,
+            geom.TABLE_WIDTH / 2.0,
+            SURFACE_Z - geom.TABLE_THICKNESS,
+        ),
+    )
+    # Boundary contact is allowed, volume overlap is not: the proxy ends exactly where the real
+    # regulation top slab begins.
+    assert keepout[1][2] == top[0][2]
+    assert top[1][2] == SURFACE_Z
+
+    net_center = tf.net_center_env(NEAR_X, SURFACE_Z)
+    net_size = geom.net_size()
+    _close(
+        net[0],
+        tuple(c - s / 2.0 for c, s in zip(net_center, net_size)),
+    )
+    _close(
+        net[1],
+        tuple(c + s / 2.0 for c, s in zip(net_center, net_size)),
+    )
+
+    post_size = tf.net_post_size()
+    for box, is_left in ((left, True), (right, False)):
+        center = tf.net_post_center_env(
+            NEAR_X,
+            SURFACE_Z,
+            left=is_left,
+            post_height=tf.NET_POST_HEIGHT,
+        )
+        _close(
+            box[0],
+            tuple(c - s / 2.0 for c, s in zip(center, post_size)),
+        )
+        _close(
+            box[1],
+            tuple(c + s / 2.0 for c, s in zip(center, post_size)),
+        )
+
+
+def test_full_robot_table_assembly_rejects_invalid_floor_or_margin(frame):
+    _geom, tf = frame
+    with pytest.raises(ValueError, match="floor"):
+        tf.table_assembly_aabbs_env(
+            NEAR_X,
+            SURFACE_Z,
+            keepout_floor_z=SURFACE_Z,
+        )
+    with pytest.raises(ValueError, match="margin"):
+        tf.table_assembly_aabbs_env(
+            NEAR_X,
+            SURFACE_Z,
+            margin=-0.001,
+        )
+    for kwargs in (
+        {"near_x": float("nan")},
+        {"surface_z": float("inf")},
+        {"keepout_floor_z": float("-inf")},
+        {"margin": float("nan")},
+    ):
+        inputs = {"near_x": NEAR_X, "surface_z": SURFACE_Z, **kwargs}
+        with pytest.raises(ValueError, match="finite"):
+            tf.table_assembly_aabbs_env(**inputs)
+
+
 # ------------------------------------------------------- one table across the two simulators -- #
 def test_mujoco_prereg_obstacles_equal_the_isaac_derivation(frame):
     """The MJCF augmentation and the Isaac scene place the same table, to the millimetre.
@@ -156,12 +241,12 @@ def test_mujoco_prereg_obstacles_equal_the_isaac_derivation(frame):
     _close(obs["net"]["center_mjcf_world_m"], tf.net_center_env(NEAR_X, SURFACE_Z))
     _close(obs["net"]["full_extents_m"], geom.net_size())
 
-    post_h = geom.NET_HEIGHT + 0.02
+    post_h = tf.NET_POST_HEIGHT
     posts = {p["name"]: p for p in obs["net_posts"]}
     for name, left in (("motion_net_post_left", True), ("motion_net_post_right", False)):
         _close(posts[name]["center_mjcf_world_m"],
                tf.net_post_center_env(NEAR_X, SURFACE_Z, left=left, post_height=post_h))
-        _close(posts[name]["full_extents_m"], (0.02, 0.02, post_h))
+        _close(posts[name]["full_extents_m"], tf.net_post_size())
 
 
 def test_prereg_still_binds_the_unmodified_geometry_module():

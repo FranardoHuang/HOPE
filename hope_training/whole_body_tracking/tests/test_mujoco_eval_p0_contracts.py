@@ -397,12 +397,21 @@ def test_attempt_flags_never_mark_a_truncation_eligible():
         "censored": True,
         "eligible": False,
         "physical_fall": False,
+        "table_hit": False,
         "guard_reset": False,
     }
     fall = M.attempt_ledger_flags("fall_pre_strike", ("fall_tilt",), scheduled_exam=True)
     assert fall["eligible"] is True and fall["physical_fall"] is True
     guard = M.attempt_ledger_flags("fall_pre_strike", ("anchor_pos",), scheduled_exam=True)
     assert guard["eligible"] is True and guard["guard_reset"] is True
+    table = M.attempt_ledger_flags(
+        "table_hit_pre_strike",
+        ("robot_hit_table", "fall_tilt", "anchor_pos"),
+        scheduled_exam=True,
+    )
+    assert table["table_hit"] is True
+    assert table["physical_fall"] is True
+    assert table["guard_reset"] is False
 
 
 def test_formal_bank_cap_is_proven_from_k_timeout_and_clip_lengths():
@@ -541,6 +550,13 @@ def _install_fake_mujoco(monkeypatch, *, armature=0.01, effort=24.0,
         if step_velocity is not None:
             data.qvel[vadr[0]] = float(step_velocity)
 
+    def object_velocity(_model, data, _kind, _object_id, out, _local):
+        out[:] = 0.0
+        # Deterministic site-velocity witness: the first articulated qvel is sampled before any
+        # diagnostic post-step clip, so tests can prove the direction receipt did not read back
+        # the safer continuation state.
+        out[3] = data.qvel[vadr[0]]
+
     fake = SimpleNamespace(
         MjModel=SimpleNamespace(from_xml_path=lambda _path: model),
         MjData=_Data,
@@ -550,6 +566,7 @@ def _install_fake_mujoco(monkeypatch, *, armature=0.01, effort=24.0,
         mj_name2id=name2id,
         mj_step=step,
         mj_forward=lambda *_args: None,
+        mj_objectVelocity=object_velocity,
     )
     monkeypatch.setitem(sys.modules, "mujoco", fake)
     return joint_names, body_names, model
@@ -776,6 +793,9 @@ def test_mujoco_robot_fails_mismatched_bound_armature_and_active_velocity_limit(
     )
     with pytest.raises(SystemExit, match="reached bound PhysX joint-velocity limit"):
         robot.apply_pd_and_step(np.zeros(31), np.ones(31), np.ones(31), 1)
+    assert robot.last_control_velocity_limit[
+        "post_step_raw_racket_lin_vel_w"
+    ] == pytest.approx([13.0, 0.0, 0.0])
 
 
 def test_explicit_velocity_proxy_continues_and_keeps_other_plant_guards(monkeypatch):
@@ -798,6 +818,10 @@ def test_explicit_velocity_proxy_continues_and_keeps_other_plant_guards(monkeypa
     robot.apply_pd_and_step(np.zeros(31), np.ones(31), np.ones(31), 1)
     assert robot.velocity_limit_hit_count == 1
     assert robot.data.qvel[robot.vadr[0]] == pytest.approx(12.0)
+    assert robot.last_control_velocity_limit[
+        "post_step_raw_racket_lin_vel_w"
+    ] == pytest.approx([13.0, 0.0, 0.0])
+    assert robot.racket_lin_vel_w() == pytest.approx([12.0, 0.0, 0.0])
     assert robot.allow_effort_limit_proxy is False
     assert robot.fail_on_self_contact is True
 

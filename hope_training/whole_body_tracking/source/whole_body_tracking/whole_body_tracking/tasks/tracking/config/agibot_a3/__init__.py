@@ -78,6 +78,20 @@ gym.register(
     },
 )
 
+# HOPE ping-pong WBC — action-conditioned ball-first launch source.  The registered class keeps
+# the native 177-D HITTER prefix and adds the complete VirtualBall/v2 reward lineage.  The exact
+# +4 face tail and +N action identity are appended only by train.py after manifest/order preflight;
+# the task YAML therefore cannot silently choose an action-bank size.
+gym.register(
+    id="HOPE-PingPong-ActionBall-AgibotA3-v0",
+    entry_point="isaaclab.envs:ManagerBasedRLEnv",
+    disable_env_checker=True,
+    kwargs={
+        "env_cfg_entry_point": hope_env_cfg.HOPEPingPongActionBallAgibotA3EnvCfg,
+        "rsl_rl_cfg_entry_point": f"{agents.__name__}.ppo:HOPEAgibotA3PPORunnerCfg",
+    },
+)
+
 # HOPE ping-pong WBC — HITTER-PURE faithful reproduction (2026-07-07, arXiv:2508.21043).
 # Actor = Table I exact (110-D hitter_pure: NO reference stream, NO swing_type, world-frame
 # targets + e_base,x); independent station sampling + station-relative fixed striking plane;

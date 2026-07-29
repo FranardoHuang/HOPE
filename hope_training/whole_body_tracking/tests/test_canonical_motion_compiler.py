@@ -19,6 +19,7 @@ if str(SCRIPTS) not in sys.path:
 
 import canonical_motion_compiler as cmc  # noqa: E402
 import canonical_path_topp as cpt  # noqa: E402
+import canonical_time_law_artifact as time_law_artifact  # noqa: E402
 from canonical_motion_geometry import CanonicalMotionGeometry  # noqa: E402
 from canonical_motion_markers import (  # noqa: E402
     ConstructionMarker,
@@ -51,23 +52,63 @@ def _fake_collocation_trace(
     q: np.ndarray,
     *,
     duration_s: float,
+    path_length: float = 1.0,
     weighted_arc_length_receipt=None,
 ) -> ScalarPathCollocationTrace:
     """Minimal immutable exact-state double for compiler-bound retimers."""
 
-    q_node = np.asarray(q, dtype=np.float64)
-    s_node = np.linspace(0.0, 1.0, len(q_node))
+    tick_q = np.asarray(q, dtype=np.float64)
+    assert tick_q.shape[0] == 16
+    assert duration_s == 0.30
+    path_length = float(path_length)
+    s_node = path_length * np.asarray(
+        [0.0, 1.0 / 3.0, 2.0 / 3.0, 1.0], dtype=np.float64
+    )
     s_mid = 0.5 * (s_node[:-1] + s_node[1:])
+    node_tick = np.asarray([0, 6, 9, 15], dtype=np.int64)
+    q_node = tick_q[node_tick]
     q_mid = 0.5 * (q_node[:-1] + q_node[1:])
     zeros_node = np.zeros_like(q_node)
     zeros_mid = np.zeros_like(q_mid)
-    tick_cell_index = np.clip(
-        np.arange(len(q_node), dtype=np.int64), 0, len(q_node) - 2
+    speed = 5.0 * path_length / (3.0 * duration_s)
+    x_node = np.asarray(
+        [0.0, speed * speed, speed * speed, 0.0], dtype=np.float64
     )
-    tick_cell_side = np.full(len(q_node), "cell_interior", dtype="U32")
+    u_cell = np.diff(x_node) / (2.0 * np.diff(s_node))
+    time_node = np.asarray([0.0, 0.12, 0.18, 0.30], dtype=np.float64)
+    speed_node = np.sqrt(x_node)
+    x_mid = 0.5 * (x_node[:-1] + x_node[1:])
+    time_mid = time_node[:-1] + np.diff(s_node) / (
+        speed_node[:-1] + np.sqrt(x_mid)
+    )
+    tick_time = np.arange(16, dtype=np.float64) / 50.0
+    tick_s = np.empty(16, dtype=np.float64)
+    tick_x = np.empty(16, dtype=np.float64)
+    tick_cell_index = np.empty(16, dtype=np.int64)
+    tick_cell_side = np.full(16, "cell_interior", dtype="U32")
+    for index, time_s in enumerate(tick_time):
+        if time_s <= time_node[1]:
+            cell = 0
+        elif time_s <= time_node[2]:
+            cell = 1
+        else:
+            cell = 2
+        delta_t = time_s - time_node[cell]
+        start_speed = speed_node[cell]
+        tick_s[index] = (
+            s_node[cell]
+            + start_speed * delta_t
+            + 0.5 * u_cell[cell] * delta_t * delta_t
+        )
+        tick_x[index] = (
+            x_node[cell]
+            + 2.0 * u_cell[cell] * (tick_s[index] - s_node[cell])
+        )
+        tick_cell_index[index] = cell
+    tick_s[node_tick] = s_node
+    tick_x[node_tick] = x_node
     tick_cell_side[0] = "right_cell_at_knot"
     tick_cell_side[-1] = "left_cell_at_path_end"
-    tick_time = np.linspace(0.0, duration_s, len(q_node))
     return ScalarPathCollocationTrace(
         s_node=s_node,
         s_mid=s_mid,
@@ -78,19 +119,19 @@ def _fake_collocation_trace(
         q_mid=q_mid,
         q_s_mid=zeros_mid,
         q_ss_mid=zeros_mid,
-        x_node=np.zeros(len(q_node)),
-        u_cell=np.zeros(len(q_node) - 1),
-        time_node_s=tick_time,
-        time_mid_s=0.5 * (tick_time[:-1] + tick_time[1:]),
+        x_node=x_node,
+        u_cell=u_cell,
+        time_node_s=time_node,
+        time_mid_s=time_mid,
         tick_time_s=tick_time,
-        tick_s=s_node,
-        tick_x=np.zeros(len(q_node)),
-        tick_q=q_node,
-        tick_q_s=zeros_node,
-        tick_q_ss=zeros_node,
-        tick_qdot=zeros_node,
-        tick_qdd=zeros_node,
-        tick_scalar_acceleration=np.zeros(len(q_node)),
+        tick_s=tick_s,
+        tick_x=tick_x,
+        tick_q=tick_q,
+        tick_q_s=np.zeros_like(tick_q),
+        tick_q_ss=np.zeros_like(tick_q),
+        tick_qdot=np.zeros_like(tick_q),
+        tick_qdd=np.zeros_like(tick_q),
+        tick_scalar_acceleration=u_cell[tick_cell_index],
         tick_cell_index=tick_cell_index,
         tick_cell_side=tick_cell_side,
         path_progress_contract=(
@@ -211,7 +252,15 @@ def _fast_marker_only_retime(q_path, *args, **kwargs) -> RetimeResult:
     """Cheap retimer double; the dedicated search test checks ranking."""
 
     del args
-    q = np.asarray(q_path, dtype=np.float64)
+    q_input = np.asarray(q_path, dtype=np.float64)
+    source_axis = np.linspace(0.0, 1.0, len(q_input))
+    tick_axis = np.linspace(0.0, 1.0, 16)
+    q = np.column_stack(
+        [
+            np.interp(tick_axis, source_axis, q_input[:, column])
+            for column in range(q_input.shape[1])
+        ]
+    )
     marker_rows = kwargs["markers"]
     progress = np.asarray(kwargs["path_progress"], dtype=np.float64)
     arc = kwargs.get("weighted_arc_path")
@@ -249,8 +298,8 @@ def _fast_marker_only_retime(q_path, *args, **kwargs) -> RetimeResult:
         q=q,
         qdot=np.zeros_like(q),
         path_position=np.arange(len(q), dtype=np.float64),
-        path_speed=np.ones(len(q) - 1, dtype=np.float64),
-        path_acceleration=np.zeros(len(q) - 1, dtype=np.float64),
+        path_speed=np.ones(len(q_input) - 1, dtype=np.float64),
+        path_acceleration=np.zeros(len(q_input) - 1, dtype=np.float64),
         markers=markers,
         report={
             "duration_s": 0.30,
@@ -320,6 +369,7 @@ def _fast_marker_only_retime(q_path, *args, **kwargs) -> RetimeResult:
         collocation_trace=_fake_collocation_trace(
             q,
             duration_s=0.30,
+            path_length=float(progress[-1]),
             weighted_arc_length_receipt=weighted_receipt,
         ),
     )
@@ -747,6 +797,79 @@ def test_compile_builds_exact_five_by_two_direct_ready_candidates(
     )
 
 
+def test_compiler_artifact_preserves_real_style_anchor_before_inside_after_window(
+    tmp_path, monkeypatch
+):
+    recipe = _make_recipe(tmp_path)
+    anchors = {
+        "fh_loop": 6,
+        "bh_loop_c": 3,
+        "bh_block": 4,
+        "s0_highpress": 6,
+    }
+    recipe = replace(
+        recipe,
+        marker_semantics=replace(
+            recipe.marker_semantics,
+            rows=tuple(
+                (
+                    replace(row, nominal_event=anchors[row.motion_id])
+                    if row.motion_id in anchors
+                    else row
+                )
+                for row in recipe.marker_semantics.rows
+            ),
+        ),
+    )
+    monkeypatch.setattr(
+        cmc,
+        "solve_face_flipped_window",
+        lambda source_joint_pos, *args, **kwargs: FakeFaceResult(
+            source_joint_pos, kwargs["frame_indices"]
+        ),
+    )
+    monkeypatch.setattr(cmc, "build_schema2_candidate", _fake_schema2_builder)
+    monkeypatch.setattr(
+        cmc, "build_canonical_geometry", _compiler_plumbing_geometry
+    )
+    monkeypatch.setattr(cmc, "retime_path", _fast_marker_only_retime)
+
+    library = cmc.compile_loaded_canonical_motion_library(
+        recipe,
+        options=_options(),
+        backend=FakePlantBackend(),
+    )
+    upper = {
+        row.motion_id: row
+        for row in library.motions
+        if row.scope == "upper"
+    }
+    marker_s = {
+        motion_id: {
+            name: float(receipt["path_s"])
+            for name, receipt in row.time_law_artifact.manifest[
+                "markers"
+            ].items()
+        }
+        for motion_id, row in upper.items()
+    }
+    assert marker_s["fh_loop"]["source_anchor"] > marker_s["fh_loop"][
+        "window_end"
+    ]
+    assert marker_s["bh_loop_c"]["source_anchor"] < marker_s["bh_loop_c"][
+        "window_start"
+    ]
+    assert (
+        marker_s["bh_block"]["window_start"]
+        <= marker_s["bh_block"]["source_anchor"]
+        <= marker_s["bh_block"]["window_end"]
+    )
+    for row in upper.values():
+        time_law_artifact.validate_time_law_artifact(
+            row.time_law_artifact
+        )
+
+
 def test_search_score_prioritizes_quantized_hit_start_over_cycle_duration(
     tmp_path, monkeypatch
 ):
@@ -1133,9 +1256,55 @@ def test_publish_is_candidate_only_and_no_clobber(
     manifest = json.loads(manifest_bytes)
     assert manifest["build_verdict"] == "PASS_COMPILER_CANDIDATE_ONLY"
     assert manifest["training_authorized"] is False
-    assert len(list(output.glob("*.npz"))) == 10
-    assert len(list(output.glob("*.npz.manifest.json"))) == 10
+    assert len(
+        [
+            path
+            for path in output.glob("*.npz")
+            if not path.name.endswith(".time_law.npz")
+        ]
+    ) == 10
+    assert len(
+        [
+            path
+            for path in output.glob("*.npz.manifest.json")
+            if not path.name.endswith(
+                ".time_law.npz.manifest.json"
+            )
+        ]
+    ) == 10
     assert len(list(output.glob("*.npz.report.json"))) == 10
+    artifacts = sorted(output.glob("*.time_law.npz"))
+    assert len(artifacts) == 10
+    artifact_rows = {
+        row["time_law_artifact"]["npz_filename"]: (
+            row["time_law_artifact"]
+        )
+        for row in manifest["outputs"]
+    }
+    assert all(
+        row["schema_version"] == 2
+        and row["artifact_type"]
+        == "canonical_time_law_collocation_v2"
+        for row in artifact_rows.values()
+    )
+    assert set(artifact_rows) == {path.name for path in artifacts}
+    for path in artifacts:
+        loaded = time_law_artifact.read_time_law_artifact(
+            path,
+            manifest_path=(
+                output
+                / artifact_rows[path.name]["manifest_filename"]
+            ),
+        )
+        assert (
+            loaded.npz_sha256
+            == artifact_rows[path.name]["npz_sha256"]
+        )
+        assert (
+            loaded.manifest_sha256
+            == artifact_rows[path.name]["manifest_sha256"]
+        )
+        assert loaded.arrays["tick_qacc"].flags.writeable is False
 
     with pytest.raises(FileExistsError, match="refusing to overwrite"):
         cmc.write_compiled_canonical_motion_library(library, output)

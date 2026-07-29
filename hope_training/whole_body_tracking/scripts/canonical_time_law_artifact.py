@@ -39,8 +39,8 @@ from typing import Any, Mapping
 import numpy as np
 
 
-ARTIFACT_SCHEMA_VERSION = 1
-ARTIFACT_TYPE = "canonical_time_law_collocation_v1"
+ARTIFACT_SCHEMA_VERSION = 2
+ARTIFACT_TYPE = "canonical_time_law_collocation_v2"
 PUBLICATION_CLASS = "time_law_collocation_candidate"
 BUILD_VERDICT = "PASS_SAMPLED_COLLOCATION_CANDIDATE_ONLY"
 FPS_HZ = 50.0
@@ -267,6 +267,14 @@ _SEMANTICS = {
         "explicit_solver_arrays_only_schema2_finite_difference_forbidden"
     ),
     "path_geometry_evidence": ("producer_receipt_bound_not_independently_recomputed"),
+    "source_anchor_role": (
+        "lineage_and_ranking_reference_may_precede_or_follow_the_protected_"
+        "window_not_contact_truth"
+    ),
+    "protected_window_role": (
+        "window_start_to_window_end_only_controls_contact_observation_and_"
+        "no_early_brake"
+    ),
     "publication_protocol": (
         "npz_first_manifest_receipt_last_orphan_npz_is_incomplete"
     ),
@@ -1093,17 +1101,24 @@ def _marker_and_window_receipts(
         name: _finite_float(marker_path_s[name], f"marker_path_s[{name!r}]")
         for name in MARKER_NAMES
     }
-    ordered_s = [path_positions[name] for name in MARKER_NAMES]
-    if not (
-        float(arrays["s_node"][0])
-        <= ordered_s[0]
-        <= ordered_s[1]
-        <= ordered_s[2]
-        <= float(arrays["s_node"][-1])
-        and ordered_s[0] < ordered_s[2]
-    ):
+    path_start = float(arrays["s_node"][0])
+    path_end = float(arrays["s_node"][-1])
+    outside = [
+        name
+        for name, path_s in path_positions.items()
+        if path_s < path_start or path_s > path_end
+    ]
+    if outside:
         raise TimeLawArtifactError(
-            "window_start/source_anchor/window_end path positions are not ordered"
+            "marker path positions leave the solved path: "
+            f"{sorted(outside)}"
+        )
+    window_start_s = path_positions["window_start"]
+    window_end_s = path_positions["window_end"]
+    if window_start_s > window_end_s:
+        raise TimeLawArtifactError(
+            "protected window endpoints must satisfy "
+            "window_start <= window_end"
         )
 
     tick_count = len(arrays["tick_index"])
@@ -1132,17 +1147,27 @@ def _marker_and_window_receipts(
             "nearest_observation_tick": nearest,
         }
 
-    times = [markers[name]["time_s"] for name in MARKER_NAMES]
-    after_ticks = [markers[name]["at_or_after_tick"] for name in MARKER_NAMES]
-    nearest_ticks = [markers[name]["nearest_observation_tick"] for name in MARKER_NAMES]
+    times = [
+        markers[name]["time_s"]
+        for name in ("window_start", "window_end")
+    ]
+    after_ticks = [
+        markers[name]["at_or_after_tick"]
+        for name in ("window_start", "window_end")
+    ]
+    nearest_ticks = [
+        markers[name]["nearest_observation_tick"]
+        for name in ("window_start", "window_end")
+    ]
     if not (
-        times[0] <= times[1] <= times[2]
-        and after_ticks[0] <= after_ticks[1] <= after_ticks[2]
-        and nearest_ticks[0] <= nearest_ticks[1] <= nearest_ticks[2]
+        times[0] <= times[1]
+        and after_ticks[0] <= after_ticks[1]
+        and nearest_ticks[0] <= nearest_ticks[1]
     ):
-        raise TimeLawArtifactError("marker time/tick mappings are not monotonic")
+        raise TimeLawArtifactError(
+            "protected window time/tick mappings are not monotonic"
+        )
 
-    window_end_s = ordered_s[2]
     # A cell is constrained iff it owns any positive-width left-time interval
     # before exact window_end.  A cell beginning exactly at window_end may
     # brake; an exact-node tick belongs to that right-side cell.
@@ -1167,8 +1192,8 @@ def _marker_and_window_receipts(
     if inclusive_start < 0 or inclusive_end >= tick_count:
         raise TimeLawArtifactError("contact window tick interval leaves the artifact")
     window = {
-        "window_start_s": ordered_s[0],
-        "window_end_s": ordered_s[2],
+        "window_start_s": window_start_s,
+        "window_end_s": window_end_s,
         "no_early_brake_from_path_start_through_window_end": True,
         "positive_overlap_cell_indices": overlap.astype(int).tolist(),
         "inclusive_tick_start": inclusive_start,

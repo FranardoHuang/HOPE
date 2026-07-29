@@ -18,8 +18,9 @@ so::
 This module is the ONLY place that translation is written down.  ``geometry.py`` stays the single
 source of truth for the table's DIMENSIONS and is deliberately not edited (it is sha256-pinned by
 ``configs/motion_backhand_loop_b_table_net_clearance_prereg_20260715.json`` as the bound frame
-source of the MuJoCo table/net audit); this module is a pure consumer of it and adds no constant
-of its own.
+source of the MuJoCo table/net audit).  The regulation table/net dimensions remain there.  This
+adapter additionally owns only the already-preregistered conservative post-proxy width/height so
+host-only safety kernels and Isaac builders do not duplicate those two proxy values.
 
 Consumers: ``hope_env_cfg.attach_table_obstacle`` (the task obstacle, default ON),
 ``attach_shadow_ball_scene`` / ``attach_physical_ball_scene`` (the two metrics-only truth
@@ -34,7 +35,22 @@ Pure Python — no Isaac, no torch — so it is importable and testable on a bar
 
 from __future__ import annotations
 
+import math
+
 from whole_body_tracking.tasks.table_tennis import geometry
+
+# Explicit post proxy already used by the frozen MuJoCo clearance preregistration.  Keep it in this
+# pure shared frame module so Isaac scene construction and host-only safety kernels consume the
+# same dimensions without importing Isaac Lab.
+NET_POST_WIDTH: float = 0.02
+NET_POST_HEIGHT: float = geometry.NET_HEIGHT + 0.02
+TABLE_ASSEMBLY_ROLES: tuple[str, ...] = (
+    "top",
+    "keepout",
+    "net",
+    "post_left",
+    "post_right",
+)
 
 
 def env_frame_offset(near_x: float, surface_z: float) -> tuple[float, float, float]:
@@ -82,14 +98,83 @@ def net_post_center_env(
     """Centre of one net post in the tracking env frame.
 
     The post straddles the net line at ``|y| = TABLE_WIDTH/2 + NET_OVERHANG`` and stands from the
-    table surface up through ``post_height``.  Only the MJCF audit uses posts today; the Isaac
-    scenes spawn no post collider (they are visual-only there).
+    table surface up through ``post_height``.
     """
     y = geometry.TABLE_WIDTH / 2.0 + geometry.NET_OVERHANG
     return (
         float(near_x) + geometry.NET_X,
         y if left else -y,
         float(surface_z) + float(post_height) / 2.0,
+    )
+
+
+def net_post_size() -> tuple[float, float, float]:
+    """Full extents of the shared conservative net-post collision proxy."""
+
+    return (NET_POST_WIDTH, NET_POST_WIDTH, NET_POST_HEIGHT)
+
+
+def table_assembly_aabbs_env(
+    near_x: float,
+    surface_z: float,
+    *,
+    keepout_floor_z: float = 0.0,
+    margin: float = 0.0,
+) -> tuple[
+    tuple[tuple[float, float, float], tuple[float, float, float]], ...
+]:
+    """AABBs for the conservative robot keep-out, top, net and two posts.
+
+    Box order is :data:`TABLE_ASSEMBLY_ROLES`: real top, under-table keep-out, regulation net,
+    then left/right post proxies.  The keep-out fills only the volume below the regulation top
+    slab, from ``keepout_floor_z`` to its underside; it is a robot-safety proxy, not a model of
+    individual leg geometry.
+    """
+
+    near = float(near_x)
+    floor_z = float(keepout_floor_z)
+    surface = float(surface_z)
+    m = float(margin)
+    if not all(math.isfinite(value) for value in (near, floor_z, surface, m)):
+        raise ValueError("table assembly coordinates and margin must be finite")
+    underside = surface - geometry.TABLE_THICKNESS
+    if not floor_z < underside:
+        raise ValueError(
+            "table assembly keep-out floor must be below the top-slab underside"
+        )
+    if m < 0.0:
+        raise ValueError("table assembly AABB margin must be non-negative")
+
+    table_c = table_top_center_env(near, surface)
+    table_s = geometry.table_top_size()
+    net_c = net_center_env(near, surface)
+    net_s = geometry.net_size()
+    post_s = net_post_size()
+    post_centers = (
+        net_post_center_env(
+            near, surface, left=True, post_height=NET_POST_HEIGHT
+        ),
+        net_post_center_env(
+            near, surface, left=False, post_height=NET_POST_HEIGHT
+        ),
+    )
+
+    def bounds(
+        center: tuple[float, float, float],
+        size: tuple[float, float, float],
+    ) -> tuple[tuple[float, float, float], tuple[float, float, float]]:
+        return (
+            tuple(float(c) - float(s) / 2.0 - m for c, s in zip(center, size)),
+            tuple(float(c) + float(s) / 2.0 + m for c, s in zip(center, size)),
+        )
+
+    keepout_center = (table_c[0], table_c[1], (floor_z + underside) / 2.0)
+    keepout_size = (table_s[0], table_s[1], underside - floor_z)
+    return (
+        bounds(table_c, table_s),
+        bounds(keepout_center, keepout_size),
+        bounds(net_c, net_s),
+        *(bounds(center, post_s) for center in post_centers),
     )
 
 

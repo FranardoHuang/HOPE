@@ -924,6 +924,79 @@ def test_virtual_ball_yaml_pins_outcome_dominant_effective_weights():
     assert env_cfg.rewards.foot_orientation.weight == pytest.approx(0.0)
 
 
+@pytest.mark.parametrize(
+    "raw, expected",
+    [
+        (False, False),
+        (0, False),
+        ("false", False),
+        ("0", False),
+        ("no", False),
+        (True, True),
+        (1, True),
+        ("true", True),
+        ("1", True),
+        ("yes", True),
+    ],
+)
+def test_action_ball_boolean_overrides_require_explicit_values(
+    raw,
+    expected,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        train_mod,
+        "_assert_physical_validity_guards_present",
+        lambda cfg: None,
+    )
+    env_cfg = _make_env_cfg()
+    env_cfg.commands.racket_target.action_ball_diagnostic_unauthorized = (
+        not expected
+    )
+    env_cfg.commands.racket_target.virtual_ball = not expected
+
+    env_cfg, _ = _apply(
+        {
+            "racket": {
+                "action_ball_diagnostic_unauthorized": raw,
+                "virtual_ball": raw,
+            }
+        },
+        env_cfg,
+    )
+
+    assert (
+        env_cfg.commands.racket_target.action_ball_diagnostic_unauthorized
+        is expected
+    )
+    assert env_cfg.commands.racket_target.virtual_ball is expected
+
+
+@pytest.mark.parametrize("raw", ["", "treu", "off", 2])
+def test_action_ball_boolean_overrides_reject_ambiguous_values(
+    raw,
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        train_mod,
+        "_assert_physical_validity_guards_present",
+        lambda cfg: None,
+    )
+    env_cfg = _make_env_cfg()
+    env_cfg.commands.racket_target.action_ball_diagnostic_unauthorized = False
+    env_cfg.commands.racket_target.virtual_ball = False
+    with pytest.raises(train_mod._OverrideError, match="explicit boolean"):
+        _apply(
+            {
+                "racket": {
+                    "action_ball_diagnostic_unauthorized": raw,
+                    "virtual_ball": False,
+                }
+            },
+            env_cfg,
+        )
+
+
 # --------------------------------------------------------------------------------------------- #
 # base-decel weight-independent RewardManager-stage activation probe
 # --------------------------------------------------------------------------------------------- #
@@ -1786,7 +1859,7 @@ _PACK_V2_WEIGHTS = {
     "action_rate_l2": 0.0,
     "action_rate_clamped": -0.2,
     "action_acc_l2": -0.05,
-    "death_penalty": -1800.0,
+    "death_penalty": -3600.0,
 }
 
 _PACK_DEFAULTED_MARKER = (
@@ -1976,9 +2049,10 @@ def test_reward_pack_v2_expands_every_blueprint_mutation_with_markers():
     # racket 侧:拍面 sigma 第三通道开,搭在显式 adaptive_sigma=true 上
     assert env_cfg.commands.racket_target.adaptive_sigma_normal is False  # 07-26 退役:包不动 sigma
     assert env_cfg.commands.racket_target.adaptive_sigma is True
-    # 每条包改动的 applied 标记都带 reward_pack=v2:1 总标记 + 10 键控注入 + 10 direct + 1 racket
+    # 每条包改动的 applied 标记都带 reward_pack=v2；optional table 缺席也必须留下
+    # 一条 skipped receipt，所以当前 fake lineage 共 33 条。
     pack_markers = [m for m in applied if "reward_pack=v2" in m]
-    assert len(pack_markers) == 32  # 07-26:-sigma +stand/post_swing +foot_soft_landing 补漏
+    assert len(pack_markers) == 33
     # 键控注入的项同时会有覆写层自己的标准记账(证明真走了现有翻译层)
     assert "rewards.hold_ready.weight=0.0" in applied
     assert "rewards.foot_slip_sq.weight=-0.1" in applied
@@ -1989,14 +2063,36 @@ def test_reward_pack_v2_expands_every_blueprint_mutation_with_markers():
     # direct 项的标记逐条在
     assert "rewards.hit_unstable_support.weight=-10.0 (reward_pack=v2)" in applied
     assert "rewards.upright_exp.weight=1.0 (reward_pack=v2)" in applied
+    assert "rewards.death_penalty.weight=-3600.0 (reward_pack=v2)" in applied
     assert "rewards.racket_strike_success.weight=0.0 (reward_pack=v2)" in applied
     assert "rewards.virtual_pass_net.weight=0.0 (reward_pack=v2)" in applied
     assert "rewards.virtual_spin.weight=0.0 (reward_pack=v2)" in applied
+    assert (
+        "rewards.table_hit_penalty ABSENT -> skipped (reward_pack=v2 optional)"
+        in applied
+    )
     assert any("virtual_landing.params" in m and "legal_base" in m for m in applied)
     assert "motion.stand_start_prob=1.0 (reward_pack=v2 stand starts)" in applied
     assert not any("adaptive_sigma" in m and "reward_pack" in m for m in applied)  # 07-26 退役:包署名的 sigma 标记不复存在(用户显式 racket 键的翻译标记不在此列)
     # 显式 v2(非默认)绝不带 defaulted 标记
     assert _PACK_DEFAULTED_MARKER not in applied
+
+
+def test_reward_pack_v2_uses_one_generic_catastrophe_price_when_table_term_exists():
+    env_cfg = _make_env_cfg()
+    env_cfg.rewards.table_hit_penalty = _Term(weight=-1800.0)
+
+    env_cfg, applied = _apply_default(
+        {"rewards": {"reward_pack": "v2"}},
+        env_cfg,
+    )
+
+    assert env_cfg.rewards.death_penalty.weight == pytest.approx(-3600.0)
+    assert env_cfg.rewards.table_hit_penalty.weight == pytest.approx(0.0)
+    assert (
+        "rewards.table_hit_penalty.weight=0.0 (reward_pack=v2 optional)"
+        in applied
+    )
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -2077,9 +2173,9 @@ def test_reward_pack_strict_default_off_keeps_default_boot_byte_identical():
 
 
 def test_every_task_yaml_declares_the_quality_keys_so_the_pack_is_dead_code_there():
-    # 这条测试就是缺陷本身的存档:七个 task yaml 全都显式写了这三键,所以包里的冻结
-    # 质量表在【任何】task 上都是死码。哪天有人把某个 yaml 的键删干净了,这里会失败,
-    # 那正是要人来复核"这条谱系现在真的跑冻结表了吗"的时刻。
+    # 这条测试保留旧七个 task 的缺陷存档:它们全都显式写了三键,所以包里的冻结质量表
+    # 在那些谱系上仍是死码。ActionBall 现在有意采用已验证的 Tier-1 低 tracking:
+    # pack 仍供应 v2 outcome/safety，其显式 4/0.5/0.5 按真实翻译顺序后写后赢。
     import glob
     import re
 
@@ -2089,7 +2185,247 @@ def test_every_task_yaml_declares_the_quality_keys_so_the_pack_is_dead_code_ther
         if re.search(r"^\s*racket_position_weight\s*:", text, re.M):
             declaring.append(os.path.basename(path))
     assert "HOPEPingPongVirtualBall.yaml" in declaring
-    assert len(declaring) == 7, declaring
+    action_ball = "HOPEPingPongActionBall.yaml"
+    assert action_ball in declaring
+    assert len([name for name in declaring if name != action_ball]) == 7, declaring
+
+    import yaml
+
+    with open(os.path.join(CFG_TASK_DIR, action_ball), encoding="utf-8") as fh:
+        action_ball_rewards = yaml.safe_load(fh)["rewards"]
+    assert action_ball_rewards["reward_pack"] == "v2"
+    assert action_ball_rewards["reward_pack_strict"] is False
+    assert {
+        key: float(action_ball_rewards[key])
+        for key in (
+            "racket_position_weight",
+            "racket_velocity_weight",
+            "racket_normal_weight",
+        )
+    } == {
+        "racket_position_weight": 4.0,
+        "racket_velocity_weight": 0.5,
+        "racket_normal_weight": 0.5,
+    }
+
+
+def test_action_ball_adopted_rewards_win_after_real_v2_pack_expansion():
+    """Exercise the actual pack-first, explicit-task-values-last translation order."""
+
+    import hydra
+    from omegaconf import OmegaConf
+
+    cfg_dir = os.path.abspath(os.path.join(HERE, "..", "cfg"))
+    with hydra.initialize_config_dir(version_base=None, config_dir=cfg_dir):
+        composed = hydra.compose(
+            config_name="train",
+            overrides=["task=HOPEPingPongActionBall"],
+        ).task
+    rewards_node = OmegaConf.to_container(composed.rewards, resolve=True)
+
+    env_cfg = _make_env_cfg()
+    # Add the Hitter/ActionBall-only reward terms to the dependency-light DeployParity fake.
+    env_cfg.rewards.base_position = _Term(weight=1.0, params={"std": 0.3})
+    env_cfg.rewards.joint_limit = _Term(weight=-40.0)
+    env_cfg.rewards.undesired_contacts = _Term(weight=-0.1)
+    env_cfg.rewards.pre_strike_foot_slip = _Term(weight=-0.2)
+    env_cfg.rewards.arm_torque_saturation = _Term(weight=-0.5)
+    env_cfg.rewards.table_hit_penalty = _Term(weight=-1800.0)
+    env_cfg.rewards.qdes_limit_barrier = _Term(
+        weight=0.0,
+        params={
+            "action_name": "joint_pos",
+            "margin_frac": 0.08,
+            "penalty_floor": 0.25,
+        },
+    )
+    env_cfg.rewards.qdes_limit_barrier_probe = _Term(
+        weight=0.0,
+        params={
+            "action_name": "joint_pos",
+            "margin_frac": 0.08,
+            "penalty_floor": 0.25,
+        },
+    )
+
+    applied = train_mod._apply_task_overrides(
+        env_cfg,
+        {"rewards": rewards_node},
+        clip_name=None,
+    )
+    R = env_cfg.rewards
+    assert {
+        "racket_position": R.racket_position.weight,
+        "racket_velocity": R.racket_velocity.weight,
+        "racket_normal": R.racket_normal.weight,
+        "virtual_landing": R.virtual_landing.weight,
+        "death_penalty": R.death_penalty.weight,
+        "table_hit_penalty": R.table_hit_penalty.weight,
+        "qdes_limit_barrier": R.qdes_limit_barrier.weight,
+        "joint_limit": R.joint_limit.weight,
+    } == pytest.approx(
+        {
+            "racket_position": 4.0,
+            "racket_velocity": 0.5,
+            "racket_normal": 0.5,
+            "virtual_landing": 1648.8,
+            "death_penalty": -3600.0,
+            "table_hit_penalty": 0.0,
+            "qdes_limit_barrier": -40.0,
+            "joint_limit": -40.0,
+        }
+    )
+    assert R.racket_position.params["std"] == pytest.approx(0.075)
+    assert R.racket_velocity.params["std"] == pytest.approx(0.5)
+    assert R.racket_normal.params["std"] == pytest.approx(0.262)
+    assert R.qdes_limit_barrier.params["margin_frac"] == pytest.approx(0.08)
+    assert R.qdes_limit_barrier_probe.weight == pytest.approx(1.0)
+
+    # Prove these were explicit low-dose winners, not the calibrated high table.
+    for key, low, frozen in (
+        ("racket_position", 4.0, 393.4),
+        ("racket_velocity", 0.5, 295.1),
+        ("racket_normal", 0.5, 229.5),
+    ):
+        marker = next(
+            item
+            for item in applied
+            if item.startswith(f"rewards.{key}_weight=")
+            and "FROZEN" in item
+        )
+        assert repr(low) in marker
+        assert repr(frozen) in marker
+
+
+def _soft_limit_v2_contract_fixture(monkeypatch):
+    def qdes_limit_barrier_v2():
+        pass
+
+    def qdes_limit_barrier_v2_probe():
+        pass
+
+    def actual_joint_limit_barrier_v2():
+        pass
+
+    def actual_joint_limit_barrier_v2_probe():
+        pass
+
+    callables = {
+        func.__name__: func
+        for func in (
+            qdes_limit_barrier_v2,
+            qdes_limit_barrier_v2_probe,
+            actual_joint_limit_barrier_v2,
+            actual_joint_limit_barrier_v2_probe,
+        )
+    }
+    monkeypatch.setattr(
+        train_mod,
+        "_authoritative_mdp_reward_callable",
+        callables.__getitem__,
+    )
+    shared = {"margin_frac": 0.08, "penalty_floor": 0.25}
+    asset_cfg = _NS(name="robot", joint_ids=slice(None))
+    rewards = _NS(
+        qdes_limit_barrier=_Term(
+            weight=-40.0,
+            func=qdes_limit_barrier_v2,
+            params={"action_name": "joint_pos", **shared},
+        ),
+        qdes_limit_barrier_probe=_Term(
+            weight=1.0,
+            func=qdes_limit_barrier_v2_probe,
+            params={"action_name": "joint_pos", **shared},
+        ),
+        joint_limit=_Term(
+            weight=-40.0,
+            func=actual_joint_limit_barrier_v2,
+            params={
+                "asset_cfg": asset_cfg,
+                **shared,
+                "expected_joint_count": 31,
+            },
+        ),
+        actual_joint_limit_barrier_probe=_Term(
+            weight=1.0,
+            func=actual_joint_limit_barrier_v2_probe,
+            params={
+                "asset_cfg": asset_cfg,
+                **shared,
+                "expected_joint_count": 31,
+            },
+        ),
+    )
+    facts = {
+        "joint_names": [f"j{i}" for i in range(31)],
+        "articulation_joint_names": [f"j{i}" for i in range(31)],
+        "qdes_joint_pos_limits": [[-1.0, 1.0] for _ in range(31)],
+    }
+    return _NS(rewards=rewards), facts, callables
+
+
+def test_soft_limit_v2_training_contract_binds_real_callables_and_two_channels(
+    monkeypatch,
+):
+    cfg, facts, _ = _soft_limit_v2_contract_fixture(monkeypatch)
+    qdes = train_mod._qdes_limit_barrier_reward_contract(cfg, facts)
+    actual = train_mod._actual_joint_limit_barrier_reward_contract(
+        cfg, facts, qdes_contract=qdes
+    )
+    assert qdes["schema_version"] == actual["schema_version"] == 2
+    assert qdes["term_callable"].endswith(".qdes_limit_barrier_v2")
+    assert qdes["probe_callable"].endswith(".qdes_limit_barrier_v2_probe")
+    assert actual["term_callable"].endswith(".actual_joint_limit_barrier_v2")
+    assert actual["probe_callable"].endswith(
+        ".actual_joint_limit_barrier_v2_probe"
+    )
+    for key, expected in (
+        ("weight", -40.0),
+        ("margin_frac", 0.08),
+        ("penalty_floor", 0.25),
+        ("shape_rate", 4.0),
+        ("stance_eps", 0.005),
+        ("margin_floor", 0.005),
+        ("per_joint_cap", 1.0),
+    ):
+        assert qdes[key] == pytest.approx(expected)
+        assert actual[key] == pytest.approx(expected)
+    assert qdes["aggregation"] == actual["aggregation"] == "sum_all_31_joints"
+    assert qdes["gate"] == actual["gate"] == "dense_every_control_step"
+
+
+def test_soft_limit_v2_contract_rejects_callable_floor_and_channel_drift(
+    monkeypatch,
+):
+    cfg, facts, callables = _soft_limit_v2_contract_fixture(monkeypatch)
+    cfg.rewards.qdes_limit_barrier_probe.func = callables[
+        "actual_joint_limit_barrier_v2_probe"
+    ]
+    with pytest.raises(RuntimeError, match="authoritative callable"):
+        train_mod._qdes_limit_barrier_reward_contract(cfg, facts)
+
+    cfg, facts, _ = _soft_limit_v2_contract_fixture(monkeypatch)
+    cfg.rewards.qdes_limit_barrier.params.pop("penalty_floor")
+    cfg.rewards.qdes_limit_barrier_probe.params.pop("penalty_floor")
+    with pytest.raises(RuntimeError, match="penalty_floor"):
+        train_mod._qdes_limit_barrier_reward_contract(cfg, facts)
+
+    cfg, facts, _ = _soft_limit_v2_contract_fixture(monkeypatch)
+    qdes = train_mod._qdes_limit_barrier_reward_contract(cfg, facts)
+    cfg.rewards.joint_limit.weight = -20.0
+    with pytest.raises(RuntimeError, match="weight must match"):
+        train_mod._actual_joint_limit_barrier_reward_contract(
+            cfg, facts, qdes_contract=qdes
+        )
+
+    cfg, facts, _ = _soft_limit_v2_contract_fixture(monkeypatch)
+    qdes = train_mod._qdes_limit_barrier_reward_contract(cfg, facts)
+    cfg.rewards.joint_limit.params["margin_frac"] = 0.1
+    cfg.rewards.actual_joint_limit_barrier_probe.params["margin_frac"] = 0.1
+    with pytest.raises(RuntimeError, match="margin_frac must match"):
+        train_mod._actual_joint_limit_barrier_reward_contract(
+            cfg, facts, qdes_contract=qdes
+        )
 
 
 def test_reward_pack_v2_works_on_omegaconf_nodes():

@@ -43,6 +43,13 @@ Current ignored local asset roots:
 - `external_repos/IsaacLab/` when a local Isaac Lab source checkout is used for the training environment; record the tag/commit in the relevant gate doc.
 - `hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/assets/agibot_a3/` and other package-local copied/generated training assets; keep only the tiny `assets/__init__.py` path-helper and local `.gitignore` tracked so `whole_body_tracking.assets.ASSET_DIR` remains importable after a fresh clone.
 
+`vendor_assets/` 本身必须是每个 checkout 内新建的真实目录：不得把这个根作为普通文件、
+Git blob、绝对 symlink、指回 checkout 自身的 symlink，或指向另一个正在运行的 checkout。
+只允许按下文和
+[`setup_local_sync.md`](operations/setup_local_sync.md)
+把明确的内容寻址子树恢复进来。这样 fresh checkout 的 Git 状态与 ignored 资产彼此独立，
+训练前也能分别证明 source clean 和 local asset bytes 一致。
+
 ## User-Recorded Motion Videos
 
 Raw user-recorded motion videos are private, local-only inputs. Do not commit
@@ -155,6 +162,18 @@ If a local-only asset is required to reproduce a result:
 4. Never rely on a private chat message as the only description of the asset.
 
 A fresh clone is not complete for deployment or training-result reproduction until the required ignored assets have been manually restored or linked from the agreed external artifact system.
+
+恢复完成后至少验证：
+
+```bash
+test -d vendor_assets
+test ! -L vendor_assets
+git check-ignore -q vendor_assets
+test -z "$(git status --porcelain --untracked-files=no)"
+```
+
+最后一行只证明 tracked source 没被恢复动作污染；每个具体 Gate 仍须重算所消费子树的
+逐文件 SHA/receipt，不能把“被 Git ignore”当成内容证明。
 
 For TTRL-only reference work, a fresh clone becomes current after `scripts/sync_external_repos.sh`; reproducible extracted work still needs the source commit recorded.
 

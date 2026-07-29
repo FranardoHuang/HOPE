@@ -53,6 +53,13 @@ question-bank incoming ball PHYSICALLY:
   cross-ruler ``pb_virt_phys_gap_m`` = |physical return landing - the analytic vb landing
   prediction latched for the SAME strike| (virtual channel vs engine channel divergence — the
   instrument's whole point).
+* COUNTER-RALLY FROZEN TRUTH (evaluator opt-in only) — an external attempt explicitly armed with
+  ``require_counter_rally=True`` continues observing the ENGINE trajectory after the first legal
+  opponent-side bounce and interpolates the subsequent +x opponent-baseline crossing, including
+  crossing y/z, complete world velocity, horizontal direction, and speed.  NaN/Inf and a motion
+  clip that cuts off a still-live trajectory are unavailable instrument failures; net, table-side,
+  and terminal baseline-miss outcomes remain distinct available negatives.  Ordinary Phase-B
+  training/exams do not arm this lane and pay no per-substep baseline-tracking work.
 * ROBOT PASS-THROUGH — the ball's collider is DISABLED (``collision_enabled=False``), which
   filters ball<->robot AND ball<->table PhysX contacts in one switch. This is deliberate:
   (a) the racket contact is CODE-DRIVEN even in Phase B (the fitted venue paddle model — a PhysX
@@ -195,11 +202,17 @@ RACKET_CONTACT_RADIUS = 0.075
 # per-substep discretization of a grazing approach. The sign-crossing branch (not this pad) is
 # the anti-tunnel guarantee for fast normal closings.
 BLADE_CONTACT_PAD = 0.005
+# Exact string for the evaluator-side counter-rally receipt.  Kept separate from the ordinary
+# Phase-B capability so old scorecards and validators retain their frozen contract.
+COUNTER_RALLY_PHYSICAL_TRUTH_CAPABILITY = (
+    "physical_first_opponent_bounce_and_baseline_state_v1"
+)
 
 _MODE_PARKED = 0   # waiting for the question / for tts to enter the serve horizon
 _MODE_INBOUND = 1  # launched; PhysX + aero wrench own the flight; strike frame not yet reached
 _MODE_POST = 2     # past the strike frame with no impulse applied; flying until landing/kill
 _MODE_RETURN = 3   # Phase B: racket impulse applied; return flight until landing/kill
+_MODE_FAILED = 4   # non-finite engine state; parked at control rate, never silently re-served
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -454,6 +467,112 @@ def blade_disc_contact(
     return within & ((slab & approaching) | crossed), d_n
 
 
+def selected_face_disc_contact(
+    ball_pos: torch.Tensor,
+    ball_vel: torch.Tensor,
+    face_center_pos: torch.Tensor,
+    face_center_vel: torch.Tensor,
+    selected_face_normal: torch.Tensor,
+    prev_ball_pos: torch.Tensor,
+    prev_face_center_pos: torch.Tensor,
+    prev_selected_face_normal: torch.Tensor,
+    prev_valid: torch.Tensor,
+    racket_radius: float = RACKET_CONTACT_RADIUS,
+    ball_radius: float = 0.02,
+    pad: float = BLADE_CONTACT_PAD,
+) -> tuple[torch.Tensor, torch.Tensor]:
+    """One-sided exact selected-face contact for ActionBall v2.
+
+    Unlike :func:`blade_disc_contact`, this contract does not treat both
+    rubber faces as an interchangeable zero-thickness plane.  ``face_center``
+    is the centre of the selected rubber surface, and contact occurs when the
+    ball centre reaches ``face_center + ball_radius * selected_normal``.
+    The returned scalar is the signed gap to that tangent plane.  Only an
+    inward crossing from the selected side can trigger the anti-tunnel path;
+    a strike through the opposite rubber is never silently reoriented into a
+    valid ActionBall hit.
+
+    The crossing branch evaluates the ball/face relative segment at the
+    interpolated tangent-plane crossing.  Testing only the current tangential
+    radius is wrong twice: a fast ball can cross inside the disc and finish
+    outside (false negative), or cross outside and finish inside (false
+    positive).  Previous ball, selected-face centre and selected-face normal
+    are therefore mandatory parts of this helper's contract, even when
+    ``prev_valid`` is false for every row.
+    """
+
+    n_hat = selected_face_normal / (
+        torch.linalg.norm(selected_face_normal, dim=-1, keepdim=True) + 1e-9
+    )
+    d = ball_pos - face_center_pos
+    d_n = torch.sum(d * n_hat, dim=-1)
+    surface_gap = d_n - float(ball_radius)
+    d_t = torch.linalg.norm(d - d_n.unsqueeze(-1) * n_hat, dim=-1)
+    within_current = d_t <= float(racket_radius)
+    slab = surface_gap.abs() <= float(pad)
+    approaching = torch.sum(
+        (ball_vel - face_center_vel) * n_hat, dim=-1
+    ) < 0.0
+
+    prev_n_hat = prev_selected_face_normal / (
+        torch.linalg.norm(
+            prev_selected_face_normal, dim=-1, keepdim=True
+        )
+        + 1e-9
+    )
+    prev_d = prev_ball_pos - prev_face_center_pos
+    prev_d_n = torch.sum(prev_d * prev_n_hat, dim=-1)
+    prev_surface_gap = prev_d_n - float(ball_radius)
+    crossed = (
+        prev_valid
+        & (prev_surface_gap > 0.0)
+        & (surface_gap <= 0.0)
+    )
+
+    denominator = prev_surface_gap - surface_gap
+    safe_denominator = torch.where(
+        denominator.abs() > 1e-9,
+        denominator,
+        torch.ones_like(denominator),
+    )
+    crossing_fraction = (
+        prev_surface_gap / safe_denominator
+    ).clamp(0.0, 1.0)
+    fraction = crossing_fraction.unsqueeze(-1)
+    ball_at_crossing = (
+        prev_ball_pos + (ball_pos - prev_ball_pos) * fraction
+    )
+    face_at_crossing = (
+        prev_face_center_pos
+        + (face_center_pos - prev_face_center_pos) * fraction
+    )
+    normal_at_crossing = (
+        prev_n_hat + (n_hat - prev_n_hat) * fraction
+    )
+    normal_at_crossing = normal_at_crossing / (
+        torch.linalg.norm(
+            normal_at_crossing, dim=-1, keepdim=True
+        )
+        + 1e-9
+    )
+    crossing_delta = ball_at_crossing - face_at_crossing
+    crossing_normal_distance = torch.sum(
+        crossing_delta * normal_at_crossing, dim=-1
+    )
+    crossing_tangent_distance = torch.linalg.norm(
+        crossing_delta
+        - crossing_normal_distance.unsqueeze(-1)
+        * normal_at_crossing,
+        dim=-1,
+    )
+    within_crossing = crossing_tangent_distance <= float(racket_radius)
+    return (
+        (within_current & slab & approaching)
+        | (crossed & within_crossing),
+        surface_gap,
+    )
+
+
 def net_plane_crossing(
     prev_pos: torch.Tensor, new_pos: torch.Tensor, net_x: float
 ) -> tuple[torch.Tensor, torch.Tensor]:
@@ -468,6 +587,65 @@ def net_plane_crossing(
     f = ((float(net_x) - prev_pos[:, 0]) / denom).clamp(0.0, 1.0)
     z_at = prev_pos[:, 2] + (new_pos[:, 2] - prev_pos[:, 2]) * f
     return crossed, z_at
+
+
+def opponent_baseline_crossing(
+    prev_pos: torch.Tensor,
+    new_pos: torch.Tensor,
+    prev_velocity: torch.Tensor,
+    new_velocity: torch.Tensor,
+    baseline_x: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor, torch.Tensor]:
+    """Interpolate a finite +x crossing of the opponent baseline.
+
+    This is deliberately a trajectory extractor, not a counter-rally scorer.  The caller must
+    additionally require a prior legal opponent-side first bounce.  Positions are env-local;
+    velocities are world-frame (the tracking env origins are translations only).  Returning the
+    complete crossing velocity lets the frozen evaluator independently check both the horizontal
+    reverse direction and the full 3-D speed instead of trusting an analytic fitted-teacher
+    boolean.
+
+    Returns ``(crossed, yz_at_crossing, velocity_at_crossing, fraction)``.  Non-finite rows,
+    zero/backward x segments, and rows that start at/after the baseline fail closed with
+    ``crossed=False``; their numeric outputs are zero and must not be consumed.
+    """
+
+    if (
+        prev_pos.ndim != 2
+        or prev_pos.shape[-1] != 3
+        or new_pos.shape != prev_pos.shape
+        or prev_velocity.shape != prev_pos.shape
+        or new_velocity.shape != prev_pos.shape
+    ):
+        raise ValueError("baseline crossing inputs must all have shape [N,3]")
+    finite = (
+        torch.isfinite(prev_pos).all(dim=-1)
+        & torch.isfinite(new_pos).all(dim=-1)
+        & torch.isfinite(prev_velocity).all(dim=-1)
+        & torch.isfinite(new_velocity).all(dim=-1)
+    )
+    dx = new_pos[:, 0] - prev_pos[:, 0]
+    crossed = (
+        finite
+        & (dx > 1.0e-12)
+        & (prev_pos[:, 0] < float(baseline_x))
+        & (new_pos[:, 0] >= float(baseline_x))
+    )
+    safe_dx = torch.where(dx.abs() > 1.0e-12, dx, torch.ones_like(dx))
+    fraction = ((float(baseline_x) - prev_pos[:, 0]) / safe_dx).clamp(0.0, 1.0)
+    fraction = torch.where(crossed, fraction, torch.zeros_like(fraction))
+    f = fraction.unsqueeze(-1)
+    pos_at = prev_pos + (new_pos - prev_pos) * f
+    vel_at = prev_velocity + (new_velocity - prev_velocity) * f
+    yz_at = pos_at[:, 1:]
+    zeros_yz = torch.zeros_like(yz_at)
+    zeros_vel = torch.zeros_like(vel_at)
+    return (
+        crossed,
+        torch.where(crossed.unsqueeze(-1), yz_at, zeros_yz),
+        torch.where(crossed.unsqueeze(-1), vel_at, zeros_vel),
+        fraction,
+    )
 
 
 def substepped_aero_force(
@@ -567,6 +745,30 @@ class PhysicalBallManager:
 
         self._prm = _vb.load_venue_params()
         self._tp = load_venue_table_params(self._prm.source_path)
+        self._exact_face_ball_radius = None
+        if bool(getattr(command, "_action_ball_enabled", False)):
+            try:
+                from . import racket_contact_geometry as _contact_geometry
+            except ImportError:
+                import racket_contact_geometry as _contact_geometry
+
+            geometry_radius = float(_contact_geometry.BALL_RADIUS_M)
+            physics_radius = float(self._prm.ball_radius)
+            if not math.isclose(
+                physics_radius,
+                geometry_radius,
+                rel_tol=0.0,
+                abs_tol=5.0e-10,
+            ):
+                raise ValueError(
+                    "ActionBall exact-face geometry ball radius differs "
+                    "from the pinned venue physics profile: "
+                    f"geometry={geometry_radius:.12g}, "
+                    f"physics={physics_radius:.12g}"
+                )
+            # The exact geometric contact point uses the geometry source's
+            # measured radius after the cross-contract equality gate above.
+            self._exact_face_ball_radius = geometry_radius
         with open(self._prm.source_path, "r") as fh:
             self._mass = float(_yaml.safe_load(fh)["ball"]["mass"])
 
@@ -642,6 +844,10 @@ class PhysicalBallManager:
         self._teff_valid = torch.zeros(n, dtype=torch.bool, device=self.device)
         self._prev_valid = torch.zeros(n, dtype=torch.bool, device=self.device)
         self._prev_pos_env = torch.zeros(n, 3, device=self.device)
+        # Previous engine velocity paired with ``_prev_pos_env``.  The counter-rally truth lane
+        # needs the velocity at the interpolated opponent-baseline crossing; deriving it from an
+        # analytic rollout would defeat the independent-physics gate.
+        self._prev_vel_w = torch.zeros(n, 3, device=self.device)
         # --- Phase B state (allocated unconditionally — tiny; all logic gated on _impulse_on).
         # One impulse per swing: latched at the hit, re-armed only by on_resample.
         self._impulse_done = torch.zeros(n, dtype=torch.bool, device=self.device)
@@ -650,6 +856,11 @@ class PhysicalBallManager:
         # anti-tunnel branch of blade_disc_contact); invalidated on serve/park/resample.
         self._prev_dn = torch.zeros(n, device=self.device)
         self._prev_dn_valid = torch.zeros(n, dtype=torch.bool, device=self.device)
+        # Exact-face anti-tunnelling needs the complete previous relative
+        # segment, not only one scalar plane gap.  These buffers are ignored
+        # whenever ``_prev_dn_valid`` is false.
+        self._prev_face_center_w = torch.zeros(n, 3, device=self.device)
+        self._prev_face_normal_w = torch.zeros(n, 3, device=self.device)
         # Return-flight event buffers: landing + net crossing (z at the net plane, latched once
         # per swing) + the analytic vb landing prediction latched at the SAME strike for the
         # pb_virt_phys_gap_m cross-ruler (the shadow-driver snapshot pattern: vb_landing_xy is
@@ -664,6 +875,27 @@ class PhysicalBallManager:
         self._net_z = torch.zeros(n, device=self.device)
         self._pred_xy = torch.zeros(n, 2, device=self.device)
         self._pred_valid = torch.zeros(n, dtype=torch.bool, device=self.device)
+        # Counter-rally physical trajectory state.  These latches are observational only:
+        # rewards/observations never read them.  A structural counter return is exactly one
+        # legal first bounce on the opponent half followed by a +x crossing of the opponent
+        # baseline.  Direction/speed qualification remains the frozen evaluator's job.
+        self._counter_first_opponent_bounce = torch.zeros(
+            n, dtype=torch.bool, device=self.device
+        )
+        self._counter_baseline_crossed = torch.zeros(
+            n, dtype=torch.bool, device=self.device
+        )
+        self._counter_baseline_yz = torch.zeros(n, 2, device=self.device)
+        self._counter_baseline_velocity_w = torch.zeros(n, 3, device=self.device)
+        self._counter_terminal = torch.zeros(
+            n, dtype=torch.bool, device=self.device
+        )
+        self._counter_physics_invalid = torch.zeros(
+            n, dtype=torch.bool, device=self.device
+        )
+        self._counter_second_surface_before_baseline = torch.zeros(
+            n, dtype=torch.bool, device=self.device
+        )
         # BankExam Phase-B truth publication. The command may resample at clip completion before
         # the evaluator regains control, so publish the just-ended swing into held buffers before
         # clearing the live latches in on_resample(). No reward/observation reads these fields.
@@ -679,12 +911,43 @@ class PhysicalBallManager:
         self._truth_published_exact_seen = torch.zeros(
             n, dtype=torch.bool, device=self.device
         )
+        self._truth_counter_required = torch.zeros(
+            n, dtype=torch.bool, device=self.device
+        )
+        self._truth_published_counter_required = torch.zeros(
+            n, dtype=torch.bool, device=self.device
+        )
         self._truth_available = torch.zeros(n, dtype=torch.bool, device=self.device)
         self._truth_contacted = torch.zeros(n, dtype=torch.bool, device=self.device)
         self._truth_net_clear = torch.zeros(n, dtype=torch.bool, device=self.device)
         self._truth_landed_ok = torch.zeros(n, dtype=torch.bool, device=self.device)
         self._truth_returned = torch.zeros(n, dtype=torch.bool, device=self.device)
         self._truth_landing_xy = torch.zeros(n, 2, device=self.device)
+        self._truth_landed = torch.zeros(n, dtype=torch.bool, device=self.device)
+        self._truth_net_crossed = torch.zeros(
+            n, dtype=torch.bool, device=self.device
+        )
+        self._truth_counter_first_opponent_bounce = torch.zeros(
+            n, dtype=torch.bool, device=self.device
+        )
+        self._truth_counter_baseline_crossed = torch.zeros(
+            n, dtype=torch.bool, device=self.device
+        )
+        self._truth_counter_baseline_yz = torch.zeros(
+            n, 2, device=self.device
+        )
+        self._truth_counter_baseline_velocity_w = torch.zeros(
+            n, 3, device=self.device
+        )
+        self._truth_counter_terminal = torch.zeros(
+            n, dtype=torch.bool, device=self.device
+        )
+        self._truth_counter_physics_invalid = torch.zeros(
+            n, dtype=torch.bool, device=self.device
+        )
+        self._truth_counter_second_surface_before_baseline = torch.zeros(
+            n, dtype=torch.bool, device=self.device
+        )
         # Host-side activity counters for the physics-callback hot path: refreshed once per
         # control step in update() (arming/activation happen ONLY there — serve), so between
         # control steps they can only OVER-estimate (callback hits/landings merely disarm) and a
@@ -693,6 +956,10 @@ class PhysicalBallManager:
         # with impulse on — adversarial-review perf finding).
         self._active_host = 0
         self._armed_host = 0
+        # Counter-rally extraction is evaluator-only and adds several vector operations per
+        # physics substep.  Keep an over-estimate-only host gate so ordinary N5/N73 training and
+        # ordinary Phase-B exams pay zero baseline-tracking work.
+        self._counter_required_host = 0
         # Reusable wrench buffers (num_envs, 1 body, 3), zeroed like table_tennis_env.py.
         self._force_b = torch.zeros(n, 1, 3, device=self.device)
         self._torque_b = torch.zeros(n, 1, 3, device=self.device)
@@ -827,8 +1094,16 @@ class PhysicalBallManager:
         """
         self._consume_events()
         ids = torch.as_tensor(env_ids, dtype=torch.long, device=self.device)
+        counter_was_armed = (
+            self._impulse_on and self._counter_required_host > 0
+        )
         if self._impulse_on:
             self._publish_cross_engine_truth(ids)
+            if counter_was_armed:
+                self._truth_counter_required[ids] = False
+                self._counter_required_host = int(
+                    self._truth_counter_required.sum()
+                )
         self._mode[ids] = _MODE_PARKED
         self._landed[ids] = False
         self._land_new[ids] = False
@@ -838,6 +1113,8 @@ class PhysicalBallManager:
         # upstream resamples repeat within one wait (see the latch comment in __init__).
         self._teff_valid[ids] = False  # new question -> new trajectory -> re-discover its segment
         self._prev_valid[ids] = False
+        if counter_was_armed:
+            self._prev_vel_w[ids] = 0.0
         # Phase B: re-arm the one-impulse-per-swing latch and clear the swing's return/net/pred
         # state. A return flight still in the air is cut short (no landing recorded for that
         # swing) — the shadow-driver convention. (After the consume above these per-id clears
@@ -849,11 +1126,25 @@ class PhysicalBallManager:
         self._ret_bounce_new[ids] = False
         self._net_crossed[ids] = False
         self._pred_valid[ids] = False
+        if counter_was_armed:
+            self._counter_first_opponent_bounce[ids] = False
+            self._counter_baseline_crossed[ids] = False
+            self._counter_baseline_yz[ids] = 0.0
+            self._counter_baseline_velocity_w[ids] = 0.0
+            self._counter_terminal[ids] = False
+            self._counter_physics_invalid[ids] = False
+            self._counter_second_surface_before_baseline[ids] = False
         # BankExam attempt ownership is armed only by begin_external_exam_attempt(), after the
         # immutable external motion/question pair has been installed. Reset-time/train-question
         # resamples must never create a held physical outcome for the later exam row.
 
-    def begin_external_exam_attempt(self, env_ids, attempt_tokens) -> None:
+    def begin_external_exam_attempt(
+        self,
+        env_ids,
+        attempt_tokens,
+        *,
+        require_counter_rally: bool = False,
+    ) -> None:
         """Arm one evaluator-owned question generation after its atomic install.
 
         The evaluator calls this exactly once after reset plus external motion/question install.
@@ -895,12 +1186,23 @@ class PhysicalBallManager:
         self._truth_published[ids] = False
         self._truth_published_served[ids] = False
         self._truth_published_exact_seen[ids] = False
+        self._truth_counter_required[ids] = bool(require_counter_rally)
+        self._truth_published_counter_required[ids] = False
         self._truth_available[ids] = False
         self._truth_contacted[ids] = False
         self._truth_net_clear[ids] = False
         self._truth_landed_ok[ids] = False
         self._truth_returned[ids] = False
         self._truth_landing_xy[ids] = 0.0
+        self._truth_landed[ids] = False
+        self._truth_net_crossed[ids] = False
+        self._truth_counter_first_opponent_bounce[ids] = False
+        self._truth_counter_baseline_crossed[ids] = False
+        self._truth_counter_baseline_yz[ids] = 0.0
+        self._truth_counter_baseline_velocity_w[ids] = 0.0
+        self._truth_counter_terminal[ids] = False
+        self._truth_counter_physics_invalid[ids] = False
+        self._truth_counter_second_surface_before_baseline[ids] = False
         # Live Phase-B latches should already be clear from reset/on_resample; clear them again at
         # this evaluator-owned generation boundary so a stale train question cannot leak in.
         self._impulse_done[ids] = False
@@ -913,6 +1215,17 @@ class PhysicalBallManager:
         self._ret_bounce_new[ids] = False
         self._pred_valid[ids] = False
         self._prev_dn_valid[ids] = False
+        self._prev_vel_w[ids] = 0.0
+        self._counter_first_opponent_bounce[ids] = False
+        self._counter_baseline_crossed[ids] = False
+        self._counter_baseline_yz[ids] = 0.0
+        self._counter_baseline_velocity_w[ids] = 0.0
+        self._counter_terminal[ids] = False
+        self._counter_physics_invalid[ids] = False
+        self._counter_second_surface_before_baseline[ids] = False
+        self._counter_required_host = int(
+            self._truth_counter_required.sum()
+        )
 
     @property
     def cross_engine_truth_capability(self) -> str:
@@ -1006,15 +1319,255 @@ class PhysicalBallManager:
         self._truth_landing_xy[ids] = torch.where(
             valid.unsqueeze(-1), xy, self._truth_landing_xy[ids]
         )
+        if self._counter_required_host > 0:
+            self._truth_published_counter_required[ids] = torch.where(
+                valid,
+                self._truth_counter_required[ids],
+                self._truth_published_counter_required[ids],
+            )
+            self._truth_landed[ids] = torch.where(
+                valid, landed, self._truth_landed[ids]
+            )
+            self._truth_net_crossed[ids] = torch.where(
+                valid,
+                self._net_crossed[ids],
+                self._truth_net_crossed[ids],
+            )
+            self._truth_counter_first_opponent_bounce[ids] = torch.where(
+                valid,
+                self._counter_first_opponent_bounce[ids],
+                self._truth_counter_first_opponent_bounce[ids],
+            )
+            self._truth_counter_baseline_crossed[ids] = torch.where(
+                valid,
+                self._counter_baseline_crossed[ids],
+                self._truth_counter_baseline_crossed[ids],
+            )
+            self._truth_counter_baseline_yz[ids] = torch.where(
+                valid.unsqueeze(-1),
+                self._counter_baseline_yz[ids],
+                self._truth_counter_baseline_yz[ids],
+            )
+            self._truth_counter_baseline_velocity_w[ids] = torch.where(
+                valid.unsqueeze(-1),
+                self._counter_baseline_velocity_w[ids],
+                self._truth_counter_baseline_velocity_w[ids],
+            )
+            self._truth_counter_terminal[ids] = torch.where(
+                valid,
+                self._counter_terminal[ids],
+                self._truth_counter_terminal[ids],
+            )
+            self._truth_counter_physics_invalid[ids] = torch.where(
+                valid,
+                self._counter_physics_invalid[ids],
+                self._truth_counter_physics_invalid[ids],
+            )
+            self._truth_counter_second_surface_before_baseline[ids] = (
+                torch.where(
+                    valid,
+                    self._counter_second_surface_before_baseline[ids],
+                    self._truth_counter_second_surface_before_baseline[
+                        ids
+                    ],
+                )
+            )
+
+    def _counter_rally_physical_record(
+        self,
+        *,
+        contacted: bool,
+        landed: bool,
+        net_crossed: bool,
+        net_clear: bool,
+        landing_xy: torch.Tensor,
+        first_opponent_bounce: bool,
+        baseline_crossed: bool,
+        baseline_yz: torch.Tensor,
+        baseline_velocity: torch.Tensor,
+        terminal: bool,
+        physics_invalid: bool,
+        second_surface_before_baseline: bool,
+        finalized: bool,
+    ) -> dict:
+        """Build the independent physical counter-rally lane.
+
+        ``available`` means the physical trajectory is complete enough to classify; it does NOT
+        mean success.  In particular, net/table-side/baseline failures are available negative
+        outcomes, while NaN/Inf or an evaluator that cut off a still-live post-bounce trajectory
+        are unavailable instrumentation failures and must never be charged to policy difficulty.
+        """
+
+        far_x = self._near_x + self._table_len
+        landing_finite = landed and bool(torch.isfinite(landing_xy).all())
+        inside_table = (
+            landing_finite
+            and bool(landing_xy[0] >= self._near_x)
+            and bool(landing_xy[0] <= far_x)
+            and bool(landing_xy[1].abs() <= self._half_w)
+        )
+        if not landed:
+            landing_side = None
+        elif not inside_table:
+            landing_side = "outside"
+        elif bool(landing_xy[0] <= self._net_x_env):
+            landing_side = "own"
+        else:
+            landing_side = "opponent"
+
+        record = {
+            "schema": "hope.physical-counter-rally-truth.v1",
+            "capability": COUNTER_RALLY_PHYSICAL_TRUTH_CAPABILITY,
+            "available": False,
+            "physics_valid": not physics_invalid,
+            "trajectory_complete": False,
+            # Structural physics only.  Direction/speed/aim tolerances belong to the frozen
+            # objective profile and are deliberately NOT decided by this instrument.
+            "structural_crossing_complete": False,
+            "reason": "physical_counter_rally_pending",
+            "net_crossed": bool(net_crossed),
+            "net_clear": bool(net_clear),
+            "first_landing_env_xy_m": (
+                [float(landing_xy[0]), float(landing_xy[1])]
+                if landing_finite
+                else None
+            ),
+            "first_landing_side": landing_side,
+            "first_opponent_bounce": bool(first_opponent_bounce),
+            "opponent_baseline_crossed": bool(baseline_crossed),
+            "baseline_cross_env_yz_m": None,
+            "baseline_velocity_world_mps": None,
+            "baseline_horizontal_direction_env_xy": None,
+            "baseline_horizontal_speed_mps": None,
+            "baseline_speed_mps": None,
+            "second_surface_before_baseline": bool(
+                second_surface_before_baseline
+            ),
+        }
+        if physics_invalid or (landed and not landing_finite):
+            record.update(
+                reason="physical_simulation_invalid",
+                physics_valid=False,
+            )
+            return record
+        if not contacted:
+            if finalized:
+                record.update(
+                    available=True,
+                    trajectory_complete=True,
+                    reason="no_racket_contact",
+                )
+            return record
+        if not landed:
+            if finalized:
+                record["reason"] = "physical_trajectory_incomplete"
+            return record
+        # From here the first descending table-plane crossing is known, so net and table-side
+        # failures are complete, classifiable physical negatives rather than missing evidence.
+        if not net_crossed:
+            record.update(
+                available=True,
+                trajectory_complete=True,
+                reason="net_not_crossed",
+            )
+            return record
+        if not net_clear:
+            record.update(
+                available=True,
+                trajectory_complete=True,
+                reason="net_not_clear",
+            )
+            return record
+        if landing_side == "outside":
+            record.update(
+                available=True,
+                trajectory_complete=True,
+                reason="first_landing_outside_table",
+            )
+            return record
+        if landing_side == "own":
+            record.update(
+                available=True,
+                trajectory_complete=True,
+                reason="first_landing_own_half",
+            )
+            return record
+        if not first_opponent_bounce:
+            # All observable prerequisites say the bounce was legal, yet the detector never
+            # latched it.  Treat this as an instrument invariant failure, never policy failure.
+            record.update(
+                reason="physical_counter_rally_state_inconsistent",
+                physics_valid=False,
+            )
+            return record
+        if baseline_crossed:
+            finite = bool(torch.isfinite(baseline_yz).all()) and bool(
+                torch.isfinite(baseline_velocity).all()
+            )
+            horizontal_speed = float(
+                torch.linalg.norm(baseline_velocity[:2])
+            ) if finite else 0.0
+            if not finite or horizontal_speed <= 1.0e-9:
+                record.update(
+                    reason="physical_baseline_state_invalid",
+                    physics_valid=False,
+                )
+                return record
+            direction = baseline_velocity[:2] / horizontal_speed
+            record.update(
+                available=True,
+                trajectory_complete=True,
+                structural_crossing_complete=True,
+                reason=None,
+                baseline_cross_env_yz_m=[
+                    float(baseline_yz[0]),
+                    float(baseline_yz[1]),
+                ],
+                baseline_velocity_world_mps=[
+                    float(baseline_velocity[0]),
+                    float(baseline_velocity[1]),
+                    float(baseline_velocity[2]),
+                ],
+                baseline_horizontal_direction_env_xy=[
+                    float(direction[0]),
+                    float(direction[1]),
+                ],
+                baseline_horizontal_speed_mps=horizontal_speed,
+                baseline_speed_mps=float(
+                    torch.linalg.norm(baseline_velocity)
+                ),
+            )
+            return record
+        if terminal:
+            record.update(
+                available=True,
+                trajectory_complete=True,
+                reason="opponent_baseline_not_crossed",
+            )
+            return record
+        if finalized:
+            record["reason"] = "physical_trajectory_incomplete"
+        return record
 
     def cross_engine_physical_truth(
-        self, env_id: int, *, expected_attempt_token: int, final: bool
+        self,
+        env_id: int,
+        *,
+        expected_attempt_token: int,
+        final: bool,
+        require_counter_rally: bool = False,
     ) -> dict:
         """Return one explicit physical-outcome record for the BankExam scorecard.
 
         ``final=True`` means the one-question evaluator is about to finalize the attempt. A
         contacted ball without a recorded landing remains unavailable and must fail the cell;
         a completed swing with no contact is a valid all-false physical outcome.
+
+        The default is byte-compatible with the ordinary single-return record.  A frozen N=1
+        counter-rally evaluator opts in with ``require_counter_rally=True``.  That adds a
+        ``counter_rally`` record and makes the top-level record unavailable when the independent
+        physical trajectory was invalid or was cut off before the post-bounce baseline verdict.
+        It never consults the analytic fitted-teacher success boolean.
         """
 
         if self.cross_engine_truth_capability != (
@@ -1039,16 +1592,42 @@ class PhysicalBallManager:
         if bool(self._truth_published[index]):
             available = bool(self._truth_available[index])
             contacted = bool(self._truth_contacted[index])
+            landed = bool(self._truth_landed[index])
+            net_crossed = bool(self._truth_net_crossed[index])
             net_clear = bool(self._truth_net_clear[index])
             landed_ok = bool(self._truth_landed_ok[index])
             returned = bool(self._truth_returned[index])
             landing_xy = self._truth_landing_xy[index]
             served = bool(self._truth_published_served[index])
             exact_seen = bool(self._truth_published_exact_seen[index])
+            counter_first_bounce = bool(
+                self._truth_counter_first_opponent_bounce[index]
+            )
+            counter_baseline = bool(
+                self._truth_counter_baseline_crossed[index]
+            )
+            counter_baseline_yz = self._truth_counter_baseline_yz[index]
+            counter_baseline_velocity = (
+                self._truth_counter_baseline_velocity_w[index]
+            )
+            counter_terminal = bool(
+                self._truth_counter_terminal[index]
+            )
+            counter_invalid = bool(
+                self._truth_counter_physics_invalid[index]
+            )
+            counter_second_surface = bool(
+                self._truth_counter_second_surface_before_baseline[index]
+            )
+            counter_armed = bool(
+                self._truth_published_counter_required[index]
+            )
+            finalized = True
         else:
             contacted = bool(self._impulse_done[index])
             landed = contacted and bool(self._landed[index])
-            net_clear = landed and bool(self._net_crossed[index]) and bool(
+            net_crossed = landed and bool(self._net_crossed[index])
+            net_clear = net_crossed and bool(
                 self._net_z[index] > self._net_clear_z
             )
             landing_xy = self._ret_land_xy[index]
@@ -1059,6 +1638,51 @@ class PhysicalBallManager:
             served = bool(self._truth_served[index])
             exact_seen = bool(self._truth_exact_seen[index])
             available = bool(final) and served and exact_seen and ((not contacted) or landed)
+            counter_first_bounce = bool(
+                self._counter_first_opponent_bounce[index]
+            )
+            counter_baseline = bool(
+                self._counter_baseline_crossed[index]
+            )
+            counter_baseline_yz = self._counter_baseline_yz[index]
+            counter_baseline_velocity = (
+                self._counter_baseline_velocity_w[index]
+            )
+            counter_terminal = bool(self._counter_terminal[index])
+            counter_invalid = bool(
+                self._counter_physics_invalid[index]
+            )
+            counter_second_surface = bool(
+                self._counter_second_surface_before_baseline[index]
+            )
+            counter_armed = bool(self._truth_counter_required[index])
+            finalized = bool(final)
+        counter_record = None
+        if require_counter_rally:
+            if not counter_armed:
+                return {
+                    "available": False,
+                    "capability": self.cross_engine_truth_capability,
+                    "reason": "counter_rally_physical_truth_not_armed",
+                    "attempt_token": token,
+                    "served": served,
+                    "exact_seen": exact_seen,
+                }
+            counter_record = self._counter_rally_physical_record(
+                contacted=contacted,
+                landed=landed,
+                net_crossed=net_crossed,
+                net_clear=net_clear,
+                landing_xy=landing_xy,
+                first_opponent_bounce=counter_first_bounce,
+                baseline_crossed=counter_baseline,
+                baseline_yz=counter_baseline_yz,
+                baseline_velocity=counter_baseline_velocity,
+                terminal=counter_terminal,
+                physics_invalid=counter_invalid,
+                second_surface_before_baseline=counter_second_surface,
+                finalized=finalized,
+            )
         if not available:
             if not served:
                 reason = "physical incoming ball was never served for this exam attempt"
@@ -1068,7 +1692,7 @@ class PhysicalBallManager:
                 reason = "racket contact occurred but no post-contact landing was recorded"
             else:
                 reason = "physical outcome pending"
-            return {
+            result = {
                 "available": False,
                 "capability": self.cross_engine_truth_capability,
                 "reason": reason,
@@ -1076,7 +1700,27 @@ class PhysicalBallManager:
                 "served": served,
                 "exact_seen": exact_seen,
             }
-        return {
+            if counter_record is not None:
+                result["counter_rally"] = counter_record
+                if counter_record["reason"] in {
+                    "physical_simulation_invalid",
+                    "physical_baseline_state_invalid",
+                    "physical_counter_rally_state_inconsistent",
+                    "physical_trajectory_incomplete",
+                }:
+                    result["reason"] = counter_record["reason"]
+            return result
+        if counter_record is not None and not counter_record["available"]:
+            return {
+                "available": False,
+                "capability": self.cross_engine_truth_capability,
+                "reason": counter_record["reason"],
+                "attempt_token": token,
+                "served": served,
+                "exact_seen": exact_seen,
+                "counter_rally": counter_record,
+            }
+        result = {
             "available": True,
             "capability": self.cross_engine_truth_capability,
             "contacted": contacted,
@@ -1090,6 +1734,9 @@ class PhysicalBallManager:
             "contact_authority": "code_driven_blade_disc_and_venue_paddle_impulse",
             "post_contact_rollout": "physx_gravity_plus_deterministic_venue_aero_and_code_table_bounce",
         }
+        if counter_record is not None:
+            result["counter_rally"] = counter_record
+        return result
 
     def update(self, exact_strike: torch.Tensor) -> None:
         """Once per control step from ``_update_metrics`` (after ``_vb_evaluate``)."""
@@ -1117,6 +1764,9 @@ class PhysicalBallManager:
         #    strike as pb_missed_serve. Cost: <= 2 integrations per swing (was: one per waiting
         #    step). Truncation is LATCHED here but counted only at consumption (serve/strike).
         just_served = torch.zeros_like(self._landed)
+        action_ball_enabled = bool(
+            getattr(cmd, "_action_ball_enabled", False)
+        )
         cand = schedule_serves(self._mode == _MODE_PARKED, cmd.time_to_strike,
                                SERVE_HORIZON_S, min_tts_s=step_dt)
         discover = cand & ~self._teff_valid
@@ -1124,8 +1774,13 @@ class PhysicalBallManager:
         integ = discover | serve_cached
         if bool(integ.any()):
             t_back = cmd.time_to_strike.clamp(min=0.0, max=SERVE_HORIZON_S)
+            contact_target_w = (
+                cmd._action_ball_ball_contact_target_w
+                if action_ball_enabled
+                else cmd.racket_target_pos_w
+            )
             pos_env, vel_w, t_eff = back_integrate_incoming(
-                cmd.racket_target_pos_w - origins, cmd.vb_vel_in_w, cmd.vb_spin_in_w,
+                contact_target_w - origins, cmd.vb_vel_in_w, cmd.vb_spin_in_w,
                 t_back, self._prm, h=SERVE_BACKINT_H,
                 surface_z=float(cmd.cfg.vb_table_surface_z), margin=SERVE_PLANE_MARGIN,
             )
@@ -1174,8 +1829,13 @@ class PhysicalBallManager:
                 self._pred_xy = torch.where(lat.unsqueeze(-1), self._cmd.vb_landing_xy, self._pred_xy)
                 self._pred_valid = self._pred_valid | (lat & self._cmd.vb_landing_valid)
         if bool(meas.any()):
+            contact_target_w = (
+                cmd._action_ball_ball_contact_target_w
+                if action_ball_enabled
+                else cmd.racket_target_pos_w
+            )
             serve_err = torch.linalg.norm(
-                self._ball.data.root_pos_w - cmd.racket_target_pos_w, dim=-1
+                self._ball.data.root_pos_w - contact_target_w, dim=-1
             )
             vel_err = torch.linalg.norm(
                 self._ball.data.root_lin_vel_w - cmd.vb_vel_in_w, dim=-1
@@ -1210,17 +1870,24 @@ class PhysicalBallManager:
         done = ((self._mode == _MODE_POST) | (self._mode == _MODE_RETURN)) & (
             (self._ball.data.root_pos_w[:, 2] - origins[:, 2]) < KILL_Z_ENV
         )
+        counter_exhausted = (
+            done
+            & (self._mode == _MODE_RETURN)
+            & self._counter_first_opponent_bounce
+            & ~self._counter_baseline_crossed
+        )
+        self._counter_terminal |= counter_exhausted
         if bool(done.any()):
             self._mode[done] = _MODE_PARKED
-        parked = self._mode == _MODE_PARKED
-        if bool(parked.any()):
-            ids = torch.where(parked)[0]
+        park_drive = (self._mode == _MODE_PARKED) | (self._mode == _MODE_FAILED)
+        if bool(park_drive.any()):
+            ids = torch.where(park_drive)[0]
             pose = torch.cat([origins[ids] + self._park_pos_env[ids], self._identity_quat[ids]], dim=-1)
             vel6 = torch.zeros(len(ids), 6, device=self.device)
             self._ball.write_root_pose_to_sim(pose, env_ids=ids)
             self._ball.write_root_velocity_to_sim(vel6, env_ids=ids)
-            self._prev_valid[parked] = False
-            self._prev_dn_valid[parked] = False
+            self._prev_valid[park_drive] = False
+            self._prev_dn_valid[park_drive] = False
 
         # 5) metrics (broadcast counters; land_x/y held per env at its most recent landing).
         m = cmd.metrics
@@ -1251,7 +1918,15 @@ class PhysicalBallManager:
         #    in the callback is therefore always correct, with ZERO per-substep device syncs.
         #    (on_resample only parks, which also only over-estimates until this refresh.)
         #    Cost: <= 2 host syncs per CONTROL step, replacing 2 bool(any) syncs per SUBSTEP.
-        self._active_host = int((self._mode != _MODE_PARKED).sum())
+        if self._counter_required_host > 0:
+            physically_active = (
+                (self._mode == _MODE_INBOUND)
+                | (self._mode == _MODE_POST)
+                | (self._mode == _MODE_RETURN)
+            )
+        else:
+            physically_active = self._mode != _MODE_PARKED
+        self._active_host = int(physically_active.sum())
         if self._impulse_on:
             armed_now = (~self._impulse_done) & (
                 (self._mode == _MODE_INBOUND) | ((self._mode == _MODE_POST) & ~self._landed)
@@ -1343,9 +2018,57 @@ class PhysicalBallManager:
         if self._active_host == 0:
             self._prev_valid.zero_()
             return
-        active = self._mode != _MODE_PARKED
+        counter_tracking = self._counter_required_host > 0
+        if counter_tracking:
+            active = (
+                (self._mode == _MODE_INBOUND)
+                | (self._mode == _MODE_POST)
+                | (self._mode == _MODE_RETURN)
+            )
+        else:
+            # Exact ordinary Phase-A/B hot path: _MODE_FAILED is counter-only and impossible.
+            active = self._mode != _MODE_PARKED
         origins = self._env.scene.env_origins
         pos_env = self._ball.data.root_pos_w - origins
+        vel_w = self._ball.data.root_lin_vel_w
+        omega_w = self._ball.data.root_ang_vel_w
+        if counter_tracking:
+            tracked = self._truth_counter_required
+            counter_live = (
+                tracked
+                & ~self._counter_baseline_crossed
+                & ~self._counter_terminal
+            )
+            finite_state = (
+                torch.isfinite(pos_env).all(dim=-1)
+                & torch.isfinite(vel_w).all(dim=-1)
+                & torch.isfinite(omega_w).all(dim=-1)
+                & torch.isfinite(
+                    self._ball.data.root_quat_w
+                ).all(dim=-1)
+            )
+            invalid = active & counter_live & ~finite_state
+            self._counter_physics_invalid |= invalid
+            self._counter_terminal |= invalid
+            self._mode = torch.where(
+                invalid,
+                torch.full_like(self._mode, _MODE_FAILED),
+                self._mode,
+            )
+            active &= ~invalid
+            # Keep invalid tracked numbers out of the branchless geometry math below.  The failed
+            # row is parked at the next control-rate update and cannot be re-served before
+            # on_resample().  Non-counter rows retain the pre-existing ordinary Phase-B path.
+            safe = finite_state | ~counter_live
+            pos_env = torch.where(
+                safe.unsqueeze(-1), pos_env, self._prev_pos_env
+            )
+            vel_w = torch.where(
+                safe.unsqueeze(-1), vel_w, torch.zeros_like(vel_w)
+            )
+            omega_w = torch.where(
+                safe.unsqueeze(-1), omega_w, torch.zeros_like(omega_w)
+            )
 
         # Phase B: net-plane crossing scan for RETURN flights (before the landing record below so
         # a segment that crosses the net AND the table plane in one step counts both). Latched
@@ -1354,6 +2077,7 @@ class PhysicalBallManager:
             ncross, z_at = net_plane_crossing(self._prev_pos_env, pos_env, self._net_x_env)
             nc = (
                 (self._mode == _MODE_RETURN)
+                & active
                 & self._prev_valid
                 & ~self._net_crossed
                 & ~self._landed
@@ -1364,6 +2088,66 @@ class PhysicalBallManager:
 
         crossed, xy = _sb.landing_crossing(self._prev_pos_env, pos_env, self._z_thr)
         evt = active & self._prev_valid & crossed
+
+        # Counter-rally baseline extraction uses ONLY the engine trajectory.  It is armed after a
+        # legal first opponent bounce and interpolates the complete crossing velocity.  A second
+        # descending table-plane crossing earlier in the same segment wins: the physical path
+        # would hit/bounce before reaching the far baseline, so extrapolating that segment would
+        # be a false success.
+        if counter_tracking:
+            base_cross, base_yz, base_velocity, base_fraction = (
+                opponent_baseline_crossing(
+                    self._prev_pos_env,
+                    pos_env,
+                    self._prev_vel_w,
+                    vel_w,
+                    self._near_x + self._table_len,
+                )
+            )
+            eligible_base = (
+                (self._mode == _MODE_RETURN)
+                & active
+                & self._truth_counter_required
+                & self._prev_valid
+                & self._counter_first_opponent_bounce
+                & ~self._counter_baseline_crossed
+                & base_cross
+            )
+            dz = self._prev_pos_env[:, 2] - pos_env[:, 2]
+            safe_dz = torch.where(
+                dz.abs() > 1.0e-12, dz, torch.ones_like(dz)
+            )
+            surface_fraction = (
+                (self._prev_pos_env[:, 2] - self._z_thr) / safe_dz
+            ).clamp(0.0, 1.0)
+            return_surface = evt & (self._mode == _MODE_RETURN)
+            surface_before_base = (
+                return_surface
+                & eligible_base
+                & (surface_fraction <= base_fraction + 1.0e-7)
+            )
+            accepted_base = eligible_base & ~surface_before_base
+            self._counter_baseline_yz = torch.where(
+                accepted_base.unsqueeze(-1),
+                base_yz,
+                self._counter_baseline_yz,
+            )
+            self._counter_baseline_velocity_w = torch.where(
+                accepted_base.unsqueeze(-1),
+                base_velocity,
+                self._counter_baseline_velocity_w,
+            )
+            self._counter_baseline_crossed |= accepted_base
+
+            second_surface = (
+                return_surface
+                & self._truth_counter_required
+                & self._landed
+                & self._counter_first_opponent_bounce
+                & ~self._counter_baseline_crossed
+            )
+            self._counter_second_surface_before_baseline |= second_surface
+            self._counter_terminal |= second_surface
 
         # landing record: first post-strike crossing (branchless masked latch).
         land = evt & (self._mode == _MODE_POST) & ~self._landed
@@ -1379,14 +2163,35 @@ class PhysicalBallManager:
         # code-driven bounce: in-bounds crossings only (off the ends/sides the ball just
         # keeps falling toward the floor — no floor model, it parks at KILL_Z_ENV).
         bounce = evt & table_bounds_mask(xy, self._near_x, self._table_len, self._half_w)
+        if self._impulse_on and counter_tracking:
+            first_opponent_bounce = (
+                ret
+                & bounce
+                & self._truth_counter_required
+                & self._net_crossed
+                & (self._net_z > self._net_clear_z)
+                & (xy[:, 0] > self._net_x_env)
+                & (xy[:, 0] <= self._near_x + self._table_len)
+            )
+            self._counter_first_opponent_bounce |= first_opponent_bounce
+            # A known first landing that is not a legal opponent-side bounce is already a
+            # complete physical negative (net/table-side reason is derived in the record).
+            # Stop the counter lane here so unrelated later flight cannot overwrite it with an
+            # instrumentation-invalid verdict.
+            counter_first_landing_failure = (
+                ret
+                & self._truth_counter_required
+                & ~first_opponent_bounce
+            )
+            self._counter_terminal |= counter_first_landing_failure
         # Mode-split counting (see docstring). With impulse off, mode never reaches RETURN, so
         # the non-RETURN gate is the identity — Phase A byte-parity holds.
         self._bounce_new |= bounce & (self._mode != _MODE_RETURN)
         if self._impulse_on:
             self._ret_bounce_new |= bounce & (self._mode == _MODE_RETURN)
         if bool(bounce.any()):  # sim write needs env_ids -> the ONE remaining substep sync
-            v_minus = self._ball.data.root_lin_vel_w
-            w_minus = self._ball.data.root_ang_vel_w
+            v_minus = vel_w
+            w_minus = omega_w
             v_plus, w_plus = predict_table_contact(v_minus, w_minus, self._tp)
             ids = torch.where(bounce)[0]
             new_pos_env = pos_env.clone()
@@ -1401,8 +2206,30 @@ class PhysicalBallManager:
             self._ball.write_root_velocity_to_sim(vel6, env_ids=ids)
             # compare-from state for the next scan = the snapped-back position.
             pos_env = torch.where(bounce.unsqueeze(-1), new_pos_env, pos_env)
+            # The racket sweep cached a signed gap against the pre-bounce
+            # position.  A code-driven table snap is a discontinuity; carrying
+            # that gap into the next substep makes detector and hit-snap use
+            # different previous segments.
+            self._prev_dn_valid[bounce] = False
+            if counter_tracking:
+                vel_w = torch.where(
+                    bounce.unsqueeze(-1), v_plus, vel_w
+                )
 
-        self._prev_pos_env.copy_(pos_env)
+        if counter_tracking:
+            self._prev_pos_env.copy_(
+                torch.where(
+                    active.unsqueeze(-1),
+                    pos_env,
+                    self._prev_pos_env,
+                )
+            )
+            self._prev_vel_w.copy_(
+                torch.where(active.unsqueeze(-1), vel_w, self._prev_vel_w)
+            )
+        else:
+            # Preserve the original one-copy ordinary detector path.
+            self._prev_pos_env.copy_(pos_env)
         self._prev_valid.copy_(active)
 
     def _detect_racket_impulse(self) -> None:
@@ -1454,36 +2281,70 @@ class PhysicalBallManager:
         )
         cmd = self._cmd
         # PURE FK locals (never rebind cmd.racket_* — see docstring).
-        r_pos, _r_quat, r_lin_vel, _r_normal_raw, r_normal = cmd._racket_fk()
+        r_pos, r_quat, r_lin_vel, _r_normal_raw, r_normal = cmd._racket_fk()
+        exact_contact = None
+        if bool(getattr(cmd, "_action_ball_enabled", False)):
+            exact_contact = cmd._action_ball_exact_achieved_contact_state(
+                racket_site_pos_w=r_pos,
+                racket_quat_wxyz=r_quat,
+                racket_site_velocity_w=r_lin_vel,
+                racket_angular_velocity_w=cmd._racket_angular_velocity_w(),
+            )
+            blade_pos = exact_contact["face_center_w_m"]
+            blade_vel = exact_contact["face_center_velocity_w_mps"]
+            blade_normal = exact_contact["physical_face_normal_w"]
+        else:
+            blade_pos = r_pos
+            blade_vel = r_lin_vel
+            blade_normal = r_normal
         ball_pos = self._ball.data.root_pos_w
         ball_vel = self._ball.data.root_lin_vel_w
         prev_dn = self._prev_dn
         prev_ok = self._prev_dn_valid & armed
-        hit, d_n = blade_disc_contact(
-            ball_pos,
-            ball_vel,
-            r_pos,
-            r_lin_vel,
-            r_normal,
-            prev_dn,
-            prev_ok,
-            racket_radius=RACKET_CONTACT_RADIUS,
-            ball_radius=float(self._prm.ball_radius),
-        )
+        if exact_contact is not None:
+            origins = self._env.scene.env_origins
+            hit, d_n = selected_face_disc_contact(
+                ball_pos,
+                ball_vel,
+                blade_pos,
+                blade_vel,
+                blade_normal,
+                self._prev_pos_env + origins,
+                self._prev_face_center_w,
+                self._prev_face_normal_w,
+                prev_ok,
+                racket_radius=RACKET_CONTACT_RADIUS,
+                ball_radius=float(self._exact_face_ball_radius),
+            )
+        else:
+            hit, d_n = blade_disc_contact(
+                ball_pos,
+                ball_vel,
+                blade_pos,
+                blade_vel,
+                blade_normal,
+                prev_dn,
+                prev_ok,
+                racket_radius=RACKET_CONTACT_RADIUS,
+                ball_radius=float(self._prm.ball_radius),
+            )
         hit = hit & armed
         if bool(hit.any()):  # sim write needs env_ids -> the ONE remaining substep sync
             v_plus, w_plus = racket_impulse(
                 ball_vel,
-                r_lin_vel,
-                r_normal,
+                blade_vel,
+                blade_normal,
                 self._ball.data.root_ang_vel_w,
                 self._prm,
             )
-            # Contact-point snap (see docstring): reconstruct the blade-PLANE (d_n = 0) contact
-            # position. Crossing rows: interpolate the substep fraction along the prev->current
-            # ball segment (prev position from the bounce scan's compare-from state, same
-            # sampling cadence as prev_dn). Slab rows / no valid prev: project along the normal.
-            n_hat = r_normal / (torch.linalg.norm(r_normal, dim=-1, keepdim=True) + 1e-9)
+            # Contact-point snap (see docstring): legacy reconstructs the
+            # blade plane; ActionBall v2 reconstructs the selected-face BALL
+            # tangent plane (ball centre = face centre + R*n).  In both
+            # branches ``d_n`` is the relevant signed surface gap, so the same
+            # interpolation/projection algebra applies.
+            n_hat = blade_normal / (
+                torch.linalg.norm(blade_normal, dim=-1, keepdim=True) + 1e-9
+            )
             origins = self._env.scene.env_origins
             prev_pos_w = self._prev_pos_env + origins
             denom = prev_dn - d_n
@@ -1491,7 +2352,19 @@ class PhysicalBallManager:
             f = (prev_dn / safe_denom).clamp(0.0, 1.0).unsqueeze(-1)
             interp = prev_pos_w + (ball_pos - prev_pos_w) * f
             proj = ball_pos - d_n.unsqueeze(-1) * n_hat
-            use_interp = prev_ok & self._prev_valid & ((prev_dn * d_n) < 0.0)
+            if exact_contact is not None:
+                use_interp = (
+                    prev_ok
+                    & self._prev_valid
+                    & (prev_dn > 0.0)
+                    & (d_n <= 0.0)
+                )
+            else:
+                use_interp = (
+                    prev_ok
+                    & self._prev_valid
+                    & ((prev_dn * d_n) < 0.0)
+                )
             contact_w = torch.where(use_interp.unsqueeze(-1), interp, proj)
             ids = torch.where(hit)[0]
             pose = torch.cat([contact_w[ids], self._ball.data.root_quat_w[ids]], dim=-1)
@@ -1501,9 +2374,14 @@ class PhysicalBallManager:
             # compare-from state for the same-substep bounce/net scan = the snapped contact
             # point (the table-bounce snap's :func:`_detect_bounce_and_landing` convention).
             self._prev_pos_env[ids] = contact_w[ids] - origins[ids]
+            if self._counter_required_host > 0:
+                self._prev_vel_w[ids] = v_plus[ids]
             self._mode[ids] = _MODE_RETURN
             self._impulse_done |= hit
             self._hit_new |= hit
+        if exact_contact is not None:
+            self._prev_face_center_w.copy_(blade_pos)
+            self._prev_face_normal_w.copy_(blade_normal)
         self._prev_dn = d_n
         self._prev_dn_valid = armed & ~hit
 
@@ -1518,21 +2396,84 @@ class PhysicalBallManager:
         lag the table bounce always had), then the Phase B impulse scan, then the bounce/landing
         scan (position-based, unaffected by the same-substep velocity rewrite).
         """
-        active = self._mode != _MODE_PARKED
+        counter_tracking = self._counter_required_host > 0
+        if counter_tracking:
+            active = (
+                (self._mode == _MODE_INBOUND)
+                | (self._mode == _MODE_POST)
+                | (self._mode == _MODE_RETURN)
+            )
+        else:
+            # Keep the original ordinary Phase-B expression and tensor count.
+            active = self._mode != _MODE_PARKED
         lin_vel_w = self._ball.data.root_lin_vel_w
         ang_vel_w = self._ball.data.root_ang_vel_w
+        quat_w = self._ball.data.root_quat_w
+        force_active = active
+        if counter_tracking:
+            tracked = self._truth_counter_required
+            counter_live = (
+                tracked
+                & ~self._counter_baseline_crossed
+                & ~self._counter_terminal
+            )
+            finite_state = (
+                torch.isfinite(self._ball.data.root_pos_w).all(dim=-1)
+                & torch.isfinite(lin_vel_w).all(dim=-1)
+                & torch.isfinite(ang_vel_w).all(dim=-1)
+                & torch.isfinite(quat_w).all(dim=-1)
+            )
+            invalid = active & counter_live & ~finite_state
+            self._counter_physics_invalid |= invalid
+            self._counter_terminal |= invalid
+            self._mode = torch.where(
+                invalid,
+                torch.full_like(self._mode, _MODE_FAILED),
+                self._mode,
+            )
+            active &= ~invalid
+            # Sanitize every armed counter row before the body-frame rotation, including a row
+            # whose verdict completed during the previous substep.  Only still-live rows turn
+            # the held truth invalid; completed rows merely receive zero wrench until evaluator
+            # closure.
+            safe = finite_state | ~tracked
+            safe_lin_vel_w = torch.where(
+                safe.unsqueeze(-1), lin_vel_w, torch.zeros_like(lin_vel_w)
+            )
+            safe_ang_vel_w = torch.where(
+                safe.unsqueeze(-1), ang_vel_w, torch.zeros_like(ang_vel_w)
+            )
+            safe_quat_w = torch.where(
+                safe.unsqueeze(-1), quat_w, self._identity_quat
+            )
+            force_active = active & safe
+        else:
+            safe_lin_vel_w = lin_vel_w
+            safe_ang_vel_w = ang_vel_w
+            safe_quat_w = quat_w
         if self._substep > 1:
             force_w = substepped_aero_force(
-                lin_vel_w, ang_vel_w, self._mass, self._prm, dt, self._substep
+                safe_lin_vel_w,
+                safe_ang_vel_w,
+                self._mass,
+                self._prm,
+                dt,
+                self._substep,
             )
         else:
             force_w = _sb.venue_aero_force(
-                lin_vel_w, ang_vel_w, self._mass, self._prm.k_d, self._prm.k_m
+                safe_lin_vel_w,
+                safe_ang_vel_w,
+                self._mass,
+                self._prm.k_d,
+                self._prm.k_m,
             )
-        force_w = force_w * active.unsqueeze(-1)
+        force_w = force_w * force_active.unsqueeze(-1)
         # Isaac Lab 2.1 applies this BODY-frame wrench at the link transform origin.  The
         # origin-centred SphereCfg has zero COM offset, so the point is also the ball COM.
-        self._force_b[:, 0, :] = _sb.quat_rotate_inverse_wxyz(self._ball.data.root_quat_w, force_w)
+        self._force_b[:, 0, :] = _sb.quat_rotate_inverse_wxyz(
+            safe_quat_w, force_w
+        )
         self._ball.set_external_force_and_torque(self._force_b, self._torque_b)
         self._ball.write_data_to_sim()
 

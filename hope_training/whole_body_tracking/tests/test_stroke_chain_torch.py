@@ -75,7 +75,11 @@ def prm(vb):
 def protos_t(sp_torch):
     if not PROTO_PATH.exists():
         pytest.skip(f"{PROTO_PATH} not built; run scripts/build_stroke_prototypes.py")
-    return sp_torch.load_stroke_prototype_tensors(PROTO_PATH, scope="upper")
+    return sp_torch.load_stroke_prototype_tensors(
+        PROTO_PATH,
+        scope="upper",
+        allow_legacy_site_velocity=True,
+    )
 
 
 @pytest.fixture(scope="module")
@@ -114,13 +118,34 @@ def test_torch_reader_fails_closed_on_a_hand_edit(sp_torch, tmp_path):
     bad = tmp_path / "tampered.json"
     bad.write_text(json.dumps(doc), encoding="utf-8")
     with pytest.raises(ValueError, match="derived_sha256"):
-        sp_torch.load_stroke_prototype_tensors(bad, scope="upper")
+        sp_torch.load_stroke_prototype_tensors(
+            bad,
+            scope="upper",
+            allow_legacy_site_velocity=True,
+        )
+
+
+def test_exact_face_loader_rejects_legacy_site_velocity_by_default(
+    sp_torch,
+):
+    with pytest.raises(
+        ValueError,
+        match="legacy official-racket-site velocity",
+    ):
+        sp_torch.load_stroke_prototype_tensors(
+            PROTO_PATH,
+            scope="upper",
+        )
 
 
 def test_torch_reader_pins_the_clip_order(sp_torch):
     with pytest.raises(ValueError, match="clip order"):
         sp_torch.load_stroke_prototype_tensors(
-            PROTO_PATH, scope="upper", expected_motion_ids=("bh_block", "fh_loop"))
+            PROTO_PATH,
+            scope="upper",
+            expected_motion_ids=("bh_block", "fh_loop"),
+            allow_legacy_site_velocity=True,
+        )
 
 
 # ------------------------------------------------------------------ selector --- #

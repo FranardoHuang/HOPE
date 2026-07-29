@@ -8,8 +8,9 @@ Pinned here:
   交叉检查(用"显式值或现值")、bool/NaN/负数拒收。
 * 机器人 body 材质随机化范围覆盖(events.physics_material.params):写成 (lo, hi) tuple、
   长度/顺序/负数 fail-loud。
-* 随机凹凸地形:plane -> generator 切换 + noise_range 传递(builder monkeypatch 检 wiring;
-  真 isaaclab 构造用 importorskip);hi<=0 / hi>0.5 / 非 plane 起点拒收。
+* 随机凹凸地垫(2026-07-29 抬脚地形修复):plane 起点 -> _attach_rough_ground_patch seam
+  (monkeypatch 检 wiring;垫子几何的纯 numpy 性质在 test_terrain_patch.py);hi<=0 / hi>0.5 /
+  带宽<0.01 / 非 plane 起点拒收;摩擦覆盖先落盘、垫子继承 POST-OVERRIDE 材质。
 * schema-3 ground_plant 合同块(training_contract):默认配方 -> None(不落键,历史 checkpoint
   逐字节兼容);任何偏离 -> 完整块;validator 拒 null 拼写、拒"写着默认值的块"、拒篡改/缺键/
   多键;train.py _ground_plant_contract 从 POST-OVERRIDE cfg 读出正确块。
@@ -79,6 +80,7 @@ def test_plant_whitelist_accepts_new_keys_and_rejects_unknown():
         "ground_dynamic_friction",
         "robot_material_static_friction_range",
         "robot_material_dynamic_friction_range",
+        "robot_material_make_consistent",
         "terrain_rough_height_range",
     ):
         assert key in train_mod._PLANT_KEYS
@@ -173,37 +175,60 @@ def test_robot_material_range_requires_event_term():
         _apply_plant({"robot_material_static_friction_range": [0.6, 1.6]}, cfg=cfg)
 
 
+def test_robot_material_make_consistent_true_writes_param_false_is_noop():
+    # true:逐桶 dynamic=min(static, dynamic) 落进 event params;false/null = 缺席,零改动
+    cfg, applied = _apply_plant({"robot_material_make_consistent": True})
+    assert cfg.events.physics_material.params["make_consistent"] is True
+    assert any("make_consistent=True" in line for line in applied)
+    for spelled_false in (False, None):
+        cfg, applied = _apply_plant({"robot_material_make_consistent": spelled_false})
+        assert "make_consistent" not in cfg.events.physics_material.params
+        assert not [line for line in applied if "make_consistent" in line]
+
+
+@pytest.mark.parametrize("bad", ["yes", 1, 0, [True]])
+def test_robot_material_make_consistent_rejects_non_bool(bad):
+    with pytest.raises(train_mod._OverrideError, match="must be a bool"):
+        _apply_plant({"robot_material_make_consistent": bad})
+
+
 # --------------------------------------------------------------------------------------------- #
-# rough terrain
+# rough terrain (2026-07-29 per-env zero-mean pad; the pure geometry lives in
+# test_terrain_patch.py — here we pin the train.py wiring through the _attach seam)
 # --------------------------------------------------------------------------------------------- #
-def test_rough_terrain_switches_plane_to_generator(monkeypatch):
-    sentinel = object()
+def test_rough_terrain_calls_attach_seam_with_authored_band(monkeypatch):
     seen = []
 
-    def fake_builder(height_range):
+    def fake_attach(env_cfg, height_range):
         seen.append(tuple(height_range))
-        return sentinel
+        env_cfg.scene.terrain = None  # 真身的行为:摘掉 plane importer
+        env_cfg.scene.rough_ground_patch = "PATCH"
+        return ["fake pad line (fresh-from-random)"]
 
-    monkeypatch.setattr(train_mod, "_build_rough_terrain_generator_cfg", fake_builder)
+    monkeypatch.setattr(train_mod, "_attach_rough_ground_patch", fake_attach)
     cfg, applied = _apply_plant({"terrain_rough_height_range": [0.02, 0.06]})
-    assert cfg.scene.terrain.terrain_type == "generator"
-    assert cfg.scene.terrain.terrain_generator is sentinel
     assert seen == [(0.02, 0.06)]
-    assert any("fresh-from-random" in line for line in applied)
+    assert cfg.scene.terrain is None
+    assert cfg.scene.rough_ground_patch == "PATCH"
+    assert "fake pad line (fresh-from-random)" in applied
 
 
 def test_rough_terrain_composes_with_friction_overrides(monkeypatch):
-    monkeypatch.setattr(
-        train_mod, "_build_rough_terrain_generator_cfg", lambda height_range: "GEN"
-    )
-    cfg, _ = _apply_plant({
+    # 摩擦覆盖在挂垫之前落盘:seam 被调用时垫子继承的是 POST-OVERRIDE 地面材质。
+    seen_material = []
+
+    def fake_attach(env_cfg, height_range):
+        material = env_cfg.scene.terrain.physics_material
+        seen_material.append((material.static_friction, material.dynamic_friction))
+        return []
+
+    monkeypatch.setattr(train_mod, "_attach_rough_ground_patch", fake_attach)
+    _apply_plant({
         "ground_static_friction": 0.9,
         "ground_dynamic_friction": 0.8,
         "terrain_rough_height_range": [0.02, 0.06],
     })
-    material = cfg.scene.terrain.physics_material
-    assert (material.static_friction, material.dynamic_friction) == (0.9, 0.8)
-    assert cfg.scene.terrain.terrain_type == "generator"
+    assert seen_material == [(0.9, 0.8)]
 
 
 @pytest.mark.parametrize(
@@ -214,6 +239,9 @@ def test_rough_terrain_composes_with_friction_overrides(monkeypatch):
         ([0.06, 0.02], "lo <= hi"),
         ([-0.01, 0.05], ">= 0"),
         ([0.02], "pair"),
+        ([0.02, 0.025], "0.01 m"),  # 居中后 ±0.0025 会量化成死平垫,拒绝
+        ([0.0, 0.2], "0.15 m"),  # 斜坡竖墙修正会破坏桌侧平区边界,拒绝
+        ([0.0, 0.015], "multiple"),  # 非 0.01 倍数会悄悄铺出别的幅度,拒绝
     ],
 )
 def test_rough_terrain_range_fail_loud(bad, msg):
@@ -221,20 +249,30 @@ def test_rough_terrain_range_fail_loud(bad, msg):
         _apply_plant({"terrain_rough_height_range": bad})
 
 
+def test_rough_terrain_nominal_1cm_band_survives_float_noise(monkeypatch):
+    # 0.03-0.02 = 0.00999...:名义 1 cm 带不许被浮点噪声拒掉(train.py 与合同同 epsilon)
+    seen = []
+    monkeypatch.setattr(
+        train_mod, "_attach_rough_ground_patch",
+        lambda env_cfg, hr: (seen.append(tuple(hr)), [])[1],
+    )
+    _apply_plant({"terrain_rough_height_range": [0.02, 0.03]})
+    assert seen == [(0.02, 0.03)]
+    block = TC.ground_plant_block(
+        **{
+            **_DEFAULT_BLOCK_KWARGS,
+            "terrain_type": TC.GROUND_PLANT_TERRAIN_ROUGH,
+            "terrain_rough_height_range_m": [0.02, 0.03],
+        }
+    )
+    assert block["terrain_rough_height_range_m"] == [0.02, 0.03]
+
+
 def test_rough_terrain_refuses_non_plane_start():
     cfg = _ground_env_cfg()
     cfg.scene.terrain.terrain_type = "generator"
     with pytest.raises(train_mod._OverrideError, match="terrain_type=='plane'"):
         _apply_plant({"terrain_rough_height_range": [0.02, 0.06]}, cfg=cfg)
-
-
-def test_real_isaaclab_rough_generator_cfg():
-    pytest.importorskip("isaaclab.terrains")
-    gen = train_mod._build_rough_terrain_generator_cfg((0.02, 0.06))
-    sub = gen.sub_terrains["random_rough"]
-    assert sub.noise_range == (0.02, 0.06)
-    assert sub.proportion == 1.0
-    assert gen.use_cache is False
 
 
 # --------------------------------------------------------------------------------------------- #
@@ -277,7 +315,7 @@ def test_block_rough_terrain_requires_range_and_plane_refuses_it():
             "terrain_rough_height_range_m": [0.02, 0.06],
         }
     )
-    assert block["terrain_type"] == "random_rough_heightfield"
+    assert block["terrain_type"] == "robot_side_zero_mean_patch"
     assert block["terrain_rough_height_range_m"] == [0.02, 0.06]
     with pytest.raises(ValueError, match="must not carry"):
         TC.ground_plant_block(
@@ -291,6 +329,53 @@ def test_block_rough_terrain_requires_range_and_plane_refuses_it():
                 "terrain_rough_height_range_m": [0.0, 0.0],
             }
         )
+    # 带宽合法域与 train.py 同一套红线:<0.01 死平垫 / >0.15 竖墙修正破平区 / 非 0.01 倍数
+    for bad_range, msg in (
+        ([0.02, 0.025], "0.01 m"),
+        ([0.0, 0.2], "0.15 m"),
+        ([0.0, 0.015], "multiple"),
+    ):
+        with pytest.raises(ValueError, match=msg):
+            TC.ground_plant_block(
+                **{
+                    **_DEFAULT_BLOCK_KWARGS,
+                    "terrain_type": TC.GROUND_PLANT_TERRAIN_ROUGH,
+                    "terrain_rough_height_range_m": bad_range,
+                }
+            )
+
+
+def test_block_make_consistent_true_spawns_key_false_is_spelled_by_omission():
+    # true 单独就是一套新 plant(独立采样 vs min 钳制是不同物理),块里长出第 7 键
+    block = TC.ground_plant_block(
+        **{**_DEFAULT_BLOCK_KWARGS}, robot_material_make_consistent=True
+    )
+    assert block["robot_material_make_consistent"] is True
+    TC._validate_ground_plant_contract({"ground_plant": block})
+    # false = 键缺席;显式写 false 的块被拒(一套 plant 只有一种拼写)
+    assert (
+        TC.ground_plant_block(
+            **{**_DEFAULT_BLOCK_KWARGS}, robot_material_make_consistent=False
+        )
+        is None
+    )
+    spelled_false = {k: v for k, v in block.items()}
+    spelled_false["robot_material_make_consistent"] = False
+    with pytest.raises(ValueError, match="omitting the key"):
+        TC._validate_ground_plant_contract({"ground_plant": spelled_false})
+    with pytest.raises(ValueError, match="must be a bool"):
+        TC.ground_plant_block(
+            **{**_DEFAULT_BLOCK_KWARGS}, robot_material_make_consistent="yes"
+        )
+
+
+def test_contract_reader_fingerprints_make_consistent():
+    cfg, _ = _apply_plant({"robot_material_make_consistent": True})
+    block = train_mod._ground_plant_contract(cfg)
+    assert block["robot_material_make_consistent"] is True
+    # 其余键仍是历史默认拼写
+    assert block["robot_material_static_friction_range"] == [0.3, 1.6]
+    assert block["terrain_type"] == "plane"
 
 
 def test_block_dynamic_over_static_and_bad_ranges_fail():
@@ -361,9 +446,12 @@ def test_contract_reader_fingerprints_all_overrides():
         "ground_dynamic_friction": 0.8,
         "robot_material_static_friction_range": [0.6, 1.6],
     })
-    cfg.scene.terrain.terrain_type = "generator"
-    cfg.scene.terrain.terrain_generator = types.SimpleNamespace(
-        sub_terrains={"random_rough": types.SimpleNamespace(noise_range=(0.02, 0.06))}
+    # 模拟 attach_rough_ground_patch 的真身效果:摘掉 plane importer,挂上零均值凹凸垫。
+    # 指纹从垫子 spawn cfg 读 AUTHORED 带宽 + POST-OVERRIDE 地面材质。
+    material = cfg.scene.terrain.physics_material
+    cfg.scene.terrain = None
+    cfg.scene.rough_ground_patch = _NS(
+        spawn=_NS(height_range_m=(0.02, 0.06), physics_material=material)
     )
     block = train_mod._ground_plant_contract(cfg)
     assert block == {
@@ -372,7 +460,7 @@ def test_contract_reader_fingerprints_all_overrides():
         "ground_dynamic_friction": 0.8,
         "robot_material_static_friction_range": [0.6, 1.6],
         "robot_material_dynamic_friction_range": [0.3, 1.2],
-        "terrain_type": "random_rough_heightfield",
+        "terrain_type": "robot_side_zero_mean_patch",
         "terrain_rough_height_range_m": [0.02, 0.06],
     }
     # 老谱系 resume 对账:默认合同没有 ground_plant 键,出现即 diff 不匹配
@@ -381,6 +469,8 @@ def test_contract_reader_fingerprints_all_overrides():
 
 
 def test_contract_reader_fail_loud_on_odd_terrain():
+    # 非 plane 的 TerrainImporter(含旧 generator 血统)一律拒绝指纹:旧 broken-generator
+    # checkpoint 不许被静默当成新垫子 plant。
     cfg = _ground_env_cfg()
     cfg.scene.terrain.terrain_type = "usd"
     with pytest.raises(RuntimeError, match="cannot fingerprint"):
@@ -388,10 +478,25 @@ def test_contract_reader_fail_loud_on_odd_terrain():
     cfg2 = _ground_env_cfg()
     cfg2.scene.terrain.terrain_type = "generator"
     cfg2.scene.terrain.terrain_generator = types.SimpleNamespace(
-        sub_terrains={"pyramids": object()}
+        sub_terrains={"random_rough": types.SimpleNamespace(noise_range=(0.02, 0.06))}
     )
-    with pytest.raises(RuntimeError, match="random_rough"):
+    with pytest.raises(RuntimeError, match="cannot fingerprint"):
         train_mod._ground_plant_contract(cfg2)
+    # 垫子和 terrain 同时在 / 同时不在 -> 配置血统不对,拒绝
+    cfg3 = _ground_env_cfg()
+    cfg3.scene.rough_ground_patch = _NS(spawn=_NS(height_range_m=(0.02, 0.06)))
+    with pytest.raises(RuntimeError, match="exactly one of"):
+        train_mod._ground_plant_contract(cfg3)
+    cfg4 = _ground_env_cfg()
+    cfg4.scene.terrain = None
+    with pytest.raises(RuntimeError, match="exactly one of"):
+        train_mod._ground_plant_contract(cfg4)
+    # 垫子在但 spawn 带宽缺失/畸形 -> fail-loud
+    cfg5 = _ground_env_cfg()
+    cfg5.scene.terrain = None
+    cfg5.scene.rough_ground_patch = _NS(spawn=_NS(height_range_m=None))
+    with pytest.raises(RuntimeError, match="height_range_m"):
+        train_mod._ground_plant_contract(cfg5)
 
 
 if __name__ == "__main__":

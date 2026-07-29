@@ -358,6 +358,92 @@ def test_legal_base_pays_floor_anywhere_on_table_and_kernel_at_center():
     assert v[1].item() == pytest.approx(0.6 + 0.4 * math.exp(-1.0), abs=1e-6)
 
 
+def test_virtual_landing_uses_each_envs_installed_action_ball_target():
+    env, cmd = _vb_env(2)
+    cmd._vb_target_xy_per_env = torch.tensor(
+        [[2.555, 0.0], [2.555, 1.0]]
+    )
+    cmd.vb_landing_xy.copy_(cmd._vb_target_xy_per_env)
+    for flag in (
+        cmd.vb_landing_valid,
+        cmd.vb_net_clear,
+        cmd.vb_on_opponent,
+        cmd.vb_fired,
+    ):
+        flag[:] = True
+    value = hope_rewards_mod.virtual_landing(
+        env,
+        "racket_target",
+        mode="legal_base",
+    )
+    # Env 1 is one metre from the legacy global target but exactly at its
+    # installed per-env aim; both rows must therefore receive the full kernel.
+    assert value.tolist() == pytest.approx([1.0, 1.0], abs=1e-6)
+
+
+def test_counter_rally_quality_reward_is_one_staged_total_without_legacy_double_score():
+    env, cmd = _vb_env(2)
+    cmd._counter_rally_enabled = True
+    cmd._counter_rally_reward_terms = torch.tensor(
+        [
+            [0.11, 0.12, 0.13, 0.14, 0.61],
+            [0.21, 0.22, 0.23, 0.24, 0.83],
+        ],
+        dtype=torch.float32,
+    )
+    cmd._vb_target_xy_per_env = torch.tensor(
+        [[2.1, -0.4], [2.9, 0.5]],
+        dtype=torch.float32,
+    )
+    cmd.vb_fired[:] = True
+    # Make every legacy coarse-scoring signal disagree with the staged score.
+    cmd.vb_landing_xy[:] = torch.tensor(
+        [[99.0, 99.0], [-99.0, -99.0]]
+    )
+    cmd.vb_landing_valid[:] = False
+    cmd.vb_net_clear[:] = False
+    cmd.vb_on_opponent[:] = False
+    cmd.vb_depth_ok[:] = False
+    cmd.vb_net_z = torch.tensor([100.0, -100.0])
+    cmd.vb_topspin = torch.tensor([1000.0, 2000.0])
+
+    landing = hope_rewards_mod.virtual_landing(
+        env,
+        "racket_target",
+        mode="legal_base",
+    )
+    pass_net = hope_rewards_mod.virtual_pass_net(
+        env,
+        "racket_target",
+    )
+    spin = hope_rewards_mod.virtual_spin(env, "racket_target")
+    assert landing.tolist() == pytest.approx([0.61, 0.83], abs=1e-6)
+    assert pass_net.tolist() == [0.0, 0.0]
+    assert spin.tolist() == [0.0, 0.0]
+    assert (landing + pass_net + spin).tolist() == pytest.approx(
+        [0.61, 0.83],
+        abs=1e-6,
+    )
+
+    # The climb alias also reads the same one-shot staged total. Cache clearing
+    # in _vb_evaluate is what makes non-contact steps zero, not a second scorer.
+    cmd.vb_fired[:] = False
+    climb = hope_rewards_mod.virtual_landing(env, "racket_target")
+    assert climb.tolist() == pytest.approx([0.61, 0.83], abs=1e-6)
+
+
+def test_counter_rally_staged_reward_cache_shape_fails_loud():
+    env, cmd = _vb_env(2)
+    cmd._counter_rally_enabled = True
+    cmd._counter_rally_reward_terms = torch.zeros(2, 4)
+    with pytest.raises(RuntimeError, match=r"shape \[num_envs,5\]"):
+        hope_rewards_mod.virtual_landing(
+            env,
+            "racket_target",
+            mode="legal_base",
+        )
+
+
 def test_legal_base_gate_is_a_prerequisite_not_a_bonus():
     env, cmd = _vb_env(1)
     cmd.vb_landing_valid[:] = True

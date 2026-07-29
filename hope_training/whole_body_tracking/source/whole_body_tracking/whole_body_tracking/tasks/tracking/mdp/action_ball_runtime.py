@@ -23,17 +23,43 @@ from __future__ import annotations
 from dataclasses import dataclass
 import base64
 import hashlib
+import importlib.util
 import json
 import math
-from pathlib import PurePosixPath, PureWindowsPath
+from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
+import sys
 from typing import Callable, Dict, Mapping, Protocol, Sequence, Tuple
+
+try:
+    from . import racket_contact_geometry as _contact_geometry
+except ImportError:
+    # Several dependency-light contract tests deliberately load this file by
+    # exact path, outside its package, so importing the sibling explicitly is
+    # the only faithful standalone fallback.  Production package imports take
+    # the normal relative path above.
+    _geometry_path = Path(__file__).with_name(
+        "racket_contact_geometry.py"
+    )
+    _geometry_spec = importlib.util.spec_from_file_location(
+        "_action_ball_racket_contact_geometry", _geometry_path
+    )
+    if _geometry_spec is None or _geometry_spec.loader is None:
+        raise
+    _contact_geometry = importlib.util.module_from_spec(_geometry_spec)
+    sys.modules[_geometry_spec.name] = _contact_geometry
+    _geometry_spec.loader.exec_module(_contact_geometry)
 
 
 Vec2 = Tuple[float, float]
 Vec3 = Tuple[float, float, float]
 
 SCHEMA_VERSION = 3
+TASK_RECEIPT_SCHEMA_VERSION = 5
+TASK_RECEIPT_TIMING_AUTHORITY = (
+    f"per_swing_task_receipt_v{TASK_RECEIPT_SCHEMA_VERSION}"
+    "_exact_face_contact"
+)
 BROKER_STATE_SCHEMA_VERSION = 4
 POOL_STATE_SCHEMA_VERSION = 3
 MAX_ACTION_UID = (1 << 53) - 1
@@ -85,6 +111,7 @@ ARM_CATALOG_SHA256 = (
 _SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 _CONTRACT_DESCRIPTION = {
     "schema_version": SCHEMA_VERSION,
+    "task_receipt_schema_version": TASK_RECEIPT_SCHEMA_VERSION,
     "sampler_schema_version": SAMPLER_SCHEMA_VERSION,
     "arm_catalog_sha256": ARM_CATALOG_SHA256,
     "birth": (
@@ -93,8 +120,12 @@ _CONTRACT_DESCRIPTION = {
         "runtime pins"
     ),
     "task": (
-        "birth/sample/ball/aim/solved racket target plus exact TTC-derived "
-        "teacher retiming proof/residual and the same exact runtime pins"
+        "birth/sample/ball-centre/aim plus exact_face_contact_v2 selected-"
+        "face full orientation, site target, face/site velocities, coupled "
+        "angular teacher retiming proof/residual and the same runtime pins"
+    ),
+    "racket_contact_geometry_source_sha256": (
+        _contact_geometry.GEOMETRY_SOURCE_SHA256
     ),
     "broker": (
         "reserve true reset -> pure full-catalog domain/provider tape "
@@ -117,7 +148,9 @@ _CONTRACT_DESCRIPTION = {
         "arm_catalog_sha256": ARM_CATALOG_SHA256,
     },
     "teacher_timing": (
-        "required=norm(racket_velocity); rate=required/reference_speed; "
+        "required=norm(racket_site_velocity); "
+        "rate=required/reference_site_speed after exact face-centre to site "
+        "omega-cross-r coupling; "
         "scaled_hit=reference_hit/rate; scaled_cycle=reference_cycle/rate; "
         "wait=TTC-scaled_hit; no clipping; certified rate bounds and "
         "reaction_margin<=wait<=1s"
@@ -282,6 +315,10 @@ if ARM_CATALOG_SHA256 != _sha256_json(
 
 class ActionBallContractError(ValueError):
     """A receipt, binding, pin, or serialized state violates the contract."""
+
+
+class CounterRallyTaskIdentityError(ActionBallContractError):
+    """Counter-rally task identity drift; never a difficulty failure."""
 
 
 class BirthProtocolError(RuntimeError):
@@ -508,6 +545,120 @@ def _true_reset(reset_kind: object) -> None:
         )
 
 
+COUNTER_RALLY_TASK_IDENTITY_SCHEMA_VERSION = 1
+_COUNTER_RALLY_TASK_IDENTITY_PAYLOAD_KEYS = (
+    "schema_version",
+    "objective_profile_sha256",
+    "return_direction_env_xy",
+    "target_baseline_speed_mps",
+)
+
+
+@dataclass(frozen=True)
+class CounterRallyTaskIdentity:
+    """Exact N=1 objective values bound inside one solved task receipt."""
+
+    objective_profile_sha256: str
+    return_direction_env_xy: Vec2
+    target_baseline_speed_mps: float
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "objective_profile_sha256",
+            _sha256(
+                self.objective_profile_sha256,
+                name="counter_rally_task.objective_profile_sha256",
+            ),
+        )
+        direction = _vec2(
+            self.return_direction_env_xy,
+            name="counter_rally_task.return_direction_env_xy",
+        )
+        norm = math.hypot(direction[0], direction[1])
+        if abs(norm - 1.0) > UNIT_VECTOR_TOLERANCE:
+            raise ActionBallContractError(
+                "counter_rally_task.return_direction_env_xy must already "
+                f"be unit length within {UNIT_VECTOR_TOLERANCE}; "
+                f"got norm {norm}"
+            )
+        if direction[0] <= 0.0:
+            raise ActionBallContractError(
+                "counter_rally_task.return_direction_env_xy must be "
+                "opponent-bound"
+            )
+        object.__setattr__(
+            self, "return_direction_env_xy", direction
+        )
+        target_speed = _finite(
+            self.target_baseline_speed_mps,
+            name="counter_rally_task.target_baseline_speed_mps",
+            minimum=0.0,
+        )
+        if target_speed <= 0.0:
+            raise ActionBallContractError(
+                "counter_rally_task.target_baseline_speed_mps must be > 0"
+            )
+        object.__setattr__(
+            self, "target_baseline_speed_mps", target_speed
+        )
+
+    def payload_dict(self) -> Dict[str, object]:
+        return {
+            "schema_version": COUNTER_RALLY_TASK_IDENTITY_SCHEMA_VERSION,
+            "objective_profile_sha256": self.objective_profile_sha256,
+            "return_direction_env_xy": list(
+                self.return_direction_env_xy
+            ),
+            "target_baseline_speed_mps": (
+                self.target_baseline_speed_mps
+            ),
+        }
+
+    @property
+    def canonical_sha256(self) -> str:
+        return _sha256_json(self.payload_dict())
+
+    def to_dict(self) -> Dict[str, object]:
+        result = self.payload_dict()
+        result["canonical_sha256"] = self.canonical_sha256
+        return result
+
+    @classmethod
+    def from_dict(cls, value: object) -> "CounterRallyTaskIdentity":
+        row = _exact_mapping(
+            value,
+            (
+                *_COUNTER_RALLY_TASK_IDENTITY_PAYLOAD_KEYS,
+                "canonical_sha256",
+            ),
+            name="counter-rally task identity",
+        )
+        if (
+            row["schema_version"]
+            != COUNTER_RALLY_TASK_IDENTITY_SCHEMA_VERSION
+        ):
+            raise ActionBallContractError(
+                "unsupported counter-rally task identity schema_version"
+            )
+        identity = cls(
+            objective_profile_sha256=row["objective_profile_sha256"],
+            return_direction_env_xy=row["return_direction_env_xy"],
+            target_baseline_speed_mps=row[
+                "target_baseline_speed_mps"
+            ],
+        )
+        declared = _sha256(
+            row["canonical_sha256"],
+            name="counter_rally_task.canonical_sha256",
+        )
+        if declared != identity.canonical_sha256:
+            raise CounterRallyTaskIdentityError(
+                "counter-rally task identity canonical SHA mismatch"
+            )
+        return identity
+
+
 @dataclass(frozen=True)
 class ActionDomainLevels:
     """Frozen normalized widths for the 32 asymmetric curriculum arms."""
@@ -575,6 +726,751 @@ class ActionDomainLevels:
     @property
     def canonical_sha256(self) -> str:
         return _sha256_json(self.to_dict())
+
+
+@dataclass(frozen=True)
+class ActionSamplingMixture:
+    """Runtime copy of the sampler's exact deterministic quota receipt."""
+
+    center_slots: int
+    interior_slots: int
+    frontier_slots: int
+    interior_level_scale: float
+    frontier_band_fraction: float
+    schedule: Tuple[str, ...]
+
+    def __post_init__(self) -> None:
+        weights = []
+        for name in (
+            "center_slots",
+            "interior_slots",
+            "frontier_slots",
+        ):
+            value = _plain_int(
+                getattr(self, name),
+                name=f"sampling_mixture.{name}",
+                minimum=1,
+            )
+            object.__setattr__(self, name, value)
+            weights.append(value)
+        interior = _finite(
+            self.interior_level_scale,
+            name="sampling_mixture.interior_level_scale",
+            minimum=0.0,
+            maximum=1.0,
+        )
+        band = _finite(
+            self.frontier_band_fraction,
+            name="sampling_mixture.frontier_band_fraction",
+            minimum=0.0,
+            maximum=1.0,
+        )
+        if not 0.0 < band < 1.0:
+            raise ActionBallContractError(
+                "sampling mixture frontier band must lie in (0, 1)"
+            )
+        if interior > 1.0 - band + 1.0e-15:
+            raise ActionBallContractError(
+                "sampling mixture interior overlaps frontier"
+            )
+        object.__setattr__(self, "interior_level_scale", interior)
+        object.__setattr__(self, "frontier_band_fraction", band)
+        total = sum(weights)
+        current = [0, 0, 0]
+        names = ("center", "interior", "frontier")
+        expected = []
+        for _ in range(total):
+            for index, weight in enumerate(weights):
+                current[index] += weight
+            chosen = max(
+                range(len(names)),
+                key=lambda index: (current[index], -index),
+            )
+            expected.append(names[chosen])
+            current[chosen] -= total
+        schedule = tuple(self.schedule)
+        if schedule != tuple(expected):
+            raise ActionBallContractError(
+                "sampling mixture schedule differs from exact quota"
+            )
+        object.__setattr__(self, "schedule", schedule)
+
+    def to_dict(self) -> Dict[str, object]:
+        return {
+            "center_slots": self.center_slots,
+            "interior_slots": self.interior_slots,
+            "frontier_slots": self.frontier_slots,
+            "interior_level_scale": self.interior_level_scale,
+            "frontier_band_fraction": self.frontier_band_fraction,
+            "schedule": list(self.schedule),
+        }
+
+    @classmethod
+    def from_dict(cls, value: object) -> "ActionSamplingMixture":
+        row = _exact_mapping(
+            value,
+            (
+                "center_slots",
+                "interior_slots",
+                "frontier_slots",
+                "interior_level_scale",
+                "frontier_band_fraction",
+                "schedule",
+            ),
+            name="action sampling mixture",
+        )
+        raw_schedule = row["schedule"]
+        if not isinstance(raw_schedule, (tuple, list)):
+            raise ActionBallContractError(
+                "sampling mixture schedule must be a sequence"
+            )
+        return cls(
+            center_slots=row["center_slots"],
+            interior_slots=row["interior_slots"],
+            frontier_slots=row["frontier_slots"],
+            interior_level_scale=row["interior_level_scale"],
+            frontier_band_fraction=row["frontier_band_fraction"],
+            schedule=tuple(raw_schedule),
+        )
+
+
+FROZEN_ATTEMPT_SCHEMA_VERSION = 4
+FROZEN_TERMINAL_OUTCOMES = (
+    "legal_return",
+    "safe_nonreturn",
+    "table_hit",
+    "fall",
+    "collision",
+    "joint_qdes_limit",
+    "joint_actual_limit",
+)
+
+
+@dataclass(frozen=True)
+class FrozenEvaluationProposalRequest:
+    """Authority-owned allocation for one frozen-policy proposal.
+
+    This is an in-process request, not an authorization capability.  The
+    evaluator allocates ``policy_generation``, ``seed``, ``sample_index`` and
+    ``birth_index``; callers never submit those values to the evaluator.
+    """
+
+    reservation_sha256: str
+    policy_checkpoint_sha256: str
+    policy_generation: int
+    window_sha256: str
+    evidence_role: str
+    proposal_offset: int
+    seed: int
+    sample_index: int
+    birth_index: int
+    action_uid: int
+    profile_sha256: str
+    mobility_mode: str
+    domain_epoch: int
+    domain_levels: ActionDomainLevels
+    selected_arm_key: str
+
+    def __post_init__(self) -> None:
+        for name in (
+            "reservation_sha256",
+            "policy_checkpoint_sha256",
+            "window_sha256",
+            "profile_sha256",
+        ):
+            object.__setattr__(
+                self,
+                name,
+                _sha256(getattr(self, name), name=name),
+            )
+        for name, minimum, maximum in (
+            ("policy_generation", 1, MAX_COUNTER),
+            ("proposal_offset", 0, MAX_COUNTER),
+            ("seed", 0, MAX_COUNTER),
+            ("sample_index", 0, MAX_COUNTER),
+            ("birth_index", 0, MAX_COUNTER),
+            ("action_uid", 1, MAX_ACTION_UID),
+            ("domain_epoch", 0, MAX_COUNTER),
+        ):
+            object.__setattr__(
+                self,
+                name,
+                _plain_int(
+                    getattr(self, name),
+                    name=name,
+                    minimum=minimum,
+                    maximum=maximum,
+                ),
+            )
+        if self.evidence_role not in (
+            "scheduler",
+            "frozen_canary",
+            "frozen_heldout",
+        ):
+            raise ActionBallContractError(
+                "frozen proposal evidence_role must be scheduler, "
+                "frozen_canary, or frozen_heldout"
+            )
+        object.__setattr__(
+            self,
+            "mobility_mode",
+            _mode(self.mobility_mode),
+        )
+        if not isinstance(self.domain_levels, ActionDomainLevels):
+            raise ActionBallContractError(
+                "frozen proposal domain_levels must be ActionDomainLevels"
+            )
+        if self.selected_arm_key and self.selected_arm_key not in ARM_KEYS:
+            raise ActionBallContractError(
+                "frozen proposal selected_arm_key is outside ARM_KEYS"
+            )
+        expected = _sha256_json(self.identity_payload())
+        if self.reservation_sha256 != expected:
+            raise ActionBallContractError(
+                "frozen proposal reservation SHA does not match its "
+                "authority allocation"
+            )
+
+    def identity_payload(self) -> Dict[str, object]:
+        return {
+            "schema_version": FROZEN_ATTEMPT_SCHEMA_VERSION,
+            "kind": "frozen_evaluation_proposal_reservation",
+            "policy_checkpoint_sha256": self.policy_checkpoint_sha256,
+            "policy_generation": self.policy_generation,
+            "window_sha256": self.window_sha256,
+            "evidence_role": self.evidence_role,
+            "proposal_offset": self.proposal_offset,
+            "seed": self.seed,
+            "sample_index": self.sample_index,
+            "birth_index": self.birth_index,
+            "action_uid": self.action_uid,
+            "profile_sha256": self.profile_sha256,
+            "mobility_mode": self.mobility_mode,
+            "domain_epoch": self.domain_epoch,
+            "domain_levels": self.domain_levels.to_dict(),
+            "selected_arm_key": self.selected_arm_key,
+        }
+
+    @classmethod
+    def create(cls, **kwargs: object) -> "FrozenEvaluationProposalRequest":
+        raw_levels = kwargs.get("domain_levels")
+        if not isinstance(raw_levels, ActionDomainLevels):
+            raise ActionBallContractError(
+                "frozen proposal domain_levels must be ActionDomainLevels"
+            )
+        normalized = dict(kwargs)
+        normalized["domain_levels"] = raw_levels.to_dict()
+        payload = {
+            "schema_version": FROZEN_ATTEMPT_SCHEMA_VERSION,
+            "kind": "frozen_evaluation_proposal_reservation",
+            **normalized,
+        }
+        return cls(
+            reservation_sha256=_sha256_json(payload),
+            **kwargs,
+        )  # type: ignore[arg-type]
+
+
+@dataclass(frozen=True)
+class FrozenIssuedProposal:
+    """Exact sampler/birth identity returned by the pinned attempt source."""
+
+    reservation_sha256: str
+    source_contract_sha256: str
+    source_receipt_sha256: str
+    sample_receipt_sha256: str
+    birth_receipt_sha256: str
+    action_uid: int
+    profile_sha256: str
+    mobility_mode: str
+    domain_epoch: int
+    levels_sha256: str
+    sample_index: int
+    birth_index: int
+    sampling_stratum: str
+    frontier_arm: str
+
+    def __post_init__(self) -> None:
+        for name in (
+            "reservation_sha256",
+            "source_contract_sha256",
+            "source_receipt_sha256",
+            "sample_receipt_sha256",
+            "birth_receipt_sha256",
+            "profile_sha256",
+            "levels_sha256",
+        ):
+            object.__setattr__(
+                self,
+                name,
+                _sha256(getattr(self, name), name=name),
+            )
+        for name, minimum, maximum in (
+            ("action_uid", 1, MAX_ACTION_UID),
+            ("domain_epoch", 0, MAX_COUNTER),
+            ("sample_index", 0, MAX_COUNTER),
+            ("birth_index", 0, MAX_COUNTER),
+        ):
+            object.__setattr__(
+                self,
+                name,
+                _plain_int(
+                    getattr(self, name),
+                    name=name,
+                    minimum=minimum,
+                    maximum=maximum,
+                ),
+            )
+        object.__setattr__(
+            self,
+            "mobility_mode",
+            _mode(self.mobility_mode),
+        )
+        if self.sampling_stratum not in (
+            "center",
+            "interior",
+            "frontier",
+        ):
+            raise ActionBallContractError(
+                "frozen proposal sampling_stratum is invalid"
+            )
+        if self.frontier_arm:
+            if (
+                self.sampling_stratum != "frontier"
+                or self.frontier_arm not in ARM_KEYS
+            ):
+                raise ActionBallContractError(
+                    "frozen proposal frontier arm/stratum mismatch"
+                )
+        elif self.sampling_stratum == "frontier":
+            raise ActionBallContractError(
+                "frontier proposal must name its signed arm"
+            )
+        expected = _sha256_json(self.receipt_payload())
+        if self.source_receipt_sha256 != expected:
+            raise ActionBallContractError(
+                "frozen issued-proposal receipt SHA mismatch"
+            )
+
+    def receipt_payload(self) -> Dict[str, object]:
+        return {
+            "schema_version": FROZEN_ATTEMPT_SCHEMA_VERSION,
+            "kind": "frozen_issued_proposal",
+            "reservation_sha256": self.reservation_sha256,
+            "source_contract_sha256": self.source_contract_sha256,
+            "sample_receipt_sha256": self.sample_receipt_sha256,
+            "birth_receipt_sha256": self.birth_receipt_sha256,
+            "action_uid": self.action_uid,
+            "profile_sha256": self.profile_sha256,
+            "mobility_mode": self.mobility_mode,
+            "domain_epoch": self.domain_epoch,
+            "levels_sha256": self.levels_sha256,
+            "sample_index": self.sample_index,
+            "birth_index": self.birth_index,
+            "sampling_stratum": self.sampling_stratum,
+            "frontier_arm": self.frontier_arm,
+        }
+
+    @classmethod
+    def create(cls, **kwargs: object) -> "FrozenIssuedProposal":
+        payload = {
+            "schema_version": FROZEN_ATTEMPT_SCHEMA_VERSION,
+            "kind": "frozen_issued_proposal",
+            **kwargs,
+        }
+        return cls(
+            source_receipt_sha256=_sha256_json(payload),
+            **kwargs,
+        )  # type: ignore[arg-type]
+
+    def assert_request(
+        self,
+        request: FrozenEvaluationProposalRequest,
+    ) -> None:
+        if not isinstance(request, FrozenEvaluationProposalRequest):
+            raise ActionBallContractError(
+                "issued proposal request must be frozen authority data"
+            )
+        expected = (
+            request.reservation_sha256,
+            request.action_uid,
+            request.profile_sha256,
+            request.mobility_mode,
+            request.domain_epoch,
+            request.domain_levels.canonical_sha256,
+            request.sample_index,
+            request.birth_index,
+        )
+        actual = (
+            self.reservation_sha256,
+            self.action_uid,
+            self.profile_sha256,
+            self.mobility_mode,
+            self.domain_epoch,
+            self.levels_sha256,
+            self.sample_index,
+            self.birth_index,
+        )
+        if actual != expected:
+            raise ActionBallContractError(
+                "issued proposal differs from its authority reservation"
+            )
+
+
+@dataclass(frozen=True)
+class FrozenSolverEvent:
+    """Pinned solver disposition; rejection keeps an explicit reason."""
+
+    proposal_receipt_sha256: str
+    source_contract_sha256: str
+    event_receipt_sha256: str
+    disposition: str
+    reject_reason: str
+    task_receipt_sha256: str
+
+    def __post_init__(self) -> None:
+        for name in (
+            "proposal_receipt_sha256",
+            "source_contract_sha256",
+            "event_receipt_sha256",
+        ):
+            object.__setattr__(
+                self,
+                name,
+                _sha256(getattr(self, name), name=name),
+            )
+        if self.disposition not in ("rejected", "admitted"):
+            raise ActionBallContractError(
+                "solver disposition must be rejected or admitted"
+            )
+        if self.disposition == "rejected":
+            object.__setattr__(
+                self,
+                "reject_reason",
+                _identity(self.reject_reason, name="reject_reason"),
+            )
+            if self.task_receipt_sha256:
+                raise ActionBallContractError(
+                    "rejected solver event cannot name a task receipt"
+                )
+        else:
+            if self.reject_reason:
+                raise ActionBallContractError(
+                    "admitted solver event cannot name a reject reason"
+                )
+            object.__setattr__(
+                self,
+                "task_receipt_sha256",
+                _sha256(
+                    self.task_receipt_sha256,
+                    name="task_receipt_sha256",
+                ),
+            )
+        expected = _sha256_json(self.event_payload())
+        if self.event_receipt_sha256 != expected:
+            raise ActionBallContractError(
+                "frozen solver event receipt SHA mismatch"
+            )
+
+    def event_payload(self) -> Dict[str, object]:
+        return {
+            "schema_version": FROZEN_ATTEMPT_SCHEMA_VERSION,
+            "kind": "frozen_solver_event",
+            "proposal_receipt_sha256": self.proposal_receipt_sha256,
+            "source_contract_sha256": self.source_contract_sha256,
+            "disposition": self.disposition,
+            "reject_reason": self.reject_reason,
+            "task_receipt_sha256": self.task_receipt_sha256,
+        }
+
+    @classmethod
+    def create(cls, **kwargs: object) -> "FrozenSolverEvent":
+        payload = {
+            "schema_version": FROZEN_ATTEMPT_SCHEMA_VERSION,
+            "kind": "frozen_solver_event",
+            **kwargs,
+        }
+        return cls(
+            event_receipt_sha256=_sha256_json(payload),
+            **kwargs,
+        )  # type: ignore[arg-type]
+
+
+@dataclass(frozen=True)
+class FrozenLifecycleEvent:
+    """Exact install/start event emitted from the in-process runtime seam."""
+
+    proposal_receipt_sha256: str
+    task_receipt_sha256: str
+    source_contract_sha256: str
+    stage: str
+    event_receipt_sha256: str
+
+    def __post_init__(self) -> None:
+        for name in (
+            "proposal_receipt_sha256",
+            "task_receipt_sha256",
+            "source_contract_sha256",
+            "event_receipt_sha256",
+        ):
+            object.__setattr__(
+                self,
+                name,
+                _sha256(getattr(self, name), name=name),
+            )
+        if self.stage not in ("installed", "started"):
+            raise ActionBallContractError(
+                "frozen lifecycle event stage is invalid"
+            )
+        expected = _sha256_json(self.event_payload())
+        if self.event_receipt_sha256 != expected:
+            raise ActionBallContractError(
+                "frozen lifecycle event receipt SHA mismatch"
+            )
+
+    def event_payload(self) -> Dict[str, object]:
+        return {
+            "schema_version": FROZEN_ATTEMPT_SCHEMA_VERSION,
+            "kind": "frozen_lifecycle_event",
+            "proposal_receipt_sha256": self.proposal_receipt_sha256,
+            "task_receipt_sha256": self.task_receipt_sha256,
+            "source_contract_sha256": self.source_contract_sha256,
+            "stage": self.stage,
+        }
+
+    @classmethod
+    def create(cls, **kwargs: object) -> "FrozenLifecycleEvent":
+        payload = {
+            "schema_version": FROZEN_ATTEMPT_SCHEMA_VERSION,
+            "kind": "frozen_lifecycle_event",
+            **kwargs,
+        }
+        return cls(
+            event_receipt_sha256=_sha256_json(payload),
+            **kwargs,
+        )  # type: ignore[arg-type]
+
+
+@dataclass(frozen=True)
+class FrozenTerminalSignals:
+    """Raw trusted sensor facts; the outcome is always code-classified."""
+
+    infrastructure_invalid: bool = False
+    joint_actual_limit: bool = False
+    joint_qdes_limit: bool = False
+    fall: bool = False
+    table_hit: bool = False
+    collision: bool = False
+    legal_return: bool = False
+
+    def __post_init__(self) -> None:
+        for name in (
+            "infrastructure_invalid",
+            "joint_actual_limit",
+            "joint_qdes_limit",
+            "fall",
+            "table_hit",
+            "collision",
+            "legal_return",
+        ):
+            if type(getattr(self, name)) is not bool:
+                raise ActionBallContractError(
+                    f"frozen terminal signal {name} must be bool"
+                )
+
+    def to_dict(self) -> Dict[str, bool]:
+        return {
+            name: getattr(self, name)
+            for name in (
+                "infrastructure_invalid",
+                "joint_actual_limit",
+                "joint_qdes_limit",
+                "fall",
+                "table_hit",
+                "collision",
+                "legal_return",
+            )
+        }
+
+
+def classify_frozen_terminal(
+    signals: FrozenTerminalSignals,
+) -> str | None:
+    """Apply the single canonical terminal precedence.
+
+    Infrastructure invalidity is ``X`` and therefore returns ``None``: it
+    burns the reservation but is not a policy closure.  Hard actual-joint
+    limit comes before commanded-limit saturation, then fall/table/collision,
+    legal return, and finally a safe non-return.
+    """
+
+    if not isinstance(signals, FrozenTerminalSignals):
+        raise ActionBallContractError(
+            "terminal classifier needs FrozenTerminalSignals"
+        )
+    if signals.infrastructure_invalid:
+        return None
+    if signals.joint_actual_limit:
+        return "joint_actual_limit"
+    if signals.joint_qdes_limit:
+        return "joint_qdes_limit"
+    if signals.fall:
+        return "fall"
+    if signals.table_hit:
+        return "table_hit"
+    if signals.collision:
+        return "collision"
+    if signals.legal_return:
+        return "legal_return"
+    return "safe_nonreturn"
+
+
+@dataclass(frozen=True)
+class FrozenTerminalEvent:
+    """Pinned sensor receipt.  It never carries a caller-selected outcome."""
+
+    proposal_receipt_sha256: str
+    task_receipt_sha256: str
+    source_contract_sha256: str
+    signals: FrozenTerminalSignals
+    event_receipt_sha256: str
+
+    def __post_init__(self) -> None:
+        for name in (
+            "proposal_receipt_sha256",
+            "task_receipt_sha256",
+            "source_contract_sha256",
+            "event_receipt_sha256",
+        ):
+            object.__setattr__(
+                self,
+                name,
+                _sha256(getattr(self, name), name=name),
+            )
+        if not isinstance(self.signals, FrozenTerminalSignals):
+            raise ActionBallContractError(
+                "terminal event signals must be FrozenTerminalSignals"
+            )
+        expected = _sha256_json(self.event_payload())
+        if self.event_receipt_sha256 != expected:
+            raise ActionBallContractError(
+                "frozen terminal event receipt SHA mismatch"
+            )
+
+    def event_payload(self) -> Dict[str, object]:
+        return {
+            "schema_version": FROZEN_ATTEMPT_SCHEMA_VERSION,
+            "kind": "frozen_terminal_event",
+            "proposal_receipt_sha256": self.proposal_receipt_sha256,
+            "task_receipt_sha256": self.task_receipt_sha256,
+            "source_contract_sha256": self.source_contract_sha256,
+            "signals": self.signals.to_dict(),
+        }
+
+    @property
+    def terminal_outcome(self) -> str | None:
+        return classify_frozen_terminal(self.signals)
+
+    @classmethod
+    def create(cls, **kwargs: object) -> "FrozenTerminalEvent":
+        signals = kwargs.get("signals")
+        if not isinstance(signals, FrozenTerminalSignals):
+            raise ActionBallContractError(
+                "terminal event signals must be FrozenTerminalSignals"
+            )
+        payload = {
+            "schema_version": FROZEN_ATTEMPT_SCHEMA_VERSION,
+            "kind": "frozen_terminal_event",
+            **kwargs,
+            "signals": signals.to_dict(),
+        }
+        return cls(
+            event_receipt_sha256=_sha256_json(payload),
+            **kwargs,
+        )  # type: ignore[arg-type]
+
+
+class FrozenAttemptSource(Protocol):
+    """Same-process, code-pinned source of sampler/solver/runtime events.
+
+    Opaque Python capabilities deliberately do not cross process boundaries.
+    A cross-process evaluator must instead introduce a separately reviewed
+    authenticated transport; JSON rehydration is not equivalent authority.
+    """
+
+    source_contract_sha256: str
+    source_code_sha256: str
+    source_path: str
+    state_owner_sha256: str
+
+    def state_dict(self) -> Mapping[str, object]:
+        ...
+
+    def load_state_dict(self, state: object) -> None:
+        ...
+
+    def issue_proposal(
+        self,
+        request: FrozenEvaluationProposalRequest,
+    ) -> FrozenIssuedProposal:
+        ...
+
+    def assert_exact_proposal(
+        self,
+        request: FrozenEvaluationProposalRequest,
+        proposal: FrozenIssuedProposal,
+    ) -> None:
+        ...
+
+    def solver_event(
+        self,
+        request: FrozenEvaluationProposalRequest,
+        proposal: FrozenIssuedProposal,
+    ) -> FrozenSolverEvent:
+        ...
+
+    def assert_solver_event(
+        self,
+        request: FrozenEvaluationProposalRequest,
+        proposal: FrozenIssuedProposal,
+        event: FrozenSolverEvent,
+    ) -> None:
+        ...
+
+    def lifecycle_event(
+        self,
+        request: FrozenEvaluationProposalRequest,
+        proposal: FrozenIssuedProposal,
+        solver: FrozenSolverEvent,
+        stage: str,
+    ) -> FrozenLifecycleEvent:
+        ...
+
+    def assert_lifecycle_event(
+        self,
+        request: FrozenEvaluationProposalRequest,
+        proposal: FrozenIssuedProposal,
+        solver: FrozenSolverEvent,
+        event: FrozenLifecycleEvent,
+    ) -> None:
+        ...
+
+    def terminal_event(
+        self,
+        request: FrozenEvaluationProposalRequest,
+        proposal: FrozenIssuedProposal,
+        solver: FrozenSolverEvent,
+    ) -> FrozenTerminalEvent:
+        ...
+
+    def assert_terminal_event(
+        self,
+        request: FrozenEvaluationProposalRequest,
+        proposal: FrozenIssuedProposal,
+        solver: FrozenSolverEvent,
+        event: FrozenTerminalEvent,
+    ) -> None:
+        ...
 
 
 @dataclass(frozen=True)
@@ -657,6 +1553,7 @@ class RuntimePins:
     domain_authority_sha256: str
     physics_sha256: str
     solver_sha256: str
+    counter_rally_objective_profile_sha256: str | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -669,18 +1566,38 @@ class RuntimePins:
             object.__setattr__(
                 self, name, _sha256(getattr(self, name), name=name)
             )
+        if self.counter_rally_objective_profile_sha256 is not None:
+            object.__setattr__(
+                self,
+                "counter_rally_objective_profile_sha256",
+                _sha256(
+                    self.counter_rally_objective_profile_sha256,
+                    name=(
+                        "counter_rally_objective_profile_sha256"
+                    ),
+                ),
+            )
 
     def to_dict(self) -> Dict[str, str]:
-        return {
+        result = {
             "manifest_sha256": self.manifest_sha256,
             "sampler_sha256": self.sampler_sha256,
             "domain_authority_sha256": self.domain_authority_sha256,
             "physics_sha256": self.physics_sha256,
             "solver_sha256": self.solver_sha256,
         }
+        if self.counter_rally_objective_profile_sha256 is not None:
+            result["counter_rally_objective_profile_sha256"] = (
+                self.counter_rally_objective_profile_sha256
+            )
+        return result
 
     @classmethod
     def from_dict(cls, value: object) -> "RuntimePins":
+        has_counter_rally_objective = (
+            isinstance(value, Mapping)
+            and "counter_rally_objective_profile_sha256" in value
+        )
         row = _exact_mapping(
             value,
             (
@@ -689,6 +1606,11 @@ class RuntimePins:
                 "domain_authority_sha256",
                 "physics_sha256",
                 "solver_sha256",
+                *(
+                    ("counter_rally_objective_profile_sha256",)
+                    if has_counter_rally_objective
+                    else ()
+                ),
             ),
             name="runtime pins",
         )
@@ -955,6 +1877,14 @@ _BIRTH_PAYLOAD_KEYS = (
     "physics_sha256",
     "solver_sha256",
 )
+_MIXTURE_BIRTH_PAYLOAD_KEYS = (
+    *_BIRTH_PAYLOAD_KEYS[:13],
+    "sampling_mixture",
+    "sampling_stratum",
+    "sampling_levels",
+    "frontier_arm",
+    *_BIRTH_PAYLOAD_KEYS[13:],
+)
 
 
 @dataclass(frozen=True)
@@ -986,6 +1916,10 @@ class ActionBirthReceipt:
     physics_sha256: str
     solver_sha256: str
     registry_sha256: str
+    sampling_mixture: ActionSamplingMixture | None = None
+    sampling_stratum: str = "domain"
+    sampling_levels: ActionDomainLevels | None = None
+    frontier_arm: str | None = None
 
     def __post_init__(self) -> None:
         object.__setattr__(
@@ -1042,6 +1976,70 @@ class ActionBirthReceipt:
             raise ActionBallContractError(
                 "birth receipt arm catalog SHA mismatch"
             )
+        if self.sampling_mixture is None:
+            if (
+                self.sampling_stratum != "domain"
+                or self.frontier_arm is not None
+            ):
+                raise ActionBallContractError(
+                    "legacy birth cannot carry mixture sampling metadata"
+                )
+            object.__setattr__(
+                self,
+                "sampling_levels",
+                ActionDomainLevels(),
+            )
+        else:
+            if not isinstance(
+                self.sampling_mixture, ActionSamplingMixture
+            ):
+                raise ActionBallContractError(
+                    "birth sampling_mixture has invalid type"
+                )
+            if self.sampling_stratum not in (
+                "center",
+                "interior",
+                "frontier",
+            ):
+                raise ActionBallContractError(
+                    "birth sampling_stratum is invalid"
+                )
+            if not isinstance(
+                self.sampling_levels, ActionDomainLevels
+            ):
+                raise ActionBallContractError(
+                    "birth sampling_levels has invalid type"
+                )
+            expected_stratum = self.sampling_mixture.schedule[
+                self.sampler_birth_index
+                % len(self.sampling_mixture.schedule)
+            ]
+            if self.sampling_stratum != expected_stratum:
+                raise ActionBallContractError(
+                    "birth sampling stratum differs from quota schedule"
+                )
+            if (self.sampling_stratum == "frontier") != (
+                self.frontier_arm is not None
+            ):
+                raise ActionBallContractError(
+                    "birth frontier arm must exist exactly at frontier"
+                )
+            if self.frontier_arm is not None and self.frontier_arm not in (
+                "base_spawn_x_lower",
+                "base_spawn_x_upper",
+                "base_spawn_y_lower",
+                "base_spawn_y_upper",
+            ):
+                raise ActionBallContractError(
+                    "birth frontier arm is not a base-spawn arm"
+                )
+            for arm in ARM_KEYS:
+                if getattr(self.sampling_levels, arm) > (
+                    getattr(self.domain_levels, arm) + 1.0e-15
+                ):
+                    raise ActionBallContractError(
+                        "birth sampling levels exceed frozen domain"
+                    )
         object.__setattr__(
             self,
             "sampler_birth_index",
@@ -1142,13 +2140,24 @@ class ActionBirthReceipt:
             "base_yaw_rad": self.base_yaw_rad,
             "base_start_w_m": self.base_spawn_w_m,
         }
+        if self.sampling_mixture is not None:
+            sampler_birth_identity.update(
+                {
+                    "sampling_mixture": (
+                        self.sampling_mixture.to_dict()
+                    ),
+                    "sampling_stratum": self.sampling_stratum,
+                    "sampling_levels": self.sampling_levels.to_dict(),
+                    "frontier_arm": self.frontier_arm,
+                }
+            )
         if _sha256_json(sampler_birth_identity) != self.sampler_birth_sha256:
             raise ActionBallContractError(
                 "sampler birth SHA does not match its exact identity fields"
             )
 
     def payload_dict(self) -> Dict[str, object]:
-        return {
+        result = {
             "schema_version": SCHEMA_VERSION,
             "runtime_contract_sha256": RUNTIME_CONTRACT_SHA256,
             "registry_sha256": self.registry_sha256,
@@ -1177,6 +2186,16 @@ class ActionBirthReceipt:
             "physics_sha256": self.physics_sha256,
             "solver_sha256": self.solver_sha256,
         }
+        if self.sampling_mixture is not None:
+            result.update(
+                {
+                    "sampling_mixture": self.sampling_mixture.to_dict(),
+                    "sampling_stratum": self.sampling_stratum,
+                    "sampling_levels": self.sampling_levels.to_dict(),
+                    "frontier_arm": self.frontier_arm,
+                }
+            )
+        return result
 
     @property
     def canonical_sha256(self) -> str:
@@ -1190,7 +2209,7 @@ class ActionBirthReceipt:
     def sampler_identity_receipt(self) -> Dict[str, object]:
         """Return the exact sampler birth identity without runtime wrappers."""
 
-        return {
+        result = {
             "birth_id": self.sampler_birth_sha256,
             "sampler_contract_sha256": self.sampler_sha256,
             "arm_catalog_sha256": self.arm_catalog_sha256,
@@ -1206,12 +2225,36 @@ class ActionBirthReceipt:
             "base_yaw_rad": self.base_yaw_rad,
             "base_start_w_m": list(self.base_spawn_w_m),
         }
+        if self.sampling_mixture is not None:
+            result.update(
+                {
+                    "sampling_mixture": (
+                        self.sampling_mixture.to_dict()
+                    ),
+                    "sampling_stratum": self.sampling_stratum,
+                    "sampling_levels": self.sampling_levels.to_dict(),
+                    "frontier_arm": self.frontier_arm,
+                }
+            )
+        return result
 
     @classmethod
     def from_dict(cls, value: object) -> "ActionBirthReceipt":
+        if not isinstance(value, Mapping):
+            raise ActionBallContractError(
+                "action birth receipt must be a mapping"
+            )
+        has_mixture = "sampling_mixture" in value
         row = _exact_mapping(
             value,
-            (*_BIRTH_PAYLOAD_KEYS, "canonical_sha256"),
+            (
+                *(
+                    _MIXTURE_BIRTH_PAYLOAD_KEYS
+                    if has_mixture
+                    else _BIRTH_PAYLOAD_KEYS
+                ),
+                "canonical_sha256",
+            ),
             name="action birth receipt",
         )
         if row["schema_version"] != SCHEMA_VERSION:
@@ -1222,14 +2265,28 @@ class ActionBirthReceipt:
             raise ActionBallContractError(
                 "action birth receipt runtime contract SHA mismatch"
             )
+        payload_keys = (
+            _MIXTURE_BIRTH_PAYLOAD_KEYS
+            if has_mixture
+            else _BIRTH_PAYLOAD_KEYS
+        )
         fields = {
             name: row[name]
-            for name in _BIRTH_PAYLOAD_KEYS
+            for name in payload_keys
             if name not in ("schema_version", "runtime_contract_sha256")
         }
         fields["domain_levels"] = ActionDomainLevels.from_dict(
             row["domain_levels"]
         )
+        if has_mixture:
+            fields["sampling_mixture"] = (
+                ActionSamplingMixture.from_dict(
+                    row["sampling_mixture"]
+                )
+            )
+            fields["sampling_levels"] = ActionDomainLevels.from_dict(
+                row["sampling_levels"]
+            )
         receipt = cls(**fields)  # type: ignore[arg-type]
         declared = _sha256(
             row["canonical_sha256"], name="canonical_sha256"
@@ -1291,6 +2348,612 @@ class ActionTeacherTiming:
     pre_swing_wait_s: float
 
 
+BASE_PREPARATION_SCHEMA_VERSION = 1
+BASE_PREPARATION_REJECT_REASON = (
+    "base_preparation_time_insufficient"
+)
+_BASE_PREPARATION_MOTION_MODEL = (
+    "rest_to_rest_planar_trapezoid_with_settle_margin"
+)
+
+
+@dataclass(frozen=True)
+class BasePreparationContract:
+    """Pinned conservative planar base-motion envelope for ``move``.
+
+    The speed and acceleration values are hard limits used by the admission
+    proof, not controller observations or policy inputs.  A producer must pin
+    this exact object in its solver contract before admitting any ``move``
+    sample.
+    """
+
+    max_planar_speed_mps: float
+    max_planar_acceleration_mps2: float
+    settle_margin_s: float
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "max_planar_speed_mps",
+            _finite(
+                self.max_planar_speed_mps,
+                name="base_preparation.max_planar_speed_mps",
+                minimum=0.0,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "max_planar_acceleration_mps2",
+            _finite(
+                self.max_planar_acceleration_mps2,
+                name=(
+                    "base_preparation."
+                    "max_planar_acceleration_mps2"
+                ),
+                minimum=0.0,
+            ),
+        )
+        object.__setattr__(
+            self,
+            "settle_margin_s",
+            _finite(
+                self.settle_margin_s,
+                name="base_preparation.settle_margin_s",
+                minimum=0.0,
+            ),
+        )
+        if self.max_planar_speed_mps <= 0.0:
+            raise ActionBallContractError(
+                "base preparation max planar speed must be > 0"
+            )
+        if self.max_planar_acceleration_mps2 <= 0.0:
+            raise ActionBallContractError(
+                "base preparation max planar acceleration must be > 0"
+            )
+
+    def payload_dict(self) -> Dict[str, object]:
+        return {
+            "schema_version": BASE_PREPARATION_SCHEMA_VERSION,
+            "kind": "base_preparation_contract",
+            "motion_model": _BASE_PREPARATION_MOTION_MODEL,
+            "max_planar_speed_mps": self.max_planar_speed_mps,
+            "max_planar_acceleration_mps2": (
+                self.max_planar_acceleration_mps2
+            ),
+            "settle_margin_s": self.settle_margin_s,
+        }
+
+    @property
+    def canonical_sha256(self) -> str:
+        return _sha256_json(self.payload_dict())
+
+    def to_dict(self) -> Dict[str, object]:
+        result = self.payload_dict()
+        result["canonical_sha256"] = self.canonical_sha256
+        return result
+
+    @classmethod
+    def from_dict(cls, value: object) -> "BasePreparationContract":
+        row = _exact_mapping(
+            value,
+            (
+                "schema_version",
+                "kind",
+                "motion_model",
+                "max_planar_speed_mps",
+                "max_planar_acceleration_mps2",
+                "settle_margin_s",
+                "canonical_sha256",
+            ),
+            name="base preparation contract",
+        )
+        if row["schema_version"] != BASE_PREPARATION_SCHEMA_VERSION:
+            raise ActionBallContractError(
+                "unsupported base preparation contract schema_version"
+            )
+        if row["kind"] != "base_preparation_contract":
+            raise ActionBallContractError(
+                "base preparation contract kind mismatch"
+            )
+        if row["motion_model"] != _BASE_PREPARATION_MOTION_MODEL:
+            raise ActionBallContractError(
+                "base preparation motion model mismatch"
+            )
+        result = cls(
+            max_planar_speed_mps=row["max_planar_speed_mps"],
+            max_planar_acceleration_mps2=(
+                row["max_planar_acceleration_mps2"]
+            ),
+            settle_margin_s=row["settle_margin_s"],
+        )
+        declared = _sha256(
+            row["canonical_sha256"],
+            name="base preparation contract canonical_sha256",
+        )
+        if declared != result.canonical_sha256:
+            raise ActionBallContractError(
+                "base preparation contract canonical SHA mismatch"
+            )
+        return result
+
+
+def _base_motion_time_required_s(
+    distance_m: float,
+    contract: BasePreparationContract,
+) -> float:
+    """Return the rest-to-rest triangular/trapezoidal minimum time."""
+
+    if distance_m == 0.0:
+        return 0.0
+    speed = contract.max_planar_speed_mps
+    acceleration = contract.max_planar_acceleration_mps2
+    distance_to_reach_speed = speed * speed / acceleration
+    if distance_m <= distance_to_reach_speed:
+        return 2.0 * math.sqrt(distance_m / acceleration)
+    return (
+        2.0 * speed / acceleration
+        + (distance_m - distance_to_reach_speed) / speed
+    )
+
+
+@dataclass(frozen=True)
+class BasePreparationReceipt:
+    """Per-proposal admission proof kept outside policy difficulty.
+
+    Each receipt accounts for exactly one sampled solver proposal and zero
+    policy attempts.  Rejected rows therefore remain in the proposal
+    denominator while never entering return-failure or curriculum-difficulty
+    statistics.
+    """
+
+    proposal_sample_sha256: str
+    proposal_sample_index: int
+    mobility_mode: str
+    preparation_contract_sha256: str | None
+    executed_base_travel_b_yaw_m: Vec3
+    planar_travel_distance_m: float
+    max_planar_speed_mps: float
+    max_planar_acceleration_mps2: float
+    settle_margin_s: float
+    motion_time_required_s: float
+    move_preparation_required_s: float
+    reaction_margin_s: float
+    required_preparation_s: float
+    available_preparation_s: float
+    admitted: bool
+    reject_reason: str
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "proposal_sample_sha256",
+            _sha256(
+                self.proposal_sample_sha256,
+                name="base preparation proposal_sample_sha256",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "proposal_sample_index",
+            _plain_int(
+                self.proposal_sample_index,
+                name="base preparation proposal_sample_index",
+            ),
+        )
+        object.__setattr__(
+            self,
+            "mobility_mode",
+            _mode(self.mobility_mode),
+        )
+        travel = _vec3(
+            self.executed_base_travel_b_yaw_m,
+            name="base preparation executed_base_travel_b_yaw_m",
+        )
+        if travel[2] != 0.0:
+            raise ActionBallContractError(
+                "base preparation travel must be planar with exact z=0"
+            )
+        object.__setattr__(
+            self,
+            "executed_base_travel_b_yaw_m",
+            travel,
+        )
+        for name in (
+            "planar_travel_distance_m",
+            "max_planar_speed_mps",
+            "max_planar_acceleration_mps2",
+            "settle_margin_s",
+            "motion_time_required_s",
+            "move_preparation_required_s",
+            "reaction_margin_s",
+            "required_preparation_s",
+            "available_preparation_s",
+        ):
+            object.__setattr__(
+                self,
+                name,
+                _finite(
+                    getattr(self, name),
+                    name=f"base preparation {name}",
+                    minimum=0.0,
+                ),
+            )
+        if type(self.admitted) is not bool:
+            raise ActionBallContractError(
+                "base preparation admitted must be bool"
+            )
+        if type(self.reject_reason) is not str:
+            raise ActionBallContractError(
+                "base preparation reject_reason must be str"
+            )
+        expected_distance = math.hypot(travel[0], travel[1])
+        if self.planar_travel_distance_m != expected_distance:
+            raise ActionBallContractError(
+                "base preparation distance differs from executed travel"
+            )
+        if self.mobility_mode == "no_move":
+            if (
+                travel != (0.0, 0.0, 0.0)
+                or self.preparation_contract_sha256 is not None
+                or self.max_planar_speed_mps != 0.0
+                or self.max_planar_acceleration_mps2 != 0.0
+                or self.settle_margin_s != 0.0
+            ):
+                raise ActionBallContractError(
+                    "no_move preparation must have zero executed travel "
+                    "and no motion contract"
+                )
+            expected_motion = 0.0
+            expected_move_required = 0.0
+        else:
+            contract = BasePreparationContract(
+                max_planar_speed_mps=self.max_planar_speed_mps,
+                max_planar_acceleration_mps2=(
+                    self.max_planar_acceleration_mps2
+                ),
+                settle_margin_s=self.settle_margin_s,
+            )
+            declared_contract = _sha256(
+                self.preparation_contract_sha256,
+                name="base preparation contract SHA",
+            )
+            if declared_contract != contract.canonical_sha256:
+                raise ActionBallContractError(
+                    "base preparation receipt contract SHA mismatch"
+                )
+            object.__setattr__(
+                self,
+                "preparation_contract_sha256",
+                declared_contract,
+            )
+            expected_motion = _base_motion_time_required_s(
+                expected_distance,
+                contract,
+            )
+            expected_move_required = (
+                0.0
+                if expected_distance == 0.0
+                else expected_motion + contract.settle_margin_s
+            )
+        expected_required = max(
+            self.reaction_margin_s,
+            expected_move_required,
+        )
+        if self.available_preparation_s < self.reaction_margin_s:
+            raise ActionBallContractError(
+                "base preparation receipt requires a wait already above "
+                "the reaction margin"
+            )
+        if self.available_preparation_s > MAX_PRE_SWING_WAIT_S:
+            raise ActionBallContractError(
+                "base preparation receipt requires a wait at or below 1s"
+            )
+        expected_admitted = (
+            self.available_preparation_s >= expected_required
+        )
+        expected_reason = (
+            "" if expected_admitted else BASE_PREPARATION_REJECT_REASON
+        )
+        expected_values = (
+            expected_motion,
+            expected_move_required,
+            expected_required,
+            expected_admitted,
+            expected_reason,
+        )
+        declared_values = (
+            self.motion_time_required_s,
+            self.move_preparation_required_s,
+            self.required_preparation_s,
+            self.admitted,
+            self.reject_reason,
+        )
+        if declared_values != expected_values:
+            raise ActionBallContractError(
+                "base preparation receipt differs from exact motion "
+                "envelope/admission formula"
+            )
+
+    @property
+    def proposal_count_delta(self) -> int:
+        return 1
+
+    @property
+    def policy_attempt_count_delta(self) -> int:
+        return 0
+
+    @property
+    def solver_rejection_count_delta(self) -> int:
+        return 0 if self.admitted else 1
+
+    def payload_dict(self) -> Dict[str, object]:
+        return {
+            "schema_version": BASE_PREPARATION_SCHEMA_VERSION,
+            "kind": "base_preparation_receipt",
+            "proposal_sample_sha256": self.proposal_sample_sha256,
+            "proposal_sample_index": self.proposal_sample_index,
+            "mobility_mode": self.mobility_mode,
+            "preparation_contract_sha256": (
+                self.preparation_contract_sha256
+            ),
+            "executed_base_travel_b_yaw_m": list(
+                self.executed_base_travel_b_yaw_m
+            ),
+            "planar_travel_distance_m": self.planar_travel_distance_m,
+            "max_planar_speed_mps": self.max_planar_speed_mps,
+            "max_planar_acceleration_mps2": (
+                self.max_planar_acceleration_mps2
+            ),
+            "settle_margin_s": self.settle_margin_s,
+            "motion_time_required_s": self.motion_time_required_s,
+            "move_preparation_required_s": (
+                self.move_preparation_required_s
+            ),
+            "reaction_margin_s": self.reaction_margin_s,
+            "required_preparation_s": self.required_preparation_s,
+            "available_preparation_s": self.available_preparation_s,
+            "admitted": self.admitted,
+            "reject_reason": self.reject_reason,
+            "proposal_count_delta": self.proposal_count_delta,
+            "policy_attempt_count_delta": (
+                self.policy_attempt_count_delta
+            ),
+            "solver_rejection_count_delta": (
+                self.solver_rejection_count_delta
+            ),
+        }
+
+    @property
+    def canonical_sha256(self) -> str:
+        return _sha256_json(self.payload_dict())
+
+    def to_dict(self) -> Dict[str, object]:
+        result = self.payload_dict()
+        result["canonical_sha256"] = self.canonical_sha256
+        return result
+
+    @classmethod
+    def evaluate(
+        cls,
+        *,
+        proposal_sample_sha256: str,
+        proposal_sample_index: int,
+        mobility_mode: str,
+        base_travel_b_yaw_m: Sequence[float],
+        reaction_margin_s: float,
+        available_preparation_s: float,
+        contract: BasePreparationContract | None,
+    ) -> "BasePreparationReceipt":
+        mode = _mode(mobility_mode)
+        latent_travel = _vec3(
+            base_travel_b_yaw_m,
+            name="base preparation base_travel_b_yaw_m",
+        )
+        if mode == "no_move":
+            if contract is not None:
+                raise ActionBallContractError(
+                    "no_move base preparation must not bind a motion "
+                    "contract"
+                )
+            travel = (0.0, 0.0, 0.0)
+            contract_sha256 = None
+            speed = 0.0
+            acceleration = 0.0
+            settle = 0.0
+            motion_time = 0.0
+            move_required = 0.0
+        else:
+            if not isinstance(contract, BasePreparationContract):
+                raise ActionBallContractError(
+                    "move base preparation requires an exact pinned "
+                    "BasePreparationContract"
+                )
+            if latent_travel[2] != 0.0:
+                raise ActionBallContractError(
+                    "move base preparation travel must have exact z=0"
+                )
+            travel = latent_travel
+            contract_sha256 = contract.canonical_sha256
+            speed = contract.max_planar_speed_mps
+            acceleration = contract.max_planar_acceleration_mps2
+            settle = contract.settle_margin_s
+            distance = math.hypot(travel[0], travel[1])
+            motion_time = _base_motion_time_required_s(
+                distance,
+                contract,
+            )
+            move_required = (
+                0.0
+                if distance == 0.0
+                else motion_time + settle
+            )
+        distance = math.hypot(travel[0], travel[1])
+        reaction = _finite(
+            reaction_margin_s,
+            name="base preparation reaction_margin_s",
+            minimum=0.0,
+        )
+        available = _finite(
+            available_preparation_s,
+            name="base preparation available_preparation_s",
+            minimum=0.0,
+        )
+        required = max(reaction, move_required)
+        admitted = available >= required
+        return cls(
+            proposal_sample_sha256=proposal_sample_sha256,
+            proposal_sample_index=proposal_sample_index,
+            mobility_mode=mode,
+            preparation_contract_sha256=contract_sha256,
+            executed_base_travel_b_yaw_m=travel,
+            planar_travel_distance_m=distance,
+            max_planar_speed_mps=speed,
+            max_planar_acceleration_mps2=acceleration,
+            settle_margin_s=settle,
+            motion_time_required_s=motion_time,
+            move_preparation_required_s=move_required,
+            reaction_margin_s=reaction,
+            required_preparation_s=required,
+            available_preparation_s=available,
+            admitted=admitted,
+            reject_reason=(
+                "" if admitted else BASE_PREPARATION_REJECT_REASON
+            ),
+        )
+
+    @classmethod
+    def from_dict(cls, value: object) -> "BasePreparationReceipt":
+        keys = (
+            "schema_version",
+            "kind",
+            "proposal_sample_sha256",
+            "proposal_sample_index",
+            "mobility_mode",
+            "preparation_contract_sha256",
+            "executed_base_travel_b_yaw_m",
+            "planar_travel_distance_m",
+            "max_planar_speed_mps",
+            "max_planar_acceleration_mps2",
+            "settle_margin_s",
+            "motion_time_required_s",
+            "move_preparation_required_s",
+            "reaction_margin_s",
+            "required_preparation_s",
+            "available_preparation_s",
+            "admitted",
+            "reject_reason",
+            "proposal_count_delta",
+            "policy_attempt_count_delta",
+            "solver_rejection_count_delta",
+        )
+        row = _exact_mapping(
+            value,
+            (*keys, "canonical_sha256"),
+            name="base preparation receipt",
+        )
+        if row["schema_version"] != BASE_PREPARATION_SCHEMA_VERSION:
+            raise ActionBallContractError(
+                "unsupported base preparation receipt schema_version"
+            )
+        if row["kind"] != "base_preparation_receipt":
+            raise ActionBallContractError(
+                "base preparation receipt kind mismatch"
+            )
+        expected_deltas = (
+            1,
+            0,
+            0 if row["admitted"] is True else 1,
+        )
+        declared_deltas = (
+            row["proposal_count_delta"],
+            row["policy_attempt_count_delta"],
+            row["solver_rejection_count_delta"],
+        )
+        if declared_deltas != expected_deltas:
+            raise ActionBallContractError(
+                "base preparation receipt accounting deltas mismatch"
+            )
+        result = cls(
+            **{
+                name: row[name]
+                for name in keys
+                if name
+                not in (
+                    "schema_version",
+                    "kind",
+                    "proposal_count_delta",
+                    "policy_attempt_count_delta",
+                    "solver_rejection_count_delta",
+                )
+            }
+        )
+        declared_sha256 = _sha256(
+            row["canonical_sha256"],
+            name="base preparation receipt canonical_sha256",
+        )
+        if declared_sha256 != result.canonical_sha256:
+            raise ActionBallContractError(
+                "base preparation receipt canonical SHA mismatch"
+            )
+        return result
+
+
+class BasePreparationAdmissionError(ActionBallContractError):
+    """Named solver-admission rejection carrying its full proposal proof."""
+
+    def __init__(self, receipt: BasePreparationReceipt) -> None:
+        if (
+            not isinstance(receipt, BasePreparationReceipt)
+            or receipt.admitted
+            or receipt.reject_reason
+            != BASE_PREPARATION_REJECT_REASON
+        ):
+            raise ActionBallContractError(
+                "base preparation rejection requires a rejected receipt"
+            )
+        self.receipt = receipt
+        self.reject_reason = receipt.reject_reason
+        super().__init__(
+            f"{receipt.reject_reason}: sample="
+            f"{receipt.proposal_sample_index}, distance_m="
+            f"{receipt.planar_travel_distance_m}, required_s="
+            f"{receipt.required_preparation_s}, available_s="
+            f"{receipt.available_preparation_s}"
+        )
+
+
+@dataclass(frozen=True)
+class ActionTeacherTimingWithBasePreparation:
+    """Admitted timing plus its separately hashable solver proof."""
+
+    timing: ActionTeacherTiming
+    base_preparation: BasePreparationReceipt
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.timing, ActionTeacherTiming):
+            raise ActionBallContractError(
+                "prepared teacher timing requires ActionTeacherTiming"
+            )
+        if (
+            not isinstance(
+                self.base_preparation,
+                BasePreparationReceipt,
+            )
+            or not self.base_preparation.admitted
+        ):
+            raise ActionBallContractError(
+                "prepared teacher timing requires an admitted base "
+                "preparation receipt"
+            )
+        if (
+            self.base_preparation.available_preparation_s
+            != self.timing.pre_swing_wait_s
+        ):
+            raise ActionBallContractError(
+                "base preparation available time differs from teacher wait"
+            )
+
+
 def derive_action_teacher_timing(
     *,
     racket_velocity_w_mps: Sequence[float],
@@ -1346,11 +3009,17 @@ def derive_action_teacher_timing(
     required_speed = math.sqrt(
         sum(component * component for component in velocity)
     )
-    teacher_rate = required_speed / reference_speed
-    if not rate_min <= teacher_rate <= rate_max:
-        raise ActionBallContractError(
-            "required teacher rate lies outside certified bounds"
+    try:
+        teacher_rate = (
+            _contact_geometry.canonical_teacher_rate_from_site_speed(
+                required_speed,
+                reference_speed,
+                rate_min,
+                rate_max,
+            )
         )
+    except _contact_geometry.ExactFaceContactGeometryError as error:
+        raise ActionBallContractError(str(error)) from error
     scaled_hit = reference_hit / teacher_rate
     scaled_cycle = reference_cycle / teacher_rate
     wait = ttc - scaled_hit
@@ -1364,6 +3033,105 @@ def derive_action_teacher_timing(
         scaled_t_hit_s=scaled_hit,
         scaled_t_cycle_s=scaled_cycle,
         pre_swing_wait_s=wait,
+    )
+
+
+def derive_action_teacher_site_timing(
+    *,
+    racket_site_velocity_w_mps: Sequence[float],
+    time_to_contact_s: float,
+    reference_t_hit_s: float,
+    reference_t_cycle_s: float,
+    reference_racket_site_speed_mps: float,
+    reaction_margin_s: float,
+    teacher_rate_min: float,
+    teacher_rate_max: float,
+) -> ActionTeacherTiming:
+    """Explicit v2 name for the canonical-site teacher clock.
+
+    ``derive_action_teacher_timing`` remains as a legacy dependency-light
+    primitive for older non-v2 callers.  Fresh ActionBall receipts may only
+    call this wrapper after the exact face-centre/angular-rate solve.
+    """
+
+    return derive_action_teacher_timing(
+        racket_velocity_w_mps=racket_site_velocity_w_mps,
+        time_to_contact_s=time_to_contact_s,
+        reference_t_hit_s=reference_t_hit_s,
+        reference_t_cycle_s=reference_t_cycle_s,
+        reference_racket_site_speed_mps=(
+            reference_racket_site_speed_mps
+        ),
+        reaction_margin_s=reaction_margin_s,
+        teacher_rate_min=teacher_rate_min,
+        teacher_rate_max=teacher_rate_max,
+    )
+
+
+def derive_action_teacher_timing_with_base_preparation(
+    *,
+    racket_velocity_w_mps: Sequence[float],
+    time_to_contact_s: float,
+    reference_t_hit_s: float,
+    reference_t_cycle_s: float,
+    reference_racket_site_speed_mps: float,
+    reaction_margin_s: float,
+    teacher_rate_min: float,
+    teacher_rate_max: float,
+    proposal_sample_sha256: str,
+    proposal_sample_index: int,
+    mobility_mode: str,
+    base_travel_b_yaw_m: Sequence[float],
+    base_preparation_contract: BasePreparationContract | None,
+) -> ActionTeacherTimingWithBasePreparation:
+    """Derive teacher timing, then admit only physically preparable travel.
+
+    The original :func:`derive_action_teacher_timing` remains untouched so
+    legacy ``no_move`` receipts and exact-resume identities stay byte-exact.
+    This explicit seam is mandatory for ``move``: omitting its pinned motion
+    contract fails closed.
+    """
+
+    mode = _mode(mobility_mode)
+    if mode == "move" and not isinstance(
+        base_preparation_contract,
+        BasePreparationContract,
+    ):
+        raise ActionBallContractError(
+            "move teacher timing requires an exact pinned "
+            "BasePreparationContract"
+        )
+    if mode == "no_move" and base_preparation_contract is not None:
+        raise ActionBallContractError(
+            "no_move teacher timing must not bind a base preparation "
+            "contract"
+        )
+    timing = derive_action_teacher_timing(
+        racket_velocity_w_mps=racket_velocity_w_mps,
+        time_to_contact_s=time_to_contact_s,
+        reference_t_hit_s=reference_t_hit_s,
+        reference_t_cycle_s=reference_t_cycle_s,
+        reference_racket_site_speed_mps=(
+            reference_racket_site_speed_mps
+        ),
+        reaction_margin_s=reaction_margin_s,
+        teacher_rate_min=teacher_rate_min,
+        teacher_rate_max=teacher_rate_max,
+    )
+    preparation = BasePreparationReceipt.evaluate(
+        proposal_sample_sha256=proposal_sample_sha256,
+        proposal_sample_index=proposal_sample_index,
+        mobility_mode=mode,
+        base_travel_b_yaw_m=base_travel_b_yaw_m,
+        reaction_margin_s=reaction_margin_s,
+        available_preparation_s=timing.pre_swing_wait_s,
+        contract=base_preparation_contract,
+    )
+    if not preparation.admitted:
+        raise BasePreparationAdmissionError(preparation)
+    return ActionTeacherTimingWithBasePreparation(
+        timing=timing,
+        base_preparation=preparation,
     )
 
 
@@ -1397,6 +3165,7 @@ _TASK_PAYLOAD_KEYS = (
     "base_travel_latent_b_yaw_m",
     "contact_offset_from_base_goal_b_yaw_m",
     "ball_contact_w_m",
+    "racket_site_target_w_m",
     "time_to_contact_s",
     "incoming_speed_mps",
     "incoming_direction_b_yaw",
@@ -1405,8 +3174,15 @@ _TASK_PAYLOAD_KEYS = (
     "spin_direction_b_yaw",
     "incoming_spin_w_radps",
     "landing_aim_w_xy_m",
-    "racket_velocity_w_mps",
+    "mount_normal_sign",
     "racket_normal_w",
+    "reference_racket_quat_wxyz",
+    "reference_racket_angular_velocity_w_radps",
+    "racket_command_quat_wxyz",
+    "racket_face_center_velocity_w_mps",
+    "racket_site_velocity_w_mps",
+    "racket_command_angular_velocity_w_radps",
+    "geometry_source_sha256",
     "reference_t_hit_s",
     "reference_t_cycle_s",
     "reference_racket_site_speed_mps",
@@ -1425,6 +3201,27 @@ _TASK_PAYLOAD_KEYS = (
     "motion_sha256",
     "physics_sha256",
     "solver_sha256",
+)
+_MIXTURE_TASK_PAYLOAD_KEYS = (
+    *_TASK_PAYLOAD_KEYS,
+    "birth_index",
+    "birth_sampling_stratum",
+    "birth_sampling_levels",
+    "birth_frontier_arm",
+    "sampling_mixture",
+    "sampling_stratum",
+    "sampling_levels",
+    "frontier_arm",
+    "contact_time_step_s",
+    "time_to_contact_tick",
+)
+_COUNTER_RALLY_TASK_PAYLOAD_KEYS = (
+    *_TASK_PAYLOAD_KEYS,
+    "counter_rally_task",
+)
+_COUNTER_RALLY_MIXTURE_TASK_PAYLOAD_KEYS = (
+    *_MIXTURE_TASK_PAYLOAD_KEYS,
+    "counter_rally_task",
 )
 
 
@@ -1548,6 +3345,7 @@ class ActionBallTaskReceipt:
     base_travel_latent_b_yaw_m: Vec3
     contact_offset_from_base_goal_b_yaw_m: Vec3
     ball_contact_w_m: Vec3
+    racket_site_target_w_m: Vec3
     time_to_contact_s: float
     incoming_speed_mps: float
     incoming_direction_b_yaw: Vec3
@@ -1556,8 +3354,15 @@ class ActionBallTaskReceipt:
     spin_direction_b_yaw: Vec3
     incoming_spin_w_radps: Vec3
     landing_aim_w_xy_m: Vec2
-    racket_velocity_w_mps: Vec3
+    mount_normal_sign: int
     racket_normal_w: Vec3
+    reference_racket_quat_wxyz: Tuple[float, float, float, float]
+    reference_racket_angular_velocity_w_radps: Vec3
+    racket_command_quat_wxyz: Tuple[float, float, float, float]
+    racket_face_center_velocity_w_mps: Vec3
+    racket_site_velocity_w_mps: Vec3
+    racket_command_angular_velocity_w_radps: Vec3
+    geometry_source_sha256: str
     reference_t_hit_s: float
     reference_t_cycle_s: float
     reference_racket_site_speed_mps: float
@@ -1577,6 +3382,17 @@ class ActionBallTaskReceipt:
     physics_sha256: str
     solver_sha256: str
     registry_sha256: str
+    birth_index: int = -1
+    birth_sampling_stratum: str = "domain"
+    birth_sampling_levels: ActionDomainLevels | None = None
+    birth_frontier_arm: str | None = None
+    sampling_mixture: ActionSamplingMixture | None = None
+    sampling_stratum: str = "domain"
+    sampling_levels: ActionDomainLevels | None = None
+    frontier_arm: str | None = None
+    contact_time_step_s: float | None = None
+    time_to_contact_tick: int | None = None
+    counter_rally_task: CounterRallyTaskIdentity | None = None
 
     def __post_init__(self) -> None:
         for name in (
@@ -1594,6 +3410,7 @@ class ActionBallTaskReceipt:
             "motion_sha256",
             "physics_sha256",
             "solver_sha256",
+            "geometry_source_sha256",
         ):
             object.__setattr__(
                 self, name, _sha256(getattr(self, name), name=name)
@@ -1650,6 +3467,17 @@ class ActionBallTaskReceipt:
             raise ActionBallContractError(
                 "task receipt arm catalog SHA mismatch"
             )
+        if (
+            self.counter_rally_task is not None
+            and not isinstance(
+                self.counter_rally_task,
+                CounterRallyTaskIdentity,
+            )
+        ):
+            raise ActionBallContractError(
+                "task receipt counter_rally_task must be "
+                "CounterRallyTaskIdentity or None"
+            )
         object.__setattr__(
             self, "mobility_mode", _mode(self.mobility_mode)
         )
@@ -1672,12 +3500,57 @@ class ActionBallTaskReceipt:
             "base_travel_latent_b_yaw_m",
             "contact_offset_from_base_goal_b_yaw_m",
             "ball_contact_w_m",
+            "racket_site_target_w_m",
             "incoming_velocity_w_mps",
             "incoming_spin_w_radps",
-            "racket_velocity_w_mps",
+            "reference_racket_angular_velocity_w_radps",
+            "racket_face_center_velocity_w_mps",
+            "racket_site_velocity_w_mps",
+            "racket_command_angular_velocity_w_radps",
         ):
             object.__setattr__(
                 self, name, _vec3(getattr(self, name), name=name)
+            )
+        object.__setattr__(
+            self,
+            "mount_normal_sign",
+            _plain_int(
+                self.mount_normal_sign,
+                name="mount_normal_sign",
+                minimum=-1,
+                maximum=1,
+            ),
+        )
+        if self.mount_normal_sign not in (-1, 1):
+            raise ActionBallContractError(
+                "task receipt mount_normal_sign must be +1 or -1"
+            )
+        object.__setattr__(
+            self,
+            "reference_racket_quat_wxyz",
+            _contact_geometry.canonical_quat_wxyz(
+                _unit_quat_wxyz(
+                    self.reference_racket_quat_wxyz,
+                    name="reference_racket_quat_wxyz",
+                )
+            ),
+        )
+        object.__setattr__(
+            self,
+            "racket_command_quat_wxyz",
+            _contact_geometry.canonical_quat_wxyz(
+                _unit_quat_wxyz(
+                    self.racket_command_quat_wxyz,
+                    name="racket_command_quat_wxyz",
+                )
+            ),
+        )
+        if (
+            self.geometry_source_sha256
+            != _contact_geometry.GEOMETRY_SOURCE_SHA256
+        ):
+            raise ActionBallContractError(
+                "task receipt exact-face geometry source SHA mismatch"
             )
         object.__setattr__(
             self,
@@ -1708,6 +3581,116 @@ class ActionBallTaskReceipt:
                 "sampler sample draw range must consume exactly "
                 f"{SAMPLER_SAMPLE_DRAW_COUNT} draws"
             )
+        if self.sampling_mixture is None:
+            if (
+                self.birth_index != -1
+                or self.birth_sampling_stratum != "domain"
+                or self.birth_frontier_arm is not None
+                or self.sampling_stratum != "domain"
+                or self.frontier_arm is not None
+                or self.contact_time_step_s is not None
+                or self.time_to_contact_tick is not None
+            ):
+                raise ActionBallContractError(
+                    "legacy task cannot carry mixture/tick metadata"
+                )
+            object.__setattr__(
+                self, "birth_sampling_levels", self.domain_levels
+            )
+            object.__setattr__(
+                self, "sampling_levels", self.domain_levels
+            )
+        else:
+            if not isinstance(
+                self.sampling_mixture, ActionSamplingMixture
+            ):
+                raise ActionBallContractError(
+                    "task sampling_mixture has invalid type"
+                )
+            object.__setattr__(
+                self,
+                "birth_index",
+                _plain_int(
+                    self.birth_index,
+                    name="birth_index",
+                ),
+            )
+            if not isinstance(
+                self.birth_sampling_levels, ActionDomainLevels
+            ) or not isinstance(
+                self.sampling_levels, ActionDomainLevels
+            ):
+                raise ActionBallContractError(
+                    "task sampling levels have invalid type"
+                )
+            schedule = self.sampling_mixture.schedule
+            expected_birth_stratum = schedule[
+                self.birth_index % len(schedule)
+            ]
+            expected_sample_stratum = schedule[
+                self.sample_index % len(schedule)
+            ]
+            if (
+                self.birth_sampling_stratum
+                != expected_birth_stratum
+                or self.sampling_stratum != expected_sample_stratum
+            ):
+                raise ActionBallContractError(
+                    "task sampling stratum differs from quota schedule"
+                )
+            if (self.birth_sampling_stratum == "frontier") != (
+                self.birth_frontier_arm is not None
+            ) or (self.sampling_stratum == "frontier") != (
+                self.frontier_arm is not None
+            ):
+                raise ActionBallContractError(
+                    "task frontier arm presence disagrees with stratum"
+                )
+            if self.birth_frontier_arm is not None and (
+                self.birth_frontier_arm
+                not in (
+                    "base_spawn_x_lower",
+                    "base_spawn_x_upper",
+                    "base_spawn_y_lower",
+                    "base_spawn_y_upper",
+                )
+            ):
+                raise ActionBallContractError(
+                    "task birth frontier is not a base-spawn arm"
+                )
+            if self.frontier_arm is not None and (
+                self.frontier_arm not in ARM_KEYS
+                or self.frontier_arm.startswith("base_spawn_")
+            ):
+                raise ActionBallContractError(
+                    "task swing frontier arm is invalid"
+                )
+            for arm in ARM_KEYS:
+                if (
+                    getattr(self.birth_sampling_levels, arm)
+                    > getattr(self.domain_levels, arm) + 1.0e-15
+                    or getattr(self.sampling_levels, arm)
+                    > getattr(self.domain_levels, arm) + 1.0e-15
+                ):
+                    raise ActionBallContractError(
+                        "task sampling levels exceed frozen domain"
+                    )
+            step = _finite(
+                self.contact_time_step_s,
+                name="contact_time_step_s",
+                minimum=0.0,
+            )
+            if step <= 0.0:
+                raise ActionBallContractError(
+                    "task contact_time_step_s must be > 0"
+                )
+            tick = _plain_int(
+                self.time_to_contact_tick,
+                name="time_to_contact_tick",
+                minimum=1,
+            )
+            object.__setattr__(self, "contact_time_step_s", step)
+            object.__setattr__(self, "time_to_contact_tick", tick)
         object.__setattr__(
             self,
             "time_to_contact_s",
@@ -1717,6 +3700,14 @@ class ActionBallTaskReceipt:
                 minimum=0.0,
             ),
         )
+        if (
+            self.contact_time_step_s is not None
+            and self.time_to_contact_s
+            != self.time_to_contact_tick * self.contact_time_step_s
+        ):
+            raise ActionBallContractError(
+                "task TTC is not exactly its policy-step tick"
+            )
         object.__setattr__(
             self,
             "incoming_speed_mps",
@@ -1734,6 +3725,39 @@ class ActionBallTaskReceipt:
                 name="incoming_direction_b_yaw",
             ),
         )
+        if self.counter_rally_task is not None:
+            incoming_direction_w = _rotate_yaw(
+                self.incoming_direction_b_yaw,
+                self.base_yaw_rad,
+            )
+            horizontal_norm = math.hypot(
+                incoming_direction_w[0],
+                incoming_direction_w[1],
+            )
+            if horizontal_norm <= 1.0e-12:
+                raise CounterRallyTaskIdentityError(
+                    "counter-rally incoming horizontal direction is zero"
+                )
+            expected_return_direction = (
+                -incoming_direction_w[0] / horizontal_norm,
+                -incoming_direction_w[1] / horizontal_norm,
+            )
+            if any(
+                not math.isclose(
+                    declared,
+                    expected,
+                    rel_tol=0.0,
+                    abs_tol=1.0e-10,
+                )
+                for declared, expected in zip(
+                    self.counter_rally_task.return_direction_env_xy,
+                    expected_return_direction,
+                )
+            ):
+                raise CounterRallyTaskIdentityError(
+                    "counter-rally return direction is not the exact "
+                    "horizontal reverse of the sampled incoming ball"
+                )
         object.__setattr__(
             self,
             "spin_magnitude_radps",
@@ -1792,8 +3816,80 @@ class ActionBallTaskReceipt:
                     minimum=0.0,
                 ),
             )
-        timing = derive_action_teacher_timing(
-            racket_velocity_w_mps=self.racket_velocity_w_mps,
+        try:
+            geometry = _contact_geometry.solve_exact_face_contact(
+                ball_contact_w_m=self.ball_contact_w_m,
+                racket_face_center_velocity_w_mps=(
+                    self.racket_face_center_velocity_w_mps
+                ),
+                solved_raw_a_normal_w=self.racket_normal_w,
+                mount_normal_sign=self.mount_normal_sign,
+                reference_racket_quat_wxyz=(
+                    self.reference_racket_quat_wxyz
+                ),
+                reference_racket_angular_velocity_w_radps=(
+                    self.reference_racket_angular_velocity_w_radps
+                ),
+                reference_racket_site_speed_mps=(
+                    self.reference_racket_site_speed_mps
+                ),
+                teacher_rate_min=self.teacher_rate_min,
+                teacher_rate_max=self.teacher_rate_max,
+            )
+        except _contact_geometry.ExactFaceContactGeometryError as error:
+            raise ActionBallContractError(
+                "task receipt exact-face geometry proof is invalid: "
+                f"{error}"
+            ) from error
+        geometry_vectors = (
+            (
+                self.racket_site_target_w_m,
+                geometry.racket_site_target_w_m,
+                "racket_site_target_w_m",
+            ),
+            (
+                self.racket_face_center_velocity_w_mps,
+                geometry.racket_face_center_velocity_w_mps,
+                "racket_face_center_velocity_w_mps",
+            ),
+            (
+                self.racket_site_velocity_w_mps,
+                geometry.racket_site_velocity_w_mps,
+                "racket_site_velocity_w_mps",
+            ),
+            (
+                self.racket_command_angular_velocity_w_radps,
+                geometry.racket_command_angular_velocity_w_radps,
+                "racket_command_angular_velocity_w_radps",
+            ),
+        )
+        for declared, expected, name in geometry_vectors:
+            if not _vec3_close(declared, expected, tolerance=1.0e-10):
+                raise ActionBallContractError(
+                    f"task receipt {name} differs from exact-face geometry"
+                )
+        if any(
+            not math.isclose(a, b, rel_tol=0.0, abs_tol=1.0e-12)
+            for a, b in zip(
+                self.racket_command_quat_wxyz,
+                geometry.racket_command_quat_wxyz,
+            )
+        ):
+            raise ActionBallContractError(
+                "task receipt racket command quaternion does not preserve "
+                "the reference twist through the deterministic minimal rotation"
+            )
+        if not math.isclose(
+            self.teacher_rate,
+            geometry.teacher_rate,
+            rel_tol=0.0,
+            abs_tol=1.0e-12,
+        ):
+            raise ActionBallContractError(
+                "task teacher rate differs from exact face/site angular solve"
+            )
+        timing = derive_action_teacher_site_timing(
+            racket_site_velocity_w_mps=self.racket_site_velocity_w_mps,
             time_to_contact_s=self.time_to_contact_s,
             reference_t_hit_s=self.reference_t_hit_s,
             reference_t_cycle_s=self.reference_t_cycle_s,
@@ -1901,7 +3997,7 @@ class ActionBallTaskReceipt:
             )
 
     def _sampler_identity_payload(self) -> Dict[str, object]:
-        return {
+        payload = {
             "schema_version": SAMPLER_SCHEMA_VERSION,
             "kind": "swing_sample",
             "sampler_contract_sha256": self.sampler_sha256,
@@ -1942,6 +4038,65 @@ class ActionBallTaskReceipt:
             "spin_w_radps": self.incoming_spin_w_radps,
             "landing_aim_w_xy_m": self.landing_aim_w_xy_m,
         }
+        if self.sampling_mixture is None:
+            return payload
+        return {
+            **{
+                key: payload[key]
+                for key in (
+                    "schema_version",
+                    "kind",
+                    "sampler_contract_sha256",
+                    "arm_catalog_sha256",
+                    "sample_index",
+                    "action_uid",
+                    "domain_epoch",
+                    "domain_levels",
+                )
+            },
+            "birth_index": self.birth_index,
+            "birth_sampling_stratum": (
+                self.birth_sampling_stratum
+            ),
+            "birth_sampling_levels": (
+                self.birth_sampling_levels.to_dict()
+            ),
+            "birth_frontier_arm": self.birth_frontier_arm,
+            "sampling_mixture": self.sampling_mixture.to_dict(),
+            "sampling_stratum": self.sampling_stratum,
+            "sampling_levels": self.sampling_levels.to_dict(),
+            "frontier_arm": self.frontier_arm,
+            **{
+                key: payload[key]
+                for key in (
+                    "birth_id",
+                    "profile_sha256",
+                    "levels_sha256",
+                    "draw_start",
+                    "draw_end",
+                    "mobility_mode",
+                    "base_yaw_rad",
+                    "base_start_w_m",
+                    "base_spawn_latent_w_m",
+                    "base_travel_latent_b_yaw_m",
+                    "base_goal_w_m",
+                    "contact_offset_from_base_goal_b_yaw_m",
+                    "contact_w_m",
+                    "time_to_contact_s",
+                    "incoming_speed_mps",
+                    "incoming_direction_b_yaw",
+                    "incoming_direction_w",
+                    "incoming_velocity_w_mps",
+                    "spin_magnitude_radps",
+                    "spin_direction_b_yaw",
+                    "spin_direction_w",
+                    "spin_w_radps",
+                    "landing_aim_w_xy_m",
+                )
+            },
+            "contact_time_step_s": self.contact_time_step_s,
+            "time_to_contact_tick": self.time_to_contact_tick,
+        }
 
     def sampler_identity_receipt(self) -> Dict[str, object]:
         """Return the exact flat proof accepted by ActionBallSampler."""
@@ -1966,6 +4121,7 @@ class ActionBallTaskReceipt:
         base_travel_latent_b_yaw_m: Sequence[float],
         contact_offset_from_base_goal_b_yaw_m: Sequence[float],
         ball_contact_w_m: Sequence[float],
+        racket_site_target_w_m: Sequence[float],
         time_to_contact_s: float,
         incoming_speed_mps: float,
         incoming_direction_b_yaw: Sequence[float],
@@ -1974,8 +4130,15 @@ class ActionBallTaskReceipt:
         spin_direction_b_yaw: Sequence[float],
         incoming_spin_w_radps: Sequence[float],
         landing_aim_w_xy_m: Sequence[float],
-        racket_velocity_w_mps: Sequence[float],
+        mount_normal_sign: int,
         racket_normal_w: Sequence[float],
+        reference_racket_quat_wxyz: Sequence[float],
+        reference_racket_angular_velocity_w_radps: Sequence[float],
+        racket_command_quat_wxyz: Sequence[float],
+        racket_face_center_velocity_w_mps: Sequence[float],
+        racket_site_velocity_w_mps: Sequence[float],
+        racket_command_angular_velocity_w_radps: Sequence[float],
+        geometry_source_sha256: str,
         reference_t_hit_s: float,
         reference_t_cycle_s: float,
         reference_racket_site_speed_mps: float,
@@ -1988,6 +4151,17 @@ class ActionBallTaskReceipt:
         scaled_t_cycle_s: float,
         pre_swing_wait_s: float,
         solver_residual_m: float,
+        contact_time_step_s: float | None = None,
+        time_to_contact_tick: int | None = None,
+        birth_index: int = -1,
+        birth_sampling_stratum: str = "domain",
+        birth_sampling_levels: ActionDomainLevels | None = None,
+        birth_frontier_arm: str | None = None,
+        sampling_mixture: ActionSamplingMixture | None = None,
+        sampling_stratum: str = "domain",
+        sampling_levels: ActionDomainLevels | None = None,
+        frontier_arm: str | None = None,
+        counter_rally_task: CounterRallyTaskIdentity | None = None,
     ) -> "ActionBallTaskReceipt":
         if not isinstance(birth, ActionBirthReceipt):
             raise ActionBallContractError(
@@ -2034,7 +4208,10 @@ class ActionBallTaskReceipt:
                 contact_offset_from_base_goal_b_yaw_m
             ),
             ball_contact_w_m=tuple(ball_contact_w_m),
+            racket_site_target_w_m=tuple(racket_site_target_w_m),
             time_to_contact_s=time_to_contact_s,
+            contact_time_step_s=contact_time_step_s,
+            time_to_contact_tick=time_to_contact_tick,
             incoming_speed_mps=incoming_speed_mps,
             incoming_direction_b_yaw=tuple(
                 incoming_direction_b_yaw
@@ -2044,8 +4221,27 @@ class ActionBallTaskReceipt:
             spin_direction_b_yaw=tuple(spin_direction_b_yaw),
             incoming_spin_w_radps=tuple(incoming_spin_w_radps),
             landing_aim_w_xy_m=tuple(landing_aim_w_xy_m),
-            racket_velocity_w_mps=tuple(racket_velocity_w_mps),
+            mount_normal_sign=mount_normal_sign,
             racket_normal_w=tuple(racket_normal_w),
+            reference_racket_quat_wxyz=tuple(
+                reference_racket_quat_wxyz
+            ),
+            reference_racket_angular_velocity_w_radps=tuple(
+                reference_racket_angular_velocity_w_radps
+            ),
+            racket_command_quat_wxyz=tuple(
+                racket_command_quat_wxyz
+            ),
+            racket_face_center_velocity_w_mps=tuple(
+                racket_face_center_velocity_w_mps
+            ),
+            racket_site_velocity_w_mps=tuple(
+                racket_site_velocity_w_mps
+            ),
+            racket_command_angular_velocity_w_radps=tuple(
+                racket_command_angular_velocity_w_radps
+            ),
+            geometry_source_sha256=geometry_source_sha256,
             reference_t_hit_s=reference_t_hit_s,
             reference_t_cycle_s=reference_t_cycle_s,
             reference_racket_site_speed_mps=(
@@ -2068,11 +4264,20 @@ class ActionBallTaskReceipt:
             motion_sha256=birth.motion_sha256,
             physics_sha256=birth.physics_sha256,
             solver_sha256=birth.solver_sha256,
+            birth_index=birth_index,
+            birth_sampling_stratum=birth_sampling_stratum,
+            birth_sampling_levels=birth_sampling_levels,
+            birth_frontier_arm=birth_frontier_arm,
+            sampling_mixture=sampling_mixture,
+            sampling_stratum=sampling_stratum,
+            sampling_levels=sampling_levels,
+            frontier_arm=frontier_arm,
+            counter_rally_task=counter_rally_task,
         )
 
     def payload_dict(self) -> Dict[str, object]:
-        return {
-            "schema_version": SCHEMA_VERSION,
+        payload = {
+            "schema_version": TASK_RECEIPT_SCHEMA_VERSION,
             "runtime_contract_sha256": RUNTIME_CONTRACT_SHA256,
             "registry_sha256": self.registry_sha256,
             "birth_sha256": self.birth_sha256,
@@ -2107,6 +4312,9 @@ class ActionBallTaskReceipt:
                 self.contact_offset_from_base_goal_b_yaw_m
             ),
             "ball_contact_w_m": list(self.ball_contact_w_m),
+            "racket_site_target_w_m": list(
+                self.racket_site_target_w_m
+            ),
             "time_to_contact_s": self.time_to_contact_s,
             "incoming_speed_mps": self.incoming_speed_mps,
             "incoming_direction_b_yaw": list(
@@ -2121,8 +4329,27 @@ class ActionBallTaskReceipt:
             ),
             "incoming_spin_w_radps": list(self.incoming_spin_w_radps),
             "landing_aim_w_xy_m": list(self.landing_aim_w_xy_m),
-            "racket_velocity_w_mps": list(self.racket_velocity_w_mps),
+            "mount_normal_sign": self.mount_normal_sign,
             "racket_normal_w": list(self.racket_normal_w),
+            "reference_racket_quat_wxyz": list(
+                self.reference_racket_quat_wxyz
+            ),
+            "reference_racket_angular_velocity_w_radps": list(
+                self.reference_racket_angular_velocity_w_radps
+            ),
+            "racket_command_quat_wxyz": list(
+                self.racket_command_quat_wxyz
+            ),
+            "racket_face_center_velocity_w_mps": list(
+                self.racket_face_center_velocity_w_mps
+            ),
+            "racket_site_velocity_w_mps": list(
+                self.racket_site_velocity_w_mps
+            ),
+            "racket_command_angular_velocity_w_radps": list(
+                self.racket_command_angular_velocity_w_radps
+            ),
+            "geometry_source_sha256": self.geometry_source_sha256,
             "reference_t_hit_s": self.reference_t_hit_s,
             "reference_t_cycle_s": self.reference_t_cycle_s,
             "reference_racket_site_speed_mps": (
@@ -2145,6 +4372,29 @@ class ActionBallTaskReceipt:
             "motion_sha256": self.motion_sha256,
             "physics_sha256": self.physics_sha256,
             "solver_sha256": self.solver_sha256,
+        }
+        if self.counter_rally_task is not None:
+            payload["counter_rally_task"] = (
+                self.counter_rally_task.to_dict()
+            )
+        if self.sampling_mixture is None:
+            return payload
+        return {
+            **payload,
+            "birth_index": self.birth_index,
+            "birth_sampling_stratum": (
+                self.birth_sampling_stratum
+            ),
+            "birth_sampling_levels": (
+                self.birth_sampling_levels.to_dict()
+            ),
+            "birth_frontier_arm": self.birth_frontier_arm,
+            "sampling_mixture": self.sampling_mixture.to_dict(),
+            "sampling_stratum": self.sampling_stratum,
+            "sampling_levels": self.sampling_levels.to_dict(),
+            "frontier_arm": self.frontier_arm,
+            "contact_time_step_s": self.contact_time_step_s,
+            "time_to_contact_tick": self.time_to_contact_tick,
         }
 
     @property
@@ -2170,12 +4420,28 @@ class ActionBallTaskReceipt:
 
     @classmethod
     def from_dict(cls, value: object) -> "ActionBallTaskReceipt":
+        has_mixture = (
+            isinstance(value, Mapping)
+            and "sampling_mixture" in value
+        )
+        has_counter_rally_task = (
+            isinstance(value, Mapping)
+            and "counter_rally_task" in value
+        )
+        if has_mixture and has_counter_rally_task:
+            payload_keys = _COUNTER_RALLY_MIXTURE_TASK_PAYLOAD_KEYS
+        elif has_mixture:
+            payload_keys = _MIXTURE_TASK_PAYLOAD_KEYS
+        elif has_counter_rally_task:
+            payload_keys = _COUNTER_RALLY_TASK_PAYLOAD_KEYS
+        else:
+            payload_keys = _TASK_PAYLOAD_KEYS
         row = _exact_mapping(
             value,
-            (*_TASK_PAYLOAD_KEYS, "canonical_sha256"),
+            (*payload_keys, "canonical_sha256"),
             name="action-ball task receipt",
         )
-        if row["schema_version"] != SCHEMA_VERSION:
+        if row["schema_version"] != TASK_RECEIPT_SCHEMA_VERSION:
             raise ActionBallContractError(
                 "unsupported action-ball task receipt schema_version"
             )
@@ -2185,12 +4451,32 @@ class ActionBallTaskReceipt:
             )
         fields = {
             name: row[name]
-            for name in _TASK_PAYLOAD_KEYS
+            for name in payload_keys
             if name not in ("schema_version", "runtime_contract_sha256")
         }
         fields["domain_levels"] = ActionDomainLevels.from_dict(
             row["domain_levels"]
         )
+        if has_counter_rally_task:
+            fields["counter_rally_task"] = (
+                CounterRallyTaskIdentity.from_dict(
+                    row["counter_rally_task"]
+                )
+            )
+        if has_mixture:
+            fields["birth_sampling_levels"] = (
+                ActionDomainLevels.from_dict(
+                    row["birth_sampling_levels"]
+                )
+            )
+            fields["sampling_mixture"] = (
+                ActionSamplingMixture.from_dict(
+                    row["sampling_mixture"]
+                )
+            )
+            fields["sampling_levels"] = ActionDomainLevels.from_dict(
+                row["sampling_levels"]
+            )
         receipt = cls(**fields)  # type: ignore[arg-type]
         declared = _sha256(
             row["canonical_sha256"], name="canonical_sha256"
@@ -2200,6 +4486,28 @@ class ActionBallTaskReceipt:
                 "action-ball task receipt canonical SHA mismatch"
             )
         return receipt
+
+    def require_counter_rally_task(
+        self,
+        *,
+        expected_objective_profile_sha256: str,
+    ) -> CounterRallyTaskIdentity:
+        """Return the exact N=1 task identity or hard-stop on drift."""
+
+        expected = _sha256(
+            expected_objective_profile_sha256,
+            name="expected_objective_profile_sha256",
+        )
+        identity = self.counter_rally_task
+        if identity is None:
+            raise CounterRallyTaskIdentityError(
+                "counter-rally task identity is missing"
+            )
+        if identity.objective_profile_sha256 != expected:
+            raise CounterRallyTaskIdentityError(
+                "counter-rally objective profile SHA mismatch"
+            )
+        return identity
 
     def assert_contract(
         self,
@@ -2228,6 +4536,20 @@ class ActionBallTaskReceipt:
         ):
             raise ActionBallContractError(
                 "task receipt does not match run-global pins"
+            )
+        expected_counter_rally_objective = (
+            pins.counter_rally_objective_profile_sha256
+        )
+        if expected_counter_rally_objective is None:
+            if self.counter_rally_task is not None:
+                raise CounterRallyTaskIdentityError(
+                    "ordinary task/run pins cannot carry counter-rally identity"
+                )
+        else:
+            self.require_counter_rally_task(
+                expected_objective_profile_sha256=(
+                    expected_counter_rally_objective
+                )
             )
         if self.mobility_mode != _mode(mobility_mode):
             raise ActionBallContractError(
@@ -2473,6 +4795,13 @@ class ActionBirthBroker:
         if not isinstance(pins, RuntimePins):
             raise ActionBallContractError("pins must be RuntimePins")
         self._pins = pins
+        if (
+            pins.counter_rally_objective_profile_sha256 is not None
+            and len(self._bindings) != 1
+        ):
+            raise CounterRallyTaskIdentityError(
+                "counter-rally objective pin requires exact N=1 bindings"
+            )
         self._mobility_mode = _mode(mobility_mode)
         self._by_uid = {
             binding.action_uid: binding for binding in self._bindings
@@ -4590,6 +6919,13 @@ class LazyActionTaskPool:
         if not isinstance(pins, RuntimePins):
             raise ActionBallContractError("pins must be RuntimePins")
         self._pins = pins
+        if (
+            pins.counter_rally_objective_profile_sha256 is not None
+            and len(self._bindings) != 1
+        ):
+            raise CounterRallyTaskIdentityError(
+                "counter-rally objective pin requires exact N=1 bindings"
+            )
         self._mobility_mode = _mode(mobility_mode)
         self._refill_size = _plain_int(
             refill_size, name="refill_size", minimum=1
@@ -7371,6 +9707,7 @@ class LazyActionTaskPool:
 
 __all__ = [
     "ActionBallContractError",
+    "CounterRallyTaskIdentityError",
     "BirthProtocolError",
     "PoolProtocolError",
     "RuntimePins",
@@ -7382,9 +9719,16 @@ __all__ = [
     "ActionBirthRequest",
     "ActionBirthReceipt",
     "ActionBallTaskReceipt",
+    "CounterRallyTaskIdentity",
     "ActionTaskReceiptRef",
     "ActionTeacherTiming",
+    "ActionTeacherTimingWithBasePreparation",
+    "BasePreparationContract",
+    "BasePreparationReceipt",
+    "BasePreparationAdmissionError",
     "derive_action_teacher_timing",
+    "derive_action_teacher_site_timing",
+    "derive_action_teacher_timing_with_base_preparation",
     "BirthReserveRequest",
     "BirthCommitRequest",
     "BirthConsumeRequest",
@@ -7404,6 +9748,11 @@ __all__ = [
     "SAMPLER_SCHEMA_VERSION",
     "SAMPLER_BIRTH_DRAW_COUNT",
     "SAMPLER_SAMPLE_DRAW_COUNT",
+    "TASK_RECEIPT_SCHEMA_VERSION",
+    "TASK_RECEIPT_TIMING_AUTHORITY",
+    "COUNTER_RALLY_TASK_IDENTITY_SCHEMA_VERSION",
     "MAX_PRE_SWING_WAIT_S",
+    "BASE_PREPARATION_SCHEMA_VERSION",
+    "BASE_PREPARATION_REJECT_REASON",
     "RUNTIME_CONTRACT_SHA256",
 ]

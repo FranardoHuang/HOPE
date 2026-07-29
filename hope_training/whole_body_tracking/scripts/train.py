@@ -966,7 +966,120 @@ def _canonical_contract_sha256(value) -> str:
     return hashlib.sha256(encoded).hexdigest()
 
 
-def _action_ball_preflight_contract(racket_cfg, motion_cfg) -> dict:
+def _action_ball_ready_root_z_by_slot(loaded, motion_cfg) -> tuple[float, ...]:
+    """Read the exact float32 ready-root Z that ``MotionLoader`` will expose.
+
+    Runtime selects the first configured tracked body from each schema-2
+    motion and converts ``body_pos_w`` to torch.float32.  Preflight must derive
+    the same values from the already byte-verified action assets; otherwise
+    the adapter/profile SHAs are guaranteed to drift as soon as ready Z is
+    nonzero.
+    """
+
+    assets = loaded.referenced_assets
+    if assets is None:
+        raise _OverrideError(
+            "[train.py] action-ball ready-root preflight requires verified "
+            "referenced motion assets"
+        )
+    selected_body_names = tuple(
+        str(value)
+        for value in (getattr(motion_cfg, "body_names", ()) or ())
+    )
+    if not selected_body_names or not selected_body_names[0]:
+        raise _OverrideError(
+            "[train.py] action-ball ready-root preflight requires a "
+            "non-empty motion.body_names table"
+        )
+    ready_body_name = selected_body_names[0]
+
+    import io
+    import numpy as np
+
+    ready_root_z = []
+    for slot, (action, asset) in enumerate(
+        zip(loaded.manifest.actions, assets.motions)
+    ):
+        try:
+            raw = asset.resolved_path.read_bytes()
+        except OSError as exc:
+            raise _OverrideError(
+                "[train.py] action-ball ready-root motion cannot be read: "
+                f"slot={slot} action={action.action_id!r}"
+            ) from exc
+        actual_sha256 = hashlib.sha256(raw).hexdigest()
+        if actual_sha256 != asset.sha256:
+            raise _OverrideError(
+                "[train.py] action-ball ready-root motion bytes changed "
+                "after manifest verification: "
+                f"slot={slot} action={action.action_id!r} "
+                f"verified={asset.sha256} actual={actual_sha256}"
+            )
+        try:
+            with np.load(io.BytesIO(raw), allow_pickle=False) as data:
+                if "body_names" not in data.files:
+                    raise ValueError(
+                        "schema-2 body_names metadata is required"
+                    )
+                names_raw = np.asarray(data["body_names"])
+                if names_raw.ndim != 1:
+                    raise ValueError("body_names must be one-dimensional")
+                body_names = []
+                for value in names_raw.tolist():
+                    if isinstance(value, bytes):
+                        value = value.decode("utf-8")
+                    body_names.append(str(value))
+                if (
+                    not body_names
+                    or len(body_names) != len(set(body_names))
+                    or any(not name for name in body_names)
+                ):
+                    raise ValueError(
+                        "body_names must contain unique non-empty names"
+                    )
+                try:
+                    ready_body_index = body_names.index(ready_body_name)
+                except ValueError as exc:
+                    raise ValueError(
+                        f"tracked ready body {ready_body_name!r} is absent"
+                    ) from exc
+                body_pos_w = np.asarray(data["body_pos_w"])
+                if (
+                    body_pos_w.ndim != 3
+                    or body_pos_w.shape[0] < 1
+                    or body_pos_w.shape[1] != len(body_names)
+                    or body_pos_w.shape[2] != 3
+                ):
+                    raise ValueError(
+                        "body_pos_w must have exact (T,body_names,3) shape"
+                    )
+                # MotionLoader materializes this array as torch.float32 before
+                # runtime reads frame zero.  Match that rounding exactly.
+                ready_z = float(
+                    np.float32(body_pos_w[0, ready_body_index, 2])
+                )
+                if not math.isfinite(ready_z):
+                    raise ValueError("ready-root Z is non-finite")
+        except (KeyError, UnicodeDecodeError, ValueError) as exc:
+            raise _OverrideError(
+                "[train.py] action-ball ready-root motion contract is "
+                f"invalid at slot={slot} action={action.action_id!r}: {exc}"
+            ) from exc
+        ready_root_z.append(ready_z)
+    if len(ready_root_z) != len(loaded.manifest.actions):
+        raise _OverrideError(
+            "[train.py] action-ball ready-root motion count disagrees with "
+            "the manifest"
+        )
+    return tuple(ready_root_z)
+
+
+def _action_ball_preflight_contract(
+    racket_cfg,
+    motion_cfg,
+    *,
+    policy_dt_s: float,
+) -> dict:
     """Build the independent launch-side identity expected from runtime."""
 
     loaded = _load_action_ball_manifest_from_cfg(racket_cfg, motion_cfg)
@@ -979,17 +1092,41 @@ def _action_ball_preflight_contract(racket_cfg, motion_cfg) -> dict:
         build_curriculum_config,
     )
     from whole_body_tracking.tasks.tracking.mdp.action_ball_sampling import (
+        ARM_CATALOG_SHA256,
         ActionBallSampler,
+        SamplingMixture,
     )
 
-    adapted = adapt_action_ball_manifest(loaded.manifest)
+    ready_root_z_by_slot = _action_ball_ready_root_z_by_slot(
+        loaded,
+        motion_cfg,
+    )
+    adapted = adapt_action_ball_manifest(
+        loaded.manifest,
+        ready_root_z_by_slot=ready_root_z_by_slot,
+    )
     seed = getattr(racket_cfg, "action_ball_seed", None)
     if type(seed) is not int or not 0 <= seed < (1 << 63):
         raise _OverrideError(
             "[train.py] action-ball requires racket.action_ball_seed "
             "as a plain integer in [0,2**63)"
         )
-    sampler = ActionBallSampler(adapted.profiles, seed=seed)
+    if (
+        isinstance(policy_dt_s, bool)
+        or type(policy_dt_s) not in (int, float)
+        or not math.isfinite(float(policy_dt_s))
+        or float(policy_dt_s) <= 0.0
+    ):
+        raise _OverrideError(
+            "[train.py] action-ball preflight requires the exact finite "
+            "positive policy control step"
+        )
+    sampler = ActionBallSampler(
+        adapted.profiles,
+        seed=seed,
+        sampling_mixture=SamplingMixture(),
+        contact_time_step_s=float(policy_dt_s),
+    )
     curriculum_config = build_curriculum_config(loaded.manifest).as_dict()
     profile_adapter = adapted.to_contract()
     try:
@@ -1030,6 +1167,7 @@ def _action_ball_preflight_contract(racket_cfg, motion_cfg) -> dict:
         "action_uids": [
             action.action_uid for action in loaded.manifest.actions
         ],
+        "ready_root_z_by_slot_m": list(ready_root_z_by_slot),
         "action_bindings": action_bindings,
         "prototype": {
             "path": loaded.manifest.prototype.path,
@@ -1042,6 +1180,7 @@ def _action_ball_preflight_contract(racket_cfg, motion_cfg) -> dict:
         },
         "sampler": {
             "contract_sha256": sampler.sampler_contract_sha256,
+            "arm_catalog_sha256": ARM_CATALOG_SHA256,
             "seed": seed,
             "pool_refill_rows": getattr(
                 racket_cfg, "action_ball_pool_refill_rows", None
@@ -1080,6 +1219,73 @@ def _action_ball_preflight_contract(racket_cfg, motion_cfg) -> dict:
                     "",
                 )
                 or ""
+            ),
+        },
+        "sidecar_launch": {
+            "path": str(
+                getattr(
+                    racket_cfg,
+                    "action_ball_sidecar_launch_receipt_path",
+                    "",
+                )
+                or ""
+            ),
+            "file_sha256": str(
+                getattr(
+                    racket_cfg,
+                    "action_ball_sidecar_launch_receipt_file_sha256",
+                    "",
+                )
+                or ""
+            ),
+        },
+        "drain_reset_launch": {
+            "path": str(
+                getattr(
+                    racket_cfg,
+                    "action_ball_drain_reset_launch_receipt_path",
+                    "",
+                )
+                or ""
+            ),
+            "file_sha256": str(
+                getattr(
+                    racket_cfg,
+                    "action_ball_drain_reset_launch_receipt_file_sha256",
+                    "",
+                )
+                or ""
+            ),
+        },
+        "evaluation_inbox": {
+            "root": str(
+                getattr(
+                    racket_cfg,
+                    "action_ball_evaluation_inbox_root",
+                    "",
+                )
+                or ""
+            ),
+            "owner_id": str(
+                getattr(
+                    racket_cfg,
+                    "action_ball_evaluation_owner_id",
+                    "",
+                )
+                or ""
+            ),
+            "run_id": str(
+                getattr(
+                    racket_cfg,
+                    "action_ball_evaluation_run_id",
+                    "",
+                )
+                or ""
+            ),
+            "interval_updates": getattr(
+                racket_cfg,
+                "action_ball_frozen_eval_interval_updates",
+                None,
             ),
         },
     }
@@ -1299,10 +1505,35 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
             getattr(filtered_sensor, "filter_prim_paths_expr", ()) or ()
         )
     )
-    if filter_prims != (table_prim,):
+    racket_cfg = getattr(
+        getattr(env_cfg, "commands", None), "racket_target", None
+    )
+    action_ball = (
+        str(getattr(racket_cfg, "target_mode", "") or "") == "action_ball"
+    )
+    configured_table_prims = tuple(
+        str(value)
+        for value in (getattr(env_cfg, "table_obstacle_prims", ()) or ())
+    )
+    if action_ball:
+        expected_filter_prims = (
+            "{ENV_REGEX_NS}/TableObstacle",
+            "{ENV_REGEX_NS}/TableRobotKeepout",
+            "{ENV_REGEX_NS}/TableNet",
+            "{ENV_REGEX_NS}/TableNetPostLeft",
+            "{ENV_REGEX_NS}/TableNetPostRight",
+        )
+    else:
+        expected_filter_prims = (table_prim,)
+    if (
+        configured_table_prims != expected_filter_prims
+        or filter_prims != expected_filter_prims
+    ):
         raise _OverrideError(
             "[train.py] task-first racket_table_contact must filter exactly "
-            f"the configured table collider {table_prim!r}; got {filter_prims!r}"
+            "the configured ordered table assembly; "
+            f"expected={expected_filter_prims!r} "
+            f"env={configured_table_prims!r} sensor={filter_prims!r}"
         )
     table_asset = None if scene is None else getattr(scene, "table_obstacle", None)
     if (
@@ -1373,11 +1604,17 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
     expected_table_param_keys = {
         "sensor_cfg",
         "filtered_sensor_cfg",
+        "all_body_filtered_sensor_cfgs",
+        "expected_full_table_filter_prim_paths",
         "asset_cfg",
         "near_x",
         "surface_z",
         "force_threshold",
         "margin",
+        "full_table_assembly",
+        "keepout_floor_z",
+        "action_name",
+        "require_substep_latch",
     }
     if (
         not isinstance(params, dict)
@@ -1394,6 +1631,27 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
             "[train.py] task-first robot_hit_table must consume the filtered "
             "racket_table_contact sensor"
         )
+    exact_filtered_cfgs = params.get("all_body_filtered_sensor_cfgs")
+    if not isinstance(exact_filtered_cfgs, (tuple, list)):
+        raise _OverrideError(
+            "[train.py] task-first robot_hit_table requires an ordered "
+            "all_body_filtered_sensor_cfgs sequence"
+        )
+    exact_filtered_names = tuple(
+        _task_first_scene_entity_name(value)
+        for value in exact_filtered_cfgs
+    )
+    expected_filter_binding = params.get(
+        "expected_full_table_filter_prim_paths"
+    )
+    if not isinstance(expected_filter_binding, (tuple, list)):
+        raise _OverrideError(
+            "[train.py] task-first robot_hit_table requires an ordered "
+            "expected_full_table_filter_prim_paths sequence"
+        )
+    expected_filter_binding = tuple(
+        str(value) for value in expected_filter_binding
+    )
     broad_regex = (
         r"^(?!left_ankle_roll_Link$)(?!right_ankle_roll_Link$).+$"
     )
@@ -1420,9 +1678,6 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
             raise _OverrideError(
                 f"[train.py] task-first robot_hit_table.{name} must be finite"
             )
-    racket_cfg = getattr(
-        getattr(env_cfg, "commands", None), "racket_target", None
-    )
     expected_near_x = getattr(racket_cfg, "vb_table_near_x", None)
     expected_surface_z = getattr(racket_cfg, "vb_table_surface_z", None)
     if (
@@ -1438,12 +1693,19 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
             "exactly match the live racket table geometry"
         )
     if (
-        float(params["force_threshold"]) != 1.0
+        float(params["force_threshold"]) != 1.0e-6
         or float(params["margin"]) != 0.02
+        or params["full_table_assembly"] is not action_ball
+        or isinstance(params["keepout_floor_z"], bool)
+        or not isinstance(params["keepout_floor_z"], (int, float))
+        or not math.isfinite(float(params["keepout_floor_z"]))
+        or float(params["keepout_floor_z"]) != 0.0
+        or params["action_name"] != "joint_pos"
+        or params["require_substep_latch"] is not action_ball
     ):
         raise _OverrideError(
             "[train.py] task-first robot_hit_table requires the reviewed "
-            "force_threshold=1.0 N and margin=0.02 m"
+            "force/margin/assembly/substep-latch contract"
         )
     expected_center = (
         float(expected_near_x) + 1.37,
@@ -1470,6 +1732,185 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
             "[train.py] task-first table collider pose/size/collision flag "
             "does not match the reviewed live table geometry"
         )
+    if action_ball:
+        from whole_body_tracking.tasks.tracking.config.agibot_a3.hope_env_cfg import (
+            TABLE_ALL_BODY_CONTACT_SENSOR_NAMES as _table_sensor_names,
+            TABLE_CONTACT_BODY_NAMES as _table_body_names,
+        )
+
+        if getattr(env_cfg, "table_robot_keepout", None) is not True:
+            raise _OverrideError(
+                "[train.py] action-ball requires the conservative robot-only "
+                "under-table keepout"
+            )
+        if int(getattr(env_cfg, "decimation", -1)) != 4:
+            raise _OverrideError(
+                "[train.py] action-ball table-contact latch requires decimation=4"
+            )
+        if (
+            tuple(
+                getattr(env_cfg, "table_pair_contact_sensor_names", ()) or ()
+            )
+            != tuple(_table_sensor_names)
+            or exact_filtered_names != tuple(_table_sensor_names)
+            or expected_filter_binding != expected_filter_prims
+            or len(_table_sensor_names) != len(_table_body_names)
+            or len(_table_body_names) != 32
+        ):
+            raise _OverrideError(
+                "[train.py] action-ball requires the exact ordered 32-body "
+                "pair-filter sensor table and five-part filter binding"
+            )
+        for index, (sensor_name, body_name) in enumerate(
+            zip(_table_sensor_names, _table_body_names)
+        ):
+            sensor_cfg = (
+                None if scene is None else getattr(scene, sensor_name, None)
+            )
+            if sensor_cfg is None:
+                raise _OverrideError(
+                    "[train.py] action-ball exact table-contact sensor is "
+                    f"missing at index {index}: {sensor_name!r}"
+                )
+            if (
+                str(getattr(sensor_cfg, "prim_path", "") or "")
+                != f"{{ENV_REGEX_NS}}/Robot/{body_name}"
+                or tuple(
+                    str(value)
+                    for value in (
+                        getattr(
+                            sensor_cfg,
+                            "filter_prim_paths_expr",
+                            (),
+                        )
+                        or ()
+                    )
+                )
+                != expected_filter_prims
+                or float(getattr(sensor_cfg, "update_period", math.nan))
+                != 0.0
+            ):
+                raise _OverrideError(
+                    "[train.py] action-ball exact table-contact sensor "
+                    f"{sensor_name!r} does not bind body {body_name!r}, the "
+                    "five-part table assembly, and every-physics-step updates"
+                )
+        action_cfg = getattr(
+            getattr(env_cfg, "actions", None), "joint_pos", None
+        )
+        if (
+            action_cfg is None
+            or getattr(action_cfg, "table_contact_substep_guard", None)
+            is not True
+            or str(
+                getattr(
+                    action_cfg,
+                    "table_contact_guard_termination_term",
+                    "",
+                )
+                or ""
+            )
+            != "robot_hit_table"
+            or int(
+                getattr(
+                    action_cfg,
+                    "table_contact_guard_expected_decimation",
+                    -1,
+                )
+            )
+            != 4
+        ):
+            raise _OverrideError(
+                "[train.py] action-ball requires the reviewed four-substep "
+                "sticky table-contact action guard"
+            )
+
+        from whole_body_tracking.tasks.table_tennis import geometry as _tt_geom
+        from whole_body_tracking.tasks.table_tennis import table_frame as _tt_frame
+        from whole_body_tracking.tasks.table_tennis import (
+            table_tennis_env_cfg as _tt_cfg,
+        )
+
+        underside_z = float(expected_surface_z) - float(
+            _tt_geom.TABLE_THICKNESS
+        )
+        top_center = _tt_frame.table_top_center_env(
+            float(expected_near_x),
+            float(expected_surface_z),
+        )
+        expected_assets = (
+            (
+                "table_robot_keepout",
+                expected_filter_prims[1],
+                (top_center[0], top_center[1], underside_z / 2.0),
+                (
+                    float(_tt_geom.TABLE_LENGTH),
+                    float(_tt_geom.TABLE_WIDTH),
+                    underside_z,
+                ),
+            ),
+            (
+                "table_net",
+                expected_filter_prims[2],
+                _tt_frame.net_center_env(
+                    float(expected_near_x),
+                    float(expected_surface_z),
+                ),
+                tuple(float(value) for value in _tt_geom.net_size()),
+            ),
+            (
+                "table_net_post_left",
+                expected_filter_prims[3],
+                _tt_frame.net_post_center_env(
+                    float(expected_near_x),
+                    float(expected_surface_z),
+                    left=True,
+                    post_height=_tt_cfg.NET_POST_HEIGHT,
+                ),
+                tuple(float(value) for value in _tt_cfg.net_post_size()),
+            ),
+            (
+                "table_net_post_right",
+                expected_filter_prims[4],
+                _tt_frame.net_post_center_env(
+                    float(expected_near_x),
+                    float(expected_surface_z),
+                    left=False,
+                    post_height=_tt_cfg.NET_POST_HEIGHT,
+                ),
+                tuple(float(value) for value in _tt_cfg.net_post_size()),
+            ),
+        )
+        for attr, expected_prim, expected_pos, expected_size in expected_assets:
+            asset = getattr(scene, attr, None)
+            init_state = None if asset is None else getattr(asset, "init_state", None)
+            spawn = None if asset is None else getattr(asset, "spawn", None)
+            collision_props = (
+                None if spawn is None else getattr(spawn, "collision_props", None)
+            )
+            try:
+                actual_pos = tuple(
+                    float(value) for value in getattr(init_state, "pos")
+                )
+                actual_size = tuple(
+                    float(value) for value in getattr(spawn, "size")
+                )
+            except (TypeError, ValueError):
+                actual_pos = ()
+                actual_size = ()
+            if (
+                asset is None
+                or str(getattr(asset, "prim_path", "") or "")
+                != expected_prim
+                or actual_pos != tuple(float(value) for value in expected_pos)
+                or actual_size != expected_size
+                or getattr(collision_props, "collision_enabled", None)
+                is not True
+            ):
+                raise _OverrideError(
+                    "[train.py] action-ball table assembly asset does not "
+                    f"match the reviewed contract: {attr}"
+                )
 
 
 def _finalize_task_first_training_cfg(env_cfg, task, applied) -> None:
@@ -1817,6 +2258,31 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
             f"clip_names={tuple(clip_names)!r} "
             f"manifest={tuple(manifest.action_order)!r}"
         )
+    manifest_scope = str(manifest.prototype.scope)
+    if manifest_scope not in ("upper", "full"):
+        raise _OverrideError(
+            "[train.py] action-ball manifest prototype scope must be "
+            "'upper' or 'full'"
+        )
+    reward_node = _get(task, "rewards")
+    configured_full_body = _get(reward_node, "full_body_mimic")
+    if configured_full_body is None:
+        raise _OverrideError(
+            "[train.py] action-ball requires an explicit launcher-owned "
+            "rewards.full_body_mimic value"
+        )
+    configured_full_body = _as_explicit_bool(
+        configured_full_body,
+        "task.rewards.full_body_mimic",
+    )
+    expected_full_body = manifest_scope == "full"
+    if configured_full_body is not expected_full_body:
+        raise _OverrideError(
+            "[train.py] action-ball full-body imitation must be derived from "
+            "the exact manifest prototype scope: "
+            f"scope={manifest_scope!r}, "
+            f"full_body_mimic={configured_full_body!r}"
+        )
     action_count = len(clip_names)
     if action_count > 1024:
         raise _OverrideError(
@@ -1962,6 +2428,50 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
         raise _OverrideError(
             "[train.py] action-ball requires a composed rewards cfg"
         )
+    lower_body_names = (
+        "pelvis_link",
+        "left_hip_roll_Link",
+        "left_knee_Link",
+        "left_ankle_roll_Link",
+        "right_hip_roll_Link",
+        "right_knee_Link",
+        "right_ankle_roll_Link",
+    )
+    for term_name in (
+        "motion_body_pos",
+        "motion_body_ori",
+        "motion_body_lin_vel",
+        "motion_body_ang_vel",
+    ):
+        term = getattr(rewards_cfg, term_name, None)
+        body_names = (
+            None if term is None else getattr(term, "params", {}).get("body_names")
+        )
+        if not isinstance(body_names, (list, tuple)):
+            raise _OverrideError(
+                "[train.py] action-ball scope validation requires "
+                f"rewards.{term_name}.params.body_names"
+            )
+        body_names = tuple(str(name) for name in body_names)
+        if expected_full_body:
+            if (
+                body_names[: len(lower_body_names)] != lower_body_names
+                or any(body_names.count(name) != 1 for name in lower_body_names)
+            ):
+                raise _OverrideError(
+                    "[train.py] full-scope ActionBall must include the exact "
+                    "pelvis+six-leg prefix in every body-imitation term: "
+                    f"term={term_name!r}, body_names={body_names!r}"
+                )
+        elif any(name in body_names for name in lower_body_names):
+            raise _OverrideError(
+                "[train.py] upper-scope ActionBall must not imitate lower-body "
+                f"links: term={term_name!r}, body_names={body_names!r}"
+            )
+    applied.append(
+        "action-ball imitation scope="
+        f"{manifest_scope} (full_body_mimic={expected_full_body})"
+    )
     if getattr(rewards_cfg, "motion_global_anchor_pos", None) is not None:
         raise _OverrideError(
             "[train.py] action-ball base-spawn variation requires "
@@ -2206,7 +2716,13 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
 
     # Load/adapter construction is also a cheap pre-gym validation of every
     # profile and curriculum field.  It deliberately does not sample.
-    preflight = _action_ball_preflight_contract(racket_cfg, motion_cfg)
+    preflight = _action_ball_preflight_contract(
+        racket_cfg,
+        motion_cfg,
+        policy_dt_s=(
+            float(env_cfg.sim.dt) * int(env_cfg.decimation)
+        ),
+    )
     if diagnostic_unauthorized:
         # Franco 2026-07-28 approved bypass: no trust-set or certificate
         # chain is consulted; the applied receipt below and every runtime
@@ -2948,6 +3464,57 @@ _QDES_LIMIT_BARRIER_FORMULA = (
     "m_eff=min(margin_frac,min(default_q-lo,hi-default_q)/(hi-lo)-0.005)"
 )
 
+_SOFT_LIMIT_BARRIER_V2_FORMULA = (
+    "sum(where(u>0,penalty_floor+(1-penalty_floor)*"
+    "(1-exp(-shape_rate*clamp(u,0,1)))/(1-exp(-shape_rate)),0));"
+    "u=relu(m_eff-min(q-lo,hi-q)/(hi-lo))/m_eff;"
+    "m_eff=min(margin_frac,min(default_q-lo,hi-default_q)/(hi-lo)-stance_eps);"
+    "require_all(m_eff>margin_floor)"
+)
+_SOFT_LIMIT_BARRIER_V2_SHAPE_RATE = 4.0
+_SOFT_LIMIT_BARRIER_V2_STANCE_EPS = 0.005
+_SOFT_LIMIT_BARRIER_V2_MARGIN_FLOOR = 0.005
+
+
+def _authoritative_mdp_reward_callable(name: str):
+    """Resolve one Reward callable from the imported production MDP namespace."""
+
+    try:
+        from whole_body_tracking.tasks.tracking import mdp
+
+        expected = getattr(mdp, name)
+    except (ImportError, AttributeError) as exc:
+        raise RuntimeError(
+            f"cannot resolve authoritative Reward callable mdp.{name}"
+        ) from exc
+    if not callable(expected):
+        raise RuntimeError(f"authoritative Reward mdp.{name} is not callable")
+    return expected
+
+
+def _require_authoritative_reward_callable(term, *, term_name: str, expected: str) -> str:
+    """Prove the composed RewardTerm owns the exact reviewed function object."""
+
+    actual = getattr(term, "func", None)
+    authoritative = _authoritative_mdp_reward_callable(expected)
+    if not callable(actual) or actual is not authoritative:
+        raise RuntimeError(
+            f"rewards.{term_name}.func must be the authoritative callable "
+            f"object mdp.{expected}"
+        )
+    return f"whole_body_tracking.tasks.tracking.mdp.{expected}"
+
+
+def _finite_soft_limit_v2_param(params: dict, name: str) -> float:
+    value = params.get(name)
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, (int, float))
+        or not math.isfinite(float(value))
+    ):
+        raise RuntimeError(f"soft-limit barrier v2 {name} must be finite")
+    return float(value)
+
 
 def _qdes_limit_barrier_reward_contract(env_cfg, runtime_facts: dict) -> dict | None:
     """Conditionally bind the Wave-Q all-joint q_des position-limit barrier.
@@ -3044,6 +3611,61 @@ def _qdes_limit_barrier_reward_contract(env_cfg, runtime_facts: dict) -> dict | 
                 "qdes_limit_barrier requires finite [lo, hi] joint position limits with lo < hi"
             )
 
+    # The legacy term intentionally remains schema 1 for exact-resume compatibility.  Fresh
+    # ActionBall opts in by composing the reviewed v2 callable and its mandatory floor parameter.
+    # Detect v2 from both the callable and parameter surface: a v2 callable with a missing floor
+    # must fail closed rather than being silently serialized as v1.
+    actual_func = getattr(term, "func", None)
+    actual_name = getattr(actual_func, "__name__", "")
+    v2_requested = actual_name == "qdes_limit_barrier_v2" or "penalty_floor" in params
+    if v2_requested:
+        term_callable = _require_authoritative_reward_callable(
+            term,
+            term_name="qdes_limit_barrier",
+            expected="qdes_limit_barrier_v2",
+        )
+        probe_callable = _require_authoritative_reward_callable(
+            probe,
+            term_name="qdes_limit_barrier_probe",
+            expected="qdes_limit_barrier_v2_probe",
+        )
+        if set(params) != {"action_name", "margin_frac", "penalty_floor"}:
+            raise RuntimeError(
+                "qdes_limit_barrier_v2 params must be exactly "
+                "action_name, margin_frac, penalty_floor"
+            )
+        penalty_floor = _finite_soft_limit_v2_param(params, "penalty_floor")
+        if not 0.0 < penalty_floor < 1.0:
+            raise RuntimeError(
+                "qdes_limit_barrier_v2 penalty_floor must be in (0, 1)"
+            )
+        return {
+            "schema_version": 2,
+            "enabled": weight < 0.0,
+            "probe_enabled": True,
+            "term_name": "qdes_limit_barrier",
+            "probe_term_name": "qdes_limit_barrier_probe",
+            "term_callable": term_callable,
+            "probe_callable": probe_callable,
+            "activation_ledger": "weight_independent_control_step_counters",
+            "weight": weight,
+            "margin_frac": margin_frac,
+            "penalty_floor": penalty_floor,
+            "shape_rate": _SOFT_LIMIT_BARRIER_V2_SHAPE_RATE,
+            "stance_eps": _SOFT_LIMIT_BARRIER_V2_STANCE_EPS,
+            "margin_floor": _SOFT_LIMIT_BARRIER_V2_MARGIN_FLOOR,
+            "action_name": "joint_pos",
+            "joint_count": 31,
+            "joint_order": "runtime_articulation_identity",
+            "position_source": "joint_pos.processed_actions",
+            "position_limit_source": "articulation.data.soft_joint_pos_limits",
+            "default_stance_source": "articulation.data.default_joint_pos",
+            "formula": _SOFT_LIMIT_BARRIER_V2_FORMULA,
+            "aggregation": "sum_all_31_joints",
+            "per_joint_cap": 1.0,
+            "gate": "dense_every_control_step",
+        }
+
     return {
         "schema_version": 1,
         "enabled": weight < 0.0,
@@ -3058,6 +3680,127 @@ def _qdes_limit_barrier_reward_contract(env_cfg, runtime_facts: dict) -> dict | 
         "formula": _QDES_LIMIT_BARRIER_FORMULA,
         "gate": "dense_every_control_step",
     }
+
+
+def _actual_joint_limit_barrier_reward_contract(
+    env_cfg,
+    runtime_facts: dict,
+    *,
+    qdes_contract: dict | None,
+) -> dict | None:
+    """Bind the independent actual-q v2 safety objective.
+
+    This block exists only beside a q_des schema-2 block.  The two channels must use the same
+    dose and kernel parameters so a config override cannot silently weaken one side.
+    """
+
+    if qdes_contract is None or qdes_contract.get("schema_version") != 2:
+        return None
+    rewards = getattr(env_cfg, "rewards", None)
+    term = None if rewards is None else getattr(rewards, "joint_limit", None)
+    probe = None if rewards is None else getattr(
+        rewards, "actual_joint_limit_barrier_probe", None
+    )
+    if term is None or probe is None:
+        raise RuntimeError(
+            "soft-limit barrier v2 requires joint_limit and "
+            "actual_joint_limit_barrier_probe together"
+        )
+    weight = getattr(term, "weight", None)
+    probe_weight = getattr(probe, "weight", None)
+    if (
+        isinstance(weight, bool)
+        or not isinstance(weight, (int, float))
+        or not math.isfinite(float(weight))
+        or float(weight) > 0.0
+        or isinstance(probe_weight, bool)
+        or not isinstance(probe_weight, (int, float))
+        or float(probe_weight) != 1.0
+    ):
+        raise RuntimeError(
+            "actual-q soft-limit barrier v2 requires a finite non-positive "
+            "weight and weight-independent probe"
+        )
+    params = getattr(term, "params", None)
+    probe_params = getattr(probe, "params", None)
+    if not isinstance(params, dict) or not isinstance(probe_params, dict):
+        raise RuntimeError("actual-q soft-limit barrier v2 params must be mappings")
+    if params != probe_params:
+        raise RuntimeError(
+            "actual-q soft-limit barrier v2 probe params must exactly match the real term"
+        )
+    if set(params) != {
+        "asset_cfg",
+        "margin_frac",
+        "penalty_floor",
+        "expected_joint_count",
+    }:
+        raise RuntimeError(
+            "actual-q soft-limit barrier v2 params must be exactly asset_cfg, "
+            "margin_frac, penalty_floor, expected_joint_count"
+        )
+    asset_cfg = params["asset_cfg"]
+    if getattr(asset_cfg, "name", None) != "robot":
+        raise RuntimeError(
+            "actual-q soft-limit barrier v2 asset_cfg must select robot"
+        )
+    joint_ids = getattr(asset_cfg, "joint_ids", None)
+    if joint_ids != slice(None):
+        raise RuntimeError(
+            "actual-q soft-limit barrier v2 asset_cfg must select identity 31 joints"
+        )
+    if type(params["expected_joint_count"]) is not int or params["expected_joint_count"] != 31:
+        raise RuntimeError(
+            "actual-q soft-limit barrier v2 expected_joint_count must be 31"
+        )
+    margin_frac = _finite_soft_limit_v2_param(params, "margin_frac")
+    penalty_floor = _finite_soft_limit_v2_param(params, "penalty_floor")
+    if not 0.0 < margin_frac < 0.5 or not 0.0 < penalty_floor < 1.0:
+        raise RuntimeError(
+            "actual-q soft-limit barrier v2 margin_frac/penalty_floor are invalid"
+        )
+    term_callable = _require_authoritative_reward_callable(
+        term,
+        term_name="joint_limit",
+        expected="actual_joint_limit_barrier_v2",
+    )
+    probe_callable = _require_authoritative_reward_callable(
+        probe,
+        term_name="actual_joint_limit_barrier_probe",
+        expected="actual_joint_limit_barrier_v2_probe",
+    )
+    block = {
+        "schema_version": 2,
+        "enabled": float(weight) < 0.0,
+        "probe_enabled": True,
+        "term_name": "joint_limit",
+        "probe_term_name": "actual_joint_limit_barrier_probe",
+        "term_callable": term_callable,
+        "probe_callable": probe_callable,
+        "activation_ledger": "weight_independent_control_step_counters",
+        "weight": float(weight),
+        "margin_frac": margin_frac,
+        "penalty_floor": penalty_floor,
+        "shape_rate": _SOFT_LIMIT_BARRIER_V2_SHAPE_RATE,
+        "stance_eps": _SOFT_LIMIT_BARRIER_V2_STANCE_EPS,
+        "margin_floor": _SOFT_LIMIT_BARRIER_V2_MARGIN_FLOOR,
+        "asset_name": "robot",
+        "joint_count": 31,
+        "joint_order": "runtime_articulation_identity",
+        "position_source": "articulation.data.joint_pos",
+        "position_limit_source": "articulation.data.soft_joint_pos_limits",
+        "default_stance_source": "articulation.data.default_joint_pos",
+        "formula": _SOFT_LIMIT_BARRIER_V2_FORMULA,
+        "aggregation": "sum_all_31_joints",
+        "per_joint_cap": 1.0,
+        "gate": "dense_every_control_step",
+    }
+    for key in ("weight", "margin_frac", "penalty_floor"):
+        if block[key] != qdes_contract[key]:
+            raise RuntimeError(
+                f"qdes/actual soft-limit barrier v2 {key} must match exactly"
+            )
+    return block
 
 
 _A3_LOWER_BODY_RUNTIME_JOINT_ORDER = (
@@ -3505,6 +4248,151 @@ def _action_ball_exact_dict(value, expected_keys, *, name: str) -> dict:
             f"unknown={sorted(actual - expected)!r}"
         )
     return value
+
+
+def _action_ball_training_authorization_contract(
+    diagnostic_unauthorized: bool,
+) -> dict:
+    """Bind the diagnostic bypass to explicit negative downstream rights."""
+
+    if type(diagnostic_unauthorized) is not bool:
+        raise RuntimeError(
+            "action-ball diagnostic authorization flag must be an exact bool"
+        )
+    return {
+        "diagnostic_unauthorized": diagnostic_unauthorized,
+        "formal_evidence_prohibited": diagnostic_unauthorized,
+        "curriculum_promotion_prohibited": diagnostic_unauthorized,
+        "exact_export_prohibited": diagnostic_unauthorized,
+        "formal_judge_prohibited": diagnostic_unauthorized,
+    }
+
+
+def _validate_action_ball_training_authorization(
+    action_ball_contract,
+) -> bool:
+    """Return the diagnostic brand after cross-view fail-closed validation."""
+
+    if type(action_ball_contract) is not dict:
+        raise RuntimeError("action-ball training contract must be a mapping")
+    authorization = _action_ball_exact_dict(
+        action_ball_contract.get("authorization"),
+        (
+            "diagnostic_unauthorized",
+            "formal_evidence_prohibited",
+            "curriculum_promotion_prohibited",
+            "exact_export_prohibited",
+            "formal_judge_prohibited",
+        ),
+        name="action-ball training authorization",
+    )
+    diagnostic = authorization["diagnostic_unauthorized"]
+    expected = _action_ball_training_authorization_contract(diagnostic)
+    if authorization != expected:
+        raise RuntimeError(
+            "action-ball training authorization contains contradictory "
+            "diagnostic/formal rights"
+        )
+    runtime_contract = action_ball_contract.get("runtime")
+    motion_admission = action_ball_contract.get("motion_admission")
+    if type(runtime_contract) is not dict or type(motion_admission) is not dict:
+        raise RuntimeError(
+            "action-ball training authorization requires runtime and motion "
+            "admission mappings"
+        )
+    runtime_diagnostic = (
+        runtime_contract.get("diagnostic_unauthorized") is True
+    )
+    motion_diagnostic = (
+        motion_admission.get("diagnostic_unauthorized") is True
+    )
+    if runtime_diagnostic != diagnostic or motion_diagnostic != diagnostic:
+        raise RuntimeError(
+            "action-ball diagnostic authorization disagrees across the "
+            "training/runtime/motion-admission contracts"
+        )
+    evaluator_authority = runtime_contract.get("evaluator_authority")
+    if type(evaluator_authority) is not dict:
+        raise RuntimeError(
+            "action-ball training authorization requires an evaluator "
+            "authority mapping"
+        )
+    evaluator_diagnostic = (
+        evaluator_authority.get("diagnostic_unauthorized") is True
+    )
+    evaluator_formal = (
+        evaluator_authority.get("formal_authority_available") is True
+    )
+    if (
+        evaluator_diagnostic != diagnostic
+        or evaluator_formal == diagnostic
+    ):
+        raise RuntimeError(
+            "action-ball evaluator authority disagrees with the live "
+            "diagnostic/formal authorization"
+        )
+    if diagnostic:
+        _action_ball_exact_dict(
+            evaluator_authority,
+            (
+                "diagnostic_unauthorized",
+                "formal_authority_available",
+                "formal_launch_requires_code_pinned_receipt",
+                "runtime_or_manifest_may_self_authorize",
+                "authority_binding",
+                "authority_state_owner_sha256",
+            ),
+            name="diagnostic action-ball evaluator authority",
+        )
+        if (
+            evaluator_authority[
+                "formal_launch_requires_code_pinned_receipt"
+            ]
+            is not True
+            or evaluator_authority[
+                "runtime_or_manifest_may_self_authorize"
+            ]
+            is not False
+        ):
+            raise RuntimeError(
+                "diagnostic action-ball evaluator authority must remain "
+                "code-pinned and may not self-authorize"
+            )
+        if motion_admission.get("training_authorized") is not False:
+            raise RuntimeError(
+                "diagnostic action-ball motion admission must explicitly "
+                "set training_authorized=false"
+            )
+    elif motion_admission.get("authorization_purpose") != "training":
+        raise RuntimeError(
+            "formal action-ball motion admission must be training-authorized"
+        )
+    return diagnostic
+
+
+def _action_ball_contract_lineage_exact(
+    *,
+    source_lineage_exact: bool,
+    motion_kinematics_exact: bool,
+    diagnostic_unauthorized: bool,
+) -> bool:
+    """Compute formal lineage without allowing a diagnostic run to self-upgrade."""
+
+    values = {
+        "source_lineage_exact": source_lineage_exact,
+        "motion_kinematics_exact": motion_kinematics_exact,
+        "diagnostic_unauthorized": diagnostic_unauthorized,
+    }
+    for name, value in values.items():
+        if type(value) is not bool:
+            raise RuntimeError(
+                f"action-ball lineage {name} must be an exact bool"
+            )
+    return (
+        source_lineage_exact
+        and motion_kinematics_exact
+        and not diagnostic_unauthorized
+    )
 
 
 def _action_ball_agent_recipe(agent_cfg) -> dict:
@@ -4330,13 +5218,13 @@ def _validate_action_ball_evaluator_launch_receipt(
     preflight: dict,
     solver_sha256: str,
     repo_root: pathlib.Path,
+    attempt_source,
 ) -> dict:
-    """Verify the code-pinned frozen-evaluator launch authority.
+    """Verify the code-pinned V4 inbox evaluator launch authority.
 
-    The receipt itself has no embedded digest.  Formal authority comes from
-    its canonical digest being deliberately pinned in the evaluator module,
-    while the attempt source is independently re-opened here.  A manifest,
-    runtime object, or checkpoint therefore cannot self-authorize evaluation.
+    Formal ActionBall has no legacy evaluator fallback.  The exact receipt
+    must construct the V4 authority over the append-only inbox source before
+    ``gym.make``; a schema-3 receipt therefore fails at this boundary.
     """
 
     row = _action_ball_exact_dict(
@@ -4355,6 +5243,7 @@ def _validate_action_ball_evaluator_launch_receipt(
             "attempt_source_contract_sha256",
             "attempt_source_path",
             "attempt_source_sha256",
+            "window_contract",
         ),
         name="action-ball frozen evaluator launch receipt",
     )
@@ -4368,14 +5257,16 @@ def _validate_action_ball_evaluator_launch_receipt(
 
     if (
         type(row["schema_version"]) is not int
-        or row["schema_version"] != evaluator_module.SCHEMA_VERSION
+        or row["schema_version"] != evaluator_module.V4_SCHEMA_VERSION
     ):
         raise RuntimeError(
             "action-ball frozen evaluator launch schema_version must equal "
-            f"the executable evaluator schema {evaluator_module.SCHEMA_VERSION}"
+            f"V4 ({evaluator_module.V4_SCHEMA_VERSION})"
         )
-    if row["kind"] != "action_ball_frozen_evaluator_launch":
-        raise RuntimeError("action-ball frozen evaluator launch kind drifted")
+    if row["kind"] != "action_ball_frozen_evaluator_v4_launch":
+        raise RuntimeError(
+            "action-ball formal evaluator must be the V4 inbox launch"
+        )
 
     authority_sha256 = _action_ball_sha256(
         row["authority_contract_sha256"],
@@ -4383,11 +5274,10 @@ def _validate_action_ball_evaluator_launch_receipt(
     )
     if (
         authority_sha256
-        != evaluator_module.FROZEN_EVALUATOR_AUTHORITY_CONTRACT_SHA256
+        != evaluator_module.FROZEN_EVALUATOR_V4_AUTHORITY_CONTRACT_SHA256
     ):
         raise RuntimeError(
-            "action-ball evaluator authority contract disagrees with the "
-            "executable evaluator module"
+            "action-ball V4 evaluator authority contract disagrees with code"
         )
 
     expected_profiles = [
@@ -4454,6 +5344,42 @@ def _validate_action_ball_evaluator_launch_receipt(
             f"declared={declared_source_sha256}, actual={actual_source_sha256}"
         )
 
+    try:
+        normalized = evaluator_module.launch_receipt_document_v4(
+            curriculum_contract_sha256=expected_pins[
+                "curriculum_contract_sha256"
+            ],
+            profile_order=tuple(
+                curriculum_module.ActionProfileKey(**profile)
+                for profile in expected_profiles
+            ),
+            arm_catalog_sha256=expected_pins[
+                "arm_catalog_sha256"
+            ],
+            scheduler_contract_sha256=expected_pins[
+                "scheduler_contract_sha256"
+            ],
+            sampler_sha256=expected_pins["sampler_sha256"],
+            solver_sha256=expected_pins["solver_sha256"],
+            policy_contract_sha256=expected_pins[
+                "policy_contract_sha256"
+            ],
+            attempt_source_contract_sha256=row[
+                "attempt_source_contract_sha256"
+            ],
+            attempt_source_path=row["attempt_source_path"],
+            attempt_source_sha256=declared_source_sha256,
+        )
+    except (TypeError, ValueError) as exc:
+        raise RuntimeError(
+            "action-ball V4 evaluator receipt cannot be normalized by code"
+        ) from exc
+    _action_ball_assert_json_equal(
+        row,
+        normalized,
+        name="action-ball canonical V4 evaluator launch receipt",
+    )
+
     computed_launch_sha256 = _canonical_contract_sha256(row)
     declared = _action_ball_sha256(
         declared_launch_sha256,
@@ -4464,7 +5390,10 @@ def _validate_action_ball_evaluator_launch_receipt(
             "action-ball evaluator launch receipt SHA mismatch: "
             f"declared={declared}, actual={computed_launch_sha256}"
         )
-    trusted = evaluator_module.TRUSTED_FROZEN_EVALUATOR_LAUNCH_RECEIPT_SHA256
+    trusted = (
+        evaluator_module
+        .TRUSTED_FROZEN_EVALUATOR_V4_LAUNCH_RECEIPT_SHA256
+    )
     if (
         type(trusted) is not frozenset
         or any(
@@ -4485,8 +5414,11 @@ def _validate_action_ball_evaluator_launch_receipt(
 
     try:
         authority = (
-            evaluator_module.FrozenEvaluatorAuthority
-            .from_trusted_launch_receipt(row)
+            evaluator_module.FrozenEvaluatorV4Authority
+            .from_trusted_launch_receipt(
+                row,
+                attempt_source=attempt_source,
+            )
         )
     except Exception as exc:
         raise RuntimeError(
@@ -4495,7 +5427,9 @@ def _validate_action_ball_evaluator_launch_receipt(
         ) from exc
     binding = authority.binding_document()
     expected_binding = {
+        "schema_version": evaluator_module.V4_SCHEMA_VERSION,
         "authority_contract_sha256": authority_sha256,
+        "launch_receipt_sha256": declared,
         **expected_pins,
         "profile_order": expected_profiles,
         "attempt_source_contract_sha256": row[
@@ -4503,7 +5437,10 @@ def _validate_action_ball_evaluator_launch_receipt(
         ],
         "attempt_source_path": row["attempt_source_path"],
         "attempt_source_sha256": declared_source_sha256,
-        "launch_receipt_sha256": declared,
+        "source_state_owner_sha256": (
+            attempt_source.state_owner_sha256
+        ),
+        "state_owner_sha256": authority.state_owner_sha256,
     }
     _action_ball_assert_json_equal(
         binding,
@@ -4514,13 +5451,15 @@ def _validate_action_ball_evaluator_launch_receipt(
         "launch_receipt": row,
         "launch_receipt_canonical_sha256": declared,
         "authority_binding": binding,
+        "authority_state_owner_sha256": authority.state_owner_sha256,
+        "_authority": authority,
     }
 
 
 def _load_action_ball_evaluator_launch_from_cfg(
     racket_cfg, motion_cfg, *, preflight: dict
 ) -> dict:
-    """Load and authorize the tracked frozen-evaluator receipt before Gym."""
+    """Load the complete V4 evaluator/sidecar/drain graph before Gym."""
 
     relative_path = str(
         getattr(
@@ -4560,6 +5499,51 @@ def _load_action_ball_evaluator_launch_from_cfg(
     except (OSError, RuntimeError) as exc:
         raise _OverrideError(
             f"[train.py] invalid action-ball evaluator launch receipt: {exc}"
+        ) from exc
+
+    from whole_body_tracking.tasks.tracking.mdp import (
+        action_ball_evaluation_inbox as inbox_protocol,
+    )
+
+    inbox_root = pathlib.Path(
+        str(
+            getattr(
+                racket_cfg,
+                "action_ball_evaluation_inbox_root",
+                "",
+            )
+            or ""
+        ).strip()
+    )
+    owner_id = str(
+        getattr(racket_cfg, "action_ball_evaluation_owner_id", "") or ""
+    ).strip()
+    run_id = str(
+        getattr(racket_cfg, "action_ball_evaluation_run_id", "") or ""
+    ).strip()
+    interval = getattr(
+        racket_cfg, "action_ball_frozen_eval_interval_updates", None
+    )
+    if (
+        not inbox_root.is_absolute()
+        or type(interval) is not int
+        or interval < 1
+    ):
+        raise _OverrideError(
+            "[train.py] formal action-ball requires an absolute evaluation "
+            "inbox root and a positive plain-integer evaluation interval"
+        )
+    try:
+        inbox = inbox_protocol.EvaluationInbox(inbox_root)
+        attempt_source = inbox_protocol.FrozenSidecarInboxAttemptSource(
+            inbox=inbox,
+            owner_id=owner_id,
+            run_id=run_id,
+        )
+    except Exception as exc:
+        raise _OverrideError(
+            "[train.py] invalid formal action-ball evaluation inbox "
+            f"identity: {exc}"
         ) from exc
     actual_file_sha256 = hashlib.sha256(raw).hexdigest()
     if actual_file_sha256 != expected_file_sha256:
@@ -4606,15 +5590,231 @@ def _load_action_ball_evaluator_launch_from_cfg(
             preflight=preflight,
             solver_sha256=preflight["solver_profile_sha256"],
             repo_root=repo_root,
+            attempt_source=attempt_source,
         )
     except (KeyError, RuntimeError) as exc:
         raise _OverrideError(
             f"[train.py] action-ball evaluator launch is not authorized: {exc}"
         ) from exc
+    def load_companion(path_field, sha_field, label):
+        companion_relative = str(
+            getattr(racket_cfg, path_field, "") or ""
+        ).strip()
+        companion_sha = str(
+            getattr(racket_cfg, sha_field, "") or ""
+        ).strip()
+        if not companion_relative:
+            raise _OverrideError(
+                f"[train.py] formal action-ball requires racket.{path_field}"
+            )
+        try:
+            companion_sha = _action_ball_sha256(
+                companion_sha, name=f"{label} file SHA"
+            )
+            companion_path = _action_ball_repo_relative_source(
+                companion_relative,
+                repo_root=repo_root,
+                name=f"{label} path",
+                reject_symlinks=True,
+            )
+            companion_raw = companion_path.read_bytes()
+        except (OSError, RuntimeError) as exc:
+            raise _OverrideError(
+                f"[train.py] invalid {label}: {exc}"
+            ) from exc
+        observed = hashlib.sha256(companion_raw).hexdigest()
+        if observed != companion_sha:
+            raise _OverrideError(
+                f"[train.py] {label} file SHA mismatch: "
+                f"expected={companion_sha}, actual={observed}"
+            )
+        try:
+            companion = json.loads(
+                companion_raw.decode("utf-8"),
+                object_pairs_hook=no_duplicate_keys,
+                parse_float=finite_float,
+                parse_constant=reject_constant,
+            )
+        except (UnicodeDecodeError, ValueError) as exc:
+            raise _OverrideError(
+                f"[train.py] {label} must be strict UTF-8 JSON: {exc}"
+            ) from exc
+        return {
+            "path": companion_relative,
+            "file_sha256": observed,
+            "document": companion,
+        }
+
+    sidecar = load_companion(
+        "action_ball_sidecar_launch_receipt_path",
+        "action_ball_sidecar_launch_receipt_file_sha256",
+        "action-ball frozen-evaluation sidecar launch receipt",
+    )
+    sidecar_code_relative = (
+        "hope_training/whole_body_tracking/scripts/"
+        "action_ball_frozen_eval_sidecar.py"
+    )
+    try:
+        sidecar_code = _action_ball_repo_relative_source(
+            sidecar_code_relative,
+            repo_root=repo_root,
+            name="action-ball frozen-evaluation sidecar code",
+            reject_symlinks=True,
+        )
+        sidecar_code_sha = _sha256_file(str(sidecar_code))
+        sidecar_content = sidecar["document"]["content"]
+        inbox_protocol.validate_sidecar_launch_document(
+            sidecar["document"],
+            actual_sidecar_code_sha256=sidecar_code_sha,
+            backend_contract_sha256=(
+                inbox_protocol.FORMAL_ISAAC_BACKEND_CONTRACT_SHA256
+            ),
+            require_trust=True,
+        )
+    except (KeyError, TypeError, ValueError, RuntimeError) as exc:
+        raise _OverrideError(
+            "[train.py] action-ball sidecar launch is not authorized: "
+            f"{exc}"
+        ) from exc
+    consumer_code_relative = (
+        "hope_training/whole_body_tracking/source/whole_body_tracking/"
+        "whole_body_tracking/tasks/tracking/mdp/hope_commands.py"
+    )
+    try:
+        consumer_code = _action_ball_repo_relative_source(
+            consumer_code_relative,
+            repo_root=repo_root,
+            name="action-ball evaluation consumer code",
+            reject_symlinks=True,
+        )
+        coordinator = (
+            inbox_protocol.FrozenEvaluationInboxCoordinator(
+                inbox=inbox,
+                owner_id=owner_id,
+                run_id=run_id,
+                sidecar_launch_sha256=sidecar["document"][
+                    "content_sha256"
+                ],
+                consumer_code_sha256=_sha256_file(
+                    str(consumer_code)
+                ),
+                evaluator_authority=verified["_authority"],
+            )
+        )
+    except Exception as exc:
+        raise _OverrideError(
+            "[train.py] action-ball evaluation coordinator cannot be "
+            f"constructed: {exc}"
+        ) from exc
+
+    drain = load_companion(
+        "action_ball_drain_reset_launch_receipt_path",
+        "action_ball_drain_reset_launch_receipt_file_sha256",
+        "action-ball drain/reset launch receipt",
+    )
+    from whole_body_tracking.tasks.tracking.mdp import (
+        action_ball_curriculum as curriculum_module,
+    )
+
+    class _PreGymDrainSource:
+        def binding_document(self):
+            row = drain["document"]
+            return {
+                field: row[field]
+                for field in (
+                    "runtime_source_contract_sha256",
+                    "runtime_source_path",
+                    "runtime_source_sha256",
+                    "broker_contract_sha256",
+                    "attempt_pool_contract_sha256",
+                    "task_receipt_pool_contract_sha256",
+                    "env_reset_contract_sha256",
+                )
+            }
+
+    try:
+        drain_authority = (
+            curriculum_module.DrainResetAuthority
+            .from_trusted_launch_receipt(
+                drain["document"],
+                runtime_source=_PreGymDrainSource(),
+            )
+        )
+        drain_authority.assert_binding(
+            curriculum_contract_sha256=preflight[
+                "profile_adapter"
+            ]["sha256"],
+            profile_order=tuple(
+                curriculum_module.ActionProfileKey(
+                    action_uid=binding["action_uid"],
+                    profile_sha256=binding[
+                        "sampling_profile_sha256"
+                    ],
+                    mobility=preflight["mobility_mode"],
+                )
+                for binding in preflight["action_bindings"]
+            ),
+            arm_catalog_sha256=curriculum_module.ARM_CATALOG_SHA256,
+            scheduler_contract_sha256=(
+                curriculum_module.ArmSchedulerConfig()
+                .contract_sha256
+            ),
+            sampler_sha256=preflight["sampler"][
+                "contract_sha256"
+            ],
+            solver_sha256=preflight["solver_profile_sha256"],
+            policy_contract_sha256=preflight[
+                "policy_contract_sha256"
+            ],
+        )
+    except Exception as exc:
+        raise _OverrideError(
+            "[train.py] action-ball drain/reset launch is not authorized: "
+            f"{exc}"
+        ) from exc
+
     return {
+        "schema_version": 4,
         "path": relative_path,
         "file_sha256": actual_file_sha256,
-        **verified,
+        "attempt_source_state_owner_sha256": (
+            attempt_source.state_owner_sha256
+        ),
+        "coordinator_state_owner_sha256": (
+            coordinator.state_owner_sha256
+        ),
+        "inbox_root": str(inbox_root),
+        "inbox_owner_id": owner_id,
+        "inbox_run_id": run_id,
+        "sidecar_launch": sidecar,
+        "sidecar_launch_receipt_path": sidecar["path"],
+        "sidecar_launch_receipt_file_sha256": sidecar[
+            "file_sha256"
+        ],
+        "sidecar_launch_receipt_content_sha256": sidecar[
+            "document"
+        ]["content_sha256"],
+        "sidecar_code_path": sidecar_code_relative,
+        "sidecar_code_sha256": sidecar_code_sha,
+        "drain_reset_launch": {
+            **drain,
+            "launch_receipt_canonical_sha256": (
+                curriculum_module._canonical_sha256(
+                    drain["document"]
+                )
+            ),
+            "runtime_source_binding": (
+                _PreGymDrainSource().binding_document()
+            ),
+            "authority_state_owner_sha256": (
+                drain_authority.state_owner_sha256
+            ),
+        },
+        **{
+            key: value
+            for key, value in verified.items()
+            if not key.startswith("_")
+        },
     }
 
 
@@ -4715,6 +5915,7 @@ def _validate_action_ball_runtime_hard_contract(
             "mobility_mode",
             "action_order",
             "action_uids",
+            "ready_root_z_by_slot_m",
             "action_bindings",
             "prototype",
             "profile_adapter",
@@ -4726,6 +5927,7 @@ def _validate_action_ball_runtime_hard_contract(
             "fixed_direction",
             "initial_episode_length_randomization",
             "policy_contract_sha256",
+            "evaluator_launch",
             "sha256",
         ),
         name="action-ball launch preflight",
@@ -4743,6 +5945,61 @@ def _validate_action_ball_runtime_hard_contract(
             "action-ball launch preflight must disable initial episode "
             "length randomization"
         )
+    ready_root_z = preflight["ready_root_z_by_slot_m"]
+    if (
+        type(ready_root_z) is not list
+        or len(ready_root_z) != len(preflight["action_order"])
+        or any(
+            type(value) not in (int, float)
+            or not math.isfinite(float(value))
+            for value in ready_root_z
+        )
+    ):
+        raise RuntimeError(
+            "action-ball launch preflight ready_root_z_by_slot_m must "
+            "contain one finite number per action"
+        )
+    sampler_preflight = _action_ball_exact_dict(
+        preflight["sampler"],
+        (
+            "contract_sha256",
+            "arm_catalog_sha256",
+            "seed",
+            "pool_refill_rows",
+        ),
+        name="action-ball launch preflight sampler",
+    )
+    for field in ("contract_sha256", "arm_catalog_sha256"):
+        _action_ball_sha256(
+            sampler_preflight[field],
+            name=f"action-ball launch preflight sampler.{field}",
+        )
+    from whole_body_tracking.tasks.tracking.mdp.action_ball_sampling import (
+        ARM_CATALOG_SHA256,
+    )
+
+    if sampler_preflight["arm_catalog_sha256"] != ARM_CATALOG_SHA256:
+        raise RuntimeError(
+            "action-ball launch preflight arm catalog disagrees with the "
+            "executable sampler"
+        )
+    evaluator_launch_preflight = _action_ball_exact_dict(
+        preflight["evaluator_launch"],
+        ("path", "file_sha256"),
+        name="action-ball launch preflight evaluator_launch",
+    )
+    if (
+        type(evaluator_launch_preflight["path"]) is not str
+        or not evaluator_launch_preflight["path"]
+    ):
+        raise RuntimeError(
+            "action-ball launch preflight evaluator_launch.path must be "
+            "non-empty"
+        )
+    _action_ball_sha256(
+        evaluator_launch_preflight["file_sha256"],
+        name="action-ball launch preflight evaluator_launch.file_sha256",
+    )
     preflight_declared = _action_ball_sha256(
         preflight["sha256"], name="action-ball launch preflight sha256"
     )
@@ -4768,9 +6025,13 @@ def _validate_action_ball_runtime_hard_contract(
             "prototype",
             "profiles",
             "sampling",
+            "timing",
             "solver",
             "physics",
+            "domain_authority",
+            "mutable_state_owner",
             "curriculum",
+            "evaluator_authority",
             "runtime",
             "motion_admission",
             "canonical_sha256",
@@ -4861,6 +6122,9 @@ def _validate_action_ball_runtime_hard_contract(
             row["sampling_profile_sha256"]
             for row in preflight["action_bindings"]
         ],
+        "arm_catalog_sha256": preflight["sampler"][
+            "arm_catalog_sha256"
+        ],
         "sampler_contract_sha256": preflight["sampler"][
             "contract_sha256"
         ],
@@ -4893,6 +6157,99 @@ def _validate_action_ball_runtime_hard_contract(
         name="action-ball runtime sampling",
     )
 
+    timing = _action_ball_exact_dict(
+        contract["timing"],
+        (
+            "authority",
+            "policy_dt_s",
+            "attempt_close_margin_s",
+            "episode_length_s",
+            "time_to_strike_source",
+            "legacy_motion_time_owners",
+        ),
+        name="action-ball runtime timing",
+    )
+    for field in (
+        "policy_dt_s",
+        "attempt_close_margin_s",
+        "episode_length_s",
+    ):
+        if (
+            type(timing[field]) not in (int, float)
+            or not math.isfinite(float(timing[field]))
+            or float(timing[field]) <= 0.0
+        ):
+            raise RuntimeError(
+                f"action-ball runtime timing.{field} must be finite and "
+                "positive"
+            )
+    from whole_body_tracking.tasks.tracking.mdp.action_ball_runtime import (
+        TASK_RECEIPT_TIMING_AUTHORITY,
+    )
+
+    if (
+        timing["authority"] != TASK_RECEIPT_TIMING_AUTHORITY
+        or timing["time_to_strike_source"]
+        != "MotionCommand.action_ball_time_to_contact_remaining_s"
+        or float(timing["policy_dt_s"])
+        != float(timing["attempt_close_margin_s"])
+        or float(timing["episode_length_s"])
+        < float(timing["policy_dt_s"])
+    ):
+        raise RuntimeError(
+            "action-ball runtime timing authority/dt/horizon contract drifted"
+        )
+    legacy_motion_time_owners = _action_ball_exact_dict(
+        timing["legacy_motion_time_owners"],
+        (
+            "hold_steps_range",
+            "stand_start_min_hold",
+            "post_swing_min_hold",
+            "stagger_initial_clock",
+            "speed_scale_range",
+            "speed_scale_per_clip",
+            "planner_revision_enabled",
+        ),
+        name="action-ball runtime timing.legacy_motion_time_owners",
+    )
+    speed_per_clip = getattr(motion_cfg, "speed_scale_per_clip", None)
+    expected_legacy_motion_time_owners = {
+        "hold_steps_range": [
+            int(value)
+            for value in (
+                getattr(motion_cfg, "hold_steps_range", ()) or ()
+            )
+        ],
+        "stand_start_min_hold": int(
+            getattr(motion_cfg, "stand_start_min_hold")
+        ),
+        "post_swing_min_hold": int(
+            getattr(motion_cfg, "post_swing_min_hold")
+        ),
+        "stagger_initial_clock": bool(
+            getattr(motion_cfg, "stagger_initial_clock")
+        ),
+        "speed_scale_range": [
+            float(value)
+            for value in (
+                getattr(motion_cfg, "speed_scale_range", ()) or ()
+            )
+        ],
+        "speed_scale_per_clip": (
+            None
+            if speed_per_clip is None
+            else [float(value) for value in speed_per_clip]
+        ),
+        "planner_revision_enabled": bool(
+            getattr(motion_cfg, "planner_revision_enabled", False)
+        ),
+    }
+    _action_ball_assert_json_equal(
+        legacy_motion_time_owners,
+        expected_legacy_motion_time_owners,
+        name="action-ball runtime legacy motion timing owners",
+    )
+
     physics = _action_ball_content_receipt(
         contract["physics"], name="action-ball runtime physics"
     )
@@ -4918,6 +6275,128 @@ def _validate_action_ball_runtime_hard_contract(
             "validated physics payload"
         )
 
+    repo_root = _action_ball_repo_root(motion_cfg)
+    domain_authority = _action_ball_content_receipt(
+        contract["domain_authority"],
+        name="action-ball runtime domain_authority",
+    )
+    domain_payload = _action_ball_exact_dict(
+        domain_authority["payload"],
+        (
+            "schema_version",
+            "kind",
+            "implementation_source_sha256",
+            "manifest_sha256",
+            "adapter_contract_sha256",
+            "action_uids",
+            "profile_sha256",
+            "mobility_mode",
+            "curriculum_config",
+            "policy_contract_sha256",
+            "schedule",
+        ),
+        name="action-ball runtime domain_authority.payload",
+    )
+    if (
+        type(domain_payload["schema_version"]) is not int
+        or domain_payload["schema_version"] < 1
+        or domain_payload["kind"]
+        != "whole_body_tracking.action_ball.domain_claim_authority"
+    ):
+        raise RuntimeError(
+            "action-ball runtime domain authority schema/kind drifted"
+        )
+    domain_source_map = _validate_action_ball_mdp_source_map(
+        domain_payload["implementation_source_sha256"],
+        expected_names=(
+            "hope_commands.py",
+            "action_ball_curriculum.py",
+            "action_ball_runtime.py",
+        ),
+        repo_root=repo_root,
+        name="action-ball runtime domain authority sources",
+    )
+    expected_domain_payload = {
+        "schema_version": domain_payload["schema_version"],
+        "kind": "whole_body_tracking.action_ball.domain_claim_authority",
+        "implementation_source_sha256": domain_source_map,
+        "manifest_sha256": preflight["manifest"]["file_sha256"],
+        "adapter_contract_sha256": preflight["profile_adapter"]["sha256"],
+        "action_uids": preflight["action_uids"],
+        "profile_sha256": [
+            row["sampling_profile_sha256"]
+            for row in preflight["action_bindings"]
+        ],
+        "mobility_mode": preflight["mobility_mode"],
+        "curriculum_config": preflight["curriculum"]["config"],
+        "policy_contract_sha256": preflight["policy_contract_sha256"],
+        "schedule": {
+            "claim_barrier": "true_reset_only",
+            "domain_source": (
+                "frozen_ActionBallCurriculum.expected_domains"
+            ),
+            "selection": "per_action_round_robin",
+            "training_selector": False,
+            "live_rollout_updates_curriculum": False,
+        },
+    }
+    _action_ball_assert_json_equal(
+        domain_payload,
+        expected_domain_payload,
+        name="action-ball runtime domain authority payload",
+    )
+
+    mutable_state_owner = _action_ball_exact_dict(
+        contract["mutable_state_owner"],
+        (
+            "schema_version",
+            "state_owner_sha256",
+            "protocol_views",
+            "checkpoint_state_is_mutable",
+            "mutable_state_sha256_is_not_a_hard_contract_pin",
+        ),
+        name="action-ball runtime mutable_state_owner",
+    )
+    if (
+        type(mutable_state_owner["schema_version"]) is not int
+        or mutable_state_owner["schema_version"] < 1
+    ):
+        raise RuntimeError(
+            "action-ball runtime mutable-state schema_version must be a "
+            "positive integer"
+        )
+    expected_state_owner_sha256 = _canonical_contract_sha256(
+        {
+            "schema_version": mutable_state_owner["schema_version"],
+            "kind": (
+                "whole_body_tracking.RacketTargetCommand."
+                "action_ball_mutable_state_owner"
+            ),
+            "action_uids": preflight["action_uids"],
+            "sampler_contract_sha256": preflight["sampler"][
+                "contract_sha256"
+            ],
+            "domain_authority_contract_sha256": domain_authority["sha256"],
+            "solver_contract_sha256": solver["sha256"],
+        }
+    )
+    expected_mutable_state_owner = {
+        "schema_version": mutable_state_owner["schema_version"],
+        "state_owner_sha256": expected_state_owner_sha256,
+        "protocol_views": [
+            "domain_claim_authority",
+            "birth_provider",
+            "task_solver",
+        ],
+        "checkpoint_state_is_mutable": True,
+        "mutable_state_sha256_is_not_a_hard_contract_pin": True,
+    }
+    _action_ball_assert_json_equal(
+        mutable_state_owner,
+        expected_mutable_state_owner,
+        name="action-ball runtime mutable-state owner",
+    )
+
     expected_curriculum = {
         "config": preflight["curriculum"]["config"],
         "policy_contract_sha256": preflight["policy_contract_sha256"],
@@ -4930,6 +6409,116 @@ def _validate_action_ball_runtime_hard_contract(
         name="action-ball runtime curriculum",
     )
 
+    evaluator_authority = _action_ball_exact_dict(
+        contract["evaluator_authority"],
+        (
+            "authority_contract_sha256",
+            "trusted_launch_receipt_sha256",
+            "evaluator_launch_receipt_path",
+            "evaluator_launch_receipt_file_sha256",
+            "evaluator_launch_receipt",
+            "launch_receipt_canonical_sha256",
+            "authority_binding",
+            "authority_state_owner_sha256",
+            "attempt_source_state_owner_sha256",
+            "coordinator_state_owner_sha256",
+            "inbox_root",
+            "inbox_owner_id",
+            "inbox_run_id",
+            "sidecar_launch_receipt_path",
+            "sidecar_launch_receipt_file_sha256",
+            "sidecar_launch_receipt_content_sha256",
+            "sidecar_code_path",
+            "sidecar_code_sha256",
+            "drain_reset",
+            "evaluation_interval_updates",
+            "formal_authority_available",
+            "formal_launch_requires_code_pinned_receipt",
+            "runtime_or_manifest_may_self_authorize",
+        ),
+        name="action-ball runtime evaluator_authority",
+    )
+    verified_evaluator_launch = _load_action_ball_evaluator_launch_from_cfg(
+        racket_cfg,
+        motion_cfg,
+        preflight=preflight,
+    )
+    from whole_body_tracking.tasks.tracking.mdp import (
+        action_ball_evaluation as evaluator_module,
+    )
+
+    expected_evaluator_authority = {
+        "authority_contract_sha256": (
+            evaluator_module.FROZEN_EVALUATOR_V4_AUTHORITY_CONTRACT_SHA256
+        ),
+        "trusted_launch_receipt_sha256": sorted(
+            evaluator_module
+            .TRUSTED_FROZEN_EVALUATOR_V4_LAUNCH_RECEIPT_SHA256
+        ),
+        "evaluator_launch_receipt_path": verified_evaluator_launch["path"],
+        "evaluator_launch_receipt_file_sha256": (
+            verified_evaluator_launch["file_sha256"]
+        ),
+        "evaluator_launch_receipt": verified_evaluator_launch[
+            "launch_receipt"
+        ],
+        "launch_receipt_canonical_sha256": verified_evaluator_launch[
+            "launch_receipt_canonical_sha256"
+        ],
+        "authority_binding": verified_evaluator_launch["authority_binding"],
+        "authority_state_owner_sha256": verified_evaluator_launch[
+            "authority_state_owner_sha256"
+        ],
+        "attempt_source_state_owner_sha256": (
+            verified_evaluator_launch[
+                "attempt_source_state_owner_sha256"
+            ]
+        ),
+        "coordinator_state_owner_sha256": (
+            verified_evaluator_launch[
+                "coordinator_state_owner_sha256"
+            ]
+        ),
+        "inbox_root": verified_evaluator_launch["inbox_root"],
+        "inbox_owner_id": verified_evaluator_launch["inbox_owner_id"],
+        "inbox_run_id": verified_evaluator_launch["inbox_run_id"],
+        "sidecar_launch_receipt_path": (
+            verified_evaluator_launch[
+                "sidecar_launch_receipt_path"
+            ]
+        ),
+        "sidecar_launch_receipt_file_sha256": (
+            verified_evaluator_launch[
+                "sidecar_launch_receipt_file_sha256"
+            ]
+        ),
+        "sidecar_launch_receipt_content_sha256": (
+            verified_evaluator_launch[
+                "sidecar_launch_receipt_content_sha256"
+            ]
+        ),
+        "sidecar_code_path": verified_evaluator_launch[
+            "sidecar_code_path"
+        ],
+        "sidecar_code_sha256": verified_evaluator_launch[
+            "sidecar_code_sha256"
+        ],
+        "drain_reset": verified_evaluator_launch[
+            "drain_reset_launch"
+        ],
+        "evaluation_interval_updates": int(
+            racket_cfg.action_ball_frozen_eval_interval_updates
+        ),
+        "formal_authority_available": True,
+        "formal_launch_requires_code_pinned_receipt": True,
+        "runtime_or_manifest_may_self_authorize": False,
+    }
+    _action_ball_assert_json_equal(
+        evaluator_authority,
+        expected_evaluator_authority,
+        name="action-ball runtime evaluator authority",
+    )
+
     expected_runtime_sha = _action_ball_sha256(
         expected_runtime_contract_sha256,
         name="action-ball executable runtime contract SHA",
@@ -4940,6 +6529,7 @@ def _validate_action_ball_runtime_hard_contract(
             "pins": {
                 "manifest_sha256": preflight["manifest"]["file_sha256"],
                 "sampler_sha256": preflight["sampler"]["contract_sha256"],
+                "domain_authority_sha256": domain_authority["sha256"],
                 "physics_sha256": physics["sha256"],
                 "solver_sha256": solver["sha256"],
             },
@@ -4947,9 +6537,38 @@ def _validate_action_ball_runtime_hard_contract(
             "bindings": expected_bindings,
         }
     )
+    runtime_source_map = _validate_action_ball_mdp_source_map(
+        _action_ball_exact_dict(
+            contract["runtime"],
+            (
+                "runtime_contract_sha256",
+                "registry_sha256",
+                "implementation_source_sha256",
+                "fixed_direction",
+                "wrap_teleport",
+            ),
+            name="action-ball runtime protocol identity",
+        )["implementation_source_sha256"],
+        expected_names=(
+            "hope_commands.py",
+            "action_ball_curriculum.py",
+            "action_ball_evaluation.py",
+            "action_ball_manifest.py",
+            "action_ball_profile_adapter.py",
+            "action_ball_runtime.py",
+            "action_ball_sampling.py",
+            "continuous_questions.py",
+            "racket_contact_geometry.py",
+            "stroke_adapt_torch.py",
+            "virtual_ball.py",
+        ),
+        repo_root=repo_root,
+        name="action-ball runtime implementation sources",
+    )
     expected_runtime = {
         "runtime_contract_sha256": expected_runtime_sha,
         "registry_sha256": expected_registry,
+        "implementation_source_sha256": runtime_source_map,
         "fixed_direction": True,
         "wrap_teleport": False,
     }
@@ -4958,10 +6577,22 @@ def _validate_action_ball_runtime_hard_contract(
         expected_runtime,
         name="action-ball runtime protocol identity",
     )
-    _validate_action_ball_visible_motion_identity(
+    from whole_body_tracking.tasks.tracking.mdp import (
+        action_ball_runtime as runtime_module,
+    )
+
+    _validate_action_ball_motion_admission_receipt(
         contract["motion_admission"],
+        preflight=preflight,
         motion_cfg=motion_cfg,
-        action_count=len(expected_bindings),
+        expected_runtime_contract_sha256=expected_runtime_sha,
+        expected_broker_state_schema_version=(
+            runtime_module.BROKER_STATE_SCHEMA_VERSION
+        ),
+        expected_broker_registry_sha256=expected_registry,
+        expected_provider_state_owner_sha256=mutable_state_owner[
+            "state_owner_sha256"
+        ],
     )
     return contract
 
@@ -4984,7 +6615,11 @@ def _validate_action_ball_policy_recipe(preflight: dict, agent_cfg) -> dict:
 
 
 def _build_training_hard_contract(
-    env, actor_contract, effective_reward_receipt=None, agent_cfg=None
+    env,
+    actor_contract,
+    effective_reward_receipt=None,
+    agent_cfg=None,
+    action_set_identity=None,
 ) -> dict:
     """Immutable actor/task facts that must match across a checkpoint resume.
 
@@ -4997,6 +6632,7 @@ def _build_training_hard_contract(
     from whole_body_tracking.utils.training_contract import (
         TRAINING_CONTRACT_SCHEMA_VERSION,
         runtime_execution_facts,
+        validate_action_ball_action_set_runtime_identity,
     )
 
     from whole_body_tracking.utils.effective_reward_recipe import (
@@ -5167,7 +6803,11 @@ def _build_training_hard_contract(
                 f"{sorted(required_terminations - active_terminations)}"
             )
 
-        preflight = _action_ball_preflight_contract(racket, motion_cmd.cfg)
+        preflight = _action_ball_preflight_contract(
+            racket,
+            motion_cmd.cfg,
+            policy_dt_s=float(env.step_dt),
+        )
         runtime_contract_fn = getattr(
             racket_cmd, "action_ball_hard_contract", None
         )
@@ -5230,10 +6870,66 @@ def _build_training_hard_contract(
                 "action-ball MotionCommand admission receipt must be a "
                 "non-optional plain mapping"
             )
+        _action_ball_assert_json_equal(
+            runtime_action_ball.get("motion_admission"),
+            motion_admission_receipt,
+            name=(
+                "action-ball runtime/reopened motion admission receipt"
+            ),
+        )
 
         action_ball_ppo_recipe = _validate_action_ball_policy_recipe(
             preflight, agent_cfg
         )
+
+        diagnostic_action_ball = (
+            getattr(
+                racket,
+                "action_ball_diagnostic_unauthorized",
+                False,
+            )
+            is True
+        )
+        if diagnostic_action_ball:
+            if action_set_identity is not None:
+                raise RuntimeError(
+                    "diagnostic ActionBall training cannot consume a formal "
+                    "action-set launch identity"
+                )
+        else:
+            if action_set_identity is None:
+                raise RuntimeError(
+                    "formal ActionBall training requires a verified "
+                    "launch-claim action-set identity"
+                )
+            try:
+                action_set_identity = (
+                    validate_action_ball_action_set_runtime_identity(
+                        action_set_identity,
+                        actor_obs_contract=getattr(
+                            actor_contract, "name", None
+                        ),
+                        actor_obs_width=getattr(
+                            actor_contract, "total_dim", None
+                        ),
+                        manifest_path=preflight["manifest"]["path"],
+                        manifest_sha256=preflight["manifest"][
+                            "file_sha256"
+                        ],
+                        scope=preflight["prototype"]["scope"],
+                        mobility_mode=preflight["mobility_mode"],
+                        ordered_action_ids=preflight["action_order"],
+                        ordered_action_uids=preflight["action_uids"],
+                        experiment_name=getattr(
+                            agent_cfg, "experiment_name", None
+                        ),
+                    )
+                )
+            except (KeyError, TypeError, ValueError) as exc:
+                raise RuntimeError(
+                    "formal ActionBall action-set launch identity disagrees "
+                    "with the instantiated manifest/runtime actor"
+                ) from exc
 
         racket_mode = str(getattr(racket_cmd, "_racket_mode", ""))
         wrist_index = getattr(racket_cmd, "_wrist_body_index", None)
@@ -5256,6 +6952,20 @@ def _build_training_hard_contract(
             "preflight": preflight,
             "runtime": runtime_action_ball,
             "motion_admission": motion_admission_receipt,
+            **(
+                {}
+                if action_set_identity is None
+                else {"action_set_identity": action_set_identity}
+            ),
+            "authorization": (
+                _action_ball_training_authorization_contract(
+                    getattr(
+                        racket,
+                        "action_ball_diagnostic_unauthorized",
+                        False,
+                    )
+                )
+            ),
             "resolved_racket_kinematics": {
                 "mode": racket_mode,
                 "source_body_name": str(racket.wrist_body_name),
@@ -5266,6 +6976,12 @@ def _build_training_hard_contract(
                 "sha256"
             ],
         }
+        _validate_action_ball_training_authorization(action_ball_contract)
+    elif action_set_identity is not None:
+        raise RuntimeError(
+            "an action-set launch identity may only be consumed by "
+            "target_mode=action_ball"
+        )
     runtime_facts = runtime_execution_facts(env, actor_contract)
     lateral_training = _resolve_lateral_training_runtime(env)
     processed_qdes_slew_contract = _processed_qdes_slew_hinge_reward_contract(
@@ -5273,6 +6989,13 @@ def _build_training_hard_contract(
     )
     qdes_limit_barrier_contract = _qdes_limit_barrier_reward_contract(
         env_cfg, runtime_facts
+    )
+    actual_joint_limit_barrier_contract = (
+        _actual_joint_limit_barrier_reward_contract(
+            env_cfg,
+            runtime_facts,
+            qdes_contract=qdes_limit_barrier_contract,
+        )
     )
     loaded_joint_reference = getattr(getattr(motion_cmd, "motion", None), "joint_pos", None)
     loaded_joint_reference_shape = tuple(getattr(loaded_joint_reference, "shape", ()))
@@ -5569,6 +7292,15 @@ def _build_training_hard_contract(
         ),
         **(
             {}
+            if actual_joint_limit_barrier_contract is None
+            else {
+                "actual_joint_limit_barrier_reward": (
+                    actual_joint_limit_barrier_contract
+                )
+            }
+        ),
+        **(
+            {}
             if lower_body_pose_contract is None
             else {"lower_body_pose_imitation_reward": lower_body_pose_contract}
         ),
@@ -5848,6 +7580,14 @@ _RACKET_KEYS = (
     "action_ball_pool_refill_rows", "action_ball_fixed_direction",
     "action_ball_evaluator_launch_receipt_path",
     "action_ball_evaluator_launch_receipt_file_sha256",
+    "action_ball_sidecar_launch_receipt_path",
+    "action_ball_sidecar_launch_receipt_file_sha256",
+    "action_ball_drain_reset_launch_receipt_path",
+    "action_ball_drain_reset_launch_receipt_file_sha256",
+    "action_ball_evaluation_inbox_root",
+    "action_ball_evaluation_owner_id",
+    "action_ball_evaluation_run_id",
+    "action_ball_frozen_eval_interval_updates",
     "action_ball_diagnostic_unauthorized",
     "virtual_ball",
     "ref_perturb_curriculum_steps", "ref_perturb_curriculum_start", "ref_perturb_success_gated",
@@ -6270,23 +8010,22 @@ _REWARD_PACK_V2_DIRECT = (
     # 值封顶平滑(fresh 自杀区间的解,冻结表档位):无封顶 action_rate_l2 归零,换封顶版。
     ("action_rate_l2", 0.0),
     ("action_rate_clamped", -0.2),
-    # 死亡罚(07-26 刷分事故的主修复;延付为纵深):−1800×dt=−36/次 > 满分上台 33。
-    # 刷分账:(26−36)/28 步 = 每步 −0.36 严格负;学站阶段死亡有价 → 梯度指向活久,
-    # 与自杀区间(死免费活扣钱)方向相反。PACE 先例 −1000×dt=−20 同量级。
-    ("death_penalty", -1800.0),
+    # 统一灾难价(07-28 Franco 终裁):fall/table/hard-qdes/hard-actual 都只经 generic
+    # termination 收一次。−3600×policy_dt(0.02 s)=−72，严格高于满分上台约 +33，
+    # 关死 reset/death 套利；具名原因只分账，不叠加第二份罚。
+    ("death_penalty", -3600.0),
 )
 # 包里的【可选】项:term 不存在时【跳过并记账】,不 fail-loud。
 # 与上面 DIRECT 的区别就是这一条,理由也只有一条:DIRECT 的 fail-loud 是在说"这个 cfg 血统根
 # 本不长 v2 要动的项",而可选项的缺席是一个【合法配置】——桌子被 task.table_obstacle=false
 # 关掉时 table_hit_penalty 会被 apply_table_obstacle 一并撤走,这不是配错,是无桌对照臂。
 _REWARD_PACK_V2_OPTIONAL = (
-    # 撞桌罚(07-27 上桌障碍物)。与摔死同价 −1800×dt=−36/次,并且**叠加**在 death_penalty
-    # 之上(撞桌是真终止,is_terminated 也会计),所以一次撞桌实际 −72,严格贵于摔一跤 −36。
-    # 这是有意的定序:真机上把拍子砸到台面比摔一跤更贵(球拍/腕关节),不该更便宜。
-    ("table_hit_penalty", -1800.0),
+    # 桌碰仍是独立 hard-unsafe termination/counter，但不再叠加 reason-specific reward。
+    # generic death 已给 −72；这里固定 0，防同一 terminal transition 被收两次。
+    ("table_hit_penalty", 0.0),
 )
 # v2.2 direct-params:landing 换 legal_base 语义(v1 climb 字节等价保留在函数默认)。
-# 延付(settle_delay_s)07-26 Franco 裁决:默认关、降级为消融 flag——death_penalty −1800
+# 延付(settle_delay_s)07-26 Franco 裁决:默认关、降级为消融 flag——generic death
 # + stand_start 已双重关死刷分回路,延付的边际价值待消融检验(臂级用
 # rewards.virtual_landing_settle_delay_s 显式开)。
 _REWARD_PACK_V2_LANDING_PARAMS = {"mode": "legal_base", "base_frac": 0.6, "settle_delay_s": 0.0}
@@ -6596,6 +8335,41 @@ def _assert_physical_validity_guards_present(racket_cfg):
             f"Update the checkout on this machine before launching")
 
 
+def _physical_validity_guards_required(racket_cfg) -> bool:
+    """Whether the composed command can execute one of the guarded physical constructions.
+
+    This is deliberately a launch-level decision, not a side effect of translating every
+    unrelated ``task.racket`` override.  The three guarded constructions run for
+    reference/solved/formal action modes, for a non-empty bank, or for the per-clip boxes whose
+    command constructor invokes the table-clearance/forward-velocity checks.
+    """
+
+    if racket_cfg is None:
+        return False
+    target_mode = str(getattr(racket_cfg, "target_mode", "") or "")
+    if target_mode in {
+        "reference_perturbed",
+        "solved",
+        "task_first",
+        "action_ball",
+    }:
+        return True
+    if str(getattr(racket_cfg, "question_bank", "") or "").strip():
+        return True
+    if str(getattr(racket_cfg, "base_couple_mode", "") or "") == "reference_reach":
+        return True
+    if tuple(getattr(racket_cfg, "clip_names_per_clip", ()) or ()):
+        return True
+    return any(
+        getattr(racket_cfg, name, None) is not None
+        for name in (
+            "racket_pos_range_per_clip",
+            "racket_vel_range_per_clip",
+            "vb_vel_range_per_clip",
+        )
+    )
+
+
 def _resolve_clip_names(rk):
     """The ORDERED per-clip key list every per-clip YAML block is addressed by.
 
@@ -6763,40 +8537,26 @@ _PLANT_KEYS = (
     "ground_dynamic_friction",
     "robot_material_static_friction_range",
     "robot_material_dynamic_friction_range",
+    "robot_material_make_consistent",
     "terrain_rough_height_range",
 )
 _GROUND_PLANT_TASK_KEYS = _PLANT_KEYS[1:]
 
 
-def _build_rough_terrain_generator_cfg(height_range):
-    """isaaclab random_rough 地形生成器 cfg(lazy import:Kit 起来后才 import 得动)。
+def _attach_rough_ground_patch(env_cfg, height_range):
+    """Per-env 零均值凹凸地垫的挂载 seam(真身在包内 terrain_patch;lazy import:Kit 起来后
+    才 import 得动;host 测试 monkeypatch 这个名字)。
 
-    人话:10x20 块 8mx8m 的随机凹凸高度场拼成大地板,每块的凹凸高度从 height_range(米)均匀
-    采样;horizontal_scale=0.1 m 网格、vertical_scale=5 mm 量化,参数对齐 isaaclab 自带的
-    ROUGH_TERRAINS_CFG 先例。use_cache=False:地形跟随 env seed 重建,不吃过期缓存。
+    人话:2026-07-29 抬脚地形修复。旧的 ``terrain_type="generator"`` 全局地形会把
+    ``scene.env_origins`` 换成地形 tile 原点,而克隆出来的静态桌子还钉在 GridCloner 网格上
+    ——机器人被传送到没有自己桌子的地方;而且 env_spacing=2.5 m 下邻居的桌子足迹和本 env 的
+    机器人活动区在空间上重叠,一张共享地面 mesh 根本做不到"我这里凹凸、你桌下平整"。改成
+    每个 env 自己的静态凹凸垫(shadow-table 同款 ENV_REGEX_NS+碰撞过滤先例):凹凸只铺机器人
+    一侧,高度以 0 为平均(±(hi-lo)/2),桌子足迹强制平在 z=0,桌面/动作库/虚拟球标定全不动。
     """
-    from isaaclab.terrains import TerrainGeneratorCfg
-    from isaaclab.terrains.height_field import HfRandomUniformTerrainCfg
+    from whole_body_tracking.tasks.tracking import terrain_patch
 
-    lo, hi = float(height_range[0]), float(height_range[1])
-    return TerrainGeneratorCfg(
-        size=(8.0, 8.0),
-        border_width=20.0,
-        num_rows=10,
-        num_cols=20,
-        horizontal_scale=0.1,
-        vertical_scale=0.005,
-        slope_threshold=0.75,
-        use_cache=False,
-        sub_terrains={
-            "random_rough": HfRandomUniformTerrainCfg(
-                proportion=1.0,
-                noise_range=(lo, hi),
-                noise_step=0.005,
-                border_width=0.25,
-            )
-        },
-    )
+    return terrain_patch.attach_rough_ground_patch(env_cfg, height_range)
 
 
 def _apply_ground_plant_task_override(env_cfg, plant, applied):
@@ -6896,8 +8656,32 @@ def _apply_ground_plant_task_override(env_cfg, plant, applied):
         params[param] = (lo, hi)
         applied.append(f"events.physics_material.params.{param}=({lo}, {hi})")
 
-    # 3) 随机凹凸地形(显式 null = 平地现状,零改动)。只允许从 plane 切过去——已经是
-    # generator 的 cfg 再叠一层说明配置血统不对,拒绝。
+    # 2.5) 静/动摩擦物理一致性(2026-07-29)。人话:isaaclab 的材质随机化默认静、动独立采样,
+    # 约 1/3 的桶会采到 动>静 的非物理组合;显式 true 让每个桶 dynamic=min(static, dynamic)。
+    # false 的唯一拼写是缺席/null(= 现状独立采样,字节等价),写 false 也当没写。
+    mc_raw = raws["robot_material_make_consistent"]
+    if mc_raw is not None:
+        if not isinstance(mc_raw, bool):
+            raise _OverrideError(
+                "task.plant.robot_material_make_consistent must be a bool"
+            )
+        if mc_raw:
+            events = getattr(env_cfg, "events", None)
+            term = None if events is None else getattr(events, "physics_material", None)
+            params = None if term is None else getattr(term, "params", None)
+            _require(
+                isinstance(params, dict),
+                "events.physics_material.params (task.plant.robot_material_make_consistent)",
+            )
+            params["make_consistent"] = True
+            applied.append(
+                "events.physics_material.params.make_consistent=True "
+                "(逐桶 dynamic=min(static, dynamic),动摩擦不再超过静摩擦)"
+            )
+
+    # 3) 随机凹凸地垫(显式 null = 平地现状,零改动)。只允许从 plane 起点切过去——起点不是
+    # plane 说明配置血统不对,拒绝。带宽 [lo, hi] 会被居中到 0(±(hi-lo)/2,5 mm 量化),所以
+    # 太窄的带会量化成死平垫,同样拒绝。挂载细节见 terrain_patch.attach_rough_ground_patch。
     rough_raw = raws["terrain_rough_height_range"]
     if rough_raw is not None:
         lo, hi = _plant_range(rough_raw, "terrain_rough_height_range")
@@ -6911,16 +8695,31 @@ def _apply_ground_plant_task_override(env_cfg, plant, applied):
                 "task.plant.terrain_rough_height_range hi > 0.5 m is not a plausible "
                 "arena floor"
             )
+        if (hi - lo) < 0.01 - 1e-12:
+            raise _OverrideError(
+                "task.plant.terrain_rough_height_range band (hi - lo) must be >= 0.01 m: "
+                "heights are re-centred to ±(hi-lo)/2 about z=0 and quantized at 5 mm, a "
+                f"narrower band builds a dead-flat pad (got [{lo}, {hi}])"
+            )
+        if (hi - lo) > 0.15 + 1e-12:
+            raise _OverrideError(
+                "task.plant.terrain_rough_height_range band (hi - lo) must be <= 0.15 m: "
+                "beyond that the height-field slope wall correction pulls below-zero "
+                f"vertices onto the flat table boundary column (got [{lo}, {hi}])"
+            )
+        _band_ratio = ((hi - lo) / 2.0) / 0.005
+        if abs(_band_ratio - round(_band_ratio)) > 1e-6:
+            raise _OverrideError(
+                "task.plant.terrain_rough_height_range band (hi - lo) must be a multiple "
+                "of 0.01 m (heights quantize to 5 mm levels; a non-multiple band would "
+                f"silently build a different amplitude than authored; got [{lo}, {hi}])"
+            )
         _require(
             terrain is not None and getattr(terrain, "terrain_type", None) == "plane",
             "scene.terrain.terrain_type=='plane' (task.plant.terrain_rough_height_range)",
         )
-        terrain.terrain_type = "generator"
-        terrain.terrain_generator = _build_rough_terrain_generator_cfg((lo, hi))
-        applied.append(
-            f"scene.terrain=generator/random_rough noise_range=({lo}, {hi}) m "
-            "(fresh-from-random only; ground_plant 合同块会拒绝平地谱系 resume)"
-        )
+        for line in _attach_rough_ground_patch(env_cfg, (lo, hi)):
+            applied.append(line)
 
 
 def _ground_plant_contract(env_cfg) -> dict | None:
@@ -6950,35 +8749,43 @@ def _ground_plant_contract(env_cfg) -> dict | None:
 
     scene = getattr(env_cfg, "scene", None)
     terrain = None if scene is None else getattr(scene, "terrain", None)
-    material = None if terrain is None else getattr(terrain, "physics_material", None)
-    if material is None:
-        raise RuntimeError(
-            "ground-plant contract requires scene.terrain.physics_material"
-        )
-    terrain_type_raw = getattr(terrain, "terrain_type", None)
-    if terrain_type_raw == "plane":
+    patch = None if scene is None else getattr(scene, "rough_ground_patch", None)
+    if terrain is not None and patch is None:
+        material = getattr(terrain, "physics_material", None)
+        if material is None:
+            raise RuntimeError(
+                "ground-plant contract requires scene.terrain.physics_material"
+            )
+        terrain_type_raw = getattr(terrain, "terrain_type", None)
+        if terrain_type_raw != "plane":
+            raise RuntimeError(
+                f"ground-plant contract cannot fingerprint terrain_type={terrain_type_raw!r}"
+            )
         terrain_type = GROUND_PLANT_TERRAIN_PLANE
         height = None
-    elif terrain_type_raw == "generator":
-        generator = getattr(terrain, "terrain_generator", None)
-        sub_terrains = getattr(generator, "sub_terrains", None)
-        if not isinstance(sub_terrains, dict) or set(sub_terrains) != {"random_rough"}:
-            raise RuntimeError(
-                "ground-plant contract requires generator terrain to be exactly the "
-                "single random_rough sub-terrain"
-            )
-        noise = getattr(sub_terrains["random_rough"], "noise_range", None)
+    elif terrain is None and patch is not None:
+        # 2026-07-29 抬脚地形:per-env 零均值凹凸垫替代 TerrainImporter(plane importer 被
+        # attach_rough_ground_patch 摘掉,env origins 回落克隆网格)。指纹从垫子的 spawn cfg
+        # 读回 AUTHORED 带宽和地面材质。
+        spawn = getattr(patch, "spawn", None)
+        band = None if spawn is None else getattr(spawn, "height_range_m", None)
         try:
-            noise_pair = [float(noise[0]), float(noise[1])]
+            height = [float(band[0]), float(band[1])]
         except (TypeError, ValueError, IndexError) as exc:
             raise RuntimeError(
-                "ground-plant contract requires random_rough noise_range=[lo, hi]"
+                "ground-plant contract requires rough_ground_patch.spawn"
+                ".height_range_m=[lo, hi]"
             ) from exc
+        material = getattr(spawn, "physics_material", None)
+        if material is None:
+            raise RuntimeError(
+                "ground-plant contract requires rough_ground_patch.spawn.physics_material"
+            )
         terrain_type = GROUND_PLANT_TERRAIN_ROUGH
-        height = noise_pair
     else:
         raise RuntimeError(
-            f"ground-plant contract cannot fingerprint terrain_type={terrain_type_raw!r}"
+            "ground-plant contract requires exactly one of scene.terrain (plane recipe) "
+            "or scene.rough_ground_patch (zero-mean rough pad)"
         )
     events = getattr(env_cfg, "events", None)
     event_term = None if events is None else getattr(events, "physics_material", None)
@@ -6997,11 +8804,18 @@ def _ground_plant_contract(env_cfg) -> dict | None:
                 f"ground-plant contract requires events.physics_material.params"
                 f"['{param}']=[lo, hi]"
             ) from exc
+    make_consistent = params.get("make_consistent", False)
+    if not isinstance(make_consistent, bool):
+        raise RuntimeError(
+            "ground-plant contract requires events.physics_material.params"
+            "['make_consistent'] to be a bool when present"
+        )
     return ground_plant_block(
         ground_static_friction=float(material.static_friction),
         ground_dynamic_friction=float(material.dynamic_friction),
         robot_material_static_friction_range=ranges["static_friction_range"],
         robot_material_dynamic_friction_range=ranges["dynamic_friction_range"],
+        robot_material_make_consistent=make_consistent,
         terrain_type=terrain_type,
         terrain_rough_height_range_m=height,
     )
@@ -7172,12 +8986,6 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             "(explicit schema-v3 zero-friction plant control)"
         )
 
-    # Ground/terrain plant keys (2026-07-22, chatter-ground-foot wave).  人话:地面材质摩擦、
-    # 机器人 body 材质随机化范围、随机凹凸地形——默认全缺席 = 现状平地配方逐字节不变;任何
-    # 显式值都会让 schema-3 合同长出 ground_plant 块,平地谱系 checkpoint 对着新 plant 续训
-    # 会被 _contract_diff 拒绝(rough 臂必须 fresh-from-random)。
-    _apply_ground_plant_task_override(env_cfg, plant, applied)
-
     # Recovery/hold-only random WORLD-Y torso-force training.  This deliberately is not an
     # EventManager term: the reviewed adapter must own every substep write, prove a complete zero
     # overwrite when inactive, and fail closed on any competing writer.
@@ -7206,6 +9014,13 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
         if els is not None:
             env_cfg.episode_length_s = float(els)
             applied.append(f"episode_length_s={float(els)}")
+
+    # Ground/terrain plant keys (2026-07-22, chatter-ground-foot wave; 2026-07-29 抬脚地形修复).
+    # 人话:地面材质摩擦、机器人 body 材质随机化范围、随机凹凸地垫——默认全缺席 = 现状平地
+    # 配方逐字节不变;任何显式值都会让 schema-3 合同长出 ground_plant 块,平地谱系 checkpoint
+    # 对着新 plant 续训会被 _contract_diff 拒绝(rough 臂必须 fresh-from-random)。故意排在
+    # env-base 块之后:凹凸垫的兜底地板要按 POST-OVERRIDE 的 env_spacing 算尺寸。
+    _apply_ground_plant_task_override(env_cfg, plant, applied)
 
     # sim base (control frequency = 1 / (dt * decimation))
     sim = _get(task, "sim")
@@ -8761,11 +10576,6 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             _require(hasattr(env_cfg.commands, "racket_target"),
                      f"commands.racket_target (task YAML sets racket keys {provided})")
             C = env_cfg.commands.racket_target
-            # LAUNCH-SOURCE GATE: prove the checkout we are about to train FROM actually contains
-            # the physical-validity guards. A pod checkout that predates them imports cleanly and
-            # silently skips all three, so "the guard exists" must be asserted against the module
-            # that was really imported, not against the repo the operator is looking at.
-            _assert_physical_validity_guards_present(C)
             # strike_phase is PER-MOTION: the racket-tip contact frame differs per clip, so a single
             # global value is wrong when the trained motion changes (forehand 0.46 vs backhand 0.59).
             # `strike_phase_by_motion` (clip-name substring -> phase) wins when it matches `clip_name`;
@@ -8929,7 +10739,10 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 C,
                 "action_ball_diagnostic_unauthorized",
                 _get(rk, "action_ball_diagnostic_unauthorized"),
-                bool,
+                lambda value: _as_explicit_bool(
+                    value,
+                    "task.racket.action_ball_diagnostic_unauthorized",
+                ),
                 applied,
                 "racket_target",
             )
@@ -8937,7 +10750,10 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                 C,
                 "virtual_ball",
                 _get(rk, "virtual_ball"),
-                bool,
+                lambda value: _as_explicit_bool(
+                    value,
+                    "task.racket.virtual_ball",
+                ),
                 applied,
                 "racket_target",
             )
@@ -8957,6 +10773,34 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                     "action_ball_evaluator_launch_receipt_file_sha256",
                 ),
                 str,
+                applied,
+                "racket_target",
+            )
+            for _field in (
+                "action_ball_sidecar_launch_receipt_path",
+                "action_ball_sidecar_launch_receipt_file_sha256",
+                "action_ball_drain_reset_launch_receipt_path",
+                "action_ball_drain_reset_launch_receipt_file_sha256",
+                "action_ball_evaluation_inbox_root",
+                "action_ball_evaluation_owner_id",
+                "action_ball_evaluation_run_id",
+            ):
+                _set_attr(
+                    C,
+                    _field,
+                    _get(rk, _field),
+                    str,
+                    applied,
+                    "racket_target",
+                )
+            _set_attr(
+                C,
+                "action_ball_frozen_eval_interval_updates",
+                _get(rk, "action_ball_frozen_eval_interval_updates"),
+                lambda value: _as_exact_int(
+                    value,
+                    "task.racket.action_ball_frozen_eval_interval_updates",
+                ),
                 applied,
                 "racket_target",
             )
@@ -9504,6 +11348,8 @@ def _run(cfg):
     from whole_body_tracking.utils.my_on_policy_runner import MotionOnPolicyRunner as OnPolicyRunner
     from whole_body_tracking.utils.ppo_cfg import runner_kwargs
     from whole_body_tracking.utils.training_contract import (
+        checkpoint_contract_lineage_exact,
+        load_action_ball_action_set_identity_from_launch_claim,
         require_checkpoint_contract_binding,
         validate_schema3_contract,
         validate_schema3_contract_structure,
@@ -9526,6 +11372,15 @@ def _run(cfg):
     _cfg_mod = sys.modules.get(type(env_cfg).__module__)
     print(f"[train.py] env cfg source: {type(env_cfg).__name__} <- {getattr(_cfg_mod, '__file__', '?')}", flush=True)
     applied = _apply_task_overrides(env_cfg, cfg.task, _registry_clip_name(cfg))
+    _launch_racket_cfg = getattr(
+        getattr(env_cfg, "commands", None), "racket_target", None
+    )
+    if _physical_validity_guards_required(_launch_racket_cfg):
+        # LAUNCH-SOURCE GATE: prove the checkout we are about to train FROM actually contains
+        # the physical-validity guards. A pod checkout that predates them imports cleanly and
+        # silently skips all three, so "the guard exists" must be asserted against the module
+        # that was really imported, not against the repo the operator is looking at.
+        _assert_physical_validity_guards_present(_launch_racket_cfg)
     plant_cfg = _get(cfg.task, "plant")
     zero_joint_friction_raw = _get(plant_cfg, "zero_joint_friction")
     zero_joint_friction_requested = (
@@ -9665,6 +11520,65 @@ def _run(cfg):
     # Publish the exact RSL directory before environment construction; a bad or
     # pre-existing binding therefore fails before any learning/checkpoint write.
     training_launch_claim_sha256 = _get(cfg, "training_launch_claim_sha256")
+    training_launch_claim_path = _get(
+        cfg, "training_launch_claim_path"
+    )
+    if (training_launch_claim_sha256 is None) != (
+        training_launch_claim_path is None
+    ):
+        raise RuntimeError(
+            "training_launch_claim_path and "
+            "training_launch_claim_sha256 must be supplied together"
+    )
+    action_set_identity = None
+    action_ball_launch_requested = (
+        str(getattr(_launch_racket_cfg, "target_mode", ""))
+        == "action_ball"
+    )
+    if training_launch_claim_path is not None and action_ball_launch_requested:
+        try:
+            action_set_identity = (
+                load_action_ball_action_set_identity_from_launch_claim(
+                    str(training_launch_claim_path),
+                    expected_claim_sha256=str(
+                        training_launch_claim_sha256
+                    ),
+                    actual_argv=_ORIGINAL_TRAINING_ARGV,
+                )
+            )
+        except ValueError as exc:
+            raise RuntimeError(
+                "formal ActionBall launch claim did not yield a verified "
+                "code-owned action-set identity"
+            ) from exc
+        print(
+            "[train.py] action-set launch identity verified: "
+            f"profile={action_set_identity['profile_id']} "
+            f"N={action_set_identity['expected_n']} "
+            f"order_digest="
+            f"{action_set_identity['order_uid_digest_sha256']}",
+            flush=True,
+        )
+    if action_ball_launch_requested:
+        diagnostic_launch = (
+            getattr(
+                _launch_racket_cfg,
+                "action_ball_diagnostic_unauthorized",
+                False,
+            )
+            is True
+        )
+        if diagnostic_launch and action_set_identity is not None:
+            raise RuntimeError(
+                "diagnostic ActionBall training cannot consume a formal "
+                "launch-claim action-set identity"
+            )
+        if not diagnostic_launch and action_set_identity is None:
+            raise RuntimeError(
+                "formal ActionBall training requires "
+                "training_launch_claim_path/SHA and a verified code-owned "
+                "action-set identity before scene construction"
+            )
     _publish_lean_queue_binding_if_requested(cfg, log_dir)
 
     # 5) build env, wrap, run
@@ -9735,6 +11649,7 @@ def _run(cfg):
         actor_contract,
         effective_reward_receipt=effective_reward_receipt,
         agent_cfg=agent_cfg,
+        action_set_identity=action_set_identity,
     )
     task_first_training = "task_first_training" in hard_contract
     action_ball_training = "action_ball_training" in hard_contract
@@ -9743,6 +11658,13 @@ def _run(cfg):
             "training hard contract cannot enable task-first and action-ball "
             "simultaneously"
         )
+    action_ball_diagnostic_unauthorized = (
+        _validate_action_ball_training_authorization(
+            hard_contract["action_ball_training"]
+        )
+        if action_ball_training
+        else False
+    )
     strict_exact_training = task_first_training or action_ball_training
     strict_training_label = (
         "action-ball" if action_ball_training else "task-first"
@@ -9866,7 +11788,18 @@ def _run(cfg):
             "for every action; a velocity-center curriculum cannot use "
             "ambiguous COM/link-origin motion semantics"
         )
-    contract_lineage_exact = ckpt is None and motion_kinematics_exact
+    contract_lineage_exact = _action_ball_contract_lineage_exact(
+        source_lineage_exact=ckpt is None,
+        motion_kinematics_exact=motion_kinematics_exact,
+        diagnostic_unauthorized=action_ball_diagnostic_unauthorized,
+    )
+    if action_ball_diagnostic_unauthorized:
+        print(
+            "[train.py] WARN diagnostic_unauthorized forces "
+            "training_contract_lineage_exact=0; formal evidence, curriculum "
+            "promotion, exact export, and formal judge are prohibited",
+            flush=True,
+        )
     if not motion_kinematics_exact:
         print(
             "[train.py] WARNING: one or more motion clips lack declared schema-2 COM-velocity/body-order "
@@ -9943,12 +11876,29 @@ def _run(cfg):
             else:
                 print(f"[train.py] checkpoint hard contract MATCH: {prior_contract_path}", flush=True)
                 try:
-                    validate_schema3_contract(prior_contract)
+                    if action_ball_diagnostic_unauthorized:
+                        validate_schema3_contract_structure(prior_contract)
+                    else:
+                        validate_schema3_contract(prior_contract)
                     require_checkpoint_contract_binding(
                         source_checkpoint,
                         schema=int(prior_contract["schema_version"]),
                         sha256=_sha256_file(prior_contract_path),
+                        require_lineage_exact=(
+                            not action_ball_diagnostic_unauthorized
+                        ),
                     )
+                    observed_lineage_exact = (
+                        checkpoint_contract_lineage_exact(source_checkpoint)
+                    )
+                    expected_lineage_exact = (
+                        not action_ball_diagnostic_unauthorized
+                    )
+                    if observed_lineage_exact is not expected_lineage_exact:
+                        raise ValueError(
+                            "checkpoint lineage does not match the live "
+                            "diagnostic/formal authorization"
+                        )
                 except ValueError as exc:
                     if strict_exact_training:
                         raise RuntimeError(
@@ -9962,7 +11912,15 @@ def _run(cfg):
                         flush=True,
                     )
                 else:
-                    contract_lineage_exact = motion_kinematics_exact
+                    contract_lineage_exact = (
+                        _action_ball_contract_lineage_exact(
+                            source_lineage_exact=True,
+                            motion_kinematics_exact=motion_kinematics_exact,
+                            diagnostic_unauthorized=(
+                                action_ball_diagnostic_unauthorized
+                            ),
+                        )
+                    )
 
     runner = OnPolicyRunner(
         env,
@@ -9985,10 +11943,13 @@ def _run(cfg):
         )
     runner.add_git_repo_to_log(__file__)
 
-    # Resume / curriculum hand-off: load weights+optimizer from a prior checkpoint and CONTINUE (the
-    # iteration counter resumes from the checkpoint). Config changes in the task YAML (e.g. a tighter
-    # racket_velocity_std) take effect immediately on the loaded policy — no fresh restart needed.
-    if ckpt is not None:
+    # Params/runtime lineage must be durable and bound before a strict resume
+    # load can consume checkpoint bytes.  Keep the historical load behavior in
+    # one closure, invoked below after the ActionBall bootstrap receipt is
+    # minted and attached to the runner.
+    def _load_requested_checkpoint():
+        if ckpt is None:
+            return
         if bool(getattr(cfg, "checkpoint_tolerant", False)):
             # Warm-start ACROSS critic-layout changes (e.g. the 318-D pre-merge lineage into the
             # 316-D merged model, or deploy-parity ckpts into VirtualBall's critic): actor + std
@@ -10010,10 +11971,140 @@ def _run(cfg):
                   f"optimizer={'resumed' if has_optimizer else 'FRESH — no optimizer_state_dict in ckpt'})",
                   flush=True)
 
-    dump_yaml(os.path.join(log_dir, "params", "env.yaml"), env_cfg)
-    dump_yaml(os.path.join(log_dir, "params", "agent.yaml"), agent_cfg)
-    dump_pickle(os.path.join(log_dir, "params", "env.pkl"), env_cfg)
-    dump_pickle(os.path.join(log_dir, "params", "agent.pkl"), agent_cfg)
+    params_dir = os.path.join(log_dir, "params")
+    env_yaml_path = os.path.join(params_dir, "env.yaml")
+    agent_yaml_path = os.path.join(params_dir, "agent.yaml")
+    env_pickle_path = os.path.join(params_dir, "env.pkl")
+    agent_pickle_path = os.path.join(params_dir, "agent.pkl")
+    dump_yaml(env_yaml_path, env_cfg)
+    dump_yaml(agent_yaml_path, agent_cfg)
+    dump_pickle(env_pickle_path, env_cfg)
+    dump_pickle(agent_pickle_path, agent_cfg)
+    if action_ball_training and not action_ball_diagnostic_unauthorized:
+        from whole_body_tracking.tasks.tracking.mdp import (
+            action_ball_frozen_eval_identity as frozen_eval_identity,
+            action_ball_runtime_bootstrap as runtime_bootstrap,
+        )
+
+        if training_launch_claim_sha256 is None:
+            raise RuntimeError(
+                "formal ActionBall frozen evaluation requires the exact "
+                "training launch-claim SHA"
+            )
+        if training_launch_claim_path is None:
+            raise RuntimeError(
+                "formal ActionBall runtime bootstrap requires the exact "
+                "training launch-claim path"
+            )
+        runtime_repo_root = _action_ball_repo_root(
+            env_cfg.commands.motion
+        )
+        identity_document = (
+            frozen_eval_identity.build_runtime_identity_document(
+                repo_root=runtime_repo_root,
+                task_id=task_id,
+                training_launch_claim_sha256=(
+                    training_launch_claim_sha256
+                ),
+                training_contract_path=contract_path,
+                environment_config_pickle_path=env_pickle_path,
+                agent_config_pickle_path=agent_pickle_path,
+            )
+        )
+        identity_path = os.path.join(
+            params_dir, "action_ball_frozen_eval_runtime.json"
+        )
+        identity_bytes = (
+            frozen_eval_identity.canonical_document_bytes(
+                identity_document
+            )
+        )
+        try:
+            descriptor = os.open(
+                identity_path,
+                os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+                0o600,
+            )
+        except FileExistsError as exc:
+            raise RuntimeError(
+                "ActionBall frozen-evaluation runtime identity namespace "
+                f"is already spent: {identity_path}"
+            ) from exc
+        try:
+            with os.fdopen(descriptor, "wb") as stream:
+                stream.write(identity_bytes)
+                stream.flush()
+                os.fsync(stream.fileno())
+        except Exception:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+            raise
+        print(
+            "[train.py] ActionBall frozen-evaluation runtime identity: "
+            f"{identity_path} "
+            f"sha256={hashlib.sha256(identity_bytes).hexdigest()}",
+            flush=True,
+        )
+        runtime_bootstrap.durably_sync_runtime_inputs(
+            contract_path,
+            env_pickle_path,
+            agent_pickle_path,
+            identity_path,
+        )
+        bootstrap_document = (
+            runtime_bootstrap.build_runtime_bootstrap_receipt_document(
+                repo_root=runtime_repo_root,
+                task_id=task_id,
+                training_launch_claim_sha256=(
+                    training_launch_claim_sha256
+                ),
+                launch_claim_path=training_launch_claim_path,
+                training_contract_path=contract_path,
+                environment_config_pickle_path=env_pickle_path,
+                agent_config_pickle_path=agent_pickle_path,
+                runtime_identity_path=identity_path,
+            )
+        )
+        bootstrap_path = os.path.join(
+            params_dir,
+            runtime_bootstrap.RECEIPT_FILENAME,
+        )
+        bootstrap_publication = (
+            runtime_bootstrap.publish_runtime_bootstrap_receipt(
+                output_path=bootstrap_path,
+                document=bootstrap_document,
+            )
+        )
+        bind_runtime_bootstrap = getattr(
+            runner,
+            "bind_runtime_bootstrap_receipt",
+            None,
+        )
+        if not callable(bind_runtime_bootstrap):
+            raise RuntimeError(
+                "formal ActionBall runner lacks runtime-bootstrap binding"
+            )
+        bind_runtime_bootstrap(
+            content_sha256=bootstrap_publication[
+                "content_sha256"
+            ],
+            artifact_receipt=bootstrap_publication[
+                "artifact_receipt"
+            ],
+        )
+        print(
+            "[train.py] ActionBall runtime bootstrap receipt: "
+            f"{bootstrap_path} "
+            "content_sha256="
+            f"{bootstrap_publication['content_sha256']} "
+            "file_sha256="
+            f"{bootstrap_publication['artifact_receipt']['sha256']}",
+            flush=True,
+        )
+
+    _load_requested_checkpoint()
 
     if lateral_training_runtime is None:
         # Preserve the historical default-off control flow exactly.

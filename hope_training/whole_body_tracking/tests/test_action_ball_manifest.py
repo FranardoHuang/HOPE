@@ -178,7 +178,7 @@ def _document(
         "mobility_mode": mobility_mode,
         "action_order": [action["action_id"] for action in actions],
         "prototype": {
-            "path": "configs/stroke_prototypes_v1.json",
+            "path": "configs/stroke_prototypes_v2.json",
             "sha256": hashlib.sha256(b"prototype").hexdigest(),
             "scope": "full",
         },
@@ -197,18 +197,107 @@ def _document(
         "curriculum": _curriculum(target, half_width),
         "holdout": {
             "seed": 20260727,
-            "samples_per_action": 512,
+            "samples_per_action": 768,
             "split_id": "heldout_ball_v1",
         },
         "notes": "Host-only schema fixture.",
     }
 
 
+def _counter_rally_objective():
+    return M._counter_rally_objective_profile_type()().to_mapping()
+
+
+def _prototype_bytes(document):
+    scope = document["prototype"]["scope"]
+    rows = []
+    for index, action in enumerate(document["actions"]):
+        rows.append(
+            {
+                "motion_id": action["action_id"],
+                "scope": scope,
+                "clip_index": index,
+                "npz_sha256": action["motion_sha256"],
+                "family": action["family"],
+                "face_sign": action["mount_normal_sign"],
+                "frames": 5,
+                "strike_phase": 0.5,
+                "t_prepare_s": action["reference_t_hit_s"],
+                "t_prepare_min_s": 0.1,
+                "t_prepare_max_s": 2.0,
+                "band_b_x": [0.1, 0.2],
+                "band_b_y": [-0.2, 0.2],
+                "band_z_w": [0.8, 1.2],
+                "slack_b_xy_m": 0.1,
+                "slack_z_w_m": 0.1,
+                "p_contact_b": [0.2, 0.0, 1.0],
+                "n_hat_b": [1.0, 0.0, 0.0],
+                "priority": 0,
+                "enabled": True,
+                "contact_frame": 2,
+                "contact_window_frames": [1, 3],
+                "racket_face_center_velocity_hat_b": [1.0, 0.0, 0.0],
+                "racket_face_center_elevation_deg": 0.0,
+                "racket_face_center_window_dir_cone_deg": 2.0,
+                "racket_face_center_speed_nominal_mps": 2.0,
+                "racket_face_center_speed_max_mps": 3.0,
+                "racket_face_center_speed_min_mps": 1.0,
+                "racket_face_center_v_star_cap_mps": 3.0,
+                "racket_face_center_v_dir_tol_deg": 10.0,
+                "racket_face_center_cos_normal_velocity": 0.0,
+            }
+        )
+    scopes = {scope: rows}
+    prototype = {
+        "schema_version": 2,
+        "prototype_set_id": "test_face_center_v2",
+        "velocity_contract": {
+            "direction_and_speed_point": (
+                "selected_rubber_face_center"
+            ),
+            "policy_control_point": "official_racket_site",
+            "mapping": (
+                "v_face_center=v_site+omega_world_cross_"
+                "r_face_center_from_site_world"
+            ),
+            "site_velocity_authority": (
+                "centered_position_fd_half_window_2_clamped_per_clip"
+            ),
+            "angular_velocity_authority": (
+                "npz_body_ang_vel_w_at_right_wrist_yaw_Link"
+            ),
+            "direction_frame_authority": (
+                "canonical_ready_root_yaw_at_frame_0"
+            ),
+            "geometry_source_sha256": (
+                M._exact_face_geometry_source_sha256()
+            ),
+        },
+        "contact_rule": {},
+        "provenance": {},
+        "scopes": scopes,
+        "derived_sha256": M._prototype_canonical_sha256(scopes),
+    }
+    return (
+        json.dumps(
+            prototype,
+            sort_keys=True,
+            separators=(",", ":"),
+            ensure_ascii=False,
+        )
+        + "\n"
+    ).encode("utf-8")
+
+
 def _materialize_referenced_assets(repo_root, document):
     repo_root.mkdir(parents=True, exist_ok=True)
     prototype_path = repo_root / document["prototype"]["path"]
     prototype_path.parent.mkdir(parents=True, exist_ok=True)
-    prototype_path.write_bytes(b"prototype")
+    prototype_bytes = _prototype_bytes(document)
+    prototype_path.write_bytes(prototype_bytes)
+    document["prototype"]["sha256"] = hashlib.sha256(
+        prototype_bytes
+    ).hexdigest()
     for index, action in enumerate(document["actions"]):
         motion_path = repo_root / action["motion_path"]
         motion_path.parent.mkdir(parents=True, exist_ok=True)
@@ -303,21 +392,36 @@ def test_old_schema_is_not_silently_interpreted_as_v3(
         M.load_action_ball_manifest(_write(tmp_path, document))
 
 
-def test_holdout_must_cover_manifest_curriculum_window(tmp_path):
+def test_formal_holdout_rejects_512_and_accepts_768(tmp_path):
     document = _document()
-    document["curriculum"]["min_proposals"] = 513
     document["holdout"]["samples_per_action"] = 512
     with pytest.raises(
         ValueError,
-        match=r"holdout\.samples_per_action.*at least 513",
+        match=r"holdout\.samples_per_action.*at least 768",
     ):
         M.load_action_ball_manifest(_write(tmp_path, document))
 
     document = _document()
-    document["curriculum"]["min_safe_closed"] = 513
+    document["holdout"]["samples_per_action"] = 768
+    loaded = M.load_action_ball_manifest(_write(tmp_path, document))
+    assert loaded.manifest.holdout.samples_per_action == 768
+
+
+def test_holdout_must_cover_larger_manifest_curriculum_window(tmp_path):
+    document = _document()
+    document["curriculum"]["min_proposals"] = 769
+    document["holdout"]["samples_per_action"] = 768
     with pytest.raises(
         ValueError,
-        match=r"holdout\.samples_per_action.*at least 513",
+        match=r"holdout\.samples_per_action.*at least 769",
+    ):
+        M.load_action_ball_manifest(_write(tmp_path, document))
+
+    document = _document()
+    document["curriculum"]["min_safe_closed"] = 769
+    with pytest.raises(
+        ValueError,
+        match=r"holdout\.samples_per_action.*at least 769",
     ):
         M.load_action_ball_manifest(_write(tmp_path, document))
 
@@ -365,6 +469,98 @@ def test_referenced_asset_verification_hashes_prototype_and_every_motion(
             verify_referenced_assets=True,
             repo_root=repo_root,
             require_formal_admission=True,
+        )
+
+
+def test_prototype_motion_sha_must_equal_manifest_motion_sha(tmp_path):
+    document = _document(2)
+    repo_root = tmp_path / "repo"
+    _materialize_referenced_assets(repo_root, document)
+    prototype_path = repo_root / document["prototype"]["path"]
+    prototype = json.loads(prototype_path.read_text(encoding="utf-8"))
+    prototype["scopes"]["full"][1]["npz_sha256"] = "0" * 64
+    prototype["derived_sha256"] = M._prototype_canonical_sha256(
+        prototype["scopes"]
+    )
+    raw = (
+        json.dumps(
+            prototype,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode("utf-8")
+    prototype_path.write_bytes(raw)
+    document["prototype"]["sha256"] = hashlib.sha256(raw).hexdigest()
+
+    with pytest.raises(
+        ValueError,
+        match="NPZ SHA differs from manifest motion_sha256",
+    ):
+        M.load_action_ball_manifest(
+            _write(tmp_path, document),
+            verify_referenced_assets=True,
+            repo_root=repo_root,
+        )
+
+
+def test_legacy_site_velocity_prototype_is_not_action_ball_admissible(
+    tmp_path,
+):
+    document = _document(1)
+    repo_root = tmp_path / "repo"
+    _materialize_referenced_assets(repo_root, document)
+    prototype_path = repo_root / document["prototype"]["path"]
+    prototype = json.loads(prototype_path.read_text(encoding="utf-8"))
+    prototype["schema_version"] = 1
+    raw = (
+        json.dumps(
+            prototype,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode("utf-8")
+    prototype_path.write_bytes(raw)
+    document["prototype"]["sha256"] = hashlib.sha256(raw).hexdigest()
+
+    with pytest.raises(
+        ValueError,
+        match="legacy site-velocity prototype rows are not admissible",
+    ):
+        M.load_action_ball_manifest(
+            _write(tmp_path, document),
+            verify_referenced_assets=True,
+            repo_root=repo_root,
+        )
+
+
+def test_prototype_geometry_source_sha_must_match_runtime(tmp_path):
+    document = _document(1)
+    repo_root = tmp_path / "repo"
+    _materialize_referenced_assets(repo_root, document)
+    prototype_path = repo_root / document["prototype"]["path"]
+    prototype = json.loads(prototype_path.read_text(encoding="utf-8"))
+    prototype["velocity_contract"]["geometry_source_sha256"] = "0" * 64
+    raw = (
+        json.dumps(
+            prototype,
+            sort_keys=True,
+            separators=(",", ":"),
+        )
+        + "\n"
+    ).encode("utf-8")
+    prototype_path.write_bytes(raw)
+    document["prototype"]["sha256"] = hashlib.sha256(raw).hexdigest()
+
+    with pytest.raises(
+        ValueError,
+        match="current selected-rubber face-centre geometry",
+    ):
+        M.load_action_ball_manifest(
+            _write(tmp_path, document),
+            verify_referenced_assets=True,
+            repo_root=repo_root,
         )
 
 
@@ -472,10 +668,11 @@ def test_internal_symlink_is_allowed_but_still_hashed(tmp_path):
     repo_root = tmp_path / "repo"
     _materialize_referenced_assets(repo_root, document)
     prototype = repo_root / document["prototype"]["path"]
+    prototype_bytes = prototype.read_bytes()
     prototype.unlink()
     stored = repo_root / "objects" / "prototype.json"
     stored.parent.mkdir()
-    stored.write_bytes(b"prototype")
+    stored.write_bytes(prototype_bytes)
     prototype.symlink_to(stored)
 
     loaded = M.load_action_ball_manifest(
@@ -1212,3 +1409,191 @@ def test_action_identity_rejects_nonportable_unicode(
 def test_canonical_helper_rejects_unvalidated_objects():
     with pytest.raises(TypeError, match="ActionBallManifest"):
         M.canonical_manifest_bytes(_document())
+
+
+def test_counter_rally_objective_is_exact_n1_and_legacy_bytes_stay_unchanged(
+    tmp_path,
+):
+    legacy_document = _document(action_count=1)
+    legacy = M.load_action_ball_manifest(
+        _write(tmp_path, legacy_document, name="legacy.json")
+    ).manifest
+    assert legacy.counter_rally_objective is None
+    assert legacy.to_mapping() == legacy_document
+
+    objective_document = deepcopy(legacy_document)
+    objective_document["counter_rally_objective"] = (
+        _counter_rally_objective()
+    )
+    objective = M.load_action_ball_manifest(
+        _write(tmp_path, objective_document, name="objective.json")
+    ).manifest
+    assert objective.counter_rally_objective.mode == "counter_rally_v1"
+    assert objective.to_mapping() == objective_document
+
+    invalid_n5 = _document(action_count=5)
+    invalid_n5["counter_rally_objective"] = _counter_rally_objective()
+    with pytest.raises(ValueError, match="exact N=1"):
+        M.load_action_ball_manifest(
+            _write(tmp_path, invalid_n5, name="invalid_n5.json")
+        )
+
+
+def test_counter_rally_objective_rejects_unknown_or_unreviewed_fields(
+    tmp_path,
+):
+    document = _document(action_count=1)
+    document["counter_rally_objective"] = _counter_rally_objective()
+    document["counter_rally_objective"]["unknown"] = 1
+    with pytest.raises(ValueError, match="keys mismatch"):
+        M.load_action_ball_manifest(
+            _write(tmp_path, document, name="unknown_objective.json")
+        )
+
+
+def _n5_with_counter_rally_candidates():
+    document = _document(action_count=5)
+    for index, action_id in enumerate(("bh_loop_c", "bh_block")):
+        action = document["actions"][index]
+        action["action_id"] = action_id
+        action["family"] = "backhand"
+        action["action_uid"] = M.derive_action_ball_action_uid(
+            action_id, action["family"], action["motion_sha256"]
+        )
+        document["action_order"][index] = action_id
+    return document
+
+
+def test_pure_n1_subset_producer_preserves_exact_selected_action_rows(
+    tmp_path,
+):
+    document = _n5_with_counter_rally_candidates()
+    source_path = _write(tmp_path, document, name="source_n5.json")
+    source_sha = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    source = M.load_action_ball_manifest(
+        source_path, expected_sha256=source_sha
+    )
+    profile = M._counter_rally_objective_profile_type()()
+    for action_id in ("bh_loop_c", "bh_block"):
+        subset = M.build_counter_rally_n1_subset(
+            source,
+            expected_source_file_sha256=source_sha,
+            action_id=action_id,
+            counter_rally_objective=profile,
+        )
+        source_row = next(
+            row for row in document["actions"]
+            if row["action_id"] == action_id
+        )
+        assert subset.action_order == (action_id,)
+        assert subset.actions[0].to_mapping() == source_row
+        assert subset.counter_rally_objective.sha256 == profile.sha256
+        assert subset.counter_rally_objective.inactive_curriculum_arms == (
+            "landing_aim_y_lower",
+            "landing_aim_y_upper",
+        )
+        assert len(M.canonical_manifest_sha256(subset)) == 64
+
+
+def test_no_clobber_n1_writer_emits_two_separate_strict_manifests(
+    tmp_path,
+):
+    document = _n5_with_counter_rally_candidates()
+    source_path = _write(tmp_path, document, name="source_n5.json")
+    source_sha = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    profile = M._counter_rally_objective_profile_type()()
+    outputs = []
+    for action_id in ("bh_loop_c", "bh_block"):
+        destination = tmp_path / f"{action_id}.counter_rally.json"
+        loaded = M.write_counter_rally_n1_subset_no_clobber(
+            source_path,
+            expected_source_file_sha256=source_sha,
+            action_id=action_id,
+            counter_rally_objective=profile,
+            output_path=destination,
+        )
+        outputs.append(loaded)
+        assert loaded.manifest.action_order == (action_id,)
+        assert len(loaded.manifest.actions) == 1
+        with pytest.raises(FileExistsError):
+            M.write_counter_rally_n1_subset_no_clobber(
+                source_path,
+                expected_source_file_sha256=source_sha,
+                action_id=action_id,
+                counter_rally_objective=profile,
+                output_path=destination,
+            )
+    assert outputs[0].file_sha256 != outputs[1].file_sha256
+    assert outputs[0].manifest.action_order != outputs[1].manifest.action_order
+
+
+def test_n1_subset_producer_rejects_n2_unknown_action_and_wrong_source_sha(
+    tmp_path,
+):
+    document = _n5_with_counter_rally_candidates()
+    source_path = _write(tmp_path, document, name="source_n5.json")
+    source_sha = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    source = M.load_action_ball_manifest(source_path)
+    profile = M._counter_rally_objective_profile_type()()
+    with pytest.raises(ValueError, match="exact-byte"):
+        M.build_counter_rally_n1_subset(
+            source,
+            expected_source_file_sha256="0" * 64,
+            action_id="bh_loop_c",
+            counter_rally_objective=profile,
+        )
+    with pytest.raises(ValueError, match="bh_loop_c or bh_block"):
+        M.build_counter_rally_n1_subset(
+            source,
+            expected_source_file_sha256=source_sha,
+            action_id="action_002",
+            counter_rally_objective=profile,
+        )
+    n2_path = _write(
+        tmp_path, _document(action_count=2), name="source_n2.json"
+    )
+    n2 = M.load_action_ball_manifest(n2_path)
+    with pytest.raises(ValueError, match="exact N=5"):
+        M.build_counter_rally_n1_subset(
+            n2,
+            expected_source_file_sha256=n2.file_sha256,
+            action_id="bh_loop_c",
+            counter_rally_objective=profile,
+        )
+
+
+def test_n1_subset_cli_reports_output_and_bound_hashes(tmp_path, capsys):
+    source_path = _write(
+        tmp_path,
+        _n5_with_counter_rally_candidates(),
+        name="source_cli_n5.json",
+    )
+    source_sha = hashlib.sha256(source_path.read_bytes()).hexdigest()
+    output_path = tmp_path / "bh_loop_c.cli.json"
+    assert (
+        M._counter_rally_subset_cli(
+            (
+                "--source",
+                str(source_path),
+                "--source-sha256",
+                source_sha,
+                "--action-id",
+                "bh_loop_c",
+                "--output",
+                str(output_path),
+            )
+        )
+        == 0
+    )
+    report = json.loads(capsys.readouterr().out)
+    assert report["output_path"] == str(output_path)
+    assert report["action_order"] == ["bh_loop_c"]
+    assert report["inactive_curriculum_arms"] == [
+        "landing_aim_y_lower",
+        "landing_aim_y_upper",
+    ]
+    assert report["file_sha256"] == hashlib.sha256(
+        output_path.read_bytes()
+    ).hexdigest()
+    assert len(report["canonical_sha256"]) == 64
+    assert len(report["objective_profile_sha256"]) == 64

@@ -35,7 +35,12 @@ _EPS = 1e-12
 
 
 def _normalize(v: torch.Tensor, eps: float = _EPS) -> torch.Tensor:
-    return v / (torch.linalg.norm(v, dim=-1, keepdim=True) + eps)
+    # Keep this exact denominator contract in lockstep with
+    # tracking/mdp/virtual_ball.py.  Adding eps biases every valid normal;
+    # clamp only protects degenerate rows while leaving unit inputs exact.
+    return v / torch.linalg.norm(
+        v, dim=-1, keepdim=True
+    ).clamp_min(eps)
 
 
 def orient_normal(n: torch.Tensor, v_minus: torch.Tensor, v_r: torch.Tensor) -> torch.Tensor:

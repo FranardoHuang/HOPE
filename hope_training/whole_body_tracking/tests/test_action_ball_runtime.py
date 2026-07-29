@@ -40,13 +40,31 @@ def _digest(label):
     return hashlib.sha256(str(label).encode("utf-8")).hexdigest()
 
 
-def _pins():
+def _counter_rally_task_identity(objective_profile_sha256):
+    incoming = (-4.0, 0.1, -0.2)
+    horizontal_norm = math.hypot(incoming[0], incoming[1])
+    return R.CounterRallyTaskIdentity(
+        objective_profile_sha256=objective_profile_sha256,
+        return_direction_env_xy=(
+            -incoming[0] / horizontal_norm,
+            -incoming[1] / horizontal_norm,
+        ),
+        target_baseline_speed_mps=math.sqrt(
+            sum(component * component for component in incoming)
+        ),
+    )
+
+
+def _pins(counter_rally_objective_profile_sha256=None):
     return R.RuntimePins(
         manifest_sha256=_digest("manifest"),
         sampler_sha256=_digest("sampler"),
         domain_authority_sha256=_digest("domain-authority"),
         physics_sha256=_digest("physics"),
         solver_sha256=_digest("solver"),
+        counter_rally_objective_profile_sha256=(
+            counter_rally_objective_profile_sha256
+        ),
     )
 
 
@@ -402,6 +420,7 @@ def _task(
     *,
     swing_generation=None,
     base_goal_w_m=None,
+    counter_rally_task=None,
 ):
     def rotate_inverse(value, yaw):
         cosine = math.cos(yaw)
@@ -445,8 +464,21 @@ def _task(
     )
     time_to_contact_s = 1.2
     racket_velocity = (3.0, 0.2, 0.4)
-    timing = R.derive_action_teacher_timing(
-        racket_velocity_w_mps=racket_velocity,
+    geometry = R._contact_geometry.solve_exact_face_contact(
+        ball_contact_w_m=contact,
+        racket_face_center_velocity_w_mps=racket_velocity,
+        solved_raw_a_normal_w=(1.0, 0.0, 0.0),
+        mount_normal_sign=1,
+        reference_racket_quat_wxyz=(1.0, 0.0, 0.0, 0.0),
+        reference_racket_angular_velocity_w_radps=(0.0, 0.0, 0.0),
+        reference_racket_site_speed_mps=3.0,
+        teacher_rate_min=0.8,
+        teacher_rate_max=1.2,
+    )
+    timing = R.derive_action_teacher_site_timing(
+        racket_site_velocity_w_mps=(
+            geometry.racket_site_velocity_w_mps
+        ),
         time_to_contact_s=time_to_contact_s,
         reference_t_hit_s=0.42,
         reference_t_cycle_s=1.2,
@@ -516,8 +548,24 @@ def _task(
         spin_direction_b_yaw=spin_direction,
         incoming_spin_w_radps=spin,
         landing_aim_w_xy_m=(2.5, -0.1),
-        racket_velocity_w_mps=racket_velocity,
+        racket_site_target_w_m=geometry.racket_site_target_w_m,
+        mount_normal_sign=1,
         racket_normal_w=(1.0, 0.0, 0.0),
+        reference_racket_quat_wxyz=(1.0, 0.0, 0.0, 0.0),
+        reference_racket_angular_velocity_w_radps=(0.0, 0.0, 0.0),
+        racket_command_quat_wxyz=(
+            geometry.racket_command_quat_wxyz
+        ),
+        racket_face_center_velocity_w_mps=(
+            geometry.racket_face_center_velocity_w_mps
+        ),
+        racket_site_velocity_w_mps=(
+            geometry.racket_site_velocity_w_mps
+        ),
+        racket_command_angular_velocity_w_radps=(
+            geometry.racket_command_angular_velocity_w_radps
+        ),
+        geometry_source_sha256=geometry.geometry_source_sha256,
         reference_t_hit_s=0.42,
         reference_t_cycle_s=1.2,
         reference_racket_site_speed_mps=3.0,
@@ -532,6 +580,7 @@ def _task(
         scaled_t_cycle_s=timing.scaled_t_cycle_s,
         pre_swing_wait_s=timing.pre_swing_wait_s,
         solver_residual_m=0.004,
+        counter_rally_task=counter_rally_task,
     )
 
 
@@ -711,6 +760,18 @@ class Solver:
             receipt.sample_draw_end,
         )
 
+    def _make_task(
+        self,
+        request,
+        sample_index,
+        swing_generation,
+    ):
+        return _task(
+            request.birth,
+            sample_index,
+            swing_generation=swing_generation,
+        )
+
     def __call__(self, request):
         self.requests.append(request)
         receipts = []
@@ -722,12 +783,10 @@ class Solver:
                 + 1
             )
             receipts.append(
-                _task(
-                    request.birth,
+                self._make_task(
+                    request,
                     sample_index,
-                    swing_generation=(
-                        request.swing_generation_start + offset
-                    ),
+                    request.swing_generation_start + offset,
                 )
             )
             self._record_task(receipts[-1])
@@ -746,6 +805,27 @@ class Solver:
     def solve_many(self, requests):
         self.batch_calls += 1
         return tuple(self(request) for request in requests)
+
+
+class CounterRallySolver(Solver):
+    def __init__(self, objective_profile_sha256):
+        super().__init__()
+        self.objective_profile_sha256 = objective_profile_sha256
+
+    def _make_task(
+        self,
+        request,
+        sample_index,
+        swing_generation,
+    ):
+        return _task(
+            request.birth,
+            sample_index,
+            swing_generation=swing_generation,
+            counter_rally_task=_counter_rally_task_identity(
+                self.objective_profile_sha256
+            ),
+        )
 
 
 class RoundInterleavedSolver(Solver):
@@ -911,9 +991,13 @@ class CrossBirthReplayedSampleSolver(Solver):
         return tuple(batches)
 
 
-def _broker(count=5, mode="no_move"):
+def _broker(count=5, mode="no_move", pins=None):
     bindings = _bindings(count)
-    broker = R.ActionBirthBroker(bindings, _pins(), mode)
+    broker = R.ActionBirthBroker(
+        bindings,
+        _pins() if pins is None else pins,
+        mode,
+    )
     authority = DomainAuthority(bindings, mode)
     provider = BirthProvider()
     broker.bind_domain_claim_authority(authority)
@@ -1019,9 +1103,175 @@ def test_receipts_are_immutable_canonical_strict_and_no_move_is_physical():
     tampered["ball_contact_w_m"][0] += 0.01
     with pytest.raises(
         R.ActionBallContractError,
-        match="contact|canonical SHA",
+        match="contact|exact-face geometry|canonical SHA",
     ):
         R.ActionBallTaskReceipt.from_dict(tampered)
+
+
+def test_counter_rally_task_identity_is_optional_strict_and_sha_bound():
+    broker, _ = _broker(1)
+    birth = _reserve(broker)
+    ordinary = _task(birth, 0)
+    ordinary_payload = ordinary.payload_dict()
+    assert set(ordinary_payload) == set(R._TASK_PAYLOAD_KEYS)
+    assert "counter_rally_task" not in ordinary_payload
+    assert R.ActionBallTaskReceipt.from_dict(
+        ordinary.to_dict()
+    ) == ordinary
+    with pytest.raises(
+        R.CounterRallyTaskIdentityError,
+        match="missing",
+    ):
+        ordinary.require_counter_rally_task(
+            expected_objective_profile_sha256=_digest(
+                "counter-rally-objective"
+            )
+        )
+
+    objective_sha256 = _digest("counter-rally-objective")
+    identity = _counter_rally_task_identity(
+        objective_sha256
+    )
+    assert R.CounterRallyTaskIdentity.from_dict(
+        identity.to_dict()
+    ) == identity
+    counter = _task(
+        birth,
+        0,
+        counter_rally_task=identity,
+    )
+    assert counter.canonical_sha256 != ordinary.canonical_sha256
+    assert counter.payload_dict()["counter_rally_task"] == (
+        identity.to_dict()
+    )
+    restored = R.ActionBallTaskReceipt.from_dict(counter.to_dict())
+    assert restored == counter
+    assert restored.require_counter_rally_task(
+        expected_objective_profile_sha256=objective_sha256
+    ) == identity
+
+    tampered = deepcopy(counter.to_dict())
+    tampered["counter_rally_task"][
+        "target_baseline_speed_mps"
+    ] += 0.25
+    with pytest.raises(
+        R.CounterRallyTaskIdentityError,
+        match="canonical SHA mismatch",
+    ):
+        R.ActionBallTaskReceipt.from_dict(tampered)
+
+
+def test_counter_rally_runtime_pin_is_exact_n1_and_all_or_none():
+    objective_sha256 = _digest("counter-rally-objective")
+    ordinary = _pins()
+    assert "counter_rally_objective_profile_sha256" not in (
+        ordinary.to_dict()
+    )
+    assert R.RuntimePins.from_dict(ordinary.to_dict()) == ordinary
+
+    pinned = _pins(objective_sha256)
+    assert R.RuntimePins.from_dict(pinned.to_dict()) == pinned
+    assert pinned.counter_rally_objective_profile_sha256 == (
+        objective_sha256
+    )
+    with pytest.raises(
+        R.CounterRallyTaskIdentityError,
+        match="exact N=1",
+    ):
+        R.ActionBirthBroker(_bindings(2), pinned, "no_move")
+    with pytest.raises(
+        R.CounterRallyTaskIdentityError,
+        match="exact N=1",
+    ):
+        R.LazyActionTaskPool(_bindings(2), pinned, "no_move")
+
+    ordinary_broker, _ = _broker(1)
+    ordinary_birth = _reserve(ordinary_broker)
+    counter_task = _task(
+        ordinary_birth,
+        0,
+        counter_rally_task=_counter_rally_task_identity(
+            objective_sha256
+        ),
+    )
+    with pytest.raises(
+        R.CounterRallyTaskIdentityError,
+        match="ordinary task/run pins",
+    ):
+        counter_task.assert_contract(
+            binding=_bindings(1)[0],
+            pins=ordinary,
+            mobility_mode="no_move",
+            registry_sha256=ordinary_broker.registry_sha256,
+        )
+
+    pinned_broker, _ = _broker(1, pins=pinned)
+    pinned_birth = _reserve(pinned_broker)
+    missing_identity = _task(pinned_birth, 0)
+    with pytest.raises(
+        R.CounterRallyTaskIdentityError,
+        match="missing",
+    ):
+        missing_identity.assert_contract(
+            binding=_bindings(1)[0],
+            pins=pinned,
+            mobility_mode="no_move",
+            registry_sha256=pinned_broker.registry_sha256,
+        )
+
+
+def test_counter_rally_return_direction_must_exactly_reverse_sampled_ball():
+    broker, _ = _broker(1)
+    birth = _reserve(broker)
+    identity = _counter_rally_task_identity(
+        _digest("counter-rally-objective")
+    )
+    wrong = replace(identity, return_direction_env_xy=(1.0, 0.0))
+    with pytest.raises(
+        R.CounterRallyTaskIdentityError,
+        match="exact horizontal reverse",
+    ):
+        _task(birth, 0, counter_rally_task=wrong)
+
+
+def test_counter_rally_objective_resign_still_hard_stops_against_launch_identity():
+    broker, _ = _broker(1)
+    birth = _reserve(broker)
+    expected_sha256 = _digest("counter-rally-objective")
+    task = _task(
+        birth,
+        0,
+        counter_rally_task=_counter_rally_task_identity(
+            expected_sha256
+        ),
+    )
+    drifted = deepcopy(task.to_dict())
+    nested = drifted["counter_rally_task"]
+    nested["objective_profile_sha256"] = _digest(
+        "different-counter-rally-objective"
+    )
+    nested["canonical_sha256"] = R._sha256_json(
+        {
+            key: value
+            for key, value in nested.items()
+            if key != "canonical_sha256"
+        }
+    )
+    drifted["canonical_sha256"] = R._sha256_json(
+        {
+            key: value
+            for key, value in drifted.items()
+            if key != "canonical_sha256"
+        }
+    )
+    restored = R.ActionBallTaskReceipt.from_dict(drifted)
+    with pytest.raises(
+        R.CounterRallyTaskIdentityError,
+        match="objective profile SHA mismatch",
+    ):
+        restored.require_counter_rally_task(
+            expected_objective_profile_sha256=expected_sha256
+        )
 
 
 def test_runtime_sampler_catalog_and_identity_schema_are_exactly_pinned():
@@ -1042,15 +1292,18 @@ def test_task_ref_and_teacher_timing_are_exact_and_unclipped():
     assert ref.birth_sha256 == birth.canonical_sha256
 
     with pytest.raises(
-        R.ActionBallContractError, match="exact unclipped formula"
+        R.ActionBallContractError,
+        match="exact unclipped formula|exact face/site angular solve",
     ):
         replace(task, teacher_rate=task.teacher_rate + 1.0e-12)
     with pytest.raises(
-        R.ActionBallContractError, match="outside certified bounds"
+        R.ActionBallContractError,
+        match="outside certified bounds|teacher_rate_out_of_bounds",
     ):
         replace(
             task,
-            racket_velocity_w_mps=(4.0, 0.0, 0.0),
+            racket_face_center_velocity_w_mps=(4.0, 0.0, 0.0),
+            racket_site_velocity_w_mps=(4.0, 0.0, 0.0),
             required_racket_site_speed_mps=4.0,
             teacher_rate=4.0 / task.reference_racket_site_speed_mps,
             scaled_t_hit_s=(
@@ -1083,10 +1336,353 @@ def test_task_ref_and_teacher_timing_are_exact_and_unclipped():
         )
 
 
+@pytest.mark.parametrize(
+    "native_float32_rate",
+    (
+        1.00000006489,
+        1.00000002471,
+        1.00000000142,
+        0.99999998217,
+    ),
+)
+def test_float32_native_boundary_survives_geometry_timing_and_receipt(
+    native_float32_rate,
+):
+    """The actual fivebind float32 seam must survive the complete receipt."""
+
+    broker, _ = _broker(1)
+    birth = _reserve(broker)
+    baseline = _task(birth, 0)
+    reference_speed = 3.0
+    face_velocity = (
+        reference_speed * native_float32_rate,
+        0.0,
+        0.0,
+    )
+    geometry = R._contact_geometry.solve_exact_face_contact(
+        ball_contact_w_m=baseline.ball_contact_w_m,
+        racket_face_center_velocity_w_mps=face_velocity,
+        solved_raw_a_normal_w=(1.0, 0.0, 0.0),
+        mount_normal_sign=1,
+        reference_racket_quat_wxyz=(1.0, 0.0, 0.0, 0.0),
+        reference_racket_angular_velocity_w_radps=(0.0, 0.0, 0.0),
+        reference_racket_site_speed_mps=reference_speed,
+        teacher_rate_min=0.6,
+        teacher_rate_max=1.0,
+    )
+    timing = R.derive_action_teacher_site_timing(
+        racket_site_velocity_w_mps=(
+            geometry.racket_site_velocity_w_mps
+        ),
+        time_to_contact_s=baseline.time_to_contact_s,
+        reference_t_hit_s=baseline.reference_t_hit_s,
+        reference_t_cycle_s=baseline.reference_t_cycle_s,
+        reference_racket_site_speed_mps=reference_speed,
+        reaction_margin_s=baseline.reaction_margin_s,
+        teacher_rate_min=0.6,
+        teacher_rate_max=1.0,
+    )
+    assert math.isclose(
+        timing.teacher_rate,
+        geometry.teacher_rate,
+        rel_tol=0.0,
+        abs_tol=1.0e-12,
+    )
+
+    receipt = replace(
+        baseline,
+        racket_site_target_w_m=geometry.racket_site_target_w_m,
+        reference_racket_quat_wxyz=(1.0, 0.0, 0.0, 0.0),
+        reference_racket_angular_velocity_w_radps=(0.0, 0.0, 0.0),
+        racket_command_quat_wxyz=(
+            geometry.racket_command_quat_wxyz
+        ),
+        racket_face_center_velocity_w_mps=(
+            geometry.racket_face_center_velocity_w_mps
+        ),
+        racket_site_velocity_w_mps=(
+            geometry.racket_site_velocity_w_mps
+        ),
+        racket_command_angular_velocity_w_radps=(
+            geometry.racket_command_angular_velocity_w_radps
+        ),
+        geometry_source_sha256=geometry.geometry_source_sha256,
+        reference_racket_site_speed_mps=reference_speed,
+        required_racket_site_speed_mps=(
+            timing.required_racket_site_speed_mps
+        ),
+        teacher_rate_min=0.6,
+        teacher_rate_max=1.0,
+        teacher_rate=timing.teacher_rate,
+        scaled_t_hit_s=timing.scaled_t_hit_s,
+        scaled_t_cycle_s=timing.scaled_t_cycle_s,
+        pre_swing_wait_s=timing.pre_swing_wait_s,
+    )
+    assert R.ActionBallTaskReceipt.from_dict(receipt.to_dict()) == receipt
+
+
+def test_exact_face_task_receipt_roundtrip_rejects_geometry_tampering_and_v3():
+    broker, _ = _broker(1)
+    birth = _reserve(broker)
+    task = _task(birth, 0)
+    row = task.to_dict()
+
+    assert task.racket_site_target_w_m != task.ball_contact_w_m
+    assert (
+        task.racket_face_center_velocity_w_mps
+        == task.racket_site_velocity_w_mps
+    )
+    assert R.ActionBallTaskReceipt.from_dict(row) == task
+
+    for field, delta in (
+        ("racket_site_target_w_m", (1.0e-4, 0.0, 0.0)),
+        ("racket_site_velocity_w_mps", (0.0, 1.0e-4, 0.0)),
+        (
+            "racket_command_angular_velocity_w_radps",
+            (0.0, 0.0, 1.0e-4),
+        ),
+    ):
+        tampered = deepcopy(row)
+        tampered[field] = [
+            float(value) + float(change)
+            for value, change in zip(tampered[field], delta)
+        ]
+        with pytest.raises(
+            R.ActionBallContractError,
+            match="exact-face geometry|face/site angular solve",
+        ):
+            R.ActionBallTaskReceipt.from_dict(tampered)
+
+    tampered_quat = deepcopy(row)
+    tampered_quat["racket_command_quat_wxyz"] = [1.0, 0.0, 0.0, 0.0]
+    with pytest.raises(
+        R.ActionBallContractError,
+        match="quaternion|exact-face geometry",
+    ):
+        R.ActionBallTaskReceipt.from_dict(tampered_quat)
+
+    tampered_sha = deepcopy(row)
+    tampered_sha["geometry_source_sha256"] = "0" * 64
+    with pytest.raises(
+        R.ActionBallContractError,
+        match="geometry source SHA",
+    ):
+        R.ActionBallTaskReceipt.from_dict(tampered_sha)
+
+    old_v3 = deepcopy(row)
+    old_v3["schema_version"] = 3
+    for field in (
+        "racket_site_target_w_m",
+        "mount_normal_sign",
+        "reference_racket_quat_wxyz",
+        "reference_racket_angular_velocity_w_radps",
+        "racket_command_quat_wxyz",
+        "racket_face_center_velocity_w_mps",
+        "racket_site_velocity_w_mps",
+        "racket_command_angular_velocity_w_radps",
+        "geometry_source_sha256",
+    ):
+        del old_v3[field]
+    old_v3["racket_velocity_w_mps"] = [3.0, 0.2, 0.4]
+    with pytest.raises(
+        R.ActionBallContractError,
+        match="invalid keys|schema_version",
+    ):
+        R.ActionBallTaskReceipt.from_dict(old_v3)
+
+
+def test_base_preparation_contract_and_receipt_are_strict_and_roundtrip():
+    contract = R.BasePreparationContract(
+        max_planar_speed_mps=1.0,
+        max_planar_acceleration_mps2=4.0,
+        settle_margin_s=0.05,
+    )
+    assert R.BasePreparationContract.from_dict(
+        contract.to_dict()
+    ) == contract
+    with pytest.raises(
+        R.ActionBallContractError,
+        match="speed must be > 0",
+    ):
+        R.BasePreparationContract(
+            max_planar_speed_mps=0.0,
+            max_planar_acceleration_mps2=4.0,
+            settle_margin_s=0.05,
+        )
+
+    # d_switch=v^2/a=0.25 m, so 0.40 m is trapezoidal:
+    # 2*v/a + (d-d_switch)/v = 0.65 s, then 0.05 s settle.
+    receipt = R.BasePreparationReceipt.evaluate(
+        proposal_sample_sha256=_digest("move-sample"),
+        proposal_sample_index=17,
+        mobility_mode="move",
+        base_travel_b_yaw_m=(0.40, 0.0, 0.0),
+        reaction_margin_s=0.10,
+        available_preparation_s=0.75,
+        contract=contract,
+    )
+    assert receipt.admitted
+    assert receipt.reject_reason == ""
+    assert math.isclose(receipt.planar_travel_distance_m, 0.40)
+    assert math.isclose(receipt.motion_time_required_s, 0.65)
+    assert math.isclose(
+        receipt.move_preparation_required_s,
+        0.70,
+    )
+    assert math.isclose(receipt.required_preparation_s, 0.70)
+    assert receipt.available_preparation_s == 0.75
+    assert receipt.proposal_count_delta == 1
+    assert receipt.policy_attempt_count_delta == 0
+    assert receipt.solver_rejection_count_delta == 0
+    assert R.BasePreparationReceipt.from_dict(
+        receipt.to_dict()
+    ) == receipt
+
+    tampered = deepcopy(receipt.to_dict())
+    tampered["required_preparation_s"] += 1.0e-12
+    with pytest.raises(
+        R.ActionBallContractError,
+        match="motion envelope/admission formula",
+    ):
+        R.BasePreparationReceipt.from_dict(tampered)
+
+
+def test_move_teacher_timing_rejects_unpreparable_sample_before_policy():
+    contract = R.BasePreparationContract(
+        max_planar_speed_mps=1.0,
+        max_planar_acceleration_mps2=2.0,
+        settle_margin_s=0.20,
+    )
+    kwargs = {
+        "racket_velocity_w_mps": (3.0, 0.0, 0.0),
+        "time_to_contact_s": 0.90,
+        "reference_t_hit_s": 0.40,
+        "reference_t_cycle_s": 1.20,
+        "reference_racket_site_speed_mps": 3.0,
+        "reaction_margin_s": 0.05,
+        "teacher_rate_min": 0.8,
+        "teacher_rate_max": 1.2,
+        "proposal_sample_sha256": _digest("unpreparable-move"),
+        "proposal_sample_index": 23,
+        "mobility_mode": "move",
+        "base_travel_b_yaw_m": (0.18, 0.0, 0.0),
+    }
+    # Available wait is 0.50 s.  Triangular travel needs 0.60 s plus
+    # 0.20 s settle, so this remains a solver rejection, not an attempt.
+    with pytest.raises(R.BasePreparationAdmissionError) as caught:
+        R.derive_action_teacher_timing_with_base_preparation(
+            **kwargs,
+            base_preparation_contract=contract,
+        )
+    receipt = caught.value.receipt
+    assert caught.value.reject_reason == (
+        R.BASE_PREPARATION_REJECT_REASON
+    )
+    assert receipt.reject_reason == R.BASE_PREPARATION_REJECT_REASON
+    assert math.isclose(receipt.planar_travel_distance_m, 0.18)
+    assert math.isclose(receipt.motion_time_required_s, 0.60)
+    assert math.isclose(receipt.required_preparation_s, 0.80)
+    assert math.isclose(receipt.available_preparation_s, 0.50)
+    assert receipt.proposal_count_delta == 1
+    assert receipt.policy_attempt_count_delta == 0
+    assert receipt.solver_rejection_count_delta == 1
+    assert R.BasePreparationReceipt.from_dict(
+        receipt.to_dict()
+    ) == receipt
+
+    with pytest.raises(
+        R.ActionBallContractError,
+        match="requires an exact pinned",
+    ):
+        R.derive_action_teacher_timing_with_base_preparation(
+            **kwargs,
+            base_preparation_contract=None,
+        )
+
+
+def test_move_teacher_timing_admits_exact_boundary_and_no_move_is_legacy():
+    legacy = R.derive_action_teacher_timing(
+        racket_velocity_w_mps=(3.0, 0.0, 0.0),
+        time_to_contact_s=0.90,
+        reference_t_hit_s=0.40,
+        reference_t_cycle_s=1.20,
+        reference_racket_site_speed_mps=3.0,
+        reaction_margin_s=0.05,
+        teacher_rate_min=0.8,
+        teacher_rate_max=1.2,
+    )
+    no_move = R.derive_action_teacher_timing_with_base_preparation(
+        racket_velocity_w_mps=(3.0, 0.0, 0.0),
+        time_to_contact_s=0.90,
+        reference_t_hit_s=0.40,
+        reference_t_cycle_s=1.20,
+        reference_racket_site_speed_mps=3.0,
+        reaction_margin_s=0.05,
+        teacher_rate_min=0.8,
+        teacher_rate_max=1.2,
+        proposal_sample_sha256=_digest("legacy-no-move"),
+        proposal_sample_index=0,
+        mobility_mode="no_move",
+        # Latent travel still exists for RNG parity but is not executed.
+        base_travel_b_yaw_m=(0.40, -0.30, 0.0),
+        base_preparation_contract=None,
+    )
+    assert no_move.timing == legacy
+    assert (
+        tuple(legacy.__dict__)
+        == (
+            "required_racket_site_speed_mps",
+            "teacher_rate",
+            "scaled_t_hit_s",
+            "scaled_t_cycle_s",
+            "pre_swing_wait_s",
+        )
+    )
+    assert no_move.base_preparation.planar_travel_distance_m == 0.0
+    assert no_move.base_preparation.preparation_contract_sha256 is None
+    assert no_move.base_preparation.admitted
+
+    # With a=2, d=0.08 needs exactly 0.40 s; plus 0.10 s settle
+    # exactly consumes the 0.50 s available wait and must be admitted.
+    contract = R.BasePreparationContract(
+        max_planar_speed_mps=1.0,
+        max_planar_acceleration_mps2=2.0,
+        settle_margin_s=0.10,
+    )
+    move = R.derive_action_teacher_timing_with_base_preparation(
+        racket_velocity_w_mps=(3.0, 0.0, 0.0),
+        time_to_contact_s=0.90,
+        reference_t_hit_s=0.40,
+        reference_t_cycle_s=1.20,
+        reference_racket_site_speed_mps=3.0,
+        reaction_margin_s=0.05,
+        teacher_rate_min=0.8,
+        teacher_rate_max=1.2,
+        proposal_sample_sha256=_digest("boundary-move"),
+        proposal_sample_index=1,
+        mobility_mode="move",
+        base_travel_b_yaw_m=(0.08, 0.0, 0.0),
+        base_preparation_contract=contract,
+    )
+    assert move.timing == legacy
+    assert move.base_preparation.admitted
+    assert math.isclose(
+        move.base_preparation.required_preparation_s,
+        move.timing.pre_swing_wait_s,
+    )
+
+
 def test_real_sampler_identity_is_bit_exact_with_runtime_receipt():
     action_uid = 12_345
     profile = _sampling_profile(action_uid)
-    sampler = S.ActionBallSampler((profile,), seed=20260727)
+    mixture = S.SamplingMixture()
+    policy_dt_s = 0.02
+    sampler = S.ActionBallSampler(
+        (profile,),
+        seed=20260727,
+        sampling_mixture=mixture,
+        contact_time_step_s=policy_dt_s,
+    )
     sampler_levels = S.DomainLevels(
         landing_aim_x_lower=0.2,
         contact_y_upper=0.3,
@@ -1158,6 +1754,14 @@ def test_real_sampler_identity_is_bit_exact_with_runtime_receipt():
         registry_sha256=R._registry_sha256(
             (binding,), pins, "no_move"
         ),
+        sampling_mixture=R.ActionSamplingMixture.from_dict(
+            sampled_birth.sampling_mixture.as_dict()
+        ),
+        sampling_stratum=sampled_birth.sampling_stratum,
+        sampling_levels=R.ActionDomainLevels.from_dict(
+            sampled_birth.sampling_levels.as_dict()
+        ),
+        frontier_arm=sampled_birth.frontier_arm,
     )
     sampled = sampler.sample(
         birth=sampled_birth,
@@ -1167,8 +1771,23 @@ def test_real_sampler_identity_is_bit_exact_with_runtime_receipt():
         base_yaw_rad=yaw,
     )
     racket_velocity = (6.0, 0.0, 0.0)
-    timing = R.derive_action_teacher_timing(
-        racket_velocity_w_mps=racket_velocity,
+    geometry = R._contact_geometry.solve_exact_face_contact(
+        ball_contact_w_m=sampled.contact_w_m,
+        racket_face_center_velocity_w_mps=racket_velocity,
+        solved_raw_a_normal_w=(1.0, 0.0, 0.0),
+        mount_normal_sign=1,
+        reference_racket_quat_wxyz=(1.0, 0.0, 0.0, 0.0),
+        reference_racket_angular_velocity_w_radps=(0.0, 0.0, 0.0),
+        reference_racket_site_speed_mps=(
+            profile.reference_racket_site_speed_mps
+        ),
+        teacher_rate_min=profile.teacher_rate_min,
+        teacher_rate_max=profile.teacher_rate_max,
+    )
+    timing = R.derive_action_teacher_site_timing(
+        racket_site_velocity_w_mps=(
+            geometry.racket_site_velocity_w_mps
+        ),
         time_to_contact_s=sampled.time_to_contact_s,
         reference_t_hit_s=profile.reference_t_hit_s,
         reference_t_cycle_s=profile.reference_t_cycle_s,
@@ -1203,8 +1822,24 @@ def test_real_sampler_identity_is_bit_exact_with_runtime_receipt():
         spin_direction_b_yaw=sampled.spin_direction_b_yaw,
         incoming_spin_w_radps=sampled.spin_w_radps,
         landing_aim_w_xy_m=sampled.landing_aim_w_xy_m,
-        racket_velocity_w_mps=racket_velocity,
+        racket_site_target_w_m=geometry.racket_site_target_w_m,
+        mount_normal_sign=1,
         racket_normal_w=(1.0, 0.0, 0.0),
+        reference_racket_quat_wxyz=(1.0, 0.0, 0.0, 0.0),
+        reference_racket_angular_velocity_w_radps=(0.0, 0.0, 0.0),
+        racket_command_quat_wxyz=(
+            geometry.racket_command_quat_wxyz
+        ),
+        racket_face_center_velocity_w_mps=(
+            geometry.racket_face_center_velocity_w_mps
+        ),
+        racket_site_velocity_w_mps=(
+            geometry.racket_site_velocity_w_mps
+        ),
+        racket_command_angular_velocity_w_radps=(
+            geometry.racket_command_angular_velocity_w_radps
+        ),
+        geometry_source_sha256=geometry.geometry_source_sha256,
         reference_t_hit_s=profile.reference_t_hit_s,
         reference_t_cycle_s=profile.reference_t_cycle_s,
         reference_racket_site_speed_mps=(
@@ -1221,6 +1856,22 @@ def test_real_sampler_identity_is_bit_exact_with_runtime_receipt():
         scaled_t_cycle_s=timing.scaled_t_cycle_s,
         pre_swing_wait_s=timing.pre_swing_wait_s,
         solver_residual_m=0.004,
+        contact_time_step_s=sampled.contact_time_step_s,
+        time_to_contact_tick=sampled.time_to_contact_tick,
+        birth_index=sampled.birth_index,
+        birth_sampling_stratum=sampled.birth_sampling_stratum,
+        birth_sampling_levels=R.ActionDomainLevels.from_dict(
+            sampled.birth_sampling_levels.as_dict()
+        ),
+        birth_frontier_arm=sampled.birth_frontier_arm,
+        sampling_mixture=R.ActionSamplingMixture.from_dict(
+            sampled.sampling_mixture.as_dict()
+        ),
+        sampling_stratum=sampled.sampling_stratum,
+        sampling_levels=R.ActionDomainLevels.from_dict(
+            sampled.sampling_levels.as_dict()
+        ),
+        frontier_arm=sampled.frontier_arm,
     )
     assert task.sample_sha256 == sampled.sample_id
     assert task.sampler_identity_receipt() == (
@@ -1229,6 +1880,19 @@ def test_real_sampler_identity_is_bit_exact_with_runtime_receipt():
     before = deepcopy(sampler.state_dict())
     sampler.assert_issued_sample(task.sampler_identity_receipt())
     assert sampler.state_dict() == before
+    assert task.time_to_contact_s == (
+        task.time_to_contact_tick * task.contact_time_step_s
+    )
+    assert R.ActionBallTaskReceipt.from_dict(task.to_dict()) == task
+    for field, replacement in (
+        ("contact_time_step_s", policy_dt_s * 2.0),
+        ("time_to_contact_tick", task.time_to_contact_tick + 1),
+        ("sampling_stratum", "center"),
+    ):
+        tampered = task.to_dict()
+        tampered[field] = replacement
+        with pytest.raises(R.ActionBallContractError):
+            R.ActionBallTaskReceipt.from_dict(tampered)
 
 
 @pytest.mark.parametrize("count", [1, 5, 93])
@@ -1861,6 +2525,76 @@ def test_lazy_pool_exact_resume_preserves_birth_order_cursor_and_ledger():
         birth_a, swing_generation=4
     ) == source.request(birth_a, swing_generation=4)
     assert restored.state_dict() == source.state_dict()
+
+
+def test_counter_rally_task_identity_survives_exact_pool_resume():
+    objective_sha256 = _digest("counter-rally-objective")
+    pins = _pins(objective_sha256)
+    broker, _ = _broker(1, pins=pins)
+    birth = _reserve(broker)
+    _consume(broker, birth)
+
+    source = R.LazyActionTaskPool(
+        _bindings(1), pins, "no_move", refill_size=2
+    )
+    source.bind_solver(CounterRallySolver(objective_sha256))
+    source.bind_birth_authority(broker)
+    first = source.request(birth, swing_generation=0)
+    first.require_counter_rally_task(
+        expected_objective_profile_sha256=objective_sha256
+    )
+    saved = deepcopy(source.state_dict())
+    json.dumps(saved, allow_nan=False)
+
+    restored = R.LazyActionTaskPool(
+        _bindings(1), pins, "no_move", refill_size=2
+    )
+    restored.bind_solver(CounterRallySolver(objective_sha256))
+    restored.bind_birth_authority(broker)
+    restored.load_state_dict(saved)
+    assert restored.state_dict() == saved
+    actual = restored.request(birth, swing_generation=1)
+    expected = source.request(birth, swing_generation=1)
+    assert actual == expected
+    identity = actual.require_counter_rally_task(
+        expected_objective_profile_sha256=objective_sha256
+    )
+    assert identity == _counter_rally_task_identity(objective_sha256)
+    assert restored.state_dict() == source.state_dict()
+
+
+def test_counter_rally_exact_resume_rejects_solver_objective_drift_atomically():
+    objective_a = _digest("counter-rally-objective-a")
+    objective_b = _digest("counter-rally-objective-b")
+    pins = _pins(objective_a)
+    broker, _ = _broker(1, pins=pins)
+    birth = _reserve(broker)
+    _consume(broker, birth)
+
+    source = R.LazyActionTaskPool(
+        _bindings(1), pins, "no_move", refill_size=1
+    )
+    source.bind_solver(CounterRallySolver(objective_a))
+    source.bind_birth_authority(broker)
+    source.request(birth, swing_generation=0)
+    saved = deepcopy(source.state_dict())
+
+    restored = R.LazyActionTaskPool(
+        _bindings(1), pins, "no_move", refill_size=1
+    )
+    restored_solver = CounterRallySolver(objective_b)
+    restored.bind_solver(restored_solver)
+    restored.bind_birth_authority(broker)
+    restored.load_state_dict(saved)
+    before_pool = deepcopy(restored.state_dict())
+    before_solver = deepcopy(restored_solver.state_dict())
+    with pytest.raises(
+        R.CounterRallyTaskIdentityError,
+        match="objective profile SHA mismatch",
+    ):
+        restored.request(birth, swing_generation=1)
+    assert restored.state_dict() == before_pool
+    assert restored_solver.state_dict() == before_solver
 
 
 def test_pool_load_rejects_cross_birth_proposal_segment_reclassification():

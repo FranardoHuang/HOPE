@@ -40,7 +40,9 @@ runtime/feature 细节，写进实验正文或“决定”列。全局 P0/P1 只
 
 | ID | 问题 | 人类负责人 | 执行者 | 状态 | 证据 | 决定 |
 | --- | --- | --- | --- | --- | --- | --- |
-| [EXP-ACTION-CONDITIONED-BALL-FIRST-20260727](2026-07/EXP-ACTION-CONDITIONED-BALL-FIRST-20260727.md) | 能否先冻结动作、采该动作来球，再 fixed-action 解 task，并把联合 safe-policy failure 调到 10%？ | Franco | Codex | prelaunch/blocked | E1 | manifest/sampler/curriculum/receipt host 合同在整合；正式 N5/N93 motion admission、新正手行为门、Pod smoke 与 frozen evaluator authority 仍缺 |
+| [EXP-ROUGH-GROUND-FRICTION-FIX-20260729](2026-07/EXP-ROUGH-GROUND-FRICTION-FIX-20260729.md) | 能否在不移动桌子/动作坐标的前提下，用每环境零均值地垫和物理一致摩擦训练抬脚？ | Franco | Claude、Codex | blocked | E1 | host `379 passed`；fresh N5 首轮仍用平地/no-move，rough/move 须补 Isaac clone、接触、raycast、seed/mesh、初始穿插与 4096-env 性能门 |
+| [EXP-UPPER-N3-BACKHAND-SAFE-WARMSTART-20260728](2026-07/EXP-UPPER-N3-BACKHAND-SAFE-WARMSTART-20260728.md) | 去掉旧正手、三反手独占一张卡并从 N4 热启动，能否提速且不触 physical-hard 关节包络？ | Franco | Codex | blocked | E1 | N3 bank/父本 pin/175D safe leaf 与 smoke-only launcher 已备；等待 clean commit、Pod Hydra/Isaac substep safety smoke 和小预算 canary，禁止长跑/真机 |
+| [EXP-ACTION-CONDITIONED-BALL-FIRST-20260727](2026-07/EXP-ACTION-CONDITIONED-BALL-FIRST-20260727.md) | 能否先冻结动作、采该动作来球，再 fixed-action 解 task，并把联合 safe-policy failure 调到 10%？ | Franco | Codex | blocked | E1 | manifest/sampler/curriculum/receipt host 合同在整合；正式 N5/N93 motion admission、新正手行为门、Pod smoke 与 frozen evaluator authority 仍缺 |
 | [EXP-TASK-FIRST-N-ACTION-20260727](2026-07/EXP-TASK-FIRST-N-ACTION-20260727.md) | 每个动作能否从中心 task 开始，按位置→标量速度→拍面→base 独立泛化？ | Franco | Codex | superseded/ablation-only | E1 | 先采 task 不能保证存在匹配来球；保留为历史因果消融，不再是候选 executor |
 | [EXP-ACTION-CAPABILITY-SELECTOR-20260727](2026-07/EXP-ACTION-CAPABILITY-SELECTOR-20260727.md) | 任意击球目标能否先过安全与支持域，再按成功率 LCB 和并列优先级选动作？ | Franco | Codex | blocked | E1 | pure-core 排序/receipt 候选不等于生产接线；能力卷、trusted producer、任意 N wire/C++ 与 Gate3 均缺 |
 | [EXP-EFFECTIVE-REWARD-CAUSALITY-20260727](2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md) | 当前改善来自 task 自洽，还是名义高 Reward 权重？ | Franco | Codex | preregistered | E1 | 已证实实际 `4/0.5/0.5` 覆盖名义 `393.4/295.1/229.5`；task 自洽是当前最强解释，仍需同 task 分布的两 seed paired A/B |

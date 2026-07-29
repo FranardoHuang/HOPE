@@ -57,6 +57,91 @@ Current-candidate promotion sub-gate (required before this Gate can close):
 
 ## Current State
 
+Follow-up note (2026-07-29, ground-plant handoff; Gate remains `Partial`):
+
+- 旧 `TerrainImporterCfg(terrain_type="generator")` 会把 `env_origins` 移到 terrain tile，
+  而克隆桌体仍在 GridCloner 网格，因而 rough arm 实际把机器人与自己的桌子拆开。候选修复改为
+  每环境 `robot_side_zero_mean_patch`：机器人侧围绕 z=0 起伏、桌近沿起整块严格为平面；另以
+  `robot_material_make_consistent=true` 显式约束逐桶 `dynamic≤static`。相关 schema-3 plant
+  指纹和 host 联合回归为 `379 passed`。
+- 这只达到 E1。尚缺真实 Isaac 的 2-env clone/contact isolation、兜底地板 drop、桌 footprint
+  raycast、seed/mesh/pickle 内容绑定、ready 脚初始穿插检查与 4096-env VRAM/吞吐。故首轮 fresh
+  N5 固定为平地 upper/no-move；corrected-friction 与 rough/move 均为独立后续实验，不能通过自由
+  Hydra override 混进 smoke→canary→long 的同一 scientific recipe。
+
+Follow-up note (2026-07-29, live Reward causality prelaunch; Gate remains `Partial`):
+
+- 新增 1-env formal Isaac 审计器：从真实 post-Hydra `RewardManager` 重建并逐字闭合 effective
+  recipe，再按 MJLab 平衡稳定、BeyondMimic 模仿、HOPE 击球/上台、immutable safety 四组，对每个
+  active objective 做权威输入 tensor 的单轴 worsening；生产 callable 的
+  `weight × raw × policy_dt` 不严格下降、没有复核 mutation 或运行异常都 fail closed。
+- root quaternion/world velocity、motion hold gate 等派生 property 不再被当作可写状态；审计修改
+  权威源并显式读回生产 getter。clean 门包含 untracked，且 producer 必须是 HEAD-tracked exact
+  blob；同时复用训练 physical-validity source guard、manifest/motion/policy-contract identity
+  与 Isaac 异常非零退出模式。
+- host focused `15 passed`、Reward 相关联合回归 `433 passed`，只证明源码/receipt 合同。
+  clean commit 的 Pod 真实 1-env receipt 尚未
+  生成，故不能写成四组 Reward 已通过 E2，也不授权 canary/长训。操作与证据边界见
+  [Reward 因果审计工序](../operations/run_action_ball_reward_causal_prelaunch.md)和
+  [实验卷宗](../experiments/2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md)。
+
+Follow-up note (2026-07-28, ActionBall table safety chain; Gate remains `Partial`):
+
+- ActionBall 的解析球场景改用
+  [`ActionBall table safety assembly`](../DEFINITIONS.md#action-ball-table-safety)：真实桌板、
+  floor→slab-underside 保守 robot keep-out、球网与左右网柱，五件各自是明确 cuboid collider；
+  tracked USD 只供显示，因为其 whole-mesh convex hull 不能代表真实桌腿/网几何。keep-out 不与桌板
+  体积重叠，也不宣称是腿模型；physical/shadow 动力学球组合在 cfg mutation 前 fail closed。
+- `robot_hit_table` 的 ActionBall 路径不再用 broad force + body-origin AABB 归因；它按 runtime
+  articulation order 配置 exact 32 个 one-body pair-filter sensors，每个都过滤五件桌体。双脚也在
+  内；fixed-merge 的拍面/拍柄由 `right_wrist_yaw_Link` 覆盖。ActionBall action term 在
+  decimation=4 的每个 5 ms physics substep 读取全部 sensor，episode-sticky OR；首帧以前一 policy
+  sensor timestamp 为 baseline，重复/跳步/缺失/错序/陈旧读数 fail closed。只在指定 reset env 清
+  latch，不能用新 policy step 擦掉证据。接触阈值为 `1e-6 N` 数值零容差，不允许轻蹭套利。
+- host focused 命令与输出见
+  [桌体安全 smoke 工序](../operations/run_action_ball_table_safety_smoke.md)：当前
+  `83 passed in 2.19s`，覆盖 32-body exact order、top/edge/keep-out/net/posts、五个 filter
+  index、四个单子步 pulse、compound reason、partial reset、2000 次 float32 5 ms 累加与重复/
+  漏步负例。
+- 这仍是 E1 source/host 证据。本轮没有启动 Isaac 或 Pod；真实五件 CollisionAPI、四子步真实
+  32-body actor pulse、raw termination/generic terminal 各一次、reset 零泄漏和 4096-env
+  throughput/memory 均待跑。teacher 还必须另过整个 prep→hit→recovery、all robot/racket geoms
+  对桌面/边缘/桌底/keep-out/网/网柱连续至少 `5 mm` 的 swept-clearance 门；runtime sensor 不能
+  替代这张证书。
+  在这些命令留下结果前不得启动 ActionBall canary/长训，G05 不晋级。旧
+  `motion_backhand_loop_b_table_net_clearance_prereg_20260715.json` 绑定的是修改前 source bytes，
+  不能认证当前 scene builder；正式引用须新 prereg/receipt。
+
+Follow-up note (2026-07-28, three-backhand upper baseline safety cutover; Gate remains `Partial`):
+
+- 新候选是
+  [`upper N3 safe warm-start`](../DEFINITIONS.md#upper-n3-safe)：从四动作
+  `model_10809` 的同形 `175 → 31` PPO 状态 non-exact 热启动，只保留
+  `bh_loop_c / bh_block / s0_highpress`。N3 题库 strict schema-3 SHA-256 为
+  `6d61fda0...df22`，父 checkpoint/contract 为 `74d48177...ff23 / 75f46c92...9bc`。
+  Pod1 physical GPU1 独占该候选，不与 73/93、MuJoCo 或视频混卡；专卡只解决资源分时，不是
+  行为晋级。
+- 父本最后 100 窗三动作 rally return mean 分别为 `44.394% / 46.907% / 37.369%`，
+  legal/strike 为 `53.57% / 54.99% / 42.47%`；但 near-limit mean `25.916%`、physical fall
+  `440/85646`，且没有 raw q_des/substep hard-gap 账，不能直接部署或继续照旧长训。
+- 新 `HOPEPingPongUpperSafe` 叶子保持 VirtualBall 175D/static-bank 与
+  `4.0/0.5/0.5 + virtual_landing 1648.8` 首跑配方；两个 joint DoneTerm 只在 physical
+  `joint_pos_limits` hard edge 终止，processed q_des 仍走 soft clamp、qbar `-0.65/0.08` 和
+  joint-limit `-10`。所有 termination 共用一次 `death=-3600`，table/joint specific 为零。
+- runner 已新增 protected-task 两阶段消费者：optimizer 前 zero-copy freeze，并在 simulator device
+  深校验/稀疏化逐 policy-step joint-safety ledger；prepared sidecar 经 file/parent-directory
+  `fsync` 后才允许 optimizer，optimizer commit marker durable 后才 exact-token ack。actual hard
+  edge/non-finite q 先写 fatal sidecar再阻止 optimizer；公开 destructive one-shot consume 已禁用。
+  缺 4+1 readback、identity/action term 漂移、持久化/容量/预算失败均拒绝继续。
+- 当前只有 host/source 候选：N3 bank/launcher/safe-leaf AST tests
+  `14 passed, 1 skipped`；joint safety focused `70 passed`，4096×24×31 host prepared sidecar
+  `956,704 B`。旧 `8ba15f38` probe 在 Hydra
+  compose 前被拒绝，没有 Kit/run/checkpoint，只作 infrastructure-invalid 证据。必须先形成 clean
+  commit，再在 GPU1 完成 `1 env × 2 update`、NaN/extreme pre-physics、两个 joint reason 和
+  physics-substep hard-limit readback；这些证据缺一都不允许小 canary 或长跑。完整操作和证据见
+  [实验](../experiments/2026-07/EXP-UPPER-N3-BACKHAND-SAFE-WARMSTART-20260728.md)与
+  [工序](../operations/run_upper_n3_backhand_safe.md)。无真机授权。
+
 Follow-up note (2026-07-27, action-conditioned ball-first/N-action prelaunch source candidate; Gate remains
 `Partial`):
 

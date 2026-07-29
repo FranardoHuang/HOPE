@@ -23,6 +23,7 @@ import ast
 from copy import deepcopy
 import hashlib
 import inspect
+import math
 from pathlib import Path
 import textwrap
 import types
@@ -354,8 +355,16 @@ def _motion_harness(
     )
     ready_pos = torch.zeros(time_step_total, 1, 3)
     ready_pos[:, 0, 2] = _READY_Z_M
-    ready_quat = torch.zeros(time_step_total, 1, 4)
-    ready_quat[:, 0, 0] = 1.0
+    # A real canonical-ready root carries roll/pitch.  Use a pitched ready
+    # state with yaw zero so the birth's B_yaw receipt is identity while the
+    # physical root quaternion must remain non-identity.
+    ready_root_quat = torch.tensor(
+        [math.cos(0.1), 0.0, -math.sin(0.1), 0.0],
+        dtype=torch.float32,
+    )
+    ready_quat = ready_root_quat.reshape(1, 1, 4).repeat(
+        time_step_total, 1, 1
+    )
     command.motion = types.SimpleNamespace(
         num_segments=_ACTION_COUNT,
         seg_start=segment_starts,
@@ -406,7 +415,7 @@ def _motion_harness(
     )
     command._action_ball_ready_root_z = (_READY_Z_M,) * _ACTION_COUNT
     command._action_ball_ready_root_quat = (
-        (1.0, 0.0, 0.0, 0.0),
+        tuple(float(value) for value in ready_root_quat.tolist()),
     ) * _ACTION_COUNT
     command._action_ball_reset_generation = torch.zeros(
         num_envs, dtype=torch.long
@@ -538,8 +547,21 @@ def _task_receipt(runtime, birth, *, swing_generation: int):
     incoming_spin = (0.0, 0.0, 0.0)
     racket_velocity = (3.0, 0.0, 0.0)
     time_to_contact_s = 0.80
-    timing = runtime.derive_action_teacher_timing(
-        racket_velocity_w_mps=racket_velocity,
+    geometry = runtime._contact_geometry.solve_exact_face_contact(
+        ball_contact_w_m=contact,
+        racket_face_center_velocity_w_mps=racket_velocity,
+        solved_raw_a_normal_w=(1.0, 0.0, 0.0),
+        mount_normal_sign=1,
+        reference_racket_quat_wxyz=(1.0, 0.0, 0.0, 0.0),
+        reference_racket_angular_velocity_w_radps=(0.0, 0.0, 0.0),
+        reference_racket_site_speed_mps=3.0,
+        teacher_rate_min=0.8,
+        teacher_rate_max=1.2,
+    )
+    timing = runtime.derive_action_teacher_site_timing(
+        racket_site_velocity_w_mps=(
+            geometry.racket_site_velocity_w_mps
+        ),
         time_to_contact_s=time_to_contact_s,
         reference_t_hit_s=_REFERENCE_T_HIT_S,
         reference_t_cycle_s=_REFERENCE_T_CYCLE_S,
@@ -606,8 +628,24 @@ def _task_receipt(runtime, birth, *, swing_generation: int):
         spin_direction_b_yaw=spin_direction,
         incoming_spin_w_radps=incoming_spin,
         landing_aim_w_xy_m=(2.5, 0.0),
-        racket_velocity_w_mps=racket_velocity,
+        racket_site_target_w_m=geometry.racket_site_target_w_m,
+        mount_normal_sign=1,
         racket_normal_w=(1.0, 0.0, 0.0),
+        reference_racket_quat_wxyz=(1.0, 0.0, 0.0, 0.0),
+        reference_racket_angular_velocity_w_radps=(0.0, 0.0, 0.0),
+        racket_command_quat_wxyz=(
+            geometry.racket_command_quat_wxyz
+        ),
+        racket_face_center_velocity_w_mps=(
+            geometry.racket_face_center_velocity_w_mps
+        ),
+        racket_site_velocity_w_mps=(
+            geometry.racket_site_velocity_w_mps
+        ),
+        racket_command_angular_velocity_w_radps=(
+            geometry.racket_command_angular_velocity_w_radps
+        ),
+        geometry_source_sha256=geometry.geometry_source_sha256,
         reference_t_hit_s=_REFERENCE_T_HIT_S,
         reference_t_cycle_s=_REFERENCE_T_CYCLE_S,
         reference_racket_site_speed_mps=3.0,
@@ -777,10 +815,15 @@ def test_motion_reserves_writes_and_commits_one_4096_env_batch():
     assert torch.allclose(
         command.robot.data.root_state_w[:, :3], expected_position
     )
+    expected_ready_steps = command.motion.seg_start[command.clip_id]
+    expected_root_quat = command.motion.body_quat_w[
+        expected_ready_steps, 0
+    ]
     assert torch.equal(
         command.robot.data.root_state_w[:, 3:7],
-        transaction["quat"],
+        expected_root_quat,
     )
+    assert not torch.equal(expected_root_quat, transaction["quat"])
     assert torch.count_nonzero(
         command.robot.data.root_state_w[:, 7:]
     ).item() == 0

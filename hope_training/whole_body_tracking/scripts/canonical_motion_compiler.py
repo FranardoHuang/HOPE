@@ -46,6 +46,9 @@ from typing import Any, Mapping, Sequence
 
 import numpy as np
 
+import canonical_mujoco_path_adapter as mujoco_path_adapter
+import canonical_time_law_artifact as time_law_artifact
+import canonical_torque_path_topp as torque_path_topp
 from canonical_body_scope import BodyScopeResult, preprocess_body_scope
 from canonical_face_manifold import (
     FaceManifoldConfig,
@@ -113,6 +116,34 @@ _PUBLISHED_INPUT_ARRAY_KEYS = (
     "body_ang_vel_w",
 )
 _POSITION_TOLERANCE = 1.0e-7
+_JOINT_SOFT_POSITION_MARGIN_RAD = 1.0e-3
+_TIME_LAW_NPZ_SUFFIX = ".time_law.npz"
+_TIME_LAW_SOLVER_ARRAY_KEYS = (
+    "s_node",
+    "s_mid",
+    "qpos_node",
+    "q_s_node",
+    "q_ss_node_left",
+    "q_ss_node_right",
+    "qpos_mid",
+    "q_s_mid",
+    "q_ss_mid",
+    "x_node",
+    "x_mid",
+    "u_cell",
+    "time_node_s",
+    "time_mid_s",
+    "collocation_qpos",
+    "collocation_q_s",
+    "collocation_qvel",
+    "collocation_qacc",
+    "tick_s",
+    "tick_qpos",
+    "tick_q_s",
+    "tick_q_ss",
+    "tick_qvel",
+    "tick_qacc",
+)
 _AT_FDCWD = -100
 _RENAME_NOREPLACE = 1
 _RENAME_EXCL = 0x00000004
@@ -205,6 +236,8 @@ class _PathContract:
     coordinate_scale: np.ndarray
     coordinate_semantics: tuple[str, ...]
     coordinate_units: tuple[str, ...]
+    hard_position_lower: np.ndarray | None = None
+    hard_position_upper: np.ndarray | None = None
 
 
 @dataclass(frozen=True)
@@ -287,6 +320,9 @@ class CompiledMotion:
     geometry_report: Mapping[str, Any]
     retime_report: Mapping[str, Any]
     collocation_trace: ScalarPathCollocationTrace
+    time_law_artifact_filename: str
+    time_law_artifact_manifest_filename: str
+    time_law_artifact: time_law_artifact.TimeLawArtifact
 
 
 @dataclass(frozen=True)
@@ -477,16 +513,32 @@ def _path_contract(
             "recipe joint_velocity_limit_fraction must lie in (0,1]"
         )
     joint_velocity_used = joint_velocity * velocity_fraction
+    margin = _JOINT_SOFT_POSITION_MARGIN_RAD
+    if np.any(joint_upper - joint_lower <= 2.0 * margin):
+        raise CanonicalMotionCompilerError(
+            "plant joint range is too narrow for the mandatory strict soft "
+            f"position margin of {margin:g} rad"
+        )
+    joint_soft_lower = joint_lower + margin
+    joint_soft_upper = joint_upper - margin
     if scope == "upper":
-        lower = joint_lower
-        upper = joint_upper
+        hard_lower = joint_lower
+        hard_upper = joint_upper
+        lower = joint_soft_lower
+        upper = joint_soft_upper
         velocity = joint_velocity_used
         acceleration = joint_acceleration
         semantics = tuple(RUNTIME_JOINT_NAMES)
         units = ("rad",) * 31
     elif scope == "full":
-        lower = np.concatenate((joint_lower, root_limits.position_lower))
-        upper = np.concatenate((joint_upper, root_limits.position_upper))
+        hard_lower = np.concatenate((joint_lower, root_limits.position_lower))
+        hard_upper = np.concatenate((joint_upper, root_limits.position_upper))
+        lower = np.concatenate(
+            (joint_soft_lower, root_limits.position_lower)
+        )
+        upper = np.concatenate(
+            (joint_soft_upper, root_limits.position_upper)
+        )
         velocity = np.concatenate((joint_velocity_used, root_limits.velocity))
         acceleration = np.concatenate(
             (joint_acceleration, root_limits.acceleration)
@@ -499,6 +551,8 @@ def _path_contract(
     # limits.  This is deterministic and avoids adding meters to radians.
     scale = 1.0 / velocity
     return _PathContract(
+        hard_position_lower=np.ascontiguousarray(hard_lower),
+        hard_position_upper=np.ascontiguousarray(hard_upper),
         position_lower=np.ascontiguousarray(lower),
         position_upper=np.ascontiguousarray(upper),
         velocity=np.ascontiguousarray(velocity),
@@ -2369,6 +2423,377 @@ def _rebind_schema2_input_sha256(
     )
 
 
+def _time_law_trace_from_collocation(
+    trace: ScalarPathCollocationTrace,
+) -> time_law_artifact.TimeLawTrace:
+    """Map the accepted solver state without deriving it from schema-2."""
+
+    x_mid = 0.5 * (
+        np.asarray(trace.x_node[:-1], dtype=np.float64)
+        + np.asarray(trace.x_node[1:], dtype=np.float64)
+    )
+    collocation_qpos = np.stack(
+        (trace.q_node[:-1], trace.q_mid, trace.q_node[1:]), axis=1
+    )
+    collocation_q_s = np.stack(
+        (trace.q_s_node[:-1], trace.q_s_mid, trace.q_s_node[1:]), axis=1
+    )
+    collocation_q_ss = np.stack(
+        (
+            trace.q_ss_node_right[:-1],
+            trace.q_ss_mid,
+            trace.q_ss_node_left[1:],
+        ),
+        axis=1,
+    )
+    collocation_x = np.stack(
+        (trace.x_node[:-1], x_mid, trace.x_node[1:]), axis=1
+    )
+    collocation_qvel = collocation_q_s * np.sqrt(collocation_x)[:, :, None]
+    collocation_qacc = (
+        collocation_q_s * np.asarray(trace.u_cell)[:, None, None]
+        + collocation_q_ss * collocation_x[:, :, None]
+    )
+    return time_law_artifact.TimeLawTrace(
+        s_node=trace.s_node,
+        s_mid=trace.s_mid,
+        qpos_node=trace.q_node,
+        q_s_node=trace.q_s_node,
+        q_ss_node_left=trace.q_ss_node_left,
+        q_ss_node_right=trace.q_ss_node_right,
+        qpos_mid=trace.q_mid,
+        q_s_mid=trace.q_s_mid,
+        q_ss_mid=trace.q_ss_mid,
+        x_node=trace.x_node,
+        x_mid=x_mid,
+        u_cell=trace.u_cell,
+        time_node_s=trace.time_node_s,
+        time_mid_s=trace.time_mid_s,
+        collocation_qpos=collocation_qpos,
+        collocation_q_s=collocation_q_s,
+        collocation_qvel=collocation_qvel,
+        collocation_qacc=collocation_qacc,
+        tick_s=trace.tick_s,
+        tick_qpos=trace.tick_q,
+        tick_q_s=trace.tick_q_s,
+        tick_q_ss=trace.tick_q_ss,
+        tick_qvel=trace.tick_qdot,
+        tick_qacc=trace.tick_qdd,
+    )
+
+
+def _time_law_solver_array_sha256(
+    arrays: Mapping[str, Any],
+) -> str:
+    digest = hashlib.sha256(b"canonical-compiler-time-law-arrays-v1\0")
+    for key in _TIME_LAW_SOLVER_ARRAY_KEYS:
+        value = np.ascontiguousarray(np.asarray(arrays[key]), dtype="<f8")
+        digest.update(key.encode("ascii") + b"\0")
+        digest.update(np.asarray(value.shape, dtype="<i8").tobytes(order="C"))
+        digest.update(value.tobytes(order="C"))
+    return digest.hexdigest()
+
+
+def _time_law_solver_contract_sha256(
+    *,
+    arrays: Mapping[str, Any],
+    compiler_input_sha256: str,
+    output_npz_sha256: str,
+) -> str:
+    payload = {
+        "contract": "canonical_scalar_collocation_solver_output_binding_v1",
+        "compiler_input_sha256": compiler_input_sha256,
+        "output_npz_sha256": output_npz_sha256,
+        "solver_arrays_sha256": _time_law_solver_array_sha256(arrays),
+    }
+    encoded = json.dumps(
+        payload, sort_keys=True, separators=(",", ":"), allow_nan=False
+    ).encode("utf-8")
+    return hashlib.sha256(
+        b"canonical-compiler-time-law-solver-contract-v1\0" + encoded
+    ).hexdigest()
+
+
+def _direct_actuator_contract_sha256(contract: Any) -> str:
+    digest = hashlib.sha256(b"canonical-direct-actuator-contract-v1\0")
+    for name in (
+        "dof_to_actuator",
+        "actuator_gear",
+        "actuator_force_lower",
+        "actuator_force_upper",
+        "actuator_control_lower",
+        "actuator_control_upper",
+        "joint_force_lower",
+        "joint_force_upper",
+        "frictionloss",
+    ):
+        raw = np.asarray(getattr(contract, name))
+        dtype = "<i8" if name == "dof_to_actuator" else "<f8"
+        value = np.ascontiguousarray(raw, dtype=dtype)
+        digest.update(name.encode("ascii") + b"\0")
+        digest.update(np.asarray(value.shape, dtype="<i8").tobytes(order="C"))
+        digest.update(value.tobytes(order="C"))
+    for name in (
+        "free_dof_count",
+        "support_mode",
+        "contact_mode",
+        "fixed_lp_solver",
+        "model_binding",
+    ):
+        digest.update(name.encode("ascii") + b"\0")
+        digest.update(
+            json.dumps(
+                getattr(contract, name),
+                sort_keys=True,
+                separators=(",", ":"),
+                allow_nan=False,
+            ).encode("utf-8")
+        )
+        digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def _compiler_model_bindings(
+    backend: RightRacketBackend,
+    recipe: CanonicalMotionRecipe,
+) -> tuple[str, str]:
+    """Bind the exact production model, with a fail-closed test-double receipt."""
+
+    model = getattr(backend, "model", None)
+    if model is not None:
+        try:
+            actuator = torque_path_topp.direct_actuator_contract_from_mujoco(
+                model,
+                support_mode="ground",
+                contact_mode="double_support_floor",
+                fixed_lp_solver="scipy.optimize.linprog:highs",
+            )
+            return (
+                torque_path_topp._mujoco_model_binding(model),
+                _direct_actuator_contract_sha256(actuator),
+            )
+        except Exception as exc:
+            raise CanonicalMotionCompilerError(
+                f"cannot content-bind the exact MuJoCo actuator model: {exc}"
+            ) from exc
+
+    # Unit tests may inject a lightweight kinematics backend.  This receipt is
+    # deliberately not equal to any compiled MuJoCo binding, so the independent
+    # bank gate cannot mistake such an artifact for grounded evidence.
+    digest = hashlib.sha256(
+        b"canonical-non-mujoco-test-backend-v1\0"
+        + recipe.model_hashes["mjcf"].encode("ascii")
+        + type(backend).__qualname__.encode("utf-8")
+    ).hexdigest()
+    actuator_digest = hashlib.sha256(
+        b"canonical-non-mujoco-test-actuator-contract-v1\0"
+        + digest.encode("ascii")
+    ).hexdigest()
+    return digest, actuator_digest
+
+
+def _weighted_arc_artifact_binding(
+    receipt: Mapping[str, Any],
+    *,
+    source_sha256: str,
+    evaluated_arrays_sha256: str,
+) -> time_law_artifact.WeightedArcLengthBinding:
+    if (
+        receipt.get("contract") != "weighted_arc_length_v1"
+        or receipt.get("evaluator_mode") != "direct_exact"
+    ):
+        raise CanonicalMotionCompilerError(
+            "accepted trace lacks the exact weighted-arc receipt"
+        )
+    arguments = {
+        "algorithm_id": receipt["algorithm_id"],
+        "content_sha256": receipt["content_sha256"],
+        "retimer_receipt_sha256": receipt["receipt_sha256"],
+        "coordinate_scale_sha256_float64_le": (
+            receipt["coordinate_scale_sha256_float64_le"]
+        ),
+        "l_knots_sha256_float64_le": receipt["l_knots_sha256_float64_le"],
+        "total_length": receipt["total_length"],
+        "formal_knot_count": receipt["formal_knot_count"],
+        "arc_absolute_tolerance": receipt["arc_absolute_tolerance"],
+        "arc_relative_tolerance": receipt["arc_relative_tolerance"],
+        "quadrature_max_depth": receipt["quadrature_max_depth"],
+        "quadrature_error_estimate_sum": (
+            receipt["quadrature_error_estimate_sum"]
+        ),
+        "regularity_margin": receipt["regularity_margin"],
+        "regularity_max_depth": receipt["regularity_max_depth"],
+        "certified_min_weighted_speed_per_s": (
+            receipt["certified_min_weighted_speed_per_s"]
+        ),
+        "observed_min_weighted_speed_per_s": (
+            receipt["observed_min_weighted_speed_per_s"]
+        ),
+        "inverse_absolute_tolerance": receipt["inverse_absolute_tolerance"],
+        "inverse_relative_tolerance": receipt["inverse_relative_tolerance"],
+        "inverse_parameter_tolerance": receipt[
+            "inverse_parameter_tolerance"
+        ],
+        "inverse_max_iterations": receipt["inverse_max_iterations"],
+        "evaluated_arrays_sha256": evaluated_arrays_sha256,
+        "producer_receipt_sha256": "0" * 64,
+    }
+    provisional = time_law_artifact.WeightedArcLengthBinding(**arguments)
+    arguments["producer_receipt_sha256"] = (
+        time_law_artifact.weighted_arc_length_receipt_sha256(
+            source_sha256=source_sha256,
+            binding=provisional,
+        )
+    )
+    return time_law_artifact.WeightedArcLengthBinding(**arguments)
+
+
+def _build_motion_time_law_artifact(
+    *,
+    recipe: CanonicalMotionRecipe,
+    source: MotionSource,
+    scope: str,
+    backend: RightRacketBackend,
+    schema2: Schema2Candidate,
+    trace: ScalarPathCollocationTrace,
+    marker_path_s: Mapping[str, float],
+) -> time_law_artifact.TimeLawArtifact:
+    artifact_trace = _time_law_trace_from_collocation(trace)
+    evaluated_sha256 = time_law_artifact.path_evaluation_array_sha256(
+        artifact_trace
+    )
+    evaluator_contract_payload = {
+        "path_progress_contract": trace.path_progress_contract,
+        "path_evaluator_kind": trace.path_evaluator_kind,
+        "path_evaluator_sha256_float64_le": (
+            trace.path_evaluator_sha256_float64_le
+        ),
+        "geometry_continuity_contract": trace.geometry_continuity_contract,
+        "node_second_derivative_contract": (
+            trace.node_second_derivative_contract
+        ),
+        "boundary_second_derivative_contract": (
+            trace.boundary_second_derivative_contract
+        ),
+        "tick_second_derivative_contract": (
+            trace.tick_second_derivative_contract
+        ),
+        "grid_subdivisions": int(trace.grid_subdivisions),
+        "time_scale": float(trace.time_scale),
+        "weighted_arc_retimer_receipt_sha256": (
+            None
+            if trace.weighted_arc_length_receipt is None
+            else trace.weighted_arc_length_receipt.get("receipt_sha256")
+        ),
+    }
+    evaluator_contract_sha256 = hashlib.sha256(
+        b"canonical-path-evaluator-contract-v1\0"
+        + json.dumps(
+            evaluator_contract_payload,
+            sort_keys=True,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    ).hexdigest()
+    weighted_arc_path = Path(
+        build_weighted_arc_path.__code__.co_filename
+    ).resolve()
+    evaluator_implementation_sha256 = sha256_file(weighted_arc_path)
+    path_arguments = {
+        "evaluator_id": trace.path_evaluator_kind,
+        "evaluator_version": "1",
+        "derivative_method": "exact_spline_derivative",
+        "evaluator_contract_sha256": evaluator_contract_sha256,
+        "evaluator_implementation_sha256": (
+            evaluator_implementation_sha256
+        ),
+        "evaluated_arrays_sha256": evaluated_sha256,
+        "producer_receipt_sha256": "0" * 64,
+    }
+    path_arguments["producer_receipt_sha256"] = (
+        time_law_artifact.path_evaluation_receipt_sha256(
+            source_sha256=source.sha256,
+            **{
+                key: value
+                for key, value in path_arguments.items()
+                if key != "producer_receipt_sha256"
+            },
+        )
+    )
+    path_binding = time_law_artifact.PathEvaluatorBinding(**path_arguments)
+    if trace.weighted_arc_length_receipt is None:
+        raise CanonicalMotionCompilerError(
+            "accepted canonical trace omitted weighted-arc provenance"
+        )
+    weighted_binding = _weighted_arc_artifact_binding(
+        trace.weighted_arc_length_receipt,
+        source_sha256=source.sha256,
+        evaluated_arrays_sha256=evaluated_sha256,
+    )
+    try:
+        schema_hashes = schema2.manifest["hashes"]
+        compiler_input_sha256 = str(schema_hashes["input_sha256"])
+    except (KeyError, TypeError) as exc:
+        raise CanonicalMotionCompilerError(
+            "schema-2 manifest omitted compiler input provenance"
+        ) from exc
+    trace_arrays = {
+        key: getattr(artifact_trace, key)
+        for key in _TIME_LAW_SOLVER_ARRAY_KEYS
+    }
+    path_topp_path = Path(retime_path.__code__.co_filename).resolve()
+    model_binding, actuator_binding = _compiler_model_bindings(
+        backend, recipe
+    )
+    tools = {
+        "compiler": sha256_file(Path(__file__).resolve()),
+        "path_topp": sha256_file(path_topp_path),
+        "weighted_arc": evaluator_implementation_sha256,
+        "artifact": sha256_file(Path(time_law_artifact.__file__).resolve()),
+        "mujoco_path_adapter": sha256_file(
+            Path(mujoco_path_adapter.__file__).resolve()
+        ),
+        "grounded_solver": sha256_file(
+            Path(torque_path_topp.__file__).resolve()
+        ),
+    }
+    bindings = time_law_artifact.ArtifactBindings(
+        recipe_sha256=sha256_file(recipe.path),
+        source_sha256=source.sha256,
+        ready_sha256=recipe.ready.sha256,
+        mjcf_sha256=recipe.model_hashes["mjcf"],
+        urdf_sha256=recipe.model_hashes["urdf"],
+        model_binding_sha256=model_binding,
+        actuator_contract_sha256=actuator_binding,
+        tools_sha256=tools,
+        solver=time_law_artifact.SolverBinding(
+            solver_id="canonical_path_topp.retime_path",
+            solver_version="weighted_arc_collocation_trace_v1",
+            solver_contract_sha256=_time_law_solver_contract_sha256(
+                arrays=trace_arrays,
+                compiler_input_sha256=compiler_input_sha256,
+                output_npz_sha256=schema2.output_sha256,
+            ),
+            solver_implementation_sha256=sha256_file(path_topp_path),
+        ),
+        path_evaluator=path_binding,
+        weighted_arc_length=weighted_binding,
+    )
+    try:
+        return time_law_artifact.build_time_law_artifact(
+            motion_id=source.motion_id,
+            scope=scope,
+            trace=artifact_trace,
+            marker_path_s=marker_path_s,
+            bindings=bindings,
+            fps_hz=float(recipe.raw["time_law"]["fps"]),
+        )
+    except time_law_artifact.TimeLawArtifactError as exc:
+        raise CanonicalMotionCompilerError(
+            f"cannot persist the accepted exact time law: {exc}"
+        ) from exc
+
+
 def _compile_motion_scope(
     recipe: CanonicalMotionRecipe,
     source: MotionSource,
@@ -2468,10 +2893,27 @@ def _compile_motion_scope(
             fps=float(recipe.raw["time_law"]["fps"]),
         )
     )
+    output_filename = f"{source.motion_id}_{scope}_canonical_v2.npz"
+    artifact_filename = (
+        output_filename[: -len(".npz")] + _TIME_LAW_NPZ_SUFFIX
+    )
+    marker_path_s = {
+        name: float(winner.retimed.report["markers"][name]["path_progress"])
+        for name in ("window_start", "source_anchor", "window_end")
+    }
+    artifact = _build_motion_time_law_artifact(
+        recipe=recipe,
+        source=source,
+        scope=scope,
+        backend=backend,
+        schema2=schema2,
+        trace=winner.retimed.collocation_trace,
+        marker_path_s=marker_path_s,
+    )
     return CompiledMotion(
         motion_id=source.motion_id,
         scope=scope,
-        filename=f"{source.motion_id}_{scope}_canonical_v2.npz",
+        filename=output_filename,
         schema2=schema2,
         entry_frame=winner.candidate.entry_frame,
         exit_frame=winner.candidate.exit_frame,
@@ -2503,6 +2945,11 @@ def _compile_motion_scope(
         ),
         retime_report=MappingProxyType(retime_report),
         collocation_trace=winner.retimed.collocation_trace,
+        time_law_artifact_filename=artifact_filename,
+        time_law_artifact_manifest_filename=(
+            artifact_filename + ".manifest.json"
+        ),
+        time_law_artifact=artifact,
     )
 
 
@@ -2555,6 +3002,27 @@ def _compiler_options_receipt(
             "joint_order": list(RUNTIME_JOINT_NAMES),
             "values": joint_acceleration.tolist(),
             "sha256": _array_sha256(joint_acceleration),
+        },
+        "joint_soft_position_envelope": {
+            "joint_order": list(RUNTIME_JOINT_NAMES),
+            "policy": "fixed_margin_strictly_inside_mujoco_hard_limits_v1",
+            "margin_rad": _JOINT_SOFT_POSITION_MARGIN_RAD,
+            "hard_position_lower": contracts["upper"].hard_position_lower.tolist(),
+            "hard_position_upper": contracts["upper"].hard_position_upper.tolist(),
+            "soft_position_lower": contracts["upper"].position_lower.tolist(),
+            "soft_position_upper": contracts["upper"].position_upper.tolist(),
+            "strictly_inside_hard_limits": True,
+            "sha256": hashlib.sha256(
+                b"".join(
+                    bytes.fromhex(_array_sha256(value))
+                    for value in (
+                        contracts["upper"].hard_position_lower,
+                        contracts["upper"].hard_position_upper,
+                        contracts["upper"].position_lower,
+                        contracts["upper"].position_upper,
+                    )
+                )
+            ).hexdigest(),
         },
         "full_root_limits": {
             "coordinate_order": list(ROOT_COORDINATE_NAMES),
@@ -2687,6 +3155,23 @@ def _library_manifest(
                 "scope": motion.scope,
                 "filename": motion.filename,
                 "output_npz_sha256": motion.schema2.output_sha256,
+                "time_law_artifact": {
+                    "npz_filename": motion.time_law_artifact_filename,
+                    "npz_sha256": motion.time_law_artifact.npz_sha256,
+                    "manifest_filename": (
+                        motion.time_law_artifact_manifest_filename
+                    ),
+                    "manifest_sha256": (
+                        motion.time_law_artifact.manifest_sha256
+                    ),
+                    "bundle_sha256": (
+                        motion.time_law_artifact.bundle_sha256
+                    ),
+                    "schema_version": (
+                        time_law_artifact.ARTIFACT_SCHEMA_VERSION
+                    ),
+                    "artifact_type": time_law_artifact.ARTIFACT_TYPE,
+                },
                 "entry_frame": motion.entry_frame,
                 "exit_frame": motion.exit_frame,
                 "duration_s": motion.duration_s,
@@ -3111,6 +3596,54 @@ def write_compiled_canonical_motion_library(
             write_schema2_candidate(
                 motion.schema2,
                 staging / motion.filename,
+            )
+            artifact_filename = getattr(
+                motion, "time_law_artifact_filename", None
+            )
+            artifact_manifest_filename = getattr(
+                motion, "time_law_artifact_manifest_filename", None
+            )
+            artifact = getattr(
+                motion, "time_law_artifact", None
+            )
+            # Compatibility for externally assembled legacy test doubles.
+            # Every motion returned by this compiler is a CompiledMotion and
+            # therefore always takes the artifact branch.
+            if (
+                artifact_filename is None
+                and artifact_manifest_filename is None
+                and artifact is None
+            ):
+                continue
+            if (
+                not isinstance(artifact_filename, str)
+                or not isinstance(artifact_manifest_filename, str)
+                or not isinstance(
+                    artifact, time_law_artifact.TimeLawArtifact
+                )
+            ):
+                raise CanonicalMotionCompilerError(
+                    "time-law artifact pair and filenames must be present together"
+                )
+            artifact_path = staging / artifact_filename
+            artifact_manifest_path = staging / artifact_manifest_filename
+            if (
+                artifact_path.name != artifact_filename
+                or not artifact_filename.endswith(
+                    _TIME_LAW_NPZ_SUFFIX
+                )
+                or artifact_manifest_path.name
+                != artifact_manifest_filename
+                or artifact_manifest_filename
+                != artifact_filename + ".manifest.json"
+            ):
+                raise CanonicalMotionCompilerError(
+                    "time-law artifact pair filename escaped the output directory"
+                )
+            time_law_artifact.write_time_law_artifact(
+                artifact,
+                artifact_path,
+                manifest_path=artifact_manifest_path,
             )
         manifest_path = staging / BUILD_MANIFEST_NAME
         with manifest_path.open("xb") as stream:

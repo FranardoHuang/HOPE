@@ -23,6 +23,9 @@ from whole_body_tracking.utils.training_contract import (
     ACTOR_LEG_REF_MASK_PROVENANCE_KEY,
     TRAINING_CONTRACT_SCHEMA_VERSION,
     RUNTIME_EXECUTION_KEYS,
+    action_ball_action_set_identity,
+    bind_action_ball_action_set_metadata,
+    bind_action_ball_diagnostic_metadata,
     bind_actor_leg_ref_mask_metadata,
     bind_planner_task_revision_metadata,
     checkpoint_claims_contract,
@@ -31,6 +34,7 @@ from whole_body_tracking.utils.training_contract import (
     require_checkpoint_contract_binding,
     resolve_motion_body_lin_vel_points,
     runtime_execution_facts,
+    validate_action_ball_action_set_runtime_identity,
     validate_schema3_contract,
     validate_schema3_contract_structure,
 )
@@ -253,6 +257,7 @@ def attach_onnx_metadata(
     training_contract_schema = 0
     training_contract_sha256 = None
     training_contract_lineage_exact = False
+    training_contract_diagnostic = False
     planner_revision_metadata_json = None
     if source_checkpoint_path is not None:
         checkpoint_path = os.path.abspath(str(source_checkpoint_path))
@@ -295,6 +300,16 @@ def attach_onnx_metadata(
                 except ValueError as exc:
                     raise ValueError(f"attach_onnx_metadata: {exc}") from exc
                 training_contract_lineage_exact = checkpoint_contract_lineage_exact(checkpoint)
+                training_contract_diagnostic = bind_action_ball_diagnostic_metadata(
+                    metadata,
+                    training_contract,
+                    lineage_exact=training_contract_lineage_exact,
+                )
+                bind_action_ball_action_set_metadata(
+                    metadata,
+                    training_contract,
+                    lineage_exact=training_contract_lineage_exact,
+                )
                 if training_contract_lineage_exact:
                     # An exact-lineage claim keeps the stronger formal motion/body-order gate.
                     # Diagnostic schema-3 checkpoints remain fully bound but export with
@@ -501,6 +516,55 @@ def attach_onnx_metadata(
         rt_cmd = env.command_manager.get_term("racket_target")
     except KeyError:
         rt_cmd = None  # plain tracking task: no strike clock/geometry metadata
+    checkpoint_action_set_identity = action_ball_action_set_identity(
+        training_contract
+    )
+    if checkpoint_action_set_identity is not None:
+        if rt_cmd is None:
+            raise ValueError(
+                "attach_onnx_metadata: ActionBall checkpoint requires a live "
+                "racket_target runtime for action-set identity verification"
+            )
+        runtime_identity_getter = getattr(
+            rt_cmd, "action_ball_hard_contract", None
+        )
+        if not callable(runtime_identity_getter):
+            raise ValueError(
+                "attach_onnx_metadata: export environment lacks "
+                "action_ball_hard_contract()"
+            )
+        live_action_ball = runtime_identity_getter()
+        if not isinstance(live_action_ball, dict):
+            raise ValueError(
+                "attach_onnx_metadata: export environment is not the "
+                "checkpoint's ActionBall runtime"
+            )
+        live_manifest = live_action_ball.get("manifest")
+        live_prototype = live_action_ball.get("prototype")
+        if not isinstance(live_manifest, dict) or not isinstance(
+            live_prototype, dict
+        ):
+            raise ValueError(
+                "attach_onnx_metadata: live ActionBall runtime identity lacks "
+                "manifest/prototype"
+            )
+        try:
+            validate_action_ball_action_set_runtime_identity(
+                checkpoint_action_set_identity,
+                actor_obs_contract=runtime_facts["actor_obs_contract"],
+                actor_obs_width=runtime_facts["actor_obs_total_dim"],
+                manifest_path=live_manifest.get("path"),
+                manifest_sha256=live_manifest.get("file_sha256"),
+                scope=live_prototype.get("scope"),
+                mobility_mode=live_action_ball.get("mobility_mode"),
+                ordered_action_ids=live_action_ball.get("action_order"),
+                ordered_action_uids=live_action_ball.get("action_uids"),
+            )
+        except ValueError as exc:
+            raise ValueError(
+                "attach_onnx_metadata: current export environment disagrees "
+                "with checkpoint-bound ActionBall action-set identity"
+            ) from exc
     current_question_bank_contract = None
     validated_question_bank = None
     if rt_cmd is not None:
@@ -688,7 +752,11 @@ def attach_onnx_metadata(
                 ),
             }
         )
-    if actor_contract is not None and actor_contract.name == "deploy_parity_face179":
+    if (
+        actor_contract is not None
+        and actor_contract.name == "deploy_parity_face179"
+        and not training_contract_diagnostic
+    ):
         if (
             training_contract_schema != TRAINING_CONTRACT_SCHEMA_VERSION
             or training_contract is None

@@ -264,6 +264,7 @@ def test_plan_success_is_zero_write_for_missing_or_existing_output(
     assert load_calls[0][1]["weights_only"] is True
     plan = json.loads(capsys.readouterr().out)
     assert plan == {
+        "action_ball_diagnostic_unauthorized": False,
         "artifact_written": False,
         "checkpoint_iteration": 6700,
         "graph_export_not_executed": True,
@@ -345,6 +346,18 @@ def test_normal_export_still_uses_non_weights_only_atomic_graph_path(
     events = []
     saved_models = {}
     donor = _donor(clip_hashes=("f" * 64, "b" * 64))
+    donor.metadata_props.extend(
+        [
+            SimpleNamespace(
+                key="action_ball_diagnostic_unauthorized",
+                value="stale-donor-brand",
+            ),
+            SimpleNamespace(
+                key="formal_evidence_bookable",
+                value="1",
+            ),
+        ]
+    )
 
     class MetadataProps(list):
         def add(self):
@@ -390,6 +403,11 @@ def test_normal_export_still_uses_non_weights_only_atomic_graph_path(
     assert events[:2] == ["atomic", "export"]
     assert "save" in events
     assert (out / "policy.onnx").read_bytes() == b"fake-onnx"
+    final_metadata = {
+        entry.key: entry.value for entry in exported_model.metadata_props
+    }
+    assert "action_ball_diagnostic_unauthorized" not in final_metadata
+    assert "formal_evidence_bookable" not in final_metadata
     assert "[standalone-export] SUCCESS" in capsys.readouterr().out
 
 

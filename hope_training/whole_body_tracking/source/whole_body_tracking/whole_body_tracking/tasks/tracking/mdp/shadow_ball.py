@@ -344,8 +344,13 @@ class ShadowBallDriver:
         parked = self._mode == _MODE_PARKED
         drive = pre | parked
         if bool(drive.any()):
+            contact_target_w = (
+                cmd._action_ball_ball_contact_target_w
+                if cmd._action_ball_enabled
+                else cmd.racket_target_pos_w
+            )
             pos_w, vel_w = prestrike_ball_state(
-                cmd.racket_target_pos_w, cmd.vb_vel_in_w, cmd.time_to_strike
+                contact_target_w, cmd.vb_vel_in_w, cmd.time_to_strike
             )
             pos_w = torch.where(pre.unsqueeze(-1), pos_w, origins + self._park_pos_env)
             vel_w = torch.where(pre.unsqueeze(-1), vel_w, torch.zeros_like(vel_w))
@@ -377,15 +382,40 @@ class ShadowBallDriver:
         frame.
         """
         cmd = self._cmd
+        if cmd._action_ball_enabled:
+            achieved_contact = cmd._action_ball_exact_achieved_contact_state(
+                racket_site_pos_w=cmd.racket_pos_w,
+                racket_quat_wxyz=cmd.racket_quat_w,
+                racket_site_velocity_w=cmd.racket_lin_vel_w,
+            )
+            blade_velocity_w = achieved_contact[
+                "face_center_velocity_w_mps"
+            ]
+            blade_normal_w = achieved_contact["physical_face_normal_w"]
+            pos_w = achieved_contact["ball_center_w_m"]
+        else:
+            blade_velocity_w = cmd.racket_lin_vel_w
+            blade_normal_w = cmd.racket_normal_w
+            pos_w = cmd.racket_pos_w
         v_plus, w_plus = self._vb.predict_paddle_contact(
-            cmd.vb_vel_in_w, cmd.racket_lin_vel_w, cmd.racket_normal_w, cmd.vb_spin_in_w, self._prm
+            cmd.vb_vel_in_w,
+            blade_velocity_w,
+            blade_normal_w,
+            cmd.vb_spin_in_w,
+            self._prm,
         )
-        pos_w = cmd.racket_pos_w
         if self._table_enabled:
             # Collider enabled: spawn off the face along the oriented contact normal so the ball
             # never starts inside the racket collision mesh (documented start-offset caveat).
-            n_or = self._vb.orient_normal(cmd.racket_normal_w, cmd.vb_vel_in_w, cmd.racket_lin_vel_w)
-            pos_w = pos_w + n_or * (float(self._prm.ball_radius) + SPAWN_CLEARANCE)
+            n_or = self._vb.orient_normal(
+                blade_normal_w, cmd.vb_vel_in_w, blade_velocity_w
+            )
+            clearance = (
+                SPAWN_CLEARANCE
+                if cmd._action_ball_enabled
+                else float(self._prm.ball_radius) + SPAWN_CLEARANCE
+            )
+            pos_w = pos_w + n_or * clearance
 
         ids = torch.where(fired)[0]
         pose = torch.cat([pos_w[ids], self._identity_quat[ids]], dim=-1)

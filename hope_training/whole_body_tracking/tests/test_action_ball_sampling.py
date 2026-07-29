@@ -27,6 +27,18 @@ assert SPEC.loader is not None
 sys.modules[SPEC.name] = S
 SPEC.loader.exec_module(S)
 
+COUNTER_RALLY_PATH = PATH.with_name("counter_rally.py")
+COUNTER_RALLY_SPEC = importlib.util.spec_from_file_location(
+    "counter_rally_for_sampling_test", COUNTER_RALLY_PATH
+)
+assert (
+    COUNTER_RALLY_SPEC is not None
+    and COUNTER_RALLY_SPEC.loader is not None
+)
+CR = importlib.util.module_from_spec(COUNTER_RALLY_SPEC)
+sys.modules[COUNTER_RALLY_SPEC.name] = CR
+COUNTER_RALLY_SPEC.loader.exec_module(CR)
+
 
 def _profile(action_uid=101, **overrides):
     values = dict(
@@ -348,6 +360,198 @@ def test_same_seed_birth_and_sample_are_bit_exact_and_task_is_unresolved():
     left_sample.verify_sample_id()
     with pytest.raises(ValueError, match="canonical identity"):
         replace(left_sample, sample_index=1).verify_sample_id()
+
+
+def test_counter_rally_reserves_draw_17_and_derives_landing_y_from_reverse_ray():
+    profile = _profile(
+        counter_rally_objective=CR.CounterRallyObjectiveProfile()
+    )
+    levels = _levels(
+        aim=1.0,
+        incoming_direction_u_neg=0.75,
+        incoming_direction_u_pos=0.75,
+        incoming_direction_v_neg=0.75,
+        incoming_direction_v_pos=0.75,
+        position=0.5,
+    )
+    sampler = S.ActionBallSampler([profile], seed=20260729)
+    birth = _birth(sampler, epoch=4, levels=levels, yaw=0.11)
+    before = sampler.draw_count
+    sample = _sample(
+        sampler,
+        birth,
+        epoch=4,
+        levels=levels,
+        yaw=0.11,
+    )
+    assert sampler.draw_count - before == S.DRAWS_PER_SAMPLE
+    assert sample.draw_end - sample.draw_start == 18
+    incoming_xy_norm = math.hypot(*sample.incoming_direction_w[:2])
+    return_x = -sample.incoming_direction_w[0] / incoming_xy_norm
+    return_y = -sample.incoming_direction_w[1] / incoming_xy_norm
+    scale = (
+        sample.landing_aim_w_xy_m[0] - sample.contact_w_m[0]
+    ) / return_x
+    assert sample.landing_aim_w_xy_m[1] == pytest.approx(
+        sample.contact_w_m[1] + scale * return_y
+    )
+    assert sample.profile_sha256 == profile.sha256
+    assert profile.as_dict()["counter_rally_objective"] == (
+        profile.counter_rally_objective.to_mapping()
+    )
+    task = CR.derive_counter_rally_task(
+        base_goal_env_xy_m=sample.base_goal_w_m[:2],
+        base_yaw_env_rad=sample.base_yaw_rad,
+        contact_offset_b_yaw_m=(
+            sample.contact_offset_from_base_goal_b_yaw_m
+        ),
+        incoming_direction_b_yaw=sample.incoming_direction_b_yaw[:2],
+        incoming_ball_speed_at_contact_mps=sample.incoming_speed_mps,
+        landing_depth_env_x_m=sample.landing_aim_w_xy_m[0],
+        profile=profile.counter_rally_objective,
+    )
+    assert sample.landing_aim_w_xy_m == pytest.approx(
+        task.landing_aim_env_xy_m
+    )
+
+
+def test_counter_rally_landing_y_arms_never_enter_the_frontier_schedule():
+    profile = _profile(
+        counter_rally_objective=CR.CounterRallyObjectiveProfile()
+    )
+    eligible = S._eligible_swing_frontier_arms(
+        profile,
+        _levels(aim=1.0),
+        S.SamplingMixture(),
+    )
+    assert "landing_aim_x_lower" in eligible
+    assert "landing_aim_x_upper" in eligible
+    assert "landing_aim_y_lower" not in eligible
+    assert "landing_aim_y_upper" not in eligible
+
+
+@pytest.mark.parametrize(
+    ("incoming_direction", "landing_x", "expected_reason"),
+    (
+        ((-0.80, -0.60, 0.0), 2.5, "reverse_ray_not_opponent_bound"),
+        ((-1.00, 0.00, 0.0), 1.2, "landing_depth_not_opponent_half"),
+        ((-1.00, 0.00, 0.0), 3.3, "landing_depth_outside_table"),
+        ((-0.86, -0.51, 0.0), 2.5, "reverse_ray_misses_table"),
+    ),
+)
+def test_counter_rally_geometry_returns_named_solver_rejection_without_redraw(
+    incoming_direction,
+    landing_x,
+    expected_reason,
+):
+    aim, reason = S._counter_rally_reverse_ray_geometry(
+        contact_w_m=(0.8, 0.0, 1.0),
+        incoming_direction_w=incoming_direction,
+        landing_x_w_m=landing_x,
+        objective=CR.CounterRallyObjectiveProfile(),
+    )
+    assert aim[0] == landing_x
+    assert reason == expected_reason
+    with pytest.raises(CR.CounterRallyRejected) as caught:
+        CR.derive_counter_rally_task(
+            base_goal_env_xy_m=(0.55, 0.10),
+            base_yaw_env_rad=0.0,
+            contact_offset_b_yaw_m=(0.25, -0.10, 1.0),
+            incoming_direction_b_yaw=incoming_direction[:2],
+            incoming_ball_speed_at_contact_mps=3.0,
+            landing_depth_env_x_m=landing_x,
+            profile=CR.CounterRallyObjectiveProfile(),
+        )
+    assert caught.value.reason == expected_reason
+
+
+def test_counter_rally_shared_geometry_canonicalizes_behind_contact():
+    objective = CR.CounterRallyObjectiveProfile()
+    aim, reason = S._counter_rally_reverse_ray_geometry(
+        contact_w_m=(3.0, 0.0, 1.0),
+        incoming_direction_w=(-1.0, 0.0, 0.0),
+        landing_x_w_m=2.5,
+        objective=objective,
+    )
+    assert aim == (2.5, 0.0)
+    assert reason == "landing_behind_contact"
+    with pytest.raises(CR.CounterRallyRejected) as caught:
+        CR.derive_counter_rally_task(
+            base_goal_env_xy_m=(2.75, 0.10),
+            base_yaw_env_rad=0.0,
+            contact_offset_b_yaw_m=(0.25, -0.10, 1.0),
+            incoming_direction_b_yaw=(-1.0, 0.0),
+            incoming_ball_speed_at_contact_mps=3.0,
+            landing_depth_env_x_m=2.5,
+            profile=objective,
+        )
+    assert caught.value.reason == reason
+
+
+def test_counter_rally_support_rejects_unsupported_yaw_before_any_draw():
+    profile = _profile(
+        counter_rally_objective=CR.CounterRallyObjectiveProfile()
+    )
+    sampler = S.ActionBallSampler([profile], seed=20260729)
+    before = sampler.state_dict()
+    with pytest.raises(ValueError, match="leaves the opponent cone"):
+        sampler.reserve_birth(
+            action_uid=profile.action_uid,
+            domain_epoch=0,
+            levels=S.DomainLevels(),
+            base_yaw_rad=math.radians(40.0),
+        )
+    assert sampler.state_dict() == before
+    assert sampler.draw_count == 0
+
+
+def test_counter_rally_profile_requires_all_landing_x_support_on_opponent_half():
+    with pytest.raises(
+        ValueError,
+        match="landing-x support must lie on the bounded opponent half",
+    ):
+        _profile(
+            counter_rally_objective=CR.CounterRallyObjectiveProfile(),
+            landing_aim_min_w_xy_m=(1.2, -0.55),
+        )
+
+
+def test_counter_rally_table_y_miss_keeps_proposal_and_exact_resume_transcript():
+    profile = _profile(
+        counter_rally_objective=CR.CounterRallyObjectiveProfile()
+    )
+    levels = _levels(
+        aim=1.0,
+        position=1.0,
+        incoming_direction_u_neg=1.0,
+        incoming_direction_u_pos=1.0,
+        incoming_direction_v_neg=1.0,
+        incoming_direction_v_pos=1.0,
+    )
+    sampler = S.ActionBallSampler([profile], seed=2)
+    birth = _birth(sampler, levels=levels, yaw=0.25)
+    before = sampler.draw_count
+    sample = _sample(
+        sampler,
+        birth,
+        levels=levels,
+        yaw=0.25,
+    )
+    assert sampler.draw_count - before == S.DRAWS_PER_SAMPLE
+    assert sampler.sample_count_for(profile.action_uid) == 1
+    sample.verify_sample_id()
+    _, reason = S._counter_rally_reverse_ray_geometry(
+        contact_w_m=sample.contact_w_m,
+        incoming_direction_w=sample.incoming_direction_w,
+        landing_x_w_m=sample.landing_aim_w_xy_m[0],
+        objective=profile.counter_rally_objective,
+    )
+    assert reason == "reverse_ray_misses_table"
+
+    saved = sampler.state_dict()
+    restored = S.ActionBallSampler([profile], seed=2)
+    restored.load_state_dict(saved)
+    assert restored.state_dict() == saved
 
 
 def test_exact_resume_reproduces_future_wrap_samples_bit_for_bit():
@@ -814,6 +1018,24 @@ def test_mobility_is_profile_identity_and_cannot_be_overridden_at_sample():
     moving_sample = _sample(moving, moving_birth)
     assert frozen_sample.base_goal_w_m == frozen_sample.base_start_w_m
     assert moving_sample.base_goal_w_m != moving_sample.base_start_w_m
+    assert frozen_sample.executed_planar_base_travel_distance_m == 0.0
+    assert math.isclose(
+        moving_sample.executed_planar_base_travel_distance_m,
+        math.hypot(
+            moving_sample.base_travel_latent_b_yaw_m[0],
+            moving_sample.base_travel_latent_b_yaw_m[1],
+        ),
+    )
+    assert (
+        "executed_planar_base_travel_distance_m"
+        not in frozen_sample.identity_payload()
+    )
+    assert (
+        "executed_planar_base_travel_distance_m"
+        not in moving_sample.identity_payload()
+    )
+    frozen_sample.verify_sample_id()
+    moving_sample.verify_sample_id()
     assert frozen.draw_count == moving.draw_count
 
     with pytest.raises(TypeError, match="unexpected keyword"):
@@ -1055,6 +1277,737 @@ def test_incoming_direction_cone_is_fixed_when_speed_level_expands():
     ]
     assert max(slow_angles) <= 3.0 + 1.0e-9
     assert max(fast_angles) <= 3.0 + 1.0e-9
+
+
+def test_explicit_joint_mixture_is_exact_20_60_20_and_center_is_not_a_point():
+    mixture = S.SamplingMixture()
+    assert mixture.schedule == (
+        "interior",
+        "center",
+        "interior",
+        "frontier",
+        "interior",
+    )
+    levels = _levels(**{name: 1.0 for name in S.ARM_KEYS})
+    sampler = S.ActionBallSampler(
+        [_profile()], seed=7101, sampling_mixture=mixture
+    )
+    birth = _birth(sampler, levels=levels)
+    samples = [
+        _sample(sampler, birth, levels=levels) for _ in range(100)
+    ]
+    counts = {
+        name: sum(sample.sampling_stratum == name for sample in samples)
+        for name in ("center", "interior", "frontier")
+    }
+    assert counts == {"center": 20, "interior": 60, "frontier": 20}
+
+    center_samples = [
+        sample for sample in samples if sample.sampling_stratum == "center"
+    ]
+    assert all(
+        sample.sampling_levels == _levels() for sample in center_samples
+    )
+    # Level zero is the profile's narrow initial support, not a measure-zero
+    # point at the center.
+    assert len(
+        {sample.time_to_contact_s for sample in center_samples}
+    ) > 10
+    assert any(
+        sample.time_to_contact_s
+        != _profile().time_to_contact_center_s
+        for sample in center_samples
+    )
+    for sample in samples:
+        receipt = sample.to_receipt()
+        assert "in_new_band" not in receipt["sampling"]
+        assert (
+            receipt["sampling"]["stratum"]
+            == sample.sampling_stratum
+        )
+        sampler.verify_sampling_membership(receipt)
+        sampler.assert_issued_sample(receipt)
+
+
+def test_production_ttc_is_native_tick_sampled_replayable_and_two_sided():
+    profile = _profile()
+    mixture = S.SamplingMixture()
+    levels = S.DomainLevels()
+    policy_dt_s = 0.02
+    sampler = S.ActionBallSampler(
+        [profile],
+        seed=7111,
+        sampling_mixture=mixture,
+        contact_time_step_s=policy_dt_s,
+    )
+    birth = _birth(sampler, epoch=3, levels=levels)
+    samples = [
+        _sample(
+            sampler,
+            birth,
+            epoch=3,
+            levels=levels,
+        )
+        for _ in range(9)
+    ]
+
+    assert all(
+        sample.time_to_contact_s
+        == sample.time_to_contact_tick * policy_dt_s
+        for sample in samples
+    )
+    lower = samples[3]
+    upper = samples[8]
+    assert lower.frontier_arm == "time_to_contact_lower"
+    assert upper.frontier_arm == "time_to_contact_upper"
+    grid = sampler._contact_time_grid_by_action[profile.action_uid]
+    assert lower.time_to_contact_tick < grid.center_tick
+    assert upper.time_to_contact_tick > grid.center_tick
+
+    strict_floor_s = (
+        profile.reference_t_hit_s / profile.teacher_rate_min
+        + profile.reaction_margin_s
+    )
+    assert lower.time_to_contact_s > strict_floor_s
+    assert (
+        upper.time_to_contact_s
+        - profile.reference_t_hit_s / profile.teacher_rate_max
+        <= 1.0
+    )
+    assert sampler.replay_issued_sample(
+        birth, lower.sample_index
+    ) == lower
+    sampler.verify_sampling_membership(lower)
+    sampler.verify_sampling_membership(upper)
+
+    restored = S.ActionBallSampler(
+        [profile],
+        seed=7111,
+        sampling_mixture=mixture,
+        contact_time_step_s=policy_dt_s,
+    )
+    restored.load_state_dict(sampler.state_dict())
+    assert _sample(
+        restored,
+        birth,
+        epoch=3,
+        levels=levels,
+    ) == _sample(
+        sampler,
+        birth,
+        epoch=3,
+        levels=levels,
+    )
+
+    tampered = lower.to_identity_receipt()
+    tampered["time_to_contact_tick"] += 1
+    with pytest.raises(ValueError):
+        sampler.assert_issued_sample(tampered)
+
+
+def test_frontier_receipt_recomputes_outer_band_and_forced_arm_has_no_starvation():
+    profile = _profile()
+    levels = _levels(**{name: 1.0 for name in S.ARM_KEYS})
+    mixture = S.SamplingMixture()
+    sampler = S.ActionBallSampler(
+        [profile], seed=7102, sampling_mixture=mixture
+    )
+    birth = _birth(sampler, levels=levels)
+    eligible = S._eligible_swing_frontier_arms(profile, levels)
+    assert len(eligible) == 24
+    # One frontier slot per five samples: exactly one full round of all
+    # eligible per-swing action/axis/side arms.
+    samples = [
+        _sample(sampler, birth, levels=levels)
+        for _ in range(5 * len(eligible))
+    ]
+    frontier = [
+        sample for sample in samples if sample.sampling_stratum == "frontier"
+    ]
+    assert [sample.frontier_arm for sample in frontier] == list(eligible)
+    assert set(sample.frontier_arm for sample in frontier) == set(eligible)
+    for sample in frontier:
+        sampler.verify_sampling_membership(sample.to_identity_receipt())
+        negative, positive, side, _ = S._frontier_width_pair(
+            profile, sample.sampling_levels, sample.frontier_arm
+        )
+        delta = S._frontier_coordinate_delta(
+            sample, profile, sample.frontier_arm
+        )
+        width = negative if side == "negative" else positive
+        normalized = -delta / width if side == "negative" else delta / width
+        assert (
+            normalized + 1.0e-10
+            >= 1.0 - mixture.frontier_band_fraction
+        )
+        assert normalized <= 1.0 + 1.0e-10
+
+    forged = frontier[0]
+    # Move the selected coordinate back to the center without relying on a
+    # caller-supplied membership flag, then make the outer identity
+    # self-consistent.  Geometry recomputation must still reject it.
+    assert forged.frontier_arm == "time_to_contact_lower"
+    forged = replace(
+        forged,
+        time_to_contact_s=profile.time_to_contact_center_s,
+    )
+    forged = replace(
+        forged,
+        sample_id=S._sha256_json(forged.identity_payload()),
+    )
+    forged.verify_sample_id()
+    with pytest.raises(ValueError, match="recomputed frontier band"):
+        sampler.verify_sampling_membership(forged)
+
+    unrelated_forge = replace(
+        frontier[0],
+        incoming_speed_mps=1000.0,
+    )
+    unrelated_forge = replace(
+        unrelated_forge,
+        sample_id=S._sha256_json(
+            unrelated_forge.identity_payload()
+        ),
+    )
+    unrelated_forge.verify_sample_id()
+    with pytest.raises(ValueError, match="deterministic issued replay"):
+        sampler.verify_sampling_membership(unrelated_forge)
+
+
+def test_move_frontier_round_robin_adds_all_four_travel_sides():
+    profile = _profile(mobility_mode="move")
+    levels = _levels(**{name: 1.0 for name in S.ARM_KEYS})
+    sampler = S.ActionBallSampler(
+        [profile],
+        seed=7105,
+        sampling_mixture=S.SamplingMixture(),
+    )
+    birth = _birth(sampler, levels=levels)
+    eligible = S._eligible_swing_frontier_arms(profile, levels)
+    assert len(eligible) == 28
+    travel = {
+        "base_travel_x_lower",
+        "base_travel_x_upper",
+        "base_travel_y_lower",
+        "base_travel_y_upper",
+    }
+    assert travel.issubset(set(eligible))
+    samples = [
+        _sample(sampler, birth, levels=levels)
+        for _ in range(5 * len(eligible))
+    ]
+    frontier_arms = [
+        sample.frontier_arm
+        for sample in samples
+        if sample.sampling_stratum == "frontier"
+    ]
+    assert frontier_arms == list(eligible)
+    assert travel.issubset(set(frontier_arms))
+
+
+def test_joint_mixture_state_roundtrip_preserves_midcycle_strata_and_rng():
+    mixture = S.SamplingMixture()
+    levels = _levels(**{name: 0.75 for name in S.ARM_KEYS})
+    profiles = [_profile(11), _profile(29)]
+    original = S.ActionBallSampler(
+        profiles, seed=7103, sampling_mixture=mixture
+    )
+    birth = _birth(original, uid=11, epoch=3, levels=levels)
+    for _ in range(7):
+        _sample(original, birth, uid=11, epoch=3, levels=levels)
+    saved = deepcopy(original.state_dict())
+    expected = [
+        _sample(original, birth, uid=11, epoch=3, levels=levels)
+        for _ in range(13)
+    ]
+
+    restored = S.ActionBallSampler(
+        profiles, seed=7103, sampling_mixture=mixture
+    )
+    restored.load_state_dict(saved)
+    actual = [
+        _sample(restored, birth, uid=11, epoch=3, levels=levels)
+        for _ in range(13)
+    ]
+    assert actual == expected
+    assert [
+        (sample.sampling_stratum, sample.frontier_arm)
+        for sample in actual
+    ] == [
+        (sample.sampling_stratum, sample.frontier_arm)
+        for sample in expected
+    ]
+    assert restored.state_dict() == original.state_dict()
+
+    legacy = S.ActionBallSampler(profiles, seed=7103)
+    with pytest.raises(ValueError, match="state contract"):
+        legacy.load_state_dict(saved)
+
+
+def test_joint_mixture_cursor_is_independent_per_action_and_batch_history():
+    mixture = S.SamplingMixture()
+    levels = _levels(**{name: 0.5 for name in S.ARM_KEYS})
+    profiles = [_profile(11), _profile(29)]
+    with_other_history = S.ActionBallSampler(
+        profiles, seed=7106, sampling_mixture=mixture
+    )
+    clean_action = S.ActionBallSampler(
+        profiles, seed=7106, sampling_mixture=mixture
+    )
+    first_birth = _birth(
+        with_other_history, uid=11, epoch=1, levels=levels
+    )
+    for _ in range(37):
+        _sample(
+            with_other_history,
+            first_birth,
+            uid=11,
+            epoch=1,
+            levels=levels,
+        )
+
+    mixed_birth = _birth(
+        with_other_history, uid=29, epoch=2, levels=levels
+    )
+    clean_birth = _birth(
+        clean_action, uid=29, epoch=2, levels=levels
+    )
+    mixed_samples = [
+        _sample(
+            with_other_history,
+            mixed_birth,
+            uid=29,
+            epoch=2,
+            levels=levels,
+        )
+        for _ in range(15)
+    ]
+    clean_samples = [
+        _sample(
+            clean_action,
+            clean_birth,
+            uid=29,
+            epoch=2,
+            levels=levels,
+        )
+        for _ in range(15)
+    ]
+    assert mixed_birth == clean_birth
+    assert mixed_samples == clean_samples
+    assert [
+        (sample.sampling_stratum, sample.frontier_arm)
+        for sample in mixed_samples
+    ] == [
+        (sample.sampling_stratum, sample.frontier_arm)
+        for sample in clean_samples
+    ]
+
+
+def test_sampling_mixture_is_configurable_but_all_strata_must_be_live():
+    mixture = S.SamplingMixture(
+        center_slots=2,
+        interior_slots=1,
+        frontier_slots=1,
+        interior_level_scale=0.5,
+        frontier_band_fraction=0.1,
+    )
+    assert len(mixture.schedule) == 4
+    assert mixture.schedule.count("center") == 2
+    assert mixture.schedule.count("interior") == 1
+    assert mixture.schedule.count("frontier") == 1
+    assert S.SamplingMixture.from_mapping(mixture.as_dict()) == mixture
+    with pytest.raises(ValueError, match="center_slots"):
+        S.SamplingMixture(center_slots=0)
+    with pytest.raises(ValueError, match="must be in"):
+        S.SamplingMixture(frontier_band_fraction=0.0)
+    with pytest.raises(ValueError, match="must be in"):
+        S.SamplingMixture(
+            interior_level_scale=0.0,
+            frontier_band_fraction=1.0,
+        )
+
+
+def test_zero_width_frontier_fails_before_rng_or_receipt_state_mutates():
+    zero = _profile(
+        contact_offset_std_initial_m=(0.0, 0.0, 0.0),
+        contact_offset_std_max_m=(0.0, 0.0, 0.0),
+        time_to_contact_std_lower_initial_s=0.0,
+        time_to_contact_std_lower_max_s=0.0,
+        time_to_contact_std_upper_initial_s=0.0,
+        time_to_contact_std_upper_max_s=0.0,
+        incoming_speed_std_initial_mps=0.0,
+        incoming_speed_std_max_mps=0.0,
+        incoming_direction_cone_deg=0.0,
+        spin_magnitude_std_initial_radps=0.0,
+        spin_magnitude_std_max_radps=0.0,
+        spin_direction_cone_initial_deg=0.0,
+        spin_direction_cone_max_deg=0.0,
+        base_spawn_std_initial_m=(0.0, 0.0, 0.0),
+        base_spawn_std_max_m=(0.0, 0.0, 0.0),
+        base_travel_std_initial_m=(0.0, 0.0, 0.0),
+        base_travel_std_max_m=(0.0, 0.0, 0.0),
+        landing_aim_std_initial_m=(0.0, 0.0),
+        landing_aim_std_max_m=(0.0, 0.0),
+    )
+    sampler = S.ActionBallSampler(
+        [zero], seed=7107, sampling_mixture=S.SamplingMixture()
+    )
+    levels = _levels(**{name: 1.0 for name in S.ARM_KEYS})
+    birth = _birth(sampler, levels=levels)
+    for _ in range(3):
+        _sample(sampler, birth, levels=levels)
+    assert sampler.sample_count == 3
+    before = deepcopy(sampler.state_dict())
+    with pytest.raises(ValueError, match="no non-zero per-swing arm"):
+        _sample(sampler, birth, levels=levels)
+    assert sampler.state_dict() == before
+
+
+def test_legacy_sampler_remains_opt_in_free_and_marks_domain_receipt():
+    levels = _levels(position=0.5)
+    sampler = S.ActionBallSampler([_profile()], seed=7104)
+    birth = _birth(sampler, levels=levels)
+    sample = _sample(sampler, birth, levels=levels)
+    assert sampler.sampling_mixture is None
+    assert sample.sampling_mixture is None
+    assert sample.sampling_stratum == "domain"
+    assert sample.sampling_levels == levels
+    assert sample.frontier_arm is None
+    sampler.verify_sampling_membership(sample.to_receipt())
+
+
+def test_base_birth_mixture_is_exact_20_60_20_and_forces_all_four_sides():
+    mixture = S.SamplingMixture()
+    levels = _levels(**{name: 1.0 for name in S.ARM_KEYS})
+    sampler = S.ActionBallSampler(
+        [_profile()], seed=7201, sampling_mixture=mixture
+    )
+
+    # Reserving a birth is the proposal-accounting boundary.  These receipts
+    # are deliberately discarded as though every downstream solver rejected;
+    # the pre-rejection stratum denominator must still be exact.
+    births = [_birth(sampler, levels=levels) for _ in range(100)]
+    counts = {
+        name: sum(birth.sampling_stratum == name for birth in births)
+        for name in ("center", "interior", "frontier")
+    }
+    assert counts == {"center": 20, "interior": 60, "frontier": 20}
+    assert sampler.birth_count == 100
+
+    expected_arms = (
+        "base_spawn_x_lower",
+        "base_spawn_x_upper",
+        "base_spawn_y_lower",
+        "base_spawn_y_upper",
+    )
+    frontier = [
+        birth for birth in births
+        if birth.sampling_stratum == "frontier"
+    ]
+    assert [birth.frontier_arm for birth in frontier[:4]] == list(
+        expected_arms
+    )
+    assert {
+        birth.frontier_arm for birth in frontier
+    } == set(expected_arms)
+    for birth in births:
+        sampler.verify_birth_sampling_membership(
+            birth.to_identity_receipt()
+        )
+        receipt = birth.to_receipt()
+        assert receipt["sampling"]["stratum"] == birth.sampling_stratum
+        assert (
+            receipt["sampling"]["effective_levels"]
+            == birth.sampling_levels.as_dict()
+        )
+
+
+def test_swing_receipt_binds_actual_birth_stratum_not_unused_spawn_latent():
+    mixture = S.SamplingMixture()
+    levels = _levels(**{name: 1.0 for name in S.ARM_KEYS})
+    sampler = S.ActionBallSampler(
+        [_profile()], seed=7202, sampling_mixture=mixture
+    )
+    births = [_birth(sampler, levels=levels) for _ in range(4)]
+    frontier_birth = births[-1]
+    assert frontier_birth.sampling_stratum == "frontier"
+
+    sample = _sample(sampler, frontier_birth, levels=levels)
+    assert sample.birth_index == frontier_birth.birth_index
+    assert (
+        sample.birth_sampling_stratum
+        == frontier_birth.sampling_stratum
+    )
+    assert sample.birth_sampling_levels == frontier_birth.sampling_levels
+    assert sample.birth_frontier_arm == frontier_birth.frontier_arm
+    assert sample.base_spawn_latent_w_m == frontier_birth.base_start_w_m
+    identity = sample.to_identity_receipt()
+    assert identity["birth_index"] == frontier_birth.birth_index
+    assert (
+        identity["birth_sampling_levels"]
+        == frontier_birth.sampling_levels.as_dict()
+    )
+    sampler.assert_issued_sample(identity)
+
+    before = deepcopy(sampler.state_dict())
+    forged = replace(
+        sample,
+        birth_sampling_levels=S.DomainLevels(),
+    )
+    forged = replace(
+        forged,
+        sample_id=S._sha256_json(forged.identity_payload()),
+    )
+    with pytest.raises(ValueError, match="birth sampling metadata"):
+        sampler.assert_issued_sample(forged)
+    assert sampler.state_dict() == before
+
+
+def test_joint_rho_scales_full_physical_width_and_cannot_overlap_frontier():
+    profile = _profile()
+    mixture = S.SamplingMixture()
+    levels = _levels(**{name: 1.0 for name in S.ARM_KEYS})
+
+    _, birth_interior, _ = S._sampling_plan(
+        profile=profile,
+        levels=levels,
+        mixture=mixture,
+        proposal_index=0,
+        scope="birth",
+    )
+    _, swing_interior, _ = S._sampling_plan(
+        profile=profile,
+        levels=levels,
+        mixture=mixture,
+        proposal_index=0,
+        scope="swing",
+    )
+    for arm, effective in (
+        ("base_spawn_x_lower", birth_interior),
+        ("time_to_contact_lower", swing_interior),
+        ("contact_y_upper", swing_interior),
+    ):
+        initial = S._arm_physical_width(
+            profile, S.DomainLevels(), arm
+        )
+        full = S._arm_physical_width(profile, levels, arm)
+        actual = S._arm_physical_width(profile, effective, arm)
+        assert actual == pytest.approx(
+            max(initial, mixture.interior_level_scale * full),
+            abs=1.0e-12,
+        )
+
+    _, birth_frontier_levels, birth_arm = S._sampling_plan(
+        profile=profile,
+        levels=levels,
+        mixture=mixture,
+        proposal_index=3,
+        scope="birth",
+    )
+    _, swing_frontier_levels, swing_arm = S._sampling_plan(
+        profile=profile,
+        levels=levels,
+        mixture=mixture,
+        proposal_index=3,
+        scope="swing",
+    )
+    assert birth_arm == "base_spawn_x_lower"
+    assert swing_arm == "time_to_contact_lower"
+    for arm, frontier_levels, interior_levels in (
+        (birth_arm, birth_frontier_levels, birth_interior),
+        (swing_arm, swing_frontier_levels, swing_interior),
+    ):
+        full = S._arm_physical_width(profile, frontier_levels, arm)
+        interior = S._arm_physical_width(
+            profile, interior_levels, arm
+        )
+        frontier_start = (
+            1.0 - mixture.frontier_band_fraction
+        ) * full
+        assert interior <= frontier_start + 1.0e-12
+
+    with pytest.raises(ValueError, match="cannot overlap"):
+        S.SamplingMixture(
+            interior_level_scale=0.81,
+            frontier_band_fraction=0.2,
+        )
+
+
+def test_birth_mixture_resume_and_action_cursors_are_independent_bit_exact():
+    mixture = S.SamplingMixture()
+    levels = _levels(**{name: 0.9 for name in S.ARM_KEYS})
+    profiles = [_profile(11), _profile(29)]
+    original = S.ActionBallSampler(
+        profiles, seed=7203, sampling_mixture=mixture
+    )
+    births = {11: [], 29: []}
+    for uid in (11, 29, 11, 11, 29, 11, 29):
+        birth = _birth(
+            original, uid=uid, epoch=4, levels=levels
+        )
+        births[uid].append(birth)
+        if len(births[uid]) % 2 == 0:
+            _sample(
+                original,
+                birth,
+                uid=uid,
+                epoch=4,
+                levels=levels,
+            )
+    saved = deepcopy(original.state_dict())
+
+    expected_births = []
+    expected_samples = []
+    latest = {uid: births[uid][-1] for uid in births}
+    for uid in (29, 11, 29, 11, 11, 29, 29, 11):
+        birth = _birth(
+            original, uid=uid, epoch=4, levels=levels
+        )
+        latest[uid] = birth
+        expected_births.append(birth)
+        expected_samples.append(
+            _sample(
+                original,
+                birth,
+                uid=uid,
+                epoch=4,
+                levels=levels,
+            )
+        )
+
+    restored = S.ActionBallSampler(
+        profiles, seed=7203, sampling_mixture=mixture
+    )
+    restored.load_state_dict(saved)
+    actual_births = []
+    actual_samples = []
+    for uid in (29, 11, 29, 11, 11, 29, 29, 11):
+        birth = _birth(
+            restored, uid=uid, epoch=4, levels=levels
+        )
+        actual_births.append(birth)
+        actual_samples.append(
+            _sample(
+                restored,
+                birth,
+                uid=uid,
+                epoch=4,
+                levels=levels,
+            )
+        )
+    assert actual_births == expected_births
+    assert actual_samples == expected_samples
+    assert restored.state_dict() == original.state_dict()
+
+    mixed = S.ActionBallSampler(
+        profiles, seed=7204, sampling_mixture=mixture
+    )
+    clean = S.ActionBallSampler(
+        profiles, seed=7204, sampling_mixture=mixture
+    )
+    for _ in range(37):
+        _birth(mixed, uid=11, levels=levels)
+    assert [
+        _birth(mixed, uid=29, levels=levels) for _ in range(12)
+    ] == [
+        _birth(clean, uid=29, levels=levels) for _ in range(12)
+    ]
+
+
+def test_birth_mixture_compaction_keeps_absolute_cursor_and_replays_suffix():
+    mixture = S.SamplingMixture()
+    levels = _levels(**{name: 1.0 for name in S.ARM_KEYS})
+    sampler = S.ActionBallSampler(
+        [_profile()], seed=7208, sampling_mixture=mixture
+    )
+    births = []
+    for _ in range(8):
+        birth = _birth(sampler, levels=levels)
+        births.append(birth)
+        _sample(sampler, birth, levels=levels)
+    sampler.compact_retired_prefix(
+        [
+            S.SamplerRetirePrefixBarrier(
+                action_uid=101,
+                retire_birth_through_inclusive=2,
+                retire_sample_through_inclusive=2,
+                expected_birth_highwater=(
+                    sampler.birth_highwater_for(101)
+                ),
+                expected_sample_highwater=(
+                    sampler.sample_highwater_for(101)
+                ),
+                expected_assignment_head_sha256=(
+                    sampler.assignment_head_for(101)
+                ),
+            )
+        ]
+    )
+    saved = deepcopy(sampler.state_dict())
+    restored = S.ActionBallSampler(
+        [_profile()], seed=7208, sampling_mixture=mixture
+    )
+    restored.load_state_dict(saved)
+    assert restored.state_dict() == saved
+    assert restored.retired_prefix_for(101) == (3, 3)
+    for birth in births[3:]:
+        restored.verify_birth_sampling_membership(birth)
+    expected = [_birth(sampler, levels=levels) for _ in range(7)]
+    actual = [_birth(restored, levels=levels) for _ in range(7)]
+    assert actual == expected
+
+
+def test_birth_mixture_tamper_and_zero_frontier_rollback_are_atomic():
+    mixture = S.SamplingMixture()
+    levels = _levels(**{name: 1.0 for name in S.ARM_KEYS})
+    sampler = S.ActionBallSampler(
+        [_profile()], seed=7205, sampling_mixture=mixture
+    )
+    for _ in range(5):
+        _birth(sampler, levels=levels)
+    before = deepcopy(sampler.state_dict())
+    tampered = deepcopy(before)
+    tampered["issued_births"]["101"][3][
+        "sampling_stratum"
+    ] = "center"
+    payload = {
+        key: value
+        for key, value in tampered.items()
+        if key != "integrity_sha256"
+    }
+    tampered["integrity_sha256"] = _integrity(payload)
+    with pytest.raises(ValueError, match="sampling plan mismatch"):
+        sampler.load_state_dict(tampered)
+    assert sampler.state_dict() == before
+
+    zero_spawn = _profile(
+        base_spawn_std_initial_m=(0.0, 0.0, 0.0),
+        base_spawn_std_max_m=(0.0, 0.0, 0.0),
+    )
+    blocked = S.ActionBallSampler(
+        [zero_spawn], seed=7206, sampling_mixture=mixture
+    )
+    for _ in range(3):
+        _birth(blocked, levels=levels)
+    blocked_before = deepcopy(blocked.state_dict())
+    with pytest.raises(ValueError, match="no distinct base-birth arm"):
+        _birth(blocked, levels=levels)
+    assert blocked.state_dict() == blocked_before
+
+
+def test_legacy_birth_and_sample_identity_shapes_remain_mixture_free():
+    sampler = S.ActionBallSampler([_profile()], seed=7207)
+    levels = _levels(base_spawn=0.6, position=0.4)
+    birth = _birth(sampler, levels=levels)
+    sample = _sample(sampler, birth, levels=levels)
+    assert set(birth.to_state_dict()) == set(S._BIRTH_STATE_KEYS)
+    assert "sampling" not in birth.to_receipt()
+    identity = sample.to_identity_receipt()
+    assert set(identity) == {"sample_id", *S._SAMPLE_IDENTITY_KEYS}
+    assert "birth_index" not in identity
+    assert "birth_sampling_stratum" not in identity
+    sampler.assert_issued_birth(birth.to_identity_receipt())
+    sampler.assert_issued_sample(identity)
 
 
 def test_contact_position_is_relative_to_goal_base_not_birth_spawn():
@@ -1491,4 +2444,194 @@ def test_levels_and_requests_reject_nan_unknown_and_zero_uid():
             action_uid=101,
             domain_epoch=-1,
             levels=_levels(),
+        )
+
+
+def _frozen_proposal(
+    index,
+    *,
+    seed=7001,
+    selected_arm="contact_y_upper",
+    levels=None,
+):
+    mixture = S.SamplingMixture()
+    stratum = mixture.stratum_for(index)
+    return S.sample_frozen_evaluation_proposal(
+        _profile(),
+        evaluation_seed=seed,
+        external_sample_index=index,
+        external_birth_index=index,
+        domain_epoch=9,
+        domain_levels=(
+            _levels(
+                position=1.0,
+                speed=1.0,
+                time_to_contact=1.0,
+                base_spawn=1.0,
+            )
+            if levels is None
+            else levels
+        ),
+        rho=0.6,
+        sampling_stratum=stratum,
+        selected_arm=(
+            selected_arm if stratum == "frontier" else None
+        ),
+        base_yaw_rad=0.17,
+        policy_dt_s=0.02,
+    )
+
+
+def test_frozen_evaluation_sampler_is_random_access_and_training_isolated():
+    live = S.ActionBallSampler(
+        (_profile(),),
+        seed=99,
+        sampling_mixture=S.SamplingMixture(),
+        contact_time_step_s=0.02,
+    )
+    before = deepcopy(live.state_dict())
+    first = _frozen_proposal(8, seed=8008)
+    second = _frozen_proposal(8, seed=8008)
+
+    assert first == second
+    assert live.state_dict() == before
+    assert first.external_sample_index == 8
+    assert first.external_birth_index == 8
+    assert first.birth.draw_start == 0
+    assert first.birth.draw_end == S.DRAWS_PER_BIRTH
+    assert first.sample.draw_start == S.DRAWS_PER_BIRTH
+    assert first.sample.draw_end == (
+        S.DRAWS_PER_BIRTH + S.DRAWS_PER_SAMPLE
+    )
+    assert first.sample.birth_id == first.birth.birth_id
+    first.verify()
+    assert (
+        first.proposal_sampler_contract_sha256
+        == S.FROZEN_EVALUATION_PROPOSAL_SAMPLER_CONTRACT_SHA256
+        == S.frozen_evaluation_proposal_sampler_contract()["sha256"]
+    )
+    assert _frozen_proposal(8, seed=8009) != first
+    assert _frozen_proposal(13, seed=8008) != first
+
+
+def test_frozen_evaluation_exact_quota_and_selected_frontier_arm():
+    rows = [
+        _frozen_proposal(index, seed=9000 + index)
+        for index in range(5)
+    ]
+    assert [row.sampling_stratum for row in rows].count("center") == 1
+    assert [row.sampling_stratum for row in rows].count("interior") == 3
+    assert [row.sampling_stratum for row in rows].count("frontier") == 1
+    frontier = next(
+        row for row in rows if row.sampling_stratum == "frontier"
+    )
+    assert frontier.selected_arm == "contact_y_upper"
+    assert frontier.sample.sampling_stratum == "frontier"
+    assert frontier.sample.frontier_arm == "contact_y_upper"
+    assert (
+        frontier.sample.sampling_levels.contact_y_upper
+        == frontier.domain_levels.contact_y_upper
+    )
+
+
+def test_frozen_evaluation_base_frontier_is_owned_by_birth_only():
+    row = _frozen_proposal(
+        3,
+        seed=9191,
+        selected_arm="base_spawn_y_upper",
+    )
+    assert row.sampling_stratum == "frontier"
+    assert row.birth.sampling_stratum == "frontier"
+    assert row.birth.frontier_arm == "base_spawn_y_upper"
+    assert (
+        row.birth.sampling_levels.base_spawn_y_upper
+        == row.domain_levels.base_spawn_y_upper
+    )
+    assert row.sample.frontier_arm is None
+    assert (
+        row.sample.sampling_levels.base_spawn_y_upper == 0.0
+    )
+    row.verify()
+
+
+def test_frozen_evaluation_all_32_frontier_arms_change_one_arm_only():
+    profile = _profile(mobility_mode="move")
+    levels = S.DomainLevels(
+        **{arm: 1.0 for arm in S.ARM_KEYS}
+    )
+    base_arms = {
+        "base_spawn_x_lower",
+        "base_spawn_x_upper",
+        "base_spawn_y_lower",
+        "base_spawn_y_upper",
+    }
+    for ordinal, selected_arm in enumerate(S.ARM_KEYS):
+        row = S.sample_frozen_evaluation_proposal(
+            profile,
+            evaluation_seed=12000 + ordinal,
+            external_sample_index=3,
+            external_birth_index=3,
+            domain_epoch=11,
+            domain_levels=levels,
+            rho=0.6,
+            sampling_stratum="frontier",
+            selected_arm=selected_arm,
+            base_yaw_rad=0.0,
+            policy_dt_s=0.02,
+        )
+        selected_is_birth = selected_arm in base_arms
+        assert (
+            row.birth_component_stratum,
+            row.ball_task_component_stratum,
+        ) == (
+            ("frontier", "center")
+            if selected_is_birth
+            else ("center", "frontier")
+        )
+        for arm in S.ARM_KEYS:
+            birth_level = getattr(row.birth.sampling_levels, arm)
+            swing_level = getattr(row.sample.sampling_levels, arm)
+            expected = 1.0 if arm == selected_arm else 0.0
+            assert birth_level + swing_level == expected
+            if arm in base_arms:
+                assert swing_level == 0.0
+            else:
+                assert birth_level == 0.0
+        row.verify()
+
+
+def test_frozen_evaluation_refuses_schedule_and_receipt_drift():
+    with pytest.raises(ValueError, match="allocation schedule"):
+        S.sample_frozen_evaluation_proposal(
+            _profile(),
+            evaluation_seed=1,
+            external_sample_index=3,
+            external_birth_index=3,
+            domain_epoch=0,
+            domain_levels=_levels(position=1.0),
+            rho=0.6,
+            sampling_stratum="interior",
+            selected_arm=None,
+            base_yaw_rad=0.0,
+            policy_dt_s=0.02,
+        )
+    row = _frozen_proposal(3)
+    with pytest.raises(ValueError, match="receipt SHA"):
+        replace(
+            row,
+            proposal_receipt_sha256="0" * 64,
+        ).verify()
+    with pytest.raises(ValueError, match="policy_dt_s"):
+        S.sample_frozen_evaluation_proposal(
+            _profile(),
+            evaluation_seed=1,
+            external_sample_index=1,
+            external_birth_index=1,
+            domain_epoch=0,
+            domain_levels=_levels(position=1.0),
+            rho=0.6,
+            sampling_stratum="center",
+            selected_arm=None,
+            base_yaw_rad=0.0,
+            policy_dt_s=0.0,
         )
