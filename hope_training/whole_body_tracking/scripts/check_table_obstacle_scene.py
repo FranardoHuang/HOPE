@@ -69,6 +69,8 @@ FRESH_N5_ACTION_IDS = (
 )
 FRESH_N5_FORBIDDEN_ACTION_IDS = frozenset({"fh_loop", "fh_block_syn"})
 FORMAL_RECEIPT_CLASS = "isaac_action_ball_table_filtered_smoke_v2"
+NOMINAL_HOLD_ARTIFACT_KIND = "agibot_a3_action_dynamic_ready_candidate_v1"
+NOMINAL_HOLD_RECEIPT_KIND = "isaac_action_ball_nominal_hold_v1"
 FORMAL_PRODUCER_REPO_PATH = (
     "hope_training/whole_body_tracking/scripts/check_table_obstacle_scene.py"
 )
@@ -148,6 +150,22 @@ class _FormalInputs:
     racket_geometry_contract: Mapping[str, Any]
     motions: tuple[_MotionInput, ...]
     action_set_contract: Mapping[str, Any]
+
+
+@dataclass(frozen=True)
+class _NominalHoldInput:
+    artifact_path: Path
+    artifact_sha256: str
+    document: Mapping[str, Any]
+    action_id: str
+    joint_names: tuple[str, ...]
+    motion_path: Path
+    motion_sha256: str
+    physical_root_pos: tuple[float, ...]
+    physical_root_quat: tuple[float, ...]
+    physical_joint_pos: tuple[float, ...]
+    hold_qdes: tuple[float, ...]
+    expected_plant: Mapping[str, Any]
 
 
 @dataclass(frozen=True)
@@ -247,6 +265,16 @@ def _parse(argv=None):
         default=None,
         help="formal mode: exclusively publish an exact PASS receipt at this repository path",
     )
+    ap.add_argument("--nominal-hold", default=None, metavar="DYNAMIC_READY_JSON",
+                    help="run one A3 dynamic-ready hold diagnostic")
+    ap.add_argument("--nominal-hold-sha256", default=None)
+    ap.add_argument("--nominal-hold-receipt-out", default=None)
+    ap.add_argument(
+        "--duration-s", type=float, default=1.2,
+        help="nominal-hold policy-step horizon in seconds (default: 1.2)",
+    )
+    ap.add_argument("--screenshot-dir", default=None,
+                    help="fresh nominal-hold ready/step1/step10/final screenshot directory")
     return ap.parse_args(argv)
 
 
@@ -431,6 +459,140 @@ def _read_snapshot(
         device=int(descriptor_stat.st_dev),
         inode=int(descriptor_stat.st_ino),
         size=int(descriptor_stat.st_size),
+    )
+
+
+def _finite_tuple(value, size: int, label: str) -> tuple[float, ...]:
+    if not isinstance(value, list) or len(value) != size:
+        raise TableSmokeReceiptError(f"{label} must have {size} numbers")
+    result = tuple(float(item) for item in value)
+    if any(
+        isinstance(item, bool)
+        or type(item) not in (int, float)
+        or not math.isfinite(number)
+        for item, number in zip(value, result)
+    ):
+        raise TableSmokeReceiptError(f"{label} must be finite")
+    return result
+
+
+def _pinned_external_file(
+    value: object, expected_sha256: object, label: str
+) -> tuple[Path, str]:
+    path = _assert_plain_components(Path(str(value)), label)
+    payload = path.read_bytes()
+    digest = hashlib.sha256(payload).hexdigest()
+    if digest != _require_sha256(expected_sha256, f"{label} SHA-256"):
+        raise TableSmokeReceiptError(f"{label} SHA-256 mismatch")
+    return path, digest
+
+
+def _load_nominal_hold_input(
+    artifact_value: str | Path, *, expected_sha256: str
+) -> _NominalHoldInput:
+    artifact_path, artifact_sha = _pinned_external_file(
+        artifact_value, expected_sha256, "dynamic-ready artifact"
+    )
+    payload = artifact_path.read_bytes()
+    document = _strict_json_object(payload, "dynamic-ready artifact")
+    if document.get("kind") != NOMINAL_HOLD_ARTIFACT_KIND:
+        raise TableSmokeReceiptError("wrong dynamic-ready artifact kind")
+    unsigned = dict(document)
+    content_sha = _require_sha256(
+        unsigned.pop("content_sha256", None), "artifact content SHA-256"
+    )
+    if hashlib.sha256(_canonical_json_bytes(unsigned)).hexdigest() != content_sha:
+        raise TableSmokeReceiptError("dynamic-ready content SHA-256 mismatch")
+    try:
+        robot = document["robot"]
+        physical = document["physical_ready"]
+        runtime = document["runtime_plant"]
+        hold = document["hold_candidate"]
+        motion = document["sources"]["stable_motion"]
+        action_id = document["action_id"]
+    except (KeyError, TypeError) as exc:
+        raise TableSmokeReceiptError("dynamic-ready core fields missing") from exc
+    names = tuple(robot["joint_names"])
+    if (
+        document.get("schema_version") != 1
+        or robot.get("family") != "AgiBot A3"
+        or len(names) != 31
+        or len(set(names)) != 31
+        or not isinstance(action_id, str)
+        or not action_id
+    ):
+        raise TableSmokeReceiptError("dynamic-ready is not exact A3 N=1")
+    motion_path, motion_sha = _pinned_external_file(
+        motion["path"], motion["sha256"], "stable motion"
+    )
+    vectors = {
+        out: _finite_tuple(runtime[source], 31, source)
+        for out, source in (
+            ("joint_stiffness", "joint_stiffness"),
+            ("joint_damping", "joint_damping"),
+            ("joint_effort_limits", "joint_effort_limits"),
+            ("default_joint_pos", "default_joint_pos_rad"),
+            ("action_scale", "action_scale_rad"),
+        )
+    }
+    limits = tuple(
+        _finite_tuple(pair, 2, "q_des limit")
+        for pair in runtime["qdes_joint_pos_limits"]
+    )
+    if len(limits) != 31:
+        raise TableSmokeReceiptError("q_des limits must be [31,2]")
+    expected_plant = {
+        "joint_names": names,
+        **vectors,
+        "qdes_joint_pos_limits": limits,
+        "finite_projection_soft_envelope_inset_fraction": float(
+            runtime["finite_projection_soft_envelope_inset_fraction"]
+        ),
+        "physics_step_dt_s": float(runtime["physics_step_dt_s"]),
+        "policy_step_dt_s": float(runtime["policy_step_dt_s"]),
+        "control_decimation": int(runtime["control_decimation"]),
+    }
+    root_quat = _finite_tuple(
+        physical["root_quat_wxyz"], 4, "root quaternion"
+    )
+    hold_qdes = _finite_tuple(
+        hold["hold_qdes_joint_pos_rad"], 31, "hold q_des"
+    )
+    inset = expected_plant[
+        "finite_projection_soft_envelope_inset_fraction"
+    ]
+    if (
+        not math.isclose(
+            sum(value * value for value in root_quat),
+            1.0,
+            rel_tol=0.0,
+            abs_tol=2.0e-6,
+        )
+        or any(
+            not lo + inset * (hi - lo) < qdes < hi - inset * (hi - lo)
+            for qdes, (lo, hi) in zip(hold_qdes, limits)
+        )
+    ):
+        raise TableSmokeReceiptError(
+            "dynamic-ready quaternion/q_des envelope is invalid"
+        )
+    return _NominalHoldInput(
+        artifact_path=artifact_path,
+        artifact_sha256=artifact_sha,
+        document=document,
+        action_id=action_id,
+        joint_names=names,
+        motion_path=motion_path,
+        motion_sha256=motion_sha,
+        physical_root_pos=_finite_tuple(
+            physical["root_pos_w_m"], 3, "root position"
+        ),
+        physical_root_quat=root_quat,
+        physical_joint_pos=_finite_tuple(
+            physical["joint_pos_rad"], 31, "ready q"
+        ),
+        hold_qdes=hold_qdes,
+        expected_plant=expected_plant,
     )
 
 
@@ -997,6 +1159,11 @@ def _validate_cli_mode(args) -> None:
             f"{ACTION_BALL_TASK_ID!r}"
         )
     formal = args.receipt_out is not None
+    nominal_hold = args.nominal_hold is not None
+    if formal and nominal_hold:
+        raise TableSmokeReceiptError(
+            "--receipt-out and --nominal-hold are mutually exclusive modes"
+        )
     if formal:
         failures = []
         if args.task != ACTION_BALL_TASK_ID:
@@ -1027,9 +1194,47 @@ def _validate_cli_mode(args) -> None:
             failures.append("--table-obstacle must be on")
         if args.motion_file is not None:
             failures.append("--motion-file is manifest-owned in formal mode")
+        if args.nominal_hold_sha256 is not None:
+            failures.append("--nominal-hold-sha256 is forbidden")
+        if args.nominal_hold_receipt_out is not None:
+            failures.append("--nominal-hold-receipt-out is forbidden")
+        if args.screenshot_dir is not None:
+            failures.append("--screenshot-dir is forbidden")
         if failures:
             raise TableSmokeReceiptError(
                 "invalid formal receipt mode: " + "; ".join(failures)
+            )
+    elif nominal_hold:
+        formal_args = (
+            args.manifest,
+            args.action_set_profile,
+            args.profile_pins,
+            args.profile_pins_sha256,
+        )
+        invalid_shape = (
+            args.task != ACTION_BALL_TASK_ID
+            or args.num_envs != 1
+            or args.device != "cuda:0"
+            or args.cfg_only
+            or args.bench
+            or args.contact_smoke
+            or args.table_obstacle != "on"
+            or args.motion_file is not None
+            or any(value is not None for value in formal_args)
+        )
+        if invalid_shape:
+            raise TableSmokeReceiptError(
+                "nominal hold requires the cuda:0 one-env ActionBall table scene "
+                "without formal, cfg, bench, contact-smoke or motion overrides"
+            )
+        if (
+            not args.nominal_hold_sha256
+            or _SHA256_RE.fullmatch(str(args.nominal_hold_sha256)) is None
+            or not args.nominal_hold_receipt_out
+            or not 0.0 < float(args.duration_s) <= 30.0
+        ):
+            raise TableSmokeReceiptError(
+                "nominal hold requires artifact SHA/output and a finite duration"
             )
     elif any(
         value is not None
@@ -1044,6 +1249,15 @@ def _validate_cli_mode(args) -> None:
             "--action-set-profile/--manifest/--profile-pins are accepted only together with "
             "--receipt-out"
         )
+    elif (
+        args.nominal_hold_sha256 is not None
+        or args.nominal_hold_receipt_out is not None
+        or args.screenshot_dir is not None
+    ):
+        raise TableSmokeReceiptError(
+            "--nominal-hold-sha256/--nominal-hold-receipt-out/"
+            "--screenshot-dir require --nominal-hold"
+        )
 
 
 def _initialize_isaac_runtime(args) -> None:
@@ -1054,7 +1268,10 @@ def _initialize_isaac_runtime(args) -> None:
 
     from isaaclab.app import AppLauncher
 
-    _app = AppLauncher({"headless": True, "device": args.device}).app
+    launcher_args = {"headless": True, "device": args.device}
+    if args.screenshot_dir is not None:
+        launcher_args["enable_cameras"] = True
+    _app = AppLauncher(launcher_args).app
     import gymnasium as gym_module
     import torch as torch_module
     import isaaclab_tasks  # noqa: F401
@@ -1851,6 +2068,65 @@ def _exclusive_publish_receipt(
             os.close(descriptor)
         if parent_descriptor >= 0:
             os.close(parent_descriptor)
+
+
+def _fresh_nominal_path(value: str | Path, label: str) -> Path:
+    path = Path(value).expanduser().absolute()
+    parent = _assert_plain_components(path.parent, f"{label} parent")
+    path = parent / path.name
+    if not path.name or path.exists() or path.is_symlink():
+        raise FileExistsError(f"refusing to reuse {label} {path}")
+    return path
+
+
+def _exclusive_write_bytes(path: Path, payload: bytes) -> str:
+    descriptor = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL | getattr(os, "O_NOFOLLOW", 0),
+        0o444,
+    )
+    with os.fdopen(descriptor, "wb") as stream:
+        stream.write(payload)
+        stream.flush()
+        os.fsync(stream.fileno())
+    return hashlib.sha256(payload).hexdigest()
+
+
+def _nominal_hold_render_png(env) -> bytes:
+    try:
+        frame = env.render()
+        if torch.is_tensor(frame):
+            frame = frame.detach().cpu().numpy()
+        import imageio.v3 as imageio
+
+        return bytes(imageio.imwrite("<bytes>", frame, extension=".png"))
+    except Exception as exc:
+        raise TableSmokeReceiptError(
+            f"cannot capture Isaac rgb_array screenshot: {exc}"
+        ) from exc
+
+
+def _publish_nominal_hold_screenshot(
+    directory: Path,
+    filename: str,
+    label: str,
+    policy_step: int,
+    payload: bytes,
+) -> dict[str, Any]:
+    path = directory / filename
+    return {
+        "label": label,
+        "policy_step": policy_step,
+        "path": str(path),
+        "sha256": _exclusive_write_bytes(path, payload),
+    }
+
+
+def _exclusive_publish_nominal_hold_receipt(
+    output: Path, receipt: Mapping[str, Any]
+) -> str:
+    return _exclusive_write_bytes(output, _canonical_json_bytes(receipt))
+
 
 TOL = 1e-6
 _results: dict = {}
@@ -2656,6 +2932,254 @@ def _raw_action_for_joint_target(action, target):
     return raw
 
 
+def _assert_nominal_hold_motion(unwrapped, inputs: _NominalHoldInput) -> None:
+    command = unwrapped.command_manager.get_term("motion")
+    motion = command.motion
+    if (
+        tuple(Path(value).resolve() for value in command._motion_files)
+        != (inputs.motion_path,)
+        or tuple(command._motion_file_sha256) != (inputs.motion_sha256,)
+        or int(motion.num_segments) != 1
+        or int(motion.joint_pos.shape[1]) != 31
+    ):
+        _fail("live MotionCommand does not bind the exact dynamic-ready motion")
+    expected_q = torch.tensor(
+        inputs.physical_joint_pos,
+        dtype=motion.joint_pos.dtype,
+        device=motion.joint_pos.device,
+    )
+    if not bool(torch.allclose(motion.joint_pos[0], expected_q, rtol=0.0, atol=1e-6)):
+        _fail("dynamic-ready physical q is not motion frame zero")
+
+
+def _hold_root(robot) -> tuple[float, float]:
+    pos = robot.data.root_pos_w[0]
+    quat = robot.data.root_quat_w[0]
+    if not bool(torch.all(torch.isfinite(torch.cat((pos, quat)))).item()):
+        return float("nan"), float("nan")
+    quat = quat / torch.linalg.vector_norm(quat).clamp(min=1e-12)
+    upright = torch.clamp(
+        1.0 - 2.0 * (quat[1].square() + quat[2].square()), -1.0, 1.0
+    )
+    return float(pos[2].item()), float(torch.acos(upright).item())
+
+
+def _hold_feet(unwrapped) -> float | None:
+    try:
+        sensor = unwrapped.scene.sensors["contact_forces"]
+        body_ids, _names = sensor.find_bodies([".*ankle_roll.*"])
+        ids = [int(value) for value in body_ids]
+        if len(ids) == 2:
+            forces = torch.linalg.vector_norm(
+                sensor.data.net_forces_w[0, ids, :], dim=-1
+            )
+            return float((forces > 10.0).to(torch.float32).mean().item())
+    except Exception:
+        pass
+    return None
+
+
+def nominal_hold_probe(
+    env,
+    env_cfg,
+    inputs: _NominalHoldInput,
+    *,
+    duration_s: float,
+    screenshot_dir: Path | None = None,
+) -> dict[str, Any]:
+    unwrapped = env.unwrapped
+    if int(unwrapped.num_envs) != 1:
+        _fail("nominal hold requires exactly one environment")
+    _assert_nominal_hold_motion(unwrapped, inputs)
+    from whole_body_tracking.utils.training_contract import (
+        runtime_execution_facts,
+    )
+
+    live_plant = runtime_execution_facts(unwrapped, None)
+    mismatch = []
+    for key, expected in inputs.expected_plant.items():
+        actual = live_plant.get(key)
+        if key == "joint_names":
+            matched = tuple(actual or ()) == tuple(expected)
+        elif key == "control_decimation":
+            matched = actual == expected
+        else:
+            try:
+                got = torch.as_tensor(actual, dtype=torch.float64)
+                want = torch.as_tensor(expected, dtype=torch.float64)
+                matched = got.shape == want.shape and bool(
+                    torch.allclose(got, want, rtol=0.0, atol=1.0e-6)
+                )
+            except Exception:
+                matched = False
+        if not matched:
+            mismatch.append(key)
+    if mismatch:
+        _fail("dynamic-ready/live plant mismatch: " + ", ".join(mismatch))
+
+    active = tuple(unwrapped.termination_manager.active_terms)
+    safety = (
+        "robot_hit_table",
+        "base_fell_tilt",
+        "base_too_low",
+        "joint_qdes_forbidden",
+        "joint_actual_forbidden",
+    )
+    reference_terms = ("anchor_pos", "anchor_ori", "ee_body_pos")
+    if any(name not in active for name in safety) or any(
+        name in active for name in reference_terms
+    ):
+        _fail("nominal-hold termination composition lost safety or kept reference envelopes")
+
+    robot = unwrapped.scene["robot"]
+    action = unwrapped.action_manager.get_term("joint_pos")
+    motion_command = unwrapped.command_manager.get_term("motion")
+    env_ids = torch.tensor([0], dtype=torch.long, device=unwrapped.device)
+    env.reset()
+    motion_command.clip_id[env_ids] = 0
+    motion_command.time_steps[env_ids] = 0
+    motion_command.time_steps_f[env_ids] = 0.0
+    motion_command.speed_scale[env_ids] = 1.0
+    root = robot.data.default_root_state[env_ids].detach().clone()
+    root[:, :3] = (
+        torch.tensor(inputs.physical_root_pos, device=root.device).view(1, 3)
+        + unwrapped.scene.env_origins[env_ids]
+    )
+    root[:, 3:7] = torch.tensor(
+        inputs.physical_root_quat, device=root.device
+    ).view(1, 4)
+    root[:, 7:13] = 0.0
+    ready_q = torch.tensor(
+        inputs.physical_joint_pos,
+        device=unwrapped.device,
+        dtype=robot.data.joint_pos.dtype,
+    ).view(1, 31)
+    robot.write_root_state_to_sim(root, env_ids=env_ids)
+    robot.write_joint_state_to_sim(
+        ready_q, torch.zeros_like(ready_q), env_ids=env_ids
+    )
+    unwrapped.scene.write_data_to_sim()
+    sim = getattr(unwrapped, "sim", None)
+    if sim is not None and callable(getattr(sim, "forward", None)):
+        sim.forward()
+    scene = getattr(unwrapped, "scene", None)
+    if scene is not None and callable(getattr(scene, "update", None)):
+        scene.update(0.0)
+    hold_qdes = torch.tensor(
+        inputs.hold_qdes, device=unwrapped.device, dtype=ready_q.dtype
+    ).view(1, 31)
+    raw_action = _raw_action_for_joint_target(action, hold_qdes)
+
+    if screenshot_dir is not None:
+        os.mkdir(screenshot_dir, 0o755)
+    screenshots = []
+    last_png = None
+
+    def save_frame(label: str, step: int, payload: bytes) -> None:
+        assert screenshot_dir is not None
+        screenshots.append(
+            _publish_nominal_hold_screenshot(
+                screenshot_dir,
+                f"{len(screenshots):03d}_{label}_{step:04d}.png",
+                label,
+                step,
+                payload,
+            )
+        )
+
+    if screenshot_dir is not None:
+        last_png = _nominal_hold_render_png(env)
+        save_frame("physical_ready_after_reset_write", 0, last_png)
+
+    policy_dt = float(live_plant["policy_step_dt_s"])
+    requested_steps = max(1, math.ceil(duration_s / policy_dt - 1e-12))
+    root_samples = [_hold_root(robot)]
+    foot_samples = []
+    terminal_reasons = []
+    terminated_value = False
+    truncated_value = False
+    completed = 0
+    for step in range(1, requested_steps + 1):
+        _obs, _reward, terminated, truncated, _extras = env.step(raw_action)
+        completed = step
+        terminated_value = bool(terminated[0].item())
+        truncated_value = bool(truncated[0].item())
+        terminal_reasons = [
+            name
+            for name in active
+            if bool(_term_mask(unwrapped, name)[0].item())
+        ]
+        if terminated_value or truncated_value or terminal_reasons:
+            if screenshot_dir is not None and last_png is not None:
+                save_frame("preterminal", step - 1, last_png)
+            break
+        root_samples.append(_hold_root(robot))
+        foot_samples.append(_hold_feet(unwrapped))
+        if screenshot_dir is not None:
+            last_png = _nominal_hold_render_png(env)
+            if step in (1, 10):
+                save_frame(f"after_step_{step}", step, last_png)
+
+    if (
+        screenshot_dir is not None
+        and completed == requested_steps
+        and not terminal_reasons
+        and last_png is not None
+    ):
+        save_frame("final", completed, last_png)
+
+    finite_roots = all(
+        math.isfinite(z) and math.isfinite(tilt) for z, tilt in root_samples
+    )
+    known_feet = [value for value in foot_samples if value is not None]
+    both_fraction = (
+        None
+        if not known_feet
+        else sum(value >= 1.0 for value in known_feet) / len(known_feet)
+    )
+    passed = (
+        completed == requested_steps
+        and not terminated_value
+        and not truncated_value
+        and not terminal_reasons
+        and finite_roots
+    )
+    receipt = {
+        "schema_version": 1,
+        "kind": NOMINAL_HOLD_RECEIPT_KIND,
+        "verdict": "PASS" if passed else "FAIL",
+        "action_id": inputs.action_id,
+        "artifact": {
+            "path": str(inputs.artifact_path),
+            "sha256": inputs.artifact_sha256,
+            "content_sha256": inputs.document["content_sha256"],
+        },
+        "motion_sha256": inputs.motion_sha256,
+        "plant_contract_match": True,
+        "active_terminations": list(active),
+        "requested_duration_s": duration_s,
+        "completed_duration_s": completed * policy_dt,
+        "completed_policy_steps": completed,
+        "completed_physics_steps": completed * int(env_cfg.decimation),
+        "terminal_reasons": terminal_reasons,
+        "generic_terminated": terminated_value,
+        "generic_truncated": truncated_value,
+        "minimum_root_z_m": (
+            min(z for z, _tilt in root_samples) if finite_roots else None
+        ),
+        "maximum_root_tilt_rad": (
+            max(tilt for _z, tilt in root_samples) if finite_roots else None
+        ),
+        "both_feet_contact_fraction": both_fraction,
+        "screenshots": screenshots,
+    }
+    receipt["content_sha256"] = hashlib.sha256(
+        _canonical_json_bytes(receipt)
+    ).hexdigest()
+    _results["nominal_hold"] = receipt
+    return receipt
+
+
 def sweep_formal_actions(
     env,
     env_cfg,
@@ -2913,8 +3437,46 @@ def _validate_manifest_with_runtime_loader(inputs: _FormalInputs) -> None:
             )
 
 
-def _cfg(formal_inputs: _FormalInputs | None = None):
+def _configure_nominal_hold_cfg(
+    cfg,
+    inputs: _NominalHoldInput,
+    *,
+    duration_s: float,
+) -> None:
+    """Make one deterministic hold scene without weakening physical safety."""
+
+    cfg.commands.motion.motion_file = str(inputs.motion_path)
+    cfg.commands.motion.canonical_ready_mode = False
+    cfg.commands.motion.balanced_clip_sampling = False
+    rt = cfg.commands.racket_target
+    rt.target_mode = "reference_perturbed"
+    rt.virtual_ball = False
+    for name in ("anchor_pos", "anchor_ori", "ee_body_pos"):
+        setattr(cfg.terminations, name, None)
+    # Preserve the startup nominal-q capture, but make it deterministic.
+    events = cfg.events
+    events.add_joint_default_pos.params["pos_distribution_params"] = (0.0, 0.0)
+    for name in (
+        "physics_material",
+        "base_com",
+        "randomize_link_mass",
+        "randomize_pd_gains",
+    ):
+        setattr(events, name, None)
+    cfg.episode_length_s = max(
+        5.0, float(duration_s) + 2.0 * float(cfg.sim.dt) * int(cfg.decimation)
+    )
+
+
+def _cfg(
+    formal_inputs: _FormalInputs | None = None,
+    nominal_hold_inputs: _NominalHoldInput | None = None,
+):
     cfg = parse_env_cfg(ARGS.task, device=ARGS.device, num_envs=ARGS.num_envs)
+    if formal_inputs is not None and nominal_hold_inputs is not None:
+        raise TableSmokeReceiptError(
+            "formal table smoke and nominal hold cannot share one cfg"
+        )
     if formal_inputs is not None:
         terrain = getattr(getattr(cfg, "scene", None), "terrain", None)
         if (
@@ -2958,6 +3520,12 @@ def _cfg(formal_inputs: _FormalInputs | None = None):
             max(row.reference_t_cycle_s for row in formal_inputs.motions)
             + 5.0,
         )
+    elif nominal_hold_inputs is not None:
+        _configure_nominal_hold_cfg(
+            cfg,
+            nominal_hold_inputs,
+            duration_s=float(ARGS.duration_s),
+        )
     elif ARGS.motion_file:
         cfg.commands.motion.motion_file = ARGS.motion_file
     # This script constructs a scene and reads geometry back; it never trains and never reads a
@@ -2987,7 +3555,10 @@ def main():
         _fail(str(exc))
 
     formal_inputs = None
+    nominal_hold_inputs = None
     output_path = None
+    nominal_hold_output_path = None
+    nominal_hold_screenshot_dir = None
     source_commit = None
     runtime_source_baseline = None
     repo_root = _repository_root_from_producer()
@@ -3008,6 +3579,29 @@ def main():
             source_commit = _committed_source_identity(formal_inputs)
         except (TableSmokeReceiptError, FileExistsError) as exc:
             _fail(str(exc))
+    elif ARGS.nominal_hold is not None:
+        try:
+            nominal_hold_inputs = _load_nominal_hold_input(
+                ARGS.nominal_hold,
+                expected_sha256=ARGS.nominal_hold_sha256,
+            )
+            nominal_hold_output_path = _fresh_nominal_path(
+                ARGS.nominal_hold_receipt_out,
+                "nominal-hold receipt",
+            )
+            if ARGS.screenshot_dir is not None:
+                nominal_hold_screenshot_dir = _fresh_nominal_path(
+                    ARGS.screenshot_dir,
+                    "nominal-hold screenshot directory",
+                )
+        except (
+            TableSmokeReceiptError,
+            FileExistsError,
+            KeyError,
+            TypeError,
+            ValueError,
+        ) as exc:
+            _fail(str(exc))
 
     try:
         _initialize_isaac_runtime(ARGS)
@@ -3018,7 +3612,7 @@ def main():
             raise
         _fail(f"cannot initialize exact Isaac runtime: {exc}")
 
-    env_cfg = _cfg(formal_inputs)
+    env_cfg = _cfg(formal_inputs, nominal_hold_inputs)
     if formal_inputs is not None:
         runtime_source_baseline = _assert_runtime_source_closure(
             formal_inputs, str(source_commit)
@@ -3040,13 +3634,46 @@ def main():
     else:
         check_cfg(env_cfg)
     env = None
+    exit_code = 0
     try:
         if not ARGS.cfg_only:
-            env = gym.make(ARGS.task, cfg=env_cfg)
+            if nominal_hold_screenshot_dir is not None:
+                env = gym.make(
+                    ARGS.task, cfg=env_cfg, render_mode="rgb_array"
+                )
+            else:
+                env = gym.make(ARGS.task, cfg=env_cfg)
             env.reset()
             if ARGS.table_obstacle != "off":
                 check_spawned(env, env_cfg)
-            if formal_inputs is not None:
+            if nominal_hold_inputs is not None:
+                receipt = nominal_hold_probe(
+                    env,
+                    env_cfg,
+                    nominal_hold_inputs,
+                    duration_s=float(ARGS.duration_s),
+                    screenshot_dir=nominal_hold_screenshot_dir,
+                )
+                assert nominal_hold_output_path is not None
+                receipt_sha = _exclusive_publish_nominal_hold_receipt(
+                    nominal_hold_output_path, receipt
+                )
+                _results["nominal_hold_receipt"] = {
+                    "path": str(nominal_hold_output_path),
+                    "sha256": receipt_sha,
+                    "content_sha256": receipt["content_sha256"],
+                    "verdict": receipt["verdict"],
+                }
+                print(
+                    "HOPE_ISAAC_NOMINAL_HOLD_RECEIPT="
+                    + json.dumps(
+                        _results["nominal_hold_receipt"],
+                        sort_keys=True,
+                    )
+                )
+                if receipt["verdict"] != "PASS":
+                    exit_code = 2
+            elif formal_inputs is not None:
                 action_rows, action_physics_steps = sweep_formal_n5_actions(
                     env, env_cfg, formal_inputs
                 )
@@ -3174,7 +3801,7 @@ def main():
         if _app is not None:
             _app.close()
     print("HOPE_TABLE_OBSTACLE_CHECK_JSON=" + json.dumps(_results, sort_keys=True))
-    return 0
+    return exit_code
 
 
 if __name__ == "__main__":

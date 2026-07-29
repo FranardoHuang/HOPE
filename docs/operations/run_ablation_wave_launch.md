@@ -146,6 +146,25 @@ actuator order 间 scatter/gather。产物三类 authorization 均为 false。�
 nominal-hold 模式在 `env.reset()` 后截取 ready、step 1、step 10 和 final/pre-terminal，
 并持续送同一 hold qdes 到至少 `t_hit+margin`；截图、actual-hard/table/fall 与 root/foot
 遥测一起判定“出生就怪”还是“出生正常但 plant 随后漂移”。通过前不得把候选接进 trainer。
+每个动作必须使用 fresh no-clobber 输出，且 Pod 的物理 GPU 先用 NVML/owner lock 只读核对：
+
+```bash
+CUDA_VISIBLE_DEVICES=<FREE_PHYSICAL_GPU> \
+/workspace/hope_isaac_venv/bin/python \
+  hope_training/whole_body_tracking/scripts/check_table_obstacle_scene.py \
+  --task HOPE-PingPong-ActionBall-AgibotA3-v0 \
+  --num-envs 1 \
+  --device cuda:0 \
+  --nominal-hold <absolute-dynamic-ready-candidate.json> \
+  --nominal-hold-sha256 <candidate-file-sha256> \
+  --nominal-hold-receipt-out <fresh-receipt.json> \
+  --duration-s <at-least-t_hit-plus-margin> \
+  --screenshot-dir <fresh-frame-directory>
+```
+
+这是 simulator-only diagnostic：它关闭动作参考偏离终止与随机化，但保留
+actual-hard、qdes nonfinite、table 和 fall；任何首个 terminal 立即停止，并把上一安全帧记为
+`preterminal`。该 receipt 与截图不授权训练、部署或真机。
 
 以下性能改动若 Pod focused parity 通过，可直接进入 replacement，不另开学习 A/B：
 

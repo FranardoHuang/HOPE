@@ -47,6 +47,94 @@ def _sha(payload: bytes) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def _nominal_hold_fixture(tmp_path: Path):
+    joint_names = [f"a3_joint_{index:02d}" for index in range(31)]
+    source_rows = {}
+    for key, payload in (
+        ("stable_motion", b"stable-motion-npz-fixture"),
+        ("stable_receipt", b'{"stable":true}'),
+        ("mujoco_model", b"<mujoco model='a3'/>"),
+    ):
+        path = tmp_path / f"{key}.bin"
+        path.write_bytes(payload)
+        source_rows[key] = {
+            "path": str(path.resolve()),
+            "sha256": _sha(payload),
+        }
+    runtime_contract = {
+        "target_mode": "action_ball",
+        "joint_names": joint_names,
+        "joint_stiffness": [100.0] * 31,
+        "joint_damping": [4.0] * 31,
+        "joint_effort_limits": [40.0] * 31,
+        "qdes_joint_pos_limits": [[-1.0, 1.0] for _ in range(31)],
+        "default_joint_pos": [0.0] * 31,
+        "action_scale": [0.25] * 31,
+        "joint_armature": [0.01] * 31,
+        "joint_friction_coefficients": [0.02] * 31,
+        "finite_projection_soft_envelope_inset_fraction": 0.05,
+        "physics_step_dt_s": 0.005,
+        "policy_step_dt_s": 0.02,
+        "control_decimation": 4,
+    }
+    runtime_payload = P._canonical_json_bytes(runtime_contract)
+    runtime_path = tmp_path / "runtime_training_contract.json"
+    runtime_path.write_bytes(runtime_payload)
+    source_rows["runtime_training_contract"] = {
+        "path": str(runtime_path.resolve()),
+        "sha256": _sha(runtime_payload),
+    }
+    document = {
+        "schema_version": 1,
+        "kind": P.NOMINAL_HOLD_ARTIFACT_KIND,
+        "action_id": "bh_block",
+        "robot": {
+            "family": "AgiBot A3",
+            "joint_names": joint_names,
+        },
+        "authorization": {
+            "training_authorized": False,
+            "deployment_authorized": False,
+            "hardware_authorized": False,
+            "isaac_nominal_hold_validated": False,
+        },
+        "sources": source_rows,
+        "physical_ready": {
+            "root_pos_w_m": [0.0, 0.0, 1.0],
+            "root_quat_wxyz": [1.0, 0.0, 0.0, 0.0],
+            "joint_pos_rad": [0.0] * 31,
+            "joint_vel_radps": [0.0] * 31,
+        },
+        "runtime_plant": {
+            "joint_stiffness": [100.0] * 31,
+            "joint_damping": [4.0] * 31,
+            "joint_effort_limits": [40.0] * 31,
+            "joint_armature": [0.01] * 31,
+            "joint_friction_coefficients": [0.02] * 31,
+            "qdes_joint_pos_limits": [[-1.0, 1.0] for _ in range(31)],
+            "finite_projection_soft_envelope_inset_fraction": 0.05,
+            "executed_qdes_lower_rad": [-0.9] * 31,
+            "executed_qdes_upper_rad": [0.9] * 31,
+            "default_joint_pos_rad": [0.0] * 31,
+            "action_scale_rad": [0.25] * 31,
+            "physics_step_dt_s": 0.005,
+            "policy_step_dt_s": 0.02,
+            "control_decimation": 4,
+        },
+        "hold_candidate": {
+            "hold_qdes_joint_pos_rad": [0.0] * 31,
+            "normalized_actor_action": [0.0] * 31,
+        },
+        "required_next_gate": {
+            "kind": P.NOMINAL_HOLD_RECEIPT_KIND,
+        },
+    }
+    document["content_sha256"] = _sha(P._canonical_json_bytes(document))
+    artifact_path = tmp_path / "dynamic_ready.json"
+    artifact_path.write_bytes(P._canonical_json_bytes(document))
+    return artifact_path, document, runtime_contract
+
+
 def _fixture_tree(tmp_path: Path, action_count: int = 5):
     source = (
         tmp_path
@@ -361,6 +449,68 @@ def test_real_task_id_is_default_and_retired_fake_id_is_rejected():
     )
     with pytest.raises(P.TableSmokeReceiptError, match="retired fake task id"):
         P._validate_cli_mode(fake)
+
+
+def test_nominal_hold_cli_is_opt_in_one_env_and_pinned():
+    args = P._parse(
+        [
+            "--num-envs",
+            "1",
+            "--nominal-hold",
+            "/tmp/ready.json",
+            "--nominal-hold-sha256",
+            "1" * 64,
+            "--nominal-hold-receipt-out",
+            "/tmp/hold.json",
+        ]
+    )
+    P._validate_cli_mode(args)
+    with pytest.raises(P.TableSmokeReceiptError, match="requires the cuda:0"):
+        P._validate_cli_mode(
+            P._parse(
+                [
+                    "--num-envs",
+                    "2",
+                    "--nominal-hold",
+                    "/tmp/ready.json",
+                    "--nominal-hold-sha256",
+                    "1" * 64,
+                    "--nominal-hold-receipt-out",
+                    "/tmp/hold.json",
+                ]
+            )
+        )
+
+
+def test_nominal_hold_artifact_pins_a3_motion_and_core_plant(tmp_path):
+    path, document, _contract = _nominal_hold_fixture(tmp_path)
+    loaded = P._load_nominal_hold_input(
+        path, expected_sha256=_sha(path.read_bytes())
+    )
+    assert loaded.action_id == "bh_block"
+    assert loaded.joint_names == tuple(document["robot"]["joint_names"])
+    assert loaded.motion_sha256 == document["sources"]["stable_motion"]["sha256"]
+    assert loaded.expected_plant["control_decimation"] == 4
+
+    document["hold_candidate"]["hold_qdes_joint_pos_rad"][0] = "nan"
+    unsigned = dict(document)
+    unsigned.pop("content_sha256")
+    document["content_sha256"] = _sha(P._canonical_json_bytes(unsigned))
+    path.write_bytes(P._canonical_json_bytes(document))
+    with pytest.raises(P.TableSmokeReceiptError, match="hold q_des"):
+        P._load_nominal_hold_input(
+            path, expected_sha256=_sha(path.read_bytes())
+        )
+
+
+def test_nominal_hold_outputs_are_no_clobber(tmp_path):
+    output = P._fresh_nominal_path(tmp_path / "hold.json", "receipt")
+    P._exclusive_publish_nominal_hold_receipt(
+        output,
+        {"kind": P.NOMINAL_HOLD_RECEIPT_KIND, "verdict": "FAIL"},
+    )
+    with pytest.raises(FileExistsError, match="refusing to reuse"):
+        P._fresh_nominal_path(output, "receipt")
 
 
 def test_formal_cli_has_no_boolean_pass_claims_and_requires_pod_shape():
