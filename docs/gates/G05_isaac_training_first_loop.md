@@ -3450,3 +3450,11 @@ Traceback、checkpoint finite、episode length 非恒 1，并回读 exact Reward
 因 birth/task receipt 调用未传新必填的 broker registry SHA 同因停止；仍未出现
 `Learning iteration`。调用点与 API 已对齐并重新物化 pins/bundle，下一门改为 fresh `_r3`，G05
 仍为 `Partial`。
+
+`_r3` 的 Pod1 反手拉已越过上述 registry 缺口，但在首个 update 前由 receipt
+serialize→deserialize 自检拒绝：已是单位长度的 binary64 四元数被二次归一化后产生约 `1e-16`
+表示差，导致 canonical SHA 不同；Pod2 因该确定性构造失败未启动 trainer。修复只让 unit-input
+canonicalization 幂等，非单位归一化、符号规则和全部物理/安全门不变；核心回归
+`119 passed, 14 skipped`，新 pins 与反手拉/挡 bundle 分别为 `52000401...f465`、
+`baad5b95...acbf` / `0d3c80f4...92ab`。fresh `_r4` 仍须自然完成两次 update、产出 finite
+checkpoint 且无 Python Traceback 才能解锁 canary；当前 G05 仍为 `Partial`。

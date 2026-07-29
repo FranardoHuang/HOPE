@@ -264,3 +264,21 @@ contract 与 effective Reward receipt；随后在首个 true reset 发现 runtim
 `60 passed`。因此 solver pins 再更新为 `26eb1ff2...6804d`、solver profile
 `cfba7f28...9349f`；反手拉/挡 bundle 更新为 `c2399571...05d0` /
 `c53d1669...41a2`。`_r2` 仍是构造失败而非科学结果，下一次使用 fresh `_r3`。
+
+`_r3` 的 Pod1 反手拉再次通过 scene、runtime bind、182D observation、hard contract、effective
+Reward 和 q_des clamp，随后仍在首个 PPO update 前由
+`ActionBallTaskReceipt.from_dict(receipt.to_dict())` 拒绝。根因是 receipt canonicalizer 对已经是
+binary64 单位四元数的 tuple 再除一次范数；约 `1e-16` 的表示漂移不改变物理姿态，却改变 canonical
+JSON SHA。Pod2 因 Pod1 已给出同一构造路径的确定性失败而没有执行 `_r3` trainer；两边都没有
+checkpoint 或科学结果。
+
+修复不放宽动作、球题、Reward 或物理门：仅对距单位范数不超过 `2e-15` 的输入保留原 binary64
+tuple，非单位输入仍规范化，符号 canonicalization 仍执行。四元数 bitwise 幂等与生产形态
+birth→task roundtrip 已进入回归；核心联合测试为 `119 passed, 14 skipped`，独立 20 万随机单位
+四元数复核无二次漂移。新 pins 文件 SHA-256 为
+`52000401142ca955bef175ce8faafc4a2422363d7e000b20c314c7aa8501f465`，solver profile 为
+`714ed22b89208f370978be5c48e6c4b71cc379845e70394fa0ea225f78a49485`；反手拉/挡 bundle 为
+`baad5b95012ef0786d9a63c833a29de2782364f5e20c327851a6e07c5bf0acbf` /
+`0d3c80f437bb842515fa74e9adf4aea823c90e728ac4e9d87cf4ce1a3d8692ab`。下一步只用 fresh `_r4`
+完成两动作各 `1 env / 2 update`；通过后立即发 upper Reward canary，不以 full-body 或最大课程
+support 的后续形式化工作阻塞首批 policy。

@@ -1965,6 +1965,12 @@
 </details>
 ## 2026-07-29
 
+- N=1 `_r3` 反手拉在真实 Pod 穿透 scene/runtime/Reward/obs/q_des clamp 后，首个 PPO update 前
+  暴露 receipt 四元数二次归一化造成约 `1e-16` canonical SHA 漂移；Pod2 未重复执行同一确定性
+  失败。修复保留已是单位四元数的 binary64 tuple，非单位输入和符号规则不变；核心回归
+  `119 passed, 14 skipped`，新 pins 为 `52000401...f465`，反手拉/挡 bundle 为
+  `baad5b95...acbf` / `0d3c80f4...92ab`。下一步 fresh `_r4` 双 Pod 两更新 smoke，通过即发
+  upper Reward canary；full-body 不阻塞首批 policy。
 - N=1 upper Reward 首次双 Pod 真实构造 smoke 已到 scene/Reward/obs/q_des clamp，但两动作同在
   diagnostic motion payload 生命周期处失败，未进入 PPO；失败目录与 exact 进程证据保留。修复
   diagnostic bytes snapshot、unauthorized receipt、hard-contract formal/diagnostic 分支和
