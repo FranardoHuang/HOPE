@@ -778,3 +778,9 @@ replacement 将 lower/root 改到 `AGIBOT_A3_CFG.init_state` 的 runtime stand�
 这是正确性 replacement，不做学习 A/B。验收顺序为 Pod source regression → deterministic
 closed-loop hold → `1 env×2` → `4096×5`；通过后立即发 finite long。Reward、reference、
 curriculum 10%、full-body 和 8192 env 的科学 canary 继续等 healthy strike baseline。
+
+producer focused regression 已在 Pod `12 passed`。stable-upper 反手拉/挡 exact motion
+SHA 为 `4343a85e…` / `08aeafaf…`，两者 exact A3 static audit 均为双脚 `3+3` 接触、
+LP `feasible=true`；击球帧拍速保持到数值精度。root 修复让 selected face world position
+最多变化 `0.138/0.064 m`，因此旧题明确作废；N1 producer 保留原 profile 各轴宽度，只把
+完整 contact min/center/max 共同平移到新 face center。

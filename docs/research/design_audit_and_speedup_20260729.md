@@ -343,5 +343,12 @@ loop 第二轮 `2` 次，block 每轮 `1` 次，主要为踝关节。该比例�
    finite long。
 
 `configs/a3_upper_stable_stand_v1.json` 与
-`scripts/materialize_a3_stable_upper_motion.py` 已开始实现。CaT、真实 hard-edge 放宽、
-Beta/tanh、Reward 剂量、8192 env、full-body 与 N5/N73 均不混入该 successor。
+`scripts/materialize_a3_stable_upper_motion.py` 已实现并在 Pod focused regression
+`12 passed`。反手拉/挡 stable-upper motion SHA-256 分别为
+`4343a85e227de02f634d99d27499df2a4fa63b93df069ea2edb44524dca075ff` 与
+`08aeafaff2a14b62c4d9d37c77855c2ca5a9f9cb2ffde7f97b748676b681df01`；exact A3 均为
+双脚 `3+3` 接触且 static-ground LP `feasible=true`。击球帧 site speed 分别保持
+`1.8243512604` 与 `1.6183056627 m/s`，但世界拍位最多变化 `0.138/0.064 m`，故 N1
+materializer 已改为保留来球 profile 宽度、把完整 contact box 平移到新 selected face
+center。CaT、真实 hard-edge 放宽、Beta/tanh、Reward 剂量、8192 env、full-body 与 N5/N73
+均不混入该 successor。

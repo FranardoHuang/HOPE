@@ -3,9 +3,9 @@
 
 This is the deliberately short path for the first ``bh_loop_c`` and
 ``bh_block`` experiments.  The default ``upper`` scope keeps the reviewed
-incoming-ball profile from the pinned four-action fivebind manifest, changes
-only its historically absolute contact Z into a fully base-relative Z, and
-binds that row to:
+incoming-ball profile widths from the pinned four-action fivebind manifest,
+translates its contact box to the stable-upper teacher's selected rubber face
+centre in the base-yaw frame, and binds that row to:
 
 * the exact tracked upper-body motion bytes;
 * a freshly generated schema-v2 selected-face-centre prototype;
@@ -92,10 +92,10 @@ SUPPORTED_ACTIONS = {
         "family": "backhand",
         "motion_path": (
             "assets/motions/fivebind_20260727/"
-            "bh_loop_c_upper_qvel_fix_v1.npz"
+            "bh_loop_c_upper_stable_v1.npz"
         ),
         "motion_sha256": (
-            "3b7cabdec864db09cf3124557b0f79e9f81b4e5cdb28b67a019df11471d307e0"
+            "4343a85e227de02f634d99d27499df2a4fa63b93df069ea2edb44524dca075ff"
         ),
         "reference_t_hit_s": 0.62,
         "reference_t_cycle_s": 1.4,
@@ -106,10 +106,10 @@ SUPPORTED_ACTIONS = {
         "family": "backhand",
         "motion_path": (
             "assets/motions/fivebind_20260727/"
-            "bh_block_upper_qvel_fix_v1.npz"
+            "bh_block_upper_stable_v1.npz"
         ),
         "motion_sha256": (
-            "a228e5695a70d19e0153317fd2124d8c6db1c800f3d00ca9bb3c5ee3eb944e0b"
+            "08aeafaff2a14b62c4d9d37c77855c2ca5a9f9cb2ffde7f97b748676b681df01"
         ),
         "reference_t_hit_s": 0.48,
         "reference_t_cycle_s": 1.06,
@@ -1777,6 +1777,14 @@ def _contact_receipt(
         )
         alignment["upper_contact_center_preserved"] = False
         alignment["retargeted_contact_center_z_w_m"] = legacy_absolute_z
+    else:
+        del alignment["legacy_absolute_contact_z_w_m"]
+        del alignment["corrected_contact_offset_z_b_yaw_m"]
+        alignment["contact_center_authority"] = (
+            "a3_stable_upper_selected_rubber_face_center_at_pinned_strike_frame"
+        )
+        alignment["upper_contact_center_preserved"] = False
+        alignment["retargeted_contact_center_z_w_m"] = legacy_absolute_z
     receipt = {
         "schema_version": 1,
         "artifact_type": "n1_contact_alignment_receipt_v1",
@@ -2001,10 +2009,10 @@ def materialize_n1_contact_bundle(
         ),
     )
     if scope == SCOPE:
-        # The qvel-only A3 replacement changes motion bytes/UID but preserves
-        # every qpos/root/timing/racket-site sample; beyond those pinned
-        # identity fields, only the three coordinate Z values may differ from
-        # the source row.
+        # The stable-upper replacement preserves the inherited distribution
+        # widths but intentionally changes root/lower birth and therefore the
+        # racket's world contact point. Recenter the complete contact box on
+        # the rebuilt selected rubber face; never reuse the old task centre.
         expected_source_action = deepcopy(source_action)
         for key in (
             "motion_path",
@@ -2025,6 +2033,14 @@ def materialize_n1_contact_bundle(
             ready_root_z_w_m=float(
                 np.asarray(state["ready_root_w_m"])[2]
             ),
+        )
+        expected_corrected = _retarget_contact_center(
+            expected_corrected,
+            contact_center_b_yaw_m=state["face_center_b_yaw_m"],
+        )
+        corrected_action = _retarget_contact_center(
+            corrected_action,
+            contact_center_b_yaw_m=state["face_center_b_yaw_m"],
         )
         if corrected_action != expected_corrected:
             raise AssertionError("unexpected action-row mutation")
@@ -2154,9 +2170,9 @@ def materialize_n1_contact_bundle(
         manifest_document["notes"] = (
             "Contact-only N=1 diagnostic derived from exact source manifest "
             f"SHA-256 {source_actual}. The selected incoming-ball profile is "
-            "preserved except that contact center/min/max Z are converted from "
-            "legacy absolute W-floor height to B_yaw relative to the actual "
-            "no_move spawn/goal. Canonical counter-rally RL shaping is enabled; "
+            "preserved except that the complete contact box is translated onto "
+            "the stable-upper selected rubber face in B_yaw relative to the "
+            "actual no_move spawn/goal. Canonical counter-rally RL shaping is enabled; "
             "this artifact makes no teacher landing, post-bounce, baseline, "
             "deployment, or hardware claim."
         )

@@ -1,0 +1,1178 @@
+{
+  "artifact_class": "diagnostic_a3_stable_upper_motion",
+  "authorization": {
+    "deployment_authorized": false,
+    "hardware_authorized": false,
+    "training_authorized": false
+  },
+  "inputs": {
+    "body_order": {
+      "path": "/workspace/franco/n1rs_469cf908/configs/a3_runtime_body_order.txt",
+      "sha256": "1cdae4ba7c8d604428ee69ed4a3059e67fb195b22e1d0e294d509c4325809a3a"
+    },
+    "exact_model": {
+      "backend_type": "canonical_grounded_ready.MujocoGroundedReadyBackend",
+      "compiled_model_sha256": "70b3c8783fd52f4e535933ac651cd14ed48aaae26285e0911cb5258f92b85123",
+      "exact_mujoco_backend": true,
+      "ground_model_binding_sha256": "99c07a8c3a21b00997790d45a53002430ce1cab47ba8d89484e1295fd61d5322",
+      "joint_order": [
+        "left_hip_pitch_joint",
+        "right_hip_pitch_joint",
+        "waist_yaw_joint",
+        "left_hip_roll_joint",
+        "right_hip_roll_joint",
+        "waist_roll_joint",
+        "left_hip_yaw_joint",
+        "right_hip_yaw_joint",
+        "waist_pitch_joint",
+        "left_knee_joint",
+        "right_knee_joint",
+        "head_yaw_joint",
+        "left_shoulder_pitch_joint",
+        "right_shoulder_pitch_joint",
+        "left_ankle_pitch_joint",
+        "right_ankle_pitch_joint",
+        "head_pitch_joint",
+        "left_shoulder_roll_joint",
+        "right_shoulder_roll_joint",
+        "left_ankle_roll_joint",
+        "right_ankle_roll_joint",
+        "left_shoulder_yaw_joint",
+        "right_shoulder_yaw_joint",
+        "left_elbow_joint",
+        "right_elbow_joint",
+        "left_wrist_roll_joint",
+        "right_wrist_roll_joint",
+        "left_wrist_pitch_joint",
+        "right_wrist_pitch_joint",
+        "left_wrist_yaw_joint",
+        "right_wrist_yaw_joint"
+      ],
+      "joint_position_lower_sha256": "79939e8a557b61403f9e7c843309a6e22f565b7b8c640604a58d79a2641481b3",
+      "joint_position_upper_sha256": "e32b6a1fde9395d13d9a2cfffb8b327f3c6d115b8898adcc80eb80492416ee49",
+      "mjcf_path": "/workspace/codexschema/nohope/agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml",
+      "mjcf_sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97",
+      "path_model_binding_sha256": "e447c20ef157b61cd4f955dabc054241433eb591c9a7f4bd3717ffe969cce645",
+      "status": "PASS_EXACT_MUJOCO",
+      "xml_model_name": "A3T2.5_pingpong_0519"
+    },
+    "grounded_reference_candidate": {
+      "path": "/workspace/codexschema/canonical_v2_20260724/ready_v2_g1_attempt3/published_g1_neutral_arm/grounded_ready_candidate_v1.npz",
+      "sha256": "585bbd7d643857abd08108eac7b4dd997b228d0df1a9921334ca845cd931d71e"
+    },
+    "grounded_reference_receipt": {
+      "path": "/workspace/tmp/face_report_test_20260730_001/vendor_assets/motion_finalize_20260724/ready_v2_g1_neutral_arm/RECEIPT.json",
+      "sha256": "ee7dea1aec81169e1d002bbe0b2cfa75c793a97a3f89e1e740d0064dc8be7c46"
+    },
+    "motion": {
+      "path": "/workspace/franco/n1rs_469cf908/assets/motions/fivebind_20260727/bh_loop_c_upper_qvel_fix_v1.npz",
+      "sha256": "3b7cabdec864db09cf3124557b0f79e9f81b4e5cdb28b67a019df11471d307e0"
+    },
+    "stable_stand_contract": {
+      "path": "/workspace/franco/n1rs_469cf908/configs/a3_upper_stable_stand_v1.json",
+      "sha256": "fa1a4470fd0c54c07e6ff4d9f3bc97ec98d79237ec691cd194510bc529717235"
+    }
+  },
+  "invariants": {
+    "fps_after": 50.0,
+    "fps_before": 50.0,
+    "frame_count_after": 71,
+    "frame_count_before": 71,
+    "leg_joint_velocity_exact_zero": true,
+    "nonleg_joint_pos_all_frames_bitwise_equal": true,
+    "nonleg_joint_vel_all_frames_bitwise_equal": true,
+    "right_racket_site_change_requires_task_rebind": {
+      "angular_velocity_w": {
+        "after_sha256": "628230259be5abeb511655a82765a20f390e20c17991223f027f97d144c10e5a",
+        "before_sha256": "cb540f7553161cf6134f51080d3dc06387abb0ce1171b81d13963e668680d4c5",
+        "bitwise_equal": false,
+        "maximum_abs_delta": 1.7648317185392859,
+        "unit": "rad/s"
+      },
+      "linear_velocity_w": {
+        "after_sha256": "f38c58e7eb5d94457ba87f6d74f20b51b6d83ae5f2d892e657acc6063844750f",
+        "before_sha256": "809e2e84215ef8d5cf50369b2b582ef992fd4d0020c49630cf163039b9f98a7c",
+        "bitwise_equal": false,
+        "maximum_abs_delta": 0.6455440407524364,
+        "unit": "m/s"
+      },
+      "position_w": {
+        "after_sha256": "602cbf558ea963260bf53a67ec0e6c6df2e2623f7dae5be2e3cb6581c7c93a50",
+        "before_sha256": "e27ad2768e78f25b15a95bab037d39255ef3caad9ad6735091ecc1fb4f44e24e",
+        "bitwise_equal": false,
+        "maximum_abs_delta": 0.13807109775739246,
+        "unit": "m"
+      },
+      "rotation_w": {
+        "after_sha256": "f7142bb9ccbc57cf88f56bc6c46e79b4472a1260055f5722effa00057976bb0d",
+        "before_sha256": "4d165334532fc25606b5151c48033410b1ed26372a91f8915c48007fffcca56b",
+        "bitwise_equal": false,
+        "maximum_abs_delta": 0.1939800308752015,
+        "unit": "matrix"
+      }
+    },
+    "right_racket_site_speed_at_strike_after_mps": 1.8243512603952763,
+    "right_racket_site_speed_at_strike_before_mps": 1.8243512603952765,
+    "root_xy_all_frames_bitwise_equal": true,
+    "strike_frame_after": 31,
+    "strike_frame_before": 31
+  },
+  "non_claims": [
+    "not an Isaac closed-loop hold certificate",
+    "not a table-contact or physical-ball certificate",
+    "not a task-alignment or policy-quality certificate",
+    "not deployment or hardware authorization"
+  ],
+  "outputs": {
+    "completion_semantics": "exclusive_directory_receipt_written_last",
+    "motion_filename": "bh_loop_c_upper_qvel_fix_v1.a3_stable_upper_v1.npz",
+    "motion_sha256": "4343a85e227de02f634d99d27499df2a4fa63b93df069ea2edb44524dca075ff",
+    "receipt_filename": "RECEIPT.json",
+    "schema2_manifest_filename": "SCHEMA2_MANIFEST.json",
+    "schema2_manifest_sha256": "cd5c1b9cd9023ac8308556c87763c260a6d8c7de71942a8712c103bae2993be2",
+    "schema2_report_filename": "SCHEMA2_REPORT.json",
+    "schema2_report_sha256": "7011030ca62fd182a7047bb3d583304f4a1454389aa56db712d7ecbb54a5ec6d"
+  },
+  "producer": {
+    "schema2_tool_path": "/workspace/franco/n1rs_469cf908/hope_training/whole_body_tracking/scripts/canonical_schema2_builder.py",
+    "schema2_tool_sha256": "49e45c01f88a1bbacc9728180eb0cd5fe816b2b0f02d3ea9989081c3f449fc6b",
+    "tool_path": "/workspace/franco/n1rs_469cf908/hope_training/whole_body_tracking/scripts/materialize_a3_stable_upper_motion.py",
+    "tool_sha256": "b04a573b88049673bb0ca825fd5a0399d280a3966e4012274c8c467e604aef2b"
+  },
+  "receipt_payload_sha256": "63e42ceea649b2cedf7854dba979f3095d5d244e8802a8085d3f492114f65dde",
+  "replacement": {
+    "exact_a3_static_geometry_audit": {
+      "collision_safe": true,
+      "double_support_passed": true,
+      "foot_contact_count": [
+        3,
+        3
+      ],
+      "joint_limits_passed": true,
+      "maximum_foot_penetration_m": 0.00033178289795228466,
+      "self_collision_pairs": [],
+      "sole_gap_passed": true,
+      "sole_minimum_distance_m": [
+        -0.00018977959184558746,
+        -0.00033178289795224303
+      ],
+      "static_ground_dynamics": {
+        "actuator_limit_contract": {
+          "actuated_dof_indices": [
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30,
+            31,
+            32,
+            33,
+            34,
+            35,
+            36
+          ],
+          "actuator_force_after_control": [
+            [
+              -220.0,
+              220.0
+            ],
+            [
+              -46.0,
+              46.0
+            ],
+            [
+              -118.0,
+              118.0
+            ],
+            [
+              -6.0,
+              6.0
+            ],
+            [
+              -6.0,
+              6.0
+            ],
+            [
+              -60.0,
+              60.0
+            ],
+            [
+              -60.0,
+              60.0
+            ],
+            [
+              -24.0,
+              24.0
+            ],
+            [
+              -24.0,
+              24.0
+            ],
+            [
+              -24.0,
+              24.0
+            ],
+            [
+              -6.0,
+              6.0
+            ],
+            [
+              -6.0,
+              6.0
+            ],
+            [
+              -60.0,
+              60.0
+            ],
+            [
+              -60.0,
+              60.0
+            ],
+            [
+              -24.0,
+              24.0
+            ],
+            [
+              -24.0,
+              24.0
+            ],
+            [
+              -24.0,
+              24.0
+            ],
+            [
+              -6.0,
+              6.0
+            ],
+            [
+              -6.0,
+              6.0
+            ],
+            [
+              -220.0,
+              220.0
+            ],
+            [
+              -220.0,
+              220.0
+            ],
+            [
+              -220.0,
+              220.0
+            ],
+            [
+              -320.0,
+              320.0
+            ],
+            [
+              -118.2,
+              118.2
+            ],
+            [
+              -54.75,
+              54.75
+            ],
+            [
+              -220.0,
+              220.0
+            ],
+            [
+              -220.0,
+              220.0
+            ],
+            [
+              -220.0,
+              220.0
+            ],
+            [
+              -320.0,
+              320.0
+            ],
+            [
+              -118.2,
+              118.2
+            ],
+            [
+              -54.75,
+              54.75
+            ]
+          ],
+          "actuator_gear": [
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0,
+            1.0
+          ],
+          "dof_to_actuator": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5,
+            6,
+            7,
+            8,
+            9,
+            10,
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            19,
+            20,
+            21,
+            22,
+            23,
+            24,
+            25,
+            26,
+            27,
+            28,
+            29,
+            30
+          ],
+          "free_root_unactuated_dof_indices": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5
+          ],
+          "frictionloss_full_margin": [
+            1.1971,
+            0.69223,
+            1.7,
+            0.1,
+            0.1,
+            0.6293,
+            0.6293,
+            0.41197,
+            0.41197,
+            0.41197,
+            0.1,
+            0.1,
+            0.6293,
+            0.6293,
+            0.41197,
+            0.41197,
+            0.41197,
+            0.1,
+            0.1,
+            1.1971,
+            1.1971,
+            1.1971,
+            2.4276,
+            1.4,
+            0.778,
+            1.1971,
+            1.1971,
+            1.1971,
+            2.4276,
+            1.4,
+            0.778
+          ],
+          "generalized_force_after_friction": [
+            [
+              -218.8029,
+              218.8029
+            ],
+            [
+              -45.30777,
+              45.30777
+            ],
+            [
+              -116.3,
+              116.3
+            ],
+            [
+              -5.9,
+              5.9
+            ],
+            [
+              -5.9,
+              5.9
+            ],
+            [
+              -59.3707,
+              59.3707
+            ],
+            [
+              -59.3707,
+              59.3707
+            ],
+            [
+              -23.58803,
+              23.58803
+            ],
+            [
+              -23.58803,
+              23.58803
+            ],
+            [
+              -23.58803,
+              23.58803
+            ],
+            [
+              -5.9,
+              5.9
+            ],
+            [
+              -5.9,
+              5.9
+            ],
+            [
+              -59.3707,
+              59.3707
+            ],
+            [
+              -59.3707,
+              59.3707
+            ],
+            [
+              -23.58803,
+              23.58803
+            ],
+            [
+              -23.58803,
+              23.58803
+            ],
+            [
+              -23.58803,
+              23.58803
+            ],
+            [
+              -5.9,
+              5.9
+            ],
+            [
+              -5.9,
+              5.9
+            ],
+            [
+              -218.8029,
+              218.8029
+            ],
+            [
+              -218.8029,
+              218.8029
+            ],
+            [
+              -218.8029,
+              218.8029
+            ],
+            [
+              -317.5724,
+              317.5724
+            ],
+            [
+              -116.8,
+              116.8
+            ],
+            [
+              -53.972,
+              53.972
+            ],
+            [
+              -218.8029,
+              218.8029
+            ],
+            [
+              -218.8029,
+              218.8029
+            ],
+            [
+              -218.8029,
+              218.8029
+            ],
+            [
+              -317.5724,
+              317.5724
+            ],
+            [
+              -116.8,
+              116.8
+            ],
+            [
+              -53.972,
+              53.972
+            ]
+          ],
+          "joint_force_before_friction": [
+            [
+              -220.0,
+              220.0
+            ],
+            [
+              -46.0,
+              46.0
+            ],
+            [
+              -118.0,
+              118.0
+            ],
+            [
+              -6.0,
+              6.0
+            ],
+            [
+              -6.0,
+              6.0
+            ],
+            [
+              -60.0,
+              60.0
+            ],
+            [
+              -60.0,
+              60.0
+            ],
+            [
+              -24.0,
+              24.0
+            ],
+            [
+              -24.0,
+              24.0
+            ],
+            [
+              -24.0,
+              24.0
+            ],
+            [
+              -6.0,
+              6.0
+            ],
+            [
+              -6.0,
+              6.0
+            ],
+            [
+              -60.0,
+              60.0
+            ],
+            [
+              -60.0,
+              60.0
+            ],
+            [
+              -24.0,
+              24.0
+            ],
+            [
+              -24.0,
+              24.0
+            ],
+            [
+              -24.0,
+              24.0
+            ],
+            [
+              -6.0,
+              6.0
+            ],
+            [
+              -6.0,
+              6.0
+            ],
+            [
+              -220.0,
+              220.0
+            ],
+            [
+              -220.0,
+              220.0
+            ],
+            [
+              -220.0,
+              220.0
+            ],
+            [
+              -320.0,
+              320.0
+            ],
+            [
+              -118.2,
+              118.2
+            ],
+            [
+              -54.75,
+              54.75
+            ],
+            [
+              -220.0,
+              220.0
+            ],
+            [
+              -220.0,
+              220.0
+            ],
+            [
+              -220.0,
+              220.0
+            ],
+            [
+              -320.0,
+              320.0
+            ],
+            [
+              -118.2,
+              118.2
+            ],
+            [
+              -54.75,
+              54.75
+            ]
+          ]
+        },
+        "equality_residual": 2.4868995751603507e-14,
+        "feasible": true,
+        "root_residual": 3.552713678800501e-15,
+        "solver_report": {
+          "allowed_residual": 0.00011430076827222001,
+          "bound_violation": 0.0,
+          "contact_geometry": {
+            "active_contacts": [
+              {
+                "combined_sliding_friction": 1.5,
+                "combined_tangential_friction": [
+                  1.5,
+                  1.5
+                ],
+                "contact_dim": 3,
+                "contact_index": 0,
+                "distance_m": -0.0001897795918455701,
+                "foot_index": 0,
+                "geom_pair": [
+                  0,
+                  65
+                ],
+                "position_world_m": [
+                  -0.026455439563556383,
+                  -0.2231011278538788,
+                  -9.488979592278506e-05
+                ]
+              },
+              {
+                "combined_sliding_friction": 1.5,
+                "combined_tangential_friction": [
+                  1.5,
+                  1.5
+                ],
+                "contact_dim": 3,
+                "contact_index": 1,
+                "distance_m": -0.0001890820853106545,
+                "foot_index": 0,
+                "geom_pair": [
+                  0,
+                  65
+                ],
+                "position_world_m": [
+                  0.06508354035065275,
+                  -0.22776720539300782,
+                  -9.454104265532726e-05
+                ]
+              },
+              {
+                "combined_sliding_friction": 1.5,
+                "combined_tangential_friction": [
+                  1.5,
+                  1.5
+                ],
+                "contact_dim": 3,
+                "contact_index": 2,
+                "distance_m": -0.0001776733814178033,
+                "foot_index": 0,
+                "geom_pair": [
+                  0,
+                  65
+                ],
+                "position_world_m": [
+                  0.08233041187601828,
+                  -0.10819875889190672,
+                  -8.883669070890166e-05
+                ]
+              },
+              {
+                "combined_sliding_friction": 1.5,
+                "combined_tangential_friction": [
+                  1.5,
+                  1.5
+                ],
+                "contact_dim": 3,
+                "contact_index": 3,
+                "distance_m": -0.00033178289795228466,
+                "foot_index": 1,
+                "geom_pair": [
+                  0,
+                  78
+                ],
+                "position_world_m": [
+                  0.23356274499185664,
+                  -0.24861823076230816,
+                  -0.00016589144897614233
+                ]
+              },
+              {
+                "combined_sliding_friction": 1.5,
+                "combined_tangential_friction": [
+                  1.5,
+                  1.5
+                ],
+                "contact_dim": 3,
+                "contact_index": 4,
+                "distance_m": -0.0003308683086042895,
+                "foot_index": 1,
+                "geom_pair": [
+                  0,
+                  78
+                ],
+                "position_world_m": [
+                  0.32510149009616246,
+                  -0.2532889124806558,
+                  -0.00016543415430214474
+                ]
+              },
+              {
+                "combined_sliding_friction": 1.5,
+                "combined_tangential_friction": [
+                  1.5,
+                  1.5
+                ],
+                "contact_dim": 3,
+                "contact_index": 5,
+                "distance_m": -0.000319445399722694,
+                "foot_index": 1,
+                "geom_pair": [
+                  0,
+                  78
+                ],
+                "position_world_m": [
+                  0.34235437557122267,
+                  -0.1337213336034399,
+                  -0.000159722699861347
+                ]
+              }
+            ],
+            "cop_constraint": "nonnegative_normal_forces_at_actual_MuJoCo_contact_hull_vertices",
+            "feet": [
+              {
+                "active_contact_floor_xy_m": [
+                  [
+                    -0.026455439563556383,
+                    -0.2231011278538788
+                  ],
+                  [
+                    0.06508354035065275,
+                    -0.22776720539300782
+                  ],
+                  [
+                    0.08233041187601828,
+                    -0.10819875889190672
+                  ]
+                ],
+                "active_contact_hull_contained": true,
+                "active_contact_hull_containment_tolerance_m": 0.0002,
+                "active_geom_ids": [
+                  65
+                ],
+                "body_id": 26,
+                "collision_sole_hull_floor_xy_m": [
+                  [
+                    -0.028970608456022885,
+                    -0.22082862159406072
+                  ],
+                  [
+                    -0.02577415732800036,
+                    -0.237138323729227
+                  ],
+                  [
+                    0.06117955491323443,
+                    -0.24659052807957627
+                  ],
+                  [
+                    0.06671290646551147,
+                    -0.22790956366628135
+                  ],
+                  [
+                    0.08746249685189694,
+                    -0.09720877027486247
+                  ],
+                  [
+                    0.08626306251916209,
+                    -0.06353139526146591
+                  ],
+                  [
+                    0.08480965253096373,
+                    -0.04862361821077611
+                  ],
+                  [
+                    0.0845506937195687,
+                    -0.04675103804184892
+                  ],
+                  [
+                    0.06757024187663632,
+                    -0.041011356703648624
+                  ],
+                  [
+                    0.018243128168621527,
+                    -0.037249848643705036
+                  ],
+                  [
+                    0.0037614439564454503,
+                    -0.03645972448805797
+                  ],
+                  [
+                    -0.012914493554245742,
+                    -0.03807028348781755
+                  ],
+                  [
+                    -0.014458554899808952,
+                    -0.03982175279375201
+                  ],
+                  [
+                    -0.02483347727448616,
+                    -0.08592150399481266
+                  ],
+                  [
+                    -0.02517042982891687,
+                    -0.09038782513668353
+                  ]
+                ],
+                "foot_body": "left_ankle_roll_Link",
+                "foot_index": 0,
+                "minimum_floor_distance_m": -0.0001897795918455701,
+                "support_point_range": [
+                  0,
+                  3
+                ],
+                "support_polygon_floor_xy_m": [
+                  [
+                    -0.026455439563556383,
+                    -0.2231011278538788
+                  ],
+                  [
+                    0.06508354035065275,
+                    -0.22776720539300782
+                  ],
+                  [
+                    0.08233041187601828,
+                    -0.10819875889190672
+                  ]
+                ],
+                "support_vertex_floor_distance_m": [
+                  -9.488979592278506e-05,
+                  -9.454104265532726e-05,
+                  -8.883669070890166e-05
+                ],
+                "support_vertices": 3
+              },
+              {
+                "active_contact_floor_xy_m": [
+                  [
+                    0.23356274499185664,
+                    -0.24861823076230816
+                  ],
+                  [
+                    0.32510149009616246,
+                    -0.2532889124806558
+                  ],
+                  [
+                    0.34235437557122267,
+                    -0.1337213336034399
+                  ]
+                ],
+                "active_contact_hull_contained": true,
+                "active_contact_hull_containment_tolerance_m": 0.0002,
+                "active_geom_ids": [
+                  78
+                ],
+                "body_id": 32,
+                "collision_sole_hull_floor_xy_m": [
+                  [
+                    0.2310476879143322,
+                    -0.24634559776463572
+                  ],
+                  [
+                    0.23424332003951645,
+                    -0.2626554607786078
+                  ],
+                  [
+                    0.3211965569113866,
+                    -0.2721120386899631
+                  ],
+                  [
+                    0.32673084658128626,
+                    -0.2534313524750222
+                  ],
+                  [
+                    0.3474870095203809,
+                    -0.12273160277547446
+                  ],
+                  [
+                    0.34628927160488715,
+                    -0.08905416771348397
+                  ],
+                  [
+                    0.34483660930811083,
+                    -0.07414631737811835
+                  ],
+                  [
+                    0.3445777443078234,
+                    -0.07227372415129837
+                  ],
+                  [
+                    0.32759758027413277,
+                    -0.0665331886604958
+                  ],
+                  [
+                    0.2782706560264188,
+                    -0.06276919959204813
+                  ],
+                  [
+                    0.26378901169781754,
+                    -0.061978347055988564
+                  ],
+                  [
+                    0.24711299387326763,
+                    -0.06358806735827227
+                  ],
+                  [
+                    0.24556884461639986,
+                    -0.06533945901654524
+                  ],
+                  [
+                    0.23519160314027363,
+                    -0.11143868828766484
+                  ],
+                  [
+                    0.23485442564626702,
+                    -0.11590499244828059
+                  ]
+                ],
+                "foot_body": "right_ankle_roll_Link",
+                "foot_index": 1,
+                "minimum_floor_distance_m": -0.00033178289795228466,
+                "support_point_range": [
+                  3,
+                  6
+                ],
+                "support_polygon_floor_xy_m": [
+                  [
+                    0.23356274499185664,
+                    -0.24861823076230816
+                  ],
+                  [
+                    0.32510149009616246,
+                    -0.2532889124806558
+                  ],
+                  [
+                    0.34235437557122267,
+                    -0.1337213336034399
+                  ]
+                ],
+                "support_vertex_floor_distance_m": [
+                  -0.00016589144897614233,
+                  -0.00016543415430214474,
+                  -0.000159722699861347
+                ],
+                "support_vertices": 3
+              }
+            ],
+            "floor_basis_world": [
+              [
+                1.0,
+                0.0,
+                0.0
+              ],
+              [
+                0.0,
+                1.0,
+                0.0
+              ],
+              [
+                0.0,
+                0.0,
+                1.0
+              ]
+            ],
+            "floor_geom": "floor",
+            "floor_geom_id": 0,
+            "friction_raw_min": 1.5,
+            "friction_safety_fraction": 0.8,
+            "friction_used": 1.2000000000000002,
+            "model_binding": "99c07a8c3a21b00997790d45a53002430ce1cab47ba8d89484e1295fd61d5322",
+            "model_source_path": "/workspace/codexschema/nohope/agi/A3_MuJoCo_Sim/aimrt_mujoco_sim/src/models/bin/cfg/model/a3_pingpong/a3_pingpong.xml",
+            "model_source_sha256": "2ab1cd31bffaaef979b4d9f35699bf1e6bec3a127be96c9266af131eee3feb97",
+            "support_patch_semantics": "exact_discrete_MuJoCo_contact_positions; their convex hull is contained in the contact-proximate collision sole hull"
+          },
+          "contact_kinematics": {
+            "acceleration_formula": "Jp*qacc+mj_jacDot_p*qvel",
+            "contact_acceleration_tolerance_m_s2": 0.0002,
+            "contact_velocity_tolerance_m_s": 2e-05,
+            "max_abs_Jp_qs_m_per_path_unit": 0.0,
+            "max_abs_contact_acceleration_m_s2": 0.0,
+            "max_abs_contact_velocity_m_s": 0.0,
+            "path_tangent_tolerance": 2e-06
+          },
+          "cop_world_per_foot_m": [
+            [
+              0.05862091445861169,
+              -0.1332413299993359,
+              -9.015594390715028e-05
+            ],
+            [
+              0.34235437557122267,
+              -0.1337213336034399,
+              -0.000159722699861347
+            ]
+          ],
+          "equalities": 37,
+          "equality_residual": 2.4868995751603507e-14,
+          "exact_state_lp_cache_hit": false,
+          "friction_coefficient": 1.2000000000000002,
+          "friction_pyramid": "abs(ft1)+abs(ft2)<=mu*fn",
+          "highs_iterations": 44,
+          "highs_message": "Optimization terminated successfully. (HiGHS Status 7: Optimal)",
+          "highs_status": 0,
+          "inequalities": 26,
+          "inverse_dynamics": "MuJoCo mj_inverse with constraints and frictionloss disabled; smooth net demand includes inertia/bias minus remaining passive damping/spring forces",
+          "inverse_match_residual": 0.0,
+          "max_effort_interval_ratio": 0.9268242802917248,
+          "max_inequality_violation": 0.0,
+          "minimum_normal_force_per_foot_n": 1.0,
+          "model_binding": "99c07a8c3a21b00997790d45a53002430ce1cab47ba8d89484e1295fd61d5322",
+          "normal_force_per_foot_n": [
+            380.0553037889621,
+            191.448537572138
+          ],
+          "root_residual": 3.552713678800501e-15,
+          "scipy_version": "1.15.3",
+          "solver": "scipy.optimize.linprog:highs",
+          "solver_library": "scipy",
+          "status": "FEASIBLE_SAMPLED_STATE",
+          "variables": 49
+        },
+        "status": "PASS_STATIC_GROUND_CONTACT_LP"
+      },
+      "static_ground_dynamics_gating": false,
+      "static_ground_dynamics_passed": true,
+      "unsupported_contacts": [],
+      "worst_joint_limit_excess_rad": 0.0
+    },
+    "leg_joint_indices": [
+      0,
+      3,
+      6,
+      9,
+      14,
+      19,
+      1,
+      4,
+      7,
+      10,
+      15,
+      20
+    ],
+    "leg_joint_names": [
+      "left_hip_pitch_joint",
+      "left_hip_roll_joint",
+      "left_hip_yaw_joint",
+      "left_knee_joint",
+      "left_ankle_pitch_joint",
+      "left_ankle_roll_joint",
+      "right_hip_pitch_joint",
+      "right_hip_roll_joint",
+      "right_hip_yaw_joint",
+      "right_knee_joint",
+      "right_ankle_pitch_joint",
+      "right_ankle_roll_joint"
+    ],
+    "replacement_root_z_m": 1.0684000253677368,
+    "semantics": "preserve waist/head/arm motion; replace lower-body birth and reference with the AgiBot A3 runtime default stand; preserve source yaw while making the root upright",
+    "source_root_z_m": 0.920682966709137,
+    "source_yaw_rad": 1.4771391894090635,
+    "stable_contract": {
+      "lower_joint_pos_rad": {
+        "left_ankle_pitch_joint": -0.1204,
+        "left_ankle_roll_joint": -0.0078,
+        "left_hip_pitch_joint": -0.1311,
+        "left_hip_roll_joint": 0.0056,
+        "left_hip_yaw_joint": -0.0348,
+        "left_knee_joint": 0.2468,
+        "right_ankle_pitch_joint": -0.1204,
+        "right_ankle_roll_joint": 0.0078,
+        "right_hip_pitch_joint": -0.1311,
+        "right_hip_roll_joint": -0.0056,
+        "right_hip_yaw_joint": 0.0348,
+        "right_knee_joint": 0.2468
+      },
+      "provenance": {
+        "model": "AgiBot A3",
+        "root_orientation": "upright with source world-Z yaw preserved",
+        "source": "hope_training/whole_body_tracking/source/whole_body_tracking/whole_body_tracking/robots/agibot_a3.py::AGIBOT_A3_CFG.init_state",
+        "usage": "upper-motion physical birth, actor bootstrap and masked leg-reference common contract"
+      },
+      "root_height_m": 1.0684
+    }
+  },
+  "robot": {
+    "exact_xml_model_name": "A3T2.5_pingpong_0519",
+    "family": "AgiBot A3"
+  },
+  "schema_version": 1,
+  "tool_id": "a3_stable_upper_motion_materializer_v1",
+  "verdict": "PASS_DIAGNOSTIC_A3_STABLE_UPPER_REBUILD"
+}

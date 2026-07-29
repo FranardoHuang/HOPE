@@ -266,17 +266,30 @@ def test_materializes_strict_contact_only_bundle(tmp_path: Path, action_id: str)
             "contact_offset_max_b_yaw_m",
         }:
             assert output_profile[key] == source_profile[key]
-    root_z = receipt["alignment"]["ready_root_z_w_m"]
-    for key in (
-        "contact_offset_center_b_yaw_m",
+    source_center = source_profile["contact_offset_center_b_yaw_m"]
+    output_center = output_profile["contact_offset_center_b_yaw_m"]
+    for bound_key in (
         "contact_offset_min_b_yaw_m",
         "contact_offset_max_b_yaw_m",
     ):
-        assert output_profile[key][:2] == source_profile[key][:2]
-        assert output_profile[key][2] == pytest.approx(
-            source_profile[key][2] - root_z,
+        assert [
+            bound - center
+            for bound, center in zip(
+                output_profile[bound_key], output_center
+            )
+        ] == pytest.approx(
+            [
+                bound - center
+                for bound, center in zip(
+                    source_profile[bound_key], source_center
+                )
+            ],
             abs=1.0e-12,
         )
+    assert output_center == pytest.approx(
+        receipt["alignment"]["teacher_selected_face_center_b_yaw_m"],
+        abs=1.0e-12,
+    )
     assert prototype["schema_version"] == 2
     assert tuple(prototype["scopes"]) == ("upper",)
     assert prototype["scopes"]["upper"][0]["motion_id"] == action_id
@@ -290,13 +303,15 @@ def test_materializes_strict_contact_only_bundle(tmp_path: Path, action_id: str)
         receipt["alignment"]["center_gate_distance_m"]
         <= B.CENTER_ALIGNMENT_THRESHOLD_M
     )
+    assert receipt["alignment"]["center_gate_distance_m"] <= 1.0e-12
     assert (
-        receipt["alignment"]["legacy_absolute_contact_z_w_m"]
-        == pytest.approx(
-            source_profile["contact_offset_center_b_yaw_m"][2],
-            abs=1.0e-12,
+        receipt["alignment"]["contact_center_authority"]
+        == (
+            "a3_stable_upper_selected_rubber_face_center_at_pinned_"
+            "strike_frame"
         )
     )
+    assert receipt["alignment"]["upper_contact_center_preserved"] is False
 def test_scope_cli_defaults_to_upper():
     arguments = B._build_parser().parse_args(
         [
