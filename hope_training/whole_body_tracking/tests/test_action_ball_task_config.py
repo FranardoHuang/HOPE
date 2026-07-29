@@ -360,6 +360,8 @@ def test_action_ball_yaml_composes_a_fail_closed_preflight_surface():
     )
     assert task.racket.shadow_ball is False
     assert task.racket.shadow_table is False
+    assert task.racket.pos_range_per_clip is None
+    assert task.racket.vel_range_per_clip is None
 
 
 @pytest.mark.parametrize("action_count", [4, 73])

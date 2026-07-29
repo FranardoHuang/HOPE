@@ -206,3 +206,10 @@ racket:
 
   # Per-action phase/sign tables are derived from the exact manifest during preflight.
   strike_phase_per_clip: []
+  # HITTER's named ``forehand``/``backhand`` uniform boxes are not ActionBall
+  # inputs.  Leaving them inherited makes an exact N=1 action such as
+  # ``bh_loop_c`` fail before manifest installation because the legacy map
+  # names do not match the frozen action identity.  ActionBall obtains both
+  # position and velocity support exclusively from its exact manifest/solver.
+  pos_range_per_clip: null
+  vel_range_per_clip: null
