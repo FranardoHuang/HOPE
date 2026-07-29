@@ -1965,6 +1965,12 @@
 </details>
 ## 2026-07-29
 
+- N=1 upper Reward 首次双 Pod 真实构造 smoke 已到 scene/Reward/obs/q_des clamp，但两动作同在
+  diagnostic motion payload 生命周期处失败，未进入 PPO；失败目录与 exact 进程证据保留。修复
+  diagnostic bytes snapshot、unauthorized receipt、hard-contract formal/diagnostic 分支和
+  Motion↔Racket 初始化后 digest probe，host 相关可运行回归 `236 passed`。因 solver source
+  改变，已重物化 profile pins `dd609422...f6925` 以及反手拉/挡 N=1 bundle
+  `90b88645...bc6a` / `fa03627f...4bc2`；待 fresh `_r2` Pod smoke。
 - 新增 ActionBall 1-env formal Reward 因果发射门：真实 post-Hydra/live RewardManager exact
   recipe 对账后，逐 active objective 用权威 tensor 做单轴 worsening，按四组报告 signed
   per-step/per-event 剂量；unknown term、方向错误、clean/HEAD producer/identity 漂移均 fail

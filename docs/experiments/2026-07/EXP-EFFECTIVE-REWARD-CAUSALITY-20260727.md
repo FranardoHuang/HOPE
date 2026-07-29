@@ -226,3 +226,34 @@ no-clobber/content binding、untracked/隐藏 producer
 漂移、root authoritative-state→production-getter 读回、advanced-index tensor 写入、live recipe
 不等和未知 objective fail-closed。这仍是 E1；尚未从 clean commit 在 Pod 生成真实 Isaac PASS，
 因此实验最高证据等级与采用结论不变。
+
+### 2026-07-29：N=1 Reward 首次真实构造 smoke 与生命周期修复
+
+按[标准消融发射工序](../../operations/run_ablation_wave_launch.md)改用 Pod 侧
+`/workspace/bin/kit_boot_lock.sh`；旧 N=1 diagnostic launcher 只负责生成 canonical plan/argv，
+不再用它的“整卡必须空闲 + 训练全生命周期持锁”发射路径。Pod1/Pod2 各自的 GPU0 在发射前均为
+零 compute PID；以下两个运行名（`run_name` 的通用含义见
+[术语表](../../DEFINITIONS.md)）都由 exact clean `bbefa277` 构造：
+
+- `bh_loop_c_upper_current_low_smoke_s0_r1`：反手拉、upper、实际低 tracking Reward、seed0；
+- `bh_block_upper_current_low_smoke_s0_r1`：反手挡、upper、实际低 tracking Reward、seed0。
+
+两条都完成 Isaac scene、182D observation contract、真实 RewardManager 回读和
+`q_des CLAMP ACTIVE`，随后在首个 PPO update 前同因失败：
+diagnostic canonical motion 把 `_motion_payloads` 留为 `None`，birth broker 无法证明自己绑定的是
+MotionLoader 已采用的同一份 bytes。失败 namespace 保留；只对两条已核对的 exact PID/PGID 发
+TERM，没有复用目录或影响其他进程。这是构造生命周期失败，不是 Reward 或动作效果结论。
+
+源码随后闭合三个相邻问题：
+
+1. diagnostic canonical motion 在 MotionLoader 前冻结 bytes，并与初始 SHA 再对账；
+2. diagnostic motion binding 生成明确 `training_authorized=false` 的 content-addressed receipt，
+   hard contract 不再先读取不存在的 formal evaluator receipt 字段；
+3. Motion↔Racket shared-state digest probe 延迟到两端 runtime 已发布之后，避免初始化中的
+   hard-contract 重入。
+
+host 可运行联合回归为 `236 passed`；Torch 行为套件需在 Pod exact checkout 复跑。因
+`hope_commands.py` 属于 solver source，重新生成的 pins SHA-256 为
+`dd609422...f6925`，solver profile 为 `8fbb8bbd...bd0b7`；两动作的新 contact bundle 分别为
+`90b88645...bc6a` 与 `fa03627f...4bc2`。下一次只能用 fresh `_r2` namespace，先自然完成
+1 env / 2 update，再铺 upper Reward 矩阵；当前仍没有科学结果或采用结论。

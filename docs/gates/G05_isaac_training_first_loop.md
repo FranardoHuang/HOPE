@@ -3430,3 +3430,18 @@ standalone exporter 的 `--plan` 源码门现会验证完整材料，并且在�
 `checkpoint_iteration` 必须是非负整数，成功 JSON 明确记录没有写 artifact 或执行 graph export。
 五文件聚焦回归为 `97 passed in 0.38s`，包含普通导出 fake smoke。真实 W/Y plan、ONNX、
 vendor MuJoCo 和行为卷均未运行，因此 G05 保持 `Partial`。
+
+### 2026-07-29 N=1 ActionBall Reward smoke：构造到 runtime bind，PPO 尚未开始
+
+Pod1 的反手拉和 Pod2 的反手挡各运行一次 `1 env / 2 update` 构造 smoke。两边都在 exact clean
+`bbefa277` 上通过 scene import、182D actor observation、effective Reward 回读与 q_des clamp
+激活，但在 birth broker 绑定 diagnostic motion bytes 时同因 Traceback；没有出现
+`Learning iteration`，因此不得写作 smoke PASS 或训练结果。运行日志、canonical argv、source commit、
+PID/PGID 和 pre-TERM identity 均保留在各自 no-clobber namespace。
+
+修复提交把 diagnostic motion bytes、unauthorized admission receipt、evaluator hard-contract 分支和
+Motion↔Racket 初始化后 shared-state probe 合成一个无重入生命周期；host 可运行的相关回归
+`236 passed`，Torch 行为套件仍待 Pod。solver/profile pins 与两个 N=1 contact bundle 已按新
+`hope_commands.py` 重新物化。下一门是 fresh `_r2` 自然跑完两次 update、零 Python
+Traceback、checkpoint finite、episode length 非恒 1，并回读 exact Reward/motion/manifest；
+因此 G05 状态仍为 `Partial`。
