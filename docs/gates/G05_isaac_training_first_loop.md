@@ -3781,7 +3781,8 @@ update 77：iteration 通常 `10--18 s`，mean episode 始终约 `21--22`，stri
 actual raw-hard 始终约 `47--49` events/rollout；`model_20/40/60.pt` 已写出且
 `model_20.pt` 逐 tensor finite。这足以否定当前 ready 在 100 updates 内自然跨过击球窗。
 run 随后命中 producer/consumer 不一致的 teacher-rate float32 边界检查而 Traceback；该 run
-按预登记停止，不能把 77--100 写成训练结果。
+按预登记停止，不能把 77--100 写成训练结果。`194e9786` 已统一 producer/consumer 的 canonical
+边界函数且保持 no-clipping；Pod1 focused test 对合法边界与越界篡改正/负控为 `2 passed`。
 
 老师腰部轨迹远离 A3 hard limits，q_des projection 也为零，故当前不授权调整 Reward、CaT 或
 真实 hard-edge 终止。下一门改为 nominal A3 plant 的 unified dynamic-ready/initial-qdes/

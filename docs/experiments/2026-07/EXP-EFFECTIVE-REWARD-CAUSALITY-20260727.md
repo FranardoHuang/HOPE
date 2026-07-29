@@ -824,6 +824,7 @@ mean episode 始终约 `21--22`、strike 始终为零，actual raw-hard 始终�
 `model_20/40/60.pt` 已写出且 `model_20.pt` finite。它随后因 teacher-rate 的 producer/consumer
 float32 边界复验不一致而 Traceback，按规则停止。前 77 update 已足以否定“当前 ready 会在
 100 updates 内自救”，但这不是 Reward arm，也不能外推到修复后的 dynamic ready。
+`194e9786` 已统一 canonical boundary seam；Pod1 正/负 focused test `2 passed`，无需 Reward A/B。
 
 由于 teacher 腰部轨迹离 A3 hard limits 有显著余量、q_des projection 也持续为零，当前证据
 指向 nominal A3 plant 与出生/qdes/preparation 合同，而不是 tracking、击球或 landing Reward

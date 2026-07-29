@@ -16,8 +16,8 @@
 - block stable-v2 的 1024×100 recovery 在 update 77 前始终 mean episode `21--22`、
   strike=`0`、actual raw-hard `47--49 events/rollout`，否定当前 ready 可在 100 updates 内
   自救；`model_20/40/60.pt` 已写出。update 77 后暴露 teacher-rate producer/consumer 的 float32
-  边界复验不一致并按 Traceback 停止；source 已改为复用 canonical 容差、继续禁止 clipping，
-  待 Pod focused test。Pod MuJoCo replay 同时表明 static LP 不等于动态 hold，下一步先物化
+  边界复验不一致并按 Traceback 停止；`194e9786` 已改为复用 canonical 容差、继续禁止
+  clipping，Pod1 focused test `2 passed`。Pod MuJoCo replay 同时表明 static LP 不等于动态 hold，下一步先物化
   action-specific hold qdes，再谈 preparation window 和 long。
 - stable-upper v2 loop 的 4096×5 probe 仍在击球前由 actual raw-hard 大量 reset：
   mean episode `21.01--24.20`、strike=`0`、吞吐约 `2.3--3.7k environment-steps/s`。

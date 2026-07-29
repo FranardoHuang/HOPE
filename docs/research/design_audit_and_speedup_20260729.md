@@ -410,7 +410,8 @@ stable-upper v2 的真实 Pod 结果否决了“静态 LP 可保持即可直接 
   `min <= rate <= max` 再验一次，触发
   `ValueError: action-ball teacher_rate is outside its certified range`。这是 producer/consumer
   数值接缝不一致，不是物理失败；修复必须复用同一 canonical `5e-7` 边界容差且继续禁止 clipping，
-  不做学习 A/B。
+  不做学习 A/B。`194e9786` 已完成该修复；Pod1 focused test 同时证明合法边界通过、旧的越界
+  篡改仍 fail closed（`2 passed`）。
 
 另在 Pod 用 exact A3 MuJoCo 动态 replay 复核 stable-v2 teacher。block/loop 分别在约
 `1.24/1.26 s` 后因 tilt 超门失败，COM support margin 约 `-0.375/-0.391 m`；两脚仍接地且
