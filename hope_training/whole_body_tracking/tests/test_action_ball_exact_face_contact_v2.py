@@ -74,6 +74,26 @@ def test_red_and_black_face_centres_are_not_the_control_site():
     )
 
 
+def test_quaternion_canonicalization_is_bitwise_idempotent():
+    source = (
+        0.6867758396936938,
+        0.3442809801333191,
+        -0.23836926079947673,
+        0.6530397713504417,
+    )
+    canonical = G.canonical_quat_wxyz(source)
+    assert G.canonical_quat_wxyz(canonical) == canonical
+    assert G.canonical_quat_wxyz(
+        tuple(-component for component in canonical)
+    ) == canonical
+    assert math.isclose(
+        math.sqrt(sum(component * component for component in canonical)),
+        1.0,
+        rel_tol=0.0,
+        abs_tol=G.QUATERNION_UNIT_PRESERVE_ABS_TOL,
+    )
+
+
 @pytest.mark.parametrize("face_sign", [G.RED_FACE_SIGN, G.BLACK_FACE_SIGN])
 def test_rotated_site_target_reconstructs_exact_ball_centre(face_sign):
     half = math.sqrt(0.5)

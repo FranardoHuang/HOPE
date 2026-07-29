@@ -1771,12 +1771,24 @@ def test_real_sampler_identity_is_bit_exact_with_runtime_receipt():
         base_yaw_rad=yaw,
     )
     racket_velocity = (6.0, 0.0, 0.0)
+    reference_quat = R._contact_geometry.canonical_quat_wxyz(
+        (
+            0.6867758396936938,
+            0.3442809801333191,
+            -0.23836926079947673,
+            0.6530397713504417,
+        )
+    )
+    reference_normal = R._contact_geometry.quat_rotate_wxyz(
+        reference_quat,
+        (0.0, 1.0, 0.0),
+    )
     geometry = R._contact_geometry.solve_exact_face_contact(
         ball_contact_w_m=sampled.contact_w_m,
         racket_face_center_velocity_w_mps=racket_velocity,
-        solved_raw_a_normal_w=(1.0, 0.0, 0.0),
+        solved_raw_a_normal_w=reference_normal,
         mount_normal_sign=1,
-        reference_racket_quat_wxyz=(1.0, 0.0, 0.0, 0.0),
+        reference_racket_quat_wxyz=reference_quat,
         reference_racket_angular_velocity_w_radps=(0.0, 0.0, 0.0),
         reference_racket_site_speed_mps=(
             profile.reference_racket_site_speed_mps
@@ -1797,6 +1809,22 @@ def test_real_sampler_identity_is_bit_exact_with_runtime_receipt():
         reaction_margin_s=profile.reaction_margin_s,
         teacher_rate_min=profile.teacher_rate_min,
         teacher_rate_max=profile.teacher_rate_max,
+    )
+    incoming_horizontal_norm = math.hypot(
+        sampled.incoming_velocity_w_mps[0],
+        sampled.incoming_velocity_w_mps[1],
+    )
+    counter_rally_task = R.CounterRallyTaskIdentity(
+        objective_profile_sha256=_digest(
+            "real-counter-rally-objective"
+        ),
+        return_direction_env_xy=(
+            -sampled.incoming_velocity_w_mps[0]
+            / incoming_horizontal_norm,
+            -sampled.incoming_velocity_w_mps[1]
+            / incoming_horizontal_norm,
+        ),
+        target_baseline_speed_mps=sampled.incoming_speed_mps,
     )
     task = R.ActionBallTaskReceipt.from_birth(
         birth,
@@ -1824,8 +1852,8 @@ def test_real_sampler_identity_is_bit_exact_with_runtime_receipt():
         landing_aim_w_xy_m=sampled.landing_aim_w_xy_m,
         racket_site_target_w_m=geometry.racket_site_target_w_m,
         mount_normal_sign=1,
-        racket_normal_w=(1.0, 0.0, 0.0),
-        reference_racket_quat_wxyz=(1.0, 0.0, 0.0, 0.0),
+        racket_normal_w=reference_normal,
+        reference_racket_quat_wxyz=reference_quat,
         reference_racket_angular_velocity_w_radps=(0.0, 0.0, 0.0),
         racket_command_quat_wxyz=(
             geometry.racket_command_quat_wxyz
@@ -1872,6 +1900,7 @@ def test_real_sampler_identity_is_bit_exact_with_runtime_receipt():
             sampled.sampling_levels.as_dict()
         ),
         frontier_arm=sampled.frontier_arm,
+        counter_rally_task=counter_rally_task,
     )
     assert task.sample_sha256 == sampled.sample_id
     assert task.sampler_identity_receipt() == (

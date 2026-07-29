@@ -82,6 +82,12 @@ BLACK_FACE_SIGN = -1
 # outside an exact [min,max] boundary.  This is an explicit, SHA-bound numeric
 # seam, not a general relaxation of the teacher-rate support.
 TEACHER_RATE_BOUNDARY_ABS_TOL = 5.0e-7
+# Normalizing an already-normalized binary64 quaternion can move every
+# component by one ULP.  Receipt construction and JSON round-tripping both
+# canonicalize quaternions, so that drift would make the second canonical SHA
+# differ from the first.  Preserve an already-unit representative inside this
+# narrow binary64 seam; materially non-unit inputs are still normalized.
+QUATERNION_UNIT_PRESERVE_ABS_TOL = 2.0e-15
 
 GEOMETRY_SOURCE_PAYLOAD = {
     "schema_version": EXACT_FACE_CONTACT_SCHEMA_VERSION,
@@ -137,6 +143,9 @@ GEOMETRY_SOURCE_PAYLOAD = {
     "face_signs": {"red": RED_FACE_SIGN, "black": BLACK_FACE_SIGN},
     "teacher_rate_boundary_abs_tolerance": (
         TEACHER_RATE_BOUNDARY_ABS_TOL
+    ),
+    "quaternion_unit_preserve_abs_tolerance": (
+        QUATERNION_UNIT_PRESERVE_ABS_TOL
     ),
     "teacher_rate_boundary_semantics": (
         "admit_the_raw_verified_rate_within_abs_tolerance_of_declared_"
@@ -294,7 +303,11 @@ def _quat(value: Sequence[float], *, name: str) -> Quat:
             "exact_face_contact_invalid_input",
             f"{name} must be non-zero",
         )
-    normalized = tuple(component / norm for component in raw)
+    normalized = (
+        raw
+        if abs(norm - 1.0) <= QUATERNION_UNIT_PRESERVE_ABS_TOL
+        else tuple(component / norm for component in raw)
+    )
     # q and -q are the same rotation.  A canonical sign makes receipt bytes
     # independent of a motion exporter choosing the other representative.
     for component in normalized:
