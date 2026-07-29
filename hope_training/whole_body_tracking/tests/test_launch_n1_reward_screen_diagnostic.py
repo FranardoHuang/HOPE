@@ -153,8 +153,7 @@ def exact_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     )
     prototype_document = {
         "schema_version": 2,
-        "scope": "upper",
-        "motions": [{"motion_id": "bh_loop_c"}],
+        "scopes": {"upper": [{"motion_id": "bh_loop_c"}]},
     }
     prototype = add_json(
         "configs/bh_loop_c.upper.prototype.v2.json",
@@ -303,6 +302,8 @@ def exact_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
         namespace = run_root / f"bh-loop-{profile_name}-{stage}"
         if stage == "smoke":
             num_envs, iterations, save = 1, 2, 1
+        elif stage == "long":
+            num_envs, iterations, save = 4096, 300_000_000_000, 100
         else:
             num_envs, iterations, save = 64, 100, 20
         spec = {
@@ -349,12 +350,63 @@ def exact_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     }
 
 
+def _convert_fixture_to_full(exact_repo, spec: dict) -> Path:
+    repo = exact_repo["repo"]
+    bundle_path = repo / spec["bundle"]["path"]
+    bundle = json.loads(bundle_path.read_text())
+
+    prototype_path = repo / bundle["prototype"]["path"]
+    prototype = json.loads(prototype_path.read_text())
+    prototype["scopes"] = {"full": prototype["scopes"].pop("upper")}
+    prototype_path.write_bytes(_canonical(prototype))
+    prototype_sha = hashlib.sha256(prototype_path.read_bytes()).hexdigest()
+    bundle["prototype"]["scope"] = "full"
+    bundle["prototype"]["sha256"] = prototype_sha
+
+    manifest_path = repo / bundle["manifest"]["path"]
+    manifest = json.loads(manifest_path.read_text())
+    manifest["prototype"]["scope"] = "full"
+    manifest["prototype"]["sha256"] = prototype_sha
+    manifest_path.write_bytes(_canonical(manifest))
+    bundle["manifest"]["sha256"] = hashlib.sha256(
+        manifest_path.read_bytes()
+    ).hexdigest()
+
+    full_claims = dict(bundle["claims"])
+    full_claims.update(
+        {"diagnostic_only": True, "training_authorized": False}
+    )
+    contact_path = repo / bundle["contact_alignment"]["path"]
+    contact = json.loads(contact_path.read_text())
+    contact["scope"] = "full"
+    contact["claims"] = full_claims
+    contact_path.write_bytes(_canonical(contact))
+    bundle["contact_alignment"]["sha256"] = hashlib.sha256(
+        contact_path.read_bytes()
+    ).hexdigest()
+
+    bundle["scope"] = "full"
+    bundle["claims"] = full_claims
+    bundle_path.write_bytes(_canonical(bundle))
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", "full diagnostic fixture")
+
+    spec["scope"] = "full"
+    spec["bundle"]["sha256"] = hashlib.sha256(
+        bundle_path.read_bytes()
+    ).hexdigest()
+    spec["source"]["commit_sha"] = _git(repo, "rev-parse", "HEAD")
+    spec_path = repo.parent / "full-spec.json"
+    spec_path.write_bytes(_canonical(spec))
+    return spec_path
+
+
 @pytest.mark.parametrize(
     ("profile", "expected"),
     [
-        ("current_low", ("4.0", "0.5", "0.5")),
-        ("task_mid_x2", ("8.0", "1.0", "1.0")),
-        ("task_strong_x4", ("16.0", "2.0", "2.0")),
+        ("current_low", ("4.0", "0.5", "0.5", "1.0")),
+        ("mimic_x2", ("4.0", "0.5", "0.5", "2.0")),
+        ("task_strong_x4", ("16.0", "2.0", "2.0", "1.0")),
     ],
 )
 def test_plan_binds_exact_three_reward_profiles_and_no_override_seam(
@@ -369,10 +421,19 @@ def test_plan_binds_exact_three_reward_profiles_and_no_override_seam(
     assert payload["curriculum_promotion_prohibited"] is True
     assert "task.racket.action_ball_diagnostic_unauthorized=true" in argv
     assert "task.actor_obs_contract=action_ball_n1" in argv
+    assert "algo.policy.init_noise_std=0.15" in argv
+    assert "algo.policy.init_noise_std=1.0" not in argv
     assert "task.rewards.full_body_mimic=false" in argv
+    assert f"task.rewards.motion_scale={expected[3]}" in argv
     assert f"task.rewards.racket_position_weight={expected[0]}" in argv
     assert f"task.rewards.racket_velocity_weight={expected[1]}" in argv
     assert f"task.rewards.racket_normal_weight={expected[2]}" in argv
+    assert payload["reward_weights"] == {
+        "racket_position_weight": float(expected[0]),
+        "racket_velocity_weight": float(expected[1]),
+        "racket_normal_weight": float(expected[2]),
+        "motion_scale": float(expected[3]),
+    }
     assert not any("override" in token for token in argv)
     assert not Path(payload["spec"]["namespace"]).exists()
     assert (
@@ -381,9 +442,83 @@ def test_plan_binds_exact_three_reward_profiles_and_no_override_seam(
     )
 
 
-def test_rejects_unknown_profile_and_long_budget(exact_repo):
+def test_full_scope_is_diagnostic_only_and_enables_full_body_mimic(exact_repo):
+    spec, _path = exact_repo["make_spec"]()
+    path = _convert_fixture_to_full(exact_repo, spec)
+    payload = L.build_plan(path)["canonical_payload"]
+
+    assert payload["spec"]["scope"] == "full"
+    assert payload["bundle"]["scope"] == "full"
+    assert payload["bundle"]["prototype"]["scope"] == "full"
+    assert payload["diagnostic_unauthorized"] is True
+    assert payload["formal_evidence_prohibited"] is True
+    assert payload["bundle"]["contact_alignment"]["status"] == "PASS"
+    assert "task.rewards.full_body_mimic=true" in payload["training_argv"]
+    assert "task.rewards.full_body_mimic=false" not in payload["training_argv"]
+
+
+@pytest.mark.parametrize(
+    ("tamper", "match"),
+    [
+        ("bundle_scope", "bundle scope differs"),
+        ("prototype_scope", "prototype must be schema 2"),
+        ("manifest_scope", "manifest prototype scope differs"),
+        ("contact_scope", "contact receipt scope differs"),
+        ("diagnostic_only", "frozen-action contact alignment only"),
+        ("training_authorized", "frozen-action contact alignment only"),
+    ],
+)
+def test_full_scope_rejects_scope_or_diagnostic_claim_drift(
+    exact_repo, tamper, match
+):
+    spec, _path = exact_repo["make_spec"]()
+    path = _convert_fixture_to_full(exact_repo, spec)
+    repo = exact_repo["repo"]
+    bundle_path = repo / spec["bundle"]["path"]
+    bundle = json.loads(bundle_path.read_text())
+
+    if tamper == "bundle_scope":
+        bundle["scope"] = "upper"
+    elif tamper == "prototype_scope":
+        bundle["prototype"]["scope"] = "upper"
+    elif tamper == "manifest_scope":
+        artifact_path = repo / bundle["manifest"]["path"]
+        artifact = json.loads(artifact_path.read_text())
+        artifact["prototype"]["scope"] = "upper"
+        artifact_path.write_bytes(_canonical(artifact))
+        bundle["manifest"]["sha256"] = hashlib.sha256(
+            artifact_path.read_bytes()
+        ).hexdigest()
+    elif tamper == "contact_scope":
+        artifact_path = repo / bundle["contact_alignment"]["path"]
+        artifact = json.loads(artifact_path.read_text())
+        artifact["scope"] = "upper"
+        artifact_path.write_bytes(_canonical(artifact))
+        bundle["contact_alignment"]["sha256"] = hashlib.sha256(
+            artifact_path.read_bytes()
+        ).hexdigest()
+    else:
+        bundle["claims"][tamper] = tamper != "diagnostic_only"
+
+    bundle_path.write_bytes(_canonical(bundle))
+    spec["bundle"]["sha256"] = hashlib.sha256(
+        bundle_path.read_bytes()
+    ).hexdigest()
+    _git(repo, "add", ".")
+    _git(repo, "commit", "-qm", f"tamper {tamper}")
+    spec["source"]["commit_sha"] = _git(repo, "rev-parse", "HEAD")
+    path.write_bytes(_canonical(spec))
+
+    with pytest.raises(L.LaunchRefused, match=match):
+        L.build_plan(path)
+
+
+@pytest.mark.parametrize("profile", ("user_override", "task_mid_x2"))
+def test_rejects_unknown_or_retired_profile_and_canary_budget(
+    exact_repo, profile
+):
     spec, path = exact_repo["make_spec"]()
-    spec["reward_profile"] = "user_override"
+    spec["reward_profile"] = profile
     path.write_bytes(_canonical(spec))
     with pytest.raises(L.LaunchRefused, match="reward_profile"):
         L.build_plan(path)
@@ -394,9 +529,36 @@ def test_rejects_unknown_profile_and_long_budget(exact_repo):
     with pytest.raises(L.LaunchRefused, match="\\[10,2000\\]"):
         L.build_plan(path)
 
-    spec["stage"] = "long"
+
+
+def test_accepts_only_the_exact_long_budget(exact_repo):
+    spec, path = exact_repo["make_spec"](stage="long")
+    payload = L.build_plan(path)["canonical_payload"]
+    assert payload["long_stage_prohibited"] is False
+    assert payload["formal_evidence_prohibited"] is True
+    assert payload["curriculum_promotion_prohibited"] is True
+    assert payload["diagnostic_unauthorized"] is True
+    assert payload["spec"]["num_envs"] == 4096
+    assert payload["spec"]["max_iterations"] == 300_000_000_000
+    assert payload["spec"]["save_interval"] == 100
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("num_envs", 4095),
+        ("num_envs", 4097),
+        ("max_iterations", 299_999_999_999),
+        ("max_iterations", 300_000_000_001),
+        ("save_interval", 99),
+        ("save_interval", 101),
+    ],
+)
+def test_rejects_any_long_budget_drift(exact_repo, field, value):
+    spec, path = exact_repo["make_spec"](stage="long")
+    spec[field] = value
     path.write_bytes(_canonical(spec))
-    with pytest.raises(L.LaunchRefused, match="long is forbidden"):
+    with pytest.raises(L.LaunchRefused, match="long is exactly"):
         L.build_plan(path)
 
 
@@ -467,4 +629,4 @@ def test_source_contains_lifetime_lock_double_gpu_check_and_no_shell():
     assert "shell=True" not in source
     assert "subprocess.Popen" not in source
     assert "long_stage_prohibited" in source
-    assert L.ALLOWED_STAGES == frozenset(("smoke", "canary"))
+    assert L.ALLOWED_STAGES == frozenset(("smoke", "canary", "long"))

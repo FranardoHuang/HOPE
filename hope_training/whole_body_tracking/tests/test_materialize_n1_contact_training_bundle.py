@@ -110,7 +110,13 @@ def _make_repo(tmp_path: Path, action_id: str) -> dict[str, object]:
     }
 
 
-def _materialize(fixture: dict[str, object], action_id: str):
+def _materialize(
+    fixture: dict[str, object],
+    action_id: str,
+    *,
+    scope: str = B.SCOPE,
+    strike_frame: int | None = None,
+):
     return B.materialize_n1_contact_bundle(
         repo_root=fixture["root"],
         action_id=action_id,
@@ -120,7 +126,45 @@ def _materialize(fixture: dict[str, object], action_id: str):
         expected_profile_pins_sha256=fixture["profile_sha"],
         output_dir=Path(fixture["root"]) / "configs/n1_contact",
         require_git_tracked_motion=False,
+        scope=scope,
+        strike_frame=strike_frame,
     )
+
+
+def _install_full_motion_fixture(
+    fixture: dict[str, object],
+    action_id: str,
+    monkeypatch: pytest.MonkeyPatch,
+) -> tuple[dict[str, object], int]:
+    """Use one tracked schema-v2 motion as a scope-routing fixture."""
+
+    source_action = next(
+        row
+        for row in json.loads(Path(fixture["source_path"]).read_text())[
+            "actions"
+        ]
+        if row["action_id"] == action_id
+    )
+    upper_facts = B.SUPPORTED_ACTIONS[action_id]
+    relative = Path("motions/test_fixtures") / (
+        f"{action_id}_full_scope_fixture.npz"
+    )
+    target = Path(fixture["root"]) / relative
+    _copy(REPO_ROOT / upper_facts["motion_path"], target)
+    full_facts = {
+        "motion_path": relative.as_posix(),
+        "motion_sha256": B._sha256_file(target),
+        "reference_t_hit_s": source_action["reference_t_hit_s"],
+        "reference_t_cycle_s": source_action["reference_t_cycle_s"],
+    }
+    monkeypatch.setitem(B.FULL_SUPPORTED_ACTIONS, action_id, full_facts)
+    strike_frame = round(
+        source_action["strike_phase"]
+        * (
+            source_action["reference_t_cycle_s"] * 50.0
+        )
+    )
+    return full_facts, strike_frame
 
 
 @pytest.mark.parametrize("action_id", ("bh_loop_c", "bh_block"))
@@ -235,22 +279,314 @@ def test_materializes_strict_contact_only_bundle(tmp_path: Path, action_id: str)
             abs=1.0e-12,
         )
     )
+def test_scope_cli_defaults_to_upper():
+    arguments = B._build_parser().parse_args(
+        [
+            "--action-id",
+            "bh_loop_c",
+            "--profile-pins",
+            "pins.json",
+            "--expected-profile-pins-sha256",
+            "0" * 64,
+            "--output-dir",
+            "out",
+        ]
+    )
+    assert arguments.scope == "upper"
+    assert arguments.strike_frame is None
 
 
-def test_outputs_are_deterministic_and_never_clobbered(tmp_path: Path):
+def test_full_scope_pins_exact_motion_facts():
+    assert B.FULL_SUPPORTED_ACTIONS == {
+        "bh_loop_c": {
+            "motion_path": (
+                "motions/fivebind_n5_20260728/"
+                "bh_loop_c_full_full_fivebind.npz"
+            ),
+            "motion_sha256": (
+                "010740965573863c6dbcb48f4efa3318eea51d1d005da0e458824c837a43c8b0"
+            ),
+            "reference_t_hit_s": 0.76,
+            "reference_t_cycle_s": 1.6,
+        },
+        "bh_block": {
+            "motion_path": (
+                "motions/fivebind_n5_20260728/"
+                "bh_block_full_full_fivebind.npz"
+            ),
+            "motion_sha256": (
+                "12a6c5b7914dc2d023bbd0447fab41ccc80de7d1be0bb4a8018a98e453dceefa"
+            ),
+            "reference_t_hit_s": 0.52,
+            "reference_t_cycle_s": 1.08,
+        },
+    }
+
+
+@pytest.mark.parametrize("action_id", ("bh_loop_c", "bh_block"))
+def test_full_scope_retargets_contact_box_and_preserves_incoming_semantics(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    action_id: str,
+):
+    fixture = _make_repo(tmp_path, action_id)
+    full_facts, strike_frame = _install_full_motion_fixture(
+        fixture, action_id, monkeypatch
+    )
+    # A negative tolerance makes the upper stationary-root checks impossible;
+    # full must bypass both because root motion belongs to full-body tracking.
+    monkeypatch.setattr(B, "ROOT_STATIONARY_TOLERANCE_M", -1.0)
+    monkeypatch.setattr(B, "ROOT_YAW_TOLERANCE_RAD", -1.0)
+    result = _materialize(
+        fixture,
+        action_id,
+        scope="full",
+        strike_frame=strike_frame,
+    )
+    root = Path(fixture["root"])
+    bundle = json.loads((root / result["bundle_path"]).read_text())
+    manifest = json.loads((root / result["manifest_path"]).read_text())
+    prototype = json.loads((root / result["prototype_path"]).read_text())
+    receipt = json.loads(
+        (root / result["contact_alignment_path"]).read_text()
+    )
+    source = json.loads(Path(fixture["source_path"]).read_text())
+    source_action = next(
+        row for row in source["actions"] if row["action_id"] == action_id
+    )
+    action = manifest["actions"][0]
+
+    assert bundle["scope"] == "full"
+    assert bundle["prototype"]["scope"] == "full"
+    assert bundle["claims"]["diagnostic_only"] is True
+    assert bundle["claims"]["training_authorized"] is False
+    assert receipt["scope"] == "full"
+    assert receipt["claims"] == bundle["claims"]
+    assert tuple(prototype["scopes"]) == ("full",)
+    assert prototype["scopes"]["full"][0]["scope"] == "full"
+    assert action["motion_path"] == full_facts["motion_path"]
+    assert action["motion_sha256"] == full_facts["motion_sha256"]
+    assert action["reference_t_hit_s"] == full_facts[
+        "reference_t_hit_s"
+    ]
+    assert action["reference_t_cycle_s"] == full_facts[
+        "reference_t_cycle_s"
+    ]
+    manifest_module = B._load_module(
+        f"test_manifest_{action_id}",
+        root / B.MDP_RELATIVE_DIR / "action_ball_manifest.py",
+    )
+    assert action["action_uid"] == (
+        manifest_module.derive_action_ball_action_uid(
+            action_id,
+            action["family"],
+            action["motion_sha256"],
+        )
+    )
+    for key in (
+        "bundle_path",
+        "manifest_path",
+        "prototype_path",
+        "contact_alignment_path",
+    ):
+        assert f"{action_id}.full." in Path(result[key]).name
+    for path_key, sha_key in (
+        ("bundle_path", "bundle_sha256"),
+        ("manifest_path", "manifest_sha256"),
+        ("prototype_path", "prototype_sha256"),
+        ("contact_alignment_path", "contact_alignment_sha256"),
+    ):
+        assert result[sha_key][:12] in Path(result[path_key]).name
+
+    source_profile = source_action["ball_profile"]
+    output_profile = action["ball_profile"]
+    contact_keys = {
+        "contact_offset_center_b_yaw_m",
+        "contact_offset_min_b_yaw_m",
+        "contact_offset_max_b_yaw_m",
+    }
+    timing_keys = {
+        "time_to_contact_center_s",
+        "time_to_contact_std_lower_max_s",
+        "time_to_contact_std_upper_max_s",
+        "time_to_contact_min_s",
+        "time_to_contact_max_s",
+    }
+    for key, value in source_profile.items():
+        if key not in contact_keys | timing_keys:
+            assert output_profile[key] == value
+    source_center = source_profile[
+        "contact_offset_center_b_yaw_m"
+    ]
+    output_center = output_profile[
+        "contact_offset_center_b_yaw_m"
+    ]
+    for bound_key in (
+        "contact_offset_min_b_yaw_m",
+        "contact_offset_max_b_yaw_m",
+    ):
+        assert [
+            bound - center
+            for bound, center in zip(
+                output_profile[bound_key], output_center
+            )
+        ] == pytest.approx(
+            [
+                bound - center
+                for bound, center in zip(
+                    source_profile[bound_key], source_center
+                )
+            ],
+            abs=1.0e-12,
+        )
+    assert output_center == pytest.approx(
+        receipt["alignment"][
+            "teacher_selected_face_center_b_yaw_m"
+        ],
+        abs=1.0e-12,
+    )
+    assert receipt["alignment"]["center_gate_distance_m"] <= 1.0e-12
+    assert (
+        receipt["alignment"]["contact_center_authority"]
+        == (
+            "full_motion_selected_rubber_face_center_at_explicit_"
+            "strike_frame"
+        )
+    )
+    assert (
+        receipt["alignment"]["upper_contact_center_preserved"] is False
+    )
+    minimum = (
+        action["reference_t_hit_s"] / action["teacher_rate_min"]
+        + action["reaction_margin_s"]
+    )
+    maximum = (
+        action["reference_t_hit_s"] / action["teacher_rate_max"]
+        + 1.0
+    )
+    assert output_profile["time_to_contact_min_s"] == pytest.approx(
+        minimum, abs=1.0e-12
+    )
+    assert output_profile["time_to_contact_max_s"] == pytest.approx(
+        maximum, abs=1.0e-12
+    )
+    assert (
+        manifest["counter_rally_objective"]["mode"]
+        == "counter_rally_v1"
+    )
+    assert manifest["solver_profile_sha256"] == fixture["solver_sha"]
+    assert manifest["physics_profile_sha256"] == fixture["physics_sha"]
+
+
+def test_full_scope_requires_matching_explicit_strike_frame(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+):
+    fixture = _make_repo(tmp_path, "bh_loop_c")
+    _, strike_frame = _install_full_motion_fixture(
+        fixture, "bh_loop_c", monkeypatch
+    )
+    with pytest.raises(
+        B.N1ContactBundleError,
+        match="requires one explicit integer strike frame",
+    ):
+        _materialize(fixture, "bh_loop_c", scope="full")
+    with pytest.raises(
+        B.N1ContactBundleError,
+        match="t_hit/t_cycle disagree",
+    ):
+        _materialize(
+            fixture,
+            "bh_loop_c",
+            scope="full",
+            strike_frame=strike_frame + 1,
+        )
+
+
+@pytest.mark.parametrize(
+    "action_id,strike_frame,t_hit_s,t_cycle_s",
+    (
+        ("bh_loop_c", 38, 0.76, 1.6),
+        ("bh_block", 26, 0.52, 1.08),
+    ),
+)
+def test_full_exact_asset_when_available(
+    tmp_path: Path,
+    action_id: str,
+    strike_frame: int,
+    t_hit_s: float,
+    t_cycle_s: float,
+):
+    facts = B.FULL_SUPPORTED_ACTIONS[action_id]
+    source_motion = REPO_ROOT / facts["motion_path"]
+    if not source_motion.is_file():
+        pytest.skip(f"exact {action_id} full asset is not restored locally")
+    if B._sha256_file(source_motion) != facts["motion_sha256"]:
+        pytest.skip(
+            f"local {action_id} full asset is not the pinned exact bytes"
+        )
+    fixture = _make_repo(tmp_path, action_id)
+    _copy(
+        source_motion,
+        Path(fixture["root"]) / facts["motion_path"],
+    )
+    result = _materialize(
+        fixture,
+        action_id,
+        scope="full",
+        strike_frame=strike_frame,
+    )
+    root = Path(fixture["root"])
+    manifest = json.loads((root / result["manifest_path"]).read_text())
+    receipt = json.loads(
+        (root / result["contact_alignment_path"]).read_text()
+    )
+    action = manifest["actions"][0]
+    assert action["reference_t_hit_s"] == t_hit_s
+    assert action["reference_t_cycle_s"] == t_cycle_s
+    assert action["strike_phase"] == pytest.approx(
+        strike_frame / (receipt["timing"]["frame_count"] - 1),
+        abs=1.0e-12,
+    )
+    assert action["mount_normal_sign"] == -1
+    assert receipt["timing"]["contact_frame"] == strike_frame
+    assert receipt["alignment"]["center_gate_distance_m"] <= 1.0e-12
+
+
+def test_default_upper_matches_explicit_and_never_clobbers_existing_outputs(
+    tmp_path: Path,
+):
     first = _make_repo(tmp_path / "first", "bh_loop_c")
     second = _make_repo(tmp_path / "second", "bh_loop_c")
     first_result = _materialize(first, "bh_loop_c")
-    second_result = _materialize(second, "bh_loop_c")
-    for key in (
-        "bundle_sha256",
-        "manifest_sha256",
-        "prototype_sha256",
-        "contact_alignment_sha256",
-    ):
-        assert first_result[key] == second_result[key]
+    second_result = _materialize(
+        second,
+        "bh_loop_c",
+        scope="upper",
+    )
+    assert first_result == second_result
+    first_root = Path(first["root"])
+    prototype = json.loads(
+        (first_root / first_result["prototype_path"]).read_text()
+    )
+    assert (
+        prototype["provenance"]["producer_source_sha256"]
+        == B._sha256_file(SCRIPT)
+    )
+    output_dir = first_root / "configs/n1_contact"
+    before = {
+        path.name: path.read_bytes()
+        for path in output_dir.iterdir()
+        if path.is_file()
+    }
     with pytest.raises(FileExistsError, match="no-clobber"):
-        _materialize(first, "bh_loop_c")
+        _materialize(first, "bh_loop_c", scope="upper")
+    after = {
+        path.name: path.read_bytes()
+        for path in output_dir.iterdir()
+        if path.is_file()
+    }
+    assert after == before
 
 
 @pytest.mark.parametrize(

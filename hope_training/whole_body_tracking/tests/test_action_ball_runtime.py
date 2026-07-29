@@ -991,12 +991,19 @@ class CrossBirthReplayedSampleSolver(Solver):
         return tuple(batches)
 
 
-def _broker(count=5, mode="no_move", pins=None):
+def _broker(
+    count=5,
+    mode="no_move",
+    pins=None,
+    *,
+    diagnostic_unauthorized=False,
+):
     bindings = _bindings(count)
     broker = R.ActionBirthBroker(
         bindings,
         _pins() if pins is None else pins,
         mode,
+        diagnostic_unauthorized=diagnostic_unauthorized,
     )
     authority = DomainAuthority(bindings, mode)
     provider = BirthProvider()
@@ -2382,6 +2389,268 @@ def test_request_many_uses_one_vectorized_callback_for_n93_births():
         sorted(birth.action_uid for birth in births)
     )
     assert all(task.swing_generation == 0 for task in tasks)
+
+
+def test_diagnostic_broker_skips_formal_state_and_replay_hooks():
+    bindings = _bindings(1)
+
+    class CountingProvider(BirthProvider):
+        def __init__(self):
+            super().__init__()
+            self.state_calls = 0
+            self.assert_calls = 0
+            self.highwater_calls = 0
+
+        def state_dict(self):
+            self.state_calls += 1
+            return super().state_dict()
+
+        def assert_issued_birth(self, receipt):
+            self.assert_calls += 1
+            return super().assert_issued_birth(receipt)
+
+        def birth_highwater_for(self, action_uid):
+            self.highwater_calls += 1
+            return super().birth_highwater_for(action_uid)
+
+    class CountingAuthority(DomainAuthority):
+        def __init__(self):
+            super().__init__(bindings, "no_move")
+            self.state_calls = 0
+            self.cursor_calls = 0
+
+        def state_dict(self):
+            self.state_calls += 1
+            return super().state_dict()
+
+        def domain_cursor_for(self, action_uid):
+            self.cursor_calls += 1
+            return super().domain_cursor_for(action_uid)
+
+    counts = {}
+    births = {}
+    for diagnostic in (False, True):
+        broker = R.ActionBirthBroker(
+            bindings,
+            _pins(),
+            "no_move",
+            diagnostic_unauthorized=diagnostic,
+        )
+        authority = CountingAuthority()
+        provider = CountingProvider()
+        broker.bind_domain_claim_authority(authority)
+        broker.bind_provider(provider)
+        provider.state_calls = 0
+        provider.assert_calls = 0
+        provider.highwater_calls = 0
+        authority.state_calls = 0
+        authority.cursor_calls = 0
+
+        births[diagnostic] = _reserve(broker)
+        counts[diagnostic] = (
+            provider.state_calls,
+            provider.assert_calls,
+            provider.highwater_calls,
+            authority.state_calls,
+            authority.cursor_calls,
+        )
+
+    assert births[False] == births[True]
+    assert all(value > 0 for value in counts[False])
+    assert counts[True] == (0, 0, 0, 0, 0)
+
+
+def test_diagnostic_pool_matches_formal_task_without_proof_hooks():
+    class CountingSolver(Solver):
+        def __init__(self):
+            super().__init__()
+            self.state_calls = 0
+            self.sample_assert_calls = 0
+            self.task_assert_calls = 0
+            self.assignment_assert_calls = 0
+
+        def state_dict(self):
+            self.state_calls += 1
+            return super().state_dict()
+
+        def assert_emitted_sample(self, receipt):
+            self.sample_assert_calls += 1
+            return super().assert_emitted_sample(receipt)
+
+        def assert_emitted_tasks(self, receipts):
+            self.task_assert_calls += 1
+            return super().assert_emitted_tasks(receipts)
+
+        def assert_proposal_assignments(self, assignments):
+            self.assignment_assert_calls += 1
+            return super().assert_proposal_assignments(assignments)
+
+        def reset_proof_counts(self):
+            self.state_calls = 0
+            self.sample_assert_calls = 0
+            self.task_assert_calls = 0
+            self.assignment_assert_calls = 0
+
+    tasks = {}
+    proof_counts = {}
+    fast_pool = None
+    fast_birth = None
+    for diagnostic in (False, True):
+        broker, _provider = _broker(
+            1, diagnostic_unauthorized=diagnostic
+        )
+        birth = _reserve(broker)
+        _consume(broker, birth)
+        pool = R.LazyActionTaskPool(
+            _bindings(1),
+            _pins(),
+            "no_move",
+            refill_size=1,
+            diagnostic_unauthorized=diagnostic,
+        )
+        solver = CountingSolver()
+        pool.bind_solver(solver)
+        pool.bind_birth_authority(broker)
+        solver.reset_proof_counts()
+        tasks[diagnostic] = pool.request(
+            birth, swing_generation=0
+        )
+        proof_counts[diagnostic] = (
+            solver.state_calls,
+            solver.sample_assert_calls,
+            solver.task_assert_calls,
+            solver.assignment_assert_calls,
+        )
+        if diagnostic:
+            fast_pool = pool
+            fast_birth = birth
+
+    assert tasks[False] == tasks[True]
+    assert all(value > 0 for value in proof_counts[False])
+    assert proof_counts[True] == (0, 0, 0, 0)
+    assert fast_pool.retire_birth(fast_birth) == 0
+    assert fast_pool._retired_births == {}
+    assert fast_pool._task_lifecycle == {}
+    assert fast_pool._diagnostic_birth_by_env == {}
+
+
+def test_diagnostic_pool_still_rejects_invalid_task_receipt():
+    class WrongMotionSolver(Solver):
+        def __call__(self, request):
+            batch = super().__call__(request)
+            forged = replace(
+                batch.receipts[0],
+                motion_sha256=_digest("wrong-motion"),
+            )
+            return R.ActionPoolRefillBatch(
+                action_uid=batch.action_uid,
+                proposed_count=batch.proposed_count,
+                proposal_sample_indices=batch.proposal_sample_indices,
+                receipts=(forged,),
+            )
+
+    broker, _provider = _broker(
+        1, diagnostic_unauthorized=True
+    )
+    birth = _reserve(broker)
+    _consume(broker, birth)
+    pool = R.LazyActionTaskPool(
+        _bindings(1),
+        _pins(),
+        "no_move",
+        refill_size=1,
+        diagnostic_unauthorized=True,
+    )
+    pool.bind_solver(WrongMotionSolver())
+    pool.bind_birth_authority(broker)
+
+    with pytest.raises(R.ActionBallContractError, match="action binding"):
+        pool.request(birth, swing_generation=0)
+    assert pool.materialized_action_uids == ()
+    assert pool._diagnostic_birth_by_env == {}
+
+
+def test_diagnostic_pool_requires_single_row_refill_and_matching_broker():
+    with pytest.raises(
+        R.ActionBallContractError,
+        match="require refill_size=1",
+    ):
+        R.LazyActionTaskPool(
+            _bindings(1),
+            _pins(),
+            "no_move",
+            refill_size=2,
+            diagnostic_unauthorized=True,
+        )
+
+    formal_broker, _provider = _broker(1)
+    fast_pool = R.LazyActionTaskPool(
+        _bindings(1),
+        _pins(),
+        "no_move",
+        diagnostic_unauthorized=True,
+    )
+    fast_pool.bind_solver(Solver())
+    with pytest.raises(
+        R.ActionBallContractError,
+        match="diagnostic modes differ",
+    ):
+        fast_pool.bind_birth_authority(formal_broker)
+
+
+def test_diagnostic_async_resets_keep_only_live_environment_state():
+    live_envs = 8
+    broker, _provider = _broker(
+        1, diagnostic_unauthorized=True
+    )
+    births = [
+        _reserve(broker, env_id=env_id)
+        for env_id in range(live_envs)
+    ]
+    for birth in births:
+        _commit(broker, birth)
+    broker.consume_many_true_reset(
+        tuple(_claim(birth) for birth in births)
+    )
+
+    pool = R.LazyActionTaskPool(
+        _bindings(1),
+        _pins(),
+        "no_move",
+        refill_size=1,
+        diagnostic_unauthorized=True,
+    )
+    pool.bind_solver(Solver())
+    pool.bind_birth_authority(broker)
+    pool.request_many(
+        tuple(
+            R.ActionTaskIssueRequest(birth, 0)
+            for birth in births
+        )
+    )
+
+    assert len(broker._consumed_receipts) == live_envs
+    assert len(pool._diagnostic_birth_by_env) == live_envs
+    assert len(pool._diagnostic_active_sample_sha256) == live_envs
+
+    for generation in range(2, 7):
+        retired = births[0]
+        assert pool.retire_birth(retired) == 0
+        replacement = _reserve(
+            broker,
+            env_id=retired.env_id,
+            generation=generation,
+        )
+        _consume(broker, replacement)
+        pool.request(replacement, swing_generation=0)
+        births[0] = replacement
+
+        assert len(broker._consumed_receipts) == live_envs
+        assert len(broker._diagnostic_consumed_key_by_env) == live_envs
+        assert len(pool._diagnostic_birth_by_env) == live_envs
+        assert len(pool._diagnostic_active_sample_sha256) == live_envs
+        assert pool._retired_births == {}
+        assert pool._task_lifecycle == {}
 
 
 def test_same_action_concurrent_births_have_independent_subqueues():

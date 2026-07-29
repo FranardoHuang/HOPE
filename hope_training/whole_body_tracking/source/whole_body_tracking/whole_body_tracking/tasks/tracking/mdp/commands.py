@@ -1943,6 +1943,13 @@ class MotionCommand(CommandTerm):
             raise ValueError(
                 "action-ball birth broker must be the exact repository ActionBirthBroker"
             )
+        if (
+            broker.diagnostic_fast_path
+            != self._canonical_diagnostic_unauthorized
+        ):
+            raise ValueError(
+                "action-ball broker diagnostic mode differs from Motion"
+            )
         repo_root = self._action_ball_resolve_root(trusted_repo_root)
         if self._canonical_diagnostic_unauthorized:
             print(
@@ -2563,7 +2570,14 @@ class MotionCommand(CommandTerm):
                 (env_id, generation, action_slot, action_uid)
             )
 
-        broker_state_before = self._action_ball_birth_broker.state_dict()
+        diagnostic_fast_path = (
+            self._action_ball_birth_broker.diagnostic_fast_path
+        )
+        broker_state_before = (
+            None
+            if diagnostic_fast_path
+            else self._action_ball_birth_broker.state_dict()
+        )
         try:
             receipts = self._action_ball_birth_broker.reserve_many_true_reset(
                 tuple(requests), reset_kind="true_reset"
@@ -2627,9 +2641,10 @@ class MotionCommand(CommandTerm):
                     "action-ball broker returned a malformed root batch"
                 )
         except Exception as exc:
-            self._rollback_action_ball_broker(
-                broker_state_before, original_error=exc
-            )
+            if not diagnostic_fast_path:
+                self._rollback_action_ball_broker(
+                    broker_state_before, original_error=exc
+                )
             raise
         return {
             "broker_state_before": broker_state_before,
@@ -2659,13 +2674,15 @@ class MotionCommand(CommandTerm):
         original_error: BaseException,
     ) -> None:
         rollback_error = None
-        try:
-            self._rollback_action_ball_broker(
-                transaction["broker_state_before"],
-                original_error=original_error,
-            )
-        except Exception as exc:
-            rollback_error = exc
+        broker_state_before = transaction["broker_state_before"]
+        if broker_state_before is not None:
+            try:
+                self._rollback_action_ball_broker(
+                    broker_state_before,
+                    original_error=original_error,
+                )
+            except Exception as exc:
+                rollback_error = exc
         # Restore Motion's publication fields even when a broken callback prevents broker
         # rollback, so no prefix of the batch is presented as a committed local episode.
         self._action_ball_reset_generation[env_ids] = transaction[
@@ -2740,6 +2757,10 @@ class MotionCommand(CommandTerm):
         for (env_id, _generation, _slot, _uid), receipt_sha in zip(
             request_rows, receipt_sha256
         ):
+            if self._action_ball_birth_broker.diagnostic_fast_path:
+                previous = updated_receipts[env_id]
+                if previous is not None:
+                    updated_seen.discard(previous)
             updated_receipts[env_id] = receipt_sha
             updated_seen.add(receipt_sha)
         self._action_ball_reset_generation[env_ids] = next_generation
@@ -2830,15 +2851,33 @@ class MotionCommand(CommandTerm):
             raise ValueError("action-ball task ref has a forged runtime type")
         if type(receipt) is not runtime.ActionBallTaskReceipt:
             raise ValueError("action-ball task receipt has a forged runtime type")
-        canonical_ref = receipt.task_ref()
-        if type(canonical_ref) is not runtime.ActionTaskReceiptRef:
-            raise ValueError(
-                "action-ball task receipt emitted a forged canonical ref"
+        if self._action_ball_birth_broker.diagnostic_fast_path:
+            if (
+                task_ref.env_id != receipt.env_id
+                or task_ref.reset_generation != receipt.reset_generation
+                or task_ref.swing_generation != receipt.swing_generation
+                or task_ref.action_uid != receipt.action_uid
+                or task_ref.action_slot != receipt.action_slot
+                or task_ref.birth_sha256 != receipt.birth_sha256
+                or task_ref.sample_sha256 != receipt.sample_sha256
+            ):
+                raise ValueError(
+                    "diagnostic action-ball task ref changed receipt identity"
+                )
+            self._action_ball_sha256(
+                task_ref.task_sha256, name="task_ref.task_sha256"
             )
-        if canonical_ref != task_ref:
-            raise ValueError(
-                "action-ball task resolver changed the requested immutable ref"
-            )
+        else:
+            canonical_ref = receipt.task_ref()
+            if type(canonical_ref) is not runtime.ActionTaskReceiptRef:
+                raise ValueError(
+                    "action-ball task receipt emitted a forged canonical ref"
+                )
+            if canonical_ref != task_ref:
+                raise ValueError(
+                    "action-ball task resolver changed the requested "
+                    "immutable ref"
+                )
         reset_generation = int(
             self._action_ball_reset_generation[env_id].item()
         )
@@ -4468,7 +4507,15 @@ class MotionCommand(CommandTerm):
         }
         if self._action_ball_birth_broker is not None:
             state["action_ball_birth"] = (
-                self._action_ball_exact_resume_state_dict()
+                {
+                    "diagnostic_unauthorized": True,
+                    "exact_resume_supported": False,
+                    "broker_registry_sha256": (
+                        self._action_ball_birth_broker.registry_sha256
+                    ),
+                }
+                if self._action_ball_birth_broker.diagnostic_fast_path
+                else self._action_ball_exact_resume_state_dict()
             )
         return state
 
@@ -4676,6 +4723,15 @@ class MotionCommand(CommandTerm):
         if state["identity"] != self._exact_resume_identity():
             raise ValueError(
                 "MotionCommand exact resume motion/config/clip identity does not match"
+            )
+        if (
+            action_ball_bound
+            and self._action_ball_birth_broker.diagnostic_fast_path
+        ):
+            raise ValueError(
+                "diagnostic_unauthorized fast checkpoints contain policy/"
+                "optimizer weights but no exact Motion ActionBall resume "
+                "state"
             )
         action_ball_state = (
             self._prepare_action_ball_exact_resume_state(

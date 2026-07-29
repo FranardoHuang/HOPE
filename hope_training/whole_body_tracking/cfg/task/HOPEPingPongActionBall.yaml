@@ -165,6 +165,9 @@ racket:
   action_ball_frozen_eval_interval_updates: 100
   action_ball_diagnostic_unauthorized: false
   action_ball_seed: 0
+  # Formal runs retain the reviewed prefetch depth.  The explicitly branded
+  # diagnostic runtime forces the effective value to 1 so one-step episodes
+  # do not solve and immediately discard fifteen unused tasks per reset.
   action_ball_pool_refill_rows: 16
   action_ball_fixed_direction: true
 

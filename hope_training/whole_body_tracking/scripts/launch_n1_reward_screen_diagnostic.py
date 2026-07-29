@@ -3,11 +3,12 @@
 
 This is deliberately a *diagnostic* launcher.  It does not consume or mint a
 formal action-set identity, evaluator authority, promotion receipt, exact
-resume claim, export authority, or judge authority.  Its only two public
+resume claim, export authority, or judge authority.  Its three public
 stages are:
 
 * ``smoke``: exactly one environment and two PPO updates; and
-* ``canary``: a bounded first reward-screen budget.
+* ``canary``: a bounded first reward-screen budget; and
+* ``long``: the single reviewed 4096-environment long-run budget.
 
 The launcher has no arbitrary Hydra override input.  It accepts one canonical
 JSON spec, verifies an exact clean Git commit and a tracked N=1 bundle, binds
@@ -51,7 +52,8 @@ BUNDLE_KIND = "n1_contact_training_bundle_v1"
 CONTACT_KIND = "n1_contact_alignment_receipt_v1"
 EXPERIMENT_NAME = "agibot_a3_hope_action_ball_n1_reward_screen_diagnostic"
 ALLOWED_ACTIONS = frozenset(("bh_loop_c", "bh_block"))
-ALLOWED_STAGES = frozenset(("smoke", "canary"))
+ALLOWED_STAGES = frozenset(("smoke", "canary", "long"))
+ALLOWED_SCOPES = frozenset(("upper", "full"))
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 SAFE_COMPONENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*$")
@@ -85,23 +87,27 @@ SOLVER_IMPLEMENTATION_SOURCES = (
     "counter_rally_torch.py",
 )
 
-# Only these three task-tracking weights vary.  Outcome, imitation,
-# regularization, soft/hard-limit, table and fall terms stay byte-identical.
+# The reviewed screen changes either task tracking or imitation, never both.
+# Outcome, regularization, soft/hard-limit, table and fall terms stay
+# byte-identical.
 REWARD_PROFILES: Mapping[str, Mapping[str, float]] = {
     "current_low": {
         "racket_position_weight": 4.0,
         "racket_velocity_weight": 0.5,
         "racket_normal_weight": 0.5,
+        "motion_scale": 1.0,
     },
-    "task_mid_x2": {
-        "racket_position_weight": 8.0,
-        "racket_velocity_weight": 1.0,
-        "racket_normal_weight": 1.0,
+    "mimic_x2": {
+        "racket_position_weight": 4.0,
+        "racket_velocity_weight": 0.5,
+        "racket_normal_weight": 0.5,
+        "motion_scale": 2.0,
     },
     "task_strong_x4": {
         "racket_position_weight": 16.0,
         "racket_velocity_weight": 2.0,
         "racket_normal_weight": 2.0,
+        "motion_scale": 1.0,
     },
 }
 
@@ -156,6 +162,11 @@ _BUNDLE_CLAIM_KEYS = (
     "post_bounce_claim",
     "baseline_crossing_claim",
     "deployment_claim",
+)
+_FULL_DIAGNOSTIC_CLAIM_KEYS = (
+    *_BUNDLE_CLAIM_KEYS,
+    "diagnostic_only",
+    "training_authorized",
 )
 _CONTACT_KEYS = (
     "schema_version",
@@ -645,10 +656,15 @@ def _validate_contact_receipt(
     if gate_distance > threshold or alignment["center_within_threshold"] is not True:
         raise LaunchRefused("contact center is outside the 0.03 m gate")
 
-    claims = _exact_dict(
-        row["claims"], _BUNDLE_CLAIM_KEYS, name="contact.claims"
+    claim_keys = (
+        _FULL_DIAGNOSTIC_CLAIM_KEYS
+        if bundle["scope"] == "full"
+        else _BUNDLE_CLAIM_KEYS
     )
-    _validate_claims(claims, name="contact.claims")
+    claims = _exact_dict(row["claims"], claim_keys, name="contact.claims")
+    _validate_claims(
+        claims, name="contact.claims", scope=bundle["scope"]
+    )
     return {
         "schema_version": 1,
         "status": "PASS",
@@ -659,7 +675,9 @@ def _validate_contact_receipt(
     }
 
 
-def _validate_claims(claims: dict[str, Any], *, name: str) -> None:
+def _validate_claims(
+    claims: dict[str, Any], *, name: str, scope: str
+) -> None:
     expected = {
         "selector_executed": False,
         "action_identity_frozen_before_ball_sampling": True,
@@ -669,6 +687,13 @@ def _validate_claims(claims: dict[str, Any], *, name: str) -> None:
         "baseline_crossing_claim": False,
         "deployment_claim": False,
     }
+    if scope == "full":
+        expected.update(
+            {
+                "diagnostic_only": True,
+                "training_authorized": False,
+            }
+        )
     if claims != expected:
         raise LaunchRefused(
             f"{name} must claim frozen-action contact alignment only"
@@ -694,12 +719,19 @@ def _validate_bundle(
     if bundle["action_id"] != expected_action:
         raise LaunchRefused("N1 bundle action_id differs from spec")
     _plain_int(bundle["action_uid"], name="N1 bundle.action_uid", minimum=1)
-    if bundle["scope"] != expected_scope or expected_scope != "upper":
-        raise LaunchRefused("tonight's diagnostic launcher accepts upper scope only")
-    claims = _exact_dict(
-        bundle["claims"], _BUNDLE_CLAIM_KEYS, name="N1 bundle.claims"
+    if bundle["scope"] != expected_scope:
+        raise LaunchRefused("N1 bundle scope differs from spec")
+    claim_keys = (
+        _FULL_DIAGNOSTIC_CLAIM_KEYS
+        if expected_scope == "full"
+        else _BUNDLE_CLAIM_KEYS
     )
-    _validate_claims(claims, name="N1 bundle.claims")
+    claims = _exact_dict(
+        bundle["claims"], claim_keys, name="N1 bundle.claims"
+    )
+    _validate_claims(
+        claims, name="N1 bundle.claims", scope=expected_scope
+    )
 
     source_manifest_pin, _source_manifest = _load_tracked_json(
         checkout,
@@ -826,10 +858,20 @@ def _validate_bundle(
     )
     if (
         prototype_pin["schema_version"] != 2
-        or prototype_pin["scope"] != "upper"
+        or prototype_pin["scope"] != expected_scope
         or prototype.get("schema_version") != 2
     ):
-        raise LaunchRefused("N1 prototype must be schema 2 upper scope")
+        raise LaunchRefused(
+            "N1 prototype must be schema 2 with the exact spec scope"
+        )
+    prototype_scopes = prototype.get("scopes")
+    if (
+        type(prototype_scopes) is not dict
+        or set(prototype_scopes) != {expected_scope}
+    ):
+        raise LaunchRefused(
+            "N1 prototype document must contain exactly the spec scope"
+        )
     manifest_pin, manifest = _load_tracked_json(
         checkout,
         commit_sha,
@@ -870,8 +912,8 @@ def _validate_bundle(
     if type(prototype_ref) is not dict:
         raise LaunchRefused("N1 manifest prototype pin is missing")
     _same_pin(prototype_ref, prototype_pin, name="manifest prototype")
-    if prototype_ref.get("scope") != "upper":
-        raise LaunchRefused("N1 manifest prototype scope must be upper")
+    if prototype_ref.get("scope") != expected_scope:
+        raise LaunchRefused("N1 manifest prototype scope differs from spec")
     holdout = manifest.get("holdout")
     if (
         type(holdout) is not dict
@@ -915,7 +957,7 @@ def _validate_bundle(
         "bundle": normalized_bundle_pin,
         "action_id": expected_action,
         "action_uid": bundle["action_uid"],
-        "scope": "upper",
+        "scope": expected_scope,
         "source_manifest": source_manifest_pin,
         "motion": motion_pin,
         "profile_pins": profile_pin,
@@ -971,7 +1013,7 @@ def _validate_budget(
     stage: Any, num_envs: Any, max_iterations: Any, save_interval: Any
 ) -> dict[str, Any]:
     if type(stage) is not str or stage not in ALLOWED_STAGES:
-        raise LaunchRefused("stage must be smoke or canary; long is forbidden")
+        raise LaunchRefused("stage must be smoke, canary, or exact long")
     envs = _plain_int(num_envs, name="num_envs", minimum=1)
     iterations = _plain_int(
         max_iterations, name="max_iterations", minimum=1
@@ -982,7 +1024,7 @@ def _validate_budget(
             raise LaunchRefused(
                 "smoke is exactly 1 env / 2 updates / save interval 1"
             )
-    else:
+    elif stage == "canary":
         if not (16 <= envs <= 1024):
             raise LaunchRefused("canary num_envs must be in [16,1024]")
         if not (10 <= iterations <= 2000):
@@ -993,6 +1035,11 @@ def _validate_budget(
             raise LaunchRefused(
                 "canary save_interval must be <= iterations and <= 200"
             )
+    elif (envs, iterations, save) != (4096, 300_000_000_000, 100):
+        raise LaunchRefused(
+            "long is exactly 4096 envs / 300000000000 updates / "
+            "save interval 100"
+        )
     return {
         "stage": stage,
         "num_envs": envs,
@@ -1017,6 +1064,7 @@ def _build_training_argv(
         str(wbt / "scripts/train.py"),
         "task=HOPEPingPongActionBall",
         "algo=ppo",
+        "algo.policy.init_noise_std=0.15",
         "headless=true",
         "logger=tensorboard",
         "video=false",
@@ -1032,7 +1080,11 @@ def _build_training_argv(
             f"{spec['expected_effective_reward_recipe_sha256']}"
         ),
         "task.actor_obs_contract=action_ball_n1",
-        "task.rewards.full_body_mimic=false",
+        (
+            "task.rewards.full_body_mimic="
+            f"{'true' if spec['scope'] == 'full' else 'false'}"
+        ),
+        f"task.rewards.motion_scale={weights['motion_scale']}",
         (
             "task.rewards.racket_position_weight="
             f"{weights['racket_position_weight']}"
@@ -1097,8 +1149,9 @@ def _validate_spec_document(
     action = row["action_id"]
     if type(action) is not str or action not in ALLOWED_ACTIONS:
         raise LaunchRefused("action_id must be bh_loop_c or bh_block")
-    if row["scope"] != "upper":
-        raise LaunchRefused("scope must be upper")
+    scope = row["scope"]
+    if type(scope) is not str or scope not in ALLOWED_SCOPES:
+        raise LaunchRefused("scope must be upper or full")
     bundle_pin = _exact_dict(row["bundle"], _PIN_KEYS, name="spec.bundle")
     policy_sha = _sha256(
         row["policy_contract_sha256"], name="policy_contract_sha256"
@@ -1163,7 +1216,7 @@ def _validate_spec_document(
             "isaac_python": str(isaac_python),
         },
         "action_id": action,
-        "scope": "upper",
+        "scope": scope,
         "bundle": dict(bundle_pin),
         "policy_contract_sha256": policy_sha,
         "reward_profile": profile,
@@ -1252,7 +1305,7 @@ def build_plan(spec_path: Path) -> dict[str, Any]:
         "diagnostic_unauthorized": True,
         "formal_evidence_prohibited": True,
         "curriculum_promotion_prohibited": True,
-        "long_stage_prohibited": True,
+        "long_stage_prohibited": spec["stage"] != "long",
         "spec_file_sha256": hashlib.sha256(raw).hexdigest(),
         "spec": spec,
         "source": source,

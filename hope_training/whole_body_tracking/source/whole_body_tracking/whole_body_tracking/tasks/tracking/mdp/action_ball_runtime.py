@@ -4790,11 +4790,18 @@ class ActionBirthBroker:
         bindings: Sequence[ActionBinding],
         pins: RuntimePins,
         mobility_mode: str,
+        *,
+        diagnostic_unauthorized: bool = False,
     ) -> None:
         self._bindings = _validate_bindings(bindings)
         if not isinstance(pins, RuntimePins):
             raise ActionBallContractError("pins must be RuntimePins")
         self._pins = pins
+        if type(diagnostic_unauthorized) is not bool:
+            raise ActionBallContractError(
+                "diagnostic_unauthorized must be an exact boolean"
+            )
+        self._diagnostic_fast_path = diagnostic_unauthorized
         if (
             pins.counter_rally_objective_profile_sha256 is not None
             and len(self._bindings) != 1
@@ -4824,6 +4831,9 @@ class ActionBirthBroker:
         self._consumed_receipts: Dict[
             Tuple[int, int], ActionBirthReceipt
         ] = {}
+        self._diagnostic_consumed_key_by_env: Dict[
+            int, Tuple[int, int]
+        ] = {}
         self._pending: Dict[int, _PendingBirth] = {}
 
     @property
@@ -4833,6 +4843,10 @@ class ActionBirthBroker:
     @property
     def action_count(self) -> int:
         return len(self._bindings)
+
+    @property
+    def diagnostic_fast_path(self) -> bool:
+        return self._diagnostic_fast_path
 
     @property
     def registry_sha256(self) -> str:
@@ -5310,9 +5324,14 @@ class ActionBirthBroker:
         projected_birth_indices = dict(self._last_sampler_birth_index)
         projected_draw_ends = dict(self._last_sampler_draw_end)
         projected_domain_counts = dict(self._domain_claim_count)
-        provider_state, authority_state = self._callback_states()
+        provider_state = None
+        authority_state = None
+        if not self._diagnostic_fast_path:
+            provider_state, authority_state = self._callback_states()
         try:
             if (
+                not self._diagnostic_fast_path
+                and
                 self._callback_highwaters()
                 != self._broker_callback_highwaters()
             ):
@@ -5380,7 +5399,8 @@ class ActionBirthBroker:
                     raise ActionBallContractError(
                         "birth provider returned wrong env/reset/domain claim"
                     )
-                if receipt.canonical_sha256 in receipt_digests:
+                receipt_digest = receipt.canonical_sha256
+                if receipt_digest in receipt_digests:
                     raise ActionBallContractError(
                         "birth provider replayed a receipt within one batch"
                     )
@@ -5413,54 +5433,57 @@ class ActionBirthBroker:
                 projected_draw_ends[
                     binding.action_uid
                 ] = receipt.sampler_draw_end
-                receipt_digests.add(receipt.canonical_sha256)
+                receipt_digests.add(receipt_digest)
                 sampler_birth_digests.add(
                     receipt.sampler_birth_sha256
                 )
                 receipts.append(receipt)
-            provider_state_after_issue, authority_state_after_issue = (
-                self._callback_states()
-            )
-            for receipt in receipts:
-                self._provider.assert_issued_birth(receipt)
-            if self._callback_states() != (
-                provider_state_after_issue,
-                authority_state_after_issue,
-            ):
-                raise ActionBallContractError(
-                    "birth provider authority assertion must be pure"
+            if not self._diagnostic_fast_path:
+                provider_state_after_issue, authority_state_after_issue = (
+                    self._callback_states()
                 )
-            expected_highwaters = (
-                {
-                    binding.action_uid: (
-                        projected_birth_indices.get(
-                            binding.action_uid, -1
-                        ),
-                        projected_draw_ends.get(binding.action_uid, 0),
+                for receipt in receipts:
+                    self._provider.assert_issued_birth(receipt)
+                if self._callback_states() != (
+                    provider_state_after_issue,
+                    authority_state_after_issue,
+                ):
+                    raise ActionBallContractError(
+                        "birth provider authority assertion must be pure"
                     )
-                    for binding in self._bindings
-                },
-                {
-                    binding.action_uid: projected_domain_counts.get(
-                        binding.action_uid, 0
-                    )
-                    for binding in self._bindings
-                },
-            )
-            if self._callback_highwaters() != expected_highwaters:
-                raise ActionBallContractError(
-                    "provider/domain authority advanced an unstaged action "
-                    "tape"
+                expected_highwaters = (
+                    {
+                        binding.action_uid: (
+                            projected_birth_indices.get(
+                                binding.action_uid, -1
+                            ),
+                            projected_draw_ends.get(binding.action_uid, 0),
+                        )
+                        for binding in self._bindings
+                    },
+                    {
+                        binding.action_uid: projected_domain_counts.get(
+                            binding.action_uid, 0
+                        )
+                        for binding in self._bindings
+                    },
                 )
+                if self._callback_highwaters() != expected_highwaters:
+                    raise ActionBallContractError(
+                        "provider/domain authority advanced an unstaged action "
+                        "tape"
+                    )
         except Exception:
-            try:
-                self._restore_callback_states(
-                    provider_state, authority_state
-                )
-            except Exception as rollback_error:
-                raise BirthProtocolError(
-                    "birth provider failed and its exact state rollback failed"
-                ) from rollback_error
+            if not self._diagnostic_fast_path:
+                try:
+                    self._restore_callback_states(
+                        provider_state, authority_state
+                    )
+                except Exception as rollback_error:
+                    raise BirthProtocolError(
+                        "birth provider failed and its exact state rollback "
+                        "failed"
+                    ) from rollback_error
             raise
 
         # Broker state commits only after all provider outputs validate.
@@ -5677,10 +5700,18 @@ class ActionBirthBroker:
         for env, generation, _receipt in validated:
             del self._pending[env]
             self._consumed_generation[env] = generation
+        if self._diagnostic_fast_path:
+            for env, _generation, _receipt in validated:
+                previous_key = self._diagnostic_consumed_key_by_env.pop(
+                    env, None
+                )
+                if previous_key is not None:
+                    self._consumed_receipts.pop(previous_key, None)
         for env, _generation, receipt in validated:
-            self._consumed_receipts[
-                (env, receipt.reset_generation)
-            ] = receipt
+            key = (env, receipt.reset_generation)
+            self._consumed_receipts[key] = receipt
+            if self._diagnostic_fast_path:
+                self._diagnostic_consumed_key_by_env[env] = key
         return tuple(receipt for _env, _generation, receipt in validated)
 
     def assert_consumed_birth(
@@ -6914,11 +6945,17 @@ class LazyActionTaskPool:
         mobility_mode: str,
         *,
         refill_size: int = 1,
+        diagnostic_unauthorized: bool = False,
     ) -> None:
         self._bindings = _validate_bindings(bindings)
         if not isinstance(pins, RuntimePins):
             raise ActionBallContractError("pins must be RuntimePins")
         self._pins = pins
+        if type(diagnostic_unauthorized) is not bool:
+            raise ActionBallContractError(
+                "diagnostic_unauthorized must be an exact boolean"
+            )
+        self._diagnostic_fast_path = diagnostic_unauthorized
         if (
             pins.counter_rally_objective_profile_sha256 is not None
             and len(self._bindings) != 1
@@ -6930,6 +6967,10 @@ class LazyActionTaskPool:
         self._refill_size = _plain_int(
             refill_size, name="refill_size", minimum=1
         )
+        if self._diagnostic_fast_path and self._refill_size != 1:
+            raise ActionBallContractError(
+                "diagnostic_unauthorized task pools require refill_size=1"
+            )
         self._by_uid = {
             binding.action_uid: binding for binding in self._bindings
         }
@@ -6964,6 +7005,10 @@ class LazyActionTaskPool:
         self._last_sample_index: Dict[int, int] = {}
         self._last_sample_draw_end: Dict[int, int] = {}
         self._retired_generation: Dict[int, int] = {}
+        # Diagnostic-only O(1) replacement for the formal cross-action scan.
+        # It is bounded by live environments and is cleared on retirement.
+        self._diagnostic_birth_by_env: Dict[int, Tuple[int, str]] = {}
+        self._diagnostic_active_sample_sha256: set[str] = set()
 
     @property
     def materialized_action_uids(self) -> Tuple[int, ...]:
@@ -6976,6 +7021,10 @@ class LazyActionTaskPool:
     @property
     def action_count(self) -> int:
         return len(self._bindings)
+
+    @property
+    def diagnostic_fast_path(self) -> bool:
+        return self._diagnostic_fast_path
 
     def pending_count(
         self,
@@ -7594,6 +7643,10 @@ class LazyActionTaskPool:
             raise ActionBallContractError(
                 "birth authority registry differs from task pool registry"
             )
+        if authority.diagnostic_fast_path != self._diagnostic_fast_path:
+            raise ActionBallContractError(
+                "birth authority and task pool diagnostic modes differ"
+            )
         self._birth_authority = authority
 
     def _birth_authority_state_sha256(self) -> str | None:
@@ -7643,13 +7696,20 @@ class LazyActionTaskPool:
         # The broker guarantees one action per env/reset generation.  Preserve
         # that invariant even if a caller accidentally presents two different
         # birth payloads with the same logical identity.
-        for action_births in self._births.values():
-            for active in action_births.values():
-                if active.env_id == birth.env_id:
-                    raise ActionBallContractError(
-                        "task pool already has an active birth for this env; "
-                        "retire it before the next true reset"
-                    )
+        if self._diagnostic_fast_path:
+            if birth.env_id in self._diagnostic_birth_by_env:
+                raise ActionBallContractError(
+                    "task pool already has an active birth for this env; "
+                    "retire it before the next true reset"
+                )
+        else:
+            for action_births in self._births.values():
+                for active in action_births.values():
+                    if active.env_id == birth.env_id:
+                        raise ActionBallContractError(
+                            "task pool already has an active birth for this "
+                            "env; retire it before the next true reset"
+                        )
         self._births.setdefault(uid, {})[digest] = birth
         self._pending.setdefault(uid, {})[digest] = []
         self._issued_task_transcript_sha256.setdefault(uid, {})[
@@ -7662,6 +7722,8 @@ class LazyActionTaskPool:
         self._seen_sha256.setdefault(uid, {})[digest] = set()
         self._seen_sample_sha256.setdefault(uid, {})[digest] = set()
         self._ledger.setdefault(uid, PoolLedger())
+        if self._diagnostic_fast_path:
+            self._diagnostic_birth_by_env[birth.env_id] = (uid, digest)
         return digest
 
     def _build_refill_request(
@@ -7700,6 +7762,7 @@ class LazyActionTaskPool:
         sample_draw_floor: int | None = None,
         staged_sample_indices: set[int] | None = None,
         staged_sample_draw_ranges: Sequence[Tuple[int, int]] = (),
+        verify_solver_provenance: bool = True,
     ) -> Tuple[Tuple[str, ...], int, int]:
         uid = binding.action_uid
         if not isinstance(batch, ActionPoolRefillBatch):
@@ -7755,9 +7818,10 @@ class LazyActionTaskPool:
                 registry_sha256=self._registry_sha256,
             )
             receipt.assert_birth(birth)
-            if self._solver is None:
-                raise PoolProtocolError("task solver is not bound")
-            self._solver.assert_emitted_sample(receipt)
+            if verify_solver_provenance:
+                if self._solver is None:
+                    raise PoolProtocolError("task solver is not bound")
+                self._solver.assert_emitted_sample(receipt)
             if (
                 receipt.sample_index <= floor_sample_index
                 or receipt.sample_index <= batch_sample_index
@@ -8074,6 +8138,7 @@ class LazyActionTaskPool:
             or self._seen_sample_sha256[uid][birth_digest]
         ):
             return
+        birth_env_id = self._births[uid][birth_digest].env_id
         for table in (
             self._births,
             self._pending,
@@ -8088,8 +8153,275 @@ class LazyActionTaskPool:
             del table[uid][birth_digest]
             if not table[uid]:
                 del table[uid]
+        if self._diagnostic_fast_path:
+            self._diagnostic_birth_by_env.pop(birth_env_id, None)
         if self._ledger.get(uid) == PoolLedger():
             del self._ledger[uid]
+
+    def _request_many_diagnostic(
+        self,
+        converted: Tuple[ActionTaskIssueRequest, ...],
+    ) -> Tuple[ActionBallTaskReceipt, ...]:
+        """Issue diagnostic tasks without formal proof/replay hot-path work.
+
+        The same solver callback, receipt contracts, fixed action identity,
+        and sample/task counters remain authoritative.  This path deliberately
+        does not snapshot or restore the solver: a malformed diagnostic
+        callback fails the run instead of attempting an exact-resume rollback.
+        """
+
+        validated: list[
+            Tuple[
+                ActionTaskIssueRequest,
+                ActionBinding,
+                int,
+                str,
+            ]
+        ] = []
+        request_births: set[str] = set()
+        for request in converted:
+            binding = self._validate_birth(request.birth)
+            uid = binding.action_uid
+            digest = request.birth.canonical_sha256
+            if digest in request_births:
+                raise PoolProtocolError(
+                    "task issue batch repeats one birth"
+                )
+            request_births.add(digest)
+            expected_generation = self._cursor.get(uid, {}).get(
+                digest, 0
+            )
+            if request.swing_generation != expected_generation:
+                raise PoolProtocolError(
+                    f"birth task swing generation must be exactly "
+                    f"{expected_generation}, got "
+                    f"{request.swing_generation}"
+                )
+            validated.append((request, binding, uid, digest))
+
+        registered: list[Tuple[int, str]] = []
+        try:
+            for request, binding, uid, _digest in validated:
+                before = request.birth.canonical_sha256 in self._births.get(
+                    uid, {}
+                )
+                digest = self._ensure_birth(binding, request.birth)
+                if not before:
+                    registered.append((uid, digest))
+
+            refills: list[
+                Tuple[
+                    ActionBinding,
+                    ActionBirthReceipt,
+                    str,
+                    ActionPoolRefillRequest,
+                ]
+            ] = []
+            for request, binding, uid, digest in validated:
+                if not self._pending[uid][digest]:
+                    refills.append(
+                        (
+                            binding,
+                            request.birth,
+                            digest,
+                            self._build_refill_request(
+                                binding, request.birth, digest
+                            ),
+                        )
+                    )
+
+            batches: Tuple[ActionPoolRefillBatch, ...]
+            if not refills:
+                batches = ()
+            elif len(refills) == 1:
+                if self._solver is None:
+                    raise PoolProtocolError("task solver is not bound")
+                batches = (self._solver(refills[0][3]),)
+            else:
+                solve_many = (
+                    None
+                    if self._solver is None
+                    else getattr(self._solver, "solve_many", None)
+                )
+                if not callable(solve_many):
+                    raise PoolProtocolError(
+                        "multi-birth request requires solver.solve_many()"
+                    )
+                raw_batches = solve_many(
+                    tuple(refill[3] for refill in refills)
+                )
+                if not isinstance(raw_batches, (tuple, list)):
+                    raise ActionBallContractError(
+                        "solver.solve_many() must return a tuple/list"
+                    )
+                batches = tuple(raw_batches)
+                if len(batches) != len(refills):
+                    raise ActionBallContractError(
+                        "solver.solve_many() returned wrong batch count"
+                    )
+
+            unavailable_samples = (
+                self._diagnostic_active_sample_sha256
+            )
+            staged_sample_digests: set[str] = set()
+            staged_sample_indices_by_uid: Dict[int, set[int]] = {}
+            staged_sample_draw_ranges_by_uid: Dict[
+                int, list[Tuple[int, int]]
+            ] = {}
+            proposal_indices_by_uid: Dict[int, list[int]] = {}
+            staged_refills = []
+            for refill, batch in zip(refills, batches):
+                binding, birth, digest, refill_request = refill
+                uid = binding.action_uid
+                staged_indices = staged_sample_indices_by_uid.setdefault(
+                    uid, set()
+                )
+                staged_ranges = (
+                    staged_sample_draw_ranges_by_uid.setdefault(uid, [])
+                )
+                (
+                    new_digests,
+                    last_sample_index,
+                    last_sample_draw_end,
+                ) = self._validate_refill_batch(
+                    binding=binding,
+                    birth=birth,
+                    birth_digest=digest,
+                    request=refill_request,
+                    batch=batch,
+                    unavailable_sample_sha256=unavailable_samples,
+                    sample_index_floor=self._last_sample_index.get(uid, -1),
+                    sample_draw_floor=self._last_sample_draw_end.get(uid, 0),
+                    staged_sample_indices=staged_indices,
+                    staged_sample_draw_ranges=staged_ranges,
+                    verify_solver_provenance=False,
+                )
+                staged_indices.update(
+                    receipt.sample_index for receipt in batch.receipts
+                )
+                staged_ranges.extend(
+                    (
+                        receipt.sample_draw_start,
+                        receipt.sample_draw_end,
+                    )
+                    for receipt in batch.receipts
+                )
+                for receipt in batch.receipts:
+                    if receipt.sample_sha256 in staged_sample_digests:
+                        raise ActionBallContractError(
+                            "diagnostic refill reused one staged sampler "
+                            "sample receipt"
+                        )
+                    staged_sample_digests.add(receipt.sample_sha256)
+                proposal_indices_by_uid.setdefault(uid, []).extend(
+                    batch.proposal_sample_indices
+                )
+                staged_refills.append(
+                    (
+                        binding,
+                        digest,
+                        refill_request,
+                        batch,
+                        new_digests,
+                        last_sample_index,
+                        last_sample_draw_end,
+                    )
+                )
+
+            authority_highwaters: Dict[int, Tuple[int, int]] = {}
+            for uid, proposal_indices in proposal_indices_by_uid.items():
+                authority = self._solver_sample_highwater(uid)
+                previous = (
+                    self._last_sample_index.get(uid, -1),
+                    self._last_sample_draw_end.get(uid, 0),
+                )
+                if tuple(sorted(proposal_indices)) != tuple(
+                    range(previous[0] + 1, authority[0] + 1)
+                ):
+                    raise ActionBallContractError(
+                        "diagnostic refill proposals do not exactly advance "
+                        "the action sample tape"
+                    )
+                if authority[1] < previous[1]:
+                    raise ActionBallContractError(
+                        "diagnostic solver sample draw high-water went "
+                        "backwards"
+                    )
+                authority_highwaters[uid] = authority
+
+            for (
+                binding,
+                digest,
+                refill_request,
+                batch,
+                new_digests,
+                last_sample_index,
+                last_sample_draw_end,
+            ) in staged_refills:
+                authority = authority_highwaters[binding.action_uid]
+                if (
+                    authority[0] < last_sample_index
+                    or authority[1] < last_sample_draw_end
+                ):
+                    raise ActionBallContractError(
+                        "diagnostic solver sample high-water does not cover "
+                        "its admitted receipts"
+                    )
+                self._install_refill_batch(
+                    binding=binding,
+                    birth_digest=digest,
+                    request=refill_request,
+                    batch=batch,
+                    new_digests=new_digests,
+                    last_sample_index=last_sample_index,
+                    last_sample_draw_end=last_sample_draw_end,
+                )
+            for uid, (sample_index, draw_end) in (
+                authority_highwaters.items()
+            ):
+                self._last_sample_index[uid] = sample_index
+                self._last_sample_draw_end[uid] = draw_end
+            self._diagnostic_active_sample_sha256.update(
+                staged_sample_digests
+            )
+        except Exception:
+            for uid, digest in reversed(registered):
+                if digest in self._births.get(uid, {}):
+                    self._rollback_empty_birth(uid, digest)
+            raise
+
+        issued: list[ActionBallTaskReceipt] = []
+        for request, _binding, uid, digest in validated:
+            pending = self._pending[uid][digest]
+            if not pending:
+                raise PoolProtocolError(
+                    "diagnostic solver left no admitted task to issue"
+                )
+            receipt = pending[0]
+            if receipt.swing_generation != request.swing_generation:
+                raise ActionBallContractError(
+                    "pending task receipt swing generation disagrees with "
+                    "pool cursor"
+                )
+            issued.append(receipt)
+        for (
+            _request,
+            _binding,
+            uid,
+            digest,
+        ), receipt in zip(validated, issued):
+            self._pending[uid][digest].pop(0)
+            current = self._ledger[uid]
+            self._cursor[uid][digest] += 1
+            self._ledger[uid] = PoolLedger(
+                requests=current.requests + 1,
+                refill_calls=current.refill_calls,
+                proposed=current.proposed,
+                admitted=current.admitted,
+                issued=current.issued + 1,
+                discarded=current.discarded,
+            )
+        return tuple(issued)
 
     def request_many(
         self,
@@ -8117,6 +8449,8 @@ class LazyActionTaskPool:
                 "task issue requests must be non-empty "
                 "ActionTaskIssueRequest objects"
             )
+        if self._diagnostic_fast_path:
+            return self._request_many_diagnostic(converted)
         validated: list[
             Tuple[
                 ActionTaskIssueRequest,
@@ -8538,6 +8872,79 @@ class LazyActionTaskPool:
 
         return self.retire_many((birth,))[0]
 
+    def _retire_many_diagnostic(
+        self,
+        converted: Tuple[ActionBirthReceipt, ...],
+    ) -> Tuple[int, ...]:
+        """Retire active diagnostic queues without retaining proof history."""
+
+        validated: list[Tuple[ActionBirthReceipt, int, str, int]] = []
+        discarded_by_uid: Dict[int, int] = {}
+        for birth in converted:
+            binding = self._binding(birth.action_uid)
+            birth.assert_contract(
+                binding=binding,
+                pins=self._pins,
+                mobility_mode=self._mobility_mode,
+                registry_sha256=self._registry_sha256,
+            )
+            uid = binding.action_uid
+            digest = birth.canonical_sha256
+            active = self._births.get(uid, {}).get(digest)
+            if active is None or active != birth:
+                raise PoolProtocolError(
+                    "cannot retire an unknown or already retired birth"
+                )
+            previous_retired = self._retired_generation.get(
+                birth.env_id, 0
+            )
+            if birth.reset_generation <= previous_retired:
+                raise PoolProtocolError(
+                    "birth retirement generation is stale"
+                )
+            discarded = len(self._pending[uid][digest])
+            discarded_by_uid[uid] = (
+                discarded_by_uid.get(uid, 0) + discarded
+            )
+            validated.append((birth, uid, digest, discarded))
+
+        projected_ledgers: Dict[int, PoolLedger] = {}
+        for uid, discarded in discarded_by_uid.items():
+            current = self._ledger[uid]
+            projected_ledgers[uid] = PoolLedger(
+                requests=current.requests,
+                refill_calls=current.refill_calls,
+                proposed=current.proposed,
+                admitted=current.admitted,
+                issued=current.issued,
+                discarded=current.discarded + discarded,
+            )
+        for uid, ledger in projected_ledgers.items():
+            self._ledger[uid] = ledger
+        for birth, uid, digest, _discarded in validated:
+            self._diagnostic_active_sample_sha256.difference_update(
+                self._seen_sample_sha256[uid][digest]
+            )
+            for table in (
+                self._births,
+                self._pending,
+                self._issued_task_transcript_sha256,
+                self._cursor,
+                self._refill_index,
+                self._proposed_by_birth,
+                self._sample_assignments,
+                self._seen_sha256,
+                self._seen_sample_sha256,
+            ):
+                del table[uid][digest]
+                if not table[uid]:
+                    del table[uid]
+            self._diagnostic_birth_by_env.pop(birth.env_id, None)
+            self._retired_generation[
+                birth.env_id
+            ] = birth.reset_generation
+        return tuple(row[3] for row in validated)
+
     def retire_many(
         self,
         births: Sequence[ActionBirthReceipt],
@@ -8572,6 +8979,8 @@ class LazyActionTaskPool:
             raise PoolProtocolError(
                 "retire batch must not repeat an env or birth"
             )
+        if self._diagnostic_fast_path:
+            return self._retire_many_diagnostic(converted)
 
         validated: list[
             Tuple[

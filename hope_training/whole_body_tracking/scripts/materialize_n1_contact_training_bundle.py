@@ -2,14 +2,21 @@
 """Materialize one exact, contact-only N=1 ActionBall training bundle.
 
 This is the deliberately short path for the first ``bh_loop_c`` and
-``bh_block`` experiments.  It keeps the reviewed incoming-ball profile from
-the pinned four-action fivebind manifest, changes only its historically
-absolute contact Z into a fully base-relative Z, and binds that row to:
+``bh_block`` experiments.  The default ``upper`` scope keeps the reviewed
+incoming-ball profile from the pinned four-action fivebind manifest, changes
+only its historically absolute contact Z into a fully base-relative Z, and
+binds that row to:
 
 * the exact tracked upper-body motion bytes;
 * a freshly generated schema-v2 selected-face-centre prototype;
 * freshly generated solver/physics profile pins from the final code tree; and
 * the canonical N=1 counter-rally objective used for RL shaping.
+
+The opt-in ``full`` scope keeps the incoming direction/speed distribution and
+the contact-box shape, but translates that box so its centre is the selected
+rubber face centre at one caller-supplied, interior strike frame.  Full-body
+teachers may move their pelvis; ``no_move`` still describes the task's
+locomotion mode, not a frame-by-frame stationary-root promise.
 
 The admission receipt proves only that the manifest hit time resolves to the
 same interior motion frame and that the manifest task centre is within 3 cm
@@ -54,6 +61,7 @@ SOURCE_MANIFEST_SHA256 = (
     "0b640f5d7b2d35895d1a4696635e3a256f2a32341778ad586d828d677317e2b7"
 )
 SCOPE = "upper"
+SUPPORTED_SCOPES = ("upper", "full")
 HOLDOUT_SAMPLES_PER_ACTION = 768
 CENTER_ALIGNMENT_THRESHOLD_M = 0.03
 TIMING_ABS_TOLERANCE_S = 1.0e-12
@@ -98,6 +106,31 @@ SUPPORTED_ACTIONS = {
     },
 }
 
+FULL_SUPPORTED_ACTIONS = {
+    "bh_loop_c": {
+        "motion_path": (
+            "motions/fivebind_n5_20260728/"
+            "bh_loop_c_full_full_fivebind.npz"
+        ),
+        "motion_sha256": (
+            "010740965573863c6dbcb48f4efa3318eea51d1d005da0e458824c837a43c8b0"
+        ),
+        "reference_t_hit_s": 0.76,
+        "reference_t_cycle_s": 1.6,
+    },
+    "bh_block": {
+        "motion_path": (
+            "motions/fivebind_n5_20260728/"
+            "bh_block_full_full_fivebind.npz"
+        ),
+        "motion_sha256": (
+            "12a6c5b7914dc2d023bbd0447fab41ccc80de7d1be0bb4a8018a98e453dceefa"
+        ),
+        "reference_t_hit_s": 0.52,
+        "reference_t_cycle_s": 1.08,
+    },
+}
+
 CLAIMS = {
     "selector_executed": False,
     "action_identity_frozen_before_ball_sampling": True,
@@ -107,6 +140,14 @@ CLAIMS = {
     "baseline_crossing_claim": False,
     "deployment_claim": False,
 }
+
+
+def _claims_for_scope(scope: str) -> dict[str, bool]:
+    claims = dict(CLAIMS)
+    if scope != SCOPE:
+        claims["diagnostic_only"] = True
+        claims["training_authorized"] = False
+    return claims
 
 
 class N1ContactBundleError(ValueError):
@@ -528,6 +569,8 @@ def _motion_state(
     motion_path: Path,
     action: Mapping[str, Any],
     geometry: Any,
+    scope: str = SCOPE,
+    strike_frame: int | None = None,
 ) -> dict[str, Any]:
     try:
         with np.load(motion_path, allow_pickle=False) as archive:
@@ -611,10 +654,21 @@ def _motion_state(
     wrist_index = body_names.index(RACKET_WRIST_BODY)
     root_index = body_names.index(ROOT_BODY)
     frame_count = positions.shape[0]
-    strike_phase = _require_finite(
-        action["strike_phase"], label="strike_phase"
-    )
-    contact_frame = round(strike_phase * (frame_count - 1))
+    if scope == SCOPE:
+        if strike_frame is not None:
+            raise N1ContactBundleError(
+                "upper scope does not accept an explicit strike frame"
+            )
+        strike_phase = _require_finite(
+            action["strike_phase"], label="strike_phase"
+        )
+        contact_frame = round(strike_phase * (frame_count - 1))
+    else:
+        if isinstance(strike_frame, bool) or type(strike_frame) is not int:
+            raise N1ContactBundleError(
+                "full scope requires one explicit integer strike frame"
+            )
+        contact_frame = strike_frame
     if not WINDOW_HALF_FRAMES <= contact_frame < (
         frame_count - WINDOW_HALF_FRAMES
     ):
@@ -640,20 +694,21 @@ def _motion_state(
         )
     root_position = positions[:, root_index]
     ready_root = root_position[0]
-    if (
-        np.linalg.norm(root_position[contact_frame] - ready_root)
-        > ROOT_STATIONARY_TOLERANCE_M
-    ):
-        raise N1ContactBundleError(
-            "no_move teacher root translates before contact"
-        )
+    if scope == SCOPE:
+        if (
+            np.linalg.norm(root_position[contact_frame] - ready_root)
+            > ROOT_STATIONARY_TOLERANCE_M
+        ):
+            raise N1ContactBundleError(
+                "no_move teacher root translates before contact"
+            )
     ready_yaw = _yaw(quaternions[0, root_index])
     contact_yaw = _yaw(quaternions[contact_frame, root_index])
     yaw_error = math.atan2(
         math.sin(contact_yaw - ready_yaw),
         math.cos(contact_yaw - ready_yaw),
     )
-    if abs(yaw_error) > ROOT_YAW_TOLERANCE_RAD:
+    if scope == SCOPE and abs(yaw_error) > ROOT_YAW_TOLERANCE_RAD:
         raise N1ContactBundleError(
             "no_move teacher root yaw changes before contact"
         )
@@ -673,6 +728,8 @@ def _motion_state(
         label="reference_racket_site_speed_mps",
     )
     if (
+        scope == SCOPE
+        and
         abs(reference_site_speed - declared_site_speed)
         > REFERENCE_SPEED_ABS_TOLERANCE_MPS
     ):
@@ -834,6 +891,67 @@ def _correct_contact_z(
     return corrected
 
 
+def _retarget_contact_center(
+    action: dict[str, Any],
+    *,
+    contact_center_b_yaw_m: Sequence[float],
+) -> dict[str, Any]:
+    """Translate the inherited contact box onto a full teacher's exact face."""
+
+    retargeted = deepcopy(action)
+    profile = retargeted.get("ball_profile")
+    if type(profile) is not dict:
+        raise N1ContactBundleError("source action lacks ball_profile")
+    target = np.asarray(contact_center_b_yaw_m, dtype=np.float64)
+    if target.shape != (3,) or not np.all(np.isfinite(target)):
+        raise N1ContactBundleError(
+            "full contact centre must contain three finite numbers"
+        )
+    center_key = "contact_offset_center_b_yaw_m"
+    source_center = np.asarray(profile[center_key], dtype=np.float64)
+    shift = target - source_center
+    for key in (
+        center_key,
+        "contact_offset_min_b_yaw_m",
+        "contact_offset_max_b_yaw_m",
+    ):
+        profile[key] = [
+            float(value)
+            for value in (
+                np.asarray(profile[key], dtype=np.float64) + shift
+            )
+        ]
+    return retargeted
+
+
+def _retime_ball_profile(
+    action: dict[str, Any],
+) -> dict[str, Any]:
+    """Rebuild only the contact-time envelope for a new teacher hit time."""
+
+    retimed = deepcopy(action)
+    profile = retimed.get("ball_profile")
+    if type(profile) is not dict:
+        raise N1ContactBundleError("source action lacks ball_profile")
+    t_hit = float(retimed["reference_t_hit_s"])
+    teacher_rate_min = float(retimed["teacher_rate_min"])
+    teacher_rate_max = float(retimed["teacher_rate_max"])
+    reaction_margin = float(retimed["reaction_margin_s"])
+    minimum = t_hit / teacher_rate_min + reaction_margin
+    maximum = t_hit / teacher_rate_max + 1.0
+    if not minimum < maximum:
+        raise N1ContactBundleError(
+            "full teacher timing leaves no valid incoming-ball wait window"
+        )
+    center = 0.5 * (minimum + maximum)
+    profile["time_to_contact_center_s"] = center
+    profile["time_to_contact_std_lower_max_s"] = center - minimum
+    profile["time_to_contact_std_upper_max_s"] = maximum - center
+    profile["time_to_contact_min_s"] = minimum
+    profile["time_to_contact_max_s"] = maximum
+    return retimed
+
+
 def _prototype_document(
     *,
     action_id: str,
@@ -845,6 +963,7 @@ def _prototype_document(
     geometry: Any,
     geometry_path: Path,
     repo_root: Path,
+    scope: str = SCOPE,
 ) -> dict[str, Any]:
     face_speed = float(state["face_speed_mps"])
     teacher_rate_min = float(action["teacher_rate_min"])
@@ -853,7 +972,7 @@ def _prototype_document(
     normal = np.asarray(state["physical_normal_b"])
     row = {
         "motion_id": action_id,
-        "scope": SCOPE,
+        "scope": scope,
         "family": action["family"],
         "clip_index": 0,
         "npz_sha256": motion_pin["sha256"],
@@ -910,12 +1029,12 @@ def _prototype_document(
             np.dot(normal, velocity_hat)
         ),
     }
-    scopes = {SCOPE: [row]}
+    scopes = {scope: [row]}
     producer_sha = _sha256_file(Path(__file__).resolve())
     document = {
         "schema_version": 2,
         "prototype_set_id": (
-            f"n1_{action_id}_upper_contact_"
+            f"n1_{action_id}_{scope}_contact_"
             f"{motion_pin['sha256'][:12]}"
         ),
         "velocity_contract": {
@@ -976,6 +1095,7 @@ def _contact_receipt(
     geometry_path: Path,
     repo_root: Path,
     state: Mapping[str, Any],
+    scope: str = SCOPE,
 ) -> dict[str, Any]:
     profile = action["ball_profile"]
     task_center_b = np.asarray(
@@ -999,13 +1119,45 @@ def _contact_receipt(
         float(task_center_b[2])
         + float(np.asarray(state["ready_root_w_m"])[2])
     )
+    alignment = {
+        "threshold_m": CENTER_ALIGNMENT_THRESHOLD_M,
+        "ready_root_z_w_m": float(
+            np.asarray(state["ready_root_w_m"])[2]
+        ),
+        "legacy_absolute_contact_z_w_m": legacy_absolute_z,
+        "corrected_contact_offset_z_b_yaw_m": float(
+            task_center_b[2]
+        ),
+        "task_contact_offset_center_b_yaw_m": [
+            float(value) for value in task_center_b
+        ],
+        "teacher_racket_site_b_yaw_m": [
+            float(value) for value in state["site_b_yaw_m"]
+        ],
+        "teacher_selected_face_center_b_yaw_m": [
+            float(value) for value in state["face_center_b_yaw_m"]
+        ],
+        "task_to_teacher_site_distance_m": site_distance,
+        "task_to_teacher_face_center_distance_m": face_distance,
+        "center_gate_point": "selected_rubber_face_center",
+        "center_gate_distance_m": face_distance,
+        "center_within_threshold": True,
+    }
+    if scope != SCOPE:
+        del alignment["legacy_absolute_contact_z_w_m"]
+        del alignment["corrected_contact_offset_z_b_yaw_m"]
+        alignment["contact_center_authority"] = (
+            "full_motion_selected_rubber_face_center_at_explicit_strike_frame"
+        )
+        alignment["upper_contact_center_preserved"] = False
+        alignment["retargeted_contact_center_z_w_m"] = legacy_absolute_z
     receipt = {
         "schema_version": 1,
         "artifact_type": "n1_contact_alignment_receipt_v1",
         "status": "PASS",
         "action_id": action_id,
         "action_uid": int(action["action_uid"]),
-        "scope": SCOPE,
+        "scope": scope,
         "source_manifest": dict(source_manifest_pin),
         "profile_pins": dict(profile_pin),
         "motion": dict(motion_pin),
@@ -1035,31 +1187,8 @@ def _contact_receipt(
             "teacher_reference_frame": "B_yaw_at_frame0",
             "world_z_origin": "floor",
         },
-        "alignment": {
-            "threshold_m": CENTER_ALIGNMENT_THRESHOLD_M,
-            "ready_root_z_w_m": float(
-                np.asarray(state["ready_root_w_m"])[2]
-            ),
-            "legacy_absolute_contact_z_w_m": legacy_absolute_z,
-            "corrected_contact_offset_z_b_yaw_m": float(
-                task_center_b[2]
-            ),
-            "task_contact_offset_center_b_yaw_m": [
-                float(value) for value in task_center_b
-            ],
-            "teacher_racket_site_b_yaw_m": [
-                float(value) for value in state["site_b_yaw_m"]
-            ],
-            "teacher_selected_face_center_b_yaw_m": [
-                float(value) for value in state["face_center_b_yaw_m"]
-            ],
-            "task_to_teacher_site_distance_m": site_distance,
-            "task_to_teacher_face_center_distance_m": face_distance,
-            "center_gate_point": "selected_rubber_face_center",
-            "center_gate_distance_m": face_distance,
-            "center_within_threshold": True,
-        },
-        "claims": dict(CLAIMS),
+        "alignment": alignment,
+        "claims": _claims_for_scope(scope),
     }
     return receipt
 
@@ -1091,6 +1220,8 @@ def materialize_n1_contact_bundle(
     expected_profile_pins_sha256: str,
     output_dir: Path,
     require_git_tracked_motion: bool = True,
+    scope: str = SCOPE,
+    strike_frame: int | None = None,
 ) -> dict[str, object]:
     """Validate all inputs, then exclusively create one content-addressed bundle."""
 
@@ -1098,6 +1229,24 @@ def materialize_n1_contact_bundle(
     if action_id not in SUPPORTED_ACTIONS:
         raise N1ContactBundleError(
             f"unsupported action_id {action_id!r}"
+        )
+    if type(scope) is not str or scope not in SUPPORTED_SCOPES:
+        raise N1ContactBundleError(
+            f"unsupported scope {scope!r}"
+        )
+    if scope == SCOPE and strike_frame is not None:
+        raise N1ContactBundleError(
+            "upper scope does not accept an explicit strike frame"
+        )
+    if (
+        scope != SCOPE
+        and (
+            isinstance(strike_frame, bool)
+            or type(strike_frame) is not int
+        )
+    ):
+        raise N1ContactBundleError(
+            "full scope requires one explicit integer strike frame"
         )
     if type(require_git_tracked_motion) is not bool:
         raise TypeError("require_git_tracked_motion must be bool")
@@ -1119,14 +1268,30 @@ def materialize_n1_contact_bundle(
         source_path, label="source action manifest"
     )
     source_action = _selected_source_action(source_document, action_id)
-    facts = SUPPORTED_ACTIONS[action_id]
+    facts = (
+        SUPPORTED_ACTIONS[action_id]
+        if scope == SCOPE
+        else {
+            **SUPPORTED_ACTIONS[action_id],
+            **FULL_SUPPORTED_ACTIONS[action_id],
+        }
+    )
+    scoped_action = deepcopy(source_action)
+    if scope != SCOPE:
+        for key in (
+            "motion_path",
+            "motion_sha256",
+            "reference_t_hit_s",
+            "reference_t_cycle_s",
+        ):
+            scoped_action[key] = facts[key]
     motion_path, motion_relative = _resolve_repo_file(
-        root, facts["motion_path"], label=f"{action_id} upper motion"
+        root, facts["motion_path"], label=f"{action_id} {scope} motion"
     )
     motion_sha = _sha256_file(motion_path)
     if (
         motion_sha != facts["motion_sha256"]
-        or motion_sha != source_action["motion_sha256"]
+        or motion_sha != scoped_action["motion_sha256"]
     ):
         raise N1ContactBundleError(
             f"{action_id} motion SHA differs from pinned exact bytes"
@@ -1149,6 +1314,14 @@ def materialize_n1_contact_bundle(
     manifest_module = _load_module(
         "n1_action_ball_manifest", manifest_module_path
     )
+    if scope != SCOPE:
+        scoped_action["action_uid"] = (
+            manifest_module.derive_action_ball_action_uid(
+                action_id,
+                scoped_action["family"],
+                scoped_action["motion_sha256"],
+            )
+        )
     profile_type = manifest_module._counter_rally_objective_profile_type()
     objective = profile_type()
     objective_mapping = dict(objective.to_mapping())
@@ -1163,24 +1336,41 @@ def materialize_n1_contact_bundle(
     )
     state = _motion_state(
         motion_path=motion_path,
-        action=source_action,
+        action=scoped_action,
         geometry=geometry,
+        scope=scope,
+        strike_frame=strike_frame,
     )
+    if scope != SCOPE:
+        scoped_action["strike_phase"] = (
+            int(state["contact_frame"])
+            / (int(state["frame_count"]) - 1)
+        )
+        scoped_action["reference_racket_site_speed_mps"] = float(
+            state["reference_site_speed_mps"]
+        )
+        scoped_action = _retime_ball_profile(scoped_action)
     corrected_action = _correct_contact_z(
-        source_action,
+        scoped_action,
         ready_root_z_w_m=float(
             np.asarray(state["ready_root_w_m"])[2]
         ),
     )
-    # Only the three coordinate Z values may differ from the source row.
-    expected_corrected = _correct_contact_z(
-        source_action,
-        ready_root_z_w_m=float(
-            np.asarray(state["ready_root_w_m"])[2]
-        ),
-    )
-    if corrected_action != expected_corrected:
-        raise AssertionError("unexpected action-row mutation")
+    if scope == SCOPE:
+        # Only the three coordinate Z values may differ from the source row.
+        expected_corrected = _correct_contact_z(
+            source_action,
+            ready_root_z_w_m=float(
+                np.asarray(state["ready_root_w_m"])[2]
+            ),
+        )
+        if corrected_action != expected_corrected:
+            raise AssertionError("unexpected action-row mutation")
+    else:
+        corrected_action = _retarget_contact_center(
+            corrected_action,
+            contact_center_b_yaw_m=state["face_center_b_yaw_m"],
+        )
     source_manifest_pin = {
         "path": source_relative,
         "sha256": source_actual,
@@ -1199,6 +1389,7 @@ def materialize_n1_contact_bundle(
         geometry=geometry,
         geometry_path=geometry_path,
         repo_root=root,
+        scope=scope,
     )
     prototype_bytes = _json_bytes(prototype)
     prototype_sha = _sha256_bytes(prototype_bytes)
@@ -1217,21 +1408,21 @@ def materialize_n1_contact_bundle(
             "output_dir may not be the repository root"
         )
     prototype_name = (
-        f"{action_id}.upper.prototype.v2.{prototype_sha[:12]}.json"
+        f"{action_id}.{scope}.prototype.v2.{prototype_sha[:12]}.json"
     )
     prototype_relative = (
         PurePosixPath(output_relative_dir) / prototype_name
     ).as_posix()
     manifest_document = deepcopy(source_document)
     manifest_document["manifest_id"] = (
-        f"action_ball_n1_{action_id}_upper_contact_counter_rally_v1"
+        f"action_ball_n1_{action_id}_{scope}_contact_counter_rally_v1"
     )
     manifest_document["action_order"] = [action_id]
     manifest_document["actions"] = [corrected_action]
     manifest_document["prototype"] = {
         "path": prototype_relative,
         "sha256": prototype_sha,
-        "scope": SCOPE,
+        "scope": scope,
     }
     manifest_document["solver_profile_sha256"] = profile_pin[
         "solver_profile_sha256"
@@ -1248,18 +1439,32 @@ def materialize_n1_contact_bundle(
     )
     holdout["split_id"] = (
         f"heldout_ball_{action_id}_counter_rally_n1_v1"
+        if scope == SCOPE
+        else f"heldout_ball_{action_id}_{scope}_counter_rally_n1_v1"
     )
     manifest_document["holdout"] = holdout
     manifest_document["counter_rally_objective"] = objective_mapping
-    manifest_document["notes"] = (
-        "Contact-only N=1 diagnostic derived from exact source manifest "
-        f"SHA-256 {source_actual}. The selected incoming-ball profile is "
-        "preserved except that contact center/min/max Z are converted from "
-        "legacy absolute W-floor height to B_yaw relative to the actual "
-        "no_move spawn/goal. Canonical counter-rally RL shaping is enabled; "
-        "this artifact makes no teacher landing, post-bounce, baseline, "
-        "deployment, or hardware claim."
-    )
+    if scope == SCOPE:
+        manifest_document["notes"] = (
+            "Contact-only N=1 diagnostic derived from exact source manifest "
+            f"SHA-256 {source_actual}. The selected incoming-ball profile is "
+            "preserved except that contact center/min/max Z are converted from "
+            "legacy absolute W-floor height to B_yaw relative to the actual "
+            "no_move spawn/goal. Canonical counter-rally RL shaping is enabled; "
+            "this artifact makes no teacher landing, post-bounce, baseline, "
+            "deployment, or hardware claim."
+        )
+    else:
+        manifest_document["notes"] = (
+            "Contact-only N=1 full-body diagnostic derived from exact source "
+            f"manifest SHA-256 {source_actual}. Incoming direction, speed, "
+            "spin, and contact-box shape are inherited; the whole contact box "
+            "is translated onto the selected rubber face centre at the "
+            "explicit full-motion strike frame. Canonical counter-rally RL "
+            "shaping is enabled; this artifact does not preserve the upper "
+            "contact centre and makes no teacher landing, post-bounce, "
+            "baseline, deployment, or hardware claim."
+        )
     validated_manifest = manifest_module.ActionBallManifest.from_mapping(
         manifest_document
     )
@@ -1269,6 +1474,8 @@ def materialize_n1_contact_bundle(
     manifest_sha = _sha256_bytes(manifest_bytes)
     manifest_name = (
         f"{action_id}.manifest.v3.{manifest_sha[:12]}.json"
+        if scope == SCOPE
+        else f"{action_id}.{scope}.manifest.v3.{manifest_sha[:12]}.json"
     )
     manifest_relative = (
         PurePosixPath(output_relative_dir) / manifest_name
@@ -1283,11 +1490,17 @@ def materialize_n1_contact_bundle(
         geometry_path=geometry_path,
         repo_root=root,
         state=state,
+        scope=scope,
     )
     receipt_bytes = _json_bytes(receipt)
     receipt_sha = _sha256_bytes(receipt_bytes)
     receipt_name = (
         f"{action_id}.contact_alignment.v1.{receipt_sha[:12]}.json"
+        if scope == SCOPE
+        else (
+            f"{action_id}.{scope}.contact_alignment.v1."
+            f"{receipt_sha[:12]}.json"
+        )
     )
     receipt_relative = (
         PurePosixPath(output_relative_dir) / receipt_name
@@ -1305,7 +1518,7 @@ def materialize_n1_contact_bundle(
         "artifact_type": "n1_contact_training_bundle_v1",
         "action_id": action_id,
         "action_uid": int(corrected_action["action_uid"]),
-        "scope": SCOPE,
+        "scope": scope,
         "source_manifest": source_manifest_pin,
         "profile_pins": profile_pin,
         "motion": motion_pin,
@@ -1313,7 +1526,7 @@ def materialize_n1_contact_bundle(
             "path": prototype_relative,
             "sha256": prototype_sha,
             "schema_version": 2,
-            "scope": SCOPE,
+            "scope": scope,
         },
         "manifest": {
             "path": manifest_relative,
@@ -1328,12 +1541,14 @@ def materialize_n1_contact_bundle(
             "status": "PASS",
         },
         "geometry": geometry_pin,
-        "claims": dict(CLAIMS),
+        "claims": _claims_for_scope(scope),
     }
     bundle_bytes = _json_bytes(bundle)
     bundle_sha = _sha256_bytes(bundle_bytes)
     bundle_name = (
         f"{action_id}.bundle.v1.{bundle_sha[:12]}.json"
+        if scope == SCOPE
+        else f"{action_id}.{scope}.bundle.v1.{bundle_sha[:12]}.json"
     )
     bundle_relative = (
         PurePosixPath(output_relative_dir) / bundle_name
@@ -1406,6 +1621,21 @@ def _build_parser() -> argparse.ArgumentParser:
         choices=tuple(sorted(SUPPORTED_ACTIONS)),
     )
     parser.add_argument(
+        "--scope",
+        choices=SUPPORTED_SCOPES,
+        default=SCOPE,
+        help=(
+            "teacher body scope; full additionally requires --strike-frame"
+        ),
+    )
+    parser.add_argument(
+        "--strike-frame",
+        type=int,
+        help=(
+            "explicit interior selected-face contact frame for --scope full"
+        ),
+    )
+    parser.add_argument(
         "--source-manifest",
         default=str(SOURCE_MANIFEST_RELATIVE_PATH),
     )
@@ -1446,6 +1676,8 @@ def main(argv: Sequence[str] | None = None) -> int:
         ),
         output_dir=under_root(arguments.output_dir),
         require_git_tracked_motion=True,
+        scope=arguments.scope,
+        strike_frame=arguments.strike_frame,
     )
     print(
         json.dumps(

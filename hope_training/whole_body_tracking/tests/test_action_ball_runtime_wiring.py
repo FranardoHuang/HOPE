@@ -231,6 +231,47 @@ def test_diagnostic_action_ball_omits_formal_evaluator_stack_only():
         )
 
 
+def test_diagnostic_fast_path_keeps_functional_solver_and_forces_one_row():
+    initialize = _method_source("_initialize_action_ball_runtime")
+    refill = _method_source("_action_ball_refill_pool_many")
+    diagnostic_state = _method_source(
+        "_action_ball_exact_resume_state_dict"
+    )
+
+    assert (
+        "1\n            if diagnostic_unauthorized\n"
+        "            else int(self.cfg.action_ball_pool_refill_rows)"
+        in initialize
+    )
+    assert (
+        "1.0\n            if diagnostic_unauthorized\n"
+        "            else float(self.cfg.cq_overdraw)"
+        in initialize
+    )
+    assert "diagnostic_unauthorized=diagnostic_unauthorized" in initialize
+    assert "self._action_ball_sampler.sample(" in refill
+    assert "result = solve_proposals(" in refill
+    assert "self._action_ball_effective_cq_overdraw" in refill
+    assert "racket_velocity_rows = (" in refill
+    assert "racket_normal_rows = (" in refill
+    assert "residual_rows = result.resid_m.detach().cpu().tolist()" in refill
+    assert '"exact_resume_supported": False' in diagnostic_state
+    assert "action_ball_diagnostic_checkpoint" in diagnostic_state
+
+    reserve_start = MOTION_SOURCE.index(
+        "    def _reserve_action_ball_true_reset("
+    )
+    reserve_end = MOTION_SOURCE.index(
+        "    def _rollback_action_ball_true_reset(", reserve_start
+    )
+    reserve = MOTION_SOURCE[reserve_start:reserve_end]
+    assert "diagnostic_fast_path" in reserve
+    assert (
+        "else self._action_ball_birth_broker.state_dict()" in reserve
+    )
+    assert "if not diagnostic_fast_path:" in reserve
+
+
 def test_action_ball_runtime_waits_for_command_manager_construction():
     method = _method("_ensure_action_ball_runtime_initialized")
     module = ast.Module(body=[method], type_ignores=[])

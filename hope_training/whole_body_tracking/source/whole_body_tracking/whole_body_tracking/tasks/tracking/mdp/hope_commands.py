@@ -4650,16 +4650,28 @@ class RacketTargetCommand(CommandTerm):
             )
             for slot, action in enumerate(manifest.actions)
         )
+        effective_pool_refill_rows = (
+            1
+            if diagnostic_unauthorized
+            else int(self.cfg.action_ball_pool_refill_rows)
+        )
+        effective_cq_overdraw = (
+            1.0
+            if diagnostic_unauthorized
+            else float(self.cfg.cq_overdraw)
+        )
         broker = ActionBirthBroker(
             bindings,
             pins,
             manifest.mobility_mode,
+            diagnostic_unauthorized=diagnostic_unauthorized,
         )
         pool = LazyActionTaskPool(
             bindings,
             pins,
             manifest.mobility_mode,
-            refill_size=int(self.cfg.action_ball_pool_refill_rows),
+            refill_size=effective_pool_refill_rows,
+            diagnostic_unauthorized=diagnostic_unauthorized,
         )
 
         self._action_ball_loaded_manifest = loaded
@@ -4675,6 +4687,10 @@ class RacketTargetCommand(CommandTerm):
         }
         self._action_ball_pins = pins
         self._action_ball_bindings = bindings
+        self._action_ball_effective_pool_refill_rows = (
+            effective_pool_refill_rows
+        )
+        self._action_ball_effective_cq_overdraw = effective_cq_overdraw
         self._action_ball_broker = broker
         self._action_ball_pool = pool
         self._action_ball_prototypes = prototypes
@@ -4753,6 +4769,7 @@ class RacketTargetCommand(CommandTerm):
         }
         self._action_ball_birth_by_env = [None] * self.num_envs
         self._action_ball_task_by_env = [None] * self.num_envs
+        self._action_ball_task_ref_by_env = [None] * self.num_envs
         self._counter_rally_task_identity_by_env = (
             [None] * self.num_envs
         )
@@ -5072,14 +5089,18 @@ class RacketTargetCommand(CommandTerm):
             },
             "sampling": {
                 "action_ball_seed": int(self.cfg.action_ball_seed),
-                "pool_refill_rows": int(self.cfg.action_ball_pool_refill_rows),
+                "pool_refill_rows": (
+                    self._action_ball_effective_pool_refill_rows
+                ),
                 "balanced_clip_sampling": bool(
                     self._motion().cfg.balanced_clip_sampling
                 ),
                 "balanced_clip_sampling_seed": int(
                     self._motion().cfg.balanced_clip_sampling_seed
                 ),
-                "external_overdraw_multiplier": float(self.cfg.cq_overdraw),
+                "external_overdraw_multiplier": (
+                    self._action_ball_effective_cq_overdraw
+                ),
                 "maximum_external_proposal_rounds": int(
                     self.cfg.cq_max_redraw_rounds
                 ),
@@ -5217,7 +5238,16 @@ class RacketTargetCommand(CommandTerm):
             ActionBallTaskReceipt,
         )
 
-        if ActionBallTaskReceipt.from_dict(receipt.to_dict()) != receipt:
+        if (
+            not bool(
+                getattr(
+                    self,
+                    "_action_ball_diagnostic_unauthorized",
+                    False,
+                )
+            )
+            and ActionBallTaskReceipt.from_dict(receipt.to_dict()) != receipt
+        ):
             raise RuntimeError(
                 "action-ball task receipt failed exact read-only round-trip"
             )
@@ -5246,7 +5276,18 @@ class RacketTargetCommand(CommandTerm):
         receipt = self._action_ball_task_receipt_for_env(env_id)
         if receipt is None:
             return None
-        ref = receipt.task_ref()
+        diagnostic_fast_path = bool(
+            getattr(
+                self,
+                "_action_ball_diagnostic_unauthorized",
+                False,
+            )
+        )
+        ref = (
+            self._action_ball_task_ref_by_env[env_id]
+            if diagnostic_fast_path
+            else receipt.task_ref()
+        )
         from whole_body_tracking.tasks.tracking.mdp.action_ball_runtime import (
             ActionTaskReceiptRef,
         )
@@ -5268,7 +5309,19 @@ class RacketTargetCommand(CommandTerm):
         if type(env_id) is not int:
             raise ValueError("action-ball task ref has no plain env_id")
         receipt = self._action_ball_task_receipt_for_env(env_id)
-        if receipt is None or receipt.task_ref() != ref:
+        diagnostic_fast_path = bool(
+            getattr(
+                self,
+                "_action_ball_diagnostic_unauthorized",
+                False,
+            )
+        )
+        expected_ref = (
+            self._action_ball_task_ref_by_env[env_id]
+            if diagnostic_fast_path
+            else None if receipt is None else receipt.task_ref()
+        )
+        if receipt is None or expected_ref != ref:
             raise RuntimeError(
                 "action-ball task ref is stale or belongs to another generation"
             )
@@ -6080,24 +6133,25 @@ class RacketTargetCommand(CommandTerm):
             ),
             frontier_arm=sampler_birth.frontier_arm,
         )
+        receipt_sha256 = receipt.canonical_sha256
         if (
-            receipt.canonical_sha256 in self._action_ball_provider_births
-            or receipt.canonical_sha256 in self._action_ball_provider_history
+            receipt_sha256 in self._action_ball_provider_births
+            or receipt_sha256 in self._action_ball_provider_history
         ):
             raise RuntimeError("action-ball birth provider produced a duplicate runtime receipt")
-        self._action_ball_provider_births[receipt.canonical_sha256] = {
+        self._action_ball_provider_births[receipt_sha256] = {
             "runtime_birth": receipt,
             "sampler_birth": sampler_birth,
             "stratum": str(domain.stratum),
             "levels": levels,
             "rho": float(domain.rho),
         }
-        self._action_ball_provider_history[receipt.canonical_sha256] = receipt
+        self._action_ball_provider_history[receipt_sha256] = receipt
         self._action_ball_task_transcript_by_birth[
-            receipt.canonical_sha256
+            receipt_sha256
         ] = (
             0,
-            task_transcript_sha256(receipt.canonical_sha256, ()),
+            task_transcript_sha256(receipt_sha256, ()),
         )
         return receipt
 
@@ -6658,6 +6712,12 @@ class RacketTargetCommand(CommandTerm):
         if not requests:
             raise RuntimeError("action-ball refill batch must be non-empty")
         maximum_rounds = int(self.cfg.cq_max_redraw_rounds)
+        if hasattr(self, "_action_ball_effective_cq_overdraw"):
+            effective_cq_overdraw = float(
+                self._action_ball_effective_cq_overdraw
+            )
+        else:
+            effective_cq_overdraw = float(self.cfg.cq_overdraw)
         surface_z, net_x, net_top_z = self._action_ball_planes
         dtype = self._ref_racket_normal_raw_w_per_clip.dtype
         states = []
@@ -6725,7 +6785,11 @@ class RacketTargetCommand(CommandTerm):
                     continue
                 proposal_rows = max(
                     remaining,
-                    int(math.ceil(remaining * float(self.cfg.cq_overdraw))),
+                    int(
+                        math.ceil(
+                            remaining * effective_cq_overdraw
+                        )
+                    ),
                 )
                 request = state["request"]
                 samples = [
@@ -6908,6 +6972,21 @@ class RacketTargetCommand(CommandTerm):
                 )
             reason_codes = result.proposals.reason_code.detach().cpu().tolist()
             admitted_rows = admitted.detach().cpu().tolist()
+            racket_velocity_rows = (
+                result.v_racket.detach().cpu().tolist()
+            )
+            racket_normal_rows = (
+                result.n_racket.detach().cpu().tolist()
+            )
+            residual_rows = result.resid_m.detach().cpu().tolist()
+            reference_quat_rows = (
+                self._ref_racket_quat_w_per_clip.detach().cpu().tolist()
+            )
+            reference_omega_rows = (
+                self._ref_racket_ang_vel_w_per_clip.detach()
+                .cpu()
+                .tolist()
+            )
             if (
                 len(reason_codes) != len(flat_samples)
                 or len(admitted_rows) != len(flat_samples)
@@ -6924,37 +7003,17 @@ class RacketTargetCommand(CommandTerm):
                     state["slot"]
                 ]
                 face_velocity = tuple(
-                    float(value)
-                    for value in result.v_racket[index]
-                    .detach()
-                    .cpu()
-                    .tolist()
+                    float(value) for value in racket_velocity_rows[index]
                 )
                 raw_normal = tuple(
-                    float(value)
-                    for value in result.n_racket[index]
-                    .detach()
-                    .cpu()
-                    .tolist()
+                    float(value) for value in racket_normal_rows[index]
                 )
                 slot = int(state["slot"])
                 reference_quat = tuple(
-                    float(value)
-                    for value in self._ref_racket_quat_w_per_clip[
-                        slot
-                    ]
-                    .detach()
-                    .cpu()
-                    .tolist()
+                    float(value) for value in reference_quat_rows[slot]
                 )
                 reference_omega = tuple(
-                    float(value)
-                    for value in self._ref_racket_ang_vel_w_per_clip[
-                        slot
-                    ]
-                    .detach()
-                    .cpu()
-                    .tolist()
+                    float(value) for value in reference_omega_rows[slot]
                 )
                 birth_x_lower_bound_m = ball_birth_x_lower_bound_m(
                     float(flat_samples[index].contact_w_m[0]),
@@ -7142,7 +7201,14 @@ class RacketTargetCommand(CommandTerm):
                             "geometry and teacher timing proof"
                         )
                     profile = self._action_ball_bundle.profiles[slot]
-                    sample.verify_sample_id()
+                    if not bool(
+                        getattr(
+                            self,
+                            "_action_ball_diagnostic_unauthorized",
+                            False,
+                        )
+                    ):
+                        sample.verify_sample_id()
                     goal = (
                         float(sample.base_goal_w_m[0]),
                         float(sample.base_goal_w_m[1]),
@@ -7195,24 +7261,12 @@ class RacketTargetCommand(CommandTerm):
                             mount_normal_sign=(
                                 geometry.mount_normal_sign
                             ),
-                            racket_normal_w=(
-                                result.n_racket[index].detach().cpu().tolist()
-                            ),
-                            reference_racket_quat_wxyz=(
-                                self._ref_racket_quat_w_per_clip[
-                                    slot
-                                ]
-                                .detach()
-                                .cpu()
-                                .tolist()
-                            ),
+                            racket_normal_w=racket_normal_rows[index],
+                            reference_racket_quat_wxyz=reference_quat_rows[
+                                slot
+                            ],
                             reference_racket_angular_velocity_w_radps=(
-                                self._ref_racket_ang_vel_w_per_clip[
-                                    slot
-                                ]
-                                .detach()
-                                .cpu()
-                                .tolist()
+                                reference_omega_rows[slot]
                             ),
                             racket_command_quat_wxyz=(
                                 geometry.racket_command_quat_wxyz
@@ -7256,7 +7310,7 @@ class RacketTargetCommand(CommandTerm):
                             pre_swing_wait_s=(
                                 timing.pre_swing_wait_s
                             ),
-                            solver_residual_m=float(result.resid_m[index].item()),
+                            solver_residual_m=float(residual_rows[index]),
                             contact_time_step_s=(
                                 getattr(
                                     sample,
@@ -7399,7 +7453,15 @@ class RacketTargetCommand(CommandTerm):
                 )
             staged_transcripts[birth_sha] = (
                 count + 1,
-                extend_task_transcript_sha256(
+                root
+                if bool(
+                    getattr(
+                        self,
+                        "_action_ball_diagnostic_unauthorized",
+                        False,
+                    )
+                )
+                else extend_task_transcript_sha256(
                     root, receipt.canonical_sha256
                 ),
             )
@@ -7633,6 +7695,7 @@ class RacketTargetCommand(CommandTerm):
             self._action_ball_ledger[row].add_(values)
         for env in ids[active].detach().cpu().tolist():
             self._action_ball_task_by_env[int(env)] = None
+            self._action_ball_task_ref_by_env[int(env)] = None
             self._counter_rally_task_identity_by_env[int(env)] = None
         self._action_ball_attempt_active[ids] = False
         self._action_ball_attempt_action[ids] = -1
@@ -7680,8 +7743,16 @@ class RacketTargetCommand(CommandTerm):
             )
         for env_id, birth in rows:
             del self._action_ball_provider_births[birth.canonical_sha256]
+            if self._action_ball_diagnostic_unauthorized:
+                self._action_ball_provider_history.pop(
+                    birth.canonical_sha256, None
+                )
+                self._action_ball_task_transcript_by_birth.pop(
+                    birth.canonical_sha256, None
+                )
             self._action_ball_birth_by_env[env_id] = None
             self._action_ball_task_by_env[env_id] = None
+            self._action_ball_task_ref_by_env[env_id] = None
             self._counter_rally_task_identity_by_env[env_id] = None
 
     def _action_ball_commit_install(
@@ -7901,6 +7972,11 @@ class RacketTargetCommand(CommandTerm):
         ):
             self._action_ball_birth_by_env[int(env)] = birth
             self._action_ball_task_by_env[int(env)] = receipt
+            self._action_ball_task_ref_by_env[int(env)] = (
+                receipt.task_ref()
+                if self._action_ball_diagnostic_unauthorized
+                else None
+            )
             self._counter_rally_task_identity_by_env[int(env)] = (
                 None
                 if counter_rally_identities is None
@@ -8251,6 +8327,7 @@ class RacketTargetCommand(CommandTerm):
             ].add_(additions)
         for env_id in range(self.num_envs):
             self._action_ball_task_by_env[env_id] = None
+            self._action_ball_task_ref_by_env[env_id] = None
             self._counter_rally_task_identity_by_env[env_id] = None
         self._action_ball_attempt_active.zero_()
         self._action_ball_attempt_action.fill_(-1)
@@ -10735,6 +10812,32 @@ class RacketTargetCommand(CommandTerm):
     def _action_ball_exact_resume_state_dict(self) -> dict:
         """Serialize every random tape, receipt queue, generation and attribution latch."""
 
+        if self._action_ball_diagnostic_unauthorized:
+            payload = {
+                "schema_version": 1,
+                "kind": (
+                    "whole_body_tracking.RacketTargetCommand."
+                    "action_ball_diagnostic_checkpoint"
+                ),
+                "diagnostic_unauthorized": True,
+                "exact_resume_supported": False,
+                "manifest_sha256": (
+                    self._action_ball_loaded_manifest.file_sha256
+                ),
+                "action_order": list(
+                    self._action_ball_manifest.action_order
+                ),
+                "effective_pool_refill_rows": (
+                    self._action_ball_effective_pool_refill_rows
+                ),
+                "effective_cq_overdraw": (
+                    self._action_ball_effective_cq_overdraw
+                ),
+            }
+            payload["integrity_sha256"] = (
+                _action_ball_canonical_sha256(payload)
+            )
+            return payload
         hard_contract = self.action_ball_hard_contract()
         if hard_contract is None:
             raise RuntimeError("action-ball exact state requested before runtime admission")
@@ -11046,6 +11149,12 @@ class RacketTargetCommand(CommandTerm):
 
         if strict is not True:
             raise ValueError("action-ball exact resume only supports strict=True")
+        if self._action_ball_diagnostic_unauthorized:
+            raise ValueError(
+                "diagnostic_unauthorized fast checkpoints contain policy/"
+                "optimizer weights but no exact ActionBall command resume "
+                "state"
+            )
         expected = {
             "schema_version",
             "kind",
@@ -11339,6 +11448,9 @@ class RacketTargetCommand(CommandTerm):
             self._action_ball_bindings,
             self._action_ball_pins,
             self._action_ball_manifest.mobility_mode,
+            diagnostic_unauthorized=(
+                self._action_ball_diagnostic_unauthorized
+            ),
         )
         staged_broker.bind_domain_claim_authority(staged_domain)
         staged_broker.bind_provider(staged_provider)
@@ -11374,7 +11486,10 @@ class RacketTargetCommand(CommandTerm):
             self._action_ball_bindings,
             self._action_ball_pins,
             self._action_ball_manifest.mobility_mode,
-            refill_size=int(self.cfg.action_ball_pool_refill_rows),
+            refill_size=self._action_ball_effective_pool_refill_rows,
+            diagnostic_unauthorized=(
+                self._action_ball_diagnostic_unauthorized
+            ),
         )
         staged_pool.bind_solver(staged_solver)
         staged_pool.bind_birth_authority(staged_broker)
@@ -11640,6 +11755,7 @@ class RacketTargetCommand(CommandTerm):
         )
         self._action_ball_birth_by_env = births
         self._action_ball_task_by_env = [None] * self.num_envs
+        self._action_ball_task_ref_by_env = [None] * self.num_envs
         self._counter_rally_task_identity_by_env = (
             [None] * self.num_envs
         )
