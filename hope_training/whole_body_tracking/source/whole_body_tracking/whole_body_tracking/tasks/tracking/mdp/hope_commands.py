@@ -471,17 +471,17 @@ def _assert_action_ball_recipe_is_coherent(cfg) -> None:
     ).strip()
     if not manifest_path:
         failures.append("action_ball_manifest_path is empty")
-    evaluator_receipt_path = str(
-        getattr(cfg, "action_ball_evaluator_launch_receipt_path", "") or ""
-    ).strip()
-    if not evaluator_receipt_path:
+    diagnostic = getattr(
+        cfg, "action_ball_diagnostic_unauthorized", False
+    )
+    if type(diagnostic) is not bool:
         failures.append(
-            "action_ball_evaluator_launch_receipt_path is empty"
+            "action_ball_diagnostic_unauthorized must be an exact boolean"
         )
+        diagnostic = False
     for field in (
         "action_ball_manifest_sha256",
         "action_ball_policy_contract_sha256",
-        "action_ball_evaluator_launch_receipt_file_sha256",
     ):
         digest = str(getattr(cfg, field, "") or "")
         if (
@@ -492,15 +492,19 @@ def _assert_action_ball_recipe_is_coherent(cfg) -> None:
             failures.append(
                 f"{field} must be exactly 64 lowercase hexadecimal characters"
             )
-    diagnostic = getattr(
-        cfg, "action_ball_diagnostic_unauthorized", False
-    )
-    if type(diagnostic) is not bool:
-        failures.append(
-            "action_ball_diagnostic_unauthorized must be an exact boolean"
-        )
-        diagnostic = False
     if not diagnostic:
+        evaluator_receipt_path = str(
+            getattr(
+                cfg,
+                "action_ball_evaluator_launch_receipt_path",
+                "",
+            )
+            or ""
+        ).strip()
+        if not evaluator_receipt_path:
+            failures.append(
+                "action_ball_evaluator_launch_receipt_path is empty"
+            )
         for field in (
             "action_ball_sidecar_launch_receipt_path",
             "action_ball_drain_reset_launch_receipt_path",
@@ -508,6 +512,7 @@ def _assert_action_ball_recipe_is_coherent(cfg) -> None:
             if not str(getattr(cfg, field, "") or "").strip():
                 failures.append(f"{field} is empty")
         for field in (
+            "action_ball_evaluator_launch_receipt_file_sha256",
             "action_ball_sidecar_launch_receipt_file_sha256",
             "action_ball_drain_reset_launch_receipt_file_sha256",
         ):

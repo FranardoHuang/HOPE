@@ -187,6 +187,50 @@ def test_action_ball_recipe_is_independent_and_requires_one_virtual_scorer():
     check(SimpleNamespace(target_mode="task_first"))
 
 
+def test_diagnostic_action_ball_omits_formal_evaluator_stack_only():
+    (check,) = _module_functions(
+        ("_assert_action_ball_recipe_is_coherent",),
+        {"math": math, "Path": Path},
+    )
+    omitted = {
+        "action_ball_evaluator_launch_receipt_path": "",
+        "action_ball_evaluator_launch_receipt_file_sha256": "",
+        "action_ball_sidecar_launch_receipt_path": "",
+        "action_ball_sidecar_launch_receipt_file_sha256": "",
+        "action_ball_drain_reset_launch_receipt_path": "",
+        "action_ball_drain_reset_launch_receipt_file_sha256": "",
+        "action_ball_evaluation_inbox_root": "",
+        "action_ball_evaluation_owner_id": "",
+        "action_ball_evaluation_run_id": "",
+    }
+    check(
+        _valid_recipe(
+            action_ball_diagnostic_unauthorized=True,
+            **omitted,
+        )
+    )
+    with pytest.raises(
+        ValueError,
+        match="action_ball_evaluator_launch_receipt_path is empty",
+    ):
+        check(
+            _valid_recipe(
+                action_ball_diagnostic_unauthorized=False,
+                **omitted,
+            )
+        )
+    with pytest.raises(
+        ValueError,
+        match="action_ball_diagnostic_unauthorized must be an exact boolean",
+    ):
+        check(
+            _valid_recipe(
+                action_ball_diagnostic_unauthorized=1,
+                **omitted,
+            )
+        )
+
+
 def test_action_ball_live_racket_site_geometry_is_fail_closed():
     (check,) = _module_functions(
         ("_assert_action_ball_racket_site_contract",),
