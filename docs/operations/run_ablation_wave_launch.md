@@ -82,9 +82,16 @@ policy/runtime hard contract 和 canonical argv 中同时回读：
    首发 weight=`-5`；`-20` 只允许命名清楚的消融臂；
 3. [`reference_guard_mode=metrics_only`](../DEFINITIONS.md#reference-metrics-only)：anchor/body/ee
    只记 counter，不 reset、不额外给 Reward；
-4. nonfinite raw q_des、实际/physics-substep hard edge、table hit 和 fall 仍各自 hard reset，
-   不能被 reference mode 或 projection 开关屏蔽；仅 predicted ballistic crossing 必须生成有限
-   brake target 而不 reset，最终或子步真实越界由 `joint_actual_forbidden` 的 sticky 证据终止。
+4. nonfinite raw q_des、实际关节进入 hard-limit 内缩 `2%` 安全带、physics-substep 真实 hard
+   edge、table hit 和 fall 仍各自 hard reset，不能被 reference mode 或 projection 开关屏蔽；
+   仅 predicted ballistic crossing 必须生成有限 brake target 而不 reset。注意 q_des clamp
+   只约束 drive target；真实 q 仍可能因隐式 PD、重力、接触和惯性进入安全带。
+
+若 q_des projection/nonfinite 为零、fall 很低，而 `joint_actual_forbidden` 仍让 mean episode
+length 长期短于 `t_hit`，先做单变量的滚动刹车 A/B：每个 fresh physics-substep 仍重新读 q/qdot，
+但 prediction/brake horizon 保持一个完整 policy/control step（当前 `20 ms`），不能静默缩成
+单个 physics tick（当前 `5 ms`）。不得同时改 Reward、Done 或 safety-band margin；只有
+1-env smoke 后的 fresh 4096 run 让 episode 越过 `t_hit` 且出现持续 strike，才可替换长跑。
 
 N=1 launcher 的 canonical Hydra argv 必须逐字包含
 `+task.racket.reference_guard_mode=metrics_only`。该键不在 task YAML 中，少写 `+` 会在 compose

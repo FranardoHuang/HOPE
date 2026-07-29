@@ -531,3 +531,28 @@ actual sticky hard-edge 终止，只把 projection 模式的 q_des DoneTerm 收�
 predicted-only crossing 不再重复 reset。legacy 模式不变。Pod host joint-safety suite 为
 `80 passed`；必须由 fresh namespace 的 4096 replacement 验证吞吐和 actual-hard 比率下降后，
 才能继续比较 Reward。
+
+### 2026-07-29：`5dbb4e58` replacement 暴露实际关节动态余量不足
+
+反手拉 upper 的
+[`1-env smoke`](../../../configs/n1_contact_20260729/smoke_loop_upper_gpu1_5dbb4e58.json)
+自然完成两轮，iteration 为 `4.72/3.00 s`，q_des termination 为零。随后 exact
+[`4096-env replacement`](../../../configs/n1_contact_20260729/long_loop_upper_gpu1_5dbb4e58_r1.json)
+证明移除 predicted-only reset 并未单独恢复训练吞吐：
+
+- update 3--8 与旧 `7a14b0b9` 同序号相比，iteration mean 由 `37.73 s` 变为
+  `36.78 s`，只改善约 `2.5%`；terminal reset 只少约 `7.9%`；
+- update 0--17 的 mean episode length 始终约 `19.30--23.81` steps，低于反手拉约
+  `31` steps 的击球窗；update 12 仅有一次 strike opportunity，其余为零；
+- finite q_des projection、nonfinite 与 projection penalty 始终为零；每轮约
+  `4,658--5,092` 个 `joint_actual_forbidden`，而 fall 仅 `0--23`，所以慢速主因不是倒地；
+- 该 actual term 不等于“已经撞机械硬挡”：它在当前真实 q 进入 hard limit 内缩 `2%`
+  的安全带时终止，并 OR physics-substep 真实 hard-edge sticky latch。q_des clamp 约束的是
+  drive target，不能据此推出带惯性、重力和足底接触的真实 q 不会动态超调。
+
+因此保留原 run 到早期学习观察窗，不能因前几个慢 update 单独判死；晋级判据仍是 episode length
+越过 `t_hit` 且 strike opportunity 持续非零。并行的单变量候选只把每个 fresh `5 ms`
+physics-substep 的 q/qdot 预测与 brake 保持为滚动 `20 ms` policy/control horizon；Reward、
+Done、2% safety band 和 nominal safe target 均不变，安全行要求 bitwise 不变。host
+joint-safety focused suite `81 passed`，与 ActionBall runtime wiring 的联合回归为
+`125 passed`。该候选尚无 Pod A/B，不得写成已提速或已解决。

@@ -3589,3 +3589,23 @@ successor 候选在 projection mode 令 q_des DoneTerm 只拥有 nonfinite raw r
 crossing 仍生成 finite brake target 但不 reset，实际/子步 hard edge 仍由 actual DoneTerm 终止；
 legacy 行为不变。Pod host joint-safety suite `80 passed`。fresh 4096 replacement 仍须证明
 actual-hard 比率和 update wall time 可接受；G05 继续 `Partial`。
+
+#### 2026-07-29 `5dbb4e58` 4096 replacement 与滚动刹车候选
+
+exact 1-env smoke 两轮自然完成（`4.72/3.00 s`，q_des termination=`0`）。同 source 的
+4096-env replacement 在 update 0--17 的 mean episode length 仍只有
+`19.30--23.81` steps，约 `4,658--5,092 joint_actual_forbidden/update`，而 fall 只有
+`0--23/update`；只在 update 12 产生一次 strike opportunity。update 3--8 对同序号旧 source
+只快约 `2.5%`，所以 predicted reset 所有权修正正确但不足以解锁健康长跑。
+
+这里的 `joint_actual_forbidden` 同时拥有当前真实 q 进入 hard-limit 内缩 `2%` 安全带和
+physics-substep 真实 hard-edge sticky latch；它不能被误写成每次都已撞机械硬挡。q_des
+projection/nonfinite/penalty 全为零，说明 clamp 目标合法，但不证明 implicit PD、重力和接触下的
+真实关节没有动态超调。早期慢 update 本身不判死；必须观察 episode length 是否越过约
+31-step `t_hit` 并稳定出现 strike。
+
+单变量 successor 候选保持 Reward、Done、2% safety band 与 nominal safe q_des 不变，只让每个
+fresh 5-ms substep readback 继续用完整 20-ms policy/control horizon 做滚动 crossing 预测和
+brake；安全行 target 要求 bitwise 不变。host joint-safety focused suite `81 passed`，与
+ActionBall runtime wiring 联合回归为 `125 passed`。尚未产生 Pod A/B，所以 G05 保持
+`Partial`。

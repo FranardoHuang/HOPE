@@ -13,6 +13,14 @@
 
 ## 2026-07-29（N1 ActionBall 真实 smoke 与 physical-crossing 拆账）
 
+- `5dbb4e58` 的 Pod1 反手拉 1-env smoke 自然完成，但 4096-env update 0--17 仍约
+  `4.7k joint_actual_forbidden/update`、episode length `19--24<t_hit≈31`，fall 仅
+  `0--23/update`，说明慢速主因不是倒地或 q_des clamp 失效，而是真实关节进入 hard-limit
+  内缩 2% 的安全带。update 3--8 对旧 source 只快约 2.5%，不能晋级。候选修复不动
+  Reward/Done/margin，只让每个 5-ms substep 保持滚动 20-ms crossing/brake horizon；host
+  joint-safety focused `81 passed`、联合 runtime wiring `125 passed`，尚待 Pod A/B。详见
+  [Reward 因果实验](experiments/2026-07/EXP-EFFECTIVE-REWARD-CAUSALITY-20260727.md)和
+  [G05](gates/G05_isaac_training_first_loop.md)。
 - `curr-launch-fix@7a14b0b9` 已在 Pod1 自然完成反手拉 upper 的
   `1 env × 2 update`：两轮 `2.85/2.02 s`，`model_0/model_1` 共审计
   `1,775,488` 个 tensor 元素且全部 finite。随后 4096-env 诊断首轮真实跑出

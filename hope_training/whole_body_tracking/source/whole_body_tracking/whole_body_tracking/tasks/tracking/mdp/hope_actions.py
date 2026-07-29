@@ -2320,7 +2320,11 @@ class ClampedJointPositionAction(JointPositionAction):
         if not self._pre_apply_limit_guard_enabled:
             return
         ledger = self._joint_safety_ledger
-        if ledger is None or self._pre_apply_guard_physics_dt_s is None:
+        if (
+            ledger is None
+            or self._pre_apply_guard_physics_dt_s is None
+            or self._pre_apply_guard_policy_dt_s is None
+        ):
             raise RuntimeError("physics-substep joint guard is enabled without a ledger")
         envelopes = self._current_substep_guard_envelopes
         if envelopes is None:
@@ -2403,9 +2407,13 @@ class ClampedJointPositionAction(JointPositionAction):
         )
         hard_inner_lower = hard_lower + inset
         hard_inner_upper = hard_upper - inset
-        ballistic_next = (
-            safe_pos + safe_vel * self._pre_apply_guard_physics_dt_s
-        )
+        # Keep the validated control/reaction horizon at every fresh substep readback.  Shrinking
+        # the prediction to one physics tick after the policy-step check lets an implicit drive
+        # accelerate outward during the first substep, then notices the crossing only when there is
+        # no longer enough room to brake before the terminal inset.  Re-evaluating the same policy
+        # horizon from fresh q/qdot is a receding safety guard; it does not alter nominal targets.
+        guard_horizon_s = self._pre_apply_guard_policy_dt_s
+        ballistic_next = safe_pos + safe_vel * guard_horizon_s
         hard_crossing = (
             ~state_finite
             | safe_pos.le(hard_inner_lower)
@@ -2446,7 +2454,7 @@ class ClampedJointPositionAction(JointPositionAction):
         if adjust_target:
             guard = hard_crossing | actual_hard_edge
             brake_target = torch.clamp(
-                safe_pos - safe_vel * self._pre_apply_guard_physics_dt_s,
+                safe_pos - safe_vel * guard_horizon_s,
                 min=target_lower,
                 max=target_upper,
             )

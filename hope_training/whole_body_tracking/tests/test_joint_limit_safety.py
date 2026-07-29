@@ -822,6 +822,50 @@ def test_physics_substep_ledger_records_exact_decimation_and_fresh_timestamps():
     assert action.joint_safety_ledger_snapshot()["q"][0, 0, 0].item() == 0.0
 
 
+def test_physics_substep_guard_keeps_policy_horizon_and_preserves_safe_target():
+    action, _, asset = _action_and_env(
+        guard=True,
+        guard_policy_dt_s=0.02,
+        guard_margin_fraction=0.1,
+        runtime_step_dt=0.02,
+        runtime_physics_dt=0.005,
+    )
+    base = hope_actions_mod.JointPositionAction
+    if not hasattr(base, "apply_actions"):
+        base.apply_actions = lambda self: None
+    action.process_actions(torch.full((2, 2), 0.25))
+    safe_target_before = action.processed_actions[1].detach().clone()
+
+    # apply0 starts safe.  This models the important failure mode: the implicit drive/plant
+    # accelerates outward after the policy-step check rather than arriving with a large qdot.
+    _set_sim_timestamp(asset, 0.0)
+    asset.data.joint_pos[0, 0] = 0.20
+    asset.data.joint_vel[0, 0] = 0.0
+    asset.data.joint_pos[1] = torch.tensor([0.20, -0.30])
+    asset.data.joint_vel[1] = torch.tensor([0.10, -0.10])
+    action.apply_actions()
+    assert not action.physics_substep_hard_crossing_joint_latch[0, 0].item()
+    assert torch.equal(action.processed_actions[1], safe_target_before)
+
+    _set_sim_timestamp(asset, 0.005)
+    # The 10%-inset hard upper edge is 0.96.  Env 0 remains safe over one 5-ms
+    # physics tick (0.90 + 4*0.005 = 0.92), but crosses over the validated
+    # 20-ms policy/reaction horizon (0.98) after accelerating between substeps,
+    # and must receive q-v*0.02 = 0.82.
+    asset.data.joint_pos[0, 0] = 0.90
+    asset.data.joint_vel[0, 0] = 4.0
+    asset.data.joint_pos[1] = torch.tensor([0.20, -0.30])
+    asset.data.joint_vel[1] = torch.tensor([0.10, -0.10])
+    action.apply_actions()
+
+    assert action.physics_substep_hard_crossing_joint_latch[0, 0].item()
+    assert action.processed_actions[0, 0].item() == pytest.approx(0.82)
+    assert torch.equal(action.processed_actions[1], safe_target_before)
+    snapshot = action.joint_safety_ledger_snapshot()
+    assert snapshot["apply_call_count"] == 2
+    assert snapshot["timestamp_s"] == pytest.approx((0.0, 0.005))
+
+
 @pytest.mark.parametrize("project_finite_qdes", [False, True])
 def test_physics_substep_ledger_catches_crossing_and_bounced_actual_hard_edge(
     project_finite_qdes,
@@ -834,13 +878,14 @@ def test_physics_substep_ledger_catches_crossing_and_bounced_actual_hard_edge(
         base.apply_actions = lambda self: None
     action.process_actions(torch.zeros(2, 2))
 
-    # apply0: q is inside hard +1.2 but q+qdot*0.025 crosses it.
+    # apply0: q is inside hard +1.2 but q+qdot*0.1 crosses it.  Every fresh
+    # substep readback retains the validated policy/reaction horizon.
     _set_sim_timestamp(asset, 0.0)
     asset.data.joint_pos[0, 0] = 1.15
     asset.data.joint_vel[0, 0] = 3.0
     action.apply_actions()
     assert action.physics_substep_hard_crossing_latch.tolist() == [True, False]
-    assert action.processed_actions[0, 0].item() == pytest.approx(1.0)
+    assert action.processed_actions[0, 0].item() == pytest.approx(0.85)
 
     # apply1 observes an actual hard-edge breach.  Later readbacks bounce safely inside.
     _set_sim_timestamp(asset, 0.025)
