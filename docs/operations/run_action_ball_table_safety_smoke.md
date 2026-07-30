@@ -76,6 +76,8 @@ top/keep-out/net/posts 做真实正控并推进 PhysX。必须同时满足：
 - 五件 collider 的 destructive positive controls 之间沿用上一脉冲 automatic reset 后已经
   通过的 clean state，不额外调用会重采 generic motion command 的 `env.reset()`；否则测试会把
   无关随机 reset 姿态或不推进 PhysX 的旧 force report 误写成 table-sensor 失败。
+- 初始 settle 只要求 `robot_hit_table=false`；reference/episode 等其他 generic termination
+  继续进入各自账本，但不冒充桌碰传感器的负例或阻断本工具的五角色物理正控。
 
 输出最后一行 `HOPE_TABLE_OBSTACLE_CHECK_JSON=...` 原样保存。失败日志也保存，不得删失败尝试后重报
 “全过”。

@@ -2828,17 +2828,15 @@ def contact_smoke(env, env_cfg):
     (
         _initial_obs,
         _initial_reward,
-        initial_terminated,
+        _initial_terminated,
         _initial_truncated,
         _initial_extras,
     ) = env.step(zero_action)
     initial_table_reason = unwrapped.termination_manager.get_term(
         "robot_hit_table"
     )
-    if bool(initial_terminated[0].item()) or bool(
-        initial_table_reason[0].item()
-    ):
-        _fail("contact smoke has no clean state before its first pulse")
+    if bool(initial_table_reason[0].item()):
+        _fail("contact smoke has no table-clean state before its first pulse")
     print(
         "HOPE_TABLE_DIAGNOSTIC_STAGE=contact_smoke_initial_clean_done",
         flush=True,
