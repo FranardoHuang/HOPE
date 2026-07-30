@@ -17,6 +17,7 @@ install(PROGRAMS
   scripts/fake_ball_publisher
   scripts/fake_optitrack_publisher
   scripts/mocap_rate_probe.py
+  scripts/natnet_preflight.py
   scripts/p1_pelvis_calibrator
   scripts/p1_pelvis_tf_publisher
   scripts/optitrack_mct_relay
