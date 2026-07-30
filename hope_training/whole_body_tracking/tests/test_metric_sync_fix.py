@@ -493,7 +493,10 @@ def test_metric_scalar_packets_retire_scattered_host_reads():
     assert "bool(self._swing_start_pending.any())" not in footwork_source
     assert "self._swing_start_base_xy.copy_(" in footwork_source
 
-    assert evaluate_source.count("_batched_host_scalar_values(") == 1
+    # Diagnostic exact-any + exact metrics now share the module-level packet helper; formal/default
+    # retains its one direct exact-metric batch in _update_metrics.
+    assert evaluate_source.count("_batched_host_scalar_values(") == 0
+    assert "_action_ball_diagnostic_host_packet(" in evaluate_source
     assert "if self._action_ball_diagnostic_unauthorized:" in evaluate_source
     assert "exact_any = bool(exact_any_host)" in evaluate_source
     assert "if bool((exact_strike & ~active).any()):" in evaluate_source

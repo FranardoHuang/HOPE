@@ -197,6 +197,64 @@ def _batched_host_scalar_values(values: Sequence[torch.Tensor]) -> tuple[float, 
     return tuple(float(value) for value in torch.stack(scalars).cpu().tolist())
 
 
+def _action_ball_validate_tensor_predicate(
+    predicate: torch.Tensor,
+    message: str,
+    *,
+    async_validate: bool,
+) -> None:
+    """Keep diagnostic invariants on device without weakening formal failure boundaries.
+
+    The formal/default path deliberately retains its immediate synchronous exception.  An
+    explicitly unauthorized diagnostic run may queue the same scalar assertion on CUDA instead:
+    stream ordering keeps it ahead of all dependent state writes, while the next ordinary trainer
+    synchronization still fails the run.  CPU remains the precise-message negative-control oracle.
+    """
+
+    if type(async_validate) is not bool:
+        raise TypeError("ActionBall async_validate must be an exact boolean")
+    if not torch.is_tensor(predicate):
+        raise TypeError("ActionBall tensor validation requires a tensor predicate")
+    scalar = torch.all(predicate)
+    if async_validate and scalar.device.type == "cuda":
+        assert_fn = getattr(torch, "_assert_async", None)
+        if not callable(assert_fn):  # pragma: no cover - older than the supported Pod torch
+            raise RuntimeError(
+                "torch._assert_async is required for diagnostic ActionBall validation"
+            )
+        assert_fn(scalar)
+        return
+    if not bool(scalar):
+        raise RuntimeError(message)
+
+
+def _action_ball_diagnostic_host_packet(
+    *,
+    orphan_exact: torch.Tensor,
+    identity_drift: torch.Tensor,
+    exact_any: torch.Tensor,
+    metric_scalars: Sequence[torch.Tensor] = (),
+) -> tuple[bool, bool, bool, tuple[float, ...]]:
+    """Transfer diagnostic step predicates and already-reduced metrics in one ordered packet."""
+
+    telemetry = tuple(metric_scalars)
+    packet_dtype = telemetry[0].dtype if telemetry else torch.float32
+    packet = _batched_host_scalar_values(
+        (
+            orphan_exact.to(dtype=packet_dtype),
+            identity_drift.to(dtype=packet_dtype),
+            exact_any.to(dtype=packet_dtype),
+            *telemetry,
+        )
+    )
+    return (
+        bool(packet[0]),
+        bool(packet[1]),
+        bool(packet[2]),
+        tuple(packet[3:]),
+    )
+
+
 class _ActionBallPoolSolverAdapter:
     """Stateful protocol adapter required by ``LazyActionTaskPool``.
 
@@ -2941,6 +2999,10 @@ class RacketTargetCommand(CommandTerm):
         self._recovery_spawn_sum_acc = 0.0
         self._recovery_expiry_sum_acc = 0.0
         self._recovery_n_acc = 0.0
+        # Diagnostic-only one-step staging for pure hold/recovery telemetry.  The next policy
+        # step fuses these five reductions into the mandatory exact-any host packet; the final
+        # rollout step is drained once at the PPO update boundary.
+        self._diagnostic_hold_recovery_metric_scalars = ()
         self._previous_in_hold = torch.zeros(
             self.num_envs, dtype=torch.bool, device=self.device
         )
@@ -14977,10 +15039,17 @@ class RacketTargetCommand(CommandTerm):
                 raise ValueError(
                     "ActionBall exact-face valid_mask shape mismatch"
                 )
-        if bool((invalid_slots & required).any()):
-            raise RuntimeError(
-                "ActionBall exact-face geometry saw an uninstalled action slot"
-            )
+        _action_ball_validate_tensor_predicate(
+            ~(invalid_slots & required),
+            "ActionBall exact-face geometry saw an uninstalled action slot",
+            async_validate=bool(
+                getattr(
+                    self,
+                    "_action_ball_diagnostic_unauthorized",
+                    False,
+                )
+            ),
+        )
         sign_table = torch.as_tensor(
             self._action_ball_mount_signs,
             dtype=racket_site_pos_w.dtype,
@@ -15037,11 +15106,18 @@ class RacketTargetCommand(CommandTerm):
             & torch.isfinite(quaternion_norm)
             & (quaternion_norm > 1.0e-12)
         )
-        if bool((active & ~raw_state_finite).any()):
-            raise RuntimeError(
-                "ActionBall active contact history contains a non-finite "
-                "site/twist or zero quaternion"
-            )
+        _action_ball_validate_tensor_predicate(
+            ~(active & ~raw_state_finite),
+            "ActionBall active contact history contains a non-finite "
+            "site/twist or zero quaternion",
+            async_validate=bool(
+                getattr(
+                    self,
+                    "_action_ball_diagnostic_unauthorized",
+                    False,
+                )
+            ),
+        )
         self._action_ball_prev_racket_site_w.copy_(
             self.racket_pos_w
         )
@@ -15663,15 +15739,22 @@ class RacketTargetCommand(CommandTerm):
                 raise RuntimeError(
                     "action-ball Motion just_resampled mask is malformed"
                 )
-            if hasattr(self, "_action_ball_attempt_active") and bool(
-                (
+            if hasattr(self, "_action_ball_attempt_active"):
+                invalid_active_timing = (
                     self._action_ball_attempt_active
                     & ~timing_active
                     & ~wrapped
-                ).any()
-            ):
-                raise RuntimeError(
-                    "active action-ball task has no receipt-owned Motion timing"
+                )
+                _action_ball_validate_tensor_predicate(
+                    ~invalid_active_timing,
+                    "active action-ball task has no receipt-owned Motion timing",
+                    async_validate=bool(
+                        getattr(
+                            self,
+                            "_action_ball_diagnostic_unauthorized",
+                            False,
+                        )
+                    ),
                 )
             # TTC is the task deadline.  It includes the canonical-ready wait,
             # the scaled approach to contact, and remains signed after contact;
@@ -17018,26 +17101,41 @@ class RacketTargetCommand(CommandTerm):
         )
         spawn_yaw = torch.where(conditioned, self._hold_start_yaw, zero)
         conditioned_expiry_yaw = torch.where(conditioned, yaw_abs, zero)
-        (
-            heading_expiry_sum,
-            heading_expiry_n,
-            recovery_spawn_sum,
-            recovery_expiry_sum,
-            recovery_n,
-        ) = _batched_host_scalar_values(
-            (
-                expiry_yaw.sum(),
-                expired.sum(dtype=yaw_abs.dtype),
-                spawn_yaw.sum(),
-                conditioned_expiry_yaw.sum(),
-                conditioned.sum(dtype=yaw_abs.dtype),
-            )
+        metric_scalars = (
+            expiry_yaw.sum(),
+            expired.sum(dtype=yaw_abs.dtype),
+            spawn_yaw.sum(),
+            conditioned_expiry_yaw.sum(),
+            conditioned.sum(dtype=yaw_abs.dtype),
         )
-        self._heading_expiry_sum_acc += heading_expiry_sum
-        self._heading_expiry_n_acc += heading_expiry_n
-        self._recovery_spawn_sum_acc += recovery_spawn_sum
-        self._recovery_expiry_sum_acc += recovery_expiry_sum
-        self._recovery_n_acc += recovery_n
+        diagnostic_packet = (
+            bool(getattr(self, "_action_ball_enabled", False))
+            and bool(
+                getattr(
+                    self,
+                    "_action_ball_diagnostic_unauthorized",
+                    False,
+                )
+            )
+            and bool(self.cfg.virtual_ball or self.cfg.vb_metrics_only)
+        )
+        if diagnostic_packet:
+            if getattr(
+                self,
+                "_diagnostic_hold_recovery_metric_scalars",
+                (),
+            ):
+                raise RuntimeError(
+                    "diagnostic hold/recovery telemetry was not consumed "
+                    "before the next policy step"
+                )
+            self._diagnostic_hold_recovery_metric_scalars = (
+                metric_scalars
+            )
+        else:
+            self._apply_hold_recovery_host_values(
+                _batched_host_scalar_values(metric_scalars)
+            )
         self._hold_start_yaw.copy_(
             torch.where(started, yaw_abs, self._hold_start_yaw)
         )
@@ -17045,7 +17143,54 @@ class RacketTargetCommand(CommandTerm):
         self._previous_in_hold = in_hold.clone()
         self._hold_edge_pending.zero_()
 
-    def _vb_evaluate(self, exact_strike: torch.Tensor, pos_err: torch.Tensor):
+    def _apply_hold_recovery_host_values(
+        self,
+        values: Sequence[float],
+    ) -> None:
+        """Apply the historic five Python-float telemetry increments in exact order."""
+
+        host_values = tuple(values)
+        if len(host_values) != 5:
+            raise RuntimeError(
+                "hold/recovery metric host packet changed width"
+            )
+        (
+            heading_expiry_sum,
+            heading_expiry_n,
+            recovery_spawn_sum,
+            recovery_expiry_sum,
+            recovery_n,
+        ) = host_values
+        self._heading_expiry_sum_acc += heading_expiry_sum
+        self._heading_expiry_n_acc += heading_expiry_n
+        self._recovery_spawn_sum_acc += recovery_spawn_sum
+        self._recovery_expiry_sum_acc += recovery_expiry_sum
+        self._recovery_n_acc += recovery_n
+
+    def _flush_diagnostic_hold_recovery_metric_scalars(self) -> None:
+        """Drain the final diagnostic rollout step once at the PPO update boundary."""
+
+        pending = tuple(
+            getattr(
+                self,
+                "_diagnostic_hold_recovery_metric_scalars",
+                (),
+            )
+        )
+        if not pending:
+            return
+        self._apply_hold_recovery_host_values(
+            _batched_host_scalar_values(pending)
+        )
+        self._diagnostic_hold_recovery_metric_scalars = ()
+
+    def _vb_evaluate(
+        self,
+        exact_strike: torch.Tensor,
+        pos_err: torch.Tensor,
+        *,
+        diagnostic_host_scalars: Sequence[torch.Tensor] = (),
+    ) -> tuple[float, ...]:
         """Tier-1 at-strike virtual-ball evaluation (rewardDesign.md).
 
         Runs once per control step from ``_update_metrics`` (rewards/obs read the same fresh
@@ -17059,6 +17204,7 @@ class RacketTargetCommand(CommandTerm):
 
         current_angular_velocity = None
         exact_any = None
+        prefetched_host_scalars: tuple[float, ...] = ()
         if self._action_ball_enabled:
             # RewardManager reads these one-shot caches after command.compute().
             # Clear them on every control step so a strike can never pay twice.
@@ -17092,12 +17238,12 @@ class RacketTargetCommand(CommandTerm):
                     orphan_exact_host,
                     identity_drift_host,
                     exact_any_host,
-                ) = _batched_host_scalar_values(
-                    (
-                        orphan_exact.to(dtype=torch.float32),
-                        active_identity_drift.any().to(dtype=torch.float32),
-                        exact_strike.any().to(dtype=torch.float32),
-                    )
+                    prefetched_host_scalars,
+                ) = _action_ball_diagnostic_host_packet(
+                    orphan_exact=orphan_exact,
+                    identity_drift=active_identity_drift.any(),
+                    exact_any=exact_strike.any(),
+                    metric_scalars=diagnostic_host_scalars,
                 )
                 if orphan_exact_host:
                     raise RuntimeError(
@@ -17143,7 +17289,7 @@ class RacketTargetCommand(CommandTerm):
                 self._action_ball_store_virtual_contact_history(
                     current_angular_velocity,
                 )
-            return
+            return prefetched_host_scalars
         if self._vb_params is None:
             self._vb_params = _vb.load_venue_params()
             print(
@@ -17181,11 +17327,12 @@ class RacketTargetCommand(CommandTerm):
                     self._action_ball_attempt_active
                 ),
             )
-            if bool((exact_strike & ~identity_valid).any()):
-                raise RuntimeError(
-                    "ActionBall swept contact history is missing or belongs "
-                    "to another action/reset/swing"
-                )
+            _action_ball_validate_tensor_predicate(
+                ~(exact_strike & ~identity_valid),
+                "ActionBall swept contact history is missing or belongs "
+                "to another action/reset/swing",
+                async_validate=self._action_ball_diagnostic_unauthorized,
+            )
             step_dt = float(self._env.step_dt)
             if not math.isfinite(step_dt) or step_dt <= 0.0:
                 raise RuntimeError(
@@ -17233,10 +17380,11 @@ class RacketTargetCommand(CommandTerm):
                 (attempt_action < 0)
                 | (attempt_action >= len(self._action_ball_mount_signs))
             )
-            if bool(invalid_action.any()):
-                raise RuntimeError(
-                    "ActionBall active attempt has no selected-face sign"
-                )
+            _action_ball_validate_tensor_predicate(
+                ~invalid_action,
+                "ActionBall active attempt has no selected-face sign",
+                async_validate=self._action_ball_diagnostic_unauthorized,
+            )
             face_sign = sign_table[
                 attempt_action.clamp(
                     min=0,
@@ -17771,6 +17919,7 @@ class RacketTargetCommand(CommandTerm):
             self._action_ball_store_virtual_contact_history(
                 current_angular_velocity,
             )
+        return prefetched_host_scalars
 
     def _vb_book_strike_step(
         self,
@@ -17892,6 +18041,13 @@ class RacketTargetCommand(CommandTerm):
     ) -> None:
         """Book exact, non-decayed sparse-reward counters for one simulator step."""
 
+        async_validate = bool(
+            getattr(
+                self,
+                "_action_ball_diagnostic_unauthorized",
+                False,
+            )
+        )
         masks = {
             "virtual_capture_count": capture,
             "virtual_net_clear_count": net_clear,
@@ -17906,11 +18062,12 @@ class RacketTargetCommand(CommandTerm):
                 raise ValueError(
                     "counter_rally_accepted_count must be a per-env boolean mask"
                 )
-            if bool((counter_rally_accepted & ~legal_return).any()):
-                raise RuntimeError(
-                    "counter-rally acceptance cannot occur without a legal "
-                    "first opponent-table landing"
-                )
+            _action_ball_validate_tensor_predicate(
+                ~(counter_rally_accepted & ~legal_return),
+                "counter-rally acceptance cannot occur without a legal "
+                "first opponent-table landing",
+                async_validate=async_validate,
+            )
             masks["counter_rally_accepted_count"] = (
                 counter_rally_accepted
             )
@@ -17927,16 +18084,18 @@ class RacketTargetCommand(CommandTerm):
                     raise ValueError(
                         f"{name} must be a per-env boolean mask"
                     )
-                if bool((partition & mask).any()):
-                    raise RuntimeError(
-                        "ActionBall capture/rejection ledger overlaps"
-                    )
-                partition |= mask
-            if not torch.equal(partition, exact_strike):
-                raise RuntimeError(
-                    "ActionBall capture/rejection ledger does not conserve "
-                    "the exact-strike denominator"
+                _action_ball_validate_tensor_predicate(
+                    ~(partition & mask),
+                    "ActionBall capture/rejection ledger overlaps",
+                    async_validate=async_validate,
                 )
+                partition |= mask
+            _action_ball_validate_tensor_predicate(
+                partition == exact_strike,
+                "ActionBall capture/rejection ledger does not conserve "
+                "the exact-strike denominator",
+                async_validate=async_validate,
+            )
             masks.update(contact_rejections)
         if book_strike_opportunity:
             masks = {"strike_opportunity_count": exact_strike, **masks}
@@ -18400,6 +18559,9 @@ class RacketTargetCommand(CommandTerm):
     def consume_exact_behavior_decision_counters(self) -> dict[str, torch.Tensor]:
         """Consume one update's behavior and existing sparse-outcome ledgers as one transaction."""
 
+        # The final rollout step has no following exact-any packet.  Drain its five pure-telemetry
+        # scalars once here so update-boundary reporting observes the same complete recurrence.
+        self._flush_diagnostic_hold_recovery_metric_scalars()
         ledger = self._ensure_exact_behavior_decision_counters()
         if (
             getattr(self, "_action_ball_enabled", False)
@@ -18692,24 +18854,9 @@ class RacketTargetCommand(CommandTerm):
             landing_valid=_no_sparse_outcome,
             legal_return=_no_sparse_outcome,
         )
-        # Tier-1 virtual-ball at-strike evaluation (one-shot buffers consumed by the virtual_*
-        # reward terms after this compute()); no-op (and vb_fired stays False) when disabled.
-        # vb_metrics_only runs the same evaluation purely for the virtual_*_rate curves (the
-        # reward stack of such tasks has no virtual_* terms, so the caches go unread).
-        if self.cfg.virtual_ball or self.cfg.vb_metrics_only:
-            self._vb_evaluate(exact_strike, pos_err)
-        # SHADOW physical ball (metrics-only): runs AFTER _vb_evaluate so this step's capture gate
-        # (vb_fired) and the fresh per-env analytic landing prediction can be consumed/snapshotted.
-        if self._shadow is not None:
-            self._shadow.update(exact_strike)
-        # PHYSICAL ball truth instrument (metrics-only): same seam/ordering as the shadow driver —
-        # serve scheduling, exact-strike serve-accuracy measurement, park drive. Off = no-op branch.
-        if self._physical is not None:
-            self._physical.update(exact_strike)
-        # Keep every reduction and the Python-float EMA recurrence unchanged, but transfer all
-        # global + per-bucket scalar results to the host together.  The old form called
-        # ``float(cuda_reduce)`` 10 + 8*N times per control step, draining the CUDA stream after
-        # every scalar even when the exact-strike mask was empty.
+        # Build the exact-metric reductions before VirtualBall so an unauthorized diagnostic can
+        # append them to the host packet it already needs for exact-any and identity validation.
+        # Formal/default execution still reads the same ordered reductions after VirtualBall.
         _exact_metric_tensors = [
             # Counts are reduced directly in the error dtype so the entire ordered batch can be
             # stacked and copied once.  At the supported environment counts (<=8192), sums of
@@ -18745,9 +18892,82 @@ class RacketTargetCommand(CommandTerm):
                         (normal_err_deg * _sel_f).sum(),
                     )
                 )
-        _exact_metric_values = iter(
-            _batched_host_scalar_values(_exact_metric_tensors)
-        )
+        _pending_hold_recovery_metric_scalars: tuple[
+            torch.Tensor, ...
+        ] = ()
+        if (
+            self._action_ball_enabled
+            and self._action_ball_diagnostic_unauthorized
+        ):
+            _pending_hold_recovery_metric_scalars = tuple(
+                getattr(
+                    self,
+                    "_diagnostic_hold_recovery_metric_scalars",
+                    (),
+                )
+            )
+        _prefetched_diagnostic_host_values: tuple[float, ...] = ()
+        # Tier-1 virtual-ball at-strike evaluation (one-shot buffers consumed by the virtual_*
+        # reward terms after this compute()); no-op (and vb_fired stays False) when disabled.
+        # vb_metrics_only runs the same evaluation purely for the virtual_*_rate curves (the
+        # reward stack of such tasks has no virtual_* terms, so the caches go unread).
+        if self.cfg.virtual_ball or self.cfg.vb_metrics_only:
+            _prefetched_diagnostic_host_values = self._vb_evaluate(
+                exact_strike,
+                pos_err,
+                diagnostic_host_scalars=(
+                    tuple(_exact_metric_tensors)
+                    + _pending_hold_recovery_metric_scalars
+                    if self._action_ball_enabled
+                    and self._action_ball_diagnostic_unauthorized
+                    else ()
+                ),
+            )
+        # SHADOW physical ball (metrics-only): runs AFTER _vb_evaluate so this step's capture gate
+        # (vb_fired) and the fresh per-env analytic landing prediction can be consumed/snapshotted.
+        if self._shadow is not None:
+            self._shadow.update(exact_strike)
+        # PHYSICAL ball truth instrument (metrics-only): same seam/ordering as the shadow driver —
+        # serve scheduling, exact-strike serve-accuracy measurement, park drive. Off = no-op branch.
+        if self._physical is not None:
+            self._physical.update(exact_strike)
+        # Keep every reduction and the Python-float EMA recurrence unchanged.  Formal/default and
+        # non-VirtualBall variants retain their one ordered D2H here; diagnostic ActionBall reuses
+        # the exact-any packet above and therefore performs no second per-step host transfer.  The
+        # previous step's five hold/recovery scalars ride in the same packet and are applied before
+        # this step's decay, preserving the historic ``increment -> next-step decay`` recurrence.
+        if _prefetched_diagnostic_host_values:
+            _exact_metric_width = len(_exact_metric_tensors)
+            _hold_recovery_metric_width = len(
+                _pending_hold_recovery_metric_scalars
+            )
+            if len(_prefetched_diagnostic_host_values) != (
+                _exact_metric_width + _hold_recovery_metric_width
+            ):
+                raise RuntimeError(
+                    "diagnostic metric host packet changed width"
+                )
+            _exact_metric_values = iter(
+                _prefetched_diagnostic_host_values[
+                    :_exact_metric_width
+                ]
+            )
+            if _hold_recovery_metric_width:
+                self._apply_hold_recovery_host_values(
+                    _prefetched_diagnostic_host_values[
+                        _exact_metric_width:
+                    ]
+                )
+                self._diagnostic_hold_recovery_metric_scalars = ()
+        elif _pending_hold_recovery_metric_scalars:
+            raise RuntimeError(
+                "diagnostic hold/recovery telemetry had no host packet "
+                "consumer"
+            )
+        else:
+            _exact_metric_values = iter(
+                _batched_host_scalar_values(_exact_metric_tensors)
+            )
         self._exact_n_acc = decay * self._exact_n_acc + next(_exact_metric_values)
         self._exact_pass_comp_acc = (
             decay * self._exact_pass_comp_acc + next(_exact_metric_values)
