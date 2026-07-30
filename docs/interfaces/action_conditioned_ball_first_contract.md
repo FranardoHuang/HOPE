@@ -385,6 +385,27 @@ iteration 和 receipt authority。runner
 先验证该 expected receipt，再重读 checkpoint bytes；不得在同一次 resume 中现算现填。缺该外部
 pin 时只可 fresh launch 或 diagnostic load，不能称 formal exact resume。
 
+### 7.1 非正式诊断跑的 safety aggregate
+
+`action_ball_diagnostic_unauthorized=true` 明确没有 formal promotion、exact-resume 或部署
+authority，因此不得在每个 reset / policy step 复制正式 forensic transcript 来拖慢训练。它仍
+必须逐 physics substep 执行同一 qdes clamp、receding brake、q/qdot timestamp freshness、
+actual-hard/nonfinite Done，并在 device 上累计每环境/每关节的 apply/post/timestamp count、
+qdes/crossing/actual-hard count 和 minimum hard gap。
+
+每个 PPO update 的唯一消费顺序是：
+
+1. action term 冻结 update aggregate，后续 physics/reset mutation fail-closed；
+2. runner 一次 D2H 验证 rollout step 数、apply/post 数、timestamp、finite gap、latch/count
+   守恒和连续 policy sequence；
+3. optimizer 成功后才 acknowledge/clear；optimizer 异常必须让原 aggregate 保持冻结；
+4. 只打印一条 `formal_authority=false` 的 compact JSON，不生成 formal `.prepared.pt`、
+   optimizer-commit 收据、逐 step action identity 或 per-reset terminal archive。
+
+fixed action/ball/task identity、proposal/admission/reject、RNG 与 PPO sample 仍由 command/
+broker/training contract 约束；compact safety 不能改这些值。formal ActionBall 完整证据路径保持
+不变，未来把 formal 收据降到 checkpoint 粒度必须单独 bump schema，并证明旧式 receipt 可重建。
+
 ## 8. 训练后 selector
 
 能力工件的查询至少包含 incoming ball、outgoing aim、base context、exact policy/catalog/profile

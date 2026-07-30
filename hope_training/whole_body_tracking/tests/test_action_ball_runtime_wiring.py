@@ -1067,6 +1067,39 @@ def test_runtime_transaction_consumes_birth_only_on_reset_and_installs_one_tuple
     assert '_ACTION_BALL_LEDGER_NAMES.index("S")' in install
 
 
+def test_reset_task_identity_is_packed_once_and_reused_across_python_seams():
+    sample = _method_source("_sample_targets_action_ball")
+    close = _method_source("_action_ball_close_attempts")
+    retire = _method_source("_action_ball_retire_previous_births")
+    install = _method_source("_action_ball_commit_install")
+
+    assert "host_identity_rows = tuple(" in sample
+    assert "torch.stack(" in sample
+    for field in (
+        "ids,",
+        "action_slots,",
+        "action_uids,",
+        "reset_generations,",
+        "swing_generations,",
+        "previous_swing_generations,",
+        "attempt_active.to(dtype=torch.long),",
+    ):
+        assert field in sample
+    assert sample.count(".cpu()") == 1
+    assert sample.count(".tolist()") == 1
+    assert ".item()" not in sample
+
+    assert "active_host_env_ids=active_host_env_ids" in sample
+    assert "host_env_ids=host_env_ids" in sample
+    assert "for env_id in active_host_env_ids:" in close
+    assert "for env_id in host_env_ids:" in retire
+    assert "zip(host_env_ids, births, receipts)" in install
+    # The global curriculum drain has no reset identity row pack, so the
+    # retirement seam must retain its one explicit compatibility fallback.
+    assert "if host_env_ids is None:" in retire
+    assert "ids.detach().cpu().tolist()" in retire
+
+
 def test_startup_pins_native_site_speed_and_disables_legacy_time_owners():
     initialize = _method_source("_initialize_action_ball_runtime")
     assert "ARM_KEYS as CURRICULUM_ARM_KEYS" in initialize

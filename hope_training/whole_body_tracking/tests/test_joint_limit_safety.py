@@ -151,11 +151,15 @@ def _two_step_cross_reset_action_ball_ledger(
     *,
     policy_horizon_only_crossing: bool = False,
     reset_after_safe_step: bool = False,
+    diagnostic_compact_evidence: bool = False,
 ):
     action, env, asset = _action_and_env(
         guard=True,
         guard_policy_dt_s=0.02,
         runtime_step_dt=0.02,
+        action_ball_diagnostic_unauthorized=(
+            diagnostic_compact_evidence
+        ),
     )
     receipts = ["a" * 64, "b" * 64]
     action_uids = torch.tensor([101, 202], dtype=torch.long)

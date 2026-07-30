@@ -4126,3 +4126,22 @@ claim=`2710fd6f…d4f4` 在 Pod1 GPU2 发射，exact PID/PGID=`1134253`，namesp
 首两轮 wall 约 `9.42/12.05 s`。首份 `model_0.pt` SHA=`1296e929…6bcf`，80 个 tensor 中
 76 个浮点/复数 tensor 逐项全 finite。该 run 是 fresh diagnostic，不从 smoke/probe resume，
 下一次 Gate 判读在 update100；此前腰 actual-hard 波动只记录，不临时改超参。
+
+Update-wall forensics / candidate（2026-07-30，尚未过 Pod）：
+
+- r4 每轮固定 `4096×24=98,304` env-step；update 8 后 collection 均值 `23.79 s`
+  （约 `4.13k steps/s`），learning 只有 `0.299 s`。全窗口 collection/reset 相关系数约
+  `0.84`；粗拟合固定逐步/同步税 `12–14 s`，另有 `5.6–6.7 ms/env-reset`，稳态约
+  1670 reset/update 即 `9–11 s`。同 reset 数下仍见 `21.7–29.9 s` 抖动，NVML 15 秒采样
+  SM 均值约 `10.8%`，故瓶颈不是 PPO 或 GPU 算力。
+- 源码审计确认只完成了 SHA cache、strike timing 去重、部分 metrics D2H 合批和 diagnostic
+  terminal transcript bypass；逐 reset Python/`.item()`、逐 step dense safety clone/identity、
+  每 update formal-style receipt 与残余同步仍开放。
+- fresh candidate 直接消除两类确定性开销：diagnostic 保留 clamp/brake/q-qdot freshness/
+  actual-hard Done 和逐关节 aggregate，但不再保留 dense substep/per-step identity 或每 update
+  formal 文件；reset 的 env/slot/UID/reset/swing/previous-swing/active 只做一次 host-row D2H，
+  后续 broker/pool/receipt 检查复用同一行。formal 路径不改。
+- Gate 仍为 `Partial`。candidate 必须在 Pod 通过 focused tests、`1 env×2`、旧/新同 seed
+  `4096×5`，且 Reward/Done/RNG/P/A/R/task identity/qdes/raw-hard/table/fall/checkpoint finite
+  parity；健康线为 `≥15k environment-steps/s` 或等 reset 负载 collection `≤6.5 s`。当前
+  exact milestone1000 不热补丁。

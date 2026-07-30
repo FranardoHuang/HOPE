@@ -577,3 +577,26 @@ d97b2523 系列 CONFIRMED:诊断模式下 per-reset 逐 env 转录(~22 键 dict 
 | **全 mocap 派生通道** | 只有幅值噪声、零延迟 | **加延迟注入**:每 episode 采样 1–2 个 policy step(20–40ms @50Hz)的 hold-last 延迟,套用于 position_table / orientation_table_6d / lin_vel_heading / projected_gravity / anchor_ori_b 机器人侧(若 ang_vel 保留陀螺仪则豁免) | mocap 链实测延迟;HuB 用 OU 时间相关噪声同理;幅值噪声不建模滞后,滞后才是 train/deploy 主分布差 |
 
 原则闭环:噪声量级的最终权威是**硬件管线实测**——部署估计器跑起来后,对 OptiTrack 真值录一段误差谱,训练噪声照谱设,不靠拍脑袋。实现提示:延迟注入用 obs manager 里的环形缓冲,纯张量,无热路径成本。
+
+### 8.6 update-wall 复测与第二阶段 candidate（2026-07-30 晚）
+
+**判定：§8.1 的“窄解”判断成立，加速尚未收口。** r4 每 update 固定
+`4096×24=98,304` env-step；update 8 后 collection 均值 `23.79 s`、learning
+`0.299 s`，只有约 `4.13k steps/s`。全窗口 collection/reset 相关系数约 `0.84`，粗拟合
+为 `12–14 s` 固定逐步/同步税 + `5.6–6.7 ms×reset`；稳态约 1670 reset/update 又贡献
+`9–11 s`。但 reset 数稳定后 wall 仍在 `21.7–29.9 s` 波动，15 秒 NVML 采样 SM 均值仅
+`10.8%`，故不能把剩余差额全归因于 reset，也不应优化只占约 1.2% 的 PPO。
+
+直接修、不做学习 A/B 的 candidate：
+
+1. diagnostic joint safety 只保留 device update aggregate；qdes clamp、brake、q/qdot freshness、
+   raw-hard/nonfinite Done、逐关节 count/min-gap 不变，取消逐 substep dense clone、逐
+   policy-step identity 和每 update formal receipt/fsync；
+2. reset/task identity 将 env、slot、UID、reset/swing/previous-swing generation 与 active
+   一次 stack→CPU，后续 broker/pool/receipt 检查复用同一 host row，循环内不再 `.item()`；
+3. formal 路径不随本 candidate 改动；formal checkpoint 粒度 receipt 仍是独立 schema 工作。
+
+当前状态仅为 **implemented, Pod unverified**。必须过 focused tests、`1 env×2`、旧/新同 seed
+`4096×5`，对齐 Reward/Done/RNG/P/A/R/task identity/qdes/raw-hard/table/fall/checkpoint
+finite；健康线仍是 `≥15k steps/s` 或等 reset 负载 collection `≤6.5 s`。若未达，下一顺序是
+剩余 reset broker Python → `_vb_evaluate`/EMA/envelope 的 per-step `bool/float` 同步；不动 PPO。

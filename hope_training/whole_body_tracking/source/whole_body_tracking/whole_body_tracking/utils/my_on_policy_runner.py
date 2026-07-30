@@ -3747,15 +3747,17 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                     "requires a callable env.step()"
                 )
         # Diagnostic ActionBall intentionally has no formal Reward activation
-        # or promotion authority, but its joint action still produces the same
-        # fail-closed safety ledger on every policy step.  Drain that ledger at
-        # each PPO boundary through the existing prepare/optimizer/commit
-        # transaction; otherwise the fixed-capacity policy-step summaries
-        # accumulate across updates and eventually overflow.
+        # or promotion authority.  Its joint action keeps the same clamp,
+        # physical readbacks, DoneTerms and update-scale counters, but drains a
+        # compact device aggregate instead of materializing formal per-step
+        # identity transcripts and durable receipt files.
+        diagnostic_joint_safety = (
+            self._action_ball_diagnostic_unauthorized()
+        )
         joint_safety_action_term = self._bind_joint_safety_action_term(
             required=(
                 reward_activation_task_kind is not None
-                or self._action_ball_diagnostic_unauthorized()
+                or diagnostic_joint_safety
             )
         )
 
@@ -3812,16 +3814,23 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             prepared_reward_evidence = None
             reward_artifact = None
             if joint_safety_action_term is not None:
-                # Freeze, deeply validate and durably publish the rollout receipt *before* PPO may
-                # consume it.  Incomplete substep evidence, malformed identity, persistence failure,
-                # and every formal physical hard-edge event therefore remain fail-closed.  A
-                # diagnostic finite hard-edge is retained as a terminal learning transition; its
-                # durable artifact is still written before the optimizer.  The action term keeps
-                # the evidence live until the post-optimizer acknowledgement below succeeds.
-                prepared_joint_safety = self._prepare_joint_safety_update(
-                    next_rollout_step,
-                    expected_action_term=joint_safety_action_term,
-                )
+                # Freeze and validate before PPO may consume the rollout. Formal
+                # tasks durably publish the full identity-bound receipt;
+                # diagnostic ActionBall validates one device aggregate and
+                # remains explicitly non-promotable. The action term keeps
+                # either generation live until post-optimizer acknowledgement.
+                if diagnostic_joint_safety:
+                    prepared_joint_safety = (
+                        self._prepare_diagnostic_joint_safety_update(
+                            next_rollout_step,
+                            expected_action_term=joint_safety_action_term,
+                        )
+                    )
+                else:
+                    prepared_joint_safety = self._prepare_joint_safety_update(
+                        next_rollout_step,
+                        expected_action_term=joint_safety_action_term,
+                    )
             if reward_activation_ledger is not None:
                 reward_rank = self._joint_safety_rank()
                 self._preflight_reward_evidence_update_paths(
@@ -3887,7 +3896,12 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                     )
                 )
             if prepared_joint_safety is not None:
-                self._commit_joint_safety_update(prepared_joint_safety)
+                if diagnostic_joint_safety:
+                    self._commit_diagnostic_joint_safety_update(
+                        prepared_joint_safety
+                    )
+                else:
+                    self._commit_joint_safety_update(prepared_joint_safety)
             if prepared_reward_evidence is not None:
                 if reward_ledger_is_action_bound:
                     reward_activation_ledger.acknowledge_update(
@@ -6474,6 +6488,340 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 + ", ".join(existing)
             )
 
+    def _prepare_diagnostic_joint_safety_update(
+        self, step: int, *, expected_action_term=None
+    ) -> dict:
+        """Freeze and validate one non-promotable device aggregate.
+
+        Diagnostic ActionBall keeps the exact clamp, receding brake, fresh
+        q/qdot readbacks, physical hard-edge termination and every per-joint
+        counter.  It deliberately does not retain identity-bound dense
+        transcripts or publish formal receipt files on every PPO update.
+        """
+
+        if not self._action_ball_diagnostic_unauthorized():
+            raise RuntimeError(
+                "compact diagnostic joint-safety path requires unauthorized ActionBall"
+            )
+        step = self._joint_safety_int(step, name="PPO update", minimum=0)
+        prior_step = getattr(self, "_joint_safety_consumed_step", None)
+        if prior_step is not None and step != int(prior_step) + 1:
+            raise RuntimeError(
+                "diagnostic joint-safety PPO update sequence is not contiguous"
+            )
+        if getattr(self, "_joint_safety_pending_prepared", None) is not None:
+            raise RuntimeError(
+                "diagnostic joint-safety has an unacknowledged prepared update"
+            )
+        term = self._bind_joint_safety_action_term(required=True)
+        if expected_action_term is not None and term is not expected_action_term:
+            raise RuntimeError(
+                "diagnostic joint-safety action term changed after launch binding"
+            )
+        token, snapshot = term.prepare_joint_safety_ledger_consume()
+        prepared = {
+            "step": step,
+            "term": term,
+            "token": token,
+            "status": "diagnostic_compact_snapshot_frozen",
+        }
+        self._joint_safety_pending_prepared = prepared
+        if (
+            not isinstance(snapshot, dict)
+            or snapshot.get("enabled") is not True
+            or snapshot.get("diagnostic_compact_evidence") is not True
+        ):
+            raise RuntimeError(
+                "diagnostic joint-safety producer did not expose compact evidence"
+            )
+        if snapshot.get("terminal_archives") != ():
+            raise RuntimeError(
+                "diagnostic joint-safety compact evidence retained terminal transcripts"
+            )
+        if snapshot.get("identity_bound_policy_steps") != ():
+            raise RuntimeError(
+                "diagnostic joint-safety compact evidence retained per-step identities"
+            )
+        for prefix in ("policy_step_summary", "terminal_archive"):
+            if (
+                snapshot.get(f"{prefix}_used") != 0
+                or snapshot.get(f"{prefix}_overflow_latch") is not False
+                or snapshot.get(f"{prefix}_overflow_count") != 0
+            ):
+                raise RuntimeError(
+                    f"diagnostic joint-safety {prefix} state is not compact/clean"
+                )
+
+        since = snapshot.get("since_last_consume")
+        if not isinstance(since, dict) or since.get("has_data") is not True:
+            raise RuntimeError(
+                "diagnostic joint-safety PPO update has no device aggregate"
+            )
+        consume_sequence = self._joint_safety_int(
+            since.get("consume_sequence"),
+            name="diagnostic consume_sequence",
+            minimum=0,
+        )
+        expected_steps = self._joint_safety_int(
+            getattr(self, "num_steps_per_env", None),
+            name="runner num_steps_per_env",
+            minimum=1,
+        )
+        policy_steps_raw = since.get("policy_step_count")
+        if not torch.is_tensor(policy_steps_raw) or policy_steps_raw.ndim != 1:
+            raise RuntimeError(
+                "diagnostic joint-safety policy_step_count must be one-dimensional"
+            )
+        num_envs = int(policy_steps_raw.numel())
+        if num_envs <= 0:
+            raise RuntimeError(
+                "diagnostic joint-safety cannot have zero environments"
+            )
+        contract = self._joint_safety_runtime_contract(term)
+        joint_count = self._joint_safety_int(
+            contract.get("joint_count"),
+            name="runtime joint_count",
+            minimum=1,
+        )
+        expected_apply_calls = self._joint_safety_int(
+            contract.get("expected_apply_calls"),
+            name="runtime expected_apply_calls",
+            minimum=1,
+        )
+        env_shape = (num_envs,)
+        joint_shape = (num_envs, joint_count)
+
+        def env_count(name: str) -> torch.Tensor:
+            return self._joint_safety_tensor(
+                since.get(name), name=name, shape=env_shape, integer=True
+            )
+
+        def joint_count_tensor(name: str) -> torch.Tensor:
+            return self._joint_safety_tensor(
+                since.get(name), name=name, shape=joint_shape, integer=True
+            )
+
+        policy_steps = env_count("policy_step_count")
+        complete_steps = env_count("complete_policy_step_count")
+        incomplete_steps = env_count("incomplete_policy_step_count")
+        apply_readbacks = env_count("apply_readback_count")
+        post_readbacks = env_count("post_readback_count")
+        timestamp_passes = env_count("timestamp_invariant_pass_count")
+        qdes_counts = joint_count_tensor("qdes_joint_count")
+        policy_crossing_counts = joint_count_tensor(
+            "policy_crossing_joint_count"
+        )
+        substep_crossing_counts = joint_count_tensor(
+            "substep_hard_crossing_joint_count"
+        )
+        actual_hard_counts = joint_count_tensor(
+            "actual_hard_edge_joint_count"
+        )
+        minimum_lower = self._joint_safety_tensor(
+            since.get("minimum_hard_lower_gap"),
+            name="minimum_hard_lower_gap",
+            shape=joint_shape,
+        )
+        minimum_upper = self._joint_safety_tensor(
+            since.get("minimum_hard_upper_gap"),
+            name="minimum_hard_upper_gap",
+            shape=joint_shape,
+        )
+        hard_latch = self._joint_safety_tensor(
+            since.get("hard_crossing_latch"),
+            name="hard_crossing_latch",
+            shape=env_shape,
+            boolean=True,
+        )
+        actual_latch = self._joint_safety_tensor(
+            since.get("actual_hard_edge_latch"),
+            name="actual_hard_edge_latch",
+            shape=env_shape,
+            boolean=True,
+        )
+
+        checks = torch.stack(
+            (
+                torch.all(policy_steps.eq(expected_steps)),
+                torch.all(complete_steps.eq(expected_steps)),
+                torch.all(incomplete_steps.eq(0)),
+                torch.all(
+                    apply_readbacks.eq(
+                        expected_steps * expected_apply_calls
+                    )
+                ),
+                torch.all(post_readbacks.eq(expected_steps)),
+                torch.all(timestamp_passes.eq(expected_steps)),
+                torch.all(torch.isfinite(minimum_lower)),
+                torch.all(torch.isfinite(minimum_upper)),
+                torch.all(
+                    hard_latch.eq(
+                        torch.any(substep_crossing_counts.gt(0), dim=1)
+                    )
+                ),
+                torch.all(
+                    actual_latch.eq(
+                        torch.any(actual_hard_counts.gt(0), dim=1)
+                    )
+                ),
+            )
+        )
+        aggregate_values = torch.stack(
+            (
+                policy_steps.sum(),
+                complete_steps.sum(),
+                apply_readbacks.sum(),
+                post_readbacks.sum(),
+                timestamp_passes.sum(),
+                qdes_counts.sum(),
+                policy_crossing_counts.sum(),
+                substep_crossing_counts.sum(),
+                actual_hard_counts.sum(),
+            )
+        ).to(dtype=torch.float64)
+        minimum_gap = torch.minimum(minimum_lower, minimum_upper).amin().reshape(1)
+        packed = torch.cat(
+            (
+                checks.to(dtype=torch.float64),
+                aggregate_values,
+                minimum_gap.to(dtype=torch.float64),
+            )
+        ).detach().to(device="cpu").tolist()
+        check_names = (
+            "policy_step_count",
+            "complete_policy_step_count",
+            "incomplete_policy_step_count",
+            "apply_readback_count",
+            "post_readback_count",
+            "timestamp_invariant_pass_count",
+            "minimum_hard_lower_gap",
+            "minimum_hard_upper_gap",
+            "hard_crossing_latch",
+            "actual_hard_edge_latch",
+        )
+        failed = [
+            name
+            for name, value in zip(check_names, packed[: len(check_names)])
+            if value != 1.0
+        ]
+        if failed:
+            raise RuntimeError(
+                "diagnostic joint-safety aggregate invariant failed: "
+                + ", ".join(failed)
+            )
+        first_sequence = self._joint_safety_int(
+            snapshot.get("diagnostic_first_policy_step_sequence"),
+            name="diagnostic first policy-step sequence",
+            minimum=0,
+        )
+        last_sequence = self._joint_safety_int(
+            snapshot.get("diagnostic_last_policy_step_sequence"),
+            name="diagnostic last policy-step sequence",
+            minimum=0,
+        )
+        if last_sequence - first_sequence + 1 != expected_steps:
+            raise RuntimeError(
+                "diagnostic joint-safety sequence span does not match rollout length"
+            )
+        previous_sequence = getattr(
+            self, "_joint_safety_last_policy_step_sequence", None
+        )
+        if (
+            previous_sequence is not None
+            and first_sequence != int(previous_sequence) + 1
+        ):
+            raise RuntimeError(
+                "diagnostic joint-safety sequence is discontinuous across PPO updates"
+            )
+        totals = packed[
+            len(check_names) : len(check_names) + len(aggregate_values)
+        ]
+        total_names = (
+            "policy_steps",
+            "complete_policy_steps",
+            "apply_readbacks",
+            "post_readbacks",
+            "timestamp_passes",
+            "qdes_events",
+            "policy_crossing_events",
+            "substep_crossing_events",
+            "actual_hard_edge_events",
+        )
+        record = {
+            "event": "hope_joint_safety_diagnostic_compact_update",
+            "schema_version": 1,
+            "status": "diagnostic_compact_prepared_before_optimizer",
+            "ppo_update": step,
+            "consume_sequence": consume_sequence,
+            "num_envs": num_envs,
+            "policy_step_count": expected_steps,
+            "first_policy_step_sequence": first_sequence,
+            "last_policy_step_sequence": last_sequence,
+            "counter_totals": {
+                name: int(value)
+                for name, value in zip(total_names, totals)
+            },
+            "minimum_hard_gap_rad": float(packed[-1]),
+            "terminal_archive_count": 0,
+            "identity_bound_policy_step_count": 0,
+            "formal_authority": False,
+        }
+        prepared.update(
+            {
+                "status": "diagnostic_compact_prepared_before_optimizer",
+                "record": record,
+                "first_policy_step_sequence": first_sequence,
+                "last_policy_step_sequence": last_sequence,
+                "consume_sequence": consume_sequence,
+            }
+        )
+        return prepared
+
+    def _commit_diagnostic_joint_safety_update(
+        self, prepared: dict
+    ) -> dict:
+        """Acknowledge one compact diagnostic aggregate after PPO succeeds."""
+
+        if (
+            prepared is not getattr(
+                self, "_joint_safety_pending_prepared", None
+            )
+            or prepared.get("status")
+            != "diagnostic_compact_prepared_before_optimizer"
+        ):
+            raise RuntimeError(
+                "diagnostic joint-safety optimizer commit does not own the pending aggregate"
+            )
+        term = self._bind_joint_safety_action_term(required=True)
+        if term is not prepared["term"]:
+            raise RuntimeError(
+                "diagnostic joint-safety action term changed before acknowledgement"
+            )
+        term.acknowledge_joint_safety_ledger(prepared["token"])
+        record = {
+            **prepared["record"],
+            "status": (
+                "diagnostic_compact_optimizer_committed_and_ledger_acknowledged"
+            ),
+        }
+        print(
+            "HOPE_JOINT_SAFETY_UPDATE_JSON="
+            + json.dumps(record, sort_keys=True, separators=(",", ":")),
+            flush=True,
+        )
+        self._joint_safety_consumed_step = prepared["step"]
+        self._joint_safety_consumed_record = record
+        self._joint_safety_last_policy_step_sequence = prepared[
+            "last_policy_step_sequence"
+        ]
+        self._joint_safety_last_consume_sequence = prepared[
+            "consume_sequence"
+        ]
+        self._joint_safety_last_identity = None
+        self._joint_safety_last_archive_sequence = None
+        self._joint_safety_pending_prepared = None
+        return record
+
     def _prepare_joint_safety_update(
         self, step: int, *, expected_action_term=None
     ) -> dict:
@@ -6688,6 +7036,11 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         step = self._joint_safety_int(step, name="PPO update", minimum=0)
         if getattr(self, "_joint_safety_consumed_step", None) == step:
             return getattr(self, "_joint_safety_consumed_record", None)
+        if self._action_ball_diagnostic_unauthorized():
+            prepared = self._prepare_diagnostic_joint_safety_update(
+                step, expected_action_term=expected_action_term
+            )
+            return self._commit_diagnostic_joint_safety_update(prepared)
         prepared = self._prepare_joint_safety_update(
             step, expected_action_term=expected_action_term
         )

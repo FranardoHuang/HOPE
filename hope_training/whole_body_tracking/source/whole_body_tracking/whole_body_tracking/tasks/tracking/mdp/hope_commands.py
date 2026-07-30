@@ -7811,7 +7811,11 @@ class RacketTargetCommand(CommandTerm):
         )
 
     def _action_ball_close_attempts(
-        self, ids: torch.Tensor, *, true_reset: bool
+        self,
+        ids: torch.Tensor,
+        *,
+        true_reset: bool,
+        active_host_env_ids=None,
     ) -> None:
         """Close prior installed attempts before any replacement task is requested."""
 
@@ -7914,10 +7918,14 @@ class RacketTargetCommand(CommandTerm):
         for name, values in additions.items():
             row = _ACTION_BALL_LEDGER_NAMES.index(name)
             self._action_ball_ledger[row].add_(values)
-        for env in ids[active].detach().cpu().tolist():
-            self._action_ball_task_by_env[int(env)] = None
-            self._action_ball_task_ref_by_env[int(env)] = None
-            self._counter_rally_task_identity_by_env[int(env)] = None
+        if active_host_env_ids is None:
+            active_host_env_ids = tuple(
+                int(env) for env in ids[active].detach().cpu().tolist()
+            )
+        for env_id in active_host_env_ids:
+            self._action_ball_task_by_env[env_id] = None
+            self._action_ball_task_ref_by_env[env_id] = None
+            self._counter_rally_task_identity_by_env[env_id] = None
         self._action_ball_attempt_active[ids] = False
         self._action_ball_attempt_action[ids] = -1
         self._action_ball_attempt_legal[ids] = False
@@ -7927,12 +7935,24 @@ class RacketTargetCommand(CommandTerm):
         self._counter_rally_primary_reason_code[ids] = -1
         self._action_ball_invalidate_virtual_contact_history(ids)
 
-    def _action_ball_retire_previous_births(self, ids: torch.Tensor) -> None:
+    def _action_ball_retire_previous_births(
+        self, ids: torch.Tensor, *, host_env_ids=None
+    ) -> None:
         """Retire old per-env FIFO queues only at a true episode reset."""
 
+        # Normal reset batches already materialize and validate these ids as
+        # part of their one identity D2H.  The fallback remains for the global
+        # drain, which intentionally calls this seam outside that hot path.
+        if host_env_ids is None:
+            host_env_ids = tuple(
+                int(env) for env in ids.detach().cpu().tolist()
+            )
+        elif len(host_env_ids) != len(ids):
+            raise RuntimeError(
+                "action-ball retirement host id batch length mismatch"
+            )
         rows = []
-        for env in ids.detach().cpu().tolist():
-            env_id = int(env)
+        for env_id in host_env_ids:
             birth = self._action_ball_birth_by_env[env_id]
             if birth is None:
                 continue
@@ -7994,9 +8014,14 @@ class RacketTargetCommand(CommandTerm):
         action_slots: torch.Tensor,
         reset_generations: torch.Tensor,
         swing_generations: torch.Tensor,
+        host_env_ids: tuple,
     ) -> None:
         """Single mutation seam for one fully validated task+ball env batch."""
 
+        if len(host_env_ids) != len(ids):
+            raise RuntimeError(
+                "action-ball install host id batch length mismatch"
+            )
         counter_rally_identities = None
         if self._counter_rally_enabled:
             expected_objective_sha256 = (
@@ -8194,18 +8219,17 @@ class RacketTargetCommand(CommandTerm):
         self._action_ball_attempt_action[ids] = action_slots
         self._action_ball_attempt_legal[ids] = False
         self._action_ball_invalidate_virtual_contact_history(ids)
-        for row_index, (env, birth, receipt) in enumerate(zip(
-            ids.detach().cpu().tolist(), births, receipts
-        )
+        for row_index, (env_id, birth, receipt) in enumerate(
+            zip(host_env_ids, births, receipts)
         ):
-            self._action_ball_birth_by_env[int(env)] = birth
-            self._action_ball_task_by_env[int(env)] = receipt
-            self._action_ball_task_ref_by_env[int(env)] = (
+            self._action_ball_birth_by_env[env_id] = birth
+            self._action_ball_task_by_env[env_id] = receipt
+            self._action_ball_task_ref_by_env[env_id] = (
                 receipt.task_ref()
                 if self._action_ball_diagnostic_unauthorized
                 else None
             )
-            self._counter_rally_task_identity_by_env[int(env)] = (
+            self._counter_rally_task_identity_by_env[env_id] = (
                 None
                 if counter_rally_identities is None
                 else counter_rally_identities[row_index]
@@ -8252,10 +8276,7 @@ class RacketTargetCommand(CommandTerm):
         ).reshape(-1)
         if len(ids) != n or tuple(origins.shape) != (n, 3):
             raise RuntimeError("action-ball resample batch shape mismatch")
-        if len(set(int(value) for value in ids.detach().cpu().tolist())) != n:
-            raise RuntimeError("action-ball resample batch repeats an environment")
         true_reset = not bool(self._resample_is_wrap)
-        self._action_ball_close_attempts(ids, true_reset=true_reset)
         motion = self._motion()
         action_slots = motion.clip_id[ids].to(dtype=torch.long)
         action_uids = motion.action_ball_action_uid_for_envs(ids).to(
@@ -8267,48 +8288,125 @@ class RacketTargetCommand(CommandTerm):
         swing_generations = motion.action_ball_swing_generation[ids].to(
             dtype=torch.long
         )
-        n_actions = len(self._action_ball_bindings)
-        if bool(
-            torch.any((action_slots < 0) | (action_slots >= n_actions))
+        previous_swing_generations = self._action_ball_swing_generation[ids]
+        attempt_active = self._action_ball_attempt_active[ids]
+
+        # This is the only device-to-host identity transfer in the reset/task
+        # transaction.  Every Python-side broker/pool/receipt check below
+        # reuses these immutable rows instead of synchronizing each scalar.
+        host_identity_rows = tuple(
+            (
+                int(env_id),
+                int(action_slot),
+                int(action_uid),
+                int(reset_generation),
+                int(swing_generation),
+                int(previous_swing_generation),
+                bool(active),
+            )
+            for (
+                env_id,
+                action_slot,
+                action_uid,
+                reset_generation,
+                swing_generation,
+                previous_swing_generation,
+                active,
+            ) in torch.stack(
+                (
+                    ids,
+                    action_slots,
+                    action_uids,
+                    reset_generations,
+                    swing_generations,
+                    previous_swing_generations,
+                    attempt_active.to(dtype=torch.long),
+                ),
+                dim=1,
+            )
+            .detach()
+            .cpu()
+            .tolist()
+        )
+        host_env_ids = tuple(row[0] for row in host_identity_rows)
+        if (
+            len(host_env_ids) != n
+            or len(set(host_env_ids)) != n
+            or any(
+                env_id < 0 or env_id >= self.num_envs
+                for env_id in host_env_ids
+            )
         ):
-            raise RuntimeError("action-ball selected motion slot is outside the manifest")
-        expected_uids = torch.tensor(
-            self._action_ball_bundle.action_uids,
-            dtype=torch.long,
-            device=self.device,
-        )[action_slots]
-        if not torch.equal(action_uids, expected_uids):
-            raise RuntimeError("Motion action UID and manifest slot disagree")
+            raise RuntimeError(
+                "action-ball resample batch has invalid or repeated environments"
+            )
+        active_host_env_ids = tuple(
+            row[0] for row in host_identity_rows if row[6]
+        )
+        self._action_ball_close_attempts(
+            ids,
+            true_reset=true_reset,
+            active_host_env_ids=active_host_env_ids,
+        )
+
+        n_actions = len(self._action_ball_bindings)
+        for row in host_identity_rows:
+            action_slot = row[1]
+            action_uid = row[2]
+            if action_slot < 0 or action_slot >= n_actions:
+                raise RuntimeError(
+                    "action-ball selected motion slot is outside the manifest"
+                )
+            if (
+                action_uid
+                != int(self._action_ball_bundle.action_uids[action_slot])
+            ):
+                raise RuntimeError(
+                    "Motion action UID and manifest slot disagree"
+                )
 
         if true_reset:
-            if bool(torch.any(swing_generations != 0)):
-                raise RuntimeError("action-ball true reset must start at swing generation zero")
-            self._action_ball_retire_previous_births(ids)
-            consume_requests = []
-            for env, generation, uid, slot in zip(
-                ids.detach().cpu().tolist(),
-                reset_generations.detach().cpu().tolist(),
-                action_uids.detach().cpu().tolist(),
-                action_slots.detach().cpu().tolist(),
-            ):
-                consume_requests.append(
-                    BirthConsumeRequest(
-                        env_id=int(env),
-                        reset_generation=int(generation),
-                        action_uid=int(uid),
-                        action_slot=int(slot),
-                        receipt_sha256=motion.action_ball_birth_receipt_sha256(
-                            int(env)
-                        ),
-                    )
+            if any(row[4] != 0 for row in host_identity_rows):
+                raise RuntimeError(
+                    "action-ball true reset must start at swing generation zero"
                 )
+            self._action_ball_retire_previous_births(
+                ids, host_env_ids=host_env_ids
+            )
+            consume_requests = tuple(
+                BirthConsumeRequest(
+                    env_id=env_id,
+                    reset_generation=reset_generation,
+                    action_uid=action_uid,
+                    action_slot=action_slot,
+                    receipt_sha256=motion.action_ball_birth_receipt_sha256(
+                        env_id
+                    ),
+                )
+                for (
+                    env_id,
+                    action_slot,
+                    action_uid,
+                    reset_generation,
+                    _swing_generation,
+                    _previous_swing_generation,
+                    _active,
+                ) in host_identity_rows
+            )
             births = self._action_ball_broker.consume_many_true_reset(
-                tuple(consume_requests), reset_kind="true_reset"
+                consume_requests, reset_kind="true_reset"
             )
         else:
             birth_rows = []
-            for batch_index, env in enumerate(ids.detach().cpu().tolist()):
-                env_id = int(env)
+            for (
+                env_id,
+                action_slot,
+                action_uid,
+                reset_generation,
+                swing_generation,
+                previous_swing_generation,
+                _active,
+            ) in host_identity_rows:
                 birth = self._action_ball_birth_by_env[env_id]
                 if birth is None:
                     raise RuntimeError(
@@ -8316,20 +8414,17 @@ class RacketTargetCommand(CommandTerm):
                     )
                 if (
                     birth.env_id != env_id
-                    or birth.action_uid != int(action_uids[batch_index].item())
-                    or birth.action_slot != int(action_slots[batch_index].item())
+                    or birth.action_uid != action_uid
+                    or birth.action_slot != action_slot
                     or birth.reset_generation
-                    != int(reset_generations[batch_index].item())
+                    != reset_generation
                     or motion.action_ball_birth_receipt_sha256(env_id)
                     != birth.canonical_sha256
                 ):
                     raise RuntimeError(
                         "action-ball wrap changed its frozen action/birth identity"
                     )
-                previous_swing = int(
-                    self._action_ball_swing_generation[env_id].item()
-                )
-                if int(swing_generations[batch_index].item()) != previous_swing + 1:
+                if swing_generation != previous_swing_generation + 1:
                     raise RuntimeError(
                         "action-ball wrap swing generation did not advance exactly once"
                     )
@@ -8339,10 +8434,9 @@ class RacketTargetCommand(CommandTerm):
 
         if len(births) != n:
             raise RuntimeError("action-ball broker returned the wrong birth batch size")
-        for batch_index, birth in enumerate(births):
-            binding = self._action_ball_bindings[
-                int(action_slots[batch_index].item())
-            ]
+        for birth, row in zip(births, host_identity_rows):
+            env_id, action_slot, _uid, reset_generation = row[:4]
+            binding = self._action_ball_bindings[action_slot]
             birth.assert_contract(
                 binding=binding,
                 pins=self._action_ball_pins,
@@ -8350,9 +8444,8 @@ class RacketTargetCommand(CommandTerm):
                 registry_sha256=self._action_ball_broker.registry_sha256,
             )
             if (
-                birth.env_id != int(ids[batch_index].item())
-                or birth.reset_generation
-                != int(reset_generations[batch_index].item())
+                birth.env_id != env_id
+                or birth.reset_generation != reset_generation
             ):
                 raise RuntimeError(
                     "action-ball consumed birth does not match its env generation"
@@ -8364,17 +8457,19 @@ class RacketTargetCommand(CommandTerm):
             tuple(
                 ActionTaskIssueRequest(
                     birth=birth,
-                    swing_generation=int(swing_generations[index].item()),
+                    swing_generation=row[4],
                 )
-                for index, birth in enumerate(births)
+                for birth, row in zip(births, host_identity_rows)
             )
         )
         if len(receipts) != n:
             raise RuntimeError("action-ball pool issued the wrong task batch size")
-        for index, (birth, receipt) in enumerate(zip(births, receipts)):
-            binding = self._action_ball_bindings[
-                int(action_slots[index].item())
-            ]
+        for birth, receipt, row in zip(
+            births, receipts, host_identity_rows
+        ):
+            env_id, action_slot = row[:2]
+            swing_generation = row[4]
+            binding = self._action_ball_bindings[action_slot]
             receipt.assert_contract(
                 binding=binding,
                 pins=self._action_ball_pins,
@@ -8383,9 +8478,8 @@ class RacketTargetCommand(CommandTerm):
             )
             receipt.assert_birth(birth)
             if (
-                receipt.env_id != int(ids[index].item())
-                or receipt.swing_generation
-                != int(swing_generations[index].item())
+                receipt.env_id != env_id
+                or receipt.swing_generation != swing_generation
             ):
                 raise RuntimeError(
                     "action-ball task receipt env/swing generation mismatch"
@@ -8399,6 +8493,7 @@ class RacketTargetCommand(CommandTerm):
             action_slots=action_slots,
             reset_generations=reset_generations,
             swing_generations=swing_generations,
+            host_env_ids=host_env_ids,
         )
         # Motion resets before Racket.  Resolve the just-published task receipt
         # now so the first post-reset actor observation sees the full teacher

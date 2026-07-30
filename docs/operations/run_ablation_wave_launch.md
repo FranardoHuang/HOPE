@@ -401,9 +401,13 @@ episode 是否能够活到动作 `t_hit`；五轮没有 strike 不能判策略�
 
 旧 diagnostic runner 跳过 formal Reward 时也跳过 joint-safety consumer，却仍每 policy step
 生产摘要；4096 槽在约 `170 × 24` policy steps 后必然溢出。fresh successor 必须启用
-[diagnostic joint-safety drain](../DEFINITIONS.md#diagnostic-joint-safety-drain)，每个 PPO update
-沿已有 prepare→optimizer→commit/ack 事务排空。已经 sticky overflow 的旧 checkpoint 不得清闩
-续跑，必须 fresh no-clobber 重发。
+[diagnostic joint-safety drain](../DEFINITIONS.md#diagnostic-joint-safety-drain)：qdes clamp、
+substep q/qdot freshness、brake、raw-hard Done 和逐关节 count/min-gap 全部保留在 device
+update aggregate；PPO 前 prepare/validate，optimizer 成功后才 ack/clear。诊断跑不再复制逐
+substep dense transcript、逐 policy-step identity，也不再每 update 生成 formal
+`.prepared.pt` / optimizer-commit 收据；它始终无 formal 晋级权。已经 sticky overflow 的旧
+checkpoint 不得清闩续跑，必须 fresh no-clobber 重发。该 compact 路径必须先在 Pod 通过
+fixed-seed parity 和吞吐门，未通过时仍只算 candidate。
 
 ## 停止
 

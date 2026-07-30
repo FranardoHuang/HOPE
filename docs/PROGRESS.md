@@ -13,6 +13,12 @@
 
 ## 2026-07-30（A3 stable-upper successor）
 
+- update-wall 取证确认 r4 稳态 collection=`23.79 s`、learning=`0.299 s`，仅约
+  `4.13k environment-steps/s`；约 `9–11 s` 来自 reset 热路径，另有 `12–14 s` 固定
+  ledger/同步税。fresh candidate 已把 diagnostic safety 收敛为 device update aggregate，并把
+  reset identity 的循环内 `.item()` 合成一次批量 D2H；当前 long 不热补，candidate 仍待 Pod
+  focused test、1-env smoke 与 4096-env fixed-seed parity/吞吐。实时状态只看
+  [分阶段准备看板](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md#0-当前执行看板本文唯一活跃-todo)。
 - Pod1 exact source `17c7258a` 已为 fixed-194 v2 重物化 profile pins
   `08c8f9c7…c6b4`、base bundle `ed9fa0f7…afef` 和 1.1 倍 fast-ball bundle
   `3c1076e3…c32b`，并以工件 commit `8729104e` 生成三份 canonical fresh r3 spec；spec SHA

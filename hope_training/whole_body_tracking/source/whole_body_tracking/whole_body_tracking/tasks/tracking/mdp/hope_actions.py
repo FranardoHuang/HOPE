@@ -55,6 +55,7 @@ class _PhysicsSubstepJointSafetyLedger:
         physics_dt_s: float,
         device: torch.device | str,
         dtype: torch.dtype,
+        retain_dense_records: bool = True,
     ) -> None:
         self._num_envs = int(num_envs)
         self._joint_count = int(joint_count)
@@ -62,8 +63,10 @@ class _PhysicsSubstepJointSafetyLedger:
         self._physics_dt_s = float(physics_dt_s)
         self._device = torch.device(device)
         self._dtype = dtype
+        self._retain_dense_records = bool(retain_dense_records)
         self._policy_step_sequence = -1
         self._policy_start_timestamp_s: float | None = None
+        self._last_record_timestamp_s: float | None = None
         self._apply_call_count = 0
         self._post_readback_count = 0
         self._records: list[dict[str, Any]] = []
@@ -119,6 +122,7 @@ class _PhysicsSubstepJointSafetyLedger:
         self._policy_start_timestamp_s = self._finite_timestamp(
             timestamp_s, context="joint-safety ledger policy start"
         )
+        self._last_record_timestamp_s = None
         self._apply_call_count = 0
         self._post_readback_count = 0
         self._records = []
@@ -257,7 +261,10 @@ class _PhysicsSubstepJointSafetyLedger:
                 f"kind={kind} index={call_index} actual={timestamp} "
                 f"expected={expected_timestamp}"
             )
-        if self._records and not timestamp > self._records[-1]["timestamp_s"]:
+        if (
+            self._last_record_timestamp_s is not None
+            and not timestamp > self._last_record_timestamp_s
+        ):
             raise RuntimeError(
                 "joint-safety articulation timestamp did not advance between substeps"
             )
@@ -269,28 +276,31 @@ class _PhysicsSubstepJointSafetyLedger:
             hard_crossing=hard_crossing,
             actual_hard_edge=actual_hard_edge,
         )
-        record = {
-            "kind": kind,
-            "call_index": call_index,
-            "timestamp_s": timestamp,
-            "joint_pos_timestamp_s": joint_pos_timestamp,
-            "joint_vel_timestamp_s": joint_vel_timestamp,
-            "env_valid": (~self._invalid_envs).detach().clone(),
-            "q": q.detach().clone(),
-            "qdot": qdot.detach().clone(),
-            "lower_gap": lower_gap.detach().clone(),
-            "upper_gap": upper_gap.detach().clone(),
-            "hard_crossing": hard_crossing.detach().clone(),
-            "actual_hard_edge": actual_hard_edge.detach().clone(),
-        }
         # Validation above is side-effect free.  Commit call counters and the record together so a
         # caught stale/tensor error can never manufacture a "complete" transcript with a hole.
         if kind == "apply":
             self._apply_call_count += 1
         else:
             self._post_readback_count = 1
-        self._records.append(record)
-        valid = record["env_valid"]
+        self._last_record_timestamp_s = timestamp
+        valid = ~self._invalid_envs
+        if self._retain_dense_records:
+            self._records.append(
+                {
+                    "kind": kind,
+                    "call_index": call_index,
+                    "timestamp_s": timestamp,
+                    "joint_pos_timestamp_s": joint_pos_timestamp,
+                    "joint_vel_timestamp_s": joint_vel_timestamp,
+                    "env_valid": valid.detach().clone(),
+                    "q": q.detach().clone(),
+                    "qdot": qdot.detach().clone(),
+                    "lower_gap": lower_gap.detach().clone(),
+                    "upper_gap": upper_gap.detach().clone(),
+                    "hard_crossing": hard_crossing.detach().clone(),
+                    "actual_hard_edge": actual_hard_edge.detach().clone(),
+                }
+            )
         valid_long = valid.to(dtype=torch.long)
         valid_joint = valid[:, None]
         self._aggregate_valid_record_count += valid_long
@@ -1065,6 +1075,9 @@ class ClampedJointPositionAction(JointPositionAction):
                 physics_dt_s=self._pre_apply_guard_physics_dt_s,
                 device=self._processed_actions.device,
                 dtype=self._processed_actions.dtype,
+                retain_dense_records=(
+                    not self._joint_safety_diagnostic_compact_evidence
+                ),
             )
         self._joint_safety_episode_sequence = torch.zeros(
             self.num_envs, dtype=torch.long, device=self.device
@@ -1073,6 +1086,12 @@ class ClampedJointPositionAction(JointPositionAction):
             self.num_envs, dtype=torch.long, device=self.device
         )
         self._joint_safety_current_identity: dict[str, Any] | None = None
+        self._joint_safety_diagnostic_first_policy_step_sequence: int | None = (
+            None
+        )
+        self._joint_safety_diagnostic_last_policy_step_sequence: int | None = (
+            None
+        )
         self._joint_safety_cached_action_uid = torch.full(
             (self.num_envs,), -1, dtype=torch.long, device=self.device
         )
@@ -1082,8 +1101,10 @@ class ClampedJointPositionAction(JointPositionAction):
         self._joint_safety_cached_birth_receipt: list[str | None] = [
             None
         ] * self.num_envs
-        self._joint_safety_pending_birth_receipt_env_ids: set[int] = set(
-            range(self.num_envs)
+        self._joint_safety_pending_birth_receipt_env_ids: set[int] = (
+            set()
+            if self._joint_safety_diagnostic_compact_evidence
+            else set(range(self.num_envs))
         )
         self._joint_safety_step_qdes_count_start = torch.zeros_like(
             self._pre_apply_qdes_violation_joint_count
@@ -2355,6 +2376,15 @@ class ClampedJointPositionAction(JointPositionAction):
         return {
             "schema_version": _PhysicsSubstepJointSafetyLedger._SCHEMA_VERSION,
             "enabled": True,
+            "diagnostic_compact_evidence": (
+                self._joint_safety_diagnostic_compact_evidence
+            ),
+            "diagnostic_first_policy_step_sequence": (
+                self._joint_safety_diagnostic_first_policy_step_sequence
+            ),
+            "diagnostic_last_policy_step_sequence": (
+                self._joint_safety_diagnostic_last_policy_step_sequence
+            ),
             "since_last_consume": since_last_consume,
             # Shallow immutable containers bind the retained entries without copying their dense
             # tensors.  Terminal archives are already retained on CPU.
@@ -2414,6 +2444,8 @@ class ClampedJointPositionAction(JointPositionAction):
         self._joint_safety_terminal_archive_bytes = 0
         self._joint_safety_policy_step_summaries.clear()
         self._joint_safety_policy_step_summary_bytes = 0
+        self._joint_safety_diagnostic_first_policy_step_sequence = None
+        self._joint_safety_diagnostic_last_policy_step_sequence = None
         self._joint_safety_accumulator_consume_sequence += 1
 
     def _record_physics_joint_safety_readback(
@@ -2852,7 +2884,29 @@ class ClampedJointPositionAction(JointPositionAction):
             kind="post", adjust_target=False
         )
         self._accumulate_joint_safety_live(slice(None))
-        self._publish_joint_safety_policy_step_summary()
+        if self._joint_safety_diagnostic_compact_evidence:
+            sequence = ledger._policy_step_sequence
+            previous = (
+                self._joint_safety_diagnostic_last_policy_step_sequence
+            )
+            if previous is not None and sequence != previous + 1:
+                raise RuntimeError(
+                    "diagnostic joint-safety policy-step sequence is not contiguous"
+                )
+            if (
+                self._joint_safety_diagnostic_first_policy_step_sequence
+                is None
+            ):
+                self._joint_safety_diagnostic_first_policy_step_sequence = (
+                    sequence
+                )
+            self._joint_safety_diagnostic_last_policy_step_sequence = sequence
+            # The update-scale device accumulator is the diagnostic evidence.
+            # Mark the live step published so the next policy step may begin;
+            # formal runs still retain the identity-bound dense summary below.
+            self._joint_safety_current_step_summary_published = True
+        else:
+            self._publish_joint_safety_policy_step_summary()
 
     def record_actual_joint_forbidden_diagnostic(
         self,
@@ -3544,9 +3598,17 @@ class ClampedJointPositionAction(JointPositionAction):
                     "joint-safety complete policy step was not published before overwrite"
                 )
             ledger.begin_policy_step(self._articulation_sim_timestamp())
-            self._joint_safety_current_identity = (
-                self._capture_joint_safety_identity()
-            )
+            if self._joint_safety_diagnostic_compact_evidence:
+                # Diagnostic screens are explicitly non-promotable and already
+                # bind one frozen action/ball/task identity at the command
+                # layer.  Re-cloning every environment's action UID,
+                # generation and receipt on every policy step changes no
+                # safety decision, reward or optimizer sample.
+                self._joint_safety_current_identity = None
+            else:
+                self._joint_safety_current_identity = (
+                    self._capture_joint_safety_identity()
+                )
             self._joint_safety_current_accumulator_consume_sequence = (
                 self._joint_safety_accumulator_consume_sequence
             )
@@ -3907,9 +3969,10 @@ class ClampedJointPositionAction(JointPositionAction):
         if self._joint_safety_ledger is not None:
             self._joint_safety_ledger.reset_envs(ids)
             self._joint_safety_episode_sequence[ids] += 1
-            self._joint_safety_pending_birth_receipt_env_ids.update(
-                ids.detach().to(device="cpu").tolist()
-            )
+            if not self._joint_safety_diagnostic_compact_evidence:
+                self._joint_safety_pending_birth_receipt_env_ids.update(
+                    ids.detach().to(device="cpu").tolist()
+                )
         # raw 动作历史清零 + 有效位清 False(清零对齐 ActionManager 对 action/prev_action
         # 的 reset 语义;有效位保证清零值不会被 action_acc_l2 当成真历史计费)。
         self._prev_raw_actions[ids] = 0.0

@@ -214,7 +214,7 @@
 | `penlight` / 惩罚减负臂 | Franco 第 8 条的消融：六个软惩罚统一降约 1/3（脚朝向/挥拍前直立/拍面条件引导/挥拍前脚滑/触地蹭滑/拖脚），硬保护不动，看击球是否恢复。不是加大击球权重（击球组本来就远重于模仿）。 |
 | `branch_dashboard` / 三人分支看板 | `scripts/branch_dashboard.py`：只读打印 Franco/jiayi(dongc1)/yikang(Catrunaround) 各自远端分支领先/落后 main 的提交数。纪律：领先的每个提交要么搬进 main、要么在 branch_fix_audit 文档记"不搬+原因"，不允许失踪。 |
 | <a id="action-specific-dynamic-ready"></a>`action-specific dynamic ready` / 动作专属动态准备合同 | A3 的 physical spawn 与 teacher/reference 仍使用该动作 motion frame 0；控制器出生目标、`last_action` 和 fresh actor 输出则共同使用该动作在现役 plant 上通过 Isaac nominal-hold 的 `hold_qdes`。两者允许不同，但 action、motion bytes、31 关节顺序、candidate、PASS receipt 和 runtime decoder 必须一次性绑定，true reset 必须原子写入或整体回滚。它不是 failure-buffer reset，也不改变 ball-first 的冻结动作语义。 |
-| <a id="diagnostic-joint-safety-drain"></a>`diagnostic joint-safety drain` / 诊断训练关节安全账本排空 | `training_authorized=false` 的 ActionBall 诊断跑仍执行真实 qdes 投影、actual-hard/nonfinite/table/fall 保护，但不取得 formal Reward 或 curriculum 晋级权。每个 PPO update 仍必须消费 action term 产生的有限容量安全摘要；否则 24 steps/update 会在约 170 updates 填满 4096 槽并确定性退出。该排空只修生命周期，不改变 Reward 或策略优化目标。 |
+| <a id="diagnostic-joint-safety-drain"></a>`diagnostic joint-safety drain` / 诊断训练关节安全账本排空 | `training_authorized=false` 的 ActionBall 诊断跑仍执行真实 qdes 投影、substep q/qdot freshness、brake、actual-hard/nonfinite/table/fall 保护，但不取得 formal Reward 或 curriculum 晋级权。新 compact 形式在 device 上累计每 update 的 readback 完整性、逐关节 count/min-gap，PPO 前冻结验证、optimizer 成功后才 ack/clear；不复制逐 substep dense transcript、逐 step identity，也不写 formal per-update 收据。该排空只改变诊断证据粒度和热路径成本，不改变 Reward、Done 或策略样本；formal 路径仍保留完整收据。 |
 
 ## 动作库术语
 
