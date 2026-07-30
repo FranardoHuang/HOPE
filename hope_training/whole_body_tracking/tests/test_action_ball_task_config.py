@@ -418,3 +418,34 @@ def test_new_launch_can_bind_exact_n_with_table_pose_contract(action_count):
         ("racket_target_normal_cmd", 4),
         ("action_one_hot", action_count),
     )
+
+
+@pytest.mark.parametrize("action_count", [1, 5, 73])
+def test_preferred_launch_can_bind_exact_n_with_table_pose_twist_contract(
+    action_count,
+):
+    action_names = [f"action_{index:03d}" for index in range(action_count)]
+    list_override = "[" + ",".join(action_names) + "]"
+    task = _compose_task(
+        (
+            "task.actor_obs_contract="
+            f"action_ball_table_pose_twist_n{action_count}"
+        ),
+        f"task.racket.clip_names={list_override}",
+        "task.racket.action_ball_manifest_path=configs/exact_manifest.json",
+        f"task.racket.action_ball_manifest_sha256={'a' * 64}",
+        f"task.racket.action_ball_policy_contract_sha256={'b' * 64}",
+    )
+
+    contract_mod = _load_actor_contract_module()
+    contract = contract_mod.resolve_actor_observation_contract(
+        task.actor_obs_contract
+    )
+    assert contract.total_dim == 193 + action_count
+    assert contract.layout[-5:] == (
+        ("base_position_table", 3),
+        ("base_orientation_table_6d", 6),
+        ("base_lin_vel_b", 3),
+        ("racket_target_normal_cmd", 4),
+        ("action_one_hot", action_count),
+    )

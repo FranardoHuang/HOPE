@@ -947,8 +947,21 @@ def _action_ball_diagnostic_schema3_contract():
 
 
 def _action_set_identity(
-    *, profile_id="fixture_upper_nomove_n2", table_pose=False
+    *,
+    profile_id="fixture_upper_nomove_n2",
+    table_pose=False,
+    table_pose_twist=False,
 ):
+    assert not (table_pose and table_pose_twist)
+    if table_pose_twist:
+        actor_obs_contract = "action_ball_table_pose_twist_n2"
+        actor_obs_width = 195
+    elif table_pose:
+        actor_obs_contract = "action_ball_table_pose_n2"
+        actor_obs_width = 192
+    else:
+        actor_obs_contract = "action_ball_n2"
+        actor_obs_width = 183
     action_ids = ["bh_loop", "bh_block"]
     action_uids = [101, 202]
     order_digest = TC._action_ball_order_uid_digest(action_ids, action_uids)
@@ -965,10 +978,8 @@ def _action_set_identity(
         "manifest_path": "configs/action_ball_fixture_n2.json",
         "manifest_sha256": "c" * 64,
         "experiment_name": "agibot_a3_hope_action_ball_fixture_n2",
-        "actor_obs_contract": (
-            "action_ball_table_pose_n2" if table_pose else "action_ball_n2"
-        ),
-        "actor_obs_width": 192 if table_pose else 183,
+        "actor_obs_contract": actor_obs_contract,
+        "actor_obs_width": actor_obs_width,
         "namespace_identity": f"n2-{order_digest[:12]}",
     }
     row["contract_sha256"] = TC._action_ball_canonical_sha256(row)
@@ -1232,6 +1243,48 @@ def test_action_ball_table_pose_layout_is_accepted_with_exact_n_and_width():
     cross_n = dict(identity)
     cross_n["actor_obs_contract"] = "action_ball_table_pose_n1"
     cross_n["actor_obs_width"] = 191
+    code_row = {
+        key: cross_n[key]
+        for key in TC._ACTION_BALL_ACTION_SET_CODE_KEYS
+        if key != "contract_sha256"
+    }
+    cross_n["contract_sha256"] = TC._action_ball_canonical_sha256(code_row)
+    with pytest.raises(ValueError, match="exact N=2"):
+        TC.validate_action_ball_action_set_identity_block(cross_n)
+
+
+def test_action_ball_table_pose_twist_layout_is_accepted_with_exact_n_and_width():
+    contract = _action_ball_diagnostic_schema3_contract()
+    contract["actor_obs_contract"] = "action_ball_table_pose_twist_n2"
+    contract["actor_obs_total_dim"] = 195
+    contract["actor_obs_term_dims"] = [195]
+    assert TC.validate_action_ball_training_authorization(contract) is True
+
+    wrong_width = dict(contract)
+    wrong_width["actor_obs_total_dim"] = 192
+    with pytest.raises(ValueError, match="does not match"):
+        TC.validate_action_ball_training_authorization(wrong_width)
+
+    identity = _action_set_identity(table_pose_twist=True)
+    kwargs = {
+        "actor_obs_contract": "action_ball_table_pose_twist_n2",
+        "actor_obs_width": 195,
+        "manifest_path": identity["manifest_path"],
+        "manifest_sha256": identity["manifest_sha256"],
+        "scope": "upper",
+        "mobility_mode": "no_move",
+        "ordered_action_ids": identity["ordered_action_ids"],
+        "ordered_action_uids": identity["ordered_action_uids"],
+        "experiment_name": identity["experiment_name"],
+    }
+    assert (
+        TC.validate_action_ball_action_set_runtime_identity(identity, **kwargs)
+        == identity
+    )
+
+    cross_n = dict(identity)
+    cross_n["actor_obs_contract"] = "action_ball_table_pose_twist_n1"
+    cross_n["actor_obs_width"] = 194
     code_row = {
         key: cross_n[key]
         for key in TC._ACTION_BALL_ACTION_SET_CODE_KEYS

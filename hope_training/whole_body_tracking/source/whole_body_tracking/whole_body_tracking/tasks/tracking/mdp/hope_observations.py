@@ -9,6 +9,7 @@ quantities the planner provides at deploy time (HITTER actor observation, Table 
 * :func:`base_target_pos_b`    — desired base XY position relative to base (2)
 * :func:`base_position_table`  — base root position relative to table-surface center (3)
 * :func:`base_orientation_table_6d` — full base orientation in the table frame (6)
+* :func:`base_lin_vel_b`       — root rigid-body COM linear velocity in the body frame (3)
 * :func:`station_anchor_err_b` — world station anchor minus current base XY, base frame (2;
   R10c station_obs flag, appended after the face channel = 179 -> 181)
 
@@ -204,6 +205,21 @@ def base_orientation_table_6d(
     return _base_orientation_table_6d_from_quat(
         _cmd(env, command_name).base_quat_w
     )
+
+
+def base_lin_vel_b(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    """Root rigid-body COM linear velocity expressed in the root actor frame.
+
+    Isaac reads ``root_lin_vel_b`` directly.  The deployment producer is a
+    causal fused estimator with OptiTrack position as its absolute anchor and
+    optional IMU-accelerometer propagation.  It must match this exact point and
+    frame convention, including the calibrated marker-to-root/COM offset and
+    the angular-velocity cross-offset term.
+    """
+
+    return _cmd(env, command_name).robot.data.root_lin_vel_b
 
 
 def station_anchor_err_b(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:

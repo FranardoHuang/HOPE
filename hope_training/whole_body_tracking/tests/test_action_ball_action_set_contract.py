@@ -107,9 +107,9 @@ def test_n1_n5_n73_registered_contract_is_exact(n):
     )
     assert contract["expected_n"] == n
     assert contract["actor_obs_contract"] == (
-        "action_ball_table_pose_n{}".format(n)
+        "action_ball_table_pose_twist_n{}".format(n)
     )
-    assert contract["actor_obs_width"] == 190 + n
+    assert contract["actor_obs_width"] == 193 + n
     assert contract["namespace_identity"] == "n{}-{}".format(
         n, row["order_uid_digest_sha256"][:12]
     )

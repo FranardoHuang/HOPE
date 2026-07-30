@@ -2297,18 +2297,27 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
     table_pose_actor_contract = (
         f"action_ball_table_pose_n{action_count}"
     )
+    table_pose_twist_actor_contract = (
+        f"action_ball_table_pose_twist_n{action_count}"
+    )
     if configured_actor_contract not in (
         legacy_actor_contract,
         table_pose_actor_contract,
+        table_pose_twist_actor_contract,
     ):
         raise _OverrideError(
             "[train.py] action-ball actor_obs_contract must match the exact "
-            f"action count: expected {table_pose_actor_contract!r} (preferred) "
-            f"or legacy-compatible {legacy_actor_contract!r}; got "
+            f"action count: expected {table_pose_twist_actor_contract!r} "
+            f"(preferred), or compatibility contracts "
+            f"{table_pose_actor_contract!r}/{legacy_actor_contract!r}; got "
             f"{configured_actor_contract!r}"
         )
     include_table_pose = (
-        configured_actor_contract == table_pose_actor_contract
+        configured_actor_contract
+        in (table_pose_actor_contract, table_pose_twist_actor_contract)
+    )
+    include_base_twist = (
+        configured_actor_contract == table_pose_twist_actor_contract
     )
     expected_actor_contract = configured_actor_contract
     if str(getattr(env_cfg, "obs_mode", "")) != "hitter_footwork":
@@ -2781,6 +2790,7 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
         for name in (
             "base_position_table",
             "base_orientation_table_6d",
+            "base_lin_vel_b",
             "racket_target_normal_cmd",
             "action_one_hot",
             "station_anchor_err_b",
@@ -2804,6 +2814,11 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
             func=_mdp.base_orientation_table_6d,
             params={"command_name": "racket_target"},
         )
+    if include_base_twist:
+        policy.base_lin_vel_b = _ObsTerm(
+            func=_mdp.base_lin_vel_b,
+            params={"command_name": "racket_target"},
+        )
     policy.racket_target_normal_cmd = _ObsTerm(
         func=_mdp.racket_target_normal_cmd,
         params={"command_name": "racket_target"},
@@ -2822,6 +2837,7 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
             if include_table_pose
             else ""
         )
+        + ("base_lin_vel_b(+3)," if include_base_twist else "")
         + f"racket_target_normal_cmd(+4),action_one_hot(+{action_count}) "
         f"(actor_obs_contract={expected_actor_contract}; "
         f"preflight_sha256={preflight['sha256']}; "

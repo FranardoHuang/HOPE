@@ -28,8 +28,8 @@ PROFILE_POLICY_VARIABLE = "ACTION_SET_PROFILE_POLICIES"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 SAFE_PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 SAFE_EXPERIMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
-ACTOR_OBS_CONTRACT_PREFIX = "action_ball_table_pose_n"
-ACTOR_OBS_BASE_WIDTH = 190
+ACTOR_OBS_CONTRACT_PREFIX = "action_ball_table_pose_twist_n"
+ACTOR_OBS_BASE_WIDTH = 193
 
 CONTRACT_KEYS = frozenset(
     {
