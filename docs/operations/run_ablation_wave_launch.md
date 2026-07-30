@@ -374,9 +374,11 @@ fresh successor 还必须把 actor 合同切换为
 即 exact fixed-194：相对 racket position residual、demanded velocity 和 raw-A face normal 全部
 统一到 yaw-heading frame；另加桌面中心 frame 下的 base XYZ、完整连续 6D orientation 与
 root-COM 三轴线速度，并直接提供同一 Motion phase governor 的
-`time_to_teacher_start_s=max(pre_swing_wait_s-task_age_s,0)`。policy recipe 只绑定
-PPO/decoder/dynamic-ready，不绑定 observation 名称或宽度，所以现有 tracked schema-2 recipe
-可复用；旧 182/191-D checkpoint、旧混合-frame 194-D checkpoint，以及当前兼容合同下的
+`time_to_teacher_start_s=max(pre_swing_wait_s-task_age_s,0)`。policy recipe 不直接列
+observation 名称或宽度，但 schema-2 dynamic-ready identity 会绑定 candidate/hold 的**绝对
+运行路径**与其派生 binding SHA；只要 exact checkout 路径变化，就必须在目标 checkout 上重新
+运行 recipe-only 物化，不能复用旧 tracked recipe。旧 182/191-D checkpoint、旧混合-frame
+194-D checkpoint，以及当前兼容合同下的
 194-D checkpoint 均不能因同宽复用。v2 hard contract 必须由 fresh smoke 的实际 term order/width
 和 checkpoint 证明。该 sim
 输入由 rigid-body truth 构造；当前 C++ builder 不支持 fixed-194 v2，且真实 marker→base 旋转外参、

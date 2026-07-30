@@ -21,8 +21,9 @@
   规范化 smoke spec 随后由 exact `8729104e` launcher canonical plan PASS，claim
   `7f9d12ca…4002`。r3 已在 Pod1 GPU2 真实构造并验证 fixed-194 v2 与 dynamic-ready，但在
   PPO 前发现 spec 沿用旧 policy recipe `b7209710…077f`，实际 composed recipe 为
-  `165645f5…bd9`；该 namespace spent。当前唯一下一动作是物化实际 recipe、生成 fresh r4，
-  并等待 r3 PID 自然退出后重发；状态只看
+  `165645f5…bd9`；该 namespace spent。recipe-only 构造已物化 raw SHA
+  `4b81c74b…7fb1`，fresh r4 三段 spec 也已生成。当前唯一下一动作是等待 launcher watchdog
+  exact-PG 收口并释放全 Pod Kit boot lock，随后 plan/launch r4；状态只看
   [分阶段准备看板](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md#0-当前执行看板本文唯一活跃-todo)。
 - fresh ActionBall actor 合同切为固定 194-D
   `action_ball_table_pose_twist_heading_task_teacher_start_v2`，当前 trainer 不再创建

@@ -4089,3 +4089,12 @@ runner 创建前，policy-recipe 硬门发现 spec 的旧 SHA `b7209710…077f` 
 `165645f5…bd9` 不同而 fail-closed；无 PPO update/checkpoint。namespace
 `n1hr_smoke_fastball110_8729104e_block_gpu2_seed0_r3` spent 且不复用。下一门是物化实际
 schema-2 recipe，生成 fresh r4 spec/claim，并等待旧 PID 自然退出后再占自然空闲槽。
+
+recipe-only 真实构造现已物化 policy contract `165645f5…bd9`（artifact raw SHA
+`4b81c74b…7fb1`）。差异不是 PPO 或 fixed-194 观测字段，而是 schema-2 policy initialization
+把 dynamic-ready candidate/hold 的绝对 checkout path 及派生 binding SHA 纳入 identity；
+因此换 checkout 必须重物化 recipe。fresh r4 smoke/probe/milestone1000 spec raw SHA 依次为
+`6fc4e7ca…c369`、`6e7caeb1…b200`、`533b50d2…36ea`。r3 pre-run exception 暴露另一个非首发
+阻断：`gym.make()` 后 hard-contract 异常未先 `env.close()`，Kit teardown 会自旋到 launcher
+watchdog；当前不手工 signal/kill，待 exact-PG 收口后才发 r4，异常 finally-close 修复列入
+formal N5 前 TODO。
