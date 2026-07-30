@@ -380,8 +380,11 @@ def test_diagnostic_handoff_rejects_same_size_active_row_substitution():
     command._begin_action_ball_task_pending(
         pending_ids, elapsed_s=elapsed_s
     )
-    before = _snapshot_motion_timing(command)
 
+    # The device assertion is deliberately asynchronous on CUDA.  A forged
+    # same-size substitution therefore poisons the process, but its partially
+    # queued diagnostic state is not a rollback surface and must not be
+    # inspected or retried after the exception.
     with pytest.raises(RuntimeError):
         _resolve_diagnostic_batch(
             command,
@@ -392,12 +395,6 @@ def test_diagnostic_handoff_rejects_same_size_active_row_substitution():
             receipts=(receipts[0], receipts[2]),
             task_refs=(task_refs[0], task_refs[2]),
         )
-
-    assert command._action_ball_diagnostic_pending_row_count == 2
-    _assert_motion_timing_equal(
-        _snapshot_motion_timing(command),
-        before,
-    )
 
 
 def test_diagnostic_pending_row_count_round_trips_reset_rollback():
