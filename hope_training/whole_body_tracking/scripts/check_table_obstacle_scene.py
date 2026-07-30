@@ -203,6 +203,7 @@ class _RuntimeEvidence:
 
 
 _ISAAC_RUNTIME_ORIGIN: object | None = None
+_app_launcher = None
 _app = None
 gym = None
 torch = None
@@ -1261,7 +1262,7 @@ def _validate_cli_mode(args) -> None:
 
 
 def _initialize_isaac_runtime(args) -> None:
-    global _ISAAC_RUNTIME_ORIGIN, _app
+    global _ISAAC_RUNTIME_ORIGIN, _app_launcher, _app
     global gym, torch, parse_env_cfg, tt_frame
     global TABLE_ALL_BODY_CONTACT_SENSOR_NAMES
     global TABLE_CONTACT_BODY_NAMES, TABLE_HIT_FORCE_THRESHOLD_N
@@ -1271,7 +1272,11 @@ def _initialize_isaac_runtime(args) -> None:
     launcher_args = {"headless": True, "device": args.device}
     if args.screenshot_dir is not None:
         launcher_args["enable_cameras"] = True
-    _app = AppLauncher(launcher_args).app
+    # Keep the launcher alive for the whole diagnostic, matching the shipped
+    # train/play entrypoints.  The launcher owns Kit lifecycle callbacks in
+    # addition to exposing the SimulationApp object.
+    _app_launcher = AppLauncher(launcher_args)
+    _app = _app_launcher.app
     import gymnasium as gym_module
     import torch as torch_module
     import isaaclab_tasks  # noqa: F401
@@ -3649,22 +3654,37 @@ def main():
     exit_code = 0
     try:
         if not ARGS.cfg_only:
+            print("HOPE_TABLE_DIAGNOSTIC_STAGE=gym_make_begin", flush=True)
             if nominal_hold_screenshot_dir is not None:
                 env = gym.make(
                     ARGS.task, cfg=env_cfg, render_mode="rgb_array"
                 )
             else:
                 env = gym.make(ARGS.task, cfg=env_cfg)
+            print("HOPE_TABLE_DIAGNOSTIC_STAGE=gym_make_done", flush=True)
             env.reset()
+            print("HOPE_TABLE_DIAGNOSTIC_STAGE=initial_reset_done", flush=True)
             if ARGS.table_obstacle != "off":
                 check_spawned(env, env_cfg)
+                print(
+                    "HOPE_TABLE_DIAGNOSTIC_STAGE=spawn_check_done",
+                    flush=True,
+                )
             if nominal_hold_inputs is not None:
+                print(
+                    "HOPE_TABLE_DIAGNOSTIC_STAGE=nominal_hold_begin",
+                    flush=True,
+                )
                 receipt = nominal_hold_probe(
                     env,
                     env_cfg,
                     nominal_hold_inputs,
                     duration_s=float(ARGS.duration_s),
                     screenshot_dir=nominal_hold_screenshot_dir,
+                )
+                print(
+                    "HOPE_TABLE_DIAGNOSTIC_STAGE=nominal_hold_done",
+                    flush=True,
                 )
                 assert nominal_hold_output_path is not None
                 receipt_sha = _exclusive_publish_nominal_hold_receipt(

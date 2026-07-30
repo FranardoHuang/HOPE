@@ -3806,3 +3806,11 @@ loop/block 两份 exact 候选、Isaac 的 `raw_env_reset`、artifact-ready、`1
 fixture 的两个生产默认 mode flag；当前仍只有 source，需 clean commit 后在 Pod 运行 focused
 pytest 和真实 renderer。连续若干次 renderer 在 scene creation 后零退出且无 PNG/receipt，
 均明确不算证据。这些通过前不接 trainer、不发 long，G05 继续 `Partial`。
+
+后续 clean Pod 已把 fixture 完整收口为 `test_metric_sync_fix.py: 21 passed`、
+nominal-hold focused `4 passed`，未改生产逻辑。renderer/hold 仍未出 receipt；已定位到 fresh
+checkout 的绝对 URDF 路径触发重复 A3 conversion，以及 headless Kit 缺 private GLU。按
+[`setup_local_sync.md`](../operations/setup_local_sync.md) 物化并逐层核对了 Franco-owned
+preconverted USD/GLU 副本；工具增加 `HOPE_TABLE_DIAGNOSTIC_STAGE`，下一次零退出将能精确
+区分 `gym_make / reset / spawn check / nominal hold`。在真实 PNG 与 hold receipt 出现前仍不
+声称 dynamic-ready 通过，G05 保持 `Partial`。

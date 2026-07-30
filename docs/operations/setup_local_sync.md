@@ -991,6 +991,27 @@ manifest；禁止用同名重生成文件、M0 diagnostic GMR 输出或别的 ch
 - Keep reference-only external repos synced through `scripts/sync_external_repos.sh`.
 - Promote external repos to submodules only after a project decision.
 
+## Pod A3 preconverted USD 与 headless GLU
+
+ActionBall 的 fresh detached checkout 不应因 URDF 绝对路径变化重复转换同一台 A3。Pod1 当前
+Franco-owned 的 ignored/runtime 副本是：
+
+- `/workspace/franco/runtime_assets/a3_preconverted_usd_1b3fecd7/`
+- `/workspace/franco/runtime_assets/libglu_af791d1e/`
+
+USD 四层 SHA-256（`model / base / physics / sensor`）依次为
+`1b3fecd7685cd98ca80de226fbf89985b77b8a8cfc6a36f18fcc22e65080693c`、
+`8e521141bfee4274b8a2369d382cdd8aac9bb1cfcae5bfa480666a1935a7fb42`、
+`5b5fc00b96566be295a0cd4eb6b0cd276e360d9cca189057cef452ad0bfc7981`、
+`c76c5bdd9e9b5434d72b45c9001858a9c80363656272011ed50d1419149ca60a`；
+`libGLU.so.1.3.1` 为
+`af791d1ee2acf25417f612290e634248fd716cf5da0374ba21160fb264eaeab4`。
+
+若副本丢失，只能从团队保留的 exact six-file USD bundle
+`/workspace/codexschema/simple_half_second_sprint_20260718/assets/a3_preconverted_usd/`
+和已审计 private GLU 恢复到新的 no-clobber 目录，逐文件复算上述 SHA 后再设置
+`HOPE_AGIBOT_A3_USD_PATH` / `LD_LIBRARY_PATH`；不能按同名或目录存在判定等价。
+
 ## Rebuild Local Assets
 
 If `vendor_assets/agibot/a3_deploy_example_full/` is missing, restore it from the Agibot-provided deploy package and keep the same relative path. Then update this file with the source and date.

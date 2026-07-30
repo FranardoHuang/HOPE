@@ -552,6 +552,24 @@ def test_nominal_hold_captures_raw_reset_before_dynamic_ready_write():
     )
 
 
+def test_runtime_launcher_lifetime_and_stage_markers_are_explicit():
+    init_source = inspect.getsource(P._initialize_isaac_runtime)
+    assert "_app_launcher = AppLauncher(launcher_args)" in init_source
+    assert "_app = _app_launcher.app" in init_source
+
+    main_source = inspect.getsource(P.main)
+    stages = [
+        "gym_make_begin",
+        "gym_make_done",
+        "initial_reset_done",
+        "spawn_check_done",
+        "nominal_hold_begin",
+        "nominal_hold_done",
+    ]
+    positions = [main_source.index(stage) for stage in stages]
+    assert positions == sorted(positions)
+
+
 def test_formal_cli_has_no_boolean_pass_claims_and_requires_pod_shape():
     source = SCRIPT.read_text(encoding="utf-8")
     for forbidden in (

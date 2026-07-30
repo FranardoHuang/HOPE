@@ -20,6 +20,11 @@
   run 依次暴露旧夹具缺失的 exact-attempt buffer（`12 passed / 9 failed`）与 planner 默认旗标
   （`19 passed / 2 failed`）；第三轮确认最后两项还缺 inactive actor-view 的既有 metric
   buffer。补齐后的完整复测与真实 Isaac 图像验收待完成。
+- clean Pod 已确认旧 metric fixture `21 passed`、nominal-hold focused fixture
+  `4 passed`。fresh checkout 的首次真实 Isaac probe 还暴露了两项纯启动依赖：绝对 URDF
+  路径变化会重复转换同一 A3，且 renderer 需要 `libGLU.so.1`。现已物化 Franco-owned、
+  no-clobber 的 preconverted A3 USD 与 private GLU 副本并按逐层 SHA 核对；诊断器也增加
+  构造/reset/probe stage marker，真实截图/hold verdict 仍待复跑。
 - reset 审计排除 failure-buffer 提前启用：ActionBall canonical path 固定
   `stand=1/post-swing=0` 并写动作 frame 0；当前没有“35% strike 后混入失败姿态”的实现。
   source 已加入 action-specific static-hold minimax 和 dynamic-ready candidate producer；

@@ -151,7 +151,10 @@ trainer。
 每个动作必须使用 fresh no-clobber 输出，且 Pod 的物理 GPU 先用 NVML/owner lock 只读核对：
 
 ```bash
-env -u CUDA_VISIBLE_DEVICES HOPE_URDF_IMPORTER_NO_UI=1 \
+env -u CUDA_VISIBLE_DEVICES \
+  HOPE_URDF_IMPORTER_NO_UI=1 \
+  HOPE_AGIBOT_A3_USD_PATH=/workspace/franco/runtime_assets/a3_preconverted_usd_1b3fecd7/model.usd \
+  LD_LIBRARY_PATH=/workspace/franco/runtime_assets/libglu_af791d1e${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}} \
 /workspace/hope_isaac_venv/bin/python \
   hope_training/whole_body_tracking/scripts/check_table_obstacle_scene.py \
   --task HOPE-PingPong-ActionBall-AgibotA3-v0 \
@@ -168,9 +171,12 @@ env -u CUDA_VISIBLE_DEVICES HOPE_URDF_IMPORTER_NO_UI=1 \
 actual-hard、qdes nonfinite、table 和 fall；任何首个 terminal 立即停止，并把上一安全帧记为
 `preterminal`。带截图的 Vulkan/RTX probe 不设置 `CUDA_VISIBLE_DEVICES`，直接把 Pod 物理卡号
 写进 `--device cuda:N`；否则 Isaac 4.5 的 GPU/渲染枚举可能不一致。Pod 的 headless importer
-还必须显式设置 `HOPE_URDF_IMPORTER_NO_UI=1`；日志必须越过 scene creation，不能把
+还必须显式设置 `HOPE_URDF_IMPORTER_NO_UI=1`。fresh checkout 必须复用按内容钉住的 A3
+preconverted USD；否则绝对 URDF 路径变化会触发同一资产的重复转换。当前 Pod 副本四层 SHA
+依次为 `1b3fecd7… / 8e521141… / 5b5fc00b… / c76c5bdd…`，private GLU 的
+`libGLU.so.1.3.1` 为 `af791d1e…`。日志必须越过 scene creation，不能把
 `Simulation App Shutting Down` 的零退出误写成截图证据。正式 table receipt 仍遵守“单卡可见、
-logical `cuda:0`”合同。该 receipt 与截图不授权训练、部署或真机。
+logical cuda:0”合同。该 receipt 与截图不授权训练、部署或真机。
 
 以下性能改动若 Pod focused parity 通过，可直接进入 replacement，不另开学习 A/B：
 
