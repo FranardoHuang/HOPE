@@ -1244,6 +1244,26 @@ def test_motion_rejects_mutated_exact_receipt_instead_of_clipping_rate():
     assert float(command.speed_scale[0]) == 0.0
 
 
+def test_missing_contact_geometry_preserves_the_root_attribute_error(
+    monkeypatch,
+):
+    command, runtime, broker, _provider, _domain = _motion_harness(1)
+    task_authority = _bind_task_authority(command, runtime, broker)
+    env_ids = torch.tensor([0], dtype=torch.long)
+    transaction, _rollback = _reserve_write_commit(command, env_ids)
+    consumed = _consume_committed(
+        runtime, broker, transaction["receipts"]
+    )
+    task_authority.install(
+        (_task_receipt(runtime, consumed[0], swing_generation=0),)
+    )
+    command._begin_action_ball_task_pending(env_ids, elapsed_s=0.0)
+    monkeypatch.delattr(runtime, "_contact_geometry")
+
+    with pytest.raises(AttributeError, match="_contact_geometry"):
+        command._resolve_pending_action_ball_tasks()
+
+
 def test_motion_accepts_canonical_float32_teacher_rate_boundary_seam():
     command, runtime, broker, _provider, _domain = _motion_harness(1)
     task_authority = _bind_task_authority(command, runtime, broker)

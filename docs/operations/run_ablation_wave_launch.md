@@ -178,6 +178,11 @@ preconverted USD；否则绝对 URDF 路径变化会触发同一资产的重复�
 `Simulation App Shutting Down` 的零退出误写成截图证据。正式 table receipt 仍遵守“单卡可见、
 logical cuda:0”合同。该 receipt 与截图不授权训练、部署或真机。
 
+nominal-hold 不读取 32 份 `force_matrix_w` 做 table receipt 的 USD/filtered-contact 枚举；该
+枚举由独立 formal table smoke 负责。hold 仍保留并逐步读取 `robot_hit_table`、fall、
+qdes-nonfinite 与 actual-hard term，因此这不是删除桌碰安全真值，只是把无关的收据物化从 reset
+姿势诊断中移走。
+
 以下性能改动若 Pod focused parity 通过，可直接进入 replacement，不另开学习 A/B：
 
 - immutable frozen receipt 的 external SHA cache，不得改变 dataclass/pickle/wire/exact-resume；

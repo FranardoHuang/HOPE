@@ -24,7 +24,14 @@
   `4 passed`。fresh checkout 的首次真实 Isaac probe 还暴露了两项纯启动依赖：绝对 URDF
   路径变化会重复转换同一 A3，且 renderer 需要 `libGLU.so.1`。现已物化 Franco-owned、
   no-clobber 的 preconverted A3 USD 与 private GLU 副本并按逐层 SHA 核对；诊断器也增加
-  构造/reset/probe stage marker，真实截图/hold verdict 仍待复跑。
+  构造/reset/probe stage marker。首个 stage run 证明进程自然完成 gym make 与初始 reset，
+  静默关闭发生在 nominal-hold 之前的 32-sensor `force_matrix_w` spawned-receipt 枚举。该枚举
+  已留给独立 formal table smoke；hold 仍逐步保留 table/fall/hard term，真实截图/hold verdict
+  待复跑。
+- CC 复核发现 teacher-rate consumer 的 geometry 模块绑定位于 `try` 内、异常类型却在
+  `except` 上引用该局部变量；属性读取本身失败时会用 `UnboundLocalError` 掩盖根因。绑定现已
+  移到 `try` 前，并新增缺失 geometry 时保留原始 `AttributeError` 的回归；这是异常完整性修复，
+  不改变有效 task 的 teacher-rate 数值或训练目标。
 - reset 审计排除 failure-buffer 提前启用：ActionBall canonical path 固定
   `stand=1/post-swing=0` 并写动作 frame 0；当前没有“35% strike 后混入失败姿态”的实现。
   source 已加入 action-specific static-hold minimax 和 dynamic-ready candidate producer；

@@ -3664,10 +3664,24 @@ def main():
             print("HOPE_TABLE_DIAGNOSTIC_STAGE=gym_make_done", flush=True)
             env.reset()
             print("HOPE_TABLE_DIAGNOSTIC_STAGE=initial_reset_done", flush=True)
-            if ARGS.table_obstacle != "off":
+            if (
+                ARGS.table_obstacle != "off"
+                and nominal_hold_inputs is None
+            ):
                 check_spawned(env, env_cfg)
                 print(
                     "HOPE_TABLE_DIAGNOSTIC_STAGE=spawn_check_done",
+                    flush=True,
+                )
+            elif ARGS.table_obstacle != "off":
+                # The hold probe exercises the live table/fall/hard-limit
+                # termination terms while stepping.  Its question is the A3
+                # ready state, not the separate full force-matrix receipt.
+                # Avoid materializing all 32 unsupported GPU filtered-contact
+                # matrices merely to inspect a reset pose.
+                print(
+                    "HOPE_TABLE_DIAGNOSTIC_STAGE="
+                    "spawn_check_skipped_for_nominal_hold",
                     flush=True,
                 )
             if nominal_hold_inputs is not None:

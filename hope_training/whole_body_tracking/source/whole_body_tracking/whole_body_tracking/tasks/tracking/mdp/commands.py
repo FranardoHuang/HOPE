@@ -2997,8 +2997,8 @@ class MotionCommand(CommandTerm):
             raise ValueError(
                 "action-ball certified teacher-rate bounds must contain native rate 1"
             )
+        contact_geometry = runtime._contact_geometry
         try:
-            contact_geometry = runtime._contact_geometry
             contact_geometry.canonical_teacher_rate_from_site_speed(
                 teacher_rate,
                 1.0,

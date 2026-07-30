@@ -3814,3 +3814,13 @@ checkout 的绝对 URDF 路径触发重复 A3 conversion，以及 headless Kit �
 preconverted USD/GLU 副本；工具增加 `HOPE_TABLE_DIAGNOSTIC_STAGE`，下一次零退出将能精确
 区分 `gym_make / reset / spawn check / nominal hold`。在真实 PNG 与 hold receipt 出现前仍不
 声称 dynamic-ready 通过，G05 保持 `Partial`。
+
+首个 stage run 已越过 `gym_make_done` 和 `initial_reset_done`，零退出发生在 nominal hold 前的
+32-sensor `force_matrix_w` spawned-receipt 枚举；不是 A3 reset、hold、Reward 或 qdes 失败。
+nominal-hold 现不再物化这份独立 formal table receipt，但 live `robot_hit_table`、fall、
+qdes-nonfinite、actual-hard term 原样保留并逐步判定。
+
+CC 非阻断复核另发现 teacher-rate consumer 的 contact-geometry 属性读取若失败，旧异常处理会
+因局部变量尚未绑定而掩盖根因。绑定已移到 `try` 前，并有回归要求缺失 runtime geometry 时保留
+原始 `AttributeError`；有效 receipt 的计算与判定路径不变，故不需要学习 A/B，仍需 Pod focused
+回归。

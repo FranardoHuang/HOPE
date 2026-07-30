@@ -562,12 +562,13 @@ def test_runtime_launcher_lifetime_and_stage_markers_are_explicit():
         "gym_make_begin",
         "gym_make_done",
         "initial_reset_done",
-        "spawn_check_done",
         "nominal_hold_begin",
         "nominal_hold_done",
     ]
     positions = [main_source.index(stage) for stage in stages]
     assert positions == sorted(positions)
+    assert "and nominal_hold_inputs is None" in main_source
+    assert "spawn_check_skipped_for_nominal_hold" in main_source
 
 
 def test_formal_cli_has_no_boolean_pass_claims_and_requires_pod_shape():
