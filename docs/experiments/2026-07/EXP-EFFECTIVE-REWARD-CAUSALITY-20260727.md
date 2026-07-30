@@ -847,3 +847,20 @@ row 与 runtime joint order 不同，现已加入双向 permutation 后再做 `q
 这仍是 source candidate，尚无 Pod/Isaac receipt；因此所有 Reward 权重、negative dose、
 reference guard、full-body 与 curriculum failure-rate 比较继续冻结。先用真实 reset 截图和
 闭环 hold 判定姿态，再取得 strike 分母。
+
+### 2026-07-30：dynamic-ready 静态闭环通过，下一步接入训练合同
+
+clean `4c870e94` Pod Isaac numeric hold 已让 `bh_loop_c` / `bh_block` 各持续
+`0.8 s / 40` policy steps，双脚接触率均为 `1.0`、minimum root z 均为
+`1.0684000 m`、maximum tilt 为 `0.00983/0.01029 rad`，且 qdes nonfinite、actual-hard、
+table、fall 均未终止。clean `22890ea2` 又在同一物理合同下取得可见的原生
+`raw_env_reset`、dynamic-ready、step 1/10 与 final PNG；两件原生 reset 均为直立、
+双脚着地的动作专属 frame 0，不是 failure-buffer 歪姿态，两条 screenshot receipt 再次
+`PASS`（SHA-256 `e0abbfe6…` / `53e8950c…`）。
+
+这只通过出生姿态和 action-specific hold qdes，不等于 teacher 动态或 policy 已能击球。
+下一直接修是把同一 ready 同时接到 physical spawn、初始 qdes/last action、actor observation、
+teacher/reference frame 0 与 preparation window；随后跑 `1 env×2` 和规模 probe。若接线后
+episode 越过 `t_hit` 但 strike 仍为零，下一嫌疑按预注册转为 official low-gain 腰 plant 下的
+teacher 动态不可行（部署一致的腰增益或 reference retiming），不再反复修改出生，也不提前
+解冻 Reward screen。

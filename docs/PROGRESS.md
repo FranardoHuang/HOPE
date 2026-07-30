@@ -33,10 +33,20 @@
   `1.0684000 m`，maximum tilt 分别 `0.00983/0.01029 rad`。首轮 PNG 的 post-write/step/final
   均显示直立稳定，但原生 reset 图是 RTX 首次 render 的全黑 warm-up 帧；截图器现先丢弃同一
   物理状态的首帧再保存第二帧，待 Pod 复截后才判断原生 reset 姿态。
+- clean `22890ea2` Pod 复截已让两动作 `raw_env_reset` 均得到可见 PNG，原生 reset 是直立、
+  双脚着地的动作专属 frame 0，不是歪倒/failure-buffer 状态；两件 screenshot hold 再次
+  `PASS`。loop/block receipt SHA-256 分别为 `e0abbfe6…` / `53e8950c…`，远端证据目录为
+  `/workspace/franco/n1dr_nominal_22890ea2_{loop,block}_frames_r1/`。因此下一训练 blocker 已从
+  “出生是否站得住”收窄为 dynamic-ready 的 qdes/last-action/observation/reference/preparation
+  接线，以及 teacher 在 official low-gain 腰 plant 下能否走到击球窗。
 - CC 复核发现 teacher-rate consumer 的 geometry 模块绑定位于 `try` 内、异常类型却在
   `except` 上引用该局部变量；属性读取本身失败时会用 `UnboundLocalError` 掩盖根因。绑定现已
   移到 `try` 前，并新增缺失 geometry 时保留原始 `AttributeError` 的回归；这是异常完整性修复，
   不改变有效 task 的 teacher-rate 数值或训练目标。
+- reset 收据治理采纳“checkpoint/hourly 物化、热路径紧凑事件日志”的方向，但把
+  `~7.1 ms/env-reset` 明确降为 profiler 前上界；仅 `seed+config` 不足以离线重建，日志还必须
+  保留 env/action/generation、domain、birth/sample、proposal reason、exact task、生命周期与
+  outcome。该改动不做学习 A/B，但须 Pod fixed-tape、旧收据重建、exact-resume 与分段吞吐验收。
 - reset 审计排除 failure-buffer 提前启用：ActionBall canonical path 固定
   `stand=1/post-swing=0` 并写动作 frame 0；当前没有“35% strike 后混入失败姿态”的实现。
   source 已加入 action-specific static-hold minimax 和 dynamic-ready candidate producer；

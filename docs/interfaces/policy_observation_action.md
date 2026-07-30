@@ -5,8 +5,9 @@ flat-wire/C++ source path and opt-in same-ball task-revision source are implemen
 schema-4 path has not yet passed an Isaac full-scene run, ROS/Jazzy Release, vendor Gate 3 or
 hardware behavior. It therefore remains `Partial`, not the currently accepted deployment path.
 The 181 deploy wire remains intentionally blocked pending the station/order contract day.
-Dynamic `task_first_n<N>` is a training-only source candidate; it has not passed a Pod Isaac smoke
-and has no production arbitrary-N wire/C++ consumer.
+Dynamic `task_first_n<N>` remains a historical training-only candidate. Dynamic
+`action_ball_n<N>` is implemented in the Isaac trainer and has Pod construction/training evidence,
+but it still has no production arbitrary-N flat wire or C++ observation consumer.
 
 ## HITTER-Compatible Contract
 
@@ -112,6 +113,7 @@ same policy tick. Timestamp-compensation pairs with positive delay are `NO-LAUNC
 | 179 | `deploy_parity_face179` | Exact 175 prefix + tail `racket_target_normal_cmd(3), rho(1)`; actor tail is raw mount +Y/A after the runner converts the physical-B wire normal with the selected clip sign. | Legacy face-only input uses schema 2; the existing formal atomic transport uses schema 3. The opt-in live-revision path requires exact schema 4 plus matching `planner_task_revision` ONNX metadata and `--planner-task-revision`. One older envelope-bearing model passed strict Release preflight, but no task-revision model has passed a backend first tick or vendor Gate 3 behavior. |
 | 181 | `deploy_parity_station181` | Exact 179 prefix + tail `station_anchor_err_b(2)`. | Blocked: wire and the unique station/normal term order are not frozen. |
 | `181+N` | `task_first_n<N>` | Exact `hitter_footwork(177)` prefix + `racket_target_normal_cmd(4)` + `action_one_hot(N)`；manifest/action/motion order 必须逐项相同。 | Training-only source candidate；无 ball、无 production planner wire，Pod Isaac 未测。 |
+| `181+N` | `action_ball_n<N>` | 与 `task_first_n<N>` 逐列同构，但 checkpoint 身份另名：动作先冻结，再由该动作的来球与 fixed-action solver 产生 task。当前 N=1 总宽度为 `182`。 | Isaac trainer 已实现并有 Pod 证据；无 production arbitrary-N wire/C++ consumer。 |
 | 110 | `hitter_pure` | HITTER Table-I style: 99-D proprio prefix + base forward(2), station delta(2), racket target rel base(3), target velocity(3), tts(1); no reference command or swing flag. | Supported; requires fresh localization and metadata-bound per-side station geometry. |
 
 Do not infer a contract from width alone. Formal consumers require the registered name, mode,
@@ -122,6 +124,23 @@ source-family SHA. A schema-4 launch additionally double-keys the runner flag, e
 metadata and wire width. Schema 1 never fabricates the tail.
 Merely accepting 181 in an input-shape whitelist would still create a right-width/wrong-columns
 command, so 181 remains rejected until its unique station/normal order is frozen.
+
+### Current N=1 ActionBall actor: exact 182-D layout
+
+The current upper backhand loop/block runs use `action_ball_n1`: the exact
+`hitter_footwork(177)` prefix followed by demanded signed face plus reserved spin scalar `(4)` and
+the frozen one-action identity `(1)`. The prefix is:
+
+`command(62), motion_anchor_ori_b(6), base_ang_vel(3), joint_pos(31), joint_vel(31),
+last_action(31), projected_gravity(3), base_target_pos_b(2), racket_target_pos_b(3),
+racket_target_vel_w(3), time_to_strike(1), swing_type(1)`.
+
+There is **no absolute base world position and no absolute world yaw/quaternion column**. World
+base pose is used internally to form the two relative base-target coordinates and the
+base-yaw-frame racket-target residual. In Isaac, the orientation/angular-velocity/gravity inputs
+come from simulator rigid-body truth plus configured observation noise; this is not an integrated
+IMU drift model. On A3 hardware, those orientation-derived actor terms currently use the pelvis
+IMU, while the external mocap base stream supplies position only at the consumer boundary.
 
 ### Flat racket-command wire
 

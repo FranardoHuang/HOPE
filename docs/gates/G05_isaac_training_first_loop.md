@@ -3826,7 +3826,19 @@ maximum tilt 分别 `0.00983/0.01029 rad`。post-write、step 1/10 与 final PNG
 继续倾倒；首个 raw-reset PNG 是 headless RTX 首次 render 的全黑填充帧，不可判姿态。producer
 现不推进 physics、只丢弃同一 reset 状态的首次 render 后再保存，真实 raw-reset 仍待 Pod 复截。
 
+clean `22890ea2` Pod 复截已让 loop/block 的 `raw_env_reset` 产生可见 PNG；两件原生 reset
+均为直立、双脚着地的动作专属 frame 0，不是歪倒或 failure-buffer 状态。两件 screenshot hold
+再次 `PASS`，receipt SHA-256 为 `e0abbfe6…` / `53e8950c…`，远端 no-clobber 根目录为
+`/workspace/franco/n1dr_nominal_22890ea2_{loop,block}_frames_r1/`。这通过了出生静态 hold，
+尚未证明完整 teacher 动态、policy strike 或 long；G05 继续 `Partial`。
+
 CC 非阻断复核另发现 teacher-rate consumer 的 contact-geometry 属性读取若失败，旧异常处理会
 因局部变量尚未绑定而掩盖根因。绑定已移到 `try` 前，并有回归要求缺失 runtime geometry 时保留
 原始 `AttributeError`；有效 receipt 的计算与判定路径不变，故不需要学习 A/B，仍需 Pod focused
 回归。
+
+teacher-rate focused Pod 回归现为 `3 passed`，其中包括合法 float32 边界、篡改拒绝和缺失
+geometry 时保留原始异常。reset 收据粒度方向也已裁定：完整 JSON/replay/hash-chain 移向
+checkpoint/hourly，热路径保留可 exact-resume 的紧凑事件日志与全部安全/solver/curriculum
+真值；`seed+config` 单独不足以重建历史。实现前先用 segmented profiler 把当前
+`~7.1 ms/env-reset` 上界拆开，再做 fixed-tape、旧收据重建和 exact-resume parity，不做学习 A/B。

@@ -197,6 +197,26 @@ qdes-nonfinite 与 actual-hard term，因此这不是删除桌碰安全真值，
 A/B，不是回归。只有 4096-env healthy baseline 达到至少 `15k environment-steps/s` 且出现
 strike 数据后，才启动 Reward/reference/curriculum 剂量比较。
 
+#### Reset receipt granularity decision
+
+Move the full human-readable receipt/transcript ceremony out of per-reset hot paths after the
+segmented profiler and exact parity checks pass. CC's `(33-4)s / 4100 ≈ 7.1 ms` estimate is an
+upper bound per env-reset, not yet a causal measurement; it also contains other ActionBall work.
+This is a deterministic implementation optimization and does not need a learning A/B.
+
+The replacement must keep a compact, checkpoint-bounded event journal containing at least
+action/env/reset/swing identity, domain epoch/levels, birth↔sample assignment, proposal
+admit/reject and reason, the exact GPU float32 task/solver output, lifecycle/outcome, curriculum
+generation, and every table/fall/actual-hard/nonfinite truth. `seed + config` alone cannot
+reconstruct which env reset when, the policy-caused outcome, or the exact solver task. Launch-time
+motion/manifest/solver/physics/Reward SHA and admission gates remain unchanged; full JSON,
+historical replay, hash-chain sealing and detailed reports move to checkpoint/hourly materialization.
+
+Acceptance is Pod-only: fixed proposal tape task parity, counter/reason parity, old-receipt
+canonical-byte reconstruction from the compact journal, uninterrupted-vs-exact-resume equivalence,
+and segmented reset/throughput timing. Do not implement a hash-only journal or use a live mutable
+GPU view as immutable evidence.
+
 N1 diagnostic launcher 的 budget 名称固定为：
 
 - `smoke`：`1 env × 2 update × save1`；

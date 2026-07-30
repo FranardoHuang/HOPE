@@ -121,6 +121,15 @@ wiring only; the current exact-179 ROS/AimRT first tick and vendor behavior are 
 is used, the HOPE-world → robot-frame target transform still depends on the corrected base pose at
 the interface boundary.
 
+The base flat wire already carries position plus a normalized quaternion, but the current
+`LocMode::kExternalBase` C++ consumer deliberately uses only mocap position and retains the
+yaw-aligned pelvis-IMU quaternion. Therefore a precise venue mocap orientation is presently
+discarded. The preferred successor does not add absolute pose columns to the policy: after measuring
+the rigid marker-cluster→`base_link` transform, use mocap position and calibrated/fused mocap yaw
+for every world↔base-yaw transform, retain IMU roll/pitch and gyro for fast attitude dynamics, and
+derive all existing relative observation terms from that one fused pose. This source change needs
+train/deploy tensor parity and stale/dropout handling, but no observation-width change.
+
 ## Base Link
 
 `base_link` must come from the robot model and SDK. Do not assume the mocap marker cluster equals `base_link` unless the transform has been measured.
