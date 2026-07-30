@@ -255,6 +255,76 @@ def test_per_clip_attribution_uses_prev_clip_id():
     assert cmd._rally_returns_acc_c == {0: 2.0, 1: 1.0}
 
 
+def test_named_n1_updates_its_action_bucket_without_enabling_multiseg():
+    """An explicit one-action name is a telemetry contract even for single-segment Motion."""
+
+    n = 64
+    cmd = _make_rally_cmd(n, multiseg=False)
+    action_id = "bh_loop_c"
+    cmd._metric_buckets_per_clip = True
+    cmd._clip_names = {0: action_id}
+    cmd._metric_bucket_rows_t = None
+    cmd._clip_family_rows_t = torch.tensor([0], dtype=torch.long)
+    cmd._motion().motion = types.SimpleNamespace(num_segments=1)
+    for attr in (
+        "_swing_starts_acc_c",
+        "_prestrike_fall_acc_c",
+        "_poststrike_fall_acc_c",
+        "_rally_starts_acc_c",
+        "_rally_returns_acc_c",
+        "_vb_exact_acc_c",
+        "_vb_inb_acc_c",
+        "_vb_hit_acc_c",
+    ):
+        setattr(cmd, attr, {0: 0.0})
+    cmd.metrics[f"virtual_return_rate_rally_{action_id}"] = torch.zeros(n)
+    # Recreate the sparse ledger after changing the fixture's public bucket schema.
+    if hasattr(cmd, "_sparse_reward_eligibility_counters"):
+        del cmd._sparse_reward_eligibility_counters
+
+    assert cmd._metric_bucket_accounting_enabled()
+    ids = torch.arange(n)
+    cmd._count_swing_starts(ids, count_prestrike_falls=True)
+    legal = torch.arange(n) < 48
+    cmd._vb_book_strike_step(DECAY, legal, legal, legal, legal, legal)
+    cmd._count_swing_starts(ids, count_prestrike_falls=False)
+    cmd._rally_report()
+
+    assert cmd._swing_starts_acc_c == {0: float(2 * n)}
+    assert cmd._rally_starts_acc_c == {0: float(n)}
+    assert cmd._rally_returns_acc_c == {0: 48.0}
+    assert float(cmd.metrics[f"virtual_return_rate_rally_{action_id}"][0]) == pytest.approx(0.75)
+    ledger = cmd._sparse_reward_eligibility_counters
+    assert ledger[f"strike_opportunity_count_{action_id}"].item() == 48
+    assert ledger[f"virtual_capture_count_{action_id}"].item() == 48
+    assert ledger[f"virtual_legal_return_count_{action_id}"].item() == 48
+
+
+def test_unnamed_legacy_n1_keeps_aggregate_only_metric_path():
+    """No explicit name means the historical single-clip suffix behavior stays untouched."""
+
+    cmd = _make_rally_cmd(8, multiseg=False)
+    cmd._metric_buckets_per_clip = False
+    assert not cmd._metric_bucket_accounting_enabled()
+    cmd._count_swing_starts(torch.arange(8), count_prestrike_falls=True)
+    assert cmd._swing_starts_acc == 8.0
+    assert cmd._swing_starts_acc_c == {0: 0.0, 1: 0.0}
+
+
+def test_named_metric_writers_share_one_accounting_predicate():
+    """Source guard: named outcome families must not regress to multiseg-only writer gates."""
+
+    RT = hope_commands_mod.RacketTargetCommand
+    for func in (
+        RT._count_swing_starts,
+        RT._vb_evaluate,
+        RT._book_sparse_reward_eligibility,
+        RT._rally_report,
+        RT._update_metrics,
+    ):
+        assert "_metric_bucket_accounting_enabled" in inspect.getsource(func), func.__qualname__
+
+
 def test_wrap_step_strike_books_to_new_attempt_not_old():
     """Wrap-boundary guard (防御修 2026-07-09): a strike that fires on the SAME step a clip wraps
     (strike phase ~0, or rsi_skip_settle_frames landing on the strike offset) belongs to the swing

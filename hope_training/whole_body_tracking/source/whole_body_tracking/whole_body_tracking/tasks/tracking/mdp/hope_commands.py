@@ -12373,6 +12373,27 @@ class RacketTargetCommand(CommandTerm):
         self._metric_bucket_rows_t = rows
         return rows
 
+    def _metric_bucket_accounting_enabled(self, motion=None) -> bool:
+        """Whether named/family metric buckets must receive events.
+
+        ``MotionCommand._multiseg`` answers a motion-layout question, not a telemetry question.
+        A deliberately single-segment N=1 run still declares ``clip_names_per_clip=(action_id,)``
+        so its public counters are named after that action.  Treating ``_multiseg`` as the writer
+        gate registered those counters but left every one at zero.  Explicit names therefore turn
+        bucket accounting on even when the one loaded clip is not concatenated; an unnamed legacy
+        single-clip run remains on the old aggregate-only path.
+
+        This predicate is telemetry-only.  Sampling, HER replay, motion timing, Reward, PPO and
+        curriculum continue to use their own motion/task predicates.
+        """
+
+        if motion is None:
+            motion = self._motion()
+        return bool(
+            getattr(motion, "_multiseg", False)
+            or getattr(self, "_metric_buckets_per_clip", False)
+        )
+
     def _per_clip_range_rows(self, table: torch.Tensor, cfg_key: str) -> torch.Tensor:
         """把 cfg 的 per-clip 框表对齐成"每个加载 clip 一行"((num_segments, 3, 2),缓存)。
 
@@ -16160,9 +16181,10 @@ class RacketTargetCommand(CommandTerm):
         exact_ledger["swing_start_count"].add_(n)
         self._swing_starts_acc += float(n)
         motion = self._motion()
-        if motion._multiseg:
+        if self._metric_bucket_accounting_enabled(motion):
             # per-族累计(spdmix v2 硬绑定四):桶是正/反手两族。legacy 2-clip 族行号==clip_id
-            # 逐字节不变;6-clip 下正手 1.0/1.2 变体不再被记进"backhand"桶(clip==1 的老病)。
+            # 逐字节不变;6-clip 下正手 1.0/1.2 变体不再被记进"backhand"桶(clip==1 的老病);
+            # 显式命名的 N=1 则把唯一的 clip 0 记进该动作自己的桶。
             fams = self._metric_bucket_rows()[motion.clip_id[env_ids]]
             for c in self._clip_names:
                 self._swing_starts_acc_c[c] += float((fams == c).sum())
@@ -16176,7 +16198,7 @@ class RacketTargetCommand(CommandTerm):
         returned = self._rally_returned[env_ids_t] & ended
         self._rally_starts_acc += float(ended.sum())
         self._rally_returns_acc += float(returned.sum())
-        if motion._multiseg:
+        if self._metric_bucket_accounting_enabled(motion):
             ended_fams = self._metric_bucket_rows()[self._prev_clip_id[env_ids_t]]
             for c in self._clip_names:
                 _csel = ended_fams == c
@@ -16220,7 +16242,7 @@ class RacketTargetCommand(CommandTerm):
             )
             self._prestrike_fall_acc += float(true_pre.sum())
             self._poststrike_fall_acc += float(post.sum())
-            if motion._multiseg:
+            if self._metric_bucket_accounting_enabled(motion):
                 # Attribute the fall to the clip the env was ON when it fell: pre-strike falls to the
                 # _prev_clip_id snapshot (motion already resampled clip_id for the new episode);
                 # post-wrap-hold falls to the latched clip whose swing caused the recovery.
@@ -17041,8 +17063,8 @@ class RacketTargetCommand(CommandTerm):
         # for new/old comparison). Its known disease: >1 spikes under synchronized reset queues.
         # Per-side (forehand/backhand) return rate — 反手先行 judging needs the per-side number.
         _motion = self._motion()
-        _is_multiseg = getattr(_motion, "_multiseg", False)
-        if _is_multiseg:
+        _bucket_metrics = self._metric_bucket_accounting_enabled(_motion)
+        if _bucket_metrics:
             _fam = self._metric_bucket_rows()[_motion.clip_id]
             for _c, _cn in self._clip_names.items():
                 _sel = exact_strike & (_fam == _c)
@@ -17056,7 +17078,7 @@ class RacketTargetCommand(CommandTerm):
         if self.cfg.rally_legacy_metrics:
             _lg_global, _lg_per_clip = self._rally_legacy_values()
             self.metrics["virtual_return_rate_rally_legacy"][:] = _lg_global
-            if _is_multiseg:
+            if _bucket_metrics:
                 for _cn in self._clip_names.values():
                     self.metrics[f"virtual_return_rate_rally_{_cn}_legacy"][:] = _lg_per_clip[_cn]
         self.metrics["virtual_approach_speed"] = torch.where(
@@ -17270,7 +17292,7 @@ class RacketTargetCommand(CommandTerm):
         self._book_exact_timing_bucket_sparse_events(masks)
 
         motion = self._motion()
-        if getattr(motion, "_multiseg", False):
+        if self._metric_bucket_accounting_enabled(motion):
             fam_id = self._metric_bucket_rows()[motion.clip_id]
             for family_row, family in self._clip_names.items():
                 selected = fam_id == family_row
@@ -17787,7 +17809,7 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["virtual_return_rate_rally"][:] = (
             (self._rally_returns_acc / max(self._rally_starts_acc, 1e-6)) if _enough else 0.0
         )
-        if getattr(self._motion(), "_multiseg", False):
+        if self._metric_bucket_accounting_enabled():
             for _c, _cn in self._clip_names.items():
                 _cs = self._rally_starts_acc_c[_c]
                 self.metrics[f"virtual_return_rate_rally_{_cn}"][:] = (
@@ -18022,7 +18044,7 @@ class RacketTargetCommand(CommandTerm):
             (normal_err_rad * exact_strike).sum(),
         ]
         _exact_metric_bucket_order = ()
-        if getattr(motion, "_multiseg", False):
+        if self._metric_bucket_accounting_enabled(motion):
             _exact_metric_bucket_order = tuple(self._clip_names)
             _exact_metric_families = self._metric_bucket_rows()[motion.clip_id]
             for _c in _exact_metric_bucket_order:
@@ -18180,7 +18202,7 @@ class RacketTargetCommand(CommandTerm):
             self.metrics["tracking_loss_rate"][:] = (
                 min(self._tracking_loss_acc / _s_denom, 1.0) if _s_enough else 0.0
             )
-            if getattr(_em, "_multiseg", False):
+            if self._metric_bucket_accounting_enabled(_em):
                 _rfam = self._metric_bucket_rows()[_em.clip_id]
                 for _c, _cn in self._clip_names.items():
                     self._tracking_loss_acc_c[_c] = decay * self._tracking_loss_acc_c[_c] + float(
@@ -18211,12 +18233,14 @@ class RacketTargetCommand(CommandTerm):
         self.metrics["exact_strike_sample_count_decayed"][:] = self._exact_n_acc
         # --- per-clip (forehand/backhand) breakdown of the exact-strike pass rates + errors -----------
         # Same sample-weighted EMA as the global block above, selected by the motion command's clip_id so
-        # wandb shows each swing separately. pass_pos/vel/normal already include `& exact_strike`. Multiseg
-        # (unified forehand+backhand) only; single-clip leaves these at 0.
+        # wandb shows each swing separately. pass_pos/vel/normal already include `& exact_strike`.
+        # Multiseg uses its family/per-action buckets; an explicitly named N=1 uses its sole action
+        # bucket.  Only an unnamed legacy single-clip run leaves these at 0.
         _motion = self._motion()
-        if getattr(_motion, "_multiseg", False):
+        if self._metric_bucket_accounting_enabled(_motion):
             # 按族分桶(legacy 2-clip 族行号==clip_id 逐字节不变;6-clip 下"forehand"桶=正手
-            # 三档合计,"backhand"桶=反手三档合计,不再把正手 1.0 档记成反手)。
+            # 三档合计,"backhand"桶=反手三档合计,不再把正手 1.0 档记成反手);
+            # 显式命名 N=1 的唯一行就是 action_id 自己。
             _fam = self._metric_bucket_rows()[_motion.clip_id]
             for _c, _cn in self._clip_names.items():
                 (
@@ -18270,7 +18294,12 @@ class RacketTargetCommand(CommandTerm):
             # (pos env-origin-relative, vel world). Alive envs only by construction: terminated envs
             # were reset before the command computes, so their state never lands here. Gated on the mix
             # prob so the buffers cost nothing when replay is off.
-            if self.cfg.achieved_target_mix_prob > 0.0:
+            # This is a sampler/replay mutation, not telemetry.  Preserve the historical
+            # multisegment-only HER contract even though named N=1 metric accounting is now live.
+            if (
+                getattr(_motion, "_multiseg", False)
+                and self.cfg.achieved_target_mix_prob > 0.0
+            ):
                 for _c in self._clip_names:
                     _bidx = torch.where(exact_strike & (_fam == _c))[0]
                     _m = int(_bidx.numel())
