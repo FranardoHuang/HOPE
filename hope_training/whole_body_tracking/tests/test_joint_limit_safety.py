@@ -148,7 +148,9 @@ def _finish_guarded_policy_step(action, asset):
 
 
 def _two_step_cross_reset_action_ball_ledger(
-    *, policy_horizon_only_crossing: bool = False
+    *,
+    policy_horizon_only_crossing: bool = False,
+    reset_after_safe_step: bool = False,
 ):
     action, env, asset = _action_and_env(
         guard=True,
@@ -201,9 +203,15 @@ def _two_step_cross_reset_action_ball_ledger(
         asset.data.joint_vel[0, 0] = 11.0
     action.process_actions(torch.zeros(2, 2))
     _finish_guarded_policy_step(action, asset)
+    if reset_after_safe_step:
+        asset.data.joint_pos.zero_()
+        asset.data.joint_vel.zero_()
+        env.episode_length_buf += 1
+        action.process_actions(torch.zeros(2, 2))
+        _finish_guarded_policy_step(action, asset)
     env.reset_terminated = torch.tensor([True, False])
     env.reset_time_outs = torch.tensor([False, False])
-    env.episode_length_buf[0] = 42
+    env.episode_length_buf[0] = 43 if reset_after_safe_step else 42
     action.reset(env_ids=torch.tensor([0]))
 
     # The next policy step belongs to a new immutable birth for env 0.  Env 1 stays on the exact
@@ -215,7 +223,9 @@ def _two_step_cross_reset_action_ball_ledger(
     if policy_horizon_only_crossing:
         asset.data.joint_pos.zero_()
         asset.data.joint_vel.zero_()
-    env.episode_length_buf[:] = torch.tensor([0, 18])
+    env.episode_length_buf[:] = torch.tensor(
+        [0, 19 if reset_after_safe_step else 18]
+    )
     action.process_actions(torch.zeros(2, 2))
     _finish_guarded_policy_step(action, asset)
     return action, env
@@ -1434,6 +1444,31 @@ def test_runner_validates_crossing_over_the_full_policy_guard_horizon(
     )
     assert transcript["hard_crossing"][0, 0].item()
 
+    validated = runner._validate_joint_safety_update_snapshot(
+        snapshot, step=0, contract=contract
+    )
+    assert validated["archive_count"] == 1
+
+
+def test_runner_distinguishes_episode_sticky_counts_from_current_transcript(
+    monkeypatch,
+):
+    runner_mod = _load_runner_module(monkeypatch, _load_contract_module())
+    action, env = _two_step_cross_reset_action_ball_ledger(
+        policy_horizon_only_crossing=True,
+        reset_after_safe_step=True,
+    )
+    _, snapshot = action.prepare_joint_safety_ledger_consume()
+    transcript = snapshot["terminal_archives"][0]["transcript"]
+    assert not transcript["hard_crossing"].any().item()
+    assert transcript["substep_crossing_joint_count"][0].item() > 0
+
+    runner = runner_mod.MotionOnPolicyRunner.__new__(
+        runner_mod.MotionOnPolicyRunner
+    )
+    runner.env = types.SimpleNamespace(unwrapped=env)
+    runner.num_steps_per_env = 3
+    contract = runner._joint_safety_runtime_contract(action)
     validated = runner._validate_joint_safety_update_snapshot(
         snapshot, step=0, contract=contract
     )

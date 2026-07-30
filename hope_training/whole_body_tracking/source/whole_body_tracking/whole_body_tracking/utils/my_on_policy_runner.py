@@ -4732,22 +4732,30 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         transcript_actual_count = bool_fields["actual_hard_edge"].sum(
             dim=0, dtype=torch.long
         )
+        # The transcript is one policy step, while these action-term counters
+        # and latches are intentionally episode-sticky until reset.  The
+        # current-step counts must be a subset of the cumulative episode
+        # counts; exact current-step equality is checked against ``row`` below.
         if (
-            not torch.equal(
-                joint_counts["substep_crossing_joint_count"],
-                transcript_crossing_count,
+            bool(
+                torch.any(
+                    transcript_crossing_count
+                    > joint_counts["substep_crossing_joint_count"]
+                ).item()
             )
-            or not torch.equal(
-                joint_counts["substep_actual_joint_count"],
-                transcript_actual_count,
+            or bool(
+                torch.any(
+                    transcript_actual_count
+                    > joint_counts["substep_actual_joint_count"]
+                ).item()
             )
             or not torch.equal(
                 joint_bools["substep_crossing_joint_latch"],
-                transcript_crossing_count.gt(0),
+                joint_counts["substep_crossing_joint_count"].gt(0),
             )
             or not torch.equal(
                 joint_bools["substep_actual_joint_latch"],
-                transcript_actual_count.gt(0),
+                joint_counts["substep_actual_joint_count"].gt(0),
             )
         ):
             raise RuntimeError(
@@ -4761,8 +4769,8 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             or not torch.equal(
                 joint_bools["crossing_joint_latch"],
                 joint_counts["crossing_joint_count"].gt(0)
-                | transcript_crossing_count.gt(0)
-                | transcript_actual_count.gt(0),
+                | joint_counts["substep_crossing_joint_count"].gt(0)
+                | joint_counts["substep_actual_joint_count"].gt(0),
             )
             or bool(qdes_env_latch.item())
             != bool(torch.any(joint_bools["qdes_joint_latch"]).item())
