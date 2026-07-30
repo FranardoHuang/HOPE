@@ -11,10 +11,10 @@ but it still has no production arbitrary-N flat wire or C++ observation consumer
 historical `action_ball_table_pose_twist_n<N>` added table-relative base 6-DoF context and
 three-axis root-COM linear velocity, but left racket velocity/normal in world coordinates while
 position was heading-relative. The running N1 diagnostic uses the versioned,
-frame-consistent `action_ball_table_pose_twist_heading_task_n<N>` successor. Fresh launches use
-`action_ball_table_pose_twist_heading_task_teacher_start_n<N>` and additionally expose the exact
-Motion phase-governor countdown. Its source contract is implemented, but a fresh 195-D N1
-checkpoint and deploy-consumer parity are not yet evidence.
+frame-consistent `action_ball_table_pose_twist_heading_task_n<N>` successor. Fresh N1 launches use
+fixed-194 `action_ball_table_pose_twist_heading_task_teacher_start_v2`: the former constant
+one-hot slot is replaced by the exact Motion phase-governor countdown. Its source contract is
+implemented, but a fresh v2 checkpoint and deploy-consumer parity are not yet evidence.
 
 ## HITTER-Compatible Contract
 
@@ -124,7 +124,8 @@ same policy tick. Timestamp-compensation pairs with positive delay are `NO-LAUNC
 | `190+N` | `action_ball_table_pose_n<N>` | `hitter_footwork(177)` + `base_position_table(3)` + `base_orientation_table_6d(6)` + demanded signed face / reserved spin `(4)` + `action_one_hot(N)`。当前 N=1 总宽度为 `191`。 | Feature-branch Isaac source candidate；Pod evidence 未完成，production arbitrary-N/191-D flat wire 与 C++ consumer 均不存在。 |
 | `193+N` | `action_ball_table_pose_twist_n<N>` | 历史 194-D 候选；position residual 在 heading frame，但 velocity/normal 仍在 world frame。 | 只作旧 checkpoint/诊断兼容，不得用于 fresh launch。 |
 | `193+N` | `action_ball_table_pose_twist_heading_task_n<N>` | table pose/twist 与上一行同宽；racket position residual、demanded velocity、raw-A normal 全部统一到 yaw-heading frame。 | Pod N1 `1×2/4096×5` 已过且 1000-update 正在运行；production arbitrary-N flat wire、C++/MuJoCo consumer 与真实速度估计器尚未闭合。 |
-| `194+N` | `action_ball_table_pose_twist_heading_task_teacher_start_n<N>` | 上一行后在 final one-hot 前显式加入 teacher-start 倒计时；N1=195-D。 | fresh launch 首选；旧 194-D run 不重标、不 exact resume。仍须 Pod 195-D 构造 smoke，production consumer 未闭合。 |
+| 194 | `action_ball_table_pose_twist_heading_task_teacher_start_v2` | frame-consistent table pose/twist/task 后显式加入 `time_to_teacher_start_s(1)`，不再把 `action_one_hot`/UID/slot 喂给 actor。 | fresh N1 首选；旧同宽 194-D 与历史 195-D 都不重标、不 exact resume。formal N5/N73 先加固定宽 continuous future-motion intent；仍须 Pod 194-D v2 构造 smoke，production consumer 未闭合。 |
+| `194+N` | `action_ball_table_pose_twist_heading_task_teacher_start_n<N>` | 历史 teacher-start + final N-wide one-hot 合同；N1=195-D。 | 只保留旧 checkpoint/receipt/schema 解析，不再用于 fresh ActionBall launch。 |
 | 110 | `hitter_pure` | HITTER Table-I style: 99-D proprio prefix + base forward(2), station delta(2), racket target rel base(3), target velocity(3), tts(1); no reference command or swing flag. | Supported; requires fresh localization and metadata-bound per-side station geometry. |
 
 Do not infer a contract from width alone. Formal consumers require the registered name, mode,
@@ -184,13 +185,14 @@ base_position_table(3),
 base_orientation_table_6d(6),
 base_lin_vel_heading(3),
 racket_target_normal_cmd_heading(4),
-action_one_hot(1)
+time_to_teacher_start_s(1)
 ```
 
 The first twelve terms retain the 177-D HITTER-footwork shape, but the versioned contract replaces
 the historical world-frame velocity slot with `racket_target_vel_heading` without moving its
-offset. The general width remains `177 + 3 + 6 + 3 + 4 + N = 193 + N`; therefore N=1 is exactly
-`194`.
+offset. The fresh v2 tail replaces the old constant `action_one_hot(1)` with
+`time_to_teacher_start_s(1)`, so N1 remains exactly `194` dimensions even though the semantic
+contract changes.
 `base_position_table` is the current root XYZ in the table-surface-center frame, not an arbitrary
 venue-world coordinate. `base_orientation_table_6d` is the full table-to-base rotation
 `R_table_base`, encoded from its first two columns in row-major tensor order:
@@ -246,21 +248,23 @@ calibrated OptiTrack owns table-relative position, full orientation and projecte
 the pelvis IMU three-axis gyroscope owns `base_ang_vel`; and the causal fused estimator owns
 `base_lin_vel_heading`. `motion_anchor_ori_b` combines OptiTrack base orientation with
 joint-encoder FK. The current C++ deploy builder cannot construct either the compatibility 194-D
-layout or the preferred 195-D N1 / arbitrary-N successor observations,
+layout or the fresh fixed-width 194-D v2 successor observations,
 and the marker-cluster rotational extrinsic, estimator delay/dropout and frame parity are not yet
 closed, so this training contract does not authorize a real-robot run.
 
 The first N1 wave intentionally remains single-frame. A frame-history ring is stateful at the
 environment level and changes reset/exact-resume semantics; it is not a free 72-column append.
 
-### Preferred ActionBall teacher-start successor: exact `194+N`
+### Fresh N1 ActionBall teacher-start successor: exact fixed 194-D
 
 Fresh launches after this interface cut use
-`action_ball_table_pose_twist_heading_task_teacher_start_n<N>`. It inserts
-`time_to_teacher_start_s(1)` after `racket_target_normal_cmd_heading(4)` and before the final
-`action_one_hot(N)`. The general width is `194+N`; N1 is 195-D, N5 is 199-D and N73 is 267-D.
-The predecessor remains readable but is not silently warm-started because the one-hot offsets and
-training-contract identity changed.
+`action_ball_table_pose_twist_heading_task_teacher_start_v2`. It replaces the N1 predecessor's
+constant `action_one_hot(1)` tail with `time_to_teacher_start_s(1)`, so the width remains 194-D
+while term identity changes. N-wide one-hot does not encode motion similarity and changes network
+width with the bank size, so fresh ActionBall no longer attaches it. UID/slot remains mandatory in
+the control plane. Multi-action formal training is blocked until a new, fixed-width
+content-derived future-motion intent contract is installed; v2 must not be used to make
+shared-ready N5/N73 partially observable.
 
 `time_to_teacher_start_s` is the live Motion phase-governor clock:
 
@@ -277,13 +281,13 @@ from TTS, target-speed magnitude and action constants, making it explicit avoids
 learn a norm, division and per-action lookup. Existing live 194-D runs keep their exact old bytes
 and are not relabelled.
 
-The new 195-D N1 contract still excludes localization freshness because the current OptiTrack
+The new fixed-194 v2 N1 contract still excludes localization freshness because the current OptiTrack
 dropout/latency distribution has not yet been measured. A deployment-intent successor should add
 at least `base_localization_age_s(1)` and `base_localization_valid(1)` in one versioned,
 warm-start-breaking migration after the live producer uses capture/Motive timestamps. Held poses
 must retain increasing age and must never be converted into zero velocity merely because no new
-sample arrived. Adding those two fields makes the general width `196+N` and N1 197-D; neither the
-194-D nor 195-D checkpoints may be reused as exact resume. Mocap coordinate conversion, filtering,
+sample arrived. Adding those two fields would make the N1 contract 196-D; neither historical nor
+current 194-D/195-D checkpoints may be reused as exact resume. Mocap coordinate conversion, filtering,
 timestamp alignment, sensor fusion, dropout admission and hard-stale stopping remain outside the
 policy. The actor sees age/valid only when the supervisor intentionally permits a short hold-last
 interval; if the supervisor instead guarantees fresh localization on every control tick and stops
@@ -615,13 +619,13 @@ What the real system can observe (team contract, 2026-07):
 
 Rules: actor observations must be built only from deploy-available signals; rewards run in sim
 only and may use privileged state; the critic may be privileged. The current 175-D actor uses only
-robot-side signals + planner targets (no mocap terms at all). The preferred frame-consistent
-`action_ball_table_pose_twist_heading_task_teacher_start_n<N>` successor deliberately consumes
+robot-side signals + planner targets (no mocap terms at all). The fresh frame-consistent
+`action_ball_table_pose_twist_heading_task_teacher_start_v2` successor deliberately consumes
 calibrated mocap base pose plus a causal base linear-velocity estimate and the same Motion phase
 clock that governs teacher playback: absolute-with-respect-to-table context is required alongside
 robot-relative tasks. Training must use the simulator's exact counterpart of those same terms.
 Deployment must close mocap marker→base and venue→table SE(3), gyro extrinsic,
-velocity-estimator noise/latency/stale/dropout and `194+N` C++ builder parity first;
+velocity-estimator noise/latency/stale/dropout and fixed-194 v2 C++ builder parity first;
 until then it remains simulator-only (see G07 Next Steps).
 
 ## Table-Tennis Physics Scene Observation (experimental)

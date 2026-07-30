@@ -124,6 +124,8 @@ NOSITE_BOOTSTRAP_SOURCE = (
 )
 ACTION_SET_CONTRACTS_NAME = "ACTION_SET_CONTRACTS"
 ACTION_SET_PROFILE_POLICIES_NAME = "ACTION_SET_PROFILE_POLICIES"
+ACTION_SET_ACTOR_OBS_CONTRACT_NAME = "ACTOR_OBS_CONTRACT"
+ACTION_SET_ACTOR_OBS_WIDTH_NAME = "ACTOR_OBS_WIDTH"
 PROMOTION_TRUST_NAME = "TRUSTED_BANK_PROMOTION_CERTIFICATE_SHA256"
 EVALUATOR_TRUST_NAME = (
     "TRUSTED_FROZEN_EVALUATOR_V4_LAUNCH_RECEIPT_SHA256"
@@ -981,8 +983,21 @@ def _load_action_set_contract(
     )
     registry = _literal_assignment(source, ACTION_SET_CONTRACTS_NAME)
     policies = _literal_assignment(source, ACTION_SET_PROFILE_POLICIES_NAME)
+    actor_obs_contract = _literal_assignment(
+        source, ACTION_SET_ACTOR_OBS_CONTRACT_NAME
+    )
+    actor_obs_width = _literal_assignment(
+        source, ACTION_SET_ACTOR_OBS_WIDTH_NAME
+    )
     if type(registry) is not dict or type(policies) is not dict:
         raise LaunchRefused("action-set contract registry/policies must be dicts")
+    if type(actor_obs_contract) is not str or not actor_obs_contract:
+        raise LaunchRefused("action-set actor observation contract is invalid")
+    actor_obs_width = _plain_int(
+        actor_obs_width,
+        name="action-set actor observation width",
+        minimum=1,
+    )
     if profile_id not in registry:
         raise LaunchRefused(
             f"unregistered action-set contract profile: {profile_id}"
@@ -1008,6 +1023,11 @@ def _load_action_set_contract(
     expected_n = _plain_int(
         row["expected_n"], name="action-set contract expected_n", minimum=1
     )
+    if actor_obs_contract.endswith("_v2") and expected_n != 1:
+        raise LaunchRefused(
+            "fixed-194 ActionBall v2 is N=1-only; formal multi-action "
+            "launch requires a fixed-width content-derived future-motion intent"
+        )
     order = row["ordered_action_ids"]
     uids = row["ordered_action_uids"]
     if (
@@ -1107,11 +1127,8 @@ def _load_action_set_contract(
         "manifest_path": manifest_path,
         "manifest_sha256": manifest_sha,
         "experiment_name": experiment_name,
-        "actor_obs_contract": (
-            "action_ball_table_pose_twist_heading_task_teacher_start_n"
-            f"{expected_n}"
-        ),
-        "actor_obs_width": 194 + expected_n,
+        "actor_obs_contract": actor_obs_contract,
+        "actor_obs_width": actor_obs_width,
         "namespace_identity": f"n{expected_n}-{digest[:12]}",
     }
     identity["contract_sha256"] = canonical_sha256(identity)

@@ -28,10 +28,10 @@ PROFILE_POLICY_VARIABLE = "ACTION_SET_PROFILE_POLICIES"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 SAFE_PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 SAFE_EXPERIMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
-ACTOR_OBS_CONTRACT_PREFIX = (
-    "action_ball_table_pose_twist_heading_task_teacher_start_n"
+ACTOR_OBS_CONTRACT = (
+    "action_ball_table_pose_twist_heading_task_teacher_start_v2"
 )
-ACTOR_OBS_BASE_WIDTH = 194
+ACTOR_OBS_WIDTH = 194
 
 CONTRACT_KEYS = frozenset(
     {
@@ -250,6 +250,11 @@ def validate_contract(
     expected_n = value["expected_n"]
     if type(expected_n) is not int or isinstance(expected_n, bool) or expected_n < 1:
         raise ActionSetContractError("action-set expected_n is invalid")
+    if ACTOR_OBS_CONTRACT.endswith("_v2") and expected_n != 1:
+        raise ActionSetContractError(
+            "fixed-194 ActionBall v2 is N=1-only; multi-action contracts "
+            "require a fixed-width content-derived future-motion intent"
+        )
     action_ids = value["ordered_action_ids"]
     action_uids = value["ordered_action_uids"]
     if (
@@ -332,10 +337,8 @@ def validate_contract(
         "schema_version": SCHEMA_VERSION,
         "kind": CONTRACT_KIND,
         **base,
-        "actor_obs_contract": "{}{}".format(
-            ACTOR_OBS_CONTRACT_PREFIX, expected_n
-        ),
-        "actor_obs_width": ACTOR_OBS_BASE_WIDTH + expected_n,
+        "actor_obs_contract": ACTOR_OBS_CONTRACT,
+        "actor_obs_width": ACTOR_OBS_WIDTH,
         "namespace_identity": "n{}-{}".format(expected_n, digest[:12]),
     }
     identity["contract_sha256"] = canonical_sha256(identity)

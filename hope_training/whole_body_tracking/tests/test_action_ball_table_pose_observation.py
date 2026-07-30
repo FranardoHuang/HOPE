@@ -352,7 +352,7 @@ def test_teacher_start_producer_keeps_exact_seconds_and_column_shape():
     assert torch.equal(actual[:, 0], remaining)
 
 
-def test_train_inserts_table_pose_twist_before_face_and_action():
+def test_train_builds_only_the_fixed_v2_tail_without_action_identity():
     source = TRAIN_PATH.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(TRAIN_PATH))
     finalizer = next(
@@ -363,15 +363,8 @@ def test_train_inserts_table_pose_twist_before_face_and_action():
     )
     segment = ast.get_source_segment(source, finalizer)
     assert segment is not None
-    assert 'f"action_ball_n{action_count}"' in segment
-    assert 'f"action_ball_table_pose_n{action_count}"' in segment
-    assert 'f"action_ball_table_pose_twist_n{action_count}"' in segment
     assert (
-        '"action_ball_table_pose_twist_heading_task_n"'
-        in segment
-    )
-    assert (
-        '"action_ball_table_pose_twist_heading_task_teacher_start_n"'
+        '"action_ball_table_pose_twist_heading_task_teacher_start_v2"'
         in segment
     )
     assert (
@@ -380,12 +373,11 @@ def test_train_inserts_table_pose_twist_before_face_and_action():
         < segment.index("policy.base_lin_vel_heading =")
         < segment.index("normal_term_name =")
         < segment.index("policy.time_to_teacher_start_s =")
-        < segment.index("policy.action_one_hot =")
     )
+    assert "action_identity(policy-observation omitted)" in segment
+    assert "policy.action_one_hot =" not in segment
+    assert "include_action_one_hot" not in segment
     assert "if include_table_pose:" in segment
     assert "if include_base_twist:" in segment
-    assert (
-        "configured_actor_contract"
-        in segment
-        and "table_pose_twist_heading_task_actor_contract" in segment
-    )
+    assert "configured_actor_contract != fixed_teacher_start_actor_contract" in segment
+    assert "cannot be instantiated by the current trainer" in segment

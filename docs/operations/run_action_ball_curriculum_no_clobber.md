@@ -60,12 +60,12 @@ argv。数量、顺序、stable action UID、motion bytes 或 family 任一漂�
 `fh_block_syn` 不属于这次 fresh N5。
 
 动作、UID、球/物理/solver pins 的完整含义见
-[`action-ball manifest`](../DEFINITIONS.md#action-ball-manifest)；actor 形状必须是
-[`action_ball_table_pose_twist_heading_task_teacher_start_n5`](../DEFINITIONS.md#action-ball-teacher-start-contract)
-（frame 一致的相对击球 task + 绝对桌体 pose/twist + 老师开始倒计时，总宽 199），不能把旧
-`action_ball_n5`、混合 frame 的同宽 checkpoint、其他 N 的 checkpoint 或动作列表续成 N5。
-已在跑的 `action_ball_table_pose_twist_heading_task_n5`（198-D）仍按原字节解释，但不能
-exact-resume 或重命名成 fresh 199-D 合同。
+[`action-ball manifest`](../DEFINITIONS.md#action-ball-manifest)。formal N5 当前
+**fail-closed**：fresh N1 的 fixed-194 v2 没有 future-action intent，不能直接用于 shared-ready
+多动作；历史 `...teacher_start_n5` 的 N-wide one-hot 也已退役，不得恢复。正式发射前须先注册
+固定宽、由 reference 内容生成并同时供 actor/critic 使用的 continuous future-motion intent
+合同，完成 shared-ready 混叠检查与 Pod 构造 parity。旧 `action_ball_n5`、混合 frame
+checkpoint、其他 N 的 checkpoint 或只换动作列表的续跑都不允许。
 
 ## V3 spec：字段必须恰好一致
 

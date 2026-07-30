@@ -99,26 +99,35 @@ def _case(n):
     return profile_id, row, policies, manifest, manifest_bytes
 
 
-@pytest.mark.parametrize("n", [1, 5, 73])
-def test_n1_n5_n73_registered_contract_is_exact(n):
-    profile_id, row, policies, manifest, manifest_bytes = _case(n)
+def test_n1_registered_contract_is_exact():
+    profile_id, row, policies, manifest, manifest_bytes = _case(1)
     contract = M.load_contract_from_source(
         _source(profile_id, row, policies), profile_id
     )
-    assert contract["expected_n"] == n
+    assert contract["expected_n"] == 1
     assert contract["actor_obs_contract"] == (
-        "action_ball_table_pose_twist_heading_task_teacher_start_n{}".format(
-            n
-        )
+        "action_ball_table_pose_twist_heading_task_teacher_start_v2"
     )
-    assert contract["actor_obs_width"] == 194 + n
+    assert contract["actor_obs_width"] == 194
     assert contract["namespace_identity"] == "n{}-{}".format(
-        n, row["order_uid_digest_sha256"][:12]
+        1, row["order_uid_digest_sha256"][:12]
     )
     assert contract["contract_sha256"] == M.canonical_sha256(
         {key: value for key, value in contract.items() if key != "contract_sha256"}
     )
     M.verify_manifest_identity(contract, manifest, manifest_bytes)
+
+
+@pytest.mark.parametrize("n", [5, 73])
+def test_fixed_v2_rejects_multi_action_contracts_until_motion_intent_exists(n):
+    profile_id, row, policies, _manifest, _manifest_bytes = _case(n)
+    with pytest.raises(
+        M.ActionSetContractError,
+        match="fixed-194 ActionBall v2 is N=1-only",
+    ):
+        M.load_contract_from_source(
+            _source(profile_id, row, policies), profile_id
+        )
 
 
 def test_unregistered_profile_cannot_be_self_certified():
@@ -133,27 +142,33 @@ def test_unregistered_profile_cannot_be_self_certified():
     "mutation",
     [
         "digest",
-        "uid_order",
+        "uid_count",
         "manifest_sha",
         "actor_count",
     ],
 )
 def test_contract_identity_tamper_is_rejected(mutation):
-    profile_id, row, policies, _manifest, _bytes = _case(73)
+    profile_id, row, policies, _manifest, _bytes = _case(1)
     row = dict(row)
     if mutation == "digest":
         row["order_uid_digest_sha256"] = "0" * 64
-    elif mutation == "uid_order":
-        row["ordered_action_uids"] = list(reversed(row["ordered_action_uids"]))
+    elif mutation == "uid_count":
+        row["ordered_action_uids"] = [10000, 10001]
     elif mutation == "manifest_sha":
         row["manifest_sha256"] = "not-a-sha"
     else:
-        row["expected_n"] = 72
+        row["expected_n"] = 2
     with pytest.raises(M.ActionSetContractError):
         M.load_contract_from_source(_source(profile_id, row, policies), profile_id)
 
 
-def test_n5_retired_action_policy_is_profile_specific():
+def test_n5_retired_action_policy_is_profile_specific(monkeypatch):
+    monkeypatch.setattr(
+        M,
+        "ACTOR_OBS_CONTRACT",
+        "action_ball_table_pose_twist_heading_task_teacher_start_n5",
+    )
+    monkeypatch.setattr(M, "ACTOR_OBS_WIDTH", 199)
     profile_id, row, policies, _manifest, _bytes = _case(5)
     row = dict(row)
     order = list(row["ordered_action_ids"])
@@ -169,7 +184,13 @@ def test_n5_retired_action_policy_is_profile_specific():
         M.load_contract_from_source(_source(profile_id, row, policies), profile_id)
 
 
-def test_manifest_reorder_or_uid_drift_is_rejected():
+def test_manifest_reorder_or_uid_drift_is_rejected(monkeypatch):
+    monkeypatch.setattr(
+        M,
+        "ACTOR_OBS_CONTRACT",
+        "action_ball_table_pose_twist_heading_task_teacher_start_n73",
+    )
+    monkeypatch.setattr(M, "ACTOR_OBS_WIDTH", 267)
     profile_id, row, policies, manifest, manifest_bytes = _case(73)
     contract = M.load_contract_from_source(
         _source(profile_id, row, policies), profile_id

@@ -508,7 +508,7 @@ def action_ball_table_pose_twist_heading_task_n_contract(
 def action_ball_table_pose_twist_heading_task_teacher_start_n_contract(
     action_count: int,
 ) -> ActorObservationContract:
-    """Append the explicit teacher-start clock to the frame-consistent layout.
+    """Historical N-dependent teacher-start layout with categorical identity.
 
     The new scalar is inserted immediately before the final action one-hot so
     the categorical identity remains the final ``N`` columns.  This is a fresh
@@ -534,6 +534,40 @@ def action_ball_table_pose_twist_heading_task_teacher_start_n_contract(
                 "leaves its ready frame",
             ),
             base.terms[-1],
+        ),
+    )
+
+
+def action_ball_table_pose_twist_heading_task_teacher_start_v2_contract(
+) -> ActorObservationContract:
+    """Build the fixed-width ActionBall layout without a categorical action ID.
+
+    Action identity remains frozen and audited in the sampler/solver/runtime
+    control plane, but it is not an actor observation.  The policy therefore
+    sees the same 194-D tensor shape for every action-bank size instead of an
+    N-wide slot code that has no motion-similarity geometry.  Multi-action
+    training must add a separately versioned, content-derived future-motion
+    intent before it is admitted; this contract is the N=1 launch contract.
+    """
+
+    historical = (
+        action_ball_table_pose_twist_heading_task_n_contract(1)
+    )
+    return ActorObservationContract(
+        name=(
+            "action_ball_table_pose_twist_heading_task_teacher_start_v2"
+        ),
+        obs_mode=historical.obs_mode,
+        total_dim=194,
+        terms=historical.terms[:-1]
+        + (
+            ActorObservationTerm(
+                "time_to_teacher_start_s",
+                1,
+                "action_ball_motion_phase_governor",
+                "live seconds until the frozen selected action's teacher "
+                "leaves its ready frame",
+            ),
         ),
     )
 
@@ -628,6 +662,9 @@ CONTRACTS = {
     DEPLOY_PARITY.obs_mode: DEPLOY_PARITY,
     HITTER_FOOTWORK.obs_mode: HITTER_FOOTWORK,
     HITTER_PURE.obs_mode: HITTER_PURE,
+    (
+        "action_ball_table_pose_twist_heading_task_teacher_start_v2"
+    ): action_ball_table_pose_twist_heading_task_teacher_start_v2_contract(),
     **{alias: DEPLOY_PARITY for alias in DEPLOY_PARITY.legacy_names},
 }
 
@@ -712,6 +749,7 @@ def resolve_actor_observation_contract(name: str | None) -> ActorObservationCont
         raise ValueError(
             f"Unknown actor observation contract '{name}'. Known values: {known}, "
             "task_first_n<N>, action_ball_n<N>, "
+            "action_ball_table_pose_twist_heading_task_teacher_start_v2, "
             "action_ball_table_pose_twist_heading_task_teacher_start_n<N>, "
             "action_ball_table_pose_twist_heading_task_n<N>, "
             "action_ball_table_pose_n<N>, "
@@ -750,6 +788,7 @@ def infer_actor_observation_contract(env) -> ActorObservationContract | None:
         DEPLOY_PARITY_FACE179,
         DEPLOY_PARITY_STATION181,
         HITTER_PURE,
+        action_ball_table_pose_twist_heading_task_teacher_start_v2_contract(),
     ):
         if layout == contract.layout and total_dim == contract.total_dim:
             return contract

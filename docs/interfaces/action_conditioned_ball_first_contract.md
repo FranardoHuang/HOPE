@@ -53,10 +53,17 @@ manifest loader 可校验 repo 内 regular-file bytes、拒绝 symlink escape，
 逐项交叉绑定 ordered motion bytes、upper/full scope、shared-ready、evidence chain 和 promotion
 certificate。metadata、文件存在、diagnostic PASS 或手写布尔值都不能 mint capability。
 
-actor action one-hot、motion loader slot、manifest order 和 checkpoint contract 必须完全一致。
-跨版本身份用 stable action UID；dense slot 只用于当前数组索引。
+stable action UID、motion loader slot、manifest order 和 checkpoint control-plane contract
+必须完全一致。dense slot 只用于当前数组索引；UID/slot 都不得作为 fresh actor 的 categorical
+observation。fresh N1 actor 使用固定 194-D
+`action_ball_table_pose_twist_heading_task_teacher_start_v2`，把旧 N1 的常量 one-hot 槽替换为
+`time_to_teacher_start_s`。旧 N-dependent one-hot 合同只允许历史 checkpoint/receipt 解析。
 
-当前 fresh upper/no-move N5 训练 view 的 exact ordered action ID 是：
+N5/N73 不能简单删掉 one-hot 后共用 N1 v2：shared-ready 会使不同 teacher intent 在同一 actor
+输入下发生 observation aliasing。正式多动作训练必须先冻结一份固定宽、由动作内容导出的
+continuous future-motion intent/preview 合同；在此之前 fail closed。
+
+候选 upper/no-move N5 control-plane view 的 exact ordered action ID 是：
 
 ```text
 bh_loop_c
@@ -66,9 +73,10 @@ s0_highpress
 fh_loop_high
 ```
 
-旧 `fh_loop` 与 `fh_block_syn` 只保留为编译 provenance，禁止进入这份 N5 view、actor one-hot、
-motion loader、profile、考卷或 checkpoint。N5 的通过条件只由这五件和本次 N5 运行规模决定；
-尚不存在的 N93 合同、资产或压力测试不得反向阻塞 N5。
+旧 `fh_loop` 与 `fh_block_syn` 只保留为编译 provenance，禁止进入这份 N5 view、motion loader、
+profile、考卷或 checkpoint。该 ordered view 仍只属于控制面，不授权 actor launch；N5 的通过条件
+只由这五件、本次 N5 运行规模和已冻结的 continuous future-motion intent 决定。尚不存在的 N73
+合同、资产或压力测试不得反向阻塞 N5 自己的准备工作。
 
 ## 3. 每动作采样域
 
@@ -352,7 +360,7 @@ load 只恢复数据，不采样、不写 simulator。curriculum 的 phase/front
 JSON digest。恢复后的中途 active attempt 必须显式记为 infrastructure invalid 或按预注册规则
 作废，再由首次 true reset 创建新 generation；不能悄悄丢掉。
 
-runtime 不得为了防伪永久复制全部 retired full task receipt；N93/4096 环境会让 checkpoint 线性膨胀
+runtime 不得为了防伪永久复制全部 retired full task receipt；N73/4096 环境会让 checkpoint 线性膨胀
 到不可训练。实测 sampler 在 `4096 birth + 4096 sample` 时已有 `6,070,936 B` JSON，按 100 轮
 线性外推约 `607 MB`，还没有计算 broker/pool/provider/Racket 的重复历史。issued task 必须可由
 sampler + fixed solver 确定性批量重放，生命周期用完整连续索引覆盖和 compact 状态 ledger
@@ -365,7 +373,7 @@ append-only segment head。sampler、broker、pool、provider 和 Racket 任一�
 整次 compaction 回滚。不能只做 JSON 压缩/RLE 后继续永久保存全部行，也不能让某组件先删历史。
 正式开跑前须按**本次 exact manifest 的 N、环境数 E 和预注册轮数 R**完成真实分批增长、压缩、
 保存/加载、roundtrip、篡改负例、峰值内存和时延硬门。fresh N5 只消费 N5 对应的
-`N=5 × E × R` 压力凭据；N93 的 `N=93 × E × R` 压力门只约束真正的 N93 发射，不得拿 N93
+`N=5 × E × R` 压力凭据；N73 的 `N=73 × E × R` 压力门只约束真正的 N73 发射，不得拿 N73
 缺资产或未压测阻断 N5。checkpoint 及 formal resume receipt 都绑定最终 segment head。
 
 内部 hash/replay 只能证明各组件对同一状态的 cross-view consistency，并防部分丢字段、rollback、
@@ -389,7 +397,8 @@ identity。planner 对任意目标按以下顺序：
 5. 全部不通过则明确 abstain。
 
 生产 ROS/C++ 当前仍按正反手 sign 折叠成两个 clip。训练可以先不接 selector，但部署前必须把 stable
-action ID 跨 Python wire、revision gate、ONNX catalog 和 C++ policy 全链保留下来。
+action ID 作为控制面字段跨 Python wire、revision gate、ONNX catalog 和 C++ policy 全链保留下来；
+不得因此把 categorical UID/slot 重新塞回 actor observation。
 
 ## 9. 发射、继续与当前阻塞
 
@@ -401,7 +410,8 @@ action ID 跨 Python wire、revision gate、ONNX catalog 和 C++ policy 全链�
 3. exact N5 teacher fitted-ball MuJoCo 门：每件动作的对应来球必须在真实桌、网、球、拍面接触和
    两档 `dt` 下由该动作的 exact 击球帧/时间律合法过网落台；解析 task 可解或 virtual landing
    不能替代这条物理门；
-4. N5 exact motion view 严格使用
+4. 先冻结 N5 fixed-width continuous future-motion intent/preview，再允许构造 actor；N1 v2
+   不得直接复用到 shared-ready 多动作。N5 exact motion view 严格使用
    `bh_loop_c, v12_forehand_block, bh_block, s0_highpress, fh_loop_high`，排除旧
    `fh_loop / fh_block_syn`，五件均持 opaque training admission；
 5. Pod1 双 GPU：GPU0 只跑 trainer，GPU1 只跑冻结 policy evaluator；两边独立持 no-clobber
@@ -412,9 +422,9 @@ action ID 跨 Python wire、revision gate、ONNX catalog 和 C++ policy 全链�
    证明 policy 实际执行时仍能把同一对应来球安全打上台；teacher PASS 不替 policy PASS。通过后
    才能把 center-only canary 续成动态长跑，此后每个预注册 milestone 重复本门；
 7. 动态 marginal → joint 课程；
-8. Pod2 只有在 exact ordered 93 件 manifest、逐件 compiler/安全/admission 证书和固定 N93
-   actor 合同全部存在时才可 formal N93。此前只允许 CPU inventory 或独立 N8/N12 canary，
-   不得把它续写成 N93；
+8. Pod2 只有在 exact ordered 73 件 manifest、逐件 compiler/安全/admission 证书和固定宽
+   continuous future-motion actor 合同全部存在时才可 formal N73。此前只允许 CPU inventory
+   或独立 N8/N12 canary，不得把它续写成 N73；
 9. GPU 必须现场确认空闲，不杀别人的进程、不清未知 lock。
 
 源码、host test 或 teacher receipt 都不等于 learned-policy gate 已通过。截至 2026-07-29，

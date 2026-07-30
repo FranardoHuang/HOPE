@@ -50,15 +50,17 @@ compose 后必须同时满足：
   solver payload SHA 认证。每个额外 proposal 都保留在 `P` 与 reject-reason ledger；
 - compose 输入 `racket.clip_names` 与 manifest `action_order` 完全相同；`train.py` 再由它派生
   runtime `racket_target.clip_names_per_clip`。motion 文件数、顺序与逐文件 SHA 必须完全相同；
-- fresh 训练使用
-  `task.actor_obs_contract=action_ball_table_pose_twist_heading_task_teacher_start_n<N>`，其中 N 是
-  manifest 动作数；actor 为 frame-consistent
+- fresh N1 训练使用
+  `task.actor_obs_contract=action_ball_table_pose_twist_heading_task_teacher_start_v2`；actor 为
+  frame-consistent
   `hitter_footwork(177) + table pose(9) + base linear velocity(3) +
-  face/rho(4) + time_to_teacher_start_s(1) + action_one_hot(N)`，总宽 `194+N`。
+  face/rho(4) + time_to_teacher_start_s(1)`，固定 194-D，不含 `action_one_hot`。
   `time_to_teacher_start_s=max(pre_swing_wait_s-task_age_s,0)` 直接读取同一 Motion
-  phase governor，避免 policy 从 `time_to_strike`、目标拍速与 action identity 反推老师何时离开
-  ready。旧 `action_ball_table_pose_twist_heading_task_n<N>`（`193+N`）只为已运行 checkpoint
-  保留兼容，不能 exact-resume 到新合同；
+  phase governor，避免 policy 重建老师何时离开 ready。UID/slot 只留在 sampler/solver/
+  curriculum/receipt；formal N5/N73 发射前必须切到固定宽 content-derived future-motion intent
+  successor。旧 `action_ball_table_pose_twist_heading_task_n<N>`（`193+N`）与历史
+  teacher-start `194+N` one-hot 合同只为已运行 checkpoint/receipt 保留解析，不能
+  exact-resume 到新合同；
 - `motion.balanced_clip_sampling=true` 及
   `motion.balanced_clip_sampling_seed=<内容绑定的整数 seed>`，使任意前缀的逐动作样本数最多差一；
 - action manifest、sampler、solver profile、physics profile、motion admission、policy contract 和

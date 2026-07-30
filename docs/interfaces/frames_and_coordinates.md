@@ -87,12 +87,13 @@ station center 属于 level-0 task identity。level 0 只做中心 warm-up，pos
 才开始；base residual 是最后一轴。改变 station center 会改变 manifest/task identity，并使旧碰撞、
 能力与 selector 证据失效。
 
-## Historical ChingMu Runtime Contract (superseded for fresh 195-D ActionBall)
+## Historical ChingMu Runtime Contract (superseded for fresh fixed-194 N1 ActionBall)
 
 The following 300-Hz ChingMu/VRPN contract documents the old P1/P2 consumer and remains relevant
-only when reproducing that lineage. The venue has since switched to 360-Hz OptiTrack; fresh
-`action_ball_table_pose_twist_heading_task_teacher_start_n<N>` training and future deployment use the
-OptiTrack+IMU split stated in [ActionBall table-centered actor frame](#actionball-table-centered-actor-frame).
+only when reproducing that lineage. The venue has since switched to 360-Hz OptiTrack; fresh N1
+`action_ball_table_pose_twist_heading_task_teacher_start_v2` training uses the OptiTrack+IMU split
+stated in [ActionBall table-centered actor frame](#actionball-table-centered-actor-frame).
+MuJoCo/C++ do not yet produce v2, so this sentence does not authorize deployment.
 Do not copy the old object names, rate, sensor authority or noise profile into the fresh contract.
 
 The historical rig was ChingMu streaming over VRPN. The tracked-object set differed by phase:
@@ -178,10 +179,12 @@ OptiTrack base orientation with joint-encoder FK. The current arbitrary-N deploy
 marker extrinsic and time-aligned OptiTrack/gyro producer remain OPEN, so this frame contract is
 simulator-training-only until those are closed.
 
-Fresh ActionBall actors use the versioned
-`action_ball_table_pose_twist_heading_task_teacher_start_n<N>` representation; the 194-D
-`...heading_task_n<N>` predecessor remains exact compatibility for the running N1 wave. All three
-racket-task vectors
+Fresh N1 ActionBall actors use the fixed-width 194-D
+`action_ball_table_pose_twist_heading_task_teacher_start_v2` representation. It replaces the old
+constant N1 one-hot slot with `time_to_teacher_start_s`; stable action UID/slot remains control-plane
+state. The N-dependent `...teacher_start_n<N>` and `...heading_task_n<N>` layouts remain historical
+checkpoint/receipt compatibility only. N5/N73 fail closed until a fixed-width content-derived
+future-motion intent/preview is frozen. All three racket-task vectors
 share the current base yaw-heading frame:
 
 ```text

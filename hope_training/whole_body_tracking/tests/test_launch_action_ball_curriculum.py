@@ -494,6 +494,10 @@ class LaunchFixture:
         _write_text(
             self.repo / M.ACTION_SET_CONTRACT_SOURCE,
             (
+                f"{M.ACTION_SET_ACTOR_OBS_CONTRACT_NAME} = "
+                f"{self.action_set_contract_identity['actor_obs_contract']!r}\n"
+                f"{M.ACTION_SET_ACTOR_OBS_WIDTH_NAME} = "
+                f"{self.action_set_contract_identity['actor_obs_width']!r}\n"
                 f"{M.ACTION_SET_PROFILE_POLICIES_NAME} = "
                 f"{ {self.contract_profile: {'expected_n': len(self.order), 'scope': 'upper', 'mobility_mode': 'no_move', 'required_action_ids': self.order, 'retired_action_ids': ['fh_loop', 'fh_block_syn']}}!r}\n"
                 f"{M.ACTION_SET_CONTRACTS_NAME} = "
@@ -1201,6 +1205,14 @@ def test_v3_plan_binds_exact_commit_runtime_recipe_and_claim(
         f"task.experiment_name={M.ACTION_BALL_EXPERIMENT_NAME}"
         in training_argv
     )
+    assert payload["action_set_contract"] == (
+        launch_fixture.action_set_contract_identity
+    )
+    assert (
+        "task.actor_obs_contract="
+        + launch_fixture.action_set_contract_identity["actor_obs_contract"]
+        in training_argv
+    )
     assert "task.rewards.full_body_mimic=false" in training_argv
     assert "task.rewards.full_body_mimic" in M._OWNED_OVERRIDE_KEYS
     assert "algo.policy.init_noise_std=0.02" in training_argv
@@ -1242,6 +1254,31 @@ def test_v3_plan_binds_exact_commit_runtime_recipe_and_claim(
         )
         in training_argv[:-1]
     )
+
+
+def test_generic_launcher_rejects_fixed_v2_for_an_n5_source(
+    launch_fixture: LaunchFixture,
+) -> None:
+    source_path = launch_fixture.repo / M.ACTION_SET_CONTRACT_SOURCE
+    lines = source_path.read_text(encoding="utf-8").splitlines()
+    rewritten = []
+    for line in lines:
+        if line.startswith(f"{M.ACTION_SET_ACTOR_OBS_CONTRACT_NAME} = "):
+            line = (
+                f"{M.ACTION_SET_ACTOR_OBS_CONTRACT_NAME} = "
+                "'action_ball_table_pose_twist_heading_task_teacher_start_v2'"
+            )
+        elif line.startswith(f"{M.ACTION_SET_ACTOR_OBS_WIDTH_NAME} = "):
+            line = f"{M.ACTION_SET_ACTOR_OBS_WIDTH_NAME} = 194"
+        rewritten.append(line)
+    source_path.write_text("\n".join(rewritten) + "\n", encoding="utf-8")
+    launch_fixture.commit_repo_change("fixed-v2 n5 must fail closed")
+
+    with pytest.raises(
+        M.LaunchRefused,
+        match="fixed-194 ActionBall v2 is N=1-only",
+    ):
+        M.prepare_launch_plan(launch_fixture.spec_path, "smoke")
 
 
 def test_plan_ignores_caller_git_path_and_repository_environment(

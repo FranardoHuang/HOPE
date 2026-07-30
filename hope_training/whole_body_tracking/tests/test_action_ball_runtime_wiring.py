@@ -333,6 +333,64 @@ def test_action_ball_runtime_waits_for_command_manager_construction():
         )
 
 
+def test_teacher_start_actor_read_lazily_initializes_once_before_motion_access():
+    methods = [
+        _method("_ensure_action_ball_runtime_initialized"),
+        _method("actor_time_to_teacher_start_s"),
+    ]
+    module = ast.Module(body=methods, type_ignores=[])
+    ast.fix_missing_locations(module)
+    namespace = {}
+    exec(compile(module, str(COMMAND_PATH), "exec"), namespace)
+    ensure = namespace["_ensure_action_ball_runtime_initialized"]
+    read_teacher_start = namespace["actor_time_to_teacher_start_s"]
+
+    events = []
+
+    class TensorStub:
+        def to(self, *, dtype):
+            events.append(("to", dtype))
+            return self
+
+    wait = TensorStub()
+    motion = SimpleNamespace(
+        action_ball_pre_swing_wait_remaining_s=wait,
+        validate_action_ball_task_authority_binding=lambda: events.append(
+            "validated"
+        ),
+    )
+
+    def motion_getter():
+        events.append("motion")
+        return motion
+
+    command = SimpleNamespace(
+        _action_ball_enabled=True,
+        _action_ball_runtime_initialized=False,
+        _action_ball_runtime_initializing=False,
+        _env=SimpleNamespace(command_manager=object()),
+        _initialize_action_ball_runtime=lambda: events.append("initialized"),
+        _motion=motion_getter,
+        time_to_strike=SimpleNamespace(dtype="float32"),
+    )
+    command._ensure_action_ball_runtime_initialized = types.MethodType(
+        ensure, command
+    )
+
+    assert read_teacher_start(command) is wait
+    assert events == [
+        "initialized",
+        "motion",
+        "validated",
+        "motion",
+        ("to", "float32"),
+    ]
+
+    events.clear()
+    assert read_teacher_start(command) is wait
+    assert events == ["motion", ("to", "float32")]
+
+
 def test_diagnostic_motion_payload_is_snapshotted_before_runtime_binding(
     tmp_path,
 ):

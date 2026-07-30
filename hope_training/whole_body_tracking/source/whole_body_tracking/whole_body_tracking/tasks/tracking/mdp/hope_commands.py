@@ -18531,6 +18531,13 @@ class RacketTargetCommand(CommandTerm):
         relearning it from TTS, target speed and the action one-hot.
         """
 
+        # ObservationManager asks every producer for its shape immediately
+        # after CommandManager construction, before the first environment
+        # reset.  ActionBall deliberately delays its cross-command binding
+        # until this post-construction seam, so initialize it here before
+        # reading MotionCommand's timing tensor.  The inactive construction
+        # row is exactly zero; the first reset resolves the real receipt time.
+        self._ensure_action_ball_runtime_initialized()
         return self._motion().action_ball_pre_swing_wait_remaining_s.to(
             dtype=self.time_to_strike.dtype
         )

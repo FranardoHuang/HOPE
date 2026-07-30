@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib.util
 from pathlib import Path
 import sys
+from types import SimpleNamespace
 
 import pytest
 
@@ -227,6 +228,49 @@ def test_n1_teacher_start_action_ball_offsets_are_exactly_195d():
     assert offsets["racket_target_normal_cmd_heading"] == (189, 193)
     assert offsets["time_to_teacher_start_s"] == (193, 194)
     assert offsets["action_one_hot"] == (194, 195)
+
+
+def test_teacher_start_v2_is_fixed_194d_and_omits_action_one_hot():
+    contract = contract_mod.resolve_actor_observation_contract(
+        "action_ball_table_pose_twist_heading_task_teacher_start_v2"
+    )
+    assert contract.name == (
+        "action_ball_table_pose_twist_heading_task_teacher_start_v2"
+    )
+    assert contract.obs_mode == "hitter_footwork"
+    assert contract.total_dim == 194
+    assert sum(term.dim for term in contract.terms) == 194
+    assert contract.layout[-2:] == (
+        ("racket_target_normal_cmd_heading", 4),
+        ("time_to_teacher_start_s", 1),
+    )
+    assert all(term.name != "action_one_hot" for term in contract.terms)
+
+    offsets = {}
+    offset = 0
+    for term in contract.terms:
+        offsets[term.name] = (offset, offset + term.dim)
+        offset += term.dim
+    assert offset == 194
+    assert offsets["racket_target_normal_cmd_heading"] == (189, 193)
+    assert offsets["time_to_teacher_start_s"] == (193, 194)
+
+
+def test_infer_actor_observation_contract_recognizes_teacher_start_v2():
+    expected = contract_mod.resolve_actor_observation_contract(
+        "action_ball_table_pose_twist_heading_task_teacher_start_v2"
+    )
+    observation_manager = SimpleNamespace(
+        active_terms={
+            "policy": [term.name for term in expected.terms],
+        },
+        group_obs_term_dim={
+            "policy": [(term.dim,) for term in expected.terms],
+        },
+        group_obs_dim={"policy": (expected.total_dim,)},
+    )
+    env = SimpleNamespace(observation_manager=observation_manager)
+    assert contract_mod.infer_actor_observation_contract(env) == expected
 
 
 @pytest.mark.parametrize("action_count", [1, 5, 93])
@@ -478,6 +522,11 @@ def test_action_ball_resolver_rejects_count_above_upper_bound():
         (
             "action_ball_table_pose_twist_n1",
             "action_ball_table_pose_twist_n1",
+            194,
+        ),
+        (
+            "action_ball_table_pose_twist_heading_task_teacher_start_v2",
+            "action_ball_table_pose_twist_heading_task_teacher_start_v2",
             194,
         ),
     ],

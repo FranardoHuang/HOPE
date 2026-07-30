@@ -946,6 +946,44 @@ def _action_ball_diagnostic_schema3_contract():
     return contract
 
 
+_FIXED_TEACHER_START_V2_TERM_LAYOUT = (
+    ("command", 62),
+    ("motion_anchor_ori_b", 6),
+    ("base_ang_vel", 3),
+    ("joint_pos", 31),
+    ("joint_vel", 31),
+    ("actions", 31),
+    ("projected_gravity", 3),
+    ("base_target_pos_b", 2),
+    ("racket_target_pos_b", 3),
+    ("racket_target_vel_heading", 3),
+    ("time_to_strike", 1),
+    ("swing_type", 1),
+    ("base_position_table", 3),
+    ("base_orientation_table_6d", 6),
+    ("base_lin_vel_heading", 3),
+    ("racket_target_normal_cmd_heading", 4),
+    ("time_to_teacher_start_s", 1),
+)
+
+
+def _set_fixed_teacher_start_v2_actor_layout(contract):
+    contract["actor_obs_contract"] = (
+        "action_ball_table_pose_twist_heading_task_teacher_start_v2"
+    )
+    contract["actor_obs_total_dim"] = 194
+    contract["actor_obs_term_names"] = [
+        name for name, _dim in _FIXED_TEACHER_START_V2_TERM_LAYOUT
+    ]
+    contract["actor_obs_term_dims"] = [
+        dim for _name, dim in _FIXED_TEACHER_START_V2_TERM_LAYOUT
+    ]
+    contract["observation_history_lengths"] = [1] * len(
+        _FIXED_TEACHER_START_V2_TERM_LAYOUT
+    )
+    return contract
+
+
 def _action_set_identity(
     *,
     profile_id="fixture_upper_nomove_n2",
@@ -1384,6 +1422,148 @@ def test_teacher_start_action_ball_layout_is_accepted_with_exact_width():
         TC.validate_action_ball_action_set_runtime_identity(identity, **kwargs)
         == identity
     )
+
+
+def test_fixed_teacher_start_v2_layout_and_n1_identity_are_accepted():
+    contract = _set_fixed_teacher_start_v2_actor_layout(
+        _action_ball_diagnostic_schema3_contract()
+    )
+    assert TC.validate_action_ball_training_authorization(contract) is True
+    TC.validate_schema3_contract_structure(contract)
+
+    wrong_width = dict(contract)
+    wrong_width["actor_obs_total_dim"] = 195
+    with pytest.raises(ValueError, match="does not match"):
+        TC.validate_action_ball_training_authorization(wrong_width)
+
+    identity = _action_set_identity(profile_id="fixture_upper_nomove_n1")
+    identity["expected_n"] = 1
+    identity["ordered_action_ids"] = identity["ordered_action_ids"][:1]
+    identity["ordered_action_uids"] = identity["ordered_action_uids"][:1]
+    identity["order_uid_digest_sha256"] = (
+        TC._action_ball_order_uid_digest(
+            identity["ordered_action_ids"],
+            identity["ordered_action_uids"],
+        )
+    )
+    identity["namespace_identity"] = (
+        "n1-" + identity["order_uid_digest_sha256"][:12]
+    )
+    identity["actor_obs_contract"] = (
+        "action_ball_table_pose_twist_heading_task_teacher_start_v2"
+    )
+    identity["actor_obs_width"] = 194
+    code_row = {
+        key: identity[key]
+        for key in TC._ACTION_BALL_ACTION_SET_CODE_KEYS
+        if key != "contract_sha256"
+    }
+    identity["contract_sha256"] = TC._action_ball_canonical_sha256(code_row)
+    assert (
+        TC.validate_action_ball_action_set_identity_block(identity)
+        == identity
+    )
+    kwargs = {
+        "actor_obs_contract": (
+            "action_ball_table_pose_twist_heading_task_teacher_start_v2"
+        ),
+        "actor_obs_width": 194,
+        "manifest_path": identity["manifest_path"],
+        "manifest_sha256": identity["manifest_sha256"],
+        "scope": "upper",
+        "mobility_mode": "no_move",
+        "ordered_action_ids": identity["ordered_action_ids"],
+        "ordered_action_uids": identity["ordered_action_uids"],
+        "experiment_name": identity["experiment_name"],
+    }
+    assert (
+        TC.validate_action_ball_action_set_runtime_identity(identity, **kwargs)
+        == identity
+    )
+
+
+def test_fixed_teacher_start_v2_rejects_rebranded_old_194d_layout():
+    contract = _set_fixed_teacher_start_v2_actor_layout(
+        _action_ball_diagnostic_schema3_contract()
+    )
+    # This is the old N=1 heading-task tail: same 194-D width, but the final
+    # scalar is categorical slot identity rather than teacher-start timing.
+    contract["actor_obs_term_names"][-1] = "action_one_hot"
+    with pytest.raises(ValueError, match="exact 17-term"):
+        TC.validate_action_ball_training_authorization(contract)
+
+
+def test_fixed_teacher_start_v2_rejects_any_action_one_hot_term():
+    contract = _set_fixed_teacher_start_v2_actor_layout(
+        _action_ball_diagnostic_schema3_contract()
+    )
+    contract["actor_obs_term_names"].insert(-1, "action_one_hot")
+    contract["actor_obs_term_dims"].insert(-1, 1)
+    contract["observation_history_lengths"].insert(-1, 1)
+    with pytest.raises(ValueError, match="containing no action_one_hot"):
+        TC.validate_action_ball_training_authorization(contract)
+
+
+def test_fixed_teacher_start_v2_rejects_wrong_term_order_at_same_width():
+    contract = _set_fixed_teacher_start_v2_actor_layout(
+        _action_ball_diagnostic_schema3_contract()
+    )
+    for values in (
+        contract["actor_obs_term_names"],
+        contract["actor_obs_term_dims"],
+        contract["observation_history_lengths"],
+    ):
+        values[12], values[13] = values[13], values[12]
+    assert sum(contract["actor_obs_term_dims"]) == 194
+    with pytest.raises(ValueError, match="exact 17-term"):
+        TC.validate_action_ball_training_authorization(contract)
+
+
+def test_fixed_teacher_start_v2_rejects_wrong_term_dims_at_same_total():
+    contract = _set_fixed_teacher_start_v2_actor_layout(
+        _action_ball_diagnostic_schema3_contract()
+    )
+    contract["actor_obs_term_dims"][0] -= 1
+    contract["actor_obs_term_dims"][1] += 1
+    assert sum(contract["actor_obs_term_dims"]) == 194
+    with pytest.raises(ValueError, match="exact 17-term"):
+        TC.validate_action_ball_training_authorization(contract)
+
+
+def test_fixed_teacher_start_v2_identity_rejects_n2():
+    identity = _action_set_identity()
+    identity["actor_obs_contract"] = (
+        "action_ball_table_pose_twist_heading_task_teacher_start_v2"
+    )
+    identity["actor_obs_width"] = 194
+    code_row = {
+        key: identity[key]
+        for key in TC._ACTION_BALL_ACTION_SET_CODE_KEYS
+        if key != "contract_sha256"
+    }
+    identity["contract_sha256"] = TC._action_ball_canonical_sha256(code_row)
+    with pytest.raises(ValueError, match="exact N=2"):
+        TC.validate_action_ball_action_set_identity_block(identity)
+
+
+def test_fixed_v2_still_brands_missing_target_mode_or_authorization_as_action_ball():
+    missing_target = _set_fixed_teacher_start_v2_actor_layout(
+        _action_ball_diagnostic_schema3_contract()
+    )
+    missing_target.pop("target_mode")
+    missing_target.pop("action_ball_training")
+    with pytest.raises(
+        ValueError,
+        match="requires target_mode='action_ball'",
+    ):
+        TC.validate_action_ball_training_authorization(missing_target)
+
+    missing_block = _set_fixed_teacher_start_v2_actor_layout(
+        _action_ball_diagnostic_schema3_contract()
+    )
+    missing_block.pop("action_ball_training")
+    with pytest.raises(ValueError, match="missing the mandatory"):
+        TC.validate_action_ball_training_authorization(missing_block)
 
 
 def test_action_ball_formal_contract_crossbinds_manifest_and_preflight_order():

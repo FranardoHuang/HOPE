@@ -3989,18 +3989,20 @@ physics diagnostic，不授权 formal/landing/部署。
 full-body 没有直接占用 GPU2：仓内 full bundle 仍是 schema-v1，而该 launcher 明确要求 exact
 motion/nominal-hold 双 pin 的 schema-v2 dynamic-ready。可比 full-body 仍须完成
 stable-full `ready→core→ready`、动作专属 dynamic-ready/nominal hold、full solver preflight、
-schema-v2 bundle 与 fresh 195-D `1×2→4096×5`；运行旧 bundle 只会同时改变 ready、observation 与
+schema-v2 bundle 与 fresh fixed-width successor `1×2→4096×5`；运行旧 bundle 只会同时改变 ready、observation 与
 teacher bytes，不能作为科学对照。G05 保持 `Partial`。
 
-同日采用显式 teacher-start actor 合同
-`action_ball_table_pose_twist_heading_task_teacher_start_n<N>`（`194+N`，N1=195-D）。
-`time_to_teacher_start_s` 直接读取 Motion phase governor 的剩余 ready wait，置于 heading face
-之后、final action one-hot 之前；Racket 发布 task receipt 后立即复用 Motion 的既有 validator，
-避免 formal reset 首个 observation 出现一帧假零。旧 `f2c54fc3` 三条 194-D run 不停机、不重标、
-不允许以新合同 exact resume。新 source 在 Pod N1 195-D `1 env×2 update` 构造 smoke 前保持
+同日先实现了历史 195-D teacher-start one-hot 合同，随后按动作泛化审计改为 fresh N1 固定
+194-D `action_ball_table_pose_twist_heading_task_teacher_start_v2`：用
+`time_to_teacher_start_s` 替换恒为 `[1]` 的 N1 one-hot。Racket getter 在
+ObservationManager shape probe 时先调用既有 ActionBall lazy bind，reset 后仍直接读取 Motion
+phase governor 的 receipt 真值。动作 UID/slot 保持在 sampler/solver/curriculum/receipt，
+不进入 policy；formal N5/N73 须另加固定宽 content-derived future-motion intent。旧
+`f2c54fc3` 三条同宽 194-D run 不停机、不重标、不允许以新合同 exact resume。新 source 在 Pod
+N1 v2 `1 env×2 update` 构造 smoke 前保持
 `Partial`，且 action-set source SHA、training contract 与 launch claim 均须 fresh repin。
 exact `020dc8d9` 已在 Pod1 跑过 teacher-start/observation/action-set/launcher/schema focused
-suite：`390 passed, 9 skipped in 71.26 s`。这证明 dependency-light 接线，不冒充 195-D
+suite：`390 passed, 9 skipped in 71.26 s`。这只证明历史 195-D source 接线，不冒充 v2
 ObservationManager 的真实 Isaac 构造或 finite PPO checkpoint。
 
 2026-07-30 19:39 CST 只读快照：loop seed0 / block seed0 / block seed1 分别到 update
@@ -4010,7 +4012,7 @@ capture/return 仍全为零。block seed0 的 table/fall/actual-hard 已降到 `
 proposal 全被 face gate 拒绝；loop seed0 的 post-strike fall 为 `887/946`；block seed1 的
 table/actual-hard 为 `590/325`。因此窗口与 denominator 已通，动作质量、signed-face/contact
 对齐及 seed 稳定性仍未通过；这些不是 teacher-start source merge 的阻断理由，也不能作为 N5、
-landing 或部署证据。下一条 fresh 195-D source 仍须独立 Pod `1 env×2` 构造验证。
+landing 或部署证据。下一条 fresh fixed-194 v2 source 仍须独立 Pod `1 env×2` 构造验证。
 
 2026-07-30 19:50 CST，GPU1 block seed0 已自然产出 `model_600.pt`：7,197,343 bytes，
 SHA-256=`11bee4911f54d9d43e0a112f843009f5811a746475b82d5fe050ca5fffb8470f`，80 个 tensor
@@ -4044,3 +4046,12 @@ current-source canonical plan 随后通过（claim `13dc15a2…8e86f`），但�
 `("bh_block",)` 被看成空 tuple。该 namespace 已 spent 且不复用。直接修正 guard 的字段名并把
 mode/diagnostic/action tuple 写入拒绝信息；这不改变 Reward、ball→task、plant 或 policy，
 修复提交后仍需 fresh 1-env×2 Pod smoke。
+
+第二次 fresh smoke（exact `319ae8ff`，claim `691dc1ac…344`，namespace
+`n1hr_smoke_fastball110_319ae8ff_block_gpu2_seed0_r2`）又在 PPO 前暴露独立构造次序缺口：
+ObservationManager 为探测 term shape 读取 `time_to_teacher_start_s` 时，CommandManager 已完成，
+但 ActionBall cross-command timing 仍按设计等待 lazy bind，getter 直接读 Motion 因而报
+`action-ball task timing is not bound`。失败 namespace 保留不复用。直接修为 getter 先调用
+既有 `_ensure_action_ball_runtime_initialized()`；不把未绑定 timing 静默伪造成运行时零。
+同时按 Franco 决定删除 fresh actor 的 `action_one_hot`，切固定 194-D v2；因此旧 r2 claim/spec
+全部作废，须以新 source、profile pin 和 fresh namespace 重发。

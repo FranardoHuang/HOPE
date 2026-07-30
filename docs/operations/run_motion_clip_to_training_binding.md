@@ -45,7 +45,7 @@
 <a id="task-first-addendum"></a>
 <a id="action-ball-addendum"></a>
 
-## Action-conditioned Ball-first 任意 N 动作附加门
+## Action-conditioned Ball-first 动作 bank 附加门
 
 上述 16 步仍是每个 exact motion 的基础。把动作接进
 [按动作条件化 Ball-first](../interfaces/action_conditioned_ball_first_contract.md) 还要补以下
@@ -53,7 +53,7 @@ bank 级约束：
 
 1. manifest 逐行绑定 stable action UID、motion SHA、strike phase、family/face sign，以及完整
    incoming contact/speed/spin、base spawn/travel、landing-aim profile；action order 必须与
-   loader/one-hot 相同；
+   loader/control-plane slot 相同；UID/slot 不进入 fresh actor observation；
 2. level 0 使用 manifest 的 non-zero initial std；各轴先独立找 marginal frontier，再调 joint
    `rho`。10% 只指 safe closed policy non-return，solver reject 与 unsafe 分账；
 3. 旧 `fh_loop` 不进入新 training view；旧 bytes 留档，不删除。`fh_loop_high` 必须产生新的
@@ -66,13 +66,14 @@ bank 级约束：
    内容寻址 reference checks，不替代 compiler/bank/dynamics/reference-return authority。当前输出
    `diagnostic_smoke_authorized=false` 与 `training_authorized=false`，不能据此启动 simulator 或
    trainer；
-7. 全 bank 的 manifest/file SHA、motion bytes、balanced sampling、fresh actor
-   `action_ball_table_pose_twist_heading_task_teacher_start_n<N>`（总宽 `194+N`；老师开始
-   倒计时紧邻最终 action one-hot）、
+7. 全 bank 的 manifest/file SHA、motion bytes、balanced sampling、fresh N1 actor
+   `action_ball_table_pose_twist_heading_task_teacher_start_v2`（固定 194-D；老师开始倒计时
+   替换旧 N1 常量 one-hot 槽，不包含 UID/slot）、
    fixed-action solver/physics canonical payload、single-use birth/task receipt、curriculum Gate 与
    effective Reward receipt 一起进入 checkpoint hard contract；manifest metadata 不得自授权。
-   旧 `action_ball_table_pose_twist_heading_task_n<N>`（`193+N`）只作历史 checkpoint
-   兼容，不得续成 fresh 合同。
+   旧 N-dependent `...heading_task_n<N>`（`193+N`）和
+   `...teacher_start_n<N>`（`194+N`）只作历史 checkpoint/receipt 兼容，不得续成 fresh 合同。
+   N5/N73 必须先冻结固定宽 continuous future-motion intent/preview；此前不得用 N1 v2 发射。
 
 新正手缺 upper/full、grounded collocation trace 或任一时序/速度/撞桌 Gate 时，到此停止；
 不执行第 16 步 trainer smoke。完整前置见

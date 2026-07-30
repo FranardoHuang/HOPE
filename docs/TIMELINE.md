@@ -1,15 +1,19 @@
 # TIMELINE — main 上值得记住的重要变化
 
-## 2026-07-30 — ActionBall fresh actor 直接观测老师开始倒计时
+## 2026-07-30 — ActionBall N1 fresh actor 删除槽位 one-hot，直接观测老师开始倒计时
 
 ActionBall fresh 合同新增
 `time_to_teacher_start_s=max(pre_swing_wait_s-task_age_s,0)`，直接复用 fixed-action Motion
-phase governor，不再要求 policy 从剩余击球时间、目标拍速和动作身份反推老师何时离开 ready。
-新合同为 `action_ball_table_pose_twist_heading_task_teacher_start_n<N>`，总宽 `194+N`
-（N1=195、N5=199）；标量位于 signed face/rho 后、最终 action one-hot 前。正式 reset 在 task
+phase governor，不再要求 policy 从剩余击球时间和目标拍速反推老师何时离开 ready。
+新 N1 合同为固定 194-D
+`action_ball_table_pose_twist_heading_task_teacher_start_v2`；它删除恒为 `[1]` 的
+`action_one_hot`，标量位于 signed face/rho 后并成为最后一列。正式 reset 在 task
 原子安装后立即解析同一 phase clock，保证首个 actor observation 已是完整 ready wait，之后每个
-policy tick 递减且不为负。旧 `193+N` 合同和正在运行的 194-D N1 checkpoint 保持逐字节兼容，
-但不能 exact-resume 或改名成新合同。详见
+policy tick 递减且不为负。动作 UID/slot 只留在 sampler/solver/curriculum/receipt 控制面；
+旧 N-dependent one-hot 合同只保留历史解析，当前 trainer 不再实例化。formal N5/N73 在固定宽、
+由未来 reference 内容生成的 continuous motion intent 接入前保持 fail-closed。旧 `193+N`、
+`194+N` 合同和正在运行的 194-D N1 checkpoint 保持逐字节历史，不能 exact-resume 或改名成
+新合同。详见
 [policy 接口](interfaces/policy_observation_action.md)、
 [分阶段 readiness 实验](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)与
 [G05](gates/G05_isaac_training_first_loop.md)。

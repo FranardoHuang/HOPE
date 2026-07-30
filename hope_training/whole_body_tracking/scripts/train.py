@@ -2293,64 +2293,29 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
     configured_actor_contract = str(
         _get(task, "actor_obs_contract") or ""
     )
-    legacy_actor_contract = f"action_ball_n{action_count}"
-    table_pose_actor_contract = (
-        f"action_ball_table_pose_n{action_count}"
+    fixed_teacher_start_actor_contract = (
+        "action_ball_table_pose_twist_heading_task_teacher_start_v2"
     )
-    table_pose_twist_actor_contract = (
-        f"action_ball_table_pose_twist_n{action_count}"
-    )
-    table_pose_twist_heading_task_actor_contract = (
-        "action_ball_table_pose_twist_heading_task_n"
-        f"{action_count}"
-    )
-    teacher_start_actor_contract = (
-        "action_ball_table_pose_twist_heading_task_teacher_start_n"
-        f"{action_count}"
-    )
-    if configured_actor_contract not in (
-        legacy_actor_contract,
-        table_pose_actor_contract,
-        table_pose_twist_actor_contract,
-        table_pose_twist_heading_task_actor_contract,
-        teacher_start_actor_contract,
+    if (
+        configured_actor_contract == fixed_teacher_start_actor_contract
+        and action_count != 1
     ):
         raise _OverrideError(
-            "[train.py] action-ball actor_obs_contract must match the exact "
-            "action count: expected "
-            f"{teacher_start_actor_contract!r} "
-            f"(preferred), or compatibility contracts "
-            f"{table_pose_twist_heading_task_actor_contract!r}/"
-            f"{table_pose_twist_actor_contract!r}/"
-            f"{table_pose_actor_contract!r}/{legacy_actor_contract!r}; got "
+            "[train.py] fixed-194 ActionBall v2 is N=1-only; multi-action "
+            "training requires a fixed-width content-derived future-motion intent"
+        )
+    if configured_actor_contract != fixed_teacher_start_actor_contract:
+        raise _OverrideError(
+            "[train.py] fresh ActionBall actor_obs_contract must be "
+            f"{fixed_teacher_start_actor_contract!r}; historical N-dependent "
+            "one-hot layouts remain readable by checkpoint/receipt parsers but "
+            "cannot be instantiated by the current trainer; got "
             f"{configured_actor_contract!r}"
         )
-    include_table_pose = (
-        configured_actor_contract
-        in (
-            table_pose_actor_contract,
-            table_pose_twist_actor_contract,
-            table_pose_twist_heading_task_actor_contract,
-            teacher_start_actor_contract,
-        )
-    )
-    include_base_twist = (
-        configured_actor_contract
-        in (
-            table_pose_twist_actor_contract,
-            table_pose_twist_heading_task_actor_contract,
-            teacher_start_actor_contract,
-        )
-    )
-    include_heading_task = (
-        configured_actor_contract in (
-            table_pose_twist_heading_task_actor_contract,
-            teacher_start_actor_contract,
-        )
-    )
-    include_teacher_start = (
-        configured_actor_contract == teacher_start_actor_contract
-    )
+    include_table_pose = True
+    include_base_twist = True
+    include_heading_task = True
+    include_teacher_start = True
     expected_actor_contract = configured_actor_contract
     if str(getattr(env_cfg, "obs_mode", "")) != "hitter_footwork":
         raise _OverrideError(
@@ -2552,11 +2517,11 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
     if (
         not diagnostic_unauthorized
         and configured_actor_contract
-        != table_pose_twist_heading_task_actor_contract
+        != fixed_teacher_start_actor_contract
     ):
         raise _OverrideError(
             "[train.py] formal ActionBall requires the frame-consistent "
-            f"{table_pose_twist_heading_task_actor_contract!r} actor "
+            f"{fixed_teacher_start_actor_contract!r} actor "
             "observation contract; legacy layouts are diagnostic/read-only "
             "compatibility only"
         )
@@ -2926,20 +2891,13 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
         ),
     )
     if include_teacher_start:
-        # Keep the categorical action identity as the final N columns.  This
-        # is a fresh observation contract; old 194-D checkpoints are not
-        # silently warm-started under the shifted one-hot offsets.
+        # The fresh v2 tail ends with the teacher-start countdown.  Historical
+        # layouts ended in an N-wide one-hot and remain parser-only; a matching
+        # tensor width never authorizes semantic reuse.
         policy.time_to_teacher_start_s = _ObsTerm(
             func=_mdp.time_to_teacher_start_s,
             params={"command_name": "racket_target"},
         )
-    policy.action_one_hot = _ObsTerm(
-        func=_mdp.action_one_hot,
-        params={
-            "command_name": "racket_target",
-            "expected_actions": action_count,
-        },
-    )
     applied.append(
         "observations.policy action-ball tail="
         + (
@@ -2958,7 +2916,7 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
             if include_teacher_start
             else ""
         )
-        + f"action_one_hot(+{action_count}) "
+        + "action_identity(policy-observation omitted) "
         + f"(actor_obs_contract={expected_actor_contract}; "
         f"preflight_sha256={preflight['sha256']}; "
         "motion_admission_certificate_sha256="

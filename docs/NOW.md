@@ -45,13 +45,16 @@
 - 当前 Pod1 三条 N1 diagnostic 继续绑定 exact `f2c54fc3`、frame-consistent 194-D
   `action_ball_table_pose_twist_heading_task_n1` 与旧 physics profile；它们不因 `main`
   更新而重标、续成新合同或成为部署证据。
-- 下一条 fresh ActionBall 采用
-  [`action_ball_table_pose_twist_heading_task_teacher_start_n<N>`](DEFINITIONS.md#action-ball-teacher-start-contract)：
-  在 frame-consistent task 与 final action one-hot 之间显式加入
-  `time_to_teacher_start_s=max(pre_swing_wait_s-task_age_s,0)`，总宽 `194+N`
-  （N1=195、N5=199）。这是 phase-governor 的直接可观测量，不要求 policy 从剩余击球时间、
-  目标拍速与动作身份反推；不做学习 A/B，但 fresh launch 前必须做 Pod tensor/reset/构造
-  parity，并使用新 hard contract、action-set SHA、claim 和 no-clobber namespace。
+- 下一条 fresh N1 ActionBall 采用固定 194-D
+  [`action_ball_table_pose_twist_heading_task_teacher_start_v2`](DEFINITIONS.md#action-ball-teacher-start-contract)：
+  删除 actor 的 `action_one_hot`，在 frame-consistent task 尾部直接加入
+  `time_to_teacher_start_s=max(pre_swing_wait_s-task_age_s,0)`。动作 UID/slot 只留在
+  sampler/solver/curriculum/receipt 控制面。N1 的旧 one-hot 恒为 `[1]`，删除它没有信息损失；
+  但 shared-ready 多动作可能出现“当前观测相同、下一步动作不同”的混叠，所以 formal N5/N73
+  在固定宽、由未来 reference 内容生成的连续 motion intent 接入前保持 fail-closed，不恢复
+  N-wide 槽位标签。该接口修复不做学习 A/B，但 fresh launch 前必须做 Pod
+  tensor/reset/构造 parity，并使用新 hard contract、action-set SHA、claim 和 no-clobber
+  namespace。
 - 当前阶段、后续 formal N5/N73/deploy 最迟闭合项，以及必须由人/硬件提供的信息，统一见
   [ActionBall 分阶段准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)；
   本节只记录已采用的下一条 fresh setting，不另建竞争工作队列。

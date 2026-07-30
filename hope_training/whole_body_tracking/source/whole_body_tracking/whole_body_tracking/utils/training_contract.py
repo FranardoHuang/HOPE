@@ -69,6 +69,34 @@ _ACTION_BALL_ACTOR_OBS_LAYOUTS = (
     ("action_ball_table_pose_n", 190),
     ("action_ball_n", 181),
 )
+_ACTION_BALL_TEACHER_START_V2_ACTOR_OBS_LAYOUT = (
+    ("command", 62),
+    ("motion_anchor_ori_b", 6),
+    ("base_ang_vel", 3),
+    ("joint_pos", 31),
+    ("joint_vel", 31),
+    ("actions", 31),
+    ("projected_gravity", 3),
+    ("base_target_pos_b", 2),
+    ("racket_target_pos_b", 3),
+    ("racket_target_vel_heading", 3),
+    ("time_to_strike", 1),
+    ("swing_type", 1),
+    ("base_position_table", 3),
+    ("base_orientation_table_6d", 6),
+    ("base_lin_vel_heading", 3),
+    ("racket_target_normal_cmd_heading", 4),
+    ("time_to_teacher_start_s", 1),
+)
+_ACTION_BALL_FIXED_ACTOR_OBS_TERM_LAYOUTS = {
+    "action_ball_table_pose_twist_heading_task_teacher_start_v2": (
+        _ACTION_BALL_TEACHER_START_V2_ACTOR_OBS_LAYOUT
+    ),
+}
+_ACTION_BALL_FIXED_ACTOR_OBS_LAYOUTS = {
+    name: sum(dim for _term_name, dim in layout)
+    for name, layout in _ACTION_BALL_FIXED_ACTOR_OBS_TERM_LAYOUTS.items()
+}
 ACTION_BALL_ACTION_SET_METADATA_KEYS = (
     "action_ball_profile_id",
     "action_ball_expected_n",
@@ -435,7 +463,7 @@ def _action_ball_order_uid_digest(
 def _parse_action_ball_actor_obs_contract(
     value: object,
 ) -> tuple[int, int] | None:
-    """Return ``(N, width)`` for a supported ActionBall actor layout.
+    """Return ``(authorized action count, width)`` for an ActionBall actor layout.
 
     The legacy layout remains readable for existing checkpoints and claims.
     Table-pose layouts add nine base-pose scalars (``190 + N``); the preferred
@@ -448,6 +476,12 @@ def _parse_action_ball_actor_obs_contract(
 
     if type(value) is not str:
         return None
+    fixed_width = _ACTION_BALL_FIXED_ACTOR_OBS_LAYOUTS.get(value)
+    if fixed_width is not None:
+        # v2 deliberately removes slot identity before the multi-action
+        # continuous-intent successor exists, so it is an N=1 contract even
+        # though its spelling and tensor width do not scale with N.
+        return 1, fixed_width
     for prefix, base_width in _ACTION_BALL_ACTOR_OBS_LAYOUTS:
         if not value.startswith(prefix):
             continue
@@ -563,7 +597,7 @@ def validate_action_ball_action_set_identity_block(value: object) -> dict:
     if actor_layout is None or actor_layout[0] != expected_n:
         raise ValueError(
             "action-set actor_obs_contract must be a supported ActionBall "
-            f"layout with exact N={expected_n}"
+            f"layout compatible with exact N={expected_n}"
         )
     expected_actor_width = actor_layout[1]
     if (
@@ -4161,9 +4195,12 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
     actor_contract = contract.get("actor_obs_contract")
     actor_prefixed = (
         type(actor_contract) is str
-        and any(
-            actor_contract.startswith(prefix)
-            for prefix, _base_width in _ACTION_BALL_ACTOR_OBS_LAYOUTS
+        and (
+            actor_contract in _ACTION_BALL_FIXED_ACTOR_OBS_LAYOUTS
+            or any(
+                actor_contract.startswith(prefix)
+                for prefix, _base_width in _ACTION_BALL_ACTOR_OBS_LAYOUTS
+            )
         )
     )
     block_present = ACTION_BALL_TRAINING_KEY in contract
@@ -4208,6 +4245,8 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
     if actor_layout is None:
         raise ValueError(
             "schema-3 action-ball authorization requires "
+            "actor_obs_contract="
+            "action_ball_table_pose_twist_heading_task_teacher_start_v2 or "
             "actor_obs_contract=action_ball_n<N> or "
             "action_ball_table_pose_n<N> or "
             "action_ball_table_pose_twist_heading_task_teacher_start_n<N> or "
@@ -4220,6 +4259,26 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
             "schema-3 action-ball actor_obs_total_dim does not match its "
             "exact actor_obs_contract layout"
         )
+    fixed_term_layout = _ACTION_BALL_FIXED_ACTOR_OBS_TERM_LAYOUTS.get(
+        actor_contract
+    )
+    if fixed_term_layout is not None:
+        actor_names = contract.get("actor_obs_term_names")
+        actor_dims = contract.get("actor_obs_term_dims")
+        if (
+            not isinstance(actor_names, (list, tuple))
+            or not isinstance(actor_dims, (list, tuple))
+            or any(type(name) is not str for name in actor_names)
+            or any(type(dim) is not int for dim in actor_dims)
+            or tuple(zip(actor_names, actor_dims)) != fixed_term_layout
+            or len(actor_names) != len(actor_dims)
+        ):
+            raise ValueError(
+                "schema-3 fixed-width ActionBall v2 requires the exact "
+                "17-term actor_obs_term_names/actor_obs_term_dims layout, "
+                "ending in time_to_teacher_start_s and containing no "
+                "action_one_hot"
+            )
     if not block_present:
         raise ValueError(
             "schema-3 action-ball contract is missing the mandatory "

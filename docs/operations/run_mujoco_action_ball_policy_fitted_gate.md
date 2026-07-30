@@ -7,26 +7,30 @@ center/support 来球上，是否用对应击球帧真实碰球、过网并首�
 详细术语见 [`docs/DEFINITIONS.md`](../DEFINITIONS.md)。这个门不运行 selector，不重新
 求解 task，也不调用 `mujoco_eval_onnx.py` 的 virtual landing scorer。
 
+**当前状态：BLOCKED。** fresh N1 actor 是固定 194-D
+`action_ball_table_pose_twist_heading_task_teacher_start_v2`，不含 action one-hot，且现有
+MuJoCo/C++ producer 还不能逐元素构造 v2。v2 只允许 N1；formal N5/N73 必须先冻结固定宽、
+由动作内容导出的 continuous future-motion intent/preview。因此当前没有可接受的 N5 actor
+contract 名称或宽度，历史 199-D one-hot ONNX 不得冒充新合同，也不得部署或接真机。
+
 ## 必要输入
 
 - exact clean commit；
 - N=5 physical-contact-v2 manifest、profile pins 和 launch trust root；
 - 已经正式通过的 `mujoco_teacher_motion_fitted_ball_gate` receipt；
-- 同一个 checkpoint 的 checkpoint bytes、199-D
-  `action_ball_table_pose_twist_heading_task_teacher_start_n5` ONNX 和
-  `obs_norm.npz`；
+- 同一个 checkpoint 的 checkpoint bytes、未来冻结的 fixed-width multi-action actor contract
+  ONNX 和 `obs_norm.npz`；
 - 全部输入的 SHA256。
 
-ONNX 必须声明 schema-3 exact training contract、
-`action_ball_table_pose_twist_heading_task_teacher_start_n5`、固定 199-D actor
-layout、五个 ordered motion SHA/segment length，并将 source checkpoint 和 normalizer
-sidecar 绑定到输入字节。非零 PhysX load-dependent joint-friction coefficient 当前没有
+ONNX 必须声明 schema-3 exact training contract、冻结后的 fixed-width continuous
+future-motion intent contract、五个 ordered motion SHA/segment length，并将 source checkpoint
+和 normalizer sidecar 绑定到输入字节。非零 PhysX load-dependent joint-friction coefficient 当前没有
 exact MuJoCo 等价实现，会 fail-closed，而不是静默换成 MuJoCo `frictionloss`。
 
-当前 MuJoCo/C++ producer 尚不能构造这份 199-D arbitrary-N 合同，因此本 Gate 在 formal N5
-前必须先补 table-relative pose、heading twist、三条 frame-consistent task 向量与
-`time_to_teacher_start_s` 的逐元素 parity；
-不得把旧 186-D ONNX 当作新合同输入。
+当前 MuJoCo/C++ producer 连 N1 fixed-194 v2 尚不能构造，因此本 Gate 在 formal N5 前必须先补
+table-relative pose、heading twist、三条 frame-consistent task 向量、
+`time_to_teacher_start_s` 和未来 continuous future-motion intent 的逐元素 parity；不得把旧
+186-D/199-D ONNX 当作新合同输入。
 
 ## 运行
 
@@ -56,7 +60,8 @@ python -I hope_training/whole_body_tracking/scripts/mujoco_action_ball_policy_fi
 
 ## 正式题目与通过条件
 
-每个 action 固定 one-hot identity，执行 teacher capsule 中三个正例：
+每个 action 由 Gate 控制面固定 stable UID/slot，actor 不接收 categorical identity；执行
+teacher capsule 中三个正例：
 
 1. `center_positive_seed_0`；
 2. `center_positive_seed_1`；

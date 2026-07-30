@@ -38,6 +38,7 @@ ACTOR_CONTRACT_PATH = (
     / "tracking"
     / "actor_observation_contract.py"
 )
+TRAIN_PATH = ROOT / "scripts" / "train.py"
 
 ENV_SOURCE = ENV_CFG_PATH.read_text(encoding="utf-8")
 ENV_TREE = ast.parse(ENV_SOURCE, filename=str(ENV_CFG_PATH))
@@ -421,7 +422,7 @@ def test_new_launch_can_bind_exact_n_with_table_pose_contract(action_count):
 
 
 @pytest.mark.parametrize("action_count", [1, 5, 73])
-def test_preferred_launch_can_bind_exact_n_with_frame_consistent_contract(
+def test_historical_launch_can_bind_exact_n_with_frame_consistent_contract(
     action_count,
 ):
     action_names = [f"action_{index:03d}" for index in range(action_count)]
@@ -451,3 +452,69 @@ def test_preferred_launch_can_bind_exact_n_with_frame_consistent_contract(
         ("time_to_teacher_start_s", 1),
         ("action_one_hot", action_count),
     )
+
+
+@pytest.mark.parametrize("action_count", [1, 5, 73])
+def test_v2_layout_is_fixed_even_when_task_yaml_names_a_larger_bank(
+    action_count,
+):
+    action_names = [f"action_{index:03d}" for index in range(action_count)]
+    list_override = "[" + ",".join(action_names) + "]"
+    task = _compose_task(
+        (
+            "task.actor_obs_contract="
+            "action_ball_table_pose_twist_heading_task_teacher_start_v2"
+        ),
+        f"task.racket.clip_names={list_override}",
+        "task.racket.action_ball_manifest_path=configs/exact_manifest.json",
+        f"task.racket.action_ball_manifest_sha256={'a' * 64}",
+        f"task.racket.action_ball_policy_contract_sha256={'b' * 64}",
+    )
+
+    contract_mod = _load_actor_contract_module()
+    contract = contract_mod.resolve_actor_observation_contract(
+        task.actor_obs_contract
+    )
+    assert list(task.racket.clip_names) == action_names
+    assert contract.total_dim == 194
+    assert contract.layout[-2:] == (
+        ("racket_target_normal_cmd_heading", 4),
+        ("time_to_teacher_start_s", 1),
+    )
+    assert all(term.name != "action_one_hot" for term in contract.terms)
+
+
+def test_train_finalizer_rejects_v2_for_multi_action_banks():
+    source = TRAIN_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(TRAIN_PATH))
+    finalizer = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_finalize_action_ball_training_cfg"
+    )
+    segment = ast.get_source_segment(source, finalizer)
+    assert segment is not None
+    assert (
+        "configured_actor_contract == fixed_teacher_start_actor_contract"
+        in segment
+    )
+    assert "and action_count != 1" in segment
+    assert "fixed-194 ActionBall v2 is N=1-only" in segment
+    assert "fixed-width content-derived future-motion intent" in segment
+
+
+def test_train_finalizer_does_not_instantiate_historical_one_hot_layouts():
+    source = TRAIN_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(TRAIN_PATH))
+    finalizer = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "_finalize_action_ball_training_cfg"
+    )
+    segment = ast.get_source_segment(source, finalizer)
+    assert segment is not None
+    assert "configured_actor_contract != fixed_teacher_start_actor_contract" in segment
+    assert "cannot be instantiated by the current trainer" in segment
+    assert "policy.action_one_hot =" not in segment

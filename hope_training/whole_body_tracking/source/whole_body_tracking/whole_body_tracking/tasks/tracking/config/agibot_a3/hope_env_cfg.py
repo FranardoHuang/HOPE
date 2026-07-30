@@ -2222,13 +2222,14 @@ class HOPEActionBallTerminationsCfg(HOPEDeployParityTerminationsCfg):
 
 @configclass
 class HOPEPingPongActionBallAgibotA3EnvCfg(HOPEPingPongHitterAgibotA3EnvCfg):
-    """Action-conditioned ball-first task source before the exact ``N`` tail is appended.
+    """Action-conditioned ball-first task source before the fresh N1 v2 tail is installed.
 
     The class supplies the clean 177-D ``hitter_footwork`` prefix and the complete VirtualBall
-    reward/safety lineage.  ``train.py`` atomically appends the demanded-face ``+4`` and exact
-    action-one-hot ``+N`` terms only after it has verified the manifest order and
-    ``action_ball_n<N>`` contract.  Attaching either tail here would guess ``N`` and would also
-    make the preflight's clean-prefix guard impossible to satisfy.
+    reward/safety lineage.  After verifying the one-action manifest and fixed-194 v2 contract,
+    ``train.py`` atomically installs table pose/twist, the demanded-face ``+4`` and the
+    teacher-start clock.  Stable action UID and dense slot remain control-plane state and are not
+    actor observations.  Multi-action N5/N73 fail closed until a separately versioned,
+    fixed-width continuous future-motion intent exists.
     """
 
     obs_mode: str = "hitter_footwork"
