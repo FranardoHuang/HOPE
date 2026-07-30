@@ -442,6 +442,18 @@ def _read_snapshot(
                 break
             chunks.append(chunk)
         payload = b"".join(chunks)
+    except BaseException as exc:
+        # ``SimulationApp.close`` can end Kit with status zero before Python's
+        # ordinary unhandled-exception printer runs.  Emit the evidence first.
+        import traceback
+
+        print(
+            "HOPE_TABLE_DIAGNOSTIC_STAGE="
+            f"main_exception:{type(exc).__name__}:{exc}",
+            flush=True,
+        )
+        traceback.print_exc()
+        raise
     finally:
         os.close(descriptor)
     path_stat = os.stat(resolved, follow_symlinks=False)
@@ -2845,7 +2857,13 @@ def contact_smoke(env, env_cfg):
             f"HOPE_TABLE_DIAGNOSTIC_STAGE=contact_probe_body_ready:{name}",
             flush=True,
         )
-        safe_root_pose = robot.data.root_pose_w[env_ids].detach().clone()
+        safe_root_pose = torch.cat(
+            (
+                robot.data.root_pos_w[env_ids],
+                robot.data.root_quat_w[env_ids],
+            ),
+            dim=-1,
+        ).detach().clone()
         safe_body_pos = robot.data.body_pos_w[env_ids, body_id].detach().clone()
         print(
             f"HOPE_TABLE_DIAGNOSTIC_STAGE=contact_probe_pose_read:{name}",
