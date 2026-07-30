@@ -400,8 +400,10 @@ def exact_repo(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
             num_envs, iterations, save = 1, 2, 1
         elif stage == "probe":
             num_envs, iterations, save = 4096, 5, 1
+        elif stage == "milestone1000":
+            num_envs, iterations, save = 4096, 1001, 100
         elif stage == "long":
-            num_envs, iterations, save = 4096, 300_000_000_000, 100
+            num_envs, iterations, save = 4096, 20_001, 100
         else:
             num_envs, iterations, save = 64, 100, 20
         spec = {
@@ -571,7 +573,7 @@ def test_plan_binds_exact_three_reward_profiles_and_no_override_seam(
     assert payload["curriculum_promotion_prohibited"] is True
     assert "task.racket.action_ball_diagnostic_unauthorized=true" in argv
     assert "+task.racket.reference_guard_mode=metrics_only" in argv
-    assert "task.actor_obs_contract=action_ball_n1" in argv
+    assert "task.actor_obs_contract=action_ball_table_pose_n1" in argv
     assert "algo.policy.init_noise_std=0.02" in argv
     assert "action_ball_dynamic_ready_bootstrap=true" in argv
     assert "action_ball_shared_ready_bootstrap=true" not in argv
@@ -840,7 +842,7 @@ def test_accepts_only_the_exact_long_budget(exact_repo):
     assert payload["curriculum_promotion_prohibited"] is True
     assert payload["diagnostic_unauthorized"] is True
     assert payload["spec"]["num_envs"] == 4096
-    assert payload["spec"]["max_iterations"] == 300_000_000_000
+    assert payload["spec"]["max_iterations"] == 20_001
     assert payload["spec"]["save_interval"] == 100
 
 
@@ -857,6 +859,42 @@ def test_accepts_only_the_exact_probe_budget(exact_repo):
     assert "num_envs=4096" in payload["training_argv"]
     assert "max_iterations=5" in payload["training_argv"]
     assert "algo.runner.save_interval=1" in payload["training_argv"]
+
+
+def test_accepts_only_the_exact_milestone1000_budget(exact_repo):
+    spec, path = exact_repo["make_spec"](stage="milestone1000")
+    payload = L.build_plan(path)["canonical_payload"]
+    assert payload["long_stage_prohibited"] is True
+    assert payload["formal_evidence_prohibited"] is True
+    assert payload["curriculum_promotion_prohibited"] is True
+    assert payload["diagnostic_unauthorized"] is True
+    assert payload["spec"]["num_envs"] == 4096
+    assert payload["spec"]["max_iterations"] == 1001
+    assert payload["spec"]["save_interval"] == 100
+    assert "num_envs=4096" in payload["training_argv"]
+    assert "max_iterations=1001" in payload["training_argv"]
+    assert "algo.runner.save_interval=100" in payload["training_argv"]
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("num_envs", 4095),
+        ("num_envs", 4097),
+        ("max_iterations", 1000),
+        ("max_iterations", 1002),
+        ("save_interval", 99),
+        ("save_interval", 101),
+    ],
+)
+def test_rejects_any_milestone1000_budget_drift(
+    exact_repo, field, value
+):
+    spec, path = exact_repo["make_spec"](stage="milestone1000")
+    spec[field] = value
+    path.write_bytes(_canonical(spec))
+    with pytest.raises(L.LaunchRefused, match="milestone1000 is exactly"):
+        L.build_plan(path)
 
 
 @pytest.mark.parametrize(
@@ -882,8 +920,8 @@ def test_rejects_any_probe_budget_drift(exact_repo, field, value):
     [
         ("num_envs", 4095),
         ("num_envs", 4097),
-        ("max_iterations", 299_999_999_999),
-        ("max_iterations", 300_000_000_001),
+        ("max_iterations", 20_000),
+        ("max_iterations", 20_002),
         ("save_interval", 99),
         ("save_interval", 101),
     ],
@@ -1003,5 +1041,5 @@ def test_source_contains_lifetime_lock_double_gpu_check_and_no_shell():
     assert "subprocess.Popen" not in source
     assert "long_stage_prohibited" in source
     assert L.ALLOWED_STAGES == frozenset(
-        ("smoke", "probe", "canary", "long")
+        ("smoke", "probe", "canary", "milestone1000", "long")
     )

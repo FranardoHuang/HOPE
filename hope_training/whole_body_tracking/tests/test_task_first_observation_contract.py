@@ -61,9 +61,9 @@ def test_table_pose_action_ball_contract_is_explicitly_sized(action_count):
     assert contract.obs_mode == "hitter_footwork"
     assert contract.total_dim == 190 + action_count
     assert sum(term.dim for term in contract.terms) == contract.total_dim
-    assert (
-        contract.terms[: len(contract_mod.HITTER_FOOTWORK.terms)]
-        == contract_mod.HITTER_FOOTWORK.terms
+    prefix_count = len(contract_mod.HITTER_FOOTWORK.terms)
+    assert contract.layout[:prefix_count] == (
+        contract_mod.HITTER_FOOTWORK.layout
     )
     assert contract.layout[-4:] == (
         ("base_position_table", 3),
@@ -78,6 +78,14 @@ def test_n1_table_pose_action_ball_contract_is_191d():
         "action_ball_table_pose_n1"
     )
     assert contract.total_dim == 191
+    sources = {term.name: term.deploy_source for term in contract.terms}
+    assert sources["motion_anchor_ori_b"].startswith("mocap_")
+    assert sources["base_ang_vel"] == "mocap_pose_history"
+    assert sources["projected_gravity"] == "mocap"
+    assert sources["racket_target_pos_b"] == (
+        "planner_plus_mocap_plus_racket_fk"
+    )
+    assert all("imu" not in term.deploy_source for term in contract.terms)
 
 
 @pytest.mark.parametrize("action_count", [1, 5, 93])

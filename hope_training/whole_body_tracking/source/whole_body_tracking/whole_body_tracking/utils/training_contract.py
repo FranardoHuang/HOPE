@@ -59,6 +59,10 @@ ACTION_BALL_ACTION_SET_CONTRACT_KIND = (
 )
 ACTION_BALL_LAUNCH_CLAIM_KIND = "action_ball_no_clobber_launch_claim_v3"
 ACTION_BALL_LAUNCH_CLAIM_SCHEMA_VERSION = 3
+_ACTION_BALL_ACTOR_OBS_LAYOUTS = (
+    ("action_ball_table_pose_n", 190),
+    ("action_ball_n", 181),
+)
 ACTION_BALL_ACTION_SET_METADATA_KEYS = (
     "action_ball_profile_id",
     "action_ball_expected_n",
@@ -422,6 +426,35 @@ def _action_ball_order_uid_digest(
     )
 
 
+def _parse_action_ball_actor_obs_contract(
+    value: object,
+) -> tuple[int, int] | None:
+    """Return ``(N, width)`` for either supported ActionBall actor layout.
+
+    The legacy layout remains readable for existing checkpoints and claims.
+    New table-pose layouts add nine base-pose scalars, so their width is
+    ``190 + N`` instead of ``181 + N``.  Both spellings bind the exact action
+    count; leading-zero or out-of-range suffixes are deliberately rejected.
+    """
+
+    if type(value) is not str:
+        return None
+    for prefix, base_width in _ACTION_BALL_ACTOR_OBS_LAYOUTS:
+        if not value.startswith(prefix):
+            continue
+        suffix = value[len(prefix) :]
+        if (
+            not suffix.isdigit()
+            or suffix.startswith("0")
+        ):
+            return None
+        action_count = int(suffix)
+        if not 1 <= action_count <= 1024:
+            return None
+        return action_count, base_width + action_count
+    return None
+
+
 def _action_ball_literal_assignment(source: bytes, variable: str) -> object:
     try:
         text = source.decode("utf-8")
@@ -515,18 +548,23 @@ def validate_action_ball_action_set_identity_block(value: object) -> dict:
         raise ValueError("action-set order_uid_digest_sha256 does not bind ID/UID order")
     _action_ball_repo_relative_path(row["manifest_path"], name="action-set manifest_path")
     _action_ball_sha256(row["manifest_sha256"], name="action-set manifest_sha256")
-    expected_actor_contract = f"action_ball_n{expected_n}"
-    if row["actor_obs_contract"] != expected_actor_contract:
+    actor_layout = _parse_action_ball_actor_obs_contract(
+        row["actor_obs_contract"]
+    )
+    if actor_layout is None or actor_layout[0] != expected_n:
         raise ValueError(
-            "action-set actor_obs_contract must equal "
-            f"{expected_actor_contract!r}"
+            "action-set actor_obs_contract must be a supported ActionBall "
+            f"layout with exact N={expected_n}"
         )
+    expected_actor_width = actor_layout[1]
     if (
         type(row["actor_obs_width"]) is not int
         or isinstance(row["actor_obs_width"], bool)
-        or row["actor_obs_width"] != 181 + expected_n
+        or row["actor_obs_width"] != expected_actor_width
     ):
-        raise ValueError("action-set actor_obs_width must equal 181 + N")
+        raise ValueError(
+            "action-set actor_obs_width does not match its ActionBall layout"
+        )
     if row["namespace_identity"] != f"n{expected_n}-{digest[:12]}":
         raise ValueError("action-set namespace_identity does not bind N/order")
     contract_sha = _action_ball_sha256(
@@ -4114,7 +4152,10 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
     actor_contract = contract.get("actor_obs_contract")
     actor_prefixed = (
         type(actor_contract) is str
-        and actor_contract.startswith("action_ball_n")
+        and any(
+            actor_contract.startswith(prefix)
+            for prefix, _base_width in _ACTION_BALL_ACTOR_OBS_LAYOUTS
+        )
     )
     block_present = ACTION_BALL_TRAINING_KEY in contract
     projection_present = FINITE_PRECLAMP_QDES_PROJECTION_KEY in contract
@@ -4154,23 +4195,18 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
         raise ValueError(
             "schema-3 action-ball authorization requires target_mode='action_ball'"
         )
-    actor_suffix = (
-        actor_contract[len("action_ball_n") :]
-        if actor_prefixed
-        else ""
-    )
-    actor_count = (
-        int(actor_suffix)
-        if (
-            actor_suffix.isdigit()
-            and not actor_suffix.startswith("0")
-        )
-        else 0
-    )
-    if not 1 <= actor_count <= 1024:
+    actor_layout = _parse_action_ball_actor_obs_contract(actor_contract)
+    if actor_layout is None:
         raise ValueError(
             "schema-3 action-ball authorization requires "
-            "actor_obs_contract=action_ball_n<N> for N in [1,1024]"
+            "actor_obs_contract=action_ball_n<N> or "
+            "action_ball_table_pose_n<N> for N in [1,1024]"
+        )
+    actor_count, expected_actor_width = actor_layout
+    if contract.get("actor_obs_total_dim") != expected_actor_width:
+        raise ValueError(
+            "schema-3 action-ball actor_obs_total_dim does not match its "
+            "exact actor_obs_contract layout"
         )
     if not block_present:
         raise ValueError(

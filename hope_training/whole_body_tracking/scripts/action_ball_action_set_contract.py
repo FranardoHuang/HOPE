@@ -28,6 +28,8 @@ PROFILE_POLICY_VARIABLE = "ACTION_SET_PROFILE_POLICIES"
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 SAFE_PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 SAFE_EXPERIMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
+ACTOR_OBS_CONTRACT_PREFIX = "action_ball_table_pose_n"
+ACTOR_OBS_BASE_WIDTH = 190
 
 CONTRACT_KEYS = frozenset(
     {
@@ -328,8 +330,10 @@ def validate_contract(
         "schema_version": SCHEMA_VERSION,
         "kind": CONTRACT_KIND,
         **base,
-        "actor_obs_contract": "action_ball_n{}".format(expected_n),
-        "actor_obs_width": 181 + expected_n,
+        "actor_obs_contract": "{}{}".format(
+            ACTOR_OBS_CONTRACT_PREFIX, expected_n
+        ),
+        "actor_obs_width": ACTOR_OBS_BASE_WIDTH + expected_n,
         "namespace_identity": "n{}-{}".format(expected_n, digest[:12]),
     }
     identity["contract_sha256"] = canonical_sha256(identity)

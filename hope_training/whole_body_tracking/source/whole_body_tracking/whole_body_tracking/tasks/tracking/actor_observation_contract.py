@@ -211,11 +211,48 @@ def action_ball_table_pose_n_contract(
             f"[1,1024], got {action_count!r}"
         )
     count = action_count
+    # The tensor layout remains the proven HITTER 177-D prefix, but this
+    # contract deliberately replaces the old IMU pose authority.  At deploy,
+    # every base-attitude-derived actor term comes from the same calibrated
+    # mocap SE(3) history (plus measured-joint FK where needed).  An IMU may
+    # remain outside the actor as an independent safety monitor.
+    mocap_overrides = {
+        "motion_anchor_ori_b": (
+            "mocap_plus_joint_fk_plus_reference_clip",
+            "reference torso orientation error; current torso orientation "
+            "comes from calibrated mocap base pose plus measured waist FK",
+        ),
+        "base_ang_vel": (
+            "mocap_pose_history",
+            "pelvis angular velocity from a causal SO(3) difference/filter "
+            "of calibrated mocap base orientation",
+        ),
+        "projected_gravity": (
+            "mocap",
+            "gravity direction in the base frame from calibrated mocap base "
+            "orientation",
+        ),
+        "racket_target_pos_b": (
+            "planner_plus_mocap_plus_racket_fk",
+            "desired racket position relative to current racket FK in the "
+            "mocap/table-aligned base heading frame",
+        ),
+    }
+    table_pose_prefix = tuple(
+        ActorObservationTerm(
+            term.name,
+            term.dim,
+            *mocap_overrides.get(
+                term.name, (term.deploy_source, term.description)
+            ),
+        )
+        for term in HITTER_FOOTWORK.terms
+    )
     return ActorObservationContract(
         name=f"action_ball_table_pose_n{count}",
         obs_mode=HITTER_FOOTWORK.obs_mode,
         total_dim=HITTER_FOOTWORK.total_dim + 3 + 6 + 4 + count,
-        terms=HITTER_FOOTWORK.terms
+        terms=table_pose_prefix
         + (
             ActorObservationTerm(
                 "base_position_table",

@@ -9,7 +9,10 @@ stages are:
 * ``smoke``: exactly one environment and two PPO updates; and
 * ``probe``: exactly 4096 environments and five PPO updates; and
 * ``canary``: a bounded first reward-screen budget; and
-* ``long``: the single reviewed 4096-environment long-run budget.
+* ``milestone1000``: exactly 4096 environments and 1001 PPO updates, saving
+  every 100 updates so the diagnostic naturally emits ``model_1000``; and
+* ``long``: exactly 4096 environments and 20001 PPO updates, saving every
+  100 updates so the finite run ends after emitting ``model_20000``.
 
 The launcher has no arbitrary Hydra override input.  It accepts one canonical
 JSON spec, verifies an exact clean Git commit and a tracked N=1 bundle, binds
@@ -60,7 +63,9 @@ DYNAMIC_READY_KIND = "agibot_a3_action_dynamic_ready_candidate_v1"
 NOMINAL_HOLD_RECEIPT_KIND = "isaac_action_ball_nominal_hold_v1"
 EXPERIMENT_NAME = "agibot_a3_hope_action_ball_n1_reward_screen_diagnostic"
 ALLOWED_ACTIONS = frozenset(("bh_loop_c", "bh_block"))
-ALLOWED_STAGES = frozenset(("smoke", "probe", "canary", "long"))
+ALLOWED_STAGES = frozenset(
+    ("smoke", "probe", "canary", "milestone1000", "long")
+)
 ALLOWED_SCOPES = frozenset(("upper", "full"))
 SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
@@ -1366,7 +1371,8 @@ def _validate_budget(
 ) -> dict[str, Any]:
     if type(stage) is not str or stage not in ALLOWED_STAGES:
         raise LaunchRefused(
-            "stage must be smoke, exact probe, canary, or exact long"
+            "stage must be smoke, exact probe, canary, exact milestone1000, "
+            "or exact long"
         )
     envs = _plain_int(num_envs, name="num_envs", minimum=1)
     iterations = _plain_int(
@@ -1394,10 +1400,15 @@ def _validate_budget(
             raise LaunchRefused(
                 "canary save_interval must be <= iterations and <= 200"
             )
-    elif (envs, iterations, save) != (4096, 300_000_000_000, 100):
+    elif stage == "milestone1000":
+        if (envs, iterations, save) != (4096, 1001, 100):
+            raise LaunchRefused(
+                "milestone1000 is exactly 4096 envs / 1001 updates / "
+                "save interval 100"
+            )
+    elif (envs, iterations, save) != (4096, 20_001, 100):
         raise LaunchRefused(
-            "long is exactly 4096 envs / 300000000000 updates / "
-            "save interval 100"
+            "long is exactly 4096 envs / 20001 updates / save interval 100"
         )
     return {
         "stage": stage,
@@ -1461,7 +1472,7 @@ def _build_training_argv(
             "expected_effective_reward_recipe_sha256="
             f"{spec['expected_effective_reward_recipe_sha256']}"
         ),
-        "task.actor_obs_contract=action_ball_n1",
+        "task.actor_obs_contract=action_ball_table_pose_n1",
         (
             "task.rewards.full_body_mimic="
             f"{'true' if spec['scope'] == 'full' else 'false'}"
