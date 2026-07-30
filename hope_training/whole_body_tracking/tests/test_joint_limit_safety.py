@@ -212,6 +212,9 @@ def _two_step_cross_reset_action_ball_ledger(
     action_uids[0] = 303
     birth_generations[0] = 8
     swing_generations[0] = 0
+    if policy_horizon_only_crossing:
+        asset.data.joint_pos.zero_()
+        asset.data.joint_vel.zero_()
     env.episode_length_buf[:] = torch.tensor([0, 18])
     action.process_actions(torch.zeros(2, 2))
     _finish_guarded_policy_step(action, asset)
