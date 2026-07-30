@@ -13,6 +13,14 @@
 
 ## 2026-07-30（A3 stable-upper successor）
 
+- 第二批 update-wall candidate 已在 Pod 收口：exact `26c648d4` 将 diagnostic Motion timing
+  安装改成整批 host handoff，并把 fixed-18-draw refill overlap 从 `O(K²)` 降为 `O(K)`；
+  focused suite `187 passed`，fresh `1 env×2` 为 `2.67/2.45 s` 且 checkpoint finite。
+  same-seed `4096×5` 的三组深层 update JSON 与第一批逐轮完全一致，但 wall 均值只由
+  `17.14` 降到 `17.09 s`（约 `0.3%`），故正确性 PASS、性能 FAIL。当前加速明确没有收口；
+  唯一下一动作是合并每个普通 step/strike step 的 host validation barriers，再按实测决定是否
+  批量化 table/joint kernel storm。当前 milestone1000 不热补；实时 TODO 见
+  [分阶段准备看板](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md#0-当前执行看板本文唯一活跃-todo)。
 - update-wall 取证确认 r4 稳态 collection=`23.79 s`、learning=`0.299 s`，仅约
   `4.13k environment-steps/s`；约 `9–11 s` 来自 reset 热路径，另有 `12–14 s` 固定
   ledger/同步税。fresh candidate 已把 diagnostic safety 收敛为 device update aggregate，并把

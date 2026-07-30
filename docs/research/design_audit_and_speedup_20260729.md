@@ -609,3 +609,20 @@ Pod 结果已把“正确性”和“性能”分开裁定：
 `.item()` 只是小头。下一顺序改为合批 VirtualBall/command 的 per-step host barriers，再把
 剩余 reset broker/receipt 的逐 env Python 收敛为 device/batch 事件；继续以
 `≥15k steps/s` 或等 reset 负载 collection `≤6.5 s` 为健康线，不动 PPO。
+
+第二批确定性 candidate 进一步把归因缩小：
+
+- exact `26c648d4` 让 diagnostic Motion timing handoff 复用一次 host identity D2H，并把
+  fixed-18-draw refill overlap 从 `O(K²)` 改为 `O(K)`；formal 路径不变；
+- Pod focused suite `187 passed`；修正 true-reset previous-swing `-1` sentinel 后，
+  fresh `1 env×2` wall=`2.67/2.45 s` 且 checkpoint finite；
+- same-seed `4096×5` wall=`9.00/10.11/25.63/16.81/23.89 s`，三组深层 update JSON 与
+  第一批 candidate 逐轮完全相同，五份 checkpoint 全 finite；
+- 均值 `17.09 s` 只比第一批 `17.14 s` 快 `0.06 s`（约 `0.3%`），故正确性 PASS、性能
+  FAIL。
+
+这条反证推翻了“剩余大头是 Motion reset scalar reads / refill 二次扫描”的工作假设。下一批不再
+继续磨 reset 细枝，而是把 diagnostic 每个普通 step/strike step 的 invariant、finite、
+classification/partition 与 EMA scalar 收敛为少量固定 validation packet；若该批仍不能显著降低
+wall，再处理 32-body table-contact 与 joint-safety 的小 kernel/同步风暴。正在运行的 exact
+milestone1000 不热补，PPO 不改。

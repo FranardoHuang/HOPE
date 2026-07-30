@@ -4157,3 +4157,22 @@ Update-wall forensics / candidate（2026-07-30，focused tests 已过，真实�
   `≥15k environment-steps/s` 或等 reset 负载 collection `≤6.5 s`。Gate 仍为 `Partial`；
   下一批只做剩余 VirtualBall/command host barriers 与 reset broker/receipt 批量化，继续
   Pod parity/吞吐验收，不动 PPO，也不热补当前 milestone1000。
+
+Second update-wall candidate（2026-07-30，正确性 PASS、性能 FAIL）：
+
+- exact `26c648d4` 的 diagnostic Motion timing handoff 复用 Racket 已有 host identity rows，
+  消除了逐 reset env 的 timing scalar device read；fixed-18-draw refill overlap 从 staged
+  `O(K²)` 区间扫描改为 highwater + start-set `O(K)`。formal 路径未改。
+- Pod focused suite 为 `187 passed in 13.70 s`。首次 smoke 揭示 true reset 的 previous
+  swing generation 合法 sentinel 是 `-1`；修复后 fresh `1 env×2` wall=`2.67/2.45 s`，
+  两份 checkpoint 均为 80 tensor、其中 76 个浮点/复数 tensor，逐项全 finite。
+- fresh same-seed `4096×5` wall=`9.00/10.11/25.63/16.81/23.89 s`。五轮
+  `HOPE_JOINT_SAFETY_UPDATE_JSON`、`HOPE_ACTUAL_JOINT_DIAGNOSTIC_UPDATE_JSON` 与
+  `HOPE_EXACT_BEHAVIOR_UPDATE_JSON` 均与第一批 candidate 逐字相同；actual-hard
+  `0/267/3103/861/2076`、table `0/0/0/16/25`、strike opportunity
+  `0/0/1985/0/643` 未漂移，五份 checkpoint 全 finite。
+- wall 均值 `17.09 s` 只比第一批 `17.14 s` 快 `0.06 s`（约 `0.3%`），相对旧版累计只改善
+  约 `4.2%`。这反证 Motion scalar reset 读取与 refill `O(K²)` 是剩余主瓶颈；Gate 继续
+  `Partial`。下一唯一 candidate 是把 diagnostic 普通 step/strike step 的 invariant、
+  finite、partition 与 EMA scalar 收敛为少量 validation packet；若仍慢，再批量化
+  table-contact 和 joint-safety 小 kernel。PPO 与正在运行的 milestone1000 均不改。
