@@ -2911,9 +2911,9 @@ def contact_smoke(env, env_cfg):
             role_to_spec["net"]["pos"],
         ),
         (
-            "post_left_foot_s1",
+            "post_left_ankle_s1",
             "post_left",
-            "right_ankle_roll_Link",
+            "right_ankle_pitch_Link",
             1,
             role_to_spec["post_left"]["pos"],
         ),
@@ -3275,7 +3275,7 @@ def contact_smoke(env, env_cfg):
     print(
         "ok contact smoke: five table-source sensors each materialized the exact "
         "ordered 32 explicit Robot-body filters; real actor contacts covered "
-        "representative wrist/elbow/foot links, four "
+        "representative wrist/elbow/ankle links, four "
         "substeps and all five colliders; raw reason/generic terminal counted "
         "once; reset leakage zero"
     )
