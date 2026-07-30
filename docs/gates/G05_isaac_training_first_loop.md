@@ -3940,14 +3940,29 @@ update2/4 分别产生 `1838/430` 个，说明 task 击球位置/时间窗已对
 actual-hard terminal 到 update100 已降到 `14/11`，到 update169 均为 `3`。因此按预注册不被
 五轮早期失稳拦截。Pod1 GPU1 已接受 fresh 反手挡
 `n1hr_milestone1000_f2c54fc3_block_gpu1_r1`（`4096×1001`，claim
-`8dc4dcb2…ff080`）并进入真实 `Learning iteration`；2026-07-30 快照已到 update 81，
-`model_0.pt` 的 80 个 tensor 全 finite。mean episode=`67.17` steps，已跨 `t_hit`；
-该 update 有 `1176` 个 strike opportunity、`1183/1538` swing completion（`76.92%`），
-qdes forbidden=`0`。actual-hard 从 update56 的 `1649` 降到 `1420`，但仍远高于历史
-update100 反例；table/fall=`79/2`，virtual capture=`0`，exact strike hit=`3.45%`、
-位置误差约 `0.242 m`。update79 附近的 income ledger 显示 motion imitation 正项实际非零，
-但 racket position/velocity/normal 与 strike-success 仍显示 `0.0000`，death=`-7.2`、
-qdes barrier≈`-1.04`；先等 update100 同口径，不在中途热改 Reward。反手拉在
+`8dc4dcb2…ff080`）并进入真实 `Learning iteration`。2026-07-30 快照已到 update 250；
+`model_100.pt` / `model_200.pt` 均有 80 个 tensor、全部 finite。update231–250 的
+iteration time 为 `21.19–27.99 s`，平均 `23.48 s`、中位 `22.12 s`。mean episode 已到
+`124.11` steps，显著跨过 `t_hit`；该 update 有 `882` 个 strike opportunity、
+`843/1585` swing completion（`53.19%`），qdes forbidden=`0`。
+
+actual-hard 从 update81 的 `1420` 降到 update200/250 的 `265/116`；腰部已基本退出 hard
+来源，update250 主要是 left ankle pitch/roll 与少量 right ankle roll，而且全部发生在
+episode age>1，不是出生瞬间。与此同时学习质量出现相反趋势：update100→200→250 的
+exact strike hit=`1.73%→0→0.23%`，strike-window hit=`26.46%→0.20%→5.01%`；
+update250 的 exact strike position/velocity/normal error 为
+`0.2646 m / 1.4014 m/s / 81.66°`，racket speed 仅 `0.2627 m/s`，目标为
+`1.3807 m/s`。table/fall=`481/227`，base height/upright 已降到 `0.9668/0.8935`，
+virtual capture/return 仍为 `0/0`。因此目前不是“仍被初始 hard-reset 饿死”，而是
+“episode 已足够长、hard 在恢复，但 policy 通过倾倒/撞桌走向劣质局部解”。它尚未触发
+NaN、identity、receipt、Traceback 或 counter invariant 的立即停止门，故不在 update250
+热改配方，继续到预注册 update300 做同口径裁决。
+
+update250 income ledger 中 motion imitation 五项均非零；racket position 只有 `0.0001`，
+velocity/normal/strike-success 为 `0.0000`，death=`-7.2`、qdes barrier=`-0.1790`、
+qdes projection=`0.0000`。`table_hit_penalty` 为 `0.0000` 是 pinned task config
+明确设置 `table_hit_penalty_weight=0.0` 的结果；桌碰仍由 `robot_hit_table` 终止并进入
+generic death penalty，不应把零列误称为“额外桌碰罚已生效”。反手拉在
 该槽自然完成后排队。该谱系仍是 diagnostic、绑定旧 physics profile，只授权 contact/学习可行性，不授权 formal
 landing、export 或真机。G05 继续 `Partial`。
 
