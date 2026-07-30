@@ -165,12 +165,30 @@ rotation representation follows Zhou et al.,
 and avoids Euler wrap/gimbal singularities and quaternion sign ambiguity at the network boundary.
 
 At deployment the same `p_base_table` and `R_table_base` must be built from a calibrated table pose,
-the mocap rigid-body pose and the measured marker-cluster→`base_link` SE(3). The actor's
-`base_ang_vel` must be a causal estimate from mocap quaternion history; `projected_gravity` must use
-that same mocap orientation; and `motion_anchor_ori_b` must use mocap base orientation plus
-joint-encoder FK. No actor term may mix in an IMU attitude under the same contract name. The current
-191-D deploy builder and rotational marker extrinsic are OPEN, so this frame contract is
+the OptiTrack rigid-body pose and the measured marker-cluster→`base_link` SE(3). OptiTrack owns
+absolute position/orientation and the derived `projected_gravity`; the pelvis IMU's calibrated
+three-axis gyroscope owns `base_ang_vel`. The actor must not use IMU attitude/yaw under this
+contract name, and it must not obtain angular velocity by differentiating filtered mocap
+quaternions when a direct gyro measurement exists. `motion_anchor_ori_b` combines the same
+OptiTrack base orientation with joint-encoder FK. The current 194-D deploy builder, rotational
+marker extrinsic and time-aligned OptiTrack/gyro producer remain OPEN, so this frame contract is
 simulator-training-only until those are closed.
+
+Fresh ActionBall actors use the versioned
+`action_ball_table_pose_twist_heading_task_n<N>` representation. All three racket-task vectors
+share the current base yaw-heading frame:
+
+```text
+p_task_h = R_heading^T (p_target_table - p_racket_FK_table)
+v_task_h = R_heading^T v_target_table
+n_rawA_h = R_heading^T n_rawA_table
+```
+
+The full table-relative base orientation remains a separate 6-D channel. We deliberately do not
+rotate the ballistic task through the instantaneous base roll/pitch: table Z is the physical
+vertical axis, while transient body tilt is state context rather than a redefinition of the task.
+Planner wire, solver, Reward and physics stay in canonical table/world coordinates; only the actor
+view is transformed.
 
 ## Base Link
 

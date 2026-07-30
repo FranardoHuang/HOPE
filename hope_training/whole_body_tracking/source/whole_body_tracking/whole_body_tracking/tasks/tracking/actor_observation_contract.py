@@ -385,6 +385,126 @@ def action_ball_table_pose_twist_n_contract(
     )
 
 
+def action_ball_table_pose_twist_heading_task_n_contract(
+    action_count: int,
+) -> ActorObservationContract:
+    """Build the frame-consistent table-pose/twist ActionBall layout.
+
+    This is the preferred successor to
+    :func:`action_ball_table_pose_twist_n_contract`.  Width and broad grouping
+    stay ``193 + N``, but all three actor-visible racket-task vectors are now
+    represented in one base yaw-heading frame:
+
+    * target-minus-current-racket position;
+    * demanded racket velocity;
+    * demanded raw-A face normal.
+
+    The canonical planner wire, solver, reward and physics remain in the
+    table/world frame.  A new contract name is mandatory because an old 194-D
+    checkpoint has the same shape but different velocity/normal semantics.
+    """
+
+    if type(action_count) is not int or not 1 <= action_count <= 1024:
+        raise ValueError(
+            "action-ball table-pose-twist-heading-task action_count must be a "
+            f"plain integer in [1,1024], got {action_count!r}"
+        )
+    count = action_count
+    deploy_overrides = {
+        "motion_anchor_ori_b": (
+            "optitrack_plus_joint_fk_plus_reference_clip",
+            "reference torso orientation error; current torso orientation "
+            "comes from calibrated OptiTrack base pose plus measured waist FK",
+        ),
+        "base_ang_vel": (
+            "imu_gyro",
+            "pelvis angular velocity in rad/s from the bias-corrected three-axis "
+            "IMU gyroscope after the calibrated sensor-to-base rotation",
+        ),
+        "projected_gravity": (
+            "optitrack",
+            "gravity direction in the base frame from calibrated OptiTrack "
+            "base orientation",
+        ),
+        "base_target_pos_b": (
+            "planner_plus_optitrack",
+            "desired base XY station relative to the current OptiTrack base "
+            "position in the yaw-heading frame",
+        ),
+        "racket_target_pos_b": (
+            "planner_plus_optitrack_plus_racket_fk",
+            "desired racket position relative to current racket FK in the "
+            "OptiTrack/table-aligned base heading frame",
+        ),
+    }
+    deploy_prefix = []
+    for term in HITTER_FOOTWORK.terms:
+        if term.name == "racket_target_vel_w":
+            deploy_prefix.append(
+                ActorObservationTerm(
+                    "racket_target_vel_heading",
+                    3,
+                    "planner_plus_optitrack",
+                    "actor-visible demanded racket velocity rotated from the "
+                    "canonical table/world frame into the base yaw-heading frame",
+                )
+            )
+            continue
+        deploy_prefix.append(
+            ActorObservationTerm(
+                term.name,
+                term.dim,
+                *deploy_overrides.get(
+                    term.name, (term.deploy_source, term.description)
+                ),
+            )
+        )
+    return ActorObservationContract(
+        name=f"action_ball_table_pose_twist_heading_task_n{count}",
+        obs_mode=HITTER_FOOTWORK.obs_mode,
+        total_dim=HITTER_FOOTWORK.total_dim + 3 + 6 + 3 + 4 + count,
+        terms=tuple(deploy_prefix)
+        + (
+            ActorObservationTerm(
+                "base_position_table",
+                3,
+                "optitrack_plus_table_calibration",
+                "base root position relative to the calibrated table-surface center",
+            ),
+            ActorObservationTerm(
+                "base_orientation_table_6d",
+                6,
+                "optitrack_plus_table_calibration",
+                "base orientation in the table/world frame as the first two "
+                "rotation-matrix columns",
+            ),
+            ActorObservationTerm(
+                "base_lin_vel_heading",
+                3,
+                "fused_root_com_velocity_estimator",
+                "yaw-heading-frame root-rigid-body COM linear velocity from a causal "
+                "fused estimator using OptiTrack position as the absolute anchor, "
+                "the calibrated marker-to-root/COM offset, and optional IMU "
+                "accelerometer propagation",
+            ),
+            ActorObservationTerm(
+                "racket_target_normal_cmd_heading",
+                4,
+                "planner_plus_optitrack",
+                "demanded raw-A racket face normal rotated into the base "
+                "yaw-heading frame (3) + reserved spin-rho scalar",
+            ),
+            ActorObservationTerm(
+                "action_one_hot",
+                count,
+                "action_catalog",
+                "categorical local action slot; stable action_uid is resolved through the "
+                "catalog and is never treated as a numeric observation",
+            ),
+        ),
+    )
+
+
 # Stage-1 face-command contract (2026-07-06): deploy_parity + the +4D face-command channel
 # appended LAST — racket_target_normal_cmd = demanded face normal (3, world frame, from the
 # question bank / planner) + spin-rho placeholder (1, zero-filled until the S3 spin tier).
@@ -492,6 +612,20 @@ def resolve_actor_observation_contract(name: str | None) -> ActorObservationCont
     if dynamic is not None:
         return action_ball_n_contract(int(dynamic.group(1)))
     dynamic = re.fullmatch(
+        r"action_ball_table_pose_twist_heading_task_n([1-9][0-9]*)", key
+    )
+    if dynamic is not None:
+        return action_ball_table_pose_twist_heading_task_n_contract(
+            int(dynamic.group(1))
+        )
+    if key.startswith("action_ball_table_pose_twist_heading_task_n"):
+        raise ValueError(
+            "Invalid frame-consistent table-pose-twist action-ball actor "
+            f"observation contract {name!r}; expected "
+            "action_ball_table_pose_twist_heading_task_n<N> with a base-10 N "
+            "in [1,1024] and no leading zeros"
+        )
+    dynamic = re.fullmatch(
         r"action_ball_table_pose_twist_n([1-9][0-9]*)", key
     )
     if dynamic is not None:
@@ -523,6 +657,7 @@ def resolve_actor_observation_contract(name: str | None) -> ActorObservationCont
         raise ValueError(
             f"Unknown actor observation contract '{name}'. Known values: {known}, "
             "task_first_n<N>, action_ball_n<N>, "
+            "action_ball_table_pose_twist_heading_task_n<N>, "
             "action_ball_table_pose_n<N>, "
             "action_ball_table_pose_twist_n<N>"
         )

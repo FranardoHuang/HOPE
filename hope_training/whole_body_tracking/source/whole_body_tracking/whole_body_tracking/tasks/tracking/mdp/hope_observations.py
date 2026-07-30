@@ -5,6 +5,7 @@ quantities the planner provides at deploy time (HITTER actor observation, Table 
 
 * :func:`racket_target_pos_b`  — desired racket position relative to base (3)
 * :func:`racket_target_vel_w`  — desired racket velocity in world frame (3)
+* :func:`racket_target_vel_heading` — desired racket velocity in the base yaw-heading frame (3)
 * :func:`time_to_strike`       — time remaining until strike (1)
 * :func:`base_target_pos_b`    — desired base XY position relative to base (2)
 * :func:`base_position_table`  — base root position relative to table-surface center (3)
@@ -115,6 +116,24 @@ def racket_target_vel_w(env: ManagerBasedRLEnv, command_name: str) -> torch.Tens
     (delayed/jittered when target latency is on; the live tensor otherwise, byte-identical).
     The critic uses :func:`racket_target_vel_w_live`."""
     return _cmd(env, command_name).actor_racket_target_vel_w()
+
+
+def racket_target_vel_heading(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    """Actor-visible desired racket velocity in the base yaw-heading frame.
+
+    ActionBall expresses the racket-position residual in this same frame.  The
+    transform therefore keeps position and its demanded velocity covariant
+    under a global/table yaw change.  It deliberately consumes the delayed
+    actor tuple rather than the live critic/reward target.
+    """
+
+    command = _cmd(env, command_name)
+    return quat_rotate_inverse(
+        yaw_quat(command.base_quat_w),
+        command.actor_racket_target_vel_w(),
+    )
 
 
 def time_to_strike(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
@@ -297,6 +316,26 @@ def racket_target_normal_cmd(env: ManagerBasedRLEnv, command_name: str) -> torch
     # Reading the actor view is load-bearing when A1 delay/dropout is enabled: the former live read
     # paired question N+1's face with question N's delayed/held position and velocity.
     return face_command_obs_vector(_cmd(env, command_name).actor_target_normal_cmd())
+
+
+def racket_target_normal_cmd_heading(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    """ActionBall face command in the base yaw-heading frame plus unchanged rho.
+
+    The fixed action's raw-A face normal is selected before this observation is
+    built.  Rotating it here changes only the actor representation; solver,
+    reward, contact physics and the planner wire remain in the canonical
+    table/world frame.  The reserved scalar ``rho`` is frame invariant.
+    """
+
+    command = _cmd(env, command_name)
+    raw = face_command_obs_vector(command.actor_target_normal_cmd())
+    normal_heading = quat_rotate_inverse(
+        yaw_quat(command.base_quat_w),
+        raw[:, :3],
+    )
+    return torch.cat((normal_heading, raw[:, 3:4]), dim=-1)
 
 
 # --- HITTER Table-I exact actor terms (hitter_pure contract, 2026-07-07) ------------------- #

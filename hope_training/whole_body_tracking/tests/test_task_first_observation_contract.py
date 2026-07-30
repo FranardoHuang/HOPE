@@ -144,6 +144,51 @@ def test_n1_table_pose_twist_action_ball_contract_is_194d_and_sensor_bound():
     assert offsets["action_one_hot"] == (193, 194)
 
 
+@pytest.mark.parametrize("action_count", [1, 5, 73, 93])
+def test_heading_task_action_ball_contract_is_frame_consistent_and_sized(
+    action_count,
+):
+    contract = contract_mod.resolve_actor_observation_contract(
+        "action_ball_table_pose_twist_heading_task_n"
+        f"{action_count}"
+    )
+    assert contract.name == (
+        "action_ball_table_pose_twist_heading_task_n"
+        f"{action_count}"
+    )
+    assert contract.obs_mode == "hitter_footwork"
+    assert contract.total_dim == 193 + action_count
+    assert sum(term.dim for term in contract.terms) == contract.total_dim
+    assert ("racket_target_vel_w", 3) not in contract.layout
+    assert ("racket_target_vel_heading", 3) in contract.layout
+    assert contract.layout[-5:] == (
+        ("base_position_table", 3),
+        ("base_orientation_table_6d", 6),
+        ("base_lin_vel_heading", 3),
+        ("racket_target_normal_cmd_heading", 4),
+        ("action_one_hot", action_count),
+    )
+
+
+def test_n1_heading_task_action_ball_offsets_are_exactly_194d():
+    contract = contract_mod.resolve_actor_observation_contract(
+        "action_ball_table_pose_twist_heading_task_n1"
+    )
+    offsets = {}
+    offset = 0
+    for term in contract.terms:
+        offsets[term.name] = (offset, offset + term.dim)
+        offset += term.dim
+    assert offset == 194
+    assert offsets["racket_target_pos_b"] == (169, 172)
+    assert offsets["racket_target_vel_heading"] == (172, 175)
+    assert offsets["base_position_table"] == (177, 180)
+    assert offsets["base_orientation_table_6d"] == (180, 186)
+    assert offsets["base_lin_vel_heading"] == (186, 189)
+    assert offsets["racket_target_normal_cmd_heading"] == (189, 193)
+    assert offsets["action_one_hot"] == (193, 194)
+
+
 @pytest.mark.parametrize("action_count", [1, 5, 93])
 def test_task_first_and_action_ball_share_columns_but_not_identity(action_count):
     task_first = contract_mod.resolve_actor_observation_contract(
@@ -200,6 +245,22 @@ def test_table_pose_twist_action_ball_constructor_rejects_invalid_counts(
         ),
     ):
         contract_mod.action_ball_table_pose_twist_n_contract(action_count)
+
+
+@pytest.mark.parametrize("action_count", [0, 1025, True, 1.0, "5", None])
+def test_heading_task_action_ball_constructor_rejects_invalid_counts(
+    action_count,
+):
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"^action-ball table-pose-twist-heading-task action_count must "
+            r"be a plain integer in \[1,1024\]"
+        ),
+    ):
+        contract_mod.action_ball_table_pose_twist_heading_task_n_contract(
+            action_count
+        )
 
 
 def test_action_bank_size_changes_the_contract_and_shape():
@@ -279,6 +340,29 @@ def test_invalid_table_pose_twist_action_ball_contract_names_fail_closed(name):
         match=(
             r"^Invalid table-pose-twist action-ball actor observation contract "
             r".*; expected action_ball_table_pose_twist_n<N> with a base-10 N "
+            r"in \[1,1024\] and no leading zeros$"
+        ),
+    ):
+        contract_mod.resolve_actor_observation_contract(name)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "action_ball_table_pose_twist_heading_task_n0",
+        "action_ball_table_pose_twist_heading_task_n-1",
+        "action_ball_table_pose_twist_heading_task_n",
+        "action_ball_table_pose_twist_heading_task_n1.5",
+        "action_ball_table_pose_twist_heading_task_n05",
+    ],
+)
+def test_invalid_heading_task_action_ball_contract_names_fail_closed(name):
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"^Invalid frame-consistent table-pose-twist action-ball actor "
+            r"observation contract .*; expected "
+            r"action_ball_table_pose_twist_heading_task_n<N> with a base-10 N "
             r"in \[1,1024\] and no leading zeros$"
         ),
     ):

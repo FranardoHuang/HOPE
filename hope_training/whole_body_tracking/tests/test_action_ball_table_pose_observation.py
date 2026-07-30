@@ -135,6 +135,47 @@ def _load_base_lin_vel_producer():
     return namespace["base_lin_vel_heading"]
 
 
+def _load_heading_task_producers():
+    source = OBS_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(OBS_PATH))
+    names = {
+        "racket_target_vel_heading",
+        "racket_target_normal_cmd_heading",
+    }
+    nodes = [
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef) and node.name in names
+    ]
+    assert {node.name for node in nodes} == names
+    module = ast.Module(
+        body=[
+            ast.ImportFrom(
+                module="__future__",
+                names=[ast.alias("annotations")],
+                level=0,
+            ),
+            *nodes,
+        ],
+        type_ignores=[],
+    )
+    ast.fix_missing_locations(module)
+    namespace = {
+        "torch": torch,
+        "_cmd": lambda env, command_name: env.commands[command_name],
+        "yaw_quat": _yaw_quat_wxyz,
+        "quat_rotate_inverse": _quat_rotate_inverse_wxyz,
+        "face_command_obs_vector": lambda normal: torch.cat(
+            (normal, torch.zeros_like(normal[:, :1])), dim=-1
+        ),
+    }
+    exec(compile(module, str(OBS_PATH), "exec"), namespace)
+    return (
+        namespace["racket_target_vel_heading"],
+        namespace["racket_target_normal_cmd_heading"],
+    )
+
+
 def test_base_position_is_relative_to_each_env_table_surface_center():
     position, _orientation = _load_tensor_kernels()
     env_origins = torch.tensor(
@@ -207,6 +248,70 @@ def test_base_linear_velocity_producer_uses_yaw_heading_frame_truth():
     )
 
 
+def test_action_ball_velocity_and_normal_share_heading_frame_and_keep_rho():
+    half = math.sqrt(0.5)
+    delayed_velocity = torch.tensor([[1.0, 2.0, 0.5]])
+    delayed_normal = torch.tensor([[0.0, 1.0, 0.0]])
+    command = SimpleNamespace(
+        base_quat_w=torch.tensor([[half, 0.0, 0.0, half]]),
+        actor_racket_target_vel_w=lambda: delayed_velocity,
+        actor_target_normal_cmd=lambda: delayed_normal,
+    )
+    env = SimpleNamespace(commands={"racket_target": command})
+    velocity, normal = _load_heading_task_producers()
+
+    actual_velocity = velocity(env, "racket_target")
+    actual_normal = normal(env, "racket_target")
+
+    assert torch.allclose(
+        actual_velocity,
+        torch.tensor([[2.0, -1.0, 0.5]]),
+        atol=1.0e-6,
+        rtol=0.0,
+    )
+    assert torch.allclose(
+        actual_normal,
+        torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        atol=1.0e-6,
+        rtol=0.0,
+    )
+    assert torch.allclose(
+        torch.linalg.vector_norm(actual_normal[:, :3], dim=-1),
+        torch.ones(1),
+        atol=1.0e-6,
+        rtol=0.0,
+    )
+
+
+def test_heading_task_vectors_are_invariant_to_global_yaw_rotation():
+    half = math.sqrt(0.5)
+    velocity, normal = _load_heading_task_producers()
+    base = SimpleNamespace(
+        base_quat_w=torch.tensor([[1.0, 0.0, 0.0, 0.0]]),
+        actor_racket_target_vel_w=lambda: torch.tensor([[1.0, 2.0, 0.5]]),
+        actor_target_normal_cmd=lambda: torch.tensor([[0.0, 1.0, 0.0]]),
+    )
+    rotated = SimpleNamespace(
+        base_quat_w=torch.tensor([[half, 0.0, 0.0, half]]),
+        actor_racket_target_vel_w=lambda: torch.tensor([[-2.0, 1.0, 0.5]]),
+        actor_target_normal_cmd=lambda: torch.tensor([[-1.0, 0.0, 0.0]]),
+    )
+    env_base = SimpleNamespace(commands={"racket_target": base})
+    env_rotated = SimpleNamespace(commands={"racket_target": rotated})
+    assert torch.allclose(
+        velocity(env_base, "racket_target"),
+        velocity(env_rotated, "racket_target"),
+        atol=1.0e-6,
+        rtol=0.0,
+    )
+    assert torch.allclose(
+        normal(env_base, "racket_target"),
+        normal(env_rotated, "racket_target"),
+        atol=1.0e-6,
+        rtol=0.0,
+    )
+
+
 def test_train_inserts_table_pose_twist_before_face_and_action():
     source = TRAIN_PATH.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(TRAIN_PATH))
@@ -222,15 +327,20 @@ def test_train_inserts_table_pose_twist_before_face_and_action():
     assert 'f"action_ball_table_pose_n{action_count}"' in segment
     assert 'f"action_ball_table_pose_twist_n{action_count}"' in segment
     assert (
+        '"action_ball_table_pose_twist_heading_task_n"'
+        in segment
+    )
+    assert (
         segment.index("policy.base_position_table =")
         < segment.index("policy.base_orientation_table_6d =")
         < segment.index("policy.base_lin_vel_heading =")
-        < segment.index("policy.racket_target_normal_cmd =")
+        < segment.index("normal_term_name =")
         < segment.index("policy.action_one_hot =")
     )
     assert "if include_table_pose:" in segment
     assert "if include_base_twist:" in segment
     assert (
-        "configured_actor_contract == table_pose_twist_actor_contract"
+        "configured_actor_contract"
         in segment
+        and "table_pose_twist_heading_task_actor_contract" in segment
     )

@@ -14,9 +14,10 @@
 ## 2026-07-30（A3 stable-upper successor）
 
 - 首个 N1 actor 候选已收口为 194-D
-  `action_ball_table_pose_twist_n1`：177-D HITTER/footwork 前缀后加入相对桌体 XYZ、连续
-  SO(3) 6D、yaw-heading 三轴 root-COM 线速度、signed face 与冻结动作身份；base/racket
-  task 继续是机器人相对 residual。table-hit reset 只隔离上一 episode final-substep 碰桌行的
+  `action_ball_table_pose_twist_heading_task_n1`：177-D HITTER-derived 前缀内的 racket
+  position/velocity 与尾部 signed face 统一到 yaw-heading frame，另加入相对桌体 XYZ、连续
+  SO(3) 6D、yaw-heading 三轴 root-COM 线速度与冻结动作身份；base/racket task 继续是机器人
+  相对 residual。table-hit reset 只隔离上一 episode final-substep 碰桌行的
   首份 PhysX stale report，非桌碰 reset 与 persistent 新碰撞保持可见。Pod final smoke、
   `1 env×2`、`4096 env×5` 与 fresh checkpoint 尚待完成；formal receipt 热路径、部署
   producer 和 bang-bang canary 的最迟边界见
@@ -2289,3 +2290,10 @@
   复算与 tracked qvel profile bytes 相同，两动作 dynamic-ready bundle v2 已物化 PASS：
   loop `22672c3d…`、block `69b3b78d…`。recipe-only 入口同时补齐 dynamic-ready 支持，下一门是
   clean Pod 真实 scene 物化各自动作的新 schema-2 policy contract，再写 smoke spec。
+- 2026-07-30：loop/block 旧 194-D `4096×5` probe 均产出五份 finite checkpoint，但 update0
+  已分别有 `860/864` 个 env 撞 `waist_roll` raw hard；两动作 hard-env Jaccard=`0.982`，
+  qdes forbidden=`0`，teacher waist 余量 `0.272–0.303 rad`，故定位为 shared plant DR
+  超出 ready 支持而非 Reward/solver/teacher 贴限。fresh actor 已版本化为
+  `action_ball_table_pose_twist_heading_task_n1`，把 racket position/velocity/normal 统一到
+  yaw-heading frame；N1 launcher 改用 stable-ready plant，暂关 torso CoM/link-mass/PD DR。
+  下一步只在 Pod 做 focused parity、两动作 `1×2 → 4096×5`，健康即发 `4096×1001`。

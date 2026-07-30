@@ -370,13 +370,23 @@ fresh actor bias。正式写 smoke spec 前，先在 Pod 以 `1 env`、diagnosti
 新 schema-2 recipe，旧 shared-ready SHA 不得复用。
 
 fresh successor 还必须把 actor 合同切换为
-`action_ball_table_pose_twist_n1`，即 exact 194-D：相对 task channels 不变，另加桌面中心
-frame 下的 base XYZ、完整连续 6D orientation，以及与相对 task 同为 yaw-heading frame 的
+[`action_ball_table_pose_twist_heading_task_n1`](../DEFINITIONS.md#action-ball-table-pose-twist-heading-task-contract)，
+即 exact 194-D：相对 racket position residual、demanded velocity 和 raw-A face normal 全部
+统一到 yaw-heading frame；另加桌面中心 frame 下的 base XYZ、完整连续 6D orientation 与
 root-COM 三轴线速度。policy recipe 只绑定 PPO/decoder/dynamic-ready，不绑定 observation
-名称或宽度，所以现有 tracked schema-2 recipe 可复用；旧 182/191-D checkpoint 不能复用。
-194-D hard contract 必须由 fresh smoke 的实际 term order/width 和 checkpoint 证明。该 sim
+名称或宽度，所以现有 tracked schema-2 recipe 可复用；旧 182/191-D checkpoint 及旧混合-frame
+194-D checkpoint 均不能复用。194-D hard contract 必须由 fresh smoke 的实际 term order/width
+和 checkpoint 证明。该 sim
 输入由 rigid-body truth 构造；当前 C++ builder 不支持 194-D，且真实 marker→base 旋转外参、
 gyro 外参和线速度估计器尚未闭合，因此这一步只授权 Pod 训练、不授权真机。
+
+当前 launcher 还逐字加入
+`+task.domain_rand.stable_ready_plant=true`。它保留旧 robot-material DR 与 policy recipe
+钉住的 joint-default `±0.01 rad`，关闭 torso CoM、link mass 和 PD-gain DR。理由不是方便过门：
+旧 loop/block `4096×5` 在第一次 PPO 前分别有 `860/864` 个 env 撞 `waist_roll` raw hard，
+hard-env Jaccard `0.982`，而 qdes 与 teacher 都有余量，证明 full DR 的共享 plant 已压过当前
+ready 稳定域。fresh `4096×5` 必须验证该 profile 能跨 `t_hit` 且不再 hard 爆炸；1000 update
+后再按具名 DR 轴逐项恢复。
 
 验证顺序是 Pod focused tests → `1 env × 2 update` → `4096 env × 5 update` → fresh
 `milestone1000`。前两门只判断构造、finite checkpoint、reset 后 q/qdes/last-action 一致，以及

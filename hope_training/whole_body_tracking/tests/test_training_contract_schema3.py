@@ -951,9 +951,15 @@ def _action_set_identity(
     profile_id="fixture_upper_nomove_n2",
     table_pose=False,
     table_pose_twist=False,
+    heading_task=False,
 ):
-    assert not (table_pose and table_pose_twist)
-    if table_pose_twist:
+    assert sum(bool(value) for value in (table_pose, table_pose_twist, heading_task)) <= 1
+    if heading_task:
+        actor_obs_contract = (
+            "action_ball_table_pose_twist_heading_task_n2"
+        )
+        actor_obs_width = 195
+    elif table_pose_twist:
         actor_obs_contract = "action_ball_table_pose_twist_n2"
         actor_obs_width = 195
     elif table_pose:
@@ -1293,6 +1299,40 @@ def test_action_ball_table_pose_twist_layout_is_accepted_with_exact_n_and_width(
     cross_n["contract_sha256"] = TC._action_ball_canonical_sha256(code_row)
     with pytest.raises(ValueError, match="exact N=2"):
         TC.validate_action_ball_action_set_identity_block(cross_n)
+
+
+def test_frame_consistent_action_ball_layout_is_accepted_with_exact_width():
+    contract = _action_ball_diagnostic_schema3_contract()
+    contract["actor_obs_contract"] = (
+        "action_ball_table_pose_twist_heading_task_n2"
+    )
+    contract["actor_obs_total_dim"] = 195
+    contract["actor_obs_term_dims"] = [195]
+    assert TC.validate_action_ball_training_authorization(contract) is True
+
+    wrong_width = dict(contract)
+    wrong_width["actor_obs_total_dim"] = 194
+    with pytest.raises(ValueError, match="does not match"):
+        TC.validate_action_ball_training_authorization(wrong_width)
+
+    identity = _action_set_identity(heading_task=True)
+    kwargs = {
+        "actor_obs_contract": (
+            "action_ball_table_pose_twist_heading_task_n2"
+        ),
+        "actor_obs_width": 195,
+        "manifest_path": identity["manifest_path"],
+        "manifest_sha256": identity["manifest_sha256"],
+        "scope": "upper",
+        "mobility_mode": "no_move",
+        "ordered_action_ids": identity["ordered_action_ids"],
+        "ordered_action_uids": identity["ordered_action_uids"],
+        "experiment_name": identity["experiment_name"],
+    }
+    assert (
+        TC.validate_action_ball_action_set_runtime_identity(identity, **kwargs)
+        == identity
+    )
 
 
 def test_action_ball_formal_contract_crossbinds_manifest_and_preflight_order():

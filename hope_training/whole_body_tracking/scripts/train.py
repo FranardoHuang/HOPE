@@ -2300,24 +2300,43 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
     table_pose_twist_actor_contract = (
         f"action_ball_table_pose_twist_n{action_count}"
     )
+    table_pose_twist_heading_task_actor_contract = (
+        "action_ball_table_pose_twist_heading_task_n"
+        f"{action_count}"
+    )
     if configured_actor_contract not in (
         legacy_actor_contract,
         table_pose_actor_contract,
         table_pose_twist_actor_contract,
+        table_pose_twist_heading_task_actor_contract,
     ):
         raise _OverrideError(
             "[train.py] action-ball actor_obs_contract must match the exact "
-            f"action count: expected {table_pose_twist_actor_contract!r} "
+            "action count: expected "
+            f"{table_pose_twist_heading_task_actor_contract!r} "
             f"(preferred), or compatibility contracts "
+            f"{table_pose_twist_actor_contract!r}/"
             f"{table_pose_actor_contract!r}/{legacy_actor_contract!r}; got "
             f"{configured_actor_contract!r}"
         )
     include_table_pose = (
         configured_actor_contract
-        in (table_pose_actor_contract, table_pose_twist_actor_contract)
+        in (
+            table_pose_actor_contract,
+            table_pose_twist_actor_contract,
+            table_pose_twist_heading_task_actor_contract,
+        )
     )
     include_base_twist = (
-        configured_actor_contract == table_pose_twist_actor_contract
+        configured_actor_contract
+        in (
+            table_pose_twist_actor_contract,
+            table_pose_twist_heading_task_actor_contract,
+        )
+    )
+    include_heading_task = (
+        configured_actor_contract
+        == table_pose_twist_heading_task_actor_contract
     )
     expected_actor_contract = configured_actor_contract
     if str(getattr(env_cfg, "obs_mode", "")) != "hitter_footwork":
@@ -2792,6 +2811,8 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
             "base_orientation_table_6d",
             "base_lin_vel_heading",
             "racket_target_normal_cmd",
+            "racket_target_normal_cmd_heading",
+            "racket_target_vel_heading",
             "action_one_hot",
             "station_anchor_err_b",
         )
@@ -2804,6 +2825,49 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
         )
     from isaaclab.managers import ObservationTermCfg as _ObsTerm
     from whole_body_tracking.tasks.tracking import mdp as _mdp
+
+    if include_heading_task:
+        # The Hitter-footwork base config owns this slot under the historical
+        # ``racket_target_vel_w`` key.  ActionBall must version both the
+        # semantics and the term name without moving the slot: ObservationManager
+        # concatenates config ``__dict__`` insertion order.  Keep the legacy key
+        # as explicit None and insert its frame-correct successor immediately
+        # after it, then fail the runtime contract if configclass ordering ever
+        # changes underneath us.
+        policy_items = list(vars(policy).items())
+        legacy_matches = [
+            index
+            for index, (name, _value) in enumerate(policy_items)
+            if name == "racket_target_vel_w"
+        ]
+        if len(legacy_matches) != 1:
+            raise _OverrideError(
+                "[train.py] frame-consistent ActionBall expected exactly one "
+                "racket_target_vel_w config slot before replacement"
+            )
+        legacy_value = policy_items[legacy_matches[0]][1]
+        if legacy_value is None:
+            raise _OverrideError(
+                "[train.py] frame-consistent ActionBall cannot replace a "
+                "disabled racket_target_vel_w config slot"
+            )
+        rebuilt_policy_items = []
+        for name, value in policy_items:
+            if name != "racket_target_vel_w":
+                rebuilt_policy_items.append((name, value))
+                continue
+            rebuilt_policy_items.append(("racket_target_vel_w", None))
+            rebuilt_policy_items.append(
+                (
+                    "racket_target_vel_heading",
+                    _ObsTerm(
+                        func=_mdp.racket_target_vel_heading,
+                        params={"command_name": "racket_target"},
+                    ),
+                )
+            )
+        policy.__dict__.clear()
+        policy.__dict__.update(rebuilt_policy_items)
 
     if include_table_pose:
         policy.base_position_table = _ObsTerm(
@@ -2819,9 +2883,22 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
             func=_mdp.base_lin_vel_heading,
             params={"command_name": "racket_target"},
         )
-    policy.racket_target_normal_cmd = _ObsTerm(
-        func=_mdp.racket_target_normal_cmd,
-        params={"command_name": "racket_target"},
+    normal_term_name = (
+        "racket_target_normal_cmd_heading"
+        if include_heading_task
+        else "racket_target_normal_cmd"
+    )
+    setattr(
+        policy,
+        normal_term_name,
+        _ObsTerm(
+            func=(
+                _mdp.racket_target_normal_cmd_heading
+                if include_heading_task
+                else _mdp.racket_target_normal_cmd
+            ),
+            params={"command_name": "racket_target"},
+        ),
     )
     policy.action_one_hot = _ObsTerm(
         func=_mdp.action_one_hot,
@@ -2838,7 +2915,12 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
             else ""
         )
         + ("base_lin_vel_heading(+3)," if include_base_twist else "")
-        + f"racket_target_normal_cmd(+4),action_one_hot(+{action_count}) "
+        + (
+            "racket_target_normal_cmd_heading(+4),"
+            if include_heading_task
+            else "racket_target_normal_cmd(+4),"
+        )
+        + f"action_one_hot(+{action_count}) "
         f"(actor_obs_contract={expected_actor_contract}; "
         f"preflight_sha256={preflight['sha256']}; "
         "motion_admission_certificate_sha256="
@@ -12093,17 +12175,77 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             applied.append(f"terminations.ee_body_pos.body_names={_kept} "
                            f"(ee_upper_only: ankles freed, wrist z still tracks the reference)")
 
-    # Domain randomization: behaviour preserved exactly (the pd_gain "absent/null -> disable" semantics
-    # are intentional). Only logging is added; the hasattr guards stay so DR stays optional per task.
+    # Domain randomization: behaviour preserved exactly unless an N=1
+    # diagnostic launch explicitly selects the stable-ready plant.  This is a
+    # learning prerequisite, not a robustness claim: the current 4096-env
+    # probes show a shared waist-roll raw-hard failure before PPO while the
+    # nominal hold and both teacher clips have ample limit margin.  Keep the
+    # already recipe-bound ±0.01 joint-default offset and historical material
+    # randomization, but remove the three plant axes that directly change the
+    # weak waist equilibrium (torso CoM, link mass and PD gains).
     dr = _get(task, "domain_rand")
     if dr is not None and hasattr(env_cfg, "events"):
         E = env_cfg.events
         mr = _get(dr, "link_mass_range")
-        if mr is not None and hasattr(E, "randomize_link_mass"):
-            E.randomize_link_mass.params["mass_distribution_params"] = (float(mr[0]), float(mr[1]))
-            applied.append(f"events.randomize_link_mass.mass_distribution_params=({float(mr[0])}, {float(mr[1])})")
-        if hasattr(E, "randomize_pd_gains"):
-            pr = _get(dr, "pd_gain_range")
+        pr = _get(dr, "pd_gain_range")
+        stable_ready_plant_raw = _get(dr, "stable_ready_plant")
+        stable_ready_plant = (
+            False
+            if stable_ready_plant_raw is None
+            else _as_explicit_bool(
+                stable_ready_plant_raw,
+                "task.domain_rand.stable_ready_plant",
+            )
+        )
+        if stable_ready_plant:
+            racket_cfg = getattr(
+                getattr(env_cfg, "commands", None), "racket_target", None
+            )
+            if (
+                getattr(racket_cfg, "target_mode", None) != "action_ball"
+                or getattr(
+                    racket_cfg,
+                    "action_ball_diagnostic_unauthorized",
+                    None,
+                )
+                is not True
+            ):
+                raise _OverrideError(
+                    "[train.py] task.domain_rand.stable_ready_plant=true is "
+                    "restricted to diagnostic ActionBall launches"
+                )
+            required_events = (
+                "base_com",
+                "randomize_link_mass",
+                "randomize_pd_gains",
+            )
+            missing_events = [
+                name for name in required_events if not hasattr(E, name)
+            ]
+            if missing_events:
+                raise _OverrideError(
+                    "[train.py] stable-ready ActionBall plant cannot disable "
+                    f"the required DR axes; missing event slots={missing_events}"
+                )
+            E.base_com = None
+            E.randomize_link_mass = None
+            E.randomize_pd_gains = None
+            applied.append(
+                "task.domain_rand.stable_ready_plant=true "
+                "(torso CoM/link-mass/PD randomization disabled; historical "
+                "robot-material and recipe-bound joint-default offset retained)"
+            )
+        else:
+            if mr is not None and hasattr(E, "randomize_link_mass"):
+                E.randomize_link_mass.params["mass_distribution_params"] = (
+                    float(mr[0]),
+                    float(mr[1]),
+                )
+                applied.append(
+                    "events.randomize_link_mass.mass_distribution_params="
+                    f"({float(mr[0])}, {float(mr[1])})"
+                )
+        if not stable_ready_plant and hasattr(E, "randomize_pd_gains"):
             if pr is None:
                 E.randomize_pd_gains = None  # disable
                 applied.append("events.randomize_pd_gains=None(disabled)")

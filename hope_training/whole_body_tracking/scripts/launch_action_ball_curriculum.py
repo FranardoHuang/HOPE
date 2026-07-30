@@ -1107,8 +1107,11 @@ def _load_action_set_contract(
         "manifest_path": manifest_path,
         "manifest_sha256": manifest_sha,
         "experiment_name": experiment_name,
-        "actor_obs_contract": f"action_ball_n{expected_n}",
-        "actor_obs_width": 181 + expected_n,
+        "actor_obs_contract": (
+            "action_ball_table_pose_twist_heading_task_n"
+            f"{expected_n}"
+        ),
+        "actor_obs_width": 193 + expected_n,
         "namespace_identity": f"n{expected_n}-{digest[:12]}",
     }
     identity["contract_sha256"] = canonical_sha256(identity)

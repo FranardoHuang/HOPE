@@ -1472,7 +1472,8 @@ def _build_training_argv(
             "expected_effective_reward_recipe_sha256="
             f"{spec['expected_effective_reward_recipe_sha256']}"
         ),
-        "task.actor_obs_contract=action_ball_table_pose_twist_n1",
+        "task.actor_obs_contract="
+        "action_ball_table_pose_twist_heading_task_n1",
         (
             "task.rewards.full_body_mimic="
             f"{'true' if spec['scope'] == 'full' else 'false'}"
@@ -1503,6 +1504,10 @@ def _build_training_argv(
             f"{spec['policy_contract_sha256']}"
         ),
         "task.racket.action_ball_diagnostic_unauthorized=true",
+        # The first policy keeps the historical material/default-offset axes
+        # but removes the shared waist-equilibrium CoM/mass/PD perturbations.
+        # Those axes return only after a robust-hold certificate covers them.
+        "+task.domain_rand.stable_ready_plant=true",
         "+task.racket.reference_guard_mode=metrics_only",
         f"task.racket.action_ball_seed={spec['seed']}",
         "task.racket.question_bank=",

@@ -573,9 +573,14 @@ def test_plan_binds_exact_three_reward_profiles_and_no_override_seam(
     assert payload["curriculum_promotion_prohibited"] is True
     assert "task.racket.action_ball_diagnostic_unauthorized=true" in argv
     assert "+task.racket.reference_guard_mode=metrics_only" in argv
-    assert "task.actor_obs_contract=action_ball_table_pose_twist_n1" in argv
+    assert (
+        "task.actor_obs_contract="
+        "action_ball_table_pose_twist_heading_task_n1"
+        in argv
+    )
     assert "algo.policy.init_noise_std=0.02" in argv
     assert "action_ball_dynamic_ready_bootstrap=true" in argv
+    assert "+task.domain_rand.stable_ready_plant=true" in argv
     assert "action_ball_shared_ready_bootstrap=true" not in argv
     dynamic_ready = payload["bundle"]["dynamic_ready"]
     checkout = Path(payload["spec"]["source"]["checkout"])

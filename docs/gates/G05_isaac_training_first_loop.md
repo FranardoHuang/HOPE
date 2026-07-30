@@ -3866,9 +3866,9 @@ bytes 相同；upper loop/block bundle v2 materialize 均 PASS，SHA 分别为 `
 纠正，生产 solver 未改。尚缺真实 A3 scene 的 schema-2 policy recipe、两动作 `1 env×2`、
 `4096 env×5` 和 finite checkpoint，G05 继续 `Partial`。
 
-#### 2026-07-30 194-D table-pose-twist 首发合同与剩余边界
+#### 2026-07-30 194-D table-pose-twist 原候选与剩余边界
 
-首个 fresh N1 候选升级为
+该轮原始 fresh N1 候选曾升级为
 [`action_ball_table_pose_twist_n1`](../DEFINITIONS.md#action-ball-table-pose-twist-contract)：
 完整 `hitter_footwork(177)` 前缀后依次追加 table-relative position `3`、连续完整 SO(3)
 orientation `6`、yaw-heading root-COM linear velocity `3`、signed face/rho `4` 与冻结 action
@@ -3876,7 +3876,9 @@ identity `1`，总宽 **194**。三个角度没有被简化成 yaw；task 的 ba
 相对 residual，绝对 9 值只补“机器人相对桌体在哪里、朝向如何”的几何上下文。部署权威按物理量
 拆分为 OptiTrack position/orientation、pelvis IMU 三轴 gyro，以及以 OptiTrack position 为
 无漂移锚的因果三轴线速度估计器。旧 182/191-D checkpoint 不可复用；dynamic-ready policy
-recipe 与 observation hard contract 分层，现有两份 recipe 无需重物化。
+recipe 与 observation hard contract 分层，现有两份 recipe 无需重物化。后续 probe 发现该
+同宽合同混用了 heading position 与 world velocity/normal，已由下文版本化的 frame-consistent
+合同取代；本段只保留当时证据。
 
 当前 source 同时修正 table-hit 后 reset 的 PhysX stale force report：只对上一 episode
 **最终 physics substep** 确有 table hit 的 env，隔离新 episode 第一份不可区分的旧 report；
@@ -3896,3 +3898,23 @@ penalty、EMA 或 command governor；这些分别在 formal N5 前和健康 `mod
 闭合。当前两份 actor bias 超出 `[-1,1]`，直接 raw clip 会使动作专属 ready 不可达。首发前
 唯一剩余运行门已收窄为：194-D 真实 actor 构造、finite checkpoint、episode 跨 `t_hit`，
 以及 table/fall/raw-hard/nonfinite 不持续爆炸。
+
+#### 2026-07-30 frame-consistent 194-D 与 shared-waist DR 收口
+
+`c9682591` 的 loop/block 旧混合-frame 194-D `4096 env × 5 update` probe 均有真实 PPO
+update 和 finite `model_0..4`。mean episode 从 `24` 到约 `29–32` steps，birth age `<=1`
+actual-hard 为零；但第一次 PPO 更新前仍分别有 `860/864` 个 env 触发
+`waist_roll_joint` raw mechanical hard。两动作 hard-env Jaccard=`0.982`、substep
+Jaccard=`0.992`，qdes forbidden 始终为零；teacher 的 waist raw-hard 最小余量为
+`0.272–0.303 rad`。因此不能把旧 probe 续成长跑，也不能靠改 Reward、删除 actual-hard 或
+放宽机械限位掩盖问题；证据指向共享 torso-CoM/link-mass/PD DR 超出当前 ready 稳定域。
+
+fresh successor 改用
+[`action_ball_table_pose_twist_heading_task_n1`](../DEFINITIONS.md#action-ball-table-pose-twist-heading-task-contract)：
+racket position residual、demanded velocity 与 raw-A face normal 全部统一到 yaw-heading frame；
+table-relative base position `3` + continuous orientation `6` 仍保留完整 6-DoF，宽度保持
+`194`。旧同宽 checkpoint 因列语义不同不能 resume。N1 launcher 同时选择
+[`stable-ready plant`](../DEFINITIONS.md#stable-ready-plant)，只暂关 torso CoM、link mass
+与 PD-gain DR，保留 material DR 和 recipe-bound joint-default offset。下一证据是 clean Pod
+focused parity → 两动作 `1×2` → `4096×5`；任一动作跨 `t_hit` 且 raw-hard 不再爆炸即发
+`4096×1001`。当前仍未授权真机，G05 保持 `Partial`。
