@@ -167,6 +167,9 @@ def test_motion_write_and_later_commit_rollback_include_action_state():
         ),
     )
     dynamic_action = _FakeDynamicAction()
+    # Production configuration sets this seal before the first true reset;
+    # this focused write/rollback rig bypasses that constructor path.
+    command._action_ball_dynamic_ready_binding_sha256 = _PIN_SHA
     command._action_ball_dynamic_ready_action_term = dynamic_action
     command._action_ball_dynamic_ready_normalized_actor_action = torch.stack(
         (torch.full((_JOINTS,), -0.1), torch.full((_JOINTS,), 0.1))
