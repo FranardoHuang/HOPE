@@ -41,6 +41,10 @@
   smoke、`1 env×2`、`4096 env×5` 与 fresh finite checkpoint 已完成；formal receipt 热路径、
   部署 producer 和 bang-bang canary 的最迟边界见
   [分阶段准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
+- fresh successor 已采用 195-D
+  `action_ball_table_pose_twist_heading_task_teacher_start_n1`；exact `020dc8d9` 在 Pod1 的
+  observation/action-set/launcher/schema focused suite 为 `390 passed, 9 skipped in 71.26 s`。
+  旧三条 194-D 运行不重标、不 exact resume；195-D 真实 Isaac `1 env×2` 仍是下一构造门。
 - Pod1 clean `eb2799b1` 的 table smoke 已完成 E2：32 个 A3 body×top/keepout/net/左右 post
   五列 matrix 全构造，五 role 均有真实 PhysX 正控，四个子步覆盖；五次 automatic reset 后
   table raw reason/ledger/force 全零。log SHA 为 `15c52d29…26aac`，unsupported/Traceback/FAIL

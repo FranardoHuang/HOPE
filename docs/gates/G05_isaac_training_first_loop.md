@@ -3999,6 +3999,9 @@ teacher bytes，不能作为科学对照。G05 保持 `Partial`。
 避免 formal reset 首个 observation 出现一帧假零。旧 `f2c54fc3` 三条 194-D run 不停机、不重标、
 不允许以新合同 exact resume。新 source 在 Pod N1 195-D `1 env×2 update` 构造 smoke 前保持
 `Partial`，且 action-set source SHA、training contract 与 launch claim 均须 fresh repin。
+exact `020dc8d9` 已在 Pod1 跑过 teacher-start/observation/action-set/launcher/schema focused
+suite：`390 passed, 9 skipped in 71.26 s`。这证明 dependency-light 接线，不冒充 195-D
+ObservationManager 的真实 Isaac 构造或 finite PPO checkpoint。
 
 2026-07-30 19:39 CST 只读快照：loop seed0 / block seed0 / block seed1 分别到 update
 `219 / 574 / 186`，mean episode=`104.88 / 481.52 / 105.90`，均继续产生真实 PPO update，
