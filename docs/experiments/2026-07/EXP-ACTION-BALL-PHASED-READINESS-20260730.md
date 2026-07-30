@@ -247,8 +247,8 @@ selector 或换动作。若未来希望自然借力挡得更深，才另把 land
 blob map 重物化 profile pins `9ccb9854…5788`、current-source base bundle
 `0daa5bce…ace53` 和 1.1 倍 bundle `f2be2331…1a491`；physics SHA 保持
 `aa5c9085…f85b7`，solver profile 因实现 source pin 更新为 `bf255a78…f26e`。
-这次 repin 不改变来球、落点、动作或 Reward 数值。fresh launch 将在下一份 canonical spec
-绑定包含这些工件的 exact source commit、seed `0` 和 Pod1 GPU2；仍按
+这次 repin 不改变来球、落点、动作或 Reward 数值。三份 canonical spec 现绑定 exact source
+`77f01deb`、fast-ball bundle `f2be2331…1a491`、seed `0` 和 Pod1 GPU2；仍按
 1 env×2 update → 4096 env×5 update → 4096 env×1001 update 串行。每一阶段自然完成、
 checkpoint finite 且无 fatal 后才发下一阶段；三段都从新随机初始化开始，不把前段 checkpoint
 当作续训，也不覆盖旧 GPU2 seed1 目录。
