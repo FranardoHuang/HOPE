@@ -242,12 +242,16 @@ commit、194-D observation 和旧 physics 身份，不因文档或 main 前移�
 selector 或换动作。若未来希望自然借力挡得更深，才另把 landing aim 作为显式课程轴，而不在
 本比较里混入。
 
-该诊断臂绑定 source `1bf55e5a`、seed `0` 和 Pod1 GPU2，使用三个 fresh no-clobber spec：
-`smoke_block_upper_gpu2_seed0_1bf55e5a_r1.json`（1 env×2 update）、
-`probe_block_upper_gpu2_seed0_1bf55e5a_r1.json`（4096 env×5 update）和
-`milestone1000_block_upper_gpu2_seed0_1bf55e5a_r1.json`（4096 env×1001 update）。
-每一阶段自然完成、checkpoint finite 且无 fatal 后才发下一阶段；三段都从新随机初始化开始，
-不把前段 checkpoint 当作续训，也不覆盖旧 GPU2 seed1 目录。
+第一次 plan 正确拒绝了旧 r9 bundle：最新 source 的 `hope_commands.py` blob SHA 已从
+`0e650b…` 变为 `e24190…`，而 derivative 仍引用旧 profile pins。随后在 Pod 以 exact source
+blob map 重物化 profile pins `9ccb9854…5788`、current-source base bundle
+`0daa5bce…ace53` 和 1.1 倍 bundle `f2be2331…1a491`；physics SHA 保持
+`aa5c9085…f85b7`，solver profile 因实现 source pin 更新为 `bf255a78…f26e`。
+这次 repin 不改变来球、落点、动作或 Reward 数值。fresh launch 将在下一份 canonical spec
+绑定包含这些工件的 exact source commit、seed `0` 和 Pod1 GPU2；仍按
+1 env×2 update → 4096 env×5 update → 4096 env×1001 update 串行。每一阶段自然完成、
+checkpoint finite 且无 fatal 后才发下一阶段；三段都从新随机初始化开始，不把前段 checkpoint
+当作续训，也不覆盖旧 GPU2 seed1 目录。
 
 ## 3. 分阶段最迟闭合项
 

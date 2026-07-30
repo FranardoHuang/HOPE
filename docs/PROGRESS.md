@@ -55,6 +55,10 @@
   降到均值 `0.7206`；4096 题中 `2763` 题 admitted，`1333` 题按 residual/teacher-rate 下界
   分账拒绝。该结果只授权 fresh diagnostic comparison，不满足 formal `95%` admission 门；语义和后续
   发射边界见[分阶段准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
+- 首次 fast-ball plan 因旧 r9 solver blob pin 与最新 source 不一致而 fail-closed，未创建 run。
+  Pod 随后把 current-source profile pins、base bundle 和 1.1 倍 derivative 重物化为
+  `9ccb9854…5788` / `0daa5bce…ace53` / `f2be2331…1a491`；physics 与科学参数均未变，
+  下一提交再用包含新工件的 exact source commit 生成 canonical 三阶段 spec。
 - Pod1 clean `eb2799b1` 的 table smoke 已完成 E2：32 个 A3 body×top/keepout/net/左右 post
   五列 matrix 全构造，五 role 均有真实 PhysX 正控，四个子步覆盖；五次 automatic reset 后
   table raw reason/ledger/force 全零。log SHA 为 `15c52d29…26aac`，unsupported/Traceback/FAIL

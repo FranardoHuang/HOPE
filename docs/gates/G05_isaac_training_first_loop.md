@@ -4030,3 +4030,10 @@ motion、solver、physics、拍速方向、原落点中心 `2.555 m` 与初始�
 均保留在 proposal 分母。该证据证明快球在同一落点约束下会让挡球卸力并形成更慢的 teacher
 task，但 solver rejection 使实际题分布条件化，且未达到 formal `95%` admission 门，只允许 fresh no-clobber
 diagnostic comparison，不改变 G05=`Partial`，也不冒充 curriculum 晋级。
+
+同日第一次 fast-ball plan 在创建 namespace 前按预期 fail-closed：derivative 引用的 r9 profile
+把 `hope_commands.py` 钉为 `0e650b…`，最新 source 实际为 `e24190…`。没有绕过该门；Pod 以
+exact source blob map 重物化 profile pins `9ccb9854…5788`、base bundle
+`0daa5bce…ace53` 和 fast-ball bundle `f2be2331…1a491`。physics SHA 和全部科学参数未变，
+solver profile 更新为 `bf255a78…f26e`。新 canonical spec 必须绑定包含这组工件的 exact
+source commit；旧 `8bd480…` bundle 不再用于发射。
