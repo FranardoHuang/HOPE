@@ -2261,6 +2261,11 @@ class RacketTargetCommand(CommandTerm):
     # 放一个类级 False 兜底,任何没经过 __init__ 的实例都读到"关",默认安全,且以后新增读点不必
     # 逐个记得写 getattr。
     _cq_enabled: bool = False
+    # Counter-rally is installed only by the ActionBall runtime loader.  The
+    # shared virtual-ball evaluator also serves reference/scene diagnostics,
+    # so its disabled default must exist even when no ActionBall manifest was
+    # loaded.
+    _counter_rally_enabled: bool = False
 
     def __init__(self, cfg: RacketTargetCommandCfg, env: ManagerBasedRLEnv):
         # Validate even when face_command is currently disabled: a typo must fail at environment

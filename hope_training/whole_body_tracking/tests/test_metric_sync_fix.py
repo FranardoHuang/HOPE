@@ -57,6 +57,13 @@ DECAY = 0.99
 MIN_COUNT = 50.0
 
 
+def test_counter_rally_is_disabled_without_action_ball_loader():
+    command = hope_commands_mod.RacketTargetCommand.__new__(
+        hope_commands_mod.RacketTargetCommand
+    )
+    assert command._counter_rally_enabled is False
+
+
 # --------------------------------------------------------------------------------------------- #
 # rally-ledger harness: a RacketTargetCommand with exactly the state the accounting methods touch
 # --------------------------------------------------------------------------------------------- #
