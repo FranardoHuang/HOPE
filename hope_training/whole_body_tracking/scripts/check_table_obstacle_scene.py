@@ -2838,6 +2838,26 @@ def contact_smoke(env, env_cfg):
             f"HOPE_TABLE_DIAGNOSTIC_STAGE=contact_probe_reset_done:{name}",
             flush=True,
         )
+        # Resetting an Isaac articulation does not itself advance PhysX contact
+        # buffers.  Settle one ordinary policy step before arming the pulse so
+        # the probe cannot misclassify a previous component's final force as
+        # substep one of this component.
+        (
+            _settle_obs,
+            _settle_reward,
+            _settle_terminated,
+            _settle_truncated,
+            _settle_extras,
+        ) = env.step(zero_action)
+        settle_table_reason = unwrapped.termination_manager.get_term(
+            "robot_hit_table"
+        )
+        if bool(settle_table_reason[0].item()):
+            _fail(f"{name}: reset settle step already reports robot_hit_table")
+        print(
+            f"HOPE_TABLE_DIAGNOSTIC_STAGE=contact_probe_settle_done:{name}",
+            flush=True,
+        )
         if body_name not in robot.body_names:
             _fail(f"contact probe body {body_name!r} is absent from articulation")
         pair_sensor = sensor_by_body[body_name]
