@@ -359,7 +359,10 @@ Isaac nominal-hold PASS receipt 一起钉住。launcher 会把
 `action_ball_dynamic_ready_bootstrap=true`（物理出生仍是 motion frame 0，但控制目标与 actor
 初始输出使用该动作 hold qdes）及两件文件的 path/SHA 逐字传给 trainer；旧 bundle v1 只允许
 审计读取，不能进入该发射路径。shared-ready 与 dynamic-ready 不得同时打开，resume 不得覆盖
-fresh actor bias。
+fresh actor bias。正式写 smoke spec 前，先在 Pod 以 `1 env`、diagnostic 和同一 dynamic-ready
+双 pin 运行 `action_ball_policy_recipe_output_path=<fresh absolute path>`；该 recipe-only 构造
+只写 exact PPO/policy contract，不做 PPO update。spec 的 `policy_contract_sha256` 必须取自这份
+新 schema-2 recipe，旧 shared-ready SHA 不得复用。
 
 验证顺序是 Pod focused tests → `1 env × 2 update` → `4096 env × 5 update`。前两门只判断构造、
 finite checkpoint、reset 后 q/qdes/last-action 一致，以及 episode 是否能够活到动作 `t_hit`；

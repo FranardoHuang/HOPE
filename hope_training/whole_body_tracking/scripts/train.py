@@ -4510,7 +4510,7 @@ def _action_ball_agent_recipe(
 def _resolve_action_ball_shared_ready_bootstrap_request(
     cfg, *, action_ball_launch_requested: bool
 ) -> tuple[bool, str | None]:
-    """Resolve the explicit N1/N5 bootstrap and materialization-only mode."""
+    """Resolve the legacy shared-ready switch and common recipe output path."""
 
     raw = _get(cfg, "action_ball_shared_ready_bootstrap")
     requested = False if raw is None else _as_explicit_bool(
@@ -4531,11 +4531,6 @@ def _resolve_action_ball_shared_ready_bootstrap_request(
     if requested and not action_ball_launch_requested:
         raise RuntimeError(
             "action_ball_shared_ready_bootstrap is ActionBall-only"
-        )
-    if output is not None and not requested:
-        raise RuntimeError(
-            "action_ball_policy_recipe_output_path requires "
-            "action_ball_shared_ready_bootstrap=true"
         )
     return requested, output
 
@@ -12369,6 +12364,17 @@ def _run(cfg):
     ):
         raise RuntimeError(
             "shared-ready and dynamic-ready actor bootstraps are mutually exclusive"
+        )
+    if (
+        action_ball_policy_recipe_output_path is not None
+        and not (
+            action_ball_shared_ready_bootstrap_requested
+            or action_ball_dynamic_ready_bootstrap_requested
+        )
+    ):
+        raise RuntimeError(
+            "action_ball_policy_recipe_output_path requires exactly one "
+            "shared-ready or dynamic-ready bootstrap"
         )
     action_ball_dynamic_ready_binding = None
     if action_ball_dynamic_ready_bootstrap_requested:

@@ -64,9 +64,10 @@ action_ball_dynamic_ready_artifact_sha256: null
 action_ball_dynamic_ready_nominal_receipt_path: null
 action_ball_dynamic_ready_nominal_receipt_sha256: null
 # Materialization-only escape hatch for producing the exact bootstrap-bound
-# PPO recipe before a no-clobber launch.  It requires the explicit bootstrap,
-# one environment, diagnostic ActionBall, and an unused absolute output path;
-# the process closes the environment without constructing a PPO runner.
+# PPO recipe before a no-clobber launch.  It requires exactly one explicit
+# shared-ready or dynamic-ready bootstrap, one environment, diagnostic
+# ActionBall, and an unused absolute output path; the process closes the
+# environment without constructing a PPO runner.
 action_ball_policy_recipe_output_path: null
 
 # logging
