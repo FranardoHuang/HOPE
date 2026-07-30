@@ -2878,6 +2878,8 @@ def contact_smoke(env, env_cfg):
             ),
             dim=-1,
         ).detach().clone()
+        safe_joint_pos = robot.data.joint_pos[env_ids].detach().clone()
+        safe_joint_vel = robot.data.joint_vel[env_ids].detach().clone()
         safe_body_pos = robot.data.body_pos_w[env_ids, body_id].detach().clone()
         print(
             f"HOPE_TABLE_DIAGNOSTIC_STAGE=contact_probe_pose_read:{name}",
@@ -2996,9 +2998,21 @@ def contact_smoke(env, env_cfg):
                 f"{TABLE_HIT_FORCE_THRESHOLD_N:g} N numerical-zero tolerance"
             )
         # ``env.step`` already reset the selected terminal row.  Do not call
-        # ``env.reset`` here: the immediately following clean step is the
-        # evidence that the selected automatic reset cleared both the sticky
-        # table latch and generic terminal state.
+        # ``env.reset`` here.  The generic command reset may independently
+        # resample a motion pose that touches the table, while ActionBall
+        # training atomically reinstalls its certified dynamic-ready state.
+        # Restore the exact table-clear snapshot that this probe started from,
+        # then let the immediately following physics step test whether the
+        # sticky table latch and stale report were cleared.
+        robot.write_root_pose_to_sim(safe_root_pose, env_ids=env_ids)
+        robot.write_root_velocity_to_sim(
+            zero_root_velocity, env_ids=env_ids
+        )
+        robot.write_joint_state_to_sim(
+            safe_joint_pos,
+            safe_joint_vel,
+            env_ids=env_ids,
+        )
         reason_after_positive = int(ledger[reason_key].item())
         terminal_after_positive = int(ledger["terminal_reset_count"].item())
         (

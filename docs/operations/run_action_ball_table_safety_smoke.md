@@ -79,6 +79,9 @@ top/keep-out/net/posts 做真实正控并推进 PhysX。必须同时满足：
   report 误写成 table-sensor 失败。
 - 初始 settle 只要求 `robot_hit_table=false`；reference/episode 等其他 generic termination
   继续进入各自账本，但不冒充桌碰传感器的负例或阻断本工具的五角色物理正控。
+- 每个正 pulse 的 automatic reset 后，诊断器在 clean step 前原子恢复该 probe 保存的
+  table-clear root/joint snapshot；这是对训练 dynamic-ready reset 的最小等价替身，避免 generic
+  motion resample 自己生成桌碰姿态后被误判成跨 episode stale 泄漏。
 
 输出最后一行 `HOPE_TABLE_OBSTACLE_CHECK_JSON=...` 原样保存。失败日志也保存，不得删失败尝试后重报
 “全过”。
