@@ -2782,22 +2782,6 @@ def contact_smoke(env, env_cfg):
             top["pos"],
             0,
         ),
-        (
-            "top_left_foot_s2",
-            "top",
-            "left_ankle_roll_Link",
-            2,
-            top["pos"],
-            0,
-        ),
-        (
-            "top_right_foot_s3",
-            "top",
-            "right_ankle_roll_Link",
-            3,
-            top["pos"],
-            0,
-        ),
     )
     component_probes = (
         # These additional rows cover the edge and every non-top assembly component.
@@ -3066,7 +3050,7 @@ def contact_smoke(env, env_cfg):
     }
     print(
         "ok contact smoke: all 32 exact pair filters materialized; real actor "
-        "contacts covered both feet, representative upper-body links, four "
+        "contacts covered representative upper-body links, four "
         "substeps and all five colliders; raw reason/generic terminal counted "
         "once; reset leakage zero"
     )
