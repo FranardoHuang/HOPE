@@ -3779,7 +3779,10 @@ def bench(env, steps):
     act = torch.zeros(env.unwrapped.num_envs,
                       env.unwrapped.action_manager.total_action_dim,
                       device=env.unwrapped.device)
-    for _ in range(20):          # warm-up: PhysX broadphase + CUDA graphs settle
+    # Short probes intentionally finish before the known early-policy
+    # raw-hard onset; long probes retain the historical 20-step warm-up.
+    warmup_steps = min(20, max(4, steps // 5))
+    for _ in range(warmup_steps):  # PhysX broadphase + CUDA graphs settle
         env.step(act)
     torch.cuda.synchronize()
     t0 = time.perf_counter()
@@ -3790,6 +3793,7 @@ def bench(env, steps):
     _results["bench"] = {
         "table_obstacle": bool(ARGS.table_obstacle == "on"),
         "num_envs": int(env.unwrapped.num_envs),
+        "warmup_steps": int(warmup_steps),
         "steps": int(steps),
         "seconds_per_step": per_step,
         "ms_per_step": per_step * 1e3,
