@@ -482,6 +482,15 @@ class _PhysicsSubstepTableContactLatch:
         self._hit = torch.zeros(
             self._num_envs, dtype=torch.bool, device=device
         )
+        # PhysX contact-force buffers are not advanced by an articulation
+        # reset.  The first force read after a reset can therefore still
+        # describe the terminal pose from the preceding episode even though
+        # the articulation has already been restored.  Suppress exactly that
+        # first post-reset substep per environment; a persistent or newly
+        # created contact remains observable on every later substep.
+        self._skip_first_sample_after_reset = torch.ones(
+            self._num_envs, dtype=torch.bool, device=device
+        )
         self._active = False
         self._finalized = False
         self._apply_count = 0
@@ -514,6 +523,16 @@ class _PhysicsSubstepTableContactLatch:
                 f"{context} must be a same-device bool [num_envs] mask"
             )
 
+    def _record_current_hit(self, current_hit: torch.Tensor) -> None:
+        """Consume one fresh physics sample with a one-substep reset quarantine."""
+
+        self._validate_mask(current_hit, context="table-contact physics readback")
+        self._hit.logical_or_(
+            current_hit & ~self._skip_first_sample_after_reset
+        )
+        self._skip_first_sample_after_reset.zero_()
+        self._sample_count += 1
+
     def begin_policy_step(self) -> None:
         if self._active and not self._finalized:
             raise RuntimeError(
@@ -545,9 +564,7 @@ class _PhysicsSubstepTableContactLatch:
                 raise RuntimeError(
                     "table-contact apply readback is missing a current hit mask"
                 )
-            self._validate_mask(current_hit, context="table-contact apply readback")
-            self._hit.logical_or_(current_hit)
-            self._sample_count += 1
+            self._record_current_hit(current_hit)
         self._apply_count += 1
 
     def finalize(self, current_hit: torch.Tensor) -> torch.Tensor:
@@ -562,9 +579,7 @@ class _PhysicsSubstepTableContactLatch:
                 "table-contact post-step readback requires exactly "
                 f"{self._expected_apply_calls} apply calls"
             )
-        self._validate_mask(current_hit, context="table-contact post-step readback")
-        self._hit.logical_or_(current_hit)
-        self._sample_count += 1
+        self._record_current_hit(current_hit)
         if self._sample_count != self._expected_apply_calls:
             raise RuntimeError(
                 "table-contact policy step did not sample every physics substep"
@@ -581,6 +596,7 @@ class _PhysicsSubstepTableContactLatch:
             )
         ids = slice(None) if env_ids is None else env_ids
         self._hit[ids] = False
+        self._skip_first_sample_after_reset[ids] = True
 
 
 def _consecutive_physics_timestamp_mask(

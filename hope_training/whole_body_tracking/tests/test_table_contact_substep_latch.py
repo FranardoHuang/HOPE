@@ -34,9 +34,21 @@ def _run_policy_step(latch, pulse_substep: int | None):
     return latch.finalize(final)
 
 
+def _clear_initial_reset_quarantine(latch):
+    """Advance one clean substep so ordinary pulse tests model a live episode."""
+
+    latch.begin_policy_step()
+    latch.record_apply(None)
+    latch.record_apply(torch.tensor([False, False]))
+    latch.record_apply(torch.tensor([False, False]))
+    latch.record_apply(torch.tensor([False, False]))
+    latch.finalize(torch.tensor([False, False]))
+
+
 @pytest.mark.parametrize("pulse_substep", range(4))
 def test_each_of_four_physics_substep_pulses_is_sticky(pulse_substep):
     latch = _latch()
+    _clear_initial_reset_quarantine(latch)
     assert _run_policy_step(latch, pulse_substep).tolist() == [True, False]
 
 
@@ -57,6 +69,7 @@ def test_finalize_is_exact_counted_and_idempotent():
         latch.finalize(torch.tensor([False, False]))
 
     latch = _latch()
+    _clear_initial_reset_quarantine(latch)
     first = _run_policy_step(latch, 3)
     second = latch.finalize(torch.tensor([False, True]))
     assert first.data_ptr() == second.data_ptr()
@@ -65,6 +78,7 @@ def test_finalize_is_exact_counted_and_idempotent():
 
 def test_only_reset_clears_selected_episode_rows_and_no_cross_env_leak():
     latch = _latch()
+    _clear_initial_reset_quarantine(latch)
     assert _run_policy_step(latch, 1).tolist() == [True, False]
 
     # Starting another policy step does not erase episode-sticky evidence.
@@ -84,6 +98,50 @@ def test_only_reset_clears_selected_episode_rows_and_no_cross_env_leak():
     ]
     latch.reset_envs(torch.tensor([1]))
     assert latch.hit.tolist() == [False, False]
+
+
+def test_first_post_reset_substep_is_quarantined_but_persistent_contact_is_not():
+    latch = _latch()
+
+    # A one-substep force carried over from the terminal pose is ignored.
+    latch.begin_policy_step()
+    latch.record_apply(None)
+    latch.record_apply(torch.tensor([True, False]))
+    latch.record_apply(torch.tensor([False, False]))
+    latch.record_apply(torch.tensor([False, False]))
+    assert latch.finalize(torch.tensor([False, False])).tolist() == [
+        False,
+        False,
+    ]
+
+    # After another reset, a contact that remains for a second substep is real
+    # and must still terminate the new episode.
+    latch.reset_envs(torch.tensor([0]))
+    latch.begin_policy_step()
+    latch.record_apply(None)
+    latch.record_apply(torch.tensor([True, False]))
+    latch.record_apply(torch.tensor([True, False]))
+    latch.record_apply(torch.tensor([False, False]))
+    assert latch.finalize(torch.tensor([False, False])).tolist() == [
+        True,
+        False,
+    ]
+
+
+def test_post_reset_quarantine_is_per_environment():
+    latch = _latch()
+    _clear_initial_reset_quarantine(latch)
+    latch.reset_envs(torch.tensor([0]))
+
+    latch.begin_policy_step()
+    latch.record_apply(None)
+    latch.record_apply(torch.tensor([True, True]))
+    latch.record_apply(torch.tensor([False, False]))
+    latch.record_apply(torch.tensor([False, False]))
+    assert latch.finalize(torch.tensor([False, False])).tolist() == [
+        False,
+        True,
+    ]
 
 
 def test_unfinalized_policy_step_cannot_be_overwritten():
