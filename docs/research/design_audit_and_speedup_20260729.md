@@ -34,7 +34,7 @@ b00a936e 设计(center 保留终止、marginal 起关闭)被自家 4096-env 数�
 
 ### 1.2 高承重 ruling_only(按危险排序)
 
-1. **rolling-30 环门(new-band direct-count 2/3/4)**:marginal 晋级唯一大门;零外部先例("无发表系统单独审计新增带")、零经验验证;判定统计量 24h 内纯纸面改版一次(81d598d7→b00a936e);n=30 直数下 1–2 次偶然失败翻转 expand/lock;设计上无任何机制复查已错误晋级的带(heldout 只测全域)。工单:heldout 加 new-band 专项切片。
+1. **rolling-30 环门(new-band direct-count 2/3/4)**:~~marginal 晋级唯一大门~~ **[2026-07-30 审计更正,见 §7.2]**:本条基于 b00a936e 时代快照,a93ccf8f 起环已降级为纯遥测(HEAD 上零生产调用),正式晋级权在仓内 frozen heldout 权威;"heldout 只测全域"在 7e98c3d6 前属实,该提交已把 marginal 判定改读新增带 NB_F/NB Wilson 区间(经独立核验,含反例测试与 NB<154 fail-closed 地板)。残留知情项:NB 覆盖不足时直接 bound 烧掉该臂 marginal 扩张资格,而非持有等待更多数据。
 2. **σ 静态 + 死区**:>~3σ 零梯度已咬过产线(正手 face 漂到 93–150°,EXP-V2-REWARD-FREEZE §0.11;rescue 臂从未发射);排队的 sigma_static 消融(§0.9 #5)从未跑。工单:补 rescue 或 σ 课程消融;监控各质量通道的 kernel 饱和率。
 3. **-72 死亡定价**:内部已标记敏感轴(姊妹臂 4× 摔率差);-36→-72 翻倍无推导记录;death09 消融"待点头"后无下文。
 4. **entropy 0.01 全局钉死**:上游谱系 0.005/0.004;J1 消融承诺后降级"记录性核查"、从未跑;过高熵把 σ 顶向 2% 硬限带,与 qdes/actual 越限风暴可能同源(run_pingpong_end_to_end.md:289 已记录晚期 std 膨胀判读风险)。
@@ -467,3 +467,113 @@ ready。当前代码也没有“strike 35% 后启用失败 reset”的门；这�
 observation/reference，并重跑 `1 env×2`。旧 `4ff48b21` 两条 long 到 update 169 仍为
 strike=`0`，且其旧 reference reset 语义不代表 dynamic-ready successor，继续保留但不作为
 新配方证据。
+
+---
+
+## 7. 对 §6(Codex 更新)的独立审计核验(2026-07-30)
+
+方法:三路代码验证 agent(热路径修复 / curriculum 权限与 NB 消费者 / motion 手术链)+ Pod1 运行数字抽查。结论:**§6 的声明全部属实,实现质量高,放行;发现 4 个小缺陷与 2 处文档口径问题**(见 7.4)。
+
+### 7.1 运行数字抽查(Pod1)
+
+canary `n1_stable_v2_canary_e8f1b8e5_block_gpu1_r1`:78 个迭代、teacher_rate ValueError 在场、迭代时长吻合。loop probe 五轮 collection 26.56/42.52/33.32/33.91/33.86s 与 §6.6 声明一致。block probe 0 迭代 + launcher pre_kill 记录,与"构造期 900s fail-closed"一致。**账本无虚报。**
+
+### 7.2 §6.2 反驳的逐条裁决
+
+| Codex 主张 | 裁决 |
+|---|---|
+| 4/0.5/0.5 事故 ≠ 393 金标准;先按 realized income/激活率/饱和率小筛选 | **接受**,方法上优于盲跑 A/B |
+| ladder "contradicted" 判过强(单 seed、~3.8k 截断、高权重当时未生效) | **部分接受**:降级为"有反向单变量证据,需 canary 复核";"质量档从未生效"半句不受影响,归因更正仍必须 |
+| rolling-30 "唯一晋级门"是错误的 | **接受**(本文 §1.2#1 已更正);补一刀:HEAD 上环连调度都不参与,是纯持久化遥测/死代码,建议删除或注明 |
+| CaT 的 `rewards*=(1-δ)` 非精确实现;映射到 tracking/mechanical edge 属外推 | **接受**:该式是论文自述的期望形近似,真实机制是违规概率驱动的随机终止进 GAE;"窄 canary 先行、不上全相位"正确 |
+| 证明档案存 GPU view 不是 immutable evidence | **接受**:改预分配聚合或 terminal 时 clone,本文 §3.4#4 原表述作废 |
+
+### 7.3 代码核验结论(全部 CONFIRMED)
+
+- **SHA weak-identity 缓存**:8 个 receipt 类全覆盖(旧 property 行逐一比对无遗漏);id 复用安全(weakref 解引用 `is instance` 校验);vars/repr/equality/pickle/deepcopy/wire/exact-resume 不变性有测试;GC 释放有测试。
+- **strike timing 去重**:one-shot handoff 按 host step-token,直调/重采样/token 变化均重算;测试为调用计数+源断言(非逐 tensor 对比,因函数无状态可接受——若它日后长出状态需补)。
+- **D2H 合批**:10+8N 标量一次有序 stack→cpu;float32 计数在 N≤8192 精确;旧 float() 簇全删;EMA 读写顺序保持并有位级平价测试(N=1/5/73 × 空/非空)。
+- **fired_valid 掩码**:两半都对——空集保持旧 metric 精确,`exact_strike.any()` 分支按 §6.1#5 保留。
+- **teacher_rate 容差统一**:5e-7 单一来源(SHA 绑定于 GEOMETRY_SOURCE_PAYLOAD),producer/consumer 同函数,无 clipping,边界通过+篡改拒绝双测试本地过。
+- **curriculum NB_F/NB Wilson**:反例测试真实(全域 expand vs 新增带 bound,断言新增带胜出);NB<154 硬地板 fail-closed;全域 admission/unsafe blocker 保留;host 7 测全过。
+- **motion 手术链**:腰三关节常量平移逐位验证;qd 无伪差分(builder 显式禁止差分推速度);头臂逐字节保留;根 yaw 提取正确;任务重绑无字节复用,所有 SHA 独立重算吻合。
+
+### 7.4 发现的缺陷与口径问题(均非阻断)
+
+1. commands.py teacher-rate 消费者:`contact_geometry` 绑定在 try 内而 except 引用它——若属性查找失败,handler 抛 NameError 掩盖真错。绑定移到 try 前即可。
+2. `_vb_evaluate` 非空集的掩码均值与旧压缩均值是 ulp 级等价而非位同一;空集保持是精确的。措辞注意即可。
+3. test_metric_sync_fix.py 的 11 个旧 fixture 因 `__new__` 构造未设 `_task_first_enabled`/`_action_ball_enabled` 而红——**先于本批工作就红**(e1843b3b/6b13e0ff 引入的读点),非回归,但应修 fixture 而非放着。
+4. **bh_block 击球帧口径错位**:A3 receipt 钉 strike frame 26,N1 任务接触帧为 24;§6.5 与 PROGRESS 里"击球帧 site speed 1.6422"实为帧 26 读数,任务帧速度是 1.5947(N1 侧 afebf97e 已钉对;两套速度口径——receipt 瞬时 Jacobian vs N1 ±2 帧中心差分——是设计共存,非漂移)。文档表述应改"receipt 帧 26 site speed"。
+5. `strike_frame_before/after` 是同一变量自比,等式是记录不是校验;改为独立来源比对更硬。
+6. 7e98c3d6 是大杂烩提交(热路径修复+curriculum 修复混装,提交信息未提后者)——可追溯性欠账,建议后续拆分提交。
+
+### 7.5 战略观察(非工单,供决策)
+
+- **动态回放在 ~1.25s 倾倒**(COM margin -0.38m)意味着:即便出生修好,teacher 轨迹本身在官方低增益腰 PD(50/2)下的动态可保持性未证明。dynamic-ready contract 解决出生;若其后 strike 仍为零,下一嫌疑是 teacher 动态不可行,选项:腰增益上调(须部署一致性)或参考重定时。
+- **warm-start 旁路留着**:§6.5 记录 s1w4 warm-resume 后 2–12 update 即跨击球窗——在 fresh+hold-qdes 路线受阻时,这是已证实的务实桥。
+- block 4096 构造期 900s 超时证明 **O(N) 初始化仪式仍在**(本文 §3.4 清单未过时),profiler 分段量化(§6.6 末段)是正确的下一步。
+
+---
+
+## 8. 第二轮审计 + base 旋转观测尽调(2026-07-30 下午)
+
+### 8.1 审计粒度改造 review:已实现,但是"窄解"
+
+d97b2523 系列 CONFIRMED:诊断模式下 per-reset 逐 env 转录(~22 键 dict + ~9 .item()/env)整体移除,证据降为每 policy-step 的 compact device 摘要(clone-at-capture,躲开了 §7.2 的可变 view 陷阱),runner 对诊断快照里出现 reset transcript 直接硬错。测试覆盖到位(86 passed)。**但这不是 §3.4#3–4 要的 checkpoint 粒度结构性决定**:消费节奏仍是每 update;**正式路径刻意保留全额仪式(~7ms/env-reset 不变)**;每步 ledger 5×7 clone、metrics 残余同步、broker per-env Python 均未动。结构性决定对 formal 仍然开放。
+
+缺陷:①`test_diagnostic_joint_safety_drain.py` 在 HEAD 红(d97b2523 禁掉了它构造的 formal→diagnostic 翻转组合,未更新测试);②诊断 flag 在 action term 构造期锁存、runner 校验期重读——两个读点,漂移=首个 update 致命(fail-closed 但值得统一);③**live bug:两条 07-29 长跑在第 170 迭代死于 `joint-safety policy-step summary overflow`(hope_actions.py:1697),之后进程僵死 15h+ 占显存**——容量守卫与 runner 消费节奏错配,长跑必踩,需修后才能发 long。
+
+### 8.2 dynamic-ready 合同 review:CONFIRMED(N=1 诊断道)
+
+离线 LP 求 hold_qdes(artifact 自标 candidate 非证书)→ 1-env 闭环 hold 收据(PASS/FAIL+тilt/接触分数+截图)→ 训练侧硬绑定(receipt↔artifact↔motion SHA 交叉钉、hold_qdes 逐关节 2e-7 核对、reset 时原子安装+回滚)。三个缺口:①hard-限 N=1,fivebind N=5 道用不了;②**hold 收据的时长不设门**(0<duration≤30s 任意短探针都算 PASS,且 PASS 无量化漂移阈值);③hold 证书是 nominal plant(探针关 DR),随机化训练不继承保证。probe 实测:episode 29–32 步**已跨 t_hit**,摔/桌归零——出生修复方向被现场验证;strike 仍零(旧 run 的 ee_body_pos 主导终止未换门,§2.3 工单仍待做)。
+
+### 8.3 运营警报(即办)
+
+①修 overflow bug + 清两个僵尸进程(GPU0/2 显存被占,pod1 当前零有效训练);②contact-filter 警告已从启动噪音变成 102MB/run 的日志刷屏(5 collider×4096×32),§3.5 的正确性核查顺带把 spам 一起处理;③collection 仍 22–27s(~3.5–4.5k steps/s),116s 尖刺消失但距 legacy 仍 ~7×——与 8.1"窄解"判定一致。
+
+### 8.4 base 旋转观测:前提修正 + 文献裁定
+
+**前提修正:训练观测并不缺旋转。** action_ball actor 现役就有:`motion_anchor_ori_b`(6 值,参考相对 torso 旋转矩阵前两列,tracking_env_cfg.py:127)+ `projected_gravity`(3 值绝对 roll/pitch)+ 现行 `action_ball_table_pose_n1`(191 维,launch 器 :1475 硬编码)的 `base_orientation_table_6d`(6 值绝对姿态)。hope_env_cfg.py:2300 的 None 属 HITTER-PURE 旁系。"只有 yaw"成立处:①两个位置观测的变换系用 yaw-only(设计如此);②**部署侧:实机 mocap 只供位置,姿态来自 IMU**(policy_observation_action.md:138–143)。
+
+**文献裁定(该传 3 还是 6):6 值正确,且正是现状。** Zhou et al. CVPR'19(1812.07035):所有 ≤4 维表示在 SO(3) 不连续,6D(旋转矩阵前两列)连续且学习性能最好;Geist et al. ICML'24(2404.11735):输入侧较宽容但 ≤4D 仍需 halfspace/增广拐杖,6D 免拐杖;实践全体收敛于 6D——BeyondMimic 论文 anchor 误差就是 R⁹=3 位置+6 旋转,AMP/ASE 用 quat_to_tan_norm(=6D);机器人自身姿态用 projected gravity(3 值,yaw 不变、IMU 可实现,legged_gym/Isaac Lab/OmniH2O 部署标准)。输入侧无干净消融,但 Lie 群一致处理优于朴素 quat/Euler 有正面证据(2409.11935、2510.11103)。
+
+**建议:** ①训练侧不动(已是文献最优);②若任何地方以裸角度传 yaw,改 (cos,sin) 或相对 heading(裸角有 ±π 跳变);③部署侧真正的 gap 是 IMU yaw 漂移污染 anchor 相对旋转的 yaw 分量——BeyondMimic 的锚定设计(yaw 对齐+xy 平移到机器人脚下)就是为容忍此漂移,部署实现应确认沿用;sim2real 可加 HuB(2505.07294)式 OU 相关噪声于姿态观测。
+
+引用补充:Zhou 1812.07035;Geist 2404.11735;HuB 2505.07294;Lie-group RL 2409.11935;SO(3) action primer 2510.11103;OmniH2O 2406.08858;IsaacGymEnvs humanoid_amp_base.py(quat_to_tan_norm)。
+
+### 8.5 观测收尾建议:两个残余差距 + 噪声/延迟补齐(2026-07-30)
+
+前提:launcher 已切 `action_ball_table_pose_twist_n1`(194 维),`base_lin_vel_heading` 实现与部署生产者合同(OptiTrack 锚 + 杠杆臂修正 + 可选 IMU 传播)质量高,本节只处理剩余三件事。
+
+#### 差距一:racket 任务观测的坐标系不一致(小改,搭下次合同断点)
+
+现状:`racket_target_pos_b` 是 yaw-heading 系残差,而 `racket_target_vel_w`(hope_env_cfg.py:836)与 `racket_target_normal_cmd` 前 3 维是**世界系**。三个问题:
+1. 位置通道与它的导数通道活在不同坐标系,策略被迫内部学一个 yaw 旋转来调和(无谓的乘性任务);
+2. **破坏 yaw 不变性**:其余任务观测全是 yaw 相对的,策略对世界朝向本应不变;这两个世界系通道让策略行为依赖绝对朝向——而训练里出生 yaw 按动作固定、从未变过,部署时任何台面 yaw 标定差/摆位差就是 OOD 输入;
+3. 部署侧必须用 mocap yaw 生产世界系量,标定敏感。
+
+修法:`quat_rotate_inverse(yaw_quat(base_quat_w), ·)` 旋进同一 heading 系(与 base_lin_vel_heading 同变换),改名 `racket_target_vel_b` / `racket_target_normal_b`。合同断点改动,与下一次断 warm start 的迁移打包;critic 的特权世界系变体不动。
+
+#### 差距二:单帧观测、无历史(独立 canary,不阻塞当前波)
+
+现状 actor 只有 last_action 承载时序。已部署的人形栈标准做法:OmniH2O 25 帧历史(其消融:历史堆叠优于喂估计速度)、HuB、ExBody2 学生。对本任务的三重意义:①隐式滤波(单帧被迫信瞬时噪声读数);②**延迟补偿**(mocap 链 10–40ms,观测天生描述过去,历史让策略学预测性补偿);③部分可观测(球撞拍冲量、接触状态、估计器滞后都不可观,历史是标准补救)。
+
+路线选择(按本仓约束排序):
+1. **推荐:低维关键通道帧堆叠**——ang_vel + gravity + lin_vel_heading(9 维)× 8 帧 ≈ +72 维,合同代价小,无状态(不碰 exact-resume);
+2. OmniH2O 式蒸馏 GRU 学生(教师不动,加蒸馏段;GRU 隐状态与 strict exact-resume 相性差,故排第二);
+3. 全量 proprio 堆叠(+500 维,C++ wire 代价大,不推荐)。
+按 canary 纪律:与 twist 基线同 seed 同 clip 对比后再进配方。
+
+#### 噪声/延迟补齐清单(不破合同,现在就能做)
+
+观测噪声是训练侧参数、不进 wire 合同与宽度——以下改动**不断 warm start**(但改变训练分布,按 run 身份处理):
+
+| 观测项 | 现状 | 建议 | 依据 |
+|---|---|---|---|
+| `base_lin_vel_heading` | **无噪声喂真值** | +Unoise ±0.1 m/s(过渡值);硬件估计器上线后按实测误差谱回填 | OptiTrack SG 差分 ~0.02–0.03 m/s RMS + 杠杆臂/标定残差;OmniH2O 教训:干净速度信号部署时不存在 |
+| `base_position_table` | 无噪声 | +Unoise ±0.01 m | mocap 毫米级精度 + 标定偏置/丢帧毛刺 |
+| `base_orientation_table_6d` | 无噪声 | +Unoise ±0.02(6D 分量) | 刚体姿态 0.1–0.5° ≈ 分量扰动 0.002–0.01,留余量 |
+| `racket_target_normal_cmd` | 无噪声 | 不加 | 规划器指令非测量,部署侧确定性生成 |
+| **全 mocap 派生通道** | 只有幅值噪声、零延迟 | **加延迟注入**:每 episode 采样 1–2 个 policy step(20–40ms @50Hz)的 hold-last 延迟,套用于 position_table / orientation_table_6d / lin_vel_heading / projected_gravity / anchor_ori_b 机器人侧(若 ang_vel 保留陀螺仪则豁免) | mocap 链实测延迟;HuB 用 OU 时间相关噪声同理;幅值噪声不建模滞后,滞后才是 train/deploy 主分布差 |
+
+原则闭环:噪声量级的最终权威是**硬件管线实测**——部署估计器跑起来后,对 OptiTrack 真值录一段误差谱,训练噪声照谱设,不靠拍脑袋。实现提示:延迟注入用 obs manager 里的环形缓冲,纯张量,无热路径成本。
