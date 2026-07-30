@@ -33,6 +33,7 @@
 | ID | 状态 | 当前交付 / 唯一下一动作 | 完成验收 | 阻塞输入 | 证据入口 |
 | --- | --- | --- | --- | --- | --- |
 | N1-RUN | `IN_PROGRESS` | fresh milestone1000 已在 Pod1 GPU2 用 claim `2710fd6f…d4f4` 发射，exact PID/PGID=`1134253`；已持续产生真实 PPO update，`model_0.pt` 的 80 个 tensor 全 finite。唯一下一动作是守护到 `model_100.pt` 并做首个趋势判读 | model_100/300/1000 finite 且身份不漂移；按里程碑报告 teacher fidelity、strike/capture/return、Reward income、table/fall/qdes-hard/actual-hard 与 iteration wall。前五轮腰 actual-hard 只记基线，不单独判学习失败 | 无外部阻塞；只管理该 exact run，不 signal/kill；NaN、身份漂移或 counter invariant 破坏才按预注册规则处理 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[结果判读](../../operations/read_and_report_results.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
+| N1-SPEED | `IN_PROGRESS` | 当前 r4 probe/milestone 的 update wall 约 `9–30 s`，仍高于同机 legacy/健康目标；PPO 仅占极小部分。唯一下一动作是用当前 run 做 physics/metrics/termination/reset/sampling-solve/state-write/learning 分段，并把未完成的 diagnostic broker/ledger/D2H 热路径税按收益排序 | 不改 Reward、Done、采球、solver 或动作语义；固定 reset/proposal tape 的 state/counter/reason/checkpoint parity 通过；4096-env 健康窗达到 `≥15k environment-steps/s` 或把等 reset 负载下的 update wall 压到 `≤6.5 s`，并报告 reset-count slope | 当前 exact milestone 不热补丁；优化进入 fresh source 后只在自然空闲槽做 Pod parity/吞吐验证 | [设计与加速审计](../../research/design_audit_and_speedup_20260729.md)、[N=1 发射工序](../../operations/run_ablation_wave_launch.md) |
 
 ### 0.3 Next — long 已运行后的判读与 formal N=5 前置
 
