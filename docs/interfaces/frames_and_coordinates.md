@@ -124,11 +124,53 @@ the interface boundary.
 The base flat wire already carries position plus a normalized quaternion, but the current
 `LocMode::kExternalBase` C++ consumer deliberately uses only mocap position and retains the
 yaw-aligned pelvis-IMU quaternion. Therefore a precise venue mocap orientation is presently
-discarded. The preferred successor does not add absolute pose columns to the policy: after measuring
-the rigid marker-cluster→`base_link` transform, use mocap position and calibrated/fused mocap yaw
-for every world↔base-yaw transform, retain IMU roll/pitch and gyro for fast attitude dynamics, and
-derive all existing relative observation terms from that one fused pose. This source change needs
-train/deploy tensor parity and stale/dropout handling, but no observation-width change.
+discarded. The preferred ActionBall successor reverses that decision: after measuring the full
+rigid marker-cluster→`base_link` SE(3) transform, it adds the base pose with respect to the table
+to the actor and makes ChingMu mocap the single authority for all actor pose/attitude-derived terms.
+It does not fuse pelvis-IMU roll/pitch or gyro into the actor tensor. The IMU may remain a separate
+safety monitor, but cannot silently replace stale mocap inside the policy input. This source and
+width change needs train/deploy tensor parity plus explicit mocap latency/stale/dropout handling.
+
+<a id="action-ball-table-pose-frame"></a>
+
+## ActionBall table-centered actor frame
+
+[`action_ball_table_pose_n<N>`](../DEFINITIONS.md#action-ball-table-pose-n-contract) separates two
+kinds of geometry:
+
+- **task channels stay robot-relative**: `base_target_pos_b` is a base-goal residual in the current
+  base-yaw frame, and `racket_target_pos_b` is the target-minus-current-racket-FK residual in that
+  frame. This preserves translation/generalization semantics;
+- **base context is table-relative 6-DoF**: it tells the policy where and how the A3 is standing
+  with respect to the table, so the same relative swing request can account for table clearance,
+  reach and balance from a displaced or tilted spawn.
+
+For a table frame `T`, venue/world frame `W` and base/root frame `B`, the semantic contract is:
+
+```text
+p_base_table = R_TW * (p_base_world - p_table_surface_center_world)
+R_table_base = R_TW * R_world_base
+```
+
+The current Isaac ActionBall scene aligns `T` axes with each environment-local world axes, so its
+position implementation reduces to subtracting the environment origin and the table-surface center
+`(near_x + TABLE_LENGTH/2, 0.0, surface_z)`. That optimization does not change the semantic
+frame and must not be copied to a venue whose table axes are rotated.
+
+`R_table_base` is encoded as the first two matrix columns in row-major tensor order
+`[R00,R01,R10,R11,R20,R21]`. Those are two orthogonal axes that recover the third by cross product,
+so the six scalars retain roll, pitch and yaw; they do not mean “only two angles.” This continuous
+rotation representation follows Zhou et al.,
+[CVPR 2019](https://openaccess.thecvf.com/content_CVPR_2019/html/Zhou_On_the_Continuity_of_Rotation_Representations_in_Neural_Networks_CVPR_2019_paper.html),
+and avoids Euler wrap/gimbal singularities and quaternion sign ambiguity at the network boundary.
+
+At deployment the same `p_base_table` and `R_table_base` must be built from a calibrated table pose,
+the mocap rigid-body pose and the measured marker-cluster→`base_link` SE(3). The actor's
+`base_ang_vel` must be a causal estimate from mocap quaternion history; `projected_gravity` must use
+that same mocap orientation; and `motion_anchor_ori_b` must use mocap base orientation plus
+joint-encoder FK. No actor term may mix in an IMU attitude under the same contract name. The current
+191-D deploy builder and rotational marker extrinsic are OPEN, so this frame contract is
+simulator-training-only until those are closed.
 
 ## Base Link
 
@@ -136,6 +178,7 @@ train/deploy tensor parity and stale/dropout handling, but no observation-width 
 
 Pending measurements:
 
+- venue/table frame -> ChingMu mocap world
 - `P1 mocap frame -> P1_base_link`
 - `P2 mocap frame -> P2_base_link`
 - A3 standing `base_link` height

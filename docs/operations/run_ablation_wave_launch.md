@@ -222,11 +222,16 @@ N1 diagnostic launcher 的 budget 名称固定为：
 - `smoke`：`1 env × 2 update × save1`；
 - `probe`：`4096 env × 5 update × save1`；
 - `canary`：`16--1024 env` 的有界 Reward screen；
-- `long`：`4096 env` 的 reviewed 长跑预算。
+- [`milestone1000`](../DEFINITIONS.md#n1-milestone1000)：exact
+  `4096 env × 1001 update × save100`，自然产出 `model_1000.pt`；
+- [`long`](../DEFINITIONS.md#n1-diagnostic-long)：exact
+  `4096 env × 20001 update × save100`，自然产出 `model_20000.pt` 的 finite reviewed 长跑预算。
 
 `probe` 只能使用 exact 三元组，不能借 `canary` 或 `long` 填任意值。它仅验收同一 setting 在真实
 并行规模下的构造、吞吐、reset 分账和 finite checkpoint，不产生 Reward 胜负或 curriculum
-promotion 结论。
+promotion 结论。`milestone1000` 用来买足够长的首轮学习证据，但仍是 diagnostic；它不因运行
+更久就自动升级成 formal、curriculum promotion、第二 seed 或真机证据。`long` 同样是有限预算，
+不再使用一个不可达的超大 iteration 哨兵来冒充“一路跑”。
 
 ### ActionBall finite q_des / reference-reset 切换
 
@@ -364,11 +369,19 @@ fresh actor bias。正式写 smoke spec 前，先在 Pod 以 `1 env`、diagnosti
 只写 exact PPO/policy contract，不做 PPO update。spec 的 `policy_contract_sha256` 必须取自这份
 新 schema-2 recipe，旧 shared-ready SHA 不得复用。
 
-验证顺序是 Pod focused tests → `1 env × 2 update` → `4096 env × 5 update`。前两门只判断构造、
-finite checkpoint、reset 后 q/qdes/last-action 一致，以及 episode 是否能够活到动作 `t_hit`；
-五轮没有 strike 不能判策略不可学习。通过后立即发 fresh canary，`200/500/1000` 先看 fatal、
-finite、teacher imitation、击球机会与真实安全；按历史经验，击球学习结论至少等到约 1000
-updates 和足够 eligible denominator。
+fresh successor 还必须把 actor 合同切换为
+[`action_ball_table_pose_n1`](../DEFINITIONS.md#action-ball-table-pose-n-contract)，即 exact 191-D：
+相对 task channels 不变，另加桌面中心 frame 下的 base XYZ 与完整连续 6D orientation。观测
+合同改变后必须重新物化 policy recipe/SHA，不能复用 182-D checkpoint。该 sim 输入由 rigid-body
+truth 构造；当前 C++ builder 不支持 191-D，且真实 marker→base 旋转外参未闭合，因此这一步只
+授权 Pod 训练、不授权真机。
+
+验证顺序是 Pod focused tests → `1 env × 2 update` → `4096 env × 5 update` → fresh
+`milestone1000`。前两门只判断构造、finite checkpoint、reset 后 q/qdes/last-action 一致，以及
+episode 是否能够活到动作 `t_hit`；五轮没有 strike 不能判策略不可学习。进入千轮诊断后在
+`200/500/1000` 观察 fatal、finite、teacher imitation、击球机会与真实安全；按历史经验，击球
+学习结论至少等到约 1000 updates 和足够 eligible denominator。`milestone1000` 到点后才决定
+是否进入 reviewed `long` 或开 Reward/reference/curriculum canary。
 
 旧 diagnostic runner 跳过 formal Reward 时也跳过 joint-safety consumer，却仍每 policy step
 生产摘要；4096 槽在约 `170 × 24` policy steps 后必然溢出。fresh successor 必须启用

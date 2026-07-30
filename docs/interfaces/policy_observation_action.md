@@ -7,7 +7,10 @@ hardware behavior. It therefore remains `Partial`, not the currently accepted de
 The 181 deploy wire remains intentionally blocked pending the station/order contract day.
 Dynamic `task_first_n<N>` remains a historical training-only candidate. Dynamic
 `action_ball_n<N>` is implemented in the Isaac trainer and has Pod construction/training evidence,
-but it still has no production arbitrary-N flat wire or C++ observation consumer.
+but it still has no production arbitrary-N flat wire or C++ observation consumer. The feature-branch
+successor [`action_ball_table_pose_n<N>`](../DEFINITIONS.md#action-ball-table-pose-n-contract)
+adds table-relative base 6-DoF context; its source contract is implemented, but Pod construction,
+fresh checkpoint and deploy-consumer parity are not yet evidence.
 
 ## HITTER-Compatible Contract
 
@@ -114,6 +117,7 @@ same policy tick. Timestamp-compensation pairs with positive delay are `NO-LAUNC
 | 181 | `deploy_parity_station181` | Exact 179 prefix + tail `station_anchor_err_b(2)`. | Blocked: wire and the unique station/normal term order are not frozen. |
 | `181+N` | `task_first_n<N>` | Exact `hitter_footwork(177)` prefix + `racket_target_normal_cmd(4)` + `action_one_hot(N)`；manifest/action/motion order 必须逐项相同。 | Training-only source candidate；无 ball、无 production planner wire，Pod Isaac 未测。 |
 | `181+N` | `action_ball_n<N>` | 与 `task_first_n<N>` 逐列同构，但 checkpoint 身份另名：动作先冻结，再由该动作的来球与 fixed-action solver 产生 task。当前 N=1 总宽度为 `182`。 | Isaac trainer 已实现并有 Pod 证据；无 production arbitrary-N wire/C++ consumer。 |
+| `190+N` | `action_ball_table_pose_n<N>` | `hitter_footwork(177)` + `base_position_table(3)` + `base_orientation_table_6d(6)` + demanded signed face / reserved spin `(4)` + `action_one_hot(N)`。当前 N=1 总宽度为 `191`。 | Feature-branch Isaac source candidate；Pod evidence 未完成，production arbitrary-N/191-D flat wire 与 C++ consumer 均不存在。 |
 | 110 | `hitter_pure` | HITTER Table-I style: 99-D proprio prefix + base forward(2), station delta(2), racket target rel base(3), target velocity(3), tts(1); no reference command or swing flag. | Supported; requires fresh localization and metadata-bound per-side station geometry. |
 
 Do not infer a contract from width alone. Formal consumers require the registered name, mode,
@@ -150,6 +154,59 @@ same nominal-hold-certified qdes. Raw policy-history validity remains false acro
 initialization cannot masquerade as a sampled transition. The policy action remains the same 31-D
 unbounded Gaussian output followed by the existing affine decoder and finite qdes projection; no
 observation or action width changes.
+
+### N=1 ActionBall table-pose successor: exact 191-D layout
+
+Fresh table-aware N=1 runs use
+[`action_ball_table_pose_n1`](../DEFINITIONS.md#action-ball-table-pose-n-contract). Its exact order is:
+
+```text
+hitter_footwork(177),
+base_position_table(3),
+base_orientation_table_6d(6),
+racket_target_normal_cmd_plus_rho(4),
+action_one_hot(1)
+```
+
+The general width is `177 + 3 + 6 + 4 + N = 190 + N`; therefore N=1 is exactly `191`.
+`base_position_table` is the current root XYZ in the table-surface-center frame, not an arbitrary
+venue-world coordinate. `base_orientation_table_6d` is the full table-to-base rotation
+`R_table_base`, encoded from its first two columns in row-major tensor order:
+
+```text
+R00, R01, R10, R11, R20, R21
+```
+
+This is a complete 3-DoF orientation, **not yaw-only**: after orthonormalization, the two encoded
+axes uniquely determine the third axis by a cross product. The repository uses the first two
+matrix columns because of its rotation convention; libraries that transpose the convention may
+spell the same construction with rows, so byte ordering must follow this contract rather than a
+generic example.
+
+The representation choice follows Zhou et al.,
+[“On the Continuity of Rotation Representations in Neural Networks,” CVPR 2019](https://openaccess.thecvf.com/content_CVPR_2019/html/Zhou_On_the_Continuity_of_Rotation_Representations_in_Neural_Networks_CVPR_2019_paper.html):
+Euler angles and quaternions introduce discontinuities when exposed as Euclidean network features,
+whereas 3-D rotations admit continuous 5-D/6-D representations. The 6-D construction therefore
+keeps roll, pitch and yaw information without Euler wrap/gimbal singularities or quaternion
+`q/-q` sign ambiguity. This is a representation/contract correction, not a Reward hypothesis;
+it needs Pod tensor/recipe parity, not a learning A/B.
+
+Task geometry remains relative for generalization. In particular, `base_target_pos_b` remains the
+base-goal residual from the current base in the robot yaw frame, and `racket_target_pos_b` remains
+the target-racket FK residual in that frame. The extra table-pose channels answer the different
+question “where and how is the robot standing with respect to the table?” They must not be used to
+turn the task target back into an absolute world coordinate.
+
+For real A3 consumption, all actor pose/attitude-derived terms in this contract have one authority:
+the calibrated ChingMu mocap base pose after applying the full rigid
+marker-cluster-to-`base_link` SE(3) transform and the venue/table calibration.
+`base_ang_vel` is estimated causally from mocap quaternion history;
+`projected_gravity` is derived from the same mocap orientation; and
+`motion_anchor_ori_b` combines that mocap base orientation with joint-encoder FK. The IMU may remain
+an independent high-rate safety monitor, but it is not an actor-pose authority and must not be a
+silent stale-mocap fallback. The current C++ deploy builder cannot construct 191-D arbitrary-N
+observations, and the marker-cluster rotational extrinsic is not yet closed, so this training
+contract does not authorize a real-robot run.
 
 ### Flat racket-command wire
 
@@ -463,10 +520,12 @@ What the real system can observe (team contract, 2026-07):
 
 Rules: actor observations must be built only from deploy-available signals; rewards run in sim
 only and may use privileged state; the critic may be privileged. The current 175-D actor uses only
-robot-side signals + planner targets (no mocap terms at all). NOTE: when the mocap→planner loop is
-bridged, the HOPE-world → robot-frame target transform will need the mocap base pose at the
-interface boundary even though the actor obs does not — that transform currently has no owner and
-must be designed with the bridge (see G07 Next Steps).
+robot-side signals + planner targets (no mocap terms at all). The
+`action_ball_table_pose_n<N>` successor instead deliberately consumes calibrated mocap base pose:
+that absolute-with-respect-to-table context is required alongside robot-relative tasks. Training
+must use the simulator's exact counterpart of those same terms. Deployment must close mocap
+marker→base and venue→table SE(3), latency, stale/dropout and 191-D C++ builder parity first; until
+then it remains simulator-only (see G07 Next Steps).
 
 ## Table-Tennis Physics Scene Observation (experimental)
 
