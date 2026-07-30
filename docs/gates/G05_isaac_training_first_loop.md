@@ -4097,4 +4097,5 @@ recipe-only 真实构造现已物化 policy contract `165645f5…bd9`（artifact
 `6fc4e7ca…c369`、`6e7caeb1…b200`、`533b50d2…36ea`。r3 pre-run exception 暴露另一个非首发
 阻断：`gym.make()` 后 hard-contract 异常未先 `env.close()`，Kit teardown 会自旋到 launcher
 watchdog；当前不手工 signal/kill，待 exact-PG 收口后才发 r4，异常 finally-close 修复列入
-formal N5 前 TODO。
+formal N5 前 TODO。r4 smoke canonical plan 已 PASS，claim=`257c6cccdcbef47b3154536ab19b8f8434711e9f614c3bece4a146026fded80c`；
+它只等 r3 watchdog 收口和全 Pod Kit boot lock 自然释放，不再有 recipe/spec/claim 缺口。
