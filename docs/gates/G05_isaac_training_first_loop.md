@@ -3940,11 +3940,14 @@ update2/4 分别产生 `1838/430` 个，说明 task 击球位置/时间窗已对
 actual-hard terminal 到 update100 已降到 `14/11`，到 update169 均为 `3`。因此按预注册不被
 五轮早期失稳拦截。Pod1 GPU1 已接受 fresh 反手挡
 `n1hr_milestone1000_f2c54fc3_block_gpu1_r1`（`4096×1001`，claim
-`8dc4dcb2…ff080`）并进入真实 `Learning iteration`；2026-07-30 快照已到 update 56，
-`model_0.pt` 的 80 个 tensor 全 finite。该 update 有 `733` 个 strike opportunity、
-`738/1678` swing completion、strike-window hit `47.36%`，qdes forbidden 与 physical fall
-均为 `0`；exact strike hit `3.39%`、中心 10 cm 仍近零，actual-hard 仍集中在
-waist-roll/pitch，按 update100/300/1000 判趋势。反手拉在
+`8dc4dcb2…ff080`）并进入真实 `Learning iteration`；2026-07-30 快照已到 update 81，
+`model_0.pt` 的 80 个 tensor 全 finite。mean episode=`67.17` steps，已跨 `t_hit`；
+该 update 有 `1176` 个 strike opportunity、`1183/1538` swing completion（`76.92%`），
+qdes forbidden=`0`。actual-hard 从 update56 的 `1649` 降到 `1420`，但仍远高于历史
+update100 反例；table/fall=`79/2`，virtual capture=`0`，exact strike hit=`3.45%`、
+位置误差约 `0.242 m`。update79 附近的 income ledger 显示 motion imitation 正项实际非零，
+但 racket position/velocity/normal 与 strike-success 仍显示 `0.0000`，death=`-7.2`、
+qdes barrier≈`-1.04`；先等 update100 同口径，不在中途热改 Reward。反手拉在
 该槽自然完成后排队。该谱系仍是 diagnostic、绑定旧 physics profile，只授权 contact/学习可行性，不授权 formal
 landing、export 或真机。G05 继续 `Partial`。
 
