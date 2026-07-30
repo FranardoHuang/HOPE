@@ -4,15 +4,16 @@
 # This task intentionally does NOT choose N, a manifest, a motion list, or a policy identity.
 # Every launcher must bind all four together:
 #
-#   task.actor_obs_contract=action_ball_n<N>
+#   task.actor_obs_contract=action_ball_table_pose_n<N>
 #   task.racket.clip_names=[ordered action ids]
 #   task.racket.action_ball_manifest_path=<tracked manifest>
 #   task.racket.action_ball_manifest_sha256=<exact bytes>
 #   task.racket.action_ball_policy_contract_sha256=<exact policy recipe>
 #
 # Missing any of them is a preflight error before Gym construction.  This file only supplies the
-# one MDP lineage that action-ball requires: HITTER's 177-D footwork prefix, the +N tail append
-# seam, VirtualBall/v2 outcome terms, and the table/fall safety instruments.  Formal admission
+# one MDP lineage that action-ball requires: HITTER's 177-D relative-task/footwork prefix, the
+# table-relative absolute base pose (+3 position, +6 continuous orientation), the +4 face/+N action
+# tail, VirtualBall/v2 outcome terms, and the table/fall safety instruments.  Formal admission
 # and evaluator receipt fields remain empty and fail closed; a diagnostic launcher must opt in
 # explicitly with action_ball_diagnostic_unauthorized=true and is never promotion-authorized.
 # =============================================================================
@@ -25,8 +26,10 @@ name: HOPEPingPongActionBall
 gym_task: HOPE-PingPong-ActionBall-AgibotA3-v0
 experiment_name: agibot_a3_hope_action_ball
 
-# Exact N is a launch binding, not a task default.  For example, a four-action launch must pass
-# task.actor_obs_contract=action_ball_n4; train.py cross-checks it against clip_names + manifest.
+# Exact N is a launch binding, not a task default.  New launches use
+# task.actor_obs_contract=action_ball_table_pose_n4; train.py cross-checks it against clip_names +
+# manifest and inserts the table-pose block before face/action.  Legacy action_ball_n<N>
+# checkpoints remain readable but do not receive the new +9D table-pose block.
 actor_obs_contract: null
 registry_name: null
 registry_name_2: null
@@ -183,8 +186,10 @@ racket:
   cq_anchor_bank: ""
   exam_bank: ""
 
-  # One frozen action is chosen before the ball.  Face +4 and action +N are appended atomically
-  # by train.py after manifest/order validation; the native HITTER base channel remains in-prefix.
+  # One frozen action is chosen before the ball.  For the table-pose contract, absolute calibrated
+  # base position +3 and full orientation +6 are appended first, then face +4 and action +N,
+  # atomically after manifest/order validation.  Native HITTER task-position channels stay
+  # relative in the untouched 177-D prefix.
   face_command: true
   face_command_pairing: shared_plus_y
   face_command_obs: true

@@ -7,6 +7,8 @@ quantities the planner provides at deploy time (HITTER actor observation, Table 
 * :func:`racket_target_vel_w`  — desired racket velocity in world frame (3)
 * :func:`time_to_strike`       — time remaining until strike (1)
 * :func:`base_target_pos_b`    — desired base XY position relative to base (2)
+* :func:`base_position_table`  — base root position relative to table-surface center (3)
+* :func:`base_orientation_table_6d` — full base orientation in the table frame (6)
 * :func:`station_anchor_err_b` — world station anchor minus current base XY, base frame (2;
   R10c station_obs flag, appended after the face channel = 179 -> 181)
 
@@ -22,7 +24,7 @@ import torch
 import torch.nn.functional as F
 from typing import TYPE_CHECKING
 
-from isaaclab.utils.math import quat_rotate_inverse, yaw_quat
+from isaaclab.utils.math import matrix_from_quat, quat_rotate_inverse, yaw_quat
 
 from whole_body_tracking.tasks.tracking.mdp.hope_commands import RacketTargetCommand, face_tracking_pair
 from whole_body_tracking.tasks.tracking.mdp.stage1_question_bank import face_command_obs_vector
@@ -130,6 +132,78 @@ def actor_time_to_strike(env: ManagerBasedRLEnv, command_name: str) -> torch.Ten
 
 def base_target_pos_b(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     return _cmd(env, command_name).base_target_pos_b()
+
+
+def _base_position_table_from_tensors(
+    base_pos_w: torch.Tensor,
+    env_origins: torch.Tensor,
+    *,
+    table_near_x: float,
+    table_surface_z: float,
+    table_length: float,
+) -> torch.Tensor:
+    """Return base-root XYZ relative to the env-local table-surface center."""
+
+    table_center = base_pos_w.new_tensor(
+        (
+            float(table_near_x) + 0.5 * float(table_length),
+            0.0,
+            float(table_surface_z),
+        )
+    )
+    return base_pos_w - env_origins - table_center
+
+
+def _base_orientation_table_6d_from_quat(
+    base_quat_w: torch.Tensor,
+) -> torch.Tensor:
+    """Return table/world-aligned base orientation as R[:, :2], row-major.
+
+    The six values are ``R00,R01,R10,R11,R20,R21``, exactly the flattening
+    convention already used by ``motion_anchor_ori_b``.  This continuous
+    representation carries roll, pitch and yaw without Euler discontinuities
+    or quaternion sign ambiguity.
+    """
+
+    matrix = matrix_from_quat(base_quat_w)
+    return matrix[..., :2].reshape(matrix.shape[0], -1)
+
+
+def base_position_table(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    """Absolute base XYZ in the calibrated table frame.
+
+    Simulation reads the root pose directly.  Deployment supplies the same
+    quantity from the calibrated mocap base pose; task target positions remain
+    in their existing relative channels.
+    """
+
+    from whole_body_tracking.tasks.table_tennis import geometry as table_geometry
+
+    command = _cmd(env, command_name)
+    return _base_position_table_from_tensors(
+        command.base_pos_w,
+        env.scene.env_origins,
+        table_near_x=float(command.cfg.vb_table_near_x),
+        table_surface_z=float(command.cfg.vb_table_surface_z),
+        table_length=float(table_geometry.TABLE_LENGTH),
+    )
+
+
+def base_orientation_table_6d(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    """Absolute base roll/pitch/yaw information in the calibrated table frame.
+
+    The table axes are aligned with the ActionBall simulation world.  The
+    deploy producer must use the calibrated mocap orientation in those same
+    axes, not an engage-relative IMU yaw.
+    """
+
+    return _base_orientation_table_6d_from_quat(
+        _cmd(env, command_name).base_quat_w
+    )
 
 
 def station_anchor_err_b(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:

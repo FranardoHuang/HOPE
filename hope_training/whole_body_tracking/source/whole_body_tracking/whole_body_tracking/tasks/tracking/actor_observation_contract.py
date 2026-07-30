@@ -192,6 +192,61 @@ def action_ball_n_contract(action_count: int) -> ActorObservationContract:
     )
 
 
+def action_ball_table_pose_n_contract(
+    action_count: int,
+) -> ActorObservationContract:
+    """Build the table-aware ActionBall layout for an exact action-bank size.
+
+    The existing Hitter-footwork task channels remain relative.  A separate
+    table-pose block gives the actor its absolute 6-DoF placement with respect
+    to the calibrated table: position (3) plus the continuous first-two-column
+    rotation representation (6).  Keeping those concerns separate lets one
+    policy generalize relative strike tasks without losing the information
+    needed to avoid or reposition around the table.
+    """
+
+    if type(action_count) is not int or not 1 <= action_count <= 1024:
+        raise ValueError(
+            "action-ball table-pose action_count must be a plain integer in "
+            f"[1,1024], got {action_count!r}"
+        )
+    count = action_count
+    return ActorObservationContract(
+        name=f"action_ball_table_pose_n{count}",
+        obs_mode=HITTER_FOOTWORK.obs_mode,
+        total_dim=HITTER_FOOTWORK.total_dim + 3 + 6 + 4 + count,
+        terms=HITTER_FOOTWORK.terms
+        + (
+            ActorObservationTerm(
+                "base_position_table",
+                3,
+                "mocap_plus_table_calibration",
+                "base root position relative to the calibrated table-surface center",
+            ),
+            ActorObservationTerm(
+                "base_orientation_table_6d",
+                6,
+                "mocap_plus_table_calibration",
+                "base orientation in the table/world frame as the first two "
+                "rotation-matrix columns",
+            ),
+            ActorObservationTerm(
+                "racket_target_normal_cmd",
+                4,
+                "planner",
+                "demanded racket face normal (world, 3) + reserved spin-rho scalar",
+            ),
+            ActorObservationTerm(
+                "action_one_hot",
+                count,
+                "action_catalog",
+                "categorical local action slot; stable action_uid is resolved through the "
+                "catalog and is never treated as a numeric observation",
+            ),
+        ),
+    )
+
+
 # Stage-1 face-command contract (2026-07-06): deploy_parity + the +4D face-command channel
 # appended LAST — racket_target_normal_cmd = demanded face normal (3, world frame, from the
 # question bank / planner) + spin-rho placeholder (1, zero-filled until the S3 spin tier).
@@ -298,6 +353,17 @@ def resolve_actor_observation_contract(name: str | None) -> ActorObservationCont
     dynamic = re.fullmatch(r"action_ball_n([1-9][0-9]*)", key)
     if dynamic is not None:
         return action_ball_n_contract(int(dynamic.group(1)))
+    dynamic = re.fullmatch(
+        r"action_ball_table_pose_n([1-9][0-9]*)", key
+    )
+    if dynamic is not None:
+        return action_ball_table_pose_n_contract(int(dynamic.group(1)))
+    if key.startswith("action_ball_table_pose_n"):
+        raise ValueError(
+            f"Invalid table-pose action-ball actor observation contract "
+            f"{name!r}; expected action_ball_table_pose_n<N> with a base-10 "
+            "N in [1,1024] and no leading zeros"
+        )
     if key.startswith("action_ball_n"):
         raise ValueError(
             f"Invalid action-ball actor observation contract {name!r}; expected "
@@ -307,7 +373,8 @@ def resolve_actor_observation_contract(name: str | None) -> ActorObservationCont
         known = ", ".join(sorted(CONTRACTS))
         raise ValueError(
             f"Unknown actor observation contract '{name}'. Known values: {known}, "
-            "task_first_n<N>"
+            "task_first_n<N>, action_ball_n<N>, "
+            "action_ball_table_pose_n<N>"
         )
     return CONTRACTS[key]
 

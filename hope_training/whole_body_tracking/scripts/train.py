@@ -2288,17 +2288,29 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
     if action_count > 1024:
         raise _OverrideError(
             "[train.py] action-ball supports at most 1024 actions because "
-            "the action_ball_n<N> actor contract is bounded"
+            "the dynamic actor observation contracts are bounded"
         )
-    expected_actor_contract = f"action_ball_n{action_count}"
     configured_actor_contract = str(
         _get(task, "actor_obs_contract") or ""
     )
-    if configured_actor_contract != expected_actor_contract:
+    legacy_actor_contract = f"action_ball_n{action_count}"
+    table_pose_actor_contract = (
+        f"action_ball_table_pose_n{action_count}"
+    )
+    if configured_actor_contract not in (
+        legacy_actor_contract,
+        table_pose_actor_contract,
+    ):
         raise _OverrideError(
-            "[train.py] action-ball actor_obs_contract must be exactly "
-            f"{expected_actor_contract!r}; got {configured_actor_contract!r}"
+            "[train.py] action-ball actor_obs_contract must match the exact "
+            f"action count: expected {table_pose_actor_contract!r} (preferred) "
+            f"or legacy-compatible {legacy_actor_contract!r}; got "
+            f"{configured_actor_contract!r}"
         )
+    include_table_pose = (
+        configured_actor_contract == table_pose_actor_contract
+    )
+    expected_actor_contract = configured_actor_contract
     if str(getattr(env_cfg, "obs_mode", "")) != "hitter_footwork":
         raise _OverrideError(
             "[train.py] action-ball requires obs_mode='hitter_footwork'"
@@ -2767,6 +2779,8 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
     occupied = [
         name
         for name in (
+            "base_position_table",
+            "base_orientation_table_6d",
             "racket_target_normal_cmd",
             "action_one_hot",
             "station_anchor_err_b",
@@ -2781,6 +2795,15 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
     from isaaclab.managers import ObservationTermCfg as _ObsTerm
     from whole_body_tracking.tasks.tracking import mdp as _mdp
 
+    if include_table_pose:
+        policy.base_position_table = _ObsTerm(
+            func=_mdp.base_position_table,
+            params={"command_name": "racket_target"},
+        )
+        policy.base_orientation_table_6d = _ObsTerm(
+            func=_mdp.base_orientation_table_6d,
+            params={"command_name": "racket_target"},
+        )
     policy.racket_target_normal_cmd = _ObsTerm(
         func=_mdp.racket_target_normal_cmd,
         params={"command_name": "racket_target"},
@@ -2794,7 +2817,12 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
     )
     applied.append(
         "observations.policy action-ball tail="
-        f"racket_target_normal_cmd(+4),action_one_hot(+{action_count}) "
+        + (
+            "base_position_table(+3),base_orientation_table_6d(+6),"
+            if include_table_pose
+            else ""
+        )
+        + f"racket_target_normal_cmd(+4),action_one_hot(+{action_count}) "
         f"(actor_obs_contract={expected_actor_contract}; "
         f"preflight_sha256={preflight['sha256']}; "
         "motion_admission_certificate_sha256="
