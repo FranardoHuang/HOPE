@@ -31,7 +31,7 @@
 
 | ID | 状态 | 当前交付 / 唯一下一动作 | 完成验收 | 阻塞输入 | 证据入口 |
 | --- | --- | --- | --- | --- | --- |
-| N1-RUN | `IN_PROGRESS` | exact source `8729104e` 的 canonical smoke plan 已 PASS；唯一下一动作是以 claim `7f9d12ca…4002` 发 `1 env × 2 updates`，通过后串行发 `4096 env × 5 updates` probe，再发 `4096 env × 1001 updates` long；每段 fresh 初始化 | smoke 有真实 PPO update 与 finite checkpoint；teacher-start 首帧等于完整 wait、每 tick 减一个 `policy_dt` 且不为负；probe 跨 `t_hit` 且无 NaN/identity 漂移/持续 table、fall、raw-hard 爆炸；通过即发 long | Pod1 GPU2 保持自然空闲、UUID/锁/namespace 无 owner 冲突 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[结果判读](../../operations/read_and_report_results.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
+| N1-RUN | `BLOCKED` | r3 已真实构造 fixed-194 v2 后在 PPO 前暴露 policy-recipe 旧 SHA；唯一下一动作是物化实际 recipe `165645f5…bd9`、生成 fresh r4 spec/claim，并在 r3 进程自然退出且 GPU 槽无 owner 冲突后重发 `1 env × 2 updates` | fresh smoke 有真实 PPO update 与 finite checkpoint；teacher-start 首帧等于完整 wait、每 tick 减一个 `policy_dt` 且不为负；随后 probe 跨 `t_hit` 且无 NaN/identity 漂移/持续 table、fall、raw-hard 爆炸，通过即发 long | exact recipe artifact；旧 r3 PID `1127383` 自然退出（不得 signal/kill）；自然空闲 Pod 槽 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[结果判读](../../operations/read_and_report_results.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
 
 ### 0.3 Next — long 已运行后的判读与 formal N=5 前置
 
@@ -258,6 +258,7 @@ acceleration 和 jerk 三阶约束，但这只证明该类 governor 有严格约
 
 | 项 | 证据 | 当前边界 |
 | --- | --- | --- |
+| fixed-194 v2 r3 构造失败 | Pod1 GPU2 exact source `8729104e` 已真实构造并验证 `action_ball_table_pose_twist_heading_task_teacher_start_v2 (194D)` 与 dynamic-ready bootstrap；随后在 PPO runner 创建前 fail-closed：spec 沿用 policy recipe `b7209710…077f`，post-compose 实际为 `165645f5…bd9`。spent namespace=`n1hr_smoke_fastball110_8729104e_block_gpu2_seed0_r3`，无 PPO update/checkpoint | 证明 observation/scene/ready 构造可达，不证明学习；r3 不复用，必须重新物化 policy recipe 并发 fresh r4 |
 | fixed-194 v2 fresh r3 specs / claim | smoke / probe / milestone1000 三份 canonical spec 均绑定 exact source `8729104e6c9a…46c4`、fast-ball bundle `3c1076e3…c32b`、Pod1 GPU2 UUID、seed0 与 fixed `current_low` Reward；raw JSON SHA 依次为 `e1b63f00…5b8d`、`3b200542…dd34`、`b0396fbe…d442`，namespace 全部 fresh `_r3`；smoke canonical plan PASS，claim `7f9d12ca…4002` | 第一版缩进 JSON 在创建 namespace 前被 canonical-byte 门拒绝，已机械规范化且不覆盖旧 operator-control 目录；pin/spec/claim 已闭合，下一步是 launch smoke |
 | fixed-194 v2 profile / question repin | Pod1 exact source `17c7258a` 物化 profile pins `08c8f9c7…c6b4`、base bundle `ed9fa0f7…afef` 与 1.1 倍 fast-ball bundle `3c1076e3…c32b`；solver profile 为 `52777b36…9754`，physics profile 仍为旧诊断值 `aa5c9085…f85b7`。derivative 的 4096-proposal tape 保持 `2763/4096=67.46%` admitted 与逐原因拒绝分账 | 工件内容已闭合，但在其 commit A 与 fresh spec/claim 生成前仍不可发；这是 diagnostic comparison，不是 formal 95% admission 或新 OptiTrack physics 证据 |
 | fresh fixed-194 v2 source + focused suite | commits `291bc20e` / `0227cfe9` 已让当前 ActionBall trainer 只实例化固定 194-D v2，删除 `policy.action_one_hot`，N>1 fail-closed，并对 exact 17-term layout、旧同宽重标、teacher-start lazy bind 加回归；Pod1 exact `0227cfe9` focused suite 为 **391 passed, 12 skipped in 61.35 s** | dependency/contract 测试已闭合；真实 ObservationManager、PPO update 与 finite checkpoint 仍由 fresh `1 env × 2 updates` smoke 验证 |

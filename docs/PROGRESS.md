@@ -19,8 +19,10 @@
   为 smoke `e1b63f00…5b8d`、probe `3b200542…dd34`、milestone1000
   `b0396fbe…d442`。第一版缩进 JSON 已在 namespace 创建前被严格 canonical-byte 门拒绝；
   规范化 smoke spec 随后由 exact `8729104e` launcher canonical plan PASS，claim
-  `7f9d12ca…4002`。当前唯一下一动作是用该 claim 发 Pod1 GPU2 的 `1 env × 2 updates`；
-  状态只看
+  `7f9d12ca…4002`。r3 已在 Pod1 GPU2 真实构造并验证 fixed-194 v2 与 dynamic-ready，但在
+  PPO 前发现 spec 沿用旧 policy recipe `b7209710…077f`，实际 composed recipe 为
+  `165645f5…bd9`；该 namespace spent。当前唯一下一动作是物化实际 recipe、生成 fresh r4，
+  并等待 r3 PID 自然退出后重发；状态只看
   [分阶段准备看板](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md#0-当前执行看板本文唯一活跃-todo)。
 - fresh ActionBall actor 合同切为固定 194-D
   `action_ball_table_pose_twist_heading_task_teacher_start_v2`，当前 trainer 不再创建

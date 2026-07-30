@@ -4082,3 +4082,10 @@ raw JSON SHA 依次为 `e1b63f00…5b8d`、`3b200542…dd34`、`b0396fbe…d442`
 plan PASS，launch claim=`7f9d12cac0de0e0bbe645c34cd556ef585e1469c9794634bd48d7b7a57084002`。
 plan 期间 Pod1 GPU2 UUID 正确、显存仅 3 MiB、无 compute process，目标 namespace 不存在。
 下一门收窄为用该 claim 发 `1 env × 2 updates`，取得真实 PPO update 与 finite checkpoint。
+
+r3 随后已真实构造 scene，并通过 fixed-194 v2 ObservationManager 与 dynamic-ready bootstrap：
+log 明确打印 `action_ball_table_pose_twist_heading_task_teacher_start_v2 (194D)`。但在 PPO
+runner 创建前，policy-recipe 硬门发现 spec 的旧 SHA `b7209710…077f` 与实际 post-compose
+`165645f5…bd9` 不同而 fail-closed；无 PPO update/checkpoint。namespace
+`n1hr_smoke_fastball110_8729104e_block_gpu2_seed0_r3` spent 且不复用。下一门是物化实际
+schema-2 recipe，生成 fresh r4 spec/claim，并等待旧 PID 自然退出后再占自然空闲槽。
