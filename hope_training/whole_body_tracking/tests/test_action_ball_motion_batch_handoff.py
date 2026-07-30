@@ -116,7 +116,7 @@ def _prepare_batch(*, num_envs: int, swing_generation: int):
     command._action_ball_segment_lengths = tuple(
         int(value) for value in command.motion.seg_len.tolist()
     )
-    command._action_ball_diagnostic_pending_batch_count = 0
+    command._action_ball_diagnostic_pending_row_count = 0
     return (
         command,
         broker,
@@ -169,7 +169,9 @@ def test_diagnostic_batch_matches_existing_timing_resolver(
     command._begin_action_ball_task_pending(
         env_ids, elapsed_s=elapsed_s
     )
-    assert command._action_ball_diagnostic_pending_batch_count == 1
+    assert command._action_ball_diagnostic_pending_row_count == len(
+        env_ids
+    )
     authority_calls_before = (
         authority.ref_calls,
         authority.resolve_calls,
@@ -185,7 +187,7 @@ def test_diagnostic_batch_matches_existing_timing_resolver(
         _snapshot_motion_timing(command),
         expected,
     )
-    assert command._action_ball_diagnostic_pending_batch_count == 0
+    assert command._action_ball_diagnostic_pending_row_count == 0
     with pytest.raises(RuntimeError, match="no pending selected batch"):
         _resolve_diagnostic_batch(
             command,
@@ -327,6 +329,102 @@ def test_forged_valid_task_digest_cannot_partially_write_motion():
     )
 
 
+def test_diagnostic_handoff_rejects_an_incomplete_selected_batch():
+    (
+        command,
+        broker,
+        _authority,
+        env_ids,
+        host_identity_rows,
+        receipts,
+        task_refs,
+        elapsed_s,
+    ) = _prepare_batch(num_envs=5, swing_generation=0)
+    command._action_ball_birth_broker = _DiagnosticBrokerView(broker)
+    command._begin_action_ball_task_pending(
+        env_ids, elapsed_s=elapsed_s
+    )
+    before = _snapshot_motion_timing(command)
+
+    with pytest.raises(
+        RuntimeError,
+        match="selected row count does not match the pending row count",
+    ):
+        _resolve_diagnostic_batch(
+            command,
+            host_identity_rows=host_identity_rows[:-1],
+            receipts=receipts[:-1],
+            task_refs=task_refs[:-1],
+        )
+
+    assert command._action_ball_diagnostic_pending_row_count == 5
+    _assert_motion_timing_equal(
+        _snapshot_motion_timing(command),
+        before,
+    )
+
+
+def test_diagnostic_handoff_rejects_same_size_active_row_substitution():
+    (
+        command,
+        broker,
+        _authority,
+        _env_ids,
+        host_identity_rows,
+        receipts,
+        task_refs,
+        elapsed_s,
+    ) = _prepare_batch(num_envs=3, swing_generation=0)
+    command._action_ball_birth_broker = _DiagnosticBrokerView(broker)
+    pending_ids = torch.tensor([0, 1], dtype=torch.long)
+    command._begin_action_ball_task_pending(
+        pending_ids, elapsed_s=elapsed_s
+    )
+    before = _snapshot_motion_timing(command)
+
+    with pytest.raises(RuntimeError):
+        _resolve_diagnostic_batch(
+            command,
+            host_identity_rows=(
+                host_identity_rows[0],
+                host_identity_rows[2],
+            ),
+            receipts=(receipts[0], receipts[2]),
+            task_refs=(task_refs[0], task_refs[2]),
+        )
+
+    assert command._action_ball_diagnostic_pending_row_count == 2
+    _assert_motion_timing_equal(
+        _snapshot_motion_timing(command),
+        before,
+    )
+
+
+def test_diagnostic_pending_row_count_round_trips_reset_rollback():
+    (
+        command,
+        broker,
+        _authority,
+        env_ids,
+        _host_identity_rows,
+        _receipts,
+        _task_refs,
+        elapsed_s,
+    ) = _prepare_batch(num_envs=5, swing_generation=0)
+    command._action_ball_birth_broker = _DiagnosticBrokerView(broker)
+    snapshot = command._action_ball_reset_motion_snapshot(env_ids)
+    command._begin_action_ball_task_pending(
+        env_ids, elapsed_s=elapsed_s
+    )
+    assert command._action_ball_diagnostic_pending_row_count == 5
+
+    command._restore_action_ball_reset_motion_snapshot(
+        env_ids, snapshot
+    )
+
+    assert command._action_ball_diagnostic_pending_row_count == 0
+
+
 def test_direct_batch_handoff_is_rejected_for_formal_broker():
     (
         command,
@@ -383,7 +481,7 @@ def test_diagnostic_pending_begin_defers_host_rows_to_racket_handoff():
     )
     formal_readback = begin_source.index(".detach().cpu().tolist()")
     counter = begin_source.index(
-        "self._action_ball_diagnostic_pending_batch_count += 1"
+        "self._action_ball_diagnostic_pending_row_count += int("
     )
 
     assert diagnostic_guard < formal_readback < counter
@@ -401,7 +499,7 @@ def test_diagnostic_normal_step_skips_global_pending_scan(monkeypatch):
         _elapsed_s,
     ) = _prepare_batch(num_envs=1, swing_generation=0)
     command._action_ball_birth_broker = _DiagnosticBrokerView(broker)
-    command._action_ball_diagnostic_pending_batch_count = 0
+    command._action_ball_diagnostic_pending_row_count = 0
 
     def forbidden_where(*_args, **_kwargs):
         raise AssertionError("normal diagnostic step scanned all environments")

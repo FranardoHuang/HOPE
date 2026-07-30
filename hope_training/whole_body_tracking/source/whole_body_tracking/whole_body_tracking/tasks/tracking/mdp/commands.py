@@ -867,7 +867,7 @@ class MotionCommand(CommandTerm):
         self._action_ball_seen_birth_receipts = None
         self._action_ball_active_task_refs = None
         self._action_ball_task_timing_active = None
-        self._action_ball_diagnostic_pending_batch_count = None
+        self._action_ball_diagnostic_pending_row_count = None
         self._action_ball_task_pending_elapsed_s = None
         self._action_ball_task_age_s = None
         self._action_ball_time_to_contact_s = None
@@ -2515,7 +2515,7 @@ class MotionCommand(CommandTerm):
         # the same command-manager pass.  Keep that host-known batch state here
         # so ordinary active steps do not rediscover an empty pending set with a
         # device-wide ``torch.where`` and host length check.
-        self._action_ball_diagnostic_pending_batch_count = 0
+        self._action_ball_diagnostic_pending_row_count = 0
         timing_shape = (self.num_envs,)
         timing_options = {
             "dtype": torch.float64,
@@ -2559,7 +2559,7 @@ class MotionCommand(CommandTerm):
             self._action_ball_seen_birth_receipts = None
             self._action_ball_active_task_refs = None
             self._action_ball_task_timing_active = None
-            self._action_ball_diagnostic_pending_batch_count = None
+            self._action_ball_diagnostic_pending_row_count = None
             self._action_ball_task_pending_elapsed_s = None
             self._action_ball_task_age_s = None
             self._action_ball_time_to_contact_s = None
@@ -3273,7 +3273,9 @@ class MotionCommand(CommandTerm):
             # Racket will reuse its one identity D2H to replace the inactive
             # host refs and install every final timing column.  Until then the
             # false active mask makes the previous numeric rows unreachable.
-            self._action_ball_diagnostic_pending_batch_count += 1
+            self._action_ball_diagnostic_pending_row_count += int(
+                env_ids.numel()
+            )
 
     @staticmethod
     def _action_ball_finite_float(
@@ -3801,9 +3803,17 @@ class MotionCommand(CommandTerm):
             raise RuntimeError(
                 "diagnostic action-ball timing buffers are not fully bound"
             )
-        if self._action_ball_diagnostic_pending_batch_count <= 0:
+        pending_row_count = (
+            self._action_ball_diagnostic_pending_row_count
+        )
+        if pending_row_count <= 0:
             raise RuntimeError(
                 "diagnostic action-ball timing has no pending selected batch"
+            )
+        if len(env_rows) != pending_row_count:
+            raise RuntimeError(
+                "diagnostic action-ball timing selected row count does not "
+                "match the pending row count"
             )
 
         # Tensor construction is still staging: no Motion state changes until
@@ -3821,6 +3831,13 @@ class MotionCommand(CommandTerm):
             )
         ids = staged[:, 0].to(dtype=torch.long)
         values = staged[:, 1:]
+        # The host packet length protects omissions; this same-device guard
+        # protects a forged same-length substitution of an already-active row.
+        # Diagnostic failures poison the process, so an async device assertion
+        # preserves fail-closed semantics without reintroducing a host barrier.
+        torch._assert_async(
+            torch.all(~self._action_ball_task_timing_active[ids])
+        )
 
         self._action_ball_task_pending_elapsed_s[ids] = values[:, 0]
         self._action_ball_task_age_s[ids] = values[:, 0]
@@ -3832,7 +3849,14 @@ class MotionCommand(CommandTerm):
         self._action_ball_task_timing_active[ids] = True
         for env_id, task_ref in zip(env_rows, validated_refs):
             self._action_ball_active_task_refs[env_id] = task_ref
-        self._action_ball_diagnostic_pending_batch_count -= 1
+        self._action_ball_diagnostic_pending_row_count -= len(env_rows)
+        torch._assert_async(
+            torch.all(
+                self._action_ball_task_timing_active[
+                    self._action_ball_reset_generation > 0
+                ]
+            )
+        )
 
     def install_action_ball_task_timing_diagnostic_many(
         self,
@@ -3855,7 +3879,7 @@ class MotionCommand(CommandTerm):
         if (
             self._action_ball_birth_broker is not None
             and self._action_ball_birth_broker.diagnostic_fast_path
-            and self._action_ball_diagnostic_pending_batch_count == 0
+            and self._action_ball_diagnostic_pending_row_count == 0
         ):
             return
         pending_ids = torch.where(
@@ -3864,7 +3888,7 @@ class MotionCommand(CommandTerm):
         )[0]
         if len(pending_ids) == 0:
             if self._action_ball_birth_broker.diagnostic_fast_path:
-                self._action_ball_diagnostic_pending_batch_count = 0
+                self._action_ball_diagnostic_pending_row_count = 0
             return
         for env_id in (
             int(value) for value in pending_ids.detach().cpu().tolist()
@@ -3899,7 +3923,7 @@ class MotionCommand(CommandTerm):
             ]
             self._action_ball_task_timing_active[env_id] = True
         if self._action_ball_birth_broker.diagnostic_fast_path:
-            self._action_ball_diagnostic_pending_batch_count = 0
+            self._action_ball_diagnostic_pending_row_count = 0
 
     def resolve_action_ball_task_timing_now(
         self,
@@ -4015,7 +4039,7 @@ class MotionCommand(CommandTerm):
         self._resolve_pending_action_ball_tasks()
         active = self._action_ball_task_timing_active
         if self._action_ball_birth_broker.diagnostic_fast_path:
-            if self._action_ball_diagnostic_pending_batch_count != 0:
+            if self._action_ball_diagnostic_pending_row_count != 0:
                 raise RuntimeError(
                     "diagnostic action-ball task timing remained unresolved"
                 )
@@ -6413,10 +6437,10 @@ class MotionCommand(CommandTerm):
                 else self._stagger_hold_pending[env_ids].clone()
             ),
             "active_task_refs": list(self._action_ball_active_task_refs),
-            "diagnostic_pending_batch_count": (
+            "diagnostic_pending_row_count": (
                 getattr(
                     self,
-                    "_action_ball_diagnostic_pending_batch_count",
+                    "_action_ball_diagnostic_pending_row_count",
                     0,
                 )
             ),
@@ -6462,8 +6486,8 @@ class MotionCommand(CommandTerm):
         self._action_ball_active_task_refs = list(
             state["active_task_refs"]
         )
-        self._action_ball_diagnostic_pending_batch_count = state[
-            "diagnostic_pending_batch_count"
+        self._action_ball_diagnostic_pending_row_count = state[
+            "diagnostic_pending_row_count"
         ]
         self._action_ball_task_timing_active[env_ids] = state[
             "task_timing_active"
