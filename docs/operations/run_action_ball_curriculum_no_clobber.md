@@ -61,8 +61,9 @@ argv。数量、顺序、stable action UID、motion bytes 或 family 任一漂�
 
 动作、UID、球/物理/solver pins 的完整含义见
 [`action-ball manifest`](../DEFINITIONS.md#action-ball-manifest)；actor 形状必须是
-[`action_ball_n5`](../DEFINITIONS.md#action-ball-n-contract)，不能把其他 N 的 checkpoint 或
-动作列表续成 N5。
+[`action_ball_table_pose_twist_heading_task_n5`](../DEFINITIONS.md#action-ball-table-pose-twist-heading-task-contract)
+（frame 一致的相对击球 task + 绝对桌体 pose/twist，总宽 198），不能把旧
+`action_ball_n5`、混合 frame 的同宽 checkpoint、其他 N 的 checkpoint 或动作列表续成 N5。
 
 ## V3 spec：字段必须恰好一致
 

@@ -435,7 +435,7 @@ def _parse_action_ball_actor_obs_contract(
 
     The legacy layout remains readable for existing checkpoints and claims.
     Table-pose layouts add nine base-pose scalars (``190 + N``); the preferred
-    table-pose-twist layout adds body-frame linear velocity as well
+    table-pose-twist layouts add yaw-heading-frame linear velocity as well
     (``193 + N``).  The legacy layout remains ``181 + N``.  Every spelling
     binds the exact action count; leading-zero or out-of-range suffixes are
     deliberately rejected.

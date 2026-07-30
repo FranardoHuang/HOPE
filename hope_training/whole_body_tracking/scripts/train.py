@@ -2536,6 +2536,17 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
             "[train.py] racket.action_ball_diagnostic_unauthorized must be "
             "an exact boolean"
         )
+    if (
+        not diagnostic_unauthorized
+        and configured_actor_contract
+        != table_pose_twist_heading_task_actor_contract
+    ):
+        raise _OverrideError(
+            "[train.py] formal ActionBall requires the frame-consistent "
+            f"{table_pose_twist_heading_task_actor_contract!r} actor "
+            "observation contract; legacy layouts are diagnostic/read-only "
+            "compatibility only"
+        )
     if not diagnostic_unauthorized:
         for attr in (
             "canonical_registry_path",
@@ -12201,6 +12212,9 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
             racket_cfg = getattr(
                 getattr(env_cfg, "commands", None), "racket_target", None
             )
+            stable_ready_actions = tuple(
+                getattr(racket_cfg, "clip_names", ()) or ()
+            )
             if (
                 getattr(racket_cfg, "target_mode", None) != "action_ball"
                 or getattr(
@@ -12209,10 +12223,11 @@ def _apply_task_overrides(env_cfg, task, clip_name=None):
                     None,
                 )
                 is not True
+                or len(stable_ready_actions) != 1
             ):
                 raise _OverrideError(
                     "[train.py] task.domain_rand.stable_ready_plant=true is "
-                    "restricted to diagnostic ActionBall launches"
+                    "restricted to exact N=1 diagnostic ActionBall launches"
                 )
             required_events = (
                 "base_com",

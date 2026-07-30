@@ -121,7 +121,7 @@ same policy tick. Timestamp-compensation pairs with positive delay are `NO-LAUNC
 | `181+N` | `action_ball_n<N>` | 与 `task_first_n<N>` 逐列同构，但 checkpoint 身份另名：动作先冻结，再由该动作的来球与 fixed-action solver 产生 task。当前 N=1 总宽度为 `182`。 | Isaac trainer 已实现并有 Pod 证据；无 production arbitrary-N wire/C++ consumer。 |
 | `190+N` | `action_ball_table_pose_n<N>` | `hitter_footwork(177)` + `base_position_table(3)` + `base_orientation_table_6d(6)` + demanded signed face / reserved spin `(4)` + `action_one_hot(N)`。当前 N=1 总宽度为 `191`。 | Feature-branch Isaac source candidate；Pod evidence 未完成，production arbitrary-N/191-D flat wire 与 C++ consumer 均不存在。 |
 | `193+N` | `action_ball_table_pose_twist_n<N>` | 历史 194-D 候选；position residual 在 heading frame，但 velocity/normal 仍在 world frame。 | 只作旧 checkpoint/诊断兼容，不得用于 fresh launch。 |
-| `193+N` | `action_ball_table_pose_twist_heading_task_n<N>` | table pose/twist 与上一行同宽；racket position residual、demanded velocity、raw-A normal 全部统一到 yaw-heading frame。 | 当前 feature-branch fresh 首发候选；production arbitrary-N/194-D flat wire、C++/MuJoCo consumer 与真实速度估计器尚未闭合。 |
+| `193+N` | `action_ball_table_pose_twist_heading_task_n<N>` | table pose/twist 与上一行同宽；racket position residual、demanded velocity、raw-A normal 全部统一到 yaw-heading frame。 | Pod N1 `1×2/4096×5` 已过且 1000-update 正在运行；production arbitrary-N flat wire、C++/MuJoCo consumer 与真实速度估计器尚未闭合。 |
 | 110 | `hitter_pure` | HITTER Table-I style: 99-D proprio prefix + base forward(2), station delta(2), racket target rel base(3), target velocity(3), tts(1); no reference command or swing flag. | Supported; requires fresh localization and metadata-bound per-side station geometry. |
 
 Do not infer a contract from width alone. Formal consumers require the registered name, mode,
@@ -133,9 +133,9 @@ metadata and wire width. Schema 1 never fabricates the tail.
 Merely accepting 181 in an input-shape whitelist would still create a right-width/wrong-columns
 command, so 181 remains rejected until its unique station/normal order is frozen.
 
-### Current N=1 ActionBall actor: exact 182-D layout
+### Historical N=1 ActionBall actor: exact 182-D layout
 
-The current upper backhand loop/block runs use `action_ball_n1`: the exact
+Historical upper backhand loop/block runs used `action_ball_n1`: the exact
 `hitter_footwork(177)` prefix followed by demanded signed face plus reserved spin scalar `(4)` and
 the frozen one-action identity `(1)`. The prefix is:
 
@@ -147,8 +147,8 @@ There is **no absolute base world position and no absolute world yaw/quaternion 
 base pose is used internally to form the two relative base-target coordinates and the
 base-yaw-frame racket-target residual. In Isaac, the orientation/angular-velocity/gravity inputs
 come from simulator rigid-body truth plus configured observation noise; this is not an integrated
-IMU drift model. On A3 hardware, those orientation-derived actor terms currently use the pelvis
-IMU, while the external mocap base stream supplies position only at the consumer boundary.
+IMU drift model. The historical A3 consumer used pelvis-IMU orientation-derived terms and external
+mocap position only; the fresh contract below supersedes that source split.
 
 Fresh N=1 ActionBall runs may opt into the
 [action-specific dynamic ready](../DEFINITIONS.md#action-specific-dynamic-ready) reset contract.
@@ -170,17 +170,17 @@ motion_anchor_ori_b(6),
 base_ang_vel(3),
 joint_pos(31),
 joint_vel(31),
-last_action(31),
+actions(31),
 projected_gravity(3),
 base_target_pos_b(2),
-racket_target_pos_b_heading(3),
+racket_target_pos_b(3),
 racket_target_vel_heading(3),
 time_to_strike(1),
 swing_type(1),
 base_position_table(3),
 base_orientation_table_6d(6),
 base_lin_vel_heading(3),
-racket_target_normal_cmd_heading_plus_rho(4),
+racket_target_normal_cmd_heading(4),
 action_one_hot(1)
 ```
 
@@ -248,6 +248,14 @@ closed, so this training contract does not authorize a real-robot run.
 
 The first fresh N1 wave intentionally remains single-frame. A frame-history ring is stateful at the
 environment level and changes reset/exact-resume semantics; it is not a free 72-column append.
+
+The 194-D name also deliberately excludes localization freshness because the current OptiTrack
+dropout/latency distribution has not yet been measured. A deployment-intent successor should add
+at least `base_localization_age_s(1)` and `base_localization_valid(1)` in one versioned,
+warm-start-breaking migration after the live producer uses capture/Motive timestamps. Held poses
+must retain increasing age and must never be converted into zero velocity merely because no new
+sample arrived. With only those two additions, N=1 would be 196-D; the old 194-D name and
+checkpoints must not be reused.
 History is reconsidered only after the measured OptiTrack/IMU pipeline shows a residual
 partial-observability or delay problem that cannot be represented by the coherent pose/twist
 packet. At that point the first canary is a small critical-channel stack, not an unbounded history

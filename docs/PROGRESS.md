@@ -13,14 +13,21 @@
 
 ## 2026-07-30（A3 stable-upper successor）
 
+- exact `f2c54fc3` 的 frame-consistent 194-D stable-ready loop/block 已在 Pod1 各完成
+  `1 env×2` 与 `4096 env×5`：14 份 checkpoint 全部 finite，smoke 全安全，probe mean episode
+  约 `48–72` steps 并跨 `t_hit`；loop/block 已分别出现 `867/2268` 个 strike opportunity。
+  第一次 PPO 后两者仍共同出现 waist-roll/pitch actual-hard，但旧 `4ff48b21` 对照到
+  update100/169 曾降到 `14/11` 与 `3/3`，故不以五轮否决学习。Pod1 GPU1 已启动反手挡
+  `4096×1001`，反手拉同槽排在其后；身份、传感器/物理后续边界见
+  [分阶段准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
 - 首个 N1 actor 候选已收口为 194-D
   `action_ball_table_pose_twist_heading_task_n1`：177-D HITTER-derived 前缀内的 racket
   position/velocity 与尾部 signed face 统一到 yaw-heading frame，另加入相对桌体 XYZ、连续
   SO(3) 6D、yaw-heading 三轴 root-COM 线速度与冻结动作身份；base/racket task 继续是机器人
   相对 residual。table-hit reset 只隔离上一 episode final-substep 碰桌行的
-  首份 PhysX stale report，非桌碰 reset 与 persistent 新碰撞保持可见。Pod final smoke、
-  `1 env×2`、`4096 env×5` 与 fresh checkpoint 尚待完成；formal receipt 热路径、部署
-  producer 和 bang-bang canary 的最迟边界见
+  首份 PhysX stale report，非桌碰 reset 与 persistent 新碰撞保持可见。Pod 194-D actor
+  smoke、`1 env×2`、`4096 env×5` 与 fresh finite checkpoint 已完成；formal receipt 热路径、
+  部署 producer 和 bang-bang canary 的最迟边界见
   [分阶段准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
 - Pod1 clean `eb2799b1` 的 table smoke 已完成 E2：32 个 A3 body×top/keepout/net/左右 post
   五列 matrix 全构造，五 role 均有真实 PhysX 正控，四个子步覆盖；五次 automatic reset 后

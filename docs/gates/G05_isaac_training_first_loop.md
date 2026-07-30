@@ -3918,3 +3918,30 @@ table-relative base position `3` + continuous orientation `6` 仍保留完整 6-
 与 PD-gain DR，保留 material DR 和 recipe-bound joint-default offset。下一证据是 clean Pod
 focused parity → 两动作 `1×2` → `4096×5`；任一动作跨 `t_hit` 且 raw-hard 不再爆炸即发
 `4096×1001`。当前仍未授权真机，G05 保持 `Partial`。
+
+#### 2026-07-30 frame-consistent stable-ready 双动作实跑与首条 1000-update
+
+exact `f2c54fc3` 已在 Pod1 通过 dependency-light focused suite
+`338 passed, 9 skipped`。loop/block 两条 `1 env × 2 update` smoke 均真实验证
+`action_ball_table_pose_twist_heading_task_n1 (194D)`，四份 checkpoint 逐 tensor finite，
+qdes/actual-hard/table/fall/nonfinite 全零；log SHA-256 分别为
+`db75ef49…49b` / `0a26cbee…69f`。stable-ready plant 日志明确只关闭 torso CoM、
+link-mass 与 PD-gain DR，保留 material 与 recipe-bound joint-default offset。
+
+随后两动作各自然完成 `4096 env × 5 update`。十份 checkpoint 全部 finite，update 0
+全安全；mean episode 随后约 `48–72` steps，已跨 loop `t_hit≈31` steps 与 block
+`t_hit≈24` steps。loop 在 update2/3 分别产生 `783/84` 个 strike opportunity；block 在
+update2/4 分别产生 `1838/430` 个，说明 task 击球位置/时间窗已对上。两条从第一次 PPO 更新后
+都出现共享 waist-roll/pitch actual-hard，qdes forbidden 始终为零；probe log SHA-256 为
+`5c5ce9d4…420` / `a93b39c4…e7a`。这证明出生修复有效、动态学习仍需观察，不能用五轮判定恢复
+上限或调 Reward。
+
+历史 exact `4ff48b21` 给出直接反例：它在 update1–5 同样有大规模 reset，但 loop/block 的
+actual-hard terminal 到 update100 已降到 `14/11`，到 update169 均为 `3`。因此按预注册不被
+五轮早期失稳拦截。Pod1 GPU1 已接受 fresh 反手挡
+`n1hr_milestone1000_f2c54fc3_block_gpu1_r1`（`4096×1001`，claim
+`8dc4dcb2…ff080`）并进入真实 `Learning iteration`；2026-07-30 快照已到 update 26，
+该 update 有 `583` 个 strike opportunity、`578/1653` swing completion、qdes forbidden
+仍为 `0`，actual-hard 仍集中在 waist-roll/pitch，按 update100/300/1000 判趋势。反手拉在
+该槽自然完成后排队。该谱系仍是 diagnostic、绑定旧 physics profile，只授权 contact/学习可行性，不授权 formal
+landing、export 或真机。G05 继续 `Partial`。

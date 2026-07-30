@@ -50,8 +50,10 @@ compose 后必须同时满足：
   solver payload SHA 认证。每个额外 proposal 都保留在 `P` 与 reject-reason ledger；
 - compose 输入 `racket.clip_names` 与 manifest `action_order` 完全相同；`train.py` 再由它派生
   runtime `racket_target.clip_names_per_clip`。motion 文件数、顺序与逐文件 SHA 必须完全相同；
-- `task.actor_obs_contract=action_ball_n<N>`，其中 N 是 manifest 动作数；actor 为
-  `hitter_footwork(177) + face/rho(4) + action_one_hot(N)`；
+- `task.actor_obs_contract=action_ball_table_pose_twist_heading_task_n<N>`，其中 N 是
+  manifest 动作数；actor 为 frame-consistent
+  `hitter_footwork(177) + table pose(9) + base linear velocity(3) +
+  face/rho(4) + action_one_hot(N)`，总宽 `193+N`；
 - `motion.balanced_clip_sampling=true` 及
   `motion.balanced_clip_sampling_seed=<内容绑定的整数 seed>`，使任意前缀的逐动作样本数最多差一；
 - action manifest、sampler、solver profile、physics profile、motion admission、policy contract 和

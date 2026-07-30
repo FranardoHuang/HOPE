@@ -1,6 +1,6 @@
 # EXP-ACTION-BALL-PHASED-READINESS-20260730 — ActionBall 分阶段训练准备账本
 
-- 状态：`preregistered`
+- 状态：`running`
 - 阶段/轴：AgiBot A3，动作条件 Ball-first，N=1 诊断长训 → 正式 N=5 → N=73 → 部署
 - 集成小目标：先产出一份可迭代的 N=1 policy，同时把不应阻塞首跑、但必须在后续阶段关闭的工程债写清楚
 - 人类负责人：Franco
@@ -94,16 +94,55 @@ feed-forward actor 中能区分“同一姿态、正在倒/正在平移”和“
 marker rotational extrinsic、时间同步、丢帧/延迟和 causal velocity estimator，所以 194-D
 训练合同目前不授权真机。
 
-旧青瞳（ChingMu）场地 profile 可作数量级先验，但不能直接冒充 OptiTrack 标定：旧位置模型是
+2026-07-30 对近期分支的复核给出三条新的硬边界：
+
+- 近期 OptiTrack producer 不在过期的 `origin/jiayi`，而在 `origin/hitter` /
+  `origin/hitterobs`；当前 live P1 rigid-body 是 `360 Hz`、米制、完整 6-DoF；
+- 当前消费的 `NamedPoseArray v1` 只带 ROS 到达时间，不能分解相机曝光、Motive 解算和网络延迟；
+  驱动已有携带 camera mid-exposure 与 Motive latency 的 v2 消息，部署意图标定必须切到该
+  timestamp 路径；
+- `origin/hitterobs` 已有“只在收到新 pose 时按真实 `delta_t` 更新、EMA、age/stale、reset
+  原子清状态”的二维线速度生产模式。ActionBall 应复用该**因果更新规则**并扩成三维
+  root-COM heading velocity；重复的 held pose 绝不能被解释为零速度。
+
+首个 194-D N1 保持最小可学习合同，不在没有真实 dropout 分布时追加常量 freshness 列。最终
+部署意图 actor 应在同一次自然断 warm-start 的版本迁移中增加至少
+`base_localization_age_s(1) + base_localization_valid(1)`：短 dropout 时 policy 能区分
+“新测量”和“hold-last”，超过 supervisor stale 门则直接安全停机。若只增加这两列，N=1
+宽度将由 194 变为 196，必须使用新 contract 名并重钉 Python/C++/MuJoCo producer；不能在
+194-D 名称下静默追加。是否再加短 history 仍由实测延迟/别名 canary 决定。
+
+旧青瞳（ChingMu）场地 profile 只可作数量级先验，不能直接冒充 OptiTrack 标定：旧位置模型是
 `1.9 mm` white、`5.2 mm` AR(1) marginal、`rho=0.717`/50-Hz policy tick；旧场地记录还把
 `40 ms` 作为保守整条 target 传输上界，而另一份实测说明传输 `<10 ms`、端到端 `<=20 ms`。
+复核还确认这些数主要来自旧链的**球轨迹**，不是新 OptiTrack A3 base rigid-body；Jiayi V15
+中的 `[3,3,5] mm`、`20 ms`、`1% dropout`、EMA `alpha=0.25` 也明确只是 guessed prior。
 这些数字来自不同设备、对象和处理链。当前 N1 首波不把它们分别撒到 6-D rotation、
 projected gravity 和 task residual 上；部署意图重训前必须重新记录 OptiTrack capture/source/
 receive/consume timestamp、Motive smoothing、遮挡、gyro bias 和 marker→COM 线速度残差，并在
 同一个因果 SE(3)+twist packet 上注入 episode extrinsic bias、tangent-space orientation noise、
 colored position noise 与 hold-last latency。
 
-### 1.4 joint 和 task 信息是否够
+### 1.4 近期球物理与 73 动作证据如何消费
+
+`origin/main@ddfaaa02` 已加入 2026-07-30 OptiTrack 球物理：较可信的拟合量包括
+`k_d=0.1253`、`k_m=0.00404`、球拍有效恢复系数 `0.646`，桌面恢复系数采用裁定值
+`0.9215`；paddle speed decay、table/paddle tangential retention 仍欠充分辨识，只能作为
+canary/prior。该提交目前不是 `curr-launch-fix` 的祖先，所以本轮已物化 N1 bundle 仍绑定旧
+physics profile，**不得声称已经使用新物理**。
+
+首个 contact-only N1 的判据只是 task 击球位置/时间窗是否可达，新参数不阻塞 1000-update
+diagnostic；任何正式 landing/return 结论、formal N=5 或部署意图训练前，必须显式合入新物理、
+重新物化 physics/solver/question bundle 并重钉 SHA。参数改变不是 Reward A/B，但新旧 policy
+表现也不能混成同一 lineage。
+
+ChingMu-73 已不是“只有动作、来球要反推”的原料：exact N=73 manifest 已逐动作保存真实
+`v_in/v_out`、击球点、station、yaw、contact phase 与 motion bytes。73 条 station 覆盖约
+`0.260 m x 0.479 m`，yaw 约 `-4.76 deg .. 37.83 deg`。这进一步支持当前拆分：动作/task
+保持 heading-relative 以复用，table-relative base pose 9 值保留绝对站位与三轴姿态；
+每动作用 manifest 的真实来球作 ball center，而不是强行共享一个 spawn。
+
+### 1.5 joint 和 task 信息是否够
 
 194-D 合同中已经有：
 
@@ -131,7 +170,7 @@ fixed-action solver 已把每颗来球编译成当前相对 task；在真实 PPO
 exact-resume state。它不是“纯拼列、无状态”的免费修改，GRU/蒸馏排在 feed-forward stack
 之后，也不阻塞首个 N1 policy。
 
-### 1.5 bang-bang：先量化，再加约束
+### 1.6 bang-bang：先量化，再加约束
 
 现役合同已有 raw/processed action 平滑项、实际 joint acceleration/limit 账、
 finite qdes projection、投影前超出量 penalty 和 actual soft/hard 分账。首个 N=1 long
@@ -177,6 +216,10 @@ acceleration 和 jerk 三阶约束，但这只证明该类 governor 有严格约
 | table contact source | Pod1 `eb2799b1` r26：五件 kinematic collider、32-body×5-role matrix、四子步与五 role 真实正控均通过；五 probe reset 后零泄漏，unsupported/Traceback/FAIL 均为 0，出现 `main_completed` | E2 receipt 已保存；训练仍逐 run 监测 table counter |
 | 旧 194-D loop/block 构造 probe | exact `c9682591` 各 `4096×5` 均持续产 checkpoint 且 finite；mean episode 已到约 29–32 步，birth age≤1 hard 为零 | 第一次 PPO 前 update0 已有 `860/864` 个 env 撞 `waist_roll` raw hard；两动作 hard-env Jaccard `0.982`，不能据此发 1000 |
 | shared waist 根因定位 | qdes forbidden 始终 0；teacher waist/hard 最小余量 `0.272–0.303 rad`；hard 首发约 step18/0.365s，且两动作 substep hard Jaccard `0.992` | 指向共享 plant DR，不指向 solver/Reward/teacher 贴限；下一轮使用 stable-ready plant |
+| frame-consistent stable-ready smoke | exact `f2c54fc3` 的 loop/block `1 env×2` 均验证 194-D actor，四份 checkpoint finite，qdes/actual-hard/table/fall/nonfinite 全零；log SHA 为 `db75ef49…49b` / `0a26cbee…69f` | 证明真实构造和初始 plant，不判断学习 |
+| frame-consistent stable-ready probe | loop/block `4096×5` 各有五份 finite checkpoint；update 0 全安全，mean episode 随后约 `48–72` steps 并跨各自 `t_hit`；loop 在 update2/3 有 `783/84` 个 strike opportunity，block 在 update2/4 有 `1838/430` 个 | 第一次 PPO 后共同出现 waist-roll/pitch actual-hard，qdes forbidden 始终 0；五轮只证明窗口可达，不判恢复上限 |
+| 历史恢复反例 | 旧 exact `4ff48b21` 在 update 1–5 同样有大量 reset；loop/block 的 actual-hard terminal 到 update100 已降到 `14/11`，update169 均为 `3` | 支持按预注册运行到 100/300/1000 再判，不支持把旧 policy 当新合同结果 |
+| 首条 milestone1000 | Pod1 GPU1 已接受反手挡 `4096×1001`，fresh namespace `n1hr_milestone1000_f2c54fc3_block_gpu1_r1`，claim `8dc4dcb2…ff080`；2026-07-30 快照已到 update 26，仍有 `583` 个 strike opportunity、`578/1653` swing completion、qdes forbidden `0` | 运行中；早期 actual-hard 仍集中在腰 roll/pitch，按历史反例在 update100/300/1000 判趋势；反手拉同一卡自然排在其后 |
 
 这些都是功能分支证据；进入 `main` 前不改变当前采用 setting。
 
@@ -205,6 +248,9 @@ acceleration 和 jerk 三阶约束，但这只证明该类 governor 有严格约
    `model_1000.pt`）；另一动作可串行排在同一空闲槽，不因它阻塞先过门者；
 6. 把 exact spec、recipe、run record 和复现命令纳入 repo；所有 namespace fresh/no-clobber。
 
+这批 N1 的物理身份是当前 bundle 已钉住的旧 profile，只授权 contact/学习可行性诊断；不得在
+结果中写成 2026-07-30 OptiTrack 新球物理或部署候选。
+
 下列项**不阻塞**首个 diagnostic N=1 long：
 
 - formal per-reset receipt checkpoint compaction；
@@ -215,7 +261,8 @@ acceleration 和 jerk 三阶约束，但这只证明该类 governor 有严格约
 - EMA 或 command governor。
 
 stable-ready plant 不是最终 sim-to-real 配方。它只把“先让 policy 学到动作”与“证明 ready
-覆盖完整 DR support”拆开；1000 后按 base-CoM → PD → mass → material 的具名阶段重新加回，
+覆盖完整 DR support”拆开；robot-material DR 从未关闭，1000 后只按 base-CoM → PD → mass
+的具名阶段重新加回，
 每阶段先出 robust-hold/teacher-to-`t_hit` 证据再做短 canary，禁止一次性恢复整包后靠 Reward
 解释 hard-limit。
 
@@ -262,13 +309,18 @@ parity/吞吐验证。
    safety archive、birth/retire、sampling/solver、state write、PPO；据实修每步 ledger clone/
    string 重建、残余 D2H、broker per-env Python。`~7 ms/env-reset` 只作为混合上界，未经 profiler
    不写成精确归因；
-4. **generic formal launcher 升级。** 任意 N launcher 识别 194-D family、dynamic-ready/
-   table-pose-twist identity、真实 Reward/PPO/plant/solver SHA 和 exact resume；
+4. **generic formal launcher 余项。** 任意 N launcher 对 194-D family 的 name/width 识别已完成；
+   仍须把 dynamic-ready、table-pose-twist producer identity、真实 Reward/PPO/plant/solver SHA
+   和 exact resume 全部绑定进 formal receipt；
 5. exact ordered N=5 manifest、五件 motion bytes/admission、动作专属 ball center/support、
    new-forehand `t_hit/t_cycle/site speed/table clearance/recovery` 和非空 trust set；
 6. formal Reward causal receipt、frozen evaluator canary/heldout、table smoke、stage evidence 和
    checkpoint identity 全闭合；
 7. 运行规模压力证据只按 N=5 的 N/E/R 合同给 N=5，不让 N=73 缺口反向阻塞。
+8. 显式合入 `origin/main@ddfaaa02` 或其等价后继，采用已裁定的新 OptiTrack 球物理，
+   重新物化并重钉 physics/solver/question bundle；未充分辨识的切向参数保留 canary 身份，
+   不静默写成 verified constant。第一次 byte pin 前先修正新 physics YAML 中残留的旧曲线
+   示例注释，避免只改注释也迫使全链再次重物化。
 
 正式路径的 per-reset receipt 改造是**有意留到这里而不是漏忘**：它不改变 N=1 学习问题，
 却决定 N=5/N=73 是否能在短 episode 下接近正常吞吐和可用 checkpoint 大小。该改造不做学习
@@ -279,26 +331,31 @@ A/B；验收是 numerical/state parity、旧收据重建、exact resume 和固�
 1. exact ordered 73 manifest 与每件 motion/compiler/safety/admission 证书逐项闭合；
 2. 每动作自己的 ready、`t_hit/t_cycle/site speed`、ball center/support 和 solver profile，
    不把 N=5 的 shared-ready 假设扩散到 73；
-3. full-body actor/reference 和 action identity one-hot 的任意 N 路径通过；
-4. N=73 对应的 sampler/pool/broker/curriculum/checkpoint 压力、compaction 和 exact resume；
-5. 逐动作独立 frontier、强制覆盖/starvation、center/interior/frontier 混合和 frozen heldout；
-6. 若启用 base move，先证明真实 spawn 与 no-move/move goal 语义、preparation window 和移动恢复；
-7. N=73 仍在 Pod 独立 smoke/canary，不能由 N=5 run 续成或更换 action order。
+3. 直接消费 exact manifest 已保存的逐动作真实 `v_in/v_out`、击球点、station 与 yaw 作为中心；
+   不再反推或把 73 件归一到同一绝对 spawn；
+4. full-body actor/reference 和 action identity one-hot 的任意 N 路径通过；
+5. N=73 对应的 sampler/pool/broker/curriculum/checkpoint 压力、compaction 和 exact resume；
+6. 逐动作独立 frontier、强制覆盖/starvation、center/interior/frontier 混合和 frozen heldout；
+7. 若启用 base move，先证明真实 spawn 与 no-move/move goal 语义、preparation window 和移动恢复；
+8. N=73 仍在 Pod 独立 smoke/canary，不能由 N=5 run 续成或更换 action order。
 
 ### 3.5 部署前
 
-1. C++/ONNX/MuJoCo 全部支持 exact 194-D ordered terms、normalization、metadata 和 stale/dropout
-   语义；
+1. C++/ONNX/MuJoCo 全部支持最终版本化 ordered terms、normalization、metadata 和 stale/dropout
+   语义；若采用 `localization_age/valid`，必须使用新名称/宽度，不能伪装成 194-D；
 2. OptiTrack marker cluster→`base_link`、venue→table 的完整 SE(3) 外参、时间同步、Motive
-   smoothing/端到端 latency 和遮挡处理进入部署合同；
+   smoothing/端到端 latency 和遮挡处理进入部署合同；时间链使用 v2 capture/Motive timestamp，
+   不再只看 ROS 到达时间；
 3. 三轴 gyro 与 OptiTrack pose 的 frame/extrinsic 对齐；base linear velocity estimator 完成
    mocap anchor、可选 accelerometer 融合、marker→COM 刚体速度修正；
 4. 用真实噪声、延迟和 dropout 重新做 Isaac/MuJoCo observation parity；不能把 simulator truth
    直接当部署证据；
-5. 若采用 governor，Isaac/MuJoCo/C++ 使用同一逐电机 velocity/acceleration/jerk 参数、executed
+5. 新 OptiTrack 球物理在 Isaac/MuJoCo/solver 中同值，question bundle 已按新 identity
+   重物化；未充分辨识的切向参数不冒充部署硬真值；
+6. 若采用 governor，Isaac/MuJoCo/C++ 使用同一逐电机 velocity/acceleration/jerk 参数、executed
    state observation 和冲突处理；未采用时也必须保留 hard q/effort/velocity 安全边界；
-6. 同一 checkpoint 在 MuJoCo 验证动作方向、teacher fidelity、table/ball/racket 物理和无桌碰；
-7. G06/G07 dry-run、joint order、scale、stop 和 no-publish safety gate 通过前不得接真机。
+7. 同一 checkpoint 在 MuJoCo 验证动作方向、teacher fidelity、table/ball/racket 物理和无桌碰；
+8. G06/G07 dry-run、joint order、scale、stop 和 no-publish safety gate 通过前不得接真机。
 
 ## 4. 决策账本
 
@@ -308,10 +365,17 @@ A/B；验收是 numerical/state parity、旧收据重建、exact resume 和固�
 | base linear velocity 3-D | 直接修 | N=1 long | 否；做 observation parity | 已进入 194-D actor |
 | racket task velocity/normal 统一 heading frame | 直接修 | N=1 long | 否；做 tensor/构造 parity | 新合同名；旧同宽 194-D 不续 |
 | OptiTrack pose + gyro angular velocity | deploy contract | 部署 | 否；做传感器延迟/噪声实测 | 采用分量级最优源，不整套弃用 IMU |
-| dynamic-ready 原子合同 | 直接修 | N=1 long | 否 | 已实现，待 194-D 新 recipe/smoke |
+| OptiTrack v2 timestamp + localization age/valid | deploy contract | 部署意图重训前 | 否；做 producer/tensor parity | 当前 194-D 不加猜测常量；实测后以新合同迁移，长 stale 由 supervisor 停机 |
+| 2026-07-30 OptiTrack 球物理 | identity/physics 直接修 | formal N=5 或任何正式 landing 结论前 | 否；重新物化和 Pod parity | 当前分支未含；contact-only N1 可先跑，但不得冒充新物理 |
+| ChingMu ball/base 噪声直接复用 | 暂不采用 | 永不作为 OptiTrack 硬合同 | 否 | 只作数量级先验；新系统按对象、时间戳与 Motive 设置重测 |
+| dynamic-ready 原子合同 | 直接修 | N=1 long | 否 | 已实现；现有 policy recipe 已复用，194-D hard-contract/smoke/probe 已过 |
 | stable-ready plant（关 CoM/mass/PD DR） | 直接修后 Pod probe | N=1 long | 否；旧 full-DR 已给失败反例 | 防 shared waist raw-hard；1000 后逐轴恢复 DR |
 | table-contact filtered truth | 直接修 | N=1 long | 否 | Pod r26 E2 已过；训练继续逐 run 分账 |
 | diagnostic receipt 快路径 | 直接修 | N=1 long | 否 | 已实现 |
+| zero-weight RewardTerm 结构裁剪 | 数学等价直接修 | formal N=5 | 否；做 composed-config/Pod parity | N1 不删 table/contact sensors；formal ledger 仅遍历 active 非零列 |
+| qdes weight-independent probe | 安全验收 | formal N=5；部署前冻结复测 | 否；冻结同 policy/task tape | 当前 penalty 权重归零会连遥测一起消失；需独立零值 probe 和 global residence `<0.005` 候选门 |
+| 单一 physics/contact 真源 | 跨语言合同修复 | formal N=5 | 否；做 Python/MuJoCo/planner golden parity | 采纳 Jiayi 的模式，不搬其过期硬编码常量 |
+| 部署 binary metadata 拒载 | deploy contract | 部署前 | 否；negative tests | 为 ActionBall 最终 obs/checkpoint/motion/physics 生成，不复用 V17 的 180-D 常量 |
 | formal checkpoint 粒度 receipt | 直接修 | formal N=5 | 否；做 parity/吞吐 | 开放，不能拖到 N=73 |
 | ledger/D2H/broker 热路径 | profiler 后直接修 | formal N=5 | 否；做固定工作量吞吐 | 开放 |
 | Reward 权重与负项剂量 | canary | 1000 update 后 | 是 | 不阻塞首跑 |

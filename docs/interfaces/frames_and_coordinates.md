@@ -87,9 +87,15 @@ station center 属于 level-0 task identity。level 0 只做中心 warm-up，pos
 才开始；base residual 是最后一轴。改变 station center 会改变 manifest/task identity，并使旧碰撞、
 能力与 selector 证据失效。
 
-## Mocap Runtime Contract (team contract, 2026-07)
+## Historical ChingMu Runtime Contract (superseded for fresh 194-D ActionBall)
 
-The rig is ChingMu streaming over VRPN. The tracked-object set differs by phase:
+The following 300-Hz ChingMu/VRPN contract documents the old P1/P2 consumer and remains relevant
+only when reproducing that lineage. The venue has since switched to 360-Hz OptiTrack; fresh
+`action_ball_table_pose_twist_heading_task_n<N>` training and future deployment use the
+OptiTrack+IMU split stated in [ActionBall table-centered actor frame](#actionball-table-centered-actor-frame).
+Do not copy the old object names, rate, sensor authority or noise profile into the fresh contract.
+
+The historical rig was ChingMu streaming over VRPN. The tracked-object set differed by phase:
 
 - **PLAY (live table tennis), 300 Hz**: robot base (pelvis) pose and ball position. Ball
   rotation/spin is planned for the physics-modeling phase — the ball is currently tracked as a
@@ -121,15 +127,13 @@ wiring only; the current exact-179 ROS/AimRT first tick and vendor behavior are 
 is used, the HOPE-world → robot-frame target transform still depends on the corrected base pose at
 the interface boundary.
 
-The base flat wire already carries position plus a normalized quaternion, but the current
+The historical base flat wire already carried position plus a normalized quaternion, but the old
 `LocMode::kExternalBase` C++ consumer deliberately uses only mocap position and retains the
-yaw-aligned pelvis-IMU quaternion. Therefore a precise venue mocap orientation is presently
-discarded. The preferred ActionBall successor reverses that decision: after measuring the full
-rigid marker-cluster→`base_link` SE(3) transform, it adds the base pose with respect to the table
-to the actor and makes ChingMu mocap the single authority for all actor pose/attitude-derived terms.
-It does not fuse pelvis-IMU roll/pitch or gyro into the actor tensor. The IMU may remain a separate
-safety monitor, but cannot silently replace stale mocap inside the policy input. This source and
-width change needs train/deploy tensor parity plus explicit mocap latency/stale/dropout handling.
+yaw-aligned pelvis-IMU quaternion. That mixed historical producer is not the fresh contract.
+The preferred successor instead uses calibrated OptiTrack for table-relative position/full
+orientation and projected gravity, the pelvis IMU gyro for three-axis angular velocity, and a
+causal OptiTrack-anchored estimator for three-axis root-COM linear velocity. These sources must be
+time aligned as one causal state packet and need explicit latency/stale/dropout handling.
 
 <a id="action-ball-table-pose-frame"></a>
 
@@ -194,12 +198,26 @@ view is transformed.
 
 `base_link` must come from the robot model and SDK. Do not assume the mocap marker cluster equals `base_link` unless the transform has been measured.
 
-Pending measurements:
+Historical ChingMu measurements (do not satisfy the OptiTrack contract):
 
 - venue/table frame -> ChingMu mocap world
 - `P1 mocap frame -> P1_base_link`
 - `P2 mocap frame -> P2_base_link`
 - A3 standing `base_link` height
+
+Fresh OptiTrack measurements required before deployment-intent retraining:
+
+- venue/table frame -> OptiTrack world;
+- OptiTrack rigid marker cluster -> A3 `base_link`/root COM;
+- OptiTrack v2 camera mid-exposure/Motive/source/receive/consume timestamps and Motive smoothing setting;
+- time offset and rotational extrinsic between OptiTrack and pelvis IMU gyro;
+- causal root-COM velocity error, dropout and hold-last distributions.
+
+The live 360-Hz P1 rigid body already supplies metric position and full orientation, but the
+currently consumed v1 message timestamps ROS arrival, not capture. Noise or delay values from the
+old ChingMu ball pipeline therefore cannot close this list. The causal velocity producer updates
+only on a genuinely new pose using its real `delta_t`; a repeated hold-last pose preserves the
+previous estimate and increases localization age instead of fabricating zero velocity.
 
 ## Racket Frame
 

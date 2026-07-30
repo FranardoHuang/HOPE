@@ -40,7 +40,7 @@ runtime/feature 细节，写进实验正文或“决定”列。全局 P0/P1 只
 
 | ID | 问题 | 人类负责人 | 执行者 | 状态 | 证据 | 决定 |
 | --- | --- | --- | --- | --- | --- | --- |
-| [EXP-ACTION-BALL-PHASED-READINESS-20260730](2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md) | 首个 N1、1000 update、formal N5、N73 与部署各自最迟必须闭合哪些训练、观测、吞吐和安全合同？ | Franco | Codex | preregistered | E2 | 首个 N1 只等待 194-D Pod 构造与桌碰真值；formal 收据热路径最迟 N5 前重构；bang-bang 新 penalty/EMA/governor 等健康千轮后再 canary |
+| [EXP-ACTION-BALL-PHASED-READINESS-20260730](2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md) | 首个 N1、1000 update、formal N5、N73 与部署各自最迟必须闭合哪些训练、观测、吞吐和安全合同？ | Franco | Codex | running | E2 | frame-consistent 194-D stable-ready 的双动作 `1×2/4096×5` 已过，Pod1 反手挡 `4096×1001` 正在运行、反手拉排队；formal 收据热路径与新 OptiTrack physics 最迟 N5 前收口；bang-bang 新 penalty/EMA/governor 等千轮量尺后再 canary |
 | [EXP-ROUGH-GROUND-FRICTION-FIX-20260729](2026-07/EXP-ROUGH-GROUND-FRICTION-FIX-20260729.md) | 能否在不移动桌子/动作坐标的前提下，用每环境零均值地垫和物理一致摩擦训练抬脚？ | Franco | Claude、Codex | blocked | E1 | host `379 passed`；fresh N5 首轮仍用平地/no-move，rough/move 须补 Isaac clone、接触、raycast、seed/mesh、初始穿插与 4096-env 性能门 |
 | [EXP-UPPER-N3-BACKHAND-SAFE-WARMSTART-20260728](2026-07/EXP-UPPER-N3-BACKHAND-SAFE-WARMSTART-20260728.md) | 去掉旧正手、三反手独占一张卡并从 N4 热启动，能否提速且不触 physical-hard 关节包络？ | Franco | Codex | blocked | E1 | N3 bank/父本 pin/175D safe leaf 与 smoke-only launcher 已备；等待 clean commit、Pod Hydra/Isaac substep safety smoke 和小预算 canary，禁止长跑/真机 |
 | [EXP-ACTION-CONDITIONED-BALL-FIRST-20260727](2026-07/EXP-ACTION-CONDITIONED-BALL-FIRST-20260727.md) | 能否先冻结动作、采该动作来球，再 fixed-action 解 task，并把联合 safe-policy failure 调到 10%？ | Franco | Codex | blocked | E1 | manifest/sampler/curriculum/receipt host 合同在整合；正式 N5/N93 motion admission、新正手行为门、Pod smoke 与 frozen evaluator authority 仍缺 |
