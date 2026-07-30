@@ -143,12 +143,15 @@ stable-upper v2 仍不能用 `qdes=physical_q` 保持到击球窗。动作专属
 该工具保留历史 ground-LP feasibility 默认，只为 hold 显式选择按正负可执行力矩归一化的
 minimax 目标；它还必须按 exact mapping 在 A3 runtime joint order 与 MuJoCo post-root
 actuator order 间 scatter/gather。产物三类 authorization 均为 false。随后用 Isaac
-nominal-hold 模式在 `env.reset()` 后截取 ready、step 1、step 10 和 final/pre-terminal，
-并持续送同一 hold qdes 到至少 `t_hit+margin`；截图、actual-hard/table/fall 与 root/foot
-遥测一起判定“出生就怪”还是“出生正常但 plant 随后漂移”。通过前不得把候选接进 trainer。
+nominal-hold 模式先截取未经 artifact 覆盖的 `raw_env_reset`，再截取
+`physical_ready_after_reset_write`、step 1、step 10 和 final/pre-terminal，并持续送同一
+hold qdes 到至少 `t_hit+margin`；截图、actual-hard/table/fall 与 root/foot 遥测一起判定
+“原生 reset 就怪”“候选 ready 写坏”还是“出生正常但 plant 随后漂移”。通过前不得把候选接进
+trainer。
 每个动作必须使用 fresh no-clobber 输出，且 Pod 的物理 GPU 先用 NVML/owner lock 只读核对：
 
 ```bash
+env -u CUDA_VISIBLE_DEVICES HOPE_URDF_IMPORTER_NO_UI=1 \
 /workspace/hope_isaac_venv/bin/python \
   hope_training/whole_body_tracking/scripts/check_table_obstacle_scene.py \
   --task HOPE-PingPong-ActionBall-AgibotA3-v0 \
@@ -164,8 +167,10 @@ nominal-hold 模式在 `env.reset()` 后截取 ready、step 1、step 10 和 fina
 这是 simulator-only diagnostic：它关闭动作参考偏离终止与随机化，但保留
 actual-hard、qdes nonfinite、table 和 fall；任何首个 terminal 立即停止，并把上一安全帧记为
 `preterminal`。带截图的 Vulkan/RTX probe 不设置 `CUDA_VISIBLE_DEVICES`，直接把 Pod 物理卡号
-写进 `--device cuda:N`；否则 Isaac 4.5 的 GPU/渲染枚举可能不一致。正式 table receipt 仍遵守
-“单卡可见、logical `cuda:0`”合同。该 receipt 与截图不授权训练、部署或真机。
+写进 `--device cuda:N`；否则 Isaac 4.5 的 GPU/渲染枚举可能不一致。Pod 的 headless importer
+还必须显式设置 `HOPE_URDF_IMPORTER_NO_UI=1`；日志必须越过 scene creation，不能把
+`Simulation App Shutting Down` 的零退出误写成截图证据。正式 table receipt 仍遵守“单卡可见、
+logical `cuda:0`”合同。该 receipt 与截图不授权训练、部署或真机。
 
 以下性能改动若 Pod focused parity 通过，可直接进入 replacement，不另开学习 A/B：
 

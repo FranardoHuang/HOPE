@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import hashlib
 import importlib.util
+import inspect
 import json
 import os
 from pathlib import Path
@@ -513,6 +514,42 @@ def test_nominal_hold_outputs_are_no_clobber(tmp_path):
     )
     with pytest.raises(FileExistsError, match="refusing to reuse"):
         P._fresh_nominal_path(output, "receipt")
+
+
+def test_nominal_hold_captures_raw_reset_before_dynamic_ready_write():
+    events = []
+    unwrapped = SimpleNamespace(
+        sim=SimpleNamespace(forward=lambda: events.append("forward")),
+        scene=SimpleNamespace(
+            update=lambda dt: events.append(("scene.update", dt))
+        ),
+    )
+    P._refresh_nominal_hold_derived_state(unwrapped)
+    assert events == ["forward", ("scene.update", 0.0)]
+
+    source = inspect.getsource(P.nominal_hold_probe)
+    reset = source.index("env.reset()")
+    reset_refresh = source.index(
+        "_refresh_nominal_hold_derived_state(unwrapped)", reset
+    )
+    raw_frame = source.index('save_frame("raw_env_reset", 0, last_png)')
+    artifact_write = source.index("motion_command.clip_id[env_ids] = 0")
+    simulator_write = source.index("robot.write_root_state_to_sim(")
+    ready_refresh = source.index(
+        "_refresh_nominal_hold_derived_state(unwrapped)", simulator_write
+    )
+    ready_frame = source.index(
+        'save_frame("physical_ready_after_reset_write", 0, last_png)'
+    )
+    assert (
+        reset
+        < reset_refresh
+        < raw_frame
+        < artifact_write
+        < simulator_write
+        < ready_refresh
+        < ready_frame
+    )
 
 
 def test_formal_cli_has_no_boolean_pass_claims_and_requires_pod_shape():

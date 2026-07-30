@@ -2106,6 +2106,17 @@ def _nominal_hold_render_png(env) -> bytes:
         ) from exc
 
 
+def _refresh_nominal_hold_derived_state(unwrapped) -> None:
+    """Refresh render/body state after a direct reset or simulator write."""
+
+    sim = getattr(unwrapped, "sim", None)
+    if sim is not None and callable(getattr(sim, "forward", None)):
+        sim.forward()
+    scene = getattr(unwrapped, "scene", None)
+    if scene is not None and callable(getattr(scene, "update", None)):
+        scene.update(0.0)
+
+
 def _publish_nominal_hold_screenshot(
     directory: Path,
     filename: str,
@@ -3035,7 +3046,30 @@ def nominal_hold_probe(
     action = unwrapped.action_manager.get_term("joint_pos")
     motion_command = unwrapped.command_manager.get_term("motion")
     env_ids = torch.tensor([0], dtype=torch.long, device=unwrapped.device)
+
+    if screenshot_dir is not None:
+        os.mkdir(screenshot_dir, 0o755)
+    screenshots = []
+    last_png = None
+
+    def save_frame(label: str, step: int, payload: bytes) -> None:
+        assert screenshot_dir is not None
+        screenshots.append(
+            _publish_nominal_hold_screenshot(
+                screenshot_dir,
+                f"{len(screenshots):03d}_{label}_{step:04d}.png",
+                label,
+                step,
+                payload,
+            )
+        )
+
     env.reset()
+    _refresh_nominal_hold_derived_state(unwrapped)
+    if screenshot_dir is not None:
+        last_png = _nominal_hold_render_png(env)
+        save_frame("raw_env_reset", 0, last_png)
+
     motion_command.clip_id[env_ids] = 0
     motion_command.time_steps[env_ids] = 0
     motion_command.time_steps_f[env_ids] = 0.0
@@ -3059,33 +3093,11 @@ def nominal_hold_probe(
         ready_q, torch.zeros_like(ready_q), env_ids=env_ids
     )
     unwrapped.scene.write_data_to_sim()
-    sim = getattr(unwrapped, "sim", None)
-    if sim is not None and callable(getattr(sim, "forward", None)):
-        sim.forward()
-    scene = getattr(unwrapped, "scene", None)
-    if scene is not None and callable(getattr(scene, "update", None)):
-        scene.update(0.0)
+    _refresh_nominal_hold_derived_state(unwrapped)
     hold_qdes = torch.tensor(
         inputs.hold_qdes, device=unwrapped.device, dtype=ready_q.dtype
     ).view(1, 31)
     raw_action = _raw_action_for_joint_target(action, hold_qdes)
-
-    if screenshot_dir is not None:
-        os.mkdir(screenshot_dir, 0o755)
-    screenshots = []
-    last_png = None
-
-    def save_frame(label: str, step: int, payload: bytes) -> None:
-        assert screenshot_dir is not None
-        screenshots.append(
-            _publish_nominal_hold_screenshot(
-                screenshot_dir,
-                f"{len(screenshots):03d}_{label}_{step:04d}.png",
-                label,
-                step,
-                payload,
-            )
-        )
 
     if screenshot_dir is not None:
         last_png = _nominal_hold_render_png(env)

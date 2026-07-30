@@ -96,7 +96,7 @@
 | 工具 | 干什么 | 退出码 | 调用 |
 | --- | --- | --- | --- |
 | `check_motion_target_alignment.py` | 长训前快门：yaw≈0 / 拍速 +X 主导 / 参考起点对齐 | 1 | 工序 |
-| `check_table_obstacle_scene.py` | 核对 legacy 单桌板或 [ActionBall 五件桌体安全总成](../DEFINITIONS.md#action-ball-table-safety)；可在 Pod 用真实机器人刚体逐子步撞 top/keep-out/net/posts，验证四子步 latch、raw reason 和 reset 不泄漏；`--nominal-hold` 还可对 dynamic-ready 候选抓真实 Isaac reset/step 1/step 10/final-or-preterminal 截图并闭环保持 | 1 | [桌体工序](run_action_ball_table_safety_smoke.md)；[dynamic-ready 工序](run_ablation_wave_launch.md#actionball-a3-upper-qqd-修复与-hot-path-快线) |
+| `check_table_obstacle_scene.py` | 核对 legacy 单桌板或 [ActionBall 五件桌体安全总成](../DEFINITIONS.md#action-ball-table-safety)；可在 Pod 用真实机器人刚体逐子步撞 top/keep-out/net/posts，验证四子步 latch、raw reason 和 reset 不泄漏；`--nominal-hold` 还会分开抓 `raw_env_reset` 与 artifact-ready，再抓 step 1/10/final-or-preterminal 并闭环保持 | 1 | [桌体工序](run_action_ball_table_safety_smoke.md)；[dynamic-ready 工序](run_ablation_wave_launch.md#actionball-a3-upper-qqd-修复与-hot-path-快线) |
 | `check_perclip_pos_sampling.py` | 不开 Isaac 查目标**位置**框，打印"低于桌面"占比 | **—** ⚠ 打印 83% 也 `exit 0`；`TABLE_H` 是本地硬编码副本 | **无** |
 | `check_perclip_vel_sampling.py` | 同上，速度框 | **—** ⚠ 同样没有门 | **无** |
 | `a3_joint_order_contract.py` | GMR→运行时关节顺序双射。**只是源码门**，不认证 schema-2 | — | 工序 |

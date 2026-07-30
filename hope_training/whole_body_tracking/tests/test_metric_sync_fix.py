@@ -63,6 +63,12 @@ MIN_COUNT = 50.0
 def _make_rally_cmd(n, clip_ids=None, multiseg=True):
     RT = hope_commands_mod.RacketTargetCommand
     cmd = RT.__new__(RT)
+    # Match the non-task-first / non-ActionBall defaults installed
+    # unconditionally by RacketTargetCommand.__init__.  This lightweight
+    # fixture intentionally bypasses __init__, so it must seed those runtime
+    # mode flags before exercising the shared accounting methods.
+    cmd._task_first_enabled = False
+    cmd._action_ball_enabled = False
     cmd.num_envs = n
     cmd.device = "cpu"
     cmd.cfg = types.SimpleNamespace(

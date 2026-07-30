@@ -13,6 +13,11 @@
 
 ## 2026-07-30（A3 stable-upper successor）
 
+- nominal-hold 截图器现将未经 artifact 覆盖的 `raw_env_reset` 与
+  `physical_ready_after_reset_write` 分开记录，避免把手工 ready 冒充原生 reset；同时修复
+  `test_metric_sync_fix.py` 的旧 `__new__` fixture，补齐生产初始化必有的非 task-first /
+  非 ActionBall 默认旗标，未改生产逻辑。两项尚待 clean commit 后 Pod focused pytest 与真实
+  Isaac 图像验收。
 - reset 审计排除 failure-buffer 提前启用：ActionBall canonical path 固定
   `stand=1/post-swing=0` 并写动作 frame 0；当前没有“35% strike 后混入失败姿态”的实现。
   source 已加入 action-specific static-hold minimax 和 dynamic-ready candidate producer；

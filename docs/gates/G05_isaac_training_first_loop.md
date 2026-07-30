@@ -3801,5 +3801,8 @@ source 已新增 opt-in static-hold minimax LP 与动作专属 dynamic-ready can
 独立复核发现并已修正 MuJoCo actuator row 与 A3 runtime joint order 的非恒等排列；所有
 runtime qdes/PD 边界先 scatter 到 LP order，求解力矩再 gather 回 runtime order。
 dependency-light 回归已写但按约定未在本地运行。下一证据是 clean Pod focused pytest、
-loop/block 两份 exact 候选、Isaac reset 后 `0/1/10/final` 截图与闭环 hold telemetry。
-这些通过前不接 trainer、不发 long，G05 继续 `Partial`。
+loop/block 两份 exact 候选、Isaac 的 `raw_env_reset`、artifact-ready、`1/10/final` 截图与
+闭环 hold telemetry。截图器已把 raw reset 与候选写入后的 ready 分账，并补上旧 metric
+fixture 的两个生产默认 mode flag；当前仍只有 source，需 clean commit 后在 Pod 运行 focused
+pytest 和真实 renderer。连续若干次 renderer 在 scene creation 后零退出且无 PNG/receipt，
+均明确不算证据。这些通过前不接 trainer、不发 long，G05 继续 `Partial`。
