@@ -147,7 +147,9 @@ def _finish_guarded_policy_step(action, asset):
     action.finalize_joint_safety_post_step_readback()
 
 
-def _two_step_cross_reset_action_ball_ledger():
+def _two_step_cross_reset_action_ball_ledger(
+    *, policy_horizon_only_crossing: bool = False
+):
     action, env, asset = _action_and_env(
         guard=True,
         guard_policy_dt_s=0.02,
@@ -191,6 +193,12 @@ def _two_step_cross_reset_action_ball_ledger():
     )
 
     env.episode_length_buf[:] = torch.tensor([41, 17])
+    if policy_horizon_only_crossing:
+        # Physical +/-1.2 limits and zero inset: one 5 ms physics tick stays
+        # inside (1.055), while the full 20 ms policy guard reaches 1.22.
+        # The producer uses the latter receding-control horizon.
+        asset.data.joint_pos[0, 0] = 1.0
+        asset.data.joint_vel[0, 0] = 11.0
     action.process_actions(torch.zeros(2, 2))
     _finish_guarded_policy_step(action, asset)
     env.reset_terminated = torch.tensor([True, False])
@@ -1389,6 +1397,44 @@ def test_runner_consumes_once_persists_every_step_and_keeps_cross_reset_identity
     ]
     assert len(lines) == 1
     assert json.loads(lines[0].split("=", 1)[1]) == first
+
+
+def test_runner_validates_crossing_over_the_full_policy_guard_horizon(
+    monkeypatch,
+):
+    runner_mod = _load_runner_module(monkeypatch, _load_contract_module())
+    action, env = _two_step_cross_reset_action_ball_ledger(
+        policy_horizon_only_crossing=True
+    )
+    _, snapshot = action.prepare_joint_safety_ledger_consume()
+    transcript = snapshot["terminal_archives"][0]["transcript"]
+    runner = runner_mod.MotionOnPolicyRunner.__new__(
+        runner_mod.MotionOnPolicyRunner
+    )
+    runner.env = types.SimpleNamespace(unwrapped=env)
+    runner.num_steps_per_env = 2
+    contract = runner._joint_safety_runtime_contract(action)
+
+    q = transcript["q"][0, 0]
+    qdot = transcript["qdot"][0, 0]
+    travel = contract["hard_upper"][0] - contract["hard_lower"][0]
+    inner_upper = contract["hard_upper"][0] - (
+        contract["margin_rad"] + contract["margin_fraction"] * travel
+    )
+    assert q + qdot * contract["physics_dt_s"] < inner_upper
+    assert (
+        q
+        + qdot
+        * contract["physics_dt_s"]
+        * contract["expected_apply_calls"]
+        >= inner_upper
+    )
+    assert transcript["hard_crossing"][0, 0].item()
+
+    validated = runner._validate_joint_safety_update_snapshot(
+        snapshot, step=0, contract=contract
+    )
+    assert validated["archive_count"] == 1
 
 
 def test_protected_task_detection_covers_action_ball_and_upper_safe(monkeypatch):

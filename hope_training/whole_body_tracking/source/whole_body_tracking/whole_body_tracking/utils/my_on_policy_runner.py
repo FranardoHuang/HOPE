@@ -4652,7 +4652,12 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         inner_upper = hard_upper - inset
         safe_q = torch.where(finite_q, q, torch.zeros_like(q))
         safe_qdot = torch.where(finite_qdot, qdot, torch.zeros_like(qdot))
-        ballistic_next = safe_q + safe_qdot * physics_dt
+        # The action term deliberately applies the same full control/reaction
+        # horizon at every fresh physics-substep readback.  Recomputing this
+        # mask with one physics tick here would reject an honest transcript
+        # whenever only the full policy horizon reaches the inner hard guard.
+        guard_horizon_s = physics_dt * expected_apply
+        ballistic_next = safe_q + safe_qdot * guard_horizon_s
         crossing_expected = (
             ~finite_q
             | ~finite_qdot
