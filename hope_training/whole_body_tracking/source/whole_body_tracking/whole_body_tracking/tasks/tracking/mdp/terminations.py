@@ -595,21 +595,20 @@ def filtered_contact_hit_mask(
     return torch.any(pushing.flatten(start_dim=1), dim=1)
 
 
-def all_body_filtered_contact_hit_mask(
+def full_table_filtered_contact_hit_mask(
     force_matrices_w: list[torch.Tensor] | tuple[torch.Tensor, ...],
     force_threshold: float,
 ) -> torch.Tensor:
-    """Reduce one exact table-pair force matrix per robot rigid body.
+    """Reduce one exact Robot-pair force matrix per table-assembly body.
 
-    Isaac Lab's filtered contact reporter is one-sensor-body-to-many-filter-bodies only.  Stacking
-    several robot bodies into one filtered ``ContactSensor`` is therefore not a valid substitute
-    for this list: every matrix here must come from its own one-body sensor.  The caller validates
-    the runtime body identity and exact five-filter shape before this pure tensor reduction.
+    Isaac Lab's filtered contact reporter is one-sensor-body-to-many-filter-bodies.  Each matrix
+    therefore has one table-part source body and one or more Robot filter bodies.  The caller
+    validates all five source roles and freezes their runtime shape before this reduction.
     """
 
     if not isinstance(force_matrices_w, (list, tuple)) or not force_matrices_w:
         raise RuntimeError(
-            "robot_hit_table requires a non-empty exact per-body force-matrix list"
+            "robot_hit_table requires a non-empty exact table-source force-matrix list"
         )
     hits = [filtered_contact_hit_mask(matrix, force_threshold) for matrix in force_matrices_w]
     reference = hits[0]
@@ -620,39 +619,52 @@ def all_body_filtered_contact_hit_mask(
             or hit.device != reference.device
         ):
             raise RuntimeError(
-                "robot_hit_table per-body force matrices do not share one env/device "
+                "robot_hit_table table-source force matrices do not share one env/device "
                 f"contract at index {index}"
             )
     return torch.any(torch.stack(hits, dim=1), dim=1)
 
 
-def _sample_all_body_filtered_table_contact(
+def _sample_full_table_filtered_contact(
     env: ManagerBasedRLEnv,
     *,
-    filtered_sensor_cfg: SceneEntityCfg,
-    all_body_filtered_sensor_cfgs: tuple[SceneEntityCfg, ...] | list[SceneEntityCfg],
+    full_table_filtered_sensor_cfgs: tuple[SceneEntityCfg, ...]
+    | list[SceneEntityCfg],
     asset_cfg: SceneEntityCfg,
     force_threshold: float,
-    expected_filter_prim_paths: tuple[str, ...] | list[str],
+    expected_source_prim_paths: tuple[str, ...] | list[str],
+    robot_filter_prim_path: str = "{ENV_REGEX_NS}/Robot/.*",
 ) -> torch.Tensor:
-    """Read exact robot-body/table-assembly pair forces without body-origin attribution."""
+    """Read exact five-part table/Robot pair forces without body-origin attribution.
+
+    Static strings, source identities and force-matrix shapes are proved once and cached on the
+    first source sensor.  The physics hot path thereafter only reads the five current matrices and
+    reduces them.  Runtime force values remain fail-safe through
+    :func:`filtered_contact_hit_mask`.
+    """
 
     if (
-        not isinstance(expected_filter_prim_paths, (tuple, list))
-        or not expected_filter_prim_paths
+        not isinstance(expected_source_prim_paths, (tuple, list))
+        or len(expected_source_prim_paths) != 5
         or any(
             not isinstance(path, str) or not path
-            for path in expected_filter_prim_paths
+            for path in expected_source_prim_paths
         )
-        or len(set(expected_filter_prim_paths))
-        != len(expected_filter_prim_paths)
+        or len(set(expected_source_prim_paths))
+        != len(expected_source_prim_paths)
     ):
         raise RuntimeError(
-            "robot_hit_table full assembly requires non-empty unique expected "
-            "filter prim paths"
+            "robot_hit_table full assembly requires five unique expected "
+            "table-source prim paths"
         )
-    expected_filter_prim_paths = tuple(expected_filter_prim_paths)
-    expected_filter_count = len(expected_filter_prim_paths)
+    expected_source_prim_paths = tuple(expected_source_prim_paths)
+    if (
+        not isinstance(robot_filter_prim_path, str)
+        or not robot_filter_prim_path
+    ):
+        raise RuntimeError(
+            "robot_hit_table full assembly requires one non-empty Robot filter prim path"
+        )
     scene_env_regex_ns = getattr(env.scene, "env_regex_ns", None)
     if scene_env_regex_ns is not None and (
         not isinstance(scene_env_regex_ns, str) or not scene_env_regex_ns
@@ -660,94 +672,93 @@ def _sample_all_body_filtered_table_contact(
         raise RuntimeError(
             "robot_hit_table scene env_regex_ns must be a non-empty string"
         )
-    runtime_expected_filter_prim_paths = tuple(
+    runtime_expected_source_prim_paths = tuple(
         path.format(ENV_REGEX_NS=scene_env_regex_ns)
         if scene_env_regex_ns is not None
         else path
-        for path in expected_filter_prim_paths
+        for path in expected_source_prim_paths
     )
-    if not isinstance(all_body_filtered_sensor_cfgs, (tuple, list)):
+    runtime_robot_filter_prim_path = (
+        robot_filter_prim_path.format(ENV_REGEX_NS=scene_env_regex_ns)
+        if scene_env_regex_ns is not None
+        else robot_filter_prim_path
+    )
+    if not isinstance(full_table_filtered_sensor_cfgs, (tuple, list)):
         raise RuntimeError(
-            "robot_hit_table full assembly requires ordered per-body filtered sensor configs"
+            "robot_hit_table full assembly requires ordered table-source filtered sensor configs"
         )
-    cfgs = tuple(all_body_filtered_sensor_cfgs)
+    cfgs = tuple(full_table_filtered_sensor_cfgs)
+    if len(cfgs) != 5:
+        raise RuntimeError(
+            "robot_hit_table full assembly requires exactly five table-source sensors"
+        )
     asset: Articulation = env.scene[asset_cfg.name]
-    expected_body_names = tuple(str(name) for name in asset.body_names)
-    if not expected_body_names or len(set(expected_body_names)) != len(
-        expected_body_names
-    ):
+    robot_body_names = tuple(str(name) for name in asset.body_names)
+    if len(robot_body_names) != 32 or len(set(robot_body_names)) != 32:
         raise RuntimeError(
-            "robot_hit_table requires a non-empty unique articulation body-name table"
+            "robot_hit_table full assembly requires the exact unique 32-body "
+            "A3 articulation table"
         )
-    if len(cfgs) != len(expected_body_names):
-        raise RuntimeError(
-            "robot_hit_table requires exactly one filtered sensor per articulation "
-            f"rigid body; got {len(cfgs)} sensors for {len(expected_body_names)} bodies"
-        )
-
     cfg_names = tuple(getattr(cfg, "name", None) for cfg in cfgs)
     if (
         any(not isinstance(name, str) or not name for name in cfg_names)
         or len(set(cfg_names)) != len(cfg_names)
     ):
         raise RuntimeError(
-            "robot_hit_table per-body filtered sensor names must be non-empty and unique"
+            "robot_hit_table table-source filtered sensor names must be non-empty and unique"
         )
-    if getattr(filtered_sensor_cfg, "name", None) not in cfg_names:
+    try:
+        cache_owner = env.scene.sensors[cfg_names[0]]
+    except KeyError as exc:
         raise RuntimeError(
-            "robot_hit_table wrist/racket filtered sensor is missing from the "
-            "all-body exact sensor set"
+            "robot_hit_table is missing exact table-source filtered sensor "
+            f"{cfg_names[0]!r}"
+        ) from exc
+    cached = getattr(
+        cache_owner, "_hope_full_table_filtered_contact_cache", None
+    )
+    if cached is not None:
+        force_matrices = tuple(
+            sensor.data.force_matrix_w for sensor in cached
         )
-    wrist_sensor_index = cfg_names.index(filtered_sensor_cfg.name)
-    if expected_body_names[wrist_sensor_index] != "right_wrist_yaw_Link":
-        raise RuntimeError(
-            "robot_hit_table filtered_sensor_cfg does not identify the exact "
-            "right_wrist_yaw_Link/racket sensor"
+        return full_table_filtered_contact_hit_mask(
+            force_matrices, force_threshold
         )
 
+    sensors = []
     force_matrices: list[torch.Tensor] = []
-    observed_body_names: list[str] = []
     expected_env_count: int | None = None
     expected_device = None
-    for index, cfg in enumerate(cfgs):
+    for index, (cfg, expected_source_prim) in enumerate(
+        zip(cfgs, runtime_expected_source_prim_paths)
+    ):
         try:
             sensor = env.scene.sensors[cfg.name]
         except KeyError as exc:
             raise RuntimeError(
-                "robot_hit_table is missing exact per-body filtered sensor "
+                "robot_hit_table is missing exact table-source filtered sensor "
                 f"{cfg.name!r}"
             ) from exc
         body_names = tuple(str(name) for name in getattr(sensor, "body_names", ()))
-        expected_body_name = expected_body_names[index]
-        if body_names != (expected_body_name,):
+        expected_source_body_name = expected_source_prim.rsplit("/", 1)[-1]
+        if body_names != (expected_source_body_name,):
             raise RuntimeError(
-                "robot_hit_table exact filtered sensors must each resolve to one "
-                f"expected rigid body; {cfg.name!r} expected "
-                f"{expected_body_name!r}, resolved {body_names!r}"
+                "robot_hit_table exact filtered sensors must each resolve to one expected "
+                f"table-source body; {cfg.name!r} expected "
+                f"{expected_source_body_name!r}, resolved {body_names!r}"
             )
-        observed_body_names.append(body_names[0])
 
         runtime_sensor_cfg = getattr(sensor, "cfg", None)
-        expected_sensor_prim_template = (
-            f"{{ENV_REGEX_NS}}/Robot/{expected_body_name}"
-        )
-        expected_sensor_prim = (
-            expected_sensor_prim_template.format(
-                ENV_REGEX_NS=scene_env_regex_ns
-            )
-            if scene_env_regex_ns is not None
-            else expected_sensor_prim_template
-        )
         runtime_filter_paths = tuple(
             getattr(runtime_sensor_cfg, "filter_prim_paths_expr", ()) or ()
         )
         if (
             getattr(runtime_sensor_cfg, "prim_path", None)
-            != expected_sensor_prim
-            or runtime_filter_paths != runtime_expected_filter_prim_paths
+            != expected_source_prim
+            or runtime_filter_paths != (runtime_robot_filter_prim_path,)
         ):
             raise RuntimeError(
-                "robot_hit_table exact per-body sensor source/filter binding drift: "
+                "robot_hit_table exact table-source/Robot-filter binding drift: "
                 f"{cfg.name!r}"
             )
 
@@ -756,33 +767,42 @@ def _sample_all_body_filtered_table_contact(
             matrix is None
             or matrix.ndim != 4
             or matrix.shape[1] != 1
-            or matrix.shape[2] != expected_filter_count
+            or matrix.shape[2] != len(robot_body_names)
             or matrix.shape[3] != 3
+            or not torch.is_floating_point(matrix)
         ):
             raise RuntimeError(
-                "robot_hit_table requires every exact per-body force_matrix_w shaped "
-                f"[env, 1, {expected_filter_count}, 3]; sensor {cfg.name!r} got "
+                "robot_hit_table requires every table-source force_matrix_w shaped "
+                f"[env, 1, 32, 3] with complete A3 Robot coverage; "
+                f"sensor {cfg.name!r} got "
                 f"{None if matrix is None else tuple(matrix.shape)}"
             )
         if expected_env_count is None:
             expected_env_count = int(matrix.shape[0])
             expected_device = matrix.device
+            if expected_env_count != int(env.num_envs):
+                raise RuntimeError(
+                    "robot_hit_table table-source matrix env count does not match runtime env"
+                )
         elif (
             int(matrix.shape[0]) != expected_env_count
             or matrix.device != expected_device
         ):
             raise RuntimeError(
-                "robot_hit_table exact per-body force matrices disagree on env/device "
+                "robot_hit_table exact table-source force matrices disagree on env/device "
                 f"at sensor index {index}"
             )
+        sensors.append(sensor)
         force_matrices.append(matrix)
 
-    if tuple(observed_body_names) != expected_body_names:
-        raise RuntimeError(
-            "robot_hit_table exact per-body sensor coverage/order does not equal the "
-            "runtime articulation body table"
-        )
-    return all_body_filtered_contact_hit_mask(force_matrices, force_threshold)
+    setattr(
+        cache_owner,
+        "_hope_full_table_filtered_contact_cache",
+        tuple(sensors),
+    )
+    return full_table_filtered_contact_hit_mask(
+        force_matrices, force_threshold
+    )
 
 
 def sample_robot_table_contact_current(
@@ -792,9 +812,9 @@ def sample_robot_table_contact_current(
     asset_cfg: SceneEntityCfg,
     near_x: float,
     surface_z: float,
-    all_body_filtered_sensor_cfgs: tuple[SceneEntityCfg, ...]
+    full_table_filtered_sensor_cfgs: tuple[SceneEntityCfg, ...]
     | list[SceneEntityCfg] = (),
-    expected_full_table_filter_prim_paths: tuple[str, ...]
+    expected_full_table_source_prim_paths: tuple[str, ...]
     | list[str] = (),
     force_threshold: float = 1.0,
     margin: float = 0.02,
@@ -804,7 +824,7 @@ def sample_robot_table_contact_current(
     """Sample current table contact once.
 
     Legacy top-only mode uses broad-origin attribution plus an exact wrist pair.  Full ActionBall
-    mode uses only exact one-body pair-filter sensors over the five-part assembly.
+    mode uses five one-table-body sensors, each exactly filtered against the Robot subtree.
     """
 
     from whole_body_tracking.tasks.table_tennis import table_frame as tt_frame
@@ -813,13 +833,12 @@ def sample_robot_table_contact_current(
         # Exact pair identity replaces the legacy body-origin attribution.  It catches a contact
         # point on an elbow/forearm/racket mesh even when that rigid body's origin is outside every
         # obstacle AABB, and it includes feet because a foot/table contact is not sanctioned.
-        return _sample_all_body_filtered_table_contact(
+        return _sample_full_table_filtered_contact(
             env,
-            filtered_sensor_cfg=filtered_sensor_cfg,
-            all_body_filtered_sensor_cfgs=all_body_filtered_sensor_cfgs,
+            full_table_filtered_sensor_cfgs=full_table_filtered_sensor_cfgs,
             asset_cfg=asset_cfg,
             force_threshold=force_threshold,
-            expected_filter_prim_paths=expected_full_table_filter_prim_paths,
+            expected_source_prim_paths=expected_full_table_source_prim_paths,
         )
 
     sensor = env.scene.sensors[sensor_cfg.name]
@@ -891,9 +910,9 @@ def robot_hit_table(
     asset_cfg: SceneEntityCfg,
     near_x: float,
     surface_z: float,
-    all_body_filtered_sensor_cfgs: tuple[SceneEntityCfg, ...]
+    full_table_filtered_sensor_cfgs: tuple[SceneEntityCfg, ...]
     | list[SceneEntityCfg] = (),
-    expected_full_table_filter_prim_paths: tuple[str, ...]
+    expected_full_table_source_prim_paths: tuple[str, ...]
     | list[str] = (),
     force_threshold: float = 1.0,
     margin: float = 0.02,
@@ -906,8 +925,8 @@ def robot_hit_table(
 
     Legacy top-only mode keeps the broad non-foot/body-origin channel plus one exact wrist/racket
     pair channel.  ActionBall instead reads one one-body ``force_matrix_w`` sensor for every
-    articulation rigid body, each filtered against the installed table, keep-out, net and posts;
-    body origins never determine pair identity.  ActionBall also requires the action term's
+    installed table part, each filtered against the complete Robot subtree; body origins never
+    determine pair identity.  ActionBall also requires the action term's
     policy-step latch: apply calls 2..4 sample physics substeps 1..3 and this DoneTerm finalizes
     substep 4, so a transient contact in any of the four substeps remains terminal.
 
@@ -946,9 +965,9 @@ def robot_hit_table(
         env,
         sensor_cfg=sensor_cfg,
         filtered_sensor_cfg=filtered_sensor_cfg,
-        all_body_filtered_sensor_cfgs=all_body_filtered_sensor_cfgs,
-        expected_full_table_filter_prim_paths=(
-            expected_full_table_filter_prim_paths
+        full_table_filtered_sensor_cfgs=full_table_filtered_sensor_cfgs,
+        expected_full_table_source_prim_paths=(
+            expected_full_table_source_prim_paths
         ),
         asset_cfg=asset_cfg,
         near_x=near_x,

@@ -867,6 +867,9 @@ class ClampedJointPositionAction(JointPositionAction):
         self._table_contact_guard_termination_term: str | None = None
         self._table_contact_guard_decimation: int | None = None
         self._table_contact_guard_physics_dt_s: float | None = None
+        self._table_contact_resolved_params_cache: dict[str, Any] | None = None
+        self._table_contact_timestamp_sensors: tuple[Any, ...] | None = None
+        self._table_contact_timestamp_data_contract_validated = False
         self._table_contact_last_sensor_timestamp: torch.Tensor | None = None
         self._table_contact_latch: _PhysicsSubstepTableContactLatch | None = None
         if self._table_contact_substep_guard_enabled:
@@ -2629,10 +2632,13 @@ class ClampedJointPositionAction(JointPositionAction):
             torch._assert_async(condition)
 
     def _resolved_table_contact_params(self) -> dict[str, Any]:
-        """Resolve and cross-bind the one DoneTerm that owns table-contact semantics."""
+        """Resolve and cross-bind the table DoneTerm once, outside the physics hot path."""
 
         if not self._table_contact_substep_guard_enabled:
             raise RuntimeError("table-contact substep guard is not enabled")
+        cached = self._table_contact_resolved_params_cache
+        if cached is not None:
+            return cached
         term_name = self._table_contact_guard_termination_term
         manager = getattr(self._safety_env, "termination_manager", None)
         get_term_cfg = getattr(manager, "get_term_cfg", None)
@@ -2684,23 +2690,33 @@ class ClampedJointPositionAction(JointPositionAction):
                 f"{missing}"
             )
         if params.get("full_table_assembly") is True:
-            exact_cfgs = params.get("all_body_filtered_sensor_cfgs")
-            expected_filter_paths = params.get(
-                "expected_full_table_filter_prim_paths"
+            exact_cfgs = params.get("full_table_filtered_sensor_cfgs")
+            expected_source_paths = params.get(
+                "expected_full_table_source_prim_paths"
             )
-            if not isinstance(exact_cfgs, (tuple, list)) or not exact_cfgs:
+            if (
+                not isinstance(exact_cfgs, (tuple, list))
+                or len(exact_cfgs) != 5
+            ):
                 raise RuntimeError(
-                    "full table-contact assembly requires ordered exact per-body "
+                    "full table-contact assembly requires five ordered exact table-source "
                     "filtered sensor configs"
                 )
             if (
-                not isinstance(expected_filter_paths, (tuple, list))
-                or len(expected_filter_paths) != 5
+                not isinstance(expected_source_paths, (tuple, list))
+                or len(expected_source_paths) != 5
             ):
                 raise RuntimeError(
-                    "full table-contact assembly requires exact five filter prim paths"
+                    "full table-contact assembly requires exact five source prim paths"
                 )
-        return params
+        resolved = dict(params)
+        if params.get("full_table_assembly") is True:
+            resolved["full_table_filtered_sensor_cfgs"] = tuple(exact_cfgs)
+            resolved["expected_full_table_source_prim_paths"] = tuple(
+                expected_source_paths
+            )
+        self._table_contact_resolved_params_cache = resolved
+        return resolved
 
     def _table_contact_sensor_timestamps(
         self, params: dict[str, Any], *, require_data_fresh: bool
@@ -2713,87 +2729,102 @@ class ClampedJointPositionAction(JointPositionAction):
         consumed.
         """
 
-        if params.get("full_table_assembly") is True:
-            sensor_cfgs = tuple(params["all_body_filtered_sensor_cfgs"])
-        else:
-            sensor_cfgs = (
-                params["sensor_cfg"],
-                params["filtered_sensor_cfg"],
-            )
-        sensor_names = tuple(getattr(cfg, "name", None) for cfg in sensor_cfgs)
-        if (
-            not sensor_names
-            or any(not isinstance(name, str) or not name for name in sensor_names)
-            or len(set(sensor_names)) != len(sensor_names)
-        ):
-            raise RuntimeError(
-                "table-contact sensor clocks require non-empty unique sensor names"
-            )
-
-        reference_timestamp = None
-        all_fresh = None
-        all_same_frame = None
-        for sensor_name in sensor_names:
-            sensor = self._safety_env.scene.sensors[sensor_name]
-            update_period = getattr(
-                getattr(sensor, "cfg", None), "update_period", None
+        sensors = getattr(self, "_table_contact_timestamp_sensors", None)
+        if sensors is None:
+            if params.get("full_table_assembly") is True:
+                sensor_cfgs = tuple(
+                    params["full_table_filtered_sensor_cfgs"]
+                )
+            else:
+                sensor_cfgs = (
+                    params["sensor_cfg"],
+                    params["filtered_sensor_cfg"],
+                )
+            sensor_names = tuple(
+                getattr(cfg, "name", None) for cfg in sensor_cfgs
             )
             if (
-                isinstance(update_period, bool)
-                or not isinstance(update_period, Real)
-                or float(update_period) != 0.0
+                not sensor_names
+                or any(
+                    not isinstance(name, str) or not name
+                    for name in sensor_names
+                )
+                or len(set(sensor_names)) != len(sensor_names)
             ):
                 raise RuntimeError(
-                    f"table-contact sensor {sensor_name!r} must update every physics step"
+                    "table-contact sensor clocks require non-empty unique sensor names"
                 )
-            timestamp = getattr(sensor, "_timestamp", None)
-            if (
-                not torch.is_tensor(timestamp)
-                or tuple(timestamp.shape) != (self.num_envs,)
-                or not timestamp.dtype.is_floating_point
-                or timestamp.device != self._processed_actions.device
-            ):
-                raise RuntimeError(
-                    f"table-contact sensor {sensor_name!r} did not provide a "
-                    "per-environment floating-point physics timestamp"
+            sensors = tuple(
+                self._safety_env.scene.sensors[name]
+                for name in sensor_names
+            )
+            for sensor_name, sensor in zip(sensor_names, sensors):
+                update_period = getattr(
+                    getattr(sensor, "cfg", None), "update_period", None
                 )
-            condition = torch.isfinite(timestamp)
-            if require_data_fresh:
-                last_update = getattr(sensor, "_timestamp_last_update", None)
+                timestamp = getattr(sensor, "_timestamp", None)
                 if (
-                    not torch.is_tensor(last_update)
-                    or tuple(last_update.shape) != (self.num_envs,)
-                    or last_update.dtype != timestamp.dtype
-                    or last_update.device != timestamp.device
+                    isinstance(update_period, bool)
+                    or not isinstance(update_period, Real)
+                    or float(update_period) != 0.0
                 ):
                     raise RuntimeError(
-                        f"table-contact sensor {sensor_name!r} did not provide a fresh "
-                        "per-environment physics timestamp"
+                        f"table-contact sensor {sensor_name!r} must update every physics step"
                     )
-                condition &= timestamp.eq(last_update)
-            all_fresh = condition if all_fresh is None else (all_fresh & condition)
-            if reference_timestamp is None:
-                reference_timestamp = timestamp.detach().clone()
-            else:
-                same_frame = timestamp.eq(reference_timestamp)
-                all_same_frame = (
-                    same_frame
-                    if all_same_frame is None
-                    else (all_same_frame & same_frame)
-                )
-        if reference_timestamp is None or all_fresh is None:
-            raise RuntimeError("table-contact sensor clock set is empty")
-        self._assert_table_contact_device(
-            torch.all(all_fresh),
-            "one or more table-contact pair sensors did not provide a fresh "
-            "per-environment physics timestamp",
+                if (
+                    not torch.is_tensor(timestamp)
+                    or tuple(timestamp.shape) != (self.num_envs,)
+                    or not timestamp.dtype.is_floating_point
+                    or timestamp.device != self._processed_actions.device
+                ):
+                    raise RuntimeError(
+                        f"table-contact sensor {sensor_name!r} did not provide a "
+                        "per-environment floating-point physics timestamp"
+                    )
+            self._table_contact_timestamp_sensors = sensors
+
+        timestamp_stack = torch.stack(
+            tuple(sensor._timestamp for sensor in sensors), dim=0
         )
-        if all_same_frame is not None:
-            self._assert_table_contact_device(
-                torch.all(all_same_frame),
-                "table-contact pair sensors sampled different physics frames",
+        valid = torch.isfinite(timestamp_stack)
+        valid &= timestamp_stack.eq(timestamp_stack[0:1])
+        if require_data_fresh:
+            if not getattr(
+                self,
+                "_table_contact_timestamp_data_contract_validated",
+                False,
+            ):
+                for sensor in sensors:
+                    timestamp = sensor._timestamp
+                    last_update = getattr(
+                        sensor, "_timestamp_last_update", None
+                    )
+                    if (
+                        not torch.is_tensor(last_update)
+                        or tuple(last_update.shape) != (self.num_envs,)
+                        or last_update.dtype != timestamp.dtype
+                        or last_update.device != timestamp.device
+                    ):
+                        raise RuntimeError(
+                            "a table-contact sensor did not provide a fresh "
+                            "per-environment physics timestamp"
+                        )
+                self._table_contact_timestamp_data_contract_validated = True
+            last_update_stack = torch.stack(
+                tuple(
+                    sensor._timestamp_last_update for sensor in sensors
+                ),
+                dim=0,
             )
-        return reference_timestamp
+            valid &= timestamp_stack.eq(last_update_stack)
+        self._assert_table_contact_device(
+            torch.all(valid),
+            "one or more table-contact pair sensors were stale, non-finite, "
+            "or sampled different physics frames",
+        )
+        # ``stack`` owns fresh storage, so this row remains a valid baseline if
+        # Isaac updates the sensor tensors in place before the next substep.
+        return timestamp_stack[0]
 
     def _sample_table_contact_current(self) -> torch.Tensor:
         """Read the exact resolved ``robot_hit_table`` current-sensor kernel."""
@@ -2805,11 +2836,11 @@ class ClampedJointPositionAction(JointPositionAction):
             self._safety_env,
             sensor_cfg=params["sensor_cfg"],
             filtered_sensor_cfg=params["filtered_sensor_cfg"],
-            all_body_filtered_sensor_cfgs=params.get(
-                "all_body_filtered_sensor_cfgs", ()
+            full_table_filtered_sensor_cfgs=params.get(
+                "full_table_filtered_sensor_cfgs", ()
             ),
-            expected_full_table_filter_prim_paths=params.get(
-                "expected_full_table_filter_prim_paths", ()
+            expected_full_table_source_prim_paths=params.get(
+                "expected_full_table_source_prim_paths", ()
             ),
             asset_cfg=params["asset_cfg"],
             near_x=params["near_x"],

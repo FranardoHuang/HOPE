@@ -58,14 +58,20 @@ def _action_ball_table_contact_rows():
             for target in node.targets
         )
     )
-    sensor_names = tuple(
-        "racket_table_contact"
-        if body_name == "right_wrist_yaw_Link"
-        else f"robot_table_contact_{index:02d}"
-        for index, body_name in enumerate(body_names)
+    sensor_names = (
+        "table_top_robot_contact",
+        "table_keepout_robot_contact",
+        "table_net_robot_contact",
+        "table_post_left_robot_contact",
+        "table_post_right_robot_contact",
     )
-    assert len(body_names) == len(sensor_names) == 32
-    return body_names, sensor_names
+    assert len(body_names) == 32
+    return (
+        body_names,
+        sensor_names,
+        _ACTION_BALL_TABLE_FILTER_PRIMS,
+        "{ENV_REGEX_NS}/Robot/.*",
+    )
 
 
 class NS(types.SimpleNamespace):
@@ -215,7 +221,12 @@ def _action_ball_env(action_ids):
     )
     table_prim = "{ENV_REGEX_NS}/TableObstacle"
     table_filter_prims = _ACTION_BALL_TABLE_FILTER_PRIMS
-    table_body_names, table_sensor_names = (
+    (
+        table_body_names,
+        table_sensor_names,
+        table_source_prims,
+        table_robot_filter_prim,
+    ) = (
         _action_ball_table_contact_rows()
     )
 
@@ -226,6 +237,7 @@ def _action_ball_env(action_ids):
             spawn=NS(
                 size=size,
                 collision_props=NS(collision_enabled=True),
+                activate_contact_sensors=True,
             ),
         )
 
@@ -256,15 +268,15 @@ def _action_ball_env(action_ids):
             (0.02, 0.02, 0.1725),
         ),
     )
-    for sensor_name, body_name in zip(
-        table_sensor_names, table_body_names
+    for sensor_name, source_prim in zip(
+        table_sensor_names, table_source_prims
     ):
         setattr(
             scene,
             sensor_name,
             NS(
-                prim_path=f"{{ENV_REGEX_NS}}/Robot/{body_name}",
-                filter_prim_paths_expr=list(table_filter_prims),
+                prim_path=source_prim,
+                filter_prim_paths_expr=[table_robot_filter_prim],
                 update_period=0.0,
             ),
         )
@@ -311,12 +323,12 @@ def _action_ball_env(action_ids):
                         name="contact_forces", body_names=[broad_regex]
                     ),
                     "filtered_sensor_cfg": NS(
-                        name="racket_table_contact"
+                        name="table_top_robot_contact"
                     ),
-                    "all_body_filtered_sensor_cfgs": (
+                    "full_table_filtered_sensor_cfgs": (
                         filtered_sensor_cfgs
                     ),
-                    "expected_full_table_filter_prim_paths": (
+                    "expected_full_table_source_prim_paths": (
                         table_filter_prims
                     ),
                     "asset_cfg": NS(
@@ -433,7 +445,12 @@ def _stub_obs_imports(monkeypatch):
         ),
         table_cfg,
     )
-    body_names, sensor_names = _action_ball_table_contact_rows()
+    (
+        body_names,
+        sensor_names,
+        source_prims,
+        robot_filter_prim,
+    ) = _action_ball_table_contact_rows()
     hope_cfg = types.ModuleType(
         (
             "whole_body_tracking.tasks.tracking.config.agibot_a3."
@@ -441,7 +458,9 @@ def _stub_obs_imports(monkeypatch):
         )
     )
     hope_cfg.TABLE_CONTACT_BODY_NAMES = body_names
-    hope_cfg.TABLE_ALL_BODY_CONTACT_SENSOR_NAMES = sensor_names
+    hope_cfg.TABLE_FULL_CONTACT_SENSOR_NAMES = sensor_names
+    hope_cfg.TABLE_FULL_CONTACT_SENSOR_PRIMS = source_prims
+    hope_cfg.TABLE_ROBOT_FILTER_PRIM = robot_filter_prim
     agibot_a3.hope_env_cfg = hope_cfg
     monkeypatch.setitem(
         sys.modules,

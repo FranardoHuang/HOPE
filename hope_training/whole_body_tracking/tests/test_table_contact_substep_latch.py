@@ -224,6 +224,8 @@ def _clock_reader(sensor_times):
     return SimpleNamespace(
         num_envs=2,
         _processed_actions=torch.zeros(2, 1),
+        _table_contact_timestamp_sensors=None,
+        _table_contact_timestamp_data_contract_validated=False,
         _safety_env=SimpleNamespace(
             scene=SimpleNamespace(sensors=sensors)
         ),
@@ -231,18 +233,24 @@ def _clock_reader(sensor_times):
     )
 
 
-def test_full_assembly_freshness_checks_every_exact_pair_sensor_clock():
+def test_full_assembly_freshness_checks_every_table_source_sensor_clock():
     method = (
         hope_actions_mod.ClampedJointPositionAction
         ._table_contact_sensor_timestamps
     )
     cfgs = tuple(
         SimpleNamespace(name=name)
-        for name in ("pair_pelvis", "pair_elbow", "racket_table_contact")
+        for name in (
+            "table_top",
+            "table_keepout",
+            "table_net",
+            "table_post_left",
+            "table_post_right",
+        )
     )
     params = {
         "full_table_assembly": True,
-        "all_body_filtered_sensor_cfgs": cfgs,
+        "full_table_filtered_sensor_cfgs": cfgs,
         # Deliberately absent from the scene: full assembly must not read the legacy broad clock.
         "sensor_cfg": SimpleNamespace(name="legacy_broad"),
         "filtered_sensor_cfg": cfgs[-1],
@@ -256,6 +264,8 @@ def test_full_assembly_freshness_checks_every_exact_pair_sensor_clock():
             cfgs[0].name: 1.25,
             cfgs[1].name: 1.255,
             cfgs[2].name: 1.25,
+            cfgs[3].name: 1.25,
+            cfgs[4].name: 1.25,
         }
     )
     with pytest.raises(RuntimeError, match="different physics frames"):

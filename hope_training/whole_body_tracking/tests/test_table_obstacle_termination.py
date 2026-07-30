@@ -152,7 +152,7 @@ def test_body_alignment_is_by_name_not_position(term_mod):
 
 
 def test_configured_exact_pair_body_table_matches_shipped_urdf_rigid_order():
-    """The one-body sensors cover root + every non-fixed child, including both feet."""
+    """The whole-Robot filter contract covers root + every child, including both feet."""
 
     cfg_path = (
         REPO
@@ -211,7 +211,7 @@ def test_configured_exact_pair_body_table_matches_shipped_urdf_rigid_order():
     assert configured.count("right_wrist_yaw_Link") == 1
 
 
-def test_action_ball_attaches_one_robot_only_five_filter_sensor_per_body():
+def test_action_ball_attaches_five_table_source_sensors_filtered_against_robot():
     cfg_path = (
         REPO
         / "hope_training/whole_body_tracking/source/whole_body_tracking"
@@ -224,18 +224,14 @@ def test_action_ball_attaches_one_robot_only_five_filter_sensor_per_body():
             continue
         for target in node.targets:
             if isinstance(target, ast.Name) and target.id in {
-                "TABLE_CONTACT_BODY_NAMES",
                 "TABLE_CONTACT_SENSOR_NAME",
+                "TABLE_FULL_CONTACT_SENSOR_NAMES",
+                "TABLE_ROBOT_FILTER_PRIM",
             }:
                 assignments[target.id] = ast.literal_eval(node.value)
-    body_names = tuple(assignments["TABLE_CONTACT_BODY_NAMES"])
     wrist_sensor_name = assignments["TABLE_CONTACT_SENSOR_NAME"]
-    sensor_names = tuple(
-        wrist_sensor_name
-        if body == "right_wrist_yaw_Link"
-        else f"robot_table_contact_{index:02d}"
-        for index, body in enumerate(body_names)
-    )
+    sensor_names = tuple(assignments["TABLE_FULL_CONTACT_SENSOR_NAMES"])
+    robot_filter_prim = assignments["TABLE_ROBOT_FILTER_PRIM"]
 
     function = next(
         node
@@ -250,12 +246,12 @@ def test_action_ball_attaches_one_robot_only_five_filter_sensor_per_body():
 
     namespace = {
         "ContactSensorCfg": FakeContactSensorCfg,
-        "TABLE_CONTACT_BODY_NAMES": body_names,
         "TABLE_CONTACT_SENSOR_NAME": wrist_sensor_name,
         "TABLE_CONTACT_SENSOR_PRIM": (
             "{ENV_REGEX_NS}/Robot/right_wrist_yaw_Link"
         ),
-        "TABLE_ALL_BODY_CONTACT_SENSOR_NAMES": sensor_names,
+        "TABLE_FULL_CONTACT_SENSOR_NAMES": sensor_names,
+        "TABLE_ROBOT_FILTER_PRIM": robot_filter_prim,
     }
     exec(
         compile(
@@ -266,6 +262,7 @@ def test_action_ball_attaches_one_robot_only_five_filter_sensor_per_body():
         namespace,
     )
     five_obstacles = tuple(f"{{ENV_REGEX_NS}}/TablePart{index}" for index in range(5))
+    namespace["TABLE_FULL_CONTACT_SENSOR_PRIMS"] = five_obstacles
     env_cfg = types.SimpleNamespace(
         table_robot_keepout=True,
         table_obstacle_prims=five_obstacles,
@@ -273,14 +270,16 @@ def test_action_ball_attaches_one_robot_only_five_filter_sensor_per_body():
     )
     namespace["attach_table_contact_sensor"](env_cfg)
     assert env_cfg.table_pair_contact_sensor_names == sensor_names
-    for sensor_name, body_name in zip(sensor_names, body_names):
+    for sensor_name, source_prim in zip(sensor_names, five_obstacles):
         sensor_cfg = getattr(env_cfg.scene, sensor_name)
-        assert sensor_cfg.prim_path == f"{{ENV_REGEX_NS}}/Robot/{body_name}"
-        assert tuple(sensor_cfg.filter_prim_paths_expr) == five_obstacles
+        assert sensor_cfg.prim_path == source_prim
+        assert tuple(sensor_cfg.filter_prim_paths_expr) == (
+            robot_filter_prim,
+        )
         assert sensor_cfg.update_period == 0.0
         assert "Ball" not in sensor_cfg.prim_path
 
-    # Late full→legacy override must retire every stale per-body pair sensor, not leave hidden
+    # Late full→legacy override must retire every stale table-source sensor, not leave hidden
     # collision telemetry outside the declared contract.
     env_cfg.table_robot_keepout = False
     env_cfg.table_obstacle_prims = five_obstacles[:1]
@@ -379,6 +378,23 @@ def test_action_ball_table_filter_targets_are_kinematic_rigid_bodies():
             filtered_target_calls.append(call)
     # top + keep-out + net + one post template instantiated for left and right.
     assert len(filtered_target_calls) == 4
+    for call in filtered_target_calls:
+        reporter_keyword = next(
+            (
+                keyword
+                for keyword in call.keywords
+                if keyword.arg == "activate_contact_sensors"
+            ),
+            None,
+        )
+        assert reporter_keyword is not None
+        assert (
+            isinstance(reporter_keyword.value, ast.Constant)
+            and reporter_keyword.value.value is True
+        ) or (
+            isinstance(reporter_keyword.value, ast.Name)
+            and reporter_keyword.value.id == "full_assembly"
+        )
 
 
 # ------------------------------------------------------------------- the termination on an env - #
@@ -396,11 +412,11 @@ class _Sensor:
 
 
 class _FilteredSensor:
-    def __init__(self, force_matrix, body_name="right_wrist_yaw_Link"):
-        self.body_names = [body_name]
+    def __init__(self, force_matrix, source_prim, filter_prims):
+        self.body_names = [source_prim.rsplit("/", 1)[-1]]
         self.cfg = types.SimpleNamespace(
-            prim_path=f"{{ENV_REGEX_NS}}/Robot/{body_name}",
-            filter_prim_paths_expr=list(EXACT_FILTER_PRIMS),
+            prim_path=source_prim,
+            filter_prim_paths_expr=list(filter_prims),
         )
         self.data = _Data(None, None, force_matrix)
 
@@ -427,6 +443,7 @@ class _Scene:
 class _Env:
     def __init__(self, scene):
         self.scene = scene
+        self.num_envs = int(scene.env_origins.shape[0])
 
 
 class _Cfg:
@@ -435,17 +452,26 @@ class _Cfg:
         self.body_ids = body_ids
 
 
-BODIES = ["pelvis_link", "right_elbow_Link", "right_wrist_yaw_Link", "left_ankle_roll_Link"]
+BODIES = [
+    "pelvis_link",
+    "right_elbow_Link",
+    "right_wrist_yaw_Link",
+    "left_ankle_roll_Link",
+    *(f"a3_test_body_{index}" for index in range(28)),
+]
 WATCHED = [0, 1, 2]  # everything but the foot
 EXACT_SENSOR_NAMES = [
-    "robot_table_contact_00",
-    "robot_table_contact_01",
-    "racket_table_contact",
-    "robot_table_contact_03",
+    "table_top_robot_contact",
+    "table_keepout_robot_contact",
+    "table_net_robot_contact",
+    "table_post_left_robot_contact",
+    "table_post_right_robot_contact",
 ]
-EXACT_FILTER_PRIMS = tuple(
+EXACT_SOURCE_PRIMS = tuple(
     f"{{ENV_REGEX_NS}}/TablePart{index}" for index in range(5)
 )
+EXACT_ROLES = ("top", "keepout", "net", "post_left", "post_right")
+ROBOT_FILTER_PRIM = "{ENV_REGEX_NS}/Robot/.*"
 
 
 def _env(
@@ -453,26 +479,34 @@ def _env(
     force,
     filtered_force=None,
     *,
-    filter_count=1,
-    exact_body_forces=None,
+    robot_filter_count=32,
+    exact_role_forces=None,
 ):
     sensor = _Sensor(BODIES, torch.tensor(force, dtype=torch.float32))
     if filtered_force is None:
-        filtered_force = torch.zeros(len(pos), 1, filter_count, 3)
+        filtered_force = torch.zeros(len(pos), 1, 1, 3)
     else:
         filtered_force = torch.as_tensor(filtered_force, dtype=torch.float32)
-    exact_body_forces = exact_body_forces or {}
-    filtered_sensors = {}
-    for sensor_name, body_name in zip(EXACT_SENSOR_NAMES, BODIES):
-        matrix = exact_body_forces.get(body_name)
+    exact_role_forces = exact_role_forces or {}
+    filtered_sensors = {
+        "racket_table_contact": _FilteredSensor(
+            filtered_force,
+            "{ENV_REGEX_NS}/Robot/right_wrist_yaw_Link",
+            (EXACT_SOURCE_PRIMS[0],),
+        )
+    }
+    for role, sensor_name, source_prim in zip(
+        EXACT_ROLES, EXACT_SENSOR_NAMES, EXACT_SOURCE_PRIMS
+    ):
+        matrix = exact_role_forces.get(role)
         if matrix is None:
-            matrix = (
-                filtered_force
-                if body_name == "right_wrist_yaw_Link"
-                else torch.zeros(len(pos), 1, filter_count, 3)
+            matrix = torch.zeros(
+                len(pos), 1, robot_filter_count, 3
             )
         filtered_sensors[sensor_name] = _FilteredSensor(
-            torch.as_tensor(matrix, dtype=torch.float32), body_name
+            torch.as_tensor(matrix, dtype=torch.float32),
+            source_prim,
+            (ROBOT_FILTER_PRIM,),
         )
     asset = _Asset(BODIES, torch.tensor(pos, dtype=torch.float32))
     return _Env(
@@ -495,12 +529,12 @@ def _call(term_mod, env, **overrides):
     params.update(overrides)
     if params.get("full_table_assembly"):
         params.setdefault(
-            "all_body_filtered_sensor_cfgs",
+            "full_table_filtered_sensor_cfgs",
             tuple(_Cfg(name, [0]) for name in EXACT_SENSOR_NAMES),
         )
         params.setdefault(
-            "expected_full_table_filter_prim_paths",
-            EXACT_FILTER_PRIMS,
+            "expected_full_table_source_prim_paths",
+            EXACT_SOURCE_PRIMS,
         )
     return term_mod.robot_hit_table(
         env, _Cfg("contact_forces", WATCHED), _Cfg("racket_table_contact", [0]),
@@ -569,12 +603,16 @@ def test_action_ball_keepout_catches_under_slab_contact(term_mod):
     pos = [[[0.0, 0.0, 1.0], [0.0, 0.0, 1.1],
             [NEAR_X + 0.25, 0.0, 0.60], [0.0, 0.1, 0.05]]]
     force = [[[0, 0, 0]] * 4]
-    wrist_pair_force = torch.zeros(1, 1, 5, 3)
-    wrist_pair_force[0, 0, 1, 2] = 120.0
+    keepout_pair_force = torch.zeros(1, 1, 4, 3)
+    keepout_pair_force[0, 0, 2, 2] = 120.0
     assert bool(
         _call(
             term_mod,
-            _env(pos, force, wrist_pair_force, filter_count=5),
+            _env(
+                pos,
+                force,
+                exact_role_forces={"keepout": keepout_pair_force},
+            ),
             full_table_assembly=True,
             keepout_floor_z=0.0,
         )
@@ -582,33 +620,38 @@ def test_action_ball_keepout_catches_under_slab_contact(term_mod):
 
 
 @pytest.mark.parametrize(
-    "point",
+    ("role", "point"),
     [
         # Top and near-side edge.
-        [NEAR_X + 0.30, 0.0, SURFACE_Z - 0.01],
-        [NEAR_X, 0.0, SURFACE_Z - 0.025],
+        ("top", [NEAR_X + 0.30, 0.0, SURFACE_Z - 0.01]),
+        ("top", [NEAR_X, 0.0, SURFACE_Z - 0.025]),
         # Net center.
-        [NEAR_X + 1.37, 0.0, SURFACE_Z + 0.07],
+        ("net", [NEAR_X + 1.37, 0.0, SURFACE_Z + 0.07]),
         # Left/right post centers.
-        [NEAR_X + 1.37, 0.7625 + 0.15, SURFACE_Z + 0.08],
-        [NEAR_X + 1.37, -(0.7625 + 0.15), SURFACE_Z + 0.08],
+        (
+            "post_left",
+            [NEAR_X + 1.37, 0.7625 + 0.15, SURFACE_Z + 0.08],
+        ),
+        (
+            "post_right",
+            [NEAR_X + 1.37, -(0.7625 + 0.15), SURFACE_Z + 0.08],
+        ),
     ],
 )
 def test_full_assembly_exact_pair_channel_covers_top_edge_net_and_posts(
-    term_mod, point
+    term_mod, role, point
 ):
     pos = [[[0.0, 0.0, 1.0], point, [0.0, 0.0, 1.1], [0.0, 0.1, 0.05]]]
     broad_force = [[[0, 0, 0]] * 4]
-    torso_pair_force = torch.zeros(1, 1, 5, 3)
-    torso_pair_force[0, 0, 0, 2] = 120.0
+    table_pair_force = torch.zeros(1, 1, 4, 3)
+    table_pair_force[0, 0, 1, 2] = 120.0
     assert bool(
         _call(
             term_mod,
             _env(
                 pos,
                 broad_force,
-                filter_count=5,
-                exact_body_forces={"right_elbow_Link": torso_pair_force},
+                exact_role_forces={role: table_pair_force},
             ),
             full_table_assembly=True,
         )
@@ -631,16 +674,15 @@ def test_elbow_mesh_contact_terminates_when_body_origin_is_outside_every_aabb(
     # table assembly, so the old origin-AABB heuristic returned false.  The pair-filter force says
     # this exact rigid body contacted the top collider and must terminate.
     broad_force = [[[0, 0, 0], [0.0, 0.0, 120.0], [0, 0, 0], [0, 0, 0]]]
-    elbow_pair_force = torch.zeros(1, 1, 5, 3)
-    elbow_pair_force[0, 0, 0, 2] = 120.0
+    elbow_pair_force = torch.zeros(1, 1, 4, 3)
+    elbow_pair_force[0, 0, 1, 2] = 120.0
     assert bool(
         _call(
             term_mod,
             _env(
                 pos,
                 broad_force,
-                filter_count=5,
-                exact_body_forces={"right_elbow_Link": elbow_pair_force},
+                exact_role_forces={"top": elbow_pair_force},
             ),
             full_table_assembly=True,
         )
@@ -662,7 +704,7 @@ def test_full_assembly_does_not_use_unattributed_broad_force_or_body_origin(
     assert bool(
         _call(
             term_mod,
-            _env(pos, broad_force, filter_count=5),
+            _env(pos, broad_force),
             full_table_assembly=True,
         )
     ) is False
@@ -673,85 +715,90 @@ def test_full_assembly_includes_feet_in_exact_table_pair_coverage(term_mod):
 
     pos = [[[0.0, 0.0, 1.0]] * 4]
     broad_force = [[[0, 0, 0]] * 4]
-    foot_pair_force = torch.zeros(1, 1, 5, 3)
-    foot_pair_force[0, 0, 1, 0] = 25.0
+    foot_pair_force = torch.zeros(1, 1, 4, 3)
+    foot_pair_force[0, 0, 3, 0] = 25.0
     assert bool(
         _call(
             term_mod,
             _env(
                 pos,
                 broad_force,
-                filter_count=5,
-                exact_body_forces={
-                    "left_ankle_roll_Link": foot_pair_force
-                },
+                exact_role_forces={"keepout": foot_pair_force},
             ),
             full_table_assembly=True,
         )
     ) is True
 
 
-@pytest.mark.parametrize("filter_index", range(5))
-def test_filtered_racket_channel_accepts_every_assembly_prim(
-    term_mod, filter_index
+@pytest.mark.parametrize("role", EXACT_ROLES)
+def test_each_table_source_accepts_any_robot_filter_column(
+    term_mod, role
 ):
-    """One-to-many wrist sensor covers top, keepout, net and both posts."""
+    """Every one-body table source covers all Robot filter columns."""
 
     pos = [[[0.0, 0.0, 1.0], [0.0, 0.0, 1.1],
             [NEAR_X - 0.30, 0.0, 1.1], [0.0, 0.1, 0.05]]]
     broad_force = [[[0, 0, 0]] * 4]
-    filtered = torch.zeros(1, 1, 5, 3)
-    filtered[0, 0, filter_index, 2] = 120.0
+    filtered = torch.zeros(1, 1, 32, 3)
+    filtered[0, 0, 31, 2] = 120.0
     assert bool(
             _call(
                 term_mod,
-                _env(pos, broad_force, filtered, filter_count=5),
+                _env(
+                    pos,
+                    broad_force,
+                    robot_filter_count=32,
+                    exact_role_forces={role: filtered},
+                ),
                 full_table_assembly=True,
             )
     ) is True
 
 
-def test_full_assembly_rejects_nonexact_filtered_column_count(term_mod):
+@pytest.mark.parametrize("filter_count", (0, 31, 33))
+def test_full_assembly_rejects_incomplete_or_extra_robot_filter_axis(
+    term_mod, filter_count
+):
     pos = [[[0.0, 0.0, 1.0]] * 4]
     broad_force = [[[0, 0, 0]] * 4]
-    with pytest.raises(RuntimeError, match=r"1, 5, 3"):
+    with pytest.raises(RuntimeError, match="complete A3 Robot coverage"):
         _call(
             term_mod,
-            _env(pos, broad_force, filter_count=4),
+            _env(pos, broad_force, robot_filter_count=filter_count),
             full_table_assembly=True,
         )
 
 
-def test_full_assembly_fails_closed_on_missing_or_misordered_body_sensor(term_mod):
+def test_full_assembly_fails_closed_on_missing_or_misbound_table_sensor(term_mod):
     pos = [[[0.0, 0.0, 1.0]] * 4]
     broad_force = [[[0, 0, 0]] * 4]
-    env = _env(pos, broad_force, filter_count=5)
+    env = _env(pos, broad_force)
     env.scene.sensors.pop(EXACT_SENSOR_NAMES[0])
-    with pytest.raises(RuntimeError, match="missing exact per-body"):
+    with pytest.raises(RuntimeError, match="missing exact table-source"):
         _call(term_mod, env, full_table_assembly=True)
 
-    env = _env(pos, broad_force, filter_count=5)
+    env = _env(pos, broad_force)
     first = env.scene.sensors[EXACT_SENSOR_NAMES[0]]
     first.body_names = ["forged_body"]
-    with pytest.raises(RuntimeError, match="expected rigid body"):
+    with pytest.raises(RuntimeError, match="table-source body"):
         _call(term_mod, env, full_table_assembly=True)
 
 
 def test_full_assembly_fails_closed_on_sensor_source_or_filter_drift(term_mod):
     pos = [[[0.0, 0.0, 1.0]] * 4]
     broad_force = [[[0, 0, 0]] * 4]
-    env = _env(pos, broad_force, filter_count=5)
+    env = _env(pos, broad_force)
     env.scene.sensors[EXACT_SENSOR_NAMES[1]].cfg.prim_path = (
-        "{ENV_REGEX_NS}/Robot/wrong_body"
+        "{ENV_REGEX_NS}/WrongTablePart"
     )
-    with pytest.raises(RuntimeError, match="source/filter binding drift"):
+    with pytest.raises(RuntimeError, match="source/Robot-filter binding drift"):
         _call(term_mod, env, full_table_assembly=True)
 
-    env = _env(pos, broad_force, filter_count=5)
+    env = _env(pos, broad_force)
     env.scene.sensors[
         EXACT_SENSOR_NAMES[1]
     ].cfg.filter_prim_paths_expr[-1] = "{ENV_REGEX_NS}/Ball"
-    with pytest.raises(RuntimeError, match="source/filter binding drift"):
+    with pytest.raises(RuntimeError, match="source/Robot-filter binding drift"):
         _call(term_mod, env, full_table_assembly=True)
 
 
@@ -760,7 +807,7 @@ def test_full_assembly_accepts_interactive_scene_expanded_prim_paths(term_mod):
 
     pos = [[[0.0, 0.0, 1.0]] * 4]
     broad_force = [[[0, 0, 0]] * 4]
-    env = _env(pos, broad_force, filter_count=5)
+    env = _env(pos, broad_force)
     env.scene.env_regex_ns = "/World/envs/env_.*"
     for sensor_name in EXACT_SENSOR_NAMES:
         sensor_cfg = env.scene.sensors[sensor_name].cfg
@@ -773,7 +820,7 @@ def test_full_assembly_accepts_interactive_scene_expanded_prim_paths(term_mod):
         ]
 
     elbow_pair_force = env.scene.sensors[
-        EXACT_SENSOR_NAMES[1]
+        EXACT_SENSOR_NAMES[0]
     ].data.force_matrix_w
     elbow_pair_force[0, 0, 0, 2] = 120.0
     assert bool(_call(term_mod, env, full_table_assembly=True)) is True
@@ -814,6 +861,81 @@ def test_missing_filtered_force_stream_fails_loud(term_mod):
     env.scene.sensors["racket_table_contact"].data.force_matrix_w = None
     with pytest.raises(RuntimeError, match="force_matrix_w"):
         _call(term_mod, env)
+
+
+def test_apply_table_obstacle_only_binds_scene_entities_installed_in_each_mode():
+    """Manager eagerly resolves every SceneEntityCfg, including compatibility-only params."""
+
+    cfg_path = (
+        REPO
+        / "hope_training/whole_body_tracking/source/whole_body_tracking"
+        / "whole_body_tracking/tasks/tracking/config/agibot_a3/hope_env_cfg.py"
+    )
+    tree = ast.parse(cfg_path.read_text(encoding="utf-8"), filename=str(cfg_path))
+    fn = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "apply_table_obstacle"
+    )
+
+    class FakeSceneEntityCfg:
+        def __init__(self, name):
+            self.name = name
+
+    sensor_names = tuple(EXACT_SENSOR_NAMES)
+    namespace = {
+        "TABLE_CONTACT_SENSOR_NAME": "racket_table_contact",
+        "TABLE_FULL_CONTACT_SENSOR_NAMES": sensor_names,
+        "SceneEntityCfg": FakeSceneEntityCfg,
+        "attach_table_obstacle": lambda _cfg: None,
+        "attach_table_contact_sensor": lambda _cfg: None,
+        "table_hit_done_term": lambda: None,
+        "table_hit_rew_term": lambda: None,
+    }
+    exec(
+        compile(
+            ast.Module(body=[fn], type_ignores=[]),
+            str(cfg_path),
+            "exec",
+        ),
+        namespace,
+    )
+
+    def make_cfg(*, full):
+        term = types.SimpleNamespace(params={})
+        return types.SimpleNamespace(
+            table_obstacle=True,
+            table_robot_keepout=full,
+            table_obstacle_prims=EXACT_SOURCE_PRIMS if full else EXACT_SOURCE_PRIMS[:1],
+            decimation=4,
+            scene=types.SimpleNamespace(),
+            terminations=types.SimpleNamespace(robot_hit_table=term),
+            rewards=types.SimpleNamespace(table_hit_penalty=object()),
+            commands=types.SimpleNamespace(
+                racket_target=types.SimpleNamespace(
+                    vb_table_near_x=NEAR_X,
+                    vb_table_surface_z=SURFACE_Z,
+                )
+            ),
+            actions=types.SimpleNamespace(
+                joint_pos=types.SimpleNamespace()
+            ),
+        )
+
+    full_cfg = make_cfg(full=True)
+    namespace["apply_table_obstacle"](full_cfg)
+    full_params = full_cfg.terminations.robot_hit_table.params
+    assert full_params["filtered_sensor_cfg"].name == sensor_names[0]
+    assert tuple(
+        cfg.name for cfg in full_params["full_table_filtered_sensor_cfgs"]
+    ) == sensor_names
+
+    legacy_cfg = make_cfg(full=False)
+    namespace["apply_table_obstacle"](legacy_cfg)
+    legacy_params = legacy_cfg.terminations.robot_hit_table.params
+    assert legacy_params["filtered_sensor_cfg"].name == "racket_table_contact"
+    assert legacy_params["full_table_filtered_sensor_cfgs"] == ()
 
 
 def test_table_disabled_removes_filtered_sensor_with_other_table_parts():

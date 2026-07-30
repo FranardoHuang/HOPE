@@ -7,8 +7,8 @@ Three checks, in increasing cost:
 
 1. ``--cfg-only`` — no simulator.  The env CFG carries either the legacy top-only obstacle or the
    ActionBall five-part assembly (top, floor-to-slab robot keep-out, net and two posts).  Full
-   ActionBall additionally carries one exact pair-filter sensor for every articulation body
-   (including both feet; the fixed-merged racket and handle ride on the right wrist), a
+   ActionBall additionally carries one exact sensor per table part, each filtered against the
+   complete 32-body Robot subtree (including both feet and the fixed-merged racket), a
    ``robot_hit_table`` termination and a ``table_hit_penalty`` reward.  Every pose/extent comes
    back to the shared ``table_tennis.table_frame`` derivation.
 2. default — construct the env.  Read every SPAWNED prim's world transform and CollisionAPI back
@@ -26,7 +26,7 @@ Usage (pod, inside the Isaac venv)::
 
 The formal ``--receipt-out`` mode is intentionally stricter than the diagnostic
 checks above.  It accepts one exact fresh-N5 ActionBall manifest, reopens every
-motion as immutable bytes, executes the real 32-body × five-filter/four-substep
+motion as immutable bytes, executes the real five-source × 32-body-filter/four-substep
 PhysX controls, sweeps every frame of every ordered motion, and only then
 publishes ``isaac_action_ball_table_filtered_smoke_v2``.  There are no command
 line switches that can self-report any PASS field.
@@ -209,7 +209,10 @@ gym = None
 torch = None
 parse_env_cfg = None
 tt_frame = None
-TABLE_ALL_BODY_CONTACT_SENSOR_NAMES = ()
+TABLE_FULL_CONTACT_SENSOR_NAMES = ()
+TABLE_FULL_CONTACT_SENSOR_PRIMS = ()
+TABLE_FULL_CONTACT_SENSOR_ROLES = ()
+TABLE_ROBOT_FILTER_PRIM = ""
 TABLE_CONTACT_BODY_NAMES = ()
 TABLE_HIT_FORCE_THRESHOLD_N = float("nan")
 
@@ -1276,7 +1279,8 @@ def _validate_cli_mode(args) -> None:
 def _initialize_isaac_runtime(args) -> None:
     global _ISAAC_RUNTIME_ORIGIN, _app_launcher, _app
     global gym, torch, parse_env_cfg, tt_frame
-    global TABLE_ALL_BODY_CONTACT_SENSOR_NAMES
+    global TABLE_FULL_CONTACT_SENSOR_NAMES, TABLE_FULL_CONTACT_SENSOR_PRIMS
+    global TABLE_FULL_CONTACT_SENSOR_ROLES, TABLE_ROBOT_FILTER_PRIM
     global TABLE_CONTACT_BODY_NAMES, TABLE_HIT_FORCE_THRESHOLD_N
 
     from isaaclab.app import AppLauncher
@@ -1301,9 +1305,16 @@ def _initialize_isaac_runtime(args) -> None:
     torch = torch_module
     parse_env_cfg = parse_env_cfg_function
     tt_frame = frame_module
-    TABLE_ALL_BODY_CONTACT_SENSOR_NAMES = tuple(
-        hope_env_cfg.TABLE_ALL_BODY_CONTACT_SENSOR_NAMES
+    TABLE_FULL_CONTACT_SENSOR_NAMES = tuple(
+        hope_env_cfg.TABLE_FULL_CONTACT_SENSOR_NAMES
     )
+    TABLE_FULL_CONTACT_SENSOR_PRIMS = tuple(
+        hope_env_cfg.TABLE_FULL_CONTACT_SENSOR_PRIMS
+    )
+    TABLE_FULL_CONTACT_SENSOR_ROLES = tuple(
+        hope_env_cfg.TABLE_FULL_CONTACT_SENSOR_ROLES
+    )
+    TABLE_ROBOT_FILTER_PRIM = str(hope_env_cfg.TABLE_ROBOT_FILTER_PRIM)
     TABLE_CONTACT_BODY_NAMES = tuple(hope_env_cfg.TABLE_CONTACT_BODY_NAMES)
     TABLE_HIT_FORCE_THRESHOLD_N = float(
         hope_env_cfg.TABLE_HIT_FORCE_THRESHOLD_N
@@ -2275,10 +2286,12 @@ def check_cfg(env_cfg):
             rigid is None
             or getattr(rigid, "kinematic_enabled", None) is not True
             or getattr(rigid, "disable_gravity", None) is not True
+            or getattr(asset.spawn, "activate_contact_sensors", None)
+            is not True
         ):
             _fail(
-                f"scene.{spec['attr']} is a GPU pair-filter target but is not "
-                "a gravity-free kinematic rigid body"
+                f"scene.{spec['attr']} is a table sensor source but is not a "
+                "gravity-free kinematic rigid body with contact reporting"
             )
         _close(asset.init_state.pos, spec["pos"], f"scene.{spec['attr']}.init_state.pos")
         _close(asset.spawn.size, spec["size"], f"scene.{spec['attr']}.spawn.size")
@@ -2289,7 +2302,8 @@ def check_cfg(env_cfg):
                 "scene_attr": spec["attr"],
                 "pos": [float(v) for v in spec["pos"]],
                 "size": [float(v) for v in spec["size"]],
-                "gpu_filter_target_kinematic": bool(full),
+                "gpu_filter_source_kinematic": bool(full),
+                "contact_reporter_requested": bool(full),
             }
         )
 
@@ -2322,30 +2336,32 @@ def check_cfg(env_cfg):
             f"numerical-zero tolerance {TABLE_HIT_FORCE_THRESHOLD_N:g} N"
         )
 
-    filtered_cfg = getattr(env_cfg.scene, "racket_table_contact", None)
-    if filtered_cfg is None:
-        _fail("scene.racket_table_contact is missing — offset racket contacts can be missed")
-    if filtered_cfg.prim_path != "{ENV_REGEX_NS}/Robot/right_wrist_yaw_Link":
-        _fail(f"scene.racket_table_contact.prim_path {filtered_cfg.prim_path!r} is not the A3 wrist")
-    if tuple(filtered_cfg.filter_prim_paths_expr) != expected_prims:
-        _fail(
-            "scene.racket_table_contact filters are not the exact canonical assembly: "
-            f"{tuple(filtered_cfg.filter_prim_paths_expr)!r} != {expected_prims!r}"
-        )
     done_filtered = done.params.get("filtered_sensor_cfg")
-    if done_filtered is None or done_filtered.name != "racket_table_contact":
-        _fail("terminations.robot_hit_table does not consume scene.racket_table_contact")
+    expected_compat_sensor_name = (
+        TABLE_FULL_CONTACT_SENSOR_NAMES[0]
+        if full
+        else "racket_table_contact"
+    )
+    if (
+        done_filtered is None
+        or done_filtered.name != expected_compat_sensor_name
+    ):
+        _fail(
+            "terminations.robot_hit_table compatibility sensor must resolve "
+            f"the installed {expected_compat_sensor_name!r} sensor"
+        )
     exact_sensor_rows = []
     if full:
-        expected_sensor_names = tuple(TABLE_ALL_BODY_CONTACT_SENSOR_NAMES)
-        expected_body_names = tuple(TABLE_CONTACT_BODY_NAMES)
+        expected_sensor_names = tuple(TABLE_FULL_CONTACT_SENSOR_NAMES)
+        expected_source_prims = tuple(TABLE_FULL_CONTACT_SENSOR_PRIMS)
+        expected_roles = tuple(TABLE_FULL_CONTACT_SENSOR_ROLES)
         configured_sensor_names = tuple(
             getattr(env_cfg, "table_pair_contact_sensor_names", ()) or ()
         )
-        done_sensor_cfgs = done.params.get("all_body_filtered_sensor_cfgs")
+        done_sensor_cfgs = done.params.get("full_table_filtered_sensor_cfgs")
         if not isinstance(done_sensor_cfgs, (tuple, list)):
             _fail(
-                "robot_hit_table all_body_filtered_sensor_cfgs is not an "
+                "robot_hit_table full_table_filtered_sensor_cfgs is not an "
                 "ordered sequence"
             )
         done_sensor_names = tuple(
@@ -2353,43 +2369,46 @@ def check_cfg(env_cfg):
             for sensor_cfg in done_sensor_cfgs
         )
         if (
-            len(expected_body_names) != 32
-            or len(expected_sensor_names) != len(expected_body_names)
+            len(TABLE_CONTACT_BODY_NAMES) != 32
+            or len(expected_sensor_names) != 5
+            or len(expected_source_prims) != len(expected_sensor_names)
+            or len(expected_roles) != len(expected_sensor_names)
             or configured_sensor_names != expected_sensor_names
             or done_sensor_names != expected_sensor_names
             or tuple(
                 done.params.get(
-                    "expected_full_table_filter_prim_paths", ()
+                    "expected_full_table_source_prim_paths", ()
                 )
                 or ()
             )
             != expected_prims
+            or expected_source_prims != expected_prims
         ):
             _fail(
-                "ActionBall does not bind the exact ordered 32-body × "
-                "five-component pair-filter contract"
+                "ActionBall does not bind the exact ordered five-table-source × "
+                "32-body Robot-filter contract"
             )
-        for sensor_name, body_name in zip(
-            expected_sensor_names, expected_body_names
+        for role, sensor_name, source_prim in zip(
+            expected_roles, expected_sensor_names, expected_source_prims
         ):
             sensor_cfg = getattr(env_cfg.scene, sensor_name, None)
             if sensor_cfg is None:
                 _fail(f"scene.{sensor_name} is missing")
-            expected_body_prim = f"{{ENV_REGEX_NS}}/Robot/{body_name}"
             if (
-                sensor_cfg.prim_path != expected_body_prim
+                sensor_cfg.prim_path != source_prim
                 or tuple(sensor_cfg.filter_prim_paths_expr)
-                != expected_prims
+                != (TABLE_ROBOT_FILTER_PRIM,)
                 or float(sensor_cfg.update_period) != 0.0
             ):
                 _fail(
-                    f"scene.{sensor_name} does not bind {body_name!r}, "
-                    "the exact five-part assembly, and every physics step"
+                    f"scene.{sensor_name} does not bind table role {role!r}, "
+                    "the complete Robot filter, and every physics step"
                 )
             exact_sensor_rows.append(
                 {
+                    "role": role,
                     "name": sensor_name,
-                    "body_name": body_name,
+                    "source_prim": source_prim,
                     "prim_path": sensor_cfg.prim_path,
                     "filter_prim_paths_expr": list(
                         sensor_cfg.filter_prim_paths_expr
@@ -2406,6 +2425,24 @@ def check_cfg(env_cfg):
             or int(getattr(env_cfg, "decimation", -1)) != 4
         ):
             _fail("ActionBall action term does not bind the exact four-substep table latch")
+        filtered_cfg = None
+    else:
+        filtered_cfg = getattr(env_cfg.scene, "racket_table_contact", None)
+        if filtered_cfg is None:
+            _fail(
+                "scene.racket_table_contact is missing — offset racket contacts can be missed"
+            )
+        if (
+            filtered_cfg.prim_path
+            != "{ENV_REGEX_NS}/Robot/right_wrist_yaw_Link"
+        ):
+            _fail(
+                "scene.racket_table_contact.prim_path is not the A3 wrist"
+            )
+        if tuple(filtered_cfg.filter_prim_paths_expr) != expected_prims:
+            _fail(
+                "scene.racket_table_contact filters are not the exact canonical top"
+            )
 
     rew = getattr(env_cfg.rewards, "table_hit_penalty", None)
     if rew is None:
@@ -2422,12 +2459,18 @@ def check_cfg(env_cfg):
         "near_x": near_x,
         "termination_params": {k: (float(v) if isinstance(v, (int, float)) else str(v))
                                for k, v in done.params.items()},
-        "filtered_contact_sensor": {
-            "name": "racket_table_contact",
-            "prim_path": filtered_cfg.prim_path,
-            "filter_prim_paths_expr": list(filtered_cfg.filter_prim_paths_expr),
-        },
-        "exact_all_body_contact_sensors": exact_sensor_rows,
+        "legacy_filtered_contact_sensor": (
+            None
+            if filtered_cfg is None
+            else {
+                "name": "racket_table_contact",
+                "prim_path": filtered_cfg.prim_path,
+                "filter_prim_paths_expr": list(
+                    filtered_cfg.filter_prim_paths_expr
+                ),
+            }
+        ),
+        "exact_full_table_contact_sensors": exact_sensor_rows,
         "force_threshold_n": float(
             done.params["force_threshold"]
         ),
@@ -2444,7 +2487,7 @@ def check_spawned(env, env_cfg):
     """Read every pose and CollisionAPI PhysX actually has, not only requested cfg."""
 
     print("HOPE_TABLE_DIAGNOSTIC_STAGE=spawn_check_begin", flush=True)
-    from pxr import Usd, UsdGeom
+    from pxr import PhysxSchema, Usd, UsdGeom
     import isaacsim.core.utils.stage as stage_utils
 
     full, specs = _component_specs(env_cfg)
@@ -2507,6 +2550,11 @@ def check_spawned(env, env_cfg):
                 _fail(
                     f"{prim_path} GPU pair-filter target is not kinematic"
                 )
+            if not prim.HasAPI(PhysxSchema.PhysxContactReportAPI):
+                _fail(
+                    f"{prim_path} table sensor source has no "
+                    "PhysxContactReportAPI"
+                )
         enabled = []
         for collider_path in collider_paths:
             api = UsdPhysics.CollisionAPI(stage.GetPrimAtPath(collider_path))
@@ -2523,7 +2571,8 @@ def check_spawned(env, env_cfg):
                 "env_local_translation": list(local),
                 "configured_size": list(spec["size"]),
                 "collider_prims": collider_paths,
-                "gpu_filter_target_kinematic": bool(full),
+                "gpu_filter_source_kinematic": bool(full),
+                "contact_report_api": bool(full),
             }
         )
         print(
@@ -2594,19 +2643,36 @@ def check_spawned(env, env_cfg):
                 "runtime articulation body order differs from the exact "
                 "32-body table-contact contract"
             )
-        for sensor_name, body_name in zip(
-            TABLE_ALL_BODY_CONTACT_SENSOR_NAMES,
-            TABLE_CONTACT_BODY_NAMES,
+        for role, sensor_name, source_prim in zip(
+            TABLE_FULL_CONTACT_SENSOR_ROLES,
+            TABLE_FULL_CONTACT_SENSOR_NAMES,
+            TABLE_FULL_CONTACT_SENSOR_PRIMS,
         ):
             sensor = env.unwrapped.scene.sensors.get(sensor_name)
             if sensor is None:
                 _fail(f"spawned scene has no {sensor_name} sensor")
+            source_body_name = source_prim.rsplit("/", 1)[-1]
             if tuple(str(name) for name in sensor.body_names) != (
-                body_name,
+                source_body_name,
             ):
                 _fail(
                     f"spawned {sensor_name} does not resolve exactly to "
-                    f"{body_name!r}"
+                    f"table source {source_body_name!r}"
+                )
+            runtime_cfg = sensor.cfg
+            runtime_source_prim = source_prim.replace(
+                "{ENV_REGEX_NS}", env.unwrapped.scene.env_regex_ns
+            )
+            runtime_robot_filter = TABLE_ROBOT_FILTER_PRIM.replace(
+                "{ENV_REGEX_NS}", env.unwrapped.scene.env_regex_ns
+            )
+            if (
+                runtime_cfg.prim_path != runtime_source_prim
+                or tuple(runtime_cfg.filter_prim_paths_expr)
+                != (runtime_robot_filter,)
+            ):
+                _fail(
+                    f"spawned {sensor_name} source/Robot filter binding drifted"
                 )
             # ContactSensor tensors are initialized lazily.  Keep an explicit marker on both
             # sides of that native boundary: some Kit/PhysX failures terminate the process
@@ -2631,25 +2697,24 @@ def check_spawned(env, env_cfg):
                 f"force_matrix_done:{sensor_name}",
                 flush=True,
             )
-            expected_shape = (
-                int(env.unwrapped.num_envs),
-                1,
-                len(specs),
-                3,
-            )
             if (
                 matrix is None
-                or tuple(matrix.shape) != expected_shape
+                or matrix.ndim != 4
+                or int(matrix.shape[0]) != int(env.unwrapped.num_envs)
+                or int(matrix.shape[1]) != 1
+                or int(matrix.shape[2]) != len(robot_body_names)
+                or int(matrix.shape[3]) != 3
             ):
                 _fail(
                     f"spawned {sensor_name} force_matrix_w is "
                     f"{None if matrix is None else tuple(matrix.shape)}, "
-                    f"expected {expected_shape}"
+                    "expected [env, 1, 32, 3] with complete A3 Robot coverage"
                 )
             runtime_sensor_rows.append(
                 {
+                    "role": role,
                     "name": sensor_name,
-                    "body_name": body_name,
+                    "source_body_name": source_body_name,
                     "force_matrix_shape": list(matrix.shape),
                 }
             )
@@ -2681,6 +2746,9 @@ def check_spawned(env, env_cfg):
     rew_active = tuple(env.unwrapped.reward_manager.active_terms)
     _results["spawned"] = {
         "mode": "full_action_ball" if full else "legacy_top",
+        "robot_filter_body_names": (
+            list(robot_body_names) if full else []
+        ),
         "components": spawned_components,
         "visual_provider": {
             "scene_attr": visual_name,
@@ -2732,24 +2800,24 @@ def contact_smoke(env, env_cfg):
         1, unwrapped.action_manager.total_action_dim, device=unwrapped.device
     )
     done_cfg = unwrapped.termination_manager.get_term_cfg("robot_hit_table")
-    exact_cfgs = done_cfg.params.get("all_body_filtered_sensor_cfgs")
+    exact_cfgs = done_cfg.params.get("full_table_filtered_sensor_cfgs")
     if not isinstance(exact_cfgs, (tuple, list)):
-        _fail("contact smoke has no ordered all-body exact sensor configs")
+        _fail("contact smoke has no ordered five-table-source sensor configs")
     exact_sensor_names = tuple(
         getattr(sensor_cfg, "name", None) for sensor_cfg in exact_cfgs
     )
     if (
-        exact_sensor_names != tuple(TABLE_ALL_BODY_CONTACT_SENSOR_NAMES)
+        exact_sensor_names != tuple(TABLE_FULL_CONTACT_SENSOR_NAMES)
         or tuple(robot.body_names) != tuple(TABLE_CONTACT_BODY_NAMES)
     ):
         _fail(
-            "contact smoke runtime body/sensor order differs from the exact "
-            "32-body contract"
+            "contact smoke runtime sensor/Robot order differs from the exact "
+            "five-source × 32-body-filter contract"
         )
-    sensor_by_body = {
-        body_name: unwrapped.scene.sensors[sensor_name]
-        for sensor_name, body_name in zip(
-            exact_sensor_names, TABLE_CONTACT_BODY_NAMES
+    sensor_by_role = {
+        role: unwrapped.scene.sensors[sensor_name]
+        for role, sensor_name in zip(
+            TABLE_FULL_CONTACT_SENSOR_ROLES, exact_sensor_names
         )
     }
     print("HOPE_TABLE_DIAGNOSTIC_STAGE=contact_smoke_runtime_done", flush=True)
@@ -2764,7 +2832,8 @@ def contact_smoke(env, env_cfg):
 
     role_to_spec = {spec["role"]: spec for spec in specs}
     top = role_to_spec["top"]
-    # Matrix shape/order above proves all 32 exact pair filters materialize.
+    # Matrix shape/order above proves each table source materializes all 32 exact Robot filter
+    # columns; the runtime articulation table independently pins their identity/order contract.
     # Runtime positive controls use rigid bodies with shipped collision
     # geometry; several intermediate A3 rigid links intentionally carry no
     # collider, so demanding a physical positive from every body is invalid.
@@ -2775,7 +2844,6 @@ def contact_smoke(env, env_cfg):
             "right_wrist_yaw_Link",
             1,
             top["pos"],
-            0,
         ),
     )
     component_probes = (
@@ -2787,7 +2855,6 @@ def contact_smoke(env, env_cfg):
             "torso_Link",
             3,
             role_to_spec["keepout"]["pos"],
-            1,
         ),
         (
             "net_blade_wrist_s4",
@@ -2795,7 +2862,6 @@ def contact_smoke(env, env_cfg):
             "right_wrist_yaw_Link",
             4,
             role_to_spec["net"]["pos"],
-            2,
         ),
         (
             "post_left_torso_s1",
@@ -2803,7 +2869,6 @@ def contact_smoke(env, env_cfg):
             "torso_Link",
             1,
             role_to_spec["post_left"]["pos"],
-            3,
         ),
         (
             "post_right_blade_wrist_s2",
@@ -2811,7 +2876,6 @@ def contact_smoke(env, env_cfg):
             "right_wrist_yaw_Link",
             2,
             role_to_spec["post_right"]["pos"],
-            4,
         ),
     )
     probes = top_body_probes + component_probes
@@ -2853,7 +2917,6 @@ def contact_smoke(env, env_cfg):
             body_name,
             pulse_substep,
             target_local,
-            filter_index,
         ) = probe
         print(
             f"HOPE_TABLE_DIAGNOSTIC_STAGE=contact_probe_begin:{name}",
@@ -2865,7 +2928,7 @@ def contact_smoke(env, env_cfg):
         )
         if body_name not in robot.body_names:
             _fail(f"contact probe body {body_name!r} is absent from articulation")
-        pair_sensor = sensor_by_body[body_name]
+        pair_sensor = sensor_by_role[role]
         body_id = robot.body_names.index(body_name)
         print(
             f"HOPE_TABLE_DIAGNOSTIC_STAGE=contact_probe_body_ready:{name}",
@@ -2969,21 +3032,22 @@ def contact_smoke(env, env_cfg):
             _fail(f"{name}: generic terminal event was not booked exactly once")
 
         hit_sample = samples[pulse_substep - 1]
-        pair_peaks = torch.linalg.vector_norm(
-            hit_sample[1][0], dim=-1
-        ).amax(dim=0)
-        selected_peak = float(pair_peaks[filter_index].item())
-        pair_peak_any = float(pair_peaks.amax().item())
+        robot_filter_peaks = torch.linalg.vector_norm(
+            hit_sample[1][0, 0], dim=-1
+        )
+        selected_peak = float(robot_filter_peaks.amax().item())
+        pair_peak_any = selected_peak
         print(
             "HOPE_TABLE_DIAGNOSTIC_CONTACT_PEAK="
             + json.dumps(
                 {
                     "name": name,
                     "hit_rows": hit_rows,
-                    "pair_peak_by_role_n": [
-                        float(value) for value in pair_peaks.tolist()
+                    "robot_filter_peaks_n": [
+                        float(value)
+                        for value in robot_filter_peaks.tolist()
                     ],
-                    "selected_filter_index": int(filter_index),
+                    "selected_table_role": role,
                     "selected_peak_n": selected_peak,
                     "pair_peak_any_n": pair_peak_any,
                 },
@@ -2993,8 +3057,8 @@ def contact_smoke(env, env_cfg):
         )
         if pair_peak_any <= float(TABLE_HIT_FORCE_THRESHOLD_N):
             _fail(
-                f"{name}: exact {body_name} pair-filter saw no force in any "
-                "table-component column above the reviewed "
+                f"{name}: exact {role} table-source sensor saw no force in any "
+                "Robot-filter column above the reviewed "
                 f"{TABLE_HIT_FORCE_THRESHOLD_N:g} N numerical-zero tolerance"
             )
         # ``env.step`` already reset the selected terminal row.  Do not call
@@ -3029,11 +3093,11 @@ def contact_smoke(env, env_cfg):
             tuple(
                 torch.linalg.vector_norm(
                     sensor.data.force_matrix_w[0, 0], dim=-1
-                )
-                for sensor in sensor_by_body.values()
+                ).amax()
+                for sensor in sensor_by_role.values()
             ),
             dim=0,
-        ).amax(dim=0)
+        )
         print(
             "HOPE_TABLE_DIAGNOSTIC_POST_RESET="
             + json.dumps(
@@ -3074,8 +3138,8 @@ def contact_smoke(env, env_cfg):
             "current_hit_by_substep": hit_rows,
             "selected_pair_peak_n": selected_peak,
             "pair_peak_any_n": pair_peak_any,
-            "pair_peak_by_role_n": [
-                float(value) for value in pair_peaks.tolist()
+            "robot_filter_peaks_n": [
+                float(value) for value in robot_filter_peaks.tolist()
             ],
             "raw_robot_hit_table": True,
             "generic_terminated": True,
@@ -3096,8 +3160,12 @@ def contact_smoke(env, env_cfg):
 
     rows = [run_probe(probe) for probe in probes]
     peak_by_role = [
-        max(float(row["pair_peak_by_role_n"][index]) for row in rows)
-        for index in range(len(specs))
+        max(
+            float(row["pair_peak_any_n"])
+            for row in rows
+            if row["role"] == spec["role"]
+        )
+        for spec in specs
     ]
     missing_roles = [
         specs[index]["role"]
@@ -3128,8 +3196,8 @@ def contact_smoke(env, env_cfg):
         "physics_steps": sum(int(row["physics_steps"]) for row in rows) + 4,
     }
     print(
-        "ok contact smoke: all 32 exact pair filters materialized; real actor "
-        "contacts covered representative upper-body links, four "
+        "ok contact smoke: five table-source sensors materialized against the "
+        "32-body Robot filter; real actor contacts covered representative links, four "
         "substeps and all five colliders; raw reason/generic terminal counted "
         "once; reset leakage zero"
     )
@@ -4000,18 +4068,18 @@ def main():
                     all_32_body_pair_filters=(
                         len(
                             cfg_result.get(
-                                "exact_all_body_contact_sensors", ()
+                                "exact_full_table_contact_sensors", ()
                             )
                         )
-                        == 32
+                        == 5
                         and len(
                             spawned.get("exact_pair_filter_sensors", ())
                         )
-                        == 32
+                        == 5
                         and tuple(
-                            str(row.get("body_name"))
-                            for row in spawned.get(
-                                "exact_pair_filter_sensors", ()
+                            str(name)
+                            for name in spawned.get(
+                                "robot_filter_body_names", ()
                             )
                         )
                         == tuple(TABLE_CONTACT_BODY_NAMES)

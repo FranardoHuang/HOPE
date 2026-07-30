@@ -1485,27 +1485,6 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
             "[train.py] task-first requires a concrete table_obstacle_prim"
         )
     scene = getattr(env_cfg, "scene", None)
-    filtered_sensor = (
-        None if scene is None else getattr(scene, "racket_table_contact", None)
-    )
-    if filtered_sensor is None:
-        raise _OverrideError(
-            "[train.py] task-first requires the filtered racket_table_contact "
-            "sensor bound to the table collider"
-        )
-    if str(getattr(filtered_sensor, "prim_path", "") or "") != (
-        "{ENV_REGEX_NS}/Robot/right_wrist_yaw_Link"
-    ):
-        raise _OverrideError(
-            "[train.py] task-first racket_table_contact must watch the exact "
-            "right_wrist_yaw_Link that carries the merged paddle collider"
-        )
-    filter_prims = tuple(
-        str(value)
-        for value in (
-            getattr(filtered_sensor, "filter_prim_paths_expr", ()) or ()
-        )
-    )
     racket_cfg = getattr(
         getattr(env_cfg, "commands", None), "racket_target", None
     )
@@ -1526,16 +1505,43 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
         )
     else:
         expected_filter_prims = (table_prim,)
-    if (
-        configured_table_prims != expected_filter_prims
-        or filter_prims != expected_filter_prims
-    ):
+    if configured_table_prims != expected_filter_prims:
         raise _OverrideError(
-            "[train.py] task-first racket_table_contact must filter exactly "
-            "the configured ordered table assembly; "
+            "[train.py] task-first table obstacle prims must equal the "
+            "configured ordered table assembly; "
             f"expected={expected_filter_prims!r} "
-            f"env={configured_table_prims!r} sensor={filter_prims!r}"
+            f"env={configured_table_prims!r}"
         )
+    if not action_ball:
+        filtered_sensor = (
+            None
+            if scene is None
+            else getattr(scene, "racket_table_contact", None)
+        )
+        if filtered_sensor is None:
+            raise _OverrideError(
+                "[train.py] task-first legacy mode requires the filtered "
+                "racket_table_contact sensor bound to the table collider"
+            )
+        if str(getattr(filtered_sensor, "prim_path", "") or "") != (
+            "{ENV_REGEX_NS}/Robot/right_wrist_yaw_Link"
+        ):
+            raise _OverrideError(
+                "[train.py] task-first legacy racket_table_contact must watch "
+                "the exact right_wrist_yaw_Link carrying the merged paddle"
+            )
+        filter_prims = tuple(
+            str(value)
+            for value in (
+                getattr(filtered_sensor, "filter_prim_paths_expr", ()) or ()
+            )
+        )
+        if filter_prims != expected_filter_prims:
+            raise _OverrideError(
+                "[train.py] task-first legacy racket_table_contact must filter "
+                "exactly the configured canonical table top; "
+                f"expected={expected_filter_prims!r} sensor={filter_prims!r}"
+            )
     table_asset = None if scene is None else getattr(scene, "table_obstacle", None)
     if (
         table_prim != "{ENV_REGEX_NS}/TableObstacle"
@@ -1605,8 +1611,8 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
     expected_table_param_keys = {
         "sensor_cfg",
         "filtered_sensor_cfg",
-        "all_body_filtered_sensor_cfgs",
-        "expected_full_table_filter_prim_paths",
+        "full_table_filtered_sensor_cfgs",
+        "expected_full_table_source_prim_paths",
         "asset_cfg",
         "near_x",
         "surface_z",
@@ -1625,33 +1631,36 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
             "[train.py] task-first robot_hit_table term requires exactly "
             f"{sorted(expected_table_param_keys)!r}"
         )
+    expected_compat_sensor_name = (
+        "table_top_robot_contact" if action_ball else "racket_table_contact"
+    )
     if _task_first_scene_entity_name(
         params.get("filtered_sensor_cfg")
-    ) != "racket_table_contact":
+    ) != expected_compat_sensor_name:
         raise _OverrideError(
-            "[train.py] task-first robot_hit_table must consume the filtered "
-            "racket_table_contact sensor"
+            "[train.py] task-first robot_hit_table compatibility binding must "
+            f"resolve an installed sensor ({expected_compat_sensor_name!r})"
         )
-    exact_filtered_cfgs = params.get("all_body_filtered_sensor_cfgs")
+    exact_filtered_cfgs = params.get("full_table_filtered_sensor_cfgs")
     if not isinstance(exact_filtered_cfgs, (tuple, list)):
         raise _OverrideError(
             "[train.py] task-first robot_hit_table requires an ordered "
-            "all_body_filtered_sensor_cfgs sequence"
+            "full_table_filtered_sensor_cfgs sequence"
         )
     exact_filtered_names = tuple(
         _task_first_scene_entity_name(value)
         for value in exact_filtered_cfgs
     )
-    expected_filter_binding = params.get(
-        "expected_full_table_filter_prim_paths"
+    expected_source_binding = params.get(
+        "expected_full_table_source_prim_paths"
     )
-    if not isinstance(expected_filter_binding, (tuple, list)):
+    if not isinstance(expected_source_binding, (tuple, list)):
         raise _OverrideError(
             "[train.py] task-first robot_hit_table requires an ordered "
-            "expected_full_table_filter_prim_paths sequence"
+            "expected_full_table_source_prim_paths sequence"
         )
-    expected_filter_binding = tuple(
-        str(value) for value in expected_filter_binding
+    expected_source_binding = tuple(
+        str(value) for value in expected_source_binding
     )
     broad_regex = (
         r"^(?!left_ankle_roll_Link$)(?!right_ankle_roll_Link$).+$"
@@ -1735,8 +1744,10 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
         )
     if action_ball:
         from whole_body_tracking.tasks.tracking.config.agibot_a3.hope_env_cfg import (
-            TABLE_ALL_BODY_CONTACT_SENSOR_NAMES as _table_sensor_names,
             TABLE_CONTACT_BODY_NAMES as _table_body_names,
+            TABLE_FULL_CONTACT_SENSOR_NAMES as _table_sensor_names,
+            TABLE_FULL_CONTACT_SENSOR_PRIMS as _table_source_prims,
+            TABLE_ROBOT_FILTER_PRIM as _table_robot_filter_prim,
         )
 
         if getattr(env_cfg, "table_robot_keepout", None) is not True:
@@ -1754,16 +1765,18 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
             )
             != tuple(_table_sensor_names)
             or exact_filtered_names != tuple(_table_sensor_names)
-            or expected_filter_binding != expected_filter_prims
-            or len(_table_sensor_names) != len(_table_body_names)
+            or expected_source_binding != expected_filter_prims
+            or tuple(_table_source_prims) != expected_filter_prims
+            or len(_table_sensor_names) != 5
+            or len(_table_source_prims) != len(_table_sensor_names)
             or len(_table_body_names) != 32
         ):
             raise _OverrideError(
-                "[train.py] action-ball requires the exact ordered 32-body "
-                "pair-filter sensor table and five-part filter binding"
+                "[train.py] action-ball requires five ordered table-source "
+                "sensors filtered against the exact 32-body Robot subtree"
             )
-        for index, (sensor_name, body_name) in enumerate(
-            zip(_table_sensor_names, _table_body_names)
+        for index, (sensor_name, source_prim) in enumerate(
+            zip(_table_sensor_names, _table_source_prims)
         ):
             sensor_cfg = (
                 None if scene is None else getattr(scene, sensor_name, None)
@@ -1775,7 +1788,7 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
                 )
             if (
                 str(getattr(sensor_cfg, "prim_path", "") or "")
-                != f"{{ENV_REGEX_NS}}/Robot/{body_name}"
+                != source_prim
                 or tuple(
                     str(value)
                     for value in (
@@ -1787,14 +1800,14 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
                         or ()
                     )
                 )
-                != expected_filter_prims
+                != (_table_robot_filter_prim,)
                 or float(getattr(sensor_cfg, "update_period", math.nan))
                 != 0.0
             ):
                 raise _OverrideError(
                     "[train.py] action-ball exact table-contact sensor "
-                    f"{sensor_name!r} does not bind body {body_name!r}, the "
-                    "five-part table assembly, and every-physics-step updates"
+                    f"{sensor_name!r} does not bind table source {source_prim!r}, "
+                    "the complete Robot filter, and every-physics-step updates"
                 )
         action_cfg = getattr(
             getattr(env_cfg, "actions", None), "joint_pos", None
@@ -1835,6 +1848,14 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
         underside_z = float(expected_surface_z) - float(
             _tt_geom.TABLE_THICKNESS
         )
+        if getattr(
+            getattr(table_asset, "spawn", None),
+            "activate_contact_sensors",
+            None,
+        ) is not True:
+            raise _OverrideError(
+                "[train.py] action-ball table top must activate ContactReportAPI"
+            )
         top_center = _tt_frame.table_top_center_env(
             float(expected_near_x),
             float(expected_surface_z),
@@ -1907,6 +1928,7 @@ def _validate_task_first_safety_semantics(env_cfg) -> None:
                 or actual_size != expected_size
                 or getattr(collision_props, "collision_enabled", None)
                 is not True
+                or getattr(spawn, "activate_contact_sensors", None) is not True
             ):
                 raise _OverrideError(
                     "[train.py] action-ball table assembly asset does not "
