@@ -163,7 +163,7 @@ class ReplayedIndexAndDrawRangeSolver(SUPPORT.Solver):
         batches[1] = R.ActionPoolRefillBatch(
             action_uid=second.action_uid,
             proposed_count=second.proposed_count,
-            proposal_sample_indices=second.proposal_sample_indices,
+            proposal_sample_indices=(first.sample_index,),
             receipts=(forged,),
         )
         return tuple(batches)

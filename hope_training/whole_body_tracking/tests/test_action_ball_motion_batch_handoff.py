@@ -368,4 +368,4 @@ def test_racket_routes_only_diagnostic_rows_to_direct_batch_handoff():
     ]
     assert "try:" not in diagnostic_seam
     assert "except" not in diagnostic_seam
-    assert "poisons the whole diagnostic run" in diagnostic_seam
+    assert "poisons the whole run" in diagnostic_seam
