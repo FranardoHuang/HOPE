@@ -2257,6 +2257,70 @@ def test_actual_hard_edge_is_durable_and_blocks_optimizer(
     ] is True
 
 
+def test_diagnostic_finite_hard_edge_is_terminal_training_sample(
+    monkeypatch, tmp_path
+):
+    runner_mod = _load_runner_module(monkeypatch, _load_contract_module())
+    action, env, asset = _action_and_env(
+        guard=True,
+        guard_policy_dt_s=0.02,
+        runtime_step_dt=0.02,
+        action_ball_diagnostic_unauthorized=True,
+    )
+    action.process_actions(torch.zeros(2, 2))
+    asset.data.joint_pos[0, 0] = 1.21
+    _finish_guarded_policy_step(action, asset)
+    env.reset_terminated = torch.tensor([True, False])
+    env.reset_time_outs = torch.tensor([False, False])
+    action.reset(env_ids=torch.tensor([0]))
+
+    base_runner = runner_mod.MotionOnPolicyRunner.__mro__[1]
+
+    def one_update(_self, **_kwargs):
+        _self.alg.update()
+
+    monkeypatch.setattr(base_runner, "learn", one_update, raising=False)
+    optimizer_calls = []
+    runner = runner_mod.MotionOnPolicyRunner.__new__(
+        runner_mod.MotionOnPolicyRunner
+    )
+    runner.env = types.SimpleNamespace(
+        unwrapped=env, step=lambda *_a, **_k: None
+    )
+    runner.log_dir = str(tmp_path)
+    runner.num_steps_per_env = 1
+    runner.rank = 0
+    runner.current_learning_iteration = 0
+    runner.alg = types.SimpleNamespace(
+        update=lambda: optimizer_calls.append("optimizer")
+    )
+    runner._effective_reward_activation_task_kind = lambda: None
+    runner._action_ball_resume_reset_pending = False
+    runner._rollout_update_wrapper_active = False
+
+    runner.learn(num_learning_iterations=1)
+    assert optimizer_calls == ["optimizer"]
+    artifacts = list(
+        (tmp_path / "joint_safety_ledgers").glob("*.prepared.pt")
+    )
+    assert len(artifacts) == 1
+    payload = torch.load(
+        artifacts[0], map_location="cpu", weights_only=False
+    )
+    assert payload["status"] == "fatal_actual_hard_edge"
+    assert payload["fatal_flags"]["actual_hard_edge_event_count"] > 0
+    assert len(
+        list(
+            (tmp_path / "joint_safety_ledgers").glob(
+                "*.optimizer_commit.json"
+            )
+        )
+    ) == 1
+    assert action.joint_safety_ledger_snapshot()["since_last_consume"][
+        "has_data"
+    ] is False
+
+
 def test_4096_by_24_safe_compact_artifact_stays_within_budget(
     monkeypatch, tmp_path
 ):

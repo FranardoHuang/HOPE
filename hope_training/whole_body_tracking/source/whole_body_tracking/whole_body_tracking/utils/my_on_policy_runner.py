@@ -3813,10 +3813,11 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             reward_artifact = None
             if joint_safety_action_term is not None:
                 # Freeze, deeply validate and durably publish the rollout receipt *before* PPO may
-                # consume it.  A physical hard-edge event, incomplete substep transcript, malformed
-                # identity, or persistence failure therefore cannot update the policy.  The action
-                # term keeps the evidence live and refuses another simulator mutation until the
-                # post-optimizer acknowledgement below succeeds.
+                # consume it.  Incomplete substep evidence, malformed identity, persistence failure,
+                # and every formal physical hard-edge event therefore remain fail-closed.  A
+                # diagnostic finite hard-edge is retained as a terminal learning transition; its
+                # durable artifact is still written before the optimizer.  The action term keeps
+                # the evidence live until the post-optimizer acknowledgement below succeeds.
                 prepared_joint_safety = self._prepare_joint_safety_update(
                     next_rollout_step,
                     expected_action_term=joint_safety_action_term,
@@ -6567,11 +6568,54 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             }
         )
         if payload["status"] == "fatal_actual_hard_edge":
+            diagnostic_finite_terminal_sample = (
+                self._action_ball_diagnostic_unauthorized()
+                and bool(
+                    torch.all(
+                        torch.isfinite(validated["combined_gap"])
+                    ).item()
+                )
+            )
+            if diagnostic_finite_terminal_sample:
+                # A finite raw-hard contact remains a terminal, heavily
+                # penalized transition for the affected environment.  It is
+                # not evidence corruption, however, and discarding the whole
+                # rollout would prevent PPO from learning to avoid precisely
+                # that failure.  Formal ActionBall remains fail-closed below;
+                # non-finite q is never admitted through this diagnostic
+                # exception because it produces a non-finite hard gap.
+                record["optimizer_disposition"] = (
+                    "diagnostic_continue_after_finite_terminal_hard_edge"
+                )
+                prepared["status"] = "prepared_before_optimizer"
+                prepared["record"] = record
             print(
                 "HOPE_JOINT_SAFETY_FATAL_JSON="
                 + json.dumps(record, sort_keys=True, separators=(",", ":")),
                 flush=True,
             )
+            if diagnostic_finite_terminal_sample:
+                print(
+                    "HOPE_JOINT_SAFETY_DIAGNOSTIC_CONTINUE_JSON="
+                    + json.dumps(
+                        {
+                            "event": _JOINT_SAFETY_EVENT,
+                            "schema_version": (
+                                _JOINT_SAFETY_ARTIFACT_SCHEMA_VERSION
+                            ),
+                            "ppo_update": step,
+                            "source_evidence_status": payload["status"],
+                            "optimizer_disposition": record[
+                                "optimizer_disposition"
+                            ],
+                            "fatal_flags": payload["fatal_flags"],
+                        },
+                        sort_keys=True,
+                        separators=(",", ":"),
+                    ),
+                    flush=True,
+                )
+                return prepared
             raise RuntimeError(
                 "physical joint hard-edge/non-finite-q evidence was durably "
                 "recorded; refusing PPO update and leaving the ledger frozen"
