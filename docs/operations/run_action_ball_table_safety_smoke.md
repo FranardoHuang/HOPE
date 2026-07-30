@@ -86,6 +86,10 @@ top/keep-out/net/posts 做真实正控并推进 PhysX。必须同时满足：
 输出最后一行 `HOPE_TABLE_OBSTACLE_CHECK_JSON=...` 原样保存。失败日志也保存，不得删失败尝试后重报
 “全过”。
 
+当前首份通过证据是 Pod1 clean `eb2799b1` r26；机器可读摘要见
+[`table_smoke_eb2799b1_gpu1_r26.receipt.json`](../../configs/n1_contact_dynamic_ready_20260730/table_smoke_eb2799b1_gpu1_r26.receipt.json)，
+远端原始 log 必须与其中 SHA-256 一致。
+
 ## 4. 4096-env 性能对照
 
 同一 Pod/GPU、同一 commit、同一动作文件分别跑 on/off；两臂分进程串行，不能在一个 Kit 里建第二个

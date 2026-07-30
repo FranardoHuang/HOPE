@@ -145,7 +145,7 @@ acceleration 和 jerk 三阶约束，但这只证明该类 governor 有严格约
 | qdes 安全语义 | finite request 投影到合法包络，penalty 读取投影前超出量；nonfinite/actual hard 仍终止 | Reward 剂量仍需 healthy baseline 后 canary |
 | reset 诊断热路径 | diagnostic per-reset 逐 env 完整转录已移出；不可变 receipt SHA、strike timing、metrics D2H 等已做确定性优化 | formal 路径仍保留完整 per-reset 仪式；每步 ledger/broker 税仍开放 |
 | 194-D actor source | `203b2d92` 实现 table pose + base twist；Pod dependency-light 合同回归 `290 passed, 9 skipped, 1 deselected` | C++/ONNX/MuJoCo producer 未实现，旧 182/191-D checkpoint 不可复用；policy recipe 与 observation 分层，现有 dynamic-ready recipe 可复用 |
-| table contact source | 五件 table collider 改为 kinematic rigid-body target，32-body×5-role filtered matrix 可构造；修复跨 probe/reset 的 PhysX stale contact buffer | 仍须保存最终无 warning、五 role 正控、reset 零泄漏的 Pod receipt |
+| table contact source | Pod1 `eb2799b1` r26：五件 kinematic collider、32-body×5-role matrix、四子步与五 role 真实正控均通过；五 probe reset 后零泄漏，unsupported/Traceback/FAIL 均为 0，出现 `main_completed` | E2 receipt 已保存；训练仍逐 run 监测 table counter |
 
 这些都是功能分支证据；进入 `main` 前不改变当前采用 setting。
 
@@ -155,8 +155,10 @@ acceleration 和 jerk 三阶约束，但这只证明该类 governor 有严格约
 
 直接修/验证，完成即开跑，不等待后续工程完美化：
 
-1. 完成 table-contact Pod smoke：五个 role 均有真实正控，32 个 matrix shape/order 正确，
-   `robot_hit_table` 会触发，reset/settle 后零泄漏，启动日志不再有 unsupported filtered target；
+1. table-contact Pod smoke 已在 `eb2799b1` 完成：五个 role 均有真实正控，32 个 matrix
+   shape/order 正确，`robot_hit_table` 会触发，reset/settle 后零泄漏，日志无 unsupported
+   filtered target；receipt 见
+   [`table_smoke_eb2799b1_gpu1_r26.receipt.json`](../../../configs/n1_contact_dynamic_ready_20260730/table_smoke_eb2799b1_gpu1_r26.receipt.json)；
 2. 用当前 dynamic-ready policy recipe 构造 **194-D** actor；recipe 只绑定 PPO/decoder/ready，
    observation name/width/term order 由训练 hard contract 单独绑定，所以无需为 194-D 重物化
    recipe；旧 182/191-D checkpoint 一律不续；
@@ -266,7 +268,7 @@ A/B；验收是 numerical/state parity、旧收据重建、exact resume 和固�
 | base linear velocity 3-D | 直接修 | N=1 long | 否；做 observation parity | 已进入 194-D actor |
 | OptiTrack pose + gyro angular velocity | deploy contract | 部署 | 否；做传感器延迟/噪声实测 | 采用分量级最优源，不整套弃用 IMU |
 | dynamic-ready 原子合同 | 直接修 | N=1 long | 否 | 已实现，待 194-D 新 recipe/smoke |
-| table-contact filtered truth | 直接修 | N=1 long | 否 | source 已修，待最终 Pod receipt |
+| table-contact filtered truth | 直接修 | N=1 long | 否 | Pod r26 E2 已过；训练继续逐 run 分账 |
 | diagnostic receipt 快路径 | 直接修 | N=1 long | 否 | 已实现 |
 | formal checkpoint 粒度 receipt | 直接修 | formal N=5 | 否；做 parity/吞吐 | 开放，不能拖到 N=73 |
 | ledger/D2H/broker 热路径 | profiler 后直接修 | formal N=5 | 否；做固定工作量吞吐 | 开放 |

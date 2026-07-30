@@ -21,6 +21,11 @@
   `1 env×2`、`4096 env×5` 与 fresh checkpoint 尚待完成；formal receipt 热路径、部署
   producer 和 bang-bang canary 的最迟边界见
   [分阶段准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
+- Pod1 clean `eb2799b1` 的 table smoke 已完成 E2：32 个 A3 body×top/keepout/net/左右 post
+  五列 matrix 全构造，五 role 均有真实 PhysX 正控，四个子步覆盖；五次 automatic reset 后
+  table raw reason/ledger/force 全零。log SHA 为 `15c52d29…26aac`，unsupported/Traceback/FAIL
+  均为 0；receipt 已入
+  [`configs/n1_contact_dynamic_ready_20260730/`](../configs/n1_contact_dynamic_ready_20260730/table_smoke_eb2799b1_gpu1_r26.receipt.json)。
 - nominal-hold 截图器现将未经 artifact 覆盖的 `raw_env_reset` 与
   `physical_ready_after_reset_write` 分开记录，避免把手工 ready 冒充原生 reset；同时修复
   `test_metric_sync_fix.py` 的旧 `__new__` fixture，补齐生产初始化必有的非 task-first /

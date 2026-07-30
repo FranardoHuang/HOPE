@@ -3881,13 +3881,18 @@ recipe 与 observation hard contract 分层，现有两份 recipe 无需重物�
 当前 source 同时修正 table-hit 后 reset 的 PhysX stale force report：只对上一 episode
 **最终 physics substep** 确有 table hit 的 env，隔离新 episode 第一份不可区分的旧 report；
 非 table reset 不隔离，persistent 新碰撞在下一 substep 仍会触发，decimation 小于 2 时拒绝。
-该机制依赖已经通过 hold 的 table-clear dynamic-ready 出生姿态。最终 Pod 正/负控、reset
-零泄漏、dependency-light 194-D 回归和真实 `1 env×2 → 4096 env×5` 尚未完成，因此 G05
-继续 `Partial`，也尚未授权长训或真机。
+该机制依赖已经通过 hold 的 table-clear dynamic-ready 出生姿态。Pod1 clean `eb2799b1`
+table smoke 已让五个 collider role 分别得到真实 PhysX 正控，32 个 body×5 列 matrix 全构造，
+四个 physics substep 均覆盖；五个 probe 的 post-reset raw reason/ledger/force 均零泄漏。
+log SHA-256 为 `15c52d29…26aac`，unsupported/Traceback/FAIL 均为 0，且出现
+`main_completed`；机器可读 receipt 见
+[`table_smoke_eb2799b1_gpu1_r26.receipt.json`](../../configs/n1_contact_dynamic_ready_20260730/table_smoke_eb2799b1_gpu1_r26.receipt.json)。
+dependency-light 194-D 回归为 `257 passed, 9 skipped`。真实 `1 env×2 → 4096 env×5` 尚未完成，
+因此 G05 继续 `Partial`，也尚未授权长训或真机。
 
 首个 N1 不等待 formal per-reset receipt 的 checkpoint 粒度重构，也不临时添加更强 action
 penalty、EMA 或 command governor；这些分别在 formal N5 前和健康 `model_1000.pt` 后按
 [分阶段准备账本](../experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)
 闭合。当前两份 actor bias 超出 `[-1,1]`，直接 raw clip 会使动作专属 ready 不可达。首发前
-唯一剩余运行门是：桌碰真值、194-D 真实 actor 构造、finite checkpoint、episode 跨
-`t_hit`，以及 table/fall/raw-hard/nonfinite 不持续爆炸。
+唯一剩余运行门已收窄为：194-D 真实 actor 构造、finite checkpoint、episode 跨 `t_hit`，
+以及 table/fall/raw-hard/nonfinite 不持续爆炸。
