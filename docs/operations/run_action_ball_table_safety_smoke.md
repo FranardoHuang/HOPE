@@ -73,9 +73,10 @@ top/keep-out/net/posts 做真实正控并推进 PhysX。必须同时满足：
 - automatic reset 后若 PhysX 暂留终止姿态的 final-substep contact report，只对原 table
   terminal row 的第一份 report 做一次 quarantine；同一步后续 substep 与其他 env 仍正常检测，
   零 pulse step 不再重复报告 `robot_hit_table`。
-- 五件 collider 的 destructive positive controls 之间沿用上一脉冲 automatic reset 后已经
-  通过的 clean state，不额外调用会重采 generic motion command 的 `env.reset()`；否则测试会把
-  无关随机 reset 姿态或不推进 PhysX 的旧 force report 误写成 table-sensor 失败。
+- 场景构造完成后只做一次显式初始化 `env.reset()`；五件 collider 的 destructive positive
+  controls 之间沿用上一脉冲 automatic reset 后已经通过的 clean state，不再调用会重采 generic
+  motion command 的 `env.reset()`。否则测试会把无关随机 reset 姿态或不推进 PhysX 的旧 force
+  report 误写成 table-sensor 失败。
 - 初始 settle 只要求 `robot_hit_table=false`；reference/episode 等其他 generic termination
   继续进入各自账本，但不冒充桌碰传感器的负例或阻断本工具的五角色物理正控。
 

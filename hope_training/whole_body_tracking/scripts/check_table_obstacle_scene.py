@@ -2825,6 +2825,10 @@ def contact_smoke(env, env_cfg):
     # ``env.reset()`` again between probes would resample the generic motion
     # command and can create a different, unrelated table-contact pose; it
     # would also make a non-advancing PhysX force report look live.
+    # Scene construction can leave the contact report at its pre-reset
+    # initialization pose.  Perform exactly one explicit reset here; later
+    # probes rely only on each pulse's automatic reset and verified clean step.
+    env.reset()
     (
         _initial_obs,
         _initial_reward,
