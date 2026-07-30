@@ -2986,6 +2986,39 @@ def contact_smoke(env, env_cfg):
         clean_raw_reason = unwrapped.termination_manager.get_term(
             "robot_hit_table"
         )
+        clean_role_peaks = torch.stack(
+            tuple(
+                torch.linalg.vector_norm(
+                    sensor.data.force_matrix_w[0, 0], dim=-1
+                )
+                for sensor in sensor_by_body.values()
+            ),
+            dim=0,
+        ).amax(dim=0)
+        print(
+            "HOPE_TABLE_DIAGNOSTIC_POST_RESET="
+            + json.dumps(
+                {
+                    "name": name,
+                    "terminated": bool(clean_terminated[0].item()),
+                    "truncated": bool(clean_truncated[0].item()),
+                    "raw_robot_hit_table": bool(clean_raw_reason[0].item()),
+                    "table_reason_delta": (
+                        int(ledger[reason_key].item())
+                        - reason_after_positive
+                    ),
+                    "terminal_delta": (
+                        int(ledger["terminal_reset_count"].item())
+                        - terminal_after_positive
+                    ),
+                    "peak_by_role_n": [
+                        float(value) for value in clean_role_peaks.tolist()
+                    ],
+                },
+                sort_keys=True,
+            ),
+            flush=True,
+        )
         if (
             bool(clean_raw_reason[0].item())
             or int(ledger[reason_key].item()) != reason_after_positive
