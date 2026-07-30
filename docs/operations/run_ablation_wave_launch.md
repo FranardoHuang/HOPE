@@ -370,14 +370,16 @@ fresh actor bias。正式写 smoke spec 前，先在 Pod 以 `1 env`、diagnosti
 新 schema-2 recipe，旧 shared-ready SHA 不得复用。
 
 fresh successor 还必须把 actor 合同切换为
-[`action_ball_table_pose_twist_heading_task_n1`](../DEFINITIONS.md#action-ball-table-pose-twist-heading-task-contract)，
-即 exact 194-D：相对 racket position residual、demanded velocity 和 raw-A face normal 全部
+[`action_ball_table_pose_twist_heading_task_teacher_start_n1`](../DEFINITIONS.md#action-ball-teacher-start-contract)，
+即 exact 195-D：相对 racket position residual、demanded velocity 和 raw-A face normal 全部
 统一到 yaw-heading frame；另加桌面中心 frame 下的 base XYZ、完整连续 6D orientation 与
-root-COM 三轴线速度。policy recipe 只绑定 PPO/decoder/dynamic-ready，不绑定 observation
-名称或宽度，所以现有 tracked schema-2 recipe 可复用；旧 182/191-D checkpoint 及旧混合-frame
-194-D checkpoint 均不能复用。194-D hard contract 必须由 fresh smoke 的实际 term order/width
+root-COM 三轴线速度，并直接提供同一 Motion phase governor 的
+`time_to_teacher_start_s=max(pre_swing_wait_s-task_age_s,0)`。policy recipe 只绑定
+PPO/decoder/dynamic-ready，不绑定 observation 名称或宽度，所以现有 tracked schema-2 recipe
+可复用；旧 182/191-D checkpoint、旧混合-frame 194-D checkpoint，以及当前兼容合同下的
+194-D checkpoint 均不能复用。195-D hard contract 必须由 fresh smoke 的实际 term order/width
 和 checkpoint 证明。该 sim
-输入由 rigid-body truth 构造；当前 C++ builder 不支持 194-D，且真实 marker→base 旋转外参、
+输入由 rigid-body truth 构造；当前 C++ builder 不支持 195-D，且真实 marker→base 旋转外参、
 gyro 外参和线速度估计器尚未闭合，因此这一步只授权 Pod 训练、不授权真机。
 
 当前 launcher 还逐字加入

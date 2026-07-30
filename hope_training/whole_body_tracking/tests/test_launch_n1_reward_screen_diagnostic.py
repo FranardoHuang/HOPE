@@ -575,7 +575,7 @@ def test_plan_binds_exact_three_reward_profiles_and_no_override_seam(
     assert "+task.racket.reference_guard_mode=metrics_only" in argv
     assert (
         "task.actor_obs_contract="
-        "action_ball_table_pose_twist_heading_task_n1"
+        "action_ball_table_pose_twist_heading_task_teacher_start_n1"
         in argv
     )
     assert "algo.policy.init_noise_std=0.02" in argv

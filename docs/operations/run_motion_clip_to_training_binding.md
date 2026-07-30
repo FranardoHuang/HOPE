@@ -66,10 +66,13 @@ bank 级约束：
    内容寻址 reference checks，不替代 compiler/bank/dynamics/reference-return authority。当前输出
    `diagnostic_smoke_authorized=false` 与 `training_authorized=false`，不能据此启动 simulator 或
    trainer；
-7. 全 bank 的 manifest/file SHA、motion bytes、balanced sampling、actor
-   `action_ball_table_pose_twist_heading_task_n<N>`（总宽 `193+N`）、
+7. 全 bank 的 manifest/file SHA、motion bytes、balanced sampling、fresh actor
+   `action_ball_table_pose_twist_heading_task_teacher_start_n<N>`（总宽 `194+N`；老师开始
+   倒计时紧邻最终 action one-hot）、
    fixed-action solver/physics canonical payload、single-use birth/task receipt、curriculum Gate 与
    effective Reward receipt 一起进入 checkpoint hard contract；manifest metadata 不得自授权。
+   旧 `action_ball_table_pose_twist_heading_task_n<N>`（`193+N`）只作历史 checkpoint
+   兼容，不得续成 fresh 合同。
 
 新正手缺 upper/full、grounded collocation trace 或任一时序/速度/撞桌 Gate 时，到此停止；
 不执行第 16 步 trainer smoke。完整前置见

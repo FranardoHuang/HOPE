@@ -29,9 +29,9 @@ SHA256_RE = re.compile(r"^[0-9a-f]{64}$")
 SAFE_PROFILE_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 SAFE_EXPERIMENT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.-]{0,127}$")
 ACTOR_OBS_CONTRACT_PREFIX = (
-    "action_ball_table_pose_twist_heading_task_n"
+    "action_ball_table_pose_twist_heading_task_teacher_start_n"
 )
-ACTOR_OBS_BASE_WIDTH = 193
+ACTOR_OBS_BASE_WIDTH = 194
 
 CONTRACT_KEYS = frozenset(
     {

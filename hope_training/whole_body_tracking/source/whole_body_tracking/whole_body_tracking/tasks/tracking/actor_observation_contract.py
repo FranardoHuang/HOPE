@@ -505,6 +505,39 @@ def action_ball_table_pose_twist_heading_task_n_contract(
     )
 
 
+def action_ball_table_pose_twist_heading_task_teacher_start_n_contract(
+    action_count: int,
+) -> ActorObservationContract:
+    """Append the explicit teacher-start clock to the frame-consistent layout.
+
+    The new scalar is inserted immediately before the final action one-hot so
+    the categorical identity remains the final ``N`` columns.  This is a fresh
+    contract; the old layout remains readable for historical checkpoints and
+    receipts but is never silently warm-started under shifted offsets.
+    """
+
+    base = action_ball_table_pose_twist_heading_task_n_contract(action_count)
+    return ActorObservationContract(
+        name=(
+            "action_ball_table_pose_twist_heading_task_teacher_start_n"
+            f"{action_count}"
+        ),
+        obs_mode=base.obs_mode,
+        total_dim=base.total_dim + 1,
+        terms=base.terms[:-1]
+        + (
+            ActorObservationTerm(
+                "time_to_teacher_start_s",
+                1,
+                "action_ball_motion_phase_governor",
+                "live seconds until the frozen selected action's teacher "
+                "leaves its ready frame",
+            ),
+            base.terms[-1],
+        ),
+    )
+
+
 # Stage-1 face-command contract (2026-07-06): deploy_parity + the +4D face-command channel
 # appended LAST — racket_target_normal_cmd = demanded face normal (3, world frame, from the
 # question bank / planner) + spin-rho placeholder (1, zero-filled until the S3 spin tier).
@@ -612,6 +645,28 @@ def resolve_actor_observation_contract(name: str | None) -> ActorObservationCont
     if dynamic is not None:
         return action_ball_n_contract(int(dynamic.group(1)))
     dynamic = re.fullmatch(
+        (
+            r"action_ball_table_pose_twist_heading_task_teacher_start_n"
+            r"([1-9][0-9]*)"
+        ),
+        key,
+    )
+    if dynamic is not None:
+        return (
+            action_ball_table_pose_twist_heading_task_teacher_start_n_contract(
+                int(dynamic.group(1))
+            )
+        )
+    if key.startswith(
+        "action_ball_table_pose_twist_heading_task_teacher_start_n"
+    ):
+        raise ValueError(
+            "Invalid teacher-start table-pose-twist action-ball actor "
+            f"observation contract {name!r}; expected "
+            "action_ball_table_pose_twist_heading_task_teacher_start_n<N> "
+            "with a base-10 N in [1,1024] and no leading zeros"
+        )
+    dynamic = re.fullmatch(
         r"action_ball_table_pose_twist_heading_task_n([1-9][0-9]*)", key
     )
     if dynamic is not None:
@@ -657,6 +712,7 @@ def resolve_actor_observation_contract(name: str | None) -> ActorObservationCont
         raise ValueError(
             f"Unknown actor observation contract '{name}'. Known values: {known}, "
             "task_first_n<N>, action_ball_n<N>, "
+            "action_ball_table_pose_twist_heading_task_teacher_start_n<N>, "
             "action_ball_table_pose_twist_heading_task_n<N>, "
             "action_ball_table_pose_n<N>, "
             "action_ball_table_pose_twist_n<N>"

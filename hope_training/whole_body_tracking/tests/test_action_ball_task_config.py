@@ -429,7 +429,7 @@ def test_preferred_launch_can_bind_exact_n_with_frame_consistent_contract(
     task = _compose_task(
         (
             "task.actor_obs_contract="
-            "action_ball_table_pose_twist_heading_task_n"
+            "action_ball_table_pose_twist_heading_task_teacher_start_n"
             f"{action_count}"
         ),
         f"task.racket.clip_names={list_override}",
@@ -442,11 +442,12 @@ def test_preferred_launch_can_bind_exact_n_with_frame_consistent_contract(
     contract = contract_mod.resolve_actor_observation_contract(
         task.actor_obs_contract
     )
-    assert contract.total_dim == 193 + action_count
-    assert contract.layout[-5:] == (
+    assert contract.total_dim == 194 + action_count
+    assert contract.layout[-6:] == (
         ("base_position_table", 3),
         ("base_orientation_table_6d", 6),
         ("base_lin_vel_heading", 3),
         ("racket_target_normal_cmd_heading", 4),
+        ("time_to_teacher_start_s", 1),
         ("action_one_hot", action_count),
     )

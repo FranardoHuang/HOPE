@@ -17,15 +17,14 @@
   `1 env×2` 与 `4096 env×5`：14 份 checkpoint 全部 finite，smoke 全安全，probe mean episode
   约 `48–72` steps 并跨 `t_hit`；loop/block 已分别出现 `867/2268` 个 strike opportunity。
   第一次 PPO 后两者仍共同出现 waist-roll/pitch actual-hard，但旧 `4ff48b21` 对照到
-  update100/169 曾降到 `14/11` 与 `3/3`，故不以五轮否决学习。Pod1 GPU1 已启动反手挡
-  `4096×1001`；快照已到 update250，`model_100/200.pt` 全 tensor finite，最近 20 轮平均
-  `23.48 s/update`。mean episode=`124.11`，actual-hard 从 update81 的 `1420` 降到 `116`
-  且由腰转移到踝，qdes forbidden 始终为零；但 table/fall=`481/227`、virtual
-  capture/return=`0/0`、exact/window hit=`0.23%/5.01%`，base height/upright 降到
-  `0.9668/0.8935`。Reward income 显示 motion 正项实际生效，racket 命中奖励近零；
-  table-specific 罚按 pinned config 本来为零，桌碰只承担 generic death。当前属于
-  “窗口可达但 policy 质量退化”，无致命合同错误，不热改，继续到预注册 update300 再裁决。
-  反手拉同槽排在其后；身份、传感器/物理后续边界见
+  update100/169 曾降到 `14/11` 与 `3/3`，故不以五轮否决学习。Pod1 三卡现分别运行
+  loop seed0 / block seed0 / block seed1 的 `4096×1001`；2026-07-30 19:39 CST 快照到
+  update `219/574/186`，mean episode `104.88/481.52/105.90`，都持续产生 PPO update 且无新
+  Traceback。三条当前 update 各有约 950 个 strike opportunity，但 virtual capture/return
+  仍全为 `0/0`：block seed0 已把 table/fall/actual-hard 降到 `2/3/6`，却有 965 个 proposal
+  全被 face gate 拒绝；loop seed0 post-strike fall 为 `887/946`；block seed1 table/actual-hard
+  为 `590/325`。因此“窗口与 denominator 可达”已证明，但动作质量、signed-face/contact
+  对齐和 seed 稳定性仍开放，不热改旧 run，也不写成可部署 policy。身份、传感器/物理后续边界见
   [分阶段准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
 - `origin/main@ddfaaa02` 的 OptiTrack 球物理拟合管线与双份 Isaac/MuJoCo YAML 已以
   `bed6661f` 合入当前分支，并在首次 byte pin 前纠正速度衰减曲线的旧示例注释。当前运行的
@@ -2322,6 +2321,12 @@
   upper seed1，均为 `4096×1001`、194-D、schema-v2 dynamic-ready 与 stable-ready plant。
   旧 GPU0/GPU2 进程只在复核 owner/PID/PGID/cwd/claim/checkpoint 后精确 TERM，证据未删；新
   GPU0/GPU2 claims 为 `3c523fde…0196` / `7ac32418…e3f`，均已出现真实 PPO update。当前
-  observation 没有独立 teacher-start 倒计时，但它可由 TTS、目标拍速和 action identity 精确
-  重建；下一次与 localization age/valid 一并做 warm-start-breaking 显式迁移。full-body 因仍是
-  schema-v1 且缺 stable-full dynamic-ready/hold，不以旧 bundle 冒充对照。
+  这批 194-D observation 没有独立 teacher-start 倒计时，但可由 TTS、目标拍速和 action identity
+  精确重建；随后采用的显式 successor 见下一条。full-body 因仍是 schema-v1 且缺 stable-full
+  dynamic-ready/hold，不以旧 bundle 冒充对照。
+- 2026-07-30：采用显式 `time_to_teacher_start_s` 的 fresh ActionBall actor 合同
+  `action_ball_table_pose_twist_heading_task_teacher_start_n<N>`（`194+N`，N1=195-D）。
+  scalar 直接读取 Motion phase governor，在 heading face 后、final action one-hot 前；formal
+  reset 由 Racket 发布 receipt 后立即复用既有 timing validator，避免首个 actor observation
+  假零。旧三条 `f2c54fc3` 194-D long 保持 exact 历史并继续训练，不停机、不重标、不 resume。
+  source/依赖轻量合同验证后仍须 Pod `1 env×2 update` 真实构造，action-set/source/claim 必须 fresh。

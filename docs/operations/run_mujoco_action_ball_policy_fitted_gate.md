@@ -12,19 +12,20 @@ center/support 来球上，是否用对应击球帧真实碰球、过网并首�
 - exact clean commit；
 - N=5 physical-contact-v2 manifest、profile pins 和 launch trust root；
 - 已经正式通过的 `mujoco_teacher_motion_fitted_ball_gate` receipt；
-- 同一个 checkpoint 的 checkpoint bytes、198-D
-  `action_ball_table_pose_twist_heading_task_n5` ONNX 和
+- 同一个 checkpoint 的 checkpoint bytes、199-D
+  `action_ball_table_pose_twist_heading_task_teacher_start_n5` ONNX 和
   `obs_norm.npz`；
 - 全部输入的 SHA256。
 
 ONNX 必须声明 schema-3 exact training contract、
-`action_ball_table_pose_twist_heading_task_n5`、固定 198-D actor
+`action_ball_table_pose_twist_heading_task_teacher_start_n5`、固定 199-D actor
 layout、五个 ordered motion SHA/segment length，并将 source checkpoint 和 normalizer
 sidecar 绑定到输入字节。非零 PhysX load-dependent joint-friction coefficient 当前没有
 exact MuJoCo 等价实现，会 fail-closed，而不是静默换成 MuJoCo `frictionloss`。
 
-当前 MuJoCo/C++ producer 尚不能构造这份 198-D arbitrary-N 合同，因此本 Gate 在 formal N5
-前必须先补 table-relative pose、heading twist 与三条 frame-consistent task 向量的逐元素 parity；
+当前 MuJoCo/C++ producer 尚不能构造这份 199-D arbitrary-N 合同，因此本 Gate 在 formal N5
+前必须先补 table-relative pose、heading twist、三条 frame-consistent task 向量与
+`time_to_teacher_start_s` 的逐元素 parity；
 不得把旧 186-D ONNX 当作新合同输入。
 
 ## 运行

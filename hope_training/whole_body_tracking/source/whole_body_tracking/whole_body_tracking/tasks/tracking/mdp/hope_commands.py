@@ -8400,6 +8400,11 @@ class RacketTargetCommand(CommandTerm):
             reset_generations=reset_generations,
             swing_generations=swing_generations,
         )
+        # Motion resets before Racket.  Resolve the just-published task receipt
+        # now so the first post-reset actor observation sees the full teacher
+        # wait instead of a one-frame false zero.  The diagnostic fast path
+        # already installed timing and therefore takes the same no-op seam.
+        motion.resolve_action_ball_task_timing_now(ids)
         if true_reset:
             # The installed birth is the authority boundary for the whole
             # episode.  Compute against the published phase only after all
@@ -18516,6 +18521,19 @@ class RacketTargetCommand(CommandTerm):
         if self._delay_tts_mode == "live" and not self.planner_revision_enabled:
             return self.time_to_strike
         return self.delayed_time_to_strike
+
+    def actor_time_to_teacher_start_s(self) -> torch.Tensor:
+        """Exact time until the selected action's teacher leaves ready.
+
+        ActionBall freezes one action identity before sampling the incoming
+        ball.  MotionCommand owns the resulting pre-swing wait and phase
+        governor, so the actor consumes that live clock directly instead of
+        relearning it from TTS, target speed and the action one-hot.
+        """
+
+        return self._motion().action_ball_pre_swing_wait_remaining_s.to(
+            dtype=self.time_to_strike.dtype
+        )
 
     def _target_xy_err_b(self, target_xy_w: torch.Tensor) -> torch.Tensor:
         """(world XY target − current base XY) rotated into the yaw-heading base frame — the shared

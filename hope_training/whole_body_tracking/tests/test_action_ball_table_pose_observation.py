@@ -176,6 +176,34 @@ def _load_heading_task_producers():
     )
 
 
+def _load_teacher_start_producer():
+    source = OBS_PATH.read_text(encoding="utf-8")
+    tree = ast.parse(source, filename=str(OBS_PATH))
+    node = next(
+        node
+        for node in tree.body
+        if isinstance(node, ast.FunctionDef)
+        and node.name == "time_to_teacher_start_s"
+    )
+    module = ast.Module(
+        body=[
+            ast.ImportFrom(
+                module="__future__",
+                names=[ast.alias("annotations")],
+                level=0,
+            ),
+            node,
+        ],
+        type_ignores=[],
+    )
+    ast.fix_missing_locations(module)
+    namespace = {
+        "_cmd": lambda env, command_name: env.commands[command_name],
+    }
+    exec(compile(module, str(OBS_PATH), "exec"), namespace)
+    return namespace["time_to_teacher_start_s"]
+
+
 def test_base_position_is_relative_to_each_env_table_surface_center():
     position, _orientation = _load_tensor_kernels()
     env_origins = torch.tensor(
@@ -312,6 +340,18 @@ def test_heading_task_vectors_are_invariant_to_global_yaw_rotation():
     )
 
 
+def test_teacher_start_producer_keeps_exact_seconds_and_column_shape():
+    remaining = torch.tensor([0.84, 0.0, 0.12], dtype=torch.float32)
+    command = SimpleNamespace(
+        actor_time_to_teacher_start_s=lambda: remaining
+    )
+    env = SimpleNamespace(commands={"racket_target": command})
+    actual = _load_teacher_start_producer()(env, "racket_target")
+    assert actual.shape == (3, 1)
+    assert actual.dtype == torch.float32
+    assert torch.equal(actual[:, 0], remaining)
+
+
 def test_train_inserts_table_pose_twist_before_face_and_action():
     source = TRAIN_PATH.read_text(encoding="utf-8")
     tree = ast.parse(source, filename=str(TRAIN_PATH))
@@ -331,10 +371,15 @@ def test_train_inserts_table_pose_twist_before_face_and_action():
         in segment
     )
     assert (
+        '"action_ball_table_pose_twist_heading_task_teacher_start_n"'
+        in segment
+    )
+    assert (
         segment.index("policy.base_position_table =")
         < segment.index("policy.base_orientation_table_6d =")
         < segment.index("policy.base_lin_vel_heading =")
         < segment.index("normal_term_name =")
+        < segment.index("policy.time_to_teacher_start_s =")
         < segment.index("policy.action_one_hot =")
     )
     assert "if include_table_pose:" in segment

@@ -2304,17 +2304,23 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
         "action_ball_table_pose_twist_heading_task_n"
         f"{action_count}"
     )
+    teacher_start_actor_contract = (
+        "action_ball_table_pose_twist_heading_task_teacher_start_n"
+        f"{action_count}"
+    )
     if configured_actor_contract not in (
         legacy_actor_contract,
         table_pose_actor_contract,
         table_pose_twist_actor_contract,
         table_pose_twist_heading_task_actor_contract,
+        teacher_start_actor_contract,
     ):
         raise _OverrideError(
             "[train.py] action-ball actor_obs_contract must match the exact "
             "action count: expected "
-            f"{table_pose_twist_heading_task_actor_contract!r} "
+            f"{teacher_start_actor_contract!r} "
             f"(preferred), or compatibility contracts "
+            f"{table_pose_twist_heading_task_actor_contract!r}/"
             f"{table_pose_twist_actor_contract!r}/"
             f"{table_pose_actor_contract!r}/{legacy_actor_contract!r}; got "
             f"{configured_actor_contract!r}"
@@ -2325,6 +2331,7 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
             table_pose_actor_contract,
             table_pose_twist_actor_contract,
             table_pose_twist_heading_task_actor_contract,
+            teacher_start_actor_contract,
         )
     )
     include_base_twist = (
@@ -2332,11 +2339,17 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
         in (
             table_pose_twist_actor_contract,
             table_pose_twist_heading_task_actor_contract,
+            teacher_start_actor_contract,
         )
     )
     include_heading_task = (
-        configured_actor_contract
-        == table_pose_twist_heading_task_actor_contract
+        configured_actor_contract in (
+            table_pose_twist_heading_task_actor_contract,
+            teacher_start_actor_contract,
+        )
+    )
+    include_teacher_start = (
+        configured_actor_contract == teacher_start_actor_contract
     )
     expected_actor_contract = configured_actor_contract
     if str(getattr(env_cfg, "obs_mode", "")) != "hitter_footwork":
@@ -2825,6 +2838,7 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
             "racket_target_normal_cmd_heading",
             "racket_target_vel_heading",
             "action_one_hot",
+            "time_to_teacher_start_s",
             "station_anchor_err_b",
         )
         if getattr(policy, name, None) is not None
@@ -2911,6 +2925,14 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
             params={"command_name": "racket_target"},
         ),
     )
+    if include_teacher_start:
+        # Keep the categorical action identity as the final N columns.  This
+        # is a fresh observation contract; old 194-D checkpoints are not
+        # silently warm-started under the shifted one-hot offsets.
+        policy.time_to_teacher_start_s = _ObsTerm(
+            func=_mdp.time_to_teacher_start_s,
+            params={"command_name": "racket_target"},
+        )
     policy.action_one_hot = _ObsTerm(
         func=_mdp.action_one_hot,
         params={
@@ -2931,8 +2953,13 @@ def _finalize_action_ball_training_cfg(env_cfg, task, applied) -> None:
             if include_heading_task
             else "racket_target_normal_cmd(+4),"
         )
+        + (
+            "time_to_teacher_start_s(+1),"
+            if include_teacher_start
+            else ""
+        )
         + f"action_one_hot(+{action_count}) "
-        f"(actor_obs_contract={expected_actor_contract}; "
+        + f"(actor_obs_contract={expected_actor_contract}; "
         f"preflight_sha256={preflight['sha256']}; "
         "motion_admission_certificate_sha256="
         f"{motion_admission['certificate_sha256']}; "

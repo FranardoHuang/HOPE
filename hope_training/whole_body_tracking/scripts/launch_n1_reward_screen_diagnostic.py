@@ -1473,7 +1473,7 @@ def _build_training_argv(
             f"{spec['expected_effective_reward_recipe_sha256']}"
         ),
         "task.actor_obs_contract="
-        "action_ball_table_pose_twist_heading_task_n1",
+        "action_ball_table_pose_twist_heading_task_teacher_start_n1",
         (
             "task.rewards.full_body_mimic="
             f"{'true' if spec['scope'] == 'full' else 'false'}"

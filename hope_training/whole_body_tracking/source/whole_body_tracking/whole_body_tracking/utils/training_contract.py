@@ -60,6 +60,10 @@ ACTION_BALL_ACTION_SET_CONTRACT_KIND = (
 ACTION_BALL_LAUNCH_CLAIM_KIND = "action_ball_no_clobber_launch_claim_v3"
 ACTION_BALL_LAUNCH_CLAIM_SCHEMA_VERSION = 3
 _ACTION_BALL_ACTOR_OBS_LAYOUTS = (
+    (
+        "action_ball_table_pose_twist_heading_task_teacher_start_n",
+        194,
+    ),
     ("action_ball_table_pose_twist_heading_task_n", 193),
     ("action_ball_table_pose_twist_n", 193),
     ("action_ball_table_pose_n", 190),
@@ -436,7 +440,8 @@ def _parse_action_ball_actor_obs_contract(
     The legacy layout remains readable for existing checkpoints and claims.
     Table-pose layouts add nine base-pose scalars (``190 + N``); the preferred
     table-pose-twist layouts add yaw-heading-frame linear velocity as well
-    (``193 + N``).  The legacy layout remains ``181 + N``.  Every spelling
+    (``193 + N``); the preferred teacher-start successor is ``194 + N``.
+    The legacy layout remains ``181 + N``.  Every spelling
     binds the exact action count; leading-zero or out-of-range suffixes are
     deliberately rejected.
     """
@@ -4205,6 +4210,7 @@ def validate_action_ball_training_authorization(contract: Mapping) -> bool:
             "schema-3 action-ball authorization requires "
             "actor_obs_contract=action_ball_n<N> or "
             "action_ball_table_pose_n<N> or "
+            "action_ball_table_pose_twist_heading_task_teacher_start_n<N> or "
             "action_ball_table_pose_twist_heading_task_n<N> or "
             "action_ball_table_pose_twist_n<N> for N in [1,1024]"
         )

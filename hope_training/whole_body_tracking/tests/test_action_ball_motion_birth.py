@@ -1140,6 +1140,42 @@ def test_wrap_installs_age_zero_then_counts_exactly_one_physical_tick():
     assert first_tasks[0].task_ref() != second_task.task_ref()
 
 
+def test_public_timing_handoff_exposes_teacher_wait_before_first_observation():
+    command, runtime, broker, _provider, _domain = _motion_harness(1)
+    task_authority = _bind_task_authority(command, runtime, broker)
+    env_ids = torch.tensor([0], dtype=torch.long)
+    transaction, _rollback = _reserve_write_commit(command, env_ids)
+    tasks = _install_current_tasks(
+        command,
+        runtime,
+        broker,
+        task_authority,
+        transaction["receipts"],
+    )
+    task = tasks[0]
+
+    assert not bool(command.action_ball_task_timing_active[0])
+    assert float(
+        command.action_ball_pre_swing_wait_remaining_s[0]
+    ) == 0.0
+
+    command.resolve_action_ball_task_timing_now(env_ids)
+    assert bool(command.action_ball_task_timing_active[0])
+    assert float(
+        command.action_ball_pre_swing_wait_remaining_s[0]
+    ) == pytest.approx(task.pre_swing_wait_s, abs=1.0e-12)
+
+    held, due = command._advance_action_ball_task_timing()
+    assert bool(held[0])
+    assert not bool(due[0])
+    assert float(
+        command.action_ball_pre_swing_wait_remaining_s[0]
+    ) == pytest.approx(
+        max(task.pre_swing_wait_s - _POLICY_DT_S, 0.0),
+        abs=1.0e-12,
+    )
+
+
 def test_receipt_cycle_must_fit_episode_horizon_with_one_close_tick():
     command, runtime, broker, _provider, _domain = _motion_harness(1)
     task_authority = _bind_task_authority(command, runtime, broker)

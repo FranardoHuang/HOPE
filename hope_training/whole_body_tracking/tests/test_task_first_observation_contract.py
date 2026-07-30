@@ -189,6 +189,46 @@ def test_n1_heading_task_action_ball_offsets_are_exactly_194d():
     assert offsets["action_one_hot"] == (193, 194)
 
 
+@pytest.mark.parametrize("action_count", [1, 5, 73, 93])
+def test_teacher_start_action_ball_contract_is_explicit_and_sized(
+    action_count,
+):
+    contract = contract_mod.resolve_actor_observation_contract(
+        "action_ball_table_pose_twist_heading_task_teacher_start_n"
+        f"{action_count}"
+    )
+    assert contract.name == (
+        "action_ball_table_pose_twist_heading_task_teacher_start_n"
+        f"{action_count}"
+    )
+    assert contract.total_dim == 194 + action_count
+    assert sum(term.dim for term in contract.terms) == contract.total_dim
+    assert contract.layout[-3:] == (
+        ("racket_target_normal_cmd_heading", 4),
+        ("time_to_teacher_start_s", 1),
+        ("action_one_hot", action_count),
+    )
+    sources = {term.name: term.deploy_source for term in contract.terms}
+    assert sources["time_to_teacher_start_s"] == (
+        "action_ball_motion_phase_governor"
+    )
+
+
+def test_n1_teacher_start_action_ball_offsets_are_exactly_195d():
+    contract = contract_mod.resolve_actor_observation_contract(
+        "action_ball_table_pose_twist_heading_task_teacher_start_n1"
+    )
+    offsets = {}
+    offset = 0
+    for term in contract.terms:
+        offsets[term.name] = (offset, offset + term.dim)
+        offset += term.dim
+    assert offset == 195
+    assert offsets["racket_target_normal_cmd_heading"] == (189, 193)
+    assert offsets["time_to_teacher_start_s"] == (193, 194)
+    assert offsets["action_one_hot"] == (194, 195)
+
+
 @pytest.mark.parametrize("action_count", [1, 5, 93])
 def test_task_first_and_action_ball_share_columns_but_not_identity(action_count):
     task_first = contract_mod.resolve_actor_observation_contract(
@@ -260,6 +300,25 @@ def test_heading_task_action_ball_constructor_rejects_invalid_counts(
     ):
         contract_mod.action_ball_table_pose_twist_heading_task_n_contract(
             action_count
+        )
+
+
+@pytest.mark.parametrize("action_count", [0, 1025, True, 1.0, "5", None])
+def test_teacher_start_action_ball_constructor_rejects_invalid_counts(
+    action_count,
+):
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"^action-ball table-pose-twist-heading-task action_count must "
+            r"be a plain integer in \[1,1024\]"
+        ),
+    ):
+        (
+            contract_mod
+            .action_ball_table_pose_twist_heading_task_teacher_start_n_contract(
+                action_count
+            )
         )
 
 
@@ -364,6 +423,29 @@ def test_invalid_heading_task_action_ball_contract_names_fail_closed(name):
             r"observation contract .*; expected "
             r"action_ball_table_pose_twist_heading_task_n<N> with a base-10 N "
             r"in \[1,1024\] and no leading zeros$"
+        ),
+    ):
+        contract_mod.resolve_actor_observation_contract(name)
+
+
+@pytest.mark.parametrize(
+    "name",
+    [
+        "action_ball_table_pose_twist_heading_task_teacher_start_n0",
+        "action_ball_table_pose_twist_heading_task_teacher_start_n-1",
+        "action_ball_table_pose_twist_heading_task_teacher_start_n",
+        "action_ball_table_pose_twist_heading_task_teacher_start_n1.5",
+        "action_ball_table_pose_twist_heading_task_teacher_start_n05",
+    ],
+)
+def test_invalid_teacher_start_action_ball_contract_names_fail_closed(name):
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"^Invalid teacher-start table-pose-twist action-ball actor "
+            r"observation contract .*; expected "
+            r"action_ball_table_pose_twist_heading_task_teacher_start_n<N> "
+            r"with a base-10 N in \[1,1024\] and no leading zeros$"
         ),
     ):
         contract_mod.resolve_actor_observation_contract(name)

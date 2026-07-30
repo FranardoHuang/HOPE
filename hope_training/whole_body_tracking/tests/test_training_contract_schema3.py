@@ -952,9 +952,26 @@ def _action_set_identity(
     table_pose=False,
     table_pose_twist=False,
     heading_task=False,
+    teacher_start=False,
 ):
-    assert sum(bool(value) for value in (table_pose, table_pose_twist, heading_task)) <= 1
-    if heading_task:
+    assert (
+        sum(
+            bool(value)
+            for value in (
+                table_pose,
+                table_pose_twist,
+                heading_task,
+                teacher_start,
+            )
+        )
+        <= 1
+    )
+    if teacher_start:
+        actor_obs_contract = (
+            "action_ball_table_pose_twist_heading_task_teacher_start_n2"
+        )
+        actor_obs_width = 196
+    elif heading_task:
         actor_obs_contract = (
             "action_ball_table_pose_twist_heading_task_n2"
         )
@@ -1321,6 +1338,40 @@ def test_frame_consistent_action_ball_layout_is_accepted_with_exact_width():
             "action_ball_table_pose_twist_heading_task_n2"
         ),
         "actor_obs_width": 195,
+        "manifest_path": identity["manifest_path"],
+        "manifest_sha256": identity["manifest_sha256"],
+        "scope": "upper",
+        "mobility_mode": "no_move",
+        "ordered_action_ids": identity["ordered_action_ids"],
+        "ordered_action_uids": identity["ordered_action_uids"],
+        "experiment_name": identity["experiment_name"],
+    }
+    assert (
+        TC.validate_action_ball_action_set_runtime_identity(identity, **kwargs)
+        == identity
+    )
+
+
+def test_teacher_start_action_ball_layout_is_accepted_with_exact_width():
+    contract = _action_ball_diagnostic_schema3_contract()
+    contract["actor_obs_contract"] = (
+        "action_ball_table_pose_twist_heading_task_teacher_start_n2"
+    )
+    contract["actor_obs_total_dim"] = 196
+    contract["actor_obs_term_dims"] = [196]
+    assert TC.validate_action_ball_training_authorization(contract) is True
+
+    wrong_width = dict(contract)
+    wrong_width["actor_obs_total_dim"] = 195
+    with pytest.raises(ValueError, match="does not match"):
+        TC.validate_action_ball_training_authorization(wrong_width)
+
+    identity = _action_set_identity(teacher_start=True)
+    kwargs = {
+        "actor_obs_contract": (
+            "action_ball_table_pose_twist_heading_task_teacher_start_n2"
+        ),
+        "actor_obs_width": 196,
         "manifest_path": identity["manifest_path"],
         "manifest_sha256": identity["manifest_sha256"],
         "scope": "upper",

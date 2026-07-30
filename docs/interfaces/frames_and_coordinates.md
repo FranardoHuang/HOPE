@@ -87,11 +87,11 @@ station center 属于 level-0 task identity。level 0 只做中心 warm-up，pos
 才开始；base residual 是最后一轴。改变 station center 会改变 manifest/task identity，并使旧碰撞、
 能力与 selector 证据失效。
 
-## Historical ChingMu Runtime Contract (superseded for fresh 194-D ActionBall)
+## Historical ChingMu Runtime Contract (superseded for fresh 195-D ActionBall)
 
 The following 300-Hz ChingMu/VRPN contract documents the old P1/P2 consumer and remains relevant
 only when reproducing that lineage. The venue has since switched to 360-Hz OptiTrack; fresh
-`action_ball_table_pose_twist_heading_task_n<N>` training and future deployment use the
+`action_ball_table_pose_twist_heading_task_teacher_start_n<N>` training and future deployment use the
 OptiTrack+IMU split stated in [ActionBall table-centered actor frame](#actionball-table-centered-actor-frame).
 Do not copy the old object names, rate, sensor authority or noise profile into the fresh contract.
 
@@ -174,12 +174,14 @@ absolute position/orientation and the derived `projected_gravity`; the pelvis IM
 three-axis gyroscope owns `base_ang_vel`. The actor must not use IMU attitude/yaw under this
 contract name, and it must not obtain angular velocity by differentiating filtered mocap
 quaternions when a direct gyro measurement exists. `motion_anchor_ori_b` combines the same
-OptiTrack base orientation with joint-encoder FK. The current 194-D deploy builder, rotational
+OptiTrack base orientation with joint-encoder FK. The current arbitrary-N deploy builder, rotational
 marker extrinsic and time-aligned OptiTrack/gyro producer remain OPEN, so this frame contract is
 simulator-training-only until those are closed.
 
 Fresh ActionBall actors use the versioned
-`action_ball_table_pose_twist_heading_task_n<N>` representation. All three racket-task vectors
+`action_ball_table_pose_twist_heading_task_teacher_start_n<N>` representation; the 194-D
+`...heading_task_n<N>` predecessor remains exact compatibility for the running N1 wave. All three
+racket-task vectors
 share the current base yaw-heading frame:
 
 ```text

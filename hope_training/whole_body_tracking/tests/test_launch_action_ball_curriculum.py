@@ -289,10 +289,10 @@ class LaunchFixture:
             "kind": "whole_body_tracking.action_ball.action_set_contract",
             **self.action_set_contract_row,
             "actor_obs_contract": (
-                "action_ball_table_pose_twist_heading_task_n"
+                "action_ball_table_pose_twist_heading_task_teacher_start_n"
                 f"{len(self.order)}"
             ),
-            "actor_obs_width": 193 + len(self.order),
+            "actor_obs_width": 194 + len(self.order),
             "namespace_identity": self.namespace_identity,
         }
         self.action_set_contract_identity["contract_sha256"] = (

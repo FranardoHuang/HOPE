@@ -10,9 +10,11 @@ Dynamic `task_first_n<N>` remains a historical training-only candidate. Dynamic
 but it still has no production arbitrary-N flat wire or C++ observation consumer. The feature-branch
 historical `action_ball_table_pose_twist_n<N>` added table-relative base 6-DoF context and
 three-axis root-COM linear velocity, but left racket velocity/normal in world coordinates while
-position was heading-relative. Fresh runs use the versioned,
-frame-consistent `action_ball_table_pose_twist_heading_task_n<N>` successor. Its source contract
-is implemented, but a fresh 194-D checkpoint and deploy-consumer parity are not yet evidence.
+position was heading-relative. The running N1 diagnostic uses the versioned,
+frame-consistent `action_ball_table_pose_twist_heading_task_n<N>` successor. Fresh launches use
+`action_ball_table_pose_twist_heading_task_teacher_start_n<N>` and additionally expose the exact
+Motion phase-governor countdown. Its source contract is implemented, but a fresh 195-D N1
+checkpoint and deploy-consumer parity are not yet evidence.
 
 ## HITTER-Compatible Contract
 
@@ -122,6 +124,7 @@ same policy tick. Timestamp-compensation pairs with positive delay are `NO-LAUNC
 | `190+N` | `action_ball_table_pose_n<N>` | `hitter_footwork(177)` + `base_position_table(3)` + `base_orientation_table_6d(6)` + demanded signed face / reserved spin `(4)` + `action_one_hot(N)`。当前 N=1 总宽度为 `191`。 | Feature-branch Isaac source candidate；Pod evidence 未完成，production arbitrary-N/191-D flat wire 与 C++ consumer 均不存在。 |
 | `193+N` | `action_ball_table_pose_twist_n<N>` | 历史 194-D 候选；position residual 在 heading frame，但 velocity/normal 仍在 world frame。 | 只作旧 checkpoint/诊断兼容，不得用于 fresh launch。 |
 | `193+N` | `action_ball_table_pose_twist_heading_task_n<N>` | table pose/twist 与上一行同宽；racket position residual、demanded velocity、raw-A normal 全部统一到 yaw-heading frame。 | Pod N1 `1×2/4096×5` 已过且 1000-update 正在运行；production arbitrary-N flat wire、C++/MuJoCo consumer 与真实速度估计器尚未闭合。 |
+| `194+N` | `action_ball_table_pose_twist_heading_task_teacher_start_n<N>` | 上一行后在 final one-hot 前显式加入 teacher-start 倒计时；N1=195-D。 | fresh launch 首选；旧 194-D run 不重标、不 exact resume。仍须 Pod 195-D 构造 smoke，production consumer 未闭合。 |
 | 110 | `hitter_pure` | HITTER Table-I style: 99-D proprio prefix + base forward(2), station delta(2), racket target rel base(3), target velocity(3), tts(1); no reference command or swing flag. | Supported; requires fresh localization and metadata-bound per-side station geometry. |
 
 Do not infer a contract from width alone. Formal consumers require the registered name, mode,
@@ -159,9 +162,9 @@ initialization cannot masquerade as a sampled transition. The policy action rema
 unbounded Gaussian output followed by the existing affine decoder and finite qdes projection; no
 observation or action width changes.
 
-### N=1 ActionBall frame-consistent table-pose-twist successor: exact 194-D layout
+### N=1 ActionBall frame-consistent compatibility layout: exact 194-D
 
-Fresh table-aware N=1 runs use
+The 2026-07-30 N=1 diagnostic wave uses
 `action_ball_table_pose_twist_heading_task_n1`. Its exact order is:
 
 ```text
@@ -242,45 +245,49 @@ For real A3 consumption, pose and velocity use different authorities by physical
 calibrated OptiTrack owns table-relative position, full orientation and projected gravity;
 the pelvis IMU three-axis gyroscope owns `base_ang_vel`; and the causal fused estimator owns
 `base_lin_vel_heading`. `motion_anchor_ori_b` combines OptiTrack base orientation with
-joint-encoder FK. The current C++ deploy builder cannot construct 194-D arbitrary-N observations,
+joint-encoder FK. The current C++ deploy builder cannot construct either the compatibility 194-D
+layout or the preferred 195-D N1 / arbitrary-N successor observations,
 and the marker-cluster rotational extrinsic, estimator delay/dropout and frame parity are not yet
 closed, so this training contract does not authorize a real-robot run.
 
-The first fresh N1 wave intentionally remains single-frame. A frame-history ring is stateful at the
+The first N1 wave intentionally remains single-frame. A frame-history ring is stateful at the
 environment level and changes reset/exact-resume semantics; it is not a free 72-column append.
 
-The current 194-D actor has no separate `time_to_teacher_start_s` column.  This is not a hidden
-state in the present ActionBall contract: `time_to_strike` is the complete incoming-ball deadline,
-including the ready hold; `racket_target_vel_heading` fixes the requested site-speed magnitude; and
-`action_one_hot` selects the per-action `reference_t_hit` and reference site speed.  Therefore the
-runtime's exact internal metric is deterministically recoverable as:
+### Preferred ActionBall teacher-start successor: exact `194+N`
+
+Fresh launches after this interface cut use
+`action_ball_table_pose_twist_heading_task_teacher_start_n<N>`. It inserts
+`time_to_teacher_start_s(1)` after `racket_target_normal_cmd_heading(4)` and before the final
+`action_one_hot(N)`. The general width is `194+N`; N1 is 195-D, N5 is 199-D and N73 is 267-D.
+The predecessor remains readable but is not silently warm-started because the one-hot offsets and
+training-contract identity changed.
+
+`time_to_teacher_start_s` is the live Motion phase-governor clock:
 
 ```text
-teacher_rate = norm(racket_target_vel_heading) / reference_site_speed[action]
-scaled_t_hit = reference_t_hit[action] / teacher_rate
-time_to_teacher_start_s = max(time_to_strike - scaled_t_hit, 0)
+time_to_teacher_start_s = max(pre_swing_wait_s - action_ball_task_age_s, 0)
 ```
 
-During that positive interval the 62-D teacher command remains at frame 0 with zero reference
-velocity; afterwards it advances at `teacher_rate`.  This is sufficient for the current N=1
-diagnostic, so adding a column does not justify stopping or relabelling an active 194-D run.
-Nevertheless, arbitrary-N training should expose the scalar explicitly at its next
-warm-start-breaking observation migration.  That removes the need for an MLP to relearn a vector
-norm, division and per-action constants for every action, especially for N=73.
+It resets to the selected task receipt's full wait, decreases by one policy `step_dt` after each
+physical tick, clamps at zero and remains zero through swing/recovery. During the positive interval
+the 62-D teacher command stays at frame 0 with zero reference velocity; afterwards it advances at
+`teacher_rate`. Motion timing is resolved immediately after Racket publishes the task receipt so
+the first post-reset observation cannot report a false zero. Although the scalar could be derived
+from TTS, target-speed magnitude and action constants, making it explicit avoids asking an MLP to
+learn a norm, division and per-action lookup. Existing live 194-D runs keep their exact old bytes
+and are not relabelled.
 
-The 194-D name also deliberately excludes localization freshness because the current OptiTrack
+The new 195-D N1 contract still excludes localization freshness because the current OptiTrack
 dropout/latency distribution has not yet been measured. A deployment-intent successor should add
 at least `base_localization_age_s(1)` and `base_localization_valid(1)` in one versioned,
 warm-start-breaking migration after the live producer uses capture/Motive timestamps. Held poses
 must retain increasing age and must never be converted into zero velocity merely because no new
-sample arrived. With only those two additions, N=1 would be 196-D; the old 194-D name and
-checkpoints must not be reused.
-If `time_to_teacher_start_s` is added in the same migration, the general width becomes `196+N`
-and N=1 becomes 197-D.  Mocap coordinate conversion, filtering, timestamp alignment, sensor fusion,
-dropout admission and hard-stale stopping remain outside the policy.  The actor sees age/valid only
-when the supervisor intentionally permits a short hold-last interval; if the supervisor instead
-guarantees fresh localization on every control tick and stops before policy evaluation, freshness
-can remain supervisor-only.
+sample arrived. Adding those two fields makes the general width `196+N` and N1 197-D; neither the
+194-D nor 195-D checkpoints may be reused as exact resume. Mocap coordinate conversion, filtering,
+timestamp alignment, sensor fusion, dropout admission and hard-stale stopping remain outside the
+policy. The actor sees age/valid only when the supervisor intentionally permits a short hold-last
+interval; if the supervisor instead guarantees fresh localization on every control tick and stops
+before policy evaluation, freshness can remain supervisor-only.
 History is reconsidered only after the measured OptiTrack/IMU pipeline shows a residual
 partial-observability or delay problem that cannot be represented by the coherent pose/twist
 packet. At that point the first canary is a small critical-channel stack, not an unbounded history
@@ -608,12 +615,13 @@ What the real system can observe (team contract, 2026-07):
 
 Rules: actor observations must be built only from deploy-available signals; rewards run in sim
 only and may use privileged state; the critic may be privileged. The current 175-D actor uses only
-robot-side signals + planner targets (no mocap terms at all). The frame-consistent
-`action_ball_table_pose_twist_heading_task_n<N>` successor instead deliberately consumes calibrated
-mocap base pose plus a causal base linear-velocity estimate: that absolute-with-respect-to-table
-context is required alongside robot-relative tasks. Training must use the simulator's exact
-counterpart of those same terms. Deployment must close mocap marker→base and venue→table SE(3),
-gyro extrinsic, velocity-estimator noise/latency/stale/dropout and 194-D C++ builder parity first;
+robot-side signals + planner targets (no mocap terms at all). The preferred frame-consistent
+`action_ball_table_pose_twist_heading_task_teacher_start_n<N>` successor deliberately consumes
+calibrated mocap base pose plus a causal base linear-velocity estimate and the same Motion phase
+clock that governs teacher playback: absolute-with-respect-to-table context is required alongside
+robot-relative tasks. Training must use the simulator's exact counterpart of those same terms.
+Deployment must close mocap marker→base and venue→table SE(3), gyro extrinsic,
+velocity-estimator noise/latency/stale/dropout and `194+N` C++ builder parity first;
 until then it remains simulator-only (see G07 Next Steps).
 
 ## Table-Tennis Physics Scene Observation (experimental)

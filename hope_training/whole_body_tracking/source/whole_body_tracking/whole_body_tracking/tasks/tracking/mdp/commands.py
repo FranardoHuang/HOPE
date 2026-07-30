@@ -3576,6 +3576,28 @@ class MotionCommand(CommandTerm):
             ]
             self._action_ball_task_timing_active[env_id] = True
 
+    def resolve_action_ball_task_timing_now(
+        self, env_ids: torch.Tensor
+    ) -> None:
+        """Resolve newly published Racket receipts before reset observation.
+
+        CommandManager resets Motion before Racket.  Without this handoff,
+        formal rows remain locally pending until the following policy step and
+        the first actor observation would report a false zero teacher-start
+        clock.  This reuses the normal receipt validator and does not advance
+        task age or teacher phase.
+        """
+
+        ids = torch.as_tensor(
+            env_ids, dtype=torch.long, device=self.device
+        ).reshape(-1)
+        self._resolve_pending_action_ball_tasks()
+        if bool((~self._action_ball_task_timing_active[ids]).any()):
+            raise RuntimeError(
+                "action-ball task timing was not active before reset "
+                "observation"
+            )
+
     @property
     def action_ball_task_timing_active(self) -> torch.Tensor:
         if self._action_ball_task_timing_active is None:
@@ -3596,6 +3618,33 @@ class MotionCommand(CommandTerm):
             self._action_ball_task_timing_active,
             remaining,
             torch.full_like(remaining, 1.0e6),
+        )
+
+    @property
+    def action_ball_pre_swing_wait_remaining_s(self) -> torch.Tensor:
+        """Time until this row's teacher leaves its frozen ready frame.
+
+        This is the exact live phase-governor clock, not a value reconstructed
+        by the actor from time-to-contact, action identity and requested site
+        speed.  Inactive rows expose zero; a valid ActionBall rollout resolves
+        every row before the policy observation is consumed.
+        """
+
+        if (
+            self._action_ball_task_timing_active is None
+            or self._action_ball_pre_swing_wait_s is None
+            or self._action_ball_task_age_s is None
+        ):
+            raise RuntimeError("action-ball task timing is not bound")
+        remaining = torch.clamp(
+            self._action_ball_pre_swing_wait_s
+            - self._action_ball_task_age_s,
+            min=0.0,
+        )
+        return torch.where(
+            self._action_ball_task_timing_active,
+            remaining,
+            torch.zeros_like(remaining),
         )
 
     def _advance_action_ball_task_timing(
@@ -3678,11 +3727,11 @@ class MotionCommand(CommandTerm):
         self.metrics["action_ball_teacher_rate"] = (
             self._action_ball_teacher_rate.to(self.speed_scale.dtype)
         )
-        self.metrics["action_ball_pre_swing_wait_remaining_s"] = torch.clamp(
-            self._action_ball_pre_swing_wait_s
-            - self._action_ball_task_age_s,
-            min=0.0,
-        ).to(self.speed_scale.dtype)
+        self.metrics["action_ball_pre_swing_wait_remaining_s"] = (
+            self.action_ball_pre_swing_wait_remaining_s.to(
+                self.speed_scale.dtype
+            )
+        )
         return held, cycle_due_before
 
     def _write_canonical_ready_state(

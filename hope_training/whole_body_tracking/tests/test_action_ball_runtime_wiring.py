@@ -2514,6 +2514,17 @@ def test_reference_termination_phase_is_per_env_true_reset_latched_and_resumed()
     )
 
 
+def test_task_timing_is_resolved_before_first_reset_observation_can_escape():
+    sample = _method_source("_sample_targets_action_ball")
+    assert (
+        sample.index("_action_ball_commit_install(")
+        < sample.index("motion.resolve_action_ball_task_timing_now(ids)")
+        < sample.index(
+            "self._action_ball_reference_term_center_latch[ids]"
+        )
+    )
+
+
 def test_hard_joint_outcomes_preserve_raw_overlap_and_never_enter_difficulty():
     classify = _method_source("_action_ball_reset_outcome_masks")
     close = _method_source("_action_ball_close_attempts")

@@ -7,6 +7,7 @@ quantities the planner provides at deploy time (HITTER actor observation, Table 
 * :func:`racket_target_vel_w`  — desired racket velocity in world frame (3)
 * :func:`racket_target_vel_heading` — desired racket velocity in the base yaw-heading frame (3)
 * :func:`time_to_strike`       — time remaining until strike (1)
+* :func:`time_to_teacher_start_s` — time until the frozen teacher leaves its ready frame (1)
 * :func:`base_target_pos_b`    — desired base XY position relative to base (2)
 * :func:`base_position_table`  — base root position relative to table-surface center (3)
 * :func:`base_orientation_table_6d` — full base orientation in the table frame (6)
@@ -148,6 +149,16 @@ def time_to_strike(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
 def actor_time_to_strike(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:
     """Actor-visible planner TTS: live, source-timestamp compensated, or stale negative control."""
     return _cmd(env, command_name).actor_time_to_strike().unsqueeze(-1)
+
+
+def time_to_teacher_start_s(
+    env: ManagerBasedRLEnv, command_name: str
+) -> torch.Tensor:
+    """Exact live countdown until ActionBall teacher playback starts."""
+
+    return _cmd(
+        env, command_name
+    ).actor_time_to_teacher_start_s().unsqueeze(-1)
 
 
 def base_target_pos_b(env: ManagerBasedRLEnv, command_name: str) -> torch.Tensor:

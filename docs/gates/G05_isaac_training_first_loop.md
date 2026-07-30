@@ -3989,5 +3989,22 @@ physics diagnostic，不授权 formal/landing/部署。
 full-body 没有直接占用 GPU2：仓内 full bundle 仍是 schema-v1，而该 launcher 明确要求 exact
 motion/nominal-hold 双 pin 的 schema-v2 dynamic-ready。可比 full-body 仍须完成
 stable-full `ready→core→ready`、动作专属 dynamic-ready/nominal hold、full solver preflight、
-schema-v2 bundle 与 194-D `1×2→4096×5`；运行旧 bundle 只会同时改变 ready、observation 与
+schema-v2 bundle 与 fresh 195-D `1×2→4096×5`；运行旧 bundle 只会同时改变 ready、observation 与
 teacher bytes，不能作为科学对照。G05 保持 `Partial`。
+
+同日采用显式 teacher-start actor 合同
+`action_ball_table_pose_twist_heading_task_teacher_start_n<N>`（`194+N`，N1=195-D）。
+`time_to_teacher_start_s` 直接读取 Motion phase governor 的剩余 ready wait，置于 heading face
+之后、final action one-hot 之前；Racket 发布 task receipt 后立即复用 Motion 的既有 validator，
+避免 formal reset 首个 observation 出现一帧假零。旧 `f2c54fc3` 三条 194-D run 不停机、不重标、
+不允许以新合同 exact resume。新 source 在 Pod N1 195-D `1 env×2 update` 构造 smoke 前保持
+`Partial`，且 action-set source SHA、training contract 与 launch claim 均须 fresh repin。
+
+2026-07-30 19:39 CST 只读快照：loop seed0 / block seed0 / block seed1 分别到 update
+`219 / 574 / 186`，mean episode=`104.88 / 481.52 / 105.90`，均继续产生真实 PPO update，
+无新 Traceback。三条当前窗的 strike opportunity=`945 / 965 / 962`，但 virtual
+capture/return 仍全为零。block seed0 的 table/fall/actual-hard 已降到 `2/3/6`，但 965 个
+proposal 全被 face gate 拒绝；loop seed0 的 post-strike fall 为 `887/946`；block seed1 的
+table/actual-hard 为 `590/325`。因此窗口与 denominator 已通，动作质量、signed-face/contact
+对齐及 seed 稳定性仍未通过；这些不是 teacher-start source merge 的阻断理由，也不能作为 N5、
+landing 或部署证据。下一条 fresh 195-D source 仍须独立 Pod `1 env×2` 构造验证。
