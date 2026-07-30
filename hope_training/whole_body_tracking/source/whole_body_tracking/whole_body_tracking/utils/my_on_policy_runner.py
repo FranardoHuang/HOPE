@@ -5484,15 +5484,12 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 }
             )
         for row in summary_rows:
-            unsafe_by_field_env_joint = torch.stack(
-                [row[field].gt(0) for field in aggregate_fields],
-                dim=0,
-            )
-            # PyTorch 2.2 accepts a tuple ``dim`` here, but the Py3.8/older
-            # Torch runtime used by some host gates does not.  Reduce fields
-            # and joints explicitly while preserving the per-env result.
+            # A predicted inner-envelope crossing is a non-terminal brake
+            # event, and a finite q_des projection is a non-terminal learning
+            # signal.  Only a raw physical hard-edge observation is required
+            # to have a matching terminal-reset forensic archive.
             unsafe_envs = torch.any(
-                torch.any(unsafe_by_field_env_joint, dim=0),
+                row["actual_hard_edge_joint_count"].gt(0),
                 dim=1,
             )
             for env_id in torch.nonzero(
