@@ -1,0 +1,32 @@
+{
+  "action_id": "bh_block",
+  "bundle": {
+    "path": "configs/n1_contact_fastball_20260730/bh_block.bundle.v2.8bd480329e4b.json",
+    "sha256": "8bd480329e4b19943044b32a5ffcf0e81ce2e5773a3324ae187cc451b58dda4d"
+  },
+  "expected_effective_reward_recipe_sha256": "c2f13419a22fd12d1ab93d936516f8e990dad1b5b51a03f4e93c4d02e4e26c11",
+  "gpu": {
+    "index": 2,
+    "lock_path": "/tmp/hope_lean_queue_gpu2.lock",
+    "owner": "Franco",
+    "require_empty": true,
+    "uuid": "GPU-473a79f3-8736-6c7f-c3db-290c6be385b8"
+  },
+  "kind": "n1_reward_screen_diagnostic_spec_v1",
+  "log_path": "/workspace/franco/n1hr_probe_fastball110_1bf55e5a_block_gpu2_seed0_r1/run.log",
+  "max_iterations": 5,
+  "namespace": "/workspace/franco/n1hr_probe_fastball110_1bf55e5a_block_gpu2_seed0_r1",
+  "num_envs": 4096,
+  "policy_contract_sha256": "b7209710cc9ac01766b5d449042b5fa6eaab8b7999759b4f15732a0e12b0077f",
+  "reward_profile": "current_low",
+  "save_interval": 1,
+  "schema_version": 1,
+  "scope": "upper",
+  "seed": 0,
+  "source": {
+    "checkout": "/workspace/franco/n1fast_1bf55e5a",
+    "commit_sha": "1bf55e5a8fc0d6f965519239dda7ea4bcf96dd98",
+    "isaac_python": "/workspace/hope_isaac_venv/bin/python"
+  },
+  "stage": "probe"
+}

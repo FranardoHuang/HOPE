@@ -242,6 +242,13 @@ commit、194-D observation 和旧 physics 身份，不因文档或 main 前移�
 selector 或换动作。若未来希望自然借力挡得更深，才另把 landing aim 作为显式课程轴，而不在
 本比较里混入。
 
+该诊断臂绑定 source `1bf55e5a`、seed `0` 和 Pod1 GPU2，使用三个 fresh no-clobber spec：
+`smoke_block_upper_gpu2_seed0_1bf55e5a_r1.json`（1 env×2 update）、
+`probe_block_upper_gpu2_seed0_1bf55e5a_r1.json`（4096 env×5 update）和
+`milestone1000_block_upper_gpu2_seed0_1bf55e5a_r1.json`（4096 env×1001 update）。
+每一阶段自然完成、checkpoint finite 且无 fatal 后才发下一阶段；三段都从新随机初始化开始，
+不把前段 checkpoint 当作续训，也不覆盖旧 GPU2 seed1 目录。
+
 ## 3. 分阶段最迟闭合项
 
 ### 3.1 首个 N=1 long 前（历史 194-D 波已完成；fresh 195-D 仍缺 Pod smoke）
