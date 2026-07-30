@@ -2540,6 +2540,14 @@ def check_spawned(env, env_cfg):
     visual_path = visual_cfg.prim_path.replace(
         "{ENV_REGEX_NS}", "/World/envs/env_0"
     )
+    # SceneEntityCfg has already expanded ``{ENV_REGEX_NS}`` by this point on
+    # some Isaac Lab versions, leaving the authored regex in the config while
+    # the live stage contains the concrete env_0 prim.
+    visual_path = re.sub(
+        r"^/World/envs/env_\.\*/",
+        "/World/envs/env_0/",
+        visual_path,
+    )
     visual_prim = stage.GetPrimAtPath(visual_path)
     if not visual_prim.IsValid():
         _fail(f"{visual_path} visual provider was not spawned")
@@ -3905,12 +3913,24 @@ def main():
                 contact_smoke(env, env_cfg)
             if ARGS.bench:
                 bench(env, ARGS.bench)
+            # Print the authoritative completion payload before closing Kit.
+            # Isaac Sim 4.5 may terminate the process from ``SimulationApp.close``
+            # with status zero, which would otherwise hide both successful
+            # evidence and Python failures raised earlier in the diagnostic.
+            print(
+                "HOPE_TABLE_OBSTACLE_CHECK_JSON="
+                + json.dumps(_results, sort_keys=True),
+                flush=True,
+            )
+            print(
+                "HOPE_TABLE_DIAGNOSTIC_STAGE=main_completed",
+                flush=True,
+            )
     finally:
         if env is not None:
             env.close()
         if _app is not None:
             _app.close()
-    print("HOPE_TABLE_OBSTACLE_CHECK_JSON=" + json.dumps(_results, sort_keys=True))
     return exit_code
 
 
