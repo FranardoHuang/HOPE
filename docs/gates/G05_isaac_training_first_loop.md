@@ -3945,3 +3945,8 @@ actual-hard terminal 到 update100 已降到 `14/11`，到 update169 均为 `3`�
 仍为 `0`，actual-hard 仍集中在 waist-roll/pitch，按 update100/300/1000 判趋势。反手拉在
 该槽自然完成后排队。该谱系仍是 diagnostic、绑定旧 physics profile，只授权 contact/学习可行性，不授权 formal
 landing、export 或真机。G05 继续 `Partial`。
+
+其后 feature-branch head `9fdb909a` 仅增加 fresh/formal observation guard、阶段账本与
+OptiTrack ballfit 科学源；Pod fresh worktree 对 observation、N1/generic launcher 与
+training-contract 的 dependency-light focused suite 为 `314 passed, 9 skipped`。该验证不改变
+正在运行的 exact `f2c54fc3` bytes，也不把其旧 physics bundle 重标为 OptiTrack profile。

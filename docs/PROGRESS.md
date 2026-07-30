@@ -23,7 +23,9 @@
 - `origin/main@ddfaaa02` 的 OptiTrack 球物理拟合管线与双份 Isaac/MuJoCo YAML 已以
   `bed6661f` 合入当前分支，并在首次 byte pin 前纠正速度衰减曲线的旧示例注释。当前运行的
   exact `f2c54fc3` N1 bundle 仍绑定旧 profile，只作 contact/学习可行性诊断；formal N5
-  前须显式选择新 YAML，并重物化 physics/solver/question bundle。
+  前须显式选择新 YAML，并重物化 physics/solver/question bundle。Pod fresh worktree
+  `9fdb909a` 的 observation/launcher/training-contract focused suite 为
+  `314 passed, 9 skipped`。
 - 首个 N1 actor 候选已收口为 194-D
   `action_ball_table_pose_twist_heading_task_n1`：177-D HITTER-derived 前缀内的 racket
   position/velocity 与尾部 signed face 统一到 yaw-heading frame，另加入相对桌体 XYZ、连续
