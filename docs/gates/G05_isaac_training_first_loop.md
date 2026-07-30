@@ -2,6 +2,14 @@
 
 Status: Partial (the base training-loop mechanics are proven; the current-candidate promotion sub-gate is open)
 
+2026-07-30 fixed-194 v2 source checkpoint：fresh ActionBall trainer 已删除 actor
+`action_one_hot`，只接受
+`action_ball_table_pose_twist_heading_task_teacher_start_v2`（N=1、194-D）；training
+contract 严格核对 17-term layout，并拒绝旧同宽 one-hot 重标。Pod1 exact `0227cfe9`
+focused suite 为 `391 passed, 12 skipped in 61.35 s`。这证明依赖级 contract/launcher/runtime
+wiring，不替代真实 ObservationManager 与 PPO 构造；下一门仍是 current-source repin 后的
+fresh `1 env × 2 updates` smoke。
+
 ## Goal
 
 Run the first end-to-end Isaac training loop that produces a policy artifact, even if the policy is weak.

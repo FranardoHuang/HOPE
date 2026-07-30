@@ -14,6 +14,45 @@
 [`origin/main` 的 `NOW`](../../NOW.md)。本文只回答一件事：某项工作最迟应在首个 N=1
 长训、1000 update 检查、正式 N=5、N=73 或部署中的哪一个边界前闭合。
 
+## 0. 当前执行看板（本文唯一活跃 TODO）
+
+### 0.1 维护规则
+
+- 本节是本文唯一可领取、可更新状态的 TODO；[`origin/main` 的 `NOW`](../../NOW.md)
+  仍是项目唯一优先级和算力队列，两者不得互相替代。
+- 每次代码、合同、Pod 验证、发射状态或外部输入发生变化时，先更新本节，再把不可替代的数字、
+  SHA、失败原因和运行证据追加到后文附录。不要把事件时间线继续写进看板。
+- 状态只用 `IN_PROGRESS`、`READY`、`BLOCKED`、`LATER`。完成项从本节移到
+  [已完成证据附录](#2-已完成证据附录-a不参与调度)，不在看板长期堆积。
+- `BLOCKED` 必须写清缺的输入；`IN_PROGRESS` 必须写清唯一下一动作和验收条件。任何后文边界、
+  决策或历史记录若未在本节出现，都不是当前可领取任务。
+
+### 0.2 Now — fresh fixed-194 N=1 先形成可训练 lineage
+
+| ID | 状态 | 当前交付 / 唯一下一动作 | 完成验收 | 阻塞输入 | 证据入口 |
+| --- | --- | --- | --- | --- | --- |
+| N1-PIN | `IN_PROGRESS` | 以 fixed-194 v2 exact clean source 重新物化 profile pins、current-source base bundle 和 1.1 倍中心来球 derivative；随后生成 fresh/no-clobber spec 与 claim | source blob、motion、physics、solver、bundle、recipe、GPU UUID、spec/claim SHA 全部互相一致；旧失败 namespace 永不复用 | 可用 Pod 物化环境 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[no-clobber 规则](../../operations/run_action_ball_curriculum_no_clobber.md) |
+| N1-RUN | `BLOCKED` | N1-PIN 后在 Pod 串行执行 `1 env × 2 updates` 构造 smoke → `4096 env × 5 updates` probe → `4096 env × 1001 updates` long；每段 fresh 初始化，不把短段 checkpoint 当续训 | smoke 有真实 PPO update 与 finite checkpoint；teacher-start 首帧等于完整 wait、每 tick 减一个 `policy_dt` 且不为负；probe 跨 `t_hit` 且无 NaN/identity 漂移/持续 table、fall、raw-hard 爆炸；通过即发 long | N1-TEST、N1-PIN；自然空闲且无 owner 冲突的 Pod 槽 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[结果判读](../../operations/read_and_report_results.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
+
+### 0.3 Next — long 已运行后的判读与 formal N=5 前置
+
+| ID | 状态 | 当前交付 / 触发条件 | 完成验收 | 阻塞输入 | 证据入口 |
+| --- | --- | --- | --- | --- | --- |
+| N1-REVIEW | `BLOCKED` | N1-RUN 的 long 启动后按 update 100/300/1000 检查 teacher fidelity、strike denominator、return/landing、Reward income、unsafe 与课程 frontier；不按一次均值临时改超参 | finite/exact identity 持续；动作与 teacher 偏差可解释；strike opportunity 非零；table/fall/hard 与 curriculum failure 分账；1000 结论进入附录 | N1 long 数据；必要时 Franco 对动作语义/视频的人工裁定 | [结果判读](../../operations/read_and_report_results.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
+| N5-INTENT | `LATER` | formal N=5 前把 v2 的 N1-only 无身份合同替换为**固定宽、内容生成的连续动作意图**；首版使用归一化 `q_ref_at_hit-q_ready` 与 `teacher_rate*qd_ref_at_hit`，共享 ready 有混叠才加中间相位 preview | actor/critic 同源；宽度不随 N 变化；跨 N tensor/order、动作间距离、混叠检查和 Pod 构造 parity 通过；禁止恢复 N 维 one-hot、UID 数值或 per-slot embedding | exact N=5 ordered motion/reference；N1 不被此项阻塞 | [ActionBall 合同](../../interfaces/action_conditioned_ball_first_contract.md)、[Policy 观测合同](../../interfaces/policy_observation_action.md) |
+| N5-RECEIPT | `LATER` | formal N=5 前把正式审计从 per-env reset 仪式改为 device 紧凑 event tape + checkpoint/hourly 批量物化；同时清理残余 D2H、ledger clone、broker per-env Python | 旧式完整 receipt 可逐字段重建；checkpoint save/load/no-step、跨进程 exact resume、篡改负例与固定工作量吞吐验收通过；proposal/reject/action/domain/lifecycle/outcome 分母不丢 | 分段 profiler 和可用 Pod | [formal 发射工序](../../operations/run_action_ball_curriculum_no_clobber.md)、[设计与加速审计](../../research/design_audit_and_speedup_20260729.md) |
+| N5-PHYSICS | `LATER` | formal landing 或 N=5 前显式选择 2026-07-30 OptiTrack ball-physics profile，重新物化 physics/solver/question bundle；zero-weight term 做结构裁剪，不能以“权重为零”冒充未解析 | physics/solver/question SHA 重钉；Isaac/solver 配置 parity；active Reward/term ledger 可复算；未充分辨识切向参数明确保持 prior/canary | 现有科学源可先工程化；最终 table/tangential 参数仍需 OptiTrack 补测 | [G05](../../gates/G05_isaac_training_first_loop.md)、[Reward 因果审计](../../operations/run_action_ball_reward_causal_prelaunch.md) |
+| N5-LAUNCH | `BLOCKED` | 上述 N5-INTENT、N5-RECEIPT、N5-PHYSICS 通过后，绑定 exact ordered N=5 manifest、逐动作 admission/ball support/new-forehand 安全证据并 fresh 发射 | formal receipt 绑定 continuous intent、motion bytes/order、Reward/PPO/plant/solver/physics/table/evaluator 和 exact resume；clean/no-clobber lineage | Franco 确认 exact 五动作顺序；新正手采用/站位裁定 | [formal 发射工序](../../operations/run_action_ball_curriculum_no_clobber.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
+
+### 0.4 Later — N=73 与部署边界
+
+| ID | 状态 | 最迟边界 / 交付 | 完成验收 | 必须由人或硬件提供 | 证据入口 |
+| --- | --- | --- | --- | --- | --- |
+| N73 | `LATER` | N=73 发射前完成 exact ordered 73 manifest、逐件 compiler/safety/admission、动作专属 ready/ball center/support、full-body 与 fixed-width continuous intent 的任意 N 压力门 | 73 件 order/UID/motion bytes 全钉；逐动作 frontier 与 heldout 独立；broker/curriculum/checkpoint/exact resume 压力通过；不得由 N5 续成 | 若 repo/Pod 制品不完整，需提供缺失 bytes、证书、站位元数据和人类采用顺序 | [动作库终审](EXP-MOTION-CANONICAL-LIBRARY-20260723.md)、[ActionBall 合同](../../interfaces/action_conditioned_ball_first_contract.md) |
+| DEP-OBS | `LATER` | 部署意图重训前落地 OptiTrack pose + gyro angular velocity + causal base linear velocity producer；用新合同加入 localization age/valid 和实测 noise/latency/dropout | capture/source/receive/consume timestamp 链、marker→`base_link`、venue→table、gyro frame、marker→COM 修正、hold-last/stale 语义及 Isaac/MuJoCo/C++ parity 全过；不得伪装成 194-D | OptiTrack v2 记录、Motive smoothing、遮挡/dropout、两组 SE(3) 外参、gyro bias/对齐 | [Policy 观测合同](../../interfaces/policy_observation_action.md)、[G07](../../gates/G07_mujoco_to_real.md) |
+| DEP-PHYSICS | `LATER` | 任何正式 landing/真机前闭合 table effective restitution 与切向参数，并让训练/planner/MuJoCo/C++ 共用同一冻结接触模型 | 新测量 receipt、拟合 YAML、跨引擎 golden parity 和 binary metadata 拒载负例齐全 | OptiTrack 30 分钟落球/反弹补测及 Motive 配置 | [G03](../../gates/G03_data_processing_and_physics_calibration.md)、[G06](../../gates/G06_isaac_to_mujoco.md) |
+| DEP-CONTROL | `LATER` | 只有 1000-update 量尺证明 policy 独有 bang-bang 后才评估 executed-qdes penalty/CAPS/EMA/governor；真机前无论采用与否都闭合 A3 硬边界 | 干预率、teacher phase delay、strike/return、拍速、imitation 与 Isaac/MuJoCo/C++ 同合同；G06/G07 dry-run、急停和 no-publish 门通过 | A3 逐电机 command velocity/acceleration/jerk（若采用）、PD/effort/torque-speed/delay 与 Franco 真机放行 | [G06](../../gates/G06_isaac_to_mujoco.md)、[G07](../../gates/G07_mujoco_to_real.md) |
+
 ## 1. 第一性原理裁定
 
 ### 1.1 先产 policy，但不能在错误合同上产
@@ -160,9 +199,9 @@ fresh fixed-194 v2 合同中已经有：
 - 31 个上一 policy action；
 - 三轴 base angular velocity、三轴 base linear velocity、projected gravity；
 - motion anchor orientation、62-D teacher command；
-- 相对 base goal、相对 racket target、目标拍速、time-to-strike、swing identity；
-- demanded signed face、完整 table-relative base pose、teacher-start 倒计时。冻结 action
-  identity 只在控制面，不在 actor observation。
+- 相对 base goal、相对 racket target、目标拍速、time-to-strike、teacher-start 倒计时；
+- demanded signed face、完整 table-relative base pose。冻结 action identity 只在控制面，不在
+  actor observation。
 
 这里的 `HITTER` 是 177-D prefix 的来源；仓库没有一份独立、可替代上述布局的 “SMASH actor
 contract”。SMASH 相关论文/实现可提供 reward、噪声或训练方法启发，但不能凭名字推断另一组列。
@@ -213,10 +252,14 @@ policy。[Ruckig](https://arxiv.org/abs/2105.04830)确实能对多自由度轨�
 acceleration 和 jerk 三阶约束，但这只证明该类 governor 有严格约束实现，不证明未经 A3
 参数标定的 governor 对快速击球无损。
 
-## 2. 已完成证据（截至本分支 2026-07-30）
+## 2. 已完成证据（附录 A；不参与调度）
+
+本节只保存不可替代的运行数字、SHA、失败根因和完成边界。新工作不得从这里领取；状态变化先更新
+[当前执行看板](#0-当前执行看板本文唯一活跃-todo)，完成后再把证据移入本节。
 
 | 项 | 证据 | 当前边界 |
 | --- | --- | --- |
+| fresh fixed-194 v2 source + focused suite | commits `291bc20e` / `0227cfe9` 已让当前 ActionBall trainer 只实例化固定 194-D v2，删除 `policy.action_one_hot`，N>1 fail-closed，并对 exact 17-term layout、旧同宽重标、teacher-start lazy bind 加回归；Pod1 exact `0227cfe9` focused suite 为 **391 passed, 12 skipped in 61.35 s** | dependency/contract 测试已闭合；真实 ObservationManager、PPO update 与 finite checkpoint 仍由 fresh `1 env × 2 updates` smoke 验证 |
 | dynamic-ready 出生与 hold | loop/block 在 Pod 各闭环保持 `0.8 s / 40` policy steps，双脚接触率 `1.0`，table/fall/hard/nonfinite 零；可见 raw-reset 图证明原生 reset 直立 | 证明出生与 nominal hold，不证明 teacher 全轨、strike 或 long |
 | dynamic-ready trainer 接线 | candidate/hold receipt 双 pin；physical state、初始 qdes、last action、actor bias 和 motion frame 0 原子一致；Pod focused `63 passed` | 当前只授权 exact N=1 diagnostic |
 | 170-update overflow | diagnostic joint-safety summary 已改为每 update 按事务排空 | 旧 overflow checkpoint 不续；fresh run 重新开始 |
@@ -267,7 +310,11 @@ fresh r2 的 smoke/probe/milestone specs 现绑定 source `319ae8ff`，分别使
 `n1hr_smoke/probe/milestone1000_fastball110_319ae8ff_block_gpu2_seed0_r2` namespace；未发射的
 旧 r1 probe/milestone spec 已删除，失败 smoke r1 spec 留作 exact 证据。
 
-## 3. 分阶段最迟闭合项
+## 3. 分阶段最迟闭合项（附录 B；边界参考，不参与调度）
+
+本节保存各阶段的完整门槛语义，避免看板为容纳细节而再次变成长流水账。所有当前动作均须在
+[当前执行看板](#0-当前执行看板本文唯一活跃-todo)有且只有一行；本节未出现在看板中的条目
+不得被解释为当前算力或实现队列。
 
 ### 3.1 首个 N=1 long 前（历史 194-D 波已完成；fresh fixed-194 v2 仍缺 Pod smoke）
 
@@ -435,7 +482,10 @@ A/B；验收是 numerical/state parity、旧收据重建、exact resume 和固�
 exact-resume parity 与 N5 launcher 工程本身**不需要新的人工信息**；只需要可用的 Pod 槽和现有
 仓库/制品访问。
 
-## 4. 决策账本
+## 4. 决策账本（附录 C；采用/拒绝依据，不参与调度）
+
+本表说明为什么采用、推迟或拒绝某项设计，不承担 TODO 状态。当前状态只维护在
+[当前执行看板](#0-当前执行看板本文唯一活跃-todo)。
 
 | 项 | 分类 | 最迟边界 | 是否需要学习 A/B | 当前决定 |
 | --- | --- | --- | --- | --- |
@@ -470,7 +520,7 @@ exact-resume parity 与 N5 launcher 工程本身**不需要新的人工信息**�
 | OptiTrack/IMU 噪声与延迟 | 实测后直接建模 | 部署意图重训前 | 不用猜值 A/B；估计器方案可 canary | 旧青瞳数字只作量级先验 |
 | 关键通道 observation history | canary | 实测显示单帧别名后 | 是 | 首个 N1 不加；若做须绑定 reset/exact-resume state |
 
-## 5. 收口判据
+## 5. 收口判据（附录 D；验收参考）
 
 ### 可发下一条 fresh 194-D v2 N=1
 
@@ -496,7 +546,7 @@ exact-resume parity 与 N5 launcher 工程本身**不需要新的人工信息**�
   Reward/table/evaluator 全闭合；
 - 使用新的 clean/no-clobber lineage，不把 N=1 diagnostic 结果冒充 formal 证据。
 
-## 6. 证据入口
+## 6. 证据入口（附录 E）
 
 - 当前训练 Gate：[G05 Isaac training first loop](../../gates/G05_isaac_training_first_loop.md)
 - ActionBall 语义：[按动作条件化 Ball-first 合同](../../interfaces/action_conditioned_ball_first_contract.md)

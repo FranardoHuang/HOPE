@@ -13,6 +13,13 @@
 
 ## 2026-07-30（A3 stable-upper successor）
 
+- fresh ActionBall actor 合同切为固定 194-D
+  `action_ball_table_pose_twist_heading_task_teacher_start_v2`，当前 trainer 不再创建
+  `action_one_hot`；UID/slot 只留控制面，N5/N73 在 fixed-width continuous future-motion
+  intent 前 fail-closed。Pod1 exact `0227cfe9` focused suite 为
+  `391 passed, 12 skipped in 61.35 s`；下一步是 current-source repin 与 fresh
+  `1 env × 2 updates` ObservationManager/PPO smoke。当前 TODO 只看
+  [分阶段准备看板](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md#0-当前执行看板本文唯一活跃-todo)。
 - exact `f2c54fc3` 的 frame-consistent 194-D stable-ready loop/block 已在 Pod1 各完成
   `1 env×2` 与 `4096 env×5`：14 份 checkpoint 全部 finite，smoke 全安全，probe mean episode
   约 `48–72` steps 并跨 `t_hit`；loop/block 已分别出现 `867/2268` 个 strike opportunity。
