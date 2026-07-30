@@ -3093,6 +3093,19 @@ class MotionCommand(CommandTerm):
                     broker_state_before, original_error=exc
                 )
             raise
+        if diagnostic_fast_path:
+            # A diagnostic exception poisons the run instead of restoring it.
+            # Do not clone formal Motion rollback tensors or whole-run
+            # containers on every successful short episode.
+            return {
+                "receipts": receipts,
+                "receipt_sha256": tuple(receipt_sha256),
+                "request_rows": tuple(request_rows),
+                "next_generation": next_generation,
+                "spawn": spawn,
+                "quat": quat,
+            }
+        # Preserve the formal transaction's exact field order and values.
         return {
             "broker_state_before": broker_state_before,
             "receipts": receipts,
@@ -3120,6 +3133,11 @@ class MotionCommand(CommandTerm):
         *,
         original_error: BaseException,
     ) -> None:
+        if self._action_ball_birth_broker.diagnostic_fast_path:
+            raise RuntimeError(
+                "diagnostic action-ball reset is fail-stop and cannot be "
+                "rolled back or retried"
+            ) from original_error
         rollback_error = None
         broker_state_before = transaction["broker_state_before"]
         if broker_state_before is not None:
@@ -6829,7 +6847,7 @@ class MotionCommand(CommandTerm):
             ]
 
     def _resample_command(self, env_ids: Sequence[int]):
-        """Run one resample with all-or-nothing Motion state on action-ball true reset."""
+        """Run one formal atomic or diagnostic fail-stop action-ball true reset."""
 
         if len(env_ids) == 0:
             return
@@ -6848,6 +6866,12 @@ class MotionCommand(CommandTerm):
         env_ids_t = env_ids_t.to(
             device=self.device, dtype=torch.long
         ).reshape(-1)
+        if self._action_ball_birth_broker.diagnostic_fast_path:
+            # Diagnostic broker/provider/domain state is intentionally not
+            # recoverable after a true-reset exception.  Let the one attempt
+            # either publish normally or poison the whole run; a formal Motion
+            # snapshot here is both unused and a dominant short-episode tax.
+            return self._resample_command_body(env_ids_t)
         snapshot = self._action_ball_reset_motion_snapshot(env_ids_t)
         try:
             return self._resample_command_body(env_ids_t)
@@ -6982,6 +7006,12 @@ class MotionCommand(CommandTerm):
                         env_ids_t, elapsed_s=0.0
                     )
                 except Exception as exc:
+                    if self._action_ball_birth_broker.diagnostic_fast_path:
+                        # Diagnostic transactions carry no rollback fields.
+                        # Any failure after reserve poisons the run and must
+                        # escape unchanged; retrying could reuse an advanced
+                        # provider/RNG tape under the same logical reset.
+                        raise
                     # _write_canonical_ready_state already restores a failed setter.  A later
                     # commit failure needs the same physical rollback before rewinding the exact
                     # broker/provider/domain tape.

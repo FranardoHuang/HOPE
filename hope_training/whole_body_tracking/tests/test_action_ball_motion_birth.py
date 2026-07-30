@@ -319,11 +319,17 @@ def _motion_harness(
     num_envs: int,
     *,
     provider_bad_at: int | None = None,
+    diagnostic_fast_path: bool = False,
 ):
     runtime = C.MotionCommand._action_ball_runtime_module()
     bindings = _bindings(runtime)
     pins = _pins(runtime)
-    broker = runtime.ActionBirthBroker(bindings, pins, "no_move")
+    broker = runtime.ActionBirthBroker(
+        bindings,
+        pins,
+        "no_move",
+        diagnostic_unauthorized=diagnostic_fast_path,
+    )
     authority = _DomainAuthority(runtime, bindings, "no_move")
     provider = _BirthProvider(runtime, bad_at=provider_bad_at)
     broker.bind_domain_claim_authority(authority)
@@ -875,6 +881,27 @@ def test_bad_provider_row_rolls_back_broker_tapes_motion_and_sampler():
     command._resample_command_body = types.MethodType(
         failing_body, command
     )
+    snapshot_calls = 0
+    restore_calls = 0
+    original_snapshot = command._action_ball_reset_motion_snapshot
+    original_restore = command._restore_action_ball_reset_motion_snapshot
+
+    def counted_snapshot(self, reset_env_ids):
+        nonlocal snapshot_calls
+        snapshot_calls += 1
+        return original_snapshot(reset_env_ids)
+
+    def counted_restore(self, reset_env_ids, state):
+        nonlocal restore_calls
+        restore_calls += 1
+        return original_restore(reset_env_ids, state)
+
+    command._action_ball_reset_motion_snapshot = types.MethodType(
+        counted_snapshot, command
+    )
+    command._restore_action_ball_reset_motion_snapshot = types.MethodType(
+        counted_restore, command
+    )
 
     broker_before = deepcopy(broker.state_dict())
     provider_before = deepcopy(provider.state_dict())
@@ -899,6 +926,8 @@ def test_bad_provider_row_rolls_back_broker_tapes_motion_and_sampler():
     with pytest.raises(RuntimeError, match="injected bad provider row"):
         command._resample_command(env_ids)
 
+    assert snapshot_calls == 1
+    assert restore_calls == 1
     assert provider.issue_invocations == bad_at + 1
     assert broker.state_dict() == broker_before
     assert provider.state_dict() == provider_before
@@ -921,6 +950,120 @@ def test_bad_provider_row_rolls_back_broker_tapes_motion_and_sampler():
     assert command._action_ball_seen_birth_receipts == seen_before
     assert command.robot.root_write_calls == root_writes_before
     assert command.robot.joint_write_calls == joint_writes_before
+
+
+def test_diagnostic_reset_skips_formal_snapshot_and_does_not_retry():
+    command, _runtime, broker, provider, _authority = _motion_harness(
+        8, diagnostic_fast_path=True
+    )
+    command._event_scheduler = None
+    command.canonical_ready_mode = True
+    command._multiseg = True
+    env_ids = torch.arange(8, dtype=torch.long)
+
+    def forbidden_snapshot(self, reset_env_ids):
+        raise AssertionError("diagnostic reset constructed formal snapshot")
+
+    def forbidden_restore(self, reset_env_ids, state):
+        raise AssertionError("diagnostic reset restored formal snapshot")
+
+    rollback_calls = 0
+
+    def forbidden_rollback(
+        self, reset_env_ids, transaction, *, original_error
+    ):
+        nonlocal rollback_calls
+        rollback_calls += 1
+        raise AssertionError("diagnostic reset attempted rollback")
+
+    write_calls = 0
+
+    def fail_once(self, reset_env_ids, **kwargs):
+        nonlocal write_calls
+        write_calls += 1
+        raise RuntimeError("injected diagnostic write failure")
+
+    command._action_ball_reset_motion_snapshot = types.MethodType(
+        forbidden_snapshot, command
+    )
+    command._restore_action_ball_reset_motion_snapshot = types.MethodType(
+        forbidden_restore, command
+    )
+    command._rollback_action_ball_true_reset = types.MethodType(
+        forbidden_rollback, command
+    )
+    command._write_canonical_ready_state = types.MethodType(
+        fail_once, command
+    )
+
+    with pytest.raises(
+        RuntimeError, match="injected diagnostic write failure"
+    ):
+        command._resample_command(env_ids)
+
+    # One reserved batch followed by one failed write is terminal for this
+    # diagnostic run.  No wrapper retry and no exact rollback are permitted.
+    assert provider.issue_invocations == len(env_ids)
+    assert write_calls == 1
+    assert rollback_calls == 0
+    first_slot = int(command.clip_id[0])
+    assert (
+        broker.pending_receipt(
+            env_id=0,
+            reset_generation=1,
+            action_uid=command._action_ball_action_uids[first_slot],
+            action_slot=first_slot,
+            reset_kind="true_reset",
+        )
+        is not None
+    )
+
+
+def test_diagnostic_reserve_transaction_omits_formal_rollback_fields():
+    command, _runtime, _broker, _provider, _authority = _motion_harness(
+        8, diagnostic_fast_path=True
+    )
+    env_ids = torch.arange(8, dtype=torch.long)
+
+    transaction = command._reserve_action_ball_true_reset(env_ids)
+
+    assert set(transaction) == {
+        "receipts",
+        "receipt_sha256",
+        "request_rows",
+        "next_generation",
+        "spawn",
+        "quat",
+    }
+    with pytest.raises(
+        RuntimeError, match="fail-stop.*cannot be rolled back or retried"
+    ):
+        command._rollback_action_ball_true_reset(
+            env_ids,
+            transaction,
+            original_error=RuntimeError("injected diagnostic failure"),
+        )
+
+
+def test_formal_reserve_transaction_retains_exact_rollback_fields():
+    command, _runtime, _broker, _provider, _authority = _motion_harness(8)
+    env_ids = torch.arange(8, dtype=torch.long)
+
+    transaction = command._reserve_action_ball_true_reset(env_ids)
+
+    assert tuple(transaction) == (
+        "broker_state_before",
+        "receipts",
+        "receipt_sha256",
+        "request_rows",
+        "next_generation",
+        "spawn",
+        "quat",
+        "motion_reset_generation_before",
+        "motion_swing_generation_before",
+        "motion_birth_receipts_before",
+        "motion_seen_receipts_before",
+    )
 
 
 def test_forged_runtime_birth_and_untrusted_paths_are_rejected(tmp_path):
