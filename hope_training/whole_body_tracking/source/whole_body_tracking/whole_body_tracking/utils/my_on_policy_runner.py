@@ -5282,24 +5282,13 @@ class MotionOnPolicyRunner(OnPolicyRunner):
         archives = snapshot.get("terminal_archives")
         if not isinstance(archives, tuple):
             raise RuntimeError("joint-safety terminal_archives must be a tuple")
-        diagnostic_latest_archives = (
+        diagnostic_compact_evidence = (
             self._action_ball_diagnostic_unauthorized()
         )
-        if diagnostic_latest_archives:
-            # The non-promotable screen deliberately retains only the latest
-            # terminal proof per environment.  Replacing an older slot creates
-            # valid sequence gaps and leaves list order unrelated to global
-            # archive order, so canonicalize the borrowed view before deep
-            # validation.  Formal evidence keeps exact append-only order.
-            archives = tuple(
-                sorted(
-                    archives,
-                    key=lambda archive: (
-                        archive.get("archive_sequence", -1)
-                        if isinstance(archive, dict)
-                        else -1
-                    ),
-                )
+        if diagnostic_compact_evidence and archives:
+            raise RuntimeError(
+                "diagnostic joint-safety evidence must not materialize "
+                "per-reset terminal transcripts"
             )
         archive_used = self._joint_safety_int(
             snapshot.get("terminal_archive_used"),
@@ -5341,7 +5330,6 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             self, "_joint_safety_last_archive_sequence", None
         )
         seen_archive_keys = set()
-        seen_archive_envs = set()
         validated_archives = []
         for archive_index, archive in enumerate(archives):
             if (
@@ -5357,25 +5345,15 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 name=f"terminal archive {archive_index}.archive_sequence",
                 minimum=0,
             )
-            if diagnostic_latest_archives:
-                if (
-                    previous_archive_sequence is not None
-                    and archive_sequence <= previous_archive_sequence
-                ):
-                    raise RuntimeError(
-                        "diagnostic joint-safety terminal archive sequence "
-                        "is not strictly increasing"
-                    )
-            else:
-                expected_archive_sequence = (
-                    0
-                    if previous_archive_sequence is None
-                    else previous_archive_sequence + 1
+            expected_archive_sequence = (
+                0
+                if previous_archive_sequence is None
+                else previous_archive_sequence + 1
+            )
+            if archive_sequence != expected_archive_sequence:
+                raise RuntimeError(
+                    "joint-safety terminal archive sequence is discontinuous"
                 )
-                if archive_sequence != expected_archive_sequence:
-                    raise RuntimeError(
-                        "joint-safety terminal archive sequence is discontinuous"
-                    )
             previous_archive_sequence = archive_sequence
             if (
                 archive.get("included_in_accumulator") is not True
@@ -5394,12 +5372,6 @@ class MotionOnPolicyRunner(OnPolicyRunner):
                 raise RuntimeError(
                     f"joint-safety terminal archive {archive_index} env is out of range"
                 )
-            if diagnostic_latest_archives:
-                if env_id in seen_archive_envs:
-                    raise RuntimeError(
-                        "diagnostic joint-safety terminal archive repeats an env"
-                    )
-                seen_archive_envs.add(env_id)
             sequence = self._joint_safety_int(
                 archive.get("policy_step_sequence"),
                 name=f"terminal archive {archive_index}.policy_step_sequence",
@@ -5525,10 +5497,9 @@ class MotionOnPolicyRunner(OnPolicyRunner):
             # event, and a finite q_des projection is a non-terminal learning
             # signal.  Only a raw physical hard-edge observation is required
             # to have a matching terminal-reset forensic archive in formal
-            # evidence.  The diagnostic screen keeps only the latest archive
-            # per env, so its immutable per-step aggregate is authoritative
-            # and an evicted older transcript cannot be required here.
-            if diagnostic_latest_archives:
+            # evidence.  The diagnostic screen keeps the same immutable
+            # per-step aggregate but deliberately omits reset transcripts.
+            if diagnostic_compact_evidence:
                 continue
             unsafe_envs = torch.any(
                 row["actual_hard_edge_joint_count"].gt(0),

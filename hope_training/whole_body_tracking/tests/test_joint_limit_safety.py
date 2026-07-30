@@ -1265,7 +1265,7 @@ def test_terminal_archive_overflow_is_sticky_and_never_overwrites():
         action.process_actions(torch.zeros(2, 2))
 
 
-def test_diagnostic_terminal_archive_keeps_latest_proof_per_env_at_4096():
+def test_diagnostic_reset_batches_keep_compact_device_evidence_at_4096():
     num_envs = 4096
     action, _, asset = _action_and_env(
         num_envs=num_envs,
@@ -1280,14 +1280,10 @@ def test_diagnostic_terminal_archive_keeps_latest_proof_per_env_at_4096():
     _finish_guarded_policy_step(action, asset)
     action.reset(env_ids=all_envs)
     first = action.joint_safety_ledger_snapshot()
-    assert first["terminal_archive_used"] == num_envs
+    assert first["terminal_archive_used"] == 0
     assert first["terminal_archive_overflow_latch"] is False
-    assert {
-        entry["policy_step_sequence"]
-        for entry in first["terminal_archives"]
-    } == {0}
+    assert first["terminal_archives"] == ()
 
-    latest_sequence = torch.zeros(num_envs, dtype=torch.long)
     for env_ids in (
         torch.arange(0, num_envs, 2),
         torch.arange(1, num_envs, 2),
@@ -1296,47 +1292,12 @@ def test_diagnostic_terminal_archive_keeps_latest_proof_per_env_at_4096():
         action.process_actions(torch.zeros(num_envs, 1))
         _finish_guarded_policy_step(action, asset)
         action.reset(env_ids=env_ids)
-        latest_sequence[env_ids] = (
-            action._joint_safety_ledger._policy_step_sequence
-        )
 
     snapshot = action.joint_safety_ledger_snapshot()
-    assert snapshot["terminal_archive_used"] == num_envs
+    assert snapshot["terminal_archive_used"] == 0
     assert snapshot["terminal_archive_overflow_latch"] is False
     assert snapshot["terminal_archive_overflow_count"] == 0
-    by_env = {
-        entry["env_id"]: entry
-        for entry in snapshot["terminal_archives"]
-    }
-    assert len(by_env) == num_envs
-    for env_id in range(num_envs):
-        assert by_env[env_id]["policy_step_sequence"] == int(
-            latest_sequence[env_id].item()
-        )
-
-
-def test_runner_accepts_diagnostic_latest_archive_sequence_gap(
-    monkeypatch,
-):
-    runner_mod = _load_runner_module(monkeypatch, _load_contract_module())
-    action, env = _two_step_cross_reset_action_ball_ledger()
-    env.cfg.commands.racket_target.action_ball_diagnostic_unauthorized = True
-    _, snapshot = action.prepare_joint_safety_ledger_consume()
-    archive = snapshot["terminal_archives"][0]
-    archive["archive_sequence"] = 17
-    archive["payload_bytes"] = action._joint_safety_payload_bytes(archive)
-
-    runner = runner_mod.MotionOnPolicyRunner.__new__(
-        runner_mod.MotionOnPolicyRunner
-    )
-    runner.env = types.SimpleNamespace(unwrapped=env)
-    runner.num_steps_per_env = 2
-    contract = runner._joint_safety_runtime_contract(action)
-    validated = runner._validate_joint_safety_update_snapshot(
-        snapshot, step=0, contract=contract
-    )
-    assert validated["archive_count"] == 1
-    assert validated["last_archive_sequence"] == 17
+    assert snapshot["terminal_archives"] == ()
 
 
 def test_one_shot_consume_fails_closed_even_when_guard_is_disabled():
@@ -2334,6 +2295,7 @@ def test_diagnostic_finite_hard_edge_is_terminal_training_sample(
     )
     assert payload["status"] == "fatal_actual_hard_edge"
     assert payload["fatal_flags"]["actual_hard_edge_event_count"] > 0
+    assert payload["terminal"]["archive_count"] == 0
     assert len(
         list(
             (tmp_path / "joint_safety_ledgers").glob(

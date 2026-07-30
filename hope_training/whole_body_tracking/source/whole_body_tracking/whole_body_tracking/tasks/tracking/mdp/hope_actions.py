@@ -649,7 +649,7 @@ class ClampedJointPositionAction(JointPositionAction):
             raise ValueError(
                 "racket_target.action_ball_diagnostic_unauthorized must be an exact boolean"
             )
-        self._joint_safety_diagnostic_latest_archive = bool(
+        self._joint_safety_diagnostic_compact_evidence = bool(
             getattr(racket_cfg, "target_mode", None) == "action_ball"
             and diagnostic_unauthorized
         )
@@ -659,7 +659,7 @@ class ClampedJointPositionAction(JointPositionAction):
         # This state is never cleared by per-environment reset and is copied to the host only once
         # at the PPO update boundary by ``consume_actual_joint_forbidden_diagnostic``.
         self._actual_joint_forbidden_diagnostic_enabled = (
-            self._joint_safety_diagnostic_latest_archive
+            self._joint_safety_diagnostic_compact_evidence
         )
         diagnostic_all_joint_names = tuple(
             str(name)
@@ -1142,11 +1142,6 @@ class ClampedJointPositionAction(JointPositionAction):
         self._joint_safety_terminal_archives: list[dict[str, Any]] = []
         self._joint_safety_terminal_archive_index: dict[
             tuple[int, int], int
-        ] = {}
-        # Diagnostic-only bounded view: one latest terminal proof per live environment.  Formal
-        # runs never consult this index and retain every (policy_step, env) proof fail-closed.
-        self._joint_safety_diagnostic_terminal_archive_env_index: dict[
-            int, int
         ] = {}
         self._joint_safety_next_archive_sequence = 0
         self._joint_safety_terminal_archive_bytes = 0
@@ -1934,6 +1929,15 @@ class ClampedJointPositionAction(JointPositionAction):
         ledger = self._joint_safety_ledger
         if ledger is None or not ledger.has_started:
             return
+        if self._joint_safety_diagnostic_compact_evidence:
+            # The fixed-domain diagnostic already retains immutable per-policy-
+            # step hard-edge counters/minimum gaps plus the device-side
+            # joint/side/episode-age attribution ledger.  Materializing one
+            # full q/qdot transcript per reset changes no policy input, reward,
+            # termination, or optimizer sample, but makes short-episode
+            # training O(number of resets) in Python and CPU transfers.  Formal
+            # ActionBall keeps the complete reset transcript path below.
+            return
         ids = self._joint_safety_env_id_tensor(env_ids)
         if ids.numel() == 0:
             return
@@ -1942,19 +1946,8 @@ class ClampedJointPositionAction(JointPositionAction):
             (ledger._policy_step_sequence, env_id)
             for env_id in env_id_list
         ]
-        replacement_slots: dict[tuple[int, int], int] = {}
-        if self._joint_safety_diagnostic_latest_archive:
-            for env_id, key in zip(env_id_list, keys):
-                if key in self._joint_safety_terminal_archive_index:
-                    continue
-                slot = self._joint_safety_diagnostic_terminal_archive_env_index.get(
-                    env_id
-                )
-                if slot is not None:
-                    replacement_slots[key] = slot
         new_count = sum(
             key not in self._joint_safety_terminal_archive_index
-            and key not in replacement_slots
             for key in keys
         )
         assert self._joint_safety_terminal_archive_capacity is not None
@@ -2203,30 +2196,10 @@ class ClampedJointPositionAction(JointPositionAction):
             }
             payload_bytes = self._joint_safety_payload_bytes(entry)
             entry["payload_bytes"] = payload_bytes
-            replacement_slot = replacement_slots.get(key)
-            if replacement_slot is None:
-                archive_slot = len(self._joint_safety_terminal_archives)
-                self._joint_safety_terminal_archives.append(entry)
-                self._joint_safety_terminal_archive_bytes += payload_bytes
-            else:
-                previous = self._joint_safety_terminal_archives[
-                    replacement_slot
-                ]
-                previous_key = (
-                    int(previous["policy_step_sequence"]),
-                    int(previous["env_id"]),
-                )
-                del self._joint_safety_terminal_archive_index[previous_key]
-                self._joint_safety_terminal_archive_bytes += (
-                    payload_bytes - int(previous["payload_bytes"])
-                )
-                self._joint_safety_terminal_archives[replacement_slot] = entry
-                archive_slot = replacement_slot
+            archive_slot = len(self._joint_safety_terminal_archives)
+            self._joint_safety_terminal_archives.append(entry)
+            self._joint_safety_terminal_archive_bytes += payload_bytes
             self._joint_safety_terminal_archive_index[key] = archive_slot
-            if self._joint_safety_diagnostic_latest_archive:
-                self._joint_safety_diagnostic_terminal_archive_env_index[
-                    env_id
-                ] = archive_slot
             self._joint_safety_next_archive_sequence += 1
 
     def _joint_safety_accumulator_snapshot(self) -> dict[str, Any]:
@@ -2404,7 +2377,6 @@ class ClampedJointPositionAction(JointPositionAction):
         self._joint_safety_accumulator_min_hard_upper_gap.fill_(float("inf"))
         self._joint_safety_terminal_archives.clear()
         self._joint_safety_terminal_archive_index.clear()
-        self._joint_safety_diagnostic_terminal_archive_env_index.clear()
         self._joint_safety_terminal_archive_bytes = 0
         self._joint_safety_policy_step_summaries.clear()
         self._joint_safety_policy_step_summary_bytes = 0
