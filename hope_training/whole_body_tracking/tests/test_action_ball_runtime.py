@@ -2460,7 +2460,35 @@ def test_diagnostic_batch_birth_callbacks_match_scalar_fixed_tape_n5():
         task.to_dict() for task in scalar_tasks
     ]
     assert batched_solver.state_dict() == scalar_solver.state_dict()
-    assert batched_pool.state_dict() == scalar_pool.state_dict()
+    # Diagnostic pools intentionally omit the formal compact lifecycle and
+    # cannot produce an exact-resume state_dict.  Assert the boundary on both
+    # sides instead of mixing a formal pool with diagnostic birth authority.
+    for pool in (scalar_pool, batched_pool):
+        with pytest.raises(
+            R.ActionBallContractError,
+            match="task lifecycle must cover sample indices",
+        ):
+            pool.state_dict()
+    for name in (
+        "_births",
+        "_pending",
+        "_issued_task_transcript_sha256",
+        "_cursor",
+        "_refill_index",
+        "_proposed_by_birth",
+        "_sample_assignments",
+        "_ledger",
+        "_seen_sha256",
+        "_seen_sample_sha256",
+        "_retired_births",
+        "_task_lifecycle",
+        "_last_sample_index",
+        "_last_sample_draw_end",
+        "_retired_generation",
+        "_diagnostic_birth_by_env",
+        "_diagnostic_active_sample_sha256",
+    ):
+        assert getattr(batched_pool, name) == getattr(scalar_pool, name)
     assert {
         uid: batched_pool.ledger(uid).to_dict()
         for uid in batched.ordered_action_uids
