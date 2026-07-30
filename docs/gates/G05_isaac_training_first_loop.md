@@ -4011,3 +4011,13 @@ proposal 全被 face gate 拒绝；loop seed0 的 post-strike fall 为 `887/946`
 table/actual-hard 为 `590/325`。因此窗口与 denominator 已通，动作质量、signed-face/contact
 对齐及 seed 稳定性仍未通过；这些不是 teacher-start source merge 的阻断理由，也不能作为 N5、
 landing 或部署证据。下一条 fresh 195-D source 仍须独立 Pod `1 env×2` 构造验证。
+
+2026-07-30 19:50 CST，GPU1 block seed0 已自然产出 `model_600.pt`：7,197,343 bytes，
+SHA-256=`11bee4911f54d9d43e0a112f843009f5811a746475b82d5fe050ca5fffb8470f`，80 个 tensor
+全部 finite；exact PID/PGID、cwd、GPU UUID、source、claim 与 namespace 均匹配。update608
+iteration=`20.94 s`、mean episode=`440.77`、strike opportunity=`951`，
+table/fall/actual-hard/qdes-forbidden=`4/5/14/0`，无 Traceback/RuntimeError/NaN/identity/
+receipt/counter drift。但 capture/return 仍为零，`937/951` 被 face gate 拒绝，exact strike
+position/velocity/normal error=`0.2426 m / 1.3928 m/s / 86.31°`，实际拍速仅
+`0.2832 m/s`（目标 `1.2793 m/s`）。因此出生/episode/safety 恢复已形成新证据，学习质量仍未
+通过；按预注册继续到 update1000，不热改超参。

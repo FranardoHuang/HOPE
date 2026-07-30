@@ -45,6 +45,11 @@
   `action_ball_table_pose_twist_heading_task_teacher_start_n1`；exact `020dc8d9` 在 Pod1 的
   observation/action-set/launcher/schema focused suite 为 `390 passed, 9 skipped in 71.26 s`。
   旧三条 194-D 运行不重标、不 exact resume；195-D 真实 Isaac `1 env×2` 仍是下一构造门。
+- Pod1 block seed0 已到 update608 并自然产出 finite `model_600.pt`（80 tensors；
+  SHA `11bee491…8470f`）。mean episode=`440.77`，table/fall/actual-hard/qdes-forbidden
+  为 `4/5/14/0`，说明出生与安全风暴基本恢复；但 951 个 strike opportunity 仍零 capture，
+  其中 937 个被 face gate 拒绝，实际拍速 `0.2832 m/s` 对目标 `1.2793 m/s`。当前主问题已收窄
+  为 teacher 击球位置/拍速/拍面学习，而非 reset 合同；继续到 update1000，不热改。
 - Pod1 clean `eb2799b1` 的 table smoke 已完成 E2：32 个 A3 body×top/keepout/net/左右 post
   五列 matrix 全构造，五 role 均有真实 PhysX 正控，四个子步覆盖；五次 automatic reset 后
   table raw reason/ledger/force 全零。log SHA 为 `15c52d29…26aac`，unsupported/Traceback/FAIL
