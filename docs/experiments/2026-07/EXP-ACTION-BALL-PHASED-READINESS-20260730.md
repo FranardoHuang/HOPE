@@ -32,7 +32,7 @@
 
 | ID | 状态 | 当前交付 / 唯一下一动作 | 完成验收 | 阻塞输入 | 证据入口 |
 | --- | --- | --- | --- | --- | --- |
-| N1-RUN | `IN_PROGRESS` | r3 已由 watchdog 自然收口；fresh r4 smoke 已完成 2 个真实 PPO update、两份 checkpoint 全 finite。唯一下一动作是对 r4 `4096 env × 5 updates` probe 生成 canonical claim，并在 Pod1 GPU2 fresh no-clobber namespace 发射 | probe 五份 checkpoint finite，episode 跨 `t_hit`，teacher-start 合同不漂移；无 NaN/identity drift，table/fall/qdes-hard/actual-hard 不持续爆炸。通过即 fresh 发 `4096 × 1001` milestone1000 | 无外部阻塞；发射当刻仍须 GPU2 自然空闲、全 Pod Kit boot lock 可用且目标 namespace 不存在 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[结果判读](../../operations/read_and_report_results.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
+| N1-RUN | `READY` | r3 已自然收口，fresh r4 smoke 已通过；r4 `4096 env × 5 updates` probe canonical plan PASS，claim=`fca61705…b813`。唯一下一动作是在 Pod1 GPU2 fresh no-clobber namespace 用该 claim 发射 probe | probe 五份 checkpoint finite，episode 跨 `t_hit`，teacher-start 合同不漂移；无 NaN/identity drift，table/fall/qdes-hard/actual-hard 不持续爆炸。通过即 fresh 发 `4096 × 1001` milestone1000 | 无外部阻塞；发射当刻仍须 GPU2 自然空闲、全 Pod Kit boot lock 可用且目标 namespace 不存在 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[结果判读](../../operations/read_and_report_results.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
 
 ### 0.3 Next — long 已运行后的判读与 formal N=5 前置
 
