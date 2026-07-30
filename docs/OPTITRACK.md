@@ -229,15 +229,15 @@ calibrator. The measured correction should then be approximately identity. In
 that configuration, do not run `p1_pelvis_tf_publisher`; doing so would apply
 the correction twice.
 
-The v2 CAD table defines ten markers, whose nominal centroid is
-`[-0.0024, 0, -0.1490] m` in `pelvis_link`. However, `f1` and `b1` are not
-present in the current `a3_hip_marker_shell_p1_mocap_balls_0702.x_t` shell.
-The default tool configuration therefore uses its eight realized markers
-(`f2`–`f5`, `b2`–`b5`), with a centroid of `[-0.0030, 0, -0.1575] m`. If its
-axes are already aligned, the current-shell CAD cross-check is a Motive pivot
-translation of `[+3.0, 0, +157.5] mm`; include `f1` or `b1` only after
-fabrication and measurement. The live calibration result remains authoritative
-because it captures the installed marker plate and its actual orientation.
+The v2 CAD table and the current
+`a3_hip_marker_shell_p1_mocap_balls_0702.x_t` shell define all ten markers
+(`f1`–`f5`, `b1`–`b5`), and a physical mocap experiment confirmed that all ten
+points are visible. The default tool configuration therefore uses the complete
+ten-marker set, whose centroid is `[-0.0024, 0, -0.1490] m` in `pelvis_link`.
+If its axes are already aligned, the current-shell CAD cross-check is a Motive
+pivot translation of `[+2.4, 0, +149.0] mm`. The live calibration result
+remains authoritative because it captures the installed marker plate and its
+actual orientation.
 Marker stream order and per-marker topic names do not affect this tool: it
 consumes the solved 6-DOF `/P1/pose`, while its CAD centroid calculation is
 order-independent. Only an offline reconstruction directly from individual

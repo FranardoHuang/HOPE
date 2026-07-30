@@ -45,10 +45,10 @@ from typing import Iterable, Sequence
 Vector3 = tuple[float, float, float]
 Quaternion = tuple[float, float, float, float]  # ROS order: x, y, z, w
 
-# Source: agibot/pku/README.md, marker-coordinate table v2.  These are ball
-# centres in pelvis_link, in metres.  The current 0702 shell does not contain
-# f1 or b1; keep them here as design values only so a later physical revision
-# can opt in explicitly with --marker-names.
+# Source: agibot/pku/README.md, marker-coordinate table v2. These are ball
+# centres in pelvis_link, in metres. The 0702 Parasolid asset and its layout
+# define all ten points, and physical mocap testing confirmed that f1-f5 and
+# b1-b5 are all visible. The complete ten-marker set is therefore the default.
 MARKER_NAMES = ("f1", "f2", "f3", "f4", "f5", "b1", "b2", "b3", "b4", "b5")
 MODEL_NOMINAL: dict[str, Vector3] = {
     "f1": (0.090, 0.000, -0.130),
@@ -62,8 +62,7 @@ MODEL_NOMINAL: dict[str, Vector3] = {
     "b4": (-0.085, -0.030, -0.180),
     "b5": (-0.085, 0.030, -0.180),
 }
-NOMINAL_ONLY_MARKERS = frozenset(("f1", "b1"))
-CURRENT_SHELL_MARKER_NAMES = tuple(name for name in MARKER_NAMES if name not in NOMINAL_ONLY_MARKERS)
+CURRENT_SHELL_MARKER_NAMES = MARKER_NAMES
 
 
 @dataclass(frozen=True)
@@ -409,12 +408,15 @@ def result_document(
     pivot_delta_in_pelvis_axes = _rotate(_quat_conjugate(correction.quaternion), correction.translation)
     nominal_centroid = marker_centroid(marker_names)
     nominal_pivot_to_pelvis = tuple(-value for value in nominal_centroid)
-    nominal_only = [name for name in marker_names if name in NOMINAL_ONLY_MARKERS]
     return {
         "cad_cross_check": {
             "source": "agibot/pku/README.md marker coordinates v2",
+            "parasolid_asset": (
+                "agibot/pku/hip_marker_shell/"
+                "a3_hip_marker_shell_p1_mocap_balls_0702.x_t"
+            ),
+            "current_shell_marker_names": list(CURRENT_SHELL_MARKER_NAMES),
             "selected_marker_names": list(marker_names),
-            "nominal_only_marker_names": nominal_only,
             "marker_centroid_in_pelvis_link_m": [float(value) for value in nominal_centroid],
             "expected_pivot_delta_mm_if_axes_aligned": [
                 float(value * 1000.0) for value in nominal_pivot_to_pelvis
@@ -422,7 +424,8 @@ def result_document(
             "warning": (
                 "CAD is a cross-check only. The independent live pelvis pose is authoritative. "
                 "Marker stream order is irrelevant: live calibration uses only the solved P1 pose. "
-                "f1 and b1 are nominal-only unless their mounts have been installed and measured."
+                "The 0702 shell uses all ten verified-visible points f1-f5 and b1-b5 by default; "
+                "override --marker-names only for a deliberately different physical marker set."
             ),
         },
         "calibration": {
@@ -554,12 +557,6 @@ def _print_result(document: dict) -> None:
         f"{cad['expected_pivot_delta_mm_if_axes_aligned'][1]:.3f}, "
         f"{cad['expected_pivot_delta_mm_if_axes_aligned'][2]:.3f})"
     )
-    if cad["nominal_only_marker_names"]:
-        print(
-            "  WARNING: selected nominal-only markers: "
-            f"{', '.join(cad['nominal_only_marker_names'])}. Include them only after physical "
-            "installation and measurement."
-        )
     print(
         "  3. If using this optional Motive method, save the asset, restart streaming, and rerun "
         "this tool: the correction should be identity."
@@ -592,8 +589,8 @@ def _parse_arguments() -> argparse.Namespace:
     parser.add_argument(
         "--marker-names", default=",".join(CURRENT_SHELL_MARKER_NAMES),
         help=(
-            "comma-separated CAD marker-position set; order is irrelevant and defaults to the eight "
-            "realized 0702-shell markers (f2,f3,f4,f5,b2,b3,b4,b5)"
+            "comma-separated CAD marker-position set; order is irrelevant and defaults to all ten "
+            "verified-visible 0702-shell markers (f1,f2,f3,f4,f5,b1,b2,b3,b4,b5)"
         ),
     )
     parser.add_argument("--samples", type=int, default=200, help="accepted synchronized samples to collect")

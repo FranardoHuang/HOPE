@@ -31,7 +31,7 @@ def test_loads_and_normalizes_p1_to_pelvis_transform(tmp_path):
                 "p1_to_pelvis": {
                     "parent_frame": "P1",
                     "child_frame": "pelvis_link",
-                    "translation_m": [0.003, 0.0, 0.1575],
+                    "translation_m": [0.0024, 0.0, 0.1490],
                     "quaternion_xyzw": [0.0, 0.0, 0.0, 2.0],
                 }
             }
@@ -43,7 +43,7 @@ def test_loads_and_normalizes_p1_to_pelvis_transform(tmp_path):
 
     assert parent == "P1"
     assert child == "pelvis_link"
-    assert translation == pytest.approx([0.003, 0.0, 0.1575])
+    assert translation == pytest.approx([0.0024, 0.0, 0.1490])
     assert quaternion == pytest.approx([0.0, 0.0, 0.0, 1.0])
 
 

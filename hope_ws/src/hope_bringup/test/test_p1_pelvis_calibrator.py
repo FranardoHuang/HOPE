@@ -94,12 +94,17 @@ def test_report_uses_local_pelvis_translation_after_pivot_axis_rotation():
     )
     assert document["calibration"]["pelvis_reference_topic"] == "/a3/calibration/pelvis_pose"
     assert document["calibration"]["transform_model"] == "constant_rigid_attachment_P1_to_pelvis_link"
+    cad = document["cad_cross_check"]
+    assert cad["current_shell_marker_names"] == list(module.MARKER_NAMES)
+    assert cad["selected_marker_names"] == list(module.MARKER_NAMES)
+    assert cad["marker_centroid_in_pelvis_link_m"] == pytest.approx([-0.0024, 0.0, -0.1490])
+    assert cad["expected_pivot_delta_mm_if_axes_aligned"] == pytest.approx([2.4, 0.0, 149.0])
 
 
 def test_relative_pose_transform_uses_one_common_reference_frame():
     module = _load_module()
     world_to_p1 = module.Transform((0.5, -0.2, 0.8), _yaw_quaternion(30.0))
-    expected = module.Transform((0.003, 0.0, 0.1575), _yaw_quaternion(-4.0))
+    expected = module.Transform((0.0024, 0.0, 0.1490), _yaw_quaternion(-4.0))
     world_to_pelvis = module.compose(world_to_p1, expected)
 
     class _Position:
@@ -140,7 +145,7 @@ def test_rotation_medoid_seed_rejects_a_stale_burst():
 
 def test_estimator_rejects_a_multi_sample_stale_burst():
     module = _load_module()
-    valid = module.Transform((0.003, 0.0, 0.1575), _yaw_quaternion(5.0))
+    valid = module.Transform((0.0024, 0.0, 0.1490), _yaw_quaternion(5.0))
     stale = module.Transform((0.08, -0.04, 0.10), _yaw_quaternion(80.0))
 
     estimate, accepted, _, accepted_indices = module.estimate_fixed_transform(
@@ -170,17 +175,19 @@ def test_trajectory_statistics_exposes_stationary_capture():
     assert statistics["unique_timestamps"] == 3
 
 
-def test_cad_cross_check_distinguishes_nominal_ten_from_realized_eight_markers():
+def test_cad_cross_check_uses_all_ten_verified_visible_markers():
     module = _load_module()
 
     assert module.marker_centroid(module.MARKER_NAMES) == pytest.approx((-0.0024, 0.0, -0.1490))
-    assert module.marker_centroid(module.CURRENT_SHELL_MARKER_NAMES) == pytest.approx((-0.003, 0.0, -0.1575))
-    assert module.CURRENT_SHELL_MARKER_NAMES == ("f2", "f3", "f4", "f5", "b2", "b3", "b4", "b5")
+    assert module.marker_centroid(module.CURRENT_SHELL_MARKER_NAMES) == pytest.approx(
+        (-0.0024, 0.0, -0.1490)
+    )
+    assert module.CURRENT_SHELL_MARKER_NAMES == module.MARKER_NAMES
 
 
 def test_cad_cross_check_is_invariant_to_marker_stream_order():
     module = _load_module()
-    shuffled = ("b4", "f3", "b2", "f5", "f2", "b5", "f4", "b3")
+    shuffled = ("b4", "f3", "b2", "f5", "f1", "b5", "f4", "b3", "f2", "b1")
 
     assert module.marker_centroid(shuffled) == pytest.approx(
         module.marker_centroid(module.CURRENT_SHELL_MARKER_NAMES)
