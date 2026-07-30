@@ -858,6 +858,7 @@ class MotionCommand(CommandTerm):
         self._action_ball_expected_shared_racket_state_sha256 = None
         self._action_ball_action_uids = None
         self._action_ball_motion_sha256 = None
+        self._action_ball_segment_lengths = None
         self._action_ball_ready_root_z = None
         self._action_ball_ready_root_quat = None
         self._action_ball_reset_generation = None
@@ -2474,6 +2475,19 @@ class MotionCommand(CommandTerm):
                 ready_steps, 0
             ].detach().cpu().tolist()
         )
+        segment_lengths = None
+        if broker.diagnostic_fast_path:
+            segment_lengths = tuple(
+                int(value)
+                for value in self.motion.seg_len.detach().cpu().tolist()
+            )
+            if (
+                len(segment_lengths) != action_count
+                or any(length < 3 for length in segment_lengths)
+            ):
+                raise ValueError(
+                    "action-ball admitted motions require one interior frame per action"
+                )
         # Publish only after every opaque admission and file/broker row has passed.  The hard
         # receipt immediately reopens the capability and all implementation sources once more.
         self._action_ball_birth_broker = broker
@@ -2481,6 +2495,7 @@ class MotionCommand(CommandTerm):
         self._action_ball_trusted_repo_root = repo_root
         self._action_ball_action_uids = action_uids
         self._action_ball_motion_sha256 = tuple(motion_sha256)
+        self._action_ball_segment_lengths = segment_lengths
         self._action_ball_ready_root_z = ready_root_z
         self._action_ball_ready_root_quat = ready_root_quat
         self._action_ball_reset_generation = torch.zeros(
@@ -2529,6 +2544,7 @@ class MotionCommand(CommandTerm):
             self._action_ball_trusted_repo_root = None
             self._action_ball_action_uids = None
             self._action_ball_motion_sha256 = None
+            self._action_ball_segment_lengths = None
             self._action_ball_ready_root_z = None
             self._action_ball_ready_root_quat = None
             self._action_ball_reset_generation = None
@@ -3265,12 +3281,53 @@ class MotionCommand(CommandTerm):
                 f"{name} is inconsistent: actual={actual}, expected={expected}"
             )
 
-    def _validate_action_ball_task_ref_and_receipt(
-        self, task_ref, receipt, *, env_id: int
+    def _validate_action_ball_task_ref_and_receipt_host(
+        self,
+        task_ref,
+        receipt,
+        *,
+        env_id: int,
+        reset_generation: int,
+        swing_generation: int,
+        action_slot: int,
+        segment_length: int,
+        pending_elapsed_s: float,
     ) -> dict:
-        """Validate one opaque ref resolution and every timing identity/algebra field."""
+        """Validate one task entirely from immutable host identity and timing rows."""
 
         runtime = self._action_ball_runtime_module_bound
+        env_id = self._action_ball_plain_int(
+            env_id, name="task.env_id"
+        )
+        if env_id >= self.num_envs:
+            raise ValueError("task.env_id is outside Motion's environment range")
+        reset_generation = self._action_ball_plain_int(
+            reset_generation,
+            name="task.reset_generation",
+            minimum=1,
+        )
+        swing_generation = self._action_ball_plain_int(
+            swing_generation,
+            name="task.swing_generation",
+        )
+        action_slot = self._action_ball_plain_int(
+            action_slot, name="task.action_slot"
+        )
+        if (
+            self._action_ball_action_uids is None
+            or action_slot >= len(self._action_ball_action_uids)
+        ):
+            raise ValueError("task.action_slot is outside Motion's action manifest")
+        segment_length = self._action_ball_plain_int(
+            segment_length,
+            name="task.segment_length",
+            minimum=3,
+        )
+        pending_elapsed = self._action_ball_finite_float(
+            pending_elapsed_s,
+            name="task.pending_elapsed_s",
+            minimum=0.0,
+        )
         if type(task_ref) is not runtime.ActionTaskReceiptRef:
             raise ValueError("action-ball task ref has a forged runtime type")
         if type(receipt) is not runtime.ActionBallTaskReceipt:
@@ -3284,6 +3341,7 @@ class MotionCommand(CommandTerm):
                 or task_ref.action_slot != receipt.action_slot
                 or task_ref.birth_sha256 != receipt.birth_sha256
                 or task_ref.sample_sha256 != receipt.sample_sha256
+                or task_ref.task_sha256 != receipt.canonical_sha256
             ):
                 raise ValueError(
                     "diagnostic action-ball task ref changed receipt identity"
@@ -3302,13 +3360,6 @@ class MotionCommand(CommandTerm):
                     "action-ball task resolver changed the requested "
                     "immutable ref"
                 )
-        reset_generation = int(
-            self._action_ball_reset_generation[env_id].item()
-        )
-        swing_generation = int(
-            self._action_ball_swing_generation[env_id].item()
-        )
-        action_slot = int(self.clip_id[env_id].item())
         action_uid = self._action_ball_action_uids[action_slot]
         birth_sha256 = self.action_ball_birth_receipt_sha256(env_id)
         if (
@@ -3498,9 +3549,7 @@ class MotionCommand(CommandTerm):
             raise ValueError(
                 "action-ball task cycle plus close tick exceeds runtime episode horizon"
             )
-        native_cycle = (
-            int(self.motion.seg_len[action_slot].item()) - 1
-        ) * float(self._env.step_dt)
+        native_cycle = (segment_length - 1) * float(self._env.step_dt)
         self._action_ball_close_float(
             reference_t_cycle,
             native_cycle,
@@ -3512,15 +3561,10 @@ class MotionCommand(CommandTerm):
             float(round(hit_frame)),
             name="task reference_t_hit_s policy-frame alignment",
         )
-        if not 0 < round(hit_frame) < int(
-            self.motion.seg_len[action_slot].item()
-        ) - 1:
+        if not 0 < round(hit_frame) < segment_length - 1:
             raise ValueError(
                 "action-ball task hit frame is outside the admitted motion interior"
             )
-        pending_elapsed = float(
-            self._action_ball_task_pending_elapsed_s[env_id].item()
-        )
         if pending_elapsed > pre_swing_wait + 1.0e-12:
             raise RuntimeError(
                 "action-ball task arrived after its certified ready-wait ended"
@@ -3533,6 +3577,234 @@ class MotionCommand(CommandTerm):
             "pre_swing_wait_s": pre_swing_wait,
             "pending_elapsed_s": pending_elapsed,
         }
+
+    def _validate_action_ball_task_ref_and_receipt(
+        self, task_ref, receipt, *, env_id: int
+    ) -> dict:
+        """Resolve formal/live device identity before the common host validator."""
+
+        env_id = self._action_ball_plain_int(
+            env_id, name="task.env_id"
+        )
+        if env_id >= self.num_envs:
+            raise ValueError("task.env_id is outside Motion's environment range")
+        action_slot = int(self.clip_id[env_id].item())
+        return self._validate_action_ball_task_ref_and_receipt_host(
+            task_ref,
+            receipt,
+            env_id=env_id,
+            reset_generation=int(
+                self._action_ball_reset_generation[env_id].item()
+            ),
+            swing_generation=int(
+                self._action_ball_swing_generation[env_id].item()
+            ),
+            action_slot=action_slot,
+            segment_length=int(
+                self.motion.seg_len[action_slot].item()
+            ),
+            pending_elapsed_s=float(
+                self._action_ball_task_pending_elapsed_s[env_id].item()
+            ),
+        )
+
+    def install_action_ball_task_timing_diagnostic_many(
+        self,
+        *,
+        host_identity_rows: tuple,
+        receipts: tuple,
+        task_refs: tuple,
+    ) -> None:
+        """Install one diagnostic timing batch without per-env device reads.
+
+        Racket calls this only after validating and installing every issued
+        receipt.  All identities, timing algebra, buffer shapes, and tensor
+        materialization complete before any Motion buffer changes.
+        Because the diagnostic pool has already issued, any failure is terminal
+        for that run and must never be caught and retried.
+        Formal runs retain the opaque ref/resolver path below.
+        """
+
+        if (
+            self._action_ball_birth_broker is None
+            or not self._action_ball_birth_broker.diagnostic_fast_path
+        ):
+            raise RuntimeError(
+                "direct action-ball task timing install is diagnostic-only"
+            )
+        if (
+            type(host_identity_rows) is not tuple
+            or type(receipts) is not tuple
+            or type(task_refs) is not tuple
+            or not host_identity_rows
+            or len(receipts) != len(host_identity_rows)
+            or len(task_refs) != len(host_identity_rows)
+        ):
+            raise ValueError(
+                "diagnostic action-ball timing requires one non-empty aligned tuple batch"
+        )
+        if (
+            self._action_ball_segment_lengths is None
+            or self._action_ball_action_uids is None
+            or len(self._action_ball_segment_lengths)
+            != len(self._action_ball_action_uids)
+        ):
+            raise RuntimeError(
+                "diagnostic action-ball timing lacks admitted segment lengths"
+            )
+
+        env_rows: list[int] = []
+        timing_rows: list[tuple[float, ...]] = []
+        validated_refs: list[object] = []
+        seen_envs: set[int] = set()
+        step_dt = float(self._env.step_dt)
+        for row_index, (identity, receipt, task_ref) in enumerate(
+            zip(host_identity_rows, receipts, task_refs)
+        ):
+            if type(identity) is not tuple or len(identity) != 7:
+                raise ValueError(
+                    "diagnostic action-ball timing identity row must have seven fields"
+                )
+            (
+                raw_env_id,
+                raw_action_slot,
+                raw_action_uid,
+                raw_reset_generation,
+                raw_swing_generation,
+                raw_previous_swing_generation,
+                active_before_install,
+            ) = identity
+            env_id = self._action_ball_plain_int(
+                raw_env_id,
+                name=f"host_identity_rows[{row_index}].env_id",
+            )
+            if env_id >= self.num_envs or env_id in seen_envs:
+                raise ValueError(
+                    "diagnostic action-ball timing env ids are out of range or repeated"
+                )
+            seen_envs.add(env_id)
+            action_slot = self._action_ball_plain_int(
+                raw_action_slot,
+                name=f"host_identity_rows[{row_index}].action_slot",
+            )
+            if action_slot >= len(self._action_ball_action_uids):
+                raise ValueError(
+                    "diagnostic action-ball timing action slot is outside the manifest"
+                )
+            action_uid = self._action_ball_plain_int(
+                raw_action_uid,
+                name=f"host_identity_rows[{row_index}].action_uid",
+                minimum=1,
+            )
+            reset_generation = self._action_ball_plain_int(
+                raw_reset_generation,
+                name=f"host_identity_rows[{row_index}].reset_generation",
+                minimum=1,
+            )
+            swing_generation = self._action_ball_plain_int(
+                raw_swing_generation,
+                name=f"host_identity_rows[{row_index}].swing_generation",
+            )
+            previous_swing_generation = self._action_ball_plain_int(
+                raw_previous_swing_generation,
+                name=(
+                    f"host_identity_rows[{row_index}]"
+                    ".previous_swing_generation"
+                ),
+            )
+            if (
+                swing_generation > 0
+                and swing_generation != previous_swing_generation + 1
+            ):
+                raise ValueError(
+                    "diagnostic action-ball wrap generation did not advance exactly once"
+                )
+            # Racket already consumed this flag while closing the prior attempt.
+            # A true reset may legitimately replace either an active or an
+            # inactive env, so Motion only preserves its exact boolean shape.
+            if type(active_before_install) is not bool:
+                raise ValueError(
+                    "diagnostic action-ball timing active flag must be boolean"
+                )
+            if action_uid != self._action_ball_action_uids[action_slot]:
+                raise ValueError(
+                    "diagnostic action-ball timing action UID/slot binding changed"
+                )
+
+            pending_elapsed = 0.0 if swing_generation == 0 else step_dt
+            timing = self._validate_action_ball_task_ref_and_receipt_host(
+                task_ref,
+                receipt,
+                env_id=env_id,
+                reset_generation=reset_generation,
+                swing_generation=swing_generation,
+                action_slot=action_slot,
+                segment_length=self._action_ball_segment_lengths[
+                    action_slot
+                ],
+                pending_elapsed_s=pending_elapsed,
+            )
+            env_rows.append(env_id)
+            validated_refs.append(task_ref)
+            timing_rows.append(
+                (
+                    timing["pending_elapsed_s"],
+                    timing["time_to_contact_s"],
+                    timing["teacher_rate"],
+                    timing["scaled_t_hit_s"],
+                    timing["scaled_t_cycle_s"],
+                    timing["pre_swing_wait_s"],
+                )
+            )
+
+        timing_buffers = (
+            self._action_ball_task_pending_elapsed_s,
+            self._action_ball_task_age_s,
+            self._action_ball_time_to_contact_s,
+            self._action_ball_teacher_rate,
+            self._action_ball_scaled_t_hit_s,
+            self._action_ball_scaled_t_cycle_s,
+            self._action_ball_pre_swing_wait_s,
+            self._action_ball_task_timing_active,
+        )
+        if (
+            type(self._action_ball_active_task_refs) is not list
+            or len(self._action_ball_active_task_refs) != self.num_envs
+            or any(
+                buffer is None
+                or tuple(buffer.shape) != (self.num_envs,)
+                for buffer in timing_buffers
+            )
+        ):
+            raise RuntimeError(
+                "diagnostic action-ball timing buffers are not fully bound"
+            )
+
+        # Tensor construction is still staging: no Motion state changes until
+        # the complete host batch and both device payloads exist.
+        ids = torch.tensor(
+            env_rows, dtype=torch.long, device=self.device
+        )
+        values = torch.tensor(
+            timing_rows,
+            dtype=self._action_ball_task_age_s.dtype,
+            device=self.device,
+        )
+        if tuple(values.shape) != (len(env_rows), 6):
+            raise RuntimeError(
+                "diagnostic action-ball timing staging shape changed"
+            )
+
+        self._action_ball_task_pending_elapsed_s[ids] = values[:, 0]
+        self._action_ball_task_age_s[ids] = values[:, 0]
+        self._action_ball_time_to_contact_s[ids] = values[:, 1]
+        self._action_ball_teacher_rate[ids] = values[:, 2]
+        self._action_ball_scaled_t_hit_s[ids] = values[:, 3]
+        self._action_ball_scaled_t_cycle_s[ids] = values[:, 4]
+        self._action_ball_pre_swing_wait_s[ids] = values[:, 5]
+        self._action_ball_task_timing_active[ids] = True
+        for env_id, task_ref in zip(env_rows, validated_refs):
+            self._action_ball_active_task_refs[env_id] = task_ref
 
     def _resolve_pending_action_ball_tasks(self) -> None:
         if self._action_ball_task_ref_for_env is None:

@@ -8015,7 +8015,7 @@ class RacketTargetCommand(CommandTerm):
         reset_generations: torch.Tensor,
         swing_generations: torch.Tensor,
         host_env_ids: tuple,
-    ) -> None:
+    ) -> tuple | None:
         """Single mutation seam for one fully validated task+ball env batch."""
 
         if len(host_env_ids) != len(ids):
@@ -8035,6 +8035,11 @@ class RacketTargetCommand(CommandTerm):
                 )
                 for receipt in receipts
             )
+        diagnostic_task_refs = (
+            tuple(receipt.task_ref() for receipt in receipts)
+            if self._action_ball_diagnostic_unauthorized
+            else None
+        )
         dtype = self.racket_target_pos_w.dtype
         ball_contact_local = torch.tensor(
             [receipt.ball_contact_w_m for receipt in receipts],
@@ -8225,8 +8230,8 @@ class RacketTargetCommand(CommandTerm):
             self._action_ball_birth_by_env[env_id] = birth
             self._action_ball_task_by_env[env_id] = receipt
             self._action_ball_task_ref_by_env[env_id] = (
-                receipt.task_ref()
-                if self._action_ball_diagnostic_unauthorized
+                diagnostic_task_refs[row_index]
+                if diagnostic_task_refs is not None
                 else None
             )
             self._counter_rally_task_identity_by_env[env_id] = (
@@ -8255,6 +8260,7 @@ class RacketTargetCommand(CommandTerm):
             if wide_window_s is None
             else tts_abs <= float(wide_window_s)
         )
+        return diagnostic_task_refs
 
     def _sample_targets_action_ball(
         self,
@@ -8484,7 +8490,7 @@ class RacketTargetCommand(CommandTerm):
                 raise RuntimeError(
                     "action-ball task receipt env/swing generation mismatch"
                 )
-        self._action_ball_commit_install(
+        diagnostic_task_refs = self._action_ball_commit_install(
             ids=ids,
             origins=origins,
             births=births,
@@ -8498,8 +8504,23 @@ class RacketTargetCommand(CommandTerm):
         # Motion resets before Racket.  Resolve the just-published task receipt
         # now so the first post-reset actor observation sees the full teacher
         # wait instead of a one-frame false zero.  The diagnostic fast path
-        # already installed timing and therefore takes the same no-op seam.
-        motion.resolve_action_ball_task_timing_now(ids)
+        # reuses the already validated host rows and receipts; formal retains
+        # the opaque ref/resolver authority seam unchanged.
+        if self._action_ball_diagnostic_unauthorized:
+            if type(diagnostic_task_refs) is not tuple:
+                raise RuntimeError(
+                    "diagnostic action-ball install lost its task ref batch"
+                )
+            # The diagnostic pool and Racket install have already advanced.
+            # Any Motion validation failure poisons the whole run and must
+            # propagate; catching it and retrying would reuse advanced state.
+            motion.install_action_ball_task_timing_diagnostic_many(
+                host_identity_rows=host_identity_rows,
+                receipts=receipts,
+                task_refs=diagnostic_task_refs,
+            )
+        else:
+            motion.resolve_action_ball_task_timing_now(ids)
         if true_reset:
             # The installed birth is the authority boundary for the whole
             # episode.  Compute against the published phase only after all

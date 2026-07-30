@@ -7848,6 +7848,8 @@ class LazyActionTaskPool:
         sample_index_floor: int | None = None,
         sample_draw_floor: int | None = None,
         staged_sample_indices: set[int] | None = None,
+        staged_sample_draw_highwater: int | None = None,
+        staged_sample_draw_starts: set[int] | None = None,
         staged_sample_draw_ranges: Sequence[Tuple[int, int]] = (),
         verify_solver_provenance: bool = True,
     ) -> Tuple[Tuple[str, ...], int, int]:
@@ -7920,6 +7922,25 @@ class LazyActionTaskPool:
             if (
                 receipt.sample_draw_start < floor_sample_draw_end
                 or receipt.sample_draw_start < batch_sample_draw_end
+                # Diagnostic solve-many batches normally advance in tape
+                # order.  A later redraw can still return one earlier,
+                # disjoint admitted range after a higher range, so retain
+                # exact overlap semantics with constant-width start probes.
+                or (
+                    staged_sample_draw_highwater is not None
+                    and staged_sample_draw_starts is not None
+                    and receipt.sample_draw_start
+                    < staged_sample_draw_highwater
+                    and any(
+                        prior_start in staged_sample_draw_starts
+                        for prior_start in range(
+                            receipt.sample_draw_start
+                            - SAMPLER_SAMPLE_DRAW_COUNT
+                            + 1,
+                            receipt.sample_draw_end,
+                        )
+                    )
+                )
                 or any(
                     receipt.sample_draw_start < prior_end
                     and prior_start < receipt.sample_draw_end
@@ -8352,9 +8373,8 @@ class LazyActionTaskPool:
             )
             staged_sample_digests: set[str] = set()
             staged_sample_indices_by_uid: Dict[int, set[int]] = {}
-            staged_sample_draw_ranges_by_uid: Dict[
-                int, list[Tuple[int, int]]
-            ] = {}
+            staged_sample_draw_highwater_by_uid: Dict[int, int] = {}
+            staged_sample_draw_starts_by_uid: Dict[int, set[int]] = {}
             proposal_indices_by_uid: Dict[int, list[int]] = {}
             staged_refills = []
             for refill, batch in zip(refills, batches):
@@ -8363,9 +8383,15 @@ class LazyActionTaskPool:
                 staged_indices = staged_sample_indices_by_uid.setdefault(
                     uid, set()
                 )
-                staged_ranges = (
-                    staged_sample_draw_ranges_by_uid.setdefault(uid, [])
+                staged_draw_highwater = (
+                    staged_sample_draw_highwater_by_uid.get(
+                        uid, self._last_sample_draw_end.get(uid, 0)
+                    )
                 )
+                staged_draw_starts = (
+                    staged_sample_draw_starts_by_uid.setdefault(uid, set())
+                )
+                sample_draw_floor = self._last_sample_draw_end.get(uid, 0)
                 (
                     new_digests,
                     last_sample_index,
@@ -8378,19 +8404,20 @@ class LazyActionTaskPool:
                     batch=batch,
                     unavailable_sample_sha256=unavailable_samples,
                     sample_index_floor=self._last_sample_index.get(uid, -1),
-                    sample_draw_floor=self._last_sample_draw_end.get(uid, 0),
+                    sample_draw_floor=sample_draw_floor,
                     staged_sample_indices=staged_indices,
-                    staged_sample_draw_ranges=staged_ranges,
+                    staged_sample_draw_highwater=staged_draw_highwater,
+                    staged_sample_draw_starts=staged_draw_starts,
                     verify_solver_provenance=False,
                 )
                 staged_indices.update(
                     receipt.sample_index for receipt in batch.receipts
                 )
-                staged_ranges.extend(
-                    (
-                        receipt.sample_draw_start,
-                        receipt.sample_draw_end,
-                    )
+                staged_sample_draw_highwater_by_uid[uid] = max(
+                    staged_draw_highwater, last_sample_draw_end
+                )
+                staged_draw_starts.update(
+                    receipt.sample_draw_start
                     for receipt in batch.receipts
                 )
                 for receipt in batch.receipts:
