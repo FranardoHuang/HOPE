@@ -4109,3 +4109,13 @@ iteration 0/1 分别约 `2.75/2.80 s`。日志回读的 actor contract 是
 finite。两轮 table/fall/qdes-hard/actual-hard/nonfinite/terminal reset 均为 0，首轮 ready
 双脚接触率为 1.0；48 个 environment steps 尚未到击球窗，strike=0 符合 smoke 预算而不能判学习。
 下一门仅为同一 exact setting 的 `4096 env × 5 updates` r4 probe。
+
+Probe evidence（2026-07-30）：claim=`fca61705…b813` 的 fresh r4 probe 已自然完成
+`4096 env × 5 updates`，五份 checkpoint 各含 80 个 tensor、其中 76 个浮点/复数 tensor，
+逐项全 finite；`model_4.pt` SHA=`0f925821…f2e7`。iteration wall 依次为
+`10.09/10.48/26.63/17.16/24.85 s`，mean episode 在 update 1--4 为
+`48.00/71.66/52.99/59.91`；update 2/4 分别出现 `1985/643` 个 strike opportunity，故完整
+preparation+击球窗已可达。qdes-hard/fall 始终为 0，table 在 update 3/4 为 `16/25`，
+actual-hard 为 `0/267/3103/861/2076`。历史同谱系在 update 1--5 也有早期腰 hard、到
+update100/169 显著下降，故该五轮只作趋势基线，不单独否决学习；下一门是同身份 fresh
+`4096 × 1001` milestone1000，并按 100/300/1000 判读。
