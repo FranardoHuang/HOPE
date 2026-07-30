@@ -4072,7 +4072,8 @@ diagnostic comparison。下一门是先把工件提交为 source commit A，再�
 精确指向 A；未完成前不得复用旧 r1/r2 namespace 或 claim。
 
 工件现已进入 exact source commit `8729104e6c9a…46c4`。fresh r3 smoke/probe/milestone1000
-spec 都指向该 commit、bundle `3c1076e3…c32b`、Pod1 GPU2 UUID 与 seed0；三份 raw JSON SHA
-依次为 `35cf08c1…0a2e`、`f10564fc…311f`、`de4d6aa4…56f3`。它们尚未被 plan/launch：
+spec 都指向该 commit、bundle `3c1076e3…c32b`、Pod1 GPU2 UUID 与 seed0；三份 canonical
+raw JSON SHA 依次为 `e1b63f00…5b8d`、`3b200542…dd34`、`b0396fbe…d442`。第一版缩进 JSON
+已在 namespace 创建前被 canonical-byte 门拒绝并保留原 operator-control 目录；它们尚未 launch：
 下一门是把 tracked spec 复制到独立 operator-control 目录，用 exact source A 的 launcher
 生成 canonical claim，并在真实 GPU/lock/namespace no-clobber admission 后才可发 smoke。

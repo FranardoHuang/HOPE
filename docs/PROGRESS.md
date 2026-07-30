@@ -15,9 +15,10 @@
 
 - Pod1 exact source `17c7258a` 已为 fixed-194 v2 重物化 profile pins
   `08c8f9c7…c6b4`、base bundle `ed9fa0f7…afef` 和 1.1 倍 fast-ball bundle
-  `3c1076e3…c32b`，并以工件 commit `8729104e` 生成三份 fresh r3 spec；spec SHA 为
-  smoke `35cf08c1…0a2e`、probe `f10564fc…311f`、milestone1000
-  `de4d6aa4…56f3`。当前唯一下一动作是把 spec 发布到 Pod operator-control 目录并由 exact
+  `3c1076e3…c32b`，并以工件 commit `8729104e` 生成三份 canonical fresh r3 spec；spec SHA
+  为 smoke `e1b63f00…5b8d`、probe `3b200542…dd34`、milestone1000
+  `b0396fbe…d442`。第一版缩进 JSON 已在 namespace 创建前被严格 canonical-byte 门拒绝；
+  当前唯一下一动作是把规范化 spec 发布到新 Pod operator-control 目录并由 exact
   `8729104e` launcher 做 canonical plan/claim；状态只看
   [分阶段准备看板](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md#0-当前执行看板本文唯一活跃-todo)。
 - fresh ActionBall actor 合同切为固定 194-D
