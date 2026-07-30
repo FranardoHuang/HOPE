@@ -4119,3 +4119,10 @@ preparation+击球窗已可达。qdes-hard/fall 始终为 0，table 在 update 3
 actual-hard 为 `0/267/3103/861/2076`。历史同谱系在 update 1--5 也有早期腰 hard、到
 update100/169 显著下降，故该五轮只作趋势基线，不单独否决学习；下一门是同身份 fresh
 `4096 × 1001` milestone1000，并按 100/300/1000 判读。
+
+Milestone launch evidence（2026-07-30）：fresh r4 milestone1000 已用 canonical
+claim=`2710fd6f…d4f4` 在 Pod1 GPU2 发射，exact PID/PGID=`1134253`，namespace 为
+`n1hr_milestone1000_fastball110_8729104e_block_gpu2_seed0_r4`。它已进入真实 PPO；
+首两轮 wall 约 `9.42/12.05 s`。首份 `model_0.pt` SHA=`1296e929…6bcf`，80 个 tensor 中
+76 个浮点/复数 tensor 逐项全 finite。该 run 是 fresh diagnostic，不从 smoke/probe resume，
+下一次 Gate 判读在 update100；此前腰 actual-hard 波动只记录，不临时改超参。

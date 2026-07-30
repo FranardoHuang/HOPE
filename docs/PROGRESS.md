@@ -28,8 +28,9 @@
   table/fall/qdes-hard/actual-hard/nonfinite/terminal reset 均为 0。随后 r4 `4096×5` probe
   也已自然完成，五份 checkpoint 全 finite；update 2/4 有 `1985/643` 个 strike opportunity，
   证明完整 preparation+击球窗可达。qdes-hard/fall 全零；前五轮 actual-hard
-  `0/267/3103/861/2076` 只作为预注册的 update100/300/1000 趋势基线。当前唯一下一动作是同一
-  exact setting 的 fresh `4096×1001` milestone1000；状态只看
+  `0/267/3103/861/2076` 只作为预注册的 update100/300/1000 趋势基线。同一 exact setting 的
+  fresh `4096×1001` milestone1000 已用 claim `2710fd6f…d4f4` 在 Pod1 GPU2 启动并进入真实
+  PPO；`model_0.pt` 的 80 个 tensor 全 finite。当前唯一下一动作是守护到 update100；状态只看
   [分阶段准备看板](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md#0-当前执行看板本文唯一活跃-todo)。
 - fresh ActionBall actor 合同切为固定 194-D
   `action_ball_table_pose_twist_heading_task_teacher_start_v2`，当前 trainer 不再创建
