@@ -3711,6 +3711,7 @@ class MotionCommand(CommandTerm):
                     f"host_identity_rows[{row_index}]"
                     ".previous_swing_generation"
                 ),
+                minimum=-1,
             )
             if (
                 swing_generation > 0

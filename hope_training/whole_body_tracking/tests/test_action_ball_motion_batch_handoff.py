@@ -93,7 +93,7 @@ def _prepare_batch(*, num_envs: int, swing_generation: int):
             command._action_ball_action_uids[action_slot],
             int(command._action_ball_reset_generation[env_id]),
             swing_generation,
-            max(swing_generation - 1, 0),
+            swing_generation - 1,
             False,
         )
         for env_id, action_slot in enumerate(command.clip_id.tolist())
