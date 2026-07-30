@@ -31,7 +31,7 @@
 
 | ID | 状态 | 当前交付 / 唯一下一动作 | 完成验收 | 阻塞输入 | 证据入口 |
 | --- | --- | --- | --- | --- | --- |
-| N1-PIN | `IN_PROGRESS` | fixed-194 v2 的 profile pins、base bundle 与 1.1 倍中心来球 derivative 已物化；唯一下一动作是把这些工件提交为 exact source commit A，再以 A 生成 fresh/no-clobber smoke、probe、long spec 与 claim | source blob、motion、physics、solver、bundle、recipe、GPU UUID、spec/claim SHA 全部互相一致；spec source 必须指向包含工件的 commit A，旧失败 namespace 永不复用 | commit A 的完整 SHA；自然空闲且无 owner 冲突的 Pod 槽 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[no-clobber 规则](../../operations/run_action_ball_curriculum_no_clobber.md) |
+| N1-PIN | `IN_PROGRESS` | 工件已进入 exact source commit `8729104e`，三份 fresh r3 spec 已生成并都指向该 commit；唯一下一动作是提交/发布 spec，复制到 Pod 的独立 operator-control 目录，再执行 canonical `plan` 取得并核对 claim | source blob、motion、physics、solver、bundle、recipe、GPU UUID、spec/claim SHA 全部互相一致；spec source 指向包含工件的 commit A，旧失败 namespace 永不复用 | 自然空闲且无 owner 冲突的 Pod1 GPU2；canonical plan PASS | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[no-clobber 规则](../../operations/run_action_ball_curriculum_no_clobber.md) |
 | N1-RUN | `BLOCKED` | N1-PIN 后在 Pod 串行执行 `1 env × 2 updates` 构造 smoke → `4096 env × 5 updates` probe → `4096 env × 1001 updates` long；每段 fresh 初始化，不把短段 checkpoint 当续训 | smoke 有真实 PPO update 与 finite checkpoint；teacher-start 首帧等于完整 wait、每 tick 减一个 `policy_dt` 且不为负；probe 跨 `t_hit` 且无 NaN/identity 漂移/持续 table、fall、raw-hard 爆炸；通过即发 long | N1-TEST、N1-PIN；自然空闲且无 owner 冲突的 Pod 槽 | [N=1 发射工序](../../operations/run_ablation_wave_launch.md)、[结果判读](../../operations/read_and_report_results.md)、[G05](../../gates/G05_isaac_training_first_loop.md) |
 
 ### 0.3 Next — long 已运行后的判读与 formal N=5 前置
@@ -259,6 +259,7 @@ acceleration 和 jerk 三阶约束，但这只证明该类 governor 有严格约
 
 | 项 | 证据 | 当前边界 |
 | --- | --- | --- |
+| fixed-194 v2 fresh r3 specs | smoke / probe / milestone1000 三份 spec 均绑定 exact source `8729104e6c9a…46c4`、fast-ball bundle `3c1076e3…c32b`、Pod1 GPU2 UUID、seed0 与 fixed `current_low` Reward；raw JSON SHA 依次为 `35cf08c1…0a2e`、`f10564fc…311f`、`de4d6aa4…56f3`，namespace 全部 fresh `_r3` | spec 只在外部 operator-control 目录交给 source commit A 的 launcher；canonical plan/claim 与真实 GPU owner admission 仍待 Pod 完成 |
 | fixed-194 v2 profile / question repin | Pod1 exact source `17c7258a` 物化 profile pins `08c8f9c7…c6b4`、base bundle `ed9fa0f7…afef` 与 1.1 倍 fast-ball bundle `3c1076e3…c32b`；solver profile 为 `52777b36…9754`，physics profile 仍为旧诊断值 `aa5c9085…f85b7`。derivative 的 4096-proposal tape 保持 `2763/4096=67.46%` admitted 与逐原因拒绝分账 | 工件内容已闭合，但在其 commit A 与 fresh spec/claim 生成前仍不可发；这是 diagnostic comparison，不是 formal 95% admission 或新 OptiTrack physics 证据 |
 | fresh fixed-194 v2 source + focused suite | commits `291bc20e` / `0227cfe9` 已让当前 ActionBall trainer 只实例化固定 194-D v2，删除 `policy.action_one_hot`，N>1 fail-closed，并对 exact 17-term layout、旧同宽重标、teacher-start lazy bind 加回归；Pod1 exact `0227cfe9` focused suite 为 **391 passed, 12 skipped in 61.35 s** | dependency/contract 测试已闭合；真实 ObservationManager、PPO update 与 finite checkpoint 仍由 fresh `1 env × 2 updates` smoke 验证 |
 | dynamic-ready 出生与 hold | loop/block 在 Pod 各闭环保持 `0.8 s / 40` policy steps，双脚接触率 `1.0`，table/fall/hard/nonfinite 零；可见 raw-reset 图证明原生 reset 直立 | 证明出生与 nominal hold，不证明 teacher 全轨、strike 或 long |
