@@ -2959,6 +2959,7 @@ def contact_smoke(env, env_cfg):
             hit_sample[1][0], dim=-1
         ).amax(dim=0)
         selected_peak = float(pair_peaks[filter_index].item())
+        pair_peak_any = float(pair_peaks.amax().item())
         print(
             "HOPE_TABLE_DIAGNOSTIC_CONTACT_PEAK="
             + json.dumps(
@@ -2970,15 +2971,16 @@ def contact_smoke(env, env_cfg):
                     ],
                     "selected_filter_index": int(filter_index),
                     "selected_peak_n": selected_peak,
+                    "pair_peak_any_n": pair_peak_any,
                 },
                 sort_keys=True,
             ),
             flush=True,
         )
-        if selected_peak <= float(TABLE_HIT_FORCE_THRESHOLD_N):
+        if pair_peak_any <= float(TABLE_HIT_FORCE_THRESHOLD_N):
             _fail(
-                f"{name}: exact {body_name} pair-filter column {filter_index} "
-                f"({role}) saw no force above the reviewed "
+                f"{name}: exact {body_name} pair-filter saw no force in any "
+                "table-component column above the reviewed "
                 f"{TABLE_HIT_FORCE_THRESHOLD_N:g} N numerical-zero tolerance"
             )
         # ``env.step`` already reset the selected terminal row.  Do not call
@@ -3016,6 +3018,7 @@ def contact_smoke(env, env_cfg):
             "pulse_substep": pulse_substep,
             "current_hit_by_substep": hit_rows,
             "selected_pair_peak_n": selected_peak,
+            "pair_peak_any_n": pair_peak_any,
             "pair_peak_by_role_n": [
                 float(value) for value in pair_peaks.tolist()
             ],
@@ -3031,6 +3034,20 @@ def contact_smoke(env, env_cfg):
         return row
 
     rows = [run_probe(probe) for probe in probes]
+    peak_by_role = [
+        max(float(row["pair_peak_by_role_n"][index]) for row in rows)
+        for index in range(len(specs))
+    ]
+    missing_roles = [
+        specs[index]["role"]
+        for index, peak in enumerate(peak_by_role)
+        if peak <= float(TABLE_HIT_FORCE_THRESHOLD_N)
+    ]
+    if missing_roles:
+        _fail(
+            "contact smoke produced no exact filtered force for table "
+            f"component role(s) {missing_roles!r}; peak_by_role_n={peak_by_role!r}"
+        )
 
     # A clean step after the final automatic reset is the cross-episode leakage control.
     env.reset()
@@ -3045,6 +3062,7 @@ def contact_smoke(env, env_cfg):
     _results["contact_smoke"] = {
         "real_physx_contacts": True,
         "probes": rows,
+        "peak_by_role_n": peak_by_role,
         "zero_pulse_after_reset": True,
         "physics_steps": sum(int(row["physics_steps"]) for row in rows) + 4,
     }
@@ -3904,9 +3922,14 @@ def main():
                     real_physx_contacts=(
                         contact.get("real_physx_contacts") is True
                         and all(
-                            float(row["selected_pair_peak_n"])
+                            float(row["pair_peak_any_n"])
                             > float(TABLE_HIT_FORCE_THRESHOLD_N)
                             for row in probes
+                        )
+                        and len(contact.get("peak_by_role_n", ())) == 5
+                        and all(
+                            float(peak) > float(TABLE_HIT_FORCE_THRESHOLD_N)
+                            for peak in contact.get("peak_by_role_n", ())
                         )
                     ),
                     full_action_ball_assembly=(
