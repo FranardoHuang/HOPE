@@ -1304,6 +1304,172 @@ def test_diagnostic_reset_batches_keep_compact_device_evidence_at_4096():
     assert snapshot["terminal_archives"] == ()
 
 
+def test_diagnostic_full_batch_skips_dense_summary_and_indexed_reduction(
+    monkeypatch,
+):
+    action, _, asset = _action_and_env(
+        num_envs=8,
+        joint_count=3,
+        guard=True,
+        action_ball_diagnostic_unauthorized=True,
+    )
+    ledger = action._joint_safety_ledger
+    assert ledger is not None
+    monkeypatch.setattr(
+        ledger,
+        "aggregate_rows",
+        lambda _ids: (_ for _ in ()).throw(
+            AssertionError(
+                "diagnostic full-batch accumulation used indexed gathers"
+            )
+        ),
+    )
+
+    action.process_actions(torch.zeros(8, 3))
+    # These buffers belong only to formal per-policy-step summaries.  A compact
+    # diagnostic must not spend rollout bandwidth clearing or refilling them.
+    action._joint_safety_current_step_qdes_joint_count.fill_(251)
+    action._joint_safety_current_step_policy_crossing_joint_count.fill_(252)
+    action._joint_safety_current_step_substep_crossing_joint_count.fill_(253)
+    action._joint_safety_current_step_actual_hard_edge_joint_count.fill_(254)
+    action._joint_safety_current_step_minimum_hard_gap.fill_(-123.0)
+    _finish_guarded_policy_step(action, asset)
+    action.reset(env_ids=torch.tensor([0, 3, 7]))
+
+    assert torch.all(
+        action._joint_safety_current_step_qdes_joint_count.eq(251)
+    )
+    assert torch.all(
+        action._joint_safety_current_step_policy_crossing_joint_count.eq(252)
+    )
+    assert torch.all(
+        action._joint_safety_current_step_substep_crossing_joint_count.eq(253)
+    )
+    assert torch.all(
+        action._joint_safety_current_step_actual_hard_edge_joint_count.eq(254)
+    )
+    assert torch.all(
+        action._joint_safety_current_step_minimum_hard_gap.eq(-123.0)
+    )
+    token, snapshot = action.prepare_joint_safety_ledger_consume()
+    since = snapshot["since_last_consume"]
+    assert since["policy_step_count"].tolist() == [1] * 8
+    assert since["complete_policy_step_count"].tolist() == [1] * 8
+    assert since["incomplete_policy_step_count"].tolist() == [0] * 8
+    assert since["apply_readback_count"].tolist() == [4] * 8
+    assert since["post_readback_count"].tolist() == [1] * 8
+    assert snapshot["identity_bound_policy_steps"] == ()
+    assert snapshot["terminal_archives"] == ()
+    action.acknowledge_joint_safety_ledger(token)
+
+
+def test_diagnostic_fixed_tape_matches_formal_counters_without_receipt_reads():
+    def make_action(*, diagnostic: bool):
+        action, env, asset = _action_and_env(
+            num_envs=2,
+            joint_count=2,
+            guard=True,
+            action_ball_diagnostic_unauthorized=diagnostic,
+        )
+        receipts = ("a" * 64, "b" * 64)
+        receipt_reads = []
+        command = types.SimpleNamespace(
+            action_ball_enabled=True,
+            action_ball_episode_generation=torch.tensor(
+                [7, 9], dtype=torch.long
+            ),
+            action_ball_swing_generation=torch.tensor(
+                [3, 4], dtype=torch.long
+            ),
+            action_ball_action_uid_for_envs=lambda ids: torch.tensor(
+                [101, 202], dtype=torch.long
+            )[ids],
+            action_ball_birth_receipt_sha256=lambda env_id: (
+                receipt_reads.append(env_id) or receipts[env_id]
+            ),
+        )
+        env.command_manager = types.SimpleNamespace(
+            get_term=lambda name: (
+                command if name == "racket_target" else None
+            )
+        )
+        return action, asset, receipts, receipt_reads
+
+    def play_fixed_tape(action, asset):
+        steps = (
+            (
+                torch.zeros(2, 2),
+                torch.zeros(2, 2),
+                torch.zeros(2, 2),
+            ),
+            (
+                torch.tensor([[2.0, 0.0], [0.0, -2.0]]),
+                torch.tensor([[1.21, 0.0], [0.0, -1.21]]),
+                torch.zeros(2, 2),
+            ),
+            (
+                torch.zeros(2, 2),
+                torch.tensor([[0.2, 0.0], [0.0, -0.2]]),
+                torch.tensor([[12.0, 0.0], [0.0, -12.0]]),
+            ),
+        )
+        for actions, joint_pos, joint_vel in steps:
+            asset.data.joint_pos.zero_()
+            asset.data.joint_vel.zero_()
+            action.process_actions(actions)
+            asset.data.joint_pos.copy_(joint_pos)
+            asset.data.joint_vel.copy_(joint_vel)
+            _finish_guarded_policy_step(action, asset)
+        return action.prepare_joint_safety_ledger_consume()
+
+    formal, formal_asset, receipts, formal_receipt_reads = make_action(
+        diagnostic=False
+    )
+    compact, compact_asset, _, compact_receipt_reads = make_action(
+        diagnostic=True
+    )
+    formal_token, formal_snapshot = play_fixed_tape(formal, formal_asset)
+    compact_token, compact_snapshot = play_fixed_tape(
+        compact, compact_asset
+    )
+
+    formal_since = formal_snapshot["since_last_consume"]
+    compact_since = compact_snapshot["since_last_consume"]
+    for name in (
+        "policy_step_count",
+        "complete_policy_step_count",
+        "incomplete_policy_step_count",
+        "apply_readback_count",
+        "post_readback_count",
+        "timestamp_invariant_pass_count",
+        "hard_crossing_latch",
+        "actual_hard_edge_latch",
+        "qdes_joint_count",
+        "policy_crossing_joint_count",
+        "substep_hard_crossing_joint_count",
+        "actual_hard_edge_joint_count",
+        "minimum_hard_lower_gap",
+        "minimum_hard_upper_gap",
+    ):
+        assert torch.equal(compact_since[name], formal_since[name]), name
+
+    # The old formal schema remains byte-identifiable: receipts are resolved
+    # once per birth and retained on every immutable policy-step identity.
+    assert formal_receipt_reads == [0, 1]
+    assert all(
+        summary["action_identity"]["birth_receipt_sha256"] == receipts
+        for summary in formal_snapshot["identity_bound_policy_steps"]
+    )
+    # The non-promotable compact path must never pull Python SHA strings into
+    # the rollout hot loop; its device counters are the only training evidence.
+    assert compact_receipt_reads == []
+    assert compact_snapshot["identity_bound_policy_steps"] == ()
+    assert compact_snapshot["terminal_archives"] == ()
+
+    formal.acknowledge_joint_safety_ledger(formal_token)
+    compact.acknowledge_joint_safety_ledger(compact_token)
+
+
 def test_one_shot_consume_fails_closed_even_when_guard_is_disabled():
     action, _, _ = _action_and_env(guard=False)
     assert action.joint_safety_ledger_snapshot()["enabled"] is False

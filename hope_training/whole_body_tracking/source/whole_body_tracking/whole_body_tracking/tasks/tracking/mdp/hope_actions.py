@@ -1088,6 +1088,14 @@ class ClampedJointPositionAction(JointPositionAction):
         self._joint_safety_all_env_ids = torch.arange(
             self.num_envs, dtype=torch.long, device=self.device
         )
+        # Reuse one device-side duplicate detector for reset batches.  The prior
+        # ``torch.unique(...).numel()``/``.item()`` validation synchronized CUDA
+        # to the host on every reset, which is especially expensive for the
+        # short ActionBall episodes.  CPU callers keep the simple synchronous
+        # checks; CUDA uses this fixed-size scratch plus ``_assert_async``.
+        self._joint_safety_env_id_validation_counts = torch.zeros(
+            self.num_envs, dtype=torch.int32, device=self.device
+        )
         self._joint_safety_current_identity: dict[str, Any] | None = None
         self._joint_safety_diagnostic_first_policy_step_sequence: int | None = (
             None
@@ -1464,10 +1472,30 @@ class ClampedJointPositionAction(JointPositionAction):
             ).reshape(-1)
         if ids.numel() == 0:
             return ids
-        if bool(torch.any(ids.lt(0) | ids.ge(self.num_envs)).item()):
-            raise IndexError("joint-safety environment id is outside the batch")
-        if torch.unique(ids).numel() != ids.numel():
-            raise ValueError("joint-safety environment ids must be unique")
+        in_range = torch.all(ids.ge(0) & ids.lt(self.num_envs))
+        if ids.device.type == "cpu":
+            if not bool(in_range):
+                raise IndexError(
+                    "joint-safety environment id is outside the batch"
+                )
+            if torch.unique(ids).numel() != ids.numel():
+                raise ValueError(
+                    "joint-safety environment ids must be unique"
+                )
+        else:
+            # Clamp only the validation indices so an out-of-range caller
+            # cannot address outside the fixed scratch while the asynchronous
+            # fail-closed assertion is pending.  The returned ids remain
+            # untouched and therefore can never be silently accepted.
+            torch._assert_async(in_range)
+            counts = self._joint_safety_env_id_validation_counts
+            counts.zero_()
+            counts.scatter_add_(
+                0,
+                torch.clamp(ids, min=0, max=self.num_envs - 1),
+                torch.ones_like(ids, dtype=counts.dtype),
+            )
+            torch._assert_async(torch.all(counts.le(1)))
         return ids
 
     def _joint_safety_episode_lengths(self) -> torch.Tensor:
@@ -1690,6 +1718,15 @@ class ClampedJointPositionAction(JointPositionAction):
         ledger = self._joint_safety_ledger
         if ledger is None or not ledger.has_started:
             return
+        if self._joint_safety_diagnostic_compact_evidence and (
+            env_ids is None
+            or (
+                isinstance(env_ids, slice)
+                and env_ids == slice(None)
+            )
+        ):
+            self._accumulate_joint_safety_diagnostic_full_batch(ledger)
+            return
         ids = self._joint_safety_env_id_tensor(env_ids)
         if ids.numel() == 0:
             return
@@ -1833,7 +1870,128 @@ class ClampedJointPositionAction(JointPositionAction):
         )
         self._joint_safety_current_accumulated_envs[ids] |= newly_accumulated
 
+    def _accumulate_joint_safety_diagnostic_full_batch(
+        self, ledger: _PhysicsSubstepJointSafetyLedger
+    ) -> None:
+        """Fold one diagnostic policy step without gather copies or dead summaries.
+
+        Unauthorized ActionBall diagnostics never publish per-policy-step
+        identities or dense readback transcripts.  Their formal evidence is the
+        update-scale device accumulator consumed by the runner.  The generic
+        path above nevertheless gathered every aggregate through a 4096-row
+        index tensor and populated five dense summary buffers that the
+        diagnostic runner requires to stay empty.  This full-batch path writes
+        the exact same counters/minima directly into the accumulator.
+
+        ``newly_accumulated`` is retained rather than assumed all-true so direct
+        partial-reset tests and any future manager ordering remain exactly-once.
+        """
+
+        newly_accumulated = ~self._joint_safety_current_accumulated_envs
+        newly_long = newly_accumulated.to(dtype=torch.long)
+        newly_joint = newly_accumulated[:, None]
+        apply_counts = ledger._aggregate_apply_count * newly_long
+        post_counts = ledger._aggregate_post_count * newly_long
+        crossing_counts = (
+            ledger._aggregate_hard_crossing_count
+            * newly_joint.to(dtype=torch.long)
+        )
+        actual_counts = (
+            ledger._aggregate_actual_hard_edge_count
+            * newly_joint.to(dtype=torch.long)
+        )
+        min_lower = torch.where(
+            newly_joint,
+            ledger._aggregate_min_lower_gap,
+            torch.full_like(
+                ledger._aggregate_min_lower_gap, float("inf")
+            ),
+        )
+        min_upper = torch.where(
+            newly_joint,
+            ledger._aggregate_min_upper_gap,
+            torch.full_like(
+                ledger._aggregate_min_upper_gap, float("inf")
+            ),
+        )
+        expected_records = ledger._expected_apply_calls + 1
+        env_complete = (
+            ledger.is_complete
+            & apply_counts.eq(ledger._expected_apply_calls)
+            & post_counts.eq(1)
+            & ledger._aggregate_valid_record_count.eq(expected_records)
+        )
+        qdes_delta, policy_crossing_delta = (
+            self._joint_safety_step_count_deltas()
+        )
+        qdes_counts = qdes_delta * newly_joint.to(dtype=torch.long)
+        policy_crossing_counts = (
+            policy_crossing_delta * newly_joint.to(dtype=torch.long)
+        )
+        compact_counts_valid = torch.all(
+            qdes_counts.le(255)
+            & policy_crossing_counts.le(255)
+            & crossing_counts.le(255)
+            & actual_counts.le(255)
+        )
+        if compact_counts_valid.device.type == "cpu":
+            if not bool(compact_counts_valid):
+                raise RuntimeError(
+                    "joint-safety per-step compact count exceeded uint8"
+                )
+        else:
+            torch._assert_async(compact_counts_valid)
+
+        self._joint_safety_accumulator_policy_steps.add_(newly_long)
+        self._joint_safety_accumulator_complete_steps.add_(
+            env_complete.to(dtype=torch.long) * newly_long
+        )
+        self._joint_safety_accumulator_incomplete_steps.add_(
+            (~env_complete).to(dtype=torch.long) * newly_long
+        )
+        self._joint_safety_accumulator_apply_readbacks.add_(apply_counts)
+        self._joint_safety_accumulator_post_readbacks.add_(post_counts)
+        self._joint_safety_accumulator_timestamp_passes.add_(
+            env_complete.to(dtype=torch.long) * newly_long
+        )
+        self._joint_safety_accumulator_hard_crossing_latch.logical_or_(
+            torch.any(crossing_counts.gt(0), dim=1)
+        )
+        self._joint_safety_accumulator_actual_hard_edge_latch.logical_or_(
+            torch.any(actual_counts.gt(0), dim=1)
+        )
+        self._joint_safety_accumulator_substep_crossing_joint_count.add_(
+            crossing_counts
+        )
+        self._joint_safety_accumulator_actual_hard_edge_joint_count.add_(
+            actual_counts
+        )
+        self._joint_safety_accumulator_qdes_joint_count.add_(qdes_counts)
+        self._joint_safety_accumulator_policy_crossing_joint_count.add_(
+            policy_crossing_counts
+        )
+        torch.minimum(
+            self._joint_safety_accumulator_min_hard_lower_gap,
+            min_lower,
+            out=self._joint_safety_accumulator_min_hard_lower_gap,
+        )
+        torch.minimum(
+            self._joint_safety_accumulator_min_hard_upper_gap,
+            min_upper,
+            out=self._joint_safety_accumulator_min_hard_upper_gap,
+        )
+        self._joint_safety_current_accumulated_envs.logical_or_(
+            newly_accumulated
+        )
+
     def _reset_joint_safety_current_step_summary(self) -> None:
+        if self._joint_safety_diagnostic_compact_evidence:
+            # Diagnostic PPO updates consume only the update-scale device
+            # accumulator.  Clearing and then refilling the dense per-step
+            # summary tensors was pure bandwidth: the runner explicitly
+            # requires ``identity_bound_policy_steps == ()``.
+            self._joint_safety_current_step_summary_published = False
+            return
         self._joint_safety_current_step_summary_filled.zero_()
         self._joint_safety_current_step_complete.zero_()
         self._joint_safety_current_step_apply_count.zero_()
@@ -3989,7 +4147,27 @@ class ClampedJointPositionAction(JointPositionAction):
             ids_tensor = self._joint_safety_env_id_tensor(env_ids)
             # Isaac resets terminal rows inside env.step, before the runner can inspect them.
             # Fold and archive first; only then may live state be invalidated and cleared.
-            self._accumulate_joint_safety_live(ids_tensor)
+            if (
+                self._joint_safety_diagnostic_compact_evidence
+                and self._joint_safety_ledger.post_readback_recorded
+            ):
+                # The post-step DoneTerm already folded the entire batch through
+                # the compact full-batch path.  Re-entering the generic indexed
+                # reducer here used to gather every per-joint aggregate again
+                # for rows whose exactly-once bit was already set.
+                accumulated = torch.all(
+                    self._joint_safety_current_accumulated_envs[ids_tensor]
+                )
+                if accumulated.device.type == "cpu":
+                    if not bool(accumulated):
+                        raise RuntimeError(
+                            "diagnostic reset observed rows not accumulated by "
+                            "the completed post-step readback"
+                        )
+                else:
+                    torch._assert_async(accumulated)
+            else:
+                self._accumulate_joint_safety_live(ids_tensor)
             self._joint_safety_archive_live(
                 ids_tensor, reason="reset", reset_observed=True
             )
