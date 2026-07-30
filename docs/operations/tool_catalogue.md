@@ -90,6 +90,8 @@
 | `rebind_question_bank_motion_family.py` | 登记烤入件的 SHA。**题目张量一个字节都不改**；`contact.row_bitwise` 必须 true | 2 | 内部 |
 | `stroke_guard_bank_audit.py` | 统计"开行程守卫会拦掉多少题"。**PASS ≠ 可行**（松弛的必要条件） | — | 测试 |
 | `isaac_ball_inloop_check.py` | PhysX 球飞行 vs RK4。**只验飞行**，弹台/拍球接触是另一条 | — | 工序 |
+| `diagnose_n1_teacher_rate_tape.py` | 只读复用 exact N=1 fixed-action solver，对确定性来球/落点 proposal tape 报 teacher-rate、目标拍速、admission 与逐 reason reject；速度/落点 override 只改内存副本，不授权训练 | 0/2 | [分阶段准备账本](../experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md) |
+| `materialize_n1_fast_ball_bootstrap.py` | 从 sealed N1 bundle 只派生来球速度/落点 support，内容寻址生成 fast-ball diagnostic manifest/bundle；不改 action/motion/solver/physics/teacher-rate bounds，低于 formal admission 时必须显式降级 | 0/2 | [分阶段准备账本](../experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md) |
 
 ## 发射前静态检查（**2026-07-26 缺陷现场**）
 

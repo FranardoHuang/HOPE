@@ -230,9 +230,17 @@ acceleration 和 jerk 三阶约束，但这只证明该类 governor 有严格约
 | 2026-07-30 19:39 CST live 快照 | loop seed0 / block seed0 / block seed1 分别到 update `219 / 574 / 186`，mean episode `104.88 / 481.52 / 105.90`，三条均持续写真实 PPO update、无新 Traceback；当前 update 的 strike opportunity 为 `945 / 965 / 962` | 三条 virtual capture/return 仍全为 `0/0`。block seed0 当前 table/fall/actual-hard=`2/3/6`，但 965 个 contact proposal 全被 face gate 拒绝；loop seed0 post-strike fall=`887/946`；block seed1 table/actual-hard=`590/325`。说明窗口与 denominator 已通，但动作质量、signed-face/contact 对齐和 seed 稳定性仍未闭合，不得写成可部署 policy |
 | 2026-07-30 19:50 CST block seed0 update 600 里程碑 | exact PID/PGID=`1055080`、cwd=`n1dr_10069d3c/.../whole_body_tracking`、GPU UUID=`GPU-a8f7…e6cb6`、source/claim/namespace 均与发射绑定一致；update608 持续训练，`model_600.pt` 为 7,197,343 bytes、SHA=`11bee491…8470f`，80 个 tensor 全 finite。mean episode=`440.77`、iteration=`20.94 s`、strike opportunity=`951`，table/fall/actual-hard/qdes-forbidden=`4/5/14/0` | 仍是零 capture/return；`937/951` 被 face gate 拒绝，exact strike position/velocity/normal error=`0.2426 m / 1.3928 m/s / 86.31°`，实际/目标拍速=`0.2832/1.2793 m/s`。安全与 episode 长度已恢复，当前主要问题是未学到 teacher 的击球位置、拍速和拍面，不是出生或 qdes reset storm |
 | 显式 teacher-start source contract | fresh 合同改为 `action_ball_table_pose_twist_heading_task_teacher_start_n<N>`，宽 `194+N`；scalar 位于 heading face 后、final one-hot 前，并由 Motion phase governor 直接提供。exact `020dc8d9` 的 Pod focused suite 为 `390 passed, 9 skipped` | 这是接口正确性直接修，不做学习 A/B。旧 194-D run 保持 exact 历史；focused suite 不冒充真实 ObservationManager/Isaac 构造，新合同在 Pod 195-D `1×2` 构造通过前只算 source-ready |
+| 反手挡 1.1 倍中心来球公式带 | 固定 `bh_block` 动作身份、原落点中心 `2.555 m`、初始速度双侧宽度 `0.15 m/s` 和现有 solver/physics/prototype，在 Pod1 GPU2 对 4096 个确定性 proposal 只把中心来球从 `4.2376948` 提到 `4.6614643 m/s`。同一逐球 solver 得到 target site speed 均值 `1.14907 m/s`、teacher-rate 均值/中位 `0.72055/0.71595`；`2763/4096=67.46%` admitted，拒绝严格分账为 `resid_gt_tol=1327`、`teacher_rate_below_min=6`，proposal tape SHA 为 `0335220d…2581` | 这证明“更快来球但仍落同一台面中心”会让挡球 task 卸力并降低主动老师拍速，不需要另写反向 solver。它只是 GPU2 的机制诊断：solver rejection 会把实际训练题条件化，且 admission 未达 formal `95%` 门，所以不能称严格单变量 A/B，也不可作为 curriculum 晋级或 N5 证据；训练 sampler 必须保留全部 proposal 分母与拒绝原因 |
 
 当前 source 证据随本次集成提交进入 `main` 后才生效；旧 `f2c54fc3` 三条运行始终保持其原
 commit、194-D observation 和旧 physics 身份，不因文档或 main 前移而重标。
+
+上表的 1.1 倍比较也澄清了 ball→task 变量边界。每个环境先冻结动作，再采来球、到球时间、
+击球点、base 与 landing aim；solver 随后保持该动作的拍速方向，逐球求拍速大小、有符号拍面和
+精确击球位置。**landing aim 是 solver 输入，不是 solver 自己选择的输出**。所以来球变快后，
+若仍要求落在原台面中心，公式会主动卸力；target 本身仍由同一公式逐球计算，训练中没有
+selector 或换动作。若未来希望自然借力挡得更深，才另把 landing aim 作为显式课程轴，而不在
+本比较里混入。
 
 ## 3. 分阶段最迟闭合项
 

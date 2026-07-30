@@ -50,6 +50,11 @@
   为 `4/5/14/0`，说明出生与安全风暴基本恢复；但 951 个 strike opportunity 仍零 capture，
   其中 937 个被 face gate 拒绝，实际拍速 `0.2832 m/s` 对目标 `1.2793 m/s`。当前主问题已收窄
   为 teacher 击球位置/拍速/拍面学习，而非 reset 合同；继续到 update1000，不热改。
+- Pod1 GPU2 的 fixed-action exact tape 验证了反手挡的 1.1 倍来球比较：保持原台面落点中心
+  `2.555 m` 和原初始宽度，只把中心球速提到 `4.6615 m/s`，同一 ball→task solver 把老师速率
+  降到均值 `0.7206`；4096 题中 `2763` 题 admitted，`1333` 题按 residual/teacher-rate 下界
+  分账拒绝。该结果只授权 fresh diagnostic comparison，不满足 formal `95%` admission 门；语义和后续
+  发射边界见[分阶段准备账本](experiments/2026-07/EXP-ACTION-BALL-PHASED-READINESS-20260730.md)。
 - Pod1 clean `eb2799b1` 的 table smoke 已完成 E2：32 个 A3 body×top/keepout/net/左右 post
   五列 matrix 全构造，五 role 均有真实 PhysX 正控，四个子步覆盖；五次 automatic reset 后
   table raw reason/ledger/force 全零。log SHA 为 `15c52d29…26aac`，unsupported/Traceback/FAIL

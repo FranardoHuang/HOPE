@@ -4021,3 +4021,12 @@ receipt/counter drift。但 capture/return 仍为零，`937/951` 被 face gate �
 position/velocity/normal error=`0.2426 m / 1.3928 m/s / 86.31°`，实际拍速仅
 `0.2832 m/s`（目标 `1.2793 m/s`）。因此出生/episode/safety 恢复已形成新证据，学习质量仍未
 通过；按预注册继续到 update1000，不热改超参。
+
+2026-07-30 后续对 GPU2 比较臂先做了 fixed-action 公式带，而不是先改 Reward。反手挡动作身份、
+motion、solver、physics、拍速方向、原落点中心 `2.555 m` 与初始速度宽度都保持不变；只把
+中心来球从 `4.2376948` 提到 `4.6614643 m/s`（1.1 倍），再由现有 solver 对每球重算拍速、
+拍面和击球位置。4096 个确定性 proposal 中 `2763` 个 admitted（`67.46%`），teacher-rate
+均值/中位为 `0.72055/0.71595`；`1327` 个 residual 超容差、`6` 个低于 teacher-rate 下界，
+均保留在 proposal 分母。该证据证明快球在同一落点约束下会让挡球卸力并形成更慢的 teacher
+task，但 solver rejection 使实际题分布条件化，且未达到 formal `95%` admission 门，只允许 fresh no-clobber
+diagnostic comparison，不改变 G05=`Partial`，也不冒充 curriculum 晋级。
